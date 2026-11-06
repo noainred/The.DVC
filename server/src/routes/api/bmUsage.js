@@ -15,7 +15,7 @@
  */
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모 표시
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
 import { mergeScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.607 AUTHZ2607-05
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
@@ -254,7 +254,7 @@ export async function bmPerfView(req, snap, deps = {}) {
   if (target) {
     if (allowed && (!target.vcenterId || !allowed.has(target.vcenterId))) return NOT_FOUND;
     const agent = config.agent?.name || '';
-    const row0 = (await D.latestUsage().catch(() => [])).find((r) => t(r.key) === target.key && t(r.agent) === agent) || null;
+    const row0 = (await D.latestUsage({ json: true }).catch(() => [])).find((r) => t(r.key) === target.key && t(r.agent) === agent) || null;
     const row = row0 ? (await demoPerfRows([row0], tg.targets))[0] : null;   // v2.920(반증 D2) — 데모 대상만, 응답 단계에서만
     const hwOf = await D.hwFactsReader({ agent, freshMs: freshMsFor(s.intervalMs) }).catch(() => () => null);
     const entry = row ? buildPerfEntry({ row, hw: hwOf(target) || null, th: s.perf, intervalMs: s.intervalMs, full: true }) : null;
@@ -282,6 +282,147 @@ export async function bmPerfView(req, snap, deps = {}) {
   }
   return NOT_FOUND;
 }
+/**
+ * v2.922(3a) — 서버 1대의 추이(평균·피크 두 계열) · 장치 목록. 3b 화면(추이 탭 · 확대 팝업 · 장치 토글)이 쓴다. 기존 `/tools/bm-usage/history`
+ *   (BmUsageChart)는 그대로 두었다(계약 불변).
+ *  · 권한·범위·404 는 bmPerfView 와 같은 규칙(범위 밖·귀속 없음·없는 키 → 404 · 주소인 key 는 가림 토큰으로도 찾는다).
+ *  · 이 노드 서버는 trendFor/devicesFor(시간 단위 파일). **엣지 위임 서버는 엣지 대행**(central/bmUsageEdgePull.pullBmTrend — 응답 상한 ·
+ *    아는 필드만 · truncated). 중앙은 엣지 이력을 복제 적재하지 않는다(설계 §4.4 ‘중앙 크기는 변하지 않는다’).
+ *  · 응답 캐시: memoJson(세대 + URL) + 범위 서명 + 역할 + 마지막 수집 시각.
+ */
+export async function bmTrendView(req, snap, mode = 'history', deps = {}) {
+  const D = {
+    currentTargets, bmAddressHosts,
+    listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
+    pullBmTrend: async (agent, m, key, q) => (await import('../../central/bmUsageEdgePull.js')).pullBmTrend(agent, { mode: m, key, query: q }),
+    trendFor: async (a) => (await import('../../bmusage/trendQuery.js')).trendFor(a),
+    devicesFor: async (a) => (await import('../../bmusage/trendQuery.js')).devicesFor(a),
+    ...deps,
+  };
+  const allowed = scopedVcenterIds(req.user, snap);
+  const isAdmin = isAdminReq(req);
+  const key = t(req.params.key);
+  if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
+  const NOT_FOUND = { __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' };
+  const tg = await D.currentTargets();
+  const realKey = tg.targets.some((x) => x.key === key) ? key : (isAdmin ? null : resolveMaskedToken(key, tg.targets.map((x) => x.key)));
+  const target = realKey ? (tg.targets.find((x) => x.key === realKey) || null) : null;
+  if (target) {
+    if (allowed && (!target.vcenterId || !allowed.has(target.vcenterId))) return NOT_FOUND;
+    const agent = config.agent?.name || '';
+    const r = mode === 'devices' ? await D.devicesFor({ agent, key: target.key }) : await D.trendFor({ agent, key: target.key, q: req.query || {}, settings: loadBmUsageSettings() });
+    return r && r.ok ? { ...r, key, via: 'local' } : r;
+  }
+  const regHosts = isAdmin ? [] : await D.bmAddressHosts(null);
+  for (const rec of await D.listEdgeBmUsage()) {
+    const sn = rec?.snap;
+    if (!sn) continue;
+    const snapHosts = isAdmin ? [] : [...regHosts, ...(sn.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])].filter((h) => typeof h === 'string' && h);
+    const em = addressMatcher(snapHosts);
+    const tgt = (sn.targets || []).find((x) => t(x.key) === key || (!isAdmin && maskBmIdentity(x, em).key === key));
+    if (!tgt) continue;
+    if (allowed && (!t(tgt.vcenterId) || !allowed.has(t(tgt.vcenterId)))) return NOT_FOUND;
+    const r = await D.pullBmTrend(rec.agent, mode, t(tgt.key), req.query || {});
+    if (!r?.ok) return { ok: false, key, via: 'edge', agent: rec.agent, kind: r?.kind || 'error', reason: r?.reason || '엣지에서 추이를 읽지 못했습니다.' };
+    return { ...r.body, key, via: 'edge', agent: rec.agent, ms: r.ms };
+  }
+  return NOT_FOUND;
+}
+/**
+ * v2.922(3a · 설계 PROFILES §10) — 서버 NIC ↔ CVP 스위치 포트: 매핑(수동 확정 · 설명 매칭 후보) · 상태 5종 · 양쪽 대조 ⑤.
+ *  · 법인 축: 서버 vCenter → DataCenter(datacenter/store) ↔ CVP 서버의 datacenterId. 그 법인 CVP 가 없으면 no-cvp(열 전체 ‘—’).
+ *  · **범위 계정은 자기 법인 CVP 만**: 서버가 범위 밖이면 404(존재 은닉) · 수동 매핑이 다른 법인 CVP 를 가리키면 범위 계정에는 숨기고 센다.
+ *  · CVP 이력은 복제 적재하지 않는다 — port_latest(이 노드 CVP DB)를 조회로 붙인다. 엣지 위임 서버의 NIC 값은 엣지 대행(nics).
+ *  · LLDP·MAC 매핑은 만들지 않았다(경로 미확인 — 정직 기록). 응답이 그 사실을 싣는다(notBuilt).
+ */
+export async function bmPortsView(req, snap, deps = {}) {
+  const D = {
+    currentTargets, bmAddressHosts,
+    listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
+    pullBmTrend: async (agent, m, key, q) => (await import('../../central/bmUsageEdgePull.js')).pullBmTrend(agent, { mode: m, key, query: q }),
+    nicLatestFor: async (a) => (await import('../../bmusage/trendQuery.js')).nicLatestFor(a),
+    cvpServers: async () => (await import('../../cvp/registry.js')).listServers(),
+    datacenterOfVcenter: async (vc) => (await import('../../datacenter/store.js')).datacenterOfVcenter(vc),
+    portLatestRows: async (o) => (await import('../../cvp/db.js')).portLatestRows(o),
+    portsByDesc: async (t2) => (await import('../../cvp/db.js')).portsByDesc(t2),
+    cvpIntervalMs: async () => { try { return (await import('../../cvp/settings.js')).loadSettings().intervalMs; } catch { return null; } },
+    listPortMap: async (o) => (await import('../../bmusage/portMap.js')).listPortMap(o),
+    ...deps,
+  };
+  const P = await import('../../bmusage/portCompare.js');
+  const allowed = scopedVcenterIds(req.user, snap);
+  const isAdmin = isAdminReq(req);
+  const key = t(req.params.key);
+  if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
+  const NOT_FOUND = { __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' };
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
+  if (!found) return NOT_FOUND;
+  if (found.denied) return NOT_FOUND;
+  const s = loadBmUsageSettings();
+  const tol = s.store?.portTolPct ?? 5;
+  const vc = t(found.target.vcenterId);
+  const corpId = vc ? t(await D.datacenterOfVcenter(vc)) : '';
+  const cvps = (await D.cvpServers().catch(() => [])) || [];
+  const corpCvpIds = corpId ? cvps.filter((x) => t(x.datacenterId) === corpId).map((x) => String(x.id)) : [];
+  const base = { ok: true, key, via: found.via, corpId: corpId || null, tolPct: tol, alignPct: 20, notBuilt: ['lldp', 'mac'] };
+  // 서버 NIC 최신 5분(이 노드 또는 엣지 대행)
+  let nicRes;
+  if (found.via === 'local') nicRes = await D.nicLatestFor({ agent: found.agent, key: found.realKey, intervalMs: s.intervalMs });
+  else { const r = await D.pullBmTrend(found.agent, 'nics', found.realKey, {}); nicRes = r?.ok ? r.body : { ok: false, nics: [], reason: r?.reason || '엣지에서 NIC 값을 읽지 못했습니다.' }; }
+  const nics = nicRes?.nics || [];
+  if (!corpCvpIds.length) return { ...base, cvpRegistered: false, nics: nics.map((x) => ({ nic: x.nic, state: 'no-cvp' })), candidates: [] };
+  const corpSet = new Set(corpCvpIds);
+  const maps0 = await D.listPortMap({ agent: found.agent, key: found.realKey });
+  // 확정 매핑이 가리키는 CVP 의 포트 최신값만 읽는다(범위 계정은 자기 법인 CVP 만 — 나머지는 아래에서 숨기고 센다).
+  const mapCvps = [...new Set(maps0.map((m) => String(m.cvpId)))].filter((id) => !allowed || corpSet.has(id));
+  const portsAll = (await D.portLatestRows({ cvpIds: mapCvps }).catch(() => ({ rows: [] }))).rows || [];
+  // 후보: v2.920 cvp/hostMatch 하나(포트 설명 — 호스트 짧은 이름·서비스 태그·NIC 이름). 단서로 LIKE 를 넉넉히 뽑고 경계 판정은 matchUplinks.
+  const H = await import('../../cvp/hostMatch.js');
+  const host = { name: found.target.name || '', aliases: [found.target.serviceTag, found.target.osHostName].filter(Boolean), nics: nics.map((x) => ({ device: x.nic })) };
+  const terms = H.hostMatchTerms(host).names;
+  const byDesc = terms.length ? ((await D.portsByDesc(terms).catch(() => ({ rows: [] }))).rows || []).filter((p) => corpSet.has(String(p.cvpId))) : [];
+  const candidates = H.matchUplinks(byDesc, host).uplinks.slice(0, 32)
+    .map((u) => ({ cvpId: String(u.cvpId), deviceKey: String(u.key), deviceName: u.hostname || '', port: u.port, descr: String(u.desc).slice(0, 200), nic: u.nic, basis: u.basis }));
+  const maps = maps0;
+  let hiddenOutOfScope = 0;
+  const cvpSpan = Number(await D.cvpIntervalMs()) || null;
+  const freshMs = Math.max(30 * 60_000, 3 * (cvpSpan || 300_000));
+  const rows = nics.map((x) => {
+    let mapping = maps.find((m) => m.nic === x.nic) || null;
+    if (mapping && allowed && !corpSet.has(String(mapping.cvpId))) { hiddenOutOfScope += 1; mapping = null; }
+    const port = mapping ? (portsAll.find((p) => String(p.cvp_id) === String(mapping.cvpId) && String(p.device_key) === String(mapping.deviceKey) && String(p.port) === String(mapping.port)) || null) : null;
+    const state = P.portState({ mapping, candidates: candidates.filter((c) => !c.nic || c.nic === x.nic), corpHasCvp: true, port, freshMs });
+    const compare = state === 'mapped' ? P.compareTraffic({ server: { txBps: x.txBps, rxBps: x.rxBps, at: x.at, spanMs: x.spanMs, dropDelta: x.dropDelta, errDelta: x.errDelta },
+      port: { ...port, spanMs: cvpSpan }, tolPct: tol }) : null;
+    return { nic: x.nic, state, mapping: mapping ? { cvpId: mapping.cvpId, deviceKey: mapping.deviceKey, port: mapping.port, by: isAdmin ? mapping.by : undefined, at: mapping.at } : null,
+      port: port ? { device: port.hostname || port.device_key, port: port.port, descr: port.descr, speedBps: port.speed_bps, oper: port.oper, inBps: port.in_bps, outBps: port.out_bps, inUtil: port.in_util, outUtil: port.out_util,
+        inErr: port.in_err, outErr: port.out_err, inDrop: port.in_drop ?? null, outDrop: port.out_drop ?? null, rateAt: port.rate_ts } : null,
+      server: { rxBps: x.rxBps, txBps: x.txBps, at: x.at, dropDelta: x.dropDelta, errDelta: x.errDelta }, compare };
+  });
+  return { ...base, cvpRegistered: true, nics: rows, candidates, ...(hiddenOutOfScope ? { hiddenOutOfScope } : {}), ...(nicRes?.ok === false ? { nicError: nicRes.reason } : {}) };
+}
+/** 성능 상세 대상 해석(이 노드 · 엣지 보관분) — bmTrendView 와 같은 규칙. 범위 밖이면 { denied }. */
+async function resolvePerfTarget(req, D, { allowed, isAdmin, key }) {
+  const tg = await D.currentTargets();
+  const realKey = tg.targets.some((x) => x.key === key) ? key : (isAdmin ? null : resolveMaskedToken(key, tg.targets.map((x) => x.key)));
+  const target = realKey ? (tg.targets.find((x) => x.key === realKey) || null) : null;
+  if (target) {
+    if (allowed && (!target.vcenterId || !allowed.has(target.vcenterId))) return { denied: true };
+    return { via: 'local', agent: config.agent?.name || '', realKey, target };
+  }
+  const regHosts = isAdmin ? [] : await D.bmAddressHosts(null);
+  for (const rec of await D.listEdgeBmUsage()) {
+    const sn = rec?.snap;
+    if (!sn) continue;
+    const snapHosts = isAdmin ? [] : [...regHosts, ...(sn.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])].filter((h) => typeof h === 'string' && h);
+    const em = addressMatcher(snapHosts);
+    const tgt = (sn.targets || []).find((x) => t(x.key) === key || (!isAdmin && maskBmIdentity(x, em).key === key));
+    if (!tgt) continue;
+    if (allowed && (!t(tgt.vcenterId) || !allowed.has(t(tgt.vcenterId)))) return { denied: true };
+    return { via: 'edge', agent: rec.agent, realKey: t(tgt.key), target: tgt };
+  }
+  return null;
+}
 export function registerBmUsage(api) {
 
 /** 주 조회 — 대상·최신값·설정·상태. 장비에 접속하지 않는다. */
@@ -291,7 +432,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
   try {
     const [tg, latest, db] = await Promise.all([
       currentTargets(),
-      latestUsage().catch(() => []),
+      latestUsage({ json: true }).catch(() => []),   // v2.922(D13): 판정(psiAbsent·firstSample)이 detail_json 을 쓴다
       dbStatus().catch(() => ({ available: false })),
     ]);
     // v2.600 AUTHZ-2600-08: 비-admin 에는 iDRAC·OS 관리 주소를 가린다(가린 사실은 addressHidden).
@@ -390,6 +531,46 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
 api.get('/tools/bm-usage/perf/:key', toolsPerm, (req, res) => memoJson(req, res, 'bm-perf', (snap) => bmPerfView(req, snap), {
   extraKey: `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${bmUsageStatus().last?.at || 0}`,
 }));
+
+// v2.922(3a): 추이(평균·피크 · 해상도 auto · 결측 · 기준선) · 장치 목록(색 고정 순서). 엣지 위임 서버는 엣지 대행.
+const trendKey = (req) => `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${bmUsageStatus().last?.at || 0}`;
+api.get('/tools/bm-usage/perf/:key/history', toolsPerm, (req, res) => memoJson(req, res, 'bm-trend', (snap) => bmTrendView(req, snap, 'history'), { extraKey: trendKey(req) }));
+api.get('/tools/bm-usage/perf/:key/devices', toolsPerm, (req, res) => memoJson(req, res, 'bm-devices', (snap) => bmTrendView(req, snap, 'devices'), { extraKey: trendKey(req) }));
+
+api.get('/tools/bm-usage/perf/:key/ports', toolsPerm, (req, res) => memoJson(req, res, 'bm-ports', (snap) => bmPortsView(req, snap), { extraKey: trendKey(req) }));
+/**
+ * v2.922 — 수동 매핑 확정/삭제(설정 소유자 = admin). 범위: 서버가 안 보이면 404 · 보이는데 매핑할 CVP 가 그 법인 것이 아니면 403(조회 밖 404 → 쓰기 밖 403).
+ *   원자적 쓰기(portMap.js) · 감사 로그. body { key, nic, cvpId, deviceKey, port, remove? }.
+ */
+api.put('/tools/bm-usage/port-map', adminOnly, toolsPerm, async (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const allowed = scopedVcenterIds(req.user, store.get());
+  const D = {
+    currentTargets, bmAddressHosts,
+    listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
+  };
+  try {
+    const found = await resolvePerfTarget(req, D, { allowed, isAdmin: true, key: t(b.key) });
+    if (!found || found.denied) return res.status(404).json({ ok: false, reason: '대상 서버를 찾지 못했습니다.' });
+    // 조회 밖 404 → 쓰기 밖 403(쓰기 범위가 조회 범위보다 좁은 계정 — auth/scope inUserWriteScope).
+    if (allowed && !inUserWriteScope(req.user, store.get(), t(found.target.vcenterId))) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다.' });
+    const PM = await import('../../bmusage/portMap.js');
+    if (b.remove === true) {
+      const r = PM.removePortMapping({ agent: found.agent, key: found.realKey, nic: t(b.nic) });
+      logAudit({ user: req.user?.username, action: 'bm-usage.port-map.remove', ip: req.ip || '', detail: JSON.stringify({ key: found.realKey, nic: t(b.nic), ok: r.ok }).slice(0, 300) });
+      return res.status(r.ok ? 200 : r.notFound ? 404 : 409).json(r);
+    }
+    if (allowed) {
+      const vc = t(found.target.vcenterId);
+      const corp = vc ? t((await import('../../datacenter/store.js')).datacenterOfVcenter(vc)) : '';
+      const cvp = (await import('../../cvp/registry.js')).listServers().find((x) => String(x.id) === t(b.cvpId));
+      if (!cvp || !corp || t(cvp.datacenterId) !== corp) return res.status(403).json({ ok: false, error: 'forbidden', reason: '범위 계정은 자기 법인 CVP 포트로만 매핑할 수 있습니다.' });
+    }
+    const r = PM.setPortMapping({ agent: found.agent, key: found.realKey, nic: b.nic, cvpId: b.cvpId, deviceKey: b.deviceKey, port: b.port }, { by: req.user?.username || '' });
+    logAudit({ user: req.user?.username, action: 'bm-usage.port-map.set', ip: req.ip || '', detail: JSON.stringify({ key: found.realKey, nic: t(b.nic), cvpId: t(b.cvpId), deviceKey: t(b.deviceKey), port: t(b.port), ok: r.ok, replaced: !!r.replaced }).slice(0, 300) });
+    res.status(r.ok ? 200 : 400).json(r);
+  } catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+});
 
 /** 한 서버의 추이 — 원시 + 일 롤업. 상한으로 잘렸으면 밝힌다(조용한 상한 금지). */
 api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {

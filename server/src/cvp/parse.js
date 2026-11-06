@@ -841,6 +841,9 @@ export function parseCounters(text) {
       outOctets: numOrNull(pick(f, ['outOctets', 'outBytes', 'ifOutOctets', 'ifHCOutOctets'])),
       inErrors: numOrNull(pick(f, ['inErrors', 'inErrorsTotal', 'ifInErrors', 'inTotalErrors'])),
       outErrors: numOrNull(pick(f, ['outErrors', 'outErrorsTotal', 'ifOutErrors', 'outTotalErrors'])),
+      // v2.922(3a): 포트 드롭(discards) — 필드 이름은 **추정**(Arista 공식 경로 미확인 · 설계 PROFILES §10 정직 기록). 못 읽으면 null(0 아님).
+      inDiscards: numOrNull(pick(f, ['inDiscards', 'inDiscardsTotal', 'ifInDiscards', 'inTotalDiscards', 'inDroppedPkts'])),
+      outDiscards: numOrNull(pick(f, ['outDiscards', 'outDiscardsTotal', 'ifOutDiscards', 'outTotalDiscards', 'outDroppedPkts'])),
     };
     if (Object.values(c).every((x) => x == null)) continue; // 카운터 필드가 없는 개체는 세지 않는다
     counters.set(str(name, 64), c);
@@ -874,7 +877,7 @@ export function counterGapOk(prevAt, curAt, intervalMs, slackMs = 0) {
  * @param {number} [slackMs]    간격 한계에 더할 직전 실행 소요(v2.611 COL2611-08 — 표본 간격 = 주기 + 실행 시간)
  */
 export function portDelta(prev, cur, speed, intervalMs, slackMs = 0) {
-  const out = { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, reason: null };
+  const out = { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, inDrop: null, outDrop: null, reason: null };
   if (!prev || !prev.c) { out.reason = 'first'; return out; }
   if (!counterGapOk(prev.at, cur?.at, intervalMs, slackMs)) { out.reason = 'gap'; return out; }
   const gapMs = Number(cur.at) - Number(prev.at);
@@ -887,6 +890,8 @@ export function portDelta(prev, cur, speed, intervalMs, slackMs = 0) {
   out.outBps = outO == null ? null : Math.round((outO * 8) / sec);
   out.inErr = d(prev.c.inErrors, cur.c.inErrors);
   out.outErr = d(prev.c.outErrors, cur.c.outErrors);
+  out.inDrop = d(prev.c.inDiscards, cur.c.inDiscards);   // v2.922 — 못 읽은 카운터는 null(드롭 0 이 아니다)
+  out.outDrop = d(prev.c.outDiscards, cur.c.outDiscards);
   const sp = Number(speed);
   const util = (bps) => {
     if (bps == null || !Number.isFinite(sp) || sp <= 0) return null;

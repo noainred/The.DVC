@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **278개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **279개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-06)
@@ -64,6 +64,7 @@
 | `bmusage-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bmusage/poller.js |
 | `bmusage-central.json` | 설정 | 엣지가 받은 베어메탈 사용률 설정 중앙 배포 사본(상태, v2.627) | ✅ | ✅ | ✅ | bmusage/settings.js |
 | `bmusage-distribute.json` | 설정 | 베어메탈 사용률 설정의 엣지 배포(켬·제외 엣지 — 중앙, v2.627) | ✅ | ✅ | ✅ | bmusage/settings.js |
+| `bmusage-portmap.json` | 설정 | 서버 NIC ↔ 스위치·포트 **수동 매핑 파일**(v2.922 · 3a · 설계 PROFILES §10 ①). 파일: `<configDir>/bmusage-portmap.json`. | ✅ | ✅ | ✅ | bmusage/portMap.js |
 | `bmusage-settings.json` | 설정 | 베어메탈 사용률 수집 설정(v2.550). | ✅ | ✅ | ✅ | bmusage/settings.js |
 | `board.json` | 설정 | 접속 공지(팝업)와 게시판 글 저장소(v2.722). | ✅ | ✅ | ✅ | bulletin/store.js |
 | `capacity.db` | DB | 리소스 적정성(용량) 샘플 시계열 |  |  |  | config.js |

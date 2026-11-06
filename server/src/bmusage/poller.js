@@ -26,7 +26,7 @@ import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../proxy/sshExec.js';
 import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
-import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange } from './settings.js';
+import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays } from './settings.js';
 import { resolveTargets } from './targets.js';
 import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
@@ -34,6 +34,7 @@ import { buildUsage } from './usage.js';
 import { recordHbaBasis, pruneHbaBasis } from './hbaBasis.js'; // v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거(화면 각주)
 import { collectOsUsage, SESSION_BUDGET_MS as OS_BUDGET_MS } from './collectors/osSsh.js';
 import { insertUsage, pruneUsage } from './db.js';
+import { ensureMonthMigration, migrationLast } from './monthMigrate.js';
 import { recordBmUsage } from './activityLog.js';
 import { runBmUsageAlerts, alertStateInfo } from './notify.js';
 import { isMockMode } from '../mock/demo/flags.js'; // v2.708: 데모(mock)는 장비에 접속하지 않고 합성 행
@@ -237,6 +238,7 @@ export function bmUsageStatus({ detail = false } = {}) {
     prevKeys: _prev.size,
     authStopCount: _authStopped.size,
     lastPrune: _lastPrune,
+    migration: migrationLast(),   // v2.922: 마지막 마이그레이션 실행(단계·실패 사유 — 개수만, 서버 이름 없음)
   };
   // v2.744(최종 검토 FB): 등록부 로드 오류 사유는 detail 일 때만 위치(줄·칸)까지 — 그 밖에는 분류 문구(sourceErrorsView).
   if (st.last && Array.isArray(st.last.sourceErrors)) st.last = { ...st.last, sourceErrors: sourceErrorsView(st.last.sourceErrors, { detail }) };
@@ -529,6 +531,12 @@ export async function idracTelemetryJob(entry, { full = false, allowList = true,
  *   실제 경과 490초인데 300초로 나눠 **63% 과다**, 200초→10초면 **63% 과소**, 5초→250초면
  *   **82% 과다**. `now` 를 다시 전 서버 공용으로 되돌리지 말 것.
  */
+/** v2.922: 저장 구조·피크 설정(store) — 엣지·중앙 모두 이 노드의 설정이다. */
+function storeOf() { try { return loadBmUsageSettings().store || STORE_DEFAULTS; } catch { return STORE_DEFAULTS; } }
+/** OS 수집기에 넘길 옵션 — 파티션 I/O 옵트인 · ##BLKQ 장치 상한(D7) · 피크 창(A) · 샘플러 수거(B — 옵트인 · 해시 대조 자리). */
+export function osStoreOpts(st = storeOf()) {
+  return { partitionIo: !!st.partitionIo, blkqMax: st.blkqMax, peakWindowS: st.peakWindowS, sampler: !!st.peakSampler, samplerSha: st.peakSamplerSha256 || '' };
+}
 async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRunMs = 0, runT0 = null } = {}) {
   const t0 = Date.now();
   const dev = authDev(target);
@@ -555,7 +563,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
     : entStopped ? Promise.resolve({ ok: false, kind: 'auth-stopped', error: `iDRAC 인증 실패로 주기 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: entStopped })
       : idracTelemetryJob(target.idrac, { full, allowList }));
   jobs.push((target.paths.includes('os') && !stopped)
-    ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective }), 'OS 수집 시한 초과')
+    ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts() }), 'OS 수집 시한 초과')
       .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) }))
     : Promise.resolve(stopped ? { ok: false, error: `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: stopped } : null));
   const [idrac, os] = await Promise.all(jobs);
@@ -647,7 +655,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   }
 
   // v2.732(B1-01): 주기·여유를 넘긴다 — 넘기지 않으면 간격 한계가 60분 고정이라 주기 60분 이상에서 누적 카운터 지표가 매 주기 빈다.
-  const built = buildUsage({ target, idrac, os, ent, prev: _prev.get(target.key) || null, now: sampledAt, ...spanArgsFor({ intervalMs, prevRunMs, runT0, sampledAt }) });
+  const built = buildUsage({ target, idrac, os, ent, prev: _prev.get(target.key) || null, now: sampledAt, deviceMax: storeOf().deviceMax, ...spanArgsFor({ intervalMs, prevRunMs, runT0, sampledAt }) });
   if (built.next) _prev.set(target.key, built.next);
   const ok = !!(idrac?.ok || os?.ok || ent?.ok);
   recordHbaBasis(target.key, built, { at: sampledAt, ok });   // v2.744(LEFT-08 ②): 포트 수만 — 화면 각주가 분모 근거를 한 번 말한다
@@ -691,7 +699,10 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
   try { exists = fs.existsSync(BMUSAGE_DB_FILE()); } catch { /* */ }
   if (!exists && !bmUsageEnabled()) return { ok: true, skipped: true, reason: 'no-db' };
   const s = loadBmUsageSettings();
-  const r = await pruneUsage({ rawDays: s.rawRetentionDays, dailyDays: s.dailyRetentionDays, force: true }).catch((e) => ({ ok: false, error: errText(e) }));
+  // v2.922: 시간 단위 파일 보존(파일 삭제 + 경계 기간 청크) — 단계마다 보존일. 예전 표(마이그레이션 전 잔여)는 예전 규칙 그대로.
+  const st = s.store || STORE_DEFAULTS;
+  const keep = { raw: effectiveRawDays(s), h1: st.hourlyDays, d1: s.dailyRetentionDays, dev: st.devRawDays, dev1h: st.devHourlyDays };
+  const r = await pruneUsage({ rawDays: s.rawRetentionDays, dailyDays: s.dailyRetentionDays, force: true, keep }).catch((e) => ({ ok: false, error: errText(e) }));
   _lastPrune = { at: Date.now(), ...r };
   if (r && r.ok === false && r.error && _srcErrLog('prune', r.error)) console.warn(`[bmusage] 보존 정리 실패: ${r.error}`);
   return r;
@@ -699,6 +710,8 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
 
 /** 폴러 한 틱 — 켜져 있으면 수집하고, **켜짐 여부와 무관하게** 보존 정리를 시도한다(위 주석). */
 export async function bmUsageTimerTick() {
+  // v2.922: 예전 표 → 시간 단위 파일 마이그레이션 — 기다리지 않는다(청크·양보·재개 — monthMigrate.js). DB 파일이 있을 때만.
+  try { if (fs.existsSync(BMUSAGE_DB_FILE())) ensureMonthMigration(); } catch { /* 상태로 밝힌다 */ }
   try {
     if (bmUsageEnabled()) await pollBmUsageOnce({ trigger: 'auto' });
   } finally {
@@ -780,7 +793,11 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     // ⚠ `_perIf`·`_perFc` 는 화면 상세용 내부 배열이다 — DB 적재 경로로 넘기지 않는다(오염 방지).
     const rows = results.filter((r) => r?.ok && r.built)
       .map((r) => { const { _perIf: _a, _perFc: _b, ...row } = r.built.row; return row; });
-    const ins = await insertUsage(rows, config.agent?.name || '');
+    // v2.922: 장치별 이력(5분 → 1시간)·마운트 일 롤업 — 행 밖 배열로 함께 넘긴다(1초 피크 표본은 이미 집계돼 없다).
+    const okBuilt = results.filter((r) => r?.ok && r.built);
+    const devices = okBuilt.flatMap((r) => r.built.devices || []);
+    const mounts = okBuilt.flatMap((r) => r.built.mounts || []);
+    const ins = await insertUsage(rows, config.agent?.name || '', { devices, mounts });
     /*
      * 임계 초과 알림(v2.551). ⚠ **적재 뒤에** 판정한다(알림은 저장된 값을 근거로 한다).
      * ⚠ 실패해도 수집을 실패로 만들지 않는다 — 알림은 부가 기능이고, 사유는 `_last` 에 남긴다.

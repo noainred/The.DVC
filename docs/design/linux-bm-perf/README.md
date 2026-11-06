@@ -117,7 +117,12 @@
 - **메인 파일**(`bm-usage.db`): `usage_latest` · `tuning_latest` · 장치 목록 · 설정 — 보드는 이 파일만 읽는다.
 - **피크 1초 샘플은 DB 에 넣지 않는다** — 서버 로컬 파일 7일(B 안).
 - 열: 서버 행은 '지표를 열로'(기존 판단) + `_peak · _peak_at` · 출처 `src_*` · `os_at · idrac_at`. 온도·전력·부품·CVP 포트·장애 기록은 기존 표를 조회로 붙이고 복제 적재하지 않는다.
-- 크기 추정(1,000대 법인 · SQLite 행 크기 실측 전): 대표값 원시 30일 약 2.6GB + 1시간 1년 약 4GB + 일 5년 약 1GB + 장치별 약 5~6GB ≈ **10GB 안팎**. 상한은 설정값. 중앙 크기는 변하지 않는다(이력 복제 없음). 구현 때 1,000행 샘플로 행 크기를 재서 이 수치를 정정한다.
+- ~~크기 추정(1,000대 법인 · SQLite 행 크기 실측 전): 대표값 원시 30일 약 2.6GB + 1시간 1년 약 4GB + 일 5년 약 1GB + 장치별 약 5~6GB ≈ **10GB 안팎**. 상한은 설정값. 중앙 크기는 변하지 않는다(이력 복제 없음). 구현 때 1,000행 샘플로 행 크기를 재서 이 수치를 정정한다.~~
+- **⚠ 정정(3a 실측 · v2.922 — `server/test/bmPerf2921Size.test.js`)**: 실제 적재 경로로 1,000행(성능 열·피크 채움)을 넣고 WAL 을 접은 뒤 잰 행당 크기(인덱스 포함, 4KB 페이지 근사) —
+  5분 원시 **655B** · 1시간 롤업 **1,110B**(합·개수·최대 37지표 + 피크) · 1일 롤업 **1,147B** · 장치 5분 **213B** · 장치 1시간 **296B**.
+  1,000대 · 장치 5개/대로 다시 계산하면 보존 정확 기준 원시 30일 **5.7GB** + 1시간 1년 **9.7GB** + 1일 5년 **2.1GB** + 장치 5분 14일 **4.3GB** + 장치 1시간 90일 **3.2GB** ≈ **25GB**(설계 추정 10GB 의 약 2.5배).
+  보존은 **기간 파일 삭제**라 디스크에는 최대 한 기간이 더 남는다(원시는 ‘달 끝 + 30일’ 까지 — 최악 약 2개월 · 장치 5분은 최악 약 45일) → 최악 **약 40GB 안팎**(추정).
+  줄이는 선택지(사용자 결정 필요 — 3a 는 설계대로 만들었다): ① 1시간 롤업의 평균(합·개수)을 추천 지표 12행만 ② 장치 5분 파일을 주 단위로 ③ 원시 보존 축소. 중앙 크기는 변하지 않는다(이력 복제 없음 — 그대로).
 - **수집 동시성 32**(v2.916 에서 기본값 4 → 32 적용 · `BMUSAGE_CONCURRENCY`): 1,000대 · 서버당 ~5초면 동시 4 는 약 21분(재진입 가드로 실제 주기 20분+), 32 는 약 2.6분. 엣지 자원이 작은 법인은 env 로 낮춘다.
 - 엣지 봉투 `GET /api/collector/bm-usage` 필드 추가(중앙 정제 화이트리스트에도) · 스냅샷 `POST /tools/bm-perf/:key/snapshot`(엣지 대행 · 동시 1건/서버) · 권한은 기존 bmusage 와 같다(`tools` + vCenter scope · 귀속 없는 서버는 범위 계정에 미노출 · 스냅샷 실행은 operator 이상).
 
@@ -151,12 +156,12 @@
 9. (3차) **Red Hat 문서는 원문을 열지 못했다** — docs.redhat.com 이 브라우저가 아닌 요청을 403 으로 막았고 사용자 에이전트를 바꿔 우회하지 않았다. Red Hat 인용 문장은 검색 엔진이 그 페이지에서 뽑아 보여 준 것이라 등급 ◐ 다. Rocky 문서 2편은 원문(HTTP 200)을 받아 대조했다(●). ‘DB 역할 권장값’(swappiness 10 · THP madvise) 중 Red Hat 이 RHEL 9 문서에서 명시한 것은 없다(RHEL 6 구판 예시·DB 벤더 관행 — ○). 세부는 `TUNING-SOURCES.md`.
 
 11. **1단계 반증에서 미룬 것**(2026-11-07 반증 `review-s1` — D1~D6·D8 은 1단계 수정 커밋에서 고쳤다. 아래는 코드 수정 없이 기록만, 단계별로 다시 연다):
-    - **D7(3단계)** `##BLKQ` 가 장치마다 프로세스 4개(basename + cat×3)를 띄우고 이름 순 앞 64개만 읽는다 — dm-* 가 먼저 와 멀티패스 서버는 물리 디스크 큐가 안 나온다. `grep -H '' /sys/block/*/queue/…` 한 번 + 물리 장치 우선으로.
+    - ✅ **D7(3단계 — v2.922 처리: grep -H 한 번 · 물리 우선 · 상한 설정)** `##BLKQ` 가 장치마다 프로세스 4개(basename + cat×3)를 띄우고 이름 순 앞 64개만 읽는다 — dm-* 가 먼저 와 멀티패스 서버는 물리 디스크 큐가 안 나온다. `grep -H '' /sys/block/*/queue/…` 한 번 + 물리 장치 우선으로.
     - **D9(2단계 · 일부 고침)** 출력 상한 테스트가 하드코딩 4MB 와 비교하던 것은 sshExec `EXEC_MAX_OUTPUT` 실제 값과 비교하도록 고쳤다. 남은 것: sshExec 은 stderr 도 합산하므로 stderr 가 큰 서버의 여유(256KB)가 맞는지 실측 전.
     - **D10(3단계)** 코어별 최고 사용률을 줄 순서로 짝짓는다 — 두 표본 사이 CPU offline/online 이면 코어가 한 칸씩 밀린다. CPU 번호를 함께 저장하거나 코어 수가 바뀌면 그 칸 null.
     - **D11(2단계 · 일부 고침)** 중앙 정제가 장치·근거·장애 목록의 내부 축약(32·8·16)을 sanitizeDropped 에 세지 않는다. (키가 빈 항목은 이제 버리고 센다.)
     - **D12(4단계)** hwFacts selCritical 이 시간 창 없이 인벤토리 events 의 Critical 을 모두 센다(‘최근’ 이 아니다) · IRQ awk 패턴의 virtio 가 virtio-blk·config 까지 잡는다.
-    - **D13(3단계)** latestUsage `SELECT *` 가 detail_json·tuning_json 까지 읽어 JSON 이 필요 없는 corpUsage·svcInventory·cpuLatest 도 무거워졌다 — JSON 열 없는 판본과 나눈다(월 파일·메인 파일 분리 때).
+    - ✅ **D13(3단계 — v2.922 처리: 기본은 JSON 열 없는 판본 · 판정 소비처만 json:true)** latestUsage `SELECT *` 가 detail_json·tuning_json 까지 읽어 JSON 이 필요 없는 corpUsage·svcInventory·cpuLatest 도 무거워졌다 — JSON 열 없는 판본과 나눈다(월 파일·메인 파일 분리 때).
     - **D14(2단계 · 테스트 품질)** 실제 라우터 테스트가 admin·AUTH 끔만 본다(requirePerm 거부·toolsDenied·범위가 다른 두 사용자의 캐시 분리 미확인) · bmPerfView 테스트의 `Date.now()` · ReDoS 비율 기준(40배)이 느슨하다.
     - **D15(2단계)** 기준값 부분 저장: warn 이 bad 보다 크면 bad 를 조용히 올린다(응답에 밝히지 않음) · perf 하위 키의 ''·null 은 직전 값이 아니라 기본값으로 돌아간다.
     - 기록: 판정 칸 code `none` 은 지금 칸 구성에서 나오지 않는다(모든 S 칸에 absent 가 될 수 없는 입력이 하나씩 있다 — 변이 L20 이 등가인 이유).
@@ -183,6 +188,10 @@
 ## 8. 구현 범위(컨펌 뒤 — Opus)
 - **1단계 구현됨(v2.919 예정 — 서버만)**: 수집 구획·파서·rates·새 열·DB 마이그레이션·USE/교차 판정·커버리지·엣지 봉투/정제·API(`GET /tools/bm-usage` perf 확장 + `GET /tools/bm-usage/perf/:key` — 경로를 지시와 다르게 둔 이유는 `docs/rules/idrac-server.md` v2.919 항목). 화면은 2단계.
 - **2단계 구현됨(v2.920 예정 — 화면)**: 기존 `bm-usage` 화면에 신뢰 띠 · KPI · USE 매트릭스(토글로 기존 사용률 표 유지) · 병목 Top · 서버 상세(머리 · 판정 띠 · 교차 판정 · 탭 요약/자원/하드웨어) · 상태 9종 문구 · 400 폭. 문구 `web/src/views/tools/bmPerfText.js` · 규칙 `docs/rules/web.md` v2.920 항목. API 보강은 성능 항목의 `psiAbsent` 하나(+ 중앙 정제) · 반증(review-s2) D5 로 `useJudge.js crossJudge ③` 근거 수 중복 제거 · 데모 성능 열은 응답 단계에서만(적재 안 함). 장애 기록 · 튜닝 · 용도 · 스냅샷 · 추이 탭과 ‘권한 부족’ 상태(진단 스냅샷)는 다음 단계.
+- **3a 구현됨(v2.922 예정 — 서버만)**: 시간 단위 파일(5분 원시 `bm-usage-YYYY-MM.db` · 1시간 `bm-usage-1h-YYYY-MM.db` · 1일 `bm-usage-1d-YYYY.db` · 장치 `bm-usage-dev(1h)-YYYY-MM.db` — 단계마다 파일을 나눈 이유와 ATTACH 대신 파일별 핸들(조회당 10개 상한)을 쓴 이유는 `bmusage/monthStore.js` 머리말) ·
+  예전 표 마이그레이션(청크·양보·재개 · 옮기기 → 행 수 대조 → 삭제 · 실패면 예전 표로 계속 — `bmusage/monthMigrate.js`) · 장치별 이력(물리 디스크·dm/md·물리 NIC·bond · 파티션 옵트인 · 상한 32) ·
+  피크 A 안(같은 세션 1초 창 · 예산 안 · `peak_src`/`peak_window_s`) · B 샘플러는 수거 구획·형식·해시 자리만 · 추이 API(`/tools/bm-usage/perf/:key/history|devices|ports`) · CVP 드롭 열·수동 매핑·대조 ⑤ ·
+  1단계 반증 D7(##BLKQ grep 한 번)·D13(latestUsage JSON 열 분리) 처리. 규칙 `docs/rules/idrac-server.md` v2.922 항목 · 행 크기 실측은 §4.4 정정. 화면은 3b.
 `bmusage/collectors/osSsh.js linuxCommand` 구획 추가 → `parse/linuxProc.js` 파서(순수 · 테스트) → `rates.js`·`usage.js` 열 추가 → `db.js` 열·튜닝 표 → USE 판정 순수 모듈(테스트가 웹·서버 같은 입력으로 대조) → `edgePull.js` 봉투 + 중앙 정제 화이트리스트 → 스냅샷 엣지 대행 라우트 → 웹(보드 · 상세 · 400 · 상태) → 목 데이터 → Chromium 1440/400 → 릴리스.
 
 ## 9. 출처(검색 2026-11-06)

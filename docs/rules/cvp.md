@@ -17,6 +17,7 @@
 - (원래 4634행) CVP 장비 목록 EOS 버전 칩 · 필터 연동 KPI(v2.652)
 - (원래 4639행) CVP 인터페이스 세부 정보(v2.649) — 설명은 설정 노드에서 부품 주기에 읽고, `null`(못 읽음)과 `''`(설명 없음)을 구분한다
 - (원래 4688행) CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다
+- (v2.922) 포트 드롭 열(in_drop/out_drop — 추정 경로) · 베어메탈 NIC 매핑·대조는 hostMatch 하나
 
 ## 본문
 
@@ -125,4 +126,11 @@
     MAC 은 콜론·하이픈·점·붙임 표기 전부. `vmnic0` 글자만으로는 호스트를 특정하지 않는다(어느 호스트나 vmnic0 이 있다). 같은 MAC 이 포트 3개 이상이면 '충돌' 로 표시만.
   - 방향은 스위치 포트 기준 **In = 서버 송신 · Out = 서버 수신** — 응답 `direction` 과 화면 띠·열 이름이 말한다. 값 없음은 '—'(0 금지). 드롭은 수집 전이라 '—'.
   - 범위 계정은 그 호스트 법인의 CVP 서버 행만(`rowOwnerOf` + `datacenterId`), 범위 검사(404)가 도구 키 검사(403)보다 먼저다(존재 은닉).
+- ⚠ **v2.922(리눅스 성능 3a) — 포트 드롭 열 · 베어메탈 서버 NIC ↔ 포트 매핑은 hostMatch 하나**(`cvp/{parse,db,poller,push,hostMatch}.js` · `central/cvpEdge.js` · 회귀 `server/test/bmPerf2921Cvp.test.js`):
+  - `parseCounters` 후보에 `inDiscards/outDiscards`(필드 이름 **추정** — Arista 공식 경로 미확인) → `portDelta` 의 `inDrop/outDrop`(못 읽으면 null · 리셋 null). `port_latest/port_sample` 에 `in_drop/out_drop`,
+    `port_daily` 에 `in_drop_sum/out_drop_sum/in_drop_n/out_drop_n` — **ALTER 로 더한다**(`addPortDropCols` · 멱등 · 기존 행 null). 엣지 push 표본 행은 12칸(뒤 두 칸 드롭) — 구버전 엣지의 10칸 행은 드롭 null.
+    정제 화이트리스트(cvpEdge)·해시 키(push RATE_KEYS)·adopt 병합·portSeries·portsByDesc 에도 넣었다.
+  - 베어메탈 성능 화면의 포트 후보는 **v2.920 `hostMatch.matchUplinks` 를 재사용**한다(판정 두 벌 금지). 넓힌 것: `host.aliases`(서비스 태그) · 리눅스 NIC 이름(eno1·bond0 — 이름 단서와 함께일 때만 NIC 지목).
+    ⚠ 고친 결함: `descHasName` 이 구분자 있는 이름(`bm-kr1-db01` · `esx-01`)을 설명 토큰 하나와 비교해 **영원히 매칭하지 못했다** → 이름도 나눠 연속 토큰열로 비교(경계 규칙 유지).
+  - PROFILES §10 매핑 출처: ① 수동 매핑 — v2.922 신규(`bmusage/portMap.js`) ② 포트 설명 매칭 — v2.920 hostMatch(가상화 호스트) 를 베어메탈로 확장 ③ LLDP · ④ MAC — **미구현**(경로 미확인).
 

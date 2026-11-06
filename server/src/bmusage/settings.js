@@ -102,7 +102,51 @@ export const DEFAULTS = Object.freeze({
    *   구버전 엣지가 영원히 '적용 대기' 로 보인다(혼재 버전 호환). 배포는 엣지가 전부 이 판으로 오른 뒤의 일이다.
    */
   perf: null,   // normalizeSettings 가 PERF_DEFAULTS 로 채운다
+  /*
+   * v2.922(3a 단계 — 설계 README §4.4 사용자 확정 2026-11-06): 저장 구조·장치별 이력·피크 수집 설정. perf 와 같이 **이 노드의 설정**이고
+   *   중앙 배포 키(DISTRIBUTED_KEYS)에는 넣지 않는다(넣으면 배포 서명이 바뀌어 구버전 엣지가 ‘적용 대기’ 로 남는다 — perf 와 같은 이유).
+   */
+  store: null,  // normalizeSettings 가 STORE_DEFAULTS 로 채운다
 });
+
+/**
+ * v2.922 — 저장 구조·피크 기본값(설계 §4.4 · PROFILES §6 끝 ‘피크 수집 3안’ · §9 · §10).
+ *  · rawDays 30(5분 원시 · 월 파일) — 실제 보존은 min(이 값, 기존 rawRetentionDays)다(기존 키를 더 짧게 둔 현장의 결정을 늘리지 않는다).
+ *  · hourlyDays 365(1시간 롤업) · 1일 롤업은 기존 dailyRetentionDays(5년) 그대로 · 장치 5분 14일 · 장치 1시간 90일(설계).
+ *  · deviceMax 32(서버당 장치 수 상한 — 넘으면 ‘상한 초과 n’) · partitionIo 꺼짐(파티션 I/O 는 옵트인) · blkqMax 64(##BLKQ 장치 수 — D7).
+ *  · peakWindowS 10(A 안: 같은 SSH 세션 안 1초 간격 창 — 0 이면 끔. 세션 예산이 모자라면 줄이고 행에 적는다).
+ *  · peakSampler 꺼짐(B 안 — 서버 샘플러 파일 수거. 이번 단계는 수거 구획·형식 명세·sha256 대조 자리만; 스크립트 배포는 7단계).
+ *  · portTolPct 5(CVP 양쪽 대조 ⑤ 의 어긋남 기준 — 설계 ‘예 5%’ · 임의 시작값).
+ */
+export const STORE_DEFAULTS = Object.freeze({
+  rawDays: 30, hourlyDays: 365, devRawDays: 14, devHourlyDays: 90,
+  deviceMax: 32, partitionIo: false, blkqMax: 64,
+  peakWindowS: 10, peakSampler: false, peakSamplerSha256: '',
+  portTolPct: 5,
+});
+const STORE_LIMITS = Object.freeze({
+  rawDays: [7, 365, false], hourlyDays: [30, 730, false], devRawDays: [1, 60, false], devHourlyDays: [7, 365, false],
+  deviceMax: [1, 256, false], blkqMax: [1, 1_024, false], peakWindowS: [0, 30, false], portTolPct: [0.5, 100, true],
+});
+/** 저장 구조 설정 정규화(순수) — 모르는 키는 버리고, 빈 칸은 기본값(clampSetting 규약). sha256 은 64자리 16진수만(아니면 ''). */
+export function normalizeStoreSettings(raw = {}) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const out = {};
+  for (const [k, [min, max, frac]] of Object.entries(STORE_LIMITS)) out[k] = clampSetting(src[k], { min, max, def: STORE_DEFAULTS[k], round: !frac });
+  // peakWindowS 0 = 끔 — clampSetting 의 '0 은 미지정' 규약과 달리 명시적 0 을 지킨다(끄는 값이다).
+  if (src.peakWindowS === 0 || src.peakWindowS === '0') out.peakWindowS = 0;
+  out.partitionIo = src.partitionIo === true;
+  out.peakSampler = src.peakSampler === true;
+  const sha = String(src.peakSamplerSha256 || '').trim().toLowerCase();
+  out.peakSamplerSha256 = /^[0-9a-f]{64}$/.test(sha) ? sha : '';
+  return out;
+}
+/** 실효 원시 보존(일) — 월 파일 5분 원시. 기존 키(rawRetentionDays)를 더 짧게 둔 현장은 그 값을 따른다(늘리지 않는다). */
+export function effectiveRawDays(s = {}) {
+  const a = Number(s?.store?.rawDays) || STORE_DEFAULTS.rawDays;
+  const b = Number(s?.rawRetentionDays) || a;
+  return Math.max(1, Math.min(a, b));
+}
 
 /**
  * v2.919 — USE 판정 기준값 기본(설계 §4.2). ⚠ ‘(추정)’ 표시는 공식 권고가 아니라 **임의 시작값**이라는 뜻이다 — 현장에서 조정한다.
@@ -226,6 +270,7 @@ export function normalizeSettings(raw = {}) {
     osSsh: raw.osSsh === undefined ? DEFAULTS.osSsh : !!raw.osSsh,
     idracTelemetry: raw.idracTelemetry === undefined ? DEFAULTS.idracTelemetry : !!raw.idracTelemetry,
     perf: normalizePerfThresholds(raw.perf),   // v2.919
+    store: normalizeStoreSettings(raw.store),   // v2.922
   };
 }
 
@@ -454,6 +499,9 @@ export function saveBmUsageSettings(body = {}) {
   // v2.919: 기준값은 **키 단위로** 겹친다(일부만 보내도 나머지는 직전 값 — 통째로 바꾸면 보내지 않은 기준이 기본값으로 되돌아간다).
   if (patch.perf && typeof patch.perf === 'object' && !Array.isArray(patch.perf)) patch.perf = { ...prevLocal.perf, ...patch.perf };
   else delete patch.perf;
+  // v2.922: 저장 구조 설정도 키 단위로 겹친다(perf 와 같은 이유).
+  if (patch.store && typeof patch.store === 'object' && !Array.isArray(patch.store)) patch.store = { ...prevLocal.store, ...patch.store };
+  else delete patch.store;
   const local = normalizeSettings({ ...prevLocal, ...patch });
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(local, null, 2), { mode: 0o600 });

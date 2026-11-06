@@ -18,6 +18,7 @@
 - (원래 520행) 식별 키 충돌을 조용히 두지 말 것
 - (원래 526행) 인메모리 상태 맵은 대상 목록을 기준으로 정리한다
 - (v2.919) 리눅스 베어메탈 통합 성능 모니터링 1단계 — 같은 SSH 1회에 구획 추가 · USE 판정 코어 하나 · 하드웨어 축은 이미 가진 데이터만
+- (v2.922) 리눅스 성능 3a — 시간 단위 파일(5분·1시간·1일·장치) · 예전 표 마이그레이션(대조 뒤 삭제) · 피크 A 안 · 추이 API · CVP 포트 대조
 - (원래 746행) iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
 - (원래 844행) 서버 온도 — 히트맵 보드(시안 B). '못 읽은 값' 을 정상으로도 이상으로도 세지 않는다
 - (원래 1030행) v2.728 — 엣지 축약 인벤토리는 부품 이름·health·state 를 싣고, 중앙 `INV_SHAPE` 와 한 쌍으로 넓힌다
@@ -378,6 +379,38 @@
       기존 db 모듈은 열기 실패를 ‘DB 없이 동작’ 으로 두는 관행인데, 열 하나 때문에 DB 전체를 끄면 다섯 지표까지 멈추므로 그 열만 빼고 계속한다.
     · **D8** 명령 앞 `export LC_ALL=C;`(한국어 로캘의 번역된 df 머리글).
     · 미룬 것(D7·D9~D15)은 설계 README §6 의 11번.
+- ⚠⚠ **리눅스 성능 3a(v2.922 예정 — 서버만) — 저장은 시간 단위 파일 · 보존은 파일 삭제 · 예전 표는 ‘옮기기 → 행 수 대조 → 삭제’ · 피크는 같은 세션 1초 창**
+  (`bmusage/{monthStore,monthMigrate,peakWindow,samplerSpec,deviceRows,trendWindow,trendQuery,portCompare,portMap}.js` · `db.js`(메인 = 최신값·장치 목록·bm_meta) ·
+  `routes/api/bmUsage.js`(`/tools/bm-usage/perf/:key/history|devices|ports` · `PUT /tools/bm-usage/port-map`) · `routes/collector.js`(`/bm-usage/trend|devices|nics`) ·
+  `central/bmUsageEdgePull.js pullBmTrend`. 설계 README §4.4 · PROFILES §6·§8~§12. 회귀 `server/test/bmPerf2921{,Migrate,Cvp,Size}.test.js`):
+  - **파일**: 5분 원시 `bm-usage-YYYY-MM.db`(30일 — 실효는 min(store.rawDays, rawRetentionDays)) · 1시간 `bm-usage-1h-YYYY-MM.db`(365일) · 1일 `bm-usage-1d-YYYY.db`(**연 파일** — 5년 창이 6개) ·
+    장치 5분 `bm-usage-dev-YYYY-MM.db`(14일) · 장치 1시간 `bm-usage-dev1h-YYYY-MM.db`(90일). 달·해 경계는 포탈 시각(util/dayKey). **보존이 같은 것끼리 파일을 나눈다** —
+    한 파일에 단계를 섞으면 5년 뒤에야 지울 수 있고 그 사이 수천만 행을 DELETE 해야 한다(설계 문장과 다른 결정 — 이유는 monthStore 머리말).
+    보존: 기간 끝 ≤ 기준이면 **파일 삭제**(-wal/-shm 포함 · 쓰는 중 pin 이면 다음으로) · 경계 기간만 청크 DELETE. ⚠ 디스크는 최대 한 기간 더 남는다(정직 기록).
+  - **조회**: ATTACH 대신 파일별 핸들(진행 중인 open 공유 `opening` Map · LRU `BMUSAGE_MONTH_MAX_OPEN` 24 · pin) · **조회당 파일 10개 상한**(ATTACH 상한과 같은 값 — 넘으면 최근 10 + `filesCapped`) ·
+    없는/못 연 기간은 `missingPeriods`(그 기간 없음)로 밝히고 나머지로 계속. 조회는 파일을 만들지 않는다.
+  - **적재**: 원시 INSERT OR IGNORE + 새로 들어간 행만 1시간·1일 upsert(합·개수·최대 · null 은 개수 제외 · 피크는 더 클 때만 값과 시각을 같이) · 파일마다 트랜잭션 1회(안에 await 없음).
+    1일 표는 예전 모양 + 모든 지표의 합·개수 + 피크. **1초 샘플은 DB 에 없다**(1초 해상도 표가 없다 — 창 표본은 집계 뒤 버린다).
+  - ⚠⚠ **마이그레이션(위험한 수정 — 순서를 테스트가 고정)**: 메인 파일을 여는 순간 상태(bm_meta `migrate.v2922`)를 정한다(예전 표에 행이 있으면 copy-raw) —
+    copy-raw(rowid 순 청크 → 월 파일 IGNORE + 1시간 롤업은 **파일별 `_mig` 커서를 같은 트랜잭션에서** 올려 재개해도 한 번만) → copy-daily(사본 표 usage_daily_mig — IGNORE) →
+    verify(달·해마다 예전 행 수 ≤ 사본 행 수 — 지우기 전) → delete(시작 시 최대 rowid 이하만 청크) → done. 청크마다 시간 기준 양보 · 폴러 틱이 기다리지 않고 잇는다.
+    실패면 failed(1시간 뒤 재시도 · 최대 3회 · 대조 실패면 커서 0 부터). **그동안 읽기는 예전 표가 그 구간의 원본**(readRule) — historyRollup 의 ‘원본 폴백 금지’ 는 롤업 대신 원시를
+    읽는 것이라 이것과 다르다. 1시간 롤업이 아직 없는 구간은 원시로 메우지 않고 결측 사유 `migrating`. 옮기는 동안 원시·롤업 파일 보존은 멈춘다(대조 전에 사본을 지우지 않게).
+    ⚠ 메인 파일 크기는 VACUUM 전에는 줄지 않는다(지운 자리는 메인 파일 안 빈 페이지 — 운영 VACUUM 은 docs/SETTINGS.md 부록 A-2).
+  - **장치별**: 물리 디스크·dm/md·물리 NIC·bond(가상 NIC·loop·ram·zram·sr 제외) · 파티션 I/O 는 `store.partitionIo` 옵트인(part 표시 · 대표값에서 뺀다) · 상한 `store.deviceMax`(32 — 물리 → md → dm → 파티션 순,
+    한 종류가 상한을 다 차지하지 않게) · 넘은 수는 최신값 `dev_over` + 노트. 장치 목록(usage_devices)은 처음 본 순서 `ord` 가 색 순서(바뀌지 않는다). 마운트는 일 롤업만.
+  - **피크 A 안**: 본 명령 뒤 **같은 세션**에서 `/proc/stat`·`/proc/diskstats`·`/proc/net/dev` 를 1초 간격 N+1 번(`store.peakWindowS` 10 · 0 이면 끔) — 세션 예산(50초)에서 남은 시간으로
+    줄이고(2초 미만이면 0) 행에 `peak_window_s` · 노트. 시각은 원격 /proc/uptime 간격 + 이 노드 시계. `peak_src`: window10 | sampler | psi | none.
+    ⚠ 주기 산수(추정): 서버당 +약 13초 → 1,000대 · 동시 32 면 한 주기 약 2.6분 → 약 7~8분(5분 주기를 넘는다 — 재진입 가드가 다음 틱을 건너뛴다). 큰 법인은 peakWindowS 를 줄이거나 끈다.
+    B 샘플러: `store.peakSampler` 옵트인일 때만 `##SAMPLER`(고정 경로 · 없으면 absent) · 형식 v1 · 기대 sha256(`store.peakSamplerSha256`)이 없거나 다르면 unverified(값을 쓰지 않는다) — **배포 기능 없음(7단계)**.
+  - **D7**: `##BLKQ` = `grep -H ''` 한 번(+ 가상 장치 거르는 grep) · 물리 → md → dm 순 · 상한 `store.blkqMax`(64) · 자르기 전 수는 tuning `blkqTotal`.
+  - **D13**: `latestUsage()` 기본은 JSON 열 없는 판본 · 판정 소비처(주 조회·상세·엣지 봉투)만 `{ json:true }`.
+  - **추이 API**: 해상도 auto(2일 5분 · 60일 1시간 · 그 위 1일 · 보존 밖이면 한 단계 위 · 장치는 1일 없음 · 마운트는 1일만) · 평균/최대/피크/피크 시각 · 결측 구간(기대 간격 2배) · 기준선(settings.perf) ·
+    점 상한 6,000(넘으면 truncated) · 지표·종류·장치 이름은 화이트리스트. 엣지 위임 서버는 엣지 대행(보관 안 함 · 정제 · 최소 엣지 2.922.0). scope 교집합 404 · memoJson + scopeKey + 역할 + 마지막 수집 시각.
+  - **CVP 대조(서버 쪽)**: 후보는 `cvp/hostMatch.js matchUplinks` **하나**(v2.920 업링크 매칭 — 별칭·리눅스 NIC 이름을 받게 넓혔다 · 구분자 있는 이름 매칭 결함 수정) · 수동 매핑 `bmusage-portmap.json`
+    (admin · 원자 쓰기 · 손상 보존 후 저장 거부 · 감사 로그 · 범위 계정은 자기 법인 CVP 로만 — 안 보이면 404, 보이는데 다른 법인이면 403) · 상태 no-cvp · no-mapping · candidate · no-counters · stale · mapped ·
+    대조 ⑤ 는 창(끝 시각·길이)이 20% 안일 때만, 기준 `store.portTolPct` 5%. LLDP·MAC 은 만들지 않았다.
+  - **행 크기 실측**(설계 §4.4 정정): 원시 655B · 1시간 1,110B · 1일 1,147B · 장치 5분 213B · 장치 1시간 296B → 1,000대 약 25GB(보존 정확) · 최악 약 40GB(추정).
   - ⚠ **정직 기록**: 표본은 커널 문서 형식 + 이 개발 컨테이너(커널 6.18 · dash) 실행 출력이다 — 이 현장 Rocky 9 / RHEL 8 베어메탈 출력은 보지 못했다. `/proc/interrupts` 의 NIC 큐 이름 패턴 ·
     PSI 유무 · `/etc/tuned/active_profile` 존재는 첫 실수집에서 `detail.sections`·`tuning.sections` 를 보고 좁힌다. 화면(2단계)·월 파일/3단 보존/장치별 이력(3단계)·진단 스냅샷(4단계)은 아직이다.
 - ⚠⚠ **iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에

@@ -24,6 +24,8 @@ export function hostMatchTerms(host = {}) {
   const short = full.split('.')[0];
   const names = [];
   if (short.length >= 3) names.push(short);
+  // v2.922(리눅스 성능 3a — 베어메탈 서버 NIC ↔ 포트): 별칭(서비스 태그 등)도 이름 단서로 — 같은 토큰 경계 규칙. 가상화 호스트 호출은 aliases 를 넘기지 않아 예전과 같다.
+  for (const a of Array.isArray(host.aliases) ? host.aliases : []) { const x = String(a || '').trim().toLowerCase(); if (x.length >= 3 && !names.includes(x)) names.push(x); }
   const nics = (Array.isArray(host.nics) ? host.nics : []).map((n) => ({ device: String(n?.device || ''), mac: normMac(n?.mac) })).filter((n) => n.device);
   return { full, short, names, nics, macs: nics.filter((n) => n.mac.length === 12).map((n) => n.mac) };
 }
@@ -31,8 +33,19 @@ export function hostMatchTerms(host = {}) {
 /** 설명 안에 토큰 경계로 이름이 있는가('esx01' ⊄ 'esx010'). */
 export function descHasName(desc, name) {
   if (!name) return false;
-  const toks = String(desc || '').toLowerCase().split(SEP).filter(Boolean);
-  return toks.includes(name);
+  const toks = String(desc || '').toLowerCase().slice(0, 1024).split(SEP).filter(Boolean);
+  /*
+   * v2.922(3a 에서 발견 · 고침): 이름 자체에 구분자가 있으면('bm-kr1-db01') 설명 토큰 하나와 같을 수 없어 **영원히 매칭되지 않았다**.
+   *   이름도 같은 구분자로 나눠 **연속된 토큰열**로 찾는다(경계 규칙은 그대로 — 'db01' 은 'db010' 에 맞지 않는다).
+   */
+  const parts = String(name).toLowerCase().split(SEP).filter(Boolean);
+  if (!parts.length) return false;
+  for (let i = 0; i + parts.length <= toks.length; i++) {
+    let ok = true;
+    for (let j = 0; j < parts.length; j++) if (toks[i + j] !== parts[j]) { ok = false; break; }
+    if (ok) return true;
+  }
+  return false;
 }
 
 /** 설명 안의 MAC(어느 표기든) — 정규화 12자. */
@@ -59,7 +72,8 @@ export function matchUplinks(ports = [], host = {}) {
     const dMacs = macsInDesc(desc);
     const nicByMac = terms.nics.find((n) => n.mac && dMacs.has(n.mac)) || null;
     const nicNames = (desc.toLowerCase().match(NIC_RE) || []);
-    const nicByName = terms.nics.find((n) => nicNames.includes(n.device.toLowerCase())) || null;
+    // v2.922(3a): 리눅스 NIC 이름(eno1·ens1f0·bond0 …)은 vmnic 글자 규칙에 걸리지 않는다 — 장치 이름이 설명 토큰과 같으면 NIC 지목(이름 단서와 함께일 때만 — 아래 조건).
+    const nicByName = terms.nics.find((n) => nicNames.includes(n.device.toLowerCase()) || descHasName(desc, n.device.toLowerCase())) || null;
     const nameHit = terms.names.some((n) => descHasName(desc, n));
     if (!nicByMac && !(nicByName && nameHit) && !nameHit) continue;   // vmnic 글자만으로는 호스트를 특정할 수 없다(어느 호스트나 vmnic0 이 있다)
     const nic = nicByMac?.device || nicByName?.device || null;
@@ -77,6 +91,6 @@ export const BASIS_LABEL = Object.freeze({
   lldp: { label: '확정', note: 'LLDP 이웃', tone: 'ok' },
   mac: { label: '높음', note: 'MAC 테이블 학습', tone: 'ok' },
   'desc-mac': { label: '보통', note: '포트 설명에 NIC MAC', tone: 'warn' },
-  'desc-nic': { label: '보통', note: '포트 설명에 호스트 이름 + vmnic', tone: 'warn' },
+  'desc-nic': { label: '보통', note: '포트 설명에 호스트 이름 + NIC 이름(vmnic·eno 등)', tone: 'warn' },
   'desc-name': { label: '보통', note: '포트 설명에 호스트 이름', tone: 'warn' },
 });

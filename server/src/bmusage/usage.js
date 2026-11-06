@@ -21,7 +21,9 @@
  */
 import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, maxStrict, spanOk, spanLimitMs,
   deltaOrNull, cpuBreakdownPct, coreMaxPct, awaitMs, avgQueue, retransPct } from './rates.js';
-import { PERF_COL_NAMES, JSON_COL_MAX } from './perfCols.js';
+import { PERF_COL_NAMES, JSON_COL_MAX, PEAK_COLS } from './perfCols.js';
+import { peakSrcOf } from './peakWindow.js'; // v2.922: 피크 출처(A 창 · B 샘플러 · C PSI)
+import { buildDeviceRows, buildMountRows } from './deviceRows.js'; // v2.922: 장치별 이력 행
 import { numOrNull } from '../util/numOrNull.js';
 import { fcUtilization, fcRateNotes, fcRowPctFields, fcRepresentative, fcPlausibleBps } from './parse/fcRate.js';
 
@@ -58,7 +60,7 @@ function gapText(gapMs, limMs) {
  * @param {number|null} [p.intervalMs] 설정 수집 주기 — 누적 카운터 간격 한계(v2.732 B1-01 `rates.spanLimitMs`). 넘기지 않으면 예전 60분.
  * @param {number} [p.slackMs]   간격 한계에 더할 여유(직전 주기 실행 소요 + 이번 주기에서 이 서버가 읽히기까지 — poller.spanArgsFor)
  */
-export function buildUsage({ target = {}, idrac = null, os = null, ent = null, prev = null, now = Date.now(), intervalMs = null, slackMs = 0 } = {}) {
+export function buildUsage({ target = {}, idrac = null, os = null, ent = null, prev = null, now = Date.now(), intervalMs = null, slackMs = 0, deviceMax = 32 } = {}) {
   const srcOf = {};
   const notes = [];
   /*
@@ -82,7 +84,11 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     ...Object.fromEntries(PERF_COL_NAMES.map((c) => [c, null])),
     // 두 경로를 이번 주기에 읽은 시각(최신값 전용 — 커버리지·신선도 판정이 쓴다). 못 읽었으면 null.
     os_at: null, idrac_at: null,
+    // v2.922: 피크(창 안 최대 · 시각) — 창이 없으면 null(0 이 아니다) · 출처 · 실제 창 길이 · 장치 상한 초과 수.
+    ...Object.fromEntries(PEAK_COLS.flatMap((c) => [[`${c}_peak`, null], [`${c}_peak_at`, null]])),
+    peak_src: 'none', peak_window_s: null, peak_n: null, dev_over: null,
   };
+  let deviceRows = []; let mountRows = [];   // v2.922: 장치별 이력·마운트 일 롤업(행 밖 — 폴러가 insertUsage 에 함께 넘긴다)
   let perfOut = null;   // v2.919: 장치별·튜닝·연속 증가 — buildPerf 결과(아래 Linux 분기)
 
   // ── OS 경로 ────────────────────────────────────────────────────────────────
@@ -126,7 +132,8 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     // 메모리 — 순간값이라 첫 주기부터 나온다.
     if (n(os.mem?.usedPct) != null) { out.mem_pct = n(os.mem.usedPct); srcOf.mem = 'os'; }
     // 디스크 busy — io_ticks 증가 / 경과.
-    const busy = maxOrNull((c.disks || []).map((d) => busyPct(findBy(pc?.disks, 'name', d.name)?.ioTicksMs, d.ioTicksMs, pAt, now, lim)));
+    // v2.922: 파티션(옵트인 · part)은 대표값에서 뺀다 — 디스크와 파티션을 함께 세면 같은 I/O 가 두 번 보인다.
+    const busy = maxOrNull((c.disks || []).filter((d) => !d.part).map((d) => busyPct(findBy(pc?.disks, 'name', d.name)?.ioTicksMs, d.ioTicksMs, pAt, now, lim)));
     if (busy != null) { out.disk_busy_pct = busy; srcOf.diskBusy = 'os'; }
     // 디스크 사용 공간 — df(순간값).
     const used = maxOrNull((os.mounts || []).map((m) => m.usedPct));
@@ -137,7 +144,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       const rx = perSecond(p?.rxBytes, x.rxBytes, pAt, now, lim);
       const tx = perSecond(p?.txBytes, x.txBytes, pAt, now, lim);
       const bps = sumStrict([rx, tx]);
-      return { iface: x.iface, bps, pct: x.virtual ? null : linkPct(maxStrict([rx, tx]), x.bitsPerSec), state: x.state, bitsPerSec: x.virtual ? null : x.bitsPerSec, ...(x.virtual ? { virtual: true } : {}) };
+      return { iface: x.iface, bps, rxBps: rx, txBps: tx, pct: x.virtual ? null : linkPct(maxStrict([rx, tx]), x.bitsPerSec), state: x.state, bitsPerSec: x.virtual ? null : x.bitsPerSec, ...(x.virtual ? { virtual: true } : {}) };
     });
     const np = maxOrNull(perIf.map((x) => x.pct));
     if (np != null) { out.net_pct = np; srcOf.net = 'os'; }
@@ -188,6 +195,26 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     perfOut = buildPerf({ os, pc, pAt, now, lim, prevStreak: prev?.streak || null });
     Object.assign(out, perfOut.cols);
     for (const x of perfOut.notes) notes.push(x);
+    // v2.922 피크 — A 안(같은 세션 1초 창) · B 안(샘플러 — 해시가 검증된 파일만) · C(PSI 는 열에 이미 있다 — 출처 표기만).
+    const pk = os.peak || null; const smp = os.sampler || null;
+    const wS = Number(pk?.windowS) > 0 ? Number(pk.windowS) : 0;
+    if (smp?.state === 'ok') {
+      for (const c of PEAK_COLS) { const m = smp.metrics?.[c]; if (m) { out[`${c}_peak`] = n(m.peak); out[`${c}_peak_at`] = n(m.at); } }
+      out.peak_window_s = n(smp.windowS);
+    } else if (wS) {
+      for (const c of PEAK_COLS) { const v = pk.server?.[c]; if (v && n(v.peak) != null) { out[`${c}_peak`] = n(v.peak); out[`${c}_peak_at`] = n(v.at); } }
+      out.peak_window_s = wS; out.peak_n = wS + 1;
+    } else out.peak_window_s = 0;
+    out.peak_src = peakSrcOf({ windowS: wS, sampler: smp, psiRead: !!os.perf?.psi?.value });
+    if (pk?.reduced && wS) notes.push(`세션 예산이 모자라 피크 창을 ${pk.wantS}초에서 ${wS}초로 줄였습니다(피크는 그 창 안의 최대입니다).`);
+    else if (pk?.wantS && !wS) notes.push(pk.reason === 'error' ? '피크 창(1초 간격 읽기)을 실행하지 못해 이번 주기 피크는 비웠습니다.' : '세션 예산이 모자라 이번 주기 피크 창을 건너뛰었습니다(피크는 비웠습니다 — 0 이 아닙니다).');
+    // 장치별 이력 행(물리 디스크·dm/md·물리 NIC·bond · 파티션은 옵트인) — 상한을 넘으면 뺀 수를 행에 적는다.
+    const errOf = new Map((perfOut.nicDeltas || []).map((x) => [x.iface, x]));
+    const devRes = buildDeviceRows({ key: target.key, ts: now, disks: perfOut.allDisks || [], deviceMax,
+      nics: perIf.map((x) => ({ ...x, errDelta: errOf.get(x.iface)?.errDelta ?? null, dropDelta: errOf.get(x.iface)?.dropDelta ?? null })), peaks: pk?.devices || {} });
+    deviceRows = devRes.rows; out.dev_over = devRes.over;
+    if (devRes.over) notes.push(`장치가 ${devRes.total}개라 상한(${deviceMax})을 넘은 ${devRes.over}개는 장치별 이력에 남기지 않았습니다(대표값에는 포함).`);
+    mountRows = buildMountRows({ key: target.key, ts: now, mounts: os.mounts || [], inodes: os.perf?.dfi?.value || [] });
   }
   if (osOk) out.os_at = now;
 
@@ -307,7 +334,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
   const srcs = [...new Set(Object.values(srcOf))].sort();
   out.src = srcs.join('+');
   return {
-    row: out, srcOf, notes,
+    row: out, srcOf, notes, devices: deviceRows, mounts: mountRows,
     // 화면 상세용 — DB 에는 넣지 않는다(장치 수 × 주기면 행이 폭주한다).
     detail: {
       osKind: osOk ? os.osKind : null,
@@ -420,12 +447,16 @@ export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = nu
 
   // ── 디스크(장치별 → 대표값 최대) ────────────────────────────────────────────
   const findDisk = (name) => (Array.isArray(pc?.disks) ? pc.disks.find((d) => d.name === name) : null) || null;
-  const disks = (c.disks || []).map((d) => {
+  const allDisks = (c.disks || []).map((d) => {
     const p = findDisk(d.name);
     const dr = perSecond(p?.reads, d.reads, pAt, now, lim); const dw = perSecond(p?.writes, d.writes, pAt, now, lim);
     const iops = sumStrict([dr, dw]);
+    const rb = perSecond(p?.readBytes, d.readBytes, pAt, now, lim); const wb = perSecond(p?.writeBytes, d.writeBytes, pAt, now, lim);
     return {
       name: String(d.name || '').slice(0, 64),
+      // v2.922: 장치별 이력 열(읽기/쓰기 분리) · 파티션 표시(옵트인)
+      rIops: dr == null ? null : r1(dr), wIops: dw == null ? null : r1(dw), rBps: rb == null ? null : Math.round(rb), wBps: wb == null ? null : Math.round(wb),
+      ...(d.part ? { part: true } : {}),
       busyPct: busyPct(p?.ioTicksMs, d.ioTicksMs, pAt, now, lim),
       iops: iops == null ? null : r1(iops),
       awaitMs: awaitMs(p, d, pAt, now, lim),
@@ -433,6 +464,7 @@ export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = nu
       inFlight: n(d.inFlight),
     };
   });
+  const disks = allDisks.filter((d) => !d.part).map(({ rIops: _a, wIops: _b, rBps: _c, wBps: _d, ...rest }) => rest);   // 대표값·detail 은 예전 모양(파티션 제외)
   cols.disk_iops = maxOrNull(disks.map((d) => d.iops));
   cols.disk_await_ms = maxOrNull(disks.map((d) => d.awaitMs));
   cols.disk_aqu = maxOrNull(disks.map((d) => d.aqu));
@@ -486,8 +518,10 @@ export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = nu
     v: 1, at: now,
     sysctl: sy, hugepages: hp,
     blkq: bq ? bq.slice(0, PERF_DEVICE_MAX) : null,
+    // v2.922(D7): 상한(store.blkqMax)·물리 우선으로 자르기 전 장치 수 — 화면이 ‘n개 중 m개’ 를 말할 수 있게.
+    blkqTotal: bq ? (Number(bq.total) || bq.length) : null,
     irq: irq ? { irqbalance: irq.irqbalance, nicIrqs: irq.nicIrqs, spreadMin: irq.spreadMin, spreadMax: irq.spreadMax, cpus: irq.cpus } : null,
     sections: { sysctl: sections.sysctl || 'missing', hugepages: sections.hugepages || 'missing', blkq: sections.blkq || 'missing', irq: sections.irq || 'missing' },
   };
-  return { cols, detail, tuning, streak, notes };
+  return { cols, detail, tuning, streak, notes, allDisks, nicDeltas: nics };
 }
