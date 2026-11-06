@@ -3,8 +3,8 @@
  *
  * 게이트(형제 라우트와 같은 기준 — shared.js 머리말):
  *  - 마운트가 이미 `requirePerm('svcmon')` 아래다(index.js).
- *  - `/settings-sync/*` 는 **조회도 canEdit + fullScopeOnly** — 전 법인 설정의 주소(호스트·포트)가 실린다. 통신 점검 `/tools/link-check/targets`
- *    (adminOnly + fullScopeOnly)와 같은 성격의 정보라 범위 계정·viewer 에게 열지 않는다. 변경은 그 위에 같은 게이트.
+ *  - `/settings-sync/*` 는 **조회도 adminOnly + fullScopeOnly** — 전 법인 설정의 주소(호스트·포트)가 실린다. 통신 점검 `/tools/link-check/targets`
+ *    와 같은 게이트다(반증 H1: 처음 판본은 canEdit 이라 operator 가 봉인 비밀인 웹훅 URL·통합 계정 매핑을 받았다 — 행도 화이트리스트로 자른다).
  *  - `/overview` 는 `/state` 와 같은 조회 기준(svcmon 권한) — 대상 이름·호스트는 `/state` 가 이미 싣는 것과 같다. 엣지 주소(sourceIp)는 싣지 않는다.
  *  - `/alert-settings` 조회 canEdit · 저장 adminOnly + fullScopeOnly(알림 채널로 실제 발송이 나간다 — 로그 설정 PUT 과 같은 기준).
  *  - 엣지 노드(CENTRAL_URL)는 설정 연동을 쓰지 않는다(409) — 엣지의 svcmon 대상은 중앙 배정 사본이다.
@@ -71,7 +71,7 @@ function syncAssignments(agents, user) {
 export function registerSettingsSync(svcmonRouter) {
 
 /** 카탈로그 × Monitoring 대상 — 행 · 집계 · 드리프트 이력 · 엣지 · 이벤트. */
-svcmonRouter.get('/settings-sync/catalog', canEdit, fullScopeOnly, async (req, res) => {
+svcmonRouter.get('/settings-sync/catalog', adminOnly, fullScopeOnly, async (req, res) => {
   if (!syncAvailableHere()) return edgeOnly(res);
   const cat = await readCatalog();
   const rows = cat.rows.slice(0, MAX_ROWS);
@@ -103,7 +103,7 @@ async function planFrom(body = {}) {
 }
 
 /** 미리보기 — 저장하지 않는다(대량 등록과 같은 검증 코드 planBulkTargets 로 판정). */
-svcmonRouter.post('/settings-sync/preview', canEdit, fullScopeOnly, async (req, res) => {
+svcmonRouter.post('/settings-sync/preview', adminOnly, fullScopeOnly, async (req, res) => {
   if (!syncAvailableHere()) return edgeOnly(res);
   const r = await planFrom(req.body || {});
   if (r.error) return res.status(400).json({ ok: false, error: r.error });
@@ -112,7 +112,7 @@ svcmonRouter.post('/settings-sync/preview', canEdit, fullScopeOnly, async (req, 
 });
 
 /** 적용 — 추가(전부 성공 또는 전부 취소) · 주소 반영 · 사라짐 처리 · (선택) 담당 엣지 배정 동기화. */
-svcmonRouter.post('/settings-sync/apply', canEdit, fullScopeOnly, async (req, res) => {
+svcmonRouter.post('/settings-sync/apply', adminOnly, fullScopeOnly, async (req, res) => {
   if (!syncAvailableHere()) return edgeOnly(res);
   const r = await planFrom(req.body || {});
   if (r.error) return res.status(400).json({ ok: false, error: r.error });
@@ -131,7 +131,7 @@ svcmonRouter.post('/settings-sync/apply', canEdit, fullScopeOnly, async (req, re
 });
 
 /** 자동 등록 종류(기본 없음 = 끔). */
-svcmonRouter.put('/settings-sync/options', canEdit, fullScopeOnly, (req, res) => {
+svcmonRouter.put('/settings-sync/options', adminOnly, fullScopeOnly, (req, res) => {
   if (!syncAvailableHere()) return edgeOnly(res);
   const before = getOptions();
   const next = setOptions(req.body || {});
@@ -140,14 +140,14 @@ svcmonRouter.put('/settings-sync/options', canEdit, fullScopeOnly, (req, res) =>
 });
 
 /** 배너 '확인' — 지금까지 설정에 새로 생긴 항목을 본 것으로 둔다(미등록 상태는 설정 연동 탭에 그대로 남는다). */
-svcmonRouter.post('/settings-sync/ack', canEdit, fullScopeOnly, (req, res) => {
+svcmonRouter.post('/settings-sync/ack', adminOnly, fullScopeOnly, (req, res) => {
   if (!syncAvailableHere()) return edgeOnly(res);
   const r = ackDrift();
   res.status(r.saved ? 200 : 500).json({ ok: r.saved, ackAt: r.ackAt });
 });
 
 /** 연동 해제 — 대상은 남기고 출처만 지운다(수동 대상으로 전환). */
-svcmonRouter.post('/settings-sync/detach/:id', canEdit, fullScopeOnly, (req, res) => {
+svcmonRouter.post('/settings-sync/detach/:id', adminOnly, fullScopeOnly, (req, res) => {
   const r = detachTarget(String(req.params.id || ''));
   if (!r) return res.status(404).json({ ok: false, error: '대상을 찾을 수 없습니다.' });
   if (r.changed) logAudit({ user: req.user?.username, action: 'svcmon.settings-sync.detach', target: r.target?.id, detail: r.target?.name || '' });
@@ -158,12 +158,13 @@ svcmonRouter.post('/settings-sync/detach/:id', canEdit, fullScopeOnly, (req, res
 let _dashMemo = null;   // { key, at, body }
 svcmonRouter.get('/overview', (req, res) => {
   const now = Date.now();
-  // 같은 저장소 세대·10초 안이면 재사용(여러 화면이 30초마다 부른다 — 20만 점검 전수 순회를 매번 하지 않게).
-  const key = `${storeRevision()}|${Math.floor(now / 10_000)}`;
+  // 같은 저장소 세대·30초 안이면 재사용 — 20만 점검 + 엣지 행 전수 순회는 수백 ms 동기다(반증 M6 실측: 로컬 200k 0.39초 · 엣지 192k 0.86초).
+  //   화면은 60초마다 부르고(무거운 API 15초 폴링 금지), 엣지 행은 정렬하지 않고 읽는다(sort:false — localeCompare 정렬이 비용의 큰 몫).
+  const key = `${storeRevision()}|${Math.floor(now / 30_000)}`;
   if (_dashMemo && _dashMemo.key === key) return res.json(_dashMemo.body);
   const edges = [];
   for (const e of edgeSummary(now)) {
-    const st = edgeState(e.agent, { limit: 50_000 }, now);
+    const st = edgeState(e.agent, { limit: 50_000, sort: false }, now);
     if (st) edges.push({ agent: st.agent, silent: st.silent, items: st.items });
   }
   const dash = buildDash({ targets: listTargets(), results: getResults(), edgeStates: edges, now, executes: executesHere() });

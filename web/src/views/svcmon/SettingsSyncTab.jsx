@@ -183,7 +183,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
       {!compact && (
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
           출처는 <b>통신 점검 › 설정 전수 점검</b>과 같은 카탈로그입니다. 장비 <b>자격증명은 옮기지 않습니다</b> — 등록되는 점검은 무인증(TCP · 인증서 만료 · HTTP 상태 · SSH/SMTP 배너)뿐이고,
-          401/403 응답은 살아 있음으로 봅니다. 등록하면 트리의 ‘{data.root}\그룹\법인’ 아래에 <b>중지 상태</b>로 들어가며, 점검은 담당 엣지(배정 후보일 때)에서 돕니다.
+          401/403 응답은 살아 있음으로 봅니다. 등록하면 트리의 ‘{data.root}\그룹\법인’ 아래에 <b>중지 상태</b>로 들어갑니다. 담당 엣지가 배정 후보면 그 엣지 전용 대상이 되고(배정 동기화), 이 포탈이 점검을 직접 실행하는 역할이면 이 포탈도 함께 잽니다.
         </div>
       )}
 
@@ -358,20 +358,20 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
           <div className="tv-opts">
             <div className="muted" style={{ fontSize: 12 }}>
               {`미등록 ${pickedRows.filter((r) => r.state === 'new').length} · 주소 변경 ${pickedRows.filter((r) => r.state === 'changed').length} · 사라짐 ${pickedRows.filter((r) => r.state === 'gone').length}`}
-              {' — 추가는 전부 성공 또는 전부 취소, 주소 반영·사라짐 처리는 대상별로 결과를 보고합니다.'}
+              {' — 추가는 전부 성공 또는 전부 취소, 주소 반영·사라짐 처리는 대상별로 결과를 보고합니다. 옵션을 바꾸면 미리보기를 다시 봐야 적용할 수 있습니다.'}
             </div>
             <label htmlFor="ss-enabled">등록 직후 상태
-              <Select sort={false} className="select" id="ss-enabled" value={opts.enabled ? 'on' : 'off'} onChange={(e) => setOpts((o) => ({ ...o, enabled: e.target.value === 'on' }))}>
+              <Select sort={false} className="select" id="ss-enabled" value={opts.enabled ? 'on' : 'off'} onChange={(e) => { setOpts((o) => ({ ...o, enabled: e.target.value === 'on' })); setPreview(null); }}>
                 <option value="off">중지 (권장 — 확인 후 켬)</option><option value="on">사용</option>
               </Select>
             </label>
             <label htmlFor="ss-gone">설정에서 사라진 대상
-              <Select sort={false} className="select" id="ss-gone" value={opts.goneAction} onChange={(e) => setOpts((o) => ({ ...o, goneAction: e.target.value }))}>
+              <Select sort={false} className="select" id="ss-gone" value={opts.goneAction} onChange={(e) => { setOpts((o) => ({ ...o, goneAction: e.target.value })); setPreview(null); }}>
                 <option value="disable">중지로 표시 (기본 — 삭제하지 않음)</option><option value="keep">표지만 남김</option><option value="delete">삭제</option>
               </Select>
             </label>
-            <label><input type="checkbox" checked={opts.withChecks} onChange={(e) => setOpts((o) => ({ ...o, withChecks: e.target.checked }))} />종류별 기본 점검 넣기(끄면 대상만 등록)</label>
-            <label><input type="checkbox" checked={opts.syncAssign} onChange={(e) => setOpts((o) => ({ ...o, syncAssign: e.target.checked }))} />담당 엣지에 배정 동기화(엣지별 배정이거나 배정이 없는 엣지만 — 경로 기준 배정은 바꾸지 않습니다)</label>
+            <label><input type="checkbox" checked={opts.withChecks} onChange={(e) => { setOpts((o) => ({ ...o, withChecks: e.target.checked })); setPreview(null); }} />종류별 기본 점검 넣기(끄면 대상만 등록)</label>
+            <label><input type="checkbox" checked={opts.syncAssign} onChange={(e) => { setOpts((o) => ({ ...o, syncAssign: e.target.checked })); setPreview(null); }} />담당 엣지에 배정 동기화(엣지별 배정이거나 배정이 없는 엣지만 — 경로 기준 배정은 바꾸지 않습니다)</label>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button type="button" className="btn" disabled={busy || !picked.size} onClick={doPreview}>{busy && !preview ? '확인 중…' : '미리보기'}</button>
               <button type="button" className="btn primary" disabled={busy || !preview || (preview.errors || []).length > 0 || (preview.over || []).length > 0} onClick={doApply}>

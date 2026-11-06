@@ -96,9 +96,25 @@ export async function buildSettingsTargets(deps = {}) {
       const m = await import(path);
       const name = fnNames.find((n) => typeof m[n] === 'function');
       if (!name) throw new Error(`${path} 에 ${fnNames.join('/')} 중 아무 함수도 없습니다(모듈이 바뀌었습니다 — 이 등록부는 점검에서 빠집니다).`);
-      return pick(m, name) ?? [];
+      const list = pick(m, name) ?? [];
+      noteLoadError(key, m);
+      return list;
     }, errors);
   };
+  /*
+   * v2.915(반증 M2 — 재현): 손상된 등록부는 **던지지 않고 빈 목록**을 준다(preserveCorrupt 뒤 []). 그것을 '등록 0건' 으로 읽으면 설정 연동이
+   *   그 종류의 연동 대상 전부를 '설정에서 사라짐' 으로 판정했다. 모듈이 손상 상태를 알려 주면(registryLoadError 류) sourceErrors 로 올린다
+   *   — 통신 점검 화면도 '못 읽음' 을 말한다(조용한 0건 금지 — 이 파일 머리말과 같은 원칙). 원문(파일 조각)은 싣지 않는다.
+   */
+  function noteLoadError(key, m) {
+    for (const fn of ['registryLoadError', 'emRegistryLoadError', 'settingsLoadError', 'isiduSettingsLoadError']) {
+      if (typeof m?.[fn] !== 'function') continue;
+      let bad = null;
+      try { bad = m[fn](); } catch { bad = null; }
+      if (bad) errors.push({ source: key, reason: '등록부 파일을 읽지 못했습니다(손상본을 보존했습니다) — 이 출처의 항목이 빠졌을 수 있습니다.' });
+      return;
+    }
+  }
 
   /* ── 가상화 ───────────────────────────────────────────────────────────── */
   /*
@@ -242,7 +258,9 @@ export async function buildSettingsTargets(deps = {}) {
     const bs = deps.bareos || (await safe('bareos', async () => {
       const m = await import('../bareos/settings.js');
       if (typeof m.publicSettings !== 'function') throw new Error('bareos/settings.js 에 publicSettings 가 없습니다(모듈이 바뀌었습니다).');
-      return m.publicSettings();
+      const v = m.publicSettings();
+      noteLoadError('bareos', m);
+      return v;
     }, errors)) || {};
     const sites = Array.isArray(bs.sites) ? bs.sites : [];
     for (const d of (Array.isArray(bs.directors) ? bs.directors : [])) {
@@ -260,7 +278,9 @@ export async function buildSettingsTargets(deps = {}) {
     const isd = deps.isidu || (await safe('isidu', async () => {
       const m = await import('../isidu/settings.js');
       if (typeof m.loadSettings !== 'function') throw new Error('isidu/settings.js 에 loadSettings 가 없습니다(모듈이 바뀌었습니다).');
-      return m.loadSettings();
+      const v = m.loadSettings();
+      noteLoadError('isidu', m);
+      return v;
     }, errors)) || {};
     for (const x of (Array.isArray(isd.targets) ? isd.targets : [])) {
       if (!x || x.deviceId || !t(x.host)) continue;

@@ -8,7 +8,7 @@ import { stackedBars, fmtMs, fmtAge } from './syncLogic.js';
 /**
  * Monitoring › **개요(기술 뷰)**(v2.915 · 시안 ⑦ · Datadog 대시보드 참고) — 모니터 요약 · 출처별 체크 상태 · ALERT/WARN 추이 · 엣지 보고 ·
  * 호스트 맵 · 느린 점검 · 연속 실패 · 인증서 임박 · 상태 전이. 데이터는 `GET /svcmon/overview` 하나(서버 svcmon/dash.js — 상태 판정은
- * status.js · edgeState 그대로). 30초마다 다시 읽고(서버 10초 memo) 늦게 온 이전 응답은 버린다.
+ * status.js · edgeState 그대로). 60초마다 다시 읽고(서버 30초 memo) 늦게 온 이전 응답은 버린다.
  */
 
 const TILES = [
@@ -66,7 +66,7 @@ export default function OverviewDash({ onPickTarget = null }) {
   }, []);
   useEffect(() => {
     load();
-    const id = setInterval(load, 30_000);
+    const id = setInterval(load, 60_000);   // 무거운 집계(서버 30초 memo) — 15초 폴링 금지 규약
     return () => clearInterval(id);
   }, [load]);
 
@@ -88,7 +88,7 @@ export default function OverviewDash({ onPickTarget = null }) {
       <div className="card tv-top">
         <h3>Monitoring · 개요</h3>
         <span className="tv-var"><span>time</span><b>최근 24시간(재시작 이후)</b></span>
-        <span className="tv-var"><span>live</span><b className="tv-ok">30s</b></span>
+        <span className="tv-var"><span>live</span><b className="tv-ok">60s</b></span>
         <span className="tv-var"><span>alerts</span><b className={d.alerts?.enabled ? 'tv-ok' : ''}>{d.alerts?.enabled ? `on · 알림 중 ${d.alerts.alerted}` : 'off'}</b></span>
         <span className="tv-spacer"><button type="button" className="btn" disabled={busy} onClick={load}>{busy ? '읽는 중…' : '새로고침'}</button></span>
       </div>

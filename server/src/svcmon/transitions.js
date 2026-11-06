@@ -169,7 +169,8 @@ export function buildAlerts(items = [], s = getAlertSettings()) {
     const name = kind === 'bad' ? '실패' : kind === 'warn' ? '경고' : '복구';
     out.push({
       severity: kind === 'bad' ? 'critical' : kind === 'warn' ? 'warning' : 'info',
-      key: `svcmon.test.${kind}:summary`,
+      // 키에 시각을 넣는다 — 고정 키면 alerts.js 억제 창(기본 5분)이 다음 요약을 'suppressed' 로 버렸다(반증 M4 — 재현).
+      key: `svcmon.test.${kind}:summary:${Date.now()}`,
       title: `Monitoring 점검 ${name} ${list.length}건(${Math.round(ALERT_BATCH_MS / 1000)}초 안에 몰림 — 요약)`,
       detail: `${head}${list.length > 10 ? `\n… 외 ${list.length - 10}건` : ''}\n대량 ${name}는 회선·엣지 장애일 수 있습니다 — Monitoring › 개요의 엣지 보고 · 상태 전이를 먼저 보세요.`,
     });

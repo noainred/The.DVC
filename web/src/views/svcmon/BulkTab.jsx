@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, downloadFile, canCsv } from '../../api.js';
+import { fetchJson, postJson, putJson, downloadFile, canCsv, getCurrentUser } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 400 본문을 성공으로 읽지 않는다
 import PreviewTable from './PreviewTable.jsx';
@@ -198,7 +198,9 @@ export default function BulkTab({ canEdit, prefill }) {
   const parsedFreeCount = inputMode === 'free' ? parseFree(freeText).length : 0;
 
   // 입력 방식 — v2.915 '설정된 시스템에서 선택'(설정 연동)은 편집 권한이 있을 때만(서버가 canEdit + 전체 범위로 막는다).
-  const MODES = [['table', '표로 입력'], ['free', '자유형식 붙여넣기'], ...(csvOk ? [['file', '파일(CSV/XLSX)']] : []), ...(canEdit ? [['settings', '설정된 시스템에서 선택']] : [])];
+  // v2.915(반증 H1): 설정 연동 카탈로그는 관리자(전체 범위)만 — 서버 adminOnly + fullScopeOnly 와 같은 기준으로 모드를 보인다.
+  const isAdminUser = getCurrentUser()?.role === 'admin' && !(getCurrentUser()?.scope?.vcenters?.length);
+  const MODES = [['table', '표로 입력'], ['free', '자유형식 붙여넣기'], ...(csvOk ? [['file', '파일(CSV/XLSX)']] : []), ...(isAdminUser ? [['settings', '설정된 시스템에서 선택']] : [])];
   const modeRadios = (
     <div className="flex gap wrap" style={{ alignItems: 'center' }}>
       {MODES.map(([v, t]) => (
@@ -224,7 +226,7 @@ export default function BulkTab({ canEdit, prefill }) {
             운영 중 차이(새 항목·주소 변경·사라짐)는 Monitoring 설정 › 설정 연동 탭에서 봅니다.
           </div>
         </div>
-        <SettingsSyncTab canEdit={canEdit} compact />
+        <SettingsSyncTab canEdit={isAdminUser} compact />
       </div>
     );
   }

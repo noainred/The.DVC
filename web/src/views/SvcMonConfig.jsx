@@ -28,7 +28,7 @@ const TABS = [
   { k: 'log', label: '로그 설정', desc: '점검 결과 CSV 의 저장 경로·분할 단위·보관 기간·용량 상한을 정합니다.' },
   { k: 'analyze', label: '로그 분석', desc: '지난 기록을 시간/일/주/월/분기/반기/연간 단위로 집계해 봅니다(원천: CSV 로그).' },
   // v2.915 — 포탈 설정에 등록된 시스템(vCenter·엣지·NSX·iDRAC·스토리지·SAN·PDU·CVP·Veeam·Bareos …)을 골라 Monitoring 대상으로.
-  { k: 'sync', label: '설정 연동', desc: '포탈 설정에 등록된 시스템을 골라 Monitoring 대상으로 등록하고, 설정이 바뀌면(새 항목·주소 변경·사라짐) 차이를 보여 줍니다. 전체 범위 operator 이상.' },
+  { k: 'sync', label: '설정 연동', desc: '포탈 설정에 등록된 시스템을 골라 Monitoring 대상으로 등록하고, 설정이 바뀌면(새 항목·주소 변경·사라짐) 차이를 보여 줍니다. 관리자(전체 범위)만.' },
   { k: 'alert', label: '알림', desc: '점검이 연속 N회 실패하면 포탈 알림 채널로 보냅니다(기본 꺼짐 · 복구 알림 · 대량이면 요약).' },
 ];
 
@@ -75,7 +75,8 @@ export default function SvcMonConfig() {
       {tab === 'assign' && <AssignTab canEdit={canEdit} />}
       {tab === 'log' && <LogSettingsTab isAdmin={me?.role === 'admin'} />}
       {tab === 'analyze' && <AnalyzeTab />}
-      {tab === 'sync' && <SettingsSyncTab canEdit={canEdit} />}
+      {/* v2.915(반증 H1): 설정 연동은 관리자(전체 범위)만 — 서버도 adminOnly + fullScopeOnly(전 법인 설정 주소). */}
+      {tab === 'sync' && <SettingsSyncTab canEdit={me?.role === 'admin'} />}
       {tab === 'alert' && <AlertTab isAdmin={me?.role === 'admin'} />}
     </div>
   );

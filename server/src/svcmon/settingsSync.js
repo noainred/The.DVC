@@ -47,7 +47,26 @@ export const EXCLUDED_KINDS = Object.freeze({
   'set:upgrade-src': '외부 인터넷 주소라 폐쇄망 엣지에서 전면 실패합니다 — 통신 점검이 잽니다.',
   'set:package-repo': '외부 저장소 주소 — 통신 점검이 잽니다.',
   'set:llm': '대개 이 포탈 자신(localhost)이라 SSRF 가드가 막습니다 — 통신 점검이 잽니다.',
+  // v2.915(반증 H1·M7): 통합 계정의 '계정 이름 → 호스트' 매핑은 관리자 전용 정보다(통합 계정 목록 adminOnly). 등록하면 대상 이름·출처로
+  //   /state 를 통해 범위 계정에도 보인다 — 옮기지 않는다(같은 호스트는 다른 종류로 이미 등록돼 있는 경우가 대부분이다).
+  'set:credential-host': '통합 계정의 계정 이름과 호스트의 연결은 관리자 전용 정보라 Monitoring 대상(범위 계정도 보는 화면)으로 옮기지 않습니다.',
 });
+
+/**
+ * 응답에 싣는 주소 — 사용자 정보(user:pw@)·쿼리·조각을 지운다(반증 H1: 봉인 비밀인 웹훅 URL 원문이 카탈로그 응답으로 나갔다).
+ * 제외 종류(웹훅 등)는 주소 자체를 싣지 않는다 — 경로에 토큰이 있다.
+ */
+export function safeAddress(addr, kind = '') {
+  const a = t(addr);
+  if (!a) return '';
+  if (EXCLUDED_KINDS[kind]) return '';
+  try {
+    const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(a);
+    if (!hasScheme) return a.replace(/^[^@/]*@/, '').replace(/[?#].*$/, '').slice(0, 300);
+    const u = new URL(a);
+    return `${u.protocol}//${u.host}${u.pathname === '/' ? '' : u.pathname}`.slice(0, 300);
+  } catch { return ''; }
+}
 
 /**
  * 종류 → 카탈로그 로더 이름(buildSettingsTargets 의 sourceErrors[].source). 그 출처를 못 읽었으면 그 종류의 연동 대상은
@@ -187,8 +206,8 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
     return {
       key: t(x.id), kind: t(x.kind), kindLabel: spec.label || t(x.kind), group: spec.group || '기타', depth: spec.depth || '',
       settings: spec.settings || '', name: t(x.name) || t(x.ref), ref: t(x.ref),
-      host: t(x.host), port: Number(x.port) || null, scheme: t(x.scheme), address: t(x.address),
-      settingsEnabled: x.enabled !== false, corp: corp.label, corpId: corp.id,
+      host: t(x.host), port: Number(x.port) || null, scheme: t(x.scheme),
+      settingsEnabled: x.enabled !== false, corp: corp.label, corpId: corp.id, address: safeAddress(x.address, t(x.kind)),
       agent: ag.agent, agentDeclared: ag.declared, agentNote: ag.note,
       path: syncPathOf({ group: spec.group }, corp),
     };
@@ -204,7 +223,8 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
     row.checks = checkBrief(checks);
     const linked = linkedByKey.get(key) || [];
     if (EXCLUDED_KINDS[row.kind] && !linked.length) {
-      rows.push({ ...row, state: 'excluded', reason: EXCLUDED_KINDS[row.kind] });
+      // 제외 종류는 주소·점검을 싣지 않는다(웹훅 URL 은 비밀 · 통합 계정 매핑은 관리자 전용).
+      rows.push({ ...row, host: row.kind === 'set:webhook' ? '' : row.host, port: row.kind === 'set:webhook' ? null : row.port, checks: [], state: 'excluded', reason: EXCLUDED_KINDS[row.kind] });
       continue;
     }
     if (linked.length) {
@@ -212,9 +232,12 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
       const o = st.origin || {};
       const hostChanged = t(st.host).toLowerCase() !== row.host.toLowerCase();
       const portChanged = !!(o.port && row.port && Number(o.port) !== row.port);
-      const changed = hostChanged || portChanged;
+      // v2.915(반증 M3 — 재현): 사라짐으로 표지(·중지)된 대상이 설정에 다시 나타나면 '연동' 으로 두면 영구히 중지·표지가 남았다 —
+      //   '변경(다시 나타남)' 으로 올려 적용이 표지를 지우고, 설정 연동이 중지한 것이었으면 다시 켠다(goneOff).
+      const reappeared = !!o.gone;
+      const changed = hostChanged || portChanged || reappeared;
       rows.push({
-        ...row, state: changed ? 'changed' : 'linked',
+        ...row, state: changed ? 'changed' : 'linked', ...(reappeared ? { reappeared: true, reason: '설정에 다시 나타났습니다 — 적용하면 사라짐 표지를 지웁니다(설정 연동이 중지했다면 다시 켭니다).' } : {}),
         targetId: st.id, targetPath: st.path, targetName: st.name, targetEnabled: st.enabled !== false, targetAgent: t(st.agent),
         tests: Array.isArray(st.tests) ? st.tests.length : 0, syncedAt: o.syncedAt || null, ...(o.gone ? { wasGone: o.gone } : {}),
         ...(changed ? { prevHost: t(st.host), prevPort: o.port || null } : {}),
@@ -236,7 +259,7 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
     const linked = (linkedByKey.get(key) || [])[0];
     rows.push({
       key, kind, kindLabel: spec.label || kind, group: spec.group || '기타', depth: spec.depth || '', settings: spec.settings || '',
-      name: t(p?.name) || t(p?.ref), ref: t(p?.ref), host: '', port: null, scheme: '', address: t(p?.address), settingsEnabled: true,
+      name: t(p?.name) || t(p?.ref), ref: t(p?.ref), host: '', port: null, scheme: '', address: safeAddress(p?.address, kind), settingsEnabled: true,
       corp: '전역', corpId: '', agent: '', agentDeclared: '', agentNote: '', path: '', checks: [],
       state: 'problem', reason: t(p?.reason) || '주소를 해석하지 못했습니다.', ...(linked ? { targetId: linked.id, targetPath: linked.path } : {}),
     });
@@ -281,6 +304,8 @@ export function countsOf(rows = []) {
     k.total += 1;
     if (r.state === 'linked' || r.state === 'changed') k.linked += 1;
   }
+  // 아직 처리하지 않은 사라짐(표지 없음) — 배너는 이것만 센다(중지 처리한 뒤에도 계속 뜨지 않게 — 반증 낮음).
+  c.goneOpen = rows.filter((r) => r.state === 'gone' && !r.goneAt).length;
   const denom = rows.filter((r) => r.state !== 'gone' && r.state !== 'held' && r.state !== 'excluded').length;
   c.coveragePct = denom ? Math.round(((c.linked + c.changed) / denom) * 1000) / 10 : null;
   c.byKind = Object.values(byKind).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
@@ -366,7 +391,7 @@ export function dailySummary() { return loadState().daily.slice(); }
 export function driftSummary() {
   if (!_last) return null;
   const c = _last.counts || {};
-  return { at: _last.at, new: newSinceCount(), unregistered: c.new || 0, changed: c.changed || 0, gone: c.gone || 0, held: c.held || 0 };
+  return { at: _last.at, new: newSinceCount(), unregistered: c.new || 0, changed: c.changed || 0, gone: c.goneOpen ?? c.gone ?? 0, held: c.held || 0 };
 }
 let _lastNewKeys = [];
 function newSinceCount() {
@@ -548,8 +573,9 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
       const cur = getTarget(c.targetId);
       if (!cur) { out.errors.push({ key: c.key, name: c.name, reason: '대상이 이미 지워졌습니다.' }); continue; }
       const origin = { ...(cur.origin || {}), ...originOf(c.x, { label: c.corp }, now) };
-      delete origin.gone;
-      updateTarget(c.targetId, { host: c.host }, { origin });
+      const reEnable = !!(cur.origin?.gone && cur.origin?.goneOff);
+      delete origin.gone; delete origin.goneOff;
+      updateTarget(c.targetId, { host: c.host, ...(reEnable ? { enabled: true } : {}) }, { origin });
       // 설정 연동이 만든 점검(tpl='settings')만 tplKey 로 맞춰 고친다 — id 를 승계해 연속 횟수·만기가 리셋되지 않는다.
       const specs = new Map(checksFor(c.x).map((s) => [s.tplKey, s]));
       let fixed = 0; let added = 0;
@@ -557,7 +583,8 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
         if (test.tpl !== SYNC_TPL) continue;
         const s = specs.get(test.tplKey);
         if (!s) continue;
-        updateTest(c.targetId, test.id, s);
+        // 주소에 묶인 칸(포트·URL)만 고친다 — 사람이 바꾼 사용 여부·주기·이름·임계는 그대로(반증 낮음: 예전에는 전부 덮어썼다).
+        updateTest(c.targetId, test.id, Object.fromEntries(Object.entries({ port: s.port, url: s.url }).filter(([, v]) => v !== undefined)));
         specs.delete(test.tplKey);
         fixed += 1;
       }
@@ -575,7 +602,7 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
       if (!cur) { out.errors.push({ key: g.key, name: g.name, reason: '대상이 이미 지워졌습니다.' }); continue; }
       if (g.action === 'delete') { deleteTarget(g.targetId); out.gone.push({ key: g.key, name: g.name, action: 'delete' }); }
       else {
-        const origin = { ...(cur.origin || {}), gone: now };
+        const origin = { ...(cur.origin || {}), gone: now, ...(g.action === 'disable' && cur.enabled !== false ? { goneOff: 1 } : {}) };
         updateTarget(g.targetId, g.action === 'disable' ? { enabled: false } : {}, { origin });
         out.gone.push({ key: g.key, name: g.name, action: g.action });
       }

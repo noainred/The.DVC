@@ -263,8 +263,10 @@ export function cleanOrigin(o) {
     corp: text(o.corp, 80) || undefined,
     syncedAt: num(o.syncedAt, 0, Number.MAX_SAFE_INTEGER, undefined),
     gone: num(o.gone, 0, Number.MAX_SAFE_INTEGER, undefined),
+    // 사라짐 처리 때 설정 연동이 **켜져 있던 대상을 중지**했으면 1 — 다시 나타나 적용하면 다시 켠다(사람이 꺼 둔 것은 켜지 않는다).
+    goneOff: o.goneOff ? 1 : undefined,
   };
-  if (!out.gone) delete out.gone;
+  if (!out.gone) { delete out.gone; delete out.goneOff; }
   return compact(out);
 }
 

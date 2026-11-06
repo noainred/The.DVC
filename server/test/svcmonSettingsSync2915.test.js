@@ -322,7 +322,7 @@ test('transitions — 바뀔 때만 기록 · 연속 N회째 한 번 알림 · �
   await TR.flushAlerts();
   assert.equal(sent.length, 1, '요약 1건');
   assert.match(sent[0].title, /실패 12건/);
-  assert.match(sent[0].key, /:summary$/);
+  assert.match(sent[0].key, /:summary:\d+$/);
 });
 
 test('엣지 보고 수신 — 같은 측정의 재전송은 시간별 집계·알림에 두 번 세지 않는다', async () => {
@@ -331,7 +331,7 @@ test('엣지 보고 수신 — 같은 측정의 재전송은 시간별 집계·�
   const now = Date.now();
   const body = { snapId: 7, seq: 1, total: 1, rows: [{ i: 'e-t1', s: 'bad', r: 'timeout', m: null, k: 2, a: 1000 }] };
   ingestReport('edge-z', body, now);
-  ingestReport('edge-z', body, now);   // 같은 측정(구간값·수신 시각이 같다) — 재전송
+  ingestReport('edge-z', body, now + 37);   // 같은 측정의 재전송 — 전송 지연만큼 measuredAt 이 흔들린다(반증 M5 재현 조건)
   assert.equal(TR.hourlySeries(now).at(-1).n, 1);
   ingestReport('edge-z', { ...body, snapId: 8, rows: [{ i: 'e-t1', s: 'ok', r: '1ms', m: 1, k: 1, a: 0 }] }, now + 60_000);
   assert.equal(TR.recentTransitions(5)[0].to, 'ok');
@@ -371,14 +371,16 @@ test('라우트 — 설정 연동은 조회도 canEdit + 전체 범위 · 개요
   assert.equal((await call('PUT', '/settings-sync/options', SCOPED_OP, { autoKinds: ['set:vcenter'] })).status, 403);
   assert.equal((await call('POST', '/settings-sync/ack', SCOPED_OP, {})).status, 403);
   assert.equal((await call('POST', '/settings-sync/detach/g-x', SCOPED_OP, {})).status, 403);
-  assert.equal((await call('POST', '/settings-sync/ack', OPER, {})).status, 200);
-  const ok = await call('GET', '/settings-sync/catalog', OPER);
+  assert.equal((await call('POST', '/settings-sync/ack', OPER, {})).status, 403);
+  assert.equal((await call('POST', '/settings-sync/ack', ADMIN, {})).status, 200);
+  assert.equal((await call('GET', '/settings-sync/catalog', OPER)).status, 403, 'operator 도 못 본다(반증 H1 — 봉인 비밀 웹훅 URL·통합 계정 매핑)');
+  const ok = await call('GET', '/settings-sync/catalog', ADMIN);
   assert.equal(ok.status, 200);
   assert.ok(Array.isArray(ok.json.rows));
   assert.ok(ok.json.kinds['set:cvp'], '종류 메타에 새 종류');
   assert.ok(!JSON.stringify(ok.json.edges || []).includes('sourceIp'), '엣지 주소(sourceIp)를 싣지 않는다');
-  assert.equal((await call('POST', '/settings-sync/apply', OPER, { keys: [] })).status, 400, '고른 것이 없으면 400');
-  const opt = await call('PUT', '/settings-sync/options', OPER, { autoKinds: ['set:vcenter', 'set:webhook', 'set:nope'] });
+  assert.equal((await call('POST', '/settings-sync/apply', ADMIN, { keys: [] })).status, 400, '고른 것이 없으면 400');
+  const opt = await call('PUT', '/settings-sync/options', ADMIN, { autoKinds: ['set:vcenter', 'set:webhook', 'set:nope'] });
   assert.deepEqual(opt.json.options.autoKinds, ['set:vcenter'], '제외 종류·모르는 종류는 자동 등록에 넣지 않는다');
   const ov = await call('GET', '/overview', VIEWER);
   assert.equal(ov.status, 200);
@@ -391,3 +393,72 @@ test('라우트 — 설정 연동은 조회도 canEdit + 전체 범위 · 개요
   const st = await call('GET', '/state', VIEWER);
   assert.ok('settingsDrift' in st.json, '/state 에 배너 요약 키');
 });
+
+/* ── 반증 반영(v2.915) ── */
+test('반증 H1 — 웹훅(봉인 비밀) 주소·통합 계정 매핑은 행에 싣지 않는다 · 주소의 사용자 정보·쿼리를 지운다', () => {
+  const SECRET = 'T000/B000/SECRETTOKEN';
+  const built = {
+    targets: [
+      cat('set:webhook', 'webhook:slack', { host: 'hooks.slack.com', address: `https://hooks.slack.com/services/${SECRET}` }),
+      cat('set:credential-host', 'cred1:10.0.0.9', { host: '10.0.0.9', name: '운영계정 → 10.0.0.9' }),
+      cat('set:nsx', 'n1', { host: 'nsx.corp.example', address: 'https://admin:pw@nsx.corp.example/api?token=zz#x' }),
+    ],
+    problems: [{ kind: 'set:webhook', ref: 'webhook:teams', name: 'teams', address: `https://x.webhook.office.com/${SECRET}`, reason: 'bad' }],
+    sourceErrors: [],
+  };
+  const { rows } = SYNC.classifyCatalog(built, []);
+  const json = JSON.stringify(rows);
+  assert.ok(!json.includes(SECRET), '웹훅 경로 토큰 0');
+  assert.ok(!json.includes('pw@') && !json.includes('token=zz'), '사용자 정보·쿼리 0');
+  assert.equal(rows.find((r) => r.kind === 'set:credential-host').state, 'excluded');
+  assert.equal(rows.find((r) => r.kind === 'set:nsx').address, 'https://nsx.corp.example/api');
+});
+
+test('반증 M3 — 사라짐(중지)된 대상이 다시 나타나면 변경으로 올라오고 적용하면 표지를 지우고 다시 켠다 · 사람이 꺼 둔 것은 켜지 않는다', () => {
+  STORE._resetCache();
+  for (const x of [...STORE.listTargets()]) STORE.deleteTarget(x.id);
+  SYNC._resetSettingsSyncForTest();
+  const x = cat('set:sanswitch-ssh', 'sw1', { host: 'sw1.corp.example', port: 22 });
+  const add = SYNC.planApply(SYNC.classifyCatalog({ targets: [x] }, []).rows, [x.id], { enabled: true, builtByKey: new Map([[x.id, x]]) });
+  SYNC.executePlan(add, { user: 't' });
+  const id = STORE.listTargets()[0].id;
+  // 사라짐 → 중지(설정 연동이 켜져 있던 것을 껐다)
+  SYNC.executePlan(SYNC.planApply(SYNC.classifyCatalog({ targets: [] }, STORE.listTargets()).rows, [x.id], {}), { user: 't' });
+  assert.equal(STORE.getTarget(id).enabled, false);
+  assert.equal(STORE.getTarget(id).origin.goneOff, 1);
+  // 다시 나타남 → changed(reappeared)
+  const back = SYNC.classifyCatalog({ targets: [x] }, STORE.listTargets()).rows[0];
+  assert.equal(back.state, 'changed');
+  assert.equal(back.reappeared, true);
+  SYNC.executePlan(SYNC.planApply([back], [x.id], { builtByKey: new Map([[x.id, x]]) }), { user: 't' });
+  assert.equal(STORE.getTarget(id).enabled, true, '설정 연동이 끈 것이면 다시 켠다');
+  assert.equal(STORE.getTarget(id).origin.gone, undefined);
+  // 사람이 먼저 꺼 둔 대상은 사라짐→재등장 뒤에도 켜지 않는다
+  STORE.updateTarget(id, { enabled: false });
+  SYNC.executePlan(SYNC.planApply(SYNC.classifyCatalog({ targets: [] }, STORE.listTargets()).rows, [x.id], {}), { user: 't' });
+  assert.equal(STORE.getTarget(id).origin.goneOff, undefined);
+  const back2 = SYNC.classifyCatalog({ targets: [x] }, STORE.listTargets()).rows[0];
+  SYNC.executePlan(SYNC.planApply([back2], [x.id], { builtByKey: new Map([[x.id, x]]) }), { user: 't' });
+  assert.equal(STORE.getTarget(id).enabled, false);
+});
+
+test('반증 M2 — 손상된 등록부(던지지 않고 빈 목록)는 sourceErrors 로 올라 연동 대상이 사라짐이 아니라 보류가 된다', async () => {
+  const fs2 = await import('node:fs');
+  const p = path.join(TMP, 'cvp-servers.json');
+  fs2.writeFileSync(p, '{not json');
+  const reg = await import('../src/cvp/registry.js');
+  reg._resetForTest();
+  const r = await LINKS.buildSettingsTargets({ snapshot: null });
+  assert.ok(r.sourceErrors.some((e) => e.source === 'cvp'), JSON.stringify(r.sourceErrors));
+  const cls = SYNC.classifyCatalog(r, [{ id: 'g-c', name: 'cvp1', host: 'cvp.corp.example', path: 'p', tests: [], origin: { key: 'set:cvp|c1', kind: 'set:cvp', ref: 'c1' } }]);
+  assert.equal(cls.rows.find((x) => x.key === 'set:cvp|c1').state, 'held');
+});
+
+test('반증 M4 — 요약 알림 키는 매번 달라 억제 창에 버려지지 않는다', () => {
+  TR._setAlertSettingsForTest({ enabled: true, failCount: 1 });
+  const items = Array.from({ length: 8 }, (_, i) => ({ kind: 'bad', key: `|m${i}`, label: `t${i}`, where: '이 포탈', x: { streak: 1, reply: 'x', target: {}, test: {}, at: Date.now() } }));
+  const a = TR.buildAlerts(items); const b = TR.buildAlerts(items);
+  assert.equal(a.length, 1);
+  assert.match(a[0].key, /^svcmon\.test\.bad:summary:\d+$/);
+});
+
