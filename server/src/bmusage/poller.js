@@ -4,7 +4,7 @@
  * ── CLAUDE.md 폴러 규약을 전부 지킨다 ───────────────────────────────────────
  *  ① **재진입 가드** — 이전 주기가 주기를 넘기면 이번 틱을 건너뛴다. 수동 실행('지금 수집')도
  *     **같은 가드를 공유**한다(연타가 SSH·Redfish 세션을 곱하지 않게 — `net/monitor` 패턴).
- *  ② **동시 수집 제한**(`BMUSAGE_CONCURRENCY` 기본 4) — 200대를 한꺼번에 찌르면 매 주기 SSH
+ *  ② **동시 수집 제한**(`BMUSAGE_CONCURRENCY` 기본 32 — v2.918, 이전 4) — 200대를 한꺼번에 찌르면 매 주기 SSH
  *     핸드셰이크가 몰려 CPU·회선이 순간 포화된다.
  *  ③ **서버당 타임아웃은 세션을 실제로 끊는다**(`withDeadline` + `signal` — v2.417). `Promise.race`
  *     로 결과만 포기하면 SSH 세션이 남아 동시성 상한이 실효를 잃고 다음 주기가 두 번째 세션을 연다.
@@ -42,7 +42,12 @@ import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js'; // v2.744(RV2744F-WEB-03): 상주 상세 문자열 평탄화
 import { idracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 
-const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 4);
+/*
+ * v2.918(사용자 결정 2026-11-06 "동시성을 32개로 늘려줘"): 기본 4 → 32. 1,000대 법인에서 동시 4 · 서버당 ~5초면 한 주기에 약 21분이
+ * 걸려 재진입 가드 때문에 실제 주기가 5분이 아니라 20분 이상으로 늘어났다. 32 면 같은 조건에서 약 2.6분. env 로 낮출 수 있다(상한 없음 —
+ * 엣지 자원이 작으면 BMUSAGE_CONCURRENCY=8 처럼). 회귀 `test/bmUsageConcurrency2918.test.js`.
+ */
+const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 32);
 const DEVICE_TIMEOUT_MS = Math.max(20_000, Number(process.env.BMUSAGE_DEVICE_TIMEOUT_MS) || 60_000);
 /**
  * v2.613 RUNTIME2613-05: '세션 예산 < 장비 시한' 은 v2.550.3·v2.554 가 **기본값 산수**로만 지킨 관계였다 — 세 env
