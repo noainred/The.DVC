@@ -26,14 +26,24 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; white-space: nowrap; }
 
   <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; display: flex; flex-direction: column; gap: 12px; padding: 14px 14px 16px; min-width: 0">
     <div style="display: flex; flex-direction: column; gap: 6px">
-      <h3 style="margin: 0; font-size: 15px; font-weight: 700">노드 부하 추이 <span style="font-weight: 500; color: #8b9bb4; font-size: 12.5px">— 네트워크 In / Out</span></h3>
-      <div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere">출처 REST node.net.ext.bytes.*.rate · 수집 주기(1시간 — 설정값)마다 1회 · 순간값</div>
+      <h3 style="margin: 0; font-size: 15px; font-weight: 700">노드 부하 추이 <span style="font-weight: 500; color: #8b9bb4; font-size: 12.5px">— 네트워크 In / Out · 디스크 쓰기 / 읽기</span></h3>
+      <div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere">출처 REST node.net.ext.bytes.*.rate · node.disk.bytes.*.rate.sum · 수집 주기(1시간 — 설정값)마다 1회 · 순간값. 세그먼트 세 줄(네트워크 · 디스크 · 보기)은 줄바꿈.</div>
     </div>
 
     <div style="display: flex; flex-wrap: wrap; gap: 8px">
       <div class="seg"><button class="on">24시간</button><button>7일</button><button>30일</button><button>90일</button></div>
       <div class="seg"><button class="on">In</button><button>Out</button><button>In + Out</button></div>
+      <div class="seg"><button>쓰기(In)</button><button>읽기(Out)</button><button>합계</button></div>
       <div class="seg"><button class="on">히트맵</button><a href="Multiples.dc.html">소형 다중</a><a href="Multiples.dc.html">겹쳐 보기</a></div>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #1f2a40; border-radius: 10px; background: #0f1626; min-width: 0">
+      <button type="button" style="height: 30px; padding: 0 10px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap">◀ 이전 24시간</button>
+      <button type="button" disabled="{{ true }}" style="height: 30px; padding: 0 10px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #8b9bb4; font: inherit; font-size: 12px; white-space: nowrap">다음 24시간 ▶</button>
+      <button type="button" disabled="{{ true }}" style="height: 30px; padding: 0 10px; border: 1px solid #1d4ed8; border-radius: 8px; background: #2563eb; color: #e6edf6; font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap">최신</button>
+      <input type="range" min="0" max="29" step="1" value="29" aria-label="조회 구간 스크롤(오른쪽 끝 = 최근)" style="flex: 1 1 100%; min-width: 0; accent-color: #3987e5; margin: 2px 0">
+      <label style="display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: #8b9bb4; min-width: 0">날짜·시각으로 이동 <input type="datetime-local" value="2026-11-07T07:00" step="3600" aria-label="창 끝 날짜와 시각" style="height: 28px; padding: 0 8px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px; max-width: 100%"></label>
+      <span style="flex-basis: 100%; font-size: 11.5px; color: #8b9bb4; overflow-wrap: anywhere">최근 구간 · 11.06 07:00 ~ 11.07 07:00 · 수집 주기마다 갱신 · 갈 수 있는 범위 30칸 = 원시 표 보존 30일(설정값)</span>
     </div>
 
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 8px">
@@ -136,7 +146,7 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; white-space: nowrap; }
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1760}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1900}}'>
 class Component extends DCLogic {
   renderVals() {
     const R = (s) => { const x = Math.sin(s * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };

@@ -33,9 +33,9 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; vertical-align: middle
 
     <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px">
       <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
-        <h3 style="margin: 0; font-size: 16px; font-weight: 700">노드 부하 추이 <span style="font-weight: 500; color: #8b9bb4; font-size: 13px">— 네트워크 In / Out</span></h3>
+        <h3 style="margin: 0; font-size: 16px; font-weight: 700">노드 부하 추이 <span style="font-weight: 500; color: #8b9bb4; font-size: 13px">— 네트워크 In / Out · 디스크 쓰기 / 읽기</span></h3>
         <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #8b9bb4">
-          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid #243049; background: #0f1626"><i style="width: 7px; height: 7px; border-radius: 50%; background: #34e0b4; display: inline-block" aria-hidden="true"></i>출처 <b style="color: #e6edf6; font-family: 'JetBrains Mono', monospace; font-weight: 600">node.net.ext.bytes.*.rate</b> (REST) · SSH 장비는 ‘isi status’ 처리량 열</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid #243049; background: #0f1626"><i style="width: 7px; height: 7px; border-radius: 50%; background: #34e0b4; display: inline-block" aria-hidden="true"></i>출처 네트워크 <b style="color: #e6edf6; font-family: 'JetBrains Mono', monospace; font-weight: 600">node.net.ext.bytes.*.rate</b> · 디스크 <b style="color: #e6edf6; font-family: 'JetBrains Mono', monospace; font-weight: 600">node.disk.bytes.*.rate.sum</b> (REST) · SSH 장비는 ‘isi status’ 처리량 열 + ‘isi statistics system’</span>
           <span style="display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; border: 1px solid #243049; background: #0f1626">표본 <b style="color: #e6edf6; margin: 0 4px">수집 주기마다 1회 · 순간값</b> (주기 {{sampleLabel}} — 설정값)</span>
         </div>
       </div>
@@ -46,8 +46,11 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; vertical-align: middle
       <div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 12px; color: #8b9bb4">기간</span>
         <div class="seg"><button class="{{r24}}" onClick="{{set24}}">24시간</button><button class="{{r7}}" onClick="{{set7}}">7일</button><button class="{{r30}}" onClick="{{set30}}">30일</button><button class="{{r90}}" onClick="{{set90}}">90일</button></div>
       </div>
-      <div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 12px; color: #8b9bb4">방향</span>
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 12px; color: #8b9bb4">네트워크</span>
         <div class="seg"><button class="{{dIn}}" onClick="{{setIn}}">In</button><button class="{{dOut}}" onClick="{{setOut}}">Out</button><button class="{{dSum}}" onClick="{{setSum}}">In + Out</button></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 12px; color: #8b9bb4">디스크</span>
+        <div class="seg"><button class="{{dDIn}}" onClick="{{setDIn}}">쓰기(In)</button><button class="{{dDOut}}" onClick="{{setDOut}}">읽기(Out)</button><button class="{{dDSum}}" onClick="{{setDSum}}">합계</button></div>
       </div>
       <div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 12px; color: #8b9bb4">보기</span>
         <div class="seg"><button class="on">히트맵</button><a href="Multiples.dc.html">소형 다중</a><a href="Multiples.dc.html">겹쳐 보기</a></div>
@@ -55,10 +58,19 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; vertical-align: middle
       <span style="font-size: 12px; color: #8b9bb4; margin-left: auto">{{rangeNote}}</span>
     </div>
 
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 8px 12px; border: 1px solid #1f2a40; border-radius: 10px; background: #0f1626">
+      <button type="button" disabled="{{prevOff}}" onClick="{{goPrev}}" style="height: 30px; padding: 0 11px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap">◀ 이전 {{rangeShort}}</button>
+      <input type="range" min="0" max="{{maxBack}}" step="1" value="{{sliderVal}}" onChange="{{onSlide}}" aria-label="조회 구간 스크롤(오른쪽 끝 = 최근)" style="flex: 1 1 220px; min-width: 120px; accent-color: #3987e5; margin: 0">
+      <button type="button" disabled="{{nextOff}}" onClick="{{goNext}}" style="height: 30px; padding: 0 11px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap">다음 {{rangeShort}} ▶</button>
+      <button type="button" disabled="{{nextOff}}" onClick="{{goLatest}}" style="height: 30px; padding: 0 11px; border: 1px solid {{latestBorder}}; border-radius: 8px; background: {{latestBg}}; color: #e6edf6; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap">최신</button>
+      <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #8b9bb4; white-space: nowrap">날짜·시각으로 이동 <input type="datetime-local" value="{{jumpVal}}" step="3600" aria-label="창 끝 날짜와 시각" style="height: 28px; padding: 0 8px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px"></label>
+      <span style="flex-basis: 100%; font-size: 12px; color: #8b9bb4">{{winText}}</span>
+    </div>
+
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px">
       <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
-        <div style="font-size: 12px; color: #8b9bb4">클러스터 합계 · 마지막 표본</div>
-        <div style="font-size: 24px; font-weight: 600; line-height: 1.15">{{nowIn}} <span style="font-size: 13px; color: #8b9bb4; font-weight: 500">In</span> <span style="color: #5d6b85; font-weight: 400">/</span> {{nowOut}} <span style="font-size: 13px; color: #8b9bb4; font-weight: 500">Out</span></div>
+        <div style="font-size: 12px; color: #8b9bb4">클러스터 합계 · {{lastKind}}</div>
+        <div style="font-size: 24px; font-weight: 600; line-height: 1.15">{{nowIn}} <span style="font-size: 13px; color: #8b9bb4; font-weight: 500">{{legA}}</span> <span style="color: #5d6b85; font-weight: 400">/</span> {{nowOut}} <span style="font-size: 13px; color: #8b9bb4; font-weight: 500">{{legB}}</span></div>
         <div style="font-size: 12px; color: #8b9bb4">8 노드 합 · {{lastLabel}} 표본</div>
       </div>
       <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
@@ -108,12 +120,12 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; vertical-align: middle
             </sc-for>
             <div style="position: absolute; left: calc(150px + 10px + (100% - 160px) * {{tipX}}); top: {{tipTop}}px; transform: translate(-50%, -100%); background: #0b1220; border: 1px solid #243049; border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.45); white-space: nowrap; pointer-events: none">
               <div style="color: #8b9bb4; margin-bottom: 4px">노드 5 · {{tipWhen}}</div>
-              <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 74px">{{tipIn}}</b><span style="color: #8b9bb4">In</span></div>
-              <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 74px">{{tipOut}}</b><span style="color: #8b9bb4">Out</span></div>
+              <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 74px">{{tipIn}}</b><span style="color: #8b9bb4">{{legA}}</span></div>
+              <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 74px">{{tipOut}}</b><span style="color: #8b9bb4">{{legB}}</span></div>
             </div>
           </div>
         </div>
-        <div style="font-size: 12px; color: #8b9bb4">빗금 칸은 그 주기에 그 노드 값을 읽지 못한 것입니다(0 이 아닙니다). 노드를 누르면 아래 노드 표에서 그 노드가 선택되고 ‘겹쳐 보기’ 에 들어갑니다.</div>
+        <div style="font-size: 12px; color: #8b9bb4">빗금 칸은 그 주기에 그 노드 값을 읽지 못한 것입니다(0 이 아닙니다). 노드 이름을 누르면 아래 노드 표에서 그 노드가 선택되고 ‘겹쳐 보기’ 에 들어갑니다. {{drillNote}}</div>
       </div>
 
       <div style="flex: 1 1 300px; min-width: 0; background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px">
@@ -133,8 +145,8 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; vertical-align: middle
 
     <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
       <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
-        <div style="font-size: 13px; font-weight: 600">클러스터 합계 추이 <span style="font-weight: 400; color: #8b9bb4">· 8 노드 합 · 한 노드라도 읽지 못한 주기는 합계를 비웁니다(부분 합 없음)</span></div>
-        <div style="display: flex; gap: 14px; font-size: 12px; color: #8b9bb4"><span style="display: inline-flex; align-items: center; gap: 6px"><i style="width: 14px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i>In</span><span style="display: inline-flex; align-items: center; gap: 6px"><i style="width: 14px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i>Out</span></div>
+        <div style="font-size: 13px; font-weight: 600">클러스터 합계 추이 <span style="font-weight: 400; color: #8b9bb4">· {{grpLabel}} · 8 노드 합 · 한 노드라도 읽지 못한 주기는 합계를 비웁니다(부분 합 없음)</span></div>
+        <div style="display: flex; gap: 14px; font-size: 12px; color: #8b9bb4"><span style="display: inline-flex; align-items: center; gap: 6px"><i style="width: 14px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i>{{legA}}</span><span style="display: inline-flex; align-items: center; gap: 6px"><i style="width: 14px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i>{{legB}}</span></div>
       </div>
       <div style="position: relative; display: grid; grid-template-columns: 56px minmax(0, 1fr) 96px; gap: 0 8px">
         <div style="position: relative; height: 200px; font-size: 11px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace">
@@ -149,8 +161,8 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; vertical-align: middle
           </svg>
           <div style="position: absolute; left: {{crossPct}}%; top: 8px; transform: translateX(10px); background: #0b1220; border: 1px solid #243049; border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.45); white-space: nowrap; pointer-events: none">
             <div style="color: #8b9bb4; margin-bottom: 4px">{{crossWhen}}</div>
-            <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 80px">{{crossIn}}</b><span style="color: #8b9bb4">In · 8 노드</span></div>
-            <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 80px">{{crossOut}}</b><span style="color: #8b9bb4">Out · 8 노드</span></div>
+            <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 80px">{{crossIn}}</b><span style="color: #8b9bb4">{{legA}} · 8 노드</span></div>
+            <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 80px">{{crossOut}}</b><span style="color: #8b9bb4">{{legB}} · 8 노드</span></div>
           </div>
         </div>
         <div style="position: relative; height: 200px; font-size: 12px">
@@ -175,7 +187,7 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; vertical-align: middle
         <table>
           <thead><tr>
             <th style="width: 34px"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">선택</span></th>
-            <th style="text-align: right; width: 40px">ID</th><th>IP</th><th>시리얼</th><th style="width: 56px">상태</th><th style="text-align: right">In(bps)</th><th style="text-align: right">Out(bps)</th><th>추이 {{rangeShort}}</th><th>HDD Used/Size</th><th>SSD Used/Size</th>
+            <th style="text-align: right; width: 40px">ID</th><th>IP</th><th>시리얼</th><th style="width: 56px">상태</th><th style="text-align: right">In(bps)</th><th style="text-align: right">Out(bps)</th><th style="text-align: right">디스크 쓰기(MB/s)</th><th style="text-align: right">디스크 읽기(MB/s)</th><th>추이 {{rangeShort}} · {{grpLabel}}</th><th>HDD Used/Size</th><th>SSD Used/Size</th>
           </tr></thead>
           <tbody>
             <sc-for list="{{tableRows}}" as="n" hint-placeholder-count="8">
@@ -187,6 +199,8 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; vertical-align: middle
                 <td><span style="display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; background: rgba(34,197,94,.14); color: #86efac; border: 1px solid rgba(34,197,94,.3)">OK</span></td>
                 <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.inNow}}</td>
                 <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.outNow}}</td>
+                <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.dInNow}}</td>
+                <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.dOutNow}}</td>
                 <td><svg width="110" height="26" viewBox="0 0 110 26" style="display: block" role="img" aria-label="노드 {{n.id}} 추이"><path d="{{n.sparkIn}}" fill="none" stroke="#3987e5" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path><path d="{{n.sparkOut}}" fill="none" stroke="#d95926" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path></svg></td>
                 <td>{{n.hdd}}</td>
                 <td>{{n.ssd}}</td>
@@ -198,37 +212,54 @@ td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; vertical-align: middle
     </div>
 
     <div style="font-size: 12px; color: #8b9bb4; line-height: 1.6; border-top: 1px solid #1f2a40; padding-top: 10px">
-      <b style="color: #e6edf6">읽는 법.</b> 값은 장비가 보고한 그 시점의 처리량(bps)이고 수집 주기(설정값)마다 한 번 읽습니다 — 주기 사이의 부하는 모릅니다(평균이 아닙니다). 디스크 I/O 는 지금 수집하지 않습니다. 이 장비는 REST 수집이라 B/s 를 bps 로 바꾼 값(×8)입니다. 추이는 최신 ‘isi status / REST’ 값과 같은 수집에서 왔고, 엣지 위임 장비는 중앙이 push 를 받은 시점부터 쌓입니다.
+      <b style="color: #e6edf6">읽는 법.</b> 값은 장비가 보고한 그 시점의 처리량이고 수집 주기(설정값)마다 한 번 읽습니다 — 주기 사이의 부하는 모릅니다(평균이 아닙니다). 네트워크는 bps(REST 는 B/s ×8), 디스크는 B/s 그대로(MB/s 표시)입니다. 디스크 쓰기/읽기의 OneFS 키 이름과 In/Out 방향(쓰기/읽기)은 <b style="color: #fcd34d">실장비에서 확인한 뒤 표기를 확정</b>합니다 — 키가 없으면 디스크 열·버튼이 생기지 않고 노드 수집 상태에 받은 키를 적습니다. 엣지 위임 장비는 중앙이 push 를 받은 시점부터 쌓입니다.
     </div>
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"sampleMin":{"editor":"int","default":60,"min":1,"max":1440,"unit":"min","section":"데이터"},"$preview":{"width":1440,"height":1560}}'>
+<script type="text/x-dc" data-dc-script data-props='{"sampleMin":{"editor":"int","default":60,"min":1,"max":1440,"unit":"min","section":"데이터"},"$preview":{"width":1440,"height":1640}}'>
 class Component extends DCLogic {
-  constructor(props) { super(props); this.state = { dir: 'in', range: '24h' }; }
+  constructor(props) { super(props); this.state = { dir: 'in', range: '24h', back: 0 }; }
   renderVals() {
     const R = (s) => { const x = Math.sin(s * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
     const dir = this.state.dir; const range = this.state.range;
     const cols = { '24h': 24, '7d': 42, '30d': 30, '90d': 45 }[range];
     const N = 8;
-    const baseIn = [0, 1.1, 0.8, 1.4, 2.3, 1.2, 0.9, 0.7, 1.0];
-    const baseOut = [0, 1.6, 1.3, 2.0, 3.3, 1.9, 1.4, 1.1, 1.5];
+    const H = 3600000; const D = 24 * H;
+    const spanMs = { '24h': D, '7d': 7 * D, '30d': 30 * D, '90d': 90 * D }[range];
+    const stepMs = spanMs / cols;
+    const RAW_DAYS = 30; const DAILY_DAYS = 1825;
+    const maxBack = (range === '24h' || range === '7d') ? Math.floor(RAW_DAYS * D / spanMs) - 1 : Math.floor(DAILY_DAYS * D / spanMs) - 1;
+    const back = Math.max(0, Math.min(maxBack, this.state.back || 0));
+    const BASE_END = Date.UTC(2026, 10, 6, 22, 0, 0);
+    const endMs = BASE_END - back * spanMs;
+    const KST = 9 * H;
+    const p2 = (n) => String(n).padStart(2, '0');
+    const clock = (ms) => { const d = new Date(ms + KST); return p2(d.getUTCMonth() + 1) + '.' + p2(d.getUTCDate()) + ' ' + p2(d.getUTCHours()) + ':00'; };
+    const localInput = (ms) => { const d = new Date(ms + KST); return d.getUTCFullYear() + '-' + p2(d.getUTCMonth() + 1) + '-' + p2(d.getUTCDate()) + 'T' + p2(d.getUTCHours()) + ':00'; };
+    const colTime = (i) => endMs - (cols - i) * stepMs;
+    const grp = dir.charAt(0) === 'd' ? 'disk' : 'net';
+    const base = { in: [0, 1.1, 0.8, 1.4, 2.3, 1.2, 0.9, 0.7, 1.0], out: [0, 1.6, 1.3, 2.0, 3.3, 1.9, 1.4, 1.1, 1.5],
+      din: [0, 95, 70, 120, 210, 105, 80, 60, 90], dout: [0, 140, 110, 180, 300, 160, 125, 95, 135] };
     const prof = (i) => { const h = range === '24h' ? i : (i * 24 / cols * 7) % 24; return 0.62 + 0.38 * Math.sin((h - 7) / 24 * Math.PI * 2); };
     const nullAt = (n, i) => n === 7 && (range === '24h' ? (i >= 9 && i <= 11) : i === Math.floor(cols * 0.4));
-    const val = (n, i, d) => { if (nullAt(n, i)) return null; const b = (d === 'in' ? baseIn : baseOut)[n]; return Math.round(b * prof(i) * (0.8 + 0.4 * R(n * 131 + i * 7 + (d === 'in' ? 1 : 2))) * 100) / 100; };
-    const v = (n, i) => { if (dir === 'sum') { const a = val(n, i, 'in'); return a == null ? null : Math.round((a + val(n, i, 'out')) * 100) / 100; } return val(n, i, dir); };
-    const fmt = (x) => (x == null ? '—' : (x >= 10 ? x.toFixed(1) : x.toFixed(2)) + ' Gbps');
-    const dirLabel = dir === 'in' ? 'In' : dir === 'out' ? 'Out' : 'In + Out';
+    const val = (n, i, d) => { if (nullAt(n, i)) return null; const b = base[d][n]; const x = b * prof(i) * (0.8 + 0.4 * R(n * 131 + i * 7 + (d === 'in' ? 1 : d === 'out' ? 2 : d === 'din' ? 3 : 4))); return d.charAt(0) === 'd' ? Math.round(x) : Math.round(x * 100) / 100; };
+    const A = grp === 'disk' ? 'din' : 'in'; const B = grp === 'disk' ? 'dout' : 'out';
+    const v = (n, i) => { if (dir === 'sum' || dir === 'dsum') { const a = val(n, i, A); return a == null ? null : Math.round((a + val(n, i, B)) * 100) / 100; } return val(n, i, dir); };
+    const fmt = (x) => (x == null ? '—' : grp === 'disk' ? (x >= 1000 ? (x / 1000).toFixed(2) + ' GB/s' : Math.round(x) + ' MB/s') : (x >= 10 ? x.toFixed(1) : x.toFixed(2)) + ' Gbps');
+    const dirLabel = { in: '네트워크 In', out: '네트워크 Out', sum: '네트워크 In + Out', din: '디스크 쓰기', dout: '디스크 읽기', dsum: '디스크 쓰기 + 읽기' }[dir];
+    const legA = grp === 'disk' ? '쓰기' : 'In'; const legB = grp === 'disk' ? '읽기' : 'Out';
     const ramp = ['#184f95', '#2a78d6', '#5598e7', '#86b6ef', '#b7d3f6'];
     let max = 0; const grid = [];
     for (let n = 1; n <= N; n++) { const r = []; for (let i = 0; i < cols; i++) { const x = v(n, i); r.push(x); if (x != null && x > max) max = x; } grid.push(r); }
     const colLabels = []; const when = [];
     for (let i = 0; i < cols; i++) {
+      const t = colTime(i); const d = new Date(t + KST);
       let lab = ''; let w = '';
-      if (range === '24h') { w = String(i).padStart(2, '0') + ':00'; lab = i % 3 === 0 ? String(i).padStart(2, '0') : ''; }
-      else if (range === '7d') { const d = Math.floor(i / 6); w = '11.0' + (1 + d) + ' ' + String((i % 6) * 4).padStart(2, '0') + ':00 (4시간 평균)'; lab = i % 6 === 0 ? '11.0' + (1 + d) : ''; }
-      else if (range === '30d') { const day = 9 + i; w = (day > 31 ? '11.' + String(day - 31).padStart(2, '0') : '10.' + String(day).padStart(2, '0')) + ' (하루 평균)'; lab = i % 5 === 0 ? (day > 31 ? '11.' + String(day - 31).padStart(2, '0') : '10.' + String(day).padStart(2, '0')) : ''; }
-      else { const L = ['08.10', '08.28', '09.15', '10.03', '10.21']; w = '2일 평균 #' + (i + 1); lab = i % 9 === 0 ? L[i / 9] : ''; }
+      if (range === '24h') { w = clock(t); lab = d.getUTCHours() % 3 === 0 ? p2(d.getUTCHours()) : ''; }
+      else if (range === '7d') { w = clock(t) + ' (4시간 평균)'; lab = d.getUTCHours() === 0 ? p2(d.getUTCMonth() + 1) + '.' + p2(d.getUTCDate()) : ''; }
+      else if (range === '30d') { w = clock(t).slice(0, 5) + ' (하루 평균)'; lab = i % 5 === 0 ? clock(t).slice(0, 5) : ''; }
+      else { w = clock(t).slice(0, 5) + ' (2일 평균)'; lab = i % 9 === 0 ? clock(t).slice(0, 5) : ''; }
       colLabels.push(lab); when.push(w);
     }
     const rows = []; let missing = 0;
@@ -247,27 +278,40 @@ class Component extends DCLogic {
     const ranked = sorted.map((a) => ({ id: a.id, avg: fmt(a.avg), w: Math.round(a.avg / topAvg * 100) }));
     const sumAt = (i, d) => { let s = 0; for (let n = 1; n <= N; n++) { const x = val(n, i, d); if (x == null) return null; s += x; } return Math.round(s * 100) / 100; };
     const sIn = []; const sOut = []; let maxS = 0;
-    for (let i = 0; i < cols; i++) { const a = sumAt(i, 'in'); const b = sumAt(i, 'out'); sIn.push(a); sOut.push(b); if (a != null && a > maxS) maxS = a; if (b != null && b > maxS) maxS = b; }
-    const step = maxS > 16 ? 5 : maxS > 8 ? 2.5 : 2; const top = Math.ceil(maxS / step) * step;
+    for (let i = 0; i < cols; i++) { const a = sumAt(i, A); const b = sumAt(i, B); sIn.push(a); sOut.push(b); if (a != null && a > maxS) maxS = a; if (b != null && b > maxS) maxS = b; }
+    const step = grp === 'disk' ? (maxS > 1600 ? 500 : maxS > 800 ? 250 : 200) : (maxS > 16 ? 5 : maxS > 8 ? 2.5 : 2); const top = Math.ceil(maxS / step) * step;
     const yOf = (x) => 190 - x / top * 180;
     const path = (arr) => { let d = ''; let pen = false; arr.forEach((x, i) => { if (x == null) { pen = false; return; } const px = (i / (cols - 1) * 1000).toFixed(1); const py = yOf(x).toFixed(1); d += (pen ? ' L ' : ' M ') + px + ' ' + py; pen = true; }); return d.trim(); };
-    const ticks = []; for (let t = 0; t <= top; t += step) ticks.push({ label: t + ' G', y: Math.round(yOf(t)) });
-    const axisLabels = range === '24h' ? ['00:00', '06:00', '12:00', '18:00', '23:00'] : range === '7d' ? ['11.01', '11.03', '11.05', '11.07'] : range === '30d' ? ['10.09', '10.19', '10.29', '11.07'] : ['08.10', '09.15', '10.21'];
+    const ticks = []; for (let t = 0; t <= top; t += step) ticks.push({ label: grp === 'disk' ? (t >= 1000 ? (t / 1000) + ' GB/s' : t + ' MB/s') : t + ' G', y: Math.round(yOf(t)) });
+    const axisLabels = [0, 0.25, 0.5, 0.75, 1].map((f) => { const t = endMs - spanMs + f * spanMs; return range === '24h' ? clock(t).slice(6) : clock(t).slice(0, 5); });
     const cross = range === '24h' ? 14 : Math.floor(cols * 0.6);
     const lastIdx = cols - 1;
     const endIn = sIn[lastIdx]; const endOut = sOut[lastIdx];
     const tableRows = [];
     for (let n = 1; n <= N; n++) {
-      const sp = (d) => { let s = ''; let pen = false; for (let i = 0; i < cols; i++) { const x = val(n, i, d); if (x == null) { pen = false; continue; } const px = (2 + i / (cols - 1) * 106).toFixed(1); const py = (24 - x / 3.6 * 20).toFixed(1); s += (pen ? ' L ' : ' M ') + px + ' ' + py; pen = true; } return s.trim(); };
-      const bpsTxt = (g) => (g == null ? '—' : (g * 1e9 >= 1e9 ? (g).toFixed(1) + 'G' : (g * 1e3).toFixed(0) + 'M'));
-      tableRows.push({ id: n, ip: '10.94.42.' + (180 + n), serial: 'DEMOSN4F1' + String(n).padStart(3, '0'), sel: n === 4 || n === 5, inNow: bpsTxt(val(n, lastIdx, 'in')), outNow: bpsTxt(val(n, lastIdx, 'out')), sparkIn: sp('in'), sparkOut: sp('out'), hdd: (170 + n * 3) + '.' + n + 'T/241.5T (' + (70 + n) + '%)', ssd: '8.1T/19.3T (42%)' });
+      const sTop = grp === 'disk' ? 330 : 3.6;
+      const sp = (d) => { let s = ''; let pen = false; for (let i = 0; i < cols; i++) { const x = val(n, i, d); if (x == null) { pen = false; continue; } const px = (2 + i / (cols - 1) * 106).toFixed(1); const py = (24 - x / sTop * 20).toFixed(1); s += (pen ? ' L ' : ' M ') + px + ' ' + py; pen = true; } return s.trim(); };
+      const bpsTxt = (g) => (g == null ? '—' : (g >= 1 ? g.toFixed(1) + 'G' : (g * 1e3).toFixed(0) + 'M'));
+      const mbTxt = (m) => (m == null ? '—' : String(Math.round(m)));
+      tableRows.push({ id: n, ip: '10.94.42.' + (180 + n), serial: 'DEMOSN4F1' + String(n).padStart(3, '0'), sel: n === 4 || n === 5, inNow: bpsTxt(val(n, lastIdx, 'in')), outNow: bpsTxt(val(n, lastIdx, 'out')), dInNow: mbTxt(val(n, lastIdx, 'din')), dOutNow: mbTxt(val(n, lastIdx, 'dout')), sparkIn: sp(A), sparkOut: sp(B), hdd: (170 + n * 3) + '.' + n + 'T/241.5T (' + (70 + n) + '%)', ssd: '8.1T/19.3T (42%)' });
     }
     const gapCols = []; for (let i = 0; i < cols; i++) if (sIn[i] == null) gapCols.push(when[i].replace(/ \(.*\)$/, ''));
     const tipI = range === '24h' ? 14 : Math.floor(cols * 0.6);
     const sm = this.props.sampleMin ?? 60;
+    const rangeShort = range === '24h' ? '24시간' : range === '7d' ? '7일' : range === '30d' ? '30일' : '90일';
+    const rangeText = clock(endMs - spanMs) + ' ~ ' + clock(endMs);
+    const tableSrc = (range === '24h' || range === '7d') ? '원시 표 보존 ' + RAW_DAYS + '일(설정값)' : '일 롤업 보존 5년';
     return {
       cols, colLabels, rows, ranked, ticks, axisLabels, tableRows,
-      dirLabel, rangeShort: range === '24h' ? '24시간' : range === '7d' ? '7일' : range === '30d' ? '30일' : '90일',
+      dirLabel, rangeShort,
+      maxBack, sliderVal: maxBack - back, prevOff: back >= maxBack, nextOff: back <= 0,
+      latestBorder: back === 0 ? '#1d4ed8' : '#243049', latestBg: back === 0 ? '#2563eb' : '#141b2d',
+      jumpVal: localInput(endMs),
+      winText: (back ? back + '칸 전 (' + rangeShort + ' 단위) · ' + rangeText + ' · 과거 구간은 자동 갱신하지 않습니다' : '최근 구간 · ' + rangeText + ' · 수집 주기마다 갱신') + ' · 갈 수 있는 범위 ' + (maxBack + 1) + '칸 = ' + tableSrc,
+      lastKind: back ? '창 끝 표본' : '마지막 표본',
+      drillNote: range === '24h' ? '' : '열(시각)을 누르면 그 날의 24시간 보기(시간별)로 들어갑니다.',
+      goPrev: () => this.setState({ back: Math.min(maxBack, back + 1) }), goNext: () => this.setState({ back: Math.max(0, back - 1) }), goLatest: () => this.setState({ back: 0 }),
+      onSlide: (e) => this.setState({ back: maxBack - Number(e.target.value) }),
       rangeNote: range === '24h' ? '칸 = 수집 주기 1회(순간값)' : range === '7d' ? '칸 = 4시간 평균(버킷) · 최대는 툴팁에' : range === '30d' ? '칸 = 하루 평균 · 일 롤업 표' : '칸 = 2일 평균 · 일 롤업 표',
       bucketNote: range === '24h' ? '' : ' → 버킷 평균',
       sampleLabel: sm >= 60 ? (sm / 60) + '시간' : sm + '분',
@@ -279,11 +323,14 @@ class Component extends DCLogic {
       pathIn: path(sIn), pathOut: path(sOut),
       crossX: (cross / (cols - 1) * 1000).toFixed(1), crossPct: (cross / (cols - 1) * 100).toFixed(2), crossWhen: when[cross].replace(/ \(.*\)$/, ''), crossIn: fmt(sIn[cross]), crossOut: fmt(sOut[cross]),
       endIn: fmt(endIn), endOut: fmt(endOut), endInY: endIn == null ? 100 : Math.round(yOf(endIn)), endOutY: endOut == null ? 120 : Math.round(yOf(endOut)),
-      tipX: ((tipI + 0.5) / cols).toFixed(4), tipTop: 18 + 2 + 26 * 4 - 6, tipWhen: when[tipI], tipIn: fmt(val(5, tipI, 'in')), tipOut: fmt(val(5, tipI, 'out')),
+      tipX: ((tipI + 0.5) / cols).toFixed(4), tipTop: 18 + 2 + 26 * 4 - 6, tipWhen: when[tipI], tipIn: fmt(val(5, tipI, A)), tipOut: fmt(val(5, tipI, B)),
+      legA, legB, grpLabel: grp === 'disk' ? '디스크 쓰기 · 읽기' : '네트워크 In · Out',
+      dDIn: dir === 'din' ? 'on' : '', dDOut: dir === 'dout' ? 'on' : '', dDSum: dir === 'dsum' ? 'on' : '',
+      setDIn: () => this.setState({ dir: 'din' }), setDOut: () => this.setState({ dir: 'dout' }), setDSum: () => this.setState({ dir: 'dsum' }),
       gapNote: gapCols.length ? '합계가 빈 구간 ' + gapCols.join(' · ') + ' — 노드 7 값을 읽지 못해 합계를 내지 않았습니다(7 노드 합을 8 노드 합처럼 그리지 않습니다).' : '이 기간에는 합계가 빈 구간이 없습니다.',
       r24: range === '24h' ? 'on' : '', r7: range === '7d' ? 'on' : '', r30: range === '30d' ? 'on' : '', r90: range === '90d' ? 'on' : '',
       dIn: dir === 'in' ? 'on' : '', dOut: dir === 'out' ? 'on' : '', dSum: dir === 'sum' ? 'on' : '',
-      set24: () => this.setState({ range: '24h' }), set7: () => this.setState({ range: '7d' }), set30: () => this.setState({ range: '30d' }), set90: () => this.setState({ range: '90d' }),
+      set24: () => this.setState({ range: '24h', back: 0 }), set7: () => this.setState({ range: '7d', back: 0 }), set30: () => this.setState({ range: '30d', back: 0 }), set90: () => this.setState({ range: '90d', back: 0 }),
       setIn: () => this.setState({ dir: 'in' }), setOut: () => this.setState({ dir: 'out' }), setSum: () => this.setState({ dir: 'sum' }),
     };
   }
