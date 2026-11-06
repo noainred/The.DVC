@@ -1,7 +1,7 @@
 # 설계: Monitoring › 설정 연동 — 포탈 설정에 등록된 시스템을 골라 Monitoring 대상으로 자동 등록
 
-작성 2026-11-06 (v2.914.0 기준 · 브랜치 `claude/kind-hypatia-4li2qs`) · 상태 **시안 1차(컨펌 대기)** · 시안 캔버스: https://claude.ai/artifact/45bKr4S67wekyVt6uWvPQP
-(아트보드 6장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 법인명·주소·수치는 데모(mock) 데이터와 가상값이다. 색·글자는 `web/src/styles.css` `:root` 토큰과
+작성 2026-11-06 (v2.914.0 기준 · 브랜치 `claude/kind-hypatia-4li2qs`) · 상태 **시안 2차 — 기술 뷰(컨펌 대기)** · 시안 캔버스: https://claude.ai/artifact/45bKr4S67wekyVt6uWvPQP
+(아트보드 7장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 2차(2026-11-06 "datadog 의 대시보드 참고해서 업데이트 · 기술적인 뷰로")는 ① 설정 연동 탭과 ⑤ 400px 를 기술 뷰로 다시 그리고 ⑦ Monitoring 개요 기술 뷰를 더했다 — §5.1. 법인명·주소·수치는 데모(mock) 데이터와 가상값이다. 색·글자는 `web/src/styles.css` `:root` 토큰과
 Monitoring 화면의 `.pc-root` 토큰 그대로. 계정의 ‘Design System’ 아티팩트는 비어 있어 쓰지 않았다 — xfer-ping·bareos-cancel 과 같다.)
 
 ## 1. 요구 (사용자 요청 2026-11-06)
@@ -83,15 +83,41 @@ Monitoring 화면의 `.pc-root` 토큰 그대로. 계정의 ‘Design System’ 
 ## 5. 화면(IA) — 시안 캔버스의 아트보드
 
 ```
-① Main      특수 기능 › Monitoring 설정 › 새 탭 '설정 연동'(1440) — 안내 배너 · KPI 6 · 필터(종류·법인·상태) · 그룹별 표(☐ 종류 이름 법인 주소 점검위치 기본점검 상태) · 하단 규칙·토글 2
+① Main      특수 기능 › Monitoring 설정 › 새 탭 '설정 연동' — 기술 뷰(1440, Datadog 대시보드 참고) — 상단 템플릿 변수(kind·corp·edge·state·depth) + 시간 창 + 갱신 주기 ·
+            Query Value 6(스파크라인 · 변화량) · 종류별 등록 커버리지 Top List · 드리프트 감지 추이(24h · 5분 버킷 · 새/변경/사라짐 누적 막대) · 엣지별 배정·보고 표 ·
+            왼쪽 패싯(STATE·KIND·CORP·EDGE·DEPTH, 건수) + 모니터 목록식 표(STATE 알약 · 태그 칩 kind/corp/edge/depth · host:port · 기본 점검 · 마지막 동기화) · 이벤트 스트림
 ② Register  Monitoring '＋ 등록' 마법사 ② 단계에 네 번째 모드 '설정된 시스템에서 선택' — 왼쪽 종류/법인 트리(미등록/전체 수) · 오른쪽 항목 표 · 안내문
 ③ Apply     미리보기·적용 — 요약 5칸(추가·변경·사라짐·건너뜀·오류) · 결과 표(출처 열) · 종류별 기본 점검 표 · 적용 옵션(상태·사라짐 처리·주소 갱신·배정 동기화·자동 등록)
-④ Tree      Monitoring 화면 — 상단 '설정이 바뀌었습니다' 배너 · 트리 '설정 연동' 폴더 + 출처 배지(vCenter/NSX/주소 변경/사라짐) · 상세 모달 '출처' 상자(설정 화면 링크 · 연동 해제)
-⑤ Narrow    ① 의 400px — KPI 2열 · 필터 세로 · 행은 카드형 · 하단 고정 '등록…'
+④ Tree      Monitoring 트리 — 상단 '설정이 바뀌었습니다' 배너 · 트리 '설정 연동' 폴더 + 출처 배지(vCenter/NSX/주소 변경/사라짐) · 상세 모달 '출처' 상자(설정 화면 링크 · 연동 해제)
+⑤ Narrow    ① 의 400px 기술 뷰 — 변수 칩 가로 스크롤 · Query Value 3열 · 커버리지·엣지 Top List · 질의 입력 · 카드형 행(알약 · 태그 · 점검 칩)
 ⑥ Improve   Monitoring 개선안 3건(§7)
+⑦ Dash      Monitoring › 개요 기술 뷰(1440, Datadog 참고 · 개선안 ④) — 모니터 요약 7칸(OK/WARN/ALERT/NO DATA/PENDING/DISABLED) · 출처별 체크 상태 타일 · ALERT·WARN 추이 + 평균 응답(1시간 버킷) ·
+            엣지 보고·지연 표 · 법인별 호스트 맵(육각형 = 대상 · 최악 상태) · 응답 느린 점검 TOP 8 · 연속 실패·인증서 임박 · 상태 전이 이벤트 스트림
 ```
 
 표는 구현 때 `STable`(헤더 정렬) · `BoldText` 문구 규칙(백틱 금지) · 그리드 자식 `min-width:0` · 버튼 행 `flexWrap`.
+
+### 5.1 기술 뷰 — Datadog 대시보드에서 가져온 요소와 데이터 원천(정직 표)
+
+Datadog 을 **모양이 아니라 구성 단위**로 참고했다: 템플릿 변수(상단 `key:value` 칩) · 시간 창/갱신 주기 · Query Value(큰 수 + 스파크라인 + 변화량) · Top List(가로 막대) ·
+Timeseries(누적 막대 + 우축 선) · Check Status(종류별 타일) · Host Map(육각형) · Monitor Summary(상태별 칸) · Event Stream · 패싯 + 질의 목록(Monitors/Infrastructure 목록).
+색·글자·간격은 포탈 토큰(`.pc-root` · `:root`) 그대로이고 Datadog 의 보라 계열·아이콘은 쓰지 않았다(남의 디자인 재현 아님).
+
+| 위젯 | 데이터 원천(있는 것) | 없어서 추가할 것 |
+|---|---|---|
+| ① Query Value 6 · 커버리지 Top List · 패싯 · 목록 | `buildSettingsTargets()` ∩ svcmon 대상(`origin` 조인) — §4.3 `GET /catalog` 한 번으로 전부 파생 | 스파크라인은 감지 결과의 **일별 요약**(`svcmon-settings-sync.json` 에 날짜별 new/changed/gone 수 — 30일) |
+| ① 드리프트 추이(24h · 5분) | 5분 감지(§4.3)의 결과 | 버킷 보관 — 메모리 링버퍼 288칸(24h) + 일별 요약 파일. CSV 로그에 넣지 않는다(점검 로그와 섞이지 않게) |
+| ① 엣지별 배정·보고 | `central/svcmonAssign.js listAssignments()`(대상 수 · 상한 `MAX_TARGETS_PER_AGENT`) · `central/svcmonEdge.js edgeSummary()`(`lastAt`·`ageMs`·`silent`·`rows`·`items`) | 없음 — 두 함수 결과를 엣지 이름으로 조인 |
+| ① 이벤트 스트림 | 배치 원장 `svcmon-batches.json`(apply) · 감사 로그 | drift 감지 이벤트는 위 링버퍼에서 |
+| ① 질의 입력(`name:vc-* host:10.20.* kind:idrac`) | 서버는 패싯 값(kind·corp·edge·state·depth)만 받는다 | 자유 질의는 **화면에서 파싱**(key:value 공백 구분 · 정규식 아님 · 와일드카드는 접두/접미만 — ReDoS 규칙) |
+| ⑦ 모니터 요약 7칸 · 체크 상태 타일 · 호스트 맵 · TOP 8 · 연속 실패 · 인증서 임박 | `GET /svcmon/state`(결과 status·reply·streak·ts · `status.js testState` 6상태) — 전부 지금 응답에 있다. 출처별 타일은 `origin.kind` 로 묶는다 | 없음(묶기만). 인증서 D-일은 cert 점검 reply 값 |
+| ⑦ ALERT·WARN 추이 + 평균 응답(1시간) | `GET /svcmon/log/analyze`(`loganalyze.js ANALYZE_BUCKETS` hour…year) | 5분 버킷은 없다 — 1시간 버킷으로 시작. 응답 ms 평균은 집계에 포함돼 있는지 구현 때 확인(없으면 추가) |
+| ⑦ 엣지 보고·지연 | `GET /svcmon/edge-state` | 없음 |
+| ⑦ 상태 전이 이벤트 | 지금은 **결과만** 있고 전이 이력이 없다 | 폴러/보고 수신에서 `prev.status !== cur.status` 일 때 링버퍼 500건에 push(`svcmon/transitions.js`) — 개선 ② 실패 알림이 같은 훅을 쓴다 |
+| 템플릿 변수 · 시간 창 | 화면 상태(URL 해시 쿼리) | 시간 창은 추이·이벤트 위젯만 따른다(현재 상태 위젯은 '지금') — 문구로 밝힌다 |
+
+범위: ①·⑦ 조회는 각각 §6 규칙을 따른다 — ① 은 전체 범위 쓰기 계정, ⑦ 은 svcmon 권한(기존 `/state` 와 같음 · 범위 계정은 지금처럼 자기 범위 결과만).
+⑦ 은 기존 KPI 카드 + 트리 화면을 **대체하지 않는다** — 상단 모드 옆 '개요 | 트리' 세그먼트로 전환(트리는 등록·편집, 개요는 읽기).
 
 ## 6. 범위(scope) · 보안
 
@@ -109,6 +135,7 @@ Monitoring 화면의 `.pc-root` 토큰 그대로. 계정의 ‘Design System’ 
 | ② | 점검 실패 알림(연속 N회 → `notify()` · 복구 알림 · warn 은 기본 끔) | `svcmon/` 아래 notify 0건 · 있는 것은 엣지 무보고(`central/svcmonSilence.js:71`) — 점검이 실패해도 아무도 모른다 | 서버 훅 + 설정 UI 1절 + 테스트 |
 | ③-a | 빈 상태 문구 '＋ Add 로 등록하세요' → 버튼 이름 '＋ 등록' 과 맞춤 | `web/src/views/SvcMonitor.jsx:534` vs 버튼 `:547` | 문구 1건 |
 | ③-b | 통신 점검 카탈로그 보강(6종 · PDU sshPort · vCenter 관측 엣지) | §3 1~3 | §4.1 과 같은 작업 |
+| ④ | Monitoring 개요 기술 뷰(시안 ⑦ — 모니터 요약 · 출처별 체크 상태 · 추이 · 호스트 맵 · TOP · 전이 이벤트) | 지금 화면은 KPI 7장 + 트리/표뿐 — '어느 종류·법인·엣지가 나쁜가' 를 한눈에 못 본다. 원천은 §5.1 표대로 대부분 있다 | 화면 1장 + 전이 링버퍼 + 1시간 집계 연결 |
 
 제안하지 않은 것(검토했지만 근거 부족): 통신 점검과 Monitoring 통합 — 질문이 다르고(도달성 vs 세부 점검) 두 화면의 사용자가 다르다(adminOnly vs svcmon 권한). 다음 라운드 후보로만 남긴다.
 
@@ -126,3 +153,5 @@ Monitoring 화면의 `.pc-root` 토큰 그대로. 계정의 ‘Design System’ 
 4. 제외 종류(알림 웹훅 · 업그레이드 소스 · 패키지 저장소 · LLM)를 그대로 제외할지.
 5. 개선안 ①~③ 을 이번 구현에 함께 넣을지(①·③-a 는 작고, ② 는 설정 UI 가 하나 더 생긴다).
 6. 검증 수준: 표준(관련 테스트 + Chromium + 반증 1인) 권장.
+7. (2차) 기술 뷰 범위 — ① 설정 연동 탭만 기술 뷰로 구현할지, ⑦ Monitoring 개요 기술 뷰까지 함께 갈지. ⑦ 은 전이 링버퍼·1시간 집계 연결이 더 붙어 약 1시간이 늘어난다.
+8. (2차) 자유 질의 입력(`name:vc-* kind:idrac`)을 넣을지, 패싯 체크만 둘지. 권장: 패싯만 먼저(질의 파서는 다음 라운드).
