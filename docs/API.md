@@ -22,11 +22,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1303개** |
+| 엔드포인트 | **1304개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 127개 |
 | GET | 681개 |
-| POST | 418개 |
+| POST | 419개 |
 | PUT | 132개 |
 | PATCH | 3개 |
 | DELETE | 69개 |
@@ -39,7 +39,7 @@
 | [`/api/central`](#apicentral) | 63 | 엣지 → 중앙 **push·pull** 경로. 개별/공유 중앙 토큰 게이트이며 라우터 미들웨어가 토큰↔agent 일치를 강제한다. |
 | [`/api/upgrade`](#apiupgrade) | 10 | 자동 업그레이드 제어(번들 수신·적용). |
 | [`/api/remote`](#apiremote) | 19 | 원격 접속(HAProxy/SSH/RDP 중계). |
-| [`/api/svcmon`](#apisvcmon) | 64 | 성능점검(서비스 모니터링). 마운트에서 `requirePerm('svcmon')` — v2.506 에 추가된 게이트다. |
+| [`/api/svcmon`](#apisvcmon) | 65 | 성능점검(서비스 모니터링). 마운트에서 `requirePerm('svcmon')` — v2.506 에 추가된 게이트다. |
 | [`/api/admin`](#apiadmin) | 368 | 설정·관리. `authMiddleware + requireEnrolled + auditMiddleware` 뒤에 있고 대부분 `adminOnly`, 비밀을 다루는 것은 `requireSettingsOwner` 가 추가된다. |
 | [`/api/auth`](#apiauth) | 11 | 로그인·OTP·`/me`. **로그인 전** 호출되므로 `requireEnrolled` 를 타지 않는다(내부 admin 라우트는 스스로 게이트한다). |
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
@@ -233,8 +233,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/alert-settings` | 역할 `admin/operator` | [server/src/routes/svcmon/settingsSync.js:175](../server/src/routes/svcmon/settingsSync.js#L175) |
-| PUT | `/alert-settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:178](../server/src/routes/svcmon/settingsSync.js#L178) |
+| GET | `/alert-settings` | 역할 `admin/operator` | [server/src/routes/svcmon/settingsSync.js:183](../server/src/routes/svcmon/settingsSync.js#L183) |
+| PUT | `/alert-settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:186](../server/src/routes/svcmon/settingsSync.js#L186) |
 | GET | `/assign` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:32](../server/src/routes/svcmon/edge.js#L32) |
 | DELETE | `/assign/:agent` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:109](../server/src/routes/svcmon/edge.js#L109) |
 | PUT | `/assign/:agent` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:67](../server/src/routes/svcmon/edge.js#L67) |
@@ -258,16 +258,17 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/log/files/:name` | 역할 `admin/operator` | [server/src/routes/svcmon/logs.js:68](../server/src/routes/svcmon/logs.js#L68) |
 | POST | `/log/prune` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/logs.js:121](../server/src/routes/svcmon/logs.js#L121) |
 | GET | `/log/windows` | — | [server/src/routes/svcmon/logs.js:81](../server/src/routes/svcmon/logs.js#L81) |
-| GET | `/overview` | — | [server/src/routes/svcmon/settingsSync.js:152](../server/src/routes/svcmon/settingsSync.js#L152) |
+| GET | `/overview` | — | [server/src/routes/svcmon/settingsSync.js:159](../server/src/routes/svcmon/settingsSync.js#L159) |
 | POST | `/push-now` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:178](../server/src/routes/svcmon/edge.js#L178) |
 | POST | `/refresh` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/overview.js:121](../server/src/routes/svcmon/overview.js#L121) |
 | PUT | `/reorder/folders` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:52](../server/src/routes/svcmon/tree.js#L52) |
 | PUT | `/reorder/targets` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:47](../server/src/routes/svcmon/tree.js#L47) |
-| POST | `/settings-sync/apply` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:115](../server/src/routes/svcmon/settingsSync.js#L115) |
-| GET | `/settings-sync/catalog` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:74](../server/src/routes/svcmon/settingsSync.js#L74) |
-| POST | `/settings-sync/detach/:id` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:143](../server/src/routes/svcmon/settingsSync.js#L143) |
-| PUT | `/settings-sync/options` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:134](../server/src/routes/svcmon/settingsSync.js#L134) |
-| POST | `/settings-sync/preview` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:106](../server/src/routes/svcmon/settingsSync.js#L106) |
+| POST | `/settings-sync/ack` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:143](../server/src/routes/svcmon/settingsSync.js#L143) |
+| POST | `/settings-sync/apply` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:115](../server/src/routes/svcmon/settingsSync.js#L115) |
+| GET | `/settings-sync/catalog` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:74](../server/src/routes/svcmon/settingsSync.js#L74) |
+| POST | `/settings-sync/detach/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:150](../server/src/routes/svcmon/settingsSync.js#L150) |
+| PUT | `/settings-sync/options` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:134](../server/src/routes/svcmon/settingsSync.js#L134) |
+| POST | `/settings-sync/preview` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:106](../server/src/routes/svcmon/settingsSync.js#L106) |
 | POST | `/silence-check` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:185](../server/src/routes/svcmon/edge.js#L185) |
 | PUT | `/sort` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:67](../server/src/routes/svcmon/tree.js#L67) |
 | GET | `/state` | — | [server/src/routes/svcmon/overview.js:51](../server/src/routes/svcmon/overview.js#L51) |
@@ -1475,7 +1476,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
-| `fullScopeOnly` | 284 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
+| `fullScopeOnly` | 285 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `fleetOnly` | 204 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
 | `requireCentral` | 63 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
 | `requireSettingsOwner` | 47 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
