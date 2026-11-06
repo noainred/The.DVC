@@ -12,6 +12,8 @@ import { MENU_GROUPS } from './topMenu.js';
 import { TOOLS } from './specialToolsList.js';
 
 export const PERIODS = Object.freeze([7, 30, 90, 365]);
+/** 기능별 표가 처음에 보이는 행 수(정렬한 뒤 자른다 — STable limit · 나머지 수를 화면이 밝힌다). */
+export const FEATURE_LIMIT = 60;
 export const VIEWS = Object.freeze([
   { k: 'overview', label: '개요' }, { k: 'features', label: '기능별' }, { k: 'users', label: '사용자별' }, { k: 'settings', label: '수집 설정' },
 ]);
@@ -127,6 +129,13 @@ export function fmtDur(ms) {
   if (m < 60) return `${m}분${s % 60 ? ` ${s % 60}초` : ''}`;
   const h = Math.floor(m / 60);
   return `${h.toLocaleString('ko-KR')}시간${m % 60 ? ` ${m % 60}분` : ''}`;
+}
+/** 파일 크기 — 값이 없으면 '—', 1MB 미만은 KB. */
+export function fmtBytes(b) {
+  const v = n0(b);
+  if (v == null) return '크기 —';
+  if (v < 1048576) return `${Math.max(1, Math.round(v / 1024)).toLocaleString('ko-KR')} KB`;
+  return `${(v / 1048576).toFixed(1)} MB`;
 }
 /** 1회 평균 — 열람이 0 이면 '—'. */
 export const avgPerView = (ms, views) => (n0(views) && views > 0 && n0(ms) != null ? fmtDur(ms / views) : '—');

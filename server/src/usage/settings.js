@@ -2,7 +2,9 @@
  * usage/settings.js — 기능 사용 추적 설정(v2.913). 파일 `usage-settings.json`(CONFIG_DIR, 비밀 없음).
  *
  * 값: { enabled, idleMin, keepDays, excluded[], noticeEnabled, notice(null = 기본 문구), toggles[{at,by,on}], updatedAt, updatedBy }
- *  · **기본 꺼짐**(사용자 결정 2026-11-06 · 설계 §5 ⑥) — 설치 직후에는 아무것도 세지 않는다. 설정 소유자가 켠다.
+ *  · **기본 켜짐**(사용자 결정 2026-11-06 '기본값 켜기' — 시안 §5 ⑥ 의 '꺼짐' 을 바꿨다) — 설치 · 업그레이드 직후부터 센다. 설정 소유자가 끌 수 있다.
+ *    파일이 없으면(켠 기록이 없으면) 기록 시작 시각을 모른다 — 집계는 그 시작을 '가장 오래된 기록 날' 로 잡는다(usage/store.js recordingIntervals ·
+ *    그 앞 날을 '켜져 있었는데 0회' 로 세지 않는다).
  *  · `toggles` 는 켜고 끈 기록(최근 200건)이다 — 화면의 '꺼져 있던 구간' 띠와 추이의 빗금 막대, '하루 평균' 의 분모(기록이 켜져 있던 날)의 근거.
  *  · 데모 계정(thedvcdemp)은 기본 제외(§5 ⑦).
  *  · 손상 파일은 보존(`.corrupt.<시각>`)하고 **꺼짐으로 읽는다**(fail-closed — 못 읽은 설정으로 기록하지 않는다). 화면은 `loadError` 로 그 사실을 말하고
@@ -23,7 +25,7 @@ export const DEMO_ACCOUNT = 'thedvcdemp';
 const fileOf = () => path.join(config.configDir, 'usage-settings.json');
 
 export function defaultUsageSettings() {
-  return { enabled: false, idleMin: 5, keepDays: 180, excluded: [DEMO_ACCOUNT], noticeEnabled: true, notice: null, toggles: [], updatedAt: null, updatedBy: null };
+  return { enabled: true, idleMin: 5, keepDays: 180, excluded: [DEMO_ACCOUNT], noticeEnabled: true, notice: null, toggles: [], updatedAt: null, updatedBy: null };
 }
 
 /** 기본 고지 문구 — 보관 일수를 지금 값으로 넣는다(문구와 설정이 어긋나지 않게). */

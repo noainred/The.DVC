@@ -39,7 +39,8 @@ async function openDb() {
   try {
     fs.mkdirSync(path.dirname(FILE()), { recursive: true });
     const { DatabaseSync } = await import('node:sqlite');
-    conn = openSqlite(new DatabaseSync(FILE()));   // busy_timeout 먼저 · 파일 0600 · 잠금이면 닫고 던진다
+    conn = openSqlite(new DatabaseSync(FILE()));   // busy_timeout 먼저 · 파일 0600(첫 쓰기 전) · 잠금이면 닫고 던진다
+    try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort — openSqlite 가 이미 걸었다(v2.503 S-5 규칙 — 모듈마다 명시) */ }
     conn.exec(`CREATE TABLE IF NOT EXISTS fu_daily (
         day TEXT NOT NULL, user TEXT NOT NULL, k TEXT NOT NULL,
         views INTEGER NOT NULL DEFAULT 0, active_ms INTEGER NOT NULL DEFAULT 0, last_ts INTEGER,

@@ -618,6 +618,7 @@ export const THEMES_CSS = `
 .lt-usage-notice { position: fixed; z-index: 5; left: 16px; right: 170px; bottom: 12px; max-width: 760px; box-sizing: border-box;
   background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.12); color: #cbd5e1; border-radius: 10px; padding: 7px 11px;
   font-size: 11px; line-height: 1.55; }
+@media (max-width: 640px) { .lt-usage-notice { position: static; display: block; margin: 12px 16px 64px; max-width: none; } }   /* 좁은 화면은 고정하지 않는다 — 폼 아래를 가리지 않게(테마 버튼 자리 64px 비움) */
 
 /* ── 1) Davinci: 좌 히어로 + 우 카드 + 도트맵 ── */
 .lt-davinci { --lt-card: rgba(13,20,28,.93); --lt-accent: #34e0b4; --lt-accent-ink: #052e25; --lt-glow: rgba(45,212,191,.15);

@@ -27,11 +27,11 @@
 .fu-kpis.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .fu-kpi { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .fu-kpi .lb { font-size: 12px; font-weight: 600; color: var(--text-dim); }
-.fu-kpi .val { font-size: 26px; font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.fu-kpi .val { font-size: 26px; font-weight: 800; line-height: 1.15; word-break: keep-all; overflow-wrap: break-word; }   /* 띄어쓰기에서만 줄바꿈(‘47 / 분’ 처럼 단위만 떨어지지 않게) */
 .fu-kpi .val.warn { color: #fcd34d; }
 .fu-kpi .val small { font-size: 13px; font-weight: 600; color: var(--text-dim); margin-left: 4px; }
 .fu-kpi .sub { font-size: 12px; color: var(--text-dim); line-height: 1.45; }
-.fu-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.fu-row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }   /* 표는 전체 폭(1440 에서 열이 숨지 않게) · 보조 패널 셋은 한 줄 */
 .fu-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .fu-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .fu-ph { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; }
@@ -81,6 +81,7 @@
 .fu-top3 { display: inline-flex; gap: 4px; flex-wrap: nowrap; }
 .fu-top3 span { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--panel-deep); border: 1px solid var(--border); font-size: 11px; color: #aebbd0; white-space: nowrap; }
 .fu-top3 b { font-family: var(--mono); font-weight: 500; color: var(--text-dim); margin-left: 4px; }
+.fu-more { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .fu-spark { display: inline-flex; align-items: flex-end; gap: 1px; height: 16px; width: 64px; vertical-align: middle; }
 .fu-spark i { flex: 1; display: block; background: var(--accent); border-radius: 1px 1px 0 0; min-height: 1px; }
 /* 드로어 */
@@ -123,7 +124,7 @@
 .fu-danger { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.5); color: #fca5a5; }
 @media (max-width: 1200px) {
   .fu-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .fu-grid, .fu-sgrid { grid-template-columns: minmax(0, 1fr); }
+  .fu-row3, .fu-sgrid { grid-template-columns: minmax(0, 1fr); }
   .fu-hints { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
@@ -133,4 +134,5 @@
   .fu-row .l { padding-top: 0; }
   .fu-dk { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fu-q, .fu-exin { width: 100%; }
+  .fu-tabs { flex-wrap: wrap; overflow-x: visible; }   /* 400px 에서 ‘수집 설정’ 이 잘리지 않게 */
 }

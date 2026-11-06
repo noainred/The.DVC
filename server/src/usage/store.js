@@ -179,6 +179,21 @@ export function resolveRange({ days, from, to, now = Date.now() } = {}) {
   return { fromIdx: today - n + 1, toIdx: today, today };
 }
 
+/**
+ * 기록이 켜져 있던 구간 — onIntervals 의 '시작 모름'(-∞)을 **가장 오래된 기록 날의 시작**으로 바꾼다(v2.913 기본 켜짐).
+ * 켠 기록 없이 켜져 있으면(기본값 · 손으로 고친 파일) 그 앞 날은 '켜져 있었는데 0회' 가 아니라 '기록 시작 전' 이다. 기록이 하나도 없으면 지금부터.
+ * 메모리에 모아 둔(아직 저장 전) 날도 본다 — 첫 저장 전에 화면을 열어도 오늘이 '꺼짐' 으로 보이지 않게.
+ */
+export async function recordingIntervals(s = loadUsageSettings(), now = Date.now()) {
+  const iv = onIntervals(s);
+  if (!iv.some((x) => x.from === -Infinity)) return iv;
+  let oldest = null;
+  try { oldest = (await usageDbInfo()).oldest || null; } catch { oldest = null; }
+  for (const p of pending.values()) if (!oldest || p.day < oldest) oldest = p.day;
+  const start = oldest ? dayStartMs(dayIndex(Date.parse(`${oldest}T00:00:00Z`), 0)) : now;
+  return iv.map((x) => (x.from === -Infinity ? { ...x, from: start } : x)).filter((x) => x.to > x.from);
+}
+
 /** 하루가 기록 켜짐 구간과 얼마나 겹치는가: 'on' | 'part' | 'off'. 오늘은 지금까지만 본다. */
 export function dayRecState(idx, intervals, now = Date.now()) {
   const a = dayStartMs(idx);
@@ -233,7 +248,7 @@ async function accountTable() {
 export async function buildUsageReport({ days, from, to, now = Date.now() } = {}) {
   const { fromIdx, toIdx, today } = resolveRange({ days, from, to, now });
   const s = loadUsageSettings();
-  const iv = onIntervals(s);
+  const iv = await recordingIntervals(s, now);
   const yieldNow = createYielder(15);
   const n = toIdx - fromIdx + 1;
 
@@ -296,7 +311,7 @@ export async function buildUsageReport({ days, from, to, now = Date.now() } = {}
   };
 }
 
-/** 기간 안의 '꺼짐' 구간(누가 껐는지 함께). */
+/** 기간 안의 '기록 없음' 구간 — 끈 구간은 누가 껐는지(by), 기록 시작 전은 by=null · beforeStart=true. */
 function gapsIn(iv, a, b, s) {
   const out = [];
   let cur = a;
@@ -307,7 +322,8 @@ function gapsIn(iv, a, b, s) {
   }
   if (cur < b) out.push({ from: cur, to: b });
   const offBy = (t) => [...(s.toggles || [])].reverse().find((g) => !g.on && g.at <= t + 1)?.by || null;
-  return out.map((g) => ({ ...g, by: offBy(g.from) }));
+  const firstOn = iv.length ? Math.min(...iv.map((x) => x.from)) : Infinity;
+  return out.map((g) => ({ ...g, by: offBy(g.from), beforeStart: g.to <= firstOn }));
 }
 
 /** 한 계정의 기간 집계(개인 상세 드로어). */
@@ -315,7 +331,7 @@ export async function buildUserUsage({ user, days, from, to, now = Date.now() } 
   const uk = userKeyOf(user);
   if (!uk) { const e = new Error('계정 이름이 비었습니다'); e.status = 400; throw e; }
   const { fromIdx, toIdx, today } = resolveRange({ days, from, to, now });
-  const iv = onIntervals(loadUsageSettings());
+  const iv = await recordingIntervals(loadUsageSettings(), now);
   const yieldNow = createYielder(15);
   const byKey = new Map(); const daily = []; let views = 0; let ms = 0; let last = null; let activeDays = 0;
   for (let i = fromIdx; i <= toIdx; i++) {

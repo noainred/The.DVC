@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  keyMeta, allUsageKeys, menuItemKeys, fmtDur, fmtInt, avgPerView, pctText, trendOf, bucketShares, perDay, usageHints, filterFeatures, filterUsers, BUCKETS, fmtWhen,
+  keyMeta, allUsageKeys, menuItemKeys, fmtDur, fmtInt, avgPerView, pctText, trendOf, bucketShares, perDay, usageHints, filterFeatures, filterUsers, BUCKETS, fmtWhen, fmtBytes,
 } from './featureUsageText.js';
 import { TOOL_SEGS as TRACKER_SEGS } from '../usageTracker.js';
 import { TOOL_SEGS } from './featureUsageText.js';
@@ -49,6 +49,9 @@ describe('수치 · 결측', () => {
     expect(perDay(100, 0)).toBe(null);
     expect(perDay(100, 4)).toBe(25);
     expect(fmtWhen(null)).toBe('—');
+    expect(fmtBytes(null)).toBe('크기 —');
+    expect(fmtBytes(90_000)).toBe('88 KB');
+    expect(fmtBytes(3 * 1048576)).toBe('3.0 MB');
   });
   it('지난 기간 대비 — 기록 없음은 —, 0 에서 늘면 새로', () => {
     expect(trendOf(10, null)).toEqual({ text: '—', dir: 'flat' });

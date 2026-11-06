@@ -7,7 +7,7 @@ import Select from '../components/Select.jsx';
 import { useHashTab } from '../hooks/useHashTab.js';
 import {
   PERIODS, VIEWS, KIND_BADGE, BUCKETS, ROLE_BADGE, SRC_LABEL, PURGE_SCOPES, DROP_LABEL, HINT_RULES,
-  keyMeta, allUsageKeys, fmtInt, fmtDur, avgPerView, pctText, trendOf, fmtWhen, bucketShares, perDay, usageHints, filterUsers, filterFeatures,
+  keyMeta, allUsageKeys, fmtInt, fmtDur, fmtBytes, FEATURE_LIMIT, avgPerView, pctText, trendOf, fmtWhen, bucketShares, perDay, usageHints, filterUsers, filterFeatures,
 } from './featureUsageText.js';
 import './featureUsage.css';
 
@@ -111,7 +111,7 @@ function Bands({ rep, onSettings }) {
       )}
       {(rep.gaps || []).length > 0 && !off && (
         <div className="fu-band warn">
-          이 기간 안에 기록이 꺼져 있던 구간이 있습니다 — {rep.gaps.slice(0, 3).map((g) => `${fmtWhen(g.from)} ~ ${fmtWhen(g.to)}${g.by ? ` (${g.by})` : ''}`).join(' · ')}{rep.gaps.length > 3 ? ` 외 ${rep.gaps.length - 3}건` : ''}. 그 사이는 어떤 값에도 넣지 않았고 0 으로 세지 않습니다.
+          이 기간 안에 기록이 없던 구간이 있습니다 — {rep.gaps.slice(0, 3).map((g) => `${fmtWhen(g.from)} ~ ${fmtWhen(g.to)}${g.beforeStart ? ' (기록 시작 전)' : g.by ? ` (${g.by} 가 끔)` : ' (꺼짐)'}`).join(' · ')}{rep.gaps.length > 3 ? ` 외 ${rep.gaps.length - 3}건` : ''}. 그 사이는 어떤 값에도 넣지 않았고 0 으로 세지 않습니다.
         </div>
       )}
       <div className="fu-band info">
@@ -145,8 +145,7 @@ function Overview({ rep, ctx, onFeatures }) {
         <Kpi label="이 기간 0회" value={fmtInt(t.recDays > 0 ? unused.length : null)} warn meta={<button type="button" className="fu-link" onClick={onFeatures}>기능별에서 보기 →</button>} />
       </div>
 
-      <div className="fu-grid">
-        <div className="card fu-panel">
+      <div className="card fu-panel">
           <div className="fu-ph"><b>많이 쓰는 기능 — 상위 15</b><span className="muted">열람 내림차순 · 제목을 누르면 정렬 · 전체는 ‘기능별’ 탭</span></div>
           {rep.byKey.length === 0 ? <div className="muted fu-empty">이 기간에 기록된 열람이 없습니다.</div> : (
             <STable className="fu-table" minWidth={860} limit={15}>
@@ -171,9 +170,9 @@ function Overview({ rep, ctx, onFeatures }) {
             </STable>
           )}
           {rep.byKey.length > 15 && <div className="muted fu-note">나머지 {rep.byKey.length - 15}개 기능 {fmtInt(rep.byKey.slice(15).reduce((a, r) => a + r.views, 0))}회 · ‘지난 기간 대비’ 는 바로 앞 같은 길이 기간의 열람과 비교 · 그 기간에 기록이 없으면 ‘—’</div>}
-        </div>
+      </div>
 
-        <div className="fu-col">
+      <div className="fu-row3">
           <div className="card fu-panel">
             <div className="fu-ph"><b>메뉴 묶음별 비중</b><span className="muted">열람 기준</span></div>
             <div className="fu-stack" role="img" aria-label="메뉴 묶음별 열람 비중">
@@ -210,7 +209,6 @@ function Overview({ rep, ctx, onFeatures }) {
               </div>
             )}
           </div>
-        </div>
       </div>
 
       <div className="card fu-panel">
@@ -292,6 +290,7 @@ function Features({ rep, ctx }) {
   const [kind, setKind] = useState('');
   const [status, setStatus] = useState('');
   const [q, setQ] = useState('');
+  const [showAll, setShowAll] = useState(false);
   const rows = useMemo(() => {
     const by = new Map(rep.byKey.map((r) => [r.k, r]));
     const prevOnly = new Map((rep.prevKeys || []).map((r) => [r.k, r.prevViews]));
@@ -320,15 +319,15 @@ function Features({ rep, ctx }) {
       </div>
       <div className="card fu-panel">
         <div className="fu-ph"><b>기능 {shown.length}개</b><span className="muted">열람 내림차순 · 0회는 뒤 · 제목을 누르면 정렬</span></div>
-        <STable className="fu-table" minWidth={1100}>
-          <thead><tr><th>기능</th><th>종류</th><th>어디서 여나</th><th>권한</th><th className="r">열람</th><th className="r">사용자</th><th className="r">머문 시간</th><th className="r">1회 평균</th><th>비중</th><th className="r">지난 기간 대비</th><th className="r">마지막 사용</th></tr></thead>
+        <STable className="fu-table" minWidth={1040} limit={showAll ? 0 : FEATURE_LIMIT}>
+          <thead><tr><th>기능</th><th>종류</th><th>어디서 여나</th><th>권한</th><th className="r">열람</th><th className="r">사용자</th><th className="r">머문 시간</th><th className="r">1회 평균</th><th className="r">비중</th><th className="r">지난 기간 대비</th><th className="r">마지막 사용</th></tr></thead>
           <tbody>
             {shown.map((r) => {
               const tr = trendOf(r.views, r.prevViews);
               const zero = !(r.views > 0);
               return (
                 <tr key={r.k} className={zero ? 'z' : ''}>
-                  <td><b>{r.meta.label}</b> <span className="faint mono">{r.k.replace(/^[a-z]+:/, '')}</span></td>
+                  <td title={r.k}><b>{r.meta.label}</b></td>
                   <td><span className={`badge ${KIND_BADGE[r.meta.kind] || 'gray'}`}>{r.meta.kindLabel}</span></td>
                   <td className="fu-pos">{r.meta.where}{r.meta.notReady && <> <span className="badge gray">준비 중</span></>}</td>
                   <td className="fu-pos">{r.meta.auth || '—'}</td>
@@ -336,7 +335,7 @@ function Features({ rep, ctx }) {
                   <td className="r mono" data-sort={zero ? '' : r.users}>{zero ? '—' : fmtInt(r.users)}</td>
                   <td className="r mono" data-sort={zero ? '' : r.ms}>{zero ? '—' : fmtDur(r.ms)}</td>
                   <td className="r mono" data-sort={zero ? '' : r.ms / r.views}>{avgPerView(r.ms, r.views)}</td>
-                  <td data-sort={r.views}>{zero ? <span className="muted">—</span> : <Share part={r.views} total={total} max={rows[0]?.views} />}</td>
+                  <td className="r mono muted" data-sort={r.views}>{zero ? '—' : pctText(r.views, total)}</td>
                   <td className={`r fu-trend ${tr.dir}`} data-sort={r.prevViews == null ? '' : r.views - r.prevViews}>{zero && r.prevViews != null ? `직전 ${fmtInt(r.prevViews)}` : tr.text}</td>
                   <td className="r mono muted" data-sort={r.last ?? ''}>{fmtWhen(r.last)}</td>
                 </tr>
@@ -344,6 +343,12 @@ function Features({ rep, ctx }) {
             })}
           </tbody>
         </STable>
+        {shown.length > FEATURE_LIMIT && (
+          <div className="fu-more">
+            <span className="muted">{showAll ? `${shown.length}개 전부 보는 중` : `정렬한 순서로 ${FEATURE_LIMIT}개만 보입니다 — 나머지 ${shown.length - FEATURE_LIMIT}개`}</span>
+            <button type="button" className="btn btn-sm" onClick={() => setShowAll((v) => !v)}>{showAll ? `${FEATURE_LIMIT}개만 보기` : '전부 보기'}</button>
+          </div>
+        )}
       </div>
     </>
   );
@@ -397,15 +402,13 @@ function Users({ rep, ctx, onOpen }) {
       </div>
       <div className="card fu-panel">
         <div className="fu-ph"><b>사용자 {users.length}명</b><span className="muted">열람 내림차순 · 계정을 누르면 개인 상세 · 마지막 접속은 이 기록의 마지막 열람(KST)</span></div>
-        <STable className="fu-table" minWidth={1100}>
-          <thead><tr><th>계정</th><th>이름</th><th>역할</th><th>범위</th><th className="r">열람</th><th className="r">머문 시간</th><th className="r">활동일</th><th className="r">기능 수</th><th data-nosort>상위 3 기능</th><th data-nosort>일별</th><th className="r">마지막 접속</th></tr></thead>
+        <STable className="fu-table" minWidth={1000}>
+          <thead><tr><th>계정 · 이름</th><th>역할</th><th className="r">열람</th><th className="r">머문 시간</th><th className="r">활동일</th><th className="r">기능 수</th><th data-nosort>상위 3 기능</th><th data-nosort>일별</th><th className="r">마지막 접속</th></tr></thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.user}>
-                <td><button type="button" className="fu-link mono" onClick={() => onOpen(u.user)}>{u.user}</button>{u.src === 'ad' && <> <span className="badge gray">AD</span></>}</td>
-                <td>{u.name && u.name !== u.user ? u.name : <span className="muted">—</span>}</td>
+                <td data-sort={u.user}><button type="button" className="fu-link mono" onClick={() => onOpen(u.user)}>{u.user}</button>{u.name && u.name !== u.user && <span className="muted"> {u.name}</span>}{u.src === 'ad' && <> <span className="badge gray">AD</span></>}{u.scoped && <> <span className="badge amber">법인 지정</span></>}</td>
                 <td><span className={`badge ${ROLE_BADGE[u.role] || 'gray'}`}>{u.role || '—'}</span></td>
-                <td className="fu-pos">{u.scoped ? '법인 지정' : '전 법인'}</td>
                 <td className="r mono" data-sort={u.views}>{fmtInt(u.views)}</td>
                 <td className="r mono" data-sort={u.ms}>{fmtDur(u.ms)}</td>
                 <td className="r mono" data-sort={u.days}>{u.days} / {rep.range.days}</td>
@@ -417,10 +420,8 @@ function Users({ rep, ctx, onOpen }) {
             ))}
             {idle.map((u) => (
               <tr key={`idle-${u.user}`} className="z" data-pin="bottom">
-                <td className="mono">{u.user}{u.src === 'ad' && <> <span className="badge gray">AD</span></>}</td>
-                <td>{u.name && u.name !== u.user ? u.name : <span className="muted">—</span>}</td>
+                <td data-sort={u.user}><span className="mono">{u.user}</span>{u.name && u.name !== u.user && <span className="muted"> {u.name}</span>}{u.src === 'ad' && <> <span className="badge gray">AD</span></>}{u.scoped && <> <span className="badge amber">법인 지정</span></>}</td>
                 <td><span className={`badge ${ROLE_BADGE[u.role] || 'gray'}`}>{u.role || '—'}</span></td>
-                <td className="fu-pos">{u.scoped ? '법인 지정' : '전 법인'}</td>
                 <td className="r mono" data-sort={0}>0</td><td className="r mono muted">—</td><td className="r mono">0 / {rep.range.days}</td><td className="r mono muted">—</td>
                 <td className="muted">이 기간 미접속</td><td />
                 <td className="r mono muted" data-sort={u.last ?? ''}>{u.last ? fmtWhen(u.last) : '기록 없음'}</td>
@@ -476,14 +477,14 @@ function UserDrawer({ user, days, ctx, overall, onClose }) {
             <div className="card fu-panel">
               <div className="fu-ph"><b>기능별</b><span className="muted">{d.byKey.length > 10 ? `상위 10 · 전체 ${d.byKey.length}개는 CSV` : `${d.byKey.length}개`}</span></div>
               <STable className="fu-table" minWidth={460} limit={10}>
-                <thead><tr><th>기능</th><th className="r">열람</th><th className="r">머문</th><th>비중</th><th className="r">마지막</th></tr></thead>
+                <thead><tr><th>기능</th><th className="r">열람</th><th className="r">머문</th><th className="r">비중</th><th className="r">마지막</th></tr></thead>
                 <tbody>
                   {d.byKey.map((r) => (
                     <tr key={r.k}>
                       <td><b>{keyMeta(r.k, ctx).label}</b> <span className="fu-pos">{keyMeta(r.k, ctx).where.split(' › ')[0]}</span></td>
                       <td className="r mono" data-sort={r.views}>{fmtInt(r.views)}</td>
                       <td className="r mono" data-sort={r.ms}>{fmtDur(r.ms)}</td>
-                      <td data-sort={r.views}><Share part={r.views} total={d.totals.views} max={d.byKey[0]?.views} /></td>
+                      <td className="r mono muted" data-sort={r.views}>{pctText(r.views, d.totals.views)}</td>
                       <td className="r mono muted" data-sort={r.last ?? ''}>{fmtWhen(r.last)}</td>
                     </tr>
                   ))}
@@ -575,7 +576,7 @@ function UsageSettings() {
           <div className="l">기능 사용 기록<small>끄면 그 순간부터 신호를 받지 않습니다. 켜고 끈 시각과 계정을 남깁니다.</small></div>
           <div className="c">
             <label className="fu-toggle"><input type="checkbox" checked={!!form.enabled} onChange={(e) => set({ enabled: e.target.checked })} /> <span>{form.enabled ? '켜짐' : '꺼짐'}</span></label>
-            <div className="note">기본은 꺼짐입니다(설치 직후에는 아무것도 세지 않습니다). 켜고 끈 것은 각 사용자가 다시 로그인하거나 새로고침한 뒤 화면 추적기에 반영되고, 그 사이 신호는 서버가 버립니다. 꺼져 있던 구간은 어떤 합계에도 0 으로 넣지 않습니다.</div>
+            <div className="note">기본은 켜짐입니다(설치 · 업그레이드 직후부터 셉니다). 켜고 끈 것은 각 사용자가 다시 로그인하거나 새로고침한 뒤 화면 추적기에 반영되고, 그 사이 신호는 서버가 버립니다. 꺼져 있던 구간은 어떤 합계에도 0 으로 넣지 않습니다.</div>
           </div>
         </div>
         <div className="fu-row">
@@ -639,7 +640,7 @@ function UsageSettings() {
             <span className="k">버린 신호</span><span className="v">{dropped.length ? dropped.map(([k, v]) => `${DROP_LABEL[k] || k} ${fmtInt(v)}`).join(' · ') : '없음'}</span>
             <span className="k">저장 방식</span><span className="v">메모리에 모아 {Math.round((st.flushEveryMs || 60000) / 1000)}초마다 한 트랜잭션으로 일 집계에 더함 · 대기 {fmtInt(st.pending)}칸</span>
             <span className="k">마지막 저장</span><span className="v">{st.lastFlush ? `${fmtWhen(st.lastFlush.at)} · ${fmtInt(st.lastFlush.rows)}행${st.lastFlush.ok ? '' : ` · 실패(${st.lastFlush.reason})`}` : '—'}</span>
-            <span className="k">DB</span><span className="v">{st.db?.ok ? `usage.db · ${st.db.size == null ? '크기 —' : `${(st.db.size / 1048576).toFixed(1)} MB`} · 가장 오래된 날 ${st.db.oldest || '—'}` : `열지 못함 — ${st.db?.error || '원인 미상'}`}</span>
+            <span className="k">DB</span><span className="v">{st.db?.ok ? `usage.db · ${fmtBytes(st.db.size)} · 가장 오래된 날 ${st.db.oldest || '—'}` : `열지 못함 — ${st.db?.error || '원인 미상'}`}</span>
           </div>
           {(data.settings.toggles || []).length > 0 && (
             <div className="muted fu-note">켜고 끈 기록: {data.settings.toggles.slice(-5).reverse().map((t) => `${fmtWhen(t.at)} ${t.on ? '켬' : '끔'}(${t.by || '—'})`).join(' · ')}</div>

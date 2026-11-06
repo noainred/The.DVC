@@ -2,7 +2,7 @@
  * featureUsage2913.test.js — v2.913 설정 › 사용자 › 기능 사용 현황(사용자별 기능 사용 추적) 서버 회귀.
  * 설계 docs/design/feature-usage. 고정하는 것:
  *  ① 키 등록부 — 웹 App.jsx TABS · Settings.jsx SUB · console PAGES · usageTracker TOOL_SEGS 와 서버 usage/keys.js 가 같다(소스 대조)
- *  ② 설정 — 기본 꺼짐 · 데모 계정 기본 제외 · 형식 400 · 켜고 끈 기록 · 손상 파일은 보존하고 꺼짐(fail-closed) + loadError
+ *  ② 설정 — 기본 켜짐(사용자 결정 '기본값 켜기') · 데모 계정 기본 제외 · 형식 400 · 켜고 끈 기록 · 손상 파일은 보존하고 꺼짐(fail-closed) + loadError
  *  ③ 수신 — 꺼짐이면 세지 않는다 · 계정은 req.user 만(본문 user 무시) · 데모/제외/모르는 키 버림 · 2초 안 같은 열람 1회 ·
  *     머문 조각 45초 상한 + 계정당 벽시계 상한 · 분당 상한
  *  ④ 집계 — 저장 전 메모리 분 포함 · 기록 꺼진 날은 'off'(0 아님) · 직전 기간 기록 없으면 비교 null · 미접속 계정 · 계정 출처
@@ -65,23 +65,25 @@ test('① 키 등록부 — 웹 목록과 서버 목록이 같다', () => {
   for (const k of bad) assert.equal(keys.validUsageKey(k), false, String(k));
 });
 
-test('② 설정 — 기본 꺼짐 · 데모 제외 · 형식 400 · 켜고 끈 기록 · 손상은 꺼짐 + loadError', () => {
+test('② 설정 — 기본 켜짐 · 데모 제외 · 형식 400 · 켜고 끈 기록 · 손상은 꺼짐 + loadError', () => {
   resetAll();
   const d = settings.loadUsageSettings();
-  assert.equal(d.enabled, false, '기본 꺼짐');
+  assert.equal(d.enabled, true, '기본 켜짐(2026-11-06 사용자 결정)');
+  assert.deepEqual(d.toggles, [], '켠 기록 없음 — 시작 시각은 집계가 가장 오래된 기록 날로 잡는다');
   assert.deepEqual(d.excluded, ['thedvcdemp']);
   assert.equal(settings.usageSettingsLoadError(), null);
   assert.throws(() => settings.saveUsageSettings({ idleMin: 0 }, 'o'), (e) => e.status === 400 && e.field === 'idleMin');
   assert.throws(() => settings.saveUsageSettings({ keepDays: 30 }, 'o'), (e) => e.status === 400 && e.field === 'keepDays');
   assert.throws(() => settings.saveUsageSettings({ excluded: ['a b'] }, 'o'), (e) => e.status === 400);
   assert.throws(() => settings.saveUsageSettings({ notice: 'x\u0001' }, 'o'), (e) => e.status === 400);
-  const r = settings.saveUsageSettings({ enabled: true, idleMin: '10', keepDays: 365, toggles: [{ at: 1, on: false, by: 'evil' }] }, 'own', NOW - 1000);
-  assert.equal(r.settings.enabled, true);
+  const r = settings.saveUsageSettings({ enabled: false, idleMin: '10', keepDays: 365, toggles: [{ at: 1, on: true, by: 'evil' }] }, 'own', NOW - 1000);
+  assert.equal(r.settings.enabled, false);
   assert.equal(r.settings.idleMin, 10);
-  assert.deepEqual(r.settings.toggles, [{ at: NOW - 1000, on: true, by: 'own' }], '본문의 toggles 는 무시 · 켬 한 줄');
-  assert.ok(r.changes.some((c) => /enabled false→true/.test(c)) && r.changes.some((c) => /idleMin 5→10/.test(c)));
+  assert.deepEqual(r.settings.toggles, [{ at: NOW - 1000, on: false, by: 'own' }], '본문의 toggles 는 무시 · 끔 한 줄');
+  assert.ok(r.changes.some((c) => /enabled true→false/.test(c)) && r.changes.some((c) => /idleMin 5→10/.test(c)));
+  settings.saveUsageSettings({ enabled: true }, 'own', NOW - 500);
   const again = settings.saveUsageSettings({ enabled: true }, 'own', NOW);
-  assert.equal(again.settings.toggles.length, 1, '같은 값이면 기록을 더하지 않는다');
+  assert.equal(again.settings.toggles.length, 2, '같은 값이면 기록을 더하지 않는다');
   assert.deepEqual(again.changes, []);
   assert.match(settings.noticeText(), /365일 뒤 지워집니다/, '기본 문구는 보관 일수를 따른다');
   // 켜짐 구간
@@ -102,7 +104,8 @@ test('② 설정 — 기본 꺼짐 · 데모 제외 · 형식 400 · 켜고 끈 
 test('③ 수신 — 꺼짐 · 계정 · 버림 · 중복 열람 · 머문 시간 상한 · 분당 상한', () => {
   resetAll();
   const u = { username: 'Alice', name: '앨리스', role: 'operator' };
-  assert.deepEqual(store.recordUsage({ user: u, k: 'tab:vms', hit: true, now: NOW }), { ok: false, reason: 'disabled' });
+  settings.saveUsageSettings({ enabled: false }, 'own', NOW - 120_000);
+  assert.deepEqual(store.recordUsage({ user: u, k: 'tab:vms', hit: true, now: NOW }), { ok: false, reason: 'disabled' }, '끄면 세지 않는다');
   settings.saveUsageSettings({ enabled: true, excluded: ['thedvcdemp', 'Svc.Report'] }, 'own', NOW - 60_000);
   assert.equal(store.recordUsage({ user: u, k: 'tab:vms', hit: true, now: NOW }).counted, true);
   assert.equal(store.recordUsage({ user: u, k: 'tab:vms', hit: true, now: NOW + 1500 }).counted, false, '2초 안 같은 열람은 한 번');
@@ -140,6 +143,7 @@ test('④ 집계 — 저장 · 메모리 합산 · 꺼진 날은 off · 직전 �
   resetAll();
   // 3일 전 켬 → 2일 전 끔 → 어제 켬
   const day0 = NOW - 3 * DAY_MS;
+  settings.saveUsageSettings({ enabled: false }, 'own', day0 - 2 * 3_600_000);
   settings.saveUsageSettings({ enabled: true }, 'own', day0 - 3_600_000);
   const u = { username: 'dave', role: 'admin' };
   store.recordUsage({ user: u, k: 'tool:vmfinder', hit: true, now: day0 });
@@ -188,6 +192,26 @@ test('④ 집계 — 저장 · 메모리 합산 · 꺼진 날은 off · 직전 �
   const after = await store.buildUsageReport({ days: 4, now: NOW + 1000 });
   assert.ok(!after.users.some((x) => x.user === 'dave'), '지운 계정은 집계에서 사라진다(메모리 분 포함)');
   assert.equal(dayKey(NOW), r.range.today);
+});
+
+test('④-2 기본 켜짐(켠 기록 없음) — 가장 오래된 기록 날 앞은 기록 시작 전(0 이 아니다) · 직전 기간 비교 없음', async () => {
+  resetAll();
+  assert.equal(settings.loadUsageSettings().enabled, true, '파일 없음 = 기본 켜짐');
+  const u = { username: 'erin', role: 'viewer' };
+  store.recordUsage({ user: u, k: 'tab:vms', hit: true, now: NOW - 2 * DAY_MS });
+  await store.flushUsage(NOW - 2 * DAY_MS + 1000);
+  store.recordUsage({ user: u, k: 'tab:vms', hit: true, now: NOW });
+  const r = await store.buildUsageReport({ days: 5, now: NOW + 1000 });
+  assert.deepEqual(r.daily.map((d) => d.rec), ['off', 'off', 'on', 'on', 'on'], '첫 기록 날부터 켜짐 — 그 앞은 off');
+  assert.equal(r.totals.recDays, 3, '하루 평균의 분모는 기록한 날만');
+  assert.equal(r.prev.available, false, '직전 기간은 기록 시작 전 — 비교하지 않는다(새로 · 0% 가 아니다)');
+  assert.ok(r.gaps.length === 1 && r.gaps[0].beforeStart === true && r.gaps[0].by === null, '기록 시작 전 구간으로 밝힌다');
+  // 저장 전(메모리)만 있어도 오늘은 켜짐
+  resetAll();
+  store.recordUsage({ user: u, k: 'tab:hosts', hit: true, now: NOW });
+  const r2 = await store.buildUsageReport({ days: 2, now: NOW + 1000 });
+  assert.deepEqual(r2.daily.map((d) => d.rec), ['off', 'on']);
+  assert.equal(r2.byKey[0].views, 1);
 });
 
 /* ── ⑤ 라우트 ─────────────────────────────────────────────────────────── */
