@@ -21,7 +21,11 @@
  */
 import { withSsh } from '../../proxy/sshExec.js';
 import { sanitizeMounts, parseDfOutput } from '../../bmstor/collect.js';
-import { splitSections, parseProcStat, parseMemInfo, parseDiskstats, parseNetDev, parseNetInfo, parseFcHosts, parseClkTck } from '../parse/linuxProc.js';
+import {
+  splitSections, parseProcStat, parseMemInfo, parseDiskstats, parseNetDev, parseNetInfo, parseFcHosts, parseClkTck,
+  readSection, parseProcStatFull, parseLoadavg, parsePsi, parseVmstat, parseSnmpTcp, parseBlkq, parseSysctl, parseHugePages, parseIrq, parseDfInodes,
+  SYSCTL_PATHS, MAX_CORES, MAX_BLKQ, MAX_IRQ_LINES,
+} from '../parse/linuxProc.js';
 import { parseWinPerf } from '../parse/winPerf.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 
@@ -47,11 +51,30 @@ const _osKind = new Map();
 export function _resetOsKindForTest() { _osKind.clear(); }
 export function osKindOf(host) { return _osKind.get(String(host || '').toLowerCase()) || ''; }
 
+/**
+ * v2.919(리눅스 성능 1단계) — 출력 총량 상한(바이트). 명령 전체를 `head -c` 로 감싸 이 크기에서 자른다 —
+ *   `proxy/sshExec.js EXEC_MAX_OUTPUT`(4MB)에 닿아 결과가 통째로 버려지기 전에 우리가 먼저 자르고, 잘렸다는 사실은
+ *   맨 끝 표지(`##END`)가 오지 않은 것으로 안다(`truncated`). 새 구획은 기존 구획 **뒤에** 둔다 — 잘려도 예전 다섯 지표는 남는다.
+ */
+export const OUTPUT_MAX_BYTES = 1_048_576;
+/** 구획별 줄 상한(명령의 head -n — 파서의 MAX_SECTION_LINES 와 별개의 1차 방어). */
+export const SECTION_LINE_CAP = Object.freeze({ STAT_OTHER: 64, STAT_CPU: MAX_CORES + 1, PSI: 6, VMSTAT: 8, SNMP: 2, BLKQ: MAX_BLKQ, SYSCTL: 32, IRQ: MAX_IRQ_LINES, DFI: 66 });
+/** `##SYSCTL` 이 읽는 파일 — 상수 표(파서의 화이트리스트와 같은 원천). 명령에 변수 삽입이 없다. */
+const SYSCTL_FILES = Object.keys(SYSCTL_PATHS).join(' ');
+/**
+ * `##IRQ` awk 요약 — 첫 줄(CPU 머리글)로 코어 수를 세고, NIC 큐로 보이는 줄만 `<irq>|<0 아닌 코어 수>|<코어 수>|<이름>` 으로 낸다.
+ *   ⚠ 코어 수만큼 넓은 원문을 그대로 보내지 않는다(256코어면 줄당 3KB). 이름 패턴은 흔한 드라이버 접두사 — 못 잡은 NIC 는 ‘요약 없음’ 이다.
+ */
+const IRQ_AWK = "awk 'NR==1{n=NF;next} {nz=0; for(i=2;i<=n+1&&i<=NF;i++) if(($i+0)>0) nz++; nm=$NF; if (nm ~ /^(eth|en|em|p[0-9]|bond|mlx|i40e|ice|ixgbe|igb|bnxt|qede|nfp|virtio|be2net|tg3)/) print substr($1,1,12) \"|\" nz \"|\" n \"|\" substr(nm,1,48)}' /proc/interrupts 2>/dev/null";
+
 /** Linux 수집 명령 — 구획 표지로 나눈 한 방. */
 export function linuxCommand(mounts = []) {
   const dfPart = mounts.length ? `df -P -k -- ${mounts.join(' ')} 2>/dev/null` : 'true';
-  return [
-    "echo '##STAT'", 'head -1 /proc/stat 2>/dev/null',
+  // v2.919: inode(##DFI) — 같은 sanitize 된 마운트만(변수 삽입은 이 화이트리스트뿐).
+  const dfiPart = mounts.length ? `df -P -i -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DFI}` : 'true';
+  const cmds = [
+    // v2.919: /proc/stat 전체 — cpu 합계 + cpuN(코어 수 = 줄 수) + ctxt·intr·procs_running·procs_blocked. 줄 폭은 cut 으로(intr 줄은 수천 칸).
+    "echo '##STAT'", `grep -v '^cpu' /proc/stat 2>/dev/null | head -n ${SECTION_LINE_CAP.STAT_OTHER} | cut -c1-256`, `grep '^cpu' /proc/stat 2>/dev/null | head -n ${SECTION_LINE_CAP.STAT_CPU} | cut -c1-256`,
     "echo '##MEM'", 'cat /proc/meminfo 2>/dev/null',
     "echo '##DISK'", 'cat /proc/diskstats 2>/dev/null',
     "echo '##NET'", 'cat /proc/net/dev 2>/dev/null',
@@ -66,7 +89,23 @@ export function linuxCommand(mounts = []) {
     "echo '##TICK'", 'getconf CLK_TCK 2>/dev/null',
     "echo '##DF'", dfPart,
     "echo '##HOST'", 'uname -srn 2>/dev/null',
-  ].join('; ');
+    // ── v2.919 새 구획(전부 읽기 전용 · 표지는 항상 출력 — ‘표지는 왔는데 0줄’ = absent) ─────────────────────────
+    "echo '##LOAD'", 'cat /proc/loadavg 2>/dev/null',
+    // PSI — 파일이 없으면(커널 4.20 미만 · RHEL 8 기본) 0줄 = absent. 자원 이름을 앞에 붙여 한 구획으로.
+    "echo '##PSI'", `for r in cpu memory io; do if [ -r /proc/pressure/$r ]; then while read -r l; do echo "$r $l"; done < /proc/pressure/$r; fi; done 2>/dev/null | head -n ${SECTION_LINE_CAP.PSI}`,
+    "echo '##VMSTAT'", `grep -E '^(pswpin|pswpout|pgmajfault|oom_kill) ' /proc/vmstat 2>/dev/null | head -n ${SECTION_LINE_CAP.VMSTAT}`,
+    "echo '##SNMP'", `grep '^Tcp:' /proc/net/snmp 2>/dev/null | head -n ${SECTION_LINE_CAP.SNMP}`,
+    "echo '##BLKQ'",
+    `for d in /sys/block/*; do n=\`basename "$d"\`; case "$n" in loop*|ram*|zram*|sr*) continue;; esac; sc=\`cat "$d/queue/scheduler" 2>/dev/null\`; nr=\`cat "$d/queue/nr_requests" 2>/dev/null\`; ro=\`cat "$d/queue/rotational" 2>/dev/null\`; echo "$n|$sc|$nr|$ro"; done 2>/dev/null | head -n ${SECTION_LINE_CAP.BLKQ}`,
+    // sysctl·THP·governor·numa_balancing·TuneD — grep -H 한 번으로 `<경로>:<값>`(키마다 프로세스를 띄우지 않는다). 없는 파일은 줄이 없다(= 확인 불가).
+    // ⚠ 셸 `read` 내장으로 읽지 말 것 — dash 는 1바이트씩 읽는데 sysctl 정수 파일은 오프셋 0 이 아니면 EOF 를 준다(이 컨테이너 실측: swappiness 60 → '6').
+    "echo '##SYSCTL'", `grep -H '' ${SYSCTL_FILES} 2>/dev/null | head -n ${SECTION_LINE_CAP.SYSCTL}`,
+    "echo '##IRQ'", `${IRQ_AWK} | head -n ${SECTION_LINE_CAP.IRQ}`, 'echo "irqbalance=`systemctl is-active irqbalance 2>/dev/null`"',
+    "echo '##DFI'", dfiPart,
+    "echo '##END'",
+  ];
+  // ⚠ 총량 상한 — 넘치면 잘리고 ##END 가 오지 않는다(shapeLinux 의 truncated). stderr 는 예전처럼 따로 받는다.
+  return `{ ${cmds.join('; ')}; } | head -c ${OUTPUT_MAX_BYTES}`;
 }
 
 /**
@@ -128,6 +167,8 @@ export function shapeLinux(stdout, mounts = []) {
   if (!mounts.length) absent.push('diskspace');
   else mark('diskspace', !!(df.mounts || []).length);
   const host = (sec.HOST || []).join(' ').trim();
+  // v2.919 — 새 구획(값 · absent · missing). 잘림(##END 미도착)이면 그 뒤 구획은 missing 이 된다(표지가 안 왔다).
+  const perf = shapePerfSections(sec);
 
   return {
     osKind: 'linux',
@@ -143,8 +184,35 @@ export function shapeLinux(stdout, mounts = []) {
       disks: disks || [],
       nets: (nets || []).map((n) => ({ ...n, bitsPerSec: netInfo[n.iface]?.bitsPerSec ?? null, state: netInfo[n.iface]?.state || '', ...(netInfo[n.iface]?.virtual ? { virtual: true } : {}) })),
       hbas: fcs || [],
+      // v2.919 — 누적 카운터(rates.js 가 환산). 못 읽었으면 null(첫 표본과 같이 다룬다).
+      cpuExt: perf.stat.value ? { ...perf.stat.value.cpu, cores: perf.stat.value.cores } : null,
+      ctxt: perf.stat.value?.ctxt ?? null, intr: perf.stat.value?.intr ?? null,
+      vm: perf.vmstat.value || null,
+      tcp: perf.snmp.value ? { retransSegs: perf.snmp.value.retransSegs, outSegs: perf.snmp.value.outSegs, inErrs: perf.snmp.value.inErrs } : null,
     },
+    // v2.919 — 순간값·튜닝 현재값(누적이 아니라 델타가 필요 없다)과 구획별 상태.
+    perf,
+    truncated: !Array.isArray(sec.END),
     read, missing, absent,
+  };
+}
+
+/**
+ * v2.919 — 새 구획을 한 번에 읽는다(순수). 각 칸은 `{ value, absent, missing }`(parse/linuxProc.js readSection 규약).
+ *   ##STAT 은 기존 구획이지만 확장분(분해·코어·ctxt)을 여기서 함께 읽는다 — cpu_pct 는 예전 parseProcStat 그대로 쓴다.
+ */
+export function shapePerfSections(sec = {}) {
+  return {
+    stat: readSection(sec, 'STAT', parseProcStatFull),
+    load: readSection(sec, 'LOAD', parseLoadavg),
+    psi: readSection(sec, 'PSI', parsePsi),
+    vmstat: readSection(sec, 'VMSTAT', parseVmstat),
+    snmp: readSection(sec, 'SNMP', parseSnmpTcp),
+    blkq: readSection(sec, 'BLKQ', parseBlkq),
+    sysctl: readSection(sec, 'SYSCTL', parseSysctl),
+    hugepages: readSection(sec, 'MEM', parseHugePages),
+    irq: readSection(sec, 'IRQ', parseIrq),
+    dfi: readSection(sec, 'DFI', parseDfInodes),
   };
 }
 

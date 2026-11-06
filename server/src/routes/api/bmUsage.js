@@ -36,6 +36,12 @@ import { strOf } from '../../util/coercionTrap.js';
 import { fleetPartialsSummary } from '../../central/fleet.js'; // v2.607 LEFT2607-02
 import { poolSettled } from '../../util/pool.js'; // v2.613 RUNTIME2613-03(a)
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
+import { memoJson, scopeKey } from './shared.js'; // v2.919: 서버 1대 성능 상세(응답 캐시 + 범위 서명)
+import { perfForRows, stripJsonCols } from '../../bmusage/edgePull.js'; // v2.919: 판정이 붙은 성능 항목(엣지 봉투와 같은 함수)
+import { buildPerfEntry, PERF_COL_META } from '../../bmusage/perfView.js';
+import { hwFactsReader } from '../../bmusage/hwFacts.js';
+import { freshMsFor } from '../../bmusage/useJudge.js';
+import { PERF_DEFAULTS } from '../../bmusage/settings.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -201,6 +207,13 @@ function usageDetailPart(key, { admin = false, hosts = [] } = {}) {
   };
 }
 
+/** v2.919 — 성능 항목에서 목록용 필드만(근거·장치별·튜닝·하드웨어 사실은 상세에서). */
+export function compactPerf(p) {
+  if (!p || typeof p !== 'object') return p;
+  const { cells: _c, crossDetail: _x, values: _v, detail: _d, tuning: _t, hw: _h, ...rest } = p;
+  return rest;
+}
+
 // v2.613 RUNTIME2613-03(a): 엣지 인출 풀 상수(모듈 최상위 — export 를 등록 함수 안에 두면 SyntaxError, v2.593 교훈).
 export const EDGE_PULL_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.BMUSAGE_PULL_CONCURRENCY) || 4));
 // 시한 env 는 [1초, 10분] 정규화(v2.605 TIM2605-04 규약 — agent/envTimeout.js). 예산 상한 150초 < 웹 시한 180초.
@@ -208,6 +221,63 @@ export const EDGE_PULL_BUDGET_MS = reqTimeoutMs(process.env.BMUSAGE_PULL_BUDGET_
 // 엣지 1곳 최악 = 요청 시한 × (1 + 재시도 1). ⚠ 시한 env 는 `central/bmUsageEdgePull.js:25` 와 같은 이름을 읽는다(그쪽이 export 하지 않는다 — 두 곳).
 export const EDGE_PULL_WORST_MS = 2 * reqTimeoutMs(process.env.BMUSAGE_PULL_TIMEOUT_MS, 20_000, { min: 5_000 });
 
+/**
+ * v2.919(리눅스 성능 1단계) — 서버 1대의 성능 상세: USE 매트릭스(근거 포함) · 교차 판정 ①~④ · 커버리지 · 장치별 · 튜닝 현재값 · 두 경로 읽은 시각.
+ *  · 권한: `tools` + vCenter scope — 범위 밖·귀속 없는 서버는 **없는 것과 구분하지 않고 404**(존재 은닉 — history 와 같은 규칙).
+ *  · 이 노드가 직접 수집하는 서버는 여기서 판정한다(hwFacts — 장비 왕복 0). 엣지 위임 서버는 **엣지가 판정해 보낸 보관분**을 그대로 전한다
+ *    (중앙이 다시 판정하지 않는다 — v2.548). 보관분이 없으면 404 가 아니라 `via:'edge-none'` 으로 ‘당겨 와야 한다’ 를 말한다.
+ *  · 응답 캐시: memoJson(스냅샷 세대 + URL) + 범위 서명 + 역할(주소 가림이 다르다) + 마지막 수집 시각(새 표본이 오면 새로 계산).
+ *  · 진단 스냅샷(POST)은 4단계다 — 이 라우트는 읽기만 한다.
+ *  ⚠ 경로는 `/tools/bm-usage/perf/:key` 다(지시문의 `/tools/bm-perf/:key` 가 아니다): `/api/tools/<첫 세그먼트>` 는 도구 키와 같아야
+ *    도구별 접근(toolsDenied)이 서버에서 집행된다(auth/toolAccess.js 이름 규약 — 세그먼트≠키 표는 늘리지 않는다). 새 세그먼트 bm-perf 를
+ *    만들면 ‘베어메탈 사용률’ 을 거부당한 사용자도 이 상세를 읽는다. 같은 도구의 하위 경로로 두어 기존 매핑을 그대로 탄다.
+ */
+export async function bmPerfView(req, snap, deps = {}) {
+  // deps — 테스트 주입점(대상 해석·최신값·하드웨어 사실·엣지 보관분). 라우트는 넘기지 않는다(실제 모듈).
+  const D = {
+    currentTargets, latestUsage, hwFactsReader, bmAddressHosts,
+    listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
+    ...deps,
+  };
+  const allowed = scopedVcenterIds(req.user, snap);
+  const isAdmin = isAdminReq(req);
+  const key = t(req.params.key);
+  if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
+  const NOT_FOUND = { __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' };
+  const s = loadBmUsageSettings();
+  const tg = await D.currentTargets();
+  const realKey = tg.targets.some((x) => x.key === key) ? key
+    : (isAdmin ? null : resolveMaskedToken(key, tg.targets.map((x) => x.key)));
+  const target = realKey ? (tg.targets.find((x) => x.key === realKey) || null) : null;
+  const common = { perfThresholds: s.perf, perfDefaults: PERF_DEFAULTS, perfCols: PERF_COL_META, intervalMs: s.intervalMs, freshMs: freshMsFor(s.intervalMs) };
+  if (target) {
+    if (allowed && (!target.vcenterId || !allowed.has(target.vcenterId))) return NOT_FOUND;
+    const agent = config.agent?.name || '';
+    const row = (await D.latestUsage().catch(() => [])).find((r) => t(r.key) === target.key && t(r.agent) === agent) || null;
+    const hwOf = await D.hwFactsReader({ agent, freshMs: freshMsFor(s.intervalMs) }).catch(() => () => null);
+    const entry = row ? buildPerfEntry({ row, hw: hwOf(target) || null, th: s.perf, intervalMs: s.intervalMs, full: true }) : null;
+    if (isAdmin) return { ok: true, key, via: 'local', target: publicTarget(target), entry, ...common, ...(row ? {} : { reason: 'no-sample' }) };
+    const hosts = await D.bmAddressHosts(tg);
+    return { ok: true, key, via: 'local', target: maskTargetAddress(publicTarget(target), hosts), entry: entry ? { ...entry, key } : null, ...common, addressHidden: true, ...(row ? {} : { reason: 'no-sample' }) };
+  }
+  // 엣지 위임 서버 — 보관분(중앙이 당겨 온 엣지 봉투)에서 찾는다. 범위 계정은 대상의 vCenter 가 범위 안일 때만(엣지 목록과 같은 규칙).
+  const regHosts = isAdmin ? [] : await D.bmAddressHosts(null);
+  for (const rec of await D.listEdgeBmUsage()) {
+    const sn = rec?.snap;
+    if (!sn) continue;
+    const snapHosts = isAdmin ? [] : [...regHosts, ...(sn.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])].filter((h) => typeof h === 'string' && h);
+    const em = addressMatcher(snapHosts);
+    const tgt = (sn.targets || []).find((x) => t(x.key) === key || (!isAdmin && maskBmIdentity(x, em).key === key));
+    if (!tgt) continue;
+    if (allowed && (!t(tgt.vcenterId) || !allowed.has(t(tgt.vcenterId)))) return NOT_FOUND;
+    const entry = (sn.perf || []).find((p) => t(p.key) === t(tgt.key)) || null;
+    const base = { ok: true, key, via: entry ? 'edge' : 'edge-none', agent: rec.agent, snapAt: rec.snapAt || null, ...common,
+      perfThresholds: sn.perfThresholds || null, edgeThresholds: true };
+    if (isAdmin) return { ...base, target: tgt, entry };
+    return { ...base, target: maskTargetAddress(tgt, snapHosts, em), entry: entry ? { ...entry, key } : null, addressHidden: true };
+  }
+  return NOT_FOUND;
+}
 export function registerBmUsage(api) {
 
 /** 주 조회 — 대상·최신값·설정·상태. 장비에 접속하지 않는다. */
@@ -246,8 +316,13 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       : tg.counts;
     const keys = new Set(targets0.map((x) => x.key));
     // 최신값은 **대상 목록 안의 것만** 준다(법인을 끄거나 등록이 사라진 서버의 옛 값이 새어 나가지 않게).
-    const rows0 = latest.filter((r) => keys.has(t(r.key)));
+    const rowsRaw = latest.filter((r) => keys.has(t(r.key)));
+    // v2.919: 행에서 JSON 문자열 열(장치별·튜닝)을 뗀다 — 목록에는 판정 code 표(perf)만, 장치별은 서버 상세(/tools/bm-usage/perf/:key)에서.
+    const rows0 = rowsRaw.map(stripJsonCols);
     const rows = isAdmin ? rows0 : maskBmList(rows0, match);
+    const perfSettings = loadBmUsageSettings();
+    const pf = await perfForRows(rowsRaw, tg.targets, perfSettings, { full: false });
+    const perf = isAdmin ? pf.perf : maskBmList(pf.perf, match);
     res.json({
       ok: true, at: Date.now(),
       enabled: bmUsageEnabled(),
@@ -295,11 +370,21 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       fleetPartials: allowed ? null : fleetPartialsSummary({ detail: isAdmin }), // v2.744(회귀 검토 GD-R1): 등록부 손상 사유의 위치(줄·칸)는 관리자에게만(operator 는 tools 기본 보유) — 원문 조각은 누구에게도 싣지 않는다
       log: scopeFilePaths(bmUsageLogInfo(), req.user),
       ...(isAdmin ? {} : { addressHidden: true }),
+      /*
+       * v2.919(리눅스 성능 1단계): 보이는 행마다 USE 판정 code 표·판정 한 줄·커버리지·교차 판정 상태(perf) + 기준값(이 노드 설정 — 화면에
+       *   숫자를 박지 않는다) + 열 ↔ USE 칸 대응(perfCols). 행 필터·주소 가림은 rows 와 같다(같은 key 토큰).
+       */
+      perf, perfThresholds: perfSettings.perf, perfDefaults: PERF_DEFAULTS, perfCols: PERF_COL_META,
+      ...(pf.perfError ? { perfError: pf.perfError } : {}),
     });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
   }
 });
+
+api.get('/tools/bm-usage/perf/:key', toolsPerm, (req, res) => memoJson(req, res, 'bm-perf', (snap) => bmPerfView(req, snap), {
+  extraKey: `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${bmUsageStatus().last?.at || 0}`,
+}));
 
 /** 한 서버의 추이 — 원시 + 일 롤업. 상한으로 잘렸으면 밝힌다(조용한 상한 금지). */
 api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
@@ -485,6 +570,9 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
         counts: snap && !allowed ? (snap.counts || {}) : null,
         skippedCounts: snap && !allowed ? (snap.skippedCounts || {}) : null,
         truncated: snap?.truncated || 0,
+        // v2.919: 엣지가 판정한 성능 항목 — 보이는 대상의 것만 · 목록에는 code 표만(근거·장치별은 /tools/bm-usage/perf/:key) · 기준값은 그 엣지 설정.
+        perf: snap ? (isAdmin ? (l) => l : (l) => maskBmList(l, em))((snap.perf || []).filter((p) => keys.has(t(p.key))).map(compactPerf)) : [],
+        perfThresholds: snap?.perfThresholds || null,
         // 정지 목록은 **보이는 대상의 것만** — 키가 곧 범위 밖 서버의 식별자다.
         authStops: (isAdmin ? (l) => l : (l) => maskBmList(l, em))((snap?.authStops || []).filter((a) => !allowed || keys.has(t(a?.key)))),
       };

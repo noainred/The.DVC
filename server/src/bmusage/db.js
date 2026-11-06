@@ -34,6 +34,7 @@ const FILE = () => path.join(config.dbDir || config.configDir, 'bm-usage.db');
 import { DAY_OFFSET_MIN, dayKey } from "../util/dayKey.js";
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
+import { PERF_COL_NAMES } from './perfCols.js';
 const lockRetry = createLockRetry();
 export { DAY_OFFSET_MIN, dayKey };
 
@@ -111,6 +112,9 @@ async function openDb() {
         net_pct REAL, net_bps REAL, hba_pct REAL, hba_bps REAL, io_pct REAL,
         PRIMARY KEY (agent, key)
       );`);
+    // v2.919(리눅스 성능 1단계): 새 열은 CREATE 문이 아니라 **ALTER 마이그레이션**으로 더한다 — 기존 DB(v2.918 이하)와 새 DB 가
+    //   같은 경로를 탄다(두 벌 스키마가 갈라지지 않게). ADD COLUMN 은 표를 다시 쓰지 않는다(O(1)).
+    migratePerfColumns(conn);
     // 기존 DB 마이그레이션 — 비어 있을 때만 1회(실측 747ms. 기동 1회이고 이후는 upsert 가 유지한다).
     try {
       const has = conn.prepare('SELECT COUNT(*) c FROM usage_latest').get()?.c ?? 0;
@@ -141,6 +145,32 @@ async function openDb() {
   }
   _tried = true;                   // 성패가 확정된 뒤에 세운다
   return _db;
+}
+
+/**
+ * v2.919 — 표마다 없는 열만 ALTER TABLE ADD COLUMN(멱등). 이력: 새 지표 열(REAL) · 일 롤업: `<열>_max`(REAL — 포화·오류는 피크가 뜻이다) ·
+ *   최신값: 새 지표 열 + 두 경로 읽은 시각(INTEGER) + 장치별·튜닝 현재값 JSON(TEXT — 이력 적재는 3단계).
+ * ⚠ 한 열이 실패해도 나머지는 계속한다(실패는 콘솔 1줄 — 그 열은 적재에서 빠지지 않고 insert 가 실패를 돌려준다).
+ * @returns {{added:number}} 이번에 더한 열 수(테스트가 기존 DB 호환을 확인한다)
+ */
+export const PERF_TABLE_COLS = Object.freeze({
+  usage_history: PERF_COL_NAMES.map((c) => [c, 'REAL']),
+  usage_daily: PERF_COL_NAMES.map((c) => [`${c}_max`, 'REAL']),
+  usage_latest: [...PERF_COL_NAMES.map((c) => [c, 'REAL']), ['os_at', 'INTEGER'], ['idrac_at', 'INTEGER'], ['detail_json', 'TEXT'], ['tuning_json', 'TEXT']],
+});
+export function migratePerfColumns(conn) {
+  let added = 0;
+  for (const [table, cols] of Object.entries(PERF_TABLE_COLS)) {
+    let have;
+    try { have = new Set(conn.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name)); } catch { continue; }
+    for (const [col, type] of cols) {
+      if (have.has(col)) continue;
+      try { conn.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`); added += 1; }
+      catch (e) { console.warn(`[bmusage-db] 열 추가 실패(${table}.${col}):`, e?.message); }
+    }
+  }
+  if (added) console.log(`[bmusage-db] 리눅스 성능 열 ${added}개를 더했습니다(v2.919 마이그레이션 — 기존 행은 null).`);
+  return { added };
 }
 
 export async function available() { return !!(await getDb()); }
@@ -183,6 +213,9 @@ const n = numOrNull;   // v2.561: 공용 판정
  * @param {Array} rows  `[{ key, ts, name, vcenterId, src, cpu_pct, … }]`
  * @param {string} agent
  */
+/** JSON 열 값 — 문자열만(객체는 직렬화하지 않고 버린다: usage.js jsonCol 이 상한을 이미 적용한다). */
+const jsonText = (v) => (typeof v === 'string' && v ? v : null);
+
 export async function insertUsage(rows = [], agent = '') {
   const db = await getDb();
   if (!db || !rows.length) return { ok: !!db, inserted: 0 };
@@ -191,9 +224,12 @@ export async function insertUsage(rows = [], agent = '') {
    *   history 는 덮어써도 **일 롤업은 두 번 누적**돼 평균·표본수가 틀어진다. IGNORE 로 두고
    *   `changes` 가 1일 때만 롤업을 갱신하면 그 이중 계수가 **구조적으로 없다**(쿼리 수는 같다).
    */
+  // v2.919: 새 지표 열은 perfCols.js 목록 그대로 뒤에 붙인다(열 이름은 상수 표에서만 온다 — 외부 입력이 SQL 에 들어가지 않는다).
+  const PC = PERF_COL_NAMES.map((c) => `,${c}`).join('');
+  const PQ = ',?'.repeat(PERF_COL_NAMES.length);
   const ins = db.prepare(`INSERT OR IGNORE INTO usage_history
-    (agent,key,ts,name,vcenter_id,src,cpu_pct,mem_pct,disk_busy_pct,disk_used_pct,net_pct,net_bps,hba_pct,hba_bps,io_pct)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    (agent,key,ts,name,vcenter_id,src,cpu_pct,mem_pct,disk_busy_pct,disk_used_pct,net_pct,net_bps,hba_pct,hba_bps,io_pct${PC})
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?${PQ})`);
   /*
    * ⚠ 일 롤업은 **`ON CONFLICT DO UPDATE`** 다(예전에는 `SELECT` + `OR REPLACE` 로 행당 2쿼리).
    *   200행/주기 실측 **14.5ms → 7.4ms**. SQL 안에서 누적하므로 읽기 왕복이 사라진다.
@@ -202,10 +238,12 @@ export async function insertUsage(rows = [], agent = '') {
    *   ⚠ `cpu_n` 은 **값이 있을 때만** 1 을 더한다(호출부가 0/1 을 넘긴다) — null 을 분모에 넣으면
    *     '못 읽은 주기' 가 평균을 0 쪽으로 끌어내린다.
    */
+  const DC = PERF_COL_NAMES.map((c) => `,${c}_max`).join('');
+  const DSET = PERF_COL_NAMES.map((c) => `,\n      ${c}_max=NULLIF(MAX(IFNULL(${c}_max,-1e308),IFNULL(excluded.${c}_max,-1e308)),-1e308)`).join('');
   const upDay = db.prepare(`INSERT INTO usage_daily
     (agent,key,day,name,vcenter_id,cpu_sum,cpu_n,cpu_max,mem_sum,mem_n,mem_max,
-     disk_busy_max,disk_used_max,net_max,net_bps_max,hba_max,hba_bps_max,io_max,samples,last_ts)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     disk_busy_max,disk_used_max,net_max,net_bps_max,hba_max,hba_bps_max,io_max,samples,last_ts${DC})
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?${PQ})
     ON CONFLICT(agent,key,day) DO UPDATE SET
       name=excluded.name, vcenter_id=excluded.vcenter_id,
       cpu_sum=cpu_sum+excluded.cpu_sum, cpu_n=cpu_n+excluded.cpu_n,
@@ -219,17 +257,24 @@ export async function insertUsage(rows = [], agent = '') {
       hba_max=NULLIF(MAX(IFNULL(hba_max,-1e308),IFNULL(excluded.hba_max,-1e308)),-1e308),
       hba_bps_max=NULLIF(MAX(IFNULL(hba_bps_max,-1e308),IFNULL(excluded.hba_bps_max,-1e308)),-1e308),
       io_max=NULLIF(MAX(IFNULL(io_max,-1e308),IFNULL(excluded.io_max,-1e308)),-1e308),
-      samples=samples+1, last_ts=MAX(IFNULL(last_ts,0),excluded.last_ts)`);
+      samples=samples+1, last_ts=MAX(IFNULL(last_ts,0),excluded.last_ts)${DSET}`);
   /* 최신값 테이블 — ⚠ **`ts` 가 더 클 때만** 갱신한다(엣지 push 는 순서대로 오지 않는다 — v2.531 규약). */
+  /*
+   * v2.919: 최신값에는 새 지표 열 + 두 경로 읽은 시각 + 장치별·튜닝 JSON 도 둔다. 읽은 시각은 **그 경로를 마지막으로 읽은 시각**이라
+   *   이번 주기에 그 경로가 실패했으면(null) 직전 값을 지키고(COALESCE), 지표·JSON 은 이번 표본 그대로다(최신값 = 마지막 표본 — 옛 장치값을 섞지 않는다).
+   */
+  const LSET = PERF_COL_NAMES.map((c) => `, ${c}=excluded.${c}`).join('');
   const upLatest = db.prepare(`INSERT INTO usage_latest
-    (agent,key,ts,name,vcenter_id,src,cpu_pct,mem_pct,disk_busy_pct,disk_used_pct,net_pct,net_bps,hba_pct,hba_bps,io_pct)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    (agent,key,ts,name,vcenter_id,src,cpu_pct,mem_pct,disk_busy_pct,disk_used_pct,net_pct,net_bps,hba_pct,hba_bps,io_pct${PC},os_at,idrac_at,detail_json,tuning_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?${PQ},?,?,?,?)
     ON CONFLICT(agent,key) DO UPDATE SET
       ts=excluded.ts, name=excluded.name, vcenter_id=excluded.vcenter_id, src=excluded.src,
       cpu_pct=excluded.cpu_pct, mem_pct=excluded.mem_pct,
       disk_busy_pct=excluded.disk_busy_pct, disk_used_pct=excluded.disk_used_pct,
       net_pct=excluded.net_pct, net_bps=excluded.net_bps,
-      hba_pct=excluded.hba_pct, hba_bps=excluded.hba_bps, io_pct=excluded.io_pct
+      hba_pct=excluded.hba_pct, hba_bps=excluded.hba_bps, io_pct=excluded.io_pct${LSET},
+      os_at=COALESCE(excluded.os_at, usage_latest.os_at), idrac_at=COALESCE(excluded.idrac_at, usage_latest.idrac_at),
+      detail_json=excluded.detail_json, tuning_json=excluded.tuning_json
       WHERE excluded.ts > usage_latest.ts`);
   let inserted = 0; let duplicates = 0;
   db.exec('BEGIN');
@@ -241,7 +286,8 @@ export async function insertUsage(rows = [], agent = '') {
       const name = String(r.name || ''); const vc = String(r.vcenterId || '');
       const cpu = n(r.cpu_pct); const mem = n(r.mem_pct);
       const vals = [n(r.disk_busy_pct), n(r.disk_used_pct), n(r.net_pct), n(r.net_bps), n(r.hba_pct), n(r.hba_bps), n(r.io_pct)];
-      const res = ins.run(agent, key, ts, name, vc, String(r.src || ''), cpu, mem, ...vals);
+      const perf = PERF_COL_NAMES.map((c) => n(r[c]));   // v2.919 — 못 읽은 칸은 null(numOrNull — 0 으로 두지 않는다)
+      const res = ins.run(agent, key, ts, name, vc, String(r.src || ''), cpu, mem, ...vals, ...perf);
       // ⚠ 같은 ts 가 이미 있으면(changes 0) 롤업을 **건드리지 않는다** — 이중 계수 방지.
       if (!Number(res?.changes)) { duplicates += 1; continue; }
       inserted += 1;
@@ -251,9 +297,10 @@ export async function insertUsage(rows = [], agent = '') {
         // ⚠ null 은 합·개수에 넣지 않는다 — 넣으면 '못 읽은 주기' 가 평균을 끌어내린다.
         cpu ?? 0, cpu == null ? 0 : 1, cpu,
         mem ?? 0, mem == null ? 0 : 1, mem,
-        ...vals, 1, ts,
+        ...vals, 1, ts, ...perf,
       );
-      upLatest.run(agent, key, ts, name, vc, String(r.src || ''), cpu, mem, ...vals);
+      upLatest.run(agent, key, ts, name, vc, String(r.src || ''), cpu, mem, ...vals, ...perf,
+        n(r.os_at), n(r.idrac_at), jsonText(r.detail_json), jsonText(r.tuning_json));
     }
     db.exec('COMMIT');
   } catch (e) {

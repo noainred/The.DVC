@@ -165,6 +165,7 @@
 12. (14~17차) 로그 분석 · 등록/온보딩 · SSH 키 저장소 · 보안 · 용량 예측 · 정비 창 · 프로세스 Top-N · 저활용 · 전력/온도 — 전부 **시안 단계(미컨펌)**. 새 SSH 구획은 `##DFI`(inode)·`##TOP`(프로세스)·로그 증분 읽기뿐이고 나머지는 기존 저장값의 집계. 구현 순서·범위는 `PROFILES.md` §17~§20 의 정직 기록을 보고 정한다.
 
 ## 8. 구현 범위(컨펌 뒤 — Opus)
+- **1단계 구현됨(v2.919 예정 — 서버만)**: 수집 구획·파서·rates·새 열·DB 마이그레이션·USE/교차 판정·커버리지·엣지 봉투/정제·API(`GET /tools/bm-usage` perf 확장 + `GET /tools/bm-usage/perf/:key` — 경로를 지시와 다르게 둔 이유는 `docs/rules/idrac-server.md` v2.919 항목). 화면은 2단계.
 `bmusage/collectors/osSsh.js linuxCommand` 구획 추가 → `parse/linuxProc.js` 파서(순수 · 테스트) → `rates.js`·`usage.js` 열 추가 → `db.js` 열·튜닝 표 → USE 판정 순수 모듈(테스트가 웹·서버 같은 입력으로 대조) → `edgePull.js` 봉투 + 중앙 정제 화이트리스트 → 스냅샷 엣지 대행 라우트 → 웹(보드 · 상세 · 400 · 상태) → 목 데이터 → Chromium 1440/400 → 릴리스.
 
 ## 9. 출처(검색 2026-11-06)

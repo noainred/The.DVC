@@ -96,7 +96,62 @@ export const DEFAULTS = Object.freeze({
   alertPct: 90,
   alertSustainMin: 15,
   alertRepeatHours: 6,
+  /*
+   * v2.919(리눅스 성능 1단계): USE 판정 기준값 — **이 노드(법인 엣지)의 설정**이고 API 가 내려준다(화면에 박지 않는다).
+   *   판정은 bmusage/useJudge.js 하나가 이 값으로 한다. ⚠ 중앙 배포(DISTRIBUTED_KEYS)에는 아직 넣지 않았다 — 넣으면 배포 서명이 바뀌어
+   *   구버전 엣지가 영원히 '적용 대기' 로 보인다(혼재 버전 호환). 배포는 엣지가 전부 이 판으로 오른 뒤의 일이다.
+   */
+  perf: null,   // normalizeSettings 가 PERF_DEFAULTS 로 채운다
 });
+
+/**
+ * v2.919 — USE 판정 기준값 기본(설계 §4.2). ⚠ ‘(추정)’ 표시는 공식 권고가 아니라 **임의 시작값**이라는 뜻이다 — 현장에서 조정한다.
+ *  · 사용률 warn 80 / bad 90(설계) · 런큐/코어 1.0 / 2.0(설계) · 평균 대기열 2(설계) / 4(추정) · PSI full 10초 5% / 20%(설계)
+ *  · PSI cpu some 10초 20% / 50%(추정 — cpu 는 full 이 시스템 수준에서 0 이라 some 을 쓴다) · 스왑 아웃 1 / 100 pages/s(추정)
+ *  · TCP 재전송 1% / 5%(추정) · 오류·드롭: 증가분 > 0 → warn, `errRepeatBad` 주기 연속 증가 → bad(설계 ‘반복 → bad’ — 3 은 추정)
+ *  · OS↔iDRAC CPU 불일치 15%p(설계 — 임의 시작값) · 흡기 온도 27 / 35℃(추정 — ASHRAE 권장 상한 · A2 허용 상한) · 전력 cap 대비 90 / 98%(추정)
+ */
+export const PERF_DEFAULTS = Object.freeze({
+  utilWarn: 80, utilBad: 90,
+  runqWarn: 1, runqBad: 2,
+  queueWarn: 2, queueBad: 4,
+  psiFullWarn: 5, psiFullBad: 20,
+  psiCpuSomeWarn: 20, psiCpuSomeBad: 50,
+  swapOutWarn: 1, swapOutBad: 100,
+  retransWarn: 1, retransBad: 5,
+  errRepeatBad: 3,
+  cpuMismatchPct: 15,
+  inletWarnC: 27, inletBadC: 35,
+  powerCapWarnPct: 90, powerCapBadPct: 98,
+});
+/** 기준값 범위(서버가 강제 — 화면 입력을 믿지 않는다). [min, max, 소수 허용] */
+const PERF_LIMITS = Object.freeze({
+  utilWarn: [1, 100, false], utilBad: [1, 100, false],
+  runqWarn: [0.1, 64, true], runqBad: [0.1, 64, true],
+  queueWarn: [0.1, 1_024, true], queueBad: [0.1, 1_024, true],
+  psiFullWarn: [0.1, 100, true], psiFullBad: [0.1, 100, true],
+  psiCpuSomeWarn: [0.1, 100, true], psiCpuSomeBad: [0.1, 100, true],
+  swapOutWarn: [0.1, 1e7, true], swapOutBad: [0.1, 1e7, true],
+  retransWarn: [0.01, 100, true], retransBad: [0.01, 100, true],
+  errRepeatBad: [1, 1_000, false],
+  cpuMismatchPct: [1, 100, false],
+  inletWarnC: [10, 60, false], inletBadC: [10, 70, false],
+  powerCapWarnPct: [10, 100, false], powerCapBadPct: [10, 100, false],
+});
+/** 기준값 정규화(순수) — 모르는 키는 버리고, 빈 칸은 기본값(clampSetting 규약), warn 이 bad 보다 크면 bad 를 warn 으로 올린다. */
+export function normalizePerfThresholds(raw = {}) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const out = {};
+  for (const [k, [min, max, frac]] of Object.entries(PERF_LIMITS)) {
+    out[k] = clampSetting(src[k], { min, max, def: PERF_DEFAULTS[k], round: !frac });
+  }
+  for (const base of ['util', 'runq', 'queue', 'psiFull', 'psiCpuSome', 'swapOut', 'retrans', 'inlet', 'powerCap']) {
+    const w = base === 'inlet' ? 'inletWarnC' : base === 'powerCap' ? 'powerCapWarnPct' : `${base}Warn`;
+    const b = base === 'inlet' ? 'inletBadC' : base === 'powerCap' ? 'powerCapBadPct' : `${base}Bad`;
+    if (out[w] > out[b]) out[b] = out[w];
+  }
+  return out;
+}
 
 /** 하한·상한은 서버가 강제한다(화면 입력을 믿지 않는다). */
 const MIN_INTERVAL_MS = 60_000;
@@ -167,6 +222,7 @@ export function normalizeSettings(raw = {}) {
     dailyRetentionDays: clampSetting(raw.dailyRetentionDays, { min: 30, max: 365 * 10, def: DEFAULTS.dailyRetentionDays }),
     osSsh: raw.osSsh === undefined ? DEFAULTS.osSsh : !!raw.osSsh,
     idracTelemetry: raw.idracTelemetry === undefined ? DEFAULTS.idracTelemetry : !!raw.idracTelemetry,
+    perf: normalizePerfThresholds(raw.perf),   // v2.919
   };
 }
 
@@ -391,7 +447,11 @@ export function saveBmUsageSettings(body = {}) {
   const { patch } = dropUnspecifiedNumbers(body);
   const ignoredCentralManaged = [];
   if (readCentralCopy()) for (const k of DISTRIBUTED_KEYS) if (Object.hasOwn(patch, k)) { delete patch[k]; ignoredCentralManaged.push(k); }
-  const local = normalizeSettings({ ...normalizeSettings(readFile()), ...patch });
+  const prevLocal = normalizeSettings(readFile());
+  // v2.919: 기준값은 **키 단위로** 겹친다(일부만 보내도 나머지는 직전 값 — 통째로 바꾸면 보내지 않은 기준이 기본값으로 되돌아간다).
+  if (patch.perf && typeof patch.perf === 'object' && !Array.isArray(patch.perf)) patch.perf = { ...prevLocal.perf, ...patch.perf };
+  else delete patch.perf;
+  const local = normalizeSettings({ ...prevLocal, ...patch });
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(local, null, 2), { mode: 0o600 });
   _localErr.ok();

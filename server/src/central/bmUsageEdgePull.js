@@ -18,6 +18,13 @@ import { pullFromEdge } from './edgePull.js'; // v2.613 CONTRACT2613-01·EDGE261
 import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-03: 엣지 본문의 글자 필드는 타입부터 좁힌다
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
+import { sanitizePerfFields } from './bmPerfSanitize.js'; // v2.919: 리눅스 성능 항목 화이트리스트
+import { PERF_COL_NAMES } from '../bmusage/perfCols.js';
+/**
+ * v2.919 — 행의 **새** 수치 열(리눅스 성능 열 + 두 경로 읽은 시각)은 수로 좁힌다('1.5' → 1.5 · 못 읽으면 null).
+ * ⚠ 기존 9개 열은 예전 계약(원시값 그대로 — audit2604a CEN2604-03 이 고정)을 바꾸지 않는다.
+ */
+const ROW_NUM_COLS = Object.freeze([...PERF_COL_NAMES, 'os_at', 'idrac_at']);
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
 export const MIN_EDGE_VERSION = '2.554.0';
@@ -107,9 +114,16 @@ export function sanitizeBmUsageSnap(snap) {
   const node = isObj(snap.node) ? snap.node : {};
   const st = isObj(snap.settings) ? snap.settings : null;
   const targets = objList(snap.targets, (x) => ({ ...shallow(x), key: strOf(x.key, 256), name: strOf(x.name, 256), vcenterId: strOf(x.vcenterId, 128) }));
-  const rows = objList(snap.rows, (r) => ({ ...shallow(r), key: strOf(r.key, 256), name: strOf(r.name, 256) }));
+  // v2.919: 행의 JSON 문자열 열(detail_json·tuning_json)은 받지 않는다 — 같은 내용은 perf 에 객체로 오고 그쪽을 화이트리스트로 정제한다.
+  //   새 지표 열(성능 열 · 시각)은 **수로** 좁힌다(문자열 수치 '1.5' → 1.5 · 못 읽으면 null — 0 으로 두지 않는다).
+  const rows = objList(snap.rows, (r) => {
+    const { detail_json: _d, tuning_json: _t, ...rest } = shallow(r);
+    for (const c of ROW_NUM_COLS) if (Object.hasOwn(rest, c)) rest[c] = numOrNull(r[c]);
+    return { ...rest, key: strOf(r.key, 256), name: strOf(r.name, 256) };
+  });
+  const pf = sanitizePerfFields(snap);
   const stops = objList(snap.authStops, (a) => ({ key: strOf(a.key, 256), path: strOf(a.path, 32), attempts: numOrNull(a.attempts), since: numOrNull(a.since), reason: strOf(a.reason, 300) }));
-  const dropped = targets.dropped + rows.dropped + stops.dropped;
+  const dropped = targets.dropped + rows.dropped + stops.dropped + pf.dropped;
   return {
     node: { agent: strOf(node.agent, 128), version: strOf(node.version, 32), role: strOf(node.role, 16), datacenter: strOf(node.datacenter, 128) },
     at: numOrNull(snap.at),
@@ -129,6 +143,7 @@ export function sanitizeBmUsageSnap(snap) {
     skippedCounts: numMap(snap.skippedCounts),
     authStops: stops.list,
     status: isObj(snap.status) ? shallow(snap.status) : null,
+    ...pf.fields,
     ...(dropped ? { sanitizeDropped: dropped } : {}),
   };
 }

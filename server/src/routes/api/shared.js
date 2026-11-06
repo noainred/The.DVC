@@ -18,6 +18,13 @@ export async function memoJson(req, res, name, compute, { ttlMs = 12_000, extraK
     const snap = store.get();
     const key = `${snap.generatedAt}|${req.originalUrl}|${extraKey}`;
     const payload = await snapMemo(name, key, ttlMs, async () => compute(snap));
+    // v2.919: 계산 결과가 `__status`(정수, 200 이 아님)를 가지면 그 상태 코드로 본문만 보낸다(sendCached 의 캐시 헤더·304 경로를 타지 않는다) — 단건 404(존재 은닉)·400 을
+    //   캐시된 경로에서도 지키기 위해서다. 열쇠에 범위 서명이 들어가므로 범위가 다른 사용자끼리 404 를 공유하지 않는다.
+    if (payload && typeof payload === 'object' && Number.isInteger(payload.__status) && payload.__status !== 200) {
+      const { __status: code, ...body } = payload;
+      res.status(code).json(body);
+      return;
+    }
     sendCached(req, res, key, payload);
   } catch (e) {
     // async 경로라 Express가 sync throw처럼 자동 처리하지 못한다 — 직접 500으로 응답(클라 hang 방지).
