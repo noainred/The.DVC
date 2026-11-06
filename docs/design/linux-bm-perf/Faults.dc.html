@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>하드웨어 장애 기록</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.dim{color:#8b9bb4}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid #243049}
+.tabs a{padding:10px 14px;color:#8b9bb4;font-weight:600;text-decoration:none;border-bottom:2px solid transparent;min-height:40px;box-sizing:border-box;display:inline-flex;align-items:center}
+.tabs a.on{color:#e6edf6;border-bottom-color:#22d3ee}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+.sel{min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{min-height:34px;padding:0 14px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer}
+.seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5;white-space:nowrap}
+.kpi .label{color:#8b9bb4;font-size:12px;font-weight:600;letter-spacing:.5px}.kpi .value{font-size:28px;font-weight:800;margin-top:6px;line-height:1;text-align:center}.kpi .meta{font-size:12px;color:#8b9bb4;margin-top:8px}
+h2{margin:0;font-size:15px;font-weight:700}
+.tl{display:grid;grid-template-columns:150px minmax(0,1fr);gap:0 12px}
+.tl .t{font-size:12px;color:#8b9bb4;text-align:right;padding:8px 0;border-right:2px solid #243049;padding-right:12px;white-space:nowrap}
+.tl .e{padding:8px 0 8px 0;border-bottom:1px solid #1f2a40}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:12px;color:#8b9bb4"><a href="Main.dc.html">리눅스 베어메탈 통합 성능</a> › PL-WAW › <b style="color:#e6edf6">bm-pl1-db02</b></div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;display:flex;flex-wrap:wrap;align-items:center;gap:10px">bm-pl1-db02 <span class="chip bad">오류 — ECC + MCE</span> <span class="chip ok">경로 OS + iDRAC</span></h1>
+      <div class="dim" style="font-size:12px;margin-top:4px">Rocky 9.4 · 32코어 · 512GB · 역할 DB · 서비스 태그 ‘3C8F1M2’ · OS 13:35 · iDRAC 13:34</div>
+    </div>
+    <div style="flex:1 1 20px"></div>
+    <a class="btn" href="#" style="display:inline-flex;align-items:center;text-decoration:none">파트 장애 도구에서 열기</a>
+    <button class="btn" type="button">CSV</button>
+  </div>
+  <nav class="tabs" aria-label="서버 상세 탭"><a href="Server.dc.html">요약</a><a href="Server.dc.html">자원 (USE)</a><a href="Server.dc.html">하드웨어 (iDRAC)</a><a class="on" href="Faults.dc.html" aria-current="page">장애 기록</a><a href="Tuning.dc.html">튜닝</a><a href="Profiles.dc.html">용도</a><a href="Server.dc.html">진단 스냅샷</a></nav>
+
+  <!-- 요약 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:14px">
+    <div class="card kpi"><div class="label">열린 장애</div><div class="value" style="color:#f87171">1</div><div class="meta">DIMM A3 · 주의(ECC 정정 증가) · 2일째</div></div>
+    <div class="card kpi"><div class="label">최근 90일 발생</div><div class="value">4</div><div class="meta">DIMM 2 · 디스크 1 · PSU 1</div></div>
+    <div class="card kpi"><div class="label">평균 지속</div><div class="value">2.1<small style="font-size:14px;color:#8b9bb4;font-weight:600"> 일</small></div><div class="meta">정상 복귀·부품 제거로 끝난 2건 기준 (수동 닫음·시작 모름 제외)</div></div>
+    <div class="card kpi"><div class="label">교체(부품 제거)</div><div class="value">1</div><div class="meta">디스크 Bay 4 · 10-21</div></div>
+    <div class="card kpi"><div class="label">종료 기록 없음</div><div class="value" style="color:#fbbf24">1</div><div class="meta">PSU2 — 해소 이벤트 없이 끝남 (‘정상 복귀’ 라 말하지 않음)</div></div>
+  </div>
+
+  <!-- 서버 장애 기록 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:10px">
+      <h2>장애 기록 — 발생 1건 = 1행 (같은 부품의 발생 → 변화 → 해소를 한 건으로)</h2>
+      <div class="seg" role="group" aria-label="기간" style="margin-left:auto"><button type="button">30일</button><button class="on" type="button">90일</button><button type="button">1년</button><button type="button">전체(보존 기간)</button></div>
+      <select class="sel" aria-label="부품 종류"><option>부품 전체</option><option>메모리(DIMM)</option><option>디스크</option><option>PSU</option><option>팬</option><option>NIC</option><option>CPU</option></select>
+    </div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>발생</th><th>종료</th><th>지속</th><th>부품 종류</th><th>부품</th><th>상태 · 원문</th><th>종료 사유</th><th>보류 사유</th><th>연관</th><th>이슈</th></tr></thead>
+      <tbody>
+        <tr style="background:rgba(239,68,68,.06)"><td>11-04 09:12</td><td><b>진행 중</b></td><td>2일 4시간</td><td>메모리(DIMM)</td><td class="mono">DIMM A3 · 32GB</td><td><span class="chip warn">주의</span> <span class="dim">“Correctable ECC errors exceeded threshold”</span></td><td class="dim">—</td><td class="dim">—</td><td>교차 ③ · OS MCE 1 (11-05 03:40) · SEL W 11-04 09:10</td><td><a href="#">#1842 자동 등록</a></td></tr>
+        <tr><td>10-28 14:03</td><td>10-28 14:03</td><td class="dim">—</td><td>PSU</td><td class="mono">PSU2</td><td><span class="chip warn">주의</span> <span class="dim">“Input voltage lost”</span></td><td><span class="chip">종료 기록 없음</span></td><td class="dim">—</td><td>SEL W PSU0002 11-05 03:12 (같은 PSU · 별건)</td><td class="dim">—</td></tr>
+        <tr><td>10-19 02:41</td><td>10-21 10:05</td><td>2일 7시간</td><td>디스크</td><td class="mono">Bay 4 · SAS 2.4TB</td><td><span class="chip bad">이상</span> <span class="dim">“Predictive failure”</span></td><td><span class="chip">부품 제거(교체)</span></td><td class="dim">—</td><td>SMART 예측 장애 → 교차 ② 해당</td><td><a href="#">#1790</a></td></tr>
+        <tr><td><span class="dim">시작 모름</span></td><td>10-09 08:20</td><td class="dim">—</td><td>메모리(DIMM)</td><td class="mono">DIMM B1</td><td><span class="chip warn">주의</span></td><td><span class="chip ok">정상 복귀</span></td><td class="dim">—</td><td class="dim">보존 기간 밖에서 열림 — 시작 시각 모름</td><td class="dim">—</td></tr>
+        <tr><td>09-30 11:50</td><td>10-02 12:14</td><td>2일 0시간</td><td>팬</td><td class="mono">FAN 3</td><td><span class="chip bad">이상</span></td><td><span class="chip ok">정상 복귀</span></td><td>10-01 edge-stale 6시간(엣지 보고 지연 — 장비 아님)</td><td class="dim">—</td><td class="dim">—</td></tr>
+      </tbody></table></div>
+    <div class="dim" style="font-size:11.5px;margin-top:10px;line-height:1.6">
+      ‘종료 기록 없음’ 은 해소 이벤트 없이 끝난 것이고 ‘정상 복귀’ 와 다르다 · ‘부품 제거’ 는 고친 것이 아니라 뽑은 것(교체 이력) · ‘수동 닫음’ 은 평균 지속에 넣지 않는다 · ‘보류 사유’ 는 그 기간에 상태를 못 읽은 이유(unknown · 장비 실패 · 컬렉션 실패 · 엣지 보고 지연 …)이고 장애가 아니다 · 식별 키가 바뀐 장애(key-migrated)는 한 건으로 합친다. 전부 기존 파트 장애 모듈(incidents.js)의 규칙 그대로 — 이 화면은 서버 하나로 좁혀 보여 줄 뿐 다시 판정하지 않는다.
+    </div>
+  </div>
+
+  <!-- 타임라인: 장애 + SEL + 교차 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">시간순 — 부품 전이 · iDRAC SEL/LC · OS 오류를 한 줄에</h2>
+      <div class="tl">
+        <div class="t">11-05 03:40</div><div class="e"><span class="chip info">OS</span> dmesg MCE 1건 (CPU 0 bank 7 · 메모리 컨트롤러) — 교차 ③ 근거</div>
+        <div class="t">11-05 03:12</div><div class="e"><span class="chip warn">SEL W</span> PSU0002 입력 전압 순간 저하(복구) — 장애 기록의 PSU2 건과 다른 이벤트(열림 없음)</div>
+        <div class="t">11-04 09:12</div><div class="e"><span class="chip bad">열림</span> DIMM A3 ‘주의’ — Correctable ECC errors exceeded threshold · 이슈 #1842 자동 등록</div>
+        <div class="t">11-04 09:10</div><div class="e"><span class="chip warn">SEL W</span> MEM0702 DIMM_A3 정정 가능 오류 임계 초과</div>
+        <div class="t">10-28 14:03</div><div class="e"><span class="chip warn">열림</span> PSU2 ‘주의’ — Input voltage lost · 같은 주기에 해소 이벤트 없음(종료 기록 없음)</div>
+        <div class="t">10-21 10:05</div><div class="e"><span class="chip">닫힘 · 제거</span> 디스크 Bay 4 — 빈 슬롯 관측(교체)</div>
+        <div class="t">10-19 02:41</div><div class="e"><span class="chip bad">열림</span> 디스크 Bay 4 ‘이상’ — Predictive failure · SMART 예측 장애 1</div>
+      </div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">세 출처(부품 전이 · SEL/LC · OS dmesg)를 시각으로만 정렬한다 — 인과는 적지 않고 ‘교차 판정’ 이 붙은 줄만 근거를 말한다.</div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:8px"><h2>함대 — 최근 90일 장애 기록 (범위 안 법인)</h2><span class="dim" style="font-size:12px">기존 파트 장애 도구의 ‘장애별’ 묶기를 그대로 — 법인·종류·상태 필터</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <select class="sel" aria-label="법인"><option>법인 전체</option><option>KR-SEL</option><option>PL-WAW</option><option>US-EAST</option></select>
+        <select class="sel" aria-label="상태"><option>진행 중 + 종료</option><option>진행 중만</option><option>종료만</option></select>
+        <span class="chip bad">디스크 9</span><span class="chip warn">메모리(DIMM) 5</span><span class="chip">PSU 3</span><span class="chip">팬 2</span><span class="chip">NIC 1</span>
+      </div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>서버</th><th>법인</th><th>부품</th><th>발생</th><th>상태</th><th>종료</th><th>지속</th></tr></thead>
+        <tbody>
+          <tr><td><a href="Faults.dc.html" style="font-weight:600">bm-pl1-db02</a></td><td class="dim">PL-WAW</td><td>DIMM A3</td><td>11-04</td><td><span class="chip warn">진행 중</span></td><td class="dim">—</td><td>2일</td></tr>
+          <tr><td><a href="Faults.dc.html" style="font-weight:600">bm-us1-fs03</a></td><td class="dim">US-EAST</td><td>디스크 Bay 11</td><td>11-03</td><td><span class="chip bad">진행 중</span></td><td class="dim">—</td><td>3일</td></tr>
+          <tr><td><a href="Faults.dc.html" style="font-weight:600">bm-kr1-gp04</a></td><td class="dim">KR-SEL</td><td>디스크 Bay 2</td><td>10-30</td><td><span class="chip">제거(교체)</span></td><td>11-01</td><td>2일</td></tr>
+          <tr><td><a href="Faults.dc.html" style="font-weight:600">bm-kr1-db01</a></td><td class="dim">KR-SEL</td><td>PSU2</td><td>10-28</td><td><span class="chip">종료 기록 없음</span></td><td>10-28</td><td class="dim">—</td></tr>
+          <tr><td><a href="Faults.dc.html" style="font-weight:600">bm-pl1-app03</a></td><td class="dim">PL-WAW</td><td>FAN 1</td><td>10-22</td><td><span class="chip ok">정상 복귀</span></td><td>10-23</td><td>1일</td></tr>
+          <tr><td><a href="Faults.dc.html" style="font-weight:600">bm-us1-cache02</a></td><td class="dim">US-EAST</td><td>NIC 포트 2</td><td>10-15</td><td><span class="chip">수동 닫음</span></td><td>10-20</td><td class="dim">—</td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">서버 이름을 누르면 그 서버의 ‘장애 기록’ 탭. 통합 보드의 하드웨어 E 칸이 이 수를 센다(열린 장애 + 5분 증가분). 범위 계정은 자기 법인 것만.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">출처 · 범위</h2>
+    <div class="dim" style="font-size:12.5px;line-height:1.6">
+      데이터는 기존 <b style="color:#e6edf6">파트 장애</b> 모듈(엣지가 iDRAC 부품 상태의 <b style="color:#e6edf6">전이만</b> 기록 → 중앙 push · `#/tools/part-faults` 의 열린 장애 · 장애별 · 종류별 · 이력)과 서버 센서의 최근 SEL/LC 이벤트, OS 스냅샷의 dmesg 다. 새 수집은 없다. 새로 만드는 것은 ① 서버 상세의 ‘장애 기록’ 탭(한 서버로 좁힌 incidents + SEL + dmesg 시간순) ② 통합 보드의 하드웨어 E 칸과 함대 표 ③ 교차 판정에 장애 기록을 연결하는 ‘연관’ 열이다.
+      수치·이름은 가상이다.
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

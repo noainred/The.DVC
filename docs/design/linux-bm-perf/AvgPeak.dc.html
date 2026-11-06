@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>평균 · 피크 — 시간축 동기화</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.dim{color:#8b9bb4}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{min-height:34px;padding:0 14px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer}
+.seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+.sel{min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5;white-space:nowrap}
+.row{display:grid;grid-template-columns:170px minmax(0,1fr) 150px;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid #1f2a40}
+.row .n{font-size:12.5px;font-weight:600}.row .n small{display:block;font-weight:500;color:#8b9bb4;font-size:11px}
+.row .v{font-size:12px;text-align:right}.row .v b{font-size:15px}
+h2{margin:0;font-size:15px;font-weight:700}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:12px;color:#8b9bb4"><a href="Main.dc.html">리눅스 베어메탈 통합 성능</a> › KR-SEL › <a href="Server.dc.html">bm-kr1-db01</a> › <b style="color:#e6edf6">추이 — 평균 · 피크</b></div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">평균 화면과 피크 화면 — 시간축 하나로 동기화</h1>
+      <div class="dim" style="font-size:12px;margin-top:4px">왼쪽 축·커서·구간(brush)을 두 화면이 공유한다. 평균 = 5분 주기 평균(지금 bmusage) · 피크 = 같은 5분 안의 최대값과 그 시각(아래 ‘수집 방식’ 중 선택) · 수치는 가상</div>
+    </div>
+    <div style="flex:1 1 20px"></div>
+    <div class="seg" role="group" aria-label="기간"><button type="button">6시간</button><button class="on" type="button">24시간</button><button type="button">7일</button><button type="button">30일</button></div>
+    <div class="seg" role="group" aria-label="배치"><button class="on" type="button">위·아래</button><button type="button">좌·우</button><button type="button">겹쳐 보기(평균 면 + 피크 선)</button></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" checked style="width:18px;height:18px"> 시간축 동기화</label>
+    <button class="btn" type="button">CSV (평균·피크 두 열)</button>
+  </div>
+
+  <!-- 지표군 선택 -->
+  <div class="card" style="padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;font-size:12.5px">
+    <span class="dim">지표군</span>
+    <span class="chip ok">CPU — 사용률 · 런큐(큐) · PSI</span><span class="chip ok">디스크 — busy · await · 대기열 깊이(큐) · IOPS</span><span class="chip ok">네트워크 — bps · 드롭 · softnet 백로그(큐) · TCP accept 큐 · 재전송</span><span class="chip ok">버퍼 — Dirty/Writeback 페이지 · 소켓 메모리 · 페이지 캐시</span>
+    <span style="flex:1 1 20px"></span>
+    <span class="dim">커서 13:35 · 구간 02:00~05:10 선택됨 → 아래 표가 그 구간의 평균/피크로 바뀐다</span>
+  </div>
+
+  <!-- 평균 화면 -->
+  <div class="card" style="border-color:rgba(59,130,246,.4)">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:6px"><h2>① 평균 — 5분 주기 평균 (usage_history avg)</h2><span class="chip info">출처 OS(SSH) · 결측 3점은 선을 끊는다</span><span class="dim" style="font-size:12px;margin-left:auto">세로 눈금은 지표마다 · 가로 시간축은 공유</span></div>
+    <svg viewBox="0 0 1300 330" role="img" aria-label="24시간 평균 추이 4줄: CPU 사용률, 디스크 busy, 네트워크 사용률, Dirty 페이지. 공유 시간축에 선택 구간 02:00에서 05:10 이 음영이고 커서가 13:35 에 있다" style="width:100%;height:auto;display:block">
+      <rect x="430" y="10" width="190" height="300" fill="rgba(34,211,238,.08)" stroke="rgba(34,211,238,.35)" stroke-dasharray="3 3"/>
+      <line x1="1240" y1="10" x2="1240" y2="310" stroke="#e6edf6" stroke-dasharray="3 3"/>
+      <text x="1236" y="22" fill="#e6edf6" font-size="11" text-anchor="end">13:35</text>
+      <line x1="150" y1="10" x2="150" y2="310" stroke="#243049"/>
+      <text x="10" y="40" fill="#e6edf6" font-size="12" font-weight="700">CPU 사용률 %</text><text x="10" y="56" fill="#8b9bb4" font-size="11">0–100</text>
+      <line x1="150" y1="80" x2="1280" y2="80" stroke="#1f2a40"/>
+      <polyline fill="none" stroke="#3b82f6" stroke-width="2" points="150,60 250,58 350,62 430,55 520,40 620,42 700,58 800,60 900,57 1000,50 1100,48 1200,45 1280,44"/>
+      <text x="10" y="112" fill="#e6edf6" font-size="12" font-weight="700">디스크 busy %</text><text x="10" y="128" fill="#8b9bb4" font-size="11">nvme1n1 · 0–100</text>
+      <line x1="150" y1="155" x2="1280" y2="155" stroke="#1f2a40"/>
+      <polyline fill="none" stroke="#f59e0b" stroke-width="2" points="150,145 250,143 350,146 430,130 480,105 560,102 620,112 700,142 800,144 900,140 1000,120 1100,98 1200,92 1280,90"/>
+      <text x="10" y="187" fill="#e6edf6" font-size="12" font-weight="700">네트워크 %</text><text x="10" y="203" fill="#8b9bb4" font-size="11">bond0 · 0–100</text>
+      <line x1="150" y1="230" x2="1280" y2="230" stroke="#1f2a40"/>
+      <polyline fill="none" stroke="#a855f7" stroke-width="2" points="150,222 250,221 350,223 430,214 520,206 620,208 700,220 800,221 900,219 1000,217 1100,214 1200,213 1280,212"/>
+      <text x="10" y="262" fill="#e6edf6" font-size="12" font-weight="700">Dirty 페이지 GB</text><text x="10" y="278" fill="#8b9bb4" font-size="11">상한 dirty_bytes 4GB</text>
+      <line x1="150" y1="305" x2="1280" y2="305" stroke="#1f2a40"/>
+      <polyline fill="none" stroke="#22d3ee" stroke-width="2" points="150,298 250,297 350,298 430,290 520,282 620,284 700,296 800,297 900,296 1000,292 1100,286 1200,283 1280,282"/>
+      <text x="150" y="325" fill="#8b9bb4" font-size="11">13:40 어제</text><text x="525" y="325" fill="#67e8f9" font-size="11" text-anchor="middle">02:00 ~ 05:10 (선택)</text><text x="1280" y="325" fill="#8b9bb4" font-size="11" text-anchor="end">13:35</text>
+    </svg>
+  </div>
+
+  <!-- 피크 화면 -->
+  <div class="card" style="border-color:rgba(239,68,68,.4)">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:6px"><h2>② 피크 — 같은 5분 안의 최대값 + 발생 시각 (usage_history peak · peak_at)</h2><span class="chip warn">출처 1초 샘플러(옵션 B) · 샘플 300/주기</span><span class="dim" style="font-size:12px;margin-left:auto">같은 시간축 · 같은 커서 · 같은 선택 구간 — 평균 선을 흐리게 깔아 간격(burst)을 보인다</span></div>
+    <svg viewBox="0 0 1300 330" role="img" aria-label="24시간 피크 추이 4줄: 같은 지표의 5분 내 최대값. 새벽 선택 구간에서 디스크 busy 피크가 100%, CPU 피크가 평균보다 35 포인트 높다" style="width:100%;height:auto;display:block">
+      <rect x="430" y="10" width="190" height="300" fill="rgba(34,211,238,.08)" stroke="rgba(34,211,238,.35)" stroke-dasharray="3 3"/>
+      <line x1="1240" y1="10" x2="1240" y2="310" stroke="#e6edf6" stroke-dasharray="3 3"/>
+      <text x="1236" y="22" fill="#e6edf6" font-size="11" text-anchor="end">13:35</text>
+      <line x1="150" y1="10" x2="150" y2="310" stroke="#243049"/>
+      <text x="10" y="40" fill="#e6edf6" font-size="12" font-weight="700">CPU 피크 %</text><text x="10" y="56" fill="#8b9bb4" font-size="11">최고 코어 · 0–100</text>
+      <line x1="150" y1="80" x2="1280" y2="80" stroke="#1f2a40"/>
+      <polyline fill="none" stroke="#3b82f6" stroke-width="1" opacity=".35" points="150,60 250,58 350,62 430,55 520,40 620,42 700,58 800,60 900,57 1000,50 1100,48 1200,45 1280,44"/>
+      <polyline fill="none" stroke="#f87171" stroke-width="2" points="150,40 250,44 350,38 430,30 520,14 620,16 700,36 800,42 900,38 1000,24 1100,20 1200,16 1280,15"/>
+      <text x="10" y="112" fill="#e6edf6" font-size="12" font-weight="700">디스크 busy 피크 %</text><text x="10" y="128" fill="#8b9bb4" font-size="11">nvme1n1</text>
+      <line x1="150" y1="155" x2="1280" y2="155" stroke="#1f2a40"/>
+      <polyline fill="none" stroke="#f59e0b" stroke-width="1" opacity=".35" points="150,145 250,143 350,146 430,130 480,105 560,102 620,112 700,142 800,144 900,140 1000,120 1100,98 1200,92 1280,90"/>
+      <polyline fill="none" stroke="#f87171" stroke-width="2" points="150,120 250,118 350,124 430,100 480,88 560,88 620,90 700,118 800,122 900,116 1000,94 1100,88 1200,88 1280,88"/>
+      <text x="10" y="187" fill="#e6edf6" font-size="12" font-weight="700">네트워크 피크 %</text><text x="10" y="203" fill="#8b9bb4" font-size="11">bond0</text>
+      <line x1="150" y1="230" x2="1280" y2="230" stroke="#1f2a40"/>
+      <polyline fill="none" stroke="#a855f7" stroke-width="1" opacity=".35" points="150,222 250,221 350,223 430,214 520,206 620,208 700,220 800,221 900,219 1000,217 1100,214 1200,213 1280,212"/>
+      <polyline fill="none" stroke="#f87171" stroke-width="2" points="150,205 250,200 350,206 430,190 520,170 620,176 700,200 800,204 900,198 1000,196 1100,190 1200,188 1280,186"/>
+      <text x="10" y="262" fill="#e6edf6" font-size="12" font-weight="700">Dirty 피크 GB</text><text x="10" y="278" fill="#8b9bb4" font-size="11">상한 4GB = 쓰기 지연 시작</text>
+      <line x1="150" y1="305" x2="1280" y2="305" stroke="#1f2a40"/>
+      <line x1="150" y1="262" x2="1280" y2="262" stroke="#f87171" stroke-dasharray="3 4" opacity=".6"/>
+      <polyline fill="none" stroke="#22d3ee" stroke-width="1" opacity=".35" points="150,298 250,297 350,298 430,290 520,282 620,284 700,296 800,297 900,296 1000,292 1100,286 1200,283 1280,282"/>
+      <polyline fill="none" stroke="#f87171" stroke-width="2" points="150,290 250,288 350,291 430,276 520,264 560,263 620,268 700,286 800,288 900,286 1000,280 1100,270 1200,266 1280,265"/>
+      <text x="150" y="325" fill="#8b9bb4" font-size="11">13:40 어제</text><text x="525" y="325" fill="#67e8f9" font-size="11" text-anchor="middle">02:00 ~ 05:10 (선택)</text><text x="1280" y="325" fill="#8b9bb4" font-size="11" text-anchor="end">13:35</text>
+    </svg>
+    <div class="dim" style="font-size:11.5px;margin-top:6px">피크 선 아래 흐린 선이 평균이다. 둘 사이가 넓을수록 ‘짧은 폭주(burst)’ — 평균만 보면 놓치는 구간. 피크 점을 누르면 그 5분 안의 발생 시각(peak_at)과 1초 샘플 300개를 펼친다(엣지 보관 7일).</div>
+  </div>
+
+  <!-- 큐 · 버퍼 표 (선택 구간) -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>큐 · 버퍼 사용량 — 선택 구간 02:00~05:10 의 평균 · 피크 · 상한 대비</h2><span class="dim" style="font-size:12px">‘상한’ 은 그 서버에서 읽은 설정값(sysctl · /sys · ethtool) — 화면에 숫자를 박지 않는다 · 못 읽으면 ‘—’</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>자원</th><th>큐 · 버퍼</th><th>읽는 곳</th><th>평균</th><th>피크 (시각)</th><th>상한</th><th>피크/상한</th><th>판정</th></tr></thead>
+      <tbody>
+        <tr><td>CPU</td><td>런큐 (실행 대기 스레드)</td><td class="mono">/proc/loadavg · /proc/stat procs_running</td><td>9.8</td><td>41 (03:12)</td><td>32코어</td><td class="bad">1.3</td><td><span class="chip bad">피크 포화</span></td></tr>
+        <tr><td>CPU</td><td>PSI cpu some (avg10)</td><td class="mono">/proc/pressure/cpu</td><td>4%</td><td>38% (03:12)</td><td class="dim">—</td><td class="dim">—</td><td><span class="chip warn">평균은 정상 · 피크 포화</span></td></tr>
+        <tr><td>디스크</td><td>대기열 깊이 (in_flight)</td><td class="mono">/proc/diskstats 12열</td><td>9.2</td><td>63 (02:48)</td><td>nr_requests 1023</td><td class="ok">0.06</td><td><span class="chip warn">await 급등 — 큐 한계 아님</span></td></tr>
+        <tr><td>디스크</td><td>await (요청당 대기)</td><td class="mono">diskstats 7·11열 ÷ 4·8열</td><td>18ms</td><td>212ms (02:48)</td><td class="dim">—</td><td class="dim">—</td><td><span class="chip bad">피크 포화</span></td></tr>
+        <tr><td>디스크</td><td>Dirty · Writeback 페이지</td><td class="mono">/proc/meminfo Dirty · Writeback</td><td>1.1GB</td><td>4.0GB (02:51)</td><td>vm.dirty_bytes 4GB</td><td class="bad">1.0</td><td><span class="chip bad">쓰기 지연(throttle) 발생</span></td></tr>
+        <tr><td>네트워크</td><td>softnet 백로그 드롭 · time_squeeze</td><td class="mono">/proc/net/softnet_stat 2·3열</td><td>0</td><td>0</td><td>netdev_max_backlog 1000</td><td class="ok">0</td><td><span class="chip ok">정상</span></td></tr>
+        <tr><td>네트워크</td><td>qdisc 백로그 (송신 큐)</td><td class="mono">tc -s qdisc show dev bond0 (backlog)</td><td>12KB</td><td>1.8MB (03:05)</td><td>txqueuelen 1000 pkt</td><td class="warn">0.4</td><td><span class="chip warn">송신 폭주</span></td></tr>
+        <tr><td>네트워크</td><td>TCP accept 큐 (Recv-Q/Send-Q · LISTEN)</td><td class="mono">ss -ltn</td><td>0 / 4096</td><td>7 / 4096 (03:05)</td><td>somaxconn 4096</td><td class="ok">0.002</td><td><span class="chip ok">정상</span></td></tr>
+        <tr><td>네트워크</td><td>소켓 메모리 (TCP mem)</td><td class="mono">/proc/net/sockstat TCP mem · tcp_mem</td><td>18k 페이지</td><td>61k (03:05)</td><td>tcp_mem pressure 96k</td><td class="warn">0.64</td><td><span class="chip ok">정상 (압박 전)</span></td></tr>
+        <tr><td>네트워크</td><td>NIC 링 버퍼 사용량</td><td class="dim">직접 읽을 수 없음</td><td class="dim">—</td><td class="dim">—</td><td>ring rx 512 / 4096</td><td class="dim">—</td><td><span class="chip">관측 불가 — rx_dropped.nic 로 간접</span></td></tr>
+        <tr><td>메모리</td><td>페이지 캐시 · 스왑</td><td class="mono">/proc/meminfo Cached · SwapUsed · vmstat pswpout</td><td>49GB · 0/s</td><td>52GB · 0/s</td><td class="dim">—</td><td class="dim">—</td><td><span class="chip ok">정상</span></td></tr>
+      </tbody></table></div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px">읽기: 새벽 구간의 디스크 await 피크(212ms)는 대기열 깊이 63 과 Dirty 4GB(상한 도달)가 같이 올라 있다 — 큐 한계(nr_requests)가 아니라 쓰기 폭주에 writeback 이 밀린 쪽. 평균만 보면 await 18ms 로 ‘경계’ 에 머문다. 판정 문장은 상관을 ‘후보’ 로만 말한다.</div>
+  </div>
+
+  <!-- 수집 방식 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">피크를 어떻게 모으나 — 3안 (정직하게)</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>안</th><th>방법</th><th>피크의 뜻</th><th>부담</th><th>판정</th></tr></thead>
+        <tbody>
+          <tr><td><b>A</b> 세션 안 짧은 샘플</td><td>지금 SSH 1회 안에서 1초 × N(예 10)회 /proc 를 읽어 그 안의 최대</td><td>5분 중 <b>10초 창의 피크</b> — 나머지 290초는 모른다</td><td class="ok">추가 설치 없음 · 세션 +10초(예산 50초 안)</td><td><span class="chip">기본값 — 작게 시작</span></td></tr>
+          <tr><td><b>B</b> 서버 경량 샘플러 <span class="chip warn">권장(옵트인)</span></td><td>systemd timer + 셸 스크립트가 1초마다 /proc 를 읽어 5분 avg/max/peak_at 을 로컬 파일에 쓰고, SSH 가 그 파일을 가져간다(원시 1초 샘플은 서버에 7일)</td><td>5분 전체의 <b>진짜 피크</b>(1초 해상도)</td><td class="warn">서버마다 스크립트 배포(패키지·데몬 아님 — 포탈이 SSH 로 설치·검증 · 법인 단위 옵트인) · CPU 1% 미만 목표(실측 필요)</td><td><span class="chip warn">피크가 필요한 서버만</span></td></tr>
+          <tr><td><b>C</b> 커널·BMC 가 주는 근사</td><td>PSI avg10/avg60(커널 10초·60초 창) · iDRAC 텔레메트리 리포트의 집계(장비·리포트에 따라 Peak 필드가 있을 수 있음 — 미확인)</td><td>포화의 10초 근사만 · 사용률 피크는 아님</td><td class="ok">추가 없음</td><td><span class="chip">A·B 의 보조</span></td></tr>
+        </tbody></table></div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">화면은 피크 값 옆에 <b style="color:#e6edf6">어느 안으로 모은 것인지</b>(창 10초 / 1초 샘플 300개 / PSI 근사)를 항상 적는다 — ‘피크’ 라는 한 단어로 다른 세 가지를 섞지 않는다. 평균은 세 안 모두 지금 그대로다.</div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">동기화 규칙 · 저장</h2>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:12.5px" class="dim">
+        <li><b style="color:#e6edf6">한 시간축</b>: 두 화면은 같은 start/end · 같은 롤업(5분 → 7일은 30분, 30일은 2시간 — 롤업은 avg 는 평균의 평균, peak 는 최대의 최대)을 쓰고 응답이 실제 롤업을 돌려준다.</li>
+        <li><b style="color:#e6edf6">커서·구간 공유</b>: 한쪽에서 hover·brush 하면 다른 쪽이 같은 x 로 움직이고, 아래 표가 선택 구간의 평균/피크로 바뀐다. 동기화 체크를 끄면 각자 움직인다.</li>
+        <li><b style="color:#e6edf6">결측</b>: 못 읽은 주기는 두 화면 모두 선을 끊는다 · 피크 샘플이 없는 주기(옵트인 전)는 피크 화면에 ‘—’ 띠로 표시(0 으로 그리지 않음).</li>
+        <li><b style="color:#e6edf6">저장</b>: usage_history 에 지표마다 <span class="mono">_avg · _peak · _peak_at</span> 열 — 지표를 열로 두는 기존 판단 그대로(행 수 불변). 일 롤업은 이미 평균+최대를 함께 둔다.</li>
+        <li><b style="color:#e6edf6">큐·버퍼의 ‘상한’</b> 은 튜닝 탭(⑤)이 읽는 같은 값(nr_requests · dirty_bytes · netdev_max_backlog · somaxconn · tcp_mem · ring)을 재사용한다 — 두 곳에서 따로 읽지 않는다.</li>
+        <li>400 폭: 두 화면을 세로로, 표는 가로 스크롤 — ③ 과 같은 규칙.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
