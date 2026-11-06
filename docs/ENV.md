@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **707개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **708개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-04)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-06)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (217)
+## 공통 (218)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -76,7 +76,7 @@
 | `BMUSAGE_ACTIVITY_MAX` | `500` |  | bmusage/activityLog.js |
 | `BMUSAGE_ALERT_MAX` | `40` |  | bmusage/notify.js |
 | `BMUSAGE_CMD_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
-| `BMUSAGE_CONCURRENCY` | `4` |  | bmusage/poller.js |
+| `BMUSAGE_CONCURRENCY` | `32` |  | bmusage/poller.js |
 | `BMUSAGE_COUNT_CACHE_MS` | `60000` |  | bmusage/db.js |
 | `BMUSAGE_DEVICE_TIMEOUT_MS` | `60000` |  | bmusage/poller.js |
 | `BMUSAGE_ENABLED` | `''` |  | bmusage/settings.js |
@@ -87,6 +87,7 @@
 | `BMUSAGE_ENT_PROBE_PER_RUN` | `10` |  | bmusage/poller.js |
 | `BMUSAGE_ENT_SSH_READY_MS` | `12000` |  | bmusage/collectors/idracEnterprise.js |
 | `BMUSAGE_ENTERPRISE` | `''` |  | bmusage/settings.js |
+| `BMUSAGE_ENVELOPE_MAX_BYTES` | `8` |  | bmusage/edgePull.js |
 | `BMUSAGE_LIST_BUDGET` | `20` |  | bmusage/poller.js |
 | `BMUSAGE_SESSION_BUDGET_MS` |  |  | bmusage/collectors/osSsh.js |
 | `BMUSAGE_SSH_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
@@ -896,4 +897,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 707
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 708
