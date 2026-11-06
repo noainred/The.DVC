@@ -152,7 +152,7 @@ function Overview({ rep, ctx, onFeatures }) {
               <thead><tr><th>기능</th><th>위치</th><th className="r">열람</th><th className="r">사용자</th><th className="r">머문 시간</th><th className="r">1회 평균</th><th>비중</th><th className="r">지난 {rep.range.days}일 대비</th></tr></thead>
               <tbody>
                 {rep.byKey.map((r) => {
-                  const m = keyMeta(r.k, ctx); const tr = trendOf(r.views, r.prevViews);
+                  const m = keyMeta(r.k, ctx); const tr = trendOf(r.views, r.prevViews, t.recDays, rep.prev?.onDays);
                   return (
                     <tr key={r.k}>
                       <td><b>{m.label}</b></td>
@@ -169,7 +169,7 @@ function Overview({ rep, ctx, onFeatures }) {
               </tbody>
             </STable>
           )}
-          {rep.byKey.length > 15 && <div className="muted fu-note">나머지 {rep.byKey.length - 15}개 기능 {fmtInt(rep.byKey.slice(15).reduce((a, r) => a + r.views, 0))}회 · ‘지난 기간 대비’ 는 바로 앞 같은 길이 기간의 열람과 비교 · 그 기간에 기록이 없으면 ‘—’</div>}
+          {rep.byKey.length > 15 && <div className="muted fu-note">나머지 {rep.byKey.length - 15}개 기능 {fmtInt(rep.byKey.slice(15).reduce((a, r) => a + r.views, 0))}회 · ‘지난 기간 대비’ 는 바로 앞 같은 길이 기간과 비교(기록한 날 하루 평균끼리) · 그 기간의 모든 날에 기록이 있지 않으면 ‘—’</div>}
       </div>
 
       <div className="fu-row3">
@@ -323,7 +323,7 @@ function Features({ rep, ctx }) {
           <thead><tr><th>기능</th><th>종류</th><th>어디서 여나</th><th>권한</th><th className="r">열람</th><th className="r">사용자</th><th className="r">머문 시간</th><th className="r">비중</th><th className="r">지난 기간 대비</th><th className="r">마지막 사용</th></tr></thead>
           <tbody>
             {shown.map((r) => {
-              const tr = trendOf(r.views, r.prevViews);
+              const tr = trendOf(r.views, r.prevViews, rep.totals.recDays, rep.prev?.onDays);
               const zero = !(r.views > 0);
               return (
                 <tr key={r.k} className={zero ? 'z' : ''}>

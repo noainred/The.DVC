@@ -212,6 +212,17 @@ test('④-2 기본 켜짐(켠 기록 없음) — 가장 오래된 기록 날 앞
   const r2 = await store.buildUsageReport({ days: 2, now: NOW + 1000 });
   assert.deepEqual(r2.daily.map((d) => d.rec), ['off', 'on']);
   assert.equal(r2.byKey[0].views, 1);
+  // 직전 기간이 일부만 기록되어 있으면 비교하지 않는다(부분 합 — 거짓 증가 방지)
+  resetAll();
+  store.recordUsage({ user: u, k: 'tab:vms', hit: true, now: NOW - 2 * DAY_MS });   // 기록 시작 = 2일 전 → 직전 2일 기간(3일 전 · 2일 전) 중 하루만 기록
+  await store.flushUsage(NOW - 2 * DAY_MS + 1000);
+  store.recordUsage({ user: u, k: 'tab:vms', hit: true, now: NOW - DAY_MS });
+  const r3 = await store.buildUsageReport({ days: 2, now: NOW + 1000 });
+  assert.equal(r3.prev.available, false, '직전 2일 중 1일만 기록 — 비교하지 않는다');
+  assert.equal(r3.byKey[0].prevViews, null);
+  const r4 = await store.buildUsageReport({ days: 1, now: NOW + 1000 });
+  assert.equal(r4.prev.available, true, '직전 1일(어제)은 날마다 기록 — 비교한다');
+  assert.equal(r4.prev.days, 1);
 });
 
 /* ── ⑤ 라우트 ─────────────────────────────────────────────────────────── */

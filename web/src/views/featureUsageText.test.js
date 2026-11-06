@@ -60,6 +60,7 @@ describe('수치 · 결측', () => {
     expect(trendOf(106, 100)).toEqual({ text: '+6%', dir: 'up' });
     expect(trendOf(98, 100)).toEqual({ text: '−2%', dir: 'flat' });
     expect(trendOf(50, 100).dir).toBe('dn');
+    expect(trendOf(290, 300, 29, 30)).toEqual({ text: '0%', dir: 'flat' }, '이번 기간에 꺼진 날이 있으면 하루 평균끼리');
   });
 });
 

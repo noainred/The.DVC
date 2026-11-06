@@ -141,9 +141,13 @@ export function fmtBytes(b) {
 export const avgPerView = (ms, views) => (n0(views) && views > 0 && n0(ms) != null ? fmtDur(ms / views) : '—');
 export const pctText = (part, total) => (n0(total) && total > 0 && n0(part) != null ? `${((part / total) * 100).toFixed(1)}%` : '—');
 
-/** 지난 기간 대비 — prev 가 null 이면(그 기간 기록 없음) '—', prev 0 이면 '새로' . */
-export function trendOf(cur, prev) {
+/**
+ * 지난 기간 대비 — prev 가 null 이면(그 기간 기록이 날마다 있지 않음) '—', prev 0 이면 '새로'.
+ * 기록한 날 수가 다르면(이번 기간에 꺼진 날이 있으면) 하루 평균끼리 비교한다: curDays · prevDays 를 주면 cur/curDays 와 prev/prevDays 를 견준다.
+ */
+export function trendOf(cur, prev, curDays = 0, prevDays = 0) {
   if (prev == null) return { text: '—', dir: 'flat' };
+  if (curDays > 0 && prevDays > 0 && curDays !== prevDays) { cur /= curDays; prev /= prevDays; }
   if (prev === 0) return cur > 0 ? { text: '새로', dir: 'up' } : { text: '—', dir: 'flat' };
   const d = Math.round(((cur - prev) / prev) * 100);
   return { text: `${d > 0 ? '+' : d < 0 ? '−' : ''}${Math.abs(d)}%`, dir: d >= 3 ? 'up' : d <= -3 ? 'dn' : 'flat' };

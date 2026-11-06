@@ -269,7 +269,8 @@ export async function buildUsageReport({ days, from, to, now = Date.now() } = {}
     await yieldNow();
   }
 
-  // 직전 같은 길이 기간 — 기능별 '지난 기간 대비'. 그 기간에 기록이 하나도 켜져 있지 않았으면 비교값은 null(0% 가 아니다).
+  // 직전 같은 길이 기간 — 기능별 '지난 기간 대비'. **그 기간의 모든 날에 기록이 있을 때만** 비교한다(일부만 있으면 부분 합 —
+  //   기록을 시작한 지 며칠 안 된 기간과 비교하면 +400% 같은 거짓 증가가 나온다. v2.913 Chromium 판독). 못 하면 null(0% 가 아니다).
   const prev = new Map(); let prevViews = 0; let prevOnDays = 0;
   for (let i = fromIdx - n; i < fromIdx; i++) {
     if (dayRecState(i, iv, now) === 'off') continue;
@@ -296,15 +297,16 @@ export async function buildUsageReport({ days, from, to, now = Date.now() } = {}
   const tot = { views: 0, ms: 0 };
   for (const a of byKey.values()) { tot.views += a.views; tot.ms += a.ms; }
   const recDays = daily.filter((d) => d.rec !== 'off').length;
+  const prevOk = prevOnDays === n;
   return {
     ok: true,
     range: { from: dayLabel(fromIdx), to: dayLabel(toIdx), days: n, today: dayLabel(today), partialToday: toIdx === today },
     settings: { enabled: s.enabled, idleMin: s.idleMin, keepDays: s.keepDays },
     totals: { views: tot.views, ms: tot.ms, activeUsers: users.length, usedKeys: byKey.size, recDays },
-    prev: { available: prevOnDays > 0, views: prevOnDays > 0 ? prevViews : null, onDays: prevOnDays },
-    byKey: [...byKey.values()].map((a) => ({ k: a.k, views: a.views, ms: a.ms, users: a.users.size, last: a.last, prevViews: prevOnDays > 0 ? (prev.get(a.k) || 0) : null }))
+    prev: { available: prevOk, views: prevOk ? prevViews : null, onDays: prevOnDays, days: n },
+    byKey: [...byKey.values()].map((a) => ({ k: a.k, views: a.views, ms: a.ms, users: a.users.size, last: a.last, prevViews: prevOk ? (prev.get(a.k) || 0) : null }))
       .sort((a, b) => b.views - a.views || (a.k < b.k ? -1 : 1)),
-    prevKeys: prevOnDays > 0 ? [...prev.entries()].filter(([k]) => !byKey.has(k)).map(([k, v]) => ({ k, prevViews: v })) : [],
+    prevKeys: prevOk ? [...prev.entries()].filter(([k]) => !byKey.has(k)).map(([k, v]) => ({ k, prevViews: v })) : [],
     users, idle, userKeys, daily,
     gaps: gapsIn(iv, dayStartMs(fromIdx), Math.min(dayStartMs(toIdx) + DAY_MS, now), s),
     generatedAt: now,
