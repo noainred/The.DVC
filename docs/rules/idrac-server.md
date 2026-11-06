@@ -17,6 +17,7 @@
 - (원래 517행) '전체 조회' 분기에서 파티션 키를 빠뜨리지 말 것
 - (원래 520행) 식별 키 충돌을 조용히 두지 말 것
 - (원래 526행) 인메모리 상태 맵은 대상 목록을 기준으로 정리한다
+- (v2.919) 리눅스 베어메탈 통합 성능 모니터링 1단계 — 같은 SSH 1회에 구획 추가 · USE 판정 코어 하나 · 하드웨어 축은 이미 가진 데이터만
 - (원래 746행) iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
 - (원래 844행) 서버 온도 — 히트맵 보드(시안 B). '못 읽은 값' 을 정상으로도 이상으로도 세지 않는다
 - (원래 1030행) v2.728 — 엣지 축약 인벤토리는 부품 이름·health·state 를 싣고, 중앙 `INV_SHAPE` 와 한 쌍으로 넓힌다
@@ -337,6 +338,48 @@
   들고 있으면 등록부에서 서버가 빠져도 프로세스 수명 내내 남는다(누수). 더 나쁜 것 — 서버가
   **되돌아오면** 몇 시간 전 카운터와 비교해 `MAX_SPAN_MS` 상한에 걸려 그 주기가 통째로 `null` 이
   되고 '첫 수집' 이라고 말하지도 않는다. 매 주기 `live` 집합으로 걸러낼 것.
+- ⚠⚠ **리눅스 베어메탈 통합 성능 모니터링 1단계(v2.919 예정 — 서버만) — 같은 SSH 1회에 구획을 더하고, 판정은 엣지 한 곳·USE 칸마다 code 로**
+  (`bmusage/{collectors/osSsh.js,parse/linuxProc.js,rates.js,usage.js,perfCols.js,useJudge.js,hwFacts.js,perfView.js,db.js,edgePull.js}` ·
+  `central/{bmUsageEdgePull.js,bmPerfSanitize.js}` · `routes/api/bmUsage.js`. 설계 `docs/design/linux-bm-perf/README.md` §3.2·§4 · 사용자 결정 2026-11-07 '8단계 전부 순차 구현'.
+  회귀 `server/test/bmPerf2919.test.js`(30건 · 줄 변이 24건 중 23건 검출 — 1건(PSI 전부 absent → none)은 지금 칸 구성에서 도달하지 않는 등가 변이 · 기준판 f794b98 파일 되돌림 10/10 검출):
+  - **구획**: `##STAT` 은 `/proc/stat` 전체(cpu 합계·cpuN·ctxt·intr·procs_*; cpuN 줄 수 = 코어 수) · `##LOAD` · `##PSI`(`/proc/pressure/*` — 없으면 **0줄 = absent**) ·
+    `##VMSTAT`(pswpin·pswpout·pgmajfault·oom_kill) · `##SNMP`(Tcp 두 줄) · `##BLKQ` · `##SYSCTL`(화이트리스트 경로 `parse/linuxProc.js SYSCTL_PATHS`) · `##IRQ`(awk 요약 + irqbalance) ·
+    `##DFI`(`df -P -i` 등록 마운트) · `##END`. 기존 `##DISK`·`##NET` 명령은 그대로이고 파서가 14열·16열을 다 쓴다. 왕복 1회·세션 예산 산수는 바뀌지 않았다.
+    새 구획은 기존 구획 **뒤**에 두고 명령 전체를 `head -c OUTPUT_MAX_BYTES`(1MiB)로 감싼다 — `##END` 가 오지 않으면 `truncated`(그 뒤 구획은 missing). sshExec 4MB 상한에서 결과가 통째로 버려지기 전에 우리가 먼저 자른다.
+  - ⚠⚠ **sysctl 파일을 셸 `read` 로 읽지 말 것**(이 컨테이너 dash 실측): dash 는 1바이트씩 읽고 sysctl 정수 파일은 오프셋 0 이 아니면 EOF 라 `swappiness 60` 이 `6` 으로 읽혔다(오류 없이 틀린 값). `grep -H ''` 한 번으로 읽는다.
+  - ⚠ **원시 idle 은 `idleRaw`** — `idle` 이름은 기존 규약(idle+iowait)이 쓴다. 분해 필드로 덮으면 cpu_pct 와 분해가 서로 다른 idle 을 쓴다(자체 실측에서 잡았다).
+  - **absent vs missing**: 구획 표지 미도착 = missing · 표지는 왔는데 빈 줄만 = absent · 줄은 있는데 파싱 실패 = missing(`readSection`). 판정 칸 code 는 `ok|warn|bad|none(absent)|missing|nopath(경로 없음)` 이고
+    none·missing·nopath 는 병목·포화·오류 판정에 넣지 않고 **따로 센다**.
+  - **열**: 새 지표 열 28개는 `perfCols.js PERF_COLS` 하나가 계약이다(자원·USE 칸·judged). 이력·최신값은 열 그대로, 일 롤업은 `<열>_max` 만(포화·오류는 피크가 뜻이다).
+    최신값 전용: `os_at`·`idrac_at`(그 경로의 **마지막 성공** — 이번에 못 읽었으면 COALESCE 로 지킨다) · `detail_json`(장치별 — 디스크·NIC 각 32 상한) · `tuning_json`(sysctl·THP·governor·hugepages·blkq·irq).
+    JSON 열은 64KB 를 넘으면 잘린 JSON 대신 `{truncated:true}`. 열 추가는 `migratePerfColumns`(ALTER ADD COLUMN · 멱등) — 기존 DB 와 새 DB 가 같은 경로다.
+  - **rates**: 첫 표본·리셋(음수)·간격 비정상은 null(기존 규약). I/O 0건 간격의 await·보낸 세그먼트 0 의 재전송률은 null(지어내지 않는다). 대표값은 장치 중 최대(maxOrNull) ·
+    드롭·오류는 **물리 NIC 만**(veth·bridge 드롭은 회선 드롭이 아니다). 오류·드롭·OOM 은 ‘연속 증가 주기 수’(streak)를 `_prev` 에 들고 간다(null 은 판정 보류 — 끊지 않는다).
+  - **판정 코어는 `useJudge.js` 하나**(웹이 복제하지 않는다): 기준값은 `settings.perf`(이 노드 설정 · `PERF_DEFAULTS` — ‘추정’ 값은 주석에 그렇게 적었다)이고 API 가 내려준다.
+    ‘병목’ = 한 자원의 세 칸 중 둘 이상 bad · ‘포화’ = S bad · ‘오류’ = E bad · 증가분 > 0 → warn, `errRepeatBad` 주기 연속 → bad. 판정 한 줄(`line`)도 이 노드가 만들고 중앙은 그대로 전한다.
+    ⚠ `perf` 는 중앙 배포 키(`DISTRIBUTED_KEYS`)에 넣지 않았다 — 넣으면 배포 서명이 바뀌어 구버전 엣지가 영원히 ‘적용 대기’ 다(전 엣지가 이 판 이상일 때 넣는다).
+  - ⚠⚠ **하드웨어 축·교차 판정은 이미 가진 데이터만**(`hwFacts.js` — Redfish 호출 0): 전력 W(idrac/db latest) · cap(인벤토리 powerCap) · 흡기·CPU(sensorStore) · DIMM·SMART 예측·SEL(인벤토리) ·
+    부품 장애(partfault openFaults — DB 가 없는 노드에 파일을 만들지 않는다). **받지 않는 값**(스로틀 · ECC 정정 수 · SMART 재할당 · NIC CRC)은 null → missing 이고 교차 ④ 는 단정하지 않는다.
+    교차 판정은 커버리지 `both` 일 때만, ‘후보’ 로만 말한다. 커버리지는 두 경로 마지막 성공이 신선도 한계(주기 × 3, 최소 15분) 안인가로 정한다.
+  - **엣지 봉투·정제**: 봉투에 `perf`(판정 항목 — 근거·장치별·튜닝·하드웨어 사실 포함) · `perfThresholds` · `perfCols` 를 싣고 행에서 JSON 문자열 열을 뗀다. 중앙은 `central/bmPerfSanitize.js`
+    화이트리스트(아는 필드만 · enum 밖 code 는 missing · 장치 32 · 문자열 상한)로 담고 새 수치 열은 수로 좁힌다(기존 9개 열은 예전 계약 그대로 원시값).
+  - **API**: `GET /tools/bm-usage` 에 `perf`(code 표)·`perfThresholds`·`perfDefaults`·`perfCols` 추가(기존 필드 불변 — 행의 JSON 열만 뗐다). 서버 1대 상세는
+    ⚠ **`GET /tools/bm-usage/perf/:key`**(설계 지시는 `/tools/bm-perf/:key` 였다 — 새 첫 세그먼트는 `auth/toolAccess.js` 도구 매핑 밖이라 ‘베어메탈 사용률’ 을 거부당한 사용자도 읽게 된다. 같은 도구의 하위 경로로 두었다).
+    scope 교집합 · 범위 밖·귀속 없음·없는 키 404 · 엣지 위임 서버는 보관분(엣지 판정) 그대로 · `memoJson` + 범위 서명 + 역할 + 마지막 수집 시각. `memoJson` 은 계산 결과의 `__status`(≠200)를 그 상태로 보낸다(캐시 경로 404).
+  - ⚠⚠ **반증(review-s1) 반영 — 되돌리지 말 것**(회귀 `server/test/bmPerf2919Review.test.js`):
+    · **D1** 출력이 잘리면(##END 미도착) **마지막 구획을 통째로 버린다**(cutSections — 숫자 중간에서 잘린 io_ticks 를 카운터로 쓰면 다음 주기 가짜 100% 가 원시·일 롤업에 남는다) ·
+      기존 구획(MEM·DISK·NET·NETINFO·FC·DF)에도 `head -n (상한+1)`(DISK 10,000줄) — 넘으면 linesCapped · 전체 `head -c` 는 `EXEC_MAX_OUTPUT − 256KB` 이고
+      구획 상한 × 줄 최대 바이트(가정)의 합(`SECTION_BYTES_SUM`)보다 크다(테스트 고정). 1단계 초판의 1MiB 상한은 예전 다섯 지표를 퇴행시켰다.
+    · **D2** 엣지 봉투는 `ENVELOPE_MAX_BYTES`(기본 8MB · 중앙 16MB 의 절반) 안으로 — 넘치면 성능 상세 → code 표 → 전부 제거 순으로 빼고 `perfTruncated` 로 밝힌다. 다섯 지표 행·대상은 언제나 남는다.
+    · **D3** 중앙 정제가 엣지 시각(ts·osAt·idracAt·detail.at·tuning.at·hw 시각)을 수신 시각으로 자르고 원본은 `edgeTsRaw`(`util/clampEdgeTs.js` — corpUsage 와 같은 함수).
+    · **D4** 행이 신선도 한계(API `freshMs`)를 넘으면 cpu·mem·disk·net 칸은 `stale`(판정에 넣지 않고 따로 센다 · 판정 ‘오래됨’). 인벤토리 캐시는 `inventoryFreshMsFor`(주 폴러 인벤토리 주기 30분 × 4 와 freshMs 중 큰 값) 안일 때만 iDRAC ‘읽음’.
+    · **D5** 경로가 있는 칸 중 판정한 칸이 `minJudgedPct`(기본 50 — 추정) 미만이면 ‘정상’ 대신 ‘대부분 못 읽음’(partial). 판정 한 줄은 ‘읽은 칸 j/a’ 를 늘 붙인다.
+    · **D6** `migratePerfColumns` 는 실패를 콘솔 오류로 남기고 `migrateError` 를 insertUsage 결과·dbStatus·폴러 `_last.dbMigrateError` 로 올린다. 적재는 **실제로 있는 열만** 쓴다 —
+      기존 db 모듈은 열기 실패를 ‘DB 없이 동작’ 으로 두는 관행인데, 열 하나 때문에 DB 전체를 끄면 다섯 지표까지 멈추므로 그 열만 빼고 계속한다.
+    · **D8** 명령 앞 `export LC_ALL=C;`(한국어 로캘의 번역된 df 머리글).
+    · 미룬 것(D7·D9~D15)은 설계 README §6 의 11번.
+  - ⚠ **정직 기록**: 표본은 커널 문서 형식 + 이 개발 컨테이너(커널 6.18 · dash) 실행 출력이다 — 이 현장 Rocky 9 / RHEL 8 베어메탈 출력은 보지 못했다. `/proc/interrupts` 의 NIC 큐 이름 패턴 ·
+    PSI 유무 · `/etc/tuned/active_profile` 존재는 첫 실수집에서 `detail.sections`·`tuning.sections` 를 보고 좁힌다. 화면(2단계)·월 파일/3단 보존/장치별 이력(3단계)·진단 스냅샷(4단계)은 아직이다.
 - ⚠⚠ **iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
   관리자가 동의해야 켜진다**(`bmusage/license.js`·`collectors/idracEnterprise.js`·`parse/racadm.js`
   + `idrac/redfish.js fetchUsageSensors`, v2.554 — 사용자 신고 "idarc 텔레메트리는 data center

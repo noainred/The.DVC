@@ -23,6 +23,50 @@ import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive } from './setting
 import { publicTarget } from './targets.js';
 import { currentTargets, bmUsageStatus, authStopsFor } from './poller.js';
 import { latestUsage } from './db.js';
+import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from './perfView.js';
+import { hwFactsReader } from './hwFacts.js';
+import { freshMsFor } from './useJudge.js';
+
+/**
+ * v2.919(리눅스 성능 1단계): 봉투에 판정이 붙은 성능 항목(`perf`)을 싣는다 — **엣지가 판정하고 중앙은 그대로 전한다**.
+ *   행(rows)에서는 JSON 문자열 열(detail_json·tuning_json)을 뗀다(중앙 정제가 글자 512자로 잘라 깨진 JSON 이 되므로 — 같은 내용은 perf 에 객체로).
+ *   하드웨어 사실은 이 엣지가 이미 가진 iDRAC 데이터(hwFacts — 장비 왕복 0). 실패해도 봉투는 나간다(perf 만 비고 perfError 로 밝힌다).
+ */
+export async function perfForRows(rows, targets, s, { full = true, now = Date.now() } = {}) {
+  let hwOf = () => null; let perfError = '';
+  try { hwOf = await hwFactsReader({ agent: config.agent?.name || '', now, freshMs: freshMsFor(s.intervalMs) }); }
+  catch (e) { perfError = `하드웨어 사실을 읽지 못했습니다: ${String(e?.message || e).slice(0, 160)}`; }
+  const byKey = new Map((targets || []).map((x) => [t(x.key), x]));
+  const perf = [];
+  for (const r of rows || []) {
+    try { perf.push(buildPerfEntry({ row: r, hw: hwOf(byKey.get(t(r.key))) || null, th: s.perf, intervalMs: s.intervalMs, now, full })); }
+    catch (e) { perfError = perfError || `판정 실패: ${String(e?.message || e).slice(0, 160)}`; }
+  }
+  return { perf, perfError };
+}
+/**
+ * v2.919(반증 D2) — 봉투 바이트 상한. 중앙 수신 상한(`util/readCapped.js EDGE_RESPONSE_MAX_BYTES` 16MB — 압축 해제 뒤 크기)을 넘으면
+ *   중앙이 응답을 통째로 거절해 **기존 다섯 지표까지** 못 당긴다(반증 실측: 장치 32개 서버 1대 약 18KB → 약 880대에서 16MB).
+ *   그래서 넘치면 무거운 것부터 뺀다: ① 성능 항목을 목록용(code 표)으로 — 근거·장치별(detail)·튜닝·하드웨어 사실 제거 ② 그래도 넘치면 성능 항목 전부 제거.
+ *   행(rows — 다섯 지표)·대상(targets)은 **언제나 남긴다**. 뺀 사실은 `perfTruncated`(사유·단계·전후 바이트)로 봉투가 밝힌다(조용한 축약 금지).
+ *   env `BMUSAGE_ENVELOPE_MAX_BYTES`(256KB~12MB, 기본 8MB — 중앙 16MB 의 절반).
+ */
+export const ENVELOPE_MAX_BYTES = Math.min(12 * 1_048_576, Math.max(256 * 1024, Number(process.env.BMUSAGE_ENVELOPE_MAX_BYTES) || 8 * 1_048_576));
+const jsonBytes = (o) => Buffer.byteLength(JSON.stringify(o));
+/** 순수 — 봉투를 상한 안으로(성능 항목만 줄인다). 상한 안이면 그대로 돌려준다. */
+export function fitEnvelope(env, maxBytes = ENVELOPE_MAX_BYTES) {
+  const before = jsonBytes(env);
+  if (before <= maxBytes) return env;
+  let out = { ...env, perf: (env.perf || []).map(compactPerfEntry) };
+  let level = 'compact';
+  let after = jsonBytes(out);
+  if (after > maxBytes) { out = { ...out, perf: [] }; level = 'dropped'; after = jsonBytes(out); }
+  out.perfTruncated = { reason: 'envelope-bytes', level, bytesBefore: before, bytesAfter: after, maxBytes, ...(after > maxBytes ? { overStill: true } : {}) };
+  return out;
+}
+
+/** 행에서 JSON 문자열 열을 뗀다(봉투·주 조회 — 크기와 정제 상한). */
+export const stripJsonCols = (r) => { const { detail_json: _d, tuning_json: _t, ...rest } = r || {}; return rest; };
 
 /** 서버 수 상한 — 한 법인이 200대라도 봉투가 수백 KB 를 넘지 않게. */
 export const DEFAULT_LIMIT = 400;
@@ -35,7 +79,11 @@ const t = (v) => String(v ?? '').trim();
  * @param {{limit?:number}} opt
  * @returns {Promise<object>}
  */
-export async function buildBmUsageEnvelope({ limit = DEFAULT_LIMIT } = {}) {
+export async function buildBmUsageEnvelope(opt = {}) {
+  // v2.919(반증 D2): 봉투 바이트 상한 — 넘치면 성능 상세부터 뺀다(fitEnvelope). 다섯 지표 행은 언제나 남는다.
+  return fitEnvelope(await buildEnvelopeRaw(opt), opt.maxBytes ?? ENVELOPE_MAX_BYTES);
+}
+async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
   const cap = Math.min(MAX_LIMIT, Math.max(1, Number(limit) || DEFAULT_LIMIT));
   const s = loadBmUsageSettings();
   const [tg, latest] = await Promise.all([
@@ -46,7 +94,9 @@ export async function buildBmUsageEnvelope({ limit = DEFAULT_LIMIT } = {}) {
   const targets = all.slice(0, cap);
   const keys = new Set(targets.map((x) => t(x.key)));
   // 최신값은 **대상 목록 안의 것만**(법인을 끄거나 등록이 사라진 서버의 옛 값이 새어 나가지 않게).
-  const rows = (latest || []).filter((r) => keys.has(t(r.key)));
+  const rows0 = (latest || []).filter((r) => keys.has(t(r.key)));
+  const { perf, perfError } = await perfForRows(rows0, tg.targets || [], s, { full: true });
+  const rows = rows0.map(stripJsonCols);
   return {
     node: {
       agent: config.agent?.name || '',
@@ -72,5 +122,11 @@ export async function buildBmUsageEnvelope({ limit = DEFAULT_LIMIT } = {}) {
     // ⚠ 정지 대상은 **개수와 경로만**(이름은 targets 에 이미 있다 — 중복으로 싣지 않는다).
     authStops: authStopsFor(tg.targets || []).map(({ key, path, attempts, since, reason }) => ({ key, path, attempts, since, reason })),
     status: bmUsageStatus(),
+    // v2.919 — 판정이 붙은 성능 항목 · 이 엣지의 기준값 · 열 ↔ USE 칸 대응(중앙 정제 화이트리스트: central/bmUsageEdgePull.js sanitizePerfEntry).
+    perfVersion: 1,
+    perf,
+    perfThresholds: s.perf,
+    perfCols: PERF_COL_META,
+    ...(perfError ? { perfError } : {}),
   };
 }

@@ -19,7 +19,9 @@
  *   말해야 한다(v2.517 규약: '기다리면 되는지' 를 말한다).
  *   Windows 경로는 `Win32_PerfFormattedData_*` 가 순간값이라 첫 주기부터 나온다 — 그 차이도 밝힌다.
  */
-import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, maxStrict, spanOk, spanLimitMs } from './rates.js';
+import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, maxStrict, spanOk, spanLimitMs,
+  deltaOrNull, cpuBreakdownPct, coreMaxPct, awaitMs, avgQueue, retransPct } from './rates.js';
+import { PERF_COL_NAMES, JSON_COL_MAX } from './perfCols.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { fcUtilization, fcRateNotes, fcRowPctFields, fcRepresentative, fcPlausibleBps } from './parse/fcRate.js';
 
@@ -76,7 +78,12 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     key: target.key, name: target.name, vcenterId: target.vcenterId || '', ts: now,
     cpu_pct: null, mem_pct: null, disk_busy_pct: null, disk_used_pct: null,
     net_pct: null, net_bps: null, hba_pct: null, hba_bps: null, io_pct: null,
+    // v2.919 리눅스 성능 1단계 — 새 열은 전부 null 로 시작한다(못 읽은 것은 0 이 아니다). 목록은 perfCols.js 하나.
+    ...Object.fromEntries(PERF_COL_NAMES.map((c) => [c, null])),
+    // 두 경로를 이번 주기에 읽은 시각(최신값 전용 — 커버리지·신선도 판정이 쓴다). 못 읽었으면 null.
+    os_at: null, idrac_at: null,
   };
+  let perfOut = null;   // v2.919: 장치별·튜닝·연속 증가 — buildPerf 결과(아래 Linux 분기)
 
   // ── OS 경로 ────────────────────────────────────────────────────────────────
   const osOk = !!(os && os.ok);
@@ -177,7 +184,12 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     if (fcImplausible) notes.push(`FC HBA 처리량 ${fcImplausible}건이 회선의 물리 상한을 넘어(카운터 이상) 비웠습니다 — 처리량·사용률로 저장하지 않았습니다.`);
     // ⚠ 화면 상세용이고 **DB 에는 넣지 않는다** — 폴러가 적재 직전에 뗀다(v2.550.3).
     out._perIf = perIf; out._perFc = perFc;
+    // v2.919 리눅스 성능 1단계 — 새 열·장치별·튜닝(같은 간격 한계 lim · 같은 표본 시각).
+    perfOut = buildPerf({ os, pc, pAt, now, lim, prevStreak: prev?.streak || null });
+    Object.assign(out, perfOut.cols);
+    for (const x of perfOut.notes) notes.push(x);
   }
+  if (osOk) out.os_at = now;
 
   // ── iDRAC 경로(빈 칸만 채운다) ─────────────────────────────────────────────
   let idracIf = null; let idracFc = null;
@@ -282,6 +294,10 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
    *   `watts`·`celsius` 로 무엇을 만들려 하지 말 것.
    * ⚠ `io_pct` 는 iDRAC 계열 값이므로 텔레메트리가 못 읽었을 때만 채운다.
    */
+  if ((idrac && idrac.ok) || (ent && ent.ok)) out.idrac_at = now;
+  // v2.919: 장치별·튜닝 현재값은 **최신값 전용 JSON 열**(이력 적재는 3단계). Linux 가 아니면 비운다(Windows 는 이번 단계 대상이 아니다).
+  out.detail_json = perfOut ? jsonCol(perfOut.detail) : (osOk && winShape ? jsonCol({ osKind: 'windows' }) : null);
+  out.tuning_json = perfOut ? jsonCol(perfOut.tuning) : null;
   if (ent && ent.ok) {
     if (out.cpu_pct == null && n(ent.cpuPct) != null) { out.cpu_pct = n(ent.cpuPct); srcOf.cpu = 'idrac-ent'; }
     if (out.mem_pct == null && n(ent.memPct) != null) { out.mem_pct = n(ent.memPct); srcOf.mem = 'idrac-ent'; }
@@ -342,7 +358,136 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       const idracCounters = (idrac && idrac.ok && ((idrac.nics || []).length || (idrac.fcs || []).length))
         ? { nics: idrac.nics || [], fcs: idrac.fcs || [] } : null;
       if (!osCounters && !idracCounters) return null;
-      return { at: now, counters: osCounters, idrac: idracCounters };
+      // v2.919: 오류·드롭 '연속 증가 주기 수'(반복 → bad 판정의 근거) — 누적 카운터와 같은 수명(인메모리).
+      return { at: now, counters: osCounters, idrac: idracCounters, ...(perfOut ? { streak: perfOut.streak } : {}) };
     })(),
   };
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * v2.919 리눅스 성능 1단계 — 새 열 · 장치별 · 튜닝 현재값(순수).
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+/** 장치별 행 상한 — detail_json 이 서버당 수 KB 를 넘지 않게(파티션·가상 장치는 이미 isWholeDisk·virtual 로 빠진다). */
+export const PERF_DEVICE_MAX = 32;
+const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
+
+/** JSON 열 직렬화 — 상한을 넘으면 잘린 JSON 대신 `{truncated:true}` 를 둔다(읽는 쪽이 깨진 JSON 을 받지 않게). */
+export function jsonCol(obj) {
+  if (obj == null) return null;
+  let sJson = '';
+  try { sJson = JSON.stringify(obj); } catch { return null; }
+  return sJson.length > JSON_COL_MAX ? JSON.stringify({ truncated: true, bytes: sJson.length }) : sJson;
+}
+
+/** 구획 상태 한 글자 — 'ok' | 'absent' | 'missing'. */
+const secState = (x) => (!x ? 'missing' : x.absent ? 'absent' : x.missing ? 'missing' : 'ok');
+
+/**
+ * 한 서버 한 주기의 새 지표(순수). Linux OS 경로를 읽었을 때만 부른다.
+ * @returns {{cols:object, detail:object, tuning:object, streak:object, notes:string[]}}
+ */
+export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = null } = {}) {
+  const c = os?.counters || {};
+  const perf = os?.perf || {};
+  const notes = [];
+  const cols = Object.fromEntries(PERF_COL_NAMES.map((k) => [k, null]));
+
+  // ── CPU ────────────────────────────────────────────────────────────────────
+  const br = cpuBreakdownPct(pc?.cpuExt, c.cpuExt, pAt, now, lim);
+  cols.cpu_user_pct = br.user; cols.cpu_sys_pct = br.sys; cols.cpu_iowait_pct = br.iowait; cols.cpu_steal_pct = br.steal;
+  cols.cpu_core_max_pct = coreMaxPct(pc?.cpuExt?.cores, c.cpuExt?.cores, pAt, now, lim);
+  const st = perf.stat?.value || null;
+  const cores = n(st?.coreCount);
+  const ld = perf.load?.value || null;
+  cols.load1 = n(ld?.load1); cols.load5 = n(ld?.load5); cols.load15 = n(ld?.load15);
+  // 런큐/코어 = load1 ÷ 코어(설계 §4 ‘런큐 ÷ 코어’). 코어 수를 모르면 null(지어내지 않는다). ⚠ Linux load 는 D 상태도 센다 — 근거에 PSI 를 함께 싣는다.
+  cols.runq_per_core = cols.load1 != null && cores != null && cores > 0 ? Math.round((cols.load1 / cores) * 100) / 100 : null;
+  const ctxtPs = perSecond(pc?.ctxt, c.ctxt, pAt, now, lim);
+  cols.ctxt_ps = ctxtPs == null ? null : Math.round(ctxtPs);
+  cols.procs_blocked = n(st?.procsBlocked);
+  const psi = perf.psi?.value || null;
+  cols.psi_cpu_some10 = n(psi?.cpu?.some?.avg10); cols.psi_cpu_some60 = n(psi?.cpu?.some?.avg60);
+  cols.psi_mem_full10 = n(psi?.memory?.full?.avg10); cols.psi_mem_full60 = n(psi?.memory?.full?.avg60);
+  cols.psi_io_full10 = n(psi?.io?.full?.avg10); cols.psi_io_full60 = n(psi?.io?.full?.avg60);
+
+  // ── 메모리 ─────────────────────────────────────────────────────────────────
+  const vm = c.vm || null; const pvm = pc?.vm || null;
+  const rate = (k) => { const v = perSecond(pvm?.[k], vm?.[k], pAt, now, lim); return v == null ? null : r1(v); };
+  cols.swap_in_ps = rate('pswpin'); cols.swap_out_ps = rate('pswpout'); cols.pgmajfault_ps = rate('pgmajfault');
+  cols.oom_kill_delta = deltaOrNull(pvm?.oomKill, vm?.oomKill, pAt, now, lim);
+
+  // ── 디스크(장치별 → 대표값 최대) ────────────────────────────────────────────
+  const findDisk = (name) => (Array.isArray(pc?.disks) ? pc.disks.find((d) => d.name === name) : null) || null;
+  const disks = (c.disks || []).map((d) => {
+    const p = findDisk(d.name);
+    const dr = perSecond(p?.reads, d.reads, pAt, now, lim); const dw = perSecond(p?.writes, d.writes, pAt, now, lim);
+    const iops = sumStrict([dr, dw]);
+    return {
+      name: String(d.name || '').slice(0, 64),
+      busyPct: busyPct(p?.ioTicksMs, d.ioTicksMs, pAt, now, lim),
+      iops: iops == null ? null : r1(iops),
+      awaitMs: awaitMs(p, d, pAt, now, lim),
+      aqu: avgQueue(p?.weightedTicksMs, d.weightedTicksMs, pAt, now, lim),
+      inFlight: n(d.inFlight),
+    };
+  });
+  cols.disk_iops = maxOrNull(disks.map((d) => d.iops));
+  cols.disk_await_ms = maxOrNull(disks.map((d) => d.awaitMs));
+  cols.disk_aqu = maxOrNull(disks.map((d) => d.aqu));
+  cols.disk_inflight = maxOrNull(disks.map((d) => d.inFlight));
+
+  // ── 네트워크(물리 NIC 만 — 가상 인터페이스의 드롭은 브리지·veth 정책이라 회선 오류가 아니다) ──────────────
+  const findNet = (iface) => (Array.isArray(pc?.nets) ? pc.nets.find((x) => x.iface === iface) : null) || null;
+  const nics = (c.nets || []).filter((x) => !x.virtual).map((x) => {
+    const p = findNet(x.iface);
+    const d = (k) => deltaOrNull(p?.[k], x[k], pAt, now, lim);
+    const rxE = d('rxErrs'); const txE = d('txErrs'); const rxD = d('rxDrop'); const txD = d('txDrop');
+    return { iface: String(x.iface || '').slice(0, 64), errDelta: sumStrict([rxE, txE]), dropDelta: sumStrict([rxD, txD]), rxErrDelta: rxE, txErrDelta: txE, rxDropDelta: rxD, txDropDelta: txD, state: x.state || '' };
+  });
+  cols.net_err_delta = maxOrNull(nics.map((x) => x.errDelta));
+  cols.net_drop_delta = maxOrNull(nics.map((x) => x.dropDelta));
+  cols.tcp_retrans_pct = retransPct(pc?.tcp, c.tcp, pAt, now, lim);
+
+  // ── 연속 증가(반복 → bad) — 이번 값이 null 이면 판정 보류: 직전 연속값을 그대로 둔다(끊지도 늘리지도 않는다 — alertRules 의 null 규약) ──
+  const step = (prevN, v) => (v == null ? (n(prevN) ?? 0) : v > 0 ? (n(prevN) ?? 0) + 1 : 0);
+  const streak = {
+    netErr: step(prevStreak?.netErr, cols.net_err_delta),
+    netDrop: step(prevStreak?.netDrop, cols.net_drop_delta),
+    oom: step(prevStreak?.oom, cols.oom_kill_delta),
+  };
+
+  const sections = Object.fromEntries(Object.entries(perf).map(([k, v]) => [k, secState(v)]));
+  if (sections.psi === 'absent') notes.push('이 커널에는 PSI(/proc/pressure)가 없습니다 — 커널 4.20 미만이거나 RHEL 8 계열에서 psi=1 부팅 옵션이 꺼져 있습니다. PSI 칸은 ‘없음’ 이고 못 읽은 것과 다릅니다.');
+  if (os?.truncated) notes.push(`수집 출력이 상한에서 잘려 마지막 구획${(os.cutSections || []).length ? `(${os.cutSections.join('·')})` : ''}과 그 뒤를 받지 못했습니다 — 잘린 줄은 쓰지 않았고 그 칸은 ‘못 읽음’ 입니다(다음 주기는 첫 표본).`);
+  if ((os?.linesCapped || []).length) notes.push(`줄 상한에 닿은 구획(${os.linesCapped.join('·')})은 앞쪽 장치만 읽었습니다 — 대표값(최대)은 읽은 장치 기준입니다.`);
+  if (st?.coresTruncated) notes.push(`코어가 ${st.coreCount}개라 코어별 최고 사용률은 앞쪽 일부 코어로만 계산했습니다.`);
+
+  const dfi = perf.dfi?.value || null;
+  const detail = {
+    v: 1, at: now, osKind: 'linux', firstSample: pc == null,
+    cores, coresTruncated: !!st?.coresTruncated, procsRunning: n(st?.procsRunning), threads: n(ld?.threads),
+    psi: psi ? {
+      cpu: psi.cpu ? { some10: n(psi.cpu.some?.avg10), some60: n(psi.cpu.some?.avg60), some300: n(psi.cpu.some?.avg300) } : null,
+      memory: psi.memory ? { some10: n(psi.memory.some?.avg10), full10: n(psi.memory.full?.avg10), full60: n(psi.memory.full?.avg60), full300: n(psi.memory.full?.avg300) } : null,
+      io: psi.io ? { some10: n(psi.io.some?.avg10), full10: n(psi.io.full?.avg10), full60: n(psi.io.full?.avg60), full300: n(psi.io.full?.avg300) } : null,
+    } : null,
+    disks: disks.slice(0, PERF_DEVICE_MAX), disksTotal: disks.length,
+    nics: nics.slice(0, PERF_DEVICE_MAX), nicsTotal: nics.length,
+    inodes: dfi ? dfi.slice(0, 16) : null,
+    streak, sections, truncated: !!os?.truncated,
+    ...((os?.cutSections || []).length ? { cutSections: os.cutSections.slice(0, 4) } : {}),
+    ...((os?.linesCapped || []).length ? { linesCapped: os.linesCapped.slice(0, 8) } : {}),
+  };
+  const sy = perf.sysctl?.value || null; const hp = perf.hugepages?.value || null;
+  const bq = perf.blkq?.value || null; const irq = perf.irq?.value || null;
+  const tuning = {
+    v: 1, at: now,
+    sysctl: sy, hugepages: hp,
+    blkq: bq ? bq.slice(0, PERF_DEVICE_MAX) : null,
+    irq: irq ? { irqbalance: irq.irqbalance, nicIrqs: irq.nicIrqs, spreadMin: irq.spreadMin, spreadMax: irq.spreadMax, cpus: irq.cpus } : null,
+    sections: { sysctl: sections.sysctl || 'missing', hugepages: sections.hugepages || 'missing', blkq: sections.blkq || 'missing', irq: sections.irq || 'missing' },
+  };
+  return { cols, detail, tuning, streak, notes };
 }
