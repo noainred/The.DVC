@@ -21,6 +21,8 @@ import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 import { gpuFinderNote } from './gpuFinderText.js';
 import Select from '../../components/Select.jsx';
 import { partsCell } from '../idrac/hwStatusText.js'; // v2.728: '부품 이상' 열(판정은 서버 — 색·문구만)
+import { effVcOf, dcOfServer, scopeMatchServer, matchServerQuery } from './baremetalBoardText.js'; // v2.916 소속·스코프 판정 하나로
+import BaremetalBoard from './BaremetalBoard.jsx'; // v2.916 물리 서버 › 상태 보드
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 import { useFocusHandoff } from '../../hooks/useSearchHandoff.js'; // v2.911 고른 장비 상세 열기
 
@@ -266,21 +268,11 @@ function ServerInfoByVcenter({ vc, onServer }) {
   const assign = dcs.assign || {};
   // 가상화 소속 vCenter: 명시 vcenterId가 있으면 그것, 없으면 mappedVcenterId(서비스태그=ESXi
   // 일련번호 매칭으로 찾은 vCenter). 스캔 등록 iDRAC 서버도 서비스태그가 ESXi와 일치하면 그 vCenter로.
-  const effVc = (s) => s.vcenterId || s.mappedVcenterId || '';
-  // 서버의 소속 법인: 스캔 등록분은 datacenterId 직접, 그 외는 (매핑 포함) vCenter→DataCenter 할당.
-  const dcOf = (s) => s.datacenterId || assign[effVc(s)] || '';
-  // 상단 2단 필터(스코프 객체 { datacenterId?, vcenterId?, baremetal? })를 적용. 백엔드
-  // serverInScope와 동일 규칙: 법인=그 법인 전체, vCenter=그 vCenter 가상화, Baremetal=vCenter 미소속.
-  const scopeMatch = (s) => {
-    const sc = (vc && typeof vc === 'object') ? vc : {};
-    const ev = effVc(s);
-    if (sc.vcenterId) { if (sc.vcenterId === '__unmapped__' ? ev : ev !== sc.vcenterId) return false; }
-    if (sc.datacenterId) { if (dcOf(s) !== (sc.datacenterId === '__unmapped__' ? '' : sc.datacenterId)) return false; }
-    if (sc.baremetal && ev) return false;
-    return true;
-  };
-  const ql = q.trim().toLowerCase();
-  const match = (s) => !ql || [s.name, s.serviceTag, s.host, s.model].some((x) => String(x || '').toLowerCase().includes(ql));
+  // v2.916: 소속·스코프·검색 판정은 baremetalBoardText.js 하나(상태 보드 탭과 같은 규칙 — 백엔드 serverInScope 와 동일).
+  const effVc = effVcOf;
+  const dcOf = (s) => dcOfServer(s, assign);
+  const scopeMatch = (s) => scopeMatchServer(s, vc, assign);
+  const match = (s) => matchServerQuery(s, q);
   const rows = d.filter((s) => scopeMatch(s) && match(s));
   const groups = new Map();
   for (const s of rows) { const id = dcOf(s) || '__unmapped__'; if (!groups.has(id)) groups.set(id, []); groups.get(id).push(s); }
@@ -603,7 +595,8 @@ export function ServerAnalysis() {
 
 function ServerAnalysisView({ bm = false }) {
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
-  const [sub, setSub] = useHashTab({ base: bm ? ['tools', 'serveranalysis', BAREMETAL_SEG] : ['tools', 'serveranalysis'], valid: ['info', 'hw', 'parts', 'temp', 'gpu', 'fw', 'unsupported'], fallback: 'info' });
+  const [sub, setSub] = useHashTab({ base: bm ? ['tools', 'serveranalysis', BAREMETAL_SEG] : ['tools', 'serveranalysis'], valid: ['board', 'info', 'hw', 'parts', 'temp', 'gpu', 'fw', 'unsupported'], fallback: bm ? 'board' : 'info' });
+  // v2.916: '상태 보드' 탭(docs/design/baremetal/ 시안 A) — 물리 서버 메뉴의 첫 화면. 서버 분석(전체)에서는 둘째 선택지.
   const [dc, setDc] = useState('');   // 1차 박스: '' 전체 | DataCenter id
   const [lvl2, setLvl2] = useState(bm ? 'baremetal' : ''); // 2차 박스: '' 전체 | vc:<id> | baremetal (물리 서버 메뉴면 baremetal 고정)
   const [vcs, setVcs] = useState([]);
@@ -632,6 +625,8 @@ function ServerAnalysisView({ bm = false }) {
     <div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="flex gap wrap">
+          <button className={sub === 'board' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('board')}
+            title="서버 1대 = 타일 1개 — 부품 상태(장애·경고·확인 불가·판정 못함)를 법인별로 한눈에 봅니다.">🧭 상태 보드</button>
           <button className={sub === 'info' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('info')}>🗄 법인별 서버 정보</button>
           <button className={sub === 'hw' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('hw')}>🔩 하드웨어 집계</button>
           <button className={sub === 'parts' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('parts')}>🧩 파트 인벤토리</button>
@@ -672,6 +667,7 @@ function ServerAnalysisView({ bm = false }) {
         </div>
       )}
       <DcErrNote err={dcErr} />
+      {sub === 'board' && <BaremetalBoard {...sp} bm={bm} dcLabel={dc ? ((dcs.find((x) => x.id === dc) || {}).name || dc) : ''} />}
       {sub === 'info' && <ServerInfoByVcenter {...sp} vcs={vcs} />}
       {sub === 'hw' && <HardwareSummary />}
       {sub === 'parts' && <PartsInventory {...sp} />}
