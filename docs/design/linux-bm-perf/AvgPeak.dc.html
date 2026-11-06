@@ -63,6 +63,19 @@ h2{margin:0;font-size:15px;font-weight:700}
     <span class="dim">커서 13:35 · 구간 02:00~05:10 선택됨 → 아래 표가 그 구간의 평균/피크로 바뀐다</span>
   </div>
 
+  <!-- 장치 토글 줄 (두 패널 공유) -->
+  <div class="card" style="padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:12.5px">
+    <span class="dim">디스크 행</span>
+    <div class="seg" role="group" aria-label="디스크 축"><button class="on" type="button">전체(가장 바쁜 장치)</button><button type="button">디스크별</button><button type="button">파티션·마운트별</button></div>
+    <span class="dim">네트워크 행</span>
+    <div class="seg" role="group" aria-label="네트워크 축"><button class="on" type="button">전체(가장 높은 회선)</button><button type="button">인터페이스별</button></div>
+    <span class="dim">개별 표시</span>
+    <div class="seg" role="group" aria-label="개별 표시"><button class="on" type="button">겹쳐서</button><button type="button">행 나눠서</button></div>
+    <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" checked style="width:16px;height:16px"> 두 패널에 같이 적용</label>
+    <span style="flex:1 1 20px"></span>
+    <a href="Toggle.dc.html" style="font-weight:600">토글한 모습 보기 →</a>
+  </div>
+
   <!-- 평균 화면 -->
   <div class="card" style="border-color:rgba(59,130,246,.4)">
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:6px"><h2>① 평균 — 5분 주기 평균 (usage_history avg)</h2><span class="chip info">출처 OS(SSH) · 결측 3점은 선을 끊는다</span><span class="dim" style="font-size:12px;margin-left:auto">세로 눈금은 지표마다 · 가로 시간축은 공유 · 행을 누르면 큰 팝업</span> <a class="btn" href="Popup.dc.html" style="display:inline-flex;align-items:center;text-decoration:none;min-height:32px">⤢ 확대</a></div>
@@ -330,7 +343,7 @@ h2{margin:0;font-size:15px;font-weight:700}
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":4500}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":4580}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }
