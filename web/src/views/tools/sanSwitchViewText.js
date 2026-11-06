@@ -97,7 +97,7 @@ export function trafficSummary(d, { selected = 0 } = {}) {
   if (!d) return { state: 'empty', lead: '', now: '—', tail: '', sub: '', notes };
   if (d.enabled === false) {
     return { state: 'off', lead: '', now: '', tail: '',
-      sub: `포트 사용량 수집이 꺼져 있습니다 — 설정 › 수집 › SAN 스위치 포트 사용량에서 켜면 ${intervalText(d.intervalMs) || '주기'}마다 합산합니다.`,
+      sub: `포트 사용량 수집이 꺼져 있습니다 — 설정 › 수집 주기·임계 › SAN 스위치 포트 사용량에서 켜면 ${intervalText(d.intervalMs) || '주기'}마다 합산합니다.`,
       notes: [] };
   }
   if (d.unavailable) {

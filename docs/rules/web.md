@@ -597,6 +597,13 @@
   - `VcInfoParts.DvpgTeamingCard` — 분산 스위치가 없는 호스트 · 호스트 구성을 아직 읽지 않은 호스트에는 **부르지도 그리지도 않는다**(훅은 조기 return 위 · `useOnce` 의 enabled). 업링크 포트그룹은 뺀다.
     팀 구성 문구(`TEAMING_TEXT` · `teamingText`)는 `vcd/vcInfo.js` 한 벌로 옮겼다(HostObject 는 다시 내보내기만 — 표준 스위치 표와 분산 포트그룹 표가 같은 말).
   - Bareos 그룹 카드: 회차 중단 없이 행마다 취소한 이번 회차 실행 — '멈추는 중(실행별 취소)' · '실행 중 · 실행별 취소 n'(서버 `cancelPlan.sentFire` · 옛 서버는 예전 판정).
+- **v2.916 — 설정 메뉴 개편: 왼쪽 목록 + 상태 배지(사용자 요청 '설정 메뉴를 클로드 디자인 사용해서 개편 — 효율적이고 직관적으로' · 시안 A안 + B 상태 요약 · '항목별 미설정 전부' · '표준')**.
+  회귀 `server/test/settingsMenu2905.test.js`(③ 갱신) · `server/test/settingsStatus2916.test.js` · `web/src/views/settingsMenu.test.js`. 설계 `docs/design/settings-menu/README.md` §4.
+  - 메뉴는 **설정 안의 왼쪽 목록**(`.stg` — 묶음 접기 · 검색 `/` · 상태 요약 칩 · 즐겨찾기 · 최근)이고 v2.905 의 1단 가로 탭 줄(`.vcd-views`)은 없다. 묶음 10개(`GROUP_ORDER`).
+    새 설정 화면은 `SUB` 에 `group:` 과 **`desc:`(한 줄 설명 — 본문 머리 · 검색이 쓴다)** 를 달 것(테스트 ③이 desc 없는 항목을 막는다).
+  - 좁은 화면 판정은 **화면 폭(media)이 아니라 설정 영역 폭(컨테이너 쿼리 `@container stg (max-width: 760px)`)** — 사이드바 펼침(236)/레일(64)에 따라 본문 폭이 달라 같은 1100px 화면도 결과가 다르다.
+  - 상태 배지 판정은 서버 `settingsStatus/grade.js` 하나(화면에서 다시 판정하지 않는다). **꺼짐(off — 선택 기능 미사용)은 미설정이 아니다** — 쓰지 않는 법인에 호박색이 13개 붙지 않게.
+    사실을 못 읽으면 그 항목만 `unknown`('?') · 응답 실패면 목록 바닥에 '배지가 없다고 정상인 것은 아닙니다'. 사실 수집(`sources.js`)은 **파일 · 메모리 값만**(외부 호출 · SQLite · readdir · `authStopFor` 금지 — 테스트 ④가 원문 대조).
 - **v2.905 — 설정 메뉴 재배치(사용자 요청 '설정에 메뉴가 너무 많아져서 스크롤바가 생긴다 — 재배치' · '9개 묶음 + 2단' · '표준')**. 회귀 `server/test/settingsMenu2905.test.js`.
   - 1단은 **묶음만**(`Settings.jsx GROUP_ORDER` 9개 — 인프라 등록 · 백업 · 수집 · 엣지·원격 · 사용자 · 보안 · 알림·연동 · 로그 · 시스템). 단독 1단 항목을 만들지 않는다 —
     v2.904 까지 단독 12개 + 그룹 7개 = 19개라 1,600px 대에서도 가로 스크롤이 생겼다. 새 설정 화면은 `SUB` 에 `group:` 을 달아 묶음 하나에 넣는다(묶음 없으면 테스트 ②가 막는다).
