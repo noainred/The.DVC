@@ -122,11 +122,13 @@ export const STORE_DEFAULTS = Object.freeze({
   rawDays: 30, hourlyDays: 365, devRawDays: 14, devHourlyDays: 90,
   deviceMax: 32, partitionIo: false, blkqMax: 64,
   peakWindowS: 10, peakSampler: false, peakSamplerSha256: '',
+  // 피크 창 주기 예산 — 예상 주기 소요가 주기 × 이 비율을 넘으면 창을 줄인다(peakPlan.js · 0.7 은 메인 지시값). peakWindowS 는 그 상한이다.
+  peakCycleRatio: 0.7,
   portTolPct: 5,
 });
 const STORE_LIMITS = Object.freeze({
   rawDays: [7, 365, false], hourlyDays: [30, 730, false], devRawDays: [1, 60, false], devHourlyDays: [7, 365, false],
-  deviceMax: [1, 256, false], blkqMax: [1, 1_024, false], peakWindowS: [0, 30, false], portTolPct: [0.5, 100, true],
+  deviceMax: [1, 256, false], blkqMax: [1, 1_024, false], peakWindowS: [0, 30, false], peakCycleRatio: [0.3, 0.95, true], portTolPct: [0.5, 100, true],
 });
 /** 저장 구조 설정 정규화(순수) — 모르는 키는 버리고, 빈 칸은 기본값(clampSetting 규약). sha256 은 64자리 16진수만(아니면 ''). */
 export function normalizeStoreSettings(raw = {}) {

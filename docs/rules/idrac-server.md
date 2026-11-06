@@ -401,7 +401,10 @@
     한 종류가 상한을 다 차지하지 않게) · 넘은 수는 최신값 `dev_over` + 노트. 장치 목록(usage_devices)은 처음 본 순서 `ord` 가 색 순서(바뀌지 않는다). 마운트는 일 롤업만.
   - **피크 A 안**: 본 명령 뒤 **같은 세션**에서 `/proc/stat`·`/proc/diskstats`·`/proc/net/dev` 를 1초 간격 N+1 번(`store.peakWindowS` 10 · 0 이면 끔) — 세션 예산(50초)에서 남은 시간으로
     줄이고(2초 미만이면 0) 행에 `peak_window_s` · 노트. 시각은 원격 /proc/uptime 간격 + 이 노드 시계. `peak_src`: window10 | sampler | psi | none.
-    ⚠ 주기 산수(추정): 서버당 +약 13초 → 1,000대 · 동시 32 면 한 주기 약 2.6분 → 약 7~8분(5분 주기를 넘는다 — 재진입 가드가 다음 틱을 건너뛴다). 큰 법인은 peakWindowS 를 줄이거나 끈다.
+    ⚠⚠ **주기 예산 자동 맞춤(v2.922 메인 지시 — `bmusage/peakPlan.js`)**: 창은 서버마다 수집 시간을 늘려 1,000대 · 동시 32 에서 주기를 넘겼다(재진입 가드가 다음 틱을 건너뛰면
+      **기존 다섯 지표까지 굶는다**). 매 주기 예상 소요 = max(1, 대상 ÷ 동시성) × (서버당 기본 소요 + OS 비율 × 창) 가 주기 × `store.peakCycleRatio`(0.7) 를 넘으면 창을 10 → 5 → 3 → 0초로 줄인다 —
+      `peakWindowS` 는 상한(줄이기만) · 기본 소요는 직전 주기 실측(서버별 소요 − 실제 창, 평균), 없으면 보수적 8초(추정) · 결정은 `_last.peakPlan`·`bmUsageStatus().peakPlan`(수집 건강 ⑫) · 행 노트와 `peak_window_s` 에 실제 값.
+      **이 맞춤을 지우거나 상한 대신 결정값을 그대로 쓰지 말 것**(회귀 `server/test/bmPerf2921Plan.test.js` — 변이 11/11).
     B 샘플러: `store.peakSampler` 옵트인일 때만 `##SAMPLER`(고정 경로 · 없으면 absent) · 형식 v1 · 기대 sha256(`store.peakSamplerSha256`)이 없거나 다르면 unverified(값을 쓰지 않는다) — **배포 기능 없음(7단계)**.
   - **D7**: `##BLKQ` = `grep -H ''` 한 번(+ 가상 장치 거르는 grep) · 물리 → md → dm 순 · 상한 `store.blkqMax`(64) · 자르기 전 수는 tuning `blkqTotal`.
   - **D13**: `latestUsage()` 기본은 JSON 열 없는 판본 · 판정 소비처(주 조회·상세·엣지 봉투)만 `{ json:true }`.

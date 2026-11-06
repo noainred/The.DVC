@@ -206,6 +206,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       out.peak_window_s = wS; out.peak_n = wS + 1;
     } else out.peak_window_s = 0;
     out.peak_src = peakSrcOf({ windowS: wS, sampler: smp, psiRead: !!os.perf?.psi?.value });
+    if (pk?.cycle) notes.push(`수집 주기 안에 끝내려고 이번 주기 피크 창을 ${pk.cycle.capS}초에서 ${pk.cycle.plannedS}초로 줄였습니다(대상 수 ÷ 동시성 × 서버당 소요로 예상한 주기가 예산을 넘음)${pk.cycle.plannedS ? '' : ' — 피크는 비웠고 PSI(10초 평균)만 보조로 남습니다'}.`);
     if (pk?.reduced && wS) notes.push(`세션 예산이 모자라 피크 창을 ${pk.wantS}초에서 ${wS}초로 줄였습니다(피크는 그 창 안의 최대입니다).`);
     else if (pk?.wantS && !wS) notes.push(pk.reason === 'error' ? '피크 창(1초 간격 읽기)을 실행하지 못해 이번 주기 피크는 비웠습니다.' : '세션 예산이 모자라 이번 주기 피크 창을 건너뛰었습니다(피크는 비웠습니다 — 0 이 아닙니다).');
     // 장치별 이력 행(물리 디스크·dm/md·물리 NIC·bond · 파티션은 옵트인) — 상한을 넘으면 뺀 수를 행에 적는다.

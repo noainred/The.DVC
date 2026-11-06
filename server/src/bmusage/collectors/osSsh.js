@@ -264,7 +264,7 @@ export function shapePerfSections(sec = {}, { blkqMax = MAX_BLKQ } = {}) {
  * @param {object} osHost  `bmstor` 등록 항목(host·port·username·password·mounts)
  * @param {{signal?:AbortSignal}} opt
  */
-export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '' } = {}) {
+export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null } = {}) {
   const host = String(osHost.host || '').trim();
   if (!host) return { ok: false, error: 'OS host 가 없습니다.' };
   const { mounts } = sanitizeMounts(osHost.mounts);
@@ -292,7 +292,9 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
         if (!shaped) return null;
         // v2.922 피크 A 안 — 같은 세션에서 1초 창. 남은 예산이 모자라면 줄이고(planWindow) 그 사실을 남긴다. 1초 표본은 여기서 집계 뒤 버린다.
         const plan = planWindow({ wantS: peakWindowS, remainingMs: endsAt - Date.now() });
-        let peak = { windowS: 0, wantS: Math.max(0, Number(peakWindowS) || 0), reduced: plan.reduced, reason: plan.reason };
+        let peak = { windowS: 0, wantS: Math.max(0, Number(peakWindowS) || 0), reduced: plan.reduced, reason: plan.reason,
+          // v2.922: 주기 예산 자동 맞춤이 설정 상한보다 줄였으면 그 사실(행 노트 · 화면이 ‘왜 창이 짧은가’ 를 말한다).
+          ...(peakCycle && Number(peakCycle.plannedS) < Number(peakCycle.capS) ? { cycle: { capS: Number(peakCycle.capS), plannedS: Number(peakCycle.plannedS), reason: String(peakCycle.reason || '') } } : {}) };
         if (plan.windowS) {
           try {
             const startWall = Date.now();
