@@ -192,6 +192,9 @@ describe('문구 — 피크 출처 · 해상도 · 응답 안내 · 값 글자',
     expect(all).toContain('‘copy-raw’');
     expect(all).toContain('**3개**');
     expect(T.trendNotes({ via: 'local' })).toEqual([]);
+    const e = T.trendNotes({ error: 'db-unavailable' }).join('\n');
+    expect(e).toContain('일부 구간이 빠졌을 수');
+    expect(e).not.toContain('db-unavailable');   // 원문을 싣지 않는다
   });
   it('오류 — 404 는 없거나 범위 밖(구분하지 않는다) · 엣지 실패는 그 사유', () => {
     expect(T.trendErrorText({ status: 404, message: 'x' })).toContain('볼 수 있는 범위 밖');
@@ -338,6 +341,7 @@ describe('CVP 스위치 포트(§10) — 서버 code 를 문장으로만', () =>
     expect(T.portStateView('candidate').label).toContain('확인 필요');
     expect(T.portStateView('no-cvp').body).toContain('‘—’');
     expect(T.portStateView('no-counters').body).toContain('빈 응답');
+    expect(T.portStateView('no-permission').label).toBe('권한 없음');
     const u = T.portStateView('denied');
     expect(u.label).toBe('상태 ‘denied’');
     expect(u.tone).toBe('idle');
@@ -374,6 +378,7 @@ describe('CVP 스위치 포트(§10) — 서버 code 를 문장으로만', () =>
     expect(n1).toContain('범위 계정은 자기 법인 CVP 포트만');
     expect(T.portNotes({ cvpRegistered: false }).join('\n')).toContain('0 이 아닙니다');
     expect(T.portNotes({ nicError: '엣지 응답 없음' }).join('\n')).toContain('엣지 응답 없음');
+    expect(T.portNotes({ cvpAccess: false, reason: 'CVP 도구가 꺼진 역할' }).join('\n')).toContain('권한이 없어');
   });
 });
 

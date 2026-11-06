@@ -224,6 +224,7 @@ export function trendNotes(resp = {}) {
     out.push(`기간 파일이 없거나 열지 못한 기간이 있습니다: ${ps}${resp.missingPeriods.length > 4 ? ` 외 ${resp.missingPeriods.length - 4}개` : ''} — 그 구간은 결측입니다.`);
   }
   if (n(resp.filesCapped)) out.push(`조회당 파일 상한으로 오래된 기간 **${n(resp.filesCapped)}개**를 읽지 않았습니다.`);
+  if (t(resp.error)) out.push('기간 파일을 읽다 오류가 있었습니다 — 일부 구간이 빠졌을 수 있습니다(결측으로 둡니다).');   // 원문(경로 · 파일 조각)은 싣지 않는다
   if (t(resp.migration)) out.push(`저장 구조를 옮기는 중입니다(단계 ‘${t(resp.migration)}’) — 1시간 롤업이 아직 없는 구간은 원시로 메우지 않고 결측으로 둡니다.`);
   return out;
 }
@@ -513,8 +514,10 @@ export const PORT_STATE_INFO = Object.freeze({
   'no-cvp': { label: 'CVP 미등록 법인', tone: 'idle', body: '이 서버 법인에 등록된 CVP 가 없습니다 — 포트 열은 전부 ‘—’ 입니다.' },
   'no-counters': { label: '포트 카운터 없음', tone: 'warn', body: 'CVP 가 이 포트의 카운터를 빈 응답으로 줬습니다(실장비 빈 응답 기록 v2.641) — 사용률 · 오류는 ‘—’ 입니다.' },
   stale: { label: '오래됨', tone: 'warn', body: 'CVP 수집이 늦어 포트 값이 신선도 한계를 넘었습니다 — 대조하지 않습니다.' },
+  // 3a 반증 D15: CVP 도구 접근이 없는 계정 — 서버가 포트 설명 · 처리량 · 매핑 · 후보를 내주지 않는다(상태만).
+  'no-permission': { label: '권한 없음', tone: 'idle', body: 'CVP 도구 접근 권한이 없는 계정이라 포트 설명 · 처리량 · 매핑을 보여 주지 않습니다 — 상태만 보입니다.' },
 });
-export const PORT_STATE_ORDER = Object.freeze(['mapped', 'candidate', 'no-mapping', 'no-cvp', 'no-counters', 'stale']);
+export const PORT_STATE_ORDER = Object.freeze(['mapped', 'candidate', 'no-mapping', 'no-cvp', 'no-counters', 'stale', 'no-permission']);
 export function portStateView(state) {
   return PORT_STATE_INFO[t(state)] || { label: `상태 ‘${t(state) || '—'}’`, tone: 'idle', body: '이 화면이 아직 모르는 상태 값입니다 — 서버가 준 그대로 적었습니다.' };
 }
@@ -562,6 +565,7 @@ export function portStateCounts(resp = {}) {
 export function portNotes(resp = {}) {
   const out = [];
   if (!resp || typeof resp !== 'object') return out;
+  if (resp.cvpAccess === false) out.push(`CVP 도구 접근 권한이 없어 포트 값 · 매핑 · 후보를 보여 주지 않습니다${t(resp.reason) ? `(${t(resp.reason)})` : ''} — 서버 NIC 쪽 값만 봅니다.`);
   if (resp.cvpRegistered === false) out.push('이 서버 법인에 CVP 가 등록되어 있지 않습니다 — 포트 열은 전부 ‘—’ 입니다(0 이 아닙니다).');
   if (n(resp.hiddenOutOfScope)) out.push(`다른 법인 CVP 를 가리키는 매핑 **${n(resp.hiddenOutOfScope)}개**는 볼 수 있는 범위 밖이라 숨겼습니다.`);
   if (t(resp.nicError)) out.push(`서버 NIC 값을 읽지 못했습니다: ${t(resp.nicError)}`);
