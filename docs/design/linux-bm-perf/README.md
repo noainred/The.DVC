@@ -207,6 +207,10 @@
   예전 표 마이그레이션(청크·양보·재개 · 옮기기 → 행 수 대조 → 삭제 · 실패면 예전 표로 계속 — `bmusage/monthMigrate.js`) · 장치별 이력(물리 디스크·dm/md·물리 NIC·bond · 파티션 옵트인 · 상한 32) ·
   피크 A 안(같은 세션 1초 창 · 예산 안 · `peak_src`/`peak_window_s`) · B 샘플러는 수거 구획·형식·해시 자리만 · 추이 API(`/tools/bm-usage/perf/:key/history|devices|ports`) · CVP 드롭 열·수동 매핑·대조 ⑤ ·
   1단계 반증 D7(##BLKQ grep 한 번)·D13(latestUsage JSON 열 분리) 처리. 규칙 `docs/rules/idrac-server.md` v2.922 항목 · 행 크기 실측은 §4.4 정정. 화면은 3b.
+- **3b 구현됨(v2.923 예정 — 화면)**: 서버 상세 ‘추이(평균 · 피크)’ 탭 — 기간 · 해상도(서버 자동) · 표시 · 커서 동기 · CSV → 장치 토글 줄(§12) → ① 평균 · ② 피크 두 패널(같은 시간축 · 커서 동기 · 끌어서 선택 구간 공유 · 행 9: CPU · 메모리 · 디스크 · 네트워크 · 런큐 · 디스크 대기열 · in-flight · NIC 드롭 · 오류) →
+  선택 구간 요약 표 → 추천 지표 12행(출처 태그 SRE · NF · USE · DELL · ND · CM) → 장치별 보기(A 디스크 · B 마운트 · C 인터페이스 + CVP 열) → D 스위치 포트 연동(매핑 출처 4 · 대조 ⑤ · 상태) · 확대 팝업(§11 — 요약 4 · 큰 차트 · 구간 이동 · Esc · 400 전체 화면).
+  화면 `web/src/views/tools/{BmTrendTab,BmTrendPopup,BmTrendChart}.jsx` · 문구 `bmTrendText.js` · 규칙 `docs/rules/web.md` v2.923 항목. 서버 변경 없음.
+  설계와 다르게 둔 것(이유는 web.md): ‘기타(최대)’ 계열 없음 · 장치 칩은 그 장치의 확대 팝업을 연다(위 패널 계열은 토글 줄이 바꾼다) · 마운트 표의 ‘7일 증가 · 가득 예상’ 없음(서버 API 없음) · 소켓 · conntrack 등 이력 없는 큐는 행 없음 · 수동 매핑 편집 칸 없음(PUT API 만) · 피크 점은 1초 표본을 펼치지 않는다.
 `bmusage/collectors/osSsh.js linuxCommand` 구획 추가 → `parse/linuxProc.js` 파서(순수 · 테스트) → `rates.js`·`usage.js` 열 추가 → `db.js` 열·튜닝 표 → USE 판정 순수 모듈(테스트가 웹·서버 같은 입력으로 대조) → `edgePull.js` 봉투 + 중앙 정제 화이트리스트 → 스냅샷 엣지 대행 라우트 → 웹(보드 · 상세 · 400 · 상태) → 목 데이터 → Chromium 1440/400 → 릴리스.
 
 ## 9. 출처(검색 2026-11-06)
