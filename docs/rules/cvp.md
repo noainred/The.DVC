@@ -117,3 +117,12 @@
   근거가 모자라면 상태를 바꾸지 않는다. ⚠ ecb 의 뜻·'slice 번호 = 라인카드 슬롯' 은 실장비 미확인 추정이다.
 
   · v2.769(점검 R4-D5-2): 비-admin 응답의 BGP 라벨은 피어를 통째 '(주소 가림)' 으로 바꾸고 VRF 만 남긴다(`maskBgpLabel` — IPv6 정규식으로 피어를 찾지 않는다). `maskErrText` 는 IPv6('::' 축약·콜론 7개)도 상한 있는 선형 정규식으로 가린다 — 세 응답(overview·device·faults) 전부.
+- **호스트 업링크 매칭(v2.920 — 설계 `docs/design/san-cvp-traffic/README.md` §4.2, A 단계)** — 판정은 `cvp/hostMatch.js`(순수 `matchUplinks`) 하나, 조회는
+  `cvp/db.js portsByDesc`(설명 LIKE 로 넉넉히 뽑고 토큰 경계는 순수 모듈이 판정), 라우트 `routes/api/hostSan.js GET /hosts/:id/net-uplinks`, 화면
+  `HostNetCvp.jsx`·`hostNetText.js`(네트워크 카드 NIC 표의 CVP 열 3개 + 업링크 블록). 회귀 `server/test/sanAttrib2920.test.js` ④ · 웹 `hostNetText.test.js`.
+  - **근거 없는 매칭을 만들지 않는다**: 근거 우선순위 LLDP(확정) → MAC 테이블(높음) → **포트 설명 일치(보통 — 지금 가능한 유일한 근거)** → 미매칭. 포탈 CVP 수집은
+    LLDP·MAC 테이블·discards 를 아직 읽지 않으므로(위 항목들) 매칭은 전부 '보통' 이고 화면이 그렇게 말한다. 설명의 호스트 이름은 **토큰 경계**로 본다(`esx01` ⊄ `esx010`),
+    MAC 은 콜론·하이픈·점·붙임 표기 전부. `vmnic0` 글자만으로는 호스트를 특정하지 않는다(어느 호스트나 vmnic0 이 있다). 같은 MAC 이 포트 3개 이상이면 '충돌' 로 표시만.
+  - 방향은 스위치 포트 기준 **In = 서버 송신 · Out = 서버 수신** — 응답 `direction` 과 화면 띠·열 이름이 말한다. 값 없음은 '—'(0 금지). 드롭은 수집 전이라 '—'.
+  - 범위 계정은 그 호스트 법인의 CVP 서버 행만(`rowOwnerOf` + `datacenterId`), 범위 검사(404)가 도구 키 검사(403)보다 먼저다(존재 은닉).
+

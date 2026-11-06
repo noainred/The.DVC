@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **276개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **278개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-06)
@@ -238,8 +238,10 @@
 | `storage-latest.json` | 설정 | 이 노드가 수집한 최신 스냅샷 보관(v2.302). | ✅ | ✅ | ✅ | storage/store.js |
 | `storage-usage-mail-state.json` | 설정 | 스토리지 사용량 예약 메일 회차·기록(상태, v2.789) | ✅ | ✅ | ✅ | storage/usageMail.js |
 | `storage-usage-mail.json` | 설정 | 스토리지 사용량 예약 메일 설정(v2.789 — 켜기·요일·시각·받는 사람·표 단위. 비밀 없음, 주소는 담는다) | ✅ | ✅ | ✅ | storage/usageMail.js |
+| `svcmon-alert.json` | 설정 | Monitoring **점검 실패 알림 설정**(v2.915) — `CONFIG_DIR/svcmon-alert.json`. | ✅ | ✅ |  | svcmon/alertSettings.js |
 | `svcmon-batches.json` | 설정 | 성능점검 대량 등록/가져오기 **이력 원장**(+ 롤백) — `CONFIG_DIR/svcmon-batches.json`. | ✅ | ✅ |  | svcmon/batches.js |
 | `svcmon-log.json` | 설정 | 성능점검 로그 설정 — CSV 적재/분할/보관 정책. `CONFIG_DIR/svcmon-log.json`. | ✅ | ✅ |  | svcmon/logsettings.js |
+| `svcmon-settings-sync.json` | 설정 | **설정 연동**(v2.915): 포탈 설정에 등록된 시스템을 골라 Monitoring(성능점검) 대상으로 등록하고, | ✅ | ✅ |  | svcmon/settingsSync.js |
 | `svcmon-templates.json` | 설정 | 성능점검 '점검 템플릿' — 서비스 유형별 점검 묶음을 저장하고 대상에 적용한다. | ✅ | ✅ |  | svcmon/templates.js |
 | `svcmon.json` | 설정 | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). | ✅ | ✅ |  | svcmon/store.js |
 | `tag-policy.json` | 설정 | 태그 점검 정책(`tag-policy.json`, v2.703 — A15). 사람이 정하는 **설정** 파일이다(비밀 없음). | ✅ | ✅ | ✅ | tags/policy.js |

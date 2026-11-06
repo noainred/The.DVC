@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>The Davinci — ESXi 호스트 상세 · 네트워크 묶음 + CVP 업링크</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=Noto+Sans+KR:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;-webkit-font-smoothing:antialiased}
+a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}.tabular{font-variant-numeric:tabular-nums}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.hd-card{padding:12px 14px;overflow:hidden}
+.hd-card-h{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 10px;margin-bottom:8px;font-size:13.5px}
+.hd-card-h>b{display:inline-flex;align-items:center;gap:8px}
+.hd-card-h .muted{font-size:11.5px;min-width:0;overflow-wrap:anywhere}
+.ht-gdot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}.badge.red{background:rgba(239,68,68,.15);color:#f87171}.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.btn{display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;line-height:1.4;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.banner{padding:8px 12px;border-radius:8px;border:1px solid #243049;border-left:4px solid #3b82f6;background:#141b2d;color:#e6edf6;font-size:12.5px;line-height:1.55}
+.banner.warn{border-color:rgba(245,158,11,.35);border-left-color:#f59e0b}
+.table-wrap{overflow:auto;border-radius:12px;border:1px solid #243049}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-size:12.5px}
+tbody tr:last-child td{border-bottom:none}
+.ht-kpi{display:flex;flex-direction:column;gap:3px;min-width:0;padding:11px 13px;border:1px solid #243049;border-radius:10px;background:#141b2d}
+.ht-kpi-l{font-size:11px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ht-kpi-v{display:flex;align-items:baseline;gap:5px;min-width:0;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
+.ht-kpi-v small{font-size:11px;font-weight:500;color:#8b9bb4}
+.ht-kpi-s{font-size:11px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd-nav a{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:15px;border:1px solid #243049;background:#141b2d;color:#e6edf6;text-decoration:none;font-size:12px;font-weight:600}
+.hd-nav a.on{border-color:#3b82f6;background:rgba(59,130,246,.16)}
+.mini-bar{width:90px;height:6px;border-radius:3px;background:#1a2236;display:inline-block;vertical-align:middle;overflow:hidden}
+.mini-bar>span{display:block;height:100%}
+.sb-item{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:8px;color:#8b9bb4;font-size:13px;font-weight:600;line-height:1.3;white-space:nowrap;box-sizing:border-box}
+.sb-item.active{color:#e6edf6;background:rgba(34,211,238,.12);box-shadow:inset 3px 0 0 #22d3ee}
+.sb-child{padding:6px 10px 6px 12px;font-weight:500;font-size:12.5px}
+.sb-child.active{box-shadow:none}
+.sb-dot{width:5px;height:5px;border-radius:50%;background:#5d6b85;flex:none}
+.sb-child.active .sb-dot{background:#22d3ee;box-shadow:0 0 6px #22d3ee}
+.sb-count{font-family:"JetBrains Mono",monospace;font-size:10px;font-weight:500;color:#5d6b85;margin-left:auto}
+.ver-badge{font-size:11px;font-weight:700;color:#22d3ee;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.3);padding:1px 7px;border-radius:10px;white-space:nowrap}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:0 10px;border-radius:13px;border:1px solid #243049;background:#0f1626;color:#8b9bb4;font-size:11.5px;font-weight:600;white-space:nowrap}
+.chip.new{border-color:rgba(245,158,11,.45);color:#fbbf24;background:rgba(245,158,11,.08)}
+.chip.ok{border-color:rgba(34,197,94,.45);color:#4ade80;background:rgba(34,197,94,.08)}
+.node{box-sizing:border-box;padding:8px 10px;border:1px solid #243049;border-radius:8px;background:#0f1626;display:flex;flex-direction:column;gap:2px;min-width:0;font-size:12px}
+.node b{font-size:12.5px}
+.arrow{flex:1 1 28px;min-width:24px;display:flex;align-items:center;padding:0 4px}
+.arrow i{flex:1;height:2px;background:#3b5a8a;display:block}
+.tile{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:9px 11px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.tile .l{font-size:11px;color:#8b9bb4}
+.tile .v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
+.tile .s{font-size:11px;color:#8b9bb4}
+.sbar{display:flex;align-items:center;justify-content:center;gap:10px;padding:7px 14px;border-right:1px solid #1f2a40;font-size:12px;flex:1;font-family:"JetBrains Mono",monospace}
+.sbar:last-child{border-right:none}
+.sbar .l{color:#5d6b85;font-size:10px;font-weight:600;letter-spacing:.12em}
+.sbar .v{color:#e6edf6;font-weight:700;font-variant-numeric:tabular-nums}
+</style>
+</helmet>
+<div style="display: flex; flex-direction: column; min-height: 1560px; background: radial-gradient(1200px 600px at 70% -10%, #16213a 0%, #0a0e17 55%); color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif">
+
+  <header style="display: flex; align-items: center; gap: 14px; padding: 6px 20px; min-height: 44px; background: rgba(12,17,30,.9); border-bottom: 1px solid #1f2a40; flex-wrap: wrap">
+    <button type="button" aria-label="메뉴 접기" style="width: 32px; height: 32px; border: 0; border-radius: 8px; background: none; color: #8b9bb4; display: grid; place-items: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <div style="display: flex; align-items: center; gap: 10px">
+      <div style="width: 26px; height: 26px; border-radius: 7px; font-size: 13px; background: linear-gradient(135deg, #3b82f6, #22d3ee); display: grid; place-items: center; font-weight: 800; color: #04101f">V</div>
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><b style="font-size: 13px">The Davinci</b><span class="ver-badge">v2.914.0</span><span class="ver-badge" style="color: #4ade80; background: rgba(34,197,94,.12); border-color: transparent">LIVE</span></div>
+    </div>
+    <div style="flex: 1 1 0%; min-width: 0; display: flex; justify-content: center">
+      <button type="button" style="display: inline-flex; align-items: center; gap: 10px; width: 420px; max-width: 100%; height: 32px; padding: 0 12px; border-radius: 8px; background: #0f1626; border: 1px solid #243049; color: #5d6b85; font-size: 12px; font-family: inherit; text-align: left"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span style="flex: 1">장비 · 기능 · 탭 찾기</span><kbd class="mono" style="font-size: 10.5px; padding: 1px 6px; border: 1px solid #243049; border-radius: 5px; color: #8b9bb4">⌘K</kbd></button>
+    </div>
+    <div class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8b9bb4; letter-spacing: .04em; white-space: nowrap"><span style="width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e; display: inline-block"></span>28/28 vCenter <b style="color: #4ade80">OK</b><span class="muted" style="font-size: 11px">· 7초 전</span></div>
+    <div style="display: flex; align-items: center; gap: 9px; padding-left: 14px; border-left: 1px solid #1f2a40">
+      <div style="width: 30px; height: 30px; border-radius: 50%; background: #1a2236; display: grid; place-items: center; font-weight: 700; font-size: 12px">박</div>
+      <div style="line-height: 1.2"><div style="font-size: 12.5px; font-weight: 600">박준호</div><div class="muted" style="font-size: 10.5px">관리자</div></div>
+      <button type="button" class="btn" style="padding: 3px 9px; font-size: 11.5px">Out</button>
+    </div>
+  </header>
+
+  <div style="display: flex; align-items: stretch; flex: 1 1 auto; min-height: 0">
+    <aside aria-label="메뉴" style="flex: 0 0 236px; display: flex; flex-direction: column; background: rgba(12,17,30,.72); border-right: 1px solid #1f2a40">
+      <nav style="flex: 1 1 auto; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px">
+        <a href="#" class="sb-item">Overview</a>
+        <a href="#" class="sb-item">Summary</a>
+        <div style="display: flex; flex-direction: column">
+          <a href="#" class="sb-item active" aria-expanded="true">서버<span class="sb-count">6</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5d6b85" stroke-width="2" aria-hidden="true" style="transform: rotate(180deg)"><path d="M6 9l6 6 6-6"/></svg></a>
+          <ul style="list-style: none; margin: 2px 0 4px; padding: 0 0 0 12px; display: flex; flex-direction: column; gap: 1px">
+            <li><a href="#" class="sb-item sb-child"><span class="sb-dot"></span>가상화 서버</a></li>
+            <li><a href="Main.dc.html" class="sb-item sb-child active" aria-current="page"><span class="sb-dot"></span>ESXi 호스트</a></li>
+            <li><a href="#" class="sb-item sb-child"><span class="sb-dot"></span>vCenter</a></li>
+            <li><a href="#" class="sb-item sb-child"><span class="sb-dot"></span>물리 서버</a></li>
+            <li><a href="#" class="sb-item sb-child"><span class="sb-dot"></span>Backup</a></li>
+            <li><a href="#" class="sb-item sb-child"><span class="sb-dot"></span>알람</a></li>
+          </ul>
+        </div>
+        <a href="DvcSanAttrib.dc.html" class="sb-item">스토리지<span class="sb-count">7</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5d6b85" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></a>
+        <a href="#" class="sb-item">네트워크<span class="sb-count">6</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5d6b85" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></a>
+        <a href="#" class="sb-item">자원관리<span class="sb-count">3</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5d6b85" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></a>
+        <a href="#" class="sb-item">자원 최적화<span class="sb-count">2</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5d6b85" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></a>
+        <a href="#" class="sb-item">특수 기능</a>
+        <a href="#" class="sb-item">이슈</a>
+        <a href="#" class="sb-item">위키</a>
+        <a href="#" class="sb-item">게시판</a>
+        <a href="#" class="sb-item">설정<span class="sb-count">3</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5d6b85" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></a>
+      </nav>
+      <div style="border-top: 1px solid #1f2a40; padding: 8px; display: flex; flex-direction: column; gap: 2px">
+        <a href="#" class="sb-item" style="font-weight: 500">메뉴 편집<span class="muted" style="margin-left: auto; font-size: 10.5px; font-weight: 500">포탈 기본</span></a>
+        <a href="#" class="sb-item" style="font-weight: 500">접기</a>
+      </div>
+    </aside>
+
+    <main style="flex: 1 1 auto; min-width: 0; padding: 22px 24px 40px; max-width: 1680px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px">
+
+      <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px">
+        <div style="display: flex; flex-direction: column; gap: 5px; min-width: 0">
+          <a href="Main.dc.html" style="font-size: 12px; color: #22d3ee">‹ 호스트 목록</a>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px"><b style="font-size: 20px; letter-spacing: -0.01em">esx-kr1-03</b><span class="badge green">정상</span><span class="badge green">전원 On</span><span class="badge amber">구성·보안 2</span><span class="badge green">iDRAC 정상</span><span class="badge amber">업링크 에러 +3</span></div>
+          <span class="muted" style="font-size: 12px">vCenter VC-DEMO1(Seoul, KR) · 8.0.3 › 데이터센터 DC-KR1 › 클러스터 CL-Web01 · vCenter ID host-1033 · 인벤토리 00:52 · 구성 00:40 · CVP 수집 00:50(cvp-kr1 · 엣지 위임) · 관리 IP <span class="mono">10.20.1.13</span></span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+          <button type="button" style="min-height: 34px; padding: 0 12px; border-radius: 16px; border: 1px solid rgba(56,189,248,.45); background: rgba(56,189,248,.12); color: #7dd3fc; font: inherit; font-weight: 700">VM 41대 보기 ›</button>
+          <button type="button" class="btn">메트릭</button>
+          <button type="button" class="btn">iDRAC 추이</button>
+          <a href="#" class="btn">구성 점검 열기</a>
+          <a href="#" class="btn">CVP 에서 보기</a>
+        </div>
+      </div>
+
+      <nav class="hd-nav" aria-label="묶음 이동" style="display: flex; flex-wrap: wrap; gap: 6px">
+        <a href="#"><i class="ht-gdot" style="background: #3b82f6"></i>기본</a>
+        <a href="#"><i class="ht-gdot" style="background: #ef4444"></i>구성·보안</a>
+        <a href="#"><i class="ht-gdot" style="background: #f59e0b"></i>경합·지연</a>
+        <a href="#"><i class="ht-gdot" style="background: #22d3ee"></i>클러스터</a>
+        <a href="DvcHostNet.dc.html" class="on" aria-current="true"><i class="ht-gdot" style="background: #60a5fa"></i>네트워크<span class="badge amber" style="font-size: 10px; padding: 0 5px">CVP 확장</span></a>
+        <a href="#"><i class="ht-gdot" style="background: #fb923c"></i>스토리지</a>
+        <a href="DvcHostSan.dc.html"><i class="ht-gdot" style="background: #34e0b4"></i>SAN 경로·트래픽</a>
+        <a href="#"><i class="ht-gdot" style="background: #f59e0b"></i>전력 · iDRAC</a>
+        <a href="#"><i class="ht-gdot" style="background: #94a3b8"></i>재부팅</a>
+        <a href="#"><i class="ht-gdot" style="background: #22c55e"></i>VM</a>
+      </nav>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px">
+        <div class="ht-kpi"><span class="ht-kpi-l">CPU 사용률</span><span class="ht-kpi-v"><span class="mini-bar"><span style="width: 44%; background: #22c55e"></span></span> 44%</span><span class="ht-kpi-s">56,320 / 128,000 MHz</span></div>
+        <div class="ht-kpi"><span class="ht-kpi-l">메모리 사용률</span><span class="ht-kpi-v"><span class="mini-bar"><span style="width: 71%; background: #22c55e"></span></span> 71%</span><span class="ht-kpi-s">727 GB / 1,024 GB</span></div>
+        <div class="ht-kpi"><span class="ht-kpi-l">VM</span><span class="ht-kpi-v">41</span><span class="ht-kpi-s">켜짐 38 · 꺼짐 3</span></div>
+        <div class="ht-kpi"><span class="ht-kpi-l">업링크 CVP 매칭</span><span class="ht-kpi-v">2 <small>/ 4 NIC</small></span><span class="ht-kpi-s">보통(포트 설명 일치) 2 · 미매칭 2</span></div>
+        <div class="ht-kpi"><span class="ht-kpi-l">업링크 지금 송신 / 수신</span><span class="ht-kpi-v">2.1 <small>/ 0.6 Gbps</small></span><span class="ht-kpi-s">CVP port_latest · 매칭 포트 2 합</span></div>
+        <div class="ht-kpi"><span class="ht-kpi-l">업링크 에러 24h</span><span class="ht-kpi-v" style="color: #fbbf24">3 <small>in_err</small></span><span class="ht-kpi-s">leaf1-kr1 Ethernet12 · out_err 0</span></div>
+        <div class="ht-kpi"><span class="ht-kpi-l">업링크 드롭 24h</span><span class="ht-kpi-v muted">—</span><span class="ht-kpi-s">inDiscards · outDiscards 새 수집</span></div>
+        <div class="ht-kpi"><span class="ht-kpi-l">업타임</span><span class="ht-kpi-v">54<small>일</small></span><span class="ht-kpi-s">부팅 2026-09-13 03:40</span></div>
+      </div>
+
+      <div class="banner" style="border-left-color: #243049; color: #8b9bb4">다른 묶음은 <b style="color: #e6edf6">지금 화면 그대로</b>입니다. 이 시안은 기존 ‘네트워크’ 카드(물리 NIC 표 · 가상 스위치 각주)에 <b style="color: #e6edf6">CVP 업링크 열 3개와 업링크 포트 블록</b>을 더한 모습입니다. 방향 기준은 스위치 포트입니다 — <b style="color: #e6edf6">In = 서버 송신</b>(서버 → 스위치) · <b style="color: #e6edf6">Out = 서버 수신</b>(스위치 → 서버).</div>
+
+      <section class="card hd-card" aria-label="네트워크">
+        <div class="hd-card-h">
+          <b><i class="ht-gdot" style="background: #60a5fa"></i>네트워크</b>
+          <span class="muted">물리 NIC 4 · 링크 끊김 0 · 쓰는 업링크 끊김 0 · 가상 스위치 2 · 포트그룹 14 · 관리 IP 10.20.1.13 · CVP 매칭 2/4 · CVP 수집 00:50</span>
+        </div>
+
+        <div class="table-wrap" style="margin-bottom: 10px">
+          <table>
+            <thead><tr><th>장치</th><th>모델</th><th style="text-align: right">속도</th><th>링크</th><th>스위치</th><th>MAC</th><th>드라이버</th><th style="background: rgba(59,130,246,.08)">CVP 스위치 · 포트</th><th style="background: rgba(59,130,246,.08)">매칭 근거</th><th style="background: rgba(59,130,246,.08); text-align: right">지금 송신 / 수신</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><b>vmnic0</b></td><td class="muted" style="font-size: 12px">Intel X710</td><td style="text-align: right">10 Gb</td><td><span class="badge green">Up</span></td><td>vSwitch0(표준)</td><td class="muted mono" style="font-size: 11px">3c:fd:fe:9a:2b:c0</td><td class="muted" style="font-size: 12px">i40en</td>
+                <td class="muted">미매칭</td><td class="muted" style="font-size: 11.5px">포트 설명 없음 · 표준 vSwitch 는 LLDP 를 보내지 않음(CDP만)</td><td style="text-align: right" class="muted">—</td>
+              </tr>
+              <tr>
+                <td><b>vmnic1</b></td><td class="muted" style="font-size: 12px">Intel X710</td><td style="text-align: right">10 Gb</td><td><span class="badge green">Up</span></td><td>vSwitch0(표준)</td><td class="muted mono" style="font-size: 11px">3c:fd:fe:9a:2b:c1</td><td class="muted" style="font-size: 12px">i40en</td>
+                <td class="muted">미매칭</td><td class="muted" style="font-size: 11.5px">MAC 테이블 수집 뒤 재판정</td><td style="text-align: right" class="muted">—</td>
+              </tr>
+              <tr style="background: rgba(255,255,255,.02)">
+                <td><b>vmnic2</b></td><td class="muted" style="font-size: 12px">NVIDIA ConnectX-6</td><td style="text-align: right">25 Gb</td><td><span class="badge green">Up</span></td><td>vDS-PROD(분산)</td><td class="muted mono" style="font-size: 11px">b8:ce:f6:12:ab:30</td><td class="muted" style="font-size: 12px">nmlx5_core</td>
+                <td><b>leaf1-kr1</b> <span class="mono">Ethernet12</span><div class="muted" style="font-size: 11px">7050SX3-48YC8 · EOS 4.33.2F · Po12</div></td>
+                <td><span class="badge amber">보통</span> <span class="muted" style="font-size: 11.5px">포트 설명 ‘esx-kr1-03 vmnic2’ 일치</span></td>
+                <td style="text-align: right" class="tabular">1.14 / 0.31 <span class="muted">Gbps</span></td>
+              </tr>
+              <tr style="background: rgba(255,255,255,.02)">
+                <td><b>vmnic3</b></td><td class="muted" style="font-size: 12px">NVIDIA ConnectX-6</td><td style="text-align: right">25 Gb</td><td><span class="badge green">Up</span></td><td>vDS-PROD(분산)</td><td class="muted mono" style="font-size: 11px">b8:ce:f6:12:ab:31</td><td class="muted" style="font-size: 12px">nmlx5_core</td>
+                <td><b>leaf2-kr1</b> <span class="mono">Ethernet12</span><div class="muted" style="font-size: 11px">7050SX3-48YC8 · EOS 4.33.2F · Po12</div></td>
+                <td><span class="badge amber">보통</span> <span class="muted" style="font-size: 11.5px">포트 설명 ‘esx-kr1-03 vmnic3’ 일치</span></td>
+                <td style="text-align: right" class="tabular">0.98 / 0.29 <span class="muted">Gbps</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="muted" style="font-size: 11.5px; margin-bottom: 12px; line-height: 1.5">vSwitch0(표준 · 업링크 vmnic0+vmnic1 · 포트그룹 3) · vDS-PROD(분산 · 업링크 vmnic2+vmnic3 · 포트그룹 11) · 포트그룹 전체는 ‘구성 점검 열기’ 에서 · 매칭 신뢰도: <b style="color: #4ade80">확정</b> LLDP 이웃 일치 · <b style="color: #60a5fa">높음</b> MAC 테이블 학습 · <b style="color: #fbbf24">보통</b> 포트 설명 일치(지금 가능) · <b>미매칭</b> 근거 없음 — 지어내지 않습니다</div>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 12px">
+          <span class="muted" style="font-size: 12px">매칭 근거(우선순위 순)</span>
+          <span class="chip new">LLDP 이웃 · 새 수집 · Sysdb l2discovery(경로 추정) · vDS LLDP Advertise 필요</span>
+          <span class="chip new">MAC 테이블 · 새 수집 · /Smash/bridging/status/smashFdbStatus(경로 추정)</span>
+          <span class="chip ok">포트 설명 · 지금 있음 · port_latest.descr</span>
+          <span class="chip new">EndpointLocation · 새 수집 · Resource API(MAC당 1회)</span>
+        </div>
+
+        <div class="muted" style="font-size: 12px; margin: 0 0 6px">업링크 포트 — CVP 측 값과 ESXi 측 값을 나란히(ESXi 측 카운터는 지금 수집하지 않음)</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 10px; margin-bottom: 12px">
+          <div style="border: 1px solid rgba(245,158,11,.45); border-radius: 10px; padding: 11px 13px; background: #141b2d; display: flex; flex-direction: column; gap: 9px">
+            <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px"><b>leaf1-kr1 Ethernet12</b><span class="muted" style="font-size: 11.5px">25G full · up · trunk · Po12(MLAG 12) · MTU 9214 · 설명 esx-kr1-03 vmnic2</span></div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px">
+              <div class="tile"><span class="l">송신(In)</span><span class="v">1.14 <small class="muted" style="font-size: 11px; font-weight: 500">Gbps</small></span><span class="s">사용률 4.6% · in_bps</span></div>
+              <div class="tile"><span class="l">수신(Out)</span><span class="v">312 <small class="muted" style="font-size: 11px; font-weight: 500">Mbps</small></span><span class="s">사용률 1.2% · out_bps</span></div>
+              <div class="tile" style="border-color: rgba(245,158,11,.45)"><span class="l">에러 24h</span><span class="v" style="color: #fbbf24">3</span><span class="s">in_err 3 · out_err 0 · port_daily</span></div>
+              <div class="tile"><span class="l">드롭 24h</span><span class="v muted">—</span><span class="s"><span class="badge amber" style="font-size: 10px; padding: 0 5px">새 수집</span> inDiscards · outDiscards</span></div>
+            </div>
+            <div class="muted" style="font-size: 11.5px; line-height: 1.5">ESXi 측 vmnic2 — 드롭·CRC 카운터 <span class="badge amber" style="font-size: 10px; padding: 0 5px">새 수집</span> (vCenter net.droppedRx · net.errorsRx 또는 esxcli network nic stats). 지금 판정 가능한 것은 CVP 측 에러 증가 유무와 사용률만이며, ‘어느 쪽 드롭인가’ 는 양쪽 카운터가 모두 있을 때 판정합니다.</div>
+          </div>
+          <div style="border: 1px solid #243049; border-radius: 10px; padding: 11px 13px; background: #141b2d; display: flex; flex-direction: column; gap: 9px">
+            <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px"><b>leaf2-kr1 Ethernet12</b><span class="muted" style="font-size: 11.5px">25G full · up · trunk · Po12(MLAG 12) · MTU 9214 · 설명 esx-kr1-03 vmnic3</span></div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px">
+              <div class="tile"><span class="l">송신(In)</span><span class="v">0.98 <small class="muted" style="font-size: 11px; font-weight: 500">Gbps</small></span><span class="s">사용률 3.9%</span></div>
+              <div class="tile"><span class="l">수신(Out)</span><span class="v">290 <small class="muted" style="font-size: 11px; font-weight: 500">Mbps</small></span><span class="s">사용률 1.2%</span></div>
+              <div class="tile"><span class="l">에러 24h</span><span class="v">0</span><span class="s">in_err 0 · out_err 0</span></div>
+              <div class="tile"><span class="l">드롭 24h</span><span class="v muted">—</span><span class="s"><span class="badge amber" style="font-size: 10px; padding: 0 5px">새 수집</span></span></div>
+            </div>
+            <div class="muted" style="font-size: 11.5px; line-height: 1.5">포트 카운터는 이 업링크를 쓰는 모든 VM 의 합계입니다(서버 업링크 포트 기준). VM 별 분할은 CVP 에 흐름 수집(sFlow/IPFIX)이 없어 제공하지 않습니다.</div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; margin-bottom: 12px">
+          <div style="flex: 999 1 560px; min-width: 0">
+            <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 4px">
+              <span class="muted" style="font-size: 12px">leaf1-kr1 Ethernet12 · 24시간 처리량 — CVP port_sample(5분) · 송신 실선 · 수신 점선</span>
+              <span style="display: inline-flex; gap: 10px; font-size: 11.5px; color: #8b9bb4"><span><i style="display: inline-block; width: 12px; height: 2px; background: #60a5fa; vertical-align: middle"></i> 송신(In)</span><span><i style="display: inline-block; width: 12px; height: 0; border-top: 2px dashed #60a5fa; vertical-align: middle"></i> 수신(Out)</span><span><i style="display: inline-block; width: 10px; height: 10px; background: #fbbf24; vertical-align: middle; border-radius: 2px"></i> in_err 증분</span></span>
+            </div>
+            <svg viewBox="0 0 760 150" role="img" aria-label="leaf1-kr1 Ethernet12 24시간 송신·수신 처리량과 에러 증분" style="width: 100%; height: 150px; display: block">
+              <line x1="48" y1="12" x2="750" y2="12" stroke="#243049"/><line x1="48" y1="56" x2="750" y2="56" stroke="#243049"/><line x1="48" y1="100" x2="750" y2="100" stroke="#3b5a8a"/>
+              <text x="42" y="16" text-anchor="end" font-size="10" fill="#8b9bb4">3 Gbps</text><text x="42" y="60" text-anchor="end" font-size="10" fill="#8b9bb4">1.5</text><text x="42" y="103" text-anchor="end" font-size="10" fill="#8b9bb4">0</text>
+              <polyline fill="none" stroke="#60a5fa" stroke-width="2" stroke-linejoin="round" points="48,70 120,68 190,71 260,66 330,69 400,64 470,67 540,60 580,40 600,30 620,44 660,60 710,66 750,67"/>
+              <polyline fill="none" stroke="#60a5fa" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round" points="48,92 120,92 190,91 260,91 330,91 400,90 470,90 540,89 580,88 600,87 620,88 660,90 710,91 750,91"/>
+              <rect x="394" y="97" width="8" height="3" fill="#fbbf24"/><rect x="596" y="94" width="8" height="6" fill="#fbbf24"/>
+              <line x1="600" y1="8" x2="600" y2="100" stroke="#fbbf24" stroke-dasharray="3 3"/>
+              <text x="606" y="20" font-size="10.5" fill="#fbbf24">03:14 송신 2.5 Gbps · in_err +2</text>
+              <text x="48" y="128" font-size="10" fill="#8b9bb4">11/06 00:50</text><text x="399" y="128" text-anchor="middle" font-size="10" fill="#8b9bb4">12:50</text><text x="750" y="128" text-anchor="end" font-size="10" fill="#8b9bb4">11/07 00:50</text>
+              <text x="48" y="144" font-size="10" fill="#5d6b85">수집 공백 버킷은 선을 끊어 그립니다(0 으로 채우지 않음) · 첫 수집 주기는 bps 가 null</text>
+            </svg>
+          </div>
+          <div style="flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px"><span class="muted" style="font-size: 12px">CVP 이벤트 — 이 호스트의 매칭 포트 · 원문 그대로</span><a href="#" style="font-size: 11.5px">CVP 도구에서 전체 보기</a></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>시각</th><th>제목 · eventType</th><th>장비 · 포트</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono" style="font-size: 11.5px">11/07 00:14</td><td>High Input Interface Errors<div class="muted mono" style="font-size: 10.5px">INTF_IN_ERRORS_HIGH</div></td><td class="muted" style="font-size: 12px">leaf1-kr1 · Ethernet12</td></tr>
+                  <tr><td class="mono" style="font-size: 11.5px">11/06 22:41</td><td>Interface went down unexpectedly<div class="muted mono" style="font-size: 10.5px">DEVICE_INTF_ERR_SMART</div></td><td class="muted" style="font-size: 12px">leaf1-kr1 · Ethernet12</td></tr>
+                  <tr><td class="mono" style="font-size: 11.5px">11/06 22:41</td><td>Insufficient peer LAG redundancy<div class="muted mono" style="font-size: 10.5px">INSUFFICIENT_PEER_LAG_REDUNDANCY</div></td><td class="muted" style="font-size: 12px">leaf1-kr1 · Port-Channel12</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="muted" style="font-size: 11px; line-height: 1.5">지금 파서는 title · description · eventType 만 읽습니다(cvp/parse.js) — 심각도는 응답에 있으면 표시하고, 없으면 칸을 비웁니다. 임계값은 CVP 의 이벤트 규칙이고 포탈은 표시만 합니다.</div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px">
+          <span class="muted" style="font-size: 12px">이 호스트 VM 의 vNIC MAC 27개 — VM 장치 캐시(dev.nics.mac)에 있어 MAC 테이블 수집 뒤 포트 학습 확인에 그대로 씁니다</span>
+          <span class="badge gray mono" style="font-size: 10.5px">00:50:56:8b:2f:11 web-prod-03</span><span class="badge gray mono" style="font-size: 10.5px">00:50:56:8b:2f:12 web-prod-04</span><span class="badge gray mono" style="font-size: 10.5px">00:50:56:91:0c:5a db-prod-01</span><span class="muted" style="font-size: 11.5px">… 24개 더</span>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+          <span class="muted" style="font-size: 11.5px">출처</span>
+          <span class="chip">vCenter · config.network.pnic(mac · speed · link) · dev.nics.mac</span>
+          <span class="chip">CVP · port_latest(descr · speed · oper · lag · mtu · in/out_bps · util · err)</span>
+          <span class="chip">CVP · port_sample / port_daily · events(title · type)</span>
+          <span class="chip new">새 수집 · 드롭 카운터 · MAC 테이블 · LLDP · EndpointLocation(경로 전부 추정 — 원문 표본으로 확인)</span>
+          <span class="chip new">새 수집 · ESXi vmnic 드롭·에러</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer style="display: flex; align-items: stretch; background: rgba(12,18,32,.92); border-top: 1px solid #1f2a40">
+    <div class="sbar"><span class="l">서버 Uptime</span><span class="v">41일 3시간</span></div>
+    <div class="sbar"><span class="l">vCenter</span><span class="v">28 / 28</span></div>
+    <div class="sbar"><span class="l">ESXi 호스트</span><span class="v">658</span></div>
+    <div class="sbar"><span class="l">VM</span><span class="v">5,850</span></div>
+    <div class="sbar"><span class="l">알람</span><span class="v">12</span></div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
