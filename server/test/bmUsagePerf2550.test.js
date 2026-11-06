@@ -57,17 +57,20 @@ test('⚠ latestUsage 는 GROUP BY 풀스캔이 아니라 usage_latest 를 읽�
 
 // ── P3 + B5 ───────────────────────────────────────────────────────────────────
 test('일 롤업은 ON CONFLICT DO UPDATE 로 누적한다 (행당 2쿼리 14.5ms → 7.4ms)', () => {
-  const s = bare('bmusage/db.js');
+  // v2.922: 원시·롤업 적재는 시간 단위 파일 모듈(monthStore.js)로 옮겼다 — 두 파일을 함께 본다.
+  const s = bare('bmusage/db.js') + bare('bmusage/monthStore.js');
   assert.match(s, /ON CONFLICT\(agent,key,day\) DO UPDATE SET/);
   assert.ok(!/SELECT \* FROM usage_daily WHERE agent=\? AND key=\? AND day=\?/.test(s), '행당 SELECT 를 되살리지 말 것');
   // ⚠ MAX() 는 인자 하나가 NULL 이면 NULL 이라 하한으로 감싸고 되돌려야 한다.
-  assert.match(s, /NULLIF\(MAX\(IFNULL\(cpu_max,-1e308\)/);
+  // v2.922: 열 이름은 상수 표에서 조립한다(maxSql) — 템플릿 모양으로 본다. 실제 산수는 bmPerf2921 의 롤업 수치 테스트가 고정한다.
+  assert.match(s, /NULLIF\(MAX\(IFNULL\(\$\{c\},-1e308\),IFNULL\(\$\{src\}\.\$\{c\},-1e308\)\),-1e308\)/);
 });
 test('같은 ts 재삽입은 INSERT OR IGNORE + changes 검사로 이중 계수를 막는다', () => {
-  const s = bare('bmusage/db.js');
+  // v2.922: 적재는 monthStore.js — 새로 들어간 행(changes 1)만 롤업 목록(insertedRows)에 넣는다.
+  const s = bare('bmusage/db.js') + bare('bmusage/monthStore.js');
   assert.match(s, /INSERT OR IGNORE INTO usage_history/);
   assert.ok(!/INSERT OR REPLACE INTO usage_history/.test(s), 'REPLACE 면 롤업이 두 번 누적된다');
-  assert.match(s, /if \(!Number\(res\?\.changes\)\)/, 'changes 0 이면 롤업을 건드리지 않는다');
+  assert.match(s, /const isNew = !!Number\(out\?\.changes\);\s*if \(isNew\) \{ res\.inserted \+= 1; res\.insertedRows\.push\(r\); \} else res\.duplicates \+= 1;/, 'changes 0 이면 롤업을 건드리지 않는다(v2.922: 보정 대기도 새 행만 — pend inserted)');
 });
 test('최신값은 ts 가 더 클 때만 갱신한다 — 엣지 push 는 순서대로 오지 않는다', () => {
   assert.match(bare('bmusage/db.js'), /WHERE excluded\.ts > usage_latest\.ts/);

@@ -128,7 +128,7 @@ export function isWholeDisk(name, present = new Set()) {
  * 6 rd_sectors · 10 wr_sectors · **13 io_ticks(ms)**.
  * 섹터는 항상 512B 다(커널 고정 — 장치 논리 섹터 크기와 무관).
  */
-export function parseDiskstats(lines = []) {
+export function parseDiskstats(lines = [], { partitions = false } = {}) {
   const rows = [];
   const names = new Set();
   for (const l of lines) {
@@ -142,7 +142,9 @@ export function parseDiskstats(lines = []) {
   const out = [];
   for (const f of rows) {
     const name = f[2];
-    if (!isWholeDisk(name, names)) continue;
+    // v2.922: 파티션 I/O 는 서버 옵트인(partitionIo) — 켜면 파티션 행도 내되 `part:true` 로 표시한다(대표값·장치별 기본 대상에서는 뺀다).
+    const whole = isWholeDisk(name, names);
+    if (!whole && !(partitions && !/^(loop|ram|zram|sr)\d*$/.test(name))) continue;
     const rdSec = num(f[5]); const wrSec = num(f[9]); const ticks = num(f[12]);
     if (rdSec == null && wrSec == null && ticks == null) continue;
     out.push({
@@ -157,6 +159,7 @@ export function parseDiskstats(lines = []) {
        */
       reads: num(f[3]), readTicksMs: num(f[6]), writes: num(f[7]), writeTicksMs: num(f[10]),
       inFlight: num(f[11]), weightedTicksMs: f.length > 13 ? num(f[13]) : null,
+      ...(whole ? {} : { part: true }),
     });
   }
   return out.length ? out : null;
@@ -398,21 +401,53 @@ export function parseSnmpTcp(lines = []) {
  * scheduler 원문 `mq-deadline kyber [bfq] none` 에서 대괄호가 현재값이다(없으면 그 원문 하나가 현재값 — `none` 만 있는 NVMe).
  */
 export const MAX_BLKQ = 64;
-export function parseBlkq(lines = []) {
-  const out = [];
+/** v2.922(D7): 명령이 보내는 BLKQ 줄 상한(장치 × 3 파일) — 장치 수 상한은 설정(store.blkqMax)이 파서에서 정한다. */
+export const BLKQ_SHELL_LINES = 3 * 1_024;   // store.blkqMax 상한(1,024) × 3 파일 — 바이트 합 산수(D1)를 테스트가 고정한다
+/** 장치 이름 → 우선순위(물리 디스크 먼저 · md · dm 마지막 — 멀티패스 서버에서 dm-* 가 물리 디스크 큐를 밀어내지 않게 · D7). */
+export function blkqRank(name) {
+  const n0 = String(name || '');
+  if (/^(sd|nvme|vd|xvd|hd)/.test(n0)) return 0;
+  if (/^md\d/.test(n0)) return 1;
+  if (/^dm-\d/.test(n0)) return 2;
+  return 1;
+}
+/**
+ * `##BLKQ` — 두 형식을 받는다:
+ *  · v2.922(D7) `grep -H '' /sys/block/<name>/queue/{scheduler,nr_requests,rotational}` 한 번 → `/sys/block/<name>/queue/<file>:<값>`
+ *  · v2.919 `<name>|<scheduler 원문>|<nr_requests>|<rotational>`(옛 명령 · 테스트 표본)
+ * scheduler 원문 `mq-deadline kyber [bfq] none` 에서 대괄호가 현재값이다(없으면 그 원문 하나가 현재값 — `none` 만 있는 NVMe).
+ * 물리 디스크 → md → dm 순으로 정렬해 앞 max 개만(나머지는 결과 배열의 `total` 로 센다).
+ */
+export function parseBlkq(lines = [], { max = MAX_BLKQ } = {}) {
+  const map = new Map();
+  const get = (name) => { if (!map.has(name)) map.set(name, { name, raw: null, nr: null, ro: null }); return map.get(name); };
   for (const l of lines) {
-    if (out.length >= MAX_BLKQ) break;
-    const f = String(l).trim().slice(0, 512).split('|');
+    const s0 = String(l).trim().slice(0, 512);
+    const g = /^\/sys\/block\/([A-Za-z0-9._:-]{1,64})\/queue\/(scheduler|nr_requests|rotational):(.*)$/.exec(s0);
+    if (g) {
+      const e = get(g[1]);
+      if (g[2] === 'scheduler') e.raw = g[3]; else if (g[2] === 'nr_requests') e.nr = g[3]; else e.ro = g[3];
+      continue;
+    }
+    const f = s0.split('|');
     if (f.length < 4 || !/^[A-Za-z0-9._:-]{1,64}$/.test(f[0])) continue;
-    const raw = f[1].trim();
+    const e = get(f[0]); e.raw = f[1]; e.nr = f[2]; e.ro = f[3];
+  }
+  const all = [...map.values()].filter((e) => !/^(loop|ram|zram|sr)\d/.test(e.name))
+    .map((e, i) => ({ e, i })).sort((a, b) => blkqRank(a.e.name) - blkqRank(b.e.name) || a.i - b.i).map((x) => x.e);
+  const cap = Math.max(1, Math.floor(Number(max) || MAX_BLKQ));
+  const out = all.slice(0, cap).map((e) => {
+    const raw = String(e.raw ?? '').trim();
     const act = /\[([A-Za-z0-9_-]{1,32})\]/.exec(raw);
     const list = raw.replace(/[[\]]/g, ' ').split(/\s+/).filter((x) => /^[A-Za-z0-9_-]{1,32}$/.test(x)).slice(0, 8);
-    out.push({
-      name: f[0], scheduler: act ? act[1] : (list.length === 1 ? list[0] : null), schedulers: list,
-      nrRequests: num(f[2]), rotational: num(f[3]) === 1 ? true : num(f[3]) === 0 ? false : null,
-    });
-  }
-  return out.length ? out : null;
+    return {
+      name: e.name, scheduler: act ? act[1] : (list.length === 1 ? list[0] : null), schedulers: list,
+      nrRequests: num(e.nr), rotational: num(e.ro) === 1 ? true : num(e.ro) === 0 ? false : null,
+    };
+  });
+  if (!out.length) return null;
+  out.total = all.length;   // 상한으로 뺀 수(= total − length)는 tuning.blkqTotal 로 밝힌다
+  return out;
 }
 
 /**

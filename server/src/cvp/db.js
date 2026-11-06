@@ -103,6 +103,7 @@ async function openInner() {
     addDailyErrCountCols(conn);
     addDeviceInfoCols(conn);
     addPortDetailCols(conn);
+    addPortDropCols(conn);   // v2.922(3a): 포트 드롭(discards — 추정 경로)
     const maxOf = (col) => `NULLIF(MAX(IFNULL(port_daily.${col},-1e308), IFNULL(excluded.${col},-1e308)), -1e308)`;
     const st = {
       upDevice: conn.prepare(`INSERT INTO device_latest (agent,cvp_id,device_key,ts,hostname,model,serial,mgmt_ip,eos_version,streaming,telemetry,parts_json,parts_at,bgp_json,ports_read,extra_json,info_json,sys_ts,cpu_pct,mem_pct,mem_total)
@@ -129,8 +130,8 @@ async function openInner() {
         ON CONFLICT(agent,cvp_id,ev_key,ts) DO UPDATE SET severity=excluded.severity, title=excluded.title, descr=excluded.descr, ev_type=excluded.ev_type,
           devices_json=excluded.devices_json, ack=excluded.ack, updated_at=excluded.updated_at, deleted=excluded.deleted`),
       // v2.649: 설명·세부 열은 NULL(이번에 못 읽음)이면 직전 값을 유지한다 — '' 는 '설명 없음' 으로 그대로 저장한다.
-      upPort: conn.prepare(`INSERT INTO port_latest (agent,cvp_id,device_key,port,ts,descr,speed_bps,oper,admin,vlan,lag,in_bps,out_bps,in_util,out_util,in_err,out_err,rate_ts,duplex,fwd_model,mac,mtu,oper_raw)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      upPort: conn.prepare(`INSERT INTO port_latest (agent,cvp_id,device_key,port,ts,descr,speed_bps,oper,admin,vlan,lag,in_bps,out_bps,in_util,out_util,in_err,out_err,rate_ts,duplex,fwd_model,mac,mtu,oper_raw,in_drop,out_drop)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(agent,cvp_id,device_key,port) DO UPDATE SET ts=excluded.ts, descr=COALESCE(excluded.descr, port_latest.descr), speed_bps=excluded.speed_bps, oper=excluded.oper,
           admin=excluded.admin, vlan=excluded.vlan, lag=excluded.lag,
           duplex=COALESCE(excluded.duplex, port_latest.duplex), fwd_model=COALESCE(excluded.fwd_model, port_latest.fwd_model),
@@ -141,20 +142,25 @@ async function openInner() {
           out_util=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.out_util ELSE excluded.out_util END,
           in_err=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.in_err ELSE excluded.in_err END,
           out_err=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.out_err ELSE excluded.out_err END,
+          in_drop=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.in_drop ELSE excluded.in_drop END,
+          out_drop=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.out_drop ELSE excluded.out_drop END,
           rate_ts=MAX(IFNULL(port_latest.rate_ts,0), excluded.rate_ts)
         WHERE excluded.ts > port_latest.ts`),
       // 원시 표본이 오면 그 포트의 마지막 처리량도 갱신한다(엣지는 구성이 바뀌지 않은 장비 레코드를 매번 보내지 않는다 — push.js).
-      rateFromSample: conn.prepare(`UPDATE port_latest SET in_bps=?, out_bps=?, in_util=?, out_util=?, in_err=?, out_err=?, rate_ts=?
+      rateFromSample: conn.prepare(`UPDATE port_latest SET in_bps=?, out_bps=?, in_util=?, out_util=?, in_err=?, out_err=?, in_drop=?, out_drop=?, rate_ts=?
+        WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ?`),
+      // v2.922(반증 D3): 구 엣지 10칸 표본(드롭 칸 자체가 없다)은 port_latest 의 드롭을 **덮지 않는다** — 장비 레코드가 준 값이 null 로 지워졌다.
+      rateFromSampleNoDrop: conn.prepare(`UPDATE port_latest SET in_bps=?, out_bps=?, in_util=?, out_util=?, in_err=?, out_err=?, rate_ts=?
         WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ?`),
       // v2.611(EDGE2611-04): 행이 **있으면** 센다(ts 는 더 클 때만 오른다) — changes 가 '중앙에 그 장비 행이 있는가' 를 말해야
       //   엣지가 없는 행을 touch 로만 보내는 것을 알아채고 레코드를 다시 보낸다(예전 `AND ts < ?` 는 같은 ts 재전송을 0 으로 셌다).
       touchDevice: conn.prepare('UPDATE device_latest SET ts=MAX(ts, ?) WHERE agent=? AND cvp_id=? AND device_key=?'),
       delPortsOld: conn.prepare('DELETE FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ?'),
       selDevTs: conn.prepare('SELECT ts FROM device_latest WHERE agent=? AND cvp_id=? AND device_key=?'),
-      insSample: conn.prepare('INSERT OR IGNORE INTO port_sample (agent,cvp_id,device_key,port,ts,in_bps,out_bps,in_util,out_util,in_err,out_err) VALUES (?,?,?,?,?,?,?,?,?,?,?)'),
+      insSample: conn.prepare('INSERT OR IGNORE INTO port_sample (agent,cvp_id,device_key,port,ts,in_bps,out_bps,in_util,out_util,in_err,out_err,in_drop,out_drop) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'),
       upDaily: conn.prepare(`INSERT INTO port_daily (agent,cvp_id,device_key,port,day,samples,in_bps_sum,in_bps_n,in_bps_max,out_bps_sum,out_bps_n,out_bps_max,
-          in_util_sum,in_util_n,in_util_max,out_util_sum,out_util_n,out_util_max,in_err_sum,out_err_sum,in_err_n,out_err_n)
-        VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          in_util_sum,in_util_n,in_util_max,out_util_sum,out_util_n,out_util_max,in_err_sum,out_err_sum,in_err_n,out_err_n,in_drop_sum,out_drop_sum,in_drop_n,out_drop_n)
+        VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(agent,cvp_id,device_key,port,day) DO UPDATE SET samples=port_daily.samples+1,
           in_bps_sum=port_daily.in_bps_sum+excluded.in_bps_sum, in_bps_n=port_daily.in_bps_n+excluded.in_bps_n, in_bps_max=${maxOf('in_bps_max')},
           out_bps_sum=port_daily.out_bps_sum+excluded.out_bps_sum, out_bps_n=port_daily.out_bps_n+excluded.out_bps_n, out_bps_max=${maxOf('out_bps_max')},
@@ -162,7 +168,10 @@ async function openInner() {
           out_util_sum=port_daily.out_util_sum+excluded.out_util_sum, out_util_n=port_daily.out_util_n+excluded.out_util_n, out_util_max=${maxOf('out_util_max')},
           in_err_sum=CASE WHEN excluded.in_err_sum IS NULL THEN port_daily.in_err_sum ELSE IFNULL(port_daily.in_err_sum,0)+excluded.in_err_sum END,
           out_err_sum=CASE WHEN excluded.out_err_sum IS NULL THEN port_daily.out_err_sum ELSE IFNULL(port_daily.out_err_sum,0)+excluded.out_err_sum END,
-          in_err_n=port_daily.in_err_n+excluded.in_err_n, out_err_n=port_daily.out_err_n+excluded.out_err_n`),
+          in_err_n=port_daily.in_err_n+excluded.in_err_n, out_err_n=port_daily.out_err_n+excluded.out_err_n,
+          in_drop_sum=CASE WHEN excluded.in_drop_sum IS NULL THEN port_daily.in_drop_sum ELSE IFNULL(port_daily.in_drop_sum,0)+excluded.in_drop_sum END,
+          out_drop_sum=CASE WHEN excluded.out_drop_sum IS NULL THEN port_daily.out_drop_sum ELSE IFNULL(port_daily.out_drop_sum,0)+excluded.out_drop_sum END,
+          in_drop_n=port_daily.in_drop_n+excluded.in_drop_n, out_drop_n=port_daily.out_drop_n+excluded.out_drop_n`),
       // ── 장애 전이(v2.640, faults.js) — 전이만 적재. state 표는 파트 수만큼만 존재하고 event 는 open/change/close 만 append.
       fOpen: conn.prepare(`INSERT INTO cvp_fault_state (agent,cvp_id,device_key,fault_key,kind,label,detail,state,first_seen,last_seen,hold_reason,notified_at,device_name)
         VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?)
@@ -202,6 +211,28 @@ function addDailyErrCountCols(conn) {
   }
 }
 
+/**
+ * v2.922(3a · 설계 PROFILES §10): 포트 드롭 열 — port_latest·port_sample 의 in_drop/out_drop, port_daily 의 합·개수.
+ *   CREATE 문이 아니라 ALTER 로 더한다(기존 DB 와 새 DB 가 같은 경로 · 'duplicate column name' 만 삼킨다 — DB2603-01).
+ *   ⚠ 카운터 필드 이름은 추정(parse.parseCounters inDiscards)이다 — 못 읽으면 null(드롭 0 이 아니다).
+ */
+export const PORT_DROP_COLS = Object.freeze({
+  port_latest: [['in_drop', 'INTEGER'], ['out_drop', 'INTEGER']],
+  port_sample: [['in_drop', 'INTEGER'], ['out_drop', 'INTEGER']],
+  port_daily: [['in_drop_sum', 'INTEGER'], ['out_drop_sum', 'INTEGER'], ['in_drop_n', 'INTEGER NOT NULL DEFAULT 0'], ['out_drop_n', 'INTEGER NOT NULL DEFAULT 0']],
+});
+export function addPortDropCols(conn) {
+  let added = 0;
+  for (const [table, cols] of Object.entries(PORT_DROP_COLS)) {
+    const have = new Set(conn.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name));
+    for (const [col, type] of cols) {
+      if (have.has(col)) continue;
+      try { conn.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`); added += 1; }
+      catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; }
+    }
+  }
+  return added;
+}
 /** v2.649: port_latest 의 인터페이스 세부 정보 열(duplex·forwarding model·MAC·MTU·원래 상태 문자열) — 없는 열만 더한다. */
 function addPortDetailCols(conn) {
   const have = new Set(conn.prepare('PRAGMA table_info(port_latest)').all().map((r) => r.name));
@@ -308,11 +339,11 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
             if (!olderRecord) {
               st.upPort.run(agent, cvpId, key, name, ts, descOf(p.desc), numOrNull(p.speedBps), txt(p.oper, 16), txt(p.admin, 16), txt(p.vlan, 32), txt(p.lag, 64),
                 numOrNull(p.inBps), numOrNull(p.outBps), numOrNull(p.inUtil), numOrNull(p.outUtil), numOrNull(p.inErr), numOrNull(p.outErr), ts,
-                txt(p.duplex, 48), txt(p.fwdModel, 48), txt(p.mac, 32), mtuOf(p.mtu), txt(p.operRaw, 48));
+                txt(p.duplex, 48), txt(p.fwdModel, 48), txt(p.mac, 32), mtuOf(p.mtu), txt(p.operRaw, 48), numOrNull(p.inDrop), numOrNull(p.outDrop));
               np++;
             }
             if (samples && sampleWorthy(p)) {
-              const r = insertSample(st, [agent, cvpId, key, name, ts, p.inBps, p.outBps, p.inUtil, p.outUtil, p.inErr, p.outErr]);
+              const r = insertSample(st, [agent, cvpId, key, name, ts, p.inBps, p.outBps, p.inUtil, p.outUtil, p.inErr, p.outErr, p.inDrop, p.outDrop]);
               if (r) ns++; else dup++;
             }
           }
@@ -328,19 +359,21 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
 }
 
 /** 원시 표본 1행 + 일 롤업(표본이 새로 들어갔을 때만 — 재전송 이중 계수 방지). 반환: 새로 넣었는가. */
-function insertSample(st, [agent, cvpId, key, port, ts, inBps, outBps, inUtil, outUtil, inErr, outErr]) {
-  const v = [numOrNull(inBps), numOrNull(outBps), numOrNull(inUtil), numOrNull(outUtil), numOrNull(inErr), numOrNull(outErr)];
+function insertSample(st, [agent, cvpId, key, port, ts, inBps, outBps, inUtil, outUtil, inErr, outErr, inDrop, outDrop]) {
+  // v2.922: 드롭 두 칸을 뒤에 붙였다(구버전 엣지 push 행은 없다 → undefined → null — 드롭 0 이 아니다).
+  const v = [numOrNull(inBps), numOrNull(outBps), numOrNull(inUtil), numOrNull(outUtil), numOrNull(inErr), numOrNull(outErr), numOrNull(inDrop), numOrNull(outDrop)];
   const r = st.insSample.run(agent, cvpId, key, port, ts, ...v);
   if (Number(r.changes) === 0) return false;
-  const [ib, ob, iu, ou, ie, oe] = v;
+  const [ib, ob, iu, ou, ie, oe, id, od] = v;
   st.upDaily.run(agent, cvpId, key, port, dayIndex(ts),
     ib ?? 0, ib == null ? 0 : 1, ib, ob ?? 0, ob == null ? 0 : 1, ob,
-    iu ?? 0, iu == null ? 0 : 1, iu, ou ?? 0, ou == null ? 0 : 1, ou, ie, oe, ie == null ? 0 : 1, oe == null ? 0 : 1);
+    iu ?? 0, iu == null ? 0 : 1, iu, ou ?? 0, ou == null ? 0 : 1, ou, ie, oe, ie == null ? 0 : 1, oe == null ? 0 : 1,
+    id, od, id == null ? 0 : 1, od == null ? 0 : 1);
   return true;
 }
 
 /**
- * 중앙: 엣지 push 의 원시 표본 행 적재. rows: [[cvpId, deviceKey, port, ts, inBps, outBps, inUtil, outUtil, inErr, outErr], …]
+ * 중앙: 엣지 push 의 원시 표본 행 적재. rows: [[cvpId, deviceKey, port, ts, inBps, outBps, inUtil, outUtil, inErr, outErr(, inDrop, outDrop — v2.922 새 엣지 12칸)], …]
  * ⚠ 호출자가 소유권(cvpId ∈ serversForAgent(agent))을 먼저 걸러야 한다.
  */
 export const IMPORT_TXN_ROWS = 2_000;
@@ -360,10 +393,10 @@ export async function importSamples(agent, rows = []) {
     db.conn.exec('BEGIN');
     try {
       for (const r of part) {
-        if (insertSample(db.st, [agent, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]])) {
+        if (insertSample(db.st, [agent, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]])) {
           ins++;
-          const v = [r[4], r[5], r[6], r[7], r[8], r[9]].map(numOrNull);
-          db.st.rateFromSample.run(...v, r[3], agent, r[0], r[1], r[2], r[3]);
+          if (r.length >= 12) db.st.rateFromSample.run(...[r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]].map(numOrNull), r[3], agent, r[0], r[1], r[2], r[3]);
+          else db.st.rateFromSampleNoDrop.run(...[r[4], r[5], r[6], r[7], r[8], r[9]].map(numOrNull), r[3], agent, r[0], r[1], r[2], r[3]);
         } else dup++;
       }
       db.conn.exec('COMMIT');
@@ -459,7 +492,8 @@ function dailyMergeSql() {
   const errSum = (c) => `${c}=CASE WHEN v.${c} IS NULL THEN port_daily.${c} ELSE IFNULL(port_daily.${c},0)+v.${c} END`;
   const sums = ['in_bps', 'out_bps', 'in_util', 'out_util'].flatMap((m) => [`${m}_sum=port_daily.${m}_sum+v.${m}_sum`, `${m}_n=port_daily.${m}_n+v.${m}_n`, mx(`${m}_max`)]);
   return `UPDATE port_daily SET samples=port_daily.samples+v.samples, ${sums.join(', ')},
-      ${errSum('in_err_sum')}, ${errSum('out_err_sum')}, in_err_n=port_daily.in_err_n+v.in_err_n, out_err_n=port_daily.out_err_n+v.out_err_n
+      ${errSum('in_err_sum')}, ${errSum('out_err_sum')}, in_err_n=port_daily.in_err_n+v.in_err_n, out_err_n=port_daily.out_err_n+v.out_err_n,
+      ${errSum('in_drop_sum')}, ${errSum('out_drop_sum')}, in_drop_n=port_daily.in_drop_n+v.in_drop_n, out_drop_n=port_daily.out_drop_n+v.out_drop_n
     FROM (SELECT * FROM port_daily WHERE ${IN_CHUNK}) AS v
     WHERE port_daily.agent=? AND ${ADOPT_PK.port_daily.map((c) => `port_daily.${c}=v.${c}`).join(' AND ')}`;
 }
@@ -624,7 +658,7 @@ export async function deviceDetail(agent, cvpId, key) {
   if (!r) return null;
   const ports = db.conn.prepare('SELECT * FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? ORDER BY port LIMIT 4096').all(agent, cvpId, key)
     .map((p) => ({ name: p.port, speedBps: p.speed_bps, oper: p.oper || 'unknown', admin: p.admin || 'unknown', vlan: p.vlan || '', lag: p.lag || '',
-      inBps: p.in_bps, outBps: p.out_bps, inUtil: p.in_util, outUtil: p.out_util, inErr: p.in_err, outErr: p.out_err, ts: Number(p.ts), ...portDetailOf(p) }));
+      inBps: p.in_bps, outBps: p.out_bps, inUtil: p.in_util, outUtil: p.out_util, inErr: p.in_err, outErr: p.out_err, inDrop: p.in_drop ?? null, outDrop: p.out_drop ?? null, ts: Number(p.ts), ...portDetailOf(p) }));
   // v2.630 A2-02: 합계 판정은 parse.portsSummary 하나를 쓴다(미연결 'nolink' 는 down 이 아니다 — 개수는 noLink).
   const pSum = portsSummary(ports);
   return { device: rowToDevice(r, pSum), ports: r.ports_read === 1 ? ports : null };
@@ -649,6 +683,7 @@ export async function portsByDesc(terms = [], { limit = 200 } = {}) {
   const out = rows.slice(0, lim).map((p) => ({ agent: p.agent, cvpId: p.cvp_id, key: p.device_key, hostname: p.dev_hostname || '', serial: p.dev_serial || '',
     port: p.port, desc: p.descr, speedBps: p.speed_bps ?? null, oper: p.oper || 'unknown', admin: p.admin || 'unknown', vlan: p.vlan || '', lag: p.lag || '',
     inBps: p.in_bps ?? null, outBps: p.out_bps ?? null, inUtil: p.in_util ?? null, outUtil: p.out_util ?? null, inErr: p.in_err ?? null, outErr: p.out_err ?? null,
+    inDrop: p.in_drop ?? null, outDrop: p.out_drop ?? null,   // v2.922(3a): 포트 드롭(추정 경로 — 못 읽으면 null)
     rateTs: p.rate_ts == null ? null : Number(p.rate_ts), ts: Number(p.ts), mac: p.mac ?? null, mtu: p.mtu ?? null }));
   return { rows: out, ...(rows.length > lim ? { truncated: true, limit: lim } : {}) };
 }
@@ -670,7 +705,7 @@ export async function deviceRecordsFor(agent, cvpId) {
     const k = p.device_key;
     if (!portsBy.has(k)) portsBy.set(k, []);
     portsBy.get(k).push({ name: p.port, speedBps: p.speed_bps, oper: p.oper, admin: p.admin, vlan: p.vlan || '', lag: p.lag || '',
-      inBps: p.in_bps, outBps: p.out_bps, inUtil: p.in_util, outUtil: p.out_util, inErr: p.in_err, outErr: p.out_err, ...portDetailOf(p) });
+      inBps: p.in_bps, outBps: p.out_bps, inUtil: p.in_util, outUtil: p.out_util, inErr: p.in_err, outErr: p.out_err, inDrop: p.in_drop ?? null, outDrop: p.out_drop ?? null, ...portDetailOf(p) });
   }
   return devs.map((r) => {
     const x = parseJson(r.extra_json) || {};
@@ -690,11 +725,11 @@ export async function deviceRecordsFor(agent, cvpId) {
 export async function samplesAfter(rowid = 0, limit = 20_000) {
   const db = await open();
   if (!db) return { rows: [], maxRowid: Number(rowid) || 0, unavailable: true };
-  const rows = db.conn.prepare(`SELECT rowid AS rowid, cvp_id, device_key, port, ts, in_bps, out_bps, in_util, out_util, in_err, out_err
+  const rows = db.conn.prepare(`SELECT rowid AS rowid, cvp_id, device_key, port, ts, in_bps, out_bps, in_util, out_util, in_err, out_err, in_drop, out_drop
       FROM port_sample WHERE rowid > ? AND +agent = '' ORDER BY rowid LIMIT ?`)
     .all(Number(rowid) || 0, Math.max(1, Math.min(100_000, Number(limit) || 20_000)));
   return {
-    rows: rows.map((r) => [r.cvp_id, r.device_key, r.port, Number(r.ts), r.in_bps, r.out_bps, r.in_util, r.out_util, r.in_err, r.out_err]),
+    rows: rows.map((r) => [r.cvp_id, r.device_key, r.port, Number(r.ts), r.in_bps, r.out_bps, r.in_util, r.out_util, r.in_err, r.out_err, r.in_drop, r.out_drop]),
     maxRowid: rows.length ? Number(rows[rows.length - 1].rowid) : (Number(rowid) || 0),
   };
 }
@@ -715,10 +750,10 @@ export async function portSeries({ agent, cvpId, key, port, hours = 24, rawReten
   const from = now - h * 3600_000;
   const LIMIT = 5000;
   if (h <= rawRetentionDays * 24) {
-    const rows = db.conn.prepare(`SELECT ts, in_bps, out_bps, in_util, out_util, in_err, out_err FROM port_sample
+    const rows = db.conn.prepare(`SELECT ts, in_bps, out_bps, in_util, out_util, in_err, out_err, in_drop, out_drop FROM port_sample
         WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND ts>=? ORDER BY ts DESC LIMIT ?`).all(agent, cvpId, key, port, from, LIMIT + 1);
     const truncated = rows.length > LIMIT;
-    const pts = rows.slice(0, LIMIT).reverse().map((r) => ({ ts: Number(r.ts), inBps: r.in_bps, outBps: r.out_bps, inUtil: r.in_util, outUtil: r.out_util, inErr: r.in_err, outErr: r.out_err }));
+    const pts = rows.slice(0, LIMIT).reverse().map((r) => ({ ts: Number(r.ts), inBps: r.in_bps, outBps: r.out_bps, inUtil: r.in_util, outUtil: r.out_util, inErr: r.in_err, outErr: r.out_err, inDrop: r.in_drop ?? null, outDrop: r.out_drop ?? null }));
     return { points: pts, source: 'raw', intervalMs, ...(truncated ? { truncated: true, limit: LIMIT } : {}) };
   }
   const rows = db.conn.prepare(`SELECT * FROM port_daily WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND day>=? ORDER BY day LIMIT ?`)
@@ -733,6 +768,7 @@ export async function portSeries({ agent, cvpId, key, port, hours = 24, rawReten
     // v2.611(DB2611-06): 오류 합은 **델타를 만든 표본만** 더한 부분 합이다(첫 표본·간격 비정상·카운터 리셋은 null).
     //   몇 표본의 합인지(inErrN)를 함께 준다 — samples 와 다르면 하루 전체의 오류가 아니다. 열 추가 전(구버전) 행은 null(모름).
     inErrN: legacyN(r.in_err_n, r.in_err_sum), outErrN: legacyN(r.out_err_n, r.out_err_sum),
+    inDrop: r.in_drop_sum ?? null, outDrop: r.out_drop_sum ?? null, inDropN: legacyN(r.in_drop_n, r.in_drop_sum), outDropN: legacyN(r.out_drop_n, r.out_drop_sum),
   }));
   return { points: pts, source: 'daily', intervalMs: DAY_MS };
 }
@@ -1106,4 +1142,20 @@ export function _resetForTest() {
   try { if (_db && _db !== 'unavailable') _db.conn.close(); } catch { /* */ }
   _db = null; _opening = null; _counts = null; _pruneTick = 0; pruneFlight.reset(); lockRetry.ok();
   _adopted.clear(); _adopting.clear(); _lostUnsent = { total: 0, last: 0, at: null };
+}
+
+/**
+ * v2.922(3a) — 베어메탈 서버 NIC ↔ 스위치 포트 대조용 포트 최신값(설명·속도·상태·처리량·오류·드롭 + 장비 이름).
+ *   CVP 이력은 복제 적재하지 않는다(설계 §10) — 서버 성능 화면이 조회할 때 이 최신 표를 읽는다. cvpIds 가 빈 배열이면 0행(넓히지 않는다).
+ */
+export async function portLatestRows({ cvpIds = null, limit = 50_000 } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  if (Array.isArray(cvpIds) && !cvpIds.length) return { rows: [] };
+  const ids = Array.isArray(cvpIds) ? cvpIds.slice(0, 256).map(String) : null;
+  const where = ids ? `WHERE p.cvp_id IN (${ids.map(() => '?').join(',')})` : '';
+  const rows = db.conn.prepare(`SELECT p.agent, p.cvp_id, p.device_key, p.port, p.ts, p.descr, p.speed_bps, p.oper, p.admin, p.lag,
+      p.in_bps, p.out_bps, p.in_util, p.out_util, p.in_err, p.out_err, p.in_drop, p.out_drop, p.rate_ts, d.hostname
+    FROM port_latest p LEFT JOIN device_latest d ON d.agent=p.agent AND d.cvp_id=p.cvp_id AND d.device_key=p.device_key ${where} LIMIT ?`).all(...(ids || []), limit + 1);
+  return { rows: rows.slice(0, limit), ...(rows.length > limit ? { truncated: true } : {}) };
 }

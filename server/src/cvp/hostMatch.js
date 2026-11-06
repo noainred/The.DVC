@@ -24,15 +24,64 @@ export function hostMatchTerms(host = {}) {
   const short = full.split('.')[0];
   const names = [];
   if (short.length >= 3) names.push(short);
+  // v2.922(리눅스 성능 3a — 베어메탈 서버 NIC ↔ 포트): 별칭(서비스 태그 등)도 이름 단서로 — 같은 토큰 경계 규칙. 가상화 호스트 호출은 aliases 를 넘기지 않아 예전과 같다.
+  for (const a of Array.isArray(host.aliases) ? host.aliases : []) { const x = String(a || '').trim().toLowerCase(); if (x.length >= 3 && !names.includes(x)) names.push(x); }
   const nics = (Array.isArray(host.nics) ? host.nics : []).map((n) => ({ device: String(n?.device || ''), mac: normMac(n?.mac) })).filter((n) => n.device);
   return { full, short, names, nics, macs: nics.filter((n) => n.mac.length === 12).map((n) => n.mac) };
 }
 
-/** 설명 안에 토큰 경계로 이름이 있는가('esx01' ⊄ 'esx010'). */
-export function descHasName(desc, name) {
+/**
+ * 이름 뒤·앞에 하이픈·밑줄로 **붙어 이어져도 같은 호스트로 보는** 토큰 — NIC·역할 접미사(‘esx01-vmnic1’ · ‘kr-esx-01-mgmt’). 이 목록 밖 토큰이 붙으면
+ *   다른 호스트 이름의 일부로 본다(‘esx-01-b’ · ‘bm-kr1-db01-old’ · ‘db-1-0’ · ‘kr-esx-01’). 목록은 흔한 표기만(추정 — 현장 표기로 늘릴 수 있다).
+ */
+export const JOIN_OK_RE = /^(vmnic\d{1,3}|vmk\d{1,3}|nic\d{1,3}|eth\d{1,3}|en[a-z]{0,2}\d[a-z0-9]{0,8}|bond\d{1,3}|team\d{1,3}|p\d{1,2}p?\d{0,2}|port\d{1,3}|mgmt|mgt|oob|idrac|ilo|bmc|ipmi|uplink\d{0,2}|lag\d{0,3}|po\d{1,4}|mlag|vmotion|vsan|iscsi|nfs|data|backup)$/;
+/** 설명을 소문자 토큰열로(각 토큰 뒤 구분자 원문 포함 — 붙은 이어짐 판정용). 길이를 먼저 자르고 선형으로. */
+function tokensOf(desc) {
+  const d = String(desc || '').toLowerCase().slice(0, 1024);
+  const out = [];
+  let i = 0;
+  while (i < d.length) {
+    while (i < d.length && !/[a-z0-9]/.test(d[i])) i++;
+    const st = i;
+    while (i < d.length && /[a-z0-9]/.test(d[i])) i++;
+    if (i > st) out.push({ t: d.slice(st, i), start: st, end: i });
+  }
+  for (let k = 0; k < out.length; k++) out[k].sepAfter = k + 1 < out.length ? d.slice(out[k].end, out[k + 1].start) : '';
+  return out;
+}
+const JOINED = (sep) => sep === '-' || sep === '_';
+/** 이름 **앞**에 붙어도 되는 연결어 — ‘to-esx01’ · ‘TO_ESX01-p1’(v2.920 테스트가 고정한 표기). ‘kr-esx-01’ 의 ‘kr’ 같은 이름 조각은 아니다. */
+export const JOIN_PREFIX_OK_RE = /^(to|from|link|conn|uplink|srv|svr|server|host)$/;
+/**
+ * 설명 안에 이름이 있는가. 이름·설명 둘 다 구분자로 나눈 **연속 토큰열**로 찾는다('db01' ⊄ 'db010' · 'esx-01' = 'esx 01' = 'ESX_01').
+ * v2.922(3a · 반증 D7 보강):
+ *  · 구분자 있는 이름('bm-kr1-db01')이 예전에는 토큰 하나와 비교돼 **영원히 매칭되지 않았다**(v2.920 결함) — 토큰열 비교로 고쳤다.
+ *  · strict(기본 — 호스트 이름): 토큰열 **바로 앞·뒤에 하이픈·밑줄로 붙은 토큰**이 있으면 다른 호스트 이름의 일부로 보고 매칭하지 않는다
+ *    (‘esx-01-b’ · ‘kr-esx-01’ · ‘db-1-0’ · ‘bm-kr1-db01-old’). 단 붙은 토큰이 NIC·역할 접미사(JOIN_OK_RE)면 같은 호스트다(‘esx01-vmnic1’ · ‘kr-esx-01-mgmt’).
+ *    앞에는 연결어(JOIN_PREFIX_OK_RE — ‘to-esx01’)만 붙을 수 있다. 앞 연장(‘kr-esx-01’ 이 ‘esx-01’ 을 품는 것)은 후보로도 남기지 않는다 — 하이픈으로 이은 식별자는 한 호스트 이름이라 보고(이 현장 이름 규칙 추정),
+ *    거짓 후보를 사람이 지우는 비용보다 거짓 매칭이 업링크 트래픽을 잘못 귀속하는 비용이 크다고 판단했다.
+ *  · 여러 토큰 이름은 영숫자 합이 3자 이상일 때만(‘a-b’ ↔ ‘link a b c’ 같은 흔한 토큰 쌍 방지). 한 토큰 이름의 길이 하한은 호출부(hostMatchTerms 3자)가 정한다.
+ *  · strict:false — NIC 장치 이름(eno1 · vmnic0) 찾기용: 붙은 이어짐을 따지지 않는다(‘db01-eno1’ 의 eno1).
+ */
+export function descHasName(desc, name, { strict = true } = {}) {
   if (!name) return false;
-  const toks = String(desc || '').toLowerCase().split(SEP).filter(Boolean);
-  return toks.includes(name);
+  const parts = String(name).toLowerCase().split(SEP).filter(Boolean);
+  if (!parts.length) return false;
+  if (parts.length > 1 && parts.join('').length < 3) return false;
+  const toks = tokensOf(desc);
+  for (let i = 0; i + parts.length <= toks.length; i++) {
+    let ok = true;
+    for (let j = 0; j < parts.length; j++) if (toks[i + j].t !== parts[j]) { ok = false; break; }
+    if (!ok) continue;
+    if (!strict) return true;
+    const prev = i > 0 ? toks[i - 1] : null;
+    const last = toks[i + parts.length - 1];
+    const next = i + parts.length < toks.length ? toks[i + parts.length] : null;
+    if (prev && JOINED(prev.sepAfter) && !JOIN_OK_RE.test(prev.t) && !JOIN_PREFIX_OK_RE.test(prev.t)) continue;
+    if (next && JOINED(last.sepAfter) && !JOIN_OK_RE.test(next.t)) continue;
+    return true;
+  }
+  return false;
 }
 
 /** 설명 안의 MAC(어느 표기든) — 정규화 12자. */
@@ -59,7 +108,8 @@ export function matchUplinks(ports = [], host = {}) {
     const dMacs = macsInDesc(desc);
     const nicByMac = terms.nics.find((n) => n.mac && dMacs.has(n.mac)) || null;
     const nicNames = (desc.toLowerCase().match(NIC_RE) || []);
-    const nicByName = terms.nics.find((n) => nicNames.includes(n.device.toLowerCase())) || null;
+    // v2.922(3a): 리눅스 NIC 이름(eno1·ens1f0·bond0 …)은 vmnic 글자 규칙에 걸리지 않는다 — 장치 이름이 설명 토큰과 같으면 NIC 지목(이름 단서와 함께일 때만 — 아래 조건).
+    const nicByName = terms.nics.find((n) => nicNames.includes(n.device.toLowerCase()) || descHasName(desc, n.device.toLowerCase(), { strict: false })) || null;
     const nameHit = terms.names.some((n) => descHasName(desc, n));
     if (!nicByMac && !(nicByName && nameHit) && !nameHit) continue;   // vmnic 글자만으로는 호스트를 특정할 수 없다(어느 호스트나 vmnic0 이 있다)
     const nic = nicByMac?.device || nicByName?.device || null;
@@ -77,6 +127,6 @@ export const BASIS_LABEL = Object.freeze({
   lldp: { label: '확정', note: 'LLDP 이웃', tone: 'ok' },
   mac: { label: '높음', note: 'MAC 테이블 학습', tone: 'ok' },
   'desc-mac': { label: '보통', note: '포트 설명에 NIC MAC', tone: 'warn' },
-  'desc-nic': { label: '보통', note: '포트 설명에 호스트 이름 + vmnic', tone: 'warn' },
+  'desc-nic': { label: '보통', note: '포트 설명에 호스트 이름 + NIC 이름(vmnic·eno 등)', tone: 'warn' },
   'desc-name': { label: '보통', note: '포트 설명에 호스트 이름', tone: 'warn' },
 });
