@@ -85,6 +85,7 @@ import { registerUserMenu } from './api/userMenu.js'; // 계정별 좌측 메뉴
 import { registerIssues } from './api/issues.js'; // 이슈 트래커(등록·담당자 할당·상태·댓글·이력, v2.864)
 import { registerWiki } from './api/wiki.js'; // 위키(스페이스 · 페이지 트리 · 판 · 비교 · 댓글 · 대문, v2.881)
 import { registerAttach } from './api/attach.js'; // 위키 · 이슈 첨부(v2.889)
+import { registerUsage } from './api/usage.js'; // v2.913 기능 사용 추적 수신(설정 › 사용자 › 기능 사용 현황)
 
 // 특수기능/인벤토리 API 집계 라우터 — v2.283.0 대형 파일 분할.
 // 도메인 구현은 ./api/*.js 로 이동. ⚠️ register 호출 순서 = 라우트 등록 순서(Express 매칭 순서)이므로
@@ -199,3 +200,4 @@ registerUserMenu(api);
 registerIssues(api);
 registerWiki(api);
 registerAttach(api);
+registerUsage(api);

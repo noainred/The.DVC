@@ -58,6 +58,7 @@ export const MIGRATABLE = [
   { file: 'cvp.db', label: 'Arista CloudVision(CVP) 네트워크 스위치 — 장비·포트 최신값·포트 사용량 이력(v2.608)' },
   { file: 'vm-dns.db', label: 'VM DNS 서버 설정 변경 이력(바뀐 것만 — v2.696)' },
   { file: 'xfer-speed.db', label: '법인 간 전송 속도 측정 이력(중앙↔엣지 10MB 왕복 — 원시 + 일 요약, v2.735)' },
+  { file: 'usage.db', label: '기능 사용 현황 — 사용자 × 화면 × 날 열람 수 · 머문 시간 일 집계(v2.913)' },
   { file: 'isidu.db', label: '아이실론 디렉터리 사용량 이력(사용자 폴더 크기 — 조사마다 전체, v2.736)' },
   // vcenter-logs.db 는 **이미 자체 경로 설정**(설정 › 로그 수집의 storagePath)이 있어 제외한다 —
   // 두 곳에서 경로를 제어하면 어느 쪽이 이겼는지 알 수 없다(그 화면에서 옮기세요).

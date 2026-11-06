@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>기능 사용 현황 — 상태 모음</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.wrap{padding:24px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.case{display:flex;flex-direction:column;gap:8px;min-width:0}
+.cl{font-size:12px;font-weight:700;color:#8b9bb4;display:flex;align-items:center;gap:8px}
+.cl b{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:#1a2236;border:1px solid #243049;color:#e6edf6;font-size:11px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.panel{padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.danger{background:#ef4444;border-color:#ef4444;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;box-sizing:border-box}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.band{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border-radius:10px;font-size:12px;border:1px solid;line-height:1.5}
+.band.info{background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.35);color:#bfdbfe}
+.band.warn{background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.4);color:#fcd34d}
+.band.crit{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.45);color:#fca5a5}
+.ic{width:14px;height:14px;flex:none;margin-top:2px}
+.kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.tile{padding:10px 12px;display:flex;flex-direction:column;gap:5px;min-width:0;background:#0f1626;border:1px solid #243049;border-radius:10px}
+.tile .lb{font-size:11px;font-weight:600;color:#8b9bb4}
+.tile .val{font-size:20px;font-weight:800;line-height:1}
+.tile .val small{font-size:11px;font-weight:600;color:#8b9bb4;margin-left:3px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;font-size:11px;font-weight:700;color:#8b9bb4;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+td{padding:6px 8px;border-bottom:1px solid #1f2a40;white-space:nowrap}
+.r{text-align:right}
+.err{border:1px solid rgba(239,68,68,.45);background:rgba(239,68,68,.08);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.err h4{margin:0;font-size:13px;color:#fca5a5;display:flex;align-items:center;gap:8px}
+.err p{margin:0;font-size:12px;color:#e6edf6;line-height:1.5}
+.modal{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;box-shadow:0 12px 40px rgba(0,0,0,.6);max-width:520px}
+.modal h4{margin:0;font-size:14px}
+.login{background:#0f1626;border:1px solid #243049;border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;max-width:380px}
+.login .in{height:36px;border:1px solid #243049;border-radius:8px;background:#0a0e17;display:flex;align-items:center;padding:0 10px;color:#5d6b85;font-size:12.5px}
+.sbm{width:236px;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:2px}
+.sbm a{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:12.5px}
+.sbm a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12px}
+.sbm a.grp{box-shadow:inset 3px 0 0 #22d3ee}
+.sbm a.new{color:#22d3ee;background:#1a2236}
+.bars{height:48px;display:flex;align-items:flex-end;gap:2px}
+.bars i{flex:1;display:block;background:#3b82f6;border-radius:3px 3px 0 0;min-height:2px}
+.bars i.gap{background:repeating-linear-gradient(135deg,#f59e0b 0 2px,transparent 2px 6px);opacity:.6}
+.bars i.part{background:repeating-linear-gradient(135deg,#3b82f6 0 3px,#141b2d 3px 6px)}
+.bars i.we{background:#1e3a5f}
+.axis{display:flex;justify-content:space-between;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8b9bb4}
+</style>
+</helmet>
+
+<div class="wrap">
+
+  <!-- ⓐ -->
+  <div class="case">
+    <div class="cl"><b>ⓐ</b> 기록이 꺼져 있음 — 화면은 비지 않는다(마지막 기록 구간을 보여 준다)</div>
+    <div class="card panel">
+      <div class="band warn">
+        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 2.5 14 13H2z"/><path d="M8 7v3M8 11.5v.2"/></svg>
+        <div><b>기능 사용 기록이 꺼져 있습니다</b> — 2026-10-30 18:20 부터 (jh.park). 아래는 꺼지기 전 기록(10-07 ~ 10-30)입니다. <a href="#">수집 설정에서 켜기 →</a></div>
+      </div>
+      <div class="kpis">
+        <div class="tile"><div class="lb">활성 사용자</div><div class="val">21<small>/ 41</small></div></div>
+        <div class="tile"><div class="lb">열람</div><div class="val mono">3,870<small>회</small></div></div>
+        <div class="tile"><div class="lb">기록 구간</div><div class="val" style="font-size:14px;padding-top:4px">10-07 ~ 10-30</div></div>
+      </div>
+      <div class="muted" style="font-size:11.5px">꺼진 뒤 기간은 어떤 합계 · 추이 · ‘지난 기간 대비’ 에도 넣지 않는다. 기간 선택기가 꺼진 날을 포함하면 머리에 이 띠가 남는다.</div>
+    </div>
+  </div>
+
+  <!-- ⓑ -->
+  <div class="case">
+    <div class="cl"><b>ⓑ</b> 막 켬 — 하루가 차지 않았다(오늘은 부분)</div>
+    <div class="card panel">
+      <div class="band info">
+        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7v4M8 5v.2"/></svg>
+        <div>기록을 시작한 지 <b>2시간 14분</b> (11-05 15:28 · jh.park). 아직 하루가 차지 않아 추이 · 지난 기간 대비 · 순위는 내일부터 뜻이 있습니다. 지금까지: 열람 38회 · 사용자 3명 · 기능 9개.</div>
+      </div>
+      <table>
+        <thead><tr><th>기능</th><th class="r">열람</th><th class="r">사용자</th><th class="r">머문 시간</th><th class="r">지난 30일 대비</th></tr></thead>
+        <tbody>
+          <tr><td><b>Overview</b></td><td class="r mono">14</td><td class="r mono">3</td><td class="r mono">41m</td><td class="r mono muted">—</td></tr>
+          <tr><td><b>가상화 서버</b></td><td class="r mono">9</td><td class="r mono">2</td><td class="r mono">27m</td><td class="r mono muted">—</td></tr>
+          <tr><td><b>기능 사용 현황</b> <span class="faint">(이 화면)</span></td><td class="r mono">6</td><td class="r mono">1</td><td class="r mono">12m</td><td class="r mono muted">—</td></tr>
+        </tbody>
+      </table>
+      <div class="muted" style="font-size:11.5px">직전 기간 기록이 없으면 ‘—’ 다 — 0% 로 쓰지 않는다. 이 화면 자신도 센다(제외하지 않는다 — 관리 화면도 UI 다).</div>
+    </div>
+  </div>
+
+  <!-- ⓒ -->
+  <div class="case">
+    <div class="cl"><b>ⓒ</b> 범위가 지정된 설정 소유자 — 서버 403, 화면은 권한 안내(ErrorBox)</div>
+    <div class="card panel">
+      <div class="err">
+        <h4><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>이 화면을 볼 수 없습니다</h4>
+        <p>기능 사용 현황은 <b>설정 소유자이면서 전체 범위(법인 지정 없음)</b>인 계정만 봅니다. 지금 계정 <span class="mono">ops.pl</span> 은 설정 소유자이지만 범위가 <span class="mono">VC-PL1</span> 로 지정되어 있어 다른 법인 사용자의 기록까지 보는 이 화면은 열리지 않습니다.</p>
+        <p class="muted" style="font-size:11.5px">서버: requireSettingsOwner(소유자 ∧ 전체 범위) → 403 SETTINGS_OWNER_FULL_SCOPE_REASON. 설정 1단 ‘사용자’ 묶음에서 이 항목 자체를 숨기지는 않는다(소유자 목록 노출 규칙과 같음) — 눌렀을 때 이 안내.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⓓ -->
+  <div class="case">
+    <div class="cl"><b>ⓓ</b> 집계를 못 읽음 — 빈 표를 그리지 않는다(503 + 다시 시도)</div>
+    <div class="card panel">
+      <div class="band crit">
+        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5"/></svg>
+        <div><b>집계를 읽지 못했습니다</b> — usage.db 가 잠겨 있습니다(다른 연결이 쓰는 중 · 3초 대기 뒤 실패). 기록은 계속 받고 있고 메모리에 모인 신호는 잃지 않습니다. <a href="#">다시 시도</a></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn sm" type="button">다시 시도</button>
+        <span class="muted" style="font-size:11.5px">직전에 성공한 응답(17:40 기준)이 있으면 그것을 ‘오래됨’ 표시와 함께 보여 준다 — 수치를 0 으로 채우지 않는다.</span>
+      </div>
+      <div class="kpis" style="opacity:.55">
+        <div class="tile"><div class="lb">활성 사용자 <span class="tag warn">17:40 기준</span></div><div class="val">23<small>/ 41</small></div></div>
+        <div class="tile"><div class="lb">열람 <span class="tag warn">17:40 기준</span></div><div class="val mono">4,507</div></div>
+        <div class="tile"><div class="lb">머문 시간 <span class="tag warn">17:40 기준</span></div><div class="val">286<small>h</small></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⓔ -->
+  <div class="case">
+    <div class="cl"><b>ⓔ</b> 기록 지우기 확인 — 소유자 OTP 재인증 · 범위 명시 · 감사 로그</div>
+    <div class="modal" role="dialog" aria-labelledby="dl">
+      <h4 id="dl">기능 사용 기록을 지웁니다</h4>
+      <div class="band crit">
+        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 2.5 14 13H2z"/><path d="M8 7v3M8 11.5v.2"/></svg>
+        <div>범위 <b>한 사용자 · k.yoon(AD · 퇴직)</b> — 2026-10-07 ~ 11-05 의 행 61개. 되돌릴 수 없고 포탈 백업에도 없습니다.</div>
+      </div>
+      <label for="otp" style="font-size:12px;font-weight:600">본인 OTP (jh.park)</label>
+      <input id="otp" class="input mono" placeholder="6자리" style="width:160px;letter-spacing:3px">
+      <div class="muted" style="font-size:11.5px">감사 로그에 ‘기능 사용 기록 삭제 · 범위 · 행 수 · 누가’ 를 남깁니다. 5회 틀리면 잠깁니다(민감 작업 재인증 규칙과 같음).</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn" type="button">취소</button><button class="btn danger" type="button">61행 지우기</button></div>
+    </div>
+  </div>
+
+  <!-- ⓕ -->
+  <div class="case">
+    <div class="cl"><b>ⓕ</b> 로그인 화면 고지 — 수집이 켜져 있을 때만 · 문구는 수집 설정의 것</div>
+    <div class="card panel" style="align-items:center">
+      <div class="login">
+        <div style="font-weight:800;font-size:15px;display:flex;align-items:center;gap:8px"><span style="width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:13px">V</span>THE DAVINCI</div>
+        <div class="in">계정</div>
+        <div class="in">비밀번호 또는 OTP</div>
+        <button class="btn primary" type="button" style="justify-content:center">로그인</button>
+        <div class="muted" style="font-size:11px;line-height:1.5;border-top:1px solid #1f2a40;padding-top:8px">이 포탈은 어느 화면을 얼마나 쓰는지(열람 횟수 · 머문 시간)를 계정별로 기록해 UI 개선에 씁니다. 입력한 내용 · 검색어 · 조회한 데이터는 기록하지 않습니다. 기록은 설정 소유자만 보며 180일 뒤 지워집니다.</div>
+      </div>
+      <div class="muted" style="font-size:11.5px">미인증 응답(/auth/config)에 싣는 것은 <b>문구와 켜짐 여부뿐</b> — 보관 일수 외에 계정 · 수치는 넣지 않는다(계정 열거 단서 금지 규칙).</div>
+    </div>
+  </div>
+
+  <!-- ⓖ -->
+  <div class="case">
+    <div class="cl"><b>ⓖ</b> 추이 안의 공백 · 오늘(부분) — 세 가지 막대를 구분한다</div>
+    <div class="card panel">
+      <div class="bars" role="img" aria-label="공백과 부분이 있는 추이">
+        <i style="height:70%"></i><i style="height:84%"></i><i style="height:62%"></i><i class="we" style="height:14%"></i><i class="we" style="height:10%"></i><i style="height:88%"></i><i style="height:76%"></i><i style="height:92%"></i><i class="gap" style="height:100%"></i><i class="gap" style="height:100%"></i><i style="height:80%"></i><i style="height:71%"></i><i class="we" style="height:12%"></i><i class="we" style="height:9%"></i><i style="height:85%"></i><i style="height:78%"></i><i class="part" style="height:40%"></i>
+      </div>
+      <div class="axis"><span>10-20</span><span>꺼짐 10-28~29</span><span>11-05</span></div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:#8b9bb4;align-items:center">
+        <span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#3b82f6;vertical-align:middle;margin-right:5px"></i>평일</span>
+        <span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#1e3a5f;vertical-align:middle;margin-right:5px"></i>주말</span>
+        <span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:repeating-linear-gradient(135deg,#f59e0b 0 2px,transparent 2px 6px);vertical-align:middle;margin-right:5px"></i>기록 꺼짐(값 없음 — 0 아님)</span>
+        <span><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:repeating-linear-gradient(135deg,#3b82f6 0 3px,#141b2d 3px 6px);vertical-align:middle;margin-right:5px"></i>오늘(부분)</span>
+      </div>
+      <div class="muted" style="font-size:11.5px">꺼진 날은 막대 자리에 빗금 전체 높이로 ‘없음’ 을 표시하고 툴팁에 사유(꺼짐 · 누가)를 쓴다. 평균 · 합계에서 그 날은 분모에서도 뺀다.</div>
+    </div>
+  </div>
+
+  <!-- ⓗ -->
+  <div class="case">
+    <div class="cl"><b>ⓗ</b> 메뉴 위치 — 설정 하위 탭이 기본 · 사이드바 설정 묶음에 바로 가기는 선택(컨펌 항목)</div>
+    <div class="card panel" style="flex-direction:row;gap:16px;flex-wrap:wrap;align-items:flex-start">
+      <div class="sbm" aria-label="사이드바 설정 묶음">
+        <a href="#" class="grp">설정 <span style="margin-left:auto;font-size:11px;color:#8b9bb4">4 ▴</span></a>
+        <a href="#" class="sub">설정</a><a href="#" class="sub">업그레이드</a><a href="#" class="sub">엣지 토큰 맞추기</a><a href="#" class="sub new">기능 사용 현황</a>
+      </div>
+      <div style="flex:1;min-width:240px;display:flex;flex-direction:column;gap:8px;font-size:12px;color:#aebbd0;line-height:1.5">
+        <div><b style="color:#e6edf6">기본(권장)</b>: 설정 › 사용자 › 기능 사용 현황 — 주소 <span class="mono">#/settings/feature-usage</span>. 설정 소유자 게이트를 그대로 타고, 1단 묶음을 늘리지 않는다(v2.905 에 9개로 줄인 것을 유지).</div>
+        <div><b style="color:#e6edf6">선택</b>: 사이드바 ‘설정’ 묶음에 바로 가기 1줄(엣지 토큰 맞추기와 같은 꼴 — 그 항목은 도구 키라 메뉴에 둘 수 있었고, 설정 하위 탭은 지금 메뉴 형식(탭 · 도구)에 없어 <span class="mono">topMenu.js</span> 에 ‘설정 하위’ 항목 형식을 하나 더해야 한다). 자주 볼 화면이면 넣고, 분기마다 볼 화면이면 뺀다.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

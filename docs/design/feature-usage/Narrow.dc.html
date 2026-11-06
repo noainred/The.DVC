@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>기능 사용 현황 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.ib{width:32px;height:32px;border-radius:8px;border:1px solid #243049;background:#0a0e17;display:inline-flex;align-items:center;justify-content:center;color:#8b9bb4}
+.st{font-size:15px;font-weight:800}
+.gb{display:flex;gap:6px;flex-wrap:wrap}
+.gb a{padding:7px 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-weight:600;font-size:12px;text-decoration:none;white-space:nowrap}
+.gb a.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.g2{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:8px;padding:8px 10px;border-radius:10px;background:rgba(37,99,235,.07);border-left:3px solid #3b82f6}
+.g2 .pre{font-size:11px;color:#8b9bb4;opacity:.8;white-space:nowrap}
+.g2 a{padding:5px 10px;font-size:12px;border-radius:7px;color:#9aa4b2;border:1px solid transparent;text-decoration:none;white-space:nowrap}
+.g2 a.on{background:rgba(37,99,235,.22);color:#93c5fd;border-color:rgba(37,99,235,.55);font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;font-size:10.5px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.seg2{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg2 a{padding:7px 10px;color:#8b9bb4;font-weight:600;text-decoration:none;font-size:12px;white-space:nowrap}
+.seg2 a.on{background:#3b82f6;color:#fff}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 12px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.band{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:10px;font-size:11.5px;border:1px solid;line-height:1.45}
+.band.info{background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.35);color:#bfdbfe}
+.ic{width:14px;height:14px;flex:none;margin-top:1px}
+.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.tile{padding:10px 12px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.tile .lb{font-size:11px;font-weight:600;color:#8b9bb4}
+.tile .val{font-size:22px;font-weight:800;line-height:1}
+.tile .val small{font-size:11px;font-weight:600;color:#8b9bb4;margin-left:3px}
+.tile .sub{font-size:11px;color:#8b9bb4}
+.panel{padding:12px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.ph{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.pt{font-size:13px;font-weight:700}
+.list{display:flex;flex-direction:column}
+.li{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:2px 8px;padding:9px 0;border-bottom:1px solid #1f2a40;align-items:center;min-height:44px}
+.li .rk{color:#8b9bb4;font-size:11.5px;text-align:right}
+.li .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.li .mt{grid-column:2;font-size:11px;color:#8b9bb4;display:flex;gap:8px;flex-wrap:wrap}
+.li .vv{grid-row:1/3;text-align:right;font-family:"JetBrains Mono",monospace;font-size:12.5px}
+.li .vv small{display:block;font-size:10.5px;color:#8b9bb4}
+.li .bar{grid-column:2/4;height:4px;background:#0f1626;border-radius:2px;overflow:hidden;margin-top:2px}
+.li .bar i{display:block;height:100%;background:#3b82f6;border-radius:2px}
+.stack{display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px;background:#141b2d}
+.stack i{display:block;height:100%}
+.lgd{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:5px 8px;align-items:center;font-size:11.5px}
+.lgd i{width:12px;height:12px;border-radius:3px;display:block}
+.bars{height:72px;display:flex;align-items:flex-end;gap:1px}
+.bars i{flex:1;display:block;background:#3b82f6;border-radius:2px 2px 0 0;min-height:2px}
+.bars i.we{background:#1e3a5f}
+.bars i.part{background:repeating-linear-gradient(135deg,#3b82f6 0 3px,#141b2d 3px 6px)}
+.axis{display:flex;justify-content:space-between;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8b9bb4}
+.hint{display:flex;flex-direction:column;gap:8px}
+.hint .h{padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626;display:flex;flex-direction:column;gap:6px}
+.hint h4{margin:0;font-size:12px;display:flex;align-items:center;gap:8px}
+.hint ul{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:#aebbd0;line-height:1.45}
+.hint li b{color:#e6edf6;font-weight:600}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+</style>
+</helmet>
+
+<div style="min-height:100%;display:flex;flex-direction:column;background:#0a0e17">
+  <div class="tb">
+    <span class="ib" aria-hidden="true">☰</span>
+    <span class="logo"><span class="v">V</span>THE DAVINCI</span>
+    <span class="mock">MOCK</span>
+    <span style="flex:1"></span>
+    <span class="ib" aria-hidden="true">⌕</span>
+    <span class="muted" style="font-size:12px">jh.park</span>
+  </div>
+
+  <main style="display:flex;flex-direction:column;gap:10px;padding:12px 16px 24px;box-sizing:border-box;min-width:0">
+    <div class="st">⚙️ 설정</div>
+    <div class="gb">
+      <a href="#">인프라 등록</a><a href="#">백업</a><a href="#">수집</a><a href="#">엣지·원격</a><a href="#" class="on">사용자</a><a href="#">보안</a><a href="#">알림·연동</a><a href="#">로그</a><a href="#">시스템</a>
+    </div>
+    <div class="g2">
+      <span class="pre">사용자 ›</span>
+      <a href="#">메인포탈 사용자 관리</a><a href="#">엣지 사용자 배포</a><a href="#">인증(AD)</a><a href="#" class="on">기능 사용 현황</a>
+    </div>
+
+    <h2 style="margin:4px 0 0;font-size:17px">기능 사용 현황</h2>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span class="seg2" role="group" aria-label="기간"><a href="#">7일</a><a href="#" class="on">30일</a><a href="#">90일</a><a href="#">직접</a></span>
+      <span class="muted mono" style="font-size:11.5px">10-07 ~ 11-05</span>
+      <span style="flex:1"></span>
+      <button class="btn" type="button" style="min-height:30px;padding:0 10px">CSV</button>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <a href="#" class="on">개요</a><a href="#">기능별 <span class="muted" style="font-weight:500">71/190</span></a><a href="#">사용자별 <span class="muted" style="font-weight:500">23</span></a><a href="#">수집 설정</a>
+    </div>
+
+    <div class="band info">
+      <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7v4M8 5v.2"/></svg>
+      <div>엣지 포탈 사용분 제외 · 머문 시간은 창이 보이고 마지막 입력 뒤 5분 이내만 · 오늘은 부분.</div>
+    </div>
+
+    <div class="kpis">
+      <div class="card tile"><div class="lb">활성 사용자</div><div class="val">23<small>/ 41</small></div><div class="sub">미접속 18명</div></div>
+      <div class="card tile"><div class="lb">열람</div><div class="val mono">4,507<small>회</small></div><div class="sub">하루 평균 150</div></div>
+      <div class="card tile"><div class="lb">머문 시간</div><div class="val">286<small>h 05m</small></div><div class="sub">1회 평균 3분 48초</div></div>
+      <div class="card tile"><div class="lb">쓰인 / 0회 기능</div><div class="val">71<small>/ 190</small></div><div class="sub" style="color:#fcd34d">30일간 0회 119</div></div>
+    </div>
+
+    <div class="card panel">
+      <div class="ph"><span class="pt">많이 쓰는 기능 — 상위 8</span><a href="#" style="font-size:11.5px">전체 →</a></div>
+      <div class="list">
+        <div class="li"><span class="rk">1</span><span class="nm">가상화 서버</span><span class="vv">1,004<small>66h 20m</small></span><span class="mt">서버 › 가상화 서버 <span class="tag gray">탭</span> · 21명</span><span class="bar"><i style="width:100%"></i></span></div>
+        <div class="li"><span class="rk">2</span><span class="nm">Overview</span><span class="vv">742<small>51h 10m</small></span><span class="mt">Overview <span class="tag gray">탭</span> · 23명</span><span class="bar"><i style="width:74%"></i></span></div>
+        <div class="li"><span class="rk">3</span><span class="nm">ESXi 호스트</span><span class="vv">418<small>22h 05m</small></span><span class="mt">서버 › ESXi 호스트 <span class="tag gray">탭</span> · 17명</span><span class="bar"><i style="width:42%"></i></span></div>
+        <div class="li"><span class="rk">4</span><span class="nm">알람</span><span class="vv">377<small>14h 30m</small></span><span class="mt">서버 › 알람 <span class="tag gray">탭</span> · 19명</span><span class="bar"><i style="width:38%"></i></span></div>
+        <div class="li"><span class="rk">5</span><span class="nm">스토리지 현황</span><span class="vv">296<small>24h 50m</small></span><span class="mt">스토리지 <span class="tag blue">도구</span> · 11명</span><span class="bar"><i style="width:29%"></i></span></div>
+        <div class="li"><span class="rk">6</span><span class="nm">VM 정밀 검색</span><span class="vv">231<small>9h 40m</small></span><span class="mt">가상화 서버 탭 줄 · 카드 <span class="tag blue">도구</span> · 14명</span><span class="bar"><i style="width:23%"></i></span></div>
+        <div class="li"><span class="rk">7</span><span class="nm">이슈</span><span class="vv">205<small>17h 15m</small></span><span class="mt">이슈 <span class="tag gray">탭</span> · 16명</span><span class="bar"><i style="width:20%"></i></span></div>
+        <div class="li"><span class="rk">8</span><span class="nm">데이터스토어</span><span class="vv">164<small>6h 50m</small></span><span class="mt">스토리지 › 데이터스토어 <span class="tag gray">탭</span> · 12명</span><span class="bar"><i style="width:16%"></i></span></div>
+      </div>
+    </div>
+
+    <div class="card panel">
+      <div class="ph"><span class="pt">메뉴 묶음별 비중</span></div>
+      <div class="stack" role="img" aria-label="메뉴 묶음별 열람 비중">
+        <i style="width:42.8%;background:#3b82f6"></i><i style="width:18.2%;background:#d97706"></i><i style="width:10.8%;background:#0891b2"></i><i style="width:9.1%;background:#9333ea"></i><i style="width:8%;background:#0d9488"></i><i style="width:11.1%;background:#5d6b85"></i>
+      </div>
+      <div class="lgd">
+        <i style="background:#3b82f6"></i><span>서버</span><span class="mono muted">42.8%</span>
+        <i style="background:#d97706"></i><span>Overview · Summary</span><span class="mono muted">18.2%</span>
+        <i style="background:#0891b2"></i><span>스토리지</span><span class="mono muted">10.8%</span>
+        <i style="background:#9333ea"></i><span>이슈 · 위키 · 게시판</span><span class="mono muted">9.1%</span>
+        <i style="background:#0d9488"></i><span>특수 기능</span><span class="mono muted">8.0%</span>
+        <i style="background:#5d6b85"></i><span>기타(설정 · 네트워크 · 자원관리)</span><span class="mono muted">11.1%</span>
+      </div>
+    </div>
+
+    <div class="card panel">
+      <div class="ph"><span class="pt">일별 열람 추이</span><span class="muted" style="font-size:11px">최고 10-21 230회</span></div>
+      <div class="bars" role="img" aria-label="일별 열람 추이 30일">
+        <i style="height:82%"></i><i style="height:87%"></i><i style="height:77%"></i><i style="height:73%"></i><i class="we" style="height:18%"></i><i class="we" style="height:17%"></i><i style="height:93%"></i><i style="height:86%"></i><i style="height:97%"></i><i style="height:83%"></i><i style="height:74%"></i><i class="we" style="height:22%"></i><i class="we" style="height:14%"></i><i style="height:90%"></i><i style="height:100%"></i><i style="height:92%"></i><i style="height:80%"></i><i style="height:70%"></i><i class="we" style="height:20%"></i><i class="we" style="height:13%"></i><i style="height:95%"></i><i style="height:89%"></i><i style="height:85%"></i><i style="height:77%"></i><i style="height:66%"></i><i class="we" style="height:19%"></i><i class="we" style="height:16%"></i><i style="height:93%"></i><i style="height:90%"></i><i class="part" style="height:42%"></i>
+      </div>
+      <div class="axis"><span>10-07</span><span>10-21</span><span>11-05</span></div>
+    </div>
+
+    <div class="card panel">
+      <div class="ph"><span class="pt">UI 개선 단서</span></div>
+      <div class="hint">
+        <div class="h"><h4><span class="tag ok">승격 후보</span> 메뉴에 없는데 많이 씀</h4><ul><li><b>VM 복제(백업)</b> 88회 · 7명</li><li><b>로그인 실패 분석</b> 64회 · 3명</li><li><b>시리얼 조회</b> 59회 · 9명</li></ul></div>
+        <div class="h"><h4><span class="tag warn">정리 후보</span> 메뉴에 있는데 0회</h4><ul><li><b>스토리지 › 베어메탈 스토리지</b></li><li><b>네트워크 › 글로벌 네트워크 점검</b></li><li><b>자원 최적화 › Infra Observability</b> <span class="faint">+3</span></li></ul></div>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

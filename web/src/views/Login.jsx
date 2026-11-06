@@ -65,6 +65,7 @@ export default function Login({ onSuccess, notice, setup }) {
     username, setUsername, password, setPassword, showPw, setShowPw, keep, setKeep,
     forgotInfo, toggleForgot: () => setForgotInfo((v) => !v),
     error, busy, submit, welcome, notice,
+    usageNotice: setup?.usageNotice || '',   // v2.913 기능 사용 기록 고지 — 테마 공용 AuthFields 가 카드 안에 그린다
     idRemembered: !!savedId, // ID 가 미리 채워졌으면 비밀번호 칸에 바로 포커스
   };
 

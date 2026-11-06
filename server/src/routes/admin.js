@@ -27,6 +27,7 @@ import { registerLogAnalysis } from './admin/logAnalysis.js'; // v2.583: 설정 
 import { registerPeerTrust } from './admin/peerTrust.js'; // 2026-10-09 S-01·S-02: 설정 › 장비 신뢰(SSH 호스트키·TLS 인증서)
 import { registerVeeam } from './admin/veeam.js'; // v2.751: 설정 › 백업 › Veeam 백업 서버
 import { registerVeeamEm } from './admin/veeamEm.js'; // v2.788: 설정 › Veeam 백업 서버 › Enterprise Manager
+import { registerUsageAdmin } from './admin/usage.js'; // v2.913: 설정 › 사용자 › 기능 사용 현황
 
 // 관리자 API 집계 라우터 — v2.285.0 대형 파일 분할.
 // 도메인 구현은 ./admin/*.js 로 이동. ⚠️ register 호출 순서 = 라우트 등록 순서(Express 매칭 순서).
@@ -64,3 +65,4 @@ registerLogAnalysis(adminRouter);   // v2.583: 로그 → 개선점(누적·버�
 registerPeerTrust(adminRouter);     // 2026-10-09 S-01·S-02: 장비 신뢰 지문 승인·거부·정책
 registerVeeam(adminRouter);         // v2.751: Veeam 백업 서버 등록·연결 시험·지금 읽기
 registerVeeamEm(adminRouter);       // v2.788: Veeam Enterprise Manager 등록·연결 시험·지금 수집
+registerUsageAdmin(adminRouter);   // v2.913: 기능 사용 현황(조회 · 설정 · 지우기 — 설정 소유자)

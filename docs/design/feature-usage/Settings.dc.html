@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>기능 사용 현황 — 수집 설정</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.srch{display:flex;align-items:center;gap:8px;width:420px;height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#8b9bb4;font-size:12px;padding:0 10px}
+.sb{width:236px;flex:none;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp.on{background:transparent;color:#e6edf6;box-shadow:inset 3px 0 0 #22d3ee}
+.sb .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600}
+.st{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
+.gb{display:flex;gap:6px;flex-wrap:wrap}
+.gb a{padding:8px 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-weight:600;font-size:12.5px;text-decoration:none;white-space:nowrap}
+.gb a.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.g2{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:14px;padding:8px 12px;border-radius:10px;background:rgba(37,99,235,.07);border-left:3px solid #3b82f6}
+.g2 .pre{font-size:11px;color:#8b9bb4;opacity:.8;white-space:nowrap}
+.g2 a{padding:6px 12px;font-size:12.5px;border-radius:7px;color:#9aa4b2;border:1px solid transparent;text-decoration:none;white-space:nowrap}
+.g2 a.on{background:rgba(37,99,235,.22);color:#93c5fd;border-color:rgba(37,99,235,.55);font-weight:600}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;box-sizing:border-box}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.danger{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.5);color:#fca5a5}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px;align-items:start}
+.panel{padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.ph{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.pt{font-size:13px;font-weight:700}
+.row{display:grid;grid-template-columns:200px minmax(0,1fr);gap:6px 16px;align-items:start;padding:10px 0;border-top:1px solid #1f2a40}
+.row:first-of-type{border-top:0;padding-top:0}
+.row .l{font-weight:600;font-size:12.5px;padding-top:7px}
+.row .l small{display:block;font-weight:400;color:#8b9bb4;font-size:11.5px;margin-top:2px;line-height:1.4}
+.row .c{display:flex;flex-direction:column;gap:6px;min-width:0}
+.row .c .note{font-size:11.5px;color:#8b9bb4;line-height:1.45}
+.tg{display:inline-flex;align-items:center;gap:8px}
+.tg i{width:38px;height:22px;border-radius:11px;background:#22c55e;position:relative;display:inline-block;flex:none}
+.tg i::after{content:"";position:absolute;top:3px;right:3px;width:16px;height:16px;border-radius:50%;background:#fff}
+.tg i.off{background:#243049}
+.tg i.off::after{right:auto;left:3px}
+.inl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chipx{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 6px 0 10px;border-radius:999px;background:#0f1626;border:1px solid #243049;font-size:12px}
+.chipx .x{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#8b9bb4;border:0;background:transparent;font:inherit;cursor:pointer}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 14px;font-size:12.5px;align-items:baseline}
+.kv .k{color:#8b9bb4;white-space:nowrap}
+.kv .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.bar{height:8px;background:#0f1626;border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:4px;background:#3b82f6}
+.band{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border-radius:10px;font-size:12px;border:1px solid;line-height:1.5}
+.band.info{background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.35);color:#bfdbfe}
+.band.warn{background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.4);color:#fcd34d}
+.ic{width:14px;height:14px;flex:none}
+.ta{min-height:64px;padding:8px 10px;line-height:1.5;resize:vertical;width:100%}
+.sv{display:flex;justify-content:flex-end;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid #1f2a40;padding-top:12px}
+ol.steps{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px;font-size:12px;color:#aebbd0;line-height:1.45}
+ol.steps b{color:#e6edf6;font-weight:600}
+</style>
+</helmet>
+
+<div style="min-height:100%;display:flex;flex-direction:column;background:#0a0e17">
+
+  <div class="tb">
+    <span class="logo"><span class="v">V</span>THE DAVINCI</span>
+    <span class="ver">v2.912</span>
+    <span class="mock">MOCK</span>
+    <span style="flex:1"></span>
+    <span class="srch">장비 · 기능 · 탭 찾기<span style="margin-left:auto;font-size:10.5px;border:1px solid #243049;border-radius:4px;padding:0 4px">⌘K</span></span>
+    <span style="flex:1"></span>
+    <span class="muted mono" style="font-size:12px">28/28 vCenter <b style="color:#86efac">OK</b> · 17:46:02</span>
+    <span class="muted" style="font-size:12px">jh.park</span>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;flex:1;min-width:0">
+  <aside class="sb" aria-label="메뉴">
+    <a href="#">Overview</a><a href="#">Summary</a>
+    <a href="#">서버 <span class="n">6 ▾</span></a><a href="#">스토리지 <span class="n">7 ▾</span></a><a href="#">네트워크 <span class="n">6 ▾</span></a><a href="#">자원관리 <span class="n">3 ▾</span></a><a href="#">자원 최적화 <span class="n">2 ▾</span></a><a href="#">특수 기능</a><a href="#">이슈</a><a href="#">위키</a><a href="#">게시판</a>
+    <a href="#" class="grp on">설정 <span class="n">3 ▴</span></a>
+    <a href="#" class="sub on">설정</a><a href="#" class="sub">업그레이드</a><a href="#" class="sub">엣지 토큰 맞추기</a>
+  </aside>
+
+  <main style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px;padding:16px 24px 28px;box-sizing:border-box">
+
+    <div class="st">⚙️ 설정</div>
+    <div class="gb">
+      <a href="#">인프라 등록</a><a href="#">백업</a><a href="#">수집</a><a href="#">엣지·원격</a><a href="#" class="on">사용자</a><a href="#">보안</a><a href="#">알림·연동</a><a href="#">로그</a><a href="#">시스템</a>
+    </div>
+    <div class="g2">
+      <span class="pre">사용자 ›</span>
+      <a href="#">메인포탈 사용자 관리</a><a href="#">엣지 사용자 배포</a><a href="#">인증(AD)</a><a href="#" class="on">기능 사용 현황</a>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-top:6px">
+      <div style="min-width:0">
+        <h2 style="margin:0;font-size:18px">기능 사용 현황</h2>
+        <div class="muted" style="font-size:12px;margin-top:4px">무엇을 어떻게 셀지 — 켜고 끄기 · 머문 시간의 기준 · 보관 · 제외 계정 · 고지 · 지우기.</div>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <a href="Main.dc.html">개요</a><a href="Features.dc.html">기능별 <span class="muted" style="font-weight:500">71 / 190</span></a><a href="Users.dc.html">사용자별 <span class="muted" style="font-weight:500">23</span></a><a href="#" class="on">수집 설정</a>
+    </div>
+
+    <div class="grid">
+      <!-- ===== 왼쪽: 설정 폼 ===== -->
+      <div class="card panel">
+        <div class="ph"><span class="pt">수집</span><span class="muted" style="font-size:11.5px">저장은 설정 소유자 + 감사 로그 · 값은 API 가 내려 준다(화면에 숫자를 박지 않는다)</span></div>
+
+        <div class="row">
+          <div class="l">기능 사용 기록<small>끄면 그 순간부터 신호를 받지 않고, 받은 것도 버린다. 켜고 끈 시각과 계정을 기록한다.</small></div>
+          <div class="c">
+            <label class="tg"><i aria-hidden="true"></i><span>켜짐 — 2026-10-31 09:05 부터 (jh.park)</span><input type="checkbox" checked style="position:absolute;opacity:0;width:0;height:0" aria-label="기능 사용 기록 켜기"></label>
+            <div class="note">꺼져 있던 구간은 화면마다 띠로 알리고, 어떤 합계에도 0 으로 넣지 않는다. 기본값은 <b>꺼짐</b>(설치 직후에는 아무것도 세지 않는다 — 소유자가 켠다).</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="l">머문 시간의 기준<small>‘보고 있다’ 로 치는 조건.</small></div>
+          <div class="c">
+            <div class="inl">
+              <span>창이 보이고, 마지막 입력(마우스 · 키 · 스크롤 · 터치) 뒤</span>
+              <label for="idle" style="position:absolute;opacity:0;width:0;height:0">유휴 한도(분)</label>
+              <input id="idle" class="input" value="5" style="width:64px;text-align:right;min-height:30px"><span>분 이내인 시간만 더한다</span>
+            </div>
+            <div class="note">벽면 모니터에 띄워 둔 Overview 가 하루 24시간을 먹지 않게 하는 장치. 1~30분. 화면이 10초마다 조각을 올리므로 창을 닫는 순간의 마지막 조각(최대 10초)은 빠질 수 있다 — 보고서에 그렇게 적는다.</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="l">보관 기간<small>일 단위 집계만 보관한다(원본 이벤트는 남기지 않는다).</small></div>
+          <div class="c">
+            <div class="inl"><input class="input" value="180" style="width:80px;text-align:right;min-height:30px" aria-label="보관 기간(일)"><span>일 · 지난 것은 하루에 한 번 조각으로 지운다</span></div>
+            <div class="note">지금 크기: 행 48,210 · 2.9 MB (<span class="mono">usage.db</span>) · 가장 오래된 날 2026-10-07. 90일 ~ 5년.</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="l">제외 계정<small>이 계정의 신호는 받지 않는다(세지도, 보이지도 않는다).</small></div>
+          <div class="c">
+            <div class="inl">
+              <span class="chipx">thedvcdemp <span class="tag gray">데모 · 기본</span><button class="x" type="button" aria-label="thedvcdemp 제외 해제">×</button></span>
+              <span class="chipx">svc.report <span class="tag gray">조회 API 전용</span><button class="x" type="button" aria-label="svc.report 제외 해제">×</button></span>
+              <input class="input" placeholder="계정 추가…" style="width:180px;min-height:28px" aria-label="제외할 계정">
+            </div>
+            <div class="note">제외를 풀어도 지난 기록은 생기지 않는다. 설정 소유자 자신을 제외할 수는 있지만 권하지 않는다(관리 화면 사용 패턴도 UI 개선 자료다).</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="l">무엇을 세나<small>바꿀 수 없는 범위 — 설명만.</small></div>
+          <div class="c">
+            <div class="note">상단 탭 · 특수 기능 도구(#/tools/&lt;k&gt;) · 설정 하위 탭(#/settings/&lt;k&gt;) · 관제 콘솔 페이지 · Overview 보기 모드 — 즉 <b>주소가 바뀌는 화면 전환</b>만 센다. 검색어 · 입력 값 · 조회한 장비 · 화면 안 버튼은 세지 않는다. 엣지 포탈(법인) 사용은 들어오지 않는다(2단계 — 엣지 push 로 합치는 것은 별도 설계).</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="l">사용자 고지<small>로그인 화면 아래에 보이는 문구.</small></div>
+          <div class="c">
+            <label class="tg"><i aria-hidden="true"></i><span>로그인 화면에 고지 문구 표시</span><input type="checkbox" checked style="position:absolute;opacity:0;width:0;height:0" aria-label="고지 문구 표시"></label>
+            <label for="notice" style="position:absolute;opacity:0;width:0;height:0">고지 문구</label>
+            <textarea id="notice" class="input ta">이 포탈은 어느 화면을 얼마나 쓰는지(열람 횟수 · 머문 시간)를 계정별로 기록해 UI 개선에 씁니다. 입력한 내용 · 검색어 · 조회한 데이터는 기록하지 않습니다. 기록은 설정 소유자만 보며 180일 뒤 지워집니다.</textarea>
+            <div class="note">보관 기간 숫자는 저장할 때 위 값으로 바꿔 넣는다(문구와 설정이 어긋나지 않게).</div>
+          </div>
+        </div>
+
+        <div class="sv">
+          <span class="muted" style="font-size:11.5px;margin-right:auto">마지막 저장 2026-10-31 09:05 · jh.park</span>
+          <button class="btn" type="button">되돌리기</button>
+          <button class="btn primary" type="button">저장</button>
+        </div>
+      </div>
+
+      <!-- ===== 오른쪽: 상태 · 지우기 ===== -->
+      <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+        <div class="card panel">
+          <div class="ph"><span class="pt">지금 상태</span><span class="tag ok">기록 중</span></div>
+          <div class="kv">
+            <span class="k">마지막 신호</span><span class="v">17:45:58 (4초 전) · sy.kim · 스토리지 현황</span>
+            <span class="k">오늘 받은 신호</span><span class="v">1,912건 → 열람 96 · 사용자 14</span>
+            <span class="k">버린 신호</span><span class="v">7건 (모르는 키 5 · 제외 계정 2)</span>
+            <span class="k">저장 방식</span><span class="v">메모리에 모아 60초마다 한 트랜잭션으로 일 집계에 더함</span>
+            <span class="k">마지막 저장</span><span class="v">17:45:10 · 38행 · 3ms</span>
+            <span class="k">DB</span><span class="v">usage.db · 2.9 MB · 48,210행 · 정리 03:10 (KST)</span>
+          </div>
+          <div class="bar" role="img" aria-label="보관 사용량 — 30일 중 180일"><i style="width:17%"></i></div>
+          <div class="muted" style="font-size:11.5px">보관 기간 180일 중 30일 분이 쌓였다. 기록이 꺼져 있던 구간: 10-30 18:20 ~ 10-31 09:05.</div>
+        </div>
+
+        <div class="card panel">
+          <div class="ph"><span class="pt">기록 지우기</span></div>
+          <div class="band warn">
+            <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 2.5 14 13H2z"/><path d="M8 7v3M8 11.5v.2"/></svg>
+            <div>되돌릴 수 없다. 설정 소유자 + <b>본인 OTP 재인증</b> + 감사 로그(누가 · 언제 · 어떤 범위). 포탈 백업에는 들어가지 않는다(usage.db 는 백업 대상이 아니다 — 자격증명이 아니고 되살릴 가치보다 개인 기록 성격이 크다).</div>
+          </div>
+          <div class="inl">
+            <label for="scope" class="muted" style="font-size:12px">범위</label>
+            <select id="scope" class="input" style="min-height:30px"><option>전체(모든 사용자 · 모든 날)</option><option>한 사용자</option><option>어느 날 이전</option></select>
+            <button class="btn danger" type="button">지우기…</button>
+          </div>
+          <div class="muted" style="font-size:11.5px">퇴직자 기록만 지우려면 ‘한 사용자’ 를 고른다. 보관 기간을 줄이는 것으로도 오래된 날은 지워진다.</div>
+        </div>
+
+        <div class="card panel">
+          <div class="ph"><span class="pt">어떻게 동작하나</span></div>
+          <ol class="steps">
+            <li>화면이 주소를 바꿀 때마다 <b>열람 1회</b>를 보낸다(키 · 시각). 같은 화면을 새로고침해도 1회.</li>
+            <li>보고 있는 동안 <b>10초마다 머문 조각</b>을 보낸다 — 창이 가려지거나 유휴 한도를 넘으면 멈춘다.</li>
+            <li>서버는 아는 키만 받고(탭 · 도구 · 설정 하위 · 콘솔 목록), 계정은 <b>인증된 사용자</b>로 적는다 — 본문의 계정명은 믿지 않는다.</li>
+            <li>메모리에 모았다가 60초마다 한 트랜잭션으로 <b>사용자 × 기능 × 날</b> 행에 더한다(ON CONFLICT DO UPDATE). 하루 경계는 KST.</li>
+            <li>화면은 그 표만 읽는다 — 원본 이벤트는 없다. 오늘은 ‘부분’ 으로 표시한다.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+  </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
