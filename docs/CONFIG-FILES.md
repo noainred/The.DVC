@@ -252,7 +252,7 @@
 | `upgrade-status.json` | 설정 | 업그레이드 확인·적용·자동 확인·엣지 동기화 기록(상태, v2.736.2 · v2.865 lastEdgeSync) | ✅ | ✅ | ✅ | upgrade/statusStore.js |
 | `upgrade.json` | 설정 | Runtime-editable auto-upgrade settings. Env vars provide the defaults; values | ✅ | ✅ | ✅ | upgrade/settings.js |
 | `usage-settings.json` | 설정 | 기능 사용 추적 설정(v2.913). 파일 `usage-settings.json`(CONFIG_DIR, 비밀 없음). | ✅ | ✅ |  | usage/settings.js |
-| `usage.db` | DB | 기능 사용 일 집계 DB(v2.913). 파일: `<dbDir>/usage.db`. |  |  |  | usage/db.js |
+| `usage.db` | DB | 기능 사용 일 집계 DB(v2.913). 파일: `<dbDir>/usage.db`. |  |  | ✅ | usage/db.js |
 | `user-menus.json` | 설정 | 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). | ✅ | ✅ | ✅ | usermenu/store.js |
 | `users.json` | 설정 | 포탈 계정(역할·비밀번호 해시·TOTP 시크릿) | ✅ | ✅ | ✅ | auth/auth.js |
 | `vcenter-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | vcenter/restClient.js |

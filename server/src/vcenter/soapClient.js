@@ -168,6 +168,12 @@ const ENVELOPE = (body) =>
  * 그때는 6시간 안에 자연 만료되거나 포탈 재시작으로 비워진다. 엔트리 수는 vCenter 수(≤30)로 유계.
  */
 const PERF_COUNTER_CACHE = new Map();
+/**
+ * v2.911 — vCenter 성능 **보관 주기**(PerformanceManager.historicalInterval) 캐시(vCenter 별 · 6시간). 성능 화면이 과거 창의 롤업을 고르고
+ * 슬라이더 범위를 계산하는 데 쓴다. 못 읽으면 VMware 기본값(5분/1일 · 30분/1주 · 2시간/1달 · 1일/1년 · 실시간 1시간)으로 두고 `source:'default'` 로 밝힌다.
+ */
+const PERF_RETENTION_CACHE = new Map();
+export const PERF_RETENTION_DEFAULT = Object.freeze({ realtime: 3600, day: 86400, week: 604800, month: 2592000, year: 31536000 });
 const PERF_COUNTER_TTL_MS = Math.max(60_000, Number(process.env.PERF_COUNTER_TTL_MS) || 6 * 3_600_000);
 
 export class VimSoapClient {
@@ -515,6 +521,26 @@ export class VimSoapClient {
   }
 
   /**
+   * v2.911 — 이 vCenter 의 성능 보관 주기(`historicalInterval`) → { retention:{realtime,day,week,month,year}(초), source:'vcenter'|'default' }.
+   * 6시간 캐시(카운터 카탈로그와 같은 수명). 읽기 실패 · 빈 답은 기본값 + 'default' — 던지지 않는다(성능 조회가 보관 주기 때문에 실패하지 않게).
+   */
+  async perfRetention() {
+    const ck = `${this.vc?.id || this.vc?.host || ''}`;
+    const hit = PERF_RETENTION_CACHE.get(ck);
+    if (hit && Date.now() - hit.at < PERF_COUNTER_TTL_MS) return hit.v;
+    let v = { retention: { ...PERF_RETENTION_DEFAULT }, source: 'default' };
+    try {
+      if (this.sc.perfManager) {
+        const objs = await this.retrieveObjectProps('PerformanceManager', this.sc.perfManager, ['historicalInterval']);
+        const parsed = parseHistoricalIntervals(objs[0]?.props?.historicalInterval || '');
+        if (parsed) v = { retention: { ...PERF_RETENTION_DEFAULT, ...parsed }, source: 'vcenter' };
+      }
+    } catch { /* 보관 주기는 보조 정보 — 기본값으로 */ }
+    PERF_RETENTION_CACHE.set(ck, { at: Date.now(), v });
+    return v;
+  }
+
+  /**
    * Query a perf counter time-series for one entity over the given interval.
    * intervalId: 20 (real-time), 300 (day), 1800 (week), 7200 (month), 86400 (year).
    * Returns [{ t: ISO timestamp, v: number }].
@@ -545,7 +571,7 @@ export class VimSoapClient {
    * 리포트 한 장에 6초 이상 걸린다. metricId 를 한 querySpec 에 나열하면 vCenter 가 한 응답에
    * 계열별 <value> 블록을 돌려준다. 반환: Map<counterId, [{t,v}]>. 카운터가 응답에 없으면 빈 배열.
    */
-  async queryEntityPerfMulti(entityType, ref, counterIds, intervalId, { startTime, endTime } = {}) {
+  async queryEntityPerfMulti(entityType, ref, counterIds, intervalId, { startTime, endTime, maxSample = 0 } = {}) {
     const ids = [...new Set((counterIds || []).filter(Boolean))];
     const out = new Map(ids.map((id) => [id, []]));
     if (!ids.length) return out;
@@ -554,6 +580,7 @@ export class VimSoapClient {
       `<querySpec><entity type="${entityType}">${ref}</entity>` +
       (startTime ? `<startTime>${startTime}</startTime>` : '') +
       (endTime ? `<endTime>${endTime}</endTime>` : '') +
+      (!startTime && maxSample ? `<maxSample>${maxSample}</maxSample>` : '') +   // v2.911 실시간(최근 1시간 = 180점)은 단건 조회와 같은 상한
       metricIds + `<intervalId>${intervalId}</intervalId></querySpec>`;
     const xml = await this.#call(
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
@@ -1282,6 +1309,81 @@ export async function fetchEntityMetric(vc, entityType, moref, type, interval, {
 
 export const fetchVmMetric = (vc, moref, type, interval, opts) => fetchEntityMetric(vc, 'VirtualMachine', moref, type, interval, opts);
 export const fetchHostMetric = (vc, moref, type, interval, opts) => fetchEntityMetric(vc, 'HostSystem', moref, type, interval, opts);
+
+/**
+ * v2.911 — `historicalInterval` 응답(PerfInterval 블록들)을 { day, week, month, year }(보관 초) 로. 켜진(enabled) 주기만 · samplingPeriod 로 이름을 찾는다.
+ * 하나도 못 읽으면 null(호출자가 기본값을 쓴다 — 지어내지 않는다).
+ */
+export function parseHistoricalIntervals(xml) {
+  const byPeriod = { 300: 'day', 1800: 'week', 7200: 'month', 86400: 'year' };
+  const out = {};
+  for (const blk of String(xml || '').split('<PerfInterval').slice(1)) {
+    const period = Number(/<samplingPeriod>(\d+)<\/samplingPeriod>/.exec(blk)?.[1]);
+    const length = Number(/<length>(\d+)<\/length>/.exec(blk)?.[1]);
+    const enabled = /<enabled>(true|false)<\/enabled>/.exec(blk)?.[1];
+    const name = byPeriod[period];
+    if (!name || !Number.isFinite(length) || length <= 0 || enabled === 'false') continue;
+    out[name] = length;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * v2.911 — 창(start~end)의 **나이**로 롤업을 고른다(순수). vCenter 는 보관 주기 밖 구간을 그 롤업으로 물으면 빈 응답을 주므로,
+ * 요청한 롤업이 창의 시작을 보관하지 못하면 더 거친 롤업으로 올린다(요청보다 가늘게는 가지 않는다). 실시간은 창이 없다(최근 1시간만).
+ * @returns {{ name: string, id: number }} name = realtime|day|week|month|year · id = 초
+ */
+export function pickPerfInterval({ interval, start = null, end = null, now = Date.now(), retention = PERF_RETENTION_DEFAULT } = {}) {
+  const order = ['day', 'week', 'month', 'year'];
+  const req = PERF_INTERVALS[interval] ? interval : 'realtime';
+  if (req === 'realtime' || (!start && !end)) return { name: req, id: PERF_INTERVALS[req] };
+  const startMs = start ? Date.parse(start) : null;
+  const ageSec = Number.isFinite(startMs) ? Math.max(0, (now - startMs) / 1000) : 0;
+  const from = Math.max(0, order.indexOf(req));
+  for (let i = from; i < order.length; i++) {
+    const keep = Number(retention?.[order[i]]);
+    if (Number.isFinite(keep) && keep > 0 && ageSec <= keep) return { name: order[i], id: PERF_INTERVALS[order[i]] };
+  }
+  return { name: 'year', id: PERF_INTERVALS.year };
+}
+
+/**
+ * v2.911 — 지표 여러 개(cpu·mem·disk·net)를 **로그인 1회 · QueryPerf 1회**로 받는다(성능 화면 · 드로어 스파크). 예전 `fetchEntityMetric` 은
+ * 지표마다 login→QueryPerf→logout 이라 4지표면 로그인 4회였다(v2.591 계정 잠금 규칙의 경계). 과거 창은 `pickPerfInterval` 로 롤업을 고르고
+ * 실제 쓴 값을 `interval` 로 돌려준다. 카운터가 없는 지표는 던지지 않고 그 계열만 `error` 로(나머지는 그린다).
+ */
+export async function fetchEntityMetrics(vc, entityType, moref, types, interval, { start, end, now = Date.now() } = {}) {
+  const list = [...new Set((types || []).filter((t) => PERF_COUNTERS[t]))];
+  if (!list.length) throw new Error('지표가 없습니다(cpu·mem·disk·net).');
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const map = await c.perfCounterMap();
+    const { retention, source: retentionSource } = await c.perfRetention();
+    const startTime = start ? new Date(start).toISOString() : null;
+    const endTime = end ? new Date(end).toISOString() : null;
+    const picked = pickPerfInterval({ interval, start: startTime, end: endTime, now, retention });
+    const maxSample = (!startTime && picked.name === 'realtime') ? 180 : 0;
+    const ids = []; const missing = [];
+    for (const t of list) { const id = map.get(PERF_COUNTERS[t].key); if (id) ids.push(id); else missing.push(t); }
+    const raw = ids.length ? await c.queryEntityPerfMulti(entityType, moref, ids, picked.id, { startTime, endTime, maxSample }) : new Map();
+    const series = {};
+    for (const t of list) {
+      const cfg = PERF_COUNTERS[t];
+      const id = map.get(cfg.key);
+      series[t] = id ? { unit: cfg.unit, points: entityMetricPoints(raw.get(id) || [], cfg.div) }
+        : { unit: cfg.unit, points: null, error: `vCenter에 카운터가 없습니다: ${cfg.key}` };
+    }
+    return {
+      ok: true, types: list, requested: PERF_INTERVALS[interval] ? interval : 'realtime', interval: picked.name, sampleSec: picked.id,
+      start: startTime, end: endTime, past: !!(startTime || endTime), refreshSec: 20, retention, retentionSource, series, missingCounters: missing,
+    };
+  } finally {
+    await c.logout();
+  }
+}
+export const fetchVmMetrics = (vc, moref, types, interval, opts) => fetchEntityMetrics(vc, 'VirtualMachine', moref, types, interval, opts);
+export const fetchHostMetrics = (vc, moref, types, interval, opts) => fetchEntityMetrics(vc, 'HostSystem', moref, types, interval, opts);
 
 /**
  * 자원 축소 근거 리포트용 VM 카운터(v2.445). ⚠ v2.582 정정 — 예전 주석은 "전부 통계 레벨 1" 이라 적었지만

@@ -134,7 +134,7 @@ export default function HostDetail({ id }) {
         </div>
         <div className="hd-actions">
           <button type="button" className="hd-vmbtn" onClick={() => setShowVms(true)} title="이 호스트의 VM 목록(창)">VM {numText(h.vmCount)}대 보기 ›</button>
-          <Lazy><HostMetricButton hostId={h.id} hostName={h.name} /></Lazy>
+          <Lazy><HostMetricButton hostId={h.id} hostName={h.name} vcenterId={h.vcenterId} /></Lazy>
           <Lazy><IdracTrendLinkButton hostId={h.id} hostName={h.name} /></Lazy>
           {toolAllowed('host-hygiene') && <a className="btn" href="#/tools/host-hygiene" style={{ textDecoration: 'none' }}>구성 점검 열기</a>}
           {canCsv() && <button type="button" className="btn primary" onClick={() => setExportOpen(true)} title="이 vCenter 의 호스트·클러스터 엑셀(창에서 클러스터를 고를 수 있습니다)">⤓ 호스트·클러스터 엑셀…</button>}

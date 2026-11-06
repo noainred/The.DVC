@@ -27,6 +27,7 @@ import { signalText, usageTone, TONE_COLOR, TONE_TEXT, barW, pctText } from '../
 import '../vms/vmHub.css';
 
 const VmMetricButton = React.lazy(() => import('../../components/VmMetrics.jsx').then((m) => ({ default: m.VmMetricButton })));
+const VmPerfView = React.lazy(() => import('../../components/vmperf/VmPerfView.jsx')); // v2.911 성능 — 모니터 탭 첫 섹션(시안 docs/design/vm-perf ②)
 const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React.Suspense>;
 const GRID = 'vcd-obj-grid';
 /** 포탈 VM · 호스트 id('<vcenterId>:<moref>')의 moref — vCenter id 에 콜론이 있어도 vcenterId 앞머리로 자른다. */
@@ -68,7 +69,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
       badges={<><StateBadge state={vm.powerState} /><StateBadge state={vm.toolsStatus} />{vm.template && <span className="badge gray">템플릿</span>}{vm.connectionState && vm.connectionState !== 'connected' && <span className="badge amber">{vm.connectionState}</span>}
         {(vm.signals || []).map((k) => { const x = signalText(k, { days: sigDays }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</>}
       sub={`${vm.guestOS || '—'} · 호스트 ${vm.host || '—'} · 클러스터 ${vm.cluster || '—'}${vm.resourcePool ? ` · 리소스 풀 ${vm.resourcePool}` : ''}${ips[0] ? ` · ${ips[0]}` : ''}`}
-      actions={<><VmReconfigButton vm={vm} /><VmConsoleButton vmId={vm.id} vmName={vm.name} /><VmRemoteButton item={vm} /><Lazy><VmMetricButton vmId={vm.id} vmName={vm.name} /></Lazy></>}
+      actions={<><VmReconfigButton vm={vm} /><VmConsoleButton vmId={vm.id} vmName={vm.name} /><VmRemoteButton item={vm} /><Lazy><VmMetricButton vmId={vm.id} vmName={vm.name} vcenterId={vm.vcenterId} /></Lazy></>}
       tab={tab} onTab={onTab} extraTabs={extraTabs}>
 
       {tab === 'summary' && (
@@ -178,17 +179,16 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
       )}
 
       {tab === 'monitor' && (
+        <>
+          {/* v2.911(시안 docs/design/vm-perf ②): 성능은 모달이 아니라 이 탭의 첫 섹션 — 4지표 1회 조회 · 과거 창 · 구간 요약. */}
+          <Lazy><VmPerfView entityType="vm" id={vm.id} name={vm.name} powered={powered} /></Lazy>
         <div className={GRID}>
-          <Card title="성능" sub="vCenter 성능 롤업 · 열 때 조회(저장 안 함)">
-            <div style={{ padding: 14, display: 'grid', gap: 10 }}>
-              <div className="muted" style={{ fontSize: 12.5 }}>CPU · 메모리 · 디스크 · 네트워크를 실시간 ~ 1년 기간으로 봅니다. 포탈은 VM 별 시계열을 저장하지 않으므로 누를 때 vCenter 에 묻습니다.</div>
-              <div><Lazy><VmMetricButton vmId={vm.id} vmName={vm.name} /></Lazy></div>
-            </div>
-          </Card>
-          <Card title="이벤트 · 이동"><div style={{ padding: '0 14px 12px' }}>{toolAllowed('vm-changes') ? <VmChangesSection vm={vm} /> : <ErrorBox error={toolDenied('VM 이동·구성 변경 이력')} />}</div></Card>
+          {/* 성능 카드가 빠져 혼자 남은 줄 — 한 줄을 다 쓴다(v2.911 Chromium 확인: 3열 격자에 혼자 좁게 남았다). */}
+          <Card title="이벤트 · 이동" style={{ gridColumn: '1 / -1' }}><div style={{ padding: '0 14px 12px' }}>{toolAllowed('vm-changes') ? <VmChangesSection vm={vm} /> : <ErrorBox error={toolDenied('VM 이동·구성 변경 이력')} />}</div></Card>
           <VcAlarmsCard vcenterId={vcenterId} entityType="VirtualMachine" entity={vmRef(vm)} wide />
           <VcTasksCard vcenterId={vcenterId} entityType="VirtualMachine" entity={vmRef(vm)} wide />
         </div>
+        </>
       )}
 
       {tab === 'configure' && (

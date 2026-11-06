@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>대안 — 성능을 넓은 모달로(제자리에서)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn:disabled{opacity:.5}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{height:30px;padding:0 11px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.pill{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;border:1px solid #243049;background:#0f1626;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.pill b{color:#e6edf6;font-weight:600}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#34e0b4;box-shadow:0 0 0 4px rgba(52,224,180,.15)}
+.ghost{position:absolute;inset:0;opacity:.3;display:flex}
+.ghost .side{width:236px;background:#0f1626;border-right:1px solid #1f2a40}
+.ghost .drawer{position:absolute;top:0;right:0;bottom:0;width:640px;background:#111726;border-left:1px solid #243049}
+.overlay{position:absolute;inset:0;background:rgba(5,8,15,.55)}
+.modal{position:absolute;left:50%;top:40px;transform:translateX(-50%);width:1180px;background:#141b2d;border:1px solid #243049;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.6);padding:16px 18px 18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.mh{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.mh b{font-size:15px}
+.stats{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:10px}
+.stat{background:#0f1626;border:1px solid #243049;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:5px;min-width:0;text-align:left;font:inherit;color:#e6edf6}
+.stat.on{border-color:#3b82f6;box-shadow:inset 0 0 0 1px #3b82f6}
+.stat .lb{font-size:11.5px;font-weight:600;color:#8b9bb4}
+.stat .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:22px;font-weight:700;line-height:1.05}
+.stat .v small{font-size:11px;font-weight:600;color:#8b9bb4;margin-left:3px}
+.stat .mm{font-size:11px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:2px 8px}
+.stat .mm b{color:#e6edf6;font-weight:600;font-family:"JetBrains Mono",ui-monospace,monospace}
+.legend{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12px;color:#8b9bb4}
+.legend i{display:inline-block;width:12px;height:0;border-top:2px solid #3b82f6;margin-right:5px;vertical-align:middle}
+.note{font-size:12px;color:#5d6b85}
+svg text{font-family:"JetBrains Mono",ui-monospace,monospace}
+input[type=range]{accent-color:#3b82f6;flex:1 1 160px;min-width:0}
+.winrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid #1f2a40;padding-top:10px}
+.callout{position:absolute;left:24px;bottom:16px;width:560px;background:rgba(15,22,38,.96);border:1px solid #f59e0b;border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.55;color:#c3cfe2;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.callout b{color:#e6edf6}
+</style>
+</helmet>
+
+<div style="position:relative;min-height:900px;overflow:hidden">
+  <div class="ghost" aria-hidden="true"><div class="side"></div><div class="drawer"></div></div>
+  <div class="overlay" aria-hidden="true"></div>
+
+  <div class="modal" role="dialog" aria-label="성능 — web-kr1-023">
+    <div class="mh">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b>성능 — web-kr1-023</b><span class="note">vCenter 성능 롤업 · 열 때 조회 · 저장 안 함</span></div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+        <div class="seg" role="tablist" aria-label="기간"><button type="button" class="on">실시간 1시간</button><button type="button">24시간</button><button type="button">7일</button><button type="button">30일</button><button type="button">1년</button></div>
+        <span class="pill"><span class="dot"></span>20초마다 갱신 · 마지막 <b class="mono">07:21:40</b></span>
+        <button type="button" class="btn">CSV</button>
+        <button type="button" class="btn">개체 보기 › 모니터에서 열기</button>
+        <button type="button" class="btn" aria-label="닫기">닫기</button>
+      </div>
+    </div>
+    <div class="stats" role="tablist" aria-label="지표">
+      <button type="button" class="stat on" role="tab" aria-selected="true"><span class="lb">CPU 사용률 · 8 vCPU</span><span class="v" style="color:#93c5fd">41<small>%</small></span><span class="mm"><span>1시간 평균 <b>44.2%</b></span><span>최대 <b>71%</b> 07:03</span></span></button>
+      <button type="button" class="stat" role="tab" aria-selected="false"><span class="lb">메모리 사용률 · 32 GB</span><span class="v" style="color:#fcd34d">88<small>%</small></span><span class="mm"><span>평균 <b>87.5%</b></span><span>최대 <b>89%</b></span></span></button>
+      <button type="button" class="stat" role="tab" aria-selected="false"><span class="lb">디스크 I/O</span><span class="v">1.8<small>MB/s</small></span><span class="mm"><span>평균 <b>1.3 MB/s</b></span><span>최대 <b>4.1 MB/s</b> 06:48</span></span></button>
+      <button type="button" class="stat" role="tab" aria-selected="false"><span class="lb">네트워크 I/O</span><span class="v">640<small>KB/s</small></span><span class="mm"><span>평균 <b>390 KB/s</b></span><span>최대 <b>1.2 MB/s</b></span></span></button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:13.5px">실시간 1시간 · CPU 사용률</b><div class="seg"><button type="button" class="on">한 지표</button><button type="button">CPU + 메모리</button><button type="button">디스크 + 네트워크</button></div></div>
+      <div class="legend"><span><i></i>CPU(20초)</span><span><i style="border-top:1px dashed #8b9bb4"></i>1시간 평균 44.2%</span><span><i style="border-top:1px dashed #ef4444"></i>과부하 기준 90%</span></div>
+    </div>
+    <svg viewBox="0 0 1140 220" role="img" aria-label="CPU 실시간 1시간" style="display:block;width:100%;height:auto">
+      <line x1="50" x2="1120" y1="190" y2="190" stroke="#1f2a40"></line><text x="44" y="194" fill="#5d6b85" font-size="11" text-anchor="end">0%</text>
+      <line x1="50" x2="1120" y1="103" y2="103" stroke="#1f2a40"></line><text x="44" y="107" fill="#5d6b85" font-size="11" text-anchor="end">50%</text>
+      <line x1="50" x2="1120" y1="16" y2="16" stroke="#1f2a40"></line><text x="44" y="20" fill="#5d6b85" font-size="11" text-anchor="end">100%</text>
+      <text x="50" y="210" fill="#5d6b85" font-size="11">06:21</text><text x="585" y="210" fill="#5d6b85" font-size="11" text-anchor="middle">06:51</text><text x="1120" y="210" fill="#5d6b85" font-size="11" text-anchor="end">07:21</text>
+      <line x1="50" x2="1120" y1="33.4" y2="33.4" stroke="#ef4444" stroke-dasharray="4 4" opacity=".6"></line>
+      <line x1="50" x2="1120" y1="{{avgY}}" y2="{{avgY}}" stroke="#8b9bb4" stroke-dasharray="4 4" opacity=".6"></line>
+      <path d="{{area}}" fill="#3b82f6" opacity=".12"></path>
+      <path d="{{line}}" fill="none" stroke="#3b82f6" stroke-width="1.6" stroke-linejoin="round"></path>
+    </svg>
+    <div class="note">실시간(20초)은 vCenter 가 최근 1시간만 보관합니다 — 더 이전은 24시간 이상 보기에서 ◀ 이전 구간으로 봅니다 · 실시간에는 구간 이동이 없습니다</div>
+  </div>
+
+  <div class="callout">
+    <b>대안 ⑤ — 모달을 유지하고 디자인만 바꾼다.</b> 컴포넌트는 ②와 같고(기간 세그먼트 · 4지표 카드 · 평균선 · 기준선 · 구간 이동) 1180px 모달에 넣는다. 드로어 · 개체 보기에서 ‘성능 그래프 보기’ 를 누르면 제자리에서 열린다.<br>
+    <b>남는 단점</b>: 모달 위 모달이 그대로이고 주소가 없어 새로고침 · 공유가 안 된다 · 400px 에서는 전체 화면 시트로 바꿔야 한다. 기본값 ②(모니터 탭 안)에 ‘개체 보기 › 모니터에서 열기’ 단추를 두면 둘을 함께 가질 수도 있다(컨펌 질문 ③).
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var n = 180;
+    var s = 11;
+    function rnd() { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }
+    var cpu = [];
+    for (var i = 0; i < n; i++) {
+      var c = 42 + 12 * Math.sin(i / 17) + (rnd() - 0.5) * 14 + (i > 120 && i < 132 ? 22 : 0);
+      cpu.push(Math.max(10, Math.min(71, c)));
+    }
+    var out = [];
+    for (var k = 0; k < n; k++) {
+      var x = 50 + 1070 * k / (n - 1);
+      var y = 190 - 174 * cpu[k] / 100;
+      out.push((k ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1));
+    }
+    var line = out.join(' ');
+    return { line: line, area: line + ' L1120 190 L50 190 Z', avgY: (190 - 174 * 44.2 / 100).toFixed(1) };
+  }
+}
+</script>
+</body>
+</html>

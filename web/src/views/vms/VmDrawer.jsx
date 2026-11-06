@@ -111,7 +111,7 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
           <VmConsoleButton vmId={vm.id} vmName={vm.name} />
           <VmRemoteButton item={vm} />
           <VmReconfigButton vm={vm} />
-          <Lazy><VmMetricButton vmId={vm.id} vmName={vm.name} /></Lazy>
+          <Lazy><VmMetricButton vmId={vm.id} vmName={vm.name} vcenterId={vm.vcenterId} onBefore={onClose} /></Lazy>
           <button type="button" className="logout-btn" style={{ flex: 'none', padding: '8px 14px', whiteSpace: 'nowrap' }}
             onClick={() => setShowReport(true)} title="이 VM 의 CPU·메모리를 줄여도 되는지 기간별 추이·근거로 확인합니다">📊 축소 근거 리포트</button>
         </div>

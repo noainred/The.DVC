@@ -700,7 +700,7 @@ export function EntityDetail({ type, item, onClose }) {
       {type === 'host' && <Lazy><HostPowerPanel hostName={item.name} serviceTag={item.serviceTag} /></Lazy>}
       {type === 'host' && (
         <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end', flexWrap: 'wrap', rowGap: 8 }}>
-          <Lazy><HostMetricButton hostId={item.id} hostName={item.name} /></Lazy>
+          <Lazy><HostMetricButton hostId={item.id} hostName={item.name} vcenterId={item.vcenterId} onBefore={onClose} /></Lazy>
           <Lazy><IdracTrendLinkButton hostId={item.id} hostName={item.name} onClose={onClose} /></Lazy>
           <ObjectViewButton type="host" item={item} onClose={onClose} />
         </div>
@@ -713,7 +713,7 @@ export function EntityDetail({ type, item, onClose }) {
           <VmReconfigButton vm={item} />
           <VmConsoleButton vmId={item.id} vmName={item.name} />
           <VmRemoteButton item={item} />
-          <Lazy><VmMetricButton vmId={item.id} vmName={item.name} /></Lazy>
+          <Lazy><VmMetricButton vmId={item.id} vmName={item.name} vcenterId={item.vcenterId} onBefore={onClose} /></Lazy>
           {/* 자원 축소 근거 리포트(v2.449) — 특수 기능 › Optimization 표의 '📊 리포트' 와 같은 화면이다.
               그 표에서만 열 수 있어 VM 을 검색해 들어온 경우 도구 화면으로 되돌아가야 했다. */}
           <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px', whiteSpace: 'nowrap' }}
