@@ -271,7 +271,8 @@ export default function Settings({ initialSub }) {
   const curBadge = badgeOf(curSt);
 
   return (
-    <div className={`stg${navOpen ? ' nav-open' : ''}`}>
+    // 컨테이너 쿼리는 컨테이너의 **자손**에만 걸린다 — 폭을 재는 상자(.stg-cq)와 접히는 줄(.stg)을 나눈다(같은 요소면 400px 에서 접히지 않는다).
+    <div className="stg-cq"><div className={`stg${navOpen ? ' nav-open' : ''}`}>
       <aside className="stg-nav" aria-label="설정 항목">
         <div className="stg-head">
           <div className="stg-title">설정</div>
@@ -386,6 +387,6 @@ export default function Settings({ initialSub }) {
         {/* lazy 화면의 첫 로드 동안만 잠깐 보인다 — 이미 받은 청크는 즉시 그려진다. */}
         <div className="stg-body"><Suspense fallback={<Loading />}><Cur /></Suspense></div>
       </section>
-    </div>
+    </div></div>
   );
 }

@@ -3049,7 +3049,10 @@ table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background
    목록 240px(sticky — 상단 바와 상태바 사이 높이) + 본문. 폭은 컨테이너 쿼리로 판정한다 — 사이드바가 펼쳤는지 접혔는지에 따라
    본문 폭이 달라지므로 화면 폭(media)이 아니라 이 영역의 폭으로 접는다. 760px 미만: 목록은 '현재 위치 한 줄' 로 접고(누르면 펼침),
    같은 묶음의 항목은 본문 위 가로 칩으로. ⚠ 대문자 변환 금지 · 자식 min-width:0 · 선택자는 전부 .stg 아래. */
-.stg { container: stg / inline-size; display: flex; align-items: flex-start; gap: 20px; min-width: 0; }
+/* v2.916 Chromium 400px 실측: container 를 .stg 자신에 걸면 @container 안의 .stg 규칙이 걸리지 않아(컨테이너 자신은 질의 대상이 아니다) 목록 297px ·
+   본문 35px 로 나란히 섰다. 폭을 재는 상자(.stg-cq)와 접히는 줄(.stg)을 나눈다. */
+.stg-cq { container: stg / inline-size; min-width: 0; }
+.stg { display: flex; align-items: flex-start; gap: 20px; min-width: 0; }
 .stg > * { min-width: 0; }
 .stg-nav {
   flex: 0 0 240px; width: 240px; position: sticky; top: calc(var(--topbar-h, 56px) + 10px);

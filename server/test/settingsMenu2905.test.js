@@ -62,7 +62,10 @@ test('③ 메뉴는 왼쪽 목록(GROUP_ORDER 순)이고 가로 탭 줄이 없�
   const descs = [...SRC.matchAll(/^ {2}\{ k: '([a-z0-9-]+)', label: '[^']+', C: \w+, group: '[a-z-]+', desc: '([^']{10,})'/gm)].map((m) => m[1]);
   assert.deepEqual(ITEMS.map((i) => i.k).filter((k) => !descs.includes(k)), [], '설명(desc) 없는 항목 — 본문 머리의 한 줄 설명 · 검색이 쓴다');
   const css = fs.readFileSync(path.join(ROOT, 'web/src/styles.css'), 'utf8');
-  assert.match(css, /\.stg \{ container: stg \/ inline-size;/, '목록 접힘은 화면 폭이 아니라 설정 영역 폭으로(사이드바 펼침/접힘에 따라 본문 폭이 다르다)');
+  assert.match(css, /\.stg-cq \{ container: stg \/ inline-size;/, '목록 접힘은 화면 폭이 아니라 설정 영역 폭으로(사이드바 펼침/접힘에 따라 본문 폭이 다르다)');
+  // 컨테이너 쿼리는 컨테이너 자신에게 걸리지 않는다 — 접히는 .stg 는 컨테이너(.stg-cq)의 자손이어야 한다(v2.916 Chromium 400px 실측 결함).
+  assert.doesNotMatch(css, /\.stg \{[^}]*container:/);
+  assert.match(body, /<div className="stg-cq"><div className=\{`stg\$\{navOpen/);
   assert.match(css, /@container stg \(max-width: 760px\)/);
 });
 
