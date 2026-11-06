@@ -177,6 +177,7 @@
 
 ## 8. 구현 범위(컨펌 뒤 — Opus)
 - **1단계 구현됨(v2.919 예정 — 서버만)**: 수집 구획·파서·rates·새 열·DB 마이그레이션·USE/교차 판정·커버리지·엣지 봉투/정제·API(`GET /tools/bm-usage` perf 확장 + `GET /tools/bm-usage/perf/:key` — 경로를 지시와 다르게 둔 이유는 `docs/rules/idrac-server.md` v2.919 항목). 화면은 2단계.
+- **2단계 구현됨(v2.920 예정 — 화면)**: 기존 `bm-usage` 화면에 신뢰 띠 · KPI · USE 매트릭스(토글로 기존 사용률 표 유지) · 병목 Top · 서버 상세(머리 · 판정 띠 · 교차 판정 · 탭 요약/자원/하드웨어) · 상태 9종 문구 · 400 폭. 문구 `web/src/views/tools/bmPerfText.js` · 규칙 `docs/rules/web.md` v2.920 항목. API 보강은 성능 항목의 `psiAbsent` 하나(+ 중앙 정제). 장애 기록 · 튜닝 · 용도 · 스냅샷 · 추이 탭과 ‘권한 부족’ 상태(진단 스냅샷)는 다음 단계.
 `bmusage/collectors/osSsh.js linuxCommand` 구획 추가 → `parse/linuxProc.js` 파서(순수 · 테스트) → `rates.js`·`usage.js` 열 추가 → `db.js` 열·튜닝 표 → USE 판정 순수 모듈(테스트가 웹·서버 같은 입력으로 대조) → `edgePull.js` 봉투 + 중앙 정제 화이트리스트 → 스냅샷 엣지 대행 라우트 → 웹(보드 · 상세 · 400 · 상태) → 목 데이터 → Chromium 1440/400 → 릴리스.
 
 ## 9. 출처(검색 2026-11-06)

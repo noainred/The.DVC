@@ -154,6 +154,7 @@ export function sanitizePerfEntry(e, rcv = Date.now()) {
     perResource: Object.fromEntries(RES.map((r) => [r, oneOf(e.perResource?.[r], VERDICTS, 'unknown')])),
     cross: list(e.cross, 4, (c) => ({ id: num(c.id), state: oneOf(c.state, CROSS_STATES, 'missing'), code: str(c.code, 32) })),
     mismatch: mm, firstSample: bool(e.firstSample),
+    psiAbsent: bool(e.psiAbsent),   // v2.920 — 보드 ‘PSI 없음’ 수(perfView.buildPerfEntry 와 같은 필드)
   };
   // 자른 원본은 따로(루트 규약 — 원본을 버리지 않는다). 자르지 않았으면 싣지 않는다.
   const raw = {};
