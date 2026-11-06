@@ -240,7 +240,37 @@ function cleanTest(data, existing = null, { endpoints = true } = {}) {
   return compact(t);
 }
 
-function cleanTarget(data, existing = null) {
+/**
+ * v2.915(설정 연동): 대상의 **출처** — 포탈 설정 카탈로그(linkcheck/settingsLinks.js)의 어느 항목에서 만들어졌는가.
+ *
+ * ⚠ 서버만 발급한다(`batch` 와 같은 원칙). 사용자 입력(`/targets` · `/targets/bulk` · CSV · 템플릿)으로 들어온 `origin` 은
+ *   cleanTarget 이 읽지 않는다 — 받아들이면 남의 출처를 달아 다음 동기화가 그 대상을 '주소 변경'·'사라짐' 으로 덮어쓴다.
+ *   설정 연동 경로만 `opts.origin`(cleanTarget) · `trustedOrigin`(planBulkTargets) 로 넘긴다.
+ * 수정 경로(updateTarget)는 기존 값을 **승계**한다 — 손으로 호스트를 고쳐도 출처가 남아야 다음 감지가 '주소 변경' 으로 다시 묻는다.
+ * 화이트리스트·길이 상한은 여기 하나다(키를 늘리면 이 함수만 고친다 — 저장 후 재로드 키 집합이 같아야 한다).
+ */
+export function cleanOrigin(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return undefined;
+  const key = text(o.key, 200);
+  const kind = text(o.kind, 40);
+  if (!key || !/^set:[a-z0-9-]{1,30}$/.test(kind) || !key.startsWith(`${kind}|`)) return undefined;
+  const port = portOf(o.port);
+  const out = {
+    key, kind,
+    ref: text(o.ref, 160) || undefined,
+    host: text(o.host, 253) || undefined,
+    port,
+    corp: text(o.corp, 80) || undefined,
+    syncedAt: num(o.syncedAt, 0, Number.MAX_SAFE_INTEGER, undefined),
+    gone: num(o.gone, 0, Number.MAX_SAFE_INTEGER, undefined),
+    // 사라짐 처리 때 설정 연동이 **켜져 있던 대상을 중지**했으면 1 — 다시 나타나 적용하면 다시 켠다(사람이 꺼 둔 것은 켜지 않는다).
+    goneOff: o.goneOff ? 1 : undefined,
+  };
+  if (!out.gone) { delete out.gone; delete out.goneOff; }
+  return compact(out);
+}
+
+function cleanTarget(data, existing = null, opts = {}) {
   const base = existing || {};
   const target = { id: base.id || ('g-' + crypto.randomUUID().slice(0, 8)) };
   for (const f of TARGET_FIELDS) {
@@ -259,6 +289,8 @@ function cleanTarget(data, existing = null) {
   target.order = num(data.order, 0, Number.MAX_SAFE_INTEGER, base.order ?? Date.now());
   // 대량 등록 배치 태그 — 롤백이 '정확히 그 배치만' 지우는 근거.
   target.batch = text(data.batch, 40, base.batch || '') || undefined;
+  // 출처 — opts.origin 이 있으면(null 포함) 그 값으로, 없으면 기존 값 승계. data.origin 은 **읽지 않는다**(cleanOrigin 머리말).
+  target.origin = Object.prototype.hasOwnProperty.call(opts, 'origin') ? cleanOrigin(opts.origin) : (base.origin ? cleanOrigin(base.origin) : undefined);
   target.tests = base.tests || [];
 
   if (!target.name) throw new Error('대상 이름을 입력하세요.');
@@ -468,11 +500,12 @@ function ensureFolderPath(dbx, kind, p) {
   return missing.length;
 }
 
-export function updateTarget(id, data) {
+export function updateTarget(id, data, opts = {}) {
   const dbx = load();
   const i = dbx.targets.findIndex((t) => t.id === id);
   if (i < 0) return null;
-  const next = cleanTarget(data, dbx.targets[i]);
+  // opts.origin 은 설정 연동(svcmon/settingsSync.js)만 넘긴다 — 라우트(/targets/:id)는 data 만 넘기므로 출처를 바꿀 수 없다.
+  const next = cleanTarget(data, dbx.targets[i], Object.prototype.hasOwnProperty.call(opts, 'origin') ? { origin: opts.origin } : {});
   ensureFolderPath(dbx, next.kind, next.path);   // 실패 시 기존 대상을 덮어쓰지 않는다
   dbx.targets[i] = next;
   save();
@@ -540,9 +573,9 @@ const dupKey = (t) => `${t.kind} ${t.path} ${t.name.toLowerCase()}`;
  * @returns {{added:number, errors:object[], skipped:object[], newFolders:number, newTests:number,
  *            committed:boolean, saved:boolean}}
  */
-export function bulkAddTargets(list = [], { atomic = true, dedup = true, batch = '' } = {}) {
+export function bulkAddTargets(list = [], { atomic = true, dedup = true, batch = '', trustedOrigin = false } = {}) {
   const dbx = load();
-  const plan = planBulkTargets(list, { dedup, batch });
+  const plan = planBulkTargets(list, { dedup, batch, trustedOrigin });
   const fail = plan.over.length > 0 || (atomic && plan.errors.length > 0);
   if (fail) {
     return {
@@ -576,7 +609,7 @@ export function bulkAddTargets(list = [], { atomic = true, dedup = true, batch =
  * 대량 등록 계획 — **저장하지 않고** 커밋과 똑같은 검증을 수행한다.
  * 미리보기와 실제 등록이 다른 코드로 판정하면 "미리보기는 통과인데 등록은 실패"가 생긴다.
  */
-export function planBulkTargets(list = [], { dedup = true, batch = '' } = {}) {
+export function planBulkTargets(list = [], { dedup = true, batch = '', trustedOrigin = false } = {}) {
   const dbx = load();
   const errors = [];
   const skipped = [];
@@ -590,7 +623,8 @@ export function planBulkTargets(list = [], { dedup = true, batch = '' } = {}) {
 
   list.forEach((row, i) => {
     try {
-      const t = cleanTarget({ ...row, batch: row?.batch || batch });
+      // trustedOrigin 은 설정 연동만 켠다 — 가져오기·대량 등록 행의 origin 은 버린다(cleanOrigin 머리말).
+      const t = cleanTarget({ ...row, batch: row?.batch || batch }, null, trustedOrigin ? { origin: row?.origin } : {});
       const key = dupKey(t);
       if (dedup && nameIdx.has(key)) {
         skipped.push({ row: i + 1, name: t.name, path: t.path, reason: '이미 있는 대상(구분+경로+이름 중복)' });

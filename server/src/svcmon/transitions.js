@@ -1,0 +1,225 @@
+/**
+ * svcmon/transitions.js — 점검 **상태 전이 이력 · 시간별 집계 · 실패 알림**(v2.915, Monitoring 개요 기술 뷰 · 개선안 ②).
+ *
+ * 왜 따로 두는가: 예전에는 결과(최신값)만 있고 '언제 무엇이 나빠졌나' 의 이력이 없었다. 점검 실패 알림도 없었다 —
+ * `svcmon/` 아래 notify 호출 0건(있던 것은 엣지 무보고/재개 알림 `central/svcmonSilence.js` 뿐).
+ *
+ * 입력은 두 곳에서 온다 — 둘 다 결과를 기록하는 **그 자리**에서 `noteResult` 를 부른다(판정은 여기 하나):
+ *   · 이 인스턴스의 폴러(`svcmon/poller.js sweep`) — scope ''(직접)
+ *   · 중앙이 받은 엣지 보고(`central/svcmonEdge.js ingestReport`) — scope = 엣지 이름
+ *
+ * 지키는 것
+ *  - **핫패스는 O(1)** — 결과 1건당 맵 갱신 몇 번뿐(20만 점검 × 1분 주기를 가정). 파일 쓰기 없음(이력은 메모리 — 재시작하면 비고,
+ *    화면이 '재시작 이후' 임을 밝힌다).
+ *  - 알림은 **전이 때만**(연속 N회째 처음 넘을 때 1번 · 복구 1번) — 매 결과마다 보내지 않는다. 한꺼번에 많이 넘으면(대량 장애)
+ *    20초 창으로 묶어 **요약 1건**을 보낸다(알림 폭주 금지 — alerts.js 대기열 머리말의 '한 틱 40건' 사고와 같은 이유).
+ *  - 알림은 **기본 끔**(설정 › Monitoring 설정 › 알림) — 업그레이드만으로 전 법인 포탈이 실패 중인 점검 수만큼 알림을 쏘지 않게.
+ *  - 보내기는 `alerts.js enqueueNotify`(결과를 기다리지 않는 호출부용 대기열) — 폴러가 SMTP 로그인 시간만큼 멈추지 않게.
+ */
+
+import { numOrNull } from '../util/numOrNull.js';
+import { getAlertSettings, cleanAlertSettings, ALERT_DEFAULTS, onAlertSettingsSaved, _setAlertSettingsCache } from './alertSettings.js';
+
+export { getAlertSettings, saveAlertSettings, cleanAlertSettings, ALERT_DEFAULTS, ALERT_SCOPES } from './alertSettings.js';
+const t = (v) => String(v ?? '').trim();
+
+export const RING_MAX = 500;
+export const HOUR_MS = 3_600_000;
+export const HOURS_KEEP = 24;
+export const ALERT_BATCH_MS = 20_000;
+export const ALERT_BATCH_INDIVIDUAL_MAX = 5;
+const ALERTED_MAX = 50_000;
+export const SYNC_PATH_PREFIX = '설정 연동';
+
+/* 알림 설정은 svcmon/alertSettings.js(파일 입출력은 그쪽 — 이 모듈은 메모리만 쓴다). */
+
+/* ───────────────────────────── 이력 · 집계 ───────────────────────────── */
+
+let _ring = [];                 // [{ at, scope, testId, from, to, target, test, path, host, reply, streak }]
+const _hours = new Map();       // hourStart -> { ok, warn, bad, n, msSum, msN }
+const _alerted = new Map();     // `${scope}|${testId}` -> { at, target, test }
+const _warned = new Map();
+// 알림을 끄면 '알린 상태' 를 비운다 — 다시 켰을 때 그 사이 복구된 점검에 거짓 복구 알림을 보내지 않게.
+onAlertSettingsSaved((next) => { if (!next.enabled) { _alerted.clear(); _warned.clear(); } });
+let _queue = [];                // 보낼 알림(창으로 묶는다)
+let _flushTimer = null;
+let _sentStats = { individual: 0, summaries: 0, lastAt: 0 };
+
+/** 테스트 주입 — 실제 발송 함수(기본: alerts.js enqueueNotify). */
+let _send = null;
+async function sendAlert(a) {
+  if (_send) return _send(a);
+  try { const m = await import('../alerts.js'); return m.enqueueNotify(a); } catch (e) { console.warn('[svcmon] 알림 대기열 실패:', e?.message || e); return null; }
+}
+
+function bumpHour(at, status, ms) {
+  const h = Math.floor(at / HOUR_MS) * HOUR_MS;
+  let b = _hours.get(h);
+  if (!b) {
+    b = { ok: 0, warn: 0, bad: 0, n: 0, msSum: 0, msN: 0 };
+    _hours.set(h, b);
+    // 오래된 칸 정리 — 칸을 새로 만들 때만(핫패스에서 매번 훑지 않는다).
+    const floor = h - HOURS_KEEP * HOUR_MS;
+    for (const k of _hours.keys()) if (k < floor) _hours.delete(k);
+  }
+  b.n += 1;
+  if (status === 'ok' || status === 'warn' || status === 'bad') b[status] += 1;
+  const m = numOrNull(ms);
+  if (m != null && m >= 0 && status !== 'bad') { b.msSum += m; b.msN += 1; }
+}
+
+const inScope = (s, p) => s.scope !== 'settings' || t(p) === SYNC_PATH_PREFIX || t(p).startsWith(`${SYNC_PATH_PREFIX}\\`);
+
+/**
+ * 결과 1건 기록. 핫패스 — 던지지 않는다.
+ * @param {{at?:number, scope?:string, testId:string, prev?:string|null, status:string, reply?:string, ms?:number|null, streak?:number,
+ *          target?:{name?:string, path?:string, host?:string}, test?:{name?:string, type?:string}}} r
+ */
+export function noteResult(r) {
+  try {
+    const at = Number(r?.at) || Date.now();
+    const status = t(r?.status);
+    const scope = t(r?.scope);
+    const testId = t(r?.testId);
+    if (!testId || !status) return;
+    bumpHour(at, status, r?.ms);
+    const prev = r?.prev ? t(r.prev) : '';
+    if (prev && prev !== status) {
+      _ring.push({
+        at, scope, testId, from: prev, to: status,
+        target: t(r?.target?.name).slice(0, 120), path: t(r?.target?.path).slice(0, 300), host: t(r?.target?.host).slice(0, 253),
+        test: t(r?.test?.name).slice(0, 80), type: t(r?.test?.type).slice(0, 16), reply: t(r?.reply).slice(0, 160),
+        streak: Number(r?.streak) || 1,
+      });
+      if (_ring.length > RING_MAX) _ring.splice(0, _ring.length - RING_MAX);
+    }
+    evalAlert({ at, scope, testId, status, streak: Number(r?.streak) || 1, reply: t(r?.reply), target: r?.target || {}, test: r?.test || {} });
+  } catch { /* 이력은 부가 정보 — 결과 기록을 막지 않는다 */ }
+}
+
+function evalAlert(x) {
+  const s = getAlertSettings();
+  if (!s.enabled) return;
+  if (!inScope(s, x.target?.path)) return;
+  const key = `${x.scope}|${x.testId}`;
+  const label = `${t(x.target?.name) || t(x.target?.host) || x.testId} › ${t(x.test?.name) || t(x.test?.type)}`;
+  const where = x.scope ? `엣지 ${x.scope}` : '이 포탈';
+  if (x.status === 'bad') {
+    if (x.streak >= s.failCount && !_alerted.has(key)) {
+      if (_alerted.size >= ALERTED_MAX) _alerted.delete(_alerted.keys().next().value);
+      _alerted.set(key, { at: x.at, label });
+      enqueue({ kind: 'bad', key, label, x, where });
+    }
+    return;
+  }
+  if (x.status === 'warn') {
+    if (s.warn && x.streak >= s.failCount && !_warned.has(key)) {
+      if (_warned.size >= ALERTED_MAX) _warned.delete(_warned.keys().next().value);
+      _warned.set(key, { at: x.at, label });
+      enqueue({ kind: 'warn', key, label, x, where });
+    }
+    return;
+  }
+  if (x.status === 'ok') {
+    const a = _alerted.get(key) || _warned.get(key);
+    if (!a) return;
+    _alerted.delete(key); _warned.delete(key);
+    if (s.recover) enqueue({ kind: 'ok', key, label, x, where, since: a.at });
+  }
+}
+
+function enqueue(item) {
+  _queue.push(item);
+  if (_flushTimer) return;
+  _flushTimer = setTimeout(() => { _flushTimer = null; flushAlerts().catch(() => {}); }, ALERT_BATCH_MS);
+  _flushTimer.unref?.();
+}
+
+const mins = (ms) => Math.max(0, Math.round(ms / 60_000));
+
+/** 알림 묶음 → 보낼 알림 목록(순수 — 테스트가 고정). 창 안의 건수가 상한 이하면 하나씩, 넘으면 종류별 요약 1건. */
+export function buildAlerts(items = [], s = getAlertSettings()) {
+  const out = [];
+  const byKind = { bad: [], warn: [], ok: [] };
+  for (const it of items) (byKind[it.kind] || (byKind[it.kind] = [])).push(it);
+  const one = (it) => {
+    const p = t(it.x?.target?.path);
+    if (it.kind === 'bad') {
+      return {
+        severity: 'critical', key: `svcmon.test.bad:${it.key}`, title: `Monitoring 점검 실패: ${it.label}`,
+        detail: `${s.failCount}회 연속 실패(현재 ${it.x.streak}회) · ${it.x.reply || '응답 없음'} · 점검 위치 ${it.where}${p ? ` · 경로 ${p}` : ''}`,
+      };
+    }
+    if (it.kind === 'warn') {
+      return {
+        severity: 'warning', key: `svcmon.test.warn:${it.key}`, title: `Monitoring 점검 경고: ${it.label}`,
+        detail: `${s.failCount}회 연속 경고 · ${it.x.reply || ''} · 점검 위치 ${it.where}${p ? ` · 경로 ${p}` : ''}`,
+      };
+    }
+    return {
+      severity: 'info', key: `svcmon.test.ok:${it.key}`, title: `Monitoring 점검 복구: ${it.label}`,
+      detail: `정상으로 돌아왔습니다(${it.x.reply || 'ok'}) · 이상 지속 약 ${mins(it.x.at - (it.since || it.x.at))}분 · 점검 위치 ${it.where}`,
+    };
+  };
+  for (const kind of ['bad', 'warn', 'ok']) {
+    const list = byKind[kind] || [];
+    if (!list.length) continue;
+    if (list.length <= ALERT_BATCH_INDIVIDUAL_MAX) { for (const it of list) out.push(one(it)); continue; }
+    const head = list.slice(0, 10).map((it) => `· ${it.label} (${it.where})`).join('\n');
+    const name = kind === 'bad' ? '실패' : kind === 'warn' ? '경고' : '복구';
+    out.push({
+      severity: kind === 'bad' ? 'critical' : kind === 'warn' ? 'warning' : 'info',
+      // 키에 시각을 넣는다 — 고정 키면 alerts.js 억제 창(기본 5분)이 다음 요약을 'suppressed' 로 버렸다(반증 M4 — 재현).
+      key: `svcmon.test.${kind}:summary:${Date.now()}`,
+      title: `Monitoring 점검 ${name} ${list.length}건(${Math.round(ALERT_BATCH_MS / 1000)}초 안에 몰림 — 요약)`,
+      detail: `${head}${list.length > 10 ? `\n… 외 ${list.length - 10}건` : ''}\n대량 ${name}는 회선·엣지 장애일 수 있습니다 — Monitoring › 개요의 엣지 보고 · 상태 전이를 먼저 보세요.`,
+    });
+  }
+  return out;
+}
+
+export async function flushAlerts() {
+  const items = _queue; _queue = [];
+  if (!items.length) return [];
+  const list = buildAlerts(items);
+  for (const a of list) {
+    await sendAlert(a);
+    if (/:summary$/.test(a.key)) _sentStats.summaries += 1; else _sentStats.individual += 1;
+  }
+  _sentStats.lastAt = Date.now();
+  return list;
+}
+
+/* ───────────────────────────── 조회 ───────────────────────────── */
+
+/** 최근 전이(최신 먼저). */
+export function recentTransitions(limit = 50) {
+  return _ring.slice(-Math.max(1, Math.min(RING_MAX, Number(limit) || 50))).reverse();
+}
+
+/** 지난 24시간 시간별 집계(오래된 → 최신, 빈 시간은 0 — 결측과 구분되게 `n` 을 싣는다). */
+export function hourlySeries(now = Date.now()) {
+  const cur = Math.floor(now / HOUR_MS) * HOUR_MS;
+  const out = [];
+  for (let i = HOURS_KEEP - 1; i >= 0; i -= 1) {
+    const h = cur - i * HOUR_MS;
+    const b = _hours.get(h);
+    out.push({ at: h, ok: b?.ok || 0, warn: b?.warn || 0, bad: b?.bad || 0, n: b?.n || 0, avgMs: b?.msN ? Math.round(b.msSum / b.msN) : null });
+  }
+  return out;
+}
+
+export function alertStats() {
+  return { alerted: _alerted.size, warned: _warned.size, queued: _queue.length, ..._sentStats };
+}
+/** 기동 시각 — 화면이 '재시작 이후' 임을 밝힌다. */
+const _startedAt = Date.now();
+export function transitionsSince() { return _startedAt; }
+
+/** 테스트 전용. */
+export function _resetTransitionsForTest({ send = null } = {}) {
+  _ring = []; _hours.clear(); _alerted.clear(); _warned.clear(); _queue = []; _setAlertSettingsCache(null); _send = send;
+  if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; }
+  _sentStats = { individual: 0, summaries: 0, lastAt: 0 };
+}
+export function _setAlertSettingsForTest(s) { _setAlertSettingsCache(cleanAlertSettings(s, ALERT_DEFAULTS)); }

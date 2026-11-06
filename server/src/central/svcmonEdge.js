@@ -32,6 +32,7 @@ import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { listAssignments, noteExpectMs } from './svcmonAssign.js';
+import { noteResult } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -180,6 +181,14 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
       measuredAt,
       snapId,
     });
+    // v2.915: 같은 측정의 재전송은 새 결과가 아니다 — 시간별 집계·알림에 두 번 세지 않는다. ⚠ measuredAt 비교로는 못 가른다
+    //   (반증 M5 — 재현: measuredAt = 수신 시각 − 구간값이라 전송 지연만큼 ms 단위로 흔들린다). 새 측정은 상태가 바뀌거나 연속 횟수(k)가 바뀐다.
+    const row = a.rows.get(id);
+    if (!prev || prev.s !== row.s || prev.k !== row.k) {
+      const mm = a.meta.get(id);
+      noteResult({ at: measuredAt, scope: a.agent, testId: id, prev: prev?.s || null, status: row.s, reply: row.r, ms: row.m, streak: row.k,
+        target: { name: mm?.n, path: mm?.p, host: mm?.h }, test: { name: mm?.t, type: mm?.y } });
+    }
     accepted += 1;
   }
   a.counters.accepted += accepted;
@@ -368,7 +377,7 @@ export function edgeSummaryWithAssigned(now = Date.now()) {
 }
 
 /** 엣지 1개의 항목 목록(메타가 있으면 이름·경로까지). limit 로 잘라 응답 크기를 묶는다. */
-export function edgeState(agent, { path: scope = '', limit = 500, only = '' } = {}, now = Date.now()) {
+export function edgeState(agent, { path: scope = '', limit = 500, only = '', sort = true } = {}, now = Date.now()) {
   const a = agents[String(agent || '').trim()];
   if (!a) return null;
   const silent = isSilent(a, now);
@@ -397,7 +406,8 @@ export function edgeState(agent, { path: scope = '', limit = 500, only = '' } = 
       intervalSec: m?.iv || null,
     });
   }
-  items.sort((x, y) => (x.path || '').localeCompare(y.path || '') || (x.target || '').localeCompare(y.target || ''));
+  // v2.915: Monitoring 개요 집계는 순서가 필요 없다(sort:false) — 수십만 행 localeCompare 정렬을 건너뛴다.
+  if (sort) items.sort((x, y) => (x.path || '').localeCompare(y.path || '') || (x.target || '').localeCompare(y.target || ''));
   return {
     agent: a.agent,
     silent,
