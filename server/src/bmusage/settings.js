@@ -123,6 +123,8 @@ export const PERF_DEFAULTS = Object.freeze({
   cpuMismatchPct: 15,
   inletWarnC: 27, inletBadC: 35,
   powerCapWarnPct: 90, powerCapBadPct: 98,
+  // v2.919(반증 D5): 경로가 있는 칸 중 판정한 칸이 이 비율(%) 미만이면 ‘정상’ 대신 ‘대부분 못 읽음’(50 은 추정 시작값).
+  minJudgedPct: 50,
 });
 /** 기준값 범위(서버가 강제 — 화면 입력을 믿지 않는다). [min, max, 소수 허용] */
 const PERF_LIMITS = Object.freeze({
@@ -137,6 +139,7 @@ const PERF_LIMITS = Object.freeze({
   cpuMismatchPct: [1, 100, false],
   inletWarnC: [10, 60, false], inletBadC: [10, 70, false],
   powerCapWarnPct: [10, 100, false], powerCapBadPct: [10, 100, false],
+  minJudgedPct: [0, 100, false],
 });
 /** 기준값 정규화(순수) — 모르는 키는 버리고, 빈 칸은 기본값(clampSetting 규약), warn 이 bad 보다 크면 bad 를 warn 으로 올린다. */
 export function normalizePerfThresholds(raw = {}) {

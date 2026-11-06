@@ -23,7 +23,7 @@ import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive } from './setting
 import { publicTarget } from './targets.js';
 import { currentTargets, bmUsageStatus, authStopsFor } from './poller.js';
 import { latestUsage } from './db.js';
-import { buildPerfEntry, PERF_COL_META } from './perfView.js';
+import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from './perfView.js';
 import { hwFactsReader } from './hwFacts.js';
 import { freshMsFor } from './useJudge.js';
 
@@ -44,6 +44,27 @@ export async function perfForRows(rows, targets, s, { full = true, now = Date.no
   }
   return { perf, perfError };
 }
+/**
+ * v2.919(반증 D2) — 봉투 바이트 상한. 중앙 수신 상한(`util/readCapped.js EDGE_RESPONSE_MAX_BYTES` 16MB — 압축 해제 뒤 크기)을 넘으면
+ *   중앙이 응답을 통째로 거절해 **기존 다섯 지표까지** 못 당긴다(반증 실측: 장치 32개 서버 1대 약 18KB → 약 880대에서 16MB).
+ *   그래서 넘치면 무거운 것부터 뺀다: ① 성능 항목을 목록용(code 표)으로 — 근거·장치별(detail)·튜닝·하드웨어 사실 제거 ② 그래도 넘치면 성능 항목 전부 제거.
+ *   행(rows — 다섯 지표)·대상(targets)은 **언제나 남긴다**. 뺀 사실은 `perfTruncated`(사유·단계·전후 바이트)로 봉투가 밝힌다(조용한 축약 금지).
+ *   env `BMUSAGE_ENVELOPE_MAX_BYTES`(256KB~12MB, 기본 8MB — 중앙 16MB 의 절반).
+ */
+export const ENVELOPE_MAX_BYTES = Math.min(12 * 1_048_576, Math.max(256 * 1024, Number(process.env.BMUSAGE_ENVELOPE_MAX_BYTES) || 8 * 1_048_576));
+const jsonBytes = (o) => Buffer.byteLength(JSON.stringify(o));
+/** 순수 — 봉투를 상한 안으로(성능 항목만 줄인다). 상한 안이면 그대로 돌려준다. */
+export function fitEnvelope(env, maxBytes = ENVELOPE_MAX_BYTES) {
+  const before = jsonBytes(env);
+  if (before <= maxBytes) return env;
+  let out = { ...env, perf: (env.perf || []).map(compactPerfEntry) };
+  let level = 'compact';
+  let after = jsonBytes(out);
+  if (after > maxBytes) { out = { ...out, perf: [] }; level = 'dropped'; after = jsonBytes(out); }
+  out.perfTruncated = { reason: 'envelope-bytes', level, bytesBefore: before, bytesAfter: after, maxBytes, ...(after > maxBytes ? { overStill: true } : {}) };
+  return out;
+}
+
 /** 행에서 JSON 문자열 열을 뗀다(봉투·주 조회 — 크기와 정제 상한). */
 export const stripJsonCols = (r) => { const { detail_json: _d, tuning_json: _t, ...rest } = r || {}; return rest; };
 
@@ -58,7 +79,11 @@ const t = (v) => String(v ?? '').trim();
  * @param {{limit?:number}} opt
  * @returns {Promise<object>}
  */
-export async function buildBmUsageEnvelope({ limit = DEFAULT_LIMIT } = {}) {
+export async function buildBmUsageEnvelope(opt = {}) {
+  // v2.919(반증 D2): 봉투 바이트 상한 — 넘치면 성능 상세부터 뺀다(fitEnvelope). 다섯 지표 행은 언제나 남는다.
+  return fitEnvelope(await buildEnvelopeRaw(opt), opt.maxBytes ?? ENVELOPE_MAX_BYTES);
+}
+async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
   const cap = Math.min(MAX_LIMIT, Math.max(1, Number(limit) || DEFAULT_LIMIT));
   const s = loadBmUsageSettings();
   const [tg, latest] = await Promise.all([

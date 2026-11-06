@@ -19,8 +19,10 @@ import { PERF_DEFAULTS } from './settings.js';
 const n = numOrNull;
 export const RESOURCES = Object.freeze(['cpu', 'mem', 'disk', 'net', 'hw']);
 export const RESOURCE_LABEL = Object.freeze({ cpu: 'CPU', mem: '메모리', disk: '디스크', net: '네트워크', hw: '하드웨어' });
-export const CODES = Object.freeze(['ok', 'warn', 'bad', 'none', 'missing', 'nopath']);
-export const VERDICT_LABEL = Object.freeze({ bottleneck: '병목', saturated: '포화', errors: '오류', warn: '주의', ok: '정상', unknown: '판정 불가' });
+// v2.919(반증 D4): `stale` — 그 칸을 준 표본이 신선도 한계를 넘었다(오래된 값을 지금 값으로 판정하지 않는다). 판정에 넣지 않고 따로 센다.
+export const CODES = Object.freeze(['ok', 'warn', 'bad', 'none', 'missing', 'nopath', 'stale']);
+// v2.919(반증 D4·D5): `partial` — 판정한 칸이 기준 비율(minJudgedPct) 미만이라 ‘정상’ 이라 말하지 않는다 · `stale` — OS/행 표본이 오래됨.
+export const VERDICT_LABEL = Object.freeze({ bottleneck: '병목', saturated: '포화', errors: '오류', warn: '주의', ok: '정상', partial: '대부분 못 읽음', stale: '오래됨', unknown: '판정 불가' });
 const RANK = { bad: 3, warn: 2, ok: 1 };
 
 /** 값 하나를 warn/bad 기준과 비교 — 값이 없으면 null(판정 보류). */
@@ -81,7 +83,7 @@ const psiAbsent = (detail) => sec(detail, 'psi') === 'absent';
  * @param {string} p.coverage    coverageOf 결과
  * @param {object} [p.th]        기준값(settings.perf) — 빠진 키는 PERF_DEFAULTS
  */
-export function judgeUse({ row = {}, detail = null, hw = null, coverage = 'none', th = {} } = {}) {
+export function judgeUse({ row = {}, detail = null, hw = null, coverage = 'none', th = {}, now = null, freshMs = null } = {}) {
   const T = { ...PERF_DEFAULTS, ...(th || {}) };
   const osPath = coverage === 'both' || coverage === 'os';
   const idPath = coverage === 'both' || coverage === 'idrac';
@@ -146,6 +148,23 @@ export function judgeUse({ row = {}, detail = null, hw = null, coverage = 'none'
     },
   };
 
+  /*
+   * v2.919(반증 D4): 행(OS·텔레메트리 값)이 신선도 한계를 넘었으면 그 행에서 온 칸(cpu·mem·disk·net)은 판정하지 않고 `stale` 로 둔다 —
+   *   30일 전 표본이 ‘지금 CPU 97%’ 로 판정되던 결함. 하드웨어 칸은 hwFacts 가 이미 신선한 것만 주므로 그대로 둔다.
+   *   now·freshMs 를 주지 않은 호출(단위 테스트)은 검사하지 않는다.
+   */
+  const rowStale = n(now) != null && n(freshMs) != null && (n(row.ts) == null || n(now) - n(row.ts) > n(freshMs));
+  if (rowStale) {
+    // 경로가 ‘지금’ 신선하지 않아 nopath 로 나온 칸도, 그 경로를 한 번이라도 읽었으면(os_at·idrac_at) ‘경로 없음’ 이 아니라 ‘오래됨’ 이다.
+    const everOs = n(row.os_at) != null && !windows;
+    const everAny = everOs || n(row.idrac_at) != null || n(row.os_at) != null;
+    for (const r of ['cpu', 'mem', 'disk', 'net']) {
+      for (const k of ['U', 'S', 'E']) {
+        const had = cells[r][k].code !== 'nopath' || (k === 'U' ? everAny : everOs);
+        if (had) cells[r][k] = { ...cells[r][k], code: 'stale' };
+      }
+    }
+  }
   const counts = Object.fromEntries(CODES.map((c) => [c, 0]));
   const perRes = {};
   for (const r of RESOURCES) {
@@ -159,6 +178,15 @@ export function judgeUse({ row = {}, detail = null, hw = null, coverage = 'none'
   const ORDER = ['bottleneck', 'saturated', 'errors', 'warn', 'ok', 'unknown'];
   let verdict = 'unknown'; let focus = null;
   for (const vv of ORDER) { const r = RESOURCES.find((x) => perRes[x] === vv); if (r) { verdict = vv; focus = r; break; } }
+  if (rowStale) for (const r of ['cpu', 'mem', 'disk', 'net']) if (perRes[r] === 'unknown') perRes[r] = 'stale';
+  /*
+   * v2.919(반증 D5): 판정한 칸이 경로가 있는 칸의 기준 비율(minJudgedPct — API 값) 미만이면 ‘정상’ 이라 말하지 않는다(15칸 중 1칸만 읽고 정상이던 결함).
+   *   병목·포화·오류·주의는 읽은 칸에서 실제로 나온 것이라 그대로 두고, 판정 한 줄에 ‘읽은 칸 j/a’ 를 늘 붙인다.
+   */
+  const judged = counts.ok + counts.warn + counts.bad;
+  const applicable = RESOURCES.length * 3 - counts.nopath;
+  if (rowStale && (verdict === 'ok' || verdict === 'unknown')) { verdict = 'stale'; focus = null; }
+  else if (verdict === 'ok' && applicable > 0 && (judged / applicable) * 100 < T.minJudgedPct) { verdict = 'partial'; focus = null; }
   const bottleneckCount = RESOURCES.filter((r) => perRes[r] === 'bottleneck').length;
 
   // OS ↔ iDRAC CPU 불일치(설계 ⑨) — 어느 쪽이 맞는지 단정하지 않는다. OS 값은 이 행이 OS 출처일 때만.
@@ -167,7 +195,8 @@ export function judgeUse({ row = {}, detail = null, hw = null, coverage = 'none'
   const diffPp = osCpu != null && idCpu != null ? Math.round(Math.abs(osCpu - idCpu) * 10) / 10 : null;
   const mismatch = diffPp != null ? { cpu: { os: osCpu, idrac: idCpu, diffPp, flag: diffPp >= T.cpuMismatchPct } } : null;
 
-  return { cells, perResource: perRes, verdict, focus, bottleneckCount, counts, mismatch, line: verdictLine(verdict, focus, cells) };
+  const read = { judged, applicable };
+  return { cells, perResource: perRes, verdict, focus, bottleneckCount, counts, read, rowStale, mismatch, line: verdictLine(verdict, focus, cells, read) };
 }
 
 function hwFaultInputs(hw, field, label) {
@@ -208,9 +237,12 @@ const fmt = (x) => {
  * 판정 한 줄 — ‘디스크 포화 — nvme1n1 평균 대기열 6.2 · PSI io full 12%’. 값은 측정값뿐이고 기준 숫자는 넣지 않는다(기준은 API 값).
  * 정상·판정 불가면 짧게. 백틱·`**` 를 쓰지 않는다(문구 규약).
  */
-export function verdictLine(verdict, focus, cells) {
-  if (!focus || verdict === 'unknown') return '판정 불가 — 읽은 칸이 없습니다';
-  if (verdict === 'ok') return '정상';
+export function verdictLine(verdict, focus, cells, read = null) {
+  const tail = read && n(read.applicable) != null ? ` · 읽은 칸 ${read.judged}/${read.applicable}` : '';
+  if (verdict === 'stale') return `오래됨 — 마지막 표본이 신선도 한계를 넘어 판정하지 않았습니다${tail}`;
+  if (verdict === 'partial') return `대부분 못 읽음 — 읽은 칸은 정상이지만 판정하기에 부족합니다${tail}`;
+  if (!focus || verdict === 'unknown') return `판정 불가 — 읽은 칸이 없습니다${tail}`;
+  if (verdict === 'ok') return `정상${tail}`;
   const c = cells[focus];
   const ev = [];
   for (const k of ['S', 'E', 'U']) {
@@ -221,7 +253,7 @@ export function verdictLine(verdict, focus, cells) {
     }
     if (ev.length >= 3) break;
   }
-  return `${RESOURCE_LABEL[focus]} ${VERDICT_LABEL[verdict]}${ev.length ? ` — ${ev.join(' · ')}` : ''}`;
+  return `${RESOURCE_LABEL[focus]} ${VERDICT_LABEL[verdict]}${ev.length ? ` — ${ev.join(' · ')}` : ''}${tail}`;
 }
 
 /**

@@ -11,6 +11,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { PERF_COL_NAMES } from '../bmusage/perfCols.js';
 import { PERF_DEFAULTS } from '../bmusage/settings.js';
 import { SYSCTL_PATHS } from '../bmusage/parse/linuxProc.js';
+import { clampEdgeTs } from '../util/clampEdgeTs.js';
 
 export const PERF_LIST_MAX = 2_000;
 const DEV_MAX = 32;
@@ -28,11 +29,11 @@ const strList = (v, max, len) => {
   return out;
 };
 
-const CODES = ['ok', 'warn', 'bad', 'none', 'missing', 'nopath'];
+const CODES = ['ok', 'warn', 'bad', 'none', 'missing', 'nopath', 'stale'];
 const RES = ['cpu', 'mem', 'disk', 'net', 'hw'];
 const UES = ['U', 'S', 'E'];
 const COVERAGE = ['both', 'os', 'idrac', 'none'];
-const VERDICTS = ['bottleneck', 'saturated', 'errors', 'warn', 'ok', 'unknown'];
+const VERDICTS = ['bottleneck', 'saturated', 'errors', 'warn', 'ok', 'partial', 'stale', 'unknown'];
 const CROSS_STATES = ['candidate', 'clear', 'inactive', 'missing', 'nopath'];
 const SECTION_STATES = ['ok', 'absent', 'missing'];
 const SECTION_NAMES = ['stat', 'load', 'psi', 'vmstat', 'snmp', 'blkq', 'sysctl', 'hugepages', 'irq', 'dfi'];
@@ -77,7 +78,7 @@ function codesOf(c) {
   }
   return out;
 }
-function detailOf(d) {
+function detailOf(d, rcv) {
   if (!isObj(d)) return null;
   const psi = isObj(d.psi) ? {
     cpu: numKeys(d.psi.cpu, ['some10', 'some60', 'some300']),
@@ -85,7 +86,7 @@ function detailOf(d) {
     io: numKeys(d.psi.io, ['some10', 'full10', 'full60', 'full300']),
   } : null;
   return {
-    v: num(d.v), at: num(d.at), osKind: oneOf(d.osKind, ['linux', 'windows'], null), firstSample: bool(d.firstSample),
+    v: num(d.v), at: clampEdgeTs(d.at, rcv), osKind: oneOf(d.osKind, ['linux', 'windows'], null), firstSample: bool(d.firstSample),
     cores: num(d.cores), coresTruncated: bool(d.coresTruncated), procsRunning: num(d.procsRunning), threads: num(d.threads),
     psi,
     disks: list(d.disks, DEV_MAX, (x) => ({ name: str(x.name, 64), busyPct: num(x.busyPct), iops: num(x.iops), awaitMs: num(x.awaitMs), aqu: num(x.aqu), inFlight: num(x.inFlight) })),
@@ -99,14 +100,16 @@ function detailOf(d) {
     streak: numKeys(d.streak, ['netErr', 'netDrop', 'oom']),
     sections: sections(d.sections, SECTION_NAMES),
     truncated: bool(d.truncated),
+    ...(Array.isArray(d.cutSections) ? { cutSections: strList(d.cutSections, 4, 16) } : {}),
+    ...(Array.isArray(d.linesCapped) ? { linesCapped: strList(d.linesCapped, 8, 16) } : {}),
   };
 }
-function tuningOf(tu) {
+function tuningOf(tu, rcv) {
   if (!isObj(tu)) return null;
   let sysctl = null;
   if (isObj(tu.sysctl)) { sysctl = {}; for (const k of SYSCTL_KEYS) if (Object.hasOwn(tu.sysctl, k)) sysctl[k] = tu.sysctl[k] == null ? null : str(tu.sysctl[k], 128); }
   return {
-    v: num(tu.v), at: num(tu.at),
+    v: num(tu.v), at: clampEdgeTs(tu.at, rcv),
     sysctl,
     hugepages: numKeys(tu.hugepages, ['total', 'free', 'sizeKb']),
     blkq: Array.isArray(tu.blkq) ? list(tu.blkq, DEV_MAX, (x) => ({
@@ -117,12 +120,12 @@ function tuningOf(tu) {
     sections: sections(tu.sections, ['sysctl', 'hugepages', 'blkq', 'irq']),
   };
 }
-function hwOf(h) {
+function hwOf(h, rcv) {
   if (!isObj(h)) return null;
   return {
     read: bool(h.read),
-    power: isObj(h.power) ? numKeys(h.power, ['watts', 'at', 'capWatts', 'capPct']) : null,
-    inletC: num(h.inletC), sensorAt: num(h.sensorAt), cpuPct: num(h.cpuPct), inventoryAt: num(h.inventoryAt),
+    power: isObj(h.power) ? { ...numKeys(h.power, ['watts', 'capWatts', 'capPct']), at: clampEdgeTs(h.power.at, rcv) } : null,
+    inletC: num(h.inletC), sensorAt: clampEdgeTs(h.sensorAt, rcv), cpuPct: num(h.cpuPct), inventoryAt: clampEdgeTs(h.inventoryAt, rcv), inventoryStale: bool(h.inventoryStale),
     dimmBad: strList(h.dimmBad, 16, 64), dimmWarn: strList(h.dimmWarn, 16, 64), diskPredicted: strList(h.diskPredicted, 16, 64),
     selCritical: num(h.selCritical), faultCount: num(h.faultCount),
     faults: faultList(h.faults), cpuFaults: faultList(h.cpuFaults), dimmFaults: faultList(h.dimmFaults), diskFaults: faultList(h.diskFaults), nicFaults: faultList(h.nicFaults),
@@ -131,20 +134,31 @@ function hwOf(h) {
 }
 
 /** 성능 항목 하나(목록·상세 공용 — 상세 필드가 없으면 싣지 않는다). */
-export function sanitizePerfEntry(e) {
+/**
+ * @param {object} e  엣지 성능 항목
+ * @param {number} [rcv] 수신 시각 — 엣지 시각(ts·osAt·idracAt·detail.at·hw.*At)을 이 시각으로 자른다(반증 D3). 자른 원본은 `edgeTsRaw`.
+ */
+export function sanitizePerfEntry(e, rcv = Date.now()) {
   if (!isObj(e)) return null;
+  const key = str(e.key, 256);
+  if (!key) return null;   // 키가 없는 항목은 어느 서버 것인지 알 수 없다 — 버리고 센다
   const mm = isObj(e.mismatch) && isObj(e.mismatch.cpu)
     ? { cpu: { os: num(e.mismatch.cpu.os), idrac: num(e.mismatch.cpu.idrac), diffPp: num(e.mismatch.cpu.diffPp), flag: bool(e.mismatch.cpu.flag) } } : null;
   const out = {
-    key: str(e.key, 256), ts: num(e.ts),
-    coverage: oneOf(e.coverage, COVERAGE, 'none'), osAt: num(e.osAt), idracAt: num(e.idracAt),
+    key, ts: clampEdgeTs(e.ts, rcv),
+    coverage: oneOf(e.coverage, COVERAGE, 'none'), osAt: clampEdgeTs(e.osAt, rcv), idracAt: clampEdgeTs(e.idracAt, rcv),
     verdict: oneOf(e.verdict, VERDICTS, 'unknown'), focus: oneOf(e.focus, RES, null), line: str(e.line, 300), bottleneckCount: num(e.bottleneckCount),
+    read: isObj(e.read) ? numKeys(e.read, ['judged', 'applicable']) : null, rowStale: bool(e.rowStale),
     counts: Object.fromEntries(CODES.map((k) => [k, num(e.counts?.[k]) ?? 0])),
     codes: codesOf(e.codes),
     perResource: Object.fromEntries(RES.map((r) => [r, oneOf(e.perResource?.[r], VERDICTS, 'unknown')])),
     cross: list(e.cross, 4, (c) => ({ id: num(c.id), state: oneOf(c.state, CROSS_STATES, 'missing'), code: str(c.code, 32) })),
     mismatch: mm, firstSample: bool(e.firstSample),
   };
+  // 자른 원본은 따로(루트 규약 — 원본을 버리지 않는다). 자르지 않았으면 싣지 않는다.
+  const raw = {};
+  for (const k of ['ts', 'osAt', 'idracAt']) { const v = num(e[k]); if (v != null && out[k] !== v) raw[k] = v; }
+  if (Object.keys(raw).length) out.edgeTsRaw = raw;
   if (isObj(e.cells)) out.cells = cellsOf(e.cells);
   if (Array.isArray(e.crossDetail)) {
     out.crossDetail = list(e.crossDetail, 4, (c) => ({
@@ -153,16 +167,17 @@ export function sanitizePerfEntry(e) {
     }));
   }
   if (isObj(e.values)) out.values = Object.fromEntries(PERF_COL_NAMES.map((c) => [c, num(e.values[c])]));
-  if ('detail' in e) out.detail = detailOf(e.detail);
-  if ('tuning' in e) out.tuning = tuningOf(e.tuning);
-  if ('hw' in e) out.hw = hwOf(e.hw);
+  if ('detail' in e) out.detail = detailOf(e.detail, rcv);
+  if ('tuning' in e) out.tuning = tuningOf(e.tuning, rcv);
+  if ('hw' in e) out.hw = hwOf(e.hw, rcv);
   return out;
 }
 
 /** 봉투의 성능 필드 묶음 → 정제본 + 버린 원소 수. */
-export function sanitizePerfFields(snap) {
+export function sanitizePerfFields(snap, rcv = Date.now()) {
   const arr = Array.isArray(snap?.perf) ? snap.perf : [];
-  const perf = arr.slice(0, PERF_LIST_MAX).map(sanitizePerfEntry).filter(Boolean);
+  const perf = arr.slice(0, PERF_LIST_MAX).map((e) => sanitizePerfEntry(e, rcv)).filter(Boolean);
+  const pt = isObj(snap?.perfTruncated) ? snap.perfTruncated : null;
   const th = isObj(snap?.perfThresholds) ? Object.fromEntries(Object.keys(PERF_DEFAULTS).map((k) => [k, num(snap.perfThresholds[k])])) : null;
   const cols = Array.isArray(snap?.perfCols)
     ? list(snap.perfCols, 64, (c) => ({ col: str(c.col, 64), res: str(c.res, 8), use: str(c.use, 2), judged: bool(c.judged), unit: str(c.unit, 16), label: str(c.label, 80) }))
@@ -171,6 +186,8 @@ export function sanitizePerfFields(snap) {
     fields: {
       perfVersion: num(snap?.perfVersion), perf, perfThresholds: th, perfCols: cols,
       ...(typeof snap?.perfError === 'string' && snap.perfError ? { perfError: str(snap.perfError, 300) } : {}),
+      // v2.919(반증 D2): 엣지가 봉투 크기 상한으로 성능 상세를 뺐다는 표지 — 그대로 전한다(화면이 ‘왜 상세가 없는지’ 를 말한다).
+      ...(pt ? { perfTruncated: { reason: str(pt.reason, 32), level: oneOf(pt.level, ['compact', 'dropped'], 'dropped'), bytesBefore: num(pt.bytesBefore), bytesAfter: num(pt.bytesAfter), maxBytes: num(pt.maxBytes), overStill: bool(pt.overStill) } } : {}),
     },
     dropped: arr.length - perf.length,
   };

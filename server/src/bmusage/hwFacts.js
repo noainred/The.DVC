@@ -19,6 +19,13 @@ const t = (v) => String(v ?? '').trim();
 /** 흡기 센서 이름 패턴 — Dell 은 `System Board Inlet Temp` · HPE 는 `01-Inlet Ambient`. 못 찾으면 null(다른 센서로 대신하지 않는다). */
 const INLET_RE = /inlet|ambient/i;
 const BAD_HEALTH = /^(critical)$/i;
+/**
+ * v2.919(반증 D4): 인벤토리 캐시의 신선도 한계 — 주 iDRAC 폴러가 인벤토리를 `INVENTORY_MAX_AGE_MS`(30분 — idrac/poller.js) 마다 새로 읽으므로
+ *   그 4배(2시간)와 지표 신선도(freshMs) 중 큰 값. 이보다 오래된 인벤토리(연결이 끊긴 지 오래된 서버)는 ‘지금 사실’ 이 아니다 —
+ *   iDRAC 경로를 ‘읽음’ 으로 보지 않고 cap·DIMM·SMART·SEL 칸은 missing 이다(디스크 캐시는 재시작 뒤에도 남아 있어 더 위험하다).
+ */
+export const IDRAC_INVENTORY_REFRESH_MS = 30 * 60_000;
+export const inventoryFreshMsFor = (freshMs) => Math.max(4 * IDRAC_INVENTORY_REFRESH_MS, numOrNull(freshMs) ?? 0);
 const WARN_HEALTH = /^(warning)$/i;
 
 /**
@@ -29,7 +36,9 @@ const WARN_HEALTH = /^(warning)$/i;
 export function shapeHwFacts(raw = {}, { now = Date.now(), freshMs = 15 * 60_000 } = {}) {
   const fresh = (at) => n(at) != null && now - n(at) <= freshMs;
   const power = raw.power && fresh(raw.power.ts) ? { watts: n(raw.power.watts), at: n(raw.power.ts) } : null;
-  const inv = raw.inv && typeof raw.inv === 'object' ? raw.inv : null;
+  const inv0 = raw.inv && typeof raw.inv === 'object' ? raw.inv : null;
+  const invStale = !!inv0 && !(n(inv0.collectedAt) != null && now - n(inv0.collectedAt) <= inventoryFreshMsFor(freshMs));
+  const inv = invStale ? null : inv0;
   const capW = n(inv?.powerCap?.limitWatts);
   const capPct = power?.watts != null && capW != null && capW > 0 ? Math.round((power.watts / capW) * 1000) / 10 : null;
   const sensor = raw.sensor && fresh(raw.sensor.t) ? raw.sensor : null;
@@ -53,7 +62,7 @@ export function shapeHwFacts(raw = {}, { now = Date.now(), freshMs = 15 * 60_000
     power: power ? { ...power, capWatts: capW, capPct } : (capW != null ? { watts: null, at: null, capWatts: capW, capPct: null } : null),
     inletC, sensorAt: sensor ? n(sensor.t) : null,
     cpuPct: sensor ? n(sensor.cpu) : null,
-    inventoryAt: inv ? n(inv.collectedAt) : null,
+    inventoryAt: inv0 ? n(inv0.collectedAt) : null, inventoryStale: invStale,
     dimmBad, dimmWarn, diskPredicted, selCritical,
     faults: faultView(faults),
     faultCount: faults ? faults.length : null,

@@ -38,7 +38,7 @@ import { poolSettled } from '../../util/pool.js'; // v2.613 RUNTIME2613-03(a)
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { memoJson, scopeKey } from './shared.js'; // v2.919: 서버 1대 성능 상세(응답 캐시 + 범위 서명)
 import { perfForRows, stripJsonCols } from '../../bmusage/edgePull.js'; // v2.919: 판정이 붙은 성능 항목(엣지 봉투와 같은 함수)
-import { buildPerfEntry, PERF_COL_META } from '../../bmusage/perfView.js';
+import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from '../../bmusage/perfView.js';
 import { hwFactsReader } from '../../bmusage/hwFacts.js';
 import { freshMsFor } from '../../bmusage/useJudge.js';
 import { PERF_DEFAULTS } from '../../bmusage/settings.js';
@@ -207,12 +207,8 @@ function usageDetailPart(key, { admin = false, hosts = [] } = {}) {
   };
 }
 
-/** v2.919 — 성능 항목에서 목록용 필드만(근거·장치별·튜닝·하드웨어 사실은 상세에서). */
-export function compactPerf(p) {
-  if (!p || typeof p !== 'object') return p;
-  const { cells: _c, crossDetail: _x, values: _v, detail: _d, tuning: _t, hw: _h, ...rest } = p;
-  return rest;
-}
+/** v2.919 — 성능 항목에서 목록용 필드만(본체는 perfView.compactPerfEntry 하나 — 봉투 크기 상한과 같은 함수). */
+export const compactPerf = compactPerfEntry;
 
 // v2.613 RUNTIME2613-03(a): 엣지 인출 풀 상수(모듈 최상위 — export 를 등록 함수 안에 두면 SyntaxError, v2.593 교훈).
 export const EDGE_PULL_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.BMUSAGE_PULL_CONCURRENCY) || 4));
@@ -271,8 +267,10 @@ export async function bmPerfView(req, snap, deps = {}) {
     if (!tgt) continue;
     if (allowed && (!t(tgt.vcenterId) || !allowed.has(t(tgt.vcenterId)))) return NOT_FOUND;
     const entry = (sn.perf || []).find((p) => t(p.key) === t(tgt.key)) || null;
+    // v2.919(반증 D2): 봉투가 크기 상한으로 상세를 뺐으면 그 사실과 사유를 그대로 전한다(상세가 없는 것을 ‘모름’ 으로 뭉개지 않는다).
     const base = { ok: true, key, via: entry ? 'edge' : 'edge-none', agent: rec.agent, snapAt: rec.snapAt || null, ...common,
-      perfThresholds: sn.perfThresholds || null, edgeThresholds: true };
+      perfThresholds: sn.perfThresholds || null, edgeThresholds: true,
+      ...(entry && !entry.cells ? { detailOmitted: true } : {}), ...(sn.perfTruncated ? { perfTruncated: sn.perfTruncated } : {}) };
     if (isAdmin) return { ...base, target: tgt, entry };
     return { ...base, target: maskTargetAddress(tgt, snapHosts, em), entry: entry ? { ...entry, key } : null, addressHidden: true };
   }
@@ -573,6 +571,7 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
         // v2.919: 엣지가 판정한 성능 항목 — 보이는 대상의 것만 · 목록에는 code 표만(근거·장치별은 /tools/bm-usage/perf/:key) · 기준값은 그 엣지 설정.
         perf: snap ? (isAdmin ? (l) => l : (l) => maskBmList(l, em))((snap.perf || []).filter((p) => keys.has(t(p.key))).map(compactPerf)) : [],
         perfThresholds: snap?.perfThresholds || null,
+        perfTruncated: snap?.perfTruncated || null,
         // 정지 목록은 **보이는 대상의 것만** — 키가 곧 범위 밖 서버의 식별자다.
         authStops: (isAdmin ? (l) => l : (l) => maskBmList(l, em))((snap?.authStops || []).filter((a) => !allowed || keys.has(t(a?.key)))),
       };

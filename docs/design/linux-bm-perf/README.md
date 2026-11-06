@@ -150,6 +150,17 @@
 10. (4차) 세 요청의 정직 기록은 `PROFILES.md` 끝에 모았다 — Rocky 9.4 공식 점검 항목은 셋뿐 · Airflow 메트릭은 수신기 필요(범위 밖) · Airflow 3 파싱 설정 위치 미확인 · GPDB SQL 점검은 gpadmin 전제 · 피크 샘플러 B 안의 CPU 부담 실측 전 · Ubuntu/Windows/Hadoop 프로파일 미작성.
 9. (3차) **Red Hat 문서는 원문을 열지 못했다** — docs.redhat.com 이 브라우저가 아닌 요청을 403 으로 막았고 사용자 에이전트를 바꿔 우회하지 않았다. Red Hat 인용 문장은 검색 엔진이 그 페이지에서 뽑아 보여 준 것이라 등급 ◐ 다. Rocky 문서 2편은 원문(HTTP 200)을 받아 대조했다(●). ‘DB 역할 권장값’(swappiness 10 · THP madvise) 중 Red Hat 이 RHEL 9 문서에서 명시한 것은 없다(RHEL 6 구판 예시·DB 벤더 관행 — ○). 세부는 `TUNING-SOURCES.md`.
 
+11. **1단계 반증에서 미룬 것**(2026-11-07 반증 `review-s1` — D1~D6·D8 은 1단계 수정 커밋에서 고쳤다. 아래는 코드 수정 없이 기록만, 단계별로 다시 연다):
+    - **D7(3단계)** `##BLKQ` 가 장치마다 프로세스 4개(basename + cat×3)를 띄우고 이름 순 앞 64개만 읽는다 — dm-* 가 먼저 와 멀티패스 서버는 물리 디스크 큐가 안 나온다. `grep -H '' /sys/block/*/queue/…` 한 번 + 물리 장치 우선으로.
+    - **D9(2단계 · 일부 고침)** 출력 상한 테스트가 하드코딩 4MB 와 비교하던 것은 sshExec `EXEC_MAX_OUTPUT` 실제 값과 비교하도록 고쳤다. 남은 것: sshExec 은 stderr 도 합산하므로 stderr 가 큰 서버의 여유(256KB)가 맞는지 실측 전.
+    - **D10(3단계)** 코어별 최고 사용률을 줄 순서로 짝짓는다 — 두 표본 사이 CPU offline/online 이면 코어가 한 칸씩 밀린다. CPU 번호를 함께 저장하거나 코어 수가 바뀌면 그 칸 null.
+    - **D11(2단계 · 일부 고침)** 중앙 정제가 장치·근거·장애 목록의 내부 축약(32·8·16)을 sanitizeDropped 에 세지 않는다. (키가 빈 항목은 이제 버리고 센다.)
+    - **D12(4단계)** hwFacts selCritical 이 시간 창 없이 인벤토리 events 의 Critical 을 모두 센다(‘최근’ 이 아니다) · IRQ awk 패턴의 virtio 가 virtio-blk·config 까지 잡는다.
+    - **D13(3단계)** latestUsage `SELECT *` 가 detail_json·tuning_json 까지 읽어 JSON 이 필요 없는 corpUsage·svcInventory·cpuLatest 도 무거워졌다 — JSON 열 없는 판본과 나눈다(월 파일·메인 파일 분리 때).
+    - **D14(2단계 · 테스트 품질)** 실제 라우터 테스트가 admin·AUTH 끔만 본다(requirePerm 거부·toolsDenied·범위가 다른 두 사용자의 캐시 분리 미확인) · bmPerfView 테스트의 `Date.now()` · ReDoS 비율 기준(40배)이 느슨하다.
+    - **D15(2단계)** 기준값 부분 저장: warn 이 bad 보다 크면 bad 를 조용히 올린다(응답에 밝히지 않음) · perf 하위 키의 ''·null 은 직전 값이 아니라 기본값으로 돌아간다.
+    - 기록: 판정 칸 code `none` 은 지금 칸 구성에서 나오지 않는다(모든 S 칸에 absent 가 될 수 없는 입력이 하나씩 있다 — 변이 L20 이 등가인 이유).
+
 ## 7. 컨펌 때 정할 것(기본값을 적어 둔다)
 1. 방식 — **D(권장)** / B 연동 병행 / 다른 것.
 2. 진단 스냅샷의 프로세스별 I/O — **권한 있으면 읽고 없으면 ‘확인 불가’(기본)** / 넣지 않음.

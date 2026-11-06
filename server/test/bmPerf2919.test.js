@@ -275,7 +275,7 @@ test('⑤ 교차 판정은 둘 다 읽힌 서버에서만 — 한쪽만이면 �
 test('⑤ ① 전력 cap 근접 + 런큐↑ → 후보 · ② await↑ + SMART 예측 장애 → 교체 후보 / 깨끗하면 I/O 양 · ④ CRC 를 받지 않으면 missing', () => {
   const now = 10_000_000;
   const hw = HW.shapeHwFacts({
-    power: { watts: 470, ts: now }, inv: { powerCap: { limitWatts: 500 }, collections: {}, disks: [{ name: 'Disk.Bay.1', predictiveFailure: true }], memoryDimms: [{ locator: 'A1', health: 'OK' }] },
+    power: { watts: 470, ts: now }, inv: { collectedAt: now, powerCap: { limitWatts: 500 }, collections: {}, disks: [{ name: 'Disk.Bay.1', predictiveFailure: true }], memoryDimms: [{ locator: 'A1', health: 'OK' }] },
     sensor: { t: now, cpu: 50, temps: { 'System Board Inlet Temp': 24 } }, faults: [],
   }, { now });
   assert.equal(hw.power.capPct, 94); assert.equal(hw.inletC, 24); assert.deepEqual(hw.diskPredicted, ['Disk.Bay.1']);
@@ -285,7 +285,7 @@ test('⑤ ① 전력 cap 근접 + 런큐↑ → 후보 · ② await↑ + SMART �
   assert.equal(cr[1].state, 'candidate'); assert.equal(cr[1].code, 'replace-candidate');
   assert.equal(cr[2].state, 'inactive', 'DIMM 이 정상이면 ③ 은 서지 않는다');
   assert.equal(cr[3].state, 'missing', 'iDRAC CRC 는 이 저장소가 받지 않는다 — 단정하지 않는다');
-  const clean = HW.shapeHwFacts({ inv: { collections: {}, disks: [{ name: 'd', predictiveFailure: false }] } }, { now });
+  const clean = HW.shapeHwFacts({ inv: { collectedAt: now, collections: {}, disks: [{ name: 'd', predictiveFailure: false }] } }, { now });
   const cr2 = J.crossJudge({ use, hw: clean, coverage: 'both', th: TH });
   assert.equal(cr2[1].code, 'io-volume');
   assert.equal(cr2[0].state, 'missing', '전력·흡기 둘 다 못 읽으면 missing');
@@ -325,7 +325,7 @@ test('⑦ 중앙 정제 화이트리스트 — 모르는 필드 제거 · 문자
   assert.equal(p.verdict, 'bottleneck', '엣지 판정 그대로(다시 판정하지 않는다)');
   assert.equal(p.line.length, 300);
   assert.equal(p.codes.cpu.S, 'missing', 'enum 밖 code 는 missing');
-  assert.deepEqual(p.counts, { ok: 3, warn: 0, bad: 0, none: 0, missing: 0, nopath: 0 });
+  assert.deepEqual(p.counts, { ok: 3, warn: 0, bad: 0, none: 0, missing: 0, nopath: 0, stale: 0 });
   assert.deepEqual(p.cross, [{ id: 1, state: 'candidate', code: 'power-thermal-limit' }]);
   assert.equal(p.detail.disks.length, 32, '장치 행 상한'); assert.equal(p.detail.disks[0].aqu, 1.5); assert.ok(!('evil' in p.detail.disks[0]));
   assert.equal(p.detail.streak.netErr, 2); assert.deepEqual(p.detail.sections, { psi: 'absent' }); assert.equal(p.detail.osKind, null);

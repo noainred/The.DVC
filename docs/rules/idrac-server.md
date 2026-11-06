@@ -366,6 +366,18 @@
   - **API**: `GET /tools/bm-usage` 에 `perf`(code 표)·`perfThresholds`·`perfDefaults`·`perfCols` 추가(기존 필드 불변 — 행의 JSON 열만 뗐다). 서버 1대 상세는
     ⚠ **`GET /tools/bm-usage/perf/:key`**(설계 지시는 `/tools/bm-perf/:key` 였다 — 새 첫 세그먼트는 `auth/toolAccess.js` 도구 매핑 밖이라 ‘베어메탈 사용률’ 을 거부당한 사용자도 읽게 된다. 같은 도구의 하위 경로로 두었다).
     scope 교집합 · 범위 밖·귀속 없음·없는 키 404 · 엣지 위임 서버는 보관분(엣지 판정) 그대로 · `memoJson` + 범위 서명 + 역할 + 마지막 수집 시각. `memoJson` 은 계산 결과의 `__status`(≠200)를 그 상태로 보낸다(캐시 경로 404).
+  - ⚠⚠ **반증(review-s1) 반영 — 되돌리지 말 것**(회귀 `server/test/bmPerf2919Review.test.js`):
+    · **D1** 출력이 잘리면(##END 미도착) **마지막 구획을 통째로 버린다**(cutSections — 숫자 중간에서 잘린 io_ticks 를 카운터로 쓰면 다음 주기 가짜 100% 가 원시·일 롤업에 남는다) ·
+      기존 구획(MEM·DISK·NET·NETINFO·FC·DF)에도 `head -n (상한+1)`(DISK 10,000줄) — 넘으면 linesCapped · 전체 `head -c` 는 `EXEC_MAX_OUTPUT − 256KB` 이고
+      구획 상한 × 줄 최대 바이트(가정)의 합(`SECTION_BYTES_SUM`)보다 크다(테스트 고정). 1단계 초판의 1MiB 상한은 예전 다섯 지표를 퇴행시켰다.
+    · **D2** 엣지 봉투는 `ENVELOPE_MAX_BYTES`(기본 8MB · 중앙 16MB 의 절반) 안으로 — 넘치면 성능 상세 → code 표 → 전부 제거 순으로 빼고 `perfTruncated` 로 밝힌다. 다섯 지표 행·대상은 언제나 남는다.
+    · **D3** 중앙 정제가 엣지 시각(ts·osAt·idracAt·detail.at·tuning.at·hw 시각)을 수신 시각으로 자르고 원본은 `edgeTsRaw`(`util/clampEdgeTs.js` — corpUsage 와 같은 함수).
+    · **D4** 행이 신선도 한계(API `freshMs`)를 넘으면 cpu·mem·disk·net 칸은 `stale`(판정에 넣지 않고 따로 센다 · 판정 ‘오래됨’). 인벤토리 캐시는 `inventoryFreshMsFor`(주 폴러 인벤토리 주기 30분 × 4 와 freshMs 중 큰 값) 안일 때만 iDRAC ‘읽음’.
+    · **D5** 경로가 있는 칸 중 판정한 칸이 `minJudgedPct`(기본 50 — 추정) 미만이면 ‘정상’ 대신 ‘대부분 못 읽음’(partial). 판정 한 줄은 ‘읽은 칸 j/a’ 를 늘 붙인다.
+    · **D6** `migratePerfColumns` 는 실패를 콘솔 오류로 남기고 `migrateError` 를 insertUsage 결과·dbStatus·폴러 `_last.dbMigrateError` 로 올린다. 적재는 **실제로 있는 열만** 쓴다 —
+      기존 db 모듈은 열기 실패를 ‘DB 없이 동작’ 으로 두는 관행인데, 열 하나 때문에 DB 전체를 끄면 다섯 지표까지 멈추므로 그 열만 빼고 계속한다.
+    · **D8** 명령 앞 `export LC_ALL=C;`(한국어 로캘의 번역된 df 머리글).
+    · 미룬 것(D7·D9~D15)은 설계 README §6 의 11번.
   - ⚠ **정직 기록**: 표본은 커널 문서 형식 + 이 개발 컨테이너(커널 6.18 · dash) 실행 출력이다 — 이 현장 Rocky 9 / RHEL 8 베어메탈 출력은 보지 못했다. `/proc/interrupts` 의 NIC 큐 이름 패턴 ·
     PSI 유무 · `/etc/tuned/active_profile` 존재는 첫 실수집에서 `detail.sections`·`tuning.sections` 를 보고 좁힌다. 화면(2단계)·월 파일/3단 보존/장치별 이력(3단계)·진단 스냅샷(4단계)은 아직이다.
 - ⚠⚠ **iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에

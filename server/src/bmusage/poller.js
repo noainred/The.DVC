@@ -806,7 +806,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
         viaSsh: results.filter((r) => r?.ent?.ok && String(r.ent.via || '').includes('ssh')).length,
         unparsed: results.filter((r) => r?.ent && r.ent.kind === 'unparsed').length,
       },
-      dbOk: !!ins.ok, dbError: ins.error || null, counts, ...srcErr, trigger, ...(demo ? { demo: true } : {}),
+      dbOk: !!ins.ok, dbError: ins.error || null, ...(ins.migrateError ? { dbMigrateError: { count: ins.migrateError.count, at: ins.migrateError.at } } : {}), counts, ...srcErr, trigger, ...(demo ? { demo: true } : {}),
       alerts: alerts && !alerts.skipped ? { sent: alerts.sent ?? 0, suppressed: alerts.suppressed ?? 0, capped: alerts.capped ?? 0, over: alerts.counts?.over ?? 0, error: alerts.error || null } : null,
     };
     return { ok: true, ...(_last) };

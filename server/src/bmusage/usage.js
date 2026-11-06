@@ -460,7 +460,8 @@ export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = nu
 
   const sections = Object.fromEntries(Object.entries(perf).map(([k, v]) => [k, secState(v)]));
   if (sections.psi === 'absent') notes.push('이 커널에는 PSI(/proc/pressure)가 없습니다 — 커널 4.20 미만이거나 RHEL 8 계열에서 psi=1 부팅 옵션이 꺼져 있습니다. PSI 칸은 ‘없음’ 이고 못 읽은 것과 다릅니다.');
-  if (os?.truncated) notes.push('수집 출력이 상한에서 잘려 뒤쪽 구획 일부를 받지 못했습니다(그 칸은 ‘못 읽음’ 입니다).');
+  if (os?.truncated) notes.push(`수집 출력이 상한에서 잘려 마지막 구획${(os.cutSections || []).length ? `(${os.cutSections.join('·')})` : ''}과 그 뒤를 받지 못했습니다 — 잘린 줄은 쓰지 않았고 그 칸은 ‘못 읽음’ 입니다(다음 주기는 첫 표본).`);
+  if ((os?.linesCapped || []).length) notes.push(`줄 상한에 닿은 구획(${os.linesCapped.join('·')})은 앞쪽 장치만 읽었습니다 — 대표값(최대)은 읽은 장치 기준입니다.`);
   if (st?.coresTruncated) notes.push(`코어가 ${st.coreCount}개라 코어별 최고 사용률은 앞쪽 일부 코어로만 계산했습니다.`);
 
   const dfi = perf.dfi?.value || null;
@@ -476,6 +477,8 @@ export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = nu
     nics: nics.slice(0, PERF_DEVICE_MAX), nicsTotal: nics.length,
     inodes: dfi ? dfi.slice(0, 16) : null,
     streak, sections, truncated: !!os?.truncated,
+    ...((os?.cutSections || []).length ? { cutSections: os.cutSections.slice(0, 4) } : {}),
+    ...((os?.linesCapped || []).length ? { linesCapped: os.linesCapped.slice(0, 8) } : {}),
   };
   const sy = perf.sysctl?.value || null; const hp = perf.hugepages?.value || null;
   const bq = perf.blkq?.value || null; const irq = perf.irq?.value || null;

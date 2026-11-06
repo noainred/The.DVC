@@ -19,7 +19,7 @@
  * ⚠ 마운트 경로는 `bmstor/collect.js sanitizeMounts` 를 **반드시** 통과한 것만 명령에 넣는다
  *   (명령 주입 방어 — 그 함수가 단일 소스다).
  */
-import { withSsh } from '../../proxy/sshExec.js';
+import { withSsh, EXEC_MAX_OUTPUT } from '../../proxy/sshExec.js';
 import { sanitizeMounts, parseDfOutput } from '../../bmstor/collect.js';
 import {
   splitSections, parseProcStat, parseMemInfo, parseDiskstats, parseNetDev, parseNetInfo, parseFcHosts, parseClkTck,
@@ -52,13 +52,31 @@ export function _resetOsKindForTest() { _osKind.clear(); }
 export function osKindOf(host) { return _osKind.get(String(host || '').toLowerCase()) || ''; }
 
 /**
- * v2.919(리눅스 성능 1단계) — 출력 총량 상한(바이트). 명령 전체를 `head -c` 로 감싸 이 크기에서 자른다 —
- *   `proxy/sshExec.js EXEC_MAX_OUTPUT`(4MB)에 닿아 결과가 통째로 버려지기 전에 우리가 먼저 자르고, 잘렸다는 사실은
- *   맨 끝 표지(`##END`)가 오지 않은 것으로 안다(`truncated`). 새 구획은 기존 구획 **뒤에** 둔다 — 잘려도 예전 다섯 지표는 남는다.
+ * v2.919(리눅스 성능 1단계 · 반증 D1 반영) — **구획별 줄 상한 + 전체 바이트 상한** 두 겹.
+ *  ① 기존 구획(MEM·DISK·NET·NETINFO·FC·DF)에도 `head -n (상한+1)` 을 둔다 — 상한+1 줄이 오면 그 구획은 ‘상한 도달’(`linesCapped`)이고
+ *     파서는 앞 상한 줄만 쓴다(온전한 줄만 — 값이 틀리지 않는다). 멀티패스 SAN 서버(LUN 500 × 경로 8 + 파티션 + dm)를 생각해 DISK 는 10,000줄.
+ *  ② 전체는 `head -c OUTPUT_MAX_BYTES` — **구획 상한 × 줄 최대 바이트(가정)의 합보다 크게**(정상 서버에서 걸리지 않게), 그리고
+ *     `proxy/sshExec.js EXEC_MAX_OUTPUT`(넘으면 결과를 통째로 버린다)보다 작게 잡는다. 테스트가 이 산수를 고정한다.
+ *  ③ 그래도 잘리면(`##END` 미도착) **마지막 구획을 통째로 버린다**(missing) — 숫자 중간에서 잘린 줄을 카운터로 읽으면 다음 주기 Δ 가 부풀어
+ *     가짜 디스크 100% 가 원시·일 롤업에 남는다(반증 재현). 버린 구획의 누적 카운터는 `_prev` 에 들어가지 않는다(빈 목록 → 다음 주기 첫 표본).
+ * ⚠ 예전(v2.918)에는 출력 상한이 sshExec 4MB 뿐이었고 그 아래면 다섯 지표가 다 왔다 — 1단계 초판의 1MiB 상한은 그것을 퇴행시켰다(D1).
  */
-export const OUTPUT_MAX_BYTES = 1_048_576;
-/** 구획별 줄 상한(명령의 head -n — 파서의 MAX_SECTION_LINES 와 별개의 1차 방어). */
-export const SECTION_LINE_CAP = Object.freeze({ STAT_OTHER: 64, STAT_CPU: MAX_CORES + 1, PSI: 6, VMSTAT: 8, SNMP: 2, BLKQ: MAX_BLKQ, SYSCTL: 32, IRQ: MAX_IRQ_LINES, DFI: 66 });
+export const SECTION_LINE_CAP = Object.freeze({
+  STAT_OTHER: 64, STAT_CPU: MAX_CORES + 1,
+  MEM: 256, DISK: 10_000, NET: 1_026, NETINFO: 1_024, FC: 128, DF: 128,
+  PSI: 6, VMSTAT: 8, SNMP: 2, BLKQ: MAX_BLKQ, SYSCTL: 32, IRQ: MAX_IRQ_LINES, DFI: 66,
+});
+/** 줄 최대 바이트(가정 — 개행 포함). cut 으로 자르는 구획은 그 폭, 커널 숫자 형식(DISK·NET)은 관측 폭의 여유값(추정 — 자르지 않는다: 숫자 중간 절단 금지). */
+export const SECTION_LINE_BYTES = Object.freeze({
+  STAT_OTHER: 257, STAT_CPU: 257, MEM: 80, DISK: 220, NET: 260, NETINFO: 129, FC: 513, DF: 1_025,
+  PSI: 128, VMSTAT: 32, SNMP: 300, BLKQ: 200, SYSCTL: 200, IRQ: 80, DFI: 1_025,
+});
+/** 기존 구획 중 줄 상한을 파서가 확인하는 것(splitSections 이름 → 상한). 상한+1 줄이 오면 상한 도달. */
+export const LEGACY_CAPPED = Object.freeze({ MEM: SECTION_LINE_CAP.MEM, DISK: SECTION_LINE_CAP.DISK, NET: SECTION_LINE_CAP.NET, NETINFO: SECTION_LINE_CAP.NETINFO, FC: SECTION_LINE_CAP.FC, DF: SECTION_LINE_CAP.DF });
+/** 구획 상한의 바이트 합(가정) — 테스트가 `< OUTPUT_MAX_BYTES < EXEC_MAX_OUTPUT` 를 고정한다. */
+export const SECTION_BYTES_SUM = Object.keys(SECTION_LINE_BYTES).reduce((a, k) => a + (SECTION_LINE_CAP[k] + 1) * SECTION_LINE_BYTES[k], 0) + 4_096;
+/** 전체 바이트 상한 = sshExec 상한 − 256KB(stderr·여유). env 로 sshExec 상한을 낮추면 함께 낮아진다(그때는 ③ 이 지킨다). */
+export const OUTPUT_MAX_BYTES = Math.max(64 * 1024, EXEC_MAX_OUTPUT - 256 * 1024);
 /** `##SYSCTL` 이 읽는 파일 — 상수 표(파서의 화이트리스트와 같은 원천). 명령에 변수 삽입이 없다. */
 const SYSCTL_FILES = Object.keys(SYSCTL_PATHS).join(' ');
 /**
@@ -69,23 +87,23 @@ const IRQ_AWK = "awk 'NR==1{n=NF;next} {nz=0; for(i=2;i<=n+1&&i<=NF;i++) if(($i+
 
 /** Linux 수집 명령 — 구획 표지로 나눈 한 방. */
 export function linuxCommand(mounts = []) {
-  const dfPart = mounts.length ? `df -P -k -- ${mounts.join(' ')} 2>/dev/null` : 'true';
+  const dfPart = mounts.length ? `df -P -k -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DF + 1} | cut -c1-1024` : 'true';
   // v2.919: inode(##DFI) — 같은 sanitize 된 마운트만(변수 삽입은 이 화이트리스트뿐).
   const dfiPart = mounts.length ? `df -P -i -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DFI}` : 'true';
   const cmds = [
     // v2.919: /proc/stat 전체 — cpu 합계 + cpuN(코어 수 = 줄 수) + ctxt·intr·procs_running·procs_blocked. 줄 폭은 cut 으로(intr 줄은 수천 칸).
     "echo '##STAT'", `grep -v '^cpu' /proc/stat 2>/dev/null | head -n ${SECTION_LINE_CAP.STAT_OTHER} | cut -c1-256`, `grep '^cpu' /proc/stat 2>/dev/null | head -n ${SECTION_LINE_CAP.STAT_CPU} | cut -c1-256`,
-    "echo '##MEM'", 'cat /proc/meminfo 2>/dev/null',
-    "echo '##DISK'", 'cat /proc/diskstats 2>/dev/null',
-    "echo '##NET'", 'cat /proc/net/dev 2>/dev/null',
+    "echo '##MEM'", `head -n ${SECTION_LINE_CAP.MEM + 1} /proc/meminfo 2>/dev/null`,
+    "echo '##DISK'", `head -n ${SECTION_LINE_CAP.DISK + 1} /proc/diskstats 2>/dev/null`,
+    "echo '##NET'", `head -n ${SECTION_LINE_CAP.NET + 1} /proc/net/dev 2>/dev/null`,
     "echo '##NETINFO'",
     // 인터페이스별 링크 속도(Mbit)와 상태. 속도를 못 읽으면 -1 → 파서가 null 로 다룬다.
     // v2.605(COL2605-01): 넷째 필드 = 물리 여부(`device` 링크가 있거나 bonding 마스터면 1, 아니면 0).
     //   tun/tap·veth·bridge 는 드라이버가 **고정 속도(tun 은 10Mb/s)** 를 보고해 사용률(%)이 거짓 100% 가 된다.
-    'for d in /sys/class/net/*; do n=`basename "$d"`; if [ "$n" = lo ]; then continue; fi; s=-1; if [ -r "$d/speed" ]; then s=`cat "$d/speed" 2>/dev/null || echo -1`; fi; st=`cat "$d/operstate" 2>/dev/null`; p=0; if [ -e "$d/device" ] || [ -d "$d/bonding" ]; then p=1; fi; echo "$n $s ${st:--} $p"; done',
+    'for d in /sys/class/net/*; do n=`basename "$d"`; if [ "$n" = lo ]; then continue; fi; s=-1; if [ -r "$d/speed" ]; then s=`cat "$d/speed" 2>/dev/null || echo -1`; fi; st=`cat "$d/operstate" 2>/dev/null`; p=0; if [ -e "$d/device" ] || [ -d "$d/bonding" ]; then p=1; fi; echo "$n $s ${st:--} $p"; done' + ` | head -n ${SECTION_LINE_CAP.NETINFO + 1} | cut -c1-128`,
     "echo '##FC'",
     // FC HBA — 속도 원문에 공백이 있어 `|` 로 구분한다.
-    'for d in /sys/class/fc_host/*; do if [ ! -d "$d" ]; then continue; fi; h=`basename "$d"`; ps=`cat "$d/port_state" 2>/dev/null`; sp=`cat "$d/speed" 2>/dev/null`; tx=`cat "$d/statistics/tx_words" 2>/dev/null`; rx=`cat "$d/statistics/rx_words" 2>/dev/null`; echo "$h|$ps|$sp|$tx|$rx"; done',
+    'for d in /sys/class/fc_host/*; do if [ ! -d "$d" ]; then continue; fi; h=`basename "$d"`; ps=`cat "$d/port_state" 2>/dev/null`; sp=`cat "$d/speed" 2>/dev/null`; tx=`cat "$d/statistics/tx_words" 2>/dev/null`; rx=`cat "$d/statistics/rx_words" 2>/dev/null`; echo "$h|$ps|$sp|$tx|$rx"; done' + ` | head -n ${SECTION_LINE_CAP.FC + 1} | cut -c1-512`,
     "echo '##TICK'", 'getconf CLK_TCK 2>/dev/null',
     "echo '##DF'", dfPart,
     "echo '##HOST'", 'uname -srn 2>/dev/null',
@@ -105,7 +123,8 @@ export function linuxCommand(mounts = []) {
     "echo '##END'",
   ];
   // ⚠ 총량 상한 — 넘치면 잘리고 ##END 가 오지 않는다(shapeLinux 의 truncated). stderr 는 예전처럼 따로 받는다.
-  return `{ ${cmds.join('; ')}; } | head -c ${OUTPUT_MAX_BYTES}`;
+  // ⚠ LC_ALL=C(반증 D8): 한국어 로캘이면 df 머리글이 번역되어 ##DF·##DFI 에 가짜 행이 생긴다 — 명령 전체를 C 로캘로.
+  return `export LC_ALL=C; { ${cmds.join('; ')}; } | head -c ${OUTPUT_MAX_BYTES}`;
 }
 
 /**
@@ -135,6 +154,22 @@ export function winCommand(script = WIN_PS) {
 export function shapeLinux(stdout, mounts = []) {
   const sec = splitSections(stdout);
   if (!Object.keys(sec).length) return null;              // 구획 표지 0개 = Linux 가 아니거나 셸이 다르다
+  /*
+   * v2.919(반증 D1): ① 출력이 잘렸으면(##END 미도착) **마지막 구획을 통째로 버린다** — 그 구획의 마지막 줄은 숫자 중간에서 잘렸을 수 있고
+   *   (io_ticks 149360 → 14), 그 값을 카운터로 쓰면 다음 주기 Δ 가 부풀어 가짜 100% 가 남는다. 버린 구획은 missing 이고 카운터는 빈 목록이라
+   *   `_prev` 에 들어가지 않는다(다음 주기는 첫 표본).
+   * ② 기존 구획의 줄 상한(명령이 상한+1 줄까지 보낸다) — 넘었으면 앞 상한 줄(온전한 줄)만 쓰고 그 구획을 ‘상한 도달’ 로 밝힌다.
+   */
+  const truncated = !Array.isArray(sec.END);
+  const cutSections = [];
+  if (truncated) {
+    const last = Object.keys(sec).at(-1);
+    if (last) { delete sec[last]; cutSections.push(last); }
+  }
+  const linesCapped = [];
+  for (const [name, cap] of Object.entries(LEGACY_CAPPED)) {
+    if (Array.isArray(sec[name]) && sec[name].length > cap) { sec[name] = sec[name].slice(0, cap); linesCapped.push(name); }
+  }
   /*
    * ⚠⚠ **'없는 것' 과 '못 읽은 것' 을 같은 칸에 넣지 말 것**(v2.526 Unity `REMOVED` 규약과 같은 유형).
    *   FC HBA 가 아예 없는 서버를 `missing:['hba']` 로 세면 화면이 '확인 불가 1건' 이라 말해
@@ -192,7 +227,7 @@ export function shapeLinux(stdout, mounts = []) {
     },
     // v2.919 — 순간값·튜닝 현재값(누적이 아니라 델타가 필요 없다)과 구획별 상태.
     perf,
-    truncated: !Array.isArray(sec.END),
+    truncated, cutSections, linesCapped,
     read, missing, absent,
   };
 }

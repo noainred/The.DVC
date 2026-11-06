@@ -42,12 +42,12 @@ export function buildPerfEntry({ row = {}, hw = null, th = {}, intervalMs = null
   const tuning = parseJsonCol(row.tuning_json);
   const freshMs = freshMsFor(intervalMs);
   const coverage = coverageOf({ osAt: row.os_at, idracAt: row.idrac_at, hwRead: !!hw?.read, now, freshMs });
-  const use = judgeUse({ row, detail, hw, coverage, th });
+  const use = judgeUse({ row, detail, hw, coverage, th, now, freshMs });   // v2.919(D4): 행 나이가 한계를 넘으면 stale
   const cross = crossJudge({ use, hw, coverage, th });
   const base = {
     key: String(row.key ?? ''), ts: n(row.ts),
     coverage, osAt: n(row.os_at), idracAt: n(row.idrac_at),
-    verdict: use.verdict, focus: use.focus, line: use.line, bottleneckCount: use.bottleneckCount,
+    verdict: use.verdict, focus: use.focus, line: use.line, bottleneckCount: use.bottleneckCount, read: use.read, rowStale: use.rowStale,
     counts: use.counts, codes: codesOf(use.cells), perResource: use.perResource,
     cross: cross.map(({ id, state, code }) => ({ id, state, code })),
     mismatch: use.mismatch,
@@ -67,3 +67,10 @@ export function buildPerfEntry({ row = {}, hw = null, th = {}, intervalMs = null
 
 /** 판정 칸 이름표(화면·문서용 — 열 ↔ USE 칸 대응을 응답으로 내려준다). */
 export const PERF_COL_META = Object.freeze(PERF_COLS.map(({ col, res, use, judged, unit, label }) => ({ col, res, use, judged, unit, label })));
+
+/** 성능 항목에서 목록용 필드만(근거·장치별·튜닝·하드웨어 사실은 상세에서) — 주 조회·엣지 목록·봉투 크기 상한이 같은 함수를 쓴다. */
+export function compactPerfEntry(p) {
+  if (!p || typeof p !== 'object') return p;
+  const { cells: _c, crossDetail: _x, values: _v, detail: _d, tuning: _t, hw: _h, ...rest } = p;
+  return rest;
+}

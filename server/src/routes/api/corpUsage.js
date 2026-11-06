@@ -44,12 +44,9 @@ export function mergeLatestRows(...lists) {
 }
 
 /** v2.682(R3S-01): 엣지 행 시각 clamp — 받은 시각(snapAt)보다 뒤면 받은 시각으로. 받은 시각을 모르면 원래 값(숫자만). 순수. */
-export function clampEdgeTs(ts, receivedAt) {
-  const v = numOrNull(ts);
-  const at = numOrNull(receivedAt);
-  if (v == null) return null;
-  return at != null && v > at ? at : v;
-}
+// v2.919: 본체는 util/clampEdgeTs.js(중앙 정제도 쓴다) — import 뒤 다시 내보낸다(`export { x } from` 은 이 스코프에 이름을 만들지 않는다 — v2.575).
+import { clampEdgeTs } from '../../util/clampEdgeTs.js';
+export { clampEdgeTs };
 
 /**
  * v2.629(A6-03): 엣지 보관분 행을 `에이전트소문자|key소문자` 로도 색인한다 — 서비스태그 없는 엣지 서버는 중앙 키와 엣지 키가

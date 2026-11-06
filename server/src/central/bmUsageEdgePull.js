@@ -109,7 +109,7 @@ function numMap(v) {
   }
   return out;
 }
-export function sanitizeBmUsageSnap(snap) {
+export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
   if (!isObj(snap)) return null;
   const node = isObj(snap.node) ? snap.node : {};
   const st = isObj(snap.settings) ? snap.settings : null;
@@ -121,7 +121,7 @@ export function sanitizeBmUsageSnap(snap) {
     for (const c of ROW_NUM_COLS) if (Object.hasOwn(rest, c)) rest[c] = numOrNull(r[c]);
     return { ...rest, key: strOf(r.key, 256), name: strOf(r.name, 256) };
   });
-  const pf = sanitizePerfFields(snap);
+  const pf = sanitizePerfFields(snap, receivedAt);   // v2.919(D3): 엣지 시각은 수신 시각으로 자른다
   const stops = objList(snap.authStops, (a) => ({ key: strOf(a.key, 256), path: strOf(a.path, 32), attempts: numOrNull(a.attempts), since: numOrNull(a.since), reason: strOf(a.reason, 300) }));
   const dropped = targets.dropped + rows.dropped + stops.dropped + pf.dropped;
   return {
