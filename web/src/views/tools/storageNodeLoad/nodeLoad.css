@@ -1,0 +1,104 @@
+/*
+ * 스토리지 장비 상세 › 노드 부하 추이(v2.926) — 전부 .nl 아래로만(전역 클래스를 바꾸지 않는다).
+ * 색은 기존 토큰 + 차트 규약의 계열색·단일 색조 램프(nodeLoadText.js 상수). text-transform 은 쓰지 않는다.
+ */
+.nl { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin: 4px 0 14px; padding: 12px 14px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); word-break: keep-all; }
+.nl .nl-muted { color: var(--text-dim); font-weight: 400; }
+.nl .nl-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.nl .nl-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.nl .nl-pill { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-deep); font-size: 11.5px; color: var(--text-dim); max-width: 100%; overflow-wrap: anywhere; }
+.nl .nl-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.nl .nl-segwrap { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.nl .nl-seglabel { font-size: 12px; color: var(--text-dim); }
+.nl .nl-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.nl .nl-seg button { height: 30px; padding: 0 10px; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-dim); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.nl .nl-seg button:first-child { border-left: 0; }
+.nl .nl-seg button.on { background: rgba(59,130,246,.22); color: var(--text); }
+.nl .nl-seg button:focus-visible, .nl .nl-btn:focus-visible, .nl .nl-colbtn:focus-visible, .nl .nl-heatname:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nl .nl-winrow { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--panel-deep); min-width: 0; }
+.nl .nl-winbtns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.nl .nl-btn { height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.nl .nl-btn:disabled { opacity: .5; cursor: not-allowed; }
+.nl .nl-btn.primary { border-color: #1d4ed8; background: #2563eb; color: #fff; font-weight: 600; }
+.nl .nl-slider { flex: 1 1 180px; min-width: 120px; accent-color: var(--accent); margin: 0; }
+.nl .nl-jump { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); min-width: 0; }
+.nl .nl-jump input { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; max-width: 100%; color-scheme: dark; }
+.nl .nl-note { font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; line-height: 1.55; }
+.nl .nl-banner { padding: 8px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.5; border: 1px solid var(--border-soft); background: var(--panel-deep); color: var(--text-dim); overflow-wrap: anywhere; }
+.nl .nl-banner.amber { border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.07); color: #fcd34d; }
+.nl .nl-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 8px; }
+.nl .nl-tile { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--panel-deep); min-width: 0; }
+.nl .nl-tile b { font-size: 19px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.nl .nl-tile .nl-muted { font-size: 11.5px; overflow-wrap: anywhere; }
+.nl .nl-tlabel { font-size: 11.5px; color: var(--text-dim); }
+.nl .nl-subhead { font-size: 12.5px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+.nl .nl-body { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+.nl .nl-main { flex: 999 1 460px; min-width: 0; }
+.nl .nl-side { flex: 1 1 220px; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--panel-deep); }
+.nl .nl-sidehead { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.nl .nl-heat { display: flex; flex-direction: column; gap: 2px; overflow-x: auto; min-width: 0; }
+.nl .nl-heatrow { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 0 8px; align-items: center; }
+.nl .nl-heatname { all: unset; box-sizing: border-box; font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.nl div.nl-heatname { cursor: default; }
+.nl button.nl-heatname:hover { color: var(--accent); }
+.nl .nl-heatcells { display: grid; gap: 1px; min-width: 0; }
+.nl .nl-heathead .nl-heatcells { align-items: end; height: 16px; }
+.nl .nl-coltick, .nl .nl-colbtn { font-size: 10.5px; color: var(--text-faint); font-family: var(--mono); white-space: nowrap; overflow: visible; line-height: 1; }
+.nl .nl-colbtn { all: unset; box-sizing: border-box; display: block; height: 16px; font-size: 10.5px; color: var(--text-faint); font-family: var(--mono); white-space: nowrap; overflow: visible; cursor: pointer; border-bottom: 2px solid transparent; }
+.nl .nl-colbtn:hover { border-bottom-color: var(--accent); color: var(--text); }
+.nl .nl-cell { display: block; border-radius: 2px; min-width: 0; }
+.nl .nl-cell.miss { background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.16) 3px 4px); outline: 1px solid var(--border); outline-offset: -1px; }
+.nl .nl-jobsrow { margin-top: 3px; }
+.nl .nl-job { display: block; height: 7px; border-radius: 2px; background: rgba(255,255,255,.05); }
+.nl .nl-job.on { background: #c98500; }
+.nl .nl-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 11.5px; color: var(--text-dim); margin-top: 4px; }
+.nl .nl-legend > i { display: inline-block; width: 14px; height: 9px; border-radius: 2px; margin-left: -8px; }
+.nl .nl-legend > i:first-of-type { margin-left: 0; }
+.nl .nl-legmiss { display: inline-flex; align-items: center; gap: 5px; }
+.nl .nl-legmiss .nl-cell, .nl .nl-legmiss .nl-job { width: 14px; height: 9px; display: inline-block; }
+.nl .nl-key { display: inline-flex; align-items: center; gap: 6px; }
+.nl .nl-key i { display: inline-block; width: 14px; height: 2px; }
+.nl .nl-rank { display: flex; flex-direction: column; gap: 5px; }
+.nl .nl-rankrow { display: grid; grid-template-columns: 52px minmax(0, 1fr) 92px; gap: 8px; align-items: center; font-size: 12px; }
+/* v2.935: 순위 행은 버튼(드로어) — 값 칸 92px('5,662 ops/s' 가 들어간다 · Chromium 1440 에서 48px 격자로 넘쳤던 것). */
+.nl .nl-rankbtn { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 52px minmax(0, 1fr) 92px; gap: 8px; align-items: center; font-size: 12px; cursor: pointer; padding: 2px 4px; border-radius: 6px; min-width: 0; }
+.nl .nl-rankbtn:hover { background: rgba(59,130,246,.12); }
+.nl .nl-rankbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nl .nl-track { display: block; height: 10px; }
+.nl .nl-track i { display: block; height: 10px; border-radius: 0 4px 4px 0; background: #3987e5; min-width: 2px; }
+.nl .nl-num { text-align: right; font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+.nl .nl-chart, .nl .nl-overlay { min-width: 0; }
+.nl .nl-tip { background: #0b1220; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 3px; max-width: 320px; }
+.nl .nl-tiprow { display: flex; align-items: center; gap: 8px; }
+.nl .nl-tiprow i { display: inline-block; width: 12px; height: 2px; }
+.nl .nl-tiprow b { font-weight: 600; min-width: 76px; }
+.nl .nl-multi { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: 8px; }
+.nl .nl-mcard { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--panel-deep); min-width: 0; }
+.nl .nl-mhead { display: flex; flex-direction: column; gap: 1px; font-size: 12px; min-width: 0; }
+.nl .nl-mhead .nl-muted { font-size: 11px; overflow-wrap: anywhere; }
+.nl .nl-msvg { width: 100%; height: 48px; display: block; }
+.nl .nl-full { grid-column: 1 / -1; }
+.nl .nl-picks { display: flex; flex-wrap: wrap; gap: 6px 12px; border: 1px solid var(--border-soft); border-radius: 10px; padding: 6px 10px 8px; margin: 0 0 6px; font-size: 12px; }
+.nl .nl-picks legend { padding: 0 4px; color: var(--text-dim); font-size: 11.5px; }
+.nl .nl-picks label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; min-height: 24px; }
+.nl .nl-picks label.off { opacity: .5; cursor: not-allowed; }
+.nl .nl-picks label i { display: inline-block; width: 12px; height: 3px; }
+.nl .nl-picks input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+/* ── v2.932(2차 ③) 노드 드로어 · 클라이언트 분포 ── */
+.nl .nl-drawer { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; border: 1px solid rgba(59,130,246,.35); border-radius: 10px; background: var(--panel-deep); min-width: 0; }
+.nl .nl-drawerhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; }
+.nl .nl-drawerhead .nl-close { margin-left: auto; }
+.nl .nl-tablewrap { max-height: 40vh; margin: 0; }
+.nl .nl-tablewrap td, .nl .nl-tablewrap th { font-size: 12px; white-space: nowrap; }
+.nl .nl-mono { font-family: var(--mono); font-size: 11.5px; }
+.nl td.nl-num { text-align: right; font-family: var(--mono); font-size: 11.5px; }
+.nl .nl-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; border: 1px solid rgba(59,130,246,.45); background: rgba(59,130,246,.15); font-size: 10.5px; line-height: 16px; color: var(--text); vertical-align: middle; }
+.nl .nl-badge.amber { border-color: rgba(245,158,11,.5); background: rgba(245,158,11,.12); color: #fcd34d; }
+.nl .nl-dist { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.nl .nl-skew { display: flex; flex-direction: column; gap: 5px; }
+.nl .nl-rowbtn { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 92px minmax(0, 1fr) 48px; gap: 8px; align-items: center; font-size: 12px; cursor: pointer; padding: 2px 4px; border-radius: 6px; min-width: 0; }
+.nl .nl-rowbtn:hover { background: rgba(59,130,246,.12); }
+.nl .nl-rowbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nl .nl-rowbtn.skew .nl-track i { background: #c98500; }
+.nl .nl-cands { margin: 0; padding: 0 0 0 18px; font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.nl .nl-sharecell { min-width: 44px; }

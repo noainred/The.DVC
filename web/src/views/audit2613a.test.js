@@ -281,6 +281,9 @@ describe('CATALOG2613-06/WEB2613-04: 도구 루트의 서브탭은 useHashTab �
     for (const f of walk(dir)) {
       const src = fs.readFileSync(f, 'utf8');
       if (!/^const VIEWS = \[/m.test(src)) continue;
+      // 예외(v2.923 — 명시): BmUsage.jsx 의 보기 전환은 v2.920 부터 localStorage 기억 + **자동 기본값**(성능 항목이 있으면 USE 매트릭스)이다.
+      // useHashTab 은 첫 렌더(데이터 전)의 fallback 을 해시에 굳혀 자동 기본값을 깨므로 옮기지 않았다(4단계에서 보기 2개를 더하며 VIEWS 상수가 생겼다).
+      if (path.relative(WEB, f) === path.join('views', 'tools', 'BmUsage.jsx')) continue;
       if (!/useHashTab\(\{ base: \['tools', '/.test(src)) bad.push(path.relative(WEB, f));
     }
     expect(bad).toEqual([]);

@@ -184,7 +184,8 @@ function narrowStorageSnapshotRest(d) {
 }
 import { recordActivity } from '../storage/activityLog.js';
 import { sanitizeEdgeResources } from '../storage/resources.js'; // v2.789
-import { saveCapacityPoint } from '../storage/db.js';
+import { saveCapacityPoint, saveNodeLoadPoint, saveNodeLoadSample } from '../storage/db.js';
+import { sanitizeNodeLoadSample, CLIENT_LIMIT_MAX } from '../storage/nodeLoad.js'; // v2.932(2차 ⑨)
 import { ackCollect, setCollectBaseResolver } from '../storage/collectRequests.js';
 
 const FILE = path.join(config.configDir, 'central-agent-storage.json');
@@ -261,6 +262,8 @@ export function saveEdgeStorage(agent, devices, info = {}) {
     // 여전히 엣지 DB). 같은 collectedAt 재push 는 위 dedup 이 걸러 중복 점이 쌓이지 않는다.
     // 실패 스냅샷은 saveCapacityPoint 가 자체 스킵(ok 만 적재 — 그래프 0값 오염 방지).
     saveCapacityPoint(dv).catch(() => { /* DB 비활성 — 스냅샷 보관·로그는 계속 */ });
+    // v2.926 — 노드 부하 시계열도 같은 자리(같은 중복 제거 뒤). 노드 값은 위 sanitizeNodeList(NODE_NUM_KEYS)를 거친 것이다.
+    saveNodeLoadPoint(dv).catch(() => { /* DB 비활성 — 스냅샷 보관·로그는 계속 */ });
     try {
       recordActivity({
         deviceId: key, name: dv.name || key, host: dv.host || '', source: agent,
@@ -283,6 +286,40 @@ function pruneLastRec() {
 }
 /** 테스트·진단용 — 중복 제거 Map 크기. */
 export function _lastRecSize() { return _lastRec.size; }
+
+/**
+ * v2.932(2차 ⑨) — 엣지가 storage push 본문에 실어 보낸 5분 표본 고리(`nodeLoadSamples: [{ deviceId, samples:[…] }]`)를 중앙 DB 에 적재한다.
+ *  · 소유권(중앙 직접 장비 거절 · 개별 토큰은 위임분만)은 라우트가 장비 목록과 같은 함수로 먼저 거른다 — 여기서는 모양·상한·정제만.
+ *  · 표본마다 `sanitizeNodeLoadSample`(아는 필드만 · 노드 64 · 클라이언트 상한 · 문자열 수치는 수로) + ts 는 수신 시각 이하로.
+ *  · 같은 (장비, ts) 는 DB PK 가 거른다(엣지 재전송 — duplicate 로 센다, 실패가 아니다). 뺀 것은 `dropped` 로 밝힌다(조용한 상한 금지).
+ *  · 적재는 표본마다 트랜잭션 1개(db.saveNodeLoadSample) — 장비 500 × 표본 6 상한이라 한 push 에 최대 3,000 개지만 실제는 장비당 ≤3.
+ */
+export const NODE_LOAD_SAMPLES_MAX_DEVICES = 500;
+export const NODE_LOAD_SAMPLES_PER_DEVICE = 6;
+export async function saveEdgeNodeLoadSamples(agent, list, { now = Date.now() } = {}) {
+  const out = { devices: 0, received: 0, saved: 0, duplicate: 0, dropped: 0 };
+  if (!Array.isArray(list)) return out;
+  for (const ent of list.slice(0, NODE_LOAD_SAMPLES_MAX_DEVICES)) {
+    if (!isPlainObj(ent) || !Array.isArray(ent.samples)) { out.dropped += 1; continue; }
+    const id = capStr(ent.deviceId, 128).trim(); // 글자·수만(객체·불리언은 '' — capStr)
+    if (!id) { out.dropped += 1; continue; }
+    out.devices += 1;
+    for (const raw of ent.samples.slice(0, NODE_LOAD_SAMPLES_PER_DEVICE)) {
+      out.received += 1;
+      const s = sanitizeNodeLoadSample(raw, { clientLimit: CLIENT_LIMIT_MAX, maxTs: now });
+      if (!s) { out.dropped += 1; continue; }
+      let r;
+      try { r = await saveNodeLoadSample(id, s); } catch { r = { saved: false, reason: 'db-error' }; }
+      if (r?.saved) out.saved += 1;
+      else if (r?.duplicate) out.duplicate += 1;
+      else { out.dropped += 1; if (r?.reason === 'db-unavailable') out.dbUnavailable = true; }
+    }
+    if (ent.samples.length > NODE_LOAD_SAMPLES_PER_DEVICE) out.dropped += ent.samples.length - NODE_LOAD_SAMPLES_PER_DEVICE;
+  }
+  if (list.length > NODE_LOAD_SAMPLES_MAX_DEVICES) out.dropped += list.length - NODE_LOAD_SAMPLES_MAX_DEVICES;
+  if (out.saved) console.log(`[central] storage-data: 엣지 '${String(agent).slice(0, 64)}' 노드 부하 표본 ${out.saved}개 적재(장비 ${out.devices} · 중복 ${out.duplicate} · 뺀 것 ${out.dropped})`);
+  return out;
+}
 
 /**
  * v2.581(BUG-D): 엣지의 상태 전용 보고 — 장비 목록(`devices`·`at`)은 그대로 두고 `status` 만 기록한다.

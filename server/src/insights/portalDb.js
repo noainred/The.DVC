@@ -89,6 +89,7 @@ const PURPOSES = {
   'capacity.db': '포탈 서버 자신의 리소스(CPU·메모리·디스크·네트워크) 샘플 — 리소스 적정성 진단용',
   'veeam-snap.db': 'Veeam 스냅샷 이벤트(생성·제거만 · 최근 31일) — vCenter 카드 백업 수량·VM 화면 Veeam 백업 시도를 바로 계산',
   'veeam-history.db': 'Veeam 일 단위 이력(라이선스 사용·만료 · 저장소 용량) 400일 — EM 탭 추이·소진 예측(v2.788)',
+  'gpu-alloc.db': 'GPU 할당율 일 단위 이력(법인별 용량 · 할당) 800일 — GPU 할당율 › 추이 · 소진 예상(v2.939)',
   'ping-monitor.db': '핑 모니터 응답/손실 시계열',
   'storage-history.db': '스토리지 장비(8종) 용량 이력',
   // ── v2.613 PERSIST2613-02: DB 위치 이전 대상(insights/dbLocation.js MIGRATABLE) 19개 중 13개가 여기 없어 '포탈 DB' 화면이
@@ -219,6 +220,12 @@ const DETAILS = {
     writer: '라이선스 감시(1시간마다 — B&R 결과의 라이선스) · Enterprise Manager 폴러(수집 직후 저장소 용량)',
     retention: '400일 · 청크 정리',
     note: '같은 날 다시 쓰면 그날 값을 갱신한다(이중 계수 없음). 이 파일이 없으면 추이만 비고 나머지 화면은 같다.',
+  },
+  'gpu-alloc.db': {
+    keeps: '법인(vCenter)별 GPU 용량 · 할당(켜진 VM) · GPU 장수 · 호스트 수 하루 한 점(alloc_daily).',
+    writer: 'GPU 할당 이력 수집기(1시간마다 — 스냅샷만 읽는다, vCenter 왕복 0)',
+    retention: '800일 · 청크 정리',
+    note: '용량·할당을 모두 아는 법인만 쌓는다(부분 합 금지). 같은 날 다시 쓰면 그날 값을 갱신한다. 이 파일이 없으면 추이만 비고 나머지 화면은 같다.',
   },
   'veeam-snap.db': {
     keeps: 'vCenter 이벤트 중 스냅샷 생성·제거 행만(snap_ev) · 백필 진행 기록(snap_meta) · 엣지가 보낸 Veeam 스냅샷 요약(snap_edge — 중앙).',

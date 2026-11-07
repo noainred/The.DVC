@@ -23,6 +23,8 @@
 - (원래 5857행) CLI 계정 관리 메뉴(v2.723) — `server/src/tools/user-admin.js` + 래퍼 `user-admin.sh` → 설치본 `sudo vmware-port
 - (원래 5877행) super_admin 은 '저장 역할' 이고 요청 문맥에서는 admin + `superAdmin:true` 다
 - (v2.912 추가) 로그인 기록(최근 로그인 · 로그인 횟수)은 감사 로그가 아니라 `security/loginHistory.js` 하나로 센다
+- (v2.923 추가) 베어메탈 진단 스냅샷(원격 명령 실행 경로) — 상수 명령 · 읽기 전용 · sudo 0 · 인자 0 · 사유 · 감사 · 동시 1건 · 법인당 하루 상한 · 범위 404/403 · 인증 가드
+- (v2.929 추가) 베어메탈 집중 모니터링(분마다 SSH · Redfish 를 여는 쓰기 경로) · 성능 알림 규칙 설정 · 시험 실행 — 스냅샷 규약 재사용 · 법인 상한 예약 · 인증 즉시 중단 · 설정 소유자 · 전체 범위
 
 ## 본문
 
@@ -389,6 +391,9 @@
      베어메탈 귀속은 서버 분석 범위 절단과 같은 함수(`idrac/corpAttribution.js idracServerVcOf`) — 사본을 만들지 않는다(반증 L-1).
   ⑥ 검색어에서 파생한 값(시리얼 정규화 등)은 **요청당 한 번**(반증 M-2 — 행마다 하면 조작한 254자 검색어가 5만 행에서 215ms). 색인 생성은 시간 기준 양보(createYielder).
   ④ 색인은 관리자 판본 하나를 30초 공유하고 범위 · 가림은 응답 때 건다(사용자별 색인 금지 — 캐시 키 실수로 새는 것을 막는다). 응답 캐시(memoJson)는 두지 않는다. 검색어 256자 상한(넘으면 아무것도 맞지 않음) · 정규식 없는 선형 일치.
+  ⑦ v2.928 — **VM 태그 · 사용자 지정 속성으로 찾기는 그 값이 보이는 화면(`vm-tags` 도구)을 쓸 수 있는 계정만**(`accessPlan.tagsSearchable` — tools ∧ `userToolAllowed('vm-tags')`, 아니면 태그 칸을
+     일치에서 뺀다 · 표지 `tags` 도 싣지 않는다). 메모(annotation)는 inv.vms 의 '메모 포함' 과 같은 값이라 vm 종류로 충분하지만 본문은 응답에 싣지 않는다(`_notes` 는 검색 키).
+     `recent=`(클라이언트가 보낸 최근 장비 id)는 **이미 보이는 행의 순서에만** 쓴다 — 행을 더하거나 범위 판정에 쓰지 않는다. 색인 실측(`index` · 전체 행 수)은 관리자 판본(∧ 전체 범위)에게만.
   회귀 `server/test/invSearch2909.test.js` 21건 · 변이 22건 중 21 잡음(살아남은 1건은 `visible()` 의 이중 방어 줄 — 동등 변이) · 반증 1인 결과와 조치는 docs/design/inventory-search/README.md §7.4.
 - **v2.912 — 로그인 기록(설정 › 로그 › 최근 로그인 · 로그인 횟수)은 감사 로그가 아니라 `security/loginHistory.js` 하나로 센다.**
   ① 감사 로그(`audit.ndjson`)는 모든 관리 작업과 함께 **줄 수 상한**(AUDIT_MAX)으로 잘린다 — 기간 집계(최근 1달 · 사용자 정의)에 쓰면 밀려난 로그인이 '0 회' 로 보인다.
@@ -406,3 +411,48 @@
   ③ 라우트가 감사 줄에 '무엇이 어떻게' 를 남기려면 `res.locals.auditDetail`(문자열)을 세운다 — `auditMiddleware` 가 같은 줄의 detail 로 싣는다.
      쓰기 경로를 AUDIT_SKIP 에 넣어 두 줄을 피하지 말 것(데모 계정 쓰기 차단이 그 목록을 '읽기성 POST' 로 본다).
   회귀 `server/test/featureUsage2913.test.js` · 웹 `web/src/usageTracker.test.js` · `web/src/views/featureUsageText.test.js` · 설계 `docs/design/feature-usage/`.
+
+- ⚠⚠ **v2.923 — 베어메탈 진단 스냅샷(`POST /api/tools/bm-usage/perf/:key/snapshot`)은 원격 명령 실행 경로다 — 규약 10개를 테스트가 하나씩 고정한다**
+  (`bmusage/snapshot/{command,run}.js` · `routes/api/bmUsage.js bmSnapshotRun · bmSnapshotRead` · `routes/collector.js /bm-usage/snapshot(s)` · `central/bmUsageEdgePull.js runEdgeSnapshot`.
+  회귀 `server/test/bmPerf2923Snapshot.test.js`(실제 api 라우터 + 엣지 collector 라우트 포함) · 변이 검증):
+  ① **명령은 상수 하나**(`SNAPSHOT_COMMAND` — 함수가 아니라 값). 서버 이름 · 키 · 주소 · 사유 · 실행자 · 설정값(상위 N · 줄 수)을 명령에 넣지 않는다 — 설정은 파서가 결과를 자를 때만 쓴다(테스트가 악성 이름 · 사유로 SSH 에 간 명령 === 상수를 대조 · `exec(` 인자 스윕).
+  ② **읽기 전용 · 대상에 파일을 쓰지 않는다** — /proc/<pid>/io 두 표본의 차이는 awk 메모리에서 계산(임시 파일 없음) · 리다이렉트는 /dev/null 만 · rm · kill · tee 0.
+  ③ **sudo · su · pkexec · doas 자동 시도 0**(소스 스윕) — 권한이 없으면 그 칸은 ‘권한 부족 · 확인 불가’(/proc/<pid>/io 읽힌 수 < 전체 · dmesg_restrict) — 0 으로 두지 않는다.
+  ④ **프로세스 인자 · 환경 0** — ps 는 comm · /proc/<pid>/comm 만(cmdline · environ 금지 — 인자에 비밀번호가 흔하다).
+  ⑤ **출력 상한 세 겹** — 구획마다 head/tail · cut · 전체 `head -c SNAPSHOT_OUTPUT_MAX`(256KB · sshExec 4MB 보다 훨씬 작게) · 파서 줄 수 · 길이 · 설정 상위 N. 잘리면(END 없음) 뒤 구획은 missing.
+     **보관 상한(64KB)** 은 `fitSnapshotResult` 가 큰 칸부터(커널 로그 오래된 줄 → iDRAC 문장 → ss → 프로세스 표) 덜어 맞추고 `trimmed` · `dmesgDropped` 로 밝힌다 — 예전에는 결과를 통째로 `{truncated}` 로 바꿔 다시 열면 전 칸이 ‘받지 못함’ 이었다(반증 R4).
+     **표지는 위조되지 않게**(반증 R6 — 수집 명령 R1 과 같은 규칙): 줄 머리 정확 일치 · `SNAPSHOT_SECTIONS` 순서에서 뒤의 표지만 · 재개방 금지 · 커널 로그 줄은 `d:` 접두. dmesg ‘권한 부족’ 은 dmesg 자신의 오류 줄(`dmesg:`)만 본다(반증 R5 — 커널 메시지 안의 ‘Permission denied’ 는 실제 오류).
+  ⑥ **권한**: 실행 = `writeRole`(operator 이상 — viewer 403) + tools · 조회 밖 404(존재 은닉) → **쓰기 범위 밖 403 무조건**(server/CLAUDE.md v2.733 함정 — 조회 무제한 + writeVcenters 계정) · 사유 2~300자 필수(400) ·
+     보관분 조회는 tools + 조회 범위(실행 권한과 다르다) · 실행자(by)는 관리자에게만 · 비관리자에게는 dmesg · ss · 이벤트 · 사유의 IPv4 를 가린다.
+  ⑦ **서버당 동시 1건**(실행 노드의 실행 중 집합 — 검사와 등록 사이에 await 없음 · 중앙 대행도 같은 키 중복 전송을 막는다 · 409) · **법인당 24시간 상한**(실행 노드 설정 `snapshot.dailyCorpMax` · 429) —
+     ⚠ 상한은 **보관 행 + 실행 중** 으로 센다(반증 R2: 같은 법인 서로 다른 서버 6대를 동시에 누르면 상한 2 에 6건이 돌았다). 법인별 실행 중 수를 **동기적으로 예약**하고, [세기 → 검사 → 예약] 과 [보관 행 쓰기 → 해제] 를
+     법인 잠금 안에서 한다(세기와 해제 사이 틈 없음 · SSH 는 잠금 밖) · 보관 목록 · 조회도 7일 밖 행은 내지 않고 폴러 주기 정리가 지운다(반증 R3 — 예전에는 실행할 때만 지웠다) ·
+     **보관 DB 를 못 열면 실행하지 않는다**(상한을 셀 수 없다 — 503). 실패한 시도도 보관 · 상한에 센다(SSH 세션을 열었으므로).
+  ⑧ **SSH 는 공용 경로** — `withSsh`(호스트키 확인 S-01) + `withDeadline`(세션 시한 50초 > 연결 15 + 명령 30 — 시한이 세션을 실제로 끊는다) · 인증 실패는 **주기 수집과 같은 가드 · 같은 식별자**에 기록(`poller.recordOsAuthOutcome` — 계정 잠금 방지) ·
+     성공은 정지를 푼다 · 수동 실행은 정지 중에도 막지 않는다(규칙 3 — 결과가 ‘정지 상태였다’ 를 말한다) · 호스트키 거부 · 시한은 인증 실패가 아니다.
+  ⑨ **감사 로그** — 중앙 `bm-usage.snapshot`(실행자 · 사유 · via · code · id) · 엣지 `중앙 대행 진단 스냅샷`(central-portal:<계정 — 글자 제한>). 사유 · 실행자는 명령에 들어가지 않는다.
+     사유는 `cleanReason` 이 C0 · C1 제어 · 양방향 제어(U+202A~202E · U+2066~2069 — 감사 화면 글자 순서 뒤집기) · 폭 없는 문자를 뺀다(반증).
+     (기록 — 반증 E) 이 쓰기 경로는 감사가 두 줄이다: `auditMiddleware` 의 자동 줄 + 라우트의 `logAudit`(무엇이 · 어떻게). 같은 파일 port-map · purpose 와 같은 기존 패턴이라 고치지 않았다 · ip 는 `req.ip`(기존 패턴).
+  ⑩ **엣지 대행 계약** — 같은 url · 같은 토큰(tokenFirst + 4kb 파서) · POST 재전송 0(retries 0) · 엣지는 자기 대상 목록 밖 키를 not-found · 업무 결과는 200 + code(중앙이 HTTP 로 옮긴다) · 중앙 정제 `sanitizeSnapshotBody`(아는 필드 · 상한 · enum 밖 code/상태 차단) ·
+     결과는 엣지 7일 보관 · 중앙은 받기만(복제 적재 없음) · 다른 서버 키로 id 를 읽지 못한다.
+  iDRAC 쪽은 명령이 아니라 **이미 가진 값**(인벤토리 SEL/LC 최근 5 · 센서 순간값 · 전력 최신 — Redfish 호출 0). 튜닝 탭에는 **쓰기 경로 자체가 없다**(sysctl -w · tuned-adm profile · ethtool -G 0 — 소스 스윕).
+  ⑪ **GET 에 writable**(반증 W4 — server/CLAUDE.md v2.733): 보관분 목록 · 용도 보기 응답에 쓰기 범위(`inUserWriteScope`)를 싣고 화면이 실행 · 태그 칸을 잠근다(서버는 그대로 403). 응답 캐시 키(opsKey)에 **쓰기 범위 서명**을 넣었다 — 조회 범위 · 역할이 같고 쓰기 범위만 다른 두 계정이 캐시를 나누면 writable 이 샌다.
+  ⑫ **덮어쓰기 scope(반증 R10)**: `PUT /tools/bm-usage/tuning/overrides` 의 scope 는 'all' 또는 vCenter id 형식이면서 Object.prototype 이름이 아닌 것만 · 맵은 null 프로토타입 · 읽기는 Object.hasOwn — 예전에는 ‘toString’ 이 ok:true 인데 저장되지 않고 전역 내장 함수 객체를 고쳤다(재현).
+- ⚠⚠ **v2.929 — 베어메탈 집중 모니터링(`POST /api/tools/bm-usage/perf/:key/focus` · `/focus/:id/stop`)은 분마다 SSH · Redfish 를 여는 쓰기 경로다 — v2.923 스냅샷 규약을 그대로 쓰고, 넘는 부분만 더했다**
+  (`routes/api/bmPerfOps.js bmFocusStart · bmFocusStop` · `bmusage/focus/run.js` · `routes/collector.js /bm-usage/focus[/stop]` · `central/bmPerfOpsPull.js runEdgeFocus · stopEdgeFocus`.
+  회귀 `server/test/bmPerf2929Focus.test.js`(실제 api 라우터 + 엣지 collector 라우트) · `bmPerf2929Alerts.test.js ⑥` · 변이 20건 전부 잡힘):
+  ① **권한**: 시작 · 중지 = `writeRole`(operator 이상) + tools · 조회 밖 404 → **쓰기 범위 밖 403 무조건**(v2.733 함정) · 사유 2~300자 필수(400 — `snapshot/reason.js cleanReason` · 제어 · 양방향 · 폭 없는 문자 제거) ·
+     감사 `bm-perf.focus`(사유 · via · code · id) · `bm-perf.focus.stop` · 엣지 쪽 `중앙 대행 집중 모니터링`(central-portal:<계정 — 글자 제한>). 사유 · 실행자는 명령에 들어가지 않는다.
+  ② **명령은 상수**: 1분 = 주기 수집 명령(`linuxCommand` — 마운트 화이트리스트만 삽입) + `FOCUS_SNAPSHOT_COMMAND`(상수 · 읽기 전용 · ps comm 만 · sudo 0 · 출력 16KB) — 같은 SSH 세션(`extraCommands` — 세션을 더 열지 않는다).
+  ③ **동시성 · 부하 상한**: 서버당 1세션 · 법인당 동시 상한(기본 5 — **실행 중 + 예약을 동기적으로 세고 예약** · 넘치면 대기열) · 전역 슬롯 공유 · 세션 시한 50초(`withDeadline` 이 세션을 끊는다) ·
+     자동 집중은 법인 옵트인 + 하루 상한(10) + 같은 서버 재발 억제 30분 · 인증 정지 계정이면 자동 시작 0.
+  ④ **인증 거부는 그 분에서 즉시 중단** — 다음 분을 예약하지 않는다 · 주기 수집과 **같은 가드 · 같은 식별자**에 기록(자동 재시도 0 — 계정 잠금). ⚠ 반증 F11 정정: 초판은 ‘수동은 정지 중에도 막지 않는다(스냅샷 규칙 3 과 같다)’ 였지만 스냅샷에는 법인당 하루 상한이 있어 시도 수가 묶였고 집중에는 없었다 —
+     누를 때마다 정지된 계정으로 로그인 1회(계정 잠금 경로). 이제 **수동도 정지된 계정이면 거부**(`auth-stopped` · 어느 경로가 정지인지 · 이유 문구) + **법인당 하루 수동 상한**(`daily.manualFocus` 기본 20 — `daily-cap` 429 ·
+     처음 한 번 DB 에서 세고 그 뒤는 동기 증가: 동시 요청도 한 번만 통과).
+  ⑤ **엣지 대행 계약** — POST 재전송 0(retries 0) · 같은 토큰(tokenFirst + 4kb 파서) · 엣지는 자기 대상 목록 밖 키를 not-found · 업무 결과 200 + code · 중앙 정제(`sanitizeFocusBody` — 아는 필드 · enum · 상한 · 시각 clamp) ·
+     구버전 엣지(경로 없음 401 · 404)는 `old-version`(문구의 최소 버전은 릴리스 노트에서 읽는다 — `perfOpsMinEdgeVersion` · edge.md v2.929 · 판정은 경로 존재).
+  ⑧ **엣지 봉투의 법인 · 키 · 제목은 신뢰하지 않는다**(반증 F9 — edge.md v2.929): 이슈 · 알림 이력 범위는 중앙이 정한 법인(파트 장애 자동 등록과 같은 함수) · 그 엣지 대상 목록 밖 키는 버림 · 제목은 code 로 다시 만든다.
+  ⑥ **알림 규칙 설정(`PUT /tools/bm-usage/perf-rules`)** = admin + `requireSettingsOwner`(소유자 ∧ 전체 범위) + tools · 형식 밖 400(모르는 규칙 · 채널 · Object.prototype 이름 거부) · 감사 `bm-perf.rules`(켠 규칙 요약 · 비밀 없음).
+     읽기는 tools — 범위 계정은 **자기 법인 예외 · 자기 법인 발송 기록만**(비관리자는 주소 가림 · 제목의 IPv4 가림) · 채널 URL 은 싣지 않는다(기존 알림 채널 설정의 사본만 쓴다).
+  ⑦ **시험 실행(`POST /perf-rules/dry-run`)** = admin + **fullScopeOnly**(이 노드 전 서버를 대 본다 — 이름 · 법인이 실린다) + tools · 보내지 않고 상태도 바꾸지 않는다. (archScan `route-gate-missing` 이 이 게이트 누락을 잡았다.)
+

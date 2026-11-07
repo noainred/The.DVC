@@ -766,7 +766,7 @@ export function unassignedNote(info = null) {
  * 이 표 최악의 거짓이다. 이유를 **순서대로** 말한다(v2.552 `rowState` 와 같은 규약).
  * @returns {{state:string, label:string, why:string, tone:string}}
  */
-export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60_000, now = Date.now() } = {}) {
+export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60_000, now = Date.now(), canEnableCentral = false, offWhy = '' } = {}) {
   const at = n(row.snapAt);
   const att = row.lastAttempt || null;
   if (row.enabled === false) return { state: 'off-central', label: '중앙에서 비활성', why: '중앙에서 이 수집 서버를 비활성으로 두었습니다 — 켜야 가져올 수 있습니다.', tone: 'idle' };
@@ -782,7 +782,21 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
     };
   }
   if (row.enabledOnEdge === false) {
-    return { state: 'off-edge', label: '엣지에서 꺼짐', why: '그 엣지에서 베어메탈 사용률 수집이 꺼져 있습니다 — 그 법인 포탈에서 켜야 값이 생깁니다(중앙에서는 켤 수 없습니다).', tone: 'warn' };
+    /*
+     * v2.927 정정: v2.627 부터 중앙이 엣지 설정을 내려줄 수 있고, v2.927 '중앙에서 켜기' 로 한 엣지만 켤 수 있다 — 예전 문구 '중앙에서는 켤 수
+     *   없습니다' 는 사실과 달랐다. 버튼을 쓸 수 있는 사람(전체 범위 관리자 · 중앙 · 그 엣지가 전체 배포·제외에 묶이지 않음)에게만 버튼을 말한다.
+     */
+    // 반증 F7: 그 노드가 엣지가 아니면(중앙·단독 — 배포 인출 워커가 없다) 중앙 켜기는 닿지 않는다 — 노드 역할은 서버가 보관분에서 판정해 준다(nodeRole).
+    if (row.nodeRole === 'central') return { state: 'off-edge', label: '그 노드에서 꺼짐', tone: 'warn', why: '그 노드에서 베어메탈 사용률 수집이 꺼져 있습니다 — 이 노드는 엣지가 아닙니다(중앙·단독 — 배포를 받지 않습니다). 그 포탈의 베어메탈 사용률 설정에서 직접 켜세요.' };
+    const base = '그 엣지에서 베어메탈 사용률 수집이 꺼져 있습니다 — ';
+    return { state: 'off-edge', label: '엣지에서 꺼짐', tone: 'warn',
+      // offWhy — 관리자 화면이 배포 현황으로 아는 더 정확한 사유(중앙 켜기 저장됨 · 전체 배포가 끔 — bmUsageDistText.edgeOnView). 완결된 문장이다.
+      why: offWhy ? String(offWhy)
+        : canEnableCentral
+          ? `${base}**중앙에서 켜기** 버튼으로 켤 수 있습니다(그 법인 포탈에서 켜도 됩니다).`
+          : row.nodeRole === 'edge' || row.nodeRole == null
+            ? `${base}관리자가 중앙에서 켜거나 그 법인 포탈에서 켭니다.`
+            : `${base}이 노드의 역할을 확인할 수 없어 중앙 켜기를 제공하지 않습니다 — 그 법인 포탈에서 켭니다(보관분에 노드 역할이 없습니다).` };
   }
   const old = now - at > staleMs;
   if (att && !att.ok) {

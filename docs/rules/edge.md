@@ -26,6 +26,8 @@
 - (원래 4860행) 아키텍처 점검(v2.614) — 포탈 점검 3번째 서브메뉴. 운영 포탈이 자기 라우터 스택·카탈로그·표·파일을 스스로 판정한다
 - (v2.793) VM 백업 센터 법인 위임 — 엣지 위임 vCenter 의 백업은 담당 엣지가 실행한다. 중앙은 정의·화면·이력만
 - (v2.826) 엣지 개별 토큰 자동 적용 — 옛 판 엣지는 401 이고 아무것도 받지 않는다. 전달할 통로가 없으면 발급하지 않는다
+- (v2.927) 중앙 → 엣지 설정 배포에 엣지별 지시를 더할 때 — 엣지 코드를 바꾸지 않으려면 받는 쪽이 채우는 기본값까지 계산에 넣는다
+- (v2.929) 베어메탈 성능 5단계 엣지 대행 — 집중 · 변경 · 띠 · 비교는 볼 때 pull, 봉투에는 요약만 · 판정 · 발송은 엣지 · 이슈는 중앙이 당길 때 · 구버전은 경로 존재로 구분
 
 ## 본문
 
@@ -677,9 +679,10 @@
   · **적용과 겹치지 않는다**: 확인·적용 중이면 동기화는 `skipped`, 적용은 진행 중인 동기화 `inflight` 를 기다린 뒤 자기 push 를 한다(같은 엣지에 두 번들을 동시에 올리지 않게).
     둘 다 `pushConcurrencyOf()`(기본 4)로 민다.
   · 상태 코드(`EDGE_SYNC_STATES`·`EDGE_SYNC_OUTCOMES`)는 서버, 문장은 웹(`EDGE_STATE_TEXT`·`SYNC_OUTCOME_TEXT`) — 웹 테스트가 서버 소스와 1:1 대조한다. 코드를 더하면 둘 다.
-    동기화 기록은 메모리뿐이다(재시작 전 기록은 지어내지 않는다 — 화면이 '기동 2분 뒤 첫 실행' 이라 말한다). 엣지별 push 결과는 수집 서버 상태 `upgrade` 에 남는다.
-  · ⚠ 정직 기록: `UPGRADE_EDGES`(upgrade.json edges — `/api/upgrade/bundle` 로 받는 옛 방식)는 버전을 보고하지 않아 동기화 대상이 아니다(적용 직후 1회 push 만 — 예전과 같다).
-    실제 WAN 엣지로는 확인하지 못했다(가짜 수집 서버 + 실제 서명 번들로 push 경로를 돌렸다).
+    ~~동기화 기록은 메모리뿐이다~~ → ✅ **v2.865 A 에 해결**(upgrade-status.json `lastEdgeSync` · 재시작 뒤 '재시작 전 기록'). 연속 실패 수·알린 사실도 ✅ **v2.938**(`edgeSyncState`). 엣지별 push 결과는 수집 서버 상태 `upgrade` 에 남는다.
+    (v2.938 정정 — 이 줄은 v2.865 에서 고친 뒤에도 정정하지 않은 채 남아 있었다.)
+  · ~~`UPGRADE_EDGES`(옛 방식)는 동기화 대상이 아니다~~ → ✅ **v2.865 B 에 해결**(`/api/health` 버전 질의 · `pushBundleToEdge` — 아래 v2.865 절). v2.938 정정(고친 뒤 정정하지 않았다).
+    실제 WAN 엣지로는 확인하지 못했다(가짜 수집 서버 + 실제 서명 번들로 push 경로를 돌렸다) → v2.938 부터 **포탈 점검 › 법인별 실환경 확인**의 '엣지 업그레이드 push' 칸이 법인마다 실제 수신 기록으로 확인한다.
   · **v2.865 후속(사용자 선택 A·B·C·D — '프로그램 개선', 회귀 `server/test/edgeAutoUpgrade2865.test.js`)**:
     A. 동기화 기록은 `upgrade-status.json` 의 `lastEdgeSync` 로 남는다(`autoState.sanitizeEdgeSync` 쓰기·읽기 공용 · runner `onRun` 훅 → manager `#save`) — 재시작 뒤
        `restored:true` 로 되살리고 모르는 결과 코드는 'error' 로 읽는다(화면 '재시작 전 기록'). 되살림 표지는 파일에 쓰지 않는다.
@@ -690,7 +693,7 @@
     C. `POST /api/upgrade/edge-sync`(관리자·전체 범위 · 꺼져 있으면 409 · 감사 로그)가 같은 `run()` 을 부른다(단일 진행 — 주기 실행과 겹치면 같은 약속). 업그레이드 화면 '지금 동기화' ·
        수집 서버 화면 '구버전 엣지 밀어 넣기'(한 줄 상태는 `GET /admin/collectors` 의 `edgeSync`). ⚠ 수집 서버 화면의 기존 '지금 동기화' 는 pull 이다 — 이름을 겹치지 않게 했다.
     D. 같은 엣지가 같은 대상 버전으로 **백오프 상한(6시간)에 닿을 만큼 연속 실패**(10분 주기면 7번째)하면 `alerts.js notify` 로 한 번 알리고(key `edgesync:<id>|<버전>`), 그 뒤
-       성공하면 `:close` 로 해소를 한 번 알린다(`edgeSyncAlert` 순수 — 백틱·별표 없음). 알린 사실은 메모리뿐 — 재시작하면 연속 실패 수가 0 부터라 같은 장애를 한 번 더 알릴 수 있다(정직 기록).
+       성공하면 `:close` 로 해소를 한 번 알린다(`edgeSyncAlert` 순수 — 백틱·별표 없음). ~~알린 사실은 메모리뿐~~ → ✅ **v2.938 해결**: 연속 실패 수·알린 사실을 upgrade-status.json `edgeSyncState` 로 재시작을 넘긴다(`persistState`·`restoreState` · 백오프도 이어진다 — 회귀 `edgeSyncPersist2938`).
        알림 발송이 던져도 동기화는 계속된다.
 - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
   (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
@@ -790,3 +793,34 @@
     같은 경로(`pushUpgradeToCollectors` — 서명 manifest 포함) · 새 판(최소 2.776.0 이고 번들 판을 알면 그 이상)을 **확인한 뒤에만** 발급한다.
     시한(`UPGRADE_WAIT_MS`) 안에 못 보면 발급하지 않고 멈춘다. 판을 모르면(pull 상태 없음) 업그레이드하지 않고 통로를 직접 시도한다.
   - 웹 `edgeTokenSyncText.js MIN_EDGE_API_VERSION` 과 `web/src/cmpVersion.js` 는 서버 값·규칙의 사본 — 서버 테스트가 대조한다. 판을 모르면 null(낮다고 보지 않는다).
+
+- **중앙 → 엣지 설정 배포에 엣지별 지시를 더할 때(v2.927 베어메탈 사용률 '중앙에서 켜기') — 엣지 코드를 바꾸지 않으려면 받는 쪽이 채우는 기본값까지 계산에 넣는다**
+  (`bmusage/settings.js` perEdge 절 · `bmusage/edgeCorps.js` · 회귀 `server/test/bmUsageEdgeOn2927.test.js` — 실제 centralRouter + 실제 엣지 인출 워커).
+  - 받는 쪽(2.627~ 엣지)이 본문을 `normalizeSettings` 로 정규화한 뒤 배포 키 **전부**를 덮는다 — 일부 키만 보내면 빠진 키가 엣지에서 **기본값**이 된다. 엣지별 판도 배포 키 전부를
+    보내고, 그 부작용(주기·보존·경로·알림이 중앙 값)을 화면이 값과 함께 말한다. 새 필드(`mode`)는 구버전 엣지가 읽지 않는 추가 필드로만 싣는다.
+  - 엣지별 판(그 엣지 법인이 실린 설정)은 **개별 토큰으로 인증된 이름에만** 내준다 — 공유 토큰 `?agent=` 는 이름을 증명하지 못한다(v2.589 규약). 거절 사유는 엣지 상태에 남는다.
+  - ⚠⚠ **엣지가 받을 값을 인출 때 다시 계산하지 말 것**(반증 F2 — 실측): 중앙 상태(법인 매핑 — 스냅샷 관측 · fleet 캐시)는 점검중 · push 전 · TTL 만료 · 중앙 재기동에 순간적으로
+    비고, '없음' 으로 답하면 엣지가 사본을 지워 수집이 꺼진다. 관리자가 확인한 값을 **저장 때 확정**하고 인출은 그것을 그대로 보낸다. 지금 계산이 저장 값과 다르면 화면이
+    '다시 확인' 을 받는다(조용히 바꾸지도, 끄지도 않는다). 계산이 필요하면 디스크 원천(등록부 · 위임 인벤토리 소유)을 먼저 본다.
+  - 엣지별 지시는 **그 노드가 배포를 받는 엣지일 때만** 준다(반증 F7) — 수집 서버 등록부에는 중앙·단독 노드도 올라온다. 노드가 보고한 역할(보관분 `node.role`)로 판정한다.
+  - 엣지별 지시의 **해제는 등록부와 무관하게** 된다(반증 F1) — 토큰 폐기로 이름이 등록부에서 빠지면 지시를 지울 길이 없고, 같은 이름으로 재발급하면 바로 다시 받는다.
+  - '적용됨/대기' 는 **그 엣지에 실제로 보낼 판의 서명**과 비교한다 — 엣지마다 판이 다르면 전역 서명 하나로는 영원히 '대기' 다.
+- ⚠⚠ **v2.929 — 베어메탈 성능 5단계의 엣지 대행: 판정 · 발송 · 보관은 수집 노드(엣지), 중앙은 요약을 봉투로 받고 상세는 볼 때 당긴다**
+  (`routes/collector.js` `POST /bm-usage/focus` · `POST /bm-usage/focus/stop` · `GET /bm-usage/focus` · `GET /bm-usage/changes|baseline|compare` — tokenFirst · 본문 4kb · 자기 대상 목록 밖 키는 not-found ·
+  `central/bmPerfOpsPull.js` · `bmusage/edgePull.js`(봉투) · `central/bmPerfSanitize.js` · `dataflow/build.js` 분류. 회귀 `bmPerf2929Focus.test.js ⑥ · 구버전`):
+  - **봉투에는 요약만**: `focusSummary`(세션 요약 — 상세 표본 없음) · `perfAlertSent`(최근 24시간 발송 기록) · 행의 `health`(소모품 칸 code · since). 집중 표본 · 변경 이벤트 · 띠 · 비교는 화면이 볼 때 엣지에서 당긴다.
+    ⚠ 새 필드는 중앙 정제 화이트리스트에도(`bmPerfSanitize healthOf` · `sanitizeFocusSummary` · `sanitizeAlertSent` · `sanitizeChangesBody|BaselineBody|CompareBody` — 아는 필드 · enum · 상한 · 시각은 수신 시각으로 clamp).
+  - **POST 는 재전송 0**(retries 0 — 시작이 두 번 가면 세션이 두 개) · GET 은 1회 재시도. 업무 결과는 200 + code(중앙이 HTTP 로 옮긴다).
+  - **구버전 엣지 구분은 경로 존재**: 옛 엣지의 collector 라우터에 없는 경로는 사용자 인증 미들웨어로 떨어져 401(`missing401` — v2.736 edgePull 규약) 또는 404 → `old-version`. 문구에 적는 최소 버전은 **손으로 맞추는 상수가 아니다**(반증 F15 — 예정 번호 2.929.0 이 다른 기능의 게시 번호와 겹쳐 2.929~2.933 엣지에 거짓 안내가 될 뻔했다):
+    `central/bmPerfOpsPull.js perfOpsMinEdgeVersion()` 이 `server/src/release-notes.json` 에서 제목에 ‘리눅스 통합 성능 모니터링 5단계’ 가 든 가장 낮은 게시 번호를 읽어 메모한다(없으면 = 지금 package.json 번호).
+    대조 테스트 `server/test/bmPerfMinEdgeVersion2929.test.js`(main 의 bmUsageMinEdgeVersion2933 과 같은 꼴 — 노트가 있으면 같음 · 없으면 package.json 과 같음). 다른 세션이 계속 릴리스해 번호가 밀려도 코드 수정이 필요 없다.
+  - **알림 판정 · 발송은 엣지**(그 엣지의 규칙 파일 — 중앙에서 엣지로 배포하지 않는다: 다음 판). 엣지의 발송 기록 중 이슈 대상은 **중앙이 사용률을 당길 때**(`pullBmUsage` → `ingestEdgeAlertIssues`) 중앙 문지기가 만든다 —
+    중앙이 그 엣지를 당기지 않으면 이슈도 생기지 않는다(정직 기록). 같은 발송 건은 id(`<agent>:<id>`)로 한 번만.
+  - ⚠⚠ **엣지 봉투의 법인 · 서버 키 · 제목을 그대로 쓰지 않는다**(반증 F9 — 대상이 `TAG-A1@vcA` 하나뿐인 엣지가 `vcB` · 남의 키 · URL 섞인 제목으로 vcB 의 p1 이슈를 만들 수 있었다):
+    `centralizeEdgeSent` 가 ① 서버 키는 **같은 봉투의 그 엣지 대상 목록(snap.targets)** 에 있는 것만(밖이면 버리고 dropped 로 센다) ② 법인은 **중앙이 정한다** — 파트 장애 자동 등록과 같은 함수
+    `issues/autoCreate.js resolveIssueVcenter`(서비스 태그 → ESXi 호스트 vCenter · 아니면 대상이 말한 법인이 **그 엣지가 담당하는 vCenter 일 때만** · 아니면 담당이 하나일 때만 · 아니면 공용) ·
+    ③ 제목 · 이름은 중앙이 code 로(규칙 이름 + 대상 이름 — URL 제거 · 상한). 규칙 화면의 ‘알림 이력’ 범위도 이 중앙 법인으로 가른다(엣지 vcenterId 로 가르지 않는다). 회귀 Alerts F9(실제 sanitizeBmUsageSnap → ingest → 이슈 저장소).
+  - **이슈 중복 원천은 받은 발송 건**(반증 F2 · F3 · F12): 엣지 봉투는 24시간 기록을 매번 다시 싣는다 — 같은 묶음 안 같은 열쇠는 이슈 하나 + 댓글 · 이슈 출처에 그 열쇠로 받은 가장 늦은 시각(`lastAt` · 같은 ms 의 id `lastIds`)을 두어
+    밀려난 partKeys(64개 상한) id 가 ‘새 건’ 이 되지 않게 · 중복 판정은 **닫힌 이슈 포함**(같은 건으로 되살리지 않는다 — 닫힌 뒤 **새** 발생은 새 이슈: 다른 알람 · 파트 장애와 같은 ‘열린 이슈면 댓글’ 규약) ·
+    하루 상한은 **법인별**(F7 — 예전에는 전 법인 합계).
+

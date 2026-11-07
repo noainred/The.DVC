@@ -27,6 +27,7 @@ import { listJobsOf, getJob, addRestore, inBatch, restoreOpen, restoreHeld, rest
 import { jobDirectorId, directorById, directorConn, directorCred } from './settings.js';
 import { bulkRestorePlan, reservedRestoreNames, inventoryAtOf, BULK_RESTORE_MAX } from './restore.js';
 import { onDirector, effectiveSettings, isEdgeNode, isDemoActive, bareosAuthGuard } from './service.js';
+import { lateRestores } from './lateReplies.js'; // v2.938: 엣지 대행 늦은 회신 반영(제안 6번 — 원장만 · 복구 순서 항목은 '결과 모름' 그대로)
 import { SESSION_DEAD } from './ops.js';
 import { drItemIssue, drGateBlock } from './drPlan.js';
 import { pluginValueIssue } from './names.js';
@@ -368,7 +369,7 @@ async function step(run, now) {
     }
     noteRestoreBatchStart(batchId, `재해 복구 ${wave.name} ${ready.length}대`);
     let out = null; let err = null;
-    try { out = await onDirector(dirId, 'restores', { items: sendItems }, { trigger: 'dr', signal: AbortSignal.timeout(RESTORES_DEADLINE_MS) }); } catch (e) { err = e; } finally { noteRestoreBatchEnd(batchId); }
+    try { out = await onDirector(dirId, 'restores', { items: sendItems }, { trigger: 'dr', signal: AbortSignal.timeout(RESTORES_DEADLINE_MS), onLate: lateRestores(ready.map(({ it }) => ({ jobId: it.id, batchId }))) }); } catch (e) { err = e; } finally { noteRestoreBatchEnd(batchId); }
     const rec = (it, p, extra) => addRestore(it.id, { mode: 'newVm', target: p.plan.target, by: run.by, client: sendItems[ready.findIndex((x) => x.it === it)].client, batchId, nic: 'disconnect', dr: true, drRun: run.id, ...(wave.verify ? { verify: true, deleteOnOk: false } : {}), ...extra });
     // VM 마다 감사(묶음 복원 라우트와 같은 결 — 버그 점검 B1-05 · B2-02: 결과 모름 · 보내기 오류가 감사에 남지 않았다)
     const auditVm = (it, what) => logAudit({ user: run.by, action: 'Bareos 재해 복구', target: `${run.vcenterId}/${it.vmName || it.id}`, detail: clip(`복구 순서 ${run.id} · ${wave.name} · 묶음 ${batchId} · ${what}`, 600) });

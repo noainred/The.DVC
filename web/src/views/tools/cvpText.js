@@ -284,6 +284,8 @@ export const ITEM_LABEL = {
   // v2.641 추가 항목
   enrich: '장비 상태(레거시 인벤토리)', lifecycle: '수명주기(EOL)', bugs: '버그·CVE 노출', events: '이벤트', eventsCapped: '이벤트 상한',
   cpu: 'CPU', memory: '메모리',
+  // v2.924 추가 항목(호스트 업링크 매칭 근거)
+  lldp: 'LLDP 이웃', fdb: 'MAC 테이블',
 };
 export const itemLabel = (k) => ITEM_LABEL[k] || String(k);
 
@@ -585,7 +587,8 @@ export function serverPayload(f, { isNew = false } = {}) {
 /** 설정 폼 → PUT 본문. 빈 칸은 보내지 않는다(blankOr) — 서버가 이전 값을 유지한다. */
 export function settingsPayload(f) {
   // v2.640 ③: 알림 스위치 둘(불리언 — 빈 칸 규칙 대상이 아니다). faultAlertsClosed 는 체크 해제가 곧 false.
-  const out = { enabled: !!(f && f.enabled), faultAlerts: !!(f && f.faultAlerts), faultAlertsClosed: !(f && f.faultAlertsClosed === false) };
+  const out = { enabled: !!(f && f.enabled), faultAlerts: !!(f && f.faultAlerts), faultAlertsClosed: !(f && f.faultAlertsClosed === false),
+    endpointScan: !(f && f.endpointScan === false) };   // v2.935(C-③): EndpointLocation 주기 수집(체크 해제가 곧 false)
   const min = (v) => { const n = blankOr(v); return n == null ? undefined : n; };
   const intervalMin = min(f && f.intervalMin);
   if (intervalMin != null) out.intervalMs = Math.round(intervalMin * 60_000);
@@ -597,6 +600,7 @@ export function settingsPayload(f) {
   if (to != null) out.deviceTimeoutMs = Math.round(to * 1000);
   // v2.646: GBIC 수신 광량 기준(dBm, 음수)
   for (const k of ['xcvrRxWarnDbm', 'xcvrRxFaultDbm']) { const n = min(f && f[k]); if (n != null) out[k] = n; }
+  { const n = min(f && f.endpointPerCycle); if (n != null) out.endpointPerCycle = n; }   // v2.935(C-③)
   return out;
 }
 
@@ -615,6 +619,8 @@ export function settingsToForm(s) {
     deviceTimeoutSec: n(o.deviceTimeoutMs, 1000),
     xcvrRxWarnDbm: n(o.xcvrRxWarnDbm),
     xcvrRxFaultDbm: n(o.xcvrRxFaultDbm),
+    endpointScan: o.endpointScan !== false,   // v2.935(C-③)
+    endpointPerCycle: n(o.endpointPerCycle),
   };
 }
 

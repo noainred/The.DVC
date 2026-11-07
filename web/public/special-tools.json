@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-04T13:26:00.150Z",
-  "count": 121,
+  "generatedAt": "2026-11-07T05:33:02.239Z",
+  "count": 122,
   "tools": [
     {
       "k": "service-hub",
@@ -228,6 +228,14 @@
     },
     {
       "k": "san-switch",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "san-flow",
       "adminOnly": true,
       "perm": null,
       "external": null,

@@ -311,7 +311,7 @@ export function LogViewer() {   // v2.768: 회귀 테스트(audit2768c)가 직�
       if (reset) { setRows([]); setTotal(0); setTotalInfo({ totalCapped: false, totalCap: null, lastBatch: 0 }); setOffset(0); }
     }).finally(() => { if (gen === fedGen.current) setLoading(false); });
   };
-  useEffect(() => { load(true); /* eslint-disable-next-line */ }, [f.vcenterId, f.severity, period, sources]);
+  useEffect(() => { load(true); }, [f.vcenterId, f.severity, period, sources]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const exportCsv = async () => {
     const qs = new URLSearchParams();

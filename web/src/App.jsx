@@ -326,12 +326,16 @@ function Portal({ user, onLogout }) {
   // v2.909 헤더 ⌘K 통합 장비 검색 — 가상머신 · VM호스트 · 스토리지(데이터스토어) 탭은 상단 필터바의 검색이 그 화면의 검색 칸이다.
   //   팔레트가 남긴 검색어(장비 이름 · ‘모두 보기’ 검색어)를 그 탭의 필터로 넣는다 — 팔레트가 범위 안 전 vCenter 에서 센 결과이므로
   //   리전 · vCenter 선택은 비운다(남겨 두면 '모두 보기' 가 일부만 보인다). 인계는 메모리다(hooks/searchHandoff.js — URL 에 싣지 않는다).
-  useEffect(() => onSearchHandoff((t) => {
-    if (!INV_FILTER_TABS.includes(t)) return;
-    const s = takeSearch(t);
-    if (s) patchFilter({ q: s, region: '', vcenterId: '' }, t);
+  useEffect(() => {
+    // v2.928(A5): 새 탭으로 열렸으면 main.jsx 가 이미 남겨 둔 것이 있다 — 마운트 때 한 번 꺼낸다(구독은 이후 것만 받는다).
+    for (const t of INV_FILTER_TABS) { const s = takeSearch(t); if (s) patchFilter({ q: s, region: '', vcenterId: '' }, t); }
+    return onSearchHandoff((t) => {
+      if (!INV_FILTER_TABS.includes(t)) return;
+      const s = takeSearch(t);
+      if (s) patchFilter({ q: s, region: '', vcenterId: '' }, t);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), []);
+  }, []);
 
   // Keep the URL hash in sync with the active tab, and follow back/forward.
   const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; setHashNow(`#/${id}`); };

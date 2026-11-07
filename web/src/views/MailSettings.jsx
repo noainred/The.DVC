@@ -60,7 +60,7 @@ export default function MailSettings() {
       setErr(null);
     } catch (e) { setErr(e.message); }
   };
-  useEffect(() => { load(); const t = setInterval(load, 20_000); return () => clearInterval(t); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); const t = setInterval(load, 20_000); return () => clearInterval(t); }, []);
 
   const save = async () => {
     setBusy(true); setMsg(null);

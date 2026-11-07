@@ -27,6 +27,7 @@
 - v2.898 — vCenter 알람 · 최근 작업 · 권한 목록 · Linked Mode · 업데이트 · vLCM(`vcinfo/`) + 스냅샷 트리 · VM NIC. 캐시는 스냅샷 vCenter 객체 밖이고 호출은 읽기 전용뿐이다
 - v2.901 — 리소스 풀 설정(`vcinfo` pools) · NIC 팀 구성(hcfg.net teaming) · 호스트별 DS 마운트(dscfg mounts) · VMXNET3 권장(nic-legacy) · Linked 범위 가림 · 엣지 vcInfo 계약(키 없음 = 유지 · 낡음 · 만료)
 - v2.906 — 분산 포트그룹 팀 구성 · LACP · VLAN(`vcinfo` dvpg — 6시간 · 이미 받은 포트그룹 moref 만 · Enhanced LACP 의 LAG)
+- v2.935 — ESXi 경로 카운터(`storpath/` — storagePath 그룹 · 한 시간마다 5분 표본 · 비율만 실측)
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
 
 ## 본문
@@ -178,6 +179,15 @@
     호스트 · 데이터스토어 모달은 그대로 · `EntityDetail type='vm'` 을 쓰는 다른 5곳(알람 · 탐색 · Platform VM 검색 · VmLink · 호스트 전체 페이지)은 **그대로**(질문 ① 기본값 — 다음 후보).
   · 드로어 · 개체 보기 요약의 24h 스파크(`vmSeries.useDaySeries`)는 `types=cpu,mem` 한 번(예전 2회 로그인 → 1회).
   · 남긴 것: 엣지 위임 vCenter 의 성능을 그 엣지 포탈에서 보는 링크(`findRemoteServer` 안내)는 넣지 않았다(옛 모달에도 없던 것 — 다음 후보).
+    → ✅ **v2.927 에 해결**(아래 v2.927 '엣지 위임 vCenter 의 성능' — 관리자에게 담당 엣지 포탈 링크).
+- **v2.927 — VM 상세 · 성능 그래프 후속 3건(코드·테스트 표지는 v2.926 — 준비 중 main 이 2.926.0(리눅스 성능)을 먼저 써서 2.927.0 으로 게시)(사용자 선택 A '성능 화면·드로어 후속' · 표준)**(웹 `components/EntityDetail.jsx` · `vmMetricsText.js` · `vmperf/VmPerfView.jsx` · `views/VCenters.jsx` ·
+  서버 `vcenter/authStopGate.js skipExtra` · `routes/api/vmMetrics.js edgeHint`. 회귀 `server/test/vmPerf2926.test.js`(3) · 웹 `views/vmPerf2926.test.jsx`(6) · `audit2744k`(링크)):
+  · **VM 상세는 드로어 한 벌** — `EntityDetail type='vm'` 은 `VmDrawer` 로 위임한다(동적 import — VmDrawer 가 EntityDetail 의 섹션을 import 하는 순환을 끊는다 · `rows:[]` 라 ‹ › 잠김 ·
+    signals 없는 항목은 '신호를 함께 받지 않았다'). 알람 · 탐색 · Platform VM 검색 · `VmLink`(도구 표 · 호스트 VM 목록 모달) · 호스트 전체 페이지가 자동으로 드로어다. 옛 VM 모달 본문은 지웠다.
+    모달(z 200) 안에서 연 드로어(z 151)는 그 모달의 쌓임 맥락 안에서 모달 본문 위에 그려진다(Chromium 확인) — 드로어 z 를 올리지 말 것(드로어가 여는 공용 Modal 이 아래로 간다).
+  · **엣지 위임 vCenter 의 성능**: 409 skip(site) 본문에 담당 엣지 포탈 주소 `edge:{id,name,url}` — **관리자만**(`isAdminReq` · 관리 주소 가림 규칙) · 수집 서버 등록부 `remoteAgent` 일치(id/name · 대소문자 무시) ·
+    url 없으면 싣지 않는다. 화면은 `edgePortalHref(edge, vcHash(...monitor))` 로 같은 화면 링크(새 창 · '따로 로그인' 안내). 판정 · 사유 문구 · 로그인 0 은 그대로(`respondIfVcAuthStopped` 의 `skipExtra` 훅).
+  · **vCenter 상세 `key={site.id}`**: 같은 페이지에서 해시로 다른 vCenter 의 개체로 건너뛰면 옛 `obj` 가 남아 '이 VM 이 없습니다' 가 떴다(A/B 재현) — vCenter 가 바뀌면 새로 마운트.
 - ⚠⚠ **v2.697 — VM 구성 속성(B10)은 30초 인벤토리 요청에 싣지 않는다 — 오래된 VM 부터 주기당 상한만큼 다시 읽는 캐시다**
   (`server/src/vmcfg/`{parse.js(순수 파서·판정·엣지 정제),cache.js,collect.js} + `soapClient.js` 배선 + 웹 `views/vmcfg/vmCfgText.js` + `EntityDetail.jsx VmCfgSection`.
   회귀 `server/test/vmCfg2697.test.js`(변이 5/5) + 웹 `vmCfgText.test.js`(서버·웹 판정 대조)):
@@ -282,7 +292,7 @@
   · ⚠ 조회는 `INDEXED BY idx_events_tracked`(부분 인덱스) — 통계가 없으면 플래너가 `(vcenterId,ts)` 인덱스로 기간의 **모든 이벤트**를 훑었다(EXPLAIN 실측 — 테스트가 계획을 고정).
     옛 DB 는 `detail` 열을 table_info 로 확인해 더한다(v2.603 규칙). 2.702 이전 이벤트는 상세가 null 이고 화면이 개수로 밝힌다.
   · VM 은 이벤트 엔티티 **이름**으로 묶는다(동명 VM 구분 불가 — 화면이 말한다). 과다 이동 기준 = 7일에 10회를 기간에 비례(`churnThreshold`, 최소 3).
-  · 이벤트를 받은 적 없는 vCenter·수집 꺼짐·최소 심각도 > info 는 '이동 없음' 이 아니다(`coverageNote`). 읽기 상한 20,000(`truncated`).
+  · 이벤트를 받은 적 없는 vCenter·수집 꺼짐·최소 심각도 > info 는 '이동 없음' 이 아니다(`coverageNote`). 읽기 상한 20,000(`truncated`) → v2.932: 화면은 행을 모으지 않고 조각으로 흘려보내며 센다(`trackedEventsEach` · 누적기 `createMovesAcc`·`createChangesAcc` · 상한 `SCAN_MAX` 30만 · 잘리면 `coveredSince` — 그 시각 이후는 빠짐없이). CSV 만 `READ_MAX` 2만(시험 `vmChanges2932`).
   · VM 상세는 `/tools/vm-changes/of`(30일·20건, 범위 밖 VM 404) — 모달은 `white-space: nowrap` 을 물려받으므로 이력 줄에 `whiteSpace:'normal'` + 그리드 트랙 `minmax(0,1fr)` 이 필요하다
     (Chromium 판독에서 오른쪽이 잘려 발견 — 같은 원인으로 구성 점검·클러스터 칸의 각주도 잘리고 있어 함께 고쳤다).
   · ⚠ 정직 기록: 실장비 이벤트 본문(configChanges·PermissionAddedEvent)은 합성 입력으로만 확인했다.
@@ -293,7 +303,7 @@
   · 블록 추출은 선형 indexOf 이고 **태그 다음 글자가 공백·'>' 일 때만** 같은 태그다(`<rules>` 를 `<rule>` 로 읽지 않는다 — 테스트 고정). EVC 는 summary 를 읽었는데 키가 없으면 ''(꺼짐), summary 를 못 읽으면 null.
   · 판정: HA 를 켰는지 모르면 수용 제어·모니터링도 판정하지 않는다 · 단일 호스트 클러스터는 single-host 하나 · EVC 혼재는 **연결된 호스트**의 CPU 모델로만.
   · VM 상세의 '이 VM 의 규칙' 은 vmId 에서 **vCenter id 접두를 떼서** moref 를 얻는다(콜론 split 금지 — vCenter id 에 콜론이 있다). 상세 창은 `toolAllowed('cluster-check')` 를 먼저 본다(403 을 만들지 않게).
-  · 엣지 수신은 `sanitizeClusterCfgList`(아는 필드만·규칙 50·VM 참조 100·클러스터 500). **vcenter 객체의 다른 필드(solutions 등)는 여전히 정제하지 않는다**(기존 상태 — 별건).
+  · 엣지 수신은 `sanitizeClusterCfgList`(아는 필드만·규칙 50·VM 참조 100·클러스터 500). ~~vcenter 객체의 다른 필드(solutions 등)는 여전히 정제하지 않는다~~ → licenses·solutions 는 v2.742, **그 밖의 최상위 필드는 ✅ v2.938**(`central/vcenterTop.js` — 아는 키·형식만, 모르는 키는 이름·개수로 응답·콘솔에 · 수집기 키와 표를 대조하는 스윕 `vcenterTop2938`). 새 vcenter 필드를 수집기에 더하면 그 표에도 더할 것.
   · 네트워크(A10)는 호스트 캐시의 선택 경로 묶음 `noNetPath`(20대씩). 업링크 = 스위치 **직속 `<pnic>`**(브리지 nicDevice 아님) · 무차별 = **computedPolicy**(유효 정책) ·
     포트그룹 없는 표준 스위치는 판정에서 뺀다 · 링크 다운은 인벤토리 `host.nics[].link` 를 알 때만 · 포트그룹 드리프트는 목록이 잘렸으면(`pgsTotal > pgs.length`) 비교하지 않는다.
   · ⚠ 정직 기록: 실장비 응답(configurationEx·vswitch·proxySwitch XML)은 합성 입력으로만 확인했다. 위조 전송·MAC 변경은 vSS 기본값이 허용이라 판정하지 않았다(소음).
@@ -463,3 +473,9 @@
   - LACP: vDS `config.lacpGroupConfig` 의 LAG 가 활성 업링크에 있으면 그 LAG, 아니면 포트그룹 `lacpPolicy`. vDS 호출이 실패하면 이름만 다시 읽고 `lagError`(LACP 는 포트그룹 설정만) ·
     이름도 못 읽으면 `dvsError`(화면이 '짝짓지 못함' 으로 말한다 — 지어내지 않는다). 호스트와의 짝은 hcfg.net 의 분산 스위치 **이름**(`dvpgRowsForHost`).
   - 실 vCenter 로 확인하지 못했다(추정 — 응답 모양은 공식 바인딩 기준): `config.lacpGroupConfig` 경로가 받아지는지 · 3rd-party DVS(타입이 VmwareDistributedVirtualSwitch 가 아님)면 vDS 호출 전체가 실패한다(lagError · dvsError 로 남는다).
+
+- **ESXi 경로 카운터(v2.935 C-① — `server/src/storpath/`, 회귀 `test/sanStorPath2935.test.js`)**
+  - vCenter perf `storagePath` 그룹(읽기 · 쓰기 · 지연)을 FC HBA 가 있는 호스트만 **한 시간마다 5분(표본 15개)** QueryPerf 로 읽는다(실시간 20초 · instance `*`).
+    고RTT 함대에서 응답 크기를 묶으려는 선택 — 주기마다 200대(`STORPATH_PER_CYCLE`), 예산 10초 · 4대씩. 실시간 통계 수준 · 인스턴스 이름 형식은 실장비 미확인(추정).
+  - 경로 → 타깃 WWN 은 인스턴스 이름(`fc.<node>:<port>-fc.<node>:<port>-<dev>`) 또는 `vmhbaN:Cn:Tn:Ln` + 멀티패스 rt 표(`hcfg.mp.rt`)로 푼다. 못 풀면 그 경로는 세지 않는다(0 이 아님).
+  - 이력은 인메모리(호스트당 26개 — 5분 스냅샷 스윕)이고 귀속 엔진에는 **비율만** 넘긴다. 엣지가 보낸 `spath` 는 중앙에서 아는 필드만 정제한다(`sanitizeHostSpath`).

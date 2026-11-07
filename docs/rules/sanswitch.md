@@ -22,6 +22,8 @@
 - (원래 2797행) 점검 이력은 '수집 1회 = 기록 1회' 다
 - (원래 2809행) '전체 수집' 은 무엇을 했는지 나눠 말한다
 - (v2.748) 포트 사용량·포트 배치 탭 — 기간은 경계로 자르고, 빈 칸·부분 합·미래 칸을 값으로 만들지 않는다
+- (v2.920) 호스트 ↔ SAN 조닝·트래픽 귀속 — 판정 코어는 `attribution.js` 하나, 확정분과 추정분을 합치지 않는다
+- (v2.935) 귀속 실측 우선(ESXi 경로 비율 → IPF → 포트 비율) · Flow Vision 플로우 모니터(san-flow) — 스위치 설정을 바꾸는 명령은 서버만 만든다
 
 ## 본문
 
@@ -122,7 +124,7 @@
 - **'사용량이 왜 비어 있나' 는 판정해서 말한다 — 한 문구로 덮지 말 것**(`sanswitch/perfDiag.js` +
   웹 `views/tools/sanPerfDiagText.js`, v2.517 — 사용자 신고 "데이터 수집이 안되, edge 의 사용량도
   분석하게 해줘"):
-  - v2.516 까지 포트 사용량 패널의 빈 상태는 **무조건** "설정 › 수집 › SAN 스위치 포트 사용량
+  - v2.516 까지 포트 사용량 패널의 빈 상태는 **무조건** "설정 › 수집 주기·임계 › SAN 스위치 포트 사용량
     에서 수집을 켜면 쌓기 시작합니다" 였다. 그 한 문구가 **행동이 정반대인 상황들**을 덮었다 —
     꺼짐(켜면 된다) / 첫 주기(**기다리면** 된다) / REST 장비(portperfshow 를 쓰지 않아 **켜도·
     기다려도 영원히** 안 쌓인다) / 명령 부재·제한 셸(**기다려도 안 된다**) / 엣지 미보고(엣지
@@ -297,3 +299,40 @@
     연결 테스트는 처리량 기준값을 건드리지 않는다(`noRates`) · 비밀번호 승계는 `sanAccessMoved` 하나(saveDevice 와 공유) · 주기 수집은 진행 중 장비를 건너뛰고 `inFlightSkipped` 로 센다.
   · v2.771(점검 R6-F1): 축약은 상한을 넘을 때 **심각도 순으로 고르고**(faulty > 링크 에러 > rx ≤ -12 > disabled > disc_c3·rx 주의) 반환은 포트 순 — 포트 번호 순 slice 는 뒤 번호 장애 포트를 잘랐다.
     중앙 ports 항목은 `portsOmitted>0` 이면 엣지 전체 집계 `ports.faulty` 를 본다. 리셋은 **포트 단위**(한 키라도 cur<base 면 그 포트의 축약 아닌 키 전부 하한 = cur, held='reset').
+- **호스트 ↔ SAN 조닝·트래픽 귀속(v2.920 — 설계 `docs/design/san-cvp-traffic/README.md`, 기본값 A 단계)** — 판정 코어는 `sanswitch/attribution.js`(순수) 하나
+  (`buildFabrics` → `attributeHost`/`attributeFleet`), 기간 바이트는 `perfDb.portBytesMulti`(heavyQuery — 기억·합류·감시 · 데모는 `demoPortSeries` 수식),
+  라우트 `routes/api/hostSan.js`(`GET /hosts/:id/san-attribution` · `GET /tools/sanswitch/attribution`), 화면 `HostSanSection.jsx`·`hostSanText.js` ·
+  `SanHostAttrib.jsx`·`sanHostAttribText.js`. 회귀 `server/test/sanAttrib2920.test.js` · 웹 `hostSanText.test.js`·`sanHostAttribText.test.js`.
+  - **신뢰도는 조닝 그림의 ●/◐ 와 한 식구다**: ● 확정 = 그 HBA 포트가 닿을 수 있는 스토리지가 **하나**이고 타깃 역할이 **네임서버 확정**(nsRoles) — 포트 카운터 전부가
+    그 스토리지. 멀티패스 경로별 타깃 WWN(`hcfg.mp.targets`, 같은 SOAP 경로 `config.storageDevice.multipathInfo` 에서 `parseMultipath` 가 어댑터별로 센다 — 새 vCenter 호출 없음)이
+    있으면 '살아 있는 경로의 타깃' 으로 후보를 좁힌다(조닝 2개 → 실제 1개면 확정). ◐ 추정 = 후보 2개 이상을 **같은 스위치의 타깃 포트 바이트 비율**로 나눈다(IPF 보정은
+    다음 단계) · nsRoles 가 빈 패브릭은 후보가 하나여도 추정(없는 근거를 만들지 않는다). 분배 불가 = 타깃 포트 바이트가 없어 못 나눔(호스트 합에는 들어가고 스토리지에는
+    주지 않는다). 조닝만 = zone 멤버인데 어느 스위치에도 로그인 없음(통계 밖 · 정리 후보 표). 미확인 = 어느 스냅샷에도 없는 WWN.
+  - **확정분과 추정분을 한 숫자로 합치지 않는다**(부분 합 규약) — 표·KPI 는 두 열이고 '합(참고)' 은 정렬용이라고 말한다. 측정 없음은 **0 이 아니라 null('—')**:
+    표본 없는 포트는 `portBytesMulti` 의 Map 에 아예 없고, 엔진은 `measured:false` + `unmeasuredPorts` 로 센다. 호스트 합계는 HBA 포트 카운터 그대로(귀속과 무관).
+  - 기간 바이트는 portperfshow 합산값이라 **방향이 없다**(읽기+쓰기 합) — 화면이 그렇게 적는다. 방향은 '지금' 값(스냅샷 델타 `inBps/outBps`)만: 호스트 F_Port 의
+    스위치 Tx(`outBps`) = 읽기 · Rx(`inBps`) = 쓰기. '버킷 평균 × 폭' 은 어림(≈)이고 가장자리 버킷은 구간 안쪽 폭만 센다.
+  - 스토리지 신원은 타깃 포트 `attachedName` → `storageKey` → `arraySerialOf` → 등록 스토리지 시리얼 일치(storage-summary 와 같은 판정 — 순수 함수는 v2.920 에
+    `sanswitch/endpointKey.js` 로 옮기고 perfDb 가 다시 내보낸다). 평평한 이름(`::` 없음)은 포트마다 다른 키가 되어 한 어레이가 여러 행이 될 수 있다 — 화면이
+    '어레이 미확인' 으로 말한다(억지로 합치지 않는다).
+  - 범위: 호스트 단건 라우트는 `inv.hosts` + `tools` + 도구 키 `san-switch`(`issueFor`) + 범위 밖 404 이고, **범위 계정은 그 호스트 법인(`datacenterOfVcenter`)의 스위치·스토리지만**
+    본다(법인 미지정 장비·법인 없는 vCenter 는 아무것도 — 'vCenter 귀속 없는 데이터 미노출'). 함대 라우트는 형제처럼 `fullScopeOnly`. 응답에 관리 주소를 싣지 않는다.
+  - 시안의 '보기 세그먼트' 는 실제 화면에 없어(912행 세그먼트는 장비 상세 안의 것) **헤더 버튼 + 모달**(전체 점검·사용량 분석과 같은 틀)로 넣었다 — 법인 칩 선택을 범위로 쓴다.
+
+- **호스트 귀속 실측 우선 · Flow Vision 플로우 모니터(v2.935 — 설계 `docs/design/san-cvp-traffic/README.md` §9·§10, 회귀 `test/sanStorPath2935.test.js` · `sanFlow2935.test.js`)**
+  - 분배 우선순위는 `attribution.js attributeHost` 하나 — ESXi 경로 실측 비율(`measured`) → IPF(`ipf.js` — 패브릭을 조닝 서명으로 묶어 코어-엣지도 한 문제) → 타깃 포트 비율.
+    실측 비율은 **비율만** 쓰고 양은 스위치 포트 바이트(정확)에 곱한다. 확정분 · 실측 비율분 · 추정분은 따로 센다(합쳐 ‘확정’ 이라 부르지 않는다).
+  - Flow Vision(`flowCmd.js` · `flowJobs.js` · `routes/api/sanFlow.js`): **스위치 설정을 바꾼다** — 라우트 전부 tools + admin + 전체 범위, 만들기 · 지우기는 OTP 재인증(`reauth`) + 감사.
+    명령은 `buildFlowCommands` 만 만들고(이름 `dvc_` 고정 · 포트 · WWN 화이트리스트 — 선행 `-` · 공백 · 대문자 거부), 엣지는 중앙이 보낸 **정의**를 다시 검사해 직접 만든다(명령 글자를 받지 않는다).
+    포트 · 타깃은 화면 값을 믿지 않고 `planCreate` 가 귀속 엔진으로 다시 판정한다(미리보기도 같은 함수 — 판정 코어 하나). 지우기는 포탈 기록에 있는 `dvc_` 만.
+    엣지 위임은 testRuns 와 같은 틀(큐 → `sanswitch-config` 의 `flowNow` → `sanswitch-flow-result`, 대상 엣지만 회신 · 회신은 그 작업이 실행했어야 하는 명령 출력만 · 상한).
+    세션 시한 4분(`flowSessionMs` — 회신 시한 5분 안). 카운터를 못 읽으면 0 이 아니라 사유. `san-flows.json` 은 혼합 상태 파일(카운터 · 점검 결과는 지문에서 뺀다).
+  - ⚠ 문법 · 출력 · 상한은 FOS 8.0.1 명령 참조 기준 — 실장비 미확인. 데모(`mock-san-`)는 접속하지 않고 ESXi 데모 실측 ±3% 의 가상 카운터를 만든다.
+  - **반증 1인 확정분(v2.935 — `test/sanFlow2935.test.js` ①~⑦ · 변이 5)**: 이름은 `dvc_` + 호스트 앞 7자 + 해시 5자 + 차례 = **19자 이하 · 소문자**(FOS 20자 — 문서 검색 요약 기준 추정) ·
+    카운터 주기는 **꺼짐 · 인증 실패 정지**(이 노드 `sanAuthGuard` + 엣지 스냅샷 `extra.authStopped`)를 건너뛰고 인증 실패는 정지 기록에 남긴다(폴러와 같은 기록 — 계정 잠금 방지) ·
+    live 모드 데모 장비 접속 금지 · 만들기는 실행 전에 기록을 `pending` 으로 먼저 쓰고, 결과를 모르면 `unknown`(failed 로 단정하지 않음) · 시한 뒤 늦은 회신도 반영 ·
+    엣지는 `ttlMs` 가 지난 작업을 실행하지 않는다 · 권한 점검이 찾은 '포탈 기록 없는 dvc_' 는 보여 주고 지울 수 있다 · `exists` 는 show 에 초기자 · 타깃이 보일 때만 활성(아니면 `conflict`) ·
+    못 읽은 카운터는 성공 시각을 움직이지 않는다 · 주기 작업은 사용자 작업 상한과 따로(64) · 오래된 것부터 · 건너뛴 사유를 남긴다 · 엣지 버전 2.935.0 미만이면 위임하지 않는다 ·
+    권한 점검 통과를 서버가 강제 · 상한 = 점검 때 장비 개수 + 그 뒤 만든 것 · 작업 사유의 관리 주소 가림 · 출력 분류는 표 줄 · 이름 낱말을 빼고 본다 · 미리보기는 감사 제외.
+  - **SAN 스위치 쓰기 라우트 13개 + san-flow 는 조회 · 쓰기 모두 전체 범위**(`routes/admin/shared.js fullReadWriteScopeOnlyWith` — `isFullReadWriteScope`, v2.904 규칙). 예전 `fullScopeOnly` 는
+    조회 범위만 봐서 writeVcenters 로 쓰기만 줄인 admin 이 스위치 등록 · 수집 · 설정 변경을 할 수 있었다(반증 L-1). 조회 라우트는 그대로 `fullScopeOnly`.

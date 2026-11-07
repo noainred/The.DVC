@@ -251,7 +251,7 @@ export function LicenseExpiry({ scope, isAdmin, initialData = null }) {
       .then((d) => { if (gen === licGen.current) { setData(d); setErr(null); } })
       .catch((e) => { if (gen === licGen.current) setErr(e.message); });
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope]);
+  useEffect(() => { load(); }, [scope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (err) return <ErrorBox message={err} />;
   if (!data) return <Loading />;

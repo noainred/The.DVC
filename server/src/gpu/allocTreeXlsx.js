@@ -13,6 +13,7 @@
  * ⚠ 개요 + 폭 한 장 인쇄를 함께 쓰므로 util/xlsxSheetPrOrder.js 를 반드시 불러온다(v2.799.1 — Excel '복구' 대화상자).
  */
 import ExcelJS from 'exceljs';
+import { runXlsxWorker } from '../util/xlsxWorkerRun.js'; // v2.938: 공용 엑셀 워커
 import '../util/xlsxSheetPrOrder.js';
 import { BORDER, PAL, fill, styleHeadRow, barText } from '../vcenter/vmXlsxStyle.js';
 import { sheetLink } from '../util/xlsxInternalLink.js';   // 목차 ↔ 법인 시트 링크를 규격 모양(location 만)으로 — 워커가 아니어도 같은 모듈이 건다
@@ -101,6 +102,7 @@ function totalsCells(t) {
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}장`);
   if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.870 감사 A4-01: 꺼진 VM 합에서 빠진 수(예전에는 어디에도 없었다)
   if (t.hostUseUnknown && t.hosts > 1) notes.push(`CPU·메모리 사용률은 ${t.hostUseUnknown}대 제외(못 읽음·끊김)`);
+  if (num(t.offOverGB) > 0) notes.push(`꺼진 VM 을 모두 켜면 예비보다 ${t.offOverGB} GB 더 필요(켜지지 않을 수 있음)`);   // v2.939 개선 5 — 호스트 행만
   if (num(t.spareGB) != null && t.spareGB < 0) notes.push('할당이 용량을 넘음 — 확인 필요');
   else if (pct != null && pct >= 90) notes.push('포화(90% 이상)');
   return { cap: num(t.capGB), alloc: num(t.allocGB), spare: num(t.spareGB), pct, bar: pct == null ? '' : barText(pct / 100, 10), off: t.offGB ? t.offGB : null, vms: `${t.vmsOn} / ${t.vmsOff}`, note: notes.join(' · '),
@@ -281,7 +283,7 @@ function addTocSheet(wb, roster, names, meta, skipped) {
  * @param {{ depth?: string, sheets?: string[], roster?: object[]|null }} opt roster = allocCorpRoster(법인별 시트 · 목차 — 없으면 계층의 법인만)
  * @returns {Promise<Buffer>}
  */
-export async function renderGpuAllocWorkbook(tree, meta, { depth = 'vm', sheets = ALLOC_SHEET_KEYS, roster = null } = {}) {
+export async function buildGpuAllocWorkbookInline(tree, meta, { depth = 'vm', sheets = ALLOC_SHEET_KEYS, roster = null } = {}) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'VMware Global Monitoring Portal';
   wb.created = new Date();
@@ -372,6 +374,34 @@ export async function renderGpuAllocWorkbook(tree, meta, { depth = 'vm', sheets 
   }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
+
+/**
+ * v2.938(제안 5번 — 감사 A5-05 'GPU 엑셀 생성의 메인 스레드 블록, 4배 규모 최대 525ms'): 조립·직렬화를 공용 엑셀 워커(util/xlsxWorkerRun.js)에서 한다.
+ *   결과 파일은 같은 buildGpuAllocWorkbookInline 이 만든다. 끄는 길 env GPU_ALLOC_XLSX_WORKER=0 · 시한 GPU_ALLOC_XLSX_TIMEOUT_MS(기본 5분).
+ *   워커를 띄우지 못하면 메인에서 만든다(경고) — 예전 동작.
+ * @returns {Promise<Buffer>}
+ */
+let _allocWorkerUrl = new URL('./allocTreeXlsxWorker.js', import.meta.url);
+/** 테스트 전용 — 띄우지 못하는 가짜 워커로 인라인 경로를 확인한다. */
+export function _setGpuAllocXlsxWorkerUrlForTest(url) { _allocWorkerUrl = url || new URL('./allocTreeXlsxWorker.js', import.meta.url); }
+/** 워커 입구 — payload = { tree, meta, opt }. */
+export async function buildGpuAllocWorkbookPayload(payload) {
+  const p = payload || {};
+  const buffer = await buildGpuAllocWorkbookInline(p.tree, p.meta, p.opt || {});
+  return { buffer, meta: { sheets: (p.opt?.sheets || ALLOC_SHEET_KEYS).length } };
+}
+export async function renderGpuAllocWorkbook(tree, meta, opt = {}, { signal = null } = {}) {
+  const r = await runXlsxWorker({
+    workerUrl: _allocWorkerUrl, payload: { tree, meta, opt }, inline: buildGpuAllocWorkbookPayload, signal, tag: 'gpu-alloc-xlsx',
+    timeoutMs: process.env.GPU_ALLOC_XLSX_TIMEOUT_MS ?? 300_000,   // 해석·상하한은 runXlsxWorker 의 deadlineMs
+    disabled: String(process.env.GPU_ALLOC_XLSX_WORKER ?? '1').trim() === '0',
+  });
+  lastRenderMode = r.mode;
+  return r.buffer;
+}
+let lastRenderMode = null;
+/** 마지막 생성이 워커였는가(테스트·진단). */
+export const gpuAllocLastRenderMode = () => lastRenderMode;
 
 /** CSV(평면 표와 같은 열) — BOM 은 라우트가 붙인다. */
 export function allocCsvLines(tree, csvCell) {

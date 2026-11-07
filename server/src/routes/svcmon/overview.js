@@ -27,6 +27,7 @@ import { getResults, getLastSweep, runNow, pollerStats, executesHere, pollerRole
 import { ROTATE_UNITS, ROTATE_LABEL } from '../../svcmon/logsettings.js';
 import { logStats } from '../../svcmon/csvlog.js';
 import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
+import { driftSummary, DETECT_INTERVAL_MS } from '../../svcmon/settingsSync.js';
 import { redactEdgeSummary, redactPushStatus, ADMIN_ONLY_TEXT } from '../../auth/scopeStatus.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store as _storeForScope } from '../../store.js';
@@ -100,6 +101,9 @@ svcmonRouter.get('/state', (req, res) => {
     lastSweep: getLastSweep(),
     // v2.769(점검 R4-D3-3): 이 인스턴스가 점검을 직접 실행하는가 — 화면이 '새로고침' 버튼을 이 값으로 끈다(중앙·킬스위치).
     executes: executesHere(),
+    // v2.915: 설정 연동 감지 요약(수만 — 이름·주소 없음). 화면 상단 '설정이 바뀌었습니다' 배너. 감지 전이면 null.
+    // v2.932(점검 D1-08): 감지 주기를 함께 싣는다 — 배너가 '5분 주기' 를 박지 않게(driftSummary 자체의 키는 그대로).
+    settingsDrift: (() => { const d = driftSummary(); return d ? { ...d, intervalMs: DETECT_INTERVAL_MS } : null; })(),
   });
 });
 

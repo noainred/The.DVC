@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Monitoring — 출처 배지 · 변경 감지 배너 · 상세 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a111c;color:#c8d6e8;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#9fcaff}a:hover{color:#cfe4ff}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.pc-mode{display:inline-flex;align-items:center;gap:7px;padding:7px 16px;border-radius:999px;border:1px solid #1e3350;background:#0f1a2b;color:#9fb4cc;font:inherit;font-size:13px}
+.pc-mode.on{background:#1668d8;color:#fff;font-weight:700;border-color:#1668d8}
+.pc-card{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px;padding:12px 14px;border-top:2px solid #1e3350;display:flex;flex-direction:column;gap:4px;min-width:0}
+.pc-card-label{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;color:#8ea4bd}
+.pc-card-value{font-family:"JetBrains Mono",monospace;font-size:26px;font-weight:600;color:#dbe7f5}
+.pc-card.b{border-top-color:#4b9bff}.pc-card.g{border-top-color:#3ddc84}.pc-card.g .pc-card-value{color:#3ddc84}.pc-card.a{border-top-color:#f0a92e}.pc-card.a .pc-card-value{color:#f0a92e}.pc-card.r{border-top-color:#ff5c5c}.pc-card.r .pc-card-value{color:#ff5c5c}.pc-card.o{border-top-color:#6b7f99}
+.pc-card-note{font-size:11px;color:#7b93ae}
+.pc-panel{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px;overflow:hidden}
+.pc-panel-head{display:flex;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #1c2c42;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.1em;color:#8ea4bd}
+.pc-btn{padding:6px 12px;border:1px solid #1e3350;border-radius:6px;background:#0f1a2b;color:#c8d6e8;font:inherit;font-size:12.5px;white-space:nowrap}
+.pc-btn.accent{border-color:#2b6fc0;background:#153357;color:#9fcaff}
+.pc-btn:disabled{opacity:.45}
+.pc-chip{padding:5px 11px;border-radius:14px;border:1px solid #1e3350;background:transparent;color:#8ea4bd;font:inherit;font-size:11.5px;font-family:"JetBrains Mono",monospace}
+.pc-chip.on{border-color:#4b9bff;background:#153357;color:#9fcaff}
+.inp{height:30px;padding:0 10px;border-radius:6px;border:1px solid #1e3350;background:#0a141f;color:#c8d6e8;font:inherit;font-size:12.5px}
+.inp::placeholder{color:#7b93ae}
+.row{display:flex;align-items:center;gap:7px;padding:4px 12px;font-size:12.5px;color:#cfe0f2;border-left:3px solid transparent;white-space:nowrap}
+.row.sel{background:#14497f;border-left-color:#4b9bff;color:#fff}
+.row .tg{width:13px;height:13px;flex:none;display:grid;place-items:center;font-size:10px;color:#7b93ae;border:1px solid #24405f;border-radius:3px}
+.dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block}
+.dot.ok{background:#3ddc84}.dot.warn{background:#f0a92e}.dot.bad{background:#ff5c5c;box-shadow:0 0 6px #ff5c5c}.dot.off{background:#7b8fa8}
+.badge{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10px;color:#ff8b8b;background:#2a1216;border:1px solid #5f1d1d;border-radius:4px;padding:1px 6px}
+.origin{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-family:"JetBrains Mono",monospace;color:#9fcaff;border:1px solid #1d4ed8;background:#0e1a33;border-radius:4px;padding:0 5px;height:16px}
+.origin.chg{color:#f0a92e;border-color:#5a3d07;background:#1b1305}
+.origin.gone{color:#ff8b8b;border-color:#5f1d1d;background:#2a1216}
+.thead,.tr,.grp{display:grid;grid-template-columns:26px minmax(240px,1fr) 118px 96px 150px 200px}
+.thead{background:#132132}
+.th{padding:9px 12px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.06em;color:#8ea4bd}
+.th.r{text-align:right}
+.grp{display:flex;justify-content:space-between;padding:7px 12px;background:#14497f;color:#dceaff;font-family:"JetBrains Mono",monospace;font-size:11.5px}
+.tr{border-bottom:1px solid #131f30}
+.tr > div{padding:7px 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr.off{opacity:.55}
+.td-name{color:#dbe7f5;font-size:13px}
+.td-status{font-family:"JetBrains Mono",monospace;font-size:12px}
+.td-status.ok{color:#3ddc84}.td-status.warn{color:#f0a92e}.td-status.bad{color:#ff5c5c}.td-status.off{color:#7b8fa8}
+.td-num{font-family:"JetBrains Mono",monospace;font-size:12px;color:#8ea4bd;text-align:right}
+.td-reply{font-family:"JetBrains Mono",monospace;font-size:12px;color:#cfe0f2;text-align:right}
+.td-method{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#7b93ae}
+.banner{display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid #5a3d07;border-left:3px solid #f0a92e;background:#1b1305;border-radius:8px;font-size:12.5px;color:#f6d28a}
+.banner b{color:#fff}
+.overlay{position:absolute;inset:0;background:rgba(5,10,18,.55)}
+.modal{position:absolute;right:60px;top:150px;width:560px;background:#0f1a2b;border:1px solid #24405f;border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.55);overflow:hidden}
+.modal-head{display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid #1c2c42}
+.modal-head b{color:#e8f1fb;font-size:14px}
+.grid{display:grid;grid-template-columns:120px 1fr;row-gap:10px;column-gap:12px;padding:16px;font-size:12.5px}
+.grid > span:nth-child(odd){color:#7b93ae}
+.obox{margin:0 16px 14px;border:1px solid #1d4ed8;background:#0e1a33;border-radius:8px;padding:10px 12px;font-size:12px;color:#c8d6e8;line-height:1.6}
+.actions{display:flex;gap:8px;justify-content:flex-end;padding:0 16px 16px;flex-wrap:wrap}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;box-sizing:border-box;position:relative;overflow:hidden;background:#0a111c">
+  <div style="padding:16px 24px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;gap:8px"><span class="pc-mode on">인프라</span><span class="pc-mode">서비스</span></div>
+
+    <div class="banner" role="status">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      <span><b>설정이 바뀌었습니다</b> — 새 항목 <b>3</b>(iDRAC 2 · 스토리지 1) · 주소 변경 <b>1</b>(vc-cn-east) · 설정에서 사라짐 <b>1</b>(isilon-sgp). 마지막 확인 14:50(5분 주기 · 카탈로그 읽기만 — 네트워크 점검 아님)</span>
+      <a href="Main.dc.html" class="pc-btn accent" style="margin-left:auto;text-decoration:none">설정 연동에서 검토</a>
+      <button class="pc-btn" type="button">나중에</button>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:12px"><span class="mono" style="font-size:12px;letter-spacing:.14em;color:#7b93ae">INFRASTRUCTURE PERFORMANCE TESTS</span><span style="flex:1;height:1px;background:#1c2c42"></span><span class="mono" style="font-size:11.5px;color:#8ea4bd">Root\설정 연동\가상화\PL-WRO · 2 host(s)</span><button class="pc-btn" type="button">설정</button></div>
+
+    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:12px">
+      <div class="pc-card b"><span class="pc-card-label">TOTAL TESTS</span><span class="pc-card-value">123</span><span class="pc-card-note">44개 대상 그룹</span></div>
+      <div class="pc-card g"><span class="pc-card-label">정상</span><span class="pc-card-value">101</span><span class="pc-card-note">Ok · Host is alive</span></div>
+      <div class="pc-card a"><span class="pc-card-label">경고</span><span class="pc-card-value">9</span><span class="pc-card-note">임계치 근접</span></div>
+      <div class="pc-card r"><span class="pc-card-label">실패</span><span class="pc-card-value">4</span><span class="pc-card-note">No answer · Error</span></div>
+      <div class="pc-card o"><span class="pc-card-label">중지</span><span class="pc-card-value">9</span><span class="pc-card-note">설정 연동 신규 8 · 사라짐 1</span></div>
+      <div class="pc-card o"><span class="pc-card-label">갱신 안 됨</span><span class="pc-card-value">0</span><span class="pc-card-note">주기 초과</span></div>
+      <div class="pc-card o"><span class="pc-card-label">점검 대기</span><span class="pc-card-value">0</span><span class="pc-card-note">아직 실행 안 됨</span></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:340px 8px minmax(0,1fr);gap:6px;align-items:start">
+      <div class="pc-panel">
+        <div class="pc-panel-head"><span>TEST TREE</span><span>44 hosts</span></div>
+        <div style="padding:0 12px 8px"><input class="inp" type="search" aria-label="대상 검색" placeholder="대상 검색" style="width:100%;box-sizing:border-box"></div>
+        <div style="padding-bottom:8px">
+          <div class="row"><span class="tg" aria-hidden="true">−</span><span class="dot warn"></span>Root<span class="badge">4</span></div>
+          <div class="row" style="padding-left:28px"><span class="tg" aria-hidden="true">+</span><span class="dot bad"></span>vCenter<span class="badge">3</span></div>
+          <div class="row" style="padding-left:28px"><span class="tg" aria-hidden="true">−</span><span class="dot warn"></span>설정 연동 <span class="origin" title="설정 연동으로 만들어진 폴더">설정</span><span class="badge">1</span></div>
+          <div class="row" style="padding-left:44px"><span class="tg" aria-hidden="true">−</span><span class="dot warn"></span>가상화</div>
+          <div class="row sel" style="padding-left:60px"><span class="tg" aria-hidden="true">−</span><span class="dot ok"></span>PL-WRO</div>
+          <div class="row" style="padding-left:76px"><span class="tg" aria-hidden="true">·</span><span class="dot ok"></span>vc-eu-central <span class="origin">vCenter</span></div>
+          <div class="row" style="padding-left:76px"><span class="tg" aria-hidden="true">·</span><span class="dot ok"></span>nsx-mgr-frankfurt <span class="origin">NSX</span></div>
+          <div class="row" style="padding-left:60px"><span class="tg" aria-hidden="true">+</span><span class="dot ok"></span>US-IAD</div>
+          <div class="row" style="padding-left:60px"><span class="tg" aria-hidden="true">+</span><span class="dot warn"></span>CN-SHA <span class="origin chg">주소 변경</span></div>
+          <div class="row" style="padding-left:44px"><span class="tg" aria-hidden="true">+</span><span class="dot ok"></span>중앙↔엣지</div>
+          <div class="row" style="padding-left:44px"><span class="tg" aria-hidden="true">+</span><span class="dot off"></span>서버 <span class="origin">신규 2 · 중지</span></div>
+          <div class="row" style="padding-left:44px"><span class="tg" aria-hidden="true">−</span><span class="dot off"></span>스토리지</div>
+          <div class="row" style="padding-left:60px"><span class="tg" aria-hidden="true">·</span><span class="dot off"></span>isilon-sgp <span class="origin gone">설정에서 사라짐</span></div>
+          <div class="row" style="padding-left:44px"><span class="tg" aria-hidden="true">+</span><span class="dot ok"></span>백업</div>
+        </div>
+      </div>
+      <div style="width:8px;height:560px;background:#131f30;border-radius:3px"></div>
+      <div class="pc-panel">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid #1c2c42">
+          <button class="pc-btn" type="button">＋ 등록</button><button class="pc-btn" type="button">✎ 점검 추가</button><button class="pc-btn" type="button">수정</button><button class="pc-btn" type="button">Remove</button>
+          <button class="pc-btn accent" type="button">Refresh</button><button class="pc-btn" type="button">Reset</button><button class="pc-btn" type="button">폴더</button><button class="pc-btn" type="button">로그</button>
+          <span style="width:1px;height:22px;background:#1e3350"></span>
+          <button class="pc-chip on" type="button">ALL</button><button class="pc-chip" type="button">OK</button><button class="pc-chip" type="button">WARN</button><button class="pc-chip" type="button">FAIL</button><button class="pc-chip" type="button">STALE</button><button class="pc-chip" type="button">PENDING</button><button class="pc-chip" type="button">DISABLED</button>
+          <input class="inp" type="search" aria-label="Test name 검색" placeholder="Test name 검색" style="margin-left:auto;width:200px">
+        </div>
+        <div class="thead"><div></div><div class="th">TEST NAME</div><div class="th">STATUS</div><div class="th r">RECURREN…</div><div class="th r">REPLY</div><div class="th">TEST METHOD</div></div>
+        <div class="grp"><span>🗀 Root\설정 연동\가상화\PL-WRO\vc-eu-central\vcenter-eu-central-01.demo.invalid</span><span style="color:#9fcaff">3 tests · 출처 vCenter · 엣지 mock-Edge-Frankfurt</span></div>
+        <div class="tr"><div><span class="dot ok"></span></div><div class="td-name">TCP 443</div><div class="td-status ok">Ok</div><div class="td-num">1,412</div><div class="td-reply">12 ms</div><div class="td-method">TCP port 443</div></div>
+        <div class="tr"><div><span class="dot ok"></span></div><div class="td-name">인증서 만료(443)</div><div class="td-status ok">Ok</div><div class="td-num">58</div><div class="td-reply">D-201</div><div class="td-method">SSL certificate expiry</div></div>
+        <div class="tr"><div><span class="dot ok"></span></div><div class="td-name">HTTP /sdk/vimServiceVersions.xml</div><div class="td-status ok">Ok</div><div class="td-num">282</div><div class="td-reply">200 · 86 ms</div><div class="td-method">HTTP/URL</div></div>
+        <div class="grp"><span>🗀 Root\설정 연동\가상화\PL-WRO\nsx-mgr-frankfurt\nsx-fra.corp.local</span><span style="color:#9fcaff">3 tests · 출처 NSX</span></div>
+        <div class="tr"><div><span class="dot ok"></span></div><div class="td-name">TCP 443</div><div class="td-status ok">Ok</div><div class="td-num">1,411</div><div class="td-reply">9 ms</div><div class="td-method">TCP port 443</div></div>
+        <div class="tr"><div><span class="dot warn"></span></div><div class="td-name">인증서 만료(443)</div><div class="td-status warn">Warning</div><div class="td-num">58</div><div class="td-reply">D-21</div><div class="td-method">SSL certificate expiry</div></div>
+        <div class="tr"><div><span class="dot ok"></span></div><div class="td-name">HTTP /api/v1/node</div><div class="td-status ok">Ok</div><div class="td-num">282</div><div class="td-reply">401 · 64 ms</div><div class="td-method">HTTP/URL (401 허용)</div></div>
+        <div style="display:flex;gap:18px;padding:9px 12px;background:#111e30;border-top:1px solid #1c2c42;font-family:'JetBrains Mono',monospace;font-size:11px;color:#7b93ae"><span>SHOWN 6 / 123</span><span>AVG REPLY 34 ms</span><span>LOCAL SWEEP —</span><span style="margin-left:auto;color:#3ddc84">● LIVE POLLING</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" aria-hidden="true"></div>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dt-title">
+    <div class="modal-head"><b id="dt-title">HTTP /sdk/vimServiceVersions.xml</b><span class="origin">출처 vCenter</span><button class="pc-btn" type="button" aria-label="닫기" style="margin-left:auto;border:0;background:none;font-size:16px;color:#7b93ae">✕</button></div>
+    <div class="grid">
+      <span>대상</span><span>vc-eu-central <span class="mono" style="color:#9fb4cc">vcenter-eu-central-01.demo.invalid</span></span>
+      <span>경로</span><span class="mono" style="font-size:11.5px;color:#9fb4cc">Root\설정 연동\가상화\PL-WRO</span>
+      <span>상태</span><span style="color:#3ddc84" class="mono">Ok · 200 · 86 ms</span>
+      <span>방식</span><span class="mono" style="font-size:12px">HTTP/URL · 300s · 기대 200 · 키워드 없음</span>
+      <span>점검 위치</span><span>mock-Edge-Frankfurt (배정 활성 · 마지막 보고 14:52)</span>
+      <span>연속</span><span class="mono">282회 정상</span>
+    </div>
+    <div class="obox">
+      이 대상은 <b>설정 연동</b>으로 만들어졌습니다 — 주소·이름은 <b>설정 › 인프라 등록 › vCenter 등록·관리 › vc-eu-central</b> 을 따릅니다.
+      설정이 바뀌면 여기서 고치지 말고 설정 연동에서 반영하세요(여기서 호스트를 고치면 다음 동기화에 ‘주소 변경’으로 다시 뜹니다).<br>
+      <a href="#settings-vcenter">설정 화면 열기</a> · <a href="Main.dc.html">설정 연동에서 보기</a> · 원본 <span class="mono">vcenter|vc-eu-central</span>
+    </div>
+    <div class="actions"><button class="pc-btn" type="button">연동 해제(수동 대상으로 전환)</button><button class="pc-btn" type="button">점검 수정</button><button class="pc-btn accent" type="button">지금 점검</button><button class="pc-btn" type="button">닫기</button></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

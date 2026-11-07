@@ -201,7 +201,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
   };
   // v2.611 LEFT2611-07: 403(범위 제한 계정)은 정책 거부라 2초마다 다시 묻지 않는다.
   const deniedRef = useRef(false);
-  useEffect(() => { load(agent, true); const t = setInterval(() => { if (!deniedRef.current) load(agent, false); }, 2000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [agent]);
+  useEffect(() => { load(agent, true); const t = setInterval(() => { if (!deniedRef.current) load(agent, false); }, 2000); return () => clearInterval(t); }, [agent]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!s) return <Frame asPage={asPage} title="🛰️ IP 스캔 설정" onClose={onClose}>{loadErr ? <ErrorBox message={loadErr} /> : msg ? <ErrorBox message={msg} /> : <Loading />}</Frame>;
 
   const isLocal = agent === LOCAL_AGENT;
