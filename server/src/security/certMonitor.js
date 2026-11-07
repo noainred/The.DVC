@@ -74,7 +74,7 @@ function targets() {
     const hp = splitHostPort(nx.host);
     if (!hp) continue;
     out.push({ kind: 'nsx', id: nx.id, name: nx.name || nx.id, host: hp.host, port: hp.port, hostPort: hp.hostPort,
-      vcenterId: typeof nx.vcenterId === 'string' ? nx.vcenterId : '' }); // v2.927 이슈 자동 등록의 법인(귀속 없으면 공용)
+      vcenterId: typeof nx.vcenterId === 'string' ? nx.vcenterId : '' }); // v2.928 이슈 자동 등록의 법인(귀속 없으면 공용)
   }
   return out;
 }
@@ -115,7 +115,7 @@ export async function refreshCerts() {
 }
 
 /**
- * v2.927 결과 구독(이슈 자동 등록 — issues/alertIssues.js applyCertResults). 한 번 확인할 때마다 항목 사본을 준다. 구독자는 미뤄서 돈다
+ * v2.928 결과 구독(이슈 자동 등록 — issues/alertIssues.js applyCertResults). 한 번 확인할 때마다 항목 사본을 준다. 구독자는 미뤄서 돈다
  * (setImmediate — 프로브 결과 정리를 막지 않는다). 이 모듈이 이슈를 모르게 한다(의존 방향: 이슈 → 인증서 감시).
  */
 const _resultListeners = new Set();
