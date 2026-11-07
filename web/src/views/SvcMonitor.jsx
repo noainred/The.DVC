@@ -169,8 +169,13 @@ export default function SvcMonitor() {
   useEffect(() => {
     if (!jumpRef.current || view !== 'tree') return;
     jumpRef.current = false;
+    // 트리 상자 안에서만 스크롤한다 — scrollIntoView 는 창까지 내려 상단(모드·KPI)을 가렸다(Chromium 실측).
     const el = document.querySelector('[data-tree-sel="1"]');
-    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+    const box = el?.closest('.pc-tree-body');
+    if (el && box) {
+      const r = el.getBoundingClientRect(); const b = box.getBoundingClientRect();
+      box.scrollTop += (r.top - b.top) - (b.height / 2) + (r.height / 2);
+    }
   });
 
   // 선택 노드나 모드가 바뀌면 표시 개수를 처음으로 되돌린다(이전 폴더에서 늘려 둔 값 승계 금지).
