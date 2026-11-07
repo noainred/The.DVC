@@ -184,7 +184,7 @@ function narrowStorageSnapshotRest(d) {
 }
 import { recordActivity } from '../storage/activityLog.js';
 import { sanitizeEdgeResources } from '../storage/resources.js'; // v2.789
-import { saveCapacityPoint } from '../storage/db.js';
+import { saveCapacityPoint, saveNodeLoadPoint } from '../storage/db.js';
 import { ackCollect, setCollectBaseResolver } from '../storage/collectRequests.js';
 
 const FILE = path.join(config.configDir, 'central-agent-storage.json');
@@ -261,6 +261,8 @@ export function saveEdgeStorage(agent, devices, info = {}) {
     // 여전히 엣지 DB). 같은 collectedAt 재push 는 위 dedup 이 걸러 중복 점이 쌓이지 않는다.
     // 실패 스냅샷은 saveCapacityPoint 가 자체 스킵(ok 만 적재 — 그래프 0값 오염 방지).
     saveCapacityPoint(dv).catch(() => { /* DB 비활성 — 스냅샷 보관·로그는 계속 */ });
+    // v2.926 — 노드 부하 시계열도 같은 자리(같은 중복 제거 뒤). 노드 값은 위 sanitizeNodeList(NODE_NUM_KEYS)를 거친 것이다.
+    saveNodeLoadPoint(dv).catch(() => { /* DB 비활성 — 스냅샷 보관·로그는 계속 */ });
     try {
       recordActivity({
         deviceId: key, name: dv.name || key, host: dv.host || '', source: agent,

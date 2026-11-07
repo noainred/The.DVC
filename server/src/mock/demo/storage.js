@@ -177,11 +177,22 @@ export function demoStorageSnapshot(dev, t = Date.now(), now = t) {
   const bad = new Set(); for (let i = 0; i < (spec.badNodes || 0); i++) bad.add((h + i) % spec.nodes);
   const nodeName = (i) => ({ unity480: `sp${'ab'[i]}`, powerstore: `Node${'AB'[i % 2]}-${Math.floor(i / 2) + 1}`, xtremio: `X${Math.floor(i / 2) + 1}-SC${(i % 2) + 1}`,
     powermax: `director-${1 + (i >> 1)}${'AB'[i % 2]}`, vmax: `director-${1 + (i >> 1)}${'AB'[i % 2]}`, vplex: `director-${1 + (i >> 1)}-${(i % 2) + 1}-${'AB'[i % 2]}`, metronode: `director-1-${i + 1}-A` }[spec.type]);
+  // v2.926 — Isilon 노드 부하에 하루 주기(KST 오후가 바쁨)를 얹는다: 노드 부하 추이(히트맵)가 모양을 갖게. 다른 타입은 예전 그대로.
+  const hourOfDay = new Date(t + 9 * HOUR).getUTCHours();
+  const dayProf = spec.type === 'isilon' ? 0.62 + 0.38 * Math.sin(((hourOfDay - 7) / 24) * Math.PI * 2) : 1;
+  // ps-fra-01 의 노드 7 은 매일 02~04시에 값을 읽지 못한 것으로 둔다 — 결측(빗금)·합계 생략 화면 확인용(0 이 아니라 null).
+  const missAt = (i) => spec.k === 'ps-fra-01' && i === 6 && hourOfDay >= 2 && hourOfDay <= 4;
   const list = Array.from({ length: spec.nodes }, (_, i) => {
     const per = spec.type === 'isilon' && total ? total / spec.nodes : 0;
     const node = { id: i + 1, ip: demoIp(`storage:${spec.k}:node${i}`), health: bad.has(i) ? 'degraded' : 'ok',
-      inBps: Math.round(2.5e8 * (0.5 + demoRand(`${spec.k}:n${i}`)) * jig(`in${i}`, 0.3)),
-      outBps: Math.round(4e8 * (0.5 + demoRand(`${spec.k}:o${i}`)) * jig(`out${i}`, 0.3)) };
+      inBps: missAt(i) ? null : Math.round(2.5e8 * (0.5 + demoRand(`${spec.k}:n${i}`)) * dayProf * jig(`in${i}`, 0.3)),
+      outBps: missAt(i) ? null : Math.round(4e8 * (0.5 + demoRand(`${spec.k}:o${i}`)) * dayProf * jig(`out${i}`, 0.3)) };
+    if (spec.type === 'isilon' && !missAt(i)) {
+      // v2.926 — 노드 디스크 쓰기·읽기(B/s)·CPU %(합성 — 실제 수집기 필드와 같은 이름·단위).
+      node.diskInBytesPs = Math.round(9e7 * (0.5 + demoRand(`${spec.k}:di${i}`)) * dayProf * jig(`di${i}`, 0.3));
+      node.diskOutBytesPs = Math.round(1.4e8 * (0.5 + demoRand(`${spec.k}:do${i}`)) * dayProf * jig(`do${i}`, 0.3));
+      node.cpuPct = Math.round(Math.min(97, 12 + 60 * dayProf * (0.55 + 0.5 * demoRand(`${spec.k}:c${i}`)) * jig(`c${i}`, 0.2)) * 10) / 10;
+    }
     if (spec.type === 'isilon') {
       node.hdd = { totalBytes: Math.round(per * 0.92), usedBytes: Math.round(per * 0.92 * used / total), pct: r2(used / total * 100) };
       node.ssd = { totalBytes: Math.round(per * 0.08), usedBytes: Math.round(per * 0.08 * 0.42), pct: 42 };
@@ -207,6 +218,17 @@ export function demoStorageSnapshot(dev, t = Date.now(), now = t) {
   if (spec.type === 'isilon') {
     snap.extra.clusterHealth = bad.size ? 'ATTN' : 'OK';
     snap.extra.dataReduction = '1.00:1';
+    // v2.926 — 노드 부하 읽은 수(실제 수집기의 nodeLoadProbe 와 같은 모양).
+    const method = dev.collectMethod || spec.method;
+    snap.extra.nodeLoadProbe = { source: method === 'ssh' ? 'isi statistics system' : 'REST node.disk.bytes.*.rate.sum · node.cpu.idle.avg',
+      total: list.length, disk: list.filter((n) => n.diskInBytesPs != null).length, cpu: list.filter((n) => n.cpuPct != null).length };
+    if (method === 'ssh') {
+      // v2.926 — 잡 엔진(isi status 꼬리 — SSH 수집기만 읽는다). 합성: 매일 01~05시 SmartPools, 13~14시 MediaScan(Low).
+      const running = [];
+      if (hourOfDay >= 1 && hourOfDay <= 5) running.push({ job: 'SmartPools[118838]', impact: 'Low', pri: 6, policy: 'LOW', phase: '1/2', runTime: `${hourOfDay - 1}:12:40` });
+      if (hourOfDay >= 13 && hourOfDay <= 14) running.push({ job: 'MediaScan[118901]', impact: 'Low', pri: 8, policy: 'LOW', phase: '3/7', runTime: `${hourOfDay - 13}:31:05` });
+      snap.extra.jobs = { running, paused: [], failed: [], recent: [] };
+    }
   }
   // ── 전력(storage/power.js 계약 — 경로가 있는 조합만) ──
   const pkey = `${spec.type}:${dev.collectMethod || spec.method}`;
@@ -388,6 +410,30 @@ async function backfillStorage(devices, now) {
   return { devices: nDev, points, events };
 }
 
+/**
+ * v2.926 — 노드 부하(네트워크·디스크·CPU) 이력: 원시는 최근 30일 시간별, 그 앞 120일은 하루 4점(일 롤업이 차게). 데모 Isilon 만 ·
+ * 그 장비에 노드 부하 기록이 하나도 없을 때만(재기동마다 다시 쌓지 않는다 — 용량 백필과 같은 멱등 규칙). 원시 보존(기본 30일)보다
+ * 오래된 원시 행은 다음 정리에서 지워지고 일 롤업만 남는다 — 실제 운영과 같은 모양이다.
+ */
+async function backfillNodeLoad(devices, now) {
+  const db = await import('../../storage/db.js');
+  if (!(await db.dbAvailable())) return { devices: 0, points: 0, reason: 'db-unavailable' };
+  let nDev = 0; let points = 0;
+  for (const d of devices) {
+    if (!isDemoId(d.id) || d.type !== 'isilon') continue;
+    const o = await db.nodeLoadOldest(d.id);
+    if (o.sampleTs != null || o.day != null) continue;
+    nDev += 1;
+    const base = Math.floor(now / HOUR) * HOUR - (demoHash(d.id) % 50) * 60_000;
+    for (let back = 150 * 24; back >= 1; back -= (back > 30 * 24 ? 6 : 1)) {
+      const r = await db.saveNodeLoadPoint(demoStorageSnapshot(d, base - back * HOUR, now)); if (r.saved) points += 1;
+      if (points % 100 === 0) await new Promise((res) => setImmediate(res)); // 100점마다 양보(이벤트 루프를 길게 잡지 않는다)
+    }
+    await new Promise((res) => setImmediate(res)); // 장비 사이 양보
+  }
+  return { devices: nDev, points };
+}
+
 /** 베어메탈 12시간 이력 365일 — 그 슬롯에 합계가 없을 때만. */
 async function backfillBm(now) {
   const { listBmServers } = await import('../../bmstor/registry.js');
@@ -466,6 +512,7 @@ export async function ensureStorageDemo({ now = Date.now() } = {}) {
         } catch { /* 표지 실패는 시드를 막지 않는다 */ }
       }
       out.storageBackfill = await backfillStorage(reg.listDevices(), now);
+      out.nodeLoadBackfill = await backfillNodeLoad(reg.listDevices(), now);
     } catch (e) { out.storageError = e.message; }
     try {
       const bm = await import('../../bmstor/registry.js');

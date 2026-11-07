@@ -23,6 +23,7 @@ import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { createYielder } from '../util/timeSlice.js';   // v2.743 DB-01: 합계 추이 조각 사이 양보(시간 기준)
 import { pushAll } from '../util/pushAll.js';
 import { normalizeResourceList, resourceKey } from './resources.js';   // v2.789 하위 항목
+import { nodeLoadRowsOf, METRIC_BY_KEY, NODE_LOAD_GROUPS, NODE_LOAD_METRICS, NODE_LOAD_LIMIT } from './nodeLoad.js';   // v2.926 노드 부하
 
 // DB 저장 경로 설정(v2.379)을 따른다 — dbLocation 이 지정한 dbDir 아래, 없으면 configDir.
 // (vmperf/vmtrack 과 동일 규약. MIGRATABLE 에 이 파일이 있어 미적용 시 마이그레이션 후
@@ -46,6 +47,7 @@ const MAX_JSON_BYTES = 512 * 1024; // 엔드포인트당 원문 상한 — 512KB
  */
 export const RAW_KEEP_DAYS_DEF = 90;
 export const DAILY_KEEP_DAYS_DEF = 5 * 365;   // 5년(사용자 지정 기본값)
+export const NODE_LOAD_RAW_KEEP_DAYS_DEF = 30; // v2.926 노드 부하 원시 보존(사용자 확인 기본값 — README §6-3)
 
 /**
  * 일 경계 오프셋(분). 사용자(포탈 운영자)는 **한국**에 있으므로 기본 +9시간이다 —
@@ -58,20 +60,22 @@ import { DAY_OFFSET_MIN, DAY_MS, dayIndex, dayStartMs, dayLabel } from "../util/
 export { DAY_OFFSET_MIN, dayIndex, dayStartMs, dayLabel };
 
 /** 보존 일수(설정 → env → 기본). 순환 import 를 피하려고 setter 로 주입받는다. */
-let _keepDays = { raw: null, daily: null };
-export function setKeepDays({ rawKeepDays, dailyKeepDays } = {}) {
+let _keepDays = { raw: null, daily: null, nodeRaw: null };
+export function setKeepDays({ rawKeepDays, dailyKeepDays, nodeLoadRawKeepDays } = {}) {
   // ⚠⚠ v2.576: `numOrNull` 로 좁힌다. 예전 형태(`Number.isFinite(Number(v)) ? … : null`)는
   //   `Number(null)`·`Number('')`·`Number([])` 를 전부 **0** 으로 통과시킨다. 여기서 0 이 되면
   //   아래 `keepDays()` 의 `_keepDays.raw ?? 기본값` 이 **0 ?? x === 0** 이라 기본값으로 되돌지
   //   못하고 **보존 0일 = 전량 삭제**가 된다. v2.561 은 `loadGrowthSettings()` 가 명시적 null 을
   //   막고 있다는 근거로 REVIEWED_SAFE 로 뒀지만, 그 근거는 **호출부 하나**에 기댄 것이라
   //   다음 호출부가 생기면 무효가 된다. 결과가 파괴적이므로 sink 에서 막는다.
-  _keepDays = { raw: numOrNull(rawKeepDays), daily: numOrNull(dailyKeepDays) };
+  _keepDays = { raw: numOrNull(rawKeepDays), daily: numOrNull(dailyKeepDays), nodeRaw: numOrNull(nodeLoadRawKeepDays) };
 }
 function keepDays() {
   return {
     raw: _keepDays.raw ?? (Number(process.env.STORAGE_HISTORY_KEEP_DAYS) || RAW_KEEP_DAYS_DEF),
     daily: _keepDays.daily ?? (Number(process.env.STORAGE_DAILY_KEEP_DAYS) || DAILY_KEEP_DAYS_DEF),
+    // v2.926 노드 부하 원시 — 노드 × 주기라 용량 원시보다 크다(64 노드 · 1시간 = 하루 1,536행) → 기본을 짧게(30일).
+    nodeRaw: _keepDays.nodeRaw ?? (Number(process.env.STORAGE_NODELOAD_KEEP_DAYS) || NODE_LOAD_RAW_KEEP_DAYS_DEF),
   };
 }
 
@@ -150,7 +154,34 @@ async function openInner() {
         samples INTEGER NOT NULL DEFAULT 1,
         PRIMARY KEY (device_id, rkey, day)
       );
-      CREATE INDEX IF NOT EXISTS idx_resd_day ON resource_daily (day);`);
+      CREATE INDEX IF NOT EXISTS idx_resd_day ON resource_daily (day);
+      /* 노드 부하 시계열(v2.926) — 네트워크 In/Out(bps) · 디스크 쓰기/읽기(B/s) · CPU %. storage/nodeLoad.js 가 규칙을 갖는다.
+         node_load_sample = 스냅샷 1개(장비 × 수집 시각) — 중복 판정(PK) · 그 주기 목록의 노드 수 · 잡 엔진(JSON, 모르면 NULL).
+         node_load_history = 노드 × 수집 시각 원시(보존 nodeLoadRawKeepDays, 기본 30일). 목록에 있는 노드는 값이 모두 NULL 이어도 행을 남긴다
+           (그래야 그 주기의 클러스터 합계가 부분 합인지 판정한다 — 못 읽은 값은 NULL, 0 이 아니다).
+         node_load_daily = 노드 × 일 — 지표마다 sum · n(읽은 표본 수) · max(평균 = sum / n). 보존은 일 롤업 보존일(5년). */
+      CREATE TABLE IF NOT EXISTS node_load_sample (
+        device_id TEXT NOT NULL, ts INTEGER NOT NULL, nodes INTEGER NOT NULL, jobs TEXT,
+        PRIMARY KEY (device_id, ts)
+      );
+      CREATE INDEX IF NOT EXISTS idx_nls_ts ON node_load_sample (ts);
+      CREATE TABLE IF NOT EXISTS node_load_history (
+        device_id TEXT NOT NULL, ts INTEGER NOT NULL, node_id INTEGER NOT NULL,
+        in_bps REAL, out_bps REAL, disk_in REAL, disk_out REAL, cpu_pct REAL
+      );
+      CREATE INDEX IF NOT EXISTS idx_nlh_dev_ts ON node_load_history (device_id, ts);
+      CREATE INDEX IF NOT EXISTS idx_nlh_ts ON node_load_history (ts);
+      CREATE TABLE IF NOT EXISTS node_load_daily (
+        device_id TEXT NOT NULL, node_id INTEGER NOT NULL, day INTEGER NOT NULL, samples INTEGER NOT NULL DEFAULT 1,
+        in_sum REAL NOT NULL DEFAULT 0, in_n INTEGER NOT NULL DEFAULT 0, in_max REAL,
+        out_sum REAL NOT NULL DEFAULT 0, out_n INTEGER NOT NULL DEFAULT 0, out_max REAL,
+        din_sum REAL NOT NULL DEFAULT 0, din_n INTEGER NOT NULL DEFAULT 0, din_max REAL,
+        dout_sum REAL NOT NULL DEFAULT 0, dout_n INTEGER NOT NULL DEFAULT 0, dout_max REAL,
+        cpu_sum REAL NOT NULL DEFAULT 0, cpu_n INTEGER NOT NULL DEFAULT 0, cpu_max REAL,
+        PRIMARY KEY (device_id, node_id, day)
+      );
+      CREATE INDEX IF NOT EXISTS idx_nld_dev_day ON node_load_daily (device_id, day);
+      CREATE INDEX IF NOT EXISTS idx_nld_day ON node_load_daily (day);`);
     _db = {
       conn,
       upLatest: conn.prepare(`INSERT INTO api_latest (device_id, area, endpoint, ts, ok, bytes, truncated, json, error)
@@ -279,6 +310,31 @@ async function openInner() {
       delResDev: conn.prepare('DELETE FROM resource_daily WHERE device_id = ?'),
       // 하위 항목은 장비 × 항목 × 일이라 capacity_daily 보다 크다(Unity 18대 × 20항목 × 5년 ≈ 66만 행) — 청크로 지운다(DB2606-02 규약).
       prune4: conn.prepare('DELETE FROM resource_daily WHERE rowid IN (SELECT rowid FROM resource_daily WHERE day < ? LIMIT ?)'),
+      // v2.926 노드 부하 — 적재(스냅샷 1개 = 트랜잭션 1개 · saveNodeLoadPoint) · 조회(nodeLoadQuery — 장비·시각 인덱스) · 정리(청크).
+      insNodeSample: conn.prepare('INSERT OR IGNORE INTO node_load_sample (device_id, ts, nodes, jobs) VALUES (?,?,?,?)'),
+      insNodeRaw: conn.prepare('INSERT INTO node_load_history (device_id, ts, node_id, in_bps, out_bps, disk_in, disk_out, cpu_pct) VALUES (?,?,?,?,?,?,?,?)'),
+      // ⚠ max 는 스칼라 max() 를 쓰지 않는다 — SQLite 의 max(a, NULL) 은 NULL 이라 못 읽은 표본 하나가 그 날 최대를 지운다.
+      upNodeDaily: conn.prepare(`INSERT INTO node_load_daily (device_id, node_id, day, samples, in_sum, in_n, in_max, out_sum, out_n, out_max, din_sum, din_n, din_max, dout_sum, dout_n, dout_max, cpu_sum, cpu_n, cpu_max)
+        VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(device_id, node_id, day) DO UPDATE SET samples = node_load_daily.samples + 1,
+          in_sum = node_load_daily.in_sum + excluded.in_sum, in_n = node_load_daily.in_n + excluded.in_n,
+          in_max = CASE WHEN excluded.in_max IS NULL THEN node_load_daily.in_max WHEN node_load_daily.in_max IS NULL OR excluded.in_max > node_load_daily.in_max THEN excluded.in_max ELSE node_load_daily.in_max END,
+          out_sum = node_load_daily.out_sum + excluded.out_sum, out_n = node_load_daily.out_n + excluded.out_n,
+          out_max = CASE WHEN excluded.out_max IS NULL THEN node_load_daily.out_max WHEN node_load_daily.out_max IS NULL OR excluded.out_max > node_load_daily.out_max THEN excluded.out_max ELSE node_load_daily.out_max END,
+          din_sum = node_load_daily.din_sum + excluded.din_sum, din_n = node_load_daily.din_n + excluded.din_n,
+          din_max = CASE WHEN excluded.din_max IS NULL THEN node_load_daily.din_max WHEN node_load_daily.din_max IS NULL OR excluded.din_max > node_load_daily.din_max THEN excluded.din_max ELSE node_load_daily.din_max END,
+          dout_sum = node_load_daily.dout_sum + excluded.dout_sum, dout_n = node_load_daily.dout_n + excluded.dout_n,
+          dout_max = CASE WHEN excluded.dout_max IS NULL THEN node_load_daily.dout_max WHEN node_load_daily.dout_max IS NULL OR excluded.dout_max > node_load_daily.dout_max THEN excluded.dout_max ELSE node_load_daily.dout_max END,
+          cpu_sum = node_load_daily.cpu_sum + excluded.cpu_sum, cpu_n = node_load_daily.cpu_n + excluded.cpu_n,
+          cpu_max = CASE WHEN excluded.cpu_max IS NULL THEN node_load_daily.cpu_max WHEN node_load_daily.cpu_max IS NULL OR excluded.cpu_max > node_load_daily.cpu_max THEN excluded.cpu_max ELSE node_load_daily.cpu_max END`),
+      selNodeJobs: conn.prepare('SELECT ts, nodes, jobs FROM node_load_sample WHERE device_id = ? AND ts >= ? AND ts < ? ORDER BY ts LIMIT 5000'),
+      // 가장 오래된 기록 — 집계 하나 · 장비 조건(PK·인덱스 앞부분)이라 인덱스 한 칸만 읽는다(perf-db '집계 하나일 때만 빠르다').
+      selNodeOldestTs: conn.prepare('SELECT MIN(ts) AS t FROM node_load_sample WHERE device_id = ?'),
+      selNodeOldestDay: conn.prepare('SELECT MIN(day) AS d FROM node_load_daily WHERE device_id = ?'),
+      pruneNode1: conn.prepare('DELETE FROM node_load_history WHERE rowid IN (SELECT rowid FROM node_load_history WHERE ts < ? LIMIT ?)'),
+      pruneNode2: conn.prepare('DELETE FROM node_load_sample WHERE rowid IN (SELECT rowid FROM node_load_sample WHERE ts < ? LIMIT ?)'),
+      pruneNode3: conn.prepare('DELETE FROM node_load_daily WHERE rowid IN (SELECT rowid FROM node_load_daily WHERE day < ? LIMIT ?)'),
+      nodeSel: new Map(),   // 묶음·종류별 조회 문장(처음 쓸 때 준비 — nodeLoadStmt)
     };
     lockRetry.ok();
     return _db;
@@ -339,7 +395,7 @@ function maybePrune(db, every = 10) {
 }
 
 // 진행 공유 — 더 늦은 경계(보존일이 더 짧다)로 도는 정리는 이른 경계 요청을 덮는다. 덮지 못하면 끝난 뒤 한 번 더 돈다.
-const _pruneFlight = createPruneFlight({ covers: (run, next) => run.cut >= next.cut && run.dayCut >= next.dayCut });
+const _pruneFlight = createPruneFlight({ covers: (run, next) => run.cut >= next.cut && run.dayCut >= next.dayCut && (run.nodeCut ?? 0) >= (next.nodeCut ?? 0) });
 
 /**
  * 보존 정리 본체(v2.606 DB2606-02). api_history·capacity_history 는 청크(chunkedDelete), capacity_daily 는 장비 × 일 1행이라
@@ -347,15 +403,21 @@ const _pruneFlight = createPruneFlight({ covers: (run, next) => run.cut >= next.
  * @returns {Promise<{apiHistory:number, capacityHistory:number, capacityDaily:number, done:boolean}>}
  */
 function runPrune(db) {
-  const { raw, daily } = keepDays();
-  const key = { cut: Date.now() - raw * DAY_MS, dayCut: dayIndex(Date.now()) - daily };
+  const { raw, daily, nodeRaw } = keepDays();
+  const key = { cut: Date.now() - raw * DAY_MS, dayCut: dayIndex(Date.now()) - daily, nodeCut: Date.now() - nodeRaw * DAY_MS };
   return _pruneFlight.run(key, async () => {
     const a = await chunkedDelete(db.prune1, [key.cut], { label: 'storage api_history' });
     const c = await chunkedDelete(db.prune2, [key.cut], { label: 'storage capacity_history' });
     const d = Number(db.prune3.run(key.dayCut)?.changes || 0);
     // v2.789: 하위 항목 일 롤업도 같은 보존일(청크 — 아래 prune4 주석).
     const r = await chunkedDelete(db.prune4, [key.dayCut], { label: 'storage resource_daily' });
-    return { apiHistory: a.deleted, capacityHistory: c.deleted, capacityDaily: d, resourceDaily: r.deleted, done: a.done && c.done && r.done };
+    // v2.926: 노드 부하 — 원시·표본은 노드 원시 보존일, 일 롤업은 일 롤업 보존일(청크 — ts·day 단독 인덱스).
+    const n1 = await chunkedDelete(db.pruneNode1, [key.nodeCut], { label: 'storage node_load_history' });
+    const n2 = await chunkedDelete(db.pruneNode2, [key.nodeCut], { label: 'storage node_load_sample' });
+    const n3 = await chunkedDelete(db.pruneNode3, [key.dayCut], { label: 'storage node_load_daily' });
+    return { apiHistory: a.deleted, capacityHistory: c.deleted, capacityDaily: d, resourceDaily: r.deleted,
+      nodeLoadHistory: n1.deleted, nodeLoadSample: n2.deleted, nodeLoadDaily: n3.deleted,
+      done: a.done && c.done && r.done && n1.done && n2.done && n3.done };
   });
 }
 
@@ -840,6 +902,117 @@ export async function capacityResets() {
     }
   } catch { /* 테이블 없음(구 DB) */ }
   return out;
+}
+
+/* ── v2.926 노드 부하 시계열 ──────────────────────────────────────────────
+ * 규칙은 storage/nodeLoad.js(순수)가 갖고 여기서는 적재·조회만 한다. 호출 지점은 용량 점과 같은 두 곳 — 중앙 직접 수집
+ * (poller.collectOneInner)과 엣지 push 수신(storageEdge — 같은 collectedAt 재전송은 그 앞에서 걸러진다). 던지지 않는다.
+ */
+/**
+ * 노드 부하 1점(스냅샷 1개) — 표본 행 + 노드 원시 행 + 노드 일 롤업을 **트랜잭션 하나**로(최대 64 노드 × 3문장).
+ * 같은 (장비, 시각) 표본이 이미 있으면 아무것도 쓰지 않는다(일 롤업 이중 집계 방지 — PK 가 판정한다).
+ * @returns {Promise<{saved:boolean, reason?:string, duplicate?:boolean, nodes?:number}>}
+ */
+export async function saveNodeLoadPoint(snap) {
+  const r = nodeLoadRowsOf(snap);
+  if (!r.ok) return { saved: false, reason: r.reason };
+  const db = await open();
+  if (!db) return { saved: false, reason: 'db-unavailable' };
+  const day = dayIndex(r.ts);
+  db.conn.exec('BEGIN');
+  try {
+    const ins = db.insNodeSample.run(r.deviceId, r.ts, r.nodes.length, r.jobs ? JSON.stringify(r.jobs) : null);
+    if (!Number(ins?.changes)) { db.conn.exec('ROLLBACK'); return { saved: false, duplicate: true, reason: 'duplicate' }; }
+    for (const n of r.nodes) {
+      db.insNodeRaw.run(r.deviceId, r.ts, n.id, n.in, n.out, n.din, n.dout, n.cpu);
+      const args = [];
+      for (const m of NODE_LOAD_METRICS) { const v = n[m.key]; args.push(v ?? 0, v == null ? 0 : 1, v ?? null); }
+      db.upNodeDaily.run(r.deviceId, n.id, day, ...args);
+    }
+    db.conn.exec('COMMIT');
+  } catch (e) {
+    try { db.conn.exec('ROLLBACK'); } catch { /* */ }
+    console.warn(`[storage-db] 노드 부하 적재 실패(${r.deviceId}): ${e.message}`);
+    return { saved: false, reason: 'db-error' };
+  }
+  maybePrune(db);
+  return { saved: true, nodes: r.nodes.length, day };
+}
+
+/** 묶음·종류별 조회 문장(지표 열 이름은 NODE_LOAD_METRICS 의 고정 값 — 사용자 입력이 아니다). */
+function nodeLoadStmt(db, group, kind) {
+  const key = `${group}|${kind}`;
+  if (db.nodeSel.has(key)) return db.nodeSel.get(key);
+  const ms = (NODE_LOAD_GROUPS[group] || []).map((k) => METRIC_BY_KEY.get(k));
+  let sql;
+  if (kind === 'raw') {
+    sql = `SELECT node_id AS node, ts, ${ms.map((m) => `${m.col} AS v_${m.key}`).join(', ')}
+      FROM node_load_history WHERE device_id = ? AND ts >= ? AND ts < ? ORDER BY ts, node_id LIMIT ?`;
+  } else if (kind === 'bucket') {
+    // 버킷은 포탈 날짜 경계(오프셋)에 맞춘다 — CAST 필수(node:sqlite 는 수를 REAL 로 묶는다 — selCapBucket 주석).
+    sql = `SELECT node_id AS node, CAST(CAST((ts + ?) / ? AS INTEGER) * ? - ? AS INTEGER) AS b,
+        ${ms.map((m) => `AVG(${m.col}) AS v_${m.key}, MAX(${m.col}) AS x_${m.key}, COUNT(${m.col}) AS n_${m.key}`).join(', ')}
+      FROM node_load_history WHERE device_id = ? AND ts >= ? AND ts < ?
+      GROUP BY node_id, CAST((ts + ?) / ? AS INTEGER) ORDER BY 2, 1 LIMIT ?`;
+  } else {
+    sql = `SELECT node_id AS node, day, ${ms.map((m) => `${m.key}_sum AS s_${m.key}, ${m.key}_n AS n_${m.key}, ${m.key}_max AS x_${m.key}`).join(', ')}
+      FROM node_load_daily WHERE device_id = ? AND day >= ? AND day <= ? ORDER BY day, node_id LIMIT ?`;
+  }
+  const st = db.conn.prepare(sql);
+  db.nodeSel.set(key, st);
+  return st;
+}
+
+/**
+ * 노드 부하 조회 — buildNodeLoadSeries 가 받는 행 모양으로 돌려준다.
+ * @param {{group:'net'|'disk'|'cpu', kind:'raw'|'bucket'|'daily', from:number, to:number, bucketMs?:number, offsetMin?:number}} q
+ * @returns {Promise<{db:boolean, rows:Array<object>, truncated:boolean}>}
+ */
+export async function nodeLoadQuery(deviceId, { group = 'net', kind = 'raw', from, to, bucketMs = 0, offsetMin = DAY_OFFSET_MIN } = {}) {
+  const db = await open();
+  if (!db || !NODE_LOAD_GROUPS[group]) return { db: !!db, rows: [], truncated: false };
+  const keys = NODE_LOAD_GROUPS[group];
+  const st = nodeLoadStmt(db, group, kind);
+  const id = String(deviceId);
+  let raw; let limit;
+  if (kind === 'raw') {
+    limit = NODE_LOAD_LIMIT * 400;
+    raw = st.all(id, from, to, limit);
+    return { db: true, truncated: raw.length >= limit,
+      rows: raw.map((r) => ({ node: r.node, ts: r.ts, v: Object.fromEntries(keys.map((k) => [k, r[`v_${k}`]])) })) };
+  }
+  if (kind === 'bucket') {
+    const off = offsetMin * 60_000; const b = Math.max(60_000, Math.floor(bucketMs));
+    limit = NODE_LOAD_LIMIT * 200;
+    raw = st.all(off, b, b, off, id, from, to, off, b, limit);
+    return { db: true, truncated: raw.length >= limit,
+      rows: raw.map((r) => ({ node: r.node, ts: r.b,
+        v: Object.fromEntries(keys.map((k) => [k, r[`v_${k}`]])),
+        mx: Object.fromEntries(keys.map((k) => [k, r[`x_${k}`]])),
+        n: Object.fromEntries(keys.map((k) => [k, r[`n_${k}`]])) })) };
+  }
+  limit = NODE_LOAD_LIMIT * 120;
+  raw = st.all(id, dayIndex(from), dayIndex(to - 1), limit);
+  return { db: true, truncated: raw.length >= limit,
+    rows: raw.map((r) => ({ node: r.node, ts: dayStartMs(r.day),
+      v: Object.fromEntries(keys.map((k) => [k, r[`n_${k}`] > 0 ? r[`s_${k}`] / r[`n_${k}`] : null])),
+      mx: Object.fromEntries(keys.map((k) => [k, r[`x_${k}`]])),
+      n: Object.fromEntries(keys.map((k) => [k, r[`n_${k}`]])) })) };
+}
+
+/** 창 안의 잡 엔진 표본(원시 보존 안에서만 있다). */
+export async function nodeLoadJobs(deviceId, from, to) {
+  const db = await open();
+  return db ? db.selNodeJobs.all(String(deviceId), from, to) : [];
+}
+
+/** 가장 오래된 기록 — 원시 표본 시각 · 일 롤업 날짜(화면이 '몇 칸까지 과거로 갈 수 있나' 를 계산한다). 없으면 null. */
+export async function nodeLoadOldest(deviceId) {
+  const db = await open();
+  if (!db) return { sampleTs: null, day: null };
+  const t = db.selNodeOldestTs.get(String(deviceId))?.t;
+  const d = db.selNodeOldestDay.get(String(deviceId))?.d;
+  return { sampleTs: Number.isFinite(t) ? t : null, day: Number.isFinite(d) ? dayLabel(d) : null };
 }
 
 export function _resetForTest() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; _pruneFlight.reset(); lockRetry.ok(); }

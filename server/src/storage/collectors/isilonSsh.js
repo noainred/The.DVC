@@ -24,6 +24,7 @@ import { readIsiHwSsh, applyIsiNodeHw, ISI_HW_CMD, HW_START_BUDGET_MS } from './
 import { emptySnapshot } from '../types.js';
 import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
 import { DEFAULT_PERIODS } from '../growth.js';
+import { ISI_SYSTEM_STATS_CMD, parseIsiSystemStats, applyIsiSystemStats } from './isilonNodeLoad.js'; // v2.926 노드 디스크·CPU
 
 const fmtStep = (b) => {
   for (const [u, k] of [['PiB', 5], ['TiB', 4], ['GiB', 3], ['MiB', 2], ['KiB', 1]]) {
@@ -385,7 +386,7 @@ export async function readIsiPowerSsh(sh, host, { expectedNodes = null } = {}) {
 /*
  * ── 세션 예산(v2.741 감사 DEV-02 — v2.528 Unity 와 같은 유형의 재발) ─────────────────────────────────
  * 이 세션의 명령 시한 합은 `isi status`·`isi version`·`isi auth users list`(각 exec 기본 60초) + 통계 20초 + 전원 키·값
- * 20+20초 + 시리얼 45초 = 최악 약 285초로, 폴러의 장비 시한(`storage/poller.js DEVICE_TIMEOUT_MS`, 기본 180초)을 넘는다.
+ * 20+20초 + 시리얼 45초 = 최악 약 285초(v2.926 노드 부하 20초를 더해 305초)로, 폴러의 장비 시한(`storage/poller.js DEVICE_TIMEOUT_MS`, 기본 180초)을 넘는다.
  * 넘는 순간 `withDeadline` 이 세션을 끊고 **이미 받은 `isi status`(용량·노드)까지 통째로 버린다**(시리얼에만 예산이
  * 있었다). 그래서 부가 명령은 남은 예산 안에서만 기다리고, 남은 시간이 모자라면 **시작하지 않고** 사유를 남긴다
  * (`cliSsh.runCliSession` 과 같은 방식 — 예산 env 도 같은 `STORAGE_CLI_SESSION_BUDGET_MS` 를 쓴다).
@@ -455,6 +456,8 @@ export async function collectViaSsh(device, { budgetMs = ISI_SESSION_BUDGET_MS }
         //   isi status(필수) → 정확 용량 통계 → 전원 → 버전 → 계정 → 시리얼 순이다. 서로 의존이 없어 순서만 바꿨다.
         // v2.604(COL-2604-01): 정확한 용량 바이트(best-effort) — 못 읽으면 isi status 반올림 값을 쓰고 그 사실을 밝힌다.
         const stats = await soft(bsh.exec(ISI_STATS_CMD, 20_000));
+        // v2.926 — 노드별 디스크 쓰기·읽기·CPU(best-effort · 20초). 정확 용량 다음 — 둘 다 매 주기 시계열에 쓰는 값이라 부가 정보(버전·계정)보다 앞이다.
+        const sys = await soft(bsh.exec(ISI_SYSTEM_STATS_CMD, 20_000));
         // v2.667 — 전원(best-effort): 키 탐색(6시간 캐시) → 그 키 하나의 현재값. 못 읽으면 사유만 남긴다.
         const power = await readIsiPowerSsh(bsh, device.host, { expectedNodes: parsedStatus.nodes.length || null });
         const ver = await soft(bsh.exec('isi version'));
@@ -463,7 +466,7 @@ export async function collectViaSsh(device, { budgetMs = ISI_SESSION_BUDGET_MS }
         // v2.741(DEV-02): 세션 예산이 바닥이면 시리얼 모듈의 '예산 초과' 갈래로 보낸다(직전 성공값은 그대로 쓰고, 실패로 기억하지 않는다).
         const hwStart = leftMs() < ISI_MIN_SLICE_MS ? Date.now() - HW_START_BUDGET_MS - 1 : sessionStartedAt;
         const hw = parsedStatus.nodes.length ? await readIsiHwSsh(bsh, device, { sessionStartedAt: hwStart, clusterName: parsedStatus.name }) : null;
-        return { status: status.stdout || '', parsedStatus, ver: ver.stdout || '', usersRaw: usersRaw.stdout || '', usersBudget: !!usersRaw.budget, stats: stats.stdout || '', power, hw };
+        return { status: status.stdout || '', parsedStatus, ver: ver.stdout || '', usersRaw: usersRaw.stdout || '', usersBudget: !!usersRaw.budget, stats: stats.stdout || '', sys: sys.stdout || '', sysBudget: !!sys.budget, power, hw };
       },
     );
     const parsed = r.parsedStatus || parseIsiStatus(r.status);
@@ -472,6 +475,7 @@ export async function collectViaSsh(device, { budgetMs = ISI_SESSION_BUDGET_MS }
     try { const j = JSON.parse(r.usersRaw); users = Array.isArray(j) ? j : null; } catch { /* 계정 섹션만 생략 */ }
     const snap = normalizeIsiStatus(device, parsed, { version, users, exact: parseIsiStatsBytes(r.stats) });
     markMixedBasis(snap, device.id);
+    applyIsiSystemStats(snap, parseIsiSystemStats(r.sys), { budget: r.sysBudget, failed: !r.sys });
     if (r.power?.power) snap.extra.power = r.power.power; else if (r.power?.probe) snap.extra.powerProbe = r.power.probe;
     applyIsiNodeHw(snap, r.hw, { source: ISI_HW_CMD });
     if (!users) {
