@@ -30,6 +30,7 @@ export async function localPerfOps(mode, { key, q = {}, now = Date.now(), deps =
     trend: async (o) => (await import('./trendQuery.js')).trendFor(o),
     outside: async (pts, series) => (await import('./baseline.js')).outsideOf(pts, series),
     compare: async (o) => (await import('./compare.js')).compareFor(o),
+    latest: async () => (await import('./db.js')).latestUsage(),
     ...deps,
   };
   if (mode === 'changes') {
@@ -61,6 +62,19 @@ export async function localPerfOps(mode, { key, q = {}, now = Date.now(), deps =
   if (mode === 'compare') {
     const [settings, rules] = [await D.settings(), await D.rules()];
     return D.compare({ agent, key, q, settings, rules, now });
+  }
+  if (mode === 'compare-series') {
+    // 6단계 서버 비교 — 이 서버의 지표 여러 개 계열 통계 · 스파크 · 베이스라인 이탈(요청 1개 — 엣지 대행도 이 함수).
+    const M = await import('./multiCompare.js');
+    const [settings, rules] = [await D.settings(), await D.rules()];
+    const metrics = M.parseCompareMetrics(q.metrics, { group: String(q.group || '') });
+    const w = M.compareWindow({ range: String(q.range || ''), from: q.from != null && q.from !== '' ? Number(q.from) : null, to: q.to != null && q.to !== '' ? Number(q.to) : null, now });
+    if (!w) return { __status: 400, ok: false, reason: 'from 이 to 보다 앞이어야 합니다.' };
+    let latestRow = null; let bands = null; let B = null;
+    try { latestRow = (await D.latest()).find((r) => String(r.key) === String(key) && String(r.agent || '') === agent) || null; } catch { latestRow = null; }
+    try { B = await import('./baseline.js'); bands = await B.slotBands({ agent, cfg: rules.baseline, intervalMs: settings.intervalMs, now }); } catch { bands = null; }
+    const { createYielder } = await import('../util/timeSlice.js');
+    return M.compareSeriesFor({ agent, key, metrics, from: w.from, to: w.to, settings, trendFor: D.trend, latestRow, bands, deviationsFor: B?.deviationsFor || null, yieldFn: createYielder(15) });
   }
   return { __status: 400, ok: false, reason: 'mode' };
 }

@@ -69,7 +69,7 @@ export function ChangeTable({ events = [] }) {
 }
 
 /** 베이스라인 · 변경 이벤트 · 집중 1분 점 겹침 카드. changes = 부모가 부른 변경 응답(같은 창). */
-export function BaselineOverlay({ itemKey, win, changes = null, narrow = false }) {
+export function BaselineOverlay({ itemKey, win, changes = null, narrow = false, annotMarks: pins = [] }) {
   const [metric, setMetric] = useState('disk_await_ms');
   const q = `from=${Math.floor(win.from)}&to=${Math.floor(win.to)}`;
   const band = useGenJson(itemKey ? `/tools/bm-usage/perf/${enc(itemKey)}/baseline?metric=${metric}&${q}` : '');
@@ -84,7 +84,7 @@ export function BaselineOverlay({ itemKey, win, changes = null, narrow = false }
   const polys = band.data?.ok ? bandPolys(bs, { ...win, yMax }) : [];
   const outs = band.data?.ok && Array.isArray(band.data.outside) ? band.data.outside : [];   // 띠 밖 판정은 서버(반증 L3 — baseline.outsideOf)
   const ev = changes?.events || [];
-  const marks = changeMarks(ev, win);
+  const marks = [...changeMarks(ev, win), ...pins];   // 6단계: 운영 주석 ◆ 핀도 같은 줄에
   const focusDots = (changes?.focus || []).filter((f) => f.vals?.[metric]?.avg != null).map((f) => ({ t: f.t, v: f.vals[metric].avg, color: 'var(--amber)', title: `집중 ${fmtHm(f.t)} ${vText(f.vals[metric].avg, info.unit)}` }));
   const dots = [...outs.map((p) => ({ t: p.t, v: p.avg, color: 'var(--red)', title: `띠 밖 ${fmtHm(p.t)} ${vText(p.avg, info.unit)}` })), ...focusDots];
   return (

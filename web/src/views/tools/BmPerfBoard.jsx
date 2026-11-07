@@ -44,7 +44,7 @@ export function VerdictBadge({ verdict }) {
  * 매트릭스 행들(tr 배열) — 보드와 정렬 회귀 테스트가 같은 함수를 쓴다(테스트는 이 결과에 실제 sortChildren 을 건다).
  * 열 순서(마지막 머리글 줄): 0 서버 · 1 경로 · 2~16 자원 5 × U·S·E · 17 판정.
  */
-export function matrixRows(items = [], { authStops = [], staleMs = null, now = Date.now(), th = null, selKey = '', open = () => {} } = {}) {
+export function matrixRows(items = [], { authStops = [], staleMs = null, now = Date.now(), th = null, selKey = '', open = () => {}, cmpKeys = null, onPickCmp = null } = {}) {
   const keyOpen = (key) => (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(key); } };
   return items.map((it) => {
     const e = it.entry;
@@ -54,6 +54,8 @@ export function matrixRows(items = [], { authStops = [], staleMs = null, now = D
     return (
       <tr key={`${it.agent}|${it.key}`} data-key={it.key} style={{ background: selKey === it.key ? 'rgba(103,232,249,0.06)' : undefined }}>
         <td data-sort={it.name}>
+          {/* 6단계: 비교에 담기(체크 — 서버 칸 안에 둔다: 열을 늘리면 정렬 열 번호가 밀린다) */}
+          {onPickCmp && <input type="checkbox" className="bmcmp-pick" aria-label={`${it.name} 비교에 담기`} checked={!!cmpKeys?.includes(it.key)} onChange={() => onPickCmp(it.key)} />}
           <span role="button" tabIndex={0} className="bmp-link" onClick={() => open(it.key)} onKeyDown={keyOpen(it.key)}>{it.name}</span>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{it.vcenterId || '귀속 없음'}{it.agent ? ` · 엣지 ${it.agent}` : ''}</div>
         </td>
@@ -87,7 +89,7 @@ export function StateChips({ states = [] }) {
   );
 }
 
-export default function BmPerfBoard({ items = [], th = null, intervalMs = null, authStops = [], staleMs = null, onOpen, selKey = '', perfError = '', corpOff = 0, now: nowProp = null }) {
+export default function BmPerfBoard({ items = [], th = null, intervalMs = null, authStops = [], staleMs = null, onOpen, selKey = '', perfError = '', corpOff = 0, now: nowProp = null, cmpKeys = null, onPickCmp = null, onCompare = null, cmpMsg = '' }) {
   const [all, setAll] = useState(false);
   const now = nowProp ?? Date.now();
   const ordered = useMemo(() => severityOrder(items), [items]);
@@ -134,6 +136,13 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
           <h4 style={{ margin: 0 }}>USE 매트릭스</h4>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>자원 5 × 사용률(U) · 포화(S) · 오류(E) · 심각도 순 · 머리글을 누르면 정렬</span>
         </div>
+        {onPickCmp && (
+          <div className="bmcmp-tray" style={{ marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>서버 칸의 체크로 비교에 담습니다 — 담은 서버 {cmpKeys?.length || 0}대</span>
+            {onCompare && <button type="button" className="btn btn-sm bmp-touch" disabled={(cmpKeys?.length || 0) < 2} onClick={() => onCompare(cmpKeys)}>비교 보기</button>}
+            {cmpMsg && <span style={{ fontSize: 12, color: toneVar('warn') }}>{cmpMsg}</span>}
+          </div>
+        )}
         {!items.length ? (
           <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>표시할 서버가 없습니다.</p>
         ) : (
@@ -151,7 +160,7 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
               </tr>
             </thead>
             <tbody>
-              {matrixRows(ordered, { authStops, staleMs, now, th, selKey, open })}
+              {matrixRows(ordered, { authStops, staleMs, now, th, selKey, open, cmpKeys, onPickCmp })}
             </tbody>
           </STable>
         )}
@@ -179,6 +188,7 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'baseline', marginBottom: 6 }}>
           <h4 style={{ margin: 0 }}>병목 Top</h4>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>서버 판정 등급 순 · 판정 한 줄은 서버 문장 그대로 · 두 경로가 다 읽힌 서버는 교차 판정을 붙입니다</span>
+          {onCompare && top.length >= 2 && <button type="button" className="btn btn-sm bmp-touch" onClick={() => onCompare(top.map((it) => it.key))}>Top {top.length} 비교</button>}
         </div>
         {!top.length ? (
           <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>병목·포화·오류·주의로 판정된 서버가 없습니다{k.held ? ` — 다만 판정 보류 ${k.held}대는 정상이라는 뜻이 아닙니다` : ''}.</p>

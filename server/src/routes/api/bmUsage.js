@@ -135,6 +135,17 @@ const stripAckBy = (st, isAdmin) => {
  * 제외(skipped) 행·귀속 없음 표본에는 주소 칸이 없어 **등록부 주소와 대조**해야 이름=FQDN 인 행을 잡는다.
  * 등록부를 못 읽어도 IP 판정은 그대로 동작한다(넓게 여는 쪽으로 실패하지 않는다 — IPv4 는 항상 가린다).
  */
+/**
+ * 6단계 반증 F11 — 비관리자 응답의 이름 · 주소 가림 판정기 **하나**(이 노드 대상 · iDRAC 등록부 + **엣지 보관분 대상의 idracHost · osHostName**).
+ *   비교 · 운영 주석처럼 엣지 위임 서버 이름이 실리는 응답은 이 함수로 판정기를 만든다(엣지 호스트명을 빠뜨리면 FQDN 이 그대로 나갔다).
+ * @param {{bmAddressHosts:Function, listEdgeBmUsage:Function}} D @param {object} tg 이 노드 대상(currentTargets 결과)
+ * @returns {Promise<{hosts:string[], match:Function}>}
+ */
+export async function perfAddressMatcher(D, tg) {
+  const hosts = await D.bmAddressHosts(tg).catch(() => []);
+  const edgeHosts = (await D.listEdgeBmUsage().catch(() => [])).flatMap((rec) => (rec?.snap?.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])).filter((h) => typeof h === 'string' && h);
+  return { hosts, match: addressMatcher([...new Set([...hosts, ...edgeHosts])]) };
+}
 export async function bmAddressHosts(tg) {
   const hosts = [];
   for (const x of (tg?.targets || [])) {
@@ -209,8 +220,8 @@ function usageDetailPart(key, { admin = false, hosts = [] } = {}) {
   };
 }
 
-/** v2.920(반증 D2) — 데모(mock) 대상 최신값에 성능 열을 겹친다(응답 전용 · mock 이 아니면 그대로). */
-async function demoPerfRows(rows, targets) {
+/** v2.920(반증 D2) — 데모(mock) 대상 최신값에 성능 열을 겹친다(응답 전용 · mock 이 아니면 그대로). 6단계 라우트(비교 · 플레이북)도 같은 함수(판정이 화면마다 갈리지 않게). */
+export async function demoPerfRows(rows, targets) {
   if (!isMockMode()) return rows;
   return (await import('../../mock/demo/baremetal.js')).demoPerfLatestRows(rows, targets);
 }

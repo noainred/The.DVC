@@ -309,6 +309,8 @@ async function bmPerfOpsCollector(req, res, mode) {
 collectorRouter.get('/bm-usage/changes', tokenFirst('bm-usage-changes'), (req, res) => bmPerfOpsCollector(req, res, 'changes'));
 collectorRouter.get('/bm-usage/baseline', tokenFirst('bm-usage-baseline'), (req, res) => bmPerfOpsCollector(req, res, 'baseline'));
 collectorRouter.get('/bm-usage/compare', tokenFirst('bm-usage-compare'), (req, res) => bmPerfOpsCollector(req, res, 'compare'));
+// 6단계 서버 비교 — 엣지 위임 서버 1대의 지표 여러 개 계열 통계(요청 1개 · 보관 없음 · central/bmComparePull.js). 대상 목록 밖 키는 404.
+collectorRouter.get('/bm-usage/compare-series', tokenFirst('bm-usage-compare-series'), (req, res) => bmPerfOpsCollector(req, res, 'compare-series'));
 
 /**
  * 이 엣지의 **토큰 자기보고**(v2.560 — 사용자 요청 "등록된 모든 엣지/수집 서버의 모든 토큰 …

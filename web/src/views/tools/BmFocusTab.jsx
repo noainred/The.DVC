@@ -6,7 +6,8 @@
  * ⚠ 폴링: **진행 중 · 대기 세션을 보고 있을 때만** FOCUS_POLL_MS(30초)마다 그 세션 하나를 다시 읽는다 — 1분 표본이라 30초면 한 분을 놓치지 않고,
  *   세션당 focusPollMax 회로 묶이며 끝나면(완료 · 중지 · 중단) 멈춘다. 그 밖에는 탭을 열 때 1회 + ‘다시 읽기’(웹 규약의 예외 — web.md v2.929).
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useAnnotations } from './BmAnnotations.jsx'; // 6단계 운영 주석(이벤트 줄 ◆)
 import { postJson, fetchJson, hasRole, canCsv } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -48,7 +49,7 @@ export function ProgressBand({ session, samples }) {
 }
 
 /** 세션 상세(상태 없음 — 응답을 받아 그린다). */
-export function FocusSessionView({ resp, name = '' }) {
+export function FocusSessionView({ resp, name = '', annotations = [] }) {
   const s = resp?.session || null;
   const samples = resp?.samples || [];
   if (!s) return null;
@@ -57,7 +58,9 @@ export function FocusSessionView({ resp, name = '' }) {
   const mp = missPathParts(s, sum);
   const rows = heatRows(samples);
   const before = beforeRows(sum, samples);
-  const events = focusEvents(s, samples, resp?.changes || []);
+  // 6단계: 같은 시간의 운영 주석(◆ — 사람이 남긴 맥락)도 이벤트 줄에.
+  const events = [...focusEvents(s, samples, resp?.changes || []),
+    ...(annotations || []).filter((a) => !a.deleted && (a.end ?? a.at) >= (s.start || s.created) && a.at <= (s.end || Date.now())).map((a) => ({ at: a.at, kind: 'annot', text: `◆ ${a.by} — ${a.text}` }))].sort((a, b) => a.at - b.at);
   const c1 = (sum.candidates || [])[0];
   const maxAwait = sum.maxBy?.disk_await_ms; const maxCpu = sum.maxBy?.cpu_pct;
   const companion = [sum.maxBy?.cpu_iowait_pct ? `iowait ${vText(sum.maxBy.cpu_iowait_pct.value, '%')}` : '', sum.maxBy?.psi_io_full10 ? `PSI io ${vText(sum.maxBy.psi_io_full10.value, '%')}` : '', sum.maxBy?.swap_out_ps ? `스왑아웃 ${vText(sum.maxBy.swap_out_ps.value, '/s')}` : ''].filter(Boolean).join(' · ');
@@ -156,7 +159,7 @@ export function FocusSessionView({ resp, name = '' }) {
         {!events.length ? <p className="bmo-note">이벤트가 없습니다.</p> : (
           <div className="bmo-tl">
             {events.map((e, i) => (
-              <div key={i} className="bmo-tl-row"><span className="bmo-tl-at">{fmtHm(e.at)}</span><span className="bmp-chip">{({ start: '시작', verdict: '판정', missing: '결측', dmesg: 'dmesg', change: '변경', end: '끝' })[e.kind] || e.kind}</span><span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{e.text}</span></div>
+              <div key={i} className="bmo-tl-row"><span className="bmo-tl-at">{fmtHm(e.at)}</span><span className="bmp-chip">{({ start: '시작', verdict: '판정', missing: '결측', dmesg: 'dmesg', change: '변경', end: '끝', annot: '주석' })[e.kind] || e.kind}</span><span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{e.text}</span></div>
             ))}
           </div>
         )}
@@ -223,6 +226,9 @@ export default function BmFocusTab({ itemKey, name = '' }) {
   const writable = list.resp?.writable;
   const canRun = roleOk && writable !== false;
   const plan = list.resp?.plan || null;
+  // 6단계: 고른 세션 시간의 운영 주석(자동 주석 포함) — 세션을 고를 때 1회.
+  const sessWin = useMemo(() => { const x = sel.resp?.session; return x ? { from: (x.start || x.created) - 60_000, to: (x.end || Date.now()) + 60_000 } : null; }, [sel.resp]);
+  const ann = useAnnotations(itemKey && sessWin ? [itemKey] : [], sessWin, 0);
 
   // poll = 폴링 타이머가 부른 것 — 횟수 카운터를 되돌리지 않는다(반증 F8: 예전에는 open 이 늘 0 으로 돌려 상한이 동작하지 않고 목록도 매번 다시 읽었다).
   const open = async (id, { poll = false } = {}) => {
@@ -290,7 +296,7 @@ export default function BmFocusTab({ itemKey, name = '' }) {
 
       {sel.err && <OpsError err={sel.err} />}
       {sel.resp?.ok === false && <p className="bmo-note" style={{ color: toneVar('bad') }}>{focusCodeView(sel.resp.code).text}{sel.resp.reason ? ` (${sel.resp.reason})` : ''}</p>}
-      {sel.resp?.session && <FocusSessionView resp={sel.resp} name={name} />}
+      {sel.resp?.session && <FocusSessionView resp={sel.resp} name={name} annotations={ann.list} />}
 
       <section className="bmo-card">
         <h5 className="bmo-h">세션 — 이 서버 · 최근 {list.resp?.keepDays ?? 30}일 <button type="button" className="btn btn-sm bmp-touch" onClick={() => list.reload()} disabled={list.loading}>{list.loading ? '읽는 중…' : '다시 읽기'}</button></h5>

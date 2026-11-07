@@ -62,6 +62,8 @@ export function expectedCycleMs({ targets, osTargets = targets, concurrency, bas
   return Math.round(Math.max(1, N / C) * ((n(baseMs) ?? BASE_DEFAULT_MS) + osShare * Math.max(0, n(windowS) ?? 0) * 1000));
 }
 
+/** 창 결정 사유 열거(화면 문구 표 · 수집 건강 정제가 같은 목록을 쓴다 — 6단계). */
+export const PEAK_PLAN_REASONS = Object.freeze(['off', 'fits', 'reduced', 'base-over-budget', 'no-targets']);
 /**
  * 이번 주기의 창 길이 결정(순수).
  * @param {{targets:number, osTargets?:number, concurrency:number, intervalMs:number, ratio?:number, capS:number, baseMs:number, baseSource?:string}} p

@@ -22,7 +22,8 @@ import { isMockMode } from '../mock/demo/flags.js'; // v2.920 데모 성능 열(
 import { config, currentVersion } from '../config.js';
 import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive } from './settings.js';
 import { publicTarget } from './targets.js';
-import { currentTargets, bmUsageStatus, authStopsFor } from './poller.js';
+import { currentTargets, bmUsageStatus, authStopsFor, collectHealthNow } from './poller.js';
+import { COLLECT_HEALTH_VER, hourlyTrend } from './collectHealth.js';
 import { latestUsage } from './db.js';
 import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from './perfView.js';
 import { hwFactsReader } from './hwFacts.js';
@@ -143,5 +144,21 @@ async function envelopeOps(now = Date.now()) {
   const out = {};
   try { const F = await import('./focus/run.js'); const f = await F.focusEnvelopeSummary({ now }); if (f) out.focusSummary = f; } catch { /* */ }
   try { const A = await import('./perfAlerts.js'); out.perfAlertSent = (A.perfAlertStatus().sent || []).filter((r) => Number(r?.at) >= now - 86_400_000); } catch { /* */ }
+  // 6단계 수집 건강 — 이 엣지가 매 주기 잰 값 + 주기 추이(7일 · 1시간 칸). 아직 주기가 없으면 값은 싣지 않는다(지어내지 않는다 — 중앙은 ‘아직 주기 없음’).
+  //   표지(collectHealthVer)는 주기 전에도 싣는다 — 중앙이 ‘값 없음’ 을 ‘구버전’ 과 가른다(반증 F3: 재시작 직후 6단계 엣지가 ‘엣지 버전 낮음’ 으로 보였다).
+  out.collectHealthVer = COLLECT_HEALTH_VER;
+  try {
+    const h = collectHealthNow();
+    if (h) out.collectHealth = { ...h, trend: await collectTrend({ now }) };
+  } catch { /* 그 필드만 빠진다 */ }
   return out;
+}
+
+/** 6단계 — 이 노드의 주기 추이(메인 DB collect_cycle · 7일 → 1시간 칸). 못 읽으면 빈 배열. */
+export async function collectTrend({ now = Date.now(), days = 7 } = {}) {
+  try {
+    const O = await import('./opsDb.js');
+    const rows = await O.cycleRange({ agent: config.agent?.name || '', from: now - days * 86_400_000, to: now, limit: 20_000 });
+    return rows ? hourlyTrend(rows) : [];
+  } catch { return []; }
 }

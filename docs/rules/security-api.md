@@ -25,6 +25,7 @@
 - (v2.912 추가) 로그인 기록(최근 로그인 · 로그인 횟수)은 감사 로그가 아니라 `security/loginHistory.js` 하나로 센다
 - (v2.923 추가) 베어메탈 진단 스냅샷(원격 명령 실행 경로) — 상수 명령 · 읽기 전용 · sudo 0 · 인자 0 · 사유 · 감사 · 동시 1건 · 법인당 하루 상한 · 범위 404/403 · 인증 가드
 - (v2.929 추가) 베어메탈 집중 모니터링(분마다 SSH · Redfish 를 여는 쓰기 경로) · 성능 알림 규칙 설정 · 시험 실행 — 스냅샷 규약 재사용 · 법인 상한 예약 · 인증 즉시 중단 · 설정 소유자 · 전체 범위
+- (6단계 추가) 리눅스 성능 6단계 — 비교(법인 간은 전체 범위만 · 범위 밖 = 없음) · 5대 집중(전부 검사 뒤 시작) · 주석(작성자/관리자 · 흔적 삭제) · 목표 저장(설정 소유자) · 플레이북 실행 경로 없음 · 공유 링크 권한 없음
 
 ## 본문
 
@@ -438,6 +439,25 @@
   iDRAC 쪽은 명령이 아니라 **이미 가진 값**(인벤토리 SEL/LC 최근 5 · 센서 순간값 · 전력 최신 — Redfish 호출 0). 튜닝 탭에는 **쓰기 경로 자체가 없다**(sysctl -w · tuned-adm profile · ethtool -G 0 — 소스 스윕).
   ⑪ **GET 에 writable**(반증 W4 — server/CLAUDE.md v2.733): 보관분 목록 · 용도 보기 응답에 쓰기 범위(`inUserWriteScope`)를 싣고 화면이 실행 · 태그 칸을 잠근다(서버는 그대로 403). 응답 캐시 키(opsKey)에 **쓰기 범위 서명**을 넣었다 — 조회 범위 · 역할이 같고 쓰기 범위만 다른 두 계정이 캐시를 나누면 writable 이 샌다.
   ⑫ **덮어쓰기 scope(반증 R10)**: `PUT /tools/bm-usage/tuning/overrides` 의 scope 는 'all' 또는 vCenter id 형식이면서 Object.prototype 이름이 아닌 것만 · 맵은 null 프로토타입 · 읽기는 Object.hasOwn — 예전에는 ‘toString’ 이 ok:true 인데 저장되지 않고 전역 내장 함수 객체를 고쳤다(재현).
+- ⚠⚠ **리눅스 성능 6단계 — 비교 · 주석 · 세트 · 목표선 · 수집 건강의 권한 · 범위 · 감사(새 쓰기 경로는 주석 · 세트 · 목표 · 5대 집중뿐 — 원격 명령 실행 경로는 없다)**
+  (`routes/api/{bmCompare,bmAnnotations,bmPlaybookSlo,bmCollectHealth}.js`. 회귀 `server/test/bmPerfStage6{Compare,Annot,PlaybookSlo,Health}.test.js` — 실제 api 라우터 · 변이 28건 전부 잡힘):
+  ① **비교 조회**(tools): 범위 밖 · 없는 서버는 둘 다 `none`(존재 은닉) · **법인 간 허용(`cross=1`)은 전체 범위 계정만** — 범위 계정이 보내면 404(기능 은닉 · 화면에 토글 없음) · 비관리자는 이름 가림(주소 매처).
+  ② **5대 동시 집중**(`POST /compare/focus` — writeRole + tools): 키를 전부 먼저 해석(하나라도 없음 · 범위 밖 → 404, 아무것도 시작하지 않음) → **쓰기 범위 하나라도 밖이면 403 전부 거부**(v2.733 함정 — 조회 무제한 + writeVcenters) →
+     서버마다 5단계 `focusStartResolved`(사유 필수 · 법인 상한 · 인증 정지 거부 · 감사 `bm-perf.focus` origin `compare`). 사유는 한 번 받아 모든 서버에 같이 쓴다.
+  ③ **운영 주석**: 조회 tools — 주석의 법인이 **전부** 조회 범위 안일 때만 보인다(귀속 없음은 범위 계정에 숨김) · 쓰기 writeRole — 조회 밖 404 → 쓰기 밖 403(서버 대상은 대상 해석의 법인 · 법인 대상은 알려진 법인만) ·
+     고침 · 삭제는 **작성자 또는 관리자**(자동 주석 `system` 은 관리자만) · 삭제는 흔적(본문 · 연결을 비운다) · 감사 `bm-perf.annotation`(op · 종류 · 본문 앞 120자) · 응답에 서버 키를 싣지 않는다(요청한 토큰만 `includes` · 이름은 비관리자 가림).
+  ④ **비교 세트**: 사용자별(남의 세트를 읽거나 지우지 못한다) · 범위 계정은 `cross` 세트 저장 400 · 쓰기 writeRole · 감사 `bm-perf.compare-set`.
+  ⑤ **목표선 설정**: 저장 `PUT /tools/bm-usage/slo` = admin + `requireSettingsOwner`(소유자 ∧ 전체 범위) + tools · 형식 밖 400(모르는 지표 · 기준 · 연산 · Object.prototype 이름) · 감사 `bm-perf.slo`(바뀐 범위 요약) ·
+     조회는 tools — 범위 관리자는 보이는 서버의 개별 목표만 · **비관리자는 서버 키(주소일 수 있다)를 받지 않고 개수만**(`serversHidden`).
+  ⑥ **수집 건강**(admin/operator + tools — 설계 ‘관리자와 운영자’): 범위 계정은 자기 법인 행만 · 다른 법인 서버가 섞인 노드 값(주기 · 동시성 · SSH · DB · 추이 · 며칠째)은 `nodeHidden` · 보이는 법인이 없는 노드는 개수만 · 마지막 당김 사유 원문 없음.
+  ⑦ **진단 플레이북은 실행 경로가 없다**: 카탈로그 · 서버별 응답 모두 `executes:false` · 라우트는 GET 뿐 · `bmusage/playbooks.js` 는 SSH · exec 모듈을 import 하지 않는다(테스트가 소스로 확인) ·
+     명령 줄은 **검토된 읽기 전용 목록에 글자 그대로 있는 줄만**(`READONLY_COMMANDS` 정확 일치 — 반증 F6: 예전 도구 화이트리스트는 `dnf history undo` · `ss -K` · `sort -o /etc/passwd` ·
+     `awk 'BEGIN{system(…)}'` · `grep "a\" # " ; reboot`(이스케이프 따옴표가 주석 자르기를 속임 — bash 실측 실행) 등 17건을 통과시켰다) 싣고, 자리표시 값은 이름 화이트리스트(셸 의미 문자 금지) —
+     복사한 사람이 서버에서 그대로 붙여 넣어도 쓰기 · 재시작 명령이 되지 않게. 목록에 더할 줄은 `lintCommand`(도구별 허용 인자)를 통과해야 한다(검토 보조 — 보증은 목록).
+  ⑨ **가림 판정기는 하나**(반증 F11): 엣지 위임 서버 이름이 실리는 응답(비교 · 운영 주석)은 `bmUsage.perfAddressMatcher`(이 노드 대상 · 등록부 + 엣지 보관분 idracHost · osHostName)로 가린다 —
+     주석 목록이 엣지 호스트명(FQDN)을 비관리자에게 그대로 보내던 것을 막는다(응답은 `addressHidden:true` 라고 말하면서 원문을 실었다).
+  ⑩ **범위 계정의 수집 건강 노드 상태**(반증 F8): 노드 값을 숨긴 노드는 상태도 숨기고(`hidden`) 법인 행은 그 법인 값으로 판정 — 다른 법인의 인증 정지가 ‘기준 밖’ 으로 새지 않는다.
+  ⑧ **공유 링크는 권한을 주지 않는다**: 해시(`#/tools/bm-usage/share?…`)에는 보기 상태만 — 여는 사람의 권한 · 범위로 다시 조회한다(없으면 ‘찾지 못함’ — 존재 여부를 말하지 않는다). 캡처 PNG 는 브라우저가 화면을 그린 것(서버 경로 없음).
 - ⚠⚠ **v2.929 — 베어메탈 집중 모니터링(`POST /api/tools/bm-usage/perf/:key/focus` · `/focus/:id/stop`)은 분마다 SSH · Redfish 를 여는 쓰기 경로다 — v2.923 스냅샷 규약을 그대로 쓰고, 넘는 부분만 더했다**
   (`routes/api/bmPerfOps.js bmFocusStart · bmFocusStop` · `bmusage/focus/run.js` · `routes/collector.js /bm-usage/focus[/stop]` · `central/bmPerfOpsPull.js runEdgeFocus · stopEdgeFocus`.
   회귀 `server/test/bmPerf2929Focus.test.js`(실제 api 라우터 + 엣지 collector 라우트) · `bmPerf2929Alerts.test.js ⑥` · 변이 20건 전부 잡힘):
