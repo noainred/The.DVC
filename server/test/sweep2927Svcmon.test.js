@@ -112,9 +112,11 @@ test('D1-03 메타 없는 엣지 행 — 알림 판정을 미루고 메타가 �
   EDGE._resetEdgeCache();
   TR._setAlertSettingsForTest({ enabled: true, failCount: 3, scope: 'settings' });
   EDGE.ingestReport('KR-EDGE', { snapId: NOW, seq: 1, total: 1, rows: [row] }, NOW);
+  assert.equal(TR.alertStats().metaPending, 1, '경로를 모르면 범위도 모른다 — 범위 검사 전에 보류로 센다');
   EDGE.ingestReport('KR-EDGE', { snapId: NOW + 60_000, seq: 1, total: 1, rows: [{ ...row, a: 61_000 }], meta, metaSig: 'sig1' }, NOW + 60_000);
   await TR.flushAlerts();
   assert.equal(sent.length, 1, '메타가 온 뒤 범위 안(설정 연동 경로)으로 판정');
+  assert.equal(TR.alertStats().metaPending, 0);
 
   // 시한 — 메타가 끝내 오지 않으면 시한 뒤 메타 없이 판정한다(무기한 보류 금지)
   sent.length = 0;
@@ -246,12 +248,13 @@ test('D1-05 ③ 지우거나 끈 점검의 알린 상태가 닫힌다 — 이 �
     await POLLER.runNow();
     assert.equal(TR.alertStats().alerted, 0, '색인을 다시 만들면 살아 있지 않은 점검의 상태를 닫는다');
   }
-  assert.match(SRC('src/svcmon/poller.js'), /forgetAlertedWhere\('', \(id\) => liveIds\.has\(id\)\)/);
+  assert.match(SRC('src/svcmon/poller.js'), /forgetAlertedWhere\('', \(_k, e\) => liveIds\.has\(e\.testId\)\)/);
   // keep 판정 — 살아 있는 것은 남기고 다른 scope 는 건드리지 않는다
   TR.noteResult({ scope: '', testId: 'live', at: NOW, prev: 'ok', status: 'bad', streak: 1, target: { path: 'Infra' } });
   TR.noteResult({ scope: '', testId: 'dead', at: NOW, prev: 'ok', status: 'bad', streak: 1, target: { path: 'Infra' } });
-  TR.noteResult({ scope: 'EDGE-B', testId: 'dead', at: NOW, prev: 'ok', status: 'bad', streak: 1, target: { path: 'Infra' } });
-  TR.forgetAlertedWhere('', (id) => id === 'live');
+  // v2.928 엣지 알림 키는 이름 기준 — 이름이 없으면 판정 보류라 알린 상태가 생기지 않는다(대상·점검 이름을 싣는다)
+  TR.noteResult({ scope: 'EDGE-B', testId: 'dead', at: NOW, prev: 'ok', status: 'bad', streak: 1, target: { name: 'db9', path: 'Infra' }, test: { name: 'TCP' } });
+  TR.forgetAlertedWhere('', (_k, e) => e.testId === 'live');
   assert.equal(TR.alertStats().alerted, 2, '살아 있는 점검 · 다른 scope(엣지)는 남는다');
   TR._resetTransitionsForTest({ send: async () => {} });
   TR._setAlertSettingsForTest({ enabled: true, failCount: 1 });
@@ -265,6 +268,32 @@ test('D1-05 ③ 지우거나 끈 점검의 알린 상태가 닫힌다 — 이 �
   EDGE.ingestReport('EDGE-G', { snapId: NOW + 120_000, seq: 1, total: 1, rows: [{ i: 'e2', s: 'ok', r: '1ms', m: 1, k: 3, a: 0 }], metaSig: 's' }, NOW + 120_000);
   assert.equal(EDGE.getAgentRaw('EDGE-G').rows.has('e1'), false);
   assert.equal(TR.alertStats().alerted, 0, 'GC 가 행을 지우면 알린 상태도 닫힌다');
+  // 재배정(같은 점검에 새 id) — 옛 id 행이 GC 로 지워져도 남은 행이 같은 이름 키라 알린 상태는 남는다(v2.928 의도 — 같은 실패를 다시 알리지 않는다)
+  const sentR = [];
+  TR._resetTransitionsForTest({ send: async (x) => { sentR.push(x); } });
+  TR._setAlertSettingsForTest({ enabled: true, failCount: 1 });
+  const mr = (i) => ({ i, p: 'Infra', n: 'vc-r', h: 'h', t: 'TCP 443', y: 'tcp', iv: 60 });
+  EDGE.ingestReport('EDGE-R', { snapId: NOW, seq: 1, total: 1, rows: [{ i: 'o1', s: 'bad', r: 'x', k: 1, a: 0 }], meta: [mr('o1')], metaSig: 's1' }, NOW);
+  EDGE.ingestReport('EDGE-R', { snapId: NOW + 60_000, seq: 1, total: 1, rows: [{ i: 'n1', s: 'bad', r: 'x', k: 2, a: 0 }], meta: [mr('n1')], metaSig: 's2' }, NOW + 60_000);
+  EDGE.ingestReport('EDGE-R', { snapId: NOW + 120_000, seq: 1, total: 1, rows: [{ i: 'n1', s: 'bad', r: 'x', k: 3, a: 0 }], metaSig: 's2' }, NOW + 120_000);
+  assert.equal(EDGE.getAgentRaw('EDGE-R').rows.has('o1'), false, '옛 id 행은 GC 됐다');
+  // ⚠ 재배정 직후 한 세대는 옛 행·새 행 메타가 공존해 nameCount 2 → dupName → 새 id 는 testId 키로 한 번 더 알린다(main v2.928 동작 그대로 —
+  //   이 묶음에서 고치지 않았다 · 보고). GC 뒤에는 이름 키(옛 알림)만 남고 고아가 된 testId 키는 닫힌다.
+  assert.equal(TR.alertStats().alerted, 1, '같은 이름 키의 행이 남아 있으면 알린 상태를 지우지 않는다(고아 testId 키만 닫는다)');
+  EDGE.ingestReport('EDGE-R', { snapId: NOW + 180_000, seq: 1, total: 1, rows: [{ i: 'n1', s: 'ok', r: '1ms', m: 1, k: 1, a: 0 }], metaSig: 's2' }, NOW + 180_000);
+  assert.equal(TR.alertStats().alerted, 0, '새 id 의 복구가 남은 이름 키를 닫는다');
+  await TR.flushAlerts();
+  assert.equal(sentR.filter((x) => x.severity === 'info').length, 1, '복구 알림 한 번');
+  // 보류 중이던 행이 GC 로 사라지면 보류 수에서도 빠진다
+  TR._resetTransitionsForTest({ send: async () => {} });
+  TR._setAlertSettingsForTest({ enabled: true, failCount: 1 });
+  EDGE.ingestReport('EDGE-H', { snapId: NOW, seq: 1, total: 1, rows: [{ i: 'h1', s: 'bad', r: 'x', k: 1, a: 0 }, { i: 'h2', s: 'ok', r: '1', m: 1, k: 1, a: 0 }], meta: [meta('h2')], metaSig: 's' }, NOW);
+  assert.equal(TR.alertStats().metaPending, 1);
+  EDGE.ingestReport('EDGE-H', { snapId: NOW + 60_000, seq: 1, total: 1, rows: [{ i: 'h2', s: 'ok', r: '1', m: 1, k: 2, a: 0 }], metaSig: 's' }, NOW + 60_000);
+  EDGE.ingestReport('EDGE-H', { snapId: NOW + 120_000, seq: 1, total: 1, rows: [{ i: 'h2', s: 'ok', r: '1', m: 1, k: 3, a: 0 }], metaSig: 's' }, NOW + 120_000);
+  assert.equal(EDGE.getAgentRaw('EDGE-H').alertPending.size, 0);
+  assert.equal(TR.alertStats().metaPending, 0, '지운 행을 보류로 세지 않는다');
+  TR._setAlertSettingsForTest({ enabled: true, failCount: 1 });
   // 엣지 잊기
   EDGE.ingestReport('EDGE-F', { snapId: NOW, seq: 1, total: 1, rows: [{ i: 'f1', s: 'bad', r: 'x', k: 1, a: 0 }], meta: [meta('f1')], metaSig: 's' }, NOW);
   assert.equal(TR.alertStats().alerted, 1);
@@ -275,7 +304,8 @@ test('D1-05 ③ 지우거나 끈 점검의 알린 상태가 닫힌다 — 이 �
 test('D1-06 요약 알림은 통계에서 요약으로 센다', async () => {
   TR._resetTransitionsForTest({ send: async () => {} });
   TR._setAlertSettingsForTest({ enabled: true, failCount: 1 });
-  for (let i = 0; i < 7; i++) TR.noteResult({ scope: 'edge-x', testId: `s${i}`, at: NOW, status: 'bad', streak: 1, target: { path: 'Infra' } });
+  // v2.928 엣지 알림 키는 (엣지 · 경로 · 대상 · 점검 이름) — 서로 다른 점검 7개
+  for (let i = 0; i < 7; i++) TR.noteResult({ scope: 'edge-x', testId: `s${i}`, at: NOW, status: 'bad', streak: 1, target: { name: `h${i}`, path: 'Infra' }, test: { name: 'TCP' } });
   const sent = await TR.flushAlerts();
   assert.equal(sent.length, 1);
   assert.match(sent[0].key, /:summary:\d+$/, '키 모양(시각 포함 — 반증 M4)은 그대로');
@@ -335,38 +365,28 @@ test('D1-08 화면 문구용 값 — 알림 묶음 창·요약 기준(+1 은 서
   }
 });
 
-test('E1-05 개요 집계 — 양보하는 async 판이 동기 판과 같은 결과 · 실제로 양보한다 · 엣지 행은 반복자 · 라우트는 single-flight', async () => {
+test('E1-05 개요 집계 — 라우트는 양보판(buildDashAsync)과 single-flight · 엣지 행은 엣지 하나씩(main v2.928 구현 — 등가·양보·계산 1회는 svcmonImprove2928 이 고정)', async () => {
+  // 우리 단언: 큰 입력에서 실제로 이벤트 루프가 돈다(시간 기준 양보 — 기본 yielder)
   const targets = []; const results = new Map();
   for (let i = 0; i < 6000; i++) {
-    const tests = [{ id: `x${i}a`, name: 'ping', type: i % 7 ? 'ping' : 'cert', intervalSec: 60 }, { id: `x${i}b`, name: 'https', type: 'http', intervalSec: 60 }];
-    targets.push({ id: `gx${i}`, name: `host-${i % 900}`, host: `10.1.${i % 250}.${i % 200}`, path: `법인${i % 9}\\랙${i % 4}`, tests, origin: i % 3 ? { kind: 'set:idrac', corp: `법인${i % 9}` } : undefined });
-    for (const x of tests) results.set(x.id, { status: ['ok', 'warn', 'bad'][i % 3], reply: i % 5 ? `D-${i % 70}` : 'ok', ms: i % 4 ? i % 300 : null, streak: i % 6, ts: NOW - 10_000 });
+    const tests = [{ id: `x${i}a`, name: 'ping', type: 'ping', intervalSec: 60 }, { id: `x${i}b`, name: 'https', type: 'http', intervalSec: 60 }];
+    targets.push({ id: `gx${i}`, name: `host-${i % 900}`, host: 'h', path: `법인${i % 9}\\랙${i % 4}`, tests });
+    for (const x of tests) results.set(x.id, { status: ['ok', 'warn', 'bad'][i % 3], reply: 'ok', ms: i % 300, streak: i % 6, ts: NOW - 10_000 });
   }
-  const mkItems = () => Array.from({ length: 6000 }, (_, i) => ({ state: ['ok', 'bad', 'stale', 'zzz'][i % 4], reply: 'D-3', ms: i % 3 ? i % 50 : null, streak: i % 9, path: `엣지\\g${i % 7}`, target: `e-${i % 1700}`, host: 'h', test: 't', type: i % 2 ? 'ping' : 'domain' }));
-  const e1 = mkItems();
-  const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((q) => [q, x[q]])) : x));
-  const sync = DASH.buildDash({ targets, results, edgeStates: [{ agent: 'A', items: e1 }], now: NOW });
+  const items = Array.from({ length: 6000 }, (_, i) => ({ state: 'ok', reply: 'x', ms: i % 50, streak: 1, path: `엣지\\g${i % 7}`, target: `e-${i}`, host: 'h', test: 't', type: 'ping' }));
   let ticks = 0; let on = true;
   const spin = () => { if (!on) return; ticks += 1; setImmediate(spin); };
   setImmediate(spin);
-  const asy = await DASH.buildDashAsync({ targets, results, edgeStates: [{ agent: 'A', items: e1.values() }], now: NOW }, { sliceMs: 1 });
+  const { createYielder } = await import('../src/util/timeSlice.js');
+  const asy = await DASH.buildDashAsync({ targets, results, agents: ['A'], edgeItemsOf: () => items, now: NOW }, { maybeYield: createYielder(1), every: 128 });
   on = false;
-  assert.equal(canon(asy), canon(sync), '같은 결과(키 순서 제외)');
+  assert.equal(asy.summary.total, 18000);
   assert.ok(ticks >= 2, `계산 도중 이벤트 루프가 돌았다(ticks ${ticks})`);
-  assert.ok(sync.hexTruncated && sync.hexes.length === DASH.HEX_MAX);
-  // 전부 정렬한 결과와 같은 앞 HEX_MAX(안정 정렬)
-  // 반복자 — edgeState 항목과 같은 내용
-  EDGE._resetEdgeCache();
-  EDGE.ingestReport('IT', { snapId: NOW, seq: 1, total: 1, rows: [{ i: 'a', s: 'ok', r: '1ms', m: 1, k: 1, a: 0 }, { i: 'b', s: 'bad', r: 'x', k: 4, a: 0 }], meta: [{ i: 'a', p: 'P', n: 'na', h: 'ha', t: 'TCP', y: 'tcp', iv: 60 }], metaSig: 's' }, NOW);
-  const viaState = EDGE.edgeState('IT', { limit: 50_000, sort: false }, NOW).items;
-  const viaIter = [...EDGE.edgeItems('IT', NOW).items];
-  assert.deepEqual(viaIter, viaState);
-  // 라우트 — 동시 요청이 같은 계산을 기다린다
+  const route = SRC('src/routes/svcmon/settingsSync.js');
+  assert.match(route, /await buildDashAsync\(/);
+  assert.match(route, /_dashInflight/);
+  assert.doesNotMatch(route, /edgeState\(e\.agent, \{ limit: 50_000/, '엣지 행을 전 엣지 한꺼번에 모으지 않는다');
   const [a, b] = await Promise.all([call('GET', '/overview', VIEWER), call('GET', '/overview', VIEWER)]);
   assert.equal(a.status, 200); assert.equal(b.status, 200);
   assert.equal(a.json.at, b.json.at);
-  const route = SRC('src/routes/svcmon/settingsSync.js');
-  assert.match(route, /_dashInflight && _dashInflight\.key === key/, 'single-flight');
-  assert.match(route, /await buildDashAsync\(/);
-  assert.doesNotMatch(route, /edgeState\(e\.agent, \{ limit: 50_000/, '엣지 행을 배열로 모으지 않는다');
 });

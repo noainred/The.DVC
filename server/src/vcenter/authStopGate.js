@@ -75,8 +75,13 @@ export const authStopBody = (info) => ({ ok: false, ...info });
  */
 export function respondIfVcAuthStopped(req, res, vc, { allowManual = false, skipExtra = null } = {}) {
   const skip = vcSkipOf(vc);
-  // v2.927: skipExtra — 호출부가 사유에 덧붙일 값(예: 엣지 위임이면 담당 엣지 이름). 사유 · 문구는 그대로다.
-  if (skip) { res.status(409).json({ ok: false, ...skip, ...((typeof skipExtra === 'function' && skipExtra(skip)) || {}) }); return true; }
+  if (skip) {
+    // v2.926: 호출자가 skip 본문에 더할 안내(예: 엣지 위임 vCenter 의 엣지 포탈 주소 — 관리자만). 판정 · 사유 문구는 그대로다.
+    let extra = {};
+    if (typeof skipExtra === 'function') { try { extra = skipExtra(skip) || {}; } catch { extra = {}; } }
+    res.status(409).json({ ok: false, ...skip, ...extra });
+    return true;
+  }
   if (allowManual && req.query?.manual === '1') return false;
   const info = vcAuthStopOf(vc);
   if (!info) return false;

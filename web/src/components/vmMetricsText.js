@@ -28,9 +28,10 @@ export function metricErrorState(err) {
     return { authStopped: { attempts, since, reason: String(body.reason || '') }, skip: null, message: String(body.reason || err.message || '') };
   }
   if (body && typeof body === 'object' && typeof body.skipReason === 'string' && body.skipReason) {
-    // v2.927: 엣지 위임이면 담당 엣지 이름(agent) — 안내가 '그 엣지 포탈에서 보세요' 로 말한다(주소는 오지 않는다)
-    const agent = typeof body.agent === 'string' && body.agent.trim() ? body.agent.trim().slice(0, 64) : null;
-    return { authStopped: null, skip: { skipReason: body.skipReason, reason: String(body.reason || ''), ...(agent ? { agent } : {}) }, message: String(body.reason || err.message || '') };
+    // v2.926: 엣지 위임이면 서버가(관리자에게만) 담당 엣지 포탈 주소를 싣는다 — 아는 모양(url 문자열)일 때만 받는다.
+    const e = body.edge;
+    const edge = e && typeof e === 'object' && typeof e.url === 'string' && e.url ? { id: String(e.id ?? ''), name: String(e.name || e.id || ''), url: e.url } : null;
+    return { authStopped: null, skip: { skipReason: body.skipReason, reason: String(body.reason || ''), edge }, message: String(body.reason || err.message || '') };
   }
   return { authStopped: null, skip: null, message: String(err?.message || err || '') };
 }
@@ -50,4 +51,18 @@ export function metricAuthStopText(stop) {
   return `**인증 실패로 멈춘 vCenter 라 자동 갱신을 멈췄습니다**${stop.attempts != null ? `(실패 ${stop.attempts}회)` : ''}.`
     + ' 같은 계정으로 반복 로그인하면 **계정이 잠깁니다**. 비밀번호를 고치거나 설정 › vCenter 연결 테스트가 성공하면 다시 조회합니다.'
     + ' 아래 ‘다시 조회’ 는 1회만 시도합니다.';
+}
+
+/**
+ * v2.926 — 엣지 포탈의 같은 화면 주소: `<엣지 url>/<hash>`. http(s) 가 아닌 주소 · 빈 값은 null(링크를 그리지 않는다).
+ * 끝의 '/' 는 선형으로 떼어 낸다(정규식 `/\/+$/` 금지 — O(n²)).
+ */
+export function edgePortalHref(edge, hash) {
+  let base = typeof edge?.url === 'string' ? edge.url.trim() : '';
+  if (!/^https?:\/\//i.test(base)) return null;
+  let end = base.length;
+  while (end > 0 && base[end - 1] === '/') end -= 1;
+  base = base.slice(0, end);
+  const h = typeof hash === 'string' ? hash : '';
+  return `${base}/${h.startsWith('#') ? h : `#${h}`}`;
 }

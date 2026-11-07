@@ -167,7 +167,7 @@ function rebuildIndex() {
   for (const id of [...nextDue.keys()]) if (!liveIds.has(id)) nextDue.delete(id);
   for (const id of [...results.keys()]) if (!liveIds.has(id)) results.delete(id);
   // v2.927(점검 D1-05 ③): 지우거나 끈 점검은 결과가 더 오지 않는다 — 이 포탈(scope '')의 '알린 상태' 도 닫는다(복구 알림 없음).
-  forgetAlertedWhere('', (id) => liveIds.has(id));
+  forgetAlertedWhere('', (_k, e) => liveIds.has(e.testId));
 }
 
 /*

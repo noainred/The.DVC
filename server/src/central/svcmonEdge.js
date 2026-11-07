@@ -32,7 +32,7 @@ import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { listAssignments, noteExpectMs } from './svcmonAssign.js';
-import { noteResult, noteAlertOnly, forgetAlerted, forgetAlertedWhere } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림
+import { noteResult, noteAlertOnly, alertKeyOf, forgetHeld, forgetAlertedWhere, hasAlertedIn } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림 · v2.928 보류 재판정 · v2.927 보류 시한·상태 정리
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -76,9 +76,37 @@ let agents = Object.create(null);   // null-proto: agent 이름이 '__proto__' �
 const text = (v, n) => (typeof v === 'string' ? capStr(v, n) : '');
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+/**
+ * v2.928(반증 재검토 N1 — 재현): 엣지 알림 키는 (경로 · 대상 이름 · 점검 이름)인데 **점검 이름은 유일하지 않다**(마법사 기본 이름 —
+ *   TCP 22·443 둘 다 'TCP 포트 열림'). 같은 이름 키를 가진 메타가 둘 이상이면 그 행은 testId 키로 떨어뜨려야 한다 — 그 개수를 엣지별로 센다.
+ */
+const nameKeyOfMeta = (m) => (m ? `${m.p}\u0001${m.n}\u0001${m.t}` : '');
+function metaSet(a, id, m) {
+  const prev = a.meta.get(id);
+  if (prev) { const k = nameKeyOfMeta(prev); const c = (a.nameCount.get(k) || 0) - 1; if (c > 0) a.nameCount.set(k, c); else a.nameCount.delete(k); }
+  a.meta.set(id, m);
+  const k = nameKeyOfMeta(m); a.nameCount.set(k, (a.nameCount.get(k) || 0) + 1);
+}
+function metaDelete(a, id) {
+  const prev = a.meta.get(id);
+  if (!prev) return;
+  const k = nameKeyOfMeta(prev); const c = (a.nameCount.get(k) || 0) - 1;
+  if (c > 0) a.nameCount.set(k, c); else a.nameCount.delete(k);
+  a.meta.delete(id);
+}
+/** 알림 판정용 대상·점검 정보 — 이름 키가 겹치면 dupName(=testId 키로). 메타가 없으면 이름 없이(판정 보류). */
+function alertInfoOf(a, id) {
+  const mm = a.meta.get(id);
+  return {
+    target: { name: mm?.n, path: mm?.p, host: mm?.h },
+    test: { name: mm?.t, type: mm?.y, dupName: !!mm && (a.nameCount.get(nameKeyOfMeta(mm)) || 0) > 1 },
+  };
+}
+
 function blank(agent) {
   return {
     agent,
+    nameCount: new Map(),   // v2.928: 메타 이름 키 → 개수(알림 키 충돌 판정)
     firstAt: 0,
     lastAt: 0,
     lastSnapId: 0,
@@ -194,11 +222,10 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     //   (반증 M5 — 재현: measuredAt = 수신 시각 − 구간값이라 전송 지연만큼 ms 단위로 흔들린다). 새 측정은 상태가 바뀌거나 연속 횟수(k)가 바뀐다.
     const row = a.rows.get(id);
     if (!prev || prev.s !== row.s || prev.k !== row.k) {
-      const mm = a.meta.get(id);
-      // v2.927(점검 D1-03): 메타가 없으면 집계·전이만 기록하고 알림 판정은 메타가 온 뒤로 미룬다(아래 alertPending 처리 — 시한 있음).
-      noteResult({ at: measuredAt, scope: a.agent, testId: id, prev: prev?.s || null, status: row.s, reply: row.r, ms: row.m, streak: row.k,
-        target: { name: mm?.n, path: mm?.p, host: mm?.h }, test: { name: mm?.t, type: mm?.y }, deferAlert: !mm });
-      if (!mm) { if (!a.alertPending.has(id)) a.alertPending.set(id, recvAt); } else a.alertPending.delete(id);
+      const info = alertInfoOf(a, id);
+      noteResult({ at: measuredAt, scope: a.agent, testId: id, prev: prev?.s || null, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info });
+      // 메타가 아직 없으면(중앙 재시작 직후) 알림 판정이 보류된다 — 아래(메타 루프 뒤)에서 다시 판정한다(N2 · v2.927 D1-03: 다음 요청에 메타가 와도 · 시한).
+      if (!info.target.name || !info.test.name) { if (!a.alertPending.has(id)) a.alertPending.set(id, recvAt); } else a.alertPending.delete(id);
     }
     accepted += 1;
   }
@@ -218,26 +245,28 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
         a.counters.metaOverflow = (a.counters.metaOverflow || 0) + 1;
         continue;
       }
-      a.meta.set(id, {
+      metaSet(a, id, {
         p: text(m?.p, 620), n: text(m?.n, 120), h: text(m?.h, 253),
         t: text(m?.t, 80), y: text(m?.y, 16), iv: num(m?.iv) || 60,
       });
     }
     a.metaSig = text(body?.metaSig, 64);
   }
-
-  // v2.927(점검 D1-03): 미룬 알림 판정 — 메타가 왔으면 그 이름·경로로(범위 '설정 연동 대상만' 판정도 이때), 시한을 넘기면 메타 없이 판정한다.
-  //   집계·전이는 이미 기록했다(noteAlertOnly 는 판정만). 행이 사라졌으면 버린다. 보류 집합은 행 id 의 부분집합이라 상한이 행 상한과 같다.
+  // v2.928(반증 재검토 N2): 메타 없이 보류됐던 행은 메타가 오면 지금 다시 판정한다 — 같은 측정의 재전송은 다시 세지 않으므로(M5)
+  //   여기서 놓치면 다음 측정(인증서·도메인은 하루)까지 알림이 늦었다. 시간별 집계·전이 이력은 이미 셌다(알림만).
+  // v2.927(점검 D1-03): 보류는 **요청을 넘어** 이어진다 — 중앙 재시작 직후에는 메타가 needMeta 응답 뒤 **다음** push 에 오고 그 push 의 행은 같은
+  //   측정(재전송)이라 noteResult 가 다시 불리지 않는다. 또 시한(metaAlertHoldMs)을 넘기면 이름 없이 testId 키로 판정한다(무기한 보류 금지).
+  //   보류 집합은 행 id 의 부분집합이라 상한이 행 상한과 같다.
   if (a.alertPending.size) {
     const hold = metaAlertHoldMs(a);
     for (const [id, since] of a.alertPending) {
       const row = a.rows.get(id);
-      if (!row) { a.alertPending.delete(id); continue; }
-      const mm = a.meta.get(id);
-      if (!mm && recvAt - since < hold) continue;
+      if (!row) { a.alertPending.delete(id); forgetHeld(a.agent, id); continue; }
+      const info = alertInfoOf(a, id);
+      const named = !!(info.target.name && info.test.name);
+      if (!named && recvAt - since < hold) continue;
       a.alertPending.delete(id);
-      noteAlertOnly({ at: row.measuredAt, scope: a.agent, testId: id, status: row.s, reply: row.r, streak: row.k,
-        target: { name: mm?.n, path: mm?.p, host: mm?.h }, test: { name: mm?.t, type: mm?.y } });
+      noteAlertOnly({ at: row.measuredAt, scope: a.agent, testId: id, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info, ...(named ? {} : { metaTimeout: true }) });
     }
   }
 
@@ -270,11 +299,24 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
       else { a.regressPrevSnapId = snapId; a.counters.regressGcSkipped = (a.counters.regressGcSkipped || 0) + 1; }
     } else { a.regressSince = 0; a.regressPrevSnapId = 0; }
     if (!warmHold && (snapId >= a.prevCompleteSnapId || regressReset)) {
+      let gone = 0;
       for (const [id, row] of a.rows) {
-        // v2.927(점검 D1-05 ③): 엣지에서 지워진(또는 꺼진) 점검 — 결과가 더 오지 않으므로 '알린 상태' 도 닫는다(복구 알림 없음).
-        if (row.snapId !== snapId && row.snapId !== keepPrev) { a.rows.delete(id); a.alertPending.delete(id); forgetAlerted(a.agent, id); }
+        if (row.snapId !== snapId && row.snapId !== keepPrev) { a.rows.delete(id); a.alertPending.delete(id); forgetHeld(a.agent, id); gone += 1; }
       }
-      for (const id of a.meta.keys()) if (!a.rows.has(id)) a.meta.delete(id);
+      for (const id of [...a.meta.keys()]) if (!a.rows.has(id)) metaDelete(a, id);
+      // v2.927(점검 D1-05 ③): 엣지에서 지워진(또는 꺼진) 점검은 결과가 더 오지 않는다 — 남은 행의 알림 키에 없는 '알린 상태' 를 닫는다(복구 알림 없음).
+      //   v2.928 이름 키라 재배정으로 id 만 바뀐 점검은 새 행이 같은 키를 가져 남는다(같은 실패를 다시 알리지 않게). 메타가 빠진 행이 있으면 그 행의
+      //   키를 모르므로 이번에는 건너뛴다(지우면 그 점검이 다시 '처음 실패' 로 알려진다). 알린 상태가 있을 때만 키를 계산한다.
+      if (gone && hasAlertedIn(a.agent)) {
+        const live = new Set();
+        let unknown = false;
+        for (const id of a.rows.keys()) {
+          const k = alertKeyOf({ scope: a.agent, testId: id, ...alertInfoOf(a, id) });
+          if (!k) { unknown = true; break; }
+          live.add(k);
+        }
+        if (!unknown) forgetAlertedWhere(a.agent, (k) => live.has(k));
+      }
       a.prevCompleteSnapId = snapId;
       if (regressReset) { a.regressSince = 0; a.regressPrevSnapId = 0; a.counters.regressResets = (a.counters.regressResets || 0) + 1; }
     }
@@ -404,42 +446,6 @@ export function edgeSummaryWithAssigned(now = Date.now()) {
 }
 
 /** 엣지 1개의 항목 목록(메타가 있으면 이름·경로까지). limit 로 잘라 응답 크기를 묶는다. */
-/** 행 1개 → 화면 항목(상태 판정은 여기 하나 — edgeState · edgeItems 가 같이 쓴다). */
-function edgeItemOf(a, id, r, m, silent, now) {
-  const iv = (m?.iv || 60) * 1000;
-  const limitMs = Math.max(3 * iv, 5 * (a.expectMs || 60_000));
-  const stale = now - r.measuredAt > limitMs;
-  return {
-    id,
-    state: silent ? 'unknown' : (stale ? 'stale' : r.s),
-    status: r.s,
-    reply: r.r,
-    ms: r.m,
-    streak: r.k,
-    ageMs: now - r.measuredAt,
-    path: m?.p || '',
-    target: m?.n || '',
-    host: m?.h || '',
-    test: m?.t || '',
-    type: m?.y || '',
-    intervalSec: m?.iv || null,
-  };
-}
-
-/**
- * v2.927(점검 E1-05): Monitoring 개요용 **반복자** — edgeState 처럼 전 행을 배열로 모으지 않고 하나씩 낸다(엣지당 수만 행 × 엣지 수의 사본을 만들지 않는다).
- *   소비자(svcmon/dash.js buildDashAsync)가 중간에 양보하므로 그 사이 들어온 보고가 행을 바꿀 수 있다 — Map 반복은 지운 항목을 건너뛰고 새 항목을
- *   내므로 깨지지 않는다(개요는 '그 시점 근처' 의 표시다). 무보고 판정은 시작 시각 기준 한 번.
- * @returns {null | {agent:string, silent:boolean, items:Iterable<object>}}
- */
-export function edgeItems(agent, now = Date.now()) {
-  const a = agents[String(agent || '').trim()];
-  if (!a) return null;
-  const silent = isSilent(a, now);
-  function* gen() { for (const [id, r] of a.rows) yield edgeItemOf(a, id, r, a.meta.get(id) || null, silent, now); }
-  return { agent: a.agent, silent, items: gen() };
-}
-
 export function edgeState(agent, { path: scope = '', limit = 500, only = '', sort = true } = {}, now = Date.now()) {
   const a = agents[String(agent || '').trim()];
   if (!a) return null;
@@ -448,9 +454,26 @@ export function edgeState(agent, { path: scope = '', limit = 500, only = '', sor
   for (const [id, r] of a.rows) {
     const m = a.meta.get(id) || null;
     if (scope && m && !(m.p === scope || String(m.p).startsWith(`${scope}\\`))) continue;
-    const it = edgeItemOf(a, id, r, m, silent, now);
-    if (only && only !== it.state) continue;
-    items.push(it);
+    const iv = (m?.iv || 60) * 1000;
+    const limitMs = Math.max(3 * iv, 5 * (a.expectMs || 60_000));
+    const stale = now - r.measuredAt > limitMs;
+    const state = silent ? 'unknown' : (stale ? 'stale' : r.s);
+    if (only && only !== state) continue;
+    items.push({
+      id,
+      state,
+      status: r.s,
+      reply: r.r,
+      ms: r.m,
+      streak: r.k,
+      ageMs: now - r.measuredAt,
+      path: m?.p || '',
+      target: m?.n || '',
+      host: m?.h || '',
+      test: m?.t || '',
+      type: m?.y || '',
+      intervalSec: m?.iv || null,
+    });
   }
   // v2.915: Monitoring 개요 집계는 순서가 필요 없다(sort:false) — 수십만 행 localeCompare 정렬을 건너뛴다.
   if (sort) items.sort((x, y) => (x.path || '').localeCompare(y.path || '') || (x.target || '').localeCompare(y.target || ''));

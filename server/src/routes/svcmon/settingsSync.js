@@ -20,7 +20,7 @@ import { recordBatch } from '../../svcmon/batches.js';
 import { buildDashAsync } from '../../svcmon/dash.js';
 import { recentTransitions, hourlySeries, getAlertSettings, saveAlertSettings, alertStats, transitionsSince, alertBatchInfo, HOURS_KEEP } from '../../svcmon/transitions.js';
 import { getResults, executesHere, pollerRole } from '../../svcmon/poller.js';
-import { edgeSummary, edgeItems, listAgentNames } from '../../central/svcmonEdge.js';
+import { edgeSummary, edgeState, listAgentNames, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
 import { listAssignments, setAssignment, DEFAULT_EXCEPT_TYPES } from '../../central/svcmonAssign.js';
 import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
 
@@ -67,6 +67,37 @@ function syncAssignments(agents, user) {
   }
   return out;
 }
+
+/* ── Monitoring 개요(기술 뷰) ── */
+let _dashMemo = null;       // { key, at, body }
+let _dashInflight = null;   // { key, promise } — 같은 세대의 동시 요청은 계산 하나를 함께 기다린다
+let _dashBuilds = 0;        // 테스트 전용 — 실제 계산 횟수
+
+/**
+ * 개요 본문 계산 — **시간 기준 양보**(buildDashAsync · createYielder 15ms)로 이벤트 루프를 붙잡지 않는다.
+ * v2.928(반증 M6 후속): 예전에는 전 점검 + 전 엣지 행을 동기로 돌았다(실측: 로컬 200k 0.39초 · 엣지 192k 0.86초 · 상한 1.28M 5.6초 블로킹).
+ *   엣지 행은 엣지 하나씩 만들고(sort:false — localeCompare 정렬 생략) 표 위젯은 상위 K 만 유지한다.
+ */
+const OVERVIEW_TRANSITIONS = 60;
+async function computeDash(now) {
+  _dashBuilds += 1;
+  const agents = listAgentNames();   // 이름만 — edgeSummary 는 전 행을 순회한다(반증 재검토 N3: 1.28M 행 301ms). 엣지 표(edgeRows)에서 한 번만 돈다.
+  const dash = await buildDashAsync({
+    targets: listTargets(), results: getResults(), agents, now, executes: executesHere(),
+    edgeItemsOf: (agent) => edgeState(agent, { limit: MAX_ROWS_PER_AGENT, sort: false }, now)?.items || [],
+  });
+  return {
+    ok: true, at: now, ...dash,
+    hourly: hourlySeries(now), transitions: recentTransitions(OVERVIEW_TRANSITIONS), since: transitionsSince(),
+    limits: { hours: HOURS_KEEP, transitions: OVERVIEW_TRANSITIONS },   // v2.927(점검 D1-08): 화면 문구('최근 N시간 · 최근 N건')용
+    edges: edgeRows(now), executes: executesHere(), role: pollerRole(),
+    alerts: { enabled: getAlertSettings().enabled, ...alertStats() },
+    kindLabels: Object.fromEntries(Object.entries(kindMeta()).map(([k, v]) => [k, v.label])),
+  };
+}
+
+/** 테스트 전용 — 개요 캐시·계산 횟수. */
+export function _dashStateForTest({ reset = false } = {}) { if (reset) { _dashMemo = null; _dashInflight = null; _dashBuilds = 0; } return { builds: _dashBuilds }; }
 
 export function registerSettingsSync(svcmonRouter) {
 
@@ -156,44 +187,21 @@ svcmonRouter.post('/settings-sync/detach/:id', adminOnly, fullScopeOnly, (req, r
   res.json({ ok: true, changed: r.changed });
 });
 
-/* ── Monitoring 개요(기술 뷰) ── */
-let _dashMemo = null;       // { key, at, body }
-let _dashInflight = null;   // { key, p } — 같은 세대의 동시 요청은 계산 하나를 함께 기다린다(single-flight)
-/*
- * 같은 저장소 세대·30초 안이면 재사용. 화면은 60초마다 부른다(무거운 API 15초 폴링 금지).
- * v2.927(점검 E1-05 — 측정): 계산을 **시간 기준 양보**(buildDashAsync · createYielder)로 돈다 — 예전에는 로컬 점검 20만 + 엣지 행 19.2만을 한 번에
- *   동기로 돌아 약 1.2초 이벤트 루프를 잡았다(반증 M6 실측과 같은 규모). 엣지 행은 배열로 모으지 않고 반복자(edgeItems)로 넘긴다.
- *   양보하는 동안 같은 세대의 다른 요청이 계산을 또 시작하지 않게 진행 중인 약속을 공유한다.
- */
-const OVERVIEW_TRANSITIONS = 60;
-async function computeDash(now) {
-  const edges = [];
-  for (const name of listAgentNames()) {
-    const st = edgeItems(name, now);
-    if (st) edges.push(st);
-  }
-  const dash = await buildDashAsync({ targets: listTargets(), results: getResults(), edgeStates: edges, now, executes: executesHere() });
-  return {
-    ok: true, at: now, ...dash,
-    hourly: hourlySeries(now), transitions: recentTransitions(OVERVIEW_TRANSITIONS), since: transitionsSince(),
-    limits: { hours: HOURS_KEEP, transitions: OVERVIEW_TRANSITIONS },   // v2.927(점검 D1-08): 화면 문구('최근 N시간 · 최근 N건')용
-    edges: edgeRows(now), executes: executesHere(), role: pollerRole(),
-    alerts: { enabled: getAlertSettings().enabled, ...alertStats() },
-    kindLabels: Object.fromEntries(Object.entries(kindMeta()).map(([k, v]) => [k, v.label])),
-  };
-}
+/* ── Monitoring 개요(기술 뷰) — 라우트 ── */
 svcmonRouter.get('/overview', async (req, res) => {
   const now = Date.now();
+  // 같은 저장소 세대·30초 안이면 재사용(화면 60초 갱신 — 무거운 API 15초 폴링 금지). 계산 중이면 그 계산을 함께 기다린다.
   const key = `${storeRevision()}|${Math.floor(now / 30_000)}`;
   if (_dashMemo && _dashMemo.key === key) return res.json(_dashMemo.body);
-  let fl = _dashInflight && _dashInflight.key === key ? _dashInflight : null;
-  if (!fl) {
-    fl = { key, p: computeDash(now) };
-    _dashInflight = fl;
-    fl.p.then((body) => { _dashMemo = { key, at: now, body }; }, () => {}).finally(() => { if (_dashInflight === fl) _dashInflight = null; });
+  if (!_dashInflight || _dashInflight.key !== key) {
+    const promise = computeDash(now)
+      // 늦게 끝난 옛 계산이 더 새 캐시를 덮지 않게(반증 재검토 L1).
+      .then((body) => { if (!_dashMemo || _dashMemo.at <= now) _dashMemo = { key, at: now, body }; return body; })
+      .finally(() => { if (_dashInflight?.promise === promise) _dashInflight = null; });
+    _dashInflight = { key, promise };
   }
-  try { res.json(await fl.p); }
-  catch (e) { res.status(500).json({ ok: false, error: `개요를 만들지 못했습니다: ${t(e?.message).slice(0, 200)}` }); }
+  try { res.json(await _dashInflight.promise); }
+  catch (e) { res.status(500).json({ ok: false, error: `개요 집계 실패: ${t(e?.message).slice(0, 200)}` }); }
 });
 
 /* ── 실패 알림 설정 ── */

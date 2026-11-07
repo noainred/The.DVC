@@ -100,7 +100,7 @@ before(async () => {
     source: 'live', generatedAt: '2026-10-19T03:30:00.000Z',
     vcenters: [
       { id: 'vc-a', name: 'VC-A', status: 'connected' },
-      { id: 'vc-m', name: 'VC-M', status: 'connected' }, { id: 'vc-s', name: 'VC-S', status: 'connected', collectSource: 'site', collectedBy: 'edge1' }, { id: 'vc-o', name: 'VC-O', status: 'connected' },
+      { id: 'vc-m', name: 'VC-M', status: 'connected' }, { id: 'vc-s', name: 'VC-S', status: 'connected' }, { id: 'vc-o', name: 'VC-O', status: 'connected' },
       { id: 'vc-u', name: 'VC-U', status: 'unreachable' }, { id: 'vc-p', name: 'VC-P', status: 'pending' },
     ],
     vms: [...prodVms(), ...['vc-m', 'vc-s', 'vc-o'].flatMap((id) => vmRows(id))],
@@ -239,9 +239,6 @@ test('VC-04 ① 직접 수집 대상이 아닌 vCenter(점검중·엣지 위임�
     let r = await call('GET', `/api/vms/${encodeURIComponent(`${id}:vm-1`)}/metrics?type=cpu&interval=day`);
     assert.equal(r.status, 409, `${id} VM 성능 ${r.status}`); assert.equal(r.logins, 0, `${id} VM 성능 로그인 ${r.logins}`);
     assert.equal(r.j.skipReason, why);
-    // v2.927: 엣지 위임이면 담당 엣지 이름(스냅샷 collectedBy)을 싣는다 — 그 엣지 포탈에서 보라고 말하게. 다른 사유에는 없다 · 주소는 싣지 않는다
-    assert.equal(r.j.agent, why === 'site' ? 'edge1' : undefined);
-    assert.equal(/https?:|url/i.test(JSON.stringify(r.j)), false, '엣지 주소를 싣지 않는다');
     r = await call('GET', `/api/vms/${encodeURIComponent(`${id}:vm-1`)}/metrics?type=cpu&interval=day&manual=1`);
     assert.equal(r.status, 409, '사람이 누른 다시 조회도 막는다'); assert.equal(r.logins, 0);
     r = await call('GET', `/api/hosts/${encodeURIComponent(`${id}:host-1`)}/metrics?type=cpu&interval=day`);
