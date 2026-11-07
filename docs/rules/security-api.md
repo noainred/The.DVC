@@ -28,6 +28,7 @@
 - (6단계 추가) 리눅스 성능 6단계 — 비교(법인 간은 전체 범위만 · 범위 밖 = 없음) · 5대 집중(전부 검사 뒤 시작) · 주석(작성자/관리자 · 흔적 삭제) · 목표 저장(설정 소유자) · 플레이북 실행 경로 없음 · 공유 링크 권한 없음
 - (7a단계 추가) 리눅스 성능 7a단계 로그 분석 — 조회 범위 교집합 먼저 · 단건 404 · 보안 패널(IP · 계정)은 관리자 판본만 원문 · 쓰기 경로 없음 · 차단 · 잠금 없음
 
+- (7b단계 추가) 리눅스 성능 7b단계 SSH 키 저장소 · 공통 계정 · 서버 등록 업로드 — 관리 = 설정 소유자 등급 + 본인 OTP(마지막 게이트) · 지문 · 공개키만 · 번들 가림 · 행 단위 범위 404/403 · 비밀 원문 행 거부
 ## 본문
 
 - ⚠⚠ **express 4 는 async 핸들러의 throw 를 잡지 않는다 — 라우터를 `wrapAsyncRouter` 로 감싼다**
@@ -494,3 +495,24 @@
      읽기는 tools — 범위 계정은 **자기 법인 예외 · 자기 법인 발송 기록만**(비관리자는 주소 가림 · 제목의 IPv4 가림) · 채널 URL 은 싣지 않는다(기존 알림 채널 설정의 사본만 쓴다).
   ⑦ **시험 실행(`POST /perf-rules/dry-run`)** = admin + **fullScopeOnly**(이 노드 전 서버를 대 본다 — 이름 · 법인이 실린다) + tools · 보내지 않고 상태도 바꾸지 않는다. (archScan `route-gate-missing` 이 이 게이트 누락을 잡았다.)
 
+- ⚠⚠ **리눅스 성능 7b단계 — SSH 키 저장소 · 법인 공통 계정 · 서버 등록(CSV/Excel) 업로드의 권한 · 비밀 · 범위**
+  (`bmusage/onboard/{keyParse,keyStore,keyBundle,refs,importParse,importAnalyze,onboardRun,edgeDeploy,edgeApply,missing,connTest}.js` · `routes/api/bmOnboard.js` ·
+  회귀 `server/test/bmOnboard7b{Keys,Import,Edge,Missing}.test.js`):
+  ① **키 · 공통 계정 관리**(등록 · 이름/회전 예정 · passphrase · 회전 · 삭제 · 계정 저장/삭제) = `adminOnly → tools → requireSettingsOwner(소유자 ∧ 전체 범위) → reauth(본인 OTP)` —
+     **reauth 는 마지막**: 권한이 없는 요청(소유자 아님 · 범위 소유자)이 OTP 코드를 소모하지 않는다(⑨ 가 순서를 고정). 감사 로그에는 이름 · 종류 · 지문 · code 만.
+  ② **응답 · 감사 · 내보내기 · 백업 · 엣지 설정 push 에는 지문 · 공개키만** — 라우트는 원본 목록(`listKeysRaw` · `listAccountsRaw` · `keyMaterial` · `resolveOsAuth`)을
+     쓰지 않는다(소스 스윕 ⑩). 접속 자격 원본은 `refs.withResolvedAuth`(폴러) · `connTest.testSavedOs`(연결 시험)만 만든다.
+     번들(`backup/service.js putCollected` — 백업과 엣지 push 가 같은 함수)은 ssh-keys.json 의 개인키 · passphrase · 비밀번호를 **봉인본도 싣지 않는다**(`keyBundle.redactKeyStoreText`) ·
+     복원은 지금 파일의 같은 지문 · 같은 계정의 저장값(봉인 그대로)을 옮겨 붙이고 못 살린 항목은 빼며 `envKeysDropped` 로 밝힌다.
+  ③ **키 판정은 키 자체로**(사람이 적은 종류 · 지문을 받지 않는다): DSA · RSA<2048 · 공개키만 · PKCS#8(ssh2 미지원) · 여러 개 · 틀린 passphrase 거부.
+  ④ **저장소 손상 = 쓰기 거절(503)** — 로드를 **먼저** 하고 오류를 본다(⑦ 이 잡은 결함: 첫 호출이 쓰기면 오류 상태가 비어 손상 파일을 빈 저장소로 덮어썼다).
+     정책 잠금(S-07)은 `SECRETS_POLICY_UNAVAILABLE` 그대로 · 메모리도 바꾸지 않는다(사본 수정 → 봉인 · 원자적 쓰기 → 성공 뒤 캐시 교체).
+  ⑤ **주소가 바뀌면 키 · 공통 계정 참조도 승계하지 않는다**(bm-storage `keyRef` · `credRef` — host · port · 계정, secretCarry 와 같은 판정 · `droppedSecrets`).
+     공통 계정은 법인 · 종류 · 계정명이 바뀌면 비밀번호 · 기본 키를 잇지 않는다. 키를 못 찾으면 **비밀번호로 몰래 넘어가지 않고** 접속하지 않는다(authError).
+  ⑥ **업로드**(`POST /tools/bm-usage/onboard/{analyze,apply}`) = admin + tools + `data.csv` + 데모 계정 403 · BIG_JSON(세션 풀 · `sessionBigBodyAllowed` 의 `ONBOARD_UPLOAD`) ·
+     파일 4MB · 5,000행 · 칸 1,024자 · .xlsx 는 압축 폭탄 가드(`svcmon/formats.js assertXlsxSizeOk` — 실제로 풀며 상한) · 파일 미보관 ·
+     **비밀 칸 값은 읽지 않고 그 행 거부 · 칸 내용이 키 블록 · password= 꼴이면 거부 · 자격 칸(os_cred · idrac_cred · os_key) 값은 결과 · 결과 CSV 에 다시 싣지 않는다** ·
+     결과 CSV 는 `csvLine`(수식 주입 `= + - @` 가드).
+  ⑦ **범위는 행 단위**(archScan `ROUTE_GATE_ALLOW` 에 사유): 조회 밖 법인 = '없는 법인' 과 같은 문구(corp-not-found — 404 꼴, 존재 은닉) → 쓰기 밖 = corp-forbidden(403 꼴) ·
+     바꾸려는 **기존 항목의 법인**도 쓰기 범위 · 미귀속 행 · 귀속 없는 기존 항목은 전체 범위만. 적용은 같은 파일을 **다시 분석**한 서명이 사람이 본 서명과 같을 때만(다르면 409).
+  ⑧ 연결 시험(`POST /onboard/test`)은 **id 만** 받는다(v2.480 — 요청 host 무시) · 한 번 · 인증 거부는 '정지 후보' 안내(자동 재시도 없음) · 호스트키 미신뢰는 peerTrust 승인 안내.

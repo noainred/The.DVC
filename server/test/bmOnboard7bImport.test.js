@@ -120,6 +120,11 @@ test('③ 분석 — 비밀 원문 · 키 내용 행 거부 · 자격 칸 값은
   for (const leak of ['Hunter2', 'Sup3rS3cret!', 'notakey-xyz', pemOneLine.slice(0, 30)]) assert.equal(all.includes(leak), false, `값이 다시 나왔다: ${leak}`);
   const out = await RUN.resultCsv(v);
   assert.ok(out.includes("'=cmd|calc"), '수식 주입 차단(= 앞 따옴표)');
+  // 비밀 칸 이름에 값이 있는 행 — 값은 읽지 않고 그 행 거부(비어 있으면 다른 행은 그대로)
+  const sc = (await P.parseOnboardFile(csv([`${HDR},password`, 'sc1,KR-SEL,,,,10.20.4.41,,kr-ops,,central,/,,,Pw-In-File-9', 'sc2,KR-SEL,,,,10.20.4.42,,kr-ops,,central,/,,,']))).rows;
+  const sa = A.analyzeOnboardRows(sc, await ctxOf()).rows;
+  assert.equal(sa[0].code, 'secret-col'); assert.equal(sa[1].action, 'new');
+  assert.equal(JSON.stringify(sa).includes('Pw-In-File-9'), false);
   assert.equal(/(^|,)=cmd/m.test(out), false);
 });
 
@@ -224,6 +229,12 @@ test('⑥ 직렬 큐 · 정책 잠금 · 못 읽은 등록부 — 동시 적용 
   assert.ok(r1.ok && r2.ok);
   const names = BM.listBmServersRaw().map((x) => x.name);
   assert.ok(names.includes('q1') && names.includes('q2'), '둘 다 남는다(읽기-수정-쓰기 경쟁 없음)');
+  // 같은 파일을 동시에 두 번 — 큐가 없으면 둘 다 '신규' 로 분석해 같은 서버가 두 번 생긴다. 큐가 있으면 두 번째는 '변화 없음'.
+  const same = mk('qq', '10.20.9.9');
+  const [s1, s2] = await Promise.all([job(same), job(same)]);
+  assert.ok(s1.ok && s2.ok);
+  assert.equal(BM.listBmServersRaw().filter((x) => x.name === 'qq').length, 1, '같은 서버가 두 번 등록되지 않는다(직렬 큐)');
+  assert.equal(s2.nothing, true, '두 번째는 적용할 것이 없다');
   // 정책 잠금 흉내 — loadSecretsPolicy 가 잠금을 돌려주면 쓰지 않는다
   const a = await RUN.analyzeUpload(mk('q3', '10.20.9.3'), { ctx: await ctxOf() });
   const locked = RUN.applyOnboard(a.rows, { D: { ...D, VAULT: { loadSecretsPolicy: () => ({ mode: 'unavailable', locked: true }) } }, by: 'adm' });

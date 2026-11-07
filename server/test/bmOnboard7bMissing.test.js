@@ -45,7 +45,7 @@ test('① 누락 점검 — 보드 커버리지 값 그대로 · 기록 없음�
 
 test('② 연결 시험 — 키 해석 실패 · 인증 수단 없음은 접속하지 않는다 · 라우트는 id 만 받고 범위 404/403', async (t) => {
   const BM = await import('../src/bmstor/registry.js');
-  const { testSavedOs } = await import('../src/routes/api/bmOnboard.js');
+  const { testSavedOs } = await import('../src/bmusage/onboard/connTest.js');
   const a = BM.saveBmServer({ name: 'k1', host: '10.70.0.1', username: 'mon', mounts: ['/'], keyRef: 'k_000000000000', vcenterId: 'vcA' });
   const b = BM.saveBmServer({ name: 'k2', host: '10.70.0.2', username: 'mon', mounts: ['/'], vcenterId: 'vcB' });
   const r1 = await testSavedOs(BM.listBmServersRaw().find((x) => x.id === a.server.id));
@@ -80,4 +80,26 @@ test('③ 수집 건강 — 중앙 직접 법인 RTT 800ms+ 경고 · 핑 값이
   assert.equal(by.vcA.rttHigh, false); assert.equal(by.vcA.rttMs, 35);
   assert.equal(by.vcP.rttHigh, true); assert.equal(by.vcP.rttMs, 912);
   assert.equal(by.vcN.rttHigh, null, '모르면 null'); assert.equal(by.vcN.rttMs, null);
+});
+
+test('④ 키 · 공통 계정 인증 서버는 엣지 df 위임 잡 · PUSH 에 싣지 않는다(키를 법인 밖으로 보내지 않음) · 비밀번호 서버는 그대로 잡에 · 업로드 큰 본문 게이트(관리자 · 데모 제외)', async () => {
+  const BM = await import('../src/bmstor/registry.js');
+  const P = await import('../src/bmstor/poller.js');
+  const J = await import('../src/bmstor/jobs.js');
+  // 앞 시험의 중앙 직접 항목은 끈다 — 이 시험이 실제 SSH 접속을 시도하지 않게(CI 러너 네트워크에 기대지 않는다)
+  for (const s of BM.listBmServersRaw()) BM.saveBmServer({ ...s, enabled: false });
+  const kk = BM.saveBmServer({ name: 'dk1', host: '10.71.0.1', username: 'mon', mounts: ['/'], agent: 'edge-k', keyRef: 'k_111111111111' });
+  const pw = BM.saveBmServer({ name: 'dk2', host: '10.71.0.2', username: 'mon', mounts: ['/'], agent: 'edge-k', password: 'pw-x' });
+  await P.bmCollectNow('manual');
+  const jobs = J.takeBmstorJobs('edge-k');
+  const sent = (Array.isArray(jobs) ? jobs : (jobs?.jobs || [])).flatMap((j) => j.servers || []);
+  assert.ok(sent.some((x) => x.id === pw.server.id), '비밀번호 서버는 잡에 실린다');
+  assert.equal(sent.some((x) => x.id === kk.server.id), false, '키 서버는 잡에 싣지 않는다');
+  assert.match(P.getBmLatest().get(kk.server.id)?.error || '', /엣지 위임 잡으로 보내지 않습니다/);
+  const { sessionBigBodyAllowed } = await import('../src/util/bigJsonGate.js');
+  const f = '/api/tools/bm-usage/onboard/analyze';
+  assert.equal(sessionBigBodyAllowed({ role: 'admin' }, f, { scoped: () => true }), true, '범위 관리자도(행 단위 범위)');
+  assert.equal(sessionBigBodyAllowed({ role: 'admin', demoGuest: true }, f, {}), false, '데모 계정 제외');
+  assert.equal(sessionBigBodyAllowed({ role: 'operator' }, f, {}), false);
+  assert.equal(sessionBigBodyAllowed({ role: 'admin' }, '/api/tools/bm-usage/onboard/other', {}), false, '모르는 경로는 파싱하지 않는다');
 });

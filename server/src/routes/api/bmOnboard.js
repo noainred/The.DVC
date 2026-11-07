@@ -19,6 +19,7 @@ import { isDemoGuest } from '../../auth/demoGuest.js';
 import { config } from '../../config.js';
 import * as RUN from '../../bmusage/onboard/onboardRun.js';
 import * as ED from '../../bmusage/onboard/edgeDeploy.js';
+import { testSavedOs } from '../../bmusage/onboard/connTest.js';   // 연결 시험 본체(접속 자격 해석은 라우트 밖 — 소스 스윕)
 import { ROW_CODE, WARN } from '../../bmusage/onboard/importAnalyze.js';
 import { TEMPLATE_COLUMNS, MAX_UPLOAD_BYTES, MAX_ROWS } from '../../bmusage/onboard/importParse.js';
 import * as KS from '../../bmusage/onboard/keyStore.js';
@@ -279,15 +280,13 @@ export function registerBmOnboard(api, deps = {}) {
     const scoped = !!scopedVcenterIds(req.user, snap);
     if (!s0 || (vc ? !inUserScope(req.user, snap, vc) : scoped)) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
     if (vc && !inUserWriteScope(req.user, snap, vc)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' });
-    const r = await (deps.testOs || (await import('../../bmusage/onboard/connTest.js')).testSavedOs)(s0);
+    const r = await (deps.testOs || testSavedOs)(s0);
     logAudit({ user: who(req), action: 'bm-usage.onboard.test', target: s0.name || id, ip: req.ip || '', detail: JSON.stringify({ ok: !!r.ok, kind: r.kind, auth: r.authKind }).slice(0, 200) });
     res.json(r);
   });
 
   api.get('/tools/bm-usage/onboard/codes', adminOnly, toolsPerm, (_req, res) => res.json({ ok: true, rowCodes: ROW_CODE, warnCodes: WARN, columns: TEMPLATE_COLUMNS, maxRows: MAX_ROWS, maxBytes: MAX_UPLOAD_BYTES }));
 }
-
-export { testSavedOs } from '../../bmusage/onboard/connTest.js';   // 연결 시험 본체(접속 자격 해석은 라우트 밖 — 소스 스윕)
 
 /**
  * 법인(vCenter) → 그 법인 엣지 { agent, online }(중앙 전용). 매핑은 `bmusage/edgeCorps.js`(‘중앙에서 켜기’ 와 같은 판정 — 등록부 · 위임 인벤토리 · 관측),

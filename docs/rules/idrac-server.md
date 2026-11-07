@@ -37,6 +37,7 @@
 - (원래 5022행) 법인별 서버 사용량(v2.625) — 퍼센트를 더하지 않는다. 사용률 × 용량으로 사용량을 만들어 더한다
 - (원래 5129행) v2.634 — 폴러의 표본 시각은 '그 서버를 실제로 읽은 시각' 이고, 신선도 경계는 폴 주기 소요에 맞춰 넓힌다
 
+- (7b단계 추가) 리눅스 성능 7b단계 서버 등록 — 새 등록부 없음(iDRAC · OS · 분류 태그로 나눔) · 저장 규칙 재사용 · 한 번 쓰기 · 직전 스냅샷 · 직렬 큐 · 누락 점검은 보드 커버리지 값
 ## 본문
 
 - ⚠⚠ **물리 파트(부품) 장애 — v2.548 재설계. '확인 불가' 를 정상으로도 장애로도 세지 않고, 전이만 기록한다**
@@ -1169,3 +1170,20 @@
 
   · v2.770(점검 R5-E4): replace 스캔의 부분 판정(`scanPartialReasons`)에 **인증서 미신뢰(tlsUntrusted)** 를 넣는다 — 실재가 확인된 장비라 authFailed 와 같은 근거로 merge 강등(일반 무응답은 강등하지 않는다 — 폐기 서버를 지울 수 있어야 한다).
     교체로 지운 등록은 `removedIds` 로 결과·감사 로그(`idrac.scan.replace.removed`)·중앙 정제까지 남긴다. 등록부 accessMoved 는 **정규화한 host** 로 비교(스킴 없는 같은 주소를 이동으로 보지 않는다), CSV 에 없는 열은 키를 만들지 않는다.
+
+- ⚠⚠ **리눅스 성능 7b단계 서버 등록(온보딩) · 누락 점검 — 새 등록부를 만들지 않고, 판정을 복제하지 않는다**
+  (`bmusage/onboard/{importParse,importAnalyze,onboardRun,missing}.js` · `bmstor/registry.js applyBmServerBatch` · `idrac/registry.js idracInputIssue` · `insights/fleetTags.js setFleetTagsBatch`):
+  - 템플릿 17열(설계 §18 의 ‘14열’ 표기와 다르다 — 열 목록이 16개 + `os_key` 라 목록을 따랐다): name* · corp* · idrac_host · idrac_cred · service_tag · os_host · os_port · os_cred · os_key ·
+    collect_via · class · purposes · role · mounts · switch_port · enabled · note. 머리글 별칭(한/영) · 비밀 칸 이름은 값을 읽지 않는다.
+  - 검증은 **저장 함수 그대로**: OS = `bmServerInputIssue`(SSRF · 셸 글자 · `sanitizeMounts`) · iDRAC = `idracInputIssue`(= normalize — SSRF 포함) · 용도/역할 = `APP_IDS` · `ROLES`.
+  - **못 읽은 칸은 빈 값이 아니다**: .xlsx 수식에 저장된 결과가 없으면 · 오류 값 · 병합 셀이 걸친 행 · 글자 상한 초과 → 그 행 거부(병합 머리글은 파일 거부).
+    병합 셀을 ‘첫 칸 값’ 으로 받지 않은 이유: exceljs 는 병합 범위의 모든 칸에 첫 칸 값을 돌려줘 이름 · 주소가 옆 행으로 복제된다(어느 행 값인지 모호).
+  - 적용 = 파일마다 **한 번** 원자적 쓰기(OS 일괄 · iDRAC merge 가져오기 · 분류 태그 일괄 · 엣지 배포 목록) · 직전 스냅샷 `CONFIG_DIR/onboard-prev/`(0700/0600 · 원본 바이트) ·
+    직렬 큐(`serialOnboard`) · 등록부 못 읽음 · 정책 잠금이면 **아무것도 쓰지 않는다** · 파일 사이 원자성은 없고 중간 실패면 `partial` + 단계 + 스냅샷을 돌려준다.
+  - 새 iDRAC 행은 `idrac_cred`(iDRAC 공통 계정)가 필요하다(iDRAC 등록부는 계정명이 필수) · 공통 계정의 계정 · 비밀번호는 **적용 때 그 항목에 복사**된다(참조 칸이 없다 —
+    공통 계정 비밀번호를 바꾸면 다시 적용해야 한다: 정직 기록). OS 항목은 `keyRef` · `credRef` 참조라 회전이 그대로 따라간다.
+  - mounts 가 비면 ‘/’ 하나(설계 ‘비면 전체 마운트’ 와 다르다 — 등록부가 마운트 1개 이상을 요구한다) · switch_port 는 형식만 확인(매핑은 수집 뒤 상세에서) ·
+    class · purposes · role 은 service_tag 가 있을 때만 적용(fleet-tags 키).
+  - **누락 점검**의 칸은 보드 커버리지 값(`perfForRows → buildPerfEntry → useJudge.coverageOf`의 entry.coverage — 엣지 서버는 그 엣지 봉투 perf 의 coverage)을 그대로 쓴다.
+    수집 기록이 없으면 none 이 아니라 **unknown** · 수집 DB 를 못 읽으면 503 · ‘제안’ 은 CSV 줄을 채워 줄 뿐 등록하지 않는다(FQDN 이름만 OS 주소로 제안 — DNS 조회 없음).
+  - 수집 대상 집합은 여전히 `classifyFleet().bareMetal` 이다 — OS 만 등록한 서버(iDRAC · vCenter 에 없는)는 등록부에는 들어가도 대상이 되지 않는다(정직 기록 · 다음 단계 후보).

@@ -31,6 +31,7 @@
 - (6단계) 리눅스 성능 6단계 엣지 대행 — 비교 계열 요청 1개 · 수집 건강 봉투(법인 대조) · 최소 버전 공용 함수(릴리스 노트 6단계 첫 번호)
 - (7a단계) 리눅스 성능 7a단계 로그 분석 — 봉투 logsVer · logSummary(정제 · 키는 같은 봉투 대상만) · 상세 대행(bodyOk 명시 · 왕복 테스트) · 최소 버전 7a 표지
 
+- (7b단계 추가) 리눅스 성능 7b단계 서버 등록 배포(중앙 → 엣지) — 비밀 없는 이름 목록 · 개별 토큰만 · 엣지가 같은 분석을 다시 · 자기가 만든 항목만 지움 · 끊겨도 central 로 넘기지 않음
 ## 본문
 
 - ⚠⚠ **엣지 로그·진행상태는 '당겨서' 본다 — 상시 수집하지 않는다**(`edgelog/` + `central/edgeLog*.js` +
@@ -862,3 +863,17 @@
     밀려난 partKeys(64개 상한) id 가 ‘새 건’ 이 되지 않게 · 중복 판정은 **닫힌 이슈 포함**(같은 건으로 되살리지 않는다 — 닫힌 뒤 **새** 발생은 새 이슈: 다른 알람 · 파트 장애와 같은 ‘열린 이슈면 댓글’ 규약) ·
     하루 상한은 **법인별**(F7 — 예전에는 전 법인 합계).
 
+- ⚠⚠ **리눅스 성능 7b단계 수집 경로(edge/central/auto) · 서버 등록 배포 — 경계는 지금 코드 그대로, 키는 법인 밖으로 나가지 않는다**
+  (`bmusage/onboard/{edgeDeploy,edgeApply}.js` · `routes/central.js GET /bm-onboard` · `agent/bmOnboardPull.js` · `central/featureMinEdgeVersion.js STAGE7B_TITLE_RE` ·
+  회귀 `server/test/bmOnboard7bEdge.test.js` — **엣지는 자식 프로세스**(자기 CONFIG_DIR · 자기 키 저장소)라 실제 centralRouter ↔ 실제 `pullBmOnboardNow` 성공 왕복):
+  - 경계: 중앙은 agent 없는(자기 등록부) 서버만 · 엣지는 자기 등록부 · 자기 agent 서버만(`resolveTargets` 그대로). 중앙에서 edge 로 등록하면 **중앙 등록부에서 그 서버를 빼고**
+    배포 목록(`bm-onboard-edge.json` — 비밀 없음 · 공통 계정 · 키는 **이름**)으로 옮긴다 → 같은 서버를 두 곳이 열지 않는다. 엣지 → 중앙 이동은 거부(edge-to-central) —
+    배포 목록에서 먼저 빼고(엣지가 반영한 뒤) 다시 올린다(두 곳이 여는 구간을 만들지 않게).
+  - auto = 그 법인 엣지(`edgeCorps.edgeCorpsSource` — ‘중앙에서 켜기’ 와 같은 매핑)가 **지금 접속 중**(`agentLastContact` 15분 안)일 때만 edge · 엣지가 없으면 central ·
+    **엣지가 있는데 끊겼거나 접속 기록을 모르면(중앙 재시작 직후) 판정 보류(거부)** — 엣지가 사라졌다고 central 로 정하지 않는다(원문이 법인 밖으로 나가는 결정은 사람이).
+  - 인출 `GET /api/central/bm-onboard` 은 **개별 토큰으로 인증된 이름에만** 행을 준다(공유 토큰 `?agent=` 는 distribute:false) · 본문 판정은 `onboardBodyOk`
+    (배포 판정 칸 · 서명 꼴 — 봉투 `{ok, node}` 판정이 아니다) · 손상이면 지속형 503(`settingsUnreadable`) · 엣지는 결과(적용 · 거부 · 지운 수)와 적용 서명을 **다음 인출의 쿼리 숫자**로만 알린다.
+  - 엣지는 받은 행을 `edgeRowFromPlan` 으로 다시 자르고 **같은 분석(analyzeOnboardRows · isEdge)** 을 거친다(배포 경로 정규화 — v2.933 규약) — 자기 법인(로컬 corps)만 ·
+    공통 계정 · 키는 **엣지 자기 저장소의 같은 이름** · 없으면 그 행 거부. 배포에서 빠진 서버는 **이 배포가 만든 항목만** 지운다(`bm-onboard-applied.json` · 손으로 둔 항목은 남는다).
+  - 중앙의 bm-storage 항목 중 키 · 공통 계정 인증 서버는 **엣지 df 위임 잡 · 엣지 PUSH 에 싣지 않는다**(개인키를 중앙 → 엣지로 보내지 않는다 · 빈 비밀번호로 계정을 잠그지 않게).
+  - 최소 엣지 버전 문구는 `stage7bMinEdgeVersion()`(릴리스 노트의 ‘리눅스 통합 성능 모니터링 7b단계’ 첫 번호 — 숫자를 박지 않는다).
