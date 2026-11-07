@@ -108,7 +108,7 @@ test('v2.911 B2: 여러 낱말은 낱말마다 어느 칸에든 있으면(AND) �
   ];
   const pq = Q.parseQuery('srv rhel');
   assert.deepEqual(pq.words.map((w) => w.w), ['srv', 'rhel']);
-  assert.equal(Q.matchTier(rows[0], pq), 8);
+  assert.equal(Q.matchTier(rows[0], pq), Q.TIER.words);
   assert.equal(Q.matchTier(rows[3], pq), null, '한 낱말이라도 없으면 아니다');
   const r = Q.searchRows(rows, Q.parseQuery('srv db'));
   assert.deepEqual(r.groups[0].rows.map((x) => x.id), ['v3', 'v1'], '통째 일치(srv db phrase)가 먼저, 낱말 일치가 뒤');
@@ -376,4 +376,82 @@ test('parseKinds: 아는 키만', () => {
   assert.deepEqual([...ROUTE.parseKinds('vm, host,zz')], ['vm', 'host']);
   assert.equal(ROUTE.parseKinds(''), null);
   assert.equal(ROUTE.parseKinds(['vm']), null);
+});
+
+
+// ── v2.928 남은 개선(B3 태그 · 메모 · B4 최근 가산점 · D1 생성 실측) ───────────────────────────────
+test('v2.928 B3: vmTagStrings — 스냅샷 vm.tags + tagInv 의 범주:태그 · 속성=값', () => {
+  const inv = { categories: [{ name: 'Env' }], tags: [{ name: 'Prod', cat: 0 }, { name: 'Gold' }], vmTags: { 'vm-7': [0, 1] },
+    fields: [{ key: 101, name: 'Owner' }], vmCustom: { 'vm-7': { 101: 'InfraTeam' } } };
+  const got = IDX.vmTagStrings({ id: 'vc1:vm-7', vcenterId: 'vc1', tags: ['Backup:Daily'] }, inv);
+  assert.deepEqual(got, ['Backup:Daily', 'Env:Prod', 'Gold', 'Owner=InfraTeam']);
+  assert.deepEqual(IDX.vmTagStrings({ id: 'x', vcenterId: 'vc1' }, null), []);
+});
+
+test('v2.928 B3: 메모는 vm 을 보는 계정 누구나 · 태그는 vm-tags 도구 권한이 있을 때만 · 등급은 이름 · 모델 뒤', () => {
+  const r = row('vm', { id: 'vc1:a', name: 'app-01', notes: '담당: 인프라팀 · 마이그레이션 예정', tags: ['Env:Prod', 'Owner=InfraTeam'] });
+  assert.equal(Q.matchTier(r, Q.parseQuery('마이그레이션')), Q.TIER.notes);
+  assert.equal(Q.matchTier(r, Q.parseQuery('env:prod')), null, '태그 권한이 없으면 태그로 찾지 않는다');
+  assert.equal(Q.matchTier(r, Q.parseQuery('env:prod'), { tagsOk: true }), Q.TIER.tag);
+  assert.equal(Q.matchTier(r, Q.parseQuery('app prod'), { tagsOk: true }), Q.TIER.words, '낱말 AND 에도 태그 칸');
+  assert.ok(!('_notes' in ACC.publicRow(r, ACC.accessPlan(ADMIN, SNAP))), '메모는 응답에 싣지 않는다');
+  const long = row('vm', { id: 'x', name: 'x', notes: `${'a'.repeat(400)}needle` });
+  assert.equal(Q.matchTier(long, Q.parseQuery('needle')), null, '메모는 앞 300자만');
+});
+
+test('v2.928 B3: 라우트 — 태그로 걸린 행은 via:tag + 걸린 태그만 · 권한 없는 계정은 태그로 못 찾는다', async () => {
+  IDX._setIndexForTest([
+    row('vm', { id: 'vc1:a', name: 'app-01', vcenterId: 'vc1', notes: '마이그레이션 예정', tags: ['Env:Prod', 'Owner=InfraTeam', 'Backup:Daily'] }),
+  ]);
+  const a = await call(ADMIN, { q: 'infrateam' });
+  assert.equal(a.body.groups[0].rows[0].via, 'tag');
+  assert.deepEqual(a.body.groups[0].rows[0].tags, ['Owner=InfraTeam']);
+  const n = await call(ADMIN, { q: '마이그레이션' });
+  assert.equal(n.body.groups[0].rows[0].via, 'notes');
+  const name = 'op-notags';
+  perms.setUserTools(name, { mode: 'deny', tools: ['vm-tags'] });
+  const o = await call({ username: name, role: 'operator' }, { q: 'infrateam' });
+  assert.equal(o.body.matched, 0, 'vm-tags 도구를 거부한 계정은 태그로 찾지 못한다');
+  const on = await call({ username: name, role: 'operator' }, { q: '마이그레이션' });
+  assert.equal(on.body.matched, 1, '메모는 찾는다');
+  perms.setUserTools(name, { mode: 'off' });
+});
+
+test('v2.928 B4: 최근 연 장비는 완전 일치 바로 다음 · 보이지 않는 행을 끌어오지 않는다 · recent 값은 아는 종류 10개까지', async () => {
+  const rows = [row('vm', { id: 'a', name: 'web-01' }), row('vm', { id: 'b', name: 'web-02' }), row('vm', { id: 'c', name: 'web' })];
+  const r = Q.searchRows(rows, Q.parseQuery('web'), { recent: new Set(['vm|b']) });
+  assert.deepEqual(r.groups[0].rows.map((x) => x.id), ['c', 'b', 'a'], '완전 일치(c) › 최근(b) › 나머지');
+  // 완전 일치인 행이 최근에도 있으면 완전 일치 등급 그대로(가산점이 강등이 되면 안 된다 — 변이 M4)
+  const r2 = Q.searchRows([row('vm', { id: 'd', name: 'web' }), row('vm', { id: 'e', name: 'web' })], Q.parseQuery('web'), { recent: new Set(['vm|e']) });
+  assert.deepEqual(r2.groups[0].tiers, [Q.TIER.exact, Q.TIER.exact], '최근에 있어도 완전 일치는 등급 1');
+  assert.equal(ROUTE.parseRecent('vm|a,zz|b,host|,|x, storage|st-1 ').size, 2);
+  assert.equal(ROUTE.parseRecent(Array.from({ length: 30 }, (_, i) => `vm|v${i}`).join(',')).size, 10);
+  assert.equal(ROUTE.parseRecent(['vm|a']), null);
+  await seed();
+  const out = await call(RANGE, { q: 'srv-db', recent: 'vm|vc2:b' });
+  assert.ok(!JSON.stringify(out.body).includes('srv-db-pl'), '범위 밖 id 를 recent 로 보내도 나오지 않는다');
+  const via = await call(ADMIN, { q: 'srv-db', recent: 'vm|vc2:b' });
+  assert.equal(via.body.groups[0].rows[0].id, 'vc2:b');
+  assert.equal(via.body.groups[0].rows[0].via, 'recent');
+});
+
+test('v2.928 D1: 느린 색인 생성 로그는 10분에 한 번 · 실측은 전체 범위 관리자 응답에만', async () => {
+  IDX._resetSlowLogForTest();
+  const logs = [];
+  const b = { buildMs: IDX.SLOW_BUILD_MS + 1, rows: [1, 2], yields: 3, stepMs: { ip: 900, snapshot: 400 } };
+  assert.equal(IDX.noteSlowBuild(b, 1_000_000, (m) => logs.push(m)), true);
+  assert.equal(IDX.noteSlowBuild(b, 1_000_000 + 60_000, (m) => logs.push(m)), false, '10분 안에는 다시 쓰지 않는다');
+  assert.equal(IDX.noteSlowBuild({ ...b, buildMs: 10 }, 9_999_999, (m) => logs.push(m)), false, '빠르면 쓰지 않는다');
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /ip 900ms · snapshot 400ms/);
+  await seed();
+  const a = await call(ADMIN, { q: 'srv' });
+  assert.ok(a.body.index && typeof a.body.index.rows === 'number');
+  const o = await call(OPER, { q: 'srv' });
+  assert.equal(o.body.index, undefined);
+  const r = await call(RANGE, { q: 'srv' });
+  assert.equal(r.body.index, undefined, '전체 행 수는 범위와 무관한 값이라 범위 계정에 싣지 않는다');
+  const sa = await call({ username: 'adm-kr', role: 'admin', scope: { vcenters: ['vc1'] } }, { q: 'srv' });
+  assert.equal(sa.status, 200);
+  assert.equal(sa.body.index, undefined, '범위가 걸린 관리자에게도 싣지 않는다(변이 M7)');
 });
