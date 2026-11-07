@@ -6,7 +6,7 @@
  *  · 무거운 API 는 폴링하지 않는다(마운트 1회 + 버튼). 늦게 온 이전 응답은 버린다(gen).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, delJson, hasRole, getCurrentUser, downloadFile } from '../../api.js';
+import { fetchJson, postJson, delJson, hasRole, getCurrentUser, downloadFile, canCsv } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -89,7 +89,7 @@ function KeysSection({ manage, onChanged }) {
                 <td data-sort={k.fingerprint}><code title={`${k.fingerprint}\n${k.publicKey}`}>{shortFp(k.fingerprint)}</code></td>
                 <td data-sort={k.createdAt || 0}>{ymd(k.createdAt)}<div className="bmo-sub">{k.createdBy || '—'}</div></td>
                 <td data-sort={k.rotateAt || 0}>{ymd(k.rotateAt)}{k.rotateDue && <div><Chip tone="warn">예정일 지남</Chip></div>}</td>
-                <td className="right" data-sort={k.servers ?? -1}>{numOr(k.servers)}{k.accountsUsing ? <div className="bmo-sub">계정 {k.accountsUsing}</div> : null}</td>
+                <td className="right" data-sort={k.servers ?? ''}>{numOr(k.servers)}{k.accountsUsing ? <div className="bmo-sub">계정 {k.accountsUsing}</div> : null}</td>
                 <td data-sort={k.status}>{KEY_STATUS_TEXT[k.status] || k.status}</td>
                 {manage && <td data-nosort><button className="btn btn-sm" type="button" onClick={() => del(k)} disabled={busy}>삭제</button></td>}
               </tr>
@@ -174,7 +174,7 @@ function AccountsSection({ manage, vcenters, keysRev }) {
               <td data-sort={a.username}>{a.username}</td>
               <td data-sort={keyName(a.keyRef)}>{a.kind === 'os' ? keyName(a.keyRef) : '—'}</td>
               <td data-sort={a.hasPassword ? 1 : 0}>{a.hasPassword ? '저장됨' : '없음'}</td>
-              <td className="right" data-sort={a.servers ?? -1}>{numOr(a.servers)}</td>
+              <td className="right" data-sort={a.servers ?? ''}>{numOr(a.servers)}</td>
               {manage && <td data-nosort><div className="bmob-acts"><button className="btn btn-sm" type="button" onClick={() => setF({ ...blank, id: a.id, name: a.name, kind: a.kind, corp: a.corp, username: a.username, keyRef: a.keyRef })}>고치기</button><button className="btn btn-sm" type="button" onClick={() => del(a)}>삭제</button></div></td>}
             </tr>
           ))}
@@ -201,6 +201,7 @@ function AccountsSection({ manage, vcenters, keysRev }) {
 
 /* ── CSV/Excel 등록 ───────────────────────────────────────────────── */
 function ImportSection({ onApplied }) {
+  const csvOk = canCsv();   // v2.643: CSV · 엑셀 가져오기/내보내기는 'data.csv' 권한(서버 csvPerm 이 다시 막는다)
   const [file, setFile] = useState(null);   // { name, data(base64) } — 서버에 보관하지 않는다(분석 · 적용 요청에만 싣는다)
   const [an, setAn] = useState({ busy: false, resp: null, err: null });
   const [ap, setAp] = useState({ busy: false, msg: '', tone: 'muted' });
@@ -241,11 +242,13 @@ function ImportSection({ onApplied }) {
     <section className="bmob-sec">
       <h4>CSV · Excel 로 서버 등록</h4>
       <p className="bmo-note"><BoldText text={'한 장의 표가 iDRAC 등록부 · OS 계정 등록부 · 분류 태그로 나뉘어 들어갑니다(새 등록부 없음). **비밀번호 · 키 내용이 든 행은 거부**합니다 — 자격 칸에는 공통 계정 · SSH 키 **이름**만 적습니다. 파일은 서버에 보관하지 않습니다. 적용 전에 판정을 전부 보여 주고, 적용은 같은 파일을 서버가 다시 분석해 판정이 같을 때만 합니다.'} /></p>
-      <div className="bmob-acts">
-        <button className="btn" type="button" onClick={() => downloadFile('/tools/bm-usage/onboard/template.csv', 'bm-onboard-template.csv').catch(() => {})}>템플릿 내려받기(CSV)</button>
-        <label className="btn btn-primary bmob-file">파일 고르기(CSV · .xlsx)<input type="file" accept=".csv,.tsv,.txt,.xlsx" onChange={pick} /></label>
-        {file && <span className="bmo-sub">{file.name}</span>}
-      </div>
+      {csvOk ? (
+        <div className="bmob-acts">
+          <button className="btn" type="button" onClick={() => downloadFile('/tools/bm-usage/onboard/template.csv', 'bm-onboard-template.csv').catch(() => {})}>템플릿 내려받기(CSV)</button>
+          <label className="btn btn-primary bmob-file">파일 고르기(CSV · .xlsx)<input type="file" accept=".csv,.tsv,.txt,.xlsx" onChange={pick} /></label>
+          {file && <span className="bmo-sub">{file.name}</span>}
+        </div>
+      ) : <p className="bmo-note">CSV · 엑셀 가져오기 권한(data.csv)이 없는 계정입니다.</p>}
       {an.busy && <p className="bmo-note">분석 중…</p>}
       {an.err && <ErrorBox error={an.err} />}
       {an.resp && (
@@ -340,7 +343,7 @@ function MissingSection({ rev }) {
           <div className="bmob-chips">
             {BUCKET_ORDER.map((b) => <button key={b} type="button" className={`bmob-chip bmob-${b === 'both' ? 'ok' : b === 'unknown' ? 'muted' : b === 'none' ? 'bad' : 'warn'}${only === b ? ' on' : ''}`} onClick={() => setOnly(only === b ? '' : b)}>{BUCKET_TEXT[b]} {numOr(st.resp?.counts?.[b])}</button>)}
             <button className="btn btn-sm" type="button" onClick={load}>다시 점검</button>
-            <button className="btn btn-sm" type="button" disabled={!sugg.length} onClick={() => downloadBlob(new Blob([suggestCsv(sugg)], { type: 'text/csv;charset=utf-8' }), 'bm-onboard-suggest.csv')}>제안 CSV {sugg.length}줄</button>
+            {canCsv() && <button className="btn btn-sm" type="button" disabled={!sugg.length} onClick={() => downloadBlob(new Blob([suggestCsv(sugg)], { type: 'text/csv;charset=utf-8' }), 'bm-onboard-suggest.csv')}>제안 CSV {sugg.length}줄</button>}
           </div>
           {st.resp?.sourceErrors ? <p className="bmo-note" style={{ color: toneVar('warn') }}>대상 해석 입력 {st.resp.sourceErrors}건을 읽지 못했습니다 — 일부 서버가 빠졌을 수 있습니다.</p> : null}
           <STable minWidth={760} limit={500} className="bmo-t" style={{ fontSize: 12 }}>
