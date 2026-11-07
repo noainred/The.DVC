@@ -131,16 +131,14 @@ tr:hover td{background:rgba(59,130,246,.06)}
 
   <div style="flex:1;min-width:0;display:flex;flex-direction:column">
 
-  <!-- 필터 바: 범위 · 검색은 허브 공용, '상태' 와 메모 · IPMS 는 호스트 탭 고유 -->
-  <div class="fb" aria-label="범위 · 조건">
+  <!-- 공용 필터 바: ② vCenter 탭과 같다(사용자 요청 2026-11-07). 탭 고유 조건(상태 · 메모 · IPMS)은 아래 보기 줄로 -->
+  <div class="fb" aria-label="범위">
     <label for="region" class="muted" style="font-size:12px">범위</label>
-    <select id="region" class="input" style="min-width:118px"><option>전체 리전</option></select>
-    <select id="vcsel" class="input" style="min-width:184px" aria-label="vCenter"><option>전체 vCenter(28)</option></select>
-    <select id="st" class="input" style="min-width:118px" aria-label="상태"><option>전체 상태</option><option>정상</option><option>점검</option><option>연결끊김</option></select>
+    <select id="region" class="input" style="min-width:118px"><option>전체 리전</option><option>북미</option><option>유럽</option><option>아시아</option></select>
+    <select id="vcsel" class="input" style="min-width:184px" aria-label="vCenter"><option>전체 vCenter(28)</option><option>vcenter-us-east-01</option><option>vcenter-eu-central-01</option></select>
     <label for="q" class="muted" style="font-size:12px">검색</label>
-    <input id="q" class="input" placeholder="이름 / IP / OS 검색…" style="width:220px">
-    <label class="chk"><input type="checkbox">메모 포함</label>
-    <label class="chk"><input type="checkbox">IPMS 포함</label>
+    <input id="q" class="input" placeholder="vCenter · 호스트 · VM 이름 · IP" style="width:260px">
+    <span class="note" style="margin-left:4px">범위 · 검색은 vCenter · 호스트 · VM 탭에 함께 적용됩니다</span>
     <span style="flex:1"></span>
     <span class="mono muted" style="font-size:12px">스냅샷 오전 10:38:45</span>
   </div>
@@ -184,7 +182,10 @@ tr:hover td{background:rgba(59,130,246,.06)}
     <!-- 호스트 탭 본문 = 지금 ESXi 호스트 화면(v2.805 · v2.811) 그대로. 제목 줄의 '호스트별 · 법인별' 이 하위 보기 -->
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
       <nav class="seg" aria-label="호스트 보기"><a href="Hosts.dc.html" class="on" aria-current="page">호스트별</a><a href="#">법인별</a></nav>
-      <span class="muted" style="font-size:12px">확인 대상이 있으면 그 목록부터 · 열 제목을 누르면 정렬</span>
+      <select id="st" class="input" style="min-width:118px" aria-label="상태"><option>전체 상태</option><option>정상</option><option>점검</option><option>연결끊김</option></select>
+      <label class="chk"><input type="checkbox">메모 포함</label>
+      <label class="chk"><input type="checkbox">IPMS 포함</label>
+      <span class="note">상태 · 메모 · IPMS 는 호스트 탭 고유 조건</span>
       <span style="flex:1"></span>
       <button class="btn" type="button">점검 집계 다시 읽기 (오전 10:37:44)</button>
       <button class="btn primary" type="button"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="width:14px;height:14px"><path d="M12 4v12m0 0 4-4m-4 4-4-4M4 20h16"/></svg>호스트·클러스터 엑셀</button>
