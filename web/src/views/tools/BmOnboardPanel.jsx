@@ -94,7 +94,7 @@ function KeysSection({ manage, onChanged }) {
                 {manage && <td data-nosort><button className="btn btn-sm" type="button" onClick={() => del(k)} disabled={busy}>삭제</button></td>}
               </tr>
             ))}
-            {!keys.length && <tr><td colSpan={manage ? 8 : 7} className="bmo-sub">등록한 키가 없습니다.</td></tr>}
+            {!keys.length && <tr><td colSpan={manage ? 8 : 7} className="bmo-sub">{st.resp?.hidden === 'scoped' ? '범위 계정에는 키 목록을 보이지 않습니다(키가 없다는 뜻이 아닙니다).' : '등록한 키가 없습니다.'}</td></tr>}
           </tbody>
         </STable>
       )}
@@ -138,7 +138,8 @@ function AccountsSection({ manage, vcenters, keysRev }) {
   const [busy, setBusy] = useState(false);
   const accounts = st.resp?.accounts || [];
   const keys = (kst.resp?.keys || []).filter((k) => k.status === 'active');
-  const keyName = (id) => (kst.resp?.keys || []).find((k) => k.id === id)?.name || (id ? '(없는 키)' : '—');
+  // 범위 계정에는 키 목록이 없다(L-7) — '없는 키' 로 보이지 않게 '설정됨' 으로만 말한다.
+  const keyName = (id) => (!id ? '—' : kst.resp?.hidden === 'scoped' ? '(설정됨)' : ((kst.resp?.keys || []).find((k) => k.id === id)?.name || '(없는 키)'));
   const vcName = (id) => (id ? (vcenters.find((v) => v.id === id)?.name || id) : '전 법인 공용');
   const save = async () => {
     setBusy(true); setMsg({ text: '', tone: 'muted' });

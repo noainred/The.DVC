@@ -386,7 +386,7 @@ export default function BmStorageTool() {
               <label>비밀번호<input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={form.id ? '비우면 기존 유지' : ''} autoComplete="new-password" /></label>
               {owner && (
                 <label>인증(SSH 키 · 공통 계정) <span className="muted" style={{ fontSize: 11 }}>(설정 소유자 — 묶음을 바꾸면 본인 OTP)</span>
-                  <Select className="input" value={form.auth || ''} onChange={(e) => setForm({ ...form, auth: e.target.value })}>
+                  <Select sort={false} className="input" value={form.auth || ''} onChange={(e) => setForm({ ...form, auth: e.target.value })}>
                     <option value="">개별 비밀번호(위 칸)</option>
                     {authOpts.keys.map((k) => <option key={k.id} value={`key:${k.id}`}>키 · {k.name} ({k.algo})</option>)}
                     {authOpts.accounts.map((a) => <option key={a.id} value={`acc:${a.id}`}>공통 계정 · {a.name} ({a.username})</option>)}
