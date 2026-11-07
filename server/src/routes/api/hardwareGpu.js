@@ -16,14 +16,15 @@ import { loadGpuGuestSettings } from '../../gpu/settings.js';
 import { findCollectorByName } from '../../collector/registry.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { gpuActivity, BUSY_UTIL_PCT, HELD_MEM_PCT } from '../../gpu/activity.js';
-import { vmVgpuAllocGB } from '../../gpu/vgpuProfile.js';
+import { vmVgpuAllocGB, gpuDevicesOnHost, isGpuVmOnHost, gpuViewOnHost } from '../../gpu/vgpuProfile.js';
 import { enqueuePing, getPingResults, setPingResults } from '../../central/pingJobs.js';
 import { pingMany } from '../../util/ping.js';
 import { todayStamp } from "../../util/dayKey.js";
 import { acquireExport } from '../../util/exportBusy.js';
 import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5): drain 만 기다리면 끊긴 클라이언트에서 영원히 멈춰 내보내기 잠금이 풀리지 않았다
 import { snapMemo } from '../../util/snapCache.js';
-import { buildGpuAllocTree, allocCorpRoster, allocScopeOf } from '../../gpu/allocTree.js';
+import { buildGpuAllocTree, allocCorpRoster, allocScopeOf, allocDiag } from '../../gpu/allocTree.js';
+import { allocHistoryRows, allocHistoryView, HISTORY_DAYS_MAX } from '../../gpu/allocHistory.js';
 import { renderGpuAllocWorkbook, allocCsvLines, allocExportOpts, allocFileName, corpSheetNames, CORP_SHEETS_MAX, ALLOC_DEPTHS, ALLOC_SHEET_KEYS, XLSX_MIME as ALLOC_XLSX_MIME } from '../../gpu/allocTreeXlsx.js';
 import { fileStamp, localStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { tzName } from '../../vcenter/vmExportCatalog.js';
@@ -37,6 +38,13 @@ const csvPerm = requirePerm('data.csv');
  * 호스트 이름은 vCenter 안에서만 유일하므로 (vcenterId, 이름) 쌍으로 묶는다.
  */
 export const gpuHostKey = (vcenterId, host) => `${vcenterId ?? ''}\t${host ?? ''}`;
+
+/** v2.939: GPU 호스트 → GPU 목록 맵(키 gpuHostKey) — VM 의 GPU 장치를 그 호스트 GPU 와 맞출 때(gpuDevicesOnHost). */
+export function gpuHostGpusMap(hosts) {
+  const m = new Map();
+  for (const h of hosts || []) if ((h.gpus || []).length) m.set(gpuHostKey(h.vcenterId, h.name), h.gpus);
+  return m;
+}
 
 /** GPU 호스트 → 대표 모델 맵(키 gpuHostKey). */
 export function gpuHostModelMap(hosts) {
@@ -120,11 +128,16 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
   // GPU가 할당된 VM을 호스트(이름)별로 집계 — 각 GPU 호스트에 몇 개 VM이 GPU를 쓰는지.
   // 키는 gpuHostKey(vcenterId, 호스트 이름) — 이름 단독이면 다른 vCenter 의 동명 호스트와 섞인다(VC2598-03).
   const gpuVmByHost = new Map();
+  // v2.939(개선 1): GPU 가 아닌 패스스루(NIC · HBA)만 가진 VM 은 GPU VM 으로 세지 않는다 — 판정은 vgpuProfile.gpuDevicesOnHost(GPU 할당율과 같은 함수).
+  const hostGpusOf = gpuHostGpusMap(hosts);
+  const devOnHost = (v) => gpuDevicesOnHost(v.gpu, hostGpusOf.get(gpuHostKey(v.vcenterId, v.host)));
   for (const v of scopedVms) {
     if (!v.gpu || !v.host) continue;
     const k = gpuHostKey(v.vcenterId, v.host);
+    const d = devOnHost(v);
+    if (!isGpuVmOnHost(d)) continue;
     const e = gpuVmByHost.get(k) || { vms: 0, on: 0, off: 0, vgpu: 0, passthrough: 0, names: [] };
-    e.vms++; e.vgpu += v.gpu.vgpu || 0; e.passthrough += v.gpu.passthrough || 0;
+    e.vms++; e.vgpu += d.vgpu; e.passthrough += d.passthrough;
     if (v.powerState === 'POWERED_ON') e.on++; else e.off++;
     if (v.name) e.names.push({ name: v.name, on: v.powerState === 'POWERED_ON' });
     gpuVmByHost.set(k, e);
@@ -201,7 +214,8 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
   }
   const utils = hostsWithGpu.map((x) => x.utilPct).filter((x) => x != null);
   // GPU를 사용하는 VM 수(스코프 내, 템플릿 제외) — 상단 요약용.
-  const gpuVmCount = scopedVms.filter((v) => v.gpu && !v.template && (!vcenterId || v.vcenterId === vcenterId)).length;
+  // v2.939(개선 1): 패스스루가 전부 NIC · HBA 인 VM 은 세지 않는다(위 gpuVmByHost 와 같은 판정 — GPU 호스트가 없는 곳의 VM 은 예전처럼 센다).
+  const gpuVmCount = scopedVms.filter((v) => v.gpu && !v.template && (!vcenterId || v.vcenterId === vcenterId) && isGpuVmOnHost(devOnHost(v))).length;
   return {
     totalGpus,
     hostsWithGpu: hostsWithGpu.length,
@@ -559,6 +573,34 @@ api.get('/tools/gpu-alloc.xlsx', csvPerm, requirePerm('tools'), async (req, res)
     if (!res.headersSent) res.status(500).json({ ok: false, error: 'export_failed', reason: '엑셀을 만들지 못했습니다.' });
   } finally { lock.release(); }
 });
+/**
+ * v2.939(개선 2): 수집 점검 — 'GPU 할당율' 이 기대는 수집 가정(꺼진 VM 의 GPU 목록 · 패스스루 장치 주소 · 프로파일 이름 · 배치 정보)을
+ *   이미 수집한 스냅샷으로 판정한다(gpu/allocTree.js allocDiag — vCenter 왕복 0). 조회 범위가 먼저다(계층과 같은 scopeTest).
+ */
+api.get('/tools/gpu-alloc/diag', requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  res.json({ generatedAt: snap.generatedAt || null, ...allocDiag(snap, { allowed: scopedVcenterIds(req.user, snap) }) });
+});
+/**
+ * v2.939(개선 7): 법인별 일 단위 이력(gpu/allocHistory.js) — 용량 · 할당 추이와 소진 예상. 조회 범위 밖 법인의 행은 내보내지 않는다
+ *   (범위를 요청 필터 vcenterIds 보다 먼저). DB 가 없으면 available:false(빈 이력과 구분).
+ */
+api.get('/tools/gpu-alloc/history', requirePerm('tools'), async (req, res) => {
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const raw = typeof req.query.vcenterIds === 'string' ? req.query.vcenterIds.slice(0, 20_000) : '';
+  const picked = raw ? new Set(raw.split(',').map((x) => x.trim()).filter((x) => x && x.length <= 200).slice(0, 100)) : null;
+  const days = Math.max(7, Math.min(HISTORY_DAYS_MAX, Math.floor(Number(req.query.days) || 90)));
+  try {
+    const all = await allocHistoryRows(days);
+    const byVc = all && new Map([...all].filter(([id]) => (!allowed || allowed.has(id)) && (!picked || !picked.size || picked.has(id))));
+    const names = new Map((snap.vcenters || []).filter(Boolean).map((v) => [String(v.id), String(v.name || v.id)]));
+    res.json({ days, ...allocHistoryView(byVc, { names }) });
+  } catch (e) {
+    console.warn(`[gpu] 할당 이력 조회 실패: ${e?.message || e}`);
+    res.status(500).json({ ok: false, error: 'history_failed', reason: '이력을 읽지 못했습니다.' });
+  }
+});
 
 // GPU 사용률 시계열 수집 메타 — '언제부터 데이터가 쌓였는지'(수집 시작/마지막/샘플 수).
 // export 모달에서 사용자가 수집 시작 일시를 보고 전체/기간을 고르도록.
@@ -648,13 +690,21 @@ api.get('/tools/gpu/vms', requirePerm('tools'), (req, res) => {
   // (vCenter, 호스트명) → GPU 모델 매핑(모델 필터용 — 이름 단독 키는 다른 vCenter 동명 호스트와 섞인다, VC2598-03)
   const hostModel = gpuHostModelMap(snap.hosts);
   const modelOf = (v) => hostModel.get(gpuHostKey(v.vcenterId, v.host)) || '';
-  let vms = (snap.vms || []).filter((v) => v.gpu);
+  // v2.939(개선 1): GPU 장치는 그 호스트 GPU 와 맞춰 센다 — 패스스루가 전부 NIC · HBA 인 VM 은 목록에서 뺀다(gpuDevicesOnHost 하나).
+  const hostGpusOf = gpuHostGpusMap(snap.hosts);
+  const devOf = new Map();
+  let vms = (snap.vms || []).filter((v) => {
+    if (!v.gpu) return false;
+    const d = gpuDevicesOnHost(v.gpu, hostGpusOf.get(gpuHostKey(v.vcenterId, v.host)));
+    devOf.set(v, d);
+    return isGpuVmOnHost(d);
+  });
   const allowed = scopedVcenterIds(req.user, snap);
   if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   if (req.query.host) vms = vms.filter((v) => v.host === req.query.host);
   if (req.query.model) vms = vms.filter((v) => modelOf(v) === req.query.model);
-  if (req.query.mode) vms = vms.filter((v) => v.gpu.type === req.query.mode || (req.query.mode === 'vgpu' && v.gpu.vgpu) || (req.query.mode === 'passthrough' && v.gpu.passthrough));
+  if (req.query.mode) vms = vms.filter((v) => { const g = gpuViewOnHost(v.gpu, devOf.get(v)); return g.type === req.query.mode || (req.query.mode === 'vgpu' && g.vgpu) || (req.query.mode === 'passthrough' && g.passthrough); });
   // 게스트 OS(nvidia-smi)에서 수집한 VM별 GPU 사용률/메모리 오버레이(패스쓰루 GPU는 ESXi가 못 봄).
   const guestByVm = new Map(getGuestGpuVms().map((g) => [g.vmId, g]));
   res.json({
@@ -664,7 +714,7 @@ api.get('/tools/gpu/vms', requirePerm('tools'), (req, res) => {
       const g = v.powerState === 'POWERED_ON' ? guestByVm.get(v.id) : null;
       return {
         id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
-        powerState: v.powerState, model: modelOf(v), gpu: v.gpu,
+        powerState: v.powerState, model: modelOf(v), gpu: gpuViewOnHost(v.gpu, devOf.get(v)),
         guestUtilPct: g ? g.utilPct : null, guestUtilNA: g ? !!g.utilNA : false, guestMemPct: g ? (g.memUsedPct ?? null) : null, guestAt: g ? g.at : null,
         // v2.650: VRAM 절대량·온도·동작 판정·vGPU 할당 GB(프로파일에서 계산 — 해석 못 하면 null)
         guestMemUsedMB: g ? (g.memUsedMB ?? null) : null, guestMemTotalMB: g ? (g.memTotalMB ?? null) : null,
