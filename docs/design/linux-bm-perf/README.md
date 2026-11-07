@@ -263,7 +263,7 @@
       | 공격면 | 대책 | 근거(파일:줄 · 테스트) | 상태 |
       |---|---|---|---|
       | SSH 키 저장소 | 봉인 · 0600 · 원자적 쓰기 · 손상이면 쓰기 거절 · 정책 잠금 그대로 | `keyStore.js:90`(로드 먼저) · `:97 commit` · `bmOnboard7bKeys` ③ ⑦ | ✅ |
-      | | 관리 = 소유자 등급 + 본인 OTP(마지막 게이트) + 감사 | `routes/api/bmOnboard.js:33 keyAdmin` · `bmOnboard7bKeys` ⑨ | ✅ |
+      | | 관리 = 소유자 등급 + 본인 OTP(마지막 게이트) + 감사 | `routes/api/bmOnboard.js:34 keyAdmin` · `bmOnboard7bKeys` ⑨ | ✅ |
       | | 응답 · 내보내기 · 백업 · 엣지 push 에 지문 · 공개키만 | `keyBundle.js:19` · `backup/service.js:260` · `bmOnboard7bKeys` ③ ⑧ ⑩(소스 스윕) | ✅ |
       | | 약한 알고리즘 거부 · 키 직접 판정 | `keyParse.js:96` · `bmOnboard7bKeys` ① | ✅ |
       | | 주소 변경 시 비밀 · 키 참조 승계 없음 | `bmstor/registry.js:168` · `bmOnboard7bKeys` ④ | ✅ |
@@ -274,7 +274,7 @@
       | 엣지 샘플러 스크립트 | 번들 고정 + sha256 대조 | `samplerSpec.js:6` — 해시는 **자기 신고**(v2.922 D13 정정) | ○ 미확인(서명 · 실해시 없음) |
       | 로그 샘플 | redact · 로그 규칙 | `edgelog/redact.js:125` · `bmLogs7a*` | ✅ 기존 규약(7a) |
       | CSV/Excel 업로드 | 상한(4MB · 5,000행) · 미보관 · 압축 폭탄 · 값만 · 비밀 원문 거부 · SSRF · 수식 주입 | `importParse.js:102` · `importAnalyze.js:164` · `onboardRun.js resultCsv` · `bigJsonGate.js:51` · `bmOnboard7bImport` ①~④ | ✅ |
-      | | 범위 404 → 403 · 서명 대조 · 직렬 큐 · 스냅샷 | `importAnalyze.js` ② · `bmOnboard.js:193` · `onboardRun.js:22` · `bmOnboard7bImport` ④ ⑥ ⑦ | ✅ |
+      | | 범위 404 → 403 · 서명 대조 · 직렬 큐 · 스냅샷 | `importAnalyze.js` ② · `bmOnboard.js:194` · `onboardRun.js:22` · `bmOnboard7bImport` ④ ⑥ ⑦ | ✅ |
       | 수집 경로 · 엣지 배포 | 개별 토큰만 · 엣지 재분석 · 이름만(키 안 보냄) · 만든 것만 지움 · 끊겨도 central 로 넘기지 않음 | `routes/central.js:1795` · `edgeApply.js:59` · `importAnalyze.js:208` · `bmOnboard7bEdge` ①~③ | ✅ |
       | 집중 · 스냅샷 실행 | operator + 사유 + 감사 + 상한 · 키 해석 실패면 접속 안 함 | `snapshot/run.js`(7b: authError 거부 추가) · `bmPerf2923Snapshot` · `bmPerf2929Focus` | ◐(7b 추가분은 테스트 없음) |
       | CVP 매핑 | 쓰기 404/403 · 법인 CVP 일치 | `bmUsage.js portMapWrite`(3a) · 7b 는 매핑하지 않음(형식만) | ✅ 기존 규약 |
