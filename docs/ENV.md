@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **707개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **730개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-04)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-07)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (217)
+## 공통 (229)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -76,7 +76,7 @@
 | `BMUSAGE_ACTIVITY_MAX` | `500` |  | bmusage/activityLog.js |
 | `BMUSAGE_ALERT_MAX` | `40` |  | bmusage/notify.js |
 | `BMUSAGE_CMD_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
-| `BMUSAGE_CONCURRENCY` | `4` |  | bmusage/poller.js |
+| `BMUSAGE_CONCURRENCY` | `32` |  | bmusage/poller.js |
 | `BMUSAGE_COUNT_CACHE_MS` | `60000` |  | bmusage/db.js |
 | `BMUSAGE_DEVICE_TIMEOUT_MS` | `60000` |  | bmusage/poller.js |
 | `BMUSAGE_ENABLED` | `''` |  | bmusage/settings.js |
@@ -87,7 +87,13 @@
 | `BMUSAGE_ENT_PROBE_PER_RUN` | `10` |  | bmusage/poller.js |
 | `BMUSAGE_ENT_SSH_READY_MS` | `12000` |  | bmusage/collectors/idracEnterprise.js |
 | `BMUSAGE_ENTERPRISE` | `''` |  | bmusage/settings.js |
+| `BMUSAGE_ENVELOPE_MAX_BYTES` | `8` |  | bmusage/edgePull.js |
+| `BMUSAGE_INSERT_CHUNK_ROWS` | `256` |  | bmusage/db.js |
 | `BMUSAGE_LIST_BUDGET` | `20` |  | bmusage/poller.js |
+| `BMUSAGE_MIGRATE_CHUNK_ROWS` | `500` |  | bmusage/monthMigrate.js |
+| `BMUSAGE_MONTH_COUNT_CACHE_MS` | `10` |  | bmusage/monthStore.js |
+| `BMUSAGE_MONTH_MAX_OPEN` | `24` |  | bmusage/monthStore.js |
+| `BMUSAGE_REPAIR_BUDGET_MS` |  |  | bmusage/monthStore.js |
 | `BMUSAGE_SESSION_BUDGET_MS` |  |  | bmusage/collectors/osSsh.js |
 | `BMUSAGE_SSH_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
 | `BOARD_MAX_BYTES` |  |  | bulletin/store.js |
@@ -126,6 +132,7 @@
 | `CVP_FOLLOW_CONCURRENCY` | `4` |  | cvp/client.js |
 | `CVP_FOLLOW_MAX` | `160` |  | cvp/client.js |
 | `CVP_HTTP_TIMEOUT_MS` |  |  | cvp/client.js |
+| `CVP_L2` | `''` |  | cvp/client.js |
 | `CVP_PARTS_EVERY_MS` |  |  | cvp/faults.js |
 | `CVP_PUSH_CHUNK_BYTES` | `700` |  | cvp/push.js |
 | `CVP_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | cvp/push.js |
@@ -143,6 +150,7 @@
 | `DS_CFG_REFRESH_MS` |  |  | config.js |
 | `DS_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `EDGE_MODE` | `''` | ✅ | config.js |
+| `GPU_ALLOC_DB_PATH` |  |  | config.js |
 | `GUESTDISK_CONCURRENCY` | `4` |  | guestdisk/poller.js |
 | `GUESTDISK_DB_PATH` |  |  | guestdisk/db.js |
 | `GUESTDISK_TIMEOUT_MS` |  |  | guestdisk/service.js |
@@ -210,6 +218,10 @@
 | `STALL_WATCH` | `기본 아님('0' 일 때만 적용)` |  | perf/stallWatch.js |
 | `STALL_WATCH_HEAP_WARN_PCT` | `85` |  | perf/stallWatch.js |
 | `STALL_WATCH_MS` | `10000` |  | perf/stallWatch.js |
+| `STORPATH_PER_CYCLE` |  |  | config.js |
+| `STORPATH_REFRESH_MS` |  |  | config.js |
+| `STORPATH_SAMPLES` |  |  | config.js |
+| `STORPATH_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `SVCMON_ROLE` | `''` |  | config.js |
 | `TAG_REFRESH_MS` |  |  | config.js |
 | `TAG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
@@ -387,7 +399,7 @@
 | `POWER_CURRENT_STALE_MS` | `2` |  | collector/state.js, idrac/service.js |
 | `UPGRADE_PUSH_CONCURRENCY` | `4` |  | collector/upgradePush.js |
 
-## 스토리지 수집 (26)
+## 스토리지 수집 (33)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -404,6 +416,13 @@
 | `STORAGE_HTTP_TIMEOUT_MS` |  |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
 | `STORAGE_ISILON_PORT` | `8080` |  | storage/collectors/isilon.js |
+| `STORAGE_NODECLIENT_DAILY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
+| `STORAGE_NODECLIENT_HOURLY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
+| `STORAGE_NODECLIENT_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
+| `STORAGE_NODELOAD_HOURLY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
+| `STORAGE_NODELOAD_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
+| `STORAGE_NODELOAD_MS` | `5 * 60_000` |  | storage/intervals.js |
+| `STORAGE_NODELOAD_TIMEOUT_MS` |  |  | storage/nodeLoadPoller.js |
 | `STORAGE_POLL_MS` | `60 * 60_000` |  | storage/intervals.js |
 | `STORAGE_POWERSTORE_LIST_LIMIT` | `2000` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_METRICS_INTERVAL` | `'OneDay'` |  | storage/collectors/powerstore.js |
@@ -620,12 +639,12 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (57)
+## 중앙(위임 수집) (58)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BMUSAGE_PULL_STALE_MS` | `30` |  | central/bmUsageEdgePull.js |
-| `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmUsageEdgePull.js, routes/api/bmUsage.js |
+| `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmComparePull.js, central/bmPerfOpsPull.js 외 2 |
 | `CAPTURE_ACK_GRACE_MS` | `60000` |  | central/captureJobs.js |
 | `CENTRAL_AGENT_CONFIG_MAX_BYTES` | `32` |  | central/agentConfig.js |
 | `CENTRAL_AGENT_IDENTITY_MAX` |  |  | central/agentIdentity.js |
@@ -675,6 +694,7 @@
 | `PORTALCHECK_PULL_TIMEOUT_MS` | `20000` |  | central/tokenCheckPull.js |
 | `SVCMON_EDGE_MAX_AGENTS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_MAX_ROWS` |  |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_META_ALERT_HOLD_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_REGRESS_GC_HOLD_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_SILENCE_MIN_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_SKEW_WARN_MS` |  |  | central/svcmonEdge.js |
@@ -738,10 +758,12 @@
 | `WASTE_EXPORT_MAX_REPORTS` | `200` |  | routes/api/toolsCapacity.js |
 | `WASTE_SPARK_MAX_VMS` | `24` |  | routes/api/toolsCapacity.js |
 
-## GPU (6)
+## GPU (8)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `GPU_ALLOC_XLSX_TIMEOUT_MS` | `300000` |  | gpu/allocTreeXlsx.js |
+| `GPU_ALLOC_XLSX_WORKER` | `'1'` |  | gpu/allocTreeXlsx.js |
 | `GPU_GUEST_FILE_MAX_BYTES` | `8` |  | gpu/guestops.js |
 | `GUEST_GPU_MAX_HOSTS` |  |  | gpu/store.js |
 | `GUEST_GPU_MAX_HOSTS_PER_AGENT` |  |  | gpu/store.js |
@@ -832,10 +854,11 @@
 | `PDU_SESSION_BUDGET_MS` | `75000` |  | pdu/collectors/apcSsh.js |
 | `PDU_THRESHOLDS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/thresholds.js |
 
-## SAN 스위치 (34)
+## SAN 스위치 (35)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `SAN_FLOW_SHOW_MS` | `15` |  | sanswitch/flowJobs.js |
 | `SANHEALTH_DB_PATH` |  |  | sanswitch/healthHistory.js |
 | `SANHEALTH_MAX_RUNS` | `24` |  | sanswitch/healthHistory.js |
 | `SANSW_ALIAS_MAX` | `8000` |  | sanswitch/zoning.js |
@@ -896,4 +919,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 707
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 730

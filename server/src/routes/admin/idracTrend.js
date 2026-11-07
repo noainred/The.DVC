@@ -272,7 +272,7 @@ async function seriesFor(s, win, { host = undefined } = {}) {
   const hostGpuFirstTs = {};
   const cpuParts = { telemetry: [], sensor: [], bmIdrac: [], history: [] };
   let firstTs = null;
-  let cpuHistoryKey = null;
+  let cpuHistoryKey = null; let cpuHistoryNote = null;   // v2.922(반증 D14)
   try {
     const db = await getMetricsDb();
     // v2.729: 계열마다 조각으로 읽고 사이에 양보한다(historyRangeAsync — 결과는 historyRange 와 같다). 한 계열 원본을 한 문장으로
@@ -315,6 +315,16 @@ async function seriesFor(s, win, { host = undefined } = {}) {
       const r = await usageCpuRange([s.serviceTag, s.id, s.fleetId], { agent: config.agent?.name || '', start: win.start, end: win.end, bucketMs: off ? MIN : win.bucketMs, idracOnly: true });
       cpuParts.history = off ? rebucketMean(r.rows, win) : r.rows; cpuHistoryKey = r.key;
       if (r.rows.length && (firstTs == null || r.rows[0].ts < firstTs)) firstTs = r.rows[0].ts;
+      /*
+       * v2.922(리눅스 성능 3a · 반증 D14): 베어메탈 원시가 시간 단위 파일로 바뀌며 보존이 90일 → 30일(실효 min(store.rawDays, rawRetentionDays))이 됐다.
+       *   그보다 오래된 구간은 이 출처로 메울 수 없다(1시간 롤업은 행마다 출처(src)가 없어 iDRAC 전용 판정을 못 한다) — 응답이 그 사실을 말한다.
+       */
+      try {
+        const { loadBmUsageSettings, effectiveRawDays } = await import('../../bmusage/settings.js');
+        const rawDays = effectiveRawDays(loadBmUsageSettings());
+        const coverFrom = Date.now() - rawDays * 86_400_000;
+        if (win.start < coverFrom) cpuHistoryNote = { reason: 'bm-raw-retention', rawDays, coverFrom };
+      } catch { /* 참고 문구 — 실패해도 값은 그대로 */ }
     } catch (e) { errors.cpuHistory = e?.message || String(e); }
   }
   const cpu = mergeCpuSeries(win, cpuParts);
@@ -325,7 +335,7 @@ async function seriesFor(s, win, { host = undefined } = {}) {
     power = powerKeyOf(s, { entries: remotePowerEntries(), hasSeries: (k) => (typeof pdb.latest === 'function' ? pdb.latest(k) != null : false) });
     out.powerW = power.key && pdb.bucketRange ? pdb.bucketRange(power.key, win.start, win.end, win.bucketMs, win.offsetMs || 0) : [];
   } catch (e) { errors.powerW = e?.message || String(e); }
-  return { points: mergeSeries(win, out), errors, firstTs, cpuSources: cpu.sources, cpuHistoryKey, power: { found: !!power.key, reason: power.reason }, hostCpuFirstTs, hostGpuFirstTs };
+  return { points: mergeSeries(win, out), errors, firstTs, cpuSources: cpu.sources, cpuHistoryKey, ...(cpuHistoryNote ? { cpuHistoryNote } : {}), power: { found: !!power.key, reason: power.reason }, hostCpuFirstTs, hostGpuFirstTs };
 }
 
 /** 점 [{ts,v}] → 오프셋 버킷 평균(순수 — A-07). */

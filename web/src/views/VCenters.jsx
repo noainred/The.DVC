@@ -267,7 +267,9 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
   const sites = data || [];
   const openSite = sites.find((s) => s.id === openId);
   // v2.915: 상세에 ‹ 이전 · 다음 › vCenter(목록 순서) — 브레드크럼 줄에서 법인을 옮겨 다닌다(시안 ⑤)
-  if (openSite) return <Suspense fallback={<Loading />}><VCenterDetail site={openSite} onBack={() => setOpenId(null)} siblings={siblingsOf(sites, openId)} onOpen={(id) => setOpenId(id)} /></Suspense>;
+  // v2.926: key — 같은 페이지에서 해시로 **다른 vCenter 의 개체**로 건너뛰면 상세가 그대로 남아 옛 vCenter 의 개체 id(obj)로 새 목록을 찾다 '이 VM 이 없습니다' 가 떴다
+  //   (Chromium A/B 재현). vCenter 가 바뀌면 새로 마운트해 주소에서 다시 읽는다(검색 · 펼침 · 탭 상태도 그 vCenter 의 것으로).
+  if (openSite) return <Suspense fallback={<Loading />}><VCenterDetail key={openSite.id} site={openSite} onBack={() => setOpenId(null)} siblings={siblingsOf(sites, openId)} onOpen={(id) => setOpenId(id)} /></Suspense>;
   // v2.915 허브 범위(리전 · vCenter)로 먼저 거른다 — 세 탭이 같은 범위를 쓴다. 검색은 그 다음.
   const regSel = String(scope?.region || ''); const vcSel = String(scope?.vcenterId || '');
   const inScope = sites.filter((s) => (!vcSel || s.id === vcSel) && (!regSel || s.location?.region === regSel));

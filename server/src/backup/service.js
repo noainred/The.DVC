@@ -129,7 +129,9 @@ export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json
   //   필드 이름이 last* 가 아니라 아래 MIXED_EXTRA_RUN_FIELDS 로 따로 지정한다(이름을 바꾸면 화면·엣지 계약이 바뀐다).
   'central-svcmon-assign.json',
   // 2026-10-09 검토 S-01·S-02: 장비 지문 신뢰(peer-trust.json)는 승인·정책(설정)과 연결마다 바뀌는 lastSeen·lastSeenCount(실행)를 한 파일에 둔다.
-  'peer-trust.json']);
+  'peer-trust.json',
+  // v2.935(C-②): SAN 플로우 모니터 기록 — 플로우 정의(설정)와 15분마다 바뀌는 카운터 · 권한 점검 결과(실행)를 한 파일에 둔다.
+  'san-flows.json']);
 // 실행 필드 — last* 와 사용 횟수(useCount). 설정이 아니다.
 const RUN_FIELD_RE = /^(last[A-Z]|useCount$)/;
 /**
@@ -158,6 +160,12 @@ export const MIXED_EXTRA_RUN_FIELDS = new Map([
   }],
   // v2.830: 백업 그룹의 실행 상태 — 보내는 중 표지(sending)·놓친 회차(missed). lastKey·lastFire 는 last* 규칙이 뺀다.
   //   그룹 정의(이름·VM·스케줄·스토리지·anchorAt·고친 사람)만 남긴다 — 예약 회차마다 change 백업이 생기지 않게.
+  // v2.935(C-②): 플로우 카운터 · 직전 카운터 · 활성 여부 · 권한 점검 결과는 실행 — 15분 카운터 주기마다 change 백업이 생기지 않게.
+  ['san-flows.json', (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const FLOW_RUN = new Set(['counters', 'prevCounters', 'prevAt', 'active', 'rawSample']);   // v2.940 rawSample(못 읽은 출력 원문)도 실행 값
+    return { flows: Array.isArray(obj.flows) ? obj.flows.map((f) => (f && typeof f === 'object' ? Object.fromEntries(Object.entries(f).filter(([k]) => !FLOW_RUN.has(k))) : f)) : obj.flows };
+  }],
   ['bareos-groups.json', (obj) => {
     if (!obj || typeof obj !== 'object' || !Array.isArray(obj.groups)) return obj;
     const GROUP_RUN = new Set(['sending', 'missed', 'fires']);   // v2.831 fires = 실행 이력(실행 상태) · lastPrune 은 last* 로 빠진다
@@ -200,7 +208,9 @@ function fingerprintContent(name, content) {
  */
 // v2.785(검토 R-B1): v2.784 의 백업 표시(`backup-marks.json` — VM 별 업무 중요도·백업 필요·메모, 사용자가 누를 때마다 쓴다)도 같은 성격이다 —
 //   빠져 있어 표시를 바꿀 때마다 change 백업이 생겨 자동 보관 슬롯(10)의 실제 설정 변경 백업을 밀어냈다(재현: 표시만 바꿔도 지문이 달라짐).
-export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json', 'backup-marks.json', 'issues.json', 'wiki.json', 'issue-sprints.json', 'issue-filters.json', 'wiki-user.json', 'attachments.json', 'service-map-pins.json']); // v2.889 첨부 목록(올릴 때마다 바뀐다 — 본체는 백업에 넣지 않는다)
+export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json', 'backup-marks.json', 'issues.json', 'wiki.json', 'issue-sprints.json', 'issue-filters.json', 'wiki-user.json', 'attachments.json', 'service-map-pins.json',
+  // v2.915 Monitoring 설정 연동 상태 — 5분 감지가 일별 요약·연동 키(known)를 쓴다(설정 변경 아님). 번들에는 들어간다.
+  'svcmon-settings-sync.json']); // v2.889 첨부 목록(올릴 때마다 바뀐다 — 본체는 백업에 넣지 않는다)
 // 서비스 인벤토리 고정(한 대씩 고정·검토·유령 정리 때마다 바뀐다 — 5차 검토 R1: 고정 한 번이 '설정 변경' 백업 939KB 를 만들었다. 서비스·규칙(service-map.json)은 설정이라 감시 대상 그대로)
 // v2.888 위키 즐겨찾기 · 조회 수(문서를 열 때마다 바뀐다) · v2.864: 이슈 트래커 · v2.881 위키 · v2.882 스프린트 · 저장 필터도 같은 성질(사용자 데이터)
 export function isChangeWatchExcluded(name) { return CHANGE_WATCH_EXCLUDE.has(path.basename(String(name || ''))); }

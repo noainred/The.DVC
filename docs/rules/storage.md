@@ -39,6 +39,7 @@
 - (원래 5142행) v2.635 — 베어메탈 스토리지 디스크 사용량 12시간 이력. 새 수집이 아니라 '최신 결과를 떼어 적재' 한다
 - (v2.749) 게스트 파티션 사용률 경보 — 원천은 게스트 디스크 수집의 part_latest · 경로 모양으로 OS · 정규식 없는 패턴 · 메일은 아이실론 코어
 - (v2.789) 스토리지 사용량 보고서(일간·주간·월간 표 · LUN·파일시스템 · CSV · 법인/종류 비교 · 예약 메일)
+- v2.926 — 아이실론 노드 부하 시계열(네트워크·디스크·CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`, 수집 키는 `collectors/isilonNodeLoad.js`
 
 ## 본문
 
@@ -775,3 +776,42 @@
   - 7일 증가는 `part_series` 의 기준 시각 이하 마지막 점(diff-저장)으로 낸다 — 기준 점이 없으면 null(관측 부족), 변화 기준(기본 1 GB) 미만 변화는 보이지 않는다. 가득 참 예상은 그 속도의 단순 추정.
   · v2.770(점검 R5-E2): 엣지 소비 전력의 부분 합 표지(`partial`·`missing`)도 중앙 정제 화이트리스트에(missing>0 일 때만 partial) — 빠지면 전체 전력이 부분 합을 '측정' 으로 센다.
     장비 출력 파서에 `m` 플래그 + 무제한 부정 클래스 금지(외로운 \r 마다 시작점) · `/^(\d+):\s*(.*)$/` 대신 `uemcliParse.recStart` 를 쓴다(한 벌) · 주기 수집은 `_inFlight` 를 보고 건너뛰며(`inFlightSkipped`), finally 는 자기 항목만 지운다.
+- ⚠⚠ **v2.926(릴리스 2.931.0) — 아이실론 노드 부하 시계열(네트워크 In/Out · 디스크 쓰기/읽기 · CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`(`saveNodeLoadPoint`·`nodeLoadQuery`), 수집 키는 `collectors/isilonNodeLoad.js`, 화면은 `views/tools/storageNodeLoad/`**
+  (사용자 요청 "노드별 io network 부하를 저장하고 차트로" · "기간별 시간별로 이전 기록" · "Disk io 추가" · 성능 추천 ①CPU ④잡 엔진 ⑤지난주 비교 — Claude Design 시안 v2 컨펌,
+  `docs/design/isilon-node-load/`. 회귀 `server/test/storageNodeLoad2926.test.js` + 웹 `storageNodeLoad/nodeLoadText.test.js`(서버 묶음·기간·조립을 같은 소스로 대조)):
+  · **장비 왕복을 늘리지 않는다** — REST 는 이미 부르는 `statistics/current?devid=all` 에 키 3개(`node.disk.bytes.{in,out}.rate.sum` · `node.cpu.idle.avg`)를 더하고(테스트가 statistics 호출 수 3 을 고정),
+    SSH 는 세션 안에 `isi statistics system --nodes all --format json` 1개(soft · 20초 · 정확 용량 다음 · 전원보다 앞). 표본 = 수집 주기마다 1회 순간값(주기 사이는 모른다 — 화면이 말한다).
+  · ⚠ 정직 기록: 키 이름 · `node.cpu.idle.avg` 의 1/10 % 단위 · 디스크 In = 쓰기 / Out = 읽기 · CLI JSON 모양은 **실장비 미확인**. CPU 단위를 값마다 추측하지 않는다(0~1000 밖은 null —
+    값마다 추측하면 모든 노드가 바쁠 때 해석이 뒤집힌다). 값이 없으면 필드를 만들지 않고(`nodeLoadProbe` 가 읽은 수·사유), 화면은 그 묶음 버튼·표 열을 그리지 않는다.
+  · 디스크는 **B/s 그대로**(네트워크처럼 ×8 하지 않는다 — v2.599 단위 사고) · 필드 이름에 단위(`diskInBytesPs`). 새 노드 필드 3개는 `edgeRecord.NODE_NUM_KEYS` 에도(엣지 정제).
+  · 표 3개(`storage-history.db`): `node_load_sample`(장비 × 시각 PK — 재전송 중복 판정 · 노드 수 · 잡 JSON) · `node_load_history`(노드 원시 — 보존 `nodeLoadRawKeepDays` 기본 30일,
+    설정은 스토리지 증가량 › ⚙ 저장 기간 · env `STORAGE_NODELOAD_KEEP_DAYS`) · `node_load_daily`(노드 × 일 — 지표마다 sum·n·max, 보존은 일 롤업 5년). 스냅샷 1개 = 트랜잭션 1개.
+    ⚠ 일 롤업 max 는 스칼라 `max()` 금지(`max(a, NULL)` = NULL — 못 읽은 표본 하나가 그 날 최대를 지운다) — CASE 로 쓴다.
+  · ⚠⚠ **목록의 노드는 값이 모두 비어도 행을 남긴다** — 그래야 그 주기의 클러스터 합계가 부분 합인지 안다(칸의 노드를 전부 읽었을 때만 합계, 아니면 null · 버킷·일 칸은 노드마다 읽은 표본이 있을 때만).
+    노드 값이 하나도 없는 스냅샷(Unity·PowerStore 처럼 노드 처리량을 재지 않는 타입)은 적재하지 않는다(`no-load`).
+  · API `GET /tools/storage/devices/:id/node-load?range=24h|7d|30d|90d&group=net|disk|cpu[&end=ms]` — toolsPerm + fullScopeOnly · 데모 계정은 데모 장비만(404).
+    24h 원시(수집 주기 15분 미만이면 15분 버킷) · 7d 4시간 버킷(평균 + 최대) · 30d/90d 일 롤업(원시 폴백 없음). 묶음은 `Object.hasOwn` 으로만 받는다(열 이름을 만드는 키).
+    비교 구간(`BASELINE` — 24h 는 지난주 같은 요일)은 같은 조립 규칙으로 읽어 창 위치로 옮긴다. 응답의 `oldest`·`retention`·`rawMaxDays` 로 화면이 이전 구간 범위를 계산한다.
+  · 화면: 창 이동은 전송 속도의 순수 함수(`xferSpeedText` maxBackOf·windowEndOf·windowLabel·windowRangeText)를 **그대로** 쓴다(세 번째 사용처 — 사본 금지). 최신 창만 새 수집(collectedAt)에 다시 부르고 폴링하지 않는다.
+    단위가 다른 묶음은 한 차트에 겹치지 않는다(이중 축 금지). 비교 '대비 %' 는 두 구간 모두 합계를 낸 칸이 절반 이상일 때만. 잡 엔진은 SSH 장비만(REST 는 '모름' — '잡 없음' 이 아니다).
+  · 장비를 지워도 노드 부하 이력은 지우지 않는다(용량 이력과 같다 — 보존 기간으로 정리된다).
+
+36. **v2.937(2차) — 아이실론 노드 2차: 디스크 busy·IOPS(②) · 클라이언트·프로토콜(③) · 표본 주기 분리(⑨) · 노드 드로어 · 재배치 보드**(설계 `docs/design/isilon-node-clients/README.md` · 회귀 `storageNodeClients2936`):
+  · **표본 폴러는 수집 주기와 따로 돈다**(`storage/nodeLoadPoller.js` — 주기 `intervals.nodeLoadMs` 기본 5분·하한 1분·**상한 60분**(항목별 `max`) · 아이실론만 · 장비 토글 `nodeLoadEnabled`
+    기본 켬(`registry.normalizeDevice` — 다른 타입은 필드를 만들지 않는다) · 동시 3 · 장비당 시한 60초(`reqTimeoutMs` 관문) · 인증 정지는 수집 주기와 같은 레코드).
+    장비 점유는 `poller.runSampleExclusive` 로 나눈다 — **표본은 수집 중이면 건너뛰고(IN_FLIGHT_BUSY), 수집 주기는 표본이 끝날 때까지 기다린다**(표본 때문에 1시간 수집이 빠지는 쪽이 더 나쁘다).
+    호출은 4개뿐(REST `statistics/current?devid=all` + `summary/{client,protocol,drive}` · SSH `isi statistics {system,client,protocol,drive} --format json`). ⚠ 실장비 미확인 — 요약 경로·필드·행의 node(lnn 가정) · REST devid→lnn 은 6시간마다 `/cluster/nodes` 로 대응(`probe.idMap`).
+  · **엣지 → 중앙은 기존 storage push 본문의 `nodeLoadSamples`**(장비당 미전송 고리 `RING_MAX`=3 · 200 이면 지움 · 더 쌓이면 가장 오래된 것을 버리고 `ring.dropped` 로 센다). 중앙 `/storage-data` 는 장비 목록과
+    **같은 소유권 필터**(중앙 직접 장비 거절 · 개별 토큰은 위임분만)를 지난 뒤 `storageEdge.saveEdgeNodeLoadSamples`(sanitizeNodeLoadSample — ts 는 수신 시각 이하 · 장비 500 × 표본 6 상한)로 적재하고 응답 `nodeLoadSamples` 로 확인한다.
+    push 는 그 확인을 `util/centralReply.dropSummaryOf` 로 읽는다(ack 가 없으면 중앙 v2.934 이하 — 표본은 버려진다고 콘솔·상태에 남긴다). 새 노드 필드(`busyPct`·`iops`·`opsPs`·`latencyMs`)는 `NODE_NUM_KEYS` 에도.
+  · 표(`storage-history.db`): `node_load_history`·`node_load_daily` 에 지표 4열(ops·lat·busy·iops) 추가 · **`node_load_hourly`(노드 × 시간 — 보존 `nodeLoadHourlyKeepDays` 기본 90일)** ·
+    `node_client_sample`(원시 `nodeClientRawKeepDays` 기본 **2일** — 가장 많이 쌓인다) · `node_client_hourly`(30일) · `node_client_daily`(1년) · `node_proto_hourly/daily`. 표본 1개 = 트랜잭션 1개 · 같은 (장비, ts) 는 PK 가 거른다.
+    **노드 원시 기본 30일 → 7일**(5분 표본이면 12배 — 저장값이 있으면 그대로 · 테스트 2926 ④ 갱신). 원시 보존 밖의 '원시' 창(24시간 · 지난주 비교 구간)은 **시간 요약 1시간 칸**으로 내려간다(원시 폴백이 아니라 요약 — `nodeLoadQuery` source:'hourly').
+  · API: `node-load` 에 묶음 `disk`(din·dout·**busy·iops**)·`proto`(ops·lat — `protoTable` 노드 × 프로토콜 동봉) · 응답 `sample:{pollMs,nodeLoadMs,sampleEnabled,sampleMs}`(표본 켜진 장비는 24시간 창이 15분 칸) ·
+    `GET …/node-clients?node=&range=24h|7d[&end]`(지금 = 창 안 마지막 표본 · 창 평균 · **노드 비중·고정은 전 노드 행렬로**(이 노드만 보면 판정 불가) · 다른 노드 · 이름) ·
+    `GET …/client-dist?range=24h|7d|30d&proto=&fixed=0.5~1&skew=1.1~5`(행렬 상위 50 · 쏠림 노드 집합은 `nodeLoadNodeIds` — ops 0 노드도 분모 · 후보는 `rebalanceCandidates` 탐욕 — **계산일 뿐, 포탈은 바꾸지 않는다**(응답 note)).
+    셋 다 toolsPerm + fullScopeOnly · 데모 404 · 장비 호출 0 · 폴링 없음.
+  · 이름 붙이기는 `storage/clientNames.js` 하나 — 장비 보고 이름(remote_name) > VM IP > 호스트 이름/관리 IP(`hostLedgerIp` 와 같은 판정) · 같은 IP 둘은 `ambiguous` · 비정규 IPv4 표기는 같은 IP 가 아니다 · **역방향 DNS 는 하지 않는다**(SSRF·지연).
+  · 화면: '클라이언트 없음' 은 '연결 없음' 이 아니다(쉬는 마운트는 통계에 없다 — 문장으로) · 마지막 표본이 주기 ×3 을 넘으면 노란 머리(`lateMs` 는 응답 값) · 드로어는 모달 위 모달이 아니라 구역 안 펼침 ·
+    표본 꺼진 장비는 묶음 버튼이 1시간 값으로 그려지고 드로어·분포가 그 사실을 말한다 · 묶음 순서·첫 선택은 `GROUP_ORDER`·`GROUP_FIRST`(서버 묶음과 vitest 대조). 데모는 노드 2 쏠림 · 노드 3 클라이언트 0 을 합성한다(`demoNodeLoadSample` · 48시간 5분 + 5일 1시간 백필 — 클라이언트 기록이 없을 때만).
+  · 남긴 것(정직): 장비 CSV 가져오기/내보내기·일괄 변경에는 `nodeLoadEnabled` 칸이 없다(장비 편집 폼만) · 노드 표(ID 열)에서 드로어를 열지 않는다(노드 부하 구역의 히트맵 이름·순위·분포 막대에서만) · 엣지 미전송 고리는 재시작하면 비워진다(로컬 DB 에는 남는다).

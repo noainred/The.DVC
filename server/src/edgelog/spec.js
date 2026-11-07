@@ -101,6 +101,7 @@ export const STATUS_SPEC = Object.freeze([
    */
   { key: 'collect.inventory', label: 'vCenter 인벤토리 수집', group: 'collect', mod: '../store.js', fn: 'storeStatus' },
   { key: 'collect.storage', label: '스토리지 수집', group: 'collect', mod: '../storage/poller.js', fn: 'storagePollerStatus' },
+  { key: 'collect.storageNodeLoad', label: '아이실론 노드 부하 표본', group: 'collect', mod: '../storage/nodeLoadPoller.js', fn: 'nodeLoadPollerStatus' }, // v2.932(2차 ⑨) — 수집 주기와 따로 도는 가벼운 폴러(중앙·엣지 공용 · 자기 몫 아이실론만)
   { key: 'collect.sanswitch', label: 'SAN 스위치 수집', group: 'collect', mod: '../sanswitch/poller.js', fn: 'sanSwitchPollerStatus' },
   { key: 'collect.sanswitchPerf', label: 'SAN 포트 사용량 수집', group: 'collect', mod: '../sanswitch/perfPoller.js', fn: 'sanSwitchPerfStatus' },
   { key: 'collect.cvp', label: 'CVP 수집', group: 'collect', mod: '../cvp/poller.js', fn: 'cvpPollerStatus' },

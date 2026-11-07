@@ -10,6 +10,7 @@ import { statusText, traceText, isActive, phaseLabel, testSnapView } from './san
 import SanZoningPanel from './SanZoningPanel.jsx';
 import SanPortUsage from './SanPortUsage.jsx';   // v2.748 📊 포트 사용량(시안 A안 개정 2)
 import SanPortMap from './SanPortMap.jsx';       // v2.748 🔲 포트 배치(스위치 한 대 전체 포트)
+import SanHostAttrib from './SanHostAttrib.jsx'; // v2.920 호스트 귀속(가상화 호스트 HBA ↔ 조닝 ↔ 스토리지 트래픽 — 시안 D-③)
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, throughputTitle, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
@@ -86,6 +87,7 @@ export default function SanSwitchTool() {
   const [dcPerf, setDcPerf] = useState(null);      // 법인 단위 스토리지 사용량 분석 모달
   const [bulkOpen, setBulkOpen] = useState(false);  // 대량 등록 모달(v2.513) — 훅은 조기 return 위에
   const [healthOpen, setHealthOpen] = useState(false); // 전체 점검 모달(v2.519) — 훅은 조기 return 위에
+  const [attribOpen, setAttribOpen] = useState(false); // 호스트 귀속 모달(v2.920) — 훅은 조기 return 위에
   const [portFilter, setPortFilter] = useState('all');
   const [portQ, setPortQ] = useState('');
   const [infoOpen, setInfoOpen] = useState(false);   // 장비 일반 정보 펼침
@@ -249,6 +251,10 @@ export default function SanSwitchTool() {
           <button type="button" className="san2-btn"
             title="등록된 SAN 스위치를 월간 점검 체크리스트로 판정해 이상 유무를 요약하고, 세부 보고서를 PDF 로 내려받습니다. 스위치에 새로 접속하지 않고 마지막 수집 스냅샷을 판정합니다."
             onClick={() => setHealthOpen(true)}>전체 점검</button>
+          {/* v2.920 호스트 귀속 — 가상화 호스트의 HBA WWN 을 스위치 포트·zone·등록 스토리지에 대조해 어느 스토리지에 얼마나 트래픽이 가는지(확정/추정). 법인 칩 선택을 범위로 쓴다. */}
+          <button type="button" className="san2-btn"
+            title="가상화 호스트의 HBA WWN 을 스위치 포트 · zone · 네임서버 역할 · 등록 스토리지(시리얼)에 대조해 호스트별로 어느 스토리지에 얼마나 트래픽이 가는지 봅니다(확정/추정 분리). 법인 칩 선택을 그대로 범위로 씁니다."
+            onClick={() => setAttribOpen(true)}>호스트 귀속</button>
           <button type="button" className="san2-btn" disabled={busy}
             title="중앙이 직접 수집하는 스위치를 지금 다시 수집하고, 엣지 위임 스위치는 재수집 요청을 등록합니다(엣지는 다음 설정 pull 때 수집 후 바로 push)."
             onClick={collectAll}>전체 수집</button>
@@ -426,6 +432,11 @@ export default function SanSwitchTool() {
         </Modal>
       )}
 
+      {attribOpen && (
+        <Modal title={`호스트 귀속 — SAN 조닝 · 트래픽${dcSel.size ? ` — ${[...dcSel].join(', ')}` : ' — 전체'}`} onClose={() => setAttribOpen(false)} width={1400}>
+          <SanHostAttrib datacenterIds={[...dcSel].map(dcIdOfName).filter(Boolean)} datacenters={data.datacenters || []} dcNameOf={dcName} />
+        </Modal>
+      )}
       {canCsv() && bulkOpen && (
         <BulkDeviceIo base="/tools/sanswitch" title="SAN 스위치 대량 등록 — CSV · 자유텍스트" keyLabel="host"
           onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); load(); }} />
@@ -694,7 +705,7 @@ function RangePicker({ hours, setHours, range, setRange }) {
           <label>시작 <input className="input" type="datetime-local" value={fromStr} onChange={(e) => setFromStr(e.target.value)} style={{ width: 200 }} /></label>
           <label>끝 <input className="input" type="datetime-local" value={toStr} onChange={(e) => setToStr(e.target.value)} style={{ width: 200 }} placeholder="비우면 지금" /></label>
           <button className="login-btn" style={{ flex: 'none', padding: '4px 12px' }} onClick={apply}>적용</button>
-          <span className="muted">끝을 비우면 지금까지 · 최대 {RANGE_MAX_DAYS}일 · 보관 기간(설정 › 수집 › SAN 스위치 포트 사용량) 밖의 시각은 데이터가 없습니다.</span>
+          <span className="muted">끝을 비우면 지금까지 · 최대 {RANGE_MAX_DAYS}일 · 보관 기간(설정 › 수집 주기·임계 › SAN 스위치 포트 사용량) 밖의 시각은 데이터가 없습니다.</span>
           {issue && <span style={{ color: TONE.bad }}>{issue}</span>}
         </div>
       )}
@@ -1204,7 +1215,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
                 있고 장비에서 실패하는 상황에서도 사용자가 멀쩡한 설정을 의심하며 헤맸다(장비별 진단은
                 장비 상세 › 사용량 분석 탭이 `perfDiag` 로 사유를 말한다). */}
             {data.perfEnabled === false
-              ? <><b>설정 › 수집 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).</>
+              ? <><b>설정 › 수집 주기·임계 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).</>
               : <>포트 사용량 수집은 <b>켜져 있습니다</b> — 표본이 없는 이유는 스위치마다 다릅니다. 장비를 눌러 <b>사용량 분석</b> 탭을 열면 그 스위치의 사유(첫 주기 대기 / 엣지 미보고 / 명령 실패 등)를 알려줍니다.</>}
             {data.unavailable ? <div style={{ color: 'var(--amber)', marginTop: 4 }}>이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다.</div> : null}
             {!data.switches.length ? <div style={{ marginTop: 4 }}>이 법인에 등록된 스위치가 없습니다.</div> : null}

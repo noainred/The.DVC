@@ -59,7 +59,7 @@ test('notifications — 와일드카드(all) 응답은 update 키가 개체, 개
   assert.deepEqual(P.portsSummary(r.ports), { total: 3, up: 1, down: 1 }, 'down 은 관리상 켜진 포트만(쓰지 않는 포트를 장애로 세지 않는다)');
   const single = { notifications: [{ path: '/Smash/counters/ethIntf/FastCounters/current/Ethernet1', updates: { inOctets: { key: 'inOctets', value: 100 }, outOctets: { key: 'outOctets', value: 50 } } }] };
   const c = P.parseCounters(JSON.stringify(single));
-  assert.deepEqual(c.counters.get('Ethernet1'), { inOctets: 100, outOctets: 50, inErrors: null, outErrors: null }, '없는 오류 카운터는 0 이 아니라 null');
+  assert.deepEqual(c.counters.get('Ethernet1'), { inOctets: 100, outOctets: 50, inErrors: null, outErrors: null, inDiscards: null, outDiscards: null }, '(v2.922 드롭 후보 포함) 없는 오류 카운터는 0 이 아니라 null');
 });
 
 test('오류 본문(인식 필드 없음)을 포트·카운터·부품·피어로 지어내지 않는다', () => {

@@ -176,6 +176,25 @@ export function sanitizeEdgeSync(r) {
 }
 
 /**
+ * v2.938: 엣지 동기화의 연속 실패 수·알린 사실(반복 실패 알림 — 재시작해도 같은 장애를 다시 알리지 않게) 정제 — 쓸 때·읽을 때 공용.
+ * attempts: [[id, {at, ok, target, attempts, reason}]] 최대 500 · alerted: ['<id>|<버전>'] 최대 500. 모르는 모양은 버린다.
+ */
+export function sanitizeEdgeSyncState(d) {
+  if (!d || typeof d !== 'object') return null;
+  const attempts = [];
+  for (const e of Array.isArray(d.attempts) ? d.attempts.slice(0, 500) : []) {
+    if (!Array.isArray(e) || e.length !== 2) continue;
+    const id = txt(e[0], 200); const a = e[1];
+    if (!id || !a || typeof a !== 'object') continue;
+    const at = ts(a.at); const target = ver(a.target); const n = num(a.attempts);
+    if (at == null || !target || n == null || n < 0) continue;
+    attempts.push([id, { at, ok: bool(a.ok), target, attempts: Math.min(1000, Math.floor(n)), reason: txt(a.reason, 300) }]);
+  }
+  const alerted = (Array.isArray(d.alerted) ? d.alerted.slice(0, 500) : []).map((x) => txt(x, 240)).filter((x) => x && x.includes('|'));
+  return attempts.length || alerted.length ? { attempts, alerted } : null;
+}
+
+/**
  * 재시작 전 기록을 되살린다 — `restored:true` 를 달고, 확인 결과의 '새 버전 있음' 은 지금 버전 기준으로 다시 계산한다.
  * @param {object} doc 파일 내용 {lastCheck,lastResult,lastTick}
  * @param {string} currentVersion 지금 실행 중인 버전
@@ -189,7 +208,7 @@ export function restoreStatus(doc, currentVersion) {
     if (check.remote) check.remote.available = !!(check.remote.ok && check.remote.latest && newerThanNow(check.remote.latest));
     if (check.watch) check.watch.available = !!(check.watch.version && newerThanNow(check.watch.version));
   }
-  return { lastCheck: check, lastResult: mark(sanitizeResult(d.lastResult)), lastTick: mark(sanitizeTick(d.lastTick)), lastEdgeSync: mark(sanitizeEdgeSync(d.lastEdgeSync)) }; // v2.865: 엣지 동기화 기록도
+  return { lastCheck: check, lastResult: mark(sanitizeResult(d.lastResult)), lastTick: mark(sanitizeTick(d.lastTick)), lastEdgeSync: mark(sanitizeEdgeSync(d.lastEdgeSync)), edgeSyncState: sanitizeEdgeSyncState(d.edgeSyncState) }; // v2.865: 엣지 동기화 기록도 · v2.938: 연속 실패·알린 사실
 }
 
 /** 다음 백그라운드 확인 시각 — setInterval(무장 시각 + k × 주기). 꺼져 있거나 모르면 null. */

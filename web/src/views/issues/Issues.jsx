@@ -1311,7 +1311,7 @@ function SlaCalendarForm({ cal, vcenters, onChange }) {
   const set = (p) => onChange({ ...cal, ...p });
   const setRow = (i, p) => set({ byVc: cal.byVc.map((r, j) => (j === i ? { ...r, ...p } : r)) });
   return (
-    <div className="iss-cal">
+    <div className="iss-slacal">
       <div className="iss-checks">
         <span className="muted" style={{ fontSize: 12.5 }}>시간 세는 방식</span>
         <label className="iss-check"><input type="radio" name="sla-cal-mode" checked={cal.mode === '24x7'} onChange={() => set({ mode: '24x7' })} /> 달력 시간(24×7)</label>
@@ -1320,8 +1320,8 @@ function SlaCalendarForm({ cal, vcenters, onChange }) {
       {cal.mode === 'business' && (
         <>
           <div className="iss-checks">
-            <label className="iss-inline">시작<input className="input iss-time" type="time" value={cal.start} onChange={(e) => set({ start: e.target.value })} /></label>
-            <label className="iss-inline">끝<input className="input iss-time" type="time" value={cal.end} onChange={(e) => set({ end: e.target.value })} /></label>
+            <label className="iss-inline">시작<input className="input iss-slacal-time" type="time" value={cal.start} onChange={(e) => set({ start: e.target.value })} /></label>
+            <label className="iss-inline">끝<input className="input iss-slacal-time" type="time" value={cal.end} onChange={(e) => set({ end: e.target.value })} /></label>
             {WEEKDAY_TEXT.map((w, d) => (
               <label key={w} className="iss-check"><input type="checkbox" checked={cal.days.includes(d)} onChange={(e) => set({ days: e.target.checked ? [...cal.days, d].sort() : cal.days.filter((x) => x !== d) })} /> {w}</label>
             ))}
@@ -1332,7 +1332,7 @@ function SlaCalendarForm({ cal, vcenters, onChange }) {
           <div className="muted" style={{ fontSize: 12.5 }}>법인별 — 그 법인 이슈는 그 시간대로 셉니다(예: 폴란드 Europe/Warsaw · 미국 동부 America/New_York). ‘법인 휴일’ 을 켜면 공통 휴일 대신 그 목록을 씁니다.</div>
           <div className="iss-rows">
             {cal.byVc.map((r, i) => (
-              <div key={i} className="iss-row-edit iss-cal-row">
+              <div key={i} className="iss-row-edit iss-slacal-row">
                 <Select className="select" value={r.vc} onChange={(e) => setRow(i, { vc: e.target.value })} aria-label={`법인 ${i + 1}`}>
                   <option value="">법인 고르기</option>
                   {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
@@ -1454,7 +1454,7 @@ function IssueSettings({ meta = null }) {
         <h3 className="iss-h3">자동화 규칙</h3>
         <div className="muted" style={{ fontSize: 12.5 }}>정해진 목록에서 켜고 끕니다(자유 스크립트 없음). 실행 기록은 이슈 이력 · 위키 체크 기록에 ‘automation’ 으로 남습니다.</div>
         {[
-          ['wikiCheck', '이슈가 완료되면 → 그 이슈 키(ISS-번호)를 적은 위키 체크리스트 항목을 완료로(판을 만들지 않는 체크 · 읽기 전용 스페이스와 보관 문서는 건너뜀)'],
+          ['wikiCheck', '이슈가 완료되면 → 그 이슈 키(ISS-번호)를 적은 위키 체크리스트 항목을 완료로(이슈의 법인 스페이스와 공용 스페이스만 · 판을 만들지 않는 체크 · 읽기 전용 스페이스와 보관 문서는 건너뜀)'],
           ['childrenReview', '하위 작업이 모두 완료되면 → 상위 이슈를 ‘검토’ 로(완료는 사람이)'],
           ['p0Chat', 'P0 장애(유형 장애 · 우선순위 P0)가 등록되면 → 팀 채팅에 바로(1분 묶음을 기다리지 않음 · 채널은 설정 › 알림)'],
         ].map(([k, label]) => (
@@ -1464,7 +1464,7 @@ function IssueSettings({ meta = null }) {
           <label className="iss-check"><input type="checkbox" checked={!!form.automation.stale} onChange={(e) => upd({ automation: { ...form.automation, stale: e.target.checked } })} /> 진행 중인데</label>
           <label className="iss-inline"><input className="input iss-num" type="number" min={1} max={90} value={form.automation.staleDays} onChange={(e) => upd({ automation: { ...form.automation, staleDays: e.target.value } })} aria-label="멈춤 일 수" />일 갱신이 없으면 → 담당자에게 알림(같은 멈춤에 그 일 수마다 한 번) · 보드 · 목록에 ‘멈춤’ 배지</label>
         </div>
-        {data.automationStatus && <div className="muted" style={{ fontSize: 12.5 }}>실행: 위키 체크 {data.automationStatus.wikiChecked}항목({data.automationStatus.wikiPages}문서) · 상위 검토 {data.automationStatus.reviewed} · P0 채팅 {data.automationStatus.p0Chat}{data.automationStatus.p0ChatFail ? ` · 채팅 실패 ${data.automationStatus.p0ChatFail}` : ''}{data.automationStatus.errors ? ` · 실패 ${data.automationStatus.errors}(${data.automationStatus.error || ''})` : ''} — 포탈을 다시 시작하면 0 부터 셉니다</div>}
+        {data.automationStatus && <div className="muted" style={{ fontSize: 12.5 }}>실행: 위키 체크 {data.automationStatus.wikiChecked}항목({data.automationStatus.wikiPages}문서{data.automationStatus.wikiOutOfScope ? ` · 다른 법인 문서라 건너뜀 ${data.automationStatus.wikiOutOfScope}` : ''}) · 상위 검토 {data.automationStatus.reviewed} · P0 채팅 {data.automationStatus.p0Chat}{data.automationStatus.p0ChatFail ? ` · 채팅 실패 ${data.automationStatus.p0ChatFail}` : ''}{data.automationStatus.errors ? ` · 실패 ${data.automationStatus.errors}(${data.automationStatus.error || ''})` : ''} — 포탈을 다시 시작하면 0 부터 셉니다</div>}
       </div>
 
       {form.sla && (

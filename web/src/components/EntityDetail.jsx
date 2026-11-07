@@ -17,11 +17,10 @@ import { hostUsagePct } from '../views/vcdOverview.js'; // v2.606 WEB2606-02: �
 const HostPowerPanel = React.lazy(() => import('./HostPowerPanel.jsx'));
 const HostGpuPanel = React.lazy(() => import('./HostGpuPanel.jsx')); // v2.650
 const IdracTrendLinkButton = React.lazy(() => import('./IdracTrendLinkButton.jsx')); // v2.676
-// v2.449: VM 상세에서도 '자원 축소 근거 리포트'(Optimization 표의 📊 리포트와 같은 화면)를 연다.
-// recharts 를 쓰므로 반드시 lazy — 정적 import 하면 이 파일이 entry 그래프에 있어 로그인 화면까지
-// 차트 번들(496KB)이 따라온다(v2.448 에서 끊어낸 경로).
-const RightsizeReport = React.lazy(() => import('../views/tools/RightsizeReport.jsx'));
-const VmMetricButton = React.lazy(() => import('./VmMetrics.jsx').then((m) => ({ default: m.VmMetricButton })));
+// v2.926(시안 docs/design/vm-perf §8 '남긴 것' ① · 사용자 선택 A): VM 상세는 **드로어 한 벌**(views/vms/VmDrawer.jsx — 가상화 서버 · vCenter 트리와 같은 화면).
+// 옛 VM 모달 본문(KV 17 · 섹션 6 · 버튼 6)은 드로어가 전부 갖고 있어 여기서 지웠다. VmDrawer 가 이 파일의 섹션을 import 하므로(순환) **동적 import** 로 끊는다
+// (정적 import 면 모듈 평가 순환 — 이 파일 머리의 경고와 같은 이유). 축소 근거 리포트 · 성능 단추도 드로어 안에 있다.
+const VmDrawer = React.lazy(() => import('../views/vms/VmDrawer.jsx'));
 const HostMetricButton = React.lazy(() => import('./VmMetrics.jsx').then((m) => ({ default: m.HostMetricButton })));
 /** lazy 컴포넌트를 감싸는 얇은 경계 — 버튼 하나가 뜨는 동안 상세 화면이 접히지 않게 폴백을 최소화. */
 const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React.Suspense>;
@@ -624,45 +623,19 @@ export function HostHbaTable({ item }) {
 }
 
 export function EntityDetail({ type, item, onClose }) {
-  const titles = { vm: 'VM', host: '호스트', datastore: '데이터스토어' };
+  const titles = { host: '호스트', datastore: '데이터스토어' };
   const [showHostVms, setShowHostVms] = useState(false);
   // 훅은 조기 return 위(컴포넌트 최상단)에서만 선언한다 — 렌더 간 훅 개수가 달라지면 React #310
   // 으로 화면 전체가 크래시한다(CLAUDE.md 회귀 규칙, v2.202 실제 사고).
-  const [showReport, setShowReport] = useState(false);
+  // v2.926: VM 은 드로어(가상화 서버 · vCenter 트리와 같은 화면) — 알람 · 탐색 · Platform VM 검색 · VmLink(도구 표 · 호스트 VM 목록) · 호스트 전체 페이지가 여기로 온다.
+  //   rows 가 없으니 ‹ › 는 잠기고 목록 위치도 보이지 않는다 · signals 가 없는 항목은 드로어가 '신호를 함께 받지 않았다' 고 말한다(지어내지 않는다).
+  //   모달(z 200) 안에서 열려도 보인다 — 드로어(z 151)는 그 모달의 쌓임 맥락 안에서 모달 본문 위에 그려지고, 드로어가 여는 공용 Modal(200)은 그 위다(Chromium 확인).
+  if (type === 'vm') return <Lazy><VmDrawer vm={item} rows={[]} onClose={onClose} onMove={() => {}} days={null} /></Lazy>;
   return (
     <Modal title={`${titles[type] || ''} 상세 — ${item.name}`} onClose={onClose} width={640}>
       {/* v2.594(감사 UI-2594-01): '1fr 1fr' 트랙은 최소폭이 auto 라 400px 에서 오른쪽 열이 잘렸다(Modal 이 overflow:hidden).
           좁은 폭은 1열로 떨어지고, 트랙은 minmax(0,…) 로 못 박는다(v2.576 .vc-grid 와 같은 결함). */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0 24px' }}>
-        {type === 'vm' && (
-          <>
-            <DRow label="이름"><b>{item.name}</b></DRow>
-            <DRow label="전원"><StateBadge state={item.powerState} /></DRow>
-            <DRow label="vCenter">{item.vcenterId}</DRow>
-            <DRow label="호스트">{item.host || '—'}</DRow>
-            <DRow label="클러스터">{item.cluster || '—'}</DRow>
-            <DRow label="Guest OS">{item.guestOS}</DRow>
-            <DRow label={`IP${item.ipAddresses?.length > 1 ? ` (${item.ipAddresses.length})` : ''}`}>
-              {(() => {
-                const ips = item.ipAddresses?.length ? item.ipAddresses : (item.ipAddress ? [item.ipAddress] : []);
-                if (!ips.length) return '—';
-                return <VmIpPing vcenterId={item.vcenterId} ips={ips} />;
-              })()}
-            </DRow>
-            <DRow label="VMware Tools"><StateBadge state={item.toolsStatus} /></DRow>
-            <DRow label="vCPU">{item.cpuCount != null ? `${item.cpuCount} 코어` : '—'}</DRow>
-            <DRow label="RAM">{item.memMB != null ? <>{gb(item.memMB)} ({item.memMB.toLocaleString()} MB)</> : '—'}</DRow>
-            <DRow label="디스크">{item.storageGB != null ? `${item.storageGB} GB` : '—'}</DRow>
-            <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
-            <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>
-            <DRow label="Tools 버전">{item.toolsVersion || '—'}</DRow>
-            <DRow label="스냅샷">{item.snapshotCount ? `${item.snapshotCount}개 · ${item.snapshotSizeGB || 0} GB` : '없음'}</DRow>
-            <DRow label="GPU">{item.gpu ? <GpuBadge gpu={item.gpu} /> : <span className="muted">없음</span>}</DRow>
-            <DRow label="vCenter ID">{item.id}</DRow>
-            <DRow label="태그">{item.tags?.length ? item.tags.map((t) => <span key={t} className="badge blue" style={{ marginLeft: 4 }}>{t}</span>) : '—'}</DRow>
-            <DRow label="메모">{item.notes || '—'}</DRow>
-          </>
-        )}
         {type === 'host' && <HostBasicRows item={item} onShowVms={() => setShowHostVms(true)} />}
         {type === 'datastore' && (
           <>
@@ -678,13 +651,9 @@ export function EntityDetail({ type, item, onClose }) {
           </>
         )}
       </div>
-      {type === 'vm' && <VmPartitionsSection vm={item} />}
-      {type === 'vm' && <VmCfgSection vm={item} />}
       {type === 'host' && <HostCfgSection host={item} />}
-      {(type === 'vm' || type === 'host') && <PerfcSection item={item} isVm={type === 'vm'} />}
-      {(type === 'vm' || type === 'host') && <ClusterCfgSection item={item} isVm={type === 'vm'} />}
-      {type === 'vm' && <VmTagsSection vm={item} />}
-      {type === 'vm' && <VmChangesSection vm={item} />}
+      {type === 'host' && <PerfcSection item={item} isVm={false} />}
+      {type === 'host' && <ClusterCfgSection item={item} isVm={false} />}
       {type === 'datastore' && <DsBrowseSection item={item} />}
       {type === 'host' && <HostHbaTable item={item} />}
       {type === 'host' && item.gpus?.length > 0 && (
@@ -704,26 +673,6 @@ export function EntityDetail({ type, item, onClose }) {
           <Lazy><IdracTrendLinkButton hostId={item.id} hostName={item.name} onClose={onClose} /></Lazy>
           <ObjectViewButton type="host" item={item} onClose={onClose} />
         </div>
-      )}
-      {type === 'vm' && (
-        // flexWrap: 버튼 총폭이 모달보다 넓으면 다음 줄로 접는다(안 접으면 justify-end 라 왼쪽 버튼이 잘림 — 사용자 신고).
-        <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end', flexWrap: 'wrap', rowGap: 8 }}>
-          {/* 사양 변경은 4개 VM 상세 화면 중 '가상머신' 탭에만 있어 화면마다 기능이 달랐다(v2.240 통일).
-              권한(vm.reconfig)이 없으면 버튼이 스스로 렌더되지 않는다 — 서버도 requirePerm 으로 강제. */}
-          <VmReconfigButton vm={item} />
-          <VmConsoleButton vmId={item.id} vmName={item.name} />
-          <VmRemoteButton item={item} />
-          <Lazy><VmMetricButton vmId={item.id} vmName={item.name} vcenterId={item.vcenterId} onBefore={onClose} /></Lazy>
-          {/* 자원 축소 근거 리포트(v2.449) — 특수 기능 › Optimization 표의 '📊 리포트' 와 같은 화면이다.
-              그 표에서만 열 수 있어 VM 을 검색해 들어온 경우 도구 화면으로 되돌아가야 했다. */}
-          <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px', whiteSpace: 'nowrap' }}
-            onClick={() => setShowReport(true)}
-            title="이 VM 의 CPU·메모리를 줄여도 되는지 기간별 추이·근거로 확인합니다">📊 축소 근거 리포트</button>
-          <ObjectViewButton type="vm" item={item} onClose={onClose} />
-        </div>
-      )}
-      {type === 'vm' && showReport && (
-        <Lazy><RightsizeReport vm={item} onClose={() => setShowReport(false)} /></Lazy>
       )}
       {type === 'host' && showHostVms && (
         <HostVmsModal host={item.name} vcenterId={item.vcenterId} onClose={() => setShowHostVms(false)} />

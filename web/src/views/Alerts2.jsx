@@ -12,6 +12,7 @@ const RULE_LABEL = {
   datastorePct: '데이터스토어 사용률 ≥ (%)',
   ramOvercommitPct: '클러스터 RAM 오버커밋 ≥ (%)',
   vcpuPerCore: '클러스터 vCPU:코어 ≥',
+  gpuAllocPct: '법인 GPU 할당률 ≥ (%)',   // v2.939(GPU 할당율 개선 6 · 기본 끔 — 예비가 음수면 위험 등급)
 };
 
 /** 설정 → 알림: 임계치/조건 규칙 + Slack/Webhook 통지 채널. initialData 는 렌더 스모크 테스트용(화면은 넘기지 않는다 — 마운트 때 읽는다). */

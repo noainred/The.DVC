@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>장비 상세 — 노드 부하 추이</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: #0a0e17; color: #e6edf6; font-family: Inter, -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+a { color: #8b9bb4; } a:hover { color: #e6edf6; }
+.seg { display: inline-flex; border: 1px solid #243049; border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
+.seg button, .seg a { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 0; border-left: 1px solid #243049; background: transparent; color: #8b9bb4; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; text-decoration: none; }
+.seg button:first-child, .seg a:first-child { border-left: 0; }
+.seg .on { background: #1b2540; color: #e6edf6; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+th { text-align: left; font-weight: 600; color: #8b9bb4; font-size: 11.5px; padding: 8px 10px; border-bottom: 1px solid #243049; white-space: nowrap; background: #0f1626; }
+td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; vertical-align: middle; white-space: nowrap; }
+</style>
+</helmet>
+
+<div style="max-width: 1392px; margin: 0 auto; padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box">
+
+  <div style="display: flex; flex-direction: column; gap: 4px">
+    <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: .06em; color: #8b9bb4">특수 기능 › 스토리지 모니터링 › 장비 상세 · <span style="color: #e6edf6">PS-FRA-01</span> (Isilon / PowerScale · 8 노드 · REST)</div>
+    <div style="font-size: 12.5px; color: #8b9bb4">아래는 장비 상세 모달의 <b style="color: #e6edf6">‘노드’ 절에 새로 들어가는 구역</b>입니다. 위쪽(용량 · HDD/SSD 풀 · 용량 추이)은 지금 그대로이고, 노드 표는 이 구역 아래로 내려옵니다.</div>
+  </div>
+
+  <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; display: flex; flex-direction: column; gap: 14px; padding: 16px 18px 18px">
+
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px">
+      <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+        <h3 style="margin: 0; font-size: 16px; font-weight: 700">노드 부하 추이 <span style="font-weight: 500; color: #8b9bb4; font-size: 13px">— 네트워크 In / Out · 디스크 쓰기 / 읽기</span></h3>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #8b9bb4">
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid #243049; background: #0f1626"><i style="width: 7px; height: 7px; border-radius: 50%; background: #34e0b4; display: inline-block" aria-hidden="true"></i>출처 네트워크 <b style="color: #e6edf6; font-family: 'JetBrains Mono', monospace; font-weight: 600">node.net.ext.bytes.*.rate</b> · 디스크 <b style="color: #e6edf6; font-family: 'JetBrains Mono', monospace; font-weight: 600">node.disk.bytes.*.rate.sum</b> (REST) · SSH 장비는 ‘isi status’ 처리량 열 + ‘isi statistics system’</span>
+          <span style="display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; border: 1px solid #243049; background: #0f1626">표본 <b style="color: #e6edf6; margin: 0 4px">수집 주기마다 1회 · 순간값</b> (주기 {{sampleLabel}} — 설정값)</span>
+        </div>
+      </div>
+      <a href="#table" style="font-size: 12.5px; display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: 1px solid #243049; border-radius: 8px; background: #0f1626; color: #e6edf6; text-decoration: none">표로 보기</a>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px">
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 12px; color: #8b9bb4">기간</span>
+        <div class="seg"><button class="{{r24}}" onClick="{{set24}}">24시간</button><button class="{{r7}}" onClick="{{set7}}">7일</button><button class="{{r30}}" onClick="{{set30}}">30일</button><button class="{{r90}}" onClick="{{set90}}">90일</button></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 12px; color: #8b9bb4">네트워크</span>
+        <div class="seg"><button class="{{dIn}}" onClick="{{setIn}}">In</button><button class="{{dOut}}" onClick="{{setOut}}">Out</button><button class="{{dSum}}" onClick="{{setSum}}">In + Out</button></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 12px; color: #8b9bb4">디스크</span>
+        <div class="seg"><button class="{{dDIn}}" onClick="{{setDIn}}">쓰기(In)</button><button class="{{dDOut}}" onClick="{{setDOut}}">읽기(Out)</button><button class="{{dDSum}}" onClick="{{setDSum}}">합계</button></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px"><span style="font-size: 12px; color: #8b9bb4">보기</span>
+        <div class="seg"><button class="on">히트맵</button><a href="Multiples.dc.html">소형 다중</a><a href="Multiples.dc.html">겹쳐 보기</a></div>
+      </div>
+      <span style="font-size: 12px; color: #8b9bb4; margin-left: auto">{{rangeNote}}</span>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 8px 12px; border: 1px solid #1f2a40; border-radius: 10px; background: #0f1626">
+      <button type="button" disabled="{{prevOff}}" onClick="{{goPrev}}" style="height: 30px; padding: 0 11px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap">◀ 이전 {{rangeShort}}</button>
+      <input type="range" min="0" max="{{maxBack}}" step="1" value="{{sliderVal}}" onChange="{{onSlide}}" aria-label="조회 구간 스크롤(오른쪽 끝 = 최근)" style="flex: 1 1 220px; min-width: 120px; accent-color: #3987e5; margin: 0">
+      <button type="button" disabled="{{nextOff}}" onClick="{{goNext}}" style="height: 30px; padding: 0 11px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap">다음 {{rangeShort}} ▶</button>
+      <button type="button" disabled="{{nextOff}}" onClick="{{goLatest}}" style="height: 30px; padding: 0 11px; border: 1px solid {{latestBorder}}; border-radius: 8px; background: {{latestBg}}; color: #e6edf6; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap">최신</button>
+      <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #8b9bb4; white-space: nowrap">날짜·시각으로 이동 <input type="datetime-local" value="{{jumpVal}}" step="3600" aria-label="창 끝 날짜와 시각" style="height: 28px; padding: 0 8px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px"></label>
+      <span style="flex-basis: 100%; font-size: 12px; color: #8b9bb4">{{winText}}</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px">
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+        <div style="font-size: 12px; color: #8b9bb4">클러스터 합계 · {{lastKind}}</div>
+        <div style="font-size: 24px; font-weight: 600; line-height: 1.15">{{nowIn}} <span style="font-size: 13px; color: #8b9bb4; font-weight: 500">{{legA}}</span> <span style="color: #5d6b85; font-weight: 400">/</span> {{nowOut}} <span style="font-size: 13px; color: #8b9bb4; font-weight: 500">{{legB}}</span></div>
+        <div style="font-size: 12px; color: #8b9bb4">8 노드 합 · {{lastLabel}} 표본</div>
+      </div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+        <div style="font-size: 12px; color: #8b9bb4">가장 바쁜 노드 · 기간 평균 {{dirLabel}}</div>
+        <div style="font-size: 24px; font-weight: 600; line-height: 1.15">노드 {{busyId}} <span style="font-size: 13px; color: #8b9bb4; font-weight: 500">{{busyAvg}}</span></div>
+        <div style="font-size: 12px; color: #8b9bb4">노드 평균의 {{busyRatio}}배 · 평균 {{meanAvg}}</div>
+      </div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+        <div style="font-size: 12px; color: #8b9bb4">가장 한가한 노드 · 기간 평균 {{dirLabel}}</div>
+        <div style="font-size: 24px; font-weight: 600; line-height: 1.15">노드 {{idleId}} <span style="font-size: 13px; color: #8b9bb4; font-weight: 500">{{idleAvg}}</span></div>
+        <div style="font-size: 12px; color: #8b9bb4">최대 노드와 {{spread}}배 차이</div>
+      </div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+        <div style="font-size: 12px; color: #8b9bb4">표본</div>
+        <div style="font-size: 24px; font-weight: 600; line-height: 1.15">{{cols}} <span style="font-size: 13px; color: #8b9bb4; font-weight: 500">/ {{cols}} 주기</span></div>
+        <div style="font-size: 12px; color: #8b9bb4">읽지 못한 노드값 {{missing}}개 — 0 으로 채우지 않음(빈칸)</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch">
+
+      <div style="flex: 999 1 720px; min-width: 0; background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px 12px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+          <div style="font-size: 13px; font-weight: 600">노드 × 시간 히트맵 <span style="font-weight: 400; color: #8b9bb4">· {{dirLabel}} · 칸 하나 = 표본 하나{{bucketNote}}</span></div>
+          <div style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #8b9bb4">
+            <span>0</span>
+            <span style="display: inline-flex; gap: 2px" aria-hidden="true"><i style="width: 16px; height: 10px; border-radius: 2px; background: #184f95; display: inline-block"></i><i style="width: 16px; height: 10px; border-radius: 2px; background: #2a78d6; display: inline-block"></i><i style="width: 16px; height: 10px; border-radius: 2px; background: #5598e7; display: inline-block"></i><i style="width: 16px; height: 10px; border-radius: 2px; background: #86b6ef; display: inline-block"></i><i style="width: 16px; height: 10px; border-radius: 2px; background: #b7d3f6; display: inline-block"></i></span>
+            <span>{{maxLabel}}</span>
+            <span style="margin-left: 10px; display: inline-flex; align-items: center; gap: 5px"><i style="width: 16px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid #243049; background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.14) 3px 4px)" aria-hidden="true"></i>값 없음</span>
+          </div>
+        </div>
+        <div style="overflow-x: auto">
+          <div style="position: relative; min-width: 640px">
+            <div style="display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 0 10px; align-items: center; height: 18px; font-size: 11px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace">
+              <div></div>
+              <div style="display: grid; grid-template-columns: repeat({{cols}}, minmax(0, 1fr)); gap: 2px">
+                <sc-for list="{{colLabels}}" as="c" hint-placeholder-count="24"><div style="overflow: visible; white-space: nowrap">{{c}}</div></sc-for>
+              </div>
+            </div>
+            <sc-for list="{{rows}}" as="row" hint-placeholder-count="8">
+              <div style="display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 0 10px; align-items: center; margin-top: 2px">
+                <div style="display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12px"><b style="font-weight: 600">노드 {{row.id}}</b><span style="color: #8b9bb4; font-family: 'JetBrains Mono', monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis">{{row.ip}}</span></div>
+                <div style="display: grid; grid-template-columns: repeat({{cols}}, minmax(0, 1fr)); gap: 2px">
+                  <sc-for list="{{row.cells}}" as="c" hint-placeholder-count="24"><div title="{{c.tip}}" style="height: 24px; border-radius: 3px; background: {{c.bg}}; border: {{c.border}}"></div></sc-for>
+                </div>
+              </div>
+            </sc-for>
+            <div style="position: absolute; left: calc(150px + 10px + (100% - 160px) * {{tipX}}); top: {{tipTop}}px; transform: translate(-50%, -100%); background: #0b1220; border: 1px solid #243049; border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.45); white-space: nowrap; pointer-events: none">
+              <div style="color: #8b9bb4; margin-bottom: 4px">노드 5 · {{tipWhen}}</div>
+              <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 74px">{{tipIn}}</b><span style="color: #8b9bb4">{{legA}}</span></div>
+              <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 74px">{{tipOut}}</b><span style="color: #8b9bb4">{{legB}}</span></div>
+            </div>
+          </div>
+        </div>
+        <div style="font-size: 12px; color: #8b9bb4">빗금 칸은 그 주기에 그 노드 값을 읽지 못한 것입니다(0 이 아닙니다). 노드 이름을 누르면 아래 노드 표에서 그 노드가 선택되고 ‘겹쳐 보기’ 에 들어갑니다. {{drillNote}}</div>
+      </div>
+
+      <div style="flex: 1 1 300px; min-width: 0; background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px">
+        <div style="font-size: 13px; font-weight: 600">노드 순위 <span style="font-weight: 400; color: #8b9bb4">· 기간 평균 {{dirLabel}}</span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{ranked}}" as="n" hint-placeholder-count="8">
+            <div style="display: grid; grid-template-columns: 56px minmax(0, 1fr) 76px; gap: 10px; align-items: center; font-size: 12.5px">
+              <div>노드 {{n.id}}</div>
+              <div style="height: 14px; border-radius: 0 4px 4px 0; background: #3987e5; width: {{n.w}}%; min-width: 2px"></div>
+              <div style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #e6edf6">{{n.avg}}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-size: 12px; color: #8b9bb4; margin-top: auto">평균은 읽은 표본만으로 냅니다 — 읽지 못한 주기는 분모에서 뺍니다.</div>
+      </div>
+    </div>
+
+    <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+        <div style="font-size: 13px; font-weight: 600">클러스터 합계 추이 <span style="font-weight: 400; color: #8b9bb4">· {{grpLabel}} · 8 노드 합 · 한 노드라도 읽지 못한 주기는 합계를 비웁니다(부분 합 없음)</span></div>
+        <div style="display: flex; gap: 14px; font-size: 12px; color: #8b9bb4"><span style="display: inline-flex; align-items: center; gap: 6px"><i style="width: 14px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i>{{legA}}</span><span style="display: inline-flex; align-items: center; gap: 6px"><i style="width: 14px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i>{{legB}}</span></div>
+      </div>
+      <div style="position: relative; display: grid; grid-template-columns: 56px minmax(0, 1fr) 96px; gap: 0 8px">
+        <div style="position: relative; height: 200px; font-size: 11px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace">
+          <sc-for list="{{ticks}}" as="t" hint-placeholder-count="4"><div style="position: absolute; right: 0; top: {{t.y}}px; transform: translateY(-50%)">{{t.label}}</div></sc-for>
+        </div>
+        <div style="position: relative; height: 200px">
+          <svg width="100%" height="200" viewBox="0 0 1000 200" preserveAspectRatio="none" style="display: block; overflow: visible" role="img" aria-label="클러스터 합계 In · Out 추이">
+            <sc-for list="{{ticks}}" as="t" hint-placeholder-count="4"><line x1="0" x2="1000" y1="{{t.y}}" y2="{{t.y}}" stroke="#1f2a40" stroke-width="1" vector-effect="non-scaling-stroke"></line></sc-for>
+            <line x1="{{crossX}}" x2="{{crossX}}" y1="0" y2="200" stroke="#5d6b85" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+            <path d="{{pathIn}}" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+            <path d="{{pathOut}}" fill="none" stroke="#d95926" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+          </svg>
+          <div style="position: absolute; left: {{crossPct}}%; top: 8px; transform: translateX(10px); background: #0b1220; border: 1px solid #243049; border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.45); white-space: nowrap; pointer-events: none">
+            <div style="color: #8b9bb4; margin-bottom: 4px">{{crossWhen}}</div>
+            <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 80px">{{crossIn}}</b><span style="color: #8b9bb4">{{legA}} · 8 노드</span></div>
+            <div style="display: flex; align-items: center; gap: 8px"><i style="width: 12px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i><b style="font-weight: 600; min-width: 80px">{{crossOut}}</b><span style="color: #8b9bb4">{{legB}} · 8 노드</span></div>
+          </div>
+        </div>
+        <div style="position: relative; height: 200px; font-size: 12px">
+          <div style="position: absolute; left: 0; top: {{endInY}}px; transform: translateY(-50%); display: flex; align-items: center; gap: 6px"><i style="width: 10px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i><span>{{endIn}}</span></div>
+          <div style="position: absolute; left: 0; top: {{endOutY}}px; transform: translateY(-50%); display: flex; align-items: center; gap: 6px"><i style="width: 10px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i><span>{{endOut}}</span></div>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: 56px minmax(0, 1fr) 96px; gap: 0 8px; font-size: 11px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace">
+        <div></div>
+        <div style="display: flex; justify-content: space-between"><sc-for list="{{axisLabels}}" as="a" hint-placeholder-count="5"><span>{{a}}</span></sc-for></div>
+        <div></div>
+      </div>
+      <div style="font-size: 12px; color: #8b9bb4">{{gapNote}}</div>
+    </div>
+
+    <div id="table" style="display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px">
+        <div style="font-size: 13px; font-weight: 600">노드 8 <span style="font-weight: 400; color: #8b9bb4">· 기존 표 + ‘추이’ 열 · 체크한 노드는 겹쳐 보기(최대 4)</span></div>
+        <div style="font-size: 12px; color: #8b9bb4">선택 2 / 4 · <a href="Multiples.dc.html">겹쳐 보기 열기</a></div>
+      </div>
+      <div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px">
+        <table>
+          <thead><tr>
+            <th style="width: 34px"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">선택</span></th>
+            <th style="text-align: right; width: 40px">ID</th><th>IP</th><th>시리얼</th><th style="width: 56px">상태</th><th style="text-align: right">In(bps)</th><th style="text-align: right">Out(bps)</th><th style="text-align: right">디스크 쓰기(MB/s)</th><th style="text-align: right">디스크 읽기(MB/s)</th><th>추이 {{rangeShort}} · {{grpLabel}}</th><th>HDD Used/Size</th><th>SSD Used/Size</th>
+          </tr></thead>
+          <tbody>
+            <sc-for list="{{tableRows}}" as="n" hint-placeholder-count="8">
+              <tr>
+                <td><input type="checkbox" aria-label="노드 {{n.id}} 겹쳐 보기 선택" checked="{{n.sel}}" style="width: 16px; height: 16px; accent-color: #3987e5; margin: 0; display: block"></td>
+                <td style="text-align: right">{{n.id}}</td>
+                <td style="font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.ip}}</td>
+                <td style="font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.serial}}</td>
+                <td><span style="display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; background: rgba(34,197,94,.14); color: #86efac; border: 1px solid rgba(34,197,94,.3)">OK</span></td>
+                <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.inNow}}</td>
+                <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.outNow}}</td>
+                <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.dInNow}}</td>
+                <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.dOutNow}}</td>
+                <td><svg width="110" height="26" viewBox="0 0 110 26" style="display: block" role="img" aria-label="노드 {{n.id}} 추이"><path d="{{n.sparkIn}}" fill="none" stroke="#3987e5" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path><path d="{{n.sparkOut}}" fill="none" stroke="#d95926" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path></svg></td>
+                <td>{{n.hdd}}</td>
+                <td>{{n.ssd}}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="font-size: 12px; color: #8b9bb4; line-height: 1.6; border-top: 1px solid #1f2a40; padding-top: 10px">
+      <b style="color: #e6edf6">읽는 법.</b> 값은 장비가 보고한 그 시점의 처리량이고 수집 주기(설정값)마다 한 번 읽습니다 — 주기 사이의 부하는 모릅니다(평균이 아닙니다). 네트워크는 bps(REST 는 B/s ×8), 디스크는 B/s 그대로(MB/s 표시)입니다. 디스크 쓰기/읽기의 OneFS 키 이름과 In/Out 방향(쓰기/읽기)은 <b style="color: #fcd34d">실장비에서 확인한 뒤 표기를 확정</b>합니다 — 키가 없으면 디스크 열·버튼이 생기지 않고 노드 수집 상태에 받은 키를 적습니다. 엣지 위임 장비는 중앙이 push 를 받은 시점부터 쌓입니다.
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"sampleMin":{"editor":"int","default":60,"min":1,"max":1440,"unit":"min","section":"데이터"},"$preview":{"width":1440,"height":1640}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { dir: 'in', range: '24h', back: 0 }; }
+  renderVals() {
+    const R = (s) => { const x = Math.sin(s * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+    const dir = this.state.dir; const range = this.state.range;
+    const cols = { '24h': 24, '7d': 42, '30d': 30, '90d': 45 }[range];
+    const N = 8;
+    const H = 3600000; const D = 24 * H;
+    const spanMs = { '24h': D, '7d': 7 * D, '30d': 30 * D, '90d': 90 * D }[range];
+    const stepMs = spanMs / cols;
+    const RAW_DAYS = 30; const DAILY_DAYS = 1825;
+    const maxBack = (range === '24h' || range === '7d') ? Math.floor(RAW_DAYS * D / spanMs) - 1 : Math.floor(DAILY_DAYS * D / spanMs) - 1;
+    const back = Math.max(0, Math.min(maxBack, this.state.back || 0));
+    const BASE_END = Date.UTC(2026, 10, 6, 22, 0, 0);
+    const endMs = BASE_END - back * spanMs;
+    const KST = 9 * H;
+    const p2 = (n) => String(n).padStart(2, '0');
+    const clock = (ms) => { const d = new Date(ms + KST); return p2(d.getUTCMonth() + 1) + '.' + p2(d.getUTCDate()) + ' ' + p2(d.getUTCHours()) + ':00'; };
+    const localInput = (ms) => { const d = new Date(ms + KST); return d.getUTCFullYear() + '-' + p2(d.getUTCMonth() + 1) + '-' + p2(d.getUTCDate()) + 'T' + p2(d.getUTCHours()) + ':00'; };
+    const colTime = (i) => endMs - (cols - i) * stepMs;
+    const grp = dir.charAt(0) === 'd' ? 'disk' : 'net';
+    const base = { in: [0, 1.1, 0.8, 1.4, 2.3, 1.2, 0.9, 0.7, 1.0], out: [0, 1.6, 1.3, 2.0, 3.3, 1.9, 1.4, 1.1, 1.5],
+      din: [0, 95, 70, 120, 210, 105, 80, 60, 90], dout: [0, 140, 110, 180, 300, 160, 125, 95, 135] };
+    const prof = (i) => { const h = range === '24h' ? i : (i * 24 / cols * 7) % 24; return 0.62 + 0.38 * Math.sin((h - 7) / 24 * Math.PI * 2); };
+    const nullAt = (n, i) => n === 7 && (range === '24h' ? (i >= 9 && i <= 11) : i === Math.floor(cols * 0.4));
+    const val = (n, i, d) => { if (nullAt(n, i)) return null; const b = base[d][n]; const x = b * prof(i) * (0.8 + 0.4 * R(n * 131 + i * 7 + (d === 'in' ? 1 : d === 'out' ? 2 : d === 'din' ? 3 : 4))); return d.charAt(0) === 'd' ? Math.round(x) : Math.round(x * 100) / 100; };
+    const A = grp === 'disk' ? 'din' : 'in'; const B = grp === 'disk' ? 'dout' : 'out';
+    const v = (n, i) => { if (dir === 'sum' || dir === 'dsum') { const a = val(n, i, A); return a == null ? null : Math.round((a + val(n, i, B)) * 100) / 100; } return val(n, i, dir); };
+    const fmt = (x) => (x == null ? '—' : grp === 'disk' ? (x >= 1000 ? (x / 1000).toFixed(2) + ' GB/s' : Math.round(x) + ' MB/s') : (x >= 10 ? x.toFixed(1) : x.toFixed(2)) + ' Gbps');
+    const dirLabel = { in: '네트워크 In', out: '네트워크 Out', sum: '네트워크 In + Out', din: '디스크 쓰기', dout: '디스크 읽기', dsum: '디스크 쓰기 + 읽기' }[dir];
+    const legA = grp === 'disk' ? '쓰기' : 'In'; const legB = grp === 'disk' ? '읽기' : 'Out';
+    const ramp = ['#184f95', '#2a78d6', '#5598e7', '#86b6ef', '#b7d3f6'];
+    let max = 0; const grid = [];
+    for (let n = 1; n <= N; n++) { const r = []; for (let i = 0; i < cols; i++) { const x = v(n, i); r.push(x); if (x != null && x > max) max = x; } grid.push(r); }
+    const colLabels = []; const when = [];
+    for (let i = 0; i < cols; i++) {
+      const t = colTime(i); const d = new Date(t + KST);
+      let lab = ''; let w = '';
+      if (range === '24h') { w = clock(t); lab = d.getUTCHours() % 3 === 0 ? p2(d.getUTCHours()) : ''; }
+      else if (range === '7d') { w = clock(t) + ' (4시간 평균)'; lab = d.getUTCHours() === 0 ? p2(d.getUTCMonth() + 1) + '.' + p2(d.getUTCDate()) : ''; }
+      else if (range === '30d') { w = clock(t).slice(0, 5) + ' (하루 평균)'; lab = i % 5 === 0 ? clock(t).slice(0, 5) : ''; }
+      else { w = clock(t).slice(0, 5) + ' (2일 평균)'; lab = i % 9 === 0 ? clock(t).slice(0, 5) : ''; }
+      colLabels.push(lab); when.push(w);
+    }
+    const rows = []; let missing = 0;
+    for (let n = 1; n <= N; n++) {
+      const cells = grid[n - 1].map((x, i) => {
+        if (x == null) { missing += 1; return { bg: 'repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.14) 3px 4px)', border: '1px solid #243049', tip: '노드 ' + n + ' · ' + when[i] + ' · 값 없음(읽지 못함)' }; }
+        const bin = Math.min(4, Math.floor(x / max * 5));
+        return { bg: ramp[bin], border: '0', tip: '노드 ' + n + ' · ' + when[i] + ' · ' + dirLabel + ' ' + fmt(x) };
+      });
+      rows.push({ id: n, ip: '10.94.42.' + (180 + n), cells });
+    }
+    const avgOf = (n) => { const xs = grid[n - 1].filter((x) => x != null); return xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length); };
+    const avgs = []; for (let n = 1; n <= N; n++) avgs.push({ id: n, avg: avgOf(n) });
+    const sorted = avgs.slice().sort((a, b) => b.avg - a.avg);
+    const topAvg = sorted[0].avg; const mean = avgs.reduce((a, b) => a + b.avg, 0) / N;
+    const ranked = sorted.map((a) => ({ id: a.id, avg: fmt(a.avg), w: Math.round(a.avg / topAvg * 100) }));
+    const sumAt = (i, d) => { let s = 0; for (let n = 1; n <= N; n++) { const x = val(n, i, d); if (x == null) return null; s += x; } return Math.round(s * 100) / 100; };
+    const sIn = []; const sOut = []; let maxS = 0;
+    for (let i = 0; i < cols; i++) { const a = sumAt(i, A); const b = sumAt(i, B); sIn.push(a); sOut.push(b); if (a != null && a > maxS) maxS = a; if (b != null && b > maxS) maxS = b; }
+    const step = grp === 'disk' ? (maxS > 1600 ? 500 : maxS > 800 ? 250 : 200) : (maxS > 16 ? 5 : maxS > 8 ? 2.5 : 2); const top = Math.ceil(maxS / step) * step;
+    const yOf = (x) => 190 - x / top * 180;
+    const path = (arr) => { let d = ''; let pen = false; arr.forEach((x, i) => { if (x == null) { pen = false; return; } const px = (i / (cols - 1) * 1000).toFixed(1); const py = yOf(x).toFixed(1); d += (pen ? ' L ' : ' M ') + px + ' ' + py; pen = true; }); return d.trim(); };
+    const ticks = []; for (let t = 0; t <= top; t += step) ticks.push({ label: grp === 'disk' ? (t >= 1000 ? (t / 1000) + ' GB/s' : t + ' MB/s') : t + ' G', y: Math.round(yOf(t)) });
+    const axisLabels = [0, 0.25, 0.5, 0.75, 1].map((f) => { const t = endMs - spanMs + f * spanMs; return range === '24h' ? clock(t).slice(6) : clock(t).slice(0, 5); });
+    const cross = range === '24h' ? 14 : Math.floor(cols * 0.6);
+    const lastIdx = cols - 1;
+    const endIn = sIn[lastIdx]; const endOut = sOut[lastIdx];
+    const tableRows = [];
+    for (let n = 1; n <= N; n++) {
+      const sTop = grp === 'disk' ? 330 : 3.6;
+      const sp = (d) => { let s = ''; let pen = false; for (let i = 0; i < cols; i++) { const x = val(n, i, d); if (x == null) { pen = false; continue; } const px = (2 + i / (cols - 1) * 106).toFixed(1); const py = (24 - x / sTop * 20).toFixed(1); s += (pen ? ' L ' : ' M ') + px + ' ' + py; pen = true; } return s.trim(); };
+      const bpsTxt = (g) => (g == null ? '—' : (g >= 1 ? g.toFixed(1) + 'G' : (g * 1e3).toFixed(0) + 'M'));
+      const mbTxt = (m) => (m == null ? '—' : String(Math.round(m)));
+      tableRows.push({ id: n, ip: '10.94.42.' + (180 + n), serial: 'DEMOSN4F1' + String(n).padStart(3, '0'), sel: n === 4 || n === 5, inNow: bpsTxt(val(n, lastIdx, 'in')), outNow: bpsTxt(val(n, lastIdx, 'out')), dInNow: mbTxt(val(n, lastIdx, 'din')), dOutNow: mbTxt(val(n, lastIdx, 'dout')), sparkIn: sp(A), sparkOut: sp(B), hdd: (170 + n * 3) + '.' + n + 'T/241.5T (' + (70 + n) + '%)', ssd: '8.1T/19.3T (42%)' });
+    }
+    const gapCols = []; for (let i = 0; i < cols; i++) if (sIn[i] == null) gapCols.push(when[i].replace(/ \(.*\)$/, ''));
+    const tipI = range === '24h' ? 14 : Math.floor(cols * 0.6);
+    const sm = this.props.sampleMin ?? 60;
+    const rangeShort = range === '24h' ? '24시간' : range === '7d' ? '7일' : range === '30d' ? '30일' : '90일';
+    const rangeText = clock(endMs - spanMs) + ' ~ ' + clock(endMs);
+    const tableSrc = (range === '24h' || range === '7d') ? '원시 표 보존 ' + RAW_DAYS + '일(설정값)' : '일 롤업 보존 5년';
+    return {
+      cols, colLabels, rows, ranked, ticks, axisLabels, tableRows,
+      dirLabel, rangeShort,
+      maxBack, sliderVal: maxBack - back, prevOff: back >= maxBack, nextOff: back <= 0,
+      latestBorder: back === 0 ? '#1d4ed8' : '#243049', latestBg: back === 0 ? '#2563eb' : '#141b2d',
+      jumpVal: localInput(endMs),
+      winText: (back ? back + '칸 전 (' + rangeShort + ' 단위) · ' + rangeText + ' · 과거 구간은 자동 갱신하지 않습니다' : '최근 구간 · ' + rangeText + ' · 수집 주기마다 갱신') + ' · 갈 수 있는 범위 ' + (maxBack + 1) + '칸 = ' + tableSrc,
+      lastKind: back ? '창 끝 표본' : '마지막 표본',
+      drillNote: range === '24h' ? '' : '열(시각)을 누르면 그 날의 24시간 보기(시간별)로 들어갑니다.',
+      goPrev: () => this.setState({ back: Math.min(maxBack, back + 1) }), goNext: () => this.setState({ back: Math.max(0, back - 1) }), goLatest: () => this.setState({ back: 0 }),
+      onSlide: (e) => this.setState({ back: maxBack - Number(e.target.value) }),
+      rangeNote: range === '24h' ? '칸 = 수집 주기 1회(순간값)' : range === '7d' ? '칸 = 4시간 평균(버킷) · 최대는 툴팁에' : range === '30d' ? '칸 = 하루 평균 · 일 롤업 표' : '칸 = 2일 평균 · 일 롤업 표',
+      bucketNote: range === '24h' ? '' : ' → 버킷 평균',
+      sampleLabel: sm >= 60 ? (sm / 60) + '시간' : sm + '분',
+      maxLabel: fmt(max),
+      nowIn: fmt(endIn), nowOut: fmt(endOut), lastLabel: when[lastIdx].replace(/ \(.*\)$/, ''),
+      busyId: sorted[0].id, busyAvg: fmt(topAvg), busyRatio: (topAvg / mean).toFixed(1), meanAvg: fmt(mean),
+      idleId: sorted[N - 1].id, idleAvg: fmt(sorted[N - 1].avg), spread: (topAvg / sorted[N - 1].avg).toFixed(1),
+      missing,
+      pathIn: path(sIn), pathOut: path(sOut),
+      crossX: (cross / (cols - 1) * 1000).toFixed(1), crossPct: (cross / (cols - 1) * 100).toFixed(2), crossWhen: when[cross].replace(/ \(.*\)$/, ''), crossIn: fmt(sIn[cross]), crossOut: fmt(sOut[cross]),
+      endIn: fmt(endIn), endOut: fmt(endOut), endInY: endIn == null ? 100 : Math.round(yOf(endIn)), endOutY: endOut == null ? 120 : Math.round(yOf(endOut)),
+      tipX: ((tipI + 0.5) / cols).toFixed(4), tipTop: 18 + 2 + 26 * 4 - 6, tipWhen: when[tipI], tipIn: fmt(val(5, tipI, A)), tipOut: fmt(val(5, tipI, B)),
+      legA, legB, grpLabel: grp === 'disk' ? '디스크 쓰기 · 읽기' : '네트워크 In · Out',
+      dDIn: dir === 'din' ? 'on' : '', dDOut: dir === 'dout' ? 'on' : '', dDSum: dir === 'dsum' ? 'on' : '',
+      setDIn: () => this.setState({ dir: 'din' }), setDOut: () => this.setState({ dir: 'dout' }), setDSum: () => this.setState({ dir: 'dsum' }),
+      gapNote: gapCols.length ? '합계가 빈 구간 ' + gapCols.join(' · ') + ' — 노드 7 값을 읽지 못해 합계를 내지 않았습니다(7 노드 합을 8 노드 합처럼 그리지 않습니다).' : '이 기간에는 합계가 빈 구간이 없습니다.',
+      r24: range === '24h' ? 'on' : '', r7: range === '7d' ? 'on' : '', r30: range === '30d' ? 'on' : '', r90: range === '90d' ? 'on' : '',
+      dIn: dir === 'in' ? 'on' : '', dOut: dir === 'out' ? 'on' : '', dSum: dir === 'sum' ? 'on' : '',
+      set24: () => this.setState({ range: '24h', back: 0 }), set7: () => this.setState({ range: '7d', back: 0 }), set30: () => this.setState({ range: '30d', back: 0 }), set90: () => this.setState({ range: '90d', back: 0 }),
+      setIn: () => this.setState({ dir: 'in' }), setOut: () => this.setState({ dir: 'out' }), setSum: () => this.setState({ dir: 'sum' }),
+    };
+  }
+}
+</script>
+</body>
+</html>

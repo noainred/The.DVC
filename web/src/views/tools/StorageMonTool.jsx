@@ -35,6 +35,8 @@ import { hardwareSummaryParts } from './storageHardwareText.js'; // v2.599 C2599
 import { volumeProvisionText } from './powerstoreVolumeText.js'; // v2.603 COL-2603-07: 볼륨 size 결측 안내
 import { serialHeader, showNodeSerialCol, nodeSerialTitle, nodeSerialNote } from './storageSerialText.js';
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
+import NodeLoadPanel from './storageNodeLoad/NodeLoadPanel.jsx'; // v2.926 노드 부하 추이(네트워크·디스크·CPU)
+import { rateText, pctText } from './storageNodeLoad/nodeLoadText.js';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -713,7 +715,7 @@ export default function StorageMonTool() {
   return (
     <div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
-        <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ type: 'isilon', name: '', host: '', username: 'root', password: '', agent: '', datacenterId: '', collectMethod: 'ssh', sshPort: 22, enabled: true })}>+ 장비 등록</button>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ type: 'isilon', name: '', host: '', username: 'root', password: '', agent: '', datacenterId: '', collectMethod: 'ssh', sshPort: 22, enabled: true, nodeLoadEnabled: true })}>+ 장비 등록</button>
         {['devices', 'dc', 'type', 'faults', 'trend'].map((v) => (
           <button key={v} className={view === v ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px' }} onClick={() => setView(v)}
             title={v === 'faults' ? faultKpiTitle(fk) : undefined}>
@@ -1004,6 +1006,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
     name: nodeList.some((n) => n.name),
     ext: nodeList.some((n) => n.ext),
     io: nodeList.some((n) => n.inBps != null || n.outBps != null),
+    // v2.926 — 노드 디스크 쓰기·읽기(B/s)·CPU %. 값이 있는 장비에서만 열을 그린다(키가 없는 장비에 '—' 열을 늘어놓지 않는다).
+    disk: nodeList.some((n) => n.diskInBytesPs != null || n.diskOutBytesPs != null),
+    cpu: nodeList.some((n) => n.cpuPct != null),
     hdd: nodeList.some((n) => n.hdd),
     ssd: nodeList.some((n) => n.ssd || n.l3Bytes > 0),
     serial: showNodeSerialCol(nodeList, ex),   // v2.735.2 — PowerScale 노드 시리얼
@@ -1028,7 +1033,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   // 제거를 위해 1100 으로 넓혔으나 실제 렌더 결과 노드 표 열 사이 빈 공간이 커서 압축.
   // 노드 표 실제 콘텐츠 폭(모노스페이스 수치 포함)은 ~700px 이라 900 에서도 가로 스크롤 없음.
   return (
-    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name || r.host}`} onClose={onClose} width={900}>
+    // v2.926: 아이실론은 노드 부하 추이(히트맵)와 노드 표 디스크·CPU 열이 더해져 900px 에서 노드 표의 HDD/SSD 열이 가로 스크롤 뒤로 밀렸다
+    //   (Chromium 1440 판독) — 아이실론 상세만 1240px(좁은 화면은 Modal 이 화면 폭으로 줄인다). 다른 타입은 예전 그대로.
+    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name || r.host}`} onClose={onClose} width={r.type === 'isilon' ? 1240 : 900}>
       {/* 새로고침(v2.306, 사용자 요구) — 중앙 수집 장비는 즉시 재수집, 엣지 장비는 주기 안내(202 사유) */}
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12.5 }} disabled={busy} onClick={refresh}>
@@ -1177,6 +1184,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               SSH isilon 은 Ext·처리량·HDD/SSD·L3 전부, API 타입(PowerStore/Unity/PowerMax/VPLEX)은
               대부분 id·이름·상태만 채워 나머지 열이 항상 '—' 였다 → 빈 열을 숨겨 정보 밀도를 높인다.
               노드 표제도 타입에 맞춘다(컨트롤러/SP/디렉터). */}
+          {/* v2.926 노드 부하 추이(사용자 요청 — 아이실론 노드별 네트워크·디스크·CPU 저장 + 차트 · 이전 구간 · 지난주 비교 · 잡 엔진).
+              Isilon 만(다른 타입 수집기는 노드 처리량을 재지 않는다 — 값이 없으면 패널이 스스로 그리지 않는다). */}
+          {r.type === 'isilon' && nodeList.length > 0 && <NodeLoadPanel deviceId={r.id} snap={s} isEdge={!!r.agent} />}
           {nodeList.length > 0 && (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '스토리지 컨트롤러' : r.type === 'unity480' ? '스토리지 프로세서(SP)' : (r.type === 'vplex' || r.type === 'metronode') ? '디렉터' : '노드'} {nodeList.length}{s.nodes.count > nodeList.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
@@ -1191,6 +1201,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                     {ncol.ext && <th style={{ width: 44 }}>Ext</th>}
                     {ncol.io && <th style={{ textAlign: 'right', width: 84 }}>In(bps)</th>}
                     {ncol.io && <th style={{ textAlign: 'right', width: 84 }}>Out(bps)</th>}
+                    {ncol.disk && <th style={{ textAlign: 'right' }} title="디스크 In(쓰기로 읽는다 — 실장비 확인 전 가정)">디스크 쓰기</th>}
+                    {ncol.disk && <th style={{ textAlign: 'right' }} title="디스크 Out(읽기로 읽는다 — 실장비 확인 전 가정)">디스크 읽기</th>}
+                    {ncol.cpu && <th style={{ textAlign: 'right', width: 60 }}>CPU</th>}
                     {ncol.hdd && <th>HDD Used/Size</th>}
                     {ncol.ssd && <th>SSD Used/Size</th>}
                   </tr></thead>
@@ -1205,6 +1218,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                         {ncol.ext && <td>{n.ext ? <span className={`badge ${n.ext === 'C' ? 'green' : 'red'}`} title="C=Connected · N=Not Connected">{n.ext}</span> : <span className="muted">—</span>}</td>}
                         {ncol.io && <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.inBps)}</td>}
                         {ncol.io && <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.outBps)}</td>}
+                        {ncol.disk && <td data-sort={String(n.diskInBytesPs ?? '')} style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12, whiteSpace: 'nowrap' }}>{rateText(n.diskInBytesPs)}</td>}
+                        {ncol.disk && <td data-sort={String(n.diskOutBytesPs ?? '')} style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12, whiteSpace: 'nowrap' }}>{rateText(n.diskOutBytesPs)}</td>}
+                        {ncol.cpu && <td data-sort={String(n.cpuPct ?? '')} style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{pctText(n.cpuPct)}</td>}
                         {/* 'No Storage HDDs' 는 isilon(isi status) 전용 문구 — 타 타입의 hdd null 은 '—' */}
                         {ncol.hdd && <td style={{ whiteSpace: 'nowrap' }}>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)}${n.hdd.pct != null ? ` (${n.hdd.pct}%)` : ''}` : <span className="muted">{r.type === 'isilon' ? 'No Storage HDDs' : '—'}</span>}</td>}
                         {ncol.ssd && <td style={{ whiteSpace: 'nowrap' }}>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)}${n.ssd.pct != null ? ` (${n.ssd.pct}%)` : ''}` : n.l3Bytes > 0 ? <span className="muted">L3: {tbFmt(n.l3Bytes)}</span> : <span className="muted">—</span>}</td>}
@@ -1644,6 +1660,13 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
         <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}>
           <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 활성
         </label>
+        {/* v2.932(2차 ⑨): 노드 부하 표본 수집 — 아이실론만 · 기본 켬. 주기는 설정 › 스토리지 수집 주기(노드 부하 표본 주기)에서. SSH 장비는 표본마다 로그인이 생긴다(장비 로그). */}
+        {form.type === 'isilon' && (
+          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}
+            title="수집 주기와 따로 도는 가벼운 폴러가 노드별 부하·클라이언트·프로토콜 표본을 읽습니다(주기는 설정 › 스토리지 수집 주기). 끄면 1시간 수집 값만 남고 노드 드로어·클라이언트 분포가 비어 있습니다. SSH 장비는 표본마다 로그인이 생겨 장비 감사 로그가 늘어납니다.">
+            <input type="checkbox" checked={form.nodeLoadEnabled !== false} onChange={(e) => setForm({ ...form, nodeLoadEnabled: e.target.checked })} /> 노드 부하 표본 수집
+          </label>
+        )}
         {/* 연결 테스트 — 저장하지 않고 수집기를 1회 돌려 API 가 실제로 도는지 확인(v2.404).
             서버가 ssrfBlockReason 을 그대로 태우므로 임의 host 프로브로 쓰이지 않는다. */}
         <button className="tab" style={{ flex: 'none', padding: '8px 14px' }}

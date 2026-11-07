@@ -139,7 +139,8 @@ test('1 · 2 · 3 · 4 — 댓글 고치기 · 휴지통 · 링크 · 옮기기'
     await call('DELETE', '/wiki/pages/' + e.id);
     out.expired = wk.purgeExpiredTrash(Date.now() + 31 * 86400000);
   `);
-  assert.deepEqual(out.edit, { s: 200, edits: 1, prev: 1 });
+  // v2.932(점검 B1-01): 고치기 응답에도 고치기 전 원문(prev)을 싣지 않는다 — 저장은 그대로(sweep2932Issues 가 저장 · 응답을 함께 고정)
+  assert.deepEqual(out.edit, { s: 200, edits: 1 }); // prev 칸이 없다(JSON 으로 옮겨 undefined 는 빠진다)
   assert.deepEqual(out.editMails, ['lee@x.co'], '고친 댓글은 새로 언급한 사람에게만');
   assert.equal(out.editOther, 403);
   assert.deepEqual(out.issueEdit, { s: 200, body: '고친 글', edited: true });

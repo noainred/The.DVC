@@ -19,7 +19,7 @@ export default function VcenterPorts() {
   // v2.596(감사 WS-4): 마지막 요청만 반영한다(늦게 온 이전 기간 응답이 현재 것을 덮지 않게).
   const loadGen = useRef(0);
   const load = () => { const g = ++loadGen.current; setError(null); fetchJson('/ping/vcport/overview', { range }).then((d) => { if (g !== loadGen.current) return; setData(d); if (portInput === '') setPortInput((d.ports || []).join(', ')); }).catch((e) => { if (g === loadGen.current) setError(e.message); }); };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [range]);
+  useEffect(() => { load(); }, [range]); // eslint-disable-line react-hooks/exhaustive-deps
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4000); };
 
   const savePorts = async () => {
