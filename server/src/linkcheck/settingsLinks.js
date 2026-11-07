@@ -36,6 +36,19 @@ export function splitTarget(raw, { defaultPort = 443, defaultScheme = 'https' } 
   } catch (e) { return { bad: `주소를 해석하지 못했습니다(${String(e?.message || e).slice(0, 60)}).` }; }
 }
 
+/**
+ * v2.932(점검 D1-01 — 재현): load-error 표지(`registryLoadError` 류)를 내보내지 않는 등록부 → 그 등록부 **파일 이름**.
+ *   이 모듈들은 손상된 파일을 보존본(<파일>.corrupt.<시각>)으로 옮기고 빈 목록을 준다 — 그것을 '등록 0건' 으로 읽으면 설정 연동이
+ *   그 종류의 연동 대상 전부를 '설정에서 사라짐' 으로 판정했다(vcenters.json 손상 → vCenter 대상 전부 gone → 적용하면 전부 중지).
+ *   판정은 설정 메뉴 상태 배지와 같은 `settingsStatus/sources.js damaged`(파일 없음 ∧ 손상 보존본만 있음) 하나를 쓴다.
+ *   ⚠ 이름이 틀리면 늘 '정상' 이다 — 각 모듈의 FILE 과 같은 문자열이어야 한다(시험이 실제 로더로 대조한다). '파일 없음 ∧ 보존본 없음' 은
+ *   진짜 0건이라 보류가 아니다.
+ */
+export const REGISTRY_FILE_OF = Object.freeze({
+  vcenters: 'vcenters.json', nsx: 'nsx.json', horizon: 'horizon.json', deploy: 'agent-deploy-targets.json',
+  relaytopo: 'relay-topology.json', gpuPhysical: 'gpu-physical.json', capture: 'capture-monitors.json', credentials: 'credentials.json',
+});
+
 /** 대상 id — **안정적**이어야 한다(DB 기본키이고 이력이 이어진다). */
 export function targetIdOf(kind, ref) { return `${kind}|${t(ref) || '-'}`; }
 
@@ -97,7 +110,8 @@ export async function buildSettingsTargets(deps = {}) {
       const name = fnNames.find((n) => typeof m[n] === 'function');
       if (!name) throw new Error(`${path} 에 ${fnNames.join('/')} 중 아무 함수도 없습니다(모듈이 바뀌었습니다 — 이 등록부는 점검에서 빠집니다).`);
       const list = pick(m, name) ?? [];
-      noteLoadError(key, m);
+      // v2.932(점검 D1-01): 표지 함수가 없는 모듈은 등록부 파일의 손상 보존본으로 본다(로더가 파일을 옮긴 **뒤**라야 보인다 — pick 다음).
+      if (!noteLoadError(key, m)) await noteDamagedFile(key);
       return list;
     }, errors);
   };
@@ -106,14 +120,26 @@ export async function buildSettingsTargets(deps = {}) {
    *   그 종류의 연동 대상 전부를 '설정에서 사라짐' 으로 판정했다. 모듈이 손상 상태를 알려 주면(registryLoadError 류) sourceErrors 로 올린다
    *   — 통신 점검 화면도 '못 읽음' 을 말한다(조용한 0건 금지 — 이 파일 머리말과 같은 원칙). 원문(파일 조각)은 싣지 않는다.
    */
+  const LOAD_ERROR_REASON = '등록부 파일을 읽지 못했습니다(손상본을 보존했습니다) — 이 출처의 항목이 빠졌을 수 있습니다.';
+  /** @returns {boolean} 모듈이 load-error 표지 함수를 갖고 있는가(있으면 그 판정이 진실 — 파일 판정을 겹쳐 보지 않는다) */
   function noteLoadError(key, m) {
     for (const fn of ['registryLoadError', 'emRegistryLoadError', 'settingsLoadError', 'isiduSettingsLoadError']) {
       if (typeof m?.[fn] !== 'function') continue;
       let bad = null;
       try { bad = m[fn](); } catch { bad = null; }
-      if (bad) errors.push({ source: key, reason: '등록부 파일을 읽지 못했습니다(손상본을 보존했습니다) — 이 출처의 항목이 빠졌을 수 있습니다.' });
-      return;
+      if (bad) errors.push({ source: key, reason: LOAD_ERROR_REASON });
+      return true;
     }
+    return false;
+  }
+  let damagedFile = null;
+  async function noteDamagedFile(key) {
+    const file = REGISTRY_FILE_OF[key];
+    if (!file) return;
+    try {
+      damagedFile ||= (await import('../settingsStatus/sources.js')).damaged;
+      if (damagedFile(file)) errors.push({ source: key, reason: LOAD_ERROR_REASON });
+    } catch (e) { console.warn(`[linkcheck] 등록부 손상 판정 실패(${key}): ${String(e?.message || e).slice(0, 120)}`); }
   }
 
   /* ── 가상화 ───────────────────────────────────────────────────────────── */

@@ -50,7 +50,7 @@ function VmReconfigModal({ vm, onClose }) {
     setCpu(r.hw.cpu); setCps(r.hw.coresPerSocket || 1); setRamGB(Math.round((r.hw.memMB || 0) / 1024)); setErr(null);
     setNicConn(Object.fromEntries((r.hw.nics || []).map((n) => [n.key, n.connected])));
   }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const poweredOn = /on/i.test(powerState);
   const cpuBlocked = poweredOn && hw && !hw.cpuHotAdd;

@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **713개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **716개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-07)
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (222)
+## 공통 (224)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -88,10 +88,12 @@
 | `BMUSAGE_ENT_SSH_READY_MS` | `12000` |  | bmusage/collectors/idracEnterprise.js |
 | `BMUSAGE_ENTERPRISE` | `''` |  | bmusage/settings.js |
 | `BMUSAGE_ENVELOPE_MAX_BYTES` | `8` |  | bmusage/edgePull.js |
+| `BMUSAGE_INSERT_CHUNK_ROWS` | `256` |  | bmusage/db.js |
 | `BMUSAGE_LIST_BUDGET` | `20` |  | bmusage/poller.js |
 | `BMUSAGE_MIGRATE_CHUNK_ROWS` | `500` |  | bmusage/monthMigrate.js |
 | `BMUSAGE_MONTH_COUNT_CACHE_MS` | `10` |  | bmusage/monthStore.js |
 | `BMUSAGE_MONTH_MAX_OPEN` | `24` |  | bmusage/monthStore.js |
+| `BMUSAGE_REPAIR_BUDGET_MS` |  |  | bmusage/monthStore.js |
 | `BMUSAGE_SESSION_BUDGET_MS` |  |  | bmusage/collectors/osSsh.js |
 | `BMUSAGE_SSH_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
 | `BOARD_MAX_BYTES` |  |  | bulletin/store.js |
@@ -626,7 +628,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (57)
+## 중앙(위임 수집) (58)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -681,6 +683,7 @@
 | `PORTALCHECK_PULL_TIMEOUT_MS` | `20000` |  | central/tokenCheckPull.js |
 | `SVCMON_EDGE_MAX_AGENTS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_MAX_ROWS` |  |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_META_ALERT_HOLD_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_REGRESS_GC_HOLD_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_SILENCE_MIN_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_SKEW_WARN_MS` |  |  | central/svcmonEdge.js |
@@ -902,4 +905,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 713
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 716

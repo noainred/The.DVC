@@ -385,15 +385,21 @@ export async function bmPortsView(req, snap, deps = {}) {
   const mask = async (v) => (isAdmin || v == null ? v : D.maskText(v, hosts));
   if (!corpCvpIds.length) return { ...base, cvpRegistered: false, nics: nics.map((x) => ({ nic: x.nic, state: 'no-cvp' })), candidates: [] };
   const corpSet = new Set(corpCvpIds);
+  /*
+   * v2.932(점검 A1-05): 포트 최신값 · 설명 후보는 **그 CVP 의 지금 담당 행만**(등록부 agent — cvp/overview rowOwnerOf · hostSan.js 와 같은 판정).
+   *   CVP 담당이 바뀌고 옛 담당 엣지가 더 push 하지 않으면 port_latest 에 옛 agent 행이 남아, 옛 처리량으로 대조하거나 같은 포트 후보가 두 번 나왔다.
+   */
+  const { rowOwnerOf } = await import('../../cvp/overview.js');
+  const own = rowOwnerOf(cvps);   // 담당 판정만(법인 거름은 아래 corpSet · 범위 규칙 그대로)
   const maps0 = await D.listPortMap({ agent: found.agent, key: found.realKey });
   // 확정 매핑이 가리키는 CVP 의 포트 최신값만 읽는다(범위 계정은 자기 법인 CVP 만 — 나머지는 아래에서 숨기고 센다).
   const mapCvps = [...new Set(maps0.map((m) => String(m.cvpId)))].filter((id) => !allowed || corpSet.has(id));
-  const portsAll = (await D.portLatestRows({ cvpIds: mapCvps }).catch(() => ({ rows: [] }))).rows || [];
+  const portsAll = ((await D.portLatestRows({ cvpIds: mapCvps }).catch(() => ({ rows: [] }))).rows || []).filter((p) => own({ cvpId: p.cvp_id, agent: p.agent }));
   // 후보: v2.920 cvp/hostMatch 하나(포트 설명 — 호스트 짧은 이름·서비스 태그·NIC 이름). 단서로 LIKE 를 넉넉히 뽑고 경계 판정은 matchUplinks.
   const H = await import('../../cvp/hostMatch.js');
   const host = { name: found.target.name || '', aliases: [found.target.serviceTag, found.target.osHostName].filter(Boolean), nics: nics.map((x) => ({ device: x.nic })) };
   const terms = H.hostMatchTerms(host).names;
-  const byDesc = terms.length ? ((await D.portsByDesc(terms).catch(() => ({ rows: [] }))).rows || []).filter((p) => corpSet.has(String(p.cvpId))) : [];
+  const byDesc = terms.length ? ((await D.portsByDesc(terms).catch(() => ({ rows: [] }))).rows || []).filter((p) => corpSet.has(String(p.cvpId)) && own(p)) : [];
   const candidates = [];
   for (const u of H.matchUplinks(byDesc, host).uplinks.slice(0, 32)) {
     candidates.push({ cvpId: String(u.cvpId), deviceKey: String(u.key), deviceName: u.hostname || '', port: u.port, descr: await mask(String(u.desc).slice(0, 200)), nic: u.nic, basis: u.basis });
@@ -770,6 +776,26 @@ function tuningOverrideWrite(req, res) {
     res.status(r.ok ? 200 : r.unreadable ? 503 : 400).json(r.unreadable ? { ...r, code: 'settingsUnreadable' } : r);
   }).catch((e) => res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }));
 }
+/*
+ * v2.932(점검 E1-08): 엣지 위임 서버의 상세 · 추이 · 장치는 중앙 보관분(엣지 push 의 snapAt)으로 본문이 달라지는데 열쇠에 그 세대가 없어,
+ *   '엣지에서 당기기' 뒤에도 스냅샷 세대가 바뀔 때까지 ETag(열쇠 해시)가 같아 304 로 이전 본문이 남았다 → 열쇠에 엣지 보관분 세대(가장 최근 snapAt)를 넣는다.
+ *   엣지 대행 실패(ok:false)는 `__noStore` 로 보내 ETag·304 경로를 타지 않는다(memoJson — 성공한 다음 응답이 실패 본문의 304 로 가려지지 않게).
+ */
+async function edgeSnapRev() {
+  try { let m = 0; for (const r of (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage()) m = Math.max(m, Number(r?.snapAt) || 0); return m; } catch { return 0; }
+}
+export const noStoreFail = (r) => (r && typeof r === 'object' && r.ok === false && r.via === 'edge' && !Number.isInteger(r.__status) ? { ...r, __noStore: true } : r);
+export const perfKey = async (req) => `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${bmUsageStatus().last?.at || 0}|e${await edgeSnapRev()}`;
+// v2.922(3a): 추이 · 장치 · 포트 열쇠(범위 서명 · 역할 · 이 노드 적재 세대) — v2.932: 모듈 수준으로 옮겼다(시험이 같은 열쇠를 쓴다).
+export const trendKey = (req) => `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${bmUsageStatus().last?.at || 0}`;
+/*
+ * v2.932(점검 A1-01 · E1-01): 본문이 사용자별 CVP 도구 접근(issueFor(req.user,'cvp') — 권한 파일 · 사용자 재정의)으로 갈리는데 열쇠는 범위 · 역할 ·
+ *   세대뿐이라, CVP 가 허용된 운영자가 연 응답(포트 설명 · 처리량 · 후보)을 12초 안에 같은 범위의 CVP 거부 사용자가 그대로 받았다(v2.922 D15 우회).
+ *   → 열쇠에 같은 actor(req.user — 본문 판정과 같은 주체)의 도구 판정을 넣는다. 판정은 본문(bmPortsView cvpToolIssue)과 같은 함수.
+ */
+export const cvpBit = async (req) => { try { return (await import('../../auth/toolAccess.js')).issueFor(req.user, 'cvp') ? 'c0' : 'c1'; } catch { return 'c0'; } };
+export const portsKey = async (req) => `${trendKey(req)}|${await cvpBit(req)}`;
+
 export function registerBmUsage(api) {
 
 /** 주 조회 — 대상·최신값·설정·상태. 장비에 접속하지 않는다. */
@@ -875,16 +901,13 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
   }
 });
 
-api.get('/tools/bm-usage/perf/:key', toolsPerm, (req, res) => memoJson(req, res, 'bm-perf', (snap) => bmPerfView(req, snap), {
-  extraKey: `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${bmUsageStatus().last?.at || 0}`,
-}));
+api.get('/tools/bm-usage/perf/:key', toolsPerm, async (req, res) => memoJson(req, res, 'bm-perf', (snap) => bmPerfView(req, snap), { extraKey: await perfKey(req) }));
 
 // v2.922(3a): 추이(평균·피크 · 해상도 auto · 결측 · 기준선) · 장치 목록(색 고정 순서). 엣지 위임 서버는 엣지 대행.
-const trendKey = (req) => `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${bmUsageStatus().last?.at || 0}`;
-api.get('/tools/bm-usage/perf/:key/history', toolsPerm, (req, res) => memoJson(req, res, 'bm-trend', (snap) => bmTrendView(req, snap, 'history'), { extraKey: trendKey(req) }));
-api.get('/tools/bm-usage/perf/:key/devices', toolsPerm, (req, res) => memoJson(req, res, 'bm-devices', (snap) => bmTrendView(req, snap, 'devices'), { extraKey: trendKey(req) }));
+api.get('/tools/bm-usage/perf/:key/history', toolsPerm, async (req, res) => memoJson(req, res, 'bm-trend', async (snap) => noStoreFail(await bmTrendView(req, snap, 'history')), { extraKey: await perfKey(req) }));
+api.get('/tools/bm-usage/perf/:key/devices', toolsPerm, async (req, res) => memoJson(req, res, 'bm-devices', async (snap) => noStoreFail(await bmTrendView(req, snap, 'devices')), { extraKey: await perfKey(req) }));
 
-api.get('/tools/bm-usage/perf/:key/ports', toolsPerm, (req, res) => memoJson(req, res, 'bm-ports', (snap) => bmPortsView(req, snap), { extraKey: trendKey(req) }));
+api.get('/tools/bm-usage/perf/:key/ports', toolsPerm, async (req, res) => memoJson(req, res, 'bm-ports', (snap) => bmPortsView(req, snap), { extraKey: await portsKey(req) }));
 
 // v2.923(4단계): 튜닝 · 용도(서버 1대 · 함대) — 응답 캐시는 범위 서명 + 역할 + 마지막 수집 + 수동 태그 세대(fleetRev) + 덮어쓰기 저장 시각.
 //   세대가 바뀌면 지워지는 것: 새 표본(lastAt) · 용도 태그 저장(fleetRev) · 덮어쓰기 저장(tuningRev). 장애 기록 · 스냅샷은 캐시하지 않는다(누를 때만 · 부품 장애는 자체 30초 메모).

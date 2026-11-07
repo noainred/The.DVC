@@ -375,6 +375,7 @@ let _ring = [];                  // [{ at, new, changed, gone, held, problem, li
 let _events = [];                // [{ at, kind:'drift'|'gone'|'apply'|'auto', text }]
 let _last = null;                // { at, ms, counts, sourceErrors }
 let _prevKeys = null;            // { new:Set, changed:Set, gone:Set }
+let _lastAutoSummary = '';       // v2.932(점검 D1-04): 바로 앞 자동 등록 실패 문구(같은 실패를 5분마다 쌓지 않게)
 
 export function pushEvent(ev) {
   _events.push({ at: Date.now(), ...ev, text: t(ev?.text).slice(0, 400) });
@@ -462,7 +463,7 @@ export function noteDetection(result, { at = Date.now(), ms = 0, sourceErrors = 
 }
 
 /** 테스트 전용 — 메모리 이력·캐시 초기화. */
-export function _resetSettingsSyncForTest() { _state = null; _ring = []; _events = []; _last = null; _prevKeys = null; _lastNewKeys = []; }
+export function _resetSettingsSyncForTest() { _state = null; _ring = []; _events = []; _last = null; _prevKeys = null; _lastNewKeys = []; _lastAutoSummary = ''; }
 
 /* ───────────────────────────── 카탈로그 읽기(입출력) ───────────────────────────── */
 
@@ -503,6 +504,23 @@ export async function loadCandidates() {
 
 const APPLY_STATES = new Set(['new', 'changed', 'gone']);
 export const GONE_ACTIONS = Object.freeze(['disable', 'keep', 'delete']);
+const NAME_MAX = 120;   // svcmon/testSchema.js TARGET_FIELDS name.max — 넘치면 cleanTarget 이 거부한다
+/** 같은 폴더 안 이름 키 — store.js dupKey(구분+경로+이름 소문자)와 같은 뜻(설정 연동 대상은 언제나 구분 infra). */
+const nameKeyOf = (p, name) => `${t(p)}\u0001${t(name).toLowerCase()}`;
+
+/**
+ * v2.932(점검 D1-04 — 재현): 설정 연동 대상의 이름 정하기. 같은 엣지가 '수집 서버' 와 '에이전트 배포 대상' 에 같은 이름(KR-EDGE)으로 있으면
+ *   둘 다 `설정 연동\중앙↔엣지\전역` 에 놓여 경로+이름이 같다 → 둘째는 대량 등록 중복 규칙(store dupKey)으로 늘 '건너뜀' 이 되어 영원히 '새 항목' 이었다.
+ *   폴더 안 이름이 대상의 식별자라는 규칙(CSV 묶음 · 엣지 사본 조인 · 개요 조인)은 그대로 두고, **겹칠 때만** 종류 라벨을 붙인다(`KR-EDGE (에이전트 배포 대상)`).
+ *   붙여도 겹치면 null(건너뜀 — 대량 가져오기 등 다른 경로의 이름 중복 규칙은 바꾸지 않는다).
+ */
+export function syncNameFor(r, taken) {
+  const base = t(r?.name).slice(0, NAME_MAX);
+  if (!taken.has(nameKeyOf(r?.path, base))) return base;
+  const suffix = ` (${t(r?.kindLabel) || t(r?.kind)})`;
+  const alt = `${base.slice(0, Math.max(1, NAME_MAX - suffix.length))}${suffix}`.slice(0, NAME_MAX);
+  return taken.has(nameKeyOf(r?.path, alt)) ? null : alt;
+}
 
 /**
  * 고른 키 → 실행 계획(저장 없음). 서버가 **지금** 다시 분류한 행으로만 판정한다(화면이 본 상태를 믿지 않는다).
@@ -510,10 +528,13 @@ export const GONE_ACTIONS = Object.freeze(['disable', 'keep', 'delete']);
  * @param {string[]} keys
  * @param {{enabled?:boolean, goneAction?:string, withChecks?:boolean, builtByKey?:Map}} o
  */
-export function planApply(rows, keys, { enabled = false, goneAction = 'disable', withChecks = true, builtByKey = new Map(), now = Date.now() } = {}) {
+export function planApply(rows, keys, { enabled = false, goneAction = 'disable', withChecks = true, builtByKey = new Map(), now = Date.now(), svcTargets = null } = {}) {
   const want = new Set((Array.isArray(keys) ? keys : []).map(t).filter(Boolean));
   const byKey = new Map(rows.map((r) => [r.key, r]));
   const add = []; const change = []; const gone = []; const skip = [];
+  // v2.932(점검 D1-04): 이미 있는 대상(구분 infra)과 이번 계획에서 앞서 정한 이름 — syncNameFor 가 겹침을 본다.
+  const taken = new Set();
+  for (const st of (svcTargets || listTargets())) if (t(st?.kind || 'infra') === 'infra') taken.add(nameKeyOf(st.path, st.name));
   for (const k of want) {
     const r = byKey.get(k);
     if (!r) { skip.push({ key: k, name: '', reason: '카탈로그에 없습니다(새로 고친 뒤 다시 고르세요).' }); continue; }
@@ -521,10 +542,13 @@ export function planApply(rows, keys, { enabled = false, goneAction = 'disable',
     const x = builtByKey.get(k);
     if (r.state === 'new') {
       if (!x) { skip.push({ key: k, name: r.name, reason: '카탈로그 항목을 다시 읽지 못했습니다.' }); continue; }
+      const name = syncNameFor(r, taken);
+      if (!name) { skip.push({ key: k, name: r.name, reason: `같은 폴더(${r.path})에 같은 이름의 대상이 이미 있습니다(종류 라벨을 붙여도 겹칩니다) — 한쪽 이름을 바꾸세요.` }); continue; }
+      taken.add(nameKeyOf(r.path, name));
       add.push({
-        key: k, name: r.name, kindLabel: r.kindLabel, path: r.path, host: r.host, port: r.port, agent: r.agent,
+        key: k, name, kindLabel: r.kindLabel, path: r.path, host: r.host, port: r.port, agent: r.agent,
         row: {
-          kind: 'infra', path: r.path, name: r.name.slice(0, 120), host: r.host, enabled, ...(r.agent ? { agent: r.agent } : {}),
+          kind: 'infra', path: r.path, name, host: r.host, enabled, ...(r.agent ? { agent: r.agent } : {}),
           tests: withChecks ? checksFor(x) : [], origin: originOf(x, { label: r.corp }, now),
         },
       });
@@ -564,8 +588,11 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
     out.committed = r.committed;
     out.added = r.added; out.newTests = r.newTests; out.addErrors = r.errors.slice(0, 200); out.addSkipped = r.skipped.slice(0, 200);
     if (r.committed && r.added) {
-      markKnown(plan.add.map((a) => a.key), now);
-      out.agents = [...new Set(plan.add.map((a) => a.row.agent).filter(Boolean))];
+      // v2.932(점검 D1-04): 실제로 추가된 키만 known — 대량 등록이 건너뛴 행(row = 입력 순번 1..N)까지 넣으면 연동된 적 없는 키가 everLinked 가 됐다.
+      const skippedRows = new Set((r.skipped || []).map((x) => Number(x?.row)));
+      const added = plan.add.filter((_, i) => !skippedRows.has(i + 1));
+      markKnown(added.map((a) => a.key), now);
+      out.agents = [...new Set(added.map((a) => a.row.agent).filter(Boolean))];
     }
   }
   for (const c of plan.change) {
@@ -610,14 +637,24 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
     } catch (e) { out.errors.push({ key: g.key, name: g.name, reason: String(e?.message || e).slice(0, 200) }); }
   }
   out.agents = [...new Set(out.agents)];
-  saveState();
+  // v2.932(점검 D1-04): 자동 등록이 아무것도 바꾸지 않았으면(전부 건너뜀) 이벤트·상태 파일을 남기지 않는다 — 5분마다 '변경 없음' 이 쌓여
+  //   이벤트 링(EVENT_MAX)이 실제 감지·적용 기록을 밀어냈다. 실패(추가 취소)는 같은 문구가 바로 앞 자동 이벤트와 같을 때만 생략한다(무음 실패 금지).
+  const auto = batchPrefix === 'settings-auto';
+  const nothing = !out.added && !out.changed.length && !out.gone.length && !out.errors.length;
+  if (auto && nothing && out.committed) return out;
+  if (!auto || out.added || out.changed.length || out.gone.length) saveState();
   const parts = [];
   if (out.added) parts.push(`추가 ${out.added}(점검 ${out.newTests})`);
   if (out.changed.length) parts.push(`주소 반영 ${out.changed.length}`);
   if (out.gone.length) parts.push(`사라짐 처리 ${out.gone.length}`);
   if (!out.committed) parts.push(`추가 취소(오류 ${out.addErrors.length})`);
   if (out.errors.length) parts.push(`실패 ${out.errors.length}`);
-  pushEvent({ kind: batchPrefix === 'settings-auto' ? 'auto' : 'apply', text: `배치 ${batch} — ${parts.join(' · ') || '변경 없음'}${user ? ` · by ${user}` : ''}` });
+  const summaryText = `${parts.join(' · ') || '변경 없음'}${user ? ` · by ${user}` : ''}`;
+  if (auto) {
+    if (nothing && _lastAutoSummary === summaryText) return out;   // 같은 실패의 반복 — 첫 번은 남겼다
+    _lastAutoSummary = nothing ? summaryText : '';
+  }
+  pushEvent({ kind: auto ? 'auto' : 'apply', text: `배치 ${batch} — ${summaryText}` });
   return out;
 }
 
@@ -647,7 +684,9 @@ export function kindMeta() {
 /* ───────────────────────────── 주기 감지 ───────────────────────────── */
 
 export const DETECT_INTERVAL_MS = 5 * 60_000;
-const FIRST_DELAY_MS = 60_000;
+export const FIRST_DELAY_MS = 60_000;
+/** v2.932(점검 D1-08): 화면 문구용 감지 주기(카탈로그 · /state 배너가 싣는다 — 화면에 '5분' 을 박지 않게). */
+export function detectTiming() { return { intervalMs: DETECT_INTERVAL_MS, firstDelayMs: FIRST_DELAY_MS }; }
 let _timer = null;
 let _running = false;
 

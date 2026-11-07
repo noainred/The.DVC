@@ -14,11 +14,11 @@ import { logAudit } from '../../audit.js';
 import { listTargets, storeRevision, planBulkTargets } from '../../svcmon/store.js';
 import {
   readCatalog, planApply, previewOf, executePlan, detachTarget, getOptions, setOptions, kindMeta, driftRing, dailySummary, syncEvents,
-  lastDetection, syncAvailableHere, ackDrift, MAX_ROWS, MAX_APPLY, GONE_ACTIONS, EXCLUDED_KINDS, SYNC_ROOT,
+  lastDetection, syncAvailableHere, ackDrift, MAX_ROWS, MAX_APPLY, GONE_ACTIONS, EXCLUDED_KINDS, SYNC_ROOT, detectTiming,
 } from '../../svcmon/settingsSync.js';
 import { recordBatch } from '../../svcmon/batches.js';
 import { buildDashAsync } from '../../svcmon/dash.js';
-import { recentTransitions, hourlySeries, getAlertSettings, saveAlertSettings, alertStats, transitionsSince } from '../../svcmon/transitions.js';
+import { recentTransitions, hourlySeries, getAlertSettings, saveAlertSettings, alertStats, transitionsSince, alertBatchInfo, HOURS_KEEP } from '../../svcmon/transitions.js';
 import { getResults, executesHere, pollerRole } from '../../svcmon/poller.js';
 import { edgeSummary, edgeState, listAgentNames, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
 import { listAssignments, setAssignment, DEFAULT_EXCEPT_TYPES } from '../../central/svcmonAssign.js';
@@ -78,6 +78,7 @@ let _dashBuilds = 0;        // 테스트 전용 — 실제 계산 횟수
  * v2.928(반증 M6 후속): 예전에는 전 점검 + 전 엣지 행을 동기로 돌았다(실측: 로컬 200k 0.39초 · 엣지 192k 0.86초 · 상한 1.28M 5.6초 블로킹).
  *   엣지 행은 엣지 하나씩 만들고(sort:false — localeCompare 정렬 생략) 표 위젯은 상위 K 만 유지한다.
  */
+const OVERVIEW_TRANSITIONS = 60;
 async function computeDash(now) {
   _dashBuilds += 1;
   const agents = listAgentNames();   // 이름만 — edgeSummary 는 전 행을 순회한다(반증 재검토 N3: 1.28M 행 301ms). 엣지 표(edgeRows)에서 한 번만 돈다.
@@ -87,7 +88,8 @@ async function computeDash(now) {
   });
   return {
     ok: true, at: now, ...dash,
-    hourly: hourlySeries(now), transitions: recentTransitions(60), since: transitionsSince(),
+    hourly: hourlySeries(now), transitions: recentTransitions(OVERVIEW_TRANSITIONS), since: transitionsSince(),
+    limits: { hours: HOURS_KEEP, transitions: OVERVIEW_TRANSITIONS },   // v2.932(점검 D1-08): 화면 문구('최근 N시간 · 최근 N건')용
     edges: edgeRows(now), executes: executesHere(), role: pollerRole(),
     alerts: { enabled: getAlertSettings().enabled, ...alertStats() },
     kindLabels: Object.fromEntries(Object.entries(kindMeta()).map(([k, v]) => [k, v.label])),
@@ -112,6 +114,8 @@ svcmonRouter.get('/settings-sync/catalog', adminOnly, fullScopeOnly, async (req,
     options: getOptions(), drift: { ring: driftRing(), daily: dailySummary(), last: lastDetection() },
     edges: edgeRows().map((e) => ({ ...e, syncTargets: assignedTargets.get(e.agent) || 0 })),
     events: syncEvents().slice(0, 50), limits: { maxApply: MAX_APPLY, goneActions: GONE_ACTIONS }, root: SYNC_ROOT,
+    // v2.932(점검 D1-08): 화면 문구('기동 N 뒤부터 M마다')가 서버 상수를 박지 않게 감지 주기를 싣는다.
+    detect: detectTiming(),
     role: pollerRole(), storeRev: storeRevision(),
   });
 });
@@ -202,7 +206,8 @@ svcmonRouter.get('/overview', async (req, res) => {
 
 /* ── 실패 알림 설정 ── */
 svcmonRouter.get('/alert-settings', canEdit, (req, res) => {
-  res.json({ ok: true, settings: getAlertSettings(), stats: alertStats() });
+  // v2.932(점검 D1-08): 요약 묶음 창·기준 건수를 싣는다 — 화면이 '20초 안에 6건' 을 박지 않게(+1 해석은 서버 alertBatchInfo 한 곳).
+  res.json({ ok: true, settings: getAlertSettings(), stats: alertStats(), batch: alertBatchInfo() });
 });
 svcmonRouter.put('/alert-settings', adminOnly, fullScopeOnly, (req, res) => {
   try {
