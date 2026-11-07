@@ -1760,6 +1760,7 @@ centralRouter.get('/partfault-config', requireCentral(), async (req, res) => {
 
 // v2.627 베어메탈 사용률 설정 배포(사용자 요청 "한번에 켜는 기능") — 엣지가 주기적으로 GET. 중앙이 배포를 켜고 그 엣지를
 //   제외하지 않았으면 배포 키(Enterprise 제외)를 내려주고, 아니면 distribute:false + 사유(엣지는 사본을 지워 로컬로 돌아간다).
+//   v2.927: 전체 배포가 덮지 않는 엣지라도 '중앙에서 켜기' 가 저장돼 있으면 그 엣지만 켜는 판(mode:'per-edge')을 내려준다.
 //   `?applied=<sig>` 는 엣지가 지금 적용 중인 판 — 화면이 '적용됨 / 대기' 를 가르는 근거다(인메모리 기록).
 centralRouter.get('/bmusage-config', requireCentral(), async (req, res) => {
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim();
@@ -1771,8 +1772,12 @@ centralRouter.get('/bmusage-config', requireCentral(), async (req, res) => {
     if (le) recordBmUsagePull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), reason: 'settings-unreadable', verified: req.centralAuth?.mode === 'agent', deliveredSig: '' });
   }
   if (settingsUnreadable(res, bmUsageSettingsLoadError, '베어메탈 사용률')) return;
-  const out = distributeFor(agent);
-  recordBmUsagePull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), reason: out.distribute ? '' : out.reason, verified: req.centralAuth?.mode === 'agent', deliveredSig: out.distribute ? String(out.sig || '') : '' });
+  // v2.927 '중앙에서 켜기': 한 엣지만 켜는 판은 **개별 토큰으로 검증된 이름**에만 내준다(공유 토큰의 ?agent= 는 남의 이름을 댈 수 있다 —
+  //   켜진 설정·그 엣지 법인 목록을 받아 가지 못하게). 법인은 **저장 때 확정한 목록**을 그대로 보낸다(인출 때 매핑을 다시 계산하지 않는다 —
+  //   점검중·push 전·fleet 만료·중앙 재기동 같은 순간 상태가 엣지 수집을 끄지 않게. 반증 F2).
+  const verified = req.centralAuth?.mode === 'agent';
+  const out = distributeFor(agent, { verified });
+  recordBmUsagePull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), reason: out.distribute ? '' : out.reason, verified, deliveredSig: out.distribute ? String(out.sig || '') : '' });
   res.set('Cache-Control', 'no-store');
   res.json({ ok: true, ...out });
 });

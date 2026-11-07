@@ -172,6 +172,15 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
 }
 
 export function getEdgeBmUsage(agent) { return _store.get(t(agent).toLowerCase()) || null; }
+/**
+ * v2.927(반증 F7): 보관분이 말한 그 노드의 역할 — 'edge'(CENTRAL_URL 이 있다 = 배포 인출 워커가 돈다) · 'central'(중앙·단독 — 배포를 받지 않는다)
+ *   · 'unknown'(보관분 없음 · 역할 없음). '중앙에서 켜기' 는 'edge' 에만 제공한다(화면 버튼과 PUT 이 이 함수 하나로 판정한다).
+ *   값은 엣지 export(bmusage/edgePull.js node.role)를 중앙 정제(sanitizeBmUsageSnap)가 16자로 자른 글자다.
+ */
+export function edgeRoleOf(rec) {
+  const r = String(rec?.snap?.node?.role || '').trim().toLowerCase();
+  return r === 'edge' ? 'edge' : (r === 'central' ? 'central' : 'unknown');
+}
 export function listEdgeBmUsage() { return [..._store.values()]; }
 export function _resetForTest() { _store.clear(); }
 
@@ -264,7 +273,8 @@ export const TREND_MIN_EDGE_VERSION = '2.922.0';
  *   중앙은 결과만 받는다(저장하지 않는다). POST 는 재전송하지 않는다(retries 0 — 엣지 동작을 두 번 시키지 않게 · v2.612 EDGE2612-01).
  *   엣지 응답은 아는 필드만 · 상한(sanitizeSnapshotBody). 사유 · 실행자는 엣지 보관 행과 양쪽 감사 로그에 남는다.
  * ════════════════════════════════════════════════════════════════════════════ */
-export const SNAPSHOT_MIN_EDGE_VERSION = '2.923.0';
+// v2.933 정정: 4단계는 번호 충돌로 2.926.0 으로 게시됐다 — 2.923~2.925 는 다른 작업의 릴리스라 스냅샷 대행 라우트가 없다(예정 번호 2.923.0 이 남아 그 엣지에 요청을 보내 404 를 받았다).
+export const SNAPSHOT_MIN_EDGE_VERSION = '2.926.0';
 /** 엣지 시한(연결 15초 + 명령 30초 + 여유) — 엣지 세션 시한(50초)보다 길게. */
 export const SNAPSHOT_PULL_TIMEOUT_MS = 75_000;
 const SNAP_STATES = ['ok', 'perm', 'partial', 'absent', 'missing'];
