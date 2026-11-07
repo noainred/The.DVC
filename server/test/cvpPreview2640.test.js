@@ -51,7 +51,7 @@ test('previewParse — 9종 각각 합성 응답을 읽고 count·keys 를 돌�
 
   const r4 = PV.previewParse('counters', noti('/Smash/counters/ethIntf/FastCounters/current/Ethernet1', { inOctets: { key: 'inOctets', value: 100 }, outOctets: { key: 'outOctets', value: 50 } }));
   assert.equal(r4.ok, true); assert.equal(r4.count, 1);
-  assert.deepEqual(r4.items[0], { name: 'Ethernet1', inOctets: 100, outOctets: 50, inErrors: null, outErrors: null }, 'Map 을 배열로 · 없는 카운터는 null');
+  assert.deepEqual(r4.items[0], { name: 'Ethernet1', inOctets: 100, outOctets: 50, inErrors: null, outErrors: null, inDiscards: null, outDiscards: null }, 'Map 을 배열로 · 없는 카운터는 null');
 
   const r5 = PV.previewParse('bgp', noti('/bgp/all', { '10.0.0.1': { value: { bgpPeerState: 'Established', bgpPeerAs: 65001, bgpPeerPrefixesReceived: 42 } }, '10.0.0.2': { value: { bgpPeerState: 'Idle', bgpPeerAs: 65002 } } }));
   assert.equal(r5.ok, true); assert.equal(r5.count, 2);

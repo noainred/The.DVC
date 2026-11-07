@@ -82,6 +82,8 @@ CVP 도 Edge 에 연결되어 있다. 가져올 정보: 스위치 정보·장애
   부품을 한 종류도 못 읽으면 `parts:null`(빈 배열 = 읽었고 0개와 구분). 일부만 못 읽으면 `partsMissingKinds`.
 - 처리량·사용률: 첫 표본·음수 델타(카운터 리셋)·간격 비정상(주기×3 초과) → null. 사용률은 **방향별**(in/out 속도 각각 — v2.590 F9), 속도를 모르면 null,
   100% 초과(카운터·속도 불일치)는 **null**(클램프하지 않는다 — v2.578).
+- 드롭(discards, v2.922 B-①): 오류와 같은 규칙의 델타(첫 표본·리셋·간격 비정상·한쪽 없음 → null). 필드 이름 `inDiscards`·`outDiscards`(별칭 `ifInDiscards` 등)는
+  실장비 미확인 **추정**이다 — 원문 표본에 그 필드가 없으면 화면은 '—' 로 남는다(0 으로 보이지 않는다). 저장은 `port_latest`·`port_sample`(`in_disc`/`out_disc`)·`port_daily`(합 + 표본 수).
 - 스트리밍이 꺼진 장비(`streaming:false`)는 텔레메트리를 조회하지 않는다(`telemetry:'not-streaming'`) — 포트·부품·BGP 는 null.
 
 ## 6. ⚠ 정직 기록 — 실장비 CVP 로 확인하지 못한 것
@@ -93,7 +95,7 @@ CVP 도 Edge 에 연결되어 있다. 가져올 정보: 스위치 정보·장애
 | 인벤토리 | `/api/resources/inventory/v1/Device/all` → `/cvpservice/inventory/devices` | Resource API 스트림 모양(NDJSON/배열/이어붙인 객체 — 셋 다 받는다) · 필드명(`softwareVersion`·`modelName`·`streamingStatus`·`key.deviceId`) · Resource API 에 관리 IP 가 없을 수 있다(옛 API 의 `ipAddress` 만 확인된 이름) |
 | CVP 버전 | `/cvpservice/cvpInfo/getCvpInfo.do` | 응답의 `version` 필드 |
 | 인터페이스 | `/api/v1/rest/{serial}/Sysdb/interface/status/eth/phy/slice/1/intfStatus/all` | Telemetry REST(`/api/v1/rest`)가 이 CVP 버전에서 열려 있는지 · 필드(`operStatus`·`linkStatus`·`adminEnabled`·`speed`·`description`) · VLAN·LAG 소속은 이 경로에 없을 가능성이 높다(없으면 빈 칸) |
-| 카운터 | `/api/v1/rest/{serial}/Smash/counters/ethIntf/FastCounters/current` | 필드(`inOctets`·`outOctets`·`inErrors`) · 누적값인지 |
+| 카운터 | `/api/v1/rest/{serial}/Smash/counters/ethIntf/FastCounters/current` | 필드(`inOctets`·`outOctets`·`inErrors`·`inDiscards`·`outDiscards` — v2.922 드롭 추가) · 누적값인지 |
 | BGP | `/api/v1/rest/{serial}/Sysdb/routing/bgp/export/vrfBgpPeerInfoStatusEntryTable` | 경로 존재 · 필드(`bgpPeerState`·`bgpPeerAs`·`bgpPeerPrefixesReceived`) |
 | 부품 | `…/Sysdb/environment/{power,cooling,temperature}/status` · `…/Sysdb/hardware/archer/xcvr/status` | 경로·상태 필드명 전부(`state`·`status`·`alertRaised`) |
 | 로그인 | `/cvpservice/login/authenticate.do`·`logout.do` | 쿠키 이름 `access_token` 과 본문 `sessionId` 중 무엇이 오는지(둘 다 받는다) |

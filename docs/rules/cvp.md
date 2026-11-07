@@ -125,4 +125,9 @@
     MAC 은 콜론·하이픈·점·붙임 표기 전부. `vmnic0` 글자만으로는 호스트를 특정하지 않는다(어느 호스트나 vmnic0 이 있다). 같은 MAC 이 포트 3개 이상이면 '충돌' 로 표시만.
   - 방향은 스위치 포트 기준 **In = 서버 송신 · Out = 서버 수신** — 응답 `direction` 과 화면 띠·열 이름이 말한다. 값 없음은 '—'(0 금지). 드롭은 수집 전이라 '—'.
   - 범위 계정은 그 호스트 법인의 CVP 서버 행만(`rowOwnerOf` + `datacenterId`), 범위 검사(404)가 도구 키 검사(403)보다 먼저다(존재 은닉).
+  · v2.922(B-①) **포트 드롭(discards)** — `parse.parseCounters`(IF-MIB 계열 이름 — ⚠ 실장비 미확인 추정) → `portDelta.inDisc/outDisc`(오류와 같은 null 규칙) →
+    `db.js` `port_latest`·`port_sample` `in_disc/out_disc` + `port_daily` `in_disc_sum/out_disc_sum/in_disc_n/out_disc_n`(열은 `addDiscardCols` — 없는 열만).
+    **엣지 push 표본 행은 12칸**(끝 두 칸 드롭) — 구버전 중앙은 '길이 ≥ 10' 검사라 그대로 받고 앞 10칸만 쓴다 · 구버전 엣지의 10칸 행은 새 중앙에서 드롭 null(0 금지).
+    중앙 정제는 0 이상 유한수만(`nonNeg`). 호스트 업링크 블록은 `portWindowSums`(원시 표본을 JS 로 더함 — 집계 함수 두 개를 한 문장에 쓰지 않는다)로
+    24시간 에러·드롭과 '값이 있는 표본 수' 를 같이 보여 준다. 회귀 `server/test/cvpDiscards2922.test.js`.
 

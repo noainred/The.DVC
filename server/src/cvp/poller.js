@@ -92,9 +92,9 @@ export function applyDeltas(cvpId, dev, intervalMs, prevMap = _prevCounters, sla
   for (const p of dev.ports) {
     const k = `${cvpId}|${dev.key}|${p.name}`;
     const c = dev.counters instanceof Map ? dev.counters.get(p.name) : null;
-    if (!c || at == null) { Object.assign(p, { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null }); continue; }
+    if (!c || at == null) { Object.assign(p, { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, inDisc: null, outDisc: null }); continue; }
     const d = portDelta(prevMap.get(k) || null, { at, c }, p.speedBps, intervalMs, slackMs);
-    Object.assign(p, { inBps: d.inBps, outBps: d.outBps, inUtil: d.inUtil, outUtil: d.outUtil, inErr: d.inErr, outErr: d.outErr });
+    Object.assign(p, { inBps: d.inBps, outBps: d.outBps, inUtil: d.inUtil, outUtil: d.outUtil, inErr: d.inErr, outErr: d.outErr, inDisc: d.inDisc, outDisc: d.outDisc });
     prevMap.set(k, { at, c });
   }
 }

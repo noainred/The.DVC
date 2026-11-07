@@ -24,6 +24,15 @@ export function bpsText(v) {
 }
 /** 송신/수신 — 스위치 In = 서버 송신 · Out = 서버 수신. */
 export const txRxText = (u) => (numOrNull(u?.inBps) == null && numOrNull(u?.outBps) == null ? '—' : `${bpsText(u?.inBps)} / ${bpsText(u?.outBps)}`);
+/** v2.922(B-①): 직전 주기 드롭(in / out). 수집 전·못 읽음은 ‘—’. */
+export const discText = (u) => (numOrNull(u?.inDisc) == null && numOrNull(u?.outDisc) == null ? '—' : `${numOrNull(u?.inDisc) ?? '—'} / ${numOrNull(u?.outDisc) ?? '—'}`);
+/** v2.922(B-①): 최근 24시간 합(in / out) — 값이 있는 표본만 더한 부분 합이라 몇 표본인지 함께 준다. 없으면 ‘—’. */
+export function daySumText(day, kind = 'disc') {
+  if (!day) return '—';
+  const [a, b, n] = kind === 'disc' ? [day.inDisc, day.outDisc, day.discN] : [day.inErr, day.outErr, day.errN];
+  if (numOrNull(a) == null && numOrNull(b) == null) return '—';
+  return `${numOrNull(a) ?? '—'} / ${numOrNull(b) ?? '—'}${Number.isFinite(n) && Number.isFinite(day.samples) && n < day.samples ? ` (표본 ${n}/${day.samples})` : ''}`;
+}
 export const errText = (u) => (numOrNull(u?.inErr) == null && numOrNull(u?.outErr) == null ? '—' : `${numOrNull(u?.inErr) ?? '—'} / ${numOrNull(u?.outErr) ?? '—'}`);
 export const speedText = (bps) => { const n = numOrNull(bps); return n == null ? '—' : n >= 1e9 ? `${Math.round(n / 1e8) / 10} G` : `${Math.round(n / 1e6)} M`; };
 export const portLabel = (u) => `${u?.hostname || u?.key || '?'} ${u?.port || ''}`.trim();
@@ -59,7 +68,15 @@ export function uplinkSummary(d, nics = []) {
 
 /** 업링크 합계(매칭 포트의 In/Out 합 — 없는 값은 더하지 않고 센다). */
 export function uplinkTotals(uplinks = []) {
-  let tx = null; let rx = null; let unmeasured = 0; let err = null;
+  let tx = null; let rx = null; let unmeasured = 0; let err = null; let disc = null; let discDay = null; let errDay = null;
+  for (const u of Array.isArray(uplinks) ? uplinks : []) {
+    // v2.922(B-①): 드롭(직전 주기 · 24시간 합)은 처리량 측정 여부와 따로 센다 — 값이 있는 것만 더한다.
+    for (const [k, a, b] of [['disc', u?.inDisc, u?.outDisc], ['discDay', u?.day?.inDisc, u?.day?.outDisc], ['errDay', u?.day?.inErr, u?.day?.outErr]]) {
+      if (numOrNull(a) == null && numOrNull(b) == null) continue;
+      const v = (numOrNull(a) ?? 0) + (numOrNull(b) ?? 0);
+      if (k === 'disc') disc = (disc ?? 0) + v; else if (k === 'discDay') discDay = (discDay ?? 0) + v; else errDay = (errDay ?? 0) + v;
+    }
+  }
   for (const u of Array.isArray(uplinks) ? uplinks : []) {
     const i = numOrNull(u?.inBps); const o = numOrNull(u?.outBps);
     if (i == null && o == null) { unmeasured += 1; continue; }
@@ -67,7 +84,7 @@ export function uplinkTotals(uplinks = []) {
     const e = (numOrNull(u?.inErr) ?? 0) + (numOrNull(u?.outErr) ?? 0);
     if (numOrNull(u?.inErr) != null || numOrNull(u?.outErr) != null) err = (err ?? 0) + e;
   }
-  return { tx, rx, unmeasured, err };
+  return { tx, rx, unmeasured, err, disc, discDay, errDay };
 }
 
 export const SEVERITY_BADGE = Object.freeze({ critical: 'red', error: 'red', warning: 'amber', info: 'gray' });

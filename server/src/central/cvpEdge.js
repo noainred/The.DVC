@@ -199,6 +199,9 @@ export function cleanStatus(x, now = Date.now()) {
 }
 
 /** v2.641: 경로 탐색 표본 정제 — PROBE_MAX(28)개 · head 1536자. */
+/** v2.922: 드롭 델타 — 0 이상의 유한수만(델타는 음수가 될 수 없다 — 리셋은 엣지가 null 로 만든다). */
+const nonNeg = (v) => { const n = numOrNull(v); return n == null || n < 0 ? null : n; };
+
 export function cleanProbes(list, now = Date.now()) {
   return list.filter(isPlainObj).slice(0, 28).map((x) => ({
     path: s(x.path, 256), device: s(x.device, 128), status: numOrNull(x.status), at: tsClamp(x.at, now), ok: x.ok === true,
@@ -224,6 +227,7 @@ export function cleanDevice(x, now = Date.now(), cnt = { ports: 0 }) {
       duplex: sOrNull(p.duplex, 48), fwdModel: sOrNull(p.fwdModel, 48), mac: sOrNull(p.mac, 32), mtu: numOrNull(p.mtu), operRaw: sOrNull(p.operRaw, 48),
       oper: LINK.has(p.oper) ? p.oper : 'unknown', admin: LINK.has(p.admin) ? p.admin : 'unknown', vlan: s(p.vlan, 32), lag: s(p.lag, 64),
       inBps: numOrNull(p.inBps), outBps: numOrNull(p.outBps), inUtil: numOrNull(p.inUtil), outUtil: numOrNull(p.outUtil), inErr: numOrNull(p.inErr), outErr: numOrNull(p.outErr),
+      inDisc: nonNeg(p.inDisc), outDisc: nonNeg(p.outDisc),   // v2.922(B-①) 드롭 델타 — 구버전 엣지는 없다(null = 모름)
     })),
   };
   if (Array.isArray(x.ports) && x.ports.length > PORT_MAX) cnt.ports += x.ports.length - PORT_MAX;
@@ -319,7 +323,8 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
     if (!own(r[0])) { dropped.notOwned++; continue; }
     const key = s(r[1], 128); const port = s(r[2], 64); const ts = tsClamp(r[3], now);
     if (!key || !port || ts == null) { dropped.badRow++; continue; }
-    rows.push([r[0], key, port, ts, numOrNull(r[4]), numOrNull(r[5]), numOrNull(r[6]), numOrNull(r[7]), numOrNull(r[8]), numOrNull(r[9])]);
+    // v2.922(B-①): 끝 두 칸 = 드롭 델타(구버전 엣지는 10칸 — undefined → null). 음수·숫자 아님은 null.
+    rows.push([r[0], key, port, ts, numOrNull(r[4]), numOrNull(r[5]), numOrNull(r[6]), numOrNull(r[7]), numOrNull(r[8]), numOrNull(r[9]), nonNeg(r[10]), nonNeg(r[11])]);
   }
   const touch = [];
   for (const t of Array.isArray(b.touch) ? b.touch.slice(0, 20_000) : []) {

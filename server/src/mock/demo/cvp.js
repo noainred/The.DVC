@@ -99,19 +99,21 @@ function portOf(sw, p, k, ts, variant) {
     duplex: 'duplexFull', fwdModel: isUplink ? 'routed' : 'bridged', mac: `00:1c:73:${pad(((ph >>> 16) % 256).toString(16))}:${pad(((ph >>> 8) % 256).toString(16))}:${pad((ph % 256).toString(16))}`,
     mtu: isUplink ? 9214 : 1500,
   };
-  if (!used) return { ...base, desc: '', oper: 'nolink', admin: 'up', operRaw: 'linkDown', inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null };
+  if (!used) return { ...base, desc: '', oper: 'nolink', admin: 'up', operRaw: 'linkDown', inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, inDisc: null, outDisc: null };
   // 장애: 관리상 켜져 있는데 링크가 내려간 포트(정상 장비 대부분은 0개).
   const downNow = sw.streaming && sw.h % 8 === 1 && k === 7;
   const downPast = variant === 'past3' && sw.h % 7 === 2 && k === 9;   // 과거에만 있던 link down(이력에서 '해소' 로 닫힌다)
   const desc = isUplink ? `to ${sw.role === 'leaf' ? 'spine' : 'leaf'}-${pad(1 + (ph % 20))} ${p.name}` : `esx-${pad(1 + (ph % 90), 3)} vmnic${ph % 4}`;
-  if (downNow || downPast) return { ...base, desc, oper: 'down', admin: 'up', operRaw: 'linkDown', inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null };
+  if (downNow || downPast) return { ...base, desc, oper: 'down', admin: 'up', operRaw: 'linkDown', inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, inDisc: null, outDisc: null };
   const hot = ph % 37 === 3;
   const u0 = hot ? 60 + (ph % 10) : 2 + (ph % 34);
   const utilIn = Math.min(97, Math.max(0.2, u0 * diurnal(ts) * (1 + (demoRand(`${sw.key}|${p.name}|${slot}`) * 2 - 1) * 0.08)));
   const utilOut = Math.min(97, Math.max(0.1, utilIn * (0.55 + (ph % 40) / 100)));
   const inBps = Math.round(p.speedBps * utilIn / 100);
   const outBps = Math.round(p.speedBps * utilOut / 100);
-  return { ...base, desc, oper: 'up', admin: 'up', operRaw: 'linkUp', inBps, outBps, inUtil: r2(utilIn), outUtil: r2(utilOut), inErr: ph % 23 === 0 ? 3 : 0, outErr: 0 };
+  return { ...base, desc, oper: 'up', admin: 'up', operRaw: 'linkUp', inBps, outBps, inUtil: r2(utilIn), outUtil: r2(utilOut), inErr: ph % 23 === 0 ? 3 : 0, outErr: 0,
+    // v2.922(B-①) 데모 드롭 — 붐비는 포트(hot)는 송신 쪽 드롭이 생긴다(큐 넘침 모양), 그 밖은 0.
+    inDisc: ph % 29 === 0 ? 1 : 0, outDisc: hot ? 12 + (ph % 7) : 0 };
 }
 
 /** 부품 목록(장비 접속 없이 합성). judgeOptics·judgeSlotPower 는 호출자(demoCvpDevice)가 적용한다. */
@@ -312,7 +314,7 @@ async function backfillCvp(servers, now = Date.now()) {
         for (const { p, k } of pick) {
           const v = portOf(sw, p, k, t, 'now');
           if (v.oper !== 'up') continue;
-          rows.push([srv.id, sw.key, v.name, t, v.inBps, v.outBps, v.inUtil, v.outUtil, v.inErr, v.outErr]);
+          rows.push([srv.id, sw.key, v.name, t, v.inBps, v.outBps, v.inUtil, v.outUtil, v.inErr, v.outErr, v.inDisc, v.outDisc]);
         }
       }
       for (let t = now - 7 * 24 * HOUR; t < now - 20 * 60_000; t += 30 * 60_000) {

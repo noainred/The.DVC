@@ -828,8 +828,10 @@ export function xcvrTypeText(v) {
 }
 
 /**
- * 누적 카운터 파서 → Map(name → {inOctets,outOctets,inErrors,outErrors}) 또는 null.
+ * 누적 카운터 파서 → Map(name → {inOctets,outOctets,inErrors,outErrors,inDiscards,outDiscards}) 또는 null.
  * 값이 없는 필드는 null 이다(0 을 지어내지 않는다).
+ * v2.922(B-①): 드롭(discards) — EOS 인터페이스 카운터의 IF-MIB 계열 이름(inDiscards·outDiscards)을 먼저 본다. ⚠ 텔레메트리 필드 이름은
+ *   실장비로 확인하지 못한 **추정**이다(오류 카운터와 같은 처지 — 원문 표본으로 확인). 못 읽으면 null 이고 화면은 '—'.
  */
 export function parseCounters(text) {
   const { entities, format, keys, droppedFields } = entitiesOf(text);
@@ -841,6 +843,8 @@ export function parseCounters(text) {
       outOctets: numOrNull(pick(f, ['outOctets', 'outBytes', 'ifOutOctets', 'ifHCOutOctets'])),
       inErrors: numOrNull(pick(f, ['inErrors', 'inErrorsTotal', 'ifInErrors', 'inTotalErrors'])),
       outErrors: numOrNull(pick(f, ['outErrors', 'outErrorsTotal', 'ifOutErrors', 'outTotalErrors'])),
+      inDiscards: numOrNull(pick(f, ['inDiscards', 'ifInDiscards', 'inDiscardsTotal', 'inTotalDiscards'])),
+      outDiscards: numOrNull(pick(f, ['outDiscards', 'ifOutDiscards', 'outDiscardsTotal', 'outTotalDiscards'])),
     };
     if (Object.values(c).every((x) => x == null)) continue; // 카운터 필드가 없는 개체는 세지 않는다
     counters.set(str(name, 64), c);
@@ -867,14 +871,14 @@ export function counterGapOk(prevAt, curAt, intervalMs, slackMs = 0) {
  *  · 첫 표본(prev 없음) → null  · 음수 델타(카운터 리셋) → null  · 간격이 0 이하거나 주기의 3배 초과 → null
  *  · 사용률은 **방향별** — in_bps / speed, out_bps / speed(rx+tx 합을 한 방향 속도로 나누지 않는다 — v2.590 F9).
  *    속도를 모르면 null. 100% 를 넘으면(카운터·속도 불일치) null(클램프하지 않는다 — v2.578).
- * @param {{at:number, c:{inOctets,outOctets,inErrors,outErrors}}|null} prev
+ * @param {{at:number, c:{inOctets,outOctets,inErrors,outErrors,inDiscards?,outDiscards?}}|null} prev
  * @param {{at:number, c:object}} cur
  * @param {number|null} speed  bps
  * @param {number} intervalMs  설정 주기(간격 비정상 판정 기준)
  * @param {number} [slackMs]    간격 한계에 더할 직전 실행 소요(v2.611 COL2611-08 — 표본 간격 = 주기 + 실행 시간)
  */
 export function portDelta(prev, cur, speed, intervalMs, slackMs = 0) {
-  const out = { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, reason: null };
+  const out = { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, inDisc: null, outDisc: null, reason: null };
   if (!prev || !prev.c) { out.reason = 'first'; return out; }
   if (!counterGapOk(prev.at, cur?.at, intervalMs, slackMs)) { out.reason = 'gap'; return out; }
   const gapMs = Number(cur.at) - Number(prev.at);
@@ -887,6 +891,8 @@ export function portDelta(prev, cur, speed, intervalMs, slackMs = 0) {
   out.outBps = outO == null ? null : Math.round((outO * 8) / sec);
   out.inErr = d(prev.c.inErrors, cur.c.inErrors);
   out.outErr = d(prev.c.outErrors, cur.c.outErrors);
+  out.inDisc = d(prev.c.inDiscards, cur.c.inDiscards);    // v2.922(B-①) — 오류와 같은 규칙(리셋·간격 비정상·한쪽 없음은 null)
+  out.outDisc = d(prev.c.outDiscards, cur.c.outDiscards);
   const sp = Number(speed);
   const util = (bps) => {
     if (bps == null || !Number.isFinite(sp) || sp <= 0) return null;

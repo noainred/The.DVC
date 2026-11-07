@@ -1,7 +1,7 @@
 // 호스트 상세 ‘네트워크’ 카드의 CVP 업링크 블록(v2.920 — 시안 D-② HostNet). 매칭 포트 타일(송신·수신·에러) + 그 장비의 24h 이벤트.
 //   데이터는 HostDetail 이 받아 넘긴다(/hosts/:id/net-uplinks — NIC 표의 CVP 열과 같은 응답). 문구는 hostNetText.js(순수).
 import React from 'react';
-import { basisOf, bpsText, errText, speedText, portLabel, uplinkSummary, uplinkTotals, SEVERITY_BADGE, eventTimeText } from './hostNetText.js';
+import { basisOf, bpsText, errText, discText, daySumText, speedText, portLabel, uplinkSummary, uplinkTotals, SEVERITY_BADGE, eventTimeText } from './hostNetText.js';
 import { agoText } from './tools/relTime.js';
 
 export default function HostNetCvp({ data, nics = [] }) {
@@ -21,7 +21,8 @@ export default function HostNetCvp({ data, nics = [] }) {
         <>
           <div className="hd-kpis" style={{ margin: '8px 0' }}>
             <div className="ht-kpi"><span className="ht-kpi-l">업링크 지금 송신 / 수신</span><span className="ht-kpi-v hd-kpi-v" style={{ fontSize: 16 }}>{t.tx == null && t.rx == null ? '—' : `${bpsText(t.tx)} / ${bpsText(t.rx)}`}</span><span className="ht-kpi-s">매칭 포트 {ups.length} 합{t.unmeasured ? ` · 값 없는 포트 ${t.unmeasured}` : ''}</span></div>
-            <div className="ht-kpi"><span className="ht-kpi-l">업링크 에러(누적 in / out)</span><span className="ht-kpi-v hd-kpi-v" style={{ fontSize: 16 }}>{t.err == null ? '—' : t.err.toLocaleString('en-US')}</span><span className="ht-kpi-s">CVP in_err · out_err 합 · 드롭(discards)은 아직 수집 안 함</span></div>
+            <div className="ht-kpi"><span className="ht-kpi-l">업링크 에러 · 최근 24시간</span><span className="ht-kpi-v hd-kpi-v" style={{ fontSize: 16 }}>{t.errDay == null ? '—' : t.errDay.toLocaleString('en-US')}</span><span className="ht-kpi-s">매칭 포트 in + out 합 · 직전 주기 {t.err == null ? '—' : t.err.toLocaleString('en-US')}</span></div>
+            <div className="ht-kpi"><span className="ht-kpi-l">업링크 드롭 · 최근 24시간</span><span className="ht-kpi-v hd-kpi-v" style={{ fontSize: 16 }}>{t.discDay == null ? '—' : t.discDay.toLocaleString('en-US')}</span><span className="ht-kpi-s">스위치 discards in + out · 직전 주기 {t.disc == null ? '—' : t.disc.toLocaleString('en-US')} · ESXi 쪽 드롭은 별도</span></div>
           </div>
           <div className="flex gap wrap">
             {ups.map((u, i) => {
@@ -34,7 +35,8 @@ export default function HostNetCvp({ data, nics = [] }) {
                   </div>
                   <div className="muted" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.nic ? `${u.nic} · ` : 'NIC 미확정 · '}{u.oper === 'up' ? 'Up' : u.oper === 'down' ? 'Down' : u.oper || '—'} · {speedText(u.speedBps)}{u.lag ? ` · ${u.lag}` : ''}</div>
                   <div style={{ marginTop: 4 }}>송신 <b>{bpsText(u.inBps)}</b> · 수신 <b>{bpsText(u.outBps)}</b></div>
-                  <div className="muted" style={{ fontSize: 11 }}>에러 in/out {errText(u)} · 측정 {agoText(u.rateTs ?? u.ts)}</div>
+                  <div className="muted" style={{ fontSize: 11 }}>에러 in/out {errText(u)} · 드롭 in/out {discText(u)} · 측정 {agoText(u.rateTs ?? u.ts)}</div>
+                  <div className="muted" style={{ fontSize: 11 }} title="최근 24시간 원시 표본 합 — 값이 있는 표본만 더했습니다(첫 주기·간격 비정상·카운터 리셋은 빠짐)">24시간 에러 {daySumText(u.day, 'err')} · 드롭 {daySumText(u.day)}</div>
                 </div>
               );
             })}

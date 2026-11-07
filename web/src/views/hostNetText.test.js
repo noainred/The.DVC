@@ -1,9 +1,9 @@
 // v2.920 — 호스트 네트워크 카드 CVP 업링크 문구: 방향(In=송신) · 값 없음 — · 매칭 없음은 이유를 말한다.
 import { describe, it, expect } from 'vitest';
-import { basisOf, bpsText, txRxText, errText, speedText, uplinksByNic, hostLevelUplinks, nicUplinkText, uplinkSummary, uplinkTotals } from './hostNetText.js';
+import { basisOf, bpsText, txRxText, errText, discText, daySumText, speedText, uplinksByNic, hostLevelUplinks, nicUplinkText, uplinkSummary, uplinkTotals } from './hostNetText.js';
 
 const ups = [
-  { hostname: 'leaf1', port: 'Ethernet12', nic: 'vmnic0', basis: 'desc-nic', inBps: 1e9, outBps: 5e8, inErr: 3, outErr: 0 },
+  { hostname: 'leaf1', port: 'Ethernet12', nic: 'vmnic0', basis: 'desc-nic', inBps: 1e9, outBps: 5e8, inErr: 3, outErr: 0, inDisc: 0, outDisc: 7, day: { inErr: 10, outErr: 0, inDisc: 2, outDisc: 40, samples: 288, discN: 280, errN: 288 } },
   { hostname: 'leaf2', port: 'Ethernet12', nic: 'vmnic1', basis: 'desc-mac', inBps: null, outBps: null, inErr: null, outErr: null },
   { hostname: 'leaf2', port: 'Ethernet20', nic: null, basis: 'desc-name', inBps: 2e6, outBps: 1e6 },
 ];
@@ -29,7 +29,12 @@ describe('업링크 문구', () => {
     expect(s.text).toBe('CVP 매칭 2 / 4 NIC · 호스트 수준 1'); expect(s.note).toContain('충돌 1');
   });
   it('합계 — 없는 값은 더하지 않고 센다', () => {
-    expect(uplinkTotals(ups)).toEqual({ tx: 1e9 + 2e6, rx: 5e8 + 1e6, unmeasured: 1, err: 3 });
-    expect(uplinkTotals([])).toEqual({ tx: null, rx: null, unmeasured: 0, err: null });
+    expect(uplinkTotals(ups)).toEqual({ tx: 1e9 + 2e6, rx: 5e8 + 1e6, unmeasured: 1, err: 3, disc: 7, discDay: 42, errDay: 10 });
+    expect(uplinkTotals([])).toEqual({ tx: null, rx: null, unmeasured: 0, err: null, disc: null, discDay: null, errDay: null });
+  });
+  it('v2.922 드롭 — 직전 주기 · 24시간 부분 합(표본 수) · 없으면 —', () => {
+    expect(discText(ups[0])).toBe('0 / 7'); expect(discText(ups[1])).toBe('—'); expect(discText({ inDisc: '', outDisc: null })).toBe('—');
+    expect(daySumText(ups[0].day)).toBe('2 / 40 (표본 280/288)'); expect(daySumText(ups[0].day, 'err')).toBe('10 / 0');
+    expect(daySumText(null)).toBe('—'); expect(daySumText({ inDisc: null, outDisc: null, samples: 3, discN: 0 })).toBe('—');
   });
 });
