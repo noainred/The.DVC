@@ -134,5 +134,14 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
     perfThresholds: s.perf,
     perfCols: PERF_COL_META,
     ...(perfError ? { perfError } : {}),
+    // v2.929(5단계): 집중 모니터링 요약(진행 중 · 대기 · 최근 24시간 — 중앙 보드 ‘집중 n 건’ 칩 · 상세는 볼 때 엣지 대행으로) · 성능 알림 발송 기록(최근 24시간 · 채널 URL 없음).
+    ...(await envelopeOps()),
   };
+}
+/** 5단계 봉투 필드 — 실패해도 봉투는 나간다(그 필드만 빠진다). */
+async function envelopeOps(now = Date.now()) {
+  const out = {};
+  try { const F = await import('./focus/run.js'); const f = await F.focusEnvelopeSummary({ now }); if (f) out.focusSummary = f; } catch { /* */ }
+  try { const A = await import('./perfAlerts.js'); out.perfAlertSent = (A.perfAlertStatus().sent || []).filter((r) => Number(r?.at) >= now - 86_400_000); } catch { /* */ }
+  return out;
 }

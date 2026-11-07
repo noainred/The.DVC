@@ -26,6 +26,7 @@
 - (원래 4860행) 아키텍처 점검(v2.614) — 포탈 점검 3번째 서브메뉴. 운영 포탈이 자기 라우터 스택·카탈로그·표·파일을 스스로 판정한다
 - (v2.793) VM 백업 센터 법인 위임 — 엣지 위임 vCenter 의 백업은 담당 엣지가 실행한다. 중앙은 정의·화면·이력만
 - (v2.826) 엣지 개별 토큰 자동 적용 — 옛 판 엣지는 401 이고 아무것도 받지 않는다. 전달할 통로가 없으면 발급하지 않는다
+- (v2.929) 베어메탈 성능 5단계 엣지 대행 — 집중 · 변경 · 띠 · 비교는 볼 때 pull, 봉투에는 요약만 · 판정 · 발송은 엣지 · 이슈는 중앙이 당길 때 · 구버전은 경로 존재로 구분
 
 ## 본문
 
@@ -790,3 +791,14 @@
     같은 경로(`pushUpgradeToCollectors` — 서명 manifest 포함) · 새 판(최소 2.776.0 이고 번들 판을 알면 그 이상)을 **확인한 뒤에만** 발급한다.
     시한(`UPGRADE_WAIT_MS`) 안에 못 보면 발급하지 않고 멈춘다. 판을 모르면(pull 상태 없음) 업그레이드하지 않고 통로를 직접 시도한다.
   - 웹 `edgeTokenSyncText.js MIN_EDGE_API_VERSION` 과 `web/src/cmpVersion.js` 는 서버 값·규칙의 사본 — 서버 테스트가 대조한다. 판을 모르면 null(낮다고 보지 않는다).
+- ⚠⚠ **v2.929 — 베어메탈 성능 5단계의 엣지 대행: 판정 · 발송 · 보관은 수집 노드(엣지), 중앙은 요약을 봉투로 받고 상세는 볼 때 당긴다**
+  (`routes/collector.js` `POST /bm-usage/focus` · `POST /bm-usage/focus/stop` · `GET /bm-usage/focus` · `GET /bm-usage/changes|baseline|compare` — tokenFirst · 본문 4kb · 자기 대상 목록 밖 키는 not-found ·
+  `central/bmPerfOpsPull.js` · `bmusage/edgePull.js`(봉투) · `central/bmPerfSanitize.js` · `dataflow/build.js` 분류. 회귀 `bmPerf2929Focus.test.js ⑥ · 구버전`):
+  - **봉투에는 요약만**: `focusSummary`(세션 요약 — 상세 표본 없음) · `perfAlertSent`(최근 24시간 발송 기록) · 행의 `health`(소모품 칸 code · since). 집중 표본 · 변경 이벤트 · 띠 · 비교는 화면이 볼 때 엣지에서 당긴다.
+    ⚠ 새 필드는 중앙 정제 화이트리스트에도(`bmPerfSanitize healthOf` · `sanitizeFocusSummary` · `sanitizeAlertSent` · `sanitizeChangesBody|BaselineBody|CompareBody` — 아는 필드 · enum · 상한 · 시각은 수신 시각으로 clamp).
+  - **POST 는 재전송 0**(retries 0 — 시작이 두 번 가면 세션이 두 개) · GET 은 1회 재시도. 업무 결과는 200 + code(중앙이 HTTP 로 옮긴다).
+  - **구버전 엣지 구분은 경로 존재**: 옛 엣지의 collector 라우터에 없는 경로는 사용자 인증 미들웨어로 떨어져 401(`missing401` — v2.736 edgePull 규약) 또는 404 → `old-version`. 문구에 적는 최소 버전은 **`PERF_OPS_MIN_EDGE_VERSION` 하나**
+    (`central/bmPerfOpsPull.js` — 다른 파일 · 테스트는 import · 테스트는 값이 아니라 ‘경로 없는 엣지는 old-version · 문구가 그 상수’ 를 본다). 릴리스 번호가 정해지면 그 한 줄만 맞춘다.
+  - **알림 판정 · 발송은 엣지**(그 엣지의 규칙 파일 — 중앙에서 엣지로 배포하지 않는다: 다음 판). 엣지의 발송 기록 중 이슈 대상은 **중앙이 사용률을 당길 때**(`pullBmUsage` → `ingestEdgeAlertIssues`) 중앙 문지기가 만든다 —
+    중앙이 그 엣지를 당기지 않으면 이슈도 생기지 않는다(정직 기록). 같은 발송 건은 id(`<agent>:<id>`)로 한 번만.
+

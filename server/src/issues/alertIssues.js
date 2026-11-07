@@ -276,6 +276,65 @@ export function applyBackupFailures(rows, { now = Date.now() } = {}) {
   return { created };
 }
 
+/* ───── v2.929(리눅스 성능 5단계) — 베어메탈 성능 알림 규칙 → 이슈(같은 문지기) ─────
+ * 규칙 열 ‘이슈 자동 등록’ 이 켜진 발송 건(bmusage/perfAlerts.js · 중앙 직접 수집분, 또는 엣지 봉투의 pending-central 을 중앙이 받아서)을 이슈로 만든다.
+ * 틀은 위와 같다: 출처(origin kind 'bmperf' · alertKey = agent|서버|규칙) · 같은 키의 열린 이슈가 있으면 댓글 · 하루 상한(규칙 설정 daily.issues — 이슈 문지기와 별도 축이라
+ *   다른 알람 상한과 따로 센다) · 법인 = 서버의 vCenter(없으면 공용 — 지어내지 않는다). 같은 발송 건(id)을 두 번 쓰지 않는다(엣지 봉투를 다시 당겨도).
+ * 판정(조건) · 발송은 그 서버를 수집하는 노드가 이미 했다 — 여기서 다시 판정하지 않는다.
+ */
+export const BMPERF_RULE_LABEL = Object.freeze({ use: 'USE 판정 변화', cross: '교차 판정', focusEnd: '집중 모니터링 결론', baseline: '베이스라인 이탈', health: '점검 소모품', profile: '용도 점검 실패' });
+export function planBmPerfIssues(fires, { existing = [], createdToday = 0, dailyMax = 20 } = {}) {
+  const actions = []; let capped = 0;
+  const byKey = new Map(); const seenIds = new Set();
+  for (const x of existing) { if (x.origin?.alertKey) byKey.set(x.origin.alertKey, x); for (const id of x.origin?.partKeys || []) seenIds.add(String(id)); }
+  let room = Math.max(0, dailyMax - createdToday);
+  for (const f of fires || []) {
+    if (!f?.id || seenIds.has(String(f.id))) { actions.push({ type: 'dup', f }); continue; }
+    const k = `bmperf:${f.agent || ''}|${f.key}|${f.rule}`;
+    const ex = byKey.get(k);
+    if (ex && ex.status !== 'done') { actions.push({ type: 'again', key: ex.key, f }); continue; }
+    if (room <= 0) { capped += 1; actions.push({ type: 'capped', f }); continue; }
+    room -= 1;
+    actions.push({ type: 'create', alertKey: k, f });
+  }
+  return { actions, capped };
+}
+/** 발송 건 → 이슈. 반환 byId: 발송 id → 'created' | 'commented' | 'daily-cap' | 'dup' | 'error'. 던지지 않는다. */
+export function applyBmPerfFires(fires, { now = Date.now(), dailyMax = 20 } = {}) {
+  const byId = {};
+  let plan;
+  try {
+    const existing = findByOrigin((o) => o.kind === 'bmperf');
+    plan = planBmPerfIssues(fires, { existing, createdToday: originCreatedSince('bmperf', todayStartMs(now)), dailyMax });
+  } catch (e) { status.errors += 1; status.error = String(e?.message || e).slice(0, 200); return { byId, error: status.error }; }
+  if (plan.capped) noteCap(plan.capped, { dailyMax }, now);
+  const settings = loadIssueSettings();
+  const viewers = settings.autoAssign?.enabled ? issueViewers() : null;
+  for (const a of plan.actions) {
+    const f = a.f;
+    try {
+      if (a.type === 'dup') { byId[f.id] = 'dup'; continue; }
+      if (a.type === 'capped') { byId[f.id] = 'daily-cap'; continue; }
+      if (a.type === 'again') {
+        patchOrigin(a.key, (o) => ({ ...o, partKeys: [...(o.partKeys || []), String(f.id)].slice(-64), reopen: (o.reopen || 0) + 1 }));
+        comment(a.key, `다시 발생했습니다 — ${f.title || f.rule} (${portalTime(f.at)})`);
+        byId[f.id] = 'commented';
+        continue;
+      }
+      const label = BMPERF_RULE_LABEL[f.rule] || f.rule;
+      make({
+        title: capStr(`[베어메탈 성능] ${f.title || `${f.name} ${label}`}`, 200), type: 'incident', priority: f.rule === 'use' || f.rule === 'profile' ? 'p1' : 'p2', labels: ['bm-perf', 'auto'], component: label,
+        vcenterId: String(f.vcenterId || ''), status: 'backlog',
+        body: capStr([`베어메탈 성능 알림 규칙 ‘${label}’ 이 이 서버에서 성립해 이슈로 등록했습니다.`, '', `■ ${f.title || ''}`, `서버: ${f.name || f.key}${f.agent ? ` · 수집 노드 ${f.agent}` : ''} · 발생 ${portalTime(f.at)}`, '',
+          '화면: 특수 기능 › 베어메탈 사용률 › 서버 상세(판정 근거 · 집중 모니터링).', '판정 · 발송은 그 서버를 수집하는 노드가 했습니다. 같은 규칙이 다시 성립하면 이 이슈에 댓글이 달립니다 — 닫기는 사람이 합니다.'].join('\n'), 9_000),
+      }, { kind: 'bmperf', alertKey: a.alertKey, alertKind: f.rule, title: f.title || '', deviceName: f.name || '', partKeys: [String(f.id)] }, settings, viewers);
+      status.created += 1;
+      byId[f.id] = 'created';
+    } catch (e) { status.errors += 1; status.error = `bmperf ${a.type}: ${String(e?.message || e).slice(0, 160)}`; byId[f.id] = 'error'; }
+  }
+  return { byId };
+}
+
 let started = false;
 /** index.js 가 기동 때 한 번 — 알람 엔진 · Bareos 실패 메일 틱을 구독한다(그 모듈들은 이슈를 모른다). */
 export async function startAlertIssues() {

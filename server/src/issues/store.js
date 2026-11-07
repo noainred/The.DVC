@@ -557,7 +557,7 @@ function findFor(key, access = FULL_ACCESS, { write = false } = {}) {
  * 사람이 만든 이슈에는 없다. 서버 내부 경로(issues/autoCreate.js)만 붙이고 라우트 본문으로는 받지 않는다(위조 금지).
  * partKeys 는 한 이슈가 덮는 파트 키(`agent|partKey`) — 장비 단위로 묶은 이슈는 여럿이다. resolved 는 해소된 키.
  */
-export const ORIGIN_KINDS = Object.freeze(['partfault', 'wiki-comment', 'alert', 'backup']); // v2.908 alert · backup — issues/alertIssues.js
+export const ORIGIN_KINDS = Object.freeze(['partfault', 'wiki-comment', 'alert', 'backup', 'bmperf']); // v2.908 alert · backup — issues/alertIssues.js · v2.929 bmperf(베어메탈 성능 알림 규칙)
 const ORIGIN_KEYS_MAX = 64;
 const WIKI_PAGE_RE = /^W\d{1,9}$/;
 const WIKI_COMMENT_RE = /^[0-9a-f]{1,40}$/;
@@ -569,7 +569,8 @@ function originField(o) {
     return { kind: 'wiki-comment', pageId: WIKI_PAGE_RE.test(String(o.pageId || '')) ? o.pageId : '', commentId: WIKI_COMMENT_RE.test(String(o.commentId || '')) ? o.commentId : '', partKeys: [], resolved: [] };
   }
   // v2.908 다른 알람(알람 키 하나) · Bareos 백업 실패(잡 하나 — 실패한 jobid 를 partKeys 에 쌓는다)
-  if (o?.kind === 'alert' || o?.kind === 'backup') {
+  // v2.929 베어메탈 성능 알림 규칙(같은 모양 — 발송 건 id 를 partKeys 에 쌓아 두 번 만들지 않는다)
+  if (o?.kind === 'alert' || o?.kind === 'backup' || o?.kind === 'bmperf') {
     return {
       kind: o.kind, alertKey: t(o.alertKey, 300), alertKind: t(o.alertKind, 32), title: t(o.title, 200), deviceName: t(o.deviceName, 200),
       partKeys: keys(o.partKeys), resolved: [], reopen: Math.max(0, Math.min(9999, Math.trunc(Number(o.reopen) || 0))),
@@ -586,11 +587,12 @@ function originField(o) {
 const originNote = (o) => (o?.kind === 'wiki-comment' ? `위키 댓글에서 등록: ${o.pageId || '?'}`
   : o?.kind === 'alert' ? `자동 등록: 알람 · ${capStr(String(o.title || o.alertKey || ''), 80)}`
     : o?.kind === 'backup' ? `자동 등록: 백업 실패 · ${capStr(String(o.deviceName || o.alertKey || ''), 80)}`
+      : o?.kind === 'bmperf' ? `자동 등록: 베어메탈 성능 · ${capStr(String(o.title || o.deviceName || ''), 80)}`
       : `자동 등록: 파트 장애${o?.deviceName || o?.deviceId ? ` · ${capStr(String(o.deviceName || o.deviceId), 80)}` : ''}`);
 /** 화면에 싣는 출처(키 목록 대신 개수 — 목록 응답을 키우지 않는다). */
 function originView(o) {
   if (o.kind === 'wiki-comment') return { kind: o.kind, pageId: o.pageId || '', commentId: o.commentId || '' };
-  if (o.kind === 'alert' || o.kind === 'backup') return { kind: o.kind, alertKind: o.alertKind || '', title: o.title || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, reopen: o.reopen || 0, resolvedAt: o.resolvedAt ?? null };
+  if (o.kind === 'alert' || o.kind === 'backup' || o.kind === 'bmperf') return { kind: o.kind, alertKind: o.alertKind || '', title: o.title || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, reopen: o.reopen || 0, resolvedAt: o.resolvedAt ?? null };
   return { kind: o.kind, agent: o.agent || '', scope: o.scope || '', deviceId: o.deviceId || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, resolved: (o.resolved || []).length };
 }
 /** 출처로 이슈 찾기(서버 내부 — 범위 없음). pred(origin, issue) 가 참인 이슈의 사본. */

@@ -192,6 +192,15 @@
     - **감사 두 줄**(auditMiddleware 자동 줄 + 라우트 logAudit)은 같은 파일의 기존 패턴 그대로(security-api.md v2.923 ⑨).
     - **R8** 의 SSSD · 바쁜 systemd 대기는 실측 없이 추정으로 고쳤다(timeout 3 · getent -s files). R6 의 실제 도달(커널 메시지 개행)도 미확인.
 
+17. **(5단계 구현 — 2026-11-07)** 밝혀 둘 것:
+    - **1분 간격 SSH 의 실장비 부하는 측정하지 못했다.** 이 컨테이너(sshd · iDRAC 없음)에서 명령 실행분만 쟀다 — 주 명령 158ms(dash) · 239ms(bash) + 경량 스냅샷 2.03초(/proc/pid/io 2초 간격) + 피크 창(설정 상한 10초 — 같은 세션) ≈ **분당 약 12초 + SSH 연결 · Redfish 1회(미측정)**.
+      800ms RTT 법인은 연결만 수 초로 추정한다. 집중 1회 = sshd 로그인 1회(10분이면 10회) — 화면이 말한다.
+    - `chronyc -c tracking` · `needs-restarting -r` · `dnf history` 의 Rocky 9 실출력 형식은 **미확인**(파서는 형식 밖 줄을 버린다 → 그 칸 ‘확인 불가’). sysctl 휘발성 키 목록도 실장비 미확인 — 전체 CRC 가 3주기 연속 바뀌면 이벤트를 멈춘다.
+    - **유지보수 창 억제 원천이 없다** — Bareos · Veeam 스케줄은 VM 대상이라 베어메탈 서버의 백업 창을 읽을 수 없다. 설정 칸은 두되 억제는 일어나지 않는다(`maintenanceFor` source 'none' · 화면이 말한다). 정비 창 화면은 8단계.
+    - 알림 규칙은 **그 노드 전용**(중앙에서 엣지로 배포하지 않는다 — 다음 판) · 엣지 발송의 이슈는 **중앙이 그 엣지를 당길 때만** 생긴다.
+    - 변경 이벤트 보관은 30일(설정 7~400일) — 설계의 ‘1년’ 은 기본값으로 쓰지 않았다(메인 DB 행 수). USE 판정의 과거 값은 저장하지 않아 구간 비교에 판정 행이 없다.
+    - 데모(mock)에는 4주 1시간 롤업이 없어 띠는 화면 판독 때 서버 `bandOf` 결과를 응답에 끼워 그리기만 확인했다(계산은 단위 테스트).
+
 ## 7. 컨펌 때 정할 것(기본값을 적어 둔다)
 1. 방식 — **D(권장)** / B 연동 병행 / 다른 것.
 2. 진단 스냅샷의 프로세스별 I/O — **권한 있으면 읽고 없으면 ‘확인 불가’(기본)** / 넣지 않음.
@@ -226,6 +235,13 @@
   ⑤ 역할 권장값은 DB 열만 근거가 있어 다른 역할은 ‘권장 없음’ · 관리자 덮어쓰기는 같다/다르다로 판정되는 항목(`overridable`)만 · ⑥ 스냅샷 결과는 **실행 노드**(엣지)에 7일 보관하고 중앙은 받아 보여 주기만 한다 ·
   ⑦ 스냅샷의 iDRAC 쪽은 Redfish 호출 없이 이미 가진 값(SEL/LC 최근 5 · 센서 · 전력) · ⑧ 장애 기록의 SEL/LC 는 이 노드 인벤토리가 있는 서버만(엣지 위임 서버는 중앙에 목록이 없다) · ⑨ PROFILES §5 중 보드 E 칸은 2단계 그대로(부품 장애 · SEL 입력 — 새 칸 없음) · 장애 탭 시간순에 스냅샷 dmesg 를 섞지 않았다(스냅샷 탭에서 본다) · 교차 판정 ‘연관’ 열은 만들지 않았다.
   남은 것: 실장비 출력 미확인(Rocky 9 의 getenforce · logind.conf.d · softnet 열 수 · NIC 큐 디렉터리 · Airflow comm) · TUNING-SOURCES ◐ 항목 원문 재대조 · §6-11 D12 · B 샘플러 · Airflow/GPDB 앱 점검(CLI · HTTP · SQL — ‘미수집’ 으로 둠).
+- **5단계 구현됨(v2.929 예정 — 서버 + 화면)**: 집중 모니터링(서버 상세 ‘집중 모니터링’ 탭 · 보드 ‘집중 n건’ 칩 · 함대 목록) · 알림 규칙(설정 카드의 별도 절 · 파일 `bm-perf-rules.json`) · 베이스라인 띠 · 점검 소모품 8칸(요약 탭 카드 · 함대 ‘소모품 주의’ 표) ·
+  변경 이벤트(추이 탭 점 + 목록) · 구간 비교(A/B · CSV). 서버 `bmusage/{parse/linuxHealth,health,changes,cycleOps,opsDb,perfRules,perfAlerts,baseline,compare,slots,perfOpsView,focus/{run,summary},snapshot/reason}.js` ·
+  라우트 `routes/api/bmPerfOps.js` · 엣지 대행 `routes/collector.js` + `central/bmPerfOpsPull.js` · 화면 `web/src/views/tools/{BmFocusTab,BmPerfOpsParts,BmTrendOps,BmPerfRulesPanel}.jsx` · 문구 `bmPerfOpsText.js`.
+  규칙 `docs/rules/{idrac-server,security-api,web,edge}.md` 의 v2.929 항목. 설계와 다르게 둔 것: ① 변경 이벤트 보관 기본 30일(1년 아님) · ② 유지보수 창 억제는 원천이 없어 자리만(§6-17) · ③ 알림 규칙은 노드 전용(엣지 배포 없음) ·
+  ④ 채널은 기존 알림 채널 설정의 사본(메일 · 웹훅 · Slack · Teams — 새 채널 없음) · ⑤ 집중 1분의 피크 창은 주기 수집 설정(상한 10초)을 따른다 · ⑥ 엣지 발송의 이슈는 중앙이 당길 때 만든다 ·
+  ⑦ 구간 비교의 ‘튜닝 값 차이’ 는 그 사이 변경 이벤트(바뀐 것만)로 보인다 — 튜닝 사실의 과거 값은 저장하지 않는다 · USE 판정 과거 값도 없어 판정 행은 없다.
+  남은 것: §6-17 의 실측 · 형식 확인 · USE 매트릭스 B 열(에이전트) · 규칙 엣지 배포 · 정비 창(8단계).
 `bmusage/collectors/osSsh.js linuxCommand` 구획 추가 → `parse/linuxProc.js` 파서(순수 · 테스트) → `rates.js`·`usage.js` 열 추가 → `db.js` 열·튜닝 표 → USE 판정 순수 모듈(테스트가 웹·서버 같은 입력으로 대조) → `edgePull.js` 봉투 + 중앙 정제 화이트리스트 → 스냅샷 엣지 대행 라우트 → 웹(보드 · 상세 · 400 · 상태) → 목 데이터 → Chromium 1440/400 → 릴리스.
 
 ## 9. 출처(검색 2026-11-06)

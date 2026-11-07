@@ -127,7 +127,27 @@ async function openDb() {
         by_user TEXT, reason TEXT, ok INTEGER, code TEXT, ms INTEGER, result_json TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_bm_snap_at ON bm_snapshots(at);
-      CREATE INDEX IF NOT EXISTS idx_bm_snap_key ON bm_snapshots(key, at);`);
+      CREATE INDEX IF NOT EXISTS idx_bm_snap_key ON bm_snapshots(key, at);
+      /* v2.929(5단계 — opsDb.js 가 읽고 쓴다): 집중 모니터링(세션 머리 · 분 표본 — 30일) · 변경 이벤트(전이만 — 30일) · 변경 사실 최신값(서버당 1행 — 재시작 뒤 재방출 없음).
+         표본 값은 JSON(분 × 지표 평균/피크) — 세션당 행이 10개 안팎이고 SQL 집계를 하지 않는다(열 30개를 늘리지 않았다 — 설계와 다른 결정, opsDb.js 머리말). */
+      CREATE TABLE IF NOT EXISTS focus_session (
+        id TEXT PRIMARY KEY, agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, vcenter_id TEXT, trigger_kind TEXT, rule TEXT, by_user TEXT, reason TEXT,
+        created INTEGER NOT NULL, start INTEGER, end INTEGER, interval_s INTEGER, count INTEGER, done INTEGER NOT NULL DEFAULT 0,
+        miss_os INTEGER NOT NULL DEFAULT 0, miss_idrac INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, summary_json TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_bm_focus_created ON focus_session(created);
+      CREATE INDEX IF NOT EXISTS idx_bm_focus_key ON focus_session(key, created);
+      CREATE TABLE IF NOT EXISTS focus_sample (
+        session_id TEXT NOT NULL, idx INTEGER NOT NULL, minute_ts INTEGER NOT NULL, os_ok INTEGER, idrac_ok INTEGER, verdict TEXT, miss_os TEXT, miss_idrac TEXT,
+        vals_json TEXT, snap_json TEXT, PRIMARY KEY (session_id, idx)
+      );
+      CREATE INDEX IF NOT EXISTS idx_bm_focus_sample_ts ON focus_sample(minute_ts);
+      CREATE TABLE IF NOT EXISTS change_event (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, ts INTEGER NOT NULL, kind TEXT NOT NULL, item TEXT, before_v TEXT, after_v TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_bm_change_ts ON change_event(ts);
+      CREATE INDEX IF NOT EXISTS idx_bm_change_key ON change_event(key, ts);
+      CREATE TABLE IF NOT EXISTS change_latest (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER, facts_json TEXT, PRIMARY KEY (agent, key));`);
     // v2.919(리눅스 성능 1단계): 새 열은 CREATE 문이 아니라 **ALTER 마이그레이션**으로 더한다 — 기존 DB(v2.918 이하)와 새 DB 가
     //   같은 경로를 탄다(두 벌 스키마가 갈라지지 않게). ADD COLUMN 은 표를 다시 쓰지 않는다(O(1)).
     const mig = migratePerfColumns(conn);
@@ -307,6 +327,8 @@ export async function repairRollups({ rawKeepFrom = null } = {}) {
 }
 /** 메인 파일 핸들(마이그레이션 모듈 전용 — 같은 연결을 쓴다: 두 연결이 같은 파일에 쓰면 SQLITE_BUSY). */
 export async function mainDbForMigration() { return getDb(); }
+/** v2.929(5단계): 메인 파일 핸들 — 집중 모니터링 · 변경 이벤트(opsDb.js)가 같은 연결을 쓴다(열기 공유 · 0600 · 잠금 재시도 규약 그대로). */
+export async function mainDb() { return getDb(); }
 /**
  * 읽기 규칙(마이그레이션 진행 중) — **예전 표를 읽는 것은 폴백이 아니라 정상 경로다**:
  *   옮기는 중·대조 전·실패한 동안에는 예전 표가 그 구간의 원본이고(아직 아무것도 지우지 않았다) 월 파일의 사본은 대조 전이라 쓰지 않는다.

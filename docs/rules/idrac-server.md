@@ -20,6 +20,7 @@
 - (v2.919) 리눅스 베어메탈 통합 성능 모니터링 1단계 — 같은 SSH 1회에 구획 추가 · USE 판정 코어 하나 · 하드웨어 축은 이미 가진 데이터만
 - (v2.922) 리눅스 성능 3a — 시간 단위 파일(5분·1시간·1일·장치) · 예전 표 마이그레이션(대조 뒤 삭제) · 피크 A 안 · 추이 API · CVP 포트 대조
 - (v2.923) 리눅스 성능 4단계 — 튜닝 탭(항목 26 · 근거 등급 · 출처 · 자동 적용 없음) · 용도 프로파일(rocky9-base · airflow · gpdb) · 장애 기록(partfault 재사용) · 진단 스냅샷(원격 명령 — 규약은 security-api.md v2.923)
+- (v2.929) 리눅스 성능 5단계 — 집중 모니터링(별도 타이머 · 법인 상한 · 전역 슬롯 · 인증 즉시 중단) · 알림 규칙(엣지 판정 · 상태 파일 · 하루 상한) · 베이스라인 띠 · 점검 소모품 8칸 · 변경 이벤트(전이 · 해시만) · 구간 비교
 - (원래 746행) iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
 - (원래 844행) 서버 온도 — 히트맵 보드(시안 B). '못 읽은 값' 을 정상으로도 이상으로도 세지 않는다
 - (원래 1030행) v2.728 — 엣지 축약 인벤토리는 부품 이름·health·state 를 싣고, 중앙 `INV_SHAPE` 와 한 쌍으로 넓힌다
@@ -472,6 +473,46 @@
     (2단계 하드웨어 탭 · hwFacts 와 같은 판단 · part-faults 도구 접근은 따로 재검사). 함대 ‘장애 기록’ 보기도 같은 축으로 자른다. 모순이 아니라 축이 다르다 — 회귀 Ops 테스트 ①.
   - ⚠ **정직 기록**: 수집 구획 · 스냅샷 명령은 이 개발 컨테이너(dash · 커널 6.18 · systemd 없음 · ss 없음)에서만 실행해 봤다 — Rocky 9 실장비 출력 미확인(getenforce · logind.conf.d · softnet 열 수 · NIC 큐 디렉터리).
     Airflow 프로세스 comm 이 ‘airflow’ 인지 ‘python3’ 인지는 설치 방식에 따라 다를 수 있다(미확인). GPDB coordinator/segment 는 기본 포트로 **추정**한다. 설계 README §6-11 D12(selCritical 시간 창 · IRQ virtio)는 이번에도 미처리.
+- ⚠⚠ **리눅스 성능 5단계(v2.929 예정 — 서버 + 화면) — 집중 모니터링은 ‘별도 타이머 · 같은 수집 함수 · 같은 인증 가드 · 같은 슬롯’, 판정 · 발송은 수집 노드, 설정 파일 내용 · dmesg 원문은 저장하지 않는다**
+  (`bmusage/{parse/linuxHealth.js,health.js,changes.js,cycleOps.js,opsDb.js,perfRules.js,perfAlerts.js,baseline.js,compare.js,slots.js,perfOpsView.js,focus/{run,summary}.js,snapshot/reason.js}` ·
+  `routes/api/bmPerfOps.js` · `routes/collector.js`(`/bm-usage/focus[/stop] · /changes · /baseline · /compare`) · `central/bmPerfOpsPull.js` · `issues/alertIssues.js applyBmPerfFires`(출처 `bmperf`).
+  설계 PROFILES §13 · §14 · README §8. 회귀 `server/test/bmPerf2929{Health,Changes,Focus,Alerts,Baseline}.test.js` · 웹 `bmPerfOpsText.test.jsx`):
+  - **수집 구획(같은 SSH 1회 · 1단계 R1 규약 그대로)**: `##CHRONY`(`chronyc -c tracking` 한 줄 · `c:`) · `##DMESG`(awk 가 err · warn · 최근 24시간 **개수만** · `k:` — 원문은 awk 밖으로 나오지 않는다) ·
+    `##CHANGES`(`x:` — uptime · boot_id · 커널 · needs-restarting -r · dnf history 최근 6줄(**명령줄 열은 셸에서 버린다**) · `sysctl -a` 휘발성 키를 뺀 **CRC 하나** · /etc/sysctl.d · cron.d · crontab · /var/spool/cron 은
+    **cksum(CRC)만**(내용 · 크기는 셸 밖으로 나오지 않는다 — 비밀 혼입) · tuned-adm active · systemctl --failed 개수 · file-nr · conntrack). 멈출 수 있는 명령은 `timeout`(chronyc · dmesg · systemctl 3 · needs-restarting · dnf 8) ·
+    rc ≠ 0 이면 그 칸 null(missing) · 명령이 없으면 absent. 줄 머리를 사용자가 정할 수 있는 칸(파일 이름 · dnf 행)은 고정 접두 + 이름 화이트리스트(`../` · 공백 이름은 버린다).
+    `LINUX_SECTIONS` 순서(사실 구획 뒤 · 샘플러 앞) · 바이트 산수(SECTION_BYTES_SUM < OUTPUT_MAX_BYTES < EXEC_MAX_OUTPUT)는 Health 테스트가 **실제 dash · bash** 로 고정(가짜 chronyc · dmesg · dnf).
+    이 컨테이너 실측: 주 명령 전체 158ms(dash) · 239ms(bash) — 새 구획 포함(chronyc · needs-restarting · dnf 는 이 컨테이너에 없어 absent 경로만 실행됐다).
+  - **점검 소모품 8칸(`health.js judgeHealth` — 판정은 수집 노드 · 중앙은 code 를 그대로)**: chrony 오프셋(기본 100ms) · 실패 유닛(4단계 UNITS 사실 — R7 실패=missing) · OOM(vmstat oom_kill 증가) ·
+    커널 오류(24시간 err 개수 기준 0) · 가동 시간 · 재부팅 필요 · FD · conntrack(80%) · 인증서(**svcmon cert 점검 재사용** — 서버 주소 · 이름 정확 일치 · 가장 짧은 남은 일수 · 30일) · TuneD · SELinux · firewalld(참고).
+    code `ok · warn · bad · missing · absent · perm · na · info` — **주의(attention)는 warn + bad 만**(못 읽음 · 없음 · 해당 없음은 주의에도 정상에도 넣지 않는다). 칸은 `cycleOps.prepareCycleOps` 가 적재 **전에** 행 detail_json 에 싣는다
+    (`since` = 그 code 가 된 시각 — change_latest 전이 기록 · 화면 ‘며칠째’).
+  - **변경 이벤트(`changes.js diffChangeFacts` — 전이만)**: 첫 관찰은 기준만(이벤트 0) · 이전과 다를 때만 `change_event` · **null(못 읽음)은 비교하지 않고 직전 값을 들고 간다** · 펌웨어(이미 가진 iDRAC 인벤토리 — BIOS 중복 제거) ·
+    CVP 매핑(수동 매핑) · 소모품 칸 code 전이. sysctl 전체 CRC 가 **연속 3주기** 바뀌면 휘발성(noisy)으로 보고 그 이벤트를 멈춘다(실장비 휘발성 키 미확인 대비) · 한 주기 24건 상한(넘으면 ‘그 밖 n건’ 한 줄).
+    최신 사실은 `change_latest`(서버별 — 재시작 뒤 같은 변화를 다시 적지 않는다) · 쓰기는 한 트랜잭션(`changeWriteBatch`) · 보관 30일(설정 `changes.keepDays` — 설계의 ‘1년’ 은 쓰지 않았다: 메인 DB 행 수) ·
+    대상에서 사라진 서버의 최신값은 **마지막 성공 주기의 키**(`_lastLiveKeys`)로 정리한다 — 정리 틱에서 대상 해석(`currentTargets`)을 다시 부르면 bmstor 등록부 캐시를 오염시켰다(bmPerf2923Snapshot 404 — 이번 회차에 잡음).
+  - **집중 모니터링(`focus/run.js`)**: 별도 타이머 · 별도 표(`focus_session` · `focus_sample` — 메인 bm-usage.db · 30일 · 폴러 정리 틱이 청크로) · 기본 10분 × 1분(간격 하한 30초 · 길이 상한 60분) ·
+    1분 = **주기 수집과 같은 함수**(`collectOsUsage` + `extraCommands` 로 같은 SSH 세션에서 경량 스냅샷 `FOCUS_SNAPSHOT_COMMAND` — 상수 · ps 상위 5 · /proc/pid/io 2초 차이 · ss -s) + Redfish 1회(`idracTelemetryJob` 재사용) →
+    `buildUsage` · `buildPerfEntry`(판정 코어 하나). 세션 시한 `withDeadline` 50초 > 예산 45초(시한이 세션을 끊는다).
+    ⚠⚠ **법인당 동시 상한(기본 5)은 실행 중 + 시작 중(예약)을 동기적으로 세고 예약**한다(검사와 예약 사이 await 없음 — 4단계 스냅샷 R2 와 같은 판단) · 넘치면 법인별 대기열(순번) · 서버당 1세션.
+    ⚠⚠ **인증 거부는 그 분에서 즉시 중단**(다음 분을 예약하지 않는다) — OS · iDRAC 결과를 **주기 수집과 같은 가드 · 같은 식별자**에 기록(실패는 주기 수집도 멈추고 성공은 푼다 — Focus 테스트 ③가 실제 poller 가드로 확인).
+    자동 집중은 정지 계정이면 시작하지 않는다(수동은 막지 않는다 — 1분에 한 번 시도 후 바로 중단). 결측 분은 **비우고** OS · iDRAC 를 따로 센다(경로가 없는 쪽은 요약 null — 화면 ‘경로 없음’).
+    ⚠ **전역 슬롯(`slots.js`)**: 주기 수집 풀과 집중이 같은 용량(단일 원천 = poller `CONCURRENCY` → `configureSlots`)을 나눠 쓰고 집중은 **앞자리 대기** · 대기 상한(간격 × 0.75 · 5~45초)을 넘기면 그 분 결측 `pool-busy`.
+    피크 창 주기 예산(peakPlan)에는 **활성 집중 수를 뺀 동시성**을 준다. 재시작이면 남은 진행 중 · 대기 세션은 `interrupted` 로 닫는다(타이머가 없다).
+    ⚠ **순환 금지(arch2579 SCC 상한 4)**: focus/run 은 poller 를 import 하지 않는다 — 폴러가 로드될 때 `registerFocusPollerHooks` 로 넘긴다(미등록이면 인증 정지 조회는 ‘정지’ 로 답한다 — 계정 잠금 쪽으로 틀리지 않게).
+    요약은 `focus/summary.js`(데모 시드가 import) · 사유 정제는 `snapshot/reason.js`(focus 가 snapshot/run 을 import 하면 snapshot/run → poller → focus 순환).
+    원인 후보는 **상관**(스냅샷이 있는 분 중 I/O · CPU 1위 횟수 — 문제 자원이 디스크 · 네트워크면 I/O 먼저) · 조치는 code(웹이 문장).
+  - **알림 규칙(`perfRules.js` 파일 `bm-perf-rules.json` · `perfAlerts.js`)**: 규칙 6종(USE 판정 변화 · 교차 판정 · 집중 결론 · 베이스라인 이탈 · 점검 소모품 · 용도 점검 실패) — **조건은 수집 노드가 판정한 code 의 변화만**(null 은 보류) ·
+    지속 n주기 · 한 사건에 한 번 · 재발 억제(분) · **켠 규칙만 저장** · 하루 상한(법인당 알림 50 · 이슈 20 · 자동 집중 10). 채널은 **기존 알림 채널 설정의 사본**(메일 · 웹훅 · Slack · Teams — 새 채널 설정 없음) ·
+    이슈는 **기존 문지기**(`alertIssues` — 출처 `bmperf` · 같은 발송 건 두 번 안 만듦 · 열린 이슈면 댓글). 엣지의 발송 기록은 봉투(`perfAlertSent` 24시간)로 올라가고 이슈는 **중앙이 끌어올 때** 만든다.
+    상태 파일 `bm-perf-alert-state.json`(원자 쓰기 · 재시작 뒤 재발송 없음) — **손상이면 보존본을 남기고 warmup**(그 주기는 기준만 · 보내지 않음). 규칙 파일 손상은 기본값(전부 꺼짐)으로 돌되
+    주기 상태에 `skipped: 'settings-unreadable'` 로 남기고 규칙 화면 · 서비스 점검(audit2633 20개)이 밝힌다. 유지보수 창 억제는 **원천이 없다**(`maintenanceFor` 는 늘 suppressed:false · source 'none' — 베어메탈 서버의 백업 창을 읽는 스케줄이 없다).
+  - **베이스라인(`baseline.js`)**: 지난 4주 같은 요일 · 같은 시각(정확히 7일 배수)의 1시간 롤업 평균 ±40% · 표본 4주 미만 · 결측 25% 초과면 띠 없음(reason) · ML 없음.
+    주기 판정용 슬롯 평균은 시간당 한 번(`slotBands` — h IN 질의 1회) · 화면용 띠 계열은 시간 기준 양보(`createYielder`) · 10분 메모 · 최대 14일 · 지표 화이트리스트 5개.
+  - **구간 비교(`compare.js`)**: 같은 길이(짧은 쪽) · 같은(거친) 해상도 · **결측은 양쪽에서 뺀다** · 차이 %(A=0 이면 null) · ±20% 표시 · 프로세스 상위 차이는 스냅샷이 있는 구간만 · 튜닝 값 차이는 그 사이 변경 이벤트.
+  - ⚠ **정직 기록**: 1분 간격 SSH 의 실장비 부하는 측정하지 못했다 — 이 컨테이너(sshd 없음)에서 명령 실행분만 쟀다: 주 명령 158~239ms + 경량 스냅샷 2.03초(/proc/pid/io 2초 간격) + 피크 창(설정 상한 10초 — 같은 세션) ≈ 분당 약 12초 +
+    SSH 연결 · Redfish 1회(미측정 — 800ms RTT 법인은 연결만 수 초 추정). chronyc -c · needs-restarting -r · dnf history 의 Rocky 9 실출력 형식은 미확인(파서는 형식 밖 줄을 버린다 — 칸이 비면 ‘확인 불가’).
+    데모 백필(30분 간격 · 14일)에는 디스크 지표 · 4주 이력이 없어 화면 판독의 띠는 서버 `bandOf` 결과를 응답에 끼워 확인했다.
 - ⚠⚠ **iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
   관리자가 동의해야 켜진다**(`bmusage/license.js`·`collectors/idracEnterprise.js`·`parse/racadm.js`
   + `idrac/redfish.js fetchUsageSensors`, v2.554 — 사용자 신고 "idarc 텔레메트리는 data center

@@ -20,6 +20,9 @@ import { bpsText } from './bmUsageText.js';
 import { bpsText as bitsText, pctText as portPctText } from './cvpText.js';
 import { createTrendLoader, trendFetcher } from './bmTrendLoad.js';
 import { TrendRow, TimeAxis, Spark } from './BmTrendChart.jsx';
+// v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 겹침 · 구간 비교(BmTrendOps.jsx) — 패널 행에는 변경 이벤트 점만 얹는다.
+import { BaselineOverlay, CompareView } from './BmTrendOps.jsx';
+import { changeMarks } from './bmPerfOpsText.js';
 import BmTrendPopup from './BmTrendPopup.jsx';
 import {
   TREND_RANGES, trendRangeOf, SHOW_MODES, showAvg, showPeak, metricInfo, PANEL_ROWS, SOCKET_NOTE, SOURCE_TAGS, SOURCE_ORDER, RECO_TILES,
@@ -114,6 +117,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
   const [devSeg, setDevSeg] = useState('none');
   const [withParts, setWithParts] = useState(false);
   const [narrow, setNarrow] = useState(() => (narrowOverride != null ? narrowOverride : typeof window !== 'undefined' && window.innerWidth < 720));
+  const [cmpOn, setCmpOn] = useState(false);   // v2.929: 구간 비교 절 펼치기
   const recoRef = useRef(null);
   const loader = useRef(null);
   const mLoader = useRef(null);
@@ -127,6 +131,9 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
   const devs = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/devices` : '', clock.n);
   const ports = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/ports` : '', clock.n);
   const devices = useMemo(() => (devs.data && devs.data.ok !== false && devs.data.devices) || { disk: [], nic: [], mount: [] }, [devs.data]);
+  // v2.929: 같은 창의 변경 이벤트(+ 집중 1분 점) — 창이 바뀔 때 1회(폴링 없음). 패널 행 위 점과 겹침 카드가 같은 응답을 쓴다.
+  const changes = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/changes?from=${Math.floor(win.from)}&to=${Math.floor(win.to)}&focus=1` : '', clock.n);
+  const chMarks = useMemo(() => changeMarks(changes.data?.events || [], win), [changes.data, win]);
 
   useEffect(() => {
     if (narrowOverride != null || typeof window === 'undefined') return undefined;
@@ -281,7 +288,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
           const sub = [baseSub, groupFirst ? restNote(rp.rest) : '', groupFirst && rp.autoRows ? '8개 초과 — 행 나눔으로 바꿨습니다' : ''].filter(Boolean).join(' · ');
           return (
             <TrendRow key={rp.id} title={title} sub={sub} readout={readout} series={lines} win={win} yMax={yMax} cursor={cursorMs} sel={sel} baseline={isPeak ? null : baseline}
-              gaps={[]} noPeak={noPeak} message={lines.length ? '' : msg} note={lines.length ? msg : ''} legend={lg} unit={info.unit}
+              gaps={[]} noPeak={noPeak} message={lines.length ? '' : msg} note={lines.length ? msg : ''} legend={lg} unit={info.unit} marks={chMarks}
               onHover={(ms) => setCur(ms == null ? null : { ms, panel: which })} onSelect={setSel}
               onOpen={() => open(first, { show: isPeak ? 'peak' : 'avg' })} />
           );
@@ -345,7 +352,16 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
       {/* ── ① 평균 · ② 피크 ── */}
       {showAvg(show) && renderPanel('avg')}
       {showPeak(show) && renderPanel('peak')}
-      <p className="bmt-note">{SOCKET_NOTE}</p>
+      <p className="bmt-note">{SOCKET_NOTE}{chMarks.length ? ` · 행 위 파란 점선 = 변경 이벤트(${chMarks.length}곳 — 아래 목록)` : ''}</p>
+
+      {/* ── v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 · 구간 비교 ── */}
+      <BaselineOverlay itemKey={itemKey} win={win} changes={changes.data && changes.data.ok !== false ? changes.data : null} narrow={narrow} />
+      {changes.err && <p className="bmt-note" style={{ color: toneVar('warn') }}>변경 이벤트를 읽지 못했습니다: {trendErrorText(changes.err)}</p>}
+      <div className="bmt-ctl">
+        <button type="button" className="btn btn-sm bmp-touch" aria-expanded={cmpOn} onClick={() => setCmpOn((v) => !v)}>{cmpOn ? '구간 비교 닫기' : '구간 비교(A/B) 열기'}</button>
+        <span className="bmt-hint">위 패널에서 끌어 고른 구간이 B 가 됩니다(없으면 최근 1시간).</span>
+      </div>
+      {cmpOn && <CompareView itemKey={itemKey} sel={sel} name={name} />}
 
       {/* ── 선택 구간 요약 ── */}
       <section className="bmt-card" aria-label="선택 구간 요약">

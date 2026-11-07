@@ -27,6 +27,7 @@ import {
   SYSCTL_PATHS, MAX_CORES, MAX_BLKQ, MAX_IRQ_LINES, BLKQ_SHELL_LINES,
 } from '../parse/linuxProc.js';
 import { FACT_SHELL, FACT_SECTIONS, FACT_LINE_CAP, FACT_LINE_BYTES, parseOsRel, parseUnits, parsePorts, parseProcs, parseAccts, parseKargs, parseSoftnet, parseNetq, parseXfs } from '../parse/linuxFacts.js'; // v2.923: 4단계 용도 감지 · 튜닝 사실
+import { HEALTH_SHELL, HEALTH_SECTIONS, HEALTH_LINE_CAP, HEALTH_LINE_BYTES, parseChrony, parseDmesgCounts, parseChanges } from '../parse/linuxHealth.js'; // v2.929(5단계): 점검 소모품 · 변경 이벤트
 import { planWindow, peakCommand, parsePeakOutput, computePeaks, PEAK_OVERHEAD_MS } from '../peakWindow.js'; // v2.922: 피크 A 안
 import { samplerCommand, parseSamplerFile, SAMPLER_MAX_LINES } from '../samplerSpec.js'; // v2.922: 피크 B 안(수거 자리만)
 import { parseWinPerf } from '../parse/winPerf.js';
@@ -70,12 +71,15 @@ export const SECTION_LINE_CAP = Object.freeze({
   PSI: 6, VMSTAT: 8, SNMP: 2, BLKQ: BLKQ_SHELL_LINES, SYSCTL: 48, IRQ: MAX_IRQ_LINES, DFI: 66, SAMPLER: SAMPLER_MAX_LINES,
   // v2.923(4단계): 용도 감지 · 튜닝 사실 구획(parse/linuxFacts.js — 명령 조각도 그 모듈의 상수)
   ...FACT_LINE_CAP,
+  // v2.929(5단계): 점검 소모품 · 변경 이벤트(parse/linuxHealth.js — 줄마다 고정 접두)
+  ...HEALTH_LINE_CAP,
 });
 /** 줄 최대 바이트(가정 — 개행 포함). cut 으로 자르는 구획은 그 폭, 커널 숫자 형식(DISK·NET)은 관측 폭의 여유값(추정 — 자르지 않는다: 숫자 중간 절단 금지). */
 export const SECTION_LINE_BYTES = Object.freeze({
   STAT_OTHER: 257, STAT_CPU: 257, MEM: 80, DISK: 220, NET: 260, NETINFO: 129, FC: 513, DF: 1_025,
   PSI: 128, VMSTAT: 32, SNMP: 300, BLKQ: 100, SYSCTL: 200, IRQ: 80, DFI: 1_025, SAMPLER: 257,
   ...FACT_LINE_BYTES,
+  ...HEALTH_LINE_BYTES,
 });
 /** 기존 구획 중 줄 상한을 파서가 확인하는 것(splitSections 이름 → 상한). 상한+1 줄이 오면 상한 도달. */
 export const LEGACY_CAPPED = Object.freeze({ MEM: SECTION_LINE_CAP.MEM, DISK: SECTION_LINE_CAP.DISK, NET: SECTION_LINE_CAP.NET, NETINFO: SECTION_LINE_CAP.NETINFO, FC: SECTION_LINE_CAP.FC, DF: SECTION_LINE_CAP.DF });
@@ -95,7 +99,7 @@ const IRQ_AWK = "awk 'NR==1{n=NF;next} {nz=0; for(i=2;i<=n+1&&i<=NF;i++) if(($i+
  * v2.923(반증 R1): 명령이 표지를 내는 **순서** — 파서(splitSections)는 이 순서에서 지금보다 뒤의 표지만 받는다(앞 구획을 다시 열지 않는다).
  *   linuxCommand 의 echo 순서와 같아야 한다(테스트가 명령 문자열에서 표지를 뽑아 대조).
  */
-export const LINUX_SECTIONS = Object.freeze(['STAT', 'MEM', 'DISK', 'NET', 'NETINFO', 'FC', 'TICK', 'DF', 'HOST', 'LOAD', 'PSI', 'VMSTAT', 'SNMP', 'BLKQ', 'SYSCTL', 'IRQ', 'DFI', ...FACT_SECTIONS, 'SAMPLER', 'END']);
+export const LINUX_SECTIONS = Object.freeze(['STAT', 'MEM', 'DISK', 'NET', 'NETINFO', 'FC', 'TICK', 'DF', 'HOST', 'LOAD', 'PSI', 'VMSTAT', 'SNMP', 'BLKQ', 'SYSCTL', 'IRQ', 'DFI', ...FACT_SECTIONS, ...HEALTH_SECTIONS, 'SAMPLER', 'END']);
 
 /** Linux 수집 명령 — 구획 표지로 나눈 한 방. */
 export function linuxCommand(mounts = [], { sampler = false } = {}) {
@@ -138,6 +142,8 @@ export function linuxCommand(mounts = [], { sampler = false } = {}) {
     "echo '##DFI'", dfiPart,
     // ── v2.923(4단계) 용도 감지 · 튜닝 사실 — 전부 읽기 전용 상수 조각(parse/linuxFacts.js FACT_SHELL). 프로세스는 이름(comm)만 · 인자 없음 · sudo 없음.
     ...FACT_SECTIONS.flatMap((k) => [`echo '##${k}'`, FACT_SHELL[k]]),
+    // ── v2.929(5단계) 점검 소모품 · 변경 이벤트 — 상수 조각(parse/linuxHealth.js HEALTH_SHELL). 줄마다 고정 접두 · 내용은 CRC · 개수만(설정 파일 · dmesg 원문 없음).
+    ...HEALTH_SECTIONS.flatMap((k) => [`echo '##${k}'`, HEALTH_SHELL[k]]),
     // v2.922: 피크 B 안 수거 구획 — 옵트인일 때만(기본 명령은 그대로). 파일이 없으면 0줄(absent).
     ...(sampler ? ["echo '##SAMPLER'", samplerCommand()] : []),
     "echo '##END'",
@@ -280,6 +286,10 @@ export function shapePerfSections(sec = {}, { blkqMax = MAX_BLKQ } = {}) {
     softnet: readSection(sec, 'SOFTNET', parseSoftnet),
     netq: readSection(sec, 'NETQ', parseNetq),
     xfs: readSection(sec, 'XFS', parseXfs),
+    // v2.929(5단계) — 점검 소모품 · 변경 이벤트(표지 없음 missing · 0줄 absent — chrony 없는 서버는 absent)
+    chrony: readSection(sec, 'CHRONY', parseChrony),
+    dmesg: readSection(sec, 'DMESG', parseDmesgCounts),
+    changes: readSection(sec, 'CHANGES', parseChanges),
   };
 }
 
@@ -288,7 +298,7 @@ export function shapePerfSections(sec = {}, { blkqMax = MAX_BLKQ } = {}) {
  * @param {object} osHost  `bmstor` 등록 항목(host·port·username·password·mounts)
  * @param {{signal?:AbortSignal}} opt
  */
-export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null } = {}) {
+export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null, extraCommands = [] } = {}) {
   const host = String(osHost.host || '').trim();
   if (!host) return { ok: false, error: 'OS host 가 없습니다.' };
   const { mounts } = sanitizeMounts(osHost.mounts);
@@ -332,7 +342,21 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
               plannedS: plan.windowS, reduced: plan.reduced || pk.windowS < plan.windowS, reason: plan.reason, shortBy: Math.max(0, plan.windowS - pk.windowS) };
           } catch (e) { peak = { ...peak, windowS: 0, reason: 'error', error: String(e?.message || e).slice(0, 160) }; }
         }
-        return { ...shaped, peak, ok: true, stderr: (r.stderr || '').slice(0, 300) };
+        /*
+         * v2.929(5단계 — 집중 모니터링 경량 스냅샷): 같은 세션에서 덧붙일 **상수 명령**(호출부가 상수만 넘긴다 — snapshot/command.js FOCUS_SNAPSHOT_COMMAND).
+         *   남은 예산 안에서만 돌리고(MIN_SLICE 아래면 건너뛰고 사유) 출력은 상한으로 자른다. 실패해도 본 수집 결과는 그대로다(그 칸만 비운다).
+         */
+        const extra = {};
+        for (const x of Array.isArray(extraCommands) ? extraCommands.slice(0, 2) : []) {
+          if (!x || typeof x.cmd !== 'string' || !/^[a-z]{1,16}$/.test(String(x.name || ''))) continue;
+          if (slice() < MIN_SLICE_MS) { extra[x.name] = { skipped: 'budget' }; continue; }
+          try {
+            const EXTRA_TMO = Math.min(Number(x.timeoutMs) || 15_000, slice());   // ⚠ 위치 인자(숫자) — 객체를 넘기면 NaN → 즉시 시한
+            const er = await exec(x.cmd, EXTRA_TMO);
+            extra[x.name] = { stdout: String(er.stdout || '').slice(0, Math.max(1_024, Number(x.maxBytes) || 64 * 1024)) };
+          } catch (e) { extra[x.name] = { error: String(e?.message || e).slice(0, 160) }; }
+        }
+        return { ...shaped, peak, ok: true, stderr: (r.stderr || '').slice(0, 300), ...(Object.keys(extra).length ? { extra } : {}) };
       };
       const tryWin = async () => {
         const r = await exec(winCommand(), slice());

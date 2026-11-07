@@ -63,7 +63,7 @@ function usePointer({ win, onHover, onSelect, onOpen }) {
  * SVG 한 장 — 계열(선) 여러 개 · 결측 띠 · 피크 없는 띠 · 선택 구간 · 커서 · 기준선.
  * series: [{ points, gaps, pick:'avg'|'max'|'peak', color, dash, faint, width }]
  */
-export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = null, baseline = null, gaps = [], noPeak = [], label = '', height = 56, ptr = {} }) {
+export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = null, baseline = null, gaps = [], noPeak = [], label = '', height = 56, ptr = {}, marks = [], bandPolys = [], dots = [] }) {
   const bands = gapBands(gaps, { ...win, w: W });
   const np = noPeak.length ? gapBands(noPeak.map((r) => ({ ...r, reason: 'no-peak' })), { ...win, w: W }) : [];
   const cx = cursor == null ? null : xOf(cursor, { ...win, w: W });
@@ -76,6 +76,8 @@ export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = nu
       {bands.map((b, i) => <rect key={`g${i}`} x={b.x} y="0" width={Math.max(b.width, 0.5)} height={H} fill="var(--text-faint)" opacity={b.reason === 'migrating' ? 0.16 : 0.08}><title>{`결측 — ${gapReasonText(b.reason)}`}</title></rect>)}
       {np.map((b, i) => <rect key={`n${i}`} x={b.x} y={H - 6} width={Math.max(b.width, 0.5)} height="6" fill="var(--text-faint)" opacity="0.35"><title>피크 표본이 없는 주기(—)</title></rect>)}
       {selA != null && selB != null && selB > selA && <rect x={selA} y="0" width={selB - selA} height={H} fill="var(--accent-2)" opacity="0.08" stroke="var(--accent-2)" strokeOpacity="0.4" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />}
+      {/* v2.929(5단계): 베이스라인 띠(지난 N주 같은 요일 · 시각 평균 ± — 다각형은 bmPerfOpsText.bandPolys) · 변경 이벤트 점(위 가장자리) · 집중 1분 점 */}
+      {bandPolys.map((pts, i) => <polygon key={`b${i}`} points={pts} fill="var(--accent-2)" opacity="0.13" />)}
       {baseline && baseline.warn != null && baseline.warn <= yMax && <line x1="0" x2={W} y1={yOf(baseline.warn)} y2={yOf(baseline.warn)} stroke="var(--amber)" strokeDasharray="5 4" opacity="0.7" vectorEffect="non-scaling-stroke" />}
       {baseline && baseline.bad != null && baseline.bad <= yMax && <line x1="0" x2={W} y1={yOf(baseline.bad)} y2={yOf(baseline.bad)} stroke="var(--red)" strokeDasharray="5 4" opacity="0.7" vectorEffect="non-scaling-stroke" />}
       {series.map((s, i) => {
@@ -88,13 +90,15 @@ export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = nu
           </g>
         );
       })}
+      {dots.map((d, i) => { const x = xOf(d.t, { ...win, w: W }); const y = H - (Math.max(0, Math.min(d.v, yMax)) / yMax) * H; return <path key={`f${i}`} d={`M${x.toFixed(1)} ${y.toFixed(1)} l0 0`} stroke={d.color || 'var(--amber)'} strokeWidth="5" strokeLinecap="round" vectorEffect="non-scaling-stroke"><title>{d.title || ''}</title></path>; })}
+      {marks.map((m, i) => { const x = xOf(m.t, { ...win, w: W }); return <g key={`m${i}`}><line x1={x} x2={x} y1="0" y2={H} stroke="var(--accent-2)" strokeOpacity="0.45" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" /><path d={`M${x.toFixed(1)} 0 l0 0`} stroke="var(--accent-2)" strokeWidth="7" strokeLinecap="round" vectorEffect="non-scaling-stroke"><title>{m.title || ''}</title></path></g>; })}
       {cx != null && <line x1={cx} x2={cx} y1="0" y2={H} stroke="var(--text-dim)" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />}
     </svg>
   );
 }
 
 /** 패널 한 행 — 이름(HTML) + SVG. 행을 누르면 확대 팝업. */
-export function TrendRow({ title, sub = '', readout = null, series = [], win, yMax, cursor, sel, baseline = null, gaps = [], noPeak = [], message = '', note = '', onHover, onSelect, onOpen, legend = null, height = 56, unit = '' }) {
+export function TrendRow({ title, sub = '', readout = null, series = [], win, yMax, cursor, sel, baseline = null, gaps = [], noPeak = [], message = '', note = '', onHover, onSelect, onOpen, legend = null, height = 56, unit = '', marks = [] }) {
   const ptr = usePointer({ win, onHover, onSelect, onOpen });
   return (
     <div className="bmt-row">
@@ -106,7 +110,7 @@ export function TrendRow({ title, sub = '', readout = null, series = [], win, yM
         {readout && <div className="bmt-row-read">{readout}</div>}
       </div>
       <div className="bmt-row-plot">
-        <TrendSvg series={series} win={win} yMax={yMax} cursor={cursor} sel={sel} baseline={baseline} gaps={gaps} noPeak={noPeak} label={`${title} 추이`} height={height} ptr={ptr} />
+        <TrendSvg series={series} win={win} yMax={yMax} cursor={cursor} sel={sel} baseline={baseline} gaps={gaps} noPeak={noPeak} label={`${title} 추이`} height={height} ptr={ptr} marks={marks} />
         <span className="bmt-ymax" aria-hidden="true">{unit === '%' ? '100' : ''}</span>
         {message && <div className="bmt-row-msg">{message}</div>}
       </div>

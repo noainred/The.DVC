@@ -8,6 +8,7 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { PERF_COLS, PERF_COL_NAMES } from './perfCols.js';
 import { judgeUse, crossJudge, coverageOf, freshMsFor } from './useJudge.js';
+import { compactHealth } from './health.js';
 
 const n = numOrNull;
 /** JSON 열 파싱 — 깨졌거나 상한 표지(`{truncated:true}`)면 그대로/ null. 예외를 던지지 않는다. */
@@ -56,6 +57,8 @@ export function buildPerfEntry({ row = {}, hw = null, th = {}, intervalMs = null
     // v2.920(2단계 화면): 그 커널에 PSI 가 없다(구획은 왔는데 0줄 = absent) — 보드 신뢰 띠의 ‘PSI 없음 n’ 은 목록 응답만으로 세야 한다(목록에는 detail 이 없다).
     //   판정이 아니라 수집 사실 한 비트다(판정은 useJudge 가 이미 그 칸을 none 으로 냈다).
     psiAbsent: detail?.sections?.psi === 'absent',
+    // v2.929(5단계): 점검 소모품 칸(code · since — 판정은 수집 노드가 이미 했다 · cycleOps). 목록(보드 ‘소모품 주의 n대’ · 함대 표)이 이것만 쓴다.
+    health: compactHealth(detail?.health),
   };
   if (!full) return base;
   return {

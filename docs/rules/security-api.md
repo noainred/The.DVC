@@ -24,6 +24,7 @@
 - (원래 5877행) super_admin 은 '저장 역할' 이고 요청 문맥에서는 admin + `superAdmin:true` 다
 - (v2.912 추가) 로그인 기록(최근 로그인 · 로그인 횟수)은 감사 로그가 아니라 `security/loginHistory.js` 하나로 센다
 - (v2.923 추가) 베어메탈 진단 스냅샷(원격 명령 실행 경로) — 상수 명령 · 읽기 전용 · sudo 0 · 인자 0 · 사유 · 감사 · 동시 1건 · 법인당 하루 상한 · 범위 404/403 · 인증 가드
+- (v2.929 추가) 베어메탈 집중 모니터링(분마다 SSH · Redfish 를 여는 쓰기 경로) · 성능 알림 규칙 설정 · 시험 실행 — 스냅샷 규약 재사용 · 법인 상한 예약 · 인증 즉시 중단 · 설정 소유자 · 전체 범위
 
 ## 본문
 
@@ -434,4 +435,18 @@
   iDRAC 쪽은 명령이 아니라 **이미 가진 값**(인벤토리 SEL/LC 최근 5 · 센서 순간값 · 전력 최신 — Redfish 호출 0). 튜닝 탭에는 **쓰기 경로 자체가 없다**(sysctl -w · tuned-adm profile · ethtool -G 0 — 소스 스윕).
   ⑪ **GET 에 writable**(반증 W4 — server/CLAUDE.md v2.733): 보관분 목록 · 용도 보기 응답에 쓰기 범위(`inUserWriteScope`)를 싣고 화면이 실행 · 태그 칸을 잠근다(서버는 그대로 403). 응답 캐시 키(opsKey)에 **쓰기 범위 서명**을 넣었다 — 조회 범위 · 역할이 같고 쓰기 범위만 다른 두 계정이 캐시를 나누면 writable 이 샌다.
   ⑫ **덮어쓰기 scope(반증 R10)**: `PUT /tools/bm-usage/tuning/overrides` 의 scope 는 'all' 또는 vCenter id 형식이면서 Object.prototype 이름이 아닌 것만 · 맵은 null 프로토타입 · 읽기는 Object.hasOwn — 예전에는 ‘toString’ 이 ok:true 인데 저장되지 않고 전역 내장 함수 객체를 고쳤다(재현).
+- ⚠⚠ **v2.929 — 베어메탈 집중 모니터링(`POST /api/tools/bm-usage/perf/:key/focus` · `/focus/:id/stop`)은 분마다 SSH · Redfish 를 여는 쓰기 경로다 — v2.923 스냅샷 규약을 그대로 쓰고, 넘는 부분만 더했다**
+  (`routes/api/bmPerfOps.js bmFocusStart · bmFocusStop` · `bmusage/focus/run.js` · `routes/collector.js /bm-usage/focus[/stop]` · `central/bmPerfOpsPull.js runEdgeFocus · stopEdgeFocus`.
+  회귀 `server/test/bmPerf2929Focus.test.js`(실제 api 라우터 + 엣지 collector 라우트) · `bmPerf2929Alerts.test.js ⑥` · 변이 20건 전부 잡힘):
+  ① **권한**: 시작 · 중지 = `writeRole`(operator 이상) + tools · 조회 밖 404 → **쓰기 범위 밖 403 무조건**(v2.733 함정) · 사유 2~300자 필수(400 — `snapshot/reason.js cleanReason` · 제어 · 양방향 · 폭 없는 문자 제거) ·
+     감사 `bm-perf.focus`(사유 · via · code · id) · `bm-perf.focus.stop` · 엣지 쪽 `중앙 대행 집중 모니터링`(central-portal:<계정 — 글자 제한>). 사유 · 실행자는 명령에 들어가지 않는다.
+  ② **명령은 상수**: 1분 = 주기 수집 명령(`linuxCommand` — 마운트 화이트리스트만 삽입) + `FOCUS_SNAPSHOT_COMMAND`(상수 · 읽기 전용 · ps comm 만 · sudo 0 · 출력 16KB) — 같은 SSH 세션(`extraCommands` — 세션을 더 열지 않는다).
+  ③ **동시성 · 부하 상한**: 서버당 1세션 · 법인당 동시 상한(기본 5 — **실행 중 + 예약을 동기적으로 세고 예약** · 넘치면 대기열) · 전역 슬롯 공유 · 세션 시한 50초(`withDeadline` 이 세션을 끊는다) ·
+     자동 집중은 법인 옵트인 + 하루 상한(10) + 같은 서버 재발 억제 30분 · 인증 정지 계정이면 자동 시작 0.
+  ④ **인증 거부는 그 분에서 즉시 중단** — 다음 분을 예약하지 않는다 · 주기 수집과 **같은 가드 · 같은 식별자**에 기록(자동 재시도 0 — 계정 잠금). 수동 시작은 정지 중에도 막지 않는다(사람의 1회 시도 — 스냅샷 규칙 3 과 같다).
+  ⑤ **엣지 대행 계약** — POST 재전송 0(retries 0) · 같은 토큰(tokenFirst + 4kb 파서) · 엣지는 자기 대상 목록 밖 키를 not-found · 업무 결과 200 + code · 중앙 정제(`sanitizeFocusBody` — 아는 필드 · enum · 상한 · 시각 clamp) ·
+     구버전 엣지(경로 없음 401 · 404)는 `old-version`(문구의 최소 버전은 `PERF_OPS_MIN_EDGE_VERSION` 단일 상수 — 판정은 경로 존재).
+  ⑥ **알림 규칙 설정(`PUT /tools/bm-usage/perf-rules`)** = admin + `requireSettingsOwner`(소유자 ∧ 전체 범위) + tools · 형식 밖 400(모르는 규칙 · 채널 · Object.prototype 이름 거부) · 감사 `bm-perf.rules`(켠 규칙 요약 · 비밀 없음).
+     읽기는 tools — 범위 계정은 **자기 법인 예외 · 자기 법인 발송 기록만**(비관리자는 주소 가림 · 제목의 IPv4 가림) · 채널 URL 은 싣지 않는다(기존 알림 채널 설정의 사본만 쓴다).
+  ⑦ **시험 실행(`POST /perf-rules/dry-run`)** = admin + **fullScopeOnly**(이 노드 전 서버를 대 본다 — 이름 · 법인이 실린다) + tools · 보내지 않고 상태도 바꾸지 않는다. (archScan `route-gate-missing` 이 이 게이트 누락을 잡았다.)
 

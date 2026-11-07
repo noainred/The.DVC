@@ -44,6 +44,7 @@ import { registerCvpBulk } from './api/cvpBulk.js';       // CVP 서버 CSV·자
 import { registerPartFaults } from './api/partFaults.js'; // 파트 장애(물리 부품 장애 기록·알림, v2.547)
 import { registerEdgeLog } from './api/edgeLog.js'; // 엣지 로그·진행상태(중앙이 당긴다 + 폴백, v2.549)
 import { registerBmUsage } from './api/bmUsage.js'; // 베어메탈 사용률(CPU·MEM·디스크·NET·HBA, v2.550)
+import { registerBmPerfOps } from './api/bmPerfOps.js'; // v2.929 리눅스 성능 5단계(집중 모니터링 · 변경 이벤트 · 베이스라인 · 구간 비교 · 알림 규칙)
 import { registerServerSensors } from './api/serverSensors.js'; // 서버 온도 › 센서 상세(v2.659)
 import { registerCorpUsage } from './api/corpUsage.js'; // 법인별 서버 사용량(전체·물리·가상화, v2.625)
 import { registerSvcInventory } from './api/svcInventory.js'; // 서비스 인벤토리(VM + 베어메탈 · 법인 › 폴더 › 서비스 · 전역 카탈로그, v2.887)
@@ -160,6 +161,7 @@ registerCvpBulk(api);
 registerPartFaults(api);
 registerEdgeLog(api);
 registerBmUsage(api);
+registerBmPerfOps(api);
 registerCorpUsage(api);
 registerSvcInventory(api);
 registerServerSensors(api);
