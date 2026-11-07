@@ -151,13 +151,19 @@ test('표지 파서(반증 R1) — 줄 머리 정확 일치 · 이미 본 표지
   assert.deepEqual(s3, { A: ['1', '##A', '2'] }, '순서가 없어도 재개방은 하지 않는다');
 });
 test('실제 셸 + 실제 shapeLinux(반증 R1 재현) — ‘##MEM’ · ‘MemTotal: 9 kB’ · ‘##END’ 이름의 프로세스가 있어도 메모리 값 · 프로세스 목록 · 잘림 판정이 그대로', async (t) => {
-  const sleepBin = ['/bin/sleep', '/usr/bin/sleep'].find((p) => fs.existsSync(p));
-  if (!sleepBin || !fs.existsSync('/bin/sh')) return t.skip('sleep · sh 없음');
-  const fdir = fs.mkdtempSync(path.join(DIR, 'forge-'));
+  if (!fs.existsSync('/bin/sh') || !fs.existsSync('/proc/self/comm')) return t.skip('sh · /proc/self/comm 없음');
   const names = ['##MEM', 'MemTotal: 9 kB', 'MemFree: 0 kB', 'MemAvailable: 0', '##END', '##PROCS', 'ID=ubuntu'];
-  const kids = names.map((n) => { const f = path.join(fdir, n); fs.copyFileSync(sleepBin, f); fs.chmodSync(f, 0o755); return spawn(f, ['30'], { stdio: 'ignore' }); });
+  /*
+   * v2.926(CI 실패 수정): 예전에는 /bin/sleep 을 그 이름으로 **복사해** 띄웠다. 이 개발 컨테이너에서는 통과했지만 GitHub
+   *   러너에서는 ‘##MEM’ 이 ps 에 나오지 않았다(원인 미확정 — 다중 호출(multicall) coreutils 이면 복사본이 argv[0] 을 몰라 곧바로
+   *   끝난다는 것이 가장 유력한 추정). 그래서 **셸이 자기 comm 을 바꾸는** 방식으로 띄운다 — 실제 공격(prctl PR_SET_NAME ·
+   *   setproctitle)과 같은 경로이고 바이너리 종류에 기대지 않는다. 이름이 실제로 바뀌었는지 먼저 확인하고, 못 바꾸는 환경이면 건너뛴다.
+   */
+  const kids = names.map((n) => spawn('/bin/sh', ['-c', 'printf %s "$N" > /proc/$$/comm; while :; do sleep 1; done'], { stdio: 'ignore', env: { ...process.env, N: n } }));
   try {
     await new Promise((r) => setTimeout(r, 300));
+    const forged = kids.map((k) => { try { return fs.readFileSync(`/proc/${k.pid}/comm`, 'utf8').replace(/\n$/, ''); } catch { return ''; } });
+    if (forged.some((c, i) => c !== names[i])) return t.skip(`이 환경에서는 프로세스 이름을 바꿀 수 없음(${JSON.stringify(forged)})`);
     const out = execFileSync('/bin/sh', ['-c', O.linuxCommand([])], { encoding: 'utf8', timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
     const realTotalKb = Number(/^MemTotal:\s+(\d+)/m.exec(fs.readFileSync('/proc/meminfo', 'utf8'))[1]);
     const shaped = O.shapeLinux(out, []);
