@@ -39,7 +39,7 @@ const csvPerm = requirePerm('data.csv');
  */
 export const gpuHostKey = (vcenterId, host) => `${vcenterId ?? ''}\t${host ?? ''}`;
 
-/** v2.938: GPU 호스트 → GPU 목록 맵(키 gpuHostKey) — VM 의 GPU 장치를 그 호스트 GPU 와 맞출 때(gpuDevicesOnHost). */
+/** v2.939: GPU 호스트 → GPU 목록 맵(키 gpuHostKey) — VM 의 GPU 장치를 그 호스트 GPU 와 맞출 때(gpuDevicesOnHost). */
 export function gpuHostGpusMap(hosts) {
   const m = new Map();
   for (const h of hosts || []) if ((h.gpus || []).length) m.set(gpuHostKey(h.vcenterId, h.name), h.gpus);
@@ -128,7 +128,7 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
   // GPU가 할당된 VM을 호스트(이름)별로 집계 — 각 GPU 호스트에 몇 개 VM이 GPU를 쓰는지.
   // 키는 gpuHostKey(vcenterId, 호스트 이름) — 이름 단독이면 다른 vCenter 의 동명 호스트와 섞인다(VC2598-03).
   const gpuVmByHost = new Map();
-  // v2.938(개선 1): GPU 가 아닌 패스스루(NIC · HBA)만 가진 VM 은 GPU VM 으로 세지 않는다 — 판정은 vgpuProfile.gpuDevicesOnHost(GPU 할당율과 같은 함수).
+  // v2.939(개선 1): GPU 가 아닌 패스스루(NIC · HBA)만 가진 VM 은 GPU VM 으로 세지 않는다 — 판정은 vgpuProfile.gpuDevicesOnHost(GPU 할당율과 같은 함수).
   const hostGpusOf = gpuHostGpusMap(hosts);
   const devOnHost = (v) => gpuDevicesOnHost(v.gpu, hostGpusOf.get(gpuHostKey(v.vcenterId, v.host)));
   for (const v of scopedVms) {
@@ -214,7 +214,7 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
   }
   const utils = hostsWithGpu.map((x) => x.utilPct).filter((x) => x != null);
   // GPU를 사용하는 VM 수(스코프 내, 템플릿 제외) — 상단 요약용.
-  // v2.938(개선 1): 패스스루가 전부 NIC · HBA 인 VM 은 세지 않는다(위 gpuVmByHost 와 같은 판정 — GPU 호스트가 없는 곳의 VM 은 예전처럼 센다).
+  // v2.939(개선 1): 패스스루가 전부 NIC · HBA 인 VM 은 세지 않는다(위 gpuVmByHost 와 같은 판정 — GPU 호스트가 없는 곳의 VM 은 예전처럼 센다).
   const gpuVmCount = scopedVms.filter((v) => v.gpu && !v.template && (!vcenterId || v.vcenterId === vcenterId) && isGpuVmOnHost(devOnHost(v))).length;
   return {
     totalGpus,
@@ -574,7 +574,7 @@ api.get('/tools/gpu-alloc.xlsx', csvPerm, requirePerm('tools'), async (req, res)
   } finally { lock.release(); }
 });
 /**
- * v2.938(개선 2): 수집 점검 — 'GPU 할당율' 이 기대는 수집 가정(꺼진 VM 의 GPU 목록 · 패스스루 장치 주소 · 프로파일 이름 · 배치 정보)을
+ * v2.939(개선 2): 수집 점검 — 'GPU 할당율' 이 기대는 수집 가정(꺼진 VM 의 GPU 목록 · 패스스루 장치 주소 · 프로파일 이름 · 배치 정보)을
  *   이미 수집한 스냅샷으로 판정한다(gpu/allocTree.js allocDiag — vCenter 왕복 0). 조회 범위가 먼저다(계층과 같은 scopeTest).
  */
 api.get('/tools/gpu-alloc/diag', requirePerm('tools'), (req, res) => {
@@ -582,7 +582,7 @@ api.get('/tools/gpu-alloc/diag', requirePerm('tools'), (req, res) => {
   res.json({ generatedAt: snap.generatedAt || null, ...allocDiag(snap, { allowed: scopedVcenterIds(req.user, snap) }) });
 });
 /**
- * v2.938(개선 7): 법인별 일 단위 이력(gpu/allocHistory.js) — 용량 · 할당 추이와 소진 예상. 조회 범위 밖 법인의 행은 내보내지 않는다
+ * v2.939(개선 7): 법인별 일 단위 이력(gpu/allocHistory.js) — 용량 · 할당 추이와 소진 예상. 조회 범위 밖 법인의 행은 내보내지 않는다
  *   (범위를 요청 필터 vcenterIds 보다 먼저). DB 가 없으면 available:false(빈 이력과 구분).
  */
 api.get('/tools/gpu-alloc/history', requirePerm('tools'), async (req, res) => {
@@ -690,7 +690,7 @@ api.get('/tools/gpu/vms', requirePerm('tools'), (req, res) => {
   // (vCenter, 호스트명) → GPU 모델 매핑(모델 필터용 — 이름 단독 키는 다른 vCenter 동명 호스트와 섞인다, VC2598-03)
   const hostModel = gpuHostModelMap(snap.hosts);
   const modelOf = (v) => hostModel.get(gpuHostKey(v.vcenterId, v.host)) || '';
-  // v2.938(개선 1): GPU 장치는 그 호스트 GPU 와 맞춰 센다 — 패스스루가 전부 NIC · HBA 인 VM 은 목록에서 뺀다(gpuDevicesOnHost 하나).
+  // v2.939(개선 1): GPU 장치는 그 호스트 GPU 와 맞춰 센다 — 패스스루가 전부 NIC · HBA 인 VM 은 목록에서 뺀다(gpuDevicesOnHost 하나).
   const hostGpusOf = gpuHostGpusMap(snap.hosts);
   const devOf = new Map();
   let vms = (snap.vms || []).filter((v) => {

@@ -51,7 +51,7 @@ export function vmGpuMark(vm) {
   return { vgpu: Math.max(0, vgpu), passthrough: Math.max(0, passthrough), profile: vgpu > 0 && /^[A-Za-z0-9._-]{1,64}$/.test(p) ? p : '' };
 }
 
-/** GPU 모드 — 수집기 mode 가 없으면 vgpuMode 로(구버전 스냅샷). (v2.938: allocTree.js 에서 옮김 — 아래 gpuDevicesOnHost 가 함께 쓴다) */
+/** GPU 모드 — 수집기 mode 가 없으면 vgpuMode 로(구버전 스냅샷). (v2.939: allocTree.js 에서 옮김 — 아래 gpuDevicesOnHost 가 함께 쓴다) */
 export function gpuModeOf(g) {
   if (!g) return null;
   if (g.mode === 'vgpu' || g.mode === 'passthrough' || g.mode === 'vsga') return g.mode;
@@ -59,7 +59,7 @@ export function gpuModeOf(g) {
 }
 
 /**
- * v2.871 → v2.938(판정 한 벌): 호스트 기준 VM 의 GPU 장치 수. 수집기(parseVmGpu)의 패스스루 수는 GPU 가 아닌 DirectPath 장치(NIC · HBA)까지 센다 —
+ * v2.871 → v2.939(판정 한 벌): 호스트 기준 VM 의 GPU 장치 수. 수집기(parseVmGpu)의 패스스루 수는 GPU 가 아닌 DirectPath 장치(NIC · HBA)까지 센다 —
  * 호스트 패스스루 GPU 목록은 PCI 디스플레이 클래스(0x03)만이다(soapClient parsePassthruGpus). 호스트 패스스루 GPU 가 모두 pciId 를 갖고
  * VM 장치 주소(gpu.pciIds)를 모두 읽었을 때만 주소로 가른다(맞는 것만 GPU · 대소문자 무시). 하나라도 모르면(구버전 수집기 · 꺼진 VM 의 동적
  * DirectPath) 예전처럼 전부 GPU 로 본다(지어내지 않는다). GPU 할당율(allocTree)과 GPU 인벤토리(hostGpu · hardwareGpu)가 이것 하나를 쓴다.

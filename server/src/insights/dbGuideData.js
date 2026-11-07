@@ -1449,7 +1449,7 @@ export const DB_GUIDE_DATA = {
   },
   "gpu-alloc.db": {
     "title": "GPU 할당율 일 단위 이력 DB",
-    "summary": "법인(vCenter)마다 GPU 전체 용량과 할당(켜진 VM 이 받은 프레임버퍼)을 하루 한 점씩 담는 SQLite 데이터베이스입니다(v2.938). 'GPU 할당율 › 추이' 탭의 용량·할당 추이와 소진 예상이 이 기록을 읽습니다.",
+    "summary": "법인(vCenter)마다 GPU 전체 용량과 할당(켜진 VM 이 받은 프레임버퍼)을 하루 한 점씩 담는 SQLite 데이터베이스입니다(v2.939). 'GPU 할당율 › 추이' 탭의 용량·할당 추이와 소진 예상이 이 기록을 읽습니다.",
     "stores": [
       "일 단위 표(‘alloc_daily’): 법인, 날짜, 기록 시각, 전체 용량(GB), 할당(GB), GPU 장수, GPU 호스트 수."
     ],

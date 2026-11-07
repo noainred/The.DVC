@@ -29,7 +29,7 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 export const NO_DC = '';            // 데이터센터를 모름(구버전 스냅샷) — 화면이 '(데이터센터 모름)' 으로 적는다
 export const ALLOC_TREE_HOSTS_MAX = 5000;
 
-// v2.938: gpuModeOf 는 vgpuProfile.js 로 옮겼다(GPU 인벤토리와 함께 쓰는 gpuDevicesOnHost 가 쓴다) — 예전 import 경로를 위해 다시 내보낸다.
+// v2.939: gpuModeOf 는 vgpuProfile.js 로 옮겼다(GPU 인벤토리와 함께 쓰는 gpuDevicesOnHost 가 쓴다) — 예전 import 경로를 위해 다시 내보낸다.
 export { gpuModeOf };
 
 /** GPU 한 장의 용량(GB)과 근거. @returns {{ gb: number|null, basis: 'reported'|'nominal'|'model'|null }} */
@@ -133,12 +133,12 @@ export function buildHostAlloc(h, vmsIn) {
       placement: mode === 'vgpu' ? vmIds != null : mode === 'passthrough' ? pciId != null : false,
       _vmIds: vmIds, vms: [] };
   });
-  // v2.871(버그 점검) → v2.938: GPU 가 아닌 패스스루(NIC · HBA)를 가르는 판정은 vgpuProfile.gpuDevicesOnHost 하나다(GPU 인벤토리와 같은 함수).
+  // v2.871(버그 점검) → v2.939: GPU 가 아닌 패스스루(NIC · HBA)를 가르는 판정은 vgpuProfile.gpuDevicesOnHost 하나다(GPU 인벤토리와 같은 함수).
   const pciKey = (x) => String(x).toLowerCase();
   const devs = new Map(vms.map((v) => [v, gpuDevicesOnHost(v.gpu, h.gpus)]));
   // GPU 장치가 하나도 없는 VM(패스스루가 전부 NIC 등)은 이 계층의 대상이 아니다 — 켜짐·꺼짐·미배치 어디에도 넣지 않는다.
   vms = vms.filter((v) => isGpuVmOnHost(devs.get(v)));
-  // v2.938(개선 3): 한 VM 의 vGPU 장치 여럿이 같은 GPU 에 붙으면 graphicsInfo 목록에는 그 VM 이 한 번만 온다 — GPU 단위 할당이 한 장치분으로
+  // v2.939(개선 3): 한 VM 의 vGPU 장치 여럿이 같은 GPU 에 붙으면 graphicsInfo 목록에는 그 VM 이 한 번만 온다 — GPU 단위 할당이 한 장치분으로
   //   적게 잡혔다. VM 이 vGPU GPU 목록 **하나에만** 있으면 그 VM 의 vGPU 장치 수를 모두 그 GPU 에 둔다. 여러 목록에 있으면 목록마다 한 장치
   //   (장치 수가 목록 수보다 많으면 어느 GPU 에 더 붙었는지 몰라 예전처럼 한 장치씩 — 호스트 합계는 VM 구성에서 내므로 늘 정확하다).
   const listedOn = new Map();
@@ -163,7 +163,7 @@ export function buildHostAlloc(h, vmsIn) {
         if (!v || v.powerState !== ON || placed.has(`${id}|${g.idx}`)) continue;
         const per = vgpuProfileGB(v.gpu?.profile);
         const d = devs.get(v);
-        const n = listedOn.get(id) === 1 && d.vgpu > 1 ? d.vgpu : 1;   // 이 GPU 위의 장치 수(v2.938 — 위 설명)
+        const n = listedOn.get(id) === 1 && d.vgpu > 1 ? d.vgpu : 1;   // 이 GPU 위의 장치 수(v2.939 — 위 설명)
         g.vms.push(vmRowOf(v, per == null ? null : per * n, { onGpu: n }, d));
         placed.add(`${id}|${g.idx}`); placed.add(id);
       }
@@ -194,7 +194,7 @@ export function buildHostAlloc(h, vmsIn) {
       g.spareGB = unknown || g.capGB == null ? null : r1(g.capGB - alloc);
       const profiles = [...new Set(g.vms.map((x) => x.profile))];
       const per = profiles.length === 1 ? vgpuProfileGB(profiles[0]) : null;
-      const usedDev = g.vms.reduce((s, x) => s + (x.onGpu || 1), 0);   // v2.938: 슬롯은 VM 수가 아니라 장치 수
+      const usedDev = g.vms.reduce((s, x) => s + (x.onGpu || 1), 0);   // v2.939: 슬롯은 VM 수가 아니라 장치 수
       g.slots = profiles.length === 0 ? { total: null, used: 0, free: null, profile: null }
         : per && g.capGB != null ? { total: Math.floor(g.capGB / per), used: usedDev, free: Math.max(0, Math.floor(g.capGB / per) - usedDev), profile: profiles[0] }
           : { total: null, used: usedDev, free: null, profile: profiles.length === 1 ? profiles[0] : null, mixed: profiles.length > 1 };
@@ -235,7 +235,7 @@ export function buildHostAlloc(h, vmsIn) {
   for (const g of gpus) g.vms.sort(byName);
   unplaced.sort(byName); off.sort(byName);
   const totals = finishTotals(t);
-  // v2.938(개선 5): 꺼진 VM 을 모두 켜면 예비보다 많이 필요한가 — 호스트 행에만(배치는 호스트 단위다). 모르는 값이 섞이면 판정하지 않는다.
+  // v2.939(개선 5): 꺼진 VM 을 모두 켜면 예비보다 많이 필요한가 — 호스트 행에만(배치는 호스트 단위다). 모르는 값이 섞이면 판정하지 않는다.
   //   vGPU 는 같은 프로파일 슬롯 단위로만 들어가므로 GB 비교는 근사다(넘지 않아도 슬롯이 맞지 않으면 켜지지 않을 수 있다 — 비고가 말한다).
   totals.offOverGB = totals.spareGB != null && t.offUnknown === 0 && t.offGB > totals.spareGB ? r1(t.offGB - totals.spareGB) : null;
   return {
@@ -434,7 +434,7 @@ export function flatRows(tree) {
 }
 
 /**
- * v2.938(개선 2 — 실장비 확인 도구): 'GPU 할당율' 이 기대는 수집 가정을 **이미 수집한 스냅샷**으로 판정한다(vCenter 왕복 0 · 엣지 법인도 같다).
+ * v2.939(개선 2 — 실장비 확인 도구): 'GPU 할당율' 이 기대는 수집 가정을 **이미 수집한 스냅샷**으로 판정한다(vCenter 왕복 0 · 엣지 법인도 같다).
  *   ① 꺼진 VM 이 GPU 별 목록(HostGraphicsInfo.vm)에 오는가 — 배치 정보가 있는 vGPU GPU 의 목록에 꺼진 vGPU VM 이 보이는가
  *   ② 켜진 패스스루 VM 의 장치 주소(정적 id · 동적 assignedId)를 읽는가 — gpu.pciIds 가 장치 수만큼 있는가
  *   ③ vGPU 프로파일 이름을 GB 로 읽는가(vgpuProfileGB) — 못 읽은 이름과 VM 수

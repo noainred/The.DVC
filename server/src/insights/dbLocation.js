@@ -35,7 +35,7 @@ export const MIGRATABLE = [
   { file: 'capacity.db', label: '용량 샘플' },
   { file: 'veeam-snap.db', label: 'Veeam 스냅샷 이벤트(최근 31일 · 카드 백업 수량)' },
   { file: 'veeam-history.db', label: 'Veeam 일 단위 이력(라이선스·저장소 용량 · 400일)' },
-  { file: 'gpu-alloc.db', label: 'GPU 할당율 일 단위 이력(법인별 용량 · 할당 · 800일 — v2.938)' },
+  { file: 'gpu-alloc.db', label: 'GPU 할당율 일 단위 이력(법인별 용량 · 할당 · 800일 — v2.939)' },
   { file: 'vm-track.db', label: 'VM 수량·스토리지 추이' },
   { file: 'storage-history.db', label: '스토리지 장비 이력' },
   // ▼ v2.379 이후 추가된 DB — 등재가 누락돼 있었다(v2.451 수정).

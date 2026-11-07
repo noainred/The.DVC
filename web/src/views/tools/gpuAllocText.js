@@ -41,7 +41,7 @@ export function totalsNote(t) {
   if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.870 감사 A4-01: 꺼진 VM 합에서 빠진 수(엑셀 totalsCells 와 같은 말)
   if (t.unplaced) notes.push(`미배치 VM ${t.unplaced}`);
   if (t.hostUseUnknown && t.hosts > 1) notes.push(`CPU·메모리 사용률 ${t.hostUseUnknown}대 제외`);   // v2.868: 끊김·못 읽음 — 읽은 호스트 기준
-  // v2.938 개선 5: 꺼진 VM 을 모두 켜면 예비보다 많이 필요(호스트 행만 — 서버 buildHostAlloc offOverGB · 엑셀 totalsCells 와 같은 말)
+  // v2.939 개선 5: 꺼진 VM 을 모두 켜면 예비보다 많이 필요(호스트 행만 — 서버 buildHostAlloc offOverGB · 엑셀 totalsCells 와 같은 말)
   if (numOrNull(t.offOverGB) > 0) { notes.push(`꺼진 VM 을 모두 켜면 ${numText(t.offOverGB)} GB 모자람`); if (!tone) tone = 'warn'; }
   if (!notes.length && t.vmsOn === 0 && t.gpus > 0) { notes.push('할당 VM 없음 — 전부 예비'); tone = 'free'; }
   if (!t.gpus && t.vsga) notes.push('vSGA 만 — 할당형 GPU 없음(합계 제외)');
@@ -296,7 +296,7 @@ export function allocExportQuery({ scope = '', vcSel = null, depth = 'vm', sheet
   return q ? `?${q}` : '';
 }
 
-/* ── v2.938 개선 4 · 배치 추천('어디에 놓을 수 있나') ───────────────────────────────────────────────── */
+/* ── v2.939 개선 4 · 배치 추천('어디에 놓을 수 있나') ───────────────────────────────────────────────── */
 /** 프로파일 이름 → 할당 GB(서버 gpu/vgpuProfile.js vgpuProfileGB 와 같은 규칙 — 시험이 같은 입력으로 대조). 못 읽으면 null. */
 export function profileGB(profile) {
   const s = String(profile ?? '').trim();
@@ -361,7 +361,7 @@ export function placementCandidates(tree, profile, vcSel = null) {
   return out;
 }
 
-/* ── v2.938 개선 10 · 새로 고침 뒤 펼침 ─────────────────────────────────────────────────────────────── */
+/* ── v2.939 개선 10 · 새로 고침 뒤 펼침 ─────────────────────────────────────────────────────────────── */
 /**
  * 새로 고침으로 새로 생긴 노드(법인 · 데이터센터 · 클러스터 · 호스트 · GPU)를 지금 펼침 단계대로 펼친다(순수). 이미 있던 노드는 사용자가
  * 접고 편 그대로 둔다. 예전에는 펼침 목록을 그대로 두어 새로 생긴 법인·호스트가 접힌 채로 보였다.
@@ -374,7 +374,7 @@ export function openAfterRefresh(open, oldTree, newTree, level) {
   return next;
 }
 
-/* ── v2.938 개선 2 · 수집 점검 글자 ─────────────────────────────────────────────────────────────────── */
+/* ── v2.939 개선 2 · 수집 점검 글자 ─────────────────────────────────────────────────────────────────── */
 /** 판정 → 글자·색(서버 allocDiag verdicts). 관측할 대상이 없으면 '판단 불가' — 없다고 단정하지 않는다. */
 export function diagVerdicts(d) {
   if (!d || !d.totals) return [];
@@ -404,7 +404,7 @@ export function diagVerdicts(d) {
   ];
 }
 
-/* ── v2.938 개선 7 · 추이 ───────────────────────────────────────────────────────────────────────────── */
+/* ── v2.939 개선 7 · 추이 ───────────────────────────────────────────────────────────────────────────── */
 /** 추이 조회 쿼리 — 화면 범위(scope = 법인 하나로 연 화면 · 고른 법인 칩)를 vcenterIds 로. 서버가 조회 범위와 먼저 교집합을 낸다. */
 export function historyQuery({ days = 90, vcSel = null, scope = '' } = {}) {
   const p = new URLSearchParams();

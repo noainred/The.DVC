@@ -89,7 +89,7 @@ const PURPOSES = {
   'capacity.db': '포탈 서버 자신의 리소스(CPU·메모리·디스크·네트워크) 샘플 — 리소스 적정성 진단용',
   'veeam-snap.db': 'Veeam 스냅샷 이벤트(생성·제거만 · 최근 31일) — vCenter 카드 백업 수량·VM 화면 Veeam 백업 시도를 바로 계산',
   'veeam-history.db': 'Veeam 일 단위 이력(라이선스 사용·만료 · 저장소 용량) 400일 — EM 탭 추이·소진 예측(v2.788)',
-  'gpu-alloc.db': 'GPU 할당율 일 단위 이력(법인별 용량 · 할당) 800일 — GPU 할당율 › 추이 · 소진 예상(v2.938)',
+  'gpu-alloc.db': 'GPU 할당율 일 단위 이력(법인별 용량 · 할당) 800일 — GPU 할당율 › 추이 · 소진 예상(v2.939)',
   'ping-monitor.db': '핑 모니터 응답/손실 시계열',
   'storage-history.db': '스토리지 장비(8종) 용량 이력',
   // ── v2.613 PERSIST2613-02: DB 위치 이전 대상(insights/dbLocation.js MIGRATABLE) 19개 중 13개가 여기 없어 '포탈 DB' 화면이

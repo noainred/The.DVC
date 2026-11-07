@@ -243,7 +243,7 @@ export const config = {
   veeamSnap: { dbPath: dbFile('veeam-snap.db') },
   // v2.788 Veeam 일 단위 이력 — 라이선스 사용·만료(B&R) · 저장소 용량(EM) 400일(veeam/historyDb.js · 추이·v2.789 소진 예측).
   veeamHistory: { dbPath: dbFile('veeam-history.db') },
-  // v2.938 GPU 할당율 일 단위 이력 — 법인별 하루 한 점(용량 · 할당) 800일(gpu/allocHistory.js · 추이 · 소진 예상).
+  // v2.939 GPU 할당율 일 단위 이력 — 법인별 하루 한 점(용량 · 할당) 800일(gpu/allocHistory.js · 추이 · 소진 예상).
   gpuAllocHistory: { dbPath: process.env.GPU_ALLOC_DB_PATH || dbFile('gpu-alloc.db') },
   capacity: {
     // 리소스 적정성 진단(Capacity Advisor) — 포탈 서버 '호스트 자신'의 CPU/메모리/네트워크/

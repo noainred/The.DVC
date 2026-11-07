@@ -1,5 +1,5 @@
 /**
- * v2.938 GPU 할당율 개선(사용자 요청 '개선 포인트 모두 적용' — 11가지 중 서버 몫).
+ * v2.939 GPU 할당율 개선(사용자 요청 '개선 포인트 모두 적용' — 11가지 중 서버 몫).
  *   ① GPU 인벤토리도 NIC · HBA 패스스루를 GPU 로 세지 않는다(gpuDevicesOnHost 한 벌)
  *   ② 수집 점검(allocDiag) ③ 같은 GPU 의 vGPU 여러 장 ⑤ 꺼진 VM 을 켜면 넘침 ⑥ 할당률 알림(기본 끔)
  *   ⑦ 일 단위 이력 · 소진 예상 ⑧ 일일 헬스체크 절
@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'gpualloc2938-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'gpualloc2939-'));
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'mock';
 process.env.GPU_ALLOC_DB_PATH = path.join(DIR, 'gpu-alloc.db');

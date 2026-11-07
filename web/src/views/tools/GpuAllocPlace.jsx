@@ -1,5 +1,5 @@
 /**
- * GpuAllocPlace — GPU 할당율 '배치 추천'(v2.938 개선 4 — 사용자 결정 '시안 없이 바로 구현').
+ * GpuAllocPlace — GPU 할당율 '배치 추천'(v2.939 개선 4 — 사용자 결정 '시안 없이 바로 구현').
  * vGPU 프로파일을 고르면 그 VM 을 하나 더 놓을 수 있는 GPU 를 보여 준다. 판정은 화면이 이미 받은 계층(서버 allocTree 의 슬롯·용량)만 쓴다 —
  * 새로 묻지 않는다(gpuAllocText.placementCandidates · 순수 · 시험). 화면의 법인 칩 선택을 따른다.
  */
