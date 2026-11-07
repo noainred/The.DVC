@@ -797,8 +797,16 @@
   - **봉투에는 요약만**: `focusSummary`(세션 요약 — 상세 표본 없음) · `perfAlertSent`(최근 24시간 발송 기록) · 행의 `health`(소모품 칸 code · since). 집중 표본 · 변경 이벤트 · 띠 · 비교는 화면이 볼 때 엣지에서 당긴다.
     ⚠ 새 필드는 중앙 정제 화이트리스트에도(`bmPerfSanitize healthOf` · `sanitizeFocusSummary` · `sanitizeAlertSent` · `sanitizeChangesBody|BaselineBody|CompareBody` — 아는 필드 · enum · 상한 · 시각은 수신 시각으로 clamp).
   - **POST 는 재전송 0**(retries 0 — 시작이 두 번 가면 세션이 두 개) · GET 은 1회 재시도. 업무 결과는 200 + code(중앙이 HTTP 로 옮긴다).
-  - **구버전 엣지 구분은 경로 존재**: 옛 엣지의 collector 라우터에 없는 경로는 사용자 인증 미들웨어로 떨어져 401(`missing401` — v2.736 edgePull 규약) 또는 404 → `old-version`. 문구에 적는 최소 버전은 **`PERF_OPS_MIN_EDGE_VERSION` 하나**
-    (`central/bmPerfOpsPull.js` — 다른 파일 · 테스트는 import · 테스트는 값이 아니라 ‘경로 없는 엣지는 old-version · 문구가 그 상수’ 를 본다). 릴리스 번호가 정해지면 그 한 줄만 맞춘다.
+  - **구버전 엣지 구분은 경로 존재**: 옛 엣지의 collector 라우터에 없는 경로는 사용자 인증 미들웨어로 떨어져 401(`missing401` — v2.736 edgePull 규약) 또는 404 → `old-version`. 문구에 적는 최소 버전은 **손으로 맞추는 상수가 아니다**(반증 F15 — 예정 번호 2.929.0 이 다른 기능의 게시 번호와 겹쳐 2.929~2.933 엣지에 거짓 안내가 될 뻔했다):
+    `central/bmPerfOpsPull.js perfOpsMinEdgeVersion()` 이 `server/src/release-notes.json` 에서 제목에 ‘리눅스 통합 성능 모니터링 5단계’ 가 든 가장 낮은 게시 번호를 읽어 메모한다(없으면 = 지금 package.json 번호).
+    대조 테스트 `server/test/bmPerfMinEdgeVersion2929.test.js`(main 의 bmUsageMinEdgeVersion2933 과 같은 꼴 — 노트가 있으면 같음 · 없으면 package.json 과 같음). 다른 세션이 계속 릴리스해 번호가 밀려도 코드 수정이 필요 없다.
   - **알림 판정 · 발송은 엣지**(그 엣지의 규칙 파일 — 중앙에서 엣지로 배포하지 않는다: 다음 판). 엣지의 발송 기록 중 이슈 대상은 **중앙이 사용률을 당길 때**(`pullBmUsage` → `ingestEdgeAlertIssues`) 중앙 문지기가 만든다 —
     중앙이 그 엣지를 당기지 않으면 이슈도 생기지 않는다(정직 기록). 같은 발송 건은 id(`<agent>:<id>`)로 한 번만.
+  - ⚠⚠ **엣지 봉투의 법인 · 서버 키 · 제목을 그대로 쓰지 않는다**(반증 F9 — 대상이 `TAG-A1@vcA` 하나뿐인 엣지가 `vcB` · 남의 키 · URL 섞인 제목으로 vcB 의 p1 이슈를 만들 수 있었다):
+    `centralizeEdgeSent` 가 ① 서버 키는 **같은 봉투의 그 엣지 대상 목록(snap.targets)** 에 있는 것만(밖이면 버리고 dropped 로 센다) ② 법인은 **중앙이 정한다** — 파트 장애 자동 등록과 같은 함수
+    `issues/autoCreate.js resolveIssueVcenter`(서비스 태그 → ESXi 호스트 vCenter · 아니면 대상이 말한 법인이 **그 엣지가 담당하는 vCenter 일 때만** · 아니면 담당이 하나일 때만 · 아니면 공용) ·
+    ③ 제목 · 이름은 중앙이 code 로(규칙 이름 + 대상 이름 — URL 제거 · 상한). 규칙 화면의 ‘알림 이력’ 범위도 이 중앙 법인으로 가른다(엣지 vcenterId 로 가르지 않는다). 회귀 Alerts F9(실제 sanitizeBmUsageSnap → ingest → 이슈 저장소).
+  - **이슈 중복 원천은 받은 발송 건**(반증 F2 · F3 · F12): 엣지 봉투는 24시간 기록을 매번 다시 싣는다 — 같은 묶음 안 같은 열쇠는 이슈 하나 + 댓글 · 이슈 출처에 그 열쇠로 받은 가장 늦은 시각(`lastAt` · 같은 ms 의 id `lastIds`)을 두어
+    밀려난 partKeys(64개 상한) id 가 ‘새 건’ 이 되지 않게 · 중복 판정은 **닫힌 이슈 포함**(같은 건으로 되살리지 않는다 — 닫힌 뒤 **새** 발생은 새 이슈: 다른 알람 · 파트 장애와 같은 ‘열린 이슈면 댓글’ 규약) ·
+    하루 상한은 **법인별**(F7 — 예전에는 전 법인 합계).
 

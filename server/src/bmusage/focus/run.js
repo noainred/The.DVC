@@ -20,6 +20,7 @@ import { withDeadline } from '../../proxy/sshExec.js';
 import { config } from '../../config.js';
 import { isAuthFailureText, isPeerRejectText } from '../../util/authGuard.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { dayKey, DAY_MS, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { capStr } from '../../util/capStr.js';
 import { cleanReason } from '../snapshot/reason.js';
 import { summarizeFocus } from './summary.js';
@@ -65,7 +66,8 @@ export function focusActiveCount() { return _active.size; }
 export function focusQueuedCount() { let c = 0; for (const q of _queue.values()) c += q.length; return c; }
 export function _resetFocusForTest() {
   for (const s of _active.values()) if (s.timer) clearTimeout(s.timer);
-  _active.clear(); _queue.clear(); _byKey.clear(); _starting.clear(); _endListeners.clear(); _initDone = false;
+  _active.clear(); _queue.clear(); _byKey.clear(); _starting.clear(); _endListeners.clear(); _initDone = false; _initP = null;
+  _manual.day = ''; _manual.counts = new Map(); _manual.init = new Map(); _nodeMax = 10; _corpMax = 5;
 }
 
 /*
@@ -119,11 +121,32 @@ async function isDemoTarget(target) {
 }
 
 /** 재시작 뒤 첫 사용 — 남은 진행 중 · 대기 세션을 닫는다(타이머가 없다). */
+let _initP = null;
 async function ensureInit() {
   if (_initDone) return;
-  _initDone = true;
-  try { await _D.db.focusCloseOrphans({ agent: config.agent?.name || '', now: _D.now() }); } catch { /* 표가 없으면 다음 사용 때 */ }
+  if (!_initP) _initP = (async () => { try { await _D.db.focusCloseOrphans({ agent: config.agent?.name || '', now: _D.now() }); } catch { /* 표가 없으면 다음 사용 때 */ } _initDone = true; })();
+  await _initP;
 }
+/** 기동 때 한 번(반증 F13 — 폴러 시작이 부른다): 재시작 직후 봉투 · 함대 칩이 죽은 세션을 ‘진행 중’ 으로 보이지 않게 남은 세션을 먼저 닫는다. */
+export async function initFocus() { await ensureInit(); }
+
+/* 수동 집중 법인당 하루 상한(반증 F11) — 오늘(포탈 날짜) 그 법인에서 사람이 시작한 수. 처음 한 번 DB 에서 세고(같은 promise 공유) 그 뒤는 동기 증가(검사와 예약 사이 await 없음). */
+const _manual = { day: '', counts: new Map(), init: new Map() };
+const dayStartMs = (now) => { const k = dayKey(now); return k ? Date.parse(`${k}T00:00:00Z`) - DAY_OFFSET_MIN * 60_000 : now - (now % DAY_MS); };
+async function manualReady(vc, now) {
+  const day = dayKey(now) || '';
+  if (_manual.day !== day) { _manual.day = day; _manual.counts = new Map(); _manual.init = new Map(); }
+  if (!_manual.init.has(vc)) {
+    _manual.init.set(vc, Promise.resolve().then(() => _D.db.focusCountSince({ vcenterId: vc, since: dayStartMs(now), trigger: 'manual' }))
+      .then((c) => { if (!_manual.counts.has(vc)) _manual.counts.set(vc, Number(c) || 0); })
+      .catch(() => { if (!_manual.counts.has(vc)) _manual.counts.set(vc, 0); }));
+  }
+  await _manual.init.get(vc);
+}
+let _nodeMax = 10;   // 마지막 설정의 노드 전체 동시 상한(대기열 처리 때 쓴다)
+let _corpMax = 5;    // 마지막 설정의 법인당 상한(대기열 처리 때 — 대기 중 세션이 만들어질 때의 값이 아니라 지금 설정)
+/** 이 노드에서 실행 중(+ 시작 중 예약) 세션 수. */
+function nodeRunning() { let c = _active.size; for (const v of _starting.values()) c += v; return c; }
 
 /** 설정 → 이번 세션 간격 · 횟수(하한 · 상한은 perfRules 정규화가 이미 지켰다 — 여기서 한 번 더). */
 export function sessionPlan(rules = {}) {
@@ -131,7 +154,7 @@ export function sessionPlan(rules = {}) {
   const intervalS = Math.max(30, Math.min(600, Math.round(Number(f.intervalS) || 60)));
   const durationMin = Math.max(1, Math.min(60, Math.round(Number(f.durationMin) || 10)));
   const count = Math.max(1, Math.min(120, Math.floor((durationMin * 60) / intervalS)));
-  return { intervalS, durationMin, count, corpMax: Math.max(1, Math.round(Number(f.corpMax) || 5)) };
+  return { intervalS, durationMin, count, corpMax: Math.max(1, Math.round(Number(f.corpMax) || 5)), nodeMax: Math.max(1, Math.min(64, Math.round(Number(f.nodeMax) || 10))) };
 }
 
 /**
@@ -150,17 +173,25 @@ export async function startFocusLocal({ target, reason = '', by = '', trigger = 
   if (!hasOs && !hasIdrac) return { ok: false, code: 'no-path', reason: '이 서버에는 OS · iDRAC 수집 경로가 없습니다.' };
   // 서버당 동시 1세션 — 검사와 등록 사이에 await 를 두지 않는다.
   if (_byKey.has(target.key)) return { ok: false, code: 'busy', reason: '이 서버의 집중 모니터링이 이미 진행 중이거나 대기 중입니다.', id: _byKey.get(target.key) };
-  // 자동 집중은 인증 정지된 계정으로 시작하지 않는다(계정 잠금). 수동은 막지 않는다.
-  if (trigger !== 'manual') {
-    const st = (hasOs ? await _D.osAuthStop(target).catch(() => null) : null) || null;
-    if (st) return { ok: false, code: 'auth-stopped', reason: 'OS 계정이 인증 실패로 정지돼 있어 자동 집중을 시작하지 않았습니다.' };
+  // 인증 정지된 계정으로는 시작하지 않는다 — 자동 · **수동 모두**(반증 F11: 수동은 누를 때마다 로그인 1회 → 계정 잠금 경로였다 · iDRAC 은 이미 분마다 정지를 존중).
+  //   OS 경로가 정지면 거부(분마다 SSH 를 연다) · iDRAC 만 있는 서버는 iDRAC 정지면 거부. 풀기는 주기 수집이 다음 성공에서 · 자격증명을 고친 뒤.
+  {
+    const osSt = hasOs ? (await _D.osAuthStop(target).catch(() => null)) || null : null;
+    const idSt = !hasOs && hasIdrac ? (await _D.idracAuthStop(target).catch(() => null)) || null : null;
+    if (osSt || idSt) {
+      return { ok: false, code: 'auth-stopped', authStopped: osSt ? 'os' : 'idrac',
+        reason: `${osSt ? 'OS(SSH)' : 'iDRAC'} 계정이 인증 실패로 정지돼 있어 ${trigger === 'manual' ? '' : '자동 '}집중 모니터링을 시작하지 않았습니다 — 분마다 로그인하면 계정이 잠길 수 있습니다. 자격증명을 고친 뒤 주기 수집이 성공하면 풀립니다.` };
+    }
   }
   if (_byKey.has(target.key)) return { ok: false, code: 'busy', reason: '이 서버의 집중 모니터링이 이미 진행 중이거나 대기 중입니다.', id: _byKey.get(target.key) };
   if (!(await _D.db.focusStoreAvailable())) return { ok: false, code: 'store-unavailable', reason: '집중 모니터링 보관 DB 를 열 수 없어 시작하지 않았습니다.' };
   let rules;
   try { rules = await _D.loadRules(); } catch { return { ok: false, code: 'settings-unreadable', reason: '집중 모니터링 설정을 읽지 못했습니다.' }; }
   const plan = sessionPlan(rules);
+  _nodeMax = plan.nodeMax; _corpMax = plan.corpMax;
   const vc = String(target.vcenterId || '');
+  const manualMax = Math.max(1, Math.round(Number(rules?.daily?.manualFocus) || 20));
+  if (trigger === 'manual') await manualReady(vc, now);
   const id = crypto.randomUUID();
   const sess = {
     id, key: target.key, vcenterId: vc, target, trigger: trigger === 'manual' ? 'manual' : 'auto', rule: String(rule || '').slice(0, 32), by: String(by || '').slice(0, 64), reason: r,
@@ -172,10 +203,21 @@ export async function startFocusLocal({ target, reason = '', by = '', trigger = 
   // 데모 합성 분은 OS 값을 만든다(demoFocusSample) — 경로 표시('OS 경로 없음')와 결측 카운터가 합성 분과 어긋나지 않게.
   if (sess.demo) sess.hasOs = true;
   if (_byKey.has(target.key)) return { ok: false, code: 'busy', reason: '이 서버의 집중 모니터링이 이미 진행 중이거나 대기 중입니다.', id: _byKey.get(target.key) };
+  // ── 여기서부터 등록까지 await 없음(검사와 예약을 한 동기 구간에서) ──
+  // 설정(상한)이 바뀌어 대기열 앞쪽이 지금 시작할 수 있으면 그것부터(새 요청이 대기열을 앞지르지 않게 — 반증 F4).
+  startTaken(takeStartable());
+  if (trigger === 'manual') {
+    const usedN = _manual.counts.get(vc) || 0;
+    if (usedN >= manualMax) return { ok: false, code: 'daily-cap', reason: `이 법인의 오늘 수동 집중 모니터링 상한(${manualMax}회)에 닿았습니다 — 설정 › 리눅스 성능 알림 규칙 › 하루 상한.` };
+    _manual.counts.set(vc, usedN + 1);
+  }
+  sess.corpMax = plan.corpMax;
+  sess.wallMs = plan.durationMin * 60_000;
   _byKey.set(target.key, id);
-  // 법인당 동시 상한 — 실행 중 + 시작 중(예약)을 **동기적으로** 세고 예약한다(검사와 예약 사이에 await 없음 — 스냅샷 R2 와 같은 판단).
+  // 법인당 · 노드 전체 동시 상한 — 실행 중 + 시작 중(예약)을 **동기적으로** 세고 예약한다(검사와 예약 사이에 await 없음 — 스냅샷 R2 와 같은 판단).
+  //   ⚠ 반증 F4: 그 법인 대기열이 비어 있지 않으면 새 요청도 대기열 뒤로(앞지르기 금지 — 끝나는 세션이 대기열 맨 앞을 같은 동기 구간에서 시작한다).
   const running = runningIn(vc);
-  const queued = running >= plan.corpMax;
+  const queued = running >= plan.corpMax || (_queue.get(vc)?.length || 0) > 0 || nodeRunning() >= plan.nodeMax || anyQueued();
   sess.status = queued ? 'queued' : 'running';
   if (queued) { if (!_queue.has(vc)) _queue.set(vc, []); _queue.get(vc).push(sess); }
   else _starting.set(vc, (_starting.get(vc) || 0) + 1);
@@ -183,6 +225,7 @@ export async function startFocusLocal({ target, reason = '', by = '', trigger = 
   const ins = await _D.db.focusInsert({ ...sess, agent: config.agent?.name || '', status: sess.status }).catch((e) => ({ ok: false, reason: String(e?.message || e) }));
   if (!ins?.ok) {
     _byKey.delete(target.key); unreserve();
+    if (trigger === 'manual') _manual.counts.set(vc, Math.max(0, (_manual.counts.get(vc) || 1) - 1));
     if (queued) { const q = _queue.get(vc) || []; const i = q.indexOf(sess); if (i >= 0) q.splice(i, 1); if (!q.length) _queue.delete(vc); }
     return { ok: false, code: 'store-unavailable', reason: '집중 모니터링 보관 DB 에 쓰지 못했습니다.' };
   }
@@ -193,6 +236,34 @@ export async function startFocusLocal({ target, reason = '', by = '', trigger = 
 }
 /** 이 법인에서 실행 중(+ 시작 중 예약) 세션 수. */
 function runningIn(vc) { let c = _starting.get(vc) || 0; for (const s of _active.values()) if (s.vcenterId === vc) c += 1; return c; }
+/** 노드 상한 때문에 기다리는 세션이 있는가(다른 법인 대기열 포함 — 새 요청이 노드 자리를 새치기하지 않게). */
+function anyQueued() { for (const q of _queue.values()) if (q.length) return nodeRunning() >= _nodeMax; return false; }
+/**
+ * 대기열에서 지금 시작할 수 있는 세션을 꺼내 **예약**한다(동기 — 반증 F4). 들어온 순서(전 법인 공통) · 법인 상한 · 노드 상한을 같이 본다.
+ *   호출부는 같은 동기 구간에서 _active 해제를 마친 뒤 부르고, 돌려받은 세션마다 beginSession 직후 예약을 푼다.
+ */
+function takeStartable() {
+  const out = [];
+  const all = [..._queue.values()].flat().sort((a, b) => (a.created - b.created) || 0);
+  for (const nx of all) {
+    if (nodeRunning() >= _nodeMax) break;
+    if (runningIn(nx.vcenterId) >= _corpMax) continue;
+    const q = _queue.get(nx.vcenterId) || [];
+    const i = q.indexOf(nx); if (i >= 0) q.splice(i, 1);
+    if (!q.length) _queue.delete(nx.vcenterId);
+    if (nx.stopped) continue;
+    _starting.set(nx.vcenterId, (_starting.get(nx.vcenterId) || 0) + 1);
+    out.push(nx);
+  }
+  return out;
+}
+function startTaken(list) {
+  for (const nx of list) {
+    const p = beginSession(nx);   // 첫 await 전에 _active 에 넣는다 — 그 직후 예약을 푼다
+    const c = (_starting.get(nx.vcenterId) || 1) - 1; if (c > 0) _starting.set(nx.vcenterId, c); else _starting.delete(nx.vcenterId);
+    p.catch((e) => finish(nx, 'failed', String(e?.message || e)));
+  }
+}
 
 /** 대기 순번(1부터) — 없으면 0. */
 export function queuePosOf(id) {
@@ -254,6 +325,8 @@ function idracMissOf(idr) {
 
 async function tick(sess, idx) {
   if (sess.stopped || !_active.has(sess.id)) return;
+  // 길이 상한은 횟수만이 아니라 **벽시계로도**(반증 L8): 한 분 수집이 간격보다 길면(시한 50초 + 슬롯 대기) 횟수로는 60분을 넘는다.
+  if (n(sess.wallMs) != null && sess.start != null && _D.now() - sess.start >= sess.wallMs) { sess.wallCapped = true; return finish(sess, 'done'); }
   if (sess.demo) {
     const d = (await import('../../mock/demo/baremetal.js')).demoFocusSample(sess.target, _D.now(), idx);
     const sample = { sessionId: sess.id, idx, minuteTs: _D.now(), osOk: d.osOk, idracOk: d.idracOk, verdict: d.verdict, missOs: d.missOs || null, missIdrac: null, vals: d.vals, snap: d.snap };
@@ -316,7 +389,8 @@ async function tick(sess, idx) {
     if (dmesgErr != null) vals.dmesg_err = { avg: dmesgErr };
     if (entry?.perResource) vals._res = entry.perResource;
   }
-  const sample = { sessionId: sess.id, idx, minuteTs, osOk, idracOk: sess.hasIdrac ? idracOk : null, verdict, missOs: missOs || null, missIdrac: sess.hasIdrac ? (missIdrac || null) : null, vals, snap };
+  // 경로가 없는 쪽은 결측이 아니다(반증 F14) — 표본에 null(‘경로 없음’ 은 세션의 hasOs · 요약 null 이 말한다).
+  const sample = { sessionId: sess.id, idx, minuteTs, osOk, idracOk: sess.hasIdrac ? idracOk : null, verdict, missOs: sess.hasOs ? (missOs || null) : null, missIdrac: sess.hasIdrac ? (missIdrac || null) : null, vals, snap };
   sess.samples.push(sample);
   sess.done = idx + 1;
   if (missOs && sess.hasOs) sess.missOs += 1;
@@ -336,19 +410,18 @@ async function finish(sess, status, error = '') {
   sess.stopped = true;
   _active.delete(sess.id);
   if (_byKey.get(sess.key) === sess.id) _byKey.delete(sess.key);
+  // ⚠⚠ 반증 F4: 해제와 대기열 시작을 **같은 동기 구간**에서 — 예전에는 DB 쓰기 · 결론 알림(await) 뒤에 대기열을 봐서 그 사이 새 시작이 대기열을 앞지르고
+  //   이어 대기열 다음도 시작돼 법인 상한을 넘었다.
+  startTaken(takeStartable());
   const end = _D.now();
   const summary = summarizeFocus(sess.samples, { before: sess.summaryBefore, hasOs: sess.hasOs, hasIdrac: sess.hasIdrac });
   if (error) summary.error = String(error).slice(0, 200);
+  if (sess.wallCapped) summary.wallCapped = true;
   sess.status = status;
   await _D.db.focusUpdate(sess.id, { status, end, done: sess.done, missOs: sess.missOs, missIdrac: sess.missIdrac, summary }).catch(() => {});
-  for (const fn of _endListeners) { try { await fn({ id: sess.id, key: sess.key, vcenterId: sess.vcenterId, name: sess.target?.name || sess.key, trigger: sess.trigger, status, summary, start: sess.start, end, target: sess.target }); } catch { /* 알림 실패는 세션을 바꾸지 않는다 */ } }
-  // 같은 법인 대기열의 다음 세션
-  const q = _queue.get(sess.vcenterId);
-  if (q && q.length) {
-    const nxt = q.shift();
-    if (!q.length) _queue.delete(sess.vcenterId);
-    if (!nxt.stopped) await beginSession(nxt).catch((e) => finish(nxt, 'failed', String(e?.message || e)));
-  }
+  // 끝 구독자(집중 결론 알림)는 **기다리지 않는다**(반증 L4 — 엣지 대행 중지가 메일 시한만큼 늦게 답해 중앙이 ‘시한 초과’ 로 보였다).
+  const ev = { id: sess.id, key: sess.key, vcenterId: sess.vcenterId, name: sess.target?.name || sess.key, trigger: sess.trigger, status, summary, start: sess.start, end, target: sess.target };
+  for (const fn of _endListeners) Promise.resolve().then(() => fn(ev)).catch(() => { /* 알림 실패는 세션을 바꾸지 않는다 */ });
 }
 
 /** 중지(사람) — 실행 중이면 그 분까지 남기고 닫는다 · 대기 중이면 대기열에서 뺀다. */
@@ -374,7 +447,9 @@ export async function listFocusLocal({ key, keepDays = 30 } = {}) {
   await ensureInit();
   const list = await _D.db.focusList({ key, agent: config.agent?.name || '', since: _D.now() - keepDays * 86_400_000, limit: 60 });
   if (list == null) return { ok: false, code: 'store-unavailable', reason: '집중 모니터링 보관 DB 를 열 수 없습니다.' };
-  return { ok: true, code: 'ok', sessions: list.map((s) => ({ ...s, ...(s.status === 'queued' ? { queuePos: queuePosOf(s.id) } : {}) })), keepDays };
+  // 진행 중 · 대기 세션은 경로(hasOs · hasIdrac)를 싣는다 — 요약이 아직 없어 화면이 ‘경로 없음’ 과 ‘0분 결측’ 을 가를 근거(반증 F14).
+  const liveOf = (id) => _active.get(id) || [..._queue.values()].flat().find((x) => x.id === id) || null;
+  return { ok: true, code: 'ok', sessions: list.map((s) => { const lv = liveOf(s.id); return { ...s, ...(s.status === 'queued' ? { queuePos: queuePosOf(s.id) } : {}), ...(lv ? { hasOs: !!lv.hasOs, hasIdrac: !!lv.hasIdrac } : {}) }; }), keepDays };
 }
 /** 세션 하나 + 분 표본 + 같은 시간대 변경 이벤트(키가 다르면 없는 것으로). */
 export async function getFocusLocal({ key, id } = {}) {
@@ -392,6 +467,7 @@ export async function getFocusLocal({ key, id } = {}) {
 
 /** 봉투 요약(중앙은 요약만 — 상세는 볼 때 당긴다): 진행 중 · 대기 + 최근 24시간 끝난 것. */
 export async function focusEnvelopeSummary({ now = Date.now(), max = 200 } = {}) {
+  await ensureInit();   // 반증 F13 — 재시작 뒤 남은 세션을 닫은 다음에 싣는다
   try {
     const list = await _D.db.focusRecent({ agent: config.agent?.name || '', since: now - 86_400_000, limit: max });
     if (!list) return null;

@@ -71,7 +71,13 @@ test('① 사유 · 경로 · 서버당 1세션 · 자동 집중은 정지 계�
   F._resetFocusForTest();
   const h2 = harness({ osStop: { since: NOW, attempts: 2 } }); F._setFocusDepsForTest(h2.deps);
   assert.equal((await F.startFocusLocal({ target: tgt('A9'), trigger: 'auto', reason: 'rule' })).code, 'auth-stopped', '자동은 정지된 계정으로 시작하지 않는다');
-  assert.equal((await F.startFocusLocal({ target: tgt('A9'), reason: '수동은 막지 않는다', by: 'op' })).code, 'ok', '수동은 막지 않는다(첫 분이 실패하면 거기서 멈춘다)');
+  // 반증 F11: 수동도 정지된 계정이면 거부하고 이유를 말한다(누를 때마다 로그인 1회 → 계정 잠금 경로였다)
+  const man = await F.startFocusLocal({ target: tgt('A9'), reason: '수동도 거부', by: 'op' });
+  assert.equal(man.code, 'auth-stopped'); assert.equal(man.authStopped, 'os'); assert.match(man.reason, /정지/);
+  F._resetFocusForTest();
+  const h3 = harness({ idracStop: { since: NOW } }); F._setFocusDepsForTest(h3.deps);
+  assert.equal((await F.startFocusLocal({ target: tgt('A8', 'vcA', { paths: ['idrac'], osHost: null }), reason: 'iDRAC 만', by: 'op' })).code, 'auth-stopped', 'iDRAC 만 있는 서버는 iDRAC 정지면 거부');
+  assert.equal((await F.startFocusLocal({ target: tgt('A7'), reason: 'OS 정상 · iDRAC 정지', by: 'op' })).code, 'ok', 'OS 경로가 정상이면 시작(iDRAC 분은 auth-stopped 결측)');
   F._resetFocusForTest();
 });
 
@@ -186,7 +192,7 @@ test('세션 요약(순수) — 판정 변화 · 지표 최고값 · 원인 후�
   assert.equal(s.missOs, 1); assert.equal(s.missIdrac, null, 'iDRAC 경로가 없으면 null(0 이 아니다)');
   assert.ok(s.actions.includes('check-batch') && s.actions.includes('tuning-dirty'));
   assert.deepEqual(F.beforeStats([{ cpu_pct: 40 }, { cpu_pct: null }, { cpu_pct: 50 }]).cpu_pct, { avg: 45, max: 50, n: 2 });
-  assert.deepEqual(F.sessionPlan({ focus: { intervalS: 10, durationMin: 999 } }), { intervalS: 30, durationMin: 60, count: 120, corpMax: 5 }, '간격 하한 30초 · 길이 상한 60분');
+  assert.deepEqual(F.sessionPlan({ focus: { intervalS: 10, durationMin: 999 } }), { intervalS: 30, durationMin: 60, count: 120, corpMax: 5, nodeMax: 10 }, '간격 하한 30초 · 길이 상한 60분 · 노드 상한 기본 10');
 });
 
 test('⑦ 전역 동시성 풀 — 집중은 앞자리 대기 · 상한을 넘기면 얻지 못함(그 분 결측)', async () => {
@@ -290,7 +296,7 @@ test('⑥ 실제 api 라우터 · 엣지 collector 대행 · 중앙 정제', asy
   assert.equal(sum.length, 1); assert.equal(sum[0].created, rcv);
 });
 
-test('구버전 엣지(경로 없음 — 401 · 404) — 집중 · 변경 · 띠 · 비교 대행은 old-version 이고 문구의 최소 버전은 단일 상수(PERF_OPS_MIN_EDGE_VERSION)', async (t) => {
+test('구버전 엣지(경로 없음 — 401 · 404) — 집중 · 변경 · 띠 · 비교 대행은 old-version 이고 문구의 최소 버전은 릴리스 노트에서(perfOpsMinEdgeVersion)', async (t) => {
   const http = await import('node:http');
   // 구버전 엣지 흉내: collector 라우터에 경로가 없으면 사용자 인증 미들웨어로 떨어져 401(POST · GET 모두) · 다른 하나는 404(본문 사유 없음).
   const mk = (status) => new Promise((r) => { const s = http.createServer((req, res) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'x' })); }); s.listen(0, '127.0.0.1', () => r(s)); });
@@ -300,7 +306,7 @@ test('구버전 엣지(경로 없음 — 401 · 404) — 집중 · 변경 · 띠
   assert.equal(reg.addCollector({ id: 'edge-old401', name: 'edge-old401', url: `http://127.0.0.1:${s401.address().port}`, token: 'tok-old' }).ok, true);
   assert.equal(reg.addCollector({ id: 'edge-old404', name: 'edge-old404', url: `http://127.0.0.1:${s404.address().port}`, token: 'tok-old' }).ok, true);
   const P = await import('../src/central/bmPerfOpsPull.js');
-  const V = P.PERF_OPS_MIN_EDGE_VERSION;
+  const V = P.perfOpsMinEdgeVersion();   // 반증 F15: 릴리스 노트에서 읽는다(손으로 맞추는 상수 없음 — 대조는 bmPerfMinEdgeVersion2929.test.js)
   assert.match(V, /^\d+\.\d+\.\d+$/);
   for (const agent of ['edge-old401', 'edge-old404']) {
     const st = await P.runEdgeFocus(agent, { key: 'K', reason: '구버전', by: 'adm' });
@@ -313,11 +319,113 @@ test('구버전 엣지(경로 없음 — 401 · 404) — 집중 · 변경 · 띠
       assert.equal(r.kind, 'old-version', `${agent} ${mode}`); assert.ok(r.reason.includes(`v${V}`));
     }
   }
-  // 버전 숫자는 이 상수 한 곳(소스 스윕 — 다른 파일에 같은 문자열을 반복하지 않는다)
+  // 버전 숫자를 코드에 박지 않는다(소스 스윕 — 손으로 맞추는 상수 금지: 다른 세션의 릴리스로 번호가 밀리면 거짓 안내가 됐다 · 반증 F15)
   const { stripComments } = await import('./_stripComments.js');
-  const root = path.join(import.meta.dirname, '../src');
-  const hits = [];
-  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.js$/.test(e.name) && !p.includes(`${path.sep}vendor${path.sep}`) && stripComments(fs.readFileSync(p, 'utf8')).includes(`'${V}'`)) hits.push(path.relative(root, p)); } };
-  walk(root);
-  assert.deepEqual(hits, ['central/bmPerfOpsPull.js']);
+  const src = stripComments(fs.readFileSync(path.join(import.meta.dirname, '../src/central/bmPerfOpsPull.js'), 'utf8'));
+  assert.doesNotMatch(src, /MIN_EDGE_VERSION\s*=\s*'\d/, '상수로 박은 최소 버전 없음');
+});
+
+/* ── 반증 review-s5 반영 ─────────────────────────────────────────────── */
+test('F4 법인 상한 경쟁 — 세션이 끝나는 동안(끝 구독자 대기 중) 새 시작은 대기열을 앞지르지 못하고 상한을 넘지 않는다', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  F._resetFocusForTest();
+  const h = harness({ rules: { focus: { intervalS: 60, durationMin: 1, corpMax: 1 } } }); F._setFocusDepsForTest(h.deps);
+  let release; const gate = new Promise((r) => { release = r; });
+  F.onFocusEnd(async () => { await gate; });   // 집중 결론 알림 발송(메일 · 웹훅 수 초) 흉내
+  const a = await F.startFocusLocal({ target: tgt('FA'), reason: '첫 번째', by: 'op' });
+  const b = await F.startFocusLocal({ target: tgt('FB'), reason: '두 번째', by: 'op' });
+  assert.equal(a.status, 'running'); assert.equal(b.status, 'queued');
+  const tm = h.timers.shift(); const pTick = tm.fn();
+  await new Promise((r) => setImmediate(r));
+  // A 가 끝나는 중 — 같은 동기 구간에서 대기열 맨 앞(B)이 시작됐다
+  assert.equal(F.focusActiveCount(), 1); assert.equal(F.focusQueuedCount(), 0);
+  const c = await F.startFocusLocal({ target: tgt('FC'), reason: '세 번째', by: 'op' });
+  assert.equal(c.status, 'queued', '새 시작은 대기열 뒤로(앞지르기 없음)');
+  release(); await pTick; await new Promise((r) => setImmediate(r));
+  assert.equal(F.focusActiveCount(), 1, '법인 상한 1 을 넘지 않는다');
+  const O = await import('../src/bmusage/opsDb.js');
+  assert.equal((await O.focusGet(b.id)).status, 'running', '대기열 순서대로 B');
+  F._resetFocusForTest();
+  // 법인 상한을 올린 뒤의 새 요청 — 대기열 앞(D)이 먼저 시작하고 새 요청(E)은 그 뒤(앞지르기 없음)
+  const rules2 = { focus: { intervalS: 60, durationMin: 1, corpMax: 1 } };
+  const h2 = harness({ rules: rules2 }); F._setFocusDepsForTest(h2.deps);
+  const x1 = await F.startFocusLocal({ target: tgt('FX1'), reason: '첫 번째', by: 'op' });
+  const d = await F.startFocusLocal({ target: tgt('FD'), reason: '대기', by: 'op' });
+  assert.equal(x1.status, 'running'); assert.equal(d.status, 'queued');
+  rules2.focus.corpMax = 2;
+  const e = await F.startFocusLocal({ target: tgt('FE'), reason: '상한을 올린 뒤', by: 'op' });
+  assert.equal(e.status, 'queued', '새 요청은 대기열 뒤');
+  assert.equal((await O.focusGet(d.id)).status, 'running', '대기열 앞이 먼저(올린 상한으로)');
+  F._resetFocusForTest();
+});
+
+test('L11 노드 전체 상한 · F11 수동 하루 상한(daily-cap 실제 사용 · 동시 요청도 예약) · L8 벽시계 상한', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  F._resetFocusForTest();
+  const h = harness({ rules: { focus: { intervalS: 60, durationMin: 5, corpMax: 5, nodeMax: 2 }, daily: { manualFocus: 2 } } }); F._setFocusDepsForTest(h.deps);
+  const rs = await Promise.all([['N1', 'vcN1'], ['N2', 'vcN2'], ['N3', 'vcN3']].map(([k, vc]) => F.startFocusLocal({ target: tgt(k, vc), reason: '노드 상한', by: 'op' })));
+  assert.deepEqual(rs.map((r) => r.status).sort(), ['queued', 'running', 'running'], '법인이 달라도 노드 전체 2');
+  const many = await Promise.all(['M1', 'M2'].map((k) => F.startFocusLocal({ target: tgt(k, 'vcN1'), reason: '수동 상한', by: 'op' })));
+  assert.deepEqual(many.map((r) => r.code).sort(), ['daily-cap', 'queued'], '법인 vcN1 오늘 수동 2회째까지(N1 · 하나) · 3회째는 daily-cap(동시 요청도 한 번만 통과 · 노드가 차서 대기)');
+  assert.match(many.find((r) => r.code === 'daily-cap').reason, /상한/);
+  assert.equal(F.FOCUS_CODE_STATUS['daily-cap'], 429);
+  F._resetFocusForTest();
+  // L8 — 한 분 수집이 간격보다 길어도 벽시계로 길이 상한에서 끝난다
+  const h2 = harness({ rules: { focus: { intervalS: 30, durationMin: 2, corpMax: 5 } }, osSeq: [() => { h2.advance(90_000); return { ok: true }; }] }); F._setFocusDepsForTest(h2.deps);
+  const w = await F.startFocusLocal({ target: tgt('W1'), reason: '벽시계', by: 'op' });
+  await h2.fireAll();
+  const O = await import('../src/bmusage/opsDb.js');
+  const done = await O.focusGet(w.id);
+  assert.equal(done.status, 'done'); assert.equal(done.summary.wallCapped, true); assert.equal(done.count, 4); assert.ok(done.done < 4, '횟수(4)를 다 채우기 전에 벽시계(2분)로 끝');
+  F._resetFocusForTest();
+});
+
+test('F13 재시작 직후 봉투 요약은 죽은 세션을 진행 중으로 싣지 않는다(초기화 먼저) · F14 iDRAC 만 있는 서버의 분은 결측이 아니다', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  const O = await import('../src/bmusage/opsDb.js');
+  const { config } = await import('../src/config.js');
+  F._resetFocusForTest();
+  const h = harness(); F._setFocusDepsForTest(h.deps);
+  await O.focusInsert({ id: '00000000-0000-4000-8000-0000000000ab', agent: config.agent?.name || '', key: 'RK1', vcenterId: 'vcA', trigger: 'manual', by: 'op', reason: 'r', created: NOW - 120_000, start: NOW - 120_000, intervalS: 60, count: 10, status: 'running' });
+  F._resetFocusForTest(); F._setFocusDepsForTest(h.deps);   // = 재시작
+  const env = await F.focusEnvelopeSummary({ now: NOW });
+  assert.equal(env.find((x) => x.key === 'RK1')?.status, 'interrupted', '아무도 집중 API 를 부르지 않아도');
+  // F14
+  F._resetFocusForTest();
+  const h2 = harness({ rules: { focus: { intervalS: 60, durationMin: 2, corpMax: 5 } } }); F._setFocusDepsForTest(h2.deps);
+  const r = await F.startFocusLocal({ target: tgt('IO1', 'vcA', { paths: ['idrac'], osHost: null }), reason: 'iDRAC 만', by: 'op' });
+  const lst = await F.listFocusLocal({ key: 'IO1' });
+  assert.deepEqual([lst.sessions[0].hasOs, lst.sessions[0].hasIdrac], [false, true], '진행 중 세션은 경로를 싣는다(요약 전 — 화면이 ‘경로 없음’ 을 가린다)');
+  await h2.fireAll();
+  const g = await F.getFocusLocal({ key: 'IO1', id: r.id });
+  assert.ok(g.samples.length >= 1);
+  assert.ok(g.samples.every((x) => x.missOs == null), '경로 없음은 표본 결측이 아니다(no-path 를 적지 않는다)');
+  assert.equal(g.session.summary.missOs, null, '요약도 null(경로 없음)');
+  F._resetFocusForTest();
+});
+
+
+test('V12 · V13 비관리자 응답 — 변경 이벤트 · 구간 비교의 변경 목록 · 항목의 IPv4 를 가린다(관리자는 그대로) · V7 엣지 소모품 since 는 수신 시각으로 자른다', async () => {
+  const B = await import('../src/routes/api/bmPerfOps.js');
+  const deps = {
+    currentTargets: async () => ({ targets: [tgt('V1')] }), bmAddressHosts: async () => [], listEdgeBmUsage: async () => [],
+    local: async (mode) => (mode === 'changes'
+      ? { ok: true, events: [{ kind: 'sysctl', item: 'route 10.1.2.3', before: '10.0.0.1', after: '192.168.0.9' }] }
+      : { ok: true, changes: [{ kind: 'cron', item: 'job 10.7.7.7', before: 'host 10.9.9.9', after: null }] }),
+  };
+  const req = (role) => ({ user: { username: 'u', role, scope: null }, params: { key: 'V1' }, query: {} });
+  const ip = /\b\d{1,3}(?:\.\d{1,3}){3}\b/;
+  for (const mode of ['changes', 'compare']) {
+    const viewer = await B.bmPerfOpsRead(req('viewer'), {}, mode, deps);
+    assert.ok(!viewer.__status, JSON.stringify(viewer));
+    assert.doesNotMatch(JSON.stringify(viewer.events || viewer.changes), ip, `${mode}: 비관리자 IPv4 가림`);
+    assert.equal(viewer.addressHidden, true);
+    const admin = await B.bmPerfOpsRead(req('admin'), {}, mode, deps);
+    assert.match(JSON.stringify(admin.events || admin.changes), ip, `${mode}: 관리자는 그대로`);
+  }
+  const PS = await import('../src/central/bmPerfSanitize.js');
+  const rcv = Date.now();
+  const h = PS.healthOf({ cells: { chrony: { code: 'warn' } }, since: { chrony: rcv + 30 * 86_400_000 } }, rcv);
+  assert.equal(h.since.chrony, rcv, '엣지 since(미래)는 수신 시각으로(상세)');
+  assert.equal(PS.healthOf({ cells: { chrony: { code: 'warn' } }, since: { chrony: rcv + 30 * 86_400_000 } }, rcv, { full: false }).cells.chrony.since, rcv, '봉투 요약도');
 });

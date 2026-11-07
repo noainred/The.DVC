@@ -76,13 +76,22 @@ export const HEALTH_SHELL = Object.freeze({
   ].join(' '),
   /*
    * 변경 감지 사실 — 줄마다 `x:<키>=<값>`(키는 고정). 파일 목록은 `x:sf:<이름>|<crc>` · `x:cf:` · `x:ct:` (이름은 root 가 만든 파일 · 사용자 이름).
-   *   needs-restarting 은 종료 코드만(0 = 재부팅 불필요 · 1 = 필요 · 그 밖 = 실패) — 없으면 `nr=absent`.
+   *   needs-restarting(반증 L1): 종료 코드 1 은 ‘재부팅 필요’ 와 ‘dnf 오류’ 가 같다 — **출력 표지**(LC_ALL=C · ‘Reboot is required’ / ‘should not be necessary’)로만 가르고
+   *   못 가르면 `nr=x`(확인 불가 — 지어내지 않는다). 출력 원문은 셸 변수에만 있고 밖으로 나오지 않는다.
+   *   ⚠ 매 주기(집중이면 매 분) 파이썬 dnf 를 띄우지 않는다 — 결과는 부팅 · 패키지 DB 가 바뀔 때만 바뀐다: 방금 부팅(30분 안) · rpmdb 가 최근 바뀜 ·
+   *   하루 네 번 10분 창(03 · 09 · 15 · 21시 00~09분 — 처음 값과 안전망)에만 실행하고 그 밖에는 `nr=skip`(직전 값을 이어 쓴다 — cycleOps).
+   *   없으면 `nr=absent`.
    */
   CHANGES: [
     `echo "${P.CHANGES}up=$(cut -d' ' -f1 /proc/uptime 2>/dev/null)";`,
     `echo "${P.CHANGES}boot=$(cut -c1-36 /proc/sys/kernel/random/boot_id 2>/dev/null)";`,
     `echo "${P.CHANGES}kern=$(uname -r 2>/dev/null | cut -c1-80)";`,
-    `if command -v needs-restarting >/dev/null 2>&1; then timeout 8 needs-restarting -r >/dev/null 2>&1; echo "${P.CHANGES}nr=$?"; else echo '${P.CHANGES}nr=absent'; fi;`,
+    `nrr=0; [ "$(cut -d. -f1 /proc/uptime 2>/dev/null)" -lt 1800 ] 2>/dev/null && nrr=1;`,
+    `[ -n "$(find /var/lib/rpm -maxdepth 1 \\( -name rpmdb.sqlite -o -name Packages \\) -mmin -${DNF_RECENT_MIN} 2>/dev/null | head -n 1)" ] && nrr=1;`,
+    `case "$(date +%H%M 2>/dev/null)" in 030?|090?|150?|210?) nrr=1;; esac;`,
+    `if command -v needs-restarting >/dev/null 2>&1; then if [ "$nrr" = 1 ]; then nro=$(LC_ALL=C timeout 8 needs-restarting -r 2>/dev/null | head -c 4096);`,
+    `case "$nro" in *"Reboot is required"*) echo '${P.CHANGES}nr=1';; *"should not be necessary"*) echo '${P.CHANGES}nr=0';; *) echo '${P.CHANGES}nr=x';; esac;`,
+    `else echo '${P.CHANGES}nr=skip'; fi; else echo '${P.CHANGES}nr=absent'; fi;`,
     `echo "${P.CHANGES}pk=$(stat -c %Y /var/lib/rpm/rpmdb.sqlite /var/lib/rpm/Packages 2>/dev/null | head -n 1)";`,
     `if [ -n "$(find /var/lib/rpm -maxdepth 1 \\( -name rpmdb.sqlite -o -name Packages \\) -mmin -${DNF_RECENT_MIN} 2>/dev/null | head -n 1)" ] && command -v dnf >/dev/null 2>&1; then`,
     `timeout 8 dnf -q history list 2>/dev/null | head -n ${DNF_LINES_MAX + 2} | cut -c1-160 | sed 's/^/${P.CHANGES}h:/'; fi;`,
@@ -190,7 +199,7 @@ export function parseDnfLine(s) {
 export function parseChanges(lines = []) {
   const ls = stripped(lines, P.CHANGES, 200);
   const out = {
-    upS: null, bootId: null, kernel: null, needsRestart: null, nrAbsent: false, rpmdbAt: null, dnf: null,
+    upS: null, bootId: null, kernel: null, needsRestart: null, nrAbsent: false, nrSkipped: false, rpmdbAt: null, dnf: null,
     sysctlCrc: null, sysctlFiles: {}, cronFiles: {}, spool: {}, spoolPerm: false, firewalld: null, fd: null, conntrack: null,
   };
   let seen = 0;
@@ -212,9 +221,10 @@ export function parseChanges(lines = []) {
     if ((m = /^up=([\d.]{1,16})$/.exec(s))) { out.upS = num(m[1]); seen += 1; continue; }
     if ((m = /^boot=([0-9a-f-]{36})$/.exec(s))) { out.bootId = m[1]; seen += 1; continue; }
     if ((m = /^kern=([A-Za-z0-9._+-]{1,80})$/.exec(s))) { out.kernel = m[1]; seen += 1; continue; }
-    if ((m = /^nr=(absent|\d{1,3})$/.exec(s))) {
+    if ((m = /^nr=(absent|skip|0|1|x)$/.exec(s))) {
       if (m[1] === 'absent') out.nrAbsent = true;
-      else out.needsRestart = m[1] === '1' ? true : m[1] === '0' ? false : null;   // 그 밖(실패 · 시한 124)은 확인 불가
+      else if (m[1] === 'skip') out.nrSkipped = true;   // 이번 주기는 실행하지 않음 — 직전 값을 이어 쓴다(cycleOps)
+      else out.needsRestart = m[1] === '1' ? true : m[1] === '0' ? false : null;   // x(표지 없음 · 실패 · 시한)는 확인 불가
       seen += 1; continue;
     }
     if ((m = /^pk=(\d{1,12})$/.exec(s))) { out.rpmdbAt = Number(m[1]) * 1000; seen += 1; continue; }

@@ -44,7 +44,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js'; // v2.744(RV2744F-WEB-03): 상주 상세 문자열 평탄화
 import { idracAuthStopFor as mainIdracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 import { withSlot, configureSlots } from './slots.js'; // v2.929(5단계): 전역 동시성 풀 — 집중 수집과 슬롯을 나눠 쓴다
-import { focusActiveCount, registerFocusPollerHooks, focusHousekeeping, onFocusEnd } from './focus/run.js'; // v2.929: 피크 창 예산에서 활성 집중 수만큼 동시성을 뺀다
+import { focusActiveCount, registerFocusPollerHooks, focusHousekeeping, onFocusEnd, initFocus } from './focus/run.js'; // v2.929: 피크 창 예산에서 활성 집중 수만큼 동시성을 뺀다
 
 /*
  * v2.918(사용자 결정 2026-11-06 "동시성을 32개로 늘려줘"): 기본 4 → 32. 1,000대 법인에서 동시 4 · 서버당 ~5초면 한 주기에 약 21분이
@@ -897,7 +897,9 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
      */
     const live = new Set(targets.map((t2) => t2.key));
     dropStaleState(live);
-    _lastLiveKeys = live;   // v2.929: 변경 사실 최신값 정리(pruneTick)가 쓰는 대상 목록
+    // v2.929: 변경 사실 최신값 정리(pruneTick)가 쓰는 대상 목록 — ⚠ 반증 L5: 대상이 **일부만** 해석된 주기(등록부 못 읽음 등 sourceErrors)의 목록으로는 지우지 않는다
+    //   (그 밖 서버의 change_latest 를 지우면 돌아올 때 ‘첫 관찰’ 이 돼 그 사이 변화 · 소모품 ‘며칠째’ 를 잃는다). 그 주기는 직전 목록을 그대로 둔다.
+    if (!sourceErrors.length) _lastLiveKeys = live;
     /*
      * v2.929(5단계): 점검 소모품 판정(detail_json 에 health — 이 노드 기준값) · 변경 이벤트 전이(직전 사실과 비교). **적재 전에** 해야 행이 소모품 칸을 싣는다.
      *   실패해도 수집은 실패가 아니다(사유는 _last.cycleOps).
@@ -956,8 +958,9 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       dbOk: !!ins.ok, dbError: ins.error || null, ...(ins.migrateError ? { dbMigrateError: { count: ins.migrateError.count, at: ins.migrateError.at } } : {}), counts, ...srcErr, trigger, ...(demo ? { demo: true } : {}),
       alerts: alerts && !alerts.skipped ? { sent: alerts.sent ?? 0, suppressed: alerts.suppressed ?? 0, capped: alerts.capped ?? 0, over: alerts.counts?.over ?? 0, error: alerts.error || null } : null,
       // v2.929(5단계): 소모품 · 변경 이벤트 · 성능 알림 규칙 — 개수만(서버 이름 없음 · status 는 무스코프로 나간다).
+      ...(perfAlerts?.skipped ? { perfAlertsSkipped: perfAlerts.skipped } : {}),
       cycleOps: cycleOps ? { health: cycleOps.health ?? 0, events: cycleOps.events ?? 0, written: changeRes?.ok ? changeRes.events ?? 0 : null, error: cycleOps.error || (changeRes && !changeRes.ok ? changeRes.reason || 'write-failed' : null) } : null,
-      perfAlerts: perfAlerts && !perfAlerts.skipped ? { fires: perfAlerts.fires ?? 0, sent: perfAlerts.sent ?? 0, capped: perfAlerts.capped ?? 0, autoFocus: perfAlerts.autoFocus ?? 0, issues: perfAlerts.issues ?? 0, ...(perfAlerts.warmup ? { warmup: true } : {}), error: perfAlerts.error || null } : null,
+      perfAlerts: perfAlerts && !perfAlerts.skipped ? { fires: perfAlerts.fires ?? 0, queued: perfAlerts.queued ?? 0, deferred: perfAlerts.deferred ?? 0, capped: perfAlerts.capped ?? 0, autoFocus: perfAlerts.autoFocus ?? 0, issues: perfAlerts.issues ?? 0, ...(perfAlerts.warmup ? { warmup: true } : {}), error: perfAlerts.error || null } : null,
     };
     return { ok: true, ...(_last) };
   } catch (e) {
@@ -1010,6 +1013,8 @@ export function startBmUsagePoller() {
   // v2.929(5단계): 집중 결론 규칙 — 세션이 끝날 때 한 번(focus/run.js). 기동 때 한 번만 구독한다.
   if (!_focusEndHooked) {
     _focusEndHooked = true;
+    // 반증 F13: 재시작 뒤 남은 집중 세션(타이머 없음)을 기동 때 닫는다 — 봉투 · 함대 칩이 죽은 세션을 ‘진행 중’ 으로 보이지 않게.
+    initFocus().catch(() => {});
     onFocusEnd(async (ev) => {
       try { const rules = (await import('./perfRules.js')).loadPerfRules(); await (await import('./perfAlerts.js')).runFocusEndAlert(ev, { rules }); }
       catch (e) { console.warn(`[bmusage] 집중 결론 알림 실패: ${String(e?.message || e).slice(0, 160)}`); }

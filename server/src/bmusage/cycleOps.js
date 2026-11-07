@@ -51,6 +51,8 @@ export async function prepareCycleOps(okResults = [], { agent = '', rules = {}, 
     if (detail && detail.osKind === 'linux' && detail.hfacts) {
       const tuning = parseJsonCol(row.tuning_json);
       const c = cert ? certForServer(tg, cert) : { error: true };
+      // needs-restarting 은 하루 몇 번 · 바뀔 때만 실행한다(반증 L1 — parse/linuxHealth.js) — 건너뛴 주기는 직전에 읽은 값을 이어 쓴다(지어내지 않는다: 직전 값이 없으면 확인 불가).
+      if (detail.hfacts.needsRestart == null && detail.hfacts.nrSkipped && typeof prev?.needsRestart === 'boolean') detail.hfacts = { ...detail.hfacts, needsRestart: prev.needsRestart, nrCarried: true };
       const h = judgeHealth({ hfacts: detail.hfacts, tuning, row, cert: c, th: rules.health, now });
       healthMap = healthSince(prev?.health || null, h.cells, now);
       h.since = Object.fromEntries(Object.entries(healthMap).map(([k, v]) => [k, v.since]));

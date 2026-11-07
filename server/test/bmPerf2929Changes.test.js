@@ -141,3 +141,29 @@ test('보관(실제 DB) + cycleOps — 한 트랜잭션 · 소모품 칸이 행 
   assert.equal((await O.changeLatestAll({ agent: '' })).size, 0);
   db._resetForTest();
 });
+
+test('L1 needs-restarting 을 건너뛴 주기(nr=skip)는 직전에 읽은 값을 이어 쓴다 — 직전 값이 없으면 확인 불가(지어내지 않는다)', async () => {
+  const CO = await import('../src/bmusage/cycleOps.js');
+  const U = await import('../src/bmusage/usage.js');
+  const hf = { chrony: null, dmesg: null, upS: 3 * 86_400, kernel: '5.14.0', needsRestart: null, nrAbsent: false, nrSkipped: true, firewalld: null, fd: null, conntrack: null, oomTotal: null, sections: { chrony: 'absent', dmesg: 'absent', changes: 'ok' } };
+  const res = (key) => ({ target: { key }, built: { row: { key, detail_json: U.jsonCol({ osKind: 'linux', hfacts: hf }) }, changeFacts: null } });
+  const deps = (facts) => ({ latestAll: async () => new Map(facts ? [['K1', { facts }]] : []), certSource: async () => null, inventoryOf: async () => null, portMapOf: async () => [], portMapError: async () => null });
+  const cellOf = (r) => JSON.parse(r.built.row.detail_json).health.cells.uptime;
+  const a = res('K1'); await CO.prepareCycleOps([a], { agent: '', rules: {}, now: NOW, deps: deps({ needsRestart: true }) });
+  assert.equal(cellOf(a).code, 'warn', '직전 ‘필요’ 를 이어 쓴다');
+  const b = res('K1'); await CO.prepareCycleOps([b], { agent: '', rules: {}, now: NOW, deps: deps(null) });
+  assert.equal(cellOf(b).code, 'missing', '직전 값이 없으면 확인 불가');
+});
+
+test('L6 펌웨어 — 인벤토리 일부 실패로 빠진 부품은 ‘없음’ 이벤트가 아니다(직전 버전 유지) · V1 sysctl 한쪽 못 읽음은 비교하지 않는다', () => {
+  const fw0 = { bios: '2.1', idrac: '7.0', list: { 'NIC 1': '22.5', 'RAID': '52.1', 'PSU 1': '1.0' } };
+  const a = C.diffChangeFacts(null, { os: os0, fw: fw0 }, { now: NOW });
+  const b = C.diffChangeFacts(a.facts, { os: os0, fw: { ...fw0, list: { 'NIC 1': '22.5' } } }, { now: NOW + 300_000 });   // RAID · PSU GET 실패
+  assert.deepEqual(b.events, [], '빠진 부품 = 못 읽음');
+  assert.deepEqual(b.facts.fw.list, fw0.list, '직전 버전을 들고 간다');
+  const c = C.diffChangeFacts(b.facts, { os: os0, fw: { ...fw0, list: { ...fw0.list, RAID: '52.2' } } }, { now: NOW + 600_000 });
+  assert.deepEqual(c.events.map((e) => [e.kind, e.item, e.before, e.after]), [['firmware', 'RAID', '52.1', '52.2']], '다시 읽힌 부품은 실제 변화만');
+  // V1: sysctl 키가 이번에 없음(못 읽음) — 이벤트가 아니다
+  const d = C.diffChangeFacts(a.facts, { os: { ...os0, sysctl: { 'vm.swappiness': '10' } } }, { now: NOW + 300_000 });
+  assert.equal(d.events.filter((e) => e.kind === 'sysctl').length, 0, 'vm.dirty_ratio 못 읽음 ≠ 바뀜');
+});

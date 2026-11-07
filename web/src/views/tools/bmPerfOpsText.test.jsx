@@ -20,7 +20,7 @@ import { HEALTH_CELLS, HEALTH_CODES, HEALTH_GRADE, judgeHealth, compactHealth } 
 import { CHANGE_KINDS } from '../../../../server/src/bmusage/changes.js';
 import { RULE_IDS, RULE_CONDS, CHANNELS, BASELINE_METRICS } from '../../../../server/src/bmusage/perfRules.js';
 import { COMPARE_METRICS } from '../../../../server/src/bmusage/compare.js';
-import { bandOf, slotHours, hourStart } from '../../../../server/src/bmusage/baseline.js';
+import { bandOf, slotHours, hourStart, outsideOf } from '../../../../server/src/bmusage/baseline.js';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const H = 3_600_000; const D = 24 * H;
@@ -127,8 +127,10 @@ describe('그리기 — 결측은 0 이 아니다 · 서버 판정 그대로', (
     const series = [{ t: t0, ...b }, { t: t0 + H, ...b }, { t: t0 + 2 * H, reason: 'few-weeks' }, { t: t0 + 3 * H, ...b }];
     const polys = T.bandPolys(series, { from: t0, to: t0 + 5 * H, yMax: 100 });
     expect(polys.length).toBe(2, 'reason 칸에서 끊긴다');
-    const outs = T.outsidePoints([{ t: t0 + 60_000, avg: 29 }, { t: t0 + H + 60_000, avg: 9 }, { t: t0 + 2 * H + 60_000, avg: 99 }], series);
-    expect(outs.map((p) => p.avg)).toEqual([29], '띠 없는 시간의 값은 밖으로 세지 않는다');
+    // 띠 밖 판정은 서버 하나(baseline.outsideOf — 주기 규칙의 deviationOf) · 웹에는 같은 비교가 없다(반증 L3)
+    const outs = outsideOf([{ t: t0 + 60_000, avg: 29 }, { t: t0 + H + 60_000, avg: 9 }, { t: t0 + 2 * H + 60_000, avg: 99 }, { t: t0 + 3 * H + 60_000, avg: 1 }], series);
+    expect(outs).toEqual([{ t: t0 + 60_000, avg: 29, out: 'above' }, { t: t0 + 3 * H + 60_000, avg: 1, out: 'below' }], '띠 없는 시간의 값은 밖으로 세지 않는다');
+    expect(T.outsidePoints, '웹 복제 판정 없음').toBeUndefined();
     expect(T.bandSummaryText({ series: [{ t: 1, reason: 'few-weeks' }], weeks: 4, minWeeks: 4, maxMissingPct: 25 })).toMatch(/^베이스라인 없음 — 표본 주 수 부족/);
   });
   it('구간 비교 프리셋 — 같은 길이 · B 는 선택 구간 또는 최근 1시간', () => {
@@ -145,6 +147,34 @@ describe('그리기 — 결측은 0 이 아니다 · 서버 판정 그대로', (
     const csv = T.focusCsv(session, samples);
     const line = csv.split('\r\n')[2];
     expect(line).toMatch(/,0,1,timeout,/); expect(line).not.toMatch(/,0,0,0,0/);
+  });
+  it('F8 폴링 한 번(순수) — 횟수는 이어서 센다 · 상한에서 멈춘다 · 목록은 4회에 1번', () => {
+    const sess = { count: 2, intervalS: 60 };   // 상한 = max(4, ceil(120s/30s) + 4) = 8
+    let polls = 0; const steps = [];
+    for (let i = 0; i < 12; i += 1) { const st = T.focusPollStep(polls, sess); steps.push(st); if (st.go) polls = st.polls; }
+    expect(steps.filter((x) => x.go).length).toBe(8);
+    expect(steps.filter((x) => x.reloadList).length).toBe(2);
+    expect(T.focusPollStep(8, sess)).toMatchObject({ go: false });
+    const src = fs.readFileSync(path.join(HERE, 'BmFocusTab.jsx'), 'utf8');
+    expect(src).toMatch(/open\(sel\.id, \{ poll: true \}\)/);   // 폴링 경로는 카운터를 되돌리지 않는 open
+    expect(src).toMatch(/if \(!poll\) polls\.current = 0/);
+  });
+  it('F14 경로 없음은 결측이 아니다 — iDRAC 만 있는 서버의 분은 점선 · 결측 이벤트 · 결측 칸이 아니다(옛 no-path 표본 포함)', () => {
+    const sess = { count: 2, start: NOW, status: 'done', trigger: 'manual' };
+    for (const missOs of [null, 'no-path']) {
+      const smp = [{ idx: 0, minuteTs: NOW, osOk: false, idracOk: true, verdict: 'ok', missOs, missIdrac: null, vals: { power_w: { avg: 400 } } }];
+      expect(T.progressCells(sess, smp)[0].state).toBe('done');
+      expect(T.focusEvents(sess, smp, []).some((e) => e.kind === 'missing')).toBe(false);
+      expect(T.heatRows(smp).find((r) => r.metric === 'power_w').cells[0].miss).toBeFalsy();
+      expect(T.osMissed(smp[0])).toBe(false);
+    }
+    expect(T.osMissed({ osOk: false, missOs: 'timeout' })).toBe(true);
+    const row = renderToStaticMarkup(h(FocusSessionList, { sessions: [{ id: 'r1', status: 'running', trigger: 'manual', count: 10, intervalS: 60, done: 2, missOs: 0, missIdrac: 0, hasOs: false, hasIdrac: true, created: NOW }] }));
+    expect(row).toContain('OS 경로 없음'); expect(row).not.toContain('OS 0분');
+  });
+  it('발송 결과 문구 = 서버 결과 enum(대기열 · 실패 포함 — 전 채널 실패를 ‘보냄’ 으로 쓰지 않는다)', () => {
+    for (const r of ['queued', 'sent', 'failed', 'suppressed', 'no-channel', 'no-channel-config', 'daily-cap', 'maintenance', 'error']) expect(T.SENT_RESULT_TEXT[r], r).toBeTruthy();
+    expect(T.SENT_RESULT_TEXT.failed).not.toMatch(/보냄$/);
   });
   it('결측 문구 — 경로가 없는 쪽은 ‘경로 없음’(0 분이 아니다) · 서버 summarizeFocus 의 null 을 그대로', () => {
     const smp = [{ idx: 0, minuteTs: NOW, osOk: true, idracOk: null, verdict: 'ok', missOs: null, missIdrac: null, vals: { cpu_pct: { avg: 10 } } }];
@@ -186,7 +216,7 @@ describe('소스 스윕', () => {
   it('폴링은 집중 진행 중 화면만(setTimeout 1곳 · FOCUS_POLL_MS · 상한) — setInterval · usePolling 없음', () => {
     for (const [f, s] of Object.entries(src)) { expect(s, f).not.toMatch(/setInterval\(|usePolling\(/); }
     expect((src['BmFocusTab.jsx'].match(/setTimeout\(/g) || []).length).toBe(2, '폴링 1 + 내려받기 URL 해제 1');
-    expect(src['BmFocusTab.jsx']).toMatch(/focusPollMax/);
+    expect(src['BmFocusTab.jsx']).toMatch(/focusPollStep/);
     expect(T.focusPollMax({ count: 10, intervalS: 60 })).toBe(24);
   });
   it('text-transform uppercase 없음(날 드롭다운은 전역 스윕 selectSort.test.js 가 본다)', () => {

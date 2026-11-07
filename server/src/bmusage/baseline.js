@@ -152,6 +152,21 @@ export async function slotBands({ agent = '', cfg, intervalMs = 300_000, now = D
   return bands;
 }
 /** 한 서버의 이탈(감시 지표마다) — 띠가 없으면 그 지표는 null. */
+/**
+ * 띠 밖 점(순수 — 반증 L3: 웹이 따로 비교하던 것을 서버 판정 하나로). points = 추이 응답 점({t, avg}) · series = 이 띠 계열(시간 머리 t).
+ *   비교는 deviationOf(주기 규칙과 같은 함수) — 띠가 없는 시간 · 값이 없는 점은 판정하지 않는다.
+ */
+export function outsideOf(points = [], series = []) {
+  const byH = new Map((series || []).filter((b) => b && !b.reason && n(b.mean) != null).map((b) => [hourStart(b.t), b]));
+  const out = [];
+  for (const p of points || []) {
+    const t = n(p?.t); if (t == null) continue;
+    const d = deviationOf(p.avg, byH.get(hourStart(t)));
+    if (d && d.out !== 'in') out.push({ t, avg: d.value, out: d.out });
+    if (out.length >= 2_000) break;
+  }
+  return out;
+}
 export function deviationsFor(bands, key, row = {}) {
   const per = bands?.get?.(key);
   const out = {};

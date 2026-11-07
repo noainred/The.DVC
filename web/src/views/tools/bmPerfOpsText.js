@@ -68,6 +68,8 @@ export function vText(v, unit = '') {
   const r = Math.abs(x) >= 100 ? Math.round(x) : Math.round(x * 10) / 10;
   return `${r.toLocaleString('ko-KR')}${unit || ''}`;
 }
+/** 그 분 OS 경로 결측인가(순수 — 반증 F14: ‘경로 없음(no-path)’ 은 결측이 아니다 · iDRAC 만 있는 서버의 분을 점선으로 그리지 않는다). */
+export function osMissed(s) { return !!s && !s.osOk && !!s.missOs && s.missOs !== 'no-path'; }
 /** 진행 띠 칸(순수) — 세션 길이만큼. 칸: { idx, state:'done'|'missing'|'pending'|'partial', tone, title }. */
 export function progressCells(session = {}, samples = []) {
   const count = Math.max(1, n(session.count) ?? samples.length ?? 1);
@@ -75,7 +77,7 @@ export function progressCells(session = {}, samples = []) {
   return Array.from({ length: count }, (_, i) => {
     const s = by.get(i);
     if (!s) return { idx: i, state: 'pending', tone: 'idle', title: `${i + 1}분 — 아직` };
-    if (!s.osOk && s.missOs) return { idx: i, state: 'missing', tone: 'idle', title: `${i + 1}분 — 결측(${FOCUS_MISS_TEXT[s.missOs] || s.missOs})${s.idracOk ? ' · iDRAC 만 있음' : ''}`, at: s.minuteTs };
+    if (osMissed(s)) return { idx: i, state: 'missing', tone: 'idle', title: `${i + 1}분 — 결측(${FOCUS_MISS_TEXT[s.missOs] || s.missOs})${s.idracOk ? ' · iDRAC 만 있음' : ''}`, at: s.minuteTs };
     const v = s.verdict ? verdictView(s.verdict) : null;
     return { idx: i, state: s.missIdrac && s.missIdrac !== 'no-path' ? 'partial' : 'done', tone: v ? v.tone : 'idle', title: `${i + 1}분 — ${v ? v.label : '판정 없음'}${s.missIdrac && s.missIdrac !== 'no-path' ? ` · iDRAC 결측(${FOCUS_MISS_TEXT[s.missIdrac] || s.missIdrac})` : ''}`, at: s.minuteTs };
   });
@@ -85,7 +87,7 @@ export function heatRows(samples = [], { rows = FOCUS_ROWS } = {}) {
   const out = [];
   for (const m of rows) {
     const cells = samples.map((s) => {
-      if (!s.osOk && s.missOs && !['power_w', 'inlet_c'].includes(m)) return { miss: true };
+      if (osMissed(s) && !['power_w', 'inlet_c'].includes(m)) return { miss: true };
       const v = s.vals?.[m];
       return v ? { avg: n(v.avg), peak: n(v.peak) } : { avg: null, peak: null };
     });
@@ -115,7 +117,7 @@ export function focusEvents(session = {}, samples = [], changes = []) {
   if (session.start) ev.push({ at: session.start, kind: 'start', text: `${session.trigger === 'auto' ? '자동 규칙' : '수동'} 시작${session.reason ? ` — ${session.reason}` : ''}` });
   let prevV = null; let prevD = null;
   for (const s of samples || []) {
-    if (!s.osOk && s.missOs) ev.push({ at: s.minuteTs, kind: 'missing', text: `결측 — ${FOCUS_MISS_TEXT[s.missOs] || s.missOs}${s.idracOk ? ' · iDRAC 값만 기록' : ''}` });
+    if (osMissed(s)) ev.push({ at: s.minuteTs, kind: 'missing', text: `결측 — ${FOCUS_MISS_TEXT[s.missOs] || s.missOs}${s.idracOk ? ' · iDRAC 값만 기록' : ''}` });
     if (s.verdict && s.verdict !== prevV) { if (prevV) ev.push({ at: s.minuteTs, kind: 'verdict', text: `판정 ${verdictView(prevV).label} → ${verdictView(s.verdict).label}` }); prevV = s.verdict; }
     const d = n(s.vals?.dmesg_err?.avg);
     if (d != null && prevD != null && d > prevD) ev.push({ at: s.minuteTs, kind: 'dmesg', text: `커널 오류 메시지 +${d - prevD}건(개수만 — 원문은 진단 스냅샷)` });
@@ -153,7 +155,7 @@ export function conclusionParts(summary = {}, session = {}) {
 export function focusCsv(session = {}, samples = []) {
   const head = ['minute', 'verdict', 'os_ok', 'idrac_ok', 'miss_os', 'miss_idrac', ...FOCUS_ROWS.flatMap((m) => [`${m}_avg`, `${m}_peak`]), 'io_top1', 'cpu_top1'];
   const rows = [head];
-  for (const s of samples) rows.push([new Date(s.minuteTs).toISOString(), s.verdict || '', s.osOk ? 1 : 0, s.idracOk == null ? '' : s.idracOk ? 1 : 0, s.missOs || '', s.missIdrac || '',
+  for (const s of samples) rows.push([new Date(s.minuteTs).toISOString(), s.verdict || '', s.osOk ? 1 : 0, s.idracOk == null ? '' : s.idracOk ? 1 : 0, s.missOs && s.missOs !== 'no-path' ? s.missOs : '', s.missIdrac && s.missIdrac !== 'no-path' ? s.missIdrac : '',
     ...FOCUS_ROWS.flatMap((m) => [n(s.vals?.[m]?.avg) ?? '', n(s.vals?.[m]?.peak) ?? '']), s.snap?.ioTop?.[0]?.name || '', s.snap?.cpuTop?.[0]?.name || '']);
   return `${toCsv(rows)}\r\n`;
 }
@@ -164,6 +166,14 @@ export function focusCsvName(name, session = {}) {
 /** 진행 중 화면만 다시 읽는 간격(ms) — 근거: 1분 표본이라 30초면 한 분을 놓치지 않는다 · 세션당 최대 (길이 × 2 + 2)회로 묶인다(BmFocusTab 이 센다). */
 export const FOCUS_POLL_MS = 30_000;
 export function focusPollMax(session = {}) { return Math.max(4, Math.ceil(((n(session.count) || 10) * (n(session.intervalS) || 60) * 1000) / FOCUS_POLL_MS) + 4); }
+/** 폴링 한 번(순수 — 반증 F8): 지금까지 횟수 polls 로 다음을 갈지 · 갈 때 목록도 다시 읽을지(4회에 1번). 상한(focusPollMax)을 넘기면 멈춘다. */
+export function focusPollStep(polls = 0, session = {}) {
+  const max = focusPollMax(session);
+  const p = Math.max(0, Math.floor(Number(polls) || 0));
+  if (p >= max) return { go: false, polls: p, reloadList: false, max };
+  const next = p + 1;
+  return { go: true, polls: next, reloadList: next % 4 === 0, max };
+}
 
 /* ── 점검 소모품 ───────────────────────────────────────────────────────── */
 export const HEALTH_CELL_TEXT = Object.freeze({
@@ -269,15 +279,7 @@ export function bandPolys(series = [], { from, to, yMax = 100, w = 1000, h = 100
     return [...top, ...bot].join(' ');
   });
 }
-/** 띠 밖 점(순수) — 그 시간의 띠(시간 시작 기준)와 비교해 밖인 점만. */
-export function outsidePoints(points = [], series = []) {
-  const byH = new Map((series || []).filter((b) => !b.reason && n(b.lo) != null).map((b) => [b.t, b]));
-  return (points || []).filter((p) => {
-    const v = n(p.avg); if (v == null) return false;
-    const b = byH.get(Math.floor(p.t / 3_600_000) * 3_600_000);
-    return !!b && (v > b.hi || v < b.lo);
-  });
-}
+/* 띠 밖 점은 서버가 판정해 응답(baseline.outsideOf → outside)에 싣는다 — 웹은 그리기만(반증 L3: 웹 outsidePoints 가 서버 deviationOf 를 복제했다). */
 export function bandSummaryText(resp = {}) {
   const s = resp?.series || [];
   if (!s.length) return '베이스라인 없음';
@@ -319,7 +321,7 @@ export const RULE_TEXT = Object.freeze({
   profile: { label: '용도 프로파일 점검 실패', conds: { bad: '점검 결과 이상(CRITICAL)' } },
 });
 export const CHANNEL_TEXT = Object.freeze({ email: '메일', webhook: '웹훅', slack: 'Slack', teams: 'Teams' });
-export const SENT_RESULT_TEXT = Object.freeze({ sent: '보냄', suppressed: '중복 억제', 'no-channel': '켜진 채널 없음', 'no-channel-config': '알림 설정 없음', 'daily-cap': '하루 상한', maintenance: '유지보수 창', error: '실패', '': '—' });
+export const SENT_RESULT_TEXT = Object.freeze({ queued: '보내는 중(대기열)', sent: '보냄', failed: '보내지 못함(채널 오류 — 재시도 규칙대로)', suppressed: '중복 억제', 'no-channel': '켜진 채널 없음', 'no-channel-config': '알림 설정 없음', 'daily-cap': '하루 상한', maintenance: '유지보수 창', error: '실패', '': '—' });
 export const ISSUE_RESULT_TEXT = Object.freeze({ 'pending-central': '중앙에서 판단', 'daily-cap': '하루 상한', created: '만듦', commented: '댓글', dup: '이미 처리', error: '실패', skipped: '안 만듦' });
 export const RULES_HONEST = '판정 · 발송은 그 서버를 수집하는 노드(엣지)가 합니다 — 이 설정은 이 노드 것이고 중앙에서 엣지로 배포하지 않습니다(다음 판). 유지보수 창 억제는 베어메탈 서버의 백업 창을 읽는 원천이 아직 없어 동작하지 않습니다(8단계 정비 창). 같은 상태가 이어지면 다시 보내지 않고, 재시작해도 다시 보내지 않습니다(상태 파일).';
 export function sentResultText(r) { return SENT_RESULT_TEXT[r] ?? String(r || '—'); }

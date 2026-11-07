@@ -16,7 +16,7 @@ import { TrendSvg, TimeAxis } from './BmTrendChart.jsx';
 import { shortStamp } from './bmOpsText.js';
 import { fmtHm } from '../../components/vmperf/vmPerfText.js';
 import {
-  bandPolys, outsidePoints, bandSummaryText, changeKindText, changeMarks, CHANGES_HONEST, FOCUS_METRIC_TEXT, vText,
+  bandPolys, bandSummaryText, changeKindText, changeMarks, CHANGES_HONEST, FOCUS_METRIC_TEXT, vText,
   COMPARE_METRIC_TEXT, COMPARE_PRESETS, comparePair, diffText, compareCsv, COMPARE_HONEST,
 } from './bmPerfOpsText.js';
 import './bmOps.css';
@@ -82,7 +82,7 @@ export function BaselineOverlay({ itemKey, win, changes = null, narrow = false }
   const yMax = info.unit === '%' ? 100 : Math.max(1, ...vals) * 1.1;
   const noLine = !hist.loading && !pts.some((p) => p.avg != null);
   const polys = band.data?.ok ? bandPolys(bs, { ...win, yMax }) : [];
-  const outs = band.data?.ok ? outsidePoints(pts, bs) : [];
+  const outs = band.data?.ok && Array.isArray(band.data.outside) ? band.data.outside : [];   // 띠 밖 판정은 서버(반증 L3 — baseline.outsideOf)
   const ev = changes?.events || [];
   const marks = changeMarks(ev, win);
   const focusDots = (changes?.focus || []).filter((f) => f.vals?.[metric]?.avg != null).map((f) => ({ t: f.t, v: f.vals[metric].avg, color: 'var(--amber)', title: `집중 ${fmtHm(f.t)} ${vText(f.vals[metric].avg, info.unit)}` }));

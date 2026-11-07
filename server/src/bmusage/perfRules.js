@@ -45,8 +45,8 @@ export const RULE_DEFAULTS = Object.freeze({
 });
 export const LIMITS = Object.freeze({
   sustain: [1, 48], repeatMin: [0, 10_080], corpsOff: 200,
-  daily: { alerts: [1, 1_000], issues: [1, 500], autoFocus: [1, 200] },
-  focus: { intervalS: [30, 600], durationMin: [1, 60], corpMax: [1, 32], keepDays: [1, 90], autoSuppressMin: [5, 1_440] },
+  daily: { alerts: [1, 1_000], issues: [1, 500], autoFocus: [1, 200], manualFocus: [1, 500] },
+  focus: { intervalS: [30, 600], durationMin: [1, 60], corpMax: [1, 32], nodeMax: [1, 64], keepDays: [1, 90], autoSuppressMin: [5, 1_440] },
   baseline: { weeks: [2, 12], bandPct: [5, 300], minWeeks: [2, 12], maxMissingPct: [0, 90] },
   health: { chronyMs: [1, 600_000], fdPct: [10, 99], conntrackPct: [10, 99], dmesgErr24h: [0, 100_000], certDays: [1, 365] },
   changes: { keepDays: [7, 400] },
@@ -54,9 +54,11 @@ export const LIMITS = Object.freeze({
 });
 export const DEFAULTS = Object.freeze({
   rules: {},
-  daily: { alerts: 50, issues: 20, autoFocus: 10 },
+  // manualFocus(반증 F11): 사람이 누르는 집중도 법인당 하루 상한 — 누를 때마다 SSH · Redfish 를 분마다 연다(스냅샷 dailyCorpMax 와 같은 판단).
+  daily: { alerts: 50, issues: 20, autoFocus: 10, manualFocus: 20 },
   // 집중 모니터링(§13): 기본 10분 × 1분 · 간격 하한 30초 · 길이 상한 60분 · 법인당 동시 5 · 30일 보관 · 자동 집중은 기본 꺼짐(법인 옵트인) · 같은 서버 재발 억제 30분.
-  focus: { intervalS: 60, durationMin: 10, corpMax: 5, keepDays: 30, autoCorps: [], autoSuppressMin: 30 },
+  // nodeMax(반증 L11): 이 노드 전체 동시 집중 상한 — 법인 상한만 있으면 중앙 직접 수집(엣지 없는 법인 여럿)에서 법인 수 × 5 가 앞자리 대기로 슬롯을 먼저 가져간다.
+  focus: { intervalS: 60, durationMin: 10, corpMax: 5, nodeMax: 10, keepDays: 30, autoCorps: [], autoSuppressMin: 30 },
   baseline: { weeks: 4, bandPct: 40, minWeeks: 4, maxMissingPct: 25 },
   health: { ...HEALTH_DEFAULTS },
   changes: { keepDays: 30 },

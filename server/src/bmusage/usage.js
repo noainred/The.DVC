@@ -575,7 +575,7 @@ export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = nu
   detail.hfacts = {
     chrony: perf.chrony?.value || null,
     dmesg: dm ? (dm.failed ? { failed: true, rc: dm.rc ?? null } : { err: dm.err, warn: dm.warn, err24: dm.err24, warn24: dm.warn24 }) : null,
-    upS: ch ? ch.upS : null, kernel: ch ? ch.kernel : null, needsRestart: ch ? ch.needsRestart : null, nrAbsent: !!ch?.nrAbsent,
+    upS: ch ? ch.upS : null, kernel: ch ? ch.kernel : null, needsRestart: ch ? ch.needsRestart : null, nrAbsent: !!ch?.nrAbsent, nrSkipped: !!ch?.nrSkipped,
     firewalld: ch ? ch.firewalld : null, fd: ch ? ch.fd : null, conntrack: ch ? ch.conntrack : null,
     oomTotal: n(vm?.oomKill),
     sections: { chrony: sections.chrony || 'missing', dmesg: sections.dmesg || 'missing', changes: sections.changes || 'missing' },

@@ -18,8 +18,8 @@ import { shortStamp } from './bmOpsText.js';
 import { fmtHm } from '../../components/vmperf/vmPerfText.js';
 import { unitText } from '../unitText.js';
 import {
-  FOCUS_MISS_TEXT, ACTION_TEXT, FOCUS_HONEST, focusStatusView, focusCodeView, vText, progressCells, heatRows, heatAlpha, beforeRows, focusEvents, conclusionParts, missPathParts,
-  focusCsv, focusCsvName, FOCUS_POLL_MS, focusPollMax, FOCUS_METRIC_TEXT,
+  FOCUS_MISS_TEXT, ACTION_TEXT, FOCUS_HONEST, focusStatusView, focusCodeView, vText, progressCells, heatRows, heatAlpha, beforeRows, focusEvents, conclusionParts, missPathParts, osMissed,
+  focusCsv, focusCsvName, FOCUS_POLL_MS, focusPollStep, FOCUS_METRIC_TEXT,
 } from './bmPerfOpsText.js';
 import './bmOps.css';
 import './bmPerfOps.css';
@@ -100,12 +100,12 @@ export function FocusSessionView({ resp, name = '' }) {
               ))}
               <tr>
                 <td data-sort="판정" className="bmo-name">USE 판정</td>
-                {samples.map((x) => <td key={x.idx} data-sort={x.verdict || ''} style={{ color: x.verdict ? toneVar(verdictView(x.verdict).tone) : 'var(--muted)' }}>{x.verdict ? verdictView(x.verdict).label : (x.missOs ? '결측' : '—')}</td>)}
+                {samples.map((x) => <td key={x.idx} data-sort={x.verdict || ''} style={{ color: x.verdict ? toneVar(verdictView(x.verdict).tone) : 'var(--muted)' }}>{x.verdict ? verdictView(x.verdict).label : (osMissed(x) ? '결측' : '—')}</td>)}
               </tr>
             </tbody>
           </STable>
         )}
-        {samples.some((x) => x.missOs) && <p className="bmo-note">결측 분: {samples.filter((x) => x.missOs).map((x) => `${fmtHm(x.minuteTs)} ${FOCUS_MISS_TEXT[x.missOs] || x.missOs}`).join(' · ')} — 그 분은 iDRAC 쪽(전력 · 흡기)만 있을 수 있습니다(두 경로는 따로 셉니다).</p>}
+        {samples.some(osMissed) && <p className="bmo-note">결측 분: {samples.filter(osMissed).map((x) => `${fmtHm(x.minuteTs)} ${FOCUS_MISS_TEXT[x.missOs] || x.missOs}`).join(' · ')} — 그 분은 iDRAC 쪽(전력 · 흡기)만 있을 수 있습니다(두 경로는 따로 셉니다).</p>}
       </section>
 
       <section className="bmo-card">
@@ -135,7 +135,7 @@ export function FocusSessionView({ resp, name = '' }) {
             {samples.map((x) => {
               const io = x.snap?.ioTop || []; const cpu = x.snap?.cpuTop || [];
               const ioT = (p) => (p ? `${p.name} ${vText(((p.readBps || 0) + (p.writeBps || 0)) / 1e6, 'MB/s')}` : '—');
-              if (!x.snap || x.snap.error) return <tr key={x.idx}><td data-sort={x.minuteTs}>{fmtHm(x.minuteTs)}</td><td colSpan={4} data-sort="">{x.missOs ? `결측 — ${FOCUS_MISS_TEXT[x.missOs] || x.missOs}` : '스냅샷 없음'}</td></tr>;
+              if (!x.snap || x.snap.error) return <tr key={x.idx}><td data-sort={x.minuteTs}>{fmtHm(x.minuteTs)}</td><td colSpan={4} data-sort="">{osMissed(x) ? `결측 — ${FOCUS_MISS_TEXT[x.missOs] || x.missOs}` : (sum.missOs === null || x.missOs === 'no-path' ? 'OS 경로 없음' : '스냅샷 없음')}</td></tr>;
               return (
                 <tr key={x.idx}>
                   <td data-sort={x.minuteTs}>{fmtHm(x.minuteTs)}</td>
@@ -188,7 +188,9 @@ export function FocusSessionList({ sessions = [], selId = '', onOpen = () => {} 
       <thead><tr><th>시작</th><th>트리거</th>{withBy && <th>실행자</th>}<th>길이 · 간격</th><th>결측(OS · iDRAC)</th><th>판정 변화</th><th>원인 후보</th><th>상태</th><th data-nosort /></tr></thead>
       <tbody>
         {sessions.map((x) => {
-          const st = focusStatusView(x.status); const sm = x.summary || {}; const mpx = missPathParts(x, sm);
+          const st = focusStatusView(x.status); const sm = x.summary || {};
+          // 진행 중 세션은 요약이 없다 — 세션이 실은 경로(hasOs · hasIdrac — 실행 노드의 세션 값)로 ‘경로 없음’ 을 가린다(반증 F14).
+          const mpx = missPathParts(x, { ...sm, ...(x.hasOs === false ? { missOs: null } : {}), ...(x.hasIdrac === false ? { missIdrac: null } : {}) });
           return (
             <tr key={x.id} style={{ background: selId === x.id ? 'rgba(255,255,255,0.04)' : undefined }}>
               <td data-sort={x.start || x.created}>{shortStamp(x.start || x.created)}</td>
@@ -222,9 +224,10 @@ export default function BmFocusTab({ itemKey, name = '' }) {
   const canRun = roleOk && writable !== false;
   const plan = list.resp?.plan || null;
 
-  const open = async (id) => {
+  // poll = 폴링 타이머가 부른 것 — 횟수 카운터를 되돌리지 않는다(반증 F8: 예전에는 open 이 늘 0 으로 돌려 상한이 동작하지 않고 목록도 매번 다시 읽었다).
+  const open = async (id, { poll = false } = {}) => {
     const g = ++gen.current;
-    polls.current = 0;
+    if (!poll) polls.current = 0;
     setSel((p) => ({ id, resp: p.id === id ? p.resp : null, err: null }));
     try {
       const resp = await fetchJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/focus/${encodeURIComponent(id)}`, {}, undefined, { timeoutMs: 60_000 });
@@ -241,11 +244,11 @@ export default function BmFocusTab({ itemKey, name = '' }) {
   const selStatus = sel.resp?.session?.status;
   useEffect(() => {
     if (!sel.id || !(selStatus === 'running' || selStatus === 'queued')) return undefined;
-    const max = focusPollMax(sel.resp?.session);
     const h = setTimeout(() => {
-      if (polls.current >= max) return;
-      polls.current += 1;
-      open(sel.id).then(() => { if (polls.current % 4 === 0) list.reload(); });
+      const step = focusPollStep(polls.current, sel.resp?.session);
+      if (!step.go) return;
+      polls.current = step.polls;
+      open(sel.id, { poll: true }).then(() => { if (step.reloadList) list.reload(); });
     }, FOCUS_POLL_MS);
     return () => clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 응답이 바뀔 때마다 다음 한 번을 예약한다

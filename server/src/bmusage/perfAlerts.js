@@ -24,6 +24,7 @@ import { capStr } from '../util/capStr.js';
 import { dayKey } from '../util/dayKey.js';
 import { RULE_IDS, BASELINE_METRICS } from './perfRules.js';
 import { VERDICT_LABEL } from './useJudge.js';
+import { MAX_SEND } from './notify.js';
 
 const n = numOrNull;
 const FILE = () => path.join(config.configDir, 'bm-perf-alert-state.json');
@@ -35,11 +36,39 @@ const METRIC_LABEL = Object.freeze({ cpu_pct: 'CPU', mem_pct: '메모리', disk_
 const HEALTH_LABEL = Object.freeze({ chrony: '시각 동기', units: '실패 유닛', oom: 'OOM', dmesg: '커널 오류', uptime: '재부팅 필요', fdct: 'FD · conntrack', cert: '인증서', tuned: 'TuneD · SELinux · firewalld' });
 
 /**
+ * 칸 단위 판정(순수) — 칸 id → 'true'(조건 성립) · 'false'(읽었고 성립 안 함) · 'unread'(못 읽음 · 경로 없음 · 띠 없음 등 판정 불가).
+ *   health = 소모품 칸 · baseline = 지표 · cross = 교차 판정 id. use · profile 은 칸이 하나라 쓰지 않는다.
+ */
+export function ruleCells(id, ctx = {}, rule = {}) {
+  const out = {};
+  if (id === 'health') {
+    for (const [k, c] of Object.entries(ctx.health?.cells || {})) {
+      const code = c?.code;
+      if (!['ok', 'warn', 'bad'].includes(code)) { out[k] = 'unread'; continue; }
+      out[k] = (rule.cond === 'bad' ? code === 'bad' : code === 'warn' || code === 'bad') ? 'true' : 'false';
+    }
+  } else if (id === 'baseline') {
+    for (const [m, d] of Object.entries(ctx.dev && typeof ctx.dev === 'object' ? ctx.dev : {})) {
+      if (!d || d.reason || !d.out) { out[m] = 'unread'; continue; }
+      out[m] = d.out === 'above' || d.out === 'below' ? 'true' : 'false';
+    }
+  } else if (id === 'cross') {
+    for (const [i, x] of (Array.isArray(ctx.entry?.cross) ? ctx.entry.cross : []).entries()) {
+      const k = String(x?.id ?? i);
+      if (!x || x.state === 'missing' || x.state === 'nopath') { out[k] = 'unread'; continue; }
+      out[k] = x.state === 'candidate' ? 'true' : 'false';
+    }
+  }
+  return out;
+}
+/**
  * 규칙 조건(순수) — true(조건 성립) · false(성립 안 함) · null(판정 보류 — 못 읽음 · 오래됨 · 띠 없음).
+ * ⚠⚠ 반증 F5: **직전에 참이던 칸을 이번에 못 읽었으면 null**(보류 — 사건 유지)이다. 예전에는 남은 칸이 정상이면 false 라 한 주기 결측(chronyc 시한 등)이
+ *   사건을 ‘해소’ 하고 다음 주기에 같은 사건을 새로 보냈다. prevOn = 직전 주기에 참이던 칸 id 목록(상태의 on).
  * @param {string} id  규칙 id
  * @param {{entry?:object, health?:object, dev?:object, profile?:object}} ctx  그 서버의 이번 주기 값(이 노드가 만든 것)
  */
-export function ruleCondition(id, ctx = {}, rule = {}) {
+export function ruleCondition(id, ctx = {}, rule = {}, prevOn = null) {
   if (id === 'use') {
     const v = ctx.entry?.verdict;
     if (!v || ['stale', 'partial', 'unknown'].includes(v)) return null;
@@ -47,31 +76,28 @@ export function ruleCondition(id, ctx = {}, rule = {}) {
     if (rule.cond === 'errors') return v === 'errors';
     return BAD_VERDICT.has(v);
   }
-  if (id === 'cross') {
-    const xs = Array.isArray(ctx.entry?.cross) ? ctx.entry.cross : null;
-    if (!xs || !xs.length) return null;
-    if (xs.some((x) => x?.state === 'candidate')) return true;
-    return xs.every((x) => x?.state === 'missing' || x?.state === 'nopath') ? null : false;
-  }
-  if (id === 'baseline') {
-    const d = ctx.dev && typeof ctx.dev === 'object' ? Object.values(ctx.dev) : [];
-    const judged = d.filter((x) => x && !x.reason && x.out);
-    if (!judged.length) return null;
-    return judged.some((x) => x.out === 'above' || x.out === 'below');
-  }
-  if (id === 'health') {
-    const cells = ctx.health?.cells ? Object.values(ctx.health.cells) : null;
-    if (!cells) return null;
-    const judged = cells.filter((c) => ['ok', 'warn', 'bad'].includes(c?.code));
-    if (!judged.length) return null;
-    return rule.cond === 'bad' ? judged.some((c) => c.code === 'bad') : judged.some((c) => c.code === 'warn' || c.code === 'bad');
-  }
   if (id === 'profile') {
     const st = ctx.profile?.status;
     if (!st || st === 'none' || st === 'unknown') return null;
     return st === 'bad';
   }
+  if (id === 'health' || id === 'baseline' || id === 'cross') {
+    if (id === 'health' && !ctx.health?.cells) return null;
+    if (id === 'cross' && !(Array.isArray(ctx.entry?.cross) && ctx.entry.cross.length)) return null;
+    const cells = ruleCells(id, ctx, rule);
+    const vals = Object.values(cells);
+    if (vals.includes('true')) return true;
+    if (Array.isArray(prevOn) && prevOn.some((k) => cells[k] !== 'true' && cells[k] !== 'false')) return null;   // 직전 참 칸을 못 읽음 — 보류
+    if (!vals.includes('false')) return null;
+    return false;
+  }
   return null;
+}
+/** 상태에 남길 ‘참이던 칸’(순수) — 성립이면 지금 참인 칸 · 보류면 직전 그대로 · 해소면 비움. */
+export function onCellsAfter(id, ctx, rule, cond, prevOn) {
+  if (cond === true) return Object.entries(ruleCells(id, ctx, rule)).filter(([, v]) => v === 'true').map(([k]) => k).slice(0, 16);
+  if (cond === null || cond === undefined) return Array.isArray(prevOn) ? prevOn : [];
+  return [];
 }
 
 /**
@@ -86,6 +112,8 @@ export function stepRule(prev, cond, rule = {}, now = Date.now()) {
   const streak = (n(p.streak) ?? 0) + 1;
   const since = p.since ?? now;
   const sustain = Math.max(1, n(rule.sustain) ?? 1);
+  // 발송 실패 재시도(반증 F6 — 기존 알림 경로 규칙 retryDelayMs 재사용: 5분 · 15분 두 번까지) — 사건이 이어지는 동안만.
+  if (p.active && n(p.retryAt) != null && now >= p.retryAt) return { state: { ...p, streak, since, seenAt: now, retryAt: null, firedAt: now }, fire: true, reason: 'retry' };
   if (p.active) return { state: { ...p, streak, since, seenAt: now }, fire: false, reason: 'ongoing' };
   if (streak < sustain) return { state: { ...p, streak, since, active: false, seenAt: now }, fire: false, reason: 'sustaining' };
   const rep = Math.max(0, n(rule.repeatMin) ?? 0) * 60_000;
@@ -101,7 +129,7 @@ export function stepRule(prev, cond, rule = {}, now = Date.now()) {
  */
 export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date.now()) {
   const next = {}; const fires = [];
-  const counts = { fire: 0, suppressed: 0, sustaining: 0, unknown: 0, ongoing: 0, corpOff: 0 };
+  const counts = { fire: 0, suppressed: 0, sustaining: 0, unknown: 0, ongoing: 0, corpOff: 0, retry: 0, clear: 0 };
   const on = RULE_IDS.filter((id) => id !== 'focusEnd' && rules?.[id]?.on);
   const seen = new Set();
   for (const it of items) {
@@ -110,11 +138,13 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
       const rule = rules[id];
       const sk = `${id}|${key}`; seen.add(sk);
       if ((rule.corpsOff || []).includes(String(it.vcenterId || ''))) { counts.corpOff += 1; continue; }
-      const cond = ruleCondition(id, it, rule);
-      const out = stepRule(state?.[sk] || null, cond, rule, now);
-      next[sk] = out.state;
+      const prev = state?.[sk] || null;
+      const cond = ruleCondition(id, it, rule, prev?.on || null);
+      const out = stepRule(prev, cond, rule, now);
+      const on = onCellsAfter(id, it, rule, cond, prev?.on || null);
+      next[sk] = on.length ? { ...out.state, on } : out.state;
       if (counts[out.reason] != null) counts[out.reason] += 1;
-      if (out.fire) { counts.fire += 1; fires.push({ rule: id, key, name: it.name || key, vcenterId: String(it.vcenterId || ''), ctx: it }); }
+      if (out.fire) { counts.fire += 1; fires.push({ rule: id, key, name: it.name || key, vcenterId: String(it.vcenterId || ''), ctx: it, prevState: prev, retry: out.reason === 'retry' }); }
     }
   }
   // 이번 주기에 없던 서버(수집 실패 · 대상 제외)의 상태는 CARRY_MS 동안 들고 간다 — 켠 규칙만(끈 규칙의 상태는 버린다: 다시 켜면 처음부터).
@@ -178,7 +208,7 @@ function load() {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닙니다');
     _state = { v: 1, rules: raw.rules && typeof raw.rules === 'object' ? raw.rules : {}, day: String(raw.day || ''), counts: raw.counts && typeof raw.counts === 'object' ? raw.counts : {},
-      sent: Array.isArray(raw.sent) ? raw.sent.slice(-SENT_LOG_MAX) : [] };
+      sent: Array.isArray(raw.sent) ? raw.sent.slice(-SENT_LOG_MAX) : [], ...(raw.autoAt && typeof raw.autoAt === 'object' ? { autoAt: raw.autoAt } : {}) };
   } catch (e) {
     // 손상 — 보존하고 첫 주기는 기준만 잡는다(진행 중인 사건을 ‘새 사건’ 으로 한꺼번에 다시 보내지 않게).
     preserveCorrupt(FILE(), String(e?.message || e));
@@ -193,12 +223,26 @@ function save(st) {
   _state = st;
   try { atomicWriteFileSync(FILE(), `${JSON.stringify({ ...st, at: Date.now() })}\n`, { mode: 0o600 }); } catch (e) { _loadError = { at: Date.now(), reason: `상태 파일 쓰기 실패: ${String(e?.message || e).slice(0, 120)}` }; }
 }
-export function _resetPerfAlertsForTest({ unlink = true } = {}) { _state = null; _warmup = false; _loadError = null; if (unlink) { try { fs.unlinkSync(FILE()); } catch { /* */ } } }
+/*
+ * ⚠⚠ 상태 변경은 **한 직렬 큐**(반증 F1): 주기 판정(runPerfAlerts) · 집중 결론(runFocusEndAlert) · 발송 결과 기록이 각자 `load → await → save` 하면
+ *   늦게 끝난 쪽이 앞의 결과를 통째로 덮었다(규칙 상태가 되돌아가 같은 사건을 다시 보냄 · 발송 기록 소실 · 하루 상한 카운트 공유/유실).
+ *   이제 읽기-수정-쓰기를 큐의 한 단위로 하고, 단위 안에서는 같은 _state 객체를 고친 뒤 저장한다. 발송(I/O)은 단위 밖(대기열 — 아래 dispatch).
+ */
+let _chain = Promise.resolve();
+function withState(fn) {
+  const run = _chain.then(async () => { const st = load(); const r = await fn(st); save(st); return r; });
+  _chain = run.catch(() => {});
+  return run;
+}
+const _pendingSends = new Set();
+export function _resetPerfAlertsForTest({ unlink = true } = {}) { _state = null; _warmup = false; _loadError = null; _chain = Promise.resolve(); if (unlink) { try { fs.unlinkSync(FILE()); } catch { /* */ } } }
+/** 테스트 · 종료용 — 대기열에 넣은 발송의 결과 기록까지 끝날 때까지 기다린다. */
+export async function _drainPerfAlertsForTest() { while (_pendingSends.size) await Promise.allSettled([..._pendingSends]); await _chain; }
 /** 화면 · 봉투용 — 추적 수 · 오늘 상한 사용 · 발송 기록(최근 SENT_LOG_MAX — 채널 URL 없음). */
 export function perfAlertStatus() {
   const st = load();
   const tracked = Object.values(st.rules || {}).filter((x) => x?.active).length;
-  return { tracked, day: st.day, counts: st.counts || {}, sent: (st.sent || []).slice(-SENT_LOG_MAX), ...(_loadError ? { loadError: _loadError } : {}) };
+  return { tracked, day: st.day, counts: st.counts || {}, sent: (st.sent || []).slice(-SENT_LOG_MAX), pendingSends: _pendingSends.size, ...(_loadError ? { loadError: _loadError } : {}) };
 }
 
 /** 오늘(포탈 날짜) 법인 상한 사용량 — 날이 바뀌면 0 부터. */
@@ -212,19 +256,51 @@ function used(st, vc, kind, today) { return st.day === today ? (st.counts?.[vc]?
 const channelCfg = (cfg, wanted) => ({ ...cfg, channels: Object.fromEntries(Object.entries(cfg?.channels || {}).map(([k, v]) => [k, { ...v, enabled: !!v?.enabled && wanted.includes(k) }])) });
 
 /**
- * 발송 한 묶음(I/O) — 상한 · 억제 · 채널 · 이슈 · 자동 집중. 순차 발송(alerts 의 POST 를 수백 개 동시에 열지 않는다).
+ * 발송 결과 → 기록 · 재시도(순수에 가까운 상태 고치기 — withState 안에서). 결과 판정은 기존 알림 경로의 deliveryOutcome(한 채널이라도 받았으면 delivered ·
+ *   받은 채널 없이 오류면 failed · 정책상 안 보냄은 skipped). ⚠ 전 채널 실패를 ‘보냄’ 으로 적지 않는다(반증 F6).
+ *   failed 이고 사건이 이어지는 중이면 retryDelayMs(기존 규칙 — 5분 · 15분 두 번)로 다음 시도 시각을 규칙 상태에 적는다(주기 판정이 그때 다시 보낸다).
+ */
+export function recordOutcome(st, { recId, sk = null, res, outcome, rule = {}, now = Date.now(), retryDelay = null } = {}) {
+  const rec = (st.sent || []).find((x) => x.id === recId);
+  const line = Array.isArray(res) ? res.map(String).join(' · ') : String(res ?? '');
+  const result = outcome === 'delivered' ? 'sent' : outcome === 'failed' ? 'failed' : (/suppressed/.test(line) ? 'suppressed' : 'no-channel');
+  if (rec) { rec.result = result; if (result === 'failed') rec.error = capStr(line, 160); }
+  const rs = sk ? st.rules?.[sk] : null;
+  if (rs && rs.active) {
+    if (result === 'sent') { delete rs.retries; delete rs.retryAt; }
+    else if (result === 'failed' && typeof retryDelay === 'function') {
+      const cooldownMs = Math.max(0, n(rule.repeatMin) ?? 0) * 60_000 || Infinity;
+      const d = retryDelay(n(rs.retries) ?? 0, cooldownMs);
+      if (d != null) { rs.retries = (n(rs.retries) ?? 0) + 1; rs.retryAt = now + d; }
+    }
+  }
+  return result;
+}
+
+/**
+ * 발송 한 묶음 — 상한 · 억제 · 채널 · 이슈 · 자동 집중. ⚠ 반증 F6: 주기 수집 경로는 **판정 · 큐잉만** 한다 — 발송은 기존 알림 대기열(alerts.enqueueNotify — 채널별 레인 · 상한)이
+ *   하고 결과는 끝난 뒤 큐 단위로 기록한다(예전에는 fires 마다 순차 await 라 SMTP 장애면 한 주기가 수십 분 묶였다). 주기당 상한 = 기존 MAX_SEND(bmusage/notify.js) —
+ *   넘친 건은 상태를 되돌려 **다음 주기에 다시 판정**한다(조용히 버리지 않는다 · deferred 로 센다).
  * @param {Array} fires   evaluatePerfRules().fires 또는 집중 결론 한 건
  */
-async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map() }) {
+async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cycleMax = Infinity }) {
   const today = dayKey(now) || '';
-  const out = { sent: 0, capped: 0, maintenance: 0, failed: 0, issues: 0, autoFocus: 0 };
+  const out = { queued: 0, capped: 0, deferred: 0, maintenance: 0, failed: 0, issues: 0, autoFocus: 0 };
   const isEdge = !!config.agent?.centralUrl;
   const alertCfg = await D.alertConfig().catch(() => null);
-  const issueFires = [];
+  const issueFires = []; const sends = [];
   for (const f of fires) {
     const rule = rules.rules?.[f.rule] || {};
+    const sk = f.rule === 'focusEnd' ? null : `${f.rule}|${f.key}`;
+    if (sends.length >= cycleMax && alertCfg && sk) {
+      // 주기 상한 — 이번에는 보내지 않고 상태를 되돌린다(다음 주기 다시 판정 · 지속은 그대로).
+      const cur = st.rules?.[sk];
+      if (cur) st.rules[sk] = { ...cur, active: false, firedAt: f.prevState?.firedAt ?? null, ...(f.retry ? { active: true, retryAt: now } : {}) };
+      out.deferred += 1;
+      continue;
+    }
     const tg = targetsByKey.get(f.key) || f.ctx?.target || null;
-    const rec = { id: crypto.randomUUID().slice(0, 12), at: now, rule: f.rule, key: f.key, name: capStr(f.name, 120), vcenterId: f.vcenterId, title: '', channels: rule.channels || [], result: '', issue: null, autoFocus: null };
+    const rec = { id: crypto.randomUUID().slice(0, 12), at: now, rule: f.rule, key: f.key, name: capStr(f.name, 120), vcenterId: f.vcenterId, title: '', channels: rule.channels || [], result: '', issue: null, autoFocus: null, ...(f.retry ? { retry: true } : {}) };
     const mw = maintenanceFor(tg, now, rules.maintenance);
     const al = perfAlertOf({ ...f, sustain: rule.sustain, weeks: rules.baseline?.weeks }, {});
     rec.title = al.title;
@@ -233,21 +309,17 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map() }) 
     else if (!alertCfg) { rec.result = 'no-channel-config'; out.failed += 1; }
     else {
       bump(st, f.vcenterId, 'alerts', today);
-      try {
-        const r = await D.notify(al, channelCfg(alertCfg, rule.channels || []));
-        const line = Array.isArray(r) ? r.join(' · ') : String(r);
-        rec.result = /suppressed/.test(line) ? 'suppressed' : (Array.isArray(r) && r.length ? 'sent' : 'no-channel');
-        if (rec.result === 'sent') out.sent += 1;
-      } catch (e) { rec.result = 'error'; rec.error = String(e?.message || e).slice(0, 120); out.failed += 1; }
+      rec.result = 'queued';
+      sends.push({ recId: rec.id, sk, al, cfg: channelCfg(alertCfg, rule.channels || []), rule });
+      out.queued += 1;
     }
     // 이슈 — 이슈 저장소가 있는 중앙이 만든다. 엣지는 ‘원함’ 표시만(중앙이 봉투를 받을 때 자기 문지기로 판단 — bmPerfOpsPull.ingestEdgeAlertIssues).
-    if (rule.issue) {
+    if (rule.issue && !f.retry) {
       if (isEdge) rec.issue = 'pending-central';
-      else if (used(st, f.vcenterId, 'issues', today) >= (rules.daily?.issues ?? 20)) rec.issue = 'daily-cap';
-      else { issueFires.push({ ...rec, agent: config.agent?.name || '' }); }
+      else issueFires.push({ ...rec, agent: config.agent?.name || '' });
     }
     // 자동 집중 — 법인 옵트인(focus.autoCorps) · 같은 서버 재발 억제 · 하루 상한. 이 노드의 대상만(엣지 위임 서버는 그 엣지가).
-    if (rule.autoFocus && f.rule !== 'focusEnd') {
+    if (rule.autoFocus && f.rule !== 'focusEnd' && !f.retry) {
       const opted = (rules.focus?.autoCorps || []).includes(f.vcenterId);
       const lastAuto = n(st.autoAt?.[f.key]);
       const supMs = Math.max(5, n(rules.focus?.autoSuppressMin) ?? 30) * 60_000;
@@ -264,13 +336,30 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map() }) 
     st.sent = [...(st.sent || []), rec].slice(-SENT_LOG_MAX);
   }
   if (issueFires.length) {
+    // 법인별 하루 상한은 이슈 문지기가 이슈 저장소에서 센다(applyBmPerfFires — 반증 F7).
     const r = await D.applyIssues(issueFires, { now, dailyMax: rules.daily?.issues ?? 20 }).catch((e) => ({ error: String(e?.message || e) }));
-    for (const rec of st.sent.slice(-fires.length)) {
+    for (const x of issueFires) {
+      const rec = st.sent.find((y) => y.id === x.id);
+      if (!rec) continue;
       const res = r?.byId?.[rec.id];
       if (res) { rec.issue = res; if (res === 'created') bump(st, rec.vcenterId, 'issues', today); }
-      else if (issueFires.some((x) => x.id === rec.id)) rec.issue = r?.error ? 'error' : 'skipped';
+      else rec.issue = r?.error ? 'error' : 'skipped';
     }
     out.issues = Object.values(r?.byId || {}).filter((x) => x === 'created').length;
+  }
+  // 발송은 대기열로 — 결과는 끝난 뒤 큐 단위로 기록(이 함수는 기다리지 않는다).
+  for (const job of sends) {
+    const p = Promise.resolve().then(() => D.notify(job.al, job.cfg))
+      .catch((e) => [`queue:err ${String(e?.message || e).slice(0, 120)}`])
+      .then(async (res) => {
+        const outcome = await D.outcome(res).catch(() => 'failed');
+        const retryDelay = await D.retryDelay().catch(() => null);
+        const supMs = Math.max(0, n(job.cfg?.suppressWindowMin) ?? 5) * 60_000;
+        await withState((s2) => recordOutcome(s2, { recId: job.recId, sk: job.sk, res, outcome, rule: job.rule, now: D.clock(), retryDelay: retryDelay ? (a, c) => retryDelay(a, c, supMs) : null }));
+      })
+      .catch(() => {})
+      .finally(() => _pendingSends.delete(p));
+    _pendingSends.add(p);
   }
   return out;
 }
@@ -278,36 +367,45 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map() }) 
 function depsOf(deps = {}) {
   return {
     alertConfig: async () => (await import('../alerts.js')).loadAlertConfig(),
-    notify: async (al, cfg) => (await import('../alerts.js')).notify(al, cfg),
+    notify: async (al, cfg) => (await import('../alerts.js')).enqueueNotify(al, cfg),
+    outcome: async (res) => (await import('../alerts.js')).deliveryOutcome(res),
+    retryDelay: async () => (await import('../alerts.js')).retryDelayMs,
     applyIssues: async (fires, o) => (await import('../issues/alertIssues.js')).applyBmPerfFires(fires, o),
     startFocus: async (o) => (await import('./focus/run.js')).startFocusLocal(o),
     isMock: async () => (await import('../mock/demo/flags.js')).isMockMode(),
+    clock: () => Date.now(),   // 발송 결과를 받은 시각(재시도 기준 — 기존 경로와 같이 ‘결과를 받은 시각’)
     ...deps,
   };
 }
 
 /**
  * 한 주기(폴러가 적재 · 소모품 판정 뒤 부른다). 켠 규칙이 없으면 판정도 하지 않는다(상태를 건드리지 않는다 — 다시 켤 때 예전 사건이 한꺼번에 나가지 않게).
+ *   발송은 기다리지 않는다(대기열) — 돌려주는 queued 는 ‘대기열에 넣은 수’ 이고 결과는 발송 기록(sent)의 result 가 나중에 바뀐다.
  * @param {Array} items  [{ key, name, vcenterId, entry, health, dev, profile, target }]
  */
-export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps = {}, dryRun = false } = {}) {
+export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps = {}, dryRun = false, cycleMax = MAX_SEND } = {}) {
   const D = depsOf(deps);
   const on = RULE_IDS.filter((id) => id !== 'focusEnd' && rules?.rules?.[id]?.on);
   if (!on.length) return { ok: true, skipped: 'no-rules' };
-  if (!dryRun && await D.isMock().catch(() => false)) return { ok: true, skipped: 'demo' };
-  const st = load();
-  const { next, fires, counts } = evaluatePerfRules(items, rules.rules, st.rules, now);
-  if (dryRun) return { ok: true, dryRun: true, counts, fires: fires.map((f) => ({ rule: f.rule, key: f.key, name: f.name, vcenterId: f.vcenterId, title: perfAlertOf(f).title })) };
-  // 상태가 바뀐 적 없는 첫 주기(손상 뒤 warmup)는 기준만 잡는다.
-  if (_warmup) { _warmup = false; save({ ...st, rules: next }); return { ok: true, warmup: true, counts }; }
-  const st2 = { ...st, rules: next };
-  const targetsByKey = new Map(items.filter((x) => x?.target).map((x) => [x.key, x.target]));
-  const out = fires.length ? await dispatch(fires, { rules, st: st2, now, D, targetsByKey }) : {};
-  save(st2);
-  return { ok: true, counts, fires: fires.length, ...out };
+  if (dryRun) {
+    // 시험 실행(반증 F10): 화면 문구대로 **지속 1주기 · 빈 상태**로 지금 값에 대 본다(재발 억제 · 진행 중 사건 무시) — 상태 파일을 읽지도 고치지도 않는다.
+    const r1 = Object.fromEntries(Object.entries(rules.rules || {}).map(([id, x]) => [id, { ...x, sustain: 1, repeatMin: 0 }]));
+    const { fires, counts } = evaluatePerfRules(items, r1, {}, now);
+    return { ok: true, dryRun: true, counts, fires: fires.map((f) => ({ rule: f.rule, key: f.key, name: f.name, vcenterId: f.vcenterId, title: perfAlertOf(f).title })) };
+  }
+  if (await D.isMock().catch(() => false)) return { ok: true, skipped: 'demo' };
+  return withState(async (st) => {
+    const { next, fires, counts } = evaluatePerfRules(items, rules.rules, st.rules, now);
+    st.rules = next;
+    // 상태가 바뀐 적 없는 첫 주기(손상 뒤 warmup)는 기준만 잡는다.
+    if (_warmup) { _warmup = false; return { ok: true, warmup: true, counts }; }
+    const targetsByKey = new Map(items.filter((x) => x?.target).map((x) => [x.key, x.target]));
+    const out = fires.length ? await dispatch(fires, { rules, st, now, D, targetsByKey, cycleMax }) : {};
+    return { ok: true, counts, fires: fires.length, ...out };
+  });
 }
 
-/** 집중 결론 규칙 — 세션이 끝날 때 한 번(focus/run.js onFocusEnd 구독). */
+/** 집중 결론 규칙 — 세션이 끝날 때 한 번(focus/run.js onFocusEnd 구독). 같은 직렬 큐. */
 export async function runFocusEndAlert(ev, { rules, now = Date.now(), deps = {} } = {}) {
   const rule = rules?.rules?.focusEnd;
   if (!rule?.on) return { ok: true, skipped: 'off' };
@@ -317,10 +415,10 @@ export async function runFocusEndAlert(ev, { rules, now = Date.now(), deps = {} 
   const s = ev.summary || {};
   if (!['done', 'stopped', 'auth'].includes(ev.status)) return { ok: true, skipped: 'status' };
   if (rule.cond !== 'any' && (!s.verdictTo || s.verdictTo === 'ok')) return { ok: true, skipped: 'returned-ok' };
-  const st = load();
-  const out = await dispatch([{ rule: 'focusEnd', key: ev.key, name: ev.name, vcenterId: String(ev.vcenterId || ''), ctx: { summary: s, id: ev.id, target: ev.target } }], { rules, st, now, D });
-  save(st);
-  return { ok: true, ...out };
+  return withState(async (st) => {
+    const out = await dispatch([{ rule: 'focusEnd', key: ev.key, name: ev.name, vcenterId: String(ev.vcenterId || ''), ctx: { summary: s, id: ev.id, target: ev.target } }], { rules, st, now, D });
+    return { ok: true, ...out };
+  });
 }
 
 /** 베이스라인 지표 — 웹 · 테스트 공용(같은 목록). */

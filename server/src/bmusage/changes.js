@@ -58,7 +58,9 @@ export function diffChangeFacts(prev, cur = {}, { now = Date.now() } = {}) {
     if (os.spool) next.spool = os.spool;
     if (Array.isArray(os.dnf) && os.dnf.length) next.dnfTop = os.dnf[0];
   }
-  if (cur.fw) next.fw = cur.fw;
+  // 펌웨어(반증 L6): 인벤토리 수집에서 한 부품 GET 이 실패하면 그 부품이 목록에서 빠진다(idrac/redfish.js fetchFirmwareInventory — 표지 없음) ·
+  //   64개 상한 밖 부품도 드나든다 → **빠진 부품은 못 읽음**으로 보고 직전 버전을 들고 간다(‘버전 → 없음’ 이벤트를 지어내지 않는다).
+  if (cur.fw) next.fw = { ...cur.fw, list: { ...(P?.fw?.list || {}), ...(cur.fw.list || {}) } };
   if (cur.cvp) next.cvp = cur.cvp;
   if (cur.health) next.health = cur.health;
   // sysctl 전체 CRC 휘발성 판정(연속 바뀜)
@@ -101,7 +103,7 @@ export function diffChangeFacts(prev, cur = {}, { now = Date.now() } = {}) {
     const a = P.fw.list || {}; const b = cur.fw.list || {};
     if (Object.keys(a).length && Object.keys(b).length) {
       for (const nm of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) {
-        if (a[nm] === b[nm]) continue;
+        if (a[nm] === b[nm] || b[nm] == null) continue;   // 이번에 없는 부품 = 못 읽음(위 병합 — 비교하지 않는다)
         const before = a[nm] == null ? '없음' : str(a[nm], 40); const after = b[nm] == null ? '없음' : str(b[nm], 40);
         // BIOS · iDRAC 은 위에서 이미 적었다(펌웨어 목록에도 같은 버전 변화로 나온다 — 두 번 적지 않는다).
         if (events.some((e) => e.kind === 'firmware' && e.before === before && e.after === after)) continue;
@@ -117,8 +119,10 @@ export function diffChangeFacts(prev, cur = {}, { now = Date.now() } = {}) {
   }
   if (cur.health && P.health) {
     for (const cell of Object.keys(cur.health).sort()) {
-      const a = P.health[cell]?.code; const b = cur.health[cell]?.code;
-      if (!a || !b || a === b) continue;
+      // 반증 F5: 못 읽음(missing · perm) 전이는 변경이 아니다 — 직전에 읽은 code(hold)와 이번에 읽은 code 만 비교한다.
+      const pa = P.health[cell]; const b = cur.health[cell]?.code;
+      const a = pa ? (UNREAD_HEALTH.has(pa.code) ? pa.hold : pa.code) : null;
+      if (!a || !b || UNREAD_HEALTH.has(b) || a === b) continue;
       events.push({ kind: 'health', item: str(cell, 16), before: a, after: b });
     }
   }
@@ -132,11 +136,16 @@ export function diffChangeFacts(prev, cur = {}, { now = Date.now() } = {}) {
  * @param {object|null} prevHealth  { cell: { code, since } }
  * @param {object} cells           judgeHealth().cells
  */
+export const UNREAD_HEALTH = new Set(['missing', 'perm']);
 export function healthSince(prevHealth, cells = {}, now = Date.now()) {
   const out = {};
   for (const [k, c] of Object.entries(cells || {})) {
     const p = prevHealth?.[k];
-    out[k] = { code: c?.code || 'missing', since: p && p.code === c?.code && n(p.since) != null ? p.since : now };
+    const code = c?.code || 'missing';
+    // 반증 F5: 못 읽음(missing · perm)은 판정 보류 — 직전에 읽은 code(hold)와 그 since 를 들고 간다(한 주기 결측으로 ‘며칠째’ 가 0 이 되지 않게).
+    const base = p ? (UNREAD_HEALTH.has(p.code) ? (p.hold ?? null) : p.code) : null;
+    if (UNREAD_HEALTH.has(code)) { out[k] = { code, since: p && n(p.since) != null ? p.since : now, ...(base ? { hold: base } : {}) }; continue; }
+    out[k] = { code, since: p && base === code && n(p.since) != null ? p.since : now };
   }
   return out;
 }

@@ -575,6 +575,8 @@ function originField(o) {
       kind: o.kind, alertKey: t(o.alertKey, 300), alertKind: t(o.alertKind, 32), title: t(o.title, 200), deviceName: t(o.deviceName, 200),
       partKeys: keys(o.partKeys), resolved: [], reopen: Math.max(0, Math.min(9999, Math.trunc(Number(o.reopen) || 0))),
       resolvedAt: Number.isFinite(Number(o.resolvedAt)) && Number(o.resolvedAt) > 0 ? Number(o.resolvedAt) : null,
+      // v2.929(반증 F3): 베어메탈 성능 — 이 열쇠로 받은 가장 늦은 발송 시각(그보다 이른 건은 다시 쓰지 않는다 · partKeys 64개 상한에서 밀려난 id 가 ‘새 건’ 이 되지 않게)
+      ...(o.kind === 'bmperf' ? { lastAt: Number.isFinite(Number(o.lastAt)) && Number(o.lastAt) > 0 ? Number(o.lastAt) : null, lastIds: keys(o.lastIds) } : {}),
     };
   }
   return {
@@ -613,9 +615,9 @@ export function patchOrigin(key, fn) {
   return replace(c, next, [], 'system', { touch: false });
 }
 /** 오늘(포탈 날짜) 자동 등록으로 만든 이슈 수 — 하루 상한 판정(상태 파일 없이 이슈에서 센다). */
-export function originCreatedSince(kind, sinceMs) {
+export function originCreatedSince(kind, sinceMs, pred = null) {
   let n = 0;
-  for (const x of load().issues) if (x.origin?.kind === kind && x.createdAt >= sinceMs) n += 1;
+  for (const x of load().issues) if (x.origin?.kind === kind && x.createdAt >= sinceMs && (!pred || pred(x))) n += 1;   // pred — v2.929 법인별 상한(베어메탈 성능)
   return n;
 }
 

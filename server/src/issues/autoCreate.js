@@ -357,10 +357,16 @@ async function vcenterOfPart(p, ctx) {
     const byTag = tag ? ctx.byTag.get(tag) : '';
     if (byTag) return { id: byTag, name: ctx.names.get(byTag) || byTag, via: 'serviceTag' };
     const ids = ctx.agentIds(p.agent);
+    // v2.929(반증 F9): 엣지 봉투가 대상의 법인을 말하면(claimedVcenterId) **그 엣지가 담당하는 vCenter 일 때만** 받는다(엣지 주장 ∩ 중앙이 아는 담당).
+    //   파트 장애는 claimed 가 없어 예전과 같다.
+    const claimed = t(p.claimedVcenterId);
+    if (claimed && ids.includes(claimed)) return { id: claimed, name: ctx.names.get(claimed) || claimed, via: 'agent-claim' };
     if (ids.length === 1) return { id: ids[0], name: ctx.names.get(ids[0]) || ids[0], via: 'agent' };
     return { id: '', name: '', via: 'none' };
   } catch { return { id: '', name: '', via: 'none' }; }
 }
+/** 이슈 법인 결정(위 vcenterOfPart 하나 — 베어메탈 성능 엣지 발송도 이것을 쓴다: 두 벌 금지). p = { agent, scope, deviceKeyKind, deviceKey, claimedVcenterId? }. */
+export async function resolveIssueVcenter(p, ctx = {}) { return vcenterOfPart(p || {}, ctx); }
 
 /**
  * 전이를 받아 이슈를 만들고 고친다. 던지지 않는다(폴러를 막지 않는다).

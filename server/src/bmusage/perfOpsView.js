@@ -27,6 +27,8 @@ export async function localPerfOps(mode, { key, q = {}, now = Date.now(), deps =
     changes: async (o) => (await import('./opsDb.js')).changeEventsRange(o),
     focusRange: async (o) => (await import('./opsDb.js')).focusSamplesInRange(o),
     band: async (o) => (await import('./baseline.js')).readBandSeries(o),
+    trend: async (o) => (await import('./trendQuery.js')).trendFor(o),
+    outside: async (pts, series) => (await import('./baseline.js')).outsideOf(pts, series),
     compare: async (o) => (await import('./compare.js')).compareFor(o),
     ...deps,
   };
@@ -45,7 +47,16 @@ export async function localPerfOps(mode, { key, q = {}, now = Date.now(), deps =
   }
   if (mode === 'baseline') {
     const [settings, rules] = [await D.settings(), await D.rules()];
-    return D.band({ agent, key, metric: String(q.metric || 'cpu_pct'), from: q.from, to: q.to, cfg: rules.baseline, intervalMs: settings.intervalMs, now });
+    const metric = String(q.metric || 'cpu_pct');
+    const band = await D.band({ agent, key, metric, from: q.from, to: q.to, cfg: rules.baseline, intervalMs: settings.intervalMs, now });
+    if (!band?.ok) return band;
+    // 띠 밖 점은 서버가 판정한다(반증 L3) — 같은 창의 추이 점(trendFor — 화면 선과 같은 응답)을 같은 deviationOf 로 띠에 대 본다.
+    let outside = null;
+    try {
+      const tr = await D.trend({ agent, key, q: { metric, from: band.from, to: band.to }, settings, now });
+      outside = tr?.ok ? await D.outside(tr.points || [], band.series || []) : null;
+    } catch { outside = null; }
+    return { ...band, outside };
   }
   if (mode === 'compare') {
     const [settings, rules] = [await D.settings(), await D.rules()];

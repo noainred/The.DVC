@@ -17,8 +17,8 @@ import './bmOps.css';
 import './bmPerfOps.css';
 
 const NUM_SECTIONS = Object.freeze([
-  { k: 'daily', title: '하루 상한(법인당)', fields: [['alerts', '알림'], ['issues', '이슈'], ['autoFocus', '자동 집중']] },
-  { k: 'focus', title: '집중 모니터링', fields: [['intervalS', '간격(초 · 하한 30)'], ['durationMin', '길이(분 · 상한 60)'], ['corpMax', '법인당 동시'], ['keepDays', '보관(일)'], ['autoSuppressMin', '같은 서버 재발 억제(분)']] },
+  { k: 'daily', title: '하루 상한(법인당)', fields: [['alerts', '알림'], ['issues', '이슈'], ['autoFocus', '자동 집중'], ['manualFocus', '수동 집중']] },
+  { k: 'focus', title: '집중 모니터링', fields: [['intervalS', '간격(초 · 하한 30)'], ['durationMin', '길이(분 · 상한 60)'], ['corpMax', '법인당 동시'], ['nodeMax', '이 노드 전체 동시'], ['keepDays', '보관(일)'], ['autoSuppressMin', '같은 서버 재발 억제(분)']] },
   { k: 'baseline', title: '베이스라인', fields: [['weeks', '지난 주 수'], ['bandPct', '띠 ±%'], ['minWeeks', '최소 표본 주'], ['maxMissingPct', '결측 상한 %']] },
   { k: 'health', title: '점검 소모품 기준', fields: [['chronyMs', '시각 오프셋 ms'], ['fdPct', 'FD %'], ['conntrackPct', 'conntrack %'], ['dmesgErr24h', '24시간 커널 오류'], ['certDays', '인증서 남은 일']] },
   { k: 'changes', title: '변경 이벤트', fields: [['keepDays', '보관(일)']] },

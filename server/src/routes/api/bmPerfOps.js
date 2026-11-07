@@ -186,7 +186,14 @@ export async function bmRulesRead(req, snap, deps = {}) {
   const scopedRules = { ...rules, rules: Object.fromEntries(Object.entries(rules.rules || {}).map(([id, x]) => [id, { ...x, corpsOff: keepVc(x.corpsOff) }])), focus: { ...rules.focus, autoCorps: keepVc(rules.focus?.autoCorps) } };
   const st = A.perfAlertStatus();
   const sent = [...(st.sent || []).map((x) => ({ ...x, agent: config.agent?.name || '', via: 'local' }))];
-  for (const rec of await D.listEdgeBmUsage()) for (const x of rec?.snap?.perfAlertSent || []) sent.push({ ...x, agent: rec.agent, via: 'edge' });
+  // 엣지 발송 기록 — 서버 키 · 법인 · 제목은 중앙이 다시 세운다(반증 F9: 엣지가 준 vcenterId 로 범위를 가르지 않는다 · 그 엣지 대상 밖 키는 버린다).
+  const { centralizeEdgeSent } = await import('../../central/bmPerfOpsPull.js');
+  let edgeDropped = 0;
+  for (const rec of await D.listEdgeBmUsage()) {
+    const c = await centralizeEdgeSent(rec.agent, rec?.snap || {}, deps);
+    edgeDropped += c.dropped;
+    for (const x of c.list) sent.push({ ...x, agent: rec.agent, via: 'edge' });
+  }
   let sentShown = applyScope(sent, allowed).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 300);
   if (!isAdmin) { const tg = await D.currentTargets().catch(() => ({ targets: [] })); sentShown = maskBmList(sentShown, addressMatcher(await D.bmAddressHosts(tg))).map((x) => ({ ...x, title: scrubIp(x.title) })); }
   const loadError = R.perfRulesLoadError();
@@ -195,7 +202,7 @@ export async function bmRulesRead(req, snap, deps = {}) {
     ...(loadError ? { loadError: { at: loadError.at, reason: isAdmin ? loadError.reason : '설정 파일을 읽지 못했습니다' } } : {}),
     status: { tracked: st.tracked, day: st.day, counts: allowed ? Object.fromEntries(Object.entries(st.counts || {}).filter(([vc]) => allowed.has(vc))) : st.counts, ...(st.loadError ? { stateError: st.loadError.reason } : {}),
       slots: slotStatus(), focusActive: F.focusActiveCount(), focusQueued: F.focusQueuedCount(), last: bmUsageStatus().last?.perfAlerts || null },
-    sent: sentShown,
+    sent: sentShown, ...(edgeDropped && isAdmin ? { edgeSentDropped: edgeDropped } : {}),
     // 정직 기록 — 이 노드 전용 설정(엣지 배포는 다음 판) · 유지보수 창 억제 원천 없음.
     scope: config.agent?.centralUrl ? 'edge-local' : 'central-local', maintenanceSource: 'none',
     readOnly: !isAdmin || !!allowed, ...(isAdmin ? {} : { addressHidden: true }),
