@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../../config.js';
-import { analyzeOnboardRows, analysisSig, edgeRowFromPlan } from './importAnalyze.js';
+import { analyzeOnboardRows, analysisSig, edgeRowFromPlan, osWriteOf } from './importAnalyze.js';
 import { atomicWriteFileSync } from '../../util/atomicWrite.js';
 import { parseOnboardFile } from './importParse.js';
 
@@ -160,17 +160,21 @@ export function applyOnboard(rows = [], { D, by = '', now = Date.now(), isEdge =
     const p = r.plan;
     if (p.where === 'edge') {
       edgeUpserts.push({ agent: p.agent, row: edgeRowFromPlan({ name: p.name, vc: p.vc, tag: p.tag, idracHost: p.idrac?.host, osHost: p.os?.host, osPort: p.os?.port,
-        mounts: p.os?.mounts || [], enabled: p.enabled !== false, note: p.note, cls: p.cls, apps: p.apps, role: p.role, ...p.edgeNames }, p.agent) });
+        mounts: p.os?.mounts || [], enabled: p.enabled !== false, note: p.note, cls: p.cls, apps: p.apps, role: p.role, ...p.edgeNames,
+        // r3(R-N1): 묶음 행은 라우트가 소유자 등급 + OTP 를 통과시킨 뒤에만 여기 온다(plan.binds) — 그 승인을 행에 싣는다. 묶음 칸이 그대로인 행은 앞 승인을 잇는다.
+        bindOk: p.binds === true || p.edgeBindKeep === true }, p.agent) });
       if (p.moveToEdge) { if (p.os?.id) osRemove.push(p.os.id); if (p.idrac?.existing && p.idrac.id) idrRemove.push(p.idrac.id); }
       continue;
     }
     if (p.os) {
       const ex = p.os.id ? osRaw.get(p.os.id) : null;
       osInputs.push({
-        ...(ex ? { id: ex.id } : {}), name: p.name, host: p.os.host, port: p.os.port, username: p.os.username || ex?.username || 'root', mounts: p.os.mounts,
+        ...(ex ? { id: ex.id } : {}), name: p.name, ...osWriteOf(p.os, ex), mounts: p.os.mounts,
         agent: ex ? ex.agent || '' : '', dispatch: ex ? ex.dispatch : undefined,
         enabled: p.enabled === null ? (ex ? ex.enabled !== false : true) : p.enabled,
-        ...(p.os.keepCred ? {} : { keyRef: p.os.keyRef || '', credRef: p.os.credRef || '', osAuth: p.os.osAuth || '' }),
+        // r3(R-N1): 등록부 choke point 는 bindApproved 가 있을 때만 묶는다 — 묶음 행(plan.binds)은 라우트가 소유자 등급 + OTP 를 통과시킨 뒤에만
+        //   여기 온다(엣지 적용은 중앙이 승인한 행 bindOk 만 plan.binds 가 된다). 판정이 '묶음 아님' 이면 세우지 않는다.
+        bindApproved: p.binds === true,
         vcenterId: p.vc, collectVia: isEdge ? 'edge' : p.via, ...(p.note ? { note: p.note } : {}), onboardAt: now,
       });
     }

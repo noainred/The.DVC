@@ -38,7 +38,7 @@ function load() {
         if (!k || k.length > 64 || !v || typeof v !== 'object') continue;
         const rows = (Array.isArray(v.rows) ? v.rows : []).filter((r) => r && typeof r === 'object' && !Array.isArray(r)).slice(0, MAX_EDGE_ROWS).map((r) => edgeRowFromPlan({
           name: r.name, vc: r.corp, tag: r.serviceTag, idracHost: r.idracHost, idracCred: r.idracCred, osHost: r.osHost, osPort: r.osPort, osCred: r.osCred, osUser: r.osUser, osKey: r.osKey,
-          mounts: r.mounts, enabled: r.enabled, note: r.note, cls: r.cls, apps: r.apps, role: r.role,
+          mounts: r.mounts, enabled: r.enabled, note: r.note, cls: r.cls, apps: r.apps, role: r.role, bindOk: r.bindOk,
         }, k)).filter((r) => r.name);
         // 반증 F14: 배포에서 뺐지만 엣지가 아직 반영(적용 서명 확인)하지 않은 행 — 그 동안 같은 서버의 central 등록을 막는다.
         const pending = (Array.isArray(v.pending) ? v.pending : []).filter((x) => x && typeof x === 'object' && x.name).slice(0, MAX_EDGE_ROWS)

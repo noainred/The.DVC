@@ -131,8 +131,8 @@ test('② F2 — bmstor 주기 수집의 인증 정지는 해석 뒤 자격으�
   for (const s of BM.listBmServersRaw()) BM.removeBmServer(s.id);
   const k1 = KS.addKey({ name: 'f2a', privateKey: F.ed25519Key().pem }, { by: 'own' }); const k2 = KS.addKey({ name: 'f2b', privateKey: F.ed25519Key().pem }, { by: 'own' });
   const acc = KS.saveAccount({ name: 'f2-acc', kind: 'os', corp: '', username: 'f2u', password: 'F2-pass-1' }, { by: 'own' });
-  BM.saveBmServer({ name: 'by-key', host: '127.0.0.1', port: SSHD.port, username: 'mon', mounts: ['/'], keyRef: k1.key.id });
-  BM.saveBmServer({ name: 'by-acc', host: '127.0.0.1', port: SSHD.port, username: 'x', mounts: ['/'], credRef: acc.account.id });
+  BM.saveBmServer({ name: 'by-key', host: '127.0.0.1', port: SSHD.port, username: 'mon', mounts: ['/'], keyRef: k1.key.id, bindApproved: true });
+  BM.saveBmServer({ name: 'by-acc', host: '127.0.0.1', port: SSHD.port, username: 'x', mounts: ['/'], credRef: acc.account.id, bindApproved: true });
   const PL = await import('../src/bmstor/poller.js');
   const n0 = SSHD.seen.length;
   await PL.bmCollectNow('interval');
@@ -242,7 +242,8 @@ test('⑤ F6 · F7 · F8 · F9 · L-9 — 이동은 배포 목록 먼저(실패�
   const man = BM.listBmServersRaw().find((x) => x.name === 'manual-db');
   assert.equal(man.host, '10.50.0.5'); assert.equal(man.password, 'Hand-Typed-PW', 'F8: 손으로 둔 항목은 이름이 같아도 덮지 않는다');
   // F7: iDRAC 단계 실패 — 이미 만든 OS 항목도 '만든 항목' 으로 남아, 배포에서 빠지면 지운다
-  const rowsE = [{ name: 'e7', corp: 'vcE', serviceTag: 'TAGE7', idracHost: '10.82.0.1', idracCred: 'glob-idrac', osHost: '10.82.0.2', osUser: 'mon', osKey: 'password', mounts: ['/'], enabled: true }];
+  // r3: 공통 계정 이름을 쓰는 배포 행 = 중앙이 소유자 + OTP 로 승인한 행(bindOk) — 승인 없는 행은 엣지가 거부한다(아래 ⑪ h20).
+  const rowsE = [{ name: 'e7', corp: 'vcE', serviceTag: 'TAGE7', idracHost: '10.82.0.1', idracCred: 'glob-idrac', osHost: '10.82.0.2', osUser: 'mon', osKey: 'password', mounts: ['/'], enabled: true, bindOk: true }];
   const Dfail = { ...D, IDR: { ...D.IDR, importServers: () => ({ ok: false, reason: 'boom' }) } };
   const f7 = await EA.applyEdgeDeployment(rowsE, { sig: 'c'.repeat(32), D: Dfail, corps, myCorps: ['vcE'] });
   assert.equal(f7.ok, false);
@@ -349,4 +350,189 @@ test('⑨ 소유자 CSV 적용 — 묶음 행이 있으면 본인 OTP(서명 대
   assert.equal(adm.j.rows[0].action, 'unchanged', adm.txt);
   const moved = csv([HDR, 'own1,KR-SEL,,,,10.85.0.2,22,glob-ops,,central,,,,/,,']).toString('base64');
   assert.equal((await call('adm', 'POST', '/tools/bm-usage/onboard/analyze', { fileName: 'o.csv', data: moved })).j.rows[0].code, 'bind-owner-only');
+});
+
+/* ── r3 재검증 R-N1 — 판정 코어 하나(bindRule) + 등록부 choke point(bindApproved) ─────────────────────────────── */
+// ⑧ 이 범위 계정 목록을 정확히 보므로 vcA 공통 계정은 ⑩ 에서 만든다(시험 순서대로 돈다).
+let KR = null;
+const krAcc = () => { if (!KR) { KR = KS.saveAccount({ name: 'kr-ops-r3', kind: 'os', corp: 'vcA', username: 'svcmon', password: 'TopSecret-KR-1' }, { by: 'own' }); assert.ok(KR.ok, KR.reason); } return KR; };
+const rawOf = (name) => BM.listBmServersRaw().find((x) => x.name === name);
+
+test('⑩ r3 R-N1(h18) — 소유자가 묶은 서버(credRef + osAuth=password)를 비소유자 · 범위 관리자가 os_cred 빈칸 + os_key=password + 새 주소로 갱신 → 분석 bind-owner-only · 적용 0 · 새 주소로 나간 인증 0', async (t) => {
+  const call = await api(t);
+  const EVIL = await fakeSshd(); t.after(() => EVIL.close());
+  krAcc();
+  const up = async (u, line) => {
+    const body = { fileName: 'x.csv', data: csv([HDR, line]).toString('base64') };
+    const an = await call(u, 'POST', '/tools/bm-usage/onboard/analyze', body);
+    const ap = await call(u, 'POST', '/tools/bm-usage/onboard/apply', { ...body, sig: an.j.sig });
+    return { row: an.j.rows?.[0] || {}, an, ap };
+  };
+  for (const [u, name] of [['adm', 'rn1-adm'], ['sa', 'rn1-sa']]) {
+    // 소유자가 묶어 둔 상태(소유자 + OTP 를 통과한 쓰기와 같은 결과 — 승인된 쓰기로 만든다)
+    const s0 = BM.saveBmServer({ name, host: '127.0.0.1', port: SSHD.port, username: 'svcmon', mounts: ['/'], credRef: KR.account.id, osAuth: 'password', vcenterId: 'vcA', collectVia: 'central', bindApproved: true });
+    assert.equal(s0.ok, true, s0.reason);
+    // ① R-N1 행 — 계정 · 키 이름은 쓰지 않지만 기존 공통 계정을 새 주소로 잇는다 = 묶음 → 소유자만
+    const a = await up(u, `${name},KR-SEL,,,,127.0.0.1,${EVIL.port},,password,central,,,,/,,`);
+    assert.equal(a.row.code, 'bind-owner-only', `${u}: ${a.row.reason}`);
+    assert.equal(a.ap.j.applied?.os || 0, 0, a.ap.txt);
+    const e1 = rawOf(name);
+    assert.equal(e1.port, SSHD.port, `${u}: 주소가 바뀌지 않았다`); assert.equal(e1.credRef, KR.account.id, `${u}: 소유자 묶음 그대로`);
+    // ② 같은 주소에서 인증 방식만 바꾸기(공통 계정이 있는 항목 — 키 우선 ↔ 비밀번호)도 묶음(bm-storage 라우트와 같은 판정)
+    const a2 = await up(u, `${name},KR-SEL,,,,127.0.0.1,${SSHD.port},,,central,,,,/,,`);
+    assert.notEqual(a2.row.code, 'bind-owner-only', `${u}: 칸을 비운 같은 주소 행은 묶음이 아니다 ${a2.an.txt}`);
+    // ③ bm-storage 라우트 — 클라이언트가 보낸 bindApproved 는 버린다: 참조를 다시 주면 403(소유자 게이트) · 참조 없이 주소만 바꾸면 저장되지만 참조는 버려진다
+    if (u === 'adm') {
+      const f1 = await call(u, 'POST', '/tools/bm-storage/servers', { id: e1.id, name, host: '127.0.0.1', port: EVIL.port, username: 'svcmon', mounts: ['/'], credRef: KR.account.id, osAuth: 'password', bindApproved: true });
+      assert.equal(f1.s, 403, f1.txt); assert.equal(f1.j.requiredOwner, true);
+      const f2 = await call(u, 'POST', '/tools/bm-storage/servers', { id: e1.id, name, host: '127.0.0.1', port: EVIL.port, username: 'svcmon', mounts: ['/'], osAuth: 'password', bindApproved: true });
+      assert.equal(f2.s, 200, f2.txt); assert.deepEqual(f2.j.droppedSecrets, ['credRef']);
+      assert.equal(rawOf(name).credRef, undefined, '클라이언트 bindApproved 로는 묶음이 남지 않는다');
+    } else {
+      // ④ keepCred(os_cred · os_key 둘 다 빈칸) 이동 — 묶음이 아니라 적용되지만 등록부가 참조를 버린다(choke point · secretCarry)
+      const a4 = await up(u, `${name},KR-SEL,,,,127.0.0.1,${EVIL.port},,,central,,,,/,,`);
+      assert.equal(a4.row.action, 'update', a4.an.txt); assert.equal(a4.ap.s, 200, a4.ap.txt);
+      const e4 = rawOf(name);
+      assert.equal(e4.port, EVIL.port); assert.equal(e4.credRef, undefined, 'keepCred 이동은 참조를 잇지 않는다');
+    }
+    // 연결 시험(그 사용자) — 새 주소로 공통 계정 비밀번호가 나가지 않는다
+    const tr = await call(u, 'POST', '/tools/bm-usage/onboard/test', { id: rawOf(name).id });
+    assert.ok(tr.s === 200 || tr.s === 400, tr.txt);
+    BM.removeBmServer(rawOf(name).id);   // 다음 사용자 행이 같은 공격 주소를 쓴다(주소 겹침 판정과 섞이지 않게)
+  }
+  assert.deepEqual(EVIL.seen.filter((x) => x.method === 'password' || x.method === 'publickey'), [], '공격자 주소가 받은 인증 0');
+  assert.equal(EVIL.seen.some((x) => x.password === 'TopSecret-KR-1'), false);
+});
+
+test('⑪ r3 R-N1(h20) — 등록부 choke point: 묶음 쓰기는 bindApproved 가 있을 때만 · 주소 이동은 참조를 버리고 같은 주소는 기존 유지 · 떼기는 된다 · 일괄 적용 · 온보딩 적용 · 엣지 적용(중앙 승인 bindOk 행만)도 같은 함수', async () => {
+  krAcc();
+  const base = { name: 'cp1', host: '10.90.0.1', port: 22, username: 'svcmon', mounts: ['/'] };
+  const id = BM.saveBmServer({ ...base, credRef: KR.account.id, osAuth: 'password', bindApproved: true }).server.id;
+  const raw = () => BM.listBmServersRaw().find((x) => x.id === id);
+  const rebind = () => BM.saveBmServer({ ...base, id, credRef: KR.account.id, osAuth: 'password', keyRef: '', bindApproved: true });
+  // (a) h20: 주소 이동 + 같은 credRef 를 명시로 다시 줌(온보딩 적용이 보내던 꼴) + 승인 없음 → 버림
+  for (const mv of [{ host: '10.90.0.66' }, { port: 2222 }, { username: 'other' }]) {
+    rebind();
+    const r = BM.saveBmServer({ ...base, id, ...mv, credRef: KR.account.id, keyRef: '', osAuth: 'password' });
+    assert.equal(r.ok, true); assert.equal(r.bindRefused, true, JSON.stringify(mv)); assert.deepEqual(r.droppedSecrets, ['credRef']);
+    assert.equal(raw().credRef, undefined, `${JSON.stringify(mv)}: 승인 없는 이동은 참조를 버린다`);
+  }
+  rebind();
+  assert.equal(BM.saveBmServer({ ...base, id, host: '10.90.0.66', credRef: KR.account.id, bindApproved: 'true' }).bindRefused, true, '엄격한 true 만 승인');
+  assert.equal(raw().credRef, undefined);
+  // (b) 승인된 쓰기(게이트 통과)는 이동해도 그 값
+  rebind();
+  let r = BM.saveBmServer({ ...base, id, host: '10.90.0.66', credRef: KR.account.id, keyRef: '', osAuth: 'password', bindApproved: true });
+  assert.equal(r.bindRefused, undefined); assert.equal(raw().credRef, KR.account.id);
+  assert.equal('bindApproved' in raw(), false, '승인 표지는 저장하지 않는다');
+  // (c) 같은 주소 — 인증 방식 변경 · 다른 참조는 승인 없으면 기존 유지 / (d) 떼기는 묶음이 아니다
+  rebind();
+  r = BM.saveBmServer({ ...base, id, osAuth: '' });
+  assert.equal(r.bindRefused, true); assert.equal(raw().osAuth, 'password'); assert.equal(raw().credRef, KR.account.id);
+  r = BM.saveBmServer({ ...base, id, credRef: GLOB.account.id });
+  assert.equal(r.bindRefused, true); assert.equal(raw().credRef, KR.account.id, '다른 참조로 바꾸기 — 기존 유지');
+  r = BM.saveBmServer({ ...base, id, credRef: '' });
+  assert.equal(r.bindRefused, undefined); assert.equal(raw().credRef, undefined, '떼기는 된다'); assert.equal(r.droppedSecrets, undefined);
+  // (e) 새 항목 + 참조 + 승인 없음 → 참조 없이 저장
+  r = BM.saveBmServer({ name: 'cp-new', host: '10.90.0.2', username: 'svcmon', mounts: ['/'], keyRef: 'k_00000000abcd', credRef: KR.account.id });
+  assert.equal(r.bindRefused, true); assert.equal(rawOf('cp-new').credRef, undefined); assert.equal(rawOf('cp-new').keyRef, undefined);
+  // (f) 일괄 적용(온보딩 · 엣지 적용 경로)도 같은 판정
+  rebind();
+  const b = BM.applyBmServerBatch([{ ...base, id, host: '10.90.0.77', credRef: KR.account.id, keyRef: '', osAuth: 'password' }]);
+  assert.equal(b.ok, true); assert.equal(b.results[0].bindRefused, true); assert.equal(raw().credRef, undefined);
+  // (g) 온보딩 — 소유자 문맥은 R-N1 행을 묶음으로 판정하고(plan.binds) 적용이 그 승인을 싣는다 · 비소유자 문맥은 bind-owner-only
+  const D = await RUN.defaultOnboardDeps();
+  rebind();
+  const line = 'cp1,KR-SEL,,,,10.90.0.88,22,,password,central,,,,/,,';
+  const non = await RUN.analyzeUpload(csv([HDR, line]), { ctx: await ctxOf({ owner: false }) });
+  assert.equal(non.rows[0].code, 'bind-owner-only', JSON.stringify(non.rows[0]));
+  const own = await RUN.analyzeUpload(csv([HDR, line]), { ctx: await ctxOf({}) });
+  assert.equal(own.rows[0].plan.binds, true); assert.equal(own.summary.needOwner, 1);
+  // 분석이 '묶음 아님' 으로 잘못 판정해도(계획 변조) choke point 가 승계를 막는다
+  const forged = own.rows.map((x) => ({ ...x, plan: { ...x.plan, binds: false } }));
+  assert.equal(RUN.applyOnboard(forged, { D, by: 'own' }).ok, true);
+  assert.equal(raw().host, '10.90.0.88'); assert.equal(raw().credRef, undefined, '승인 없는 적용은 참조를 버린다');
+  rebind();
+  assert.equal(RUN.applyOnboard(own.rows, { D, by: 'own' }).ok, true);
+  assert.equal(raw().host, '10.90.0.88'); assert.equal(raw().credRef, KR.account.id, '소유자 승인(plan.binds)이면 그 값');
+  // (g2) 찾은 뒤 판정(적용 본문 그대로 bindOfWrite) — 이름 · 주소가 그대로여도 공통 계정의 계정명이 바뀌었으면 접속처(계정)가 바뀌는 묶음이다
+  const U = KS.saveAccount({ name: 'kr-u-r3', kind: 'os', corp: 'vcA', username: 'svcmon', password: 'Pw-U-1' }, { by: 'own' });
+  BM.saveBmServer({ name: 'cpu', host: '10.90.1.1', port: 22, username: 'svcmon', mounts: ['/'], credRef: U.account.id, vcenterId: 'vcA', bindApproved: true });
+  assert.equal(KS.saveAccount({ id: U.account.id, username: 'svc2', password: 'Pw-U-2' }, { by: 'own' }).ok, true);
+  const lu = 'cpu,KR-SEL,,,,10.90.1.1,22,kr-u-r3,,central,,,,/,,';
+  assert.equal((await RUN.analyzeUpload(csv([HDR, lu]), { ctx: await ctxOf({ owner: false }) })).rows[0].code, 'bind-owner-only', '계정명이 바뀐 재묶음은 소유자만');
+  assert.equal((await RUN.analyzeUpload(csv([HDR, lu]), { ctx: await ctxOf({}) })).rows[0].plan.binds, true);
+  // (h) 엣지 적용 — 중앙 승인(bindOk)이 없는 행은 엣지 쪽 기존 항목의 공통 계정을 새 주소로 잇지 못한다
+  const EA = await import('../src/bmusage/onboard/edgeApply.js');
+  const row0 = { name: 'eg1', corp: 'vcE', osHost: '10.91.0.1', osCred: 'glob-ops', osKey: 'password', mounts: ['/'], enabled: true };
+  const noOk = await EA.applyEdgeDeployment([row0], { sig: '1'.repeat(32), D, corps, myCorps: ['vcE'] });
+  assert.equal(noOk.rejected, 1); assert.equal(noOk.rejects[0].code, 'bind-owner-only', '승인 없는 새 묶음 행 거부');
+  const okd = await EA.applyEdgeDeployment([{ ...row0, bindOk: true }], { sig: '2'.repeat(32), D, corps, myCorps: ['vcE'] });
+  assert.equal(okd.applied, 1, JSON.stringify(okd)); assert.equal(rawOf('eg1').credRef, GLOB.account.id);
+  const carry = { ...row0, osHost: '10.91.0.66', osCred: '', osKey: 'password' };
+  const h = await EA.applyEdgeDeployment([carry], { sig: '3'.repeat(32), D, corps, myCorps: ['vcE'] });
+  assert.equal(h.rejected, 1, JSON.stringify(h)); assert.equal(h.rejects[0].code, 'bind-owner-only');
+  assert.equal(rawOf('eg1').host, '10.91.0.1'); assert.equal(rawOf('eg1').credRef, GLOB.account.id);
+  const h2 = await EA.applyEdgeDeployment([{ ...carry, bindOk: 'true' }], { sig: '4'.repeat(32), D, corps, myCorps: ['vcE'] });
+  assert.equal(h2.rejected, 1, '엄격한 true 만 승인(문자열 거부)');
+  const h3 = await EA.applyEdgeDeployment([{ ...carry, bindOk: true }], { sig: '5'.repeat(32), D, corps, myCorps: ['vcE'] });
+  assert.equal(h3.applied, 1, JSON.stringify(h3)); assert.equal(rawOf('eg1').host, '10.91.0.66'); assert.equal(rawOf('eg1').credRef, GLOB.account.id);
+  await EA.applyEdgeDeployment([], { sig: '6'.repeat(32), D, corps, myCorps: ['vcE'] });
+  // (i) 중앙 배포 행의 승인 — 묶음 행만 bindOk · 묶음 칸이 그대로인 갱신은 앞 승인을 잇는다 · 비소유자의 묶음 행은 분석에서 거부
+  const edgeOf = () => ({ agent: 'edge-r3', online: true });
+  const dep = (l, o = {}) => RUN.analyzeUpload(csv([HDR, l]), { ctx: o.ctx });
+  let a = await dep('eb1,KR-EDGE,,,,10.92.0.1,22,glob-ops,password,edge,,,,/,,', { ctx: await ctxOf({ edgeOf }) });
+  assert.equal(a.rows[0].plan.binds, true);
+  assert.equal(RUN.applyOnboard(a.rows, { D, by: 'own' }).ok, true);
+  assert.equal(ED.edgeRowsFor('edge-r3').find((x) => x.name === 'eb1').bindOk, true);
+  a = await dep('eb1,KR-EDGE,,,,10.92.0.1,22,glob-ops,password,edge,,,,/,,메모만', { ctx: await ctxOf({ edgeOf, owner: false }) });
+  assert.equal(a.rows[0].action, 'update', JSON.stringify(a.rows[0])); assert.equal(a.rows[0].plan.binds, false);
+  assert.equal(RUN.applyOnboard(a.rows, { D, by: 'adm' }).ok, true);
+  assert.equal(ED.edgeRowsFor('edge-r3').find((x) => x.name === 'eb1').bindOk, true, '묶음 칸이 그대로면 앞 승인을 잇는다');
+  a = await dep('eb1,KR-EDGE,,,,10.92.0.1,22,glob-ops,password,edge,,,,/,,', { ctx: await ctxOf({ edgeOf: () => ({ agent: 'edge-r4', online: true }), owner: false }) });
+  assert.equal(a.rows[0].code, 'bind-owner-only', '다른 엣지로 옮기는 행 — 그 엣지에겐 새 묶음');
+  a = await dep('eb1,KR-EDGE,,,,10.92.0.66,22,glob-ops,password,edge,,,,/,,', { ctx: await ctxOf({ edgeOf, owner: false }) });
+  assert.equal(a.rows[0].code, 'bind-owner-only', '비소유자가 배포 행 주소를 바꾸면 거부');
+  a = await dep('eb1,KR-EDGE,,,,10.92.0.66,22,,password,edge,,,,/,,', { ctx: await ctxOf({ edgeOf, owner: false }) });
+  assert.equal(a.rows[0].code, 'bind-owner-only', '엣지에서 무엇이 이어질지 모르는 행(os_cred 빈칸 + os_key)은 묶음으로 본다');
+  // 묶음 칸이 바뀐 비묶음 갱신(공통 계정 떼기 → 개별 계정)은 앞 승인을 잇지 않는다 · 처음부터 비묶음인 행도 bindOk 없음
+  a = await dep('eb1,KR-EDGE,,,,10.92.0.1,22,개별:mon,,edge,,,,/,,', { ctx: await ctxOf({ edgeOf, owner: false }) });
+  assert.equal(a.rows[0].plan.binds, false, JSON.stringify(a.rows[0]));
+  assert.equal(RUN.applyOnboard(a.rows, { D, by: 'adm' }).ok, true);
+  assert.equal(ED.edgeRowsFor('edge-r3').find((x) => x.name === 'eb1').bindOk, false, '떼기 — 승인을 잇지 않는다');
+  a = await dep('eb1,KR-EDGE,,,,10.92.0.1,22,,password,edge,,,,/,,', { ctx: await ctxOf({ edgeOf, owner: false }) });
+  assert.equal(a.rows[0].code, 'bind-owner-only', '배포 행이 공통 계정을 안 써도 엣지 쪽 기존 항목에서 무엇이 이어질지 모른다 — 잇는 행은 묶음');
+  a = await dep('eb2,KR-EDGE,,,,10.92.0.2,22,개별:mon,password,edge,,,,/,,', { ctx: await ctxOf({ edgeOf }) });
+  assert.equal(RUN.applyOnboard(a.rows, { D, by: 'own' }).ok, true);
+  assert.equal(ED.edgeRowsFor('edge-r3').find((x) => x.name === 'eb2').bindOk, false, '비묶음 행은 승인 표지가 없다');
+  // 저장 · 적재 정규화도 엄격한 true 만(손댄 파일의 문자열 'true' 는 승인이 아니다)
+  assert.equal(A.edgeRowFromPlan({ name: 'x', bindOk: 'true' }).bindOk, false); assert.equal(A.edgeRowFromPlan({ name: 'x', bindOk: 1 }).bindOk, false);
+  assert.equal(A.edgeRowFromPlan({ name: 'x', bindOk: true }).bindOk, true);
+  ED.applyEdgeChanges({ removes: [{ agent: 'edge-r3', name: 'eb1' }, { agent: 'edge-r3', name: 'eb2' }] }, { by: 'own' });
+  for (const s of BM.listBmServersRaw()) if (['cp1', 'cp-new', 'cpu'].includes(s.name)) BM.removeBmServer(s.id);
+});
+
+test('⑫ r3 소스 스윕 — bindApproved 는 등록부(읽기) · bm-storage 라우트(게이트 뒤 · 클라이언트 값 버림) · 온보딩 적용(plan.binds)에만 · 엣지 적용 문맥은 행 승인(bindOk)으로만 소유자 · 묶음 판정은 bindRule 하나', async () => {
+  const { stripComments } = await import('./_stripComments.js');
+  const SRC = path.join(HERE, '../src');
+  const files = execFileSync('git', ['ls-files', '*.js'], { cwd: SRC, encoding: 'utf8' }).split('\n').filter(Boolean);
+  const has = (re) => files.filter((f) => re.test(stripComments(fs.readFileSync(path.join(SRC, f), 'utf8'))));
+  assert.deepEqual(has(/bindApproved/).sort(), ['bmstor/registry.js', 'bmusage/onboard/onboardRun.js', 'routes/api/bmstor.js']);
+  const reg = stripComments(fs.readFileSync(path.join(SRC, 'bmstor/registry.js'), 'utf8'));
+  assert.deepEqual(reg.match(/bindApproved[^\n]{0,12}/g), ['bindApproved !== true;'], '등록부는 엄격한 true 만 읽는다(세우지 않는다)');
+  const rt = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmstor.js'), 'utf8'));
+  const iSet = rt.indexOf('bindApproved: true'); const iGate = rt.indexOf('runGate(reauth, req)'); const iOwner = rt.indexOf('runGate(requireSettingsOwner, req)');
+  assert.ok(iOwner > 0 && iGate > iOwner && iSet > iGate, '라우트는 소유자 게이트 → OTP 게이트 뒤에만 세운다');
+  assert.equal(rt.match(/bindApproved: true/g).length, 1);
+  assert.match(rt, /const \{ otp, bindApproved: _clientApproval, \.\.\.rest \} = body;/, '클라이언트가 보낸 bindApproved 는 버린다');
+  assert.match(rt, /saveBmServer\(bind\.binds \? \{ \.\.\.rest, bindApproved: true \} : rest\)/);
+  const run = stripComments(fs.readFileSync(path.join(SRC, 'bmusage/onboard/onboardRun.js'), 'utf8'));
+  assert.deepEqual(run.match(/bindApproved[^\n,]*/g), ['bindApproved: p.binds === true'], '온보딩 적용은 판정(plan.binds — 라우트가 소유자 + OTP 를 통과시킨 행)만');
+  const ea = stripComments(fs.readFileSync(path.join(SRC, 'bmusage/onboard/edgeApply.js'), 'utf8'));
+  assert.match(ea, /ownerTier: \(row\) => row\?\.flags\?\.bindOk === true/); assert.doesNotMatch(ea, /ownerTier:\s*true/);
+  assert.deepEqual(has(/bindOk/).sort(), ['bmusage/onboard/edgeApply.js', 'bmusage/onboard/edgeDeploy.js', 'bmusage/onboard/importAnalyze.js', 'bmusage/onboard/onboardRun.js']);
+  // 판정 코어 하나 — 라우트 · 등록부 · 분석이 bindRule 을 쓰고, 예전 판정 조각(bindOs · osSameAddr · 라우트의 moved 계산)은 남지 않는다
+  for (const f of ['bmstor/registry.js', 'routes/api/bmstor.js', 'bmusage/onboard/importAnalyze.js']) assert.match(fs.readFileSync(path.join(SRC, f), 'utf8'), /bindRule\.js/, f);
+  assert.doesNotMatch(stripComments(fs.readFileSync(path.join(SRC, 'bmusage/onboard/importAnalyze.js'), 'utf8')), /\bbindOs\b|osSameAddr|idrSameAddr/);
+  assert.doesNotMatch(rt, /const moved =/);
 });

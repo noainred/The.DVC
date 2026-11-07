@@ -22,6 +22,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { sanitizeMounts } from './collect.js';
 import { accessMoved } from '../util/secretCarry.js'; // v2.607 LEFT2607-06
 import { normalizeBmGroups, groupsOf } from './agg.js';
+import { bindOfWrite } from '../bmusage/onboard/bindRule.js'; // 7b r3(R-N1): 비밀을 주소에 묶는 판정 하나(choke point)
 
 const FILE = path.join(config.configDir, 'bm-storage.json');
 const DEFAULT_INTERVAL_MIN = 10;
@@ -133,6 +134,14 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
 
   const existing = body.id ? data.servers.find((s) => s.id === body.id) : null;
   if (!existing && data.servers.length >= MAX_BM_SERVERS) return { ok: false, reason: '서버는 최대 1,000대까지 등록할 수 있습니다.' };
+  // 7b r3(재검증 R-N1) — **choke point**: 키 · 공통 계정 참조를 주소에 묶는(새 항목 · 주소 이동 · 다른 참조 · 같은 주소의 인증 방식 변경) 쓰기는
+  //   게이트(설정 소유자 등급 + 본인 OTP)를 통과한 호출이 세운 `bindApproved === true` 가 있을 때만 묶는다. 없으면 주소가 바뀐 쓰기는 참조를 버리고,
+  //   같은 주소면 기존 참조 · 인증 방식을 그대로 둔다(bindRefused). 판정은 bindRule.bindOfWrite 하나(분석 · bm-storage 라우트와 같은 함수).
+  const bind = bindOfWrite(existing, body);
+  const bindRefused = bind.binds && body.bindApproved !== true;
+  const detach = (f) => body[f] !== undefined && !String(body[f] || '').trim();   // 떼기는 묶음이 아니다 — 거절돼도 뗀다
+  const kept = (f) => (bind.moved || detach(f) ? '' : String(existing?.[f] || ''));
+  const refOut = bindRefused ? { credRef: kept('credRef'), keyRef: kept('keyRef') } : { credRef: bind.cred, keyRef: bind.key };
   const server = existing || { id: crypto.randomBytes(5).toString('hex') };
   const droppedSecrets = [];
   // v2.479(감사 S-2): host 변경 시 비밀번호 이월 금지. v2.607(감사 LEFT2607-06): host 만 보던 것을 공용 판정
@@ -165,9 +174,11 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
     server.password = '';
   }
   // 7b: 키 · 공통 계정 참조 — 요청이 칸을 주면 그 값(빈 값 = 해제), 안 주면 기존 유지. ⚠ 접속처가 바뀌면 요청이 다시 고르지 않는 한 버린다.
+  //   r3: 값은 위 choke point 판정(refOut)이 정한다 — 요청이 떼지 않았는데 사라지는 참조는 droppedSecrets 로 알린다.
   for (const f of ['keyRef', 'credRef']) {
-    if (body[f] !== undefined) { const v = String(body[f] || '').trim(); if (v) server[f] = v; else delete server[f]; }
-    else if (hostChanged && server[f]) { droppedSecrets.push(f); delete server[f]; }
+    const v = refOut[f];
+    if (v) server[f] = v;
+    else if (server[f]) { if (!detach(f)) droppedSecrets.push(f); delete server[f]; }
   }
   if (body.vcenterId !== undefined) { const v = String(body.vcenterId || '').trim().slice(0, 128); if (v) server.vcenterId = v; else delete server.vcenterId; }
   if (body.collectVia !== undefined) {
@@ -177,10 +188,10 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
   }
   if (body.note !== undefined) { const v = String(body.note || '').trim().slice(0, 500); if (v) server.note = v; else delete server.note; }
   // 7b: 인증 방식 고정 — 'password' 면 공통 계정에 기본 키가 있어도 비밀번호로(onboard/refs.js resolveOsAuth). 빈 값 = 키 우선(기본).
-  if (body.osAuth !== undefined) { if (body.osAuth === 'password') server.osAuth = 'password'; else delete server.osAuth; }
+  if (body.osAuth !== undefined && !(bindRefused && !bind.moved)) { if (body.osAuth === 'password') server.osAuth = 'password'; else delete server.osAuth; }
   if (body.onboardAt !== undefined && Number(body.onboardAt) > 0) server.onboardAt = Number(body.onboardAt);
   if (!existing) data.servers.push(server);
-  return { ok: true, server: redact(server), created: !existing, ...(droppedSecrets.length ? { droppedSecrets } : {}) };
+  return { ok: true, server: redact(server), created: !existing, ...(droppedSecrets.length ? { droppedSecrets } : {}), ...(bindRefused ? { bindRefused: true } : {}) };
 }
 
 /**

@@ -46,7 +46,7 @@ test('① 누락 점검 — 보드 커버리지 값 그대로 · 기록 없음�
 test('② 연결 시험 — 키 해석 실패 · 인증 수단 없음은 접속하지 않는다 · 라우트는 id 만 받고 범위 404/403', async (t) => {
   const BM = await import('../src/bmstor/registry.js');
   const { testSavedOs } = await import('../src/bmusage/onboard/connTest.js');
-  const a = BM.saveBmServer({ name: 'k1', host: '10.70.0.1', username: 'mon', mounts: ['/'], keyRef: 'k_000000000000', vcenterId: 'vcA' });
+  const a = BM.saveBmServer({ name: 'k1', host: '10.70.0.1', username: 'mon', mounts: ['/'], keyRef: 'k_000000000000', vcenterId: 'vcA', bindApproved: true });
   const b = BM.saveBmServer({ name: 'k2', host: '10.70.0.2', username: 'mon', mounts: ['/'], vcenterId: 'vcB' });
   const r1 = await testSavedOs(BM.listBmServersRaw().find((x) => x.id === a.server.id));
   assert.equal(r1.kind, 'auth-unresolved'); assert.match(r1.reason, /키 저장소에 없습니다/);
@@ -88,7 +88,7 @@ test('④ 키 · 공통 계정 인증 서버는 엣지 df 위임 잡 · PUSH 에
   const J = await import('../src/bmstor/jobs.js');
   // 앞 시험의 중앙 직접 항목은 끈다 — 이 시험이 실제 SSH 접속을 시도하지 않게(CI 러너 네트워크에 기대지 않는다)
   for (const s of BM.listBmServersRaw()) BM.saveBmServer({ ...s, enabled: false });
-  const kk = BM.saveBmServer({ name: 'dk1', host: '10.71.0.1', username: 'mon', mounts: ['/'], agent: 'edge-k', keyRef: 'k_111111111111' });
+  const kk = BM.saveBmServer({ name: 'dk1', host: '10.71.0.1', username: 'mon', mounts: ['/'], agent: 'edge-k', keyRef: 'k_111111111111', bindApproved: true });
   const pw = BM.saveBmServer({ name: 'dk2', host: '10.71.0.2', username: 'mon', mounts: ['/'], agent: 'edge-k', password: 'pw-x' });
   await P.bmCollectNow('manual');
   const jobs = J.takeBmstorJobs('edge-k');

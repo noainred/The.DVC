@@ -17,6 +17,7 @@
 import crypto from 'node:crypto';
 import { cellLooksSecret } from './keyParse.js';
 import { NAME_RE } from './keyStore.js';
+import { addrKey, bindDecision, bindOfWrite } from './bindRule.js';
 
 const t = (v) => String(v ?? '').trim();
 const lc = (v) => t(v).toLowerCase();
@@ -265,21 +266,18 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
     const nameOk = (v) => NAME_RE.test(v);
     /*
      * 메인 결정(감사 H-1 · 반증 F1 · F1-b): 저장된 비밀(공통 계정 · SSH 키)을 **주소에 묶는 것**은 그 비밀을 관리하는 등급과 같다 — 설정 소유자 등급 + 본인 OTP.
-     *   묶음 = 행이 공통 계정 · 키 **이름**을 쓰고, (새 항목 · 주소가 바뀐 항목 · 지금 묶음과 다른 이름)일 때. 주소가 그대로이고 지금 묶음과 같은 이름이면 묶음이 아니다.
-     *   소유자가 아니면 **계정 · 키를 찾기 전에** 거부한다(다른 법인 계정 · 없는 키를 가르는 오라클을 만들지 않는다).
+     *   판정은 bindRule.bindDecision **하나**(bm-storage 라우트 · 등록부 choke point 와 같은 함수 — r3 재검증 R-N1: 'os_cred 빈칸 + os_key=password + 새 주소'
+     *   는 적용 계획이 기존 credRef 를 새 주소로 잇는데(plan.os.credRef) 예전 판정은 이름을 쓰는 행만 묶음으로 봤다).
+     *   소유자가 아니면 **계정 · 키를 찾기 전에** 거부한다(다른 법인 계정 · 없는 키를 가르는 오라클을 만들지 않는다) — 그래서 여기는 이름 토큰으로 본다.
+     *   찾은 뒤에는 적용 본문(osWriteOf) 그대로 bindOfWrite 로 한 번 더 본다(등록부 choke point 와 같은 입력 — 계정의 실제 계정명 등).
      */
+    const ownerOk = typeof ctx.ownerTier === 'function' ? ctx.ownerTier(row) === true : !!ctx.ownerTier;   // 엣지 적용: 중앙이 승인한 행만(bindOk)
     const osCredRaw = t(c.os_cred); const osKeyRaw = t(c.os_key); const idracCredRaw = t(c.idrac_cred);
     const usesOsAcc = !!osHost && !!osCredRaw && !INDIVIDUAL.has(lc(osCredRaw)) && !/^(개별|individual|user)\s*:/i.test(osCredRaw);
     const usesKey = !!osHost && !!osKeyRaw && lc(osKeyRaw) !== 'password';
     const usesIdracAcc = !!idracHost && !!idracCredRaw && !INDIVIDUAL.has(lc(idracCredRaw));
-    const osSameAddr = !!exOs && hostKeyOf(exOs.host) === hostKeyOf(osHost) && (Number(exOs.port) || 22) === osPort;
-    const idrSameAddr = !!exIdr && hostKeyOf(exIdr.host) === hostKeyOf(idracHost);
-    const sameName = (a, b) => !!a && lc(a) === lc(b);
-    const bindOs = (usesOsAcc && !(osSameAddr && sameName(nameOfAcc(exOs.credRef), osCredRaw))) || (usesKey && !(osSameAddr && sameName(nameOfKey(exOs.keyRef), osKeyRaw)));
-    const bindIdrac = usesIdracAcc && !(idrSameAddr && sameName(idrCopyName(exIdr.id), idracCredRaw));
-    const binds = remote ? (usesOsAcc || usesKey || usesIdracAcc) && (!exEdge || edgeRowDiffers(exEdge, { ...exEdge, osHost, osPort, idracHost, osCred: usesOsAcc ? osCredRaw : '', osKey: osKeyRaw, idracCred: usesIdracAcc ? idracCredRaw : '' }))
-      : (bindOs || bindIdrac);
-    if (binds && !ctx.ownerTier) { reject('bind-owner-only'); done(); continue; }
+    let binds = bindNameDecision({ remote, agent, exOs, exIdr, exEdge, osHost, osPort, idracHost, osCredRaw, osKeyRaw, idracCredRaw, usesOsAcc, usesKey, usesIdracAcc, nameOfAcc, nameOfKey, idrCopyName });
+    if (binds && !ownerOk) { reject('bind-owner-only'); done(); continue; }
     const credOk = (acc) => !acc.corp || !vc || lc(acc.corp) === lc(vc);
     let idracAcc = null; let idracCredName = '';
     const idracCred = t(c.idrac_cred);
@@ -341,6 +339,14 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
       if (sm.errors?.length) { res.action = 'reject'; res.code = 'bad-mounts'; res.reason = `mounts: ${String(sm.errors[0]).slice(0, 200)}`; done(); continue; }
       const issue = typeof ctx.osIssue === 'function' ? ctx.osIssue({ ...osBody, username: osBody.username || 'root' }) : null;
       if (issue) { res.action = 'reject'; res.code = 'os-invalid'; res.reason = `os_host: ${issue}`; done(); continue; }
+    }
+    // 반증 F3: keepCred 는 os_cred 와 os_key 가 **둘 다** 비었을 때만 — os_key 만 바꾼 행은 키 · 인증 방식을 실제로 바꾸고 공통 계정만 잇는다.
+    const osPlan = osHost ? { id: exOs ? exOs.id : '', host: osHost, port: osPort, username: osBody.username, credRef: osAcc ? osAcc.id : (osCred ? '' : (exOs?.credRef || '')),
+      keyRef: osKey ? keyRef : (osCred ? '' : (exOs?.keyRef || '')), osAuth: osKey ? osAuth : (osCred ? '' : (exOs?.osAuth || '')), keepCred: !osCred && !osKey && !!exOs, mounts: osBody.mounts, existing: !!exOs } : null;
+    // r3(R-N1): 찾은 뒤 — 적용이 등록부에 보낼 본문 그대로 choke point 와 같은 함수로 본다(이름 판정이 놓친 묶음이 있으면 여기서 잡는다).
+    if (osPlan && !remote && !binds && bindOfWrite(exOs, osWriteOf(osPlan, exOs)).binds) {
+      if (!ownerOk) { reject('bind-owner-only'); done(); continue; }
+      binds = true;
     }
     let idrHostNorm = '';
     if (idracHost) {
@@ -411,11 +417,14 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
       }
     }
     if (where === 'edge' && (exIdr || exOs)) changes.push('collect_via');   // 중앙 항목 → 엣지 배포 목록
+    let edgeBindKeep = false;
     if (where === 'edge' && exEdge) {
       const next = edgeRowFromPlan({ name, vc, tag, idracHost, osHost, osPort, mounts: osBody ? osBody.mounts : [], enabled: en, note: t(c.note), cls, apps, role,
         idracCred: idracCredName, osCred: osCredName, osUser, osKey: osKeyName }, agent);
       if (edgeRowDiffers(exEdge, next)) changes.push('edge-row');
       if (lc(exEdge.agent) !== lc(agent)) changes.push('collect_via');
+      // r3: 묶음 칸(주소 · 이름)이 그대로인 행은 앞 배포의 승인(bindOk)을 잇는다 — 엣지가 그 행을 다시 적용할 때(앞 적용 실패 등) 승인 없이 거부되지 않게.
+      edgeBindKeep = exEdge.bindOk === true && lc(exEdge.agent) === lc(agent) && !EDGE_BIND_KEYS.some((k) => JSON.stringify(exEdge[k] ?? null) !== JSON.stringify(next[k] ?? null));
     }
     if (where !== 'edge' && exEdge) changes.push('collect_via');           // 엣지 배포 목록 → 중앙
     if (cls || (purposeOk && (apps.length || role))) changes.push('tags');
@@ -426,13 +435,11 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
     res.plan = {
       where, agent, vc, name, tag,
       idrac: idracHost ? { id: exIdr ? exIdr.id : (tag || name), host: idracHost, accountId: idracAcc ? idracAcc.id : '', accountName: idracAcc ? idracAcc.name : '', keepCred: !idracAcc && !!exIdr, existing: !!exIdr } : null,
-      // 반증 F3: keepCred 는 os_cred 와 os_key 가 **둘 다** 비었을 때만 — os_key 만 바꾼 행은 키 · 인증 방식을 실제로 바꾸고 공통 계정만 잇는다.
-      os: osHost ? { id: exOs ? exOs.id : '', host: osHost, port: osPort, username: osBody.username, credRef: osAcc ? osAcc.id : (osCred ? '' : (exOs?.credRef || '')),
-        keyRef: osKey ? keyRef : (osCred ? '' : (exOs?.keyRef || '')), osAuth: osKey ? osAuth : (osCred ? '' : (exOs?.osAuth || '')), keepCred: !osCred && !osKey && !!exOs, mounts: osBody.mounts, existing: !!exOs } : null,
+      os: osPlan,
       enabled: en, note: t(c.note), cls, apps: purposeOk ? apps : [], role: purposeOk ? role : '', via,
       edgeNames: { idracCred: idracCredName, osCred: osCredName, osUser, osKey: osKeyName },
       moveFromEdge: where !== 'edge' && !!exEdge ? lc(exEdge.agent) : '', moveToEdge: where === 'edge' && !!(exIdr || exOs),
-      hidden, binds,
+      hidden, binds, edgeBindKeep,
     };
     if (binds) { summary.needOwner += 1; warn('needs-owner'); }
     if (where === 'edge') summary.edge += 1; else summary.central += 1;
@@ -451,10 +458,69 @@ export function edgeRowFromPlan(p = {}, agent = '') {
     osHost: t(p.osHost).slice(0, 253), osPort: Number(p.osPort) || 22, osCred: t(p.osCred).slice(0, 64), osUser: t(p.osUser).slice(0, 128), osKey: t(p.osKey).slice(0, 64),
     mounts: (Array.isArray(p.mounts) ? p.mounts : []).slice(0, 64).map((m) => t(m).slice(0, 256)),
     enabled: p.enabled !== false, note: t(p.note).slice(0, 500), cls: t(p.cls), apps: (Array.isArray(p.apps) ? p.apps : []).slice(0, 16).map((x) => t(x).slice(0, 32)), role: t(p.role),
+    // r3(R-N1): 중앙이 이 행의 묶음을 승인했는가(설정 소유자 + OTP 를 통과한 적용이 세운다 — 엄격한 true 만). 엣지 적용은 이 값이 true 인 행만 묶는다.
+    bindOk: p.bindOk === true,
   };
 }
 const EDGE_ROW_KEYS = ['corp', 'serviceTag', 'idracHost', 'idracCred', 'osHost', 'osPort', 'osCred', 'osUser', 'osKey', 'mounts', 'enabled', 'note', 'cls', 'apps', 'role'];
 export function edgeRowDiffers(a = {}, b = {}) { return EDGE_ROW_KEYS.some((k) => JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null)); }
+/** 엣지 배포 행에서 '비밀을 주소에 묶는' 칸(주소 · 공통 계정 · 키 이름). bindOk(중앙 승인)는 이 칸이 그대로일 때만 잇는다. */
+const EDGE_BIND_KEYS = ['idracHost', 'idracCred', 'osHost', 'osPort', 'osCred', 'osUser', 'osKey'];
+
+/**
+ * 적용 계획(plan.os) → 등록부 쓰기 본문의 주소 · 참조 칸. applyOnboard 와 분석의 사후 판정이 **같은 본문**을 쓴다(choke point 와 같은 입력).
+ * keepCred = 참조 칸을 주지 않는다(등록부가 같은 주소면 기존 유지 · 주소가 바뀌면 버린다).
+ */
+export function osWriteOf(planOs = {}, ex = null) {
+  return {
+    host: planOs.host, port: planOs.port, username: planOs.username || ex?.username || 'root',
+    ...(planOs.keepCred ? {} : { keyRef: planOs.keyRef || '', credRef: planOs.credRef || '', osAuth: planOs.osAuth || '' }),
+  };
+}
+
+/**
+ * 계정 · 키를 **찾기 전** 묶음 판정(이름 토큰 · bindRule.bindDecision). 토큰은 적용 계획(plan.os)과 같은 규칙으로 '이 행이 쓰게 될 참조' 를 만든다:
+ *  · os_cred 가 공통 계정 → 그 이름 · 다른 값(개별 등) → 없음 · **빈칸 + os_key 있음 → 기존 공통 계정을 잇는다**(R-N1) · 둘 다 빈칸 → 칸을 주지 않음.
+ *  · 엣지 배포 행은 엣지 쪽 기존 항목을 중앙이 모른다 — '잇는' 행은 늘 묶음으로 본다(엣지에서 무엇이 이어질지 모르므로 소유자 승인 · bindOk 로만 간다).
+ */
+function bindNameDecision(o) {
+  const { remote, agent, exOs, exIdr, exEdge: exEdge0, osHost, osPort, idracHost, osCredRaw, osKeyRaw, idracCredRaw, usesOsAcc, usesKey, usesIdracAcc, nameOfAcc, nameOfKey, idrCopyName } = o;
+  const keyPw = lc(osKeyRaw) === 'password';
+  const exEdge = exEdge0 && lc(exEdge0.agent) === lc(agent) ? exEdge0 : null;   // 다른 엣지의 행은 이 엣지에겐 새 항목
+  const indivUser = (/^(개별|individual|user)\s*:\s*(.+)$/i.exec(osCredRaw)?.[2] || '').trim().slice(0, 128);
+  const refTok = (id, nameOf) => (id ? (lc(nameOf(id)) || `#${id}`) : '');
+  let exTok = null; let exUser = 'root';
+  if (remote) {
+    if (exEdge && t(exEdge.osHost)) {
+      const k = lc(exEdge.osKey);
+      exUser = t(exEdge.osUser) || (exEdge.osCred ? `\u0001${lc(exEdge.osCred)}` : 'root');
+      exTok = { addr: addrKey(hostKeyOf(exEdge.osHost), exEdge.osPort, exUser), cred: lc(exEdge.osCred), key: k === 'password' ? '' : k, osAuth: k === 'password' ? 'password' : '' };
+    }
+  } else if (exOs) {
+    exUser = t(exOs.username) || 'root';
+    exTok = { addr: addrKey(hostKeyOf(exOs.host), exOs.port, exUser), cred: refTok(exOs.credRef, nameOfAcc), key: refTok(exOs.keyRef, nameOfKey), osAuth: exOs.osAuth === 'password' ? 'password' : '' };
+  }
+  let osBinds = false;
+  if (osHost) {
+    const accTok = usesOsAcc ? lc(osCredRaw) : '';
+    const user = indivUser || (usesOsAcc ? (exTok && exTok.cred === accTok ? exUser : `\u0001${accTok}`) : exUser);
+    const carry = remote ? '\u0001carry' : (exTok?.cred || '');
+    const next = {
+      addr: addrKey(hostKeyOf(osHost), osPort, user),
+      cred: usesOsAcc ? accTok : (osCredRaw ? '' : (osKeyRaw ? carry : undefined)),
+      key: usesKey ? lc(osKeyRaw) : (keyPw || osCredRaw ? '' : undefined),
+      osAuth: osKeyRaw ? (keyPw ? 'password' : '') : (osCredRaw ? '' : undefined),
+    };
+    osBinds = bindDecision(exTok, next).binds;
+  }
+  let idrBinds = false;
+  if (idracHost) {
+    const ex = remote ? (exEdge && t(exEdge.idracHost) ? { addr: hostKeyOf(exEdge.idracHost), cred: lc(exEdge.idracCred) } : null)
+      : (exIdr ? { addr: hostKeyOf(exIdr.host), cred: lc(idrCopyName(exIdr.id)) } : null);
+    idrBinds = bindDecision(ex, { addr: hostKeyOf(idracHost), cred: usesIdracAcc ? lc(idracCredRaw) : (idracCredRaw ? '' : undefined) }).binds;
+  }
+  return osBinds || idrBinds;
+}
 
 /** 판정 서명 — 분석과 적용 사이에 등록부 · 키 · 범위가 바뀌었는지(적용은 같은 파일을 다시 분석해 이 값이 같을 때만). */
 export function analysisSig(rows = [], regGen = '') {

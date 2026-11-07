@@ -109,11 +109,12 @@ test('④ 주소가 바뀌면 키 · 공통 계정 참조를 승계하지 않는
   const k = KS.keyByName('kr-ops-ed25519');
   const acc = KS.saveAccount({ name: 'kr-ops', kind: 'os', corp: 'vcA', username: 'monitor', keyRef: k.id }, { by: 'own' });
   assert.equal(acc.ok, true, acc.reason);
-  const s1 = BM.saveBmServer({ name: 'bm1', host: '10.1.1.1', username: 'monitor', mounts: ['/'], keyRef: k.id, credRef: acc.account.id });
+  // r3(R-N1): 참조를 주소에 묶는 쓰기는 게이트를 통과한 호출만(bindApproved) — 이 테스트의 '묶어 둔 상태' 는 승인된 쓰기로 만든다.
+  const s1 = BM.saveBmServer({ name: 'bm1', host: '10.1.1.1', username: 'monitor', mounts: ['/'], keyRef: k.id, credRef: acc.account.id, bindApproved: true });
   assert.equal(s1.ok, true, s1.reason);
   const id = s1.server.id;
   for (const change of [{ host: '10.1.1.2' }, { port: 2222 }, { username: 'other' }]) {
-    BM.saveBmServer({ id, name: 'bm1', host: '10.1.1.1', port: 22, username: 'monitor', mounts: ['/'], keyRef: k.id, credRef: acc.account.id });
+    BM.saveBmServer({ id, name: 'bm1', host: '10.1.1.1', port: 22, username: 'monitor', mounts: ['/'], keyRef: k.id, credRef: acc.account.id, bindApproved: true });
     const r = BM.saveBmServer({ id, name: 'bm1', host: '10.1.1.1', port: 22, username: 'monitor', mounts: ['/'], ...change });
     assert.deepEqual([...(r.droppedSecrets || [])].sort(), ['credRef', 'keyRef', 'password'].filter((x) => x !== 'password'), JSON.stringify(change));
     const raw = BM.listBmServersRaw().find((x) => x.id === id);
@@ -121,14 +122,21 @@ test('④ 주소가 바뀌면 키 · 공통 계정 참조를 승계하지 않는
     assert.equal(raw.credRef, undefined);
   }
   // agent 만 바뀌면 승계(위임 수집에 필요 — 기존 규칙 그대로)
-  BM.saveBmServer({ id, name: 'bm1', host: '10.1.1.1', port: 22, username: 'monitor', mounts: ['/'], keyRef: k.id });
+  BM.saveBmServer({ id, name: 'bm1', host: '10.1.1.1', port: 22, username: 'monitor', mounts: ['/'], keyRef: k.id, bindApproved: true });
   const r2 = BM.saveBmServer({ id, name: 'bm1', host: '10.1.1.1', port: 22, username: 'monitor', mounts: ['/'], agent: 'edge-x' });
   assert.equal(r2.droppedSecrets, undefined);
   assert.equal(BM.listBmServersRaw().find((x) => x.id === id).keyRef, k.id);
-  // 주소를 바꾸며 키를 다시 고르면 그 값
-  const r3 = BM.saveBmServer({ id, name: 'bm1', host: '10.1.1.9', port: 22, username: 'monitor', mounts: ['/'], agent: '', keyRef: k.id });
+  // 주소를 바꾸며 키를 다시 고르면 — 승인(bindApproved) 없이는 묶지 않는다(choke point · bindRefused) · 승인된 쓰기만 그 값
+  const r3n = BM.saveBmServer({ id, name: 'bm1', host: '10.1.1.9', port: 22, username: 'monitor', mounts: ['/'], agent: '', keyRef: k.id });
+  assert.equal(r3n.ok, true); assert.equal(r3n.bindRefused, true);
+  assert.deepEqual(r3n.droppedSecrets, ['keyRef']);
+  assert.equal(BM.listBmServersRaw().find((x) => x.id === id).keyRef, undefined, '승인 없는 주소 이동 + 같은 키 = 버림');
+  BM.saveBmServer({ id, name: 'bm1', host: '10.1.1.1', port: 22, username: 'monitor', mounts: ['/'], keyRef: k.id, bindApproved: true });
+  const r3 = BM.saveBmServer({ id, name: 'bm1', host: '10.1.1.9', port: 22, username: 'monitor', mounts: ['/'], agent: '', keyRef: k.id, bindApproved: true });
   assert.equal((r3.droppedSecrets || []).includes('keyRef'), false);
+  assert.equal(r3.bindRefused, undefined);
   assert.equal(BM.listBmServersRaw().find((x) => x.id === id).keyRef, k.id);
+  assert.equal('bindApproved' in BM.listBmServersRaw().find((x) => x.id === id), false, '승인 표지는 등록부에 저장하지 않는다');
   // 공통 계정: 법인 · 계정명이 바뀌면 비밀 · 기본 키를 잇지 않는다
   const acc2 = KS.saveAccount({ name: 'kr-pw', kind: 'os', corp: 'vcA', username: 'u1', password: 'Secret-1' });
   const moved = KS.saveAccount({ id: acc2.account.id, corp: 'vcB' });

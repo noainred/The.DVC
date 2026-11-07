@@ -527,3 +527,15 @@
      존재 오라클 차단(감사 L-1 · 반증 F18). class 는 전체 범위만 · purposes/role 은 그 service_tag 가 쓰기 범위 안 수집 대상으로 해석될 때만(감사 M-2 · F10).
      키 목록은 범위 계정에 주지 않고 · 공통 계정은 자기 법인 소속만(공용 이름 · 사용처 없음 — L-7). 키 저장소는 복호 실패가 있으면 쓰기 거절(F5 — 봉인본이 유일한 사본).
      복원은 ssh-keys.json 을 **합집합**으로 병합(백업 뒤 키를 지우지 않음 · `sshKeysKept` — F13) · 중앙은 엣지 설정 사본의 ssh-keys.json 도 다시 가린다(L-3).
+  ⑪ (r3 · 재검증 R-N1) **묶음 판정은 `bmusage/onboard/bindRule.js` 하나 + 등록부 choke point**. R-N1: 소유자가 묶은 서버(credRef + osAuth=password)를 비소유자 · 범위 관리자가
+     `os_cred` 빈칸 + `os_key=password` + 새 주소로 올리면 예전 분석은 '이름을 쓰는 행' 만 묶음으로 봐 통과시켰고, 적용 계획이 기존 credRef 를 **명시로** 다시 실어
+     bm-storage 의 '주소가 바뀌면 버림' 가드를 지나 공통 계정 비밀번호가 새 주소로 나갔다(가짜 sshd 수신 재현). 고친 것:
+     (가) `bindDecision(existing, next)` — 토큰(접속처 = host · port · 계정, accessMoved 와 같은 정규화 · 참조 · osAuth)으로 '효력 참조가 있고 (새 항목 · 이동 · 다른 참조)
+     이거나 같은 주소에서 공통 계정의 인증 방식을 바꾼다' 를 판정. 분석(계정 · 키를 찾기 **전** 이름 토큰 + 찾은 뒤 적용 본문 그대로 `bindOfWrite`) · `bmBindCheck` ·
+     등록부가 같은 함수를 쓴다(예전 조각 `bindOs` · 라우트의 moved 계산은 지웠다 — 스윕). (나) **`bmstor/registry.js applyServerInput` = choke point**: 묶음 쓰기는
+     `bindApproved === true`(엄격) 일 때만 묶고, 아니면 주소가 바뀐 쓰기는 참조를 버리고 같은 주소면 기존 참조 · osAuth 를 둔다(`bindRefused` · `droppedSecrets`) · 떼기는 된다 ·
+     표지는 저장하지 않는다. 표지를 세우는 곳은 셋뿐(소스 스윕 ⑫): bm-storage 라우트(소유자 게이트 → OTP 게이트 **뒤** · 클라이언트가 보낸 값은 버림) ·
+     온보딩 적용(`plan.binds` — 라우트가 소유자 + OTP 를 통과시킨 행) · 엣지 적용은 같은 applyOnboard 를 지나되 **엣지 문맥의 소유자 = 행의 중앙 승인 `bindOk === true`**
+     (중앙 적용이 묶음 행에만 싣고, 묶음 칸 — 주소 · 이름 — 이 그대로인 갱신만 앞 승인을 잇는다). 엣지 쪽 기존 항목을 중앙이 모르므로 '잇는'(os_cred 빈칸 + os_key) 배포 행은
+     늘 묶음으로 본다 · 다른 엣지로 옮기는 행은 그 엣지에겐 새 묶음. 회귀 `bmOnboard7bReview` ⑩(h18 — 비소유자 · 범위 관리자 · 가짜 sshd 수신 0) ⑪(h20 — choke point ·
+     일괄 · 온보딩 · 엣지) ⑫(스윕) · 변이 R1~R10. 키 회전(`replaceBmServerKeyRefs` — 같은 주소의 키 교체, 소유자 + OTP 라우트)은 choke point 를 지나지 않는다(주소 불변).

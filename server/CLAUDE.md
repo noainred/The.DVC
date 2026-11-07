@@ -75,7 +75,8 @@
 - **7b SSH 키 저장소(`bmusage/onboard/keyStore.js` · `ssh-keys.json`)**: 관리 = 소유자 등급 + 본인 OTP(`reauth` 는 마지막 게이트) · 응답 · 감사 · 백업 · 엣지 push 에는 지문 · 공개키만
   (번들 가림 `keyBundle.js` — 봉인본도 싣지 않음) · 손상이면 쓰기 거절(로드 먼저) · 주소가 바뀌면 `keyRef` · `credRef` 승계 없음 · 키가 없으면 비밀번호로 넘어가지 않음 ·
   키 서버는 엣지 위임 잡에 싣지 않음 · **저장 비밀을 주소에 묶는 쓰기(CSV · bm-storage keyRef/credRef · iDRAC 사본 · 엣지 배포)도 소유자 등급 + OTP**(r2) ·
-  복호 실패 중 쓰기 거절 · 퇴역 키 접속 거부. 상세 `docs/rules/security-api.md` 7b 항목 ⑨ ⑩.
+  복호 실패 중 쓰기 거절 · 퇴역 키 접속 거부. **묶음 판정은 `bmusage/onboard/bindRule.js` 하나 · 등록부 `applyServerInput` 이 choke point** — `bindApproved === true` 는
+  게이트를 통과한 호출만 세운다(bm-storage 라우트 OTP 뒤 · 온보딩 `plan.binds` · 엣지는 행의 중앙 승인 `bindOk`) · 새 쓰기 경로도 이 함수를 지나게(r3 R-N1). 상세 `docs/rules/security-api.md` 7b 항목 ⑨ ⑩ ⑪.
 - **소유자 경계는 서버측 강제**: `settingsOwners`(설정 소유 계정)처럼 UI가 숨기는 권한 경계는 서버에서도 검사한다(`routes/admin.js requireSettingsOwner`). 클라이언트 전용 게이트는 admin이 API를 직접 호출해 우회·소유자 목록 탈취가 가능하다.
   - ⚠ **소유자 등급 = 소유자 ∧ 전체 범위**(v2.744 AUTHZ-02, `routes/admin/shared.js requireSettingsOwner`): 소유자 목록에 있어도
     범위가 지정된 계정(scope.vcenters)은 403(`SETTINGS_OWNER_FULL_SCOPE_REASON`)이다. `/auth/me` 의 **`isSettingsOwner`(설정 메뉴 노출 —

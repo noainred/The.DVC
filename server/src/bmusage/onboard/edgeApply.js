@@ -56,10 +56,13 @@ export async function applyEdgeDeployment(rows = [], { sig = '', D = null, corps
   const mine = (Array.isArray(myCorps) ? myCorps : []).map((x) => String(x)).filter(Boolean);
   if (!mine.length) return { ok: false, applied: 0, rejected: 0, removed: 0, noCorps: true, reason: '이 엣지의 수집 법인이 비어 있어(설정 › 베어메탈 성능) 서버 등록 배포를 적용하지 않았습니다' };
   const list = (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r === 'object' && !Array.isArray(r)).slice(0, 5000);
-  const parsedRows = list.map((r, i) => ({ line: i + 1, cells: cellsOfEdgeRow(r), flags: {} }));
+  // r3(R-N1): 행마다 중앙 승인(bindOk — 소유자 등급 + OTP 를 통과한 배포만 true)을 싣는다. 엣지 문맥은 이 값으로만 '소유자' 다 —
+  //   승인 없는 행이 엣지 쪽 기존 항목의 공통 계정 · 키를 새 주소로 잇는(묶는) 것을 엣지 분석이 거부한다(bind-owner-only).
+  const parsedRows = list.map((r, i) => ({ line: i + 1, cells: cellsOfEdgeRow(r), flags: { bindOk: r.bindOk === true } }));
   const created = prev.ok ? { ...prev.state.created } : {};
   const createdIds = new Set(Object.values(created).flatMap((x) => [x?.os, x?.idrac]).filter(Boolean).map(String));
-  const { ctx, unread } = buildOnboardCtx({ D: Dx, corps, isEdge: true, myCorps: mine, canView: () => true, canWrite: () => true, fullScope: true, ownerTier: true,
+  const { ctx, unread } = buildOnboardCtx({ D: Dx, corps, isEdge: true, myCorps: mine, canView: () => true, canWrite: () => true, fullScope: true,
+    ownerTier: (row) => row?.flags?.bindOk === true,
     // 반증 F8 · 감사 M-3: 기존 항목은 **이 배포가 만든 것** 또는 이 엣지 법인 귀속인 것만 갱신한다(손으로 둔 귀속 없음 · 다른 법인 항목은 이름이 같아도 거부).
     canUpdateExisting: (ex) => createdIds.has(String(ex.id)) || (!!ex.vcenterId && mine.includes(String(ex.vcenterId))) });
   if (unread.length) return { ok: false, applied: 0, rejected: 0, removed: 0, reason: `등록부를 읽지 못해 적용하지 않았습니다(${unread.join(', ')})` };

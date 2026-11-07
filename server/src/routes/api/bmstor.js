@@ -27,20 +27,17 @@ const fullScopeOnly = fullScopeOnlyWith('베어메탈 스토리지는 vCenter �
  */
 export async function bmBindCheck(body = {}) {
   const KS = await import('../../bmusage/onboard/keyStore.js');
+  const { bindOfWrite } = await import('../../bmusage/onboard/bindRule.js');
   const ex = body.id ? listBmServersRaw().find((x) => x.id === body.id) || null : null;
-  const norm = (v) => String(v ?? '').trim().toLowerCase();
-  const moved = !ex || norm(ex.host) !== norm(body.host ?? ex.host) || String(Number(ex.port) || 22) !== String(Number(body.port ?? ex.port) || 22) || norm(ex.username) !== norm(body.username ?? ex.username);
-  let binds = false;
   for (const [f, kind] of [['keyRef', 'key'], ['credRef', 'acc']]) {
     if (body[f] === undefined) continue;
     const v = String(body[f] || '').trim();
-    if (!v) continue;   // 떼기 — 묶음이 아니다
+    if (!v) continue;   // 떼기 — 확인할 참조가 없다
     if (kind === 'key') { const k = KS.keyById(v); if (!k) return { error: 'SSH 키가 키 저장소에 없습니다.', code: 'key-missing' }; if (k.status === 'retired') return { error: '회전으로 퇴역한 키는 고를 수 없습니다.', code: 'key-retired' }; }
     else { const a = KS.accountById(v); if (!a) return { error: '공통 계정이 없습니다.', code: 'account-missing' }; if (a.kind !== 'os') return { error: 'OS 공통 계정만 고를 수 있습니다.', code: 'account-kind' }; }
-    if (moved || String(ex?.[f] || '') !== v) binds = true;
   }
-  if (body.osAuth === 'password' && (ex?.credRef || body.credRef) && (moved || ex?.osAuth !== 'password')) binds = true;   // 공통 계정 비밀번호로 인증을 바꾸는 것도 묶음
-  return { binds };
+  // 7b r3(R-N1): 묶음 판정은 등록부 choke point 와 **같은 함수 · 같은 입력**(bindRule.bindOfWrite) — 두 벌을 두지 않는다.
+  return { binds: bindOfWrite(ex, body).binds };
 }
 
 export function registerBmStorage(api) {
@@ -98,8 +95,9 @@ export function registerBmStorage(api) {
       const g2 = await runGate(reauth, req);
       if (!g2.ok) return res.status(g2.status).json(g2.body);
     }
-    const { otp, ...rest } = body; void otp;
-    const r = saveBmServer(rest);
+    // 7b r3(R-N1): bindApproved 는 **위 두 게이트를 통과했을 때만** 이 라우트가 세운다 — 클라이언트가 보낸 값은 버린다(등록부 choke point 가 이 칸만 본다).
+    const { otp, bindApproved: _clientApproval, ...rest } = body; void otp; void _clientApproval;
+    const r = saveBmServer(bind.binds ? { ...rest, bindApproved: true } : rest);
     if (r.ok && bind.binds) logAudit({ user: req.user?.username, action: '베어메탈 서버 인증 참조 묶음', target: r.server?.host || '', detail: JSON.stringify({ keyRef: rest.keyRef || '', credRef: rest.credRef || '', osAuth: rest.osAuth || '' }).slice(0, 200), ip: req.ip || '' });
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 서버 저장', target: r.server?.host || '', detail: `mounts ${(r.server?.mounts || []).length}개${r.server?.agent ? ` · 엣지 ${r.server.agent}` : ''}`, ip: req.ip || '' });
     res.status(r.ok ? 200 : 400).json(r);

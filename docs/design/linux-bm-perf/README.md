@@ -271,6 +271,7 @@
       | SSH 키 저장소 | 봉인 · 0600 · 원자적 쓰기 · 손상이면 쓰기 거절 · 정책 잠금 그대로 | `keyStore.js:90`(로드 먼저) · `:97 commit` · `bmOnboard7bKeys` ③ ⑦ | ✅ |
       | | 관리 = 소유자 등급 + 본인 OTP(마지막 게이트) + 감사 | `routes/api/bmOnboard.js:34 keyAdmin` · `bmOnboard7bKeys` ⑨ | ✅ |
       | | **(r2 — 감사 H-1 · 반증 F1)** 저장 비밀을 **주소에 묶는 것**도 같은 등급(소유자 + OTP): CSV 적용 · bm-storage 저장 · iDRAC 사본 · 엣지 배포 행 · 비소유자는 계정을 찾기 전에 거부 · 계정명은 공통 계정 쪽(F19) · 퇴역 키 접속 거부(L-11) | `importAnalyze.js` binds · `bmstor.js bmBindCheck` · `bmOnboard7bReview` ① ⑨ · 변이 N1~N6 | ✅ |
+      | | **(r3 — 재검증 R-N1)** 묶음 판정 코어 하나(`bindRule.js`) + 등록부 choke point(`applyServerInput` — `bindApproved === true` 없으면 이동은 참조를 버리고 같은 주소는 기존 유지) · 표지는 bm-storage 라우트(OTP 뒤) · 온보딩(plan.binds) · 엣지(행의 중앙 승인 bindOk)만 세운다 · 'os_cred 빈칸 + os_key=password + 새 주소' 잇기도 묶음 | `bindRule.js` · `bmstor/registry.js applyServerInput` · `bmOnboard7bReview` ⑩(가짜 sshd 수신 0) ⑪ ⑫(스윕) · 변이 R1~R10 | ✅ |
       | | 경로별 peerTrust 강제(observe 정책에서도 미승인 상대에 저장 비밀을 보내지 않음 — 감사 권고 ②) | 하지 않음 — 묶는 권한을 소유자 + OTP 로 올려 권한 상승 경로가 닫혔다(근거 security-api.md 7b ⑨) · 화면이 observe 동작을 밝힌다 | ○ 현장 권고(enforce 권장) |
       | | 복호 실패 시 쓰기 거절(F5) · 복원 합집합(F13) · 중앙 수신 재가림(L-3) | `keyStore.js unreadable` · `keyBundle.mergeRedactedKeyStore` · `agentConfig.js` · `bmOnboard7bReview` ④ ⑦ | ✅ |
       | | 응답 · 내보내기 · 백업 · 엣지 push 에 지문 · 공개키만 | `keyBundle.js:19` · `backup/service.js:260` · `bmOnboard7bKeys` ③ ⑧ ⑩(소스 스윕) | ✅ |
