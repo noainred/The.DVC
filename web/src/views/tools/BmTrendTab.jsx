@@ -103,18 +103,19 @@ function Seg({ items, value, onChange, label, className = '' }) {
  * @param {{itemKey:string, name?:string, th?:object, latest?:object|null, keepDays?:{server?:number,dev?:number}|null, narrowOverride?:boolean}} p
  *   latest — 성능 상세의 최근 5분 장치 값(entry.detail: disks · nics) · keepDays — 이 노드 대상의 보존(일). 엣지 위임 서버는 null(모름).
  */
-export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays = null, initialRange = '24h', narrowOverride = null, vcenterId = '' }) {
+export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays = null, initialRange = '24h', narrowOverride = null, vcenterId = '', initial = null, onState = null }) {
   // ⚠ 훅은 전부 조기 return 위.
-  const [rangeK, setRangeK] = useState(() => trendRangeOf(initialRange).k);
-  const [show, setShow] = useState('both');
+  // 6단계 공유 링크: initial(기간 · 창 끝 · 커서 · 구간 · 평균/피크 · 장치 토글)로 시작할 수 있다 — 형식은 bmShare.parseShareHash 가 이미 걸렀다.
+  const [rangeK, setRangeK] = useState(() => trendRangeOf(initial?.range || initialRange).k);
+  const [show, setShow] = useState(() => initial?.show || 'both');
   const [sync, setSync] = useState(true);
-  const [clock, setClock] = useState(() => ({ at: Date.now(), n: 0 }));
+  const [clock, setClock] = useState(() => ({ at: Number.isFinite(initial?.to) && initial.to < Date.now() ? initial.to : Date.now(), n: 0 }));
   const [series, setSeries] = useState({});
   const [mountSeries, setMountSeries] = useState({});
-  const [tg, setTg] = useState({ linked: true, editing: 'avg', avg: { ...DEFAULT_TOGGLE }, peak: { ...DEFAULT_TOGGLE } });
+  const [tg, setTg] = useState(() => { const t0 = { ...DEFAULT_TOGGLE, ...(initial?.disk ? { disk: initial.disk } : {}), ...(initial?.net ? { net: initial.net } : {}), ...(initial?.layout ? { layout: initial.layout } : {}) }; return { linked: true, editing: 'avg', avg: { ...t0 }, peak: { ...t0 } }; });
   const [legend, setLegend] = useState({});
-  const [cur, setCur] = useState(null);       // { ms, panel }
-  const [sel, setSel] = useState(null);       // { from, to }
+  const [cur, setCur] = useState(() => (Number.isFinite(initial?.cursor) ? { ms: initial.cursor, panel: 'avg' } : null));       // { ms, panel }
+  const [sel, setSel] = useState(() => initial?.sel || null);       // { from, to }
   const [pop, setPop] = useState(null);
   const [recoOn, setRecoOn] = useState(false);
   const [devSeg, setDevSeg] = useState('none');
@@ -136,6 +137,8 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
   const devices = useMemo(() => (devs.data && devs.data.ok !== false && devs.data.devices) || { disk: [], nic: [], mount: [] }, [devs.data]);
   // v2.929: 같은 창의 변경 이벤트(+ 집중 1분 점) — 창이 바뀔 때 1회(폴링 없음). 패널 행 위 점과 겹침 카드가 같은 응답을 쓴다.
   const changes = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/changes?from=${Math.floor(win.from)}&to=${Math.floor(win.to)}&focus=1` : '', clock.n);
+  // 6단계: 공유 링크 · 캡처가 쓸 지금 상태를 부모에 알린다(렌더마다가 아니라 값이 바뀔 때만).
+  useEffect(() => { onState?.({ range: rangeK, show, to: clock.at, cursor: cur?.ms ?? null, sel, disk: tg.avg?.disk, net: tg.avg?.net, layout: tg.avg?.layout, from: clock.at - span }); }, [rangeK, show, clock.at, cur?.ms, sel, tg, span]); // eslint-disable-line react-hooks/exhaustive-deps
   const chMarks0 = useMemo(() => changeMarks(changes.data?.events || [], win), [changes.data, win]);
   // 6단계: 같은 창의 운영 주석 — 창이 바뀌거나 저장할 때 1회(annTick). 기계 이벤트(●)와 같은 줄에 ◆ 핀.
   const [annTick, setAnnTick] = useState(0);

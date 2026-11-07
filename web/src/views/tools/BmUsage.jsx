@@ -48,7 +48,8 @@ import BmPerfRulesPanel from './BmPerfRulesPanel.jsx';
 // 6단계: 서버 비교(2~5대) — 고른 서버 목록은 이 화면이 들고(보드 체크 · 상세 ‘비교에 추가’ · 병목 Top 5 · 용도 그룹) 비교 보기가 그린다.
 import BmCompareView from './BmCompareView.jsx';
 import BmCollectHealth from './BmCollectHealth.jsx'; // 6단계 수집 건강 보드(관리자 · 운영자)
-import { addKey } from './bmCompareText.js'; // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
+import { addKey } from './bmCompareText.js';
+import { parseShareHash } from './bmShare.js'; // 6단계 공유 링크(#/tools/bm-usage/share?… — 도구 키 그대로) // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
 
 /** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
 const VIEW_KEY = 'bmUsage.view';
@@ -119,6 +120,13 @@ export function BmUsage() {
   const [cmpMsg, setCmpMsg] = useState('');
   const [cmpMax, setCmpMax] = useState(5);
   const setCmpKeys = React.useCallback((a) => { const v = (Array.isArray(a) ? a : []).slice(0, 8); setCmpKeysState(v); writeCmp(v); }, []);
+  // 6단계 공유 링크 — 들어올 때 · 해시가 바뀔 때 한 번 적용한다(링크는 권한을 주지 않는다: 서버가 다시 판정 · 사라진 서버는 404/‘없음’).
+  const [shareInit, setShareInit] = useState(() => (typeof window !== 'undefined' ? parseShareHash(window.location.hash) : null));
+  useEffect(() => {
+    const on = () => { const x = parseShareHash(window.location.hash); if (x) setShareInit(x); };
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
 
   // v2.628 WEB2628-06: 늦게 온 이전 GET 이 방금 저장한 설정(form)을 덮지 않게 세대로 거른다(저장 성공도 세대를 올린다).
   const loadGen = React.useRef(0);
@@ -240,6 +248,11 @@ export function BmUsage() {
     } finally { if (gen === detailGen.current) setDetailLoading(false); }
   }, []);
   const [perfTab, setPerfTab] = useState('');   // v2.923: 함대 보기에서 연 서버는 그 탭으로(용도 · 장애 기록)
+  useEffect(() => {
+    if (!shareInit) return;
+    if (shareInit.view === 'compare') { setCmpKeys(shareInit.keys); setViewSel('compare'); }
+    else if (shareInit.view === 'detail') { setPerfSel(shareInit.key); setPerfTab(shareInit.tab || 'summary'); }
+  }, [shareInit, setCmpKeys]);
   async function openDetail(key, tab = '') {
     setPerfSel(key); setPerfTab(tab);
     // 사용률 추이(history)는 이 노드가 수집하는 대상만 있다 — 엣지 위임 서버는 성능 상세만 연다(없는 추이를 404 로 보이지 않게).
@@ -569,6 +582,8 @@ export function BmUsage() {
       {view === 'health' && hasRole('admin', 'operator') && <BmCollectHealth />}
       {view === 'compare' && (
         <BmCompareView keys={cmpKeys} onKeys={(k) => { setCmpKeys(k); setCmpMsg(''); }} onOpen={(k) => openDetail(k)}
+          key={shareInit?.view === 'compare' ? `share|${shareInit.keys.join(',')}` : 'cmp'}
+          initial={shareInit?.view === 'compare' ? { view: shareInit.cv, group: shareInit.group, value: shareInit.value, range: shareInit.range, cross: shareInit.cross, metric: shareInit.metric } : {}}
           names={Object.fromEntries(perfItems.map((it) => [it.key, it.name]))} />
       )}
       {/* v2.920: 서버 성능 상세(머리 · 판정 띠 · 탭 요약/자원/하드웨어) — 사용률 추이는 아래 기존 상세 카드에 그대로. */}
@@ -581,7 +596,7 @@ export function BmUsage() {
           authStops={perfAuthStops} staleMs={edges?.staleMs ?? null}
           keepDays={{ server: data?.settings?.dailyRetentionDays ?? null, dev: data?.settings?.store?.devHourlyDays ?? null }}
           onClose={() => setPerfSel('')}
-          inCompare={cmpKeys.includes(perfSel)} onCompareToggle={() => pickCmp(perfSel)} cmpMsg={cmpMsg}
+          inCompare={cmpKeys.includes(perfSel)} onCompareToggle={() => pickCmp(perfSel)} cmpMsg={cmpMsg} shareInit={shareInit?.view === 'detail' ? shareInit : null}
         />
       )}
 

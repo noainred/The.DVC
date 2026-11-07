@@ -23,6 +23,8 @@ import BmSnapshotTab from './BmSnapshotTab.jsx';
 // v2.929(5단계): 집중 모니터링 탭 · 요약 탭의 점검 소모품 카드.
 import BmFocusTab from './BmFocusTab.jsx';
 import { HealthCard } from './BmPerfOpsParts.jsx';
+import BmShareButtons from './BmShareButtons.jsx'; // 6단계 공유 링크 · 캡처
+import { SHARE_MISSING_TEXT } from './bmShare.js';
 import {
   RES_ORDER, RES_LABEL, USE_KEYS, USE_LABEL, HW_USE_LABEL, cellView, cellFootnotes, verdictView, coverageView, rowStates, STATE_TEXT,
   mismatchText, readText, crossView, crossBandText, thresholdText, basisText, evidenceRows, DETAIL_TABS, detailNotes, pathAtText,
@@ -109,13 +111,14 @@ export function createDetailLoader(fetcher = (key) => fetchJson(`/tools/bm-usage
   };
 }
 
-export default function BmPerfDetail({ itemKey, item = null, authStops = [], staleMs = null, onClose, off = false, keepDays = null, initialTab = '', inCompare = false, onCompareToggle = null, cmpMsg = '' }) {
+export default function BmPerfDetail({ itemKey, item = null, authStops = [], staleMs = null, onClose, off = false, keepDays = null, initialTab = '', inCompare = false, onCompareToggle = null, cmpMsg = '', shareInit = null }) {
   // ⚠ 훅은 전부 조기 return 위에.
   const [st, setSt] = useState({ resp: null, err: null, loading: false });
   const [tab, setTab] = useState('summary');
   const loader = useRef(null);
   if (!loader.current) loader.current = createDetailLoader();
   const rootRef = useRef(null);
+  const trendState = useRef(null);   // 6단계 공유 링크 — 추이 탭이 알려 준 지금 상태(기간 · 창 끝 · 커서 · 구간 · 토글)
   const set = useCallback((patch) => setSt((p) => ({ ...p, ...patch })), []);
   const load = useCallback((key) => loader.current.load(key, set), [set]);
   useEffect(() => {
@@ -129,13 +132,15 @@ export default function BmPerfDetail({ itemKey, item = null, authStops = [], sta
     <div ref={rootRef} style={{ minWidth: 0 }}>
       <BmPerfDetailView itemKey={itemKey} item={item} resp={st.resp} err={st.err} loading={st.loading} tab={tab} onTab={setTab}
         onReload={() => load(itemKey)} onClose={onClose} authStops={authStops} staleMs={staleMs} off={off} keepDays={keepDays}
-        inCompare={inCompare} onCompareToggle={onCompareToggle} cmpMsg={cmpMsg} />
+        inCompare={inCompare} onCompareToggle={onCompareToggle} cmpMsg={cmpMsg}
+        shareInit={shareInit && shareInit.key === itemKey ? shareInit : null} onTrendState={(x) => { trendState.current = x; }}
+        share={{ node: () => rootRef.current, state: () => ({ view: 'detail', key: itemKey, tab, ...(tab === 'trend' && trendState.current ? trendState.current : {}) }) }} />
     </div>
   );
 }
 
 /** 상세 화면(상태 없음 — 응답 · 오류 · 탭을 받아 그린다). 테스트가 응답 뒤 화면을 SSR 로 본다(반증 D8). */
-export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null, loading = false, tab = 'summary', onTab, onReload, onClose, authStops = [], staleMs = null, off = false, now = Date.now(), keepDays = null, inCompare = false, onCompareToggle = null, cmpMsg = '' }) {
+export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null, loading = false, tab = 'summary', onTab, onReload, onClose, authStops = [], staleMs = null, off = false, now = Date.now(), keepDays = null, inCompare = false, onCompareToggle = null, cmpMsg = '', shareInit = null, onTrendState = null, share = null }) {
   if (!itemKey) return null;
   const setTab = onTab || (() => {});
   const sameKey = resp && (resp.key === itemKey);
@@ -162,6 +167,9 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
         <span className="bmp-chip" style={{ color: e ? toneVar(cov.tone) : 'var(--muted)' }}>경로 {e ? cov.label : '—'}</span>
         <span style={{ flex: '1 1 auto' }} />
         {onCompareToggle && <button className="btn btn-sm bmp-touch" aria-pressed={inCompare} onClick={onCompareToggle}>{inCompare ? '비교에서 빼기' : '비교에 추가'}</button>}
+        {share && sameKey && <BmShareButtons kind={`detail-${tab}`} state={share.state} node={share.node}
+          context={() => ({ title: `${name} — ${tab}`, servers: [name], corps: [target.vcenterId || '귀속 없음'], from: share.state().from ?? null, to: share.state().to ?? resp?.entry?.ts ?? null, cursor: share.state().cursor ?? null,
+            source: [e?.osAt ? `OS ${new Date(e.osAt).toLocaleTimeString('ko-KR', { hour12: false })}` : '', e?.idracAt ? `iDRAC ${new Date(e.idracAt).toLocaleTimeString('ko-KR', { hour12: false })}` : '', item?.agent ? `엣지 ${item.agent}` : ''].filter(Boolean).join(' · '), note: '수치는 5분 평균 · 피크' })} />}
         <button className="btn btn-sm bmp-touch" onClick={onReload} disabled={loading || !onReload}>{loading ? '읽는 중…' : '다시 읽기'}</button>
         {onClose && <button className="btn btn-sm bmp-touch" onClick={onClose}>닫기</button>}
       </div>
@@ -178,6 +186,7 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
 
       {errIs403 && <div style={{ marginTop: 8 }}><ErrorBox error={err} /></div>}
       {err && !errIs403 && <p style={{ margin: '8px 0 0', fontSize: 12, color: toneVar('bad'), lineHeight: 1.6 }}>{detailErrorText(err)}</p>}
+      {err && err.status === 404 && shareInit && <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>{SHARE_MISSING_TEXT}</p>}
       {!resp && !err && <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' }}>성능 상세를 불러오는 중…</p>}
       {sameKey && !e && !err && <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>이 서버의 성능 판정 항목이 없습니다 — 위 안내가 이유를 말합니다.</p>}
 
@@ -310,7 +319,8 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
 
           {tab === 'trend' && (
             // v2.923(3b): 추이 탭 — 서버를 바꾸면 상태를 새로(key). 최근 5분 장치 값(detail)은 장치 표가 함께 쓴다. 보존(일)은 이 노드 대상만 안다.
-            <BmTrendTab key={itemKey} itemKey={itemKey} name={name} latest={e.detail || null} keepDays={item?.agent ? null : keepDays} vcenterId={target.vcenterId || ''} />
+            <BmTrendTab key={itemKey} itemKey={itemKey} name={name} latest={e.detail || null} keepDays={item?.agent ? null : keepDays} vcenterId={target.vcenterId || ''}
+              initial={shareInit?.tab === 'trend' ? shareInit : null} onState={onTrendState} />
           )}
 
           {tab === 'hw' && (

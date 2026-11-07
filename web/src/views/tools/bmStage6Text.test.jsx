@@ -21,6 +21,8 @@ import * as N from './bmAnnotText.js';
 import { AnnotTable } from './BmAnnotations.jsx';
 import { TrendSvg } from './BmTrendChart.jsx';
 import { ANNOT_KINDS } from '../../../../server/src/bmusage/annotations.js';
+import * as S from './bmShare.js';
+import { inlineSvgPaint, captureName, footerHeight } from './bmCapture.js';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const H = 3_600_000;
@@ -179,5 +181,47 @@ describe('운영 주석 — ◆ 핀 · 목록 · 연결', () => {
   it('소스 스윕 — 폴링 없음', () => {
     const s3 = strip(src('BmAnnotations.jsx')) + strip(src('bmAnnotText.js'));
     expect(s3).not.toMatch(/setInterval|usePolling|setTimeout/);
+  });
+});
+
+describe('공유 링크 · 캡처', () => {
+  it('왕복 — 상세(탭 · 기간 · 창 끝 · 커서 · 구간 · 토글) · 비교(서버 · 법인 간 · 보기 · 묶음 · 값 · 지표)', () => {
+    const d = { view: 'detail', key: 'TAG1', tab: 'trend', range: '7d', show: 'peak', to: NOW, cursor: NOW - H, sel: { from: NOW - 3 * H, to: NOW - 2 * H }, disk: 'disk', net: 'nic', layout: 'rows' };
+    expect(S.parseShareHash(S.shareHashOf(d))).toEqual(d);
+    const c = { view: 'compare', keys: ['a', 'b'], cross: true, range: '7d', cv: 'table', group: 'use', value: 'avg', metric: 'cpu_pct' };
+    expect(S.parseShareHash(S.shareHashOf(c))).toEqual(c);
+    expect(S.shareHashOf(c).startsWith('#/tools/bm-usage/share?')).toBe(true);
+  });
+  it('형식 밖은 버린다 — 모르는 보기 · 탭 · 키 · 수 · 다른 화면 해시', () => {
+    expect(S.parseShareHash('#/tools/bm-usage/share?view=evil&key=a')).toBe(null);
+    expect(S.parseShareHash('#/tools/gpu/share?view=detail&key=a')).toBe(null);
+    expect(S.parseShareHash('#/tools/bm-usage/share?view=detail&key=a%2Fb')).toBe(null);
+    const x = S.parseShareHash('#/tools/bm-usage/share?view=detail&key=k&tab=evil&to=abc&sel=5~1&cur=99999999999999999&disk=rm');
+    expect(x).toMatchObject({ key: 'k', tab: 'summary', to: null, sel: null, cursor: null, disk: null });
+    const many = S.parseShareHash(`#/tools/bm-usage/share?view=compare&keys=${Array.from({ length: 20 }, (_, i) => `k${i}`).join(',')}`);
+    expect(many.keys.length).toBe(8);
+    expect(S.shareHashOf({ view: 'detail', key: 'a b' })).toBe('#/tools/bm-usage');
+  });
+  it('캡처 각주 — 맥락 줄(값 없으면 ‘—’) · 파일 이름 ASCII', () => {
+    const f = S.captureFooter({ title: 'T', servers: ['db01'], corps: ['vcA', 'vcA'], from: NOW - H, to: NOW, cursor: null, source: 'OS 13:35', by: 'kim', at: NOW });
+    expect(f.length).toBe(4); expect(f[1]).toContain('vcA'); expect(f[1].match(/vcA/g).length).toBe(1); expect(f[3]).toContain('kim');
+    expect(S.captureFooter({}).join('\n')).toContain('—');
+    expect(captureName('detail-trend', NOW)).toMatch(/^bm-detail-trend_\d{8}-\d{4}\.png$/);
+    expect(footerHeight(['a', 'b'])).toBe(56);
+  });
+  it('SVG 칠 인라인 — 계산값만(var( 가 남은 값은 건드리지 않는다)', () => {
+    const set = []; const el = { style: { setProperty: (p, v) => set.push([p, v]) } };
+    const root = { querySelectorAll: () => [el] };
+    const doc = { defaultView: { getComputedStyle: () => ({ getPropertyValue: (p) => ({ stroke: 'rgb(1, 2, 3)', fill: 'var(--x)', opacity: '0.5' })[p] || '' }) } };
+    expect(inlineSvgPaint(doc, root)).toBe(2);
+    expect(set).toEqual([['stroke', 'rgb(1, 2, 3)'], ['opacity', '0.5']]);
+    expect(inlineSvgPaint({}, root)).toBe(0);
+  });
+  it('캡처 코어는 하나 — 리포트 저장의 html2canvas 경로(이미 있는 의존성) · 새 캡처 라이브러리 없음', () => {
+    const s4 = strip(src('bmCapture.js'));
+    expect(s4).toMatch(/from '\.\/reportExport\.js'/);
+    expect(s4).not.toMatch(/import\(['"]html2canvas|from ['"](html-to-image|dom-to-image)/);
+    const pkg = JSON.parse(fs.readFileSync(path.join(HERE, '../../../package.json'), 'utf8'));
+    expect(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter((k) => /html-to-image|dom-to-image/.test(k))).toEqual([]);
   });
 });

@@ -21,6 +21,7 @@ import {
   colorPlan, sparkPath, corpsReadText, devText, COMPARE_TABLE_NOTE, COMPARE_HONEST, skewText, baselineCellText, focusStartSummary, compareCsv, compareCsvName,
 } from './bmCompareText.js';
 import { useAnnotations } from './BmAnnotations.jsx';
+import BmShareButtons from './BmShareButtons.jsx'; // 6단계 공유 링크 · 캡처
 import './bmStage6.css';
 
 /** 조회기 — 세대로 늦게 온 이전 응답을 버린다(테스트가 가짜 fetcher 로 고정). */
@@ -219,6 +220,7 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
   const [reason, setReason] = useState('');
   const [focusBusy, setFocusBusy] = useState(false);
   const loader = useRef(null);
+  const rootRef = useRef(null);
   if (!loader.current) loader.current = createCompareLoader();
   const keysSig = keys.join(',');
   const canWrite = hasRole('admin', 'operator');
@@ -271,7 +273,7 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
   }
 
   return (
-    <div className="card bmcmp" style={{ minWidth: 0 }} data-capture="bm-compare">
+    <div className="card bmcmp" style={{ minWidth: 0 }} data-capture="bm-compare" ref={rootRef}>
       <div className="bmcmp-top">
         <h4 style={{ margin: 0 }}>서버 비교</h4>
         <span className="bmo-note" style={{ margin: 0 }}>내가 고른 2~{max}대를 한 화면에서 — 사용률 · 평균 · 피크 · 편차</span>
@@ -279,6 +281,10 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
         <div className="bmcmp-btns">
           {COMPARE_RANGES.map((r) => <button key={r.k} type="button" className={`btn btn-sm bmp-touch${range === r.k ? ' btn-primary' : ''}`} aria-pressed={range === r.k} onClick={() => setRange(r.k)}>{r.label}</button>)}
           {canCsv() && <button type="button" className="btn btn-sm bmp-touch" disabled={!resp || !live.length} onClick={exportCsv}>CSV</button>}
+          {keys.length > 0 && <BmShareButtons kind="compare"
+            state={() => ({ view: 'compare', keys, cross, range, cv: view, group, value, metric })}
+            node={() => rootRef.current}
+            context={() => ({ title: `서버 비교 — ${COMPARE_VIEW_TEXT[view]}`, servers: live.map((c) => nameOf(c.key)), corps: live.map((c) => c.vcenterId || '귀속 없음'), from: resp?.from, to: resp?.to, source: corpsReadText(resp?.corps || []) || '—', note: '수치는 5분(또는 1시간) 평균 · 피크' })} />}
           {renderExtra && renderExtra({ resp, view, nameOf })}
         </div>
       </div>
