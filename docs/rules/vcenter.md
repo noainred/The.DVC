@@ -303,7 +303,7 @@
   · 블록 추출은 선형 indexOf 이고 **태그 다음 글자가 공백·'>' 일 때만** 같은 태그다(`<rules>` 를 `<rule>` 로 읽지 않는다 — 테스트 고정). EVC 는 summary 를 읽었는데 키가 없으면 ''(꺼짐), summary 를 못 읽으면 null.
   · 판정: HA 를 켰는지 모르면 수용 제어·모니터링도 판정하지 않는다 · 단일 호스트 클러스터는 single-host 하나 · EVC 혼재는 **연결된 호스트**의 CPU 모델로만.
   · VM 상세의 '이 VM 의 규칙' 은 vmId 에서 **vCenter id 접두를 떼서** moref 를 얻는다(콜론 split 금지 — vCenter id 에 콜론이 있다). 상세 창은 `toolAllowed('cluster-check')` 를 먼저 본다(403 을 만들지 않게).
-  · 엣지 수신은 `sanitizeClusterCfgList`(아는 필드만·규칙 50·VM 참조 100·클러스터 500). **vcenter 객체의 다른 필드(solutions 등)는 여전히 정제하지 않는다**(기존 상태 — 별건).
+  · 엣지 수신은 `sanitizeClusterCfgList`(아는 필드만·규칙 50·VM 참조 100·클러스터 500). ~~vcenter 객체의 다른 필드(solutions 등)는 여전히 정제하지 않는다~~ → licenses·solutions 는 v2.742, **그 밖의 최상위 필드는 ✅ v2.938**(`central/vcenterTop.js` — 아는 키·형식만, 모르는 키는 이름·개수로 응답·콘솔에 · 수집기 키와 표를 대조하는 스윕 `vcenterTop2938`). 새 vcenter 필드를 수집기에 더하면 그 표에도 더할 것.
   · 네트워크(A10)는 호스트 캐시의 선택 경로 묶음 `noNetPath`(20대씩). 업링크 = 스위치 **직속 `<pnic>`**(브리지 nicDevice 아님) · 무차별 = **computedPolicy**(유효 정책) ·
     포트그룹 없는 표준 스위치는 판정에서 뺀다 · 링크 다운은 인벤토리 `host.nics[].link` 를 알 때만 · 포트그룹 드리프트는 목록이 잘렸으면(`pgsTotal > pgs.length`) 비교하지 않는다.
   · ⚠ 정직 기록: 실장비 응답(configurationEx·vswitch·proxySwitch XML)은 합성 입력으로만 확인했다. 위조 전송·MAC 변경은 vSS 기본값이 허용이라 판정하지 않았다(소음).
