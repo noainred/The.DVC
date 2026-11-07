@@ -59,7 +59,8 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
 .tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
 .tabs .sep{width:1px;align-self:stretch;background:#243049;margin:8px 6px}
 .tabs .cnt{font-size:11px;font-weight:800;background:rgba(239,68,68,.16);color:#fca5a5;border-radius:999px;padding:1px 7px;font-family:"JetBrains Mono",monospace}
-.tabs .tool{color:#6f7f9a;font-weight:500}
+.tabs .tool{color:#6f7f9a;font-weight:500;padding:10px 10px}
+.chip b{font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:800;color:#fca5a5}
 .tile{padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
 .tile .lb{font-size:12px;font-weight:600;color:#8b9bb4;display:flex;justify-content:space-between;gap:8px}
 .tile .val{font-size:30px;font-weight:800;line-height:1;font-family:"JetBrains Mono",monospace}
@@ -150,14 +151,14 @@ tr:hover td{background:rgba(59,130,246,.06)}
       <h1 style="margin:0;font-size:20px;font-weight:800">가상화 플랫폼</h1>
       <span class="muted" style="font-size:12.5px">전체 범위 · 28 vCenter</span>
       <span style="flex:1"></span>
-      <a class="btn sm" href="AltTree.dc.html">인벤토리 트리</a>
+      <span class="note">마지막으로 본 탭을 기억합니다</span>
     </header>
 
     <nav class="et" role="tablist" aria-label="가상화 플랫폼 보기">
       <a href="Main.dc.html">
-        <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>vCenter <span class="muted" style="font-weight:500">· 법인</span><span class="cnt tag ok" style="height:auto">연결 27 · 낡은 값 1</span></span>
+        <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>vCenter <span class="muted" style="font-weight:500">· 법인</span><span class="cnt tag warn" style="height:auto">낡은 값 1</span></span>
         <span class="val">28</span>
-        <span class="sub"><span>호스트 <b>658</b></span><span>VM <b>5,850</b></span><span>알람 <b style="color:#fca5a5">58</b></span><span>REST 폴백 <b>2</b></span></span>
+        <span class="sub"><span>연결 <b style="color:#86efac">27</b></span><span>불가 <b>0</b></span><span>REST 폴백 <b>2</b></span><span>엣지 위임 <b>6</b></span><span title="REST 폴백으로 수집된 vCenter 2곳은 경보를 조회하지 않아 합계에 없습니다">알람 <b style="color:#fca5a5">58</b> <small style="color:#5d6b85">(미조회 2곳 제외)</small></span></span>
       </a>
       <a href="Hosts.dc.html">
         <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="5" rx="1.5"/><rect x="3" y="14" width="18" height="5" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>ESXi 호스트<span class="cnt tag warn" style="height:auto">확인 대상 52</span></span>
@@ -167,16 +168,18 @@ tr:hover td{background:rgba(59,130,246,.06)}
       <a href="Vms.dc.html" class="on" aria-current="page">
         <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>가상화 서버 · VM<span class="cnt tag crit" style="height:auto">조치 필요 641</span></span>
         <span class="val">5,850</span>
-        <span class="sub"><span>구동 <b style="color:#86efac">5,120</b></span><span>정지 <b>730</b></span><span>평균 CPU <b>51%</b></span><span>메모리 <b>59%</b></span><span>GPU <b>133</b></span></span>
+        <span class="sub"><span>구동 <b style="color:#86efac">5,120</b></span><span>정지 <b>730</b></span><span>사용률 미수집 <b>37</b></span><span>템플릿 <b>42</b></span></span>
       </a>
     </nav>
 
     <!-- 바로가기(② vCenter 탭과 같은 줄): 칩을 누르면 허브 범위가 그 vCenter 로 바뀌어 이 탭의 목록이 걸러진다. 찾기는 이 탭 안에서 vCenter · VM 이름 -->
     <section class="card" style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center" aria-label="바로가기">
       <span class="muted" style="font-size:12px;font-weight:600;margin-right:4px">바로가기</span>
-      <a class="chip" href="#" title="VM 탭을 이 vCenter 범위로"><i></i>vc-us-east</a><a class="chip" href="#"><i></i>vc-us-west</a><a class="chip" href="#"><i></i>vc-br-sao</a><a class="chip" href="#"><i></i>vc-eu-central</a><a class="chip" href="#"><i></i>vc-eu-west</a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae</a><a class="chip" href="#"><i></i>vc-ap-northeast</a><a class="chip" href="#"><i></i>vc-ap-southeast</a><a class="chip" href="#"><i></i>vc-ap-south</a><a class="chip" href="#"><i></i>vc-cn-east</a><a class="chip" href="#"><i></i>vc-cn-north</a><a class="chip" href="#"><i></i>vc-pl-waw</a>
+      <a class="chip" href="#" title="VM 탭을 이 vCenter 범위로 · 숫자 = 조치 필요 VM"><i></i>vc-us-east <b>52</b></a><a class="chip" href="#"><i></i>vc-us-west <b>31</b></a><a class="chip" href="#"><i></i>vc-br-sao <b>18</b></a><a class="chip" href="#"><i></i>vc-eu-central <b>96</b></a><a class="chip" href="#"><i></i>vc-eu-west <b>44</b></a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae <b>12</b></a><a class="chip" href="#"><i></i>vc-ap-northeast <b>61</b></a><a class="chip" href="#"><i></i>vc-ap-southeast <b>27</b></a><a class="chip" href="#"><i></i>vc-ap-south <b>23</b></a><a class="chip" href="#"><i></i>vc-cn-east <b>58</b></a><a class="chip" href="#"><i></i>vc-cn-north <b>49</b></a><a class="chip" href="#"><i></i>vc-pl-waw <b>21</b></a>
       <a class="chip" href="#" style="color:#8b9bb4">+16 더</a>
+      <span class="note">숫자 = 그 vCenter 의 조치 필요 VM · 고른 법인은 파랗게</span>
       <span style="flex:1"></span>
+      <button class="btn sm ghost" type="button" aria-label="바로가기 접기">접기 ▴</button>
       <label for="vq" class="muted" style="font-size:12px">찾기</label><input id="vq" class="input" placeholder="vCenter · VM 이름" style="width:200px;min-height:30px">
     </section>
 
@@ -192,23 +195,18 @@ tr:hover td{background:rgba(59,130,246,.06)}
       <a href="#" class="tool">수량 추이</a>
       <a href="#" class="tool">현재 사용자</a>
       <a href="#" class="tool">실제 OS 확인</a>
+      <span style="flex:1"></span>
+      <select id="pw" class="input" style="min-width:110px;min-height:30px;margin-bottom:4px" aria-label="전원"><option>전체 전원</option><option>On</option><option>Off</option></select>
+      <label class="chk" style="margin:0 0 4px 10px"><input type="checkbox">메모 포함</label>
+      <label class="chk" style="margin:0 0 4px 10px"><input type="checkbox">IPMS 포함</label>
     </nav>
 
-    <!-- VM 탭 고유 조건(공용 필터 바에서 내려옴): 전원 · 메모 · IPMS -->
-    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px">
-      <span class="muted" style="font-size:12px">조건</span>
-      <select id="pw" class="input" style="min-width:110px" aria-label="전원"><option>전체 전원</option><option>On</option><option>Off</option></select>
-      <label class="chk"><input type="checkbox">메모 포함</label>
-      <label class="chk"><input type="checkbox">IPMS 포함</label>
-      <span class="note">전원 · 메모 · IPMS 는 VM 탭 고유 조건</span>
-    </div>
-
     <section style="display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:12px" aria-label="글로벌 가상머신 요약">
-      <div class="card tile">
-        <div class="lb"><span>전체 VM</span><a href="#" style="font-weight:700">조치 필요 641 ▸</a></div>
-        <div class="val">5,850</div>
-        <div class="bar"><i style="width:88%;background:#22c55e"></i></div>
-        <div class="sub"><span>구동중 <b style="color:#e6edf6">5,120</b></span><span>정지 730</span><span>미수집 37</span></div>
+      <div class="card tile" style="border-color:rgba(239,68,68,.45)">
+        <div class="lb"><span>조치 필요</span><a href="#" style="font-weight:700">조치 필요 탭 ▸</a></div>
+        <div class="val" style="color:#f87171">641</div>
+        <div class="seg"><i style="width:19%;background:#ef4444"></i><i style="width:6%;background:#5d6b85"></i><i style="width:33%;background:#f59e0b"></i><i style="width:42%;background:#fbbf24"></i></div>
+        <div class="sub"><span style="color:#fca5a5">과부하 124</span><span>미수집 37</span><span style="color:#fcd34d">Tools 구버전 212</span><span style="color:#fcd34d">스냅샷 오래됨 268</span></div>
       </div>
       <div class="card tile">
         <div class="lb"><span>평균 CPU 사용량</span><span>구동중 VM 기준</span></div>
@@ -290,8 +288,8 @@ tr:hover td{background:rgba(59,130,246,.06)}
           <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">ai-kr1-gpu-02</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag crit">CPU 90%↑</span></div></td><td class="muted">vc-ap-northeast</td><td>Ubuntu 22.04</td><td class="mono">10.20.31.8</td><td class="r mono">32 · 256 GB</td><td><span class="tag purple">vGPU ×2</span></td><td><span class="ub"><span class="bar"><i style="width:96%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">96%</span></span></td><td><span class="ub"><span class="bar"><i style="width:71%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">71%</span></span></td><td class="r mono">4.0 TB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-kr1-12</a></td></tr>
           <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">web-eu-central-023</a></td><td class="muted">vc-eu-central</td><td>Windows Server 2022</td><td class="mono">10.60.4.23</td><td class="r mono">8 · 32 GB</td><td class="muted">—</td><td><span class="ub"><span class="bar"><i style="width:94%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">94%</span></span></td><td><span class="ub"><span class="bar"><i style="width:62%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">62%</span></span></td><td class="r mono">300 GB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-eu-central-11</a></td></tr>
           <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">erp-pl-waw-001</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag warn">스냅샷 41일↑</span></div></td><td class="muted">vc-pl-waw</td><td>Windows Server 2019</td><td class="mono">10.70.2.11<br>10.70.9.11</td><td class="r mono">12 · 96 GB</td><td class="muted">—</td><td><span class="ub"><span class="bar"><i style="width:91%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">91%</span></span></td><td><span class="ub"><span class="bar"><i style="width:88%;background:#f59e0b"></i></span><span class="mono" style="width:34px;text-align:right">88%</span></span></td><td class="r mono">2.0 TB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-pl-waw-05</a></td></tr>
-          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">app-us-east-108</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag gray">사용률 미수집</span></div></td><td class="muted">vc-us-east</td><td>SUSE 15</td><td class="mono">10.10.14.108</td><td class="r mono">4 · 16 GB</td><td class="muted">—</td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td class="r mono">120 GB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-us-east-03</a></td></tr>
-          <tr><td><span class="dot" style="background:#5d6b85"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">tmp-br-sao-017</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag warn">IP 없음</span></div></td><td class="muted">vc-br-sao</td><td>CentOS Stream 9</td><td class="muted">—</td><td class="r mono">2 · 8 GB</td><td class="muted">—</td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td class="r mono">40 GB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-br-sao-02</a></td></tr>
+          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">app-us-east-108</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag gray">사용률 미수집</span><span class="tag warn">백업 없음</span></div></td><td class="muted">vc-us-east</td><td>SUSE 15</td><td class="mono">10.10.14.108</td><td class="r mono">4 · 16 GB</td><td class="muted">—</td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td class="r mono">120 GB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-us-east-03</a></td></tr>
+          <tr><td><span class="dot" style="background:#5d6b85"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">tmp-br-sao-017</a><div style="margin-top:3px;display:flex;gap:4px"><span class="tag warn">IP 없음</span><span class="tag warn">백업 없음</span></div></td><td class="muted">vc-br-sao</td><td>CentOS Stream 9</td><td class="muted">—</td><td class="r mono">2 · 8 GB</td><td class="muted">—</td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td class="r mono">40 GB</td><td class="muted"><a href="Hosts.dc.html" style="text-decoration:none">esx-br-sao-02</a></td></tr>
         </tbody>
       </table>
       </div>
@@ -301,7 +299,7 @@ tr:hover td{background:rgba(59,130,246,.06)}
         <span class="muted" style="font-size:12px">1페이지 · 1,000대 표시</span>
         <button class="btn sm" type="button">다음 페이지 불러오기 ▶</button>
         <span style="flex:1"></span>
-        <span class="note">행을 누르면 드로어(‹ › 이동) → ‘⤢ 개체 보기’ 로 VM 개체 화면 · 호스트 이름을 누르면 호스트 탭을 그 호스트로(새 교차 링크)</span>
+        <span class="note"><b style="color:#aebbd0">VM 이름을 누르면 개체 보기(브레드크럼)</b> — 드로어(‹ › 이동 · 빠른 확인)는 행 끝 버튼 · 호스트 이름을 누르면 호스트 탭을 그 호스트로 · ‘백업 없음’ = Veeam · Bareos 둘 다 없음</span>
       </div>
     </section>
 
@@ -314,7 +312,7 @@ tr:hover td{background:rgba(59,130,246,.06)}
   </footer>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1540}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }

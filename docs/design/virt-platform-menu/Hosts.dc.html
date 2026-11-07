@@ -57,6 +57,12 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
 .seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
 .seg a{padding:7px 14px;color:#8b9bb4;font-weight:600;text-decoration:none;font-size:12.5px}
 .seg a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #3b82f6}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:3px solid transparent;margin-bottom:-1px;min-height:40px;box-sizing:border-box}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tabs .sep{width:1px;align-self:stretch;background:#243049;margin:8px 6px}
+.tabs .tool{color:#6f7f9a;font-weight:500;padding:10px 10px}
+.chip b{font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:800;color:#fcd34d}
 .kp{padding:12px 14px;display:flex;flex-direction:column;gap:5px;min-width:0}
 .kp .lb{font-size:11.5px;font-weight:600;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kp .val{font-size:22px;font-weight:800;font-family:"JetBrains Mono",monospace;line-height:1.1}
@@ -149,14 +155,14 @@ tr:hover td{background:rgba(59,130,246,.06)}
       <h1 style="margin:0;font-size:20px;font-weight:800">가상화 플랫폼</h1>
       <span class="muted" style="font-size:12.5px">전체 범위 · 28 vCenter</span>
       <span style="flex:1"></span>
-      <a class="btn sm" href="AltTree.dc.html">인벤토리 트리</a>
+      <span class="note">마지막으로 본 탭을 기억합니다</span>
     </header>
 
     <nav class="et" role="tablist" aria-label="가상화 플랫폼 보기">
       <a href="Main.dc.html">
-        <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>vCenter <span class="muted" style="font-weight:500">· 법인</span><span class="cnt tag ok" style="height:auto">연결 27 · 낡은 값 1</span></span>
+        <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>vCenter <span class="muted" style="font-weight:500">· 법인</span><span class="cnt tag warn" style="height:auto">낡은 값 1</span></span>
         <span class="val">28</span>
-        <span class="sub"><span>호스트 <b>658</b></span><span>VM <b>5,850</b></span><span>알람 <b style="color:#fca5a5">58</b></span><span>REST 폴백 <b>2</b></span></span>
+        <span class="sub"><span>연결 <b style="color:#86efac">27</b></span><span>불가 <b>0</b></span><span>REST 폴백 <b>2</b></span><span>엣지 위임 <b>6</b></span><span title="REST 폴백으로 수집된 vCenter 2곳은 경보를 조회하지 않아 합계에 없습니다">알람 <b style="color:#fca5a5">58</b> <small style="color:#5d6b85">(미조회 2곳 제외)</small></span></span>
       </a>
       <a href="Hosts.dc.html" class="on" aria-current="page">
         <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="5" rx="1.5"/><rect x="3" y="14" width="18" height="5" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>ESXi 호스트<span class="cnt tag warn" style="height:auto">확인 대상 52</span></span>
@@ -166,30 +172,33 @@ tr:hover td{background:rgba(59,130,246,.06)}
       <a href="Vms.dc.html">
         <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>가상화 서버 · VM<span class="cnt tag crit" style="height:auto">조치 필요 641</span></span>
         <span class="val">5,850</span>
-        <span class="sub"><span>구동 <b style="color:#86efac">5,120</b></span><span>정지 <b>730</b></span><span>평균 CPU <b>51%</b></span><span>메모리 <b>59%</b></span><span>GPU <b>133</b></span></span>
+        <span class="sub"><span>구동 <b style="color:#86efac">5,120</b></span><span>정지 <b>730</b></span><span>사용률 미수집 <b>37</b></span><span>템플릿 <b>42</b></span></span>
       </a>
     </nav>
 
     <!-- 바로가기(② vCenter 탭과 같은 줄): 칩을 누르면 허브 범위가 그 vCenter 로 바뀌어 이 탭의 목록이 걸러진다. 찾기는 이 탭 안에서 vCenter · 호스트 이름 -->
     <section class="card" style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center" aria-label="바로가기">
       <span class="muted" style="font-size:12px;font-weight:600;margin-right:4px">바로가기</span>
-      <a class="chip" href="#" title="호스트 탭을 이 vCenter 범위로"><i></i>vc-us-east</a><a class="chip" href="#"><i></i>vc-us-west</a><a class="chip" href="#"><i></i>vc-br-sao</a><a class="chip" href="#"><i></i>vc-eu-central</a><a class="chip" href="#"><i></i>vc-eu-west</a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae</a><a class="chip" href="#"><i></i>vc-ap-northeast</a><a class="chip" href="#"><i></i>vc-ap-southeast</a><a class="chip" href="#"><i></i>vc-ap-south</a><a class="chip" href="#"><i></i>vc-cn-east</a><a class="chip" href="#"><i></i>vc-cn-north</a><a class="chip" href="#"><i></i>vc-pl-waw</a>
+      <a class="chip" href="#" title="호스트 탭을 이 vCenter 범위로 · 숫자 = 확인 대상 호스트"><i></i>vc-us-east <b>4</b></a><a class="chip" href="#"><i></i>vc-us-west <b>3</b></a><a class="chip" href="#"><i></i>vc-br-sao <b>1</b></a><a class="chip" href="#"><i></i>vc-eu-central <b>7</b></a><a class="chip" href="#"><i></i>vc-eu-west <b>5</b></a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae <b>2</b></a><a class="chip" href="#"><i></i>vc-ap-northeast <b>6</b></a><a class="chip" href="#"><i></i>vc-ap-southeast <b>2</b></a><a class="chip" href="#"><i></i>vc-ap-south <b>3</b></a><a class="chip" href="#"><i></i>vc-cn-east <b>5</b></a><a class="chip" href="#"><i></i>vc-cn-north <b>8</b></a><a class="chip" href="#"><i></i>vc-pl-waw <b>2</b></a>
       <a class="chip" href="#" style="color:#8b9bb4">+16 더</a>
+      <span class="note">숫자 = 그 vCenter 의 확인 대상 호스트 · 고른 법인은 파랗게</span>
       <span style="flex:1"></span>
+      <button class="btn sm ghost" type="button" aria-label="바로가기 접기">접기 ▴</button>
       <label for="vq" class="muted" style="font-size:12px">찾기</label><input id="vq" class="input" placeholder="vCenter · 호스트 이름" style="width:200px;min-height:30px">
     </section>
 
     <!-- 호스트 탭 본문 = 지금 ESXi 호스트 화면(v2.805 · v2.811) 그대로. 제목 줄의 '호스트별 · 법인별' 이 하위 보기 -->
-    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
-      <nav class="seg" aria-label="호스트 보기"><a href="Hosts.dc.html" class="on" aria-current="page">호스트별</a><a href="#">법인별</a></nav>
-      <select id="st" class="input" style="min-width:118px" aria-label="상태"><option>전체 상태</option><option>정상</option><option>점검</option><option>연결끊김</option></select>
-      <label class="chk"><input type="checkbox">메모 포함</label>
-      <label class="chk"><input type="checkbox">IPMS 포함</label>
-      <span class="note">상태 · 메모 · IPMS 는 호스트 탭 고유 조건</span>
+    <!-- 보기(호스트별 · 법인별) ‖ 이 탭 성격의 특수 기능(도구 키 그대로 · also 에만 추가) · 오른쪽 끝 = 호스트 탭 고유 조건. 점검 집계 · 엑셀 버튼은 표 머리로 -->
+    <nav class="tabs" aria-label="호스트 보기 · 도구">
+      <a href="Hosts.dc.html" class="on" aria-current="page">호스트별</a>
+      <a href="#">법인별 <span class="muted" style="font-weight:500;font-size:11px">2차: vCenter 탭 ‘표’ 로</span></a>
+      <span class="sep"></span>
+      <a href="#" class="tool">ESXi 호스트 구성 점검</a><a href="#" class="tool">ESXi 버전별</a><a href="#" class="tool">HBA 카드 속도</a><a href="#" class="tool">클러스터 HA·DRS 점검</a>
       <span style="flex:1"></span>
-      <button class="btn" type="button">점검 집계 다시 읽기 (오전 10:37:44)</button>
-      <button class="btn primary" type="button"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="width:14px;height:14px"><path d="M12 4v12m0 0 4-4m-4 4-4-4M4 20h16"/></svg>호스트·클러스터 엑셀</button>
-    </div>
+      <select id="st" class="input" style="min-width:118px;min-height:30px;margin-bottom:4px" aria-label="상태"><option>전체 상태</option><option>정상</option><option>점검</option><option>연결끊김</option></select>
+      <label class="chk" style="margin:0 0 4px 10px"><input type="checkbox">메모 포함</label>
+      <label class="chk" style="margin:0 0 4px 10px"><input type="checkbox">IPMS 포함</label>
+    </nav>
 
     <section style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px" aria-label="호스트 요약">
       <div class="card kp"><span class="lb">클러스터</span><span class="val">61</span><span class="bar"><i style="width:100%;background:#8b9bb4"></i></span><span class="sub">독립 호스트 7 · vCenter 당 2.2</span></div>
@@ -245,23 +254,25 @@ tr:hover td{background:rgba(59,130,246,.06)}
         <span class="muted" style="font-size:12px">열 묶음 — 누르면 접고 폅니다</span>
         <button class="cg" type="button">기본</button><button class="cg" type="button">자원</button><button class="cg" type="button">구성·보안</button><button class="cg off" type="button">네트워크</button><button class="cg off" type="button">스토리지</button><button class="cg" type="button">경합·지연</button><button class="cg off" type="button">전력·iDRAC</button><button class="cg off" type="button">재부팅</button><button class="cg" type="button">백업</button>
         <span style="flex:1"></span>
+        <button class="btn sm" type="button">점검 집계 다시 읽기 (오전 10:37:44)</button>
         <button class="btn sm" type="button">CSV</button>
+        <button class="btn sm primary" type="button">호스트·클러스터 엑셀</button>
       </div>
       <div style="overflow-x:auto">
       <table>
-        <thead><tr><th>호스트</th><th>법인 · 클러스터</th><th>상태</th><th class="r">VM</th><th>CPU</th><th>메모리</th><th class="r">코어 · vCore</th><th>ESXi</th><th>구성·보안</th><th>경합</th><th>백업</th><th>확인</th></tr></thead>
+        <thead><tr><th>호스트</th><th>법인 · 클러스터</th><th>상태</th><th class="r">VM</th><th>CPU</th><th>메모리</th><th class="r">코어 · vCore</th><th>ESXi</th><th>구성·보안</th><th>경합</th><th>Veeam / Bareos</th><th>확인</th></tr></thead>
         <tbody>
-          <tr><td><span class="dot" style="background:#ef4444"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-cn-north-07</a></td><td class="muted">vc-cn-north · Beijing-CL1</td><td><span class="tag ok">정상</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">14 →</a></td><td><span class="ub"><span class="bar"><i style="width:97%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">97%</span></span></td><td><span class="ub"><span class="bar"><i style="width:81%;background:#f59e0b"></i></span><span class="mono" style="width:34px;text-align:right">81%</span></span></td><td class="r mono">32 · 96</td><td class="mono">8.0.3</td><td><span class="tag crit">만료 인증서</span></td><td class="mono" style="color:#fca5a5">RDY 12%</td><td class="mono">14/14</td><td><span class="tag crit">CPU 90%↑</span></td></tr>
+          <tr><td><span class="dot" style="background:#ef4444"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-cn-north-07</a></td><td class="muted">vc-cn-north · Beijing-CL1</td><td><span class="tag ok">정상</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">14 →</a></td><td><span class="ub"><span class="bar"><i style="width:97%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">97%</span></span></td><td><span class="ub"><span class="bar"><i style="width:81%;background:#f59e0b"></i></span><span class="mono" style="width:34px;text-align:right">81%</span></span></td><td class="r mono">32 · 96</td><td class="mono">8.0.3</td><td><span class="tag crit">만료 인증서</span></td><td class="mono" style="color:#fca5a5">RDY 12%</td><td class="mono">14 / 5</td><td><span class="tag crit">CPU 90%↑</span></td></tr>
           <tr><td><span class="dot" style="background:#f59e0b"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-us-east-07</a></td><td class="muted">vc-us-east · Ashburn-CL1</td><td><span class="tag warn">점검</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">0 →</a></td><td><span class="ub"><span class="bar"><i style="width:3%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">3%</span></span></td><td><span class="ub"><span class="bar"><i style="width:9%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">9%</span></span></td><td class="r mono">40 · 0</td><td class="mono">8.0.2</td><td><span class="tag warn">재부팅 필요</span></td><td class="muted">—</td><td class="muted">—</td><td><span class="tag warn">점검 모드</span></td></tr>
-          <tr><td><span class="dot" style="background:#ef4444"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-eu-west-03</a></td><td class="muted">vc-eu-west · Dublin-CL1</td><td><span class="tag crit">연결끊김</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">11 →</a></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td class="r mono">32 · 88</td><td class="mono">7.0.3</td><td><span class="tag gray">못 읽음</span></td><td class="muted">—</td><td class="mono">9/11</td><td><span class="tag crit">끊김</span></td></tr>
-          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-kr1-12</a></td><td class="muted">vc-ap-northeast · Seoul-CL3</td><td><span class="tag ok">정상</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">9 →</a></td><td><span class="ub"><span class="bar"><i style="width:93%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">93%</span></span></td><td><span class="ub"><span class="bar"><i style="width:66%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">66%</span></span></td><td class="r mono">32 · 72</td><td class="mono">8.0.3</td><td><span class="tag ok">이상 없음</span></td><td class="mono" style="color:#fcd34d">RDY 6%</td><td class="mono">9/9</td><td><span class="tag crit">CPU 90%↑</span></td></tr>
-          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-pl-waw-05</a></td><td class="muted">vc-pl-waw · Warsaw-CL1</td><td><span class="tag ok">정상</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">12 →</a></td><td><span class="ub"><span class="bar"><i style="width:58%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">58%</span></span></td><td><span class="ub"><span class="bar"><i style="width:71%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">71%</span></span></td><td class="r mono">40 · 110</td><td class="mono">8.0.3</td><td><span class="tag warn">SSH 실행 중</span></td><td class="muted">—</td><td class="mono">10/12</td><td><span class="tag warn">죽은 경로 2</span></td></tr>
-          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-br-sao-02</a></td><td class="muted">vc-br-sao · SãoPaulo-CL1</td><td><span class="tag ok">정상</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">15 →</a></td><td><span class="ub"><span class="bar"><i style="width:49%;background:#1d4ed8"></i></span><span class="mono" style="width:34px;text-align:right">49%</span></span></td><td><span class="ub"><span class="bar"><i style="width:77%;background:#f59e0b"></i></span><span class="mono" style="width:34px;text-align:right">77%</span></span></td><td class="r mono">32 · 104</td><td class="mono">8.0.3</td><td><span class="tag ok">이상 없음</span></td><td class="muted">—</td><td class="mono">15/15</td><td><span class="muted">—</span></td></tr>
+          <tr><td><span class="dot" style="background:#ef4444"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-eu-west-03</a></td><td class="muted">vc-eu-west · Dublin-CL1</td><td><span class="tag crit">연결끊김</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">11 →</a></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td class="r mono">32 · 88</td><td class="mono">7.0.3</td><td><span class="tag gray">못 읽음</span></td><td class="muted">—</td><td class="mono">9 / 4</td><td><span class="tag crit">끊김</span></td></tr>
+          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-kr1-12</a></td><td class="muted">vc-ap-northeast · Seoul-CL3</td><td><span class="tag ok">정상</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">9 →</a></td><td><span class="ub"><span class="bar"><i style="width:93%;background:#ef4444"></i></span><span class="mono" style="width:34px;text-align:right">93%</span></span></td><td><span class="ub"><span class="bar"><i style="width:66%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">66%</span></span></td><td class="r mono">32 · 72</td><td class="mono">8.0.3</td><td><span class="tag ok">이상 없음</span></td><td class="mono" style="color:#fcd34d">RDY 6%</td><td class="mono">9 / 3</td><td><span class="tag crit">CPU 90%↑</span></td></tr>
+          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-pl-waw-05</a></td><td class="muted">vc-pl-waw · Warsaw-CL1</td><td><span class="tag ok">정상</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">12 →</a></td><td><span class="ub"><span class="bar"><i style="width:58%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">58%</span></span></td><td><span class="ub"><span class="bar"><i style="width:71%;background:#3b82f6"></i></span><span class="mono" style="width:34px;text-align:right">71%</span></span></td><td class="r mono">40 · 110</td><td class="mono">8.0.3</td><td><span class="tag warn">SSH 실행 중</span></td><td class="muted">—</td><td class="mono">10 / 4</td><td><span class="tag warn">죽은 경로 2</span></td></tr>
+          <tr><td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">esx-br-sao-02</a></td><td class="muted">vc-br-sao · SãoPaulo-CL1</td><td><span class="tag ok">정상</span></td><td class="r"><a href="Vms.dc.html" class="mono" style="font-weight:700">15 →</a></td><td><span class="ub"><span class="bar"><i style="width:49%;background:#1d4ed8"></i></span><span class="mono" style="width:34px;text-align:right">49%</span></span></td><td><span class="ub"><span class="bar"><i style="width:77%;background:#f59e0b"></i></span><span class="mono" style="width:34px;text-align:right">77%</span></span></td><td class="r mono">32 · 104</td><td class="mono">8.0.3</td><td><span class="tag ok">이상 없음</span></td><td class="muted">—</td><td class="mono">15 / 6</td><td><span class="muted">—</span></td></tr>
         </tbody>
       </table>
       </div>
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid #1f2a40" class="note">
-        <span>확인 대상 52대 중 6대 표시 · 호스트 이름을 누르면 호스트 상세 전체 페이지(<span class="mono">#/hosts/&lt;id&gt;</span> 그대로) · VM 수를 누르면 VM 탭을 그 호스트 범위로</span>
+        <span>확인 대상 52대 중 6대 표시 · <b style="color:#aebbd0">호스트 이름을 누르면 개체 보기(브레드크럼)</b> — 전체 페이지 상세(<span class="mono">#/hosts/&lt;id&gt;</span>)는 그 안의 버튼 · VM 수를 누르면 VM 탭을 그 호스트 범위로 · 백업 열은 Veeam / Bareos 보호 VM 수</span>
       </div>
     </section>
 

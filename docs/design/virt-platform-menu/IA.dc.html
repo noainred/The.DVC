@@ -73,7 +73,7 @@ td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:top}
       </div>
       <div style="display:flex;flex-direction:column;gap:10px;min-width:0">
         <span class="muted" style="font-size:11.5px;font-weight:700">메뉴를 누르면 — 화면 위 엔티티 탭 3개(시안 A) · 탭 안이 지금의 세 화면</span>
-        <div class="ett"><span class="on">vCenter · 법인<b>28</b>연결 27 · 낡은 값 1</span><span>ESXi 호스트<b>658</b>확인 대상 52</span><span>가상화 서버 · VM<b>5,850</b>조치 필요 641</span></div>
+        <div class="ett"><span class="on">vCenter · 법인<b>28</b>연결 27 · 낡은 값 1 · 불가 0</span><span>ESXi 호스트<b>658</b>확인 대상 52</span><span>가상화 서버 · VM<b>5,850</b>조치 필요 641</span></div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span class="muted" style="font-size:11.5px">이름 후보</span><span class="chip on">가상화 플랫폼 <span class="faint">(기본 · 사용자 표현)</span></span><span class="chip">가상 인프라 <span class="faint">(Veeam ONE ‘Virtual Infrastructure’ · VMAN ‘Virtualization’)</span></span><span class="chip">인벤토리 <span class="faint">(vSphere · Aria ‘Inventory’)</span></span></div>
         <span class="note">'서버' 그룹의 다른 항목(물리 서버 · Backup · 알람)은 그대로. 사용자가 저장한 내 메뉴 · 배포 메뉴의 옛 항목(가상화 서버 · ESXi 호스트 · vCenter)은 이 항목으로 이어 붙인다(별칭 — 조용히 사라지지 않게).</span>
       </div>
@@ -105,11 +105,16 @@ td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:top}
       <table>
         <thead><tr><th>항목</th><th>내용</th><th>근거 · 비고</th></tr></thead>
         <tbody>
-          <tr><td><b>엔티티 탭 3</b></td><td>vCenter · 호스트 · VM — 수와 ‘지금 볼 것’ 배지(확인 대상 · 조치 필요). 탭 = 기존 화면 셋, 제목 h1 만 허브로 올라간다</td><td>/health · /hosts/checks · /vms signals 집계 — 새 API 없음(추정)</td></tr>
+          <tr><td><b>엔티티 탭 3</b></td><td>vCenter · 호스트 · VM — 수와 ‘지금 볼 것’ 배지(확인 대상 · 조치 필요). 탭 = 기존 화면 셋, 제목 h1 만 허브로 올라간다</td><td>배지 수는 가벼운 요약 하나(memoJson + scopeKey)에서 받고, 아직 없으면 0 이 아니라 ‘—’ · 마지막 본 탭은 localStorage 에 기억(처음은 vCenter) · 탭 분해 숫자는 그 탭에만 있는 것</td></tr>
           <tr><td><b>범위 하나</b></td><td>리전 · vCenter · 검색은 세 탭에 함께(지금은 탭마다 따로 · vCenter 탭엔 없음). 상태 · 전원 · 메모/IPMS 는 탭 고유</td><td>App tabFilters 구조 변경 · vCenter 카드를 범위로 거른다(클라이언트)</td></tr>
           <tr><td><b>교차 링크</b></td><td>vCenter 카드의 호스트 · VM 수 → 그 범위로 탭 이동 / 호스트 행의 VM 수 → VM 탭 / VM 행의 호스트 → 호스트 탭</td><td>selectSite 는 선언만 되고 호출되지 않는 죽은 prop(VCenters.jsx) · 지금 VM→호스트 링크 0건</td></tr>
           <tr><td><b>브레드크럼 3단</b></td><td>가상화 플랫폼 › vCenter › 클러스터 › 호스트 › VM — ‘← 목록’ 대신. 이전 · 다음 vCenter</td><td>주소 그대로 · vcdRoute 파싱값으로 그린다</td></tr>
-          <tr><td><b>백업 표기</b></td><td>veeam/snapshot → <b>Veeam / Bareos</b>(스냅샷 제외) — 카드 배지 · KPI</td><td>사용자 지시 2026-11-07 · vCenter 별 Bareos 보호 VM 수 집계 필요 여부는 구현 때 확인</td></tr>
+          <tr><td><b>상세 한 규칙</b></td><td>어느 탭에서든 이름 클릭 = 개체 보기(브레드크럼) · 전체 페이지 상세(호스트) · 드로어(VM)는 그 안의 보조 버튼</td><td>지금은 호스트 상세 2벌(전체 페이지 · 개체 보기) · VM 상세 2벌(드로어 · 개체 보기)이 화면마다 다른 곳으로 간다</td></tr>
+          <tr><td><b>‖ 도구 줄</b></td><td>세 탭 모두 탭 줄 오른쪽에 특수 기능 링크 — vCenter: vCenter 버전별 · VMware 솔루션/NSX · 라이선스 한눈에 · 라이선스 만료일 · 인증서 만료 감시 · 구성 변경 이력 / 호스트: ESXi 호스트 구성 점검 · ESXi 버전별 · HBA 카드 속도 · 클러스터 HA·DRS 점검 / VM: 기존 6</td><td>도구 키 · 권한 그대로 · also 에만 추가(Backup · VM 허브 선례) · 권한 없는 도구는 숨김</td></tr>
+          <tr><td><b>vCenter 탭 보기 3</b></td><td>카드 | 표(법인별 비교 — 2차에 호스트 · VM 탭의 ‘법인별’ 을 흡수) | 트리(시안 B 의 지연 로드 트리)</td><td>1차는 카드 + 표 · 트리는 2차 후보 — 보드 ⑨ · ⑦</td></tr>
+          <tr><td><b>바로가기 칩</b></td><td>칩마다 그 탭의 숫자(vCenter: 알람 · 호스트: 확인 대상 · VM: 조치 필요) · 고른 법인은 파랗게 · 접기 상태 기억</td><td>범위 선택기와 겹치지 않게 ‘법인별 문제 지도’ 역할</td></tr>
+          <tr><td><b>400px</b></td><td>엔티티 탭은 가로 스크롤 대신 3칸 한 줄(수 + 이름 + 배지) · 분해는 아래 한 줄</td><td>세 탭이 다 보인다 — 보드 ⑥</td></tr>
+          <tr><td><b>백업 표기</b></td><td>veeam/snapshot → <b>Veeam / Bareos</b>(스냅샷 제외) — 카드 배지 · KPI · 호스트 표 열 · VM ‘백업 없음’ 신호</td><td>사용자 지시 2026-11-07 · vCenter 별 Bareos 보호 VM 수 집계 필요 여부는 구현 때 확인</td></tr>
           <tr><td><b>지키는 것</b></td><td>탭 id · 도구 키 · 해시 · 권한 id · 12탭 키 · localStorage 키 2개 · 15초 폴링 금지 · 판정 코어 하나 · 1440 열 늘리기 금지</td><td>테스트 8~9파일 기대값 갱신(topMenu · sideMenu · menuEdit · singleMenu · vmHub2909 · invSearchQuery …)</td></tr>
         </tbody>
       </table>
@@ -135,7 +140,7 @@ td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:top}
   <div class="note">가상 데이터 · 법인 · vCenter · 호스트 · VM 이름과 수치는 전부 가상. 색 · 글자 · 사이드바 · 상단 바 · 상태바는 web/src/styles.css 토큰과 실제 셸(목 서버 Chromium 캡처 2026-11-07 19:4x KST)을 따랐다.</div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }

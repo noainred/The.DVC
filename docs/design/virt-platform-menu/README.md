@@ -1,7 +1,7 @@
 # 설계: 서버 › 가상화 플랫폼 — vCenter · ESXi 호스트 · 가상화 서버 메뉴 3개 → 1개
 
 작성 2026-11-07 (main 82d95f6 · v2.914.0 기준) · 상태 **시안 · 컨펌 대기**(규칙: 설계는 Fable + Claude Design 시안 → 컨펌 뒤 Opus 구현 — 2026-11-03 '기억해') ·
-시안 캔버스: https://claude.ai/artifact/EgdqZtuep5B8GLEFZk8gSG (아트보드 8장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스 · HTML 프로토타입이지 복사 대상이 아님).
+시안 캔버스: https://claude.ai/artifact/EgdqZtuep5B8GLEFZk8gSG (아트보드 9장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스 · HTML 프로토타입이지 복사 대상이 아님).
 **법인 · vCenter · 호스트 · VM 이름과 수치는 전부 가상**이고(규모만 운영값 28 vCenter · 658 호스트 · 5,850 VM 에 맞춤) 색 · 글자 · 사이드바 · 상단 바 · 상태바는
 `web/src/styles.css` `:root` 토큰과 목 서버 Chromium 캡처(2026-11-07 19:37~19:39 KST · `#/vcenters` · `#/hosts` · `#/vms` · 상세 · 400px)를 따랐다. 계정에 'Design System' 아티팩트가 없어 쓰지 않았다.
 §2 는 코드 분석 에이전트 4명(기능 목록 3 + 제약 1)이 파일:줄로 확인한 것, §3 은 조사 에이전트 12명(제품별)의 결과를 메인(Fable)이 추린 것, §4~§6 은 시안 단계(Fable)에서 채웠다.
@@ -63,6 +63,25 @@
 | ⑥ | `Narrow.dc.html` | 시안 A **400px** — 필터 두 줄 · 엔티티 탭은 가로 스크롤(스냅 · 오른쪽 흐림) · KPI 2열 · 카드 한 열 |
 | ⑦ | `AltTree.dc.html` | **시안 B 인벤토리 트리 + 인스펙터**(vSphere Client · Veeam ONE 식) — 300px 트리(계층 · 유형별 목록 · 문제만 전환 · 알람 롤업 · 지연 로드) + 오른쪽 선택 개체(호스트 10탭 요약) |
 | ⑧ | `AltList.dc.html` | **시안 C 통합 인벤토리 표**(Datadog · Zabbix 식) — 와이어프레임만: 유형 토글 · 그룹화 · 열 · 저장 보기 · 선택 패널. 얻는 것/잃는 것을 보드에 적었다 |
+| ⑨ | `VcTable.dc.html` | 시안 A **vCenter 탭 ‘표’ 보기(법인별 통합)** — 한 줄에 한 법인(상태 · 호스트 · 확인 대상 · VM · 조치 필요 · CPU · 메모리 · 스토리지 · 알람 · Veeam / Bareos · 수집 경로 · 버전) + 합계 행 · 행 = 허브 범위를 그 법인으로 · 2차에 호스트 · VM 탭의 ‘법인별’ 열을 흡수 |
+
+### 4.0 2026-11-07 21:00~21:20 추천 13건 반영(사용자 '모두 반영해줘')
+
+| # | 반영 | 어디 |
+|---|---|---|
+| 1 | ④ 위쪽 줄 수 줄임 — ‘조건(전원 · 메모 · IPMS)’ 을 탭 줄 오른쪽 끝으로 · 바로가기 줄에 ‘접기’(상태 기억) | ③④ |
+| 2 | 엔티티 탭 분해는 그 탭에만 있는 것 — vCenter: 연결 · 불가 · REST 폴백 · 엣지 위임 · 알람 / VM: 구동 · 정지 · 미수집 · 템플릿(평균 CPU · GPU 는 타일에만) · VM 탭 ‘전체 VM’ 타일 → ‘조치 필요’ 신호 분해 타일 | ②③④⑥⑨ |
+| 3 | 상세 한 규칙 — 이름 클릭 = 개체 보기(브레드크럼) · 전체 페이지 상세(호스트) · 드로어(VM)는 그 안의 보조 버튼 | ③④⑤ 각주 · IA 표 |
+| 4 | 배지 수는 가벼운 요약 하나(`memoJson` + `scopeKey`) · 없으면 ‘—’(0 금지) | IA 표 · §6 |
+| 5 | VM 증가 · 스토리지 증가 KPI 는 `vm-track` 권한 게이트 — 없으면 두 칸 숨김 | ② 각주 · §6 |
+| 6 | 바로가기 칩에 그 탭의 숫자(알람 · 확인 대상 · 조치 필요) · 고른 법인 파랗게(`.chip.on`) | ②③④⑥ |
+| 7 | 400px 엔티티 탭 = 3칸 한 줄(수 + 이름 + 배지) · 분해는 아래 한 줄 | ⑥ |
+| 8 | 백업 Veeam / Bareos 를 전 탭에 — 호스트 표 열 · VM ‘백업 없음’ 신호 · 트리 VM 표 | ③④⑦⑨ |
+| 9 | 알람 수에 ‘(미조회 2곳 제외)’ 단서 + 툴팁 | ②③④⑥⑨ |
+| 10 | 마지막 본 탭(·보기) 기억 — localStorage · 처음은 vCenter | ②③④⑨ 머리 각주 · §6 |
+| 11 | 세 탭 모두 ‘‖ 도구’ 줄 — vCenter 6 · 호스트 4 · VM 6(도구 키 그대로 · `also` 추가) · 호스트 탭의 점검 집계 · 엑셀 버튼은 표 머리로 | ②③④⑨ |
+| 12 | vCenter 탭 ‘표’ 보기 = 법인별 통합(2차에 HostsCorp · VmsByCorp 흡수) | ⑨ 신규 · ③ 법인별 탭에 ‘2차’ 표시 |
+| 13 | vCenter 탭 ‘트리’ 보기 = 시안 B 의 지연 로드 트리(카드 \| 표 \| 트리 전환) · 머리 줄의 ‘인벤토리 트리’ 버튼 제거 | ②⑨ 보기 줄 · ⑦ 제목 |
 
 ### 4.1 시안 A '플랫폼 허브(엔티티 탭)' 가 바꾸는 것 — 권장
 
@@ -84,9 +103,10 @@
 
 1. **A · B · C** 중 어느 쪽인지(권장 A · 'A + 2차에 B 트리' 가능).
 2. **메뉴 이름**: 가상화 플랫폼(기본 · 사용자 표현) · 가상 인프라(Veeam 'Virtual Infrastructure' · VMAN 'Virtualization') · 인벤토리(vSphere · Aria).
-3. **진입 탭**: vCenter(계층 루트 · 시안 기본) 인지 VM 인지 · 마지막 본 탭을 기억할지(Proxmox 식).
-4. **범위 공유**: 리전 · vCenter · 검색을 세 탭이 공유(시안)할지, 지금처럼 탭마다 따로 둘지. vCenter 탭에도 필터 바를 보일지(지금은 없음 — 보이면 카드 목록이 범위로 걸러진다).
+3. **진입 탭**: 마지막 본 탭을 기억하고(§4.0-10) 처음은 vCenter — 처음을 VM 으로 할지만 남음.
+4. **범위 공유**: 세 탭 공용 바로 맞춤(사용자 요청 2026-11-07 21:00) — 남은 질문은 없음.
 5. **엔티티 탭 모양**: 수 + 배지가 있는 큰 탭(시안)인지, 가상화 서버 허브와 같은 얇은 탭 줄인지.
+5-1. **‘법인별’ 두 벌 흡수(2차)**: 호스트 · VM 탭의 ‘법인별’ 을 vCenter 탭 ‘표’ 로 합치는 데 동의하는지(1차는 그대로 두고 표시만).
 6. **백업 Veeam / Bareos**: vCenter 별 Bareos 보호 VM 수 집계가 `/vcenters` 에 없으면(추정) 어느 쪽에서 셀지(법인 Bareos 요약 → 중앙).
 7. **저장 메뉴 호환**: 내 메뉴 · 배포 메뉴에 남은 옛 항목 3개를 새 항목으로 이어 붙일지(별칭 · 시안 기본) 아니면 옛 항목을 그대로 두고 허브로만 열리게 할지.
 8. **검증 수준**(구현 때): ① 전체(변이 검증 + 반증 + Chromium 1440/400 전 탭) ② 표준(관련 테스트 + Chromium 1회) ③ 빠르게.
@@ -99,6 +119,12 @@
 - App: `tabFilters` 를 세 탭이 공유하는 범위(리전 · vCenter · q)와 탭 고유(상태 · 전원 · 메모/IPMS)로 나눈다 · `noFilterTabs` 에서 `vcenters` 를 빼고 VCenters 가 범위를 받아 카드를 거른다(클라이언트) · `platformResetSeq` 조건(`item.tab==='vcenters'`)은 정리 가능.
 - 교차 링크: VCenters 카드 → `onSelectSite`(hosts) 호출 + VM 용 `onSelectVms` · Hosts 표 VM 수 → `patchFilter({ host }, 'vms')` 는 필터 바에 '호스트' 칩이 필요(새 필터 키 — 서버 `/vms?host` 는 이미 있음).
 - 브레드크럼: `VCenterDetail` · `ObjectShell` 머리의 '← 목록' 자리에 `vcdRoute` 파싱값으로. 이전/다음 vCenter 는 `/vcenters` 목록 순서.
+- 상세 한 규칙(§4.0-3): 호스트 표 · 트리 · VM 표의 이름 링크를 개체 보기(`vcHash`)로 통일 — `HostDetail` 전체 페이지는 개체 보기의 '전체 페이지 상세 →' 버튼(이미 있음)으로, `VmDrawer` 는 행 끝 '빠른 확인' 버튼으로. 옛 동작(행 클릭 = 드로어)은 v2.909 승인 사항이라 **컨펌 항목**.
+- 탭 배지 · 칩 숫자(§4.0-4 · 6): vCenter 별 알람 · 확인 대상 호스트 · 조치 필요 VM 수를 한 응답으로 — 기존 `/health`(알람) · `/hosts/corp`(법인별 확인 대상 — 서버 30초 캐시) · `/vms/by-vcenter`(법인별 신호) 를 묶는 가벼운 요약(`memoJson` + `scopeKey`) 하나. 15초 폴링 금지 · 첫 수집 전은 '—'.
+- 도구 줄(§4.0-11): `topMenu.js` 항목의 `also` 에 vcversion · solutions · licenses · license-expiry · cert-expiry · change-history · host-hygiene · esxi · hba · cluster-check 를 더하고(VM 도구 6은 그대로), 탭 줄은 `VmHubTabs` 의 '권한 없는 도구 숨김' 규약을 그대로 쓴다. `vmHub2909.test.jsx` 의 `vm.also == HUB_TOOL_KEYS` 대조는 '포함' 으로 바꾼다.
+- 마지막 본 탭 · 보기(§4.0-10): localStorage 키 하나(`platform.tab` · `platform.vcView`), `vcd.tab` 과 같은 try/catch 규약.
+- vm-track 게이트(§4.0-5): 지금 `VCenters.jsx:129` 의 `toolAllowed('vm-track')` 그대로 — 두 칸을 숨기고 백업 칸만 남긴다.
+- 표 보기(§4.0-12 · 보드 ⑨): 1차는 `/vcenters` 응답 + 위 요약만으로 그린다(새 집계 없음 — 추정). HostsCorp · VmsByCorp 흡수는 2차.
 - 백업: `backupPairCell` 의 둘째 값을 snapshot → bareos 로 바꾸려면 vCenter 별 Bareos 보호 VM 수가 필요 — 법인 Bareos 요약(`bareos-summary`)에서 받는지 구현 때 확인. 없으면 1차는 Veeam 만 + 'Bareos —'.
 - 릴리스: 포탈 동작이 바뀌므로 기능 릴리스(버전업 · 릴리스 게시 · `versions.json` 확인). 화면이 바뀌니 Chromium 1440/400 · 세 탭 · 드릴다운 · 400px.
 

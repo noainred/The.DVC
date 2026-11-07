@@ -113,9 +113,9 @@ td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
 
     <header style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px">
       <h1 style="margin:0;font-size:20px;font-weight:800">가상화 플랫폼</h1>
-      <span class="muted" style="font-size:12.5px">인벤토리 — 왼쪽 트리에서 고르면 오른쪽이 그 개체의 탭으로 바뀝니다(vSphere Client · Veeam ONE 식)</span>
+      <span class="muted" style="font-size:12.5px">인벤토리 — 왼쪽 트리에서 고르면 오른쪽이 그 개체의 탭으로 바뀝니다(vSphere Client · Veeam ONE 식) · 시안 A 에서는 vCenter 탭의 ‘트리’ 보기(카드 | 표 | 트리)로 들어갑니다</span>
       <span style="flex:1"></span>
-      <a class="btn sm" href="Main.dc.html">엔티티 탭으로(시안 A)</a>
+      <a class="btn sm" href="Main.dc.html">← 카드 보기</a><a class="btn sm" href="VcTable.dc.html">표 보기</a>
     </header>
 
     <div style="display:grid;grid-template-columns:300px minmax(0,1fr);gap:12px;min-width:0;align-items:start">
@@ -194,11 +194,11 @@ td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
           <div class="ct2"><b>VM 11</b><span class="muted" style="font-size:12px">구동 10 · 정지 1 · CPU 높은 순 · 행을 누르면 트리의 그 VM 으로</span></div>
           <div style="overflow-x:auto">
           <table>
-            <thead><tr><th>VM</th><th>Guest OS</th><th>IP</th><th class="r">vCPU · RAM</th><th>CPU</th><th>메모리</th><th>백업</th><th>신호</th></tr></thead>
+            <thead><tr><th>VM</th><th>Guest OS</th><th>IP</th><th class="r">vCPU · RAM</th><th>CPU</th><th>메모리</th><th>Veeam / Bareos</th><th>신호</th></tr></thead>
             <tbody>
-              <tr><td><b>db-us-east-004</b></td><td>RHEL 9</td><td class="mono">10.10.8.4</td><td class="r mono">16 · 64 GB</td><td class="mono" style="color:#fcd34d">88%</td><td class="mono" style="color:#fcd34d">79%</td><td><span class="tag ok">Veeam 어제</span></td><td><span class="tag warn">스냅샷 33일</span></td></tr>
-              <tr><td><b>web-us-east-023</b></td><td>Windows Server 2022</td><td class="mono">10.10.4.23</td><td class="r mono">8 · 32 GB</td><td class="mono">41%</td><td class="mono">55%</td><td><span class="tag ok">Veeam 어제</span></td><td class="muted">—</td></tr>
-              <tr><td><b>app-us-east-108</b></td><td>SUSE 15</td><td class="mono">10.10.14.108</td><td class="r mono">4 · 16 GB</td><td class="muted">—</td><td class="muted">—</td><td><span class="tag ok">Veeam 어제</span></td><td><span class="tag gray">사용률 미수집</span></td></tr>
+              <tr><td><b>db-us-east-004</b></td><td>RHEL 9</td><td class="mono">10.10.8.4</td><td class="r mono">16 · 64 GB</td><td class="mono" style="color:#fcd34d">88%</td><td class="mono" style="color:#fcd34d">79%</td><td><span class="tag ok">어제 / 3일 전</span></td><td><span class="tag warn">스냅샷 33일</span></td></tr>
+              <tr><td><b>web-us-east-023</b></td><td>Windows Server 2022</td><td class="mono">10.10.4.23</td><td class="r mono">8 · 32 GB</td><td class="mono">41%</td><td class="mono">55%</td><td><span class="tag ok">어제 / 3일 전</span></td><td class="muted">—</td></tr>
+              <tr><td><b>app-us-east-108</b></td><td>SUSE 15</td><td class="mono">10.10.14.108</td><td class="r mono">4 · 16 GB</td><td class="muted">—</td><td class="muted">—</td><td><span class="tag ok">어제 / 3일 전</span></td><td><span class="tag gray">사용률 미수집</span></td></tr>
               <tr><td><b>tmp-us-east-017</b></td><td>Ubuntu 22.04</td><td class="muted">—</td><td class="r mono">2 · 8 GB</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td><span class="tag gray">Off</span></td></tr>
             </tbody>
           </table>

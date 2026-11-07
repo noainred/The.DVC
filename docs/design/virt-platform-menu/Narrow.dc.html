@@ -41,6 +41,11 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
 .et .sub{display:flex;flex-wrap:wrap;gap:3px 8px;font-size:11.5px;color:#8b9bb4}.et .sub b{color:#e6edf6;font-weight:600}
 .et .cnt{margin-left:auto;font-size:10.5px;font-weight:800;border-radius:999px;padding:1px 6px;font-family:"JetBrains Mono",monospace;height:auto}
 .fade{position:absolute;right:0;top:0;bottom:4px;width:40px;background:linear-gradient(90deg,rgba(10,14,23,0),#0a0e17);pointer-events:none}
+.et3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.et3 a{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;border-radius:10px;background:#141b2d;border:1px solid #243049;color:#8b9bb4;text-decoration:none;font-size:11.5px;font-weight:700;min-height:44px;box-sizing:border-box}
+.et3 a.on{border-color:#3b82f6;background:#1a2236;color:#93c5fd;box-shadow:inset 0 -3px 0 #3b82f6}
+.et3 b{font-size:20px;font-family:"JetBrains Mono",monospace;color:#e6edf6;line-height:1}
+.chip b{font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:800;color:#fca5a5}
 .kp{padding:12px 14px;display:flex;flex-direction:column;gap:5px;min-width:0}
 .kp .lb{font-size:12px;font-weight:600;color:#8b9bb4}.kp .val{font-size:20px;font-weight:800;font-family:"JetBrains Mono",monospace;line-height:1.1}
 .chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:999px;background:#1a2236;border:1px solid #243049;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
@@ -87,27 +92,13 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
       <span class="mono muted" style="font-size:11.5px">스냅샷 10:38:45</span>
     </header>
 
-    <!-- 엔티티 탭: 가로 스크롤(스냅) · 오른쪽 흐림으로 '더 있음' · 현재 탭이 먼저 보이게 스크롤 -->
-    <div class="etw">
-      <nav class="et" role="tablist" aria-label="가상화 플랫폼 보기">
-        <a href="Narrow.dc.html" class="on" aria-current="page">
-          <span class="lb">vCenter · 법인<span class="cnt tag ok">연결 27</span></span>
-          <span class="val">28</span>
-          <span class="sub"><span>호스트 <b>658</b></span><span>VM <b>5,850</b></span><span>알람 <b style="color:#fca5a5">58</b></span></span>
-        </a>
-        <a href="Hosts.dc.html">
-          <span class="lb">ESXi 호스트<span class="cnt tag warn">확인 52</span></span>
-          <span class="val">658</span>
-          <span class="sub"><span>연결 <b>640</b></span><span>점검 <b style="color:#fcd34d">11</b></span><span>끊김 <b style="color:#fca5a5">5</b></span></span>
-        </a>
-        <a href="Vms.dc.html">
-          <span class="lb">가상화 서버 · VM<span class="cnt tag crit">조치 641</span></span>
-          <span class="val">5,850</span>
-          <span class="sub"><span>구동 <b style="color:#86efac">5,120</b></span><span>정지 <b>730</b></span><span>CPU <b>51%</b></span></span>
-        </a>
-      </nav>
-      <div class="fade" aria-hidden="true"></div>
-    </div>
+    <!-- 엔티티 탭: 400px 은 가로 스크롤 대신 3칸 한 줄(수 + 이름 + 배지 · 세 탭이 다 보인다) · 고른 탭의 분해는 아래 한 줄 -->
+    <nav class="et3" role="tablist" aria-label="가상화 플랫폼 보기">
+      <a href="Narrow.dc.html" class="on" aria-current="page"><b>28</b><span>vCenter</span><span class="tag warn" style="height:16px;font-size:10px;padding:0 6px">낡은 값 1</span></a>
+      <a href="Hosts.dc.html"><b>658</b><span>호스트</span><span class="tag warn" style="height:16px;font-size:10px;padding:0 6px">확인 52</span></a>
+      <a href="Vms.dc.html"><b>5,850</b><span>VM</span><span class="tag crit" style="height:16px;font-size:10px;padding:0 6px">조치 641</span></a>
+    </nav>
+    <div class="muted" style="font-size:11.5px;display:flex;flex-wrap:wrap;gap:4px 10px"><span>연결 <b style="color:#86efac">27</b></span><span>불가 <b style="color:#e6edf6">0</b></span><span>REST 폴백 <b style="color:#e6edf6">2</b></span><span>엣지 위임 <b style="color:#e6edf6">6</b></span><span>알람 <b style="color:#fca5a5">58</b> <small style="color:#5d6b85">(미조회 2곳 제외)</small></span></div>
 
     <section style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px" aria-label="플랫폼 추이">
       <div class="card kp" style="grid-column:1/3"><span class="lb">VM 백업 (Veeam / Bareos)</span><span class="val" style="color:#86efac">3,912 <small style="font-size:12px;color:#8b9bb4">/</small> 1,204</span><span class="muted" style="font-size:11.5px">전체 5,850 · 둘 다 없음 734 · 확인 불가 2곳 제외</span></div>
@@ -116,7 +107,7 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
     </section>
 
     <section class="card" style="padding:10px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center" aria-label="바로가기">
-      <a class="chip" href="Drill.dc.html"><i></i>vc-us-east</a><a class="chip" href="#"><i></i>vc-us-west</a><a class="chip" href="#"><i></i>vc-br-sao</a><a class="chip" href="#"><i></i>vc-eu-central</a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae</a><a class="chip" href="#" style="color:#8b9bb4">+23 더</a>
+      <a class="chip" href="Drill.dc.html"><i></i>vc-us-east <b>6</b></a><a class="chip" href="#"><i></i>vc-us-west <b>5</b></a><a class="chip" href="#"><i></i>vc-br-sao <b>2</b></a><a class="chip" href="#"><i></i>vc-eu-central <b>7</b></a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae <b>2</b></a><a class="chip" href="#" style="color:#8b9bb4">+23 더</a>
     </section>
 
     <article class="card vc">

@@ -50,10 +50,17 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
 .et .val{font-size:30px;font-weight:800;line-height:1;font-family:"JetBrains Mono",monospace}
 .et .sub{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:#8b9bb4}.et .sub b{color:#e6edf6;font-weight:600}
 .et .cnt{margin-left:auto;font-size:11px;font-weight:800;border-radius:999px;padding:1px 7px;font-family:"JetBrains Mono",monospace}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:3px solid transparent;margin-bottom:-1px;min-height:40px;box-sizing:border-box}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tabs .sep{width:1px;align-self:stretch;background:#243049;margin:8px 6px}
+.tabs .tool{color:#6f7f9a;font-weight:500;padding:10px 10px}
 .kp{padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
 .kp .lb{font-size:12px;font-weight:600;color:#8b9bb4}.kp .val{font-size:22px;font-weight:800;font-family:"JetBrains Mono",monospace;line-height:1.1}
 .chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;background:#1a2236;border:1px solid #243049;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
 .chip i{width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block}
+.chip b{font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:800;color:#fca5a5}
+.chip.on{border-color:#3b82f6;color:#93c5fd;background:rgba(59,130,246,.14)}
 .vc{padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
 .vch{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
 .vch b{font-size:14px;font-weight:800;font-family:"JetBrains Mono",monospace}
@@ -131,15 +138,15 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
       <h1 style="margin:0;font-size:20px;font-weight:800">가상화 플랫폼</h1>
       <span class="muted" style="font-size:12.5px">법인 = vCenter = Bareos 한 단위 · vCenter 에서 호스트 · VM 으로 내려가고, 숫자를 누르면 그 범위로 탭이 바뀝니다</span>
       <span style="flex:1"></span>
-      <a class="btn sm" href="AltTree.dc.html"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="width:14px;height:14px"><path d="M5 4v16M5 8h6M5 14h6M11 6v4M11 12v4"/><rect x="13" y="6" width="7" height="4" rx="1"/><rect x="13" y="14" width="7" height="4" rx="1"/></svg>인벤토리 트리</a>
+      <span class="note">마지막으로 본 탭을 기억합니다 · 처음은 vCenter</span>
     </header>
 
     <!-- 엔티티 탭 — 세 메뉴가 여기서 탭 3개가 된다. 숫자는 헤더 /health 와 같은 집계 · 작은 배지는 '지금 볼 것' 수(확인 대상 · 조치 필요) -->
     <nav class="et" role="tablist" aria-label="가상화 플랫폼 보기">
       <a href="Main.dc.html" class="on" aria-current="page">
-        <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>vCenter <span class="muted" style="font-weight:500">· 법인</span><span class="cnt tag ok" style="height:auto">연결 27 · 낡은 값 1</span></span>
+        <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>vCenter <span class="muted" style="font-weight:500">· 법인</span><span class="cnt tag warn" style="height:auto">낡은 값 1</span></span>
         <span class="val">28</span>
-        <span class="sub"><span>호스트 <b>658</b></span><span>VM <b>5,850</b></span><span>알람 <b style="color:#fca5a5">58</b></span><span>REST 폴백 <b>2</b></span></span>
+        <span class="sub"><span>연결 <b style="color:#86efac">27</b></span><span>불가 <b>0</b></span><span>REST 폴백 <b>2</b></span><span>엣지 위임 <b>6</b></span><span title="REST 폴백으로 수집된 vCenter 2곳은 경보를 조회하지 않아 합계에 없습니다">알람 <b style="color:#fca5a5">58</b> <small style="color:#5d6b85">(미조회 2곳 제외)</small></span></span>
       </a>
       <a href="Hosts.dc.html">
         <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="5" rx="1.5"/><rect x="3" y="14" width="18" height="5" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>ESXi 호스트<span class="cnt tag warn" style="height:auto">확인 대상 52</span></span>
@@ -149,8 +156,17 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
       <a href="Vms.dc.html">
         <span class="lb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>가상화 서버 · VM<span class="cnt tag crit" style="height:auto">조치 필요 641</span></span>
         <span class="val">5,850</span>
-        <span class="sub"><span>구동 <b style="color:#86efac">5,120</b></span><span>정지 <b>730</b></span><span>평균 CPU <b>51%</b></span><span>메모리 <b>59%</b></span><span>GPU <b>133</b></span></span>
+        <span class="sub"><span>구동 <b style="color:#86efac">5,120</b></span><span>정지 <b>730</b></span><span>사용률 미수집 <b>37</b></span><span>템플릿 <b>42</b></span></span>
       </a>
+    </nav>
+
+    <!-- vCenter 탭의 보기 전환(카드 | 표 | 트리) ‖ 이 탭 성격의 특수 기능 — 도구 키 그대로 · also 에만 추가(VM 허브 · Backup 선례) -->
+    <nav class="tabs" aria-label="vCenter 보기 · 도구">
+      <a href="Main.dc.html" class="on" aria-current="page">카드</a>
+      <a href="VcTable.dc.html">표 <span class="muted" style="font-weight:500;font-size:11px">법인별 비교</span></a>
+      <a href="AltTree.dc.html">트리</a>
+      <span class="sep"></span>
+      <a href="#" class="tool">vCenter 버전별</a><a href="#" class="tool">VMware 솔루션 / NSX</a><a href="#" class="tool">라이선스 한눈에</a><a href="#" class="tool">라이선스 만료일</a><a href="#" class="tool">인증서 만료 감시</a><a href="#" class="tool">구성 변경 이력</a>
     </nav>
 
     <!-- vCenter 탭 본문 = 지금 vCenter 화면 그대로. 전체 vCenter · 호스트 · VM 카드 3장은 위 탭이 대신하므로 뺐다(남은 KPI 3장만) -->
@@ -160,11 +176,15 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
       <div class="card kp"><span class="lb" style="display:flex;justify-content:space-between">스토리지 증가 추이(30일)<span class="mono" style="color:#fcd34d">+2.1 TB</span></span><svg class="spark" viewBox="0 0 64 18" preserveAspectRatio="none" aria-hidden="true" style="width:100%;height:28px"><polyline fill="none" stroke="#f59e0b" stroke-width="1.5" points="0,12 8,12 16,11 24,11 32,10 40,10 48,9 56,9 64,8"/></svg><span class="muted" style="font-size:11.5px">사용 1,204 → 1,206 TB · 접근 불가 DS 제외</span></div>
     </section>
 
+    <div class="note">VM 증가 · 스토리지 증가 두 칸은 ‘VM 수량 추이’(vm-track) 도구 권한이 있을 때만 — 없으면 두 칸을 숨기고 백업 칸만 남긴다(지금 화면과 같은 게이트)</div>
+
     <section class="card" style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center" aria-label="바로가기">
       <span class="muted" style="font-size:12px;font-weight:600;margin-right:4px">바로가기</span>
-      <a class="chip" href="Drill.dc.html"><i></i>vc-us-east</a><a class="chip" href="#"><i></i>vc-us-west</a><a class="chip" href="#"><i></i>vc-br-sao</a><a class="chip" href="#"><i></i>vc-eu-central</a><a class="chip" href="#"><i></i>vc-eu-west</a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae</a><a class="chip" href="#"><i></i>vc-ap-northeast</a><a class="chip" href="#"><i></i>vc-ap-southeast</a><a class="chip" href="#"><i></i>vc-ap-south</a><a class="chip" href="#"><i></i>vc-cn-east</a><a class="chip" href="#"><i></i>vc-cn-north</a><a class="chip" href="#"><i></i>vc-pl-waw</a>
+      <a class="chip" href="Drill.dc.html" title="허브 범위를 이 vCenter 로 · 숫자 = 알람"><i></i>vc-us-east <b>6</b></a><a class="chip" href="#"><i></i>vc-us-west <b>5</b></a><a class="chip" href="#"><i></i>vc-br-sao <b>2</b></a><a class="chip" href="#"><i></i>vc-eu-central <b>7</b></a><a class="chip" href="#"><i></i>vc-eu-west <b>4</b></a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae <b>2</b></a><a class="chip" href="#"><i></i>vc-ap-northeast <b>5</b></a><a class="chip" href="#"><i></i>vc-ap-southeast <b>3</b></a><a class="chip" href="#"><i></i>vc-ap-south <b>1</b></a><a class="chip" href="#"><i></i>vc-cn-east <b>5</b></a><a class="chip" href="#"><i></i>vc-cn-north <b>4</b></a><a class="chip" href="#"><i></i>vc-pl-waw <b>1</b></a>
       <a class="chip" href="#" style="color:#8b9bb4">+16 더</a>
+      <span class="note">숫자 = 그 vCenter 의 알람 · 고른 법인은 파랗게 · 접은 상태는 기억</span>
       <span style="flex:1"></span>
+      <button class="btn sm ghost" type="button" aria-label="바로가기 접기">접기 ▴</button>
       <label for="vq" class="muted" style="font-size:12px">찾기</label><input id="vq" class="input" placeholder="vCenter · VM 이름" style="width:200px;min-height:30px">
     </section>
 
@@ -271,7 +291,7 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
   </footer>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1200}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1280}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }
