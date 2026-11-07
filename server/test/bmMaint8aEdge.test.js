@@ -126,6 +126,18 @@ test('③ 중앙 창 파일 손상 → 503 · 엣지는 지난 배포본 유지'
   assert.equal(r.r.ok, false); assert.equal(r.deployed.n, 3, '지난 배포본 유지(24시간 시한)');
 });
 
+test('④-00 최소 엣지 버전 — 숫자를 박지 않는다(릴리스 노트의 8a단계 첫 번호 · 없으면 지금 버전)', async () => {
+  const F = await import('../src/central/featureMinEdgeVersion.js');
+  assert.equal(F.firstReleaseOf([{ version: '2.951.0', title: '리눅스 통합 성능 모니터링 8a단계(정비 창 · 용량 예측)' }, { version: '2.952.0', title: '리눅스 통합 성능 모니터링 8a단계 보강' }], F.STAGE8A_TITLE_RE), '2.951.0');
+  F._resetFeatureMinEdgeVersionForTest(F.STAGE8A_TITLE_RE);
+  assert.equal(F.stage8aMinEdgeVersion({ notesFile: '/nonexistent/notes.json', fallback: () => '9.9.9' }), '9.9.9');
+  F._resetFeatureMinEdgeVersionForTest(F.STAGE8A_TITLE_RE);
+  for (const f of ['../src/central/bmCapacityPull.js', '../src/routes/api/bmMaint.js']) {
+    const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
+    assert.match(src, /stage8aMinEdgeVersion\(\)/); assert.doesNotMatch(src, /minVersion:\s*'\d+\.\d+/, '숫자로 박지 않는다');
+  }
+});
+
 test('④-0 엣지 인출 본문 판정(순수) — 배포 판정 칸 · 서명 꼴 · 창 배열(봉투 모양 { ok, node } 가 아니다)', async () => {
   const { maintBodyOk } = await import('../src/agent/bmMaintPull.js');
   assert.equal(maintBodyOk({ ok: true, distribute: true, sig: 'a'.repeat(32), windows: [] }), true);

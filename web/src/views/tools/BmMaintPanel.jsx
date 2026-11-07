@@ -193,7 +193,7 @@ export default function BmMaintPanel({ vcenters = [] }) {
             <tbody>{resp.deploy.edges.map((e) => (
               <tr key={e.agent}>
                 <td data-sort={e.agent}>{e.agent}</td>
-                <td data-sort={e.status} style={{ color: toneVar(DEPLOY_STATUS_TEXT[e.status]?.tone || 'idle') }}>{DEPLOY_STATUS_TEXT[e.status]?.label || e.status}</td>
+                <td data-sort={e.status} style={{ color: toneVar(DEPLOY_STATUS_TEXT[e.status]?.tone || 'idle') }}>{DEPLOY_STATUS_TEXT[e.status]?.label || e.status}{e.status === 'old' && resp.deploy.minEdgeVersion ? ` · v${resp.deploy.minEdgeVersion} 이상 필요` : ''}</td>
                 <td data-sort={e.lastPullAt ?? ''}>{e.lastPullAt ? shortStamp(e.lastPullAt) : '—'}</td>
                 <td data-sort={e.envelope?.n ?? ''}>{e.envelope ? `${unitText(e.envelope.n, '개')}${e.envelope.stale ? ' · 오래됨' : ''}${e.envelope.unreadable ? ' · 읽지 못함' : ''}` : '—'}</td>
                 <td data-sort={e.envelope?.leak ?? ''}>{e.envelope?.leak == null ? '—' : `${e.envelope.leak}건`}</td>

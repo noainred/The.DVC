@@ -36,6 +36,8 @@ function deps0(deps = {}) {
     schedule: async () => import('../../bmusage/maint/schedule.js'),
     runtime: async () => import('../../bmusage/maint/runtime.js'),
     ownerTier: (req) => isOwnerTier(req),
+    // 엣지 최소 버전(안내 문구) — 릴리스 노트의 8a단계 첫 번호(숫자를 박지 않는다 · featureMinEdgeVersion 공용 함수)
+    minEdgeVersion: async () => (await import('../../central/featureMinEdgeVersion.js')).stage8aMinEdgeVersion(),
     audit: logAudit,
     now: () => Date.now(),
     ...deps,
@@ -162,7 +164,7 @@ export async function bmMaintList(req, snap, deps = {}) {
     summary: { active: rows.filter((r) => r.status === 'active').length, scheduled: rows.filter((r) => r.status === 'scheduled').length, ended: rows.filter((r) => r.status === 'ended').length, expired: rows.filter((r) => r.status === 'expired').length },
     leak: s.leak, ownerTier: owner, ...(dep ? { deployed: { at: dep.at, sig: dep.sig, n: dep.items.length, ...(dep.unreadable ? { unreadable: true } : {}), stale: now - Number(dep.at || 0) > ST.DEPLOY_TTL_MS } } : {}),
     limits: { onceMaxMin: S.ONCE_MAX_MIN, recurMaxMin: S.RECUR_MAX_MIN, ownerOverMin: ST.OWNER_OVER_MIN, keysMax: ST.KEYS_MAX, confirmDays: J.RECUR_CONFIRM_DAYS, deployTtlMs: ST.DEPLOY_TTL_MS },
-    scopes: J.SCOPES, defaultTz: S.DEFAULT_TZ, ...(deploy ? { deploy } : {}), ...(isAdmin ? {} : { addressHidden: true }),
+    scopes: J.SCOPES, defaultTz: S.DEFAULT_TZ, ...(deploy ? { deploy: { ...deploy, minEdgeVersion: await D.minEdgeVersion().catch(() => null) } } : {}), ...(isAdmin ? {} : { addressHidden: true }),
   };
 }
 
