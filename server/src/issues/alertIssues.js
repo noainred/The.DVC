@@ -35,7 +35,7 @@ export const ALERT_KIND_LABEL = Object.freeze({
   vc: 'vCenter 수집 실패', vcstale: '엣지 보고 끊김', host: '호스트 연결 끊김', ds: '데이터스토어 용량', alarm: 'vCenter 위험 알람', massoff: 'VM 동시 전원 꺼짐', backup: 'Bareos 백업 실패',
   cert: '인증서 만료(30일 이하 · 만료)', // v2.929
 });
-// v2.931(점검 B1-03) noteWindowMin — 한 이슈의 재발 · 해소 자동 댓글은 이 창마다 한 번(그 사이 변화는 수만 세어 다음 댓글에 싣는다)
+// v2.932(점검 B1-03) noteWindowMin — 한 이슈의 재발 · 해소 자동 댓글은 이 창마다 한 번(그 사이 변화는 수만 세어 다음 댓글에 싣는다)
 export const ALERT_ISSUE_LIMITS = Object.freeze({ delayMin: [0, 1440], dailyMax: [1, 500], labels: 10, label: 30, noteWindowMin: 30 });
 export const ALERT_NOTE_WINDOW_MS = ALERT_ISSUE_LIMITS.noteWindowMin * 60_000;
 export function defaultAlertAuto() {
@@ -132,7 +132,7 @@ export function alertKindOf(key) { const k = String(key || '').split(':')[0]; re
  * @param {object} cfg  loadAlertAuto()
  * @param {{ existing:Array, now:number, createdToday:number }} ctx  existing = findByOrigin(kind 'alert')
  *
- * v2.931(점검 B1-03 — 재현: 2분마다 깜빡이는 호스트가 약 4시간에 댓글 200개를 채워 담당자 댓글이 409):
+ * v2.932(점검 B1-03 — 재현: 2분마다 깜빡이는 호스트가 약 4시간에 댓글 200개를 채워 담당자 댓글이 409):
  *   · 다시 발생(again)도 **delayMin 분 넘게 이어질 때만**(새로 만들 때와 같은 유예 — 잠깐 깜빡인 것은 재발로 치지 않는다).
  *   · 재발 · 해소 댓글은 이슈마다 ALERT_NOTE_WINDOW_MS 에 한 번 — 창 안이면 note:false(댓글 없이 출처에 수만 센다). 재발 횟수(reopen)는 계속 센다.
  *   · 묶어 둔 변화가 있고 창이 지났는데 이번에 그 이슈에 다른 할 일이 없으면 summary(요약 댓글 한 줄 · 지금 해소 상태면 '검토').
@@ -231,7 +231,7 @@ export function planCertIssues(items, cfg, { existing = [], createdToday = 0 } =
 
 /* ───── 실행 ───── */
 const SYSTEM_USER = 'alert-auto';
-// v2.931(점검 B1-03): quiet — 창 안이라 댓글 없이 센 재발 · 해소 수 · commentCapped — 자동 댓글 상한(autoCommentMax)에 닿아 달지 못한 수
+// v2.932(점검 B1-03): quiet — 창 안이라 댓글 없이 센 재발 · 해소 수 · commentCapped — 자동 댓글 상한(autoCommentMax)에 닿아 달지 못한 수
 const freshStatus = () => ({ ranAt: null, created: 0, commented: 0, review: 0, capped: 0, errors: 0, error: null, cappedAt: null, quiet: 0, commentCapped: 0 });
 const status = freshStatus();
 let capWarnedDay = '';

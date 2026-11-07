@@ -28,6 +28,8 @@
  *     unknown?,                      // v2.615: **전 노드** 기준 상태 미확인 수(목록 상한 64 밖 포함). 없으면 구버전 수집기
  *     list: [{ id, ip, health,       // 노드별 상세(≤64 — isi status 노드 표와 동일 의미,
  *       inBps, outBps,               //   2026-08-15 사용자 요구): 외부망 처리량(bps)
+ *       diskInBytesPs?, diskOutBytesPs?, cpuPct?,  // v2.926: 노드 디스크 쓰기·읽기(B/s — ×8 아님)·CPU %. 읽지 못하면 키가 없다
+ *                                    //   (isilonNodeLoad.js — 실장비 미확인 키). 노드 부하 시계열(db.saveNodeLoadPoint)이 적재한다
  *       hdd:{usedBytes,totalBytes,pct}|null,   // 노드별 HDD 풀(무디스크 노드는 null — 'No Storage HDDs')
  *       ssd:{usedBytes,totalBytes,pct}|null,
  *       name?,                       // 노드/컨트롤러 이름(v2.310 — XtremIO SC·Unity SP·PowerStore

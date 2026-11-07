@@ -384,7 +384,7 @@ export async function bmPortsView(req, snap, deps = {}) {
   if (!corpCvpIds.length) return { ...base, cvpRegistered: false, nics: nics.map((x) => ({ nic: x.nic, state: 'no-cvp' })), candidates: [] };
   const corpSet = new Set(corpCvpIds);
   /*
-   * v2.931(점검 A1-05): 포트 최신값 · 설명 후보는 **그 CVP 의 지금 담당 행만**(등록부 agent — cvp/overview rowOwnerOf · hostSan.js 와 같은 판정).
+   * v2.932(점검 A1-05): 포트 최신값 · 설명 후보는 **그 CVP 의 지금 담당 행만**(등록부 agent — cvp/overview rowOwnerOf · hostSan.js 와 같은 판정).
    *   CVP 담당이 바뀌고 옛 담당 엣지가 더 push 하지 않으면 port_latest 에 옛 agent 행이 남아, 옛 처리량으로 대조하거나 같은 포트 후보가 두 번 나왔다.
    */
   const { rowOwnerOf } = await import('../../cvp/overview.js');
@@ -775,7 +775,7 @@ function tuningOverrideWrite(req, res) {
   }).catch((e) => res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }));
 }
 /*
- * v2.931(점검 E1-08): 엣지 위임 서버의 상세 · 추이 · 장치는 중앙 보관분(엣지 push 의 snapAt)으로 본문이 달라지는데 열쇠에 그 세대가 없어,
+ * v2.932(점검 E1-08): 엣지 위임 서버의 상세 · 추이 · 장치는 중앙 보관분(엣지 push 의 snapAt)으로 본문이 달라지는데 열쇠에 그 세대가 없어,
  *   '엣지에서 당기기' 뒤에도 스냅샷 세대가 바뀔 때까지 ETag(열쇠 해시)가 같아 304 로 이전 본문이 남았다 → 열쇠에 엣지 보관분 세대(가장 최근 snapAt)를 넣는다.
  *   엣지 대행 실패(ok:false)는 `__noStore` 로 보내 ETag·304 경로를 타지 않는다(memoJson — 성공한 다음 응답이 실패 본문의 304 로 가려지지 않게).
  */
@@ -784,10 +784,10 @@ async function edgeSnapRev() {
 }
 export const noStoreFail = (r) => (r && typeof r === 'object' && r.ok === false && r.via === 'edge' && !Number.isInteger(r.__status) ? { ...r, __noStore: true } : r);
 export const perfKey = async (req) => `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${bmUsageStatus().last?.at || 0}|e${await edgeSnapRev()}`;
-// v2.922(3a): 추이 · 장치 · 포트 열쇠(범위 서명 · 역할 · 이 노드 적재 세대) — v2.931: 모듈 수준으로 옮겼다(시험이 같은 열쇠를 쓴다).
+// v2.922(3a): 추이 · 장치 · 포트 열쇠(범위 서명 · 역할 · 이 노드 적재 세대) — v2.932: 모듈 수준으로 옮겼다(시험이 같은 열쇠를 쓴다).
 export const trendKey = (req) => `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${bmUsageStatus().last?.at || 0}`;
 /*
- * v2.931(점검 A1-01 · E1-01): 본문이 사용자별 CVP 도구 접근(issueFor(req.user,'cvp') — 권한 파일 · 사용자 재정의)으로 갈리는데 열쇠는 범위 · 역할 ·
+ * v2.932(점검 A1-01 · E1-01): 본문이 사용자별 CVP 도구 접근(issueFor(req.user,'cvp') — 권한 파일 · 사용자 재정의)으로 갈리는데 열쇠는 범위 · 역할 ·
  *   세대뿐이라, CVP 가 허용된 운영자가 연 응답(포트 설명 · 처리량 · 후보)을 12초 안에 같은 범위의 CVP 거부 사용자가 그대로 받았다(v2.922 D15 우회).
  *   → 열쇠에 같은 actor(req.user — 본문 판정과 같은 주체)의 도구 판정을 넣는다. 판정은 본문(bmPortsView cvpToolIssue)과 같은 함수.
  */

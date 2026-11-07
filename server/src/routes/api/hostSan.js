@@ -159,7 +159,7 @@ export function registerHostSan(api) {
     const issue = toolIssue(req, 'cvp');
     if (issue) return res.status(403).json({ ok: false, error: 'forbidden', reason: issue.reason, tool: issue.tool });
     const corp = corpLimitOf(req, snap, h);
-    // v2.931(점검 A1-03): 범위 계정 + 법인 미지정 vCenter(corp === '')는 CVP 를 하나도 보지 않는다(corpLimitOf 머리말 · 형제 san-attribution 과 같은 판정).
+    // v2.932(점검 A1-03): 범위 계정 + 법인 미지정 vCenter(corp === '')는 CVP 를 하나도 보지 않는다(corpLimitOf 머리말 · 형제 san-attribution 과 같은 판정).
     //   예전에는 '법인 미지정 CVP' 와 같다고 봐 다른 법인 호스트(같은 짧은 이름)의 포트가 나갔다. 전체 범위(corp == null)는 그대로.
     const servers = corp === '' ? [] : listCvpServers().filter((s) => corp == null || String(s.datacenterId || '') === corp);
     /*
@@ -170,7 +170,7 @@ export function registerHostSan(api) {
     const matchServers = hostCorp ? servers.filter((s) => !String(s.datacenterId || '') || String(s.datacenterId) === hostCorp) : servers;
     const own = rowOwnerOf(matchServers);
     const terms = hostMatchTerms(h);
-    // v2.931(점검 A1-07): MAC 은 표기 4가지를 단서 4개로 늘리지 않고 portsByDesc 가 구분자를 뺀 한 표기로 묻는다(앞 8개만 묻던 상한 때문에 vmnic2 부터 빠졌다).
+    // v2.932(점검 A1-07): MAC 은 표기 4가지를 단서 4개로 늘리지 않고 portsByDesc 가 구분자를 뺀 한 표기로 묻는다(앞 8개만 묻던 상한 때문에 vmnic2 부터 빠졌다).
     const q = matchServers.length ? await cdb.portsByDesc(terms.names, { macs: terms.macs }) : { rows: [] };
     const rows = (q.rows || []).filter(own);
     const md = matchUplinks(rows, h);
@@ -229,7 +229,7 @@ export function registerHostSan(api) {
     const hourOf = (u) => sumOf(u)?.recent || null;
     const vmMacs = (snap.vms || []).filter((v) => v.vcenterId === h.vcenterId && v.host === h.name).reduce((a, v) => a + ((v.dev?.nics || []).filter((n) => n?.mac).length), 0);
     /*
-     * v2.931(점검 A1-02): 포트 설명 · CVP 이벤트 제목/설명 · LLDP 근거 문구에는 피어 주소 · URL 이 흔하다 — CVP 화면(/tools/cvp/device · events ·
+     * v2.932(점검 A1-02): 포트 설명 · CVP 이벤트 제목/설명 · LLDP 근거 문구에는 피어 주소 · URL 이 흔하다 — CVP 화면(/tools/cvp/device · events ·
      *   port-usage)과 bmPortsView 처럼 관리자가 아니면 가린다(같은 함수 cvp.maskErrText · 등록 CVP 주소 포함). 매칭은 위에서 원문으로 끝났다(응답 직전에만 가린다).
      */
     const admin = isAdminReq(req);

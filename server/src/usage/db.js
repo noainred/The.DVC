@@ -82,7 +82,7 @@ function stmts(db) {
     purgeAllDaily: db.prepare('DELETE FROM fu_daily WHERE rowid IN (SELECT rowid FROM fu_daily LIMIT ?)'),
     delUser: db.prepare('DELETE FROM fu_user WHERE user = ?'),
     delAllUsers: db.prepare('DELETE FROM fu_user'),
-    // v2.931(점검 C1-02): 마지막 사용이 보관 기간 밖인 계정 — 계정 수만큼이라(수백) 한 문장으로 지운다(청크 불필요).
+    // v2.932(점검 C1-02): 마지막 사용이 보관 기간 밖인 계정 — 계정 수만큼이라(수백) 한 문장으로 지운다(청크 불필요).
     pruneUsers: db.prepare('DELETE FROM fu_user WHERE rowid IN (SELECT rowid FROM fu_user WHERE last_ts < ? LIMIT ?)'),   // 청크(chunkedDelete — perf-db 보존 정리 규약)
   };
   _stmtsFor = db;
@@ -155,7 +155,7 @@ function dayStartOfLabel(label) {
 }
 
 /**
- * v2.931(점검 C1-02): 일 집계만 지우면 `fu_user`(표시 이름 · 역할 · 마지막 사용 시각)가 영구히 남아, 퇴사한 AD 계정이 보고서
+ * v2.932(점검 C1-02): 일 집계만 지우면 `fu_user`(표시 이름 · 역할 · 마지막 사용 시각)가 영구히 남아, 퇴사한 AD 계정이 보고서
  *   '미사용 계정' 목록에 이름 · 마지막 사용 시각과 함께 계속 나왔다(고지 문구 'N일 뒤 지워집니다' 와 어긋남). 마지막 사용이 그 날 시작보다
  *   앞인 계정(= 그 계정의 일 집계도 전부 그 날 앞)을 같이 지운다. 로컬 계정은 accountTable 이 지금 계정 목록으로 다시 채운다(마지막 사용은 '—').
  *   last_ts 가 NULL 인 행은 비교가 참이 아니라 남는다(시각을 모르는 행을 추측으로 지우지 않는다).
@@ -196,7 +196,7 @@ export async function purgeUsage({ scope, user = '', before = '' }) {
     st.delUser.run(user);
   } else if (scope === 'before') {
     r = await chunkedDelete(st.pruneDaily, [before], { label: 'usage.purge-before', maxRows: 0 });
-    // v2.931(점검 C1-02): '이전 기록 지우기' 도 그 날 앞에서 마지막으로 쓴 계정의 이름 · 역할 · 마지막 사용을 같이 지운다.
+    // v2.932(점검 C1-02): '이전 기록 지우기' 도 그 날 앞에서 마지막으로 쓴 계정의 이름 · 역할 · 마지막 사용을 같이 지운다.
     r = { ...r, users: await pruneUsersBefore(st, before, { maxRows: 0 }) };
   } else return { ok: false, deleted: 0, reason: 'bad-scope' };
   return { ok: true, deleted: r.deleted, ...(r.users != null ? { users: r.users } : {}) };

@@ -291,7 +291,7 @@
   · ⚠ 조회는 `INDEXED BY idx_events_tracked`(부분 인덱스) — 통계가 없으면 플래너가 `(vcenterId,ts)` 인덱스로 기간의 **모든 이벤트**를 훑었다(EXPLAIN 실측 — 테스트가 계획을 고정).
     옛 DB 는 `detail` 열을 table_info 로 확인해 더한다(v2.603 규칙). 2.702 이전 이벤트는 상세가 null 이고 화면이 개수로 밝힌다.
   · VM 은 이벤트 엔티티 **이름**으로 묶는다(동명 VM 구분 불가 — 화면이 말한다). 과다 이동 기준 = 7일에 10회를 기간에 비례(`churnThreshold`, 최소 3).
-  · 이벤트를 받은 적 없는 vCenter·수집 꺼짐·최소 심각도 > info 는 '이동 없음' 이 아니다(`coverageNote`). 읽기 상한 20,000(`truncated`) → v2.931: 화면은 행을 모으지 않고 조각으로 흘려보내며 센다(`trackedEventsEach` · 누적기 `createMovesAcc`·`createChangesAcc` · 상한 `SCAN_MAX` 30만 · 잘리면 `coveredSince` — 그 시각 이후는 빠짐없이). CSV 만 `READ_MAX` 2만(시험 `vmChanges2931`).
+  · 이벤트를 받은 적 없는 vCenter·수집 꺼짐·최소 심각도 > info 는 '이동 없음' 이 아니다(`coverageNote`). 읽기 상한 20,000(`truncated`) → v2.932: 화면은 행을 모으지 않고 조각으로 흘려보내며 센다(`trackedEventsEach` · 누적기 `createMovesAcc`·`createChangesAcc` · 상한 `SCAN_MAX` 30만 · 잘리면 `coveredSince` — 그 시각 이후는 빠짐없이). CSV 만 `READ_MAX` 2만(시험 `vmChanges2932`).
   · VM 상세는 `/tools/vm-changes/of`(30일·20건, 범위 밖 VM 404) — 모달은 `white-space: nowrap` 을 물려받으므로 이력 줄에 `whiteSpace:'normal'` + 그리드 트랙 `minmax(0,1fr)` 이 필요하다
     (Chromium 판독에서 오른쪽이 잘려 발견 — 같은 원인으로 구성 점검·클러스터 칸의 각주도 잘리고 있어 함께 고쳤다).
   · ⚠ 정직 기록: 실장비 이벤트 본문(configChanges·PermissionAddedEvent)은 합성 입력으로만 확인했다.

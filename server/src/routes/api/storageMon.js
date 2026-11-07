@@ -13,7 +13,10 @@ import { collectDeviceNow, storagePollerStatus, pollStorageOnce, testDeviceConne
 import { edgeStorageSnapshots, edgeStorageReports } from '../../central/storageEdge.js';
 import { listActivity } from '../../storage/activityLog.js';
 import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable,
-  dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN, capacityResets } from '../../storage/db.js';
+  dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN, capacityResets,
+  nodeLoadQuery, nodeLoadJobs, nodeLoadOldest } from '../../storage/db.js';
+import { nodeLoadWindow, buildNodeLoadSeries, jobsSeriesOf, NODE_LOAD_GROUPS, BASELINE, CLUSTER_AGG, METRIC_BY_KEY,
+  NODE_LOAD_LIMIT } from '../../storage/nodeLoad.js';   // v2.926 노드 부하 추이
 import { growthMatrix, normalizePeriods, DEFAULT_PERIODS } from '../../storage/growth.js';
 import { GROWTH_SPEC, loadGrowthSettings, saveGrowthSettings } from '../../storage/growthSettings.js';
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
@@ -589,6 +592,48 @@ function usageRange(query = {}) {
 api.get('/tools/storage/devices/:id/history', toolsPerm, fullScopeOnly, async (req, res) => {
   const { spanMs, bucketMs, range } = usageRange(req.query);
   res.json({ db: await dbAvailable(), range, spanMs, bucketMs, points: await capacityHistory(req.params.id, Date.now() - spanMs, bucketMs) });
+});
+
+/**
+ * 노드 부하 추이(v2.926 — 사용자 요청 "노드별 io network 부하를 저장하고 차트로" · "기간별 시간별로 이전 기록" · "Disk io 추가" ·
+ * 성능 추천 ①CPU ④잡 엔진 ⑤지난주 같은 구간). 설계 `docs/design/isilon-node-load/README.md` §4.3.
+ *  · ?range=24h|7d|30d|90d · ?group=net|disk|cpu(한 번에 한 묶음 — 단위가 달라 겹치지 않는다) · ?end=<ms>(창 끝 — 이전 구간 보기).
+ *  · 24h·7d 는 원시 표(7d 는 4시간 버킷 평균 + 최대), 30d·90d 는 일 롤업 — 원시 폴백 없음. 미래 end 는 지금으로 자르고 clamped.
+ *  · 클러스터 값은 그 칸의 노드를 **전부** 읽었을 때만(부분 합 금지 — nodeLoad.buildNodeLoadSeries). 비교 구간도 같은 규칙.
+ *  · 장비 호출 0 — DB 만 읽는다. 폴링하지 않는다(화면이 마운트·조작 때만 부르고, 최신 창은 새 수집이 올 때 다시 부른다).
+ * 게이트는 용량 추이와 같다(toolsPerm + fullScopeOnly). 데모 계정은 데모 장비만(아니면 404 — 존재를 말하지 않는다).
+ */
+api.get('/tools/storage/devices/:id/node-load', toolsPerm, fullScopeOnly, async (req, res) => {
+  const id = String(req.params.id || '');
+  if (isDemoGuest(req.user) && !isDemoId(id)) return res.status(404).json({ ok: false, error: 'not-found' });
+  const group = Object.hasOwn(NODE_LOAD_GROUPS, String(req.query.group)) ? String(req.query.group) : 'net';
+  const metrics = NODE_LOAD_GROUPS[group];
+  const devs = listDevices();
+  const dev = devs.find((d) => d.id === id) || null;
+  const { envPoll, pollOf } = devicePollMsByAgent(devs);
+  const sampleMs = dev ? (pollOf.get(dev.agent || '') ?? envPoll) : envPoll;
+  const now = Date.now();
+  const w = nodeLoadWindow({ range: req.query.range, end: req.query.end, now, sampleMs });
+  const q = await nodeLoadQuery(id, { group, kind: w.kind, from: w.start, to: w.end, bucketMs: w.bucketMs });
+  const series = buildNodeLoadSeries(q.rows, metrics, { kind: w.kind });
+  const B = BASELINE[w.range];
+  const bq = await nodeLoadQuery(id, { group, kind: w.kind, from: w.start - B.shiftMs, to: w.end - B.shiftMs, bucketMs: w.bucketMs });
+  const bs = buildNodeLoadSeries(bq.rows, metrics, { kind: w.kind });
+  const jobs = jobsSeriesOf(await nodeLoadJobs(id, w.start, w.end));
+  const keep = effectiveKeepDays();
+  res.json({
+    ok: true, db: q.db, deviceId: id, group, metrics,
+    units: Object.fromEntries(metrics.map((k) => [k, METRIC_BY_KEY.get(k).unit])),
+    clusterAgg: Object.fromEntries(metrics.map((k) => [k, CLUSTER_AGG[k]])),
+    range: w.range, days: w.days, spanMs: w.spanMs, start: w.start, end: w.end, past: w.past, clamped: w.clamped,
+    kind: w.kind, bucketMs: w.bucketMs, sampleMs, offsetMin: DAY_OFFSET_MIN, now,
+    // 화면이 '몇 칸까지 과거로 갈 수 있나' 를 계산한다(전송 속도 maxBackOf 와 같은 입력 — 7일 이하는 원시, 그 위는 일 롤업).
+    oldest: await nodeLoadOldest(id), rawMaxDays: 7, retention: { rawDays: keep.nodeRaw, dailyDays: keep.daily },
+    nodeLimit: NODE_LOAD_LIMIT, truncated: q.truncated,
+    ...series,
+    baseline: { label: B.label, shiftMs: B.shiftMs, cols: bs.cols.map((t) => t + B.shiftMs), cluster: bs.cluster, clusterNodes: bs.clusterNodes },
+    jobs: jobs.list, jobsKnown: jobs.known,
+  });
 });
 
 /**

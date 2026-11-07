@@ -1,5 +1,5 @@
 /**
- * test/sweep2931Bm.test.js — v2.931 최근 변경 점검(축 1 · 5) 확정분: 베어메탈 성능 · CVP 업링크 · SAN 귀속 · 엣지 정제.
+ * test/sweep2932Bm.test.js — v2.932 최근 변경 점검(축 1 · 5) 확정분: 베어메탈 성능 · CVP 업링크 · SAN 귀속 · 엣지 정제.
  *  ① A1-01(=E1-01) bm-ports 응답 캐시 열쇠에 사용자별 CVP 도구 판정 — 허용 사용자가 연 응답을 거부 사용자가 받지 않는다(반대도)
  *  ② E1-08 상세·추이 열쇠에 엣지 보관분 세대(snapAt) · 엣지 대행 실패는 no-store(ETag·304 없음)
  *  ③ A1-06(=E1-07) 엣지 최신값 행 정제 — 실제 usage_latest 의 모든 열이 남는다(PRAGMA 대조) · 피크 수치화 · 피크 시각 자르기 · peak_src enum
@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep2931bm-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep2932bm-'));
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true' });
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));
 fs.writeFileSync(path.join(DIR, 'datacenters.json'), JSON.stringify({ datacenters: [{ id: 'corp-a', name: 'A' }, { id: 'corp-b', name: 'B' }], assign: { 'vc-a': 'corp-a' } }));

@@ -1,5 +1,5 @@
 /**
- * sweep2931Usage.test.js — v2.931 최근 변경 점검 확정분(묶음 usage-login: C1-01 ~ C1-04) 서버 회귀.
+ * sweep2932Usage.test.js — v2.932 최근 변경 점검 확정분(묶음 usage-login: C1-01 ~ C1-04) 서버 회귀.
  *  C1-01 기능 사용 기록 보관 정리는 기록 켜짐 · 신호와 무관하게 돈다 — 모듈 로드 때 unref 타이머 · `(++pruneTick % N) === 0`(첫 틱 금지) ·
  *        DB 파일이 없으면 만들지 않는다 · 설정을 못 읽으면 지우지 않는다.
  *  C1-02 정리 · '이전 기록 지우기' 가 마지막 사용이 그 앞인 계정(fu_user)도 지운다 — 퇴사자가 '미사용 계정' 목록에 영구히 남지 않는다.
@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sw2931u-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sw2932u-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';
@@ -155,7 +155,7 @@ test('C1-03 login-history.ndjson 이 없는 첫 기동의 첫 로그인은 1회�
   const express = (await import('express')).default;
   const lh = await import('../src/security/loginHistory.js');
   const auth = await import('../src/auth/auth.js');
-  const made2 = auth.createUser({ username: 'sw-op', role: 'viewer', name: 'Op', password: 'Sw!2931-pass-word' }, { trusted: true });
+  const made2 = auth.createUser({ username: 'sw-op', role: 'viewer', name: 'Op', password: 'Sw!2932-pass-word' }, { trusted: true });
   assert.equal(made2.ok, true, JSON.stringify(made2));
   const { authRouter } = await import('../src/routes/auth.js');
   const app = express();
@@ -165,7 +165,7 @@ test('C1-03 login-history.ndjson 이 없는 첫 기동의 첫 로그인은 1회�
   const iso = (ms) => new Date(ms).toISOString();
   const login = async () => {
     const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/auth/login`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sw-op', password: 'Sw!2931-pass-word' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sw-op', password: 'Sw!2932-pass-word' }),
     });
     assert.equal(r.status, 200, await r.text());
   };

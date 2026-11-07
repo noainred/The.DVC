@@ -1,5 +1,5 @@
 /**
- * test/vmChanges2931.test.js — v2.931(문서 후보 — 구성 변경 이력 보고서가 최신 2만 행만 읽어 '7일' 이 약 1시간으로 짧아지던 것).
+ * test/vmChanges2932.test.js — v2.932(문서 후보 — 구성 변경 이력 보고서가 최신 2만 행만 읽어 '7일' 이 약 1시간으로 짧아지던 것).
  *  ① 누적기: 행을 조각으로 나눠 넣어도 한 번에 넣은 analyzeMoves · analyzeChanges 와 결과가 같다(목록 상한 · 개수는 전부)
  *  ② logs DB trackedEventsEach: 모으지 않고 최신 조각부터 흘려보낸다 — 순서 · 내용이 trackedEventsAsync 와 같고,
  *     상한에 닿으면 truncated + coveredSince(그보다 새 행은 빠짐없이 넘겼다)
@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vmchg2931-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vmchg2932-'));
 process.env.CONFIG_DIR = TMP;
 const { analyzeMoves, analyzeChanges, createMovesAcc, createChangesAcc, EVENT_ROWS_MAX } = await import('../src/vmchanges/analyze.js');
 

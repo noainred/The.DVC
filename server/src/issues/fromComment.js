@@ -34,7 +34,7 @@ export function defaultIssueTitle(pageTitle, commentBody) {
  * @param {string[]} o.mentioned 그 댓글에서 언급한 사람(resolveMentions 로 푼 실제 이름 · 순서 유지)
  * @param {boolean} o.canWrite 운영자 · 관리자(데모 제외)인가
  * @param {(name:string, vcenterId:string)=>boolean} o.canSee
- * @param {boolean} [o.restricted] v2.931(점검 B1-06) — mentioned 를 자동완성 후보로 좁혀 푼 계정(전체 범위 쓰기 계정이 아님). 문구가 그 사실을 말한다
+ * @param {boolean} [o.restricted] v2.932(점검 B1-06) — mentioned 를 자동완성 후보로 좁혀 푼 계정(전체 범위 쓰기 계정이 아님). 문구가 그 사실을 말한다
  *   (모르는 이름 · 없는 이름 · 후보 밖 이름이 같은 문구 — 계정 존재 판정이 되지 않게).
  * @returns {{ body:object, origin:object, requestOnly:boolean, watchers:string[], skipped:string[] }}
  */

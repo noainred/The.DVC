@@ -38,7 +38,7 @@ function Hl({ text, needle }) {
  */
 const LAST_TTL_MS = 10 * 60_000;
 /*
- * v2.931(점검 C1-06): 계정을 함께 적고 **다른 계정이면 버린다**. 로그아웃은 새로 고침 없이 화면만 바꾸므로(App.jsx logout — setUser(null)),
+ * v2.932(점검 C1-06): 계정을 함께 적고 **다른 계정이면 버린다**. 로그아웃은 새로 고침 없이 화면만 바꾸므로(App.jsx logout — setUser(null)),
  *   예전에는 같은 탭에서 10분 안에 다른 계정이 로그인해 ⌘K 를 열면 앞 계정의 검색어(IP · 시리얼 · VM 이름)가 입력 칸에 복원됐다.
  *   '최근 연 항목' 을 계정별 키로 나눈 것(반증 L-4)과 같은 축이다.
  */
@@ -174,7 +174,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
   // Tab 은 종류 칩을 돈다(시안 ⑤ⓘ) — 개수가 있는 종류만.
   const chipCycle = useMemo(() => [null, ...kindsMeta.filter((k) => !k.locked && (counts[k.key] || 0) > 0).map((k) => k.key)], [kindsMeta, counts]);
   const onKey = (e) => {
-    if (e.nativeEvent?.isComposing || e.keyCode === 229) return; // v2.931(점검 C1-05): 한글 조합 확정 Enter · Tab · Esc 를 선택 · 칩 순환 · 닫기로 먹지 않는다(MentionBox · Wiki 와 같은 판정)
+    if (e.nativeEvent?.isComposing || e.keyCode === 229) return; // v2.932(점검 C1-05): 한글 조합 확정 Enter · Tab · Esc 를 선택 · 칩 순환 · 닫기로 먹지 않는다(MentionBox · Wiki 와 같은 판정)
     if (e.key === 'Escape') {
       e.preventDefault();
       if (kindSel) { setKindSel(null); return; }

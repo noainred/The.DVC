@@ -31,7 +31,7 @@ describe('업링크 문구', () => {
   it('요약 — 없음의 이유', () => {
     expect(uplinkSummary({ cvpUnavailable: true }).text).toBe('CVP DB 없음');
     expect(uplinkSummary({ servers: 0, corpLimited: true }).note).toContain('이 호스트 법인');
-    // v2.931(A1-03 · A1-07): 범위 + 법인 미지정은 이유를 말하고, 단서 상한은 비고에 밝힌다
+    // v2.932(A1-03 · A1-07): 범위 + 법인 미지정은 이유를 말하고, 단서 상한은 비고에 밝힌다
     expect(uplinkSummary({ servers: 0, corpLimited: true, corpMissing: true }).note).toContain('법인이 지정되지 않아 CVP 매칭');
     expect(uplinkSummary({ servers: 1, uplinks: [{ nic: 'vmnic0', basis: 'lldp' }], termsTruncated: true }, [{ device: 'vmnic0' }]).note).toContain('일부 NIC 의 MAC');
     expect(uplinkSummary({ servers: 2, uplinks: [], terms: { short: 'esx01' } }, [1, 2]).text).toBe('CVP 매칭 0 / 2 NIC');

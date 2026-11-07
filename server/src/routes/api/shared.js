@@ -25,7 +25,7 @@ export async function memoJson(req, res, name, compute, { ttlMs = 12_000, extraK
       res.status(code).json(body);
       return;
     }
-    // v2.931(점검 E1-08): `__noStore` 가 붙은 결과(예: 엣지 대행 실패)는 ETag·304 없이 no-store 로 보낸다 — ETag 가 열쇠 해시라
+    // v2.932(점검 E1-08): `__noStore` 가 붙은 결과(예: 엣지 대행 실패)는 ETag·304 없이 no-store 로 보낸다 — ETag 가 열쇠 해시라
     //   실패 본문에 붙은 ETag 가 같은 열쇠의 다음 성공 응답을 304 로 가리지 않게. 서버 쪽 짧은 memo(ttl)는 그대로다(엣지를 두드리지 않게).
     if (payload && typeof payload === 'object' && payload.__noStore === true) {
       const { __noStore: _n, ...body } = payload;

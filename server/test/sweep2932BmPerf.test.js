@@ -1,5 +1,5 @@
 /**
- * v2.931(최근 변경 점검 E1-02 · E1-03 · E1-04) — 베어메탈 사용률 적재·보정·이관의 이벤트 루프 정지.
+ * v2.932(최근 변경 점검 E1-02 · E1-03 · E1-04) — 베어메탈 사용률 적재·보정·이관의 이벤트 루프 정지.
  *  ① 재집계 코어(aggregateRows)는 예전 판본과 결과가 같다(행 × 열 문자열 열쇠를 없앴다 — 순서·비교 규칙 그대로)
  *  ② 보정(repairPending)은 원시 SELECT * + 예전 집계와 같은 롤업을 쓰고, 버킷·날 사이에 실제로 양보한다(setImmediate 가 끼어든다)
  *  ③ 시간 상한: 한 실행에 적어도 한 묶음 · 남은 대기는 deferred 로 다음 실행이 잇는다(나눠 해도 결과가 같다)
@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'sw2931bm-'));
+const DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'sw2932bm-'));
 process.env.CONFIG_DIR = DIR;
 test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
 const HOUR = 3_600_000; const DAY = 86_400_000;

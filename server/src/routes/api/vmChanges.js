@@ -23,7 +23,7 @@ const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
 const DAY = 86_400_000;
 export const READ_MAX = 20_000;   // CSV(행 자체를 내보낸다)
-// v2.931(문서 후보 — '7일' 이 약 1시간): 화면은 행을 모으지 않고 흘려보내며 센다(trackedEventsEach + 누적기) — 읽는 상한을 크게.
+// v2.932(문서 후보 — '7일' 이 약 1시간): 화면은 행을 모으지 않고 흘려보내며 센다(trackedEventsEach + 누적기) — 읽는 상한을 크게.
 //   그래도 넘으면 truncated + coveredSince(그 시각보다 새 이벤트는 빠짐없이 셌다)를 화면이 말한다. 예전 화면은 잘린 사실을 말하지 않았다.
 export const SCAN_MAX = 300_000;
 const qStr = (v, n) => (typeof v === 'string' ? capStr(v.trim(), n) : '');
@@ -40,7 +40,7 @@ async function load(req, snap, { stream = null } = {}) {
   const db = await getLogsDb();
   // v2.727(감사 F-01): 화면·CSV 둘 다 조각 + 양보로 읽는다(한 문장 판은 기간 안 일치 행 전부를 TEMP B-TREE 로 흘려 동기 정지).
   //   결과(행·순서·상한)는 trackedEvents 와 같다 — `/of`(entity 전용 인덱스, 행이 적다)만 동기 판을 그대로 쓴다.
-  //   v2.931: 화면(stream)은 행을 모으지 않는다 — 조각마다 stream(rows) 로 세고, CSV 만 READ_MAX 행을 모은다.
+  //   v2.932: 화면(stream)은 행을 모으지 않는다 — 조각마다 stream(rows) 로 세고, CSV 만 READ_MAX 행을 모은다.
   let rows = []; let truncated = false; let coveredSince = null; let scanned = 0;
   if (stream) {
     if (ids.length) ({ rows: scanned, truncated, coveredSince } = await db.trackedEventsEach({ vcenterIds: ids, since }, stream, { maxRows: SCAN_MAX }));

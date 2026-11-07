@@ -1,4 +1,4 @@
-// v2.931 — 최근 변경 점검 D1-08(주기·상한 숫자를 화면에 박지 않는다 — API 값) · D1-09(전체 범위 관리자 판정은 한 군데).
+// v2.932 — 최근 변경 점검 D1-08(주기·상한 숫자를 화면에 박지 않는다 — API 값) · D1-09(전체 범위 관리자 판정은 한 군데).
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';

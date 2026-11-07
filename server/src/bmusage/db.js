@@ -303,7 +303,7 @@ export async function repairRollups({ rawKeepFrom = null } = {}) {
   if (!db) return { ok: false, reason: 'db-unavailable' };
   const m = readMeta(db, MIGRATE_KEY);
   const r = await month.repairPending({ dailyLiveAfter: m && m.phase !== 'none' ? n(m.legacyMaxTs) : null, rawKeepFrom });
-  // v2.931(점검 E1-02): 재시도 간격 중인 파일(backoff)이 있으면 이번에 오류가 없어도 ok 가 아니다 — 대기가 그 파일 앞에 묶여 있다.
+  // v2.932(점검 E1-02): 재시도 간격 중인 파일(backoff)이 있으면 이번에 오류가 없어도 ok 가 아니다 — 대기가 그 파일 앞에 묶여 있다.
   return { ok: !r.errors.length && !(r.backoff || []).length, ...r };
 }
 /** 메인 파일 핸들(마이그레이션 모듈 전용 — 같은 연결을 쓴다: 두 연결이 같은 파일에 쓰면 SQLITE_BUSY). */
@@ -332,7 +332,7 @@ export async function migrationReadRule() {
 }
 
 /*
- * v2.931(점검 E1-03): 한 주기 적재를 **서버 묶음(조각)** 으로 나눠, 조각마다 끝까지(원시 → 1시간 → 1일 → 보정 대기 정리 → 최신값 → 장치 5분·1시간 →
+ * v2.932(점검 E1-03): 한 주기 적재를 **서버 묶음(조각)** 으로 나눠, 조각마다 끝까지(원시 → 1시간 → 1일 → 보정 대기 정리 → 최신값 → 장치 5분·1시간 →
  *   장치 목록 → 마운트) 넣고 조각 사이에 setImmediate 로 양보한다. 예전에는 한 주기 전부를 양보 없이 넣어 1,000대 × 장치 32 에서 5분마다 약 1초 멈췄다.
  *   ⚠ 조각 경계는 **서버 경계**다(한 서버의 행·장치·마운트는 한 조각). 조각 안에는 예전처럼 매크로태스크 양보가 없어 요청 처리가 한 서버의
  *   ‘원시만 있고 롤업·최신값은 아직’ 상태를 보지 못한다(서버 단위 원자성은 예전과 같다). 조각 사이의 서버는 이번 주기 적재가 끝났거나 아직 시작 전이다 —
@@ -363,7 +363,7 @@ export function chunkByServer(rows = [], devices = [], mounts = [], maxRows = IN
 
 /**
  * 한 주기의 행들을 적재한다(v2.922): 5분 원시·1시간·1일 롤업은 **시간 단위 파일**(monthStore — 원시가 새로 들어간 행만 롤업),
- * 최신값·장치 목록은 이 메인 파일. 장치별 행(devices)·마운트(mounts)는 있으면 함께. v2.931(점검 E1-03): 서버 묶음 조각 + 조각 사이 양보(위 주석).
+ * 최신값·장치 목록은 이 메인 파일. 장치별 행(devices)·마운트(mounts)는 있으면 함께. v2.932(점검 E1-03): 서버 묶음 조각 + 조각 사이 양보(위 주석).
  * @param {Array} rows  `[{ key, ts, name, vcenterId, src, cpu_pct, … , <열>_peak, peak_src … }]`
  * @param {string} agent
  * @param {{devices?:Array, mounts?:Array, chunkRows?:number}} [extra]
@@ -398,7 +398,7 @@ export async function insertUsage(rows = [], agent = '', { devices = [], mounts 
   const acc = { wOk: true, inserted: 0, duplicates: 0, devInserted: 0, wErr: [], devErr: [], mntErr: [], latestErr: null };
   const chunks = chunkByServer(valid, devices, mounts, chunkRows);
   for (let ci = 0; ci < chunks.length; ci++) {
-    if (ci) await new Promise((r) => { setImmediate(r); });   // 조각 COMMIT 뒤 양보(v2.931 E1-03)
+    if (ci) await new Promise((r) => { setImmediate(r); });   // 조각 COMMIT 뒤 양보(v2.932 E1-03)
     const c = chunks[ci];
     // ① 5분 원시 → 1시간 → 1일(시간 단위 파일). INSERT OR IGNORE + 새로 들어간 행만 롤업(이중 계수 금지 — monthStore).
     const w = await month.writeServerRows(c.rows, agent).catch((e) => ({ ok: false, inserted: 0, duplicates: 0, errors: [String(e?.message || e).slice(0, 200)] }));
@@ -450,7 +450,7 @@ export async function insertUsage(rows = [], agent = '', { devices = [], mounts 
 /**
  * 장치 목록(메인 파일) — 처음 보면 종류 안 순번(ord)을 받는다. ord 는 **바뀌지 않는다**(장치 색이 필터·추가로 바뀌지 않게 — 설계 §12).
  *   ord 는 그 서버·종류의 MAX(ord)+1 이다. 이미 있으면 last_ts 만 올린다.
- *   v2.931(점검 E1-03): 예전에는 행마다 `SELECT 1`(있나) + `MAX(ord)` 를 물었다(1,000대 × 32 = 6.4만 문장). 이제 서버·종류마다 한 번 그 목록(dev·ord)을 읽어
+ *   v2.932(점검 E1-03): 예전에는 행마다 `SELECT 1`(있나) + `MAX(ord)` 를 물었다(1,000대 × 32 = 6.4만 문장). 이제 서버·종류마다 한 번 그 목록(dev·ord)을 읽어
  *   JS 에서 있나·다음 번호를 정한다 — 같은 트랜잭션 안에서 앞 행이 넣은 장치도 그 집합에 더하므로 결과(ord)는 예전과 같다.
  */
 function upsertDeviceList(db, agent, list) {

@@ -226,7 +226,7 @@ export function queueIssueEvent(ev) {
   const inboxOn = settings.inbox?.enabled !== false; // v2.908 포탈 알림함 — 받을 사람 판정은 같고 스위치는 따로
   if (!mailOn && !inboxOn) return 0;
   const viewers = issueViewers();
-  // v2.931(점검 B1-08): 받을 사람은 **한 번만** 계산한다 — 메일 · 알림함이 둘 다 켜지면 recipientsOf 를 두 번 불러 범위 밖 한 사람이
+  // v2.932(점검 B1-08): 받을 사람은 **한 번만** 계산한다 — 메일 · 알림함이 둘 다 켜지면 recipientsOf 를 두 번 불러 범위 밖 한 사람이
   // status.outOfScope 에 2로 세어졌다(위키 이벤트는 한 번). force 결과는 eventOn 판정만 건너뛴 것이라 메일 쪽(mailOn = eventOn)에 그대로 쓴다.
   const all = recipientsOf(ev, settings, viewers, { force: true });
   if (inboxOn) {
