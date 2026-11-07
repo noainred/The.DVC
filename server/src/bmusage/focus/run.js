@@ -46,6 +46,7 @@ export const FOCUS_MISS = Object.freeze(['timeout', 'auth', 'auth-stopped', 'ssh
 export const FOCUS_CODE_STATUS = Object.freeze({
   ok: 200, queued: 200, 'bad-reason': 400, 'bad-request': 400, 'not-found': 404, forbidden: 403, 'no-path': 409, busy: 409, 'daily-cap': 429,
   'auth-stopped': 409, 'store-unavailable': 503, 'settings-unreadable': 503, edge: 502,
+  maintenance: 409,   // 8a단계 ③: 정비 창 안 자동 집중(수동은 이 code 가 나오지 않는다)
 });
 export const FOCUS_CODES = Object.freeze(Object.keys(FOCUS_CODE_STATUS));
 /** 세션 시한(SSH 연결 15 + 주 명령 30 + 피크 창 + 경량 스냅샷) — 50초 안(주기 수집 SESSION_BUDGET 과 같다). */

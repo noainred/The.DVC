@@ -74,7 +74,7 @@ export async function bmCapacityFleet(req, snap, deps = {}) {
   const shownNodes = new Set(out.map((r) => r.node));
   return {
     ok: true, now, rows: out.slice(0, 20_000), truncated: out.length > 20_000, summary: C.summarize(visible, { soonDays: days, monthDays: 30 }),
-    sources: allowed ? sources.filter((s) => shownNodes.has(s.node)) : sources, cfg: { targetPct: rules.capacity?.targetPct ?? 90, minDays: rules.capacity?.minDays ?? 7, alertDays: days, ...C.CAP_DEFAULTS },
+    sources: allowed ? sources.filter((s) => shownNodes.has(s.node)) : sources, cfg: { ...C.CAP_DEFAULTS, targetPct: rules.capacity?.targetPct ?? C.CAP_DEFAULTS.targetPct, minDays: rules.capacity?.minDays ?? C.CAP_DEFAULTS.minDays, alertDays: days, recomputeAfterMin: C.RECOMPUTE_AFTER_MIN },
     minEdgeVersion: await D.minEdgeVersion().catch(() => null), ...(isAdmin ? {} : { addressHidden: true }),
   };
 }

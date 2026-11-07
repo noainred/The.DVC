@@ -137,3 +137,22 @@ export function collectCsv(resp = {}) {
   return `${toCsv(out)}\r\n`;
 }
 export function collectCsvName(at) { return `bm-collect-health_${dayStamp(n(at) ?? Date.now()) || 'latest'}.csv`; }
+
+/** 8a단계 — 법인 행 ‘정비 중’ 한 줄(건너뜀 · 창 안 실패 — 성공률 분모 밖). 둘 다 0 · 모름이면 ''. */
+export function maintRowText(r = {}) {
+  const a = n(r.maintSkipped); const b = n(r.maintFail);
+  const p = [];
+  if (a) p.push(`정비 중 건너뜀 ${a}`);
+  if (b) p.push(`창 안 실패 ${b}`);
+  return p.length ? `${p.join(' · ')}(성공률 분모 밖)` : '';
+}
+/** 8a단계 — 노드의 ‘창 끝 뒤 억제’ 점검 칸(0 이어야 정상 · 모르면 모름). */
+export function maintLeakCell(node = null) {
+  const m = node?.maint;
+  if (!m) return { text: '—', tone: 'idle', title: '정비 창 점검 값이 없습니다(구버전 노드 · 아직 주기 없음).' };
+  if (m.judge === 'unavailable' || m.localUnreadable) return { text: '판정 불가', tone: 'warn', title: '정비 창 파일을 읽지 못해 이 노드의 창으로는 억제하지 않았습니다.' };
+  const k = n(m.leak);
+  if (k == null) return { text: '—', tone: 'idle', title: '아직 점검한 주기가 없습니다.' };
+  return k === 0 ? { text: `0 · 정상(${n(m.checked) ?? 0}건 대조)`, tone: 'ok', title: '창 끝 시각 뒤에 억제가 남아 있지 않습니다.' }
+    : { text: `${k}건`, tone: 'bad', title: '억제가 시한을 넘겼거나 판정과 어긋난 적용 — 관리자 확인 필요.' };
+}

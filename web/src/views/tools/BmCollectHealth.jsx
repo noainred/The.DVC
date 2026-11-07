@@ -15,8 +15,12 @@ import { rttLine } from './bmOnboardText.js'; // 7b: 중앙 직접 수집 법인
 import {
   nodeStateView, FLAG_TEXT, REASON_TEXT, REASON_STATE_TEXT, INFO_TEXT, PATH_TEXT, msText, pctText1, gbText, cycleText, concText, sshText, reasonsLine, daysSince,
   trendPaths, trendRangeText, COLLECT_HONEST, collectCsv, collectCsvName, unknownText, peakReasonText, NODE_ERROR_TEXT, famLine,
+  maintRowText, maintLeakCell,
 } from './bmCollectText.js';
+import { numOrNull } from '../../numOrNull.js';
 import './bmStage6.css';
+
+const n0 = (v) => { const x = numOrNull(v); return x != null && x > 0; };
 
 export function CollectHealthView({ resp, now = Date.now() }) {
   const [nodeSel, setNodeSel] = useState('');
@@ -49,7 +53,7 @@ export function CollectHealthView({ resp, now = Date.now() }) {
                     {(() => { const rl = rttLine(r); return rl ? <div className="bmo-sub" style={{ color: toneVar(rl.tone) }}>{rl.text}</div> : null; })()}</td>
                   <td className="right" data-sort={r.servers ?? ''}>{r.servers ?? '—'}</td>
                   <td className="right" data-sort={r.cyclePct ?? ''}>{r.nodeHidden ? <span className="bmo-sub">노드 값 숨김</span> : cycleText(r.cycleMs, r.budgetMs)}</td>
-                  <td className="right" data-sort={r.successPct ?? ''}>{pctText1(r.successPct)}</td>
+                  <td className="right" data-sort={r.successPct ?? ''}>{pctText1(r.successPct)}{maintRowText(r) && <div className="bmo-sub">{maintRowText(r)}</div>}</td>
                   <td data-sort={r.reasons?.[0]?.n ?? ''}>{reasonsLine(r.reasons)}</td>
                   <td className="right" data-sort={r.conc?.max ?? ''}>{r.nodeHidden ? '—' : concText(r.conc)}</td>
                   <td className="right" data-sort={r.ssh?.p95Ms ?? ''}>{r.nodeHidden ? '—' : sshText(r.ssh)}</td>
@@ -61,6 +65,9 @@ export function CollectHealthView({ resp, now = Date.now() }) {
           </tbody>
         </STable>
         {!(resp?.rows || []).length && <p className="bmo-note">보이는 법인이 없습니다{resp?.nodesOmitted ? `(범위 밖 노드 ${resp.nodesOmitted}곳은 싣지 않았습니다)` : ''}.</p>}
+        {/* 8a단계 — 노드마다 ‘창 끝 뒤 억제’ 점검(정비 창 억제가 시한 뒤에 남지 않는가 — 0 이어야 정상) */}
+        {withNode.map((x) => { const c = maintLeakCell(x.node); return (
+          <p key={`mleak|${x.via}|${x.agent}`} className="bmo-note" title={c.title} style={{ color: toneVar(c.tone) }}>{x.agent || '이 노드'} — 정비 창 끝 뒤 억제 {c.text}{n0(x.node?.maint?.skipped) || n0(x.node?.maint?.failInWindow) ? ` · 정비 중 건너뜀 ${x.node.maint.skipped ?? 0} · 창 안 실패 ${x.node.maint.failInWindow ?? 0}(성공률 분모 밖)` : ''}</p>); })}
         {nodes.filter((x) => x.node?.error && NODE_ERROR_TEXT[x.node.error]).map((x) => (
           <p key={`err|${x.via}|${x.agent}`} className="bmo-note" style={{ color: toneVar(x.node.error === 'no-targets' ? 'idle' : 'bad') }}>{x.agent || '이 노드'} — {NODE_ERROR_TEXT[x.node.error]}</p>
         ))}

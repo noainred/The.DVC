@@ -31,6 +31,8 @@ const FILE = () => path.join(config.configDir, 'bm-capacity.json');
 export const CAP_DEFAULTS = Object.freeze({ targetPct: 90, minDays: 7, win: 14, cmpWin: 30, unstablePct: 30, minR2: 0.5, resetDropPp: 10, horizonDays: 365, flatPpPerDay: 0.01 });
 export const CAP_KINDS = Object.freeze(['fs', 'inode', 'mem']);
 export const CAP_STATUS = Object.freeze(['forecast', 'reached', 'no-growth', 'unstable', 'insufficient', 'no-limit']);
+/** 상태 사유(웹 문구 · 중앙 정제가 같은 목록). */
+export const CAP_REASONS = Object.freeze(['few-days', 'flat', 'r2', 'slope-diff', 'declining', 'periodic-reset', 'xfs-dynamic', 'no-inode-limit']);
 export const CAP_ROWS_MAX = 20_000;
 /** 재계산 시각(포탈 날 기준 분) — 01:10 뒤 첫 틱(설계 ‘매일 01:10 재계산’). */
 export const RECOMPUTE_AFTER_MIN = 70;

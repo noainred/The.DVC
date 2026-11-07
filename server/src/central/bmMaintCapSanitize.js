@@ -9,16 +9,17 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
+import { CAP_KINDS, CAP_STATUS, CAP_REASONS } from '../bmusage/capacity.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 const N = numOrNull;
 const ID_RE = /^mw-[a-z0-9]{6,32}$/;
 const SIG_RE = /^[0-9a-f]{32}$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-const KINDS = new Set(['fs', 'inode', 'mem']);
-const STATUS = new Set(['forecast', 'reached', 'no-growth', 'unstable', 'insufficient', 'no-limit']);
+const KINDS = new Set(CAP_KINDS);
+const STATUS = new Set(CAP_STATUS);
 const CONF = new Set(['high', 'mid']);
-const REASONS = new Set(['few-days', 'flat', 'r2', 'slope-diff', 'declining', 'periodic-reset', 'xfs-dynamic', 'no-inode-limit']);
+const REASONS = new Set(CAP_REASONS);
 const COUNT_KEYS = ['alerts', 'after', 'hold', 'focus', 'collect', 'collectFail'];
 const txt = (v, n) => capStr(typeof v === 'string' ? v : '', n).replace(/[\u0000-\u001f\u007f]/g, ' ');
 const day = (v) => (typeof v === 'string' && DAY_RE.test(v) ? v : null);

@@ -50,13 +50,15 @@ import BmOnboardPanel from './BmOnboardPanel.jsx'; // 7b단계 서버 등록 · 
 import BmCompareView from './BmCompareView.jsx';
 import BmCollectHealth from './BmCollectHealth.jsx'; // 6단계 수집 건강 보드(관리자 · 운영자)
 import BmLogsFleet from './BmLogsFleet.jsx'; // 7a단계 로그 분석 함대 보기
+import BmCapacityFleet from './BmCapacityFleet.jsx'; // 8a단계 용량 소진 예측 함대 보기
+import BmMaintPanel from './BmMaintPanel.jsx'; // 8a단계 정비 창 · 알림 억제(설정 절)
 import { addKey } from './bmCompareText.js';
 import { parseShareHash } from './bmShare.js'; // 6단계 공유 링크(#/tools/bm-usage/share?… — 도구 키 그대로) // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
 
 /** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
 const VIEW_KEY = 'bmUsage.view';
 // 보기는 URL 해시가 아니라 localStorage 기억 + 자동 기본값(v2.920) — useHashTab 은 데이터 전 fallback 을 해시에 굳혀 ‘성능 항목이 있으면 USE’ 를 깬다(audit2613a 스윕의 명시 예외).
-const VIEWS = ['use', 'util', 'purpose', 'faults', 'compare', 'health', 'logs'];
+const VIEWS = ['use', 'util', 'purpose', 'faults', 'compare', 'health', 'logs', 'capacity'];
 function readView() { try { const v = localStorage.getItem(VIEW_KEY); return VIEWS.includes(v) ? v : null; } catch { return null; } }
 function writeView(v) { try { localStorage.setItem(VIEW_KEY, v); } catch { /* 저장 실패는 무시 — 다음에 기본값 */ } }
 /** 6단계: 비교에 담은 서버(사람별 편의 — 실패해도 빈 목록으로 그린다). */
@@ -483,6 +485,7 @@ export function BmUsage() {
           <button role="tab" aria-selected={view === 'compare'} className={view === 'compare' ? 'active' : ''} onClick={() => chooseView('compare')}>서버 비교{cmpKeys.length ? ` ${cmpKeys.length}` : ''}</button>
           {hasRole('admin', 'operator') && <button role="tab" aria-selected={view === 'health'} className={view === 'health' ? 'active' : ''} onClick={() => chooseView('health')}>수집 건강</button>}
           <button role="tab" aria-selected={view === 'logs'} className={view === 'logs' ? 'active' : ''} onClick={() => chooseView('logs')}>로그 분석</button>
+          <button role="tab" aria-selected={view === 'capacity'} className={view === 'capacity' ? 'active' : ''} onClick={() => chooseView('capacity')}>용량 예측</button>
         </div>
         <DeviceFacetBar
           dcChips={barFacets.dcChips} typeChips={barFacets.typeChips} dcSel={dcSel} typeSel={typeSel}
@@ -595,6 +598,7 @@ export function BmUsage() {
       {view === 'faults' && <BmFaultsFleet onOpen={(k) => openDetail(k, 'faults')} />}
       {/* 7a단계: 로그 분석 함대(KPI · 공통 원인 후보 · 서버 표) — 서버를 누르면 상세 ‘로그’ 탭. */}
       {view === 'logs' && <BmLogsFleet onOpen={(k) => openDetail(k, 'logs')} />}
+      {view === 'capacity' && <BmCapacityFleet onOpen={(k) => openDetail(k, 'summary')} />}
       {perfSel && (
         <BmPerfDetail
           itemKey={perfSel} item={perfItems.find((it) => it.key === perfSel) || null} initialTab={perfTab}
@@ -924,6 +928,9 @@ export function BmUsage() {
 
           {/* ── v2.929(5단계) 리눅스 성능 알림 규칙 · 집중 모니터링 · 베이스라인 · 소모품 기준 — 별도 파일(bm-perf-rules.json) · 저장은 설정 소유자 ── */}
           <BmPerfRulesPanel vcenters={data?.vcenters || []} />
+
+          {/* ── 8a단계 정비 창 · 알림 억제(중앙 저장 → 엣지 배포 · 쓰기는 운영자 이상 · 법인/태그/긴 창은 설정 소유자 등급) ── */}
+          <BmMaintPanel vcenters={data?.vcenters || []} />
 
           {/* ── 7b단계 서버 등록 · SSH 키 저장소 · 공통 계정 · 엣지 배포 목록 · 누락 점검(관리자) ── */}
           <BmOnboardPanel vcenters={data?.vcenters || []} />
