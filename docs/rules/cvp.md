@@ -191,5 +191,5 @@
   - 엣지 push 커서는 `ep_meta.seq`(쓸 때마다 늘어나는 순번) — 물어본 시각(at)으로 자르면 같은 at 경계 · 늦게 커밋된 작은 at 을 건너뛴다. 엣지 이름은 대소문자를 가리지 않는다(큐 · DB owners).
   - 라우트: 범위 밖 404 → 도구 키 cvp 403 → 역할(admin · operator — `toolActorOf`, 인증 꺼짐도 익명 역할) → **쓰기 범위 밖 403**. 범위 계정 + 법인 미지정 vCenter = CVP 0대.
     비-admin 의 오류 사유는 `maskErrText` 로 가린다. DB 를 못 읽으면 ‘아직 안 물음’ 이 아니라 ‘읽지 못함’. 주기 숫자 · 켜짐은 API 값(partsEveryMs · scan).
-  - v2.939(회귀 `test/sanCvpRest2939.test.js` ①②): 반증 L-10 — 엣지 시각이 수신 시각으로 잘리면 원본을 `ep_meta.edge_at` 에 따로 두고 VM 위치 카드가 '엣지 시계 +n분' 을 보인다.
+  - v2.940(회귀 `test/sanCvpRest2940.test.js` ①②): 반증 L-10 — 엣지 시각이 수신 시각으로 잘리면 원본을 `ep_meta.edge_at` 에 따로 두고 VM 위치 카드가 '엣지 시계 +n분' 을 보인다.
     주기 요약(`endpoints`)은 엣지 상태 정제(`cleanStatus`)가 아는 필드만 받아 넘기고(예전에는 버렸다) CVP 도구 서버 표 '위치 조회(주기)' 열이 보여 준다(못 읽은 수는 '—').

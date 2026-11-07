@@ -328,7 +328,7 @@ export function attributeFleet(hosts = [], fabrics = [], opt = {}) {
     if (r.status === 'no-hba') counts.noHba += 1; else if (r.status === 'unseen') counts.unseen += 1; else if (r.status === 'zoned-only') counts.zonedOnly += 1; else counts.ok += 1;
     hostRows.push({ id: r.host.id, name: r.host.name, vcenterId: r.host.vcenterId, status: r.status, totals: r.totals, hbas: r.hbas.length, mpTargets: r.mpTargets });
     /*
-     * v2.939(C-② 시안 — '실측(스위치 플로우)' 줄): 이 호스트의 Flow Vision 플로우(HBA · 타깃 WWN)를 같은 호스트 귀속의 타깃 → 스토리지 대응으로 묶는다.
+     * v2.940(C-② 시안 — '실측(스위치 플로우)' 줄): 이 호스트의 Flow Vision 플로우(HBA · 타깃 WWN)를 같은 호스트 귀속의 타깃 → 스토리지 대응으로 묶는다.
      *   ESXi 경로 실측 · 포트 비율 분배와 **섞지 않는다**(나란히 보여 준다 — 하나를 고르지 않는다). 속도를 못 읽은 플로우는 개수에만 넣는다.
      */
     const flowBySid = new Map();
@@ -341,7 +341,7 @@ export function attributeFleet(hosts = [], fabrics = [], opt = {}) {
         if (!sid) continue;
         const e = flowBySid.get(sid) || { n: 0, measured: 0, stale: 0, rxBps: null, txBps: null };
         e.n += 1;
-        if (f.stale) e.stale += 1;   // v2.939 반증 M-1: 오래된 플로우는 합에 넣지 않고 따로 센다
+        if (f.stale) e.stale += 1;   // v2.940 반증 M-1: 오래된 플로우는 합에 넣지 않고 따로 센다
         if (numOrNull(f.rxBps) != null && numOrNull(f.txBps) != null) { e.measured += 1; e.rxBps = (e.rxBps ?? 0) + f.rxBps; e.txBps = (e.txBps ?? 0) + f.txBps; }
         flowBySid.set(sid, e);
       }

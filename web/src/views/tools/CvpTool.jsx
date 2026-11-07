@@ -31,7 +31,7 @@ import {
   CHART_MODES, seriesGeometryBps, chartCutNote, faultKindLabel, faultRowView, faultEventText, faultKpi, faultScanNote, FAULT_INTRO,
   sampleRows, SAMPLE_NOTE, PREVIEW_NOTE, previewSummary, previewColumns, sampleBadge, SYS_HIGH_PCT,
   eventDeviceRefs, eventDeviceSort,
-  epSummaryText,   // v2.939 위치 조회 주기 요약
+  epSummaryText,   // v2.940 위치 조회 주기 요약
 } from './cvpText.js';
 import Select from '../../components/Select.jsx';
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계

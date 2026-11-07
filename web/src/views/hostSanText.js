@@ -94,15 +94,15 @@ export function sanKpis(d) {
 
 /** v2.935(C-①): ‘경로별 실측’ 표 행 — 최근 표본(spath.targets)을 화면 행으로. 속도는 바이트/초(KBps × 1024). */
 const FLOW_STATE = Object.freeze({ active: '활성', inactive: '비활성', pending: '만드는 중', unknown: '결과 모름', conflict: '이름 충돌', gone: '장비에 없음' });
-/** v2.939(C-② 시안): 스위치 플로우 칸 — 속도(수신 / 송신) 또는 상태. 플로우가 없으면 ‘—’. */
+/** v2.940(C-② 시안): 스위치 플로우 칸 — 속도(수신 / 송신) 또는 상태. 플로우가 없으면 ‘—’. */
 export function flowCellText(f) {
   if (!f) return '—';
-  if (f.stale) return '오래됨(최근에 못 읽음)';   // v2.939 반증 M-1: 옛 속도를 '지금' 으로 말하지 않는다
+  if (f.stale) return '오래됨(최근에 못 읽음)';   // v2.940 반증 M-1: 옛 속도를 '지금' 으로 말하지 않는다
   const rx = numOrNull(f.rxBps); const tx = numOrNull(f.txBps);
   if (rx != null && tx != null) return `${rateText(tx)} / ${rateText(rx)}`;   // 읽기(장비 송신) / 쓰기(장비 수신) — ESXi 칸과 같은 순서
   return f.state === 'active' ? '활성 · 아직 속도 없음' : (FLOW_STATE[f.state] || f.state || '—');
 }
-/** v2.939: 못 푼 경로 이름 원문 표본(마우스를 올리면) — 이름 형식이 실장비 미확인이라 현장에서 형식을 확인할 근거. */
+/** v2.940: 못 푼 경로 이름 원문 표본(마우스를 올리면) — 이름 형식이 실장비 미확인이라 현장에서 형식을 확인할 근거. */
 export function unparsedTitle(sp) {
   const xs = Array.isArray(sp?.unparsedSamples) ? sp.unparsedSamples : [];
   if (!xs.length) return '경로 인스턴스 이름을 타깃 WWN 으로 풀지 못했습니다(원문 표본 없음)';

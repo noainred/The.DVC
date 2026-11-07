@@ -169,7 +169,7 @@ export async function runFlowCommands(device, cmds, { onTrace = null } = {}) {
 }
 
 /**
- * 다시 켜짐(포탈 '다시 켜기' · 장비에서 켠 것 · 결과 모름에서 켜진 것으로 확인 — 판정 코어 하나, v2.939 반증 M-2): 카운터 기준을 새로 잡는다.
+ * 다시 켜짐(포탈 '다시 켜기' · 장비에서 켠 것 · 결과 모름에서 켜진 것으로 확인 — 판정 코어 하나, v2.940 반증 M-2): 카운터 기준을 새로 잡는다.
  *   직전 카운터를 남기면 켠 뒤 첫 델타가 꺼져 있던 시간까지 나눠 속도를 낮게 말한다.
  */
 function markActivated(rec) { Object.assign(rec, { state: 'active', deactivatedAt: null, prevCounters: null, prevAt: null, counters: null }); }
@@ -195,7 +195,7 @@ function applyShow(rec, shown, now) {
     if (p.active === false && rec.state !== 'inactive') { rec.state = 'inactive'; rec.deactivatedAt = rec.deactivatedAt || now; }
   } else {
     rec.lastError = shown.issue?.text || '카운터 형식을 알아보지 못했습니다(원문 앞부분은 기록에)';
-    // v2.939: 출력 형식이 실장비 미확인이라 못 읽은 원문 앞부분을 기록에 남긴다(작업 기록은 1시간 뒤 사라진다 · 화면은 관리 주소를 가려 보여 준다).
+    // v2.940: 출력 형식이 실장비 미확인이라 못 읽은 원문 앞부분을 기록에 남긴다(작업 기록은 1시간 뒤 사라진다 · 화면은 관리 주소를 가려 보여 준다).
     rec.rawSample = String(shown.out || '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]+/g, ' ').slice(0, 400); // eslint-disable-line no-control-regex
   }
 }
@@ -221,7 +221,7 @@ function applyResult(job, res, { late = false } = {}) {
       const shown = outs.find((o) => o.cmd === `flow --show ${f.name}`);
       const deleted = outs.find((o) => o.cmd === `flow --delete ${f.name}`);
       const rec = reg.flows.find((x) => x.deviceId === job.deviceId && x.name === f.name && x.state !== 'deleted');
-      // v2.939 반증 L-1: 시한 뒤에 온 늦은 회신은 그 뒤에 시작한 작업이 이미 반영됐으면 상태를 바꾸지 않는다(끄기 늦은 회신이 그 뒤 켜기를 덮지 않게).
+      // v2.940 반증 L-1: 시한 뒤에 온 늦은 회신은 그 뒤에 시작한 작업이 이미 반영됐으면 상태를 바꾸지 않는다(끄기 늦은 회신이 그 뒤 켜기를 덮지 않게).
       if (late && rec && Number(rec.lastJobAt || 0) > job.startedAt) continue;
       if (rec) rec.lastJobAt = Math.max(Number(rec.lastJobAt || 0), job.startedAt);
       if (job.action === 'create' && rec) {
@@ -244,7 +244,7 @@ function applyResult(job, res, { late = false } = {}) {
           if (job.action === 'deactivate') Object.assign(rec, { state: 'inactive', deactivatedAt: now, lastError: null });
           else { markActivated(rec); rec.lastError = null; }
         } else if (rec && tog?.issue?.kind === 'missing') { rec.state = 'gone'; rec.lastError = '장비에 이 플로우가 없습니다(장비에서 지워졌을 수 있습니다)'; }
-        // v2.939 반증 L-2: 보냈는데 결과를 모르면(시한 · 세션 끊김) '결과 모름' — 주기 카운터 읽기가 활성 여부를 읽어 바로잡는다(만들기와 같은 규칙).
+        // v2.940 반증 L-2: 보냈는데 결과를 모르면(시한 · 세션 끊김) '결과 모름' — 주기 카운터 읽기가 활성 여부를 읽어 바로잡는다(만들기와 같은 규칙).
         else if (rec && !tog && !res?.notRun && (timedOut || res?.inFlight === togCmd)) { rec.state = 'unknown'; rec.lastError = `${job.action === 'deactivate' ? '비활성화' : '다시 켜기'} 결과를 모릅니다(${res?.reason || '결과 없음'}) — 다음 카운터 읽기가 장비 상태를 따라갑니다`; }
         else if (rec) rec.lastError = tog?.issue?.text || res?.reason || '바꾸지 못했습니다';
       }

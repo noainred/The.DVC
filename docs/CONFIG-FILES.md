@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **283개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **284개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-07)
@@ -107,6 +107,7 @@
 | `finops.json` | 설정 | FinOps — 전력 수집(iDRAC/OME/원격) 데이터를 kWh·전기요금·CO2로 환산해 vCenter/지역별로 | ✅ | ✅ |  | insights/finops.js |
 | `fleet-assign.json` | 설정 | 통합 서버 인벤토리 — 베어메탈/물리 서버의 '소속 법인(vCenter)' 수동 등록 저장. | ✅ | ✅ |  | insights/fleetAssign.js |
 | `fleet-tags.json` | 설정 | 통합 서버 인벤토리 — 수동 분류 예외(override) 저장. | ✅ | ✅ |  | insights/fleetTags.js |
+| `gpu-alloc.db` | DB | GPU 할당율 **일 단위 이력**(v2.939 개선 7 · gpu-alloc.db). |  |  | ✅ | config.js, gpu/allocHistory.js |
 | `gpu-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | gpu/sshCollect.js |
 | `gpu-guest.json` | 설정 | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 | ✅ | ✅ | ✅ | gpu/settings.js |
 | `gpu-physical.json` | 설정 | 물리(베어메탈) GPU 서버 등록부 — 가상화하지 않은 서버를 IP+계정으로 등록해 SSH(nvidia-smi)로 | ✅ | ✅ | ✅ | gpu/physicalRegistry.js |

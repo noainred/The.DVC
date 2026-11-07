@@ -1,5 +1,5 @@
 /**
- * v2.939 — SAN·CVP C 단계 남긴 것 다섯.
+ * v2.940 — SAN·CVP C 단계 남긴 것 다섯.
  *  ① 엣지 위치 조회 시각 원본(C-③ 반증 L-10) — 수신 시각으로 자르고 원본(edgeAt)은 따로 · DB edge_at · 화면 '엣지 시계 +n분'
  *  ② CVP 위치 주기 요약 — 엣지 상태 정제가 아는 필드만 받아 넘긴다(예전에는 버렸다)
  *  ③ 플로우 비활성화 · 다시 켜기 — 명령 · 상태 · 속도 비움 · 엣지 버전 · 라우트 게이트 · OTP
@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sancvp2939-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sancvp2940-'));
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true' });
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));
 fs.writeFileSync(path.join(DIR, 'security-session.json'), JSON.stringify({ settingsOwners: ['owner'] }));
@@ -81,11 +81,11 @@ test('③ 플로우 비활성화 · 다시 켜기', async () => {
   assert.deepEqual(C.buildFlowCommands('activate', [{ name: N }]).cmds, [`flow --activate ${N} -feature monitor`, `flow --show ${N}`]);
   assert.ok(C.buildFlowCommands('deactivate', [{ name: 'sys_mon_all_fports' }]).issue, '사람 · 장비 플로우는 손대지 않는다');
   assert.ok(C.FLOW_ACTIONS.includes('deactivate'));
-  // 엣지 버전 — 비활성화 · 다시 켜기는 2.939.0 부터(그 전 엣지는 '알 수 없는 동작' 으로 실행하지 않는다)
-  assert.match(R.flowEdgeIssue('e', '2.937.0', 'deactivate'), /2\.939\.0 이상/);
+  // 엣지 버전 — 비활성화 · 다시 켜기는 2.940.0 부터(그 전 엣지는 '알 수 없는 동작' 으로 실행하지 않는다)
+  assert.match(R.flowEdgeIssue('e', '2.937.0', 'deactivate'), /2\.940\.0 이상/);
   assert.equal(R.flowEdgeIssue('e', '2.937.0', 'show'), null, '다른 동작은 예전 하한');
-  assert.equal(R.flowEdgeIssue('e', '2.939.0', 'activate'), null);
-  assert.match(R.flowEdgeIssue('e', '2.938.0', 'activate'), /2\.939\.0 이상/, '2.938.0(다른 작업 릴리스)은 아직 모른다');
+  assert.equal(R.flowEdgeIssue('e', '2.940.0', 'activate'), null);
+  assert.match(R.flowEdgeIssue('e', '2.939.0', 'activate'), /2\.940\.0 이상/, '2.939.0(다른 작업 릴리스 — GPU)은 아직 모른다');
   // 작업 반영 — 엣지 위임(큐)으로 결과를 직접 넣는다
   fs.writeFileSync(path.join(DIR, 'san-flows.json'), JSON.stringify({ flows: [{ deviceId: 'sw-e', name: N, state: 'active', srcdev: INI, dstdev: T1, ingrport: '1/1',
     counters: { rxBytes: 1000, txBytes: 2000 }, lastAt: NOW - 60_000, prevCounters: { rxBytes: 500, txBytes: 1000 }, prevAt: NOW - 120_000 }], checks: {} }));
@@ -247,10 +247,10 @@ test('③ 반증 확정분 — WWN 은 가리지 않는다(L-3) · 구버전 엣
   const base = `http://127.0.0.1:${srv.address().port}/api/tools/san-flow`;
   const x = await fetch(`${base}/deactivate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: dev.id, name: 'dvc_o000aaaaa_01' }) });
   assert.equal(x.status, 409, 'OTP 재인증(이 계정이면 403) 전에 엣지 버전을 본다 — 거부할 요청이 OTP 를 써 버리지 않게');
-  assert.match((await x.json()).reason, /2\.939\.0 이상/);
+  assert.match((await x.json()).reason, /2\.940\.0 이상/);
   const g = await (await fetch(base)).json();
   const d = g.devices.find((v) => v.id === dev.id);
-  assert.match(d.toggleIssue || '', /2\.939\.0 이상/, '화면이 비활성화 버튼을 미리 잠근다');
+  assert.match(d.toggleIssue || '', /2\.940\.0 이상/, '화면이 비활성화 버튼을 미리 잠근다');
   assert.equal(d.edgeIssue, null, '다른 동작은 그대로');
   const fl = g.flows.find((v) => v.name === 'dvc_o000aaaaa_01');
   assert.ok(fl.rawSample.includes(INI) && !fl.rawSample.includes('10.4.4.4'), fl.rawSample);

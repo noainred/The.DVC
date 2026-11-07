@@ -55,7 +55,7 @@ export function flowDefIssue(f) {
   return null;
 }
 
-/** 동작 이름 — 엣지 버전 게이트 · 화면 문구가 같은 목록을 본다. 비활성화 · 다시 켜기는 v2.939 에 더했다(그 전 엣지는 모른다). */
+/** 동작 이름 — 엣지 버전 게이트 · 화면 문구가 같은 목록을 본다. 비활성화 · 다시 켜기는 v2.940 에 더했다(그 전 엣지는 모른다). */
 export const FLOW_ACTIONS = Object.freeze(['check', 'create', 'show', 'delete', 'deactivate', 'activate']);
 
 /**
@@ -64,7 +64,7 @@ export const FLOW_ACTIONS = Object.freeze(['check', 'create', 'show', 'delete', 
  *   create — 플로우마다 `flow --create … -feature monitor -ingrport … -srcdev … -dstdev … -bidir` 다음 `flow --show <name>`
  *   show   — 플로우마다 `flow --show <name>`
  *   delete — `flow --delete <name>`(dvc_ 만)
- *   deactivate · activate — `flow --deactivate|--activate <name> -feature monitor` 다음 `flow --show <name>`(dvc_ 만 · v2.939)
+ *   deactivate · activate — `flow --deactivate|--activate <name> -feature monitor` 다음 `flow --show <name>`(dvc_ 만 · v2.940)
  * @returns {{ cmds: string[] } | { issue: string }}
  */
 export function buildFlowCommands(action, flows = []) {
@@ -82,7 +82,7 @@ export function buildFlowCommands(action, flows = []) {
       if (!FLOW_NAME_RE.test(String(f?.name || ''))) return { issue: `포탈이 만든(${FLOW_PREFIX}) 플로우만 다룹니다` };
       cmds.push(action === 'show' ? `flow --show ${f.name}` : `flow --delete ${f.name}`);
     } else if (action === 'deactivate' || action === 'activate') {
-      // v2.939(C-② 시안의 '비활성화'): 모니터 기능만 끄고 켠다(플로우 정의는 장비에 남는다). 문법은 FOS 8.0.1 명령 참조 기준 — 실장비 미확인.
+      // v2.940(C-② 시안의 '비활성화'): 모니터 기능만 끄고 켠다(플로우 정의는 장비에 남는다). 문법은 FOS 8.0.1 명령 참조 기준 — 실장비 미확인.
       if (!FLOW_NAME_RE.test(String(f?.name || ''))) return { issue: `포탈이 만든(${FLOW_PREFIX}) 플로우만 다룹니다` };
       cmds.push(`flow --${action} ${f.name} -feature monitor`);
       cmds.push(`flow --show ${f.name}`);

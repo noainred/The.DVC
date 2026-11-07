@@ -34,13 +34,13 @@ describe('호스트 귀속 문구', () => {
   });
 });
 
-describe('v2.939 귀속 표 ‘실측(스위치 플로우)’', () => {
+describe('v2.940 귀속 표 ‘실측(스위치 플로우)’', () => {
   it('합 · 일부만 읽음 · 속도 없음 · 없음', () => {
     expect(flowSumText({ n: 2, measured: 2, rxBps: 1000, txBps: 2000 })).toBe('16 Kbps / 8 Kbps');
     expect(flowSumText({ n: 3, measured: 2, rxBps: 1000, txBps: 2000 })).toBe('16 Kbps / 8 Kbps(2/3개)');
     expect(flowSumText({ n: 1, measured: 0, rxBps: null, txBps: null })).toBe('플로우 1개 · 속도 없음');
     expect(flowSumText(null)).toBe('—');
-    expect(flowSumText({ n: 3, measured: 2, stale: 1, rxBps: 1000, txBps: 2000 })).toBe('16 Kbps / 8 Kbps(2/3개 · 오래됨 1)');   // v2.939 반증 M-1
+    expect(flowSumText({ n: 3, measured: 2, stale: 1, rxBps: 1000, txBps: 2000 })).toBe('16 Kbps / 8 Kbps(2/3개 · 오래됨 1)');   // v2.940 반증 M-1
     expect(flowSumText({ n: 1, measured: 0, stale: 1, rxBps: null, txBps: null })).toBe('플로우 1개 · 속도 없음 · 오래됨 1');
   });
 });

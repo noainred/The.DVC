@@ -145,7 +145,7 @@ function pickStatus(st) {
     ...(st.samples && typeof st.samples === 'object' ? { samples: st.samples } : {}), // v2.640 ②: 원문 표본(라우트가 admin 에게만 싣는다)
     ...(Array.isArray(st.probes) ? { probes: st.probes } : {}), // v2.641: 경로 탐색 표본(admin 만 — stripSamples 가 뺀다)
     ...(Object.hasOwn(st, 'events') ? { events: st.events } : {}), // v2.641 ④: 이벤트 요약(null = 못 읽음)
-    // v2.939(C-③ 남긴 것 · 반증 M-1): EndpointLocation 주기 요약 — 수와 열거값뿐(주소 없음). 예전에는 이 화이트리스트에 없어 화면이 늘 '—' 였다.
+    // v2.940(C-③ 남긴 것 · 반증 M-1): EndpointLocation 주기 요약 — 수와 열거값뿐(주소 없음). 예전에는 이 화이트리스트에 없어 화면이 늘 '—' 였다.
     ...(st.endpoints && typeof st.endpoints === 'object' ? { endpoints: st.endpoints } : {}),
   };
 }

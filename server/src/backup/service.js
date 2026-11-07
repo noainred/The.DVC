@@ -163,7 +163,7 @@ export const MIXED_EXTRA_RUN_FIELDS = new Map([
   // v2.935(C-②): 플로우 카운터 · 직전 카운터 · 활성 여부 · 권한 점검 결과는 실행 — 15분 카운터 주기마다 change 백업이 생기지 않게.
   ['san-flows.json', (obj) => {
     if (!obj || typeof obj !== 'object') return obj;
-    const FLOW_RUN = new Set(['counters', 'prevCounters', 'prevAt', 'active', 'rawSample']);   // v2.939 rawSample(못 읽은 출력 원문)도 실행 값
+    const FLOW_RUN = new Set(['counters', 'prevCounters', 'prevAt', 'active', 'rawSample']);   // v2.940 rawSample(못 읽은 출력 원문)도 실행 값
     return { flows: Array.isArray(obj.flows) ? obj.flows.map((f) => (f && typeof f === 'object' ? Object.fromEntries(Object.entries(f).filter(([k]) => !FLOW_RUN.has(k))) : f)) : obj.flows };
   }],
   ['bareos-groups.json', (obj) => {

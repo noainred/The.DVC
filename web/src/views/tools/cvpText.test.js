@@ -551,7 +551,7 @@ describe('streamingMeta (v2.721 감사 R2-03)', () => {
   });
 });
 
-describe('v2.939 위치 조회 주기 요약(C-③ 남긴 것)', () => {
+describe('v2.940 위치 조회 주기 요약(C-③ 남긴 것)', () => {
   it('요약 · 멈춘 사유 · 없으면 —', () => {
     expect(epSummaryText({ asked: 200, ok: 150, none: 40, errors: 0, cut: 10 }).text).toBe('물음 200 · 위치 있음 150 · 없음 40 · 못 물음 10');
     const s = epSummaryText({ asked: 3, ok: 0, none: 0, errors: 3, cut: 197, stopped: 'auth' });

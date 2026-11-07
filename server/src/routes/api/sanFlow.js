@@ -25,8 +25,8 @@ import { cmpVersion } from '../../util/cmpVersion.js';
 const gate = [requirePerm('tools'), requireRole('admin'), fullReadWriteScopeOnlyWith('SAN 플로우 모니터(스위치 설정 변경)는 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 쓸 수 있습니다.')];
 /** 엣지가 flowNow 를 아는 첫 버전(반증 M-7 — 구버전 엣지는 작업을 모른 채 버린다). */
 export const MIN_FLOW_EDGE_VERSION = '2.935.0';
-/** 비활성화 · 다시 켜기를 아는 첫 엣지 버전(v2.939 — 그 전 엣지는 '알 수 없는 동작' 으로 실행하지 않고 회신한다). */
-export const MIN_FLOW_TOGGLE_EDGE_VERSION = '2.939.0';
+/** 비활성화 · 다시 켜기를 아는 첫 엣지 버전(v2.940 — 그 전 엣지는 '알 수 없는 동작' 으로 실행하지 않고 회신한다). */
+export const MIN_FLOW_TOGGLE_EDGE_VERSION = '2.940.0';
 /** 엣지 위임 전 확인 — 버전을 알고 낮으면 거부, 모르면(중앙 재시작 직후 등) 보낸다(시한이 지나면 '결과 모름'). */
 export function flowEdgeIssue(agent, version = edgeVersionOf(agent), action = '') {
   const v = String(version || '').trim();
@@ -48,7 +48,7 @@ async function devicesWithSnap() {
   return reg.map((d) => ({ d, s: snapOf.get(d.id) || null }));
 }
 
-// 속도 · ESXi 합 계산은 sanswitch/flowView.js 하나(호스트 상세 · 귀속 표와 같은 값 — v2.939). 테스트 호환으로 다시 내보낸다.
+// 속도 · ESXi 합 계산은 sanswitch/flowView.js 하나(호스트 상세 · 귀속 표와 같은 값 — v2.940). 테스트 호환으로 다시 내보낸다.
 export { rateOf, esxiBpsOf };
 
 const flowOut = (f) => ({ name: f.name, ingrport: f.ingrport, srcdev: f.srcdev, dstdev: f.dstdev, targetName: f.targetName });
@@ -117,7 +117,7 @@ export function edgeAuthStopOf(deviceId) {
 
 /**
  * 비밀이 아닌 관리 주소도 응답에서 가린다(반증 L-4) — 등록 스위치 주소 + URL · IPv4 · IPv6. WWN(콜론 8묶음)은 IPv6 꼴로 읽혀 지워졌다 — 출력 원문의 SrcDev · DstDev 가 형식 확인 근거라
- *   WWN 은 남긴다(v2.939 반증 L-3 — 비밀이 아니고 같은 화면 표에도 이미 있다).
+ *   WWN 은 남긴다(v2.940 반증 L-3 — 비밀이 아니고 같은 화면 표에도 이미 있다).
  */
 const WWN_TOKEN_RE = /\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){7}\b/g;
 export function maskKeepWwn(v, hosts = []) {
@@ -260,10 +260,10 @@ export function registerSanFlow(api) {
   });
 
   /**
-   * 비활성화 · 다시 켜기(v2.939 — 시안 C-②) — 포탈 기록의 dvc_ 플로우만. 모니터 기능만 끄고 켠다(정의는 장비에 남는다 · 상한 개수에도 남는다).
+   * 비활성화 · 다시 켜기(v2.940 — 시안 C-②) — 포탈 기록의 dvc_ 플로우만. 모니터 기능만 끄고 켠다(정의는 장비에 남는다 · 상한 개수에도 남는다).
    *   스위치 설정을 바꾸므로 OTP 재인증 · 감사. 비활성화는 활성일 때만, 다시 켜기는 비활성일 때만.
    */
-  //   라우트는 둘을 따로 선언한다 — 반복문 안 템플릿 경로는 API 문서 생성기가 읽지 못해 문서에서 빠졌다(v2.939 Chromium 재확인 때 발견).
+  //   라우트는 둘을 따로 선언한다 — 반복문 안 템플릿 경로는 API 문서 생성기가 읽지 못해 문서에서 빠졌다(v2.940 Chromium 재확인 때 발견).
   // 반증 L-4: 이름 · 기록 · 상태 · 엣지 버전을 OTP 재인증 **전에** 본다 — 뒤에서 거부하면 OTP 를 써 버려 다음 코드를 기다려야 했다.
   const togglePrecheck = (action) => (req, res, next) => {
     const dev = getDeviceWithSecret(String(req.body?.deviceId || ''));
