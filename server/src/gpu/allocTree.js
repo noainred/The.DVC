@@ -20,7 +20,7 @@
  *   · vSGA GPU  할당형이 아니라 행으로만 보이고 합계(용량·할당·예비)에 넣지 않는다.
  */
 import { numOrNull } from '../util/numOrNull.js';
-import { vgpuProfileGB, vmGpuDevices } from './vgpuProfile.js';
+import { vgpuProfileGB, vmGpuDevices, gpuModeOf, gpuDevicesOnHost, isGpuVmOnHost } from './vgpuProfile.js';
 import { inferGpuMemGB } from './gpuModelMem.js';
 
 const ON = 'POWERED_ON';
@@ -29,12 +29,8 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 export const NO_DC = '';            // 데이터센터를 모름(구버전 스냅샷) — 화면이 '(데이터센터 모름)' 으로 적는다
 export const ALLOC_TREE_HOSTS_MAX = 5000;
 
-/** GPU 모드 — 수집기 mode 가 없으면 vgpuMode 로(구버전 스냅샷). */
-export function gpuModeOf(g) {
-  if (!g) return null;
-  if (g.mode === 'vgpu' || g.mode === 'passthrough' || g.mode === 'vsga') return g.mode;
-  return g.vgpuMode ? 'vgpu' : 'passthrough';
-}
+// v2.937: gpuModeOf 는 vgpuProfile.js 로 옮겼다(GPU 인벤토리와 함께 쓰는 gpuDevicesOnHost 가 쓴다) — 예전 import 경로를 위해 다시 내보낸다.
+export { gpuModeOf };
 
 /** GPU 한 장의 용량(GB)과 근거. @returns {{ gb: number|null, basis: 'reported'|'nominal'|'model'|null }} */
 export function gpuCapacityOf(g) {
@@ -137,25 +133,16 @@ export function buildHostAlloc(h, vmsIn) {
       placement: mode === 'vgpu' ? vmIds != null : mode === 'passthrough' ? pciId != null : false,
       _vmIds: vmIds, vms: [] };
   });
-  // v2.871(버그 점검): VM 의 패스스루 장치 수(parseVmGpu)는 GPU 가 아닌 DirectPath 장치(NIC · HBA 등)까지 센다 — 호스트 패스스루 GPU 목록은
-  //   PCI 디스플레이 클래스(0x03)만이다(soapClient parsePassthruGpus). 그대로 두면 NIC 를 받은 VM 이 'GPU VM' 으로 잡히고 GB 를 몰라
-  //   (allocUnknown) 호스트~법인 예비·할당률이 통째로 비었다. 호스트 패스스루 GPU 가 모두 pciId 를 갖고 VM 의 장치 주소를 모두 읽었을 때만
-  //   주소로 가른다: 호스트 GPU 와 맞는 장치만 GPU 다. 하나라도 모르면(구버전 수집기 · 꺼진 VM 의 동적 DirectPath) 예전처럼 전부 GPU 로 본다(지어내지 않는다).
+  // v2.871(버그 점검) → v2.937: GPU 가 아닌 패스스루(NIC · HBA)를 가르는 판정은 vgpuProfile.gpuDevicesOnHost 하나다(GPU 인벤토리와 같은 함수).
   const pciKey = (x) => String(x).toLowerCase();
-  const ptGpuIds = new Set(gpus.filter((g) => g.mode === 'passthrough' && g.pciId).map((g) => pciKey(g.pciId)));
-  const ptAllKnown = gpus.every((g) => g.mode !== 'passthrough' || g.pciId);
-  const devOf = (v) => {
-    const dev = vmGpuDevices(v.gpu);
-    const ids = Array.isArray(v.gpu?.pciIds) ? v.gpu.pciIds.map(pciKey) : null;
-    if (dev.passthrough > 0 && ptAllKnown && ids && ids.length === dev.passthrough) {
-      const gpuPt = ids.filter((id) => ptGpuIds.has(id)).length;
-      return { vgpu: dev.vgpu, passthrough: gpuPt, other: dev.passthrough - gpuPt };
-    }
-    return { ...dev, other: 0 };
-  };
-  const devs = new Map(vms.map((v) => [v, devOf(v)]));
+  const devs = new Map(vms.map((v) => [v, gpuDevicesOnHost(v.gpu, h.gpus)]));
   // GPU 장치가 하나도 없는 VM(패스스루가 전부 NIC 등)은 이 계층의 대상이 아니다 — 켜짐·꺼짐·미배치 어디에도 넣지 않는다.
-  vms = vms.filter((v) => { const d = devs.get(v); return d.vgpu > 0 || d.passthrough > 0 || !(d.other > 0); });
+  vms = vms.filter((v) => isGpuVmOnHost(devs.get(v)));
+  // v2.937(개선 3): 한 VM 의 vGPU 장치 여럿이 같은 GPU 에 붙으면 graphicsInfo 목록에는 그 VM 이 한 번만 온다 — GPU 단위 할당이 한 장치분으로
+  //   적게 잡혔다. VM 이 vGPU GPU 목록 **하나에만** 있으면 그 VM 의 vGPU 장치 수를 모두 그 GPU 에 둔다. 여러 목록에 있으면 목록마다 한 장치
+  //   (장치 수가 목록 수보다 많으면 어느 GPU 에 더 붙었는지 몰라 예전처럼 한 장치씩 — 호스트 합계는 VM 구성에서 내므로 늘 정확하다).
+  const listedOn = new Map();
+  for (const g of gpus) if (g.mode === 'vgpu' && g._vmIds) for (const id of new Set(g._vmIds)) listedOn.set(id, (listedOn.get(id) || 0) + 1);
   const hasPci = (v, id) => Array.isArray(v.gpu?.pciIds) && v.gpu.pciIds.some((x) => pciKey(x) === pciKey(id));
   const byId = new Map(vms.map((v) => [str(v.id), v]));
   const placed = new Set();
@@ -175,7 +162,9 @@ export function buildHostAlloc(h, vmsIn) {
         const v = byId.get(id);
         if (!v || v.powerState !== ON || placed.has(`${id}|${g.idx}`)) continue;
         const per = vgpuProfileGB(v.gpu?.profile);
-        g.vms.push(vmRowOf(v, per, {}, devs.get(v)));   // 이 GPU 위의 장치 하나 = 프로파일 GB 하나
+        const d = devs.get(v);
+        const n = listedOn.get(id) === 1 && d.vgpu > 1 ? d.vgpu : 1;   // 이 GPU 위의 장치 수(v2.937 — 위 설명)
+        g.vms.push(vmRowOf(v, per == null ? null : per * n, { onGpu: n }, d));
         placed.add(`${id}|${g.idx}`); placed.add(id);
       }
     } else if (g.mode === 'passthrough' && g.pciId) {
@@ -205,9 +194,10 @@ export function buildHostAlloc(h, vmsIn) {
       g.spareGB = unknown || g.capGB == null ? null : r1(g.capGB - alloc);
       const profiles = [...new Set(g.vms.map((x) => x.profile))];
       const per = profiles.length === 1 ? vgpuProfileGB(profiles[0]) : null;
+      const usedDev = g.vms.reduce((s, x) => s + (x.onGpu || 1), 0);   // v2.937: 슬롯은 VM 수가 아니라 장치 수
       g.slots = profiles.length === 0 ? { total: null, used: 0, free: null, profile: null }
-        : per && g.capGB != null ? { total: Math.floor(g.capGB / per), used: g.vms.length, free: Math.max(0, Math.floor(g.capGB / per) - g.vms.length), profile: profiles[0] }
-          : { total: null, used: g.vms.length, free: null, profile: profiles.length === 1 ? profiles[0] : null, mixed: profiles.length > 1 };
+        : per && g.capGB != null ? { total: Math.floor(g.capGB / per), used: usedDev, free: Math.max(0, Math.floor(g.capGB / per) - usedDev), profile: profiles[0] }
+          : { total: null, used: usedDev, free: null, profile: profiles.length === 1 ? profiles[0] : null, mixed: profiles.length > 1 };
     }
     if (g.vms.length === 0) t.freeGpus += 1;
   }
@@ -244,11 +234,15 @@ export function buildHostAlloc(h, vmsIn) {
   const byName = (a, b) => a.name.localeCompare(b.name);
   for (const g of gpus) g.vms.sort(byName);
   unplaced.sort(byName); off.sort(byName);
+  const totals = finishTotals(t);
+  // v2.937(개선 5): 꺼진 VM 을 모두 켜면 예비보다 많이 필요한가 — 호스트 행에만(배치는 호스트 단위다). 모르는 값이 섞이면 판정하지 않는다.
+  //   vGPU 는 같은 프로파일 슬롯 단위로만 들어가므로 GB 비교는 근사다(넘지 않아도 슬롯이 맞지 않으면 켜지지 않을 수 있다 — 비고가 말한다).
+  totals.offOverGB = totals.spareGB != null && t.offUnknown === 0 && t.offGB > totals.spareGB ? r1(t.offGB - totals.spareGB) : null;
   return {
     id: str(h.id), name: str(h.name), cluster: str(h.cluster), vcDatacenter: str(h.vcDatacenter),
     connectionState: str(h.connectionState), res: hr,
     models: [...new Set(gpus.map((g) => g.model).filter(Boolean))],
-    gpus, unplaced, off, totals: finishTotals(t), _t: t,
+    gpus, unplaced, off, totals, _t: t,
   };
 }
 
@@ -437,4 +431,70 @@ export function flatRows(tree) {
     for (const v of h.off) out.push({ ...noGpu, ...vres(v), vm: v.name, power: '꺼짐', profile: v.profile || (v.passthroughDevices ? `패스스루 ${v.passthroughDevices}장` : ''), vmGB: numCell(v.gb), note: `꺼짐 — 할당에서 제외(켜면 ${v.gb == null ? '?' : v.gb} GB 필요)` });
   }
   return out;
+}
+
+/**
+ * v2.937(개선 2 — 실장비 확인 도구): 'GPU 할당율' 이 기대는 수집 가정을 **이미 수집한 스냅샷**으로 판정한다(vCenter 왕복 0 · 엣지 법인도 같다).
+ *   ① 꺼진 VM 이 GPU 별 목록(HostGraphicsInfo.vm)에 오는가 — 배치 정보가 있는 vGPU GPU 의 목록에 꺼진 vGPU VM 이 보이는가
+ *   ② 켜진 패스스루 VM 의 장치 주소(정적 id · 동적 assignedId)를 읽는가 — gpu.pciIds 가 장치 수만큼 있는가
+ *   ③ vGPU 프로파일 이름을 GB 로 읽는가(vgpuProfileGB) — 못 읽은 이름과 VM 수
+ *   그 밖: 배치 정보 없는 GPU(구버전 수집기) · 주소 없는 패스스루 GPU · GPU 아닌 패스스루(NIC · HBA)를 가진 VM · 용량 모름 · 모델명 추정 용량.
+ * 판정은 관측만 말한다 — 관측할 대상이 없으면 '판단 불가' 다(없다고 단정하지 않는다).
+ * @param {object} snap store.get()
+ * @param {{ allowed?: Set<string>|null, vcenterId?: string|null, vcenterIds?: Set<string>|null }} opt 계층과 같은 범위(scopeTest)
+ */
+export function allocDiag(snap, opt = {}) {
+  const inScope = scopeTest(opt);
+  const vcName = new Map((snap?.vcenters || []).filter(Boolean).map((v) => [str(v.id), str(v.name) || str(v.id)]));
+  const zero = () => ({ gpuHosts: 0, vgpuGpus: 0, vgpuNoPlacement: 0, ptGpus: 0, ptNoPci: 0, capUnknown: 0, capModel: 0,
+    offVgpuVms: 0, offListed: 0, ptOnVms: 0, ptOnPciRead: 0, unparsedVms: 0, nonGpuPtVms: 0, nonGpuOnlyVms: 0 });
+  const per = new Map();
+  const unparsed = new Map();
+  const hostsByKey = new Map();
+  for (const h of snap?.hosts || []) {
+    if (!h || !inScope(h.vcenterId) || !Array.isArray(h.gpus) || !h.gpus.length) continue;
+    hostsByKey.set(`${h.vcenterId}\t${h.name}`, h);
+    const id = str(h.vcenterId);
+    const d = per.get(id) || per.set(id, zero()).get(id);
+    d.gpuHosts += 1;
+    for (const g of h.gpus) {
+      if (!g || typeof g !== 'object') continue;
+      const mode = gpuModeOf(g);
+      if (mode === 'vgpu') { d.vgpuGpus += 1; if (!Array.isArray(g.vms)) d.vgpuNoPlacement += 1; }
+      if (mode === 'passthrough') { d.ptGpus += 1; if (!(typeof g.pciId === 'string' && g.pciId)) d.ptNoPci += 1; }
+      if (mode !== 'vsga') { const c = gpuCapacityOf(g); if (c.gb == null) d.capUnknown += 1; else if (c.basis === 'model') d.capModel += 1; }
+    }
+  }
+  for (const v of snap?.vms || []) {
+    if (!v || !v.gpu || v.template || !v.host || !inScope(v.vcenterId)) continue;
+    const h = hostsByKey.get(`${v.vcenterId}\t${v.host}`);
+    if (!h) continue;
+    const d = per.get(str(v.vcenterId));
+    const raw = vmGpuDevices(v.gpu);
+    const dev = gpuDevicesOnHost(v.gpu, h.gpus);
+    if (dev.other > 0) { d.nonGpuPtVms += 1; if (!isGpuVmOnHost(dev)) { d.nonGpuOnlyVms += 1; continue; } }
+    const on = v.powerState === ON;
+    const ref = str(v.id).startsWith(`${v.vcenterId}:`) ? str(v.id).slice(String(v.vcenterId).length + 1) : str(v.id);
+    if (!on && dev.vgpu > 0) {
+      const placedGpus = h.gpus.filter((g) => g && gpuModeOf(g) === 'vgpu' && Array.isArray(g.vms));
+      if (placedGpus.length) { d.offVgpuVms += 1; if (placedGpus.some((g) => g.vms.includes(ref))) d.offListed += 1; }
+    }
+    if (on && raw.passthrough > 0) { d.ptOnVms += 1; if (Array.isArray(v.gpu.pciIds) && v.gpu.pciIds.length === raw.passthrough) d.ptOnPciRead += 1; }
+    if (dev.vgpu > 0 && vgpuProfileGB(v.gpu.profile) == null) {
+      d.unparsedVms += 1;
+      const p = str(v.gpu.profile).slice(0, 80) || '(이름 없음)';
+      unparsed.set(p, (unparsed.get(p) || 0) + 1);
+    }
+  }
+  const vcenters = [...per.entries()].map(([id, d]) => ({ id, name: vcName.get(id) || id, ...d })).sort((a, b) => a.id.localeCompare(b.id));
+  const t = zero();
+  for (const v of vcenters) for (const k of Object.keys(t)) t[k] += v[k];
+  const verdicts = {
+    offListed: t.offListed > 0 ? 'yes' : t.offVgpuVms > 0 ? 'no' : 'unknown',
+    ptPciRead: t.ptOnVms === 0 ? 'unknown' : t.ptOnPciRead === t.ptOnVms ? 'yes' : t.ptOnPciRead === 0 ? 'no' : 'partial',
+    profiles: t.unparsedVms === 0 ? (t.vgpuGpus > 0 ? 'yes' : 'unknown') : 'partial',
+    placement: t.vgpuGpus === 0 ? 'unknown' : t.vgpuNoPlacement === 0 ? 'yes' : t.vgpuNoPlacement === t.vgpuGpus ? 'no' : 'partial',
+  };
+  const unparsedProfiles = [...unparsed.entries()].map(([profile, vms]) => ({ profile, vms })).sort((a, b) => b.vms - a.vms || a.profile.localeCompare(b.profile)).slice(0, 50);
+  return { vcenters, totals: t, verdicts, unparsedProfiles };
 }

@@ -67,6 +67,7 @@ import { startAlertEngine } from './alerts.js';
 import { startDirUsageScheduler } from './dirusage/scheduler.js'; // 폴더 사용량 Top-N 리포트(v2.454)
 import { startMetricsSampler } from './metrics/sampler.js';
 import { startGpuGuestPoller } from './gpu/poller.js';
+import { startGpuAllocHistory } from './gpu/allocHistory.js';   // GPU 할당율 일 단위 이력(v2.937) — 1시간 · 재진입 가드 · 스냅샷만 읽는다
 import { startPhysicalGpuPoller } from './gpu/physicalPoller.js';
 import { startIpScanPoller } from './ipam/scanPoller.js';
 import { startIpScanAgent } from './agent/ipScanWorker.js';
@@ -623,6 +624,7 @@ const stagger = [
   startBmstorPoller, // 베어메탈 스토리지(v2.340) — 30초 틱 + 재진입 가드, 등록 0대면 대기
   startBmstorHistory, // 〃 12시간 이력(v2.635) — 60초 틱 + 재진입 가드, 슬롯당 1회(부분 합이면 새 수집마다 보강)
   startBmstorWorker, // 〃 폴링 위임 워커(v2.341) — CENTRAL_URL 미설정이면 자기기동 안 함
+  () => startGpuAllocHistory(() => store.get()), // GPU 할당율 일 단위 이력(v2.937) — 기동 2분 뒤 첫 회 · 1시간 · 재진입 가드 · vCenter 왕복 0
   startVmtrackPoller, // VM 수량 추이(v2.345) — 60초 틱, 슬롯(00/12시) 미기록 시에만 수집 + 재진입 가드
   startVmHygieneNotifier, // VM 스냅샷 정책 일일 알림(v2.698) — 10분마다 확인, 설정이 켜졌을 때만 하루 1회
   startVmDnsHistory, // VM DNS 변경 이력(v2.696) — 적응형 타이머(기본 10분) + 재진입 가드, 스냅샷만 비교(vCenter 왕복 0)
