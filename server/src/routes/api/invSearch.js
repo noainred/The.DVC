@@ -14,10 +14,29 @@ import { store } from '../../store.js';
 import { userHasPermission, userToolAllowed } from '../../auth/permissions.js';
 import { inventoryIndex, scopedIpRows } from '../../search/inventoryIndex.js';
 import { accessPlan, publicRow, LOCK_REASON_FULL_SCOPE } from '../../search/inventoryAccess.js';
-import { parseQuery, searchRows, KINDS, KIND_KEYS, normSerial, QUERY_MAX, MIN_TEXT, MIN_FIELD, PER_KIND, TOTAL_MAX } from '../../search/inventoryQuery.js';
+import { parseQuery, searchRows, KINDS, KIND_KEYS, normSerial, QUERY_MAX, MIN_TEXT, MIN_FIELD, PER_KIND, TOTAL_MAX, TIER } from '../../search/inventoryQuery.js';
 import { serialIndex } from '../../insights/serialLookup.js';
 
 const PART_KINDS = new Set(['server-part', 'sanswitch-part']);
+
+/**
+ * v2.928(B4): `recent=vm|vc:vm-1,storage|st-1` — 이 계정이 최근 연 장비(웹 localStorage · 계정별). 순서 가산점에만 쓴다(이미 보이는 행 안에서).
+ * 아는 종류 · 10개 · 항목 300자까지만. 이 값으로 행을 더하거나 범위를 바꾸지 않는다.
+ */
+export function parseRecent(v) {
+  const raw = typeof v === 'string' ? v.slice(0, 4000) : '';
+  const out = new Set();
+  for (const part of raw.split(',')) {
+    if (out.size >= 10) break;
+    const s = part.trim().slice(0, 300);
+    const i = s.indexOf('|');
+    if (i > 0 && KIND_KEYS.includes(s.slice(0, i)) && i < s.length - 1) out.add(s);
+  }
+  return out.size ? out : null;
+}
+
+/** 일치 등급 → 화면 표지('태그' · '메모' 로 걸린 행은 그렇게 알린다 — 이름에 없는데 왜 나왔는지). */
+const VIA = Object.freeze({ [TIER.tag]: 'tag', [TIER.notes]: 'notes', [TIER.recent]: 'recent' });
 
 /** `kinds=vm,host` → 아는 키만 Set(모르면 무시). */
 export function parseKinds(v) {
@@ -58,13 +77,15 @@ export function registerInvSearch(api) {
       builtAt: idx.builtAt, scoped: !!plan.allowed,
       addressHidden: !plan.admin && ok.some((k) => ['gpu', 'storage', 'sanswitch', 'netswitch', 'pdu', 'server'].includes(k)),
       limits: { queryMax: QUERY_MAX, minText: MIN_TEXT, minField: MIN_FIELD, perKind: PER_KIND, totalMax: TOTAL_MAX },
+      // v2.928(D1): 색인 생성 실측(관리자 판본에게만 — 운영 규모 성능 확인용). 전체 행 수는 범위와 무관한 값이라 범위 · 비관리자에게 싣지 않는다.
+      ...(plan.admin && !plan.allowed ? { index: { buildMs: idx.buildMs ?? null, yields: idx.yields ?? null, stepMs: idx.stepMs || null, rows: idx.rows.length } } : {}),
     };
     if (!pq.needle || pq.tooLong) {
       const counts = Object.fromEntries(ok.map((k) => [k, 0]));
       for (const r of visible) counts[r.kind] = (counts[r.kind] || 0) + 1;
       return res.json({ q: '', mode: pq.mode, kind: pq.kind, tooLong: pq.tooLong, groups: [], counts, shown: 0, matched: 0, omitted: 0, ...meta });
     }
-    const out = searchRows(visible, pq, { kinds: parseKinds(req.query.kinds), addrSearchable: plan.addrSearchable });
+    const out = searchRows(visible, pq, { kinds: parseKinds(req.query.kinds), addrSearchable: plan.addrSearchable, tagsOk: plan.tagsSearchable, recent: parseRecent(req.query.recent) });
     // sn: 은 장비만(컨펌 ⑤) — 부품 시리얼은 개수만 세어 '시리얼 조회' 로 넘긴다. 그 화면을 쓸 수 있는 계정에게만.
     let partsMatched;
     if (pq.mode === 'sn' && !pq.tooShort && !plan.allowed && userHasPermission(req.user, 'tools') && userToolAllowed(req.user, 'serial-lookup')) {
@@ -75,7 +96,13 @@ export function registerInvSearch(api) {
     }
     res.json({
       q: pq.text, mode: pq.mode, kind: pq.kind, tooShort: pq.tooShort,
-      groups: out.groups.map((g) => ({ kind: g.kind, total: g.total, rows: g.rows.map((r) => publicRow(r, plan)) })),
+      groups: out.groups.map((g) => ({ kind: g.kind, total: g.total, rows: g.rows.map((r, i) => {
+        const pr = publicRow(r, plan);
+        const via = VIA[g.tiers?.[i]];
+        if (via) pr.via = via;
+        if (via === 'tag' && plan.tagsSearchable && r.tags) pr.tags = r.tags.filter((t) => t.toLowerCase().includes(pq.needle)).slice(0, 3);
+        return pr;
+      }) })),
       counts: Object.fromEntries(ok.map((k) => [k, out.counts[k] || 0])),
       shown: out.shown, matched: out.matched, omitted: out.omitted,
       ...(partsMatched != null ? { partsMatched } : {}),
