@@ -122,6 +122,8 @@ export function parseCertInfo(xml) {
 const SHARED_TRANSPORT = /HostFibreChannelTargetTransport|HostInternetScsiTargetTransport|HostFibreChannelOverEthernetTargetTransport/;
 const MP_LUNS_MAX = 4096;
 export const MP_TARGETS_MAX = 128;   // v2.920: 어댑터 × 타깃 WWN 상한(엣지 push·중앙 정제가 같은 값)
+export const MP_RT_MAX = 8;   // v2.935(C-①): 타깃 하나의 런타임 이름(vmhbaN:Cn:Tn) 상한
+const RT_NAME = /(vmhba\d{1,4}):(C\d{1,4}):(T\d{1,5}):L\d{1,6}/i;
 /** vSphere 는 WWN 을 10진 long 으로 준다 → 콜론 16진(소문자). soapClient.parseHbas 와 같은 변환. 숫자가 아니면 null. */
 export function wwnFromDec(dec) {
   const s = String(dec ?? '').trim();
@@ -164,8 +166,13 @@ export function parseMultipath(xml) {
       if (wwn && adapter) {
         const k = `${adapter}|${wwn}`;
         let T = byTarget.get(k);
-        if (!T && byTarget.size < MP_TARGETS_MAX) { T = { adapter, wwn, live: 0, dead: 0, luns: new Set() }; byTarget.set(k, T); }
-        if (T) { if (isDead) T.dead += 1; else if (isLive) T.live += 1; T.luns.add(lun); }
+        if (!T && byTarget.size < MP_TARGETS_MAX) { T = { adapter, wwn, live: 0, dead: 0, luns: new Set(), rt: new Set() }; byTarget.set(k, T); }
+        if (T) {
+          if (isDead) T.dead += 1; else if (isLive) T.live += 1; T.luns.add(lun);
+          // v2.935(C-①): 런타임 이름의 타깃 부분('vmhba1:C0:T3') — ESXi 경로 카운터 인스턴스가 런타임 이름이면 이 표로 타깃 WWN 을 찾는다(storpath/parse.js).
+          const rt = RT_NAME.exec(String(tag(blk, 'name') || tag(blk, 'key') || '').slice(0, 200));
+          if (rt && T.rt.size < MP_RT_MAX) T.rt.add(`${rt[1]}:${rt[2]}:${rt[3]}`.toLowerCase());
+        }
       }
     }
   }
@@ -183,7 +190,7 @@ export function parseMultipath(xml) {
       if (L.live < 2) { singlePath += 1; if (singleLuns.length < 10) singleLuns.push(short(k)); }
     }
   }
-  const targets = [...byTarget.values()].map((t) => ({ adapter: t.adapter, wwn: t.wwn, live: t.live, dead: t.dead, luns: t.luns.size }))
+  const targets = [...byTarget.values()].map((t) => ({ adapter: t.adapter, wwn: t.wwn, live: t.live, dead: t.dead, luns: t.luns.size, rt: [...t.rt].sort() }))
     .sort((a, b) => a.adapter.localeCompare(b.adapter) || a.wwn.localeCompare(b.wwn));
   return { luns: byLun.size, shared, paths, dead, deadLuns, singlePath, singleLuns, policies, targets };
 }
@@ -520,7 +527,8 @@ function sanitizeMp(m) {
   const WWN_RE = /^[0-9a-f]{2}(:[0-9a-f]{2}){7}$/;
   const targets = Array.isArray(m.targets) ? m.targets.slice(0, MP_TARGETS_MAX)
     .filter((t) => t && typeof t === 'object' && !Array.isArray(t) && nicName(t.adapter) && typeof t.wwn === 'string' && WWN_RE.test(t.wwn.toLowerCase()))
-    .map((t) => ({ adapter: t.adapter, wwn: t.wwn.toLowerCase(), live: n(t.live), dead: n(t.dead), luns: n(t.luns) })) : null;
+    .map((t) => ({ adapter: t.adapter, wwn: t.wwn.toLowerCase(), live: n(t.live), dead: n(t.dead), luns: n(t.luns),
+      ...(Array.isArray(t.rt) ? { rt: t.rt.filter((r) => typeof r === 'string' && /^vmhba\d{1,4}:c\d{1,4}:t\d{1,5}$/.test(r)).slice(0, MP_RT_MAX) } : {}) })) : null;   // v2.935 rt
   return {
     luns: n(m.luns), shared: n(m.shared), paths: n(m.paths), dead: n(m.dead), singlePath: n(m.singlePath),
     deadLuns: strList(m.deadLuns)?.slice(0, 10) || [], singleLuns: strList(m.singleLuns)?.slice(0, 10) || [], policies: pol,

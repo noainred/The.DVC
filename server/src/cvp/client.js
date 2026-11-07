@@ -20,6 +20,7 @@
  *   ② 한 종류가 처음 3대에서 연속 실패하면 그 주기의 나머지 장비는 그 종류를 시도하지 않는다(`missing` 이 사유를 말한다)
  *   ③ 성공한 후보를 CVP 별로 기억해 다음 주기 첫 시도로 쓴다(`prefer`).
  */
+import { lookupEndpoints } from './endpoint.js';   // v2.935(C-③) EndpointLocation
 import { Agent } from 'undici';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { deviceTlsConnect, tlsPeerErrorOf } from '../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
@@ -394,7 +395,7 @@ function decodeSafe(x) { try { return x.split('/').map((y) => decodeURIComponent
  * @param {{ signal?:AbortSignal, budgetMs?:number, partsDue?:boolean, prefer?:Map, now?:()=>number }} opts
  * @returns {Promise<object>} 결과(아래 머리말) — 자격증명 거부는 CvpAuthError 로 던진다.
  */
-export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue = true, prefer = new Map(), now = Date.now, optics = {} } = {}) {
+export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue = true, prefer = new Map(), now = Date.now, optics = {}, epMacs = null, epBudgetMs = 20_000 } = {}) {
   const t0 = now();
   const left = () => budgetMs - (now() - t0);
   const usedPaths = {}; const missing = {}; const seenFields = {};
@@ -746,6 +747,14 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         });
       }
     }
+    // v2.935(C-③): EndpointLocation — 폴러가 고른 MAC 들(부품 주기 · 같은 세션). 남은 예산 안에서만, 미지원(501 · 가를 수 없는 404 연속)이면 멈춘다(endpoint.js).
+    let endpoints = null;
+    if (Array.isArray(epMacs) && epMacs.length && left() >= MIN_SLICE_MS && !signal?.aborted) {
+      endpoints = await lookupEndpoints(sess, epMacs, { budgetMs: Math.max(1_000, Math.min(epBudgetMs, left() - MIN_SLICE_MS)), now, signal });
+    } else if (Array.isArray(epMacs) && epMacs.length) {
+      // v2.935 반증 L-8: 부품 단계가 예산을 다 써서 위치 조회를 건너뛴 사실도 남긴다(무음 금지 — 상태의 endpoints.cut · skipped).
+      endpoints = { results: [], unsupported: false, cut: epMacs.length, stopped: 'budget' };
+    }
     // v2.611(TIM2611-01): 시한(외부 신호)에 걸려 끝나지 못한 장비는 'pending' 으로 남는다 — '조회 중단' 으로 바꾸고 개수를 밝힌다.
     for (const dev of devices) if (dev.telemetry === 'pending') { dev.telemetry = 'aborted'; truncated.aborted++; }
     if (truncated.aborted) missing.deadline = `CVP 수집 시한에 걸려 ${truncated.aborted}대는 조회를 끝내지 못했습니다(값이 비어 있는 것은 '없음' 이 아니라 '못 읽음')`;
@@ -764,7 +773,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
     for (const [k, v] of Object.entries(followNote)) if (!missing[k]) missing[`${k}`] = v;
     if (truncated.notTried) missing.budget = `시간 예산이 모자라 ${truncated.notTried}대는 이번 주기에 조회하지 않았습니다`;
     return {
-      ok: true, error: null, devices, usedPaths, missing, seenFields, truncated, samples, cvpVersion, events, ...(probes.length ? { probes } : {}),
+      ok: true, error: null, devices, usedPaths, missing, seenFields, truncated, samples, cvpVersion, events, ...(probes.length ? { probes } : {}), ...(endpoints ? { endpoints } : {}),
       inventoryComplete: inv.truncated === 0,
     };
   } finally { await sess.logout(); }

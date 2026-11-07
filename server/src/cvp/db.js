@@ -118,6 +118,24 @@ async function openInner() {
         fdb_at INTEGER, fdb_n INTEGER, fdb_truncated INTEGER, fdb_over_json TEXT, fdb_hash TEXT, fdb_fail_at INTEGER,
         lldp_at INTEGER, lldp_n INTEGER, lldp_truncated INTEGER, lldp_hash TEXT, lldp_fail_at INTEGER,
         PRIMARY KEY (agent, cvp_id, device_key));`);
+    // v2.935(SAN·CVP 설계 C-③): CVP EndpointLocation — MAC 마다 최신 위치 한 벌(교체) + 메타(물어본 시각 · 상태). vlan 은 모르면 -1.
+    //   device 는 CVP 가 준 장비 식별자(보통 시리얼) — 화면은 device_latest 와 맞춰 호스트명을 붙인다. at 은 물어본 시각(이 노드 시계).
+    conn.exec(`CREATE TABLE IF NOT EXISTS ep_loc (
+        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, mac TEXT NOT NULL, device TEXT NOT NULL, port TEXT NOT NULL, vlan INTEGER NOT NULL DEFAULT -1,
+        learned_at TEXT, mac_type TEXT, likelihood TEXT, at INTEGER NOT NULL,
+        PRIMARY KEY (agent, cvp_id, mac, device, port, vlan));
+      CREATE INDEX IF NOT EXISTS idx_eploc_mac ON ep_loc (mac);
+      CREATE INDEX IF NOT EXISTS idx_eploc_at ON ep_loc (at);
+      CREATE TABLE IF NOT EXISTS ep_meta (
+        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, mac TEXT NOT NULL, at INTEGER NOT NULL, status TEXT NOT NULL, n INTEGER, reason TEXT, seq INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (agent, cvp_id, mac));
+      CREATE INDEX IF NOT EXISTS idx_epmeta_at ON ep_meta (at);
+      CREATE INDEX IF NOT EXISTS idx_epmeta_mac ON ep_meta (mac);`);
+    // v2.935 반증 L-5: 엣지 push 변경분 커서는 '물어본 시각' 이 아니라 쓸 때마다 늘어나는 순번(seq)이다 — 같은 at 이 상한 경계에 여럿이거나,
+    //   늦게 커밋된 더 작은 at 이 있으면 시각 커서는 그 행을 건너뛰었다(재현). 이 브랜치의 개발 DB 에는 열이 없을 수 있어 없으면 더한다.
+    { const have = new Set(conn.prepare('PRAGMA table_info(ep_meta)').all().map((r) => r.name));
+      if (!have.has('seq')) { try { conn.exec('ALTER TABLE ep_meta ADD COLUMN seq INTEGER NOT NULL DEFAULT 0'); } catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; } }
+      conn.exec('CREATE INDEX IF NOT EXISTS idx_epmeta_seq ON ep_meta (seq); CREATE INDEX IF NOT EXISTS idx_epmeta_cvpseq ON ep_meta (agent, cvp_id, seq);'); }
     addDailyErrCountCols(conn);
     addDeviceInfoCols(conn);
     addPortDetailCols(conn);
@@ -476,7 +494,7 @@ export async function pruneDevices(agent, keepByCvp = {}, { cvpIds = null } = {}
   if (removed) _counts = null;
   // v2.924(B-② · 반증 L-2·L-6): 위임에서 빠진 CVP 의 L2 전체 · 목록을 받은 CVP 의 고아 L2(장비 행이 없는 키) — 조각으로 지운다.
   try {
-    for (const c of dropCvps) await dropL2Where(db.conn, 'agent=? AND cvp_id=?', [agent, c]);
+    for (const c of dropCvps) { await dropL2Where(db.conn, 'agent=? AND cvp_id=?', [agent, c]); await dropEpWhere(db.conn, 'agent=? AND cvp_id=?', [agent, c]); }   // v2.935 C-③
     for (const cvpId of Object.keys(keepByCvp || {})) {
       if (!Array.isArray(keepByCvp[cvpId])) continue;
       /*
@@ -584,7 +602,7 @@ async function runAdopt(db, key, variants, chunkRows) {
   let moved = 0; let merged = 0;
   // v2.924(B-②): L2(LLDP·MAC 테이블)는 '장비마다 최신 한 벌' 이라 옮겨 합치면 두 시각의 목록이 섞인다 — 변형 이름의 행은 지운다.
   //   엣지가 지금 쓰는 이름(key)으로 다시 보내고(바뀐 장비 · 전량 갱신 주기), 그동안 매칭은 key 의 행만 쓴다.
-  for (const v of variants) await dropL2Where(db.conn, 'agent=?', [v]);   // 반증 L-2: 조각으로
+  for (const v of variants) { await dropL2Where(db.conn, 'agent=?', [v]); await dropEpWhere(db.conn, 'agent=?', [v]); }   // 반증 L-2: 조각으로 · v2.935 EndpointLocation 도
   for (const v of variants) {
     for (const t of Object.keys(ADOPT_PK)) {
       const r = await adoptTable(db, t, key, v, chunkRows);
@@ -1204,6 +1222,9 @@ export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, no
     // v2.641: CPU·메모리 원시는 포트 원시와 같은 보존 · CVP 이벤트는 처음 받은 시각 기준 EVENT_RETENTION_DAYS.
     const d2 = await chunkedDelete(db.conn.prepare('DELETE FROM device_sample WHERE rowid IN (SELECT rowid FROM device_sample WHERE ts < ? LIMIT ?)'), [rawCut], { chunk: PRUNE_CHUNK });
     const e2 = await chunkedDelete(db.conn.prepare('DELETE FROM cvp_event WHERE rowid IN (SELECT rowid FROM cvp_event WHERE seen_at < ? LIMIT ?)'), [now - EVENT_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
+    // v2.935(C-③): EndpointLocation — 물어본 지 EP_RETENTION_DAYS 가 넘은 MAC(사라진 VM 등)은 지운다.
+    await chunkedDelete(db.conn.prepare('DELETE FROM ep_loc WHERE rowid IN (SELECT rowid FROM ep_loc WHERE at < ? LIMIT ?)'), [now - EP_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
+    await chunkedDelete(db.conn.prepare('DELETE FROM ep_meta WHERE rowid IN (SELECT rowid FROM ep_meta WHERE at < ? LIMIT ?)'), [now - EP_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
     if (lost > 0) {
       _lostUnsent = { total: _lostUnsent.total + lost, last: lost, at: Date.now() };
       console.warn(`[cvp-db] 중앙에 보내지 못한 표본 ${lost}행이 보존일(${rawRetentionDays}일)을 넘어 지워졌습니다 — 중앙 수신·push 상태를 확인하세요`);
@@ -1485,4 +1506,115 @@ async function dropL2Where(conn, where, args) {
     n += (await chunkedDelete(stmt, args, { chunk: 2000, maxRows: 0 })).deleted;
   }
   return n;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+ * v2.935(SAN·CVP 설계 C-③) — CVP EndpointLocation(MAC → 지금 배운 스위치 · 포트). 경로 · 응답 필드는 추정(cvp/endpoint.js).
+ * ══════════════════════════════════════════════════════════════════════════════ */
+export const EP_RETENTION_DAYS = 8;
+export const EP_LOC_MAX = 16;   // MAC 하나의 위치 상한(트렁크 · MLAG 양쪽 · Vxlan)
+async function dropEpWhere(conn, where, args) {
+  let n = 0;
+  for (const t of ['ep_loc', 'ep_meta']) {
+    const stmt = conn.prepare(`DELETE FROM ${t} WHERE rowid IN (SELECT rowid FROM ${t} WHERE ${where} LIMIT ?)`);
+    n += (await chunkedDelete(stmt, args, { chunk: 2000, maxRows: 0 })).deleted;
+  }
+  return n;
+}
+/**
+ * 결과 저장 — MAC 마다 위치 표를 통째로 바꾸고(옛 위치는 지운다 — vMotion 뒤 옛 포트가 남지 않게) 메타를 갱신한다. 한 트랜잭션 · COMMIT 뒤 양보.
+ * @param {Array<{mac:string, at:number, status:'ok'|'none'|'error'|'unsupported', reason?:string, locations?:Array}>} results
+ */
+export async function saveEndpoints(agent, cvpId, results = []) {
+  const db = await open();
+  if (!db) return { saved: 0, unavailable: true };
+  const c = db.conn; const a = String(agent ?? ''); const id = String(cvpId);
+  const del = c.prepare('DELETE FROM ep_loc WHERE agent=? AND cvp_id=? AND mac=?');
+  const ins = c.prepare('INSERT OR REPLACE INTO ep_loc (agent,cvp_id,mac,device,port,vlan,learned_at,mac_type,likelihood,at) VALUES (?,?,?,?,?,?,?,?,?,?)');
+  const meta = c.prepare(`INSERT INTO ep_meta (agent,cvp_id,mac,at,status,n,reason,seq) VALUES (?,?,?,?,?,?,?,?)
+    ON CONFLICT(agent,cvp_id,mac) DO UPDATE SET at=excluded.at, status=excluded.status, n=excluded.n, reason=excluded.reason, seq=excluded.seq`);
+  let saved = 0;
+  c.exec('BEGIN');
+  try {
+    let seq = Number(c.prepare('SELECT MAX(seq) AS s FROM ep_meta').get()?.s) || 0;   // 트랜잭션 안 — 쓰기 순서 = 순번 순서
+    for (const r of (Array.isArray(results) ? results : []).slice(0, 2000)) {
+      const mac = String(r?.mac || '');
+      if (!/^[0-9a-f]{12}$/.test(mac) || !Number.isFinite(Number(r.at))) continue;
+      const st = ['ok', 'none', 'error', 'unsupported'].includes(r.status) ? r.status : 'error';
+      if (st === 'ok' || st === 'none') {
+        del.run(a, id, mac);
+        for (const l of (Array.isArray(r.locations) ? r.locations : []).slice(0, EP_LOC_MAX)) {
+          if (!l?.device || !l?.port) continue;
+          const vl = Number.isInteger(l.vlan) && l.vlan >= 0 && l.vlan <= 4095 ? l.vlan : -1;
+          ins.run(a, id, mac, String(l.device).slice(0, 64), String(l.port).slice(0, 64), vl, l.learnedAt == null ? null : String(l.learnedAt).slice(0, 40),
+            l.macType == null ? null : String(l.macType).slice(0, 40), l.likelihood == null ? null : String(l.likelihood).slice(0, 40), Math.trunc(Number(r.at)));
+        }
+      }
+      // 오류 · 미지원은 위치를 지우지 않는다(직전 값이 '없음' 이 되지 않게) — 메타만 그 사실을 적는다.
+      seq += 1;
+      meta.run(a, id, mac, Math.trunc(Number(r.at)), st, st === 'ok' ? Math.min(EP_LOC_MAX, (r.locations || []).length) : st === 'none' ? 0 : null, r.reason ? String(r.reason).slice(0, 200) : null, seq);
+      saved += 1;
+    }
+    c.exec('COMMIT');
+  } catch (e) { try { c.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  await new Promise((r) => setImmediate(r));
+  return { saved };
+}
+/** 그 CVP 의 MAC → 마지막으로 물어본 시각(주기 선택 · 엣지 push 의 변경분). */
+export async function epMetaFor(agent, cvpId) {
+  const db = await open();
+  if (!db) return new Map();
+  return new Map(db.conn.prepare('SELECT mac, at FROM ep_meta WHERE agent=? AND cvp_id=?').all(String(agent ?? ''), String(cvpId)).map((r) => [r.mac, Number(r.at)]));
+}
+/** 엣지 push — 순번 sinceSeq 뒤에 쓴 MAC 의 결과(메타 + 위치 + seq). 먼저 쓴 것부터 limit 개(v2.935 반증 L-5 — 시각 커서가 아니라 순번). */
+export async function endpointsSince(agent, cvpId, sinceSeq = 0, limit = 500) {
+  const db = await open();
+  if (!db) return null;
+  const a = String(agent ?? ''); const id = String(cvpId);
+  const metas = db.conn.prepare('SELECT mac, at, status, reason, seq FROM ep_meta WHERE agent=? AND cvp_id=? AND seq > ? ORDER BY seq LIMIT ?').all(a, id, Math.trunc(Number(sinceSeq) || 0), Math.max(1, Math.min(5000, limit)));
+  const loc = db.conn.prepare('SELECT device, port, vlan, learned_at, mac_type, likelihood FROM ep_loc WHERE agent=? AND cvp_id=? AND mac=?');
+  return metas.map((m) => ({ mac: m.mac, at: Number(m.at), seq: Number(m.seq), status: m.status, ...(m.reason ? { reason: m.reason } : {}),
+    locations: m.status === 'ok' ? loc.all(a, id, m.mac).map((l) => ({ device: l.device, port: l.port, vlan: l.vlan >= 0 ? l.vlan : null, learnedAt: l.learned_at, macType: l.mac_type, likelihood: l.likelihood })) : [] }));
+}
+/**
+ * 화면용 — MAC 들의 위치(담당 CVP 행만 · owners = [{agent, cvpId}] 가 주어지면 그것만). 장비 호스트명을 붙인다(device = device_key 또는 시리얼).
+ * @returns {{ rows: object[], meta: Map<string, object[]> }} meta: mac → [{agent,cvpId,at,status,reason}]
+ */
+export async function endpointsByMacs(macs = [], { owners = null } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], meta: new Map(), unavailable: true };
+  const list = [...new Set((Array.isArray(macs) ? macs : []).map((m) => String(m || '').toLowerCase().slice(0, 64).replace(/[^0-9a-f]/g, '')).filter((m) => /^[0-9a-f]{12}$/.test(m)))].slice(0, 256);   // 콜론 · 하이픈 표기도
+  if (!list.length) return { rows: [], meta: new Map() };
+  // 담당 엣지 이름은 대소문자를 가리지 않는다(v2.935 반증 M-5 — 등록부 'Edge-A' · 저장 키 'edge-a' 행이 빠졌다).
+  const own = Array.isArray(owners) ? new Set(owners.map((o) => `${String(o.agent ?? '').toLowerCase()}\u0000${o.cvpId}`)) : null;
+  const ok = (r) => !own || own.has(`${String(r.agent ?? '').toLowerCase()}\u0000${r.cvp_id}`);
+  const ph = list.map(() => '?').join(',');
+  const rows = db.conn.prepare(`SELECT e.*, d.hostname AS dev_hostname, d.device_key AS dev_key FROM ep_loc e
+      LEFT JOIN device_latest d ON d.agent = e.agent AND d.cvp_id = e.cvp_id AND (d.device_key = e.device OR d.serial = e.device)
+      WHERE e.mac IN (${ph}) LIMIT 2000`).all(...list).filter(ok)
+    .map((r) => ({ agent: r.agent, cvpId: r.cvp_id, mac: r.mac, device: r.device, key: r.dev_key || r.device, hostname: r.dev_hostname || '', port: r.port,
+      vlan: r.vlan >= 0 ? r.vlan : null, learnedAt: r.learned_at, macType: r.mac_type, likelihood: r.likelihood, at: Number(r.at) }));
+  const meta = new Map();
+  for (const m of db.conn.prepare(`SELECT * FROM ep_meta WHERE mac IN (${ph})`).all(...list).filter(ok)) {
+    if (!meta.has(m.mac)) meta.set(m.mac, []);
+    meta.get(m.mac).push({ agent: m.agent, cvpId: m.cvp_id, at: Number(m.at), status: m.status, reason: m.reason || null });
+  }
+  return { rows, meta };
+}
+/** 수집 현황 — 물어본 MAC 수 · 가장 최근 시각 · 미지원 CVP 수(owners 기준). */
+export async function epStatus(owners = []) {
+  const db = await open();
+  if (!db) return { unavailable: true, macs: 0, lastAt: null, unsupported: 0 };
+  let macs = 0; let lastAt = null; let unsupported = 0;
+  const q1 = db.conn.prepare('SELECT COUNT(*) AS n FROM ep_meta WHERE agent=? COLLATE NOCASE AND cvp_id=?');
+  const q2 = db.conn.prepare('SELECT MAX(at) AS t FROM ep_meta WHERE agent=? COLLATE NOCASE AND cvp_id=?');
+  const q3 = db.conn.prepare("SELECT 1 FROM ep_meta WHERE agent=? COLLATE NOCASE AND cvp_id=? AND status='unsupported' LIMIT 1");
+  for (const o of (Array.isArray(owners) ? owners : []).slice(0, 256)) {
+    const a = String(o.agent ?? ''); const id = String(o.cvpId);
+    macs += Number(q1.get(a, id)?.n || 0);
+    const t = numOrNull(q2.get(a, id)?.t);
+    if (t != null && (lastAt == null || t > lastAt)) lastAt = t;
+    if (q3.get(a, id)) unsupported += 1;
+  }
+  return { macs, lastAt, unsupported };
 }

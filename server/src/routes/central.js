@@ -24,6 +24,7 @@ import { putFromEdge as putVcInfoFromEdge } from '../vcinfo/collect.js';
 import { sanitizeHostCfg } from '../hostcfg/parse.js';   // v2.699
 import { sanitizeDsCfg } from '../dscfg/parse.js';   // v2.700
 import { sanitizeVmPerfc, sanitizeHostPerfc } from '../contention/parse.js'; // v2.706(C2·C3)
+import { sanitizeHostSpath } from '../storpath/parse.js'; // v2.935(C-①) ESXi 경로 카운터
 import { sanitizeClusterCfgList } from '../clustercfg/parse.js';   // v2.701
 import { sanitizeTagInv } from '../tags/parse.js';   // v2.703
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
@@ -879,6 +880,8 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
       const v = Object.hasOwn(o.perfc, 'diskMaxMs') || Array.isArray(o.perfc?.ds) ? sanitizeHostPerfc(o.perfc) : sanitizeVmPerfc(o.perfc);
       if (v == null) dropped.coerced += 1; o.perfc = v;
     }
+    // v2.935(C-①): ESXi 경로 카운터(storpath/parse.js) — 아는 필드만 · 타깃 64 상한 · 엣지 시각은 수신 시각으로.
+    if (Object.hasOwn(o, 'spath') && o.spath != null) { const v = sanitizeHostSpath(o.spath); if (v == null) dropped.coerced += 1; o.spath = v; }
     if (Object.hasOwn(o, 'dsUuid') && o.dsUuid != null && !(typeof o.dsUuid === 'string' && /^[\w.:-]{1,64}$/.test(o.dsUuid))) { o.dsUuid = null; dropped.coerced += 1; }
     // v2.742(VC-05 후속): 호스트·VM 의 소속 클러스터 moref(clusterRef)와 vSphere 데이터센터 이름(vcDatacenter) — 수집기(soapClient)는
     //   글자 또는 null 만 싣는다. clusterRef 는 moref 꼴(64자) 글자만, vcDatacenter 는 글자만(128자로 자른다) — 객체·배열·숫자·형식 밖은
@@ -1955,6 +1958,7 @@ centralRouter.get('/sanswitch-config', requireCentral(), async (req, res) => {
   if (registryUnreadable(res, sanRegErr, 'SAN 스위치')) return;
   const { takeRequestsForAgent, takePerfRequestForAgent } = await import('../sanswitch/collectRequests.js');
   const { takeTestRequestsForAgent } = await import('../sanswitch/testRuns.js');
+  const { takeFlowJobsForAgent } = await import('../sanswitch/flowJobs.js');
   const { loadPerfSettings, perfSettingsLoadError } = await import('../sanswitch/perfSettings.js');
   // v2.632(감사 EDGE2632-02): 포트 사용량 설정 파일을 못 읽었으면 기본값(꺼짐 · 보존 90일)을 perf 로 싣지 않는다 — 엣지가 그대로
   //   저장해 수집을 끄고 보존을 줄였다. 장비 목록·collectNow·testNow 는 등록부가 원천이라 그대로 준다(cvp-config 와 같은 모양).
@@ -1970,7 +1974,9 @@ centralRouter.get('/sanswitch-config', requireCentral(), async (req, res) => {
   // perf(v2.423): 중앙의 포트 사용량 수집 설정(켜짐/주기/표본/보관)을 위임 스위치에도 적용 — 엣지가 현지 수집 후 중앙으로 중계.
   // perfCollectNow(v2.517): 중앙의 '지금 수집'(포트 사용량)을 이 엣지가 현지에서 대행 — 엣지 단위
   // one-shot 플래그다(엣지의 pollPerfOnce 는 자기 몫 전체를 한 주기에 수집한다).
-  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent), ...perfPart, perfCollectNow: takePerfRequestForAgent(agent) });
+  // flowNow(v2.935 C-②): Flow Vision 플로우 작업(만들기 · 지우기 · 카운터 읽기 · 계정 점검) — 비밀 없음(장치 id · 동작 · 플로우 정의).
+  //   엣지는 명령 글자를 받지 않고 flowCmd.js 로 다시 검사해 직접 만든다 · 자기 등록부의 자격증명으로 실행한다.
+  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent), flowNow: takeFlowJobsForAgent(agent), ...perfPart, perfCollectNow: takePerfRequestForAgent(agent) });
 });
 
 /**
@@ -2045,6 +2051,18 @@ centralRouter.post('/sanswitch-test-result', requireCentral(), async (req, res) 
   const r = completeTestRun(String(req.body?.id || ''), agent, req.body?.result);
   if (!r.ok) return res.status(404).json(r);
   res.json({ ok: true });
+});
+
+// POST /api/central/sanswitch-flow-result — 엣지가 대행한 Flow Vision 플로우 작업 결과(v2.935 C-②).
+// 연결 테스트 회신과 같은 규약: 개별 토큰이면 바인딩 agent, 공유 토큰은 body.agent — 그 작업의 대상 엣지만(completeFlowJob 대조).
+//   결과는 sanitizeFlowResult 가 '그 작업이 실행했어야 하는 명령' 의 출력만 · 상한으로 자른다(임의 명령 출력 · 대용량 차단).
+centralRouter.post('/sanswitch-flow-result', requireCentral(), async (req, res) => {
+  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const { completeFlowJob } = await import('../sanswitch/flowJobs.js');
+  const r = completeFlowJob(String(req.body?.id || '').slice(0, 64), agent, req.body?.result);
+  if (!r.ok) return res.status(404).json(r);
+  res.json({ ok: true, ...(r.already ? { already: true } : {}) });
 });
 
 // POST /api/central/sanswitch-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
@@ -2204,6 +2222,7 @@ centralRouter.get('/cvp-config', requireCentral(), async (req, res) => {
   if (registryUnreadable(res, cvpRegErr, 'CVP')) return;
   const { loadSettings, cvpSettingsLoadError } = await import('../cvp/settings.js');
   const { takeCvpRequests } = await import('../cvp/collectRequests.js');
+  const { takeEndpointRequests } = await import('../cvp/epRequests.js');   // v2.935(C-③)
   res.set('Cache-Control', 'no-store');
   /*
    * v2.631 EDGE2631-01: 수집 설정 파일이 손상이면 **설정을 싣지 않는다**(엣지 applyCentralSettings 는 settings 가 없으면 현장 값을
@@ -2214,7 +2233,8 @@ centralRouter.get('/cvp-config', requireCentral(), async (req, res) => {
   const settingsPart = setErr
     ? { settingsUnreadable: { reason: loadWhy(setErr.reason), since: setErr.at || null } }
     : { settings: loadSettings() };
-  res.json({ ok: true, agent, servers: serversForAgent(agent), ...settingsPart, collectNow: takeCvpRequests(agent) });
+  // v2.935(C-③): epNow — EndpointLocation '지금 조회' 요청(MAC 목록뿐 · 비밀 없음). 엣지가 현지에서 묻고 cvp-data push(ep)로 올린다.
+  res.json({ ok: true, agent, servers: serversForAgent(agent), ...settingsPart, collectNow: takeCvpRequests(agent), epNow: takeEndpointRequests(agent) });
 });
 
 /**
@@ -2301,6 +2321,13 @@ centralRouter.post('/cvp-data', requireCentral(), async (req, res) => {
       saved.l2 += r.devices;
       if (r.unavailable) saved.unavailable = true;
     }
+    // v2.935(SAN·CVP 설계 C-③): EndpointLocation. saved.ep 도 **항상 수** — 엣지는 이 칸이 있어야 보낸 것으로 친다(L2 와 같은 규약).
+    saved.ep = 0;
+    for (const [cvpId, list] of clean.epByCvp || []) {
+      const r = await cdb.saveEndpoints(agent, cvpId, list);
+      saved.ep += r.saved || 0;
+      if (r.unavailable) saved.unavailable = true;
+    }
   } catch (e) {
     console.warn(`[central] cvp-data: 적재 실패(${String(agent).slice(0, 64)}): ${e.message}`);
     return res.status(500).json({ ok: false, reason: `중앙 DB 적재 실패: ${e.message}` });
@@ -2309,7 +2336,7 @@ centralRouter.post('/cvp-data', requireCentral(), async (req, res) => {
    * v2.611(CEN2611-03): 적재할 것이 있었는데 DB 를 못 열었으면 **503**. 200 으로 두면 엣지가 커서·보낸 해시를 전진해 그 표본·
    *   레코드가 다시 오지 않았다(조용한 소실). 청크 0 의 상태는 위에서 이미 저장했다 — 화면은 '엣지 수집 상태' 를 계속 말한다.
    */
-  if (saved.unavailable && (clean.devicesByCvp.size || clean.rows.length || clean.touch.length || clean.devSamples.length || clean.eventsByCvp.size || clean.l2ByCvp?.size)) {
+  if (saved.unavailable && (clean.devicesByCvp.size || clean.rows.length || clean.touch.length || clean.devSamples.length || clean.eventsByCvp.size || clean.l2ByCvp?.size || clean.epByCvp?.size)) {
     return persistent503(res).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 CVP DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [cvp-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
   }
   // v2.640(③ 장애 전이): 엣지 보고가 적재됐으면 중앙의 전이 판정을 예약한다(디바운스 — 엣지 여럿의 push 를 한 번으로 모은다).

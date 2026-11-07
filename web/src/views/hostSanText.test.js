@@ -15,10 +15,14 @@ describe('문구', () => {
   });
   it('KPI — 확정·추정 따로 · 값 없음 —', () => {
     const k = sanKpis(d);
-    expect(k[0].v).toBe('1.5 KB'); expect(k[1].v).toBe(`${CONF.confirmed.glyph} 1000 B · ${CONF.estimated.glyph} 500 B`); expect(k[1].s).toBe('확정 1 · 추정 1');
-    expect(k[2].v).toBe('1.00 Gbps / —'); expect(k[3].v).toBe('2 로그인'); expect(k[3].s).toContain('멀티패스 타깃 3');
-    const e = sanKpis({ hours: 168, totals: { measuredPorts: 0, unmeasuredPorts: 2 } });
-    expect(e[0].l).toBe('7일 전송 합 · HBA 포트'); expect(e[0].v).toBe('—'); expect(e[0].s).toContain('측정 0/2 포트'); expect(e[3].s).toContain('아직 안 읽음');
+    expect(k[0].v).toBe('1.5 KB');
+    // v2.935(C-①): 확정 + 실측 비율(근거 있는 몫)과 추정(IPF · 포트 비율)을 따로 — 한 숫자로 합치지 않는다
+    expect(k[1].v).toBe('1000 B'); expect(k[1].s).toBe(`${CONF.confirmed.glyph} 확정 1000 B · ${CONF.measured.glyph} 실측 비율 —`);
+    expect(k[2].v).toBe('≈ 500 B');
+    expect(k[3].v).toBe('1.00 Gbps / —'); expect(k[4].v).toBe('—'); expect(k[4].s).toContain('아직 측정 전'); expect(k[4].s).toContain('멀티패스 타깃 3');
+    const e = sanKpis({ hours: 168, totals: { measuredPorts: 0, unmeasuredPorts: 2 }, storPathScan: false });
+    expect(e[0].l).toBe('7일 전송 합 · HBA 포트'); expect(e[0].v).toBe('—'); expect(e[0].s).toContain('측정 0/2 포트'); expect(e[1].v).toBe('—'); expect(e[2].v).toBe('—');
+    expect(e[4].s).toContain('수집 꺼짐'); expect(e[4].s).toContain('아직 안 읽음');
   });
   it('상태 문구 — 이유를 말한다', () => {
     expect(sanStateText({ corpMissing: true })).toContain('법인');

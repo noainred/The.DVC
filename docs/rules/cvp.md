@@ -18,6 +18,7 @@
 - (원래 4639행) CVP 인터페이스 세부 정보(v2.649) — 설명은 설정 노드에서 부품 주기에 읽고, `null`(못 읽음)과 `''`(설명 없음)을 구분한다
 - (원래 4688행) CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다
 - (v2.922) 포트 드롭 열(in_drop/out_drop — 추정 경로) · 베어메탈 NIC 매핑·대조는 hostMatch 하나
+- (v2.935) EndpointLocation(MAC → 지금 배운 포트) — 404 는 본문으로 가르고, likelihood 가 낮은 위치 · 스위치 사이 포트는 업링크가 아니다
 
 ## 본문
 
@@ -179,3 +180,15 @@
     결측이 섞인 0 · 매칭 포트 없음/둘 이상은 ‘판정 보류’(한쪽에만 드롭이 보이면 그쪽 드롭만 말한다). 판정 코어는 웹 `hostNicText.sideVerdict` 하나.
   - 데모는 `synthNicStats`(인벤토리 NIC 이 없으면 가상 스위치 업링크 이름) — 몇몇 호스트의 한 NIC 에만 수신 드롭.
 
+- **CVP EndpointLocation(v2.935 — 설계 `docs/design/san-cvp-traffic/README.md` §10, 회귀 `test/cvpEndpoint2935.test.js` · `cvpEpReview2935.test.js`)**
+  - 경로 · 필드는 공개 proto 기준 **추정**(`GET /api/resources/endpointlocation/v1/EndpointLocation?key.searchTerm=<MAC>` · 2021.1+ · 단건). 파서는 관용 — JSON 이 아니면 parsed:false(위치 없음과 구분).
+  - 404 는 본문으로 가른다(`endpoint.js notFoundKind`): 구체적 not found = 위치 없음, ‘Not Found’ 한 마디는 **답한 MAC 없이 8번 이어질 때만** 미지원(pNIC MAC 몇 개가 안 배워졌다고 CVP 전체를
+    미지원으로 적지 않는다). 연결 실패 · 401 · 403 이 3번 이어지면 그만 묻는다. 인증 정지 CVP 는 버튼으로도 로그인하지 않는다(`cvpAuthGuard`).
+  - 대상 고르기(`pickEndpointMacs`)는 셋 다 **오래전에 물은 것부터** · 호스트 몫 절반 — 스냅샷 순서로 고르면 같은 앞부분만 계속 묻는다(반증 M-1 재현).
+    **엣지에서는 법인 필터를 건너뛴다** — 법인 할당표(datacenters.json)는 중앙에만 있다(반증 H-1 — 엣지에서 묻는 MAC 이 0개였다).
+  - 업링크 근거(`hostMatch.matchEndpoint`): MAC 마다 가장 높은 likelihood 위치만 · 물리 아닌 인터페이스 · LLDP 이웃이 다른 장비인 포트 제외(B-② H-1 과 같은 방어).
+    VM 위치 판정은 net-uplinks 와 같은 호스트 업링크(LLDP 이름 규칙 + 위 규칙)로 하고, 위치 모르는 업링크 NIC 이 있거나 LAG 면 **판정 보류**(거짓 불일치 금지).
+  - 엣지 push 커서는 `ep_meta.seq`(쓸 때마다 늘어나는 순번) — 물어본 시각(at)으로 자르면 같은 at 경계 · 늦게 커밋된 작은 at 을 건너뛴다. 엣지 이름은 대소문자를 가리지 않는다(큐 · DB owners).
+  - 라우트: 범위 밖 404 → 도구 키 cvp 403 → 역할(admin · operator — `toolActorOf`, 인증 꺼짐도 익명 역할) → **쓰기 범위 밖 403**. 범위 계정 + 법인 미지정 vCenter = CVP 0대.
+    비-admin 의 오류 사유는 `maskErrText` 로 가린다. DB 를 못 읽으면 ‘아직 안 물음’ 이 아니라 ‘읽지 못함’. 주기 숫자 · 켜짐은 API 값(partsEveryMs · scan).
+  - 남김: 엣지 시각 원본을 따로 저장하지 않는다(수신 시각으로 자르기만 — 반증 L-10) · 상태의 `endpoints`(주기 요약)는 아직 어느 화면도 쓰지 않는다(콘솔에는 남긴다).

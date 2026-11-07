@@ -61,6 +61,7 @@ const DataFlow = React.lazy(() => import('./tools/DataFlow.jsx'));       // 데�
 const DeviceFlow = React.lazy(() => import('./tools/DeviceFlow.jsx'));   // 3단 지도(장비 → 엣지 → 메인, v2.588)
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
 const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
+const SanFlowTool = React.lazy(() => import('./tools/SanFlowTool.jsx'));   // v2.935(C-②) Flow Vision 플로우 모니터
 const CvpTool = React.lazy(() => import('./tools/CvpTool.jsx'));         // Arista CloudVision(v2.608)
 const VmHygieneTool = React.lazy(() => import('./tools/VmHygieneTool.jsx')); // VM 구성 점검(v2.698)
 const HostHygieneTool = React.lazy(() => import('./tools/HostHygieneTool.jsx')); // ESXi 호스트 구성 점검(v2.699)
@@ -641,6 +642,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'device-flow' && <DeviceFlow />}
       {tool === 'bm-storage' && <BmStorageTool />}
       {tool === 'san-switch' && <SanSwitchTool />}
+      {tool === 'san-flow' && <SanFlowTool />}
       {tool === 'cvp' && <CvpTool />}
       {tool === 'pdu' && <PduTool />}
       {tool === 'rma' && <RemoteCommand />}

@@ -106,3 +106,49 @@ D-④ DataMap    화면 요소 ↔ 데이터(지금 있음 / 새 수집 / 계산
   호스트 업링크 매칭이 LLDP(확정) · 물리 NIC MAC(높음) · VM MAC 비율(높음) · 포트 설명(보통) 순으로 근거를 고르고 근거 문장을 보여 준다. 데모는 법인 호스트를 leaf 포트에 붙여 근거가 보인다.
 - **B-③ ESXi vmnic 드롭·에러 — v2.925**: 호스트 상세 ‘네트워크’ 카드 버튼으로 vCenter 실시간 통계(최근 1시간)를 vmnic 마다 읽고, 같은 1시간 CVP 업링크 드롭과 방향 짝으로 나란히 놓아
   ‘ESXi 쪽 · 스위치 쪽 · 양쪽 · 드롭 없음’ 을 판정한다(§4.2 ‘둘 다 있을 때만’). 결측이 섞인 0 · 매칭 포트 없음은 판정 보류. 주기 수집은 하지 않았다(고RTT vCenter 로그인 수를 늘리지 않게).
+
+## 9. C 단계 시안(2026-11-07 12:13~ KST · Fable + Claude Design — 사용자 'C 단계 시안 만들어줘')
+
+시안 캔버스: https://claude.ai/artifact/TJGrCnB5sVW4ma1FP4RbWg · 이 폴더의 `C1-HostSanPath` · `C1-SanAttribIpf` · `C2-FlowVision` · `C3-EndpointLoc` · `C4-DataMap` 5장이 캔버스와 같은 내용이다(포탈 룩 · 수치는 전부 가상값).
+
+### 9.1 사용자 결정(12:24) 과 추가 질문(12:25)
+① Flow Vision 라이선스 확인 방법 안내 ② 포탈이 플로우를 직접 만든다 ③ EndpointLocation 은 버튼 + 주기 둘 다 ④ IPF 보정 넣기.
+추가 질문 "라이선스 없이 … WWN 정보와 조닝 정보 … 활용하면 구현할 수 있을 것 같은데?" → **그렇다 — 짝 후보와 포트 합은 A 단계가 이미 조닝·WWN 으로 낸다.** 짝별 *분배*만 남는데 그것은
+(a) ESXi 경로별 카운터(vCenter perf `storagePath` 그룹 — 라이선스 불필요 · 실측 · 경로 이름에 타깃 WWN) (b) IPF 보정(추정) (c) Flow Vision(스위치 쪽 실측 · 라이선스) 중 하나다.
+그래서 시안은 **(a)+(b) 를 기본(C-①)** 으로, Flow Vision 은 **라이선스가 있을 때만 쓰는 교차검증(C-②)** 으로 바꿨다.
+
+### 9.2 아트보드
+- **C-① HostSanPath** — 호스트 상세 ‘SAN 경로·트래픽’ 묶음에 경로별 실측 표(HBA · 타깃 WWN · 스토리지 · 경로 상태 · 지금/1시간/24h 읽기·쓰기 · 지연 · 근거) · KPI(실측 분배 · IPF 추정 · 교차검증 차이) · 분배 규칙 카드(실측 → 확정 → IPF → 분배 불가) · 라이선스 띠.
+- **C-① SanAttribIpf** — SAN 도구 ‘호스트 귀속’ 모달에 분배 방식 세그먼트(실측 우선 → IPF / IPF 만 / 타깃 포트 비율) · IPF 수렴 카드(반복 · 행합/열합 잔차 · 기준) · 매트릭스에 행합(HBA 포트 Δ) · 열합(타깃 포트 Δ) · 일치 표시 · 스위치별 Fabric Vision 라이선스 띠.
+- **C-② FlowVision** — 새 도구 키 `san-flow`(운영 작업 · admin · OTP 재인증 · 감사 · 엣지 대행 큐 = testRuns 패턴) · 스위치 라이선스/계정 권한 점검 표 · 플로우 만들기 폼(호스트 → HBA → 포트 → 존 안 타깃 · 접두 `dvc_` · 명령 미리보기) · 실행 로그 타임라인 · 결과 표(ESXi 실측 대비 차이).
+- **C-③ EndpointLoc** — 호스트 상세 업링크 타일 근거 ‘확정(CVP 위치)’(BASIS_RANK 에 `endpoint` — LLDP 다음) · ‘CVP 위치 조회 · 지금’ 버튼 · VM 상세 ‘네트워크 위치(CVP)’ 카드(일치/불일치/응답 없음 — vMotion L-5 보완) · CVP 설정(주기 수집 켜기 · 주기당 상한 · 우선순위 · 지원 버전).
+- **C-④ DataMap** — 화면 요소 ↔ 데이터(지금 있음/새 수집/계산) · 규약 · 위험 · 단계 제안(① C-① → ② C-③ → ③ C-②) · 컨펌 질문 5.
+
+### 9.3 정직 기록
+- ESXi `storagePath` 카운터의 인스턴스 이름 형식 · 통계 레벨은 **실장비로 확인하지 못했다**(추정). 못 읽으면 IPF 로 떨어진다.
+- Flow Vision: `flow` 명령은 Fabric Vision 라이선스 필요 · `--create/--activate/--deactivate/--modify/--reset/--show/--delete` · 상한 128(스위치)/512(디렉터) · 포트당 모니터 64 — FOS 8.0.1 명령 참조(Dell/ManualOwl 미러) · Flow Vision 8.1 안내서(Lenovo 미러) 기준. REST 노출은 확인 못 함. 현장 rbash 계정은 `flow` 가 막혀 있을 수 있다(`fosParse.js:850` 의 다른 명령들이 그랬다).
+- CVP EndpointLocation: `GET /api/resources/endpointlocation/v1/EndpointLocation?key.searchTerm=<MAC|IP>` · CVP 2021.1+ · GetAll 없음(단건) — aristanetworks.github.io cloudvision-apis 기준.
+- Flow Vision 라이선스 확인 방법: 포탈 SAN 도구 장비 상세 ‘라이선스:’ 줄(REST `brocade-license/license` 또는 SSH `licenseshow`), 또는 스위치에서 `licenseshow` / `flow --show` 직접 실행. 스냅샷에 ‘Fabric Vision’ 이 없는 것과 못 읽은 것은 다르다.
+- 이 절은 컨펌 전 시안 기록이다 — 구현은 컨펌 뒤 Opus 가 한다.
+
+## 10. C 단계 구현 기록(2026-11-07 13:21~ KST · Opus — 사용자 '구현' · 선택: 셋 다 순차(C-① → C-③ → C-②) · 검증 표준 · 릴리스 마지막에 한 번 · 기본값대로)
+
+- **C-① ESXi 경로 카운터 + IPF**(`server/src/storpath/` · `sanswitch/ipf.js` · `attribution.js`): 호스트 상세 ‘경로별 실측 · ESXi’ 표 · KPI ‘확정 + 실측 비율’ ·
+  SAN 도구 ‘호스트 귀속’ 분배 방식(자동 = 실측 비율 → IPF → 타깃 포트 비율 / IPF / 포트 비율) · IPF 카드(패브릭 — 조닝 서명으로 묶어 코어-엣지도 한 문제로) · 라이선스 카드.
+  - ⚠ 시안과 다른 점(정직): 시안은 경로 카운터를 실시간 20초 표본으로 그렸지만, 함대(658 호스트 · 고RTT)에서 응답 크기를 묶으려고 **한 시간마다 5분(표본 15개)** 만 읽는다
+    (`STORPATH_REFRESH_MS` 기본 1시간 · 하한 15분 · `STORPATH_PER_CYCLE` 200 · `STORPATH_SAMPLES` 15). 비율만 실측이고 바이트 양은 스위치 포트 바이트(정확)에 곱한다.
+    인스턴스 이름 형식(`fc.…-fc.…-naa…` · `vmhbaN:Cn:Tn:Ln`)은 실장비로 확인하지 못했다 — 못 읽으면 IPF 로 떨어진다.
+- **C-③ CVP EndpointLocation**(`server/src/cvp/endpoint.js` · `endpointNow.js` · `epRequests.js` · `db.js ep_loc/ep_meta`): 부품 주기 200 MAC(호스트 NIC → 최근 이동 VM → 순환) +
+  ‘CVP 위치 조회 · 지금’ 버튼(위임 CVP 는 엣지 요청 큐) · 근거 순위 `endpoint`(LLDP 다음 ‘확정’) · LLDP 와 다르면 둘 다 보여 줌 · VM 상세 ‘네트워크 위치(CVP)’ 카드.
+  - 반증 1인 확정 H1 · M5 · L10 중 L-10(엣지 시각 원본을 따로 남기지 않음 — 수신 시각으로 자르기만)을 뺀 전부를 고쳤다(`test/cvpEpReview2935.test.js`). H-2(404 의미)는
+    실장비 응답을 못 봐서 **본문으로 가르는 추정**이다 — 구체적 not found = 위치 없음 · ‘Not Found’ 한 마디는 답한 MAC 없이 8번 이어질 때만 미지원 · 본문 표본을 사유에 남긴다.
+  - 데모 결함(화면 판독): 데모 VM vNIC MAC 이 사이트마다 같아(사이트 안 순번만) 다른 법인 CVP 위치로 덮였다 → 넷째 바이트에 사이트 번호.
+- **C-② Flow Vision 플로우 모니터**(도구 키 `san-flow` · ‘운영 작업’ · `server/src/sanswitch/flowCmd.js` · `flowJobs.js` · `routes/api/sanFlow.js` · 웹 `SanFlowTool.jsx`):
+  admin · 전체 범위 · 만들기 · 지우기는 본인 OTP 재인증 · 감사. 명령은 서버만 만든다(이름 `dvc_` · 포트 · WWN 화이트리스트) — 엣지는 정의만 받아 **다시 검사하고 직접 만든다**.
+  서버가 포트 · zone 안 타깃을 귀속 엔진으로 다시 판정한다(미리보기와 만들기가 같은 `planCreate`). 상한 스위치 128 · 디렉터 512 · 포트당 모니터 64. 15분마다 `flow --show`.
+  - 시안에서 뺀 것: ‘비활성화’(deactivate) 버튼 · 호스트 상세 / 호스트 귀속 표에 ‘실측(스위치 플로우)’ 줄 — 이번에는 SAN 플로우 모니터 화면의 ‘ESXi 실측 대비’ 칸에만 보인다.
+  - ⚠ 문법 · 출력 형식 · 상한은 FOS 8.0.1 명령 참조 기준이고 실장비로 확인하지 못했다. 출력을 못 읽으면 0 이 아니라 ‘카운터 형식을 알아보지 못했습니다’ + 원문(작업 기록).
+  - 반증 1인 확정 H2 · M7 · L11 을 전부 고쳤다(사용자 ‘전부 고침’). 가장 큰 둘: 플로우 이름이 FOS 20자 상한을 넘어 실장비 만들기가 거부될 수 있었다(→ 19자 이하) ·
+    15분 주기가 인증 실패 정지를 보지 않아 비밀번호가 바뀐 스위치에 하루 96번 로그인할 수 있었다(→ 폴러와 같은 정지 기록). 이 과정에서 기존 SAN 스위치 쓰기 라우트 13개의 게이트도
+    ‘조회 · 쓰기 모두 전체 범위’ 로 좁혔다(writeVcenters 를 둔 admin 은 이제 스위치 등록 · 수집 · 설정 변경을 할 수 없다 — 의도한 변경).
+  - 화면 판독으로 고친 것: 400px 가로 넘침(작업 제목 · 버튼) · 같은 정의 중복 만들기 · 86줄 스위치 표 아래로 밀리던 폼 · 기록 · 결과(→ 표 위로 · 라이선스 필터 · 20대 상한).

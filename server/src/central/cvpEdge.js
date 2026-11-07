@@ -378,7 +378,38 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
     l2ByCvp.get(x.cvpId).push(r);
     nL2++;
   }
-  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped, devSamples, eventsByCvp, l2ByCvp };
+  // v2.935(SAN·CVP 설계 C-③): EndpointLocation 결과 — 소유한 CVP 만 · MAC 12자 16진 · 상태 4종 · 위치 16개 · 문자열 상한 · VLAN 범위 · 시각은 수신 시각으로 자른다.
+  const epByCvp = new Map();
+  let nEp = 0;
+  for (const x of Array.isArray(b.ep) ? b.ep : []) {
+    if (!isPlainObj(x)) { dropped.notObject++; continue; }
+    if (!own(x.cvpId)) { dropped.notOwned++; continue; }
+    if (nEp >= EP_PUSH_MAX) { dropped.overCount++; continue; }
+    const r = cleanEp(x, now);
+    if (!r) { dropped.badRow++; continue; }
+    if (!epByCvp.has(x.cvpId)) epByCvp.set(x.cvpId, []);
+    epByCvp.get(x.cvpId).push(r);
+    nEp++;
+  }
+  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped, devSamples, eventsByCvp, l2ByCvp, epByCvp };
+}
+
+/** v2.935(C-③): 한 번에 받는 EndpointLocation 결과 상한(엣지 push 한 번 — 엣지도 CVP 마다 500 개씩 보낸다). */
+export const EP_PUSH_MAX = 4000;
+const EP_STATUS = new Set(['ok', 'none', 'error', 'unsupported']);
+const epStr = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
+/** EndpointLocation 결과 하나 정제(순수) — 모양이 아니면 null. */
+export function cleanEp(x, now = Date.now()) {
+  if (!isPlainObj(x)) return null;
+  const mac = typeof x.mac === 'string' ? x.mac.toLowerCase() : '';
+  if (!/^[0-9a-f]{12}$/.test(mac) || !EP_STATUS.has(x.status)) return null;
+  const at0 = Number(x.at);
+  if (!Number.isFinite(at0) || at0 <= 0) return null;
+  const locations = x.status === 'ok' && Array.isArray(x.locations) ? x.locations.slice(0, 16).filter(isPlainObj).map((l) => ({
+    device: epStr(l.device, 64), port: epStr(l.port, 64), vlan: Number.isInteger(l.vlan) && l.vlan >= 0 && l.vlan <= 4095 ? l.vlan : null,
+    learnedAt: epStr(l.learnedAt, 40), macType: epStr(l.macType, 40), likelihood: epStr(l.likelihood, 40),
+  })).filter((l) => l.device && l.port) : [];
+  return { mac, at: Math.min(Math.trunc(at0), now), status: x.status, ...(epStr(x.reason, 200) ? { reason: epStr(x.reason, 200) } : {}), locations };
 }
 
 /**
