@@ -52,3 +52,10 @@ describe('호스트 업링크 — EndpointLocation 문구', () => {
     for (const s of [epStatusText({ macs: 1, lastAt: 1 }), epLocateText({ direct: [], queued: [] })]) expect(s).not.toMatch(/`/);
   });
 });
+
+describe('v2.938 엣지 시계 원본(C-③ L-10)', () => {
+  it('물어본 시각이 수신 시각으로 잘렸으면 표지', () => {
+    expect(locRows({ rows: [{ mac: '005056000001', verdict: 'match', edgeClockAheadMs: 5 * 60_000, locations: [] }] })[0].clock.label).toBe('엣지 시계 +5분');
+    expect(locRows({ rows: [{ mac: '005056000001', verdict: 'match', locations: [] }] })[0].clock).toBe(null);
+  });
+});

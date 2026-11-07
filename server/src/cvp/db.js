@@ -135,6 +135,8 @@ async function openInner() {
     //   늦게 커밋된 더 작은 at 이 있으면 시각 커서는 그 행을 건너뛰었다(재현). 이 브랜치의 개발 DB 에는 열이 없을 수 있어 없으면 더한다.
     { const have = new Set(conn.prepare('PRAGMA table_info(ep_meta)').all().map((r) => r.name));
       if (!have.has('seq')) { try { conn.exec('ALTER TABLE ep_meta ADD COLUMN seq INTEGER NOT NULL DEFAULT 0'); } catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; } }
+      // v2.938(C-③ 반증 L-10): 엣지가 보낸 원래 시각(수신 시각으로 잘렸을 때만 — 엣지 시계가 빠른 것을 화면이 밝힌다). 없으면 null.
+      if (!have.has('edge_at')) { try { conn.exec('ALTER TABLE ep_meta ADD COLUMN edge_at INTEGER'); } catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; } }
       conn.exec('CREATE INDEX IF NOT EXISTS idx_epmeta_seq ON ep_meta (seq); CREATE INDEX IF NOT EXISTS idx_epmeta_cvpseq ON ep_meta (agent, cvp_id, seq);'); }
     addDailyErrCountCols(conn);
     addDeviceInfoCols(conn);
@@ -1531,8 +1533,8 @@ export async function saveEndpoints(agent, cvpId, results = []) {
   const c = db.conn; const a = String(agent ?? ''); const id = String(cvpId);
   const del = c.prepare('DELETE FROM ep_loc WHERE agent=? AND cvp_id=? AND mac=?');
   const ins = c.prepare('INSERT OR REPLACE INTO ep_loc (agent,cvp_id,mac,device,port,vlan,learned_at,mac_type,likelihood,at) VALUES (?,?,?,?,?,?,?,?,?,?)');
-  const meta = c.prepare(`INSERT INTO ep_meta (agent,cvp_id,mac,at,status,n,reason,seq) VALUES (?,?,?,?,?,?,?,?)
-    ON CONFLICT(agent,cvp_id,mac) DO UPDATE SET at=excluded.at, status=excluded.status, n=excluded.n, reason=excluded.reason, seq=excluded.seq`);
+  const meta = c.prepare(`INSERT INTO ep_meta (agent,cvp_id,mac,at,status,n,reason,seq,edge_at) VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(agent,cvp_id,mac) DO UPDATE SET at=excluded.at, status=excluded.status, n=excluded.n, reason=excluded.reason, seq=excluded.seq, edge_at=excluded.edge_at`);
   let saved = 0;
   c.exec('BEGIN');
   try {
@@ -1552,7 +1554,8 @@ export async function saveEndpoints(agent, cvpId, results = []) {
       }
       // 오류 · 미지원은 위치를 지우지 않는다(직전 값이 '없음' 이 되지 않게) — 메타만 그 사실을 적는다.
       seq += 1;
-      meta.run(a, id, mac, Math.trunc(Number(r.at)), st, st === 'ok' ? Math.min(EP_LOC_MAX, (r.locations || []).length) : st === 'none' ? 0 : null, r.reason ? String(r.reason).slice(0, 200) : null, seq);
+      const edgeAt = Number.isFinite(Number(r.edgeAt)) && Number(r.edgeAt) > Number(r.at) ? Math.trunc(Number(r.edgeAt)) : null;   // 원본은 잘린 시각보다 뒤일 때만
+      meta.run(a, id, mac, Math.trunc(Number(r.at)), st, st === 'ok' ? Math.min(EP_LOC_MAX, (r.locations || []).length) : st === 'none' ? 0 : null, r.reason ? String(r.reason).slice(0, 200) : null, seq, edgeAt);
       saved += 1;
     }
     c.exec('COMMIT');
@@ -1597,7 +1600,7 @@ export async function endpointsByMacs(macs = [], { owners = null } = {}) {
   const meta = new Map();
   for (const m of db.conn.prepare(`SELECT * FROM ep_meta WHERE mac IN (${ph})`).all(...list).filter(ok)) {
     if (!meta.has(m.mac)) meta.set(m.mac, []);
-    meta.get(m.mac).push({ agent: m.agent, cvpId: m.cvp_id, at: Number(m.at), status: m.status, reason: m.reason || null });
+    meta.get(m.mac).push({ agent: m.agent, cvpId: m.cvp_id, at: Number(m.at), status: m.status, reason: m.reason || null, edgeAt: m.edge_at == null ? null : Number(m.edge_at) });
   }
   return { rows, meta };
 }

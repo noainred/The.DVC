@@ -31,6 +31,7 @@ import {
   CHART_MODES, seriesGeometryBps, chartCutNote, faultKindLabel, faultRowView, faultEventText, faultKpi, faultScanNote, FAULT_INTRO,
   sampleRows, SAMPLE_NOTE, PREVIEW_NOTE, previewSummary, previewColumns, sampleBadge, SYS_HIGH_PCT,
   eventDeviceRefs, eventDeviceSort,
+  epSummaryText,   // v2.938 위치 조회 주기 요약
 } from './cvpText.js';
 import Select from '../../components/Select.jsx';
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
@@ -300,8 +301,8 @@ export default function CvpTool() {
         {servers.length === 0 ? (
           <div style={{ ...NOTE, marginTop: 8 }}>등록된 CVP 서버가 없습니다. {isAdmin ? '아래 ‘등록·설정’ 에서 추가하세요.' : ''}</div>
         ) : (
-          <STable minWidth={760} style={{ marginTop: 8 }}>
-            <thead><tr><th>이름</th><th>주소</th><th>수집 위치</th><th>인증</th><th>상태</th><th>장비</th><th>수집 시각</th><th>읽은 경로</th></tr></thead>
+          <STable minWidth={920} style={{ marginTop: 8 }}>
+            <thead><tr><th>이름</th><th>주소</th><th>수집 위치</th><th>인증</th><th>상태</th><th>장비</th><th>수집 시각</th><th>읽은 경로</th><th>위치 조회(주기)</th></tr></thead>
             <tbody>
               {servers.map((s) => {
                 const st = s.status || {};
@@ -321,6 +322,10 @@ export default function CvpTool() {
                       {used.length ? `${used.length}개 항목` : '—'}{miss.length ? ` · 미확인 ${miss.length}` : ''}
                       {st.cvpVersion ? <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>CVP {st.cvpVersion}</div> : null}
                     </td>
+                    {(() => { const e = epSummaryText(st.endpoints); return (
+                      <td style={{ fontSize: 12, whiteSpace: 'normal', minWidth: 160, color: e.warn ? 'var(--amber)' : undefined }} title={e.title} data-sort={st.endpoints?.asked ?? undefined}>
+                        {e.text}{st.endpoints?.at ? <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{agoText(st.endpoints.at)}</div> : null}
+                      </td>); })()}
                   </tr>
                 );
               })}

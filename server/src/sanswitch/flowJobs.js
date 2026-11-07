@@ -102,17 +102,23 @@ function demoOutput(cmd, deviceId, cmds = [], now = Date.now()) {
   if (m) return `Flow ${m[1]} created and activated for monitor feature.`;
   m = /^flow --delete (\S+)/.exec(cmd);
   if (m) return `Flow ${m[1]} deleted.`;
+  m = /^flow --(deactivate|activate) (\S+)/.exec(cmd);
+  if (m) return `Flow ${m[2]} ${m[1]}d for monitor feature.`;
   m = /^flow --show (\S+)/.exec(cmd);
   if (m) {
     // 만들기 작업 안의 첫 show — 같은 작업의 create 명령에서 초기자 · 타깃을 읽는다(기록보다 명령이 정확하다).
     const rec = listFlows().find((f) => f.deviceId === deviceId && f.name === m[1]);
+    // 같은 작업에서 끄거나 켰으면 그 결과를 따른다(기록은 작업이 끝난 뒤에 바뀐다). 끈 동안 카운터는 끈 시각에 멈춘다.
+    const toggled = cmds.find((c) => c.startsWith(`flow --deactivate ${m[1]} `)) ? false : cmds.find((c) => c.startsWith(`flow --activate ${m[1]} `)) ? true : null;
+    const on = toggled ?? (rec?.state !== 'inactive');
     const cm = cmds.map((c) => /^flow --create (\S+) .*-srcdev (\S+) -dstdev (\S+)/.exec(c)).find((x) => x && x[1] === m[1]);
     const src = cm?.[2] || rec?.srcdev || ''; const dst = cm?.[3] || rec?.dstdev || '';
     const k = demoTargetKBps(src || m[1], dst);
     const noise = (((k.h >>> 5) % 61) - 30) / 1000 + (k.h % 5 === 0 ? 0.08 : 0);
     const rx = Math.round(k.wKBps * 1024 * (1 + noise)); const tx = Math.round(k.rKBps * 1024 * (1 + noise));
-    const t = (now % (7 * 86_400_000)) / 1000;   // 밀리초까지 — 데모에서 몇 초 간격으로 두 번 읽어도 속도가 튀지 않게
-    return `Name          : ${m[1]}   Features: mon(Activated)\n`
+    const frozen = !on && rec?.deactivatedAt ? rec.deactivatedAt : (!on ? now : null);
+    const t = ((frozen ?? now) % (7 * 86_400_000)) / 1000;   // 밀리초까지 — 데모에서 몇 초 간격으로 두 번 읽어도 속도가 튀지 않게
+    return `Name          : ${m[1]}   Features: mon(${on ? 'Activated' : 'Deactivated'})\n`
       + `SrcDev: ${src || '-'}  DstDev: ${dst || '-'}\n`
       + '| Rx Frames Count | Tx Frames Count | Rx Bytes Count | Tx Bytes Count | Rx Throughput(Bps) | Tx Throughput(Bps) |\n'
       + '|-----------------|-----------------|----------------|----------------|--------------------|--------------------|\n'
@@ -174,8 +180,16 @@ function applyShow(rec, shown, now) {
   if (p.counters) {
     if (rec.counters) { rec.prevCounters = rec.counters; rec.prevAt = rec.lastAt; }
     rec.counters = p.counters; rec.lastAt = now; rec.active = p.active; rec.lastError = null;
-    if (rec.state === 'unknown' || rec.state === 'pending' || rec.state === 'gone') rec.state = 'active';
-  } else rec.lastError = shown.issue?.text || '카운터 형식을 알아보지 못했습니다(원문은 작업 기록에)';
+    rec.rawSample = null;
+    if (rec.state === 'unknown' || rec.state === 'pending' || rec.state === 'gone') rec.state = p.active === false ? 'inactive' : 'active';
+    // 장비에서 직접 끄거나 켰으면 따라간다(활성 여부를 읽었을 때만 — 모르면 그대로).
+    else if (rec.state === 'active' && p.active === false) { rec.state = 'inactive'; rec.deactivatedAt = rec.deactivatedAt || now; }
+    else if (rec.state === 'inactive' && p.active === true) { rec.state = 'active'; rec.deactivatedAt = null; }
+  } else {
+    rec.lastError = shown.issue?.text || '카운터 형식을 알아보지 못했습니다(원문 앞부분은 기록에)';
+    // v2.938: 출력 형식이 실장비 미확인이라 못 읽은 원문 앞부분을 기록에 남긴다(작업 기록은 1시간 뒤 사라진다 · 화면은 관리 주소를 가려 보여 준다).
+    rec.rawSample = String(shown.out || '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]+/g, ' ').slice(0, 400); // eslint-disable-line no-control-regex
+  }
 }
 
 /** 결과를 포탈 플로우 기록에 반영한다(중앙). 늦은 회신도 같은 함수(반증 M-2). */
@@ -211,6 +225,15 @@ function applyResult(job, res) {
         else if (timedOut || res?.inFlight === createCmd) { rec.state = 'unknown'; rec.lastError = `${res?.reason || '결과를 받지 못했습니다'} — 장비에 만들어졌을 수 있습니다(카운터 읽기 · 권한 점검으로 확인)`; }
         else { rec.state = 'failed'; rec.lastError = res?.reason || '실행하지 못했습니다'; }
         rec.jobId = null;
+      }
+      if (job.action === 'deactivate' || job.action === 'activate') {
+        const tog = outs.find((o) => o.cmd.startsWith(`flow --${job.action} ${f.name} `));
+        if (rec && tog?.ok) {
+          // 비활성화 뒤 카운터 기준을 새로 잡는다 — 다시 켠 뒤 첫 델타가 꺼져 있던 시간까지 나눠 속도를 낮게 보이지 않게(직전 카운터 버림).
+          if (job.action === 'deactivate') Object.assign(rec, { state: 'inactive', deactivatedAt: now, lastError: null });
+          else Object.assign(rec, { state: 'active', deactivatedAt: null, prevCounters: null, prevAt: null, counters: null, lastError: null });
+        } else if (rec && tog?.issue?.kind === 'missing') { rec.state = 'gone'; rec.lastError = '장비에 이 플로우가 없습니다(장비에서 지워졌을 수 있습니다)'; }
+        else if (rec) rec.lastError = tog?.issue?.text || (timedOut ? `${job.action === 'deactivate' ? '비활성화' : '다시 켜기'} 결과를 모릅니다 — 카운터 읽기로 확인하세요` : res?.reason || '바꾸지 못했습니다');
       }
       if (job.action === 'delete') {
         if (deleted?.ok || deleted?.issue?.kind === 'missing') {
@@ -276,7 +299,7 @@ export function startFlowJob({ device, action, flows = [], user = '', periodic =
   if (active.some((j) => j.deviceId === device.id)) return { issue: '이 스위치에 진행 중인 플로우 작업이 있습니다 — 끝난 뒤 다시 시도하세요' };
   const target = String(device.agent || '').trim();
   const local = !target || sameAgent(target, config.agent?.name);   // 반증 L-10: 대소문자 무시(다른 곳과 같다)
-  if (!local && typeof canDelegate === 'function') { const why = canDelegate(target); if (why) return { issue: why }; }
+  if (!local && typeof canDelegate === 'function') { const why = canDelegate(target, action); if (why) return { issue: why }; }
   const id = crypto.randomBytes(8).toString('hex');
   const now = Date.now();
   const job = { id, startedAt: now, status: 'running', deviceId: device.id, deviceName: device.name || device.id, target, user, action, periodic: !!periodic,

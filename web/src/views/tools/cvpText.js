@@ -337,6 +337,23 @@ const PART_ITEM_KEYS = ['power', 'cooling', 'temperature', 'xcvr'];
  *   있을 때만 싣는다 — 그 원인만 말하고, 파트 경로 실패 사유가 함께 있으면 그 사유를 그대로 붙인다(원인을 지어내지 않는다).
  *   '이전 값' 은 시도하지 못한 장비에만 해당한다(시도한 장비는 이번 결과가 저장된다).
  */
+/**
+ * v2.938(C-③ 남긴 것): EndpointLocation 주기 요약 — 마지막 부품 주기에 물은 MAC · 위치 있음 · 없음 · 오류 · 못 물음 · 멈춘 사유. 요약이 없으면 '—'(아직 안 돎 · 구버전 엣지).
+ * @returns {{ text:string, warn:boolean, title:string }}
+ */
+export function epSummaryText(ep) {
+  if (!ep || typeof ep !== 'object') return { text: '—', warn: false, title: '이 CVP 의 위치 조회 주기 요약이 아직 없습니다(주기 조회가 꺼져 있거나 아직 부품 주기가 돌지 않았습니다)' };
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const STOP = { budget: '수집 예산 부족으로 건너뜀', auth: '401 · 403 이 이어져 멈춤', conn: '연결 실패가 이어져 멈춤' };
+  const parts = [`물음 ${n(ep.asked) ?? '—'}`, `위치 있음 ${n(ep.ok) ?? '—'}`, `없음 ${n(ep.none) ?? '—'}`];
+  if (n(ep.errors)) parts.push(`오류 ${ep.errors}`);
+  if (n(ep.cut)) parts.push(`못 물음 ${ep.cut}`);
+  if (ep.unsupported) parts.push('미지원 CVP');
+  if (STOP[ep.stopped]) parts.push(STOP[ep.stopped]);
+  return { text: parts.join(' · '), warn: !!(ep.unsupported || STOP[ep.stopped] || n(ep.errors)),
+    title: 'CVP 위치(EndpointLocation) — 마지막 부품 주기에 물어본 MAC 결과입니다. ‘못 물음’ 은 시간 예산 · 멈춤으로 이번에 묻지 못한 MAC 수입니다(다음 주기에 오래된 것부터 다시 묻습니다).' };
+}
+
 export function partsDueNote(name, st) {
   const o = st && typeof st === 'object' ? st : {};
   const n = numOrNull(o.partsNotTried);

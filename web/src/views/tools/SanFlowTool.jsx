@@ -7,7 +7,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText, existingPairs, cycleText, deadlineText } from './sanFlowText.js';
+import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText, existingPairs, cycleText, deadlineText, CONFIRM } from './sanFlowText.js';
 
 const OTP_IN = { width: 120 };
 const WRAP = { whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: '100%' };   // 긴 작업 제목 · 버튼이 좁은 화면에서 넘치지 않게(400px 가로 넘침 31px — 화면 판독)
@@ -156,17 +156,19 @@ export default function SanFlowTool() {
       .then((r) => { if (r?.ok) { setAct({ busy: '', msg: '', error: '' }); started(r.id); } else setAct({ busy: '', msg: '', error: r?.reason || '실패' }); })
       .catch((e) => setAct({ busy: '', msg: '', error: e?.message || String(e) }));
   };
+  // OTP 확인 줄의 실행 — 지우기 · 비활성화 · 다시 켜기는 작업(기록 폴링), 기록 정리는 즉시(작업 없음 — 목록을 다시 읽는다).
   const doDelete = () => {
     const x = del; setDel(null);
-    if (x.forget) {
-      // 등록부에 없는 스위치 — 장비 명령 없이 기록만 정리(작업 기록이 없다 — 목록을 다시 읽는다)
+    const c = CONFIRM[x.mode] || CONFIRM.delete;
+    if (x.mode === 'forget') {
       setAct({ busy: `forget:${x.name}`, msg: '', error: '' });
-      postJson('/tools/san-flow/forget', { deviceId: x.deviceId, name: x.name, otp: delOtp })
+      postJson(c.path, { deviceId: x.deviceId, name: x.name, otp: delOtp })
         .then((r) => { setAct({ busy: '', msg: '', error: r?.ok ? '' : (r?.reason || '실패') }); load(); })
         .catch((e) => setAct({ busy: '', msg: '', error: e?.message || String(e) }));
-    } else run('/tools/san-flow/delete', { deviceId: x.deviceId, name: x.name, otp: delOtp }, `del:${x.name}`);
+    } else run(c.path, { deviceId: x.deviceId, name: x.name, otp: delOtp }, `${x.mode}:${x.name}`);
     setDelOtp('');
   };
+  const ask = (f, mode) => { setDel({ deviceId: f.deviceId, name: f.name, mode }); setDelOtp(''); };
 
   if (st.error && !st.d) return <ErrorBox error={st.error} />;
   if (!st.d) return <Loading />;
@@ -215,9 +217,9 @@ export default function SanFlowTool() {
         <div className="hd-card-h"><b>플로우 결과</b><span className="muted">flow --show 누적 카운터의 직전 두 번 차이 · ESXi 경로 실측(같은 HBA · 타깃)과 비교는 시점이 달라 참고값</span></div>
         {del && (
           <div className="flex wrap" style={{ gap: 8, alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ minWidth: 0 }}>{del.forget ? `‘${del.name}’ 기록만 정리합니다(스위치가 등록부에 없어 장비에는 명령을 보내지 않습니다) —` : `‘${del.name}’ 을 스위치에서 지웁니다 —`}</span>
+            <span style={{ minWidth: 0 }}>{(CONFIRM[del.mode] || CONFIRM.delete).text(del.name)}</span>
             <input className="input mono" style={OTP_IN} inputMode="numeric" autoComplete="one-time-code" placeholder="본인 OTP" aria-label="본인 OTP(지우기)" value={delOtp} onChange={(e) => setDelOtp(otpClean(e.target.value))} />
-            <button type="button" className="btn danger" onClick={doDelete}>{del.forget ? '기록 정리' : '지우기'}</button>
+            <button type="button" className={`btn${(CONFIRM[del.mode] || CONFIRM.delete).danger ? ' danger' : ' primary'}`} onClick={doDelete}>{(CONFIRM[del.mode] || CONFIRM.delete).button}</button>
             <button type="button" className="btn" onClick={() => { setDel(null); setDelOtp(''); }}>취소</button>
           </div>
         )}
@@ -228,7 +230,7 @@ export default function SanFlowTool() {
               {flows.map((f) => (
                 <tr key={f.key}>
                   <td className="mono" style={{ fontSize: 12 }}>{f.name}</td>
-                  <td data-sort={f.state.label} title={[f.state.note, f.lastError].filter(Boolean).join(' — ') || undefined}><span className={`badge ${f.state.tone}`}>{f.state.label}</span>{f.lastError ? <div className="muted" style={{ fontSize: 11, maxWidth: 220, overflowWrap: 'anywhere' }}>{f.lastError}</div> : null}</td>
+                  <td data-sort={f.state.label} title={[f.state.note, f.lastError, f.rawSample ? `장비 출력 앞부분:\n${f.rawSample}` : ''].filter(Boolean).join(' — ') || undefined}><span className={`badge ${f.state.tone}`}>{f.state.label}</span>{f.lastError ? <div className="muted" style={{ fontSize: 11, maxWidth: 220, overflowWrap: 'anywhere' }}>{f.lastError}</div> : null}</td>
                   <td data-sort={f.rateSort} className="tabular">{f.rate}</td>
                   <td data-sort={f.diffSort ?? undefined} className="tabular" title={`ESXi 경로 실측 ${f.esxi}`} style={f.diffWarn ? { color: 'var(--amber, #fbbf24)' } : undefined}>{f.diff}{f.diffWarn ? ' △' : ''}</td>
                   <td>{f.host}</td>
@@ -236,9 +238,16 @@ export default function SanFlowTool() {
                   <td>{f.target}</td>
                   <td data-sort={f.bytesSort} className="tabular">{f.bytes}</td>
                   <td className="muted">{f.sw}</td>
-                  <td>{f.canDelete ? <button type="button" className="btn danger" disabled={!!act.busy} onClick={() => { setDel({ deviceId: f.deviceId, name: f.name }); setDelOtp(''); }}>지우기</button>
-                    : f.canForget ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => { setDel({ deviceId: f.deviceId, name: f.name, forget: true }); setDelOtp(''); }} title="스위치가 등록부에 없습니다 — 장비 명령 없이 기록만 정리">기록 정리</button>
-                      : <span className="muted">—</span>}</td>
+                  <td>
+                    {f.canDelete || f.canForget || f.canDeactivate || f.canActivate ? (
+                      <div className="flex wrap" style={{ gap: 6 }}>
+                        {f.canDeactivate ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => ask(f, 'deactivate')} title="모니터만 끕니다(플로우는 장비에 남습니다)">비활성화</button> : null}
+                        {f.canActivate ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => ask(f, 'activate')}>다시 켜기</button> : null}
+                        {f.canDelete ? <button type="button" className="btn danger" disabled={!!act.busy} onClick={() => ask(f, 'delete')}>지우기</button> : null}
+                        {f.canForget ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => ask(f, 'forget')} title="스위치가 등록부에 없습니다 — 장비 명령 없이 기록만 정리">기록 정리</button> : null}
+                      </div>
+                    ) : <span className="muted">—</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
