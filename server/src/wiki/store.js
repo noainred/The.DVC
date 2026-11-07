@@ -479,13 +479,17 @@ export function toggleTask(id, body, user, { access = FULL_ACCESS } = {}) {
 }
 
 /**
- * v2.908 자동화 규칙 '완료 → 위키 체크 항목 완료'(서버 내부 — 범위 없음). 이슈 키(ISS-n — 뒤에 숫자가 이어지지 않는 것)를 적은 **체크 안 된**
+ * v2.908 자동화 규칙 '완료 → 위키 체크 항목 완료'(서버 내부). 이슈 키(ISS-n — 뒤에 숫자가 이어지지 않는 것)를 적은 **체크 안 된**
  * 체크리스트 항목을 체크한다. 보기에서 체크(toggleTask)와 같은 방식 — 판을 만들지 않고 지금 판 본문도 같이 고치고 checkLog · checkRev 를 남긴다.
- * 읽기 전용 스페이스 · 보관(archived) 문서는 건드리지 않는다. 문서 50개 · 문서당 50줄까지. @returns {{ pages: number, items: number, skipped: number }}
+ * 읽기 전용 스페이스 · 보관(archived) 문서는 건드리지 않는다. 문서 50개 · 문서당 50줄까지.
+ * v2.927(사용자 선택 '같은 법인 + 공용만'): v2.908 은 모든 스페이스를 건드려 법인 A 이슈의 완료가 B 법인 스페이스 문서를 바꿀 수 있었다 —
+ *   **이슈의 법인 스페이스 + 공용 스페이스만**(공용 이슈는 공용 스페이스만). 다른 법인 문서는 건너뛰고 센다(outOfScope).
+ * @returns {{ pages: number, items: number, skipped: number, outOfScope: number }}
  */
 export const AUTO_CHECK_LIMITS = Object.freeze({ pages: 50, lines: 50 });
-export function checkIssueTasks(issueKey, user = 'automation', { now = Date.now() } = {}) {
-  const out = { pages: 0, items: 0, skipped: 0 };
+export function checkIssueTasks(issueKey, user = 'automation', { now = Date.now(), vcenterId = '' } = {}) {
+  const out = { pages: 0, items: 0, skipped: 0, outOfScope: 0 };
+  const corp = String(vcenterId || '');
   const key = String(issueKey || '');
   if (!/^ISS-\d{1,9}$/.test(key)) return out;
   const re = new RegExp(`\\b${key}(?!\\d)`);
@@ -493,6 +497,7 @@ export function checkIssueTasks(issueKey, user = 'automation', { now = Date.now(
   for (const p of c.pages) {
     if (out.pages >= AUTO_CHECK_LIMITS.pages) { out.skipped += 1; continue; }
     if (!(p.issueKeys || []).includes(key)) continue;
+    if (p.spaceId !== PUB && p.spaceId !== corp) { out.outOfScope += 1; continue; } // v2.927 — 다른 법인 스페이스는 건드리지 않는다
     if (p.status === 'archived' || c.spaces[p.spaceId]?.readOnly) { out.skipped += 1; continue; }
     const lines = String(p.body || '').split(/\r\n?|\n/);
     const hit = [];

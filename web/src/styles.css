@@ -3040,10 +3040,11 @@ table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background
 .iss-alert-kind { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
 .iss-alert-kind .iss-check { flex: 1 1 160px; min-width: 0; }
 .iss-alert-kind .select { width: auto; }
-.iss-cal { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
-.iss-time { width: 110px; }
-.iss-cal-row { flex-wrap: wrap; }
-.iss-cal-row > * { min-width: 0; }
+/* v2.927 정정: 처음(v2.908)엔 이름이 .iss-cal 이라 이슈 캘린더 화면(위 .iss-cal)에 점선 · 여백이 덧붙었다 — SLA 업무 시간 입력은 .iss-slacal */
+.iss-slacal { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.iss-slacal-time { width: 110px; }
+.iss-slacal-row { flex-wrap: wrap; }
+.iss-slacal-row > * { min-width: 0; }
 
 /* ── 설정 화면 — 왼쪽 목록 + 본문(v2.916, views/Settings.jsx · 시안 docs/design/settings-menu §4 A안 + 상태 요약) ─────────────
    목록 240px(sticky — 상단 바와 상태바 사이 높이) + 본문. 폭은 컨테이너 쿼리로 판정한다 — 사이드바가 펼쳤는지 접혔는지에 따라

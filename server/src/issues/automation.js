@@ -2,7 +2,7 @@
  * issues/automation.js — 이슈 자동화 규칙(v2.908 · 기능 추천 6 · 시안 docs/design/wiki-issues ⑪ '자동화 규칙' — 고정 목록, 자유 스크립트 없음).
  *
  * 규칙(이슈 설정 › 자동화 — settings.js defaultAutomation, 기본 전부 꺼짐):
- *  · wikiCheck — 이슈가 완료되면 그 키를 적은 위키 체크리스트 항목을 체크(wiki/store.js checkIssueTasks).
+ *  · wikiCheck — 이슈가 완료되면 그 키를 적은 위키 체크리스트 항목을 체크(wiki/store.js checkIssueTasks) — v2.927 부터 이슈의 법인 스페이스 + 공용만.
  *  · childrenReview — 하위 작업이 모두 완료되면 상위를 '검토' 로(store.js parentReadyForReview → setStatus · 이력 메모 '자동화: …').
  *  · p0Chat — 유형 장애 · P0 이슈가 만들어지면 팀 채팅에 바로(묶음을 기다리지 않는다 — 설정 › 알림의 Slack · 웹훅 · Teams).
  *  · stale — 30분 검사(notify.js scanStale)와 목록 배지(store.js staleDaysOf)가 한다 — 여기서는 하지 않는다.
@@ -17,7 +17,7 @@ import { lineOf, chatSafe } from './notify.js';
 import { capStr } from '../util/capStr.js';
 
 export const AUTOMATION_USER = 'automation';
-const freshStatus = () => ({ wikiChecked: 0, wikiPages: 0, reviewed: 0, p0Chat: 0, p0ChatFail: 0, errors: 0, error: null, ranAt: null });
+const freshStatus = () => ({ wikiChecked: 0, wikiPages: 0, wikiOutOfScope: 0, reviewed: 0, p0Chat: 0, p0ChatFail: 0, errors: 0, error: null, ranAt: null });
 const status = freshStatus();
 export function automationStatus() { return { ...status }; }
 
@@ -35,7 +35,8 @@ export async function runAutomation(ev, settings = loadIssueSettings()) {
   const fail = (what, e) => { status.errors += 1; status.error = `${what} ${i.key}: ${String(e?.message || e).slice(0, 160)}`; console.warn(`[issues] 자동화 규칙 실패(${status.error})`); };
   if (ev.type === 'status' && ev.to === 'done') {
     if (a.wikiCheck) {
-      try { const r = checkIssueTasks(i.key, AUTOMATION_USER); status.wikiChecked += r.items; status.wikiPages += r.pages; } catch (e) { fail('위키 체크', e); }
+      // v2.927(사용자 선택): 이슈의 법인 스페이스 + 공용 스페이스만 — 다른 법인 문서는 세기만 한다
+      try { const r = checkIssueTasks(i.key, AUTOMATION_USER, { vcenterId: i.vcenterId || '' }); status.wikiChecked += r.items; status.wikiPages += r.pages; status.wikiOutOfScope += r.outOfScope; } catch (e) { fail('위키 체크', e); }
     }
     if (a.childrenReview) {
       try {
