@@ -77,7 +77,7 @@ function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd })
             const st = statsOf({ children: new Map(), targets: [t] });
             const id = `target:${t.id}`;
             return (
-              <div key={t.id} className={`pc-tree-row${sel === id ? ' sel' : ''}`} style={{ paddingLeft: 8 + (depth + 1) * 16, ...(dropStyle(dnd, t.id) || {}) }}
+              <div key={t.id} data-tree-sel={sel === id ? '1' : undefined} className={`pc-tree-row${sel === id ? ' sel' : ''}`} style={{ paddingLeft: 8 + (depth + 1) * 16, ...(dropStyle(dnd, t.id) || {}) }}
                 draggable={dnd.canEdit}
                 onDragStart={(e) => { e.stopPropagation(); dnd.start(e, { type: 'target', id: t.id, path: t.path, name: t.name }); }}
                 onDragEnd={dnd.end}
@@ -164,6 +164,14 @@ export default function SvcMonitor() {
   const [view, setViewState] = useState(() => { try { return localStorage.getItem('perfcheck.view') === 'overview' ? 'overview' : 'tree'; } catch { return 'tree'; } });
   const setView = (v) => { setViewState(v); try { localStorage.setItem('perfcheck.view', v); } catch { /* noop */ } };
   const [driftHidden, setDriftHidden] = useState(false);   // '설정이 바뀌었습니다' 배너 — 이 화면을 연 동안만 숨김
+  // v2.926: 개요 호스트 맵 → 트리 바로가기. 고른 대상을 선택하고 트리에서 그 줄이 보이게 스크롤한다(한 번만).
+  const jumpRef = useRef(false);
+  useEffect(() => {
+    if (!jumpRef.current || view !== 'tree') return;
+    jumpRef.current = false;
+    const el = document.querySelector('[data-tree-sel="1"]');
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+  });
 
   // 선택 노드나 모드가 바뀌면 표시 개수를 처음으로 되돌린다(이전 폴더에서 늘려 둔 값 승계 금지).
   useEffect(() => { setPageN(TARGET_PAGE); }, [sel, mode]);
@@ -249,7 +257,13 @@ export default function SvcMonitor() {
     const v = groups.flatMap((g) => g.tests.map((x) => x.result?.ms).filter((n) => n != null));
     return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : 0;
   })();
-  const selPath = sel ? `Root\\${sel.replace(/^target:/, '')}` : 'Root';
+  // v2.926: 대상을 고르면 내부 id(g-4c30c45c) 대신 '경로\이름' 을 보인다(예전에는 sel 문자열을 그대로 붙였다).
+  const selPath = (() => {
+    if (!sel) return 'Root';
+    if (!sel.startsWith('target:')) return `Root\\${sel}`;
+    const tg = targets.find((x) => `target:${x.id}` === sel);
+    return tg ? `Root\\${tg.path ? `${tg.path}\\` : ''}${tg.name}` : 'Root';
+  })();
 
 
   /* ── 점검 추가/수정 마법사 (1 카테고리 → 2 유형 → 3 파라미터) ── */
@@ -494,7 +508,12 @@ export default function SvcMonitor() {
       <div className="pc-root">
         <div className="pc-modebar">{viewSeg}</div>
         {driftBanner}
-        <OverviewDash onPickTarget={(h) => { setView('tree'); setTreeQ(h?.name || ''); }} />
+        <OverviewDash onPickTarget={(h) => {
+          // 중앙 저장소의 대상이면 그 대상을 바로 고른다(구분·검색을 맞춘다). 엣지에만 있는 행이면 이름으로 트리 검색만 채운다.
+          setView('tree'); doReset();
+          if (h?.id) { if (h.targetKind === 'infra' || h.targetKind === 'service') setMode(h.targetKind); setSel(`target:${h.id}`); jumpRef.current = true; }
+          else setTreeQ(h?.name || '');
+        }} />
       </div>
     );
   }
