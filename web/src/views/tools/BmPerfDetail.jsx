@@ -109,7 +109,7 @@ export function createDetailLoader(fetcher = (key) => fetchJson(`/tools/bm-usage
   };
 }
 
-export default function BmPerfDetail({ itemKey, item = null, authStops = [], staleMs = null, onClose, off = false, keepDays = null, initialTab = '' }) {
+export default function BmPerfDetail({ itemKey, item = null, authStops = [], staleMs = null, onClose, off = false, keepDays = null, initialTab = '', inCompare = false, onCompareToggle = null, cmpMsg = '' }) {
   // ⚠ 훅은 전부 조기 return 위에.
   const [st, setSt] = useState({ resp: null, err: null, loading: false });
   const [tab, setTab] = useState('summary');
@@ -128,13 +128,14 @@ export default function BmPerfDetail({ itemKey, item = null, authStops = [], sta
   return (
     <div ref={rootRef} style={{ minWidth: 0 }}>
       <BmPerfDetailView itemKey={itemKey} item={item} resp={st.resp} err={st.err} loading={st.loading} tab={tab} onTab={setTab}
-        onReload={() => load(itemKey)} onClose={onClose} authStops={authStops} staleMs={staleMs} off={off} keepDays={keepDays} />
+        onReload={() => load(itemKey)} onClose={onClose} authStops={authStops} staleMs={staleMs} off={off} keepDays={keepDays}
+        inCompare={inCompare} onCompareToggle={onCompareToggle} cmpMsg={cmpMsg} />
     </div>
   );
 }
 
 /** 상세 화면(상태 없음 — 응답 · 오류 · 탭을 받아 그린다). 테스트가 응답 뒤 화면을 SSR 로 본다(반증 D8). */
-export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null, loading = false, tab = 'summary', onTab, onReload, onClose, authStops = [], staleMs = null, off = false, now = Date.now(), keepDays = null }) {
+export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null, loading = false, tab = 'summary', onTab, onReload, onClose, authStops = [], staleMs = null, off = false, now = Date.now(), keepDays = null, inCompare = false, onCompareToggle = null, cmpMsg = '' }) {
   if (!itemKey) return null;
   const setTab = onTab || (() => {});
   const sameKey = resp && (resp.key === itemKey);
@@ -160,6 +161,7 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
         {e && <VerdictBadge verdict={e.verdict} />}
         <span className="bmp-chip" style={{ color: e ? toneVar(cov.tone) : 'var(--muted)' }}>경로 {e ? cov.label : '—'}</span>
         <span style={{ flex: '1 1 auto' }} />
+        {onCompareToggle && <button className="btn btn-sm bmp-touch" aria-pressed={inCompare} onClick={onCompareToggle}>{inCompare ? '비교에서 빼기' : '비교에 추가'}</button>}
         <button className="btn btn-sm bmp-touch" onClick={onReload} disabled={loading || !onReload}>{loading ? '읽는 중…' : '다시 읽기'}</button>
         {onClose && <button className="btn btn-sm bmp-touch" onClick={onClose}>닫기</button>}
       </div>
@@ -172,6 +174,7 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
         </div>
       )}
       {notes.map((x, i) => <p key={i} style={{ margin: '4px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--text-dim)' }}><BoldText text={x} /></p>)}
+      {cmpMsg && onCompareToggle && <p style={{ margin: '4px 0 0', fontSize: 12, color: toneVar('warn') }}>{cmpMsg}</p>}
 
       {errIs403 && <div style={{ marginTop: 8 }}><ErrorBox error={err} /></div>}
       {err && !errIs403 && <p style={{ margin: '8px 0 0', fontSize: 12, color: toneVar('bad'), lineHeight: 1.6 }}>{detailErrorText(err)}</p>}

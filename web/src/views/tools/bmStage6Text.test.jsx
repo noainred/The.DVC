@@ -1,0 +1,105 @@
+/**
+ * 리눅스 성능 6단계 — 서버 비교 · 수집 건강 · 운영 주석 · 공유 링크 · 진단 플레이북 · 목표선 화면의 문구 · 그리기 회귀.
+ * ⚠ 판정은 서버(multiCompare · collectHealth · annotations · playbooks · slo) — 여기서는 ① 웹 문구 표 = 서버 열거(1:1) ② 서버 함수가 만든 값을 그대로 그리는지(SSR)
+ *   ③ 웹이 다시 판정하지 않는지(소스 스윕) ④ 결측을 0 으로 그리지 않는지 ⑤ 폴링이 없는지를 고정한다.
+ */
+import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import * as C from './bmCompareText.js';
+import { CompareSide, CompareTable, CompareOverlay, createCompareLoader } from './BmCompareView.jsx';
+import { matrixRows } from './BmPerfBoard.jsx';
+import { groupCompareKeys } from './BmOpsFleet.jsx';
+import { COMPARE_GROUPS, COMPARE_METRICS, buildCompareTable, seriesStats } from '../../../../server/src/bmusage/multiCompare.js';
+
+const HERE = path.dirname(new URL(import.meta.url).pathname);
+const H = 3_600_000;
+const NOW = Math.floor(Date.now() / H) * H - 30 * 60_000;
+const h = React.createElement;
+const src = (f) => fs.readFileSync(path.join(HERE, f), 'utf8');
+const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+describe('서버 비교 — 문구 표 = 서버 열거', () => {
+  it('묶음 · 지표 이름 · 열 상태', () => {
+    expect(Object.keys(C.COMPARE_GROUP_TEXT).sort()).toEqual(Object.keys(COMPARE_GROUPS).sort());
+    for (const m of COMPARE_METRICS) expect(C.metricLabel(m.col)).not.toBe(m.col);
+    for (const s of ['ok', 'stale', 'none', 'other-corp', 'old-version', 'no-sample']) expect(C.COLUMN_STATE_TEXT[s]).toBeTruthy();
+    expect(C.columnStateView('old-version', { minEdgeVersion: '2.950.0' }).note).toMatch('v2.950.0');
+  });
+});
+
+describe('서버 비교 — 그리기는 서버 값 그대로 · 결측은 ‘—’', () => {
+  const from = NOW - H; const to = NOW;
+  const ser = (vals) => seriesStats(vals.map((v, i) => ({ t: from + (i + 1) * 300_000, avg: v, max: v, peak: v == null ? null : v + 10 })), { from, to, stepMs: 300_000 });
+  const cols = [
+    { key: 'a', name: 'bm-a', state: 'ok', vcenterId: 'vcA', verdict: 'saturated', series: { cpu_pct: ser([10, 20, null, 40]) }, hwValues: { power_w: 412 } },
+    { key: 'b', name: 'bm-b', state: 'ok', vcenterId: 'vcA', verdict: 'ok', series: { cpu_pct: ser([null, null, null, null]) }, hwValues: {} },
+    { key: 'c', name: 'bm-c', state: 'other-corp', vcenterId: 'vcB' },
+  ];
+  const table = buildCompareTable(cols, { metrics: ['cpu_pct', 'power_w'] });
+  const resp = { ok: true, from, to, columns: cols, table, metricMeta: Object.fromEntries(COMPARE_METRICS.map((m) => [m.col, { unit: m.unit, scaleMax: m.scaleMax, src: m.src }])) };
+  const nameOf = (k) => cols.find((c) => c.key === k)?.name || k;
+  const colors = C.colorPlan(cols.map((c) => c.key));
+  it('나란히 — 값 없는 서버는 ‘—’(0 이 아니다) · 다른 법인 열은 없다 · 400 폭 블록도 같은 값', () => {
+    const html = renderToStaticMarkup(h(CompareSide, { resp, nameOf, colors, valueMode: 'avgpeak', devHigh: true }));
+    expect(html).toContain('bm-a'); expect(html).not.toContain('bm-c');
+    expect(html).toContain('—'); expect(html).not.toMatch(/>0%</);
+    expect(html).toContain('bmcmp-stack');
+    expect(html).toContain('412W');
+  });
+  it('표 — 편차는 서버 값(결측 뺀 2대 미만이면 ‘—’) · 판정 행 · 베이스라인 행', () => {
+    const html = renderToStaticMarkup(h(CompareTable, { resp, nameOf, valueMode: 'avgpeak', devHigh: true }));
+    expect(table.rows[0].dev).toBe(null);
+    expect(html).toContain('USE 판정'); expect(html).toContain('베이스라인 이탈');
+    expect(html).toContain('편차는 결측을 뺀');
+  });
+  it('겹쳐서 — 서버마다 선 · 범례 · 하드웨어 지표는 겹칠 추이가 없다', () => {
+    const html = renderToStaticMarkup(h(CompareOverlay, { resp, nameOf, colors, valueMode: 'avg', metric: 'cpu_pct', onMetric: () => {} }));
+    expect(html).toContain('<path'); expect(html).toContain('bm-b');
+  });
+  it('스파크는 값 없는 점에서 끊는다', () => {
+    const d = C.sparkPath([[0, 1, null], [1, null, null], [2, 3, null]], { pick: 1, scale: 10, w: 10, h: 10, from: 0, to: 2 });
+    expect(d.match(/M/g).length).toBe(2);
+    expect(C.sparkPath([], {})).toBe('');
+  });
+  it('CSV — 결측은 빈 칸 · 수식 가드', () => {
+    const csv = C.compareCsv(resp, { view: 'table', nameOf: () => '=evil' });
+    expect(csv).toContain("'=evil"); expect(csv).not.toContain('null'); expect(csv).not.toContain('NaN');
+  });
+  it('색은 키에 고정(선택 순서와 무관)', () => {
+    expect(C.keyColor('bm-a')).toBe(C.keyColor('bm-a'));
+    const p1 = C.colorPlan(['x', 'y']); const p2 = C.colorPlan(['y', 'x']);
+    expect(p1.x.stroke).toBe(p2.x.stroke);
+  });
+  it('담기 상한 · 중복', () => {
+    expect(C.addKey(['a', 'b'], 'c', 2).error).toMatch('2대까지');
+    expect(C.addKey(['a'], 'a', 5).list).toEqual(['a']);
+  });
+  it('늦게 온 이전 응답은 버린다', async () => {
+    let r1; const slow = new Promise((r) => { r1 = r; });
+    let calls = 0;
+    const L = createCompareLoader(() => { calls += 1; return calls === 1 ? slow : Promise.resolve({ ok: true, n: 2 }); });
+    const got = [];
+    const p1 = L.load({}, (p) => got.push(p)); const p2 = L.load({}, (p) => got.push(p));
+    expect(await p2).toBe('ok'); r1({ ok: true, n: 1 }); expect(await p1).toBe('stale');
+    expect(got.filter((x) => x.resp).map((x) => x.resp.n)).toEqual([2]);
+  });
+  it('보드 행 체크 — 서버 칸 안(열 수 불변)', () => {
+    const rows = matrixRows([{ key: 'k1', name: 's1', agent: '', target: { paths: [] }, entry: null }], { onPickCmp: () => {}, cmpKeys: ['k1'] });
+    const html = renderToStaticMarkup(h('table', null, h('tbody', null, rows)));
+    expect((html.match(/<td/g) || []).length).toBe(18);
+    expect(html).toContain('type="checkbox"'); expect(html).toContain('checked');
+  });
+  it('용도 그룹 상위 5 — 나쁜 판정 먼저', () => {
+    const servers = [{ key: 'ok1', apps: ['gpdb'], status: 'ok' }, { key: 'bad1', apps: ['gpdb'], status: 'bad' }, { key: 'x', apps: ['airflow'], status: 'bad' }, { key: 'w1', apps: ['gpdb'], status: 'warn' }];
+    expect(groupCompareKeys(servers, 'gpdb')).toEqual(['bad1', 'w1', 'ok1']);
+  });
+  it('소스 스윕 — 편차 · 스큐 · 눈금 판정을 웹이 다시 하지 않는다 · 폴링 없음', () => {
+    const s = strip(src('bmCompareText.js')) + strip(src('BmCompareView.jsx'));
+    expect(s).not.toMatch(/Math\.max\(\.\.\.[^)]*\)\s*\/\s*Math\.min/);
+    expect(s).not.toMatch(/SKEW_RATIO|DEV_HIGH_RATIO|>=\s*2\s*\*/);
+    expect(s).not.toMatch(/setInterval|usePolling/);
+  });
+});

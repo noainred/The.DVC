@@ -31,7 +31,7 @@ const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
 const scrubIp = (v) => (typeof v === 'string' ? v.replace(IPV4_RE, (ip) => maskedIdToken(ip)) : v);
 const NOT_FOUND = Object.freeze({ __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' });
 
-function depsOf(deps = {}) {
+export function depsOf(deps = {}) {
   return {
     currentTargets, bmAddressHosts,
     listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
@@ -97,13 +97,23 @@ export async function bmFocusStart(req, deps = {}) {
   const { found, key, isAdmin } = r;
   // ⚠ 쓰기 범위는 조건 없이(조회 무제한 + writeVcenters 계정 — server/CLAUDE.md v2.733). 조회 밖은 위에서 404.
   if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return { status: 403, body: { ok: false, code: 'forbidden', error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용) — 집중 모니터링은 SSH · Redfish 를 분마다 엽니다.' } };
+  return focusStartResolved(req, D, { found, key, isAdmin, reason });
+}
+/**
+ * 범위 · 사유 검사를 마친 서버 하나에 집중을 건다(단건 시작 · 6단계 비교의 ‘5대 동시 집중’ 이 같은 함수 — 법인 상한 · 대기열 · 인증 가드는 startFocusLocal/엣지가 그대로).
+ *   감사 `bm-perf.focus`(via 표지 — 비교에서 건 것은 origin:'compare') · 6단계 운영 주석(집중 세션 자동 주석 — 실패해도 시작 결과는 그대로).
+ */
+export async function focusStartResolved(req, D, { found, key, isAdmin, reason, origin = '' }) {
   const by = String(req.user?.username || '').slice(0, 64);
   const out = found.via === 'local'
     ? await (await D.focus()).startFocusLocal({ target: found.target, reason, by, trigger: 'manual' })
     : await (await D.pull()).runEdgeFocus(found.agent, { key: found.realKey, reason, by });
   if (!['bad-reason', 'not-found'].includes(out?.code)) {
     D.audit({ user: req.user?.username, action: 'bm-perf.focus', target: found.realKey, ip: req.ip || '',
-      detail: JSON.stringify({ via: found.via, agent: found.agent || '', ok: !!out?.ok, code: out?.code || '', id: out?.id || null, status: out?.status || null, reason: reason.slice(0, 120) }).slice(0, 300) });
+      detail: JSON.stringify({ via: found.via, agent: found.agent || '', ok: !!out?.ok, code: out?.code || '', id: out?.id || null, status: out?.status || null, ...(origin ? { origin } : {}), reason: reason.slice(0, 120) }).slice(0, 300) });
+  }
+  if (out?.ok && out?.id && typeof D.autoAnnotate === 'function') {
+    try { await D.autoAnnotate({ found, id: out.id, reason, by, status: out.status || null }); } catch { /* 주석 실패는 집중 시작을 바꾸지 않는다 */ }
   }
   const body = scrubFocus({ ...out, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}) }, isAdmin);
   return { status: out?.ok ? 200 : await focusStatusOf(out?.code || 'edge'), body };

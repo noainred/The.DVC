@@ -12,9 +12,8 @@ import { pullFromEdge } from './edgePull.js';
 import { strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
-import fs from 'node:fs';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
-import { currentVersion } from '../config.js';
+import { featureMinEdgeVersion, STAGE5_TITLE_RE, _resetFeatureMinEdgeVersionForTest } from './featureMinEdgeVersion.js';
 import { BMPERF_RULE_LABEL, applyBmPerfFires } from '../issues/alertIssues.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -26,21 +25,10 @@ const TIMEOUT_MS = Math.max(5_000, Number(process.env.BMUSAGE_PULL_TIMEOUT_MS) |
  *   ⚠ 이 값은 게이트가 아니다: 판정은 ‘그 경로가 엣지에 있는가’(구버전 엣지는 collector 라우터에 경로가 없어 401/404 → old-version)이고 이 번호는 안내 문구에만 들어간다.
  *   한 번 읽어 메모한다(노트는 프로세스 수명 동안 바뀌지 않는다 — 업그레이드는 재시작).
  */
-export const PERF_OPS_RELEASE_TITLE_RE = /리눅스 통합 성능 모니터링 5단계/;
-const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
-let _minVerMemo = null;
-export function perfOpsMinEdgeVersion({ notesFile = new URL('../release-notes.json', import.meta.url), fallback = currentVersion } = {}) {
-  if (_minVerMemo) return _minVerMemo;
-  let v = null;
-  try {
-    const notes = JSON.parse(fs.readFileSync(notesFile, 'utf8'))?.notes;
-    v = (Array.isArray(notes) ? notes : []).filter((x) => PERF_OPS_RELEASE_TITLE_RE.test(String(x?.title || '')) && /^\d+\.\d+\.\d+$/.test(String(x?.version || ''))).map((x) => String(x.version)).sort(verCmp)[0] || null;
-  } catch { v = null; }
-  if (!v) v = fallback();
-  if (v && v !== '0.0.0') _minVerMemo = v;
-  return v;
-}
-export function _resetPerfOpsMinEdgeVersionForTest() { _minVerMemo = null; }
+export const PERF_OPS_RELEASE_TITLE_RE = STAGE5_TITLE_RE;
+// 6단계: 본체는 central/featureMinEdgeVersion.js(표지별 메모 · 같은 폴백) — 5단계 이름 · 인자 · 동작은 그대로(bmPerfMinEdgeVersion2929 가 고정).
+export function perfOpsMinEdgeVersion(o = {}) { return featureMinEdgeVersion(PERF_OPS_RELEASE_TITLE_RE, o); }
+export function _resetPerfOpsMinEdgeVersionForTest() { _resetFeatureMinEdgeVersionForTest(PERF_OPS_RELEASE_TITLE_RE); }
 const FOCUS_CODES = new Set(['ok', 'queued', 'bad-reason', 'bad-request', 'not-found', 'no-path', 'busy', 'daily-cap', 'auth-stopped', 'store-unavailable', 'settings-unreadable']);
 const FOCUS_STATUS = new Set(['queued', 'running', 'done', 'stopped', 'auth', 'interrupted', 'failed']);
 const VERDICTS = new Set(['bottleneck', 'saturated', 'errors', 'warn', 'ok', 'partial', 'stale', 'unknown']);

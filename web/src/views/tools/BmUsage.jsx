@@ -44,14 +44,21 @@ import BmPerfDetail from './BmPerfDetail.jsx';
 import { boardItems, allAuthStops } from './bmPerfText.js';
 // v2.923(리눅스 성능 4단계): 함대 ‘용도 분석’ · ‘장애 기록’ 보기(도구 키 그대로 — 이 화면 안의 보기 전환).
 import { BmPurposeFleet, BmFaultsFleet } from './BmOpsFleet.jsx';
-import BmPerfRulesPanel from './BmPerfRulesPanel.jsx'; // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
+import BmPerfRulesPanel from './BmPerfRulesPanel.jsx';
+// 6단계: 서버 비교(2~5대) — 고른 서버 목록은 이 화면이 들고(보드 체크 · 상세 ‘비교에 추가’ · 병목 Top 5 · 용도 그룹) 비교 보기가 그린다.
+import BmCompareView from './BmCompareView.jsx';
+import { addKey } from './bmCompareText.js'; // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
 
 /** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
 const VIEW_KEY = 'bmUsage.view';
 // 보기는 URL 해시가 아니라 localStorage 기억 + 자동 기본값(v2.920) — useHashTab 은 데이터 전 fallback 을 해시에 굳혀 ‘성능 항목이 있으면 USE’ 를 깬다(audit2613a 스윕의 명시 예외).
-const VIEWS = ['use', 'util', 'purpose', 'faults'];
+const VIEWS = ['use', 'util', 'purpose', 'faults', 'compare'];
 function readView() { try { const v = localStorage.getItem(VIEW_KEY); return VIEWS.includes(v) ? v : null; } catch { return null; } }
 function writeView(v) { try { localStorage.setItem(VIEW_KEY, v); } catch { /* 저장 실패는 무시 — 다음에 기본값 */ } }
+/** 6단계: 비교에 담은 서버(사람별 편의 — 실패해도 빈 목록으로 그린다). */
+const CMP_KEY = 'bmUsage.compare';
+function readCmp() { try { const a = JSON.parse(localStorage.getItem(CMP_KEY) || '[]'); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x).slice(0, 8) : []; } catch { return []; } }
+function writeCmp(a) { try { localStorage.setItem(CMP_KEY, JSON.stringify(a)); } catch { /* 무시 */ } }
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
 const COLS = [
@@ -107,6 +114,10 @@ export function BmUsage() {
   // v2.920: 보기 — 'use'(USE 매트릭스 보드) | 'util'(기존 사용률 표). null 이면 자동(성능 항목이 있으면 USE).
   const [viewSel, setViewSel] = useState(readView);
   const [perfSel, setPerfSel] = useState('');   // 성능 상세를 연 서버(엣지 위임 서버도 — 사용률 추이는 이 노드 대상만)
+  const [cmpKeys, setCmpKeysState] = useState(readCmp);   // 6단계 서버 비교에 담은 서버
+  const [cmpMsg, setCmpMsg] = useState('');
+  const [cmpMax, setCmpMax] = useState(5);
+  const setCmpKeys = React.useCallback((a) => { const v = (Array.isArray(a) ? a : []).slice(0, 8); setCmpKeysState(v); writeCmp(v); }, []);
 
   // v2.628 WEB2628-06: 늦게 온 이전 GET 이 방금 저장한 설정(form)을 덮지 않게 세대로 거른다(저장 성공도 세대를 올린다).
   const loadGen = React.useRef(0);
@@ -235,6 +246,14 @@ export function BmUsage() {
     setSel(key); setDetail(null); setRangeKey('24h');
     await loadDetail(key, '24h');
   }
+  /** 6단계 비교 — 담기 · 빼기(상한은 서버가 준 maxServers · 넘치면 이유를 말한다) · 여러 대를 한 번에 담고 비교 보기로. */
+  function pickCmp(key) {
+    if (cmpKeys.includes(key)) { setCmpKeys(cmpKeys.filter((k) => k !== key)); setCmpMsg(''); return; }
+    const r = addKey(cmpKeys, key, cmpMax);
+    setCmpMsg(r.error); if (!r.error) setCmpKeys(r.list);
+  }
+  function compareKeys(keys) { setCmpKeys((keys || []).slice(0, cmpMax)); setCmpMsg((keys || []).length > cmpMax ? `${cmpMax}대까지 비교합니다 — 앞 ${cmpMax}대만 담았습니다.` : ''); chooseView('compare'); }
+  useEffect(() => { fetchJson('/tools/bm-usage/compare/sets').then((r) => { if (Number.isInteger(r?.maxServers)) setCmpMax(r.maxServers); }).catch(() => {}); }, []);
   async function changeRange(rk) {
     setRangeKey(rk);
     if (sel) await loadDetail(sel, rk);
@@ -445,6 +464,7 @@ export function BmUsage() {
           <button role="tab" aria-selected={view === 'util'} className={view === 'util' ? 'active' : ''} onClick={() => chooseView('util')}>사용률 표</button>
           <button role="tab" aria-selected={view === 'purpose'} className={view === 'purpose' ? 'active' : ''} onClick={() => chooseView('purpose')}>용도 분석</button>
           <button role="tab" aria-selected={view === 'faults'} className={view === 'faults' ? 'active' : ''} onClick={() => chooseView('faults')}>장애 기록</button>
+          <button role="tab" aria-selected={view === 'compare'} className={view === 'compare' ? 'active' : ''} onClick={() => chooseView('compare')}>서버 비교{cmpKeys.length ? ` ${cmpKeys.length}` : ''}</button>
         </div>
         <DeviceFacetBar
           dcChips={barFacets.dcChips} typeChips={barFacets.typeChips} dcSel={dcSel} typeSel={typeSel}
@@ -541,11 +561,16 @@ export function BmUsage() {
           items={perfShown} th={data?.perfThresholds || null} intervalMs={st.intervalMs ?? data?.settings?.intervalMs}
           authStops={perfAuthStops} staleMs={edges?.staleMs ?? null} corpOff={data?.skippedCounts?.['corp-off'] || 0}
           onOpen={openDetail} selKey={perfSel} perfError={data?.perfError || ''}
+          cmpKeys={cmpKeys} onPickCmp={pickCmp} onCompare={compareKeys} cmpMsg={cmpMsg}
         />
+      )}
+      {view === 'compare' && (
+        <BmCompareView keys={cmpKeys} onKeys={(k) => { setCmpKeys(k); setCmpMsg(''); }} onOpen={(k) => openDetail(k)}
+          names={Object.fromEntries(perfItems.map((it) => [it.key, it.name]))} />
       )}
       {/* v2.920: 서버 성능 상세(머리 · 판정 띠 · 탭 요약/자원/하드웨어) — 사용률 추이는 아래 기존 상세 카드에 그대로. */}
       {/* v2.923: 함대 보기 — 서버를 누르면 아래 상세가 그 탭으로 열린다. */}
-      {view === 'purpose' && <BmPurposeFleet onOpen={(k) => openDetail(k, 'profile')} />}
+      {view === 'purpose' && <BmPurposeFleet onOpen={(k) => openDetail(k, 'profile')} onCompare={compareKeys} />}
       {view === 'faults' && <BmFaultsFleet onOpen={(k) => openDetail(k, 'faults')} />}
       {perfSel && (
         <BmPerfDetail
@@ -553,6 +578,7 @@ export function BmUsage() {
           authStops={perfAuthStops} staleMs={edges?.staleMs ?? null}
           keepDays={{ server: data?.settings?.dailyRetentionDays ?? null, dev: data?.settings?.store?.devHourlyDays ?? null }}
           onClose={() => setPerfSel('')}
+          inCompare={cmpKeys.includes(perfSel)} onCompareToggle={() => pickCmp(perfSel)} cmpMsg={cmpMsg}
         />
       )}
 

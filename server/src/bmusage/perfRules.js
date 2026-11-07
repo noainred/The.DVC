@@ -50,7 +50,8 @@ export const LIMITS = Object.freeze({
   baseline: { weeks: [2, 12], bandPct: [5, 300], minWeeks: [2, 12], maxMissingPct: [0, 90] },
   health: { chronyMs: [1, 600_000], fdPct: [10, 99], conntrackPct: [10, 99], dmesgErr24h: [0, 100_000], certDays: [1, 365] },
   changes: { keepDays: [7, 400] },
-  compare: { diffPct: [1, 500] },
+  // 6단계: maxServers — 서버 비교 한 화면의 서버 수 상한(설계 §15 ‘2~5대 · 상한 설정 · 기본 5’ — 바깥 한계 8: 열이 늘면 400 폭 · 엣지 요청이 그만큼 는다).
+  compare: { diffPct: [1, 500], maxServers: [2, 8] },
 });
 export const DEFAULTS = Object.freeze({
   rules: {},
@@ -62,7 +63,7 @@ export const DEFAULTS = Object.freeze({
   baseline: { weeks: 4, bandPct: 40, minWeeks: 4, maxMissingPct: 25 },
   health: { ...HEALTH_DEFAULTS },
   changes: { keepDays: 30 },
-  compare: { diffPct: 20 },
+  compare: { diffPct: 20, maxServers: 5 },
   // 유지보수 창 억제(Bareos · Veeam 스케줄) — 베어메탈 서버의 백업 창을 읽는 원천이 아직 없다(perfAlerts.maintenanceFor 머리말). 켜 두면 원천이 생길 때 바로 쓴다.
   maintenance: { backupWindows: true },
 });
