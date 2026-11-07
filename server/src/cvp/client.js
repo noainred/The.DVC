@@ -60,6 +60,11 @@ const FOLLOW_DEPTH = 3;
  */
 // v2.644: counters 2(`…/current` 아래에 `statistics` 같은 포인터가 한 단계 더 있을 수 있다) · bgp 3(실장비: 표 → VRF(default·Private) →
 //   피어 → 그 피어의 값 — 캡처에서 VRF 아래 피어가 또 포인터였다. 깊이 2 에서는 이름·VRF 만 남아 '형식을 읽지 못했습니다' 였다).
+/**
+ * v2.924(반증 M-2): LLDP 는 포트 → remoteSystem → 이웃 세 단계라 포트마다 요청이 2~3회다 — 공용 상한(FOLLOW_REQ_MAX)이면 포트 56개 장비에서 일부 포트 이웃을
+ *   잃었다(재현). LLDP 만 상한을 3배로(예산·시한 안에서). 그래도 잘리면 부분 읽기로 표시하고 저장소가 읽은 포트만 바꾼다(db.saveL2 lldpPartial).
+ */
+export const FOLLOW_REQ_MAX_BY_KIND = Object.freeze({ lldp: FOLLOW_REQ_MAX * 3 });
 export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ interfaces: 1, intfConfig: 1, counters: 2, memory: 1, cpu: 2, bgp: 3, power: 2, cooling: 2, temperature: 2, xcvr: 3, lldp: 3, fdb: 1 });
 /*
  * v2.646(사용자 신고 'xcvr 이 여전히 나오지 않는다' — 캡처: `all › Ethernet1` 등 전부 '상태 미확인'): 트랜시버 노드는 **장착 여부만** 주고
@@ -566,7 +571,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       prefer.set(kind, tpl);
       noteSample(kind, tpl, r, serial);
       if (!seenFields[kind] && out.keys) seenFields[kind] = out.keys.slice(0, 40);
-      return { value: out.value, extra: out };
+      return { value: out.value, extra: out, followTruncated };   // v2.924(반증 M-2): 포인터 추종이 잘렸는가(부분 읽기)
     }
     /**
      * 포인터를 따라가 하위 개체 응답을 모은다(깊이 FOLLOW_DEPTH · 요청 FOLLOW_REQ_MAX · 장비 안 동시 FOLLOW_CONCURRENCY).
@@ -580,7 +585,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       const maxDepth = FOLLOW_DEPTH_BY_KIND[kind] || FOLLOW_DEPTH;
       for (let depth = 0; depth < maxDepth && level.length; depth++) {
         const next = [];
-        const room = Math.max(0, FOLLOW_REQ_MAX - requests);
+        const room = Math.max(0, (FOLLOW_REQ_MAX_BY_KIND[kind] || FOLLOW_REQ_MAX) - requests);
         if (level.length > room) { truncated += level.length - room; level = level.slice(0, room); }
         await poolSettled(level, FOLLOW_CONCURRENCY, async (x) => {
           if (left() < MIN_SLICE_MS || signal?.aborted) { truncated++; return; }
@@ -710,7 +715,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       if (partsDue && L2_COLLECT) {
         if (left() >= MIN_SLICE_MS) {
           const r = await readKind('lldp', serial, (t) => { const x = P.parseLldp(t); return { value: x.neighbors, keys: x.keys, truncated: x.truncated }; }, upSet ? (k) => upSet.has(k) : null);
-          if (r.value) { dev.lldp = r.value; dev.lldpTruncated = r.extra.truncated || 0; } else if (!r.skipped) dev.lldp = null;
+          if (r.value) { dev.lldp = r.value; dev.lldpTruncated = (r.extra.truncated || 0) + (r.followTruncated || 0); dev.lldpPartial = (r.followTruncated || 0) > 0; } else if (!r.skipped) dev.lldp = null;
         }
         if (left() >= MIN_SLICE_MS) {
           const r = await readKind('fdb', serial, (t) => { const x = P.parseFdb(t); return { value: x.entries, keys: x.keys, truncated: x.truncated, portsOverCap: x.portsOverCap, total: x.total }; });

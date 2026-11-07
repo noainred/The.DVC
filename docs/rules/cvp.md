@@ -157,4 +157,15 @@
   - 매칭 근거 순위 **LLDP(확정) > MAC(높음 — 물리 NIC MAC 학습) > VM MAC(높음 — 그 포트 학습의 절반 이상이 이 호스트 VM vNIC, 2개 이상 또는 학습 1개뿐) > 포트 설명(보통)**.
     포트 학습 수를 모르면 VM MAC 비율을 판정하지 않는다(트렁크일 수 있다). 한 포트가 여러 근거면 가장 강한 하나 + also. 판정 코어는 `hostMatch.matchL2 · mergeUplinks` 하나 —
     베어메탈 성능 화면(PROFILES §10 ‘③ LLDP · ④ MAC — 미구현’)도 같은 함수를 쓰면 된다(두 벌 금지). ⚠ ESXi 는 표준 vSwitch 에서 LLDP 를 보내지 않는다(분산 스위치에서 켜야 한다).
+  - ⚠ **반증 1인(v2.924) 확정분 — 되돌리지 말 것**(재현 스크립트로 확인 · 회귀 `cvpL2924.test.js`):
+    · H-1 MAC 근거는 그 포트 학습의 **절반 이상이 이 호스트 것**(NIC MAC + VM MAC)일 때만 · 그 포트의 **LLDP 이웃이 다른 장비면 버림** · Vxlan·Vlan·Loopback·Management 는 보지 않음 —
+      vmk0(=vmnic0 MAC)을 MLAG peer 가 peer-link 에서 배워 스위치 사이 포트가 '높음' 업링크로 잡히고 호스트 송수신 합에 들어갔다(작은 법인은 포트당 512 상한 아래).
+    · M-1 매칭은 **그 호스트 법인의 CVP + 법인 미지정 CVP** 만(전체 범위 계정도) · LLDP 이름은 양쪽 다 도메인이 있으면 전체 이름 일치 — 다른 법인의 같은 짧은 이름이 '확정' 으로 붙었다.
+    · M-2 LLDP 추종 요청 상한 3배(`FOLLOW_REQ_MAX_BY_KIND`) · 잘리면 **부분 읽기**(`lldpPartial` — 읽은 포트만 바꾼다).
+    · M-3 종류마다 읽은 시각(`fdbAt`·`lldpAt` — push·중앙 저장 모두) · 업링크마다 근거 나이(`l2At`) · 3시간 넘으면 ‘오래됨’ · 수집 현황에 마지막 읽기 실패 수.
+    · L-1 push 가 장비마다 양보 · L-2/L-6 큰 L2 삭제는 COMMIT 밖 조각(chunkedDelete) · 중앙은 장비 레코드로 보고한 장비의 L2 만(`requireDevice`) · 고아 L2 는 prune 이 지운다.
+    · L-3 NIC MAC 과 VM MAC 을 따로 조회(상한 때문에 NIC 행이 빠졌다) · L-4 FDB 알림 시각 순 · 같은 키 마지막 값 · deletes(배열·맵) · L-7 `saved` 가 없는 답(noDelegation)은 구버전 중앙으로 보지 않는다 · 보류는 `_last.l2HeldUntil`.
+    · L-9 이웃 섀시 MAC 이 NIC MAC 이면 LLDP 일치(IP 로 알린 이웃) · NIC 목록이 없어도 portId 가 vmnicN 이면 그 이름.
+    · 남긴 것(정직): L-5 vMotion·유지보수 직후 30분 FDB 와 지금 VM 목록이 어긋나 VM MAC 근거가 옮겨 간 쪽 호스트에 잠깐 붙을 수 있다(근거 나이로만 드러난다) ·
+      L-8 FDB 응답이 본문 상한(BODY_MAX_BYTES 8MB)을 넘으면 그 장비는 매 주기 못 읽는다(사유가 남는다).
 

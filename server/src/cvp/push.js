@@ -60,6 +60,15 @@ const _sent = new Map(); // `${cvpId}|${key}` → { h, at }
 const _l2Sent = new Map(); // `${cvpId}|${key}` → { h, at }
 let _l2Unsupported = 0;
 export const L2_UNSUPPORTED_HOLD_MS = 6 * 3600_000;
+/**
+ * v2.924(반증 L-7): 중앙 답 → L2 수신 여부(순수). 'acked' = saved.l2 가 수(새 중앙) · 'old-central' = saved 는 있는데 l2 칸이 없다(구버전 중앙) ·
+ *   'unknown' = saved 자체가 없다(noDelegation 등 — 구버전으로 단정하지 않는다: 보류하지 않고 보낸 것으로도 치지 않는다).
+ */
+export function l2AckOf(reply) {
+  const sv = reply && typeof reply === 'object' ? reply.saved : null;
+  if (!sv || typeof sv !== 'object') return 'unknown';
+  return typeof sv.l2 === 'number' ? 'acked' : 'old-central';
+}
 /** L2 를 실을지(순수) — 바뀐 장비 · 전량 갱신 주기 · 구버전 중앙 보류. */
 export function l2Due(prev, h, nowMs, { refreshMs = FULL_REFRESH_MS, unsupportedAt = 0, holdMs = L2_UNSUPPORTED_HOLD_MS } = {}) {
   if (!h) return false;
@@ -169,7 +178,7 @@ async function pushInner() {
   const servers = serversForThisNode();
   const statuses = servers.map(statusFor);
   const deviceItems = []; const deviceKeys = {}; const touch = []; const sentNow = []; const devSamples = []; const events = {}; const evMaxNow = new Map();
-  const l2Items = []; const l2SentNow = []; let l2Acked = false;   // v2.924(B-②)
+  const l2Items = []; const l2SentNow = []; let l2Acked = false; let l2OldCentral = false;   // v2.924(B-②)
   const nowMs = Date.now();
   let evBytes = 0; let evHeld = 0;
   let devicesUnavailable = !(await db.available());
@@ -196,6 +205,7 @@ async function pushInner() {
       try {
         const metas = await db.l2MetaFor(db.LOCAL_AGENT, srv.id);
         for (const m of metas || []) {
+          await new Promise((r) => setImmediate(r));   // 반증 L-1: 장비마다 양보(행을 읽고 JSON 을 만드는 동안 타이머를 막지 않게)
           const k = `${srv.id}|${m.key}`; const h = `${m.fdbHash}|${m.lldpHash}`;
           if (!l2Due(_l2Sent.get(k), m.fdbHash || m.lldpHash ? h : '', nowMs, { unsupportedAt: _l2Unsupported })) continue;
           const rec = await db.l2RecordFor(db.LOCAL_AGENT, srv.id, m.key);
@@ -265,7 +275,7 @@ async function pushInner() {
       throw e;
     }
     if (i === 0 && reply?.saved && typeof reply.saved.touched === 'number') touchedAt = reply.saved.touched;
-    if (typeof reply?.saved?.l2 === 'number') l2Acked = true;   // v2.924(B-②): 새 중앙만 이 칸을 준다
+    { const a = l2AckOf(reply); if (a === 'acked') l2Acked = true; else if (a === 'old-central') l2OldCentral = true; }   // v2.924(B-② · 반증 L-7)
     drop = mergeDrop(drop, dropSummaryOf(reply));
   }
   if (rows.length) saveCursor(maxRowid);
@@ -274,7 +284,7 @@ async function pushInner() {
   // v2.924(B-②): 중앙이 L2 를 받았다고 답했을 때만 보낸 것으로 친다. 실었는데 답이 없으면 구버전 중앙 — 보류 시각을 적는다.
   if (l2SentNow.length) {
     if (l2Acked) { for (const [k, h] of l2SentNow) _l2Sent.set(k, { h, at: nowMs }); _l2Unsupported = 0; }
-    else { _l2Unsupported = nowMs; if (warnL2('unsupported')) console.warn(`[cvp-push] 중앙이 LLDP·MAC 테이블을 받았다고 답하지 않았습니다(구버전 중앙으로 보입니다) — ${Math.round(L2_UNSUPPORTED_HOLD_MS / 3600_000)}시간 동안 싣지 않습니다`); }
+    else if (l2OldCentral) { _l2Unsupported = nowMs; if (warnL2('unsupported')) console.warn(`[cvp-push] 중앙이 LLDP·MAC 테이블을 받았다고 답하지 않았습니다(구버전 중앙으로 보입니다) — ${Math.round(L2_UNSUPPORTED_HOLD_MS / 3600_000)}시간 동안 싣지 않습니다`); }
   }
   // v2.611(EDGE2611-04): 중앙에 그 장비 행이 없으면(중앙 DB 교체·정리) touch 는 아무것도 갱신하지 않는다 — 해시를 버려
   //   다음 push 에 레코드 전체를 다시 보낸다(한 시간 전량 갱신을 기다리지 않게).
@@ -294,7 +304,7 @@ async function pushInner() {
   const more = rows.length >= MAX_ROWS;
   const lost = db.lostUnsentStats();
   _last = { at: Date.now(), ok: true, servers: statuses.length, devices: deviceItems.length, touched: touch.length, samples: rows.length, chunks: chunks.length, bytes, gzBytes: gz,
-    l2: l2Items.length, ...(l2Items.length && !l2Acked ? { l2Unsupported: true } : {}),
+    l2: l2Items.length, ...(_l2Unsupported && nowMs - _l2Unsupported < L2_UNSUPPORTED_HOLD_MS ? { l2HeldUntil: _l2Unsupported + L2_UNSUPPORTED_HOLD_MS, l2HeldNote: '중앙이 LLDP·MAC 테이블을 받지 않아(구버전 중앙) 보류 중입니다' } : {}),
     backlogRows, more, ...(evHeld ? { eventsHeld: evHeld, eventsHeldNote: '이벤트 바이트 상한으로 다음 주기에 보냅니다' } : {}), ...(touchMissing ? { touchMissing } : {}), ...(lost.total ? { lostUnsent: lost.total, lostUnsentAt: lost.at } : {}),
     ...(devicesUnavailable ? { devicesUnavailable: true, note: '엣지 DB 를 쓸 수 없어 상태만 보냈습니다(중앙의 장비 목록은 그대로)' } : {}),
     ...(servers.length ? {} : { cleared: true, note: '위임 CVP 0대 — 중앙의 이 엣지 목록을 비웠습니다' }),

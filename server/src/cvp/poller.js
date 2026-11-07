@@ -202,7 +202,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
       if (r.events && Array.isArray(r.events.list)) await db.saveEvents(db.LOCAL_AGENT, full.id, r.events.list, { now: readAt });
       // v2.924(SAN·CVP 설계 B-②): LLDP 이웃 · MAC 테이블 — 부품 주기에 시도한 장비만(배열 = 바꿈 · null = 실패 시각만 · undefined = 건드리지 않음).
       const l2Items = r.devices.filter((d) => d.lldp !== undefined || d.fdb !== undefined)
-        .map((d) => ({ key: d.key, ts: d.l2At ?? readAt, fdb: d.fdb, lldp: d.lldp, fdbMeta: d.fdbMeta, lldpTruncated: d.lldpTruncated }));
+        .map((d) => ({ key: d.key, ts: d.l2At ?? readAt, fdb: d.fdb, lldp: d.lldp, fdbMeta: d.fdbMeta, lldpTruncated: d.lldpTruncated, lldpPartial: d.lldpPartial === true }));
       if (l2Items.length) await db.saveL2(db.LOCAL_AGENT, full.id, l2Items);
     } catch (e) { saved = { error: e.message }; console.warn(`[cvp] ${full.name || full.id}: DB 적재 실패 — ${e.message}`); }
     putStatus(full.id, {

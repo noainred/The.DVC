@@ -2292,7 +2292,7 @@ centralRouter.post('/cvp-data', requireCentral(), async (req, res) => {
     // v2.924(SAN·CVP 설계 B-②): LLDP · MAC 테이블. saved.l2 는 **항상 수**로 답한다 — 엣지는 이 칸이 있어야 보낸 것으로 친다(구버전 중앙과 구분).
     saved.l2 = 0;
     for (const [cvpId, list] of clean.l2ByCvp || []) {
-      const r = await cdb.saveL2(agent, cvpId, list);
+      const r = await cdb.saveL2(agent, cvpId, list, { requireDevice: true });   // 반증 L-6: 장비 레코드로 보고한 장비만
       saved.l2 += r.devices;
       if (r.unavailable) saved.unavailable = true;
     }

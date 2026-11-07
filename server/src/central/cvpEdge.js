@@ -439,6 +439,10 @@ export function cleanL2(x, now = Date.now()) {
   const ts = tsClamp(x.ts, now);
   if (ts == null) return null;
   const out = { key, ts };
+  // v2.924(반증 M-3): 종류마다 읽은 시각(엣지 시각은 수신 시각으로 자른다) — 없으면 ts.
+  const fa = tsClamp(x.fdbAt, now); const la = tsClamp(x.lldpAt, now);
+  if (fa != null) out.fdbAt = fa;
+  if (la != null) out.lldpAt = la;
   if (Array.isArray(x.fdb)) {
     const rows = [];
     for (const e of x.fdb) {

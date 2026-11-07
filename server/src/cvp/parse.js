@@ -13,6 +13,7 @@
 import { healthWord } from '../storage/healthWord.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
+import { pushAll } from '../util/pushAll.js';   // v2.924(반증 L-4)
 
 export const DEVICE_MAX = 2000;
 export const PORT_MAX = 1024;
@@ -1265,23 +1266,29 @@ export function parseFdb(text) {
   };
   const { values } = splitJsonStream(text);
   let format = null; let updates = 0;
-  for (const v of values) {
-    if (!isObj(v) || !Array.isArray(v.notifications)) continue;
-    format = 'notifications';
-    for (const n of v.notifications) {
-      if (!isObj(n) || !isObj(n.updates)) continue;
-      for (const [k, u] of Object.entries(n.updates)) {
-        updates++;
-        const raw = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u;
-        if (ptrSegs(raw) != null) continue;
-        const val = unwrap(raw);
-        if (!isObj(val)) continue;
-        const kf = isObj(u) && isObj(u.key) ? flatten(u.key, 'key') : {};
-        take(k, { ...kf, ...flatten(val) });
-        if (all.length > FDB_MAX * 4) break;   // 상한의 4배를 넘으면 더 읽지 않는다(포트당 상한 판정에 충분)
-      }
+  // v2.924(반증 L-4): 알림을 시각 순으로 적용하고 같은 update 키는 **마지막 값**으로, deletes 는 지운다(entitiesOf 와 같은 규칙) —
+  //   예전에는 첫 값을 남겨 다른 포트로 옮긴 MAC 이 옛 포트에, 지워진 MAC 이 그대로 남았다(재현).
+  const latest = new Map();   // update 키 → [name, fields]
+  const notes = [];
+  for (const v of values) if (isObj(v) && Array.isArray(v.notifications)) { format = 'notifications'; pushAll(notes, v.notifications); }
+  for (const n of byTimestamp(notes)) {
+    if (!isObj(n)) continue;
+    // deletes 는 키 배열 또는 updates 와 같은 모양의 맵(키 → {key}) 둘 다 받는다(판본마다 다를 수 있다 — 추정).
+    const dels = Array.isArray(n.deletes) ? n.deletes : isObj(n.deletes) ? Object.keys(n.deletes) : [];
+    for (const d of dels) if (typeof d === 'string' || typeof d === 'number') latest.delete(String(d));
+    if (!isObj(n.updates)) continue;
+    for (const [k, u] of Object.entries(n.updates)) {
+      updates++;
+      const raw = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u;
+      if (ptrSegs(raw) != null) continue;
+      const val = unwrap(raw);
+      if (!isObj(val)) continue;
+      const kf = isObj(u) && isObj(u.key) ? flatten(u.key, 'key') : {};
+      if (!latest.has(k) && latest.size > FDB_MAX * 4) continue;   // 상한의 4배를 넘으면 새 키는 더 받지 않는다(포트당 상한 판정에 충분)
+      latest.set(k, [k, { ...kf, ...flatten(val) }]);
     }
   }
+  for (const [name, f] of latest.values()) take(name, f);
   if (!format) {
     const r = entitiesOf(text);
     if (notRead(r.format, r.entities)) return { entries: null, keys: r.keys };
