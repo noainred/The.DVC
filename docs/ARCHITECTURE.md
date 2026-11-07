@@ -111,7 +111,7 @@
 | `hostaccess/` | 4 | 553 | `hostaccess/service.js` (2) | hostaccess/service.js — 호스트 접근 제어 실행 계층(v2.485): 상태 조회 · 계획 · 적용(런타임) · 확정 · 되돌림. |
 | `hostcfg/` | 6 | 1,113 | `hostcfg/parse.js` (4) | 호스트 구성·보안(v2.699 — A1 보안 하드닝 · A9 구성 드리프트 · A11 재부팅 필요·빌드 불일치 · A12 호스트 인증서 만료). |
 | `idrac/` | 39 | 8,609 | `idrac/registry.js` (25) | iDRAC registry — the managed list of Dell servers whose power draw we collect |
-| `insights/` | 21 | 8,949 | `insights/analysisServers.js` (11) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
+| `insights/` | 21 | 8,981 | `insights/analysisServers.js` (11) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
 | `intro/` | 5 | 1,967 | `intro/support.js` (0) | GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`. |
 | `inventory/` | 10 | 1,428 | `inventory/osKind.js` (3) | VM 게스트 OS 문자열 → 'windows' \| 'linux' \| 'other' \| null (v2.834 — Bareos 백업 대상 OS 구분). |
 | `ipam/` | 30 | 5,721 | `ipam/ledger.js` (7) | IPAM ledger builder — turns a snapshot into a per-center IP record list. |
@@ -172,7 +172,7 @@
 | `wiki/` | 4 | 1,225 | `wiki/store.js` (6) | wiki/store.js — 위키(컨플루언스 같은 문서 공간) 저장소(v2.881 · 시안 docs/design/wiki-issues ①~⑤ · ⑫). |
 | `xferspeed/` | 7 | 1,993 | `xferspeed/schedule.js` (4) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 95개 · 파일 1240개 · 283,694줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 95개 · 파일 1240개 · 283,726줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
