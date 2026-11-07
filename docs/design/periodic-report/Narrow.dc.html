@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>정기 점검 보고 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.seg{display:flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{flex:1;min-height:40px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6}
+.tabs{display:flex;gap:2px;border-bottom:1px solid #243049;overflow-x:auto;white-space:nowrap}
+.tabs a{flex:none;padding:12px 12px;font-weight:700;font-size:13px;color:#8b9bb4;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#22d3ee}
+.st{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:11.5px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+.st .g{font-family:"JetBrains Mono",monospace;font-size:11px}
+.st.ok{color:#22c55e;background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35)}
+.st.warn{color:#f59e0b;background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4)}
+.st.crit{color:#f87171;background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.45)}
+.st.unk{color:#9aa4b2;background:rgba(139,155,180,.14);border-color:rgba(139,155,180,.4)}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",monospace;font-size:12px}
+.band{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:10px;background:rgba(37,99,235,.08);border:1px solid rgba(59,130,246,.3);font-size:12px;color:#c7d2e3}
+.kpi{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.kpi .k{padding:10px 12px;min-width:0}
+.kpi .l{font-size:11.5px;color:#8b9bb4;font-weight:600}
+.kpi .v{font-size:22px;font-weight:800;margin-top:2px;word-break:keep-all}
+.kpi .v small{font-size:12px;font-weight:600;color:#8b9bb4;margin-left:3px}
+.next{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.next .k{padding:10px 12px;min-width:0;display:flex;flex-direction:column;gap:2px}
+.next .t{font-weight:800;font-size:12.5px;display:flex;justify-content:space-between;align-items:center}
+.next .when{font-family:"JetBrains Mono",monospace;font-size:13px;font-weight:700}
+table{border-collapse:collapse;width:100%;font-size:12px;min-width:720px}
+th{text-align:left;font-weight:700;color:#8b9bb4;font-size:11px;padding:8px 8px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:8px 8px;border-bottom:1px solid #1f2a40;white-space:nowrap;vertical-align:middle}
+td.num{text-align:right;font-family:"JetBrains Mono",monospace}
+.axis .a{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.axis .t{display:flex;align-items:center;gap:8px;font-weight:800;font-size:13px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px}
+.cnts{display:flex;gap:6px;flex-wrap:wrap}
+.cnts .n{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:700;border:1px solid #243049;background:#0f1626}
+.cnts .n b{font-family:"JetBrains Mono",monospace}
+.sel{min-height:40px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;box-sizing:border-box;display:flex;align-items:center;gap:8px;flex:1 1 150px}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;min-height:1900px;max-width:100%">
+  <div class="tb">
+    <button class="btn" type="button" aria-label="메뉴" style="min-height:36px;width:36px;padding:0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <span class="logo"><span class="v">D</span>THE DVC</span>
+    <span class="muted" style="margin-left:auto;font-size:11.5px">KST 11-07 09:12</span>
+  </div>
+  <main style="padding:14px 16px 24px;display:flex;flex-direction:column;gap:12px;min-width:0">
+    <div>
+      <div class="muted" style="font-size:11.5px">특수 기능 › 리포트 · 점검</div>
+      <h1 style="margin:2px 0;font-size:19px;font-weight:800">정기 점검 보고</h1>
+      <div class="muted" style="font-size:12px">일일 · 주간 · 월간 · 분기 — 저장된 수집 결과로 만든 점검 보고서</div>
+    </div>
+    <div class="tabs" role="tablist"><a href="#" class="on" role="tab" aria-selected="true">보관함 97</a><a href="#" role="tab">점검 항목 54</a><a href="#" role="tab">일정 · 전달</a></div>
+    <div style="display:flex;gap:8px"><button class="btn primary" type="button" style="flex:1">지금 만들기 ▾</button><button class="btn" type="button" style="flex:1">일정 · 전달</button></div>
+    <div class="band"><span>새로 수집하지 않습니다 — 회차마다 <b>데이터 기준 시각</b>을 적고, 못 읽은 항목은 <b>확인 불가</b>로 따로 셉니다.</span></div>
+
+    <section class="next" aria-label="다음 회차">
+      <div class="card k"><div class="t"><span>일일</span><span class="st ok"><span class="g">✓</span></span></div><div class="when">11-08 08:00</div><div class="muted" style="font-size:11.5px">마지막 11-07 · 주의</div></div>
+      <div class="card k"><div class="t"><span>주간</span><span class="st ok"><span class="g">✓</span></span></div><div class="when">11-10 08:30</div><div class="muted" style="font-size:11.5px">마지막 11-03 · 주의</div></div>
+      <div class="card k"><div class="t"><span>월간</span><span class="st ok"><span class="g">✓</span></span></div><div class="when">12-01 09:00</div><div class="muted" style="font-size:11.5px">마지막 11-01 · 주의</div></div>
+      <div class="card k"><div class="t"><span>분기</span><span class="st ok"><span class="g">✓</span></span></div><div class="when">27-01-01 09:30</div><div class="muted" style="font-size:11.5px">마지막 10-01 · 주의</div></div>
+    </section>
+
+    <section class="kpi" aria-label="최근 회차 요약">
+      <div class="card k"><div class="l">최근 회차 종합</div><div class="v"><span class="st warn" style="height:26px;font-size:13px"><span class="g">!</span>주의</span></div><div class="muted" style="font-size:11px;margin-top:4px">일일 · 11-07 08:00</div></div>
+      <div class="card k"><div class="l">법인 보고</div><div class="v">27<small>/ 28</small></div><div class="muted" style="font-size:11px;margin-top:4px">PL1 엣지 미보고</div></div>
+      <div class="card k"><div class="l">정상</div><div class="v" style="color:#22c55e">16<small>항목</small></div></div>
+      <div class="card k"><div class="l">주의</div><div class="v" style="color:#f59e0b">4<small>항목</small></div></div>
+      <div class="card k"><div class="l">이상</div><div class="v" style="color:#f87171">0<small>항목</small></div></div>
+      <div class="card k"><div class="l">확인 불가</div><div class="v" style="color:#9aa4b2">2<small>항목</small></div></div>
+    </section>
+
+    <div class="seg" role="group" aria-label="주기"><button type="button" class="on">전체</button><button type="button">일일</button><button type="button">주간</button><button type="button">월간</button><button type="button">분기</button></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><label class="sel"><span class="muted">법인</span><select style="background:transparent;border:0;color:#e6edf6;font:inherit;flex:1"><option>전체 (28)</option></select></label><label class="sel"><span class="muted">기간</span><select style="background:transparent;border:0;color:#e6edf6;font:inherit;flex:1"><option>최근 90일</option></select></label></div>
+
+    <div class="card" style="overflow:hidden">
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>생성</th><th>회차</th><th>주기</th><th>종합</th><th style="text-align:right">정상</th><th style="text-align:right">주의</th><th style="text-align:right">이상</th><th style="text-align:right">불가</th><th>전달</th><th>열기</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">11-07 08:00</td><td class="mono">D-2026-11-07</td><td>일일</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td class="num">16</td><td class="num" style="color:#f59e0b">4</td><td class="num">0</td><td class="num" style="color:#9aa4b2">2</td><td>메일 ✓ 채널 ✓</td><td><a href="#">열기</a></td></tr>
+          <tr><td class="mono">11-06 08:00</td><td class="mono">D-2026-11-06</td><td>일일</td><td><span class="st crit"><span class="g">×</span>이상</span></td><td class="num">15</td><td class="num" style="color:#f59e0b">4</td><td class="num" style="color:#f87171">1</td><td class="num" style="color:#9aa4b2">2</td><td>메일 ✓ 채널 ✓</td><td><a href="#">열기</a></td></tr>
+          <tr><td class="mono">11-03 08:30</td><td class="mono">W-2026-45</td><td>주간</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td class="num">32</td><td class="num" style="color:#f59e0b">7</td><td class="num">0</td><td class="num" style="color:#9aa4b2">3</td><td>메일 ✓ 채널 ✓ 게시판 ✓</td><td><a href="#">열기</a></td></tr>
+          <tr><td class="mono">11-01 09:00</td><td class="mono">M-2026-10</td><td>월간</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td class="num">36</td><td class="num" style="color:#f59e0b">7</td><td class="num" style="color:#f87171">1</td><td class="num" style="color:#9aa4b2">3</td><td>메일 ✓ 채널 ✓ 게시판 ✓</td><td><a href="#">열기</a></td></tr>
+        </tbody></table></div>
+      <div class="muted" style="padding:8px 12px;border-top:1px solid #1f2a40;font-size:11.5px">표는 가로로 넘깁니다(제목 클릭 정렬 그대로) · 최근 90일 97개 중 4개</div>
+    </div>
+
+    <div style="border-top:1px dashed #243049;margin:6px 0"></div>
+    <div class="muted" style="font-size:11.5px">보고서 열람 — 400px</div>
+    <div>
+      <div class="muted" style="font-size:11.5px"><a href="#">보관함</a> › <span class="mono">M-2026-10</span></div>
+      <h2 style="margin:4px 0 6px;font-size:17px;font-weight:800">월간 점검 보고서 — 2026년 10월</h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="st warn" style="height:26px;font-size:13px"><span class="g">!</span>종합 주의</span><span class="muted" style="font-size:11.5px">기간 10-01 ~ 10-31 · 생성 11-01 09:00 · 기준 08:55 · 법인 28/28</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px"><button class="btn" type="button">XLSX</button><button class="btn" type="button">PDF 저장</button><button class="btn" type="button">메일 다시 보내기</button><button class="btn" type="button">◀ 9월</button></div>
+    <div class="cnts"><span class="n"><span class="st ok"><span class="g">✓</span></span><b>36</b></span><span class="n"><span class="st warn"><span class="g">!</span></span><b>7</b></span><span class="n"><span class="st crit"><span class="g">×</span></span><b>1</b></span><span class="n"><span class="st unk"><span class="g">?</span></span><b>3</b></span><span class="n">조치 <b style="color:#f59e0b">6</b></span></div>
+    <section class="axis" style="display:flex;flex-direction:column;gap:8px">
+      <div class="card a"><div class="t"><span class="sw" style="background:#3b82f6"></span>인프라 <span class="muted" style="font-weight:600;font-size:11.5px">22</span><span class="st crit" style="margin-left:auto"><span class="g">×</span>이상 1</span></div><div class="cnts"><span class="n">정상 <b>17</b></span><span class="n" style="color:#f59e0b">주의 <b>3</b></span><span class="n" style="color:#f87171">이상 <b>1</b></span><span class="n" style="color:#9aa4b2">불가 <b>1</b></span></div><div class="muted" style="font-size:11.5px">CN2 데이터스토어 96% · 인증서(PL1) · 증가량(KR1) · 스냅샷(DE1)</div></div>
+      <div class="card a"><div class="t"><span class="sw" style="background:#d97706"></span>서비스 <span class="muted" style="font-weight:600;font-size:11.5px">13</span><span class="st warn" style="margin-left:auto"><span class="g">!</span>주의 2</span></div><div class="cnts"><span class="n">정상 <b>10</b></span><span class="n" style="color:#f59e0b">주의 <b>2</b></span><span class="n">이상 <b>0</b></span><span class="n" style="color:#9aa4b2">불가 <b>1</b></span></div><div class="muted" style="font-size:11.5px">Veeam RPO(JP1) · 엣지 보고(PL1) · 통신 점검 꺼짐</div></div>
+      <div class="card a"><div class="t"><span class="sw" style="background:#0891b2"></span>설비 <span class="muted" style="font-weight:600;font-size:11.5px">12</span><span class="st warn" style="margin-left:auto"><span class="g">!</span>주의 2</span></div><div class="cnts"><span class="n">정상 <b>9</b></span><span class="n" style="color:#f59e0b">주의 <b>2</b></span><span class="n">이상 <b>0</b></span><span class="n" style="color:#9aa4b2">불가 <b>1</b></span></div><div class="muted" style="font-size:11.5px">흡기 온도(US-E) · 게스트 파티션(TH1) · 베어메탈 사용률 opt-in 없음</div></div>
+    </section>
+    <div class="card" style="overflow:hidden">
+      <div style="padding:10px 12px;font-weight:800;border-bottom:1px solid #1f2a40">조치 필요 6</div>
+      <div style="overflow-x:auto"><table style="min-width:620px">
+        <thead><tr><th>우선</th><th>판정</th><th>법인</th><th>항목</th><th>근거</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1</td><td><span class="st crit"><span class="g">×</span>이상</span></td><td>CN2</td><td>데이터스토어 사용률</td><td>ds-cn2-prod-03 96.2%</td></tr>
+          <tr><td class="mono">2</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>JP1</td><td>Veeam 백업 판정</td><td>RPO 7일 초과 3대</td></tr>
+          <tr><td class="mono">3</td><td><span class="st warn"><span class="g">!</span>주의</span></td><td>KR1</td><td>스토리지 증가량</td><td>KR1-PS01 83% · 8주 뒤 90%</td></tr>
+        </tbody></table></div>
+    </div>
+    <div class="muted" style="font-size:11.5px">44px 터치 · 표는 가로 넘김 · KPI 2열 · 단위 줄바꿈 금지(keep-all) · 축 카드는 1열</div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
