@@ -39,6 +39,7 @@ function deps0(deps = {}) {
     trendFor: async (a) => (await import('../../bmusage/trendQuery.js')).trendFor(a),
     pullBmTrend: async (agent, key, q) => (await import('../../central/bmUsageEdgePull.js')).pullBmTrend(agent, { mode: 'history', key, query: q }),
     focusSummary: async () => (await import('../../bmusage/focus/run.js')).focusEnvelopeSummary(),
+    maintJudge: async (now) => (await import('../../bmusage/maint/runtime.js')).maintJudge({ now }),   // 8a단계 ⑤
     ...deps,
   };
 }
@@ -131,15 +132,18 @@ export async function bmSloView(req, snap, deps = {}) {
     return [metric, r?.ok ? r.body : { ok: false, reason: r?.reason || '엣지에서 추이를 읽지 못했습니다.', kind: r?.kind || 'error' }];
   });
   const byMetric = new Map(got.filter((x) => x.status === 'fulfilled').map((x) => x.value));
+  // 8a단계 ⑤ — 이 응답 노드의 정비 창(⑤ 분모 제외를 켠 것)이 이 서버를 덮는 구간(판정 코어 하나). 판정기를 못 만들면 빼지 않는다(‘모름’ 표지).
+  let exclude = null; let maintSrc = 'none';
+  try { const MJ = await D.maintJudge(now); exclude = MJ.cover(found.target, win.from, win.to, 'exclude'); maintSrc = 'windows'; } catch { exclude = null; maintSrc = 'unavailable'; }
   const items = goals.map((g) => {
     const tr = byMetric.get(g.metric);
     if (!tr || tr.ok === false) return { goal: g, error: String(tr?.reason || '추이를 읽지 못했습니다').slice(0, 200), kind: tr?.kind || null };
     // 주기 길이: 이 노드 5분 원시는 설정 간격(반증 F12) · 엣지 위임 서버는 점 간격 중앙값(evaluateGoal 이 고른다) · 롤업은 칸 길이.
     const cycleMs = found.via === 'local' && tr.res === '5m' ? settings.intervalMs : null;
-    return { goal: g, res: tr.res, stepMs: tr.stepMs, ...L.evaluateGoal(g, tr.points || [], { from: win.from, to: win.to, stepMs: tr.stepMs, cycleMs, now }) };
+    return { goal: g, res: tr.res, stepMs: tr.stepMs, ...L.evaluateGoal(g, tr.points || [], { from: win.from, to: win.to, stepMs: tr.stepMs, cycleMs, now, exclude }) };
   });
   return { ok: true, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), ...win, month: win === mw, res, apps, items,
-    maintenanceSource: 'none', canEdit: isAdminReq(req) && !allowed, ...(L.sloLoadError() ? { loadError: { reason: '목표 설정 파일을 읽지 못해 기본 목표로 계산했습니다' } } : {}) };
+    maintenanceSource: maintSrc, maintIntervals: (exclude || []).slice(0, 200).map((x) => ({ from: x.from, to: x.to })), canEdit: isAdminReq(req) && !allowed, ...(L.sloLoadError() ? { loadError: { reason: '목표 설정 파일을 읽지 못해 기본 목표로 계산했습니다' } } : {}) };
 }
 export async function bmSloSettingsRead(req, snap, deps = {}) {
   const L = await import('../../bmusage/slo.js');

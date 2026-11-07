@@ -55,9 +55,21 @@ export function pctl(values = [], p = 50) {
  * @returns {{ node:object, byCorp:object, sinceMap:Map }}
  */
 export function summarizeCycle({ results = [], startedAt, endedAt, intervalMs, concurrency, slotPeak = null, focus = null, peakPlan = null, sinceMap = new Map(), now = Date.now(), error = null } = {}) {
-  const live = results.filter((r) => r && r.target && r.target.key);
-  const reasons = new Map();   // `${path}:${code}` → { path, code, n }
+  /*
+   * 8a단계 정비 창(설계 §20 ⑲): ④ 수집 중단으로 건너뛴 서버(maintSkip)와 창 안에서 실패한 서버(inMaint && !ok — 인증 거부는 폴러가 inMaint 를 달지 않는다)는
+   *   **성공률 분모 · 실패 사유에서 빼고 따로 센다**(node.maint · byCorp[vc].maintSkipped/maintFail) — ‘정비 중’ 은 실패도 정상도 아니다.
+   */
+  const all = results.filter((r) => r && r.target && r.target.key);
+  const maint = { skipped: 0, failInWindow: 0 };
   const byCorp = {};
+  const live = [];
+  for (const r of all) {
+    const vc = String(r.target.vcenterId || '');
+    if (r.maintSkip) { maint.skipped += 1; (byCorp[vc] ||= { servers: 0, ok: 0, fail: 0, reasons: {} }).maintSkipped = ((byCorp[vc].maintSkipped) || 0) + 1; continue; }
+    if (r.inMaint && !r.ok) { maint.failInWindow += 1; (byCorp[vc] ||= { servers: 0, ok: 0, fail: 0, reasons: {} }).maintFail = ((byCorp[vc].maintFail) || 0) + 1; continue; }
+    live.push(r);
+  }
+  const reasons = new Map();   // `${path}:${code}` → { path, code, n }
   const info = { 'no-telemetry': 0, first: 0, 'psi-absent': 0 };
   const sshMs = [];
   const nextSince = new Map();
@@ -103,6 +115,8 @@ export function summarizeCycle({ results = [], startedAt, endedAt, intervalMs, c
     ssh: { n: sshMs.length, p50Ms: pctl(sshMs, 50), p95Ms: pctl(sshMs, 95) },
     focus: focus ? { running: n(focus.running) ?? 0, queued: n(focus.queued) ?? 0 } : null,
     peakPlan: peakPlan ? { windowS: n(peakPlan.windowS), capS: n(peakPlan.capS), reason: String(peakPlan.reason || '').slice(0, 32), expectedMs: n(peakPlan.expectedMs), budgetMs: n(peakPlan.budgetMs) } : null,
+    // 8a단계: 정비 중(건너뜀 · 창 안 실패) — 주기 실패면 모름(null). leak(창 끝 뒤 억제)은 주기 끝 점검이 채운다(폴러).
+    maint: failed ? null : { ...maint },
     ...(err ? { error: err } : {}),
   };
   return { node, byCorp: failed ? {} : byCorp, sinceMap: nextSince };

@@ -208,7 +208,7 @@ function recordUsageDetail(key, built, { at = null, ok = false } = {}) {
 export function usageDetailFor(key) {
   const rec = key ? _detail.get(key) : null;
   if (!rec) return { state: 'none', detail: null, since: DETAIL_SINCE };
-  return { state: rec.state, detail: rec.detail ? JSON.parse(JSON.stringify(rec.detail)) : null, since: DETAIL_SINCE, ...(rec.at ? { at: rec.at } : {}) };
+  return { state: rec.state, detail: rec.detail ? JSON.parse(JSON.stringify(rec.detail)) : null, since: DETAIL_SINCE, ...(rec.at ? { at: rec.at } : {}), ...(rec.maintSkip ? { maintSkip: { ...rec.maintSkip } } : {}) };
 }
 
 /**
@@ -939,7 +939,31 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
      */
     const L = await import('./logs/run.js');
     const logCtx = await L.beginLogCycle({ agent: config.agent?.name || '' }).catch((e) => ({ on: true, cursors: null, error: String(e?.message || e).slice(0, 200) }));
-    const realResults = realTargets.length ? await pool(realTargets, CONCURRENCY, (tg) => withSlot(() => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0, peakPlan, logExtra: (tg.paths || []).includes('os') ? L.logExtraFor(tg, logCtx) : null })).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : [];
+    /*
+     * 8a단계 정비 창(설계 §20 ⑲ — 판정 코어 maint/judge.js 하나): ④ 수집 중단 창 안의 서버는 **접속하지 않는다**(‘정비 중’ — 실패로 세지 않는다 ·
+     *   기존 vCenter maintenance 플래그와 같은 뜻 · 수동 실행도 같다). 창 안에서 수집이 실패한 서버는 inMaint 로 표시해 성공률에서 빼고 따로 센다 —
+     *   ⚠ 인증 거부는 창과 무관하다(collectOne 의 authGuard 가 그대로 정지 · 이 표시는 인증 실패에 달지 않는다).
+     *   판정기를 못 만들면(파일 손상 등) 억제하지 않는다(평소대로 수집).
+     */
+    let mj = null;
+    try { mj = await (await import('./maint/runtime.js')).maintJudge({ now: t0 }); } catch { mj = null; }
+    const maintOf = (tg) => (mj ? mj.stateFor(tg, Date.now()) : null);
+    const maintSkip = []; const collectTargets = [];
+    for (const tg of realTargets) {
+      const ms = maintOf(tg);
+      if (ms?.scopes?.collect) maintSkip.push({ tg, ms }); else collectTargets.push(tg);
+    }
+    const realResults0 = collectTargets.length ? await pool(collectTargets, CONCURRENCY, (tg) => withSlot(() => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0, peakPlan, logExtra: (tg.paths || []).includes('os') ? L.logExtraFor(tg, logCtx) : null })).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : [];
+    const MR = mj ? await import('./maint/runtime.js') : null;
+    for (const r of markInMaint(realResults0, maintOf)) MR?.countSuppression('collectFail', r.inMaint.ids);
+    const skippedResults = maintSkip.map(({ tg, ms }) => {
+      const ids = ms.windows.filter((w) => w.scopes.includes('collect')).map((w) => w.id);
+      MR?.countSuppression('collect', ids); MR?.noteApplied('collect', tg.key, ms.until.collect, ids, Date.now());
+      // 상세는 지난 수집 기록을 지우지 않고 ‘정비 중 — 건너뜀’ 표지만 덧댄다(다음 실제 수집이 표지를 지운다).
+      _detail.set(tg.key, { ...(_detail.get(tg.key) || { state: 'none', detail: null }), maintSkip: { ids, until: ms.until.collect, at: Date.now() } });
+      return { ok: false, target: tg, maintSkip: { ids, until: ms.until.collect }, ms: 0 };
+    });
+    const realResults = [...realResults0, ...skippedResults];
     // 다음 주기 실측 근거 — 실제로 수집한 서버만(데모 합성·예외로 끝난 항목은 소요가 없다).
     const samplesNow = realResults.filter((r) => r && Number.isFinite(r.ms)).map((r) => ({ ms: r.ms, windowS: r.windowS || 0 }));
     if (samplesNow.length) _cycleSamples = samplesNow;
@@ -992,7 +1016,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     let alerts = null;
     // v2.599(RECENT2599-01): 이번 수집 시간을 함께 넘긴다 — 관측 간격이 '주기 + 수집 시간' 이라
     //   주기만으로 연속을 판정하면 수집이 긴 현장에서 지속 시간이 0 에 묶여 알림이 영원히 안 울린다.
-    try { alerts = await runBmUsageAlerts(rows, { ...settings, runMs: Date.now() - t0 }); }
+    const targetsByKey = new Map(targets.map((x) => [x.key, x]));
+    try { alerts = await runBmUsageAlerts(rows, { ...settings, runMs: Date.now() - t0, ...(mj ? { maintJudge: mj } : {}), targetOf: (k) => targetsByKey.get(k) || null }); }
     catch (e) { alerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     // 6단계 수집 건강 — 적재 뒤 · 알림 판정 앞(‘수집 건강’ 규칙이 이번 주기 값을 쓴다).
     await recordCycleHealth({ results, t0, intervalMs, peakPlan });
@@ -1000,10 +1025,14 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     let perfAlerts = null;
     try { perfAlerts = rulesNow ? await runCyclePerfAlerts(results, { settings, rules: rulesNow, agent: agentName }) : null; }
     catch (e) { perfAlerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+    // 8a단계: ‘창 끝 뒤 억제 0’ 점검 — 이번 주기에 적용한 억제(수집 건너뜀 · 알림 보류 · 자동 집중)를 파일 기준으로 다시 만든 판정과 대조(수집 건강 행).
+    let maintAudit = null;
+    try { maintAudit = await (await import('./maint/runtime.js')).auditCycle({ targetsByKey }); } catch (e) { maintAudit = { error: String(e?.message || e).slice(0, 120) }; }
+    if (_health?.node?.maint) _health.node.maint = { ..._health.node.maint, leak: maintAudit?.leak ?? null, checked: maintAudit?.checked ?? null, ...(mj?.meta ? { windows: mj.meta.n, localUnreadable: mj.meta.localUnreadable, deployed: mj.meta.deployed } : { judge: 'unavailable' }) };
     const okCount = results.filter((r) => r?.ok).length;
     _last = {
       at: Date.now(), ms: Date.now() - t0, servers: runCount,
-      okCount, failCount: runCount - okCount, inserted: ins.inserted || 0, ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}),
+      okCount, failCount: runCount - okCount - skippedResults.length, inserted: ins.inserted || 0, ...(skippedResults.length ? { maintSkipped: skippedResults.length } : {}), ...(demoOnly ? { demoOnly: true, skippedNonDemo } : {}),
       /*
        * Enterprise 대체 수집 요약(v2.554) — 화면이 '동의했는데 왜 값이 없나' 를 말할 수 있게.
        * ⚠ 개수만 담는다(장비 이름·법인은 담지 않는다 — `status.last` 는 무스코프로 나간다. v2.550.3).
@@ -1054,7 +1083,10 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
   const hwOf = await hwFactsReader({ agent, now, freshMs: freshMsFor(settings.intervalMs) }).catch(() => () => null);
   let bands = null;
   if (on.includes('baseline')) {
-    try { bands = await (await import('./baseline.js')).slotBands({ agent, cfg: rules.baseline, intervalMs: settings.intervalMs, now }); } catch { bands = null; }
+    // 8a단계 ⑤: 정비 창(롤업 제외) 구간의 주는 베이스라인 표본에서 뺀다(판정 코어 maint/judge.js — 이 노드의 창 + 중앙 배포본).
+    let ex = null;
+    try { const R = await import('./maint/runtime.js'); const tmap = new Map(results.filter((r) => r?.target).map((r) => [r.target.key, r.target])); ex = R.exclusionFor(await R.maintJudge({ now }), (k) => tmap.get(k)); } catch { ex = null; }
+    try { bands = await (await import('./baseline.js')).slotBands({ agent, cfg: rules.baseline, intervalMs: settings.intervalMs, now, ...(ex ? { exclOf: ex.exclOf, exclSig: ex.sig } : {}) }); } catch { bands = null; }
   }
   const B = bands ? await import('./baseline.js') : null;
   // 7a단계: 로그 규칙 입력(이번 주기에 로그를 읽은 서버만 — 못 읽은 서버는 없음 = 판정 보류)
@@ -1100,6 +1132,22 @@ async function runNodeCollectAlert() {
     if (!item) return { ok: true, skipped: 'no-health' };
     return await (await import('./perfAlerts.js')).runPerfAlerts([item], { rules });
   } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 160) }; }
+}
+/**
+ * 8a단계 — 창 안 수집 실패 표시(순수): 실패한 결과 중 **인증 거부가 아닌 것**에만 inMaint 를 단다(인증 거부는 창과 무관 — authGuard 가 정지하고 실패로 센다).
+ *   창(아무 억제 범위나) 안이면 ‘정비 중’ 으로 성공률에서 빼고 따로 센다(summarizeCycle). 표시한 결과 목록을 돌려준다.
+ */
+export function markInMaint(results = [], maintOf = () => null) {
+  const marked = [];
+  for (const r of results) {
+    if (!r || r.ok || !r.target) continue;
+    const authFail = !!(r.os?.authStopped || r.idrac?.authStopped || r.ent?.authStopped || (r.os && r.os.ok === false && isAuthFailureText(r.os.error))
+      || r.idrac?.kind === 'auth' || r.ent?.kind === 'auth' || r.ent?.kind === 'ssh-auth' || isAuthFailureText(r.error));
+    if (authFail) continue;
+    const ms = maintOf(r.target);
+    if (ms?.active) { r.inMaint = { ids: ms.windows.map((w) => w.id) }; marked.push(r); }
+  }
+  return marked;
 }
 let _focusEndHooked = false;
 export function startBmUsagePoller() {

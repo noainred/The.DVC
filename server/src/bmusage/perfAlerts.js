@@ -10,7 +10,10 @@
  *   ⑤ 법인당 하루 상한(알림 50 · 이슈 20 · 자동 집중 10 — 설정) — 넘으면 보내지 않고 센다(조용히 버리지 않는다).
  * ⚠⚠ `null`(못 읽음 · 오래됨 · 판정 불가)은 참도 거짓도 아니다 — 판정 보류(상태 유지). 0 을 정상으로 세지 않는다.
  * ⚠ 유지보수 창 억제(Bareos · Veeam 스케줄): 지금 저장소에는 **베어메탈 서버의 백업 창을 읽는 원천이 없다**(Bareos 그룹 스케줄 · Veeam 스케줄은 VM 대상) —
- *   억제 훅(maintenanceFor)은 자리만 두고 항상 ‘원천 없음’ 이다(정직 기록 · 8단계 정비 창에서 채운다). 화면은 그 사실을 말한다.
+ *   그 훅(maintenanceFor)은 여전히 ‘원천 없음’ 이다(정직 기록).
+ * ⚠⚠ 8a단계 정비 창 ①(설계 §20 ⑲ — maint/judge.js 판정 코어 하나): 창(① alerts 를 켠 것) 안의 발화는 **기록만**(sent 의 result 'maintenance' · 창마다 한 번) 하고
+ *   발송 · 이슈를 하지 않는다. 규칙 상태는 ‘보내지 않음’ 으로 되돌리고 `maint`(창 · 시한)를 단다 → 창이 끝난 뒤 첫 주기에도 조건이 참이면 **그때 1회** 보낸다
+ *   (제목 ‘창 안부터 초과’). 조건이 풀리면 상태가 지워져 창 뒤 발송도 없다. 억제는 그 발생의 끝(시한)까지 · 적용 기록은 ‘창 끝 뒤 억제 0’ 점검에 남긴다.
  * 채널은 기존 알림 설정(alerts.json — 메일 · 웹훅 · Slack · Teams)을 그대로 쓰고 규칙이 고른 채널만 켠 사본으로 보낸다(새 채널 없음 · 웹훅 URL 은 화면 · 상태 파일에 없다).
  * 알림 본문에 `**` 를 쓰지 않는다(Slack · 메일에는 BoldText 가 없다). 문구는 ‘무엇이 · 얼마나 · 무엇 대비 · 언제부터’ 이고 원인을 단정하지 않는다.
  */
@@ -25,6 +28,7 @@ import { dayKey } from '../util/dayKey.js';
 import { RULE_IDS, BASELINE_METRICS } from './perfRules.js';
 import { VERDICT_LABEL } from './useJudge.js';
 import { MAX_SEND } from './notify.js';
+import { countSuppression, noteApplied } from './maint/runtime.js'; // 8a단계 ① 정비 창 억제 계수 · 점검
 
 const n = numOrNull;
 const FILE = () => path.join(config.configDir, 'bm-perf-alert-state.json');
@@ -177,7 +181,8 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
 
 /** 알림 본문(순수 — `**` 없음 · 원인 단정 없음). */
 export function perfAlertOf(f, { corpName = '' } = {}) {
-  const head = `${corpName || f.vcenterId ? `[${corpName || f.vcenterId}] ` : ''}${f.name}`;
+  // 8a단계 ①: 창이 끝났는데 아직 초과라 그때 1회 보내는 발화는 제목 앞에 그 사실을 붙인다(‘창 안부터 초과’).
+  const head = `${f.afterMaint ? '(정비 창 안부터 초과) ' : ''}${corpName || f.vcenterId ? `[${corpName || f.vcenterId}] ` : ''}${f.name}`;
   const key = `bmperf:${f.rule}:${f.key}`;
   const c = f.ctx || {};
   if (f.rule === 'use') {
@@ -317,7 +322,8 @@ export function recordOutcome(st, { recId, sk = null, res, outcome, rule = {}, n
  */
 async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cycleMax = Infinity }) {
   const today = dayKey(now) || '';
-  const out = { queued: 0, capped: 0, deferred: 0, maintenance: 0, failed: 0, issues: 0, autoFocus: 0 };
+  const out = { queued: 0, capped: 0, deferred: 0, maintenance: 0, maintHeld: 0, afterMaint: 0, failed: 0, issues: 0, autoFocus: 0 };
+  const maint = D.maintJudge ? await D.maintJudge(now).catch(() => null) : null;
   const isEdge = !!config.agent?.centralUrl;
   const alertCfg = await D.alertConfig().catch(() => null);
   const issueFires = []; const sends = [];
@@ -334,7 +340,28 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cy
     const tg = targetsByKey.get(f.key) || f.ctx?.target || null;
     const rec = { id: crypto.randomUUID().slice(0, 12), at: now, rule: f.rule, key: f.key, name: capStr(f.name, 120), vcenterId: f.vcenterId, title: '', channels: rule.channels || [], result: '', issue: null, autoFocus: null, ...(f.retry ? { retry: true } : {}) };
     const mw = maintenanceFor(tg, now, rules.maintenance);
-    const al = perfAlertOf({ ...f, sustain: rule.sustain, weeks: rules.baseline?.weeks }, {});
+    // 8a단계 ① — 이 서버가 지금 알림 억제 창 안인가(판정 코어 하나). 노드 칸(__node__)은 서버가 아니라 창 대상이 아니다.
+    const ms = maint && f.key !== '__node__' ? maint.stateFor(tg || { key: f.key, vcenterId: f.vcenterId }, now) : null;
+    const prevMaint = f.prevState?.maint || null;
+    if (ms?.scopes?.alerts) {
+      const ids = (ms.windows || []).filter((w) => (w.scopes || []).includes('alerts')).map((w) => w.id).sort();
+      noteApplied('alerts', f.key, ms.until.alerts, ids, now);
+      if (sk) {
+        // 상태를 ‘보내지 않음’ 으로 되돌리고 창 · 시한을 단다(지속 streak 은 그대로 — 창 뒤 첫 주기에 조건이 참이면 그때 1회).
+        const cur = st.rules?.[sk];
+        if (cur) st.rules[sk] = { ...cur, active: false, firedAt: f.prevState?.firedAt ?? null, maint: { ids, until: ms.until.alerts, since: prevMaint?.since ?? now } };
+      }
+      const same = prevMaint && JSON.stringify(prevMaint.ids || []) === JSON.stringify(ids);
+      if (same) { out.maintHeld += 1; continue; }   // 같은 창 안 반복 발화 — 기록 · 계수는 처음 한 번만
+      rec.result = 'maintenance'; rec.maint = { ids: ids.slice(0, 8), until: ms.until.alerts };
+      out.maintenance += 1;
+      countSuppression('alerts', ids, { now });
+      st.sent = [...(st.sent || []), rec].slice(-SENT_LOG_MAX);
+      continue;   // 이슈 · 자동 집중도 하지 않는다(발송 억제 = 알림 경로 전부)
+    }
+    const afterMaint = !!(prevMaint && sk);   // 창이 끝났는데 아직 초과 — 그때 1회(‘창 안부터 초과’)
+    if (afterMaint) { rec.afterMaint = { ids: (prevMaint.ids || []).slice(0, 8), since: prevMaint.since ?? null }; out.afterMaint += 1; countSuppression('after', prevMaint.ids || [], { now }); }
+    const al = perfAlertOf({ ...f, sustain: rule.sustain, weeks: rules.baseline?.weeks, afterMaint }, {});
     rec.title = al.title;
     if (mw.suppressed && rules.maintenance?.backupWindows) { rec.result = 'maintenance'; out.maintenance += 1; }
     else if (used(st, f.vcenterId, 'alerts', today) >= (rules.daily?.alerts ?? 50)) { rec.result = 'daily-cap'; out.capped += 1; }
@@ -404,6 +431,8 @@ function depsOf(deps = {}) {
     retryDelay: async () => (await import('../alerts.js')).retryDelayMs,
     applyIssues: async (fires, o) => (await import('../issues/alertIssues.js')).applyBmPerfFires(fires, o),
     startFocus: async (o) => (await import('./focus/run.js')).startFocusLocal(o),
+    // 8a단계 ①: 정비 창 판정기(주기마다 한 번 — 이 노드의 창 + 중앙 배포본). 호출부(폴러)가 같은 주기의 판정기를 넘기면 그것을 쓴다.
+    maintJudge: async (now) => (await import('./maint/runtime.js')).maintJudge({ now }),
     isMock: async () => (await import('../mock/demo/flags.js')).isMockMode(),
     clock: () => Date.now(),   // 발송 결과를 받은 시각(재시도 기준 — 기존 경로와 같이 ‘결과를 받은 시각’)
     ...deps,

@@ -102,6 +102,8 @@ function deps0(D = {}) {
     buildEntry: async (o) => (await import('../perfView.js')).buildPerfEntry(o),
     hwReader: async (o) => (await import('../hwFacts.js')).hwFactsReader(o),
     rawBefore: async (o) => (await import('../db.js')).rawRangeMerged(o),
+    // 8a단계 ③: 정비 창 판정(판정 코어 하나 — maint/judge.js · 이 노드의 창 + 중앙 배포본).
+    maintState: async (tg, now) => (await (await import('../maint/runtime.js')).maintJudge({ now })).stateFor(tg, now),
     db: ops,
     setTimer: (fn, ms) => { const h = setTimeout(fn, Math.max(0, ms)); h.unref?.(); return h; },
     clearTimer: (h) => clearTimeout(h),
@@ -181,6 +183,21 @@ export async function startFocusLocal({ target, reason = '', by = '', trigger = 
     if (osSt || idSt) {
       return { ok: false, code: 'auth-stopped', authStopped: osSt ? 'os' : 'idrac',
         reason: `${osSt ? 'OS(SSH)' : 'iDRAC'} 계정이 인증 실패로 정지돼 있어 ${trigger === 'manual' ? '' : '자동 '}집중 모니터링을 시작하지 않았습니다 — 분마다 로그인하면 계정이 잠길 수 있습니다. 자격증명을 고친 뒤 주기 수집이 성공하면 풀립니다.` };
+    }
+  }
+  /*
+   * 8a단계 ③ 자동 집중 억제(설계 §20 ⑲): 정비 창(③ focus 또는 ④ collect 를 켠 창) 안이면 **자동** 집중은 시작하지 않는다 — 수동 집중은 허용(사유를 적고 실행).
+   *   인증 정지(위)가 먼저다 — 창과 무관하게 막는다. 억제는 그 발생의 끝까지(시한)이고 적용 기록은 ‘창 끝 뒤 억제 0’ 점검에 남긴다.
+   *   ⚠ 이 함수가 choke point 다(자동 집중은 perfAlerts.dispatch → 여기 하나로만 들어온다).
+   */
+  if (trigger !== 'manual') {
+    let ms = null;
+    try { ms = await _D.maintState(target, now); } catch { ms = null; }
+    if (ms && (ms.scopes?.focus || ms.scopes?.collect)) {
+      const scope = ms.scopes.focus ? 'focus' : 'collect';
+      const ids = (ms.windows || []).filter((w) => (w.scopes || []).includes(scope)).map((w) => w.id);
+      try { const R = await import('../maint/runtime.js'); R.countSuppression('focus', ids, { now }); R.noteApplied(scope, target.key, ms.until?.[scope], ids, now); } catch { /* 계수 실패는 억제를 바꾸지 않는다 */ }
+      return { ok: false, code: 'maintenance', maint: { ids, until: ms.until?.[scope] ?? null }, reason: '정비 창 안이라 자동 집중 모니터링을 시작하지 않았습니다(수동 집중은 사유를 적고 실행할 수 있습니다).' };
     }
   }
   if (_byKey.has(target.key)) return { ok: false, code: 'busy', reason: '이 서버의 집중 모니터링이 이미 진행 중이거나 대기 중입니다.', id: _byKey.get(target.key) };
