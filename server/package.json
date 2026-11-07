@@ -1,6 +1,6 @@
 {
   "name": "vmware-portal-server",
-  "version": "2.922.0",
+  "version": "2.924.0",
   "private": true,
   "type": "module",
   "engines": {

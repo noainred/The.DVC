@@ -124,7 +124,8 @@
   - **근거 없는 매칭을 만들지 않는다**: 근거 우선순위 LLDP(확정) → MAC 테이블(높음) → **포트 설명 일치(보통 — 지금 가능한 유일한 근거)** → 미매칭. 포탈 CVP 수집은
     LLDP·MAC 테이블·discards 를 아직 읽지 않으므로(위 항목들) 매칭은 전부 '보통' 이고 화면이 그렇게 말한다. 설명의 호스트 이름은 **토큰 경계**로 본다(`esx01` ⊄ `esx010`),
     MAC 은 콜론·하이픈·점·붙임 표기 전부. `vmnic0` 글자만으로는 호스트를 특정하지 않는다(어느 호스트나 vmnic0 이 있다). 같은 MAC 이 포트 3개 이상이면 '충돌' 로 표시만.
-  - 방향은 스위치 포트 기준 **In = 서버 송신 · Out = 서버 수신** — 응답 `direction` 과 화면 띠·열 이름이 말한다. 값 없음은 '—'(0 금지). 드롭은 수집 전이라 '—'.
+  - 방향은 스위치 포트 기준 **In = 서버 송신 · Out = 서버 수신** — 응답 `direction` 과 화면 띠·열 이름이 말한다. 값 없음은 '—'(0 금지).
+    ✅ v2.923 정정: '드롭은 수집 전' 이었던 이 줄 — 드롭은 v2.922(3a)가 수집하고 v2.923(B-①)이 화면에 싣는다(아래 항목).
   - 범위 계정은 그 호스트 법인의 CVP 서버 행만(`rowOwnerOf` + `datacenterId`), 범위 검사(404)가 도구 키 검사(403)보다 먼저다(존재 은닉).
 - ⚠ **v2.922(리눅스 성능 3a) — 포트 드롭 열 · 베어메탈 서버 NIC ↔ 포트 매핑은 hostMatch 하나**(`cvp/{parse,db,poller,push,hostMatch}.js` · `central/cvpEdge.js` · 회귀 `server/test/bmPerf2921Cvp.test.js`):
   - `parseCounters` 후보에 `inDiscards/outDiscards`(필드 이름 **추정** — Arista 공식 경로 미확인) → `portDelta` 의 `inDrop/outDrop`(못 읽으면 null · 리셋 null). `port_latest/port_sample` 에 `in_drop/out_drop`,
@@ -139,4 +140,32 @@
     여러 토큰 이름은 영숫자 3자 이상. 반증 36표본: 거짓 음성 0 · 거짓 양성 1(2자 이름 ‘10’ — hostMatchTerms 가 단서로 쓰지 않아 업링크 매칭에는 닿지 않음).
     **v2.920 대비 행동 변화**(릴리스 노트): 구분자 있는 호스트 이름이 이제 매칭된다 · ‘esx01-b’·‘kr-esx01’ 처럼 붙어 이어진 다른 이름은 더 이상 매칭되지 않는다(예전엔 토큰 ‘esx01’ 이 있어 맞았다).
   - PROFILES §10 매핑 출처: ① 수동 매핑 — v2.922 신규(`bmusage/portMap.js`) ② 포트 설명 매칭 — v2.920 hostMatch(가상화 호스트) 를 베어메탈로 확장 ③ LLDP · ④ MAC — **미구현**(경로 미확인).
+- **v2.923(SAN·CVP 설계 B-①) — 포트 드롭을 화면에 싣는다**(수집·저장·push·정제는 위 v2.922 3a 항목 그대로 — 같은 일을 두 벌로 만들지 않았다):
+  CVP 도구 장비 상세 포트 표·포트 사용량 표 ‘드롭(수/송)’ 열(`portUsage` 행에 `inDrop/outDrop`) · 호스트 상세 네트워크 카드 CVP 업링크 블록 KPI ‘업링크 에러/드롭 · 최근 24시간’ +
+  포트별 24시간 합. 24시간 합은 `db.portWindowSums`(원시 표본을 JS 로 더함 — 집계 함수 두 개를 한 문장에 쓰지 않는다)이고 **값이 있는 표본만** 더해 표본 수(`dropN/samples`)를
+  같이 준다 — 드롭 수집 전·구버전 엣지 10칸 표본은 빠진다(부분 합을 전체 합처럼 말하지 않는다). 데모 합성 포트·백필 행에도 드롭. 회귀 `server/test/cvpDropUi2923.test.js` · 웹 `hostNetText.test.js`.
+- **v2.924(SAN·CVP 설계 B-②) — LLDP 이웃 · MAC 테이블(FDB) → 호스트 업링크 매칭 ‘확정 · 높음’**(`cvp/{client,parse,db,poller,push,hostMatch}.js` · `central/cvpEdge.js cleanL2` ·
+  `routes/central.js` · `routes/api/hostSan.js` · 웹 `hostNetText.l2Text` · 데모 `mock/demo/cvp.js demoL2` · 회귀 `server/test/cvpL2924.test.js`):
+  - **경로·필드는 추정**(LLDP `/Sysdb/l2discovery/lldp/status/local/1/portStatus` · FDB `/Smash/bridging/status/smashFdbStatus` — docs/CVP.md 표). 부품 주기(30분)에만 읽고
+    `CVP_L2=false` 로 끈다. 경로 탐색 표본에 두 경로를 더했다. LLDP 는 링크가 올라온 포트만 따라가고 개체 이름은 포인터 경로 전체(포트 › remoteSystem › 번호 — 첫 조각이 로컬 포트).
+  - ⚠ **FDB 는 `entitiesOf` 로 읽지 않는다** — 항목 키가 `{fid, addr}` 복합 객체라 `updKey`(첫 스칼라 = VLAN)로 이름을 지으면 같은 VLAN 의 MAC 이 한 개체로 합쳐진다.
+    update 마다 값 + 키 객체를 함께 펼친다. 포트당 MAC 이 `FDB_PORT_MAX`(512)를 넘는 포트(스위치 사이 트렁크)는 버리고 `portsOverCap` 으로 밝힌다. 장비당 `FDB_MAX` 4096 · LLDP 512.
+  - 저장은 **장비마다 최신 한 벌**(`l2_fdb`·`l2_lldp`·`l2_meta` — 배열이면 교체 · 같은 내용 해시면 다시 쓰지 않음 · null(못 읽음)은 실패 시각만 · undefined 는 그대로).
+    장비 정리(pruneDevices)가 L2 행도 지운다. 엣지 이름 변형 모으기(adopt)는 L2 를 옮기지 않고 변형 행을 지운다(두 시각의 목록이 섞이지 않게 — 다시 보낸다).
+  - **엣지 push 는 바뀐 장비만**(메타 해시 · 전량 갱신 주기) 별도 배열 `l2` 로 보낸다. **중앙이 `saved.l2` 를 수로 답할 때만** 보낸 것으로 친다 — 구버전 중앙은 필드를 버리고
+    그 칸이 없으므로 `L2_UNSUPPORTED_HOLD_MS`(6시간) 동안 L2 를 싣지 않는다(매 주기 큰 본문을 헛보내지 않게). 새 중앙은 L2 가 없어도 `saved.l2 = 0` 을 준다.
+  - 매칭 근거 순위 **LLDP(확정) > MAC(높음 — 물리 NIC MAC 학습) > VM MAC(높음 — 그 포트 학습의 절반 이상이 이 호스트 VM vNIC, 2개 이상 또는 학습 1개뿐) > 포트 설명(보통)**.
+    포트 학습 수를 모르면 VM MAC 비율을 판정하지 않는다(트렁크일 수 있다). 한 포트가 여러 근거면 가장 강한 하나 + also. 판정 코어는 `hostMatch.matchL2 · mergeUplinks` 하나 —
+    베어메탈 성능 화면(PROFILES §10 ‘③ LLDP · ④ MAC — 미구현’)도 같은 함수를 쓰면 된다(두 벌 금지). ⚠ ESXi 는 표준 vSwitch 에서 LLDP 를 보내지 않는다(분산 스위치에서 켜야 한다).
+  - ⚠ **반증 1인(v2.924) 확정분 — 되돌리지 말 것**(재현 스크립트로 확인 · 회귀 `cvpL2924.test.js`):
+    · H-1 MAC 근거는 그 포트 학습의 **절반 이상이 이 호스트 것**(NIC MAC + VM MAC)일 때만 · 그 포트의 **LLDP 이웃이 다른 장비면 버림** · Vxlan·Vlan·Loopback·Management 는 보지 않음 —
+      vmk0(=vmnic0 MAC)을 MLAG peer 가 peer-link 에서 배워 스위치 사이 포트가 '높음' 업링크로 잡히고 호스트 송수신 합에 들어갔다(작은 법인은 포트당 512 상한 아래).
+    · M-1 매칭은 **그 호스트 법인의 CVP + 법인 미지정 CVP** 만(전체 범위 계정도) · LLDP 이름은 양쪽 다 도메인이 있으면 전체 이름 일치 — 다른 법인의 같은 짧은 이름이 '확정' 으로 붙었다.
+    · M-2 LLDP 추종 요청 상한 3배(`FOLLOW_REQ_MAX_BY_KIND`) · 잘리면 **부분 읽기**(`lldpPartial` — 읽은 포트만 바꾼다).
+    · M-3 종류마다 읽은 시각(`fdbAt`·`lldpAt` — push·중앙 저장 모두) · 업링크마다 근거 나이(`l2At`) · 3시간 넘으면 ‘오래됨’ · 수집 현황에 마지막 읽기 실패 수.
+    · L-1 push 가 장비마다 양보 · L-2/L-6 큰 L2 삭제는 COMMIT 밖 조각(chunkedDelete) · 중앙은 장비 레코드로 보고한 장비의 L2 만(`requireDevice`) · 고아 L2 는 prune 이 지운다.
+    · L-3 NIC MAC 과 VM MAC 을 따로 조회(상한 때문에 NIC 행이 빠졌다) · L-4 FDB 알림 시각 순 · 같은 키 마지막 값 · deletes(배열·맵) · L-7 `saved` 가 없는 답(noDelegation)은 구버전 중앙으로 보지 않는다 · 보류는 `_last.l2HeldUntil`.
+    · L-9 이웃 섀시 MAC 이 NIC MAC 이면 LLDP 일치(IP 로 알린 이웃) · NIC 목록이 없어도 portId 가 vmnicN 이면 그 이름.
+    · 남긴 것(정직): L-5 vMotion·유지보수 직후 30분 FDB 와 지금 VM 목록이 어긋나 VM MAC 근거가 옮겨 간 쪽 호스트에 잠깐 붙을 수 있다(근거 나이로만 드러난다) ·
+      L-8 FDB 응답이 본문 상한(BODY_MAX_BYTES 8MB)을 넘으면 그 장비는 매 주기 못 읽는다(사유가 남는다).
 

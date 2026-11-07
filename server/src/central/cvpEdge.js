@@ -18,7 +18,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { setCvpCollectBaseResolver, ackCvpCollect } from '../cvp/collectRequests.js';
 import { CANDIDATES } from '../cvp/client.js';
-import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES, PSU_W_MAX } from '../cvp/parse.js';
+import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES, PSU_W_MAX, FDB_MAX, LLDP_MAX } from '../cvp/parse.js';
 import { cmpVersion } from '../util/cmpVersion.js'; // v2.613 CONTRACT2613-04: 엣지 버전 게이트
 
 const FILE = path.join(config.configDir, 'central-agent-cvp.json');
@@ -364,7 +364,21 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
       eventsByCvp.set(cvpId, out);
     }
   }
-  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped, devSamples, eventsByCvp };
+  // v2.924(SAN·CVP 설계 B-②): LLDP 이웃 · MAC 테이블 — 소유한 CVP 만 · 장비 키·시각 · MAC 12자 16진 · VLAN 0..4095(모르면 null) · 문자열 상한 · 개수 상한.
+  //   fdb/lldp 가 배열이 아니면 그 쪽은 싣지 않는다(undefined — 중앙 저장소가 이전 목록을 그대로 둔다).
+  const l2ByCvp = new Map();
+  let nL2 = 0;
+  for (const x of Array.isArray(b.l2) ? b.l2 : []) {
+    if (!isPlainObj(x)) { dropped.notObject++; continue; }
+    if (!own(x.cvpId)) { dropped.notOwned++; continue; }
+    if (nL2 >= DEVICE_MAX) { dropped.overCount++; continue; }
+    const r = cleanL2(x, now);
+    if (!r) { dropped.badRow++; continue; }
+    if (!l2ByCvp.has(x.cvpId)) l2ByCvp.set(x.cvpId, []);
+    l2ByCvp.get(x.cvpId).push(r);
+    nL2++;
+  }
+  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped, devSamples, eventsByCvp, l2ByCvp };
 }
 
 /**
@@ -415,3 +429,49 @@ export function edgeCvpSummary() {
   });
 }
 export function _resetForTest() { _map = null; }
+
+/** v2.924(B-②): L2 레코드 1건 정제. 반환 null = 버림. fdb 행 [mac, vlan, port] · lldp 행 [port, idx, sysName, portId, portDesc, chassisId]. */
+const MAC12 = /^[0-9a-f]{12}$/;
+export function cleanL2(x, now = Date.now()) {
+  if (!isPlainObj(x)) return null;
+  const key = s(x.key, 128);
+  if (!key || key === '__proto__' || key === 'constructor' || key === 'prototype') return null;
+  const ts = tsClamp(x.ts, now);
+  if (ts == null) return null;
+  const out = { key, ts };
+  // v2.924(반증 M-3): 종류마다 읽은 시각(엣지 시각은 수신 시각으로 자른다) — 없으면 ts.
+  const fa = tsClamp(x.fdbAt, now); const la = tsClamp(x.lldpAt, now);
+  if (fa != null) out.fdbAt = fa;
+  if (la != null) out.lldpAt = la;
+  if (Array.isArray(x.fdb)) {
+    const rows = [];
+    for (const e of x.fdb) {
+      if (!Array.isArray(e) || e.length < 3) continue;
+      const mac = typeof e[0] === 'string' ? e[0].toLowerCase() : '';
+      const port = s(e[2], 64);
+      if (!MAC12.test(mac) || !port) continue;
+      const v = numOrNull(e[1]);
+      rows.push([mac, v != null && v >= 0 && v <= 4095 ? Math.trunc(v) : null, port]);
+      if (rows.length >= FDB_MAX) break;
+    }
+    out.fdb = rows;
+    const m = isPlainObj(x.fdbMeta) ? x.fdbMeta : {};
+    out.fdbMeta = { truncated: Math.max(0, numOrNull(m.truncated) ?? 0),
+      portsOverCap: Array.isArray(m.portsOverCap) ? m.portsOverCap.filter(isPlainObj).slice(0, 64).map((o) => ({ port: s(o.port, 64), macs: numOrNull(o.macs) })) : [] };
+  }
+  if (Array.isArray(x.lldp)) {
+    const rows = [];
+    for (const e of x.lldp) {
+      if (!Array.isArray(e) || e.length < 2) continue;
+      const port = s(e[0], 64);
+      if (!port) continue;
+      rows.push([port, s(e[1], 64) || '0', s(e[2], 255), s(e[3], 128), s(e[4], 200), s(e[5], 128)]);
+      if (rows.length >= LLDP_MAX) break;
+    }
+    out.lldp = rows;
+    out.lldpTruncated = Math.max(0, numOrNull(x.lldpTruncated) ?? 0);
+  }
+  if (out.fdb === undefined && out.lldp === undefined) return null;
+  return out;
+}
+
