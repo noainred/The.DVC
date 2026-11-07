@@ -3,7 +3,9 @@
  *
  * 파일 스토어 규약(perf-db.md v2.582 · 6단계 annotations.js 와 같은 꼴):
  *   · 원자 쓰기(0600) · 손상 보존(preserveCorrupt) · **손상이면 읽기 503 · 쓰기 거부**(빈 목록으로 덮어 모두의 창을 지우지 않는다) ·
- *   · 읽기-수정-쓰기는 **직렬 큐 하나**(withStore — 라우트의 비동기 검사 뒤에 들어와도 앞 쓰기를 덮지 않는다) + 창마다 rev(고치기 · 끝내기 · 지우기는 rev 가 다르면 409).
+ *   · 읽기-수정-쓰기는 **직렬 큐 하나**(withStore — 라우트의 비동기 검사 뒤에 들어와도 앞 쓰기를 덮지 않는다) + 창마다 rev(고치기 · 끝내기 · 재확인 · 지우기는
+ *     rev 가 **없거나** 다르면 409 — rev 없는 호출이 마지막 쓰기로 이기지 않게).
+ *   · 지운 창은 **묘비**(deleted.at)로 남는다 — 지금 판정에서는 빠지고 지난 구간(⑤ 분모 제외 · 음영)에는 지운 시각까지 남는다(judge.js 머리말 · 보관 90일).
  *   · 상한 2,000 — 넘으면 지운 창 · 90일 전에 끝난 창부터 비우고 그래도 넘치면 409.
  * 정규화는 **한 함수**(normalizeWindow) — API 입력(엄격) · 파일 읽기 · 엣지가 받은 배포본(느슨 — 형식 밖 항목은 버리고 센다)이 같은 함수를 지난다.
  * 판정 입력(windowsForJudge) = 이 노드의 창 + 중앙 배포본(받은 지 DEPLOY_TTL_MS 안일 때만 — 배포가 끊긴 엣지가 지워진 창으로 영원히 억제하지 않게: 억제 시한).
@@ -17,7 +19,7 @@ import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../../util/settingsLoadError.js';
 import { SCHED_KINDS, ONCE_MAX_MIN, RECUR_MAX_MIN, parseLocal, parseTime, localToUtc, validTz, DEFAULT_TZ, MIN, DAY } from './schedule.js';
-import { SCOPES, TARGET_KINDS, TAG_RE, windowStatus, expiresAt } from './judge.js';
+import { SCOPES, TARGET_KINDS, TAG_RE, windowStatus, expiresAt, effectiveOccurrences } from './judge.js';
 
 const FILE = () => path.join(config.configDir, 'maintenance-windows.json');
 const DEPLOYED_FILE = () => path.join(config.configDir, 'maintenance-windows-deployed.json');
@@ -32,8 +34,11 @@ export const FUTURE_MAX_DAYS = 400;
 export const KEEP_ENDED_DAYS = 90;
 /** 엣지 배포본 신선도 — 받은 지 이보다 오래면 판정에 넣지 않는다(중앙이 지운 창이 끊긴 엣지에서 계속 억제하지 않게). 일회 창 상한(24h)과 같다. */
 export const DEPLOY_TTL_MS = 24 * 3_600_000;
-/** 소유자 등급이 필요한 길이(분) — 이보다 길면(일회 12~24h) 설정 소유자 등급. 반복은 상한이 12h 라 해당 없음. */
+/** 소유자 등급이 필요한 길이(분) — 이보다 길면(일회 12~24h) 설정 소유자 등급. 반복은 상한이 12h 라 창 하나로는 해당 없음 —
+ *  같은 서버를 덮는 비소유자 창들의 **합**이 어느 24시간에서든 이 값을 넘어도 소유자 등급(coverNeedsOwner — 반증 F5). */
 export const OWNER_OVER_MIN = 12 * 60;
+/** 엣지 배포본 시각이 이만큼 넘게 미래면(엣지 시계가 앞서 있다가 바로잡힘) 지금으로 자른다 — 시한이 시계에 기대 무력해지지 않게(반증 F7). */
+export const DEPLOY_FUTURE_SKEW_MS = 5 * 60_000;
 const ID_RE = /^mw-[a-z0-9]{6,32}$/;
 const VC_RE = /^[A-Za-z0-9._:@-]{1,128}$/;
 const KEY_RE = /^[^\u0000-\u001f\u007f]{1,256}$/;
@@ -59,6 +64,47 @@ export function needsOwnerTier(w) {
   if (!w?.target || w.target.kind !== 'server') return true;
   const d = durationMinOf(w.schedule, w.tz);
   return d == null || d > OWNER_OVER_MIN;
+}
+
+/**
+ * 합친 덮임 규칙(순수 — 반증 F5): 같은 대상(법인, 키)을 덮는 **비소유자 창**(approvedBy 없음 · 서버 창 · 지우지 않음 · 이 노드의 창)들과 후보 창을 합쳐,
+ *   후보의 발생에 걸치는 어느 24시간 구간에서든 덮임이 OWNER_OVER_MIN(12시간)을 넘으면 true(소유자 등급 필요).
+ *   비용: 반복 창은 앞으로 36일(매월은 400일) · 일회 창은 그 발생 — 발생마다 앞뒤 2일만 다시 센다(쓰기 경로 · 같은 서버의 창 몇 개).
+ * @param {object} cand  정규화한 후보(고치기 뒤 · 재확인이면 confirmedAt 을 지금으로)
+ * @param {Array} all   이 노드의 창 전부(후보의 앞 판 · 같은 id 는 뺀다)
+ */
+export function coverNeedsOwner(cand, all = [], now = Date.now()) {
+  if (!cand || cand.target?.kind !== 'server' || cand.deleted) return false;
+  const keys = cand.target.keys || [];
+  const peers = (Array.isArray(all) ? all : []).filter((w) => w && w.id !== cand.id && !w.deleted && w.origin !== 'central' && !w.approvedBy
+    && w.target?.kind === 'server' && w.vcenterId === cand.vcenterId && (w.target.keys || []).some((k) => keys.includes(k)));
+  if (!peers.length) return false;
+  const horizon = (w) => (w.schedule?.kind === 'weekly' ? 36 * DAY : FUTURE_MAX_DAYS * DAY);
+  const anchorsOf = (w) => effectiveOccurrences(w, now - DAY, now + horizon(w));
+  const limit = OWNER_OVER_MIN * MIN;
+  for (const key of keys) {
+    const ps = peers.filter((w) => w.target.keys.includes(key));
+    if (!ps.length) continue;
+    const group = [cand, ...ps];
+    // 기준점 — 후보의 발생 + 매주가 아닌 동료의 발생(그 둘레에 후보 발생이 있으면 본다)
+    const anchors = [...anchorsOf(cand), ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)];
+    for (const a of anchors) {
+      const lo = a.start - 2 * DAY; const hi = a.end + 2 * DAY;
+      const mine = effectiveOccurrences(cand, lo, hi);
+      if (!mine.length) continue;
+      const iv = group.flatMap((w) => effectiveOccurrences(w, lo, hi)).map((o) => ({ from: Math.max(lo, o.start), to: Math.min(hi, o.end) })).sort((x, y) => x.from - y.from);
+      const m = [];
+      for (const x of iv) { const l = m[m.length - 1]; if (l && x.from <= l.to) l.to = Math.max(l.to, x.to); else m.push({ ...x }); }
+      // 24시간 창의 덮임 최대는 창 시작이 어느 구간 시작이거나 창 끝이 어느 구간 끝일 때 나온다 — 후보 발생과 겹치는 창만 본다.
+      for (const s0 of m.flatMap((x) => [x.from, x.to - DAY])) {
+        const s1 = s0 + DAY;
+        if (!mine.some((o) => o.start < s1 && o.end > s0)) continue;
+        const cov = m.reduce((acc, x) => acc + Math.max(0, Math.min(s1, x.to) - Math.max(s0, x.from)), 0);
+        if (cov > limit) return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -194,18 +240,35 @@ function withStore(fn) {
   _chain = run.catch(() => {});
   return run;
 }
-/** 끝난 지 오래된 창 · 지운 창 비우기(쓰기 때 — 순수에 가까움). */
+/**
+ * 끝난 지 오래된 창 · 지운 창(묘비) 비우기(쓰기 때). 가벼운 판정만(반증 F6 — 쓰기마다 전 창의 발생을 세지 않는다):
+ *   묘비 = 지운 시각 · 일회 = 유효 끝(지금 끝내기 · 상한 반영 — 창 판 id:rev 로 기억) · 반복 = 만료 시각(재확인 92일)만 본다.
+ */
+const _endMemo = new Map();   // `${id}:${rev}:${endedAt}` → 일회 창 유효 끝(ms · 없으면 0)
+function onceEndOf(w) {
+  const k = `${w.id}:${w.rev}:${w.endedAt ?? ''}`;
+  if (_endMemo.has(k)) return _endMemo.get(k);
+  const o = effectiveOccurrences(w, 0, 8_640_000_000_000_000);
+  const end = o.length ? o[o.length - 1].end : 0;
+  if (_endMemo.size > 5_000) _endMemo.clear();
+  _endMemo.set(k, end);
+  return end;
+}
 function pruneOld(all, now) {
   const keep = now - KEEP_ENDED_DAYS * DAY;
   all.items = all.items.filter((w) => {
     if (w.deleted) return Number(w.deleted.at) > keep;
-    const st = windowStatus(w, now);
-    if (st.status === 'ended') return (st.last?.end ?? Number(w.endedAt) ?? 0) > keep || (st.last == null && Number(w.at) > keep);
-    if (st.status === 'expired') return (expiresAt(w) ?? 0) > keep;
-    return true;
+    if (w.schedule?.kind === 'once') return onceEndOf(w) > keep || Number(w.at) > keep;
+    const exp = expiresAt(w);
+    return exp == null || exp > keep;
   });
 }
 
+/** rev 검사 — 없으면 409(마지막 쓰기 승리 금지 · 웹은 항상 보낸다) · 다르면 409. */
+function revCheck(cur, rev) {
+  if (rev == null || rev === '') throw fail(409, 'rev-required', '고칠 때는 지금 판(rev)을 함께 보내야 합니다 — 다시 불러온 뒤 고치세요.');
+  if (Number(rev) !== cur.rev) throw fail(409, 'rev-changed', '그 사이 다른 사람이 이 창을 바꿨습니다 — 다시 불러온 뒤 고치세요.');
+}
 export function listWindows() { return loadAll().items; }
 export function getWindow(id) { const x = loadAll().items.find((w) => w.id === String(id)); return x ? copy(x) : null; }
 export function maintLoadError() { try { loadAll(); } catch { /* get 이 말한다 */ } return _err.get(); }
@@ -224,14 +287,14 @@ export function addWindow(input, { by = '', approvedBy = '', now = Date.now() } 
   });
 }
 /** 고치기 — rev 가 다르면 409(그 사이 누가 바꿨다). 대상 법인은 바꾸지 않는다(범위가 바뀌는 쓰기를 만들지 않는다 — 지우고 새로). */
-export function editWindow(id, input, { by = '', approvedBy = '', rev = null, now = Date.now() } = {}) {
+export function editWindow(id, input, { by = '', approvedBy = null, rev = null, now = Date.now() } = {}) {
   return withStore((all) => {
     const i = all.items.findIndex((w) => w.id === String(id));
     const cur = i >= 0 ? all.items[i] : null;
     if (!cur || cur.deleted) throw fail(404, 'not-found', '그 정비 창을 찾지 못했습니다.');
-    if (rev != null && Number(rev) !== cur.rev) throw fail(409, 'rev-changed', '그 사이 다른 사람이 이 창을 바꿨습니다 — 다시 불러온 뒤 고치세요.');
+    revCheck(cur, rev);
     if (String(input?.vcenterId ?? cur.vcenterId) !== cur.vcenterId) throw fail(400, 'bad-window', '법인은 바꿀 수 없습니다 — 지우고 새로 만드세요.', 'vcenterId');
-    const next = normalizeWindow({ ...cur, ...input, id: cur.id, by: cur.by, at: cur.at, rev: cur.rev + 1, approvedBy: approvedBy || cur.approvedBy, confirmedAt: now, edits: cur.edits }, { strict: true, now, fresh: input?.schedule != null });
+    const next = normalizeWindow({ ...cur, ...input, id: cur.id, by: cur.by, at: cur.at, rev: cur.rev + 1, approvedBy: approvedBy ?? cur.approvedBy, confirmedAt: now, edits: cur.edits }, { strict: true, now, fresh: input?.schedule != null });
     const fields = ['name', 'reason', 'target', 'tz', 'schedule', 'scopes'].filter((k) => JSON.stringify(next[k]) !== JSON.stringify(cur[k]));
     if (!fields.length) return copy(cur);
     next.edits = [...(cur.edits || []), { at: now, by: String(by).slice(0, 64), fields }].slice(-EDITS_MAX);
@@ -247,7 +310,7 @@ export function endWindowNow(id, { by = '', rev = null, now = Date.now() } = {})
   return withStore((all) => {
     const cur = all.items.find((w) => w.id === String(id));
     if (!cur || cur.deleted) throw fail(404, 'not-found', '그 정비 창을 찾지 못했습니다.');
-    if (rev != null && Number(rev) !== cur.rev) throw fail(409, 'rev-changed', '그 사이 다른 사람이 이 창을 바꿨습니다 — 다시 불러오세요.');
+    revCheck(cur, rev);
     const st = windowStatus(cur, now);
     if (st.status !== 'active') throw fail(409, 'not-active', '진행 중인 창이 아닙니다.');
     Object.assign(cur, { endedAt: now, endedBy: String(by).slice(0, 64), endedOccStart: st.current.start, rev: cur.rev + 1 });
@@ -262,7 +325,7 @@ export function confirmWindow(id, { by = '', rev = null, now = Date.now() } = {}
     const cur = all.items.find((w) => w.id === String(id));
     if (!cur || cur.deleted) throw fail(404, 'not-found', '그 정비 창을 찾지 못했습니다.');
     if (cur.schedule.kind === 'once') throw fail(409, 'not-recurring', '일회 창은 재확인이 없습니다.');
-    if (rev != null && Number(rev) !== cur.rev) throw fail(409, 'rev-changed', '그 사이 다른 사람이 이 창을 바꿨습니다 — 다시 불러오세요.');
+    revCheck(cur, rev);
     Object.assign(cur, { confirmedAt: now, rev: cur.rev + 1 });
     cur.edits = [...(cur.edits || []), { at: now, by: String(by).slice(0, 64), fields: ['confirm'] }].slice(-EDITS_MAX);
     writeAll(all);
@@ -274,7 +337,7 @@ export function deleteWindow(id, { by = '', rev = null, now = Date.now() } = {})
   return withStore((all) => {
     const cur = all.items.find((w) => w.id === String(id));
     if (!cur || cur.deleted) throw fail(404, 'not-found', '그 정비 창을 찾지 못했습니다.');
-    if (rev != null && Number(rev) !== cur.rev) throw fail(409, 'rev-changed', '그 사이 다른 사람이 이 창을 바꿨습니다 — 다시 불러오세요.');
+    revCheck(cur, rev);
     cur.deleted = { at: now, by: String(by).slice(0, 64) };
     cur.rev += 1;
     writeAll(all);
@@ -297,16 +360,27 @@ export function saveDeployed(list, { sig = '', now = Date.now() } = {}) {
   _dep = null;
   return { ok: true, n: items.length, dropped };
 }
-/** 배포본 읽기 — 없으면 null · 손상이면 보존하고 null(억제하지 않는 쪽) + unreadable. */
-export function loadDeployed() {
+/**
+ * 배포본 읽기 — 없으면 null · 손상이면 보존하고 null(억제하지 않는 쪽) + unreadable.
+ *   받은 시각(at)이 지금보다 DEPLOY_FUTURE_SKEW_MS 넘게 미래면(엣지 시계가 앞서 있다가 바로잡힘 — 반증 F7) **지금으로 자르고 파일에도 남긴다**
+ *   (시한은 그때부터 24시간 — 매번 지금으로 되돌려 영원히 신선해지지 않게 한 번만 · 원래 값은 atClampedFrom).
+ */
+export function loadDeployed(now = Date.now()) {
   let st = null;
   try { st = fs.statSync(DEPLOYED_FILE()); } catch { return null; }
-  if (_dep && _dep.m === st.mtimeMs && _dep.s === st.size) return _dep.data;
+  if (_dep && _dep.m === st.mtimeMs && _dep.s === st.size && !(_dep.data.at > now + DEPLOY_FUTURE_SKEW_MS)) return _dep.data;
   try {
     const o = JSON.parse(fs.readFileSync(DEPLOYED_FILE(), 'utf8'));
     if (!o || typeof o !== 'object' || !Array.isArray(o.items)) throw new Error('형식이 다릅니다');
     const items = o.items.map((x) => normalizeWindow(x)).filter(Boolean).map((w) => ({ ...w, origin: 'central' }));
-    const data = { at: Number(o.at) || 0, sig: String(o.sig || '').slice(0, 64), items, dropped: Number(o.dropped) || 0 };
+    let at = Number(o.at) || 0; let clampedFrom = Number(o.atClampedFrom) || null;
+    if (at > now + DEPLOY_FUTURE_SKEW_MS) {
+      clampedFrom = at; at = now;
+      try { atomicWriteFileSync(DEPLOYED_FILE(), JSON.stringify({ ...o, at, atClampedFrom: clampedFrom }), { mode: 0o600 }); } catch { /* 못 쓰면 이번 판단만 — 다음 읽기에서 다시 자른다 */ }
+      console.warn('[bmusage] 정비 창 배포본의 받은 시각이 미래라 지금으로 잘랐습니다(엣지 시계 변경 — 24시간 시한은 지금부터)');
+      try { st = fs.statSync(DEPLOYED_FILE()); } catch { /* */ }
+    }
+    const data = { at, sig: String(o.sig || '').slice(0, 64), items, dropped: Number(o.dropped) || 0, ...(clampedFrom ? { atClampedFrom: clampedFrom } : {}) };
     _dep = { m: st.mtimeMs, s: st.size, data };
     return data;
   } catch (e) {
@@ -315,6 +389,8 @@ export function loadDeployed() {
     return { at: 0, sig: '', items: [], unreadable: true };
   }
 }
+/** 배포본이 시한을 넘었나(판정 · 화면이 같은 함수). */
+export const deployedStale = (dep, now = Date.now()) => !!dep && (now - Number(dep.at || 0) > DEPLOY_TTL_MS);
 
 /**
  * 판정 입력 — 이 노드의 창(지운 것 제외) + 신선한 배포본. 못 읽은 쪽은 넣지 않고 표지로 밝힌다.
@@ -322,10 +398,31 @@ export function loadDeployed() {
  */
 export function windowsForJudge(now = Date.now()) {
   let local = []; let localUnreadable = false;
-  try { local = loadAll().items.filter((w) => !w.deleted); } catch { localUnreadable = true; }
-  const dep = loadDeployed();
-  const stale = !!dep && (now - Number(dep.at || 0) > DEPLOY_TTL_MS);
+  // 묘비(지운 창)도 넣는다 — 지금 판정은 judge 가 빼고(activeOccurrence), 지난 구간(coverIntervals)은 지운 시각까지 쓴다.
+  try { local = loadAll().items; } catch { localUnreadable = true; }
+  const dep = loadDeployed(now);
+  const stale = deployedStale(dep, now);
   const deployed = dep ? { at: dep.at, sig: dep.sig, n: dep.items.length, stale, ...(dep.unreadable ? { unreadable: true } : {}) } : null;
   return { windows: [...local, ...(dep && !stale ? dep.items : [])], localUnreadable, deployed };
 }
-export function _resetMaintStoreForTest() { _cache = null; _dep = null; _chain = Promise.resolve(); _err.ok(); }
+/**
+ * 점검용 사실(캐시 없이 — 반증 F8): 파일 두 개를 지금 다시 읽어 창마다 지운 시각 · 지금 끝낸 시각 · 재확인 · 일정 꼴만 돌려준다(정규화 · 판정을 거치지 않는다).
+ * @returns {{ ok:boolean, byId:Map<string,{deleted:number|null, endedAt:number|null, endedOccStart:number|null, confirmedAt:number|null, kind:string, deployedAt?:number}> }}
+ */
+export function windowFactsNoCache() {
+  const byId = new Map(); let ok = true;
+  const put = (x, extra = {}) => {
+    if (!x || typeof x !== 'object' || !ID_RE.test(String(x.id || ''))) return;
+    const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);
+    byId.set(String(x.id), { deleted: x.deleted && typeof x.deleted === 'object' ? num(x.deleted.at) : null, endedAt: num(x.endedAt), endedOccStart: num(x.endedOccStart),
+      confirmedAt: num(x.confirmedAt ?? x.at), kind: String(x.schedule?.kind || ''), ...extra });
+  };
+  for (const [file, deployed] of [[FILE(), false], [DEPLOYED_FILE(), true]]) {
+    let o = null;
+    try { o = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e?.code !== 'ENOENT') ok = false; continue; }
+    const items = Array.isArray(o?.items) ? o.items : [];
+    for (const x of items) if (!(deployed && byId.has(String(x?.id)))) put(x, deployed ? { deployedAt: Number(o.at) || 0 } : {});
+  }
+  return { ok, byId };
+}
+export function _resetMaintStoreForTest() { _cache = null; _dep = null; _chain = Promise.resolve(); _err.ok(); _endMemo.clear(); }

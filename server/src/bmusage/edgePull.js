@@ -157,21 +157,21 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
 export const MAINT_VER = 1;
 export const CAPACITY_VER = 1;
 const CAP_FIELDS = ['key', 'kind', 'res', 'status', 'reason', 'grade', 'current', 'max30', 'slope', 'slope30', 'r2', 'conf', 'n', 'targetPct', 'daysToTarget', 'dateToTarget', 'daysTo100', 'dateTo100',
-  'beyondTarget', 'beyond100', 'reset', 'resetDay', 'resets30', 'excluded', 'missing', 'sizeBytes', 'dailyWin'];
+  'beyondTarget', 'beyond100', 'reset', 'resetDay', 'resets30', 'excluded', 'missing', 'sizeBytes', 'dailyWin', 'lastDay', 'staleDays', 'stale'];
 async function envelopeMaintCapacity(keys) {
   const out = { maintVer: MAINT_VER, capacityVer: CAPACITY_VER };
   try {
     const ST = await import('./maint/store.js'); const R = await import('./maint/runtime.js');
     const w = ST.windowsForJudge(Date.now());
     const s = R.maintStats();
-    out.maint = { deployed: w.deployed, local: w.windows.filter((x) => x.origin !== 'central').length, ...(w.localUnreadable ? { localUnreadable: true } : {}),
+    out.maint = { deployed: w.deployed, local: w.windows.filter((x) => x.origin !== 'central' && !x.deleted).length, ...(w.localUnreadable ? { localUnreadable: true } : {}),
       byWindow: Object.fromEntries(Object.entries(s.byWindow || {}).slice(0, 500)), leak: s.leak };
   } catch { /* 그 필드만 빠진다 */ }
   try {
     const C = (await import('./capacity.js')).loadCapacity();
     if (C) {
       out.capacity = C.unreadable ? { unreadable: true, rows: [] }
-        : { at: C.at, day: C.day, cfg: C.cfg, ...(C.truncated ? { truncated: 'rows-cap' } : {}),
+        : { at: C.at, day: C.day, cfg: C.cfg, ...(C.truncated ? { truncated: 'rows-cap' } : {}), ...(C.cap ? { cap: C.cap } : {}),
           rows: (C.rows || []).filter((r) => keys.has(t(r.key))).map((r) => Object.fromEntries(CAP_FIELDS.filter((k) => r[k] !== undefined && r[k] !== null).map((k) => [k, r[k]]))) };
     }
   } catch { /* */ }

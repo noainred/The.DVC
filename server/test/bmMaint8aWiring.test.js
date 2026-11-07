@@ -228,21 +228,30 @@ test('⑤ 분모 제외 — 목표선 · 베이스라인 띠 · 슬롯 띠', asy
   assert.ok(bandsAll.get('K').get('cpu_pct').mean > 30, '빼지 않으면 정비 창 값이 평균을 올린다');
 });
 
-test('억제 시한 — ‘창 끝 뒤 억제 0’ 점검: 시한을 넘긴 적용 · 지금 판정이 억제가 아닌 적용을 센다', async () => {
+test('억제 시한 — ‘창 끝 뒤 억제 0’ 점검: 판정과 독립된 단순 기준(창 끝 · 길이 상한 · 지움 · 끝내기 — 캐시 없이 다시 읽은 파일)', async () => {
   resetAll();
   const w = await addWin({ scopes: { alerts: true } });
   const occ = (await R.maintJudge({ now: T0 })).stateFor({ key: 'TAGA1', vcenterId: 'vcA' }, T0);
-  R.noteApplied('alerts', 'TAGA1', occ.until.alerts, [w.id], T0);                  // 정상
-  let a = await R.auditCycle({ targetsByKey: new Map([['TAGA1', { key: 'TAGA1', vcenterId: 'vcA' }]]) });
-  assert.deepEqual(a, { checked: 1, leak: 0 });
-  R.noteApplied('alerts', 'TAGA1', occ.until.alerts, [w.id], occ.until.alerts + MIN);   // 시한 뒤 적용(버그 흉내)
-  R.noteApplied('collect', 'TAGA1', occ.until.alerts, [w.id], T0);                    // 그 창은 ④ 를 켜지 않았다(판정과 어긋남)
-  a = await R.auditCycle({ targetsByKey: new Map([['TAGA1', { key: 'TAGA1', vcenterId: 'vcA' }]]) });
-  assert.deepEqual(a, { checked: 2, leak: 2 });
+  const since = R.sinceOf(occ, 'alerts');
+  R.noteApplied('alerts', 'TAGA1', occ.until.alerts, [w.id], T0, { since });                  // 정상
+  let a = await R.auditCycle();
+  assert.equal(a.checked, 1); assert.equal(a.leak, 0);
+  R.noteApplied('alerts', 'TAGA1', occ.until.alerts, [w.id], occ.until.alerts + MIN, { since });   // 시한 뒤 적용(버그 흉내)
+  R.noteApplied('alerts', 'TAGA1', since + 25 * HOUR, [w.id], T0, { since });                  // 길이 상한(일회 24h) 넘는 근거
+  a = await R.auditCycle();
+  assert.equal(a.checked, 2); assert.equal(a.leak, 2); assert.deepEqual(a.reasons, { 'after-end': 1, 'over-cap': 1 });
   assert.equal(R.maintStats().leak.n, 2);
+  // 적용 기록 없는 주기는 지난 결과를 덮지 않는다(다른 폴러가 찾은 leak 를 0 으로 지우지 않게)
+  a = await R.auditCycle(); assert.equal(a.checked, 0); assert.equal(R.maintStats().leak.n, 2);
   // 겹친 창 — 짧은 창의 시한을 넘겨 적용했지만 긴 창이 아직 덮는다: 판정은 억제여도 ‘시한을 넘긴 적용’ 은 센다(변이 M28)
   await addWin({ name: '긴 창', schedule: { kind: 'once', start: loc(T0 - 30 * MIN), end: loc(T0 + 3 * HOUR) }, scopes: { alerts: true } });
-  R.noteApplied('alerts', 'TAGA1', occ.until.alerts, [w.id], occ.until.alerts + MIN);
-  a = await R.auditCycle({ targetsByKey: new Map([['TAGA1', { key: 'TAGA1', vcenterId: 'vcA' }]]) });
-  assert.deepEqual(a, { checked: 1, leak: 1 });
+  R.noteApplied('alerts', 'TAGA1', occ.until.alerts, [w.id], occ.until.alerts + MIN, { since });
+  a = await R.auditCycle();
+  assert.equal(a.checked, 1); assert.equal(a.leak, 1);
+  // 지운 창 — 파일에서 지운 시각 뒤의 적용은 센다(캐시 없이 다시 읽는다)
+  const ST2 = await import('../src/bmusage/maint/store.js');
+  await ST2.deleteWindow(w.id, { by: 'op', rev: 1, now: T0 - MIN });
+  R.noteApplied('alerts', 'TAGA1', occ.until.alerts, [w.id], T0, { since });
+  a = await R.auditCycle();
+  assert.equal(a.leak, 1); assert.deepEqual(a.reasons, { deleted: 1 });
 });

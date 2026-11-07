@@ -112,8 +112,10 @@ test('① ② 실제 라우터 — 권한 · 범위 · 승인 등급 · 고치�
   assert.equal((await call('opA', 'POST', `${P}/${corp.body.id}/confirm`, { rev: 1 })).body.code, 'owner-required');
   assert.equal((await call('own', 'POST', `${P}/${corp.body.id}/confirm`, { rev: 1 })).status, 200);
   // 줄이는 동작 — 쓰기 범위면 된다(법인 창이라도) · 쓰기 밖은 403
-  assert.equal((await call('opA', 'POST', `${P}/${corp.body.id}/end`, {})).status, 200, '지금 끝내기');
-  assert.equal((await call('opA', 'POST', `${P}/${corp.body.id}/end`, {})).status, 409, '이미 끝남');
+  const noRev = await call('opA', 'POST', `${P}/${corp.body.id}/end`, {});
+  assert.equal(noRev.status, 409); assert.equal(noRev.body.code, 'rev-required', 'rev 없는 호출은 409(마지막 쓰기 승리 금지)');
+  assert.equal((await call('opA', 'POST', `${P}/${corp.body.id}/end`, { rev: 2 })).status, 200, '지금 끝내기');
+  assert.equal((await call('opA', 'POST', `${P}/${corp.body.id}/end`, { rev: 3 })).body.code, 'not-active', '이미 끝남');
   // 읽기 — 범위
   const lA = await call('opA', 'GET', P);
   assert.equal(lA.status, 200);
@@ -125,8 +127,8 @@ test('① ② 실제 라우터 — 권한 · 범위 · 승인 등급 · 고치�
   assert.equal(corpRow.canEdit, false, '소유자 등급 창은 운영자에게 고치기 잠김'); assert.equal(corpRow.needOwner, true);
   assert.equal(lA.body.ownerTier, false); assert.equal((await call('own', 'GET', P)).body.ownerTier, true);
   // 지우기 — 운영자 쓰기 범위
-  assert.equal((await call('opA', 'DELETE', `${P}/${tag.body.id}`)).status, 200);
-  assert.equal((await call('opA', 'DELETE', `${P}/${tag.body.id}`)).status, 404);
+  assert.equal((await call('opA', 'DELETE', `${P}/${tag.body.id}?rev=1`)).status, 200);
+  assert.equal((await call('opA', 'DELETE', `${P}/${tag.body.id}?rev=2`)).status, 404);
   const audit = await import('../src/audit.js');
   const acts = audit.auditEntriesWithAction('bm-perf.maintenance');
   const ops = acts.map((a) => JSON.parse(a.detail).op);

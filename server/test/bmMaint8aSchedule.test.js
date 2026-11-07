@@ -181,13 +181,15 @@ test('③ 저장소 — 직렬 큐 동시 쓰기 · rev 409 · 지금 끝내기 
   await assert.rejects(ST.editWindow(w0.id, { name: 'x' }, { by: 'op', rev: 99, now: NOW }), (e) => e.status === 409);
   const ed = await ST.editWindow(w0.id, { name: '이름 바꿈' }, { by: 'op', rev: 1, now: NOW });
   assert.equal(ed.rev, 2); assert.deepEqual(ed.edits.at(-1).fields, ['name']);
-  await assert.rejects(ST.editWindow(w0.id, { vcenterId: 'vcB' }, { by: 'op', now: NOW }), /법인/);
-  await assert.rejects(ST.endWindowNow(w0.id, { by: 'op', now: NOW }), (e) => e.code === 'not-active', '예정 창은 끝낼 수 없다');
-  const fin = await ST.endWindowNow(w0.id, { by: 'op', now: NOW + 90 * MIN });
+  await assert.rejects(ST.editWindow(w0.id, { vcenterId: 'vcB' }, { by: 'op', rev: 2, now: NOW }), /법인/);
+  await assert.rejects(ST.editWindow(w0.id, { name: 'y' }, { by: 'op', now: NOW }), (e) => e.status === 409 && e.code === 'rev-required', 'rev 없는 쓰기는 409');
+  await assert.rejects(ST.endWindowNow(w0.id, { by: 'op', rev: 2, now: NOW }), (e) => e.code === 'not-active', '예정 창은 끝낼 수 없다');
+  const fin = await ST.endWindowNow(w0.id, { by: 'op', rev: 2, now: NOW + 90 * MIN });
   assert.equal(J.windowStatus(fin, NOW + 91 * MIN).status, 'ended');
-  await ST.deleteWindow(made[1].id, { by: 'op', now: NOW });
+  await ST.deleteWindow(made[1].id, { by: 'op', rev: 1, now: NOW });
   const W = ST.windowsForJudge(NOW);
-  assert.equal(W.windows.length, 11, '지운 창은 판정에서 빠진다');
+  assert.equal(W.windows.filter((x) => !x.deleted).length, 11, '지운 창은 묘비로만 남는다');
+  assert.equal(J.maintStateFor(W.windows.filter((x) => x.id === made[1].id), { key: 'K1', vcenterId: 'vcA' }, NOW + 61 * MIN).active, false, '지운 창은 지금 판정에서 빠진다');
   // 손상 → 보존 + 503 + 쓰기 거부 + 판정은 이 노드 창 없이(억제 없음) + 표지
   fs.writeFileSync(path.join(DIR, 'maintenance-windows.json'), '{broken');
   ST._resetMaintStoreForTest();

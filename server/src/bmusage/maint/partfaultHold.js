@@ -7,7 +7,7 @@
  *   중앙 로컬(agent '')은 iDRAC 등록 id(deviceId) = 대상의 idrac.regId 도 본다. 맞는 서버가 없는 장비는 보류하지 않는다(모르는 장비를 억제하지 않는다).
  * 판정은 maint/judge.js 하나(② hold 를 켠 창 · 발생 끝까지 · 지금 끝내기 · 만료) — 여기서 다시 판정하지 않는다.
  */
-import { maintJudge, countSuppression, noteApplied, localTargets } from './runtime.js';
+import { maintJudge, countSuppression, noteApplied, localTargets, sinceOf, auditCycle } from './runtime.js';
 
 const t = (v) => String(v ?? '').trim();
 const _counted = new Set();   // `${창}|${장비}` — 창마다 장비 한 번만 센다(인메모리 · 상한)
@@ -38,7 +38,7 @@ export function holdSetFor(devices = [], targets = [], judge, now = Date.now()) 
     const s = judge.stateFor(tg, now);
     if (!s?.scopes?.hold) continue;
     hold.add(k);
-    byDevice.set(k, { ids: s.windows.filter((w) => w.scopes.includes('hold')).map((w) => w.id), until: s.until.hold, key: t(tg.key) });
+    byDevice.set(k, { ids: s.windows.filter((w) => w.scopes.includes('hold')).map((w) => w.id), until: s.until.hold, since: sinceOf(s, 'hold'), key: t(tg.key) });
   }
   return { hold, byDevice };
 }
@@ -63,16 +63,18 @@ async function centralTargets() {
 export async function partfaultMaintHold(devices = [], { now = Date.now(), deps = {} } = {}) {
   try {
     const judge = deps.judge || await maintJudge({ now });
-    if (!judge.windows.some((w) => w.scopes?.hold)) return { hold: new Set(), byDevice: new Map() };
+    if (!judge.windows.some((w) => w.scopes?.hold && !w.deleted)) { await (deps.audit || auditCycle)({ now }).catch(() => null); return { hold: new Set(), byDevice: new Map() }; }
     const targets = deps.targets || await centralTargets();
     const r = holdSetFor(devices, targets, judge, now);
     for (const [k, v] of r.byDevice) {
-      noteApplied('hold', v.key, v.until, v.ids, now);
+      noteApplied('hold', v.key, v.until, v.ids, now, { since: v.since });
       // 계수는 장비마다 창 한 번(주기마다 세지 않는다 — 화면 ‘전이 보류 n대’).
       const fresh = v.ids.filter((id) => !_counted.has(`${id}|${k}`));
       for (const id of fresh) { _counted.add(`${id}|${k}`); if (_counted.size > 20_000) _counted.clear(); }
       if (fresh.length) countSuppression('hold', fresh, { now });
     }
-    return r;
+    // 점검 · 계수 저장(중앙 — 로컬 bmusage 대상이 0대여도 남게: 반증 의심 항목 ‘flushMaintStats 호출처 0’)
+    const audit = await (deps.audit || auditCycle)({ now }).catch(() => null);
+    return { ...r, ...(audit ? { audit: { checked: audit.checked, leak: audit.leak } } : {}) };
   } catch (e) { return { hold: new Set(), byDevice: new Map(), error: String(e?.message || e).slice(0, 160) }; }
 }

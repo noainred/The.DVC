@@ -48,6 +48,7 @@ export function MaintForm({ form, setForm, vcenters = [], limits = {}, onPreview
       </div>
       <div className="bmm-grid">
         {f.kind === 'server' && <label className="bmm-field bmm-wide">서버 키(서비스 태그 — 쉼표로 · 한 법인 · {unitText(limits.keysMax, '대')}까지)<input className="input" value={f.keys} onChange={(e) => set({ keys: e.target.value })} placeholder="ABC1234, ABC5678" /></label>}
+        {f.kind === 'server' && <label className="bmm-field">법인(서버 키가 여러 법인에 있으면 고르세요)<Select sort={false} className="select" value={f.serverCorp || ''} disabled={editing} onChange={(e) => set({ serverCorp: e.target.value })}>{optionsOf([['', '자동 — 키로 찾기'], ...corpOpts])}</Select></label>}
         {f.kind === 'tag' && <label className="bmm-field">태그(role:역할 · app:용도)<input className="input" value={f.tag} onChange={(e) => set({ tag: e.target.value })} /></label>}
         {f.kind !== 'server' && <label className="bmm-field">법인<Select sort={false} className="select" value={f.corp} onChange={(e) => set({ corp: e.target.value })}>{optionsOf([['', '고르세요'], ...corpOpts])}</Select></label>}
         <label className="bmm-field">시간대(법인)<Select sort={false} className="select" value={f.tz} onChange={(e) => set({ tz: e.target.value })}>{optionsOf(tzOpts)}</Select></label>

@@ -58,9 +58,12 @@ export function sanitizeCapacityEnvelope(c, { targetKeys = new Set(), now = Date
       current: N(r.current), max30: N(r.max30), slope: N(r.slope), slope30: N(r.slope30), r2: N(r.r2), conf: CONF.has(r.conf) ? r.conf : null, n: N(r.n), targetPct: N(r.targetPct),
       daysToTarget: N(r.daysToTarget), dateToTarget: day(r.dateToTarget), daysTo100: N(r.daysTo100), dateTo100: day(r.dateTo100),
       beyondTarget: bool(r.beyondTarget), beyond100: bool(r.beyond100), reset: bool(r.reset), resetDay: day(r.resetDay), resets30: N(r.resets30), excluded: N(r.excluded), missing: N(r.missing), sizeBytes: N(r.sizeBytes), ...(N(r.dailyWin) ? { dailyWin: N(r.dailyWin) } : {}),
+      lastDay: day(r.lastDay), staleDays: N(r.staleDays), ...(r.stale === true ? { stale: true } : {}),
     });
   }
   dropped += Math.max(0, arr.length - 20_000);
   const cfg = isObj(c.cfg) ? { targetPct: N(c.cfg.targetPct), minDays: N(c.cfg.minDays) } : null;
-  return { at: clampEdgeTs(N(c.at), now), day: day(c.day), cfg, rows, dropped, ...(typeof c.truncated === 'string' ? { truncated: ['rows-cap', 'forecast-only'].includes(c.truncated) ? c.truncated : 'rows-cap' } : {}) };
+  // 행 상한 내역(서버 수 — F4): 아는 칸만 · 수만
+  const capInfo = isObj(c.cap) ? Object.fromEntries(['servers', 'computed', 'skippedServers', 'trimmedServers', 'trimmedMounts', 'perServerRows'].map((k) => [k, N(c.cap[k])])) : null;
+  return { at: clampEdgeTs(N(c.at), now), day: day(c.day), cfg, rows, dropped, ...(typeof c.truncated === 'string' ? { truncated: ['rows-cap', 'forecast-only'].includes(c.truncated) ? c.truncated : 'rows-cap' } : {}), ...(capInfo ? { cap: capInfo } : {}) };
 }

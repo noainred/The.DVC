@@ -197,7 +197,7 @@ export async function startFocusLocal({ target, reason = '', by = '', trigger = 
     if (ms && (ms.scopes?.focus || ms.scopes?.collect)) {
       const scope = ms.scopes.focus ? 'focus' : 'collect';
       const ids = (ms.windows || []).filter((w) => (w.scopes || []).includes(scope)).map((w) => w.id);
-      try { const R = await import('../maint/runtime.js'); R.countSuppression('focus', ids, { now }); R.noteApplied(scope, target.key, ms.until?.[scope], ids, now); } catch { /* 계수 실패는 억제를 바꾸지 않는다 */ }
+      try { const R = await import('../maint/runtime.js'); R.countSuppression('focus', ids, { now }); R.noteApplied(scope, target.key, ms.until?.[scope], ids, now, { since: R.sinceOf?.(ms, scope) ?? null }); } catch { /* 계수 실패는 억제를 바꾸지 않는다 */ }
       return { ok: false, code: 'maintenance', maint: { ids, until: ms.until?.[scope] ?? null }, reason: '정비 창 안이라 자동 집중 모니터링을 시작하지 않았습니다(수동 집중은 사유를 적고 실행할 수 있습니다).' };
     }
   }

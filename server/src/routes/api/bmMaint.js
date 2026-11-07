@@ -4,12 +4,16 @@
  * 경로 `/tools/bm-usage/maintenance…`(도구 키 bm-usage 그대로 — toolAccess 매핑 안). 권한 · 범위(security-api.md 8a 항목):
  *   · 읽기 = tools + 조회 범위 — 창의 법인이 조회 범위 안일 때만 보인다(귀속 없음 · 범위 밖은 범위 계정에 숨김).
  *   · 쓰기 = operator 이상 + tools · **조회 밖 404 → 쓰기 범위 밖 403**(한 함수 writeGate) · 서버 대상은 1~20대 · 한 법인(법인 간 대상 금지).
+ *   · 서버 대상은 **(법인, 키) 쌍**(반증 F1): 법인을 고르면 그 법인 안에서만 키를 찾고, 고르지 않았는데 같은 키가 여러 법인에 보이면 400(ambiguous-key — 고르게 한다).
  *   · **승인 등급**: 법인 전체 · 태그 대상 · 12시간 초과 창은 설정 소유자 등급(소유자 ∧ 전체 범위 — requireSettingsOwner 와 같은 판정 isOwnerTier)만 만들고 · 고치고 · 재확인한다.
+ *     12시간은 창 하나가 아니라 **같은 서버를 덮는 비소유자 창들의 합**으로도 본다(store.coverNeedsOwner — 어느 24시간에서든 12시간 초과: 반증 F5) — 재확인도 같은 규칙.
+ *     소유자 등급이 저장한 창은 approvedBy 가 남는다(합 계산에서 빠진다) · 비소유자가 고치면 approvedBy 를 비운다.
  *     고치기는 **고치기 전과 뒤 중 하나라도** 소유자 등급이 필요하면 소유자 등급(범위 관리자가 법인 창을 서버 창으로 바꿔 쥐거나, 서버 창을 법인 창으로 넓히지 못하게).
  *     억제를 **줄이는** 동작(지금 끝내기 · 지우기)은 그 법인 쓰기 범위면 된다(안전한 쪽).
  *   · 엣지 배포본(origin central)은 엣지에서 고칠 수 없다(중앙에서 고친다 — 다음 인출에 반영).
  *   · 감사 `bm-perf.maintenance`(op · id · 대상 종류 · 법인 · 서버 수 · 길이 · 범위 · 사유 앞 120자).
  *   · 미리보기(다음 5회 · DST 표지)는 서버가 계산한다 — 웹은 시간대 · 일정 계산을 복제하지 않는다.
+ *   · 요청 경로 비용(반증 F6): 목록은 창마다 상태를 한 번(조각 탐색 windowStatus) · 행 사이 시간 기준 양보 · 배포 현황은 창 상태를 한 번 세고 엣지마다 다시 쓴다.
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
@@ -20,6 +24,7 @@ import { currentTargets } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { resolvePerfTarget, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
 import { isOwnerTier } from './bmOnboard.js';
+import { createYielder } from '../../util/timeSlice.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -81,9 +86,19 @@ async function writeGate(req, snap, D, b) {
   if (kind !== 'server') throw fail(400, 'bad-target', '대상은 서버 · 태그 · 법인 중 하나입니다.');
   const keys = [...new Set((Array.isArray(tg.keys) ? tg.keys : []).map((k) => t(k)).filter(Boolean))];
   if (!keys.length || keys.length > 20) throw fail(400, 'bad-target', '대상 서버는 1~20대입니다.');
+  // 서버 = (법인, 키) 쌍(반증 F1) — 법인을 골랐으면 그 법인 안에서만 찾는다(IP 키는 법인끼리 겹친다).
+  const want = t(b.vcenterId ?? '').slice(0, 128);
+  if (want && !VC_RE.test(want)) throw fail(400, 'bad-target', '법인(vCenter id) 형식이 다릅니다.');
+  if (want && allowed && !allowed.has(want)) throw fail(404, 'not-found', '대상 서버를 찾지 못했습니다.');
   const found = [];
   for (const key of keys) {
-    const f = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
+    let f;
+    if (want) f = await resolvePerfTarget(req, corpOnly(D, want), { allowed, isAdmin, key });
+    else {
+      const corps = await corpsOfKey(req, D, { allowed, isAdmin, key });
+      if (corps.length > 1) throw fail(400, 'ambiguous-key', `같은 키의 서버가 ${corps.length}개 법인에 있습니다 — 법인을 고르세요.`);
+      f = await resolvePerfTarget(req, corps.length === 1 ? corpOnly(D, corps[0]) : D, { allowed, isAdmin, key });
+    }
     if (!f || f.denied) throw fail(404, 'not-found', '대상 서버를 찾지 못했습니다.');
     found.push(f);
   }
@@ -92,11 +107,38 @@ async function writeGate(req, snap, D, b) {
   if (!inUserWriteScope(req.user, snap, vcs[0])) throw fail(403, 'forbidden', '대상 서버의 법인에 쓰기 권한이 없습니다(조회 전용).');
   return { vcenterId: vcs[0], target: { kind: 'server', keys: found.map((f) => f.realKey), names: found.map((f) => String(f.target.name || f.realKey)) } };
 }
-/** 소유자 등급 게이트(순수 판정은 store.needsOwnerTier — 화면 문구도 같은 값). */
-async function ownerGate(req, D, ...wins) {
+/** 대상 해석을 한 법인으로 좁힌 의존성(같은 resolvePerfTarget 을 쓴다 — 가림 토큰 · 엣지 보관분 규칙 그대로). */
+function corpOnly(D, vc) {
+  return {
+    ...D,
+    currentTargets: async () => { const tg = await D.currentTargets(); return { ...tg, targets: (tg?.targets || []).filter((x) => t(x?.vcenterId) === vc) }; },
+    listEdgeBmUsage: async () => (await D.listEdgeBmUsage()).map((rec) => (rec?.snap ? { ...rec, snap: { ...rec.snap, targets: (rec.snap.targets || []).filter((x) => t(x?.vcenterId) === vc) } } : rec)),
+  };
+}
+/** 이 계정에 보이는 법인 중 그 키(또는 가림 토큰)의 서버가 있는 법인들. */
+async function corpsOfKey(req, D, { allowed, isAdmin, key }) {
+  const corps = new Set();
+  for (const x of (await D.currentTargets().catch(() => ({ targets: [] }))).targets || []) if (t(x?.vcenterId)) corps.add(t(x.vcenterId));
+  for (const rec of await D.listEdgeBmUsage().catch(() => [])) for (const x of rec?.snap?.targets || []) if (t(x?.vcenterId)) corps.add(t(x.vcenterId));
+  const out = [];
+  for (const vc of [...corps].sort()) {
+    if (allowed && !allowed.has(vc)) continue;
+    const f = await resolvePerfTarget(req, corpOnly(D, vc), { allowed, isAdmin, key }).catch(() => null);
+    if (f && !f.denied) out.push(vc);
+  }
+  return out;
+}
+/**
+ * 소유자 등급 게이트(순수 판정은 store.needsOwnerTier · store.coverNeedsOwner — 화면 문구도 같은 값). 소유자 등급이면 통과(합 계산을 하지 않는다).
+ * @param {Array} wins  창 하나 규칙을 볼 창들(고치기는 전 · 후) · combined = 합 규칙을 볼 후보(서버 창)
+ */
+async function ownerGate(req, D, wins, { combined = null, now = Date.now() } = {}) {
+  if (await D.ownerTier(req)) return;
   const ST = await D.store();
-  if (!wins.some((w) => w && ST.needsOwnerTier(w))) return;
-  if (!(await D.ownerTier(req))) throw fail(403, 'owner-required', '법인 전체 · 태그 대상 · 12시간 넘는 창은 설정 소유자 등급(소유자 + 전체 범위)만 만들고 고칠 수 있습니다.');
+  if (wins.some((w) => w && ST.needsOwnerTier(w))) throw fail(403, 'owner-required', '법인 전체 · 태그 대상 · 12시간 넘는 창은 설정 소유자 등급(소유자 + 전체 범위)만 만들고 고칠 수 있습니다.');
+  if (combined && ST.coverNeedsOwner(combined, ST.listWindows(), now)) {
+    throw fail(403, 'owner-required', '같은 서버를 덮는 창들(설정 소유자가 저장하지 않은 창)의 합이 어느 24시간에서든 12시간을 넘습니다 — 설정 소유자 등급만 만들고 · 고치고 · 재확인할 수 있습니다.');
+  }
 }
 /** 기존 창 찾기 — 조회 밖 404 → 쓰기 밖 403 · 엣지 배포본은 409. */
 async function existingGate(req, snap, D, id) {
@@ -119,7 +161,7 @@ export async function bmMaintList(req, snap, deps = {}) {
   const ST = await D.store(); const J = await D.judge(); const S = await D.schedule(); const R = await D.runtime();
   let local;
   try { local = ST.listWindows(); } catch (e) { return { __status: e?.status || 500, ok: false, code: e?.code || 'error', reason: String(e?.message || e).slice(0, 300) }; }
-  const dep = ST.loadDeployed();
+  const dep = ST.loadDeployed(now);
   const all = [...local, ...(dep?.items || [])].filter((w) => maintVisible(w, allowed));
   const corp = t(req.query?.corp);
   const list = corp ? all.filter((w) => w.vcenterId === corp) : all;
@@ -151,7 +193,10 @@ export async function bmMaintList(req, snap, deps = {}) {
       edits: (w.edits || []).slice(-5),
     };
   };
-  const rows = list.map(view).sort((a, b) => ({ active: 0, scheduled: 1, expired: 2, ended: 3 }[a.status] ?? 4) - ({ active: 0, scheduled: 1, expired: 2, ended: 3 }[b.status] ?? 4) || (a.next?.start ?? a.last?.start ?? 0) - (b.next?.start ?? b.last?.start ?? 0));
+  const y = createYielder(15);
+  const rows0 = [];
+  for (const w of list) { rows0.push(view(w)); await y(); }   // 창마다 상태 한 번 · 사이 양보(F6)
+  const rows = rows0.sort((a, b) => ({ active: 0, scheduled: 1, expired: 2, ended: 3 }[a.status] ?? 4) - ({ active: 0, scheduled: 1, expired: 2, ended: 3 }[b.status] ?? 4) || (a.next?.start ?? a.last?.start ?? 0) - (b.next?.start ?? b.last?.start ?? 0));
   const s = R.maintStats();
   // 엣지 배포 현황(중앙) — 인출 기록 + 엣지 봉투의 배포본 상태
   let deploy = null;
@@ -162,7 +207,7 @@ export async function bmMaintList(req, snap, deps = {}) {
   return {
     ok: true, now, windows: rows,
     summary: { active: rows.filter((r) => r.status === 'active').length, scheduled: rows.filter((r) => r.status === 'scheduled').length, ended: rows.filter((r) => r.status === 'ended').length, expired: rows.filter((r) => r.status === 'expired').length },
-    leak: s.leak, ownerTier: owner, ...(dep ? { deployed: { at: dep.at, sig: dep.sig, n: dep.items.length, ...(dep.unreadable ? { unreadable: true } : {}), stale: now - Number(dep.at || 0) > ST.DEPLOY_TTL_MS } } : {}),
+    leak: s.leak, ownerTier: owner, ...(dep ? { deployed: { at: dep.at, sig: dep.sig, n: dep.items.length, ...(dep.unreadable ? { unreadable: true } : {}), stale: ST.deployedStale(dep, now) } } : {}),
     limits: { onceMaxMin: S.ONCE_MAX_MIN, recurMaxMin: S.RECUR_MAX_MIN, ownerOverMin: ST.OWNER_OVER_MIN, keysMax: ST.KEYS_MAX, confirmDays: J.RECUR_CONFIRM_DAYS, deployTtlMs: ST.DEPLOY_TTL_MS },
     scopes: J.SCOPES, defaultTz: S.DEFAULT_TZ, ...(deploy ? { deploy: { ...deploy, minEdgeVersion: await D.minEdgeVersion().catch(() => null) } } : {}), ...(isAdmin ? {} : { addressHidden: true }),
   };
@@ -200,12 +245,13 @@ export async function bmMaintOccurrences(req, snap, deps = {}) {
   const R = await D.runtime(); const J = await D.judge();
   const MJ = await R.maintJudge({ now });
   // 판정기와 같은 입력(이 노드의 창 + 배포본 · 수동 태그)으로 이 서버를 덮는 창을 고른다 — 판정을 다시 만들지 않는다.
-  const merged = MJ.cover(f.target, from, to);
+  // 이 계정에 보이는 창만으로 합친다(merged 에 범위 밖 창 id 가 섞이지 않게) · 지운 창은 지운 시각까지(묘비 — 소급 소거 금지).
+  const merged = MJ.cover(f.target, from, to, null, { only: (w) => maintVisible(w, allowed) });
   const ids = new Set(merged.flatMap((x) => x.ids));
   const items = [];
   for (const w of MJ.windows) {
     if (!ids.has(w.id) || !maintVisible(w, allowed)) continue;
-    for (const o of J.effectiveOccurrences(w, from, to)) items.push({ id: w.id, name: w.name, start: o.start, end: o.end, scopes: Object.keys(w.scopes || {}), ...(o.cut ? { cut: true } : {}) });
+    for (const o of J.effectiveOccurrences(w, from, to, { history: true })) items.push({ id: w.id, name: w.name, start: o.start, end: o.end, scopes: Object.keys(w.scopes || {}), ...(o.cut ? { cut: true } : {}), ...(o.deleted ? { deleted: true } : {}) });
     if (items.length >= 1_000) break;
   }
   items.sort((a, b) => a.start - b.start);
@@ -220,9 +266,9 @@ async function create(req, res, D) {
     const ST = await D.store();
     const input = { name: b.name, reason: b.reason, tz: b.tz, schedule: b.schedule, scopes: b.scopes, target: g.target, vcenterId: g.vcenterId };
     const now = D.now();
-    const probe = ST.normalizeWindow({ ...input, id: 'mw-probe0000', by: '', at: now }, { strict: true, now, fresh: true });
-    await ownerGate(req, D, probe);
-    const owner = ST.needsOwnerTier(probe);
+    const probe = ST.normalizeWindow({ ...input, id: 'mw-probe0000', by: '', at: now, confirmedAt: now }, { strict: true, now, fresh: true });
+    await ownerGate(req, D, [probe], { combined: probe, now });
+    const owner = !!(await D.ownerTier(req));
     const by = String(req.user?.username || '');
     const rec = await ST.addWindow(input, { by, approvedBy: owner ? by : '', now });
     D.audit({ user: by, action: 'bm-perf.maintenance', target: rec.id, ip: req.ip || '', detail: auditOf('create', rec, { durMin: ST.durationMinOf(rec.schedule, rec.tz), owner }) });
@@ -240,10 +286,11 @@ async function edit(req, res, D) {
     const now = D.now();
     const next = ST.normalizeWindow({ ...cur, ...(b.name !== undefined ? { name: b.name } : {}), ...(b.reason !== undefined ? { reason: b.reason } : {}), ...(b.tz !== undefined ? { tz: b.tz } : {}),
       ...(b.schedule !== undefined ? { schedule: b.schedule } : {}), ...(b.scopes !== undefined ? { scopes: b.scopes } : {}), target, vcenterId }, { strict: true, now, fresh: b.schedule !== undefined });
-    await ownerGate(req, D, cur, next);
+    await ownerGate(req, D, [cur, next], { combined: { ...next, id: cur.id, confirmedAt: now }, now });
+    const owner = !!(await D.ownerTier(req));
     const by = String(req.user?.username || '');
     const rec = await ST.editWindow(cur.id, { name: next.name, reason: next.reason, tz: next.tz, schedule: next.schedule, scopes: next.scopes, target: next.target, vcenterId: next.vcenterId },
-      { by, approvedBy: ST.needsOwnerTier(next) ? by : '', rev: b.rev ?? null, now });
+      { by, approvedBy: owner ? by : '', rev: b.rev ?? null, now });
     D.audit({ user: by, action: 'bm-perf.maintenance', target: rec.id, ip: req.ip || '', detail: auditOf('edit', rec, { fields: rec.edits?.at(-1)?.fields || [] }) });
     res.json({ ok: true, id: rec.id, rev: rec.rev });
   } catch (e) { errOut(res, e); }
@@ -256,7 +303,7 @@ async function change(req, res, D, op) {
     const b = bodyOf(req);
     const by = String(req.user?.username || '');
     const now = D.now();
-    if (op === 'confirm') await ownerGate(req, D, cur);   // 재확인은 억제를 늘린다 — 만들 때와 같은 등급
+    if (op === 'confirm') await ownerGate(req, D, [cur], { combined: { ...cur, confirmedAt: now }, now });   // 재확인은 억제를 늘린다 — 만들 때와 같은 등급(합 규칙 포함)
     const fn = { end: ST.endWindowNow, confirm: ST.confirmWindow, delete: ST.deleteWindow }[op];
     const rec = await fn(cur.id, { by, rev: b.rev ?? req.query?.rev ?? null, now });
     D.audit({ user: by, action: 'bm-perf.maintenance', target: cur.id, ip: req.ip || '', detail: auditOf(op, cur) });

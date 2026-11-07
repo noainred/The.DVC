@@ -84,8 +84,8 @@ export function countsText(c) {
 /** ‘창 끝 뒤 억제’ 점검 한 줄(서버 leak — 0 이어야 정상 · 모르면 모른다고). */
 export function leakText(leak) {
   if (!leak || n(leak.n) == null) return { text: '창 끝 뒤 억제 — 아직 점검한 주기가 없습니다', tone: 'idle' };
-  if (leak.n === 0) return { text: `창 끝 뒤 억제 0 — 정상(지난 주기 억제 적용 ${n(leak.last) ?? 0}건을 다시 대 봄)`, tone: 'ok' };
-  return { text: `창 끝 뒤 억제 ${leak.n}건 — 억제가 시한을 넘겼거나 판정과 어긋난 흔적(관리자 확인 필요)`, tone: 'bad' };
+  if (leak.n === 0) return { text: `창 끝 뒤 억제 0 — 정상(지난 점검 억제 적용 ${n(leak.last) ?? 0}건 · 잡는 것: 창 끝 · 길이 상한 · 지움 · 끝내기 · 재확인 만료 · 배포본 시한 / 못 잡는 것: 판정 규칙 자체)`, tone: 'ok' };
+  return { text: `창 끝 뒤 억제 ${leak.n}건 — 억제가 창 끝 · 길이 상한 · 지움 · 끝내기 · 재확인 만료 · 배포본 시한을 넘겨 적용됨(관리자 확인 필요)`, tone: 'bad' };
 }
 /** 배포 현황 한 줄(엣지 행). */
 export const DEPLOY_STATUS_TEXT = Object.freeze({
@@ -115,25 +115,29 @@ export function formToBody(f = {}) {
   const schedule = f.sched === 'once' ? { kind: 'once', start: String(f.start || ''), end: String(f.end || '') }
     : f.sched === 'weekly' ? { kind: 'weekly', days: (f.days || []).map(Number), time: String(f.time || ''), durMin: Number(f.durMin) }
       : { kind: 'monthly', nth: Number(f.nth), weekday: Number(f.weekday), time: String(f.time || ''), durMin: Number(f.durMin) };
-  return { name: f.name, reason: f.reason, tz: f.tz, target, ...(f.kind !== 'server' ? { vcenterId: f.corp } : {}), schedule,
+  // 서버 대상 = (법인, 키) 쌍 — 법인을 고르면 그 법인 안에서만 키를 찾는다(고르지 않으면 서버가 키로 찾고 여러 법인이면 고르라고 한다)
+  const vc = f.kind !== 'server' ? f.corp : String(f.serverCorp || '');
+  return { name: f.name, reason: f.reason, tz: f.tz, target, ...(vc ? { vcenterId: vc } : {}), schedule,
     scopes: Object.fromEntries(SCOPE_ORDER.filter((s) => f.scopes?.[s]).map((s) => [s, true])) };
 }
 /** 빈 폼(억제 기본 = 설계 그림: ① ② ③ ⑤ 켬 · ④ 꺼짐). */
 export function emptyForm({ corp = '', tz = 'Asia/Seoul' } = {}) {
-  return { name: '', reason: '', kind: 'server', keys: '', tag: 'role:web', corp, tz, sched: 'once', start: '', end: '', days: [6], nth: 2, weekday: 6, time: '02:00', durMin: 240,
+  return { name: '', reason: '', kind: 'server', keys: '', serverCorp: '', tag: 'role:web', corp, tz, sched: 'once', start: '', end: '', days: [6], nth: 2, weekday: 6, time: '02:00', durMin: 240,
     scopes: { alerts: true, hold: true, focus: true, collect: false, exclude: true } };
 }
 /** 고치기 — 서버 창 → 폼. */
 export function windowToForm(w = {}) {
   const s = w.schedule || {};
-  return { name: w.name || '', reason: w.reason || '', kind: w.target?.kind || 'server', keys: (w.target?.keys || []).join(', '), tag: w.target?.tag || '', corp: w.vcenterId || '', tz: w.tz || 'Asia/Seoul',
+  return { name: w.name || '', reason: w.reason || '', kind: w.target?.kind || 'server', keys: (w.target?.keys || []).join(', '), serverCorp: w.target?.kind === 'server' ? (w.vcenterId || '') : '', tag: w.target?.tag || '', corp: w.vcenterId || '', tz: w.tz || 'Asia/Seoul',
     sched: s.kind || 'once', start: s.start || '', end: s.end || '', days: s.days || [6], nth: s.nth || 2, weekday: s.weekday ?? 6, time: s.time || '02:00', durMin: s.durMin || 240,
     scopes: Object.fromEntries(SCOPE_ORDER.map((k) => [k, (w.scopes || []).includes(k)])) };
 }
 /** 승인 안내(서버 limits 값으로 — 숫자를 박지 않는다). */
 export function approvalNote(limits = {}) {
   const h = n(limits.ownerOverMin) != null ? limits.ownerOverMin / 60 : null;
-  return `법인 전체 · 태그 대상 · ${h != null ? `${h}시간` : '—'} 넘는 창은 설정 소유자 등급(소유자 + 전체 범위)만 저장할 수 있습니다 — 개별 서버 창은 운영자가 바로(쓰기 범위 안 서버만).`;
+  const ht = h != null ? `${h}시간` : '—';
+  return `법인 전체 · 태그 대상 · ${ht} 넘는 창은 설정 소유자 등급(소유자 + 전체 범위)만 저장할 수 있습니다 — 개별 서버 창은 운영자가 바로(쓰기 범위 안 서버만). `
+    + `같은 서버를 덮는 창들(소유자가 저장하지 않은 창)의 합이 어느 24시간에서든 ${ht}을 넘으면 그 창도 소유자 등급입니다(재확인 포함).`;
 }
 export function limitsNote(limits = {}) {
   const o = n(limits.onceMaxMin); const r = n(limits.recurMaxMin); const c = n(limits.confirmDays);

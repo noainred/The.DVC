@@ -5,15 +5,20 @@
  *   · 창 = store.windowsForJudge(이 노드의 창 + 신선한 중앙 배포본)
  *   · 태그 = 이 노드의 수동 용도 태그(insights/fleetTags purposes — role · apps). 엣지는 중앙 태그가 없어 배포본의 펼친 keys 로 맞춘다.
  * 억제 계수(창마다 — 화면 ‘억제 알림 n · 창 뒤 발송 n’)는 이 노드 메모리 + 상태 파일(`maintenance-stats.json` — 원자 쓰기 · 손상 보존 · 손상이면 0 부터 · 그 사실을 표지로).
- * ⚠⚠ ‘창 끝 뒤 억제 0’ 점검(설계 안전장치): 억제를 적용할 때마다 그 근거 시한(until)을 기록하고, **캐시 없이 파일을 다시 읽은 판정**으로 다시 본다 —
- *   적용 시각이 시한을 넘었거나 새로 읽은 판정이 억제가 아니라고 하면 leak 로 센다(수집 건강 보드 ‘창 끝 뒤 억제’ 행 · 0 이어야 정상).
+ * ⚠⚠ ‘창 끝 뒤 억제 0’ 점검(설계 안전장치 — 반증 F8 로 다시 짰다): 억제를 적용할 때마다 근거(창 id · 발생 시작 since · 끝 until)를 기록하고,
+ *   **판정과 독립된 단순 기준**으로만 본다 — ① 적용 시각이 그 발생의 끝(until) 뒤 ② 발생 길이(until − since)가 창 꼴의 상한(일회 24h · 반복 12h) 초과
+ *   ③ **캐시 없이 다시 읽은 파일**(store.windowFactsNoCache — 정규화 · 판정을 거치지 않는다)에서 그 창이 적용 시각 전에 지워졌거나 · 끝냈거나 · 재확인이 만료됐거나 ·
+ *   배포본이면 받은 지 24시간이 지났음. 대상을 다시 판정하지 않는다(엣지 서버의 법인 창 보류 같은 정당한 보류를 결함으로 세지 않는다).
+ *   ⚠ 정직 기록: 이 점검은 **창 변경 · 시한**을 잡고 **판정 규칙 자체의 결함**(예: 대상을 너무 넓게 맞춤)은 잡지 못한다 — 그것은 시험이 고정한다.
+ * 계수 · 점검 결과는 bmusage 폴러 주기와 **파트 장애 폴러 주기(중앙)** 끝에 저장한다(로컬 대상 0대인 중앙에서도 남게).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
-import { maintStateFor, coverIntervals, SCOPES } from './judge.js';
-import { windowsForJudge } from './store.js';
+import { maintStateFor, coverIntervals, SCOPES, RECUR_CONFIRM_DAYS } from './judge.js';
+import { windowsForJudge, windowFactsNoCache, DEPLOY_TTL_MS } from './store.js';
+import { maxMinOf, MIN, DAY } from './schedule.js';
 
 const STATS_FILE = () => path.join(config.configDir, 'maintenance-stats.json');
 const STATS_MAX = 2_000;
@@ -52,11 +57,10 @@ export async function maintJudge({ now = Date.now(), windowsOf = windowsForJudge
   const tg = tagsOf || await tagsReader();
   return {
     windows: w.windows,
-    meta: { localUnreadable: !!w.localUnreadable, deployed: w.deployed, n: w.windows.length },
+    meta: { localUnreadable: !!w.localUnreadable, deployed: w.deployed, n: w.windows.filter((x) => !x.deleted).length },
     stateFor: (target, at = now) => maintStateFor(w.windows, target, at, { tagsOf: tg }),
-    cover: (target, from, to, scope = null) => coverIntervals(w.windows, target, from, to, { scope, tagsOf: tg }),
-    /** 창마다 따로 — [{ id, intervals }](용량 예측이 ‘매일 반복 창’ 을 가려낸다). */
-    coverEach: (target, from, to, scope = null) => w.windows.map((x) => ({ id: x.id, intervals: coverIntervals([x], target, from, to, { scope, tagsOf: tg }) })).filter((x) => x.intervals.length),
+    /** 구간(합집합 · 지운 창은 지운 시각까지). only(w) — 이 계정에 보이는 창만 같은 거르기. */
+    cover: (target, from, to, scope = null, { only = null } = {}) => coverIntervals(w.windows, target, from, to, { scope, tagsOf: tg, only }),
   };
 }
 
@@ -74,11 +78,11 @@ export function exclusionFor(judge, targetOf = () => null) {
 
 /* ── 억제 계수 · 점검 ─────────────────────────────────────────────── */
 let _stats = null;   // { v, byWindow: { id: { alerts, after, hold, focus, collect, collectFail, at } }, leak: { n, last, at } , unreadable? }
-let _cycle = [];     // 이번 주기에 적용한 억제 [{ scope, key, until, at, windowIds }]
+let _cycle = [];     // 이번 주기에 적용한 억제 [{ scope, key, until, since, at, windowIds }]
 function loadStats() {
   if (_stats) return _stats;
   try {
-    if (!fs.existsSync(STATS_FILE())) { _stats = { v: 1, byWindow: {}, leak: { n: 0, last: 0, at: 0 } }; return _stats; }
+    if (!fs.existsSync(STATS_FILE())) { _stats = { v: 1, byWindow: {}, leak: { n: null, last: 0, at: 0 } }; return _stats; }
     const o = JSON.parse(fs.readFileSync(STATS_FILE(), 'utf8'));
     if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error('객체가 아닙니다');
     const bw = {};
@@ -87,10 +91,11 @@ function loadStats() {
       bw[id] = Object.fromEntries(['alerts', 'after', 'hold', 'focus', 'collect', 'collectFail', 'at'].map((k) => [k, Number.isFinite(Number(x[k])) ? Number(x[k]) : 0]));
     }
     const lk = o.leak && typeof o.leak === 'object' ? o.leak : {};
-    _stats = { v: 1, byWindow: bw, leak: { n: Number(lk.n) || 0, last: Number(lk.last) || 0, at: Number(lk.at) || 0 } };
+    // 점검한 적이 없으면 n 은 null(‘0 = 정상’ 이 아니다 — 화면은 ‘아직 점검한 주기가 없습니다’)
+    _stats = { v: 1, byWindow: bw, leak: { n: Number(lk.at) ? (Number(lk.n) || 0) : null, last: Number(lk.last) || 0, at: Number(lk.at) || 0 } };
   } catch (e) {
     preserveCorrupt(STATS_FILE(), String(e?.message || e));
-    _stats = { v: 1, byWindow: {}, leak: { n: 0, last: 0, at: 0 }, unreadable: Date.now() };
+    _stats = { v: 1, byWindow: {}, leak: { n: null, last: 0, at: 0 }, unreadable: Date.now() };
   }
   return _stats;
 }
@@ -102,31 +107,51 @@ export function countSuppression(kind, windowIds = [], { now = Date.now() } = {}
     c[kind] = (Number(c[kind]) || 0) + 1; c.at = now;
   }
 }
-/** 억제를 적용했다는 기록(점검용) — 시한(until)과 적용 시각. */
-export function noteApplied(scope, key, until, windowIds = [], at = Date.now()) {
-  if (_cycle.length < 20_000) _cycle.push({ scope, key: t(key), until: Number(until), at, windowIds: (windowIds || []).slice(0, 8) });
+/** 억제를 적용했다는 기록(점검용) — 시한(until) · 그 발생의 시작(since — 판정 결과 windows[].start 의 최소) · 적용 시각. */
+export function noteApplied(scope, key, until, windowIds = [], at = Date.now(), { since = null } = {}) {
+  if (_cycle.length < 20_000) _cycle.push({ scope, key: t(key), until: Number(until), since: Number.isFinite(Number(since)) && since != null ? Number(since) : null, at, windowIds: (windowIds || []).slice(0, 8) });
+}
+/** 판정 결과(maintStateFor)에서 그 범위의 발생 시작(최소) — noteApplied 의 since. */
+export const sinceOf = (ms, scope) => { const s = (ms?.windows || []).filter((w) => (w.scopes || []).includes(scope)).map((w) => Number(w.start)).filter(Number.isFinite); return s.length ? Math.min(...s) : null; };
+/**
+ * 적용 기록 하나가 ‘창 끝 뒤 억제’ 인가(순수 — 판정과 독립된 단순 기준 · 머리말 ①~③). facts = windowFactsNoCache().byId.
+ * @returns {string|null} 사유(leak) 또는 null
+ */
+export function leakReason(x, facts = new Map()) {
+  if (!(Number.isFinite(x?.until) && x.at < x.until)) return 'after-end';
+  for (const id of x.windowIds || []) {
+    const f = facts.get(String(id));
+    if (!f) continue;   // 파일에 없다(그 사이 정리 · 새 배포본) — 사실로 반박할 수 없어 세지 않는다(unverified)
+    const cap = maxMinOf({ kind: f.kind }) * MIN;
+    if (x.since != null && x.until - x.since > cap + MIN) return 'over-cap';
+    if (f.deleted != null && f.deleted <= x.at) return 'deleted';
+    if (f.endedAt != null && f.endedAt <= x.at && (f.kind === 'once' || (x.since != null && f.endedOccStart === x.since))) return 'ended';
+    if (f.kind !== 'once' && f.confirmedAt != null && f.confirmedAt + RECUR_CONFIRM_DAYS * DAY <= x.at) return 'expired';
+    if (f.deployedAt != null && x.at - f.deployedAt > DEPLOY_TTL_MS) return 'deploy-stale';
+  }
+  return null;
 }
 /**
- * 주기 끝 점검(‘창 끝 뒤 억제 0’) — 이번 주기에 적용한 억제마다 ① 적용 시각이 시한 안이었나 ② 캐시 없이 다시 읽은 판정도 억제인가.
- *   targetsByKey: 키 → 대상(법인 · 태그 판정에 쓴다). 결과는 leak 수(0 이어야 정상)와 함께 상태 파일에 남긴다.
- * @returns {Promise<{checked:number, leak:number}>}
+ * 주기 끝 점검(‘창 끝 뒤 억제 0’) — 이번 주기에 적용한 억제마다 leakReason. 결과는 leak 수(0 이어야 정상)와 함께 상태 파일에 남긴다.
+ *   적용 기록이 없는 주기는 지난 점검 결과를 덮지 않는다(다른 폴러가 찾은 leak 를 0 으로 지우지 않게) — 계수만 저장한다.
+ * @returns {Promise<{checked:number, leak:number, unverified:number, reasons:object}>}
  */
-export async function auditCycle({ targetsByKey = new Map(), now = Date.now(), windowsOf = windowsForJudge, tagsOf = null } = {}) {
+export async function auditCycle({ now = Date.now(), factsOf = windowFactsNoCache } = {}) {
   const list = _cycle; _cycle = [];
-  let leak = 0;
+  let leak = 0; let unverified = 0; const reasons = {};
   if (list.length) {
-    const fresh = await maintJudge({ now, windowsOf, tagsOf });
+    let facts = { ok: false, byId: new Map() };
+    try { facts = factsOf(); } catch { facts = { ok: false, byId: new Map() }; }
     for (const x of list) {
-      if (!(Number.isFinite(x.until) && x.at < x.until)) { leak += 1; continue; }
-      const tg = targetsByKey.get(x.key) || { key: x.key };
-      const s = fresh.stateFor(tg, x.at);
-      if (!s.scopes[x.scope]) leak += 1;
+      if ((x.windowIds || []).every((id) => !facts.byId.has(String(id)))) unverified += 1;
+      const r = leakReason(x, facts.byId);
+      if (r) { leak += 1; reasons[r] = (reasons[r] || 0) + 1; }
     }
+    const st = loadStats();
+    st.leak = { n: leak, last: list.length, at: now, ...(unverified ? { unverified } : {}), ...(leak ? { reasons, since: st.leak?.n ? (st.leak.since || now) : now } : {}) };
   }
-  const st = loadStats();
-  st.leak = { n: leak, last: list.length, at: now, ...(leak ? { since: st.leak?.n ? (st.leak.since || now) : now } : {}) };
   saveStats();
-  return { checked: list.length, leak };
+  return { checked: list.length, leak, unverified, reasons };
 }
 function saveStats() {
   const st = loadStats();

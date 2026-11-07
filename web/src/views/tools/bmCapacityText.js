@@ -28,10 +28,16 @@ export function resText(r = {}) {
 }
 /** 현재 % — 없으면 ‘—’. */
 export function pctText(v) { const x = n(v); return x == null ? '—' : `${x}%`; }
+/** 현재 칸 — 마지막 관측이 오래됐으면(서버 stale 표지) ‘n일 전 값’ 을 붙인다(오늘 값처럼 읽히지 않게 — 반증 F11). */
+export function currentText(r = {}) {
+  const p = pctText(r.current);
+  return p !== '—' && r.stale && n(r.staleDays) != null ? `${p} (${r.staleDays}일 전)` : p;
+}
 /** 하루 증가 ‘+0.9%p’ — 예측 상태가 아니면 ‘—’(불안정 · 부족 값을 쓰지 않는다). */
 export function slopeText(r = {}) {
   const s = n(r.slope);
   if (s == null || !['forecast', 'reached', 'no-growth'].includes(r.status) || r.reason === 'flat') return '—';
+  if (r.status === 'reached' && !r.conf) return '—';   // 이미 목표선 위지만 추세는 예측 불가(증가 없음 · 불안정 · 부족) — 기울기를 쓰지 않는다
   return `${s > 0 ? '+' : ''}${s}%p`;
 }
 /** 목표 도달 칸 — 도달 · n일(MM-DD) · 1년 넘음 · 사유 글자. */
@@ -63,7 +69,8 @@ export function noteText(r = {}) {
   if (r.reset && r.resetDay) p.push(`리셋형 — ${mmdd(r.resetDay)} 뒤부터 창`);
   if (n(r.excluded)) p.push(`정비 창 ${r.excluded}일 제외`);
   if (n(r.missing)) p.push(`결측 ${r.missing}일`);
-  if (n(r.dailyWin)) p.push(`매일 반복 정비 창 ${r.dailyWin}개는 빼지 않음(모든 날에 같은 영향)`);
+  if (n(r.dailyWin)) p.push(`매일 반복 정비 창(하루 약 ${r.dailyWin}분)은 빼지 않음 — 그보다 더 덮인 날만 뺌`);
+  if (r.stale && r.lastDay) p.push(`마지막 관측 ${mmdd(r.lastDay)}(${n(r.staleDays) ?? '—'}일 전) — 도달일은 그날부터 셈`);
   if (r.grade === 'ref' || r.kind === 'mem') p.push('참고 등급(캐시 회수로 과대할 수 있음 · 누수 단정 안 함)');
   if (r.status === 'unstable' && n(r.max30) != null) p.push(`최근 30일 최대 ${r.max30}%`);
   return p.join(' · ');
@@ -86,7 +93,11 @@ export function sourceText(s = {}, minEdgeVersion = null, cfg = {}) {
   if (s.old) return `${name} — 구버전 엣지(용량 예측을 싣지 않음${minEdgeVersion ? ` · v${minEdgeVersion} 이상 필요` : ''})`;
   if (s.unreadable) return `${name} — 계산 결과 파일을 읽지 못함(다음 계산에서 다시 만든다)`;
   if (s.none) return `${name} — 아직 계산 전(하루 1회 · ${when} 뒤 첫 주기)`;
-  return `${name} — ${s.day || '—'} 기준${s.truncated ? ' · 일부만(상한)' : ''}`;
+  const c = s.cap || null;
+  const cut = c && (n(c.skippedServers) || n(c.trimmedServers))
+    ? ` · 상한 — ${n(c.skippedServers) ? `계산 안 한 서버 ${c.skippedServers}대` : ''}${n(c.skippedServers) && n(c.trimmedServers) ? ' · ' : ''}${n(c.trimmedServers) ? `마운트 일부만 ${c.trimmedServers}대(급한 마운트부터 · ${n(c.trimmedMounts) ?? '—'}개 뺌)` : ''}`
+    : s.truncated ? ' · 일부만(상한)' : '';
+  return `${name} — ${s.day || '—'} 기준${cut}`;
 }
 /**
  * 상세 그림 좌표(순수) — 일 계열(오름차순) + 맞춤선 연장(목표 도달일 또는 +14일까지). 뷰박스 1000 × 100 · y 0~100%.

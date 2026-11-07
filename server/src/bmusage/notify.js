@@ -78,7 +78,7 @@ export async function runBmUsageAlerts(rows = [], settings = {}) {
     const H = (await import('./maint/alertHold.js')).holdThresholdFires({ prev, next, fires: fires0, now,
       stateOf: (key) => { const r = byKey.get(key) || {}; return J.stateFor(settings.targetOf?.(key) || { key, vcenterId: r.vcenterId || '' }, now); } });
     fires = H.send;
-    for (const a of H.applied) R.noteApplied('alerts', a.key, a.until, a.ids, now);
+    for (const a of H.applied) R.noteApplied('alerts', a.key, a.until, a.ids, now, { since: a.since ?? null });
     for (const ids of H.counted) R.countSuppression('alerts', ids, { now });
     for (const f of H.send) if (f.afterMaint) R.countSuppression('after', f.maintIds || [], { now });
     maintOut = { held: H.held, heldNew: H.heldNew, after: H.after };

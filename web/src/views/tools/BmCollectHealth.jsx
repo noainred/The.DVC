@@ -40,7 +40,8 @@ export function CollectHealthView({ resp, now = Date.now() }) {
       </div>
       <section className="card" style={{ minWidth: 0 }}>
         <h5 className="bmo-h">법인별 수집 — 주기 소요 · 성공률 · 동시성 사용 · SSH · DB</h5>
-        <STable minWidth={1100} className="bmo-t" style={{ fontSize: 12 }}>
+        {/* 1440(사이드바 포함 본문 약 1,080px)에서 열마다 오른쪽 끝이 영역 안이게 — 최소 폭 960 · 노드 칸은 줄바꿈(6단계부터 1100 이라 ‘상태’ 열이 잘렸다 — 8a 반증 확인) · 400 은 표 안 가로 스크롤 */}
+        <STable minWidth={960} className="bmo-t" style={{ fontSize: 12 }}>
           <thead><tr><th>법인</th><th>노드</th><th className="right">대상</th><th className="right">주기 소요 / 예산</th><th className="right">성공률</th><th>실패 사유</th><th className="right">동시성 사용</th><th className="right">SSH 중앙값 / p95</th><th className="right">DB · 파일</th><th>상태</th></tr></thead>
           <tbody>
             {(resp?.rows || []).map((r) => {
@@ -49,7 +50,7 @@ export function CollectHealthView({ resp, now = Date.now() }) {
               return (
                 <tr key={`${r.agent}|${r.vcenterId}`}>
                   <td data-sort={r.vcenterId}>{r.vcenterId || '귀속 없음'}</td>
-                  <td data-sort={r.agent}>{r.agent || '—'}<div className="bmo-sub">{r.via === 'edge' ? '엣지' : '이 노드'}</div>
+                  <td data-sort={r.agent} className="bmo-wrap" style={{ maxWidth: 200 }}>{r.agent || '—'}<div className="bmo-sub">{r.via === 'edge' ? '엣지' : '이 노드'}</div>
                     {(() => { const rl = rttLine(r); return rl ? <div className="bmo-sub" style={{ color: toneVar(rl.tone) }}>{rl.text}</div> : null; })()}</td>
                   <td className="right" data-sort={r.servers ?? ''}>{r.servers ?? '—'}</td>
                   <td className="right" data-sort={r.cyclePct ?? ''}>{r.nodeHidden ? <span className="bmo-sub">노드 값 숨김</span> : cycleText(r.cycleMs, r.budgetMs)}</td>

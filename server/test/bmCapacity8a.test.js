@@ -122,14 +122,15 @@ test('⑥ 하루 계산 · 저장 · 손상 보존 · 재계산 시점 · 알림
   fs.writeFileSync(path.join(DIR, 'bm-capacity.json'), '{x');
   assert.equal(C.loadCapacity().unreadable, true);
   assert.ok(fs.readdirSync(DIR).some((f) => f.startsWith('bm-capacity.json.corrupt')));
-  // ⑤ 정비 창 날 제외 — 매일 반복 창(기간 절반 넘는 날)은 빼지 않는다(r1 판독: 매일 2시간 창이 30일을 전부 지워 ‘데이터 부족’) · 일회 창 날만 뺀다
+  // ⑤ 정비 창 날 제외 — 매일 반복 창(합집합이 기간 절반 넘는 날)은 일상 몫을 빼지 않는다(r1 판독: 매일 2시간 창이 30일을 전부 지워 ‘데이터 부족’) ·
+  //   그보다 1시간 넘게 더 덮인 날(일회 2시간 창이 겹친 날)만 뺀다 — 합집합 기준(창을 나눠도 같다: bmCapacity8aFix ②)
   const HOURx = 3_600_000;
   const daily = Array.from({ length: 31 }, (_, b) => ({ from: now - b * 86_400_000 - 5 * HOURx, to: now - b * 86_400_000 - 3 * HOURx }));
-  const once = [{ from: now - 3 * 86_400_000 - 2 * HOURx, to: now - 3 * 86_400_000 - HOURx }];
-  const judge = { cover: () => [], coverEach: () => [{ id: 'mw-daily01', intervals: daily }, { id: 'mw-once001', intervals: once }] };
+  const once = [{ from: now - 3 * 86_400_000 - 2 * HOURx, to: now - 3 * 86_400_000 }];
+  const judge = { cover: () => [...daily, ...once].sort((a, b) => a.from - b.from) };
   const cs = await C.computeServer({ agent: '', target: { key: 'K1', paths: ['os'] }, now, cfg: {}, judge, deps: { monthStore: fake } });
   const fsx = cs.rows.find((x) => x.kind === 'fs');
-  assert.equal(fsx.status, 'forecast', '매일 창이 예측을 지우지 않는다'); assert.equal(fsx.excluded, 1, '일회 창 날만 뺀다'); assert.equal(fsx.dailyWin, 1);
+  assert.equal(fsx.status, 'forecast', '매일 창이 예측을 지우지 않는다'); assert.equal(fsx.excluded, 1, '일상보다 더 덮인 날만 뺀다'); assert.equal(fsx.dailyWin, 120, '일상 몫 = 하루 120분');
   // 알림 규칙 ‘소진 ≤ N일’ — 칸 판정(못 읽음은 보류 · 0 이 아니다)
   const A = await import('../src/bmusage/perfAlerts.js');
   const rule = { cond: 'fs-inode' };

@@ -12,7 +12,7 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { unitText } from '../unitText.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
-import { KIND_TEXT, STATUS_TEXT, resText, pctText, slopeText, daysText, confText, noteText, summaryCards, sourceText, capChart, CAPACITY_HONEST } from './bmCapacityText.js';
+import { KIND_TEXT, STATUS_TEXT, resText, currentText, slopeText, daysText, confText, noteText, summaryCards, sourceText, capChart, CAPACITY_HONEST } from './bmCapacityText.js';
 import './bmOps.css';
 import './bmMaint.css';
 
@@ -66,7 +66,7 @@ export function CapacityFleetView({ resp, onOpen, onReload, loading = false, can
                 <td data-sort={r.name} style={{ whiteSpace: 'nowrap' }}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key); }}>{r.name}</span></td>
                 <td data-sort={r.vcenterId || ''}>{r.vcenterId || '—'}</td>
                 <td data-sort={resText(r)} className="bmo-wrap">{resText(r)}<div className="bmo-sub">{KIND_TEXT[r.kind] || r.kind}</div></td>
-                <td className="right" data-sort={r.current ?? ''}>{pctText(r.current)}</td>
+                <td className="right" data-sort={r.current ?? ''}>{currentText(r)}</td>
                 <td className="right" data-sort={slopeText(r) === '—' ? '' : r.slope}>{slopeText(r)}</td>
                 <td className="bmo-wrap" data-sort={r.status === 'reached' ? 0 : (r.daysToTarget ?? '')} style={{ color: toneVar(r.status === 'reached' ? 'bad' : r.daysToTarget != null && r.daysToTarget <= (cfg.alertDays ?? 7) ? 'bad' : 'idle') }}>{daysText(r, 'target')}</td>
                 <td className="bmo-wrap" data-sort={r.daysTo100 ?? ''}>{r.status === 'forecast' || r.status === 'reached' ? daysText(r, '100') : '—'}</td>
@@ -138,7 +138,7 @@ export function BmCapacityCard({ itemKey }) {
             <tbody>{rows.map((r, i) => (
               <tr key={`${r.kind}|${r.res}|${i}`} className={pick === r ? 'bmc-sel' : ''} onClick={() => setSel(r)} style={{ cursor: 'pointer' }}>
                 <td data-sort={resText(r)} className="bmo-wrap">{resText(r)}</td>
-                <td className="right" data-sort={r.current ?? ''}>{pctText(r.current)}</td>
+                <td className="right" data-sort={r.current ?? ''}>{currentText(r)}</td>
                 <td className="right" data-sort={slopeText(r) === '—' ? '' : r.slope}>{slopeText(r)}</td>
                 <td data-sort={r.daysToTarget ?? ''}>{daysText(r, 'target')}</td>
                 <td data-sort={r.r2 ?? ''}>{confText(r)}</td>
