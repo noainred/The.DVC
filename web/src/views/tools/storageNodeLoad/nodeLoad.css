@@ -37,7 +37,7 @@
 .nl .nl-side { flex: 1 1 220px; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--panel-deep); }
 .nl .nl-sidehead { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
 .nl .nl-heat { display: flex; flex-direction: column; gap: 2px; overflow-x: auto; min-width: 0; }
-.nl .nl-heatrow { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 0 8px; align-items: center; min-width: 360px; }
+.nl .nl-heatrow { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 0 8px; align-items: center; }
 .nl .nl-heatname { all: unset; box-sizing: border-box; font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .nl div.nl-heatname { cursor: default; }
 .nl button.nl-heatname:hover { color: var(--accent); }

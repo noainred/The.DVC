@@ -71,20 +71,22 @@ function Heatmap({ d, sel, jobsCol, onDrill, onPickNode }) {
   const cellH = d.nodes.length > 32 ? 9 : d.nodes.length > 16 ? 14 : 20;
   const drill = d.kind !== 'raw';
   const grid = { gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` };
+  // 칸이 4px(틈 포함) 아래로 줄 때만 상자 안 가로 스크롤 — 24칸은 400px 에서도 그대로 들어간다(Chromium 400 판독).
+  const rowMin = { minWidth: 72 + n * 4 };
   return (
     <div className="nl-heat">
-      <div className="nl-heatrow nl-heathead">
+      <div className="nl-heatrow nl-heathead" style={rowMin}>
         <div className="nl-heatname" />
         <div className="nl-heatcells" style={grid}>
           {d.cols.map((t, i) => (drill
-            ? <button key={t} type="button" className="nl-colbtn" title={`${colText(t, d.kind, d.bucketMs, d.offsetMin)} — 눌러서 그 날 24시간(시간별) 보기`} onClick={() => onDrill(t)}>{i % every === 0 ? colText(t, d.kind, d.bucketMs, d.offsetMin).slice(0, 5) : ''}</button>
-            : <span key={t} className="nl-coltick">{i % every === 0 ? colText(t, d.kind, d.bucketMs, d.offsetMin).slice(6) : ''}</span>))}
+            ? <button key={t} type="button" className="nl-colbtn" title={`${colText(t, d.kind, d.bucketMs, d.offsetMin)} — 눌러서 그 날 24시간(시간별) 보기`} onClick={() => onDrill(t)}>{i % every === 0 && i + every < n ? colText(t, d.kind, d.bucketMs, d.offsetMin).slice(0, 5) : ''}</button>
+            : <span key={t} className="nl-coltick">{i % every === 0 && i + every < n ? colText(t, d.kind, d.bucketMs, d.offsetMin).slice(6) : ''}</span>))}
         </div>
       </div>
       {d.nodes.map((nd) => {
         const vals = pickSeries(nd.v, sel); const peaks = nd.mx ? pickSeries(nd.mx, sel) : null;
         return (
-          <div key={nd.id} className="nl-heatrow">
+          <div key={nd.id} className="nl-heatrow" style={rowMin}>
             <button type="button" className="nl-heatname" title="겹쳐 보기에 넣기" onClick={() => onPickNode(nd.id)}>노드 {nd.id}</button>
             <div className="nl-heatcells" style={grid}>
               {vals.map((v, i) => {
@@ -97,7 +99,7 @@ function Heatmap({ d, sel, jobsCol, onDrill, onPickNode }) {
         );
       })}
       {jobsCol && (
-        <div className="nl-heatrow nl-jobsrow">
+        <div className="nl-heatrow nl-jobsrow" style={rowMin}>
           <div className="nl-heatname nl-muted">잡 엔진</div>
           <div className="nl-heatcells" style={grid}>
             {jobsCol.map((j, i) => <i key={d.cols[i]} className={j ? 'nl-job on' : 'nl-job'} title={j ? `${colText(d.cols[i], d.kind, d.bucketMs, d.offsetMin)} · 돌던 잡: ${j.join(', ')}` : `${colText(d.cols[i], d.kind, d.bucketMs, d.offsetMin)} · 돌던 잡 없음`} />)}
@@ -241,9 +243,9 @@ function Overlay({ d, sel, picks, onToggle }) {
 }
 
 /**
- * @param {{deviceId:string, snap:object, isEdge:boolean, onSeries?:(m:Map<number, {vals:Array, unit:string}>|null)=>void}} props
+ * @param {{deviceId:string, snap:object, isEdge:boolean}} props
  */
-export default function NodeLoadPanel({ deviceId, snap, isEdge, onSeries }) {
+export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
   const list = useMemo(() => (Array.isArray(snap?.nodes?.list) ? snap.nodes.list : []), [snap]);
   const avail = useMemo(() => groupsAvailable(list), [list]);
   const [range, setRange] = useState('24h');
@@ -282,14 +284,6 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge, onSeries }) {
   }, [deviceId, range, group, end, refreshKey]);
 
   const jobsCol = useMemo(() => (d ? jobsByCol(d) : null), [d]);
-  // 노드 표의 '추이' 열 — 같은 응답으로 그린다(추가 호출 0). 지금 고른 값 기준.
-  useEffect(() => {
-    if (!onSeries) return;
-    if (!d || d.group !== group || d.deviceId !== deviceId) { onSeries(null); return; }
-    const m = new Map();
-    for (const nd of d.nodes || []) m.set(nd.id, { vals: pickSeries(nd.v, sel), unit: selectOf(sel).unit, label: `${rangeOf(d.range).label} · ${SELECTS.find((x) => x.key === sel)?.label}` });
-    onSeries(m);
-  }, [d, sel, group, deviceId, onSeries]);
 
   const goScroll = (next, maxB) => {
     const b = Math.max(0, Math.min(maxB, next));

@@ -36,7 +36,7 @@ import { volumeProvisionText } from './powerstoreVolumeText.js'; // v2.603 COL-2
 import { serialHeader, showNodeSerialCol, nodeSerialTitle, nodeSerialNote } from './storageSerialText.js';
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 import NodeLoadPanel from './storageNodeLoad/NodeLoadPanel.jsx'; // v2.926 노드 부하 추이(네트워크·디스크·CPU)
-import { rateText, pctText, valueText as nodeLoadValueText, sparkPath } from './storageNodeLoad/nodeLoadText.js';
+import { rateText, pctText } from './storageNodeLoad/nodeLoadText.js';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -982,8 +982,6 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   // v2.540: 용량 산정이 쓰는 추이 점 — `CapacityTrend` 가 이미 불러온 것을 올려받는다(새 API 왕복 0).
   // ⚠ 훅은 조기 return 위에 둔다(React #310 — v2.202 실제 사고).
   const [trendPoints, setTrendPoints] = useState(null);
-  // v2.926: 노드 표 '추이' 열 — NodeLoadPanel 이 이미 불러온 응답을 올려받는다(새 API 왕복 0). 상태 setter 라 참조가 안정적이다.
-  const [nodeSeries, setNodeSeries] = useState(null);
   const s = r.snap;
   // 수집 방식/타입별 UI 분기(v2.325, 사용자 요구 '가져오는 정보에 맞는 최적 UI·최대한 많은 정보').
   // SSH(isi status): 시리얼 없음 · 클러스터 헬스/감축비/효율/VHS/L3/Critical Events/Job Status +
@@ -1011,7 +1009,6 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
     // v2.926 — 노드 디스크 쓰기·읽기(B/s)·CPU %. 값이 있는 장비에서만 열을 그린다(키가 없는 장비에 '—' 열을 늘어놓지 않는다).
     disk: nodeList.some((n) => n.diskInBytesPs != null || n.diskOutBytesPs != null),
     cpu: nodeList.some((n) => n.cpuPct != null),
-    trend: !!nodeSeries && nodeSeries.size > 0,
     hdd: nodeList.some((n) => n.hdd),
     ssd: nodeList.some((n) => n.ssd || n.l3Bytes > 0),
     serial: showNodeSerialCol(nodeList, ex),   // v2.735.2 — PowerScale 노드 시리얼
@@ -1036,7 +1033,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   // 제거를 위해 1100 으로 넓혔으나 실제 렌더 결과 노드 표 열 사이 빈 공간이 커서 압축.
   // 노드 표 실제 콘텐츠 폭(모노스페이스 수치 포함)은 ~700px 이라 900 에서도 가로 스크롤 없음.
   return (
-    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name || r.host}`} onClose={onClose} width={900}>
+    // v2.926: 아이실론은 노드 부하 추이(히트맵)와 노드 표 디스크·CPU 열이 더해져 900px 에서 노드 표의 HDD/SSD 열이 가로 스크롤 뒤로 밀렸다
+    //   (Chromium 1440 판독) — 아이실론 상세만 1240px(좁은 화면은 Modal 이 화면 폭으로 줄인다). 다른 타입은 예전 그대로.
+    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name || r.host}`} onClose={onClose} width={r.type === 'isilon' ? 1240 : 900}>
       {/* 새로고침(v2.306, 사용자 요구) — 중앙 수집 장비는 즉시 재수집, 엣지 장비는 주기 안내(202 사유) */}
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12.5 }} disabled={busy} onClick={refresh}>
@@ -1187,7 +1186,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               노드 표제도 타입에 맞춘다(컨트롤러/SP/디렉터). */}
           {/* v2.926 노드 부하 추이(사용자 요청 — 아이실론 노드별 네트워크·디스크·CPU 저장 + 차트 · 이전 구간 · 지난주 비교 · 잡 엔진).
               Isilon 만(다른 타입 수집기는 노드 처리량을 재지 않는다 — 값이 없으면 패널이 스스로 그리지 않는다). */}
-          {r.type === 'isilon' && nodeList.length > 0 && <NodeLoadPanel deviceId={r.id} snap={s} isEdge={!!r.agent} onSeries={setNodeSeries} />}
+          {r.type === 'isilon' && nodeList.length > 0 && <NodeLoadPanel deviceId={r.id} snap={s} isEdge={!!r.agent} />}
           {nodeList.length > 0 && (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '스토리지 컨트롤러' : r.type === 'unity480' ? '스토리지 프로세서(SP)' : (r.type === 'vplex' || r.type === 'metronode') ? '디렉터' : '노드'} {nodeList.length}{s.nodes.count > nodeList.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
@@ -1205,7 +1204,6 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                     {ncol.disk && <th style={{ textAlign: 'right' }} title="디스크 In(쓰기로 읽는다 — 실장비 확인 전 가정)">디스크 쓰기</th>}
                     {ncol.disk && <th style={{ textAlign: 'right' }} title="디스크 Out(읽기로 읽는다 — 실장비 확인 전 가정)">디스크 읽기</th>}
                     {ncol.cpu && <th style={{ textAlign: 'right', width: 60 }}>CPU</th>}
-                    {ncol.trend && <th data-nosort title={[...nodeSeries.values()][0]?.label || ''}>추이</th>}
                     {ncol.hdd && <th>HDD Used/Size</th>}
                     {ncol.ssd && <th>SSD Used/Size</th>}
                   </tr></thead>
@@ -1223,18 +1221,6 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                         {ncol.disk && <td data-sort={String(n.diskInBytesPs ?? '')} style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12, whiteSpace: 'nowrap' }}>{rateText(n.diskInBytesPs)}</td>}
                         {ncol.disk && <td data-sort={String(n.diskOutBytesPs ?? '')} style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12, whiteSpace: 'nowrap' }}>{rateText(n.diskOutBytesPs)}</td>}
                         {ncol.cpu && <td data-sort={String(n.cpuPct ?? '')} style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{pctText(n.cpuPct)}</td>}
-                        {ncol.trend && (() => {
-                          const t = nodeSeries.get(Number(n.id));
-                          const vals = t?.vals || [];
-                          const last = [...vals].reverse().find((v) => v != null);
-                          return (
-                            <td data-nosort>
-                              {vals.some((v) => v != null)
-                                ? <svg width="96" height="22" viewBox="0 0 96 22" role="img" aria-label={`노드 ${n.id} ${t.label} 추이 — 마지막 ${nodeLoadValueText(t.unit, last)}`} style={{ display: 'block' }}><title>{`${t.label} · 마지막 ${nodeLoadValueText(t.unit, last)}`}</title><path d={sparkPath(vals, { w: 96, h: 22 })} fill="none" stroke="#3987e5" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" /></svg>
-                                : <span className="muted">—</span>}
-                            </td>
-                          );
-                        })()}
                         {/* 'No Storage HDDs' 는 isilon(isi status) 전용 문구 — 타 타입의 hdd null 은 '—' */}
                         {ncol.hdd && <td style={{ whiteSpace: 'nowrap' }}>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)}${n.hdd.pct != null ? ` (${n.hdd.pct}%)` : ''}` : <span className="muted">{r.type === 'isilon' ? 'No Storage HDDs' : '—'}</span>}</td>}
                         {ncol.ssd && <td style={{ whiteSpace: 'nowrap' }}>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)}${n.ssd.pct != null ? ` (${n.ssd.pct}%)` : ''}` : n.l3Bytes > 0 ? <span className="muted">L3: {tbFmt(n.l3Bytes)}</span> : <span className="muted">—</span>}</td>}

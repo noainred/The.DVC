@@ -151,9 +151,9 @@ export function colKindText(kind, bucketMs) {
   }
   return '수집 1회(순간값)';
 }
-/** 머리줄 눈금 — 칸이 많으면 k 칸마다 하나(최대 8개 남짓). */
+/** 머리줄 눈금 — 칸이 많으면 k 칸마다 하나(6개 남짓 — 400px 에서도 글자가 겹치지 않게). */
 export function tickEvery(n) {
-  return n <= 8 ? 1 : Math.ceil(n / 8);
+  return n <= 6 ? 1 : Math.ceil(n / 6);
 }
 
 /**
