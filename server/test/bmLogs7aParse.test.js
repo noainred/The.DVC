@@ -55,7 +55,7 @@ test('dmesg -x · secure(syslog) · audit(msg=audit 초) · GPDB csv(수준 · �
     S: [...fx('secure.txt').map((l) => `S|${l}`), ...fileMeta('S', 9)],
     A: ['A#svc=active', ...fx('audit.txt').map((l) => `A|${l}`), ...fileMeta('A', 2)],
     G: ['G#dir=0', ...fx('gpdb.csv').map((l) => `G|${l}`), ...fileMeta('G', 2)],
-    F: ['F#dir=1', ...fx('airflow.log').map((l) => `F|${l}`), ...fileMeta('F', 2)],
+    F: ['F#dir=1', ...fx('airflow.txt').map((l) => `F|${l}`), ...fileMeta('F', 2)],
   });
   const r = P.parseLogOutput(out, { now: NOW });
   const k = r.items.filter((x) => x.src === 'kernel');

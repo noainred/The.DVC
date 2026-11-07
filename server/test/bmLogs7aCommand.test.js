@@ -88,7 +88,7 @@ test('첫 읽기 → 증분 → 로테이트 → copytruncate — 출처별 상�
   fs.writeFileSync(SEC, fx('secure.txt'));
   fs.writeFileSync(AUD, fx('audit.txt'));
   fs.writeFileSync(path.join(GPD, 'gpdb-2026-11-06_000000.csv'), fx('gpdb.csv'));
-  fs.writeFileSync(path.join(AFD, 'etl_daily.py.log'), fx('airflow.log'));
+  fs.writeFileSync(path.join(AFD, 'etl_daily.py.log'), fx('airflow.txt'));
   const out1 = run({});
   for (const s of C.LOG_SECTIONS) assert.ok(out1.includes(`\n##${s}\n`) || out1.startsWith(`##${s}\n`), `표지 ${s}`);
   assert.ok(!out1.includes('__CURSOR') && !out1.includes('_BOOT_ID'), '커서 · boot_id 는 내보내는 줄에서 뺀다(바이트 상한 안에 줄을 더)');
