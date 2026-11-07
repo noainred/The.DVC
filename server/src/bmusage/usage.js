@@ -343,6 +343,8 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     row: out, srcOf, notes, devices: deviceRows, mounts: mountRows,
     // v2.929(5단계): 변경 이벤트 사실(해시 · 개수 · 짧은 값만 — 행에는 넣지 않는다: 폴러의 changes.js 가 이전 사실과 비교해 전이만 change_event 에 쓴다).
     changeFacts: perfOut?.changeFacts || null,
+    // 6단계 수집 건강: 상태 9종 중 ‘정상인 빈 칸’ 두 가지(첫 주기 · PSI 없음)를 세는 비트 — detail_json 을 다시 파싱하지 않게(값이 아니라 수집 사실).
+    perfFlags: perfOut ? { firstSample: !!perfOut.detail?.firstSample, psiAbsent: perfOut.detail?.sections?.psi === 'absent' } : null,
     // 화면 상세용 — DB 에는 넣지 않는다(장치 수 × 주기면 행이 폭주한다).
     detail: {
       osKind: osOk ? os.osKind : null,

@@ -43,7 +43,8 @@ import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 �
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js'; // v2.744(RV2744F-WEB-03): 상주 상세 문자열 평탄화
 import { idracAuthStopFor as mainIdracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
-import { withSlot, configureSlots } from './slots.js'; // v2.929(5단계): 전역 동시성 풀 — 집중 수집과 슬롯을 나눠 쓴다
+import { withSlot, configureSlots, slotPeakReset } from './slots.js'; // v2.929(5단계): 전역 동시성 풀 — 집중 수집과 슬롯을 나눠 쓴다 · 6단계: 주기 최대 사용(수집 건강)
+import { summarizeCycle, dbFilesNow, collectCells } from './collectHealth.js'; // 6단계 수집 건강(메타 모니터링)
 import { focusActiveCount, registerFocusPollerHooks, focusHousekeeping, onFocusEnd, initFocus } from './focus/run.js'; // v2.929: 피크 창 예산에서 활성 집중 수만큼 동시성을 뺀다
 
 /*
@@ -631,9 +632,13 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   jobs.push(!target.paths.includes('idrac') ? Promise.resolve(null)
     : entStopped ? Promise.resolve({ ok: false, kind: 'auth-stopped', error: `iDRAC 인증 실패로 주기 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: entStopped })
       : idracTelemetryJob(target.idrac, { full, allowList }));
+  // 6단계 수집 건강: OS(SSH) 세션 소요 — 실제로 연 경우만(정지 · 경로 없음은 재지 않는다 — 0 으로 세지 않는다).
+  let osMs = null;
+  const osT0 = Date.now();
   jobs.push((target.paths.includes('os') && !stopped)
     ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan) }), 'OS 수집 시한 초과')
       .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) }))
+      .then((r) => { osMs = Date.now() - osT0; return r; })
     : Promise.resolve(stopped ? { ok: false, error: `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: stopped } : null));
   const [idrac, os] = await Promise.all(jobs);
   /*
@@ -739,7 +744,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
     ...(ok ? { cpuPct: built.row.cpu_pct, memPct: built.row.mem_pct, diskBusyPct: built.row.disk_busy_pct, netPct: built.row.net_pct, hbaPct: built.row.hba_pct } : {}),
   });
   // v2.922: 서버별 수집 소요와 실제로 쓴 피크 창 — 다음 주기의 ‘서버당 기본 소요’ 실측(peakPlan.estimateBaseMs)이 쓴다.
-  return { ok, target, built, idrac, os, ent, ms: Date.now() - t0, windowS: Number(os?.peak?.windowS) || 0 };
+  return { ok, target, built, idrac, os, ent, ms: Date.now() - t0, osMs, windowS: Number(os?.peak?.windowS) || 0 };
 }
 
 /**
@@ -760,6 +765,38 @@ function dropStaleState(live) {
  *   `(++tick % N) === 0`(기동 첫 틱에 참이 되지 않는다 — v2.453 규약). 수집이 꺼져 있고 DB 파일이 아직 없으면
  *   **파일을 만들지 않는다**(켠 적 없는 노드에 빈 DB 를 만들지 않게). 경로는 bmusage/db.js FILE() 과 같은 식이다.
  */
+/*
+ * ── 6단계 수집 건강(메타 모니터링 — 설계 PROFILES §16 C) ─────────────────────────────────────
+ * 매 주기 끝에 이 노드의 수집을 잰다(주기 소요/예산 · 성공률 · 실패 사유 · 동시성 사용 최대 · SSH 중앙값/p95 · 저장 실측 · 집중 · 피크 창).
+ *   ⚠ status(bmUsageStatus) 에 넣지 않는다 — 사유별 개수 · 법인별 분해는 범위를 거는 라우트(/tools/bm-usage/collect-health)와 엣지 봉투(collectHealth)만 싣는다.
+ *   ⚠ 0대 · 분류 실패 주기도 기록한다(무음 실패 금지). 주기 기록은 메인 DB collect_cycle(주기당 한 행 · 30일 · pruneTick 청크).
+ */
+let _health = null;
+let _healthSince = new Map();
+const HEALTH_SINCE_FROM = Date.now();
+async function recordCycleHealth({ results = [], t0, intervalMs, peakPlan = null, error = null } = {}) {
+  try {
+    const { focusQueuedCount } = await import('./focus/run.js');
+    const sum = summarizeCycle({ results, startedAt: t0, endedAt: Date.now(), intervalMs, concurrency: CONCURRENCY, slotPeak: slotPeakReset(),
+      focus: { running: focusActiveCount(), queued: focusQueuedCount() }, peakPlan, sinceMap: _healthSince, error });
+    _healthSince = sum.sinceMap;
+    const db = await dbFilesNow(path.dirname(BMUSAGE_DB_FILE()));
+    let cfg = null; try { cfg = (await import('./perfRules.js')).loadPerfRules().collect; } catch { cfg = null; }
+    const cc = collectCells(sum.node, db, cfg || undefined);
+    _health = { at: sum.node.at, node: { ...sum.node, db, dbPct: cc.dbPct, capBytes: cc.capBytes, cells: cc.cells, th: cc.th }, byCorp: sum.byCorp, sinceFrom: HEALTH_SINCE_FROM };
+    if (fs.existsSync(BMUSAGE_DB_FILE())) {
+      const O = await import('./opsDb.js');
+      await O.cycleInsert({ agent: config.agent?.name || '', ts: sum.node.at, ms: sum.node.cycleMs, budgetMs: sum.node.budgetMs, servers: sum.node.servers, ok: sum.node.ok,
+        concMax: sum.node.conc.max, concCap: sum.node.conc.cap, sshP50: sum.node.ssh.p50Ms, sshP95: sum.node.ssh.p95Ms }).catch((e) => { _health.node.recordError = String(e?.message || e).slice(0, 160); });
+    }
+  } catch (e) {
+    _health = { at: Date.now(), node: { at: Date.now(), error: `수집 건강 계산 실패: ${String(e?.message || e).slice(0, 160)}` }, byCorp: {}, sinceFrom: HEALTH_SINCE_FROM };
+  }
+  return _health;
+}
+/** 이 노드의 수집 건강(사본) — 아직 주기가 없으면 null(지어내지 않는다 — 화면은 ‘아직 주기 없음’). */
+export function collectHealthNow() { return _health ? JSON.parse(JSON.stringify(_health)) : null; }
+
 let _pruneTick = 0;
 let _lastPrune = null;
 let _lastLiveKeys = null;   // v2.929: 마지막 성공 주기의 대상 키(null = 아직 모름 — 지우지 않는다)
@@ -784,10 +821,11 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
       const O = await import('./opsDb.js');
       const fp = await focusHousekeeping({ keepDays: rules.focus?.keepDays ?? 30 });
       const cp = await O.changePrune({ before: Date.now() - (rules.changes?.keepDays ?? 30) * 86_400_000 });
+      const cyc = await O.cyclePrune({ before: Date.now() - 30 * 86_400_000 }).catch(() => 0);   // 6단계 수집 건강 주기 기록 30일
       // 대상 목록은 마지막 성공 주기의 것(이 틱에서 대상 해석을 다시 하지 않는다 — 등록부 · 분류를 정리 틱마다 읽지 않게). 모르면 지우지 않는다.
       let gone = 0;
       if (_lastLiveKeys) { try { gone = await O.changeLatestKeep({ agent: config.agent?.name || '', keys: [..._lastLiveKeys] }); } catch { /* 다음 틱 */ } }
-      if (r && typeof r === 'object') r.opsPruned = { focusSessions: fp?.sessions ?? 0, focusSamples: fp?.samples ?? 0, changeEvents: cp || 0, changeLatestGone: gone };
+      if (r && typeof r === 'object') r.opsPruned = { focusSessions: fp?.sessions ?? 0, focusSamples: fp?.samples ?? 0, changeEvents: cp || 0, changeLatestGone: gone, collectCycles: cyc || 0 };
     } catch (e) { if (_srcErrLog('ops-prune', errText(e))) console.warn(`[bmusage] 집중 · 변경 이벤트 보관 정리 실패: ${errText(e)}`); }
   }
   _lastPrune = { at: Date.now(), ...r };
@@ -838,6 +876,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
   if (_running) return { ok: false, reason: '이전 수집이 진행 중입니다.' };
   _running = true;
   const t0 = Date.now();
+  slotPeakReset();   // 6단계 수집 건강 — 이 주기의 동시성 사용 최대를 0(지금 사용 중)부터
   // v2.732(B1-01): 직전 주기 실행 소요 — 이번 주기에서 _last 를 덮기 전에 읽는다(간격 한계의 여유 — spanArgsFor).
   const prevRunMs = numOrNull(_last?.ms) ?? 0;
   try {
@@ -848,12 +887,14 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       //   (분류가 돌아오면 같은 대상이 그대로 이어진다).
       const reason = `대상 분류(서버 인벤토리)에 실패해 이번 주기를 건너뛰었습니다 — ${sourceErrors.find((x) => x.source === 'classify')?.error || ''}`;
       _last = { at: Date.now(), ms: Date.now() - t0, servers: null, okCount: 0, failCount: 0, inserted: 0, error: reason, ...srcErr, trigger };
+      await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'classify-failed' });
       return { ok: false, reason, ...srcErr };
     }
     if (!targets.length) {
       // v2.628 EDGE2628-02: 0대 경로도 누적 카운터·정지 기록을 정리한다(마지막 대상의 카운터가 남아 돌아왔을 때 간격 한계 — rates.spanLimitMs, 최소 60분 — 에 걸리지 않게).
       dropStaleState(new Set());
       _last = { at: Date.now(), ms: Date.now() - t0, servers: 0, okCount: 0, failCount: 0, inserted: 0, counts, ...srcErr, trigger };
+      await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'no-targets' });
       return { ok: true, servers: 0, counts, reason: '대상 서버가 없습니다.', ...srcErr };
     }
     _listBudget = LIST_BUDGET_PER_RUN;   // ⚠ 주기 시작마다 리셋(위 상수 주석 참조)
@@ -931,6 +972,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     //   주기만으로 연속을 판정하면 수집이 긴 현장에서 지속 시간이 0 에 묶여 알림이 영원히 안 울린다.
     try { alerts = await runBmUsageAlerts(rows, { ...settings, runMs: Date.now() - t0 }); }
     catch (e) { alerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+    // 6단계 수집 건강 — 적재 뒤 · 알림 판정 앞(‘수집 건강’ 규칙이 이번 주기 값을 쓴다).
+    await recordCycleHealth({ results, t0, intervalMs, peakPlan });
     // v2.929(5단계): 리눅스 성능 알림 규칙(켠 규칙이 있을 때만 — 판정 입력은 이 노드가 이미 만든 값). 실패해도 수집은 실패가 아니다.
     let perfAlerts = null;
     try { perfAlerts = rulesNow ? await runCyclePerfAlerts(results, { settings, rules: rulesNow, agent: agentName }) : null; }
@@ -965,6 +1008,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     return { ok: true, ...(_last) };
   } catch (e) {
     _last = { at: Date.now(), ms: Date.now() - t0, error: String(e?.message || e).slice(0, 300), trigger };
+    await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'cycle-error' }).catch(() => {});
     return { ok: false, reason: _last.error };
   } finally { _running = false; }
 }
@@ -1005,6 +1049,11 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
     items.push({ key: r.target.key, name: r.target.name || r.target.key, vcenterId: r.target.vcenterId || '', target: r.target, entry, health: detail?.health || null,
       dev: B ? B.deviationsFor(bands, r.target.key, row) : null, profile });
   }
+  // 6단계 ‘수집 건강’ — 서버가 아니라 이 노드 한 칸(key '__node__' · 법인 공용). 칸은 이번 주기 recordCycleHealth 가 기준과 대 본 결과 그대로.
+  if (on.includes('collect') && _health?.node?.cells) {
+    const h = _health.node;
+    items.push({ key: '__node__', name: `수집 노드 ${agent || '(이 노드)'}`, vcenterId: '', collect: { cells: h.cells, cyclePct: h.cyclePct, successPct: h.successPct, dbPct: h.dbPct, th: h.th } });
+  }
   return (await import('./perfAlerts.js')).runPerfAlerts(items, { rules, now });
 }
 let _focusEndHooked = false;
@@ -1027,7 +1076,7 @@ export function startBmUsagePoller() {
 }
 
 export function stopBmUsagePoller() { _timer?.stop?.(); _timer = null; }
-export function _resetForTest() { _lastLiveKeys = null; _lastRepair = null; _cycleSamples = []; _peakPlan = null; _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; guard._resetForTest(); }
+export function _resetForTest() { _lastLiveKeys = null; _lastRepair = null; _cycleSamples = []; _peakPlan = null; _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; _health = null; _healthSince = new Map(); guard._resetForTest(); }
 /** 테스트 전용 — 분류 함수 대체(EDGE2628-03) · 인메모리 상태 주입(EDGE2628-02). */
 export function _setFleetForTest(fn) { _fleetOverride = typeof fn === 'function' ? fn : null; }
 export function _seedStateForTest({ prev = [], authStopped = [] } = {}) {

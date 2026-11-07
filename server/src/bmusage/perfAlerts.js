@@ -52,6 +52,11 @@ export function ruleCells(id, ctx = {}, rule = {}) {
       if (!d || d.reason || !d.out) { out[m] = 'unread'; continue; }
       out[m] = d.out === 'above' || d.out === 'below' ? 'true' : 'false';
     }
+  } else if (id === 'collect') {
+    // 6단계 수집 건강 — 칸은 수집 노드가 기준과 대 본 결과(collectHealth.collectCells) 그대로 · 조건이 고른 칸만.
+    const cells = ctx.collect?.cells || {};
+    const want = rule.cond && rule.cond !== 'any' ? [rule.cond] : Object.keys(cells);
+    for (const k of want) out[k] = ['true', 'false'].includes(cells[k]) ? cells[k] : 'unread';
   } else if (id === 'cross') {
     for (const [i, x] of (Array.isArray(ctx.entry?.cross) ? ctx.entry.cross : []).entries()) {
       const k = String(x?.id ?? i);
@@ -81,8 +86,9 @@ export function ruleCondition(id, ctx = {}, rule = {}, prevOn = null) {
     if (!st || st === 'none' || st === 'unknown') return null;
     return st === 'bad';
   }
-  if (id === 'health' || id === 'baseline' || id === 'cross') {
+  if (id === 'health' || id === 'baseline' || id === 'cross' || id === 'collect') {
     if (id === 'health' && !ctx.health?.cells) return null;
+    if (id === 'collect' && !ctx.collect?.cells) return null;
     if (id === 'cross' && !(Array.isArray(ctx.entry?.cross) && ctx.entry.cross.length)) return null;
     const cells = ruleCells(id, ctx, rule);
     const vals = Object.values(cells);
@@ -183,6 +189,13 @@ export function perfAlertOf(f, { corpName = '' } = {}) {
   if (f.rule === 'profile') {
     const bad = (c.profile?.profiles || []).filter((p) => p?.status === 'bad').map((p) => p.id);
     return { key, severity: 'critical', title: capStr(`${head} 용도 프로파일 점검 실패 ${bad.join(' · ')}`, 200), detail: '용도 탭에서 실패한 점검(근거 · 출처)을 확인하세요.' };
+  }
+  if (f.rule === 'collect') {
+    const x = c.collect || {};
+    const LBL = { cycle: `주기 소요 ${x.cyclePct ?? '—'}%(예산 대비 · 기준 ${x.th?.cyclePct ?? '—'}%)`, success: `성공률 ${x.successPct ?? '—'}%(기준 ${x.th?.successPct ?? '—'}% 미만)`, db: `DB ${x.dbPct ?? '—'}%(상한 대비 · 기준 ${x.th?.dbPct ?? '—'}%)`, auth: '인증 정지 서버 있음' };
+    const on = Object.entries(x.cells || {}).filter(([, v]) => v === 'true').map(([k]) => LBL[k] || k);
+    return { key, severity: x.cells?.success === 'true' || x.cells?.db === 'true' ? 'critical' : 'warning', title: capStr(`${head} 수집 건강 기준 밖 — ${on.join(' · ')}`, 200),
+      detail: capStr(`베어메탈 사용률 › 수집 건강 보드에서 법인별 실패 사유 · 조치를 확인하세요. 재진입 가드가 다음 주기를 건너뛰기 전에 알리는 것이 목적입니다.`, 1_500) };
   }
   if (f.rule === 'focusEnd') {
     const s = c.summary || {};

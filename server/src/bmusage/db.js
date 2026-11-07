@@ -147,7 +147,10 @@ async function openDb() {
       );
       CREATE INDEX IF NOT EXISTS idx_bm_change_ts ON change_event(ts);
       CREATE INDEX IF NOT EXISTS idx_bm_change_key ON change_event(key, ts);
-      CREATE TABLE IF NOT EXISTS change_latest (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER, facts_json TEXT, PRIMARY KEY (agent, key));`);
+      CREATE TABLE IF NOT EXISTS change_latest (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER, facts_json TEXT, PRIMARY KEY (agent, key));
+      CREATE TABLE IF NOT EXISTS collect_cycle (agent TEXT NOT NULL DEFAULT '', ts INTEGER NOT NULL, ms INTEGER, budget_ms INTEGER, servers INTEGER, ok INTEGER,
+        conc_max INTEGER, conc_cap INTEGER, ssh_p50 INTEGER, ssh_p95 INTEGER, PRIMARY KEY (agent, ts));
+      CREATE INDEX IF NOT EXISTS idx_bm_cycle_ts ON collect_cycle(ts);`);
     // v2.919(리눅스 성능 1단계): 새 열은 CREATE 문이 아니라 **ALTER 마이그레이션**으로 더한다 — 기존 DB(v2.918 이하)와 새 DB 가
     //   같은 경로를 탄다(두 벌 스키마가 갈라지지 않게). ADD COLUMN 은 표를 다시 쓰지 않는다(O(1)).
     const mig = migratePerfColumns(conn);

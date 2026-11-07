@@ -181,7 +181,7 @@ export async function pullEdgePerfOps(agent, mode, { key, query = {} } = {}) {
 }
 
 /* ── 봉투 요약 정제(central/bmPerfSanitize.js 가 부른다) ─────────────────── */
-const RULES = new Set(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile']);
+const RULES = new Set(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect']);
 const RESULTS = new Set(['queued', 'sent', 'failed', 'suppressed', 'no-channel', 'no-channel-config', 'daily-cap', 'maintenance', 'error', '']);
 const ISSUE = new Set(['pending-central', 'daily-cap', 'created', 'commented', 'dup', 'error', 'skipped']);
 export function sanitizeFocusSummary(list, now = Date.now()) {
@@ -222,6 +222,12 @@ export async function centralizeEdgeSent(agent, snap, deps = {}) {
   const ag = capStr(String(agent ?? ''), 64);
   for (const r of sent) {
     if (!isObj(r)) { dropped += 1; continue; }
+    // 6단계 수집 건강 — 서버가 아니라 그 수집 노드 한 칸(key '__node__'): 대상 목록과 대지 않고 법인은 공용(''), 이름은 중앙이 아는 엣지 이름으로.
+    if (r.rule === 'collect' && String(r.key || '') === '__node__') {
+      const nm = safeEdgeName(`수집 노드 ${capStr(String(agent ?? ''), 64)}`, 80);
+      list.push({ ...r, key: '__node__', name: nm, vcenterId: '', title: capStr(`${nm} — ${BMPERF_RULE_LABEL.collect}`, 200) });
+      continue;
+    }
     const tg = targets.get(String(r.key || ''));
     if (!tg) { dropped += 1; continue; }
     const tag = strOf(tg.serviceTag, 64);

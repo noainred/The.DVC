@@ -47,6 +47,7 @@ import { registerEdgeLog } from './api/edgeLog.js'; // 엣지 로그·진행상�
 import { registerBmUsage } from './api/bmUsage.js'; // 베어메탈 사용률(CPU·MEM·디스크·NET·HBA, v2.550)
 import { registerBmPerfOps } from './api/bmPerfOps.js'; // v2.929 리눅스 성능 5단계(집중 모니터링 · 변경 이벤트 · 베이스라인 · 구간 비교 · 알림 규칙)
 import { registerBmCompare } from './api/bmCompare.js'; // 6단계 리눅스 성능 — 서버 비교(2~5대) · 5대 동시 집중 · 저장된 세트
+import { registerBmCollectHealth } from './api/bmCollectHealth.js'; // 6단계 — 수집 건강 보드(메타 모니터링)
 import { registerServerSensors } from './api/serverSensors.js'; // 서버 온도 › 센서 상세(v2.659)
 import { registerCorpUsage } from './api/corpUsage.js'; // 법인별 서버 사용량(전체·물리·가상화, v2.625)
 import { registerSvcInventory } from './api/svcInventory.js'; // 서비스 인벤토리(VM + 베어메탈 · 법인 › 폴더 › 서비스 · 전역 카탈로그, v2.887)
@@ -166,6 +167,7 @@ registerEdgeLog(api);
 registerBmUsage(api);
 registerBmPerfOps(api);
 registerBmCompare(api);
+registerBmCollectHealth(api);
 registerCorpUsage(api);
 registerSvcInventory(api);
 registerServerSensors(api);

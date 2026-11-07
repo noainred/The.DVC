@@ -16,7 +16,7 @@
  * ⚠ 전역 잠금을 쓰지 않는다 — 수집 중에도 설정을 고칠 수 있어야 한다(v2.529 규약).
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchJson, postJson, putJson, canCsv } from '../../api.js';
+import { fetchJson, postJson, putJson, canCsv, hasRole } from '../../api.js';
 import { scopeSaveSuffix } from '../scopeSaveText.js';
 import { fleetPartialsNote, fleetHeldNote } from '../fleetPartialText.js'; // v2.744(감사 후속 FC): fleetHeldNote — 등록부 손상으로 직전 목록 유지
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
@@ -47,12 +47,13 @@ import { BmPurposeFleet, BmFaultsFleet } from './BmOpsFleet.jsx';
 import BmPerfRulesPanel from './BmPerfRulesPanel.jsx';
 // 6단계: 서버 비교(2~5대) — 고른 서버 목록은 이 화면이 들고(보드 체크 · 상세 ‘비교에 추가’ · 병목 Top 5 · 용도 그룹) 비교 보기가 그린다.
 import BmCompareView from './BmCompareView.jsx';
+import BmCollectHealth from './BmCollectHealth.jsx'; // 6단계 수집 건강 보드(관리자 · 운영자)
 import { addKey } from './bmCompareText.js'; // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
 
 /** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
 const VIEW_KEY = 'bmUsage.view';
 // 보기는 URL 해시가 아니라 localStorage 기억 + 자동 기본값(v2.920) — useHashTab 은 데이터 전 fallback 을 해시에 굳혀 ‘성능 항목이 있으면 USE’ 를 깬다(audit2613a 스윕의 명시 예외).
-const VIEWS = ['use', 'util', 'purpose', 'faults', 'compare'];
+const VIEWS = ['use', 'util', 'purpose', 'faults', 'compare', 'health'];
 function readView() { try { const v = localStorage.getItem(VIEW_KEY); return VIEWS.includes(v) ? v : null; } catch { return null; } }
 function writeView(v) { try { localStorage.setItem(VIEW_KEY, v); } catch { /* 저장 실패는 무시 — 다음에 기본값 */ } }
 /** 6단계: 비교에 담은 서버(사람별 편의 — 실패해도 빈 목록으로 그린다). */
@@ -465,6 +466,7 @@ export function BmUsage() {
           <button role="tab" aria-selected={view === 'purpose'} className={view === 'purpose' ? 'active' : ''} onClick={() => chooseView('purpose')}>용도 분석</button>
           <button role="tab" aria-selected={view === 'faults'} className={view === 'faults' ? 'active' : ''} onClick={() => chooseView('faults')}>장애 기록</button>
           <button role="tab" aria-selected={view === 'compare'} className={view === 'compare' ? 'active' : ''} onClick={() => chooseView('compare')}>서버 비교{cmpKeys.length ? ` ${cmpKeys.length}` : ''}</button>
+          {hasRole('admin', 'operator') && <button role="tab" aria-selected={view === 'health'} className={view === 'health' ? 'active' : ''} onClick={() => chooseView('health')}>수집 건강</button>}
         </div>
         <DeviceFacetBar
           dcChips={barFacets.dcChips} typeChips={barFacets.typeChips} dcSel={dcSel} typeSel={typeSel}
@@ -564,6 +566,7 @@ export function BmUsage() {
           cmpKeys={cmpKeys} onPickCmp={pickCmp} onCompare={compareKeys} cmpMsg={cmpMsg}
         />
       )}
+      {view === 'health' && hasRole('admin', 'operator') && <BmCollectHealth />}
       {view === 'compare' && (
         <BmCompareView keys={cmpKeys} onKeys={(k) => { setCmpKeys(k); setCmpMsg(''); }} onOpen={(k) => openDetail(k)}
           names={Object.fromEntries(perfItems.map((it) => [it.key, it.name]))} />

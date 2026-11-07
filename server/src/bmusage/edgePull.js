@@ -143,5 +143,20 @@ async function envelopeOps(now = Date.now()) {
   const out = {};
   try { const F = await import('./focus/run.js'); const f = await F.focusEnvelopeSummary({ now }); if (f) out.focusSummary = f; } catch { /* */ }
   try { const A = await import('./perfAlerts.js'); out.perfAlertSent = (A.perfAlertStatus().sent || []).filter((r) => Number(r?.at) >= now - 86_400_000); } catch { /* */ }
+  // 6단계 수집 건강 — 이 엣지가 매 주기 잰 값 + 주기 추이(7일 · 1시간 칸). 아직 주기가 없으면 싣지 않는다(지어내지 않는다 — 중앙은 ‘아직 주기 없음’).
+  try {
+    const { collectHealthNow } = await import('./poller.js');
+    const h = collectHealthNow();
+    if (h) out.collectHealth = { ...h, trend: await collectTrend({ now }) };
+  } catch { /* 그 필드만 빠진다 */ }
   return out;
+}
+
+/** 6단계 — 이 노드의 주기 추이(메인 DB collect_cycle · 7일 → 1시간 칸). 못 읽으면 빈 배열. */
+export async function collectTrend({ now = Date.now(), days = 7 } = {}) {
+  try {
+    const O = await import('./opsDb.js');
+    const rows = await O.cycleRange({ agent: config.agent?.name || '', from: now - days * 86_400_000, to: now, limit: 20_000 });
+    return rows ? (await import('./collectHealth.js')).hourlyTrend(rows) : [];
+  } catch { return []; }
 }

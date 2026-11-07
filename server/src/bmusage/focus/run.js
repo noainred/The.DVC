@@ -18,7 +18,7 @@
 import crypto from 'node:crypto';
 import { withDeadline } from '../../proxy/sshExec.js';
 import { config } from '../../config.js';
-import { isAuthFailureText, isPeerRejectText } from '../../util/authGuard.js';
+import { osMissOf, idracMissOf } from '../missReason.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { dayKey, DAY_MS, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { capStr } from '../../util/capStr.js';
@@ -300,28 +300,7 @@ export function beforeStats(rows = []) {
   return out;
 }
 
-/** OS 결과 → 결측 사유(없으면 ''). */
-function osMissOf(os) {
-  if (!os) return 'no-path';
-  if (os.ok) return '';
-  const e = String(os.error || '');
-  if (os.busy) return 'pool-busy';
-  if (isPeerRejectText(e)) return 'host-key';
-  if (isAuthFailureText(e)) return 'auth';
-  if (/시한 초과|timeout|타임아웃/i.test(e)) return 'timeout';
-  if (/어느 형식으로도|Linux/i.test(e)) return 'not-linux';
-  return 'ssh-error';
-}
-function idracMissOf(idr) {
-  if (!idr) return 'no-path';
-  if (idr.ok) return '';
-  if (idr.busy) return 'pool-busy';
-  if (idr.kind === 'auth') return 'auth';
-  if (idr.kind === 'auth-stopped') return 'auth-stopped';
-  if (idr.kind === 'timeout') return 'timeout';
-  if (idr.kind === 'no-telemetry' || idr.kind === 'empty-report') return 'no-telemetry';
-  return 'unreachable';
-}
+// 결측 사유 판정은 bmusage/missReason.js 하나(6단계 수집 건강과 같은 코어).
 
 async function tick(sess, idx) {
   if (sess.stopped || !_active.has(sess.id)) return;

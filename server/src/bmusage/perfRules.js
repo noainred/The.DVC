@@ -19,7 +19,8 @@ import { HEALTH_DEFAULTS } from './health.js';
 
 const FILE = () => path.join(config.configDir, 'bm-perf-rules.json');
 
-export const RULE_IDS = Object.freeze(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile']);
+// 6단계: collect(수집 건강 — 서버가 아니라 이 수집 노드 한 칸: 주기 소요 · 성공률 · DB 상한 · 인증 정지).
+export const RULE_IDS = Object.freeze(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect']);
 /** 규칙별 조건 선택지(웹 문구 표와 1:1). */
 export const RULE_CONDS = Object.freeze({
   use: Object.freeze(['sat-err', 'bottleneck', 'errors']),
@@ -28,6 +29,7 @@ export const RULE_CONDS = Object.freeze({
   baseline: Object.freeze(['band']),
   health: Object.freeze(['any', 'bad']),
   profile: Object.freeze(['bad']),
+  collect: Object.freeze(['any', 'cycle', 'success', 'db', 'auth']),
 });
 /** 기존 알림 채널(alerts.js channels) — 새 채널을 만들지 않는다. */
 export const CHANNELS = Object.freeze(['email', 'webhook', 'slack', 'teams']);
@@ -42,6 +44,7 @@ export const RULE_DEFAULTS = Object.freeze({
   baseline: Object.freeze({ cond: 'band', sustain: 3, repeatMin: 240, channels: ['webhook'], issue: false, autoFocus: false }),
   health: Object.freeze({ cond: 'any', sustain: 1, repeatMin: 720, channels: ['email'], issue: false, autoFocus: false }),
   profile: Object.freeze({ cond: 'bad', sustain: 1, repeatMin: 30, channels: ['email', 'webhook'], issue: false, autoFocus: false }),
+  collect: Object.freeze({ cond: 'any', sustain: 2, repeatMin: 360, channels: ['email'], issue: false, autoFocus: false }),
 });
 export const LIMITS = Object.freeze({
   sustain: [1, 48], repeatMin: [0, 10_080], corpsOff: 200,
@@ -52,6 +55,8 @@ export const LIMITS = Object.freeze({
   changes: { keepDays: [7, 400] },
   // 6단계: maxServers — 서버 비교 한 화면의 서버 수 상한(설계 §15 ‘2~5대 · 상한 설정 · 기본 5’ — 바깥 한계 8: 열이 늘면 400 폭 · 엣지 요청이 그만큼 는다).
   compare: { diffPct: [1, 500], maxServers: [2, 8] },
+  // 6단계 수집 건강 기준(보드 상태 · 알림 규칙 ‘수집 건강’ 행이 같은 값 — collectHealth.collectCells). dbCapGb 0 = 상한 없음(DB 칸은 판정 보류).
+  collect: { cyclePct: [10, 100], successPct: [10, 100], dbPct: [10, 100], dbCapGb: [0, 10_000] },
 });
 export const DEFAULTS = Object.freeze({
   rules: {},
@@ -64,6 +69,7 @@ export const DEFAULTS = Object.freeze({
   health: { ...HEALTH_DEFAULTS },
   changes: { keepDays: 30 },
   compare: { diffPct: 20, maxServers: 5 },
+  collect: { cyclePct: 80, successPct: 90, dbPct: 90, dbCapGb: 20 },
   // 유지보수 창 억제(Bareos · Veeam 스케줄) — 베어메탈 서버의 백업 창을 읽는 원천이 아직 없다(perfAlerts.maintenanceFor 머리말). 켜 두면 원천이 생길 때 바로 쓴다.
   maintenance: { backupWindows: true },
 });
@@ -116,8 +122,8 @@ export function normalizeRules(raw, { strict = true } = {}) {
       repeatMin: int(x.repeatMin, LIMITS.repeatMin, `rules.${id}.repeatMin`, d.repeatMin),
       channels,
       issue: x.issue === true,
-      // 집중 결론 규칙은 그 자체가 집중의 끝이라 자동 집중을 걸지 않는다(되먹임 고리).
-      autoFocus: id === 'focusEnd' ? false : x.autoFocus === true,
+      // 집중 결론 규칙은 그 자체가 집중의 끝이라 자동 집중을 걸지 않는다(되먹임 고리). 수집 건강은 서버가 아니라 노드 칸이라 집중 대상이 없다.
+      autoFocus: id === 'focusEnd' || id === 'collect' ? false : x.autoFocus === true,
       corpsOff: vcList(x.corpsOff, `rules.${id}.corpsOff`),
     };
   }
@@ -139,9 +145,10 @@ export function normalizeRules(raw, { strict = true } = {}) {
   const health = sec('health', DEFAULTS.health, LIMITS.health).out;
   const changes = sec('changes', DEFAULTS.changes, LIMITS.changes).out;
   const compare = sec('compare', DEFAULTS.compare, LIMITS.compare).out;
+  const collect = sec('collect', DEFAULTS.collect, LIMITS.collect).out;
   const maintenance = sec('maintenance', DEFAULTS.maintenance, null).out;
   return {
-    value: { v: 1, rules, daily, focus, baseline, health, changes, compare, maintenance, by: String(r.by || '').slice(0, 64), at: Number(r.at) || 0 },
+    value: { v: 1, rules, daily, focus, baseline, health, changes, compare, collect, maintenance, by: String(r.by || '').slice(0, 64), at: Number(r.at) || 0 },
     dropped,
   };
 }
@@ -193,7 +200,7 @@ export function savePerfRules(body, { by = '' } = {}) {
 /** 감사 요약 — 켠 규칙 id · 바뀐 절(비밀 없음 · 300자). */
 export function rulesAuditSummary(prev, next) {
   const on = (x) => Object.keys(x?.rules || {}).sort().join(',');
-  const changed = ['daily', 'focus', 'baseline', 'health', 'changes', 'compare', 'maintenance'].filter((k) => JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]));
+  const changed = ['daily', 'focus', 'baseline', 'health', 'changes', 'compare', 'collect', 'maintenance'].filter((k) => JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]));
   return JSON.stringify({ before: on(prev), after: on(next), changed }).slice(0, 300);
 }
 export function _resetPerfRulesForTest() { _cache = null; _mtime = ''; _err.ok(); _listeners.clear(); }

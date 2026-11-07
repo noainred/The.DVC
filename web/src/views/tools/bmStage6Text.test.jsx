@@ -13,6 +13,10 @@ import { CompareSide, CompareTable, CompareOverlay, createCompareLoader } from '
 import { matrixRows } from './BmPerfBoard.jsx';
 import { groupCompareKeys } from './BmOpsFleet.jsx';
 import { COMPARE_GROUPS, COMPARE_METRICS, buildCompareTable, seriesStats } from '../../../../server/src/bmusage/multiCompare.js';
+import * as K from './bmCollectText.js';
+import { CollectHealthView } from './BmCollectHealth.jsx';
+import { HEALTH_REASON_CODES, NODE_FLAGS, summarizeCycle } from '../../../../server/src/bmusage/collectHealth.js';
+import { nodeStateOf } from '../../../../server/src/routes/api/bmCollectHealth.js';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const H = 3_600_000;
@@ -101,5 +105,40 @@ describe('서버 비교 — 그리기는 서버 값 그대로 · 결측은 ‘�
     expect(s).not.toMatch(/Math\.max\(\.\.\.[^)]*\)\s*\/\s*Math\.min/);
     expect(s).not.toMatch(/SKEW_RATIO|DEV_HIGH_RATIO|>=\s*2\s*\*/);
     expect(s).not.toMatch(/setInterval|usePolling/);
+  });
+});
+
+describe('수집 건강 — 문구 표 = 서버 열거 · 결측은 ‘—’', () => {
+  it('사유 · 칸 · 노드 상태 1:1', () => {
+    expect(Object.keys(K.REASON_TEXT).sort()).toEqual([...HEALTH_REASON_CODES].sort());
+    for (const f of NODE_FLAGS) expect(K.FLAG_TEXT[f]).toBeTruthy();
+    const states = new Set(['off', 'old-version', 'no-cycle', 'edge-stale', 'ok', 'attention', 'no-snapshot']);
+    expect(nodeStateOf({ via: 'edge', enabled: true, hasField: false })).toBe('old-version');
+    expect(nodeStateOf({ via: 'local', enabled: false })).toBe('off');
+    for (const st of states) expect(K.NODE_STATE_TEXT[st]).toBeTruthy();
+  });
+  it('값 없으면 단위 없이 ‘—’ · 0 은 값', () => {
+    expect(K.msText(null)).toBe('—'); expect(K.msText(0)).toBe('0ms'); expect(K.pctText1(null)).toBe('—'); expect(K.gbText(undefined)).toBe('—');
+    expect(K.cycleText(null, 300_000)).toBe('—'); expect(K.sshText({ n: 0, p50Ms: null })).toBe('—'); expect(K.concText(null)).toBe('—');
+  });
+  it('SSR — 서버 요약 그대로(사유 · 며칠째 · 노드 숨김)', () => {
+    const sum = summarizeCycle({ results: [{ ok: false, target: { key: 'a', vcenterId: 'vcA', paths: ['os'] }, os: { ok: false, error: 'OS 수집 시한 초과' }, osMs: 61_000 }], startedAt: NOW - 1000, endedAt: NOW, intervalMs: 300_000, concurrency: 32, slotPeak: 1, now: NOW });
+    const resp = { minEdgeVersion: '2.950.0', kpi: { corps: 2, servers: 1, successPct: 0, okN: 0, worstCycle: null, dbBytes: null }, reasons: [{ path: 'os', code: 'timeout', n: 1, since: NOW - 3 * 86_400_000, state: 'idracOnlyUnread' }],
+      nodes: [{ agent: 'edge-a', via: 'edge', state: 'attention', flags: ['success'], node: { ...sum.node, db: { bytes: null, families: {} } }, trend: [] }, { agent: 'edge-old', via: 'edge', state: 'old-version', flags: [], nodeHidden: false }],
+      rows: [{ vcenterId: 'vcA', agent: 'edge-a', via: 'edge', nodeState: 'attention', servers: 1, ok: 0, fail: 1, successPct: 0, reasons: [{ path: 'os', code: 'timeout', n: 1 }], cycleMs: 1000, budgetMs: 300_000 },
+        { vcenterId: 'vcB', agent: 'x', via: 'edge', nodeState: 'ok', nodeHidden: true, servers: null, reasons: [] }] };
+    const html = renderToStaticMarkup(h(CollectHealthView, { resp, now: NOW }));
+    expect(html).toContain('시한 초과'); expect(html).toContain('3일째'); expect(html).toContain('OS 못 읽음');
+    expect(html).toContain('노드 값 숨김'); expect(html).toContain('성공률 낮음');
+    expect(html).not.toMatch(/>0GB</); expect(html).not.toContain('NaN');
+  });
+  it('CSV — 결측은 빈 칸', () => {
+    const csv = K.collectCsv({ rows: [{ vcenterId: 'vcA', agent: 'e', servers: null, reasons: [] }] });
+    expect(csv).not.toContain('null'); expect(csv.split('\r\n')[1]).toMatch(/^vcA,e,,/);
+  });
+  it('소스 스윕 — 기준값 비교 · 폴링 없음', () => {
+    const s2 = strip(src('bmCollectText.js')) + strip(src('BmCollectHealth.jsx'));
+    expect(s2).not.toMatch(/cyclePct\s*>=|successPct\s*</);
+    expect(s2).not.toMatch(/setInterval|setTimeout\(\s*load|usePolling/);
   });
 });
