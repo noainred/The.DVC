@@ -128,8 +128,11 @@ export async function bmLogsFleet(req, snap, deps = {}) {
   let list = applyScope(rows, allowed);   // ⚠ 범위 교집합 먼저(귀속 없는 서버는 범위 계정에 없다) — 공통 원인 후보도 이 목록으로만
   const { commonCauseCandidates, COMMON_WINDOW_MS } = await import('../../bmusage/logs/view.js');
   let common = commonCauseCandidates(list);
+  // 분류별 ‘모름’ · ‘일부 출처만’ 서버 수(서버 요약의 cover — 못 읽은 서버를 0 · 정상 쪽에 넣지 않고 따로 센다 · 추가 수정)
+  const coverCount = (cv) => Object.fromEntries(LOG_CLASSES.map((c) => [c, list.filter((r) => r.wasRead && r.cls?.[c]?.cover === cv).length]));
   const kpi = { servers: list.length, faultServers: list.filter((r) => (r.cls?.fault?.lines || 0) > 0).length, secHighServers: list.filter((r) => (r.secHigh || 0) > 0).length,
-    byClass: Object.fromEntries(LOG_CLASSES.map((c) => [c, list.reduce((a, r) => a + (Number(r.cls?.[c]?.patterns) || 0), 0)])), unread: list.filter((r) => !r.wasRead).length, truncated: list.filter((r) => (r.trunc || 0) > 0).length };
+    byClass: Object.fromEntries(LOG_CLASSES.map((c) => [c, list.reduce((a, r) => a + (Number(r.cls?.[c]?.patterns) || 0), 0)])), unread: list.filter((r) => !r.wasRead).length, truncated: list.filter((r) => (r.trunc || 0) > 0).length,
+    unknown: coverCount('none'), partial: coverCount('partial') };
   if (!isAdmin) {
     const { hosts, match } = await perfAddressMatcher(D, tg);
     const sc = scrubberFor(hosts);

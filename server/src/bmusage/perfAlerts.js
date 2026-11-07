@@ -83,12 +83,15 @@ export function ruleCondition(id, ctx = {}, rule = {}, prevOn = null) {
   }
   if (id === 'logs') {
     // 7a단계 로그 분석 — 이번 주기에 로그를 읽은 서버만(못 읽음 · 권한 없음 · 예산 부족은 입력이 없다 = 보류). 조건 = 이번 주기 새 줄 중 장애 분류 · 보안 high 이상(집중 포함).
+    //   분류를 담는 출처를 하나도 못 읽은 주기(cover none — rules.js classCover)는 ‘없음’ 이 아니라 보류(null) — 못 읽음을 해소로 보지 않는다. 일부만 읽은 주기는 읽은 쪽으로 판정한다.
     const lg = ctx.logs;
     if (!lg || lg.read !== true) return null;
     const f = Number(lg.faultLines) || 0; const sh = Number(lg.secHigh) || 0;
-    if (rule.cond === 'fault') return f > 0;
-    if (rule.cond === 'sec') return sh > 0;
-    return f > 0 || sh > 0;
+    const blind = (c) => lg.cover?.[c] === 'none';
+    if (rule.cond === 'fault') return f > 0 ? true : blind('fault') ? null : false;
+    if (rule.cond === 'sec') return sh > 0 ? true : blind('sec') ? null : false;
+    if (f > 0 || sh > 0) return true;
+    return blind('fault') || blind('sec') ? null : false;
   }
   if (id === 'profile') {
     const st = ctx.profile?.status;

@@ -16,6 +16,7 @@ import { parseLogOutput } from './parse.js';
 import { classifyItems, HOUR, BURST_DEFAULTS } from './classify.js';
 import { logCursorsAll, logWriteBatch, logPrune } from './store.js';
 import { refreshLogSummary } from './view.js';
+import { classCover } from './rules.js';
 
 export const LOG_DEFAULTS = Object.freeze({ on: true, lineCap: LINE_CAP_DEFAULT, keepDays: 30, burstCount: BURST_DEFAULTS.count, burstWindowMin: BURST_DEFAULTS.windowMin });
 /** 로그 exec 시한(같은 세션 남은 예산과 작은 쪽 — osSsh 가 자른다). journalctl 15 + dmesg 5 + find 5 + 여유. */
@@ -57,6 +58,7 @@ export async function buildLogWrite({ key, stdout, prev = null, now = Date.now()
   const cls = await classifyItems(parsed.items, { now, burst: { count: cfg.burstCount, windowMin: cfg.burstWindowMin }, carry, authSrc: parsed.authSrc });
   const hourNow = Math.floor(now / HOUR) * HOUR;
   const hours = [...cls.hours.values()];
+  const readNow = new Set(Object.entries(parsed.sources).filter(([, x]) => x?.status === 'ok').map(([k]) => k));
   for (const [src, s] of Object.entries(parsed.sources)) {
     if (s.status !== 'ok') continue;
     if (numOrNull(s.n) != null) hours.push({ hour: hourNow, sig: `#read:${src}`, cls: 'read', count: s.n });
@@ -70,7 +72,9 @@ export async function buildLogWrite({ key, stdout, prev = null, now = Date.now()
     write: { key, readRev: prev ? prev.rev : null, at: now, state: { pos: parsed.next, carry: cls.carry }, status, ...(prev?.corrupt ? { bad: prev.rawBad || '(손상)' } : {}),
       patterns: [...cls.patterns.values()], hours, sec: [...cls.sec.values()] },
     // 알림 입력은 최근 FRESH_MS 안의 줄만(첫 읽기의 지난 줄 · 시각 모름 줄은 알림이 아니다 — 반증 F6)
-    alert: { read: Object.values(parsed.sources).some((s) => s.status === 'ok'), faultLines: cls.counts.faultLines, secHigh: cls.counts.secHigh, bursts: cls.counts.freshBursts },
+    //   분류별 읽기 범위(이번 주기 — classCover): 장애 · 보안을 담는 출처를 하나도 못 읽은 주기는 ‘없음(해소)’ 이 아니라 보류(perfAlerts — 추가 수정)
+    alert: { read: Object.values(parsed.sources).some((s) => s.status === 'ok'), faultLines: cls.counts.faultLines, secHigh: cls.counts.secHigh, bursts: cls.counts.freshBursts,
+      cover: Object.fromEntries(['fault', 'sec'].map((c) => [c, classCover(c, readNow, parsed.sources).cover])) },
   };
 }
 

@@ -109,6 +109,7 @@ export function LogsView({ resp, range, onRange, onTab, onReload, loading = fals
             <div className="bmo-k"><i className="bml-dot" style={{ background: c.color }} />{c.label}</div>
             <div className="bmo-kv">{c.value}</div>
             <div className="bmo-sub">{c.sub}</div>
+            {c.cover && <div className="bmo-sub" style={{ color: toneVar(c.partial ? 'idle' : 'warn') }}>{c.cover}</div>}
             <div className="bmo-sub" style={{ color: 'var(--text-faint)' }}>{c.desc}</div>
           </div>
         ))}

@@ -15,7 +15,7 @@ import { capStr } from '../util/capStr.js';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { stage7aMinEdgeVersion } from './featureMinEdgeVersion.js';
-import { LOG_RULE_IDS, LOG_CLASSES, LOG_SOURCES, SEC_KINDS, LOG_EVIDENCE, CLASS_LABEL, logRuleCatalog } from '../bmusage/logs/rules.js';
+import { LOG_RULE_IDS, LOG_CLASSES, LOG_SOURCES, SEC_KINDS, LOG_EVIDENCE, CLASS_LABEL, CLASS_CARRIERS, logRuleCatalog } from '../bmusage/logs/rules.js';
 import { STATUS, PERM_SCOPES } from '../bmusage/logs/parse.js';
 import { LOG_SECTIONS, APP_LOGS, AUTH_IDENTS } from '../bmusage/logs/command.js';
 import { maskStoredTmpl } from '../bmusage/logs/classify.js';
@@ -36,9 +36,14 @@ export const txt = (v, n = 200) => capStr(typeof v === 'string' ? v : '', n).rep
 const ts = (v, now) => clampEdgeTs(N(v), now);
 const enumOr = (v, set, def = null) => (typeof v === 'string' && set.has(v) ? v : def);
 
+const COVER = new Set(['all', 'partial', 'none']);
+/** 분류별 개수 + 읽기 범위(cover · 못 읽은 담는 출처 — 화면이 ‘—’ · ‘일부 출처만’ 을 그린다 · 추가 수정). 모르는 cover 는 싣지 않는다(예전 판). */
 function clsMap(x) {
   const out = {};
-  for (const c of LOG_CLASSES) { const v = isObj(x) ? x[c] : null; out[c] = isObj(v) ? { patterns: N(v.patterns), lines: N(v.lines) } : { patterns: null, lines: null }; }
+  for (const c of LOG_CLASSES) {
+    const v = isObj(x) ? x[c] : null;
+    out[c] = isObj(v) ? { patterns: N(v.patterns), lines: N(v.lines), ...(COVER.has(v.cover) ? { cover: v.cover, missing: (Array.isArray(v.missing) ? v.missing : []).filter((m) => SRC.has(m)).slice(0, 8) } : {}) } : { patterns: null, lines: null };
+  }
   return out;
 }
 function topOf(p, now) {
@@ -59,7 +64,7 @@ export function sanitizeLogSummary(list, { targetKeys = new Set(), now = Date.no
     if (!isObj(x) || typeof x.key !== 'string' || !targetKeys.has(x.key)) { dropped += 1; continue; }
     const st = isObj(x.status) && isObj(x.status.sources) ? { sources: Object.fromEntries(LOG_SOURCES.map((s) => [s, enumOr(x.status.sources[s], STAT, null)])), ended: x.status.ended !== false } : null;
     out.push({
-      key: capStr(x.key, 256), at: ts(x.at, now), wasRead: x.wasRead === true, ...(typeof x.secRead === 'boolean' ? { secRead: x.secRead } : {}), cls: clsMap(x.cls), none: N(x.none), read: N(x.read), trunc: N(x.trunc), secHigh: N(x.secHigh),
+      key: capStr(x.key, 256), at: ts(x.at, now), wasRead: x.wasRead === true, cls: clsMap(x.cls), none: N(x.none), read: N(x.read), trunc: N(x.trunc), secHigh: N(x.secHigh),
       ...(N(x.undated) != null ? { undated: N(x.undated) } : {}),
       top: (Array.isArray(x.top) ? x.top : []).slice(0, 8).map((p) => topOf(p, now)).filter(Boolean), status: st,
     });
@@ -130,7 +135,7 @@ export function sanitizeLogView(b, now = Date.now()) {
   const cs = isObj(b.corrSource) ? b.corrSource : {};
   return {
     ok: b.ok === true, key: capStr(typeof b.key === 'string' ? b.key : '', 256), agent: txt(b.agent, 128), range: ['1h', '24h', '7d'].includes(b.range) ? b.range : '24h', from: ts(b.from, now), to: N(b.to),
-    kpi: clsMap(b.kpi), classLabel: CLASS_LABEL, hourly,
+    kpi: clsMap(b.kpi), classLabel: CLASS_LABEL, classCarriers: CLASS_CARRIERS, hourly,
     read: { lines: N(rd.lines), truncated: N(rd.truncated), none: N(rd.none), undated: N(rd.undated), bySrc, authSrc: AUTHSRC.has(rd.authSrc) ? rd.authSrc : null, at: ts(rd.at, now), lineCap: N(rd.lineCap), sources, ended: rd.ended === false ? false : rd.ended === true ? true : null,
       cut: typeof rd.cut === 'string' && /^[A-Z]{1,16}$/.test(rd.cut) ? rd.cut : null, ...(rd.cursorReset ? { cursorReset: 'corrupt' } : {}), ...(rd.corruptKept === true ? { corruptKept: true } : {}), ...(rd.never === true ? { never: true } : {}) },
     security: { ...sec, totals: isObj(S.totals) ? Object.fromEntries(SEC_TOTAL_KEYS.filter((k) => Object.hasOwn(S.totals, k)).map((k) => [k, N(S.totals[k])])) : {}, totalsWhy,

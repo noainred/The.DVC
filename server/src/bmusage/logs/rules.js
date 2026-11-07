@@ -23,6 +23,9 @@ export const LOG_CLASSES = Object.freeze(['fault', 'perf', 'sec', 'issue']);
 export const CLASS_LABEL = Object.freeze({ fault: '장애', perf: '성능', sec: '보안', issue: '이슈' });
 /** 출처(command.js LOG_PREFIX 와 같은 이름) — jsec = journald 의 sshd · sudo 계열(우선순위 info 이상 · /var/log/secure 를 못 읽을 때의 보안 출처 — 반증 F1). */
 export const LOG_SOURCES = Object.freeze(['journal', 'jsec', 'kernel', 'secure', 'audit', 'gpdb', 'airflow']);
+/** 인증 기록 출처(서로 대신한다 — /var/log/secure 와 journald 보안은 같은 사건의 두 기록: parse.js pickAuthSource). */
+const AUTH_SRCS = ['secure', 'jsec'];
+export const AUTH_ALT = Object.freeze({ secure: 'jsec', jsec: 'secure' });
 /** 보안 사실 종류(log_sec.kind) — 화면 보안 패널의 행. */
 export const SEC_KINDS = Object.freeze(['fail', 'ok', 'root', 'sudo', 'sudofail', 'acct', 'avc']);
 
@@ -51,7 +54,11 @@ export const LOG_EVIDENCE = Object.freeze({
   USE: 'Brendan Gregg USE Method — OOM · 오류는 dmesg 에서 본다(설계 방법론 출처)',
 });
 
-const R = (o) => Object.freeze({ tag: '', grade: '○', corr: {}, ...o });
+/**
+ * srcs = 그 규칙의 줄이 오는 출처(태그 없는 규칙만 — 태그 규칙은 태그가 곧 출처). **매칭에는 쓰지 않는다**(태그 없는 규칙은 엔진 규약대로 모든 출처에 댄다) —
+ *   분류별 ‘담는 출처’(CLASS_CARRIERS — 못 읽었으면 그 분류는 0 이 아니라 모름) 를 카탈로그에서 기계적으로 뽑는 데만 쓴다. 테스트가 모든 규칙의 출처를 고정한다.
+ */
+const R = (o) => Object.freeze({ tag: '', grade: '○', corr: {}, ...o, ...(o.srcs ? { srcs: Object.freeze([...o.srcs]) } : {}) });
 
 /**
  * 정규식 규칙(순서 = 분류 우선순위). 줄(msg)은 출처 파서가 머리(시각 · 호스트 · 프로세스)를 뗀 **메시지 본문**이다(audit · gpdb · airflow 는 형식 그대로 — 아래 표본).
@@ -77,7 +84,7 @@ export const LOG_RULES = Object.freeze([
     sample: 'nvme nvme1: controller is down; will reset: CSTS=0xffffffff, PCI_STATUS=0xffff', evidence: ['K1'], title: 'NVMe 컨트롤러 다운 · 제거', corr: { playbook: 'use:disk', faults: true } }),
   R({ id: 'HW-FS-CORRUPT', cls: 'fault', severity: 'high', tag: 'kernel', re: /^(?:EXT4-fs error \(device [\w-]{1,32}\)|XFS \([\w-]{1,32}\): (?:Corruption|Metadata (?:corruption|I\/O error)|metadata I\/O error)|xfs_do_force_shutdown)/,
     sample: 'XFS (dm-3): Metadata corruption detected at xfs_dir3_block_read_verify+0x5e/0x110 [xfs], xfs_dir3_block block 0x2a0', evidence: ['K1'], title: '파일시스템 손상 · 강제 종료', corr: { playbook: 'use:disk', faults: true } }),
-  R({ id: 'HW-PSU', cls: 'fault', severity: 'high', re: /\b(?:power supply|PSU)\b.{0,48}\b(?:fail(?:ed|ure)?|lost|absent|redundancy lost)\b/i,
+  R({ id: 'HW-PSU', srcs: ['kernel', 'journal'], cls: 'fault', severity: 'high', re: /\b(?:power supply|PSU)\b.{0,48}\b(?:fail(?:ed|ure)?|lost|absent|redundancy lost)\b/i,
     sample: 'ipmi: Power Supply 2 failure detected', evidence: ['K1'], title: '전원 공급 장치 이상(OS 로그 — iDRAC SEL 과 대조)', corr: { playbook: 'use:hw', faults: true } }),
 
   // ── 성능(perf) ────────────────────────────────────────────────────────────
@@ -105,34 +112,34 @@ export const LOG_RULES = Object.freeze([
     sample: 'nf_conntrack: nf_conntrack: table full, dropping packet', evidence: ['K1'], title: 'conntrack 표 가득 — 패킷 버림', corr: { playbook: 'health:fdct', health: 'fdct' } }),
 
   // ── 보안(sec) — kind 는 보안 패널 행(SEC_KINDS) ───────────────────────────────
-  R({ id: 'SEC-ROOT-LOGIN', cls: 'sec', severity: 'medium', re: /^Accepted [\w/-]{1,40} for root from \S{1,64} port \d{1,5}/,
+  R({ id: 'SEC-ROOT-LOGIN', srcs: AUTH_SRCS, cls: 'sec', severity: 'medium', re: /^Accepted [\w/-]{1,40} for root from \S{1,64} port \d{1,5}/,
     sample: 'Accepted password for root from 10.20.1.5 port 44012 ssh2', evidence: ['S1'], title: 'root 직접 로그인(정책 확인)', kind: 'root' }),
-  R({ id: 'SEC-SSH-OK', cls: 'sec', severity: 'info', re: /^Accepted [\w/-]{1,40} for \S{1,64} from \S{1,64} port \d{1,5}/,
+  R({ id: 'SEC-SSH-OK', srcs: AUTH_SRCS, cls: 'sec', severity: 'info', re: /^Accepted [\w/-]{1,40} for \S{1,64} from \S{1,64} port \d{1,5}/,
     sample: 'Accepted publickey for gpadmin from 10.20.1.5 port 52210 ssh2: ED25519 SHA256:AbCdEf0123456789', evidence: ['S1'], title: 'SSH 로그인 성공', kind: 'ok' }),
-  R({ id: 'SEC-SSH-FAIL', cls: 'sec', severity: 'medium', re: /^Failed (?:password|publickey|keyboard-interactive\/pam|none) for (?:invalid user )?\S{0,64} from \S{1,64} port \d{1,5}/,
+  R({ id: 'SEC-SSH-FAIL', srcs: AUTH_SRCS, cls: 'sec', severity: 'medium', re: /^Failed (?:password|publickey|keyboard-interactive\/pam|none) for (?:invalid user )?\S{0,64} from \S{1,64} port \d{1,5}/,
     sample: 'Failed password for root from 203.0.113.45 port 51822 ssh2', evidence: ['S1'], title: 'SSH 로그인 실패', kind: 'fail' }),
-  R({ id: 'SEC-SSH-INVALID', cls: 'sec', severity: 'medium', re: /^Invalid user \S{0,64} from \S{1,64}/,
+  R({ id: 'SEC-SSH-INVALID', srcs: AUTH_SRCS, cls: 'sec', severity: 'medium', re: /^Invalid user \S{0,64} from \S{1,64}/,
     sample: 'Invalid user admin from 198.51.100.7 port 40022', evidence: ['S1'], title: '없는 계정으로 SSH 시도', kind: 'fail' }),
   // 같은 시도의 뒤따르는 줄(연결 종료 · 최대 시도 초과 · PAM 요약) — 실패로 다시 세지 않는다(반증 F8: 한 시도가 3~4건으로 부풀고 ‘invalid’ 를 IP 로 뽑았다).
   //   계정 · 주소는 서명에서 치환하고(classify secTemplate) 보안 상위에는 넣지 않는다(kind 없음).
-  R({ id: 'SEC-SSH-MAXAUTH', cls: 'sec', severity: 'medium', re: /^(?:error: )?(?:maximum authentication attempts exceeded for |Disconnecting (?:invalid |authenticating )?user \S{0,64} \S{1,64} port \d{1,5}: Too many authentication failures|PAM \d{1,3} more authentication failures?;)/,
+  R({ id: 'SEC-SSH-MAXAUTH', srcs: AUTH_SRCS, cls: 'sec', severity: 'medium', re: /^(?:error: )?(?:maximum authentication attempts exceeded for |Disconnecting (?:invalid |authenticating )?user \S{0,64} \S{1,64} port \d{1,5}: Too many authentication failures|PAM \d{1,3} more authentication failures?;)/,
     sample: 'error: maximum authentication attempts exceeded for invalid user admin from 198.51.100.7 port 40022 ssh2 [preauth]', evidence: ['S1', 'S7'], title: 'SSH 최대 시도 초과(같은 연결의 실패 줄로 센다)' }),
-  R({ id: 'SEC-SSH-PREAUTH', cls: 'sec', severity: 'info', re: /^(?:Connection (?:closed|reset) by|Disconnected from|Received disconnect from|Disconnecting) (?:(?:invalid|authenticating) user \S{0,64} )?\S{1,64} port \d{1,5}.{0,80}\[preauth\]$/,
+  R({ id: 'SEC-SSH-PREAUTH', srcs: AUTH_SRCS, cls: 'sec', severity: 'info', re: /^(?:Connection (?:closed|reset) by|Disconnected from|Received disconnect from|Disconnecting) (?:(?:invalid|authenticating) user \S{0,64} )?\S{1,64} port \d{1,5}.{0,80}\[preauth\]$/,
     sample: 'Connection closed by invalid user admin 198.51.100.7 port 40022 [preauth]', evidence: ['S1', 'S7'], title: 'SSH 인증 전 연결 종료(실패로 세지 않음 — 같은 연결의 Invalid user · Failed 줄이 센다)' }),
   // PAM 의 sshd · su · sudo 인증 실패는 그 서비스 자신의 줄(Failed password · FAILED SU · incorrect password attempts)과 같은 시도다 — 실패로 다시 세지 않는다.
-  R({ id: 'SEC-PAM-DUP', cls: 'sec', severity: 'low', re: /^pam_unix\((?:sshd|su|su-l|sudo|sudo-i):auth\): authentication failure;/,
+  R({ id: 'SEC-PAM-DUP', srcs: AUTH_SRCS, cls: 'sec', severity: 'low', re: /^pam_unix\((?:sshd|su|su-l|sudo|sudo-i):auth\): authentication failure;/,
     sample: 'pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.45  user=root', evidence: ['S1', 'S3'], title: 'PAM 인증 실패(sshd · su · sudo — 서비스 줄로 센다)' }),
-  R({ id: 'SEC-PAM-FAIL', cls: 'sec', severity: 'medium', re: /^pam_unix\([\w-]{1,24}:auth\): authentication failure;/,
+  R({ id: 'SEC-PAM-FAIL', srcs: AUTH_SRCS, cls: 'sec', severity: 'medium', re: /^pam_unix\([\w-]{1,24}:auth\): authentication failure;/,
     sample: 'pam_unix(vsftpd:auth): authentication failure; logname= uid=0 euid=0 tty=ftp ruser=ftpuser rhost=203.0.113.45  user=ftpuser', evidence: ['S1', 'S3'], title: 'PAM 인증 실패', kind: 'fail' }),
-  R({ id: 'SEC-SU-FAIL', cls: 'sec', severity: 'medium', re: /^FAILED SU \(to \S{1,64}\) \S{1,64} on /,
+  R({ id: 'SEC-SU-FAIL', srcs: AUTH_SRCS, cls: 'sec', severity: 'medium', re: /^FAILED SU \(to \S{1,64}\) \S{1,64} on /,
     sample: 'FAILED SU (to root) kim.ops on pts/1', evidence: ['S3'], title: 'su 실패', kind: 'fail' }),
-  R({ id: 'SEC-SUDO-FAIL', cls: 'sec', severity: 'medium', re: /^\s{0,4}\S{1,64} : (?:\d{1,3} incorrect password attempts?|user NOT in sudoers|command not allowed)/,
+  R({ id: 'SEC-SUDO-FAIL', srcs: AUTH_SRCS, cls: 'sec', severity: 'medium', re: /^\s{0,4}\S{1,64} : (?:\d{1,3} incorrect password attempts?|user NOT in sudoers|command not allowed)/,
     sample: 'kim.ops : 3 incorrect password attempts ; TTY=pts/0 ; PWD=/home/kim.ops ; USER=root ; COMMAND=/usr/bin/cat /etc/shadow', evidence: ['S2'], title: 'sudo 거부 · 비밀번호 실패', kind: 'sudofail' }),
-  R({ id: 'SEC-SUDO', cls: 'sec', severity: 'low', re: /^\s{0,4}\S{1,64} : (?:TTY=\S{1,32} ; )?PWD=.{0,256}? ; USER=\S{1,64} ; COMMAND=/,
+  R({ id: 'SEC-SUDO', srcs: AUTH_SRCS, cls: 'sec', severity: 'low', re: /^\s{0,4}\S{1,64} : (?:TTY=\S{1,32} ; )?PWD=.{0,256}? ; USER=\S{1,64} ; COMMAND=/,
     sample: 'kim.ops : TTY=pts/0 ; PWD=/home/kim.ops ; USER=root ; COMMAND=/usr/bin/systemctl restart postgresql', evidence: ['S2'], title: 'sudo 실행', kind: 'sudo' }),
-  R({ id: 'SEC-ACCOUNT', cls: 'sec', severity: 'medium', re: /^(?:new (?:user|group): name=|delete (?:user|group) '|change user '|add '[^']{1,64}' to (?:shadow )?group '|pam_unix\(passwd:chauthtok\): password changed for )/,
+  R({ id: 'SEC-ACCOUNT', srcs: AUTH_SRCS, cls: 'sec', severity: 'medium', re: /^(?:new (?:user|group): name=|delete (?:user|group) '|change user '|add '[^']{1,64}' to (?:shadow )?group '|pam_unix\(passwd:chauthtok\): password changed for )/,
     sample: 'new user: name=gpx, UID=1001, GID=1001, home=/home/gpx, shell=/bin/bash, from=/dev/pts/0', evidence: ['S3'], title: '계정 · 그룹 · 비밀번호 변경', kind: 'acct' }),
-  R({ id: 'SEC-AVC', cls: 'sec', severity: 'medium', re: /\bavc: {1,2}denied {1,2}\{/,
+  R({ id: 'SEC-AVC', srcs: ['audit'], cls: 'sec', severity: 'medium', re: /\bavc: {1,2}denied {1,2}\{/,
     sample: 'type=AVC msg=audit(1762402800.123:456): avc:  denied  { read } for  pid=1234 comm="httpd" name="secret.conf" dev="dm-0" ino=12345 scontext=system_u:system_r:httpd_t:s0 tcontext=unconfined_u:object_r:user_home_t:s0 tclass=file permissive=0',
     evidence: ['S6', 'S4'], title: 'SELinux 거부(AVC)', kind: 'avc', corr: { playbook: 'health:tuned', health: 'tuned' } }),
   // audit 인증 실패는 USER_AUTH(시도마다 한 건)만 센다 — USER_LOGIN · USER_ACCT 실패는 같은 시도의 뒤 레코드(아래 SEC-AUDIT-LOGIN-FAIL — 세지 않음).
@@ -149,25 +156,25 @@ export const LOG_RULES = Object.freeze([
   R({ id: 'SEC-AUDIT-CONFIG', cls: 'sec', severity: 'low', tag: 'audit', re: /^type=(?:CONFIG_CHANGE|DAEMON_ABORT|DAEMON_END) msg=audit\(/,
     sample: 'type=CONFIG_CHANGE msg=audit(1762402800.300:459): auid=1000 ses=3 op=remove_rule key="identity" list=4 res=1', evidence: ['S4'], title: 'audit 설정 변경 · 데몬 중단' }),
   // 포탈 로그인 실패 판정(logs/loginFailPattern.js)을 같은 정규식 객체로 — 위 sshd · PAM 전용 규칙에 안 맞는 로그인 실패 문장(‘authentication failed’ · ‘invalid user’ …).
-  R({ id: 'SEC-LOGIN-FAIL', cls: 'sec', severity: 'medium', re: LOGIN_FAIL_MSG_RE,
+  R({ id: 'SEC-LOGIN-FAIL', srcs: ['secure', 'jsec', 'journal'], cls: 'sec', severity: 'medium', re: LOGIN_FAIL_MSG_RE,
     sample: 'vsftpd: login failure for user ftpuser from 198.51.100.9', evidence: ['S5'], title: '로그인 실패(포탈 판정 재사용)', kind: 'fail' }),
 
   // ── 이슈(issue) ───────────────────────────────────────────────────────────
-  R({ id: 'ISS-RESTART-LOOP', cls: 'issue', severity: 'high', re: /^\S{1,128}\.service: Start request repeated too quickly/,
+  R({ id: 'ISS-RESTART-LOOP', srcs: ['journal'], cls: 'issue', severity: 'high', re: /^\S{1,128}\.service: Start request repeated too quickly/,
     sample: 'airflow-scheduler.service: Start request repeated too quickly.', evidence: ['D1'], title: '유닛 재시작 반복(start-limit)', corr: { playbook: 'health:units', health: 'units' } }),
-  R({ id: 'ISS-UNIT-FAIL', cls: 'issue', severity: 'medium', re: /^\S{1,128}\.(?:service|socket|mount|timer|path): Failed with result '[\w-]{1,40}'/,
+  R({ id: 'ISS-UNIT-FAIL', srcs: ['journal'], cls: 'issue', severity: 'medium', re: /^\S{1,128}\.(?:service|socket|mount|timer|path): Failed with result '[\w-]{1,40}'/,
     sample: "postgresql.service: Failed with result 'exit-code'.", evidence: ['D1'], title: '유닛 실패', corr: { playbook: 'health:units', health: 'units' } }),
-  R({ id: 'ISS-COREDUMP', cls: 'issue', severity: 'medium', re: /^Process \d{1,10} \(\S{1,64}\) of user \d{1,10} dumped core/,
+  R({ id: 'ISS-COREDUMP', srcs: ['journal'], cls: 'issue', severity: 'medium', re: /^Process \d{1,10} \(\S{1,64}\) of user \d{1,10} dumped core/,
     sample: 'Process 48112 (postgres) of user 1001 dumped core.', evidence: ['D1'], title: '코어 덤프' }),
   R({ id: 'ISS-SEGFAULT', cls: 'issue', severity: 'low', tag: 'kernel', re: /^\S{1,64}\[\d{1,10}\]: segfault at [0-9a-f]{1,16} ip [0-9a-f]{1,16}/,
     sample: 'python3[22101]: segfault at 0 ip 00007f3a1c2d4e10 sp 00007ffd3c1b2a90 error 4 in libc.so.6[7f3a1c200000+175000]', evidence: ['K1'], title: '프로세스 segfault' }),
-  R({ id: 'ISS-FS-RO', cls: 'issue', severity: 'high', re: /\bRemounting filesystem read-only\b|\bre-?mounted read-only\b/i,
+  R({ id: 'ISS-FS-RO', srcs: ['kernel', 'journal'], cls: 'issue', severity: 'high', re: /\bRemounting filesystem read-only\b|\bre-?mounted read-only\b/i,
     sample: 'EXT4-fs (dm-2): Remounting filesystem read-only', evidence: ['K1'], title: '파일시스템 읽기 전용 재마운트', corr: { playbook: 'use:disk' } }),
-  R({ id: 'ISS-DISKFULL', cls: 'issue', severity: 'high', re: /\bNo space left on device\b/,
+  R({ id: 'ISS-DISKFULL', srcs: ['journal', 'kernel'], cls: 'issue', severity: 'high', re: /\bNo space left on device\b/,
     sample: 'rsyslogd: file /var/log/messages: write error - No space left on device [v8.2102.0]', evidence: ['K1'], title: '디스크 가득(No space left)', corr: { playbook: 'use:disk' } }),
-  R({ id: 'ISS-CLOCK-STEP', cls: 'issue', severity: 'medium', re: /^System clock wrong by -?\d{1,10}(?:\.\d{1,9})? seconds|^Time has been changed$|^System clock was stepped by /,
+  R({ id: 'ISS-CLOCK-STEP', srcs: ['journal'], cls: 'issue', severity: 'medium', re: /^System clock wrong by -?\d{1,10}(?:\.\d{1,9})? seconds|^Time has been changed$|^System clock was stepped by /,
     sample: 'System clock wrong by 0.912345 seconds, adjustment started', evidence: ['D2'], title: '시각 점프 · 보정', corr: { playbook: 'health:chrony', health: 'chrony' } }),
-  R({ id: 'ISS-PKG-KERNEL', cls: 'issue', severity: 'medium', re: /\b(?:Installed|Upgraded|Upgrade): kernel(?:-core)?-\d/,
+  R({ id: 'ISS-PKG-KERNEL', srcs: ['journal'], cls: 'issue', severity: 'medium', re: /\b(?:Installed|Upgraded|Upgrade): kernel(?:-core)?-\d/,
     sample: 'Installed: kernel-5.14.0-427.el9.x86_64', evidence: ['D3'], title: '커널 패키지 설치 — 재부팅 필요 확인', corr: { playbook: 'health:uptime', health: 'uptime' } }),
 
   // ── 용도(APP — 프로파일 경로의 로그 · 분류는 위 넷 중 하나) ─────────────────────────
@@ -200,13 +207,41 @@ export const LOG_RULES = Object.freeze([
  * 파생 규칙 — 정규식이 아니라 기본 규칙 줄을 다시 묶어 만든다(classify.js). 표본은 기본 규칙의 줄이고, 테스트가 임계 수만큼 넣어 이 규칙이 생기는지 본다.
  */
 export const DERIVED_RULES = Object.freeze([
-  Object.freeze({ id: 'SEC-SSH-FAIL-BURST', cls: 'sec', severity: 'high', tag: '', grade: '○', kind: 'fail', derivedFrom: ['SEC-SSH-FAIL', 'SEC-SSH-INVALID', 'SEC-PAM-FAIL', 'SEC-LOGIN-FAIL', 'SEC-AUDIT-AUTH-FAIL', 'APP-GP-AUTH-FAIL'],
+  Object.freeze({ id: 'SEC-SSH-FAIL-BURST', cls: 'sec', severity: 'high', tag: '', grade: '○', kind: 'fail', srcs: Object.freeze(['secure', 'jsec', 'journal', 'audit', 'gpdb']), derivedFrom: ['SEC-SSH-FAIL', 'SEC-SSH-INVALID', 'SEC-PAM-FAIL', 'SEC-LOGIN-FAIL', 'SEC-AUDIT-AUTH-FAIL', 'APP-GP-AUTH-FAIL'],
     sample: 'Failed password for root from 203.0.113.45 port 51822 ssh2', evidence: ['S1', 'S5'], title: 'SSH 실패 집중(같은 IP · 창 안 임계 이상)', corr: {} }),
 ]);
 export const ALL_LOG_RULES = Object.freeze([...LOG_RULES, ...DERIVED_RULES]);
 export const LOG_RULE_IDS = Object.freeze(ALL_LOG_RULES.map((r) => r.id));
 const _byId = new Map(ALL_LOG_RULES.map((r) => [r.id, r]));
 export const logRuleById = (id) => _byId.get(String(id || '')) || null;
+
+/** 규칙 하나의 출처(태그 규칙 = 태그 · 태그 없는 규칙 = srcs). */
+export const ruleSources = (r) => (r?.tag ? [r.tag] : Array.isArray(r?.srcs) ? [...r.srcs] : []);
+/**
+ * 분류별 담는 출처(카탈로그에서 기계적으로 — 규칙을 더하면 따라 바뀐다). 보안 패널 종류별 담는 출처(view.js SEC_CARRIERS)와 같은 뜻의 분류 판.
+ *   예: 장애 = 커널 · journald(PSU) · GPDB · 성능 = 커널 · GPDB · 이슈 = journald · 커널 · GPDB · Airflow · 보안 = secure · journald 보안 · auditd · journald · GPDB.
+ */
+export const CLASS_CARRIERS = Object.freeze(Object.fromEntries(LOG_CLASSES.map((c) => {
+  const set = new Set(ALL_LOG_RULES.filter((r) => r.cls === c).flatMap(ruleSources));
+  return [c, Object.freeze(LOG_SOURCES.filter((x) => set.has(x)))];
+})));
+const NOT_THERE = new Set(['absent', 'nofile']);
+/**
+ * 분류 하나의 읽기 범위(순수) — 판정 코어는 이것 하나(상세 KPI · 시간 칸 · 함대 칸 · 봉투 요약 · 알림 입력이 같이 쓴다).
+ *   read = 이 기간(또는 주기)에 읽은 출처 집합 · statusOf = 마지막 출처 상태(없음 · 파일 없음인 출처는 ‘못 읽음’ 이 아니다 — 서버에 없는 것).
+ *   cover: all(담는 출처를 다 읽음) · partial(일부만 — 값은 내되 ‘일부 출처만’) · none(하나도 못 읽음 — 값은 0 이 아니라 모름). missing = 못 읽은 담는 출처.
+ *   secure 와 journald 보안은 서로 대신한다(AUTH_ALT — 하나를 읽었으면 다른 쪽은 빠진 것이 아니다).
+ */
+export function classCover(cls, read, statusOf = {}) {
+  const carriers = CLASS_CARRIERS[cls] || [];
+  const has = (x) => (read instanceof Set ? read.has(x) : Array.isArray(read) ? read.includes(x) : false);
+  const st = statusOf && typeof statusOf === 'object' ? statusOf : {};
+  const there = (x) => !NOT_THERE.has(typeof st[x] === 'string' ? st[x] : st[x]?.status);
+  const covered = carriers.filter(has);
+  const missing = carriers.filter((x) => !has(x) && !(AUTH_ALT[x] && has(AUTH_ALT[x])) && there(x));
+  if (!covered.length) return { cover: 'none', missing };
+  return { cover: missing.length ? 'partial' : 'all', missing };
+}
 
 /** 화면 규칙 카탈로그(정규식은 글자로 · 근거 문서 · 등급). */
 export function logRuleCatalog() {

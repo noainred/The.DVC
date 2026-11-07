@@ -49,12 +49,25 @@ export function stamp(ts, { date = true } = {}) {
   return `${date ? `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` : ''}${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** KPI 4칸(분류별 패턴 수 · 줄 수). 한 번도 읽지 않았으면 값은 ‘—’. */
+/** 못 읽은 담는 출처 이름(서버 missing — 출처 이름만). */
+const missingText = (m) => (Array.isArray(m) && m.length ? m.map((x) => SRC_LABEL[x] || x).join(' · ') : '');
+/**
+ * 분류 칸의 읽기 범위 덧말(서버 cover — 판정은 rules.js classCover · 웹은 글자만): none = 담는 출처를 하나도 못 읽음(값 ‘—’) · partial = 일부 출처만(값은 낸다).
+ */
+export function coverNote(k) {
+  if (!k || typeof k !== 'object') return '';
+  if (k.cover === 'none') return `모름 — 담는 출처를 못 읽음${missingText(k.missing) ? `: ${missingText(k.missing)}` : '(그 출처가 이 서버에 없음)'}`;
+  if (k.cover === 'partial') return `일부 출처만 — 못 읽음: ${missingText(k.missing) || '—'}`;
+  return '';
+}
+/** KPI 4칸(분류별 패턴 수 · 줄 수). 한 번도 읽지 않았거나 그 분류를 담는 출처를 못 읽었으면 값은 ‘—’(0 이 아니다). */
 export function kpiCards(resp) {
   const never = !!resp?.read?.never;
   return CLASS_ORDER.map((c) => {
     const k = resp?.kpi?.[c] || {};
-    return { key: c, label: CLASS_TEXT[c].label, color: CLASS_TEXT[c].color, value: never ? '—' : numText(k.patterns), sub: never ? '아직 읽지 않음' : `패턴 ${numText(k.patterns)} · 줄 ${numText(k.lines)}`, desc: CLASS_TEXT[c].desc };
+    // 못 읽은 분류는 서버가 patterns · lines 를 null 로 보낸다(‘—’) — 웹은 다시 판정하지 않고 이유 글만 붙인다
+    return { key: c, label: CLASS_TEXT[c].label, color: CLASS_TEXT[c].color, value: never ? '—' : numText(k.patterns),
+      sub: never ? '아직 읽지 않음' : `패턴 ${numText(k.patterns)} · 줄 ${numText(k.lines)}`, cover: never ? '' : coverNote(k), partial: k.cover === 'partial', desc: CLASS_TEXT[c].desc };
   });
 }
 /** 권한 없음의 범위(서버 scope) → 칩 덧말. */
@@ -196,11 +209,16 @@ export function methodLines(m = {}) {
 }
 
 /* ── 함대 ─────────────────────────────────────────────────────────────── */
+/** 함대 KPI 덧말 — 그 분류를 담는 출처를 못 읽은 서버 · 일부만 읽은 서버 수(서버 kpi.unknown · partial — 0 · 정상 쪽에 넣지 않는다). */
+export function unknownText(k = {}, c) {
+  const u = n(k?.unknown?.[c]); const p = n(k?.partial?.[c]);
+  return [u > 0 ? ` · 모름 ${numText(u)}대(담는 출처 못 읽음)` : '', p > 0 ? ` · 일부 출처만 ${numText(p)}대` : ''].join('');
+}
 export function fleetKpiCards(resp) {
   const k = resp?.kpi || {};
   return [
-    { key: 'fault', label: '로그 장애 서버', value: numText(k.faultServers), tone: n(k.faultServers) ? 'bad' : 'idle', sub: '24시간 장애 분류 줄이 있는 서버' },
-    { key: 'sec', label: '보안 high 서버', value: numText(k.secHighServers), tone: n(k.secHighServers) ? 'bad' : 'idle', sub: '24시간 보안 high 이상(집중 포함)' },
+    { key: 'fault', label: '로그 장애 서버', value: numText(k.faultServers), tone: n(k.faultServers) ? 'bad' : 'idle', sub: `24시간 장애 분류 줄이 있는 서버${unknownText(k, 'fault')}` },
+    { key: 'sec', label: '보안 high 서버', value: numText(k.secHighServers), tone: n(k.secHighServers) ? 'bad' : 'idle', sub: `24시간 보안 high 이상(집중 포함)${unknownText(k, 'sec')}` },
     { key: 'servers', label: '요약이 있는 서버', value: numText(k.servers), tone: 'idle', sub: `못 읽음 ${numText(k.unread)} · 잘림 있음 ${numText(k.truncated)}` },
     { key: 'common', label: '공통 원인 후보', value: numText(resp?.common?.length), tone: (resp?.common?.length || 0) ? 'warn' : 'idle', sub: '같은 규칙 · 같은 시간대 여러 서버(후보 — 원인 확정 아님)' },
   ];
@@ -221,17 +239,15 @@ export function fleetFilter(rows = [], { corp = '', cls = '', rule = '', q = '' 
     && (!qq || String(r.name || '').toLowerCase().includes(qq) || String(r.key || '').toLowerCase().includes(qq)));
 }
 /**
- * 함대 표 분류 칸(순수). 24시간 못 읽은 서버는 ‘—’. ‘보안’ 칸은 보안 줄을 담는 출처(secure · journald 보안 · auditd)를 하나도 못 읽었으면
- *   0 이 아니라 ‘—’(줄이 있으면 다른 출처의 부분 — 서버 secRead · 반증 F1). secRead 가 없는(예전 판) 행은 그대로 그린다.
+ * 함대 표 분류 칸(순수). 24시간 못 읽은 서버 · 그 분류를 담는 출처를 하나도 못 읽은 서버는 ‘—’(0 이 아니라 모름 — 서버 cover) ·
+ *   일부 출처만 읽었으면 값 + ‘일부’ 표시. cover 가 없는(예전 판) 행은 그대로 그린다.
  */
 export function fleetClsCell(r = {}, c) {
   if (!r?.wasRead) return { text: '—', sub: '', title: '24시간 안에 이 서버의 로그를 읽지 못했습니다(0 이 아닙니다).', partial: false };
-  const lines = n(r.cls?.[c]?.lines);
-  if (c === 'sec' && r.secRead === false) {
-    if (!lines) return { text: '—', sub: '', title: '보안 줄을 담는 출처(/var/log/secure · journald 보안 · auditd)를 24시간 안에 하나도 읽지 못했습니다 — 0 이 아니라 모름입니다.', partial: false };
-    return { text: numText(r.cls?.[c]?.patterns), sub: `줄 ${numText(lines)} · 부분`, title: '보안 출처를 못 읽어 다른 출처(용도 로그 등)에서 본 부분만입니다.', partial: true };
-  }
-  return { text: numText(r.cls?.[c]?.patterns), sub: `줄 ${numText(lines)}`, title: '', partial: false };
+  const k = r.cls?.[c] || {};
+  if (k.cover === 'none') return { text: '—', sub: '', title: coverNote(k), partial: false };
+  const partial = k.cover === 'partial';
+  return { text: numText(k.patterns), sub: `줄 ${numText(k.lines)}${partial ? ' · 일부' : ''}`, title: partial ? coverNote(k) : '', partial };
 }
 export function topRuleText(top = []) {
   return (Array.isArray(top) ? top : []).slice(0, 3).map((p) => `${p.ruleId || '(묶음)'} ${numText(p.count)}`).join(' · ') || '—';

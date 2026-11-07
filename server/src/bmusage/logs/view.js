@@ -9,7 +9,7 @@
  */
 import { config } from '../../config.js';
 import { SEVERITY_RANK } from '../../loganalysis/rules.js';
-import { LOG_CLASSES, CLASS_LABEL, logRuleById, logRuleCatalog, LOG_EVIDENCE, LOG_SOURCES } from './rules.js';
+import { LOG_CLASSES, CLASS_LABEL, logRuleById, logRuleCatalog, LOG_EVIDENCE, LOG_SOURCES, CLASS_CARRIERS, classCover } from './rules.js';
 import { LOG_SECTIONS, FIRST_SINCE_MIN, FIRST_FILE_LINES, FIRST_FILE_BYTES, LINE_WIDTH, APP_LOGS, AUTH_IDENTS, SRC_BYTES } from './command.js';
 import { logServerQuery, logFleetQuery } from './store.js';
 import { HOUR, FRESH_MS, maskStoredTmpl } from './classify.js';
@@ -76,13 +76,13 @@ export async function localLogView({ key, range = '24h', agent = config.agent?.n
   if (!q) return { ok: false, code: 'store-unavailable', reason: '이 노드의 베어메탈 DB 를 열지 못했습니다.' };
   // 시간 칸 · 읽은 양 · 패턴 기간 횟수
   const slots = new Map();
-  for (let h = from; h <= to; h += HOUR) slots.set(h, { t: h, read: false, fault: 0, perf: 0, sec: 0, issue: 0 });
+  for (let h = from; h <= to; h += HOUR) slots.set(h, { t: h, read: false, srcs: new Set(), fault: 0, perf: 0, sec: 0, issue: 0 });
   const winCount = new Map(); const winFirst = new Map(); const winLast = new Map();
   let lines = 0; let truncated = 0; let none = 0; let undated = 0;
   const bySrc = {};
   for (const r of q.hourRows) {
     const s = slots.get(Number(r.hour)); const c = Number(r.count) || 0;
-    if (r.cls === 'read') { if (s) s.read = true; lines += c; const src = String(r.sig).slice(6); const b = (bySrc[src] ||= { read: 0, truncated: 0, none: 0 }); b.read += c; b.wasRead = true; continue; }
+    if (r.cls === 'read') { const src = String(r.sig).slice(6); if (s) { s.read = true; s.srcs.add(src); } lines += c; const b = (bySrc[src] ||= { read: 0, truncated: 0, none: 0 }); b.read += c; b.wasRead = true; continue; }
     if (r.cls === 'trunc') { truncated += c; const src = String(r.sig).slice(7); (bySrc[src] ||= { read: 0, truncated: 0, none: 0 }).truncated += c; continue; }
     if (r.cls === 'none') { none += c; const src = String(r.sig).slice(6); (bySrc[src] ||= { read: 0, truncated: 0, none: 0 }).none += c; continue; }
     if (r.cls === 'undated') { undated += c; const src = String(r.sig).slice(9); (bySrc[src] ||= { read: 0, truncated: 0, none: 0 }).undated = (bySrc[src].undated || 0) + c; continue; }
@@ -91,8 +91,17 @@ export async function localLogView({ key, range = '24h', agent = config.agent?.n
     if (!winFirst.has(r.sig)) winFirst.set(r.sig, Number(r.hour));
     winLast.set(r.sig, Number(r.hour));
   }
-  const hourly = [...slots.values()].map((s) => (s.read || s.fault || s.perf || s.sec || s.issue ? { t: s.t, fault: s.fault, perf: s.perf, sec: s.sec, issue: s.issue } : { t: s.t, fault: null, perf: null, sec: null, issue: null }));
+  const st = q.cursor?.status || null;
+  const statusOf = st?.sources || {};
+  // 분류별 읽기 범위(rules.js classCover — 판정 코어 하나): 그 분류를 담는 출처를 그 시간 · 기간에 하나도 못 읽었으면 0 이 아니라 null(모름 · 추가 수정 — F1 과 같은 유형).
+  const hourly = [...slots.values()].map((s) => {
+    const o = { t: s.t };
+    for (const c of LOG_CLASSES) o[c] = s[c] > 0 ? s[c] : s.read && classCover(c, s.srcs, statusOf).cover !== 'none' ? s[c] : null;
+    return o;
+  });
+  const readAll = new Set(Object.entries(bySrc).filter(([, v]) => v.wasRead).map(([k]) => k));
   const kpi = emptyCls();
+  const kpiCover = Object.fromEntries(LOG_CLASSES.map((c) => [c, classCover(c, readAll, statusOf)]));
   const changes = ops?.changes || []; const focus = ops?.focus || [];
   const patterns = [];
   for (const [sig, n] of winCount) {
@@ -114,13 +123,16 @@ export async function localLogView({ key, range = '24h', agent = config.agent?.n
     });
   }
   patterns.sort((a, b) => sevRank(b.severity) - sevRank(a.severity) || b.count - a.count || (b.last || 0) - (a.last || 0));
-  const st = q.cursor?.status || null;
+  for (const c of LOG_CLASSES) {
+    const cv = kpiCover[c];
+    kpi[c] = cv.cover === 'none' && !kpi[c].lines ? { patterns: null, lines: null, cover: 'none', missing: cv.missing } : { ...kpi[c], cover: cv.cover, missing: cv.missing };
+  }
   // 보안 합계 — 그 종류를 담을 수 있는 출처(SEC_CARRIERS)를 이 기간에 읽었을 때만 0 이 될 수 있다 · 못 읽었으면 null + 이유(반증 F1).
   const wasReadBy = Object.fromEntries(Object.entries(bySrc).map(([k, v]) => [k, { read: v.wasRead ? v.read : null }]));
   const { totals: secTotals, why: secWhy } = secTotalsOf(q.secTotals || {}, wasReadBy, st?.sources || null);
   return {
     ok: true, key, range: rg, from, to: to + HOUR - 1, agent,
-    kpi, classLabel: CLASS_LABEL,
+    kpi, classLabel: CLASS_LABEL, classCarriers: CLASS_CARRIERS,
     read: { lines, truncated, none, undated, bySrc, authSrc: st?.authSrc ?? null, at: q.cursor?.at ?? null, lineCap: st?.lineCap ?? cfg.lineCap ?? null, sources: st?.sources || null, ended: st ? st.ended !== false : null, cut: st?.cut || null,
       ...(st?.cursorReset ? { cursorReset: st.cursorReset } : {}), ...(q.cursor?.corruptKept ? { corruptKept: true } : {}), ...(q.cursor ? {} : { never: true }) },
     hourly,
@@ -162,15 +174,14 @@ export async function refreshLogSummary({ agent = config.agent?.name || '', now 
   const maybeYield = createYielder(15);   // 조립도 서버 수 × 서명 수 — 시간 기준 양보(이벤트 루프를 한 번에 붙잡지 않게)
   if (!q) { _sum = { at: now, since, list: null, error: 'db-unavailable' }; return _sum; }
   const byKey = new Map();
-  const get = (k) => { if (!byKey.has(k)) byKey.set(k, { key: k, wasRead: false, secRead: false, cls: emptyCls(), none: 0, read: 0, trunc: 0, secHigh: 0, top: [], at: null, status: null }); return byKey.get(k); };
-  const SEC_SRCS = new Set(['#read:secure', '#read:jsec', '#read:audit']);   // 보안 줄을 담는 출처(SEC_CARRIERS 의 합집합) — 하나도 못 읽었으면 함대 ‘보안’ 칸은 0 이 아니라 모름(반증 F1)
+  const get = (k) => { if (!byKey.has(k)) byKey.set(k, { key: k, wasRead: false, readSrcs: new Set(), cls: emptyCls(), none: 0, read: 0, trunc: 0, secHigh: 0, top: [], at: null, status: null }); return byKey.get(k); };
   const meta = new Map(q.metas.map((m) => [`${m.key}|${m.sig}`, m]));
   const sigN = new Map();
   let ri = 0;
   for (const r of q.rows) {
     if ((ri++ & 1023) === 0) await maybeYield();
     const e = get(r.key); const c = Number(r.c) || 0;
-    if (r.cls === 'read') { e.read += c; e.wasRead = true; if (SEC_SRCS.has(r.sig)) e.secRead = true; continue; }   // 읽었는데 0줄(read 0)과 못 읽음(wasRead false)을 가른다
+    if (r.cls === 'read') { e.read += c; e.wasRead = true; e.readSrcs.add(String(r.sig).slice(6)); continue; }   // 읽었는데 0줄(read 0)과 못 읽음(wasRead false)을 가른다
     if (r.cls === 'trunc') { e.trunc += c; continue; }
     if (r.cls === 'none') { e.none += c; continue; }
     if (r.cls === 'undated') { e.undated = (e.undated || 0) + c; continue; }
@@ -190,7 +201,16 @@ export async function refreshLogSummary({ agent = config.agent?.name || '', now 
     e.top.push({ sig: m.sig, ruleId: m.rule_id || '', cls: m.cls, severity: m.severity || 'info', count: n.c, last: Number(m.last) || n.h, src: m.src || '', unit: m.unit || '', tmpl: maskStoredTmpl(m.cls, m.tmpl || ''), sample: smp ? smp.text : '' });
   }
   for (const c of q.curs) { const e = get(c.key); e.at = c.at; e.status = c.status ? { sources: Object.fromEntries(Object.entries(c.status.sources || {}).map(([s, x]) => [s, x?.status || null])), ended: c.status.ended !== false } : null; }
-  for (const e of byKey.values()) { e.top.sort((a, b) => sevRank(b.severity) - sevRank(a.severity) || b.count - a.count); e.top = e.top.slice(0, TOP_MAX); }
+  for (const e of byKey.values()) {
+    e.top.sort((a, b) => sevRank(b.severity) - sevRank(a.severity) || b.count - a.count); e.top = e.top.slice(0, TOP_MAX);
+    // 분류별 읽기 범위(24시간 안 읽은 출처 · 마지막 출처 상태) — 못 읽은 분류 칸은 null(함대 표 · 봉투 · 함대 KPI 가 같은 값을 쓴다)
+    const statusOf = e.status?.sources || {};
+    for (const c of LOG_CLASSES) {
+      const cv = classCover(c, e.readSrcs, statusOf);
+      e.cls[c] = cv.cover === 'none' && !e.cls[c].lines ? { patterns: null, lines: null, cover: 'none', missing: cv.missing } : { ...e.cls[c], cover: cv.cover, missing: cv.missing };
+    }
+    delete e.readSrcs;
+  }
   _sum = { at: now, since, list: [...byKey.values()] };
   return _sum;
 }

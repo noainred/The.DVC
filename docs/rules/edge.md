@@ -840,6 +840,7 @@
     **중앙 자기 것**(정적 — 엣지가 보낸 정규식 글자를 싣지 않는다 · `rulesFrom: 'central'`) · `method`(구획은 `LOG_SECTIONS` 안만 · 출처 · 식별자 · 앱 경로는 꼴 검사 · 주기 `intervalMs`) ·
     출처 상태의 화면 칸(scope · partial · first · older · undated · skew · dup · authSkipped · uid · groups · svc …) · `security.totalsWhy` · `read.authSrc` · `corrSource`. 회귀는 **로컬 응답의 키 경로 ⊆ 대행 응답의 키 경로**
     (실제 왕복 + 풍부한 응답의 정제)를 대조하고 화면이 쓰는 칸을 값으로 단언한다. 서명은 정제에서 `maskStoredTmpl` 로 다시 가린다.
+    봉투 요약 · 상세의 분류별 개수에는 읽기 범위(`cover` all|partial|none · `missing` — 출처 열거만)가 함께 실린다(못 읽은 분류는 개수 null) — 정제가 버리면 중앙 화면이 ‘모름’ 을 0 으로 그린다(테스트).
   - **최소 엣지 버전**: `stage7aMinEdgeVersion`(`STAGE7A_TITLE_RE = /리눅스 통합 성능 모니터링 7a단계/` — 릴리스 노트 첫 게시 번호 · 없으면 지금 판 · 숫자를 박지 않는다) · 구버전(경로 없음 → 401/404) = old-version.
     함대 표는 노드마다 상태(ok · old-version · no-cycle · none)를 말한다.
 - ⚠⚠ **v2.929 — 베어메탈 성능 5단계의 엣지 대행: 판정 · 발송 · 보관은 수집 노드(엣지), 중앙은 요약을 봉투로 받고 상세는 볼 때 당긴다**

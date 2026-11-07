@@ -98,14 +98,18 @@ describe('7a 반증 — 권한 · 보안 합계 · 주기 숫자(F1 · F2 · F3 
     const src = fs.readFileSync(path.join(HERE, 'bmLogsText.js'), 'utf8');
     expect(src).not.toMatch(/['`][^'`\n]{0,40}\d+분 주기/);
   });
-  it('함대 보안 칸 — 보안 출처를 하나도 못 읽었으면 ‘—’(0 아님) · 다른 출처 줄이 있으면 부분 · 못 읽은 서버는 ‘—’', () => {
-    const base = { wasRead: true, cls: { sec: { patterns: 0, lines: 0 }, fault: { patterns: 1, lines: 2 } } };
-    expect(T.fleetClsCell({ ...base, secRead: false }, 'sec').text).toBe('—');
-    expect(T.fleetClsCell({ ...base, secRead: false }, 'fault').text).toBe('1');
-    expect(T.fleetClsCell({ ...base, secRead: true }, 'sec').text).toBe('0');
-    const p = T.fleetClsCell({ wasRead: true, secRead: false, cls: { sec: { patterns: 1, lines: 3 } } }, 'sec');
-    expect(p.partial).toBe(true); expect(p.sub).toContain('부분');
+  it('분류 칸 읽기 범위(추가 수정) — 담는 출처를 하나도 못 읽었으면 ‘—’(0 아님) · 일부면 값 + ‘일부’ · 못 읽은 서버는 ‘—’ · KPI 도 같다', () => {
+    const base = { wasRead: true, cls: { sec: { patterns: null, lines: null, cover: 'none', missing: ['jsec', 'secure', 'audit'] }, fault: { patterns: 1, lines: 2, cover: 'partial', missing: ['journal'] }, perf: { patterns: 0, lines: 0, cover: 'all', missing: [] } } };
+    expect(T.fleetClsCell(base, 'sec').text).toBe('—'); expect(T.fleetClsCell(base, 'sec').title).toContain('/var/log/secure');
+    const f = T.fleetClsCell(base, 'fault'); expect(f.text).toBe('1'); expect(f.partial).toBe(true); expect(f.sub).toContain('일부'); expect(f.title).toContain('journald');
+    expect(T.fleetClsCell(base, 'perf').text).toBe('0');
     expect(T.fleetClsCell({ wasRead: false }, 'sec').text).toBe('—');
+    expect(T.fleetClsCell({ wasRead: true, cls: { sec: { patterns: 0, lines: 0 } } }, 'sec').text).toBe('0', 'cover 없는 예전 판 행은 그대로');
+    const k = T.kpiCards({ kpi: base.cls, read: {} });
+    expect(k.find((x) => x.key === 'sec').value).toBe('—'); expect(k.find((x) => x.key === 'sec').cover).toContain('모름');
+    expect(k.find((x) => x.key === 'fault').cover).toContain('일부 출처만');
+    expect(T.coverNote({ cover: 'none', missing: [] })).toContain('이 서버에 없음');
+    expect(T.unknownText({ unknown: { fault: 2 }, partial: { fault: 3 } }, 'fault')).toBe(' · 모름 2대(담는 출처 못 읽음) · 일부 출처만 3대');
   });
   it('범위 밖 노드 수(F10)', () => {
     expect(T.nodeNotes([], 2)).toEqual(['조회 범위 밖 노드 2곳은 싣지 않았습니다.']);

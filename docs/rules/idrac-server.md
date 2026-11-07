@@ -594,6 +594,10 @@
     자기 상한 · 원문 보관 없음). 한 주기에 보안 줄은 **한 출처만** 센다(`pickAuthSource`): `/var/log/secure`(읽음 · rsyslog 가 돌거나 모름 — 설계 §17 이 이름을 댄 출처 · authpriv 전체) → JSEC(읽음 —
     자기 저널만은 읽음이 아님) → auditd(인증 실패 · 계정 변경). 고르지 않은 JSEC 줄은 `dup` 으로 세고 빼며, auditd 의 같은 사건은 패턴만 남기고 보안 상위에 넣지 않는다 · 주 저널의 같은 식별자 줄은 `authSkipped`.
     보안 합계는 **그 종류를 담는 출처를 그 기간에 읽었을 때만 0**(`view.js SEC_CARRIERS` — 실패 · 계정 변경 = secure|jsec|audit · 성공 · root · sudo = secure|jsec · AVC = audit) — 아니면 null + 이유(`totalsWhy`).
+  - **분류별 담는 출처**(7a 반증 뒤 추가 수정 — ‘못 읽은 값은 0 이 아니다’): `rules.js CLASS_CARRIERS` 는 규칙 카탈로그에서 **기계적으로** 뽑는다(태그 규칙 = 태그 · 태그 없는 규칙 = `srcs` —
+    매칭에는 쓰지 않는다 · 테스트가 합집합을 대조). 판정 코어 `classCover(분류, 읽은 출처, 마지막 상태)` 하나: 담는 출처를 하나도 못 읽음 = `none`(값 null · 이유 = 못 읽은 출처) ·
+    일부 = `partial`(값은 내고 ‘일부 출처만’) · 전부 = `all`. 서버에 없는 출처(absent · nofile)는 못 읽음이 아니고, secure 와 journald 보안은 서로 대신한다.
+    쓰는 곳 전부: 상세 KPI 4 · 시간 칸(그 시간 읽은 출처로 분류마다 null) · 함대 요약 · 봉투 · 함대 표 칸 · 함대 KPI(`kpi.unknown` · `kpi.partial` 서버 수) · 알림 입력(`cover` — none 이면 보류, 해소로 보지 않는다).
   - **구획 위조 방지**: 모든 내용 줄에 고정 접두(`J| Q| K| S| A| G| F|`) · 메타 `X#k=v` · journalctl 자기 줄은 글자 없이 표지(`J#err`) — 로그 줄 ‘##END’ · ‘J#cur=…’ 가 구획 · 커서를 바꾸지 못한다(실제 셸 테스트).
     **명령 조립 값**(커서 · boot_id · 초 · inode · offset)은 화이트리스트 정규식(`CURSOR_RE` 등)을 지난 것만 — 아니면 첫 읽기 꼴. 용도 로그 경로는 **상수 카탈로그만**(`APP_LOGS` — `_paths` 는 테스트 전용, 소스 스윕).
   - **분류**: 규칙 = 파일 하나(`rules.js` — 정규식 · 분류 4 · 심각도(엔진 SEVERITY_RANK) · 출처 태그 · 표본 1줄 · 근거 번호 · 등급 · 연계 표지). 엔진은 `loganalysis` 의 `normalizeRules` · `indexRules`(태그 규칙 → 태그 없는 규칙,

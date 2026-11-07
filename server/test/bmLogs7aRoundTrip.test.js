@@ -61,11 +61,16 @@ test('① 성공 왕복 — 봉투(logsVer · logSummary) · 상세(pullEdgeLogs
   assert.ok(row, '정제를 지나 요약이 남는다');
   assert.equal(row.wasRead, true); assert.equal(row.cls.issue.lines, 1); assert.equal(row.status.sources.secure, 'perm', '권한 없음은 출처 상태로(0 이 아니다)');
   assert.equal(row.top[0].ruleId, 'ISS-UNIT-FAIL');
-  assert.equal(row.secRead, false, '보안 출처(secure · journald 보안 · auditd)를 못 읽었다 — 함대 ‘보안’ 칸은 0 이 아니라 모름(반증 F1)');
+  // 분류별 읽기 범위(추가 수정) — 봉투 요약에 cover · 못 읽은 담는 출처가 실린다(정제를 지나도)
+  assert.equal(row.cls.sec.cover, 'partial', 'journald 만 읽음 — 보안은 일부 출처만'); assert.deepEqual(row.cls.sec.missing, ['jsec', 'secure', 'audit']);
+  assert.equal(row.cls.fault.cover, 'all'); assert.equal(row.cls.issue.lines, 1);
+  assert.equal(row.cls.perf.cover, 'none'); assert.equal(row.cls.perf.patterns, null, '성능을 담는 출처(커널 · GPDB)를 못 읽었다 — 0 이 아니라 모름');
   // 상세 대행 — bodyOk 명시(기본 판정이면 bad-body 였다)
   const d = await L.pullEdgeLogs('log-edge', { key: 'RTAGA1', range: '24h' });
   assert.equal(d.ok, true, JSON.stringify(d).slice(0, 300));
   assert.equal(d.body.kpi.issue.lines, 1);
+  assert.equal(d.body.kpi.perf.patterns, null); assert.equal(d.body.kpi.perf.cover, 'none'); assert.equal(d.body.kpi.sec.cover, 'partial');
+  assert.ok(d.body.hourly.every((h) => h.perf == null), '성능 시간 칸도 모름(null) — 0 으로 그리지 않는다');
   assert.equal(d.body.read.sources.secure.status, 'perm');
   assert.equal(d.body.patterns[0].ruleId, 'ISS-UNIT-FAIL');
   assert.ok(Array.isArray(d.body.hourly) && d.body.hourly.length === 24);
@@ -107,6 +112,8 @@ test('① 성공 왕복 — 봉투(logsVer · logSummary) · 상세(pullEdgeLogs
   assert.ok(sr.security.fail_ip.length && sr.security.bursts.length, '보안 상위 · 집중');
   assert.equal(sr.read.sources.journal.partial, 'timeout'); assert.equal(sr.read.sources.kernel.older, 7); assert.equal(sr.read.sources.secure.partial, 12);
   assert.equal(sr.read.bySrc.journal.undated, 1, '시각 모름(40일 전)은 분류하지 않고 센다');
+  assert.equal(sr.kpi.fault.cover, 'partial'); assert.deepEqual(sr.kpi.fault.missing, ['gpdb'], 'GPDB 로그 폴더 권한 없음 — 장애 · 성능 · 이슈는 일부 출처만');
+  assert.deepEqual(sr.classCarriers, lr.classCarriers);
   const nf = await L.pullEdgeLogs('log-edge', { key: 'NOPE' });
   assert.equal(nf.ok, false); assert.notEqual(nf.kind, 'bad-body', '대상 밖 키는 엣지가 404 로 답한다(왕복 성공)');
 });

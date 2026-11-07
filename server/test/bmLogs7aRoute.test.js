@@ -159,6 +159,21 @@ test('반증 F10 — 범위 계정의 함대 응답에는 자기 범위 대상�
   assert.equal(all.nodes.length, 4); assert.equal(all.nodesOmitted, undefined);
 });
 
+test('함대 KPI(추가 수정) — 분류를 담는 출처를 못 읽은 서버 · 일부만 읽은 서버를 따로 센다(0 · 정상 쪽에 넣지 않는다)', async () => {
+  const R = await import('../src/routes/api/bmLogs.js');
+  const row = (key, cls) => ({ key, wasRead: true, cls, top: [], secHigh: 0, status: { sources: {} } });
+  const list = [
+    row('L-1', { fault: { patterns: 0, lines: 0, cover: 'partial', missing: ['journal'] }, perf: { patterns: 0, lines: 0, cover: 'all', missing: [] }, sec: { patterns: null, lines: null, cover: 'none', missing: ['secure'] }, issue: { patterns: 0, lines: 0, cover: 'partial', missing: ['journal'] } }),
+    row('L-2', { fault: { patterns: 1, lines: 2, cover: 'all', missing: [] }, perf: { patterns: 0, lines: 0, cover: 'all', missing: [] }, sec: { patterns: 0, lines: 0, cover: 'all', missing: [] }, issue: { patterns: 0, lines: 0, cover: 'all', missing: [] } }),
+  ];
+  const deps = { listEdgeBmUsage: async () => [], summary: async () => ({ at: NOW, list }), currentTargets: async () => ({ targets: [{ key: 'L-1', name: 'l1', vcenterId: 'vcA' }, { key: 'L-2', name: 'l2', vcenterId: 'vcA' }] }), bmAddressHosts: async () => [] };
+  const r = await R.bmLogsFleet({ user: { username: 'adm', role: 'admin', scope: null } }, { vcenters: [{ id: 'vcA' }] }, deps);
+  assert.deepEqual(r.kpi.unknown, { fault: 0, perf: 0, sec: 1, issue: 0 });
+  assert.deepEqual(r.kpi.partial, { fault: 1, perf: 0, sec: 0, issue: 1 });
+  assert.equal(r.kpi.faultServers, 1);
+  assert.equal(r.servers.find((x) => x.key === 'L-1').cls.sec.patterns, null, '못 읽은 분류 칸은 null 그대로');
+});
+
 test('비관리자 계정 꼴 가림(maskAccountForms) — role "x" · user=x · acct="x" 는 토큰(같은 값은 같은 토큰)', async () => {
   const { maskAccountForms } = await import('../src/routes/api/bmLogs.js');
   const a = maskAccountForms('FATAL: role "bob" does not exist; user=bob acct="bob"');

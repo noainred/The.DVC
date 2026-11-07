@@ -139,6 +139,7 @@ test('비교 후 쓰기에서 진 서버(conflicts)는 알림 입력에서도 �
   assert.equal(st.conflicts, 1); assert.equal(st.written, 1);
   assert.ok(RUN.logAlertInputs().has('KA'), '쓴 서버는 알림 입력'); assert.equal(RUN.logAlertInputs().has('KB'), false, '진 서버는 빠진다');
   assert.equal(RUN.logAlertInputs().get('KA').faultLines, 1);
+  assert.deepEqual(RUN.logAlertInputs().get('KA').cover, { fault: 'all', sec: 'none' }, '알림 입력에 이번 주기 분류별 읽기 범위(커널만 읽음 — 보안은 모름)');
 });
 
 test('알림 규칙 ‘logs’ — 못 읽음 = 보류(null) · 장애 · 보안 high · 조건 선택 · perfRules 정규화', async () => {
@@ -150,6 +151,12 @@ test('알림 규칙 ‘logs’ — 못 읽음 = 보류(null) · 장애 · 보안
   assert.equal(A.ruleCondition('logs', { logs: { read: true, faultLines: 0, secHigh: 0 } }, { cond: 'fault-sec' }), false);
   assert.equal(A.ruleCondition('logs', { logs: { read: true, faultLines: 1, secHigh: 0 } }, { cond: 'sec' }), false);
   assert.equal(A.ruleCondition('logs', { logs: { read: true, faultLines: 0, secHigh: 25 } }, { cond: 'sec' }), true);
+  // 추가 수정 — 그 분류를 담는 출처를 이번 주기에 하나도 못 읽었으면 ‘없음(해소)’ 이 아니라 보류 · 일부만 읽었으면 읽은 쪽으로 판정
+  assert.equal(A.ruleCondition('logs', { logs: { read: true, faultLines: 0, secHigh: 0, cover: { fault: 'all', sec: 'none' } } }, { cond: 'sec' }), null, '보안 출처를 못 읽은 주기는 해소가 아니다');
+  assert.equal(A.ruleCondition('logs', { logs: { read: true, faultLines: 0, secHigh: 0, cover: { fault: 'none', sec: 'all' } } }, { cond: 'fault' }), null);
+  assert.equal(A.ruleCondition('logs', { logs: { read: true, faultLines: 0, secHigh: 0, cover: { fault: 'all', sec: 'none' } } }, { cond: 'fault-sec' }), null);
+  assert.equal(A.ruleCondition('logs', { logs: { read: true, faultLines: 2, secHigh: 0, cover: { fault: 'all', sec: 'none' } } }, { cond: 'fault-sec' }), true, '읽은 쪽에 있으면 참');
+  assert.equal(A.ruleCondition('logs', { logs: { read: true, faultLines: 0, secHigh: 0, cover: { fault: 'partial', sec: 'partial' } } }, { cond: 'fault-sec' }), false, '일부만 읽음 = 읽은 쪽으로 판정');
   const al = A.perfAlertOf({ rule: 'logs', key: 'k', name: 'n', vcenterId: '', ctx: { logs: { read: true, faultLines: 0, secHigh: 25, bursts: 1 } } });
   assert.ok(!al.title.includes('**') && al.title.includes('SSH 실패 집중'));
   // 설정 — 기본 켬 · 범위 밖은 400(저장) · 기본값(읽기)

@@ -249,3 +249,22 @@ test('보안 합계(반증 F1) — 그 종류를 담는 출처를 읽었을 때�
   const partial = V.secTotalsOf({ fail_ip: 2 }, { journal: { read: 1 } }, null);
   assert.equal(partial.totals.fail_ip, null); assert.equal(partial.why.fail_ip.partial, 2, '다른 출처에서 센 수는 부분 합으로만');
 });
+
+test('분류별 담는 출처(추가 수정) — 카탈로그에서 기계적으로 · 모든 규칙에 출처 · classCover(없음 · 일부 · 전부 · 서버에 없는 출처 · secure↔journald 보안)', () => {
+  for (const r of R.ALL_LOG_RULES) {
+    const s = R.ruleSources(r);
+    assert.ok(s.length > 0, `${r.id} 출처(태그 또는 srcs)`);
+    for (const x of s) assert.ok(R.LOG_SOURCES.includes(x), `${r.id} 출처 ${x}`);
+  }
+  for (const c of R.LOG_CLASSES) {
+    const union = new Set(R.ALL_LOG_RULES.filter((r) => r.cls === c).flatMap(R.ruleSources));
+    assert.deepEqual([...R.CLASS_CARRIERS[c]].sort(), [...union].sort(), `${c} 담는 출처 = 규칙 출처 합집합`);
+  }
+  assert.ok(R.CLASS_CARRIERS.fault.includes('kernel') && R.CLASS_CARRIERS.issue.includes('journal') && R.CLASS_CARRIERS.perf.includes('kernel'));
+  assert.deepEqual(R.classCover('issue', new Set(), { journal: 'perm', kernel: 'perm', gpdb: 'absent', airflow: 'absent' }), { cover: 'none', missing: ['journal', 'kernel'] });
+  assert.deepEqual(R.classCover('issue', new Set(['kernel']), { journal: 'perm', gpdb: 'absent', airflow: 'nofile' }), { cover: 'partial', missing: ['journal'] });
+  assert.deepEqual(R.classCover('perf', new Set(['kernel']), { gpdb: 'absent' }), { cover: 'all', missing: [] }, '서버에 없는 출처(GPDB 미설치)는 못 읽음이 아니다');
+  assert.deepEqual(R.classCover('sec', new Set(['secure', 'journal']), { jsec: 'perm', audit: { status: 'absent' }, gpdb: 'absent' }), { cover: 'all', missing: [] }, 'secure 를 읽었으면 journald 보안은 빠진 것이 아니다');
+  assert.deepEqual(R.classCover('sec', new Set(['journal']), { jsec: 'perm', secure: 'perm', audit: 'perm', gpdb: 'absent' }), { cover: 'partial', missing: ['jsec', 'secure', 'audit'] });
+  assert.deepEqual(R.classCover('perf', [], { kernel: 'absent', gpdb: 'absent' }), { cover: 'none', missing: [] }, '담는 출처가 서버에 하나도 없으면 none(이유: 없음)');
+});

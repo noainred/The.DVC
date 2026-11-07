@@ -93,7 +93,7 @@ export function LogsFleetView({ resp, onOpen, onReload, loading = false }) {
           </tbody>
         </STable>
         {!rows.length && <p className="bmo-note">표시할 서버가 없습니다(로그를 읽은 서버 · 보는 범위 안 서버만).</p>}
-        <p className="bmo-note"><BoldText text="칸 = **패턴 수**(아래 작은 글씨는 줄 수) · ‘—’ 는 그 서버의 로그를 24시간 안에 읽지 못한 것이고 0 이 아닙니다. 서버를 누르면 상세 ‘로그’ 탭이 열립니다." /></p>
+        <p className="bmo-note"><BoldText text="칸 = **패턴 수**(아래 작은 글씨는 줄 수) · ‘—’ 는 그 서버의 로그를 24시간 안에 읽지 못했거나 그 분류를 담는 출처(장애 · 성능 = 커널 등 · 이슈 = journald 등 · 보안 = secure · journald 보안 · auditd 등)를 하나도 못 읽은 것이고 0 이 아닙니다 · ‘일부’ 는 담는 출처 일부만 읽은 값입니다(칸에 마우스를 올리면 못 읽은 출처). 서버를 누르면 상세 ‘로그’ 탭이 열립니다." /></p>
       </section>
     </div>
   );
