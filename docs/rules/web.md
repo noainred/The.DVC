@@ -53,6 +53,7 @@
 - (원래 5853행) 게시판 답글·공감(v2.723)
 - (원래 5868행) 상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다
 
+- (7b단계 추가) 리눅스 성능 7b단계 설정 › 서버 등록 패널 — 판정은 서버 값 그대로 · 키 관리 버튼은 settingsOwnerTier · 모르는 수 ‘—’ · 수집 건강 RTT 줄은 rttHigh 그대로
 ## 본문
 
 - ⚠⚠ **리눅스 성능 6단계 화면 — ‘서버 비교’ · ‘수집 건강’ 보기 · 상세 ‘진단 플레이북’ · ‘목표선’ 탭 · 추이 ◆ 주석 핀 · 목표 위반 띠 · 공유 링크 · 캡처 PNG(그리기만 — 판정 · 대조는 서버)**
@@ -834,3 +835,14 @@
   ⑨ vCenter 탭 보기는 **카드 | 표**(`platform/VcTable.jsx` — 법인별 비교 · `/vcenters` + 허브 요약만 · 새 집계 없음 · localStorage `platform.vcView`). '트리' 보기와 호스트 · VM 탭 '법인별' 흡수는 2차(README §4.0-12·13).
      마지막 본 탭은 `platform.tab`, 바로가기 접힘은 `platform.chips`(전부 try/catch). 400px: 엔티티 탭 3칸 한 줄(수 + 이름 + 배지 — `.ph-tab .parts` 숨김 · 열린 탭의 분해는 아래 한 줄) · KPI 한 줄(`kpis-1row`)은 720 미만에서 세로로(추이 스파크 130px 가 넘쳤다 — Chromium 실측 8px).
   ⑩ 기능 사용 현황(`featureUsageText.js menuIndex`)은 `tabs` 도 같은 자리로 센다(`tab:vms` 키 그대로 · 이름 '가상화 플랫폼 › 가상화 서버 · VM').
+
+- **리눅스 성능 7b단계 설정 › 베어메탈 성능 › 서버 등록(`web/src/views/tools/BmOnboardPanel.jsx` · 문구 `bmOnboardText.js` · `bmOnboard.css` · vitest `bmOnboardText.test.jsx`)**:
+  - 순서: SSH 키 저장소 → 법인 공통 계정 → CSV · Excel 등록(파일 → 분석 표 → 결과 CSV · 적용) → 엣지 배포 목록(중앙) → 누락 점검. 마운트 1회 + 버튼(폴링 없음) · 늦은 응답은 gen 으로 버린다.
+  - 판정은 서버 값 그대로(행 action · code · reason · warnings · 누락 bucket · 수집 건강 `rttHigh`) — 화면이 800ms 를 다시 판정하지 않는다(테스트가 rttHigh false + 1000ms 를 고정).
+  - 키 · 공통 계정 관리 폼은 `settingsOwnerTier`(소유자 ∧ 전체 범위)일 때만 그린다(`isSettingsOwner` 아님 — server/CLAUDE.md) · 서버가 다시 막는다.
+  - postJson 은 409 를, delJson(sendJson)은 400 · 409 를 던지지 않는다 — 결과마다 `r?.ok === false` 를 먼저 본다(분석 서명 409 · 사용 중 키 409).
+  - 개인키 · passphrase · 비밀번호 입력 칸은 `autoComplete="new-password"`/`off` · 보낸 뒤 비운다 · OTP 는 실패해도 비운다(1회용 — 같은 코드 재시도는 잠금만 올린다).
+  - 모르는 수(null — 사용처를 모름 · 인출 기록 없음)는 ‘—’ / ‘모름’ 이다(0 · 반영됨으로 지어내지 않는다). 분석 표는 `STable limit={500}`(정렬 뒤 자름) · 전체는 결과 CSV.
+  - (r2) 분석 요약 `needOwner` 가 있으면 적용 옆에 **본인 OTP** 칸(1회용 — 실패해도 비운다) · 호스트키 정책 observe 안내 문구(`HOSTKEY_OBSERVE_NOTE`) · 범위 계정 키 목록 숨김 안내 ·
+    iDRAC 공통 계정 '복사 방식' · 비밀번호 변경 시 사본 수(`copiesStale`) 안내 · 누락 점검 칸 'OS 만 — 성능 수집 안 됨' · 엣지 배포 '제거 대기 n'.
+    베어메탈 스토리지 서버 폼(`BmStorageTool.jsx`)에 **인증(SSH 키 · 공통 계정) 드롭다운** — `settingsOwnerTier` 에만 보이고, 묶음이 바뀌면 본인 OTP 칸 · 바뀌지 않으면 참조 칸을 보내지 않는다(`authBodyOf`).

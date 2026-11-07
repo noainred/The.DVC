@@ -1,0 +1,30 @@
+/* 7b 서버 등록 · SSH 키 저장소 · 누락 점검(BmOnboardPanel) — 그리드 · 플렉스 자식 min-width:0 · 버튼 줄 flexWrap · 400px 은 표 안 스크롤 */
+.bmob { display: grid; gap: 12px; min-width: 0; }
+.bmob-sec { display: grid; gap: 8px; min-width: 0; padding: 10px 0 4px; border-top: 1px solid var(--border); }
+.bmob-sec > h4 { margin: 0; }
+.bmob-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 10px; min-width: 0; }
+.bmob-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 8px; align-items: start; align-content: start; min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.bmob-form > legend { font-size: 12.5px; font-weight: 600; padding: 0 4px; }
+.bmob-form > label { display: grid; gap: 3px; align-content: start; font-size: 12px; color: var(--text-dim); min-width: 0; }
+.bmob-form > label input.input, .bmob-form > label select { height: auto; min-height: 32px; }
+.bmob-form > div { align-self: end; }
+.bmob-form > label .input, .bmob-form > label textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.bmob-form > .bmob-wide { grid-column: 1 / -1; }
+.bmob-form > p { grid-column: 1 / -1; margin: 0; }
+.bmob-form textarea { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; resize: vertical; }
+.bmob-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.bmob-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.bmob-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid var(--border); background: transparent; color: var(--text-dim); white-space: nowrap; cursor: default; }
+button.bmob-chip { cursor: pointer; min-height: 26px; }
+.bmob-chip.on { box-shadow: inset 0 0 0 1px var(--accent-2); }
+.bmob-ok { color: var(--green); }
+.bmob-warn { color: var(--amber); }
+.bmob-bad { color: var(--red); }
+.bmob-info { color: var(--accent-2); }
+.bmob-muted { color: var(--text-faint); }
+.bmob-file { position: relative; overflow: hidden; cursor: pointer; }
+.bmob-file input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.bmob-edge { min-width: 0; }
+.bmob-edge > summary { cursor: pointer; font-size: 12.5px; overflow-wrap: anywhere; }
+table.bmo-t td.bmob-note-cell { min-width: 220px; max-width: 460px; }
+.bmob code { font-size: 11.5px; }

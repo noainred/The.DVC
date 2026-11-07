@@ -246,6 +246,48 @@
     - 읽기 실패 · 예산 부족(`skipped`) · Windows 서버의 ‘이번 주기 못 읽음’ 은 서버별로 저장하지 않는다(`_last.logs` 개수만 · 화면은 ‘마지막 읽음’ 시각으로 낡음을 보인다).
     - 1,000대 규모의 분류 CPU · DB 크기(log_hour · log_sec 행 수)는 **실측하지 않았다** — 5,000줄 분류가 양보하며 끝나는 것만 시험했다. 보관 기본 30일(설정 1~90).
       함대 요약(주기 끝)은 서버별 범위 질의 + 양보로 바꿔 이 컨테이너 실측 최장 정지 1,000대 · 보관 30일 28ms(예전 한 문장 질의는 보관 기간에 비례 — 1,000대 7일 756ms) · 총 소요 약 0.7초(비슷).
+22. **(7b단계 구현 — 2026-11-08)** 밝혀 둘 것(서버 등록 · SSH 키 저장소 · 수집 경로 · 보안):
+    - **실 서버 · 실 엣지로 접속해 보지 않았다** — 키 인증 접속 · 엣지 배포 적용은 테스트(엣지 = 자식 프로세스 · 가짜 키는 node:crypto 로 만든 OpenSSH 형식)로만 확인했다.
+      PKCS#8 PEM(`BEGIN PRIVATE KEY`)은 ssh2 가 읽지 못해 등록에서 거부한다(현장 키가 이 형식이면 `ssh-keygen -p` 로 다시 저장해야 한다 — 문구가 안내).
+    - **템플릿은 17열**이다(설계 §18 의 ‘14열’ 표기와 다르다 — 설계 목록이 16개 + os_key). mounts 가 비면 ‘/’ 하나(설계 ‘전체 마운트’ — 등록부가 마운트 1개 이상을 요구).
+      switch_port 는 형식만 확인하고 매핑하지 않는다 · class · purposes · role 은 service_tag 가 있을 때만 적용.
+    - **iDRAC 공통 계정은 적용 때 복사**된다(iDRAC 등록부에 참조 칸이 없다) — 공통 계정 비밀번호를 바꾸면 다시 적용해야 한다. OS 는 참조(keyRef · credRef)라 회전이 따라간다.
+    - **병합 셀은 그 행을 거부**한다(첫 칸 값으로 받지 않음 — exceljs 가 병합 범위 모든 칸에 첫 칸 값을 돌려줘 옆 행으로 복제된다). 수식은 저장된 결과값만(결과 없음 = 거부).
+    - **auto 는 엣지 접속을 모르면 판정하지 않는다**(설계 ‘온라인 엣지 없으면 central’ 보다 좁다 — 중앙 재시작 직후 접속 기록이 비어 있을 때 central 로 정하면 원문이 법인 밖으로 나간다).
+      엣지 → 중앙 이동은 거부(배포에서 먼저 빼고 엣지가 반영한 뒤 다시 올린다) — 바로 옮기면 엣지 인출 주기(기본 10분)만큼 두 곳이 같은 서버를 연다.
+    - 연결 시험은 **서버 하나씩**(버튼) — 설계의 ‘표본 · 1,000대 전수 동시성 32’ 일괄 시험은 만들지 않았다(자동 재시도 · 잠금 위험을 줄이는 쪽).
+    - OS 만 등록한 서버(iDRAC · vCenter 에 없는)는 등록부에 들어가도 **수집 대상이 되지 않는다** — 대상 집합은 여전히 `classifyFleet().bareMetal`(다음 단계 후보).
+    - 공통 계정 이름 · 키 이름은 **엣지마다 따로** 만든다(엣지 배포는 이름만 보낸다) — 중앙에서 만든 키를 엣지로 보내는 경로는 없다(의도).
+    - **(r2 — 반증 review-s7b · 감사 audit-s7b 반영, 2026-11-08)** 저장 비밀(공통 계정 · SSH 키)을 주소에 묶는 것은 설정 소유자 + 본인 OTP 로만 한다(메인 결정) —
+      비소유자 관리자 · 범위 관리자는 개별 계정으로만 등록하고 주소가 그대로인 기존 항목의 다른 칸만 갱신한다. 감사 권고 ②(peerTrust 경로별 강제)는 하지 않았다(근거 security-api.md 7b ⑨) —
+      호스트키 정책이 observe 면 소유자가 묶은 새 주소의 첫 접속은 지문 승인 없이 간다(화면 문구가 밝힌다 · enforce 권장).
+      iDRAC 공통 계정은 여전히 복사 방식이지만 사본을 사용처로 센다(삭제 거절 · 비밀번호 변경 시 '사본 n대 다시 적용' 안내 — 자동 재적용은 없다).
+      키 저장소 복원은 합집합(백업 뒤 키를 지우지 않는다 — 대신 복원으로 '지운 키를 되살리는' 일도 없다) · 복호 실패 중에는 키 · 계정 쓰기를 모두 거절한다(비밀키를 되돌리기 전까지 키 관리 불가).
+      남은 것: `root/Passw0rd!` 꼴(사용자/비밀번호)은 비밀 원문 판정이 잡지 못한다(경로와 구분이 안 된다 — 휴리스틱 한계) · 스냅샷 경로의 authError 거부 테스트 없음.
+    - **보안 점검 표(§19 공격면 7 × 대책 — 2026-11-08 코드 대조)**: 상태 = ✅ 코드 · 테스트로 확인 / ◐ 일부 / ○ 미확인 · 현장 권고.
+
+      | 공격면 | 대책 | 근거(파일:줄 · 테스트) | 상태 |
+      |---|---|---|---|
+      | SSH 키 저장소 | 봉인 · 0600 · 원자적 쓰기 · 손상이면 쓰기 거절 · 정책 잠금 그대로 | `keyStore.js:90`(로드 먼저) · `:97 commit` · `bmOnboard7bKeys` ③ ⑦ | ✅ |
+      | | 관리 = 소유자 등급 + 본인 OTP(마지막 게이트) + 감사 | `routes/api/bmOnboard.js:34 keyAdmin` · `bmOnboard7bKeys` ⑨ | ✅ |
+      | | **(r2 — 감사 H-1 · 반증 F1)** 저장 비밀을 **주소에 묶는 것**도 같은 등급(소유자 + OTP): CSV 적용 · bm-storage 저장 · iDRAC 사본 · 엣지 배포 행 · 비소유자는 계정을 찾기 전에 거부 · 계정명은 공통 계정 쪽(F19) · 퇴역 키 접속 거부(L-11) | `importAnalyze.js` binds · `bmstor.js bmBindCheck` · `bmOnboard7bReview` ① ⑨ · 변이 N1~N6 | ✅ |
+      | | **(r3 — 재검증 R-N1)** 묶음 판정 코어 하나(`bindRule.js`) + 등록부 choke point(`applyServerInput` — `bindApproved === true` 없으면 이동은 참조를 버리고 같은 주소는 기존 유지) · 표지는 bm-storage 라우트(OTP 뒤) · 온보딩(plan.binds) · 엣지(행의 중앙 승인 bindOk)만 세운다 · 'os_cred 빈칸 + os_key=password + 새 주소' 잇기도 묶음 | `bindRule.js` · `bmstor/registry.js applyServerInput` · `bmOnboard7bReview` ⑩(가짜 sshd 수신 0) ⑪ ⑫(스윕) · 변이 R1~R10 | ✅ |
+      | | 경로별 peerTrust 강제(observe 정책에서도 미승인 상대에 저장 비밀을 보내지 않음 — 감사 권고 ②) | 하지 않음 — 묶는 권한을 소유자 + OTP 로 올려 권한 상승 경로가 닫혔다(근거 security-api.md 7b ⑨) · 화면이 observe 동작을 밝힌다 | ○ 현장 권고(enforce 권장) |
+      | | 복호 실패 시 쓰기 거절(F5) · 복원 합집합(F13) · 중앙 수신 재가림(L-3) | `keyStore.js unreadable` · `keyBundle.mergeRedactedKeyStore` · `agentConfig.js` · `bmOnboard7bReview` ④ ⑦ | ✅ |
+      | | 응답 · 내보내기 · 백업 · 엣지 push 에 지문 · 공개키만 | `keyBundle.js:19` · `backup/service.js:260` · `bmOnboard7bKeys` ③ ⑧ ⑩(소스 스윕) | ✅ |
+      | | 약한 알고리즘 거부 · 키 직접 판정 | `keyParse.js:96` · `bmOnboard7bKeys` ① | ✅ |
+      | | 주소 변경 시 비밀 · 키 참조 승계 없음 | `bmstor/registry.js:168` · `bmOnboard7bKeys` ④ | ✅ |
+      | | 키 없으면 비밀번호로 넘어가지 않음 · 키 서버는 엣지 위임 잡에 싣지 않음 | `refs.js resolveOsAuth` · `osSsh.js` · `bmstor/poller.js keyDelegated` · `bmOnboard7bKeys` ⑤ · `bmOnboard7bMissing` ④ | ✅ |
+      | | 서버 쪽 읽기 전용 계정 · `restrict,from=` · authorized_keys | 포탈은 건드리지 않음 — `ONBOARD-TEMPLATE.md` §3 | ○ 현장 권고 |
+      | 1,000대 SSH 세션 | 동시성 상한 · 장비 시한(signal) · 인증 거부 정지(해석 뒤 자격 — bmusage · bmstor 같은 `authCredOf`) · 암호화 키 파싱 캐시(M-5) | `bmusage/poller.js` · `bmstor/poller.js` · `refs.js authCredOf` · `bmOnboard7bReview` ②(회전 · 비밀번호 변경 뒤 재시도) ⑧ | ✅ |
+      | | 호스트키 검증(무음 TOFU 금지) | `proxy/sshExec.js:206`(기존 peerTrust) · 연결 시험 안내 | ✅ 기존 규약(7b 는 새 접속 경로 없음) |
+      | 엣지 샘플러 스크립트 | 번들 고정 + sha256 대조 | `samplerSpec.js:6` — 해시는 **자기 신고**(v2.922 D13 정정) | ○ 미확인(서명 · 실해시 없음) |
+      | 로그 샘플 | redact · 로그 규칙 | `edgelog/redact.js:125` · `bmLogs7a*` | ✅ 기존 규약(7a) |
+      | CSV/Excel 업로드 | 상한(4MB · 5,000행) · 미보관 · 압축 폭탄 · **병합 전개 상한(M-4)** · 값만 · 비밀 원문 거부(F11 보강) · SSRF · 수식 주입 | `importParse.js` · `svcmon/formats.js assertXlsxMergesOk` · `importAnalyze.js` · `bmOnboard7bImport` ①~④ · `bmOnboard7bReview` ⑧ | ✅ |
+      | | 범위 404 → 403 · 범위 밖 겹침은 신규 꼴 + 적용 차단(L-1 · F18) · id 충돌(M-1) · class · 용도 범위(M-2) · 서명(등록부 세대 — F12) · 직렬 큐 · 스냅샷(원자적 · SECRET_FILES — L-4) | `importAnalyze.js` · `onboardRun.js` · `bmOnboard7bImport` ④ ⑥ ⑦ · `bmOnboard7bReview` ③ ⑥ | ✅ |
+      | 수집 경로 · 엣지 배포 | 개별 토큰만 · 엣지 재분석 · 이름만(키 안 보냄) · 만든 것만 지움 · **만든 것 · 자기 법인만 갱신(M-3)** · 법인 비면 미적용(L-9) · 목록 먼저(F6) · 제거 대기(F14) · 끊겨도 central 로 넘기지 않음 | `routes/central.js /bm-onboard` · `edgeApply.js` · `edgeDeploy.js settlePending` · `bmOnboard7bEdge` ①~③ · `bmOnboard7bReview` ⑤ ⑥ | ✅ |
+      | 집중 · 스냅샷 실행 | operator + 사유 + 감사 + 상한 · 키 해석 실패면 접속 안 함 | `snapshot/run.js`(7b: authError 거부 추가) · `bmPerf2923Snapshot` · `bmPerf2929Focus` | ◐(7b 추가분 authError 는 스냅샷 경로 테스트 없음 — 주기 · 연결 시험 경로로만 고정) |
+      | CVP 매핑 | 쓰기 404/403 · 법인 CVP 일치 | `bmUsage.js portMapWrite`(3a) · 7b 는 매핑하지 않음(형식만) | ✅ 기존 규약 |
 
 ## 7. 컨펌 때 정할 것(기본값을 적어 둔다)
 1. 방식 — **D(권장)** / B 연동 병행 / 다른 것.
@@ -309,6 +351,12 @@
   반증(F1~F14) 반영: journald JSON · 항목마다 커서 · `##JSEC`(보안 출처 하나) · `-q` 제거(권한 범위) · 0700 폴더 = 권한 없음 · 출처 바이트 상한(영구 정지 없음) · dmesg 첫 읽기 60분 ·
   끝 줄 미완성 넘김 · 가림 판정 하나(서명 포함) · OpenSSH 연결 식별 꼴 · 심각도 우선 서명 상한 · 엣지 대행 모양 = 로컬 · 함대 노드 범위 · GPDB 로그인 실패 = 보안 · 주기 숫자 API 값 · 숫자 화이트리스트.
   남은 것: §6-21 의 실측 · 형식 확인 · IP 기준 공통 원인 · 서버별 ‘이번 주기 못 읽음’ 기록 · 시도 단위(연결 PID) 실패 집계.
+- **7b단계 구현됨(버전 미정 — 서버 + 화면)**: 설정 › 베어메탈 성능 › 서버 등록 — SSH 키 저장소(봉인 · 지문 · 회전 · 사용 0 삭제) · 법인 공통 계정(OS 기본 키 / iDRAC 읽기 전용) ·
+  CSV/Excel 등록(17열 · 별칭 · 인코딩 감지 · .xlsx 값만 · 비밀 원문 거부 · 분석 → 결과 CSV → 서명 대조 적용 · 직전 스냅샷) · 수집 경로 edge/central/auto(엣지 배포 목록 — 이름만 ·
+  엣지가 다시 분석 · 자기가 만든 것만 지움) · 누락 점검(보드 커버리지 값 · 모름 분리 · 제안 CSV) · 저장 항목 연결 시험 · 수집 건강 RTT 800ms+ 줄.
+  서버 `bmusage/onboard/{keyParse,keyStore,keyBundle,refs,importParse,importAnalyze,onboardRun,edgeDeploy,edgeApply,missing,connTest}.js` · 라우트 `routes/api/bmOnboard.js` ·
+  `routes/central.js GET /bm-onboard` · 엣지 워커 `agent/bmOnboardPull.js` · 화면 `web/src/views/tools/{BmOnboardPanel.jsx,bmOnboardText.js}` · 템플릿 설명서 `ONBOARD-TEMPLATE.md`.
+  규칙 `docs/rules/{security-api,idrac-server,edge,web}.md` 7b 항목 · `server/CLAUDE.md` 키 저장소 불변조건. 설계와 다르게 둔 것과 남은 것은 §6-22.
 `bmusage/collectors/osSsh.js linuxCommand` 구획 추가 → `parse/linuxProc.js` 파서(순수 · 테스트) → `rates.js`·`usage.js` 열 추가 → `db.js` 열·튜닝 표 → USE 판정 순수 모듈(테스트가 웹·서버 같은 입력으로 대조) → `edgePull.js` 봉투 + 중앙 정제 화이트리스트 → 스냅샷 엣지 대행 라우트 → 웹(보드 · 상세 · 400 · 상태) → 목 데이터 → Chromium 1440/400 → 릴리스.
 
 ## 9. 출처(검색 2026-11-06)

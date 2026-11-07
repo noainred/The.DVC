@@ -301,6 +301,9 @@ export function shapePerfSections(sec = {}, { blkqMax = MAX_BLKQ } = {}) {
 export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null, extraCommands = [] } = {}) {
   const host = String(osHost.host || '').trim();
   if (!host) return { ok: false, error: 'OS host 가 없습니다.' };
+  // 7b: 키 · 공통 계정 참조를 해석하지 못했으면(키 삭제 · 봉인 해제 실패 · 저장소 손상) 접속하지 않는다 — 빈 비밀번호로 시도해
+  //   인증 실패 · 계정 잠금을 부르지 않게(onboard/refs.js withResolvedAuth 가 단다).
+  if (osHost.authError) return { ok: false, error: String(osHost.authError).slice(0, 300), authErrorCode: String(osHost.authErrorCode || '') };
   const { mounts } = sanitizeMounts(osHost.mounts);
   const hostKey = host.toLowerCase();
   const known = _osKind.get(hostKey) || '';
@@ -309,7 +312,7 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
     return await withSsh({
       host, port: Number(osHost.port) || 22,
       username: String(osHost.username || 'root'),
-      password: osHost.password || '', privateKey: osHost.privateKey || undefined,
+      password: osHost.password || '', privateKey: osHost.privateKey || undefined, passphrase: osHost.passphrase || undefined,
       readyTimeout: READY_TIMEOUT_MS, signal,
     }, async ({ exec }) => {
       // 예산 시계는 **SSH 연결이 끝난 시점**부터 센다(READY 는 withSsh 가 이미 소비했다).

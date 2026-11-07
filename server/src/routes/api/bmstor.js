@@ -21,6 +21,25 @@ const adminOnly = requireRole('admin');
 // v2.612 AUTHZ2612-06: 베어메탈 서버는 법인 축이 없다(엣지만) — 범위 제한 admin 도 403(스토리지 모니터링과 같은 기준).
 const fullScopeOnly = fullScopeOnlyWith('베어메탈 스토리지는 vCenter 범위 밖이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
+/**
+ * 7b: 요청이 키 · 공통 계정 참조를 **새로 묶는지**(새 항목 · 주소 변경 · 다른 참조) 판정하고 참조를 확인한다(존재 · 퇴역 · 종류).
+ * @returns {Promise<{binds:boolean}|{error:string, code:string, status?:number}>}
+ */
+export async function bmBindCheck(body = {}) {
+  const KS = await import('../../bmusage/onboard/keyStore.js');
+  const { bindOfWrite } = await import('../../bmusage/onboard/bindRule.js');
+  const ex = body.id ? listBmServersRaw().find((x) => x.id === body.id) || null : null;
+  for (const [f, kind] of [['keyRef', 'key'], ['credRef', 'acc']]) {
+    if (body[f] === undefined) continue;
+    const v = String(body[f] || '').trim();
+    if (!v) continue;   // 떼기 — 확인할 참조가 없다
+    if (kind === 'key') { const k = KS.keyById(v); if (!k) return { error: 'SSH 키가 키 저장소에 없습니다.', code: 'key-missing' }; if (k.status === 'retired') return { error: '회전으로 퇴역한 키는 고를 수 없습니다.', code: 'key-retired' }; }
+    else { const a = KS.accountById(v); if (!a) return { error: '공통 계정이 없습니다.', code: 'account-missing' }; if (a.kind !== 'os') return { error: 'OS 공통 계정만 고를 수 있습니다.', code: 'account-kind' }; }
+  }
+  // 7b r3(R-N1): 묶음 판정은 등록부 choke point 와 **같은 함수 · 같은 입력**(bindRule.bindOfWrite) — 두 벌을 두지 않는다.
+  return { binds: bindOfWrite(ex, body).binds };
+}
+
 export function registerBmStorage(api) {
   // 현황 — 서버 목록(비밀 redact) + 최신 수집을 합산(서버/그룹/전체)해 반환. 엣지 콤보용 목록 포함.
   api.get('/tools/bm-storage', adminOnly, fullScopeOnly, (req, res) => {
@@ -62,8 +81,24 @@ export function registerBmStorage(api) {
   });
 
   // 서버 추가/수정 — body { id?, name, host, port, username, password?, agent, groups(최대 3개), mounts, enabled }
-  api.post('/tools/bm-storage/servers', adminOnly, fullScopeOnly, (req, res) => {
-    const r = saveBmServer(req.body || {});
+  api.post('/tools/bm-storage/servers', adminOnly, fullScopeOnly, async (req, res) => {
+    // 7b 메인 결정(감사 H-1 · 반증 F1 · Q4): SSH 키 · 공통 계정을 이 주소에 **묶는(바꾸는)** 저장은 그 비밀을 관리하는 등급과 같다 —
+    //   설정 소유자 등급 + 본인 OTP(마지막). 존재 · 퇴역 · 종류도 여기서 본다(형식만 보던 것). 참조를 떼는 것(빈 값)은 묶음이 아니다.
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const bind = await bmBindCheck(body);
+    if (bind.error) return res.status(bind.status || 400).json({ ok: false, code: bind.code, reason: bind.error });
+    if (bind.binds) {
+      const { runGate } = await import('./bmOnboard.js');
+      const { reauth } = await import('./reauth.js');
+      const g1 = await runGate(requireSettingsOwner, req);
+      if (!g1.ok) return res.status(g1.status).json({ ...g1.body, reason: '공통 계정 · SSH 키를 서버 주소에 묶는 저장은 설정 소유자(전체 범위)만 할 수 있습니다 — 개별 비밀번호로 등록하거나 소유자에게 맡기세요.' });
+      const g2 = await runGate(reauth, req);
+      if (!g2.ok) return res.status(g2.status).json(g2.body);
+    }
+    // 7b r3(R-N1): bindApproved 는 **위 두 게이트를 통과했을 때만** 이 라우트가 세운다 — 클라이언트가 보낸 값은 버린다(등록부 choke point 가 이 칸만 본다).
+    const { otp, bindApproved: _clientApproval, ...rest } = body; void otp; void _clientApproval;
+    const r = saveBmServer(bind.binds ? { ...rest, bindApproved: true } : rest);
+    if (r.ok && bind.binds) logAudit({ user: req.user?.username, action: '베어메탈 서버 인증 참조 묶음', target: r.server?.host || '', detail: JSON.stringify({ keyRef: rest.keyRef || '', credRef: rest.credRef || '', osAuth: rest.osAuth || '' }).slice(0, 200), ip: req.ip || '' });
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 서버 저장', target: r.server?.host || '', detail: `mounts ${(r.server?.mounts || []).length}개${r.server?.agent ? ` · 엣지 ${r.server.agent}` : ''}`, ip: req.ip || '' });
     res.status(r.ok ? 200 : 400).json(r);
   });

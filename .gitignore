@@ -169,6 +169,12 @@ server/config/perf-hangs.ndjson
 server/config/perf-monitor.json
 server/config/central-unsupported-servers.json
 server/config/bm-storage.json
+# 7b: SSH 키 저장소(개인키 봉인) · 온보딩 직전 등록부 스냅샷 · 엣지 배포 목록
+server/config/ssh-keys.json
+server/config/bm-onboard-*.json
+server/config/onboard-prev/
+server/config/onboard-prev/bm-storage.json
+server/config/onboard-prev/idrac.json
 server/config/*.ndjson
 sbp-shortcuts.csv
 sbp-proxy-shortcuts.json

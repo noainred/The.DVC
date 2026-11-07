@@ -154,6 +154,7 @@ import { startPartFaultPoller } from './partfault/poller.js';       // 파트 �
 import { startPartFaultPush } from './partfault/push.js';           // 〃 엣지: 로컬 판정 후 '장애 + 전체 요약' 을 중앙 push(v2.548 프로토콜 2)
 import { startPartFaultConfigPull } from './agent/partFaultConfigPull.js'; // 〃 중앙→엣지 스위치 배포(v2.548)
 import { startBmUsageConfigPull } from './agent/bmUsageConfigPull.js'; // v2.627 베어메탈 사용률 설정 중앙→엣지 배포
+import { startBmOnboardPull } from './agent/bmOnboardPull.js'; // 7b단계 서버 등록 배포(중앙 → 엣지 — 수집 경로 edge)
 import { startEdgeLogWorker } from './agent/edgeLogWorker.js';  // 엣지 로그 폴백 워커(v2.549) — 중앙이 못 닿는 법인에서만 쓰인다
 import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 사용률 수집(v2.550) — 기본 꺼짐, 법인 단위 opt-in
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
@@ -439,6 +440,9 @@ app.use('/api/central/fleet', BIG_JSON);
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
 // 로그 분석 붙여넣기(v2.583) — 폐쇄망 현장이 다른 서버의 journalctl 출력을 붙여넣는다(라우트가 8MB 상한을 다시 건다).
 app.use('/api/admin/log-analysis/paste', BIG_JSON);
+// 7b: 서버 등록 CSV/Excel(파일 4MB → base64 약 5.4MB — 전역 1MB 파서면 413). 세션 풀 · 관리자만(sessionBigBodyAllowed) · 본문 상한은 라우트가 다시 본다.
+app.use('/api/tools/bm-usage/onboard/analyze', BIG_JSON);
+app.use('/api/tools/bm-usage/onboard/apply', BIG_JSON);
 app.use('/api/svcmon/targets/import', BIG_JSON);
 app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);
 // TRUST_PROXY(v2.428, 구성도 미스매치 #8): 중앙/엣지가 HAProxy·nginx 뒤에 있으면 홉 수(예 1)를 지정 — req.ip 가 X-Forwarded-For 의
@@ -645,6 +649,7 @@ const stagger = [
   // 중앙은 직접 수집분 + 엣지 보고를 합쳐 전이(열림/변화/해소)를 계산해 DB 에 남기고 알린다.
   // 둘 다 opt-in/조건부이며(PARTFAULT_ENABLED · CENTRAL_URL) 왜 안 도는지 로그가 말한다.
   startPartFaultPoller, startPartFaultPush, startPartFaultConfigPull, startBmUsageConfigPull,
+  startBmOnboardPull, // 7b 서버 등록 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
   startEdgeLogWorker,
   startBmUsagePoller,
   startLinkCheckPoller,

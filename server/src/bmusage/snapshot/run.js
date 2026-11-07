@@ -96,6 +96,8 @@ export async function runSnapshotLocal({ target, reason, by = '', settings = {},
   if (!r) return { ok: false, code: 'bad-reason', reason: '사유를 2자 이상 적어야 합니다(감사 기록에 남습니다).' };
   if (!target || !target.key) return { ok: false, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' };
   if (!target.osHost || !String(target.osHost.host || '').trim()) return { ok: false, code: 'no-os-path', reason: '이 서버에는 OS 계정(베어메탈 스토리지 등록부)이 없습니다 — 스냅샷은 SSH 경로가 있어야 합니다.' };
+  // 7b: 키 · 공통 계정 참조를 해석하지 못한 서버는 접속하지 않는다(주기 수집과 같은 판정 — onboard/refs.js).
+  if (target.osHost.authError) return { ok: false, code: 'auth-unresolved', reason: String(target.osHost.authError).slice(0, 300) };
   // ⚠ 동시 1건: 검사와 등록 사이에 await 를 두지 않는다(같은 틱의 두 요청이 둘 다 통과하지 않게).
   if (_running.has(target.key)) return { ok: false, code: 'busy', reason: '이 서버의 스냅샷이 이미 실행 중입니다 — 끝난 뒤 다시 누르세요.' };
   _running.add(target.key);
@@ -125,7 +127,7 @@ export async function runSnapshotLocal({ target, reason, by = '', settings = {},
     try {
       const out = await D.withDeadline(SNAPSHOT_DEADLINE_MS, (signal) => D.withSsh({
         host: String(target.osHost.host).trim(), port: Number(target.osHost.port) || 22,
-        username: String(target.osHost.username || 'root'), password: target.osHost.password || '', privateKey: target.osHost.privateKey || undefined,
+        username: String(target.osHost.username || 'root'), password: target.osHost.password || '', privateKey: target.osHost.privateKey || undefined, passphrase: target.osHost.passphrase || undefined,
         readyTimeout: SNAPSHOT_READY_MS, signal,
       }, async ({ exec }) => exec(SNAPSHOT_COMMAND, SNAPSHOT_CMD_MS)), '진단 스냅샷 시한 초과');
       const parsed = parseSnapshot(out?.stdout || '', { topN: snapCfg.topN, dmesgLines: snapCfg.dmesgLines });

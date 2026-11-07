@@ -8,6 +8,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { preserveCorrupt } from '../util/atomicWrite.js';
 import { redactEnvSecrets } from '../util/envRedact.js'; // v2.538
+import { KEY_FILE_NAME, redactKeyStoreText } from '../bmusage/onboard/keyBundle.js'; // 7b 감사 L-3
 // v2.582 ARCH-4 종료 flush 는 writer 가 등록한다. v2.599(CEN-2599-04): 엣지 수 상한 + 비동기 쓰기(storageEdge 와 같은 코어).
 import { admitAgent, createDebouncedWriter } from './edgeRecord.js';
 
@@ -44,7 +45,9 @@ export function setAgentConfig(agent, files, { retain = [] } = {}) {
   const cleaned = {};
   let total = 0; let omitted = 0;
   for (const [k, v] of Object.entries(files)) {
-    const val = (typeof v === 'string' && /\.env$/i.test(String(k))) ? redactEnvSecrets(v).text : v;
+    // 7b 감사 L-3: SSH 키 저장소도 수신 쪽에서 다시 가린다(7b 이전 엣지 · 되돌린 엣지는 개인키 봉인본을 그대로 보낸다 — 중앙 백업에 남지 않게).
+    const val = (typeof v === 'string' && /\.env$/i.test(String(k))) ? redactEnvSecrets(v).text
+      : (typeof v === 'string' && String(k) === KEY_FILE_NAME) ? redactKeyStoreText(v).text : v;
     const size = typeof val === 'string' ? val.length : (() => { try { return JSON.stringify(val).length; } catch { return Infinity; } })();
     if (total + size > AGENT_CONFIG_MAX_BYTES) { omitted += 1; continue; }
     total += size;
