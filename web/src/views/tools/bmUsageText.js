@@ -766,7 +766,7 @@ export function unassignedNote(info = null) {
  * 이 표 최악의 거짓이다. 이유를 **순서대로** 말한다(v2.552 `rowState` 와 같은 규약).
  * @returns {{state:string, label:string, why:string, tone:string}}
  */
-export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60_000, now = Date.now() } = {}) {
+export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60_000, now = Date.now(), canEnableCentral = false } = {}) {
   const at = n(row.snapAt);
   const att = row.lastAttempt || null;
   if (row.enabled === false) return { state: 'off-central', label: '중앙에서 비활성', why: '중앙에서 이 수집 서버를 비활성으로 두었습니다 — 켜야 가져올 수 있습니다.', tone: 'idle' };
@@ -782,7 +782,14 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
     };
   }
   if (row.enabledOnEdge === false) {
-    return { state: 'off-edge', label: '엣지에서 꺼짐', why: '그 엣지에서 베어메탈 사용률 수집이 꺼져 있습니다 — 그 법인 포탈에서 켜야 값이 생깁니다(중앙에서는 켤 수 없습니다).', tone: 'warn' };
+    /*
+     * v2.927 정정: v2.627 부터 중앙이 엣지 설정을 내려줄 수 있고, v2.927 '중앙에서 켜기' 로 한 엣지만 켤 수 있다 — 예전 문구 '중앙에서는 켤 수
+     *   없습니다' 는 사실과 달랐다. 버튼을 쓸 수 있는 사람(전체 범위 관리자 · 중앙 · 그 엣지가 전체 배포·제외에 묶이지 않음)에게만 버튼을 말한다.
+     */
+    return { state: 'off-edge', label: '엣지에서 꺼짐', tone: 'warn',
+      why: canEnableCentral
+        ? '그 엣지에서 베어메탈 사용률 수집이 꺼져 있습니다 — **중앙에서 켜기** 버튼으로 켤 수 있습니다(그 법인 포탈에서 켜도 됩니다).'
+        : '그 엣지에서 베어메탈 사용률 수집이 꺼져 있습니다 — 관리자가 중앙에서 켜거나 그 법인 포탈에서 켭니다.' };
   }
   const old = now - at > staleMs;
   if (att && !att.ok) {

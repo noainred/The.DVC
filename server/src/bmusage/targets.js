@@ -163,8 +163,7 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
    *  · 켜지 않았으면 제외 목록에도 싣지 않는다 — 수백 대의 '꺼짐' 행이 베어메탈 화면의 사유 목록을 덮는다.
    */
   if (settings.includeVirtualization) {
-    const siteAgent = new Map((vcenters || []).filter((v) => v && (v.collectSource === 'site' || v.collectMode === 'site'))
-      .map((v) => [t(v.id), t(v.collectedBy || v.agent)]));
+    const siteAgent = siteAgentByVcenter(vcenters);
     const bmKeys = new Set(targets.map((x) => x.key));
     for (const h of virtHosts || []) {
       if (!h || typeof h !== 'object') continue;
@@ -250,6 +249,55 @@ export function idOf(b) {
     key: tag || t(b.fleetId) || t(b.serverId),
     keyKind: tag ? 'serviceTag' : (t(b.fleetId) ? 'fleetId' : 'serverId'),
   };
+}
+
+/**
+ * 사이트 위임 vCenter → 그 vCenter 를 수집하는 엣지 이름(원형 · 모르면 '')(순수).
+ * v2.927: 가상화 호스트 위임 판정(위 resolveTargets)과 '중앙에서 켜기'의 엣지별 법인 매핑(edgeCorpIndex)이 **같은 규칙**을 쓴다
+ *   — 두 벌로 두면 한쪽만 고쳐져 '그 엣지가 수집한다' 는 판정과 '그 엣지의 법인' 이 갈라진다(판정 복제 금지).
+ */
+export function siteAgentByVcenter(vcenters = []) {
+  return new Map((vcenters || []).filter((v) => v && (v.collectSource === 'site' || v.collectMode === 'site'))
+    .map((v) => [t(v.id), t(v.collectedBy || v.agent)]));
+}
+
+/**
+ * v2.927 '중앙에서 켜기' — 엣지 이름(소문자) → 그 엣지 법인(vCenter id) 집합(순수).
+ *  ① 사이트 위임 vCenter 를 그 엣지가 수집한다(siteAgentByVcenter — 법인 · vCenter · 엣지 1:1:1 의 기본 경우).
+ *  ② 그 엣지가 보고한 베어메탈(`remoteAgent` = 그 엣지)의 vcenterId — vCenter 는 중앙이 직접 수집하고 iDRAC 만 엣지에 맡긴 법인.
+ *     ⚠ 엣지가 보낸 값이다(엣지 정제 규약): **중앙 vCenter 목록에 있는 id 만** 쓰고, 다른 엣지가 수집하는 사이트 vCenter 는
+ *     그 엣지의 법인이라 넣지 않는다(엣지 보고만으로 남의 법인을 자기 법인으로 만들지 못하게).
+ * 결과는 엣지에 내려갈 `corps` 의 근거다 — 엣지는 자기 대상만 이 표로 거른다(resolveTargets `corps[vc]`).
+ * @param {{vcenters?:Array, bareMetal?:Array}} p  bareMetal 은 `{remoteAgent, vcenterId}` 를 가진 행(엣지 보고 베어메탈)
+ * @returns {Map<string, Set<string>>}
+ */
+export function edgeCorpIndex({ vcenters = [], bareMetal = [] } = {}) {
+  const site = siteAgentByVcenter(vcenters);
+  const known = new Set((vcenters || []).map((v) => (v && typeof v === 'object' ? t(v.id) : '')).filter(Boolean));
+  const idx = new Map();
+  const add = (agent, id) => {
+    const k = norm(agent);
+    if (!k || !id) return;
+    if (!idx.has(k)) idx.set(k, new Set());
+    idx.get(k).add(id);
+  };
+  for (const [vc, a] of site) add(a, vc);
+  for (const b of bareMetal || []) {
+    if (!b || typeof b !== 'object') continue;
+    const a = typeof b.remoteAgent === 'string' ? norm(b.remoteAgent) : '';
+    const vc = typeof b.vcenterId === 'string' ? t(b.vcenterId) : '';
+    if (!a || !vc || !known.has(vc)) continue;
+    const owner = norm(site.get(vc) || '');
+    if (owner && owner !== a) continue;
+    add(a, vc);
+  }
+  return idx;
+}
+
+/** 한 엣지의 법인 id 목록(정렬 · 대소문자 무시). */
+export function edgeCorpIds({ vcenters = [], bareMetal = [], agent = '' } = {}, idx = null) {
+  const set = (idx || edgeCorpIndex({ vcenters, bareMetal })).get(norm(agent));
+  return set ? [...set].sort() : [];
 }
 
 /**
