@@ -335,8 +335,9 @@ export function setWikiFlash(text) { try { window.sessionStorage.setItem(FLASH_K
 function takeWikiFlash() { try { const t = window.sessionStorage.getItem(FLASH_KEY) || ''; window.sessionStorage.removeItem(FLASH_KEY); return t; } catch { return ''; } }
 /** 제목 바꾼 뒤 링크 갱신 결과(서버 linkFix). 고친 것이 없으면 ''. */
 export function linkFixText(f) {
-  if (!f || (!f.fixed && !f.skipped)) return '';
-  return `제목이 바뀌어 다른 문서 ${f.fixed}개의 링크를 새 제목으로 고쳤습니다(각 문서에 새 판 · 메모 ‘링크 갱신’)${f.skipped ? ` · 쓰기 범위 밖이거나 읽기 전용이라 못 고친 문서 ${f.skipped}개` : ''}.`;
+  if (!f || (!f.fixed && !f.skipped && !f.crossSpace)) return '';
+  // v2.927(점검 B1-02) crossSpace — 다른 법인 스페이스의 문서는 그 문서를 읽는 사람이 새 제목을 볼 수 없을 수 있어 고치지 않는다(서버가 센다)
+  return `제목이 바뀌어 다른 문서 ${f.fixed}개의 링크를 새 제목으로 고쳤습니다(각 문서에 새 판 · 메모 ‘링크 갱신’)${f.skipped ? ` · 쓰기 범위 밖이거나 읽기 전용이라 못 고친 문서 ${f.skipped}개` : ''}${f.crossSpace ? ` · 다른 법인 스페이스의 문서라 고치지 않은 문서 ${f.crossSpace}개(그 문서의 독자가 이 문서를 볼 수 없을 수 있습니다 — 정리 › 깨진 링크에서 확인)` : ''}.`;
 }
 function TidyView({ space, meta, onWritten }) {
   const [trash, setTrash] = useState(null);
@@ -416,7 +417,8 @@ export function commentIssueText(r) {
   if (!i) return '';
   if (i.existing) return `이 댓글로 만든 열린 이슈 ${i.key} 가 이미 있습니다.`;
   const who = i.requestOnly ? '요청으로 등록' : `담당자 ${i.assignee}${i.watchers?.length ? ` · 관찰자 ${i.watchers.join(', ')}` : ''}`;
-  const skip = i.skipped?.length ? ` · 이 법인을 볼 수 없어 뺀 사람 ${i.skipped.join(', ')}` : '';
+  // v2.927(점검 B1-06): 뺀 사람 이름은 전체 범위 쓰기 계정에게만 온다 — 그 밖은 수(skippedN)만
+  const skip = i.skipped?.length ? ` · 이 법인을 볼 수 없어 뺀 사람 ${i.skipped.join(', ')}` : i.skippedN ? ` · 이 법인을 볼 수 없어 뺀 사람 ${i.skippedN}명` : '';
   const mail = i.notifyOn === false ? ' · 이슈 알림이 꺼져 있어 메일은 가지 않습니다' : i.noEmail?.length ? ` · 메일 주소가 없는 사람 ${i.noEmail.join(', ')}(이슈는 포탈 ‘내 작업’ 에서 보입니다)` : i.notifyOn ? ' · 메일은 1분 안에 한 통씩 갑니다' : '';
   return `이슈 ${i.key} 를 만들었습니다 — ${who}${i.relatedTo ? ` · 예전 이슈 ${i.relatedTo} 와 ‘관련’ 으로 이음` : ''}${skip}${mail}.`;
 }

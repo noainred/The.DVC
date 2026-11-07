@@ -34,9 +34,11 @@ export function defaultIssueTitle(pageTitle, commentBody) {
  * @param {string[]} o.mentioned 그 댓글에서 언급한 사람(resolveMentions 로 푼 실제 이름 · 순서 유지)
  * @param {boolean} o.canWrite 운영자 · 관리자(데모 제외)인가
  * @param {(name:string, vcenterId:string)=>boolean} o.canSee
+ * @param {boolean} [o.restricted] v2.927(점검 B1-06) — mentioned 를 자동완성 후보로 좁혀 푼 계정(전체 범위 쓰기 계정이 아님). 문구가 그 사실을 말한다
+ *   (모르는 이름 · 없는 이름 · 후보 밖 이름이 같은 문구 — 계정 존재 판정이 되지 않게).
  * @returns {{ body:object, origin:object, requestOnly:boolean, watchers:string[], skipped:string[] }}
  */
-export function planCommentIssue({ page, comment, req = {}, mentioned = [], canWrite = false, canSee = () => true }) {
+export function planCommentIssue({ page, comment, req = {}, mentioned = [], canWrite = false, canSee = () => true, restricted = false }) {
   const vcenterId = vcenterOfSpace(page.spaceId);
   const requestOnly = !canWrite;
   if (requestOnly && req.request !== true) throw fieldError('issue', '담당자를 지정하는 이슈는 운영자 · 관리자만 만듭니다 — 요청으로 등록하세요');
@@ -49,7 +51,11 @@ export function planCommentIssue({ page, comment, req = {}, mentioned = [], canW
   let assignee = '';
   const watchers = []; const skipped = [];
   if (!requestOnly) {
-    if (!mentioned.length) throw fieldError('issue.assignee', '댓글에 언급한 사람(@계정)이 없어 담당자를 정할 수 없습니다');
+    if (!mentioned.length) {
+      throw fieldError('issue.assignee', restricted
+        ? '담당자로 고를 수 있는 사람을 언급하지 않았습니다 — 이 문서 참여자 · 볼 수 있는 이슈에 나온 사람 · 자기 자신(@ 자동완성 후보)만 고를 수 있습니다'
+        : '댓글에 언급한 사람(@계정)이 없어 담당자를 정할 수 없습니다');
+    }
     assignee = req.assignee == null || req.assignee === '' ? mentioned[0] : String(req.assignee);
     if (!mentioned.includes(assignee)) throw fieldError('issue.assignee', '담당자는 댓글에서 언급한 사람 중에서 고릅니다');
     if (!canSee(assignee, vcenterId)) throw fieldError('issue.assignee', `‘${assignee}’ 는 이 문서의 법인 이슈를 볼 수 없어 담당자로 지정할 수 없습니다`);

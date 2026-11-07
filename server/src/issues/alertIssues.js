@@ -30,7 +30,9 @@ export const ALERT_ISSUE_KINDS = Object.freeze(['vc', 'vcstale', 'host', 'ds', '
 export const ALERT_KIND_LABEL = Object.freeze({
   vc: 'vCenter 수집 실패', vcstale: '엣지 보고 끊김', host: '호스트 연결 끊김', ds: '데이터스토어 용량', alarm: 'vCenter 위험 알람', massoff: 'VM 동시 전원 꺼짐', backup: 'Bareos 백업 실패',
 });
-export const ALERT_ISSUE_LIMITS = Object.freeze({ delayMin: [0, 1440], dailyMax: [1, 500], labels: 10, label: 30 });
+// v2.927(점검 B1-03) noteWindowMin — 한 이슈의 재발 · 해소 자동 댓글은 이 창마다 한 번(그 사이 변화는 수만 세어 다음 댓글에 싣는다)
+export const ALERT_ISSUE_LIMITS = Object.freeze({ delayMin: [0, 1440], dailyMax: [1, 500], labels: 10, label: 30, noteWindowMin: 30 });
+export const ALERT_NOTE_WINDOW_MS = ALERT_ISSUE_LIMITS.noteWindowMin * 60_000;
 export function defaultAlertAuto() {
   return {
     enabled: false,
@@ -124,25 +126,41 @@ export function alertKindOf(key) { const k = String(key || '').split(':')[0]; re
  * @param {{ firing:Array<{key,alert,since}>, resolved:Array<{key,alert}> }} st
  * @param {object} cfg  loadAlertAuto()
  * @param {{ existing:Array, now:number, createdToday:number }} ctx  existing = findByOrigin(kind 'alert')
+ *
+ * v2.927(점검 B1-03 — 재현: 2분마다 깜빡이는 호스트가 약 4시간에 댓글 200개를 채워 담당자 댓글이 409):
+ *   · 다시 발생(again)도 **delayMin 분 넘게 이어질 때만**(새로 만들 때와 같은 유예 — 잠깐 깜빡인 것은 재발로 치지 않는다).
+ *   · 재발 · 해소 댓글은 이슈마다 ALERT_NOTE_WINDOW_MS 에 한 번 — 창 안이면 note:false(댓글 없이 출처에 수만 센다). 재발 횟수(reopen)는 계속 센다.
+ *   · 묶어 둔 변화가 있고 창이 지났는데 이번에 그 이슈에 다른 할 일이 없으면 summary(요약 댓글 한 줄 · 지금 해소 상태면 '검토').
  */
 export function planAlertIssues(st, cfg, { existing = [], now = Date.now(), createdToday = 0 } = {}) {
   const actions = []; let capped = 0;
   const byKey = new Map();
   for (const x of existing) if (x.origin?.alertKey) byKey.set(x.origin.alertKey, x);
+  const noteDue = (o) => now - (Number(o?.noteAt) || 0) >= ALERT_NOTE_WINDOW_MS;
+  const touched = new Set();
   let room = Math.max(0, cfg.dailyMax - createdToday);
   for (const f of st?.firing || []) {
     const kind = alertKindOf(f.key);
     if (!kind || !cfg.kinds[kind]) continue;
     const ex = byKey.get(f.key);
-    if (ex) { if (ex.origin.resolvedAt) actions.push({ type: 'again', key: ex.key, f }); continue; }
-    if (now - (Number(f.since) || now) < cfg.delayMin * 60_000) continue;
+    const young = now - (Number(f.since) || now) < cfg.delayMin * 60_000;
+    if (ex) {
+      if (ex.origin.resolvedAt && !young) { actions.push({ type: 'again', key: ex.key, f, note: noteDue(ex.origin) }); touched.add(ex.key); }
+      continue;
+    }
+    if (young) continue;
     if (room <= 0) { capped += 1; continue; }
     room -= 1;
     actions.push({ type: 'create', kind, f });
   }
   for (const r of st?.resolved || []) {
     const ex = byKey.get(r.key);
-    if (ex && !ex.origin.resolvedAt) actions.push({ type: 'resolve', key: ex.key, r });
+    if (ex && !ex.origin.resolvedAt) { actions.push({ type: 'resolve', key: ex.key, r, note: noteDue(ex.origin) }); touched.add(ex.key); }
+  }
+  for (const x of existing) {
+    const o = x.origin || {};
+    if (!o.alertKey || touched.has(x.key) || !alertKindOf(o.alertKey)) continue;
+    if ((Number(o.quietAgain) || 0) + (Number(o.quietResolve) || 0) > 0 && noteDue(o)) actions.push({ type: 'summary', key: x.key });
   }
   return { actions, capped };
 }
@@ -176,7 +194,8 @@ export function planBackupIssues(rows, cfg, { existing = [], createdToday = 0 } 
 
 /* ───── 실행 ───── */
 const SYSTEM_USER = 'alert-auto';
-const freshStatus = () => ({ ranAt: null, created: 0, commented: 0, review: 0, capped: 0, errors: 0, error: null, cappedAt: null });
+// v2.927(점검 B1-03): quiet — 창 안이라 댓글 없이 센 재발 · 해소 수 · commentCapped — 자동 댓글 상한(autoCommentMax)에 닿아 달지 못한 수
+const freshStatus = () => ({ ranAt: null, created: 0, commented: 0, review: 0, capped: 0, errors: 0, error: null, cappedAt: null, quiet: 0, commentCapped: 0 });
 const status = freshStatus();
 let capWarnedDay = '';
 export function alertIssuesStatus() { return { ...status }; }
@@ -190,8 +209,22 @@ function noteCap(capped, cfg, now) {
   if (capWarnedDay !== day) { capWarnedDay = day; console.warn(`[issues] 다른 알람 자동 등록 하루 상한(${cfg.dailyMax}건)에 닿아 ${capped}건을 만들지 않았습니다 — 이슈 › 설정 › 자동 등록`); }
 }
 function comment(key, body) {
-  try { addComment(key, { body: capStr(body, 1_900) }, SYSTEM_USER); status.commented += 1; }
-  catch (e) { status.errors += 1; status.error = `comment ${key}: ${String(e?.message || e).slice(0, 160)}`; }
+  try { addComment(key, { body: capStr(body, 1_900) }, SYSTEM_USER, { auto: true }); status.commented += 1; }
+  catch (e) {
+    if (e?.extra?.code === 'auto-comments-full') { status.commentCapped += 1; return; } // 사람 댓글 몫과 따로 — 재발 수는 출처(reopen)에 계속 남는다
+    status.errors += 1; status.error = `comment ${key}: ${String(e?.message || e).slice(0, 160)}`;
+  }
+}
+/** 묶어 둔 변화 한 마디('' = 없음). */
+const quietText = (o) => {
+  const a = Number(o?.quietAgain) || 0; const r = Number(o?.quietResolve) || 0;
+  return a || r ? ` · 앞서 묶어 둔 변화: 다시 발생 ${a}회 · 해소 ${r}회(댓글은 이슈마다 ${ALERT_ISSUE_LIMITS.noteWindowMin}분에 한 번)` : '';
+};
+/** 해소 → '검토'(설정이 review 이고 아직 검토 · 완료가 아닐 때). */
+function toReview(key, cfg) {
+  if (cfg.onResolve !== 'review') return;
+  const cur = findByOrigin((_o, x) => x.key === key)[0];
+  if (cur && cur.status !== 'review' && cur.status !== 'done') { setStatus(key, 'review', SYSTEM_USER, { note: '자동 등록: 알람 해소' }); status.review += 1; }
 }
 function make(body, origin, settings, viewers) {
   let auto = null;
@@ -227,15 +260,20 @@ export function applyAlertState(st, { now = Date.now() } = {}) {
         }, { kind: 'alert', alertKey: a.f.key, alertKind: a.kind, title: al.title || '' }, settings, viewers);
         created += 1; status.created += 1;
       } else if (a.type === 'again') {
-        const o = patchOrigin(a.key, (o2) => ({ ...o2, resolvedAt: null, reopen: (o2.reopen || 0) + 1 })).origin;
-        comment(a.key, `다시 발생했습니다(${o.reopen}회째) — ${a.f.alert?.title || a.f.key}`);
+        let before = null;
+        const o = patchOrigin(a.key, (o2) => { before = o2; return { ...o2, resolvedAt: null, reopen: (o2.reopen || 0) + 1, ...(a.note ? { noteAt: now, quietAgain: 0, quietResolve: 0 } : { quietAgain: (o2.quietAgain || 0) + 1 }) }; }).origin;
+        if (a.note) comment(a.key, `다시 발생했습니다(${o.reopen}회째) — ${a.f.alert?.title || a.f.key}${quietText(before)}`);
+        else status.quiet += 1;
       } else if (a.type === 'resolve') {
-        patchOrigin(a.key, (o2) => ({ ...o2, resolvedAt: now }));
-        comment(a.key, `해소: ${a.r.alert?.title || a.r.key} — 알람이 더 이상 발생하지 않습니다.`);
-        if (cfg.onResolve === 'review') {
-          const cur = findByOrigin((_o, x) => x.key === a.key)[0];
-          if (cur && cur.status !== 'review' && cur.status !== 'done') { setStatus(a.key, 'review', SYSTEM_USER, { note: '자동 등록: 알람 해소' }); status.review += 1; }
-        }
+        let before = null;
+        patchOrigin(a.key, (o2) => { before = o2; return { ...o2, resolvedAt: now, ...(a.note ? { noteAt: now, quietAgain: 0, quietResolve: 0 } : { quietResolve: (o2.quietResolve || 0) + 1 }) }; });
+        if (a.note) { comment(a.key, `해소: ${a.r.alert?.title || a.r.key} — 알람이 더 이상 발생하지 않습니다.${quietText(before)}`); toReview(a.key, cfg); }
+        else status.quiet += 1; // '검토' 로 옮기기도 묶는다 — 창이 지나 summary 가 그때 상태로 한다
+      } else if (a.type === 'summary') {
+        let before = null;
+        const o = patchOrigin(a.key, (o2) => { before = o2; return { ...o2, noteAt: now, quietAgain: 0, quietResolve: 0 }; }).origin;
+        comment(a.key, `알람이 오르내렸습니다 — 지금: ${o.resolvedAt ? '해소' : '발생 중'} · ${o.title || o.alertKey}${quietText(before)}`);
+        if (o.resolvedAt) toReview(a.key, cfg);
       }
     } catch (e) { status.errors += 1; status.error = `${a.type}: ${String(e?.message || e).slice(0, 180)}`; console.warn(`[issues] 다른 알람 자동 등록 실패(${status.error})`); }
   }
