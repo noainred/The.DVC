@@ -89,7 +89,7 @@ async function computeDash(now) {
   return {
     ok: true, at: now, ...dash,
     hourly: hourlySeries(now), transitions: recentTransitions(OVERVIEW_TRANSITIONS), since: transitionsSince(),
-    limits: { hours: HOURS_KEEP, transitions: OVERVIEW_TRANSITIONS },   // v2.927(점검 D1-08): 화면 문구('최근 N시간 · 최근 N건')용
+    limits: { hours: HOURS_KEEP, transitions: OVERVIEW_TRANSITIONS },   // v2.930(점검 D1-08): 화면 문구('최근 N시간 · 최근 N건')용
     edges: edgeRows(now), executes: executesHere(), role: pollerRole(),
     alerts: { enabled: getAlertSettings().enabled, ...alertStats() },
     kindLabels: Object.fromEntries(Object.entries(kindMeta()).map(([k, v]) => [k, v.label])),
@@ -114,7 +114,7 @@ svcmonRouter.get('/settings-sync/catalog', adminOnly, fullScopeOnly, async (req,
     options: getOptions(), drift: { ring: driftRing(), daily: dailySummary(), last: lastDetection() },
     edges: edgeRows().map((e) => ({ ...e, syncTargets: assignedTargets.get(e.agent) || 0 })),
     events: syncEvents().slice(0, 50), limits: { maxApply: MAX_APPLY, goneActions: GONE_ACTIONS }, root: SYNC_ROOT,
-    // v2.927(점검 D1-08): 화면 문구('기동 N 뒤부터 M마다')가 서버 상수를 박지 않게 감지 주기를 싣는다.
+    // v2.930(점검 D1-08): 화면 문구('기동 N 뒤부터 M마다')가 서버 상수를 박지 않게 감지 주기를 싣는다.
     detect: detectTiming(),
     role: pollerRole(), storeRev: storeRevision(),
   });
@@ -206,7 +206,7 @@ svcmonRouter.get('/overview', async (req, res) => {
 
 /* ── 실패 알림 설정 ── */
 svcmonRouter.get('/alert-settings', canEdit, (req, res) => {
-  // v2.927(점검 D1-08): 요약 묶음 창·기준 건수를 싣는다 — 화면이 '20초 안에 6건' 을 박지 않게(+1 해석은 서버 alertBatchInfo 한 곳).
+  // v2.930(점검 D1-08): 요약 묶음 창·기준 건수를 싣는다 — 화면이 '20초 안에 6건' 을 박지 않게(+1 해석은 서버 alertBatchInfo 한 곳).
   res.json({ ok: true, settings: getAlertSettings(), stats: alertStats(), batch: alertBatchInfo() });
 });
 svcmonRouter.put('/alert-settings', adminOnly, fullScopeOnly, (req, res) => {

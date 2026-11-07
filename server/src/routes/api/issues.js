@@ -196,7 +196,7 @@ export function registerIssues(api) {
   api.get('/issues/templates', creators, (req, res) => {
     res.set('Cache-Control', 'no-store');
     const canManage = isAdmin(req) && isFullReadWriteScope(req.user, store.get());
-    // v2.927(점검 B1-07): 문지기는 creators(범위 운영자 · 요청 권한 viewer 포함)라 관리자 계정명(createdBy · updatedBy)은 관리할 수 있는 사람에게만
+    // v2.930(점검 B1-07): 문지기는 creators(범위 운영자 · 요청 권한 viewer 포함)라 관리자 계정명(createdBy · updatedBy)은 관리할 수 있는 사람에게만
     const items = canManage ? allIssueTemplates() : allIssueTemplates().map(({ createdBy, updatedBy, ...t }) => { void createdBy; void updatedBy; return t; });
     res.json({ ok: true, items, loadError: isAdmin(req) ? issueTemplatesLoadError() : null, limits: ISSUE_TEMPLATE_LIMITS, canManage });
   });
@@ -245,7 +245,7 @@ export function registerIssues(api) {
     res.set('Cache-Control', 'no-store');
     if (isDemoGuest(req.user)) return res.json({ ok: true, items: [], unread: 0, total: 0, demo: true, limits: INBOX_LIMITS });
     const access = accessOf(req);
-    // v2.927(점검 B1-05): issues/visibility.js · 이슈 canSee 와 같은 규칙 — 범위 계정은 법인 없는 줄(공용 이슈 · 공용 위키)도 보지 않는다
+    // v2.930(점검 B1-05): issues/visibility.js · 이슈 canSee 와 같은 규칙 — 범위 계정은 법인 없는 줄(공용 이슈 · 공용 위키)도 보지 않는다
     //   (예전 `!vc ||` 가 먼저 참이 돼, 전체 범위였다가 좁혀진 계정이 공용 이슈 제목 · 댓글 앞부분 줄을 30일 동안 계속 봤다)
     const canSee = (vc) => !access.read || (!!vc && access.read.has(vc));
     const { limit } = pageArgs(req.query, { def: 50, max: 100 });
@@ -567,7 +567,7 @@ export function registerIssues(api) {
       const c = addComment(req.params.key, req.body, userOf(req), { access });
       audit(req, 'issue.comment.create', `${req.params.key}/${c.id}`);
       // v2.907 선택(결정 5): 언급한 사람을 관찰자로 — 그 법인을 볼 수 없는 사람은 빼고 센다
-      // v2.927(점검 B1-06): 응답(added · skipped)이 '그 이름의 계정이 있는가 · 그 법인을 보는가' 판정이 되지 않게 — 전체 범위 쓰기 계정이 아니면
+      // v2.930(점검 B1-06): 응답(added · skipped)이 '그 이름의 계정이 있는가 · 그 법인을 보는가' 판정이 되지 않게 — 전체 범위 쓰기 계정이 아니면
       //   이름 해석 후보를 멘션 자동완성(mentionCandidates)과 같게(참여자 + 볼 수 있는 이슈에 나온 이름 + 자기) 좁히고, 뺀 사람은 이름 없이 수만.
       //   알림 수신 해석(notify.js recipientsOf)은 응답에 나오지 않으므로 그대로 둔다.
       let watch = null;

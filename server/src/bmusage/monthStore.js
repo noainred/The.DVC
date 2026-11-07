@@ -446,9 +446,9 @@ async function clearPend(list, agent) {
 
 /** 5분 행들 → 롤업 한 줄의 값(순수 — 재집계용). 열 순서는 cols(H1_COLS · D1_COLS) 그대로. */
 /*
- * v2.927(점검 E1-02): 재집계 비용의 대부분이 이 함수였다(하루 277행에 약 4ms — 행 × 열마다 `${p}_sum` 같은 열쇠 문자열을 새로 만들고 큰 객체에 썼다).
+ * v2.930(점검 E1-02): 재집계 비용의 대부분이 이 함수였다(하루 277행에 약 4ms — 행 × 열마다 `${p}_sum` 같은 열쇠 문자열을 새로 만들고 큰 객체에 썼다).
  *   열쇠는 rolls 배열마다 한 번 만들고(WeakMap) 합·개수·최대·피크는 지역 배열에 모은 뒤 마지막에 한 번 쓴다. 더하는 순서(시각 순)·비교 규칙은 같다 —
- *   결과가 예전 판본과 같음을 시험이 대조한다(sweep2927BmPerf).
+ *   결과가 예전 판본과 같음을 시험이 대조한다(sweep2930BmPerf).
  */
 const _rollKeys = new WeakMap();
 function rollKeysOf(rolls) {
@@ -488,7 +488,7 @@ export function aggregateRows(rows, { agent, key, bucketCol, bucket, rolls }) {
 }
 
 /*
- * v2.927(점검 E1-02): 보정은 한 번에 끝내지 않는다 — 롤업이 한 번 실패하면 대기가 서버 수만큼(200대면 200) 남고, 예전에는 다음 틱이
+ * v2.930(점검 E1-02): 보정은 한 번에 끝내지 않는다 — 롤업이 한 번 실패하면 대기가 서버 수만큼(200대면 200) 남고, 예전에는 다음 틱이
  *   버킷·날마다 원시를 다시 읽어(하루 277행) **양보 없이** 재집계했다(200대 · 23시 실측 1.3초 정지). 1일 파일이 계속 안 열리면 그것을 매 틱 되풀이했다.
  *   ① 버킷·날 사이 시간 기준 양보(createYielder) ② 한 번에 쓰는 시간 상한(REPAIR_BUDGET_MS — 남은 대기는 _pend 에 그대로 두고 다음 틱이 잇는다) ·
  *   serial() 안이라 그동안 다른 적재가 기다린다 — 그 대기를 이 상한으로 묶는다 ③ 같은 (agent·key·날) 묶음은 하루 원시를 **한 번** 읽어 시간 버킷과
@@ -515,7 +515,7 @@ function repairSelect(rawDb) {
  * 보정 대기 처리 — 원시에서 그 시간(·하루) 버킷을 다시 집계해 롤업 행을 **바꾼다**(누적이 아니라 교체 — 다시 해도 같은 값).
  *  · 1일 재집계는 dailyLiveAfter 보다 나중 행만 센다(마이그레이션이 옮긴 예전 원시는 1일 사본 표가 따로 갖는다 — 두 번 세지 않게).
  *  · 하루의 원시가 보존 밖으로 일부 지워졌으면(rawKeepFrom 보다 하루 시작이 이르면) 1일은 다시 집계하지 않는다(덜 센 값으로 덮지 않게) — expiredDaily 로 센다.
- *  · v2.927(점검 E1-02): budgetMs(시간 상한 — 넘으면 deferred · budgetHit) · sliceMs(양보 간격) · yielder(호출부 양보기) · ignoreBackoff(마이그레이션 — 자기 재시도 정책이 있다).
+ *  · v2.930(점검 E1-02): budgetMs(시간 상한 — 넘으면 deferred · budgetHit) · sliceMs(양보 간격) · yielder(호출부 양보기) · ignoreBackoff(마이그레이션 — 자기 재시도 정책이 있다).
  * @returns {Promise<{buckets:number, days:number, expiredDaily:number, errors:string[], skipped:number, deferred:number, budgetHit?:boolean, backoff?:Array}>}
  */
 export async function repairPending({ dailyLiveAfter = null, rawKeepFrom = null, max = 2_000, budgetMs = REPAIR_BUDGET_MS, sliceMs = 15, ignoreBackoff = false, yielder = null } = {}) {

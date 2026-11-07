@@ -56,7 +56,7 @@ export function nicUplinkText(list) {
 export function uplinkSummary(d, nics = []) {
   if (!d) return { text: '', note: '' };
   if (d.cvpUnavailable) return { text: 'CVP DB 없음', note: 'CVP 수집 DB 를 열지 못했습니다.' };
-  // v2.927(점검 A1-03): 범위 계정 + 법인 미지정 vCenter 는 서버가 CVP 를 하나도 싣지 않는다 — '등록된 CVP 가 없다' 가 아니라 그 이유를 말한다.
+  // v2.930(점검 A1-03): 범위 계정 + 법인 미지정 vCenter 는 서버가 CVP 를 하나도 싣지 않는다 — '등록된 CVP 가 없다' 가 아니라 그 이유를 말한다.
   if (!d.servers && d.corpMissing) return { text: 'CVP 없음', note: '범위 계정은 자기 법인의 CVP 만 봅니다 — 이 호스트의 vCenter 에 법인이 지정되지 않아 CVP 매칭을 보여 주지 않습니다(설정 › 법인).' };
   if (!d.servers) return { text: 'CVP 없음', note: d.corpLimited || d.hostCorpMatched ? '이 호스트 법인에 등록된 CVP 서버가 없습니다(매칭은 그 호스트 법인의 CVP 만 봅니다 — 법인 · vCenter 1:1).' : '등록된 CVP 서버가 없습니다(특수 기능 › Arista CloudVision).' };
   const ups = Array.isArray(d.uplinks) ? d.uplinks : [];

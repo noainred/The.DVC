@@ -37,7 +37,7 @@ export default function AlertTab({ isAdmin = false }) {
     catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
   const st = d.stats || {};
-  // v2.927(점검 D1-08): 요약 묶음 창·기준 건수는 서버 값(/alert-settings batch) — 못 받으면 숫자 없이 말한다.
+  // v2.930(점검 D1-08): 요약 묶음 창·기준 건수는 서버 값(/alert-settings batch) — 못 받으면 숫자 없이 말한다.
   const win = periodText(d.batch?.batchMs);
   const from = Number.isInteger(d.batch?.summaryFrom) && d.batch.summaryFrom > 0 ? d.batch.summaryFrom : null;
   const batchText = win && from ? `${win} 안에 ${from}건 이상 몰리면(회선·엣지 장애)` : '짧은 시간에 한꺼번에 몰리면(회선·엣지 장애)';

@@ -56,7 +56,7 @@ export const TYPES = Object.freeze(['incident', 'task', 'request', 'improve', 'e
 export const PRIORITIES = Object.freeze(['p0', 'p1', 'p2', 'p3']);
 export const LIMITS = Object.freeze({
   issueMax: 2000, title: 200, body: 10000, commentMax: 200, commentBody: 2000,
-  // v2.927(점검 B1-03 — 재현): 자동 등록(알람 · 파트 장애)이 다는 댓글은 따로 센다 — 사람 몫(commentMax)을 쓰지 않는다
+  // v2.930(점검 B1-03 — 재현): 자동 등록(알람 · 파트 장애)이 다는 댓글은 따로 센다 — 사람 몫(commentMax)을 쓰지 않는다
   autoCommentMax: 100,
   labelMax: 10, label: 30, component: 60, watcherMax: 50, historyMax: 300, name: 64, blockReason: 500, progressNote: 300, activityMax: 300,
   // v2.871 감사 A3-02: 요청 등록(viewer)은 전체 상한에서 운영자 몫(requestReserve)을 남기고, 한 사람이 열어 둔 요청은 requestOpenPerUser 건까지.
@@ -576,7 +576,7 @@ function originField(o) {
       kind: o.kind, alertKey: t(o.alertKey, 300), alertKind: t(o.alertKind, 32), title: t(o.title, 200), deviceName: t(o.deviceName, 200),
       partKeys: keys(o.partKeys), resolved: [], reopen: Math.max(0, Math.min(9999, Math.trunc(Number(o.reopen) || 0))),
       resolvedAt: Number.isFinite(Number(o.resolvedAt)) && Number(o.resolvedAt) > 0 ? Number(o.resolvedAt) : null,
-      // v2.927(점검 B1-03) 재발 · 해소 댓글 묶기 — 마지막 자동 댓글 시각 · 그 뒤 묶어 둔(댓글을 달지 않은) 재발 · 해소 수
+      // v2.930(점검 B1-03) 재발 · 해소 댓글 묶기 — 마지막 자동 댓글 시각 · 그 뒤 묶어 둔(댓글을 달지 않은) 재발 · 해소 수
       noteAt: Number.isFinite(Number(o.noteAt)) && Number(o.noteAt) > 0 ? Number(o.noteAt) : null,
       quietAgain: Math.max(0, Math.min(99_999, Math.trunc(Number(o.quietAgain) || 0))),
       quietResolve: Math.max(0, Math.min(99_999, Math.trunc(Number(o.quietResolve) || 0))),
@@ -737,12 +737,12 @@ function vcenterField(v, access, known) {
 
 /* ───── 조회 ───── */
 const commentsOf = (x) => (Array.isArray(x?.comments) ? x.comments.filter((c) => c && typeof c === 'object' && typeof c.id === 'string') : []);
-/** 응답에 싣는 댓글 칸(화이트리스트 — 고치기 전 원문 prev 는 싣지 않는다 · v2.927 점검 B1-01 에서 고치기 응답도 같은 모양으로). */
+/** 응답에 싣는 댓글 칸(화이트리스트 — 고치기 전 원문 prev 는 싣지 않는다 · v2.930 점검 B1-01 에서 고치기 응답도 같은 모양으로). */
 const commentOut = (c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt, ...(c.editedAt ? { editedAt: c.editedAt, edits: c.edits || 1 } : {}) });
 /**
- * v2.927(점검 B1-03): 자동 댓글 판정 — 저장 때 단 표지(auto). 표지가 생기기 전(v2.908~v2.926)에 자동 등록이 단 댓글은 그 계정 이름으로 본다
+ * v2.930(점검 B1-03): 자동 댓글 판정 — 저장 때 단 표지(auto). 표지가 생기기 전(v2.908~v2.926)에 자동 등록이 단 댓글은 그 계정 이름으로 본다
  * (issues/alertIssues.js SYSTEM_USER 'alert-auto' · issues/autoCreate.js SYSTEM_USER 'partfault' — 순환 import 를 피해 이름만 둔다).
- * 이미 사람 몫 200개가 자동 댓글로 찬 이슈도 이 판정으로 사람이 다시 댓글을 달 수 있다. v2.927 부터 새 댓글은 auto 를 늘 적으므로(true/false)
+ * 이미 사람 몫 200개가 자동 댓글로 찬 이슈도 이 판정으로 사람이 다시 댓글을 달 수 있다. v2.930 부터 새 댓글은 auto 를 늘 적으므로(true/false)
  * 이름 판정은 표지 없는 옛 댓글에만 걸린다(같은 이름의 사람 계정이 새로 단 댓글은 사람 몫으로 센다).
  */
 export const AUTO_COMMENT_AUTHORS = Object.freeze(['alert-auto', 'partfault']);
@@ -1442,7 +1442,7 @@ export function activityFeed({ access = FULL_ACCESS, limit = 100, since = 0 } = 
 
 /**
  * 댓글 달기. auto=true 는 서버 내부 자동 등록(알람 · 파트 장애)만 — 자동 댓글은 autoCommentMax 로 따로 세고 사람 몫(commentMax)은 사람 댓글만 센다
- * (v2.927 점검 B1-03 — 깜빡이는 알람의 '다시 발생' · '해소' 댓글이 200개를 채워 담당자가 409 로 댓글을 못 달았다).
+ * (v2.930 점검 B1-03 — 깜빡이는 알람의 '다시 발생' · '해소' 댓글이 200개를 채워 담당자가 409 로 댓글을 못 달았다).
  */
 export function addComment(key, body, user, { access = FULL_ACCESS, auto = false } = {}) {
   const c = load();
@@ -1476,7 +1476,7 @@ export function editComment(key, commentId, body, user, { access = FULL_ACCESS }
   const before = new Set(mentionsOf(cm.body));
   const fresh = mentionsOf(nextBody).filter((m) => !before.has(m));
   if (fresh.length) emit({ type: 'comment', edit: true, actor: user, issue: evIssue(y), commentId, excerpt: capStr(nextBody, 200), mentions: fresh });
-  return commentOut(edited); // v2.927(점검 B1-01): 작성자 응답에도 prev 를 싣지 않는다(viewIssue 와 같은 모양)
+  return commentOut(edited); // v2.930(점검 B1-01): 작성자 응답에도 prev 를 싣지 않는다(viewIssue 와 같은 모양)
 }
 
 /** 댓글 삭제 — 작성자 본인 또는 관리자(isMod). */

@@ -1,4 +1,4 @@
-// v2.927 — 최근 변경 점검(축 4 D1-01 ~ D1-09 · 축 5 E1-05) Monitoring(svcmon) 묶음 회귀. 고정하는 것:
+// v2.930 — 최근 변경 점검(축 4 D1-01 ~ D1-09 · 축 5 E1-05) Monitoring(svcmon) 묶음 회귀. 고정하는 것:
 //  D1-01 load-error 표지가 없는 등록부(vCenter · NSX · Horizon · 배포 대상 · 중계 토폴로지 · 물리 GPU · 캡처 · 통합 계정)도 손상 보존본만 있으면
 //        sourceErrors → 연동 대상은 '사라짐' 이 아니라 '보류'. 파일이 그냥 없으면(진짜 0건) 보류가 아니다. 실제 로더 · 실제 파일 이름으로 대조.
 //  D1-02 데모 계정은 설정 연동(/api/svcmon/settings-sync/*)을 조회도 못 한다(통신 점검 link-check 와 같은 카탈로그). 알림 설정 조회는 연다.
@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep2927svcmon-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep2930svcmon-'));
 process.env.CONFIG_DIR = TMP;
 process.env.AUTH_ENABLED = 'true';
 // 캐시하는 로더(배포 대상 · 물리 GPU · 캡처 · 통합 계정)는 첫 읽기에서 굳는다 — 어떤 모듈이 먼저 읽든 손상본을 보게 import 보다 먼저 쓴다.

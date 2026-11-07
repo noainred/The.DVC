@@ -50,7 +50,7 @@ export const READ_DENY = [
   '/api/tools/edge-log-local',
   // v2.820: Bareos Director 설정(주소·콘솔 이름)과 Director 카탈로그(실제 Director 에 접속) — 설정 탭.
   '/api/tools/bareos-backup/settings',   // v2.823: 카탈로그·매핑 제안·자동 설정도 /settings/directors/… 아래(옛 /catalog 경로는 없앴다 — 검토 I5)
-  // v2.927(점검 D1-02): Monitoring 설정 연동 — 통신 점검(/api/tools/link-check)과 같은 카탈로그(전 시스템 이름·호스트·포트·담당 엣지)를 싣는다.
+  // v2.930(점검 D1-02): Monitoring 설정 연동 — 통신 점검(/api/tools/link-check)과 같은 카탈로그(전 시스템 이름·호스트·포트·담당 엣지)를 싣는다.
   '/api/svcmon/settings-sync',
 ];
 

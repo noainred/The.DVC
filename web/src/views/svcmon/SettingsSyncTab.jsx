@@ -124,7 +124,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
   const c = data.counts || {};
   const daily = data.drift?.daily || [];
   const ring = data.drift?.ring || [];
-  const detectEvery = detectText(data.detect).every;   // v2.927(점검 D1-08): 감지 주기는 서버 값
+  const detectEvery = detectText(data.detect).every;   // v2.930(점검 D1-08): 감지 주기는 서버 값
   const present = (c.total || 0) - (c.gone || 0) - (c.held || 0);
   const pickedRows = rows.filter((r) => picked.has(r.key));
   const togglePick = (k) => setPicked((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else if (n.size < maxApply) n.add(k); return n; });

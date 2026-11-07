@@ -480,7 +480,7 @@ export async function pruneDevices(agent, keepByCvp = {}, { cvpIds = null } = {}
     for (const cvpId of Object.keys(keepByCvp || {})) {
       if (!Array.isArray(keepByCvp[cvpId])) continue;
       /*
-       * v2.927(점검 E1-06): 예전에는 push 마다 고아가 0건이어도 그 CVP 의 L2 행 전부를 NOT IN 으로 훑었다(40만 행 68ms — cvp-data 청크 0 마다).
+       * v2.930(점검 E1-06): 예전에는 push 마다 고아가 0건이어도 그 CVP 의 L2 행 전부를 NOT IN 으로 훑었다(40만 행 68ms — cvp-data 청크 0 마다).
        *   고아 장비 키는 장비당 1행인 l2_meta 에서 먼저 고르고 그 키만 지운다(스캔 비용 = 장비 수). l2_meta 없이 남은 행(예외 경로)은
        *   전체 훑기를 (agent, CVP)마다 L2_FULL_SWEEP_MS 에 한 번만 한다 — 정리를 없애지 않고 횟수만 줄인다.
        */
@@ -751,7 +751,7 @@ export async function portWindowSums(ports = [], { sinceMs = 24 * 3600_000, rece
  * @param {string[]} terms 소문자 단서(LIKE 의 % _ 는 이스케이프)
  */
 /*
- * v2.927(점검 A1-07): 예전에는 단서를 앞 8개만 썼다 — 호스트가 MAC 표기 4가지 × NIC 수를 넘겨 vmnic2 부터의 MAC 은 묻지도 않았고 잘림 표시도 없었다.
+ * v2.930(점검 A1-07): 예전에는 단서를 앞 8개만 썼다 — 호스트가 MAC 표기 4가지 × NIC 수를 넘겨 vmnic2 부터의 MAC 은 묻지도 않았고 잘림 표시도 없었다.
  *   이름 단서(`terms`)는 그대로 lower(descr) LIKE 로, MAC(`macs` — 12자 16진)은 설명에서 ':' '-' '.' 를 뺀 글자에 **한 표기로** 묻는다
  *   (표기 4가지를 단서 4개로 늘리지 않는다 — 한 번 훑는 OR 길이를 NIC 수에 비례하게). 상한을 넘긴 단서는 `termsTruncated` 로 밝힌다.
  *   경계 판정(다른 16진 문자열 안의 우연 일치)은 지금처럼 cvp/hostMatch matchUplinks 가 한다.
@@ -1466,7 +1466,7 @@ export async function l2Status(owners = []) {
   }
   return { fdbDevices, lldpDevices, lastAt, fdbFailing, lldpFailing };
 }
-/** v2.927(E1-06): l2_meta 없이 남은 고아 L2 행을 찾는 전체 훑기의 최소 간격((agent, CVP)마다 · 프로세스 메모리 — 재기동 뒤 첫 push 는 한 번 훑는다). */
+/** v2.930(E1-06): l2_meta 없이 남은 고아 L2 행을 찾는 전체 훑기의 최소 간격((agent, CVP)마다 · 프로세스 메모리 — 재기동 뒤 첫 push 는 한 번 훑는다). */
 export const L2_FULL_SWEEP_MS = 6 * 3_600_000;
 const _l2FullSweepAt = new Map();
 export function _resetL2SweepForTest() { _l2FullSweepAt.clear(); }

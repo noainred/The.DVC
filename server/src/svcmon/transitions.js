@@ -41,7 +41,7 @@ const _alerted = new Map();     // `${scope}|${testId}` -> { at, label, path, sc
 const _warned = new Map();
 const inScope = (s, p) => s.scope !== 'settings' || t(p) === SYNC_PATH_PREFIX || t(p).startsWith(`${SYNC_PATH_PREFIX}\\`);
 // 알림을 끄면 '알린 상태' 를 비운다 — 다시 켰을 때 그 사이 복구된 점검에 거짓 복구 알림을 보내지 않게.
-// v2.927(점검 D1-05 ①②): 범위를 좁히거나 경고 알림을 끌 때는 비우지 않는다 — 대신 복구 결과가 범위·종류와 관계없이 상태를 지운다(evalAlert).
+// v2.930(점검 D1-05 ①②): 범위를 좁히거나 경고 알림을 끌 때는 비우지 않는다 — 대신 복구 결과가 범위·종류와 관계없이 상태를 지운다(evalAlert).
 //   저장 때 비우면 범위를 다시 넓힌 순간 아직 실패 중인(이미 알린) 점검에 실패 알림이 한 번 더 나간다.
 onAlertSettingsSaved((next) => { if (!next.enabled) { _alerted.clear(); _warned.clear(); } });
 let _queue = [];                // 보낼 알림(창으로 묶는다)
@@ -105,7 +105,7 @@ export function noteResult(r) {
  *   정상이 '복구' 로 지워 실패/복구가 번갈아 나갔다). 엣지가 같은 이름 키를 둘 이상 가지면(`test.dupName` — svcmonEdge 가 센다) 그 행은
  *   **testId 키**로 떨어뜨린다(재배정 때 한 번 더 알릴 수 있지만 거짓 복구는 없다). 구분자는 제어 문자(\u0001) — 이름·경로의 '|' 와 섞이지 않게.
  * 엣지 메타(이름)를 아직 모르면(중앙 재시작 직후 — 메타는 다음 push 에 온다) **null = 판정 보류** — 이름 없이 내부 id 로 알리지 않는다.
- * v2.927(점검 D1-03 — 보류에는 시한): 메타가 보류 시한(svcmonEdge metaAlertHoldMs) 안에 오지 않으면 svcmonEdge 가 `metaTimeout:true` 로 다시 판정한다 —
+ * v2.930(점검 D1-03 — 보류에는 시한): 메타가 보류 시한(svcmonEdge metaAlertHoldMs) 안에 오지 않으면 svcmonEdge 가 `metaTimeout:true` 로 다시 판정한다 —
  *   그때만 testId 키(`엣지 \u0001 # id`)로 판정한다(무기한 보류 금지 · 루트 CLAUDE.md '보류에는 시한'). 나중에 메타가 오면 이름 키로 한 번 더 알릴 수 있다.
  */
 const SEP = '\u0001';
@@ -129,7 +129,7 @@ export function noteAlertOnly(r) {
     const status = t(r?.status); const testId = t(r?.testId);
     if (!testId || !status) return;
     evalAlert({ at: Number(r?.at) || Date.now(), scope: t(r?.scope), testId, status, streak: Number(r?.streak) || 1, reply: t(r?.reply), target: r?.target || {}, test: r?.test || {},
-      metaTimeout: r?.metaTimeout === true });   // v2.927(점검 D1-03): 보류 시한을 넘긴 재판정만 testId 키로
+      metaTimeout: r?.metaTimeout === true });   // v2.930(점검 D1-03): 보류 시한을 넘긴 재판정만 testId 키로
   } catch { /* 알림은 부가 정보 */ }
 }
 
@@ -137,14 +137,14 @@ function evalAlert(x) {
   const s = getAlertSettings();
   if (!s.enabled) return;
   const path = t(x.target?.path);
-  // 키가 없으면(엣지 이름을 아직 모름) 보류 — 범위 검사보다 먼저(경로를 모르면 범위도 모른다 · v2.927 점검 D1-03: '설정 연동 대상만' 범위에서 빠지던 문제).
+  // 키가 없으면(엣지 이름을 아직 모름) 보류 — 범위 검사보다 먼저(경로를 모르면 범위도 모른다 · v2.930 점검 D1-03: '설정 연동 대상만' 범위에서 빠지던 문제).
   const key = alertKeyOf(x);
   const heldKey = `${x.scope}${SEP}${x.testId}`;
   if (!key) { if (_held.size < HELD_MAX) _held.add(heldKey); return; }
   _held.delete(heldKey);
   const label = `${t(x.target?.name) || t(x.target?.host) || x.testId} › ${t(x.test?.name) || t(x.test?.type)}`;
   const where = x.scope ? `엣지 ${x.scope}` : '이 포탈';
-  // v2.927(점검 D1-05 ① — 재현): 복구는 범위 검사보다 **먼저** — 범위 밖 복구도 '알린 상태' 는 지운다(알림만 생략). 예전에는 범위 검사에서 먼저
+  // v2.930(점검 D1-05 ① — 재현): 복구는 범위 검사보다 **먼저** — 범위 밖 복구도 '알린 상태' 는 지운다(알림만 생략). 예전에는 범위 검사에서 먼저
   //   돌아가 상태가 남았고, '전체' 로 되돌리면 오래전 복구된 점검에 복구 알림('이상 지속 약 360분')이 나갔다.
   //   ②(반증: 설계 판단): 경고만 알렸던 점검의 복구는 **경고 알림이 켜져 있을 때만** 보낸다(상태는 늘 지운다) — 범위와 같은 규칙(끈 종류·범위 밖은 상태만 닫는다).
   if (x.status === 'ok') {
@@ -173,7 +173,7 @@ function evalAlert(x) {
 }
 
 /*
- * v2.927(점검 D1-05 ③): 대상·점검을 지우거나 끄면 결과가 더 오지 않아 '알린 상태' 가 닫히지 않았다(알림 탭 '지금 알린 상태: 실패 N' 이 실패 중인
+ * v2.930(점검 D1-05 ③): 대상·점검을 지우거나 끄면 결과가 더 오지 않아 '알린 상태' 가 닫히지 않았다(알림 탭 '지금 알린 상태: 실패 N' 이 실패 중인
  *   점검이 없어도 N). 결과가 멈추는 자리에서 지운다(복구 알림은 보내지 않는다 — 결과가 아니다):
  *   · 이 포탈의 폴러 — 색인을 다시 만들 때 살아 있는 점검 id 로(scope '' 키는 `|testId` — 안정).
  *   · 중앙의 엣지 수신 — 완결 GC 가 행을 지운 뒤 **남은 행의 알림 키**로(v2.928 이름 키: 재배정으로 id 만 바뀐 점검은 키가 같아 남는다 — 같은 실패를
@@ -258,7 +258,7 @@ export async function flushAlerts() {
   const list = buildAlerts(items);
   for (const a of list) {
     await sendAlert(a);
-    // v2.927(점검 D1-06): 요약 키는 `…:summary:<시각>` 이다(반증 M4 — 고정 키는 억제 창에 버려졌다) — 끝이 ':summary' 인지만 보면 늘 '개별' 로 셌다.
+    // v2.930(점검 D1-06): 요약 키는 `…:summary:<시각>` 이다(반증 M4 — 고정 키는 억제 창에 버려졌다) — 끝이 ':summary' 인지만 보면 늘 '개별' 로 셌다.
     if (/:summary(:|$)/.test(a.key)) _sentStats.summaries += 1; else _sentStats.individual += 1;
   }
   _sentStats.lastAt = Date.now();
@@ -285,7 +285,7 @@ export function hourlySeries(now = Date.now()) {
 }
 
 /**
- * v2.927(점검 D1-08): 요약 묶음 규칙 — 화면 문구가 상수를 박지 않게 API 로 싣는다. 요약은 창 안의 같은 종류가 상한(ALERT_BATCH_INDIVIDUAL_MAX)을
+ * v2.930(점검 D1-08): 요약 묶음 규칙 — 화면 문구가 상수를 박지 않게 API 로 싣는다. 요약은 창 안의 같은 종류가 상한(ALERT_BATCH_INDIVIDUAL_MAX)을
  *   **넘을 때**라 '몇 건 이상이면 요약' 은 상한 + 1 이다(+1 해석은 여기 한 곳 — buildAlerts 의 `list.length <= ALERT_BATCH_INDIVIDUAL_MAX` 와 같은 뜻).
  */
 export function alertBatchInfo() {

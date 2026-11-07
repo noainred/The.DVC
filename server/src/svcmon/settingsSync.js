@@ -375,7 +375,7 @@ let _ring = [];                  // [{ at, new, changed, gone, held, problem, li
 let _events = [];                // [{ at, kind:'drift'|'gone'|'apply'|'auto', text }]
 let _last = null;                // { at, ms, counts, sourceErrors }
 let _prevKeys = null;            // { new:Set, changed:Set, gone:Set }
-let _lastAutoSummary = '';       // v2.927(점검 D1-04): 바로 앞 자동 등록 실패 문구(같은 실패를 5분마다 쌓지 않게)
+let _lastAutoSummary = '';       // v2.930(점검 D1-04): 바로 앞 자동 등록 실패 문구(같은 실패를 5분마다 쌓지 않게)
 
 export function pushEvent(ev) {
   _events.push({ at: Date.now(), ...ev, text: t(ev?.text).slice(0, 400) });
@@ -509,7 +509,7 @@ const NAME_MAX = 120;   // svcmon/testSchema.js TARGET_FIELDS name.max — 넘�
 const nameKeyOf = (p, name) => `${t(p)}\u0001${t(name).toLowerCase()}`;
 
 /**
- * v2.927(점검 D1-04 — 재현): 설정 연동 대상의 이름 정하기. 같은 엣지가 '수집 서버' 와 '에이전트 배포 대상' 에 같은 이름(KR-EDGE)으로 있으면
+ * v2.930(점검 D1-04 — 재현): 설정 연동 대상의 이름 정하기. 같은 엣지가 '수집 서버' 와 '에이전트 배포 대상' 에 같은 이름(KR-EDGE)으로 있으면
  *   둘 다 `설정 연동\중앙↔엣지\전역` 에 놓여 경로+이름이 같다 → 둘째는 대량 등록 중복 규칙(store dupKey)으로 늘 '건너뜀' 이 되어 영원히 '새 항목' 이었다.
  *   폴더 안 이름이 대상의 식별자라는 규칙(CSV 묶음 · 엣지 사본 조인 · 개요 조인)은 그대로 두고, **겹칠 때만** 종류 라벨을 붙인다(`KR-EDGE (에이전트 배포 대상)`).
  *   붙여도 겹치면 null(건너뜀 — 대량 가져오기 등 다른 경로의 이름 중복 규칙은 바꾸지 않는다).
@@ -532,7 +532,7 @@ export function planApply(rows, keys, { enabled = false, goneAction = 'disable',
   const want = new Set((Array.isArray(keys) ? keys : []).map(t).filter(Boolean));
   const byKey = new Map(rows.map((r) => [r.key, r]));
   const add = []; const change = []; const gone = []; const skip = [];
-  // v2.927(점검 D1-04): 이미 있는 대상(구분 infra)과 이번 계획에서 앞서 정한 이름 — syncNameFor 가 겹침을 본다.
+  // v2.930(점검 D1-04): 이미 있는 대상(구분 infra)과 이번 계획에서 앞서 정한 이름 — syncNameFor 가 겹침을 본다.
   const taken = new Set();
   for (const st of (svcTargets || listTargets())) if (t(st?.kind || 'infra') === 'infra') taken.add(nameKeyOf(st.path, st.name));
   for (const k of want) {
@@ -588,7 +588,7 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
     out.committed = r.committed;
     out.added = r.added; out.newTests = r.newTests; out.addErrors = r.errors.slice(0, 200); out.addSkipped = r.skipped.slice(0, 200);
     if (r.committed && r.added) {
-      // v2.927(점검 D1-04): 실제로 추가된 키만 known — 대량 등록이 건너뛴 행(row = 입력 순번 1..N)까지 넣으면 연동된 적 없는 키가 everLinked 가 됐다.
+      // v2.930(점검 D1-04): 실제로 추가된 키만 known — 대량 등록이 건너뛴 행(row = 입력 순번 1..N)까지 넣으면 연동된 적 없는 키가 everLinked 가 됐다.
       const skippedRows = new Set((r.skipped || []).map((x) => Number(x?.row)));
       const added = plan.add.filter((_, i) => !skippedRows.has(i + 1));
       markKnown(added.map((a) => a.key), now);
@@ -637,7 +637,7 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
     } catch (e) { out.errors.push({ key: g.key, name: g.name, reason: String(e?.message || e).slice(0, 200) }); }
   }
   out.agents = [...new Set(out.agents)];
-  // v2.927(점검 D1-04): 자동 등록이 아무것도 바꾸지 않았으면(전부 건너뜀) 이벤트·상태 파일을 남기지 않는다 — 5분마다 '변경 없음' 이 쌓여
+  // v2.930(점검 D1-04): 자동 등록이 아무것도 바꾸지 않았으면(전부 건너뜀) 이벤트·상태 파일을 남기지 않는다 — 5분마다 '변경 없음' 이 쌓여
   //   이벤트 링(EVENT_MAX)이 실제 감지·적용 기록을 밀어냈다. 실패(추가 취소)는 같은 문구가 바로 앞 자동 이벤트와 같을 때만 생략한다(무음 실패 금지).
   const auto = batchPrefix === 'settings-auto';
   const nothing = !out.added && !out.changed.length && !out.gone.length && !out.errors.length;
@@ -685,7 +685,7 @@ export function kindMeta() {
 
 export const DETECT_INTERVAL_MS = 5 * 60_000;
 export const FIRST_DELAY_MS = 60_000;
-/** v2.927(점검 D1-08): 화면 문구용 감지 주기(카탈로그 · /state 배너가 싣는다 — 화면에 '5분' 을 박지 않게). */
+/** v2.930(점검 D1-08): 화면 문구용 감지 주기(카탈로그 · /state 배너가 싣는다 — 화면에 '5분' 을 박지 않게). */
 export function detectTiming() { return { intervalMs: DETECT_INTERVAL_MS, firstDelayMs: FIRST_DELAY_MS }; }
 let _timer = null;
 let _running = false;

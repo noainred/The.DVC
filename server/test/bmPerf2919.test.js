@@ -438,7 +438,7 @@ test('⑨ 도구 접근 매핑 — 상세는 bm-usage 세그먼트 아래(새 �
   const s = bare('routes/api/bmUsage.js');
   assert.match(s, /api\.get\('\/tools\/bm-usage\/perf\/:key', toolsPerm,/);
   assert.ok(!/'\/tools\/bm-perf/.test(s), '새 세그먼트는 toolsDenied 매핑 밖이다');
-  // v2.927(E1-08): 열쇠는 perfKey(범위 서명 + 엣지 보관분 세대)로 모았다 — memoJson 이 그 열쇠를 쓰고, 열쇠에 범위 서명이 있는지 본다.
+  // v2.930(E1-08): 열쇠는 perfKey(범위 서명 + 엣지 보관분 세대)로 모았다 — memoJson 이 그 열쇠를 쓰고, 열쇠에 범위 서명이 있는지 본다.
   assert.match(s, /memoJson\(req, res, 'bm-perf'[\s\S]{0,200}extraKey: await perfKey\(req\)/, 'memoJson + 열쇠');
   assert.match(s, /export const perfKey = async \(req\) => `\$\{scopeKey\(req\.user/, '열쇠에 범위 서명');
 });

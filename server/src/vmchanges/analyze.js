@@ -18,7 +18,7 @@ export const VM_ROWS_MAX = 1000;
 export const EVENT_ROWS_MAX = 1000;
 
 /**
- * v2.927: 이동 집계를 조각마다 더하는 누적기 — 보고서가 행을 모으지 않고 흘려보내며 센다(logs/db.js trackedEventsEach).
+ * v2.930: 이동 집계를 조각마다 더하는 누적기 — 보고서가 행을 모으지 않고 흘려보내며 센다(logs/db.js trackedEventsEach).
  *   add(rows) 를 몇 번에 나눠 불러도 한 번에 부른 analyzeMoves 와 결과가 같다(테스트 대조 · 순서 무관 — 최신 판정은 ts 최대).
  */
 export function createMovesAcc({ days = 7, now = Date.now(), vcName = new Map(), q = '' } = {}) {
@@ -84,7 +84,7 @@ function changeSummary(type, d) {
 }
 
 /**
- * v2.927: 구성 · 권한 변경 집계 누적기 — 행을 최신 먼저 흘려 넣으면(trackedEventsEach 순서) 목록은 최신 EVENT_ROWS_MAX 건,
+ * v2.930: 구성 · 권한 변경 집계 누적기 — 행을 최신 먼저 흘려 넣으면(trackedEventsEach 순서) 목록은 최신 EVENT_ROWS_MAX 건,
  *   개수 · 사용자별 수는 넣은 행 전부다. 한 번에 부른 analyzeChanges 와 결과가 같다(테스트 대조).
  */
 export function createChangesAcc({ vcName = new Map(), q = '', kind = '' } = {}) {

@@ -123,7 +123,7 @@ export function fmtMs(ms) {
 }
 
 /**
- * v2.927(점검 D1-08): 서버가 준 주기·창(ms) → '20초' · '5분' · '1분 30초' · '2시간'. 못 읽으면 null(호출부가 숫자 없이 말한다 — 0 이나 기본값을 지어내지 않는다).
+ * v2.930(점검 D1-08): 서버가 준 주기·창(ms) → '20초' · '5분' · '1분 30초' · '2시간'. 못 읽으면 null(호출부가 숫자 없이 말한다 — 0 이나 기본값을 지어내지 않는다).
  */
 export function periodText(ms) {
   const n = numOrNull(ms);
@@ -135,7 +135,7 @@ export function periodText(ms) {
   return m % 60 ? `${Math.floor(m / 60)}시간 ${m % 60}분` : `${m / 60}시간`;
 }
 
-/** v2.927(점검 D1-08): 설정 연동 감지 주기 문구 — 서버 값(catalog `detect`)만 쓴다. 못 받으면 숫자 없이 말한다. */
+/** v2.930(점검 D1-08): 설정 연동 감지 주기 문구 — 서버 값(catalog `detect`)만 쓴다. 못 받으면 숫자 없이 말한다. */
 export function detectText(detect) {
   const every = periodText(detect?.intervalMs);
   const first = periodText(detect?.firstDelayMs);
