@@ -16,6 +16,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { HEALTH_DEFAULTS } from './health.js';
+import { LINE_CAP_RANGE, LINE_CAP_DEFAULT } from './logs/command.js';
 
 const FILE = () => path.join(config.configDir, 'bm-perf-rules.json');
 
@@ -60,8 +61,9 @@ export const LIMITS = Object.freeze({
   compare: { diffPct: [1, 500], maxServers: [2, 8] },
   // 6단계 수집 건강 기준(보드 상태 · 알림 규칙 ‘수집 건강’ 행이 같은 값 — collectHealth.collectCells). dbCapGb 0 = 상한 없음(DB 칸은 판정 보류).
   collect: { cyclePct: [10, 100], successPct: [10, 100], dbPct: [10, 100], dbCapGb: [0, 10_000] },
-  // 7a단계 로그 분석 — 주기당 출처별 줄 상한 · 보관(일) · SSH 실패 집중(같은 IP · 창 분 · 임계 줄)
-  logs: { lineCap: [100, 20_000], keepDays: [1, 90], burstCount: [2, 1_000], burstWindowMin: [1, 60] },
+  // 7a단계 로그 분석 — 주기당 출처별 줄 상한 · 보관(일) · SSH 실패 집중(같은 IP · 창 분 · 임계 줄).
+  //   줄 상한의 범위는 명령의 산수(command.js LINE_CAP_RANGE — 앱 두 개가 한 구획이라 2 × 상한 + 메타 < 구획 줄 상한 · 반증 F4)에서 온다.
+  logs: { lineCap: [...LINE_CAP_RANGE], keepDays: [1, 90], burstCount: [2, 1_000], burstWindowMin: [1, 60] },
 });
 export const DEFAULTS = Object.freeze({
   rules: {},
@@ -76,7 +78,7 @@ export const DEFAULTS = Object.freeze({
   compare: { diffPct: 20, maxServers: 5 },
   collect: { cyclePct: 80, successPct: 90, dbPct: 90, dbCapGb: 20 },
   // 7a단계 로그 분석(설계 §17 — 줄 상한 5,000 · 보관 30일 · ‘외부 IP 집중’ 5분 20회 — 설정값). on=false 면 로그 읽기 exec 를 붙이지 않는다.
-  logs: { on: true, lineCap: 5_000, keepDays: 30, burstCount: 20, burstWindowMin: 5 },
+  logs: { on: true, lineCap: LINE_CAP_DEFAULT, keepDays: 30, burstCount: 20, burstWindowMin: 5 },
   // 유지보수 창 억제(Bareos · Veeam 스케줄) — 베어메탈 서버의 백업 창을 읽는 원천이 아직 없다(perfAlerts.maintenanceFor 머리말). 켜 두면 원천이 생길 때 바로 쓴다.
   maintenance: { backupWindows: true },
 });

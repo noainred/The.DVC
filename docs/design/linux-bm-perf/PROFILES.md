@@ -172,7 +172,7 @@ OS 요구값(“Configuring Your Systems”): `vm.overcommit_memory=2`(“the on
 
 요청: "주요 로그 분석해서 성능, 보안, 이슈, 장애와 관련된 이슈 보는 기능 추가". 아트보드 ⑮ · 서버 상세 ‘로그’ 탭 + 보드 KPI + 함대 표.
 
-> **(7a 구현)** 같은 SSH 세션의 별도 exec(`bmusage/logs/command.js` — 구획 `##JOURNAL · ##DMESG · ##SECURE · ##AUDIT · ##APPLOG`) · 커서는 메인 DB `log_cursor` · 심각도는 포탈 엔진 이름(warning → medium) · 규칙 전부 ○ · 공통 원인 후보는 규칙 기준 — 다르게 둔 결정과 정직 기록은 README §6-21 · §8 ‘7a단계 구현됨’.
+> **(7a 구현)** 같은 SSH 세션의 별도 exec(`bmusage/logs/command.js` — 구획 `##JOURNAL · ##JSEC · ##DMESG · ##SECURE · ##AUDIT · ##APPLOG` — JSEC 는 반증 F1 의 journald 보안 읽기) · 커서는 메인 DB `log_cursor` · 심각도는 포탈 엔진 이름(warning → medium) · 규칙 전부 ○ · 공통 원인 후보는 규칙 기준 — 다르게 둔 결정과 정직 기록은 README §6-21 · §8 ‘7a단계 구현됨’.
 - **출처**: journald(우선순위 warning 이상 · 커서 증분) · dmesg · `/var/log/secure`(sshd · sudo — 읽기 권한 있을 때) · auditd(있을 때) · 용도 로그(GPDB pg_log · Airflow scheduler — 프로파일이 경로를 안다) · iDRAC SEL/LC(기존). 5분 주기 SSH 1회 안의 구획 `##JOURNAL · ##DMESG · ##SECURE`(+ 프로파일 구획) · 주기당 줄 상한(기본 5,000 · 설정) · ‘잘림 n줄’ 표시 · 커서(journal cursor · 파일 offset+inode)를 엣지가 기억.
 - **분류 4**: 장애(MCE · EDAC UE · PSU · 패닉) · 성능(I/O timeout · OOM · soft lockup · 링크 플랩 · 스로틀 · tcp_mem) · 보안(SSH 실패 집중(임계 설정) · root 직접 로그인 · sudo · 계정/권한 변경 · AVC · auditd) · 이슈(유닛 실패/재시작 루프 · 커널 패키지 설치 → 재부팅 필요 · 시각 점프 · 읽기 전용 재마운트 · 디스크 가득) + 용도 규칙(APP-PG/GP/AF). 규칙 = 파일 하나(정규식 · 분류 · 심각도 · 근거 번호 · 표본 1줄) — **기존 `loganalysis/`(포탈 자체 로그 규칙 엔진 · 표본 검증 · id) 재사용**, 보안 집중 판정은 **`logs/loginFailPattern.js` 재사용**. 분류 못 하는 줄은 세기만(지어내지 않는다).
 - **저장(엣지)**: 서명(가변부 치환 해시)별 `log_pattern(agent,key,sig,class,severity,count,first,last,rule_id)` + 샘플 5줄(`edgelog/redact.js` + 로그용 가림 규칙) · 시간당 집계 `log_hour` · 보안 상위 N(IP·계정). **원문 전체는 저장·전송하지 않는다**(법인 밖으로 안 나감 · 중앙은 집계·샘플만 봉투로).

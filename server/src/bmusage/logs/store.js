@@ -11,8 +11,17 @@
  */
 import { mainDb } from '../db.js';
 import { SAMPLES_MAX, SEC_ITEMS_MAX } from './classify.js';
+import { SEVERITY_RANK } from '../../loganalysis/rules.js';
+import { createYielder } from '../../util/timeSlice.js';
 
 export const PATTERN_MAX = 500;          // 서버당 서명 수 상한 — 넘치면 분류별 ‘서명 상한 초과’ 한 행으로 묶는다(센다)
+/**
+ * high · critical 서명은 PATTERN_MAX 를 넘어도 이만큼 더 받는다(반증 F8 — 낮은 심각도 서명이 상한을 채우면 다음 주기의 MCE(critical)가 묶음 행으로 접혀
+ *   규칙 · 근거 · 연계 · 공통 원인 후보에서 사라졌다). 한 주기 안에서는 심각도 높은 것부터 쓴다. 이 여유까지 차면 high 도 묶는다(묶음 행 심각도 = 묶인 것 중 가장 높은 것).
+ */
+export const HIGH_RESERVE = 100;
+const sevRank = (s) => SEVERITY_RANK[s] || 0;
+const HIGH_RANK = SEVERITY_RANK.high;
 const PRUNE_CHUNK = 2_000;
 const STATE_MAX = 64 * 1024;
 const s64 = (v, n = 64) => String(v ?? '').slice(0, n);
@@ -51,11 +60,11 @@ export async function logCursorsAll({ agent = '' } = {}) {
 export function logWriteBatch({ agent = '', items = [] } = {}) {
   return withLogChain(async () => {
     const db = await mainDb();
-    if (!db) return { ok: false, reason: 'db-unavailable', written: 0, conflicts: 0, overflow: 0 };
+    if (!db) return { ok: false, reason: 'db-unavailable', written: 0, conflicts: 0, overflow: 0, writtenKeys: [] };
     const ag = s64(agent, 128);
     const insCur = db.prepare('INSERT INTO log_cursor (agent,key,at,rev,state_json,status_json,bad_json) VALUES (?,?,?,1,?,?,?) ON CONFLICT(agent,key) DO NOTHING');
     const updCur = db.prepare('UPDATE log_cursor SET at=?, rev=rev+1, state_json=?, status_json=?, bad_json=COALESCE(?, bad_json) WHERE agent=? AND key=? AND rev=?');
-    const getPat = db.prepare('SELECT samples_json FROM log_pattern WHERE agent=? AND key=? AND sig=?');
+    const getPat = db.prepare('SELECT samples_json, severity FROM log_pattern WHERE agent=? AND key=? AND sig=?');
     const cntPat = db.prepare('SELECT COUNT(*) c FROM log_pattern WHERE agent=? AND key=?');
     const upPat = db.prepare(`INSERT INTO log_pattern (agent,key,sig,cls,severity,rule_id,src,unit,tmpl,count,first,last,samples_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(agent,key,sig) DO UPDATE SET count=count+excluded.count, first=min(first, excluded.first), last=max(last, excluded.last),
@@ -64,7 +73,7 @@ export function logWriteBatch({ agent = '', items = [] } = {}) {
     const hasSec = db.prepare('SELECT 1 FROM log_sec WHERE agent=? AND key=? AND hour=? AND kind=? AND item=?');
     const cntSec = db.prepare('SELECT COUNT(*) c FROM log_sec WHERE agent=? AND key=? AND hour=? AND kind=?');
     const upSec = db.prepare('INSERT INTO log_sec (agent,key,hour,kind,item,count) VALUES (?,?,?,?,?,?) ON CONFLICT(agent,key,hour,kind,item) DO UPDATE SET count=count+excluded.count');
-    let written = 0; let conflicts = 0; let overflow = 0;
+    let written = 0; let conflicts = 0; let overflow = 0; const writtenKeys = [];
     db.exec('BEGIN');
     try {
       for (const it of items) {
@@ -78,20 +87,24 @@ export function logWriteBatch({ agent = '', items = [] } = {}) {
         if (!ch) { conflicts += 1; continue; }   // 다른 주기가 먼저 썼다 — 이 서버의 이번 결과는 버린다(두 번 세지 않는다)
         let have = Number(cntPat.get(ag, key)?.c ?? 0);
         const fold = new Map();   // 서명 상한 초과 — 원래 서명 → 분류별 묶음 서명(시간 집계도 같은 곳으로)
-        for (const p of it.patterns || []) {
-          let sig = s64(p.sig, 64); let tmpl = s64(p.tmpl, 200); let ruleId = s64(p.ruleId, 40);
+        // 심각도 높은 것부터(같으면 횟수 많은 것) — 상한에 닿을 때 접히는 쪽이 낮은 심각도가 되게
+        const pats = [...(it.patterns || [])].sort((a, b) => sevRank(b?.severity) - sevRank(a?.severity) || (Number(b?.count) || 0) - (Number(a?.count) || 0));
+        for (const p of pats) {
+          let sig = s64(p.sig, 64); let tmpl = s64(p.tmpl, 200); let ruleId = s64(p.ruleId, 40); let severity = s64(p.severity, 10);
           let row = getPat.get(ag, key, sig);
-          if (!row && have >= PATTERN_MAX) {
+          const cap = sevRank(p.severity) >= HIGH_RANK ? PATTERN_MAX + HIGH_RESERVE : PATTERN_MAX;
+          if (!row && have >= cap) {
             overflow += Math.round(Number(p.count) || 0);
             const over = `#over:${s64(p.cls, 8)}`;
             fold.set(sig, over); sig = over; tmpl = '(서명 수 상한 초과 — 이 분류의 나머지 서명을 한 행에 묶었다)'; ruleId = '';
             row = getPat.get(ag, key, sig);
+            if (row && sevRank(row.severity) > sevRank(severity)) severity = s64(row.severity, 10);
           }
           const old = parse(row?.samples_json);
           const prevS = Array.isArray(old.value) ? old.value : [];
           const merged = [...prevS, ...(p.samples || [])].filter((x) => x && typeof x.text === 'string').sort((a, b) => (a.ts || 0) - (b.ts || 0)).slice(-SAMPLES_MAX)
             .map((x) => ({ ts: Math.round(Number(x.ts) || 0), text: s64(x.text, 300) }));
-          upPat.run(ag, key, sig, s64(p.cls, 8), s64(p.severity, 10), ruleId, s64(p.src, 16), s64(p.unit, 64), tmpl, Math.round(Number(p.count) || 0),
+          upPat.run(ag, key, sig, s64(p.cls, 8), severity, ruleId, s64(p.src, 16), s64(p.unit, 64), tmpl, Math.round(Number(p.count) || 0),
             Math.round(Number(p.first) || 0), Math.round(Number(p.last) || 0), json(merged, 8_192) || '[]');
           if (!row) have += 1;
         }
@@ -110,14 +123,14 @@ export function logWriteBatch({ agent = '', items = [] } = {}) {
           }
           upSec.run(ag, key, hour, kind, item, Math.round(Number(e.count) || 0));
         }
-        written += 1;
+        written += 1; writtenKeys.push(key);
       }
       db.exec('COMMIT');
     } catch (e) {
       try { db.exec('ROLLBACK'); } catch { /* */ }
-      return { ok: false, reason: String(e?.message || e).slice(0, 200), written: 0, conflicts, overflow };
+      return { ok: false, reason: String(e?.message || e).slice(0, 200), written: 0, conflicts, overflow, writtenKeys: [] };
     }
-    return { ok: true, written, conflicts, overflow };
+    return { ok: true, written, conflicts, overflow, writtenKeys };
   });
 }
 
@@ -174,14 +187,29 @@ export async function logServerQuery({ agent = '', key, from, to, secTop = 15 } 
 
 /**
  * 이 노드의 서버별 요약(최근 since 부터 — 주기마다 한 번 계산해 메모리에 둔다: 봉투 · 함대 표는 SQL 을 요청마다 돌리지 않는다).
- * @returns {Promise<Map<string, object>|null>}
+ *   ⚠ 성능(반증 7 — 예전 한 문장 `GROUP BY key, sig` + SUM · MAX 는 PK(agent,key,hour,sig)의 agent 앞부분만 써 **보관 전체**를 훑었다: 1,000대 1일 733ms 동기):
+ *     서버 키마다 PK 앞부분 (agent, key, hour ≥ since) 범위만 읽는다(창 안 행만 · 새 인덱스 없음) · 합 · 마지막 시각은 JS 에서(한 문장 집계 둘 금지 — perf-db) ·
+ *     서버 사이에 시간 기준 양보(createYielder — 큰 노드가 이벤트 루프를 한 번에 붙잡지 않게).
+ * @returns {Promise<{rows:Array<{key,sig,cls,c,h}>, metas:Array, curs:Array}|null>}
  */
-export async function logFleetQuery({ agent = '', since } = {}) {
+export async function logFleetQuery({ agent = '', since, sliceMs = 15 } = {}) {
   const db = await mainDb();
   if (!db) return null;
   const ag = String(agent); const s = Math.round(Number(since));
-  const rows = db.prepare('SELECT key, sig, cls, SUM(count) c, MAX(hour) h FROM log_hour WHERE agent=? AND hour>=? GROUP BY key, sig').all(ag, s);
-  const metas = db.prepare('SELECT key, sig, cls, severity, rule_id, src, unit, tmpl, last, samples_json FROM log_pattern WHERE agent=? AND last>=?').all(ag, s);
+  const maybeYield = createYielder(sliceMs);
   const curs = db.prepare('SELECT key, at, status_json FROM log_cursor WHERE agent=?').all(ag);
+  const hourQ = db.prepare('SELECT sig, cls, hour, count FROM log_hour WHERE agent=? AND key=? AND hour>=?');
+  const metaQ = db.prepare('SELECT sig, cls, severity, rule_id, src, unit, tmpl, last, samples_json FROM log_pattern WHERE agent=? AND key=? AND last>=?');
+  const rows = []; const metas = [];
+  for (const c of curs) {
+    await maybeYield();
+    const acc = new Map();
+    for (const r of hourQ.all(ag, c.key, s)) {
+      const e = acc.get(r.sig);
+      if (e) { e.c += Number(r.count) || 0; if (r.hour > e.h) e.h = r.hour; } else acc.set(r.sig, { key: c.key, sig: r.sig, cls: r.cls, c: Number(r.count) || 0, h: Number(r.hour) });
+    }
+    for (const e of acc.values()) rows.push(e);
+    for (const m of metaQ.all(ag, c.key, s)) metas.push({ key: c.key, ...m });
+  }
   return { rows, metas, curs: curs.map((r) => ({ key: r.key, at: Number(r.at) || null, status: parse(r.status_json).value })) };
 }

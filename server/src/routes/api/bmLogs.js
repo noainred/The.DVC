@@ -41,11 +41,21 @@ export function depsOf(deps = {}) {
   };
 }
 
-/** 비관리자 판본(순수) — 보안 상위 · 집중 IP · 계정은 가림 토큰 · 보안 표본 제외 · 그 밖 표본 · 연계 문구는 주소 판정기 + IPv4 토큰. */
+/**
+ * 비관리자 판본의 계정 꼴 가림(순수 · 길이 한정) — 보안이 아닌 분류의 표본 · 서명에도 계정 이름이 실린다(GPDB ‘role "x" …’ · ‘user=x’ · audit acct="x" — 반증 F11).
+ *   같은 값은 같은 토큰(maskedIdToken)이라 반복은 보인다. 보안 분류의 표본은 아예 싣지 않는다(아래).
+ */
+export function maskAccountForms(s) {
+  if (typeof s !== 'string') return s;
+  return s.replace(/\b(user|role|acct|for user)( ?= ?| )"([^"<>]{1,64})"/g, (_m, k, sep, v) => `${k}${sep}"${maskedIdToken(v)}"`)
+    .replace(/\b(user|ruser|acct|USER)=([^\s,;"'<>]{1,64})/g, (_m, k, v) => `${k}=${maskedIdToken(v)}`);
+}
+
+/** 비관리자 판본(순수) — 보안 상위 · 집중 IP · 계정은 가림 토큰 · 보안 표본 제외 · 그 밖 표본 · 서명 · 연계 문구는 주소 판정기 + IPv4 토큰 + 계정 꼴 토큰. */
 export function maskLogView(body, scrub = (s) => s) {
   if (!body || typeof body !== 'object') return body;
   const tok = (v) => (v ? maskedIdToken(String(v)) : v);
-  const clean = (s) => (typeof s === 'string' ? scrub(s).replace(IPV4_RE, (ip) => maskedIdToken(ip)) : s);
+  const clean = (s) => (typeof s === 'string' ? maskAccountForms(scrub(s)).replace(IPV4_RE, (ip) => maskedIdToken(ip)) : s);
   const sec = { ...(body.security || {}) };
   for (const k of ['fail_ip', 'root']) if (Array.isArray(sec[k])) sec[k] = sec[k].map((x) => ({ ...x, item: tok(x.item) }));
   for (const k of ['fail_user', 'sudofail']) if (Array.isArray(sec[k])) sec[k] = sec[k].map((x) => ({ ...x, item: tok(x.item) }));
@@ -95,20 +105,24 @@ export async function bmLogsFleet(req, snap, deps = {}) {
   const isAdmin = isAdminReq(req);
   const tg = await D.currentTargets().catch(() => ({ targets: [] }));
   const byKey = new Map((tg.targets || []).map((x) => [x.key, x]));
-  const rows = []; const nodes = [];
+  const rows = []; const nodes0 = [];
+  // ⚠ 범위 계정에는 **자기 범위 대상이 보이는 노드만**(반증 F10 — /tools/bm-usage/edges 의 v2.600 AUTHZ-2600-07 규약과 같다: 엣지 이름 · 상태 · 시각도 다른 법인 운영 정보다).
+  const inScope = (list) => !allowed || (list || []).some((x) => x && allowed.has(String(x.vcenterId || '')));
   const sum = await D.summary().catch(() => null);
   const agent = config.agent?.name || '';
+  const localSeen = inScope(tg.targets);
   if (Array.isArray(sum?.list)) {
     for (const s of sum.list) { const x = byKey.get(s.key); if (x) rows.push({ ...s, name: x.name || x.key, vcenterId: x.vcenterId || '', via: 'local', agent }); }
-    nodes.push({ agent, via: 'local', state: 'ok', at: sum.at });
-  } else if (tg.targets?.length) nodes.push({ agent, via: 'local', state: sum?.error || 'none' });
+    nodes0.push({ seen: localSeen, n: { agent, via: 'local', state: 'ok', at: sum.at } });
+  } else if (tg.targets?.length) nodes0.push({ seen: localSeen, n: { agent, via: 'local', state: sum?.error || 'none' } });
   for (const rec of await D.listEdgeBmUsage().catch(() => [])) {
     const sn = rec?.snap;
-    if (!sn) { nodes.push({ agent: rec?.agent, via: 'edge', state: 'none' }); continue; }
-    if (!Number.isInteger(sn.logsVer)) { nodes.push({ agent: rec.agent, via: 'edge', state: 'old-version', snapAt: rec.snapAt || null }); continue; }
+    const seen = inScope(sn?.targets);
+    if (!sn) { nodes0.push({ seen, n: { agent: rec?.agent, via: 'edge', state: 'none' } }); continue; }
+    if (!Number.isInteger(sn.logsVer)) { nodes0.push({ seen, n: { agent: rec.agent, via: 'edge', state: 'old-version', snapAt: rec.snapAt || null } }); continue; }
     const en = new Map((sn.targets || []).map((x) => [String(x.key), x]));
-    if (!Array.isArray(sn.logSummary)) { nodes.push({ agent: rec.agent, via: 'edge', state: 'no-cycle', snapAt: rec.snapAt || null }); continue; }
-    nodes.push({ agent: rec.agent, via: 'edge', state: 'ok', snapAt: rec.snapAt || null, ...(sn.logSummaryDropped ? { dropped: sn.logSummaryDropped } : {}) });
+    if (!Array.isArray(sn.logSummary)) { nodes0.push({ seen, n: { agent: rec.agent, via: 'edge', state: 'no-cycle', snapAt: rec.snapAt || null } }); continue; }
+    nodes0.push({ seen, n: { agent: rec.agent, via: 'edge', state: 'ok', snapAt: rec.snapAt || null, ...(sn.logSummaryDropped ? { dropped: sn.logSummaryDropped } : {}) } });
     for (const s of sn.logSummary) { const x = en.get(s.key); if (x) rows.push({ ...s, name: x.name || x.key, vcenterId: x.vcenterId || '', via: 'edge', agent: rec.agent, snapAt: rec.snapAt || null }); }
   }
   let list = applyScope(rows, allowed);   // ⚠ 범위 교집합 먼저(귀속 없는 서버는 범위 계정에 없다) — 공통 원인 후보도 이 목록으로만
@@ -119,11 +133,13 @@ export async function bmLogsFleet(req, snap, deps = {}) {
   if (!isAdmin) {
     const { hosts, match } = await perfAddressMatcher(D, tg);
     const sc = scrubberFor(hosts);
-    const clean = (s) => (typeof s === 'string' ? sc(s).replace(IPV4_RE, (ip) => maskedIdToken(ip)) : s);
+    const clean = (s) => (typeof s === 'string' ? maskAccountForms(sc(s)).replace(IPV4_RE, (ip) => maskedIdToken(ip)) : s);
     list = maskBmList(list, match).map((r) => ({ ...r, top: (r.top || []).map((p) => ({ ...p, tmpl: clean(p.tmpl), sample: p.cls === 'sec' ? '' : clean(p.sample) })) }));
     common = common.map((c) => ({ ...c, servers: maskBmList(c.servers, match) }));
   }
-  return { ok: true, at: Date.now(), kpi, classLabel: CLASS_LABEL, servers: list.slice(0, 2_000), common: common.slice(0, 50), commonWindowMs: COMMON_WINDOW_MS, nodes, ...(isAdmin ? {} : { addressHidden: true }) };
+  const nodes = nodes0.filter((x) => x.seen).map((x) => x.n);
+  return { ok: true, at: Date.now(), kpi, classLabel: CLASS_LABEL, servers: list.slice(0, 2_000), common: common.slice(0, 50), commonWindowMs: COMMON_WINDOW_MS, nodes,
+    ...(allowed ? { scoped: true, nodesOmitted: nodes0.length - nodes.length } : {}), ...(isAdmin ? {} : { addressHidden: true }) };
 }
 
 export function registerBmLogs(api) {

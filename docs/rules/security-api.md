@@ -469,6 +469,12 @@
   - 응답 캐시 `memoJson` 열쇠 = 범위 서명 + **역할** + 마지막 수집 + 로그 주기 + 엣지 보관분 세대(관리자가 먼저 읽어도 비관리자는 가린 판본 — 테스트) · 엣지 대행 실패는 `__noStore`.
   - **표본 가림**(`redactSystemLogLine` — 표본 5줄 · 서명 · 함대 표본 공통): 포탈 규칙(`redactLogLine`) + `pass=`/`pwd=`/`pw=`(소문자 — 대문자 `PWD=` 는 sudo 작업 폴더라 두었다) · `Authorization:` 줄 끝까지 ·
     PEM 머리 줄 · 줄 전체 긴 base64 · 전자우편 · 주민번호 · 휴대전화 · 카드번호 · **sudo COMMAND 인자**. 줄 길이 먼저 자르고 길이 한정 반복만(ReDoS 비율 테스트). 완전할 수 없다 — 1차 방어는 원문 미보관.
+  - ⚠⚠ **가림 판정은 하나 — 표본 · 서명 · 보안 상위가 같은 줄에서 어긋나면 안 된다**(7a 반증 F7 — 서명 `templateFor` 가 `redactSystemLogLine` 을 건너뛰어 같은 줄의 표본은 [가림] 인데 서명에
+    계정 · 메일 · 토큰이 나갔고, 비관리자 보안 상위는 토큰인데 서명에 계정 원문이 있었다): 서명 = 보안 꼴 치환(OpenSSH 연결 식별 꼴 · GPDB `user "…"` 포함) → **같은 줄에서 뽑은 계정 · 주소 값 치환**
+    (`scrubFacts`) → `redactSystemLogLine` → 경로 → `templateOf`. 보관 · 봉투 · 중앙 정제에서 읽을 때도 `maskStoredTmpl`(멱등)로 다시 댄다. 비관리자 판본은 보안이 아닌 표본 · 서명의 계정 꼴
+    (`role "x"` · `user=x` · `acct="x"`)도 토큰(`maskAccountForms`). GPDB 로그인 실패는 보안 분류(표본은 관리자만 · 반증 F11).
+  - **함대 노드 목록도 범위**(반증 F10): 범위 계정의 `/tools/bm-usage/logs` `nodes` 는 자기 범위 대상이 보이는 노드(이 노드 · 엣지)만 — 엣지 이름 · 상태 · 시각도 다른 법인 운영 정보다
+    (`/tools/bm-usage/edges` v2.600 AUTHZ-2600-07 과 같은 규약) · 뺀 수는 `nodesOmitted`.
   - 포탈은 **차단 · 계정 잠금을 하지 않는다**(보안 판정은 알림 규칙 ‘logs’ 까지).
 - ⚠⚠ **v2.929 — 베어메탈 집중 모니터링(`POST /api/tools/bm-usage/perf/:key/focus` · `/focus/:id/stop`)은 분마다 SSH · Redfish 를 여는 쓰기 경로다 — v2.923 스냅샷 규약을 그대로 쓰고, 넘는 부분만 더했다**
   (`routes/api/bmPerfOps.js bmFocusStart · bmFocusStop` · `bmusage/focus/run.js` · `routes/collector.js /bm-usage/focus[/stop]` · `central/bmPerfOpsPull.js runEdgeFocus · stopEdgeFocus`.

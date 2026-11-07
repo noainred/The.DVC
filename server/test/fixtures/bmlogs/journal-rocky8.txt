@@ -1,2 +1,0 @@
-2026-11-06T13:02:41+0900 bm-kr1-db02 systemd[1]: postgresql.service: Failed with result 'exit-code'.
-2026-11-06T13:44:00+0900 bm-kr1-db02 sshd[2210]: error: kex_exchange_identification: Connection closed by remote host

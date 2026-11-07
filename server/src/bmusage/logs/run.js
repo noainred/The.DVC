@@ -54,7 +54,7 @@ export async function buildLogWrite({ key, stdout, prev = null, now = Date.now()
   const prevPos = prev && !prev.corrupt ? prev.state?.pos || {} : {};
   const carry = prev && !prev.corrupt ? prev.state?.carry || null : null;
   const parsed = parseLogOutput(stdout, { prev: prevPos, now });
-  const cls = await classifyItems(parsed.items, { now, burst: { count: cfg.burstCount, windowMin: cfg.burstWindowMin }, carry });
+  const cls = await classifyItems(parsed.items, { now, burst: { count: cfg.burstCount, windowMin: cfg.burstWindowMin }, carry, authSrc: parsed.authSrc });
   const hourNow = Math.floor(now / HOUR) * HOUR;
   const hours = [...cls.hours.values()];
   for (const [src, s] of Object.entries(parsed.sources)) {
@@ -63,13 +63,14 @@ export async function buildLogWrite({ key, stdout, prev = null, now = Date.now()
     if (numOrNull(s.truncated) > 0) hours.push({ hour: hourNow, sig: `#trunc:${src}`, cls: 'trunc', count: s.truncated });
   }
   const status = {
-    at: now, ended: parsed.ended, cut: parsed.cut || null, sources: parsed.sources, lineCap: cfg.lineCap,
+    at: now, ended: parsed.ended, cut: parsed.cut || null, sources: parsed.sources, lineCap: cfg.lineCap, authSrc: parsed.authSrc,
     counts: cls.counts, bursts: cls.bursts.slice(0, 16), ...(prev?.corrupt ? { cursorReset: 'corrupt' } : {}),
   };
   return {
     write: { key, readRev: prev ? prev.rev : null, at: now, state: { pos: parsed.next, carry: cls.carry }, status, ...(prev?.corrupt ? { bad: prev.rawBad || '(손상)' } : {}),
       patterns: [...cls.patterns.values()], hours, sec: [...cls.sec.values()] },
-    alert: { read: Object.values(parsed.sources).some((s) => s.status === 'ok'), faultLines: cls.counts.faultLines, secHigh: cls.counts.secHigh, bursts: cls.bursts.length },
+    // 알림 입력은 최근 FRESH_MS 안의 줄만(첫 읽기의 지난 줄 · 시각 모름 줄은 알림이 아니다 — 반증 F6)
+    alert: { read: Object.values(parsed.sources).some((s) => s.status === 'ok'), faultLines: cls.counts.faultLines, secHigh: cls.counts.secHigh, bursts: cls.counts.freshBursts },
   };
 }
 
@@ -102,6 +103,11 @@ export async function finishLogCycle(results = [], ctx = null, { now = Date.now(
   let w = { ok: true, written: 0, conflicts: 0, overflow: 0 };
   if (items.length) w = await logWriteBatch({ agent: ctx.agent, items });
   if (!w.ok) _alertIn = new Map();   // 못 쓴 주기는 알림 입력도 버린다(다음 주기에 같은 줄을 다시 읽어 그때 센다 — 두 번 알리지 않게)
+  else {
+    // 비교 후 쓰기에서 진 서버(conflicts — 다른 주기가 먼저 썼다)는 이번 결과를 버렸다 → 알림 입력에서도 뺀다(반증 의심 — 쓰지 않은 줄로 알리지 않게)
+    const wrote = new Set(Array.isArray(w.writtenKeys) ? w.writtenKeys : []);
+    for (const k of [..._alertIn.keys()]) if (!wrote.has(k)) _alertIn.delete(k);
+  }
   try { await refreshLogSummary({ agent: ctx.agent, now }); } catch { /* 요약 실패는 다음 주기에 */ }
   _last = { at: now, on: true, ms: Date.now() - t0, ...counts, written: w.written ?? 0, conflicts: w.conflicts ?? 0, overflow: w.overflow ?? 0, ...(w.ok ? {} : { error: w.reason || 'write-failed' }) };
   return _last;

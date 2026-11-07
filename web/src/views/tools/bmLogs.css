@@ -2,6 +2,8 @@
 .bml-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 8px; min-width: 0; }
 .bml-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 .bml-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+/* 덧말이 긴 칩(권한 범위 · 같은 기록 …)은 줄을 바꾼다 — 400px 에서 페이지 가로 넘침(Chromium 판독 r2) */
+.bml-chips .bmp-chip { white-space: normal; overflow-wrap: anywhere; max-width: 100%; text-align: left; }
 .bml-chart { min-width: 0; }
 .bml-svg { display: block; width: 100%; height: 140px; background: var(--panel-deep); border-radius: 6px; }
 .bml-axis { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); margin-top: 4px; flex-wrap: wrap; }
@@ -12,6 +14,7 @@
   border: 1px solid var(--border-soft); border-radius: 10px; cursor: pointer; text-align: left; overflow-wrap: anywhere; max-width: 100%; }
 .bml-corr:hover { border-color: var(--accent); color: var(--text); }
 .bml-q.input { flex: 1 1 160px; min-width: 0; max-width: 260px; }
+.bml-why { text-align: left; white-space: normal; color: var(--text-faint); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   .bml-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bml-corr { min-height: 32px; }

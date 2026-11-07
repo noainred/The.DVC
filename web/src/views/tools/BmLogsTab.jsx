@@ -11,7 +11,7 @@ import { toneVar } from './toneVar.js';
 import { canCsv } from '../../api.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
 import {
-  CLASS_ORDER, CLASS_TEXT, SEV_TEXT, SRC_LABEL, RANGE_OPTIONS, kpiCards, sourceChips, readCard, hourlyBars, secPanelRows, SEC_HONEST, SEC_HIDDEN_TEXT,
+  CLASS_ORDER, CLASS_TEXT, SEV_TEXT, SRC_LABEL, RANGE_OPTIONS, kpiCards, sourceChips, permGuide, readCard, hourlyBars, secPanelRows, SEC_HONEST, SEC_HIDDEN_TEXT,
   corrChips, corrHeadText, patternCsv, methodLines, stamp, numText, LOG_GRADE_TEXT,
 } from './bmLogsText.js';
 import './bmOps.css';
@@ -49,12 +49,12 @@ function HourlyChart({ hourly = [], onPick }) {
   );
 }
 
-function SecPanel({ sec = {}, hidden = false }) {
+function SecPanel({ sec = {}, hidden = false, authSrc = null }) {
   const rows = secPanelRows(sec);
   return (
     <section className="bmo-card">
       <h5 className="bmo-h">보안 — 누가 · 어디서 · 몇 번</h5>
-      <div className="bmo-reads">/var/log/secure · audit · journald 의 보안 분류 줄 · auditd {sec.auditd ? `‘${sec.auditd}’` : '—'} · secure {sec.secureStatus ? `‘${sec.secureStatus}’` : '—'}</div>
+      <div className="bmo-reads">/var/log/secure · journald 보안(sshd · sudo) · auditd 중 한 출처의 보안 분류 줄{authSrc ? ` — 이번 기간 ${SRC_LABEL[authSrc] || authSrc}` : ''} · auditd {sec.auditd ? `‘${sec.auditd}’` : '—'} · secure {sec.secureStatus ? `‘${sec.secureStatus}’` : '—'}</div>
       {hidden && <p className="bmo-note"><BoldText text={SEC_HIDDEN_TEXT} /></p>}
       <STable minWidth={560} className="bmo-t" style={{ fontSize: 12 }}>
         <thead><tr><th>항목</th><th className="right">기간 합</th><th>상위(최대 5)</th></tr></thead>
@@ -62,9 +62,10 @@ function SecPanel({ sec = {}, hidden = false }) {
           {rows.map((r) => (
             <tr key={r.kind}>
               <td data-sort={r.label} className="bmo-name">{r.label}</td>
-              <td className="right" data-sort={r.total ?? ''}>{numText(r.total)}</td>
+              <td className="right" data-sort={r.total ?? ''} title={r.why || undefined}>{numText(r.total)}</td>
               <td className="bmo-wrap" data-sort={r.tops[0]?.items?.[0]?.count ?? ''}>
-                {r.tops.every((x) => !x.items.length) ? <span style={{ color: 'var(--muted)' }}>—</span>
+                {r.why && <div className="bmo-sub bml-why">{r.why}</div>}
+                {r.tops.every((x) => !x.items.length) ? (r.why ? null : <span style={{ color: 'var(--muted)' }}>—</span>)
                   : r.tops.map((x) => <div key={x.k}><span className="bmo-sub">{x.lbl}</span> {x.items.map((it) => `${it.item} ×${numText(it.count)}`).join(' · ')}</div>)}
               </td>
             </tr>
@@ -85,6 +86,7 @@ export function LogsView({ resp, range, onRange, onTab, onReload, loading = fals
   const pats = useMemo(() => (resp?.patterns || []).filter((p) => !cls || p.cls === cls), [resp, cls]);
   const rc = readCard(resp?.read);
   const chips = sourceChips(resp?.read?.sources);
+  const guide = permGuide(resp?.read?.sources);
   const exportCsv = () => {
     try {
       const blob = new Blob([`﻿${patternCsv(resp)}`], { type: 'text/csv;charset=utf-8' });
@@ -123,12 +125,18 @@ export function LogsView({ resp, range, onRange, onTab, onReload, loading = fals
           {chips.map((c) => <span key={c.src} className="bmp-chip" title={c.title} style={{ color: toneVar(c.tone) }}>{c.label} {c.text}{c.extra ? ` · ${c.extra}` : ''}</span>)}
         </div>
       )}
+      {!!guide.length && (
+        <section className="bmo-card">
+          <h5 className="bmo-h">필요한 권한 — 못 읽은 출처</h5>
+          {guide.map((x, i) => <p key={i} className="bmo-note"><BoldText text={x} /></p>)}
+        </section>
+      )}
       <section className="bmo-card">
         <h5 className="bmo-h">시간대별 발생 — 분류 4(시간당 줄 수)</h5>
         <div className="bmo-reads">추이 · 집중 탭과 같은 시간축(정시 칸) · 막대 클릭 = 그 시간이 마지막인 패턴만</div>
         <HourlyChart hourly={resp?.hourly || []} onPick={(b) => setOpen(b.unread ? '' : `h:${b.t}`)} />
       </section>
-      <SecPanel sec={resp?.security || {}} hidden={!!resp?.secHidden} />
+      <SecPanel sec={resp?.security || {}} hidden={!!resp?.secHidden} authSrc={resp?.read?.authSrc || null} />
       <section className="bmo-card">
         <h5 className="bmo-h">패턴(서명)별 — 같은 메시지는 한 행 · {corrHeadText(resp?.corrWindowMs)}</h5>
         <div className="bmo-bar">

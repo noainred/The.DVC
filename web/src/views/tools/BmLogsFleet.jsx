@@ -8,7 +8,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
-import { CLASS_ORDER, CLASS_TEXT, SEV_TEXT, fleetKpiCards, nodeNotes, fleetFilter, topRuleText, commonHonest, numText, stamp, STATUS_TEXT, SRC_LABEL } from './bmLogsText.js';
+import { CLASS_ORDER, CLASS_TEXT, SEV_TEXT, fleetKpiCards, nodeNotes, fleetFilter, topRuleText, fleetClsCell, commonHonest, numText, stamp, STATUS_TEXT, SRC_LABEL } from './bmLogsText.js';
 import './bmOps.css';
 import './bmLogs.css';
 
@@ -20,7 +20,7 @@ export function LogsFleetView({ resp, onOpen, onReload, loading = false }) {
   const rows = useMemo(() => fleetFilter(resp?.servers || [], { corp, cls, rule, q }), [resp, corp, cls, rule, q]);
   const corps = useMemo(() => [...new Set((resp?.servers || []).map((r) => r.vcenterId).filter(Boolean))].sort(), [resp]);
   const rules = useMemo(() => [...new Set((resp?.servers || []).flatMap((r) => (r.top || []).map((p) => p.ruleId)).filter(Boolean))].sort(), [resp]);
-  const notes = nodeNotes(resp?.nodes);
+  const notes = nodeNotes(resp?.nodes, resp?.nodesOmitted);
   return (
     <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
       <div className="bml-kpis">
@@ -74,11 +74,14 @@ export function LogsFleetView({ resp, onOpen, onReload, loading = false }) {
               <tr key={`${r.agent}|${r.key}`}>
                 <td data-sort={r.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key); }}>{r.name}</span></td>
                 <td data-sort={r.vcenterId || ''}>{r.vcenterId || '—'}</td>
-                {CLASS_ORDER.map((c) => (
-                  <td key={c} className="right" data-sort={r.cls?.[c]?.lines ?? ''}>
-                    {r.wasRead ? <><span style={{ color: (r.cls?.[c]?.lines || 0) > 0 ? CLASS_TEXT[c].color : 'var(--muted)' }}>{numText(r.cls?.[c]?.patterns)}</span><div className="bmo-sub">줄 {numText(r.cls?.[c]?.lines)}</div></> : '—'}
-                  </td>
-                ))}
+                {CLASS_ORDER.map((c) => {
+                  const cell = fleetClsCell(r, c);
+                  return (
+                    <td key={c} className="right" data-sort={cell.text === '—' ? '' : r.cls?.[c]?.lines ?? ''} title={cell.title || undefined}>
+                      {cell.text === '—' ? '—' : <><span style={{ color: (r.cls?.[c]?.lines || 0) > 0 ? CLASS_TEXT[c].color : 'var(--muted)' }}>{cell.text}</span><div className="bmo-sub">{cell.sub}</div></>}
+                    </td>
+                  );
+                })}
                 <td className="right" data-sort={r.none ?? ''}>{r.wasRead ? numText(r.none) : '—'}</td>
                 <td className="bmo-wrap bmo-mono" data-sort={r.top?.[0]?.ruleId || ''}>{topRuleText(r.top)}</td>
                 <td className="bmo-wrap" data-sort={Object.values(r.status?.sources || {}).filter((x) => x === 'perm').length}>

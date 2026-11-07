@@ -836,6 +836,10 @@
     봉투 크기: 상위 5 · 표본 160자 · 서명 120자로 싣고, 봉투 상한(`fitEnvelope`)을 넘으면 성능 상세를 줄인 뒤 로그 요약의 표본 · 서명 글자 → 상위 패턴 순으로 뺀다(분류별 개수 · 출처 상태는 남김 · `logsTruncated`).
   - **상세 대행**: `GET /api/collector/bm-usage/logs?key=&range=`(같은 url · 같은 토큰 · 대상 밖 키 404 · 보관 없음) — 중앙 `pullEdgeLogs` 는 **`bodyOk: logViewBodyOk` 명시**(`{ok:true, patterns[], hourly[]}` —
     기본 판정은 봉투 모양이라 성공이 전부 bad-body 가 된다 · 6단계 반증 F2) + `sanitizeLogView`(연계 표지도 꼴 검사). 실제 collector 라우터 ↔ 실제 pull 함수 성공 왕복 테스트가 고정한다.
+    ⚠⚠ **정제본은 로컬 응답의 모양을 다 가져야 한다**(7a 반증 F9 — 규칙 카탈로그 · 수집 구획 · 출처 권한 범위 · 근거가 빠져 엣지 위임 서버의 ‘규칙’ 표가 비었다): 규칙 카탈로그 · 근거 · 분류 이름은
+    **중앙 자기 것**(정적 — 엣지가 보낸 정규식 글자를 싣지 않는다 · `rulesFrom: 'central'`) · `method`(구획은 `LOG_SECTIONS` 안만 · 출처 · 식별자 · 앱 경로는 꼴 검사 · 주기 `intervalMs`) ·
+    출처 상태의 화면 칸(scope · partial · first · older · undated · skew · dup · authSkipped · uid · groups · svc …) · `security.totalsWhy` · `read.authSrc` · `corrSource`. 회귀는 **로컬 응답의 키 경로 ⊆ 대행 응답의 키 경로**
+    (실제 왕복 + 풍부한 응답의 정제)를 대조하고 화면이 쓰는 칸을 값으로 단언한다. 서명은 정제에서 `maskStoredTmpl` 로 다시 가린다.
   - **최소 엣지 버전**: `stage7aMinEdgeVersion`(`STAGE7A_TITLE_RE = /리눅스 통합 성능 모니터링 7a단계/` — 릴리스 노트 첫 게시 번호 · 없으면 지금 판 · 숫자를 박지 않는다) · 구버전(경로 없음 → 401/404) = old-version.
     함대 표는 노드마다 상태(ok · old-version · no-cycle · none)를 말한다.
 - ⚠⚠ **v2.929 — 베어메탈 성능 5단계의 엣지 대행: 판정 · 발송 · 보관은 수집 노드(엣지), 중앙은 요약을 봉투로 받고 상세는 볼 때 당긴다**

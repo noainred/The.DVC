@@ -145,3 +145,107 @@ test('ReDoS — 규칙 · 보안 추출 · 템플릿 · 가림이 긴 적대 입
   assert.equal(r.counts.lines, 5_000);
   assert.ok(probes > 0, '분류 중에 다른 작업이 돈다(양보)');
 });
+
+test('반증 F8 — OpenSSH 실제 메시지 꼴 고정 표본: 계정 · IP 추출 · 사전 인증 종료 · 최대 시도 초과는 실패로 다시 세지 않는다 · 계정마다 서명이 갈라지지 않는다', async () => {
+  const FIX = [
+    // [메시지, 기대 규칙, 기대 계정, 기대 IP]
+    ['Invalid user admin from 198.51.100.7 port 40022', 'SEC-SSH-INVALID', 'admin', '198.51.100.7'],
+    ['Failed password for invalid user admin from 198.51.100.7 port 40022 ssh2', 'SEC-SSH-FAIL', 'admin', '198.51.100.7'],
+    ['Failed password for root from 203.0.113.45 port 51822 ssh2', 'SEC-SSH-FAIL', 'root', '203.0.113.45'],
+    ['Failed publickey for root from 2001:db8::7 port 51822 ssh2: RSA SHA256:x', 'SEC-SSH-FAIL', 'root', '2001:db8::7'],
+    ['Connection closed by invalid user admin 198.51.100.7 port 40022 [preauth]', 'SEC-SSH-PREAUTH', 'admin', '198.51.100.7'],
+    ['Disconnected from invalid user admin 198.51.100.10 port 40000 [preauth]', 'SEC-SSH-PREAUTH', 'admin', '198.51.100.10'],
+    ['Connection closed by authenticating user root 203.0.113.45 port 51822 [preauth]', 'SEC-SSH-PREAUTH', 'root', '203.0.113.45'],
+    ['Disconnected from authenticating user root 203.0.113.45 port 51822 [preauth]', 'SEC-SSH-PREAUTH', 'root', '203.0.113.45'],
+    ['Received disconnect from 203.0.113.45 port 51822:11: Bye Bye [preauth]', 'SEC-SSH-PREAUTH', '', '203.0.113.45'],
+    ['Connection reset by 203.0.113.45 port 51822 [preauth]', 'SEC-SSH-PREAUTH', '', '203.0.113.45'],
+    ['error: maximum authentication attempts exceeded for root from 203.0.113.45 port 51822 ssh2 [preauth]', 'SEC-SSH-MAXAUTH', 'root', '203.0.113.45'],
+    ['error: maximum authentication attempts exceeded for invalid user admin from 198.51.100.7 port 40022 ssh2 [preauth]', 'SEC-SSH-MAXAUTH', 'admin', '198.51.100.7'],
+    ['Disconnecting authenticating user root 203.0.113.45 port 51822: Too many authentication failures [preauth]', 'SEC-SSH-MAXAUTH', 'root', '203.0.113.45'],
+    ['PAM 2 more authentication failures; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.45  user=root', 'SEC-SSH-MAXAUTH', 'root', '203.0.113.45'],
+    ['pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.45  user=root', 'SEC-PAM-DUP', 'root', '203.0.113.45'],
+    ['Accepted publickey for gpadmin from 10.20.1.5 port 52210 ssh2: ED25519 SHA256:x', 'SEC-SSH-OK', 'gpadmin', '10.20.1.5'],
+  ];
+  for (const [m, id, user, ip] of FIX) {
+    const r = C.matchRule('secure', m);
+    assert.equal(r?.id, id, m);
+    const f = C.secFacts(r, m);
+    assert.equal(f.user, user, `계정 ${m}`); assert.equal(f.ip, ip, `IP ${m}`);
+    const tm = C.templateFor(r, m, f);
+    if (user) assert.ok(!tm.includes(user), `서명에 계정 ${user}: ${tm}`);
+    assert.ok(!tm.includes(ip.split(':')[0] === '2001' ? '2001:db8' : ip), `서명에 주소: ${tm}`);
+  }
+  // ‘from’ 다음이 주소가 아니면 버린다(예전: ‘invalid’ 가 IP)
+  assert.equal(C.ipOf('invalid'), ''); assert.equal(C.ipOf('user'), ''); assert.equal(C.ipOf('cafe'), '', '16진 글자만인 낱말은 IPv6 가 아니다');
+  assert.equal(C.ipOf('::ffff:10.0.0.1'), '::ffff:10.0.0.1'); assert.equal(C.ipOf('scanner.example.net'), 'scanner.example.net');
+  // 시도당 실패 수 — 공격원 8곳 × (Invalid user + Failed + Connection closed + Disconnected) → 실패 16(Invalid · Failed) · 사전 인증 종료는 세지 않음 · 서명은 계정 수와 무관
+  const items = [];
+  for (let i = 0; i < 8; i += 1) {
+    const ip = `198.51.100.${10 + i}`; const u = `user${i}`; const t = NOW - 600_000 + i * 1000;
+    items.push({ src: 'secure', ts: t, msg: `Invalid user ${u} from ${ip} port ${40000 + i}` }, { src: 'secure', ts: t, msg: `Failed password for invalid user ${u} from ${ip} port ${40000 + i} ssh2` },
+      { src: 'secure', ts: t, msg: `Connection closed by invalid user ${u} ${ip} port ${40000 + i} [preauth]` }, { src: 'secure', ts: t, msg: `Disconnected from invalid user ${u} ${ip} port ${40000 + i} [preauth]` });
+  }
+  const r = await C.classifyItems(items, { now: NOW });
+  const fails = [...r.sec.values()].filter((x) => x.kind === 'fail_ip');
+  assert.equal(fails.reduce((a, x) => a + x.count, 0), 16);
+  assert.ok(!fails.some((x) => x.item === 'invalid' || x.item === '(IP 없음)'), '주소를 잘못 뽑지 않는다');
+  assert.equal(new Set([...r.patterns.values()].map((p) => p.sig)).size, 4, '규칙 · 문구마다 서명 1개(계정 8개여도)');
+  // 서로 다른 공격원 20곳이 1줄씩 → 가짜 ‘집중’ 없음(예전: IP=‘invalid’ 20 → 집중 high)
+  const spread = Array.from({ length: 20 }, (_, i) => ({ src: 'secure', ts: NOW - 60_000 + i, msg: `Disconnected from invalid user u${i} 198.51.${i}.9 port 1 [preauth]` }));
+  const sp = await C.classifyItems(spread, { now: NOW });
+  assert.equal(sp.bursts.length, 0); assert.equal(sp.counts.secHigh, 0);
+});
+
+test('반증 F7 · F11 — 가림 판정 하나: 같은 줄의 표본 · 서명 · 보안 상위가 가림에서 어긋나지 않는다 · GPDB 로그인 실패 = 보안 · 보관된 서명도 읽을 때 같은 가림', async () => {
+  const lines = [
+    { src: 'secure', ts: NOW - 1000, msg: 'login failure for user kim.ops@corp.example from 198.51.100.9 Bearer abcDEFghiJKLmnoPQR' },
+    { src: 'gpdb', ts: NOW - 900, msg: 'FATAL: password authentication failed for user "etl_loader"' },
+    { src: 'gpdb', ts: NOW - 800, msg: 'FATAL: no pg_hba.conf entry for host "10.1.2.3", user "bi_ro", database "dw", SSL off' },
+    { src: 'journal', ts: NOW - 700, msg: "x.service: Failed with result 'exit-code'. token=ZZsecretZZ" },
+    // 꼴 치환(secTemplate)이 모르는 자리에 계정이 다시 나와도 같은 줄에서 뽑은 값으로 치환한다(scrubFacts)
+    { src: 'secure', ts: NOW - 600, msg: 'login failure for user ftpadmin from 198.51.100.9 (ftpadmin)' },
+  ];
+  const r = await C.classifyItems(lines, { now: NOW });
+  const pats = [...r.patterns.values()];
+  for (const p of pats) {
+    for (const leak of ['kim.ops@corp.example', 'abcDEFghiJKLmnoPQR', 'etl_loader', 'bi_ro', '10.1.2.3', 'ZZsecretZZ', 'ftpadmin']) assert.ok(!p.tmpl.includes(leak), `서명에 ${leak}: ${p.tmpl}`);
+    for (const s0 of p.samples) for (const leak of ['abcDEFghiJKLmnoPQR', 'ZZsecretZZ', 'kim.ops@corp.example']) assert.ok(!s0.text.includes(leak), `표본에 ${leak}: ${s0.text}`);
+  }
+  const gp = pats.filter((p) => p.ruleId === 'APP-GP-AUTH-FAIL');
+  assert.equal(gp.length, 2); assert.ok(gp.every((p) => p.cls === 'sec'));
+  const users = [...r.sec.values()].filter((x) => x.kind === 'fail_user').map((x) => x.item);
+  assert.ok(users.includes('etl_loader') && users.includes('bi_ro'), '보안 상위(관리자 원문 · 비관리자 토큰)로 간다');
+  // 읽기 경로 방어 — 예전 판이 쓴 서명(계정 원문)도 같은 가림을 다시 댄다(멱등)
+  assert.equal(C.maskStoredTmpl('sec', 'Disconnected from invalid user kimops <ip> port <n> [preauth]'), 'Disconnected from invalid user <user> <ip> port <n> [preauth]');
+  assert.equal(C.maskStoredTmpl('sec', C.maskStoredTmpl('sec', 'Failed password for <user> from <ip> port <n> ssh2')), 'Failed password for <user> from <ip> port <n> ssh2');
+  assert.ok(!C.maskStoredTmpl('issue', 'auth Bearer abcDEFghiJKLmnoPQR').includes('abcDEF'));
+});
+
+test('반증 F1 · F6 — 보안 출처 하나(audit 의 같은 사건은 kind 없음) · 시각 모름은 분류하지 않고 센다 · 알림 입력은 최근 줄만', async () => {
+  const au = { src: 'audit', ts: NOW - 1000, msg: "type=USER_AUTH msg=audit(1.1:1): pid=1 uid=0 auid=1 ses=1 msg='op=PAM:authentication acct=\"root\" exe=\"/usr/sbin/sshd\" hostname=203.0.113.45 addr=203.0.113.45 terminal=ssh res=failed'" };
+  const a1 = await C.classifyItems([au], { now: NOW, authSrc: 'secure' });
+  assert.equal([...a1.sec.values()].length, 0, 'secure 를 읽은 주기의 audit 인증 실패는 같은 사건 — 세지 않는다'); assert.equal(a1.counts.kindDup, 1);
+  assert.equal([...a1.patterns.values()][0].ruleId, 'SEC-AUDIT-AUTH-FAIL', '패턴은 남는다');
+  const a2 = await C.classifyItems([au], { now: NOW, authSrc: 'audit' });
+  assert.ok([...a2.sec.values()].some((x) => x.kind === 'fail_ip' && x.item === '203.0.113.45'), 'audit 가 보안 출처면 센다');
+  // 시각 모름(ts null) — 분류 · 시간 칸 · 알림에서 빠지고 #undated 로만
+  const u = await C.classifyItems([{ src: 'kernel', ts: null, msg: 'mce: [Hardware Error]: Machine check events logged' }], { now: NOW });
+  assert.equal(u.patterns.size, 0); assert.equal(u.counts.undated, 1); assert.equal(u.counts.faultLines, 0);
+  assert.ok([...u.hours.values()].some((h) => h.sig === '#undated:kernel' && h.cls === 'undated'));
+  // 알림 입력 — 첫 읽기의 지난 줄(2시간 전)은 기록만 · 최근 줄만 센다
+  const f = await C.classifyItems([{ src: 'kernel', ts: NOW - 2 * HOUR, msg: 'mce: [Hardware Error]: Machine check events logged' }, { src: 'kernel', ts: NOW - 60_000, msg: 'mce: [Hardware Error]: Machine check events logged' }], { now: NOW });
+  assert.equal(f.counts.fault, 2); assert.equal(f.counts.faultLines, 1);
+});
+
+test('보안 합계(반증 F1) — 그 종류를 담는 출처를 읽었을 때만 0 · journald 주 읽기(warning)만 읽었으면 SSH 성공 · 실패는 모름(null + 이유)', async () => {
+  const V = await import('../src/bmusage/logs/view.js');
+  const onlyJournal = V.secTotalsOf({}, { journal: { read: 5 } }, { journal: { status: 'ok' }, jsec: { status: 'perm', scope: 'own' }, secure: { status: 'perm', scope: 'file' }, audit: { status: 'perm', scope: 'dir' } });
+  for (const k of V.SEC_TOTAL_KEYS) assert.equal(onlyJournal.totals[k], null, `${k} 는 모름`);
+  assert.deepEqual(onlyJournal.why.ok.carriers, ['secure', 'jsec']); assert.equal(onlyJournal.why.ok.scopes.jsec, 'own');
+  const jsecRead = V.secTotalsOf({ sudofail: 2 }, { jsec: { read: 3 } }, null);
+  assert.equal(jsecRead.totals.ok, 0); assert.equal(jsecRead.totals.sudofail, 2); assert.equal(jsecRead.totals.avc, null, 'AVC 는 auditd 만 담는다');
+  const auditOnly = V.secTotalsOf({ fail_ip: 4 }, { audit: { read: 1 } }, null);
+  assert.equal(auditOnly.totals.fail_ip, 4); assert.equal(auditOnly.totals.ok, null); assert.equal(auditOnly.totals.avc, 0);
+  const partial = V.secTotalsOf({ fail_ip: 2 }, { journal: { read: 1 } }, null);
+  assert.equal(partial.totals.fail_ip, null); assert.equal(partial.why.fail_ip.partial, 2, '다른 출처에서 센 수는 부분 합으로만');
+});

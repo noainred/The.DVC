@@ -53,10 +53,16 @@ async function setup(t) {
     syslog(NOW - 39 * 60_000, 'Failed password for admin from 203.0.113.45 port 51823 ssh2'),
     syslog(NOW - 30 * 60_000, 'Accepted password for root from 10.20.1.5 port 44012 ssh2'),
     syslog(NOW - 20 * 60_000, 'kim.ops : TTY=pts/0 ; PWD=/home/kim.ops ; USER=root ; COMMAND=/usr/bin/systemctl restart postgresql', 'sudo[9]'),
+    // 반증 F7 · F8 — OpenSSH 연결 식별 꼴(계정이 서명에 남던 꼴) · 메일 · 토큰이 실린 로그인 실패
+    syslog(NOW - 19 * 60_000, 'Disconnected from invalid user kimops 198.51.100.10 port 40000 [preauth]'),
+    syslog(NOW - 18 * 60_000, 'Connection closed by invalid user svc_backup 198.51.100.11 port 40001 [preauth]'),
+    syslog(NOW - 17 * 60_000, 'login failure for user kim.ops@corp.example from 198.51.100.9 Bearer abcDEFghiJKLmnoPQR', 'vsftpd[3]'),
   ];
+  // 반증 F11 — GPDB 로그인 실패는 보안(계정이 비관리자 표본으로 나가던 결함)
+  const gp = `${new Date(NOW - 15 * 60_000).toISOString().slice(0, 19).replace('T', ' ')}.123 KST,"etl_loader","dw",p1,th1,10.1.1.9:5432,,,0,,,seg-1,,,,,"FATAL","28P01","password authentication failed for user ""etl_loader""",,,,,,,0,,"auth.c",1,`;
   const out = ['##JOURNAL', 'J#absent', '##DMESG', 'K#boot=3818fa4e-dde8-4491-a53a-a696101a21ab', 'K#last=-1', `K#up=1000.00`, `K#now=${Math.floor(NOW / 1000)}`,
     `K|kern  :warn  : [  900.000001] nfs: server 10.9.8.7 not responding, still trying`, 'K#n=1', 'K#rc=0',
-    '##SECURE', ...sec.map((l) => `S|${l}`), 'S#ino=5', 'S#size=500', 'S#mode=inc', `S#n=${sec.length}`, 'S#off=500', '##AUDIT', 'A#svc=active', 'A#absent', '##APPLOG', 'G#absent', 'F#absent', '##END'].join('\n');
+    '##SECURE', ...sec.map((l) => `S|${l}`), 'S#ino=5', 'S#size=500', 'S#mode=inc', `S#n=${sec.length}`, 'S#off=500', '##AUDIT', 'A#svc=active', 'A#absent', '##APPLOG', 'G#dir=0', `G|${gp}`, 'G#ino=3', 'G#size=900', 'G#mode=inc', 'G#n=1', 'G#e=1', 'G#off=900', 'F#absent', '##END'].join('\n');
   const items = [];
   for (const k of keys) items.push((await RUN.buildLogWrite({ key: k, stdout: out, prev: null, now: NOW })).write);
   const w = await S.logWriteBatch({ agent: config.agent?.name || '', items });
@@ -94,13 +100,21 @@ test('실제 라우터 — 범위 · 404 은닉 · 관리자 판본 가림 · �
   assert.ok(a.body.security.sudo.some((x) => x.item.startsWith('kim.ops → root')));
   const secPat = a.body.patterns.find((p) => p.ruleId === 'SEC-SSH-FAIL');
   assert.ok(secPat.samples.length > 0);
-  assert.equal(a.body.kpi.sec.lines, 4); assert.equal(a.body.kpi.perf.lines, 1);
+  assert.equal(a.body.kpi.sec.lines, 8); assert.equal(a.body.kpi.perf.lines, 1);
+  // 반증 F7 · F8 · F11 — 서명(tmpl)은 관리자 판본에도 계정 · 메일 · 토큰이 없다(표본과 같은 가림 + 계정 · 주소 치환) · ‘invalid’ 는 IP 가 아니다
+  for (const p of a.body.patterns) for (const leak of ['kimops', 'svc_backup', 'kim.ops@corp.example', 'abcDEFghiJKLmnoPQR', 'etl_loader']) assert.ok(!p.tmpl.includes(leak), `서명 ${p.ruleId} 에 ${leak}: ${p.tmpl}`);
+  assert.ok(!a.body.security.fail_ip.some((x) => x.item === 'invalid'), '연결 식별 꼴에서 ‘invalid’ 를 IP 로 뽑지 않는다');
+  assert.equal(a.body.patterns.filter((p) => p.ruleId === 'SEC-SSH-PREAUTH').length, 2, 'Connection closed · Disconnected [preauth] = 문구 2개 → 서명 2개(계정 · 주소는 치환 — 계정마다 갈라지지 않는다)');
+  assert.equal(a.body.security.totals.fail_ip, 4, '실패 = Failed 2 + 로그인 실패 1 + GPDB 인증 실패 1(사전 인증 종료 2줄은 세지 않음)');
+  const gpa = a.body.patterns.find((p) => p.ruleId === 'APP-GP-AUTH-FAIL');
+  assert.equal(gpa?.cls, 'sec', 'GPDB 로그인 실패 = 보안');
+  assert.ok(a.body.security.fail_user.some((x) => x.item === 'etl_loader'), '관리자 보안 상위에는 계정 원문');
   assert.equal(a.body.security.auditd, 'active');
   // 비관리자(전체 범위 viewer) — 같은 URL 을 관리자가 먼저 읽었어도 가린 판본(캐시 분리)
   const v = await call('viewer', '/perf/LTAGA1/logs?range=24h');
   assert.equal(v.status, 200);
   const vs = JSON.stringify(v.body);
-  for (const leak of ['203.0.113.45', '"admin"', 'kim.ops', '10.20.1.5']) assert.ok(!vs.includes(leak), `비관리자 응답에 ${leak}`);
+  for (const leak of ['203.0.113.45', '"admin"', 'kim.ops', '10.20.1.5', 'kimops', 'svc_backup', 'abcDEFghiJKLmnoPQR', 'etl_loader', '198.51.100.10']) assert.ok(!vs.includes(leak), `비관리자 응답에 ${leak}`);
   assert.equal(v.body.secHidden, true);
   assert.deepEqual(v.body.patterns.find((p) => p.ruleId === 'SEC-SSH-FAIL').samples, []);
   assert.equal(v.body.security.fail_ip[0].count, a.body.security.fail_ip[0].count, '개수는 같다');
@@ -125,6 +139,31 @@ test('실제 라우터 — 범위 · 404 은닉 · 관리자 판본 가림 · �
   const fv = await call('viewer', '/logs');
   assert.ok(!JSON.stringify(fv.body).includes('10.9.8.7'), '비관리자 함대 응답에 주소 이름 없음');
   assert.ok(fv.body.servers.every((s) => s.top.every((p) => p.cls !== 'sec' || p.sample === '')), '보안 표본 없음');
+  for (const leak of ['kimops', 'svc_backup', 'etl_loader']) assert.ok(!JSON.stringify(fv.body).includes(leak), `비관리자 함대에 ${leak}`);
+});
+
+test('반증 F10 — 범위 계정의 함대 응답에는 자기 범위 대상이 보이는 노드만(엣지 이름 · 상태 · 시각) · 뺀 수는 밝힌다', async () => {
+  const R = await import('../src/routes/api/bmLogs.js');
+  const edges = [
+    { agent: 'edge-kr-seoul', snapAt: NOW, snap: { logsVer: 1, targets: [{ key: 'E-A1', name: 'e-a1', vcenterId: 'vcA' }], logSummary: [{ key: 'E-A1', wasRead: true, cls: {}, top: [] }] } },
+    { agent: 'edge-poland-wroclaw', snapAt: NOW, snap: { logsVer: 1, targets: [{ key: 'E-B1', name: 'e-b1', vcenterId: 'vcB' }], logSummary: [] } },
+    { agent: 'edge-us-east-ashburn', snapAt: NOW, snap: { targets: [{ key: 'E-B2', name: 'e-b2', vcenterId: 'vcB' }] } },
+  ];
+  const deps = { listEdgeBmUsage: async () => edges, summary: async () => ({ at: NOW, list: [] }), currentTargets: async () => ({ targets: [{ key: 'L-B', name: 'l-b', vcenterId: 'vcB' }] }), bmAddressHosts: async () => [] };
+  const snap = { vcenters: [{ id: 'vcA' }, { id: 'vcB' }] };
+  const scoped = await R.bmLogsFleet({ user: { username: 'opa', role: 'operator', scope: { vcenters: ['vcA'] } } }, snap, deps);
+  assert.deepEqual(scoped.nodes.map((n) => n.agent), ['edge-kr-seoul']);
+  assert.equal(scoped.nodesOmitted, 3, '이 노드(범위 밖 대상만) + 엣지 둘'); assert.equal(scoped.scoped, true);
+  assert.ok(!JSON.stringify(scoped).includes('poland') && !JSON.stringify(scoped).includes('ashburn'));
+  const all = await R.bmLogsFleet({ user: { username: 'adm', role: 'admin', scope: null } }, snap, deps);
+  assert.equal(all.nodes.length, 4); assert.equal(all.nodesOmitted, undefined);
+});
+
+test('비관리자 계정 꼴 가림(maskAccountForms) — role "x" · user=x · acct="x" 는 토큰(같은 값은 같은 토큰)', async () => {
+  const { maskAccountForms } = await import('../src/routes/api/bmLogs.js');
+  const a = maskAccountForms('FATAL: role "bob" does not exist; user=bob acct="bob"');
+  assert.ok(!a.includes('bob'), a);
+  assert.equal(maskAccountForms('no account here 1.2.3.4'), 'no account here 1.2.3.4');
 });
 
 test('도구 키 집행 — 새 경로는 ‘bm-usage’ 키로 집행된다(첫 세그먼트를 새로 만들지 않는다)', async () => {

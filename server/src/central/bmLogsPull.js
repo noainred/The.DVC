@@ -15,8 +15,11 @@ import { capStr } from '../util/capStr.js';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { stage7aMinEdgeVersion } from './featureMinEdgeVersion.js';
-import { LOG_RULE_IDS, LOG_CLASSES, LOG_SOURCES, SEC_KINDS, LOG_EVIDENCE } from '../bmusage/logs/rules.js';
-import { STATUS } from '../bmusage/logs/parse.js';
+import { LOG_RULE_IDS, LOG_CLASSES, LOG_SOURCES, SEC_KINDS, LOG_EVIDENCE, CLASS_LABEL, logRuleCatalog } from '../bmusage/logs/rules.js';
+import { STATUS, PERM_SCOPES } from '../bmusage/logs/parse.js';
+import { LOG_SECTIONS, APP_LOGS, AUTH_IDENTS } from '../bmusage/logs/command.js';
+import { maskStoredTmpl } from '../bmusage/logs/classify.js';
+import { SEC_TOTAL_KEYS } from '../bmusage/logs/view.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 const TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_PULL_TIMEOUT_MS, 20_000, { min: 5_000 });
@@ -43,7 +46,7 @@ function topOf(p, now) {
   const sig = typeof p.sig === 'string' && SIG_RE.test(p.sig) ? p.sig : null;
   if (!sig) return null;
   return { sig, ruleId: RULES.has(p.ruleId) ? p.ruleId : '', cls: enumOr(p.cls, CLS, 'issue'), severity: enumOr(p.severity, SEV, 'info'), count: N(p.count), last: ts(p.last, now),
-    src: enumOr(p.src, SRC, ''), unit: txt(p.unit, 64), tmpl: txt(p.tmpl, 200), sample: txt(p.sample, 300) };
+    src: enumOr(p.src, SRC, ''), unit: txt(p.unit, 64), tmpl: maskStoredTmpl(p.cls, txt(p.tmpl, 200)), sample: txt(p.sample, 300) };
 }
 /**
  * 봉투 logSummary → 중앙 보관 모양(순수). targetKeys = 그 엣지가 같은 봉투로 보고한 대상 키 집합(없으면 전부 버린다).
@@ -56,7 +59,8 @@ export function sanitizeLogSummary(list, { targetKeys = new Set(), now = Date.no
     if (!isObj(x) || typeof x.key !== 'string' || !targetKeys.has(x.key)) { dropped += 1; continue; }
     const st = isObj(x.status) && isObj(x.status.sources) ? { sources: Object.fromEntries(LOG_SOURCES.map((s) => [s, enumOr(x.status.sources[s], STAT, null)])), ended: x.status.ended !== false } : null;
     out.push({
-      key: capStr(x.key, 256), at: ts(x.at, now), wasRead: x.wasRead === true, cls: clsMap(x.cls), none: N(x.none), read: N(x.read), trunc: N(x.trunc), secHigh: N(x.secHigh),
+      key: capStr(x.key, 256), at: ts(x.at, now), wasRead: x.wasRead === true, ...(typeof x.secRead === 'boolean' ? { secRead: x.secRead } : {}), cls: clsMap(x.cls), none: N(x.none), read: N(x.read), trunc: N(x.trunc), secHigh: N(x.secHigh),
+      ...(N(x.undated) != null ? { undated: N(x.undated) } : {}),
       top: (Array.isArray(x.top) ? x.top : []).slice(0, 8).map((p) => topOf(p, now)).filter(Boolean), status: st,
     });
   }
@@ -64,11 +68,22 @@ export function sanitizeLogSummary(list, { targetKeys = new Set(), now = Date.no
   return { list: out, dropped };
 }
 
+const APP_IDS = new Set(APP_LOGS.map((a) => a.id));
+const PSCOPE = new Set(PERM_SCOPES);
+const AUTHSRC = new Set(['secure', 'jsec', 'audit']);
+/** 출처 상태 하나(아는 필드만 — 화면이 쓰는 칩 · 권한 안내 · 첫 읽기 · 부분 · 시각 모름이 엣지 대행에서도 같게: 반증 F9). */
 function srcStatus(s) {
   if (!isObj(s)) return null;
+  const nOpt = (k) => (N(s[k]) != null ? { [k]: N(s[k]) } : {});
   return { status: enumOr(s.status, STAT, 'missing'), n: N(s.n), emitted: N(s.emitted), truncated: N(s.truncated), ...(typeof s.mode === 'string' && /^(first|inc|shrink|rot)$/.test(s.mode) ? { mode: s.mode } : {}),
-    ...(s.rotated === true ? { rotated: true } : {}), ...(s.lost === true ? { lost: true } : {}), ...(s.rebooted === true ? { rebooted: true } : {}), ...(s.cursorReset === true ? { cursorReset: true } : {}),
-    ...(s.first === true ? { first: true } : {}), ...(s.svc != null ? { svc: typeof s.svc === 'string' && /^[a-z-]{1,16}$/.test(s.svc) ? s.svc : null } : {}) };
+    ...(s.rotated === true ? { rotated: true } : {}), ...(s.lost === true ? { lost: true } : {}), ...(s.shrunk === true ? { shrunk: true } : {}), ...(s.rebooted === true ? { rebooted: true } : {}),
+    ...(s.cursorReset === true ? { cursorReset: true } : {}), ...(s.first === true ? { first: true } : {}), ...(s.nofiles === true ? { nofiles: true } : {}), ...(s.toolMsg === true ? { toolMsg: true } : {}),
+    ...(Object.hasOwn(s, 'svc') ? { svc: typeof s.svc === 'string' && /^[a-z-]{1,16}$/.test(s.svc) ? s.svc : null } : {}),
+    ...(PSCOPE.has(s.scope) ? { scope: s.scope } : {}), ...(s.tool === 'absent' ? { tool: 'absent' } : {}),
+    ...(typeof s.reason === 'string' && /^[a-z-]{1,16}$/.test(s.reason) ? { reason: s.reason } : {}),
+    ...(s.partial === 'timeout' ? { partial: 'timeout' } : N(s.partial) != null ? { partial: N(s.partial) } : {}),
+    ...(AUTHSRC.has(s.dupOf) ? { dupOf: s.dupOf } : {}), ...(Array.isArray(s.groups) ? { groups: s.groups.filter((g) => /^(?:systemd-journal|adm|wheel)$/.test(g)).slice(0, 3) } : {}),
+    ...nOpt('rc'), ...nOpt('older'), ...nOpt('authSkipped'), ...nOpt('undated'), ...nOpt('skew'), ...nOpt('dup'), ...nOpt('uid'), ...nOpt('skippedBytes'), ...nOpt('jsonCut') };
 }
 const secList = (a) => (Array.isArray(a) ? a.slice(0, 15).filter(isObj).map((x) => ({ item: txt(x.item, 128), count: N(x.count) })).filter((x) => x.item) : []);
 /** 엣지 대행 상세 본문 정제(순수 · 아는 필드만). */
@@ -77,7 +92,8 @@ export function sanitizeLogView(b, now = Date.now()) {
   const rd = isObj(b.read) ? b.read : {};
   const sources = isObj(rd.sources) ? Object.fromEntries(LOG_SOURCES.map((s) => [s, srcStatus(rd.sources[s])]).filter(([, v]) => v)) : null;
   const bySrc = {};
-  if (isObj(rd.bySrc)) for (const s of LOG_SOURCES) if (isObj(rd.bySrc[s])) bySrc[s] = { read: N(rd.bySrc[s].read), truncated: N(rd.bySrc[s].truncated), none: N(rd.bySrc[s].none) };
+  if (isObj(rd.bySrc)) for (const s of LOG_SOURCES) if (isObj(rd.bySrc[s])) bySrc[s] = { read: N(rd.bySrc[s].read), truncated: N(rd.bySrc[s].truncated), none: N(rd.bySrc[s].none),
+    ...(rd.bySrc[s].wasRead === true ? { wasRead: true } : {}), ...(N(rd.bySrc[s].undated) != null ? { undated: N(rd.bySrc[s].undated) } : {}) };
   const sec = {};
   const S = isObj(b.security) ? b.security : {};
   for (const k of SECK) if (Array.isArray(S[k])) sec[k] = secList(S[k]);
@@ -88,7 +104,7 @@ export function sanitizeLogView(b, now = Date.now()) {
     return {
       sig, cls: enumOr(p.cls, CLS, 'issue'), severity: enumOr(p.severity, SEV, 'info'), ruleId: RULES.has(p.ruleId) ? p.ruleId : '', title: txt(p.title, 120), grade: ['●', '◐', '○'].includes(p.grade) ? p.grade : null,
       evidence: (Array.isArray(p.evidence) ? p.evidence : []).slice(0, 6).filter((e) => typeof e === 'string' && Object.hasOwn(LOG_EVIDENCE, e)),
-      src: enumOr(p.src, SRC, ''), unit: txt(p.unit, 64), tmpl: txt(p.tmpl, 200), count: N(p.count), total: N(p.total), first: ts(p.first, now), last: ts(p.last, now),
+      src: enumOr(p.src, SRC, ''), unit: txt(p.unit, 64), tmpl: maskStoredTmpl(p.cls, txt(p.tmpl, 200)), count: N(p.count), total: N(p.total), first: ts(p.first, now), last: ts(p.last, now),
       samples: (Array.isArray(p.samples) ? p.samples : []).slice(-5).filter(isObj).map((x) => ({ ts: ts(x.ts, now), text: txt(x.text, 300) })),
       corr: {
         changes: (Array.isArray(c.changes) ? c.changes : []).slice(0, 3).filter(isObj).map((e) => ({ ts: ts(e.ts, now), kind: txt(e.kind, 24), item: txt(e.item, 96) })),
@@ -101,17 +117,38 @@ export function sanitizeLogView(b, now = Date.now()) {
     };
   }).filter(Boolean);
   const hourly = (Array.isArray(b.hourly) ? b.hourly : []).slice(0, 200).filter(isObj).map((h) => ({ t: ts(h.t, now), fault: N(h.fault), perf: N(h.perf), sec: N(h.sec), issue: N(h.issue) })).filter((h) => h.t != null);
+  const tw = isObj(S.totalsWhy) ? S.totalsWhy : {};
+  const totalsWhy = {};
+  for (const k of SEC_TOTAL_KEYS) {
+    const w = tw[k];
+    if (!isObj(w)) continue;
+    const carriers = (Array.isArray(w.carriers) ? w.carriers : []).filter((c) => SRC.has(c)).slice(0, 4);
+    totalsWhy[k] = { carriers, states: Object.fromEntries(carriers.map((c) => [c, enumOr(isObj(w.states) ? w.states[c] : null, STAT, null)])),
+      scopes: Object.fromEntries(carriers.map((c) => [c, isObj(w.scopes) && PSCOPE.has(w.scopes[c]) ? w.scopes[c] : null]).filter(([, x]) => x)), ...(N(w.partial) != null ? { partial: N(w.partial) } : {}) };
+  }
+  const M = isObj(b.method) ? b.method : null;
+  const cs = isObj(b.corrSource) ? b.corrSource : {};
   return {
-    ok: b.ok === true, key: capStr(typeof b.key === 'string' ? b.key : '', 256), range: ['1h', '24h', '7d'].includes(b.range) ? b.range : '24h', from: ts(b.from, now), to: N(b.to),
-    kpi: clsMap(b.kpi), hourly,
-    read: { lines: N(rd.lines), truncated: N(rd.truncated), none: N(rd.none), bySrc, at: ts(rd.at, now), lineCap: N(rd.lineCap), sources, ended: rd.ended === false ? false : rd.ended === true ? true : null,
+    ok: b.ok === true, key: capStr(typeof b.key === 'string' ? b.key : '', 256), agent: txt(b.agent, 128), range: ['1h', '24h', '7d'].includes(b.range) ? b.range : '24h', from: ts(b.from, now), to: N(b.to),
+    kpi: clsMap(b.kpi), classLabel: CLASS_LABEL, hourly,
+    read: { lines: N(rd.lines), truncated: N(rd.truncated), none: N(rd.none), undated: N(rd.undated), bySrc, authSrc: AUTHSRC.has(rd.authSrc) ? rd.authSrc : null, at: ts(rd.at, now), lineCap: N(rd.lineCap), sources, ended: rd.ended === false ? false : rd.ended === true ? true : null,
       cut: typeof rd.cut === 'string' && /^[A-Z]{1,16}$/.test(rd.cut) ? rd.cut : null, ...(rd.cursorReset ? { cursorReset: 'corrupt' } : {}), ...(rd.corruptKept === true ? { corruptKept: true } : {}), ...(rd.never === true ? { never: true } : {}) },
-    security: { ...sec, totals: isObj(S.totals) ? Object.fromEntries([...SECK].filter((k) => Object.hasOwn(S.totals, k)).map((k) => [k, N(S.totals[k])])) : {}, bursts: (Array.isArray(S.bursts) ? S.bursts : []).slice(0, 16).filter(isObj).map((x) => ({ ip: txt(x.ip, 64), count: N(x.count), from: ts(x.from, now), to: ts(x.to, now) })),
+    security: { ...sec, totals: isObj(S.totals) ? Object.fromEntries(SEC_TOTAL_KEYS.filter((k) => Object.hasOwn(S.totals, k)).map((k) => [k, N(S.totals[k])])) : {}, totalsWhy,
+      bursts: (Array.isArray(S.bursts) ? S.bursts : []).slice(0, 16).filter(isObj).map((x) => ({ ip: txt(x.ip, 64), count: N(x.count), from: ts(x.from, now), to: ts(x.to, now) })),
       auditd: typeof S.auditd === 'string' && /^[a-z-]{1,16}$/.test(S.auditd) ? S.auditd : null, auditStatus: enumOr(S.auditStatus, STAT, null), secureStatus: enumOr(S.secureStatus, STAT, null) },
     patterns, patternsOmitted: N(b.patternsOmitted),
-    method: isObj(b.method) ? { lineCap: N(b.method.lineCap), keepDays: N(b.method.keepDays), burst: isObj(b.method.burst) ? { count: N(b.method.burst.count), windowMin: N(b.method.burst.windowMin) } : null,
-      firstSinceMin: N(b.method.firstSinceMin), firstFileLines: N(b.method.firstFileLines), lineWidth: N(b.method.lineWidth) } : null,
-    corrWindowMs: N(b.corrWindowMs),
+    // 규칙 카탈로그 · 근거는 중앙 자기 것(정적 — 엣지가 보낸 정규식 글자를 화면에 싣지 않는다 · 반증 F9: 엣지 대행 화면의 ‘규칙’ 표가 비었다)
+    rules: logRuleCatalog(), rulesFrom: 'central', evidence: LOG_EVIDENCE,
+    method: M ? {
+      sections: (Array.isArray(M.sections) ? M.sections : []).filter((x) => typeof x === 'string' && LOG_SECTIONS.includes(x) && x !== 'END').slice(0, 12),
+      lineCap: N(M.lineCap), keepDays: N(M.keepDays), burst: isObj(M.burst) ? { count: N(M.burst.count), windowMin: N(M.burst.windowMin) } : null, intervalMs: N(M.intervalMs),
+      firstSinceMin: N(M.firstSinceMin), firstFileLines: N(M.firstFileLines), firstFileBytes: N(M.firstFileBytes), lineWidth: N(M.lineWidth), srcBytes: N(M.srcBytes), freshMin: N(M.freshMin),
+      sources: (Array.isArray(M.sources) ? M.sources : []).filter((x) => SRC.has(x)).slice(0, 12),
+      authIdents: (Array.isArray(M.authIdents) ? M.authIdents : []).filter((x) => AUTH_IDENTS.includes(x)).slice(0, 24),
+      apps: (Array.isArray(M.apps) ? M.apps : []).filter((a) => isObj(a) && APP_IDS.has(a.id)).slice(0, 4).map((a) => ({ id: a.id,
+        dirs: (Array.isArray(a.dirs) ? a.dirs : []).filter((d) => typeof d === 'string' && /^\/[\w./-]{1,160}$/.test(d)).slice(0, 8), glob: typeof a.glob === 'string' && /^[\w.*-]{1,40}$/.test(a.glob) ? a.glob : '' })),
+    } : null,
+    corrWindowMs: N(b.corrWindowMs), corrSource: { changes: N(cs.changes), focus: N(cs.focus) },
   };
 }
 /** 응답 모양 판정(명시 — 6단계 반증 F2: 기본 판정은 봉투 `{ok, node}` 다). */

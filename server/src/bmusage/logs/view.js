@@ -10,9 +10,10 @@
 import { config } from '../../config.js';
 import { SEVERITY_RANK } from '../../loganalysis/rules.js';
 import { LOG_CLASSES, CLASS_LABEL, logRuleById, logRuleCatalog, LOG_EVIDENCE, LOG_SOURCES } from './rules.js';
-import { LOG_SECTIONS, FIRST_SINCE_MIN, FIRST_FILE_LINES, LINE_WIDTH, APP_LOGS } from './command.js';
+import { LOG_SECTIONS, FIRST_SINCE_MIN, FIRST_FILE_LINES, FIRST_FILE_BYTES, LINE_WIDTH, APP_LOGS, AUTH_IDENTS, SRC_BYTES } from './command.js';
 import { logServerQuery, logFleetQuery } from './store.js';
-import { HOUR } from './classify.js';
+import { HOUR, FRESH_MS, maskStoredTmpl } from './classify.js';
+import { createYielder } from '../../util/timeSlice.js';
 
 export const RANGES = Object.freeze({ '1h': 1, '24h': 24, '7d': 168 });
 export const CORR_MS = 5 * 60_000;
@@ -23,20 +24,51 @@ const emptyCls = () => Object.fromEntries(LOG_CLASSES.map((c) => [c, { patterns:
 const lastSample = (j) => { try { const a = JSON.parse(j || '[]'); return Array.isArray(a) && a.length ? a[a.length - 1] : null; } catch { return null; } };
 const samplesOf = (j) => { try { const a = JSON.parse(j || '[]'); return Array.isArray(a) ? a.slice(-5) : []; } catch { return []; } };
 
-/** 수집 방식 설명(화면 ‘수집 방식’ 카드 — 숫자는 이 값에서만). */
-export function logMethod(cfg = {}) {
+/** 수집 방식 설명(화면 ‘수집 방식’ 카드 — 숫자는 이 값에서만 · 주기는 bm-usage 설정값 intervalMs — 반증 F12: 화면에 ‘5분’ 을 박지 않는다). */
+export function logMethod(cfg = {}, { intervalMs = null } = {}) {
   return {
     sections: LOG_SECTIONS.filter((x) => x !== 'END'), lineCap: cfg.lineCap ?? null, keepDays: cfg.keepDays ?? null, burst: { count: cfg.burstCount ?? null, windowMin: cfg.burstWindowMin ?? null },
-    firstSinceMin: FIRST_SINCE_MIN, firstFileLines: FIRST_FILE_LINES, lineWidth: LINE_WIDTH, sources: LOG_SOURCES,
-    apps: APP_LOGS.map((a) => ({ id: a.id, dirs: a.dirs, glob: a.glob })),
+    intervalMs: Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : null,
+    firstSinceMin: FIRST_SINCE_MIN, firstFileLines: FIRST_FILE_LINES, firstFileBytes: FIRST_FILE_BYTES, lineWidth: LINE_WIDTH, srcBytes: SRC_BYTES, freshMin: Math.round(FRESH_MS / 60_000),
+    sources: LOG_SOURCES, authIdents: AUTH_IDENTS,
+    apps: APP_LOGS.map((a) => ({ id: a.id, dirs: a.dirs.map((d) => (typeof d === 'string' ? d : d.path)), glob: a.glob })),
   };
+}
+
+/**
+ * 보안 종류별 합계를 낼 수 있는 출처(반증 F1 — ‘그 종류를 담을 수 있는 출처를 읽었는가’ 로만 0 을 낸다).
+ *   journald 주 읽기(warning 이상)는 sshd 성공 · 실패(info)를 담지 못한다 — 담는 것은 /var/log/secure · journald 보안(JSEC — info 이상) · auditd(인증 실패 · 계정 변경 · AVC).
+ */
+export const SEC_CARRIERS = Object.freeze({
+  fail_ip: ['secure', 'jsec', 'audit'], fail_user: ['secure', 'jsec', 'audit'], ok: ['secure', 'jsec'], root: ['secure', 'jsec'],
+  sudo: ['secure', 'jsec'], sudofail: ['secure', 'jsec'], acct: ['secure', 'jsec', 'audit'], avc: ['audit'],
+});
+export const SEC_TOTAL_KEYS = Object.freeze(Object.keys(SEC_CARRIERS));
+/**
+ * 보안 합계(순수): 담을 수 있는 출처를 이 기간에 읽었으면 그 합(없으면 0) · 하나도 못 읽었으면 null + 이유(담는 출처 · 마지막 상태 · 다른 출처에서 센 부분 합).
+ * @param {object} sums  log_sec 종류별 합(kind → 수)
+ * @param {object} bySrc 기간 안 읽은 기록(#read 행 — 출처 → {read})
+ * @param {object|null} lastSources 마지막 주기의 출처 상태(status · scope)
+ */
+export function secTotalsOf(sums = {}, bySrc = {}, lastSources = null) {
+  const totals = {}; const why = {};
+  for (const k of SEC_TOTAL_KEYS) {
+    const carriers = SEC_CARRIERS[k];
+    const read = carriers.some((c) => bySrc?.[c]?.read != null);
+    const v = Number(sums?.[k]) || 0;
+    if (read) { totals[k] = v; continue; }
+    totals[k] = null;
+    why[k] = { carriers, states: Object.fromEntries(carriers.map((c) => [c, lastSources?.[c]?.status ?? null])),
+      scopes: Object.fromEntries(carriers.map((c) => [c, lastSources?.[c]?.scope ?? null]).filter(([, x]) => x)), ...(v > 0 ? { partial: v } : {}) };
+  }
+  return { totals, why };
 }
 
 /**
  * 서버 1대 상세(이 노드 DB). range = 1h · 24h · 7d(정시 경계).
  * @returns {Promise<object>} { ok, … } — DB 없음이면 { ok:false, reason }
  */
-export async function localLogView({ key, range = '24h', agent = config.agent?.name || '', now = Date.now(), cfg = {}, ops = null } = {}) {
+export async function localLogView({ key, range = '24h', agent = config.agent?.name || '', now = Date.now(), cfg = {}, ops = null, intervalMs = null } = {}) {
   const rg = rangeOf(range);
   const to = Math.floor(now / HOUR) * HOUR;
   const from = to - (RANGES[rg] - 1) * HOUR;
@@ -46,13 +78,14 @@ export async function localLogView({ key, range = '24h', agent = config.agent?.n
   const slots = new Map();
   for (let h = from; h <= to; h += HOUR) slots.set(h, { t: h, read: false, fault: 0, perf: 0, sec: 0, issue: 0 });
   const winCount = new Map(); const winFirst = new Map(); const winLast = new Map();
-  let lines = 0; let truncated = 0; let none = 0;
+  let lines = 0; let truncated = 0; let none = 0; let undated = 0;
   const bySrc = {};
   for (const r of q.hourRows) {
     const s = slots.get(Number(r.hour)); const c = Number(r.count) || 0;
-    if (r.cls === 'read') { if (s) s.read = true; lines += c; const src = String(r.sig).slice(6); (bySrc[src] ||= { read: 0, truncated: 0, none: 0 }).read += c; continue; }
+    if (r.cls === 'read') { if (s) s.read = true; lines += c; const src = String(r.sig).slice(6); const b = (bySrc[src] ||= { read: 0, truncated: 0, none: 0 }); b.read += c; b.wasRead = true; continue; }
     if (r.cls === 'trunc') { truncated += c; const src = String(r.sig).slice(7); (bySrc[src] ||= { read: 0, truncated: 0, none: 0 }).truncated += c; continue; }
     if (r.cls === 'none') { none += c; const src = String(r.sig).slice(6); (bySrc[src] ||= { read: 0, truncated: 0, none: 0 }).none += c; continue; }
+    if (r.cls === 'undated') { undated += c; const src = String(r.sig).slice(9); (bySrc[src] ||= { read: 0, truncated: 0, none: 0 }).undated = (bySrc[src].undated || 0) + c; continue; }
     if (s && LOG_CLASSES.includes(r.cls)) s[r.cls] += c;
     winCount.set(r.sig, (winCount.get(r.sig) || 0) + c);
     if (!winFirst.has(r.sig)) winFirst.set(r.sig, Number(r.hour));
@@ -71,7 +104,7 @@ export async function localLogView({ key, range = '24h', agent = config.agent?.n
     const near = (ts) => Math.abs(ts - first) <= CORR_MS || Math.abs(ts - last) <= CORR_MS;
     patterns.push({
       sig, cls, severity: m?.severity || rule?.severity || 'info', ruleId: m?.rule_id || '', title: rule?.title || (String(sig).startsWith('#over:') ? '서명 수 상한 초과(묶음)' : ''),
-      grade: rule?.grade || null, evidence: rule?.evidence || [], src: m?.src || '', unit: m?.unit || '', tmpl: m?.tmpl || '', count: n, total: Number(m?.count) || null,
+      grade: rule?.grade || null, evidence: rule?.evidence || [], src: m?.src || '', unit: m?.unit || '', tmpl: maskStoredTmpl(cls, m?.tmpl || ''), count: n, total: Number(m?.count) || null,
       first: Number(m?.first) || null, last: Number(m?.last) || null, samples: samplesOf(m?.samples_json),
       corr: {
         changes: changes.filter((e) => Number.isFinite(e.ts) && near(e.ts)).slice(0, 3).map((e) => ({ ts: e.ts, kind: e.kind, item: e.item })),
@@ -82,18 +115,18 @@ export async function localLogView({ key, range = '24h', agent = config.agent?.n
   }
   patterns.sort((a, b) => sevRank(b.severity) - sevRank(a.severity) || b.count - a.count || (b.last || 0) - (a.last || 0));
   const st = q.cursor?.status || null;
-  // 보안 합계 — 보안 줄이 오는 출처(secure · audit · journald) 중 하나라도 이 기간에 읽었으면 없는 종류는 0(읽었고 없음), 하나도 못 읽었으면 null(모름 — 0 아님).
-  const secRead = ['secure', 'audit', 'journal'].some((s0) => bySrc[s0]?.read != null);
-  const secTotals = Object.fromEntries(['fail_ip', 'fail_user', 'ok', 'root', 'sudo', 'sudofail', 'acct', 'avc'].map((k) => [k, q.secTotals?.[k] ?? (secRead ? 0 : null)]));
+  // 보안 합계 — 그 종류를 담을 수 있는 출처(SEC_CARRIERS)를 이 기간에 읽었을 때만 0 이 될 수 있다 · 못 읽었으면 null + 이유(반증 F1).
+  const wasReadBy = Object.fromEntries(Object.entries(bySrc).map(([k, v]) => [k, { read: v.wasRead ? v.read : null }]));
+  const { totals: secTotals, why: secWhy } = secTotalsOf(q.secTotals || {}, wasReadBy, st?.sources || null);
   return {
     ok: true, key, range: rg, from, to: to + HOUR - 1, agent,
     kpi, classLabel: CLASS_LABEL,
-    read: { lines, truncated, none, bySrc, at: q.cursor?.at ?? null, lineCap: st?.lineCap ?? cfg.lineCap ?? null, sources: st?.sources || null, ended: st ? st.ended !== false : null, cut: st?.cut || null,
+    read: { lines, truncated, none, undated, bySrc, authSrc: st?.authSrc ?? null, at: q.cursor?.at ?? null, lineCap: st?.lineCap ?? cfg.lineCap ?? null, sources: st?.sources || null, ended: st ? st.ended !== false : null, cut: st?.cut || null,
       ...(st?.cursorReset ? { cursorReset: st.cursorReset } : {}), ...(q.cursor?.corruptKept ? { corruptKept: true } : {}), ...(q.cursor ? {} : { never: true }) },
     hourly,
-    security: { ...q.sec, totals: secTotals, bursts: Array.isArray(st?.bursts) ? st.bursts : [], auditd: st?.sources?.audit?.svc ?? null, auditStatus: st?.sources?.audit?.status ?? null, secureStatus: st?.sources?.secure?.status ?? null },
+    security: { ...q.sec, totals: secTotals, totalsWhy: secWhy, bursts: Array.isArray(st?.bursts) ? st.bursts : [], auditd: st?.sources?.audit?.svc ?? null, auditStatus: st?.sources?.audit?.status ?? null, secureStatus: st?.sources?.secure?.status ?? null },
     patterns: patterns.slice(0, 300), patternsOmitted: Math.max(0, patterns.length - 300),
-    rules: logRuleCatalog(), evidence: LOG_EVIDENCE, method: logMethod(cfg),
+    rules: logRuleCatalog(), evidence: LOG_EVIDENCE, method: logMethod(cfg, { intervalMs }),
     corrWindowMs: CORR_MS, corrSource: { changes: changes.length, focus: focus.length },
   };
 }
@@ -114,7 +147,9 @@ export async function logViewFor({ key, range = '24h', agent = config.agent?.nam
     const fs = await O.focusList({ key, agent, since: from - HOUR, limit: 200 });
     ops = { changes: ch?.rows || [], focus: fs || [] };
   } catch { /* 연계 원천을 못 읽으면 연계만 빈다(corrSource 0) */ }
-  return localLogView({ key, range: rg, agent, now, cfg, ops });
+  let intervalMs = null;
+  try { intervalMs = Number((await import('../settings.js')).loadBmUsageSettings().intervalMs) || null; } catch { intervalMs = null; }
+  return localLogView({ key, range: rg, agent, now, cfg, ops, intervalMs });
 }
 
 /* ── 함대 요약(주기마다 한 번 — 메모리) ──────────────────────────────────────── */
@@ -124,28 +159,35 @@ export function _resetLogViewForTest() { _sum = null; _computing = null; }
 export async function refreshLogSummary({ agent = config.agent?.name || '', now = Date.now() } = {}) {
   const since = Math.floor(now / HOUR) * HOUR - 23 * HOUR;
   const q = await logFleetQuery({ agent, since });
+  const maybeYield = createYielder(15);   // 조립도 서버 수 × 서명 수 — 시간 기준 양보(이벤트 루프를 한 번에 붙잡지 않게)
   if (!q) { _sum = { at: now, since, list: null, error: 'db-unavailable' }; return _sum; }
   const byKey = new Map();
-  const get = (k) => { if (!byKey.has(k)) byKey.set(k, { key: k, wasRead: false, cls: emptyCls(), none: 0, read: 0, trunc: 0, secHigh: 0, top: [], at: null, status: null }); return byKey.get(k); };
+  const get = (k) => { if (!byKey.has(k)) byKey.set(k, { key: k, wasRead: false, secRead: false, cls: emptyCls(), none: 0, read: 0, trunc: 0, secHigh: 0, top: [], at: null, status: null }); return byKey.get(k); };
+  const SEC_SRCS = new Set(['#read:secure', '#read:jsec', '#read:audit']);   // 보안 줄을 담는 출처(SEC_CARRIERS 의 합집합) — 하나도 못 읽었으면 함대 ‘보안’ 칸은 0 이 아니라 모름(반증 F1)
   const meta = new Map(q.metas.map((m) => [`${m.key}|${m.sig}`, m]));
   const sigN = new Map();
+  let ri = 0;
   for (const r of q.rows) {
+    if ((ri++ & 1023) === 0) await maybeYield();
     const e = get(r.key); const c = Number(r.c) || 0;
-    if (r.cls === 'read') { e.read += c; e.wasRead = true; continue; }   // 읽었는데 0줄(read 0)과 못 읽음(wasRead false)을 가른다
+    if (r.cls === 'read') { e.read += c; e.wasRead = true; if (SEC_SRCS.has(r.sig)) e.secRead = true; continue; }   // 읽었는데 0줄(read 0)과 못 읽음(wasRead false)을 가른다
     if (r.cls === 'trunc') { e.trunc += c; continue; }
     if (r.cls === 'none') { e.none += c; continue; }
+    if (r.cls === 'undated') { e.undated = (e.undated || 0) + c; continue; }
     if (!e.cls[r.cls]) continue;
     e.cls[r.cls].patterns += 1; e.cls[r.cls].lines += c;
     const m = meta.get(`${r.key}|${r.sig}`);
     if (r.cls === 'sec' && ['high', 'critical'].includes(m?.severity)) e.secHigh += c;
     sigN.set(`${r.key}|${r.sig}`, { c, h: Number(r.h) || null });
   }
+  let mi = 0;
   for (const m of q.metas) {
+    if ((mi++ & 1023) === 0) await maybeYield();
     const n = sigN.get(`${m.key}|${m.sig}`);
     if (!n) continue;
     const e = get(m.key);
     const smp = lastSample(m.samples_json);
-    e.top.push({ sig: m.sig, ruleId: m.rule_id || '', cls: m.cls, severity: m.severity || 'info', count: n.c, last: Number(m.last) || n.h, src: m.src || '', unit: m.unit || '', tmpl: m.tmpl || '', sample: smp ? smp.text : '' });
+    e.top.push({ sig: m.sig, ruleId: m.rule_id || '', cls: m.cls, severity: m.severity || 'info', count: n.c, last: Number(m.last) || n.h, src: m.src || '', unit: m.unit || '', tmpl: maskStoredTmpl(m.cls, m.tmpl || ''), sample: smp ? smp.text : '' });
   }
   for (const c of q.curs) { const e = get(c.key); e.at = c.at; e.status = c.status ? { sources: Object.fromEntries(Object.entries(c.status.sources || {}).map(([s, x]) => [s, x?.status || null])), ended: c.status.ended !== false } : null; }
   for (const e of byKey.values()) { e.top.sort((a, b) => sevRank(b.severity) - sevRank(a.severity) || b.count - a.count); e.top = e.top.slice(0, TOP_MAX); }

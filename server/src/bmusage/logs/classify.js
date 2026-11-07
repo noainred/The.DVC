@@ -4,6 +4,12 @@
  * 엔진은 포탈 자체 로그 분석의 것을 그대로 쓴다: 규칙 정규화(loganalysis/rules.js normalizeRules) · 태그 색인(engine.js indexRules — 출처 태그 규칙 먼저, 그다음 태그 없는 규칙,
  *   처음 맞는 하나) · 템플릿(template.js templateOf — 숫자 · IP · UUID · 16진 · 식별자 치환) · 키 정리(engine.js safeKey — `__proto__` 같은 로그 문자열이 맵 키가 되어도 오염 없음).
  *   여기서 더하는 것은 경로 치환 · 보안 줄의 계정 · IP 치환(서명이 계정마다 갈라지지 않게 — 계정 · IP 는 보안 상위 표로 따로 센다)과 서명 해시뿐이다.
+ * ⚠⚠ 가림 판정은 하나(반증 F7): 서명(templateFor)도 표본과 같은 redactSystemLogLine 을 거치고, 같은 줄에서 뽑은 계정 · 주소 값은 서명에서 값으로 한 번 더 치환한다
+ *   (scrubFacts) — 표본 · 서명 · 보안 상위가 같은 줄에서 가림이 어긋나지 않는다. 보관된 서명도 읽을 때 같은 가림(maskStoredTmpl — view · 중앙 정제).
+ * ⚠ 보안 출처 하나(반증 F1): /var/log/secure · journald 보안 · auditd 에 같은 사건이 함께 있으면 한 출처만 센다(parse.js pickAuthSource · 여기 authSrc —
+ *   고르지 않은 auditd 의 인증 · 계정 사실은 패턴만 남기고 보안 상위에는 넣지 않는다).
+ * ⚠ 시각 모름(ts null — parse.js dateOf)은 분류 · 시간 칸 · 알림에서 빼고 ‘#undated:<출처>’ 로만 센다(반증 F6 — 지금 시각으로 지어내지 않는다).
+ *   알림 입력(장애 줄 · 보안 high · 집중)은 최근 FRESH_MS 안의 줄만.
  *
  * ⚠⚠ 분류 못 한 줄은 **세기만** 한다(출처 · 시간별 개수 — 원문 · 템플릿을 남기지 않는다 · 지어내지 않는다).
  * ⚠⚠ 원문 전체는 저장 · 전송하지 않는다 — 패턴마다 가린 표본(redactSystemLogLine) 최대 5줄만.
@@ -27,6 +33,8 @@ export const SEC_ITEMS_MAX = 20;          // 서버 · 시간 · 종류마다 �
 export const CARRY_IPS_MAX = 64;
 export const BURST_DEFAULTS = Object.freeze({ count: 20, windowMin: 5 });
 export const BURST_RULE = DERIVED_RULES[0];
+/** 알림 입력(장애 줄 · 보안 high · 집중)은 이 창 안에 일어난 줄만 — 첫 읽기의 지난 줄(파일 끝 200줄 · 반증 F6)이 ‘지금’ 알림이 되지 않게(journald 첫 읽기 창과 같은 60분). */
+export const FRESH_MS = 60 * 60_000;
 const OTHER = '(기타)';
 
 let _idx = null;
@@ -52,6 +60,10 @@ export const maskPaths = (s) => String(s ?? '').replace(PATH_RE, '$1<path>');
 /* ── 보안 줄 추출(길이 한정 · 앵커) ───────────────────────────────────────── */
 const FOR_FROM_RE = / for (?:invalid user )?(\S{0,64}) from (\S{1,64})/;
 const INVALID_RE = /^Invalid user (\S{0,64}) from (\S{1,64})/;
+/** OpenSSH 7.6+ 연결 식별 꼴 — ‘(invalid|authenticating) user 계정 주소 port N’ · ‘user 계정 주소 port N’(반증 F8: ‘from’ 다음 낱말을 주소로 뽑아 ‘invalid’ 가 IP 가 됐다). */
+const CONNID_RE = /\b(?:(?:invalid|authenticating) )?user (\S{0,64}) (\S{1,64}) port \d{1,5}/;
+/** 계정 없는 연결 꼴 — ‘Connection closed by 주소 port N’ 등. */
+const PEER_RE = /^(?:Connection (?:closed|reset) by|Received disconnect from|Disconnected from|Unable to negotiate with|Did not receive identification string from) (\S{1,64}) port \d{1,5}/;
 const RHOST_RE = /\brhost=(\S{0,64})/;
 const PUSER_RE = /\buser=(\S{1,64})/;
 const SUDO_RE = /^\s{0,4}(\S{1,64}) : /;
@@ -64,9 +76,16 @@ const TCLASS_RE = /\btclass=(\w{1,32})/;
 const AUD_ACCT_RE = /\bacct="([^"]{0,64})"/;
 const AUD_ADDR_RE = /\baddr=([\w.:-]{1,64})/;
 const AUD_OP_RE = /\bop=([\w-]{1,40})/;
+const GP_USER_RE = /\b(?:user|role) "([^"]{1,64})"/;
+const GP_HOST_RE = /\bhost "([^"]{1,64})"/;
 const clean = (v, n = 64) => String(v ?? '').slice(0, n).replace(/[\u0000-\u001f\u007f"'`\\]/g, '').trim();
-const IP_RE = /^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-fA-F:]{2,45})$/;
-const ipOf = (v) => { const s = clean(v); return !s || s === '?' ? '' : (IP_RE.test(s) ? s : s.replace(/[^\w.-]/g, '').slice(0, 64)); };
+const IPV4 = '\\d{1,3}(?:\\.\\d{1,3}){3}';
+/** 주소 꼴만(IPv4 · IPv6(콜론 둘 이상) · 점이 있는 호스트 이름) — 아니면 ''(‘invalid’ · ‘user’ 같은 낱말이 주소로 들어가지 않게 · 반증 F8). */
+const IP_RE = new RegExp(`^(?:${IPV4}|(?:[0-9a-fA-F]{0,4}:){2,7}(?:[0-9a-fA-F]{0,4}|${IPV4}))$`);
+const HOST_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?){1,6}$/;
+export const ipOf = (v) => { const s = clean(v).replace(/%[\w.-]{1,16}$/, ''); return s && (IP_RE.test(s) || (HOST_RE.test(s) && /[A-Za-z]/.test(s))) ? s : ''; };
+/** sshd · 로그인 실패 계열 규칙(같은 추출 순서). */
+const SSHISH_RE = /^SEC-(?:SSH|ROOT|LOGIN)/;
 
 /** 보안 규칙 줄 → { user, ip, item }(없는 칸은 ''). 순수 · 길이 한정. */
 export function secFacts(rule, msg) {
@@ -74,9 +93,15 @@ export function secFacts(rule, msg) {
   const id = rule?.id || '';
   let user = ''; let ip = ''; let item = '';
   let m;
-  if ((m = INVALID_RE.exec(s))) { user = clean(m[1]); ip = ipOf(m[2]); }
-  else if (/^SEC-(?:SSH|ROOT)/.test(id) && (m = FOR_FROM_RE.exec(s))) { user = clean(m[1]); ip = ipOf(m[2]); }
-  else if (id === 'SEC-PAM-FAIL') { user = clean(PUSER_RE.exec(s)?.[1]); ip = ipOf(RHOST_RE.exec(s)?.[1]); }
+  if (SSHISH_RE.test(id)) {
+    if ((m = INVALID_RE.exec(s)) || (m = FOR_FROM_RE.exec(s)) || (m = CONNID_RE.exec(s))) { user = clean(m[1]); ip = ipOf(m[2]); }
+    else if ((m = PEER_RE.exec(s))) ip = ipOf(m[1]);
+    else if (RHOST_RE.test(s) || PUSER_RE.test(s)) { user = clean(PUSER_RE.exec(s)?.[1]); ip = ipOf(RHOST_RE.exec(s)?.[1]); }
+    else if (id === 'SEC-LOGIN-FAIL') {
+      const u = /\b(?:for )?user[= ]'?([\w.@-]{1,64})/.exec(s); if (u) user = clean(u[1]);
+      const f = /\bfrom ([\w.:-]{1,64})/.exec(s); if (f) ip = ipOf(f[1]);
+    }
+  } else if (id === 'SEC-PAM-FAIL' || id === 'SEC-PAM-DUP') { user = clean(PUSER_RE.exec(s)?.[1]); ip = ipOf(RHOST_RE.exec(s)?.[1]); }
   else if (id === 'SEC-SU-FAIL' && (m = SU_RE.exec(s))) { user = clean(m[2]); item = `su → ${clean(m[1])}`; }
   else if (id === 'SEC-SUDO' || id === 'SEC-SUDO-FAIL') {
     user = clean(SUDO_RE.exec(s)?.[1]);
@@ -92,31 +117,60 @@ export function secFacts(rule, msg) {
   } else if (/^SEC-AUDIT/.test(id)) {
     user = clean(AUD_ACCT_RE.exec(s)?.[1]); ip = ipOf(AUD_ADDR_RE.exec(s)?.[1]);
     if (id === 'SEC-AUDIT-ACCT') item = `${clean(AUD_OP_RE.exec(s)?.[1]) || 'acct'} ${user}`.trim();
-  } else if (id === 'SEC-LOGIN-FAIL') {
-    const u = /\b(?:for )?user[= ]'?([\w.@-]{1,64})/.exec(s); if (u) user = clean(u[1]);
-    const f = /\bfrom ([\w.:-]{1,64})/.exec(s); if (f) ip = ipOf(f[1]);
+  } else if (id === 'APP-GP-AUTH-FAIL') {
+    user = clean(GP_USER_RE.exec(s)?.[1]); ip = ipOf(GP_HOST_RE.exec(s)?.[1]);
   }
   return { user, ip, item };
 }
-/** 보안 줄의 계정 · IP 를 치환(서명이 계정마다 갈라지지 않게 — 계정 · IP 는 보안 상위 표로). */
+/**
+ * 보안 줄의 계정 · 주소를 치환(서명이 계정마다 갈라지지 않게 — 계정 · IP 는 보안 상위 표로). 꼴 치환(문구 구조)이다 — 값 치환은 scrubFacts 가 덧댄다.
+ *   ⚠ 반증 F7 · F8: OpenSSH 연결 식별 꼴(invalid · authenticating user 계정 주소 port) · 계정 없는 연결 꼴 · GPDB `user "…"` · `host "…"` 를 더했다.
+ */
 export function secTemplate(msg) {
   return String(msg ?? '').slice(0, MSG_MAX)
     .replace(/( for (?:invalid user )?)\S{0,64}( from )\S{1,64}/, '$1<user>$2<ip>')
     .replace(/^(Invalid user )\S{0,64}( from )\S{1,64}/, '$1<user>$2<ip>')
-    .replace(/\b(rhost=)\S{0,64}/, '$1<ip>').replace(/\b(user=)\S{1,64}/, '$1<user>')
+    .replace(/\b((?:(?:invalid|authenticating) )?user )\S{0,64} \S{1,64}( port [\d<])/, '$1<user> <ip>$2')
+    .replace(/^((?:Connection (?:closed|reset) by|Received disconnect from|Disconnected from|Unable to negotiate with|Did not receive identification string from) )(?!(?:invalid |authenticating )?user )\S{1,64}( port [\d<])/, '$1<ip>$2')
+    .replace(/\b(rhost=)\S{0,64}/, '$1<ip>').replace(/\b(r?user=)\S{1,64}/g, '$1<user>')
     .replace(/^(\s{0,4})\S{1,64}( : )/, '$1<user>$2').replace(/(; USER=)\S{1,64}/, '$1<user>').replace(/(; COMMAND=\S{1,128})[ \t].{0,600}$/, '$1')
     .replace(/^(FAILED SU \(to )\S{1,64}(\) )\S{1,64}/, '$1<user>$2<user>')
     .replace(/(name=)[^,\s]{1,64}/, '$1<user>').replace(/(user ')[^']{1,64}'/, "$1<user>'").replace(/(password changed for )\S{1,64}/, '$1<user>').replace(/^(add ')[^']{1,64}'/, "$1<user>'")
-    .replace(/(acct=")[^"]{0,64}"/, '$1<user>"').replace(/\b(addr=|hostname=)\S{1,64}/g, '$1<ip>');
+    .replace(/(acct=")[^"]{0,64}"/, '$1<user>"').replace(/\b(addr=|hostname=)\S{1,64}/g, '$1<ip>')
+    .replace(/\b(user|role) "[^"]{1,64}"/g, '$1 "<user>"').replace(/\bhost "[^"]{1,64}"/g, 'host "<ip>"');
+}
+const esc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * 같은 줄에서 뽑은 계정 · 주소 값이 서명에 남지 않게 값으로 한 번 더 치환(반증 F7 — 보안 상위는 가림 토큰인데 서명에 원문이 나가던 결함).
+ *   낱말 경계(공백 · 따옴표 · = · : · 괄호 · 쉼표)로만 — 값의 일부 글자를 지우지 않는다.
+ */
+export function scrubFacts(text, facts) {
+  let out = String(text ?? '');
+  for (const [v, tok] of [[facts?.user, '<user>'], [facts?.ip, '<ip>']]) {
+    if (typeof v !== 'string' || !v || v === '?' || v.length > 64) continue;
+    out = out.replace(new RegExp(`(^|[\\s"'=(:,<\\[])${esc(v)}(?=$|[\\s"'),:;>\\]])`, 'g'), `$1${tok}`);
+  }
+  return out;
 }
 /** 서명(순수 · 안정 — 출처 · 규칙 · 정규화 템플릿의 SHA-1 앞 16자). */
 export function signatureOf(src, ruleId, tmpl) {
   return crypto.createHash('sha1').update(`${src}|${ruleId || '-'}|${tmpl}`).digest('hex').slice(0, 16);
 }
-/** 줄 → 템플릿(서명 입력 · 화면 ‘서명’ 열 — 계정 · IP · 경로 · 숫자를 치환한 것이라 원문이 아니다). */
-export function templateFor(rule, msg) {
-  const base = rule?.cls === 'sec' ? secTemplate(msg) : String(msg ?? '').slice(0, MSG_MAX);
-  return templateOf(maskPaths(base));
+/**
+ * 줄 → 템플릿(서명 입력 · 화면 ‘서명’ 열 — 계정 · IP · 경로 · 숫자를 치환한 것이라 원문이 아니다).
+ *   ⚠⚠ 가림 판정은 표본과 **같은 함수**(redactSystemLogLine — 비밀 · 메일 · 토큰 · 전화 · 카드)를 거친다(반증 F7 — 서명은 가림을 건너뛰어 같은 줄의 표본은 [가림] 인데 서명에 원문이 남았다).
+ *   순서: 보안 꼴 치환(secTemplate) → 같은 줄 계정 · 주소 값 치환(scrubFacts) → 비밀 가림 → 경로 → 숫자 · IP · 16진(templateOf).
+ */
+export function templateFor(rule, msg, facts = null) {
+  let base = String(msg ?? '').slice(0, MSG_MAX);
+  if (rule?.cls === 'sec') base = scrubFacts(secTemplate(base), facts || secFacts(rule, base));
+  return templateOf(maskPaths(redactSystemLogLine(base))).slice(0, 200);
+}
+/** 보관된 서명을 읽을 때 같은 가림을 다시 댄다(읽기 경로 방어 — 엣지 · 중앙이 받은 tmpl 도 같은 함수 · 멱등). */
+export function maskStoredTmpl(cls, tmpl) {
+  let s = String(tmpl ?? '').slice(0, 200);
+  if (cls === 'sec') s = secTemplate(s);
+  return redactSystemLogLine(s).slice(0, 200);
 }
 
 /**
@@ -142,21 +196,32 @@ const hourOf = (ts) => Math.floor(ts / HOUR) * HOUR;
  * @param {{now?:number, burst?:{count,windowMin}, carry?:object, sliceMs?:number}} o
  * @returns {Promise<{patterns:Map, hours:Map, sec:Map, counts:object, carry:object, bursts:Array}>}
  */
-export async function classifyItems(items = [], { now = Date.now(), burst = BURST_DEFAULTS, carry = null, sliceMs = 15 } = {}) {
+export async function classifyItems(items = [], { now = Date.now(), burst = BURST_DEFAULTS, carry = null, sliceMs = 15, authSrc = undefined, freshMs = FRESH_MS } = {}) {
   const idx = ruleIndex();
   const maybeYield = createYielder(sliceMs);
   const patterns = new Map(); const hours = new Map(); const sec = new Map();
-  const counts = { fault: 0, perf: 0, sec: 0, issue: 0, none: 0, secHigh: 0, faultLines: 0, lines: 0 };
+  const counts = { fault: 0, perf: 0, sec: 0, issue: 0, none: 0, secHigh: 0, faultLines: 0, lines: 0, undated: 0, kindDup: 0 };
   const failEv = [];   // { i, ip, ts }
   const classified = [];
+  const hourNow = hourOf(now);
   for (let i = 0; i < items.length; i += 1) {
     if ((i & 255) === 0) await maybeYield();
     const it = items[i];
     if (!it || typeof it.msg !== 'string' || !it.msg) continue;
     counts.lines += 1;
     const src = String(it.src || '');
-    const ts = Number.isFinite(it.ts) ? it.ts : now;
-    const rule = matchRule(src, it.msg, idx);
+    // ⚠ 시각을 모르는 줄(30일보다 오래됨 · 시각 없음 — parse.js dateOf)은 지금 시각으로 지어내지 않는다: 분류 · 시간 칸 · 알림에서 빼고 출처별 ‘시각 모름’ 으로만 센다(반증 F6).
+    if (!Number.isFinite(it.ts)) {
+      counts.undated += 1;
+      const hk = `${hourNow}|#undated:${src}`;
+      const h = hours.get(hk) || { hour: hourNow, sig: `#undated:${safeKey(src)}`, cls: 'undated', count: 0 };
+      h.count += 1; hours.set(hk, h);
+      continue;
+    }
+    const ts = it.ts;
+    let rule = matchRule(src, it.msg, idx);
+    // audit 의 인증 실패 · 계정 변경은 secure · journald 보안을 읽은 주기에는 같은 사건이다 — 패턴은 남기되 보안 사실(kind)은 세지 않는다(authSrc · 반증 F1).
+    if (rule?.kind && rule.kind !== 'avc' && src === 'audit' && authSrc !== undefined && authSrc !== 'audit') { rule = { ...rule, kind: undefined }; counts.kindDup += 1; }
     if (!rule) {
       counts.none += 1;
       const hk = `${hourOf(ts)}|#none:${src}`;
@@ -201,9 +266,10 @@ export async function classifyItems(items = [], { now = Date.now(), burst = BURS
     if ((j & 255) === 0) await maybeYield();
     const { it, rule, ts, facts, src } = classified[j];
     counts[rule.cls] += 1;
-    if (rule.cls === 'fault') counts.faultLines += 1;
-    if (rule.cls === 'sec' && (rule.severity === 'high' || rule.severity === 'critical')) counts.secHigh += 1;
-    const tmpl = templateFor(rule.id === BURST_RULE.id ? logRuleById('SEC-SSH-FAIL') : rule, it.msg);
+    const fresh = ts >= now - freshMs;
+    if (rule.cls === 'fault' && fresh) counts.faultLines += 1;
+    if (rule.cls === 'sec' && fresh && (rule.severity === 'high' || rule.severity === 'critical')) counts.secHigh += 1;
+    const tmpl = templateFor(rule.id === BURST_RULE.id ? logRuleById('SEC-SSH-FAIL') : rule, it.msg, facts);
     const sig = signatureOf(src, rule.id, tmpl);
     let p = patterns.get(sig);
     if (!p) { p = { sig, cls: rule.cls, severity: rule.severity, ruleId: rule.id, src, unit: String(it.unit || '').slice(0, 64), tmpl, count: 0, first: ts, last: ts, samples: [] }; patterns.set(sig, p); }
@@ -238,5 +304,6 @@ export async function classifyItems(items = [], { now = Date.now(), burst = BURS
       else if (k === 'avc') add('avc', f.item || '?');
     }
   }
+  counts.freshBursts = bursts.filter((b) => b.to >= now - freshMs).length;
   return { patterns, hours, sec, counts, carry: nextCarry, bursts };
 }

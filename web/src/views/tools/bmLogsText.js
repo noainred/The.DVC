@@ -18,11 +18,11 @@ export const SEV_TEXT = Object.freeze({
   critical: { label: 'critical', tone: 'bad', rank: 5 }, high: { label: 'high', tone: 'bad', rank: 4 }, medium: { label: 'medium', tone: 'warn', rank: 3 },
   low: { label: 'low', tone: 'idle', rank: 2 }, info: { label: 'info', tone: 'idle', rank: 1 },
 });
-export const SRC_LABEL = Object.freeze({ journal: 'journald', kernel: 'dmesg', secure: '/var/log/secure', audit: 'auditd', gpdb: 'GPDB pg_log', airflow: 'Airflow scheduler' });
+export const SRC_LABEL = Object.freeze({ journal: 'journald', jsec: 'journald 보안(sshd · sudo)', kernel: 'dmesg', secure: '/var/log/secure', audit: 'auditd', gpdb: 'GPDB pg_log', airflow: 'Airflow scheduler' });
 export const STATUS_TEXT = Object.freeze({
   ok: { label: '읽음', tone: 'ok' },
-  perm: { label: '권한 없음', tone: 'warn', title: '수집 계정이 읽을 수 없습니다 — 0 이 아니라 모르는 것입니다(journald 는 systemd-journal · adm 그룹, /var/log/secure · audit.log 는 root 권한이 필요할 수 있습니다).' },
-  absent: { label: '없음', tone: 'idle', title: '그 출처가 서버에 없습니다(도구 · 파일 · 폴더 없음 — 예: auditd 미설치 · rsyslog 없음 · 용도 로그 폴더 없음).' },
+  perm: { label: '권한 없음', tone: 'warn', title: '수집 계정이 읽을 수 없습니다 — 0 이 아니라 모르는 것입니다(아래 ‘필요한 권한’ 안내 — 포탈은 서버 권한을 바꾸지 않습니다).' },
+  absent: { label: '없음', tone: 'idle', title: '그 출처가 서버에 없습니다(도구 · 파일 · 폴더 · 저널 파일 없음 — 예: auditd 미설치 · rsyslog 없음 · 용도 로그 폴더 없음). 상위 폴더가 막혀 있으면 ‘없음’ 이 아니라 ‘권한 없음’ 으로 나옵니다.' },
   nofile: { label: '파일 없음', tone: 'idle', title: '용도 로그 폴더는 있는데 파일이 없습니다.' },
   failed: { label: '실패', tone: 'bad', title: '명령이 실패했습니다(시한 · 형식) — 읽기 위치는 넘어가지 않았습니다.' },
   missing: { label: '못 받음', tone: 'warn', title: '이번 출력에 그 구획이 오지 않았습니다(출력이 앞에서 끊김).' },
@@ -57,20 +57,54 @@ export function kpiCards(resp) {
     return { key: c, label: CLASS_TEXT[c].label, color: CLASS_TEXT[c].color, value: never ? '—' : numText(k.patterns), sub: never ? '아직 읽지 않음' : `패턴 ${numText(k.patterns)} · 줄 ${numText(k.lines)}`, desc: CLASS_TEXT[c].desc };
   });
 }
-/** 출처 상태 칩(읽음 · 권한 없음 · 없음 …) — 서버 status 그대로. */
+/** 권한 없음의 범위(서버 scope) → 칩 덧말. */
+export const PERM_SCOPE_TEXT = Object.freeze({
+  none: '저널 파일을 하나도 열지 못함', own: '자기 저널만 보임 — 시스템 · 다른 사용자 메시지는 못 봄(세지 않음)', dir: '상위 폴더에 들어갈 권한 없음 — 파일이 있는지 모름', file: '파일 읽기 권한 없음',
+});
+const svcText = (src, svc) => (svc ? `${src === 'secure' ? 'rsyslog' : 'auditd'} ${svc}` : '');
+/** 출처 상태 칩(읽음 · 권한 없음 · 없음 …) — 서버 status 그대로 · 덧말은 서버가 센 값만(첫 읽기 · 부분 · 시각 모름 · 같은 기록). */
 export function sourceChips(sources) {
   if (!sources || typeof sources !== 'object') return [];
   return Object.keys(SRC_LABEL).filter((s) => sources[s]).map((s) => {
     const x = sources[s]; const st = STATUS_TEXT[x.status] || { label: x.status || '—', tone: 'idle' };
-    const extra = [x.truncated > 0 ? `잘림 ${numText(x.truncated)}줄` : '', x.rotated ? (x.lost ? '로테이트 — 그 사이 줄 모름' : '로테이트 감지') : '', x.rebooted ? '재부팅 — 링 버퍼 처음부터' : '', x.cursorReset ? '커서 재시작' : '', x.first ? '첫 읽기(최근만)' : '',
-      x.svc ? `auditd ${x.svc}` : ''].filter(Boolean).join(' · ');
+    const extra = [
+      x.status === 'perm' && PERM_SCOPE_TEXT[x.scope] ? PERM_SCOPE_TEXT[x.scope] : '', x.nofiles ? '저널 파일 없음' : '',
+      x.truncated > 0 ? `잘림 ${numText(x.truncated)}줄` : '', x.partial === 'timeout' ? '시한 — 본 데까지만 셈(다음 주기는 그 뒤부터)' : n(x.partial) > 0 ? `끝 줄 미완성 ${numText(x.partial)}바이트 — 다음 주기에 온전한 줄로` : '',
+      n(x.skippedBytes) > 0 ? `증분 상한 — 앞 ${numText(x.skippedBytes)}바이트 건너뜀(그 줄 수는 모름)` : '',
+      x.rotated ? (x.lost ? '로테이트 — 그 사이 줄 모름' : '로테이트 감지') : '', x.rebooted ? '재부팅 — 링 버퍼 처음부터' : '', x.cursorReset ? '커서 재시작' : '',
+      x.first ? (s === 'kernel' ? `첫 읽기 — 가동 마지막 구간만${n(x.older) != null ? `(그 앞 ${numText(x.older)}줄은 세지 않음)` : ''}` : '첫 읽기(최근만)') : '',
+      n(x.undated) > 0 ? `시각 모름 ${numText(x.undated)}줄(분류 · 시간 칸에 넣지 않음)` : '', n(x.skew) > 0 ? `서버 시계가 빠름 ${numText(x.skew)}줄(받은 시각으로)` : '',
+      n(x.dup) > 0 ? `${SRC_LABEL[x.dupOf] || '다른 출처'} 와 같은 기록 ${numText(x.dup)}줄 — 세지 않음` : '', n(x.authSkipped) > 0 ? `sshd · sudo 줄 ${numText(x.authSkipped)} — journald 보안 쪽에서 셈` : '',
+      svcText(s, x.svc),
+    ].filter(Boolean).join(' · ');
     return { src: s, label: SRC_LABEL[s], status: x.status, text: st.label, tone: st.tone, title: st.title || '', extra };
   });
+}
+/**
+ * 필요한 권한 안내(순수 · 권한 없음인 출처만) — 포탈은 서버 권한을 바꾸지 않는다(안내만). 배포판 기본값은 실장비 미확인(문구가 밝힌다).
+ *   uid · groups 는 서버가 수집 계정에서 읽은 값(journald 메타).
+ */
+export function permGuide(sources) {
+  if (!sources || typeof sources !== 'object') return [];
+  const out = [];
+  const j = ['journal', 'jsec'].map((k) => sources[k]).find((x) => x?.status === 'perm');
+  if (j) {
+    const who = n(j.uid) != null ? `수집 계정 uid ${n(j.uid)}` : '수집 계정';   // uid 는 식별자 — 천 단위 쉼표를 넣지 않는다
+    const g = Array.isArray(j.groups) ? (j.groups.length ? `소속 ${j.groups.map((x) => `‘${x}’`).join(' · ')}` : 'systemd-journal · adm · wheel 소속 없음') : '';
+    out.push(`**journald**: ${who}${g ? `(${g})` : ''} — systemd-journal 그룹에 넣으면 시스템 저널을 읽습니다(배포판에 따라 adm · wheel 도 저널 ACL 로 읽을 수 있음 — 실장비 미확인).`);
+  }
+  if (sources.secure?.status === 'perm') out.push('**/var/log/secure**: RHEL 계열 기본 0600 root(실장비 미확인) — root 수집 계정이거나 그 파일에 읽기 ACL 이 있어야 합니다. 못 읽으면 journald 보안(sshd · sudo)을 대신 씁니다.');
+  if (sources.audit?.status === 'perm') out.push('**auditd**: /var/log/audit 는 기본 0700 root(실장비 미확인) — root 이거나 auditd.conf 의 log_group 에 수집 계정 그룹을 두어야 합니다.');
+  if (sources.kernel?.status === 'perm') out.push('**dmesg**: kernel.dmesg_restrict=1 이면 root(CAP_SYSLOG)만 읽습니다.');
+  for (const a of ['gpdb', 'airflow']) if (sources[a]?.status === 'perm') out.push(`**${SRC_LABEL[a]}**: 로그 폴더(또는 그 상위)에 수집 계정이 들어갈 권한이 없습니다 — 그 앱 계정 그룹 · ACL 이 필요합니다.`);
+  if (out.length) out.push('포탈은 서버 권한을 바꾸지 않습니다 — 권한을 주기 전에는 그 출처의 값은 ‘모름’ 입니다(0 이 아닙니다).');
+  return out;
 }
 /** ‘읽은 양’ 칸 — 줄 · 상한 · 잘림 · 분류 안 됨 · 마지막 읽음. */
 export function readCard(read) {
   if (!read || read.never) return { value: '—', sub: '아직 이 서버의 로그를 읽은 주기가 없습니다(첫 주기 전 · 로그 읽기 꺼짐 · OS 경로 없음).' };
-  const parts = [read.lineCap != null ? `상한 ${numText(read.lineCap)}줄/주기(출처마다)` : '', `잘림 ${numText(read.truncated)}`, `분류 안 됨 ${numText(read.none)}(세기만 · 보관 안 함)`, read.at ? `마지막 읽음 ${stamp(read.at)}` : ''];
+  const parts = [read.lineCap != null ? `상한 ${numText(read.lineCap)}줄/주기(출처마다)` : '', `잘림 ${numText(read.truncated)}`, `분류 안 됨 ${numText(read.none)}(세기만 · 보관 안 함)`,
+    n(read.undated) > 0 ? `시각 모름 ${numText(read.undated)}(분류 안 함)` : '', read.authSrc ? `보안 줄 출처 ${SRC_LABEL[read.authSrc] || read.authSrc}` : '', read.at ? `마지막 읽음 ${stamp(read.at)}` : ''];
   return { value: numText(read.lines), sub: parts.filter(Boolean).join(' · '), cut: read.ended === false ? '마지막 주기 출력이 잘려 끝 구획을 버렸습니다(다음 주기에 다시 읽음).' : '', reset: read.cursorReset ? '읽기 위치 기록이 손상돼 처음 읽기로 돌아갔습니다(손상본은 보존).' : '' };
 }
 
@@ -91,15 +125,25 @@ export function hourlyBars(hourly = [], { height = 120 } = {}) {
 }
 
 /** 보안 패널 행(서버 값 그대로 · 가림은 서버가 했다). */
+/** 권한 범위 짧은 말(합계 이유 칸 — 긴 설명은 출처 칩 · 권한 안내가 한다). */
+const SCOPE_SHORT = Object.freeze({ none: '저널 못 엶', own: '자기 저널만', dir: '상위 폴더', file: '파일' });
+/** 합계가 ‘—’ 인 이유(서버 totalsWhy — 그 종류를 담는 출처 · 마지막 상태 · 다른 출처의 부분 합). */
+export function secWhyText(w) {
+  if (!w || !Array.isArray(w.carriers)) return '';
+  const st = w.carriers.map((c) => `${SRC_LABEL[c] || c} ${STATUS_TEXT[w.states?.[c]]?.label || '기록 없음'}${w.scopes?.[c] && SCOPE_SHORT[w.scopes[c]] ? `(${SCOPE_SHORT[w.scopes[c]]})` : ''}`).join(' · ');
+  return `모름 — 담는 출처를 이 기간에 못 읽음: ${st}${n(w.partial) > 0 ? ` · 다른 출처에서 ${numText(w.partial)}건(부분 — 합계 아님)` : ''}`;
+}
 export function secPanelRows(sec = {}) {
   const tot = sec?.totals || {};
+  const why = sec?.totalsWhy || {};
   return SEC_ROWS.map((r) => {
-    const total = r.kind === 'fail' ? n(tot.fail_ip) : n(tot[r.parts[0][0]]);
+    const k0 = r.kind === 'fail' ? 'fail_ip' : r.parts[0][0];
+    const total = n(tot[k0]);
     const tops = r.parts.map(([k, lbl]) => ({ k, lbl, items: Array.isArray(sec?.[k]) ? sec[k].slice(0, 5) : [] }));
-    return { ...r, total, tops };
+    return { ...r, total, why: total == null ? secWhyText(why[k0]) : '', tops };
   });
 }
-export const SEC_HONEST = 'IP · 계정은 시간 · 종류마다 상위만 보관하고(나머지는 ‘(기타)’) 원문 줄은 가림 뒤 표본만 남깁니다. ‘SSH 실패 집중’ 은 같은 IP 의 실패가 설정 창 안에 임계 이상일 때입니다(포탈 로그인 실패 판정 재사용). 포탈은 차단 · 계정 잠금을 하지 않습니다 — 알림 규칙 ‘로그 — 장애/보안 high’ 까지입니다.';
+export const SEC_HONEST = 'IP · 계정은 시간 · 종류마다 상위만 보관하고(나머지는 ‘(기타)’) 원문 줄은 가림 뒤 표본만 남깁니다. 실패는 시도 수가 아니라 실패 기록 줄 수입니다(한 시도에 Invalid user · Failed 줄이 함께 찍힐 수 있고, 연결 종료 · 최대 시도 초과 · PAM 요약 줄은 세지 않습니다). 같은 사건이 /var/log/secure · journald · auditd 에 함께 있으면 한 출처만 셉니다. ‘SSH 실패 집중’ 은 같은 IP 의 실패가 설정 창 안에 임계 이상일 때입니다. 포탈은 차단 · 계정 잠금을 하지 않습니다 — 알림 규칙 ‘로그 — 장애/보안 high’ 까지입니다.';
 export const SEC_HIDDEN_TEXT = '**관리자 판본이 아닙니다** — IP · 계정은 가림 토큰(같은 값은 같은 토큰)으로, 보안 분류 패턴의 표본은 싣지 않았습니다. 개수 · 분류 · 규칙은 같습니다.';
 
 /** 연계 칩(서버가 맞춘 것 · 규칙 표지) → [{kind, text, tab}]. ‘인과 아님’ 은 표 머리가 말한다. */
@@ -127,12 +171,24 @@ export function patternCsv(resp = {}) {
   return `${rows.map((r) => r.map(csvCell).join(',')).join('\r\n')}\r\n`;
 }
 
+/** 주기 · 바이트(API 값만 — 값이 없으면 ‘—’). */
+export function intervalText(ms) {
+  const x = n(ms);
+  if (x == null || x <= 0) return '주기(—)';
+  return x % 60_000 === 0 ? `${numText(x / 60_000)}분 주기` : `${numText(Math.round(x / 1000))}초 주기`;
+}
+export function bytesText(b) {
+  const x = n(b);
+  if (x == null) return '—';
+  return x >= 1024 * 1024 ? `${(x / 1024 / 1024).toFixed(1)}MB` : `${numText(Math.round(x / 1024))}KB`;
+}
 /** 수집 방식 카드 문장(API 값만). */
 export function methodLines(m = {}) {
   if (!m) return [];
   return [
-    `**증분 읽기**: 5분 주기 수집과 같은 SSH 세션에서 별도 명령 1회 — 구획 ${(m.sections || []).map((s) => `‘${s}’`).join(' · ') || '—'}. journald 는 우선순위 warning 이상 · 커서 증분(첫 읽기는 최근 ${numText(m.firstSinceMin)}분), dmesg 는 boot_id + 마지막 초 이후, 파일은 offset + inode(첫 읽기는 마지막 ${numText(m.firstFileLines)}줄 · 로테이트 감지).`,
-    `**상한**: 출처마다 주기당 ${numText(m.lineCap)}줄 · 줄 폭 ${numText(m.lineWidth)}자 — 넘친 줄은 ‘잘림’ 으로 셉니다(읽기 위치는 끝까지 넘깁니다). 보관 ${numText(m.keepDays)}일.`,
+    `**증분 읽기**: ${intervalText(m.intervalMs)} 수집과 같은 SSH 세션에서 별도 명령 1회 — 구획 ${(m.sections || []).map((s) => `‘${s}’`).join(' · ') || '—'}. journald 는 우선순위 warning 이상(sshd · sudo 계열은 ‘JSEC’ 가 info 이상으로 따로) · 항목마다 커서(시한 · 상한에서도 본 데까지 넘어감 · 첫 읽기는 최근 ${numText(m.firstSinceMin)}분), dmesg 는 boot_id + 마지막 초 이후(첫 읽기는 가동 마지막 ${numText(m.firstSinceMin)}분), 파일은 offset + inode(첫 읽기는 끝 ${bytesText(m.firstFileBytes)} 안의 마지막 ${numText(m.firstFileLines)}줄 · 로테이트 감지 · 끝 줄이 미완성이면 다음 주기로).`,
+    `**상한**: 출처마다 주기당 ${numText(m.lineCap)}줄 · ${bytesText(m.srcBytes)} · 줄 폭 ${numText(m.lineWidth)}자 — 넘친 줄은 ‘잘림’ 으로 셉니다(읽기 위치는 끝까지 넘깁니다 · 한 출처가 다른 출처를 밀어내지 않습니다). 보관 ${numText(m.keepDays)}일.`,
+    `**시각 · 알림**: 시각을 못 매긴 줄(30일보다 오래됨 · 시각 없음)은 지금 시각으로 지어내지 않고 ‘시각 모름’ 으로만 셉니다. 알림 입력은 최근 ${numText(m.freshMin)}분 안의 줄만입니다(첫 읽기의 지난 줄은 기록만).`,
     '**엣지에서 분류 · 집계 · 가림**: 정규식 규칙(처음 맞는 하나) → 서명(숫자 · IP · 계정 · 경로 · UUID 치환 뒤 해시) → 패턴 · 시간 집계 · 보안 상위 + 가린 표본 5줄. 원문 전체는 저장 · 전송하지 않습니다(법인 밖으로 나가지 않음).',
     `**보안 집중**: 같은 IP 의 실패가 ${numText(m.burst?.windowMin)}분 안 ${numText(m.burst?.count)}줄 이상이면 ‘SSH 실패 집중’(high).`,
     '**정직하게**: 규칙은 실장비 표본 없이 업스트림 메시지 문구로 만들어 전부 ○ 등급입니다(첫 실수집 뒤 ‘분류 안 됨’ 표본으로 좁힙니다). auditd · SELinux 는 활성일 때만, 권한이 없으면 ‘권한 없음’ 으로 둡니다. 용도 로그 경로는 흔한 설치 관례의 상수 후보라 현장 경로와 다르면 ‘없음’ 입니다.',
@@ -152,8 +208,10 @@ export function fleetKpiCards(resp) {
 export const NODE_STATE_TEXT = Object.freeze({
   ok: '요약 받음', 'old-version': '엣지 판이 낮음(로그 분석 이전 판) — 엣지 업그레이드 뒤 보입니다', 'no-cycle': '엣지가 아직 로그 주기를 돌리지 않았습니다', none: '보관분 없음(엣지 사용률을 아직 당기지 않음)', 'db-unavailable': '이 노드 DB 를 열지 못했습니다',
 });
-export function nodeNotes(nodes = []) {
-  return (Array.isArray(nodes) ? nodes : []).filter((x) => x && x.state !== 'ok').map((x) => `${x.via === 'edge' ? `엣지 ${x.agent || '?'}` : '이 노드'}: ${NODE_STATE_TEXT[x.state] || x.state}`);
+export function nodeNotes(nodes = [], omitted = null) {
+  const out = (Array.isArray(nodes) ? nodes : []).filter((x) => x && x.state !== 'ok').map((x) => `${x.via === 'edge' ? `엣지 ${x.agent || '?'}` : '이 노드'}: ${NODE_STATE_TEXT[x.state] || x.state}`);
+  if (n(omitted) > 0) out.push(`조회 범위 밖 노드 ${numText(omitted)}곳은 싣지 않았습니다.`);
+  return out;
 }
 export function fleetFilter(rows = [], { corp = '', cls = '', rule = '', q = '' } = {}) {
   const qq = String(q || '').trim().toLowerCase();
@@ -161,6 +219,19 @@ export function fleetFilter(rows = [], { corp = '', cls = '', rule = '', q = '' 
     && (!cls || (n(r.cls?.[cls]?.lines) || 0) > 0)
     && (!rule || (r.top || []).some((p) => p.ruleId === rule))
     && (!qq || String(r.name || '').toLowerCase().includes(qq) || String(r.key || '').toLowerCase().includes(qq)));
+}
+/**
+ * 함대 표 분류 칸(순수). 24시간 못 읽은 서버는 ‘—’. ‘보안’ 칸은 보안 줄을 담는 출처(secure · journald 보안 · auditd)를 하나도 못 읽었으면
+ *   0 이 아니라 ‘—’(줄이 있으면 다른 출처의 부분 — 서버 secRead · 반증 F1). secRead 가 없는(예전 판) 행은 그대로 그린다.
+ */
+export function fleetClsCell(r = {}, c) {
+  if (!r?.wasRead) return { text: '—', sub: '', title: '24시간 안에 이 서버의 로그를 읽지 못했습니다(0 이 아닙니다).', partial: false };
+  const lines = n(r.cls?.[c]?.lines);
+  if (c === 'sec' && r.secRead === false) {
+    if (!lines) return { text: '—', sub: '', title: '보안 줄을 담는 출처(/var/log/secure · journald 보안 · auditd)를 24시간 안에 하나도 읽지 못했습니다 — 0 이 아니라 모름입니다.', partial: false };
+    return { text: numText(r.cls?.[c]?.patterns), sub: `줄 ${numText(lines)} · 부분`, title: '보안 출처를 못 읽어 다른 출처(용도 로그 등)에서 본 부분만입니다.', partial: true };
+  }
+  return { text: numText(r.cls?.[c]?.patterns), sub: `줄 ${numText(lines)}`, title: '', partial: false };
 }
 export function topRuleText(top = []) {
   return (Array.isArray(top) ? top : []).slice(0, 3).map((p) => `${p.ruleId || '(묶음)'} ${numText(p.count)}`).join(' · ') || '—';

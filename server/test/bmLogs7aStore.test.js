@@ -84,6 +84,63 @@ test('상한 — 서버당 서명 수(묶음 행) · 보안 항목(시간 · 종
   assert.equal(db.prepare("SELECT COUNT(*) c FROM log_cursor WHERE agent=? AND key='K1'").get(AG).c, 1, '대상 안 서버는 남긴다');
 });
 
+const AGX = 'edge-f8-test';   // 다른 노드 이름 — 아래 정리 시험의 개수와 섞이지 않게
+test('반증 F8 — 서명 상한에서 심각도 우선: 낮은 심각도 서명이 상한을 채워도 critical · high 는 접히지 않는다(여유까지) · 묶음 행 심각도는 가장 높은 것', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  const h0 = Math.floor(NOW / HOUR) * HOUR;
+  const mk = (n, { sev = 'medium', cls = 'fault', base = 0, rule = 'HW-EDAC-CE' } = {}) => Array.from({ length: n }, (_, i) => ({ sig: (base + i).toString(16).padStart(16, '0'), cls, severity: sev, ruleId: rule, src: 'kernel', unit: 'k', tmpl: `t${base + i}`, count: 1, first: NOW, last: NOW, samples: [] }));
+  const hrs = (pats) => pats.map((p) => ({ hour: h0, sig: p.sig, cls: p.cls, count: 1 }));
+  const w = (key, pats, readRev) => S.logWriteBatch({ agent: AGX, items: [{ key, readRev, at: NOW, state: { pos: {} }, status: {}, patterns: pats, hours: hrs(pats), sec: [] }] });
+  // 한 주기 안: medium 505 + critical 1(맨 뒤) → critical 먼저 쓰고 medium 이 접힌다
+  const one = [...mk(505), ...mk(1, { sev: 'critical', base: 9000, rule: 'HW-MCE' })];
+  assert.equal((await w('K3', one, null)).overflow, 6);
+  const { mainDb } = await import('../src/bmusage/db.js');
+  const db = await mainDb();
+  assert.equal(db.prepare("SELECT rule_id FROM log_pattern WHERE agent=? AND key='K3' AND sig=?").get(AGX, (9000).toString(16).padStart(16, '0'))?.rule_id, 'HW-MCE', 'critical 은 규칙 그대로 남는다');
+  // 다음 주기: 상한이 찬 서버에 새 critical → 여유(HIGH_RESERVE) 안이라 접히지 않는다(예전: #over 로 접혀 규칙 · 근거 · 공통 원인 후보에서 사라졌다)
+  const rev = (await S.logCursorsAll({ agent: AGX })).get('K3').rev;
+  const w2 = await w('K3', mk(1, { sev: 'critical', base: 9100, rule: 'HW-MCE' }), rev);
+  assert.equal(w2.overflow, 0);
+  assert.equal(db.prepare("SELECT rule_id FROM log_pattern WHERE agent=? AND key='K3' AND sig=?").get(AGX, (9100).toString(16).padStart(16, '0'))?.rule_id, 'HW-MCE');
+  // 여유까지 차면 high 도 접히고, 묶음 행 심각도는 묶인 것 중 가장 높은 것(뒤에 medium 이 와도 내려가지 않는다)
+  const rev2 = (await S.logCursorsAll({ agent: AGX })).get('K3').rev;
+  const w3 = await w('K3', mk(S.HIGH_RESERVE + 5, { sev: 'high', base: 20000, rule: 'HW-AER-UNCOR' }), rev2);
+  assert.ok(w3.overflow > 0);
+  assert.equal(db.prepare("SELECT severity FROM log_pattern WHERE agent=? AND key='K3' AND sig='#over:fault'").get(AGX).severity, 'high');
+  const rev3 = (await S.logCursorsAll({ agent: AGX })).get('K3').rev;
+  await w('K3', mk(3, { base: 30000 }), rev3);
+  assert.equal(db.prepare("SELECT severity FROM log_pattern WHERE agent=? AND key='K3' AND sig='#over:fault'").get(AGX).severity, 'high', '묶음 행 심각도는 내려가지 않는다');
+});
+
+test('읽기 경로 — 보관된 서명은 읽을 때 같은 가림(예전 판이 쓴 원문 계정) · 함대 요약은 24시간 창 행만', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  const h0 = Math.floor(NOW / HOUR) * HOUR;
+  const pat = { sig: 'feedfeedfeedfeed', cls: 'sec', severity: 'info', ruleId: 'SEC-SSH-PREAUTH', src: 'secure', unit: 'sshd', tmpl: 'Disconnected from invalid user kimops <ip> port <n> [preauth]', count: 1, first: NOW, last: NOW, samples: [] };
+  await S.logWriteBatch({ agent: AGX, items: [{ key: 'KM', readRev: null, at: NOW, state: { pos: {} }, status: {}, patterns: [pat], hours: [{ hour: h0, sig: pat.sig, cls: 'sec', count: 1 }, { hour: h0 - 3 * 24 * HOUR, sig: pat.sig, cls: 'sec', count: 50 }], sec: [] }] });
+  const v = await V.localLogView({ key: 'KM', agent: AGX, now: NOW, range: '24h' });
+  assert.equal(v.patterns[0].tmpl, 'Disconnected from invalid user <user> <ip> port <n> [preauth]');
+  V._resetLogViewForTest();
+  const sm = (await V.refreshLogSummary({ agent: AGX, now: NOW })).list.find((x) => x.key === 'KM');
+  assert.equal(sm.cls.sec.lines, 1, '3일 전 행은 24시간 요약에 들지 않는다');
+  assert.ok(!sm.top[0].tmpl.includes('kimops'), '함대 상위 서명도 같은 가림');
+});
+
+test('비교 후 쓰기에서 진 서버(conflicts)는 알림 입력에서도 뺀다(쓰지 않은 줄로 알리지 않는다)', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  const mce = ['##JOURNAL', 'J#absent', '##JSEC', 'Q#absent', '##DMESG', 'K#boot=3818fa4e-dde8-4491-a53a-a696101a21ab', 'K#last=1.000000', 'K#up=1000.00', `K#now=${Math.floor(NOW / 1000)}`,
+    'K|kern  :err   : [  990.000001] mce: [Hardware Error]: Machine check events logged', 'K#n=1', 'K#e=1', 'K#rc=0', '##SECURE', 'S#absent', '##AUDIT', 'A#absent', '##APPLOG', 'G#absent', 'F#absent', '##END'].join('\n');
+  const first = await RUN.buildLogWrite({ key: 'KB', stdout: out([]), prev: null, now: NOW });
+  await S.logWriteBatch({ agent: AGX, items: [first.write] });
+  const cur = await S.logCursorsAll({ agent: AGX });
+  const stale = { ...cur.get('KB'), rev: 999 };
+  const ctx = { on: true, cfg: RUN.LOG_DEFAULTS, agent: AGX, cursors: new Map([['KB', stale]]) };
+  const res = [{ target: { key: 'KA' }, os: { extra: { logs: { stdout: mce } } } }, { target: { key: 'KB' }, os: { extra: { logs: { stdout: mce } } } }];
+  const st = await RUN.finishLogCycle(res, ctx, { now: NOW });
+  assert.equal(st.conflicts, 1); assert.equal(st.written, 1);
+  assert.ok(RUN.logAlertInputs().has('KA'), '쓴 서버는 알림 입력'); assert.equal(RUN.logAlertInputs().has('KB'), false, '진 서버는 빠진다');
+  assert.equal(RUN.logAlertInputs().get('KA').faultLines, 1);
+});
+
 test('알림 규칙 ‘logs’ — 못 읽음 = 보류(null) · 장애 · 보안 high · 조건 선택 · perfRules 정규화', async () => {
   const A = await import('../src/bmusage/perfAlerts.js');
   const R = await import('../src/bmusage/perfRules.js');

@@ -4,7 +4,7 @@
  * 한 규칙 = { id · 분류(cls: fault 장애 · perf 성능 · sec 보안 · issue 이슈) · 심각도 · 출처 태그 · 정규식 · 표본 1줄 · 근거 번호 · 등급 · 연계 }.
  *   · 엔진은 포탈 자체 로그 분석의 것을 **그대로 쓴다**(loganalysis/rules.js normalizeRules — id · 정규식 · 심각도 검사 / engine.js indexRules — 태그별 색인 ·
  *     ‘처음 맞는 규칙 하나’). 심각도 이름도 그 엔진의 SEVERITY_RANK(critical · high · medium · low · info)다 — 아트보드의 ‘warning’ 은 medium 으로 옮겼다.
- *   · 태그 = 출처(kernel · journal · secure · audit · gpdb · airflow). 태그가 '' 인 규칙은 모든 출처에 댄다(엔진 규약). 순서가 곧 분류다 — 구체적인 규칙을 위에.
+ *   · 태그 = 출처(kernel · journal · jsec · secure · audit · gpdb · airflow). 태그가 '' 인 규칙은 모든 출처에 댄다(엔진 규약). 순서가 곧 분류다 — 구체적인 규칙을 위에.
  *   · **모든 규칙은 표본 줄로 자기 시험한다**(test/bmLogs7a*.test.js — 표본이 정규식에 맞고, 엔진에 넣으면 **그 규칙이** 처음 맞는다).
  *   · 보안 집중(SSH 실패 집중)은 정규식 규칙이 아니라 **파생 규칙**(DERIVED_RULES)이다 — 기본 규칙(SEC-SSH-FAIL · SEC-SSH-INVALID · SEC-PAM-FAIL · SEC-LOGIN-FAIL)
  *     줄을 IP 별로 창(분) 안에서 세어 임계 이상이면 그 줄을 집중 규칙으로 옮긴다(classify.js). 포탈의 로그인 실패 판정(`logs/loginFailPattern.js MSG_RE`)을
@@ -21,7 +21,8 @@ import { MSG_RE as LOGIN_FAIL_MSG_RE } from '../../logs/loginFailPattern.js';
 
 export const LOG_CLASSES = Object.freeze(['fault', 'perf', 'sec', 'issue']);
 export const CLASS_LABEL = Object.freeze({ fault: '장애', perf: '성능', sec: '보안', issue: '이슈' });
-export const LOG_SOURCES = Object.freeze(['journal', 'kernel', 'secure', 'audit', 'gpdb', 'airflow']);
+/** 출처(command.js LOG_PREFIX 와 같은 이름) — jsec = journald 의 sshd · sudo 계열(우선순위 info 이상 · /var/log/secure 를 못 읽을 때의 보안 출처 — 반증 F1). */
+export const LOG_SOURCES = Object.freeze(['journal', 'jsec', 'kernel', 'secure', 'audit', 'gpdb', 'airflow']);
 /** 보안 사실 종류(log_sec.kind) — 화면 보안 패널의 행. */
 export const SEC_KINDS = Object.freeze(['fail', 'ok', 'root', 'sudo', 'sudofail', 'acct', 'avc']);
 
@@ -38,9 +39,11 @@ export const LOG_EVIDENCE = Object.freeze({
   S4: 'Linux audit 레코드 형식(type=… msg=audit(초.밀리:일련): … res=) — audit 문서(훈련 지식)',
   S5: '포탈 로그인 실패 판정(server/src/logs/loginFailPattern.js MSG_RE) — 같은 정규식 객체를 재사용',
   S6: 'SELinux AVC 거부 문구(avc:  denied) — RHEL SELinux 문서(훈련 지식)',
+  S7: 'OpenSSH 7.6+ 연결 식별 꼴(‘invalid user X 주소 port N’ · ‘authenticating user’ · [preauth]) — sshd sshpkt_fmt_connection_id(훈련 지식 · RHEL 8 = 8.0p1 · RHEL 9 = 8.7p1)',
   D1: 'systemd 유닛 결과 문구(Failed with result · Start request repeated too quickly · dumped core) — systemd 소스 문구(훈련 지식)',
   D2: 'chronyd ‘System clock wrong by … seconds’ 문구(훈련 지식)',
   D3: 'dnf · rpm 설치 문구(Installed: kernel-…) — journald 우선순위 warning 미만이면 이 수집에 들어오지 않는다',
+  G3: 'PostgreSQL 인증 실패 문구(28P01 password authentication failed · 28000 no pg_hba.conf entry · role does not exist) — 문서(훈련 지식)',
   G1: 'Greenplum · PostgreSQL csvlog 열 순서(event_time … error_severity · sql_state_code · message) — 문서(훈련 지식)',
   G2: 'Greenplum FTS · 세그먼트 장애 문구(훈련 지식)',
   A1: 'Apache Airflow 로그 줄 형식([시각] {파일:줄} 수준 - 메시지) · 스케줄러 문구(훈련 지식)',
@@ -110,8 +113,17 @@ export const LOG_RULES = Object.freeze([
     sample: 'Failed password for root from 203.0.113.45 port 51822 ssh2', evidence: ['S1'], title: 'SSH 로그인 실패', kind: 'fail' }),
   R({ id: 'SEC-SSH-INVALID', cls: 'sec', severity: 'medium', re: /^Invalid user \S{0,64} from \S{1,64}/,
     sample: 'Invalid user admin from 198.51.100.7 port 40022', evidence: ['S1'], title: '없는 계정으로 SSH 시도', kind: 'fail' }),
+  // 같은 시도의 뒤따르는 줄(연결 종료 · 최대 시도 초과 · PAM 요약) — 실패로 다시 세지 않는다(반증 F8: 한 시도가 3~4건으로 부풀고 ‘invalid’ 를 IP 로 뽑았다).
+  //   계정 · 주소는 서명에서 치환하고(classify secTemplate) 보안 상위에는 넣지 않는다(kind 없음).
+  R({ id: 'SEC-SSH-MAXAUTH', cls: 'sec', severity: 'medium', re: /^(?:error: )?(?:maximum authentication attempts exceeded for |Disconnecting (?:invalid |authenticating )?user \S{0,64} \S{1,64} port \d{1,5}: Too many authentication failures|PAM \d{1,3} more authentication failures?;)/,
+    sample: 'error: maximum authentication attempts exceeded for invalid user admin from 198.51.100.7 port 40022 ssh2 [preauth]', evidence: ['S1', 'S7'], title: 'SSH 최대 시도 초과(같은 연결의 실패 줄로 센다)' }),
+  R({ id: 'SEC-SSH-PREAUTH', cls: 'sec', severity: 'info', re: /^(?:Connection (?:closed|reset) by|Disconnected from|Received disconnect from|Disconnecting) (?:(?:invalid|authenticating) user \S{0,64} )?\S{1,64} port \d{1,5}.{0,80}\[preauth\]$/,
+    sample: 'Connection closed by invalid user admin 198.51.100.7 port 40022 [preauth]', evidence: ['S1', 'S7'], title: 'SSH 인증 전 연결 종료(실패로 세지 않음 — 같은 연결의 Invalid user · Failed 줄이 센다)' }),
+  // PAM 의 sshd · su · sudo 인증 실패는 그 서비스 자신의 줄(Failed password · FAILED SU · incorrect password attempts)과 같은 시도다 — 실패로 다시 세지 않는다.
+  R({ id: 'SEC-PAM-DUP', cls: 'sec', severity: 'low', re: /^pam_unix\((?:sshd|su|su-l|sudo|sudo-i):auth\): authentication failure;/,
+    sample: 'pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.45  user=root', evidence: ['S1', 'S3'], title: 'PAM 인증 실패(sshd · su · sudo — 서비스 줄로 센다)' }),
   R({ id: 'SEC-PAM-FAIL', cls: 'sec', severity: 'medium', re: /^pam_unix\([\w-]{1,24}:auth\): authentication failure;/,
-    sample: 'pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.45  user=root', evidence: ['S1', 'S3'], title: 'PAM 인증 실패', kind: 'fail' }),
+    sample: 'pam_unix(vsftpd:auth): authentication failure; logname= uid=0 euid=0 tty=ftp ruser=ftpuser rhost=203.0.113.45  user=ftpuser', evidence: ['S1', 'S3'], title: 'PAM 인증 실패', kind: 'fail' }),
   R({ id: 'SEC-SU-FAIL', cls: 'sec', severity: 'medium', re: /^FAILED SU \(to \S{1,64}\) \S{1,64} on /,
     sample: 'FAILED SU (to root) kim.ops on pts/1', evidence: ['S3'], title: 'su 실패', kind: 'fail' }),
   R({ id: 'SEC-SUDO-FAIL', cls: 'sec', severity: 'medium', re: /^\s{0,4}\S{1,64} : (?:\d{1,3} incorrect password attempts?|user NOT in sudoers|command not allowed)/,
@@ -123,12 +135,17 @@ export const LOG_RULES = Object.freeze([
   R({ id: 'SEC-AVC', cls: 'sec', severity: 'medium', re: /\bavc: {1,2}denied {1,2}\{/,
     sample: 'type=AVC msg=audit(1762402800.123:456): avc:  denied  { read } for  pid=1234 comm="httpd" name="secret.conf" dev="dm-0" ino=12345 scontext=system_u:system_r:httpd_t:s0 tcontext=unconfined_u:object_r:user_home_t:s0 tclass=file permissive=0',
     evidence: ['S6', 'S4'], title: 'SELinux 거부(AVC)', kind: 'avc', corr: { playbook: 'health:tuned', health: 'tuned' } }),
-  R({ id: 'SEC-AUDIT-AUTH-FAIL', cls: 'sec', severity: 'medium', tag: 'audit', re: /^type=USER_(?:AUTH|LOGIN|ACCT) msg=audit\([\d.:]{1,40}\): .{0,400}?\bres=failed/,
+  // audit 인증 실패는 USER_AUTH(시도마다 한 건)만 센다 — USER_LOGIN · USER_ACCT 실패는 같은 시도의 뒤 레코드(아래 SEC-AUDIT-LOGIN-FAIL — 세지 않음).
+  //   /var/log/secure 나 journald 보안을 읽은 주기에는 audit 의 인증 · 계정 사실을 세지 않는다(같은 사건 — classify authSrc · parse.js pickAuthSource).
+  R({ id: 'SEC-AUDIT-AUTH-FAIL', cls: 'sec', severity: 'medium', tag: 'audit', re: /^type=USER_AUTH msg=audit\([\d.:]{1,40}\): .{0,400}?\bres=failed/,
     sample: "type=USER_AUTH msg=audit(1762402800.123:457): pid=2211 uid=0 auid=4294967295 ses=4294967295 msg='op=PAM:authentication grantors=? acct=\"root\" exe=\"/usr/sbin/sshd\" hostname=203.0.113.45 addr=203.0.113.45 terminal=ssh res=failed'",
     evidence: ['S4'], title: 'audit 인증 실패', kind: 'fail' }),
   R({ id: 'SEC-AUDIT-ACCT', cls: 'sec', severity: 'medium', tag: 'audit', re: /^type=(?:ADD_USER|DEL_USER|ADD_GROUP|DEL_GROUP|USER_MGMT|GRP_MGMT|USER_CHAUTHTOK) msg=audit\(/,
     sample: "type=ADD_USER msg=audit(1762402800.200:458): pid=3311 uid=0 auid=1000 ses=3 msg='op=add-user id=1001 exe=\"/usr/sbin/useradd\" hostname=? addr=? terminal=pts/0 res=success'",
     evidence: ['S4'], title: 'audit 계정 변경', kind: 'acct' }),
+  R({ id: 'SEC-AUDIT-LOGIN-FAIL', cls: 'sec', severity: 'low', tag: 'audit', re: /^type=USER_(?:LOGIN|ACCT) msg=audit\([\d.:]{1,40}\): .{0,400}?\bres=failed/,
+    sample: "type=USER_LOGIN msg=audit(1762402800.124:458): pid=2211 uid=0 auid=4294967295 ses=4294967295 msg='op=login acct=\"root\" exe=\"/usr/sbin/sshd\" hostname=? addr=203.0.113.45 terminal=ssh res=failed'",
+    evidence: ['S4'], title: 'audit 로그인 실패(같은 시도의 뒤 레코드 — USER_AUTH 로 센다)' }),
   R({ id: 'SEC-AUDIT-CONFIG', cls: 'sec', severity: 'low', tag: 'audit', re: /^type=(?:CONFIG_CHANGE|DAEMON_ABORT|DAEMON_END) msg=audit\(/,
     sample: 'type=CONFIG_CHANGE msg=audit(1762402800.300:459): auid=1000 ses=3 op=remove_rule key="identity" list=4 res=1', evidence: ['S4'], title: 'audit 설정 변경 · 데몬 중단' }),
   // 포탈 로그인 실패 판정(logs/loginFailPattern.js)을 같은 정규식 객체로 — 위 sshd · PAM 전용 규칙에 안 맞는 로그인 실패 문장(‘authentication failed’ · ‘invalid user’ …).
@@ -158,6 +175,9 @@ export const LOG_RULES = Object.freeze([
     sample: 'PANIC: could not write to file "pg_wal/xlogtemp.12345": No space left on device', evidence: ['G1'], title: 'GPDB · PostgreSQL PANIC', corr: { playbook: 'profile:gp.downSeg' } }),
   R({ id: 'APP-GP-SEG-DOWN', cls: 'fault', severity: 'high', tag: 'gpdb', re: /\bFTS\b.{0,80}\b(?:marking|marked) (?:segment|mirror|primary)\b.{0,40}\bdown\b|\bsegment \(dbid=\d{1,6}\).{0,40}\bis down\b/i,
     sample: 'LOG: FTS: marking mirror segment (dbid=12) as down', evidence: ['G2'], title: 'GPDB 세그먼트 다운(FTS)', corr: { playbook: 'profile:gp.downSeg' } }),
+  // GPDB · PostgreSQL 로그인 실패는 보안이다(반증 F11 — ‘이슈’ 로 분류돼 보안 가림 · 보안 패널을 피했다). FATAL 일반 규칙보다 먼저.
+  R({ id: 'APP-GP-AUTH-FAIL', cls: 'sec', severity: 'medium', tag: 'gpdb', re: /^(?:FATAL|ERROR): (?:\w{1,16} authentication failed for user "|no pg_hba\.conf entry for host "|role "[^"]{0,64}" does not exist)/,
+    sample: 'FATAL: password authentication failed for user "etl_loader"', evidence: ['G3', 'G1'], title: 'GPDB · PostgreSQL 로그인 실패', kind: 'fail' }),
   R({ id: 'APP-GP-FATAL', cls: 'issue', severity: 'high', tag: 'gpdb', re: /^FATAL: /,
     sample: 'FATAL: the database system is in recovery mode', evidence: ['G1'], title: 'GPDB · PostgreSQL FATAL' }),
   R({ id: 'APP-PG-DEADLOCK', cls: 'perf', severity: 'medium', tag: 'gpdb', re: /^ERROR: deadlock detected/,
@@ -180,7 +200,7 @@ export const LOG_RULES = Object.freeze([
  * 파생 규칙 — 정규식이 아니라 기본 규칙 줄을 다시 묶어 만든다(classify.js). 표본은 기본 규칙의 줄이고, 테스트가 임계 수만큼 넣어 이 규칙이 생기는지 본다.
  */
 export const DERIVED_RULES = Object.freeze([
-  Object.freeze({ id: 'SEC-SSH-FAIL-BURST', cls: 'sec', severity: 'high', tag: '', grade: '○', kind: 'fail', derivedFrom: ['SEC-SSH-FAIL', 'SEC-SSH-INVALID', 'SEC-PAM-FAIL', 'SEC-LOGIN-FAIL', 'SEC-AUDIT-AUTH-FAIL'],
+  Object.freeze({ id: 'SEC-SSH-FAIL-BURST', cls: 'sec', severity: 'high', tag: '', grade: '○', kind: 'fail', derivedFrom: ['SEC-SSH-FAIL', 'SEC-SSH-INVALID', 'SEC-PAM-FAIL', 'SEC-LOGIN-FAIL', 'SEC-AUDIT-AUTH-FAIL', 'APP-GP-AUTH-FAIL'],
     sample: 'Failed password for root from 203.0.113.45 port 51822 ssh2', evidence: ['S1', 'S5'], title: 'SSH 실패 집중(같은 IP · 창 안 임계 이상)', corr: {} }),
 ]);
 export const ALL_LOG_RULES = Object.freeze([...LOG_RULES, ...DERIVED_RULES]);
