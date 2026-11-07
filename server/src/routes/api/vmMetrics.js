@@ -23,7 +23,24 @@ import { loadCollectors } from '../../collector/registry.js';
  *   (응답 모양·문구는 그대로다 — authStop2591 F6 이 고정한다).
  * @returns {boolean} 응답을 보냈으면 true
  */
-const metricAuthStopped = (req, res, vc) => respondIfVcAuthStopped(req, res, vc, { allowManual: true });
+const metricAuthStopped = (req, res, vc) => respondIfVcAuthStopped(req, res, vc, { allowManual: true, skipExtra: (skip) => edgeHint(req, vc, skip) });
+
+/**
+ * v2.926 — 엣지 위임 vCenter(skipReason 'site')의 성능은 그 법인 엣지 포탈에서 본다: 담당 엣지(수집 서버 등록부 remoteAgent)의 포탈 주소를
+ * 409 본문 `edge:{id,name,url}` 로 싣는다. **관리자만**(엣지 주소는 관리 주소 — v2.600 가림 규칙과 같은 판단). 등록부에 없거나 url 이 없으면 싣지 않는다(지어내지 않는다).
+ */
+const normKey = (v) => String(v ?? '').trim().toLowerCase();   // registerVmMetrics 안의 lcTrim 과 같은 규칙(그 함수 밖이라 따로 둔다)
+export function edgeHint(req, vc, skip) {
+  if (skip?.skipReason !== 'site' || !isAdminReq(req)) return {};
+  const want = normKey(vc?.remoteAgent);
+  if (!want) return {};
+  let collectors = [];
+  try { collectors = loadCollectors() || []; } catch { collectors = []; }
+  const c = collectors.find((x) => normKey(x?.id) === want || normKey(x?.name) === want);
+  const url = typeof c?.url === 'string' ? c.url.trim() : '';
+  if (!c || !url) return {};
+  return { edge: { id: String(c.id ?? ''), name: String(c.name || c.id || ''), url } };
+}
 const metricError = (res, vc, err) => respondVcError(res, vc, err);
 
 
