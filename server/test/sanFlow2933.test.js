@@ -197,6 +197,9 @@ test('⑤ 실제 화면 라우트 — 게이트 · OTP · 서버 재판정 · �
   assert.equal(x.status, 200);
   j = await x.json();
   assert.deepEqual(j.flows.map((f) => [f.name, f.ingrport, f.srcdev, f.dstdev]), [['dvc_esx1_vmhba1_01', '1/12', INI, T1], ['dvc_esx1_vmhba1_02', '1/12', INI, T2]], '중복 타깃은 하나 · 포트는 서버가 정한다');
+  // 미리보기 — 만들기와 같은 판정 · 같은 명령(스위치는 건드리지 않는다)
+  let pv = await (await post('/preview', { deviceId: dev.id, hostId: 'vc-a:h1', hba: 'vmhba1', targets: [T1] })).json();
+  assert.equal(pv.ok, true); assert.equal(pv.cmds[0].startsWith('flow --create dvc_esx1_vmhba1_'), true); assert.equal(pv.limit, 128);
   // 지우기 — 기록에 없는 이름 · dvc_ 아닌 이름
   assert.equal((await post('/delete', { deviceId: dev.id, name: 'sys_mon_all_fports' })).status, 400);
   // 작업 조회 — 끝날 때까지(닿지 않는 주소)
@@ -206,6 +209,12 @@ test('⑤ 실제 화면 라우트 — 게이트 · OTP · 서버 재판정 · �
   assert.equal(JSON.stringify(job).includes('PWL'), false);
   const recs = J.listFlows().filter((f) => f.deviceId === dev.id);
   assert.deepEqual(recs.map((f) => f.state), ['failed', 'failed'], '만들지 못하면 활성으로 적지 않는다');
+  // 같은 정의 중복 — 활성 기록이 있으면 거부(이름만 바꿔 또 만들지 않는다)
+  { const raw0 = JSON.parse(fs.readFileSync(path.join(DIR, 'san-flows.json'), 'utf8'));
+    raw0.flows.push({ deviceId: dev.id, name: 'dvc_esx1_vmhba1_09', state: 'active', srcdev: INI, dstdev: T2, ingrport: '1/12' });
+    fs.writeFileSync(path.join(DIR, 'san-flows.json'), JSON.stringify(raw0)); J._resetFlowsForTest(); }
+  x = await post('/preview', { deviceId: dev.id, hostId: 'vc-a:h1', hba: 'vmhba1', targets: [T2] });
+  assert.equal(x.status, 409); assert.match((await x.json()).reason, /dvc_esx1_vmhba1_09/);
   // 상한 — 기존 128 이 있다고 점검이 말하면 거부
   const raw = JSON.parse(fs.readFileSync(path.join(DIR, 'san-flows.json'), 'utf8'));
   raw.checks[dev.id] = { at: NOW, ok: true, total: 128, portal: 0 };

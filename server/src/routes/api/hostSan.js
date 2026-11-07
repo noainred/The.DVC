@@ -13,6 +13,7 @@ import { requirePerm, toolActorOf } from '../../auth/auth.js';
 import { inUserScope, inUserWriteScope, scopedVcenterIds } from '../../auth/scope.js';
 import { maskErrText } from './cvp.js';
 import { loadSettings as loadCvpSettings } from '../../cvp/settings.js';
+import { cvpDemoActive } from '../../mock/demo/cvp.js';
 import { PARTS_EVERY_MS } from '../../cvp/faults.js';   // v2.933 반증 M-4: 비-admin 오류 사유의 주소 가림(CVP 상태 오류와 같은 규칙)
 import { issueFor } from '../../auth/toolAccess.js';
 import { userHasPermission } from '../../auth/permissions.js';
@@ -37,7 +38,7 @@ import { datacenterOfVcenter, listDatacenters } from '../../datacenter/store.js'
 import { isMockMode } from '../../mock/demo/flags.js';
 import { ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import * as cdb from '../../cvp/db.js';
-import { listServers as listCvpServers } from '../../cvp/registry.js';
+import { listServers as listCvpServers, serversForThisNode } from '../../cvp/registry.js';
 import { rowOwnerOf } from '../../cvp/overview.js';
 import { requestEndpointLookup, pendingEndpointRequest } from '../../cvp/epRequests.js';   // v2.933(C-③)
 import { lookupEndpointsNow } from '../../cvp/endpointNow.js';
@@ -71,7 +72,8 @@ const abandoned = (e) => e?.code === 'abandoned';
  *   반증 L-1: 인증이 꺼진 설치는 익명 역할(AUTH_DISABLED_ROLE)을 따른다(toolActorOf — requireRole 과 같은 판정). 예전에는 무조건 참이었다.
  */
 const canLocate = (req) => ['admin', 'operator'].includes(toolActorOf(req).role);
-const cvpEndpointScanOn = () => { try { const st = loadCvpSettings(); return st.enabled === true && st.endpointScan !== false; } catch { return null; } };
+// 주기 수집이 실제로 도는가 — 설정 켜짐 또는 데모 CVP(목 모드는 설정이 꺼져 있어도 돈다 — poller.js 와 같은 판정) · 위치 조회 켜짐.
+const cvpEndpointScanOn = () => { try { const st = loadCvpSettings(); return (st.enabled === true || cvpDemoActive(serversForThisNode())) && st.endpointScan !== false; } catch { return null; } };
 /** 비-admin 응답의 오류 사유 — 주소를 가린다(반증 M-4). */
 const reasonFor = (req, servers) => (v) => (v == null || isAdminReq(req) ? v : maskErrText(String(v), servers.map((sv) => sv.host).filter(Boolean)));
 const macsOfNics = (list, max = 64) => [...new Set((Array.isArray(list) ? list : []).map((n) => normMac(n?.mac)).filter((m) => m && m.length === 12))].slice(0, max);

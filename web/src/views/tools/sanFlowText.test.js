@@ -1,6 +1,6 @@
 // v2.933(C-②) SAN 플로우 모니터 문구 — 못 읽음 ≠ 없음 · 값이 없으면 ‘—’ · 사람이 만든 플로우는 보기만 · 차이 % 는 둘 다 있을 때만
 import { describe, it, expect } from 'vitest';
-import { fvBadge, checkBadge, createBlock, deviceRows, diffPct, diffText, flowRows, flowKpis, jobTitle, jobTone, traceLines, hbaOptions, targetOptions, shortWwn } from './sanFlowText.js';
+import { fvBadge, checkBadge, createBlock, deviceRows, diffPct, diffText, flowRows, flowKpis, jobTitle, jobTone, traceLines, hbaOptions, targetOptions, shortWwn, existingPairs } from './sanFlowText.js';
 
 const T0 = new Date(2026, 10, 7, 12, 30).getTime();
 const dev = (over = {}) => ({ id: 'sw1', name: 'us-sw-a1', fv: { state: 'yes', expires: null }, limit: 128, check: { at: T0, ok: true, total: 9, portal: 3, others: ['ops_backup'] }, portalFlows: 3, collectedAt: T0, agent: 'us-edge-01', ...over });
@@ -84,5 +84,14 @@ describe('작업 기록 · 만들기 폼', () => {
     expect(hbaOptions(cand, 'sw1').map((x) => x.hba)).toEqual(['vmhba1']);
     expect(targetOptions(hbaOptions(cand, 'sw1')[0]).map((t) => t.wwn)).toEqual(['a', 'b']);
     expect(hbaOptions(null, 'sw1')).toEqual([]);
+  });
+});
+
+describe('같은 정의 중복 방지', () => {
+  it('이 스위치 · 이 초기자의 활성 플로우 타깃만', () => {
+    const fl = [{ deviceId: 'sw1', srcdev: 'i1', dstdev: 't1', state: 'active' }, { deviceId: 'sw1', srcdev: 'i1', dstdev: 't2', state: 'failed' },
+      { deviceId: 'sw2', srcdev: 'i1', dstdev: 't3', state: 'active' }, { deviceId: 'sw1', srcdev: 'i9', dstdev: 't4', state: 'active' }];
+    expect(existingPairs(fl, 'sw1', 'i1')).toEqual(['t1']);
+    expect(existingPairs(fl, 'sw1', '')).toEqual([]);
   });
 });

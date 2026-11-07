@@ -66,6 +66,9 @@ async function planCreate(b) {
   const ingr = row.port.slotPort && PORT_RE.test(String(row.port.slotPort)) ? String(row.port.slotPort) : String(row.port.index);
   if (!PORT_RE.test(ingr)) return { status: 409, reason: '스위치 포트 번호를 읽지 못했습니다.' };
   const existing = listFlows().filter((f) => f.deviceId === dev.id && f.state !== 'deleted');
+  // 같은 정의(이 스위치 · 이 초기자 → 이 타깃)의 활성 포탈 플로우가 이미 있으면 거부한다 — 이름만 바꿔 같은 플로우를 또 만들었다(화면 판독 v2.933).
+  const dup = existing.filter((f) => f.state === 'active' && f.srcdev === row.wwn && want.includes(f.dstdev));
+  if (dup.length) return { status: 409, reason: `같은 초기자 → 타깃의 활성 포탈 플로우가 이미 있습니다: ${dup.map((f) => f.name).join(', ')}` };
   const names = new Set(existing.map((f) => f.name));
   const flows = []; let n = 1;
   for (const w of want) {

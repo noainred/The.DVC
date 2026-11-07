@@ -7,12 +7,14 @@ import { fetchJson, postJson } from '../../api.js';
 import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText } from './sanFlowText.js';
+import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText, existingPairs } from './sanFlowText.js';
 
 const OTP_IN = { width: 120 };
+const WRAP = { whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: '100%' };   // 긴 작업 제목 · 버튼이 좁은 화면에서 넘치지 않게(400px 가로 넘침 31px — 화면 판독)
+const SW_LIMIT = 20;
 const otpClean = (v) => String(v || '').replace(/\D/g, '').slice(0, 8);
 
-function CreateForm({ dev, onStarted, onClose }) {
+function CreateForm({ dev, existing = [], onStarted, onClose }) {
   const [hosts, setHosts] = useState({ list: null, error: null, note: '' });
   const [hostId, setHostId] = useState('');
   const [cand, setCand] = useState({ d: null, error: null });
@@ -43,7 +45,9 @@ function CreateForm({ dev, onStarted, onClose }) {
   useEffect(() => { if (hbas.length === 1 && !hba) setHba(hbas[0].hba); }, [cand.d]); // eslint-disable-line react-hooks/exhaustive-deps
   const cur = hbas.find((x) => x.hba === hba) || null;
   const targets = targetOptions(cur);
-  useEffect(() => { setPicked(targets.slice(0, 1).map((t) => t.wwn)); }, [hba, cand.d]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 이미 같은 정의(이 스위치 · 이 초기자 · 이 타깃)의 활성 포탈 플로우가 있는 타깃은 고르지 못한다 — 서버도 같은 규칙으로 거부한다.
+  const has = new Set(existingPairs(existing, dev.id, cur?.wwn));
+  useEffect(() => { setPicked(targets.filter((t) => !has.has(t.wwn)).slice(0, 1).map((t) => t.wwn)); }, [hba, cand.d]); // eslint-disable-line react-hooks/exhaustive-deps
   // 미리보기 — 서버가 만들기와 같은 판정 · 같은 명령 조립으로 답한다(스위치는 건드리지 않는다).
   useEffect(() => {
     const my = ++pvSeq.current;
@@ -89,9 +93,9 @@ function CreateForm({ dev, onStarted, onClose }) {
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>타깃(DID) — zone 안 타깃 {targets.length}개 · 고른 타깃마다 플로우 하나(최대 8)</div>
           <div className="flex wrap" style={{ gap: '4px 12px' }}>
             {targets.map((t) => (
-              <label key={t.wwn} className="sf-chk" title={t.kind}>
-                <input type="checkbox" checked={picked.includes(t.wwn)} onChange={() => toggle(t.wwn)} />
-                <span className="mono">{t.wwn}</span> <span className="muted">{t.name}</span>
+              <label key={t.wwn} className="sf-chk" title={has.has(t.wwn) ? '이 초기자 → 타깃 플로우가 이미 있습니다' : t.kind}>
+                <input type="checkbox" checked={picked.includes(t.wwn)} disabled={has.has(t.wwn)} onChange={() => toggle(t.wwn)} />
+                <span className="mono">{t.wwn}</span> <span className="muted">{t.name}{has.has(t.wwn) ? ' · 이미 플로우 있음' : ''}</span>
               </label>
             ))}
           </div>
@@ -122,7 +126,12 @@ export default function SanFlowTool() {
   const [act, setAct] = useState({ busy: '', msg: '', error: '' });
   const [del, setDel] = useState(null);             // { deviceId, name }
   const [delOtp, setDelOtp] = useState('');
+  const [swView, setSwView] = useState('fv');       // 'fv' = 라이선스 있음 · 못 읽음 · 'all' = 전체
+  const [showAll, setShowAll] = useState(false);
+  const formRef = useRef(null);
   const seq = useRef(0);
+  // 만들기를 누르면 폼(표 위)으로 옮겨 간다 — 표가 길어 아래에서 누르면 폼이 화면 밖이다.
+  useEffect(() => { if (form && formRef.current?.scrollIntoView) formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [form]);
   const load = () => {
     const my = ++seq.current;
     fetchJson('/tools/san-flow')
@@ -159,6 +168,7 @@ export default function SanFlowTool() {
   const devs = deviceRows(d);
   const flows = flowRows(d);
   const formDev = devs.find((x) => x.id === form) || null;
+  const swRows = swView === 'all' ? devs : devs.filter((x) => x.fv?.state !== 'no');
   const recent = Array.isArray(d.jobs) ? d.jobs : [];
   const shown = job || recent[0] || null;
   return (
@@ -171,46 +181,11 @@ export default function SanFlowTool() {
         {flowKpis(d).map((k) => <div key={k.label} className="ht-kpi"><span className="ht-kpi-l">{k.label}</span><span className="ht-kpi-v" style={{ fontSize: 16 }}>{k.value}</span><span className="ht-kpi-s" title={k.meta}>{k.meta}</span></div>)}
       </div>
 
-      <div className="card" style={{ marginBottom: 12, minWidth: 0 }}>
-        <div className="hd-card-h"><b>스위치 · 라이선스 · 계정 권한</b>
-          <span className="flex wrap" style={{ gap: 8, alignItems: 'center' }}>
-            <span className="muted">라이선스는 스냅샷 라이선스 목록의 ‘Fabric Vision’ · 권한 점검은 읽기 명령(flow --show)만 보냅니다</span>
-            <button type="button" className="btn" onClick={load}>새로 읽기</button>
-          </span>
-        </div>
-        {act.error ? <div style={{ color: 'var(--red)', fontSize: 12.5, marginBottom: 6 }}>{act.error}</div> : null}
-        <div className="table-wrap">
-          <STable minWidth={860}>
-            <thead><tr><th>스위치</th><th>Fabric Vision</th><th>계정 권한 점검</th><th>플로우 / 상한</th><th>실행 위치</th><th>모델</th><th data-nosort>동작</th></tr></thead>
-            <tbody>
-              {devs.map((x) => (
-                <tr key={x.id}>
-                  <td><b>{x.name}</b>{x.datacenterId ? <div className="muted" style={{ fontSize: 11 }}>{x.datacenterId}</div> : null}</td>
-                  <td data-sort={x.fvB.label} title={x.fvB.title}><span className={`badge ${x.fvB.tone}`}>{x.fvB.label}</span></td>
-                  <td data-sort={x.chk.label} title={x.chk.title}><span className={`badge ${x.chk.tone}`}>{x.chk.label}</span></td>
-                  <td data-sort={x.countSort} className="tabular">{x.countText}</td>
-                  <td className="muted">{x.where}</td>
-                  <td className="muted">{x.model || '—'}</td>
-                  <td>
-                    <div className="flex wrap" style={{ gap: 6 }}>
-                      <button type="button" className="btn" disabled={!!act.busy || x.fv?.state === 'no'} onClick={() => run('/tools/san-flow/check', { deviceId: x.id }, `chk:${x.id}`)} title="flow --show(읽기만) — 라이선스 · 명령 사용 가능 여부 · 플로우 개수">{act.busy === `chk:${x.id}` ? '보내는 중…' : '권한 점검'}</button>
-                      <button type="button" className="btn primary" disabled={!!x.block} onClick={() => setForm(x.id)} title={x.block || '이 스위치에 플로우 만들기'}>{x.block || '만들기'}</button>
-                      {x.portalFlows > 0 ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => run('/tools/san-flow/show', { deviceId: x.id }, `show:${x.id}`)}>카운터 읽기</button> : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </STable>
-        </div>
-        {!devs.length ? <div className="muted" style={{ padding: 8 }}>등록된 SAN 스위치가 없습니다(SAN 스위치 모니터링에서 등록).</div> : null}
-      </div>
-
-      {formDev ? <CreateForm key={formDev.id} dev={formDev} onStarted={started} onClose={() => setForm(null)} /> : null}
+      {formDev ? <div ref={formRef}><CreateForm key={formDev.id} dev={formDev} existing={d.flows || []} onStarted={started} onClose={() => setForm(null)} /></div> : null}
 
       {shown && (
         <div className="card" style={{ marginBottom: 12, minWidth: 0 }}>
-          <div className="hd-card-h"><b>실행 기록</b><span className={`badge ${jobTone(shown)}`}>{jobTitle(shown)}</span></div>
+          <div className="hd-card-h"><b>실행 기록</b><span className={`badge ${jobTone(shown)}`} style={WRAP}>{jobTitle(shown)}</span></div>
           <div className="sf-trace">
             {traceLines(shown).map((l) => (
               <div key={l.key} className={`sf-step ${l.level}`}><span className="mono muted">{l.t}</span><span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{l.msg}</span></div>
@@ -223,14 +198,14 @@ export default function SanFlowTool() {
           ) : null}
           {recent.length > 1 ? (
             <div className="flex wrap" style={{ gap: 6, marginTop: 8 }}>
-              {recent.slice(0, 8).map((j) => <button type="button" key={j.id} className="btn" style={{ fontSize: 11.5 }} onClick={() => { setJob(j); setJobId(isJobActive(j) ? j.id : ''); }}>{timeText(j.startedAt)} {jobTitle(j)}</button>)}
+              {recent.slice(0, 8).map((j) => <button type="button" key={j.id} className="btn" style={{ fontSize: 11.5, ...WRAP, textAlign: 'left' }} onClick={() => { setJob(j); setJobId(isJobActive(j) ? j.id : ''); }}>{timeText(j.startedAt)} {jobTitle(j)}</button>)}
             </div>
           ) : null}
           <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>엣지 위임 작업은 가져감 10분 · 회신 5분 안에 없으면 실패로 닫고 사유를 남깁니다. 기록에 비밀번호는 없습니다.</div>
         </div>
       )}
 
-      <div className="card" style={{ minWidth: 0 }}>
+      <div className="card" style={{ marginBottom: 12, minWidth: 0 }}>
         <div className="hd-card-h"><b>플로우 결과</b><span className="muted">flow --show 누적 카운터의 직전 두 번 차이 · ESXi 경로 실측(같은 HBA · 타깃)과 비교는 시점이 달라 참고값</span></div>
         {del && (
           <div className="flex wrap" style={{ gap: 8, alignItems: 'center', marginBottom: 8 }}>
@@ -264,6 +239,46 @@ export default function SanFlowTool() {
         {!flows.length ? <div className="muted" style={{ padding: 8 }}>아직 플로우가 없습니다 — 라이선스가 있는 스위치에서 권한 점검을 통과한 뒤 만들 수 있습니다.</div> : null}
         <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>라이선스가 없는 패브릭은 이 화면에서 만들 수 없습니다 — 그 법인은 호스트 상세의 ESXi 경로 실측 · IPF 로 봅니다.</div>
       </div>
+      <div className="card" style={{ minWidth: 0 }}>
+        <div className="hd-card-h"><b>스위치 · 라이선스 · 계정 권한</b>
+          <span className="flex wrap" style={{ gap: 8, alignItems: 'center' }}>
+            <span className="muted">라이선스는 스냅샷 라이선스 목록의 ‘Fabric Vision’ · 권한 점검은 읽기 명령(flow --show)만 보냅니다</span>
+            <span className="flex wrap" style={{ gap: 6 }}>
+              <button type="button" className={`btn${swView === 'fv' ? ' primary' : ''}`} onClick={() => setSwView('fv')}>라이선스 있음 · 못 읽음 {devs.filter((x) => x.fv?.state !== 'no').length}</button>
+              <button type="button" className={`btn${swView === 'all' ? ' primary' : ''}`} onClick={() => setSwView('all')}>전체 {devs.length}</button>
+              <button type="button" className="btn" onClick={load}>새로 읽기</button>
+            </span>
+          </span>
+        </div>
+        {act.error ? <div style={{ color: 'var(--red)', fontSize: 12.5, marginBottom: 6 }}>{act.error}</div> : null}
+        <div className="table-wrap">
+          <STable minWidth={860} limit={showAll ? 0 : SW_LIMIT}>
+            <thead><tr><th>스위치</th><th>Fabric Vision</th><th>계정 권한 점검</th><th>플로우 / 상한</th><th>실행 위치</th><th>모델</th><th data-nosort>동작</th></tr></thead>
+            <tbody>
+              {swRows.map((x) => (
+                <tr key={x.id}>
+                  <td><b>{x.name}</b>{x.datacenterId ? <div className="muted" style={{ fontSize: 11 }}>{x.datacenterId}</div> : null}</td>
+                  <td data-sort={x.fvB.label} title={x.fvB.title}><span className={`badge ${x.fvB.tone}`}>{x.fvB.label}</span></td>
+                  <td data-sort={x.chk.label} title={x.chk.title}><span className={`badge ${x.chk.tone}`}>{x.chk.label}</span></td>
+                  <td data-sort={x.countSort} className="tabular">{x.countText}</td>
+                  <td className="muted">{x.where}</td>
+                  <td className="muted">{x.model || '—'}</td>
+                  <td>
+                    <div className="flex wrap" style={{ gap: 6 }}>
+                      <button type="button" className="btn" disabled={!!act.busy || x.fv?.state === 'no'} onClick={() => run('/tools/san-flow/check', { deviceId: x.id }, `chk:${x.id}`)} title="flow --show(읽기만) — 라이선스 · 명령 사용 가능 여부 · 플로우 개수">{act.busy === `chk:${x.id}` ? '보내는 중…' : '권한 점검'}</button>
+                      <button type="button" className="btn primary" disabled={!!x.block} onClick={() => setForm(x.id)} title={x.block || '이 스위치에 플로우 만들기'}>{x.block || '만들기'}</button>
+                      {x.portalFlows > 0 ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => run('/tools/san-flow/show', { deviceId: x.id }, `show:${x.id}`)}>카운터 읽기</button> : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </STable>
+        </div>
+        {swRows.length > SW_LIMIT ? <button type="button" className="btn" style={{ marginTop: 8 }} onClick={() => setShowAll((v) => !v)}>{showAll ? `처음 ${SW_LIMIT}대만` : `${swRows.length}대 모두 보기`}</button> : null}
+        {!devs.length ? <div className="muted" style={{ padding: 8 }}>등록된 SAN 스위치가 없습니다(SAN 스위치 모니터링에서 등록).</div> : null}
+      </div>
+
     </div>
   );
 }

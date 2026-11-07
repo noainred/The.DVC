@@ -119,3 +119,8 @@ export function targetOptions(hba) {
   for (const t of hba?.targets || []) for (const w of t.wwns || []) out.push({ wwn: w, name: t.name || '—', kind: t.kind || '' });
   return out.slice(0, 32);
 }
+/** 이 스위치에서 이 초기자로 이미 있는(활성 · 만드는 중이 아닌 지움 제외) 포탈 플로우의 타깃 WWN — 같은 정의 중복 만들기 방지(서버 planCreate 와 같은 규칙). */
+export function existingPairs(flows, deviceId, initWwn) {
+  if (!initWwn) return [];
+  return (Array.isArray(flows) ? flows : []).filter((f) => f.deviceId === deviceId && f.srcdev === initWwn && f.state === 'active').map((f) => f.dstdev);
+}
