@@ -44,11 +44,11 @@ export default function VmCvpLocation({ vmId }) {
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.key}>
-                        <td><b>{r.label}</b></td>
+                        <td><b>{r.label}</b>{r.clock ? <div style={{ fontSize: 11, color: 'var(--amber)' }} title={r.clock.title}>{r.clock.label}</div> : null}</td>
                         <td data-sort={r.v.label} title={[r.note || r.v.note, r.reason].filter(Boolean).join(' — ')}><span className={`badge ${r.v.tone}`}>{r.v.label}</span>{r.note ? <div className="muted" style={{ fontSize: 11, maxWidth: 240, overflowWrap: 'anywhere' }}>{r.note}</div> : null}</td>
                         <td data-sort={r.where}>{r.where}</td>
                         <td>{r.vlan}</td>
-                        <td className="muted">{r.learned}{r.clock ? <div style={{ fontSize: 11, color: 'var(--amber)' }} title={r.clock.title}>{r.clock.label}</div> : null}</td>
+                        <td className="muted">{r.learned}</td>
                         <td className="mono muted" style={{ fontSize: 11 }}>{r.mac}</td>
                       </tr>
                     ))}

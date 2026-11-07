@@ -246,7 +246,8 @@ export function registerHostSan(api) {
       // v2.935(C-①): 분배 방식 · IPF 요약(스위치별) · ESXi 경로 최근 표본(타깃별) · 표본 이력 상태
       split: sc.split, ipf: sc.ipf?.fabrics || [],
       spath: spath ? { at: spath.at, samples: spath.samples, sampleSec: spath.sampleSec, instances: spath.instances, unparsed: spath.unparsed, truncated: !!spath.truncated, mock: !!spath.mock,
-        unparsedSamples: Array.isArray(spath.unparsedSamples) ? spath.unparsedSamples.slice(0, 5) : [],   // v2.939: 못 푼 경로 이름 원문(형식 확인 근거)
+        // v2.939: 못 푼 경로 이름 원문(형식 확인 근거) — 비-admin 은 주소 꼴을 가린다(반증 L-4 · iSCSI 류 이름에 IP 가 들어갈 수 있다 — 형식 미확인).
+        unparsedSamples: Array.isArray(spath.unparsedSamples) ? spath.unparsedSamples.slice(0, 5).map((x) => (admin ? x : { ...x, name: maskErrText(String(x.name || ''), []) })) : [],
         targets: pathTargetsOf(h, spath, fabrics, storageOf) } : null,
       pathWeights: (() => { const w = sc.pathWeightsOf(h); return w ? { samples: w.samples, firstAt: w.firstAt, lastAt: w.lastAt } : null; })(),
       storPathScan: !!config.storPathScan,

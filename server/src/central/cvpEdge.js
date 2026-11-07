@@ -415,7 +415,8 @@ export function cleanEp(x, now = Date.now()) {
   })).filter((l) => l.device && l.port) : [];
   // 엣지 시각은 수신 시각으로 자르고 **원본은 따로**(v2.939 — C-③ 반증 L-10 · 루트 CLAUDE.md '엣지가 보낸 것은 정제한다'): 잘렸을 때만 edgeAt 을 싣는다.
   const at = Math.min(Math.trunc(at0), now);
-  return { mac, at, ...(Math.trunc(at0) > at ? { edgeAt: Math.trunc(at0) } : {}), status: x.status, ...(epStr(x.reason, 200) ? { reason: epStr(x.reason, 200) } : {}), locations };
+  // 반증 L-1: 상태 · 수집 시각과 같은 허용 오차(5초) — 그 안이면 전송 지연과 구분할 수 없어 표지를 달지 않는다(잡음 '+0초' 금지).
+  return { mac, at, ...(Math.trunc(at0) - now > EDGE_CLOCK_AHEAD_TOLERANCE_MS ? { edgeAt: Math.trunc(at0) } : {}), status: x.status, ...(epStr(x.reason, 200) ? { reason: epStr(x.reason, 200) } : {}), locations };
 }
 
 /**

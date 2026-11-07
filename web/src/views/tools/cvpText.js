@@ -342,7 +342,7 @@ const PART_ITEM_KEYS = ['power', 'cooling', 'temperature', 'xcvr'];
  * @returns {{ text:string, warn:boolean, title:string }}
  */
 export function epSummaryText(ep) {
-  if (!ep || typeof ep !== 'object') return { text: '—', warn: false, title: '이 CVP 의 위치 조회 주기 요약이 아직 없습니다(주기 조회가 꺼져 있거나 아직 부품 주기가 돌지 않았습니다)' };
+  if (!ep || typeof ep !== 'object') return { text: '—', warn: false, title: '이 CVP 의 위치 조회 주기 요약이 없습니다 — 주기 조회가 꺼져 있거나, 아직 부품 주기가 돌지 않았거나, 이 요약을 보내지 않는 구버전 엣지일 수 있습니다' };
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const STOP = { budget: '수집 예산 부족으로 건너뜀', auth: '401 · 403 이 이어져 멈춤', conn: '연결 실패가 이어져 멈춤' };
   const parts = [`물음 ${n(ep.asked) ?? '—'}`, `위치 있음 ${n(ep.ok) ?? '—'}`, `없음 ${n(ep.none) ?? '—'}`];
@@ -351,7 +351,7 @@ export function epSummaryText(ep) {
   if (ep.unsupported) parts.push('미지원 CVP');
   if (STOP[ep.stopped]) parts.push(STOP[ep.stopped]);
   return { text: parts.join(' · '), warn: !!(ep.unsupported || STOP[ep.stopped] || n(ep.errors)),
-    title: 'CVP 위치(EndpointLocation) — 마지막 부품 주기에 물어본 MAC 결과입니다. ‘못 물음’ 은 시간 예산 · 멈춤으로 이번에 묻지 못한 MAC 수입니다(다음 주기에 오래된 것부터 다시 묻습니다).' };
+    title: 'CVP 위치(EndpointLocation) — 마지막으로 위치를 물은 부품 주기의 결과입니다(주기 조회를 끄면 마지막 값이 그대로 남으니 시각을 보세요). ‘못 물음’ 은 시간 예산 · 멈춤으로 그때 묻지 못한 MAC 수입니다(다음 주기에 오래된 것부터 다시 묻습니다).' };
 }
 
 export function partsDueNote(name, st) {

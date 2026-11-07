@@ -131,7 +131,8 @@ const numOr = (x) => { const n = typeof x === 'number' ? x : typeof x === 'strin
 
 /** 못 푼 인스턴스 이름 표본 수 · 글자 정리(제어문자 제거 · 120자). 엣지 정제도 같은 함수를 쓴다. */
 export const UNPARSED_SAMPLES = 5;
-const sampleText = (v) => String(v ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 120); // eslint-disable-line no-control-regex
+// 제어문자 · 양방향 제어문자(U+202A~202E · U+2066~2069 — 글자 방향을 뒤집어 다른 이름처럼 보이게 한다 · 반증 L-4)를 지운다.
+const sampleText = (v) => String(v ?? '').replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]+/g, ' ').slice(0, 120); // eslint-disable-line no-control-regex
 const SAMPLE_WHY = new Set(['format', 'no-target']);
 
 /** 엣지가 보낸 host.spath 정제(아는 필드만 · 상한 · 수치는 수로 · 엣지 시각은 수신 시각으로 자르고 원본은 edgeAt). 모양이 아니면 null. */

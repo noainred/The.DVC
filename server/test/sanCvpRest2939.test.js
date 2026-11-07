@@ -26,6 +26,8 @@ test('① 엣지 위치 조회 시각 — 자르고 원본은 따로 · DB 왕�
   const { cleanEp } = await import('../src/central/cvpEdge.js');
   const ahead = cleanEp({ mac: '005056aa0001', at: NOW + 10 * 60_000, status: 'none', locations: [] }, NOW);
   assert.equal(ahead.at, NOW); assert.equal(ahead.edgeAt, NOW + 10 * 60_000);
+  const near = cleanEp({ mac: '005056aa0009', at: NOW + 1500, status: 'none', locations: [] }, NOW);
+  assert.equal(near.at, NOW); assert.equal('edgeAt' in near, false, '반증 L-1: 허용 오차(5초) 안이면 전송 지연과 구분할 수 없어 원본을 싣지 않는다');
   const normal = cleanEp({ mac: '005056aa0002', at: NOW - 1000, status: 'none', locations: [] }, NOW);
   assert.equal(normal.at, NOW - 1000); assert.equal('edgeAt' in normal, false, '잘리지 않았으면 원본을 따로 싣지 않는다');
   const db = await import('../src/cvp/db.js');
@@ -44,6 +46,29 @@ test('② CVP 위치 주기 요약 — 엣지 상태 정제', async () => {
   assert.equal(cleanStatus({ cvpId: 'c1', endpoints: { stopped: 'reboot', asked: 'abc' } }, NOW).endpoints.stopped, null, '멈춤 사유는 열거값만');
   assert.equal(cleanStatus({ cvpId: 'c1', endpoints: { asked: 'abc' } }, NOW).endpoints.asked, null, '못 읽은 수는 0 이 아니라 null');
   assert.equal('endpoints' in cleanStatus({ cvpId: 'c1' }, NOW), false, '구버전 엣지는 필드 자체가 없다');
+});
+
+test('② 실제 화면 라우트 — 중앙 직접 · 엣지 둘 다 요약이 응답에 실린다(반증 M-1 — pickStatus 화이트리스트)', async () => {
+  const express = (await import('express')).default;
+  const reg = await import('../src/cvp/registry.js');
+  const { putStatus } = await import('../src/cvp/store.js');
+  const { cleanStatus, saveEdgeCvpStatus } = await import('../src/central/cvpEdge.js');
+  const { registerCvp } = await import('../src/routes/api/cvp.js');
+  const local = reg.saveServer({ name: 'CVP-L9', host: 'https://10.1.1.1', authMode: 'token', token: 't', agent: '' });
+  const deleg = reg.saveServer({ name: 'CVP-E9', host: 'https://10.1.1.2', authMode: 'token', token: 't', agent: 'edge-a' });
+  const ep = { at: NOW - 60_000, asked: 200, ok: 150, none: 40, errors: 3, unsupported: false, cut: 7, stopped: 'auth' };
+  putStatus(local.id, { name: 'CVP-L9', ok: true, collectedAt: NOW, lastAttemptAt: NOW, deviceCount: 3, endpoints: ep });
+  saveEdgeCvpStatus('edge-a', [cleanStatus({ cvpId: deleg.id, name: 'CVP-E9', ok: true, collectedAt: NOW, endpoints: ep }, NOW)], { now: NOW });
+  const app = express(); app.use((req, _r, n) => { req.user = { username: 'adm', role: 'admin' }; n(); });
+  const api = express.Router(); registerCvp(api); app.use('/api', api);
+  const srv = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
+  closers.push(() => new Promise((r) => srv.close(() => r())));
+  const j = await (await fetch(`http://127.0.0.1:${srv.address().port}/api/tools/cvp`)).json();
+  for (const name of ['CVP-L9', 'CVP-E9']) {
+    const s = (j.servers || []).find((x) => x.name === name);
+    assert.ok(s, name);
+    assert.deepEqual({ asked: s.status?.endpoints?.asked, stopped: s.status?.endpoints?.stopped }, { asked: 200, stopped: 'auth' }, `${name} — 요약이 응답에 실린다`);
+  }
 });
 
 test('③ 플로우 비활성화 · 다시 켜기', async () => {
@@ -153,6 +178,7 @@ test('⑤ 원문 표본 — 못 푼 경로 이름 · 엣지 정제 · 못 읽은
   assert.equal(s.unparsed, names.length);
   assert.equal(s.unparsedSamples.length, P.UNPARSED_SAMPLES, '표본은 상한까지만');
   assert.ok(s.unparsedSamples.every((x) => !/[\u0000-\u001f]/.test(x.name)), '제어문자 제거'); // eslint-disable-line no-control-regex
+  assert.equal(P.sanitizeHostSpath({ at: NOW, targets: [], unparsedSamples: [{ name: 'abc\u202Efdp.exe', why: 'format' }] }, NOW).unparsedSamples[0].name, 'abc fdp.exe', '반증 L-4: 양방향 제어문자 제거');
   assert.equal(s.unparsedSamples.find((x) => x.name.startsWith('vmhba9')).why, 'no-target', '멀티패스 표에 없는 런타임 이름');
   const clean = P.sanitizeHostSpath({ at: NOW, targets: [], unparsedSamples: [{ name: 'a'.repeat(500), why: 'evil' }, 'str', null, ...Array.from({ length: 9 }, () => ({ name: 'n', why: 'format' }))] }, NOW);
   assert.equal(clean.unparsedSamples.length, 3, '앞 5개를 자른 뒤 모양이 아닌 것(글자 · null)은 버린다');
