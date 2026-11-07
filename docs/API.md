@@ -22,10 +22,10 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1333개** |
+| 엔드포인트 | **1335개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 129개 |
-| GET | 703개 |
+| GET | 705개 |
 | POST | 421개 |
 | PUT | 136개 |
 | PATCH | 3개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 730 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 732 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -120,67 +120,67 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| POST | `/agent-config` | `requireCentral` | [server/src/routes/central.js:2555](../server/src/routes/central.js#L2555) |
+| POST | `/agent-config` | `requireCentral` | [server/src/routes/central.js:2570](../server/src/routes/central.js#L2570) |
 | GET | `/assignment` | `requireCentral` | [server/src/routes/central.js:431](../server/src/routes/central.js#L431) |
-| GET | `/bareos-config` | `requireCentral` | [server/src/routes/central.js:2498](../server/src/routes/central.js#L2498) |
-| POST | `/bareos-op-result` | `requireCentral` | [server/src/routes/central.js:2518](../server/src/routes/central.js#L2518) |
-| GET | `/bareos-ops` | `requireCentral` | [server/src/routes/central.js:2509](../server/src/routes/central.js#L2509) |
-| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central.js:2686](../server/src/routes/central.js#L2686) |
-| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central.js:2690](../server/src/routes/central.js#L2690) |
+| GET | `/bareos-config` | `requireCentral` | [server/src/routes/central.js:2513](../server/src/routes/central.js#L2513) |
+| POST | `/bareos-op-result` | `requireCentral` | [server/src/routes/central.js:2533](../server/src/routes/central.js#L2533) |
+| GET | `/bareos-ops` | `requireCentral` | [server/src/routes/central.js:2524](../server/src/routes/central.js#L2524) |
+| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central.js:2701](../server/src/routes/central.js#L2701) |
+| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central.js:2705](../server/src/routes/central.js#L2705) |
 | GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central.js:1762](../server/src/routes/central.js#L1762) |
 | POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:573](../server/src/routes/central.js#L573) |
-| GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central.js:2619](../server/src/routes/central.js#L2619) |
-| POST | `/capture-result` | `requireCentral` | [server/src/routes/central.js:2623](../server/src/routes/central.js#L2623) |
+| GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central.js:2634](../server/src/routes/central.js#L2634) |
+| POST | `/capture-result` | `requireCentral` | [server/src/routes/central.js:2638](../server/src/routes/central.js#L2638) |
 | POST | `/curuser` | `requireCentral` | [server/src/routes/central.js:1187](../server/src/routes/central.js#L1187) |
 | GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1285](../server/src/routes/central.js#L1285) |
-| GET | `/cvp-config` | `requireCentral` | [server/src/routes/central.js:2199](../server/src/routes/central.js#L2199) |
-| POST | `/cvp-data` | `requireCentral` | [server/src/routes/central.js:2226](../server/src/routes/central.js#L2226) |
+| GET | `/cvp-config` | `requireCentral` | [server/src/routes/central.js:2214](../server/src/routes/central.js#L2214) |
+| POST | `/cvp-data` | `requireCentral` | [server/src/routes/central.js:2241](../server/src/routes/central.js#L2241) |
 | GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central.js:1714](../server/src/routes/central.js#L1714) |
 | POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central.js:1721](../server/src/routes/central.js#L1721) |
 | POST | `/fleet` | `requireCentral` | [server/src/routes/central.js:1324](../server/src/routes/central.js#L1324) |
 | GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1555](../server/src/routes/central.js#L1555) |
 | POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1475](../server/src/routes/central.js#L1475) |
 | POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:1045](../server/src/routes/central.js#L1045) |
-| GET | `/health-probe` | `requireCentral` | [server/src/routes/central.js:2800](../server/src/routes/central.js#L2800) |
+| GET | `/health-probe` | `requireCentral` | [server/src/routes/central.js:2815](../server/src/routes/central.js#L2815) |
 | GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1397](../server/src/routes/central.js#L1397) |
 | POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1407](../server/src/routes/central.js#L1407) |
 | POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1419](../server/src/routes/central.js#L1419) |
 | POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:907](../server/src/routes/central.js#L907) |
-| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central.js:2714](../server/src/routes/central.js#L2714) |
-| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central.js:2725](../server/src/routes/central.js#L2725) |
-| GET | `/isidu-config` | `requireCentral` | [server/src/routes/central.js:2325](../server/src/routes/central.js#L2325) |
-| POST | `/isidu-data` | `requireCentral` | [server/src/routes/central.js:2347](../server/src/routes/central.js#L2347) |
-| POST | `/link-check` | `requireCentral` | [server/src/routes/central.js:2814](../server/src/routes/central.js#L2814) |
-| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central.js:2844](../server/src/routes/central.js#L2844) |
-| GET | `/log-queries` | `requireCentral` | [server/src/routes/central.js:2593](../server/src/routes/central.js#L2593) |
-| POST | `/log-query-result` | `requireCentral` | [server/src/routes/central.js:2600](../server/src/routes/central.js#L2600) |
+| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central.js:2729](../server/src/routes/central.js#L2729) |
+| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central.js:2740](../server/src/routes/central.js#L2740) |
+| GET | `/isidu-config` | `requireCentral` | [server/src/routes/central.js:2340](../server/src/routes/central.js#L2340) |
+| POST | `/isidu-data` | `requireCentral` | [server/src/routes/central.js:2362](../server/src/routes/central.js#L2362) |
+| POST | `/link-check` | `requireCentral` | [server/src/routes/central.js:2829](../server/src/routes/central.js#L2829) |
+| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central.js:2859](../server/src/routes/central.js#L2859) |
+| GET | `/log-queries` | `requireCentral` | [server/src/routes/central.js:2608](../server/src/routes/central.js#L2608) |
+| POST | `/log-query-result` | `requireCentral` | [server/src/routes/central.js:2615](../server/src/routes/central.js#L2615) |
 | POST | `/part-faults` | `requireCentral` | [server/src/routes/central.js:1683](../server/src/routes/central.js#L1683) |
 | GET | `/partfault-config` | `requireCentral` | [server/src/routes/central.js:1751](../server/src/routes/central.js#L1751) |
-| GET | `/pdu-config` | `requireCentral` | [server/src/routes/central.js:1883](../server/src/routes/central.js#L1883) |
-| POST | `/pdu-data` | `requireCentral` | [server/src/routes/central.js:1914](../server/src/routes/central.js#L1914) |
-| GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central.js:2528](../server/src/routes/central.js#L2528) |
-| POST | `/ping-result` | `requireCentral` | [server/src/routes/central.js:2536](../server/src/routes/central.js#L2536) |
+| GET | `/pdu-config` | `requireCentral` | [server/src/routes/central.js:1898](../server/src/routes/central.js#L1898) |
+| POST | `/pdu-data` | `requireCentral` | [server/src/routes/central.js:1929](../server/src/routes/central.js#L1929) |
+| GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central.js:2543](../server/src/routes/central.js#L2543) |
+| POST | `/ping-result` | `requireCentral` | [server/src/routes/central.js:2551](../server/src/routes/central.js#L2551) |
 | POST | `/register-collector` | `requireCentral` | [server/src/routes/central.js:444](../server/src/routes/central.js#L444) |
 | POST | `/result` | `requireCentral` | [server/src/routes/central.js:526](../server/src/routes/central.js#L526) |
-| POST | `/rma-credential` | `requireCentral` | [server/src/routes/central.js:2125](../server/src/routes/central.js#L2125) |
-| POST | `/rma-poll` | `requireCentral` | [server/src/routes/central.js:2060](../server/src/routes/central.js#L2060) |
-| POST | `/rma-result` | `requireCentral` | [server/src/routes/central.js:2145](../server/src/routes/central.js#L2145) |
-| GET | `/sanswitch-config` | `requireCentral` | [server/src/routes/central.js:1950](../server/src/routes/central.js#L1950) |
-| POST | `/sanswitch-data` | `requireCentral` | [server/src/routes/central.js:2158](../server/src/routes/central.js#L2158) |
-| POST | `/sanswitch-perf` | `requireCentral` | [server/src/routes/central.js:1982](../server/src/routes/central.js#L1982) |
-| POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central.js:2041](../server/src/routes/central.js#L2041) |
+| POST | `/rma-credential` | `requireCentral` | [server/src/routes/central.js:2140](../server/src/routes/central.js#L2140) |
+| POST | `/rma-poll` | `requireCentral` | [server/src/routes/central.js:2075](../server/src/routes/central.js#L2075) |
+| POST | `/rma-result` | `requireCentral` | [server/src/routes/central.js:2160](../server/src/routes/central.js#L2160) |
+| GET | `/sanswitch-config` | `requireCentral` | [server/src/routes/central.js:1965](../server/src/routes/central.js#L1965) |
+| POST | `/sanswitch-data` | `requireCentral` | [server/src/routes/central.js:2173](../server/src/routes/central.js#L2173) |
+| POST | `/sanswitch-perf` | `requireCentral` | [server/src/routes/central.js:1997](../server/src/routes/central.js#L1997) |
+| POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central.js:2056](../server/src/routes/central.js#L2056) |
 | GET | `/storage-config` | `requireCentral` | [server/src/routes/central.js:1657](../server/src/routes/central.js#L1657) |
 | POST | `/storage-data` | `requireCentral` | [server/src/routes/central.js:1784](../server/src/routes/central.js#L1784) |
 | GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:615](../server/src/routes/central.js#L615) |
 | POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:631](../server/src/routes/central.js#L631) |
 | POST | `/svcmon-report` | `requireCentral` | [server/src/routes/central.js:550](../server/src/routes/central.js#L550) |
-| GET | `/users-config` | `requireCentral` | [server/src/routes/central.js:2453](../server/src/routes/central.js#L2453) |
-| GET | `/veeam-config` | `requireCentral` | [server/src/routes/central.js:2407](../server/src/routes/central.js#L2407) |
-| POST | `/veeam-data` | `requireCentral` | [server/src/routes/central.js:2422](../server/src/routes/central.js#L2422) |
-| GET | `/veeam-run-ops` | `requireCentral` | [server/src/routes/central.js:2468](../server/src/routes/central.js#L2468) |
-| POST | `/veeam-run-result` | `requireCentral` | [server/src/routes/central.js:2475](../server/src/routes/central.js#L2475) |
-| POST | `/vm-clone-report` | `requireCentral` | [server/src/routes/central.js:2673](../server/src/routes/central.js#L2673) |
-| GET | `/vm-clone-sync` | `requireCentral` | [server/src/routes/central.js:2657](../server/src/routes/central.js#L2657) |
+| GET | `/users-config` | `requireCentral` | [server/src/routes/central.js:2468](../server/src/routes/central.js#L2468) |
+| GET | `/veeam-config` | `requireCentral` | [server/src/routes/central.js:2422](../server/src/routes/central.js#L2422) |
+| POST | `/veeam-data` | `requireCentral` | [server/src/routes/central.js:2437](../server/src/routes/central.js#L2437) |
+| GET | `/veeam-run-ops` | `requireCentral` | [server/src/routes/central.js:2483](../server/src/routes/central.js#L2483) |
+| POST | `/veeam-run-result` | `requireCentral` | [server/src/routes/central.js:2490](../server/src/routes/central.js#L2490) |
+| POST | `/vm-clone-report` | `requireCentral` | [server/src/routes/central.js:2688](../server/src/routes/central.js#L2688) |
+| GET | `/vm-clone-sync` | `requireCentral` | [server/src/routes/central.js:2672](../server/src/routes/central.js#L2672) |
 | POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:1127](../server/src/routes/central.js#L1127) |
 | GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:1309](../server/src/routes/central.js#L1309) |
 
@@ -1288,11 +1288,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/service-check/settings-files/confirm` | 역할 `admin` · `settingsFleetOnly` | [server/src/routes/api/checksLogs.js:228](../server/src/routes/api/checksLogs.js#L228) |
 | GET | `/tools/snapshots` | 권한 `tools` | [server/src/routes/api/vcTools.js:154](../server/src/routes/api/vcTools.js#L154) |
 | GET | `/tools/solutions` | 권한 `tools` | [server/src/routes/api/vcTools.js:61](../server/src/routes/api/vcTools.js#L61) |
-| GET | `/tools/storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:83](../server/src/routes/api/storageMon.js#L83) |
-| GET | `/tools/storage-growth` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:656](../server/src/routes/api/storageMon.js#L656) |
-| GET | `/tools/storage-growth/:id/daily` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:731](../server/src/routes/api/storageMon.js#L731) |
-| GET | `/tools/storage-growth/settings` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:743](../server/src/routes/api/storageMon.js#L743) |
-| POST | `/tools/storage-growth/settings` | 역할 `admin` · `fullScopeOnly` · `requireSettingsOwner` | [server/src/routes/api/storageMon.js:751](../server/src/routes/api/storageMon.js#L751) |
+| GET | `/tools/storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:85](../server/src/routes/api/storageMon.js#L85) |
+| GET | `/tools/storage-growth` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:761](../server/src/routes/api/storageMon.js#L761) |
+| GET | `/tools/storage-growth/:id/daily` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:836](../server/src/routes/api/storageMon.js#L836) |
+| GET | `/tools/storage-growth/settings` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:848](../server/src/routes/api/storageMon.js#L848) |
+| POST | `/tools/storage-growth/settings` | 역할 `admin` · `fullScopeOnly` · `requireSettingsOwner` | [server/src/routes/api/storageMon.js:856](../server/src/routes/api/storageMon.js#L856) |
 | GET | `/tools/storage-paths` | 권한 `tools` | [server/src/routes/api/storagePaths.js:34](../server/src/routes/api/storagePaths.js#L34) |
 | GET | `/tools/storage-paths.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/storagePaths.js:42](../server/src/routes/api/storagePaths.js#L42) |
 | GET | `/tools/storage-usage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageUsage.js:31](../server/src/routes/api/storageUsage.js#L31) |
@@ -1301,26 +1301,28 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/storage-usage/mail/preview` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageUsage.js:97](../server/src/routes/api/storageUsage.js#L97) |
 | POST | `/tools/storage-usage/mail/send-now` | 역할 `admin` · `fullScopeOnly` · `requireSettingsOwner` | [server/src/routes/api/storageUsage.js:89](../server/src/routes/api/storageUsage.js#L89) |
 | GET | `/tools/storage-usage/xlsx` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageUsage.js:48](../server/src/routes/api/storageUsage.js#L48) |
-| GET | `/tools/storage/activity` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:228](../server/src/routes/api/storageMon.js#L228) |
-| POST | `/tools/storage/collect-all` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:241](../server/src/routes/api/storageMon.js#L241) |
-| POST | `/tools/storage/devices` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:206](../server/src/routes/api/storageMon.js#L206) |
-| DELETE | `/tools/storage/devices/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:216](../server/src/routes/api/storageMon.js#L216) |
-| GET | `/tools/storage/devices/:id/areas` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:552](../server/src/routes/api/storageMon.js#L552) |
-| GET | `/tools/storage/devices/:id/areas/json` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:557](../server/src/routes/api/storageMon.js#L557) |
-| POST | `/tools/storage/devices/:id/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:268](../server/src/routes/api/storageMon.js#L268) |
-| GET | `/tools/storage/devices/:id/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:592](../server/src/routes/api/storageMon.js#L592) |
-| GET | `/tools/storage/devices/:id/node-load` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:606](../server/src/routes/api/storageMon.js#L606) |
-| GET | `/tools/storage/devices/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:358](../server/src/routes/api/storageMon.js#L358) |
-| GET | `/tools/storage/devices/export.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:382](../server/src/routes/api/storageMon.js#L382) |
-| POST | `/tools/storage/devices/import` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:405](../server/src/routes/api/storageMon.js#L405) |
-| POST | `/tools/storage/devices/import/test` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:488](../server/src/routes/api/storageMon.js#L488) |
-| GET | `/tools/storage/devices/import/test/:id` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:545](../server/src/routes/api/storageMon.js#L545) |
-| GET | `/tools/storage/devices/sample.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:373](../server/src/routes/api/storageMon.js#L373) |
-| GET | `/tools/storage/devices/sample.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:390](../server/src/routes/api/storageMon.js#L390) |
-| GET | `/tools/storage/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:762](../server/src/routes/api/storageMon.js#L762) |
-| GET | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:298](../server/src/routes/api/storageMon.js#L298) |
-| PUT | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:316](../server/src/routes/api/storageMon.js#L316) |
-| POST | `/tools/storage/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:152](../server/src/routes/api/storageMon.js#L152) |
+| GET | `/tools/storage/activity` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:230](../server/src/routes/api/storageMon.js#L230) |
+| POST | `/tools/storage/collect-all` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:243](../server/src/routes/api/storageMon.js#L243) |
+| POST | `/tools/storage/devices` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:208](../server/src/routes/api/storageMon.js#L208) |
+| DELETE | `/tools/storage/devices/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:218](../server/src/routes/api/storageMon.js#L218) |
+| GET | `/tools/storage/devices/:id/areas` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:554](../server/src/routes/api/storageMon.js#L554) |
+| GET | `/tools/storage/devices/:id/areas/json` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:559](../server/src/routes/api/storageMon.js#L559) |
+| GET | `/tools/storage/devices/:id/client-dist` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:712](../server/src/routes/api/storageMon.js#L712) |
+| POST | `/tools/storage/devices/:id/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:270](../server/src/routes/api/storageMon.js#L270) |
+| GET | `/tools/storage/devices/:id/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:594](../server/src/routes/api/storageMon.js#L594) |
+| GET | `/tools/storage/devices/:id/node-clients` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:675](../server/src/routes/api/storageMon.js#L675) |
+| GET | `/tools/storage/devices/:id/node-load` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:627](../server/src/routes/api/storageMon.js#L627) |
+| GET | `/tools/storage/devices/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:360](../server/src/routes/api/storageMon.js#L360) |
+| GET | `/tools/storage/devices/export.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:384](../server/src/routes/api/storageMon.js#L384) |
+| POST | `/tools/storage/devices/import` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:407](../server/src/routes/api/storageMon.js#L407) |
+| POST | `/tools/storage/devices/import/test` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:490](../server/src/routes/api/storageMon.js#L490) |
+| GET | `/tools/storage/devices/import/test/:id` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:547](../server/src/routes/api/storageMon.js#L547) |
+| GET | `/tools/storage/devices/sample.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:375](../server/src/routes/api/storageMon.js#L375) |
+| GET | `/tools/storage/devices/sample.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:392](../server/src/routes/api/storageMon.js#L392) |
+| GET | `/tools/storage/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:867](../server/src/routes/api/storageMon.js#L867) |
+| GET | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:300](../server/src/routes/api/storageMon.js#L300) |
+| PUT | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:318](../server/src/routes/api/storageMon.js#L318) |
+| POST | `/tools/storage/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:154](../server/src/routes/api/storageMon.js#L154) |
 | GET | `/tools/svc-inventory` | 권한 `tools` | [server/src/routes/api/svcInventory.js:529](../server/src/routes/api/svcInventory.js#L529) |
 | GET | `/tools/svc-inventory.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/svcInventory.js:691](../server/src/routes/api/svcInventory.js#L691) |
 | GET | `/tools/svc-inventory/candidates` | 권한 `tools` | [server/src/routes/api/svcInventory.js:672](../server/src/routes/api/svcInventory.js#L672) |
@@ -1505,7 +1507,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
-| `fullScopeOnly` | 287 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
+| `fullScopeOnly` | 289 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `fleetOnly` | 205 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
 | `requireCentral` | 63 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
 | `requireSettingsOwner` | 49 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |

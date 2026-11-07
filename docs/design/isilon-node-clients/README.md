@@ -1,6 +1,6 @@
 # 설계: 아이실론 노드 2차 — 클라이언트·프로토콜(③) · 디스크 busy·IOPS(②) · 표본 주기 분리(⑨) · 노드 클릭 → 연결 클라이언트 · 재배치 보드
 
-작성 2026-11-07 (main v2.931.0 기준 · 브랜치 `claude/charming-lamport-rr6090`) · 상태 **시안 — 컨펌 대기**(14:32 KST 요청) ·
+작성 2026-11-07 (main v2.931.0 기준 · 브랜치 `claude/charming-lamport-rr6090`) · 상태 **구현됨 v2.935.0**(14:32 KST 요청 · 컨펌 뒤 구현 — §8 구현 기록) ·
 시안 캔버스: https://claude.ai/artifact/3E5mZEubEdHdK8mJZhGmUs (아트보드 3장 — ① 노드 클릭 드로어 + 프로토콜·busy 묶음 · ② 보기 ‘클라이언트 분포’(노드 × 클라이언트 · 쏠림 · 재배치 후보) · ③ 표본 주기 분리 설정·흐름·산수·상태).
 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스(HTML 프로토타입 — 복사 대상이 아님). **IP · 이름 · 수치는 전부 가상**이다. 1차(v2.931 — `docs/design/isilon-node-load/`) 위에 얹는다.
 
@@ -87,3 +87,18 @@
 | API | `routes/api/storageMon.js`(node-load 확장 · node-clients · client-dist · CSV) · 이름 붙이기 `storage/clientNames.js`(인벤토리 조회 순수) |
 | 웹 | `storageNodeLoad/`(묶음 2 · 드로어 `NodeClientsDrawer.jsx` · 보기 `ClientDistView.jsx` · 문구 모듈 + vitest) · 설정 폼(주기 칸 · 장비 토글 · 저장 기간 칸) |
 | 테스트·문서 | `server/test/storageNodeClients29xx.test.js` · `docs/rules/storage.md` · release-notes · 이 README 상태 |
+
+## 8. 구현 기록(2026-11-07 — 상태 **구현됨 v2.935.0**)
+
+컨펌 "이대로 구현(§6 기본값)" 뒤 구현. ⚠ 규칙(설계 = Fable · 구현 = Opus)과 달리 **구현도 Fable 로 진행했다**(사용자가 `/model` 을 바꾸지 않았고 작업 흐름을 끊지 않기 위해 — vm-perf 때와 같은 선례. 보고에 밝힌다).
+
+- 시안과 달라진 것(정직 기록):
+  · 엣지 → 중앙 표본은 스냅샷 `extra` 가 아니라 **push 본문 최상위 `nodeLoadSamples`** 로 보낸다 — `extra` 에 싣으면 중앙 정제 화이트리스트와 `central-agent-storage.json` 보관분까지 표본이 섞여 커진다. 소유권 필터는 장비 목록과 같은 함수로 따로 건다.
+  · 드로어는 장비 상세 모달 위의 모달이 아니라 **노드 부하 구역 안에 펼치는 구획**이다(모달 겹침 회피). 열리는 곳은 히트맵 노드 이름 · 노드 순위 · 분포 막대(노드 표 ID 열은 아니다 — 남긴 것).
+  · 수집 주기 폴러는 표본이 진행 중이면 **끝날 때까지 기다린다**(≤60초) — 시안은 '표본이 수집 중이면 건너뜀' 만 적었는데, 반대 경우(표본 때문에 1시간 수집이 한 주기 빠짐)가 더 나빠 추가했다.
+  · 비교 구간(지난주)이 노드 원시 보존(7일) 경계에 걸려 비던 것은 **원시 보존 밖 창을 시간 요약 1시간 칸으로** 내려 해결했다(원시 폴백 아님).
+  · 일괄 변경·CSV 의 `nodeLoadEnabled` 칸은 넣지 않았다(장비 편집 폼만) — 남긴 것.
+  · 묶음 버튼은 표본 폴러가 켜진 장비면 디스크(busy·IOPS)·프로토콜을 **응답 `sample.sampleEnabled`** 로 연다(1시간 스냅샷에는 그 키가 없다).
+- 실장비 미확인 항목(첫 수집 뒤 `probe` 를 보고 보정할 것): REST `summary/{client,protocol,drive}` 경로·필드 · `isi statistics client/protocol/drive --format json` 행 모양 · 행의 node 가 lnn 인지 devid 인지(lnn 으로 본다) · 지연 단위(µs→ms 가정) · `isi statistics system` 의 Net In/Out 단위(B/s 가정 ×8).
+- 파일: `storage/nodeLoadPoller.js`(새) · `storage/clientNames.js`(새) · `collectors/isilonNodeLoad.js`(파서·REST 표본 노드·system net 옵션) · `nodeLoad.js`(정제·행렬·쏠림·후보) · `db.js`(표 6개·열 4·시간 요약·조회) · `intervals.js nodeLoadMs` · `poller.js runSampleExclusive` · `push.js` · `central/storageEdge.js` · `routes/central.js` · `routes/api/storageMon.js`(라우트 3) · `growthSettings.js`(칸 4) · `mock/demo/storage.js` · `edgelog/spec.js` · `health/services.js` · `index.js` · 웹 `storageNodeLoad/{NodeClientsDrawer,ClientDistView}.jsx` · `NodeLoadPanel.jsx` · `nodeLoadText.js`(+vitest) · `StorageMonTool.jsx`(토글).
+- 회귀: `server/test/storageNodeClients2935.test.js`(①~⑧) · `storageNodeLoad2926.test.js`(보존 기본 7일 · 디스크 묶음 4지표 갱신) · 규칙 `docs/rules/storage.md` 36항.

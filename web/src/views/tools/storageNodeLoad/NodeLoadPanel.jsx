@@ -11,12 +11,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { fetchJson } from '../../../api.js';
 import { numOrNull } from '../../../numOrNull.js';
+import { STable } from '../../../components/STable.jsx';
 import {
-  RANGES, rangeOf, SELECTS, selectOf, GROUP_TEXT, SERIES_TEXT, SERIES_COLOR, OVERLAY_COLORS, OVERLAY_MAX, BASELINE_COLOR, HEAT_RAMP,
+  RANGES, rangeOf, SELECTS, selectOf, GROUP_TEXT, GROUP_ORDER, GROUP_FIRST, SERIES_TEXT, SERIES_COLOR, OVERLAY_COLORS, OVERLAY_MAX, BASELINE_COLOR, HEAT_RAMP,
   groupsAvailable, valueText, pickSeries, rankNodes, heatScaleMax, heatBin, colText, colKindText, tickEvery, drillEndOf, scrollToEnd,
   portalLocalToMs, msToPortalLocal, rangeLimitText, jobsByCol, tilesOf, notesOf, sparkPath, sampleText, sourceText, alignBaseline,
-  maxBackOf, windowEndOf, windowLabel, windowRangeText,
+  maxBackOf, windowEndOf, windowLabel, windowRangeText, chartParts, opsText, latText, protoSummaryOf,
 } from './nodeLoadText.js';
+import NodeClientsDrawer from './NodeClientsDrawer.jsx'; // v2.932(2차 ③) 노드 드로어
+import ClientDistView from './ClientDistView.jsx';       // v2.932(2차 ③) 클라이언트 분포 · 재배치 보드
 import './nodeLoad.css';
 
 function Seg({ label, items, value, onPick }) {
@@ -87,7 +90,7 @@ function Heatmap({ d, sel, jobsCol, onDrill, onPickNode }) {
         const vals = pickSeries(nd.v, sel); const peaks = nd.mx ? pickSeries(nd.mx, sel) : null;
         return (
           <div key={nd.id} className="nl-heatrow" style={rowMin}>
-            <button type="button" className="nl-heatname" title="겹쳐 보기에 넣기" onClick={() => onPickNode(nd.id)}>노드 {nd.id}</button>
+            <button type="button" className="nl-heatname" title="눌러서 이 노드의 클라이언트·프로토콜(드로어)" onClick={() => onPickNode(nd.id)}>노드 {nd.id}</button>
             <div className="nl-heatcells" style={grid}>
               {vals.map((v, i) => {
                 const b = heatBin(v, max);
@@ -117,18 +120,41 @@ function Heatmap({ d, sel, jobsCol, onDrill, onPickNode }) {
   );
 }
 
-function RankList({ d, sel }) {
+function RankList({ d, sel, onPick }) {
   const unit = selectOf(sel).unit;
   const rows = rankNodes(d, sel);
   return (
     <div className="nl-rank">
       {rows.map((r) => (
-        <div key={r.id} className="nl-rankrow" title={`노드 ${r.id} · 평균 ${valueText(unit, r.avg)} · 최대 ${valueText(unit, r.peak)} · 읽은 칸 ${r.n} / 빈 칸 ${r.missing}`}>
+        <button type="button" key={r.id} className="nl-rankrow nl-rowbtn" onClick={() => onPick(r.id)} title={`노드 ${r.id} · 평균 ${valueText(unit, r.avg)} · 최대 ${valueText(unit, r.peak)} · 읽은 칸 ${r.n} / 빈 칸 ${r.missing} — 눌러서 이 노드의 클라이언트`}>
           <span>노드 {r.id}</span>
           <span className="nl-track"><i style={{ width: `${r.w}%` }} /></span>
           <span className="nl-num">{valueText(unit, r.avg)}</span>
-        </div>
+        </button>
       ))}
+    </div>
+  );
+}
+
+/** v2.932(2차 ③) 프로토콜 묶음 — 노드 × 프로토콜 표(창 평균·최대 ops/s · 지연). */
+function ProtoTable({ rows }) {
+  const list = protoSummaryOf(rows);
+  if (!list.length) return <div className="nl-note">이 구간에는 프로토콜 표본이 없습니다.</div>;
+  return (
+    <div className="table-wrap nl-tablewrap">
+      <STable minWidth={520}>
+        <thead><tr><th style={{ textAlign: 'right' }}>노드</th><th>프로토콜</th><th style={{ textAlign: 'right' }}>창 평균 ops/s</th><th style={{ textAlign: 'right' }}>최대 ops/s</th><th style={{ textAlign: 'right' }}>지연 평균</th><th style={{ textAlign: 'right' }}>지연 최대</th><th style={{ textAlign: 'right' }}>표본</th></tr></thead>
+        <tbody>
+          {(rows || []).map((r) => (
+            <tr key={`${r.node}|${r.proto}`}>
+              <td className="nl-num" data-sort={String(r.node)}>{r.node}</td><td>{r.proto || '—'}</td>
+              <td className="nl-num" data-sort={String(r.ops ?? '')}>{opsText(r.ops)}</td><td className="nl-num" data-sort={String(r.opsMax ?? '')}>{opsText(r.opsMax)}</td>
+              <td className="nl-num" data-sort={String(r.lat ?? '')}>{latText(r.lat)}</td><td className="nl-num" data-sort={String(r.latMax ?? '')}>{latText(r.latMax)}</td>
+              <td className="nl-num" data-sort={String(r.samples ?? '')}>{r.samples ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </STable>
     </div>
   );
 }
@@ -149,7 +175,7 @@ function ChartTip({ active, payload, label, unit, offsetMin, kind, bucketMs, job
 
 function ClusterChart({ d, sel, jobsCol }) {
   const s = selectOf(sel);
-  const parts = s.group === 'cpu' ? ['cpu'] : (s.group === 'net' ? ['in', 'out'] : ['din', 'dout']);
+  const parts = chartParts(sel);
   // 비교 구간은 지금 칸에 맞춰 같은 배열에 싣는다(칸 간격의 절반 안 — 원시는 수집 주기, 버킷·일은 그 길이).
   const step = d.kind === 'raw' ? (numOrNull(d.sampleMs) || 3_600_000) : (numOrNull(d.bucketMs) || 86_400_000);
   const baseAligned = alignBaseline(d.cols, d.baseline?.cols, pickSeries(d.baseline?.cluster, sel), step / 2);
@@ -185,7 +211,7 @@ function ClusterChart({ d, sel, jobsCol }) {
 
 function Multiples({ d, sel }) {
   const s = selectOf(sel);
-  const parts = s.group === 'cpu' ? ['cpu'] : (s.group === 'net' ? ['in', 'out'] : ['din', 'dout']);
+  const parts = chartParts(sel);
   let max = s.unit === '%' ? 100 : 0;
   if (!max) for (const nd of d.nodes) for (const k of parts) for (const v of nd.v[k] || []) if (v != null && v > max) max = v;
   return (
@@ -247,7 +273,11 @@ function Overlay({ d, sel, picks, onToggle }) {
  */
 export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
   const list = useMemo(() => (Array.isArray(snap?.nodes?.list) ? snap.nodes.list : []), [snap]);
-  const avail = useMemo(() => groupsAvailable(list), [list]);
+  const [d, setD] = useState(null);
+  // v2.932: 표본 폴러가 켜진 장비(응답 sample.sampleEnabled)는 디스크 busy·IOPS · 프로토콜 묶음 · 클라이언트 분포 보기를 연다.
+  const sampleEnabled = d?.sample?.sampleEnabled === true;
+  const avail = useMemo(() => groupsAvailable(list, { sampleEnabled }), [list, sampleEnabled]);
+  const [drawerNode, setDrawerNode] = useState(null); // v2.932(2차 ③) 노드 드로어 — 열린 노드 번호
   const [range, setRange] = useState('24h');
   const [sel, setSel] = useState('in');
   const [view, setView] = useState('heat');
@@ -260,7 +290,6 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
   const days = rangeOf(range).days;
   const end = back > 0 && anchor != null ? windowEndOf(anchor, back, days).end : null;
   const group = selectOf(sel).group;
-  const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const seq = useRef(0);
@@ -270,8 +299,8 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
   // 고른 값이 이 장비에 없는 묶음이면 있는 묶음으로 옮긴다(디스크 키가 없는 장비 등).
   useEffect(() => {
     if (avail[group]) return;
-    const first = ['net', 'disk', 'cpu'].find((g) => avail[g]);
-    if (first) setSel(first === 'net' ? 'in' : first === 'disk' ? 'din' : 'cpu');
+    const first = GROUP_ORDER.find((g) => avail[g]);
+    if (first) setSel(GROUP_FIRST[first]);
   }, [avail, group]);
 
   useEffect(() => {
@@ -308,9 +337,10 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
     const slot = [...Array(OVERLAY_MAX).keys()].find((k) => !used.has(k));
     return [...prev, { id, slot }];
   });
-  const pickFromHeat = (id) => { if (!picks.some((p) => p.id === id)) togglePick(id); setView('overlay'); };
+  const addOverlay = (id) => { if (!picks.some((p) => p.id === id)) togglePick(id); setView('overlay'); };
+  const openDrawer = (id) => setDrawerNode(id); // v2.932: 히트맵 노드 이름·순위·분포 막대 → 드로어
 
-  const groups = ['net', 'disk', 'cpu'].filter((g) => avail[g]);
+  const groups = GROUP_ORDER.filter((g) => avail[g]);
   if (!groups.length) return null;
   const tiles = d && d.group === group && d.deviceId === deviceId && (d.cols || []).length ? tilesOf(d, sel) : null;
   const unit = selectOf(sel).unit;
@@ -323,8 +353,8 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
       <div className="nl-head">
         <div className="section-title" style={{ fontSize: 13, margin: 0 }}>노드 부하 추이 <span className="nl-muted">— {groups.map((g) => GROUP_TEXT[g]).join(' · ')}</span></div>
         <div className="nl-pills">
-          <span className="nl-pill">출처 {sourceText(snap, group)}</span>
-          <span className="nl-pill">표본 수집 주기마다 1회 · 순간값(주기 {sampleText(d?.sampleMs)} — 설정값)</span>
+          <span className="nl-pill">출처 {sourceText(snap, group, { sampleEnabled })}</span>
+          <span className="nl-pill">{sampleEnabled ? '표본 주기' : '수집 주기'}마다 1회 · 순간값(주기 {sampleText(d?.sampleMs)} — 설정값){d?.sample && d.sample.sampleEnabled === false && snap?.type === 'isilon' ? ' · 표본 수집 꺼짐(장비 편집)' : ''}</span>
         </div>
       </div>
       <div className="nl-controls">
@@ -332,13 +362,17 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
         {groups.map((g) => (
           <Seg key={g} label={GROUP_TEXT[g]} items={SELECTS.filter((x) => x.group === g)} value={group === g ? sel : null} onPick={setSel} />
         ))}
-        <Seg label="보기" items={[{ key: 'heat', label: '히트맵' }, { key: 'multi', label: '소형 다중' }, { key: 'overlay', label: '겹쳐 보기' }]} value={view} onPick={setView} />
+        <Seg label="보기" items={[{ key: 'heat', label: '히트맵' }, { key: 'multi', label: '소형 다중' }, { key: 'overlay', label: '겹쳐 보기' }, ...(avail.proto ? [{ key: 'dist', label: '클라이언트 분포' }] : [])]} value={view} onPick={setView} />
         {busy && <span className="nl-muted">불러오는 중…</span>}
       </div>
       {err && <div className="nl-banner amber">노드 부하 조회 오류: {String(err?.message || err)}</div>}
-      {ready && <WindowRow d={d} back={back} dragBack={dragBack} anchor={anchor} onDrag={setDragBack} onGo={goScroll} onJumpEnd={jumpEnd} />}
-      {notes.map((n) => <div key={n.text} className={`nl-banner ${n.tone}`}>{n.text}</div>)}
-      {ready && tiles && (
+      {ready && view !== 'dist' && <WindowRow d={d} back={back} dragBack={dragBack} anchor={anchor} onDrag={setDragBack} onGo={goScroll} onJumpEnd={jumpEnd} />}
+      {drawerNode != null && (
+        <NodeClientsDrawer deviceId={deviceId} node={drawerNode} end={end} offsetMin={d?.offsetMin ?? 540} onClose={() => setDrawerNode(null)} onOverlay={addOverlay} />
+      )}
+      {view === 'dist' && <ClientDistView deviceId={deviceId} end={end} offsetMin={d?.offsetMin ?? 540} onPickNode={openDrawer} />}
+      {view !== 'dist' && notes.map((n) => <div key={n.text} className={`nl-banner ${n.tone}`}>{n.text}</div>)}
+      {ready && tiles && view !== 'dist' && (
         <>
           <div className="nl-tiles">
             <div className="nl-tile"><span className="nl-tlabel">클러스터 {tiles.clusterKind} · {back > 0 ? '창 끝 칸' : '마지막 칸'}</span>
@@ -354,15 +388,21 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
           <div className="nl-subhead">{view === 'heat' ? '노드 × 시간' : view === 'multi' ? '소형 다중' : '겹쳐 보기'} · {SELECTS.find((x) => x.key === sel)?.label} · 칸 = {colKindText(d.kind, d.bucketMs)}{view === 'heat' && d.kind !== 'raw' ? ' · 머리줄 날짜를 누르면 그 날 24시간(시간별)' : ''}</div>
           {view === 'heat' && (
             <div className="nl-body">
-              <div className="nl-main"><Heatmap d={d} sel={sel} jobsCol={jobsCol} onDrill={drill} onPickNode={pickFromHeat} /></div>
-              <div className="nl-side"><div className="nl-sidehead">노드 순위 · 기간 평균</div><RankList d={d} sel={sel} /></div>
+              <div className="nl-main"><Heatmap d={d} sel={sel} jobsCol={jobsCol} onDrill={drill} onPickNode={openDrawer} /></div>
+              <div className="nl-side"><div className="nl-sidehead">노드 순위 · 기간 평균 · 누르면 드로어</div><RankList d={d} sel={sel} onPick={openDrawer} /></div>
             </div>
+          )}
+          {group === 'proto' && Array.isArray(d.protoTable) && (
+            <>
+              <div className="nl-subhead">노드 × 프로토콜 · 창 평균 · 최대</div>
+              <ProtoTable rows={d.protoTable} />
+            </>
           )}
           {view === 'multi' && <Multiples d={d} sel={sel} />}
           {view === 'overlay' && <Overlay d={d} sel={sel} picks={picks} onToggle={togglePick} />}
           <div className="nl-subhead">클러스터 {tiles.clusterKind} 추이 · 칸의 노드를 전부 읽었을 때만 {unit === '%' ? '평균을' : '합계를'} 냅니다{d.jobsKnown ? ' · 툴팁에 그때 돌던 잡' : ''}</div>
           <ClusterChart d={d} sel={sel} jobsCol={jobsCol} />
-          <div className="nl-note">읽는 법 — 값은 장비가 보고한 그 시점의 처리량·사용률이고 수집 주기마다 한 번 읽습니다(주기 사이는 모릅니다). 네트워크는 bps, 디스크는 B/s, CPU 는 %입니다. 디스크 쓰기(In)·읽기(Out) 방향과 CPU 키 단위는 실장비 확인 전 가정입니다. {d.jobsKnown ? '' : '잡 엔진은 SSH 수집 장비만 읽습니다.'}</div>
+          <div className="nl-note">읽는 법 — 값은 장비가 보고한 그 시점의 처리량·사용률이고 {sampleEnabled ? '표본' : '수집'} 주기마다 한 번 읽습니다(주기 사이는 모릅니다). 네트워크는 bps, 디스크 쓰기·읽기는 B/s, busy 는 드라이브 평균 %, IOPS 는 드라이브 전송 수, CPU 는 %, 프로토콜은 ops/s 와 지연 ms 입니다. 디스크 쓰기(In)·읽기(Out) 방향 · CPU 키 단위 · 지연 µs→ms 는 실장비 확인 전 가정입니다. {d.jobsKnown ? '' : '잡 엔진은 SSH 수집 장비만 읽습니다.'}</div>
         </>
       )}
     </section>

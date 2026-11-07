@@ -164,8 +164,10 @@ test('③ 적재 규칙 — 실패·노드 없음·값 없는 타입은 적재�
   const r = M.nodeLoadRowsOf(snapOf('d', NOW, [[10, 20, 30, 40, 50], [null, null, null, null, null], ['5', -1, 0, undefined, 101]]));
   assert.equal(r.ok, true);
   assert.equal(r.nodes.length, 3, '값이 모두 빈 노드도 행을 남긴다(부분 합 판정 근거)');
-  assert.deepEqual(r.nodes[1], { id: 2, in: null, out: null, din: null, dout: null, cpu: null });
-  assert.deepEqual(r.nodes[2], { id: 3, in: 5, out: null, din: 0, dout: null, cpu: null }, '음수·100% 초과 CPU 는 null, 0 은 0');
+  // v2.932: 지표 4개(ops·lat·busy·iops)가 늘었다 — 스냅샷에 없으면 null(0 이 아니다).
+  const N4 = { ops: null, lat: null, busy: null, iops: null };
+  assert.deepEqual(r.nodes[1], { id: 2, in: null, out: null, din: null, dout: null, cpu: null, ...N4 });
+  assert.deepEqual(r.nodes[2], { id: 3, in: 5, out: null, din: 0, dout: null, cpu: null, ...N4 }, '음수·100% 초과 CPU 는 null, 0 은 0');
   const many = M.nodeLoadRowsOf(snapOf('d', NOW, Array.from({ length: 70 }, () => [1])));
   assert.equal(many.nodes.length, M.NODE_LOAD_LIMIT);
   assert.deepEqual(M.jobsOf({ running: [{ job: 'SmartPools[1]', impact: 'Low', phase: '1/2' }, null, { job: 5 }], paused: [{}, {}] }),
@@ -218,8 +220,8 @@ test('④ 보존 — 노드 부하 원시 보존으로 원시·표본만 지우�
   const old = NOW - 40 * D;
   assert.equal((await db.saveNodeLoadPoint(snapOf('dev-old', old, [[1, 2, 3, 4, 5]]))).saved, true);
   const keep = GS.GROWTH_SPEC.find((x) => x.key === 'nodeLoadRawKeepDays');
-  assert.equal(keep.def, 30);
-  assert.equal(db.effectiveKeepDays().nodeRaw, 30);
+  assert.equal(keep.def, 7, 'v2.932: 5분 표본이면 행이 12배라 기본 30일 → 7일(저장값이 있으면 그대로)');
+  assert.equal(db.effectiveKeepDays().nodeRaw, 7);
   await db.pruneNow();
   assert.equal((await db.nodeLoadOldest('dev-old')).sampleTs, null, '40일 전 원시는 지워진다');
   assert.notEqual((await db.nodeLoadOldest('dev-old')).day, null, '일 롤업은 5년 보존이라 남는다');
@@ -264,11 +266,12 @@ test('⑦ api — 응답 모양 · 비교 구간(지난주 같은 요일) · 잡
   assert.equal(b.baseline.cols.length, 3);
   assert.ok(b.baseline.cols.every((t) => t >= b.start && t < b.end), '비교 구간은 지금 창 위치로 옮겨 온다');
   assert.equal(b.baseline.cluster.in[0], 10);
-  assert.equal(b.retention.rawDays, 30); assert.equal(b.rawMaxDays, 7);
+  assert.equal(b.retention.rawDays, 7); assert.equal(b.rawMaxDays, 7);
+  assert.equal(b.retention.hourlyDays, 90, 'v2.932: 원시가 끝난 뒤 24시간·7일 보기는 시간 요약으로 간다');
   assert.equal(b.oldest.sampleTs, NOW - 7 * D - 3 * H);
   assert.equal(b.jobsKnown, false, '잡 없는 표본(REST)은 모름이다');
   const disk = await call(`/tools/storage/devices/${id}/node-load?range=24h&group=disk`);
-  assert.deepEqual(disk.body.metrics, ['din', 'dout']);
+  assert.deepEqual(disk.body.metrics, ['din', 'dout', 'busy', 'iops'], 'v2.932: 디스크 묶음에 busy %·IOPS 가 들어간다');
   assert.equal(disk.body.cluster.dout[5], null, '노드 2 의 읽기를 못 읽어 합계를 비운다');
   assert.equal(disk.body.cluster.din[5], 200);
   const past = await call(`/tools/storage/devices/${id}/node-load?range=24h&end=${NOW - 7 * D}`);

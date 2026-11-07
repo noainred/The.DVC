@@ -35,14 +35,30 @@ export const SELECTS = Object.freeze([
   { key: 'din', group: 'disk', label: '쓰기(In)', parts: ['din'], unit: 'B/s' },
   { key: 'dout', group: 'disk', label: '읽기(Out)', parts: ['dout'], unit: 'B/s' },
   { key: 'disk', group: 'disk', label: '쓰기 + 읽기', parts: ['din', 'dout'], unit: 'B/s' },
+  // v2.932(2차 ②): 드라이브 busy %(노드 평균 — 표본 폴러의 summary/drive · isi statistics drive) · IOPS(드라이브 전송 in+out).
+  { key: 'busy', group: 'disk', label: 'busy %', parts: ['busy'], unit: '%' },
+  { key: 'iops', group: 'disk', label: 'IOPS', parts: ['iops'], unit: 'ops/s' },
   { key: 'cpu', group: 'cpu', label: 'CPU', parts: ['cpu'], unit: '%' },
+  // v2.932(2차 ③): 프로토콜 묶음 — 노드 ops/s(전 프로토콜 합) · 지연(ops 가중 평균 ms — µs→ms 가정).
+  { key: 'ops', group: 'proto', label: 'ops/s', parts: ['ops'], unit: 'ops/s' },
+  { key: 'lat', group: 'proto', label: '지연(ms)', parts: ['lat'], unit: 'ms' },
 ]);
 export const selectOf = (key) => SELECTS.find((s) => s.key === key) || SELECTS[0];
-export const GROUP_TEXT = Object.freeze({ net: '네트워크', disk: '디스크', cpu: 'CPU' });
+export const GROUP_TEXT = Object.freeze({ net: '네트워크', disk: '디스크', cpu: 'CPU', proto: '프로토콜' });
+export const GROUP_ORDER = Object.freeze(['net', 'disk', 'cpu', 'proto']);
+/** 묶음의 첫 선택(없는 묶음으로 옮길 때). */
+export const GROUP_FIRST = Object.freeze({ net: 'in', disk: 'din', cpu: 'cpu', proto: 'ops' });
 /** 묶음의 두 계열(차트 선) — 이름표. */
-export const SERIES_TEXT = Object.freeze({ in: 'In', out: 'Out', din: '쓰기(In)', dout: '읽기(Out)', cpu: 'CPU' });
+export const SERIES_TEXT = Object.freeze({ in: 'In', out: 'Out', din: '쓰기(In)', dout: '읽기(Out)', cpu: 'CPU', busy: 'busy %', iops: 'IOPS', ops: 'ops/s', lat: '지연' });
 /** 계열색 — 기존 용량 추이(CapacityTrend)와 같은 두 색(검증기 통과: 어두운 패널 기준 CVD ΔE 26.8). 디스크도 같은 두 색(한 번에 한 묶음만 보인다). */
-export const SERIES_COLOR = Object.freeze({ in: '#3987e5', out: '#d95926', din: '#3987e5', dout: '#d95926', cpu: '#3987e5' });
+export const SERIES_COLOR = Object.freeze({ in: '#3987e5', out: '#d95926', din: '#3987e5', dout: '#d95926', cpu: '#3987e5', busy: '#3987e5', iops: '#d95926', ops: '#3987e5', lat: '#d95926' });
+/** 차트에 함께 그리는 계열 — 처리량 선택은 In·Out 두 선을 함께(한 선만 고르면 반쪽), 그 밖은 고른 계열 하나. */
+export function chartParts(sel) {
+  const s = selectOf(sel);
+  if (s.group === 'net') return ['in', 'out'];
+  if (['din', 'dout', 'disk'].includes(s.key)) return ['din', 'dout'];
+  return s.parts;
+}
 /** 겹쳐 보기 4색(검증기 통과 — 최악 인접 CVD ΔE 8.4). 색은 고른 순서의 칸(slot)에 붙는다 — 선택을 바꿔도 남은 노드 색은 그대로. */
 export const OVERLAY_COLORS = Object.freeze(['#3987e5', '#d95926', '#199e70', '#c98500']);
 export const OVERLAY_MAX = OVERLAY_COLORS.length;
@@ -51,11 +67,16 @@ export const BASELINE_COLOR = '#8b9bb4';
 /** 히트맵 단일 색조 5단계(어두운 면에서 밝을수록 큼 — 검증기 단계 간격 확인). */
 export const HEAT_RAMP = Object.freeze(['#184f95', '#2a78d6', '#5598e7', '#86b6ef', '#b7d3f6']);
 
-/** 노드 스냅샷에서 묶음별로 값이 있는가 — 값이 없는 묶음은 버튼을 그리지 않는다('—' 만 늘어놓지 않는다). */
-export function groupsAvailable(list) {
+/**
+ * 노드 스냅샷에서 묶음별로 값이 있는가 — 값이 없는 묶음은 버튼을 그리지 않는다('—' 만 늘어놓지 않는다).
+ * v2.932: 표본 폴러가 켜진 장비(응답 sample.sampleEnabled)는 디스크·프로토콜 묶음을 연다 — busy·IOPS·ops·지연은 1시간 스냅샷에 없고 5분 표본에만 있다.
+ */
+export function groupsAvailable(list, { sampleEnabled = false } = {}) {
   const nodes = Array.isArray(list) ? list.filter((n) => n && typeof n === 'object') : [];
   const has = (f) => nodes.some((n) => numOrNull(n[f]) != null);
-  return { net: has('inBps') || has('outBps'), disk: has('diskInBytesPs') || has('diskOutBytesPs'), cpu: has('cpuPct') };
+  const se = sampleEnabled === true;
+  return { net: has('inBps') || has('outBps'), disk: has('diskInBytesPs') || has('diskOutBytesPs') || has('busyPct') || has('iops') || se,
+    cpu: has('cpuPct'), proto: has('opsPs') || has('latencyMs') || se };
 }
 
 /** B/s → 사람 단위(10진 — KB/s·MB/s·GB/s). 값이 없으면 '—'. */
@@ -72,11 +93,23 @@ export function pctText(v) {
   const n = numOrNull(v);
   return n == null ? '—' : `${n.toFixed(1)}%`;
 }
+/** ops/s — 정수 · 천 단위 쉼표. 값이 없으면 '—'. */
+export function opsText(v) {
+  const n = numOrNull(v);
+  return n == null || n < 0 ? '—' : `${Math.round(n).toLocaleString()} ops/s`;
+}
+/** 지연(ms) — 소수 1자리. */
+export function latText(v) {
+  const n = numOrNull(v);
+  return n == null || n < 0 ? '—' : `${n.toFixed(1)} ms`;
+}
 /** 단위별 표기. */
 export function valueText(unit, v) {
   if (numOrNull(v) == null) return '—';
   if (unit === 'bps') return bpsText(Math.round(numOrNull(v)));
   if (unit === 'B/s') return rateText(v);
+  if (unit === 'ops/s') return opsText(v);
+  if (unit === 'ms') return latText(v);
   return pctText(v);
 }
 
@@ -323,11 +356,104 @@ export function sampleText(ms) {
   if (!m) return '—';
   return m % 60 === 0 ? `${m / 60}시간` : `${m}분`;
 }
-/** 출처 문구 — 노드 스냅샷의 nodeLoadProbe(객체가 아니거나 글자가 아니면 쓰지 않는다 — 엣지 입력). */
-export function sourceText(snap, group) {
+/** 출처 문구 — 노드 스냅샷의 nodeLoadProbe(객체가 아니거나 글자가 아니면 쓰지 않는다 — 엣지 입력). 표본 폴러가 켜졌으면 그 호출도 함께 말한다. */
+export function sourceText(snap, group, { sampleEnabled = false } = {}) {
   const ex = snap?.extra || {};
-  if (group === 'net') return ex.collectMethod === 'ssh' ? '‘isi status’ 처리량 열' : 'REST node.net.ext.bytes.*.rate(B/s × 8)';
+  const ssh = ex.collectMethod === 'ssh';
+  if (group === 'proto') return ssh ? '‘isi statistics protocol/client’(표본)' : 'REST statistics/summary/protocol·client(표본)';
+  if (group === 'net') return (ssh ? '‘isi status’ 처리량 열' : 'REST node.net.ext.bytes.*.rate(B/s × 8)') + (sampleEnabled ? ' + 표본' : '');
   const p = ex.nodeLoadProbe;
   const src = p && typeof p === 'object' && typeof p.source === 'string' ? p.source.slice(0, 120) : '';
+  if (group === 'disk' && sampleEnabled) return `${src || '—'} · busy·IOPS 는 ${ssh ? '‘isi statistics drive’' : 'summary/drive'}(표본)`;
   return src || '—';
+}
+
+/* ── v2.932(2차 ③) 노드 드로어 · 클라이언트 분포 ───────────────────────────────────────────── */
+/** 비중 %(0~100) 표기. */
+export function shareText(v) {
+  const n = numOrNull(v);
+  return n == null ? '—' : `${Math.round(n)}%`;
+}
+/** 이름 칸 — 장비가 준 이름 · 포탈 인벤토리(VM·호스트) · 못 찾음(IP 만). 출처는 괄호로 짧게. */
+export function clientNameText(row) {
+  const name = typeof row?.name === 'string' ? row.name.trim() : '';
+  if (!name) return { text: '—', hint: '포탈 인벤토리(VM IP · 호스트 관리 IP)에 없는 주소 — 역방향 DNS 는 하지 않습니다' };
+  const src = row.nameSource === 'vm' ? 'VM' : row.nameSource === 'host' ? '호스트' : row.nameSource === 'device' ? '장비 보고' : '';
+  return { text: name, hint: `${src ? `${src} 이름` : '이름'}${row.ambiguous ? ' · 같은 IP 를 가진 객체가 둘 이상 — 첫 것만 보입니다' : ''}` };
+}
+/** '지금' 열의 표본이 늦었는가 — 마지막 표본이 표본 주기 ×3(응답 lateMs)을 넘으면 노란 머리 문구. 표본이 없으면 null. */
+export function lateNote(resp, now = Date.now()) {
+  const ts = numOrNull(resp?.latest?.ts);
+  if (ts == null) return null;
+  const late = numOrNull(resp?.lateMs) ?? 0;
+  const age = Math.max(0, now - ts);
+  if (!(late > 0) || age <= late) return null;
+  const m = Math.round(age / 60_000);
+  return { tone: 'amber', text: `마지막 표본 ${m >= 120 ? `${Math.round(m / 60)}시간` : `${m}분`} 전 — 그 뒤 표본이 오지 않았습니다(표본 주기 ${sampleText(resp?.sample?.sampleMs)} 기준). 엣지 장비는 push 지연까지 더해 봅니다.` };
+}
+/** 드로어 안내문 — 아는 것과 모르는 것을 나눠 말한다. */
+export function drawerNotes(resp) {
+  const out = [];
+  if (!resp) return out;
+  if (resp.db === false) { out.push({ tone: 'amber', text: '이 포탈 노드에서 저장소 DB(SQLite)를 열 수 없어 클라이언트 표본을 저장하지 못합니다.' }); return out; }
+  if (resp.sample && resp.sample.sampleEnabled === false) out.push({ tone: 'amber', text: '이 장비는 표본 수집이 꺼져 있습니다(장비 편집 › 노드 부하 표본 수집) — 클라이언트·프로토콜은 표본에서만 읽으므로 켜기 전 구간은 비어 있습니다.' });
+  const n = (resp.clients || []).length;
+  if (!n) out.push({ tone: 'muted', text: resp.past
+    ? '이 구간에는 이 노드의 클라이언트 기록이 없습니다(보존 기간 밖이거나 그때 표본이 없었습니다).'
+    : '최근 작업한 클라이언트가 없습니다 — 통계에는 그 순간 요청을 보낸 클라이언트만 잡히고, 마운트만 하고 쉬는 클라이언트는 나오지 않습니다(‘연결 없음’ 이 아닙니다).' });
+  const u = numOrNull(resp.names?.unknown);
+  if (u > 0) out.push({ tone: 'muted', text: `이름을 찾지 못한 주소 ${u}개 — 포탈 인벤토리(VM IP · 호스트 이름/관리 IP · IP 대장)에 없습니다. 역방향 DNS 는 하지 않습니다.` });
+  if (resp.clamped) out.push({ tone: 'muted', text: '고른 시각이 지금보다 뒤라 최신 구간을 보여 줍니다.' });
+  return out;
+}
+/** 노드별 '지금' 값을 클라이언트+프로토콜 키로 — 창 표에 '지금' 열을 붙일 때 쓴다. */
+export function latestMapOf(resp) {
+  const m = new Map();
+  for (const r of resp?.latest?.rows || []) m.set(`${r.client}|${r.proto || ''}`, r);
+  return m;
+}
+/** 프로토콜 요약(노드 하나) — ops 내림차순 · 창 평균·최대. */
+export function protoSummaryOf(rows) {
+  return (rows || []).map((r) => ({ proto: r.proto || '—', ops: numOrNull(r.ops), opsMax: numOrNull(r.opsMax), lat: numOrNull(r.lat), latMax: numOrNull(r.latMax), samples: numOrNull(r.samples) ?? 0 }))
+    .sort((a, b) => (b.ops ?? -1) - (a.ops ?? -1));
+}
+
+/** 분포 보기 — 노드 막대(합계 ops 대비 %) · 쏠림 표지. 노드 집합은 서버 skew.nodes(ops 0 노드 포함). */
+export function skewBarsOf(resp) {
+  const nodes = Array.isArray(resp?.nodes) ? resp.nodes : [];
+  const max = Math.max(0, ...nodes.map((n) => numOrNull(n.total) ?? 0));
+  return nodes.map((n) => { const t = numOrNull(n.total) ?? 0; return { id: n.id, total: t, ratio: numOrNull(n.ratio), skew: n.skew === true, w: max > 0 && t > 0 ? Math.max(1, Math.round((t / max) * 100)) : 0 }; });
+}
+/** 재배치 후보 한 줄. */
+export function candidateText(c) {
+  const who = (typeof c?.name === 'string' && c.name.trim()) ? `${c.name.trim()} (${c.client})` : String(c?.client || '—');
+  return `${who}${c?.proto ? ` · ${c.proto}` : ''} — 노드 ${c?.from} → 노드 ${c?.to} · ${opsText(c?.ops)} · 옮긴 뒤 노드 ${c?.from} ${opsText(c?.fromAfter)} / 노드 ${c?.to} ${opsText(c?.toAfter)}`;
+}
+/** 분포 안내문. */
+export function distNotes(resp) {
+  const out = [];
+  if (!resp) return out;
+  if (resp.db === false) { out.push({ tone: 'amber', text: '이 포탈 노드에서 저장소 DB(SQLite)를 열 수 없어 클라이언트 표본이 없습니다.' }); return out; }
+  if (resp.sample && resp.sample.sampleEnabled === false) out.push({ tone: 'amber', text: '이 장비는 표본 수집이 꺼져 있습니다(장비 편집 › 노드 부하 표본 수집) — 분포는 표본에서만 계산합니다.' });
+  const nodes = Array.isArray(resp.nodes) ? resp.nodes : [];
+  const skewed = nodes.filter((n) => n.skew === true);
+  const f = numOrNull(resp.thresholds?.skewFactor); const fs = numOrNull(resp.thresholds?.fixedShare);
+  if (!(resp.clients || []).length) out.push({ tone: 'muted', text: resp.past ? '이 구간에는 클라이언트 기록이 없습니다.' : '아직 이 장비의 클라이언트 표본이 없습니다 — 표본 폴러가 돌기 시작하면 쌓입니다.' });
+  else if (!skewed.length) out.push({ tone: 'muted', text: `쏠린 노드가 없습니다 — 모든 노드의 ops 합이 노드 평균의 ${f ?? '—'}배 미만입니다.` });
+  else if (!(resp.candidates || []).length) out.push({ tone: 'muted', text: `쏠린 노드 ${skewed.map((n) => n.id).join(', ')} 에 ‘고정’ 클라이언트(창 ops 의 ${fs != null ? Math.round(fs * 100) : '—'}% 이상을 한 노드에 보낸 클라이언트)가 없어 후보를 내지 못했습니다 — 여러 노드에 고르게 흩어진 클라이언트는 옮겨도 쏠림이 줄지 않습니다.` });
+  const u = numOrNull(resp.names?.unknown);
+  if (u > 0) out.push({ tone: 'muted', text: `이름을 찾지 못한 주소 ${u}개 — 포탈 인벤토리에 없는 주소입니다(역방향 DNS 없음).` });
+  if (typeof resp.note === 'string' && resp.note) out.push({ tone: 'muted', text: resp.note });
+  return out;
+}
+/** 분포 CSV(클라이언트 × 노드 비중 %) — 쉼표·따옴표·줄바꿈은 따옴표로 감싼다. */
+export function distCsv(resp) {
+  const nodes = (Array.isArray(resp?.nodes) ? resp.nodes : []).map((n) => n.id);
+  const q = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const head = ['client', 'name', 'proto', 'total_ops', 'top_node', 'top_share_pct', 'fixed', ...nodes.map((n) => `node_${n}_pct`)];
+  const lines = [head.join(',')];
+  for (const c of resp?.clients || []) {
+    lines.push([c.client, c.name || '', c.proto || '', Math.round(numOrNull(c.total) ?? 0), c.top ?? '', c.topShare ?? '', c.fixed ? 'Y' : 'N', ...nodes.map((n) => (c.share?.[n] != null ? c.share[n] : ''))].map(q).join(','));
+  }
+  return `${lines.join('\n')}\n`;
 }

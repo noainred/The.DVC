@@ -46,6 +46,10 @@ export const INTERVAL_SPEC = [
     label: '중앙 설정 수신(pull) 주기', hint: '장비 목록·이 주기 설정·수집 요청을 중앙에서 받아오는 간격. 중앙 "수집" 버튼의 반응 속도이기도 하다.' },
   { key: 'areasMs', env: 'STORAGE_AREAS_MS', def: 60 * 60_000, min: 10 * 60_000,
     label: '영역(쿼터/공유) 전수 수집 주기', hint: 'PowerScale 쿼터·SMB/NFS 등 무거운 전수 조회 간격. 장비 부하가 커 기본이 길다.' },
+  // v2.932(2차 ⑨): 노드 부하 표본 — 수집 주기와 따로 도는 가벼운 폴러(storage/nodeLoadPoller.js — 아이실론만 · 장비 토글 nodeLoadEnabled 기본 켬).
+  //   상한 60분(`max`) — 수집 주기보다 길게 두면 표본은 수집 주기(1시간 스냅샷)마다만 남는다. 하한 1분은 다른 항목과 같다.
+  { key: 'nodeLoadMs', env: 'STORAGE_NODELOAD_MS', def: 5 * 60_000, min: 60_000, max: 60 * 60_000,
+    label: '노드 부하 표본 주기', hint: '아이실론 노드별 부하·클라이언트·프로토콜 표본을 읽는 간격(수집 주기와 따로 돕니다 — 장비 편집의 ‘노드 부하 표본 수집’ 이 켜진 장비만). SSH 장비는 이 간격마다 로그인이 생겨 장비 감사 로그가 늘어납니다.' },
 ];
 const SPEC_BY_KEY = new Map(INTERVAL_SPEC.map((s) => [s.key, s]));
 const MAX_MS = 24 * 60 * 60_000; // 상한 24시간 — 그 이상은 사실상 '끔'이라 오설정으로 본다.
@@ -67,7 +71,8 @@ export function normalizeIntervals(input = {}) {
     if (!Number.isFinite(n) || n <= 0) { issues.push(`${spec.label}: 숫자가 아니어서 무시(${raw})`); continue; }
     let v = Math.round(n);
     if (v < spec.min) { issues.push(`${spec.label}: 하한 ${Math.round(spec.min / 1000)}초로 올림(요청 ${Math.round(v / 1000)}초)`); v = spec.min; }
-    if (v > MAX_MS) { issues.push(`${spec.label}: 상한 24시간으로 내림`); v = MAX_MS; }
+    const max = spec.max || MAX_MS; // v2.932: 항목별 상한(nodeLoadMs 60분) — 없으면 공통 24시간
+    if (v > max) { issues.push(`${spec.label}: 상한 ${max === MAX_MS ? '24시간' : `${Math.round(max / 60_000)}분`}으로 내림`); v = max; }
     values[k] = v;
   }
   return { values, issues };
@@ -78,7 +83,7 @@ export function envIntervals() {
   const out = {};
   for (const s of INTERVAL_SPEC) {
     const n = Number(process.env[s.env]);
-    out[s.key] = Number.isFinite(n) && n > 0 ? Math.min(MAX_MS, Math.max(s.min, Math.round(n))) : s.def;
+    out[s.key] = Number.isFinite(n) && n > 0 ? Math.min(s.max || MAX_MS, Math.max(s.min, Math.round(n))) : s.def;
   }
   return out;
 }

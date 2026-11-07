@@ -14,9 +14,11 @@ import { edgeStorageSnapshots, edgeStorageReports } from '../../central/storageE
 import { listActivity } from '../../storage/activityLog.js';
 import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable,
   dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN, capacityResets,
-  nodeLoadQuery, nodeLoadJobs, nodeLoadOldest } from '../../storage/db.js';
+  nodeLoadQuery, nodeLoadJobs, nodeLoadOldest,
+  nodeClientsQuery, nodeClientsLatest, nodeProtoQuery, nodeClientOldest, nodeLoadNodeIds } from '../../storage/db.js'; // v2.932 클라이언트·프로토콜
 import { nodeLoadWindow, buildNodeLoadSeries, jobsSeriesOf, NODE_LOAD_GROUPS, BASELINE, CLUSTER_AGG, METRIC_BY_KEY,
-  NODE_LOAD_LIMIT } from '../../storage/nodeLoad.js';   // v2.926 노드 부하 추이
+  NODE_LOAD_LIMIT, clientNodeMatrix, nodeSkew, rebalanceCandidates, FIXED_SHARE_DEF, SKEW_FACTOR_DEF, protoKeyOf } from '../../storage/nodeLoad.js';   // v2.926 노드 부하 추이 · v2.932 재배치 판정
+import { buildClientNameIndex, nameClientRows, nameStats } from '../../storage/clientNames.js'; // v2.932 IP → 인벤토리 이름(역방향 DNS 없음)
 import { growthMatrix, normalizePeriods, DEFAULT_PERIODS } from '../../storage/growth.js';
 import { GROWTH_SPEC, loadGrowthSettings, saveGrowthSettings } from '../../storage/growthSettings.js';
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
@@ -603,36 +605,139 @@ api.get('/tools/storage/devices/:id/history', toolsPerm, fullScopeOnly, async (r
  *  · 장비 호출 0 — DB 만 읽는다. 폴링하지 않는다(화면이 마운트·조작 때만 부르고, 최신 창은 새 수집이 올 때 다시 부른다).
  * 게이트는 용량 추이와 같다(toolsPerm + fullScopeOnly). 데모 계정은 데모 장비만(아니면 404 — 존재를 말하지 않는다).
  */
+const NL_HOUR_MS = 3_600_000; const NL_DAY_MS = 24 * NL_HOUR_MS;
+/**
+ * v2.932(2차 ⑨): 장비의 표본 간격 — 수집 주기(pollMs)와 노드 부하 표본 주기(nodeLoadMs — 켜진 아이실론만) 중 짧은 것. 화면 문구·창 계산(15분 칸 여부)이 이 값을 쓴다.
+ * 엣지 장비는 중앙이 배포한 값이 없으면 중앙 env 기본값으로 본다(엣지 portal.env 현장 값은 중앙이 모른다 — devicePollMsByAgent 와 같은 한계).
+ */
+function sampleIntervalOf(dev, devs) {
+  const { envPoll, pollOf } = devicePollMsByAgent(devs);
+  const agent = dev?.agent || '';
+  const pollMs = dev ? (pollOf.get(agent) ?? envPoll) : envPoll;
+  let nodeLoadMs = null;
+  try { nodeLoadMs = Number(intervalsForAgent(agent)?.nodeLoadMs); } catch { nodeLoadMs = null; }
+  if (!(Number.isFinite(nodeLoadMs) && nodeLoadMs > 0)) nodeLoadMs = Number(envIntervals()?.nodeLoadMs) || 300_000;
+  const sampleEnabled = !!dev && dev.type === 'isilon' && dev.nodeLoadEnabled !== false;
+  return { pollMs, nodeLoadMs, sampleEnabled, sampleMs: sampleEnabled ? Math.min(pollMs, nodeLoadMs) : pollMs };
+}
+/** 원시 보존 밖의 '원시' 창은 시간 요약 1시간 칸으로(원시 폴백이 아니라 요약으로 내려간다 — historyRollup 규약). */
+const kindOutsideRaw = (start, kind, bucketMs, rawCut) => (kind === 'raw' && start < rawCut ? { kind: 'bucket', bucketMs: NL_HOUR_MS } : { kind, bucketMs });
+const demoGuard = (req, res, id) => { if (isDemoGuest(req.user) && !isDemoId(id)) { res.status(404).json({ ok: false, error: 'not-found' }); return true; } return false; };
+
 api.get('/tools/storage/devices/:id/node-load', toolsPerm, fullScopeOnly, async (req, res) => {
   const id = String(req.params.id || '');
-  if (isDemoGuest(req.user) && !isDemoId(id)) return res.status(404).json({ ok: false, error: 'not-found' });
+  if (demoGuard(req, res, id)) return;
   const group = Object.hasOwn(NODE_LOAD_GROUPS, String(req.query.group)) ? String(req.query.group) : 'net';
   const metrics = NODE_LOAD_GROUPS[group];
   const devs = listDevices();
   const dev = devs.find((d) => d.id === id) || null;
-  const { envPoll, pollOf } = devicePollMsByAgent(devs);
-  const sampleMs = dev ? (pollOf.get(dev.agent || '') ?? envPoll) : envPoll;
+  const si = sampleIntervalOf(dev, devs);
   const now = Date.now();
-  const w = nodeLoadWindow({ range: req.query.range, end: req.query.end, now, sampleMs });
-  const q = await nodeLoadQuery(id, { group, kind: w.kind, from: w.start, to: w.end, bucketMs: w.bucketMs });
-  const series = buildNodeLoadSeries(q.rows, metrics, { kind: w.kind });
-  const B = BASELINE[w.range];
-  const bq = await nodeLoadQuery(id, { group, kind: w.kind, from: w.start - B.shiftMs, to: w.end - B.shiftMs, bucketMs: w.bucketMs });
-  const bs = buildNodeLoadSeries(bq.rows, metrics, { kind: w.kind });
-  const jobs = jobsSeriesOf(await nodeLoadJobs(id, w.start, w.end));
   const keep = effectiveKeepDays();
+  const rawCut = now - keep.nodeRaw * NL_DAY_MS;
+  const w = nodeLoadWindow({ range: req.query.range, end: req.query.end, now, sampleMs: si.sampleMs });
+  // v2.932: 원시 보존(기본 7일) 밖의 24시간 창과 비교 구간(지난주 = 보존 경계)은 시간 요약으로 — 예전엔 비교 선이 보존에 잘려 비었다.
+  const mk = kindOutsideRaw(w.start, w.kind, w.bucketMs, rawCut);
+  const q = await nodeLoadQuery(id, { group, kind: mk.kind, from: w.start, to: w.end, bucketMs: mk.bucketMs });
+  const series = buildNodeLoadSeries(q.rows, metrics, { kind: mk.kind });
+  const B = BASELINE[w.range];
+  const bk = kindOutsideRaw(w.start - B.shiftMs, w.kind, w.bucketMs, rawCut);
+  const bq = await nodeLoadQuery(id, { group, kind: bk.kind, from: w.start - B.shiftMs, to: w.end - B.shiftMs, bucketMs: bk.bucketMs });
+  const bs = buildNodeLoadSeries(bq.rows, metrics, { kind: bk.kind });
+  const jobs = jobsSeriesOf(await nodeLoadJobs(id, w.start, w.end));
+  // v2.932(2차 ③): 프로토콜 묶음은 노드 × 프로토콜 표(창 평균·최대)를 함께 준다 — 화면 '프로토콜 표'.
+  const protoTable = group === 'proto' ? (await nodeProtoQuery(id, { from: w.start, to: w.end })).rows : undefined;
   res.json({
     ok: true, db: q.db, deviceId: id, group, metrics,
     units: Object.fromEntries(metrics.map((k) => [k, METRIC_BY_KEY.get(k).unit])),
     clusterAgg: Object.fromEntries(metrics.map((k) => [k, CLUSTER_AGG[k]])),
     range: w.range, days: w.days, spanMs: w.spanMs, start: w.start, end: w.end, past: w.past, clamped: w.clamped,
-    kind: w.kind, bucketMs: w.bucketMs, sampleMs, offsetMin: DAY_OFFSET_MIN, now,
-    // 화면이 '몇 칸까지 과거로 갈 수 있나' 를 계산한다(전송 속도 maxBackOf 와 같은 입력 — 7일 이하는 원시, 그 위는 일 롤업).
-    oldest: await nodeLoadOldest(id), rawMaxDays: 7, retention: { rawDays: keep.nodeRaw, dailyDays: keep.daily },
+    kind: mk.kind, bucketMs: mk.bucketMs, source: q.source || (mk.kind === 'daily' ? 'daily' : 'raw'), sampleMs: si.sampleMs, sample: si, offsetMin: DAY_OFFSET_MIN, now,
+    // 화면이 '몇 칸까지 과거로 갈 수 있나' 를 계산한다 — 7일 이하는 원시(그 뒤 시간 요약), 그 위는 일 롤업.
+    oldest: await nodeLoadOldest(id), rawMaxDays: 7, retention: { rawDays: keep.nodeRaw, hourlyDays: keep.nodeHourly, dailyDays: keep.daily },
     nodeLimit: NODE_LOAD_LIMIT, truncated: q.truncated,
     ...series,
-    baseline: { label: B.label, shiftMs: B.shiftMs, cols: bs.cols.map((t) => t + B.shiftMs), cluster: bs.cluster, clusterNodes: bs.clusterNodes },
+    baseline: { label: B.label, shiftMs: B.shiftMs, cols: bs.cols.map((t) => t + B.shiftMs), cluster: bs.cluster, clusterNodes: bs.clusterNodes, kind: bk.kind },
     jobs: jobs.list, jobsKnown: jobs.known,
+    ...(protoTable ? { protoTable } : {}),
+  });
+});
+
+/**
+ * 노드 드로어(v2.932 2차 ③ — 사용자 요청 "특정 노드를 클릭하면 그 노드에서 연결된 클라이언트가 어떤 프로토콜을 사용해서 노드를 사용하고 있는지").
+ *  · ?node=<lnn> 필수 · ?range=24h|7d(기본 24h) · ?end=<ms>(이전 구간).
+ *  · `latest` = 창 안 가장 최근 표본(원시)의 클라이언트 — '지금' 열. 과거 창(past)에서는 비운다(그 창의 '지금' 은 없다).
+ *  · `clients` = 창의 시간 요약 평균(2시간 미만 창은 원시) + 노드 비중(share %)·고정(fixed — 창 ops 의 fixedShare 이상이 이 노드) · 다른 노드도 쓰는가(otherNodes).
+ *    비중은 **전 노드**의 클라이언트 × 노드 행렬로 계산한다 — 이 노드만 보면 '고정' 을 판정할 수 없다.
+ *  · 이름은 포탈 인벤토리(VM IP · 호스트 이름/관리 IP)에서만(역방향 DNS 없음 — clientNames.js). 장비 호출 0 · 폴링 없음.
+ *  · '클라이언트 없음' 은 '연결 없음' 이 아니다 — 쉬는 마운트는 통계에 없다(화면 문구). 게이트는 node-load 와 같다(toolsPerm + fullScopeOnly · 데모 404).
+ */
+api.get('/tools/storage/devices/:id/node-clients', toolsPerm, fullScopeOnly, async (req, res) => {
+  const id = String(req.params.id || '');
+  if (demoGuard(req, res, id)) return;
+  const node = numOrNull(req.query.node);
+  if (node == null || !Number.isSafeInteger(node) || node < 0) return res.status(400).json({ ok: false, reason: 'node(노드 번호)가 필요합니다.' });
+  const devs = listDevices(); const dev = devs.find((d) => d.id === id) || null;
+  const si = sampleIntervalOf(dev, devs);
+  const now = Date.now();
+  const range = String(req.query.range) === '7d' ? '7d' : '24h';
+  const w = nodeLoadWindow({ range, end: req.query.end, now, sampleMs: si.sampleMs });
+  const all = await nodeClientsQuery(id, { from: w.start, to: w.end });
+  const matrix = clientNodeMatrix(all.rows.map((r) => ({ client: r.client, name: r.name, proto: r.proto, node: r.node, ops: r.opsSum })), { fixedShare: FIXED_SHARE_DEF, limit: 2000 });
+  const shareOf = new Map(matrix.clients.map((c) => [c.client, c]));
+  const idx = buildClientNameIndex(store.get());
+  const clients = nameClientRows(all.rows.filter((r) => r.node === node).map((r) => {
+    const m = shareOf.get(r.client);
+    return { ...r, share: m?.share?.[node] ?? null, fixed: !!m?.fixed && m?.top === node,
+      otherNodes: Object.keys(m?.nodes || {}).map(Number).filter((n) => n !== node).sort((a, b) => a - b) };
+  }), idx).sort((a, b) => (b.opsSum ?? 0) - (a.opsSum ?? 0));
+  const latest = w.past ? { ts: null, rows: [] } : await nodeClientsLatest(id, node, w.start);
+  const protos = (await nodeProtoQuery(id, { from: w.start, to: w.end })).rows.filter((r) => r.node === node);
+  const keep = effectiveKeepDays();
+  res.json({
+    ok: true, db: all.db, deviceId: id, node, range, days: w.days, start: w.start, end: w.end, past: w.past, clamped: w.clamped, now, offsetMin: DAY_OFFSET_MIN,
+    sample: si, source: all.source || null, lateMs: si.sampleMs * 3,
+    latest: { ts: latest.ts, rows: nameClientRows(latest.rows, idx), staleMs: latest.ts ? now - latest.ts : null },
+    clients, protos, names: nameStats(clients), thresholds: { fixedShare: FIXED_SHARE_DEF },
+    oldest: await nodeClientOldest(id), retention: { clientRawDays: keep.clientRaw, clientHourlyDays: keep.clientHourly, clientDailyDays: keep.clientDaily },
+  });
+});
+
+/**
+ * 클라이언트 분포 · 재배치 보드(v2.932 2차 ③ — 사용자 요청 "노드가 많은데 특정 노드에 치우치는 이슈 … 노드에 연결된 서버를 확인해서 재배치").
+ *  · ?range=24h|7d|30d(기본 7d) · ?proto=<nfs|smb|…|all> · ?end · ?fixed=0.5~1(고정 비중 — 기본 FIXED_SHARE_DEF) · ?skew=1.1~5(쏠림 배수 — 기본 SKEW_FACTOR_DEF).
+ *  · 행렬: 클라이언트(상위 50 — ops 합) × 노드 비중. 쏠림: 노드 ops 합 ≥ 노드 평균 × skew(노드 집합은 창 안 노드 부하 기록의 노드 — ops 0 인 노드도 분모).
+ *  · 재배치 후보: 쏠린 노드의 고정 클라이언트를 가장 한가한 노드로(탐욕 — nodeLoad.rebalanceCandidates). **계산일 뿐이다 — 포탈은 아무것도 바꾸지 않는다**(응답 note).
+ */
+api.get('/tools/storage/devices/:id/client-dist', toolsPerm, fullScopeOnly, async (req, res) => {
+  const id = String(req.params.id || '');
+  if (demoGuard(req, res, id)) return;
+  const devs = listDevices(); const dev = devs.find((d) => d.id === id) || null;
+  const si = sampleIntervalOf(dev, devs);
+  const now = Date.now();
+  const range = ['24h', '7d', '30d'].includes(String(req.query.range)) ? String(req.query.range) : '7d';
+  const w = nodeLoadWindow({ range, end: req.query.end, now, sampleMs: si.sampleMs });
+  const proto = req.query.proto && String(req.query.proto) !== 'all' ? protoKeyOf(req.query.proto) : '';
+  const clamp = (v, lo, hi, def) => { const n = numOrNull(v); return n == null ? def : Math.max(lo, Math.min(hi, n)); };
+  const fixedShare = clamp(req.query.fixed, 0.5, 1, FIXED_SHARE_DEF);
+  const factor = clamp(req.query.skew, 1.1, 5, SKEW_FACTOR_DEF);
+  const q = await nodeClientsQuery(id, { from: w.start, to: w.end });
+  const rows = q.rows.filter((r) => !proto || r.proto === proto).map((r) => ({ client: r.client, name: r.name, proto: r.proto, node: r.node, ops: r.opsSum }));
+  const nodeIds = await nodeLoadNodeIds(id, { from: w.start, to: w.end });
+  const matrix = clientNodeMatrix(rows, { fixedShare, limit: 50 });
+  const skew = nodeSkew(matrix.nodeTotals, nodeIds, { factor });
+  const idx = buildClientNameIndex(store.get());
+  const clients = nameClientRows(matrix.clients, idx);
+  const nameOf = new Map(clients.map((c) => [c.client, c]));
+  const candidates = rebalanceCandidates(matrix, skew, { max: 10 }).map((c) => ({ ...c, name: nameOf.get(c.client)?.name || c.name || '', nameSource: nameOf.get(c.client)?.nameSource || null }));
+  const keep = effectiveKeepDays();
+  res.json({
+    ok: true, db: q.db, deviceId: id, range, days: w.days, start: w.start, end: w.end, past: w.past, clamped: w.clamped, now, offsetMin: DAY_OFFSET_MIN,
+    sample: si, source: q.source || null, proto: proto || 'all', protos: [...new Set(q.rows.map((r) => r.proto).filter(Boolean))].sort(),
+    nodes: skew.nodes, mean: skew.mean, thresholds: { fixedShare, skewFactor: factor },
+    clients, clientsTotal: new Set(rows.map((r) => r.client)).size, candidates, names: nameStats(clients),
+    note: '재배치 후보는 계산일 뿐입니다 — 포탈은 장비·클라이언트 설정을 바꾸지 않습니다. 고정 클라이언트를 다른 노드(SmartConnect 풀·마운트 대상)로 옮기는 작업은 운영자가 합니다.',
+    oldest: await nodeClientOldest(id), retention: { clientRawDays: keep.clientRaw, clientHourlyDays: keep.clientHourly, clientDailyDays: keep.clientDaily },
   });
 });
 
