@@ -128,7 +128,7 @@ export function matchUplinks(ports = [], host = {}) {
  * ⚠ ESXi 는 표준 vSwitch 에서 LLDP 를 보내지 않는다(분산 스위치에서 켜야 한다 — CDP 만 기본) · vmk0 MAC 은 대개 첫 vmnic MAC 이지만 아닐 수 있다 —
  *   그래서 근거가 없으면 '미매칭' 이고 설명 일치(보통)로 떨어진다(지어내지 않는다).
  */
-export const BASIS_RANK = Object.freeze({ lldp: 0, endpoint: 0.5, mac: 1, 'mac-vm': 2, 'desc-mac': 3, 'desc-nic': 4, 'desc-name': 5 });   // v2.934(C-③) endpoint = CVP EndpointLocation
+export const BASIS_RANK = Object.freeze({ lldp: 0, endpoint: 0.5, mac: 1, 'mac-vm': 2, 'desc-mac': 3, 'desc-nic': 4, 'desc-name': 5 });   // v2.935(C-③) endpoint = CVP EndpointLocation
 export const VM_MAC_SHARE_MIN = 0.5;   // 그 포트에서 배운 MAC 중 이 호스트 VM 비율 하한(트렁크·다른 호스트 포트를 거른다)
 const pkey = (u) => `${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`;
 /** 물리 포트가 아닌 인터페이스(v2.924 반증 H-1) — MAC 근거 · CVP 위치 근거 둘 다 보지 않는다. */
@@ -245,7 +245,7 @@ export function mergeUplinks(descUplinks = [], l2Uplinks = [], rowsByKey = new M
 }
 
 /**
- * v2.934(SAN·CVP 설계 C-③): CVP EndpointLocation 근거 — 이 호스트 물리 NIC MAC 을 CVP 가 '지금 배운 곳' 이라고 답한 포트.
+ * v2.935(SAN·CVP 설계 C-③): CVP EndpointLocation 근거 — 이 호스트 물리 NIC MAC 을 CVP 가 '지금 배운 곳' 이라고 답한 포트.
  *   LLDP 가 같은 NIC 을 다른 포트로 말하면 disagree 로 둘 다 밝힌다(어느 쪽이 맞는지 정하지 않는다 — 화면이 둘 다 보여 준다).
  * @param {{ host:object, epRows:Array, l2Uplinks?:Array }} input epRows = cvp/db.js endpointsByMacs rows
  * @returns {{ uplinks: Array, disagree: Array<{nic, lldp:{hostname,port}, endpoint:{hostname,port}}> }}
@@ -254,7 +254,7 @@ export function matchEndpoint({ host, epRows = [], l2Uplinks = [], portLldp = []
   const nicByMac = new Map();
   for (const n of Array.isArray(host?.nics) ? host.nics : []) { const m = mac12(n?.mac); if (m && n?.device) nicByMac.set(m, String(n.device)); }
   /*
-   * v2.934(반증 M-2): CVP 는 한 MAC 에 여러 위치(peer-link · 트렁크 · Vxlan)를 낮은 likelihood 로 섞어 답할 수 있다 — 전부 '확정' 업링크로 잡으면
+   * v2.935(반증 M-2): CVP 는 한 MAC 에 여러 위치(peer-link · 트렁크 · Vxlan)를 낮은 likelihood 로 섞어 답할 수 있다 — 전부 '확정' 업링크로 잡으면
    *   스위치 사이 포트가 호스트 송수신 합에 들어간다(v2.924 H-1 과 같은 계열). 그래서 ① MAC 마다 가장 높은 likelihood 의 위치만(그것이 '조금' 미만이면 버림)
    *   ② 물리 포트가 아닌 인터페이스는 버리고 ③ LLDP 이웃이 다른 장비인 포트는 버린다(MAC 근거와 같은 방어).
    */

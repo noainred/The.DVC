@@ -58,8 +58,8 @@ const _sent = new Map(); // `${cvpId}|${key}` → { h, at }
  *   구버전 중앙은 필드를 버리므로, 그 답이 없으면 L2_UNSUPPORTED_HOLD_MS 동안 L2 를 싣지 않는다(매 주기 같은 큰 본문을 헛보내지 않게).
  */
 const _l2Sent = new Map(); // `${cvpId}|${key}` → { h, at }
-// v2.934(C-③): EndpointLocation — CVP 마다 중앙이 받았다고 답한 마지막 '물어본 시각'. 그 뒤에 물은 MAC 만 보낸다(L2 와 같은 ack 규약 · 구버전 중앙 보류).
-const _epSentAt = new Map(); // cvpId → 마지막으로 중앙이 받은 ep_meta 순번(seq — v2.934 반증 L-5: 예전에는 at)
+// v2.935(C-③): EndpointLocation — CVP 마다 중앙이 받았다고 답한 마지막 '물어본 시각'. 그 뒤에 물은 MAC 만 보낸다(L2 와 같은 ack 규약 · 구버전 중앙 보류).
+const _epSentAt = new Map(); // cvpId → 마지막으로 중앙이 받은 ep_meta 순번(seq — v2.935 반증 L-5: 예전에는 at)
 let _epUnsupported = 0;
 export const EP_PUSH_PER_CVP = 500;
 /** 중앙 답 → EndpointLocation 수신 여부(순수) — 'acked' = saved.ep 가 수 · 'old-central' = saved 는 있는데 ep 칸이 없다 · 'unknown'. */
@@ -189,7 +189,7 @@ async function pushInner() {
   const statuses = servers.map(statusFor);
   const deviceItems = []; const deviceKeys = {}; const touch = []; const sentNow = []; const devSamples = []; const events = {}; const evMaxNow = new Map();
   const l2Items = []; const l2SentNow = []; let l2Acked = false; let l2OldCentral = false;   // v2.924(B-②)
-  const epItems = []; const epMaxNow = new Map(); let epAcked = false; let epOldCentral = false;   // v2.934(C-③)
+  const epItems = []; const epMaxNow = new Map(); let epAcked = false; let epOldCentral = false;   // v2.935(C-③)
   const nowMs = Date.now();
   let evBytes = 0; let evHeld = 0;
   let devicesUnavailable = !(await db.available());
@@ -225,7 +225,7 @@ async function pushInner() {
           l2SentNow.push([k, h]);
         }
       } catch (e) { if (warnL2(e.message)) console.warn(`[cvp-push] L2(LLDP·MAC 테이블) 레코드를 읽지 못해 이번에는 싣지 않습니다: ${e.message}`); }
-      // v2.934(C-③): 지난 ack 뒤 새로 물어본 EndpointLocation 결과(오래된 것부터 CVP 마다 500개). 구버전 중앙이면 보류.
+      // v2.935(C-③): 지난 ack 뒤 새로 물어본 EndpointLocation 결과(오래된 것부터 CVP 마다 500개). 구버전 중앙이면 보류.
       if (!(_epUnsupported && nowMs - _epUnsupported < L2_UNSUPPORTED_HOLD_MS)) {
         try {
           const eps = await db.endpointsSince(db.LOCAL_AGENT, srv.id, _epSentAt.get(srv.id) || 0, EP_PUSH_PER_CVP);
@@ -264,7 +264,7 @@ async function pushInner() {
       ...(i === 0 ? head : { agent: config.agent.name }), chunk: i, chunks: chunks.length,
       devices: c.filter((x) => x.t === 'd').map((x) => x.v), rows: c.filter((x) => x.t === 'r').map((x) => x.v),
       ...(c.some((x) => x.t === 'l') ? { l2: c.filter((x) => x.t === 'l').map((x) => x.v) } : {}),   // v2.924(B-②)
-      ...(c.some((x) => x.t === 'e') ? { ep: c.filter((x) => x.t === 'e').map((x) => x.v) } : {}),   // v2.934(C-③)
+      ...(c.some((x) => x.t === 'e') ? { ep: c.filter((x) => x.t === 'e').map((x) => x.v) } : {}),   // v2.935(C-③)
     };
     const json = Buffer.from(JSON.stringify(body));
     let payload = json; const h = { ...hdrs };
@@ -295,7 +295,7 @@ async function pushInner() {
     }
     if (i === 0 && reply?.saved && typeof reply.saved.touched === 'number') touchedAt = reply.saved.touched;
     { const a = l2AckOf(reply); if (a === 'acked') l2Acked = true; else if (a === 'old-central') l2OldCentral = true; }   // v2.924(B-② · 반증 L-7)
-    { const a = epAckOf(reply); if (a === 'acked') epAcked = true; else if (a === 'old-central') epOldCentral = true; }   // v2.934(C-③)
+    { const a = epAckOf(reply); if (a === 'acked') epAcked = true; else if (a === 'old-central') epOldCentral = true; }   // v2.935(C-③)
     drop = mergeDrop(drop, dropSummaryOf(reply));
   }
   if (rows.length) saveCursor(maxRowid);
@@ -306,7 +306,7 @@ async function pushInner() {
     if (l2Acked) { for (const [k, h] of l2SentNow) _l2Sent.set(k, { h, at: nowMs }); _l2Unsupported = 0; }
     else if (l2OldCentral) { _l2Unsupported = nowMs; if (warnL2('unsupported')) console.warn(`[cvp-push] 중앙이 LLDP·MAC 테이블을 받았다고 답하지 않았습니다(구버전 중앙으로 보입니다) — ${Math.round(L2_UNSUPPORTED_HOLD_MS / 3600_000)}시간 동안 싣지 않습니다`); }
   }
-  // v2.934(C-③): EndpointLocation 도 중앙이 받았다고 답했을 때만 보낸 것으로 친다(실었는데 답이 없으면 구버전 중앙 — 보류).
+  // v2.935(C-③): EndpointLocation 도 중앙이 받았다고 답했을 때만 보낸 것으로 친다(실었는데 답이 없으면 구버전 중앙 — 보류).
   if (epItems.length) {
     if (epAcked) { for (const [c, at] of epMaxNow) _epSentAt.set(c, Math.max(_epSentAt.get(c) || 0, at)); _epUnsupported = 0; }
     else if (epOldCentral) { _epUnsupported = nowMs; if (warnL2('ep-unsupported')) console.warn(`[cvp-push] 중앙이 EndpointLocation 을 받았다고 답하지 않았습니다(구버전 중앙으로 보입니다) — ${Math.round(L2_UNSUPPORTED_HOLD_MS / 3600_000)}시간 동안 싣지 않습니다`); }

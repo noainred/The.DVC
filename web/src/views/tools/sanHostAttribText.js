@@ -8,7 +8,7 @@ const fmtBytes = bytesText;
 
 export { CONF, bytesText, rwText };
 export const RANGES = Object.freeze([[24, '24시간'], [24 * 7, '7일'], [24 * 30, '30일']]);
-/** v2.934(C-①): 분배 방식 세그먼트(서버 ?split=) — auto: 실측 → IPF → 포트 비율 · ipf: 실측을 건너뛴다 · ratio: A 단계 방식만. */
+/** v2.935(C-①): 분배 방식 세그먼트(서버 ?split=) — auto: 실측 → IPF → 포트 비율 · ipf: 실측을 건너뛴다 · ratio: A 단계 방식만. */
 export const SPLITS = Object.freeze([['auto', '실측 우선 → IPF'], ['ipf', 'IPF 만'], ['ratio', '타깃 포트 비율']]);
 const tot3 = (r) => (r.confirmedBytes == null && r.measuredBytes == null && r.estimatedBytes == null ? null : (r.confirmedBytes ?? 0) + (r.measuredBytes ?? 0) + (r.estimatedBytes ?? 0));
 
@@ -32,7 +32,7 @@ export function attribKpis(d) {
   ];
 }
 
-/** v2.934(C-①): IPF 카드 행 — 스위치별 반복 · 열 잔차 · 수렴 · 고정 행. */
+/** v2.935(C-①): IPF 카드 행 — 스위치별 반복 · 열 잔차 · 수렴 · 고정 행. */
 export function ipfRows(d) {
   return (Array.isArray(d?.ipf) ? d.ipf : []).map((x) => ({
     id: x.group || x.deviceId, name: x.name || x.deviceId, switches: x.switches ?? 1, rows: x.rows, cols: x.cols, fixed: x.fixedRows, free: x.freeRows, iter: x.iter,
@@ -40,7 +40,7 @@ export function ipfRows(d) {
     slack: (x.slackRow > 0 ? '다른 초기자 몫 있음' : '') || (x.slackCol > 0 ? '다른 스위치 타깃 몫 있음' : ''),
   }));
 }
-/** v2.934(C-①): 스위치별 Fabric Vision 라이선스 — 있음 · 없음 · 못 읽음(사유). */
+/** v2.935(C-①): 스위치별 Fabric Vision 라이선스 — 있음 · 없음 · 못 읽음(사유). */
 export function licenseRows(d) {
   return (Array.isArray(d?.fabrics) ? d.fabrics : []).map((f) => {
     const st = f?.fv?.state === 'yes' ? 'yes' : f?.fv?.state === 'no' ? 'no' : 'unknown';
@@ -82,7 +82,7 @@ export function sortRows(rows = [], key = 'total', dir = 'desc') {
 }
 export function filterRows(rows = [], { q = '', confirmedOnly = false } = {}) {
   const s = String(q || '').trim().toLowerCase();
-  // v2.934: ‘확정 · 실측만’ — 근거 있는 몫(확정 · ESXi 경로 실측 비율)만 남긴다.
+  // v2.935: ‘확정 · 실측만’ — 근거 있는 몫(확정 · ESXi 경로 실측 비율)만 남긴다.
   return (Array.isArray(rows) ? rows : []).filter((r) => (!confirmedOnly || r.conf === 'confirmed' || r.conf === 'measured') && (!s || [r.hostName, r.storageName, r.datacenterName, r.vcenterName].some((v) => String(v || '').toLowerCase().includes(s))));
 }
 export const rowTotalText = (r) => { const t = tot3(r); return t == null ? '—' : fmtBytes(t); };

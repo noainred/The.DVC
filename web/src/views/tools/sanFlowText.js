@@ -1,4 +1,4 @@
-// v2.934(SAN·CVP 설계 C-②) SAN 플로우 모니터 — 문구 · 표 행 · KPI(순수). 화면은 SanFlowTool.jsx.
+// v2.935(SAN·CVP 설계 C-②) SAN 플로우 모니터 — 문구 · 표 행 · KPI(순수). 화면은 SanFlowTool.jsx.
 //   값이 없으면 ‘—’(0 으로 단정하지 않는다 — numOrNull) · 명령은 서버 미리보기(/tools/san-flow/preview)가 만든 것을 그대로 보여 준다.
 import { numOrNull } from '../../numOrNull.js';
 import { bytesText, rateText } from '../hostSanText.js';

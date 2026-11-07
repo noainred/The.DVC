@@ -27,7 +27,7 @@ export function fullScopeOnlyWith(reason = '이 화면은 전체 범위(vCenter 
 }
 
 /**
- * v2.934(C-② 반증 L-1): 조회 **와 쓰기** 모두 전체 범위인 계정만 — 스위치 설정을 바꾸는 라우트(Flow Vision 플로우 · SAN 스위치 등록 · 수집 설정).
+ * v2.935(C-② 반증 L-1): 조회 **와 쓰기** 모두 전체 범위인 계정만 — 스위치 설정을 바꾸는 라우트(Flow Vision 플로우 · SAN 스위치 등록 · 수집 설정).
  *   `fullScopeOnlyWith` 는 조회 범위만 봐서 writeVcenters 로 쓰기만 줄인 admin 이 지나갔다. 판정은 auth/scope.js isFullReadWriteScope 하나(v2.904 규칙).
  */
 export function fullReadWriteScopeOnlyWith(reason = '이 작업은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.') {

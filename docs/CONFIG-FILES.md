@@ -211,7 +211,7 @@
 | `rma-settings.json` | 설정 | RMA 분배 설정(중앙) — `rma-settings.json` { version, defaultMode, agents: { name: { mode, primary } } }. | ✅ | ✅ | ✅ | rma/settings.js |
 | `rma-tests.db` | DB | 원격 점검(RMA) 결과 이력 |  |  | ✅ | rma/testResults.js |
 | `runtime.json` | 설정 | Runtime-adjustable settings that can be changed from the portal UI (and | ✅ | ✅ | ✅ | runtime-settings.js |
-| `san-flows.json` | 설정 | Flow Vision 플로우 작업(v2.934 SAN·CVP 설계 C-②) — 실행 등록부 · 포탈 플로우 기록 · 카운터 주기. | ✅ | ✅ |  | sanswitch/flowJobs.js |
+| `san-flows.json` | 설정 | Flow Vision 플로우 작업(v2.935 SAN·CVP 설계 C-②) — 실행 등록부 · 포탈 플로우 기록 · 카운터 주기. | ✅ | ✅ |  | sanswitch/flowJobs.js |
 | `san-health.db` | DB | SAN 점검 결과 이력 + **최근 N회 비교**(v2.522). |  |  | ✅ | sanswitch/healthHistory.js |
 | `sanswitch-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | sanswitch/activityLog.js |
 | `sanswitch-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | sanswitch/poller.js |

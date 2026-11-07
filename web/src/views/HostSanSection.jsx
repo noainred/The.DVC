@@ -40,7 +40,7 @@ export default function HostSanSection({ hostId, onData }) {
   const state = sanStateText(d);
   const rows = seriesRows(d.series);
   const hasLine = rows.some((r) => r.gbps != null);
-  const lic = licenseBand(d.fabrics);   // v2.934(C-①)
+  const lic = licenseBand(d.fabrics);   // v2.935(C-①)
   const prows = pathRows(d);
   return (
     <div className="hd-san">

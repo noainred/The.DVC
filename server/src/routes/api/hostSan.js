@@ -14,7 +14,7 @@ import { inUserScope, inUserWriteScope, scopedVcenterIds } from '../../auth/scop
 import { maskErrText } from './cvp.js';
 import { loadSettings as loadCvpSettings } from '../../cvp/settings.js';
 import { cvpDemoActive } from '../../mock/demo/cvp.js';
-import { PARTS_EVERY_MS } from '../../cvp/faults.js';   // v2.934 반증 M-4: 비-admin 오류 사유의 주소 가림(CVP 상태 오류와 같은 규칙)
+import { PARTS_EVERY_MS } from '../../cvp/faults.js';   // v2.935 반증 M-4: 비-admin 오류 사유의 주소 가림(CVP 상태 오류와 같은 규칙)
 import { issueFor } from '../../auth/toolAccess.js';
 import { userHasPermission } from '../../auth/permissions.js';
 import { isAdminReq, maskDeviceAddress } from '../../auth/addressMask.js';
@@ -27,8 +27,8 @@ import { localSnapshots as sanLocalSnaps } from '../../sanswitch/store.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
 import { portBytesMulti, perfQueryTtlMs } from '../../sanswitch/perfDb.js';
 import { buildFabrics, attributeHost, attributeFleet, measuredSharesOf, identityOf, SPLIT_MODES } from '../../sanswitch/attribution.js';
-import { ipfForFabrics } from '../../sanswitch/ipf.js';   // v2.934(C-①) IPF 보정
-import { recordHosts, weightsFor, startStorPathHistory, historyStatus } from '../../storpath/history.js';   // v2.934(C-①) ESXi 경로 카운터 표본 이력
+import { ipfForFabrics } from '../../sanswitch/ipf.js';   // v2.935(C-①) IPF 보정
+import { recordHosts, weightsFor, startStorPathHistory, historyStatus } from '../../storpath/history.js';   // v2.935(C-①) ESXi 경로 카운터 표본 이력
 import { demoSpath, demoWeights } from '../../mock/demo/storpath.js';
 import { normSerial } from '../../sanswitch/endpointKey.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
@@ -40,7 +40,7 @@ import { ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import * as cdb from '../../cvp/db.js';
 import { listServers as listCvpServers, serversForThisNode } from '../../cvp/registry.js';
 import { rowOwnerOf } from '../../cvp/overview.js';
-import { requestEndpointLookup, pendingEndpointRequest } from '../../cvp/epRequests.js';   // v2.934(C-③)
+import { requestEndpointLookup, pendingEndpointRequest } from '../../cvp/epRequests.js';   // v2.935(C-③)
 import { lookupEndpointsNow } from '../../cvp/endpointNow.js';
 import { normMac } from '../../cvp/parse.js';
 import { matchUplinks, hostMatchTerms, matchL2, mergeUplinks, matchEndpoint, likelyRank, BASIS_LABEL } from '../../cvp/hostMatch.js';
@@ -68,7 +68,7 @@ function perfAbortSignal(res) {
 const abandoned = (e) => e?.code === 'abandoned';
 
 /**
- * v2.934(C-③): EndpointLocation '지금 조회' 를 누를 수 있나 — CVP '지금 수집' 과 같은 축(admin · operator).
+ * v2.935(C-③): EndpointLocation '지금 조회' 를 누를 수 있나 — CVP '지금 수집' 과 같은 축(admin · operator).
  *   반증 L-1: 인증이 꺼진 설치는 익명 역할(AUTH_DISABLED_ROLE)을 따른다(toolActorOf — requireRole 과 같은 판정). 예전에는 무조건 참이었다.
  */
 const canLocate = (req) => ['admin', 'operator'].includes(toolActorOf(req).role);
@@ -86,7 +86,7 @@ function cvpServersFor(req, snap, vcenterId) {
   return hostCorp ? servers.filter((s) => !String(s.datacenterId || '') || String(s.datacenterId) === hostCorp) : servers;
 }
 /**
- * v2.934(C-③): '지금 조회' — 위임 CVP(다른 엣지 담당)는 요청 큐(엣지가 다음 cvp-config pull 에 가져가 묻고 push 로 올린다), 이 노드가 직접 수집하는 CVP 는 지금 묻는다.
+ * v2.935(C-③): '지금 조회' — 위임 CVP(다른 엣지 담당)는 요청 큐(엣지가 다음 cvp-config pull 에 가져가 묻고 push 로 올린다), 이 노드가 직접 수집하는 CVP 는 지금 묻는다.
  * @returns {Promise<{ direct: object[], queued: object[] }>}
  */
 async function locateNow(servers, macs) {
@@ -151,7 +151,7 @@ async function fabricSnapshots({ corp = null, dcSet = null, admin = true } = {})
 }
 
 /**
- * v2.934(C-①): 분배 문맥 — ESXi 경로 표본 가중치(호스트별) · IPF(스위치별) · 분배 방식. 두 라우트가 같은 규칙으로 쓴다.
+ * v2.935(C-①): 분배 문맥 — ESXi 경로 표본 가중치(호스트별) · IPF(스위치별) · 분배 방식. 두 라우트가 같은 규칙으로 쓴다.
  *   실측 가중치는 기간 [since, until] 안의 표본만(없으면 null → IPF · 타깃 포트 비율). 데모는 조닝에서 만든 가상 표본(mock/demo/storpath.js).
  *   IPF 의 고정 행 = 실측 몫이 있는 초기자(인벤토리 HBA WWN → 호스트 · 어댑터) — 같은 스위치의 다른 호스트 추정이 실측을 존중한다.
  */
@@ -198,7 +198,7 @@ function pathTargetsOf(h, spath, fabrics, storageOf) {
 const fabricOut = (f, extra = {}) => ({ deviceId: f.deviceId, name: f.name, datacenterId: f.datacenterId, agent: f.agent, collectedAt: f.collectedAt, zoneCount: f.zoneCount, nsKnown: f.nsKnown, portsComplete: f.portsComplete, fv: f.fv, ...extra });
 
 export function registerHostSan(api) {
-  // v2.934(C-①): ESXi 경로 카운터 표본 이력 — 이 노드 스냅샷을 5분마다 훑는다(새 엣지 계약 없음 · 인메모리).
+  // v2.935(C-①): ESXi 경로 카운터 표본 이력 — 이 노드 스냅샷을 5분마다 훑는다(새 엣지 계약 없음 · 인메모리).
   startStorPathHistory(() => store.get()?.hosts || []);
   api.get('/hosts/:id/san-attribution', invHosts, async (req, res) => {
     const snap = store.get();
@@ -241,7 +241,7 @@ export function registerHostSan(api) {
       ok: true, hours, from, to, rangeIssue: rangeIssue || null, since: bytes?.since ?? null, until: bytes?.until ?? null, bucketMs: bytes?.bucketMs ?? null,
       host: r.host, status: r.status, hbas: r.hbas, storages: r.storages, totals: r.totals, mpTargets: r.mpTargets, series,
       fabrics: fabrics.map((f) => fabricOut(f)),
-      // v2.934(C-①): 분배 방식 · IPF 요약(스위치별) · ESXi 경로 최근 표본(타깃별) · 표본 이력 상태
+      // v2.935(C-①): 분배 방식 · IPF 요약(스위치별) · ESXi 경로 최근 표본(타깃별) · 표본 이력 상태
       split: sc.split, ipf: sc.ipf?.fabrics || [],
       spath: spath ? { at: spath.at, samples: spath.samples, sampleSec: spath.sampleSec, instances: spath.instances, unparsed: spath.unparsed, truncated: !!spath.truncated, mock: !!spath.mock,
         targets: pathTargetsOf(h, spath, fabrics, storageOf) } : null,
@@ -303,7 +303,7 @@ export function registerHostSan(api) {
       const ownerKeys = matchServers.map((sv) => ({ agent: String(sv.agent ?? '').trim() ? sv.agent : '', cvpId: sv.id }));
       l2Info = { ...(await cdb.l2Status(ownerKeys)), ...(fdbTruncated ? { fdbTruncated: true } : {}) };
     } catch (e) { console.warn(`[hostsan] CVP LLDP·MAC 테이블 조회 실패: ${e.message}`); l2Info = { error: true }; }
-    // v2.934(SAN·CVP 설계 C-③): CVP EndpointLocation — 이 호스트 NIC MAC 을 CVP 가 지금 배운 포트(담당 행만). LLDP 와 다르면 disagree.
+    // v2.935(SAN·CVP 설계 C-③): CVP EndpointLocation — 이 호스트 NIC MAC 을 CVP 가 지금 배운 포트(담당 행만). LLDP 와 다르면 disagree.
     let ep = { uplinks: [], disagree: [] }; let epInfo = null;
     try {
       const ownerKeys = matchServers.map((sv) => ({ agent: String(sv.agent ?? '').trim() ? sv.agent : '', cvpId: sv.id }));
@@ -317,7 +317,7 @@ export function registerHostSan(api) {
         scan: cvpEndpointScanOn(), partsEveryMs: PARTS_EVERY_MS };   // 반증 L-9: 화면이 주기 숫자 · 켜짐을 API 값으로 말한다
     } catch (e) { console.warn(`[hostsan] CVP EndpointLocation 조회 실패: ${e.message}`); epInfo = { error: true }; }
     const descKeys = new Set(md.uplinks.map((u) => `${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`));
-    const l2All = [...l2.uplinks, ...ep.uplinks];   // v2.934(C-③)
+    const l2All = [...l2.uplinks, ...ep.uplinks];   // v2.935(C-③)
     const need = l2All.filter((u) => !descKeys.has(`${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`));
     const extra = need.length ? await cdb.portsByKeys(need) : { rows: [] };
     const rowsByKey = new Map((extra.rows || []).filter(own).map((r) => [`${r.agent ?? ''}\u0000${r.cvpId}\u0000${r.key}\u0000${r.port}`, r]));
@@ -364,14 +364,14 @@ export function registerHostSan(api) {
         inDrop: u.inDrop ?? null, outDrop: u.outDrop ?? null, day: dayOf(u), hour: hourOf(u), rateTs: u.rateTs, ts: u.ts })),
       conflicts: m.conflicts, terms: m.terms, events, eventsUnavailable, cvpUnavailable: !!q.unavailable, truncated: !!q.truncated, ...(q.termsTruncated ? { termsTruncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
       servers: matchServers.length, hostCorpMatched: !!hostCorp, vmNicMacs: vmMacs, corpLimited: corp != null, corpMissing: corp === '', direction: { in: '서버 송신', out: '서버 수신' },
-      ep: epInfo, epDisagree: ep.disagree.slice(0, 16),   // v2.934(C-③): EndpointLocation 현황 · LLDP 와 다른 NIC
+      ep: epInfo, epDisagree: ep.disagree.slice(0, 16),   // v2.935(C-③): EndpointLocation 현황 · LLDP 와 다른 NIC
       l2: l2Info,   // v2.924(B-②): { fdbDevices, lldpDevices, lastAt } — 0 이면 'LLDP·MAC 테이블 수집 전'(엣지 업그레이드 · 30분 주기) · error 면 조회 실패
     });
   });
 
   const WRITE_DENIED = { ok: false, error: 'forbidden', reason: '이 vCenter 는 조회만 할 수 있는 범위입니다(쓰기 범위 밖) — CVP 위치 조회는 운영 CVP 에 요청을 만듭니다.' };
   const maskLocate = (r, mask) => ({ ...r, direct: (r.direct || []).map((d) => (d.reason ? { ...d, reason: mask(d.reason) } : d)) });
-  // v2.934(SAN·CVP 설계 C-③): CVP EndpointLocation '지금 조회' — 호스트 NIC MAC(64) · VM vNIC MAC(16). 범위 밖 404 → 도구 키 403(cvp) → 역할(admin · operator).
+  // v2.935(SAN·CVP 설계 C-③): CVP EndpointLocation '지금 조회' — 호스트 NIC MAC(64) · VM vNIC MAC(16). 범위 밖 404 → 도구 키 403(cvp) → 역할(admin · operator).
   //   상태를 바꾸지 않지만 운영 CVP 에 요청을 만들므로 '지금 수집' 과 같은 역할로 묶는다. 결과는 net-uplinks · /vms/:id/endpoint-locations 가 읽는다.
   api.post('/hosts/:id/endpoint-locate', invHosts, async (req, res) => {
     const snap = store.get();
@@ -495,7 +495,7 @@ export function registerHostSan(api) {
       storages: r.storages, hosts: r.hosts.map((x) => ({ ...x, vcenterName: vcName.get(x.vcenterId) || x.vcenterId, ...corpOf(x.vcenterId) })),
       zonedOnly: r.zonedOnly.map((x) => ({ ...x, vcenterName: vcName.get(x.vcenterId) || x.vcenterId, ...corpOf(x.vcenterId) })), counts: r.counts,
       fabrics: fabrics.map((f) => fabricOut(f, { datacenterId: f.datacenterId || NONE_DC, datacenterName: dcNameOf(f.datacenterId) })),
-      split: sc.split, ipf: sc.ipf?.fabrics || [], pathHistory: sc.mock ? { mock: true } : historyStatus(), storPathScan: !!config.storPathScan,   // v2.934(C-①)
+      split: sc.split, ipf: sc.ipf?.fabrics || [], pathHistory: sc.mock ? { mock: true } : historyStatus(), storPathScan: !!config.storPathScan,   // v2.935(C-①)
       hostsTotal: (snap.hosts || []).length, hostsWithHba: hosts.length, perfUnavailable: !!bytes?.unavailable,
       computedAt: bytes?.computedAt ?? Date.now(), cacheTtlMs: perfQueryTtlMs(), source: bytes?.source ?? null, ...(admin ? {} : { addressHidden: true }),
     });

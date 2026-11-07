@@ -1,5 +1,5 @@
 /**
- * sanswitch/flowCmd.js — Brocade Flow Vision 명령 조립 · 출력 판독(v2.934 SAN·CVP 설계 C-② — docs/design/san-cvp-traffic/README.md §9). 순수.
+ * sanswitch/flowCmd.js — Brocade Flow Vision 명령 조립 · 출력 판독(v2.935 SAN·CVP 설계 C-② — docs/design/san-cvp-traffic/README.md §9). 순수.
  *
  * 왜 조심하나: 이 명령은 **스위치 설정을 바꾼다**(flow --create · --delete). 그래서
  *   ① 명령은 여기서만 만든다 — 화면 · 엣지가 보낸 글자를 이어 붙이지 않는다(셸 명령 조립 규약 — server/CLAUDE.md).
@@ -15,7 +15,7 @@ import crypto from 'node:crypto';
 
 export const FLOW_PREFIX = 'dvc_';
 /**
- * v2.934 반증 H-1: FOS 플로우 이름은 영숫자 · _ **20자 이하**이고 소문자로 저장된다(FOS 8.0.1 명령 참조 — 검색 요약 기준, 원문 미열람 · 추정).
+ * v2.935 반증 H-1: FOS 플로우 이름은 영숫자 · _ **20자 이하**이고 소문자로 저장된다(FOS 8.0.1 명령 참조 — 검색 요약 기준, 원문 미열람 · 추정).
  *   예전 정규식은 44자까지 받아 실장비에서 만들기가 거부될 가능성이 컸다. 소문자만 받는다(장비가 소문자로 바꿔 저장하면 지우기 · 보기 이름이 어긋난다).
  */
 export const FLOW_NAME_MAX = 20;
@@ -84,7 +84,7 @@ export function buildFlowCommands(action, flows = []) {
 
 /**
  * 명령 출력의 오류 분류(관용) — 라이선스 없음 · 명령 없음(rbash) · 권한 없음 · 이미 있음 · 없는 플로우. 오류가 아니면 null.
- *   v2.934 반증 L-5: 표 줄('|' 가 있는 줄 — 플로우 목록 · 카운터)과 이름처럼 보이는 낱말(밑줄 · 영숫자 이어진 것 · WWN)은 빼고 본다 —
+ *   v2.935 반증 L-5: 표 줄('|' 가 있는 줄 — 플로우 목록 · 카운터)과 이름처럼 보이는 낱말(밑줄 · 영숫자 이어진 것 · WWN)은 빼고 본다 —
  *   호스트 이름에 failed · invalid · duplicate 가 들어가면 그 이름이 출력에 실려 오류로 읽혔다.
  *   반증 L-6: 'no … license' 는 줄 안에서만(최대 80자) — 예전 `no .*license` 는 길이의 제곱으로 커졌다.
  */

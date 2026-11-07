@@ -8,7 +8,7 @@ const d = { counts: { ok: 3, unseen: 1, zonedOnly: 0, noHba: 2, confirmedPairs: 
 describe('호스트 귀속 문구', () => {
   it('KPI — 확정·추정 따로 · 비중', () => {
     const k = attribKpis(d);
-    // v2.934(C-①): 확정 · 실측 비율 · 추정을 따로(실측 값이 없으면 —)
+    // v2.935(C-①): 확정 · 실측 비율 · 추정을 따로(실측 값이 없으면 —)
     expect(k[0].v).toBe('3.9 KB'); expect(k[0].s).toBe('● 2.9 KB · ● — · ◐ 1000 B'); expect(k[1].v).toBe('3');
     expect(k[2].v).toBe('확정 2 · 실측 0 · 추정 1'); expect(k[2].s).toContain('근거 있는 몫 75%'); expect(k[3].v).toBe('실측 0 · IPF 0 · 비율 0'); expect(k[4].v).toBe('2 · 4');
     const m = attribKpis({ ...d, counts: { ...d.counts, measuredPairs: 1, ipfPorts: 2 }, storages: [{ ...d.storages[0], measuredBytes: 4000 }] });

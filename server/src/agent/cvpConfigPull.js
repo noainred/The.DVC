@@ -8,7 +8,7 @@
  *  - '지금 수집' 은 **기다리지 않는다**(한 CVP 가 수 분 걸릴 수 있다 — pull 을 붙잡으면 설정 반영이 밀린다). 수집 뒤 push 는 폴러가 한다.
  *  - 무음 실패 금지: 실패는 `_last` + 콘솔(같은 사유는 10분에 1줄). edgelog/spec.js 에 등재(pull.cvp).
  */
-import { lookupEndpointsNow } from '../cvp/endpointNow.js';   // v2.934(C-③)
+import { lookupEndpointsNow } from '../cvp/endpointNow.js';   // v2.935(C-③)
 import { pushCvpNow } from '../cvp/push.js';
 import crypto from 'node:crypto';
 import { config, clampIntervalMs } from '../config.js';
@@ -85,7 +85,7 @@ async function _pull() {
         .then((r) => { if (!r.ok) console.warn(`[cvp-config] 중앙 요청 수집을 지금 하지 못했습니다(${r.reason}) — 요청은 중앙에서 한 번 더 내려옵니다`); })
         .catch((e) => console.warn(`[cvp-config] 중앙 요청 수집 실패: ${e.message}`));
     }
-    // v2.934(C-③): EndpointLocation '지금 조회' — 이 엣지 몫 CVP 만(등록부 대조) · MAC 12자만 · 64개 · 한 번에 하나씩(pull 을 기다리게 하지 않는다).
+    // v2.935(C-③): EndpointLocation '지금 조회' — 이 엣지 몫 CVP 만(등록부 대조) · MAC 12자만 · 64개 · 한 번에 하나씩(pull 을 기다리게 하지 않는다).
     const epReqs = Array.isArray(body?.epNow) ? body.epNow.filter((x) => x && typeof x.cvpId === 'string' && Array.isArray(x.macs)).slice(0, 10) : [];
     if (epReqs.length) runEndpointRequests(epReqs);
     _last = { at: Date.now(), ok: true, applied, count: servers.length, removed: removed.length, settingsApplied, ...(settingsUnreadable ? { settingsUnreadable: true } : {}), collectRequested: wants.length,
@@ -101,8 +101,8 @@ async function _pull() {
 let _epRun = null;
 const _epQueue = [];
 /**
- * v2.934(C-③): 중앙이 내려보낸 EndpointLocation 요청을 차례로 처리하고 곧바로 push 한다(다음 push 주기를 기다리지 않게). 단일비행.
- *   v2.934 반증 L-4: 실행 중에 온 요청은 버리지 않고 대기열에 붙여 같은 실행이 이어서 처리한다(중앙은 내려보낼 때 큐에서 지운다 —
+ * v2.935(C-③): 중앙이 내려보낸 EndpointLocation 요청을 차례로 처리하고 곧바로 push 한다(다음 push 주기를 기다리지 않게). 단일비행.
+ *   v2.935 반증 L-4: 실행 중에 온 요청은 버리지 않고 대기열에 붙여 같은 실행이 이어서 처리한다(중앙은 내려보낼 때 큐에서 지운다 —
  *   버리면 로그 없이 사라졌다). 대기열은 CVP 마다 하나로 합친다(MAC 64개).
  */
 export function runEndpointRequests(reqs) {

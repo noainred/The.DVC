@@ -1,4 +1,4 @@
-// ESXi 경로 카운터 캐시(v2.934 C-①) — vCenter 별 · 호스트 moref 별 최근 표본 요약(storpath/parse.js summarizeHostPaths). 인메모리다.
+// ESXi 경로 카운터 캐시(v2.935 C-①) — vCenter 별 · 호스트 moref 별 최근 표본 요약(storpath/parse.js summarizeHostPaths). 인메모리다.
 // 재시작하면 비고 다음 주기(기본 1시간)에 다시 찬다 — 그동안 host.spath 가 없으면 귀속 엔진은 IPF · 타깃 포트 비율로 간다(0 으로 채우지 않는다).
 // 모양은 contention/cache.js 와 같다(호스트 한 종류만).
 

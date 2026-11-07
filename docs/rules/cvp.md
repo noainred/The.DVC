@@ -18,7 +18,7 @@
 - (원래 4639행) CVP 인터페이스 세부 정보(v2.649) — 설명은 설정 노드에서 부품 주기에 읽고, `null`(못 읽음)과 `''`(설명 없음)을 구분한다
 - (원래 4688행) CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다
 - (v2.922) 포트 드롭 열(in_drop/out_drop — 추정 경로) · 베어메탈 NIC 매핑·대조는 hostMatch 하나
-- (v2.934) EndpointLocation(MAC → 지금 배운 포트) — 404 는 본문으로 가르고, likelihood 가 낮은 위치 · 스위치 사이 포트는 업링크가 아니다
+- (v2.935) EndpointLocation(MAC → 지금 배운 포트) — 404 는 본문으로 가르고, likelihood 가 낮은 위치 · 스위치 사이 포트는 업링크가 아니다
 
 ## 본문
 
@@ -180,7 +180,7 @@
     결측이 섞인 0 · 매칭 포트 없음/둘 이상은 ‘판정 보류’(한쪽에만 드롭이 보이면 그쪽 드롭만 말한다). 판정 코어는 웹 `hostNicText.sideVerdict` 하나.
   - 데모는 `synthNicStats`(인벤토리 NIC 이 없으면 가상 스위치 업링크 이름) — 몇몇 호스트의 한 NIC 에만 수신 드롭.
 
-- **CVP EndpointLocation(v2.934 — 설계 `docs/design/san-cvp-traffic/README.md` §10, 회귀 `test/cvpEndpoint2934.test.js` · `cvpEpReview2934.test.js`)**
+- **CVP EndpointLocation(v2.935 — 설계 `docs/design/san-cvp-traffic/README.md` §10, 회귀 `test/cvpEndpoint2935.test.js` · `cvpEpReview2935.test.js`)**
   - 경로 · 필드는 공개 proto 기준 **추정**(`GET /api/resources/endpointlocation/v1/EndpointLocation?key.searchTerm=<MAC>` · 2021.1+ · 단건). 파서는 관용 — JSON 이 아니면 parsed:false(위치 없음과 구분).
   - 404 는 본문으로 가른다(`endpoint.js notFoundKind`): 구체적 not found = 위치 없음, ‘Not Found’ 한 마디는 **답한 MAC 없이 8번 이어질 때만** 미지원(pNIC MAC 몇 개가 안 배워졌다고 CVP 전체를
     미지원으로 적지 않는다). 연결 실패 · 401 · 403 이 3번 이어지면 그만 묻는다. 인증 정지 CVP 는 버튼으로도 로그인하지 않는다(`cvpAuthGuard`).

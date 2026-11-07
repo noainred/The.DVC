@@ -168,7 +168,7 @@ const AUDIT_SKIP = new Set([
   'POST /tools/vm-finder',          // VM 찾기 조회
   'POST /tools/deep-search',        // 심층 검색(스냅샷 조회)
   'POST /tools/cvp/parse-preview',  // 파서 시험 — 왕복 0·저장 0
-  'POST /tools/san-flow/preview',   // v2.934 SAN 플로우 만들기 미리보기(명령 글자만 — 스위치 · 저장 0 · 체크박스마다 부른다)
+  'POST /tools/san-flow/preview',   // v2.935 SAN 플로우 만들기 미리보기(명령 글자만 — 스위치 · 저장 0 · 체크박스마다 부른다)
   'POST /tools/rma/tests/validate', // 테스트 정의 검증(저장 아님)
   'POST /tools/credentials/inspect-key', // 개인키 사전 검증(저장하지 않고 지문만)
   'POST /svcmon/targets/hostmap/parse',  // 호스트맵 텍스트 파싱(저장 아님)

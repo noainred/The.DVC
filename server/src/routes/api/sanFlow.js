@@ -1,4 +1,4 @@
-// SAN 플로우 모니터(v2.934 SAN·CVP 설계 C-② — 도구 키 san-flow · ‘운영 작업’). Brocade Flow Vision 플로우를 포탈이 만들고 · 지우고 · 카운터를 읽는다.
+// SAN 플로우 모니터(v2.935 SAN·CVP 설계 C-② — 도구 키 san-flow · ‘운영 작업’). Brocade Flow Vision 플로우를 포탈이 만들고 · 지우고 · 카운터를 읽는다.
 //   ⚠ 스위치 설정을 바꾸는 도구다 — 모든 라우트는 tools 권한 + admin + 조회 · 쓰기 전체 범위(반증 L-1 — isFullReadWriteScope), 만들기 · 지우기는 OTP 재인증(reauth)까지.
 //   감사 로그는 auditMiddleware 가 남기고 '무엇을 · 어디에' 를 res.locals.auditDetail 로 싣는다(미리보기는 AUDIT_SKIP — 저장 아님). 명령은 sanswitch/flowCmd.js 만 만든다.
 //   응답에 스위치 비밀번호 · 관리 주소를 싣지 않는다 — 작업 사유 · 기록 오류의 주소도 가린다(반증 L-4 — cvp.maskErrText · 등록 스위치 주소 포함).
@@ -23,7 +23,7 @@ import { cmpVersion } from '../../util/cmpVersion.js';
 
 const gate = [requirePerm('tools'), requireRole('admin'), fullReadWriteScopeOnlyWith('SAN 플로우 모니터(스위치 설정 변경)는 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 쓸 수 있습니다.')];
 /** 엣지가 flowNow 를 아는 첫 버전(반증 M-7 — 구버전 엣지는 작업을 모른 채 버린다). */
-export const MIN_FLOW_EDGE_VERSION = '2.934.0';
+export const MIN_FLOW_EDGE_VERSION = '2.935.0';
 /** 엣지 위임 전 확인 — 버전을 알고 낮으면 거부, 모르면(중앙 재시작 직후 등) 보낸다(시한이 지나면 '결과 모름'). */
 export function flowEdgeIssue(agent, version = edgeVersionOf(agent)) {
   const v = String(version || '').trim();

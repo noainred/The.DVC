@@ -1,5 +1,5 @@
 /**
- * storpath/parse.js — ESXi 경로별 스토리지 카운터(v2.934 C-① — 설계 docs/design/san-cvp-traffic/README.md §9). 순수 파서 · 요약 · 엣지 정제.
+ * storpath/parse.js — ESXi 경로별 스토리지 카운터(v2.935 C-① — 설계 docs/design/san-cvp-traffic/README.md §9). 순수 파서 · 요약 · 엣지 정제.
  *
  * 왜 있나: SAN 스위치 포트 카운터는 HBA 포트의 **합계**만 안다(목적지를 모른다). 한 HBA 포트가 스토리지 둘 이상과 조닝돼 있으면
  *   그 합계를 스토리지별로 나눌 근거가 필요한데, Flow Vision(스위치 쪽 플로우)은 라이선스가 있어야 한다. ESXi 는 경로(path)마다

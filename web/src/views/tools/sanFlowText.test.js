@@ -1,4 +1,4 @@
-// v2.934(C-②) SAN 플로우 모니터 문구 — 못 읽음 ≠ 없음 · 값이 없으면 ‘—’ · 사람이 만든 플로우는 보기만 · 차이 % 는 둘 다 있을 때만
+// v2.935(C-②) SAN 플로우 모니터 문구 — 못 읽음 ≠ 없음 · 값이 없으면 ‘—’ · 사람이 만든 플로우는 보기만 · 차이 % 는 둘 다 있을 때만
 import { describe, it, expect } from 'vitest';
 import { fvBadge, checkBadge, createBlock, deviceRows, diffPct, diffText, flowRows, flowKpis, jobTitle, jobTone, traceLines, hbaOptions, targetOptions, shortWwn, existingPairs, cycleText, deadlineText } from './sanFlowText.js';
 
@@ -97,7 +97,7 @@ describe('같은 정의 중복 방지', () => {
   });
 });
 
-describe('반증 1인 확정분(v2.934)', () => {
+describe('반증 1인 확정분(v2.935)', () => {
   it('M-5 한쪽만 읽힌 속도 · 바이트는 비교 · 합하지 않는다', () => {
     expect(diffPct(flow({ txBps: null }))).toBe(null);
     const [r] = flowRows({ devices: [dev()], flows: [flow({ counters: { rxBytes: 5, txBytes: null } })] });

@@ -140,7 +140,7 @@ D-④ DataMap    화면 요소 ↔ 데이터(지금 있음 / 새 수집 / 계산
     인스턴스 이름 형식(`fc.…-fc.…-naa…` · `vmhbaN:Cn:Tn:Ln`)은 실장비로 확인하지 못했다 — 못 읽으면 IPF 로 떨어진다.
 - **C-③ CVP EndpointLocation**(`server/src/cvp/endpoint.js` · `endpointNow.js` · `epRequests.js` · `db.js ep_loc/ep_meta`): 부품 주기 200 MAC(호스트 NIC → 최근 이동 VM → 순환) +
   ‘CVP 위치 조회 · 지금’ 버튼(위임 CVP 는 엣지 요청 큐) · 근거 순위 `endpoint`(LLDP 다음 ‘확정’) · LLDP 와 다르면 둘 다 보여 줌 · VM 상세 ‘네트워크 위치(CVP)’ 카드.
-  - 반증 1인 확정 H1 · M5 · L10 중 L-10(엣지 시각 원본을 따로 남기지 않음 — 수신 시각으로 자르기만)을 뺀 전부를 고쳤다(`test/cvpEpReview2934.test.js`). H-2(404 의미)는
+  - 반증 1인 확정 H1 · M5 · L10 중 L-10(엣지 시각 원본을 따로 남기지 않음 — 수신 시각으로 자르기만)을 뺀 전부를 고쳤다(`test/cvpEpReview2935.test.js`). H-2(404 의미)는
     실장비 응답을 못 봐서 **본문으로 가르는 추정**이다 — 구체적 not found = 위치 없음 · ‘Not Found’ 한 마디는 답한 MAC 없이 8번 이어질 때만 미지원 · 본문 표본을 사유에 남긴다.
   - 데모 결함(화면 판독): 데모 VM vNIC MAC 이 사이트마다 같아(사이트 안 순번만) 다른 법인 CVP 위치로 덮였다 → 넷째 바이트에 사이트 번호.
 - **C-② Flow Vision 플로우 모니터**(도구 키 `san-flow` · ‘운영 작업’ · `server/src/sanswitch/flowCmd.js` · `flowJobs.js` · `routes/api/sanFlow.js` · 웹 `SanFlowTool.jsx`):

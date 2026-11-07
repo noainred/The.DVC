@@ -1,4 +1,4 @@
-// 데모(mock) — ESXi 경로 카운터(host.spath · v2.934 C-①). 목 모드에는 vCenter 실시간 통계가 없으므로, 데모 SAN 조닝(buildFabrics 결과)에서
+// 데모(mock) — ESXi 경로 카운터(host.spath · v2.935 C-①). 목 모드에는 vCenter 실시간 통계가 없으므로, 데모 SAN 조닝(buildFabrics 결과)에서
 //   그 호스트 HBA 의 zone 파트너 타깃을 찾아 결정적인 읽기·쓰기 값을 만든다. 호스트 셋 중 하나는 일부러 비워 둔다(측정 없음 → IPF · 타깃 포트 비율로 가는 모습).
 //   수치는 가상값이다.
 import { normWwn } from '../../sanswitch/zoning.js';

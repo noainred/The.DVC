@@ -131,7 +131,7 @@ describe('지금 수집', () => {
 describe('폼', () => {
   it('설정 빈 칸은 보내지 않는다', () => {
     const b = T.settingsPayload({ enabled: true, intervalMin: '', rawRetentionDays: '7', dailyRetentionDays: ' ', concurrency: '2', deviceTimeoutSec: '' });
-    expect(b).toEqual({ enabled: true, faultAlerts: false, faultAlertsClosed: true, endpointScan: true, rawRetentionDays: 7, concurrency: 2 });   // v2.934(C-③) endpointScan 은 불리언(빈 칸 규칙 밖)
+    expect(b).toEqual({ enabled: true, faultAlerts: false, faultAlertsClosed: true, endpointScan: true, rawRetentionDays: 7, concurrency: 2 });   // v2.935(C-③) endpointScan 은 불리언(빈 칸 규칙 밖)
     expect(T.settingsPayload({ endpointScan: false, endpointPerCycle: '50' })).toMatchObject({ endpointScan: false, endpointPerCycle: 50 });
     expect(T.settingsToForm({ endpointPerCycle: null }).endpointPerCycle).toBe('');
     const c = T.settingsPayload({ enabled: false, intervalMin: '5', deviceTimeoutSec: '120' });

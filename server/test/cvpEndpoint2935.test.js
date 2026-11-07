@@ -1,5 +1,5 @@
 /**
- * v2.934(SAN·CVP 설계 C-③) — CVP EndpointLocation(MAC → 지금 배운 스위치 · 포트) 버튼 + 주기.
+ * v2.935(SAN·CVP 설계 C-③) — CVP EndpointLocation(MAC → 지금 배운 스위치 · 포트) 버튼 + 주기.
  *  ① 파서 — 깊이 상관없이 interface + 장비 식별자 객체 · 줄마다 JSON · JSON 아님은 parsed:false(위치 없음과 구분) · 상한
  *  ② 조회 — ok · none · error · 404/501 이면 미지원으로 멈춤 · 시간 예산
  *  ③ 대상 고르기 — 호스트 NIC → 최근 이동 VM → 오래된 VM 순 · 이번 창에 물은 MAC 은 건너뜀 · 상한 · 이동 기억

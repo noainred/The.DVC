@@ -15,7 +15,7 @@ const confBadge = (k) => { const c = CONF[k] || CONF.none; return <span classNam
 export default function SanHostAttrib({ datacenterIds = [], datacenters = [], dcNameOf = (id) => id }) {
   const [dcSet, setDcSet] = useState(() => new Set(datacenterIds));
   const [hours, setHours] = useState(24);
-  const [split, setSplit] = useState('auto');   // v2.934(C-①) 분배 방식
+  const [split, setSplit] = useState('auto');   // v2.935(C-①) 분배 방식
   const [confirmedOnly, setConfirmedOnly] = useState(false);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState({ key: 'total', dir: 'desc' });
