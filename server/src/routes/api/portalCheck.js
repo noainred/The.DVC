@@ -70,6 +70,12 @@ import { isMockMode } from '../../mock/demo/flags.js';
 import { isDemoCollector, isDemoEdgeId, demoProbeResult, demoSiteVcenters, demoInventoryRows } from '../../mock/demo/edge.js'; // v2.708 데모 엣지
 import { snapCacheClear } from '../../util/snapCache.js';
 import { currentVersion } from '../../config.js';
+// v2.938(제안 8번 — 법인별 실환경 확인): 중앙이 이미 받은 실장비 결과로 법인마다 판정(왕복 0)
+import { buildFieldChecks, FIELD_STATES, FIELD_CHECKS } from '../../fieldcheck/judge.js';
+import { getVcInfo } from '../../vcinfo/collect.js';
+import { healthView as bareosHealthView } from '../../bareos/health.js';
+import { isMockVcenter } from '../../mock/generator.js';
+import { getInventory } from '../../central/inventory.js';
 import { gatherArchInputs, scanArch, scopeArchPaths, ARCH_CODES, ARCH_STATES } from '../../portalcheck/archScan.js';
 
 // vc 별 위임 여부만 필요하다 — redact() 는 이미 password 를 뺀다(vcenter/registry.js:45).
@@ -405,6 +411,36 @@ api.get('/tools/portal-check/inventory', adminOnly, fullScopeOnly, (req, res) =>
     findingCounts: invFindingCounts(findings),
     vocab: { states: INV_STATE, findings: INV_FINDING, grades: INV_GRADE },
   });
+});
+
+
+/**
+ * v2.938 포탈 점검 › **법인별 실환경 확인**(제안 8번 — '법인별로 적용'). 규칙 문서의 '실장비 미확인' 항목을, 법인 엣지가 실제 장비에서 읽어
+ * 보낸 결과로 법인마다 판정한다(fieldcheck/judge.js). **왕복 0** — 엣지·장비에 나가지 않는다. 권한은 형제와 같다(관리자 + 전체 범위).
+ * 데모 계정은 목 vCenter 행만 받는다(사람이 등록한 법인 이름 · 엣지 이름 · 실패 원문을 싣지 않는다 — 인벤토리 점검과 같은 판단).
+ */
+api.get('/tools/portal-check/field', adminOnly, fullScopeOnly, (req, res) => {
+  const snap = safe(() => store.get(), null);
+  const vcById = new Map((snap?.vcenters || []).filter((v) => v && v.id).map((v) => [String(v.id), v]));
+  const corps = new Map((safe(() => bareosHealthView().corps, []) || []).map((c) => [String(c.vcenterId), c]));
+  const mock = (id, vc) => !!vc && safe(() => isMockVcenter(vc), false);
+  const demo = isDemoGuest(req.user);
+  // 데모(mock) 모드에서 등록 vCenter 가 없으면 스냅샷의 목 vCenter 를 행으로 쓴다(인벤토리 점검 v2.708 과 같은 판단 — 판정은 그대로, 목은 '판정 불가')
+  const reg0 = safe(() => listVcentersFull(), []);
+  const regAll = reg0.length || !isMockMode() ? reg0 : [...vcById.values()].map((v) => ({ id: v.id, name: v.name, collectMode: v.collectSource === 'site' ? 'site' : 'direct' }));
+  const reg = demo ? regAll.filter((r) => mock(r?.id, vcById.get(String(r?.id)))) : regAll;   // 데모 계정: 목 vCenter 만(개수도 그 기준)
+  const out = buildFieldChecks({
+    registry: reg,
+    vcOf: (id) => vcById.get(id) || null,
+    agentOf: (id) => safe(() => getInventory(id)?.agent, '') || '',
+    collectors: safe(() => loadCollectors(), []),
+    statusById: safe(() => allCollectorStatus(), {}),
+    vcInfoOf: (id) => safe(() => getVcInfo(id), null),
+    corpOf: (id) => corps.get(id) || null,
+    isMock: mock,
+    centralVersion: safe(() => currentVersion(), ''),
+  });
+  res.json({ ok: true, at: Date.now(), ...out, ...(demo && reg.length !== regAll.length ? { hiddenForDemo: true } : {}), vocab: { states: FIELD_STATES, checks: FIELD_CHECKS } });
 });
 
 }

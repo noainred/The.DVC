@@ -31,6 +31,7 @@ import { loadSettings, jobDirectorId, directorById } from './settings.js';
 import { bulkRestorePlan, placementDrift } from './restore.js';
 import { capacityShortfall } from '../vmclone/capacity.js';
 import { onDirector, isDemoActive, effectiveSettings, isEdgeNode } from './service.js';
+import { lateRestores } from './lateReplies.js'; // v2.938: 엣지 대행 늦은 회신 반영(제안 6번)
 import { noteRestoreBatchStart, noteRestoreBatchEnd } from './inflight.js';
 import { drActiveVcenterIds } from './drRunner.js';
 import { RESTORES_DEADLINE_MS } from './edgeOps.js';
@@ -305,12 +306,12 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
       return { key: i, jobid: x.jobid, name: job.bareosJob, client: site?.client || job.client, restoreJob: settings.defaults.restoreJob, pluginOptions: x.plan.pluginOptions };
     });
     let out;
-    try { out = await onDirector(dirId, 'restores', { items: sendItems }, { trigger, signal: AbortSignal.timeout(RESTORES_DEADLINE_MS) }); } catch (e) {   // v2.870 감사 A5-01
+    try { out = await onDirector(dirId, 'restores', { items: sendItems }, { trigger, signal: AbortSignal.timeout(RESTORES_DEADLINE_MS), onLate: lateRestores(ready.map((x) => ({ jobId: x.id, batchId: runId }))) }); } catch (e) {   // v2.870 감사 A5-01 · v2.938 늦은 회신
       const why = String(e?.message || e).slice(0, 300);
       const unknown = !!e?.unknown || e?.code === 'unknown';
       for (const x of ready) run.items.push({ jobId: x.id, vmName: x.vmName, ok: false, reason: unknown ? `결과 모름 — ${why}` : why });
       // v2.874(점검 B5-01): 결과 모름은 원장에 남긴다 — 그 VM 을 다음 회차 · 사람의 복원이 다시 보내지 않게(restoreHeld · 이름 예약)
-      if (unknown) { try { inBatch(() => ready.forEach((x, i) => addRestore(x.id, { unknown: true, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, rehearsal: runId }))); } catch (e2) { console.warn(`[bareos] 복원 검증 ${runId} 결과 모름 기록 실패: ${e2?.message || e2}`); } }
+      if (unknown) { try { inBatch(() => ready.forEach((x, i) => addRestore(x.id, { unknown: true, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, deleteOnOk: policy.deleteOnOk, rehearsal: runId }))); } catch (e2) { console.warn(`[bareos] 복원 검증 ${runId} 결과 모름 기록 실패: ${e2?.message || e2}`); } }
       logAudit({ user: by, action: 'Bareos 복원 검증', target: directorById(dirId, settings)?.name || dirId, detail: `실패 — ${why}` });
       return finishRun({ ok: false, started: 0, reason: why, audited: true });
     }
@@ -330,7 +331,7 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
         } else {
           const unknown = !r || r.code === 'unknown';
           // v2.874(점검 B5-01): 결과 모름은 원장에 남긴다(다시 보내지 않게)
-          if (unknown) addRestore(job.id, { unknown: true, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, rehearsal: runId });
+          if (unknown) addRestore(job.id, { unknown: true, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, deleteOnOk: policy.deleteOnOk, rehearsal: runId });   // v2.938 반증 B-3: 늦은 회신이 이 행을 열면 정책대로 남기거나 지운다
           run.items.push({ jobId: job.id, vmName: job.vmName, ok: false, reason: r?.message || 'Director 회신에 없음 — 결과 모름' });
         }
       });
