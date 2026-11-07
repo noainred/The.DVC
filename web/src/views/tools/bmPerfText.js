@@ -406,6 +406,9 @@ export const DETAIL_TABS = Object.freeze([
   { id: 'trend', label: '추이(평균 · 피크)' },
   // v2.929(5단계): 집중 모니터링 — 서버 API(perf/:key/focus) 가 생겨 더했다. 문구는 bmPerfOpsText.js.
   { id: 'focus', label: '집중 모니터링' },
+  // 6단계: 진단 플레이북(판정 → 읽기 전용 런북 — 포탈은 실행하지 않음) · 목표선(SLO 달성률) — 서버 API(perf/:key/playbook · slo)가 생겨 더했다. 문구는 bmRunbookText.js.
+  { id: 'playbook', label: '진단 플레이북' },
+  { id: 'slo', label: '목표선' },
 ]);
 
 /** 상세 머리 아래 안내 — 응답이 말하는 사실(엣지 보관분 · 상세 생략 · 표본 없음 · 엣지 기준값)을 그대로. */

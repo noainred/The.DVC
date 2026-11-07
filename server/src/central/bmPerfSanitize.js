@@ -6,6 +6,7 @@
  * ⚠ 중앙은 **다시 판정하지 않는다** — code·line 은 엣지가 만든 값을 허용 목록(enum) 안에서만 그대로 전한다. 목록 밖 값은 'missing'.
  * ⚠ 모르는 필드는 버리고, 버린 원소 수는 `sanitizeDropped` 에 더한다(조용한 축약 금지 — 호출부가 합친다).
  */
+import { sanitizeCollectHealth } from './bmCollectHealthSanitize.js'; // 6단계 수집 건강
 import { strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { PERF_COL_NAMES } from '../bmusage/perfCols.js';
@@ -247,6 +248,10 @@ export function sanitizePerfFields(snap, rcv = Date.now()) {
       // v2.929(5단계): 집중 모니터링 요약(진행 중 · 대기 · 최근 24시간 — 상세는 볼 때 당긴다) · 성능 알림 발송 기록(채널 URL 없음).
       ...(Array.isArray(snap?.focusSummary) ? { focusSummary: sanitizeFocusSummary(snap.focusSummary, rcv) } : {}),
       ...(Array.isArray(snap?.perfAlertSent) ? { perfAlertSent: sanitizeAlertSent(snap.perfAlertSent, rcv) } : {}),
+      // 6단계 수집 건강(엣지가 매 주기 쓴 값 — 화이트리스트 · 상한 · 시각 clamp). 구버전 엣지는 이 필드가 없다(중앙 화면이 ‘엣지 v… 이상’).
+      ...(snap?.collectHealth && typeof snap.collectHealth === 'object' ? { collectHealth: sanitizeCollectHealth(snap.collectHealth, rcv) } : {}),
+      // 6단계 표지(첫 주기 전에도 실린다 — 필드 없음 + 표지 = 아직 주기 없음 · 표지도 없음 = 구버전 · 반증 F3). 작은 양의 정수만.
+      ...(Number.isInteger(snap?.collectHealthVer) && snap.collectHealthVer > 0 && snap.collectHealthVer < 100 ? { collectHealthVer: snap.collectHealthVer } : {}),
     },
     dropped: arr.length - perf.length,
   };

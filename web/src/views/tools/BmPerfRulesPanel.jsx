@@ -22,7 +22,9 @@ const NUM_SECTIONS = Object.freeze([
   { k: 'baseline', title: '베이스라인', fields: [['weeks', '지난 주 수'], ['bandPct', '띠 ±%'], ['minWeeks', '최소 표본 주'], ['maxMissingPct', '결측 상한 %']] },
   { k: 'health', title: '점검 소모품 기준', fields: [['chronyMs', '시각 오프셋 ms'], ['fdPct', 'FD %'], ['conntrackPct', 'conntrack %'], ['dmesgErr24h', '24시간 커널 오류'], ['certDays', '인증서 남은 일']] },
   { k: 'changes', title: '변경 이벤트', fields: [['keepDays', '보관(일)']] },
-  { k: 'compare', title: '구간 비교', fields: [['diffPct', '차이 표시 ±%']] },
+  { k: 'compare', title: '구간 · 서버 비교', fields: [['diffPct', '구간 비교 차이 표시 ±%'], ['maxServers', '서버 비교 한 화면 상한(대)']] },
+  // 6단계 수집 건강 — 보드 상태와 ‘수집 건강’ 알림 행이 같은 기준을 쓴다(DB 상한 0 = 없음 · DB 칸 판정 보류).
+  { k: 'collect', title: '수집 건강 기준', fields: [['cyclePct', '주기 소요 % (예산 대비 이상)'], ['successPct', '성공률 % (미만)'], ['dbPct', 'DB % (상한 대비 이상)'], ['dbCapGb', 'DB 상한 GB(0 = 없음)']] },
 ]);
 
 /** 이 계정이 저장할 수 있나 — 설정 소유자 등급(소유자 ∧ 전체 범위) · 인증 꺼짐(Anonymous admin). 서버가 다시 막는다. */
@@ -100,7 +102,7 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
                   <label key={c} className="bmo-check" style={{ marginRight: 6 }}><input type="checkbox" disabled={ro || !on} checked={(v.channels || []).includes(c)} onChange={(e) => setRule(id, { channels: e.target.checked ? [...new Set([...(v.channels || []), c])] : (v.channels || []).filter((x) => x !== c) })} />{CHANNEL_TEXT[c] || c}</label>
                 ))}</td>
                 <td data-sort={v.issue ? 1 : 0}><label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.issue} onChange={(e) => setRule(id, { issue: e.target.checked })} />만들기</label></td>
-                <td data-sort={v.autoFocus ? 1 : 0}>{id === 'focusEnd' ? <span className="bmo-sub">해당 없음</span> : <label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.autoFocus} onChange={(e) => setRule(id, { autoFocus: e.target.checked })} />켜기</label>}</td>
+                <td data-sort={v.autoFocus ? 1 : 0}>{id === 'focusEnd' || id === 'collect' ? <span className="bmo-sub">해당 없음</span> : <label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.autoFocus} onChange={(e) => setRule(id, { autoFocus: e.target.checked })} />켜기</label>}</td>
                 <td data-sort={(v.corpsOff || []).length}>
                   <details><summary className="bmo-sub">{(v.corpsOff || []).length ? `${(v.corpsOff || []).length}곳 제외` : '없음'}</summary>
                     <div className="bmr-corps">{vcenters.map((vc) => (

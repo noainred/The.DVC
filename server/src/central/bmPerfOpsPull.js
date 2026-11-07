@@ -12,9 +12,8 @@ import { pullFromEdge } from './edgePull.js';
 import { strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
-import fs from 'node:fs';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
-import { currentVersion } from '../config.js';
+import { featureMinEdgeVersion, STAGE5_TITLE_RE, _resetFeatureMinEdgeVersionForTest } from './featureMinEdgeVersion.js';
 import { BMPERF_RULE_LABEL, applyBmPerfFires } from '../issues/alertIssues.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -26,21 +25,10 @@ const TIMEOUT_MS = Math.max(5_000, Number(process.env.BMUSAGE_PULL_TIMEOUT_MS) |
  *   ⚠ 이 값은 게이트가 아니다: 판정은 ‘그 경로가 엣지에 있는가’(구버전 엣지는 collector 라우터에 경로가 없어 401/404 → old-version)이고 이 번호는 안내 문구에만 들어간다.
  *   한 번 읽어 메모한다(노트는 프로세스 수명 동안 바뀌지 않는다 — 업그레이드는 재시작).
  */
-export const PERF_OPS_RELEASE_TITLE_RE = /리눅스 통합 성능 모니터링 5단계/;
-const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
-let _minVerMemo = null;
-export function perfOpsMinEdgeVersion({ notesFile = new URL('../release-notes.json', import.meta.url), fallback = currentVersion } = {}) {
-  if (_minVerMemo) return _minVerMemo;
-  let v = null;
-  try {
-    const notes = JSON.parse(fs.readFileSync(notesFile, 'utf8'))?.notes;
-    v = (Array.isArray(notes) ? notes : []).filter((x) => PERF_OPS_RELEASE_TITLE_RE.test(String(x?.title || '')) && /^\d+\.\d+\.\d+$/.test(String(x?.version || ''))).map((x) => String(x.version)).sort(verCmp)[0] || null;
-  } catch { v = null; }
-  if (!v) v = fallback();
-  if (v && v !== '0.0.0') _minVerMemo = v;
-  return v;
-}
-export function _resetPerfOpsMinEdgeVersionForTest() { _minVerMemo = null; }
+export const PERF_OPS_RELEASE_TITLE_RE = STAGE5_TITLE_RE;
+// 6단계: 본체는 central/featureMinEdgeVersion.js(표지별 메모 · 같은 폴백) — 5단계 이름 · 인자 · 동작은 그대로(bmPerfMinEdgeVersion2929 가 고정).
+export function perfOpsMinEdgeVersion(o = {}) { return featureMinEdgeVersion(PERF_OPS_RELEASE_TITLE_RE, o); }
+export function _resetPerfOpsMinEdgeVersionForTest() { _resetFeatureMinEdgeVersionForTest(PERF_OPS_RELEASE_TITLE_RE); }
 const FOCUS_CODES = new Set(['ok', 'queued', 'bad-reason', 'bad-request', 'not-found', 'no-path', 'busy', 'daily-cap', 'auth-stopped', 'store-unavailable', 'settings-unreadable']);
 const FOCUS_STATUS = new Set(['queued', 'running', 'done', 'stopped', 'auth', 'interrupted', 'failed']);
 const VERDICTS = new Set(['bottleneck', 'saturated', 'errors', 'warn', 'ok', 'partial', 'stale', 'unknown']);
@@ -178,13 +166,22 @@ export function sanitizeCompareBody(b, now = Date.now()) {
   };
 }
 const SANITIZERS = { changes: sanitizeChangesBody, baseline: sanitizeBaselineBody, compare: sanitizeCompareBody };
+/**
+ * 응답 모양 판정(모드마다 — 6단계 반증 F2 정정). pullFromEdge 기본 판정은 봉투의 `{ok, node}` 라 node 가 없는 이 응답들은 v2.929(5단계) 게시 이후 성공이 전부 bad-body 였다
+ *   (5단계 테스트는 구버전 401 · 404 경로만 불렀다). 회귀: server/test/bmEdgeRoundTrip.test.js(실제 collector 라우터 왕복).
+ */
+export const PERF_OPS_BODY_OK = Object.freeze({
+  changes: (b) => isObj(b) && b.ok === true && Array.isArray(b.events),
+  baseline: (b) => isObj(b) && b.ok === true && Array.isArray(b.series),
+  compare: (b) => isObj(b) && b.ok === true && Array.isArray(b.metrics),
+});
 /** GET 한 번(보관 없음). mode: changes · baseline · compare. */
 export async function pullEdgePerfOps(agent, mode, { key, query = {} } = {}) {
   if (!SANITIZERS[mode]) return { ok: false, kind: 'bad-request', reason: 'mode' };
   const qs = new URLSearchParams({ key: String(key) });
   for (const k of ['from', 'to', 'metric', 'aFrom', 'aTo', 'bFrom', 'bTo', 'res', 'focus']) if (query?.[k] != null && query[k] !== '') qs.set(k, capStr(String(query[k]), 64));
   const r = await pullFromEdge(agent, `/api/collector/bm-usage/${mode}?${qs.toString()}`, {
-    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: perfOpsMinEdgeVersion(), what: '성능 기록을 읽을', label: '엣지 성능 기록 응답',
+    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: perfOpsMinEdgeVersion(), what: '성능 기록을 읽을', label: '엣지 성능 기록 응답', bodyOk: PERF_OPS_BODY_OK[mode],
     missing401: true,   // 경로가 없는 구버전 엣지는 사용자 인증 미들웨어로 떨어져 401 — 토큰 문제가 아니라 버전 문제다(스냅샷 대행과 같은 판정)
   });
   if (!r.ok) return { ok: false, kind: r.kind, reason: r.reason };
@@ -193,7 +190,7 @@ export async function pullEdgePerfOps(agent, mode, { key, query = {} } = {}) {
 }
 
 /* ── 봉투 요약 정제(central/bmPerfSanitize.js 가 부른다) ─────────────────── */
-const RULES = new Set(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile']);
+const RULES = new Set(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect']);
 const RESULTS = new Set(['queued', 'sent', 'failed', 'suppressed', 'no-channel', 'no-channel-config', 'daily-cap', 'maintenance', 'error', '']);
 const ISSUE = new Set(['pending-central', 'daily-cap', 'created', 'commented', 'dup', 'error', 'skipped']);
 export function sanitizeFocusSummary(list, now = Date.now()) {
@@ -234,6 +231,12 @@ export async function centralizeEdgeSent(agent, snap, deps = {}) {
   const ag = capStr(String(agent ?? ''), 64);
   for (const r of sent) {
     if (!isObj(r)) { dropped += 1; continue; }
+    // 6단계 수집 건강 — 서버가 아니라 그 수집 노드 한 칸(key '__node__'): 대상 목록과 대지 않고 법인은 공용(''), 이름은 중앙이 아는 엣지 이름으로.
+    if (r.rule === 'collect' && String(r.key || '') === '__node__') {
+      const nm = safeEdgeName(`수집 노드 ${capStr(String(agent ?? ''), 64)}`, 80);
+      list.push({ ...r, key: '__node__', name: nm, vcenterId: '', title: capStr(`${nm} — ${BMPERF_RULE_LABEL.collect}`, 200) });
+      continue;
+    }
     const tg = targets.get(String(r.key || ''));
     if (!tg) { dropped += 1; continue; }
     const tag = strOf(tg.serviceTag, 64);
