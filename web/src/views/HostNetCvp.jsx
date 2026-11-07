@@ -1,11 +1,20 @@
 // 호스트 상세 ‘네트워크’ 카드의 CVP 업링크 블록(v2.920 — 시안 D-② HostNet). 매칭 포트 타일(송신·수신·에러) + 그 장비의 24h 이벤트.
 //   데이터는 HostDetail 이 받아 넘긴다(/hosts/:id/net-uplinks — NIC 표의 CVP 열과 같은 응답). 문구는 hostNetText.js(순수).
-import React from 'react';
-import { basisOf, bpsText, errText, dropText, daySumText, speedText, portLabel, uplinkSummary, uplinkTotals, SEVERITY_BADGE, eventTimeText, ageText, L2_STALE_MS } from './hostNetText.js';
+import React, { useState } from 'react';
+import { postJson } from '../api.js';
+import { basisOf, bpsText, errText, dropText, daySumText, speedText, portLabel, uplinkSummary, uplinkTotals, SEVERITY_BADGE, eventTimeText, ageText, L2_STALE_MS, epStatusText, epLocateText, epDisagreeText } from './hostNetText.js';
 import { agoText } from './tools/relTime.js';
 
-export default function HostNetCvp({ data, nics = [] }) {
+export default function HostNetCvp({ data, nics = [], hostId = null, onReload = null }) {
+  const [loc, setLoc] = useState({ busy: false, text: '', error: '' });   // v2.935(C-③) 지금 조회
   if (!data) return null;
+  const locate = () => {
+    if (!hostId) return;
+    setLoc({ busy: true, text: '', error: '' });
+    postJson(`/hosts/${encodeURIComponent(hostId)}/endpoint-locate`, {})
+      .then((r) => { setLoc({ busy: false, text: epLocateText(r), error: '' }); if ((r.direct || []).some((d) => d.ok && d.asked)) onReload?.(); })
+      .catch((e) => setLoc({ busy: false, text: '', error: e?.message || String(e) }));
+  };
   if (data.error) return <div className="muted hd-note">CVP 업링크를 읽지 못했습니다({data.error}).</div>;
   const s = uplinkSummary(data, nics);
   const ups = Array.isArray(data.uplinks) ? data.uplinks : [];
@@ -17,6 +26,15 @@ export default function HostNetCvp({ data, nics = [] }) {
         <span className="muted" style={{ fontSize: 11 }}>방향은 스위치 포트 기준 — In = 서버 송신 · Out = 서버 수신</span>
       </div>
       {s.note && <div className="muted hd-note" style={{ marginTop: 4 }}>{s.note}</div>}
+      {data.ep && (
+        <div className="flex wrap" style={{ alignItems: 'center', gap: '4px 10px', marginTop: 4, fontSize: 11.5 }}>
+          <span className="muted" style={{ minWidth: 0 }}>{epStatusText(data.ep)}</span>
+          {data.ep.canLocate && hostId ? <button type="button" className="btn" disabled={loc.busy} onClick={locate} title="이 호스트 물리 NIC MAC 을 CVP EndpointLocation 에 지금 묻습니다(위임 CVP 는 담당 엣지에 요청)">{loc.busy ? '묻는 중…' : 'CVP 위치 조회 · 지금'}</button> : null}
+          {loc.text ? <span className="muted" style={{ minWidth: 0 }}>{loc.text}</span> : null}
+          {loc.error ? <span style={{ color: 'var(--red)', minWidth: 0 }}>조회 실패: {loc.error}</span> : null}
+        </div>
+      )}
+      {epDisagreeText(data.epDisagree).map((t) => <div key={t} className="hd-note" style={{ marginTop: 4, fontSize: 11.5, color: 'var(--amber)' }}>LLDP 와 CVP 위치가 다릅니다 — {t}(둘 다 보여 줍니다)</div>)}
       {ups.length > 0 && (
         <>
           <div className="hd-kpis" style={{ margin: '8px 0' }}>

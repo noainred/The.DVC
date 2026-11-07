@@ -796,7 +796,7 @@
     단위가 다른 묶음은 한 차트에 겹치지 않는다(이중 축 금지). 비교 '대비 %' 는 두 구간 모두 합계를 낸 칸이 절반 이상일 때만. 잡 엔진은 SSH 장비만(REST 는 '모름' — '잡 없음' 이 아니다).
   · 장비를 지워도 노드 부하 이력은 지우지 않는다(용량 이력과 같다 — 보존 기간으로 정리된다).
 
-36. **v2.935(2차) — 아이실론 노드 2차: 디스크 busy·IOPS(②) · 클라이언트·프로토콜(③) · 표본 주기 분리(⑨) · 노드 드로어 · 재배치 보드**(설계 `docs/design/isilon-node-clients/README.md` · 회귀 `storageNodeClients2935`):
+36. **v2.936(2차) — 아이실론 노드 2차: 디스크 busy·IOPS(②) · 클라이언트·프로토콜(③) · 표본 주기 분리(⑨) · 노드 드로어 · 재배치 보드**(설계 `docs/design/isilon-node-clients/README.md` · 회귀 `storageNodeClients2936`):
   · **표본 폴러는 수집 주기와 따로 돈다**(`storage/nodeLoadPoller.js` — 주기 `intervals.nodeLoadMs` 기본 5분·하한 1분·**상한 60분**(항목별 `max`) · 아이실론만 · 장비 토글 `nodeLoadEnabled`
     기본 켬(`registry.normalizeDevice` — 다른 타입은 필드를 만들지 않는다) · 동시 3 · 장비당 시한 60초(`reqTimeoutMs` 관문) · 인증 정지는 수집 주기와 같은 레코드).
     장비 점유는 `poller.runSampleExclusive` 로 나눈다 — **표본은 수집 중이면 건너뛰고(IN_FLIGHT_BUSY), 수집 주기는 표본이 끝날 때까지 기다린다**(표본 때문에 1시간 수집이 빠지는 쪽이 더 나쁘다).

@@ -1,7 +1,7 @@
 {
   "notes": [
     {
-      "version": "2.935.0",
+      "version": "2.936.0",
       "date": "2026-11-07",
       "title": "아이실론 노드 2차 — 노드별 클라이언트·프로토콜(③) · 디스크 busy·IOPS(②) · 5분 표본 폴러(⑨) · 노드 드로어 · 재배치 보드",
       "notes": [
@@ -12,6 +12,21 @@
         "저장: node_load_hourly(노드 시간 요약 · 90일) · node_client_sample/hourly/daily(2일 · 30일 · 1년) · node_proto_hourly/daily. 노드 원시 보존 기본 30일 → 7일(5분 표본이면 행 12배 — 저장값이 있으면 그대로). 스토리지 증가량 › ⚙ 저장 기간에 칸 4개 추가.",
         "엣지: 미전송 표본 고리(장비당 3)를 기존 storage push 본문(nodeLoadSamples)에 실어 보내고 중앙이 받으면 지운다 — 중앙은 장비 목록과 같은 소유권 필터 뒤 정제(아는 필드만 · 노드 64 · 클라이언트 상한 · ts 는 수신 시각 이하)해 적재하고 응답으로 확인한다. 중앙이 2.934 이하면 표본이 버려진다고 엣지 상태·콘솔에 남긴다. 엣지 로그 표 · 서비스 점검에 ‘아이실론 노드 부하 표본’ 행.",
         "⚠ 실장비 미확인: REST summary 경로·필드 · isi statistics client/protocol/drive 의 JSON 모양 · 행의 node(lnn 가정) · 지연 단위(µs→ms 가정) · isi statistics system 의 Net In/Out 단위(B/s 가정). 첫 수집 뒤 표본 probe 를 보고 보정할 것. 설계 docs/design/isilon-node-clients/README.md §8."
+      ]
+    },
+    {
+      "version": "2.935.0",
+      "date": "2026-11-07",
+      "title": "SAN·CVP C 단계 — ESXi 경로 실측 · IPF 귀속 · CVP 위치(EndpointLocation) · Flow Vision 플로우 모니터",
+      "notes": [
+        "호스트 SAN 묶음 '경로별 실측 · ESXi'(vCenter storagePath 카운터 — 한 시간마다 5분 표본 · 비율만 실측 · 양은 스위치 포트 바이트)",
+        "SAN 호스트 귀속 분배 방식 — 실측 비율 → IPF(패브릭 행합·열합 맞춤) → 타깃 포트 비율 · IPF · 라이선스 카드",
+        "CVP EndpointLocation — 부품 주기 200 MAC + '지금 조회' 버튼(위임 CVP 는 엣지 대행) · 업링크 근거 '확정(CVP 위치)' · LLDP 와 다르면 둘 다 · VM 상세 '네트워크 위치(CVP)' 카드",
+        "새 도구 'SAN 플로우 모니터'(운영 작업 · admin · OTP) — Fabric Vision 스위치에 dvc_ 플로우를 만들고 15분마다 카운터 · ESXi 실측과 교차검증(명령 문법 · 출력은 FOS 8.0.1 문서 기준 · 실장비 미확인)",
+        "SAN 플로우 모니터 반증 확정분 — 이름 20자 이하 · 인증 실패 정지 · 결과 모름/늦은 회신 · 엣지 버전 확인 · 점검 강제 · 주소 가림",
+        "반증 확정분 — 엣지 주기 위치 조회 · 404 판정 · 고르기 순환 · likelihood · VM 판정 보류 · 쓰기 범위 · 주소 가림 · push 순번 커서",
+        "데모 — VM MAC 법인별 고유 · Fabric Vision 법인 셋 중 둘",
+        "SAN 스위치 등록 · 수집 · 설정 변경 라우트는 조회 · 쓰기 모두 전체 범위인 관리자만(쓰기 범위를 둔 관리자는 403 — 의도한 변경)"
       ]
     },
     {

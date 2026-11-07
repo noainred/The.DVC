@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { config } from '../../config.js';
 import { requireRole } from '../../auth/auth.js';
 import { loadSessionSecurity } from '../../security/securitySettings.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { analysisFilter, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, collectorToDatacenterMap, remoteServersResolved, analysisServersWithRemote, invForServer, ensureCollectorDatacenter } from '../../insights/analysisServers.js'; // v2.579: 재수출용
 
@@ -24,6 +24,19 @@ export function fullScopeOnlyWith(reason = '이 화면은 전체 범위(vCenter 
   // v2.614(아키텍처 점검): `fleetOnly`·`fleetWideOnly` 류는 전부 이 팩토리의 산물이라 태그 하나로 판정기가 알아본다.
   fullScopeGate.gate = Object.freeze({ kind: 'fullScope' });
   return fullScopeGate;
+}
+
+/**
+ * v2.935(C-② 반증 L-1): 조회 **와 쓰기** 모두 전체 범위인 계정만 — 스위치 설정을 바꾸는 라우트(Flow Vision 플로우 · SAN 스위치 등록 · 수집 설정).
+ *   `fullScopeOnlyWith` 는 조회 범위만 봐서 writeVcenters 로 쓰기만 줄인 admin 이 지나갔다. 판정은 auth/scope.js isFullReadWriteScope 하나(v2.904 규칙).
+ */
+export function fullReadWriteScopeOnlyWith(reason = '이 작업은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.') {
+  const fullRwGate = (req, res, next) => {
+    if (!isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason });
+    next();
+  };
+  fullRwGate.gate = Object.freeze({ kind: 'fullScope' });
+  return fullRwGate;
 }
 
 // '설정 소유 계정(settingsOwners)' 서버측 강제 — 지금까지 소유자 경계는 UI(App.jsx)에서만
