@@ -173,6 +173,34 @@ collectorRouter.get('/bm-usage', async (req, res) => {
 });
 
 /**
+ * v2.922(3a) — 중앙의 엣지 대행 추이·장치 목록(`central/bmUsageEdgePull.js pullBmTrend`). 같은 url·같은 토큰(새 네트워크 허용 없음).
+ *   이 엣지가 수집한 서버만 답한다(대상 목록 밖 키는 404 — 중앙이 범위를 먼저 잘랐어도 엣지가 다시 본다). 계산은 trendQuery 하나.
+ */
+async function bmTrendCollector(req, res, mode) {
+  if (!config.collector.token) { logCollectorDeny(req, `bm-usage-${mode}`); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
+  if (!checkToken(req)) { logCollectorDeny(req, `bm-usage-${mode}`); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+  try {
+    const key = String(req.query.key || '').trim().slice(0, 256);
+    const { currentTargets } = await import('../bmusage/poller.js');
+    const tg = await currentTargets();
+    if (!key || !(tg.targets || []).some((x) => x.key === key)) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const q = await import('../bmusage/trendQuery.js');
+    const { loadBmUsageSettings } = await import('../bmusage/settings.js');
+    const agent = config.agent?.name || '';
+    const s = loadBmUsageSettings();
+    const r = mode === 'devices' ? await q.devicesFor({ agent, key }) : mode === 'nics' ? await q.nicLatestFor({ agent, key, intervalMs: s.intervalMs })
+      : await q.trendFor({ agent, key, q: req.query || {}, settings: s });
+    if (r && r.__status) { const { __status, ...rest } = r; return res.status(__status).json(rest); }
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) });
+  }
+}
+collectorRouter.get('/bm-usage/trend', (req, res) => bmTrendCollector(req, res, 'trend'));
+collectorRouter.get('/bm-usage/devices', (req, res) => bmTrendCollector(req, res, 'devices'));
+collectorRouter.get('/bm-usage/nics', (req, res) => bmTrendCollector(req, res, 'nics'));   // v2.922: CVP 대조 ⑤ 의 서버 쪽(NIC 최신 5분)
+
+/**
  * 이 엣지의 **토큰 자기보고**(v2.560 — 사용자 요청 "등록된 모든 엣지/수집 서버의 모든 토큰 …
  * 중앙에 저장된 토큰과 엣지에 저장된 토큰이 동일한지 점검").
  *

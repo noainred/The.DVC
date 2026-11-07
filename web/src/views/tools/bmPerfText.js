@@ -397,6 +397,8 @@ export const DETAIL_TABS = Object.freeze([
   { id: 'summary', label: '요약' },
   { id: 'res', label: '자원(USE)' },
   { id: 'hw', label: '하드웨어(iDRAC)' },
+  // v2.923(3b): 추이 탭 — 서버 3a 의 추이 API(시간 단위 파일 · 평균/피크) 가 생겨 더했다. 문구는 bmTrendText.js.
+  { id: 'trend', label: '추이(평균 · 피크)' },
 ]);
 
 /** 상세 머리 아래 안내 — 응답이 말하는 사실(엣지 보관분 · 상세 생략 · 표본 없음 · 엣지 기준값)을 그대로. */

@@ -73,7 +73,7 @@ export function pickEventsForPush(events, wm, budget) {
   }
   return { fresh, bytes, held };
 }
-const RATE_KEYS = ['inBps', 'outBps', 'inUtil', 'outUtil', 'inErr', 'outErr'];
+const RATE_KEYS = ['inBps', 'outBps', 'inUtil', 'outUtil', 'inErr', 'outErr', 'inDrop', 'outDrop']; // v2.922: 드롭
 export function recordHash(d) {
   // v2.641: CPU·메모리 값은 매 주기 바뀐다 — 해시에 넣으면 전 장비 레코드가 매번 다시 간다. 값은 devSamples 가 싣고 해시에는 '있는가' 만.
   const { ts, partsAt, sysAt, cpuPct, memPct, memTotal, ...rest } = d;

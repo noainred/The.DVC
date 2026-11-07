@@ -89,7 +89,7 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
   const s = loadBmUsageSettings();
   const [tg, latest] = await Promise.all([
     currentTargets(),
-    latestUsage().catch(() => []),
+    latestUsage({ json: true }).catch(() => []),   // v2.922(D13): 봉투의 판정 항목이 JSON 열을 쓴다
   ]);
   const all = (tg.targets || []).map(publicTarget);
   const targets = all.slice(0, cap);

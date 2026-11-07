@@ -224,6 +224,7 @@ export function cleanDevice(x, now = Date.now(), cnt = { ports: 0 }) {
       duplex: sOrNull(p.duplex, 48), fwdModel: sOrNull(p.fwdModel, 48), mac: sOrNull(p.mac, 32), mtu: numOrNull(p.mtu), operRaw: sOrNull(p.operRaw, 48),
       oper: LINK.has(p.oper) ? p.oper : 'unknown', admin: LINK.has(p.admin) ? p.admin : 'unknown', vlan: s(p.vlan, 32), lag: s(p.lag, 64),
       inBps: numOrNull(p.inBps), outBps: numOrNull(p.outBps), inUtil: numOrNull(p.inUtil), outUtil: numOrNull(p.outUtil), inErr: numOrNull(p.inErr), outErr: numOrNull(p.outErr),
+      inDrop: numOrNull(p.inDrop), outDrop: numOrNull(p.outDrop),   // v2.922(3a): 포트 드롭(추정 경로 — 못 읽으면 null)
     })),
   };
   if (Array.isArray(x.ports) && x.ports.length > PORT_MAX) cnt.ports += x.ports.length - PORT_MAX;
@@ -319,7 +320,11 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
     if (!own(r[0])) { dropped.notOwned++; continue; }
     const key = s(r[1], 128); const port = s(r[2], 64); const ts = tsClamp(r[3], now);
     if (!key || !port || ts == null) { dropped.badRow++; continue; }
-    rows.push([r[0], key, port, ts, numOrNull(r[4]), numOrNull(r[5]), numOrNull(r[6]), numOrNull(r[7]), numOrNull(r[8]), numOrNull(r[9])]);
+    // v2.922(반증 D3): 새 엣지 행은 12칸(뒤 두 칸 = 포트 드롭 in/out — 추정 경로)이다. 정제가 10칸으로 자르면 드롭이 중앙에서 영원히 비었다.
+    //   구 엣지 10칸 행은 10칸 그대로 둔다 — 적재가 '드롭을 보내지 않은 행' 과 '드롭을 못 읽은(null) 행' 을 구분한다(db.importSamples).
+    const row = [r[0], key, port, ts, numOrNull(r[4]), numOrNull(r[5]), numOrNull(r[6]), numOrNull(r[7]), numOrNull(r[8]), numOrNull(r[9])];
+    if (r.length >= 12) row.push(numOrNull(r[10]), numOrNull(r[11]));
+    rows.push(row);
   }
   const touch = [];
   for (const t of Array.isArray(b.touch) ? b.touch.slice(0, 20_000) : []) {

@@ -17,6 +17,7 @@
 - (원래 4634행) CVP 장비 목록 EOS 버전 칩 · 필터 연동 KPI(v2.652)
 - (원래 4639행) CVP 인터페이스 세부 정보(v2.649) — 설명은 설정 노드에서 부품 주기에 읽고, `null`(못 읽음)과 `''`(설명 없음)을 구분한다
 - (원래 4688행) CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다
+- (v2.922) 포트 드롭 열(in_drop/out_drop — 추정 경로) · 베어메탈 NIC 매핑·대조는 hostMatch 하나
 
 ## 본문
 
@@ -125,4 +126,17 @@
     MAC 은 콜론·하이픈·점·붙임 표기 전부. `vmnic0` 글자만으로는 호스트를 특정하지 않는다(어느 호스트나 vmnic0 이 있다). 같은 MAC 이 포트 3개 이상이면 '충돌' 로 표시만.
   - 방향은 스위치 포트 기준 **In = 서버 송신 · Out = 서버 수신** — 응답 `direction` 과 화면 띠·열 이름이 말한다. 값 없음은 '—'(0 금지). 드롭은 수집 전이라 '—'.
   - 범위 계정은 그 호스트 법인의 CVP 서버 행만(`rowOwnerOf` + `datacenterId`), 범위 검사(404)가 도구 키 검사(403)보다 먼저다(존재 은닉).
+- ⚠ **v2.922(리눅스 성능 3a) — 포트 드롭 열 · 베어메탈 서버 NIC ↔ 포트 매핑은 hostMatch 하나**(`cvp/{parse,db,poller,push,hostMatch}.js` · `central/cvpEdge.js` · 회귀 `server/test/bmPerf2921Cvp.test.js`):
+  - `parseCounters` 후보에 `inDiscards/outDiscards`(필드 이름 **추정** — Arista 공식 경로 미확인) → `portDelta` 의 `inDrop/outDrop`(못 읽으면 null · 리셋 null). `port_latest/port_sample` 에 `in_drop/out_drop`,
+    `port_daily` 에 `in_drop_sum/out_drop_sum/in_drop_n/out_drop_n` — **ALTER 로 더한다**(`addPortDropCols` · 멱등 · 기존 행 null). 엣지 push 표본 행은 12칸(뒤 두 칸 드롭) — 구버전 엣지의 10칸 행은 드롭 null.
+    해시 키(push RATE_KEYS)·adopt 병합·portSeries·portsByDesc 에도 넣었다. ⚠ 정정(반증 D3): 31140f2a 는 **중앙 정제(sanitizeCvpBody)가 표본 행을 10칸으로 잘라**
+    드롭이 중앙에서 사라졌고(이 문장이 ‘정제에도 넣었다’ 고 잘못 적었다), 표본 적재(rateFromSample)가 장비 레코드의 드롭을 null 로 덮었다 — 지금은 12칸 행만 12칸으로 두고(구 엣지 10칸은
+    10칸), 10칸 표본은 port_latest 드롭을 덮지 않는다(rateFromSampleNoDrop). 회귀는 **실제 수신 라우트**(POST /api/central/cvp-data)로 `bmPerf2921CvpRecv.test.js`.
+  - 베어메탈 성능 화면의 포트 후보는 **v2.920 `hostMatch.matchUplinks` 를 재사용**한다(판정 두 벌 금지). 넓힌 것: `host.aliases`(서비스 태그) · 리눅스 NIC 이름(eno1·bond0 — 이름 단서와 함께일 때만 NIC 지목).
+    ⚠ 고친 결함: `descHasName` 이 구분자 있는 이름(`bm-kr1-db01` · `esx-01`)을 설명 토큰 하나와 비교해 **영원히 매칭하지 못했다** → 이름도 나눠 연속 토큰열로 비교(경계 규칙 유지).
+    ⚠ 반증 D7 보강(v2.922): 토큰열만 보면 ‘esx-01’ 이 ‘esx-01-b’·‘kr-esx-01’ 에 맞는 새 거짓 양성이 생겼다 → **하이픈·밑줄로 붙은 앞·뒤 토큰이 있으면 다른 호스트**로 본다
+    (뒤는 NIC·역할 접미사 `JOIN_OK_RE` — vmnicN·ethN·enoN·mgmt·uplink 등 — 만 허용, 앞은 연결어 `JOIN_PREFIX_OK_RE` — to·link·srv 등 — 만 허용 · 앞 연장은 후보로도 남기지 않는다) ·
+    여러 토큰 이름은 영숫자 3자 이상. 반증 36표본: 거짓 음성 0 · 거짓 양성 1(2자 이름 ‘10’ — hostMatchTerms 가 단서로 쓰지 않아 업링크 매칭에는 닿지 않음).
+    **v2.920 대비 행동 변화**(릴리스 노트): 구분자 있는 호스트 이름이 이제 매칭된다 · ‘esx01-b’·‘kr-esx01’ 처럼 붙어 이어진 다른 이름은 더 이상 매칭되지 않는다(예전엔 토큰 ‘esx01’ 이 있어 맞았다).
+  - PROFILES §10 매핑 출처: ① 수동 매핑 — v2.922 신규(`bmusage/portMap.js`) ② 포트 설명 매칭 — v2.920 hostMatch(가상화 호스트) 를 베어메탈로 확장 ③ LLDP · ④ MAC — **미구현**(경로 미확인).
 

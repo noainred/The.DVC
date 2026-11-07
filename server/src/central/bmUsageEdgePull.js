@@ -169,3 +169,69 @@ export async function pullBmUsage(agent, { limit = 0 } = {}) {
   const rec = putEdgeBmUsage(r.col.name || agent, { ok: true, ms: r.ms, snap: r.body });
   return { ok: true, ms: r.ms, rec };
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * v2.922(3a) — 엣지 대행 추이·장치 목록. **보관하지 않는다**(조회할 때만 당긴다 — 중앙은 엣지 이력을 복제 적재하지 않는다).
+ *   응답 상한은 pullFromEdge 의 EDGE_RESPONSE_MAX_BYTES(크기 상한 읽기) · 점·결측·장치 수 상한 · 아는 필드만 · 글자 길이 상한.
+ *   잘랐으면 `sanitizeTruncated` 로 밝힌다(조용한 상한 금지).
+ * ════════════════════════════════════════════════════════════════════════════ */
+export const TREND_PULL_MAX_POINTS = 6_000;
+const TREND_GAPS_MAX = 2_000;
+const DEV_MAX = 512;
+const RES_SET = new Set(['5m', '1h', '1d']);
+export function sanitizeTrendBody(b) {
+  if (!isObj(b)) return null;
+  let cut = 0;
+  const pts = Array.isArray(b.points) ? b.points : [];
+  if (pts.length > TREND_PULL_MAX_POINTS) cut += pts.length - TREND_PULL_MAX_POINTS;
+  const points = pts.slice(-TREND_PULL_MAX_POINTS).filter(isObj).map((p) => ({ t: numOrNull(p.t), avg: numOrNull(p.avg), max: numOrNull(p.max), peak: numOrNull(p.peak), peakAt: numOrNull(p.peakAt), n: numOrNull(p.n) })).filter((p) => p.t != null);
+  const gl = Array.isArray(b.gaps) ? b.gaps : [];
+  if (gl.length > TREND_GAPS_MAX) cut += gl.length - TREND_GAPS_MAX;
+  const gaps = gl.slice(0, TREND_GAPS_MAX).filter(isObj).map((g) => ({ from: numOrNull(g.from), to: numOrNull(g.to), reason: strOf(g.reason, 32) })).filter((g) => g.from != null && g.to != null);
+  const bl = isObj(b.baseline) ? { warn: numOrNull(b.baseline.warn), bad: numOrNull(b.baseline.bad), key: strOf(b.baseline.key, 32) } : null;
+  return {
+    ok: b.ok === true, kind: strOf(b.kind, 16), metric: strOf(b.metric, 64), dev: b.dev == null ? null : strOf(b.dev, 256),
+    from: numOrNull(b.from), to: numOrNull(b.to), res: RES_SET.has(b.res) ? b.res : null, resReason: strOf(b.resReason, 32), stepMs: numOrNull(b.stepMs),
+    points, gaps, baseline: bl,
+    peakSrc: (Array.isArray(b.peakSrc) ? b.peakSrc : []).slice(0, 8).map((x) => strOf(x, 16)).filter(Boolean),
+    ...(numOrNull(b.truncated) ? { truncated: numOrNull(b.truncated) } : {}),
+    ...(b.truncatedRows === true ? { truncatedRows: true } : {}),
+    ...(Array.isArray(b.missingPeriods) ? { missingPeriods: b.missingPeriods.slice(0, 16).filter(isObj).map((m) => ({ period: strOf(m.period, 16), reason: strOf(m.reason, 200) })) } : {}),
+    ...(numOrNull(b.filesCapped) ? { filesCapped: numOrNull(b.filesCapped) } : {}),
+    ...(typeof b.migration === 'string' ? { migration: strOf(b.migration, 16) } : {}),
+    ...(cut ? { sanitizeTruncated: cut } : {}),
+  };
+}
+export function sanitizeDevicesBody(b) {
+  if (!isObj(b)) return null;
+  const devs = isObj(b.devices) ? b.devices : {};
+  let cut = 0;
+  const list = (k) => {
+    const a = Array.isArray(devs[k]) ? devs[k] : [];
+    if (a.length > DEV_MAX) cut += a.length - DEV_MAX;
+    return a.slice(0, DEV_MAX).filter(isObj).map((d) => ({ dev: strOf(d.dev, 256), ord: numOrNull(d.ord), color: numOrNull(d.color), firstTs: numOrNull(d.firstTs), lastTs: numOrNull(d.lastTs), ...(d.info ? { info: strOf(d.info, 32) } : {}) })).filter((d) => d.dev);
+  };
+  return { ok: b.ok === true, devices: { disk: list('disk'), nic: list('nic'), mount: list('mount') }, over: numOrNull(b.over), peakSrc: b.peakSrc == null ? null : strOf(b.peakSrc, 16), peakWindowS: numOrNull(b.peakWindowS), ...(cut ? { sanitizeTruncated: cut } : {}) };
+}
+export function sanitizeNicsBody(b) {
+  if (!isObj(b)) return null;
+  const a = Array.isArray(b.nics) ? b.nics : [];
+  return { ok: b.ok === true, nics: a.slice(0, DEV_MAX).filter(isObj).map((x) => ({ nic: strOf(x.nic, 64), at: numOrNull(x.at), spanMs: numOrNull(x.spanMs), rxBps: numOrNull(x.rxBps), txBps: numOrNull(x.txBps),
+    dropDelta: numOrNull(x.dropDelta), errDelta: numOrNull(x.errDelta), oper: x.oper == null ? null : strOf(x.oper, 16), speedBps: numOrNull(x.speedBps) })).filter((x) => x.nic),
+    ...(a.length > DEV_MAX ? { sanitizeTruncated: a.length - DEV_MAX } : {}) };
+}
+/** 한 엣지에서 추이(또는 장치 목록)를 당긴다 — 저장하지 않는다. */
+export async function pullBmTrend(agent, { mode = 'history', key = '', query = {} } = {}) {
+  const qs = new URLSearchParams();
+  qs.set('key', String(key));
+  if (mode === 'history') for (const k of ['metric', 'kind', 'dev', 'res', 'from', 'to']) if (query?.[k] != null && query[k] !== '') qs.set(k, capStr(String(query[k]), 256));
+  const r = await pullFromEdge(agent, `/api/collector/bm-usage/${mode === 'devices' ? 'devices' : mode === 'nics' ? 'nics' : 'trend'}?${qs.toString()}`, {
+    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: TREND_MIN_EDGE_VERSION, what: '추이를 읽을', label: '엣지 추이 응답',
+  });
+  if (!r.ok) return { ok: false, kind: r.kind, reason: r.reason, ms: r.ms };
+  const body = mode === 'devices' ? sanitizeDevicesBody(r.body) : mode === 'nics' ? sanitizeNicsBody(r.body) : sanitizeTrendBody(r.body);
+  if (!body) return { ok: false, kind: 'bad-body', reason: '엣지 추이 응답 형식이 다릅니다.', ms: r.ms };
+  return { ok: true, ms: r.ms, body };
+}
+/** 엣지 추이 엔드포인트를 내주기 시작한 버전(3a). */
+export const TREND_MIN_EDGE_VERSION = '2.922.0';
