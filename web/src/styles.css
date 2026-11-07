@@ -1063,7 +1063,7 @@ tbody tr:last-child td { border-bottom: none; }
 
 .pc-table-wrap { max-height: 660px; overflow: auto; }
 .pc-table { min-width: 720px; }
-/* v2.926: 열 최소폭 합이 920px 이라 1440px(트리 340px)에서 오른쪽 표 폭(약 795px)을 넘어 'TEST METHOD' 열이 잘렸다(Chromium 실측).
+/* v2.927: 열 최소폭 합이 920px 이라 1440px(트리 340px)에서 오른쪽 표 폭(약 795px)을 넘어 'TEST METHOD' 열이 잘렸다(Chromium 실측).
    이름은 200px 부터 늘고 상태·연속·응답·방식은 줄였다 — 값은 말줄임(…)이고 행 클릭 상세에 전문이 있다. */
 .pc-thead, .pc-tr, .pc-group { display: grid; grid-template-columns: 26px minmax(200px, 1fr) 104px 84px minmax(130px, 170px) minmax(150px, 200px); }
 .pc-thead { position: sticky; top: 0; z-index: 2; background: var(--pc-thead); }

@@ -125,7 +125,54 @@ export function demoPerfOverlay(target, t, scenario, base = {}) {
     disks, disksTotal: disks.length, nics, nicsTotal: nics.length, inodes: null,
     streak: { netErr: 0, netDrop: scenario === 'net-drop' ? 1 : 0, oom: 0 }, sections: sec('ok'), truncated: false,
   };
-  return { ...cols, src: 'os+idrac+demo', os_at: t, idrac_at: t, detail_json: JSON.stringify(detail) };
+  return { ...cols, src: 'os+idrac+demo', os_at: t, idrac_at: t, detail_json: JSON.stringify(detail), tuning_json: JSON.stringify(demoTuningFacts(key, t, cores)) };
+}
+
+/**
+ * v2.923(4단계) — 데모 튜닝 · 용도 사실(가상 · 응답 단계 전용 — 적재하지 않는다). 키 해시로 다섯 모양 중 하나:
+ *   Rocky 9.4 × Airflow · Rocky 9.4 × GPDB · Rocky 9.4(기능 없음) · Rocky 8.10 · Ubuntu 22.04. 수치 · 이름은 전부 가상이다.
+ */
+export const DEMO_TUNING_KINDS = Object.freeze(['rocky-airflow', 'rocky-gpdb', 'rocky-plain', 'rocky8', 'ubuntu']);
+export function demoTuningFacts(key, t, cores = 32) {
+  const kind = DEMO_TUNING_KINDS[demoHash(`tuning|${key}`) % DEMO_TUNING_KINDS.length];
+  const memTotalKb = 256 * 1024 * 1024;
+  const rocky = kind.startsWith('rocky');
+  const os = kind === 'ubuntu' ? { id: 'ubuntu', versionId: '22.04', prettyName: 'Ubuntu 22.04.4 LTS', pageSize: 4096, selinux: null, removeIpc: null }
+    : { id: 'rocky', versionId: kind === 'rocky8' ? '8.10' : '9.4', prettyName: `Rocky Linux ${kind === 'rocky8' ? '8.10 (Green Obsidian)' : '9.4 (Blue Onyx)'}`, pageSize: 4096, selinux: kind === 'rocky-gpdb' ? 'disabled' : 'enforcing', removeIpc: kind === 'rocky-gpdb' ? 'no' : null };
+  const gp = kind === 'rocky-gpdb';
+  const sysctl = {
+    'vm.swappiness': gp ? '10' : '60', 'vm.dirty_ratio': '20', 'vm.dirty_background_ratio': '10', 'vm.min_free_kbytes': gp ? '8053063' : '262144',
+    'vm.overcommit_memory': gp ? '2' : '0', 'vm.overcommit_ratio': gp ? '95' : '50', 'vm.zone_reclaim_mode': '0', 'kernel.numa_balancing': '1',
+    'net.core.somaxconn': '4096', 'net.core.netdev_max_backlog': gp ? '10000' : '1000', 'net.core.rmem_max': gp ? '16777216' : '212992', 'net.core.wmem_max': gp ? '16777216' : '212992',
+    'net.core.rmem_default': gp ? '2097152' : '212992', 'net.core.wmem_default': gp ? '2097152' : '212992',
+    'net.ipv4.tcp_rmem': '4096 87380 6291456', 'net.ipv4.tcp_wmem': '4096 16384 4194304', 'net.ipv4.tcp_max_syn_backlog': '4096', 'net.ipv4.tcp_tw_reuse': gp ? '1' : '2',
+    'net.ipv4.ip_local_port_range': gp ? '10000 65535' : '32768 60999', 'fs.file-max': '26214400',
+    'thp.enabled': gp ? 'never' : 'always', 'thp.defrag': 'madvise',
+    'cpu.governor': rocky ? 'performance' : 'powersave', 'cpu.scaling_driver': 'intel_cpufreq',
+    ...(rocky ? { 'tuned.active_profile': gp ? 'throughput-performance' : kind === 'rocky8' ? 'balanced' : 'throughput-performance' } : {}),
+    'vm.dirty_bytes': gp ? '4294967296' : '0', 'vm.dirty_background_bytes': gp ? '1610612736' : '0',
+    'kernel.shmall': gp ? '33554432' : '18446744073692774399', 'kernel.shmmax': gp ? '137438953472' : '18446744073692774399', 'kernel.shmmni': gp ? '32768' : '4096',
+    'kernel.sem': gp ? '32000 1048576000 1000 32768' : '32000 1024000000 500 32000', 'kernel.core_pattern': gp ? '/var/core/core.%h.%t' : '|/usr/lib/systemd/systemd-coredump %P %u %g %s %t %c %h',
+    'net.core.netdev_budget': '300', 'net.core.netdev_budget_usecs': '2000',
+  };
+  const units = ['chronyd.service', 'irqbalance.service', 'sshd.service', ...(rocky ? ['tuned.service', 'firewalld.service'] : ['systemd-timesyncd.service']),
+    ...(kind === 'rocky-airflow' ? ['airflow-scheduler.service', 'airflow-webserver.service', 'airflow-triggerer.service'] : [])].filter((u) => !(gp && u === 'firewalld.service'));
+  const procs = ['sshd', 'chronyd', 'irqbalance', 'node_exporter', ...(kind === 'rocky-airflow' ? ['airflow'] : []), ...(gp ? ['postgres'] : [])];
+  const ports = [22, ...(kind === 'rocky-airflow' ? [8080, 8974, 8793] : []), ...(gp ? [5432, 6000, 6001] : [])];
+  return {
+    v: 1, at: t, sysctl, hugepages: { total: 0, free: 0, sizeKb: 2048 },
+    blkq: [{ name: 'nvme0n1', scheduler: 'none', schedulers: ['none', 'mq-deadline'], nrRequests: 1023, rotational: false, readAheadKb: gp ? 8192 : 128 },
+      { name: 'sda', scheduler: 'mq-deadline', schedulers: ['none', 'mq-deadline', 'kyber', 'bfq'], nrRequests: 256, rotational: true, readAheadKb: gp ? 8192 : 4096 }],
+    blkqTotal: 2,
+    irq: { irqbalance: 'active', nicIrqs: 16, spreadMin: 6, spreadMax: 8, cpus: cores },
+    os, units: { list: units, failed: kind === 'rocky8' ? 1 : 0, capped: false }, ports: { list: ports, capped: false }, procs: { list: procs, capped: false },
+    accounts: [...(kind === 'rocky-airflow' ? ['airflow'] : []), ...(gp ? ['gpadmin'] : [])], kargs: {},
+    softnet: { cpus: cores, processed: 81234567, dropped: 0, squeezed: kind === 'rocky8' ? 12 : 0 },
+    netq: [{ name: 'eno1', txqlen: 1000, rxq: 8, txq: 8 }, { name: 'eno2', txqlen: 1000, rxq: 8, txq: 8 }],
+    xfs: gp ? [{ mount: '/', opts: ['rw', 'relatime', 'attr2', 'inode64', 'noquota'] }, { mount: '/data', opts: ['rw', 'nodev', 'noatime', 'attr2', 'inode64', 'noquota'] }] : [{ mount: '/', opts: ['rw', 'relatime', 'attr2', 'inode64', 'noquota'] }],
+    memTotalKb, cores,
+    sections: { sysctl: 'ok', hugepages: 'ok', blkq: 'ok', irq: 'ok', osrel: 'ok', units: 'ok', ports: 'ok', procs: 'ok', acct: gp || kind === 'rocky-airflow' ? 'ok' : 'absent', kargs: 'absent', softnet: 'ok', netq: 'ok', xfs: 'ok' },
+  };
 }
 /**
  * 최신값 행 → 데모 대상이면 성능 열을 겹친 사본(조회 응답 전용 — DB 에 쓰지 않는다). mock 이 아니면 입력 그대로.

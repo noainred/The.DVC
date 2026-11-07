@@ -32,7 +32,7 @@ import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { listAssignments, noteExpectMs } from './svcmonAssign.js';
-import { noteResult, noteAlertOnly } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림 · v2.926 보류 재판정
+import { noteResult, noteAlertOnly } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림 · v2.927 보류 재판정
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -69,7 +69,7 @@ const text = (v, n) => (typeof v === 'string' ? capStr(v, n) : '');
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
 /**
- * v2.926(반증 재검토 N1 — 재현): 엣지 알림 키는 (경로 · 대상 이름 · 점검 이름)인데 **점검 이름은 유일하지 않다**(마법사 기본 이름 —
+ * v2.927(반증 재검토 N1 — 재현): 엣지 알림 키는 (경로 · 대상 이름 · 점검 이름)인데 **점검 이름은 유일하지 않다**(마법사 기본 이름 —
  *   TCP 22·443 둘 다 'TCP 포트 열림'). 같은 이름 키를 가진 메타가 둘 이상이면 그 행은 testId 키로 떨어뜨려야 한다 — 그 개수를 엣지별로 센다.
  */
 const nameKeyOfMeta = (m) => (m ? `${m.p}\u0001${m.n}\u0001${m.t}` : '');
@@ -98,7 +98,7 @@ function alertInfoOf(a, id) {
 function blank(agent) {
   return {
     agent,
-    nameCount: new Map(),   // v2.926: 메타 이름 키 → 개수(알림 키 충돌 판정)
+    nameCount: new Map(),   // v2.927: 메타 이름 키 → 개수(알림 키 충돌 판정)
     firstAt: 0,
     lastAt: 0,
     lastSnapId: 0,
@@ -182,7 +182,7 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   let accepted = 0;
   let dropped = 0;
   const rows = Array.isArray(body?.rows) ? body.rows : [];
-  const heldIds = [];   // v2.926(N2): 메타 없이 들어와 알림 판정이 보류된 행
+  const heldIds = [];   // v2.927(N2): 메타 없이 들어와 알림 판정이 보류된 행
   for (const r of rows) {
     const id = text(r?.i, 64);
     if (!id) { dropped += 1; a.counters.badRow += 1; continue; }
@@ -244,7 +244,7 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     }
     a.metaSig = text(body?.metaSig, 64);
   }
-  // v2.926(반증 재검토 N2): 메타 없이 보류됐던 행은 같은 요청에 메타가 왔으면 지금 다시 판정한다 — 같은 측정의 재전송은 다시 세지
+  // v2.927(반증 재검토 N2): 메타 없이 보류됐던 행은 같은 요청에 메타가 왔으면 지금 다시 판정한다 — 같은 측정의 재전송은 다시 세지
   //   않으므로(M5) 여기서 놓치면 다음 측정(인증서·도메인은 하루)까지 알림이 늦었다. 시간별 집계·전이 이력은 이미 셌다(알림만).
   for (const id of heldIds) {
     const row = a.rows.get(id);

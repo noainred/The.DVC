@@ -235,3 +235,82 @@ export async function pullBmTrend(agent, { mode = 'history', key = '', query = {
 }
 /** 엣지 추이 엔드포인트를 내주기 시작한 버전(3a). */
 export const TREND_MIN_EDGE_VERSION = '2.922.0';
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * v2.923(4단계) — 진단 스냅샷 엣지 대행. 실행은 그 서버를 수집하는 엣지가 하고(SSH 1회 · 읽기 전용 · 상수 명령 · 7일 보관),
+ *   중앙은 결과만 받는다(저장하지 않는다). POST 는 재전송하지 않는다(retries 0 — 엣지 동작을 두 번 시키지 않게 · v2.612 EDGE2612-01).
+ *   엣지 응답은 아는 필드만 · 상한(sanitizeSnapshotBody). 사유 · 실행자는 엣지 보관 행과 양쪽 감사 로그에 남는다.
+ * ════════════════════════════════════════════════════════════════════════════ */
+export const SNAPSHOT_MIN_EDGE_VERSION = '2.923.0';
+/** 엣지 시한(연결 15초 + 명령 30초 + 여유) — 엣지 세션 시한(50초)보다 길게. */
+export const SNAPSHOT_PULL_TIMEOUT_MS = 75_000;
+const SNAP_STATES = ['ok', 'perm', 'partial', 'absent', 'missing'];
+const SNAP_TRIM_KEYS = ['dmesg', 'idrac', 'ss', 'cpuTop', 'memTop', 'ioTop', 'error'];   // snapshot/command.js fitSnapshotResult 가 덜어 내는 칸
+const procList = (v, max) => (Array.isArray(v) ? v.slice(0, max).filter(isObj).map((p) => ({ pid: numOrNull(p.pid), user: strOf(p.user, 32), cpuPct: numOrNull(p.cpuPct), rssKb: numOrNull(p.rssKb), name: strOf(p.name, 32) })) : []);
+/** 스냅샷 결과 본문 정제(엣지 → 중앙 · 아는 필드만). */
+export function sanitizeSnapshotResult(r) {
+  if (!isObj(r)) return null;
+  const st = isObj(r.states) ? r.states : {};
+  const idr = isObj(r.idrac) ? r.idrac : null;
+  return {
+    v: numOrNull(r.v),
+    cpuTop: procList(r.cpuTop, 30), memTop: procList(r.memTop, 30),
+    ioTop: Array.isArray(r.ioTop) ? r.ioTop.slice(0, 30).filter(isObj).map((x) => ({ pid: numOrNull(x.pid), name: strOf(x.name, 32), readBps: numOrNull(x.readBps), writeBps: numOrNull(x.writeBps) })) : [],
+    pids: numOrNull(r.pids), ioReadable: numOrNull(r.ioReadable), ioSpanS: numOrNull(r.ioSpanS),
+    ss: (Array.isArray(r.ss) ? r.ss : []).slice(0, 20).map((x) => strOf(x, 200)).filter(Boolean),
+    ssTcp: isObj(r.ssTcp) ? { total: numOrNull(r.ssTcp.total), estab: numOrNull(r.ssTcp.estab), timewait: numOrNull(r.ssTcp.timewait), orphaned: numOrNull(r.ssTcp.orphaned) } : null,
+    dmesg: (Array.isArray(r.dmesg) ? r.dmesg : []).slice(-200).map((x) => strOf(x, 300)),
+    dmesgTotal: numOrNull(r.dmesgTotal),
+    states: Object.fromEntries(['cpu', 'mem', 'io', 'ss', 'dmesg'].map((k) => [k, typeof st[k] === 'string' && SNAP_STATES.includes(st[k]) ? st[k] : 'missing'])),
+    truncated: r.truncated === true,
+    idrac: idr ? {
+      events: Array.isArray(idr.events) ? idr.events.slice(0, 5).filter(isObj).map((e) => ({ severity: strOf(e.severity, 16), at: strOf(e.at, 40), message: strOf(e.message, 200) })) : null,
+      eventsAt: numOrNull(idr.eventsAt),
+      temps: Array.isArray(idr.temps) ? idr.temps.slice(0, 12).filter(isObj).map((x) => ({ name: strOf(x.name, 48), c: numOrNull(x.c) })) : null,
+      sensorAt: numOrNull(idr.sensorAt), cpuPct: numOrNull(idr.cpuPct), powerW: numOrNull(idr.powerW), powerAt: numOrNull(idr.powerAt),
+    } : null,
+    ...(r.error ? { error: strOf(r.error, 300) } : {}),
+    // 반증 R4: 보관 상한에 맞춰 덜어 낸 칸(아는 이름만) · 덜어 낸 커널 로그 줄 수.
+    ...(Array.isArray(r.trimmed) ? { trimmed: r.trimmed.filter((k) => SNAP_TRIM_KEYS.includes(k)).slice(0, 8) } : {}),
+    ...(numOrNull(r.dmesgDropped) != null ? { dmesgDropped: numOrNull(r.dmesgDropped) } : {}),
+    ...(isObj(r.authStoppedBefore) ? { authStoppedBefore: { since: numOrNull(r.authStoppedBefore.since), attempts: numOrNull(r.authStoppedBefore.attempts) } } : {}),
+  };
+}
+const SNAP_CODE_SET = new Set(['ok', 'bad-reason', 'not-found', 'no-os-path', 'busy', 'daily-cap', 'store-unavailable', 'ssh-error', 'auth', 'host-key', 'timeout', 'not-linux']);
+const snapMeta = (s) => ({ id: strOf(s.id, 40), key: strOf(s.key, 256), at: numOrNull(s.at), by: strOf(s.by, 64), reason: strOf(s.reason, 300), ok: s.ok === true,
+  code: SNAP_CODE_SET.has(s.code) ? s.code : 'ssh-error', ms: numOrNull(s.ms) });
+export function sanitizeSnapshotBody(b) {
+  if (!isObj(b)) return null;
+  const code = SNAP_CODE_SET.has(b.code) ? b.code : (b.ok === true ? 'ok' : 'ssh-error');
+  return {
+    ok: b.ok === true, code, ...(b.reason != null ? { reason: strOf(b.reason, 300) } : {}),
+    ...(b.id != null ? { id: strOf(b.id, 40) } : {}), at: numOrNull(b.at), ms: numOrNull(b.ms), used: numOrNull(b.used), max: numOrNull(b.max), stored: b.stored === true,
+    ...(isObj(b.result) ? { result: sanitizeSnapshotResult(b.result) } : {}),
+    ...(Array.isArray(b.snapshots) ? { snapshots: b.snapshots.slice(0, 200).filter(isObj).map(snapMeta) } : {}),
+    ...(isObj(b.snapshot) ? { snapshot: { ...snapMeta(b.snapshot), result: sanitizeSnapshotResult(b.snapshot.result) } } : {}),
+    ...(numOrNull(b.keepDays) != null ? { keepDays: numOrNull(b.keepDays) } : {}),
+    ...(b.running === true ? { running: true } : {}),
+  };
+}
+const snapBodyOk = (b) => isObj(b) && typeof b.code === 'string';
+/** 엣지에 스냅샷 실행을 맡긴다(한 번 — 재전송 없음). */
+export async function runEdgeSnapshot(agent, { key, reason, by } = {}) {
+  const r = await pullFromEdge(agent, '/api/collector/bm-usage/snapshot', {
+    method: 'POST', jsonBody: { key: capStr(String(key), 256), reason: capStr(String(reason), 300), by: capStr(String(by || ''), 64) }, retries: 0, timeoutMs: SNAPSHOT_PULL_TIMEOUT_MS,
+    minVersion: SNAPSHOT_MIN_EDGE_VERSION, what: '진단 스냅샷을 실행할', label: '엣지 스냅샷 응답', bodyOk: snapBodyOk, missing401: true,
+  });
+  if (!r.ok) return { ok: false, code: 'edge', kind: r.kind, reason: r.reason, ms: r.ms };
+  const body = sanitizeSnapshotBody(r.body);
+  return body ? { ...body, via: 'edge', agent } : { ok: false, code: 'edge', kind: 'bad-body', reason: '엣지 스냅샷 응답 형식이 다릅니다.' };
+}
+/** 엣지 보관 목록 · 하나(GET — 재시도 1). */
+export async function pullEdgeSnapshots(agent, { key, id = '' } = {}) {
+  const qs = new URLSearchParams({ key: String(key) });
+  if (id) qs.set('id', String(id));
+  const r = await pullFromEdge(agent, `/api/collector/bm-usage/${id ? 'snapshot' : 'snapshots'}?${qs.toString()}`, {
+    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: SNAPSHOT_MIN_EDGE_VERSION, what: '진단 스냅샷을 읽을', label: '엣지 스냅샷 응답', bodyOk: snapBodyOk, missing401: true,
+  });
+  if (!r.ok) return { ok: false, code: 'edge', kind: r.kind, reason: r.reason, ms: r.ms };
+  const body = sanitizeSnapshotBody(r.body);
+  return body ? { ...body, via: 'edge', agent } : { ok: false, code: 'edge', kind: 'bad-body', reason: '엣지 스냅샷 응답 형식이 다릅니다.' };
+}
