@@ -49,5 +49,6 @@ test('③ 데모 — 합성 포트와 백필 행(12칸)에 드롭', () => {
 test('④ 호스트 업링크 라우트 — 포트별 24시간 합(day) · 드롭', () => {
   const src = fs.readFileSync(new URL('../src/routes/api/hostSan.js', import.meta.url), 'utf8');
   assert.match(src, /cdb\.portWindowSums\(/);
-  assert.match(src, /inDrop: u\.inDrop \?\? null, outDrop: u\.outDrop \?\? null, day: sumOf\(u\)/);
+  // v2.925(B-③): day 는 dayOf(u)(최근 1시간 recent 를 떼고) · hour 는 따로 — 24시간 합 자체는 그대로다.
+  assert.match(src, /inDrop: u\.inDrop \?\? null, outDrop: u\.outDrop \?\? null, day: dayOf\(u\), hour: hourOf\(u\)/);
 });

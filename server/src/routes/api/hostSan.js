@@ -39,6 +39,7 @@ const invHosts = requirePerm('inv.hosts');
 const toolsPerm = requirePerm('tools');
 const fullScopeOnly = fullScopeOnlyWith('호스트 귀속(함대)은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 const EVENT_SINCE_MS = 24 * 3600_000;
+const HOUR_MS = 3600_000;   // v2.925(B-③): 업링크 최근 1시간 오류·드롭 합(ESXi 실시간 창과 맞춘다)
 const EVENTS_MAX = 20;
 const NOT_FOUND = { ok: false, error: '호스트를 찾을 수 없습니다.', reason: '호스트를 찾을 수 없습니다.' };
 
@@ -218,16 +219,19 @@ export function registerHostSan(api) {
     }
     // v2.923(B-①): 매칭 포트의 최근 24시간 오류·드롭 합(원시 표본 — 값이 없는 표본은 세지 않는다). 포트 16개 상한.
     let sums = new Map();
-    try { sums = await cdb.portWindowSums(m.uplinks.map((u) => ({ agent: u.agent, cvpId: u.cvpId, key: u.key, port: u.port })), { sinceMs: EVENT_SINCE_MS }); }
+    try { sums = await cdb.portWindowSums(m.uplinks.map((u) => ({ agent: u.agent, cvpId: u.cvpId, key: u.key, port: u.port })), { sinceMs: EVENT_SINCE_MS, recentMs: HOUR_MS }); }
     catch (e) { console.warn(`[hostsan] CVP 포트 24시간 합 조회 실패: ${e.message}`); }
     const sumOf = (u) => sums.get(`${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`) || null;
+    // v2.925(B-③): 최근 1시간 합은 hour 로 따로(ESXi vmnic 실시간 1시간과 같은 창 — 화면의 '어느 쪽 드롭' 판정). day 에는 싣지 않는다.
+    const dayOf = (u) => { const x = sumOf(u); if (!x) return null; const { recent, ...rest } = x; return rest; };
+    const hourOf = (u) => sumOf(u)?.recent || null;
     const vmMacs = (snap.vms || []).filter((v) => v.vcenterId === h.vcenterId && v.host === h.name).reduce((a, v) => a + ((v.dev?.nics || []).filter((n) => n?.mac).length), 0);
     res.set('Cache-Control', 'no-store').json({
       ok: true, host: { id: h.id, name: h.name, vcenterId: h.vcenterId },
       uplinks: m.uplinks.map((u) => ({ cvpId: u.cvpId, agent: u.agent, key: u.key, hostname: u.hostname, port: u.port, desc: u.desc ?? '', nic: u.nic, basis: u.basis, basisLabel: BASIS_LABEL[u.basis] || null,
         evidence: u.evidence || null, l2At: u.l2At ?? null, also: (u.also || []).slice(0, 4).map((x) => ({ basis: x.basis, label: BASIS_LABEL[x.basis]?.label || '', evidence: x.evidence || null })),
         oper: u.oper, admin: u.admin, speedBps: u.speedBps, vlan: u.vlan, lag: u.lag, inBps: u.inBps, outBps: u.outBps, inUtil: u.inUtil, outUtil: u.outUtil, inErr: u.inErr, outErr: u.outErr,
-        inDrop: u.inDrop ?? null, outDrop: u.outDrop ?? null, day: sumOf(u), rateTs: u.rateTs, ts: u.ts })),
+        inDrop: u.inDrop ?? null, outDrop: u.outDrop ?? null, day: dayOf(u), hour: hourOf(u), rateTs: u.rateTs, ts: u.ts })),
       conflicts: m.conflicts, terms: m.terms, events, eventsUnavailable, cvpUnavailable: !!q.unavailable, truncated: !!q.truncated,
       servers: matchServers.length, hostCorpMatched: !!hostCorp, vmNicMacs: vmMacs, corpLimited: corp != null, corpMissing: corp === '', direction: { in: '서버 송신', out: '서버 수신' },
       l2: l2Info,   // v2.924(B-②): { fdbDevices, lldpDevices, lastAt } — 0 이면 'LLDP·MAC 테이블 수집 전'(엣지 업그레이드 · 30분 주기) · error 면 조회 실패
