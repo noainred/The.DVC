@@ -19,12 +19,24 @@ import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-03: 엣지 �
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { sanitizePerfFields } from './bmPerfSanitize.js'; // v2.919: 리눅스 성능 항목 화이트리스트
-import { PERF_COL_NAMES } from '../bmusage/perfCols.js';
+import { PERF_COL_NAMES, PEAK_SQL_COLS, PEAK_SRC } from '../bmusage/perfCols.js';
+import { clampEdgeTs } from '../util/clampEdgeTs.js'; // v2.927(점검 A1-06): 피크 시각도 수신 시각으로 자른다
 /**
  * v2.919 — 행의 **새** 수치 열(리눅스 성능 열 + 두 경로 읽은 시각)은 수로 좁힌다('1.5' → 1.5 · 못 읽으면 null).
  * ⚠ 기존 9개 열은 예전 계약(원시값 그대로 — audit2604a CEN2604-03 이 고정)을 바꾸지 않는다.
  */
 const ROW_NUM_COLS = Object.freeze([...PERF_COL_NAMES, 'os_at', 'idrac_at']);
+/*
+ * v2.927(점검 A1-06 · E1-07): v2.922 가 최신값 행에 피크 열(<열>_peak · _peak_at)과 메타(peak_src · peak_window_s · peak_n · dev_over)를 더해
+ *   행이 65칸이 됐는데, 행도 대상과 같은 shallow(FIELD_MAX 64)를 거쳐 마지막 열 dev_over 가 **조용히** 빠졌다(sanitizeDropped 에도 안 셈).
+ *   행은 열 이름이 정해져 있으므로(bmusage/db.js PERF_TABLE_COLS.usage_latest) 상한을 행 전용으로 넉넉히 두고, 넘쳐 뺀 칸은 센다.
+ *   피크 값 · 창 · 개수 · dev_over 는 수로(문자열 수치 → 수 · 못 읽으면 null), *_peak_at 은 수신 시각으로 자르고(원본은 peakAtRaw),
+ *   peak_src 는 아는 값만(PEAK_SRC + 'mixed'). 열 목록과 실제 표의 대조는 시험(sweep2927Bm)이 PRAGMA 로 고정한다.
+ */
+const ROW_FIELD_MAX = 192;
+const PEAK_NUM_COLS = Object.freeze([...PEAK_SQL_COLS.map(([c]) => c).filter((c) => !c.endsWith('_peak_at')), 'peak_window_s', 'peak_n', 'dev_over']);
+const PEAK_AT_COLS = Object.freeze(PEAK_SQL_COLS.map(([c]) => c).filter((c) => c.endsWith('_peak_at')));
+const PEAK_SRC_SET = new Set([...PEAK_SRC, 'mixed']);
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
 export const MIN_EDGE_VERSION = '2.554.0';
@@ -79,11 +91,12 @@ function prim(v) {
   if (typeof v === 'boolean' || v === null) return v;
   return undefined;
 }
-function shallow(o, depth = 0) {
+function shallow(o, depth = 0, { max = FIELD_MAX, over = null } = {}) {
   const out = {};
   let n = 0;
   for (const k of Object.keys(o)) {
-    if (BAD_KEYS.has(k) || n >= FIELD_MAX) continue;
+    if (BAD_KEYS.has(k)) continue;
+    if (n >= max) { if (over) over.n += 1; continue; }
     const v = o[k];
     let c = prim(v);
     if (c === undefined && Array.isArray(v)) c = v.slice(0, FIELD_MAX).map(prim).filter((x) => x !== undefined);
@@ -116,14 +129,24 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
   const targets = objList(snap.targets, (x) => ({ ...shallow(x), key: strOf(x.key, 256), name: strOf(x.name, 256), vcenterId: strOf(x.vcenterId, 128) }));
   // v2.919: 행의 JSON 문자열 열(detail_json·tuning_json)은 받지 않는다 — 같은 내용은 perf 에 객체로 오고 그쪽을 화이트리스트로 정제한다.
   //   새 지표 열(성능 열 · 시각)은 **수로** 좁힌다(문자열 수치 '1.5' → 1.5 · 못 읽으면 null — 0 으로 두지 않는다).
+  const rowOver = { n: 0 };
   const rows = objList(snap.rows, (r) => {
-    const { detail_json: _d, tuning_json: _t, ...rest } = shallow(r);
+    const { detail_json: _d, tuning_json: _t, ...rest } = shallow(r, 0, { max: ROW_FIELD_MAX, over: rowOver });
     for (const c of ROW_NUM_COLS) if (Object.hasOwn(rest, c)) rest[c] = numOrNull(r[c]);
-    return { ...rest, key: strOf(r.key, 256), name: strOf(r.name, 256) };
+    for (const c of PEAK_NUM_COLS) if (Object.hasOwn(rest, c)) rest[c] = numOrNull(r[c]);
+    let raw = null;
+    for (const c of PEAK_AT_COLS) {
+      if (!Object.hasOwn(rest, c)) continue;
+      const v = numOrNull(r[c]); const cut = clampEdgeTs(v, receivedAt);
+      if (v != null && cut !== v) (raw ||= {})[c] = v;
+      rest[c] = cut;
+    }
+    if (Object.hasOwn(rest, 'peak_src')) rest.peak_src = PEAK_SRC_SET.has(rest.peak_src) ? rest.peak_src : null;
+    return { ...rest, ...(raw ? { peakAtRaw: raw } : {}), key: strOf(r.key, 256), name: strOf(r.name, 256) };
   });
   const pf = sanitizePerfFields(snap, receivedAt);   // v2.919(D3): 엣지 시각은 수신 시각으로 자른다
   const stops = objList(snap.authStops, (a) => ({ key: strOf(a.key, 256), path: strOf(a.path, 32), attempts: numOrNull(a.attempts), since: numOrNull(a.since), reason: strOf(a.reason, 300) }));
-  const dropped = targets.dropped + rows.dropped + stops.dropped + pf.dropped;
+  const dropped = targets.dropped + rows.dropped + stops.dropped + pf.dropped + rowOver.n;   // v2.927(A1-06): 행 칸 상한으로 뺀 칸도 센다
   return {
     node: { agent: strOf(node.agent, 128), version: strOf(node.version, 32), role: strOf(node.role, 16), datacenter: strOf(node.datacenter, 128) },
     at: numOrNull(snap.at),

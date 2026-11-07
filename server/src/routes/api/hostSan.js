@@ -159,7 +159,9 @@ export function registerHostSan(api) {
     const issue = toolIssue(req, 'cvp');
     if (issue) return res.status(403).json({ ok: false, error: 'forbidden', reason: issue.reason, tool: issue.tool });
     const corp = corpLimitOf(req, snap, h);
-    const servers = listCvpServers().filter((s) => corp == null || String(s.datacenterId || '') === corp);
+    // v2.927(점검 A1-03): 범위 계정 + 법인 미지정 vCenter(corp === '')는 CVP 를 하나도 보지 않는다(corpLimitOf 머리말 · 형제 san-attribution 과 같은 판정).
+    //   예전에는 '법인 미지정 CVP' 와 같다고 봐 다른 법인 호스트(같은 짧은 이름)의 포트가 나갔다. 전체 범위(corp == null)는 그대로.
+    const servers = corp === '' ? [] : listCvpServers().filter((s) => corp == null || String(s.datacenterId || '') === corp);
     /*
      * v2.924(반증 M-1): 매칭은 **그 호스트 법인의 CVP**(법인 · vCenter 1:1 — 루트 CLAUDE.md)와 법인 미지정 CVP 만 본다. 전체 범위 계정도 같다 —
      *   예전에는 전체 범위 계정이 모든 법인 CVP 를 봐서 다른 법인의 같은 짧은 이름 스위치 포트가 '확정' 으로 붙었다(재현). 호스트 법인을 모르면 예전처럼 볼 수 있는 전부.
@@ -168,8 +170,8 @@ export function registerHostSan(api) {
     const matchServers = hostCorp ? servers.filter((s) => !String(s.datacenterId || '') || String(s.datacenterId) === hostCorp) : servers;
     const own = rowOwnerOf(matchServers);
     const terms = hostMatchTerms(h);
-    const macForms = terms.macs.flatMap((m) => { const p = m.match(/../g); return [p.join(':'), p.join('-'), `${m.slice(0, 4)}.${m.slice(4, 8)}.${m.slice(8)}`, m]; });
-    const q = await cdb.portsByDesc([...terms.names, ...macForms]);
+    // v2.927(점검 A1-07): MAC 은 표기 4가지를 단서 4개로 늘리지 않고 portsByDesc 가 구분자를 뺀 한 표기로 묻는다(앞 8개만 묻던 상한 때문에 vmnic2 부터 빠졌다).
+    const q = matchServers.length ? await cdb.portsByDesc(terms.names, { macs: terms.macs }) : { rows: [] };
     const rows = (q.rows || []).filter(own);
     const md = matchUplinks(rows, h);
     /*
@@ -226,13 +228,27 @@ export function registerHostSan(api) {
     const dayOf = (u) => { const x = sumOf(u); if (!x) return null; const { recent, ...rest } = x; return rest; };
     const hourOf = (u) => sumOf(u)?.recent || null;
     const vmMacs = (snap.vms || []).filter((v) => v.vcenterId === h.vcenterId && v.host === h.name).reduce((a, v) => a + ((v.dev?.nics || []).filter((n) => n?.mac).length), 0);
+    /*
+     * v2.927(점검 A1-02): 포트 설명 · CVP 이벤트 제목/설명 · LLDP 근거 문구에는 피어 주소 · URL 이 흔하다 — CVP 화면(/tools/cvp/device · events ·
+     *   port-usage)과 bmPortsView 처럼 관리자가 아니면 가린다(같은 함수 cvp.maskErrText · 등록 CVP 주소 포함). 매칭은 위에서 원문으로 끝났다(응답 직전에만 가린다).
+     */
+    const admin = isAdminReq(req);
+    const { maskErrText } = admin ? { maskErrText: null } : await import('./cvp.js');
+    const cvpHosts = admin ? [] : listCvpServers().map((x) => x.host).filter(Boolean);
+    const mk = (v) => (admin || v == null ? v : maskErrText(String(v), cvpHosts));
+    const mkEv = (v) => {   // 근거는 문구(LLDP 이웃 이름 · MAC 테이블 요약)이거나 객체 — 글자 칸만 가린다
+      if (admin || v == null) return v;
+      if (typeof v === 'string') return mk(v);
+      return typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === 'string' ? mk(x) : x])) : v;
+    };
+    if (!admin) events = events.map((e) => ({ ...e, title: mk(e.title), desc: mk(e.desc) }));
     res.set('Cache-Control', 'no-store').json({
       ok: true, host: { id: h.id, name: h.name, vcenterId: h.vcenterId },
-      uplinks: m.uplinks.map((u) => ({ cvpId: u.cvpId, agent: u.agent, key: u.key, hostname: u.hostname, port: u.port, desc: u.desc ?? '', nic: u.nic, basis: u.basis, basisLabel: BASIS_LABEL[u.basis] || null,
-        evidence: u.evidence || null, l2At: u.l2At ?? null, also: (u.also || []).slice(0, 4).map((x) => ({ basis: x.basis, label: BASIS_LABEL[x.basis]?.label || '', evidence: x.evidence || null })),
+      uplinks: m.uplinks.map((u) => ({ cvpId: u.cvpId, agent: u.agent, key: u.key, hostname: u.hostname, port: u.port, desc: mk(u.desc ?? ''), nic: u.nic, basis: u.basis, basisLabel: BASIS_LABEL[u.basis] || null,
+        evidence: mkEv(u.evidence || null), l2At: u.l2At ?? null, also: (u.also || []).slice(0, 4).map((x) => ({ basis: x.basis, label: BASIS_LABEL[x.basis]?.label || '', evidence: mkEv(x.evidence || null) })),
         oper: u.oper, admin: u.admin, speedBps: u.speedBps, vlan: u.vlan, lag: u.lag, inBps: u.inBps, outBps: u.outBps, inUtil: u.inUtil, outUtil: u.outUtil, inErr: u.inErr, outErr: u.outErr,
         inDrop: u.inDrop ?? null, outDrop: u.outDrop ?? null, day: dayOf(u), hour: hourOf(u), rateTs: u.rateTs, ts: u.ts })),
-      conflicts: m.conflicts, terms: m.terms, events, eventsUnavailable, cvpUnavailable: !!q.unavailable, truncated: !!q.truncated,
+      conflicts: m.conflicts, terms: m.terms, events, eventsUnavailable, cvpUnavailable: !!q.unavailable, truncated: !!q.truncated, ...(q.termsTruncated ? { termsTruncated: true } : {}), ...(admin ? {} : { addressHidden: true }),
       servers: matchServers.length, hostCorpMatched: !!hostCorp, vmNicMacs: vmMacs, corpLimited: corp != null, corpMissing: corp === '', direction: { in: '서버 송신', out: '서버 수신' },
       l2: l2Info,   // v2.924(B-②): { fdbDevices, lldpDevices, lastAt } — 0 이면 'LLDP·MAC 테이블 수집 전'(엣지 업그레이드 · 30분 주기) · error 면 조회 실패
     });

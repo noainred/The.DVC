@@ -56,6 +56,8 @@ export function nicUplinkText(list) {
 export function uplinkSummary(d, nics = []) {
   if (!d) return { text: '', note: '' };
   if (d.cvpUnavailable) return { text: 'CVP DB 없음', note: 'CVP 수집 DB 를 열지 못했습니다.' };
+  // v2.927(점검 A1-03): 범위 계정 + 법인 미지정 vCenter 는 서버가 CVP 를 하나도 싣지 않는다 — '등록된 CVP 가 없다' 가 아니라 그 이유를 말한다.
+  if (!d.servers && d.corpMissing) return { text: 'CVP 없음', note: '범위 계정은 자기 법인의 CVP 만 봅니다 — 이 호스트의 vCenter 에 법인이 지정되지 않아 CVP 매칭을 보여 주지 않습니다(설정 › 법인).' };
   if (!d.servers) return { text: 'CVP 없음', note: d.corpLimited || d.hostCorpMatched ? '이 호스트 법인에 등록된 CVP 서버가 없습니다(매칭은 그 호스트 법인의 CVP 만 봅니다 — 법인 · vCenter 1:1).' : '등록된 CVP 서버가 없습니다(특수 기능 › Arista CloudVision).' };
   const ups = Array.isArray(d.uplinks) ? d.uplinks : [];
   const byNic = uplinksByNic(ups);
@@ -67,7 +69,7 @@ export function uplinkSummary(d, nics = []) {
   if (!ups.length) return { text: `CVP 매칭 0 / ${nicN} NIC`, note: `LLDP 이웃 · MAC 테이블 · 포트 설명 어디에서도 이 호스트(‘${d.terms?.short || ''}’ · NIC MAC · VM MAC)를 찾지 못했습니다. ${l2}` };
   // v2.924: 인벤토리에 물리 NIC 목록이 없으면 'n / 0 NIC' 대신 매칭한 포트 수로 말한다(Chromium 판독에서 발견).
   const head = nicN ? `CVP 매칭 ${byNic.size} / ${nicN} NIC${ups.length - [...byNic.values()].flat().length ? ` · 호스트 수준 ${hostLevelUplinks(ups).length}` : ''}` : `CVP 매칭 포트 ${ups.length}(인벤토리에 NIC 목록 없음)`;
-  return { text: head, note: `${basisText}${d.conflicts?.length ? ` · 충돌 ${d.conflicts.length}(같은 MAC 이 포트 3개 이상)` : ''}${d.truncated ? ' · 후보 상한 초과(일부만)' : ''} · ${l2}` };
+  return { text: head, note: `${basisText}${d.conflicts?.length ? ` · 충돌 ${d.conflicts.length}(같은 MAC 이 포트 3개 이상)` : ''}${d.truncated ? ' · 후보 상한 초과(일부만)' : ''}${d.termsTruncated ? ' · 찾을 단서가 많아 일부 NIC 의 MAC 은 설명에서 찾지 않음' : ''} · ${l2}` };
 }
 
 /**

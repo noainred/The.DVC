@@ -183,7 +183,14 @@ export function attributeHost(host, fabrics = [], { storageOf = null, portBytes 
           return [c.idn.id, sum];
         });
         const tot = wts.reduce((a, [, v]) => a + (v ?? 0), 0);
-        if (tot > 0) { conf = 'estimated'; shares = wts.map(([id, v]) => [id, (v ?? 0) / tot]); basis += ` · 후보 ${cands.size}개 — 타깃 포트 바이트 비율로 분배`; }
+        /*
+         * v2.927(점검 A1-04): 후보 중 하나라도 타깃 포트 바이트를 **읽지 못했으면**(첫 수집 · 수집 공백 · 타깃이 같은 패브릭의 다른 스위치) 나누지 않는다.
+         *   예전에는 못 읽은 후보를 0 으로 더해 그 후보 share 0 · estimatedBytes 0 B, 측정된 후보에 share 1 을 몰아줬다('못 읽은 값은 0 이 아니다').
+         *   측정된 후보만으로 나누면 여전히 과귀속이라(반증) unsplit 로 두고 몇 개를 못 읽었는지 근거에 밝힌다.
+         */
+        const unread = wts.filter(([, v]) => v == null).length;
+        if (tot > 0 && !unread) { conf = 'estimated'; shares = wts.map(([id, v]) => [id, v / tot]); basis += ` · 후보 ${cands.size}개 — 타깃 포트 바이트 비율로 분배`; }
+        else if (unread && unread < wts.length) { conf = 'unsplit'; basis += ` · 후보 ${cands.size}개 — 그중 ${unread}개의 타깃 포트 바이트를 읽지 못해 나누지 못함`; }
         else { conf = 'unsplit'; basis += ` · 후보 ${cands.size}개 — 타깃 포트 바이트가 없어 나누지 못함`; }
       }
       const row = {
