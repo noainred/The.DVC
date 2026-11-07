@@ -32,7 +32,7 @@ import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { listAssignments, noteExpectMs } from './svcmonAssign.js';
-import { noteResult } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림
+import { noteResult, noteAlertOnly } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림 · v2.926 보류 재판정
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -68,9 +68,37 @@ let agents = Object.create(null);   // null-proto: agent 이름이 '__proto__' �
 const text = (v, n) => (typeof v === 'string' ? capStr(v, n) : '');
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+/**
+ * v2.926(반증 재검토 N1 — 재현): 엣지 알림 키는 (경로 · 대상 이름 · 점검 이름)인데 **점검 이름은 유일하지 않다**(마법사 기본 이름 —
+ *   TCP 22·443 둘 다 'TCP 포트 열림'). 같은 이름 키를 가진 메타가 둘 이상이면 그 행은 testId 키로 떨어뜨려야 한다 — 그 개수를 엣지별로 센다.
+ */
+const nameKeyOfMeta = (m) => (m ? `${m.p}\u0001${m.n}\u0001${m.t}` : '');
+function metaSet(a, id, m) {
+  const prev = a.meta.get(id);
+  if (prev) { const k = nameKeyOfMeta(prev); const c = (a.nameCount.get(k) || 0) - 1; if (c > 0) a.nameCount.set(k, c); else a.nameCount.delete(k); }
+  a.meta.set(id, m);
+  const k = nameKeyOfMeta(m); a.nameCount.set(k, (a.nameCount.get(k) || 0) + 1);
+}
+function metaDelete(a, id) {
+  const prev = a.meta.get(id);
+  if (!prev) return;
+  const k = nameKeyOfMeta(prev); const c = (a.nameCount.get(k) || 0) - 1;
+  if (c > 0) a.nameCount.set(k, c); else a.nameCount.delete(k);
+  a.meta.delete(id);
+}
+/** 알림 판정용 대상·점검 정보 — 이름 키가 겹치면 dupName(=testId 키로). 메타가 없으면 이름 없이(판정 보류). */
+function alertInfoOf(a, id) {
+  const mm = a.meta.get(id);
+  return {
+    target: { name: mm?.n, path: mm?.p, host: mm?.h },
+    test: { name: mm?.t, type: mm?.y, dupName: !!mm && (a.nameCount.get(nameKeyOfMeta(mm)) || 0) > 1 },
+  };
+}
+
 function blank(agent) {
   return {
     agent,
+    nameCount: new Map(),   // v2.926: 메타 이름 키 → 개수(알림 키 충돌 판정)
     firstAt: 0,
     lastAt: 0,
     lastSnapId: 0,
@@ -154,6 +182,7 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   let accepted = 0;
   let dropped = 0;
   const rows = Array.isArray(body?.rows) ? body.rows : [];
+  const heldIds = [];   // v2.926(N2): 메타 없이 들어와 알림 판정이 보류된 행
   for (const r of rows) {
     const id = text(r?.i, 64);
     if (!id) { dropped += 1; a.counters.badRow += 1; continue; }
@@ -185,9 +214,10 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     //   (반증 M5 — 재현: measuredAt = 수신 시각 − 구간값이라 전송 지연만큼 ms 단위로 흔들린다). 새 측정은 상태가 바뀌거나 연속 횟수(k)가 바뀐다.
     const row = a.rows.get(id);
     if (!prev || prev.s !== row.s || prev.k !== row.k) {
-      const mm = a.meta.get(id);
-      noteResult({ at: measuredAt, scope: a.agent, testId: id, prev: prev?.s || null, status: row.s, reply: row.r, ms: row.m, streak: row.k,
-        target: { name: mm?.n, path: mm?.p, host: mm?.h }, test: { name: mm?.t, type: mm?.y } });
+      const info = alertInfoOf(a, id);
+      noteResult({ at: measuredAt, scope: a.agent, testId: id, prev: prev?.s || null, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info });
+      // 메타가 아직 없으면(중앙 재시작 직후) 알림 판정이 보류된다 — 이 요청에 메타가 함께 왔으면 아래에서 다시 판정한다(N2).
+      if (!info.target.name || !info.test.name) heldIds.push(id);
     }
     accepted += 1;
   }
@@ -207,12 +237,19 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
         a.counters.metaOverflow = (a.counters.metaOverflow || 0) + 1;
         continue;
       }
-      a.meta.set(id, {
+      metaSet(a, id, {
         p: text(m?.p, 620), n: text(m?.n, 120), h: text(m?.h, 253),
         t: text(m?.t, 80), y: text(m?.y, 16), iv: num(m?.iv) || 60,
       });
     }
     a.metaSig = text(body?.metaSig, 64);
+  }
+  // v2.926(반증 재검토 N2): 메타 없이 보류됐던 행은 같은 요청에 메타가 왔으면 지금 다시 판정한다 — 같은 측정의 재전송은 다시 세지
+  //   않으므로(M5) 여기서 놓치면 다음 측정(인증서·도메인은 하루)까지 알림이 늦었다. 시간별 집계·전이 이력은 이미 셌다(알림만).
+  for (const id of heldIds) {
+    const row = a.rows.get(id);
+    if (!row || !a.meta.has(id)) continue;
+    noteAlertOnly({ at: row.measuredAt, scope: a.agent, testId: id, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...alertInfoOf(a, id) });
   }
 
   // 스냅샷 완결: 마지막 청크를 받으면 이번/직전 완결 스냅샷에 속하지 않은 행을 정리한다
@@ -247,7 +284,7 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
       for (const [id, row] of a.rows) {
         if (row.snapId !== snapId && row.snapId !== keepPrev) a.rows.delete(id);
       }
-      for (const id of a.meta.keys()) if (!a.rows.has(id)) a.meta.delete(id);
+      for (const id of [...a.meta.keys()]) if (!a.rows.has(id)) metaDelete(a, id);
       a.prevCompleteSnapId = snapId;
       if (regressReset) { a.regressSince = 0; a.regressPrevSnapId = 0; a.counters.regressResets = (a.counters.regressResets || 0) + 1; }
     }

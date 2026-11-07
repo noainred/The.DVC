@@ -20,7 +20,7 @@ import { recordBatch } from '../../svcmon/batches.js';
 import { buildDashAsync } from '../../svcmon/dash.js';
 import { recentTransitions, hourlySeries, getAlertSettings, saveAlertSettings, alertStats, transitionsSince } from '../../svcmon/transitions.js';
 import { getResults, executesHere, pollerRole } from '../../svcmon/poller.js';
-import { edgeSummary, edgeState, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
+import { edgeSummary, edgeState, listAgentNames, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
 import { listAssignments, setAssignment, DEFAULT_EXCEPT_TYPES } from '../../central/svcmonAssign.js';
 import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
 
@@ -80,7 +80,7 @@ let _dashBuilds = 0;        // 테스트 전용 — 실제 계산 횟수
  */
 async function computeDash(now) {
   _dashBuilds += 1;
-  const agents = edgeSummary(now).map((e) => e.agent);
+  const agents = listAgentNames();   // 이름만 — edgeSummary 는 전 행을 순회한다(반증 재검토 N3: 1.28M 행 301ms). 엣지 표(edgeRows)에서 한 번만 돈다.
   const dash = await buildDashAsync({
     targets: listTargets(), results: getResults(), agents, now, executes: executesHere(),
     edgeItemsOf: (agent) => edgeState(agent, { limit: MAX_ROWS_PER_AGENT, sort: false }, now)?.items || [],
@@ -191,7 +191,8 @@ svcmonRouter.get('/overview', async (req, res) => {
   if (_dashMemo && _dashMemo.key === key) return res.json(_dashMemo.body);
   if (!_dashInflight || _dashInflight.key !== key) {
     const promise = computeDash(now)
-      .then((body) => { _dashMemo = { key, at: now, body }; return body; })
+      // 늦게 끝난 옛 계산이 더 새 캐시를 덮지 않게(반증 재검토 L1).
+      .then((body) => { if (!_dashMemo || _dashMemo.at <= now) _dashMemo = { key, at: now, body }; return body; })
       .finally(() => { if (_dashInflight?.promise === promise) _dashInflight = null; });
     _dashInflight = { key, promise };
   }

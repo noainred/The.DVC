@@ -62,6 +62,7 @@ export function createDashAcc({ targets = [] } = {}) {
   for (const s of DASH_STATES) summary[s] = 0;
   const byOrigin = new Map();        // kind -> { kind, total, worst, counts }
   const hexByTarget = new Map();     // `${where}|${targetKey}` -> { id, targetKind, name, group, state, where, kind }
+  const buckets = new Map();         // group -> hex[] (v2.926: 전체 hex 를 한 번에 localeCompare 정렬하지 않는다 — 반증 재검토 N3)
   const slow = []; const streaks = []; const certs = [];
 
   // 엣지 행 → 중앙 대상(출처) 조인 키 — 엣지 사본은 경로·이름이 같다(배정 스냅샷).
@@ -81,6 +82,8 @@ export function createDashAcc({ targets = [] } = {}) {
       // id·targetKind 는 화면이 개요 → 트리로 그 대상을 바로 고르는 데 쓴다(v2.926). 중앙 저장소에 없는 엣지 행은 id 가 없다.
       h = { id: tg?.id || '', targetKind: tg?.kind || '', name: targetName, group: tg ? groupOfTarget(tg) : (t(path).split('\\')[0] || '(루트)'), state: 'disabled', where, kind };
       hexByTarget.set(hk, h);
+      const b = buckets.get(h.group);
+      if (b) b.push(h); else buckets.set(h.group, [h]);
     }
     h.state = worstOf(h.state, state);
     const m = Number.isFinite(ms) ? ms : null;
@@ -93,19 +96,32 @@ export function createDashAcc({ targets = [] } = {}) {
     }
   };
 
+  /*
+   * v2.926(반증 재검토 N3 — 실측: 50k hex localeCompare 정렬 71~153ms · 400k 0.84~1.44초 동기): 그룹은 add 에서 이미 묶였고,
+   *   그룹 순서 → 그룹 안 이름 순서로 **HEX_MAX 가 찰 때까지만** 정렬한다. 비교는 코드 단위(cmp) — 한글 음절은 유니코드가 가나다 순이고
+   *   localeCompare 보다 훨씬 싸다(대소문자는 대문자가 먼저 — 표시 순서만 다르다).
+   */
+  const cmp = (a, b) => (a < b ? -1 : (a > b ? 1 : 0));
   const finish = () => {
-    const hexes = [...hexByTarget.values()].sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name));
-    const groups = new Map();
-    for (const h of hexes) {
-      const g = groups.get(h.group) || { group: h.group, total: 0, worst: 'disabled', counts: {} };
-      g.total += 1; g.counts[h.state] = (g.counts[h.state] || 0) + 1; g.worst = worstOf(g.worst, h.state);
-      groups.set(h.group, g);
+    const groups = [];
+    let hexTotal = 0;
+    for (const [group, list] of buckets) {
+      const g = { group, total: list.length, worst: 'disabled', counts: {} };
+      for (const h of list) { g.counts[h.state] = (g.counts[h.state] || 0) + 1; g.worst = worstOf(g.worst, h.state); }
+      groups.push(g);
+      hexTotal += list.length;
+    }
+    const hexes = [];
+    for (const group of [...buckets.keys()].sort(cmp)) {
+      if (hexes.length >= HEX_MAX) break;
+      const list = buckets.get(group).slice().sort((a, b) => cmp(a.name, b.name));
+      for (const h of list) { if (hexes.length >= HEX_MAX) break; hexes.push(h); }
     }
     return {
       summary,
       byOrigin: [...byOrigin.values()].sort((a, b) => (RANK[b.worst] - RANK[a.worst]) || b.total - a.total),
-      groups: [...groups.values()].sort((a, b) => (RANK[b.worst] - RANK[a.worst]) || a.group.localeCompare(b.group)),
-      hexes: hexes.slice(0, HEX_MAX), hexTotal: hexes.length, hexTruncated: hexes.length > HEX_MAX,
+      groups: groups.sort((a, b) => (RANK[b.worst] - RANK[a.worst]) || cmp(a.group, b.group)),
+      hexes, hexTotal, hexTruncated: hexTotal > HEX_MAX,
       slow, streaks, certs,
     };
   };

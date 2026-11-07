@@ -87,11 +87,12 @@ test('엣지 알림 키는 이름 기준 — 재배정으로 점검 id 가 바�
   TR.noteResult({ scope: 'edge-a', testId: 'old-1', status: 'bad', streak: 5, target: {}, test: {} });
   await TR.flushAlerts();
   assert.equal(sent.length, 0);
-  assert.ok(TR.alertStats().metaPending >= 1);
+  assert.equal(TR.alertStats().metaPending, 1, '지금 보류 중인 수(누적이 아니다)');
   // 메타가 온 다음 결과 — 누적 연속 횟수로 바로 판정, 라벨은 이름
   TR.noteResult({ ...named, testId: 'old-1', prev: 'bad', status: 'bad', streak: 6 });
   await TR.flushAlerts();
   assert.equal(sent.length, 1);
+  assert.equal(TR.alertStats().metaPending, 0, '판정되면 보류에서 빠진다');
   assert.match(sent[0].title, /vc-a › TCP 443/);
   // 배정 재스냅샷 — 같은 점검에 새 id. 실패가 이어져도 다시 알리지 않는다
   TR.noteResult({ ...named, testId: 'new-7', status: 'bad', streak: 7 });
@@ -140,3 +141,59 @@ test('트리 표 열 최소폭 합이 1440px 오른쪽 표 폭 안에 든다(TES
   const tableMin = Number(/\.pc-table \{ min-width: (\d+)px; \}/.exec(css)?.[1]);
   assert.ok(tableMin <= 790 && tableMin >= sum, `표 최소폭 ${tableMin}px`);
 });
+
+/* ── 반증 재검토(v2.926) ── */
+test('N1 — 같은 이름의 점검 둘(TCP 22·443 이 둘 다 같은 기본 이름)은 testId 키로 갈라져 거짓 복구가 나가지 않는다', async () => {
+  const sent = [];
+  TR._resetTransitionsForTest({ send: async (a) => { sent.push(a); } });
+  TR._setAlertSettingsForTest({ enabled: true, failCount: 1, recover: true });
+  const { ingestReport } = await import('../src/central/svcmonEdge.js');
+  const now = Date.now();
+  const meta = [
+    { i: 'A', p: 'P', n: 'srv1', h: 'h', t: 'TCP 포트 열림', y: 'tcp', iv: 60 },
+    { i: 'B', p: 'P', n: 'srv1', h: 'h', t: 'TCP 포트 열림', y: 'tcp', iv: 60 },
+  ];
+  // 첫 push 는 결과 + 메타(중앙이 needMeta 로 요청한 회차). 이후 회차는 결과만 — 실제 흐름과 같다.
+  ingestReport('edge-dup', { snapId: 1, rows: [{ i: 'A', s: 'bad', r: 'refused', m: null, k: 1, a: 0 }, { i: 'B', s: 'ok', r: '2ms', m: 2, k: 1, a: 0 }], meta }, now);
+  for (let k = 2; k <= 5; k++) {
+    ingestReport('edge-dup', { snapId: 1 + k, rows: [{ i: 'A', s: 'bad', r: 'refused', m: null, k, a: 0 }, { i: 'B', s: 'ok', r: '2ms', m: 2, k, a: 0 }] }, now + k * 60_000);
+  }
+  await TR.flushAlerts();
+  assert.equal(sent.filter((a) => a.severity === 'critical').length, 1, '실패는 한 번');
+  assert.equal(sent.filter((a) => a.severity === 'info').length, 0, '실패 중인 A 에 거짓 복구가 나가면 안 된다');
+  assert.notEqual(TR.alertKeyOf({ scope: 'e', testId: 'A', target: { name: 'n', path: 'p' }, test: { name: 't', dupName: true } }),
+    TR.alertKeyOf({ scope: 'e', testId: 'B', target: { name: 'n', path: 'p' }, test: { name: 't', dupName: true } }));
+  // 구분자는 제어 문자 — 이름의 '|' 와 섞이지 않는다
+  assert.notEqual(TR.alertKeyOf({ scope: 'e', target: { name: 'a|b', path: 'p' }, test: { name: 'c' } }), TR.alertKeyOf({ scope: 'e', target: { name: 'a', path: 'p' }, test: { name: 'b|c' } }));
+});
+
+test('N2 — 메타 없이 온 결과는 같은 요청에 메타가 함께 오면 바로 판정된다(다음 측정까지 기다리지 않는다)', async () => {
+  const sent = [];
+  TR._resetTransitionsForTest({ send: async (a) => { sent.push(a); } });
+  TR._setAlertSettingsForTest({ enabled: true, failCount: 3 });
+  const { ingestReport } = await import('../src/central/svcmonEdge.js');
+  const now = Date.now();
+  ingestReport('edge-late', { snapId: 10, rows: [{ i: 'X', s: 'bad', r: 'cert expired', m: null, k: 5, a: 0 }],
+    meta: [{ i: 'X', p: 'P2', n: 'web1', h: 'h', t: '인증서 만료(443)', y: 'cert', iv: 86400 }] }, now);
+  await TR.flushAlerts();
+  assert.equal(sent.length, 1, '메타가 같은 요청에 왔으면 그 자리에서 판정');
+  assert.match(sent[0].title, /web1 › 인증서 만료/);
+  assert.equal(TR.alertStats().metaPending, 0);
+  assert.equal(TR.hourlySeries(now).at(-1).n, 1, '재판정은 시간별 집계를 다시 세지 않는다');
+});
+
+test('N3 — 호스트 맵은 그룹 순서·이름 순서로 상한까지만 정렬하고 합계는 전체를 센다', () => {
+  const targets = []; const results = new Map(); const now = Date.now();
+  for (let i = 0; i < D.HEX_MAX + 300; i++) {
+    targets.push({ id: `h${i}`, kind: 'infra', name: `n${String(i).padStart(5, '0')}`, host: 'x', path: i % 2 ? '나' : '가', enabled: true, tests: [{ id: `x${i}`, name: 'p', type: 'ping', intervalSec: 60 }] });
+    results.set(`x${i}`, { status: 'ok', ts: now, streak: 1 });
+  }
+  const d = D.buildDash({ targets, results, edgeStates: [], now });
+  assert.equal(d.hexTotal, D.HEX_MAX + 300);
+  assert.equal(d.hexes.length, D.HEX_MAX);
+  assert.equal(d.hexTruncated, true);
+  assert.equal(d.hexes[0].group, '가', '그룹 순서(가 → 나)');
+  assert.ok(d.hexes.slice(0, 10).every((h, i, a) => i === 0 || a[i - 1].name <= h.name), '그룹 안은 이름 순서');
+  assert.deepEqual(d.groups.map((g) => [g.group, g.total]).sort(), [['가', (D.HEX_MAX + 300) / 2], ['나', (D.HEX_MAX + 300) / 2]]);
+});
+

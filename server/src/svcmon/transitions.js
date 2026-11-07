@@ -100,23 +100,43 @@ export function noteResult(r) {
 /**
  * 알림 키 — 직접 실행(scope '')은 testId(저장소 id — 안정). 엣지 행은 **(엣지 · 경로 · 대상 이름 · 점검 이름)** 으로 묶는다(v2.926 —
  * 반증 낮음: 엣지는 배정을 다시 굳힐 때마다 점검 id 를 새로 발급해, 실패가 이어지는 점검을 '처음 실패' 로 또 알렸고 옛 키가 남았다).
+ * ⚠ 점검 이름은 유일하지 않다(반증 재검토 N1 — 재현: 마법사 기본 이름으로 TCP 22·443 이 둘 다 'TCP 포트 열림' → 한쪽 실패를 다른 쪽
+ *   정상이 '복구' 로 지워 실패/복구가 번갈아 나갔다). 엣지가 같은 이름 키를 둘 이상 가지면(`test.dupName` — svcmonEdge 가 센다) 그 행은
+ *   **testId 키**로 떨어뜨린다(재배정 때 한 번 더 알릴 수 있지만 거짓 복구는 없다). 구분자는 제어 문자(\u0001) — 이름·경로의 '|' 와 섞이지 않게.
  * 엣지 메타(이름)를 아직 모르면(중앙 재시작 직후 — 메타는 다음 push 에 온다) **null = 판정 보류** — 이름 없이 내부 id 로 알리지 않는다.
- * 엣지가 보내는 연속 횟수(k)는 누적값이라 메타가 온 다음 결과에서 바로 판정된다.
  */
+const SEP = '\u0001';
 export function alertKeyOf(x) {
   if (!t(x?.scope)) return `|${t(x?.testId)}`;
   const tn = t(x?.target?.name); const sn = t(x?.test?.name);
   if (!tn || !sn) return null;
-  return `${t(x.scope)}|${t(x?.target?.path)}|${tn}|${sn}`;
+  if (x?.test?.dupName) return `${t(x.scope)}${SEP}#${t(x?.testId)}`;
+  return [t(x.scope), t(x?.target?.path), tn, sn].join(SEP);
 }
-let _metaPending = 0;
+/** 지금 판정 보류 중인 (엣지 · 점검 id) — 메타가 와서 판정되면 빠진다(누적 수가 아니라 현재 수 — 반증 재검토 N2). */
+const _held = new Set();
+const HELD_MAX = 50_000;
+
+/**
+ * 알림 판정만(시간별 집계·전이 이력은 이미 셌을 때) — 엣지 메타가 늦게 와 보류됐던 결과를 다시 판정한다(svcmonEdge ingestReport).
+ * 던지지 않는다.
+ */
+export function noteAlertOnly(r) {
+  try {
+    const status = t(r?.status); const testId = t(r?.testId);
+    if (!testId || !status) return;
+    evalAlert({ at: Number(r?.at) || Date.now(), scope: t(r?.scope), testId, status, streak: Number(r?.streak) || 1, reply: t(r?.reply), target: r?.target || {}, test: r?.test || {} });
+  } catch { /* 알림은 부가 정보 */ }
+}
 
 function evalAlert(x) {
   const s = getAlertSettings();
   if (!s.enabled) return;
   if (!inScope(s, x.target?.path)) return;
   const key = alertKeyOf(x);
-  if (!key) { _metaPending += 1; return; }
+  const heldKey = `${x.scope}${SEP}${x.testId}`;
+  if (!key) { if (_held.size < HELD_MAX) _held.add(heldKey); return; }
+  _held.delete(heldKey);
   const label = `${t(x.target?.name) || t(x.target?.host) || x.testId} › ${t(x.test?.name) || t(x.test?.type)}`;
   const where = x.scope ? `엣지 ${x.scope}` : '이 포탈';
   if (x.status === 'bad') {
@@ -225,7 +245,7 @@ export function hourlySeries(now = Date.now()) {
 }
 
 export function alertStats() {
-  return { alerted: _alerted.size, warned: _warned.size, queued: _queue.length, metaPending: _metaPending, ..._sentStats };
+  return { alerted: _alerted.size, warned: _warned.size, queued: _queue.length, metaPending: _held.size, ..._sentStats };
 }
 /** 기동 시각 — 화면이 '재시작 이후' 임을 밝힌다. */
 const _startedAt = Date.now();
@@ -233,7 +253,7 @@ export function transitionsSince() { return _startedAt; }
 
 /** 테스트 전용. */
 export function _resetTransitionsForTest({ send = null } = {}) {
-  _ring = []; _hours.clear(); _alerted.clear(); _warned.clear(); _queue = []; _setAlertSettingsCache(null); _send = send; _metaPending = 0;
+  _ring = []; _hours.clear(); _alerted.clear(); _warned.clear(); _queue = []; _setAlertSettingsCache(null); _send = send; _held.clear();
   if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; }
   _sentStats = { individual: 0, summaries: 0, lastAt: 0 };
 }

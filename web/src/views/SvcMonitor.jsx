@@ -516,8 +516,14 @@ export default function SvcMonitor() {
         <OverviewDash onPickTarget={(h) => {
           // 중앙 저장소의 대상이면 그 대상을 바로 고른다(구분·검색을 맞춘다). 엣지에만 있는 행이면 이름으로 트리 검색만 채운다.
           setView('tree'); doReset();
-          if (h?.id) { if (h.targetKind === 'infra' || h.targetKind === 'service') setMode(h.targetKind); setSel(`target:${h.id}`); jumpRef.current = true; }
-          else setTreeQ(h?.name || '');
+          // 불러온 대상(상한 안)이면 그 대상을 고르고 조상 폴더를 펼친다 — 접힌 폴더 안이면 줄이 안 보였다(반증 재검토 L6).
+          //   목록 밖(상한 2000 초과)이거나 엣지에만 있는 행이면 이름 검색으로 내려간다.
+          const tg = h?.id ? allTargets.find((x) => x.id === h.id) : null;
+          if (tg) {
+            if (tg.kind === 'infra' || tg.kind === 'service') setMode(tg.kind);
+            setExpanded((e) => { const n = { ...e }; let acc = ''; for (const seg of String(tg.path || '').split('\\').filter(Boolean)) { acc = acc ? `${acc}\\${seg}` : seg; delete n[acc]; } return n; });
+            setSel(`target:${tg.id}`); jumpRef.current = true;
+          } else setTreeQ(h?.name || '');
         }} />
       </div>
     );
