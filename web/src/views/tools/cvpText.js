@@ -284,6 +284,8 @@ export const ITEM_LABEL = {
   // v2.641 추가 항목
   enrich: '장비 상태(레거시 인벤토리)', lifecycle: '수명주기(EOL)', bugs: '버그·CVE 노출', events: '이벤트', eventsCapped: '이벤트 상한',
   cpu: 'CPU', memory: '메모리',
+  // v2.924 추가 항목(호스트 업링크 매칭 근거)
+  lldp: 'LLDP 이웃', fdb: 'MAC 테이블',
 };
 export const itemLabel = (k) => ITEM_LABEL[k] || String(k);
 

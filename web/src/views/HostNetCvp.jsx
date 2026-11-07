@@ -1,7 +1,7 @@
 // 호스트 상세 ‘네트워크’ 카드의 CVP 업링크 블록(v2.920 — 시안 D-② HostNet). 매칭 포트 타일(송신·수신·에러) + 그 장비의 24h 이벤트.
 //   데이터는 HostDetail 이 받아 넘긴다(/hosts/:id/net-uplinks — NIC 표의 CVP 열과 같은 응답). 문구는 hostNetText.js(순수).
 import React from 'react';
-import { basisOf, bpsText, errText, dropText, daySumText, speedText, portLabel, uplinkSummary, uplinkTotals, SEVERITY_BADGE, eventTimeText } from './hostNetText.js';
+import { basisOf, bpsText, errText, dropText, daySumText, speedText, portLabel, uplinkSummary, uplinkTotals, SEVERITY_BADGE, eventTimeText, ageText, L2_STALE_MS } from './hostNetText.js';
 import { agoText } from './tools/relTime.js';
 
 export default function HostNetCvp({ data, nics = [] }) {
@@ -33,6 +33,7 @@ export default function HostNetCvp({ data, nics = [] }) {
                     <b style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{portLabel(u)}</b>
                     <span className={`badge ${b.tone}`} style={{ flex: 'none' }}>{b.label}</span>
                   </div>
+                  {u.evidence ? <div className="muted" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={[u.evidence, ...(u.also || []).map((x) => `${x.label} — ${x.evidence || ''}`)].join('\n')}>근거 {u.evidence}{u.also?.length ? ` 외 ${u.also.length}` : ''}{u.l2At ? ` · ${ageText(u.l2At)}` : ''}{u.l2At && Date.now() - u.l2At > L2_STALE_MS ? <span style={{ color: 'var(--amber)' }}> · 오래됨</span> : null}</div> : null}
                   <div className="muted" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.nic ? `${u.nic} · ` : 'NIC 미확정 · '}{u.oper === 'up' ? 'Up' : u.oper === 'down' ? 'Down' : u.oper || '—'} · {speedText(u.speedBps)}{u.lag ? ` · ${u.lag}` : ''}</div>
                   <div style={{ marginTop: 4 }}>송신 <b>{bpsText(u.inBps)}</b> · 수신 <b>{bpsText(u.outBps)}</b></div>
                   <div className="muted" style={{ fontSize: 11 }}>에러 in/out {errText(u)} · 드롭 in/out {dropText(u)} · 측정 {agoText(u.rateTs ?? u.ts)}</div>
@@ -58,7 +59,7 @@ export default function HostNetCvp({ data, nics = [] }) {
         </div>
       )}
       {ups.length > 0 && !data.events?.length && !data.eventsUnavailable && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>매칭 스위치의 최근 24시간 CVP 이벤트 없음</div>}
-      {data.vmNicMacs > 0 && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>이 호스트 VM 의 vNIC MAC {data.vmNicMacs}개 — 스위치 MAC 테이블 수집(다음 단계)에서 매칭 근거로 씁니다</div>}
+      {data.vmNicMacs > 0 && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>이 호스트 VM 의 vNIC MAC {data.vmNicMacs}개를 스위치 MAC 테이블과 대조합니다(그 포트 학습의 절반 이상이 이 호스트 것일 때만 근거로 씁니다)</div>}
     </div>
   );
 }

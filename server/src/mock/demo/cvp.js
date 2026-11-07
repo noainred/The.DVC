@@ -239,6 +239,7 @@ export async function demoCvpCollect(srv, { now = Date.now(), optics = {} } = {}
   const P = await import('../../cvp/parse.js');
   const specs = demoSwitchSpecs(srv);
   const devices = specs.map((sw) => demoCvpDevice(sw, now, { optics, P }));
+  await demoL2(srv, devices, now);   // v2.924(SAN·CVP 설계 B-②) — LLDP 이웃 · MAC 테이블(데모 호스트 이름 · VM MAC)
   const idx = Number(String(srv?.id || '').replace(/\D+/g, '')) || 1;
   return {
     ok: true, error: null, demo: true, devices,
@@ -246,6 +247,45 @@ export async function demoCvpCollect(srv, { now = Date.now(), optics = {} } = {}
     cvpVersion: CVP_VERSIONS[(idx - 1) % CVP_VERSIONS.length],
     events: demoCvpEvents(srv, specs, now), inventoryComplete: true,
   };
+}
+
+/**
+ * v2.924(B-②) 데모 L2 — 이 CVP 법인(datacenterId)의 데모 vCenter 호스트를 leaf 스위치의 서버 쪽 포트에 둘씩 붙인다:
+ *   LLDP 이웃(시스템 이름 = 호스트 이름 · 포트 ID = vmnic0/vmnic1) · MAC 테이블(vmnic0 포트에 그 호스트 VM 의 vNIC MAC 최대 16개 · VLAN 100).
+ *   호스트 상세의 CVP 업링크 블록이 데모에서도 '확정(LLDP)' · '높음(VM MAC)' 근거를 보여 준다. 스냅샷·법인 지정이 아직 없으면 싣지 않는다(undefined — 저장소를 건드리지 않음).
+ */
+async function demoL2(srv, devices, now) {
+  let hosts = []; let vms = [];
+  try {
+    const { store } = await import('../../store.js');
+    const { datacenterOfVcenter } = await import('../../datacenter/store.js');
+    const snap = store.get();
+    const vcs = new Set((snap?.vcenters || []).filter((v) => String(datacenterOfVcenter(v.id) || '') === String(srv?.datacenterId || '')).map((v) => v.id));
+    if (!vcs.size) return;
+    hosts = (snap.hosts || []).filter((h) => vcs.has(h.vcenterId)).slice(0, 64);
+    vms = snap.vms || [];
+  } catch { return; }
+  const leaves = devices.filter((d) => d.telemetry === 'ok' && /-leaf-/.test(String(d.hostname || '')));
+  if (!leaves.length) return;
+  for (const d of leaves) { d.lldp = []; d.fdb = []; d.fdbMeta = { truncated: 0, portsOverCap: [], total: 0 }; d.l2At = now; }
+  const slots = [];
+  for (const d of leaves) for (const p of d.ports || []) if (p.oper === 'up' && !/\/1$/.test(p.name)) slots.push({ d, p });
+  if (slots.length < 2) return;
+  hosts.forEach((h, i) => {
+    const a = slots[(2 * i) % slots.length]; const b = slots[(2 * i + 1) % slots.length];
+    a.d.lldp.push({ port: a.p.name, idx: '1', sysName: h.name, portId: 'vmnic0', portDesc: 'vmnic0', chassisId: '' });
+    b.d.lldp.push({ port: b.p.name, idx: '1', sysName: h.name, portId: 'vmnic1', portDesc: 'vmnic1', chassisId: '' });
+    let n = 0;
+    for (const v of vms) {
+      if (v.vcenterId !== h.vcenterId || v.host !== h.name) continue;
+      for (const nic of v.dev?.nics || []) {
+        const mac = String(nic?.mac || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+        if (mac.length === 12 && n < 16) { a.d.fdb.push({ mac, vlan: 100, port: a.p.name }); n++; }
+      }
+      if (n >= 16) break;
+    }
+  });
+  for (const d of leaves) d.fdbMeta.total = d.fdb.length;
 }
 
 let _seeding = null;
