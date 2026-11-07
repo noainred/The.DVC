@@ -348,7 +348,6 @@ export function registerHostSan(api) {
      *   port-usage)과 bmPortsView 처럼 관리자가 아니면 가린다(같은 함수 cvp.maskErrText · 등록 CVP 주소 포함). 매칭은 위에서 원문으로 끝났다(응답 직전에만 가린다).
      */
     const admin = isAdminReq(req);
-    const { maskErrText } = admin ? { maskErrText: null } : await import('./cvp.js');
     const cvpHosts = admin ? [] : listCvpServers().map((x) => x.host).filter(Boolean);
     const mk = (v) => (admin || v == null ? v : maskErrText(String(v), cvpHosts));
     const mkEv = (v) => {   // 근거는 문구(LLDP 이웃 이름 · MAC 테이블 요약)이거나 객체 — 글자 칸만 가린다

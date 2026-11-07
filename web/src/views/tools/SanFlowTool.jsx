@@ -7,7 +7,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText, existingPairs } from './sanFlowText.js';
+import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText, existingPairs, cycleText, deadlineText } from './sanFlowText.js';
 
 const OTP_IN = { width: 120 };
 const WRAP = { whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: '100%' };   // 긴 작업 제목 · 버튼이 좁은 화면에서 넘치지 않게(400px 가로 넘침 31px — 화면 판독)
@@ -158,7 +158,13 @@ export default function SanFlowTool() {
   };
   const doDelete = () => {
     const x = del; setDel(null);
-    run('/tools/san-flow/delete', { deviceId: x.deviceId, name: x.name, otp: delOtp }, `del:${x.name}`);
+    if (x.forget) {
+      // 등록부에 없는 스위치 — 장비 명령 없이 기록만 정리(작업 기록이 없다 — 목록을 다시 읽는다)
+      setAct({ busy: `forget:${x.name}`, msg: '', error: '' });
+      postJson('/tools/san-flow/forget', { deviceId: x.deviceId, name: x.name, otp: delOtp })
+        .then((r) => { setAct({ busy: '', msg: '', error: r?.ok ? '' : (r?.reason || '실패') }); load(); })
+        .catch((e) => setAct({ busy: '', msg: '', error: e?.message || String(e) }));
+    } else run('/tools/san-flow/delete', { deviceId: x.deviceId, name: x.name, otp: delOtp }, `del:${x.name}`);
     setDelOtp('');
   };
 
@@ -201,7 +207,7 @@ export default function SanFlowTool() {
               {recent.slice(0, 8).map((j) => <button type="button" key={j.id} className="btn" style={{ fontSize: 11.5, ...WRAP, textAlign: 'left' }} onClick={() => { setJob(j); setJobId(isJobActive(j) ? j.id : ''); }}>{timeText(j.startedAt)} {jobTitle(j)}</button>)}
             </div>
           ) : null}
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>엣지 위임 작업은 가져감 10분 · 회신 5분 안에 없으면 실패로 닫고 사유를 남깁니다. 기록에 비밀번호는 없습니다.</div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>{deadlineText(d.edgeDeadlineMs)}</div>
         </div>
       )}
 
@@ -209,9 +215,9 @@ export default function SanFlowTool() {
         <div className="hd-card-h"><b>플로우 결과</b><span className="muted">flow --show 누적 카운터의 직전 두 번 차이 · ESXi 경로 실측(같은 HBA · 타깃)과 비교는 시점이 달라 참고값</span></div>
         {del && (
           <div className="flex wrap" style={{ gap: 8, alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ minWidth: 0 }}>‘{del.name}’ 을 스위치에서 지웁니다 —</span>
+            <span style={{ minWidth: 0 }}>{del.forget ? `‘${del.name}’ 기록만 정리합니다(스위치가 등록부에 없어 장비에는 명령을 보내지 않습니다) —` : `‘${del.name}’ 을 스위치에서 지웁니다 —`}</span>
             <input className="input mono" style={OTP_IN} inputMode="numeric" autoComplete="one-time-code" placeholder="본인 OTP" aria-label="본인 OTP(지우기)" value={delOtp} onChange={(e) => setDelOtp(otpClean(e.target.value))} />
-            <button type="button" className="btn danger" onClick={doDelete}>지우기</button>
+            <button type="button" className="btn danger" onClick={doDelete}>{del.forget ? '기록 정리' : '지우기'}</button>
             <button type="button" className="btn" onClick={() => { setDel(null); setDelOtp(''); }}>취소</button>
           </div>
         )}
@@ -222,7 +228,7 @@ export default function SanFlowTool() {
               {flows.map((f) => (
                 <tr key={f.key}>
                   <td className="mono" style={{ fontSize: 12 }}>{f.name}</td>
-                  <td data-sort={f.state.label} title={f.lastError || undefined}><span className={`badge ${f.state.tone}`}>{f.state.label}</span>{f.lastError ? <div className="muted" style={{ fontSize: 11, maxWidth: 220, overflowWrap: 'anywhere' }}>{f.lastError}</div> : null}</td>
+                  <td data-sort={f.state.label} title={[f.state.note, f.lastError].filter(Boolean).join(' — ') || undefined}><span className={`badge ${f.state.tone}`}>{f.state.label}</span>{f.lastError ? <div className="muted" style={{ fontSize: 11, maxWidth: 220, overflowWrap: 'anywhere' }}>{f.lastError}</div> : null}</td>
                   <td data-sort={f.rateSort} className="tabular">{f.rate}</td>
                   <td data-sort={f.diffSort ?? undefined} className="tabular" title={`ESXi 경로 실측 ${f.esxi}`} style={f.diffWarn ? { color: 'var(--amber, #fbbf24)' } : undefined}>{f.diff}{f.diffWarn ? ' △' : ''}</td>
                   <td>{f.host}</td>
@@ -230,13 +236,16 @@ export default function SanFlowTool() {
                   <td>{f.target}</td>
                   <td data-sort={f.bytesSort} className="tabular">{f.bytes}</td>
                   <td className="muted">{f.sw}</td>
-                  <td>{f.portal && f.state.label !== '지움' ? <button type="button" className="btn danger" disabled={!!act.busy} onClick={() => { setDel({ deviceId: f.deviceId, name: f.name }); setDelOtp(''); }}>지우기</button> : <span className="muted">—</span>}</td>
+                  <td>{f.canDelete ? <button type="button" className="btn danger" disabled={!!act.busy} onClick={() => { setDel({ deviceId: f.deviceId, name: f.name }); setDelOtp(''); }}>지우기</button>
+                    : f.canForget ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => { setDel({ deviceId: f.deviceId, name: f.name, forget: true }); setDelOtp(''); }} title="스위치가 등록부에 없습니다 — 장비 명령 없이 기록만 정리">기록 정리</button>
+                      : <span className="muted">—</span>}</td>
                 </tr>
               ))}
             </tbody>
           </STable>
         </div>
         {!flows.length ? <div className="muted" style={{ padding: 8 }}>아직 플로우가 없습니다 — 라이선스가 있는 스위치에서 권한 점검을 통과한 뒤 만들 수 있습니다.</div> : null}
+        {d.showCycle ? <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>{cycleText(d.showCycle)}</div> : null}
         <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>라이선스가 없는 패브릭은 이 화면에서 만들 수 없습니다 — 그 법인은 호스트 상세의 ESXi 경로 실측 · IPF 로 봅니다.</div>
       </div>
       <div className="card" style={{ minWidth: 0 }}>
@@ -266,7 +275,7 @@ export default function SanFlowTool() {
                   <td>
                     <div className="flex wrap" style={{ gap: 6 }}>
                       <button type="button" className="btn" disabled={!!act.busy || x.fv?.state === 'no'} onClick={() => run('/tools/san-flow/check', { deviceId: x.id }, `chk:${x.id}`)} title="flow --show(읽기만) — 라이선스 · 명령 사용 가능 여부 · 플로우 개수">{act.busy === `chk:${x.id}` ? '보내는 중…' : '권한 점검'}</button>
-                      <button type="button" className="btn primary" disabled={!!x.block} onClick={() => setForm(x.id)} title={x.block || '이 스위치에 플로우 만들기'}>{x.block || '만들기'}</button>
+                      <button type="button" className="btn primary" disabled={!!x.block} onClick={() => setForm(x.id)} title={x.edgeIssue || x.block || '이 스위치에 플로우 만들기'}>{x.block || '만들기'}</button>
                       {x.portalFlows > 0 ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => run('/tools/san-flow/show', { deviceId: x.id }, `show:${x.id}`)}>카운터 읽기</button> : null}
                     </div>
                   </td>

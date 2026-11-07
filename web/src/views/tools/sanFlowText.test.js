@@ -1,6 +1,6 @@
 // v2.933(C-②) SAN 플로우 모니터 문구 — 못 읽음 ≠ 없음 · 값이 없으면 ‘—’ · 사람이 만든 플로우는 보기만 · 차이 % 는 둘 다 있을 때만
 import { describe, it, expect } from 'vitest';
-import { fvBadge, checkBadge, createBlock, deviceRows, diffPct, diffText, flowRows, flowKpis, jobTitle, jobTone, traceLines, hbaOptions, targetOptions, shortWwn, existingPairs } from './sanFlowText.js';
+import { fvBadge, checkBadge, createBlock, deviceRows, diffPct, diffText, flowRows, flowKpis, jobTitle, jobTone, traceLines, hbaOptions, targetOptions, shortWwn, existingPairs, cycleText, deadlineText } from './sanFlowText.js';
 
 const T0 = new Date(2026, 10, 7, 12, 30).getTime();
 const dev = (over = {}) => ({ id: 'sw1', name: 'us-sw-a1', fv: { state: 'yes', expires: null }, limit: 128, check: { at: T0, ok: true, total: 9, portal: 3, others: ['ops_backup'] }, portalFlows: 3, collectedAt: T0, agent: 'us-edge-01', ...over });
@@ -93,5 +93,27 @@ describe('같은 정의 중복 방지', () => {
       { deviceId: 'sw2', srcdev: 'i1', dstdev: 't3', state: 'active' }, { deviceId: 'sw1', srcdev: 'i9', dstdev: 't4', state: 'active' }];
     expect(existingPairs(fl, 'sw1', 'i1')).toEqual(['t1']);
     expect(existingPairs(fl, 'sw1', '')).toEqual([]);
+  });
+});
+
+describe('반증 1인 확정분(v2.933)', () => {
+  it('M-5 한쪽만 읽힌 속도 · 바이트는 비교 · 합하지 않는다', () => {
+    expect(diffPct(flow({ txBps: null }))).toBe(null);
+    const [r] = flowRows({ devices: [dev()], flows: [flow({ counters: { rxBytes: 5, txBytes: null } })] });
+    expect(r.bytes).toBe('—');
+  });
+  it('새 상태 · 기록 없는 dvc_ · 기록 정리', () => {
+    const rows = flowRows({ devices: [dev({ check: { at: T0, ok: true, others: [], orphans: ['dvc_orphan9abcd_01'] } })],
+      flows: [flow({ name: 'a', state: 'unknown' }), flow({ name: 'b', state: 'conflict' }), flow({ name: 'c', deviceKnown: false }), flow({ name: 'd', state: 'failed' })] });
+    expect(rows.map((r) => r.state.label)).toEqual(['결과 모름', '이름 충돌', '활성', '만들지 못함', '포탈 기록 없음']);
+    expect(rows.map((r) => [r.canDelete, r.canForget])).toEqual([[true, false], [true, false], [false, true], [false, false], [true, false]]);
+  });
+  it('엣지 버전 낮음 · 주기 · 시한 문구', () => {
+    expect(createBlock(dev({ edgeIssue: '엣지 "e" 의 버전(2.932.0)은 …' }))).toBe('엣지 버전 낮음');
+    expect(cycleText({ at: T0, devices: 5, started: 3, skipped: { '인증 실패 정지': 1, '꺼짐': 1 } })).toBe('마지막 카운터 주기 12:30 — 스위치 5대 중 3대 시작 · 건너뜀 인증 실패 정지 1 · 꺼짐 1');
+    expect(cycleText(null)).toBe('');
+    expect(deadlineText(1_200_000)).toContain('20분 안에');
+    expect(deadlineText(undefined)).toContain('정해진 시간');
+    expect(jobTitle({ action: 'create', deviceName: 'sw', status: 'done', timedOut: true, result: { ok: false } })).toBe('만들기 · sw · 결과 모름');
   });
 });

@@ -1,23 +1,35 @@
 // SAN 플로우 모니터(v2.933 SAN·CVP 설계 C-② — 도구 키 san-flow · ‘운영 작업’). Brocade Flow Vision 플로우를 포탈이 만들고 · 지우고 · 카운터를 읽는다.
-//   ⚠ 스위치 설정을 바꾸는 도구다 — 모든 라우트는 tools 권한 + admin + 전체 범위(fullScopeOnly), 만들기 · 지우기는 OTP 재인증(reauth)까지.
-//   감사 로그는 auditMiddleware 가 남기고 '무엇을 · 어디에' 를 res.locals.auditDetail 로 싣는다. 명령은 sanswitch/flowCmd.js 만 만든다(화면 글자를 잇지 않는다).
-//   응답에 스위치 비밀번호 · 관리 주소를 싣지 않는다(등록부 공개 필드 · 이름만).
+//   ⚠ 스위치 설정을 바꾸는 도구다 — 모든 라우트는 tools 권한 + admin + 조회 · 쓰기 전체 범위(반증 L-1 — isFullReadWriteScope), 만들기 · 지우기는 OTP 재인증(reauth)까지.
+//   감사 로그는 auditMiddleware 가 남기고 '무엇을 · 어디에' 를 res.locals.auditDetail 로 싣는다(미리보기는 AUDIT_SKIP — 저장 아님). 명령은 sanswitch/flowCmd.js 만 만든다.
+//   응답에 스위치 비밀번호 · 관리 주소를 싣지 않는다 — 작업 사유 · 기록 오류의 주소도 가린다(반증 L-4 — cvp.maskErrText · 등록 스위치 주소 포함).
 import { requirePerm, requireRole } from '../../auth/auth.js';
-import { fullScopeOnlyWith } from '../admin/shared.js';
+import { fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { reauth } from './reauth.js';
+import { maskErrText } from './cvp.js';
 import { store } from '../../store.js';
 import { listDevices as listSanDevices, getDeviceWithSecret } from '../../sanswitch/registry.js';
 import { localSnapshots as sanLocalSnaps } from '../../sanswitch/store.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
+import { edgeVersionOf } from '../../central/idracScanPush.js';
 import { buildFabrics, attributeHost, fabricVisionOf } from '../../sanswitch/attribution.js';
 import { normWwn } from '../../sanswitch/zoning.js';
 import { flowNameFor, flowLimitOf, buildFlowCommands, FLOW_NAME_RE, PORT_RE, WWN_RE, MONITOR_PER_PORT } from '../../sanswitch/flowCmd.js';
-import { startFlowJob, getFlowJob, recentFlowJobs, listFlows, flowChecks, startFlowShowTimer, SHOW_EVERY_MS } from '../../sanswitch/flowJobs.js';
+import { startFlowJob, getFlowJob, recentFlowJobs, listFlows, flowChecks, startFlowShowTimer, lastShowCycle, forgetFlow, SHOW_EVERY_MS, EDGE_DEADLINE_MS } from '../../sanswitch/flowJobs.js';
 import { isMockMode } from '../../mock/demo/flags.js';
 import { ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import { demoSpath } from '../../mock/demo/storpath.js';
+import { numOrNull } from '../../util/numOrNull.js';
+import { cmpVersion } from '../../util/cmpVersion.js';
 
-const gate = [requirePerm('tools'), requireRole('admin'), fullScopeOnlyWith('SAN 플로우 모니터(스위치 설정 변경)는 전체 범위(vCenter 제한 없는) 관리자만 쓸 수 있습니다.')];
+const gate = [requirePerm('tools'), requireRole('admin'), fullReadWriteScopeOnlyWith('SAN 플로우 모니터(스위치 설정 변경)는 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 쓸 수 있습니다.')];
+/** 엣지가 flowNow 를 아는 첫 버전(반증 M-7 — 구버전 엣지는 작업을 모른 채 버린다). */
+export const MIN_FLOW_EDGE_VERSION = '2.933.0';
+/** 엣지 위임 전 확인 — 버전을 알고 낮으면 거부, 모르면(중앙 재시작 직후 등) 보낸다(시한이 지나면 '결과 모름'). */
+export function flowEdgeIssue(agent, version = edgeVersionOf(agent)) {
+  const v = String(version || '').trim();
+  if (v && cmpVersion(v, MIN_FLOW_EDGE_VERSION) < 0) return `엣지 "${agent}" 의 버전(${v})은 플로우 작업을 모릅니다 — ${MIN_FLOW_EDGE_VERSION} 이상으로 올린 뒤 하세요`;
+  return null;
+}
 
 /** 등록부 장치(비밀 없음) + 최신 스냅샷(모델 · 라이선스). */
 async function devicesWithSnap() {
@@ -32,23 +44,35 @@ async function devicesWithSnap() {
   return reg.map((d) => ({ d, s: snapOf.get(d.id) || null }));
 }
 
-/** 바이트 카운터 두 번 → 초당(델타 · 리셋이면 null). */
-function rateOf(cur, prev, curAt, prevAt, k) {
-  const a = Number(cur?.[k]); const b = Number(prev?.[k]); const dt = (Number(curAt) - Number(prevAt)) / 1000;
-  if (!Number.isFinite(a) || !Number.isFinite(b) || !(dt > 0) || a < b) return null;
+/** 바이트 카운터 두 번 → 초당(델타). 하나라도 못 읽었거나(null — 0 이 아니다) 리셋이면 null(반증 M-4). */
+export function rateOf(cur, prev, curAt, prevAt, k) {
+  const a = numOrNull(cur?.[k]); const b = numOrNull(prev?.[k]); const t1 = numOrNull(curAt); const t0 = numOrNull(prevAt);
+  if (a == null || b == null || t1 == null || t0 == null) return null;
+  const dt = (t1 - t0) / 1000;
+  if (!(dt > 0) || a < b) return null;
   return Math.round((a - b) / dt);
+}
+/** ESXi 경로 실측 — 읽기 · 쓰기가 **둘 다** 있을 때만 합(한쪽만 있으면 부분 합 — 비교하지 않는다, 반증 M-5). */
+export function esxiBpsOf(t) {
+  const r = numOrNull(t?.rKBps); const w = numOrNull(t?.wKBps);
+  return r == null || w == null ? null : Math.round((r + w) * 1024);
 }
 
 const flowOut = (f) => ({ name: f.name, ingrport: f.ingrport, srcdev: f.srcdev, dstdev: f.dstdev, targetName: f.targetName });
+/** 아직 장비에 있을 수 있는 기록(지움 · 실패 말고) — 중복 · 이름 · 상한 계산에 쓴다. */
+const LIVE_STATES = new Set(['pending', 'active', 'unknown', 'conflict', 'gone']);
 
 /**
  * 만들기 판정(미리보기 · 만들기 공용 — 판정 코어는 하나). 화면이 보낸 포트 · WWN 을 믿지 않고 귀속 엔진이 찾은
  *   '이 스위치에 로그인한 HBA · zone 안 타깃' 과 맞는 것만 받는다. 포트(ingrport)는 서버가 정한다. 상한(스위치 · 포트당 모니터)을 넘으면 거부.
+ *   권한 점검(flow --show)을 통과한 스위치만(반증 L-2 — 화면 문구가 말한 규칙을 서버도 지킨다).
  * @returns {Promise<{status:number, reason:string} | {dev, h, row, flows, limit, known, onPort, ingr}>}
  */
 async function planCreate(b) {
   const dev = getDeviceWithSecret(String(b.deviceId || ''));
   if (!dev) return { status: 404, reason: '스위치를 찾을 수 없습니다.' };
+  const check = flowChecks()[dev.id];
+  if (!check?.ok) return { status: 409, reason: '먼저 계정 권한 점검(flow --show — 읽기만)을 통과해야 만들 수 있습니다.' };
   const snap = store.get();
   const h = (snap.hosts || []).find((x) => x.id === String(b.hostId || ''));
   if (!h) return { status: 404, reason: '호스트를 찾을 수 없습니다.' };
@@ -65,54 +89,78 @@ async function planCreate(b) {
   if (!want.length || want.some((w) => !WWN_RE.test(w) || !allowed.has(w))) return { status: 400, reason: '타깃은 그 HBA 의 zone 안에 있는 WWN 만 고를 수 있습니다(1~8개).' };
   const ingr = row.port.slotPort && PORT_RE.test(String(row.port.slotPort)) ? String(row.port.slotPort) : String(row.port.index);
   if (!PORT_RE.test(ingr)) return { status: 409, reason: '스위치 포트 번호를 읽지 못했습니다.' };
-  const existing = listFlows().filter((f) => f.deviceId === dev.id && f.state !== 'deleted');
-  // 같은 정의(이 스위치 · 이 초기자 → 이 타깃)의 활성 포탈 플로우가 이미 있으면 거부한다 — 이름만 바꿔 같은 플로우를 또 만들었다(화면 판독 v2.933).
-  const dup = existing.filter((f) => f.state === 'active' && f.srcdev === row.wwn && want.includes(f.dstdev));
-  if (dup.length) return { status: 409, reason: `같은 초기자 → 타깃의 활성 포탈 플로우가 이미 있습니다: ${dup.map((f) => f.name).join(', ')}` };
-  const names = new Set(existing.map((f) => f.name));
+  const existing = listFlows().filter((f) => f.deviceId === dev.id && LIVE_STATES.has(f.state));
+  // 같은 정의(이 스위치 · 이 초기자 → 이 타깃)의 기록이 장비에 있을 수 있으면 거부한다(활성 · 만드는 중 · 결과 모름 · 충돌 — 반증 M-3).
+  const dup = existing.filter((f) => f.srcdev === row.wwn && want.includes(f.dstdev));
+  if (dup.length) return { status: 409, reason: `같은 초기자 → 타깃의 포탈 플로우가 이미 있습니다: ${dup.map((f) => `${f.name}(${f.state})`).join(', ')}` };
+  const names = new Set([...existing.map((f) => f.name), ...(Array.isArray(check.orphans) ? check.orphans : [])]);
   const flows = []; let n = 1;
   for (const w of want) {
-    let name = flowNameFor(h.name, row.hba, n);
-    while (names.has(name) && n < 99) { n += 1; name = flowNameFor(h.name, row.hba, n); }
-    if (names.has(name)) return { status: 409, reason: '이 HBA 로 만들 수 있는 플로우 이름(99개)을 다 썼습니다 — 지운 뒤 다시 시도하세요.' };
+    let name = flowNameFor(h.id, h.name, row.hba, n);
+    while (names.has(name) && n < 99) { n += 1; name = flowNameFor(h.id, h.name, row.hba, n); }
+    if (names.has(name)) return { status: 409, reason: `이 호스트 · ${row.hba} 로 만들 수 있는 플로우 이름(99개)을 다 썼습니다 — 지운 뒤 다시 시도하세요.` };
     names.add(name); n += 1;
     flows.push({ name, ingrport: ingr, srcdev: row.wwn, dstdev: w, hostId: h.id, hostName: h.name, hba: row.hba, targetName: allowed.get(w) || '' });
   }
   const limit = flowLimitOf(self.s.model);
-  const known = Math.max(existing.length, Number(flowChecks()[dev.id]?.total) || 0);
-  if (known + flows.length > limit) return { status: 409, reason: `플로우 상한(${limit})을 넘습니다 — 지금 ${known}개` };
+  // 반증 L-3: 점검 때 장비가 센 개수 + 그 뒤에 포탈이 만든 것 — 둘 중 큰 쪽만 보면 사람이 만든 것이 많을 때 적게 셌다.
+  const madeAfter = existing.filter((f) => Number(f.createdAt || 0) > Number(check.at || 0)).length;
+  const known = Math.max(existing.length, (numOrNull(check.total) ?? 0) + madeAfter);
+  if (known + flows.length > limit) return { status: 409, reason: `플로우 상한(${limit})을 넘습니다 — 지금 ${known}개(권한 점검 때 장비가 센 개수 + 그 뒤에 만든 것)` };
   const onPort = existing.filter((f) => String(f.ingrport) === ingr).length;
   if (onPort + flows.length > MONITOR_PER_PORT) return { status: 409, reason: `포트 ${ingr} 의 모니터 플로우 상한(${MONITOR_PER_PORT})을 넘습니다 — 포탈 플로우 ${onPort}개` };
   return { dev, h, row, flows, limit, known, onPort, ingr };
 }
 
+/** 엣지 위임 스위치의 인증 정지 — 엣지가 스냅샷 extra.authStopped 로 올린다(그 엣지의 정지 기록 · 반증 H-2). */
+export function edgeAuthStopOf(deviceId) {
+  try { return edgeSanSwitchSnapshots().find((s) => s?.deviceId === deviceId)?.extra?.authStopped || null; } catch { return null; }
+}
+
+/** 비밀이 아닌 관리 주소도 응답에서 가린다(반증 L-4) — 등록 스위치 주소 + URL · IPv4 · IPv6. */
+function maskerOf() {
+  const hosts = listSanDevices().map((d) => d.host).filter(Boolean);
+  return (v) => (v == null ? v : maskErrText(String(v), hosts));
+}
+function maskJob(j, mask) {
+  if (!j) return j;
+  return { ...j, trace: (j.trace || []).map((t) => ({ ...t, msg: mask(t.msg) })),
+    result: j.result ? { ...j.result, ...(j.result.reason ? { reason: mask(j.result.reason) } : {}), outputs: (j.result.outputs || []).map((o) => ({ ...o, out: mask(o.out) })) } : null };
+}
+
 export function registerSanFlow(api) {
-  startFlowShowTimer((id) => getDeviceWithSecret(id));
+  startFlowShowTimer((id) => getDeviceWithSecret(id), { canDelegate: (agent) => flowEdgeIssue(agent), stoppedOf: edgeAuthStopOf });
 
   api.get('/tools/san-flow', ...gate, async (_req, res) => {
     const rows = await devicesWithSnap();
     const checks = flowChecks();
     const flows = listFlows();
+    const mask = maskerOf();
     const snap = store.get();
     const hostById = new Map((snap.hosts || []).map((h) => [h.id, h]));
     // 목 모드에는 vCenter 실시간 통계가 없다 — 호스트 SAN 묶음과 같이 데모 조닝으로 만든 경로 실측(demoSpath)을 쓴다(가상값).
     const demoFabrics = isMockMode() && flows.length ? buildFabrics(rows.filter((x) => x.s).map((x) => ({ ...x.s, name: x.d.name || x.s.name, datacenterId: x.d.datacenterId || '' }))) : null;
     const spathOf = (h) => (!h ? null : demoFabrics ? demoSpath(h, demoFabrics) : (h.spath || null));
+    const known = new Set(listSanDevices().map((d) => d.id));
     const devices = rows.map(({ d, s }) => {
-      const mine = flows.filter((f) => f.deviceId === d.id && f.state !== 'deleted');
+      const mine = flows.filter((f) => f.deviceId === d.id);
+      const ck = checks[d.id] || null;
       return { id: d.id, name: d.name || d.id, type: d.type, datacenterId: d.datacenterId || '', agent: d.agent || '', collectMethod: d.collectMethod || 'ssh',
         model: s?.model || '', fv: s ? fabricVisionOf(s) : { state: 'unknown', reason: '스냅샷 없음' }, limit: flowLimitOf(s?.model),
-        check: checks[d.id] || null, portalFlows: mine.length, collectedAt: s?.collectedAt || null };
+        check: ck ? { ...ck, text: mask(ck.text) } : null, portalFlows: mine.length, collectedAt: s?.collectedAt || null,
+        ...(d.agent ? { edgeIssue: flowEdgeIssue(d.agent) } : {}) };
     });
     const out = flows.map((f) => {
       const h = f.hostId ? hostById.get(f.hostId) : null;
       // ESXi 경로 실측(C-①)과 같은 타깃의 지금 속도 — 교차검증 참고(시점이 달라 비율만 본다).
       const sp = spathOf(h);
       const t = sp?.targets?.find((x) => x.wwn === f.dstdev && (!f.hba || x.adapter === f.hba)) || null;
-      return { ...f, rxBps: rateOf(f.counters, f.prevCounters, f.lastAt, f.prevAt, 'rxBytes'), txBps: rateOf(f.counters, f.prevCounters, f.lastAt, f.prevAt, 'txBytes'),
-        esxiBps: t && (Number.isFinite(t.rKBps) || Number.isFinite(t.wKBps)) ? Math.round(((t.rKBps || 0) + (t.wKBps || 0)) * 1024) : null, esxiAt: t ? (sp.at ?? null) : null };
+      return { ...f, lastError: mask(f.lastError), deviceKnown: known.has(f.deviceId),
+        rxBps: rateOf(f.counters, f.prevCounters, f.lastAt, f.prevAt, 'rxBytes'), txBps: rateOf(f.counters, f.prevCounters, f.lastAt, f.prevAt, 'txBytes'),
+        esxiBps: esxiBpsOf(t), esxiAt: t ? (sp.at ?? null) : null };
     });
-    res.set('Cache-Control', 'no-store').json({ ok: true, devices, flows: out, jobs: recentFlowJobs(10), showEveryMs: SHOW_EVERY_MS });
+    res.set('Cache-Control', 'no-store').json({ ok: true, devices, flows: out, jobs: recentFlowJobs(10).map((j) => maskJob(j, mask)), showEveryMs: SHOW_EVERY_MS,
+      edgeDeadlineMs: EDGE_DEADLINE_MS, showCycle: lastShowCycle() });
   });
 
   /** 만들기 폼 ① — 이 스위치에 HBA 가 로그인한 호스트(스냅샷 포트의 연결 WWN 기준 · 최대 300). */
@@ -151,17 +199,19 @@ export function registerSanFlow(api) {
     res.set('Cache-Control', 'no-store').json({ ok: true, host: { id: h.id, name: h.name }, hbas });
   });
 
-  /** 계정 권한 점검 — `flow --show`(읽기만). 라이선스 · rbash 막힘 · 개수. OTP 없이(설정을 바꾸지 않는다). */
+  const start = (req, dev, action, flows = []) => startFlowJob({ device: dev, action, flows, user: req.user?.username || '', canDelegate: (agent) => flowEdgeIssue(agent) });
+
+  /** 계정 권한 점검 — `flow --show`(읽기만). 라이선스 · rbash 막힘 · 개수 · 기록 없는 dvc_ 플로우. OTP 없이(설정을 바꾸지 않는다). */
   api.post('/tools/san-flow/check', ...gate, async (req, res) => {
     const dev = getDeviceWithSecret(String(req.body?.deviceId || ''));
     if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
-    const r = startFlowJob({ device: dev, action: 'check', user: req.user?.username || '' });
+    const r = start(req, dev, 'check');
     if (r.issue) return res.status(409).json({ ok: false, reason: r.issue });
     res.locals.auditDetail = `SAN 플로우 계정 점검 · ${dev.name || dev.id}`;
     res.json({ ok: true, id: r.id, target: r.target });
   });
 
-  /** 미리보기 — 만들기와 같은 판정(planCreate) · 같은 명령 조립(buildFlowCommands). 스위치를 건드리지 않는다(OTP 없이). */
+  /** 미리보기 — 만들기와 같은 판정(planCreate) · 같은 명령 조립(buildFlowCommands). 스위치를 건드리지 않는다(OTP 없이 · 감사 줄 없음). */
   api.post('/tools/san-flow/preview', ...gate, async (req, res) => {
     const p = await planCreate(req.body || {});
     if (p.status) return res.status(p.status).json({ ok: false, reason: p.reason });
@@ -174,33 +224,46 @@ export function registerSanFlow(api) {
   api.post('/tools/san-flow/create', ...gate, reauth, async (req, res) => {
     const p = await planCreate(req.body || {});
     if (p.status) return res.status(p.status).json({ ok: false, reason: p.reason });
-    const r = startFlowJob({ device: p.dev, action: 'create', flows: p.flows, user: req.user?.username || '' });
+    const r = start(req, p.dev, 'create', p.flows);
     if (r.issue) return res.status(409).json({ ok: false, reason: r.issue });
     res.locals.auditDetail = `SAN 플로우 만들기 · ${p.dev.name || p.dev.id} · ${p.flows.map((f) => f.name).join(', ')} · ${p.h.name} ${p.row.hba}`;
     res.json({ ok: true, id: r.id, target: r.target, flows: p.flows.map(flowOut) });
   });
 
-  /** 지우기 — 포탈이 만든(dvc_) 플로우만. OTP 재인증. */
+  /**
+   * 지우기 — 포탈이 만든(dvc_) 플로우만: 포탈 기록에 있는 것, 또는 권한 점검이 장비에서 찾았는데 기록이 없는 dvc_ 플로우(반증 M-2 — 재시작 · 시한으로
+   *   기록을 놓친 것). OTP 재인증.
+   */
   api.post('/tools/san-flow/delete', ...gate, reauth, async (req, res) => {
     const dev = getDeviceWithSecret(String(req.body?.deviceId || ''));
     const name = String(req.body?.name || '');
     if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
     if (!FLOW_NAME_RE.test(name)) return res.status(400).json({ ok: false, reason: '포탈이 만든(dvc_) 플로우만 지울 수 있습니다.' });
     const f = listFlows().find((x) => x.deviceId === dev.id && x.name === name);
-    if (!f) return res.status(404).json({ ok: false, reason: '포탈 플로우 기록에 없는 플로우입니다.' });
-    const r = startFlowJob({ device: dev, action: 'delete', flows: [{ name }], user: req.user?.username || '' });
+    const orphan = !f && (flowChecks()[dev.id]?.orphans || []).includes(name);
+    if (!f && !orphan) return res.status(404).json({ ok: false, reason: '포탈 플로우 기록에도, 마지막 권한 점검 결과에도 없는 플로우입니다.' });
+    const r = start(req, dev, 'delete', [{ name }]);
     if (r.issue) return res.status(409).json({ ok: false, reason: r.issue });
-    res.locals.auditDetail = `SAN 플로우 지우기 · ${dev.name || dev.id} · ${name}`;
+    res.locals.auditDetail = `SAN 플로우 지우기 · ${dev.name || dev.id} · ${name}${orphan ? '(포탈 기록 없음)' : ''}`;
     res.json({ ok: true, id: r.id, target: r.target });
   });
 
-  /** 카운터 지금 읽기 — 그 스위치의 활성 포탈 플로우(15분 주기와 같은 작업). */
+  /** 기록 정리 — 등록부에서 지운 스위치의 플로우 기록만(장비에 명령을 보내지 않는다 — 반증 L-11). OTP 재인증. */
+  api.post('/tools/san-flow/forget', ...gate, reauth, async (req, res) => {
+    const deviceId = String(req.body?.deviceId || ''); const name = String(req.body?.name || '');
+    if (getDeviceWithSecret(deviceId)) return res.status(409).json({ ok: false, reason: '스위치가 등록부에 있습니다 — 지우기로 장비에서 지우세요.' });
+    if (!FLOW_NAME_RE.test(name) || !forgetFlow(deviceId, name, req.user?.username || '')) return res.status(404).json({ ok: false, reason: '정리할 기록이 없습니다.' });
+    res.locals.auditDetail = `SAN 플로우 기록 정리(등록부에 없는 스위치) · ${deviceId} · ${name}`;
+    res.json({ ok: true });
+  });
+
+  /** 카운터 지금 읽기 — 그 스위치의 활성 · 결과 모름 포탈 플로우(주기와 같은 작업). */
   api.post('/tools/san-flow/show', ...gate, async (req, res) => {
     const dev = getDeviceWithSecret(String(req.body?.deviceId || ''));
     if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
-    const flows = listFlows().filter((f) => f.deviceId === dev.id && f.state === 'active').slice(0, 16);
-    if (!flows.length) return res.status(409).json({ ok: false, reason: '이 스위치에 활성 포탈 플로우가 없습니다.' });
-    const r = startFlowJob({ device: dev, action: 'show', flows, user: req.user?.username || '' });
+    const flows = listFlows().filter((f) => f.deviceId === dev.id && (f.state === 'active' || f.state === 'unknown' || f.state === 'gone')).slice(0, 16);
+    if (!flows.length) return res.status(409).json({ ok: false, reason: '이 스위치에 읽을 포탈 플로우가 없습니다.' });
+    const r = start(req, dev, 'show', flows);
     if (r.issue) return res.status(409).json({ ok: false, reason: r.issue });
     res.locals.auditDetail = `SAN 플로우 카운터 읽기 · ${dev.name || dev.id}`;
     res.json({ ok: true, id: r.id, target: r.target });
@@ -208,7 +271,7 @@ export function registerSanFlow(api) {
 
   api.get('/tools/san-flow/job/:id', ...gate, (req, res) => {
     const j = getFlowJob(req.params.id);
-    if (!j) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다(만료 30분).' });
-    res.set('Cache-Control', 'no-store').json({ ok: true, job: j });
+    if (!j) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다(끝나고 1시간 뒤 정리).' });
+    res.set('Cache-Control', 'no-store').json({ ok: true, job: maskJob(j, maskerOf()) });
   });
 }

@@ -11,8 +11,15 @@
  *   출력 판독은 관용적이고, 못 읽으면 parsed:false + 원문 앞부분을 남긴다(‘0’ 이나 ‘없음’ 으로 단정하지 않는다).
  */
 
+import crypto from 'node:crypto';
+
 export const FLOW_PREFIX = 'dvc_';
-export const FLOW_NAME_RE = /^dvc_[A-Za-z0-9_]{1,40}$/;
+/**
+ * v2.933 반증 H-1: FOS 플로우 이름은 영숫자 · _ **20자 이하**이고 소문자로 저장된다(FOS 8.0.1 명령 참조 — 검색 요약 기준, 원문 미열람 · 추정).
+ *   예전 정규식은 44자까지 받아 실장비에서 만들기가 거부될 가능성이 컸다. 소문자만 받는다(장비가 소문자로 바꿔 저장하면 지우기 · 보기 이름이 어긋난다).
+ */
+export const FLOW_NAME_MAX = 20;
+export const FLOW_NAME_RE = /^dvc_[a-z0-9_]{1,16}$/;
 export const PORT_RE = /^\d{1,3}(\/\d{1,3})?$/;
 export const WWN_RE = /^[0-9a-f]{2}(:[0-9a-f]{2}){7}$/;
 export const FLOWS_PER_SWITCH = 128;
@@ -23,12 +30,16 @@ export const OUT_MAX = 16 * 1024;
 /** 모델 이름으로 상한(디렉터 512 · 그 밖 128) — 모르면 스위치 상한(작은 쪽 — 넘겨 만들지 않게). */
 export const flowLimitOf = (model) => (/DCX|X6-|X7-|director/i.test(String(model || '')) ? FLOWS_PER_DIRECTOR : FLOWS_PER_SWITCH);
 
-/** 호스트 · HBA · 차례로 포탈 플로우 이름(접두 고정 · 40자 · 영숫자와 _ 만). */
-export function flowNameFor(hostName, hba, idx) {
-  const h = String(hostName || 'host').split('.')[0].toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20) || 'host';
-  const a = String(hba || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) || 'hba';
+/**
+ * 포탈 플로우 이름 — `dvc_` + 호스트 이름 앞 7자 + (호스트 id · HBA 해시 5자) + `_` + 차례 2자리 = 최대 19자.
+ *   호스트 이름 앞부분은 사람이 알아보라고, 해시는 같은 접두의 호스트(…-esx01 · …-esx02)가 같은 이름 예산을 나눠 쓰지 않게(반증 H-1).
+ *   호스트 · HBA 대응은 포탈 기록(san-flows.json)에 있다.
+ */
+export function flowNameFor(hostKey, hostName, hba, idx) {
+  const h = String(hostName || 'host').split('.')[0].toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 7) || 'host';
+  const hash = crypto.createHash('sha1').update(`${hostKey || hostName}|${hba || ''}`).digest('hex').slice(0, 5);
   const n = String(Math.max(1, Math.min(99, Math.trunc(Number(idx) || 1)))).padStart(2, '0');
-  return `${FLOW_PREFIX}${h}_${a}_${n}`;
+  return `${FLOW_PREFIX}${h}${hash}_${n}`;
 }
 
 /**
@@ -37,7 +48,7 @@ export function flowNameFor(hostName, hba, idx) {
  */
 export function flowDefIssue(f) {
   if (!f || typeof f !== 'object') return '플로우 정의가 없습니다';
-  if (!FLOW_NAME_RE.test(String(f.name || ''))) return `플로우 이름은 ${FLOW_PREFIX} 로 시작하는 영숫자 · _ 40자 이하만 됩니다`;
+  if (!FLOW_NAME_RE.test(String(f.name || ''))) return `플로우 이름은 ${FLOW_PREFIX} 로 시작하는 소문자 · 숫자 · _ ${FLOW_NAME_MAX}자 이하만 됩니다`;
   if (!PORT_RE.test(String(f.ingrport || ''))) return '수신 포트(ingrport)는 슬롯/포트 숫자만 됩니다';
   if (!WWN_RE.test(String(f.srcdev || ''))) return '초기자(srcdev)는 WWN 표준형(콜론 16진 소문자)만 됩니다';
   if (!WWN_RE.test(String(f.dstdev || ''))) return '타깃(dstdev)은 WWN 표준형(콜론 16진 소문자)만 됩니다';
@@ -71,10 +82,18 @@ export function buildFlowCommands(action, flows = []) {
   return { cmds };
 }
 
-/** 명령 출력의 오류 분류(관용) — 라이선스 없음 · 명령 없음(rbash) · 권한 없음 · 이미 있음 · 없는 플로우. 오류가 아니면 null. */
+/**
+ * 명령 출력의 오류 분류(관용) — 라이선스 없음 · 명령 없음(rbash) · 권한 없음 · 이미 있음 · 없는 플로우. 오류가 아니면 null.
+ *   v2.933 반증 L-5: 표 줄('|' 가 있는 줄 — 플로우 목록 · 카운터)과 이름처럼 보이는 낱말(밑줄 · 영숫자 이어진 것 · WWN)은 빼고 본다 —
+ *   호스트 이름에 failed · invalid · duplicate 가 들어가면 그 이름이 출력에 실려 오류로 읽혔다.
+ *   반증 L-6: 'no … license' 는 줄 안에서만(최대 80자) — 예전 `no .*license` 는 길이의 제곱으로 커졌다.
+ */
 export function flowOutputIssue(text) {
-  const s = String(text ?? '').slice(0, OUT_MAX);
-  if (/license/i.test(s) && /(not present|not installed|required|missing|no .*license)/i.test(s)) return { kind: 'license', text: 'Fabric Vision 라이선스가 없다고 장비가 답했습니다' };
+  const s = String(text ?? '').slice(0, OUT_MAX).split(/\r?\n/).slice(0, 400)
+    .filter((l) => !l.includes('|'))
+    .map((l) => l.replace(/\b[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\b/g, ' ').replace(/\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){7}\b/g, ' ').replace(/Name\s*:\s*\S{1,64}/g, ' '))
+    .join('\n');
+  if (/license/i.test(s) && /(not present|not installed|required|missing|\bno [^\n]{0,80}license)/i.test(s)) return { kind: 'license', text: 'Fabric Vision 라이선스가 없다고 장비가 답했습니다' };
   if (/command not found|not recognized|restricted|rbash/i.test(s)) return { kind: 'no-command', text: '이 계정에서 flow 명령을 쓸 수 없습니다(제한된 셸 · 명령 없음)' };
   if (/permission denied|not permitted|insufficient|RBAC/i.test(s)) return { kind: 'permission', text: '이 계정에 flow 설정 권한이 없습니다' };
   if (/already exists|duplicate/i.test(s)) return { kind: 'exists', text: '같은 이름 · 정의의 플로우가 이미 있습니다' };

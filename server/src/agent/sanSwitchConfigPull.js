@@ -29,6 +29,7 @@ let _last = null;
 let _registryRecovered = null; // v2.744(감사 EDGE-03): 손상 등록부를 중앙 배포분으로 다시 쓴 마지막 기록
 let _perfCollectPush = null; // v2.603 EDGE2603-03: 포트 사용량 '지금 수집' 대행 뒤 push 의 결과
 let _collectPush = null; // v2.601 EDGE2601-06: '지금 수집' 직후 push 의 결과(상태 화면·엣지 로그용)
+let _flowLast = null; // v2.933(C-②): 마지막 Flow Vision 플로우 작업 대행 · 회신 결과(상태 화면 · 엣지 로그용)
 
 /**
  * v2.601(감사 EDGE2601-06): '지금 수집' 직후 push — 진행 중이던 주기 push 는 재수집 **전** 스냅샷을 보냈으므로 끝난 뒤 한 번 더 보낸다.
@@ -249,17 +250,30 @@ async function runDelegatedTest(t) {
 async function runDelegatedFlow(j) {
   const id = typeof j?.id === 'string' && /^[0-9a-f]{16}$/.test(j.id) ? j.id : '';
   if (!id) return;
+  // v2.933 반증 M-2: 남은 시한(ttlMs — 중앙 시계가 아니라 받은 순간부터의 상대값)이 지나면 실행하지 않는다 — 중앙은 이미 '결과 모름' 으로 닫았다.
+  const ttl = Math.max(0, Math.min(60 * 60_000, Number(j.ttlMs) || 0));
+  const deadline = Date.now() + ttl;
   const device = getDeviceWithSecret(String(j.deviceId || ''));
   const built = device ? buildFlowCommands(String(j.action || ''), Array.isArray(j.flows) ? j.flows : []) : null;
-  const result = !device ? Promise.resolve({ ok: false, outputs: [], reason: '이 엣지 등록부에 그 스위치가 없습니다(중앙 위임 목록을 다시 받은 뒤 시도하세요)' })
-    : built.issue ? Promise.resolve({ ok: false, outputs: [], reason: `엣지가 플로우 정의를 거부했습니다: ${built.issue}` })
-      : withHostLock(device.host, () => runFlowCommands(device, built.cmds));
+  const result = !device ? Promise.resolve({ ok: false, outputs: [], notRun: true, reason: '이 엣지 등록부에 그 스위치가 없습니다(중앙 위임 목록을 다시 받은 뒤 시도하세요)' })
+    : built.issue ? Promise.resolve({ ok: false, outputs: [], notRun: true, reason: `엣지가 플로우 정의를 거부했습니다: ${built.issue}` })
+      : !ttl ? Promise.resolve({ ok: false, outputs: [], notRun: true, reason: '중앙이 시한을 주지 않아 실행하지 않았습니다(구버전 중앙)' })
+        : withHostLock(device.host, () => (Date.now() > deadline
+          ? { ok: false, outputs: [], notRun: true, reason: '호스트 잠금을 기다리는 동안 시한이 지나 실행하지 않았습니다' }
+          : runFlowCommands(device, built.cmds)));
   const r = await result;
-  const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-flow-result`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken },
-    body: JSON.stringify({ agent: config.agent.name || '', id, result: r }), timeoutMs: 20_000, retries: 2,
-  });
-  if (!res.ok) throw new Error(`sanswitch-flow-result <- ${res.status}`);
+  try {
+    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-flow-result`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken },
+      body: JSON.stringify({ agent: config.agent.name || '', id, result: r }), timeoutMs: 20_000, retries: 2,
+    });
+    if (!res.ok) throw new Error(`sanswitch-flow-result <- ${res.status}`);
+    _flowLast = { at: Date.now(), ok: true, id, action: String(j.action || '').slice(0, 10), ran: !r.notRun };
+  } catch (e) {
+    // v2.933 반증 L-10: 회신 실패도 상태에 남긴다(콘솔만이면 엣지 로그 화면에서 보이지 않는다).
+    _flowLast = { at: Date.now(), ok: false, id, action: String(j.action || '').slice(0, 10), ran: !r.notRun, reason: String(e?.message || e).slice(0, 200) };
+    throw e;
+  }
 }
 
 export function startSanSwitchConfigPull() {
@@ -272,5 +286,6 @@ export function sanSwitchConfigPullStatus() {
     // v2.733(C4-02): '지금 수집' 작업 — 진행 중 여부·대기·지금 장비 · 마지막으로 끝난 작업 요약(무음 금지).
     collectJob: { running: _collectRunning, queued: _collectQueue.length, current: _collectCurrent },
     ...(_collectRun ? { collectRun: _collectRun } : {}),
+    ...(_flowLast ? { flowLast: _flowLast } : {}),
   };
 }

@@ -80,7 +80,7 @@ export default function HostSanSection({ hostId, onData }) {
       )}
       <div className="flex wrap" style={{ alignItems: 'baseline', gap: '4px 10px', justifyContent: 'space-between', margin: '12px 0 6px' }}>
         <div style={{ fontSize: 12.5, minWidth: 0 }}><b>경로별 실측 · ESXi</b> <span className="muted">vCenter 실시간 통계(storagePath) 최근 창 — 타깃 WWN 으로 스토리지를 찾고, 이 비율로 HBA 포트 바이트를 나눕니다(라이선스 불필요)</span></div>
-        {d.spath ? <span className="muted" style={{ fontSize: 11 }}>{d.spath.mock ? '데모 값 · ' : ''}표본 {d.spath.samples ?? '—'}개 · 경로 {d.spath.instances ?? '—'}{d.spath.unparsed ? ` · 이름 못 푼 경로 ${d.spath.unparsed}` : ''}{d.spath.truncated ? ' · 상한으로 일부만' : ''}</span> : null}
+        {d.spath ? <span className="muted" style={{ fontSize: 11 }}>{d.spath.mock ? '데모 값 · ' : ''}{d.spath.samples == null ? '표본 —' : `표본 ${d.spath.samples}개`} · 경로 {d.spath.instances ?? '—'}{d.spath.unparsed ? ` · 이름 못 푼 경로 ${d.spath.unparsed}` : ''}{d.spath.truncated ? ' · 상한으로 일부만' : ''}</span> : null}
       </div>
       {!d.spath ? (
         <div className="muted hd-note">{d.storPathScan === false ? '경로 카운터 수집이 꺼져 있습니다(STORPATH_SCAN=false) — 분배는 IPF · 타깃 포트 비율로 합니다.' : '아직 이 호스트의 경로 카운터를 읽지 않았습니다 — FC HBA 가 있는 연결 호스트를 매시 한 번 읽습니다. 그동안 분배는 IPF · 타깃 포트 비율로 합니다.'}</div>

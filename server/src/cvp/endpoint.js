@@ -7,8 +7,9 @@
  *
  * ⚠ 정직: 경로 · 응답 필드 이름은 공개 문서(aristanetworks.github.io cloudvision-apis) 기준이고 **실장비로 확인하지 못했다**.
  *   그래서 파서는 응답 모양에 관용적이다 — 어느 깊이든 `interface` 글자와 장비 식별자(deviceId · device_id · serialNumber)를 가진 객체를 위치로 본다.
- *   404 · 501 은 '이 CVP 가 이 API 를 모른다'(2021.1 미만) — 그 CVP 는 미지원으로 적고 그 주기의 나머지를 묻지 않는다.
+ *   501 · 답한 MAC 없이 이어지는 가를 수 없는 404 는 '이 CVP 가 이 API 를 모른다'(2021.1 미만) — 미지원으로 적고 나머지를 묻지 않는다(lookupEndpoints).
  */
+import { poolRun } from '../util/pool.js';
 import { normMac } from './parse.js';
 
 export const EP_PATH = '/api/resources/endpointlocation/v1/EndpointLocation';
@@ -86,29 +87,27 @@ export async function lookupEndpoints(session, macs = [], { budgetMs = 20_000, n
   let seenOk = false; let ambigRun = 0; let failRun = 0;
   const pending = [];   // 가를 수 없는 404 — 답한 MAC 이 나오면 none, 미지원으로 판정되면 unsupported
   const end = Date.now() + budgetMs;
-  let i = 0;
-  const worker = async () => {
-    while (i < list.length) {
+  // 동시성 풀은 util/pool.js 하나(arch2579 ③) — 멈춤 조건이면 남은 MAC 은 묻지 않고 지나간다(cut 으로 센다).
+  await poolRun(list, Math.max(1, Math.min(4, concurrency)), async (mac) => {
       if (unsupported || stopped || signal?.aborted || Date.now() >= end) return;
-      const mac = list[i++];
       const r = await session.get(epQueryPath(mac));
       const at = now();
       if (r.ok) {
         failRun = 0; ambigRun = 0;
         const p = parseEndpointLocation(r.text);
-        if (!p.parsed) { results.push({ mac, at, status: 'error', reason: '응답 형식을 알아보지 못했습니다(JSON 아님)', locations: [] }); continue; }
+        if (!p.parsed) { results.push({ mac, at, status: 'error', reason: '응답 형식을 알아보지 못했습니다(JSON 아님)', locations: [] }); return; }
         seenOk = true;
         results.push({ mac, at, status: p.locations.length ? 'ok' : 'none', locations: p.locations });
-        continue;
+        return;
       }
       if (r.status === 501) { unsupported = true; results.push({ mac, at, status: 'unsupported', reason: 'HTTP 501 — 이 CVP 에 EndpointLocation API 가 없습니다(2021.1 이상 필요)', locations: [] }); return; }
       if (r.status === 404) {
         failRun = 0;
-        if (notFoundKind(r.head) === 'none' || seenOk) { results.push({ mac, at, status: 'none', locations: [] }); continue; }
+        if (notFoundKind(r.head) === 'none' || seenOk) { results.push({ mac, at, status: 'none', locations: [] }); return; }
         ambigRun += 1;
         pending.push({ mac, at, sample: headSample(r.head) });
-        if (ambigRun >= AMBIG_STOP) { unsupported = true; return; }
-        continue;
+        if (ambigRun >= AMBIG_STOP) unsupported = true;
+        return;
       }
       ambigRun = 0;
       results.push({ mac, at, status: 'error', reason: String(r.reason || `HTTP ${r.status}`).slice(0, 200), locations: [] });
@@ -116,9 +115,7 @@ export async function lookupEndpoints(session, macs = [], { budgetMs = 20_000, n
         failRun += 1;
         if (failRun >= FAIL_STOP) stopped = r.status === 0 ? 'conn' : 'auth';
       } else failRun = 0;
-    }
-  };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(4, concurrency)) }, worker));
+  });
   for (const p of pending) {
     if (seenOk) results.push({ mac: p.mac, at: p.at, status: 'none', locations: [] });
     else if (unsupported) results.push({ mac: p.mac, at: p.at, status: 'unsupported', reason: `HTTP 404 이 ${AMBIG_STOP}번 이어졌고 답한 MAC 이 없습니다 — EndpointLocation API 가 없는 것으로 봅니다(2021.1 이상 필요)${p.sample ? ` · 본문: ${p.sample}` : ''}`, locations: [] });

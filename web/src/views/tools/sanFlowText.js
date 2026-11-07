@@ -20,13 +20,14 @@ const CHECK_KIND = Object.freeze({
 /** 계정 권한 점검(flow --show) 결과 → 배지. 점검 안 했으면 회색. */
 export function checkBadge(c) {
   if (!c) return { label: '점검 안 함', tone: 'gray', title: '계정 권한 점검(flow --show — 읽기만)을 아직 하지 않았습니다' };
-  if (c.ok) return { label: `통과 · ${hm(c.at)}`, tone: 'green', title: `flow --show 가 통과했습니다 — 장비 플로우 ${c.total ?? '—'}개(포탈 ${c.portal ?? '—'}) · ${c.by || ''}` };
+  if (c.ok) return { label: `통과 · ${hm(c.at)}`, tone: 'green', title: `flow --show 가 통과했습니다 — 장비 플로우 ${c.total == null ? '—' : `${c.total}개`}(포탈 ${c.portal ?? '—'}) · ${c.by || ''}` };
   return { label: CHECK_KIND[c.kind] || '오류', tone: c.kind === 'error' ? 'amber' : 'red', title: c.text || '점검이 실패했습니다' };
 }
 
 /** 스위치 행이 ‘만들기’ 를 열 수 있나 — 라이선스 없음 · 점검 안 통과면 이유를 준다. */
 export function createBlock(dev) {
   if (dev?.fv?.state === 'no') return '라이선스 없음';
+  if (dev?.edgeIssue) return '엣지 버전 낮음';
   if (!dev?.check) return '먼저 계정 권한 점검';
   if (!dev.check.ok) return '점검 통과 필요';
   if (!dev.collectedAt) return '수집 스냅샷 없음';
@@ -41,34 +42,41 @@ export function deviceRows(d) {
   });
 }
 
-/** 플로우 바이트/초(델타)와 ESXi 경로 실측의 차이 % — 둘 다 있을 때만(시점이 달라 참고값). */
+/** 플로우 바이트/초(델타)와 ESXi 경로 실측의 차이 % — 수신 · 송신 · ESXi 가 **다** 있을 때만(한쪽만이면 부분 합 — 반증 M-5 · 시점이 달라 참고값). */
 export function diffPct(f) {
   const rx = numOrNull(f?.rxBps); const tx = numOrNull(f?.txBps); const e = numOrNull(f?.esxiBps);
-  if (rx == null && tx == null) return null;
-  if (e == null || e <= 0) return null;
-  return ((rx ?? 0) + (tx ?? 0) - e) / e * 100;
+  if (rx == null || tx == null || e == null || e <= 0) return null;
+  return (rx + tx - e) / e * 100;
 }
 export const diffText = (p) => (p == null ? '—' : `${p >= 0 ? '+' : ''}${p.toFixed(1)}%`);
 
 export const shortWwn = (w) => { const s = String(w || ''); return s.length > 12 ? `${s.slice(0, 5)}…${s.slice(-5)}` : (s || '—'); };
 
-const STATE = Object.freeze({ active: { label: '활성', tone: 'green' }, failed: { label: '만들지 못함', tone: 'red' }, deleted: { label: '지움', tone: 'gray' } });
+const STATE = Object.freeze({
+  active: { label: '활성', tone: 'green' }, pending: { label: '만드는 중', tone: 'blue' },
+  unknown: { label: '결과 모름', tone: 'amber', note: '만들기 결과를 받지 못했습니다 — 장비에 있을 수 있습니다(카운터 읽기 · 권한 점검으로 확인)' },
+  conflict: { label: '이름 충돌', tone: 'amber', note: '같은 이름의 플로우가 장비에 이미 있습니다 — 정의가 같은지 확인하지 못했습니다' },
+  gone: { label: '장비에 없음', tone: 'amber' }, failed: { label: '만들지 못함', tone: 'red' }, deleted: { label: '지움', tone: 'gray' },
+});
 export function flowRows(d) {
   const devName = new Map((d?.devices || []).map((x) => [x.id, x.name]));
   const portal = (Array.isArray(d?.flows) ? d.flows : []).map((f) => {
     const p = diffPct(f);
     const c = f.counters || null;
-    const bytes = c && (numOrNull(c.rxBytes) != null || numOrNull(c.txBytes) != null) ? (numOrNull(c.rxBytes) ?? 0) + (numOrNull(c.txBytes) ?? 0) : null;
+    const bytes = c && numOrNull(c.rxBytes) != null && numOrNull(c.txBytes) != null ? numOrNull(c.rxBytes) + numOrNull(c.txBytes) : null;   // 한쪽만이면 '—'(반증 M-5)
     return { key: `${f.deviceId}|${f.name}`, portal: true, name: f.name, deviceId: f.deviceId, sw: devName.get(f.deviceId) || f.deviceId,
       host: f.hostName ? `${String(f.hostName).split('.')[0]} · ${f.hba || '—'}` : '—', pair: `${shortWwn(f.srcdev)} → ${shortWwn(f.dstdev)}`, pairTitle: `${f.srcdev} → ${f.dstdev} · 포트 ${f.ingrport}`,
       target: f.targetName || '—', rate: c ? `${rateText(f.rxBps)} / ${rateText(f.txBps)}` : '—', rateSort: (numOrNull(f.rxBps) ?? -1) + (numOrNull(f.txBps) ?? 0),
       bytes: bytesText(bytes), bytesSort: bytes ?? -1, diff: diffText(p), diffSort: p == null ? null : Math.abs(p), diffWarn: p != null && Math.abs(p) > 5,
-      esxi: rateText(f.esxiBps), state: STATE[f.state] || { label: f.state || '—', tone: 'gray' }, lastAt: f.lastAt || null, lastError: f.lastError || null };
+      esxi: rateText(f.esxiBps), state: STATE[f.state] || { label: f.state || '—', tone: 'gray' }, lastAt: f.lastAt || null, lastError: f.lastError || null,
+      canDelete: f.state !== 'deleted' && f.state !== 'failed' && f.deviceKnown !== false, canForget: f.deviceKnown === false && f.state !== 'deleted' };
   });
   const human = [];
-  for (const x of d?.devices || []) for (const n of x.check?.others || []) {
-    human.push({ key: `${x.id}|${n}`, portal: false, name: n, deviceId: x.id, sw: x.name, host: '—', pair: '—', pairTitle: '', target: '—', rate: '—', rateSort: -1, bytes: '—', bytesSort: -1,
-      diff: '—', diffSort: null, diffWarn: false, esxi: '—', state: { label: '사람이 만듦 · 보기만', tone: 'gray' }, lastAt: x.check?.at || null, lastError: null });
+  const blank = { host: '—', pair: '—', pairTitle: '', target: '—', rate: '—', rateSort: -1, bytes: '—', bytesSort: -1, diff: '—', diffSort: null, diffWarn: false, esxi: '—', lastError: null, canForget: false };
+  for (const x of d?.devices || []) {
+    for (const n of x.check?.others || []) human.push({ ...blank, key: `${x.id}|${n}`, portal: false, name: n, deviceId: x.id, sw: x.name, state: { label: '사람이 만듦 · 보기만', tone: 'gray' }, lastAt: x.check?.at || null, canDelete: false });
+    // 장비에 있는데 포탈 기록이 없는 dvc_ — 재시작 · 시한으로 기록을 놓친 것(반증 M-2). 지울 수 있다.
+    for (const n of x.check?.orphans || []) human.push({ ...blank, key: `${x.id}|${n}`, portal: true, name: n, deviceId: x.id, sw: x.name, state: { label: '포탈 기록 없음', tone: 'amber', note: '장비에 있는데 포탈 기록이 없는 dvc_ 플로우입니다(포탈 재시작 · 시한으로 결과를 놓쳤을 수 있습니다)' }, lastAt: x.check?.at || null, canDelete: true });
   }
   return [...portal, ...human];
 }
@@ -97,11 +105,11 @@ export function flowKpis(d) {
   ];
 }
 
-const JOB_STATUS = Object.freeze({ running: '실행 중', queued: '엣지 대기(설정 pull 전)', dispatched: '엣지 실행 중', done: '끝남' });
+const JOB_STATUS = Object.freeze({ running: '실행 중', queued: '엣지 대기(설정 pull 전)', dispatched: '엣지 결과 기다림', done: '끝남' });
 const ACTION = Object.freeze({ check: '계정 권한 점검', create: '만들기', show: '카운터 읽기', delete: '지우기' });
 export function jobTitle(j) {
   if (!j) return '';
-  const st = j.status === 'done' ? (j.result?.ok ? '완료' : '실패') : (JOB_STATUS[j.status] || j.status);
+  const st = j.status === 'done' ? (j.result?.ok ? '완료' : j.timedOut && !j.lateApplied ? '결과 모름' : '실패') : (JOB_STATUS[j.status] || j.status);
   return `${ACTION[j.action] || j.action} · ${j.deviceName || j.deviceId} · ${st}${j.user ? ` · ${j.user}` : ''}`;
 }
 export const jobTone = (j) => (!j ? 'gray' : j.status !== 'done' ? 'blue' : j.result?.ok ? 'green' : 'red');
@@ -123,4 +131,15 @@ export function targetOptions(hba) {
 export function existingPairs(flows, deviceId, initWwn) {
   if (!initWwn) return [];
   return (Array.isArray(flows) ? flows : []).filter((f) => f.deviceId === deviceId && f.srcdev === initWwn && f.state === 'active').map((f) => f.dstdev);
+}
+/** 마지막 카운터 주기 — 시작 · 건너뛴 사유(무음 금지 — 반증 M-6 · H-2). */
+export function cycleText(c) {
+  if (!c) return '';
+  const sk = Object.entries(c.skipped || {}).map(([k, v]) => `${k} ${v}`).join(' · ');
+  return `마지막 카운터 주기 ${hm(c.at)} — 스위치 ${c.devices}대 중 ${c.started}대 시작${sk ? ` · 건너뜀 ${sk}` : ''}`;
+}
+/** 엣지 작업 시한 안내 — 서버 값(edgeDeadlineMs). */
+export function deadlineText(ms) {
+  const m = numOrNull(ms) != null ? Math.round(numOrNull(ms) / 60_000) : null;
+  return `엣지 위임 작업은 시작부터 ${m == null ? '정해진 시간' : `${m}분`} 안에 결과가 없으면 '결과 모름' 으로 닫고, 늦게 온 결과도 반영합니다. 기록에 비밀번호는 없습니다.`;
 }
