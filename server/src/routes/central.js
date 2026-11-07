@@ -99,6 +99,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { canonicalAgent } from '../util/agentKey.js';   // v2.611 CEN2611-02 — CVP 수신 저장 키 대소문자 정규화   // v2.600 CEN2600-01·RECENT2600-01 — 엣지가 보낸 수치 좁히기
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.583: 반복 수신 로그 조절
 import { capStr, capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 상주 기록 글자 평탄화
+import { sanitizeVcenterTop } from '../central/vcenterTop.js'; // v2.938: vcenter 객체의 아는 최상위 필드만(엣지 수신 정제)
 import { noteAgentContact } from '../central/agentContact.js'; // v2.849 — 엣지 마지막 인증 요청 시각(완전 설치 대상의 '엣지 응답')
 const gpuRecvLog = createChangeLogger();
 export const centralRouter = Router();
@@ -1015,8 +1016,14 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
     vcenter[k] = r.value;
     if (r.dropped) dropped[dk] = (dropped[dk] || 0) + r.dropped;
   }
+  // v2.938(점검 — vCenter 규칙 '별건'): 그 밖의 최상위 키는 아는 것만·형식대로 남긴다. 예전에는 `{ ...b.vcenter }` 의 모르는 키가
+  //   형식·길이 제한 없이 저장돼 /api/vcenters 로 모든 인증 사용자에게 나갔다. 버린 키는 이름(최대 20)·개수로 응답·콘솔에 밝힌다.
+  const top = sanitizeVcenterTop(vcenter);
+  if (top.droppedCount) { dropped.vcTopUnknown = top.droppedCount; dropped.vcTopKeys = top.droppedKeys; }
+  if (top.coerced) dropped.coerced += top.coerced;
+  if (top.droppedCount) console.warn(`[central] inventory: agent=${agent} vc=${vcId} vcenter 객체의 모르는 필드 ${top.droppedCount}개를 버렸습니다(${top.droppedKeys.join(', ')}) — 엣지가 중앙보다 새 버전이면 중앙을 올리세요`);
   const slice = {
-    vcenter,
+    vcenter: { ...top.value, id: vcId },
     hosts: sanitizeInventoryList(b.hosts, vcId, 50_000, dropped),
     vms: sanitizeInventoryList(b.vms, vcId, 500_000, dropped),
     datastores: sanitizeInventoryList(b.datastores, vcId, 50_000, dropped),
@@ -1037,7 +1044,7 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
     networks: slice.networks.length, alarms: slice.alarms.length, gzip: (req.get('content-encoding') || '').includes('gzip'),
   };
   res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length,
-    ...(droppedN || dropped.coerced || dropped.vcLicenses || dropped.vcSolutions ? { rejected: droppedN, dropped } : {}), ...(handover ? { ownerHandover: handover } : {}), ...(saved.held ? { held: true } : {}) });
+    ...(droppedN || dropped.coerced || dropped.vcLicenses || dropped.vcSolutions || dropped.vcTopUnknown ? { rejected: droppedN, dropped } : {}), ...(handover ? { ownerHandover: handover } : {}), ...(saved.held ? { held: true } : {}) });
 });
 
 // 사이트 위임 게스트 디스크 수신(v2.466) — 엣지가 로컬 vCenter 의 guest.disk 를 수집해 push.

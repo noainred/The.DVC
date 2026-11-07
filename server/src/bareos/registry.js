@@ -330,8 +330,9 @@ export function deleteJob(id, { directorId = '' } = {}) {
 }
 
 /** 실행 시작 기록(포탈이 run 을 보냈다). */
-export function markPending(id, { jobid, level, by, trigger = 'manual' }) {
-  return patchJob(id, { pending: { jobid, since: Date.now(), level, by: String(by || ''), trigger }, lastError: null });
+export function markPending(id, { jobid, level, by, trigger = 'manual', late = false }) {
+  // v2.938 반증 B-4: 늦은 회신은 trigger 를 바꾸지 않고 late 표지를 따로 단다(화면 triggerText 가 'group-late' 를 '수동' 으로 읽었다)
+  return patchJob(id, { pending: { jobid, since: Date.now(), level, by: String(by || ''), trigger, ...(late ? { late: true } : {}) }, lastError: null });
 }
 
 /**
@@ -406,6 +407,34 @@ export function addRestore(id, rec) {
   const st = rec?.unknown === true ? { jobid: null, status: '', state: 'unknown' } : { status: 'C', state: 'queued' };
   j.restores = [{ ...rec, ...st, at: Date.now() }, ...(Array.isArray(j.restores) ? j.restores : [])].slice(0, RESTORES_KEEP);
   persist();
+  return copy(j);
+}
+
+/**
+ * v2.938(제안 6번 — v2.824 '남긴 것' runJob·restore 늦은 회신 미반영): 시한으로 '결과 모름' 으로 남긴 복원 행(jobid 없음 · state unknown)에
+ * 엣지의 늦은 회신이 rid 를 주면 그 행을 열린 복원(queued)으로 바꾼다 — 그래야 폴러가 그 복원을 추적해 결과를 남긴다.
+ * 같은 묶음(batchId — 단건 복원은 lateKey)의 결과 모름 행 하나만 바꾼다. 이미 jobid 가 있거나(다른 경로가 채웠다) 같은 rid 가 다른 행에 있으면 하지 않는다.
+ * 반증 B-5: 보낸 뒤(sentAt) 대상이 다시 묶였으면(runsEpoch — 재설치 · Director 변경) 옛 카탈로그의 rid 라 반영하지 않는다.
+ * 반증 B-1: 묶음 밖 단건 쓰기가 실패하면 메모리를 되돌린다(patchJob 과 같은 규약). 여러 건은 호출부가 inBatch 로 묶는다.
+ * @returns {object|null} 바꾼 job 사본(바꾸지 않았으면 null)
+ */
+export function lateResolveRestore(jobId, key, { rid, chain = [] } = {}, now = Date.now(), { sentAt = 0 } = {}) {
+  if (!Number.isInteger(rid) || rid <= 0 || !key) return null;
+  const db = load();
+  const j = db.jobs.find((x) => x.id === jobId);
+  if (!j || !Array.isArray(j.restores)) return null;
+  if (sentAt && Number(j.runsEpoch) > sentAt) return null;
+  if (j.restores.some((x) => x.jobid === rid)) return null;
+  const r = j.restores.find((x) => x.state === 'unknown' && !x.jobid && (x.batchId === key || x.lateKey === key));
+  if (!r) return null;
+  const before = { ...r };
+  Object.assign(r, { jobid: rid, fromJobids: Array.isArray(chain) ? chain.slice(0, 400) : [], status: 'C', state: 'queued', lateAt: now });
+  delete r.unknown;
+  try { persist(); } catch (e) {
+    for (const k of Object.keys(r)) delete r[k];
+    Object.assign(r, before);
+    throw e;
+  }
   return copy(j);
 }
 

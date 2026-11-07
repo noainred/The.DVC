@@ -27,6 +27,7 @@ import {
   onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard, clearAuthStopIfSame, isEdgeNode,
 } from '../../bareos/service.js';
 import { pendingView, relayLimits, RESTORES_DEADLINE_MS, LOGS_DEADLINE_MS } from '../../bareos/edgeOps.js';
+import { lateRunJob, lateRestores, lateRestoreOne } from '../../bareos/lateReplies.js'; // v2.938: 엣지 대행 늦은 회신 반영(제안 6번)
 import { LOGS_MAX } from '../../bareos/ops.js';
 import { compareFirstErrors } from '../../bareos/logFirstError.js';
 import { noteSetupStart, noteSetupEnd, noteRestoreBatchStart, noteRestoreBatchEnd } from '../../bareos/inflight.js';
@@ -915,7 +916,8 @@ async function runRoute(req, res, job) {
   if (!job.enabled) return res.status(409).json({ ok: false, reason: '비활성 대상입니다 — 먼저 활성화하세요.' });
   const level = normLevel(req.body?.level || job.level);
   try {
-    const jobid = await onDirector(jobDir(job), 'runJob', { job: job.bareosJob, level });
+    // v2.938(제안 6번): 엣지 대행이 시한으로 '결과 모름' 이 된 뒤 회신이 늦게 오면 그 jobid 를 원장에 넣는다(lateReplies.js)
+    const jobid = await onDirector(jobDir(job), 'runJob', { job: job.bareosJob, level }, { onLate: lateRunJob(job.id, { level, by: req.user?.username, trigger: 'manual' }) });
     markPending(job.id, { jobid, level, by: req.user?.username, trigger: 'manual' });
     audit(req, 'Bareos 백업 실행', `${job.vcenterId}/${job.vmName}`, `jobid ${jobid} · ${level}`);
     res.status(202).json({ ok: true, jobid });
@@ -1132,8 +1134,10 @@ async function restoreRoute(req, res, job) {
 async function sendRestore(req, res, job, { b, jobid, plan, settings }) {
   const site = settings.sites.find((s) => s.vcenterId === job.vcenterId);
   const client = site?.client || job.client;
+  // v2.938 반증 B-2: 단건 복원도 늦은 회신을 받는다 — 결과 모름 행에 lateKey 를 달아 그 행만 연다(batchId 를 쓰면 묶음 복원 화면에 낀다)
+  const lateKey = `rs-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    const out = await onDirector(jobDir(job), 'restore', { jobid, name: job.bareosJob, client, restoreJob: settings.defaults.restoreJob, pluginOptions: plan.pluginOptions });
+    const out = await onDirector(jobDir(job), 'restore', { jobid, name: job.bareosJob, client, restoreJob: settings.defaults.restoreJob, pluginOptions: plan.pluginOptions }, { onLate: lateRestoreOne(job.id, lateKey) });
     addRestore(job.id, { jobid: out.rid, fromJobids: out.chain, mode: b.mode, target: plan.target, by: req.user?.username || '', client });
     audit(req, 'Bareos 복원 실행', `${job.vcenterId}/${job.vmName}`, `복원 jobid ${out.rid} · 방식 ${b.mode} · 원본 ${out.chain.join(',')}${plan.target?.name && b.mode === 'newVm' ? ` · 새 VM ${plan.target.name}` : ''}`);
     res.status(202).json({ ok: true, jobid: out.rid, fromJobids: out.chain, target: plan.target });
@@ -1141,7 +1145,7 @@ async function sendRestore(req, res, job, { b, jobid, plan, settings }) {
     const unknown = !!e?.unknown || e?.code === 'unknown';
     audit(req, 'Bareos 복원 실행', `${job.vcenterId}/${job.vmName}`, `${unknown ? '결과 모름' : '실패'} — ${String(e?.message || e).slice(0, 160)}`);
     // v2.874(점검 B5-01): 보낸 뒤 끊김은 원장에 남긴다 — 다시 누른 같은 복원이 두 번 돌지 않게(restoreHeld · 새 VM 이름 예약)
-    if (unknown) { try { addRestore(job.id, { unknown: true, fromJobids: [jobid], mode: b.mode, target: plan.target, by: req.user?.username || '', client }); } catch (e2) { console.warn(`[bareos] 복원 결과 모름 기록 실패: ${String(e2?.message || e2).slice(0, 160)}`); } }
+    if (unknown) { try { addRestore(job.id, { unknown: true, fromJobids: [jobid], mode: b.mode, target: plan.target, by: req.user?.username || '', client, lateKey }); } catch (e2) { console.warn(`[bareos] 복원 결과 모름 기록 실패: ${String(e2?.message || e2).slice(0, 160)}`); } }
     sendErr(res, Object.assign(new Error(String(e?.message || e)), { code: unknown ? 'unknown' : (e?.code || '') }));
   }
 }
@@ -1351,7 +1355,7 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
     });
     let out;
     try {
-      out = await onDirector(dir, 'restores', { items: sendItems }, { signal: AbortSignal.timeout(RESTORES_DEADLINE_MS) });   // v2.870 감사 A5-01
+      out = await onDirector(dir, 'restores', { items: sendItems }, { signal: AbortSignal.timeout(RESTORES_DEADLINE_MS), onLate: lateRestores(plan.items.map((r) => ({ jobId: r.id, batchId }))) });   // v2.870 감사 A5-01 · v2.938 늦은 회신
     } catch (e) {
       // 엣지가 가져간 뒤 회신이 없으면 결과 모름 — 시작됐을 수 있다(다시 보내면 두 번 돈다)
       const unknown = !!e?.unknown || e?.code === 'unknown';
