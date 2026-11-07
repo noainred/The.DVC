@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **712개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **717개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-07)
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (222)
+## 공통 (226)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -215,6 +215,10 @@
 | `STALL_WATCH` | `기본 아님('0' 일 때만 적용)` |  | perf/stallWatch.js |
 | `STALL_WATCH_HEAP_WARN_PCT` | `85` |  | perf/stallWatch.js |
 | `STALL_WATCH_MS` | `10000` |  | perf/stallWatch.js |
+| `STORPATH_PER_CYCLE` |  |  | config.js |
+| `STORPATH_REFRESH_MS` |  |  | config.js |
+| `STORPATH_SAMPLES` |  |  | config.js |
+| `STORPATH_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `SVCMON_ROLE` | `''` |  | config.js |
 | `TAG_REFRESH_MS` |  |  | config.js |
 | `TAG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
@@ -837,10 +841,11 @@
 | `PDU_SESSION_BUDGET_MS` | `75000` |  | pdu/collectors/apcSsh.js |
 | `PDU_THRESHOLDS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/thresholds.js |
 
-## SAN 스위치 (34)
+## SAN 스위치 (35)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `SAN_FLOW_SHOW_MS` | `15` |  | sanswitch/flowJobs.js |
 | `SANHEALTH_DB_PATH` |  |  | sanswitch/healthHistory.js |
 | `SANHEALTH_MAX_RUNS` | `24` |  | sanswitch/healthHistory.js |
 | `SANSW_ALIAS_MAX` | `8000` |  | sanswitch/zoning.js |
@@ -901,4 +906,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 712
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 717

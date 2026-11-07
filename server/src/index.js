@@ -404,6 +404,9 @@ app.use('/api/central/sanswitch-perf', BIG_JSON);
 //   그 상한을 채우면 기본 1MB 파서가 413 을 주고, 413 은 재시도 대상이 아니라 중앙 run 은 시한까지 'running' → 화면은 '엣지 무응답' 으로
 //   읽는다(실제로는 결과가 컸다). ⚠ 정직 기록: 실측이 아니라 상한 산수다 — 정상 테스트는 수십 KB 다.
 app.use('/api/central/sanswitch-test-result', BIG_JSON);
+// v2.929(C-②): Flow Vision 플로우 작업 대행 결과 — 명령 32개(플로우 16 × 만들기 · 보기) × 출력 16KB(flowCmd OUT_MAX) = 512KB 에 JSON 이스케이프가
+//   붙으면 기본 1MB 를 넘을 수 있다(413 = 결과 소실 · 작업은 시한까지 '엣지 실행 중'). 상한 산수이고 실측이 아니다.
+app.use('/api/central/sanswitch-flow-result', BIG_JSON);
 // v2.608: CVP push — 장비 레코드(포트 구성·부품·BGP)와 원시 표본이 청크 700KB 로 오지만 해제 후 1MB 를 넘을 수 있다(413 = 조용한 소실).
 app.use('/api/central/cvp-data', BIG_JSON);
 app.use('/api/central/isidu-data', BIG_JSON);   // v2.736 — 사용자 폴더 수천 개 × 스캔 여러 건(해제 후 1MB 를 넘는다 — 413 은 조용한 소실)

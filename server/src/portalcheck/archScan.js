@@ -198,6 +198,7 @@ export const BIG_JSON_SMALL = Object.freeze({
   'central:/svcmon-config-ack': '배정 sig 확인응답 한 줄',
   'central:/idrac-scan-progress': '진행률 숫자 몇 개',
   'central:/sanswitch-test-result': '연결 테스트 1대 결과',
+  'central:/sanswitch-flow-result': 'Flow Vision 플로우 작업 1건 결과 — 명령 32개 × 출력 16KB 상한(v2.929)',
   'central:/rma-poll': '잡 인출 요청(본문은 agent 이름뿐)',
   'central:/rma-credential': '자격증명 요청(대상 id 하나)',
   'central:/ping-result': 'ping 결과 — 대상당 수 필드 × 대상 수백(수십 KB)',

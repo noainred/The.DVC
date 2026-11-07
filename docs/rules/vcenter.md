@@ -27,6 +27,7 @@
 - v2.898 — vCenter 알람 · 최근 작업 · 권한 목록 · Linked Mode · 업데이트 · vLCM(`vcinfo/`) + 스냅샷 트리 · VM NIC. 캐시는 스냅샷 vCenter 객체 밖이고 호출은 읽기 전용뿐이다
 - v2.901 — 리소스 풀 설정(`vcinfo` pools) · NIC 팀 구성(hcfg.net teaming) · 호스트별 DS 마운트(dscfg mounts) · VMXNET3 권장(nic-legacy) · Linked 범위 가림 · 엣지 vcInfo 계약(키 없음 = 유지 · 낡음 · 만료)
 - v2.906 — 분산 포트그룹 팀 구성 · LACP · VLAN(`vcinfo` dvpg — 6시간 · 이미 받은 포트그룹 moref 만 · Enhanced LACP 의 LAG)
+- v2.929 — ESXi 경로 카운터(`storpath/` — storagePath 그룹 · 한 시간마다 5분 표본 · 비율만 실측)
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
 
 ## 본문
@@ -471,3 +472,9 @@
   - LACP: vDS `config.lacpGroupConfig` 의 LAG 가 활성 업링크에 있으면 그 LAG, 아니면 포트그룹 `lacpPolicy`. vDS 호출이 실패하면 이름만 다시 읽고 `lagError`(LACP 는 포트그룹 설정만) ·
     이름도 못 읽으면 `dvsError`(화면이 '짝짓지 못함' 으로 말한다 — 지어내지 않는다). 호스트와의 짝은 hcfg.net 의 분산 스위치 **이름**(`dvpgRowsForHost`).
   - 실 vCenter 로 확인하지 못했다(추정 — 응답 모양은 공식 바인딩 기준): `config.lacpGroupConfig` 경로가 받아지는지 · 3rd-party DVS(타입이 VmwareDistributedVirtualSwitch 가 아님)면 vDS 호출 전체가 실패한다(lagError · dvsError 로 남는다).
+
+- **ESXi 경로 카운터(v2.929 C-① — `server/src/storpath/`, 회귀 `test/sanStorPath2929.test.js`)**
+  - vCenter perf `storagePath` 그룹(읽기 · 쓰기 · 지연)을 FC HBA 가 있는 호스트만 **한 시간마다 5분(표본 15개)** QueryPerf 로 읽는다(실시간 20초 · instance `*`).
+    고RTT 함대에서 응답 크기를 묶으려는 선택 — 주기마다 200대(`STORPATH_PER_CYCLE`), 예산 10초 · 4대씩. 실시간 통계 수준 · 인스턴스 이름 형식은 실장비 미확인(추정).
+  - 경로 → 타깃 WWN 은 인스턴스 이름(`fc.<node>:<port>-fc.<node>:<port>-<dev>`) 또는 `vmhbaN:Cn:Tn:Ln` + 멀티패스 rt 표(`hcfg.mp.rt`)로 푼다. 못 풀면 그 경로는 세지 않는다(0 이 아님).
+  - 이력은 인메모리(호스트당 26개 — 5분 스냅샷 스윕)이고 귀속 엔진에는 **비율만** 넘긴다. 엣지가 보낸 `spath` 는 중앙에서 아는 필드만 정제한다(`sanitizeHostSpath`).

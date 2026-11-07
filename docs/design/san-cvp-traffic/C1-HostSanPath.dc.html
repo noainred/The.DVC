@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>The Davinci — ESXi 호스트 상세 · SAN 경로·트래픽(C-① 경로 실측 + IPF)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=Noto+Sans+KR:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;-webkit-font-smoothing:antialiased}
+a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}.tabular{font-variant-numeric:tabular-nums}.nowrap{white-space:nowrap}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:12px 14px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0;overflow:hidden}
+.hd-card-h{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 10px;margin-bottom:8px;font-size:13.5px}
+.hd-card-h>b{display:inline-flex;align-items:center;gap:8px}
+.hd-card-h .muted{font-size:11.5px;min-width:0;overflow-wrap:anywhere}
+.ht-gdot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}.badge.red{background:rgba(239,68,68,.15);color:#f87171}.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}.badge.blue{background:rgba(59,130,246,.15);color:#93c5fd}.badge.cyan{background:rgba(34,211,238,.14);color:#67e8f9}
+.btn{display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;line-height:1.4;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.banner{padding:8px 12px;border-radius:8px;border:1px solid #243049;border-left:4px solid #3b82f6;background:#141b2d;color:#e6edf6;font-size:12.5px;line-height:1.55}
+.banner.warn{border-color:rgba(245,158,11,.35);border-left-color:#f59e0b}
+.table-wrap{overflow:auto;border-radius:12px;border:1px solid #243049}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-size:12.5px}
+tbody tr:last-child td{border-bottom:none}
+.r{text-align:right}
+.ht-kpi{display:flex;flex-direction:column;gap:3px;min-width:0;padding:11px 13px;border:1px solid #243049;border-radius:10px;background:#141b2d}
+.ht-kpi-l{font-size:11px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ht-kpi-v{display:flex;align-items:baseline;gap:5px;min-width:0;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
+.ht-kpi-v small{font-size:11px;font-weight:500;color:#8b9bb4}
+.ht-kpi-s{font-size:11px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd-nav a{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:15px;border:1px solid #243049;background:#141b2d;color:#e6edf6;text-decoration:none;font-size:12px;font-weight:600}
+.hd-nav a.on{border-color:#3b82f6;background:rgba(59,130,246,.16)}
+.sb-item{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:8px;color:#8b9bb4;font-size:13px;font-weight:600;line-height:1.3;white-space:nowrap;box-sizing:border-box}
+.sb-item.active{color:#e6edf6;background:rgba(34,211,238,.12);box-shadow:inset 3px 0 0 #22d3ee}
+.sb-child{padding:6px 10px 6px 12px;font-weight:500;font-size:12.5px}.sb-child.active{box-shadow:none}
+.sb-dot{width:5px;height:5px;border-radius:50%;background:#5d6b85;flex:none}.sb-child.active .sb-dot{background:#22d3ee;box-shadow:0 0 6px #22d3ee}
+.ver-badge{font-size:11px;font-weight:700;color:#22d3ee;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.3);padding:1px 7px;border-radius:10px;white-space:nowrap}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:0 10px;border-radius:13px;border:1px solid #243049;background:#0f1626;color:#8b9bb4;font-size:11.5px;font-weight:600;white-space:nowrap}
+.chip.new{border-color:rgba(245,158,11,.45);color:#fbbf24;background:rgba(245,158,11,.08)}
+.chip.ok{border-color:rgba(34,197,94,.45);color:#4ade80;background:rgba(34,197,94,.08)}
+.mk{font-weight:700}.mk.m{color:#4ade80}.mk.c{color:#67e8f9}.mk.e{color:#fbbf24}.mk.n{color:#5d6b85}
+.rule{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid #243049;border-radius:8px;background:#0f1626}
+.rule .no{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;background:#1a2236;color:#93c5fd}
+.mini-bar{width:90px;height:6px;border-radius:3px;background:#1a2236;display:inline-block;vertical-align:middle;overflow:hidden}.mini-bar>span{display:block;height:100%}
+</style>
+</helmet>
+<div style="display: flex; flex-direction: column; min-height: 1560px; background: radial-gradient(1200px 600px at 70% -10%, #16213a 0%, #0a0e17 55%); color: #e6edf6; font-family: 'Inter', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif">
+
+  <header style="display: flex; align-items: center; gap: 14px; padding: 6px 20px; min-height: 44px; background: rgba(12,17,30,.9); border-bottom: 1px solid #1f2a40; flex-wrap: wrap">
+    <div style="display: flex; align-items: center; gap: 10px">
+      <div style="width: 26px; height: 26px; border-radius: 7px; font-size: 13px; background: linear-gradient(135deg, #3b82f6, #22d3ee); display: grid; place-items: center; font-weight: 800; color: #04101f">V</div>
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><b style="font-size: 13px">The Davinci</b><span class="ver-badge">v2.925.0</span><span class="ver-badge" style="color: #fbbf24; background: rgba(245,158,11,.12); border-color: transparent">MOCK</span></div>
+    </div>
+    <div style="flex: 1 1 0%; min-width: 0; display: flex; justify-content: center">
+      <button type="button" style="display: inline-flex; align-items: center; gap: 10px; width: 420px; max-width: 100%; height: 32px; padding: 0 12px; border-radius: 8px; background: #0f1626; border: 1px solid #243049; color: #5d6b85; font-size: 12px; font-family: inherit">장비 · 기능 찾기 — 이름 · IP · 시리얼<span style="margin-left: auto; font-size: 10.5px; border: 1px solid #243049; border-radius: 5px; padding: 1px 6px">Ctrl K</span></button>
+    </div>
+    <div class="mono" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8b9bb4; white-space: nowrap"><span style="width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e; display: inline-block"></span>28/28 vCenter OK</div>
+    <div style="display: flex; align-items: center; gap: 9px; padding-left: 14px; border-left: 1px solid #1f2a40">
+      <div style="width: 30px; height: 30px; border-radius: 50%; background: #1a2236; display: grid; place-items: center; font-weight: 700; font-size: 12px">박</div>
+      <div style="line-height: 1.2"><div style="font-size: 12.5px; font-weight: 600">박준호</div><div class="muted" style="font-size: 10.5px">관리자</div></div>
+      <button type="button" class="btn" style="padding: 3px 9px; font-size: 11.5px">Out</button>
+    </div>
+  </header>
+
+  <div style="display: flex; align-items: stretch; flex: 1 1 auto; min-height: 0; flex-wrap: wrap">
+    <aside aria-label="메뉴" style="flex: 0 0 236px; display: flex; flex-direction: column; background: rgba(12,17,30,.72); border-right: 1px solid #1f2a40">
+      <nav style="flex: 1 1 auto; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px">
+        <a href="#" class="sb-item">Overview</a>
+        <a href="#" class="sb-item">Summary</a>
+        <a href="#" class="sb-item active" aria-expanded="true">서버</a>
+        <ul style="list-style: none; margin: 2px 0 4px; padding: 0 0 0 12px; display: flex; flex-direction: column; gap: 1px">
+          <li><a href="#" class="sb-item sb-child"><span class="sb-dot"></span>가상화 서버</a></li>
+          <li><a href="Main.dc.html" class="sb-item sb-child active" aria-current="page"><span class="sb-dot"></span>ESXi 호스트</a></li>
+          <li><a href="#" class="sb-item sb-child"><span class="sb-dot"></span>vCenter</a></li>
+          <li><a href="#" class="sb-item sb-child"><span class="sb-dot"></span>물리 서버</a></li>
+        </ul>
+        <a href="SanAttribIpf.dc.html" class="sb-item">스토리지</a>
+        <a href="EndpointLoc.dc.html" class="sb-item">네트워크</a>
+        <a href="#" class="sb-item">자원관리</a>
+        <a href="FlowVision.dc.html" class="sb-item">특수 기능</a>
+        <a href="#" class="sb-item">이슈</a>
+        <a href="#" class="sb-item">위키</a>
+      </nav>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px">
+        <h1 style="margin: 0; font-size: 18px; font-weight: 800">esx-kr-012.corp.local</h1>
+        <span class="muted">KR-법인 · vc-kr-01 · 클러스터 KR-PROD-A · ESXi 8.0 U3</span>
+        <span class="badge green">연결됨</span>
+        <span style="margin-left: auto; display: inline-flex; gap: 6px"><a href="#" class="btn">성능 보기</a><a href="#" class="btn">내보내기</a></span>
+      </div>
+      <nav class="hd-nav" aria-label="묶음 이동" style="display: flex; flex-wrap: wrap; gap: 6px">
+        <a href="#">개요</a><a href="#">상태 점검</a><a href="#">하드웨어</a><a href="EndpointLoc.dc.html">네트워크</a><a href="#">스토리지</a><a href="#" class="on">SAN 경로 · 트래픽</a><a href="#">VM 142</a><a href="#">전력 · 온도</a><a href="#">구성 점검</a>
+      </nav>
+
+      <section class="card" id="san" aria-labelledby="san-h">
+        <div class="hd-card-h">
+          <b id="san-h"><span class="ht-gdot" style="background: #fb923c"></span>SAN 경로 · 트래픽</b>
+          <span class="muted">HBA 2 · 패브릭 2 · 스토리지 4 · 경로 16(죽은 경로 0) · 근거 — 실측(ESXi 경로) 2 · 확정 1 · 추정(IPF) 1 · 조닝만 1</span>
+        </div>
+
+        <div class="banner" style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center">
+          <span><b>라이선스 없이 냅니다.</b> 스위치 쪽 Flow Vision 실측은 없고(KR-FAB-A · KR-FAB-B 라이선스 없음), 짝별 수치는 <b>ESXi 경로 카운터(실측)</b> 와 <b>IPF 보정(추정)</b> 으로 냅니다. 스위치 포트 합계는 그대로 확정값입니다.</span>
+          <span class="chip new">Flow Vision 라이선스 없음 · 2대</span>
+          <a href="FlowVision.dc.html" class="btn" style="padding: 3px 9px; font-size: 11.5px">라이선스가 있으면 — 플로우 모니터</a>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px">
+          <div class="ht-kpi"><span class="ht-kpi-l">기간 전송 합 · 24h(HBA 포트 · 스위치 카운터)</span><span class="ht-kpi-v">64.2<small>TB</small></span><span class="ht-kpi-s">확정값 · 측정 없음 포트 0</span></div>
+          <div class="ht-kpi"><span class="ht-kpi-l">실측 분배 · ESXi 경로 카운터</span><span class="ht-kpi-v" style="color: #4ade80">51.8<small>TB · 81%</small></span><span class="ht-kpi-s">1시간 창 24개 합 · 공백 1개</span></div>
+          <div class="ht-kpi"><span class="ht-kpi-l">추정 분배 · IPF 보정</span><span class="ht-kpi-v" style="color: #fbbf24">≈12.4<small>TB · 19%</small></span><span class="ht-kpi-s">행합 · 열합 맞춤 · 반복 7회 · 잔차 0.3%</span></div>
+          <div class="ht-kpi"><span class="ht-kpi-l">교차검증 · ESXi 합 vs 스위치 HBA 포트 합</span><span class="ht-kpi-v">+2.1<small>%</small></span><span class="ht-kpi-s">5% 안 — 두 출처가 같은 트래픽을 본다</span></div>
+          <div class="ht-kpi"><span class="ht-kpi-l">지금 읽기 / 쓰기(ESXi 경로 합)</span><span class="ht-kpi-v">1.84<small>GB/s</small><span class="muted" style="font-size: 13px">/ 0.62</span></span><span class="ht-kpi-s">20초 표본 · 지연 읽기 1.9 ms · 쓰기 2.4 ms</span></div>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 10px; margin-bottom: 6px">
+          <div style="font-size: 12.5px"><b>경로별 실측</b> <span class="muted">ESXi 경로 카운터(vCenter 실시간 20초 × 180 = 최근 1시간, 1시간마다 적재) · 타깃 WWN 으로 스토리지를 찾는다(등록 시리얼 · 네임서버)</span></div>
+          <span class="muted" style="font-size: 11px">창 11:00~12:00 · 적재 12:02 · 표본 180/180</span>
+        </div>
+        <div class="table-wrap" style="margin-bottom: 12px">
+          <table>
+            <thead><tr><th>HBA</th><th>타깃 WWN</th><th>스토리지</th><th>패브릭 · 스위치 포트</th><th>경로</th><th class="r">지금 읽기 / 쓰기</th><th class="r">1시간 읽기 / 쓰기</th><th class="r">지연 읽기 / 쓰기</th><th class="r">24h 누적(실측)</th><th>근거</th></tr></thead>
+            <tbody>
+              <tr><td><b>vmhba1</b></td><td class="mono" style="font-size: 11.5px">50:06:0e:80:07:c3:f8:00</td><td>PMAX-8000 <span class="muted">(S/N 000197900123)</span></td><td>KR-FAB-A · kr-sw-a1 3/14 → 3/2</td><td><span class="badge green">작동</span></td><td class="r tabular">612 / 184 MB/s</td><td class="r tabular">2.08 / 0.61 TB</td><td class="r tabular">1.8 / 2.2 ms</td><td class="r tabular">24.1 TB</td><td><span class="mk m">●</span> 실측(ESXi 경로)</td></tr>
+              <tr><td><b>vmhba1</b></td><td class="mono" style="font-size: 11.5px">50:06:0e:80:07:c3:f8:10</td><td>PMAX-8000</td><td>KR-FAB-A · kr-sw-a1 3/14 → 3/6</td><td><span class="badge green">작동</span></td><td class="r tabular">598 / 171 MB/s</td><td class="r tabular">2.01 / 0.58 TB</td><td class="r tabular">1.9 / 2.3 ms</td><td class="r tabular">23.6 TB</td><td><span class="mk m">●</span> 실측(ESXi 경로)</td></tr>
+              <tr><td><b>vmhba2</b></td><td class="mono" style="font-size: 11.5px">50:06:01:60:3e:a0:12:44</td><td>Unity-650F <span class="muted">(S/N CKM00212345)</span></td><td>KR-FAB-B · kr-sw-b1 2/7 → 2/20</td><td><span class="badge green">작동</span></td><td class="r tabular">188 / 121 MB/s</td><td class="r tabular">0.64 / 0.40 TB</td><td class="r tabular">2.4 / 3.1 ms</td><td class="r tabular">13.4 TB</td><td><span class="mk m">●</span> 실측 · <span class="mk c">●</span> 확정(존 안 1개)</td></tr>
+              <tr><td><b>vmhba2</b></td><td class="mono" style="font-size: 11.5px">50:00:09:75:00:1a:b2:19</td><td>PS-7000 <span class="muted">(등록 없음 · 네임서버 이름)</span></td><td>KR-FAB-B · kr-sw-b1 2/7 → 2/31</td><td><span class="badge green">작동</span></td><td class="r tabular">— / —</td><td class="r tabular">— / —</td><td class="r tabular">— / —</td><td class="r tabular">≈12.4 TB</td><td><span class="mk e">◐</span> 추정(IPF) <span class="muted" title="vCenter 가 이 경로 계열을 돌려주지 않았다">· ESXi 계열 없음</span></td></tr>
+              <tr><td><b>vmhba2</b></td><td class="mono" style="font-size: 11.5px">50:00:09:75:00:1a:b2:1d</td><td>PS-7000</td><td>KR-FAB-B · kr-sw-b1 2/7 → 2/33</td><td><span class="badge amber">대기(standby)</span></td><td class="r tabular">0 / 0 MB/s</td><td class="r tabular">0 / 0 TB</td><td class="r tabular">— / —</td><td class="r tabular">0</td><td><span class="mk m">●</span> 실측 · 0 은 실측 0</td></tr>
+              <tr><td><b>vmhba1</b></td><td class="mono" style="font-size: 11.5px">50:00:14:42:a0:11:22:33</td><td>VPLEX-KR <span class="muted">(가운데 계층)</span></td><td>KR-FAB-A · kr-sw-a1 3/14 → 3/40</td><td><span class="badge gray">조닝만 · 로그인 없음</span></td><td class="r tabular">—</td><td class="r tabular">—</td><td class="r tabular">—</td><td class="r tabular">—</td><td><span class="mk n">○</span> 조닝만(정리 후보)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 12px; margin-bottom: 12px">
+          <div style="min-width: 0">
+            <div style="font-size: 12.5px; margin-bottom: 6px"><b>스토리지별 트래픽 · 24h</b> <span class="muted">근거마다 따로 센다 — 실측 · 확정 · 추정을 한 숫자로 합치지 않는다</span></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>스토리지</th><th>근거</th><th class="r">24h 전송</th><th>분배 방식</th><th>비율</th><th>비고</th></tr></thead>
+                <tbody>
+                  <tr><td><b>PMAX-8000</b></td><td><span class="mk m">●</span> 실측</td><td class="r tabular"><b>47.7 TB</b></td><td>ESXi 경로 2개 합(24 창)</td><td><span class="mini-bar"><span style="width: 74%; background: #4ade80"></span></span> 74%</td><td class="muted">스위치 포트 합과 차이 +1.8%</td></tr>
+                  <tr><td><b>Unity-650F</b></td><td><span class="mk m">●</span> 실측 · <span class="mk c">●</span> 확정</td><td class="r tabular"><b>13.4 TB</b></td><td>존 안 스토리지 1개 — 포트 카운터 그대로</td><td><span class="mini-bar"><span style="width: 21%; background: #67e8f9"></span></span> 21%</td><td class="muted">실측과 확정이 일치(차이 0.9%)</td></tr>
+                  <tr><td><b>PS-7000</b></td><td><span class="mk e">◐</span> 추정</td><td class="r tabular">≈ 3.1 TB</td><td>IPF — 행합(vmhba2 포트 Δ) · 열합(2/31 · 2/33 타깃 포트 Δ)</td><td><span class="mini-bar"><span style="width: 5%; background: #fbbf24"></span></span> 5%</td><td class="muted">ESXi 계열 없음 → IPF 폴백 · 호버에 근거</td></tr>
+                  <tr><td><b>VPLEX-KR</b></td><td><span class="mk n">○</span> 조닝만</td><td class="r tabular">—</td><td>통계에 넣지 않음</td><td>—</td><td class="muted">허용은 있으나 로그인 없음</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card" style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px">
+            <div style="font-size: 12.5px"><b>분배 규칙 · 우선순위</b> <span class="muted">(판정 코어 하나 — sanswitch/attribution.js)</span></div>
+            <div class="rule"><span class="no">1</span><div><b><span class="mk m">●</span> 실측 — ESXi 경로 카운터</b><div class="muted">호스트 쪽이 타깃 WWN 별로 센 값. 라이선스 불필요. 1시간 창을 쌓아 24h 를 만든다. 창이 빠지면 ‘(일부)’.</div></div></div>
+            <div class="rule"><span class="no">2</span><div><b><span class="mk c">●</span> 확정 — 존 안 스토리지 1개</b><div class="muted">그 HBA 포트 카운터 전부가 그 스토리지(A 단계 규칙 그대로).</div></div></div>
+            <div class="rule"><span class="no">3</span><div><b><span class="mk e">◐</span> 추정 — IPF 보정</b><div class="muted">후보 2개 이상 + 실측 없음. 행합 = 호스트 포트 Δ · 열합 = 타깃 포트 Δ 를 동시에 맞춘다(반복 ≤ 50 · 잔차 0.5%). 미수렴이면 타깃 포트 비율(A 방식)로 표기.</div></div></div>
+            <div class="rule"><span class="no">4</span><div><b>— 분배 불가 · 측정 없음</b><div class="muted">0 으로 채우지 않고 개수를 밝힌다.</div></div></div>
+            <div class="muted" style="font-size: 11px; margin-top: 2px">교차검증: ESXi 경로 합 vs 스위치 HBA 포트 합 — 5% 를 넘으면 띠에 ‘출처 불일치’ 를 띄운다(어느 쪽이 맞는지 단정하지 않는다).</div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+          <span class="chip ok">출처 · vCenter 경로 카운터(실시간) · 1시간마다</span>
+          <span class="chip ok">출처 · SAN 스위치 포트 카운터 · 15분</span>
+          <span class="chip">출처 · 조닝 · 네임서버 · 등록 시리얼</span>
+          <span class="chip new">없음 · Flow Vision(스위치 쪽 플로우 실측)</span>
+          <span class="muted" style="font-size: 11px; margin-left: auto">ESXi 경로 계열 이름·통계 레벨은 실장비로 확인해야 한다 — 못 읽으면 IPF 로 떨어진다</span>
+        </div>
+      </section>
+
+      <section class="card" aria-label="24시간 추이">
+        <div class="hd-card-h"><b><span class="ht-gdot" style="background: #60a5fa"></span>24시간 처리량 · 스토리지별(실측 창 24개)</b><span class="muted">읽기 실선 · 쓰기 점선 · 창이 빠진 구간은 선을 끊는다(0 으로 그리지 않음)</span></div>
+        <div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; align-items: stretch; height: 150px">
+          <div class="muted mono" style="display: flex; flex-direction: column; justify-content: space-between; font-size: 10.5px; text-align: right"><span>3 GB/s</span><span>2</span><span>1</span><span>0</span></div>
+          <div style="position: relative; border-left: 1px solid #243049; border-bottom: 1px solid #243049; display: flex; align-items: flex-end; gap: 3px; padding: 0 4px">
+            <div style="flex: 1; height: 62%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 66%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 71%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 58%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 54%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 0; border-top: 2px dashed #5d6b85" title="창 없음(수집 공백)"></div><div style="flex: 1; height: 60%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 73%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 80%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 84%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 77%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 69%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 64%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 61%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 57%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 55%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 59%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 63%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 70%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 75%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 72%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 68%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 65%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div><div style="flex: 1; height: 61%; background: rgba(74,222,128,.35); border-top: 2px solid #4ade80"></div>
+          </div>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: 11.5px" class="muted"><span><span class="mk m">■</span> PMAX-8000 읽기</span><span><span style="color: #67e8f9">■</span> Unity-650F</span><span><span style="color: #fbbf24">■</span> PS-7000(추정 — 점선 테두리)</span><span style="margin-left: auto">공백 창 1개(16:00) — 호스트 연결 끊김 사유는 응답만으로 단정하지 않음</span></div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
