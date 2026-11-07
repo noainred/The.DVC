@@ -206,7 +206,7 @@ export function RealOs({ scope }) {
       });
   };
   useEffect(() => { loadStatus(); /* eslint-disable-next-line */ }, []);
-  useEffect(() => { loadResults(); /* eslint-disable-next-line */ }, [scope, mm]);
+  useEffect(() => { loadResults(); }, [scope, mm]);
 
   if (err) return <ErrorBox message={err} />;
   if (!st) return <Loading />;

@@ -32,7 +32,7 @@ import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { listAssignments, noteExpectMs } from './svcmonAssign.js';
-import { noteResult, noteAlertOnly } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림 · v2.928 보류 재판정
+import { noteResult, noteAlertOnly, alertKeyOf, forgetHeld, forgetAlertedWhere, hasAlertedIn } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림 · v2.928 보류 재판정 · v2.932 보류 시한·상태 정리
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -55,6 +55,14 @@ export const WARM_GC_HOLD_MS = envNum('SVCMON_EDGE_WARM_GC_HOLD_MS', 30 * 60_000
  */
 export const REGRESS_GC_HOLD_MS = envNum('SVCMON_EDGE_REGRESS_GC_HOLD_MS', 3 * 60_000);
 export const MAX_ROWS_PER_AGENT = envNum('SVCMON_EDGE_MAX_ROWS', 20000);
+/**
+ * v2.932(점검 D1-03): 메타(대상·점검 이름·경로)가 아직 없는 행의 **알림 판정 보류 시한**(하한). 중앙 재시작 직후 엣지 첫 보고는 메타 없이 행만 오고
+ *   (중앙이 needMeta 를 답한 다음 push 에 메타가 온다), 그 사이 판정하면 제목이 내부 테스트 ID · 경로가 빈 알림이 나갔다. 보류는 엣지 push 주기의
+ *   2배(이 하한 ~ 15분 상한)까지만 — 넘으면 메타 없이 판정한다(루트 CLAUDE.md '보류에는 시한' · 행 낡음 판정 기본 5분보다 짧은 하한).
+ */
+export const META_ALERT_HOLD_MS = envNum('SVCMON_EDGE_META_ALERT_HOLD_MS', 3 * 60_000);
+const META_ALERT_HOLD_MAX_MS = 15 * 60_000;
+export function metaAlertHoldMs(a) { return Math.min(META_ALERT_HOLD_MAX_MS, Math.max(META_ALERT_HOLD_MS, 2 * (Number(a?.expectMs) || 60_000))); }
 /** 시계 오차 경고 임계 — 넘어도 결과를 버리지 않는다(경고만). */
 export const SKEW_WARN_MS = envNum('SVCMON_EDGE_SKEW_WARN_MS', 60_000);
 /** 무보고 판정 = max(3 × 엣지가 알려준 예상 간격, 이 하한). */
@@ -121,6 +129,7 @@ function blank(agent) {
     portalPort: 0,
     rows: new Map(),      // edgeTestId -> { s, r, m, k, measuredAt, snapId }
     meta: new Map(),      // edgeTestId -> { p, n, h, t, y, iv }
+    alertPending: new Map(), // v2.932(점검 D1-03): edgeTestId -> 보류 시작 시각(메타가 없어 알림 판정을 미룬 행)
     counters: { accepted: 0, dropped: 0, overflow: 0, badRow: 0, chunks: 0, snapshots: 0 },
     silent: null,         // svcmonSilence 가 관리(전환 알림용)
   };
@@ -182,7 +191,6 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   let accepted = 0;
   let dropped = 0;
   const rows = Array.isArray(body?.rows) ? body.rows : [];
-  const heldIds = [];   // v2.928(N2): 메타 없이 들어와 알림 판정이 보류된 행
   for (const r of rows) {
     const id = text(r?.i, 64);
     if (!id) { dropped += 1; a.counters.badRow += 1; continue; }
@@ -216,8 +224,8 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     if (!prev || prev.s !== row.s || prev.k !== row.k) {
       const info = alertInfoOf(a, id);
       noteResult({ at: measuredAt, scope: a.agent, testId: id, prev: prev?.s || null, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info });
-      // 메타가 아직 없으면(중앙 재시작 직후) 알림 판정이 보류된다 — 이 요청에 메타가 함께 왔으면 아래에서 다시 판정한다(N2).
-      if (!info.target.name || !info.test.name) heldIds.push(id);
+      // 메타가 아직 없으면(중앙 재시작 직후) 알림 판정이 보류된다 — 아래(메타 루프 뒤)에서 다시 판정한다(N2 · v2.932 D1-03: 다음 요청에 메타가 와도 · 시한).
+      if (!info.target.name || !info.test.name) { if (!a.alertPending.has(id)) a.alertPending.set(id, recvAt); } else a.alertPending.delete(id);
     }
     accepted += 1;
   }
@@ -244,12 +252,22 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     }
     a.metaSig = text(body?.metaSig, 64);
   }
-  // v2.928(반증 재검토 N2): 메타 없이 보류됐던 행은 같은 요청에 메타가 왔으면 지금 다시 판정한다 — 같은 측정의 재전송은 다시 세지
-  //   않으므로(M5) 여기서 놓치면 다음 측정(인증서·도메인은 하루)까지 알림이 늦었다. 시간별 집계·전이 이력은 이미 셌다(알림만).
-  for (const id of heldIds) {
-    const row = a.rows.get(id);
-    if (!row || !a.meta.has(id)) continue;
-    noteAlertOnly({ at: row.measuredAt, scope: a.agent, testId: id, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...alertInfoOf(a, id) });
+  // v2.928(반증 재검토 N2): 메타 없이 보류됐던 행은 메타가 오면 지금 다시 판정한다 — 같은 측정의 재전송은 다시 세지 않으므로(M5)
+  //   여기서 놓치면 다음 측정(인증서·도메인은 하루)까지 알림이 늦었다. 시간별 집계·전이 이력은 이미 셌다(알림만).
+  // v2.932(점검 D1-03): 보류는 **요청을 넘어** 이어진다 — 중앙 재시작 직후에는 메타가 needMeta 응답 뒤 **다음** push 에 오고 그 push 의 행은 같은
+  //   측정(재전송)이라 noteResult 가 다시 불리지 않는다. 또 시한(metaAlertHoldMs)을 넘기면 이름 없이 testId 키로 판정한다(무기한 보류 금지).
+  //   보류 집합은 행 id 의 부분집합이라 상한이 행 상한과 같다.
+  if (a.alertPending.size) {
+    const hold = metaAlertHoldMs(a);
+    for (const [id, since] of a.alertPending) {
+      const row = a.rows.get(id);
+      if (!row) { a.alertPending.delete(id); forgetHeld(a.agent, id); continue; }
+      const info = alertInfoOf(a, id);
+      const named = !!(info.target.name && info.test.name);
+      if (!named && recvAt - since < hold) continue;
+      a.alertPending.delete(id);
+      noteAlertOnly({ at: row.measuredAt, scope: a.agent, testId: id, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info, ...(named ? {} : { metaTimeout: true }) });
+    }
   }
 
   // 스냅샷 완결: 마지막 청크를 받으면 이번/직전 완결 스냅샷에 속하지 않은 행을 정리한다
@@ -281,10 +299,24 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
       else { a.regressPrevSnapId = snapId; a.counters.regressGcSkipped = (a.counters.regressGcSkipped || 0) + 1; }
     } else { a.regressSince = 0; a.regressPrevSnapId = 0; }
     if (!warmHold && (snapId >= a.prevCompleteSnapId || regressReset)) {
+      let gone = 0;
       for (const [id, row] of a.rows) {
-        if (row.snapId !== snapId && row.snapId !== keepPrev) a.rows.delete(id);
+        if (row.snapId !== snapId && row.snapId !== keepPrev) { a.rows.delete(id); a.alertPending.delete(id); forgetHeld(a.agent, id); gone += 1; }
       }
       for (const id of [...a.meta.keys()]) if (!a.rows.has(id)) metaDelete(a, id);
+      // v2.932(점검 D1-05 ③): 엣지에서 지워진(또는 꺼진) 점검은 결과가 더 오지 않는다 — 남은 행의 알림 키에 없는 '알린 상태' 를 닫는다(복구 알림 없음).
+      //   v2.928 이름 키라 재배정으로 id 만 바뀐 점검은 새 행이 같은 키를 가져 남는다(같은 실패를 다시 알리지 않게). 메타가 빠진 행이 있으면 그 행의
+      //   키를 모르므로 이번에는 건너뛴다(지우면 그 점검이 다시 '처음 실패' 로 알려진다). 알린 상태가 있을 때만 키를 계산한다.
+      if (gone && hasAlertedIn(a.agent)) {
+        const live = new Set();
+        let unknown = false;
+        for (const id of a.rows.keys()) {
+          const k = alertKeyOf({ scope: a.agent, testId: id, ...alertInfoOf(a, id) });
+          if (!k) { unknown = true; break; }
+          live.add(k);
+        }
+        if (!unknown) forgetAlertedWhere(a.agent, (k) => live.has(k));
+      }
       a.prevCompleteSnapId = snapId;
       if (regressReset) { a.regressSince = 0; a.regressPrevSnapId = 0; a.counters.regressResets = (a.counters.regressResets || 0) + 1; }
     }
@@ -479,6 +511,7 @@ export function forgetAgent(agent, user = '') {
   if (!agents[name]) return false;
   const rows = agents[name].rows.size;
   delete agents[name];
+  forgetAlertedWhere(name);   // v2.932(점검 D1-05 ③): 잊은 엣지의 '알린 상태' 도 닫는다
   logAudit({ user, action: 'svcmon.edge.forget', target: name, detail: `행 ${rows}개 폐기` });
   return true;
 }

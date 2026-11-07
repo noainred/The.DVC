@@ -37,9 +37,12 @@ export const SYNC_PATH_PREFIX = '설정 연동';
 
 let _ring = [];                 // [{ at, scope, testId, from, to, target, test, path, host, reply, streak }]
 const _hours = new Map();       // hourStart -> { ok, warn, bad, n, msSum, msN }
-const _alerted = new Map();     // `${scope}|${testId}` -> { at, target, test }
+const _alerted = new Map();     // `${scope}|${testId}` -> { at, label, path, scope, testId }
 const _warned = new Map();
+const inScope = (s, p) => s.scope !== 'settings' || t(p) === SYNC_PATH_PREFIX || t(p).startsWith(`${SYNC_PATH_PREFIX}\\`);
 // 알림을 끄면 '알린 상태' 를 비운다 — 다시 켰을 때 그 사이 복구된 점검에 거짓 복구 알림을 보내지 않게.
+// v2.932(점검 D1-05 ①②): 범위를 좁히거나 경고 알림을 끌 때는 비우지 않는다 — 대신 복구 결과가 범위·종류와 관계없이 상태를 지운다(evalAlert).
+//   저장 때 비우면 범위를 다시 넓힌 순간 아직 실패 중인(이미 알린) 점검에 실패 알림이 한 번 더 나간다.
 onAlertSettingsSaved((next) => { if (!next.enabled) { _alerted.clear(); _warned.clear(); } });
 let _queue = [];                // 보낼 알림(창으로 묶는다)
 let _flushTimer = null;
@@ -67,8 +70,6 @@ function bumpHour(at, status, ms) {
   const m = numOrNull(ms);
   if (m != null && m >= 0 && status !== 'bad') { b.msSum += m; b.msN += 1; }
 }
-
-const inScope = (s, p) => s.scope !== 'settings' || t(p) === SYNC_PATH_PREFIX || t(p).startsWith(`${SYNC_PATH_PREFIX}\\`);
 
 /**
  * 결과 1건 기록. 핫패스 — 던지지 않는다.
@@ -104,12 +105,14 @@ export function noteResult(r) {
  *   정상이 '복구' 로 지워 실패/복구가 번갈아 나갔다). 엣지가 같은 이름 키를 둘 이상 가지면(`test.dupName` — svcmonEdge 가 센다) 그 행은
  *   **testId 키**로 떨어뜨린다(재배정 때 한 번 더 알릴 수 있지만 거짓 복구는 없다). 구분자는 제어 문자(\u0001) — 이름·경로의 '|' 와 섞이지 않게.
  * 엣지 메타(이름)를 아직 모르면(중앙 재시작 직후 — 메타는 다음 push 에 온다) **null = 판정 보류** — 이름 없이 내부 id 로 알리지 않는다.
+ * v2.932(점검 D1-03 — 보류에는 시한): 메타가 보류 시한(svcmonEdge metaAlertHoldMs) 안에 오지 않으면 svcmonEdge 가 `metaTimeout:true` 로 다시 판정한다 —
+ *   그때만 testId 키(`엣지 \u0001 # id`)로 판정한다(무기한 보류 금지 · 루트 CLAUDE.md '보류에는 시한'). 나중에 메타가 오면 이름 키로 한 번 더 알릴 수 있다.
  */
 const SEP = '\u0001';
 export function alertKeyOf(x) {
   if (!t(x?.scope)) return `|${t(x?.testId)}`;
   const tn = t(x?.target?.name); const sn = t(x?.test?.name);
-  if (!tn || !sn) return null;
+  if (!tn || !sn) return x?.metaTimeout === true ? `${t(x.scope)}${SEP}#${t(x?.testId)}` : null;
   if (x?.test?.dupName) return `${t(x.scope)}${SEP}#${t(x?.testId)}`;
   return [t(x.scope), t(x?.target?.path), tn, sn].join(SEP);
 }
@@ -125,24 +128,37 @@ export function noteAlertOnly(r) {
   try {
     const status = t(r?.status); const testId = t(r?.testId);
     if (!testId || !status) return;
-    evalAlert({ at: Number(r?.at) || Date.now(), scope: t(r?.scope), testId, status, streak: Number(r?.streak) || 1, reply: t(r?.reply), target: r?.target || {}, test: r?.test || {} });
+    evalAlert({ at: Number(r?.at) || Date.now(), scope: t(r?.scope), testId, status, streak: Number(r?.streak) || 1, reply: t(r?.reply), target: r?.target || {}, test: r?.test || {},
+      metaTimeout: r?.metaTimeout === true });   // v2.932(점검 D1-03): 보류 시한을 넘긴 재판정만 testId 키로
   } catch { /* 알림은 부가 정보 */ }
 }
 
 function evalAlert(x) {
   const s = getAlertSettings();
   if (!s.enabled) return;
-  if (!inScope(s, x.target?.path)) return;
+  const path = t(x.target?.path);
+  // 키가 없으면(엣지 이름을 아직 모름) 보류 — 범위 검사보다 먼저(경로를 모르면 범위도 모른다 · v2.932 점검 D1-03: '설정 연동 대상만' 범위에서 빠지던 문제).
   const key = alertKeyOf(x);
   const heldKey = `${x.scope}${SEP}${x.testId}`;
   if (!key) { if (_held.size < HELD_MAX) _held.add(heldKey); return; }
   _held.delete(heldKey);
   const label = `${t(x.target?.name) || t(x.target?.host) || x.testId} › ${t(x.test?.name) || t(x.test?.type)}`;
   const where = x.scope ? `엣지 ${x.scope}` : '이 포탈';
+  // v2.932(점검 D1-05 ① — 재현): 복구는 범위 검사보다 **먼저** — 범위 밖 복구도 '알린 상태' 는 지운다(알림만 생략). 예전에는 범위 검사에서 먼저
+  //   돌아가 상태가 남았고, '전체' 로 되돌리면 오래전 복구된 점검에 복구 알림('이상 지속 약 360분')이 나갔다.
+  //   ②(반증: 설계 판단): 경고만 알렸던 점검의 복구는 **경고 알림이 켜져 있을 때만** 보낸다(상태는 늘 지운다) — 범위와 같은 규칙(끈 종류·범위 밖은 상태만 닫는다).
+  if (x.status === 'ok') {
+    const bad = _alerted.get(key); const warned = _warned.get(key);
+    if (!bad && !warned) return;
+    _alerted.delete(key); _warned.delete(key);
+    if (s.recover && inScope(s, path) && (bad || s.warn)) enqueue({ kind: 'ok', key, label, x, where, since: (bad || warned).at });
+    return;
+  }
+  if (!inScope(s, path)) return;
   if (x.status === 'bad') {
     if (x.streak >= s.failCount && !_alerted.has(key)) {
       if (_alerted.size >= ALERTED_MAX) _alerted.delete(_alerted.keys().next().value);
-      _alerted.set(key, { at: x.at, label });
+      _alerted.set(key, { at: x.at, label, path, scope: x.scope, testId: x.testId });
       enqueue({ kind: 'bad', key, label, x, where });
     }
     return;
@@ -150,17 +166,40 @@ function evalAlert(x) {
   if (x.status === 'warn') {
     if (s.warn && x.streak >= s.failCount && !_warned.has(key)) {
       if (_warned.size >= ALERTED_MAX) _warned.delete(_warned.keys().next().value);
-      _warned.set(key, { at: x.at, label });
+      _warned.set(key, { at: x.at, label, path, scope: x.scope, testId: x.testId });
       enqueue({ kind: 'warn', key, label, x, where });
     }
-    return;
   }
-  if (x.status === 'ok') {
-    const a = _alerted.get(key) || _warned.get(key);
-    if (!a) return;
-    _alerted.delete(key); _warned.delete(key);
-    if (s.recover) enqueue({ kind: 'ok', key, label, x, where, since: a.at });
+}
+
+/*
+ * v2.932(점검 D1-05 ③): 대상·점검을 지우거나 끄면 결과가 더 오지 않아 '알린 상태' 가 닫히지 않았다(알림 탭 '지금 알린 상태: 실패 N' 이 실패 중인
+ *   점검이 없어도 N). 결과가 멈추는 자리에서 지운다(복구 알림은 보내지 않는다 — 결과가 아니다):
+ *   · 이 포탈의 폴러 — 색인을 다시 만들 때 살아 있는 점검 id 로(scope '' 키는 `|testId` — 안정).
+ *   · 중앙의 엣지 수신 — 완결 GC 가 행을 지운 뒤 **남은 행의 알림 키**로(v2.928 이름 키: 재배정으로 id 만 바뀐 점검은 키가 같아 남는다 — 같은 실패를
+ *     다시 알리지 않게) · 엣지를 잊을 때 그 엣지 전부. 보류 중(_held)인 그 행도 함께 뺀다(metaPending 이 지운 행을 세지 않게).
+ */
+/** 보류 중인 (엣지 · 점검 id) 하나를 뺀다 — 행이 사라졌을 때. */
+export function forgetHeld(scope, testId) { _held.delete(`${t(scope)}${SEP}${t(testId)}`); }
+/** 그 scope 의 알린 상태가 하나라도 있는가(엣지 GC 가 남은 행의 키를 계산할지 정한다). */
+export function hasAlertedIn(scope) {
+  const sc = t(scope);
+  for (const m of [_alerted, _warned]) for (const v of m.values()) if (v?.scope === sc) return true;
+  return false;
+}
+/**
+ * 한 scope(엣지 이름 · '' = 이 포탈)의 알린 상태 중 `keep(key, entry)` 가 거짓인 것을 지운다(entry 에 scope·testId 가 실려 있다 — 키를 다시 쪼개지 않는다).
+ * keep 이 없으면 그 scope 전부(보류 중인 것까지).
+ */
+export function forgetAlertedWhere(scope, keep = null) {
+  const sc = t(scope);
+  for (const m of [_alerted, _warned]) {
+    for (const [k, v] of m) {
+      if (v?.scope !== sc) continue;
+      if (!keep || !keep(k, v)) m.delete(k);
+    }
   }
+  if (!keep) { const pre = `${sc}${SEP}`; for (const h of _held) if (h.startsWith(pre)) _held.delete(h); }
 }
 
 function enqueue(item) {
@@ -219,7 +258,8 @@ export async function flushAlerts() {
   const list = buildAlerts(items);
   for (const a of list) {
     await sendAlert(a);
-    if (/:summary$/.test(a.key)) _sentStats.summaries += 1; else _sentStats.individual += 1;
+    // v2.932(점검 D1-06): 요약 키는 `…:summary:<시각>` 이다(반증 M4 — 고정 키는 억제 창에 버려졌다) — 끝이 ':summary' 인지만 보면 늘 '개별' 로 셌다.
+    if (/:summary(:|$)/.test(a.key)) _sentStats.summaries += 1; else _sentStats.individual += 1;
   }
   _sentStats.lastAt = Date.now();
   return list;
@@ -242,6 +282,14 @@ export function hourlySeries(now = Date.now()) {
     out.push({ at: h, ok: b?.ok || 0, warn: b?.warn || 0, bad: b?.bad || 0, n: b?.n || 0, avgMs: b?.msN ? Math.round(b.msSum / b.msN) : null });
   }
   return out;
+}
+
+/**
+ * v2.932(점검 D1-08): 요약 묶음 규칙 — 화면 문구가 상수를 박지 않게 API 로 싣는다. 요약은 창 안의 같은 종류가 상한(ALERT_BATCH_INDIVIDUAL_MAX)을
+ *   **넘을 때**라 '몇 건 이상이면 요약' 은 상한 + 1 이다(+1 해석은 여기 한 곳 — buildAlerts 의 `list.length <= ALERT_BATCH_INDIVIDUAL_MAX` 와 같은 뜻).
+ */
+export function alertBatchInfo() {
+  return { batchMs: ALERT_BATCH_MS, batchIndividualMax: ALERT_BATCH_INDIVIDUAL_MAX, summaryFrom: ALERT_BATCH_INDIVIDUAL_MAX + 1 };
 }
 
 export function alertStats() {

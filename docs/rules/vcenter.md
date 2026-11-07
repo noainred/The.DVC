@@ -178,6 +178,7 @@
     호스트 · 데이터스토어 모달은 그대로 · `EntityDetail type='vm'` 을 쓰는 다른 5곳(알람 · 탐색 · Platform VM 검색 · VmLink · 호스트 전체 페이지)은 **그대로**(질문 ① 기본값 — 다음 후보).
   · 드로어 · 개체 보기 요약의 24h 스파크(`vmSeries.useDaySeries`)는 `types=cpu,mem` 한 번(예전 2회 로그인 → 1회).
   · 남긴 것: 엣지 위임 vCenter 의 성능을 그 엣지 포탈에서 보는 링크(`findRemoteServer` 안내)는 넣지 않았다(옛 모달에도 없던 것 — 다음 후보).
+    → ✅ **v2.927 에 해결**(아래 v2.927 '엣지 위임 vCenter 의 성능' — 관리자에게 담당 엣지 포탈 링크).
 - **v2.927 — VM 상세 · 성능 그래프 후속 3건(코드·테스트 표지는 v2.926 — 준비 중 main 이 2.926.0(리눅스 성능)을 먼저 써서 2.927.0 으로 게시)(사용자 선택 A '성능 화면·드로어 후속' · 표준)**(웹 `components/EntityDetail.jsx` · `vmMetricsText.js` · `vmperf/VmPerfView.jsx` · `views/VCenters.jsx` ·
   서버 `vcenter/authStopGate.js skipExtra` · `routes/api/vmMetrics.js edgeHint`. 회귀 `server/test/vmPerf2926.test.js`(3) · 웹 `views/vmPerf2926.test.jsx`(6) · `audit2744k`(링크)):
   · **VM 상세는 드로어 한 벌** — `EntityDetail type='vm'` 은 `VmDrawer` 로 위임한다(동적 import — VmDrawer 가 EntityDetail 의 섹션을 import 하는 순환을 끊는다 · `rows:[]` 라 ‹ › 잠김 ·
@@ -290,7 +291,7 @@
   · ⚠ 조회는 `INDEXED BY idx_events_tracked`(부분 인덱스) — 통계가 없으면 플래너가 `(vcenterId,ts)` 인덱스로 기간의 **모든 이벤트**를 훑었다(EXPLAIN 실측 — 테스트가 계획을 고정).
     옛 DB 는 `detail` 열을 table_info 로 확인해 더한다(v2.603 규칙). 2.702 이전 이벤트는 상세가 null 이고 화면이 개수로 밝힌다.
   · VM 은 이벤트 엔티티 **이름**으로 묶는다(동명 VM 구분 불가 — 화면이 말한다). 과다 이동 기준 = 7일에 10회를 기간에 비례(`churnThreshold`, 최소 3).
-  · 이벤트를 받은 적 없는 vCenter·수집 꺼짐·최소 심각도 > info 는 '이동 없음' 이 아니다(`coverageNote`). 읽기 상한 20,000(`truncated`).
+  · 이벤트를 받은 적 없는 vCenter·수집 꺼짐·최소 심각도 > info 는 '이동 없음' 이 아니다(`coverageNote`). 읽기 상한 20,000(`truncated`) → v2.932: 화면은 행을 모으지 않고 조각으로 흘려보내며 센다(`trackedEventsEach` · 누적기 `createMovesAcc`·`createChangesAcc` · 상한 `SCAN_MAX` 30만 · 잘리면 `coveredSince` — 그 시각 이후는 빠짐없이). CSV 만 `READ_MAX` 2만(시험 `vmChanges2932`).
   · VM 상세는 `/tools/vm-changes/of`(30일·20건, 범위 밖 VM 404) — 모달은 `white-space: nowrap` 을 물려받으므로 이력 줄에 `whiteSpace:'normal'` + 그리드 트랙 `minmax(0,1fr)` 이 필요하다
     (Chromium 판독에서 오른쪽이 잘려 발견 — 같은 원인으로 구성 점검·클러스터 칸의 각주도 잘리고 있어 함께 고쳤다).
   · ⚠ 정직 기록: 실장비 이벤트 본문(configChanges·PermissionAddedEvent)은 합성 입력으로만 확인했다.

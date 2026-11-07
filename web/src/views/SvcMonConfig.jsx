@@ -8,6 +8,7 @@ import LogSettingsTab from './svcmon/LogSettingsTab.jsx';
 import AnalyzeTab from './svcmon/AnalyzeTab.jsx';
 import SettingsSyncTab from './svcmon/SettingsSyncTab.jsx';
 import AlertTab from './svcmon/AlertTab.jsx';
+import { isFullScopeAdmin } from './svcmon/svcmonAccess.js';
 
 /**
  * Monitoring 설정 — 특수 기능 > 'Monitoring 설정' 카드로 들어온다.
@@ -45,6 +46,8 @@ function takePrefill() {
 export default function SvcMonConfig() {
   const me = getCurrentUser();
   const canEdit = me?.role === 'admin' || me?.role === 'operator';
+  // v2.932(점검 D1-09): 설정 연동 · 알림 저장은 서버가 adminOnly + fullScopeOnly — 범위 admin 에게 저장을 열지 않게 판정을 한 군데(svcmonAccess.js)에서.
+  const adminFull = isFullScopeAdmin(me);
   // 프리필은 최초 렌더에서 1회만 읽는다(리렌더마다 읽으면 sessionStorage 를 이미 비운 뒤라 사라진다).
   const [prefill] = useState(takePrefill);
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
@@ -76,8 +79,8 @@ export default function SvcMonConfig() {
       {tab === 'log' && <LogSettingsTab isAdmin={me?.role === 'admin'} />}
       {tab === 'analyze' && <AnalyzeTab />}
       {/* v2.915(반증 H1): 설정 연동은 관리자(전체 범위)만 — 서버도 adminOnly + fullScopeOnly(전 법인 설정 주소). */}
-      {tab === 'sync' && <SettingsSyncTab canEdit={me?.role === 'admin'} />}
-      {tab === 'alert' && <AlertTab isAdmin={me?.role === 'admin'} />}
+      {tab === 'sync' && <SettingsSyncTab canEdit={adminFull} />}
+      {tab === 'alert' && <AlertTab isAdmin={adminFull} />}
     </div>
   );
 }
