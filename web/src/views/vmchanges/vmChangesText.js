@@ -36,7 +36,9 @@ export function coverageNote(data, now = Date.now(), { what = '이동', events =
 }
 export function truncNote(data) {
   if (!data?.truncated) return null;
-  return `이벤트가 많아 최신 ${Number(data.readMax || 0).toLocaleString()}건까지만 분석했습니다 — 기간이나 vCenter 를 좁혀 보세요.`;
+  // v2.926: 서버가 흘려보내며 세서 상한이 커졌고, 잘리면 그 시각(coveredSince)보다 새 이벤트는 빠짐없이 셌다 — 어디까지인지 말한다
+  const since = Number.isFinite(data.coveredSince) ? ` · ${fmtTs(data.coveredSince)} 이후` : '';
+  return `이벤트가 많아 최신 ${Number(data.readMax || 0).toLocaleString()}건까지만 분석했습니다${since} — 기간이나 vCenter 를 좁혀 보세요.`;
 }
 export function noDetailNote(n, total) {
   if (!n) return null;

@@ -364,6 +364,48 @@ function initSqlite() {
        *   (createYielder), 상한에 닿으면 멈춘다. 조각은 ts 로 겹치지 않으므로 순서·내용은 한 문장 판과 같다(테스트가 deepStrictEqual 로 대조).
        *   since 가 없거나 entity 조회(전용 인덱스 — 행이 적다)면 한 문장 판 그대로.
        */
+      /**
+       * v2.926(문서 후보 — 구성 변경 이력 보고서가 최신 2만 행만 읽어 '7일' 이 짧아지던 것): 추적 이벤트를 **최신 조각부터 흘려보낸다**(모으지 않는다).
+       *   호출부가 조각마다 바로 센다(메모리는 집계만). 조각 길이는 창의 1/500 이상 · 1시간 이상(조각 수 상한) · 조각 사이 시간 기준 양보.
+       *   한 조각이 한 문장 상한(50,000)에 닿거나 전체 상한(maxRows)에 닿으면 거기서 멈추고 truncated — 그때 `coveredSince`(읽은 가장 오래된 시각)보다
+       *   새 행은 빠짐없이 읽었다(조각 안은 최신 먼저). 맨 위 조각은 위가 열려 있다(vCenter 시계가 앞선 이벤트도 — trackedEventsAsync 와 같다).
+       * @returns {Promise<{ rows:number, truncated:boolean, coveredSince:number|null }>}
+       */
+      trackedEventsEach: async (f = {}, onRows, { maxRows = 300_000, now = Date.now(), yieldMs = 15 } = {}) => {
+        const CAP = 50_000;
+        const b = trackedBase(f);
+        if (!b) return { rows: 0, truncated: false, coveredSince: null };
+        if (!Number.isFinite(f.since) || b.byEntity) {
+          const rows = api.trackedEvents(f, Math.min(maxRows + 1, CAP));
+          const truncated = rows.length > maxRows;
+          if (truncated) rows.length = maxRows;
+          if (rows.length) await onRows(rows);
+          return { rows: rows.length, truncated, coveredSince: truncated && rows.length ? rows[rows.length - 1].ts : null };
+        }
+        const span = Math.max(0, now - f.since);
+        const step = Math.max(3_600_000, Math.ceil(span / 500));
+        const sel = 'SELECT vcenterId,ts,type,user,entity,message,detail FROM events INDEXED BY idx_events_tracked WHERE';
+        const topSt = db.prepare(`${sel} ${[...b.w, 'ts>=?'].join(' AND ')} ORDER BY ts DESC, rowid DESC LIMIT ?`);
+        const lowSt = db.prepare(`${sel} ${[...b.w, 'ts>=?', 'ts<?'].join(' AND ')} ORDER BY ts DESC, rowid DESC LIMIT ?`);
+        const maybeYield = createYielder(yieldMs);
+        let read = 0; let truncated = false; let coveredSince = null;
+        let lo = Math.max(f.since, now - step);
+        let hiExcl = null;   // null = 맨 위(열린) 조각
+        for (;;) {
+          const lim = Math.min(CAP, maxRows - read + 1);
+          let rows = hiExcl == null ? topSt.all(...b.p, lo, lim) : lowSt.all(...b.p, lo, hiExcl, lim);
+          const full = rows.length >= CAP;
+          if (read + rows.length > maxRows) { rows = rows.slice(0, maxRows - read); truncated = true; }
+          if (full) truncated = true;
+          if (rows.length) { read += rows.length; await onRows(rows); }
+          if (truncated) { coveredSince = rows.length ? rows[rows.length - 1].ts : lo; break; }
+          if (lo <= f.since) break;
+          hiExcl = lo;
+          lo = Math.max(f.since, hiExcl - step);
+          await maybeYield();
+        }
+        return { rows: read, truncated, coveredSince };
+      },
       trackedEventsAsync: async (f = {}, limit = 5000, { sliceMs = 86_400_000, now = Date.now(), yieldMs = 15 } = {}) => {
         const lim = clampPage(limit, 0)[0];
         if (!Number.isFinite(f.since)) return api.trackedEvents(f, limit);
@@ -765,6 +807,14 @@ function initJson() {
       .map((r) => ({ vcenterId: r.vcenterId, ts: r.ts, type: r.type, user: r.user, entity: r.entity, message: r.message, detail: r.detail ?? null })),
     opsEventsAsync: async (f = {}, limit = 5000) => api.opsEvents(f, limit),   // v2.719(S1-04): SQLite 판과 같은 API
     trackedEventsAsync: async (f = {}, limit = 5000) => api.trackedEvents(f, limit),   // v2.727(F-01): SQLite 판과 같은 API
+    // v2.926: SQLite 판과 같은 API — 폴백은 메모리 배열이라 한 번에(상한 + 1 로 잘림을 안다)
+    trackedEventsEach: async (f = {}, onRows, { maxRows = 300_000 } = {}) => {
+      const rows = api.trackedEvents(f, Math.min(maxRows + 1, 50_000));
+      const truncated = rows.length > maxRows;
+      if (truncated) rows.length = maxRows;
+      if (rows.length) await onRows(rows);
+      return { rows: rows.length, truncated, coveredSince: truncated && rows.length ? rows[rows.length - 1].ts : null };
+    },
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
     query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(...((a) => [a[1], a[1] + a[0]])(clampPage(limit, offset))),
     queryAsync: async (f = {}, limit = 200) => api.query(f, limit, 0),   // v2.732(B6-03): SQLite 판과 같은 API

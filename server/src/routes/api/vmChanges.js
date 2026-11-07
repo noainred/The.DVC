@@ -16,17 +16,20 @@ import { fileStamp } from '../../util/dayKey.js';
 import { getLogsDb } from '../../logs/db.js';
 import { loadLogSettings } from '../../logs/settings.js';
 import { eventNotCollectedMap, notCollectedList, eventLagForView, eventCoverageIsMock } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
-import { analyzeMoves, analyzeChanges, vmHistory } from '../../vmchanges/analyze.js';
+import { createMovesAcc, createChangesAcc, vmHistory } from '../../vmchanges/analyze.js';
 import { MOVE_TYPES, RECONFIG_TYPES, PERM_TYPES } from '../../vmchanges/eventDetail.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
 const DAY = 86_400_000;
-export const READ_MAX = 20_000;
+export const READ_MAX = 20_000;   // CSV(행 자체를 내보낸다)
+// v2.926(문서 후보 — '7일' 이 약 1시간): 화면은 행을 모으지 않고 흘려보내며 센다(trackedEventsEach + 누적기) — 읽는 상한을 크게.
+//   그래도 넘으면 truncated + coveredSince(그 시각보다 새 이벤트는 빠짐없이 셌다)를 화면이 말한다. 예전 화면은 잘린 사실을 말하지 않았다.
+export const SCAN_MAX = 300_000;
 const qStr = (v, n) => (typeof v === 'string' ? capStr(v.trim(), n) : '');
 const daysOf = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n >= 1 ? Math.min(90, n) : 7; };
 
-async function load(req, snap) {
+async function load(req, snap, { stream = null } = {}) {
   const allowed = scopedVcenterIds(req.user, snap);
   const reqVc = qStr(req.query.vcenterId, 128);
   let ids = (snap.vcenters || []).map((v) => v.id);
@@ -35,11 +38,18 @@ async function load(req, snap) {
   const days = daysOf(req.query.days);
   const since = Date.now() - days * DAY;
   const db = await getLogsDb();
-  // v2.727(감사 F-01): 화면·CSV 둘 다 1일 조각 + 양보로 읽는다(한 문장 판은 기간 안 일치 행 전부를 TEMP B-TREE 로 흘려 동기 정지).
+  // v2.727(감사 F-01): 화면·CSV 둘 다 조각 + 양보로 읽는다(한 문장 판은 기간 안 일치 행 전부를 TEMP B-TREE 로 흘려 동기 정지).
   //   결과(행·순서·상한)는 trackedEvents 와 같다 — `/of`(entity 전용 인덱스, 행이 적다)만 동기 판을 그대로 쓴다.
-  const rows = ids.length ? await db.trackedEventsAsync({ vcenterIds: ids, since }, READ_MAX + 1) : [];
-  const truncated = rows.length > READ_MAX;
-  if (truncated) rows.length = READ_MAX;
+  //   v2.926: 화면(stream)은 행을 모으지 않는다 — 조각마다 stream(rows) 로 세고, CSV 만 READ_MAX 행을 모은다.
+  let rows = []; let truncated = false; let coveredSince = null; let scanned = 0;
+  if (stream) {
+    if (ids.length) ({ rows: scanned, truncated, coveredSince } = await db.trackedEventsEach({ vcenterIds: ids, since }, stream, { maxRows: SCAN_MAX }));
+  } else {
+    rows = ids.length ? await db.trackedEventsAsync({ vcenterIds: ids, since }, READ_MAX + 1) : [];
+    truncated = rows.length > READ_MAX;
+    if (truncated) { rows.length = READ_MAX; coveredSince = rows[rows.length - 1]?.ts ?? null; }
+    scanned = rows.length;
+  }
   const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
   const s = loadLogSettings();
   // 수집 범위 — vCenter 마다 마지막으로 받은 이벤트 시각(없으면 그 vCenter 의 이벤트는 이 포탈에 없다).
@@ -48,19 +58,24 @@ async function load(req, snap) {
   const nc = eventNotCollectedMap();
   const coverage = ids.slice(0, 200).map((id) => ({ vcenterId: id, name: vcName.get(id) || id, lastTs: db.lastTs(id) || null, ...(nc.has(id) ? { notCollected: nc.get(id) } : {}) }));
   const notCollected = notCollectedList(nc, { only: ids, names: vcName });
-  return { rows, truncated, days, since, vcName, ids, coverage, notCollected, settings: { enabled: s.enabled, retentionDays: s.retentionDays, pollIntervalMin: s.pollIntervalMin, minSeverity: s.minSeverity } };
+  return { rows, truncated, coveredSince, scanned, days, since, vcName, ids, coverage, notCollected, settings: { enabled: s.enabled, retentionDays: s.retentionDays, pollIntervalMin: s.pollIntervalMin, minSeverity: s.minSeverity } };
 }
 
 export function registerVmChanges(api) {
   api.get('/tools/vm-changes', toolsPerm, (req, res) => memoJson(req, res, 'vm-changes', async (snap) => {
-    const L = await load(req, snap);
     const q = qStr(req.query.q, 128);
     const kind = qStr(req.query.kind, 16);
+    // vcName 은 스냅샷에서 바로 — 누적기가 행을 받기 전에 이름표가 있어야 한다(load 안의 것과 같은 표)
+    const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
+    const days = daysOf(req.query.days);
+    const mv = createMovesAcc({ days, vcName, q });
+    const ch = createChangesAcc({ vcName, q, kind });
+    const L = await load(req, snap, { stream: (rows) => { mv.add(rows); ch.add(rows); } });
     return {
-      days: L.days, since: L.since, truncated: L.truncated, readMax: READ_MAX,
+      days: L.days, since: L.since, truncated: L.truncated, readMax: SCAN_MAX, scanned: L.scanned, coveredSince: L.truncated ? L.coveredSince : null,
       vcenters: L.coverage, notCollected: L.notCollected, logs: L.settings,
-      moves: analyzeMoves(L.rows, { days: L.days, vcName: L.vcName, q }),
-      changes: analyzeChanges(L.rows, { vcName: L.vcName, q, kind }),
+      moves: mv.result(),
+      changes: ch.result(),
       initial: snap.initial === true,
     };
   }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}` }));
