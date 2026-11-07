@@ -19,7 +19,9 @@ import { scopedVcenterIds, inUserWriteScope, isFullReadWriteScope, writeScopedVc
 import { mergeScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.607 AUTHZ2607-05
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers, bmUsageCentralState, distributionStatus, saveDistribution } from '../../bmusage/settings.js';
+import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers, bmUsageCentralState, distributionStatus, saveDistribution, setPerEdge, exclusionConflicts, perEdgeSuperseded, perEdgeFor, normalizeCorpIds } from '../../bmusage/settings.js';
+import { edgeCorpsSource } from '../../bmusage/edgeCorps.js'; // v2.927 중앙에서 켜기 — 엣지별 법인 매핑
+import { listAgentTokens } from '../../central/agentTokens.js';
 import { fullScopeOnlyWith, requireSettingsOwner } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
@@ -832,7 +834,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       isEdge: tg.isEdge,
       // v2.627: 이 노드가 중앙 배포값을 쓰는가(엣지 화면 배너·입력 잠금) · 중앙의 배포 현황(전체 범위 admin 에게만 — 전 엣지 이름).
       central: bmUsageCentralState(),
-      distribution: isAdmin && !allowed && !tg.isEdge ? distributionStatus(safeKnownAgents()) : null,
+      distribution: isAdmin && !allowed && !tg.isEdge ? distStatusNow() : null,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
       // v2.744(최종 검토 FB — RD-R1·RG2744-03): 등록부 로드 오류 사유(last.sourceErrors)의 위치(줄·칸)는 관리자에게만 — 그 밖의 계정은 분류 문구만.
@@ -1096,7 +1098,7 @@ async function unassignedInfoFor(tg) {
 api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   try {
-    const { listEdgeBmUsage, MIN_EDGE_VERSION, STALE_MS } = await import('../../central/bmUsageEdgePull.js');
+    const { listEdgeBmUsage, MIN_EDGE_VERSION, STALE_MS, edgeRoleOf } = await import('../../central/bmUsageEdgePull.js');
     const { loadCollectors } = await import('../../collector/registry.js');
     const cols = (() => { try { return loadCollectors(); } catch { return []; } })();
     const stored = listEdgeBmUsage();
@@ -1127,6 +1129,8 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
           : null,
         // ⚠ 엣지가 말한 이름을 **나란히** 둔다(다르면 그 자체가 진단 — v2.548 F5·v2.549 규약).
         reportedAgent: snap?.node?.agent || '', version: snap?.node?.version || '',
+        // v2.927(반증 F7): 그 노드의 역할('edge'|'central'|'unknown') — '중앙에서 켜기' 는 엣지에만(중앙·단독 노드는 배포를 받지 않는다).
+        nodeRole: edgeRoleOf(rec),
         enabledOnEdge: snap ? !!snap.enabled : null,
         /*
          * ⚠⚠ v2.574 SEC-03 — **같은 객체 리터럴 안에서 일부 필드만 거르면 안 된다.**
@@ -1213,20 +1217,87 @@ api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) =>
 });
 
 function safeKnownAgents() { try { return knownAgentNames(); } catch { return []; } }
+/** v2.927: 개별 토큰이 발급된 엣지 이름(소문자) — 중앙 켜기는 개별 토큰 인출에만 내려가므로 화면이 '토큰 없음' 을 미리 말한다. 못 읽으면 null(모른다). */
+function safeTokenAgents() { try { return new Set(listAgentTokens().map((x) => String(x.agent || '').trim().toLowerCase()).filter(Boolean)); } catch { return null; } }
+/** 배포 현황(전체 범위 admin · 중앙 전용 응답) — 행마다 그 엣지에 보낼 판의 서명으로 적용 여부를 가른다(v2.927). */
+function distStatusNow() { return distributionStatus(safeKnownAgents(), { edgeCorps: edgeCorpsSource(), tokenAgents: safeTokenAgents() }); }
 
 /**
  * v2.627 엣지 배포(사용자 요청 "한번에 켜는 기능") — 켬/끔 + 엣지별 제외. 배포되는 값은 이 중앙의 설정 자체다(따로 두 벌을 두지 않는다).
  * 엣지는 다음 인출(기본 10분 주기)에 받는다 — 응답이 그 사실과 주기를 말한다(즉시 반영된 척하지 않는다).
+ * v2.927: 중앙 켜기가 저장된 엣지를 제외로 바꾸는 저장은 409(반대 지시 — 하나를 먼저 푼다). 전체 배포를 켜서 중앙 켜기가 가려지면
+ *   응답 `perEdgeSuperseded` 로 밝힌다(전체 배포가 우선 — settings.js 머리말).
  */
 api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, (req, res) => {
   const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
   const patch = {};
   if (typeof b.enabled === 'boolean') patch.enabled = b.enabled;
   if (b.excluded && typeof b.excluded === 'object' && !Array.isArray(b.excluded)) patch.excluded = b.excluded;
+  const clash = patch.excluded ? exclusionConflicts(patch.excluded) : [];
+  if (clash.length) {
+    return res.status(409).json({ ok: false, conflict: 'per-edge', agents: clash.slice(0, 20),
+      reason: `중앙 켜기가 저장된 엣지(${clash.slice(0, 5).join(', ')}${clash.length > 5 ? ` 외 ${clash.length - 5}곳` : ''})는 제외할 수 없습니다 — '이 엣지는 로컬 설정' 과 '중앙이 켠다' 는 반대 지시입니다. 그 엣지의 중앙 켜기를 먼저 해제하세요.` });
+  }
   const next = saveDistribution(patch, String(req.user?.username || ''));
+  const superseded = perEdgeSuperseded(next);
   logAudit({ user: req.user?.username, action: 'bm-usage.distribute', ip: req.ip || '',
-    detail: JSON.stringify({ enabled: next.enabled, excluded: Object.keys(next.excluded).length }).slice(0, 300) });
-  res.json({ ok: true, distribution: distributionStatus(safeKnownAgents()) });
+    detail: JSON.stringify({ enabled: next.enabled, excluded: Object.keys(next.excluded).length, ...(superseded.length ? { perEdgeSuperseded: superseded.length } : {}) }).slice(0, 300) });
+  res.json({ ok: true, distribution: distStatusNow(), ...(superseded.length ? { perEdgeSuperseded: superseded } : {}) });
+});
+
+/**
+ * v2.927 '중앙에서 켜기'(사용자 요청 "중앙에서 엣지를 켜는 기능 추가" · 선택: 엣지별 버튼) — 한 엣지만 중앙이 켠다/다시 확인한다/해제한다.
+ *  · 게이트는 전체 배포와 같다(adminOnly + fleetOnly) — 엣지 법인의 수집을 켜는 결정이고, 엣지는 법인 축으로 나눌 수 없다.
+ *  · 켜기: 이름은 **중앙 등록부(knownAgentNames)에 있는 것만**(404) · 그 노드 보관분의 역할이 'edge' 여야 한다(409 not-edge — 반증 F7) ·
+ *    법인은 **지금 매핑을 저장해 확정**한다(0 이면 400 no-corps · 화면이 보낸 목록 `corps` 가 지금 매핑과 다르면 409 corps-changed — 관리자가 본
+ *    목록과 저장 목록이 같게). 이미 켠 엣지에 다시 보내면 '다시 확인'(법인 갱신).
+ *  · 해제: 저장된 중앙 켜기가 있으면 **등록부와 무관하게** 된다(반증 F1 — 토큰 폐기로 등록부에서 빠진 엣지도 지시를 지울 수 있어야 한다).
+ *  · 엣지 노드에서는 거부(409 — 이 노드는 배포를 받는 쪽이다). 저장 즉시 바뀐 척하지 않는다 — 엣지는 다음 인출(기본 10분)에 받는다.
+ */
+api.put('/tools/bm-usage/distribute/edge', adminOnly, fleetOnly, async (req, res) => {
+  try {
+    if (config.agent?.centralUrl) return res.status(409).json({ ok: false, code: 'edge-node', reason: '이 노드는 엣지입니다 — 중앙에서 켜기는 중앙 포탈에서만 저장합니다.' });
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    if (typeof b.on !== 'boolean') return res.status(400).json({ ok: false, reason: 'on(true|false)이 필요합니다.' });
+    const want = strOf(b.agent, 256).trim();
+    if (!want) return res.status(400).json({ ok: false, reason: '엣지 이름(agent)이 필요합니다.' });
+    const known = safeKnownAgents();
+    let name = known.find((n) => String(n).toLowerCase() === want.toLowerCase()) || '';
+    if (!name && b.on === false && perEdgeFor(want)) name = want;   // F1: 저장된 지시는 등록부와 무관하게 지운다
+    if (!name) return res.status(404).json({ ok: false, reason: '중앙 등록부에 없는 엣지 이름입니다 — 엣지가 중앙과 통신한 뒤(토큰 발급·수집 서버 등록) 다시 시도하세요.' });
+    const by = String(req.user?.username || '');
+    let r;
+    if (b.on === true) {
+      const { getEdgeBmUsage, edgeRoleOf } = await import('../../central/bmUsageEdgePull.js');
+      const role = edgeRoleOf(getEdgeBmUsage(name));
+      if (role !== 'edge') {
+        return res.status(409).json({ ok: false, conflict: 'not-edge', role,
+          reason: role === 'central'
+            ? `이 노드(${name})는 엣지가 아닙니다(중앙·단독 — 배포를 받지 않습니다) — 그 포탈의 베어메탈 사용률 설정에서 직접 켜세요.`
+            : `이 노드(${name})의 역할을 확인할 수 없어 중앙 켜기를 제공하지 않습니다 — 엣지 보관분을 '지금 가져오기' 로 먼저 가져오세요(보관분이 없거나 노드 역할이 없습니다).` });
+      }
+      const ids = normalizeCorpIds(edgeCorpsSource()(name)) || [];
+      if (!ids.length) return res.status(400).json({ ok: false, code: 'no-corps', reason: `중앙이 이 엣지(${name})의 법인을 찾지 못했습니다(등록부 담당 엣지 · 위임 인벤토리 · 엣지 보고 베어메탈 모두 없음) — 켜도 수집 대상이 없어 저장하지 않습니다.` });
+      if (Array.isArray(b.corps)) {
+        const seen = normalizeCorpIds(b.corps);
+        if (!seen || seen.length !== ids.length || seen.some((x, i) => x !== ids[i])) {
+          return res.status(409).json({ ok: false, conflict: 'corps-changed', corps: ids, reason: '확인 상자를 연 뒤 이 엣지의 법인 매핑이 바뀌었습니다 — 화면을 새로 읽고 법인 목록을 다시 확인하세요.' });
+        }
+      }
+      r = setPerEdge(name, true, by, { corps: ids });
+    } else {
+      r = setPerEdge(name, false, by);
+    }
+    if (!r.ok) return res.status(r.conflict ? 409 : 400).json({ ok: false, ...(r.conflict ? { conflict: r.conflict } : { code: r.code }), reason: r.reason });
+    const saved = r.distribution?.perEdge ? perEdgeFor(name, r.distribution) : null;
+    logAudit({ user: req.user?.username, action: 'bm-usage.distribute.edge', target: name, ip: req.ip || '',
+      detail: JSON.stringify({ agent: name, on: b.on, changed: r.changed, ...(saved ? { corps: saved.corps.slice(0, 8), corpsCount: saved.corps.length } : {}) }).slice(0, 300) });
+    res.json({ ok: true, agent: name, on: b.on, changed: r.changed, ...(saved ? { corps: saved.corps } : {}), distribution: distStatusNow(),
+      // 엣지 인출 주기는 엣지 쪽 설정이다(AGENT_BMUSAGE_CONFIG_PULL_MS — 기본 10분). 중앙은 그 엣지의 실제 값을 모른다.
+      nextPull: { defaultMs: 10 * 60_000, note: '엣지는 다음 인출(기본 10분 주기)에 받습니다 — 저장 즉시 바뀌지 않습니다.' } });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
+  }
 });
 
 /** 설정 — 법인 on/off·주기·보존. 수집 범위를 바꾸는 동작이라 admin 전용 + 감사. */
