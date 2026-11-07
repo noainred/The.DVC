@@ -15,6 +15,8 @@
  *  ⑦ 실제 api — node-load(프로토콜 묶음 표 · 디스크 묶음 4지표 · 표본 켜진 장비는 15분 칸) · node-clients(지금·창·비중·고정·다른 노드 · node 없으면 400) ·
  *       client-dist(쏠림·후보·프로토콜 필터·note) · 범위 계정 403 · 데모 404
  *  ⑧ 이름 — VM IP · 호스트 관리 IP · 장비 보고 이름 우선 · 같은 IP 둘은 ambiguous · 비정규 표기는 같은 IP 가 아니다 · 역방향 DNS 호출 없음(소스 대조)
+ *  ⑨ v2.938 — CSV·자유텍스트의 nodeLoad 칸(아이실론만 · 빈 칸은 유지 · 위치형은 맨 끝) · 가져오기가 빈 칸으로 꺼 둔 장비를 켜지 않는다(소스 대조)
+ *  ⑩ v2.938 — 엣지 미전송 고리 파일 보존: 저장 → '재시작'(메모리 비움) → 되살림(정제·장비당 상한·7일) · 손상 파일은 보존하고 빈 고리
  */
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -356,4 +358,65 @@ test('⑧ 이름 — VM IP · 호스트 관리 IP · 장비 보고 우선 · 같
   assert.deepEqual(CN.nameStats(rows), { named: 4, device: 1, unknown: 2 });
   const s = src('storage/clientNames.js');
   assert.ok(!/dns|reverse|lookup/i.test(s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), '역방향 DNS 호출 없음(주석 밖)');
+});
+
+/* ── ⑨ CSV · 자유텍스트 nodeLoad 칸(v2.938) ─────────────────────────────────── */
+test('⑨ CSV·텍스트 — nodeLoad 칸은 아이실론만 내보내고 · 빈 칸은 undefined(유지) · 위치형 끝 · 가져오기는 빈 칸으로 켜지 않는다', async () => {
+  const CSV = await import('../src/storage/csv.js');
+  assert.equal(CSV.CSV_COLUMNS[CSV.CSV_COLUMNS.length - 1], 'password', 'CSV 는 password 가 끝(가져오기 전용)');
+  assert.ok(CSV.CSV_COLUMNS.includes('nodeLoad'));
+  assert.equal(CSV.TEXT_FIELDS[CSV.TEXT_FIELDS.length - 1], 'nodeLoad', '위치형은 열 순서가 계약 — 새 열은 맨 끝(옛 파일의 note·password 가 밀리지 않게)');
+  const devs = [{ type: 'isilon', name: 'A', host: '10.0.0.1', username: 'u', nodeLoadEnabled: false }, { type: 'isilon', name: 'B', host: '10.0.0.2', username: 'u' }, { type: 'unity480', name: 'C', host: '10.0.0.3', username: 'u', nodeLoadEnabled: true }];
+  const csv = CSV.devicesToCsv(devs);
+  const lines = csv.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
+  const hi = lines[0].split(',').indexOf('nodeLoad');
+  assert.ok(hi > 0);
+  assert.deepEqual(lines.slice(1).map((l) => l.split(',')[hi]), ['false', 'true', ''], '아이실론만 true|false · 다른 타입은 빈칸');
+  const back = CSV.parseDevicesCsv(csv);
+  assert.deepEqual(back.rows.map((r) => r.nodeLoadEnabled), [false, true, undefined], '왕복 — 빈칸은 undefined');
+  const old = CSV.parseDevicesCsv('type,name,host,username,enabled\nisilon,A,10.0.0.1,u,true\n');
+  assert.equal(old.rows[0].nodeLoadEnabled, undefined, '열이 없는 옛 CSV 는 유지(켜지 않는다)');
+  const alias = CSV.parseDevicesCsv('type,name,host,표본\nisilon,A,10.0.0.1,off\n');
+  assert.equal(alias.rows[0].nodeLoadEnabled, false, '한글 별칭 · off');
+  const txt = CSV.devicesToText(devs);
+  assert.match(txt, /nodeLoad/);
+  const tb = CSV.parseDevicesText(txt);
+  assert.deepEqual(tb.rows.map((r) => r.nodeLoadEnabled), [false, true, undefined], '자유텍스트 왕복');
+  const pos = CSV.parseDevicesText('isilon  A  10.0.0.1  u  ssh  22  WA  -  true  "메모"  pw1\n');
+  assert.deepEqual([pos.rows[0].note, pos.rows[0].password, pos.rows[0].nodeLoadEnabled], ['메모', 'pw1', undefined], '옛 위치형 11열 — 메모·비밀번호가 밀리지 않고 nodeLoad 는 유지');
+  const pos2 = CSV.parseDevicesText('isilon  A  10.0.0.1  u  ssh  22  WA  -  true  "메모"  -  false\n');
+  assert.equal(pos2.rows[0].nodeLoadEnabled, false, '새 위치형 12열');
+  assert.ok(CSV.sampleCsv().includes('nodeLoad'));
+  const route = src('routes/api/storageMon.js');
+  assert.ok(/if \(row\.nodeLoadEnabled !== undefined\) input\.nodeLoadEnabled = row\.nodeLoadEnabled/.test(route), '가져오기는 빈 칸이면 키를 만들지 않는다(normalizeDevice 가 기존 값 유지)');
+  // 등록부 — 키가 없으면 기존 false 가 유지된다(가져오기가 꺼 둔 장비를 켜지 않는다)
+  const d = REG.saveDevice({ type: 'isilon', name: 'isi-csv', host: '10.9.9.8', username: 'u', password: 'p', nodeLoadEnabled: false });
+  REG.saveDevice({ id: d.id, type: 'isilon', name: 'isi-csv2', host: '10.9.9.8', username: 'u' });
+  assert.equal(REG.listDevices().find((x) => x.id === d.id).nodeLoadEnabled, false);
+});
+
+/* ── ⑩ 엣지 미전송 고리 파일 보존(v2.938) ───────────────────────────────────── */
+test('⑩ 고리 파일 — 저장 → 재시작 → 되살림(정제·상한·7일) · 손상 파일은 보존하고 빈 고리 · 보낸 것은 파일에서도 지운다', () => {
+  NLP._resetForTest();
+  NLP._ringPersistForTest({ force: true });
+  const fresh = sampleAt(NOW - 5 * M5); const stale = { ...sampleAt(NOW - 8 * D), ts: NOW - 8 * D };
+  NLP._ringPushForTest('r-p', fresh); NLP._ringPushForTest('r-p', stale); NLP._ringPushForTest('r-p', { ts: NOW - M5, nodes: [{ id: 1, in: '7', evil: 1 }] });
+  const st = NLP._ringPersistForTest({ flush: true });
+  assert.ok(fs.existsSync(st.file), '파일이 생긴다'); assert.equal(st.saved, 1);
+  NLP._ringPersistForTest({ reload: true });
+  const pend = NLP.pendingNodeLoadSamples();
+  assert.equal(pend.length, 1); assert.deepEqual(pend[0].samples.map((s) => s.ts), [NOW - 5 * M5, NOW - M5], '7일 넘은 표본은 되살리지 않는다');
+  assert.deepEqual([pend[0].samples[1].nodes[0].in, pend[0].samples[1].nodes[0].evil], [7, undefined], '되살릴 때도 정제한다(문자열 수치는 수로 · 모르는 필드 제거)');
+  assert.equal(NLP.nodeLoadPollerStatus().ring.persist.loaded, 2);
+  NLP.markNodeLoadSamplesSent(pend);
+  NLP._ringPersistForTest({ flush: true, reload: true });
+  assert.deepEqual(NLP.pendingNodeLoadSamples(), [], '보낸 표본은 파일에서도 지워진다');
+  fs.writeFileSync(st.file, '{not json');
+  const r2 = NLP._ringPersistForTest({ reload: true });
+  assert.deepEqual(NLP.pendingNodeLoadSamples(), []); assert.ok(r2.error, '손상 사유를 상태에 남긴다');
+  assert.ok(fs.readdirSync(path.dirname(st.file)).some((f) => f.startsWith('storage-nodeload-ring.json.corrupt')), '원본을 보존한다');
+  fs.writeFileSync(st.file, JSON.stringify({ version: 1, devices: { 'r-q': Array.from({ length: 9 }, (_, i) => ({ ts: NOW - (i + 1) * M5, nodes: [{ id: 1, in: 1 }] })) } }));
+  NLP._ringPersistForTest({ reload: true });
+  assert.equal(NLP.pendingNodeLoadSamples()[0].samples.length, NLP.RING_MAX, '장비당 상한(끝에서부터)');
+  NLP._ringPersistForTest({ force: false }); NLP._resetForTest();
 });
