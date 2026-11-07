@@ -37,14 +37,25 @@ function Hl({ text, needle }) {
  *   새로 치면 바로 바뀐다). 모듈 메모리(새로 고침하면 사라진다 — 검색어는 저장소에 남기지 않는다) · 10분이 지나면 버린다.
  */
 const LAST_TTL_MS = 10 * 60_000;
-let _lastSearch = null; // { q, kindSel, at }
-function takeLast(now = Date.now()) {
+/*
+ * v2.927(점검 C1-06): 계정을 함께 적고 **다른 계정이면 버린다**. 로그아웃은 새로 고침 없이 화면만 바꾸므로(App.jsx logout — setUser(null)),
+ *   예전에는 같은 탭에서 10분 안에 다른 계정이 로그인해 ⌘K 를 열면 앞 계정의 검색어(IP · 시리얼 · VM 이름)가 입력 칸에 복원됐다.
+ *   '최근 연 항목' 을 계정별 키로 나눈 것(반증 L-4)과 같은 축이다.
+ */
+let _lastSearch = null; // { q, kindSel, at, user }
+const lastUserOf = (username) => String(username ?? '').trim();
+export function rememberLastSearch({ q, kindSel = null, username = '', now = Date.now() }) {
+  _lastSearch = { q, kindSel, at: now, user: lastUserOf(username) };
+}
+export function takeLast(username = '', now = Date.now()) {
   const l = _lastSearch;
-  return l && now - l.at <= LAST_TTL_MS ? l : null;
+  if (!l || now - l.at > LAST_TTL_MS) return null;
+  if (l.user !== lastUserOf(username)) { _lastSearch = null; return null; }   // 다른 계정 — 복원하지 않고 지운다
+  return l;
 }
 
 export default function Palette({ onClose, onPick, isAdmin, username = '', toolsAllowed = null, tabs = [] }) {
-  const [restored] = useState(() => takeLast());
+  const [restored] = useState(() => takeLast(username));
   const [q, setQ] = useState(() => restored?.q || '');
   const [cur, setCur] = useState(0);
   const [catCfg, setCatCfg] = useState(null);
@@ -142,7 +153,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
       try { window.open(`${window.location.pathname}${window.location.search}${plan.hash}`, '_blank', 'noopener'); } catch { /* 팝업 차단 */ }
       return;
     }
-    if (q.trim()) _lastSearch = { q, kindSel, at: Date.now() };
+    if (q.trim()) rememberLastSearch({ q, kindSel, username });
     handoffMany(plan.handoffs || []);
     onPick(plan.hash);
   };
@@ -156,6 +167,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
   // Tab 은 종류 칩을 돈다(시안 ⑤ⓘ) — 개수가 있는 종류만.
   const chipCycle = useMemo(() => [null, ...kindsMeta.filter((k) => !k.locked && (counts[k.key] || 0) > 0).map((k) => k.key)], [kindsMeta, counts]);
   const onKey = (e) => {
+    if (e.nativeEvent?.isComposing || e.keyCode === 229) return; // v2.927(점검 C1-05): 한글 조합 확정 Enter · Tab · Esc 를 선택 · 칩 순환 · 닫기로 먹지 않는다(MentionBox · Wiki 와 같은 판정)
     if (e.key === 'Escape') {
       e.preventDefault();
       if (kindSel) { setKindSel(null); return; }

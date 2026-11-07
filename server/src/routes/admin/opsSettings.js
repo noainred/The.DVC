@@ -95,17 +95,19 @@ export function scopedOwnerWarnings(owners) {
 export function registerOpsSettings(adminRouter) {
 
 // Audit log viewer (누가 언제 무엇을 했는지).
-adminRouter.get('/audit', adminOnly, (req, res) => {
-  // v2.607 AUTHZ2607-07: 감사 로그는 전 사용자·전 법인 작업 기록이고 target 에 vCenter 축이 없는 항목이 많아 나눌 수
-  //   없다 — 범위 계정 403(v2.525 규약. 같은 파일 /alerts 는 범위로 거른다).
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '감사 로그는 전 사용자·전 법인 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
+// v2.607 AUTHZ2607-07: 감사 로그는 전 사용자·전 법인 작업 기록이고 target 에 vCenter 축이 없는 항목이 많아 나눌 수
+//   없다 — 범위 계정 403(v2.525 규약. 같은 파일 /alerts 는 범위로 거른다).
+// v2.927(점검 C1-04): 거부는 fullScopeOnlyWith 모양({ok,error,reason}) — 예전 본문의 `requiredOwner:true` 때문에 화면(AccessDenied)이
+//   '설정 소유 계정 목록에 등록하라' 는 틀린 원인 · 틀린 조치를 말했다(실제 원인은 범위 — admin/shared.js v2.744 규약). 아래 /login-history 도 같다.
+const auditFullScope = fullScopeOnlyWith('감사 로그는 전 사용자·전 법인 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
+const loginHistoryFullScope = fullScopeOnlyWith('로그인 기록은 전 사용자의 접속 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
+adminRouter.get('/audit', adminOnly, auditFullScope, (req, res) => {
   res.json(listAudit({ limit: req.query.limit, offset: req.query.offset, user: req.query.user, q: req.query.q }));
 });
 
 // v2.912 — 로그인 기록(설정 › 로그 › 최근 로그인 · 로그인 횟수). 전 사용자의 로그인 시각·IP 라 감사 로그와 같은 기준이다:
 //   관리자 + 전체 범위 계정만(범위 계정 403). 집계는 메모리 배열 한 번 훑기라 캐시하지 않는다(화면은 열 때 · 버튼으로만 부른다).
-adminRouter.get('/login-history', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 기록은 전 사용자의 접속 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
+adminRouter.get('/login-history', adminOnly, loginHistoryFullScope, (req, res) => {
   const now = Date.now();
   const range = parseLoginRange(req.query.from, req.query.to, now);
   if (range?.error) return res.status(400).json({ ok: false, error: 'bad-range', reason: range.error });

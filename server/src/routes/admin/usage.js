@@ -88,8 +88,10 @@ export function registerUsageAdmin(adminRouter) {
     try {
       const r = await purgeUsageRecords({ scope, user: String(b.user || ''), before: String(b.before || '') });
       if (!r.ok) return res.status(503).json({ ok: false, error: 'db-unavailable', reason: r.reason });
-      res.locals.auditDetail = `범위 ${scope}${scope === 'user' ? ` ${b.user}` : ''}${scope === 'before' ? ` ${b.before} 이전` : ''} · ${r.deleted}행`;
-      res.json({ ok: true, deleted: r.deleted });
+      // v2.927(점검 C1-02): before 지우기는 일 집계와 함께 그 날 이전에 마지막으로 쓴 계정 행(fu_user)도 지운다 — 그 수도 싣는다.
+      const users = Number.isFinite(r.users) ? r.users : null;
+      res.locals.auditDetail = `범위 ${scope}${scope === 'user' ? ` ${b.user}` : ''}${scope === 'before' ? ` ${b.before} 이전` : ''} · ${r.deleted}행${users ? ` · 계정 ${users}` : ''}`;
+      res.json({ ok: true, deleted: r.deleted, ...(users != null ? { users } : {}) });
     } catch (e) { fail(res, e, next); }
   });
 }
