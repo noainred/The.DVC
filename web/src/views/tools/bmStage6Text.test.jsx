@@ -17,6 +17,10 @@ import * as K from './bmCollectText.js';
 import { CollectHealthView } from './BmCollectHealth.jsx';
 import { HEALTH_REASON_CODES, NODE_FLAGS, summarizeCycle } from '../../../../server/src/bmusage/collectHealth.js';
 import { nodeStateOf } from '../../../../server/src/routes/api/bmCollectHealth.js';
+import * as N from './bmAnnotText.js';
+import { AnnotTable } from './BmAnnotations.jsx';
+import { TrendSvg } from './BmTrendChart.jsx';
+import { ANNOT_KINDS } from '../../../../server/src/bmusage/annotations.js';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const H = 3_600_000;
@@ -140,5 +144,40 @@ describe('수집 건강 — 문구 표 = 서버 열거 · 결측은 ‘—’', 
     const s2 = strip(src('bmCollectText.js')) + strip(src('BmCollectHealth.jsx'));
     expect(s2).not.toMatch(/cyclePct\s*>=|successPct\s*</);
     expect(s2).not.toMatch(/setInterval|setTimeout\(\s*load|usePolling/);
+  });
+});
+
+describe('운영 주석 — ◆ 핀 · 목록 · 연결', () => {
+  const win = { from: NOW - 6 * H, to: NOW };
+  const list = [
+    { id: 'A1', at: NOW - 2 * H, end: NOW - H, kind: 'work', text: 'pg_dump 수동', by: 'kim', target: { type: 'servers', names: ['db01', 'db02'], count: 2 }, links: { issue: 'ISS-12', wiki: { space: 'pub', id: 'W3' } }, edits: [], canEdit: true },
+    { id: 'A2', at: NOW - 3 * H, kind: 'memo', text: '', by: 'lee', deleted: { at: NOW - H, by: 'lee' }, target: { type: 'server', names: ['db01'] }, links: {}, edits: [] },
+    { id: 'A3', at: NOW - 30 * H, kind: 'memo', text: '창 밖', by: 'x', target: { type: 'corp', vcenterIds: ['vcA'] }, links: {} },
+  ];
+  it('종류 1:1 · 핀은 창 안 · 지운 것 제외 · 범위 주석은 끝을 싣는다', () => {
+    expect(Object.keys(N.ANNOT_KIND_TEXT).sort()).toEqual([...ANNOT_KINDS].sort());
+    const m = N.annotMarks(list, win);
+    expect(m.length).toBe(1); expect(m[0].pin).toBe(true); expect(m[0].end).toBe(NOW - H); expect(m[0].title).toContain('pg_dump');
+  });
+  it('연결은 해시 링크(권한은 여는 사람) · 입력 본문은 빈 칸을 보내지 않는다', () => {
+    expect(N.annotLinks(list[0].links).map((l) => l.href)).toEqual(['#/issues/list/ISS-12', '#/wiki/pub/W3']);
+    expect(N.annotBody({ keys: ['k'], at: 1, kind: 'memo', text: 'x' })).toEqual({ keys: ['k'], at: 1, kind: 'memo', text: 'x' });
+    expect(N.annotBody({ corp: 'vcA', at: 1, end: 2, kind: 'work', text: 'y', issue: ' iss-3 ' }).links).toEqual({ issue: 'ISS-3' });
+    expect(N.annotTargetText({ target: { type: 'corp', vcenterIds: ['vcA'] } })).toBe('법인 vcA');
+  });
+  it('목록 SSR — 삭제됨 흔적 · 고치기는 canEdit 일 때만', () => {
+    const html = renderToStaticMarkup(h(AnnotTable, { list }));
+    expect(html).toContain('삭제됨(lee'); expect(html).toContain('ISS-12');
+    expect((html.match(/고치기/g) || []).length).toBe(1);
+  });
+  it('추이 SVG — ◆ 핀은 HTML 겹침(SVG 도형이 아니다) · 핀이 없으면 예전 출력 그대로', () => {
+    const plain = renderToStaticMarkup(h(TrendSvg, { series: [], win, marks: [] }));
+    expect(plain.startsWith('<svg')).toBe(true);
+    const withPin = renderToStaticMarkup(h(TrendSvg, { series: [], win, marks: N.annotMarks(list, win) }));
+    expect(withPin).toContain('bmt-pin'); expect(withPin).toContain('◆');
+  });
+  it('소스 스윕 — 폴링 없음', () => {
+    const s3 = strip(src('BmAnnotations.jsx')) + strip(src('bmAnnotText.js'));
+    expect(s3).not.toMatch(/setInterval|usePolling|setTimeout/);
   });
 });

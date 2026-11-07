@@ -23,6 +23,9 @@ import { TrendRow, TimeAxis, Spark } from './BmTrendChart.jsx';
 // v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 겹침 · 구간 비교(BmTrendOps.jsx) — 패널 행에는 변경 이벤트 점만 얹는다.
 import { BaselineOverlay, CompareView } from './BmTrendOps.jsx';
 import { changeMarks } from './bmPerfOpsText.js';
+// 6단계: 운영 주석 ◆ 핀(패널 행 · 겹침 카드) · 목록 · 입력.
+import AnnotationsCard, { useAnnotations } from './BmAnnotations.jsx';
+import { annotMarks } from './bmAnnotText.js';
 import BmTrendPopup from './BmTrendPopup.jsx';
 import {
   TREND_RANGES, trendRangeOf, SHOW_MODES, showAvg, showPeak, metricInfo, PANEL_ROWS, SOCKET_NOTE, SOURCE_TAGS, SOURCE_ORDER, RECO_TILES,
@@ -100,7 +103,7 @@ function Seg({ items, value, onChange, label, className = '' }) {
  * @param {{itemKey:string, name?:string, th?:object, latest?:object|null, keepDays?:{server?:number,dev?:number}|null, narrowOverride?:boolean}} p
  *   latest — 성능 상세의 최근 5분 장치 값(entry.detail: disks · nics) · keepDays — 이 노드 대상의 보존(일). 엣지 위임 서버는 null(모름).
  */
-export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays = null, initialRange = '24h', narrowOverride = null }) {
+export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays = null, initialRange = '24h', narrowOverride = null, vcenterId = '' }) {
   // ⚠ 훅은 전부 조기 return 위.
   const [rangeK, setRangeK] = useState(() => trendRangeOf(initialRange).k);
   const [show, setShow] = useState('both');
@@ -133,7 +136,12 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
   const devices = useMemo(() => (devs.data && devs.data.ok !== false && devs.data.devices) || { disk: [], nic: [], mount: [] }, [devs.data]);
   // v2.929: 같은 창의 변경 이벤트(+ 집중 1분 점) — 창이 바뀔 때 1회(폴링 없음). 패널 행 위 점과 겹침 카드가 같은 응답을 쓴다.
   const changes = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/changes?from=${Math.floor(win.from)}&to=${Math.floor(win.to)}&focus=1` : '', clock.n);
-  const chMarks = useMemo(() => changeMarks(changes.data?.events || [], win), [changes.data, win]);
+  const chMarks0 = useMemo(() => changeMarks(changes.data?.events || [], win), [changes.data, win]);
+  // 6단계: 같은 창의 운영 주석 — 창이 바뀌거나 저장할 때 1회(annTick). 기계 이벤트(●)와 같은 줄에 ◆ 핀.
+  const [annTick, setAnnTick] = useState(0);
+  const ann = useAnnotations(itemKey ? [itemKey] : [], win, `${clock.n}|${annTick}`);
+  const anMarks = useMemo(() => annotMarks(ann.list, win), [ann.list, win]);
+  const chMarks = useMemo(() => [...chMarks0, ...anMarks], [chMarks0, anMarks]);
 
   useEffect(() => {
     if (narrowOverride != null || typeof window === 'undefined') return undefined;
@@ -352,10 +360,11 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
       {/* ── ① 평균 · ② 피크 ── */}
       {showAvg(show) && renderPanel('avg')}
       {showPeak(show) && renderPanel('peak')}
-      <p className="bmt-note">{SOCKET_NOTE}{chMarks.length ? ` · 행 위 파란 점선 = 변경 이벤트(${chMarks.length}곳 — 아래 목록)` : ''}</p>
+      <p className="bmt-note">{SOCKET_NOTE}{chMarks0.length ? ` · 행 위 파란 점선 = 변경 이벤트(${chMarks0.length}곳 — 아래 목록)` : ''}{anMarks.length ? ` · 보라 ◆ = 운영 주석(${anMarks.length}곳 — 가리키면 내용)` : ''}</p>
 
       {/* ── v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 · 구간 비교 ── */}
-      <BaselineOverlay itemKey={itemKey} win={win} changes={changes.data && changes.data.ok !== false ? changes.data : null} narrow={narrow} />
+      <BaselineOverlay itemKey={itemKey} win={win} changes={changes.data && changes.data.ok !== false ? changes.data : null} narrow={narrow} annotMarks={anMarks} />
+      <AnnotationsCard itemKey={itemKey} name={name} vcenterId={vcenterId} sel={sel} list={ann.list} err={ann.err} onChanged={() => setAnnTick((v) => v + 1)} />
       {changes.err && <p className="bmt-note" style={{ color: toneVar('warn') }}>변경 이벤트를 읽지 못했습니다: {trendErrorText(changes.err)}</p>}
       <div className="bmt-ctl">
         <button type="button" className="btn btn-sm bmp-touch" aria-expanded={cmpOn} onClick={() => setCmpOn((v) => !v)}>{cmpOn ? '구간 비교 닫기' : '구간 비교(A/B) 열기'}</button>

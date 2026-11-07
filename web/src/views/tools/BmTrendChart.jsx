@@ -70,7 +70,10 @@ export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = nu
   const selA = sel ? xOf(Math.max(sel.from, win.from), { ...win, w: W }) : null;
   const selB = sel ? xOf(Math.min(sel.to, win.to), { ...win, w: W }) : null;
   const yOf = (v) => H - (Math.max(0, Math.min(v, yMax)) / yMax) * H;
-  return (
+  // 6단계: 사람 주석은 ◆ 핀(기계 이벤트 ● 와 같은 줄 · 다른 모양). 뷰박스가 가로로 늘어나므로 핀 모양은 HTML 겹침으로 그린다(SVG 안 도형은 찌그러진다) — 핀이 없으면 예전 출력 그대로.
+  const pins = marks.filter((m) => m.pin);
+  const machine = marks.filter((m) => !m.pin);
+  const svg = (
     <svg className="bmt-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ height }} role="img" aria-label={label} {...ptr}>
       {[25, 50, 75].map((y) => <line key={y} x1="0" x2={W} y1={y} y2={y} stroke="var(--border-soft)" vectorEffect="non-scaling-stroke" />)}
       {bands.map((b, i) => <rect key={`g${i}`} x={b.x} y="0" width={Math.max(b.width, 0.5)} height={H} fill="var(--text-faint)" opacity={b.reason === 'migrating' ? 0.16 : 0.08}><title>{`결측 — ${gapReasonText(b.reason)}`}</title></rect>)}
@@ -91,9 +94,18 @@ export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = nu
         );
       })}
       {dots.map((d, i) => { const x = xOf(d.t, { ...win, w: W }); const y = H - (Math.max(0, Math.min(d.v, yMax)) / yMax) * H; return <path key={`f${i}`} d={`M${x.toFixed(1)} ${y.toFixed(1)} l0 0`} stroke={d.color || 'var(--amber)'} strokeWidth="5" strokeLinecap="round" vectorEffect="non-scaling-stroke"><title>{d.title || ''}</title></path>; })}
-      {marks.map((m, i) => { const x = xOf(m.t, { ...win, w: W }); return <g key={`m${i}`}><line x1={x} x2={x} y1="0" y2={H} stroke="var(--accent-2)" strokeOpacity="0.45" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" /><path d={`M${x.toFixed(1)} 0 l0 0`} stroke="var(--accent-2)" strokeWidth="7" strokeLinecap="round" vectorEffect="non-scaling-stroke"><title>{m.title || ''}</title></path></g>; })}
+      {pins.map((m, i) => { const x = xOf(m.t, { ...win, w: W }); const x2 = m.end != null ? xOf(m.end, { ...win, w: W }) : null; return <g key={`p${i}`}>{x2 != null && x2 > x && <rect x={x} y="0" width={x2 - x} height={H} fill="var(--purple)" opacity="0.08" />}<line x1={x} x2={x} y1="0" y2={H} stroke="var(--purple)" strokeOpacity="0.6" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" /></g>; })}
+      {machine.map((m, i) => { const x = xOf(m.t, { ...win, w: W }); return <g key={`m${i}`}><line x1={x} x2={x} y1="0" y2={H} stroke="var(--accent-2)" strokeOpacity="0.45" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" /><path d={`M${x.toFixed(1)} 0 l0 0`} stroke="var(--accent-2)" strokeWidth="7" strokeLinecap="round" vectorEffect="non-scaling-stroke"><title>{m.title || ''}</title></path></g>; })}
       {cx != null && <line x1={cx} x2={cx} y1="0" y2={H} stroke="var(--text-dim)" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />}
     </svg>
+  );
+  if (!pins.length) return svg;
+  const span = win.to - win.from;
+  return (
+    <div className="bmt-pinwrap">
+      {svg}
+      {pins.map((m, i) => <span key={`pp${i}`} className="bmt-pin" style={{ left: `${Math.max(0, Math.min(100, ((m.t - win.from) / span) * 100))}%` }} title={m.title || ''} aria-label={m.title || '운영 주석'}>◆</span>)}
+    </div>
   );
 }
 

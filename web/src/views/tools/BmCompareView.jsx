@@ -20,6 +20,7 @@ import {
   COMPARE_GROUP_TEXT, COMPARE_VIEW_TEXT, COMPARE_VIEWS, COMPARE_VALUE_TEXT, COMPARE_RANGES, columnStateView, metricLabel, metricUnit, cellPairText, cmpValText,
   colorPlan, sparkPath, corpsReadText, devText, COMPARE_TABLE_NOTE, COMPARE_HONEST, skewText, baselineCellText, focusStartSummary, compareCsv, compareCsvName,
 } from './bmCompareText.js';
+import { useAnnotations } from './BmAnnotations.jsx';
 import './bmStage6.css';
 
 /** 조회기 — 세대로 늦게 온 이전 응답을 버린다(테스트가 가짜 fetcher 로 고정). */
@@ -234,6 +235,9 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
   const colors = useMemo(() => colorPlan(cols.map((c) => c.key)), [cols]);
   const nameOf = (k) => cols.find((c) => c.key === k)?.name || names[k] || k;
   const live = cols.filter((c) => c.state === 'ok' || c.state === 'stale');
+  // 6단계: 고른 서버들의 운영 주석(◆) — 겹쳐서 보기의 줄에 같이(비교 창이 바뀔 때 1회).
+  const annWin = useMemo(() => (resp?.from != null ? { from: resp.from, to: resp.to } : null), [resp]);
+  const ann = useAnnotations(live.map((c) => c.key), annWin, 0);
   const crossCorps = new Set(live.map((c) => c.vcenterId)).size > 1;
 
   async function saveSet() {
@@ -350,7 +354,7 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
       {resp && !st.loading && (
         <div className="bmcmp-body" data-capture-body>
           {view === 'side' && <CompareSide resp={resp} nameOf={nameOf} colors={colors} valueMode={value} devHigh={devHigh} />}
-          {view === 'overlay' && <CompareOverlay resp={resp} nameOf={nameOf} colors={colors} valueMode={value} metric={metric} onMetric={setMetric} />}
+          {view === 'overlay' && <CompareOverlay resp={resp} nameOf={nameOf} colors={colors} valueMode={value} metric={metric} onMetric={setMetric} annotations={ann.list.filter((a) => !a.deleted)} />}
           {view === 'table' && <CompareTable resp={resp} nameOf={nameOf} valueMode={value} devHigh={devHigh} />}
           <p className="bmo-note">{COMPARE_HONEST}{resp.addressHidden ? ' 주소로 등록된 서버의 이름은 가렸습니다.' : ''}</p>
         </div>

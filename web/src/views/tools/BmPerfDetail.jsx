@@ -310,7 +310,7 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
 
           {tab === 'trend' && (
             // v2.923(3b): 추이 탭 — 서버를 바꾸면 상태를 새로(key). 최근 5분 장치 값(detail)은 장치 표가 함께 쓴다. 보존(일)은 이 노드 대상만 안다.
-            <BmTrendTab key={itemKey} itemKey={itemKey} name={name} latest={e.detail || null} keepDays={item?.agent ? null : keepDays} />
+            <BmTrendTab key={itemKey} itemKey={itemKey} name={name} latest={e.detail || null} keepDays={item?.agent ? null : keepDays} vcenterId={target.vcenterId || ''} />
           )}
 
           {tab === 'hw' && (

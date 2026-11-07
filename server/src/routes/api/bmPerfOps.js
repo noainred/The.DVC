@@ -40,6 +40,8 @@ export function depsOf(deps = {}) {
     local: async (mode, o) => (await import('../../bmusage/perfOpsView.js')).localPerfOps(mode, o),
     rules: async () => (await import('../../bmusage/perfRules.js')).loadPerfRules(),
     audit: logAudit,
+    // 6단계: 집중 세션 자동 주석(작성자 system — 운영 주석 화면 · 추이 ◆ 핀에 보인다). 실패는 시작 결과를 바꾸지 않는다.
+    autoAnnotate: async (o) => (await import('./bmAnnotations.js')).autoFocusAnnotation(o),
     ...deps,
   };
 }
