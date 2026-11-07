@@ -36,7 +36,7 @@ export function sanitizeCapacityDetail(b, key, now = Date.now()) {
   }
   const fits = {};
   if (isObj(b.fits)) for (const [k, f] of Object.entries(b.fits).slice(0, 65)) if (SER_KEY_RE.test(k) && isObj(f) && DAY_RE.test(String(f.fromDay))) fits[capStr(k, 270)] = { slope: N(f.slope), intercept: N(f.intercept), fromDay: String(f.fromDay) };
-  return { ok: true, key, rows, series, fits, excludedDays: (Array.isArray(b.excludedDays) ? b.excludedDays : []).filter((d) => DAY_RE.test(String(d))).slice(0, 90), today: DAY_RE.test(String(b.today)) ? String(b.today) : null };
+  return { ok: true, key, rows, series, fits, excludedDays: (Array.isArray(b.excludedDays) ? b.excludedDays : []).filter((d, i) => i < 90 && DAY_RE.test(String(d))), today: DAY_RE.test(String(b.today)) ? String(b.today) : null };
 }
 
 /** 엣지 한 서버의 상세를 당긴다. @returns {{ok:boolean, body?:object, kind?:string, reason?:string}} */

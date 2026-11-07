@@ -106,7 +106,7 @@ describe('용량 예측 문구 · 그리기', () => {
     expect(CT.daysText({ status: 'no-growth' })).toBe('증가 없음');
     expect(CT.daysText({ status: 'no-limit' })).toBe('상한 없음');
     expect(CT.slopeText({ status: 'unstable', slope: 2 })).toBe('—');
-    expect(CT.confText({ status: 'insufficient', n: 4 })).toBe('4일');
+    expect(CT.confText({ status: 'insufficient', n: 4 })).toBe('표본 4일');
     expect(CT.confText({ status: 'unstable', r2: 0.31 })).toBe('R² .31');
     expect(CT.daysText({ status: 'forecast', daysToTarget: 3, dateToTarget: '2026-11-09' })).toBe('3일 (11-09)');
     expect(CT.daysText({ status: 'reached', daysToTarget: 0 })).toBe('도달');

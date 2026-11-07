@@ -55,6 +55,8 @@ export async function maintJudge({ now = Date.now(), windowsOf = windowsForJudge
     meta: { localUnreadable: !!w.localUnreadable, deployed: w.deployed, n: w.windows.length },
     stateFor: (target, at = now) => maintStateFor(w.windows, target, at, { tagsOf: tg }),
     cover: (target, from, to, scope = null) => coverIntervals(w.windows, target, from, to, { scope, tagsOf: tg }),
+    /** 창마다 따로 — [{ id, intervals }](용량 예측이 ‘매일 반복 창’ 을 가려낸다). */
+    coverEach: (target, from, to, scope = null) => w.windows.map((x) => ({ id: x.id, intervals: coverIntervals([x], target, from, to, { scope, tagsOf: tg }) })).filter((x) => x.intervals.length),
   };
 }
 

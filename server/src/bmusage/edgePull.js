@@ -157,7 +157,7 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
 export const MAINT_VER = 1;
 export const CAPACITY_VER = 1;
 const CAP_FIELDS = ['key', 'kind', 'res', 'status', 'reason', 'grade', 'current', 'max30', 'slope', 'slope30', 'r2', 'conf', 'n', 'targetPct', 'daysToTarget', 'dateToTarget', 'daysTo100', 'dateTo100',
-  'beyondTarget', 'beyond100', 'reset', 'resetDay', 'resets30', 'excluded', 'missing', 'sizeBytes'];
+  'beyondTarget', 'beyond100', 'reset', 'resetDay', 'resets30', 'excluded', 'missing', 'sizeBytes', 'dailyWin'];
 async function envelopeMaintCapacity(keys) {
   const out = { maintVer: MAINT_VER, capacityVer: CAPACITY_VER };
   try {

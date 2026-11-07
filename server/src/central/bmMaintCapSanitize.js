@@ -57,7 +57,7 @@ export function sanitizeCapacityEnvelope(c, { targetKeys = new Set(), now = Date
       key: capStr(r.key, 256), kind: r.kind, res: txt(r.res, 256), status: r.status, reason: REASONS.has(r.reason) ? r.reason : null, grade: r.grade === 'ref' ? 'ref' : null,
       current: N(r.current), max30: N(r.max30), slope: N(r.slope), slope30: N(r.slope30), r2: N(r.r2), conf: CONF.has(r.conf) ? r.conf : null, n: N(r.n), targetPct: N(r.targetPct),
       daysToTarget: N(r.daysToTarget), dateToTarget: day(r.dateToTarget), daysTo100: N(r.daysTo100), dateTo100: day(r.dateTo100),
-      beyondTarget: bool(r.beyondTarget), beyond100: bool(r.beyond100), reset: bool(r.reset), resetDay: day(r.resetDay), resets30: N(r.resets30), excluded: N(r.excluded), missing: N(r.missing), sizeBytes: N(r.sizeBytes),
+      beyondTarget: bool(r.beyondTarget), beyond100: bool(r.beyond100), reset: bool(r.reset), resetDay: day(r.resetDay), resets30: N(r.resets30), excluded: N(r.excluded), missing: N(r.missing), sizeBytes: N(r.sizeBytes), ...(N(r.dailyWin) ? { dailyWin: N(r.dailyWin) } : {}),
     });
   }
   dropped += Math.max(0, arr.length - 20_000);

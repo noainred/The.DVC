@@ -25,6 +25,8 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { dayKey, DAY_MS, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { createYielder } from '../util/timeSlice.js';
+import { maintJudge, localTargets } from './maint/runtime.js';
+import { loadPerfRules } from './perfRules.js';
 
 const n = numOrNull;
 const FILE = () => path.join(config.configDir, 'bm-capacity.json');
@@ -195,11 +197,22 @@ export async function computeServer({ agent = '', target, now = Date.now(), cfg 
   const daily = new Map();
   for (const r of dr.live || []) daily.set(r.day, r);
   for (const r of dr.mig || []) daily.set(r.day, M.mergeDailyRows ? M.mergeDailyRows(daily.get(r.day), r) : (daily.get(r.day) || r));
-  const iv = judge ? judge.cover(target, from, now, 'exclude') : [];
-  const excludedDays = excludedDaysOf(iv, from, now);
+  // ⑤ 정비 창 날 제외 — 단 **기간의 절반 넘는 날에 걸치는 창(매일 백업 창 같은 반복)은 빼지 않는다**: 모든 날이 같은 영향을 받아 기울기를 흔들지 않고,
+  //   빼면 날이 남지 않아 예측 자체가 사라진다(Chromium 판독 r1 — 매일 2시간 창이 30일을 전부 지웠다). 뺀 · 남긴 창 수를 행에 적는다.
+  const per = judge?.coverEach ? judge.coverEach(target, from, now, 'exclude') : (judge ? [{ id: '', intervals: judge.cover(target, from, now, 'exclude') }] : []);
+  const excludedDays = new Set(); let dailyKept = 0;
+  const spanDays = Math.ceil((now - from) / DAY_MS);
+  for (const w of per) {
+    const days = excludedDaysOf(w.intervals, from, now);
+    if (days.size > spanDays / 2) { dailyKept += 1; continue; }
+    for (const d of days) excludedDays.add(d);
+  }
   const xs = xfs || (await xfsMountsOf(agent)).get(String(target.key)) || new Set();
   const today = dayKey(now);
-  const rows = forecastServer({ key: target.key, mountRows: mr.rows || [], dailyRows: [...daily.values()], excludedDays, dynInodeMounts: xs, today, cfg });
+  // 메모리 ‘소진’ 은 OS(MemAvailable) 값일 때만 — iDRAC 만 있는 서버의 mem_pct 는 다른 정의라 예측 행을 만들지 않는다.
+  const osPath = !Array.isArray(target.paths) || target.paths.includes('os');
+  const rows0 = forecastServer({ key: target.key, mountRows: mr.rows || [], dailyRows: osPath ? [...daily.values()] : [], excludedDays, dynInodeMounts: xs, today, cfg });
+  const rows = dailyKept ? rows0.map((r) => ({ ...r, dailyWin: dailyKept })) : rows0;
   if (!series) return { ok: true, rows };
   // 상세 — 자원별 일 계열(최근 30일) + 14일 맞춤선(예측 상태일 때만)
   const ser = {};
@@ -254,19 +267,18 @@ export async function recomputeCapacity({ targets = null, now = Date.now(), forc
       const cur = loadCapacity();
       if (!force && !dueForRecompute(cur, now)) return { ok: true, skipped: 'not-due' };
       const agent = config.agent?.name || '';
-      // 대상은 호출부(폴러 틱 · 라우트)가 준다 — 없으면 폴러가 등록한 공급자(폴러를 import 하지 않는다 — 순환 방지).
-      const tg = targets || await (await import('./maint/runtime.js')).localTargets();
-      const rules = deps.rules || (await import('./perfRules.js')).loadPerfRules();
+      // 대상은 호출부(폴러 틱 · 라우트)가 준다 — 없으면 폴러가 등록한 공급자(runtime.localTargets).
+      const tg = targets || await localTargets();
+      const rules = deps.rules || loadPerfRules();
       const cfg = { targetPct: rules.capacity?.targetPct ?? CAP_DEFAULTS.targetPct, minDays: rules.capacity?.minDays ?? CAP_DEFAULTS.minDays };
-      const R = await import('./maint/runtime.js');
-      const judge = deps.judge || await R.maintJudge({ now }).catch(() => null);
+      const judge = deps.judge || await maintJudge({ now }).catch(() => null);
       const xfs = await xfsMountsOf(agent);
       const y = createYielder(15);
       const rows = [];
       for (const target of tg) {
-        if (!target?.key || !(target.paths || []).includes('os')) continue;   // 마운트 · 메모리는 OS 경로가 있어야 쌓인다
+        if (!target?.key) continue;   // 마운트는 OS 경로가 있어야 쌓인다 — 행이 없으면 자원 행도 없다(메모리는 OS 경로일 때만 — 아래)
         const r = await computeServer({ agent, target, now, cfg, judge, xfs: xfs.get(String(target.key)) || new Set(), deps });
-        for (const x of r.rows) rows.push({ ...x, name: String(target.name || target.key).slice(0, 256), vcenterId: String(target.vcenterId || '') });
+        for (const x of r.rows) if (x.kind !== 'mem' || (target.paths || []).includes('os')) rows.push({ ...x, name: String(target.name || target.key).slice(0, 256), vcenterId: String(target.vcenterId || '') });
         if (rows.length >= CAP_ROWS_MAX) break;
         await y();
       }

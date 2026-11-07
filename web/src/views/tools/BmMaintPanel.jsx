@@ -12,6 +12,7 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
+import { unitText } from '../unitText.js';
 import { shortStamp } from './bmOpsText.js';
 import {
   SCOPE_ORDER, SCOPE_TEXT, STATUS_TEXT, TARGET_KIND_TEXT, WEEKDAY_OPTIONS, NTH_OPTIONS, TZ_OPTIONS, DEPLOY_STATUS_TEXT,
@@ -46,10 +47,10 @@ export function MaintForm({ form, setForm, vcenters = [], limits = {}, onPreview
         <span className="bmo-note">서버 · 태그 · 법인 중 하나(섞지 않는다)</span>
       </div>
       <div className="bmm-grid">
-        {f.kind === 'server' && <label className="bmm-field bmm-wide">서버 키(서비스 태그 — 쉼표로 · 한 법인 · {limits.keysMax ?? '—'}대까지)<input className="input" value={f.keys} onChange={(e) => set({ keys: e.target.value })} placeholder="ABC1234, ABC5678" /></label>}
+        {f.kind === 'server' && <label className="bmm-field bmm-wide">서버 키(서비스 태그 — 쉼표로 · 한 법인 · {unitText(limits.keysMax, '대')}까지)<input className="input" value={f.keys} onChange={(e) => set({ keys: e.target.value })} placeholder="ABC1234, ABC5678" /></label>}
         {f.kind === 'tag' && <label className="bmm-field">태그(role:역할 · app:용도)<input className="input" value={f.tag} onChange={(e) => set({ tag: e.target.value })} /></label>}
-        {f.kind !== 'server' && <label className="bmm-field">법인<Select sort={false} value={f.corp} onChange={(e) => set({ corp: e.target.value })}>{optionsOf([['', '고르세요'], ...corpOpts])}</Select></label>}
-        <label className="bmm-field">시간대(법인)<Select sort={false} value={f.tz} onChange={(e) => set({ tz: e.target.value })}>{optionsOf(tzOpts)}</Select></label>
+        {f.kind !== 'server' && <label className="bmm-field">법인<Select sort={false} className="select" value={f.corp} onChange={(e) => set({ corp: e.target.value })}>{optionsOf([['', '고르세요'], ...corpOpts])}</Select></label>}
+        <label className="bmm-field">시간대(법인)<Select sort={false} className="select" value={f.tz} onChange={(e) => set({ tz: e.target.value })}>{optionsOf(tzOpts)}</Select></label>
       </div>
       <div className="bmm-row" role="radiogroup" aria-label="일정">
         <b>일정</b>
@@ -63,12 +64,12 @@ export function MaintForm({ form, setForm, vcenters = [], limits = {}, onPreview
         {f.sched === 'weekly' && <div className="bmm-field bmm-wide"><span>요일</span><div className="bmm-days">{WEEKDAY_OPTIONS.map(([i, d]) => (
           <label key={i}><input type="checkbox" checked={(f.days || []).includes(i)} onChange={(e) => set({ days: e.target.checked ? [...new Set([...(f.days || []), i])] : (f.days || []).filter((x) => x !== i) })} /> {d}</label>))}</div></div>}
         {f.sched === 'monthly' && <>
-          <label className="bmm-field">n째<Select sort={false} value={String(f.nth)} onChange={(e) => set({ nth: Number(e.target.value) })}>{optionsOf(NTH_OPTIONS.map(([k, l]) => [String(k), l]))}</Select></label>
-          <label className="bmm-field">요일<Select sort={false} value={String(f.weekday)} onChange={(e) => set({ weekday: Number(e.target.value) })}>{optionsOf(WEEKDAY_OPTIONS.map(([k, l]) => [String(k), l]))}</Select></label>
+          <label className="bmm-field">n째<Select sort={false} className="select" value={String(f.nth)} onChange={(e) => set({ nth: Number(e.target.value) })}>{optionsOf(NTH_OPTIONS.map(([k, l]) => [String(k), l]))}</Select></label>
+          <label className="bmm-field">요일<Select sort={false} className="select" value={String(f.weekday)} onChange={(e) => set({ weekday: Number(e.target.value) })}>{optionsOf(WEEKDAY_OPTIONS.map(([k, l]) => [String(k), l]))}</Select></label>
         </>}
         {f.sched !== 'once' && <>
           <label className="bmm-field">시작 시각<input className="input" type="time" value={f.time} onChange={(e) => set({ time: e.target.value })} /></label>
-          <label className="bmm-field">길이(분 · 최대 {limits.recurMaxMin ?? '—'})<input className="input" type="number" min={1} max={limits.recurMaxMin} value={f.durMin} onChange={(e) => set({ durMin: e.target.value })} /></label>
+          <label className="bmm-field">길이(분 · 최대 {unitText(limits.recurMaxMin, '')})<input className="input" type="number" min={1} max={limits.recurMaxMin} value={f.durMin} onChange={(e) => set({ durMin: e.target.value })} /></label>
         </>}
       </div>
       <p className="bmo-note">{limitsNote(limits)}</p>
@@ -156,7 +157,7 @@ export default function BmMaintPanel({ vcenters = [] }) {
         <button type="button" className="btn" onClick={load} disabled={st.loading}>{st.loading ? '읽는 중…' : '다시 읽기'}</button>
       </div>
       {resp.deployed && <p className="bmo-note" style={{ color: toneVar(resp.deployed.stale || resp.deployed.unreadable ? 'warn' : 'idle') }}>
-        중앙 배포본 {resp.deployed.n ?? '—'}개 · 받은 시각 {resp.deployed.at ? shortStamp(resp.deployed.at) : '—'}{resp.deployed.stale ? ' · 오래돼 억제에 쓰지 않습니다' : ''}{resp.deployed.unreadable ? ' · 파일을 읽지 못함(억제에 쓰지 않습니다)' : ''}</p>}
+        중앙 배포본 {unitText(resp.deployed.n, '개')} · 받은 시각 {resp.deployed.at ? shortStamp(resp.deployed.at) : '—'}{resp.deployed.stale ? ' · 오래돼 억제에 쓰지 않습니다' : ''}{resp.deployed.unreadable ? ' · 파일을 읽지 못함(억제에 쓰지 않습니다)' : ''}</p>}
       {form && <MaintForm form={form} setForm={setForm} vcenters={vcenters} limits={resp.limits || {}} onPreview={doPreview} preview={preview} busy={busy} msg={msg} onSave={doSave} onCancel={() => { setForm(null); setEditId(null); }} editing={!!editId} />}
       {!form && msg && <p className="bmo-note" style={{ color: toneVar(msg.ok ? 'ok' : 'bad') }}>{msg.text}</p>}
       <STable minWidth={980} className="bmo-t" style={{ fontSize: 12, marginTop: 8 }}>
@@ -194,7 +195,7 @@ export default function BmMaintPanel({ vcenters = [] }) {
                 <td data-sort={e.agent}>{e.agent}</td>
                 <td data-sort={e.status} style={{ color: toneVar(DEPLOY_STATUS_TEXT[e.status]?.tone || 'idle') }}>{DEPLOY_STATUS_TEXT[e.status]?.label || e.status}</td>
                 <td data-sort={e.lastPullAt ?? ''}>{e.lastPullAt ? shortStamp(e.lastPullAt) : '—'}</td>
-                <td data-sort={e.envelope?.n ?? ''}>{e.envelope ? `${e.envelope.n ?? '—'}개${e.envelope.stale ? ' · 오래됨' : ''}${e.envelope.unreadable ? ' · 읽지 못함' : ''}` : '—'}</td>
+                <td data-sort={e.envelope?.n ?? ''}>{e.envelope ? `${unitText(e.envelope.n, '개')}${e.envelope.stale ? ' · 오래됨' : ''}${e.envelope.unreadable ? ' · 읽지 못함' : ''}` : '—'}</td>
                 <td data-sort={e.envelope?.leak ?? ''}>{e.envelope?.leak == null ? '—' : `${e.envelope.leak}건`}</td>
               </tr>))}</tbody>
           </STable>

@@ -46,7 +46,7 @@ import { capStr } from '../util/capStr.js'; // v2.744(RV2744F-WEB-03): 상주 �
 import { idracAuthStopFor as mainIdracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 import { withSlot, configureSlots, slotPeakReset } from './slots.js'; // v2.929(5단계): 전역 동시성 풀 — 집중 수집과 슬롯을 나눠 쓴다 · 6단계: 주기 최대 사용(수집 건강)
 import { summarizeCycle, dbFilesNow, collectCells } from './collectHealth.js'; // 6단계 수집 건강(메타 모니터링)
-import { setLocalTargetsProvider } from './maint/runtime.js'; // 8a단계 — 정비 창 · 용량 예측이 이 노드 대상을 폴러 import 없이 얻는다(순환 방지)
+import * as MAINT from './maint/runtime.js'; // 8a단계 — 정비 창 판정기 · 억제 계수 · 점검 · 대상 공급자 등록(파트 장애 · 대행이 폴러를 import 하지 않게)
 import { focusActiveCount, focusQueuedCount, registerFocusPollerHooks, focusHousekeeping, onFocusEnd, initFocus } from './focus/run.js'; // v2.929: 피크 창 예산에서 활성 집중 수만큼 동시성을 뺀다
 
 /*
@@ -954,7 +954,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
      *   판정기를 못 만들면(파일 손상 등) 억제하지 않는다(평소대로 수집).
      */
     let mj = null;
-    try { mj = await (await import('./maint/runtime.js')).maintJudge({ now: t0 }); } catch { mj = null; }
+    try { mj = await MAINT.maintJudge({ now: t0 }); } catch { mj = null; }
     const maintOf = (tg) => (mj ? mj.stateFor(tg, Date.now()) : null);
     const maintSkip = []; const collectTargets = [];
     for (const tg of realTargets) {
@@ -962,7 +962,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       if (ms?.scopes?.collect) maintSkip.push({ tg, ms }); else collectTargets.push(tg);
     }
     const realResults0 = collectTargets.length ? await pool(collectTargets, CONCURRENCY, (tg) => withSlot(() => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0, peakPlan, logExtra: (tg.paths || []).includes('os') ? L.logExtraFor(tg, logCtx) : null })).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : [];
-    const MR = mj ? await import('./maint/runtime.js') : null;
+    const MR = mj ? MAINT : null;
     for (const r of markInMaint(realResults0, maintOf)) MR?.countSuppression('collectFail', r.inMaint.ids);
     const skippedResults = maintSkip.map(({ tg, ms }) => {
       const ids = ms.windows.filter((w) => w.scopes.includes('collect')).map((w) => w.id);
@@ -1035,7 +1035,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     catch (e) { perfAlerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     // 8a단계: ‘창 끝 뒤 억제 0’ 점검 — 이번 주기에 적용한 억제(수집 건너뜀 · 알림 보류 · 자동 집중)를 파일 기준으로 다시 만든 판정과 대조(수집 건강 행).
     let maintAudit = null;
-    try { maintAudit = await (await import('./maint/runtime.js')).auditCycle({ targetsByKey }); } catch (e) { maintAudit = { error: String(e?.message || e).slice(0, 120) }; }
+    try { maintAudit = await MAINT.auditCycle({ targetsByKey }); } catch (e) { maintAudit = { error: String(e?.message || e).slice(0, 120) }; }
     if (_health?.node?.maint) _health.node.maint = { ..._health.node.maint, leak: maintAudit?.leak ?? null, checked: maintAudit?.checked ?? null, ...(mj?.meta ? { windows: mj.meta.n, localUnreadable: mj.meta.localUnreadable, deployed: mj.meta.deployed } : { judge: 'unavailable' }) };
     const okCount = results.filter((r) => r?.ok).length;
     _last = {
@@ -1093,7 +1093,7 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
   if (on.includes('baseline')) {
     // 8a단계 ⑤: 정비 창(롤업 제외) 구간의 주는 베이스라인 표본에서 뺀다(판정 코어 maint/judge.js — 이 노드의 창 + 중앙 배포본).
     let ex = null;
-    try { const R = await import('./maint/runtime.js'); const tmap = new Map(results.filter((r) => r?.target).map((r) => [r.target.key, r.target])); ex = R.exclusionFor(await R.maintJudge({ now }), (k) => tmap.get(k)); } catch { ex = null; }
+    try { const R = MAINT; const tmap = new Map(results.filter((r) => r?.target).map((r) => [r.target.key, r.target])); ex = R.exclusionFor(await R.maintJudge({ now }), (k) => tmap.get(k)); } catch { ex = null; }
     try { bands = await (await import('./baseline.js')).slotBands({ agent, cfg: rules.baseline, intervalMs: settings.intervalMs, now, ...(ex ? { exclOf: ex.exclOf, exclSig: ex.sig } : {}) }); } catch { bands = null; }
   }
   const B = bands ? await import('./baseline.js') : null;
@@ -1164,7 +1164,7 @@ export function markInMaint(results = [], maintOf = () => null) {
   return marked;
 }
 let _focusEndHooked = false;
-setLocalTargetsProvider(() => currentTargets());
+MAINT.setLocalTargetsProvider(() => currentTargets());
 export function startBmUsagePoller() {
   if (_timer) return;
   // v2.929(5단계): 집중 결론 규칙 — 세션이 끝날 때 한 번(focus/run.js). 기동 때 한 번만 구독한다.

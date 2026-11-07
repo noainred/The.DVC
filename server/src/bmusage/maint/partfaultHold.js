@@ -46,7 +46,7 @@ export function holdSetFor(devices = [], targets = [], judge, now = Date.now()) 
 /** 중앙의 대상 목록(로컬 + 엣지 보관분) — 장비 대응용 최소 필드. */
 async function centralTargets() {
   const out = [];
-  // 로컬 대상은 폴러가 등록한 공급자로(폴러를 import 하지 않는다 — 순환 방지). 모르면 로컬 장비는 보류하지 않는다.
+  // 로컬 대상은 폴러가 등록한 공급자(runtime.localTargets)로 — 모르면 로컬 장비는 보류하지 않는다.
   for (const x of await localTargets()) out.push({ agent: '', key: x.key, serviceTag: x.serviceTag, vcenterId: x.vcenterId, regId: x.idrac?.regId || '' });
   try {
     for (const rec of (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage()) {

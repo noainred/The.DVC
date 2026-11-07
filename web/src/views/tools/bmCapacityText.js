@@ -53,7 +53,7 @@ export function confText(r = {}) {
   const r2t = r2 == null ? '' : `R² ${r2.toFixed(2).replace(/^0/, '')}`;
   if (r.conf && CONF_TEXT[r.conf]) return `${CONF_TEXT[r.conf]} ${r2t}`.trim();
   if (r.status === 'unstable' && r2t) return r2t;
-  if (r.status === 'insufficient') return n(r.n) != null ? `${r.n}일` : '—';
+  if (r.status === 'insufficient') return n(r.n) != null ? `표본 ${r.n}일` : '—';   // ‘0일’ 이 남은 날로 읽히지 않게(r1 판독)
   return '—';
 }
 /** 메모 — 사유 · 리셋 · 정비 창 제외 · 결측 · 참고 등급. */
@@ -63,6 +63,7 @@ export function noteText(r = {}) {
   if (r.reset && r.resetDay) p.push(`리셋형 — ${mmdd(r.resetDay)} 뒤부터 창`);
   if (n(r.excluded)) p.push(`정비 창 ${r.excluded}일 제외`);
   if (n(r.missing)) p.push(`결측 ${r.missing}일`);
+  if (n(r.dailyWin)) p.push(`매일 반복 정비 창 ${r.dailyWin}개는 빼지 않음(모든 날에 같은 영향)`);
   if (r.grade === 'ref' || r.kind === 'mem') p.push('참고 등급(캐시 회수로 과대할 수 있음 · 누수 단정 안 함)');
   if (r.status === 'unstable' && n(r.max30) != null) p.push(`최근 30일 최대 ${r.max30}%`);
   return p.join(' · ');
@@ -71,7 +72,7 @@ export function noteText(r = {}) {
 export function summaryCards(s = {}, cfg = {}) {
   const days = n(cfg.alertDays);
   return [
-    { k: 'soon', label: `${days ?? '—'}일 안 목표선 도달`, value: n(s.soon), tone: 'bad', sub: s.soonByKind ? `파일시스템 ${s.soonByKind.fs ?? 0} · inode ${s.soonByKind.inode ?? 0} · 메모리 ${s.soonByKind.mem ?? 0}` : '' },
+    { k: 'soon', label: `${days == null ? '—' : `${days}일`} 안 목표선 도달`, value: n(s.soon), tone: 'bad', sub: s.soonByKind ? `파일시스템 ${s.soonByKind.fs ?? 0} · inode ${s.soonByKind.inode ?? 0} · 메모리 ${s.soonByKind.mem ?? 0}` : '' },
     { k: 'month', label: '30일 안 목표선 도달', value: n(s.month), tone: 'warn', sub: s.monthByKind ? `파일시스템 ${s.monthByKind.fs ?? 0} · inode ${s.monthByKind.inode ?? 0} · 메모리 ${s.monthByKind.mem ?? 0}` : '' },
     { k: 'unstable', label: '추세 불안정(예측 안 함)', value: n(s.unstable), tone: 'idle', sub: '14일 · 30일 추세가 다르거나 R² 가 낮은 서버' },
     { k: 'insufficient', label: '데이터 부족 · 상한 없음', value: n(s.insufficient), tone: 'idle', sub: '‘0일’ 로 적지 않는다 — 서버 수' },
@@ -118,7 +119,7 @@ export function capChart(series = [], fit = null, { today = null, extendDays = 1
 }
 export const CAPACITY_HONEST = '예측은 **참고**입니다(판정이 아닙니다 · ML 없음 — 최근 14일 일 최대의 직선). 계단형 적재 · 주기 정리(로그 로테이션 · VACUUM)는 직선이 틀리게 봅니다 — 그래서 ‘불안정 · 예측 안 함’ 으로 값을 쓰지 않고 최근 30일 최대만 적습니다. '
   + '메모리는 MemAvailable 기준이라 캐시 회수로 과대할 수 있고, 재부팅 리셋형은 누수라고 단정하지 않습니다. df 는 파일시스템 기준이라 씬 풀 · LVM 여유는 보지 않습니다. '
-  + '마운트는 일 롤업만 저장해 하루 최대로 계산합니다 · 정비 창(⑤ 분모 제외)이 걸친 날은 추세에서 뺍니다 · 수집 노드가 하루 한 번 계산합니다.';
+  + '마운트는 일 롤업만 저장해 하루 최대로 계산합니다 · 정비 창(⑤ 분모 제외)이 걸친 날은 추세에서 뺍니다(기간의 절반 넘는 날에 걸치는 매일 반복 창은 빼지 않습니다 — 모든 날에 같은 영향) · 수집 노드가 하루 한 번 계산합니다.';
 
 /** 보드 KPI(순수) — 30일 안 소진 서버 수 · 7일 안 · 불안정 · 부족. 계산된 출처가 하나도 없으면 ‘—’(0 이 아니다). */
 export function capacityKpi(resp) {
@@ -126,5 +127,5 @@ export function capacityKpi(resp) {
   const computed = (resp.sources || []).some((s) => !s.none && !s.old && !s.unreadable);
   if (!computed) return { value: '—', meta: '아직 계산 전(하루 1회)', soon: 0 };
   const s = resp.summary || {};
-  return { value: n(s.month) ?? '—', meta: `${n(resp.cfg?.alertDays) ?? '—'}일 안 ${n(s.soon) ?? '—'} · 불안정 ${n(s.unstable) ?? '—'} · 부족 ${n(s.insufficient) ?? '—'}`, soon: n(s.soon) || 0 };
+  return { value: n(s.month) ?? '—', meta: `${n(resp.cfg?.alertDays) == null ? '—' : `${resp.cfg.alertDays}일`} 안 ${n(s.soon) ?? '—'} · 불안정 ${n(s.unstable) ?? '—'} · 부족 ${n(s.insufficient) ?? '—'}`, soon: n(s.soon) || 0 };
 }

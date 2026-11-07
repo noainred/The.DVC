@@ -28,7 +28,7 @@ import { dayKey } from '../util/dayKey.js';
 import { RULE_IDS, BASELINE_METRICS } from './perfRules.js';
 import { VERDICT_LABEL } from './useJudge.js';
 import { MAX_SEND } from './notify.js';
-import { countSuppression, noteApplied } from './maint/runtime.js'; // 8a단계 ① 정비 창 억제 계수 · 점검
+import { countSuppression, noteApplied, maintJudge } from './maint/runtime.js'; // 8a단계 ① 정비 창 판정기 · 억제 계수 · 점검
 
 const n = numOrNull;
 const FILE = () => path.join(config.configDir, 'bm-perf-alert-state.json');
@@ -452,7 +452,7 @@ function depsOf(deps = {}) {
     applyIssues: async (fires, o) => (await import('../issues/alertIssues.js')).applyBmPerfFires(fires, o),
     startFocus: async (o) => (await import('./focus/run.js')).startFocusLocal(o),
     // 8a단계 ①: 정비 창 판정기(주기마다 한 번 — 이 노드의 창 + 중앙 배포본). 호출부(폴러)가 같은 주기의 판정기를 넘기면 그것을 쓴다.
-    maintJudge: async (now) => (await import('./maint/runtime.js')).maintJudge({ now }),
+    maintJudge: async (now) => maintJudge({ now }),
     isMock: async () => (await import('../mock/demo/flags.js')).isMockMode(),
     clock: () => Date.now(),   // 발송 결과를 받은 시각(재시도 기준 — 기존 경로와 같이 ‘결과를 받은 시각’)
     ...deps,

@@ -10,6 +10,7 @@ import Select from '../../components/Select.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
+import { unitText } from '../unitText.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
 import { KIND_TEXT, STATUS_TEXT, resText, pctText, slopeText, daysText, confText, noteText, summaryCards, sourceText, capChart, CAPACITY_HONEST } from './bmCapacityText.js';
 import './bmOps.css';
@@ -46,7 +47,7 @@ export function CapacityFleetView({ resp, onOpen, onReload, loading = false, can
       <div className="bmo-note">{(resp?.sources || []).map((s) => <div key={`${s.via}|${s.node}`} style={{ color: toneVar(s.old || s.unreadable ? 'warn' : 'idle') }}>{sourceText(s, resp?.minEdgeVersion, cfg)}</div>)}</div>
       {resp?.addressHidden && <p className="bmo-sub">관리자 판본이 아닙니다 — 주소인 서버 이름은 가림 토큰으로 보입니다.</p>}
       <section className="bmo-card">
-        <h5 className="bmo-h">함대 표 — 목표선 {cfg.targetPct ?? '—'}% 도달일 순(서버 · 자원 단위)</h5>
+        <h5 className="bmo-h">함대 표 — 목표선 {unitText(cfg.targetPct, '%')} 도달일 순(서버 · 자원 단위)</h5>
         <div className="bmo-bar">
           <Select sort={false} className="select select-sm" value={corp} onChange={(e) => setCorp(e.target.value)} aria-label="법인"><option value="">법인 전체</option>{corps.map((c) => <option key={c} value={c}>{c}</option>)}</Select>
           <Select sort={false} className="select select-sm" value={kind} onChange={(e) => setKind(e.target.value)} aria-label="자원"><option value="">자원 전체</option>{KIND_ORDER.map((k) => <option key={k} value={k}>{KIND_TEXT[k]}</option>)}</Select>
@@ -57,20 +58,20 @@ export function CapacityFleetView({ resp, onOpen, onReload, loading = false, can
           <span className="bmo-sub">{rows.length} / {(resp?.rows || []).length}행</span>
           {re && !re.busy && <span className="bmo-sub" style={{ color: toneVar(re.ok ? 'ok' : 'bad') }}>{re.text}</span>}
         </div>
-        <STable minWidth={1080} className="bmo-t" style={{ fontSize: 12 }} limit={500}>
-          <thead><tr><th>서버</th><th>법인</th><th>자원</th><th className="right">현재</th><th className="right">하루 증가</th><th>{cfg.targetPct ?? '—'}% 도달</th><th>100% 도달</th><th>신뢰</th><th>상태</th><th>메모</th></tr></thead>
+        <STable minWidth={1040} className="bmo-t" style={{ fontSize: 12 }} limit={500}>
+          <thead><tr><th>서버</th><th>법인</th><th style={{ minWidth: 110 }}>자원</th><th className="right">현재</th><th className="right">하루 증가</th><th>{unitText(cfg.targetPct, '%')} 도달</th><th>100% 도달</th><th>신뢰</th><th>상태</th><th style={{ minWidth: 140 }}>메모</th></tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={`${r.node}|${r.key}|${r.kind}|${r.res}|${i}`}>
-                <td data-sort={r.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key); }}>{r.name}</span></td>
+                <td data-sort={r.name} style={{ whiteSpace: 'nowrap' }}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key); }}>{r.name}</span></td>
                 <td data-sort={r.vcenterId || ''}>{r.vcenterId || '—'}</td>
                 <td data-sort={resText(r)} className="bmo-wrap">{resText(r)}<div className="bmo-sub">{KIND_TEXT[r.kind] || r.kind}</div></td>
                 <td className="right" data-sort={r.current ?? ''}>{pctText(r.current)}</td>
                 <td className="right" data-sort={slopeText(r) === '—' ? '' : r.slope}>{slopeText(r)}</td>
-                <td data-sort={r.status === 'reached' ? 0 : (r.daysToTarget ?? '')} style={{ color: toneVar(r.status === 'reached' ? 'bad' : r.daysToTarget != null && r.daysToTarget <= (cfg.alertDays ?? 7) ? 'bad' : 'idle') }}>{daysText(r, 'target')}</td>
-                <td data-sort={r.daysTo100 ?? ''}>{r.status === 'forecast' || r.status === 'reached' ? daysText(r, '100') : '—'}</td>
-                <td data-sort={r.r2 ?? ''}>{confText(r)}</td>
-                <td data-sort={r.status} style={{ color: toneVar(STATUS_TEXT[r.status]?.tone || 'idle') }}>{STATUS_TEXT[r.status]?.label || r.status}</td>
+                <td className="bmo-wrap" data-sort={r.status === 'reached' ? 0 : (r.daysToTarget ?? '')} style={{ color: toneVar(r.status === 'reached' ? 'bad' : r.daysToTarget != null && r.daysToTarget <= (cfg.alertDays ?? 7) ? 'bad' : 'idle') }}>{daysText(r, 'target')}</td>
+                <td className="bmo-wrap" data-sort={r.daysTo100 ?? ''}>{r.status === 'forecast' || r.status === 'reached' ? daysText(r, '100') : '—'}</td>
+                <td data-sort={r.r2 ?? ''} style={{ whiteSpace: 'normal', wordBreak: 'keep-all', minWidth: 64 }}>{confText(r)}</td>
+                <td data-sort={r.status} style={{ color: toneVar(STATUS_TEXT[r.status]?.tone || 'idle'), whiteSpace: 'normal', wordBreak: 'keep-all', minWidth: 72 }}>{STATUS_TEXT[r.status]?.label || r.status}</td>
                 <td className="bmo-wrap" data-sort={noteText(r)}>{noteText(r) || '—'}</td>
               </tr>
             ))}
@@ -119,7 +120,9 @@ export function BmCapacityCard({ itemKey }) {
   const [sel, setSel] = useState(null);
   const d = st.resp;
   const rows = d?.rows || [];
-  const pick = sel || rows.find((r) => r.status === 'reached' || r.status === 'forecast') || rows[0] || null;
+  // 기본 그림 = 가장 급한 자원(도달 → 도달일 짧은 순) — 서버가 준 값으로 고르기만(다시 판정하지 않는다).
+  const urgent = rows.filter((r) => r.status === 'reached' || r.status === 'forecast').sort((a, b) => (a.status === 'reached' ? -1 : 0) - (b.status === 'reached' ? -1 : 0) || (a.daysToTarget ?? 1e9) - (b.daysToTarget ?? 1e9))[0];
+  const pick = sel || urgent || rows[0] || null;
   const sk = pick ? (pick.kind === 'mem' ? 'mem' : `${pick.kind}:${pick.res}`) : null;
   return (
     <section className="bmo-card">

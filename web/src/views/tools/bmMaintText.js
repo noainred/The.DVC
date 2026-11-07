@@ -65,7 +65,7 @@ export function targetText(w = {}, corpName = (id) => id) {
   if (t.kind === 'corp') return `법인 ${corpName(w.vcenterId)} 전체`;
   if (t.kind === 'tag') return `태그 ${t.tag || '—'} (법인 ${corpName(w.vcenterId)})`;
   const names = t.names || [];
-  return names.length ? `${names.slice(0, 3).join(' · ')}${(t.count || names.length) > 3 ? ` 외 ${(t.count || names.length) - 3}대` : ''}` : `서버 ${n(t.count) ?? '—'}대`;
+  return names.length ? `${names.slice(0, 3).join(' · ')}${(t.count || names.length) > 3 ? ` 외 ${(t.count || names.length) - 3}대` : ''}` : (n(t.count) == null ? '서버 —' : `서버 ${t.count}대`);
 }
 /** 억제 범위 칸(켠 것만 · 짧게). */
 export function scopesText(list = []) { return SCOPE_ORDER.filter((s) => (list || []).includes(s)).map((s) => SCOPE_TEXT[s].short).join(' · ') || '—'; }
@@ -137,7 +137,7 @@ export function approvalNote(limits = {}) {
 }
 export function limitsNote(limits = {}) {
   const o = n(limits.onceMaxMin); const r = n(limits.recurMaxMin); const c = n(limits.confirmDays);
-  return `최대 길이 일회 ${o != null ? durText(o) : '—'} · 반복 ${r != null ? durText(r) : '—'} · 반복 창은 확인 뒤 ${c ?? '—'}일이 지나면 억제를 멈춥니다(재확인 필요 — 억제가 풀리지 않는 일을 막는 시한).`;
+  return `최대 길이 일회 ${o != null ? durText(o) : '—'} · 반복 ${r != null ? durText(r) : '—'} · 반복 창은 확인 뒤 ${c == null ? '—' : `${c}일`}이 지나면 억제를 멈춥니다(재확인 필요 — 억제가 풀리지 않는 일을 막는 시한).`;
 }
 export function maintHonest(limits = {}) {
   const ttl = n(limits.deployTtlMs);
