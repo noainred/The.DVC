@@ -13,7 +13,7 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import {
   nodeStateView, FLAG_TEXT, REASON_TEXT, REASON_STATE_TEXT, INFO_TEXT, PATH_TEXT, msText, pctText1, gbText, cycleText, concText, sshText, reasonsLine, daysSince,
-  trendPaths, trendRangeText, COLLECT_HONEST, collectCsv, collectCsvName, unknownText, peakReasonText,
+  trendPaths, trendRangeText, COLLECT_HONEST, collectCsv, collectCsvName, unknownText, peakReasonText, NODE_ERROR_TEXT, famLine,
 } from './bmCollectText.js';
 import './bmStage6.css';
 
@@ -52,13 +52,16 @@ export function CollectHealthView({ resp, now = Date.now() }) {
                   <td className="right" data-sort={r.conc?.max ?? ''}>{r.nodeHidden ? '—' : concText(r.conc)}</td>
                   <td className="right" data-sort={r.ssh?.p95Ms ?? ''}>{r.nodeHidden ? '—' : sshText(r.ssh)}</td>
                   <td className="right" data-sort={r.dbBytes ?? ''}>{r.nodeHidden ? '—' : `${gbText(r.dbBytes)}${r.dbFiles != null ? ` · ${r.dbFiles}` : ''}`}</td>
-                  <td data-sort={sv.label}><span style={{ color: toneVar(sv.tone) }}>{sv.label}</span>{(nd?.flags || []).map((f) => <div key={f} className="bmo-sub" style={{ color: toneVar('warn') }}>{FLAG_TEXT[f] || f}</div>)}</td>
+                  <td data-sort={sv.label}><span style={{ color: toneVar(sv.tone) }}>{sv.label}</span>{(r.flags || nd?.flags || []).map((f) => <div key={f} className="bmo-sub" style={{ color: toneVar('warn') }}>{FLAG_TEXT[f] || f}</div>)}</td>
                 </tr>
               );
             })}
           </tbody>
         </STable>
         {!(resp?.rows || []).length && <p className="bmo-note">보이는 법인이 없습니다{resp?.nodesOmitted ? `(범위 밖 노드 ${resp.nodesOmitted}곳은 싣지 않았습니다)` : ''}.</p>}
+        {nodes.filter((x) => x.node?.error && NODE_ERROR_TEXT[x.node.error]).map((x) => (
+          <p key={`err|${x.via}|${x.agent}`} className="bmo-note" style={{ color: toneVar(x.node.error === 'no-targets' ? 'idle' : 'bad') }}>{x.agent || '이 노드'} — {NODE_ERROR_TEXT[x.node.error]}</p>
+        ))}
         {resp?.corpsDropped ? <p className="bmo-note">엣지가 보낸 법인별 값 중 그 엣지의 대상 · 설정 법인이 아닌 것 {resp.corpsDropped}건은 싣지 않았습니다.</p> : null}
         <p className="bmo-note"><BoldText text={'‘주기 소요’ 는 그 노드 폴러가 한 주기에 전 서버를 도는 데 걸린 벽시계 시간입니다. 예산(주기)에 가까우면 **재진입 가드**가 다음 주기를 건너뛰어 실제 간격이 늘어납니다 — 이 보드가 그 전에 알려 줍니다(기준은 설정 › 알림 규칙의 ‘수집 건강 기준’).'} /></p>
       </section>
@@ -109,13 +112,12 @@ export function CollectHealthView({ resp, now = Date.now() }) {
         <div className="bmh-grid">
           {withNode.map((x) => {
             const db = x.node.db || {};
-            const fam = db.families || {};
             return (
               <div key={`${x.via}|${x.agent}`} className="bmh-cell" style={{ borderLeftColor: toneVar(x.flags?.includes('db') ? 'warn' : 'ok') }}>
                 <div className="bmh-head"><b>{x.agent || '이 노드'}</b><span className="bmo-sub">{x.via === 'edge' ? '엣지' : '이 노드'}</span></div>
                 <div className="bmh-v">{gbText(db.bytes)}</div>
                 {(db.error || db.unread) ? <div className="bmo-sub" style={{ color: toneVar('warn') }}>{db.error ? '데이터 폴더를 읽지 못해 크기를 모릅니다' : `파일 ${db.unread}개의 크기를 읽지 못해 합을 내지 않았습니다`}(0 으로 세지 않습니다)</div> : null}
-                <div className="bmo-sub">메인 {gbText(db.mainBytes)}{db.walBytes ? ` (+WAL ${gbText(db.walBytes)})` : ''} · 원시 {fam.raw?.files ?? 0}개 {gbText(fam.raw?.bytes)} · 1시간 {fam.h1?.files ?? 0}개 {gbText(fam.h1?.bytes)} · 장치 {(fam.dev?.files ?? 0) + (fam.dev1h?.files ?? 0)}개 · 1일 {fam.d1?.files ?? 0}개</div>
+                <div className="bmo-sub">{famLine(db)}</div>
                 <div className="bmo-sub">상한 {x.node.capBytes ? gbText(x.node.capBytes) : '없음'}{x.node.dbPct != null ? ` · ${pctText1(x.node.dbPct)}` : ''}</div>
                 <div className="bmo-sub">피크 창 {x.node.peakPlan?.windowS ?? '—'}초(상한 {x.node.peakPlan?.capS ?? '—'}){peakReasonText(x.node.peakPlan?.reason) ? ` · ${peakReasonText(x.node.peakPlan.reason)}` : ''}</div>
                 {x.via === 'edge' && <div className="bmo-sub">중앙 보관분 {x.snapAt ? daysSince(x.snapAt, now) : '—'}{x.lastAttempt ? ` · 마지막 당김 ${x.lastAttempt.ok ? '성공' : `실패(${x.lastAttempt.kind || '—'})`} ${msText(x.lastAttempt.ms)}` : ''}</div>}

@@ -192,9 +192,10 @@ export function perfAlertOf(f, { corpName = '' } = {}) {
   }
   if (f.rule === 'collect') {
     const x = c.collect || {};
-    const LBL = { cycle: `주기 소요 ${x.cyclePct ?? '—'}%(예산 대비 · 기준 ${x.th?.cyclePct ?? '—'}%)`, success: `성공률 ${x.successPct ?? '—'}%(기준 ${x.th?.successPct ?? '—'}% 미만)`, db: `DB ${x.dbPct ?? '—'}%(상한 대비 · 기준 ${x.th?.dbPct ?? '—'}%)`, auth: '인증 정지 서버 있음' };
+    const LBL = { cycle: `주기 소요 ${x.cyclePct ?? '—'}%(예산 대비 · 기준 ${x.th?.cyclePct ?? '—'}%)`, success: `성공률 ${x.successPct ?? '—'}%(기준 ${x.th?.successPct ?? '—'}% 미만)`, db: `DB ${x.dbPct ?? '—'}%(상한 대비 · 기준 ${x.th?.dbPct ?? '—'}%)`, auth: '인증 정지 서버 있음',
+      error: `이번 주기 실패(${{ 'classify-failed': '대상 분류 실패', 'cycle-error': '주기 중 예외', 'health-failed': '수집 건강 계산 실패' }[x.error] || '원인 미상'} — 대상 · 결과를 모름)` };
     const on = Object.entries(x.cells || {}).filter(([, v]) => v === 'true').map(([k]) => LBL[k] || k);
-    return { key, severity: x.cells?.success === 'true' || x.cells?.db === 'true' ? 'critical' : 'warning', title: capStr(`${head} 수집 건강 기준 밖 — ${on.join(' · ')}`, 200),
+    return { key, severity: x.cells?.success === 'true' || x.cells?.db === 'true' || x.cells?.error === 'true' ? 'critical' : 'warning', title: capStr(`${head} 수집 건강 기준 밖 — ${on.join(' · ')}`, 200),
       detail: capStr(`베어메탈 사용률 › 수집 건강 보드에서 법인별 실패 사유 · 조치를 확인하세요. 재진입 가드가 다음 주기를 건너뛰기 전에 알리는 것이 목적입니다.`, 1_500) };
   }
   if (f.rule === 'focusEnd') {

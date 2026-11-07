@@ -11,6 +11,7 @@
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { normalizeWindow, RES_MS } from './trendWindow.js';
+import { PEAK_COLS } from './perfCols.js';
 
 const n = numOrNull;
 const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
@@ -82,20 +83,24 @@ export function compareWindow({ range = '24h', from = null, to = null, now = Dat
 
 /**
  * 한 지표 계열 → 통계(순수). points 는 trendWindow.toPoints 모양({t, avg, max, peak, peakAt}).
- *  · avg = 점 평균의 평균(값 있는 점만) · peak = 점마다 (peak ?? max ?? avg) 의 최대 · last = 마지막 값 있는 점.
- *  · expected = 창 ÷ 간격 · missing = expected − 값 있는 점(음수면 0) — 결측을 0 으로 채우지 않고 개수를 센다.
+ *  · avg = 점 평균의 평균(값 있는 점만) · peak = **피크 표본(p.peak)의 최대만**(반증 F7 — 피크가 없는 점을 평균 · 칸 최대로 메우지 않는다 · peakN = 피크 있는 점 수) ·
+ *    max = 점마다 (max ?? avg) 의 최대(‘창 최대’ — 피크 표본이 아니다) · last = 마지막 값 있는 점.
+ *  · expected = 창 ÷ 주기 길이(cycleMs — 수집 간격 · 반증 F12: 1분 간격이면 n 이 expected 를 넘었다) · missing = expected − 값 있는 점(음수면 0) — 결측을 0 으로 채우지 않고 개수를 센다.
  *  · spark = 창을 SPARK_MAX 칸으로 나눠 칸마다 평균 · 피크(값 없는 칸 null — 그리는 쪽이 끊는다).
  */
-export function seriesStats(points = [], { from, to, stepMs, sparkMax = SPARK_MAX } = {}) {
+export function seriesStats(points = [], { from, to, stepMs, cycleMs = null, sparkMax = SPARK_MAX } = {}) {
   const pts = (Array.isArray(points) ? points : []).filter((p) => p && n(p.t) != null && (n(p.avg) != null || n(p.max) != null || n(p.peak) != null));
   const avgs = pts.map((p) => n(p.avg)).filter((v) => v != null);
-  let peak = null; let peakAt = null;
+  let peak = null; let peakAt = null; let peakN = 0; let max = null;
   for (const p of pts) {
-    const v = n(p.peak) ?? n(p.max) ?? n(p.avg);
-    if (v != null && (peak == null || v > peak)) { peak = v; peakAt = n(p.peakAt) ?? n(p.t); }
+    const v = n(p.peak);
+    if (v != null) { peakN += 1; if (peak == null || v > peak) { peak = v; peakAt = n(p.peakAt) ?? n(p.t); } }
+    const m = n(p.max) ?? n(p.avg);
+    if (m != null && (max == null || m > max)) max = m;
   }
   const lastP = [...pts].reverse().find((p) => n(p.avg) != null || n(p.peak) != null) || null;
-  const step = Math.max(1, n(stepMs) || RES_MS['5m']);
+  const step0 = Math.max(1, n(stepMs) || RES_MS['5m']);
+  const step = Math.min(step0, Math.max(1, n(cycleMs) || step0));
   const expected = from != null && to != null && to > from ? Math.max(1, Math.floor((to - from) / step)) : null;
   // 칸 수는 점 수를 넘지 않게(수집 주기가 칸보다 성기면 칸이 하나 걸러 비어 선이 점으로 끊긴다 — Chromium 판독 r1).
   const k = Math.max(1, Math.min(sparkMax, expected || sparkMax, Math.max(2, pts.length)));
@@ -105,7 +110,7 @@ export function seriesStats(points = [], { from, to, stepMs, sparkMax = SPARK_MA
     const buckets = Array.from({ length: k }, () => ({ s: 0, c: 0, pk: null }));
     for (const p of pts) {
       const i = Math.min(k - 1, Math.max(0, Math.floor((p.t - from) / w)));
-      const a = n(p.avg); const pk = n(p.peak) ?? n(p.max) ?? a;
+      const a = n(p.avg); const pk = n(p.peak);   // 스파크 피크 선도 피크 표본만(없는 칸은 선이 끊긴다)
       if (a != null) { buckets[i].s += a; buckets[i].c += 1; }
       if (pk != null) buckets[i].pk = buckets[i].pk == null ? pk : Math.max(buckets[i].pk, pk);
     }
@@ -113,8 +118,8 @@ export function seriesStats(points = [], { from, to, stepMs, sparkMax = SPARK_MA
   }
   return {
     avg: avgs.length ? r2(avgs.reduce((a, b) => a + b, 0) / avgs.length) : null,
-    peak: r2(peak), peakAt,
-    last: lastP ? { t: n(lastP.t), avg: r2(n(lastP.avg)), peak: r2(n(lastP.peak) ?? n(lastP.max)) } : null,
+    peak: r2(peak), peakAt, peakN, max: r2(max),
+    last: lastP ? { t: n(lastP.t), avg: r2(n(lastP.avg)), peak: r2(n(lastP.peak)) } : null,
     n: pts.length, expected, missing: expected == null ? null : Math.max(0, expected - pts.length),
     spark,
   };
@@ -138,7 +143,9 @@ export async function compareSeriesFor({ agent = '', key, metrics = [], from, to
     try { r = await trendFor({ agent, key, q: { metric: col, from, to, res: 'auto' }, settings }); } catch (e) { r = { ok: false, reason: String(e?.message || e).slice(0, 160) }; }
     if (!r || !r.ok) { out[col] = { error: String(r?.reason || '읽지 못했습니다').slice(0, 160) }; await yieldFn(); continue; }
     res = res || r.res; stepMs = stepMs || r.stepMs;
-    out[col] = { ...seriesStats(r.points, { from: r.from, to: r.to, stepMs: r.stepMs }), ...(r.truncated ? { truncated: r.truncated } : {}), ...(r.missingPeriods?.length ? { missingPeriods: r.missingPeriods.length } : {}) };
+    // 주기 길이 = 이 노드(수집 노드) 설정 간격 — 5분 원시만(롤업은 칸 길이). 반증 F12.
+    const cycleMs = r.res === '5m' ? n(settings?.intervalMs) : null;
+    out[col] = { ...seriesStats(r.points, { from: r.from, to: r.to, stepMs: r.stepMs, cycleMs }), ...(r.truncated ? { truncated: r.truncated } : {}), ...(r.missingPeriods?.length ? { missingPeriods: r.missingPeriods.length } : {}) };
     await yieldFn();
   }
   const dev = bands && typeof deviationsFor === 'function' && latestRow ? deviationsFor(bands, key, latestRow) : null;
@@ -171,16 +178,12 @@ export function niceCeil(v) {
 /**
  * 비교 표(순수). columns: [{ key, state, purposeGroup, series:{metrics}, hwValues, verdict, devWorst }] — state 가 'ok' 또는 'stale'(보관분) 인 열만 값을 낸다.
  *  · 행마다 셀 { key, now:{avg,peak}, win:{avg,peak}, clipped } · dev(max÷min — 결측 뺀 열 2개 이상 · 최소 > 0) · top(최고 열 key) · devHigh · skew.
- *  · value 모드(avgpeak · avg · peak)는 편차 · 최고 판정에 쓸 값을 고른다(avgpeak 이면 피크가 있으면 피크, 없으면 평균).
+ *  · value 모드(avgpeak · avg · peak)는 편차 · 최고 판정에 쓸 값을 고른다. 반증 F7: 서버마다 다른 양(피크 vs 평균)을 섞어 대지 않는다 —
+ *    peak 는 피크 표본이 있는 서버만(없으면 그 서버는 판정에서 빠진다) · avgpeak 는 값 있는 서버가 **모두** 피크를 가질 때만 피크, 하나라도 없으면 모두 평균(row.basis 로 밝힌다).
  */
 export function buildCompareTable(columns = [], { metrics = [], value = 'avgpeak' } = {}) {
   const live = columns.filter((c) => c && (c.state === 'ok' || c.state === 'stale'));
-  const pick = (cell) => {
-    if (!cell) return null;
-    if (value === 'avg') return n(cell.win?.avg);
-    if (value === 'peak') return n(cell.win?.peak);
-    return n(cell.win?.peak) ?? n(cell.win?.avg);
-  };
+  const pickOf = (basis) => (cell) => (cell ? n(basis === 'peak' ? cell.win?.peak : cell.win?.avg) : null);
   const rows = [];
   for (const col of metrics) {
     const meta = META.get(col);
@@ -200,7 +203,12 @@ export function buildCompareTable(columns = [], { metrics = [], value = 'avgpeak
       const top = n(x.win?.peak) ?? n(x.now?.peak);
       x.clipped = meta.scaleMax != null && top != null && top > meta.scaleMax;
     }
-    const vals = cells.map((x) => ({ key: x.key, v: pick(x) })).filter((x) => x.v != null);
+    let basis = value === 'peak' ? 'peak' : 'avg';
+    if (value === 'avgpeak') {
+      const valued = cells.filter((x) => n(x.win?.avg) != null || n(x.win?.peak) != null);
+      basis = valued.length && valued.every((x) => n(x.win?.peak) != null) ? 'peak' : 'avg';
+    }
+    const vals = cells.map((x) => ({ key: x.key, v: pickOf(basis)(x) })).filter((x) => x.v != null);
     let dev = null; let top = null;
     if (vals.length >= 2) {
       const max = Math.max(...vals.map((x) => x.v)); const min = Math.min(...vals.map((x) => x.v));
@@ -221,7 +229,8 @@ export function buildCompareTable(columns = [], { metrics = [], value = 'avgpeak
       const s = [...arr].sort((a, b) => b.v - a.v);
       if (s[1].v > 0 ? s[0].v >= s[1].v * SKEW_RATIO : s[0].v > 0) { skew = { group: g, key: s[0].key }; break; }
     }
-    rows.push({ col, unit: meta.unit, src: meta.src, scale, cells, dev, devHigh: dev != null && dev >= DEV_HIGH_RATIO, top, skew });
+    // peakCapable — 이 지표에 피크 표본 열이 있는가(없으면 화면이 피크 칸 · ‘평균으로 비교’ 표지를 내지 않는다 — 원래 피크가 없는 지표다)
+    rows.push({ col, unit: meta.unit, src: meta.src, scale, cells, dev, devHigh: dev != null && dev >= DEV_HIGH_RATIO, top, skew, basis, peakCapable: meta.src === 'series' && PEAK_COLS.includes(col) });
   }
   const verdicts = live.map((c) => ({ key: c.key, verdict: c.verdict ?? null }));
   const baseline = live.map((c) => ({ key: c.key, worst: c.devWorst ?? null }));

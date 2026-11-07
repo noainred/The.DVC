@@ -111,7 +111,7 @@ export function SloTable({ resp }) {
               <td className="right" data-sort={it.violationMs ?? ''}>{hoursText(it.violationMs)}</td>
               <td data-sort={it.longest?.cycles ?? ''}>{longestText(it.longest)}</td>
               <td data-nosort className="bmrb-spark">{dailySpark(it.daily)}</td>
-              <td className="right" data-sort={it.missing ?? ''}>{it.missing ?? '—'}주기 · {it.maintenance?.source === 'none' ? '원천 없음' : (it.maintenance?.excluded ?? '—')}</td>
+              <td className="right" data-sort={it.missing ?? ''}>{it.missing ?? '—'}주기 · {it.maintenance?.source === 'none' ? '원천 없음' : (it.maintenance?.excluded ?? '—')}{it.peakMissing ? <div className="bmo-sub">피크 표본 없음 {it.peakMissing}주기(결측으로 셈)</div> : null}</td>
               <td data-sort={st.label}><span style={{ color: toneVar(st.tone) }}>{st.label}</span>{it.error && <div className="bmo-sub">{it.error}</div>}</td>
             </tr>
           );
@@ -119,6 +119,11 @@ export function SloTable({ resp }) {
       </tbody>
     </STable>
   );
+}
+/** 지표별로 고를 수 있는 기준 — 피크 표본 열이 없는 지표는 ‘피크’ 를 빼고(서버가 400 으로 막는 것과 같은 목록 — 응답 peakMetrics). */
+export function basesFor(meta = {}, metric = '') {
+  const all = meta.bases || [];
+  return Array.isArray(meta.peakMetrics) && !meta.peakMetrics.includes(metric) ? all.filter((b) => b !== 'peak') : all;
 }
 function GoalEditor({ cfg, meta, onSaved }) {
   const [scope, setScope] = useState('default');
@@ -137,8 +142,8 @@ function GoalEditor({ cfg, meta, onSaved }) {
       <div className="bmcmp-ctl" style={{ marginTop: 0 }}>{['default', ...(meta.profiles || [])].map((s) => <button key={s} type="button" className={`btn btn-sm bmp-touch${scope === s ? ' btn-primary' : ''}`} onClick={() => setScope(s)}>{s === 'default' ? '역할(기본)' : `용도 ${s}`}</button>)}</div>
       {listOf(form).map((g, i) => (
         <div key={g.id || i} className="bmcmp-ctl">
-          <Select sort={false} className="select select-sm" value={g.metric} onChange={(e) => setList((l) => l.map((x, j) => (j === i ? { ...x, metric: e.target.value } : x)))} aria-label="지표">{(meta.metrics || []).map((m) => <option key={m} value={m}>{SLO_METRIC_TEXT[m]?.label || m}</option>)}</Select>
-          <Select sort={false} className="select select-sm" value={g.basis} onChange={(e) => setList((l) => l.map((x, j) => (j === i ? { ...x, basis: e.target.value } : x)))} aria-label="기준">{(meta.bases || []).map((m) => <option key={m} value={m}>{SLO_BASIS_TEXT[m] || m}</option>)}</Select>
+          <Select sort={false} className="select select-sm" value={g.metric} onChange={(e) => setList((l) => l.map((x, j) => (j === i ? { ...x, metric: e.target.value, basis: basesFor(meta, e.target.value).includes(x.basis) ? x.basis : 'avg' } : x)))} aria-label="지표">{(meta.metrics || []).map((m) => <option key={m} value={m}>{SLO_METRIC_TEXT[m]?.label || m}</option>)}</Select>
+          <Select sort={false} className="select select-sm" value={g.basis} onChange={(e) => setList((l) => l.map((x, j) => (j === i ? { ...x, basis: e.target.value } : x)))} aria-label="기준">{basesFor(meta, g.metric).map((m) => <option key={m} value={m}>{SLO_BASIS_TEXT[m] || m}</option>)}</Select>
           <Select sort={false} className="select select-sm" value={g.op} onChange={(e) => setList((l) => l.map((x, j) => (j === i ? { ...x, op: e.target.value } : x)))} aria-label="연산">{(meta.ops || []).map((m) => <option key={m} value={m}>{SLO_OP_TEXT[m] || m}</option>)}</Select>
           <input className="input" style={{ width: 90 }} type="number" value={g.value} onChange={(e) => setList((l) => l.map((x, j) => (j === i ? { ...x, value: e.target.value === '' ? '' : Number(e.target.value) } : x)))} aria-label="값" />
           <label className="bmo-sub">목표 %<input className="input" style={{ width: 70 }} type="number" min={1} max={100} value={g.objectivePct} onChange={(e) => setList((l) => l.map((x, j) => (j === i ? { ...x, objectivePct: e.target.value === '' ? '' : Number(e.target.value) } : x)))} /></label>

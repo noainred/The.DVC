@@ -14,7 +14,7 @@ const n = numOrNull;
 export const STEP_KIND_TEXT = Object.freeze({ portal: '포탈에서 먼저 확인', command: '서버 명령(복사용 · 읽기 전용)', config: '설정 · DB 대조', hardware: '하드웨어 의심', action: '조치 후보 · 기록' });
 /** 포탈에서 볼 곳(서버 상세 탭 id · 보기) → 이름. */
 export const LOOK_TEXT = Object.freeze({ focus: '집중 모니터링 탭(결론 · 분별 프로세스)', trend: '추이 탭', compare: '구간 비교(어제 같은 시각)', changes: '변경 이벤트 띠', annotations: '운영 주석', faults: '장애 기록 탭', hw: '하드웨어 탭', profile: '용도 탭', ports: '추이 탭 포트 절(CVP)', summary: '요약 탭(소모품)', tuning: '튜닝 탭', snap: '진단 스냅샷 탭' });
-export const RUNBOOK_HONEST = '플레이북은 판정이 ‘후보’ 로 끝난 뒤 사람이 할 다음 조사를 표준화한 것입니다. 명령은 복사용이고 **포탈은 실행하지 않습니다**(읽기 전용 명령만 싣습니다 — 쓰기 · 재시작 명령은 없습니다). 현장이 고친 단계는 위키에 덮어씁니다(포탈 판은 기본값).';
+export const RUNBOOK_HONEST = '플레이북은 판정이 ‘후보’ 로 끝난 뒤 사람이 할 다음 조사를 표준화한 것입니다. 명령은 복사용이고 **포탈은 실행하지 않습니다**. 화면에 나가는 명령은 검토된 읽기 전용 목록에 글자 그대로 있는 줄뿐이고(쓰기 · 재시작 명령은 목록에 없습니다), 자리표시는 장치 · 인터페이스 · 마운트 이름만 채웁니다. 현장이 고친 단계는 위키에 덮어씁니다(포탈 판은 기본값).';
 /** 판정 id → 짧은 글자. */
 export function judgmentText(id) {
   const [k, v] = String(id || '').split(':');
@@ -57,7 +57,7 @@ export function dailySpark(daily = []) {
   return (Array.isArray(daily) ? daily : []).map((d) => { const v = n(d?.pct); if (v == null) return '·'; return B[Math.min(7, Math.max(0, Math.round(((100 - v) / 100) * 7)))]; }).join('');
 }
 export function resNote(res) { return res === '1h' ? '창이 길어 1시간 롤업으로 셉니다(‘주기’ 대신 ‘시간’ — 5분 원시는 20일 이하 창에서만).' : '5분 주기로 셉니다.'; }
-export const SLO_HONEST = '달성률 = 목표 안에 있던 주기 ÷ 값이 있는 주기(결측 주기는 분모에서 빼고 수를 적습니다). 정비 창도 분모에서 빼야 하지만 아직 원천이 없어 빼지 못합니다(8단계). p95 기준은 기간 안 주기 평균의 95번째 백분위를 목표와 대 봅니다. 목표는 설정값(관리자)이고 우선순위는 개별 > 용도 > 역할입니다.';
+export const SLO_HONEST = '달성률 = 목표 안에 있던 주기 ÷ 값이 있는 주기(결측 주기는 분모에서 빼고 수를 적습니다). 정비 창도 분모에서 빼야 하지만 아직 원천이 없어 빼지 못합니다(8단계). 피크 기준은 피크 표본(10초 창 · 샘플러)이 있는 주기만 셉니다 — 피크 창이 꺼졌거나 예산 때문에 줄어 표본이 없는 주기는 평균으로 메우지 않고 결측으로 셉니다. p95 기준은 기간 안 주기 평균의 95번째 백분위를 목표와 대 봅니다. 위반 시간은 위반 주기 × 수집 간격입니다. 목표는 설정값(관리자)이고 우선순위는 개별 > 용도 > 역할입니다.';
 /** 위반 구간 → 추이 위반 띠(지표별). */
 export function violationBands(resp = {}) {
   const out = {};

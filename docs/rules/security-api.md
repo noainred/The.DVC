@@ -451,7 +451,12 @@
      조회는 tools — 범위 관리자는 보이는 서버의 개별 목표만 · **비관리자는 서버 키(주소일 수 있다)를 받지 않고 개수만**(`serversHidden`).
   ⑥ **수집 건강**(admin/operator + tools — 설계 ‘관리자와 운영자’): 범위 계정은 자기 법인 행만 · 다른 법인 서버가 섞인 노드 값(주기 · 동시성 · SSH · DB · 추이 · 며칠째)은 `nodeHidden` · 보이는 법인이 없는 노드는 개수만 · 마지막 당김 사유 원문 없음.
   ⑦ **진단 플레이북은 실행 경로가 없다**: 카탈로그 · 서버별 응답 모두 `executes:false` · 라우트는 GET 뿐 · `bmusage/playbooks.js` 는 SSH · exec 모듈을 import 하지 않는다(테스트가 소스로 확인) ·
-     명령 줄은 읽기 전용 화이트리스트(`isReadOnlyCommand`)를 통과한 것만 싣고 자리표시 값도 화이트리스트(셸 의미 문자 금지) — 복사한 사람이 서버에서 그대로 붙여 넣어도 쓰기 · 재시작 명령이 되지 않게.
+     명령 줄은 **검토된 읽기 전용 목록에 글자 그대로 있는 줄만**(`READONLY_COMMANDS` 정확 일치 — 반증 F6: 예전 도구 화이트리스트는 `dnf history undo` · `ss -K` · `sort -o /etc/passwd` ·
+     `awk 'BEGIN{system(…)}'` · `grep "a\" # " ; reboot`(이스케이프 따옴표가 주석 자르기를 속임 — bash 실측 실행) 등 17건을 통과시켰다) 싣고, 자리표시 값은 이름 화이트리스트(셸 의미 문자 금지) —
+     복사한 사람이 서버에서 그대로 붙여 넣어도 쓰기 · 재시작 명령이 되지 않게. 목록에 더할 줄은 `lintCommand`(도구별 허용 인자)를 통과해야 한다(검토 보조 — 보증은 목록).
+  ⑨ **가림 판정기는 하나**(반증 F11): 엣지 위임 서버 이름이 실리는 응답(비교 · 운영 주석)은 `bmUsage.perfAddressMatcher`(이 노드 대상 · 등록부 + 엣지 보관분 idracHost · osHostName)로 가린다 —
+     주석 목록이 엣지 호스트명(FQDN)을 비관리자에게 그대로 보내던 것을 막는다(응답은 `addressHidden:true` 라고 말하면서 원문을 실었다).
+  ⑩ **범위 계정의 수집 건강 노드 상태**(반증 F8): 노드 값을 숨긴 노드는 상태도 숨기고(`hidden`) 법인 행은 그 법인 값으로 판정 — 다른 법인의 인증 정지가 ‘기준 밖’ 으로 새지 않는다.
   ⑧ **공유 링크는 권한을 주지 않는다**: 해시(`#/tools/bm-usage/share?…`)에는 보기 상태만 — 여는 사람의 권한 · 범위로 다시 조회한다(없으면 ‘찾지 못함’ — 존재 여부를 말하지 않는다). 캡처 PNG 는 브라우저가 화면을 그린 것(서버 경로 없음).
 - ⚠⚠ **v2.929 — 베어메탈 집중 모니터링(`POST /api/tools/bm-usage/perf/:key/focus` · `/focus/:id/stop`)은 분마다 SSH · Redfish 를 여는 쓰기 경로다 — v2.923 스냅샷 규약을 그대로 쓰고, 넘는 부분만 더했다**
   (`routes/api/bmPerfOps.js bmFocusStart · bmFocusStop` · `bmusage/focus/run.js` · `routes/collector.js /bm-usage/focus[/stop]` · `central/bmPerfOpsPull.js runEdgeFocus · stopEdgeFocus`.

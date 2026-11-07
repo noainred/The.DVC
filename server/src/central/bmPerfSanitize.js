@@ -250,6 +250,8 @@ export function sanitizePerfFields(snap, rcv = Date.now()) {
       ...(Array.isArray(snap?.perfAlertSent) ? { perfAlertSent: sanitizeAlertSent(snap.perfAlertSent, rcv) } : {}),
       // 6단계 수집 건강(엣지가 매 주기 쓴 값 — 화이트리스트 · 상한 · 시각 clamp). 구버전 엣지는 이 필드가 없다(중앙 화면이 ‘엣지 v… 이상’).
       ...(snap?.collectHealth && typeof snap.collectHealth === 'object' ? { collectHealth: sanitizeCollectHealth(snap.collectHealth, rcv) } : {}),
+      // 6단계 표지(첫 주기 전에도 실린다 — 필드 없음 + 표지 = 아직 주기 없음 · 표지도 없음 = 구버전 · 반증 F3). 작은 양의 정수만.
+      ...(Number.isInteger(snap?.collectHealthVer) && snap.collectHealthVer > 0 && snap.collectHealthVer < 100 ? { collectHealthVer: snap.collectHealthVer } : {}),
     },
     dropped: arr.length - perf.length,
   };

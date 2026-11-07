@@ -51,7 +51,13 @@ test('① 주기 요약 — 사유 분류 · 정상인 빈 칸 · 0대 · SSH �
   assert.equal(z.node.servers, 0); assert.equal(z.node.successPct, null, '대상 0대 — 0% 도 100% 도 아니다'); assert.equal(z.node.ssh.p50Ms, null);
   // 기준 대조 — 값 없으면 unread · DB 상한 0 이면 판정 보류
   const c1 = CH.collectCells(s1.node, { bytes: 19 * 1024 ** 3 }, { dbCapGb: 20 });
-  assert.deepEqual(c1.cells, { cycle: 'true', success: 'true', db: 'true', auth: 'true' });
+  assert.deepEqual(c1.cells, { cycle: 'true', success: 'true', db: 'true', auth: 'true', error: 'false' });
+  // 반증 F1 — 분류 실패 · 주기 예외는 대상 · 결과를 모른다(대상 0 · 성공률 null · 실패 칸) · 대상 없음은 사실 0(실패 아님) · 열거 밖 오류는 계산 실패로
+  const f = CH.summarizeCycle({ results: [], startedAt: NOW, endedAt: NOW + 5, intervalMs: 300_000, concurrency: 32, now: NOW, error: 'classify-failed' });
+  assert.equal(f.node.servers, null, '분류 실패 — 대상 수를 모른다(0 이 아니다)'); assert.equal(f.node.ok, null); assert.equal(f.node.successPct, null);
+  assert.equal(CH.collectCells(f.node, null).cells.error, 'true');
+  assert.equal(CH.collectCells(CH.summarizeCycle({ results: [], startedAt: NOW, endedAt: NOW, intervalMs: 1, concurrency: 1, now: NOW, error: 'no-targets' }).node, null).cells.error, 'false');
+  assert.equal(CH.summarizeCycle({ results: [], startedAt: NOW, endedAt: NOW, intervalMs: 1, concurrency: 1, now: NOW, error: '<script>' }).node.error, 'health-failed');
   const c2 = CH.collectCells(z.node, { bytes: 1 }, { dbCapGb: 0 });
   assert.equal(c2.cells.success, 'unread'); assert.equal(c2.cells.db, 'unread'); assert.equal(c2.dbPct, null);
   const tr = CH.hourlyTrend([{ ts: NOW, ms: 100, budget_ms: 300_000, servers: 10, ok: 9, conc_max: 3 }, { ts: NOW + 60_000, ms: 900, budget_ms: 300_000, servers: 10, ok: 5, conc_max: 7 }]);
@@ -112,6 +118,24 @@ test('② 실제 폴러 — 사유 · 슬롯 최대 · SSH 소요 · 주기 기�
   const h0 = P.collectHealthNow();
   assert.equal(h0.node.servers, 0); assert.equal(h0.node.successPct, null); assert.equal(h0.node.error, 'no-targets');
   assert.equal(h0.node.cells.success, 'unread', '0대 — 성공률 칸은 판정 보류');
+  // 반증 F1 — 분류 실패 주기: 상태는 ‘주기 실패’ · 법인 행은 대상 모름(0 아님) · ‘수집 건강’ 규칙(조건 ‘주기 실패’)이 이 경로에서도 돈다
+  R.savePerfRules({ rules: { collect: { on: true, cond: 'error', sustain: 1, channels: ['email'] } }, collect: { successPct: 90 } }, { by: 'adm' });
+  A._resetPerfAlertsForTest();
+  fs.writeFileSync(path.join(DIR, 'bm-storage.json'), JSON.stringify({ servers: [{ id: 'o-a', name: 'bm-a', host: '127.0.0.1', port: 9, username: 'mon', password: 'pw', mounts: [] }] }));
+  P._setFleetForTest(async () => { throw new Error('인벤토리 응답 없음'); });
+  const rf = await P.pollBmUsageOnce({ trigger: 'auto' });
+  assert.equal(rf.ok, false);
+  const hf = P.collectHealthNow();
+  assert.equal(hf.node.error, 'classify-failed'); assert.equal(hf.node.servers, null); assert.equal(hf.node.cells.error, 'true');
+  await A._drainPerfAlertsForTest();
+  const sentF = A.perfAlertStatus().sent.filter((x) => x.rule === 'collect');
+  assert.equal(sentF.length, 1, '분류 실패 경로에서도 수집 건강 규칙이 돈다'); assert.match(sentF[0].title, /주기 실패/);
+  const { bmCollectHealthView } = await import('../src/routes/api/bmCollectHealth.js');
+  const v = await bmCollectHealthView({ user: { username: 'adm', role: 'admin', scope: null } }, {}, { listEdgeBmUsage: async () => [] });
+  assert.equal(v.nodes[0].state, 'cycle-failed', '‘정상’ 이 아니다');
+  assert.ok(v.rows.length >= 1 && v.rows.every((r) => r.servers === null && r.nodeState === 'cycle-failed'), JSON.stringify(v.rows).slice(0, 300));
+  assert.equal(v.kpi.corpsUnknown, v.rows.length, '대상 모름 — 모름 개수로 센다');
+  R.savePerfRules({ rules: { collect: { on: true, cond: 'success', sustain: 1, channels: ['email'] } }, collect: { successPct: 90 } }, { by: 'adm' });
   // 정리 틱이 주기 기록도 청크로 지운다(30일 밖)
   await O.cycleInsert({ agent: config.agent?.name || '', ts: Date.now() - 40 * 86_400_000, ms: 1, budgetMs: 1, servers: 1, ok: 1 });
   const p = await P.pruneTick({ every: 1 });
@@ -142,6 +166,18 @@ test('③ 봉투 · 중앙 정제 · ④ 실제 라우터(역할 · 범위 · �
   // vcZ — 그 엣지의 설정 법인도 대상 법인도 아니다(봉투 문자열만으로 법인 행을 만들지 않는다 → 버리고 개수를 밝힌다)
   putEdgeBmUsage('edge-new', { ok: true, snap: { ...env, enabled: true, settings: { ...env.settings, corps: ['vcB'] }, targets: [], collectHealth: { ...evil, byCorp: { vcB: evil.byCorp.vcB, vcZ: { servers: 7, ok: 0, fail: 7, reasons: {} } } } } });
   putEdgeBmUsage('edge-old', { ok: true, snap: { node: { agent: 'edge-old', version: '2.930.0' }, enabled: true, settings: { corps: ['vcC'] }, targets: [] } });
+  // 반증 F3 — 재시작 직후(첫 주기 전) 6단계 엣지: 실제 봉투 → 실제 정제(표지만 있고 값 없음) → ‘아직 주기 없음’(버전 낮음 아님)
+  const P0 = await import('../src/bmusage/poller.js');
+  const fresh = sanitizeBmUsageSnap({ ...env, collectHealth: undefined, settings: { ...env.settings, corps: ['vcD'] } }, { receivedAt: Date.now() });
+  assert.equal(fresh.collectHealthVer, 1, '표지는 주기 전에도 실린다'); assert.equal(fresh.collectHealth, undefined);
+  putEdgeBmUsage('edge-fresh', { ok: true, snap: fresh });
+  // 표지만으로도 가른다(버전을 모르는 봉투)
+  putEdgeBmUsage('edge-fresh3', { ok: true, snap: { ...fresh, node: { ...fresh.node, version: '' }, settings: { ...fresh.settings, corps: ['vcG'] } } });
+  // 표지 없이 버전만 최소 이상(같은 버전) — 단정하지 않는다
+  putEdgeBmUsage('edge-fresh2', { ok: true, snap: { node: { agent: 'edge-fresh2', version: (await import('../src/config.js')).currentVersion() }, enabled: true, settings: { corps: ['vcE'] }, targets: [] } });
+  // 반증 F4 — 성공 수를 못 읽은 법인 행은 0% 가 아니라 모름
+  putEdgeBmUsage('edge-partial', { ok: true, snap: { ...env, enabled: true, settings: { ...env.settings, corps: ['vcF'] }, targets: [], collectHealth: { ...env.collectHealth, byCorp: { vcF: { servers: 5, ok: null, fail: null, reasons: {} } } } } });
+  void P0;
   const express = (await import('express')).default;
   const { api } = await import('../src/routes/api.js');
   const USERS = { viewer: { username: 'v', role: 'viewer', scope: null }, opA: { username: 'opa', role: 'operator', scope: { vcenters: ['vcA'] } }, adm: { username: 'adm', role: 'admin', scope: null } };
@@ -156,12 +192,17 @@ test('③ 봉투 · 중앙 정제 · ④ 실제 라우터(역할 · 범위 · �
   const a = await get('adm');
   assert.equal(a.status, 200);
   const byAgent = Object.fromEntries(a.body.nodes.map((x) => [x.agent, x]));
-  assert.equal(byAgent['edge-old'].state, 'old-version', '봉투에 필드가 없으면 엣지 버전 낮음');
+  assert.equal(byAgent['edge-old'].state, 'old-version', '봉투에 필드 · 표지가 없고 버전이 낮으면 엣지 버전 낮음');
+  assert.equal(byAgent['edge-fresh'].state, 'no-cycle', '첫 주기 전 6단계 엣지 — 버전 낮음이 아니다');
+  assert.equal(byAgent['edge-fresh2'].state, 'no-cycle', '표지가 없어도 버전이 최소 이상이면 단정하지 않는다');
+  assert.equal(byAgent['edge-fresh3'].state, 'no-cycle', '버전을 몰라도 표지가 있으면 6단계 엣지');
+  const pr = a.body.rows.find((r) => r.vcenterId === 'vcF');
+  assert.equal(pr.servers, 5); assert.equal(pr.successPct, null, '성공 수를 모르면 성공률도 모른다(0% 아님)');
   assert.ok(a.body.minEdgeVersion, '문구의 최소 버전(릴리스 노트 6단계 · 없으면 package.json)');
   assert.ok(byAgent['edge-new'].node, '전체 범위 — 노드 값이 보인다');
   assert.ok(a.body.rows.some((r) => r.vcenterId === 'vcB' && r.servers === 5));
   assert.ok(!a.body.rows.some((r) => r.vcenterId === 'vcZ'), '엣지 대상 · 설정 법인이 아닌 byCorp 는 행이 되지 않는다'); assert.equal(a.body.corpsDropped, 1);
-  assert.equal(a.body.kpi.corpsUnknown, 1, '구버전 엣지의 법인(vcC)은 모름 — 0 으로 더하지 않고 개수를 센다');
+  assert.equal(a.body.kpi.corpsUnknown, 5, '구버전(vcC) · 첫 주기 전(vcD · vcE · vcG) · 성공 수 모름(vcF) — 0 으로 더하지 않고 개수를 센다');
   assert.ok(a.body.kpi.servers >= 5 && a.body.rows.find((r) => r.vcenterId === 'vcC').servers === null);
   const la = byAgent['edge-new'].lastAttempt;
   assert.ok(la && la.reason === undefined, '마지막 당김은 사유 원문 없이');
@@ -170,7 +211,7 @@ test('③ 봉투 · 중앙 정제 · ④ 실제 라우터(역할 · 범위 · �
   assert.equal(o.status, 200);
   assert.ok(o.body.rows.every((r) => r.vcenterId === 'vcA'), JSON.stringify(o.body.rows.map((r) => r.vcenterId)));
   assert.ok(o.body.nodes.every((x) => x.nodeHidden === true && x.node === undefined), '다른 법인이 섞인 노드 값은 숨김');
-  assert.equal(o.body.nodesOmitted, 2, '보이는 법인이 없는 엣지는 행을 주지 않는다(개수만)');
+  assert.equal(o.body.nodesOmitted, 6, '보이는 법인이 없는 엣지는 행을 주지 않는다(개수만)');
   assert.ok(o.body.reasons.every((x) => x.since == null), '며칠째(노드 값)는 숨김');
   assert.equal(o.body.kpi.dbBytes, null);
 });
@@ -178,6 +219,7 @@ test('③ 봉투 · 중앙 정제 · ④ 실제 라우터(역할 · 범위 · �
 test('⑤ 저장 실측 — 폴더 · 파일을 못 읽으면 크기는 모름(null) · 부분 합을 내지 않는다', async () => {
   const miss = await CH.dbFilesNow(path.join(DIR, 'no-such-dir'));
   assert.equal(miss.bytes, null, '폴더를 못 읽으면 0 이 아니다'); assert.equal(miss.files, null); assert.equal(miss.error, 'readdir');
+  assert.equal(miss.families, null, '가족별 값도 모름(0개 0KB 가 아니다 — 반증 F5)');
   assert.equal(CH.collectCells({ cyclePct: 10, successPct: 100 }, miss).cells.db, 'unread', '모르는 크기는 상한 대조 보류');
   const d = fs.mkdtempSync(path.join(DIR, 'dbf-'));
   fs.writeFileSync(path.join(d, 'bm-usage.db'), Buffer.alloc(1000));
@@ -186,7 +228,10 @@ test('⑤ 저장 실측 — 폴더 · 파일을 못 읽으면 크기는 모름(n
   assert.equal(ok.bytes, 1500); assert.equal(ok.files, 1); assert.equal(ok.families.raw.files, 1);
   fs.symlinkSync(path.join(d, 'gone.db'), path.join(d, 'bm-usage-2026-11.db'));   // 끊긴 링크 — stat 실패
   const part = await CH.dbFilesNow(d);
-  assert.equal(part.bytes, null, '못 읽은 파일이 있으면 합을 내지 않는다(부분 합 금지)'); assert.equal(part.unread, 1);
+  assert.equal(part.bytes, null, '못 읽은 파일이 있으면 합을 내지 않는다(부분 합 금지)'); assert.equal(part.unread, 1); assert.equal(part.partial, true, '가족 값은 부분 표지');
+  const { sanitizeCollectHealth } = await import('../src/central/bmCollectHealthSanitize.js');
+  const sh = sanitizeCollectHealth({ node: { at: Date.now(), db: miss, error: 'rm -rf /' }, byCorp: {} });
+  assert.equal(sh.node.db.families, null); assert.equal(sh.node.error, 'health-failed', '오류는 열거 code 만');
 });
 
 test('⑥ 엣지 ‘수집 건강’ 발송 기록 — 노드 한 칸은 중앙이 이름 · 법인을 다시 세운다(엣지 문자열 불신)', async () => {
@@ -200,4 +245,27 @@ test('⑥ 엣지 ‘수집 건강’ 발송 기록 — 노드 한 칸은 중앙�
   assert.equal(list.length, 1); assert.equal(dropped, 1, '노드 칸이 아닌 키는 대상 목록 대조(없으면 버림)');
   assert.equal(list[0].key, '__node__'); assert.equal(list[0].vcenterId, '', '법인은 공용(엣지 주장 불신)');
   assert.equal(list[0].name, '수집 노드 edge-a'); assert.ok(!/pwn|evil/.test(list[0].title), list[0].title); assert.match(list[0].title, /수집 건강/);
+});
+
+test('⑦ 범위 계정 — 노드 값을 숨기면 노드 상태도 숨기고 법인 행은 그 법인 값으로(다른 법인의 인증 정지가 ‘기준 밖’ 으로 새지 않는다 · 반증 F8)', async () => {
+  const tg = (key, vc) => ({ key, vcenterId: vc, paths: ['os'] });
+  const sum = CH.summarizeCycle({ results: [
+    { ok: true, target: tg('a', 'vcA'), os: { ok: true }, osMs: 100 },
+    { ok: false, target: tg('b', 'vcB'), os: { ok: false, error: '인증 실패로 주기 수집이 정지됐습니다', authStopped: { attempts: 3 } } },
+  ], startedAt: NOW - 1000, endedAt: NOW, intervalMs: 300_000, concurrency: 32, slotPeak: 1, now: NOW });
+  const cc = CH.collectCells(sum.node, { bytes: 1 }, { dbCapGb: 20 });
+  const health = { at: NOW, node: { ...sum.node, cells: cc.cells, th: cc.th }, byCorp: sum.byCorp };
+  assert.equal(cc.cells.auth, 'true');
+  const { bmCollectHealthView } = await import('../src/routes/api/bmCollectHealth.js');
+  const deps = { localHealth: async () => health, localEnabled: async () => true, localCorps: async () => ['vcA', 'vcB'], localTrend: async () => [], listEdgeBmUsage: async () => [] };
+  const full = await bmCollectHealthView({ user: { username: 'adm', role: 'admin', scope: null } }, {}, deps);
+  assert.equal(full.nodes[0].state, 'attention', '전체 범위 — 노드 상태 그대로');
+  const sc = await bmCollectHealthView({ user: { username: 'opa', role: 'operator', scope: { vcenters: ['vcA'] } } }, { vcenters: [{ id: 'vcA' }, { id: 'vcB' }] }, deps);
+  assert.equal(sc.nodes[0].nodeHidden, true); assert.equal(sc.nodes[0].state, 'hidden', '노드 값으로 정한 상태는 숨긴다');
+  assert.equal(sc.rows.length, 1); assert.equal(sc.rows[0].vcenterId, 'vcA');
+  assert.equal(sc.rows[0].nodeState, 'ok', 'vcA 는 정상 — vcB 의 인증 정지가 새지 않는다'); assert.deepEqual(sc.rows[0].flags, []);
+  assert.equal(sc.rows[0].successPct, 100);
+  // 그 법인 자신의 실패는 그 법인 행에 보인다(같은 판정 코어)
+  const sc2 = await bmCollectHealthView({ user: { username: 'opb', role: 'operator', scope: { vcenters: ['vcB'] } } }, { vcenters: [{ id: 'vcA' }, { id: 'vcB' }] }, deps);
+  assert.equal(sc2.rows[0].nodeState, 'attention'); assert.ok(sc2.rows[0].flags.includes('auth') && sc2.rows[0].flags.includes('success'), JSON.stringify(sc2.rows[0].flags));
 });

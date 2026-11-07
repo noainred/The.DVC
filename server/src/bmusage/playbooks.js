@@ -4,8 +4,8 @@
  * 판정이 ‘후보’ 로 끝난 뒤 사람이 할 다음 조사를 표준화한다: ① 포탈에서 먼저 확인(자동 채움) → ② 서버 명령(복사용 · **읽기 전용만** · Netflix 60초 / USE 순서) →
  *   ③ 설정 · DB 대조(튜닝 탭 권장값) → ④ 하드웨어 의심 → ⑤ 조치 후보 · 기록.
  * ⚠⚠ **포탈은 실행하지 않는다** — 명령은 화면에 복사용 글자로만 나간다(SSH · API 로 보내는 경로가 없다 — 테스트가 소스 스윕으로 고정).
- * ⚠⚠ 명령은 읽기 전용 화이트리스트(isReadOnlyCommand)를 통과한 것만 내보낸다 — 쓰기 · 재시작 · 리다이렉트 · 셸 치환 금지(카탈로그 테스트가 전 명령을 대고,
- *   런타임도 한 번 더 거른다 — 방어선 두 겹). 자리표시(‘{장치}’ 등)는 포탈 값으로 채우되 채울 값도 이름 화이트리스트(장치 · 인터페이스 · 마운트)만.
+ * ⚠⚠ 명령은 **사람이 검토한 읽기 전용 목록(READONLY_COMMANDS — 글자 그대로 일치)** 에 있는 줄만 내보낸다(카탈로그 테스트가 전 명령을 대고 런타임도 한 번 더 거른다).
+ *   목록에 더하는 줄은 lintCommand(도구 · 허용 인자 · 셸 금지 문자)를 통과해야 한다 — 검토 보조. 자리표시(‘{장치}’ 등)는 포탈 값으로 채우되 채울 값도 이름 화이트리스트만(반증 F6).
  * 판정 id(이 노드가 내는 것 전부 — 테스트가 ‘모든 판정 id 에 플레이북이 있다’ 를 고정): use:<자원> · cross:<교차 결론> · port:<대조 ⑤> · health:<소모품 칸> · profile:<용도 점검 id>.
  * 근거 번호는 튜닝 · 용도 근거(tuning/sources.js)와 방법론 출처(NF · USE · SRE · DELL — 웹 SOURCE_TAGS 와 같은 이름)만(테스트가 대조).
  * 현장이 고친 단계는 위키에 덮어쓰기(포탈 판은 기본값) — wikiTitle 로 위키 검색 링크를 만든다.
@@ -34,27 +34,118 @@ export function allJudgmentIds() {
   ];
 }
 
-/* ── 읽기 전용 명령 화이트리스트 ─────────────────────────────────────────── */
-/** 파이프 조각의 첫 낱말 → 허용 여부(+ 그 도구의 금지 인자). */
-const READ_TOOLS = Object.freeze({
-  cat: null, grep: null, head: null, tail: null, sort: null, uniq: null, wc: null, ls: null, stat: null, uptime: null, uname: null, id: null, date: null,
-  awk: null, free: null, vmstat: null, mpstat: null, pidstat: null, iostat: null, sar: null, lscpu: null, lsblk: null, df: null, numastat: null, findmnt: null,
-  ps: null, ss: null, nstat: null, getenforce: null, sestatus: null,
-  dmesg: /(^|\s)(-c|-C|--clear|--read-clear|--console-(off|on|level)|-D|-E|-n)\b/,
-  sed: /(^|\s)(-i|--in-place)/, sysctl: /(^|\s)(-w|--write|-p|--load|--system)\b|=/, ip: /(^|\s)(set|add|del|delete|change|replace|flush|link\s+set|route\s+(add|del))\b/,
-  // ethtool 은 보기 인자(-S 통계 · -g 링 · -l 채널 · -i 드라이버 · -k 오프로드 · -m 모듈 · -a · -c · -T)만 — 바꾸는 인자 · 자가 시험 · 깜빡임 금지.
-  ethtool: /(^|\s)(-(s|G|L|K|A|C|E|W|X|N|U|P|f|r|p|t|u|n|e)\b|--(change|set|config|reset|flash|identify|test|negotiate|offload|coalesce|ring|pause|features|show-eee))/,
-  journalctl: /--(vacuum|rotate|flush|sync|relinquish|setup-keys)/,
-  nvme: /^(?!\s*(smart-log|list|id-ctrl|id-ns|error-log)\b)/, smartctl: /(^|\s)(-s|--smart|-t|--test|-X|--abort|-o|--offlineauto|-S|--saveauto)\b/,
-  systemctl: /^(?!\s*(status|list-units|list-unit-files|is-active|is-enabled|is-failed|show|--failed|list-timers)\b)/,
-  'tuned-adm': /^(?!\s*(active|list|recommend|verify)\b)/, chronyc: /^(?!\s*(-c\s+)?(tracking|sources|sourcestats|activity)\b)/,
-  'firewall-cmd': /^(?!\s*(--state|--list-all|--get-active-zones|--list-ports)\b)/,
-  'needs-restarting': /^(?!\s*-r\b)/, dnf: /^(?!\s*(history(\s+(list|info))?|list\s+--installed|repolist)\b)/, rpm: /(^|\s)-(e|U|i|F)\b|--(erase|upgrade|install|freshen|import)/,
-  airflow: /^(?!\s*(jobs\s+check|version|info|config\s+get-value)\b)/, gpstate: /(^|\s)--?(?!s\b|Q\b|e\b|m\b|f\b|c\b|i\b)\w/,
-  psql: /^(?!.*-c\s+"(SELECT|select)\s)/, ipmitool: /^(?!\s*(sensor\s+list|sdr\s+list|sel\s+list|fru\s+print)\b)/,
+/* ── 읽기 전용 명령 — 허용 목록(정확 일치) ─────────────────────────────────── */
+/**
+ * ⚠⚠ 6단계 반증 F6 정정: 예전 판은 ‘도구 화이트리스트 + 도구별 금지 인자 + 셸 금지 문자’ 로 **어떤 줄이든** 읽기 전용인지 가렸지만 우회가 16건 나왔다
+ *   (`dnf history undo` · `ss -K` · `sort -o /etc/passwd` · `awk 'BEGIN{system(…)}'` · `sed -n '1e …'` · `grep "a\" # " ; reboot`(주석 자르기가 이스케이프 따옴표를 닫힌 것으로 봄) 등).
+ *   이제 **사람이 검토한 이 목록에 글자 그대로 있는 줄만** 화면에 나간다(isReadOnlyCommand = 정확 일치). 카탈로그에 명령을 더하려면 이 목록에도 더해야 하고(테스트가 대조),
+ *   더하는 줄은 lintCommand(도구 허용 목록 · 도구별 **허용 인자** · 셸 금지 문자 · 백슬래시 금지 · 따옴표를 아는 주석 자르기)를 통과해야 한다 — 이것은 검토 보조이지 보증이 아니다.
+ *   자리표시(‘{장치}’ 등)는 목록 줄 그대로 두고, 채울 값만 따로 검사한다(FILL_RE — 셸 의미 문자 없는 이름).
+ */
+export const READONLY_COMMANDS = Object.freeze([
+  "dmesg -T | tail -30",
+  "iostat -xz 1 5 # await · aqu-sz · %util — 포탈 값과 대조",
+  "pidstat -d 1 5 # 프로세스별 kB_rd/s kB_wr/s",
+  "cat /proc/pressure/io # some/full avg10 avg60",
+  "grep -E 'Dirty|Writeback' /proc/meminfo",
+  "sysctl vm.dirty_bytes vm.dirty_background_bytes vm.dirty_ratio vm.dirty_background_ratio",
+  "cat /sys/block/{장치}/queue/scheduler /sys/block/{장치}/queue/nr_requests",
+  "nvme smart-log /dev/{장치} # 설치돼 있을 때 · iDRAC 디스크 상태와 대조",
+  "dmesg -T | grep -iE 'I/O error|medium|reset|timeout' | tail -30",
+  "iostat -xz 1 5",
+  "lsblk -o NAME,MODEL,SERIAL,SIZE,ROTA",
+  "smartctl -H -A /dev/{장치} # 설치돼 있을 때",
+  "nvme smart-log /dev/{장치}",
+  "uptime",
+  "vmstat 1 5 # r(실행 대기) · us/sy/wa",
+  "mpstat -P ALL 1 3 # 한 코어만 바쁜지",
+  "pidstat 1 5",
+  "cat /proc/pressure/cpu",
+  "tuned-adm active",
+  "cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor",
+  "systemctl is-active irqbalance",
+  "grep MHz /proc/cpuinfo | sort | uniq -c | sort -rn | head -5",
+  "cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq",
+  "dmesg -T | grep -iE 'thermal|throttl|power limit' | tail -20",
+  "ipmitool sensor list # 설치돼 있을 때(읽기)",
+  "free -m",
+  "vmstat 1 5 # si/so · free",
+  "cat /proc/pressure/memory",
+  "ps -eo pid,comm,rss --sort=-rss | head -10",
+  "dmesg -T | grep -i 'out of memory' | tail -10",
+  "sysctl vm.swappiness vm.min_free_kbytes",
+  "cat /sys/kernel/mm/transparent_hugepage/enabled",
+  "numastat -m | head -30",
+  "dmesg -T | grep -iE 'mce|edac|hardware error|corrected' | tail -30",
+  "grep -r . /sys/devices/system/edac/mc/mc0/ce_count /sys/devices/system/edac/mc/mc0/ue_count",
+  "ipmitool sel list # 설치돼 있을 때(읽기)",
+  "ip -s link show {인터페이스}",
+  "ethtool -S {인터페이스} | grep -iE 'drop|miss|err|fifo|crc' | head -30",
+  "cat /proc/net/softnet_stat",
+  "nstat -az | grep -iE \"retrans|drop|overflow\"",
+  "ss -s",
+  "ethtool -g {인터페이스}",
+  "ethtool -l {인터페이스}",
+  "sysctl net.core.netdev_budget net.core.netdev_max_backlog",
+  "ethtool -m {인터페이스} # 지원할 때(광 레벨)",
+  "ethtool {인터페이스} # 속도 · 이중 · 링크",
+  "ethtool -S {인터페이스} | grep -iE 'err|drop|crc' | head -20",
+  "cat /sys/class/net/{인터페이스}/address",
+  "airflow jobs check --job-type SchedulerJob --hostname \"$HOSTNAME\"",
+  "systemctl list-units --type=service | grep -i airflow",
+  "ss -ltn",
+  "airflow config get-value core executor",
+  "airflow config get-value core parallelism",
+  "gpstate -e # 문제 세그먼트",
+  "gpstate -m # 미러",
+  "psql -c \"SELECT * FROM gp_segment_configuration WHERE status = 'd'\"",
+  "df -h {마운트}",
+  "sysctl kernel.shmall kernel.shmmax vm.overcommit_memory",
+  "findmnt -o TARGET,FSTYPE,OPTIONS {마운트}",
+  "systemctl --failed",
+  "chronyc -c tracking",
+  "needs-restarting -r",
+  "dnf history list",
+  "cat /etc/os-release",
+  "getenforce",
+  "firewall-cmd --state",
+  "cat /proc/sys/fs/file-nr",
+  "cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max",
+  "dmesg -T --level=err,warn | tail -30",
+  "sysctl fs.file-max net.netfilter.nf_conntrack_max",
+]);
+const READONLY_SET = new Set(READONLY_COMMANDS);
+/** 명령 한 줄이 검토된 읽기 전용 목록에 있는가(정확 일치 — 카탈로그 테스트 · 런타임 거름이 같은 함수). */
+export function isReadOnlyCommand(line) { return typeof line === 'string' && READONLY_SET.has(line); }
+
+/** lintCommand 의 도구 허용 목록 → 인자 판정. null = 인자 제한 없음(읽기만 하는 도구) · { allow } = 그 정규식에 맞는 인자만 · { deny } = 그 정규식에 걸리면 거부. */
+const LINT_TOOLS = Object.freeze({
+  cat: null, grep: null, head: null, tail: null, wc: null, ls: null, stat: null, uptime: null, uname: null, id: null,
+  free: null, vmstat: null, mpstat: null, pidstat: null, iostat: null, sar: null, lscpu: null, lsblk: null, df: null, numastat: null, findmnt: null,
+  ps: null, nstat: null, getenforce: null, sestatus: null,
+  sort: { allow: /^(\s+-(r|n|rn|nr|u|k\d+(,\d+)?))*\s*$/ },          // -o(파일 쓰기) · 파일 인자 없음
+  uniq: { allow: /^(\s+-(c|d|u))*\s*$/ },                               // 두 번째 인자(출력 파일) 없음
+  ss: { deny: /(^|\s)(-K|--kill|-[a-zA-Z]*K)\b/ },
+  dmesg: { deny: /(^|\s)(-c|-C|--clear|--read-clear|--console-(off|on|level)|-D|-E|-n)\b/ },
+  sysctl: { deny: /(^|\s)(-w|--write|-p|--load|--system)\b|=/ },
+  ip: { allow: /^\s+(-s\s+)?(link|addr|address|route)\s+show(\s+\S+)?\s*$/ },
+  ethtool: { allow: /^\s+(-(S|g|l|i|k|m|a|c|T)\s+)?\S+\s*$/ },          // 보기 인자 하나 + 인터페이스
+  journalctl: { deny: /--(vacuum|rotate|flush|sync|relinquish|setup-keys)/ },
+  nvme: { allow: /^\s+(smart-log|list|id-ctrl|id-ns|error-log)(\s+\S+)?\s*$/ },
+  smartctl: { allow: /^\s+(-(H|A|i|a|x)\s+)+\S+\s*$/ },
+  systemctl: { allow: /^\s+(status|list-units|list-unit-files|is-active|is-enabled|is-failed|show|--failed|list-timers)(\s+[\w@.=-]+)*\s*$/ },
+  'tuned-adm': { allow: /^\s+(active|list|recommend|verify)\s*$/ },
+  chronyc: { allow: /^\s+(-c\s+)?(tracking|sources|sourcestats|activity)\s*$/ },
+  'firewall-cmd': { allow: /^\s+(--state|--list-all|--get-active-zones|--list-ports)\s*$/ },
+  'needs-restarting': { allow: /^\s+-r\s*$/ },
+  dnf: { allow: /^\s+(history(\s+(list|info)(\s+\d+)?)?|list\s+--installed|repolist)\s*$/ },
+  airflow: { allow: /^\s+(jobs\s+check(\s+--[\w-]+(\s+"?[\w$-]+"?)?)*|version|info|config\s+get-value\s+\w+\s+\w+)\s*$/ },
+  gpstate: { allow: /^\s+-(s|Q|e|m|f|c|i)\s*$/ },
+  psql: { allow: /^\s+-c\s+"(SELECT|select)\s[^"]*"\s*$/ },          // -c 한 번 · SELECT 한 문장
+  ipmitool: { allow: /^\s+(sensor\s+list|sdr\s+list|sel\s+list|fru\s+print)\s*$/ },
 });
-/** 셸 전체에 금지 — 리다이렉트 · 순서 · 치환 · 권한 상승 · 백그라운드. 주석(#) 뒤는 글자 설명으로 본다. */
-const SHELL_BAD = /(>|<|;|&&|\|\||\$\(|`|\bsudo\b|\bsu\b|\bdoas\b|&\s*$|\btee\b|\bxargs\b|\beval\b|\bexec\b)/;
+/** 셸 전체에 금지(주석 포함 원문에 적용) — 리다이렉트 · 순서 · 치환 · 권한 상승 · 백그라운드 · 이스케이프. */
+const SHELL_BAD = /(>|<|;|&|\|\||\$\(|\$\{|`|\\|\bsudo\b|\bsu\b|\bdoas\b|\btee\b|\bxargs\b|\beval\b|\bexec\b)/;
 /** 따옴표 밖의 | 로만 나눈다(grep -E 'a|b' 의 | 는 셸 파이프가 아니다). 닫히지 않은 따옴표면 null(거부). */
 export function splitPipes(code) {
   const out = []; let cur = ''; let q = '';
@@ -68,21 +159,35 @@ export function splitPipes(code) {
   out.push(cur);
   return out;
 }
-/** 명령 한 줄이 읽기 전용인가(순수 — 카탈로그 테스트 · 런타임 거름이 같은 함수). 주석(‘ # ’ 뒤)은 설명이라 빼고 본다. */
-export function isReadOnlyCommand(line) {
+/** 따옴표 밖 · 공백 뒤의 ‘#’ 부터를 설명으로 자른다(따옴표 안의 #는 명령 글자 — 백슬래시는 SHELL_BAD 가 먼저 막는다). 닫히지 않은 따옴표면 null. */
+function stripComment(s) {
+  let q = '';
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    if (q) { if (ch === q) q = ''; continue; }
+    if (ch === "'" || ch === '"') { q = ch; continue; }
+    if (ch === '#' && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i).trim();
+  }
+  return q ? null : s.trim();
+}
+/**
+ * 검토 보조(순수) — 목록에 더할 줄이 ‘읽기 도구 + 허용 인자 + 셸 금지 문자 없음’ 인가. 보증은 READONLY_COMMANDS(사람이 검토한 정확 일치)이고 이 함수는 그 검토를 돕는다.
+ */
+export function lintCommand(line) {
   const s = String(line ?? '');
-  if (!s.trim() || s.length > 300) return false;
-  const code = s.replace(/\s#\s.*$/, '').trim();
-  if (!code || SHELL_BAD.test(code)) return false;
+  if (!s.trim() || s.length > 300 || SHELL_BAD.test(s)) return false;
+  const code = stripComment(s);
+  if (!code) return false;
   const segs = splitPipes(code);
   if (!segs) return false;
   for (const seg of segs) {
     const m = /^\s*([A-Za-z][\w.-]*)(.*)$/.exec(seg);
     if (!m) return false;
     const [, cmd, rest] = m;
-    if (!Object.hasOwn(READ_TOOLS, cmd)) return false;
-    const bad = READ_TOOLS[cmd];
-    if (bad && bad.test(rest)) return false;
+    if (!Object.hasOwn(LINT_TOOLS, cmd)) return false;
+    const rule = LINT_TOOLS[cmd];
+    if (rule?.allow && !rule.allow.test(rest)) return false;
+    if (rule?.deny && rule.deny.test(rest)) return false;
   }
   return true;
 }
@@ -181,7 +286,7 @@ export const PLAYBOOKS = Object.freeze([
   ] },
 ]);
 
-/** 화면용 카탈로그 — 명령은 읽기 전용 검사를 다시 통과한 것만(방어선 두 겹). */
+/** 화면용 카탈로그 — 명령은 검토된 목록(정확 일치)에 있는 것만 다시 거른다. */
 export function playbookCatalog() {
   return PLAYBOOKS.map((p) => ({
     id: p.id, title: p.title, appliesTo: p.appliesTo, wikiTitle: `베어메탈 플레이북 — ${p.title}`,

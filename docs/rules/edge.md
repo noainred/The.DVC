@@ -816,6 +816,15 @@
   - **엣지의 ‘수집 건강’ 알림 발송 기록**(규칙 `collect` · key `__node__`)은 대상 목록 대조 대신 **중앙이 아는 엣지 이름으로** 이름 · 제목을 다시 세우고 법인은 공용('') — 엣지가 보낸 이름 · 법인 · 제목 문자열은 쓰지 않는다.
   - **최소 엣지 버전 공용 함수**(`featureMinEdgeVersion(titleRe)`): 5단계(`perfOpsMinEdgeVersion` — 이제 이 함수의 포장)와 6단계(`stage6MinEdgeVersion` — 제목 ‘리눅스 통합 성능 모니터링 6단계’)가
     같은 규칙(노트의 가장 낮은 번호 · 없으면 지금 package.json · 표지별 메모 · 폴백 0.0.0 은 메모하지 않음)을 쓴다 — 숫자를 코드에 박지 않는다. 5단계 대조 테스트 2개(`bmPerfMinEdgeVersion2929` · `bmUsageMinEdgeVersion2933`)가 그대로 통과한다.
+  - ⚠⚠ **엣지 pull 의 본문 판정(bodyOk)은 경로마다 명시한다**(6단계 반증 F2 — **3a · 5단계 정정 포함**): `pullFromEdge` 의 기본 판정은 봉투(`/bm-usage`)의 `{ok, node}` 모양이다.
+    node 가 없는 3a 추이 · 장치 · NIC(`TREND_BODY_OK` — v2.922 게시분부터) · 5단계 변경 · 베이스라인 · 구간 비교(`PERF_OPS_BODY_OK` — v2.929) · 6단계 비교 계열(`compareSeriesBodyOk`)은
+    **성공 응답이 전부 bad-body** 로 버려져 엣지 위임 서버의 추이 탭 · 5단계 변경/띠/비교 · 6단계 비교 계열 · 목표선이 운영에서 동작하지 않았다(‘응답 형식이 다릅니다’).
+    기존 테스트가 놓친 이유: 3a 는 pullBmTrend 를 의존성 주입으로 바꿔 끼워(가짜가 곧바로 `{ok:true, body}`) 실제 함수를 부르지 않았고, 5단계 · 6단계는 구버전(401 · 404) 경로만 불렀으며,
+    collector 경로를 직접 fetch 한 테스트는 중앙 pullFromEdge 를 거치지 않았다. 데모(mock) 엣지는 이 경로에 합성 응답이 없어 화면 판독도 닿지 않았다.
+    → **새 엣지 pull 경로는 `server/test/bmEdgeRoundTrip.test.js` 에 성공 왕복을 더한다**(실제 collector 라우터 + 실제 등록부 + 실제 pull 함수 → ok · 정제된 값 대조). 봉투 · 스냅샷 · 집중도 같은 파일이 왕복한다.
+  - **수집 건강 ‘엣지 버전 낮음’ 판정(반증 F3)**: 6단계 엣지는 첫 주기 전에도 봉투에 표지 `collectHealthVer`(정수 · 중앙 정제 1~99)를 싣는다 — 값 없음 + 표지 = ‘아직 주기 없음’ ·
+    표지도 없으면 엣지가 알린 버전을 최소 버전(릴리스 노트)과 대 보고(같거나 높으면 단정하지 않는다) 그래도 낮거나 모를 때만 ‘엣지 버전 낮음’. 재시작 직후 모든 엣지가 ‘업그레이드 필요’ 로 보이던 것을 막는다.
+    주기 오류는 열거 code 만 싣는다(`classify-failed` · `cycle-error` · `health-failed` · `no-targets` — 엣지 원문은 그 노드에만).
   - 목표선의 엣지 서버 계열은 **3a 추이 대행을 그대로** 쓴다(`pullBmTrend` — 지표마다 1회 · 동시 2 · 최소 버전은 `TREND_MIN_EDGE_VERSION` 그대로: 새 필드가 없다). 운영 주석은 중앙 한 곳에 저장한다(엣지로 보내지 않는다).
 - ⚠⚠ **v2.929 — 베어메탈 성능 5단계의 엣지 대행: 판정 · 발송 · 보관은 수집 노드(엣지), 중앙은 요약을 봉투로 받고 상세는 볼 때 당긴다**
   (`routes/collector.js` `POST /bm-usage/focus` · `POST /bm-usage/focus/stop` · `GET /bm-usage/focus` · `GET /bm-usage/changes|baseline|compare` — tokenFirst · 본문 4kb · 자기 대상 목록 밖 키는 not-found ·

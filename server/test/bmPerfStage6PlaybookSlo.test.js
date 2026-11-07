@@ -38,7 +38,7 @@ test('① 카탈로그 — 모든 판정 id · 읽기 전용 명령 · 근거 �
     assert.equal(p.steps.at(-1).kind, 'action', `${p.id} 끝은 조치 후보 · 기록`);
     for (const s of p.steps) {
       assert.ok(P.STEP_KINDS.includes(s.kind));
-      for (const c of s.commands || []) assert.ok(P.isReadOnlyCommand(c), `${p.id}: 읽기 전용이 아님 — ${c}`);
+      for (const c of s.commands || []) assert.ok(P.isReadOnlyCommand(c), `${p.id}: 검토된 읽기 전용 목록에 없음 — ${c}`);
       for (const x of s.sources || []) assert.ok(known.has(x), `${p.id}: 모르는 근거 번호 ${x}`);
     }
   }
@@ -47,8 +47,20 @@ test('① 카탈로그 — 모든 판정 id · 읽기 전용 명령 · 근거 �
     'ethtool -G eth0 rx 4096', 'sudo iostat', 'cat $(ls)', 'sed -i s/a/b/ /etc/x', 'ip link set eth0 down', 'nvme format /dev/nvme0n1', 'cat a; reboot', 'smartctl -t long /dev/sda', 'journalctl --vacuum-time=1d',
     'tuned-adm profile latency-performance', 'chronyc makestep', 'dnf update -y', 'gpstate -x', 'psql -c "DELETE FROM t"', "grep 'x", 'kill -9 1', 'gprecoverseg -a', 'iostat 1 & ']) {
     assert.equal(P.isReadOnlyCommand(bad), false, `거부해야 함: ${bad}`);
+    assert.equal(P.lintCommand(bad), false, `검토 보조도 거부해야 함: ${bad}`);
   }
-  for (const ok of ["grep -iE 'drop|miss' x", 'ethtool -S eth0', 'iostat -xz 1 5 # 주석의 > 기호는 설명', 'sysctl vm.dirty_ratio']) assert.equal(P.isReadOnlyCommand(ok), true, ok);
+  // 반증 F6 — 예전 화이트리스트를 통과하던 쓰기 · 실행 16건 + 이스케이프 따옴표 주석 우회(bash 실측: ‘; echo INJECTED’ 가 실행됐다)
+  const F6 = ['dnf history undo 5', 'dnf history rollback 3', 'firewall-cmd --list-all --panic-on', 'firewall-cmd --state --add-port=23/tcp', 'date -s "2020-01-01"', 'ss -K dst 10.0.0.1',
+    `awk 'BEGIN{system("reboot")}'`, "sed -n '1e reboot' f", "sed -n 'w /etc/passwd' f", 'sort -o /etc/passwd f', 'uniq f /etc/passwd', 'psql -c "SELECT 1" -c "DROP TABLE t"',
+    'ip l s eth0 down', 'ip a a 10.0.0.9/24 dev eth0', 'rpm --rebuilddb', 'grep "a\\" # " ; reboot', 'grep "a\\" # " ; echo INJECTED'];
+  assert.equal(F6.length, 17);
+  for (const bad of F6) { assert.equal(P.isReadOnlyCommand(bad), false, `F6 거부: ${bad}`); assert.equal(P.lintCommand(bad), false, `F6 검토 보조 거부: ${bad}`); }
+  // 정확 일치 — 목록 줄 끝에 무엇을 붙여도(주석처럼 보여도) 목록 밖이다
+  assert.equal(P.isReadOnlyCommand(`${P.READONLY_COMMANDS[0]} # ; reboot`), false); assert.equal(P.isReadOnlyCommand(` ${P.READONLY_COMMANDS[0]}`), false);
+  // 목록의 모든 줄은 검토 보조를 통과하고 · 카탈로그 밖의 죽은 줄이 없다
+  const used = new Set(P.PLAYBOOKS.flatMap((p) => p.steps.flatMap((x) => x.commands || [])));
+  for (const c of P.READONLY_COMMANDS) { assert.ok(P.lintCommand(c), `검토 보조 통과 — ${c}`); assert.ok(used.has(c), `카탈로그에서 쓰지 않는 목록 줄 — ${c}`); }
+  for (const ok of ["grep -iE 'drop|miss' x", 'ethtool -S eth0', 'iostat -xz 1 5 # 주석의 설명', 'sysctl vm.dirty_ratio', "grep -E 'a#b' x"]) assert.equal(P.lintCommand(ok), true, ok);
   // 교차 결론 code — useJudge 소스의 candidate · clear code 와 같은 목록(두 벌이 갈라지면 플레이북이 빠진다)
   const { stripComments } = await import('./_stripComments.js');
   const uj = stripComments(SRC('bmusage/useJudge.js'));
@@ -101,6 +113,18 @@ test('⑤ 목표 정규화 · 우선순위 ⑥ 평가', () => {
   assert.equal(p95.p95, 95); assert.equal(p95.status, 'missed');
   const none = L.evaluateGoal({ metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 80, objectivePct: 99 }, [], { from, to, stepMs: step, now: NOW });
   assert.equal(none.status, 'no-data'); assert.equal(none.achievementPct, null, '자료 없음 — 0% 가 아니다');
+  // 반증 F7 — 피크 기준은 피크 표본만(없는 주기를 평균으로 메워 ‘달성’ 으로 세지 않는다) · 피크 열이 없는 지표에 피크 기준은 저장 400
+  const noPk = pts.map((p) => ({ ...p, peak: null }));
+  const np = L.evaluateGoal({ metric: 'disk_await_ms', basis: 'peak', op: 'lt', value: 10_000, objectivePct: 90 }, noPk, { from, to, stepMs: step, now: NOW });
+  assert.equal(np.status, 'no-data', '피크 표본이 없으면 자료 없음(평균으로 대체하지 않는다)'); assert.equal(np.achievementPct, null); assert.equal(np.peakMissing, 11);
+  assert.throws(() => L.normalizeSlo({ default: [{ metric: 'mem_pct', basis: 'peak', op: 'lt', value: 90 }] }), /피크 표본/);
+  assert.deepEqual([...L.SLO_PEAK_METRICS].sort(), ['cpu_pct', 'disk_await_ms', 'disk_busy_pct', 'net_pct']);
+  // 반증 F12 — 1분 간격 1시간 전부 위반: 위반 시간 1시간 · 기대 60주기(예전 5시간 · 기대 12)
+  const m1 = Array.from({ length: 60 }, (_, i) => ({ t: NOW - 3_600_000 + i * 60_000, avg: 3, max: 3, peak: null }));
+  const e1 = L.evaluateGoal({ metric: 'runq_per_core', basis: 'avg', op: 'lt', value: 1, objectivePct: 99 }, m1, { from: NOW - 3_600_000, to: NOW, stepMs: step, cycleMs: 60_000, now: NOW });
+  assert.equal(e1.violationMs, 3_600_000); assert.equal(e1.expected, 60); assert.equal(e1.missing, 0); assert.equal(e1.longest.cycles, 60);
+  const e2 = L.evaluateGoal({ metric: 'runq_per_core', basis: 'avg', op: 'lt', value: 1, objectivePct: 99 }, m1, { from: NOW - 3_600_000, to: NOW, stepMs: step, now: NOW });
+  assert.equal(e2.violationMs, 3_600_000, '주기 길이를 모르면 점 간격 중앙값(엣지 위임 서버)'); assert.equal(e2.cycleMs, 60_000);
   assert.equal(L.sloRes(0, 10 * 86_400_000), '5m'); assert.equal(L.sloRes(0, 31 * 86_400_000), '1h');
 });
 
@@ -143,6 +167,12 @@ test('④ ⑦ 실제 라우터 — 플레이북 · 목표선(실제 파일) · �
   const by = Object.fromEntries(s1.body.items.map((x) => [x.goal.metric, x]));
   assert.equal(by.runq_per_core.violations, 3); assert.equal(by.runq_per_core.valid, 12); assert.equal(by.runq_per_core.achievementPct, 75);
   assert.equal(by.disk_await_ms.violations, 1, '피크 기준'); assert.equal(by.swap_out_ps.status, 'met');
+  // 반증 F7 — 같은 부하 · 피크 표본 없는 서버(PTAGB)는 피크 목표가 ‘달성’ 이 아니라 자료 없음(결측 개수)
+  const rowsB = []; for (let i = 0; i < 12; i++) { const ts = NOW - HOUR + (i + 1) * 300_000; rowsB.push({ key: 'PTAGB', ts, disk_await_ms: 4, runq_per_core: 0.2, swap_out_ps: 0, os_at: ts }); }
+  await db.insertUsage(rowsB, config.agent?.name || '');
+  const sB = await call('adm', 'GET', `/perf/PTAGB/slo?from=${NOW - HOUR}&to=${NOW}`);
+  const awB = sB.body.items.find((x) => x.goal.metric === 'disk_await_ms');
+  assert.equal(awB.status, 'no-data', JSON.stringify(awB).slice(0, 200)); assert.equal(awB.peakMissing, 12);
   assert.equal(s1.body.maintenanceSource, 'none'); assert.equal(s1.body.res, '5m');
   // 저장 — 설정 소유자 등급만 · 감사
   const body = { default: [{ metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 70, objectivePct: 99 }], servers: { PTAGA: [{ metric: 'runq_per_core', basis: 'avg', op: 'lt', value: 3, objectivePct: 99 }], PTAGB: [{ metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 60, objectivePct: 99 }] } };
@@ -168,4 +198,22 @@ test('④ ⑦ 실제 라우터 — 플레이북 · 목표선(실제 파일) · �
   const s3 = await call('opA', 'GET', `/perf/PTAGA/slo?from=${NOW - HOUR}&to=${NOW}`);
   assert.ok(s3.body.loadError, '손상 — 기본 목표로 계산하고 그 사실을 말한다');
   assert.ok(fs.readdirSync(DIR).some((x) => x.startsWith('bm-perf-slo.json.corrupt')));
+});
+
+test('⑧ 목표 설정 조회 — 서버 목표 500건도 대상 해석은 요청당 한 번(키마다 다시 돌지 않는다 · 반증 F9)', async () => {
+  const L = await import('../src/bmusage/slo.js');
+  const servers = {};
+  for (let i = 0; i < 500; i++) servers[`K${i}`] = [{ metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 50, objectivePct: 99 }];
+  L.saveSlo({ default: [], servers }, { by: 'adm' });
+  let ct = 0; let le = 0;
+  const targets = Array.from({ length: 600 }, (_, i) => ({ key: `K${i}`, vcenterId: i % 2 ? 'vcA' : 'vcB' }));
+  const deps = { currentTargets: async () => { ct += 1; return { targets }; }, listEdgeBmUsage: async () => { le += 1; return [{ agent: 'e', snap: { targets: [{ key: 'K499', vcenterId: 'vcZ' }] } }]; } };
+  const { bmSloSettingsRead } = await import('../src/routes/api/bmPlaybookSlo.js');
+  const t0 = Date.now();
+  const op = await bmSloSettingsRead({ user: { username: 'op', role: 'operator', scope: null } }, {}, deps);
+  assert.equal(ct, 1, '대상 해석 1회'); assert.equal(le, 1, '엣지 보관분 1회');
+  assert.deepEqual(op.slo.servers, {}); assert.equal(op.serversHidden, 500);
+  const sc = await bmSloSettingsRead({ user: { username: 'ada', role: 'admin', scope: { vcenters: ['vcA'] } } }, { vcenters: [{ id: 'vcA' }, { id: 'vcB' }] }, deps);
+  assert.equal(Object.keys(sc.slo.servers).length, 250, '범위 관리자 — 그 법인 서버의 목표만');
+  assert.ok(Date.now() - t0 < 2_000, `한 번 읽기(측정 ${Date.now() - t0}ms)`);
 });

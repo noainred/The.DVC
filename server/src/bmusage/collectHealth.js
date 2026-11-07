@@ -29,7 +29,16 @@ export function reasonState(pathId, code) {
 }
 /** 수집 건강 기준(perfRules.collect — 알림 규칙 ‘수집 건강’ 행과 보드 상태가 같은 값). */
 export const COLLECT_DEFAULTS = Object.freeze({ cyclePct: 80, successPct: 90, dbPct: 90, dbCapGb: 20 });
-export const NODE_FLAGS = Object.freeze(['cycle', 'success', 'db', 'auth']);
+export const NODE_FLAGS = Object.freeze(['cycle', 'success', 'db', 'auth', 'error']);
+/**
+ * 주기 실패 code(반증 F1) — 이번 주기 대상 · 결과를 **모른다**(대상 0대가 아니다 · 정상도 아니다): 분류 실패 · 주기 예외 · 수집 건강 계산 실패.
+ *   'no-targets' 는 사실 0(실패 아님). 열거 밖 값은 'health-failed' 로 본다(엣지 문자열을 그대로 싣지 않는다).
+ */
+export const CYCLE_ERRORS = Object.freeze(['classify-failed', 'cycle-error', 'health-failed']);
+export const NODE_ERRORS = Object.freeze([...CYCLE_ERRORS, 'no-targets']);
+export const isCycleFailure = (e) => CYCLE_ERRORS.includes(e);
+/** 봉투 표지(반증 F3) — 6단계 엣지는 첫 주기 전에도 이 값을 싣는다(필드 없음 = 구버전 · 표지만 있음 = 아직 주기 없음). */
+export const COLLECT_HEALTH_VER = 1;
 
 /** 백분위(가장 가까운 순위 — 순수). 빈 배열이면 null. */
 export function pctl(values = [], p = 50) {
@@ -83,18 +92,20 @@ export function summarizeCycle({ results = [], startedAt, endedAt, intervalMs, c
   const servers = live.length;
   const cycleMs = n(endedAt) != null && n(startedAt) != null ? Math.max(0, endedAt - startedAt) : null;
   const budgetMs = n(intervalMs);
+  const err = error ? (NODE_ERRORS.includes(error) ? error : 'health-failed') : null;
+  const failed = isCycleFailure(err);   // 대상 · 결과를 모르는 주기 — 대상 수 · 성공 수는 null(0 이 아니다)
   const node = {
     at: now, cycleMs, budgetMs, cyclePct: cycleMs != null && budgetMs ? r1((cycleMs / budgetMs) * 100) : null,
-    servers, ok, fail: servers - ok, successPct: servers ? r1((ok / servers) * 100) : null,
+    servers: failed ? null : servers, ok: failed ? null : ok, fail: failed ? null : servers - ok, successPct: !failed && servers ? r1((ok / servers) * 100) : null,
     reasons: [...reasons.values()].map((x) => ({ ...x, state: reasonState(x.path, x.code) })).sort((a, b) => b.n - a.n),
     info,
     conc: { max: n(slotPeak), cap: n(concurrency) },
     ssh: { n: sshMs.length, p50Ms: pctl(sshMs, 50), p95Ms: pctl(sshMs, 95) },
     focus: focus ? { running: n(focus.running) ?? 0, queued: n(focus.queued) ?? 0 } : null,
     peakPlan: peakPlan ? { windowS: n(peakPlan.windowS), capS: n(peakPlan.capS), reason: String(peakPlan.reason || '').slice(0, 32), expectedMs: n(peakPlan.expectedMs), budgetMs: n(peakPlan.budgetMs) } : null,
-    ...(error ? { error: String(error).slice(0, 200) } : {}),
+    ...(err ? { error: err } : {}),
   };
-  return { node, byCorp, sinceMap: nextSince };
+  return { node, byCorp: failed ? {} : byCorp, sinceMap: nextSince };
 }
 
 /**
@@ -106,7 +117,8 @@ export async function dbFilesNow(dir) {
   let mainBytes = null; let walBytes = null; let files = 0; let bytes = 0; let unread = 0;
   let names = [];
   // 디렉터리를 못 읽으면 크기는 ‘모름’(null)이다 — 0 으로 두면 저장 상한 칸이 ‘기준 안’ 으로 읽힌다(결측은 0 이 아니다).
-  try { names = await fs.promises.readdir(dir); } catch { return { mainBytes, walBytes, families: fams, files: null, bytes: null, error: 'readdir' }; }
+  // 가족별 개수 · 크기도 모름(null) — 0개 0KB 로 그리지 않는다(반증 F5).
+  try { names = await fs.promises.readdir(dir); } catch { return { mainBytes, walBytes, families: null, files: null, bytes: null, error: 'readdir' }; }
   const size = async (f) => { try { return (await fs.promises.stat(path.join(dir, f))).size; } catch { return null; } };
   for (const f of names) {
     if (f === 'bm-usage.db') { mainBytes = await size(f); if (mainBytes == null) unread += 1; continue; }
@@ -122,7 +134,8 @@ export async function dbFilesNow(dir) {
     files += 1; bytes += s;
   }
   // 크기를 못 읽은 파일이 있으면 합은 부분 합이다 — 합을 내지 않고(null) 못 읽은 수를 따로 센다(부분 합으로 상한 대조를 하지 않는다).
-  if (unread) return { mainBytes, walBytes, families: fams, files, bytes: null, unread };
+  // 가족별 값은 읽은 파일만의 부분 합 — partial 표지로 밝힌다(화면이 ‘부분’ 을 붙인다 · 반증 F5).
+  if (unread) return { mainBytes, walBytes, families: fams, files, bytes: null, unread, partial: true };
   return { mainBytes, walBytes, families: fams, files, bytes: bytes + (mainBytes || 0) + (walBytes || 0) };
 }
 
@@ -140,6 +153,7 @@ export function collectCells(node = {}, db = null, cfg = COLLECT_DEFAULTS) {
       success: successPct == null ? 'unread' : successPct < c.successPct ? 'true' : 'false',
       db: dbPct == null ? 'unread' : dbPct >= c.dbPct ? 'true' : 'false',
       auth: (node.reasons || []).some((x) => x.code === 'auth' || x.code === 'auth-stopped') ? 'true' : (node.reasons ? 'false' : 'unread'),
+      error: isCycleFailure(node.error) ? 'true' : 'false',   // 주기 실패(분류 · 예외) — 반증 F1: 실패 주기가 ‘정상 · 대상 0’ 으로 보이지 않게
     },
     dbPct, capBytes, th: { cyclePct: c.cyclePct, successPct: c.successPct, dbPct: c.dbPct, dbCapGb: c.dbCapGb },
   };

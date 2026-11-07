@@ -14,6 +14,8 @@ import { store } from '../../store.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { config } from '../../config.js';
+import { cmpVersion } from '../../util/cmpVersion.js';
+import { isCycleFailure, collectCells, reasonState } from '../../bmusage/collectHealth.js';
 
 const t = (v) => strOf(v, 4096).trim();
 const n = numOrNull;
@@ -35,15 +37,33 @@ function deps0(deps = {}) {
 const flagsOf = (node) => Object.entries(node?.cells || {}).filter(([, v]) => v === 'true').map(([k]) => k);
 
 /**
- * 노드 상태(순수 — 사실 분류): off · no-cycle · old-version · edge-stale · ok · attention(기준 밖 칸이 있다).
- *   ‘엣지 버전 낮음’ 은 봉투에 collectHealth 필드가 없을 때(경로 존재와 같은 판정 — 버전 숫자 비교가 아니다).
+ * 노드 상태(순수 — 사실 분류): off · no-cycle · old-version · edge-stale · cycle-failed · ok · attention(기준 밖 칸이 있다).
+ *   ‘엣지 버전 낮음’ 은 봉투에 collectHealth 필드도 6단계 표지(collectHealthVer)도 없고, 엣지가 알린 버전이 최소 버전보다 낮거나 모를 때만(반증 F3 —
+ *   재시작 직후 첫 주기 전의 6단계 엣지는 ‘아직 주기 없음’). ‘주기 실패’ 는 분류 실패 · 주기 예외 · 계산 실패(대상 · 결과를 모름 — 정상이 아니다 · 반증 F1).
  */
-export function nodeStateOf({ via, enabled, health, snapAt, staleMs, now = Date.now(), hasField = true }) {
+export function nodeStateOf({ via, enabled, health, snapAt, staleMs, now = Date.now(), hasField = true, marker = false, version = '', minEdgeVersion = '' }) {
   if (enabled === false) return 'off';
-  if (via === 'edge' && !hasField) return 'old-version';
+  if (via === 'edge' && !hasField) {
+    if (marker) return 'no-cycle';
+    const c = version && minEdgeVersion ? cmpVersion(version, minEdgeVersion) : null;
+    return c != null && c >= 0 ? 'no-cycle' : 'old-version';
+  }
   if (!health) return 'no-cycle';
   if (via === 'edge' && n(snapAt) != null && n(staleMs) != null && now - snapAt > staleMs) return 'edge-stale';
+  if (isCycleFailure(health.node?.error)) return 'cycle-failed';
   return flagsOf(health.node).length ? 'attention' : 'ok';
+}
+/** 노드 값을 숨긴 범위 계정에게도 보여 줄 수 있는 상태(노드 값과 무관한 사실 · 그 법인 서버도 같이 겪는 실패) — 나머지는 법인 기준으로 다시 정한다(반증 F8). */
+const HIDDEN_KEEP = new Set(['off', 'no-cycle', 'old-version', 'edge-stale', 'no-snapshot', 'cycle-failed']);
+/**
+ * 법인 한 곳의 기준 대조(순수) — 노드 판정 코어(collectCells) 하나에 **그 법인 값만** 넣는다: 성공률 · 인증 사유 · 주기 실패. 주기 소요 · DB 는 노드 전체 값이라 대지 않는다(unread).
+ *   범위 계정이 다른 법인 서버의 장애(인증 정지 등)를 노드 상태 ‘기준 밖’ 으로 엿보지 않게(반증 F8).
+ */
+export function corpCellsOf(c, nodeError, th) {
+  const servers = n(c?.servers); const ok = n(c?.ok);
+  const reasons = Object.keys(c?.reasons || {}).map((k) => ({ code: k.split(':')[1] }));
+  const cc = collectCells({ cyclePct: null, successPct: servers && ok != null ? Math.round((ok / servers) * 1000) / 10 : null, reasons: c ? reasons : null, error: nodeError }, null, th || undefined);
+  return cc.cells;
 }
 
 export async function bmCollectHealthView(req, snap, deps = {}) {
@@ -59,7 +79,8 @@ export async function bmCollectHealthView(req, snap, deps = {}) {
   for (const rec of await D.listEdgeBmUsage()) {
     const sn = rec?.snap || null;
     const la = rec?.lastAttempt;
-    nodes0.push({ agent: t(rec?.agent), via: 'edge', enabled: sn ? sn.enabled === true : null, health: sn?.collectHealth || null, hasField: !!sn?.collectHealth, corps: Array.isArray(sn?.settings?.corps) ? sn.settings.corps : [],
+    nodes0.push({ agent: t(rec?.agent), via: 'edge', enabled: sn ? sn.enabled === true : null, health: sn?.collectHealth || null, hasField: !!sn?.collectHealth, marker: n(sn?.collectHealthVer) != null,
+      corps: Array.isArray(sn?.settings?.corps) ? sn.settings.corps : [],
       // 엣지 봉투의 byCorp 법인 이름은 그 엣지의 대상 · 설정 법인과 맞는 것만 믿는다(봉투 문자열만으로 법인 행을 새로 만들지 않는다 — 아래 corpIds).
       targetCorps: (Array.isArray(sn?.targets) ? sn.targets : []).map((x) => t(x?.vcenterId)).filter(Boolean),
       snapAt: rec?.snapAt ?? null, version: t(sn?.node?.version), noSnap: !sn,
@@ -79,8 +100,11 @@ export async function bmCollectHealthView(req, snap, deps = {}) {
     const visible = allowed ? corpIds.filter((vc) => vc && allowed.has(vc)) : corpIds;
     if (allowed && !visible.length) { omitted += 1; continue; }
     const nodeHidden = !!allowed && corpIds.some((vc) => !vc || !allowed.has(vc));
-    const state = x.noSnap ? 'no-snapshot' : nodeStateOf({ via: x.via, enabled: x.enabled, health: x.health, snapAt: x.snapAt, staleMs, now, hasField: x.hasField });
+    const state0 = x.noSnap ? 'no-snapshot' : nodeStateOf({ via: x.via, enabled: x.enabled, health: x.health, snapAt: x.snapAt, staleMs, now, hasField: x.hasField, marker: x.marker, version: x.version, minEdgeVersion });
+    // 노드 값을 숨기면 노드 상태도 노드 값(다른 법인 서버 포함)으로 정하지 않는다 — ‘법인 행을 보세요’(hidden) · 법인 행은 그 법인 값으로(반증 F8).
+    const state = nodeHidden && !HIDDEN_KEEP.has(state0) ? 'hidden' : state0;
     const node = x.health?.node || null;
+    const failed = isCycleFailure(node?.error);
     nodes.push({
       agent: x.agent, via: x.via, state, flags: nodeHidden ? [] : flagsOf(node), snapAt: x.snapAt ?? null, version: x.version || null,
       ...(x.via === 'edge' && !allowed ? { lastAttempt: x.lastAttempt } : {}),
@@ -89,10 +113,19 @@ export async function bmCollectHealthView(req, snap, deps = {}) {
     });
     for (const vc of visible) {
       const c = byCorp[vc] || null;
+      // 숨긴 노드의 법인 행 — 상태 · 기준 밖 칸은 그 법인 값으로(노드 상태가 노드 값과 무관한 사실이면 그대로).
+      let rowState = state; let rowFlags = nodeHidden ? [] : flagsOf(node);
+      if (nodeHidden && state === 'hidden') {
+        const cells = corpCellsOf(c, node?.error, node?.th);
+        rowFlags = Object.entries(cells).filter(([, v]) => v === 'true').map(([k]) => k);
+        rowState = rowFlags.length ? 'attention' : 'ok';
+      }
       rows.push({
-        vcenterId: vc, agent: x.agent, via: x.via, nodeState: state, nodeHidden,
-        servers: c ? n(c.servers) : (x.health ? 0 : null), ok: c ? n(c.ok) : null, fail: c ? n(c.fail) : null,
-        successPct: c && n(c.servers) ? Math.round((n(c.ok) / n(c.servers)) * 1000) / 10 : null,
+        vcenterId: vc, agent: x.agent, via: x.via, nodeState: rowState, flags: rowFlags, nodeHidden,
+        // 주기 실패면 이 법인 대상 수도 모른다(null — 0 이 아니다 · 반증 F1) · 주기 기록이 있고 이 법인 값이 없으면 사실 0(이번 주기 대상 없음).
+        servers: c ? n(c.servers) : (x.health && !failed ? 0 : null), ok: c ? n(c.ok) : null, fail: c ? n(c.fail) : null,
+        // 성공 수를 모르면 성공률도 모른다(0% 가 아니다 · 반증 F4).
+        successPct: c && n(c.servers) && n(c.ok) != null ? Math.round((n(c.ok) / n(c.servers)) * 1000) / 10 : null,
         reasons: c ? Object.entries(c.reasons || {}).map(([k, v]) => { const [p, code] = k.split(':'); return { path: p, code, n: n(v) }; }).sort((a, b) => (b.n || 0) - (a.n || 0)) : [],
         ...(nodeHidden || !node ? {} : { cycleMs: n(node.cycleMs), budgetMs: n(node.budgetMs), cyclePct: n(node.cyclePct), conc: node.conc || null, ssh: node.ssh || null, dbBytes: n(node.db?.bytes), dbFiles: n(node.db?.files), dbPct: n(node.dbPct) }),
       });
@@ -102,7 +135,6 @@ export async function bmCollectHealthView(req, snap, deps = {}) {
   const agg = new Map();
   for (const r of rows) for (const x of r.reasons) { const k = `${x.path}:${x.code}`; const cur = agg.get(k) || { path: x.path, code: x.code, n: 0, since: null }; cur.n += x.n || 0; agg.set(k, cur); }
   for (const nd of nodes) for (const x of nd.node?.reasons || []) { const cur = agg.get(`${x.path}:${x.code}`); if (cur && n(x.since) != null) cur.since = cur.since == null ? x.since : Math.min(cur.since, x.since); }
-  const { reasonState } = await import('../../bmusage/collectHealth.js');
   const reasons = [...agg.values()].map((x) => ({ ...x, state: reasonState(x.path, x.code) })).sort((a, b) => b.n - a.n);
   // 합계는 **값이 있는 것만** 더하고 모르는 개수를 따로 센다(결측을 0 으로 더하지 않는다 — 모르는 법인 · 노드가 있으면 화면이 ‘n곳 모름’ 을 붙인다).
   const known = rows.filter((r) => n(r.servers) != null && n(r.ok) != null);

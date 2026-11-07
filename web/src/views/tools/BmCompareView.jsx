@@ -18,7 +18,7 @@ import { VerdictBadge } from './BmPerfBoard.jsx';
 import { fmtHm } from '../../components/vmperf/vmPerfText.js';
 import { shortStamp } from './bmOpsText.js';
 import {
-  COMPARE_GROUP_TEXT, COMPARE_VIEW_TEXT, COMPARE_VIEWS, COMPARE_VALUE_TEXT, COMPARE_RANGES, columnStateView, metricLabel, metricUnit, cellPairText, cmpValText,
+  COMPARE_GROUP_TEXT, COMPARE_VIEW_TEXT, COMPARE_VIEWS, COMPARE_VALUE_TEXT, COMPARE_RANGES, columnStateView, metricLabel, metricUnit, cellPairText, cmpValText, rowBasisNote,
   colorPlan, sparkPath, corpsReadText, devText, COMPARE_TABLE_NOTE, COMPARE_HONEST, skewText, baselineCellText, focusStartSummary, compareCsv, compareCsvName,
 } from './bmCompareText.js';
 import { useAnnotations } from './BmAnnotations.jsx';
@@ -57,7 +57,7 @@ function SideCell({ row, col, resp, color, valueMode }) {
   const s = col.series?.[row.col] || null;
   return (
     <div className="bmcmp-cell">
-      <div className="bmcmp-cv">{cellPairText(cell?.now || cell?.win, unit, valueMode)}</div>
+      <div className="bmcmp-cv">{cellPairText(cell?.now || cell?.win, unit, valueMode, row.peakCapable !== false)}</div>
       {row.src === 'series' ? <Spark spark={s?.spark} scale={row.scale} from={resp.from} to={resp.to} stroke={color.stroke} valueMode={valueMode} /> : <span className="bmcmp-nospark">지금 값(iDRAC)</span>}
       {cell?.clipped && <span className="bmcmp-clip" title="피크가 이 행의 눈금 밖입니다 — 표 보기에서 값을 보십시오">잘림</span>}
       {s?.missing ? <span className="bmcmp-miss">결측 {s.missing}</span> : null}
@@ -84,7 +84,7 @@ export function CompareSide({ resp, nameOf, colors, valueMode, devHigh }) {
           <React.Fragment key={r.col}>
             <div className={`bmcmp-rl${devHigh && r.devHigh ? ' bmcmp-hi' : ''}`}>
               <div>{metricLabel(r.col)}</div>
-              <div className="bmcmp-rs">{r.scale != null ? `눈금 0–${cmpValText(r.scale, metricUnit(r.col, resp.metricMeta))}` : '눈금 없음'}{r.dev != null ? ` · 편차 ${devText(r.dev)}` : ''}</div>
+              <div className="bmcmp-rs">{r.scale != null ? `눈금 0–${cmpValText(r.scale, metricUnit(r.col, resp.metricMeta))}` : '눈금 없음'}{r.dev != null ? ` · 편차 ${devText(r.dev)}` : ''}{rowBasisNote(r, valueMode) ? ` · ${rowBasisNote(r, valueMode)}` : ''}</div>
             </div>
             {cols.map((c) => <SideCell key={c.key} row={r} col={c} resp={resp} color={colors[c.key] || {}} valueMode={valueMode} />)}
           </React.Fragment>
@@ -153,7 +153,7 @@ export function CompareOverlay({ resp, nameOf, colors, valueMode, metric, onMetr
           const cell = (row.cells || []).find((x) => x.key === c.key);
           return (
             <button key={c.key} type="button" className="bmb-chip" aria-pressed={solo === c.key} onClick={() => setSolo((v) => (v === c.key ? '' : c.key))} title="누르면 그 서버만 · 다시 누르면 전부">
-              <span className="bmx-sw" style={{ background: colors[c.key]?.stroke }} />{nameOf(c.key)} {cellPairText(cell?.win, unit, valueMode)}
+              <span className="bmx-sw" style={{ background: colors[c.key]?.stroke }} />{nameOf(c.key)} {cellPairText(cell?.win, unit, valueMode, row.peakCapable !== false)}
             </button>
           );
         })}
@@ -180,8 +180,8 @@ export function CompareTable({ resp, nameOf, valueMode, devHigh }) {
             return (
               <tr key={r.col} className={devHigh && r.devHigh ? 'bmcmp-hi' : undefined}>
                 <td data-sort={metricLabel(r.col)}>{metricLabel(r.col)}{r.skew && <div className="bmcmp-skew">{skewText(r.skew, nameOf)}</div>}</td>
-                {cols.map((c) => { const cell = (r.cells || []).find((x) => x.key === c.key); return <td key={c.key} className="right" data-sort={cell?.win?.avg ?? ''}>{cellPairText(cell?.win, unit, valueMode)}</td>; })}
-                <td className="right" data-sort={r.dev ?? ''} style={{ color: devHigh && r.devHigh ? toneVar('warn') : undefined }}>{devText(r.dev)}</td>
+                {cols.map((c) => { const cell = (r.cells || []).find((x) => x.key === c.key); return <td key={c.key} className="right" data-sort={cell?.win?.avg ?? ''}>{cellPairText(cell?.win, unit, valueMode, r.peakCapable !== false)}</td>; })}
+                <td className="right" data-sort={r.dev ?? ''} style={{ color: devHigh && r.devHigh ? toneVar('warn') : undefined }}>{devText(r.dev)}{rowBasisNote(r, valueMode) ? <div className="bmo-sub">{rowBasisNote(r, valueMode)}</div> : null}</td>
                 <td data-sort={r.top ? nameOf(r.top) : ''}>{r.top ? nameOf(r.top) : '—'}</td>
               </tr>
             );

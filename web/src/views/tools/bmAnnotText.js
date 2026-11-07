@@ -47,6 +47,27 @@ export function annotBody({ keys = [], corp = '', at, end = null, kind = 'work',
   if (String(wikiId).trim()) links.wiki = { space: String(wikiSpace).trim() || 'pub', id: String(wikiId).trim().toUpperCase() };
   return { ...(corp ? { corp } : { keys }), at, ...(n(end) != null ? { end } : {}), kind, text, ...(Object.keys(links).length ? { links } : {}) };
 }
+/**
+ * 고치기 본문(순수 — 반증 F10): **바뀐 칸만** 싣는다. 폼은 분 단위라 시각을 그대로 두면 원래 초를 보존하고(보내지 않는다),
+ *   연결은 폼에 있는 칸(이슈 · 위키)만 보낸다 — 지운 칸은 null(서버가 그 칸만 지운다) · 집중 세션 · 백업 연결은 보내지 않아 그대로 남는다.
+ * @param {object} orig 서버가 준 주석 · @param {object} form 폼 값({ at, end, kind, text, issue, wikiSpace, wikiId } — at/end 는 datetime-local 글자)
+ */
+export function annotEditPatch(orig = {}, form = {}) {
+  const out = {};
+  if (String(form.at || '') !== localInputOf(orig.at)) { const v = msOfLocalInput(form.at); if (v != null) out.at = v; }
+  if (String(form.end || '') !== (orig.end ? localInputOf(orig.end) : '')) out.end = form.end ? msOfLocalInput(form.end) : null;
+  if (form.kind !== orig.kind) out.kind = form.kind;
+  if (String(form.text ?? '') !== String(orig.text ?? '')) out.text = form.text;
+  const ol = orig.links || {};
+  const links = {};
+  const issue = String(form.issue || '').trim().toUpperCase();
+  if (issue !== String(ol.issue || '')) links.issue = issue || null;
+  const wid = String(form.wikiId || '').trim().toUpperCase(); const wsp = String(form.wikiSpace || '').trim() || 'pub';
+  const ow = ol.wiki || null;
+  if (wid ? (!ow || ow.id !== wid || ow.space !== wsp) : !!ow) links.wiki = wid ? { space: wsp, id: wid } : null;
+  if (Object.keys(links).length) out.links = links;
+  return out;
+}
 /** datetime-local 값 ↔ ms(브라우저 로컬 시각 — 화면 입력용). */
 export function localInputOf(ms) {
   const x = n(ms); if (x == null) return '';

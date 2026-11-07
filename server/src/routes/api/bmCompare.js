@@ -18,7 +18,7 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { addressMatcher, isAdminReq } from '../../auth/addressMask.js';
+import { isAdminReq } from '../../auth/addressMask.js';
 import { currentTargets } from '../../bmusage/poller.js';
 import { publicTarget, maskTargetAddress } from '../../bmusage/targets.js';
 import { latestUsage } from '../../bmusage/db.js';
@@ -29,7 +29,7 @@ import { freshMsFor } from '../../bmusage/useJudge.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { poolSettled } from '../../util/pool.js';
 import { config } from '../../config.js';
-import { resolvePerfTarget, bmAddressHosts, demoPerfRows } from './bmUsage.js';
+import { resolvePerfTarget, bmAddressHosts, demoPerfRows, perfAddressMatcher } from './bmUsage.js';
 import { depsOf as focusDepsOf, focusStartResolved } from './bmPerfOps.js';
 import * as M from '../../bmusage/multiCompare.js';
 
@@ -110,9 +110,7 @@ export async function bmCompareView(req, snap, deps = {}) {
   const tg = await D.currentTargets().catch(() => ({ targets: [] }));
   let match = null; let hosts = [];
   if (!isAdmin) {
-    hosts = await D.bmAddressHosts(tg).catch(() => []);
-    const edgeHosts = (await D.listEdgeBmUsage()).flatMap((rec) => (rec?.snap?.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])).filter((h) => typeof h === 'string' && h);
-    match = addressMatcher([...hosts, ...edgeHosts]);
+    ({ hosts, match } = await perfAddressMatcher(D, tg));   // 이 노드 + 엣지 보관분 호스트(주석 목록과 같은 판정기 — 반증 F11)
   }
   const nameOf = (target) => {
     const pt = target?.idrac || target?.osHost ? publicTarget(target) : target;

@@ -156,3 +156,43 @@ test('④ 집중 시작 → 자동 주석(system · 세션 연결)', async (t) =
   assert.ok(auto, '자동 주석'); assert.equal(auto.by, 'system'); assert.equal(auto.links.focus, r.body.id); assert.match(auto.text, /디스크 포화/);
   assert.equal(auto.canEdit, false, '시스템 주석은 운영자가 고칠 수 없다');
 });
+
+test('⑤ 반증 F10 · F11 · F13 — 고치기는 보낸 칸만(집중 연결 · 원래 시각 보존) · 엣지 호스트명 가림 · 저장소 캐시(mtime · 실패 시 버림)', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  const { call } = await setup(t);
+  const A = await import('../src/bmusage/annotations.js');
+  // F10 — 자동 주석 모양(links.focus · 초가 있는 시각)을 관리자가 내용만 고친다(웹의 실제 본문 생성 함수와 같은 규칙 — 바뀐 칸만)
+  const at0 = NOW - HOUR + 37_123;
+  const rec = A.addAnnotation({ by: 'system', at: at0, kind: 'work', text: '집중 모니터링 시작', target: { type: 'server', keys: ['ATAGA1'], names: ['bm-a1'], vcenterIds: ['vcA'] }, links: { focus: 'a1b2c3d4-0000-1111' }, auto: 'focus' });
+  const e = await call('adm', 'PUT', `/annotations/${rec.id}`, { text: '집중 모니터링 시작(오타 수정)' });
+  assert.equal(e.status, 200, JSON.stringify(e.body));
+  const g = A.getAnnotation(rec.id);
+  assert.equal(g.links.focus, 'a1b2c3d4-0000-1111', '집중 세션 연결이 남는다'); assert.equal(g.at, at0, '원래 시각(초 포함) 그대로'); assert.deepEqual(g.edits.at(-1).fields, ['text']);
+  // 연결은 칸별 병합 — 이슈만 더하고 · null 로 그 칸만 지운다
+  await call('adm', 'PUT', `/annotations/${rec.id}`, { links: { issue: 'ISS-7' } });
+  assert.deepEqual(A.getAnnotation(rec.id).links, { focus: 'a1b2c3d4-0000-1111', issue: 'ISS-7' });
+  await call('adm', 'PUT', `/annotations/${rec.id}`, { links: { issue: null } });
+  assert.deepEqual(A.getAnnotation(rec.id).links, { focus: 'a1b2c3d4-0000-1111' });
+  // F11 — 엣지 위임 서버의 호스트명 이름은 비관리자 목록에서 가린다(비교 화면과 같은 판정기)
+  const E = await import('../src/central/bmUsageEdgePull.js');
+  E.putEdgeBmUsage('edge-ann', { ok: true, snap: { node: { agent: 'edge-ann' }, enabled: true, targets: [{ key: 'EK1', name: 'db01.corp.example', osHostName: 'db01.corp.example', vcenterId: 'vcA' }], rows: [] } });
+  t.after(() => E._resetForTest());
+  const ek = await call('adm', 'POST', '/annotations', { keys: ['EK1'], at: NOW, kind: 'memo', text: '엣지 서버 주석' });
+  assert.equal(ek.status, 200, JSON.stringify(ek.body));
+  const asOp = (await call('opA', 'GET', '/annotations?keys=EK1')).body.annotations.find((x) => x.id === ek.body.id);
+  assert.ok(asOp, '범위 안 엣지 서버 주석'); assert.ok(!asOp.target.names.some((nm) => nm.includes('db01.corp.example')), JSON.stringify(asOp.target.names));
+  assert.ok((await call('adm', 'GET', '/annotations?keys=EK1')).body.annotations.find((x) => x.id === ek.body.id).target.names.includes('db01.corp.example'), '관리자는 원문');
+  // F13 — 읽기는 캐시(같은 배열) · 파일이 바뀌면 다시 읽는다 · 검사 실패로 고치다 만 값이 캐시에 남지 않는다
+  const l1 = A.listAnnotations(); const l2 = A.listAnnotations();
+  assert.equal(l1, l2, 'mtime · 크기가 같으면 파싱하지 않는다(같은 배열)');
+  assert.throws(() => A.editAnnotation(rec.id, { kind: 'memo', text: '   ' }), /내용/);
+  assert.equal(A.getAnnotation(rec.id).kind, 'work', '400 으로 끝난 고치기의 앞 칸(kind) 변경이 남지 않는다');
+  const f = path.join(DIR, 'bm-perf-annotations.json');
+  const o = JSON.parse(fs.readFileSync(f, 'utf8')); o.items = o.items.filter((x) => x.id !== rec.id);
+  fs.writeFileSync(f, JSON.stringify(o)); const st = fs.statSync(f); fs.utimesSync(f, st.atime, new Date(st.mtimeMs + 5_000));
+  assert.equal(A.getAnnotation(rec.id), null, '파일이 바뀌면(손으로 고침) 다시 읽는다');
+  // 이력의 이전 내용은 앞 120자만(파일 크기)
+  const long = A.addAnnotation({ by: 'adm', at: NOW, kind: 'memo', text: 'ㄱ'.repeat(500), target: { type: 'server', keys: ['ATAGA1'], names: [], vcenterIds: ['vcA'] } });
+  A.editAnnotation(long.id, { text: '짧게' }, { by: 'adm' });
+  assert.equal(A.getAnnotation(long.id).edits.at(-1).prev.text.length, 120);
+});

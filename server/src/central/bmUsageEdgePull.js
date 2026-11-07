@@ -192,6 +192,7 @@ export async function pullBmUsage(agent, { limit = 0 } = {}) {
   const qs = Number(limit) > 0 ? `?limit=${Math.round(Number(limit))}` : '';
   const r = await pullFromEdge(agent, `/api/collector/bm-usage${qs}`, {
     timeoutMs: TIMEOUT_MS, retries: 1, minVersion: MIN_EDGE_VERSION, what: '사용률을 읽을', label: '엣지 사용률 응답',
+    bodyOk: (b) => isObj(b) && b.ok !== false && isObj(b.node),   // 봉투 모양(이 경로만 node 가 있다 — 명시: 경로마다 모양이 다르다 · 반증 F2)
   });
   if (!r.ok) {
     if (!r.fetched) return { ok: false, kind: r.kind, reason: r.reason, ms: r.ms }; // 등록부 단계 — 보관소에 남기지 않는다
@@ -254,6 +255,16 @@ export function sanitizeNicsBody(b) {
     dropDelta: numOrNull(x.dropDelta), errDelta: numOrNull(x.errDelta), oper: x.oper == null ? null : strOf(x.oper, 16), speedBps: numOrNull(x.speedBps) })).filter((x) => x.nic),
     ...(a.length > DEV_MAX ? { sanitizeTruncated: a.length - DEV_MAX } : {}) };
 }
+/**
+ * 응답 모양 판정(경로마다 — 6단계 반증 F2 정정). pullFromEdge 의 기본 판정은 봉투(`/bm-usage`)의 `{ok, node}` 모양이라, node 가 없는 추이 · 장치 · NIC 응답은
+ *   v2.922(3a) 게시 이후 **성공 응답이 전부 bad-body** 로 버려졌다(엣지 위임 서버의 추이 탭 · 목표선이 늘 ‘읽지 못함’). 테스트가 pullBmTrend 를 의존성 주입으로 바꿔 끼워 실제 함수를 부르지 않아 놓쳤다.
+ *   회귀: server/test/bmEdgeRoundTrip.test.js(실제 collector 라우터 왕복).
+ */
+export const TREND_BODY_OK = Object.freeze({
+  history: (b) => isObj(b) && b.ok === true && Array.isArray(b.points),
+  devices: (b) => isObj(b) && b.ok === true && isObj(b.devices),
+  nics: (b) => isObj(b) && b.ok === true && Array.isArray(b.nics),
+});
 /** 한 엣지에서 추이(또는 장치 목록)를 당긴다 — 저장하지 않는다. */
 export async function pullBmTrend(agent, { mode = 'history', key = '', query = {} } = {}) {
   const qs = new URLSearchParams();
@@ -261,6 +272,7 @@ export async function pullBmTrend(agent, { mode = 'history', key = '', query = {
   if (mode === 'history') for (const k of ['metric', 'kind', 'dev', 'res', 'from', 'to']) if (query?.[k] != null && query[k] !== '') qs.set(k, capStr(String(query[k]), 256));
   const r = await pullFromEdge(agent, `/api/collector/bm-usage/${mode === 'devices' ? 'devices' : mode === 'nics' ? 'nics' : 'trend'}?${qs.toString()}`, {
     timeoutMs: TIMEOUT_MS, retries: 1, minVersion: TREND_MIN_EDGE_VERSION, what: '추이를 읽을', label: '엣지 추이 응답',
+    bodyOk: TREND_BODY_OK[mode === 'devices' ? 'devices' : mode === 'nics' ? 'nics' : 'history'],
   });
   if (!r.ok) return { ok: false, kind: r.kind, reason: r.reason, ms: r.ms };
   const body = mode === 'devices' ? sanitizeDevicesBody(r.body) : mode === 'nics' ? sanitizeNicsBody(r.body) : sanitizeTrendBody(r.body);

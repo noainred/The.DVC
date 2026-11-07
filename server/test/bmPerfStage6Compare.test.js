@@ -33,7 +33,20 @@ test('① 창 통계 · 표(편차 · 최고 · 스큐) — 결측은 0 이 아�
   const st = M.seriesStats(pts, { from, to, stepMs: 300_000 });
   assert.equal(st.avg, 20, '값 있는 점만 평균'); assert.equal(st.peak, 40); assert.equal(st.n, 2); assert.equal(st.expected, 12); assert.equal(st.missing, 10, '결측은 센다');
   assert.ok(st.spark.some((p) => p[1] == null), '값 없는 칸은 null(0 으로 채우지 않는다)');
-  assert.deepEqual(st.last, { t: from + 900_000, avg: 30, peak: 30 });
+  assert.deepEqual(st.last, { t: from + 900_000, avg: 30, peak: null }, '마지막 점에 피크 표본이 없으면 피크도 없다(평균으로 메우지 않는다 — 반증 F7)');
+  assert.equal(st.peakN, 1); assert.equal(st.max, 30, '창 최대(피크 표본 아님)는 따로');
+  // 반증 F12 — 1분 간격이면 기대 주기는 창 ÷ 1분(예전: 창 ÷ 5분 = 12 인데 n 60)
+  const m1 = Array.from({ length: 60 }, (_, i) => ({ t: from + i * 60_000, avg: 5, max: 5, peak: null }));
+  const s1 = M.seriesStats(m1, { from, to, stepMs: 300_000, cycleMs: 60_000 });
+  assert.equal(s1.expected, 60); assert.equal(s1.missing, 0); assert.equal(s1.peak, null, '피크 표본 없음 — 피크 —');
+  // 반증 F7 — 평균+피크 모드에서 피크 없는 서버가 섞이면 모두 평균으로(다른 양을 섞어 대지 않는다) · 피크 모드는 피크 있는 서버만
+  const pc = (key, avg, peak) => ({ key, state: 'ok', series: { cpu_pct: { avg, peak } }, hwValues: {} });
+  let mx = M.buildCompareTable([pc('a', 50, 90), pc('b', 60, null)], { metrics: ['cpu_pct'], value: 'avgpeak' });
+  assert.equal(mx.rows[0].basis, 'avg'); assert.equal(mx.rows[0].top, 'b', '평균으로 대 보면 b 가 높다(예전: a 의 피크 90 vs b 의 평균 60)');
+  mx = M.buildCompareTable([pc('a', 50, 90), pc('b', 60, 70)], { metrics: ['cpu_pct'], value: 'avgpeak' });
+  assert.equal(mx.rows[0].basis, 'peak'); assert.equal(mx.rows[0].top, 'a');
+  mx = M.buildCompareTable([pc('a', 50, 90), pc('b', 60, null)], { metrics: ['cpu_pct'], value: 'peak' });
+  assert.equal(mx.rows[0].dev, null, '피크 모드 — 피크 없는 서버는 판정에서 빠진다(값 있는 서버 1대)');
   assert.equal(M.seriesStats([], { from, to, stepMs: 300_000 }).avg, null);
   const col = (key, v, extra = {}) => ({ key, state: 'ok', series: { cpu_pct: v == null ? { avg: null, peak: null } : { avg: v, peak: v * 1.5, last: { avg: v, peak: v } } }, hwValues: {}, ...extra });
   let tb = M.buildCompareTable([col('a', 10), col('b', 40), col('c', null), { key: 'd', state: 'none' }], { metrics: ['cpu_pct'], value: 'avg' });

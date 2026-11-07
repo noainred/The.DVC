@@ -12,7 +12,7 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { toneVar } from './toneVar.js';
 import {
-  ANNOT_KIND_TEXT, ANNOT_KIND_SHORT, TARGET_TYPE_TEXT, annotWhenText, annotTargetText, annotLinks, annotBody, localInputOf, msOfLocalInput, ANNOT_HONEST,
+  ANNOT_KIND_TEXT, ANNOT_KIND_SHORT, TARGET_TYPE_TEXT, annotWhenText, annotTargetText, annotLinks, annotBody, annotEditPatch, localInputOf, msOfLocalInput, ANNOT_HONEST,
 } from './bmAnnotText.js';
 import './bmStage6.css';
 
@@ -63,14 +63,20 @@ export default function AnnotationsCard({ itemKey, name = '', vcenterId = '', se
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const openNew = () => { setMsg(null); setForm({ at: localInputOf(sel?.from ?? Date.now()), end: sel ? localInputOf(sel.to) : '', kind: 'work', text: '', target: 'server', issue: '', wikiSpace: '', wikiId: '' }); };
-  const openEdit = (a) => { setMsg(null); setForm({ id: a.id, at: localInputOf(a.at), end: a.end ? localInputOf(a.end) : '', kind: a.kind, text: a.text, target: a.target?.type === 'corp' ? 'corp' : 'server', issue: a.links?.issue || '', wikiSpace: a.links?.wiki?.space || '', wikiId: a.links?.wiki?.id || '' }); };
+  const openEdit = (a) => { setMsg(null); setForm({ id: a.id, orig: a, at: localInputOf(a.at), end: a.end ? localInputOf(a.end) : '', kind: a.kind, text: a.text, target: a.target?.type === 'corp' ? 'corp' : 'server', issue: a.links?.issue || '', wikiSpace: a.links?.wiki?.space || '', wikiId: a.links?.wiki?.id || '' }); };
   async function save() {
     setBusy(true); setMsg(null);
     try {
-      const body = annotBody({ keys: [itemKey], corp: form.target === 'corp' ? vcenterId : '', at: msOfLocalInput(form.at), end: msOfLocalInput(form.end), kind: form.kind, text: form.text, issue: form.issue, wikiSpace: form.wikiSpace, wikiId: form.wikiId });
-      const r = form.id
-        ? await putJson(`/tools/bm-usage/annotations/${encodeURIComponent(form.id)}`, { at: body.at, end: body.end ?? null, kind: body.kind, text: body.text, links: body.links || {} })
-        : await postJson('/tools/bm-usage/annotations', body);
+      let r;
+      if (form.id) {
+        // 바뀐 칸만(원래 시각의 초 · 집중 세션 · 백업 연결을 보존 — 반증 F10)
+        const patch = annotEditPatch(form.orig, form);
+        if (!Object.keys(patch).length) { setForm(null); setMsg({ tone: 'ok', text: '바뀐 것이 없습니다.' }); return; }
+        r = await putJson(`/tools/bm-usage/annotations/${encodeURIComponent(form.id)}`, patch);
+      } else {
+        const body = annotBody({ keys: [itemKey], corp: form.target === 'corp' ? vcenterId : '', at: msOfLocalInput(form.at), end: msOfLocalInput(form.end), kind: form.kind, text: form.text, issue: form.issue, wikiSpace: form.wikiSpace, wikiId: form.wikiId });
+        r = await postJson('/tools/bm-usage/annotations', body);
+      }
       if (r?.ok === false) { setMsg({ tone: 'bad', text: r.reason || '저장하지 못했습니다.' }); return; }
       setForm(null); setMsg({ tone: 'ok', text: '주석을 저장했습니다(감사 기록).' }); onChanged?.();
     } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }

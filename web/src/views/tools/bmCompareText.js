@@ -50,14 +50,25 @@ export function cmpValText(v, unit = '') {
   if (unit === 'W') return `${Math.round(x).toLocaleString('ko-KR')}W`;
   return valText(x, unit);
 }
-/** 칸 글자 — 값 모드대로(평균 + 피크 · 평균 · 피크). */
-export function cellPairText(pair, unit = '', value = 'avgpeak') {
+/**
+ * 칸 글자 — 값 모드대로(평균 + 피크 · 평균 · 피크). 피크 칸은 피크 표본만 — 없으면 ‘—’(평균으로 메우지 않는다 · 반증 F7).
+ *   peakCapable=false(피크 표본 열이 원래 없는 지표 · 하드웨어 지금 값)면 평균만 쓰고 ‘/ —’ 꼬리를 붙이지 않는다(피크 모드는 ‘—’).
+ */
+export function cellPairText(pair, unit = '', value = 'avgpeak', peakCapable = true) {
   if (!pair) return '—';
   const a = n(pair.avg); const p = n(pair.peak);
   if (value === 'avg') return cmpValText(a, unit);
-  if (value === 'peak') return cmpValText(p ?? a, unit);
-  if (p == null) return cmpValText(a, unit);
+  if (value === 'peak') return p == null ? '—' : cmpValText(p, unit);
+  if (!peakCapable) return cmpValText(a, unit);
+  if (p == null) return a == null ? '—' : `${cmpValText(a, unit)} / —`;
   return `${cmpValText(a, unit)} / ${cmpValText(p, unit)}`;
+}
+/** 행의 편차 · 최고 판정 기준(서버 row.basis) → 꼬리 글자. 평균+피크 모드에서 값 있는 서버 2대 이상 중 피크 표본이 없는 서버가 있어 서버가 평균으로 대 봤을 때만. */
+export function rowBasisNote(row, value = 'avgpeak') {
+  if (!row || row.src === 'hw' || row.peakCapable === false) return '';
+  const valued = (row.cells || []).filter((c) => c?.win && (n(c.win.avg) != null || n(c.win.peak) != null)).length;
+  if (value === 'avgpeak' && row.basis === 'avg' && valued >= 2) return '평균으로 비교(피크 표본이 없는 서버가 있음)';
+  return '';
 }
 
 /**

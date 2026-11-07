@@ -14,10 +14,10 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { addressMatcher, isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
+import { isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
-import { resolvePerfTarget, bmAddressHosts } from './bmUsage.js';
+import { resolvePerfTarget, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -76,7 +76,8 @@ export async function bmAnnotationsRead(req, snap, deps = {}) {
   const truncated = list.length > LIST_MAX;
   list = list.slice(0, LIST_MAX);
   let match = null;
-  if (!isAdmin) { const tg = await D.currentTargets().catch(() => ({ targets: [] })); match = addressMatcher(await D.bmAddressHosts(tg).catch(() => [])); }
+  // 가림 판정기 = 비교 화면과 같은 함수(이 노드 + 엣지 보관분 호스트 — 반증 F11: 엣지 위임 서버의 호스트명이 그대로 나갔다)
+  if (!isAdmin) { const tg = await D.currentTargets().catch(() => ({ targets: [] })); ({ match } = await perfAddressMatcher(D, tg)); }
   const maskName = (nm) => (isAdmin ? nm : (match && match(nm) ? maskedIdToken(nm) : String(nm).replace(IPV4_RE, (ip) => maskedIdToken(ip))));
   const user = String(req.user?.username || '');
   const out = list.map((a) => ({

@@ -20,6 +20,7 @@ import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { dayKey, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { RES_MS } from './trendWindow.js';
+import { PEAK_COLS } from './perfCols.js';
 
 const n = numOrNull;
 const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
@@ -27,6 +28,11 @@ const FILE = () => path.join(config.configDir, 'bm-perf-slo.json');
 /** 목표 지표 화이트리스트(추이 열 — 웹 문구 표와 1:1). */
 export const SLO_METRICS = Object.freeze(['cpu_pct', 'mem_pct', 'disk_busy_pct', 'disk_await_ms', 'disk_used_pct', 'net_pct', 'runq_per_core', 'swap_out_ps', 'psi_io_full10', 'psi_mem_full10', 'tcp_retrans_pct', 'net_drop_delta']);
 export const SLO_BASES = Object.freeze(['avg', 'peak', 'p95']);
+/**
+ * 피크 기준을 쓸 수 있는 지표 — 피크 표본 열(`<열>_peak` — perfCols.PEAK_COLS)이 있는 것만(반증 F7). 피크 열이 없는 지표에 ‘피크’ 를 고르면 저장 400 ·
+ *   읽기는 버리고 개수를 센다. 피크 기준은 **피크 표본만** 센다(없는 주기를 평균으로 메우지 않는다 — 결측으로 세고 peakMissing 으로 밝힌다).
+ */
+export const SLO_PEAK_METRICS = Object.freeze(SLO_METRICS.filter((m) => PEAK_COLS.includes(m)));
 export const SLO_OPS = Object.freeze(['lt', 'le', 'gt', 'ge']);
 export const SLO_PROFILES = Object.freeze(['airflow', 'gpdb']);
 export const SLO_LIMITS = Object.freeze({ perScope: 12, servers: 500, value: [-1e9, 1e12], objectivePct: [1, 100] });
@@ -59,6 +65,7 @@ export function normalizeSlo(raw, { strict = true } = {}) {
       if (!g || typeof g !== 'object') { bad(f, '객체여야 합니다'); continue; }
       if (!SLO_METRICS.includes(g.metric)) { bad(`${f}.metric`, '모르는 지표입니다'); continue; }
       if (!SLO_BASES.includes(g.basis)) { bad(`${f}.basis`, 'avg · peak · p95 중 하나입니다'); continue; }
+      if (g.basis === 'peak' && !SLO_PEAK_METRICS.includes(g.metric)) { bad(`${f}.basis`, '이 지표는 피크 표본이 없습니다(평균 · p95 만)'); continue; }
       if (!SLO_OPS.includes(g.op)) { bad(`${f}.op`, 'lt · le · gt · ge 중 하나입니다'); continue; }
       const v = typeof g.value === 'number' ? g.value : Number(g.value);
       if (!Number.isFinite(v) || v < SLO_LIMITS.value[0] || v > SLO_LIMITS.value[1]) { bad(`${f}.value`, '수여야 합니다'); continue; }
@@ -133,11 +140,16 @@ export function sloRes(from, to) { return to - from <= 20 * 86_400_000 ? '5m' : 
  * 한 목표 평가(순수). points = trendWindow.toPoints 모양.
  * @returns {{achievementPct, valid, expected, missing, within, violations:number, violationMs, longest, daily, status, p95, maintenance, bands}}
  */
-export function evaluateGoal(goal, points = [], { from, to, stepMs, now = Date.now() } = {}) {
-  const step = Math.max(1, n(stepMs) || RES_MS['5m']);
-  const pick = (p) => (goal.basis === 'peak' ? (n(p.peak) ?? n(p.max) ?? n(p.avg)) : n(p.avg));
+export function evaluateGoal(goal, points = [], { from, to, stepMs, cycleMs = null, now = Date.now() } = {}) {
+  // 주기 길이(반증 F12): 5분 원시는 수집 간격마다 점이 있다(설정 하한 1분) — 위반 시간 · 기대 주기 수는 추이 칸(stepMs ≥ 5분)이 아니라 **주기 길이**로 센다.
+  //   호출부가 준 cycleMs(이 노드 설정 간격) → 없으면 점 간격 중앙값(엣지 위임 서버) → 없으면 stepMs. 칸보다 길 수 없다.
+  const step0 = Math.max(1, n(stepMs) || RES_MS['5m']);
   const pts = (points || []).filter((p) => n(p?.t) != null && p.t >= from && p.t <= to).sort((a, b) => a.t - b.t);
+  const step = Math.min(step0, Math.max(1, n(cycleMs) || medianGap(pts) || step0));
+  // 피크 기준은 피크 표본만(반증 F7 — 예전에는 피크가 없으면 5분 평균으로 메워 ‘달성’ 으로 셌다). 값은 있는데 피크가 없는 주기는 결측 + peakMissing.
+  const pick = (p) => (goal.basis === 'peak' ? n(p.peak) : n(p.avg));
   const vals = pts.map((p) => ({ t: p.t, v: pick(p) })).filter((x) => x.v != null);
+  const peakMissing = goal.basis === 'peak' ? pts.filter((p) => n(p.peak) == null && (n(p.avg) != null || n(p.max) != null)).length : 0;
   const expected = Math.max(0, Math.floor((Math.min(to, now) - from) / step));
   const valid = vals.length;
   let inCnt = 0; let viol = 0; let longest = null; let run = null; const bands = [];
@@ -165,9 +177,17 @@ export function evaluateGoal(goal, points = [], { from, to, stepMs, now = Date.n
     achievementPct, valid, expected, missing: Math.max(0, expected - valid), within: inCnt, violations: valid ? viol : null, violationMs: valid ? viol * step : null,
     longest: longest ? { from: longest.from, to: longest.to, cycles: longest.cycles } : null,
     daily: [...daily.values()].map((d) => ({ day: d.day, pct: d.n ? r1((d.in / d.n) * 100) : null })),
-    status, p95: r1(p95), maintenance: { source: 'none', excluded: 0 },
+    status, p95: r1(p95), maintenance: { source: 'none', excluded: 0 }, cycleMs: step, ...(peakMissing ? { peakMissing } : {}),
     bands: bands.slice(-500).map((b) => ({ from: b.from, to: b.to })),
   };
+}
+/** 점 간격 중앙값(순수 — 2점 미만이면 null). 결측 빈틈은 큰 값이라 중앙값에 거의 영향이 없다. */
+export function medianGap(pts = []) {
+  const g = [];
+  for (let i = 1; i < pts.length; i += 1) { const d = pts[i].t - pts[i - 1].t; if (d > 0) g.push(d); }
+  if (!g.length) return null;
+  g.sort((a, b) => a - b);
+  return g[Math.floor((g.length - 1) / 2)];
 }
 /** 이번 달(포탈 날짜) 창 — 1일 0시(포탈 시각 — util/dayKey 의 경계와 같은 오프셋) ~ 지금. */
 export function monthWindow(now = Date.now()) {

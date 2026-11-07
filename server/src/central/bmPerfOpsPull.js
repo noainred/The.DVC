@@ -166,13 +166,22 @@ export function sanitizeCompareBody(b, now = Date.now()) {
   };
 }
 const SANITIZERS = { changes: sanitizeChangesBody, baseline: sanitizeBaselineBody, compare: sanitizeCompareBody };
+/**
+ * 응답 모양 판정(모드마다 — 6단계 반증 F2 정정). pullFromEdge 기본 판정은 봉투의 `{ok, node}` 라 node 가 없는 이 응답들은 v2.929(5단계) 게시 이후 성공이 전부 bad-body 였다
+ *   (5단계 테스트는 구버전 401 · 404 경로만 불렀다). 회귀: server/test/bmEdgeRoundTrip.test.js(실제 collector 라우터 왕복).
+ */
+export const PERF_OPS_BODY_OK = Object.freeze({
+  changes: (b) => isObj(b) && b.ok === true && Array.isArray(b.events),
+  baseline: (b) => isObj(b) && b.ok === true && Array.isArray(b.series),
+  compare: (b) => isObj(b) && b.ok === true && Array.isArray(b.metrics),
+});
 /** GET 한 번(보관 없음). mode: changes · baseline · compare. */
 export async function pullEdgePerfOps(agent, mode, { key, query = {} } = {}) {
   if (!SANITIZERS[mode]) return { ok: false, kind: 'bad-request', reason: 'mode' };
   const qs = new URLSearchParams({ key: String(key) });
   for (const k of ['from', 'to', 'metric', 'aFrom', 'aTo', 'bFrom', 'bTo', 'res', 'focus']) if (query?.[k] != null && query[k] !== '') qs.set(k, capStr(String(query[k]), 64));
   const r = await pullFromEdge(agent, `/api/collector/bm-usage/${mode}?${qs.toString()}`, {
-    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: perfOpsMinEdgeVersion(), what: '성능 기록을 읽을', label: '엣지 성능 기록 응답',
+    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: perfOpsMinEdgeVersion(), what: '성능 기록을 읽을', label: '엣지 성능 기록 응답', bodyOk: PERF_OPS_BODY_OK[mode],
     missing401: true,   // 경로가 없는 구버전 엣지는 사용자 인증 미들웨어로 떨어져 401 — 토큰 문제가 아니라 버전 문제다(스냅샷 대행과 같은 판정)
   });
   if (!r.ok) return { ok: false, kind: r.kind, reason: r.reason };

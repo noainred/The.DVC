@@ -29,7 +29,7 @@ export const RULE_CONDS = Object.freeze({
   baseline: Object.freeze(['band']),
   health: Object.freeze(['any', 'bad']),
   profile: Object.freeze(['bad']),
-  collect: Object.freeze(['any', 'cycle', 'success', 'db', 'auth']),
+  collect: Object.freeze(['any', 'cycle', 'success', 'db', 'auth', 'error']),
 });
 /** 기존 알림 채널(alerts.js channels) — 새 채널을 만들지 않는다. */
 export const CHANNELS = Object.freeze(['email', 'webhook', 'slack', 'teams']);

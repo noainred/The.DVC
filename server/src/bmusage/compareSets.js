@@ -66,7 +66,9 @@ export function listCompareSets(user) {
   return (all.users.find((x) => x.user === u)?.sets || []).map(pubSet);
 }
 /**
- * 저장(새로 · 같은 id 면 고침). 형식 밖은 400 · 상한 409. keys 는 라우트가 범위 검사를 마친 것(이 함수는 형식만 본다).
+ * 저장(새로 · 같은 id 면 고침). 형식 밖은 400 · 상한 409. keys 는 **범위 검사를 하지 않는다**(정정 — 반증 의심 항목: 예전 주석은 ‘라우트가 범위 검사를 마친 것’ 이라 했지만
+ *   라우트 setsWrite 는 키 범위를 보지 않는다). 세트는 저장한 사람에게만 돌려주는 자기 입력(키 글자)이라 새는 것이 없고, 세트를 열 때 비교 조회가 그 사람의 범위로 다시 판정한다
+ *   (범위 밖 · 없는 키는 ‘없음’ 열). 범위 계정은 cross 세트를 저장하지 못한다(라우트 400).
  * @param {{user:string, id?:string, name:string, keys:string[], cross?:boolean, maxServers?:number}} p
  */
 export function saveCompareSet({ user, id = '', name, keys, cross = false, maxServers = 5, now = Date.now() } = {}) {

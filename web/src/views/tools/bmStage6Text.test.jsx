@@ -15,7 +15,7 @@ import { groupCompareKeys } from './BmOpsFleet.jsx';
 import { COMPARE_GROUPS, COMPARE_METRICS, buildCompareTable, seriesStats } from '../../../../server/src/bmusage/multiCompare.js';
 import * as K from './bmCollectText.js';
 import { CollectHealthView } from './BmCollectHealth.jsx';
-import { HEALTH_REASON_CODES, NODE_FLAGS, summarizeCycle } from '../../../../server/src/bmusage/collectHealth.js';
+import { HEALTH_REASON_CODES, NODE_FLAGS, NODE_ERRORS, summarizeCycle } from '../../../../server/src/bmusage/collectHealth.js';
 import { nodeStateOf } from '../../../../server/src/routes/api/bmCollectHealth.js';
 import { PEAK_PLAN_REASONS } from '../../../../server/src/bmusage/peakPlan.js';
 import * as N from './bmAnnotText.js';
@@ -24,7 +24,7 @@ import { TrendSvg } from './BmTrendChart.jsx';
 import { ANNOT_KINDS } from '../../../../server/src/bmusage/annotations.js';
 import * as S from './bmShare.js';
 import * as RB from './bmRunbookText.js';
-import { PlaybookView, SloTable } from './BmRunbookTabs.jsx';
+import { PlaybookView, SloTable, basesFor } from './BmRunbookTabs.jsx';
 import { STEP_KINDS, playbookCatalog, allJudgmentIds } from '../../../../server/src/bmusage/playbooks.js';
 import { SLO_METRICS, SLO_BASES, SLO_OPS, evaluateGoal } from '../../../../server/src/bmusage/slo.js';
 import { inlineSvgPaint, captureName, footerHeight } from './bmCapture.js';
@@ -123,7 +123,10 @@ describe('수집 건강 — 문구 표 = 서버 열거 · 결측은 ‘—’', 
   it('사유 · 칸 · 노드 상태 1:1', () => {
     expect(Object.keys(K.REASON_TEXT).sort()).toEqual([...HEALTH_REASON_CODES].sort());
     for (const f of NODE_FLAGS) expect(K.FLAG_TEXT[f]).toBeTruthy();
-    const states = new Set(['off', 'old-version', 'no-cycle', 'edge-stale', 'ok', 'attention', 'no-snapshot']);
+    const states = new Set(['off', 'old-version', 'no-cycle', 'edge-stale', 'ok', 'attention', 'no-snapshot', 'cycle-failed', 'hidden']);
+    expect(Object.keys(K.NODE_ERROR_TEXT).sort()).toEqual([...NODE_ERRORS].sort());
+    expect(nodeStateOf({ via: 'edge', enabled: true, hasField: false, marker: true })).toBe('no-cycle');   // 반증 F3
+    expect(nodeStateOf({ via: 'local', enabled: true, health: { node: { error: 'classify-failed', cells: {} } } })).toBe('cycle-failed');   // 반증 F1
     expect(nodeStateOf({ via: 'edge', enabled: true, hasField: false })).toBe('old-version');
     expect(nodeStateOf({ via: 'local', enabled: false })).toBe('off');
     for (const st of states) expect(K.NODE_STATE_TEXT[st]).toBeTruthy();
@@ -157,6 +160,17 @@ describe('수집 건강 — 문구 표 = 서버 열거 · 결측은 ‘—’', 
     expect(gap.ms.match(/M/g).length).toBe(2, '결측 칸에서 끊긴다(0 으로 잇지 않는다)'); expect(gap.msDots.match(/M/g).length).toBe(1, '홀로 남은 첫 칸은 점');
     expect(K.trendPaths([]).msDots).toBe('');
   });
+  it('저장 카드 — 폴더를 못 읽으면 ‘—’(0개 0KB 아님) · 일부 못 읽음은 ‘부분’ (반증 F5) · 주기 실패 문구(F1)', () => {
+    expect(K.famLine({ mainBytes: null, families: null, error: 'readdir' })).toMatch(/기간 파일 —/);
+    expect(K.famLine({ mainBytes: null, families: null, error: 'readdir' })).not.toMatch(/0개|0KB/);
+    expect(K.famLine({ mainBytes: 4096, families: { raw: { files: 3, bytes: 2 * 1024 ** 2 }, h1: { files: 1, bytes: 1 }, d1: { files: null } }, partial: true })).toMatch(/원시 3개.*1일 —.*부분/);
+    const resp = { kpi: { corps: 1, servers: 0, corpsUnknown: 1 }, reasons: [],
+      nodes: [{ agent: 'vm', via: 'local', state: 'cycle-failed', flags: ['error'], node: { error: 'classify-failed', cells: { error: 'true' }, db: { families: null, error: 'readdir' } }, trend: [] }],
+      rows: [{ vcenterId: 'vcA', agent: 'vm', via: 'local', nodeState: 'cycle-failed', flags: ['error'], servers: null, reasons: [] }] };
+    const html = renderToStaticMarkup(h(CollectHealthView, { resp, now: NOW }));
+    expect(html).toContain('주기 실패'); expect(html).toContain('대상 분류(서버 인벤토리)에 실패'); expect(html).toContain('법인 1곳 모름');
+    expect(html).not.toMatch(/원시 0개/);
+  });
   it('CSV — 결측은 빈 칸', () => {
     const csv = K.collectCsv({ rows: [{ vcenterId: 'vcA', agent: 'e', servers: null, reasons: [] }] });
     expect(csv).not.toContain('null'); expect(csv.split('\r\n')[1]).toMatch(/^vcA,e,,/);
@@ -185,6 +199,15 @@ describe('운영 주석 — ◆ 핀 · 목록 · 연결', () => {
     expect(N.annotBody({ keys: ['k'], at: 1, kind: 'memo', text: 'x' })).toEqual({ keys: ['k'], at: 1, kind: 'memo', text: 'x' });
     expect(N.annotBody({ corp: 'vcA', at: 1, end: 2, kind: 'work', text: 'y', issue: ' iss-3 ' }).links).toEqual({ issue: 'ISS-3' });
     expect(N.annotTargetText({ target: { type: 'corp', vcenterIds: ['vcA'] } })).toBe('법인 vcA');
+  });
+  it('고치기 본문 — 바뀐 칸만(집중 연결 · 원래 시각의 초 보존 · 지운 칸은 null — 반증 F10)', () => {
+    const orig = { at: NOW + 37_123, end: null, kind: 'work', text: '집중 모니터링 시작', links: { focus: 'a1b2c3d4-0000-1111' } };
+    const form = { at: N.localInputOf(orig.at), end: '', kind: 'work', text: '집중 모니터링 시작(오타)', issue: '', wikiSpace: '', wikiId: '' };
+    expect(N.annotEditPatch(orig, form)).toEqual({ text: '집중 모니터링 시작(오타)' });
+    expect(N.annotEditPatch(orig, { ...form, text: orig.text, issue: 'iss-3' })).toEqual({ links: { issue: 'ISS-3' } });
+    expect(N.annotEditPatch({ ...orig, links: { issue: 'ISS-3', focus: 'x' } }, { ...form, text: orig.text })).toEqual({ links: { issue: null } });
+    const moved = N.annotEditPatch(orig, { ...form, text: orig.text, at: N.localInputOf(orig.at + 3_600_000) });
+    expect(Object.keys(moved)).toEqual(['at']);
   });
   it('목록 SSR — 삭제됨 흔적 · 고치기는 canEdit 일 때만', () => {
     const html = renderToStaticMarkup(h(AnnotTable, { list }));
@@ -254,6 +277,18 @@ describe('진단 플레이북 · 목표선', () => {
     const looks = new Set(playbookCatalog().flatMap((p) => p.steps.flatMap((x) => x.look || [])));
     for (const l of looks) expect(RB.LOOK_TEXT[l]).toBeTruthy();
     for (const id of allJudgmentIds()) expect(RB.judgmentText(id)).not.toBe('');
+  });
+  it('비교 피크 칸은 피크 표본만 · 평균+피크에서 다른 양을 섞지 않는다(반증 F7) · 목표 편집 기준은 피크 열 있는 지표만', () => {
+    expect(C.cellPairText({ avg: 40, peak: null }, '%', 'peak')).toBe('—');
+    expect(C.cellPairText({ avg: 40, peak: null }, '%', 'avgpeak')).toMatch(/40.*\/ —/);
+    expect(C.rowBasisNote({ basis: 'avg', src: 'series', peakCapable: true, cells: [{ win: { avg: 1 } }, { win: { avg: 2, peak: 3 } }] }, 'avgpeak')).toMatch(/평균으로 비교/);
+    expect(C.rowBasisNote({ basis: 'avg', src: 'series', peakCapable: true, cells: [{ win: { avg: 1 } }] }, 'avgpeak')).toBe('', '값 있는 서버 1대 — 비교가 없다');
+    expect(C.rowBasisNote({ basis: 'avg', src: 'series', peakCapable: false, cells: [{ win: { avg: 1 } }, { win: { avg: 2 } }] }, 'avgpeak')).toBe('', '원래 피크가 없는 지표');
+    expect(C.cellPairText({ avg: 504, peak: null }, 'W', 'avgpeak', false)).toBe('504W');
+    expect(C.rowBasisNote({ basis: 'peak', src: 'series', cells: [] }, 'avgpeak')).toBe('');
+    expect(basesFor({ bases: ['avg', 'peak', 'p95'], peakMetrics: ['cpu_pct'] }, 'mem_pct')).toEqual(['avg', 'p95']);
+    expect(basesFor({ bases: ['avg', 'peak', 'p95'], peakMetrics: ['cpu_pct'] }, 'cpu_pct')).toEqual(['avg', 'peak', 'p95']);
+    expect(RB.RUNBOOK_HONEST).toMatch(/검토된 읽기 전용 목록/); expect(RB.SLO_HONEST).toMatch(/평균으로 메우지 않고 결측/);
   });
   it('플레이북 SSR — 지금 판정에 맞는 것이 열리고 명령은 복사용(자리표시는 서버 값으로) · 포탈은 실행하지 않는다', () => {
     const catalog = { playbooks: playbookCatalog() };

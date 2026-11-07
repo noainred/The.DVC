@@ -29,7 +29,7 @@ function cleanStats(s, now) {
   const last = isObj(s.last) ? { t: clampEdgeTs(numOrNull(s.last.t), now), avg: numOrNull(s.last.avg), peak: numOrNull(s.last.peak) } : null;
   return {
     avg: numOrNull(s.avg), peak: numOrNull(s.peak), peakAt: clampEdgeTs(numOrNull(s.peakAt), now), last,
-    n: numOrNull(s.n), expected: numOrNull(s.expected), missing: numOrNull(s.missing),
+    n: numOrNull(s.n), expected: numOrNull(s.expected), missing: numOrNull(s.missing), peakN: numOrNull(s.peakN), max: numOrNull(s.max),
     spark: (Array.isArray(s.spark) ? s.spark : []).slice(0, 120).filter((p) => Array.isArray(p)).map((p) => [clampEdgeTs(numOrNull(p[0]), now), numOrNull(p[1]), numOrNull(p[2])]).filter((p) => p[0] != null),
     ...(numOrNull(s.truncated) != null ? { truncated: numOrNull(s.truncated) } : {}), ...(numOrNull(s.missingPeriods) != null ? { missingPeriods: numOrNull(s.missingPeriods) } : {}),
   };
@@ -56,12 +56,14 @@ export function sanitizeCompareSeries(b, now = Date.now()) {
     ...(b.reason ? { reason: strOf(b.reason, 200) } : {}),
   };
 }
+/** 응답 모양 판정 — 기본 판정(봉투 `{ok, node}`)을 쓰면 성공 응답이 전부 bad-body 다(반증 F2 · 회귀 bmEdgeRoundTrip.test.js). */
+export const compareSeriesBodyOk = (b) => isObj(b) && b.ok === true && isObj(b.metrics);
 /** 한 서버(엣지 위임)의 비교 계열 — 보관 없음. */
 export async function pullEdgeCompareSeries(agent, { key, metrics = [], from, to } = {}) {
   const ms = []; for (const c of metrics) { if (SERIES.has(c) && ms.length < 24) ms.push(c); }   // 지표 이름 화이트리스트 · 상한 24
   const qs = new URLSearchParams({ key: capStr(String(key), 256), metrics: ms.join(','), from: String(Math.floor(Number(from) || 0)), to: String(Math.floor(Number(to) || 0)) });
   const r = await pullFromEdge(agent, `/api/collector/bm-usage/compare-series?${qs.toString()}`, {
-    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: stage6MinEdgeVersion(), what: '비교 계열을 읽을', label: '엣지 비교 계열 응답',
+    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: stage6MinEdgeVersion(), what: '비교 계열을 읽을', label: '엣지 비교 계열 응답', bodyOk: compareSeriesBodyOk,
     missing401: true,   // 경로가 없는 구버전 엣지는 사용자 인증 미들웨어로 떨어져 401 — 토큰이 아니라 버전 문제다(5단계와 같은 판정)
   });
   if (!r.ok) return { ok: false, kind: r.kind, reason: r.reason, ms: r.ms };

@@ -21,13 +21,22 @@ export const NODE_STATE_TEXT = Object.freeze({
   'old-version': { label: '엣지 버전 낮음', tone: 'warn' },
   'edge-stale': { label: '보관분 오래됨', tone: 'warn' },
   'no-snapshot': { label: '보관분 없음', tone: 'idle' },
+  'cycle-failed': { label: '주기 실패', tone: 'bad' },
+  hidden: { label: '노드 값 숨김(법인 행 기준)', tone: 'idle' },
+});
+/** 주기 오류 code(서버 collectHealth.NODE_ERRORS 와 1:1) → 문구. 실패면 대상 · 결과를 모른다(대상 0 · 정상이 아니다). */
+export const NODE_ERROR_TEXT = Object.freeze({
+  'classify-failed': '대상 분류(서버 인벤토리)에 실패해 이번 주기를 건너뛰었습니다 — 대상 수 · 성공률을 모릅니다',
+  'cycle-error': '주기 중 예외로 멈췄습니다 — 이번 주기 결과를 모릅니다',
+  'health-failed': '수집 건강 계산에 실패했습니다 — 이 노드 값을 모릅니다',
+  'no-targets': '대상 서버가 없습니다(사실 0)',
 });
 export function nodeStateView(st, { minEdgeVersion = null } = {}) {
   const v = NODE_STATE_TEXT[st] || { label: String(st || '—'), tone: 'idle' };
   return st === 'old-version' && minEdgeVersion ? { ...v, label: `${v.label}(v${minEdgeVersion} 이상 필요)` } : v;
 }
 /** 기준 밖 칸(cells — 수집 노드가 대 본 결과) → 문구. */
-export const FLAG_TEXT = Object.freeze({ cycle: '주기 소요 여유 적음', success: '성공률 낮음', db: 'DB 상한 가까움', auth: '인증 정지 서버 있음' });
+export const FLAG_TEXT = Object.freeze({ cycle: '주기 소요 여유 적음', success: '성공률 낮음', db: 'DB 상한 가까움', auth: '인증 정지 서버 있음', error: '주기 실패(대상 · 결과 모름)' });
 /** 실패 사유(server HEALTH_REASON_CODES) → 이름 · 조치(1:1). */
 export const REASON_TEXT = Object.freeze({
   auth: { label: '인증 거부', action: '등록부의 자격증명을 고치세요 — 다음 주기에 자동 재개합니다(계정 잠금을 막으려고 자동 재시도하지 않습니다).' },
@@ -56,6 +65,17 @@ export function msText(v) {
   if (x < 1000) return `${Math.round(x)}ms`;
   if (x < 60_000) return `${Math.round(x / 100) / 10}s`;
   return `${Math.round(x / 6000) / 10}분`;
+}
+/**
+ * 저장 카드 한 줄(메인 · 가족별 파일 수 · 크기) — 폴더를 못 읽었으면 가족 값은 ‘—’(0개 0KB 가 아니다), 일부 파일을 못 읽었으면 ‘부분’ 을 붙인다(반증 F5).
+ */
+export function famLine(db = {}) {
+  const fam = db?.families;
+  const head = `메인 ${gbText(db?.mainBytes)}${db?.walBytes ? ` (+WAL ${gbText(db.walBytes)})` : ''}`;
+  if (!fam || typeof fam !== 'object') return `${head} · 기간 파일 —(폴더를 읽지 못함)`;
+  const cnt = (v) => { const x = n(v); return x == null ? '—' : `${x}개`; };
+  const dev = n(fam.dev?.files) != null || n(fam.dev1h?.files) != null ? `${(n(fam.dev?.files) ?? 0) + (n(fam.dev1h?.files) ?? 0)}개` : '—';
+  return `${head} · 원시 ${cnt(fam.raw?.files)} ${gbText(fam.raw?.bytes)} · 1시간 ${cnt(fam.h1?.files)} ${gbText(fam.h1?.bytes)} · 장치 ${dev} · 1일 ${cnt(fam.d1?.files)}${db?.partial ? ' (부분 — 일부 파일 크기를 못 읽음)' : ''}`;
 }
 /** 합에서 뺀 ‘모름’ 개수 → 꼬리 글자(없으면 빈 글자 — 결측을 0 으로 더하지 않았다는 표시). */
 export function unknownText(cnt, what) { const x = n(cnt); return x ? ` · ${what} ${x}곳 모름(합에서 뺌)` : ''; }

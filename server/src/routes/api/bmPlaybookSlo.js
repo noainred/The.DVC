@@ -134,12 +134,14 @@ export async function bmSloView(req, snap, deps = {}) {
   const items = goals.map((g) => {
     const tr = byMetric.get(g.metric);
     if (!tr || tr.ok === false) return { goal: g, error: String(tr?.reason || '추이를 읽지 못했습니다').slice(0, 200), kind: tr?.kind || null };
-    return { goal: g, res: tr.res, stepMs: tr.stepMs, ...L.evaluateGoal(g, tr.points || [], { from: win.from, to: win.to, stepMs: tr.stepMs, now }) };
+    // 주기 길이: 이 노드 5분 원시는 설정 간격(반증 F12) · 엣지 위임 서버는 점 간격 중앙값(evaluateGoal 이 고른다) · 롤업은 칸 길이.
+    const cycleMs = found.via === 'local' && tr.res === '5m' ? settings.intervalMs : null;
+    return { goal: g, res: tr.res, stepMs: tr.stepMs, ...L.evaluateGoal(g, tr.points || [], { from: win.from, to: win.to, stepMs: tr.stepMs, cycleMs, now }) };
   });
   return { ok: true, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), ...win, month: win === mw, res, apps, items,
     maintenanceSource: 'none', canEdit: isAdminReq(req) && !allowed, ...(L.sloLoadError() ? { loadError: { reason: '목표 설정 파일을 읽지 못해 기본 목표로 계산했습니다' } } : {}) };
 }
-export async function bmSloSettingsRead(req, snap) {
+export async function bmSloSettingsRead(req, snap, deps = {}) {
   const L = await import('../../bmusage/slo.js');
   const cfg = L.loadSlo();
   const allowed = scopedVcenterIds(req.user, snap);
@@ -148,13 +150,23 @@ export async function bmSloSettingsRead(req, snap) {
   if (allowed || !isAdmin) {
     // 범위 계정 — 서버별 목표는 보이는 서버 것만(키가 곧 서버 식별자다).
     // 비관리자 — 키(서버 주소일 수 있다 · 가림 대상)를 싣지 않고 보이는 서버의 개별 목표 **개수만** 밝힌다(서버별 값은 그 서버의 목표선 탭이 보여 준다).
-    const D = deps0();
+    // 반증 F9: 예전에는 키마다 resolvePerfTarget(대상 해석 · 엣지 보관분 · 주소 목록)을 다시 돌아 500건이면 0.7초 동안 루프를 막았다 —
+    //   대상(이 노드) · 엣지 보관분을 **요청당 한 번** 읽어 키 → 법인 맵을 만들고 O(N) 으로 대 본다(저장 키는 실제 키 — 가림 토큰을 풀 일이 없다).
+    const D = deps0(deps);
+    const vcOf = new Map();
+    for (const x of (await D.currentTargets().catch(() => ({ targets: [] })))?.targets || []) if (x?.key) vcOf.set(String(x.key), t(x.vcenterId));
+    for (const rec of await D.listEdgeBmUsage().catch(() => [])) for (const x of rec?.snap?.targets || []) { const k = t(x?.key); if (k && !vcOf.has(k)) vcOf.set(k, t(x.vcenterId)); }
     const keep = {};
-    for (const k of Object.keys(cfg.servers || {})) { const f = await resolvePerfTarget(req, D, { allowed, isAdmin, key: k }); if (f && !f.denied) keep[k] = cfg.servers[k]; }
+    for (const k of Object.keys(cfg.servers || {})) {
+      if (!vcOf.has(k)) continue;   // 지금 대상에 없는 서버(사라짐) — 예전과 같이 싣지 않는다
+      const vc = vcOf.get(k);
+      if (allowed && (!vc || !allowed.has(vc))) continue;
+      keep[k] = cfg.servers[k];
+    }
     if (isAdmin) servers = keep;
     else { servers = {}; serversHidden = Object.keys(keep).length; }
   }
-  return { ok: true, slo: { ...cfg, servers }, ...(serversHidden ? { serversHidden } : {}), metrics: L.SLO_METRICS, bases: L.SLO_BASES, ops: L.SLO_OPS, profiles: L.SLO_PROFILES, limits: L.SLO_LIMITS, defaults: L.SLO_DEFAULTS,
+  return { ok: true, slo: { ...cfg, servers }, ...(serversHidden ? { serversHidden } : {}), metrics: L.SLO_METRICS, bases: L.SLO_BASES, peakMetrics: L.SLO_PEAK_METRICS, ops: L.SLO_OPS, profiles: L.SLO_PROFILES, limits: L.SLO_LIMITS, defaults: L.SLO_DEFAULTS,
     canEdit: isAdminReq(req) && !allowed, ...(L.sloLoadError() ? { loadError: { reason: '목표 설정 파일을 읽지 못해 기본 목표로 동작 중입니다(저장하면 새 파일 · 손상본은 보존)' } } : {}) };
 }
 async function sloWrite(req, res) {

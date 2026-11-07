@@ -8,7 +8,7 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { strOf } from '../util/coercionTrap.js';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
-import { HEALTH_REASON_CODES, NODE_FLAGS } from '../bmusage/collectHealth.js';
+import { HEALTH_REASON_CODES, NODE_FLAGS, NODE_ERRORS } from '../bmusage/collectHealth.js';
 import { PEAK_PLAN_REASONS } from '../bmusage/peakPlan.js';
 import { FAMILIES } from '../bmusage/monthStore.js';
 
@@ -27,7 +27,8 @@ function cleanNode(x, now) {
     .filter((r) => PATHS.has(r.path) && CODES.has(r.code))
     .map((r) => ({ path: r.path, code: r.code, n: N(r.n), since: clampEdgeTs(N(r.since), now), state: STATES.has(r.state) ? r.state : null }));
   const info = isObj(x.info) ? { 'no-telemetry': N(x.info['no-telemetry']), first: N(x.info.first), 'psi-absent': N(x.info['psi-absent']) } : null;
-  const fams = {};
+  // 폴더를 못 읽은 노드는 가족 값이 null(모름 — 0개 0KB 가 아니다 · 반증 F5)
+  const fams = isObj(x.db?.families) ? {} : null;
   if (isObj(x.db?.families)) for (const f of Object.keys(FAMILIES)) { const v = x.db.families[f]; if (isObj(v)) fams[f] = { files: N(v.files), bytes: N(v.bytes), first: v.first == null ? null : strOf(v.first, 8), last: v.last == null ? null : strOf(v.last, 8) }; }
   const cells = {};
   if (isObj(x.cells)) for (const k of NODE_FLAGS) if (CELL.has(x.cells[k])) cells[k] = x.cells[k];
@@ -38,10 +39,11 @@ function cleanNode(x, now) {
     ssh: isObj(x.ssh) ? { n: N(x.ssh.n), p50Ms: N(x.ssh.p50Ms), p95Ms: N(x.ssh.p95Ms) } : null,
     focus: isObj(x.focus) ? { running: N(x.focus.running), queued: N(x.focus.queued) } : null,
     peakPlan: isObj(x.peakPlan) ? { windowS: N(x.peakPlan.windowS), capS: N(x.peakPlan.capS), reason: PEAK_PLAN_REASONS.includes(x.peakPlan.reason) ? x.peakPlan.reason : null, expectedMs: N(x.peakPlan.expectedMs), budgetMs: N(x.peakPlan.budgetMs) } : null,
-    db: isObj(x.db) ? { mainBytes: N(x.db.mainBytes), walBytes: N(x.db.walBytes), files: N(x.db.files), bytes: N(x.db.bytes), ...(N(x.db.unread) ? { unread: N(x.db.unread) } : {}), ...(x.db.error ? { error: 'readdir' } : {}), families: fams } : null,
+    db: isObj(x.db) ? { mainBytes: N(x.db.mainBytes), walBytes: N(x.db.walBytes), files: N(x.db.files), bytes: N(x.db.bytes), ...(N(x.db.unread) ? { unread: N(x.db.unread) } : {}), ...(x.db.error ? { error: 'readdir' } : {}), ...(x.db.partial === true ? { partial: true } : {}), families: fams } : null,
     dbPct: N(x.dbPct), capBytes: N(x.capBytes), cells,
     th: isObj(x.th) ? { cyclePct: N(x.th.cyclePct), successPct: N(x.th.successPct), dbPct: N(x.th.dbPct), dbCapGb: N(x.th.dbCapGb) } : null,
-    ...(x.error ? { error: strOf(x.error, 200) } : {}), ...(x.recordError ? { recordError: strOf(x.recordError, 160) } : {}),
+    // 주기 오류는 열거 code 만(엣지 원문을 싣지 않는다 — 모르는 값은 ‘수집 건강 계산 실패’ 로 본다 · 반증 F1).
+    ...(x.error ? { error: NODE_ERRORS.includes(x.error) ? x.error : 'health-failed' } : {}), ...(x.recordError ? { recordError: strOf(x.recordError, 160) } : {}),
   };
 }
 /** 봉투 collectHealth → 중앙 보관 모양(모르는 형식이면 null). */

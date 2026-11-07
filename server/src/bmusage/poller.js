@@ -789,7 +789,8 @@ async function recordCycleHealth({ results = [], t0, intervalMs, peakPlan = null
         concMax: sum.node.conc.max, concCap: sum.node.conc.cap, sshP50: sum.node.ssh.p50Ms, sshP95: sum.node.ssh.p95Ms }).catch((e) => { _health.node.recordError = String(e?.message || e).slice(0, 160); });
     }
   } catch (e) {
-    _health = { at: Date.now(), node: { at: Date.now(), error: `수집 건강 계산 실패: ${String(e?.message || e).slice(0, 160)}` }, byCorp: {}, sinceFrom: HEALTH_SINCE_FROM };
+    // 계산 실패도 ‘주기 실패’ 칸으로(반증 F1 — 정상으로 보이지 않게). 원문은 이 노드에만(errorDetail — 봉투 정제가 싣지 않는다).
+    _health = { at: Date.now(), node: { at: Date.now(), error: 'health-failed', errorDetail: `수집 건강 계산 실패: ${String(e?.message || e).slice(0, 160)}`, cells: { error: 'true' } }, byCorp: {}, sinceFrom: HEALTH_SINCE_FROM };
   }
   return _health;
 }
@@ -887,6 +888,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       const reason = `대상 분류(서버 인벤토리)에 실패해 이번 주기를 건너뛰었습니다 — ${sourceErrors.find((x) => x.source === 'classify')?.error || ''}`;
       _last = { at: Date.now(), ms: Date.now() - t0, servers: null, okCount: 0, failCount: 0, inserted: 0, error: reason, ...srcErr, trigger };
       await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'classify-failed' });
+      const na = await runNodeCollectAlert();
+      if (na && !na.skipped) _last.collectAlert = { fires: na.fires ?? 0, error: na.error || null };
       return { ok: false, reason, ...srcErr };
     }
     if (!targets.length) {
@@ -894,6 +897,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       dropStaleState(new Set());
       _last = { at: Date.now(), ms: Date.now() - t0, servers: 0, okCount: 0, failCount: 0, inserted: 0, counts, ...srcErr, trigger };
       await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'no-targets' });
+      await runNodeCollectAlert();
       return { ok: true, servers: 0, counts, reason: '대상 서버가 없습니다.', ...srcErr };
     }
     _listBudget = LIST_BUDGET_PER_RUN;   // ⚠ 주기 시작마다 리셋(위 상수 주석 참조)
@@ -1008,6 +1012,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
   } catch (e) {
     _last = { at: Date.now(), ms: Date.now() - t0, error: String(e?.message || e).slice(0, 300), trigger };
     await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'cycle-error' }).catch(() => {});
+    await runNodeCollectAlert();
     return { ok: false, reason: _last.error };
   } finally { _running = false; }
 }
@@ -1049,11 +1054,29 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
       dev: B ? B.deviationsFor(bands, r.target.key, row) : null, profile });
   }
   // 6단계 ‘수집 건강’ — 서버가 아니라 이 노드 한 칸(key '__node__' · 법인 공용). 칸은 이번 주기 recordCycleHealth 가 기준과 대 본 결과 그대로.
-  if (on.includes('collect') && _health?.node?.cells) {
-    const h = _health.node;
-    items.push({ key: '__node__', name: `수집 노드 ${agent || '(이 노드)'}`, vcenterId: '', collect: { cells: h.cells, cyclePct: h.cyclePct, successPct: h.successPct, dbPct: h.dbPct, th: h.th } });
-  }
+  const nodeItem = on.includes('collect') ? collectNodeItem(agent) : null;
+  if (nodeItem) items.push(nodeItem);
   return (await import('./perfAlerts.js')).runPerfAlerts(items, { rules, now });
+}
+function collectNodeItem(agent) {
+  if (!_health?.node?.cells) return null;
+  const h = _health.node;
+  return { key: '__node__', name: `수집 노드 ${agent || '(이 노드)'}`, vcenterId: '', collect: { cells: h.cells, cyclePct: h.cyclePct, successPct: h.successPct, dbPct: h.dbPct, th: h.th, error: h.error || null } };
+}
+/**
+ * 실패 · 0대 주기(분류 실패 · 주기 예외 · 대상 없음)에도 ‘수집 건강’ 규칙만 돌린다(반증 F1 — 예전에는 이 경로가 알림 판정 전에 돌아가 규칙이 실패를 못 잡았다).
+ *   서버 항목은 넣지 않는다(다른 규칙의 서버 상태는 evaluatePerfRules 가 CARRY_MS 동안 들고 간다 — 지우지 않는다). 실패해도 주기 결과를 바꾸지 않는다.
+ */
+async function runNodeCollectAlert() {
+  try {
+    const R = await import('./perfRules.js');
+    if (R.perfRulesLoadError()) return { ok: false, skipped: 'settings-unreadable' };
+    const rules = R.loadPerfRules();
+    if (!rules?.rules?.collect?.on) return { ok: true, skipped: 'off' };
+    const item = collectNodeItem(config.agent?.name || '');
+    if (!item) return { ok: true, skipped: 'no-health' };
+    return await (await import('./perfAlerts.js')).runPerfAlerts([item], { rules });
+  } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 160) }; }
 }
 let _focusEndHooked = false;
 export function startBmUsagePoller() {
