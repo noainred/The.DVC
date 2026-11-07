@@ -29,6 +29,7 @@
 - (v2.927) 중앙 → 엣지 설정 배포에 엣지별 지시를 더할 때 — 엣지 코드를 바꾸지 않으려면 받는 쪽이 채우는 기본값까지 계산에 넣는다
 - (v2.929) 베어메탈 성능 5단계 엣지 대행 — 집중 · 변경 · 띠 · 비교는 볼 때 pull, 봉투에는 요약만 · 판정 · 발송은 엣지 · 이슈는 중앙이 당길 때 · 구버전은 경로 존재로 구분
 - (6단계) 리눅스 성능 6단계 엣지 대행 — 비교 계열 요청 1개 · 수집 건강 봉투(법인 대조) · 최소 버전 공용 함수(릴리스 노트 6단계 첫 번호)
+- (7a단계) 리눅스 성능 7a단계 로그 분석 — 봉투 logsVer · logSummary(정제 · 키는 같은 봉투 대상만) · 상세 대행(bodyOk 명시 · 왕복 테스트) · 최소 버전 7a 표지
 
 ## 본문
 
@@ -827,6 +828,21 @@
     표지도 없으면 엣지가 알린 버전을 최소 버전(릴리스 노트)과 대 보고(같거나 높으면 단정하지 않는다) 그래도 낮거나 모를 때만 ‘엣지 버전 낮음’. 재시작 직후 모든 엣지가 ‘업그레이드 필요’ 로 보이던 것을 막는다.
     주기 오류는 열거 code 만 싣는다(`classify-failed` · `cycle-error` · `health-failed` · `no-targets` — 엣지 원문은 그 노드에만).
   - 목표선의 엣지 서버 계열은 **3a 추이 대행을 그대로** 쓴다(`pullBmTrend` — 지표마다 1회 · 동시 2 · 최소 버전은 `TREND_MIN_EDGE_VERSION` 그대로: 새 필드가 없다). 운영 주석은 중앙 한 곳에 저장한다(엣지로 보내지 않는다).
+- ⚠⚠ **리눅스 성능 7a단계 로그 분석의 엣지 계약 — 엣지가 분류 · 집계 · 가림까지 하고 중앙은 집계 · 가린 표본만 받는다(원문은 법인 밖으로 나가지 않는다)**
+  (`bmusage/edgePull.js envelopeLogs` · `routes/collector.js GET /bm-usage/logs` · `central/{bmLogsPull,bmPerfSanitize,featureMinEdgeVersion}.js` · `dataflow/build.js`(경로 분류). 회귀 `server/test/bmLogs7aRoundTrip.test.js`):
+  - **봉투**: `logsVer`(표지 — 첫 주기 전에도 싣는다: 값 없음 ≠ 구버전 · 6단계 반증 F3) + `logSummary`(서버별 24시간 — 분류별 패턴/줄 · 읽은 줄 · 잘림 · 분류 안 됨 · 보안 high · 상위 8 패턴 · 출처 상태 · 대상 목록 안 서버만).
+    중앙 정제(`sanitizeLogSummary`): 아는 필드만 · **키는 같은 봉투의 대상 목록 안만** · 규칙 id 는 카탈로그(`LOG_RULE_IDS`)만 · 서명 꼴(16진 16자 · `#over:<분류>`) · 분류 · 심각도 · 출처 상태 열거 ·
+    문자열 수치 → 수(못 읽으면 null) · 제어문자 제거 · 길이 상한 · 시각 clamp · 버린 수는 `logSummaryDropped`.
+    봉투 크기: 상위 5 · 표본 160자 · 서명 120자로 싣고, 봉투 상한(`fitEnvelope`)을 넘으면 성능 상세를 줄인 뒤 로그 요약의 표본 · 서명 글자 → 상위 패턴 순으로 뺀다(분류별 개수 · 출처 상태는 남김 · `logsTruncated`).
+  - **상세 대행**: `GET /api/collector/bm-usage/logs?key=&range=`(같은 url · 같은 토큰 · 대상 밖 키 404 · 보관 없음) — 중앙 `pullEdgeLogs` 는 **`bodyOk: logViewBodyOk` 명시**(`{ok:true, patterns[], hourly[]}` —
+    기본 판정은 봉투 모양이라 성공이 전부 bad-body 가 된다 · 6단계 반증 F2) + `sanitizeLogView`(연계 표지도 꼴 검사). 실제 collector 라우터 ↔ 실제 pull 함수 성공 왕복 테스트가 고정한다.
+    ⚠⚠ **정제본은 로컬 응답의 모양을 다 가져야 한다**(7a 반증 F9 — 규칙 카탈로그 · 수집 구획 · 출처 권한 범위 · 근거가 빠져 엣지 위임 서버의 ‘규칙’ 표가 비었다): 규칙 카탈로그 · 근거 · 분류 이름은
+    **중앙 자기 것**(정적 — 엣지가 보낸 정규식 글자를 싣지 않는다 · `rulesFrom: 'central'`) · `method`(구획은 `LOG_SECTIONS` 안만 · 출처 · 식별자 · 앱 경로는 꼴 검사 · 주기 `intervalMs`) ·
+    출처 상태의 화면 칸(scope · partial · first · older · undated · skew · dup · authSkipped · uid · groups · svc …) · `security.totalsWhy` · `read.authSrc` · `corrSource`. 회귀는 **로컬 응답의 키 경로 ⊆ 대행 응답의 키 경로**
+    (실제 왕복 + 풍부한 응답의 정제)를 대조하고 화면이 쓰는 칸을 값으로 단언한다. 서명은 정제에서 `maskStoredTmpl` 로 다시 가린다.
+    봉투 요약 · 상세의 분류별 개수에는 읽기 범위(`cover` all|partial|none · `missing` — 출처 열거만)가 함께 실린다(못 읽은 분류는 개수 null) — 정제가 버리면 중앙 화면이 ‘모름’ 을 0 으로 그린다(테스트).
+  - **최소 엣지 버전**: `stage7aMinEdgeVersion`(`STAGE7A_TITLE_RE = /리눅스 통합 성능 모니터링 7a단계/` — 릴리스 노트 첫 게시 번호 · 없으면 지금 판 · 숫자를 박지 않는다) · 구버전(경로 없음 → 401/404) = old-version.
+    함대 표는 노드마다 상태(ok · old-version · no-cycle · none)를 말한다.
 - ⚠⚠ **v2.929 — 베어메탈 성능 5단계의 엣지 대행: 판정 · 발송 · 보관은 수집 노드(엣지), 중앙은 요약을 봉투로 받고 상세는 볼 때 당긴다**
   (`routes/collector.js` `POST /bm-usage/focus` · `POST /bm-usage/focus/stop` · `GET /bm-usage/focus` · `GET /bm-usage/changes|baseline|compare` — tokenFirst · 본문 4kb · 자기 대상 목록 밖 키는 not-found ·
   `central/bmPerfOpsPull.js` · `bmusage/edgePull.js`(봉투) · `central/bmPerfSanitize.js` · `dataflow/build.js` 분류. 회귀 `bmPerf2929Focus.test.js ⑥ · 구버전`):

@@ -26,6 +26,7 @@ import { HealthCard } from './BmPerfOpsParts.jsx';
 import BmShareButtons from './BmShareButtons.jsx'; // 6단계 공유 링크 · 캡처
 import { BmPlaybookTab, BmSloTab } from './BmRunbookTabs.jsx'; // 6단계 진단 플레이북 · 목표선
 import { SHARE_MISSING_TEXT } from './bmShare.js';
+import BmLogsTab from './BmLogsTab.jsx'; // 7a단계 로그 분석 탭(고를 때만 마운트 → 그때 조회)
 import {
   RES_ORDER, RES_LABEL, USE_KEYS, USE_LABEL, HW_USE_LABEL, cellView, cellFootnotes, verdictView, coverageView, rowStates, STATE_TEXT,
   mismatchText, readText, crossView, crossBandText, thresholdText, basisText, evidenceRows, DETAIL_TABS, detailNotes, pathAtText,
@@ -319,6 +320,7 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
           {tab === 'focus' && <BmFocusTab key={itemKey} itemKey={itemKey} name={name} />}
           {tab === 'playbook' && <BmPlaybookTab key={itemKey} itemKey={itemKey} />}
           {tab === 'slo' && <BmSloTab key={itemKey} itemKey={itemKey} />}
+          {tab === 'logs' && <BmLogsTab key={itemKey} itemKey={itemKey} onTab={setTab} />}
 
           {tab === 'trend' && (
             // v2.923(3b): 추이 탭 — 서버를 바꾸면 상태를 새로(key). 최근 5분 장치 값(detail)은 장치 표가 함께 쓴다. 보존(일)은 이 노드 대상만 안다.

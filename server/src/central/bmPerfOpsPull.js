@@ -190,7 +190,7 @@ export async function pullEdgePerfOps(agent, mode, { key, query = {} } = {}) {
 }
 
 /* ── 봉투 요약 정제(central/bmPerfSanitize.js 가 부른다) ─────────────────── */
-const RULES = new Set(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect']);
+const RULES = new Set(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect', 'logs']);
 const RESULTS = new Set(['queued', 'sent', 'failed', 'suppressed', 'no-channel', 'no-channel-config', 'daily-cap', 'maintenance', 'error', '']);
 const ISSUE = new Set(['pending-central', 'daily-cap', 'created', 'commented', 'dup', 'error', 'skipped']);
 export function sanitizeFocusSummary(list, now = Date.now()) {
