@@ -1,11 +1,11 @@
-// v2.927 — Monitoring 개선: 개요 집계 양보(반증 M6 후속) · 동시 요청 공유 · 엣지 알림 키(재배정 재알림 · 메타 없을 때 보류) · 개요→트리 바로가기 id.
+// v2.928 — Monitoring 개선: 개요 집계 양보(반증 M6 후속) · 동시 요청 공유 · 엣지 알림 키(재배정 재알림 · 메타 없을 때 보류) · 개요→트리 바로가기 id.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'svcmon2927-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'svcmon2928-'));
 process.env.CONFIG_DIR = TMP;
 process.env.AUTH_ENABLED = 'true';
 
@@ -142,7 +142,7 @@ test('트리 표 열 최소폭 합이 1440px 오른쪽 표 폭 안에 든다(TES
   assert.ok(tableMin <= 790 && tableMin >= sum, `표 최소폭 ${tableMin}px`);
 });
 
-/* ── 반증 재검토(v2.927) ── */
+/* ── 반증 재검토(v2.928) ── */
 test('N1 — 같은 이름의 점검 둘(TCP 22·443 이 둘 다 같은 기본 이름)은 testId 키로 갈라져 거짓 복구가 나가지 않는다', async () => {
   const sent = [];
   TR._resetTransitionsForTest({ send: async (a) => { sent.push(a); } });

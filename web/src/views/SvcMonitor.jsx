@@ -164,7 +164,7 @@ export default function SvcMonitor() {
   const [view, setViewState] = useState(() => { try { return localStorage.getItem('perfcheck.view') === 'overview' ? 'overview' : 'tree'; } catch { return 'tree'; } });
   const setView = (v) => { setViewState(v); try { localStorage.setItem('perfcheck.view', v); } catch { /* noop */ } };
   const [driftHidden, setDriftHidden] = useState(false);   // '설정이 바뀌었습니다' 배너 — 이 화면을 연 동안만 숨김
-  // v2.927: 개요 호스트 맵 → 트리 바로가기. 고른 대상을 선택하고 트리에서 그 줄이 보이게 스크롤한다(한 번만).
+  // v2.928: 개요 호스트 맵 → 트리 바로가기. 고른 대상을 선택하고 트리에서 그 줄이 보이게 스크롤한다(한 번만).
   const jumpRef = useRef(false);
   useEffect(() => {
     if (!jumpRef.current || view !== 'tree') return;
@@ -262,7 +262,7 @@ export default function SvcMonitor() {
     const v = groups.flatMap((g) => g.tests.map((x) => x.result?.ms).filter((n) => n != null));
     return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : 0;
   })();
-  // v2.927: 대상을 고르면 내부 id(g-4c30c45c) 대신 '경로\이름' 을 보인다(예전에는 sel 문자열을 그대로 붙였다).
+  // v2.928: 대상을 고르면 내부 id(g-4c30c45c) 대신 '경로\이름' 을 보인다(예전에는 sel 문자열을 그대로 붙였다).
   const selPath = (() => {
     if (!sel) return 'Root';
     if (!sel.startsWith('target:')) return `Root\\${sel}`;

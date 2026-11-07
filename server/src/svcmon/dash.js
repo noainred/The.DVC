@@ -7,7 +7,7 @@
  * 판정은 하나: 상태는 `status.js testState`(직접) · 엣지 행의 `state`(edgeState — 무보고 unknown · stale 포함)를 그대로 쓴다.
  * 여기서 상태를 다시 계산하지 않는다(KPI 와 트리가 어긋나는 사고 — constants.js statusOf 머리말과 같은 이유).
  *
- * v2.927(반증 M6 후속 — 실측: 로컬 200k 0.39초 · 엣지 192k 0.86초 동기): 집계 본체를 누산기(`createDashAcc`) 하나로 두고
+ * v2.928(반증 M6 후속 — 실측: 로컬 200k 0.39초 · 엣지 192k 0.86초 동기): 집계 본체를 누산기(`createDashAcc`) 하나로 두고
  *   ① 동기판 `buildDash`(테스트·작은 입력) ② 시간 기준 양보판 `buildDashAsync`(라우트 — `util/timeSlice.js createYielder`)가 **같은 누산기**를 쓴다
  *   (두 벌 판정 금지). 표 위젯(느린 TOP · 연속 실패 · 인증서)은 전 항목 배열을 만들어 정렬하지 않고 **상위 K 만** 유지한다(메모리·정렬 비용).
  */
@@ -62,7 +62,7 @@ export function createDashAcc({ targets = [] } = {}) {
   for (const s of DASH_STATES) summary[s] = 0;
   const byOrigin = new Map();        // kind -> { kind, total, worst, counts }
   const hexByTarget = new Map();     // `${where}|${targetKey}` -> { id, targetKind, name, group, state, where, kind }
-  const buckets = new Map();         // group -> hex[] (v2.927: 전체 hex 를 한 번에 localeCompare 정렬하지 않는다 — 반증 재검토 N3)
+  const buckets = new Map();         // group -> hex[] (v2.928: 전체 hex 를 한 번에 localeCompare 정렬하지 않는다 — 반증 재검토 N3)
   const slow = []; const streaks = []; const certs = [];
 
   // 엣지 행 → 중앙 대상(출처) 조인 키 — 엣지 사본은 경로·이름이 같다(배정 스냅샷).
@@ -79,7 +79,7 @@ export function createDashAcc({ targets = [] } = {}) {
     const hk = `${where}|${tg?.id || `${path}|${targetName}`}`;
     let h = hexByTarget.get(hk);
     if (!h) {
-      // id·targetKind 는 화면이 개요 → 트리로 그 대상을 바로 고르는 데 쓴다(v2.927). 중앙 저장소에 없는 엣지 행은 id 가 없다.
+      // id·targetKind 는 화면이 개요 → 트리로 그 대상을 바로 고르는 데 쓴다(v2.928). 중앙 저장소에 없는 엣지 행은 id 가 없다.
       h = { id: tg?.id || '', targetKind: tg?.kind || '', name: targetName, group: tg ? groupOfTarget(tg) : (t(path).split('\\')[0] || '(루트)'), state: 'disabled', where, kind };
       hexByTarget.set(hk, h);
       const b = buckets.get(h.group);
@@ -97,7 +97,7 @@ export function createDashAcc({ targets = [] } = {}) {
   };
 
   /*
-   * v2.927(반증 재검토 N3 — 실측: 50k hex localeCompare 정렬 71~153ms · 400k 0.84~1.44초 동기): 그룹은 add 에서 이미 묶였고,
+   * v2.928(반증 재검토 N3 — 실측: 50k hex localeCompare 정렬 71~153ms · 400k 0.84~1.44초 동기): 그룹은 add 에서 이미 묶였고,
    *   그룹 순서 → 그룹 안 이름 순서로 **HEX_MAX 가 찰 때까지만** 정렬한다. 비교는 코드 단위(cmp) — 한글 음절은 유니코드가 가나다 순이고
    *   localeCompare 보다 훨씬 싸다(대소문자는 대문자가 먼저 — 표시 순서만 다르다).
    */
