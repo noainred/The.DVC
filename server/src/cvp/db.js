@@ -127,10 +127,15 @@ async function openInner() {
       CREATE INDEX IF NOT EXISTS idx_eploc_mac ON ep_loc (mac);
       CREATE INDEX IF NOT EXISTS idx_eploc_at ON ep_loc (at);
       CREATE TABLE IF NOT EXISTS ep_meta (
-        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, mac TEXT NOT NULL, at INTEGER NOT NULL, status TEXT NOT NULL, n INTEGER, reason TEXT,
+        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, mac TEXT NOT NULL, at INTEGER NOT NULL, status TEXT NOT NULL, n INTEGER, reason TEXT, seq INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (agent, cvp_id, mac));
       CREATE INDEX IF NOT EXISTS idx_epmeta_at ON ep_meta (at);
       CREATE INDEX IF NOT EXISTS idx_epmeta_mac ON ep_meta (mac);`);
+    // v2.929 반증 L-5: 엣지 push 변경분 커서는 '물어본 시각' 이 아니라 쓸 때마다 늘어나는 순번(seq)이다 — 같은 at 이 상한 경계에 여럿이거나,
+    //   늦게 커밋된 더 작은 at 이 있으면 시각 커서는 그 행을 건너뛰었다(재현). 이 브랜치의 개발 DB 에는 열이 없을 수 있어 없으면 더한다.
+    { const have = new Set(conn.prepare('PRAGMA table_info(ep_meta)').all().map((r) => r.name));
+      if (!have.has('seq')) { try { conn.exec('ALTER TABLE ep_meta ADD COLUMN seq INTEGER NOT NULL DEFAULT 0'); } catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; } }
+      conn.exec('CREATE INDEX IF NOT EXISTS idx_epmeta_seq ON ep_meta (seq); CREATE INDEX IF NOT EXISTS idx_epmeta_cvpseq ON ep_meta (agent, cvp_id, seq);'); }
     addDailyErrCountCols(conn);
     addDeviceInfoCols(conn);
     addPortDetailCols(conn);
@@ -1495,11 +1500,12 @@ export async function saveEndpoints(agent, cvpId, results = []) {
   const c = db.conn; const a = String(agent ?? ''); const id = String(cvpId);
   const del = c.prepare('DELETE FROM ep_loc WHERE agent=? AND cvp_id=? AND mac=?');
   const ins = c.prepare('INSERT OR REPLACE INTO ep_loc (agent,cvp_id,mac,device,port,vlan,learned_at,mac_type,likelihood,at) VALUES (?,?,?,?,?,?,?,?,?,?)');
-  const meta = c.prepare(`INSERT INTO ep_meta (agent,cvp_id,mac,at,status,n,reason) VALUES (?,?,?,?,?,?,?)
-    ON CONFLICT(agent,cvp_id,mac) DO UPDATE SET at=excluded.at, status=excluded.status, n=excluded.n, reason=excluded.reason`);
+  const meta = c.prepare(`INSERT INTO ep_meta (agent,cvp_id,mac,at,status,n,reason,seq) VALUES (?,?,?,?,?,?,?,?)
+    ON CONFLICT(agent,cvp_id,mac) DO UPDATE SET at=excluded.at, status=excluded.status, n=excluded.n, reason=excluded.reason, seq=excluded.seq`);
   let saved = 0;
   c.exec('BEGIN');
   try {
+    let seq = Number(c.prepare('SELECT MAX(seq) AS s FROM ep_meta').get()?.s) || 0;   // 트랜잭션 안 — 쓰기 순서 = 순번 순서
     for (const r of (Array.isArray(results) ? results : []).slice(0, 2000)) {
       const mac = String(r?.mac || '');
       if (!/^[0-9a-f]{12}$/.test(mac) || !Number.isFinite(Number(r.at))) continue;
@@ -1514,7 +1520,8 @@ export async function saveEndpoints(agent, cvpId, results = []) {
         }
       }
       // 오류 · 미지원은 위치를 지우지 않는다(직전 값이 '없음' 이 되지 않게) — 메타만 그 사실을 적는다.
-      meta.run(a, id, mac, Math.trunc(Number(r.at)), st, st === 'ok' ? Math.min(EP_LOC_MAX, (r.locations || []).length) : st === 'none' ? 0 : null, r.reason ? String(r.reason).slice(0, 200) : null);
+      seq += 1;
+      meta.run(a, id, mac, Math.trunc(Number(r.at)), st, st === 'ok' ? Math.min(EP_LOC_MAX, (r.locations || []).length) : st === 'none' ? 0 : null, r.reason ? String(r.reason).slice(0, 200) : null, seq);
       saved += 1;
     }
     c.exec('COMMIT');
@@ -1528,14 +1535,14 @@ export async function epMetaFor(agent, cvpId) {
   if (!db) return new Map();
   return new Map(db.conn.prepare('SELECT mac, at FROM ep_meta WHERE agent=? AND cvp_id=?').all(String(agent ?? ''), String(cvpId)).map((r) => [r.mac, Number(r.at)]));
 }
-/** 엣지 push — sinceAt 보다 뒤에 물어본 MAC 의 결과(메타 + 위치). 오래된 것부터 limit 개. */
-export async function endpointsSince(agent, cvpId, sinceAt = 0, limit = 500) {
+/** 엣지 push — 순번 sinceSeq 뒤에 쓴 MAC 의 결과(메타 + 위치 + seq). 먼저 쓴 것부터 limit 개(v2.929 반증 L-5 — 시각 커서가 아니라 순번). */
+export async function endpointsSince(agent, cvpId, sinceSeq = 0, limit = 500) {
   const db = await open();
   if (!db) return null;
   const a = String(agent ?? ''); const id = String(cvpId);
-  const metas = db.conn.prepare('SELECT mac, at, status, reason FROM ep_meta WHERE agent=? AND cvp_id=? AND at > ? ORDER BY at LIMIT ?').all(a, id, Math.trunc(Number(sinceAt) || 0), Math.max(1, Math.min(5000, limit)));
+  const metas = db.conn.prepare('SELECT mac, at, status, reason, seq FROM ep_meta WHERE agent=? AND cvp_id=? AND seq > ? ORDER BY seq LIMIT ?').all(a, id, Math.trunc(Number(sinceSeq) || 0), Math.max(1, Math.min(5000, limit)));
   const loc = db.conn.prepare('SELECT device, port, vlan, learned_at, mac_type, likelihood FROM ep_loc WHERE agent=? AND cvp_id=? AND mac=?');
-  return metas.map((m) => ({ mac: m.mac, at: Number(m.at), status: m.status, ...(m.reason ? { reason: m.reason } : {}),
+  return metas.map((m) => ({ mac: m.mac, at: Number(m.at), seq: Number(m.seq), status: m.status, ...(m.reason ? { reason: m.reason } : {}),
     locations: m.status === 'ok' ? loc.all(a, id, m.mac).map((l) => ({ device: l.device, port: l.port, vlan: l.vlan >= 0 ? l.vlan : null, learnedAt: l.learned_at, macType: l.mac_type, likelihood: l.likelihood })) : [] }));
 }
 /**
@@ -1547,8 +1554,9 @@ export async function endpointsByMacs(macs = [], { owners = null } = {}) {
   if (!db) return { rows: [], meta: new Map(), unavailable: true };
   const list = [...new Set((Array.isArray(macs) ? macs : []).map((m) => String(m || '').toLowerCase().slice(0, 64).replace(/[^0-9a-f]/g, '')).filter((m) => /^[0-9a-f]{12}$/.test(m)))].slice(0, 256);   // 콜론 · 하이픈 표기도
   if (!list.length) return { rows: [], meta: new Map() };
-  const own = Array.isArray(owners) ? new Set(owners.map((o) => `${o.agent ?? ''}\u0000${o.cvpId}`)) : null;
-  const ok = (r) => !own || own.has(`${r.agent}\u0000${r.cvp_id}`);
+  // 담당 엣지 이름은 대소문자를 가리지 않는다(v2.929 반증 M-5 — 등록부 'Edge-A' · 저장 키 'edge-a' 행이 빠졌다).
+  const own = Array.isArray(owners) ? new Set(owners.map((o) => `${String(o.agent ?? '').toLowerCase()}\u0000${o.cvpId}`)) : null;
+  const ok = (r) => !own || own.has(`${String(r.agent ?? '').toLowerCase()}\u0000${r.cvp_id}`);
   const ph = list.map(() => '?').join(',');
   const rows = db.conn.prepare(`SELECT e.*, d.hostname AS dev_hostname, d.device_key AS dev_key FROM ep_loc e
       LEFT JOIN device_latest d ON d.agent = e.agent AND d.cvp_id = e.cvp_id AND (d.device_key = e.device OR d.serial = e.device)
@@ -1567,9 +1575,9 @@ export async function epStatus(owners = []) {
   const db = await open();
   if (!db) return { unavailable: true, macs: 0, lastAt: null, unsupported: 0 };
   let macs = 0; let lastAt = null; let unsupported = 0;
-  const q1 = db.conn.prepare('SELECT COUNT(*) AS n FROM ep_meta WHERE agent=? AND cvp_id=?');
-  const q2 = db.conn.prepare('SELECT MAX(at) AS t FROM ep_meta WHERE agent=? AND cvp_id=?');
-  const q3 = db.conn.prepare("SELECT 1 FROM ep_meta WHERE agent=? AND cvp_id=? AND status='unsupported' LIMIT 1");
+  const q1 = db.conn.prepare('SELECT COUNT(*) AS n FROM ep_meta WHERE agent=? COLLATE NOCASE AND cvp_id=?');
+  const q2 = db.conn.prepare('SELECT MAX(at) AS t FROM ep_meta WHERE agent=? COLLATE NOCASE AND cvp_id=?');
+  const q3 = db.conn.prepare("SELECT 1 FROM ep_meta WHERE agent=? COLLATE NOCASE AND cvp_id=? AND status='unsupported' LIMIT 1");
   for (const o of (Array.isArray(owners) ? owners : []).slice(0, 256)) {
     const a = String(o.agent ?? ''); const id = String(o.cvpId);
     macs += Number(q1.get(a, id)?.n || 0);

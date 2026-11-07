@@ -59,7 +59,7 @@ const _sent = new Map(); // `${cvpId}|${key}` → { h, at }
  */
 const _l2Sent = new Map(); // `${cvpId}|${key}` → { h, at }
 // v2.929(C-③): EndpointLocation — CVP 마다 중앙이 받았다고 답한 마지막 '물어본 시각'. 그 뒤에 물은 MAC 만 보낸다(L2 와 같은 ack 규약 · 구버전 중앙 보류).
-const _epSentAt = new Map(); // cvpId → at
+const _epSentAt = new Map(); // cvpId → 마지막으로 중앙이 받은 ep_meta 순번(seq — v2.929 반증 L-5: 예전에는 at)
 let _epUnsupported = 0;
 export const EP_PUSH_PER_CVP = 500;
 /** 중앙 답 → EndpointLocation 수신 여부(순수) — 'acked' = saved.ep 가 수 · 'old-central' = saved 는 있는데 ep 칸이 없다 · 'unknown'. */
@@ -229,7 +229,7 @@ async function pushInner() {
       if (!(_epUnsupported && nowMs - _epUnsupported < L2_UNSUPPORTED_HOLD_MS)) {
         try {
           const eps = await db.endpointsSince(db.LOCAL_AGENT, srv.id, _epSentAt.get(srv.id) || 0, EP_PUSH_PER_CVP);
-          for (const e of eps || []) { epItems.push({ t: 'e', v: { cvpId: srv.id, ...e } }); epMaxNow.set(srv.id, Math.max(epMaxNow.get(srv.id) || 0, e.at)); }
+          for (const { seq, ...e } of eps || []) { epItems.push({ t: 'e', v: { cvpId: srv.id, ...e } }); epMaxNow.set(srv.id, Math.max(epMaxNow.get(srv.id) || 0, Number(seq) || 0)); }   // 커서 = 순번(반증 L-5)
         } catch (e) { if (warnL2(`ep:${e.message}`)) console.warn(`[cvp-push] EndpointLocation 결과를 읽지 못해 이번에는 싣지 않습니다: ${e.message}`); }
       }
       for (const d of recs) {

@@ -747,10 +747,13 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         });
       }
     }
-    // v2.929(C-③): EndpointLocation — 폴러가 고른 MAC 들(부품 주기 · 같은 세션). 남은 예산 안에서만, 미지원(404 · 501)이면 멈춘다.
+    // v2.929(C-③): EndpointLocation — 폴러가 고른 MAC 들(부품 주기 · 같은 세션). 남은 예산 안에서만, 미지원(501 · 가를 수 없는 404 연속)이면 멈춘다(endpoint.js).
     let endpoints = null;
     if (Array.isArray(epMacs) && epMacs.length && left() >= MIN_SLICE_MS && !signal?.aborted) {
       endpoints = await lookupEndpoints(sess, epMacs, { budgetMs: Math.max(1_000, Math.min(epBudgetMs, left() - MIN_SLICE_MS)), now, signal });
+    } else if (Array.isArray(epMacs) && epMacs.length) {
+      // v2.929 반증 L-8: 부품 단계가 예산을 다 써서 위치 조회를 건너뛴 사실도 남긴다(무음 금지 — 상태의 endpoints.cut · skipped).
+      endpoints = { results: [], unsupported: false, cut: epMacs.length, stopped: 'budget' };
     }
     // v2.611(TIM2611-01): 시한(외부 신호)에 걸려 끝나지 못한 장비는 'pending' 으로 남는다 — '조회 중단' 으로 바꾸고 개수를 밝힌다.
     for (const dev of devices) if (dev.telemetry === 'pending') { dev.telemetry = 'aborted'; truncated.aborted++; }

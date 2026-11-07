@@ -99,23 +99,38 @@ async function _pull() {
 }
 
 let _epRun = null;
-/** v2.929(C-③): 중앙이 내려보낸 EndpointLocation 요청을 차례로 처리하고 곧바로 push 한다(다음 push 주기를 기다리지 않게). 단일비행. */
+const _epQueue = [];
+/**
+ * v2.929(C-③): 중앙이 내려보낸 EndpointLocation 요청을 차례로 처리하고 곧바로 push 한다(다음 push 주기를 기다리지 않게). 단일비행.
+ *   v2.929 반증 L-4: 실행 중에 온 요청은 버리지 않고 대기열에 붙여 같은 실행이 이어서 처리한다(중앙은 내려보낼 때 큐에서 지운다 —
+ *   버리면 로그 없이 사라졌다). 대기열은 CVP 마다 하나로 합친다(MAC 64개).
+ */
 export function runEndpointRequests(reqs) {
+  for (const r of Array.isArray(reqs) ? reqs : []) {
+    if (!r || typeof r.cvpId !== 'string' || !Array.isArray(r.macs)) continue;
+    const cur = _epQueue.find((x) => x.cvpId === r.cvpId);
+    if (cur) cur.macs = [...new Set([...cur.macs, ...r.macs])].slice(0, 64);
+    else if (_epQueue.length < 64) _epQueue.push({ cvpId: r.cvpId, macs: r.macs.slice(0, 64) });
+  }
   if (_epRun) return _epRun;
   _epRun = (async () => {
-    const mine = new Set(serversForThisNode().map((s) => s.id));
-    let done = 0;
-    for (const r of reqs) {
+    let tried = 0; let done = 0;
+    while (_epQueue.length) {
+      const r = _epQueue.shift();
+      const mine = new Set(serversForThisNode().map((s) => s.id));
       if (!mine.has(r.cvpId)) continue;   // 이 엣지 몫이 아닌 CVP — 등록부가 원천(중앙 요청을 그대로 믿지 않는다)
       const macs = r.macs.filter((m) => typeof m === 'string' && /^[0-9a-f]{12}$/.test(m)).slice(0, 64);
+      tried += 1;
       try { const x = await lookupEndpointsNow(r.cvpId, macs); if (x.ok) done += 1; else console.warn(`[cvp-config] EndpointLocation 지금 조회 실패(${r.cvpId}): ${x.reason}`); }
       catch (e) { console.warn(`[cvp-config] EndpointLocation 지금 조회 실패(${r.cvpId}): ${e.message}`); }
     }
-    if (done) { try { await pushCvpNow(); } catch (e) { console.warn(`[cvp-config] EndpointLocation 결과 push 실패(다음 주기에 다시 갑니다): ${e.message}`); } }
+    // 실패도 MAC 마다 '오류' 로 저장된다(endpointNow) — 그 사실이 중앙에 닿도록 시도했으면 push 한다.
+    if (tried) { try { await pushCvpNow(); } catch (e) { console.warn(`[cvp-config] EndpointLocation 결과 push 실패(다음 주기에 다시 갑니다): ${e.message}`); } }
     return done;
   })().finally(() => { _epRun = null; });
   return _epRun;
 }
+export function _epQueueForTest() { return _epQueue.map((x) => ({ ...x })); }
 
 export function startCvpConfigPull() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;

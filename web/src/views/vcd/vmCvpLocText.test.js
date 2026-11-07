@@ -17,7 +17,11 @@ describe('VM 네트워크 위치(CVP)', () => {
     expect(verdictOf('weird').label).toBe('판정 보류');
   });
   it('요약 — 개수 · 판정 보류 사유 · 대기', () => {
-    expect(locSummary(d)).toBe('vNIC 4 · 일치 1 · 불일치 1 · 그 밖 2');
+    expect(locSummary(d)).toBe('vNIC 4 · 일치 1 · 불일치 1 · 그 밖 2 · 부품 주기에 차례로 · 버튼으로 지금');
+    expect(locSummary({ ...d, partsEveryMs: 1_800_000 })).toContain('부품 주기 30분에 차례로');
+    expect(locSummary({ ...d, scan: false })).toContain('주기 조회는 꺼져 있습니다');
+    expect(locSummary({ ...d, unavailable: true })).toContain('위치 DB 를 읽지 못했습니다');   // 반증 L-7 — '아직 안 물음' 으로 말하지 않는다
+    expect(locRows({ rows: [{ mac: '005056000001', verdict: 'unknown', note: 'LAG(Port-Channel) — 멤버 포트를 몰라 판정을 보류합니다', locations: [] }] })[0].note).toContain('LAG');
     expect(locSummary({ ...d, hostPortsKnown: false, pending: true })).toContain('호스트 업링크 포트를 몰라 판정 보류');
     expect(locSummary({ rows: [], servers: 0 })).toContain('CVP 가 없습니다');
     expect(locSummary({ rows: [], servers: 2 })).toContain('vNIC MAC 을 아직 읽지 않았습니다');
@@ -27,6 +31,9 @@ describe('VM 네트워크 위치(CVP)', () => {
 describe('호스트 업링크 — EndpointLocation 문구', () => {
   it('현황 — 물어본 적 없으면 그 사실만 · 미지원 · 대기', () => {
     expect(epStatusText({ macs: 0 })).toContain('아직 물어보지 않았습니다');
+    expect(epStatusText({ macs: 0 })).not.toContain('30분');   // 반증 L-9: 주기 숫자를 박지 않는다(API 값)
+    expect(epStatusText({ macs: 0, partsEveryMs: 900_000 })).toContain('15분');
+    expect(epStatusText({ unavailable: true, macs: 0 })).toContain('읽지 못했습니다');
     const t = epStatusText({ macs: 12, lastAt: 1000, unsupported: 1, pending: true }, 1000 + 5 * 60_000);
     expect(t).toBe('CVP 위치 — 물어본 MAC 12개 · 최근 5분 전 · EndpointLocation 미지원 CVP 1대(2021.1 이상 필요) · 엣지 조회 요청 대기 중');
     expect(epStatusText({ error: true })).toContain('읽지 못했습니다');

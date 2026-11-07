@@ -45,7 +45,7 @@ export default function VmCvpLocation({ vmId }) {
                     {rows.map((r) => (
                       <tr key={r.key}>
                         <td><b>{r.label}</b></td>
-                        <td data-sort={r.v.label} title={r.reason ? `${r.v.note} — ${r.reason}` : r.v.note}><span className={`badge ${r.v.tone}`}>{r.v.label}</span></td>
+                        <td data-sort={r.v.label} title={[r.note || r.v.note, r.reason].filter(Boolean).join(' — ')}><span className={`badge ${r.v.tone}`}>{r.v.label}</span>{r.note ? <div className="muted" style={{ fontSize: 11, maxWidth: 240, overflowWrap: 'anywhere' }}>{r.note}</div> : null}</td>
                         <td data-sort={r.where}>{r.where}</td>
                         <td>{r.vlan}</td>
                         <td className="muted">{r.learned}</td>

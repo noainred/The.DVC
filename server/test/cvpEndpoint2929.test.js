@@ -53,9 +53,31 @@ test('② 조회 — 상태 · 미지원 멈춤 · 예산', async () => {
     ['00:50:56:aa:00:01', '005056aa0002', '005056aa0003', '005056aa0004', 'bad'], { concurrency: 1 });
   assert.deepEqual(r.results.map((x) => [x.mac, x.status]), [['005056aa0001', 'ok'], ['005056aa0002', 'none'], ['005056aa0003', 'error'], ['005056aa0004', 'error']]);
   assert.equal(r.unsupported, false);
+  // 반증 H-2: 404 는 본문으로 가른다 — 구체적 not found 는 위치 없음 · 'Not Found' 한 마디는 가를 수 없다
+  const macsN = (n) => Array.from({ length: n }, (_, i) => `005056ab${String(i).padStart(4, '0')}`);
+  const plain404 = { ok: false, status: 404, reason: 'HTTP 404', head: '{"code":5,"message":"Not Found","details":[]}' };
   calls.length = 0;
-  r = await E.lookupEndpoints({ get: async (p) => { calls.push(p); return { ok: false, status: 404, reason: 'HTTP 404' }; } }, ['005056aa0001', '005056aa0002', '005056aa0003'], { concurrency: 1 });
-  assert.equal(r.unsupported, true); assert.equal(calls.length, 1, '404 면 나머지를 묻지 않는다'); assert.equal(r.results[0].status, 'unsupported'); assert.equal(r.cut, 2);
+  r = await E.lookupEndpoints({ get: async (p) => { calls.push(p); return plain404; } }, macsN(10), { concurrency: 1 });
+  assert.equal(r.unsupported, true); assert.equal(calls.length, E.AMBIG_STOP, `가를 수 없는 404 가 ${E.AMBIG_STOP}번 이어지고 답한 MAC 이 없으면 미지원`);
+  assert.ok(r.results.every((x) => x.status === 'unsupported')); assert.equal(r.cut, 10 - E.AMBIG_STOP);
+  assert.match(r.results[0].reason, /본문: \{"code":5/, '첫 실캡처 표본을 사유에 남긴다');
+  r = await E.lookupEndpoints({ get: async () => plain404 }, macsN(3), { concurrency: 1 });
+  assert.equal(r.unsupported, false, 'pNIC MAC 몇 개가 안 배워졌다고 CVP 전체를 미지원으로 적지 않는다');
+  assert.ok(r.results.every((x) => x.status === 'error' && /가르지 못했습니다/.test(x.reason)));
+  r = await E.lookupEndpoints({ get: async () => ({ ok: false, status: 404, head: '{"code":5,"message":"endpoint location 00:50:56:ab:00:00 not found"}' }) }, macsN(3), { concurrency: 1 });
+  assert.deepEqual(r.results.map((x) => x.status), ['none', 'none', 'none'], '구체적 not found = 위치 없음');
+  let k = 0;
+  r = await E.lookupEndpoints({ get: async () => (k++ === 0 ? { ok: true, status: 200, text: SAMPLE } : plain404) }, macsN(4), { concurrency: 1 });
+  assert.deepEqual(r.results.map((x) => x.status).sort(), ['none', 'none', 'none', 'ok'], '같은 CVP 가 답한 적이 있으면 404 는 위치 없음');
+  calls.length = 0;
+  r = await E.lookupEndpoints({ get: async (p) => { calls.push(p); return { ok: false, status: 501, reason: 'HTTP 501' }; } }, macsN(3), { concurrency: 1 });
+  assert.equal(r.unsupported, true); assert.equal(calls.length, 1, '501 은 바로 미지원');
+  // 반증 L-6: 연결 실패 · 401 · 403 이 이어지면 그만 묻는다(틀린 자격증명으로 MAC 마다 요청하지 않게)
+  calls.length = 0;
+  r = await E.lookupEndpoints({ get: async (p) => { calls.push(p); return { ok: false, status: 403, reason: 'HTTP 403' }; } }, macsN(200), { concurrency: 1 });
+  assert.equal(calls.length, E.FAIL_STOP); assert.equal(r.stopped, 'auth');
+  r = await E.lookupEndpoints({ get: async () => ({ ok: false, status: 0, reason: '연결 실패' }) }, macsN(20), { concurrency: 1 });
+  assert.equal(r.stopped, 'conn');
   r = await E.lookupEndpoints({ get: async () => { await new Promise((x) => setTimeout(x, 30)); return { ok: true, status: 200, text: '{}' }; } }, ['005056aa0001', '005056aa0002', '005056aa0003', '005056aa0004'], { concurrency: 1, budgetMs: 40 });
   assert.ok(r.cut >= 1, '예산을 넘기면 다음 MAC 을 시작하지 않는다');
 });
@@ -64,6 +86,17 @@ test('③ 대상 고르기 · 이동 기억', () => {
   const asked = new Map([['h2', NOW - 60_000], ['v3', NOW - 5 * H], ['v4', NOW - 9 * H]]);
   const pick = E.pickEndpointMacs({ hostMacs: ['h1', 'h2', 'h1'], movedVmMacs: ['v1'], vmMacs: ['v1', 'v3', 'v4', 'v5'], askedAt: asked }, { now: NOW, max: 4, staleMs: 30 * 60_000 });
   assert.deepEqual(pick, ['h1', 'v1', 'v5', 'v4'], '호스트 NIC → 이동 VM → 한 번도 안 물은 VM → 오래된 VM · 이번 창에 물은 h2 는 건너뜀');
+  // 반증 M-1: 호스트 MAC 이 상한보다 많아도 매 주기 같은 앞부분만 묻지 않는다 — 오래전에 물은 것부터 · 호스트 몫은 절반까지
+  const hosts = Array.from({ length: 300 }, (_, i) => `h${i}`); const vms = Array.from({ length: 400 }, (_, i) => `v${i}`);
+  const seen = new Set(); const askedM = new Map(); let t = NOW;
+  for (let cyc = 0; cyc < 48; cyc++) {
+    t += 31 * 60_000;
+    for (const m of E.pickEndpointMacs({ hostMacs: hosts, vmMacs: vms, askedAt: askedM }, { now: t, max: 200, staleMs: 30 * 60_000 })) { seen.add(m); askedM.set(m, t); }
+  }
+  assert.equal(hosts.filter((m) => seen.has(m)).length, 300, '하루 안에 호스트 MAC 전부');
+  assert.equal(vms.filter((m) => seen.has(m)).length, 400, '하루 안에 VM MAC 전부');
+  const first = E.pickEndpointMacs({ hostMacs: hosts, vmMacs: vms, askedAt: new Map() }, { now: NOW, max: 200 });
+  assert.equal(first.filter((m) => m.startsWith('h')).length, 100, 'VM 이 있으면 호스트 몫은 절반');
   E._resetVmHosts();
   assert.deepEqual([...E.noteVmHosts([{ id: 'a', host: 'h1' }], { now: NOW })], [], '첫 관측은 이동이 아니다');
   assert.deepEqual([...E.noteVmHosts([{ id: 'a', host: 'h2' }], { now: NOW + 1 })], ['a']);
@@ -87,10 +120,21 @@ test('④ DB — 교체 · 오류 보존 · 담당 · 호스트명 · 변경분 
   await db.saveEndpoints('edge-x', 'cvp-2', [{ mac: '005056aa0001', at: NOW, status: 'ok', locations: [loc('Et1')] }]);
   r = await db.endpointsByMacs(['005056aa0001'], { owners: [{ agent: '', cvpId: 'cvp-1' }] });
   assert.deepEqual(r.rows.map((x) => x.cvpId), ['cvp-1'], '담당 행만');
-  const since = await db.endpointsSince('', 'cvp-1', NOW - 2500, 10);
-  assert.deepEqual(since.map((x) => [x.mac, x.status]), [['005056aa0001', 'error']], '그 뒤에 물은 것만(오래된 것부터)');
+  // 반증 L-5: 커서는 시각이 아니라 쓸 때마다 늘어나는 순번 — 같은 at 이 여럿이거나 늦게 커밋된 더 작은 at 도 빠지지 않는다
+  const all = await db.endpointsSince('', 'cvp-1', 0, 10);
+  assert.deepEqual(all.map((x) => [x.mac, x.status]), [['005056aa0001', 'error']], 'MAC 마다 최신 하나');
+  const cur = all[0].seq;
+  await db.saveEndpoints('', 'cvp-1', Array.from({ length: 5 }, (_, i) => ({ mac: `005056bb000${i}`, at: NOW - 9999, status: 'none' })));   // 더 작은 at 이 나중에 커밋
+  const after = await db.endpointsSince('', 'cvp-1', cur, 3);
+  assert.equal(after.length, 3); assert.ok(after.every((x) => x.seq > cur), '순번 뒤의 것');
+  const rest = await db.endpointsSince('', 'cvp-1', after[2].seq, 10);
+  assert.equal(rest.length, 2, '같은 at 이 상한 경계에 걸려도 남은 것을 다음 페이지에서 받는다');
   const st = await db.epStatus([{ agent: '', cvpId: 'cvp-1' }, { agent: 'edge-x', cvpId: 'cvp-2' }]);
-  assert.equal(st.macs, 2); assert.equal(st.lastAt, NOW);
+  assert.equal(st.macs, 7); assert.equal(st.lastAt, NOW);
+  const stCase = await db.epStatus([{ agent: 'EDGE-X', cvpId: 'cvp-2' }]);
+  assert.equal(stCase.macs, 1, '담당 엣지 이름 대소문자를 가리지 않는다(반증 M-5)');
+  r = await db.endpointsByMacs(['005056aa0001'], { owners: [{ agent: 'Edge-X', cvpId: 'cvp-2' }] });
+  assert.deepEqual(r.rows.map((x) => x.cvpId), ['cvp-2']);
   assert.ok((await db.epMetaFor('', 'cvp-1')).get('005056aa0001') === NOW - 1000);
 });
 

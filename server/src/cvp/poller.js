@@ -110,7 +110,9 @@ export function applyDeltas(cvpId, dev, intervalMs, prevMap = _prevCounters, sla
 export async function endpointMacsFor(srv, settings, { now = Date.now(), snap = null } = {}) {
   if (settings?.endpointScan === false) return null;
   const s = snap || store.get?.() || {};
-  const dc = String(srv?.datacenterId || '');
+  // v2.929 반증 H-1: 법인 할당표(datacenters.json)는 중앙에만 있다 — 엣지에서는 모든 vCenter 가 '' 로 읽혀 묻는 MAC 이 0개였다.
+  //   엣지는 자기 법인 vCenter 만 수집하므로(법인 · vCenter 1:1) 엣지에서는 법인 필터를 건너뛴다.
+  const dc = config.agent?.centralUrl ? '' : String(srv?.datacenterId || '');
   const inCorp = (vcId) => !dc || String(datacenterOfVcenter(vcId) || '') === dc;
   const allVms = Array.isArray(s.vms) ? s.vms : [];
   const moved = noteVmHosts(allVms.map((v) => ({ id: v.id, host: `${v.vcenterId}|${v.host}` })), { now });
@@ -175,6 +177,11 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
     cvpAuthGuard.clearAuthStop(full.id);
     // v2.611(TIM2611-01): 부품을 **실제로 읽은 장비가 있을 때만** '부품 조회 시각' 을 올린다 — 예산·시한에 걸려 아무 장비도 못 읽은
     //   주기를 '읽었다' 로 적으면 다음 30분 동안 부품을 다시 보지 않고 화면은 partsRead 를 참으로 말한다.
+    // v2.929 반증 L-8: 위치 조회를 멈춘 · 건너뛴 사유를 콘솔에도 남긴다(무음 금지 — 같은 사유는 warnLog 가 묶는다).
+    if (r.endpoints?.stopped) {
+      const why = { budget: '수집 예산을 부품 단계가 다 써서 건너뜀', auth: '401 · 403 이 이어져 멈춤(자격증명 · 권한 확인)', conn: '연결 실패가 이어져 멈춤' }[r.endpoints.stopped] || r.endpoints.stopped;
+      if (warnLog(`${full.id}:ep`, why)) console.warn(`[cvp] ${full.name || full.id}: EndpointLocation 위치 조회 — ${why} · 못 물은 MAC ${r.endpoints.cut || 0}개`);
+    }
     const partsReadNow = partsDue && r.devices.some((d) => Array.isArray(d.parts));
     /*
      * v2.612 RECENT2612-01: 조회 시각은 **시도했으면** 올린다(경로가 전부 404 인 CVP 도 시도다). 예전에는 읽었을 때만 올려 파트 경로가
@@ -239,7 +246,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
       cvpVersion: r.cvpVersion, partsRead: partsReadNow, ...(partsNotTried > 0 ? { partsDueUnread: true, partsNotTried } : {}),
       ...(pruneHeld ? { pruneHeld } : {}),
       // v2.929(C-③): EndpointLocation 이번 주기 — 물은 수 · 위치 있음 · 없음 · 오류 · 미지원 · 예산으로 못 물은 수(부품 주기가 아니면 직전 값을 그대로 싣는다)
-      ...(r.endpoints ? { endpoints: { at: readAt, asked: r.endpoints.results.length, ok: r.endpoints.results.filter((x) => x.status === 'ok').length,
+      ...(r.endpoints ? { endpoints: { at: readAt, asked: r.endpoints.results.length, ok: r.endpoints.results.filter((x) => x.status === 'ok').length, stopped: r.endpoints.stopped || null,
         none: r.endpoints.results.filter((x) => x.status === 'none').length, errors: r.endpoints.results.filter((x) => x.status === 'error').length,
         unsupported: !!r.endpoints.unsupported, cut: r.endpoints.cut || 0 } } : (getStatus(full.id)?.endpoints ? { endpoints: getStatus(full.id).endpoints } : {})),
       ...(saved?.unavailable ? { dbUnavailable: true } : {}), ...(saved?.error ? { dbError: saved.error } : {}),

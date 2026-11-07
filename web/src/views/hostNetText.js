@@ -125,11 +125,19 @@ export const eventTimeText = (ts) => (Number.isFinite(ts) ? new Date(ts).toLocal
 export function epStatusText(ep, now = Date.now()) {
   if (!ep) return '';
   if (ep.error) return 'CVP 위치(EndpointLocation)를 읽지 못했습니다';
+  // v2.929 반증 L-7: DB 를 못 읽은 것을 '아직 안 물음' 으로 말하지 않는다 · L-9: 주기 숫자 · 켜짐은 API 값으로.
+  if (ep.unavailable) return 'CVP 위치 — 위치 DB 를 읽지 못했습니다(물어본 적이 없다는 뜻이 아닙니다)';
   const parts = [];
-  parts.push(ep.macs ? `CVP 위치 — 물어본 MAC ${ep.macs}개${Number.isFinite(ep.lastAt) ? ` · 최근 ${ageText(ep.lastAt, now)}` : ''}` : 'CVP 위치 — 아직 물어보지 않았습니다(부품 주기 30분 · 버튼으로 지금)');
+  parts.push(ep.macs ? `CVP 위치 — 물어본 MAC ${ep.macs}개${Number.isFinite(ep.lastAt) ? ` · 최근 ${ageText(ep.lastAt, now)}` : ''}` : `CVP 위치 — 아직 물어보지 않았습니다(${epCycleText(ep)})`);
   if (ep.unsupported) parts.push(`EndpointLocation 미지원 CVP ${ep.unsupported}대(2021.1 이상 필요)`);
   if (ep.pending) parts.push('엣지 조회 요청 대기 중');
   return parts.join(' · ');
+}
+/** 주기 조회 안내 — 켜짐 · 주기는 서버 값(scan · partsEveryMs). 모르면 숫자를 말하지 않는다. */
+export function epCycleText(ep) {
+  if (ep?.scan === false) return '주기 조회는 꺼져 있습니다 · 버튼으로 지금';
+  const m = Number(ep?.partsEveryMs) > 0 ? Math.round(Number(ep.partsEveryMs) / 60_000) : null;
+  return m ? `부품 주기 ${m}분에 차례로 · 버튼으로 지금` : '부품 주기에 차례로 · 버튼으로 지금';
 }
 /** 지금 조회 결과 문구 — 직접 물은 CVP 결과 · 엣지로 보낸 요청. */
 export function epLocateText(r) {

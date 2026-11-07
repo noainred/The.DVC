@@ -18,7 +18,8 @@ export function requestEndpointLookup(agent, cvpId, macs = [], now = Date.now())
   sweep(now);
   const id = String(cvpId);
   let r = _q.get(id);
-  if (!r || r.agent !== String(agent)) { r = { agent: String(agent), macs: new Set(), at: now, takenAt: null }; _q.set(id, r); }
+  // 반증 M-5: 엣지 이름은 대소문자를 가리지 않는다(형제 큐 util/collectRequestQueue 의 lower=true 와 같다 — v2.611 CEN2611-02 의 같은 함정).
+  if (!r || r.agent.toLowerCase() !== String(agent).toLowerCase()) { r = { agent: String(agent), macs: new Set(), at: now, takenAt: null }; _q.set(id, r); }
   for (const m of Array.isArray(macs) ? macs : []) { if (r.macs.size >= EP_REQ_MACS_MAX) break; if (/^[0-9a-f]{12}$/.test(m)) r.macs.add(m); }
   r.at = now; r.takenAt = null;
   return { queued: r.macs.size };
@@ -29,7 +30,7 @@ export function takeEndpointRequests(agent, now = Date.now()) {
   const out = [];
   for (const [id, r] of _q) {
     if (out.length >= EP_TAKE_MAX) break;
-    if (r.agent !== String(agent) || !r.macs.size) continue;
+    if (r.agent.toLowerCase() !== String(agent).toLowerCase() || !r.macs.size) continue;
     out.push({ cvpId: id, macs: [...r.macs] });
     _q.delete(id);
   }
