@@ -71,7 +71,7 @@ export default function AlertTab({ isAdmin = false }) {
         {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
       </div>
       <div className="muted" style={{ fontSize: 12, fontFamily: 'var(--mono)' }}>
-        {`지금 알린 상태: 실패 ${st.alerted ?? 0} · 경고 ${st.warned ?? 0} · 대기 ${st.queued ?? 0} · 보낸 개별 ${st.individual ?? 0} · 요약 ${st.summaries ?? 0}`}
+        {`지금 알린 상태: 실패 ${st.alerted ?? 0} · 경고 ${st.warned ?? 0} · 대기 ${st.queued ?? 0} · 보낸 개별 ${st.individual ?? 0} · 요약 ${st.summaries ?? 0} · 엣지 이름을 아직 몰라 판정 보류 중 ${st.metaPending ?? 0}`}
         {' — 메모리 기준(재시작하면 다시 셉니다: 실패가 계속되면 재시작 뒤 한 번 더 알릴 수 있습니다)'}
       </div>
     </div>
