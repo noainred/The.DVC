@@ -89,7 +89,7 @@ export default function OverviewDash({ onPickTarget = null }) {
         <h3>Monitoring · 개요</h3>
         <span className="tv-var"><span>time</span><b>최근 24시간(재시작 이후)</b></span>
         <span className="tv-var"><span>live</span><b className="tv-ok">60s</b></span>
-        <span className="tv-var"><span>alerts</span><b className={d.alerts?.enabled ? 'tv-ok' : ''}>{d.alerts?.enabled ? `on · 알림 중 ${d.alerts.alerted}` : 'off'}</b></span>
+        <span className="tv-var"><span>alerts</span><b className={d.alerts?.enabled ? 'tv-ok' : ''}>{d.alerts?.enabled ? `on · 알림 중 ${d.alerts.alerted}${d.alerts.metaPending ? ` · 엣지 이름 대기 ${d.alerts.metaPending}` : ''}` : 'off'}</b></span>
         <span className="tv-spacer"><button type="button" className="btn" disabled={busy} onClick={load}>{busy ? '읽는 중…' : '새로고침'}</button></span>
       </div>
 

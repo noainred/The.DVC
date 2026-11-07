@@ -6,7 +6,7 @@
  *   알람 엔진(alerts.js onAlertState)의 상태 알람 — vCenter 수집 실패(vc) · 엣지 보고 끊김(vcstale) · 호스트 연결 끊김(host) · 데이터스토어 용량(ds) ·
  *   vCenter 위험 알람(alarm) · VM 동시 전원 꺼짐(massoff). 오버커밋(ramoc · vcpuoc)은 용량 경고라 대상에서 뺐다.
  *   Bareos 백업 실패(backup — bareos/notify.js onBareosFailures).
- *   인증서 만료(cert — v2.928 · security/certMonitor.js onCertResults). ⚠ 정정: v2.908 은 '인증서 만료는 판정이 없다' 고 적었는데, 알람 엔진에만
+ *   인증서 만료(cert — v2.929 · security/certMonitor.js onCertResults). ⚠ 정정: v2.908 은 '인증서 만료는 판정이 없다' 고 적었는데, 알람 엔진에만
  *   없고 certMonitor 가 vCenter · NSX 443 인증서를 12시간마다 확인해 남은 30일 이하(critical) · 만료(expired)를 판정한다 — 그 판정을 쓴다.
  *
  * 언제:
@@ -33,7 +33,7 @@ import { issueViewers } from './visibility.js';
 export const ALERT_ISSUE_KINDS = Object.freeze(['vc', 'vcstale', 'host', 'ds', 'alarm', 'massoff', 'backup', 'cert']);
 export const ALERT_KIND_LABEL = Object.freeze({
   vc: 'vCenter 수집 실패', vcstale: '엣지 보고 끊김', host: '호스트 연결 끊김', ds: '데이터스토어 용량', alarm: 'vCenter 위험 알람', massoff: 'VM 동시 전원 꺼짐', backup: 'Bareos 백업 실패',
-  cert: '인증서 만료(30일 이하 · 만료)', // v2.928
+  cert: '인증서 만료(30일 이하 · 만료)', // v2.929
 });
 export const ALERT_ISSUE_LIMITS = Object.freeze({ delayMin: [0, 1440], dailyMax: [1, 500], labels: 10, label: 30 });
 export function defaultAlertAuto() {
@@ -179,7 +179,7 @@ export function planBackupIssues(rows, cfg, { existing = [], createdToday = 0 } 
   return { actions, capped };
 }
 
-/** 인증서 확인 결과 → 할 일(순수 — v2.928). 열쇠 = 'cert:<vcenter|nsx>:<id>'. partKeys 에 본 상태(critical · expired)를 적어 같은 상태 댓글을 두 번 달지 않는다. */
+/** 인증서 확인 결과 → 할 일(순수 — v2.929). 열쇠 = 'cert:<vcenter|nsx>:<id>'. partKeys 에 본 상태(critical · expired)를 적어 같은 상태 댓글을 두 번 달지 않는다. */
 export const CERT_BAD = Object.freeze(['critical', 'expired']);
 export const CERT_GOOD = Object.freeze(['ok', 'expiring']); // 남은 날이 30일을 넘는다 — 갱신된 것으로 본다(expiring = 31~90일)
 export const certKey = (c) => `cert:${String(c?.kind || '')}:${String(c?.id || '')}`;
@@ -315,7 +315,7 @@ export function applyBackupFailures(rows, { now = Date.now() } = {}) {
 
 const certWhen = (c) => (Number.isFinite(Number(c?.validTo)) ? portalTime(Number(c.validTo)).slice(0, 10) : '모름');
 const certLeft = (c) => (Number.isInteger(c?.daysLeft) ? (c.daysLeft < 0 ? `${-c.daysLeft}일 지남` : `${c.daysLeft}일 남음`) : '남은 날 모름');
-/** 인증서 확인 결과(certMonitor 구독 — v2.928). 던지지 않는다. */
+/** 인증서 확인 결과(certMonitor 구독 — v2.929). 던지지 않는다. */
 export function applyCertResults(items, { now = Date.now() } = {}) {
   const cfg = loadAlertAuto();
   if (!cfg.enabled || !cfg.kinds.cert) return { created: 0 };
@@ -361,7 +361,7 @@ export function applyCertResults(items, { now = Date.now() } = {}) {
 }
 
 let started = false;
-/** index.js 가 기동 때 한 번 — 알람 엔진 · Bareos 실패 메일 틱 · 인증서 감시(v2.928)를 구독한다(그 모듈들은 이슈를 모른다). */
+/** index.js 가 기동 때 한 번 — 알람 엔진 · Bareos 실패 메일 틱 · 인증서 감시(v2.929)를 구독한다(그 모듈들은 이슈를 모른다). */
 export async function startAlertIssues() {
   if (started) return;
   started = true;

@@ -4904,7 +4904,7 @@ export const DB_GUIDE_DATA = {
   },
   "issue-alert-auto.json": {
     "title": "이슈 — 다른 알람 · 백업 실패 자동 등록 설정",
-    "summary": "알람 엔진의 상태 알람(vCenter 수집 실패 · 엣지 보고 끊김 · 호스트 연결 끊김 · 데이터스토어 용량 · 위험 알람 · VM 동시 전원 꺼짐), Bareos 백업 실패, 인증서 만료(30일 이하 · 만료 — v2.928)를 이슈로 자동 등록할지 정하는 설정입니다.",
+    "summary": "알람 엔진의 상태 알람(vCenter 수집 실패 · 엣지 보고 끊김 · 호스트 연결 끊김 · 데이터스토어 용량 · 위험 알람 · VM 동시 전원 꺼짐), Bareos 백업 실패, 인증서 만료(30일 이하 · 만료 — v2.929)를 이슈로 자동 등록할지 정하는 설정입니다.",
     "stores": ["켬/끔 · 종류별 켬/끔 · 종류별 우선순위 · 지연(분) · 하루 상한 · 라벨 · 해소 처리(검토/그대로)"],
     "writer": "이슈 › 설정 › 자동 등록 › 다른 알람에서 전체 범위 관리자가 저장할 때 원자적으로 씁니다.",
     "usedBy": ["알람 엔진 평가 뒤(issues/alertIssues.js applyAlertState)", "Bareos 실패 메일 틱(applyBackupFailures)", "인증서 만료 감시 확인 뒤(applyCertResults)"],
@@ -4912,7 +4912,7 @@ export const DB_GUIDE_DATA = {
     "growth": "고정 크기(1KB 안팎)입니다.",
     "shrink": "해당 없습니다.",
     "ifDeleted": "기본값(꺼짐)으로 돌아갑니다. 이미 만든 이슈는 그대로입니다. 손상되면 보존하고 기본값으로 읽습니다(설정 화면이 알립니다).",
-    "cautions": ["전 법인 공용 설정입니다 — 범위가 지정된 계정은 바꿀 수 없습니다.", "인증서 만료(v2.928)는 알람 엔진이 아니라 인증서 만료 감시(security/certMonitor.js — 12시간마다)의 결과로 만듭니다. 확인 실패는 판정 보류입니다."],
+    "cautions": ["전 법인 공용 설정입니다 — 범위가 지정된 계정은 바꿀 수 없습니다.", "인증서 만료(v2.929)는 알람 엔진이 아니라 인증서 만료 감시(security/certMonitor.js — 12시간마다)의 결과로 만듭니다. 확인 실패는 판정 보류입니다."],
     "sources": ["server/src/issues/alertIssues.js", "server/src/security/certMonitor.js", "server/src/routes/api/issues.js"]
   },
   "issue-inbox.json": {

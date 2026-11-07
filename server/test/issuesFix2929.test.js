@@ -1,5 +1,5 @@
 /**
- * issuesFix2928.test.js — v2.928(사용자 '개선 포인트 1 → 3 → 2 → 4 진행해' · 검증 '표준').
+ * issuesFix2929.test.js — v2.929(사용자 '개선 포인트 1 → 3 → 2 → 4 진행해' · 검증 '표준').
  *  3 알람 엔진 평가 → 구독(onAlertState) → 다른 알람 자동 등록(applyAlertState) 이 **실제로 이어지는가**(v2.908 은 판정 함수만 직접 불렀다)
  *    · 판정 보류(그 vCenter 를 지금 못 읽음)로 목록에서 빠진 알람은 해소 댓글 · 검토로 이어지지 않는다
  *  2 인증서 만료(security/certMonitor.js 판정) → 이슈 자동 등록 · 해소
@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'i2928-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'i2929-'));
 process.env.CONFIG_DIR = DIR;
 process.env.AUTH_ENABLED = 'false';
 
