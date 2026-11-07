@@ -12,6 +12,8 @@
  * 규칙은 flags.js 머리말 — mock 모드에서만, 설정 파일은 바꾸지 않는다(사용률 수집 켜짐·법인 선택은 판정 지점의 데모 값이다).
  */
 import { isMockMode, demoHash, demoRand } from './flags.js';
+import { judgeHealth } from '../../bmusage/health.js'; // v2.929(5단계): 데모 소모품 칸은 실제 판정 함수로(응답 단계 전용 — 적재하지 않는다)
+import { summarizeFocus } from '../../bmusage/focus/summary.js'; // v2.929: 데모 지난 세션 요약 — 실제 요약 함수(순수 모듈)
 // 베어메탈 사양·시드·서비스태그 보정은 idrac.js 가 소유한다(이 모듈 → idrac.js 단방향 — 순환 금지). 호환을 위해 재수출한다.
 import { demoServerProfile, demoLoadAt, BM_PREFIX, demoBareMetalSpecs, bareMetalSpecOf, primeBareMetalSpecs, ensureBareMetalSeed, repairMockServiceTags, _resetBareMetalSeedForTest } from './idrac.js';
 export { BM_PREFIX, demoBareMetalSpecs, bareMetalSpecOf, primeBareMetalSpecs, ensureBareMetalSeed, repairMockServiceTags };
@@ -125,7 +127,98 @@ export function demoPerfOverlay(target, t, scenario, base = {}) {
     disks, disksTotal: disks.length, nics, nicsTotal: nics.length, inodes: null,
     streak: { netErr: 0, netDrop: scenario === 'net-drop' ? 1 : 0, oom: 0 }, sections: sec('ok'), truncated: false,
   };
-  return { ...cols, src: 'os+idrac+demo', os_at: t, idrac_at: t, detail_json: JSON.stringify(detail), tuning_json: JSON.stringify(demoTuningFacts(key, t, cores)) };
+  const tuning = demoTuningFacts(key, t, cores);
+  // v2.929(5단계): 점검 소모품 — 시나리오별 가상 사실을 실제 판정 함수(health.js)로 판정한다(수치 · 이름은 가상).
+  detail.hfacts = demoHealthFacts(key, t, scenario);
+  const h = judgeHealth({ hfacts: detail.hfacts, tuning, row: cols, cert: scenario === 'disk-sat' ? { days: 12, count: 1 } : null, th: {}, now: t });
+  h.since = Object.fromEntries(Object.entries(h.cells).map(([k, c]) => [k, ['warn', 'bad'].includes(c.code) ? t - (1 + (demoHash(`${key}|${k}`) % 6)) * DAY : t - 20 * DAY]));
+  detail.health = h;
+  return { ...cols, src: 'os+idrac+demo', os_at: t, idrac_at: t, detail_json: JSON.stringify(detail), tuning_json: JSON.stringify(tuning) };
+}
+
+/** v2.929 — 데모 소모품 사실(가상). 시나리오마다 주의 칸이 다르게 — 화면의 8칸 · 함대 ‘소모품 주의’ 표를 볼 수 있게. */
+export function demoHealthFacts(key, t, scenario) {
+  const w = (k) => demoRand(`${key}|hf|${k}|${Math.floor(t / DAY)}`);
+  const base = {
+    chrony: { offsetMs: Math.round((w('o') - 0.5) * 2000) / 1000, stratum: 3, leap: 'Normal', synced: true, refId: 'C0A80101' },
+    dmesg: { err: 0, warn: 2, err24: 0, warn24: 0 }, upS: (20 + Math.floor(w('u') * 30)) * DAY / 1000, kernel: '5.14.0-427.13.1.el9_4.x86_64', needsRestart: false, nrAbsent: false,
+    firewalld: 'inactive', fd: { alloc: 4096, max: 26214400, pct: 0 }, conntrack: { count: 1200 + Math.round(w('c') * 4000), max: 262144, pct: 1.2 }, oomTotal: 0,
+    sections: { chrony: 'ok', dmesg: 'ok', changes: 'ok' },
+  };
+  if (scenario === 'first') return { ...base, chrony: null, dmesg: null, upS: null, needsRestart: null, fd: null, conntrack: null, oomTotal: null, sections: { chrony: 'missing', dmesg: 'missing', changes: 'missing' } };
+  if (scenario === 'disk-sat') return { ...base, dmesg: { err: 3, warn: 9, err24: 1, warn24: 2 }, needsRestart: true, kernel: '5.14.0-362.24.1.el9_3.x86_64' };
+  if (scenario === 'net-drop') return { ...base, chrony: { offsetMs: 12400, stratum: 0, leap: 'Not synchronised', synced: false, refId: '00000000' } };
+  if (scenario === 'mem-sat') return { ...base, oomTotal: 2, conntrack: { count: 225000, max: 262144, pct: 85.8 } };
+  if (scenario === 'psi-absent') return { ...base, chrony: null, dmesg: { failed: true, rc: 1 }, nrAbsent: true, needsRestart: null, sections: { chrony: 'absent', dmesg: 'ok', changes: 'ok' } };
+  return base;
+}
+
+/**
+ * v2.929 — 데모 집중 모니터링 한 분(장비에 접속하지 않는다 — 응답 · 보관 모두 가상). 시나리오가 disk-sat 이면 앞 4분 포화 → 완화 → 정상(아트보드 Focus 와 같은 흐름).
+ *   5번째 분은 OS 결측(시한 초과) — 결측 칸을 볼 수 있게. 값 · 이름은 가상이다.
+ */
+export function demoFocusSample(target, t, idx) {
+  const key = String(target.key || '');
+  const w = (k) => demoRand(`${key}|fo|${k}|${idx}`);
+  const hot = idx < 4; const cooling = idx === 5;
+  if (idx === 4) return { osOk: false, idracOk: true, missOs: 'timeout', verdict: null, vals: { power_w: { avg: 449 }, inlet_c: { avg: 25 } }, snap: null };
+  const await_ = hot ? 24 + idx * 60 + w('a') * 20 : cooling ? 41 : 2 + w('a') * 2;
+  const vals = {
+    cpu_pct: { avg: Math.round(hot ? 58 + idx * 6 : 60 - idx * 2), peak: Math.round(hot ? 80 + idx * 4 : 70) }, cpu_iowait_pct: { avg: hot ? 9 + idx * 8 : 7, peak: hot ? 20 + idx * 8 : 9 },
+    runq_per_core: { avg: hot ? 0.3 + idx * 0.3 : 0.3 }, disk_busy_pct: { avg: hot ? 91 + idx * 3 : cooling ? 72 : 38, peak: hot ? 100 : 80 },
+    disk_await_ms: { avg: Math.round(await_ * 10) / 10, peak: Math.round(await_ * 2.5) }, disk_aqu: { avg: hot ? 9 + idx * 18 : 1, peak: hot ? 31 + idx * 22 : 3 },
+    psi_io_full10: { avg: hot ? 6 + idx * 12 : 0 }, mem_pct: { avg: 71 + (hot ? 1 : 0) }, swap_out_ps: { avg: 0 }, net_pct: { avg: 21 + idx, peak: 30 + idx }, net_drop_delta: { avg: 0 }, net_err_delta: { avg: 0 },
+    power_w: { avg: 418 + (hot ? idx * 10 : 0) }, inlet_c: { avg: 24 }, dmesg_err: { avg: idx >= 2 ? 1 : 0 },
+    _res: { disk: hot ? 'saturated' : cooling ? 'warn' : 'ok', cpu: hot && idx >= 2 ? 'saturated' : 'ok', mem: 'ok', net: 'ok', hw: 'ok' },
+  };
+  const io1 = idx < 2 || idx === 5 ? 'pg_dump' : 'checkpointer';
+  return {
+    osOk: true, idracOk: true, missOs: null, verdict: hot ? 'saturated' : cooling ? 'warn' : 'ok', vals,
+    snap: { cpuTop: [{ name: 'postgres', cpuPct: 41 + idx * 3 }, { name: 'pg_dump', cpuPct: 9 }], ioTop: [{ name: io1, readBps: 0, writeBps: Math.round((hot ? 2e8 : 4e7) * (1 + w('i'))) }, { name: io1 === 'pg_dump' ? 'checkpointer' : 'pg_dump', readBps: 1e8, writeBps: 0 }, { name: 'walwriter', readBps: 0, writeBps: 3.8e7 }],
+      io: 'ok', cpu: 'ok', ssTcp: { total: 120, estab: 88, timewait: 4 } },
+  };
+}
+
+let _opsSeeded = null;
+/**
+ * v2.929 — 데모 변경 이벤트 · 지난 집중 세션 시드(1회 · 메인 bm-usage.db). 데모 대상(mock-)에만 · 이미 있으면 건너뛴다. 값은 가상이다.
+ */
+export async function seedDemoOps(targets = [], { now = Date.now() } = {}) {
+  if (!isMockMode() || !targets.length) return { skipped: 'empty' };
+  if (_opsSeeded) return _opsSeeded;
+  _opsSeeded = (async () => {
+    const O = await import('../../bmusage/opsDb.js');
+    const { config } = await import('../../config.js');
+    const agent = config.agent?.name || '';
+    const sorted = [...targets].sort((a, b) => String(a.key).localeCompare(String(b.key)));
+    // demoPerfLatestRows 의 시나리오 순서(정렬 순위 % 9 — 0 은 iDRAC 만)와 맞춘다: OS 경로가 있는 시나리오 서버에만 시드(디스크 포화 서버가 집중 세션 첫째).
+    const pick = sorted.filter((_, i) => i % DEMO_PERF_SCENARIOS.length !== 0).slice(0, 6);
+    const existing = await O.changeEventsRange({ key: String(pick[0]?.key || ''), agent, from: now - 30 * DAY, to: now, limit: 1 }).catch(() => null);
+    if (!existing || existing.rows.length) return { skipped: 'exists' };
+    const items = pick.map((tg, i) => ({ key: tg.key, at: now, facts: null, events: [
+      { ts: now - 19 * HOUR - 40 * MIN, kind: 'sysctl', item: 'vm.dirty_ratio', before: '20', after: '10' },
+      { ts: now - 19 * HOUR - 40 * MIN, kind: 'sysctl-file', item: '99-gp.conf', before: 'crc 31a7c2e0', after: 'crc 8b02f4d1' },
+      { ts: now - 15 * HOUR - 30 * MIN, kind: 'package', item: 'dnf history #214', before: null, after: 'Install · 12개 · 2026-11-05 22:05' },
+      { ts: now - 15 * HOUR - 20 * MIN, kind: 'needs-restart', item: '재부팅 필요', before: '불필요', after: '필요' },
+      { ts: now - 2 * HOUR - 10 * MIN, kind: 'cron', item: 'pg_dump-adhoc', before: '없음', after: 'crc 5e6d0a11' },
+      ...(i % 2 ? [{ ts: now - 5 * DAY, kind: 'firmware', item: 'BIOS', before: '2.13.3', after: '2.14.1' }, { ts: now - 3 * DAY, kind: 'health', item: 'chrony', before: 'ok', after: 'warn' }] : [{ ts: now - 6 * DAY, kind: 'reboot', item: '재부팅', before: '가동 41일', after: '가동 0시간' }]),
+    ] }));
+    // change_latest 는 실제 수집이 채운다(이벤트만 넣는다 — latest:false).
+    await O.changeWriteBatch({ agent, items, latest: false });
+    // 지난 집중 세션 2건(앞 대상) — 끝난 세션 · 표본 10분
+    for (const [j, tg] of [pick[1], pick[0]].filter(Boolean).entries()) {
+      const start = j ? now - 3 * DAY - 2 * HOUR : now - 3 * HOUR;   // 하나는 최근 24시간(보드 칩 목록에 보이게) · 하나는 사흘 전
+      const id = `00000000-0000-4000-8000-${String(900_000_000_000 + j).padStart(12, '0')}`;
+      const samples = Array.from({ length: 10 }, (_, idx) => ({ sessionId: id, idx, minuteTs: start + idx * MIN, ...demoFocusSample(tg, start + idx * MIN, idx) }));
+      const summary = summarizeFocus(samples, { before: { disk_await_ms: { avg: 0.4, max: 2.1, n: 12 }, cpu_pct: { avg: 44, max: 71, n: 12 } }, hasOs: true, hasIdrac: true });
+      await O.focusInsert({ id, agent, key: tg.key, vcenterId: tg.vcenterId || '', trigger: j ? 'auto' : 'manual', rule: j ? 'use' : '', by: j ? 'rule' : 'demo.ops', reason: j ? '자동 규칙 ‘use’ — 디스크 포화' : '디스크 포화 판정 뒤 확인(데모)', created: start, start, intervalS: 60, count: 10, status: 'running' });
+      for (const sm of samples) await O.focusSampleInsert(sm);
+      await O.focusUpdate(id, { status: 'done', end: start + 10 * MIN, done: 10, missOs: 1, missIdrac: 0, summary });
+    }
+    console.log(`[mock] 베어메탈 성능 데모 시드: 변경 이벤트 ${items.reduce((a, x) => a + x.events.length, 0)}건 · 지난 집중 세션 2건`);
+    return { seeded: true };
+  })().catch((e) => { _opsSeeded = null; return { error: String(e?.message || e) }; });
+  return _opsSeeded;
 }
 
 /**
@@ -227,7 +320,9 @@ export async function backfillBmUsage(targets = [], { now = Date.now() } = {}) {
     console.log(`[mock] 베어메탈 사용률 데모 백필: ${targets.length}대 · ${inserted}행(원시 14일 + 일 롤업 45일)`);
     return { inserted };
   })();
+  // v2.929(5단계): 변경 이벤트 · 지난 집중 세션 데모 시드(1회 — 백필과 같은 때).
+  _bmBackfill.then(() => seedDemoOps(targets, { now })).catch(() => {});
   return _bmBackfill;
 }
 
-export function _resetBareMetalDemoForTest() { _resetBareMetalSeedForTest(); _bmBackfill = null; }
+export function _resetBareMetalDemoForTest() { _resetBareMetalSeedForTest(); _bmBackfill = null; _opsSeeded = null; }

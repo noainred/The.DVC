@@ -13,6 +13,8 @@ import { PERF_DEFAULTS } from '../bmusage/settings.js';
 import { SYSCTL_PATHS } from '../bmusage/parse/linuxProc.js';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
 import { DETECT_ACCOUNTS, KARG_KEYS } from '../bmusage/parse/linuxFacts.js'; // v2.923: 4단계 감지 · 튜닝 사실(화이트리스트 원천)
+import { HEALTH_CELLS, HEALTH_CODES } from '../bmusage/health.js'; // v2.929: 점검 소모품 칸(화이트리스트 원천)
+import { sanitizeFocusSummary, sanitizeAlertSent } from './bmPerfOpsPull.js'; // v2.929: 봉투의 집중 요약 · 알림 발송 기록
 
 export const PERF_LIST_MAX = 2_000;
 const DEV_MAX = 32;
@@ -79,6 +81,28 @@ function codesOf(c) {
   }
   return out;
 }
+/**
+ * v2.929(5단계) — 점검 소모품 칸 정제(아는 칸 · code enum · 값은 수 · 짧은 글자만). full = 상세(값 포함) · 아니면 code · since 만.
+ */
+const HEALTH_NUM = ['offsetMs', 'stratum', 'limitMs', 'failed', 'delta', 'total', 'rc', 'err24', 'warn24', 'err', 'warn', 'limit', 'upDays', 'fdPct', 'conntrackPct', 'limitFd', 'limitCt', 'days', 'count'];
+export function healthOf(h, rcv, { full = true } = {}) {
+  if (!isObj(h) || !isObj(h.cells)) return null;
+  const cells = {};
+  for (const k of HEALTH_CELLS) {
+    const c = h.cells[k];
+    if (!isObj(c)) continue;
+    const since = isObj(h.since) ? clampEdgeTs(h.since[k], rcv) : clampEdgeTs(c.since, rcv);
+    if (!full) { cells[k] = { code: oneOf(c.code, HEALTH_CODES, 'missing'), ...(since != null ? { since } : {}) }; continue; }
+    const out = { code: oneOf(c.code, HEALTH_CODES, 'missing') };
+    for (const f of HEALTH_NUM) if (Object.hasOwn(c, f)) out[f] = num(c[f]);
+    for (const f of ['leap', 'kernel', 'tuned', 'selinux', 'firewalld', 'why']) if (Object.hasOwn(c, f)) out[f] = c[f] == null ? null : str(c[f], 64);
+    for (const f of ['synced', 'needsRestart', 'conntrackAbsent']) if (Object.hasOwn(c, f)) out[f] = c[f] == null ? null : c[f] === true;
+    cells[k] = out;
+  }
+  const since = {};
+  if (full && isObj(h.since)) for (const k of HEALTH_CELLS) { const v = clampEdgeTs(h.since[k], rcv); if (v != null) since[k] = v; }
+  return { ...(full ? { v: num(h.v), counts: isObj(h.counts) ? numKeys(h.counts, HEALTH_CODES) : null, since } : {}), cells, attention: num(h.attention) ?? 0, at: clampEdgeTs(h.at, rcv) };
+}
 function detailOf(d, rcv) {
   if (!isObj(d)) return null;
   const psi = isObj(d.psi) ? {
@@ -103,6 +127,8 @@ function detailOf(d, rcv) {
     truncated: bool(d.truncated),
     ...(Array.isArray(d.cutSections) ? { cutSections: strList(d.cutSections, 4, 16) } : {}),
     ...(Array.isArray(d.linesCapped) ? { linesCapped: strList(d.linesCapped, 8, 16) } : {}),
+    // v2.929: 점검 소모품(엣지 판정 칸 그대로 — 다시 판정하지 않는다)
+    ...(isObj(d.health) ? { health: healthOf(d.health, rcv, { full: true }) } : {}),
   };
 }
 function tuningOf(tu, rcv) {
@@ -183,6 +209,7 @@ export function sanitizePerfEntry(e, rcv = Date.now()) {
     cross: list(e.cross, 4, (c) => ({ id: num(c.id), state: oneOf(c.state, CROSS_STATES, 'missing'), code: str(c.code, 32) })),
     mismatch: mm, firstSample: bool(e.firstSample),
     psiAbsent: bool(e.psiAbsent),   // v2.920 — 보드 ‘PSI 없음’ 수(perfView.buildPerfEntry 와 같은 필드)
+    health: healthOf(e.health, rcv, { full: false }),   // v2.929 — 점검 소모품 칸 code · since(보드 · 함대 표)
   };
   // 자른 원본은 따로(루트 규약 — 원본을 버리지 않는다). 자르지 않았으면 싣지 않는다.
   const raw = {};
@@ -217,6 +244,9 @@ export function sanitizePerfFields(snap, rcv = Date.now()) {
       ...(typeof snap?.perfError === 'string' && snap.perfError ? { perfError: str(snap.perfError, 300) } : {}),
       // v2.919(반증 D2): 엣지가 봉투 크기 상한으로 성능 상세를 뺐다는 표지 — 그대로 전한다(화면이 ‘왜 상세가 없는지’ 를 말한다).
       ...(pt ? { perfTruncated: { reason: str(pt.reason, 32), level: oneOf(pt.level, ['compact', 'dropped'], 'dropped'), bytesBefore: num(pt.bytesBefore), bytesAfter: num(pt.bytesAfter), maxBytes: num(pt.maxBytes), overStill: bool(pt.overStill) } } : {}),
+      // v2.929(5단계): 집중 모니터링 요약(진행 중 · 대기 · 최근 24시간 — 상세는 볼 때 당긴다) · 성능 알림 발송 기록(채널 URL 없음).
+      ...(Array.isArray(snap?.focusSummary) ? { focusSummary: sanitizeFocusSummary(snap.focusSummary, rcv) } : {}),
+      ...(Array.isArray(snap?.perfAlertSent) ? { perfAlertSent: sanitizeAlertSent(snap.perfAlertSent, rcv) } : {}),
     },
     dropped: arr.length - perf.length,
   };

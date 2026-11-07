@@ -341,6 +341,8 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
   out.src = srcs.join('+');
   return {
     row: out, srcOf, notes, devices: deviceRows, mounts: mountRows,
+    // v2.929(5단계): 변경 이벤트 사실(해시 · 개수 · 짧은 값만 — 행에는 넣지 않는다: 폴러의 changes.js 가 이전 사실과 비교해 전이만 change_event 에 쓴다).
+    changeFacts: perfOut?.changeFacts || null,
     // 화면 상세용 — DB 에는 넣지 않는다(장치 수 × 주기면 행이 폭주한다).
     detail: {
       osKind: osOk ? os.osKind : null,
@@ -564,5 +566,28 @@ export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = nu
       kargs: sections.kargs || 'missing', softnet: sections.softnet || 'missing', netq: sections.netq || 'missing', xfs: sections.xfs || 'missing',
     },
   };
-  return { cols, detail, tuning, streak, notes, allDisks, nicDeltas: nics };
+  /*
+   * v2.929(5단계 — 점검 소모품 · 변경 이벤트 · 설계 PROFILES §14): 소모품 사실(판정 전 — 판정은 폴러가 이 노드 설정 기준값으로 health.js 에서)과
+   *   변경 감지 사실(해시 · 개수 · 짧은 값 — 설정 파일 내용 · dmesg 원문은 명령 단계에서 이미 없다). 못 읽은 구획은 null(지어내지 않는다).
+   */
+  const ch = perf.changes?.value || null;
+  const dm = perf.dmesg?.value || null;
+  detail.hfacts = {
+    chrony: perf.chrony?.value || null,
+    dmesg: dm ? (dm.failed ? { failed: true, rc: dm.rc ?? null } : { err: dm.err, warn: dm.warn, err24: dm.err24, warn24: dm.warn24 }) : null,
+    upS: ch ? ch.upS : null, kernel: ch ? ch.kernel : null, needsRestart: ch ? ch.needsRestart : null, nrAbsent: !!ch?.nrAbsent, nrSkipped: !!ch?.nrSkipped,
+    firewalld: ch ? ch.firewalld : null, fd: ch ? ch.fd : null, conntrack: ch ? ch.conntrack : null,
+    oomTotal: n(vm?.oomKill),
+    sections: { chrony: sections.chrony || 'missing', dmesg: sections.dmesg || 'missing', changes: sections.changes || 'missing' },
+  };
+  const changeFacts = ch ? {
+    bootId: ch.bootId, upS: ch.upS, kernel: ch.kernel, needsRestart: ch.needsRestart, rpmdbAt: ch.rpmdbAt, dnf: ch.dnf,
+    sysctlCrc: ch.sysctlCrc, sysctlFiles: ch.sysctlFiles, cronFiles: ch.cronFiles, spool: ch.spool, spoolPerm: ch.spoolPerm, firewalld: ch.firewalld,
+    // 화이트리스트 sysctl 값(키 이름 · 값 — 숫자 · 짧은 값)과 TuneD · SELinux · 실패 유닛 수는 이미 읽은 구획에서(새 명령 없음).
+    sysctl: sy ? Object.fromEntries(Object.entries(sy).filter(([k]) => k !== 'tuned.active_profile').slice(0, 64)) : null,
+    tuned: sy && typeof sy['tuned.active_profile'] === 'string' ? sy['tuned.active_profile'] : null,
+    selinux: perf.osrel?.value?.selinux ?? null,
+    unitsFailed: perf.units?.value ? n(perf.units.value.failed) : null,
+  } : null;
+  return { cols, detail, tuning, streak, notes, allDisks, nicDeltas: nics, changeFacts };
 }

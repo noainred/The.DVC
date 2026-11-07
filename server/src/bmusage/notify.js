@@ -15,7 +15,7 @@ import { evaluateRows, alertOf } from './alertRules.js';
 import { isMockMode } from '../mock/demo/flags.js';
 
 const FILE = () => path.join(config.configDir, 'bmusage-alert-state.json');
-const MAX_SEND = Math.max(1, Number(process.env.BMUSAGE_ALERT_MAX) || 40);
+export const MAX_SEND = Math.max(1, Number(process.env.BMUSAGE_ALERT_MAX) || 40);   // v2.929: 성능 알림 규칙(perfAlerts)도 주기당 이 상한을 쓴다(반증 F6)
 
 let _state = null;
 function load() {
