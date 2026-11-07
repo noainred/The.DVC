@@ -22,6 +22,7 @@ import { createTrendLoader, trendFetcher } from './bmTrendLoad.js';
 import { TrendRow, TimeAxis, Spark } from './BmTrendChart.jsx';
 // v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 겹침 · 구간 비교(BmTrendOps.jsx) — 패널 행에는 변경 이벤트 점만 얹는다.
 import { BaselineOverlay, CompareView } from './BmTrendOps.jsx';
+import { maintBands } from './bmMaintText.js'; // 8a단계 정비 창 음영
 import { changeMarks } from './bmPerfOpsText.js';
 // 6단계: 운영 주석 ◆ 핀(패널 행 · 겹침 카드) · 목록 · 입력.
 import AnnotationsCard, { useAnnotations } from './BmAnnotations.jsx';
@@ -150,6 +151,9 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
   const [sloOn, setSloOn] = useState(false);
   const slo = useOnceJson(itemKey && sloOn ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/slo?from=${Math.floor(win.from)}&to=${Math.floor(win.to)}` : '', clock.n);
   const vb = useMemo(() => violationBands(slo.data), [slo.data]);
+  // 8a단계: 정비 창 음영 — 그 서버를 덮는 창 구간(서버 판정 코어 · 창이 바뀔 때 1회 · 폴링 없음). 변경 이벤트 ‘정비 창 안’ 묶음도 같은 구간.
+  const maint = useOnceJson(itemKey ? `/tools/bm-usage/maintenance/occurrences?key=${encodeURIComponent(itemKey)}&from=${Math.floor(win.from)}&to=${Math.floor(win.to)}` : '', clock.n);
+  const mb = useMemo(() => maintBands(maint.data), [maint.data]);
 
   useEffect(() => {
     if (narrowOverride != null || typeof window === 'undefined') return undefined;
@@ -304,7 +308,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
           const sub = [baseSub, groupFirst ? restNote(rp.rest) : '', groupFirst && rp.autoRows ? '8개 초과 — 행 나눔으로 바꿨습니다' : ''].filter(Boolean).join(' · ');
           return (
             <TrendRow key={rp.id} title={title} sub={sub} readout={readout} series={lines} win={win} yMax={yMax} cursor={cursorMs} sel={sel} baseline={isPeak ? null : baseline}
-              gaps={[]} noPeak={noPeak} message={lines.length ? '' : msg} note={lines.length ? msg : ''} legend={lg} unit={info.unit} marks={chMarks} vbands={!rp.dev ? (vb[r.metric] || []) : []}
+              gaps={[]} noPeak={noPeak} message={lines.length ? '' : msg} note={lines.length ? msg : ''} legend={lg} unit={info.unit} marks={chMarks} vbands={!rp.dev ? (vb[r.metric] || []) : []} mbands={mb}
               onHover={(ms) => setCur(ms == null ? null : { ms, panel: which })} onSelect={setSel}
               onOpen={() => open(first, { show: isPeak ? 'peak' : 'avg' })} />
           );
@@ -372,10 +376,10 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
         <label className="bmt-check"><input type="checkbox" checked={sloOn} onChange={(e) => setSloOn(e.target.checked)} /> 목표선 위반 띠(빨강) 겹치기</label>
         {sloOn && <span className="bmt-hint">{slo.loading ? '목표를 대 보는 중…' : slo.err ? `목표를 읽지 못했습니다: ${trendErrorText(slo.err)}` : `목표 ${(slo.data?.items || []).length}개 · 위반 띠 ${Object.values(vb).reduce((a, x) => a + x.length, 0)}곳 — 목표선 탭에 달성률`}</span>}
       </div>
-      <p className="bmt-note">{SOCKET_NOTE}{chMarks0.length ? ` · 행 위 파란 점선 = 변경 이벤트(${chMarks0.length}곳 — 아래 목록)` : ''}{anMarks.length ? ` · 보라 ◆ = 운영 주석(${anMarks.length}곳 — 가리키면 내용)` : ''}</p>
+      <p className="bmt-note">{SOCKET_NOTE}{chMarks0.length ? ` · 행 위 파란 점선 = 변경 이벤트(${chMarks0.length}곳 — 아래 목록)` : ''}{anMarks.length ? ` · 보라 ◆ = 운영 주석(${anMarks.length}곳 — 가리키면 내용)` : ''}{mb.length ? ` · 주황 음영 = 정비 창(${mb.length}곳 — 가리키면 이름)` : ''}</p>
 
       {/* ── v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 · 구간 비교 ── */}
-      <BaselineOverlay itemKey={itemKey} win={win} changes={changes.data && changes.data.ok !== false ? changes.data : null} narrow={narrow} annotMarks={anMarks} />
+      <BaselineOverlay itemKey={itemKey} win={win} changes={changes.data && changes.data.ok !== false ? changes.data : null} narrow={narrow} annotMarks={anMarks} maintBands={mb} />
       <AnnotationsCard itemKey={itemKey} name={name} vcenterId={vcenterId} sel={sel} list={ann.list} err={ann.err} onChanged={() => setAnnTick((v) => v + 1)} />
       {changes.err && <p className="bmt-note" style={{ color: toneVar('warn') }}>변경 이벤트를 읽지 못했습니다: {trendErrorText(changes.err)}</p>}
       <div className="bmt-ctl">

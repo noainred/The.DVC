@@ -63,7 +63,7 @@ function usePointer({ win, onHover, onSelect, onOpen }) {
  * SVG 한 장 — 계열(선) 여러 개 · 결측 띠 · 피크 없는 띠 · 선택 구간 · 커서 · 기준선.
  * series: [{ points, gaps, pick:'avg'|'max'|'peak', color, dash, faint, width }]
  */
-export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = null, baseline = null, gaps = [], noPeak = [], label = '', height = 56, ptr = {}, marks = [], bandPolys = [], dots = [], vbands = [] }) {
+export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = null, baseline = null, gaps = [], noPeak = [], label = '', height = 56, ptr = {}, marks = [], bandPolys = [], dots = [], vbands = [], mbands = [] }) {
   const bands = gapBands(gaps, { ...win, w: W });
   const np = noPeak.length ? gapBands(noPeak.map((r) => ({ ...r, reason: 'no-peak' })), { ...win, w: W }) : [];
   const cx = cursor == null ? null : xOf(cursor, { ...win, w: W });
@@ -76,6 +76,8 @@ export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = nu
   const svg = (
     <svg className="bmt-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ height }} role="img" aria-label={label} {...ptr}>
       {[25, 50, 75].map((y) => <line key={y} x1="0" x2={W} y1={y} y2={y} stroke="var(--border-soft)" vectorEffect="non-scaling-stroke" />)}
+      {/* 8a단계: 정비 창 음영(서버 occurrences 의 merged — 그리기만) — 결측 띠 아래 */}
+      {mbands.map((b, i) => { const a = xOf(Math.max(b.from, win.from), { ...win, w: W }); const z = xOf(Math.min(b.to, win.to), { ...win, w: W }); return z > a ? <rect key={`mw${i}`} x={a} y="0" width={Math.max(z - a, 0.5)} height={H} fill="var(--amber)" opacity="0.12"><title>{b.title || '정비 창'}</title></rect> : null; })}
       {bands.map((b, i) => <rect key={`g${i}`} x={b.x} y="0" width={Math.max(b.width, 0.5)} height={H} fill="var(--text-faint)" opacity={b.reason === 'migrating' ? 0.16 : 0.08}><title>{`결측 — ${gapReasonText(b.reason)}`}</title></rect>)}
       {np.map((b, i) => <rect key={`n${i}`} x={b.x} y={H - 6} width={Math.max(b.width, 0.5)} height="6" fill="var(--text-faint)" opacity="0.35"><title>피크 표본이 없는 주기(—)</title></rect>)}
       {selA != null && selB != null && selB > selA && <rect x={selA} y="0" width={selB - selA} height={H} fill="var(--accent-2)" opacity="0.08" stroke="var(--accent-2)" strokeOpacity="0.4" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />}
@@ -112,7 +114,7 @@ export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = nu
 }
 
 /** 패널 한 행 — 이름(HTML) + SVG. 행을 누르면 확대 팝업. */
-export function TrendRow({ title, sub = '', readout = null, series = [], win, yMax, cursor, sel, baseline = null, gaps = [], noPeak = [], message = '', note = '', onHover, onSelect, onOpen, legend = null, height = 56, unit = '', marks = [], vbands = [] }) {
+export function TrendRow({ title, sub = '', readout = null, series = [], win, yMax, cursor, sel, baseline = null, gaps = [], noPeak = [], message = '', note = '', onHover, onSelect, onOpen, legend = null, height = 56, unit = '', marks = [], vbands = [], mbands = [] }) {
   const ptr = usePointer({ win, onHover, onSelect, onOpen });
   return (
     <div className="bmt-row">
@@ -124,7 +126,7 @@ export function TrendRow({ title, sub = '', readout = null, series = [], win, yM
         {readout && <div className="bmt-row-read">{readout}</div>}
       </div>
       <div className="bmt-row-plot">
-        <TrendSvg series={series} win={win} yMax={yMax} cursor={cursor} sel={sel} baseline={baseline} gaps={gaps} noPeak={noPeak} label={`${title} 추이`} height={height} ptr={ptr} marks={marks} vbands={vbands} />
+        <TrendSvg series={series} win={win} yMax={yMax} cursor={cursor} sel={sel} baseline={baseline} gaps={gaps} noPeak={noPeak} label={`${title} 추이`} height={height} ptr={ptr} marks={marks} vbands={vbands} mbands={mbands} />
         <span className="bmt-ymax" aria-hidden="true">{unit === '%' ? '100' : ''}</span>
         {message && <div className="bmt-row-msg">{message}</div>}
       </div>

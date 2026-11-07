@@ -140,17 +140,22 @@ export function sloRes(from, to) { return to - from <= 20 * 86_400_000 ? '5m' : 
  * 한 목표 평가(순수). points = trendWindow.toPoints 모양.
  * @returns {{achievementPct, valid, expected, missing, within, violations:number, violationMs, longest, daily, status, p95, maintenance, bands}}
  */
-export function evaluateGoal(goal, points = [], { from, to, stepMs, cycleMs = null, now = Date.now() } = {}) {
+export function evaluateGoal(goal, points = [], { from, to, stepMs, cycleMs = null, now = Date.now(), exclude = null } = {}) {
   // 주기 길이(반증 F12): 5분 원시는 수집 간격마다 점이 있다(설정 하한 1분) — 위반 시간 · 기대 주기 수는 추이 칸(stepMs ≥ 5분)이 아니라 **주기 길이**로 센다.
   //   호출부가 준 cycleMs(이 노드 설정 간격) → 없으면 점 간격 중앙값(엣지 위임 서버) → 없으면 stepMs. 칸보다 길 수 없다.
   const step0 = Math.max(1, n(stepMs) || RES_MS['5m']);
-  const pts = (points || []).filter((p) => n(p?.t) != null && p.t >= from && p.t <= to).sort((a, b) => a.t - b.t);
+  const pts0 = (points || []).filter((p) => n(p?.t) != null && p.t >= from && p.t <= to).sort((a, b) => a.t - b.t);
+  // 8a단계 ⑤ 정비 창(⑤ exclude 를 켠 창 — maint/judge.js coverIntervals): 그 구간의 점은 **분모에서 뺀다**(달성도 위반도 아니다) · 기대 주기에서도 뺀다 · 뺀 수를 적는다.
+  const ex = Array.isArray(exclude) ? exclude : [];
+  const pts = ex.length ? pts0.filter((p) => !ex.some((x) => p.t >= x.from && p.t < x.to)) : pts0;
+  const excluded = pts0.length - pts.length;
+  const excludedMs = ex.reduce((a, x) => a + Math.max(0, Math.min(x.to, to, now) - Math.max(x.from, from)), 0);
   const step = Math.min(step0, Math.max(1, n(cycleMs) || medianGap(pts) || step0));
   // 피크 기준은 피크 표본만(반증 F7 — 예전에는 피크가 없으면 5분 평균으로 메워 ‘달성’ 으로 셌다). 값은 있는데 피크가 없는 주기는 결측 + peakMissing.
   const pick = (p) => (goal.basis === 'peak' ? n(p.peak) : n(p.avg));
   const vals = pts.map((p) => ({ t: p.t, v: pick(p) })).filter((x) => x.v != null);
   const peakMissing = goal.basis === 'peak' ? pts.filter((p) => n(p.peak) == null && (n(p.avg) != null || n(p.max) != null)).length : 0;
-  const expected = Math.max(0, Math.floor((Math.min(to, now) - from) / step));
+  const expected = Math.max(0, Math.floor((Math.min(to, now) - from - excludedMs) / step));
   const valid = vals.length;
   let inCnt = 0; let viol = 0; let longest = null; let run = null; const bands = [];
   let prevT = null;
@@ -177,7 +182,7 @@ export function evaluateGoal(goal, points = [], { from, to, stepMs, cycleMs = nu
     achievementPct, valid, expected, missing: Math.max(0, expected - valid), within: inCnt, violations: valid ? viol : null, violationMs: valid ? viol * step : null,
     longest: longest ? { from: longest.from, to: longest.to, cycles: longest.cycles } : null,
     daily: [...daily.values()].map((d) => ({ day: d.day, pct: d.n ? r1((d.in / d.n) * 100) : null })),
-    status, p95: r1(p95), maintenance: { source: 'none', excluded: 0 }, cycleMs: step, ...(peakMissing ? { peakMissing } : {}),
+    status, p95: r1(p95), maintenance: ex.length ? { source: 'windows', excluded, excludedMs, intervals: ex.length } : { source: 'none', excluded: 0 }, cycleMs: step, ...(peakMissing ? { peakMissing } : {}),
     bands: bands.slice(-500).map((b) => ({ from: b.from, to: b.to })),
   };
 }

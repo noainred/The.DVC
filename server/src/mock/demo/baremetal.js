@@ -317,12 +317,37 @@ export async function backfillBmUsage(targets = [], { now = Date.now() } = {}) {
       inserted += r?.inserted || 0;
       await new Promise((res) => setImmediate(res));
     }
-    console.log(`[mock] 베어메탈 사용률 데모 백필: ${targets.length}대 · ${inserted}행(원시 14일 + 일 롤업 45일)`);
+    // 8a단계: 마운트 일 롤업 데모(용량 소진 예측 화면 — 증가 · 평탄 · 주기 정리 · 등록 직후 꼴). 같은 쓰기 경로(monthStore.writeMountRows).
+    let mounts = 0;
+    try { const M = await import('../../bmusage/monthStore.js'); const mr = demoMountRows(targets, now); await M.writeMountRows(mr, agent); mounts = mr.length; } catch { /* 데모 마운트는 없어도 된다 */ }
+    console.log(`[mock] 베어메탈 사용률 데모 백필: ${targets.length}대 · ${inserted}행(원시 14일 + 일 롤업 45일) · 마운트 일 ${mounts}행`);
     return { inserted };
   })();
   // v2.929(5단계): 변경 이벤트 · 지난 집중 세션 데모 시드(1회 — 백필과 같은 때).
   _bmBackfill.then(() => seedDemoOps(targets, { now })).catch(() => {});
   return _bmBackfill;
+}
+
+/**
+ * 8a단계 데모 마운트 일 롤업(순수) — 서버마다 키 해시로 꼴을 고른다: 0 증가(/data — 7일 안 도달) · 1 평탄 · 2 주기 정리(톱니 — 불안정) · 3 등록 직후(4일만 — 데이터 부족) · 4 느린 증가.
+ *   inode 는 / 만 값(나머지는 xfs 처럼 값 없음 — ‘상한 없음’).
+ */
+export function demoMountRows(targets = [], now = Date.now()) {
+  const out = [];
+  for (const tg of targets) {
+    const k = String(tg?.key || ''); if (!k) continue;
+    let h = 0; for (const c of k) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    const shape = h % 5;
+    const days = shape === 3 ? 4 : 30;
+    for (let b = days - 1; b >= 0; b -= 1) {
+      const ts = now - b * DAY - 2 * HOUR;
+      const age = days - 1 - b;
+      const data = shape === 0 ? 62 + age * 0.9 + ((h >> 3) % 7) * 0.4 : shape === 1 ? 48 + ((age * 7 + h) % 3) * 0.2 : shape === 2 ? 40 + (age % 6) * 6 + ((h >> 5) % 4) : shape === 3 ? 22 + age * 0.3 : 30 + age * 0.15;
+      out.push({ key: k, ts, mount: '/', used_pct: 35 + ((h >> 2) % 10) + age * 0.02, inode_pct: 4 + age * 0.01, size_bytes: 200e9, used_bytes: 80e9 });
+      out.push({ key: k, ts, mount: '/data', used_pct: Math.min(99, Math.round(data * 10) / 10), inode_pct: null, size_bytes: 7.3e12, used_bytes: 7.3e12 * Math.min(0.99, data / 100) });
+    }
+  }
+  return out;
 }
 
 export function _resetBareMetalDemoForTest() { _resetBareMetalSeedForTest(); _bmBackfill = null; _opsSeeded = null; }

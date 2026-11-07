@@ -155,6 +155,7 @@ import { startPartFaultPush } from './partfault/push.js';           // 〃 엣�
 import { startPartFaultConfigPull } from './agent/partFaultConfigPull.js'; // 〃 중앙→엣지 스위치 배포(v2.548)
 import { startBmUsageConfigPull } from './agent/bmUsageConfigPull.js'; // v2.627 베어메탈 사용률 설정 중앙→엣지 배포
 import { startBmOnboardPull } from './agent/bmOnboardPull.js'; // 7b단계 서버 등록 배포(중앙 → 엣지 — 수집 경로 edge)
+import { startBmMaintPull } from './agent/bmMaintPull.js'; // 8a단계 정비 창 배포(중앙 → 엣지 — 그 법인 창)
 import { startEdgeLogWorker } from './agent/edgeLogWorker.js';  // 엣지 로그 폴백 워커(v2.549) — 중앙이 못 닿는 법인에서만 쓰인다
 import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 사용률 수집(v2.550) — 기본 꺼짐, 법인 단위 opt-in
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
@@ -650,6 +651,7 @@ const stagger = [
   // 둘 다 opt-in/조건부이며(PARTFAULT_ENABLED · CENTRAL_URL) 왜 안 도는지 로그가 말한다.
   startPartFaultPoller, startPartFaultPush, startPartFaultConfigPull, startBmUsageConfigPull,
   startBmOnboardPull, // 7b 서버 등록 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
+  startBmMaintPull, // 8a 정비 창 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
   startEdgeLogWorker,
   startBmUsagePoller,
   startLinkCheckPoller,

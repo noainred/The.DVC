@@ -139,6 +139,8 @@ export async function bmCollectHealthView(req, snap, deps = {}) {
         // 성공 수를 모르면 성공률도 모른다(0% 가 아니다 · 반증 F4).
         successPct: c && n(c.servers) && n(c.ok) != null ? Math.round((n(c.ok) / n(c.servers)) * 1000) / 10 : null,
         reasons: c ? Object.entries(c.reasons || {}).map(([k, v]) => { const [p, code] = k.split(':'); return { path: p, code, n: n(v) }; }).sort((a, b) => (b.n || 0) - (a.n || 0)) : [],
+        // 8a단계: 정비 중(건너뜀 · 창 안 실패)은 성공률 분모 밖 — 따로 센다(수집 노드가 센 값 그대로).
+        maintSkipped: c ? n(c.maintSkipped) ?? 0 : null, maintFail: c ? n(c.maintFail) ?? 0 : null,
         ...(nodeHidden || !node ? {} : { cycleMs: n(node.cycleMs), budgetMs: n(node.budgetMs), cyclePct: n(node.cyclePct), conc: node.conc || null, ssh: node.ssh || null, dbBytes: n(node.db?.bytes), dbFiles: n(node.db?.files), dbPct: n(node.dbPct) }),
       });
     }

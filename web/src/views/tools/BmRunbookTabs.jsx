@@ -14,6 +14,7 @@ import { valText } from './bmTrendText.js';
 import {
   STEP_KIND_TEXT, LOOK_TEXT, RUNBOOK_HONEST, judgmentText, fillLine, wikiSearchHref,
   SLO_METRIC_TEXT, SLO_BASIS_TEXT, SLO_OP_TEXT, SLO_STATUS_TEXT, sloSourceText, goalText, hoursText, longestText, dailySpark, resNote, SLO_HONEST,
+  sloMaintText,
 } from './bmRunbookText.js';
 import './bmStage6.css';
 
@@ -111,7 +112,7 @@ export function SloTable({ resp }) {
               <td className="right" data-sort={it.violationMs ?? ''}>{hoursText(it.violationMs)}</td>
               <td data-sort={it.longest?.cycles ?? ''}>{longestText(it.longest)}</td>
               <td data-nosort className="bmrb-spark">{dailySpark(it.daily)}</td>
-              <td className="right" data-sort={it.missing ?? ''}>{it.missing ?? '—'}주기 · {it.maintenance?.source === 'none' ? '원천 없음' : (it.maintenance?.excluded ?? '—')}{it.peakMissing ? <div className="bmo-sub">피크 표본 없음 {it.peakMissing}주기(결측으로 셈)</div> : null}</td>
+              <td className="right" data-sort={it.missing ?? ''}>{it.missing ?? '—'}주기 · {sloMaintText(it, resp)}{it.peakMissing ? <div className="bmo-sub">피크 표본 없음 {it.peakMissing}주기(결측으로 셈)</div> : null}</td>
               <td data-sort={st.label}><span style={{ color: toneVar(st.tone) }}>{st.label}</span>{it.error && <div className="bmo-sub">{it.error}</div>}</td>
             </tr>
           );

@@ -15,8 +15,12 @@ import { rttLine } from './bmOnboardText.js'; // 7b: 중앙 직접 수집 법인
 import {
   nodeStateView, FLAG_TEXT, REASON_TEXT, REASON_STATE_TEXT, INFO_TEXT, PATH_TEXT, msText, pctText1, gbText, cycleText, concText, sshText, reasonsLine, daysSince,
   trendPaths, trendRangeText, COLLECT_HONEST, collectCsv, collectCsvName, unknownText, peakReasonText, NODE_ERROR_TEXT, famLine,
+  maintRowText, maintLeakCell,
 } from './bmCollectText.js';
+import { numOrNull } from '../../numOrNull.js';
 import './bmStage6.css';
+
+const n0 = (v) => { const x = numOrNull(v); return x != null && x > 0; };
 
 export function CollectHealthView({ resp, now = Date.now() }) {
   const [nodeSel, setNodeSel] = useState('');
@@ -36,7 +40,8 @@ export function CollectHealthView({ resp, now = Date.now() }) {
       </div>
       <section className="card" style={{ minWidth: 0 }}>
         <h5 className="bmo-h">법인별 수집 — 주기 소요 · 성공률 · 동시성 사용 · SSH · DB</h5>
-        <STable minWidth={1100} className="bmo-t" style={{ fontSize: 12 }}>
+        {/* 1440(사이드바 포함 본문 약 1,080px)에서 열마다 오른쪽 끝이 영역 안이게 — 최소 폭 960 · 노드 칸은 줄바꿈(6단계부터 1100 이라 ‘상태’ 열이 잘렸다 — 8a 반증 확인) · 400 은 표 안 가로 스크롤 */}
+        <STable minWidth={960} className="bmo-t" style={{ fontSize: 12 }}>
           <thead><tr><th>법인</th><th>노드</th><th className="right">대상</th><th className="right">주기 소요 / 예산</th><th className="right">성공률</th><th>실패 사유</th><th className="right">동시성 사용</th><th className="right">SSH 중앙값 / p95</th><th className="right">DB · 파일</th><th>상태</th></tr></thead>
           <tbody>
             {(resp?.rows || []).map((r) => {
@@ -45,11 +50,11 @@ export function CollectHealthView({ resp, now = Date.now() }) {
               return (
                 <tr key={`${r.agent}|${r.vcenterId}`}>
                   <td data-sort={r.vcenterId}>{r.vcenterId || '귀속 없음'}</td>
-                  <td data-sort={r.agent}>{r.agent || '—'}<div className="bmo-sub">{r.via === 'edge' ? '엣지' : '이 노드'}</div>
+                  <td data-sort={r.agent} className="bmo-wrap" style={{ minWidth: 140, maxWidth: 200 }}>{r.agent || '—'}<div className="bmo-sub">{r.via === 'edge' ? '엣지' : '이 노드'}</div>
                     {(() => { const rl = rttLine(r); return rl ? <div className="bmo-sub" style={{ color: toneVar(rl.tone) }}>{rl.text}</div> : null; })()}</td>
                   <td className="right" data-sort={r.servers ?? ''}>{r.servers ?? '—'}</td>
                   <td className="right" data-sort={r.cyclePct ?? ''}>{r.nodeHidden ? <span className="bmo-sub">노드 값 숨김</span> : cycleText(r.cycleMs, r.budgetMs)}</td>
-                  <td className="right" data-sort={r.successPct ?? ''}>{pctText1(r.successPct)}</td>
+                  <td className="right" data-sort={r.successPct ?? ''}>{pctText1(r.successPct)}{maintRowText(r) && <div className="bmo-sub">{maintRowText(r)}</div>}</td>
                   <td data-sort={r.reasons?.[0]?.n ?? ''}>{reasonsLine(r.reasons)}</td>
                   <td className="right" data-sort={r.conc?.max ?? ''}>{r.nodeHidden ? '—' : concText(r.conc)}</td>
                   <td className="right" data-sort={r.ssh?.p95Ms ?? ''}>{r.nodeHidden ? '—' : sshText(r.ssh)}</td>
@@ -61,6 +66,9 @@ export function CollectHealthView({ resp, now = Date.now() }) {
           </tbody>
         </STable>
         {!(resp?.rows || []).length && <p className="bmo-note">보이는 법인이 없습니다{resp?.nodesOmitted ? `(범위 밖 노드 ${resp.nodesOmitted}곳은 싣지 않았습니다)` : ''}.</p>}
+        {/* 8a단계 — 노드마다 ‘창 끝 뒤 억제’ 점검(정비 창 억제가 시한 뒤에 남지 않는가 — 0 이어야 정상) */}
+        {withNode.map((x) => { const c = maintLeakCell(x.node); return (
+          <p key={`mleak|${x.via}|${x.agent}`} className="bmo-note" title={c.title} style={{ color: toneVar(c.tone) }}>{x.agent || '이 노드'} — 정비 창 끝 뒤 억제 {c.text}{n0(x.node?.maint?.skipped) || n0(x.node?.maint?.failInWindow) ? ` · 정비 중 건너뜀 ${x.node.maint.skipped ?? 0} · 창 안 실패 ${x.node.maint.failInWindow ?? 0}(성공률 분모 밖)` : ''}</p>); })}
         {nodes.filter((x) => x.node?.error && NODE_ERROR_TEXT[x.node.error]).map((x) => (
           <p key={`err|${x.via}|${x.agent}`} className="bmo-note" style={{ color: toneVar(x.node.error === 'no-targets' ? 'idle' : 'bad') }}>{x.agent || '이 노드'} — {NODE_ERROR_TEXT[x.node.error]}</p>
         ))}

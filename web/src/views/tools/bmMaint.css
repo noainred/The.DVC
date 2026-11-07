@@ -1,0 +1,19 @@
+/* 리눅스 성능 8a단계 — 정비 창 폼 · 용량 예측(토큰만 — 새 hex 없음). 그리드 · 플렉스 자식 min-width:0 · 버튼 행 flex-wrap. */
+.bmm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 8px; min-width: 0; margin: 6px 0; align-items: start; }
+.bmm-grid > * { min-width: 0; }
+.bmm-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; min-width: 0; }
+.bmm-field .input, .bmm-field select { width: 100%; min-width: 0; box-sizing: border-box; }
+.bmm-wide { grid-column: 1 / -1; }
+.bmm-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; font-size: 12px; min-width: 0; }
+.bmm-row > * { min-width: 0; }
+.bmm-days { display: flex; flex-wrap: wrap; gap: 10px; }
+.bmm-scopes { display: flex; flex-direction: column; gap: 4px; font-size: 12px; margin: 6px 0; min-width: 0; }
+.bmm-scope { display: flex; gap: 6px; align-items: flex-start; line-height: 1.5; min-width: 0; }
+.bmm-scope > span { min-width: 0; overflow-wrap: anywhere; }
+.bmm-acts { display: flex; flex-wrap: wrap; gap: 4px; }
+.bmm-preview { margin: 4px 0 0 18px; padding: 0; }
+.bmc-q { width: 160px; min-width: 0; max-width: 100%; }
+.bmc-chart { min-width: 0; }
+.bmc-axis { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+.bmc-sel td { background: var(--panel-2); }
+.bmt-maint { position: relative; }

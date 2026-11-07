@@ -38,6 +38,7 @@
 - (원래 5129행) v2.634 — 폴러의 표본 시각은 '그 서버를 실제로 읽은 시각' 이고, 신선도 경계는 폴 주기 소요에 맞춰 넓힌다
 
 - (7b단계 추가) 리눅스 성능 7b단계 서버 등록 — 새 등록부 없음(iDRAC · OS · 분류 태그로 나눔) · 저장 규칙 재사용 · 한 번 쓰기 · 직전 스냅샷 · 직렬 큐 · 누락 점검은 보드 커버리지 값
+- (8a단계 추가) 리눅스 성능 8a단계 정비 창 · 용량 소진 예측 — 판정 코어 하나(maint/judge.js) · 억제에는 시한 · 못 읽은 창은 억제가 아니다 · 예측은 참고(못 읽음 ≠ 0일 · 안전)
 ## 본문
 
 - ⚠⚠ **물리 파트(부품) 장애 — v2.548 재설계. '확인 불가' 를 정상으로도 장애로도 세지 않고, 전이만 기록한다**
@@ -1192,3 +1193,46 @@
     파일 해석을 먼저 하고 문맥 → 분석 → 적용은 await 없이 · 서명에 등록부 세대(mtime · 크기) · iDRAC 사본을 공통 계정 사용처로(`copies`) · 새 iDRAC id 가 기존 id 와 겹치면 기존 항목으로 대조(적용은 `onb_` 새 id) ·
     xlsx 는 로드 전에 병합 개수 · 넓이 상한(`svcmon/formats.js assertXlsxMergesOk` — 두 파서 공통) · 암호화 키 파싱 캐시(실측 bcrypt 16라운드 175ms/회 → 키당 1회) ·
     스냅샷 원자적 쓰기 + SECRET_FILES(`onboard-prev/bm-storage.json` · `idrac.json`) · iDRAC 제거는 한 번 쓰기(`removeServersBatch`).
+
+- ⚠⚠ **리눅스 성능 8a단계 정비 창(⑲) · 용량 소진 예측(⑱) — 판정 코어 하나 · 억제에는 시한 · 못 읽은 창은 억제가 아니다 · 예측은 참고**
+  (`bmusage/maint/{schedule,judge,store,runtime,alertHold,partfaultHold,deploy}.js` · `bmusage/capacity.js` · 라우트 `routes/api/{bmMaint,bmCapacity}.js` · 설계 PROFILES §20 ⑱ ⑲ · 아트보드 Maint · Capacity ·
+  회귀 `server/test/{bmMaint8aSchedule,bmMaint8aWiring,bmMaint8aRoute,bmMaint8aEdge,bmCapacity8a,bmCapacity8aRoute}.test.js` · 웹 `bmMaint8a.test.jsx`):
+  - **판정 코어 하나** `judge.maintStateFor(windows, target, now, {tagsOf})` — 중앙(수동 용도 태그 role:/app:) · 엣지(중앙이 그 엣지 대상 키로 펼친 태그 창 + 같은 `normalizeWindow`) · 화면(API 결과)이 같은 결과(테스트가 같은 입력으로 대조).
+    겹치는 창은 범위별 합집합(범위마다 가장 늦은 끝). 구간이 필요한 곳(⑤ 제외 · 추이 음영 · 변경 이벤트 묶음)은 같은 모듈의 `coverIntervals`.
+  - **일정은 두 꼴만**(RRULE 아님): 일회(벽시계 시작 · 끝) · 매주 요일 · 매월 n째(5=마지막) 요일 + 시각 + 길이. 시간대는 **창마다 IANA 이름**(포탈에 법인 시간대 원천이 없다 — 기본 Asia/Seoul).
+    DST: 없는 벽시계는 간격만큼 뒤로(Warsaw 02:30 → 03:30) · 두 번 있는 벽시계는 앞의 것 · 길이는 실제 경과 분. 오프셋은 `issues/sla.js tzOffsetMin`(Intl) 하나. 미리보기(다음 5회 · DST 표지)는 서버 API.
+  - ⚠⚠ **억제에는 시한**: 판정은 그 발생의 끝까지 · 길이 상한(일회 24h · 반복 12h)은 저장 검사뿐 아니라 **계산에서도 다시 자른다**(손으로 고친 파일 · 배포본) ·
+    반복 창은 확인(confirmedAt) 뒤 `RECUR_CONFIRM_DAYS`(92) 지나면 **억제하지 않는다**(설계 ‘분기마다 재확인 알림’ 을 시한으로 강화 — 재확인 버튼) · ‘지금 끝내기’ 는 진행 중 발생만 끊는다 ·
+    엣지 배포본은 받은 지 `DEPLOY_TTL_MS`(24h) 지나면 판정에 넣지 않는다 · 형식 밖 일정 · 시간대 = 억제 없음(알림이 나가는 쪽).
+  - **못 읽음은 억제가 아니다**: 창 파일 손상이면 보존 + 읽기 503 · 쓰기 거부 + 이 노드 창으로 억제하지 않음(표지 localUnreadable — 수집 건강) · 배포본 손상도 같다.
+  - **억제 5종 배선**(켠 것만 저장): ① `perfAlerts.dispatch`(성능 알림 규칙) + `notify.js`/`maint/alertHold.js`(v2.551 임계 알림) — 창 안 발화는 기록만(sent 'maintenance' · 창마다 한 번) · 이슈 · 자동 집중도 하지 않음 ·
+    상태를 ‘보내지 않음’ 으로 되돌리고 `maint` 표지 → **창 뒤 첫 주기에도 참이면 그때 1회**(제목 ‘정비 창 안부터 초과’) · 창 안에 풀리면 창 뒤 발송 없음.
+    ② `partfault/transition.js scan.maintHold`(HOLD_REASON `maintenance`) — 그 장비의 열린 장애는 닫지도 바꾸지도 않고(관측 상태는 `maintObserved`) 새 장애는 열지 않고 센다(`maintDeferred`) · 창 끝 뒤 첫 점검에 평소 규칙.
+    장비 ↔ 서버는 서비스 태그(deviceKey) · 중앙 로컬은 iDRAC 등록 id(4단계 hwFacts 와 같은 키) · **중앙 창만**(파트 장애 판정이 중앙 — 엣지 로컬 창은 모른다).
+    ③ `focus/run.js startFocusLocal`(trigger auto · choke point) — code 'maintenance' · 수동 허용 · 인증 정지가 먼저.
+    ④ `poller.js pollBmUsageOnce` — 접속하지 않음(‘정비 중’ · 수동 실행도) · 상세에 maintSkip 표지(지난 기록 유지).
+    ⑤ `slo.evaluateGoal(exclude)` · `baseline.bandOf/bandSeries/slotBands(exclOf · exclSig)` · `capacity`(창 걸친 날) — 분모에서 빼고 뺀 수를 적는다.
+  - **인증 거부는 창과 무관**: authGuard 경로는 손대지 않았다 · 창 안 실패 표시(`markInMaint`)는 인증 실패(문구 · authStopped · iDRAC auth)에 달지 않는다.
+  - **수집 건강**: ④ 건너뜀 · 창 안 실패는 성공률 분모 · 실패 사유에서 빼고 `node.maint` · `byCorp.maintSkipped/maintFail` 로 따로 센다(분모 0 = 성공률 null).
+    **‘창 끝 뒤 억제 0’ 점검**(`runtime.auditCycle` · 8a 반증 F8 로 다시 짰다): 적용한 억제마다 근거(창 id · 발생 시작 since · 끝 until)를 남기고 **판정과 독립된 단순 기준**만 본다 —
+    적용 시각이 끝 뒤 · 발생 길이가 꼴 상한 초과 · **캐시 없이 다시 읽은 파일**(`store.windowFactsNoCache`)에서 적용 전에 지움 · 끝냄 · 재확인 만료 · 배포본 24h 넘음. 대상을 다시 판정하지 않는다
+    (예전: 대상을 키만으로 다시 판정해 엣지 서버의 법인 창 보류를 leak 로 셌다). ⚠ 잡는 것은 창 변경 · 시한이고 **판정 규칙 자체의 결함은 못 잡는다**(시험이 고정). 빈 주기는 지난 결과를 덮지 않는다 ·
+    계수 · 점검은 **파트 장애 폴러 주기에서도 저장**(중앙 — 로컬 bmusage 대상 0대여도: `flushMaintStats` 호출처 0 이던 의심 항목).
+  - ⚠ 순환 금지(arch2579 ②-b): 파트 장애 · 대행 라우트 · 용량 계산이 `bmusage/poller.js` 를 import 하면 bmusage ↔ idrac ↔ partfault SCC 가 생긴다 — 폴러가 `runtime.setLocalTargetsProvider` 로 대상 공급자를 등록하고 그쪽은 `localTargets()` 를 쓴다.
+  - **용량 예측**: 입력은 마운트 일 롤업 `usage_mount_daily`(설계 ‘마운트별 1시간 90일’ 과 다르다 — 3a 부터 마운트는 일 롤업만) · `usage_daily.mem_max`(참고 등급) · `##DFI`(1단계부터 있음 — 새 구획 없음).
+    14일 최소제곱 · R² < 0.5 · 14/30일 기울기 ±30% → 불안정 · 하루 −10%p = 리셋(그 뒤부터) · **30일 안 리셋 2회 이상 = 주기 정리형 불안정**(‘데이터 부족’ 으로 숨기지 않는다) · 평탄 · 감소 = no-growth(안전이 아니다) ·
+    xfs(튜닝 사실 xfs 마운트) · inode 값 없음 = ‘상한 없음’. **계산 위치 결정**: 수집 노드가 하루 1회(포탈 날 01:10 뒤 첫 틱 · 진행 중 공유 · 서버마다 점 조회 + createYielder) `bm-capacity.json` →
+    봉투 `capacity`(대상 키만 · 넘치면 예측 행만) → 중앙 함대 표. 서버 상세(계열 · 맞춤선)는 볼 때 그 서버만(엣지 서버는 `/api/collector/bm-usage/capacity` 대행).
+    알림 규칙 `capacity`(소진 ≤ N일 · 기본 꺼짐 · 자동 집중 없음 · 데이터 부족 · 불안정은 보류). 데모(mock)는 마운트 일 롤업 꼴 5종을 백필한다(같은 쓰기 경로).
+  - 정직 기록: 실장비 · 실엣지 · 실 DST 시간대 운영으로 보지 못했다(테스트 · 목 서버) · 승인은 ‘소유자 등급만 저장’ 이다(설계 그림의 ‘hong 등록 · park 승인’ 2인 흐름 아님) ·
+    반복 서버 창(12h 이하)은 운영자가 바로 만들 수 있다(아트보드 ‘4h 이하 operator’ 와 다르다 — 지시문 기준 12h) · 엣지 로컬 창은 중앙 화면 · 파트 장애 보류에 보이지 않는다.
+  - ⚠⚠ **8a 반증(F1~F11) 뒤 규칙**(회귀 `bmMaint8aFix` · `bmMaint8aFixRoute` · `bmMaint8aFixEdge` · `bmCapacity8aFix` — 변이 31건):
+    · **서버 대상은 (법인, 키) 쌍**(F1 — IP 로 등록한 iDRAC 은 키 = IP 라 사설 대역을 겹쳐 쓰는 법인끼리 키가 같다): `judge.matchTarget` 은 모든 대상 종류가 법인부터 보고 ·
+      배포는 그 법인을 맡은 엣지에만(키 겹침으로 보내지 않는다) · 대상 식별은 `judge.targetIdOf` 하나(함대 용량 요약 · 음영) · 쓰기는 법인을 고르면 그 법인 안에서 키를 찾고 모호하면 400.
+    · **해제는 억제하지 않는다**(F9 — 창 밖에서 보낸 초과의 짝 · 창 안에서 막은 초과는 notifiedAt 을 되돌려 해제 발화가 생기지 않는다 · 억제 계수에도 넣지 않는다).
+    · **엣지 배포 태그 창은 펼친 keys 만**(F10 — origin 'central' 은 tagsOf 폴백 금지: 엣지 판정 = 중앙 판정).
+    · **지운 창은 묘비**: 지금 판정에서 빠지고 지난 구간(⑤ 분모 제외 · 음영 · 변경 묶음 · 용량 날 제외)에는 지운 시각까지 남는다(소급 소거 금지 — 그때 정비였던 사실은 지운 뒤에도 그때의 일) · 보관 90일.
+    · **용량**: 지금 ≥ 목표면 ‘도달’ 이 관문(부족 · 불안정 · 증가 없음)보다 먼저(F2) · 날 제외는 창 **합집합**의 날별 덮임 — 기간 절반 넘게 덮이면 날마다 같은 몫(중앙값)은 일상, 그보다 1시간 넘게 더 덮인 날만 뺀다
+      (F3 — 창을 나눠도 같은 결과 · `dailyWin` = 일상 몫 분) · 행 상한은 서버마다 공정 몫(급한 마운트부터 · `cap` 내역 — F4) · 도달일은 **마지막 관측일**부터(F11 · 2일 넘게 오래되면 `stale`) ·
+      xfs 판별은 최신값 표의 key · tuning_json 두 열만 조각(200행) + 양보(SELECT * 동기 읽기 금지).
+

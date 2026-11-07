@@ -14,6 +14,7 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { TrendSvg, TimeAxis } from './BmTrendChart.jsx';
 import { shortStamp } from './bmOpsText.js';
+import { splitByMaint, inMaint } from './bmMaintText.js'; // 8a단계 변경 이벤트 ‘정비 창 안’ 묶음
 import { fmtHm } from '../../components/vmperf/vmPerfText.js';
 import {
   bandPolys, bandSummaryText, changeKindText, changeMarks, CHANGES_HONEST, FOCUS_METRIC_TEXT, vText,
@@ -49,15 +50,19 @@ function download(text, name) {
 }
 
 /** 변경 이벤트 표(그리기만). */
-export function ChangeTable({ events = [] }) {
+export function ChangeTable({ events = [], maintBands = [] }) {
   if (!events.length) return <p className="bmo-note">이 창에 변경 이벤트가 없습니다(바뀐 것이 없거나 아직 기준만 잡았습니다 — 첫 관찰은 적지 않습니다).</p>;
+  // 8a단계: 정비 창 안 전이(패키지 · 재부팅)는 ‘정비 창 안’ 으로 묶어 표시(구간은 서버 판정 — 그리기만).
+  const sp = splitByMaint(events, maintBands);
   return (
+    <>
+    {!!sp.inside.length && <p className="bmo-note">정비 창 안 변경 {sp.inside.length}건 · 창 밖 {sp.outside.length}건 — 창 안 행은 ‘정비 창 안’ 으로 묶어 위에 둡니다.</p>}
     <STable minWidth={600} className="bmo-t" style={{ fontSize: 12 }}>
       <thead><tr><th>시각</th><th>종류</th><th>항목</th><th>이전 → 이후</th></tr></thead>
       <tbody>
-        {[...events].reverse().map((e, i) => (
+        {[...[...sp.inside].reverse(), ...[...sp.outside].reverse()].map((e, i) => (
           <tr key={`${e.id ?? i}|${e.ts}`}>
-            <td data-sort={e.ts}>{shortStamp(e.ts)}</td>
+            <td data-sort={e.ts}>{shortStamp(e.ts)}{inMaint(e.ts, maintBands) && <div><span className="bmp-chip">정비 창 안</span></div>}</td>
             <td data-sort={e.kind}><span className="bmp-chip">{changeKindText(e.kind)}</span></td>
             <td data-sort={e.item} className="bmo-wrap">{e.item}</td>
             <td data-sort={e.after ?? ''} className="bmo-wrap">{e.before == null && e.after == null ? '—' : `${e.before ?? '—'} → ${e.after ?? '—'}`}</td>
@@ -65,11 +70,12 @@ export function ChangeTable({ events = [] }) {
         ))}
       </tbody>
     </STable>
+    </>
   );
 }
 
 /** 베이스라인 · 변경 이벤트 · 집중 1분 점 겹침 카드. changes = 부모가 부른 변경 응답(같은 창). */
-export function BaselineOverlay({ itemKey, win, changes = null, narrow = false, annotMarks: pins = [] }) {
+export function BaselineOverlay({ itemKey, win, changes = null, narrow = false, annotMarks: pins = [], maintBands = [] }) {
   const [metric, setMetric] = useState('disk_await_ms');
   const q = `from=${Math.floor(win.from)}&to=${Math.floor(win.to)}`;
   const band = useGenJson(itemKey ? `/tools/bm-usage/perf/${enc(itemKey)}/baseline?metric=${metric}&${q}` : '');
@@ -114,7 +120,7 @@ export function BaselineOverlay({ itemKey, win, changes = null, narrow = false, 
       {band.data && <p className="bmo-note">{bandSummaryText(band.data)}{band.data.capped ? ' · 띠는 최근 14일까지만 그립니다' : ''}{outs.length ? ` · 띠 밖 ${outs.length}점(빨강)` : ''}</p>}
       {!!focusDots.length && <p className="bmo-note">집중 모니터링 1분 점 {focusDots.length}개를 5분 값 사이에 겹쳤습니다(해상도가 달라 같은 표에 섞지 않고 점으로만).</p>}
       <h6 style={{ margin: '8px 0 4px' }}>변경 이벤트 — 이 창 {ev.length}건{changes?.truncated ? '(상한으로 일부만)' : ''}</h6>
-      <ChangeTable events={ev} />
+      <ChangeTable events={ev} maintBands={maintBands} />
       <p className="bmo-note"><BoldText text={CHANGES_HONEST} /></p>
     </section>
   );

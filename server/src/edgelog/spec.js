@@ -92,6 +92,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'pull.partFault', label: '파트 장애 설정', group: 'pull', mod: '../agent/partFaultConfigPull.js', fn: 'partFaultConfigPullStatus' },
   { key: 'pull.bmUsage', label: '베어메탈 사용률 설정(중앙 배포)', group: 'pull', mod: '../agent/bmUsageConfigPull.js', fn: 'bmUsageConfigPullStatus' },
   { key: 'pull.bmOnboard', label: '베어메탈 서버 등록 배포(중앙 → 엣지 · 7b)', group: 'pull', mod: '../agent/bmOnboardPull.js', fn: 'bmOnboardPullStatus' },
+  { key: 'pull.bmMaint', label: '베어메탈 정비 창 배포(중앙 → 엣지 · 8a)', group: 'pull', mod: '../agent/bmMaintPull.js', fn: 'bmMaintPullStatus' },
 
   // ── 로컬 수집 ──────────────────────────────────────────────────────────────
   /*

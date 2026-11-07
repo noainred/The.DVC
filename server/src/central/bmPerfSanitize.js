@@ -7,6 +7,7 @@
  * ⚠ 모르는 필드는 버리고, 버린 원소 수는 `sanitizeDropped` 에 더한다(조용한 축약 금지 — 호출부가 합친다).
  */
 import { sanitizeCollectHealth } from './bmCollectHealthSanitize.js'; // 6단계 수집 건강
+import { sanitizeMaintEnvelope, sanitizeCapacityEnvelope } from './bmMaintCapSanitize.js'; // 8a단계
 import { strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { PERF_COL_NAMES } from '../bmusage/perfCols.js';
@@ -257,6 +258,11 @@ export function sanitizePerfFields(snap, rcv = Date.now()) {
       ...(Array.isArray(snap?.logSummary) ? (() => { const r = sanitizeLogSummary(snap.logSummary, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }); return { logSummary: r.list, ...(r.dropped ? { logSummaryDropped: r.dropped } : {}) }; })() : {}),
       ...(Number.isInteger(snap?.logsVer) && snap.logsVer > 0 && snap.logsVer < 100 ? { logsVer: snap.logsVer } : {}),
       ...(snap?.logsTruncated && typeof snap.logsTruncated === 'object' ? { logsTruncated: { level: oneOf(snap.logsTruncated.level, ['compact', 'dropped'], 'dropped') } } : {}),
+      // 8a단계: 정비 창 상태 · 용량 소진 예측(central/bmMaintCapSanitize.js — 화이트리스트 · 키는 같은 봉투의 대상 목록 안만 · 시각 clamp). 표지는 계산 전에도 실린다(값 없음 ≠ 구버전).
+      ...(Number.isInteger(snap?.maintVer) && snap.maintVer > 0 && snap.maintVer < 100 ? { maintVer: snap.maintVer } : {}),
+      ...(Number.isInteger(snap?.capacityVer) && snap.capacityVer > 0 && snap.capacityVer < 100 ? { capacityVer: snap.capacityVer } : {}),
+      ...(snap?.maint && typeof snap.maint === 'object' ? { maint: sanitizeMaintEnvelope(snap.maint, rcv) } : {}),
+      ...(snap?.capacity && typeof snap.capacity === 'object' ? { capacity: sanitizeCapacityEnvelope(snap.capacity, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }) } : {}),
     },
     dropped: arr.length - perf.length,
   };
