@@ -17,6 +17,7 @@ import * as K from './bmCollectText.js';
 import { CollectHealthView } from './BmCollectHealth.jsx';
 import { HEALTH_REASON_CODES, NODE_FLAGS, summarizeCycle } from '../../../../server/src/bmusage/collectHealth.js';
 import { nodeStateOf } from '../../../../server/src/routes/api/bmCollectHealth.js';
+import { PEAK_PLAN_REASONS } from '../../../../server/src/bmusage/peakPlan.js';
 import * as N from './bmAnnotText.js';
 import { AnnotTable } from './BmAnnotations.jsx';
 import { TrendSvg } from './BmTrendChart.jsx';
@@ -126,6 +127,8 @@ describe('수집 건강 — 문구 표 = 서버 열거 · 결측은 ‘—’', 
     expect(nodeStateOf({ via: 'edge', enabled: true, hasField: false })).toBe('old-version');
     expect(nodeStateOf({ via: 'local', enabled: false })).toBe('off');
     for (const st of states) expect(K.NODE_STATE_TEXT[st]).toBeTruthy();
+    expect(Object.keys(K.PEAK_REASON_TEXT).sort()).toEqual([...PEAK_PLAN_REASONS].sort());
+    expect(K.peakReasonText('rm -rf')).toBe(''); expect(K.peakReasonText('no-targets')).toBe('대상 없음');
   });
   it('값 없으면 단위 없이 ‘—’ · 0 은 값', () => {
     expect(K.msText(null)).toBe('—'); expect(K.msText(0)).toBe('0ms'); expect(K.pctText1(null)).toBe('—'); expect(K.gbText(undefined)).toBe('—');
@@ -145,6 +148,14 @@ describe('수집 건강 — 문구 표 = 서버 열거 · 결측은 ‘—’', 
     const html2 = renderToStaticMarkup(h(CollectHealthView, { resp: { ...resp, corpsDropped: 2, kpi: { ...resp.kpi, corpsUnknown: 1, dbUnknown: 1 }, nodes: [{ ...resp.nodes[0], node: { ...resp.nodes[0].node, db: { bytes: null, unread: 3, families: {} } } }] }, now: NOW }));
     expect(html2).toContain('법인 1곳 모름(합에서 뺌)'); expect(html2).toContain('노드 1곳 모름'); expect(html2).toContain('파일 3개의 크기를 읽지 못해'); expect(html2).toContain('2건은 싣지 않았습니다');
     expect(K.unknownText(0, '법인')).toBe(''); expect(K.unknownText(null, '법인')).toBe('');
+  });
+  it('주기 소요 추이 — 칸 1개 · 결측 사이 1칸은 굵은 점(가장자리에 잘리지 않게) · 결측은 잇지 않는다', () => {
+    const one = K.trendPaths([{ t: NOW, maxMs: 23, budgetMs: 300_000 }]);
+    expect(one.n).toBe(1); expect(one.msDots).toMatch(/^M500,/); expect(one.budgetDots).toMatch(/^M500,6 /);
+    const y = Number(one.msDots.split(',')[1].split(' ')[0]); expect(y).toBeGreaterThan(6 - 0.01); expect(y).toBeLessThanOrEqual(134);
+    const gap = K.trendPaths([{ t: NOW, maxMs: 10, budgetMs: 100 }, { t: NOW + 3_600_000, maxMs: null, budgetMs: 100 }, { t: NOW + 7_200_000, maxMs: 20, budgetMs: 100 }, { t: NOW + 10_800_000, maxMs: 30, budgetMs: 100 }]);
+    expect(gap.ms.match(/M/g).length).toBe(2, '결측 칸에서 끊긴다(0 으로 잇지 않는다)'); expect(gap.msDots.match(/M/g).length).toBe(1, '홀로 남은 첫 칸은 점');
+    expect(K.trendPaths([]).msDots).toBe('');
   });
   it('CSV — 결측은 빈 칸', () => {
     const csv = K.collectCsv({ rows: [{ vcenterId: 'vcA', agent: 'e', servers: null, reasons: [] }] });

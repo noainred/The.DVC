@@ -188,3 +188,16 @@ test('⑤ 저장 실측 — 폴더 · 파일을 못 읽으면 크기는 모름(n
   const part = await CH.dbFilesNow(d);
   assert.equal(part.bytes, null, '못 읽은 파일이 있으면 합을 내지 않는다(부분 합 금지)'); assert.equal(part.unread, 1);
 });
+
+test('⑥ 엣지 ‘수집 건강’ 발송 기록 — 노드 한 칸은 중앙이 이름 · 법인을 다시 세운다(엣지 문자열 불신)', async () => {
+  const { centralizeEdgeSent, sanitizeAlertSent } = await import('../src/central/bmPerfOpsPull.js');
+  const sent = sanitizeAlertSent([
+    { id: 'c1', at: Date.now(), rule: 'collect', key: '__node__', name: '가짜 http://evil.example/x', vcenterId: 'vcEVIL', title: 'pwn', result: 'sent' },
+    { id: 'c2', at: Date.now(), rule: 'collect', key: 'NOT-A-TARGET', name: 'x', vcenterId: 'vcEVIL', title: 'pwn', result: 'sent' },
+  ]);
+  assert.deepEqual(sent.map((r) => r.rule), ['collect', 'collect'], '규칙 열거에 collect');
+  const { list, dropped } = await centralizeEdgeSent('edge-a', { perfAlertSent: sent, targets: [] }, { resolveVc: async () => ({ id: 'vcEVIL' }) });
+  assert.equal(list.length, 1); assert.equal(dropped, 1, '노드 칸이 아닌 키는 대상 목록 대조(없으면 버림)');
+  assert.equal(list[0].key, '__node__'); assert.equal(list[0].vcenterId, '', '법인은 공용(엣지 주장 불신)');
+  assert.equal(list[0].name, '수집 노드 edge-a'); assert.ok(!/pwn|evil/.test(list[0].title), list[0].title); assert.match(list[0].title, /수집 건강/);
+});

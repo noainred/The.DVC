@@ -28,6 +28,7 @@
 - (v2.826) 엣지 개별 토큰 자동 적용 — 옛 판 엣지는 401 이고 아무것도 받지 않는다. 전달할 통로가 없으면 발급하지 않는다
 - (v2.927) 중앙 → 엣지 설정 배포에 엣지별 지시를 더할 때 — 엣지 코드를 바꾸지 않으려면 받는 쪽이 채우는 기본값까지 계산에 넣는다
 - (v2.929) 베어메탈 성능 5단계 엣지 대행 — 집중 · 변경 · 띠 · 비교는 볼 때 pull, 봉투에는 요약만 · 판정 · 발송은 엣지 · 이슈는 중앙이 당길 때 · 구버전은 경로 존재로 구분
+- (6단계) 리눅스 성능 6단계 엣지 대행 — 비교 계열 요청 1개 · 수집 건강 봉투(법인 대조) · 최소 버전 공용 함수(릴리스 노트 6단계 첫 번호)
 
 ## 본문
 
@@ -804,6 +805,18 @@
   - 엣지별 지시는 **그 노드가 배포를 받는 엣지일 때만** 준다(반증 F7) — 수집 서버 등록부에는 중앙·단독 노드도 올라온다. 노드가 보고한 역할(보관분 `node.role`)로 판정한다.
   - 엣지별 지시의 **해제는 등록부와 무관하게** 된다(반증 F1) — 토큰 폐기로 이름이 등록부에서 빠지면 지시를 지울 길이 없고, 같은 이름으로 재발급하면 바로 다시 받는다.
   - '적용됨/대기' 는 **그 엣지에 실제로 보낼 판의 서명**과 비교한다 — 엣지마다 판이 다르면 전역 서명 하나로는 영원히 '대기' 다.
+- ⚠⚠ **리눅스 성능 6단계 엣지 대행 — 비교 계열은 엣지마다 요청 1개, 수집 건강은 봉투로, 최소 버전 문구는 릴리스 노트의 6단계 첫 번호(공용 함수)**
+  (`routes/collector.js` `GET /bm-usage/compare-series`(tokenFirst · 자기 대상 목록 밖 키는 not-found) · `bmusage/perfOpsView.js` mode `compare-series` · `central/bmComparePull.js` ·
+  `bmusage/edgePull.js`(봉투 `collectHealth`) · `central/bmCollectHealthSanitize.js` · `central/featureMinEdgeVersion.js` · `dataflow/build.js` 분류. 회귀 `bmPerfStage6{Compare,Health,MinEdgeVersion}.test.js`):
+  - **비교 계열은 한 서버 = 한 요청**: 지표 여러 개 · 창 통계 · 스파크 · 베이스라인 이탈을 엣지가 한 번에 묶어 준다(지표마다 WAN 왕복하지 않는다 — 루트 CLAUDE.md ‘작업 하나를 법인 쪽에’). GET 재시도 1 · 보관 없음.
+    중앙 정제 `sanitizeCompareSeries`: **아는 지표만**(`SERIES_COLS` · 이탈은 `BASELINE_METRICS`) · 수는 numOrNull · 상한(지표 24 · 스파크 120점) · 시각 clamp(수신 시각) · 이탈 사유 열거 밖은 `no-history`.
+  - **수집 건강은 봉투**(`collectHealth` — 노드 값 · 법인별 · 7일 시간 추이 200점): 정제는 화이트리스트(사유 code 열거 · 칸 열거 · 법인 64 · 사유 32 · 시각 clamp · 크기 `unread`/`error` 표지).
+    ⚠ **엣지 봉투의 byCorp 법인 이름은 그 엣지의 설정 법인 · 대상 법인과 맞는 것만** 행이 된다(봉투 문자열만으로 법인 행을 만들지 않는다 — 버린 수 `corpsDropped`).
+    ‘엣지 버전 낮음’ 판정은 **봉투에 필드가 있는가**(버전 숫자 비교 아님) · 보관분이 오래됐으면 `edge-stale`(중앙 STALE_MS) · 마지막 당김은 사유 원문 없이.
+  - **엣지의 ‘수집 건강’ 알림 발송 기록**(규칙 `collect` · key `__node__`)은 대상 목록 대조 대신 **중앙이 아는 엣지 이름으로** 이름 · 제목을 다시 세우고 법인은 공용('') — 엣지가 보낸 이름 · 법인 · 제목 문자열은 쓰지 않는다.
+  - **최소 엣지 버전 공용 함수**(`featureMinEdgeVersion(titleRe)`): 5단계(`perfOpsMinEdgeVersion` — 이제 이 함수의 포장)와 6단계(`stage6MinEdgeVersion` — 제목 ‘리눅스 통합 성능 모니터링 6단계’)가
+    같은 규칙(노트의 가장 낮은 번호 · 없으면 지금 package.json · 표지별 메모 · 폴백 0.0.0 은 메모하지 않음)을 쓴다 — 숫자를 코드에 박지 않는다. 5단계 대조 테스트 2개(`bmPerfMinEdgeVersion2929` · `bmUsageMinEdgeVersion2933`)가 그대로 통과한다.
+  - 목표선의 엣지 서버 계열은 **3a 추이 대행을 그대로** 쓴다(`pullBmTrend` — 지표마다 1회 · 동시 2 · 최소 버전은 `TREND_MIN_EDGE_VERSION` 그대로: 새 필드가 없다). 운영 주석은 중앙 한 곳에 저장한다(엣지로 보내지 않는다).
 - ⚠⚠ **v2.929 — 베어메탈 성능 5단계의 엣지 대행: 판정 · 발송 · 보관은 수집 노드(엣지), 중앙은 요약을 봉투로 받고 상세는 볼 때 당긴다**
   (`routes/collector.js` `POST /bm-usage/focus` · `POST /bm-usage/focus/stop` · `GET /bm-usage/focus` · `GET /bm-usage/changes|baseline|compare` — tokenFirst · 본문 4kb · 자기 대상 목록 밖 키는 not-found ·
   `central/bmPerfOpsPull.js` · `bmusage/edgePull.js`(봉투) · `central/bmPerfSanitize.js` · `dataflow/build.js` 분류. 회귀 `bmPerf2929Focus.test.js ⑥ · 구버전`):

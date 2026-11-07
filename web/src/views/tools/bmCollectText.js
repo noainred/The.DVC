@@ -45,6 +45,9 @@ export const INFO_TEXT = Object.freeze({ 'no-telemetry': '리포트 없음(라�
 /** 사유의 상태 9종 분류(server reasonState) → 짧은 이름. */
 export const REASON_STATE_TEXT = Object.freeze({ auth: '인증 정지', idracOnlyUnread: 'OS 못 읽음', osOnlyUnread: 'iDRAC 못 읽음', osOnly: 'iDRAC 리포트 없음' });
 export const PATH_TEXT = Object.freeze({ os: 'OS(SSH)', idrac: 'iDRAC' });
+/** 피크 창 결정 사유(서버 peakPlan.PEAK_PLAN_REASONS 와 1:1 — 테스트가 대조). 모르는 code 는 글자로 내보내지 않는다. */
+export const PEAK_REASON_TEXT = Object.freeze({ off: '피크 창 꺼짐', fits: '예산 안', reduced: '예산에 맞춰 줄임', 'base-over-budget': '기본 수집만으로 예산 초과 — 창 없음', 'no-targets': '대상 없음' });
+export const peakReasonText = (r) => (r && Object.hasOwn(PEAK_REASON_TEXT, r) ? PEAK_REASON_TEXT[r] : '');
 export const reasonLabel = (x) => `${PATH_TEXT[x?.path] || x?.path || ''} ${REASON_TEXT[x?.code]?.label || x?.code || '—'}`.trim();
 
 export function msText(v) {
@@ -78,25 +81,28 @@ export function daysSince(since, now = Date.now()) {
 }
 
 /** 주기 소요 추이(1시간 칸) → SVG 경로(소요 · 예산). 값 없는 칸에서 끊는다. */
-export function trendPaths(points = [], { w = 1000, h = 140 } = {}) {
+export function trendPaths(points = [], { w = 1000, h = 140, pad = 6 } = {}) {
   const pts = (Array.isArray(points) ? points : []).filter((p) => n(p?.t) != null);
-  if (!pts.length) return { ms: '', budget: '', yMax: null, from: null, to: null };
+  if (!pts.length) return { ms: '', budget: '', msDots: '', budgetDots: '', yMax: null, from: null, to: null, n: 0 };
   const from = pts[0].t; const to = pts.at(-1).t;
   const span = to > from ? to - from : 1;
   const yMax = Math.max(...pts.map((p) => Math.max(n(p.maxMs) ?? 0, n(p.budgetMs) ?? 0))) || 1;
+  // 위아래 여백(pad) — 0 · 최대 값의 점이 그림 가장자리에서 반쯤 잘리지 않게(r3 판독: 칸 1개일 때 점이 거의 안 보였다).
+  const yOf = (v) => Math.round((pad + (1 - v / yMax) * (h - 2 * pad)) * 10) / 10;
   const path = (pick) => {
-    let d = ''; let pen = false; let solo = false;
+    let d = ''; let dots = ''; let pen = false; let solo = null;
     for (const p of pts) {
       const v = n(p[pick]);
-      if (v == null) { if (solo) d += 'l0.01,0 '; pen = false; solo = false; continue; }
+      if (v == null) { if (solo) dots += `M${solo} l0.01,0 `; pen = false; solo = null; continue; }
       const x = pts.length === 1 ? w / 2 : Math.round(((p.t - from) / span) * w * 10) / 10;   // 칸이 하나뿐이면 가운데(가장자리에 반쯤 잘린 점이 되지 않게)
-      const y = Math.round((h - (v / yMax) * h) * 10) / 10;
-      d += `${pen ? 'L' : 'M'}${x},${y} `; solo = !pen; pen = true;
+      const y = yOf(v);
+      d += `${pen ? 'L' : 'M'}${x},${y} `; solo = pen ? null : `${x},${y}`; pen = true;
     }
-    if (solo) d += 'l0.01,0 ';   // 홀로 남은 점(주기 기록 1개 등)도 보이게
-    return d.trim();
+    if (solo) dots += `M${solo} l0.01,0 `;   // 홀로 남은 점(주기 기록 1개 · 결측 사이 1칸)은 굵은 점으로 따로 그린다
+    return { d: d.trim(), dots: dots.trim() };
   };
-  return { ms: path('maxMs'), budget: path('budgetMs'), yMax, from, to };
+  const ms = path('maxMs'); const budget = path('budgetMs');
+  return { ms: ms.d, msDots: ms.dots, budget: budget.d, budgetDots: budget.dots, yMax, from, to, n: pts.length };
 }
 export function trendRangeText(t) { return t.from == null ? '' : `${dayStamp(t.from) || ''} ${fmtHm(t.from)} ~ ${dayStamp(t.to) || ''} ${fmtHm(t.to)}`; }
 export const COLLECT_HONEST = '값은 그 노드(엣지 · 중앙 직접 수집)가 매 주기 쓴 것입니다 — 중앙은 다시 판정하지 않습니다. ‘며칠째’ 는 그 노드 프로세스가 시작한 뒤부터 셉니다(재시작하면 다시 셉니다). DB 크기는 파일 크기 실측이고, 샘플러(옵션 B)의 서버 부담은 계측하지 않습니다. 범위가 지정된 계정은 다른 법인 서버가 섞인 노드 값(주기 소요 · 동시성 · SSH · DB)을 보지 않습니다.';

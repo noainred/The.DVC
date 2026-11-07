@@ -21,6 +21,7 @@
 - (v2.922) 리눅스 성능 3a — 시간 단위 파일(5분·1시간·1일·장치) · 예전 표 마이그레이션(대조 뒤 삭제) · 피크 A 안 · 추이 API · CVP 포트 대조
 - (v2.923) 리눅스 성능 4단계 — 튜닝 탭(항목 26 · 근거 등급 · 출처 · 자동 적용 없음) · 용도 프로파일(rocky9-base · airflow · gpdb) · 장애 기록(partfault 재사용) · 진단 스냅샷(원격 명령 — 규약은 security-api.md v2.923)
 - (v2.929) 리눅스 성능 5단계 — 집중 모니터링(별도 타이머 · 법인 상한 · 전역 슬롯 · 인증 즉시 중단) · 알림 규칙(엣지 판정 · 상태 파일 · 하루 상한) · 베이스라인 띠 · 점검 소모품 8칸 · 변경 이벤트(전이 · 해시만) · 구간 비교
+- (6단계) 리눅스 성능 6단계 — 서버 비교(같은 법인 기본 · 법인 간은 전체 범위만) · 수집 건강(폴러 계측 · 노드 한 칸 규칙) · 운영 주석 · 진단 플레이북(읽기 전용 · 실행 없음) · 목표선(결측 분모 제외)
 - (원래 746행) iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
 - (원래 844행) 서버 온도 — 히트맵 보드(시안 B). '못 읽은 값' 을 정상으로도 이상으로도 세지 않는다
 - (원래 1030행) v2.728 — 엣지 축약 인벤토리는 부품 이름·health·state 를 싣고, 중앙 `INV_SHAPE` 와 한 쌍으로 넓힌다
@@ -529,6 +530,36 @@
     · 기록만(고치지 않음): **L2** 베이스라인 ‘같은 요일 · 시각’ 은 UTC 7일 배수 — 서머타임 법인(폴란드 · 미국 동부)은 전환 뒤 4주 동안 업무 시각이 1시간 어긋난 띠와 비교된다(법인 시간대 원천 없음) · 띠에 절대 하한이 없어 평균 2% 서버는 3% 에서도 ‘이탈’ ·
       **L7** FD 칸은 시스템 전체 file-nr 대비 — fs.file-max 가 매우 큰 배포판에서는 늘 0%(실제 한계는 프로세스 nofile · 실장비 미확인) · **L9** 엣지 위임 서버의 집중 탭 머리 ‘10분 × 1분(설정)’ 은 중앙 규칙으로 보인다(실제 세션은 그 엣지 규칙 — 세션 칸의 간격 · 횟수가 진실) ·
       **L10** 구간 비교 5분 해상도에서 수집 주기가 1분이면 한 칸에 5표본이 떨어져 마지막 1개만 남는다(Map.set).
+- ⚠⚠ **리눅스 성능 6단계(서버 + 화면 — 버전 미정) — 비교 · 수집 건강 · 주석 · 공유 · 플레이북 · 목표선. 새 수집 · 새 SSH 구획 없음(이미 가진 값의 묶음 · 대조), 판정은 서버 코어 하나 · 결측은 개수로**
+  (`bmusage/{multiCompare,compareSets,collectHealth,missReason,annotations,playbooks,slo}.js` · `slots.js`(슬롯 최대) · `poller.js`(주기 계측 · `collect_cycle` 표) · `perfRules.js`(규칙 `collect`) ·
+  `routes/api/{bmCompare,bmCollectHealth,bmAnnotations,bmPlaybookSlo}.js` · `routes/collector.js`(`/bm-usage/compare-series`) · `central/{bmComparePull,bmCollectHealthSanitize,featureMinEdgeVersion}.js`.
+  설계 PROFILES §16 · README §8. 회귀 `server/test/bmPerfStage6{Compare,Health,Annot,PlaybookSlo,MinEdgeVersion}.test.js` · 웹 `bmStage6Text.test.jsx`):
+  - **서버 비교(`multiCompare.js` · `GET /tools/bm-usage/compare`)**: 2~5대(설정 `compare.maxServers` 2~8 — 화면은 API 값) · 지표 묶음 4(6대 사용률 · USE · 큐 · 하드웨어) · 창 1시간/24시간/7일(상한 14일).
+    **기본은 같은 법인만** — 첫 서버의 법인이 기준이고 다른 법인 서버는 `other-corp` 열(값을 당기지 않는다) · ‘법인 간 허용’(`cross=1`)은 **전체 범위 계정만**(범위 계정이 보내면 404 — 기능 은닉).
+    범위 밖 · 없는 서버는 둘 다 `none`(존재 은닉 — 어느 쪽인지 말하지 않는다). 열마다 읽은 시각(`readAt` · 엣지는 보관 시각 `snapAt`)과 상태(ok · stale · old-version · no-sample)를 따로 밝힌다.
+    통계(`seriesStats`)는 평균 · 피크 · 마지막 · **n · expected · missing**(결측을 0 으로 채우지 않는다) · 스파크(칸 = min(96, 기대 칸, 점 수)) — 칸이 점보다 많으면 점이 흩어진다(r1 판독 결함 · 고침).
+    편차 표(`buildCompareTable`)는 묶음 평균 대비 ×2 이상을 `devHigh`, 3대 이상에서 한 대만 ×2 넘게 벗어나면 `skew` · 축 상한은 `niceCeil`(지표별 scaleMax 를 넘는 값은 `clipped`).
+    판정(USE 칸 · 교차)은 **상세와 같은 코어**(`buildPerfEntry` · 데모면 `demoPerfRows` 겹침 공용 — 비교와 상세가 갈리지 않게).
+  - **5대 동시 집중(`POST /compare/focus`)**: 키를 **전부 먼저 해석**(하나라도 없거나 범위 밖이면 404 — 아무것도 시작하지 않는다) → 쓰기 범위 하나라도 밖이면 403(전부 거부) → 그 뒤 서버마다 5단계 `focusStartResolved`
+    (같은 법인 상한 · 서버당 1세션 · 사유 필수 · 감사 `bm-perf.focus` origin `compare` · 자동 주석). 결과는 서버별(상한 · 중복은 그 서버만 실패).
+  - **저장된 세트(`compareSets.js` 파일 `bm-perf-compare-sets.json`)**: 사용자별 20개 · 이름 · 키 목록 · 법인 간 여부 — 원자 쓰기 · 손상 보존 · 손상이면 503(빈 목록으로 덮지 않는다) · 쓰기는 **동기 RMW**(await 없음 — 동시 10건 테스트) · 쓰기 운영자 이상.
+  - **수집 건강(`collectHealth.js` · 폴러 계측)**: 매 주기 노드 값(주기 소요 / 예산 · 성공률 · 실패 사유 9종(`missReason.js` — 집중과 같은 코어 · 인증 정지는 `auth-stopped`) · 동시성 최대(`slots.js` `_peak`) ·
+    SSH 소요 p50/p95(SSH 를 연 서버만) · 집중 진행/대기 · DB 크기 **파일 실측**(`dbFilesNow` — 폴더를 못 읽으면 null · 크기를 못 읽은 파일이 있으면 합을 내지 않고 `unread` 를 센다)).
+    ‘리포트 없음(라이선스) · 첫 주기 · PSI 없음’ 은 **실패가 아니다**(info 로 따로) · 대상 0대 주기는 성공률 null(0% · 100% 아님) · ‘며칠째’ 는 이어지는 동안 유지(프로세스 재시작이면 다시 센다).
+    주기 기록은 메인 DB `collect_cycle`(노드 · 시각 PK · 30일 · 정리 틱 청크) — 분류 실패 · 대상 0 · 예외 주기도 기록(무음 실패 금지). 기준 대조 `collectCells` 하나(값 없으면 `unread` 보류)를 보드와 알림 규칙이 같이 쓴다.
+  - **알림 규칙 ‘수집 건강’(`collect` — 기본 꺼짐 · 자동 집중 없음)**: 서버가 아니라 **노드 한 칸**(`key:'__node__'` · 이름 ‘수집 노드 <agent>’ · 법인 없음) — 조건 any · cycle · success · db · auth.
+  - **운영 주석(`annotations.js` 파일 `bm-perf-annotations.json`)**: 종류 5(작업 · 변경 · 외부 · 장애 · 메모) · 본문 500자 · 연결(ISS-n · 위키 · 집중 id · 백업) · 시각(지난 400일 ~ 앞 7일 · 구간 31일) · 전체 5,000(넘치면 지운 것부터 재사용 · 없으면 409).
+    중앙 한 곳 저장(엣지 서버도 중앙에 — 법인 귀속은 대상 해석의 vcenterId) · 원자 쓰기 · 손상 503 · 동기 RMW(동시 20건 테스트) · 고침 이력 20 · **삭제는 흔적**(본문 · 연결을 비우고 누가 · 언제를 남긴다).
+    집중 세션 시작은 자동 주석(`by:'system'` · auto `focus` — 사람이 고치거나 지울 수 없다). 엣지 자동 집중(알림 규칙)은 자동 주석을 만들지 않는다(중앙이 시작을 모른다).
+  - **진단 플레이북(`playbooks.js` 한 파일)**: 12편 · 판정 id 46개 전부가 적어도 한 편에 걸린다(테스트가 `allJudgmentIds()` 와 대조) · 단계 종류 5(포탈 · 명령 · 설정 · 하드웨어 · 조치) · 방법론 출처 태그(NF · USE · SRE · DELL).
+    ⚠⚠ **명령은 복사용 글자이고 포탈은 실행하지 않는다**(`executes:false` · 실행 경로 없음) — 그래도 **읽기 전용 명령만** 싣는다: `isReadOnlyCommand`(도구 화이트리스트 `READ_TOOLS` + 도구별 금지 인자 · 셸 의미 문자 `SHELL_BAD` · 따옴표를 아는 파이프 분할) ·
+    카탈로그는 런타임에도 거른다(통과 못 한 줄은 내보내지 않는다). 자리표시 채우기(`fillOf` — 장치 · 인터페이스 · 마운트)는 **서버가 값 화이트리스트로 거른 것만**(셸 의미 문자 · `..` 금지).
+  - **목표선(`slo.js` 파일 `bm-perf-slo.json`)**: 지표 12 · 기준 3(5분 평균 · 5분 피크 · 기간 p95) · 연산 4 · 우선순위 **개별 서버 > 용도(airflow · gpdb — 4단계 감지) > 역할(기본)** · 범위당 12 · 서버 500.
+    달성률 = 목표 안 주기 ÷ **값이 있는 주기**(결측 주기는 분모에서 빼고 `missing` 으로 센다 · 값이 하나도 없으면 `no-data` — 0% 아님 · 위반 수 · 위반 시간도 null) · 연속 위반은 결측 칸에서 끊는다 · 최장 위반 · 일별 · 위반 띠.
+    해상도는 창 20일 이하 5분 · 그 위 1시간 · 이번 달 = 법인 하루 경계(`DAY_OFFSET_MIN`) 기준. 계열은 3a 추이(이 노드 `trendFor` · 엣지 `pullBmTrend` — 지표마다 1회 · 동시 2).
+    정비 창은 원천이 없어 분모에서 빼지 못한다(`maintenance:{source:'none', excluded:0}` · 화면이 말한다 — 8단계). 저장은 관리자 + 설정 소유자 + 감사 `bm-perf.slo` · 손상이면 보존하고 기본 목표로 계산(그 사실을 응답이 말한다).
+  - ⚠ **정직 기록**: 샘플러(옵션 B)의 서버 부담은 계측하지 않는다 · 수집 건강 ‘며칠째’ 는 프로세스 시작 뒤부터 · 비교 · 목표선 계열은 3a 파일 그대로라 데모 백필(30분 간격)에서는 5분 칸 대부분이 결측으로 보인다(그대로 센다) ·
+    월간 목표 리포트(메일)는 만들지 않았다.
 - ⚠⚠ **iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
   관리자가 동의해야 켜진다**(`bmusage/license.js`·`collectors/idracEnterprise.js`·`parse/racadm.js`
   + `idrac/redfish.js fetchUsageSensors`, v2.554 — 사용자 신고 "idarc 텔레메트리는 data center

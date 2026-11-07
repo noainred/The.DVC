@@ -13,7 +13,7 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import {
   nodeStateView, FLAG_TEXT, REASON_TEXT, REASON_STATE_TEXT, INFO_TEXT, PATH_TEXT, msText, pctText1, gbText, cycleText, concText, sshText, reasonsLine, daysSince,
-  trendPaths, trendRangeText, COLLECT_HONEST, collectCsv, collectCsvName, unknownText,
+  trendPaths, trendRangeText, COLLECT_HONEST, collectCsv, collectCsvName, unknownText, peakReasonText,
 } from './bmCollectText.js';
 import './bmStage6.css';
 
@@ -72,8 +72,11 @@ export function CollectHealthView({ resp, now = Date.now() }) {
             <svg className="bmcmp-ovsvg" style={{ height: 140 }} viewBox="0 0 1000 140" preserveAspectRatio="none" role="img" aria-label="주기 소요 추이">
               {tp.budget && <path d={tp.budget} fill="none" stroke="var(--amber)" strokeDasharray="6 4" strokeWidth="1.2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
               <path d={tp.ms} fill="none" stroke="var(--accent-2)" strokeWidth="2.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+              {tp.budgetDots && <path d={tp.budgetDots} fill="none" stroke="var(--amber)" strokeWidth="5" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
+              {tp.msDots && <path d={tp.msDots} fill="none" stroke="var(--accent-2)" strokeWidth="8" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
             </svg>
             <div className="bmcmp-axis"><span>{trendRangeText(tp)}</span><span>최대 {msText(tp.yMax)}</span></div>
+            {tp.n === 1 && <p className="bmo-note" style={{ margin: 0 }}>기록이 아직 한 시간 칸뿐입니다 — 다음 시간부터 선으로 이어집니다.</p>}
             <p className="bmo-note">실선 = 그 시간의 가장 긴 주기 · 점선 = 예산(주기). 기록은 그 노드 DB 에 30일 남습니다.</p>
           </>
         ) : <p className="bmo-note">추이를 그릴 노드 값이 없습니다(아직 주기 없음 · 엣지 버전 · 범위로 숨김).</p>}
@@ -114,7 +117,7 @@ export function CollectHealthView({ resp, now = Date.now() }) {
                 {(db.error || db.unread) ? <div className="bmo-sub" style={{ color: toneVar('warn') }}>{db.error ? '데이터 폴더를 읽지 못해 크기를 모릅니다' : `파일 ${db.unread}개의 크기를 읽지 못해 합을 내지 않았습니다`}(0 으로 세지 않습니다)</div> : null}
                 <div className="bmo-sub">메인 {gbText(db.mainBytes)}{db.walBytes ? ` (+WAL ${gbText(db.walBytes)})` : ''} · 원시 {fam.raw?.files ?? 0}개 {gbText(fam.raw?.bytes)} · 1시간 {fam.h1?.files ?? 0}개 {gbText(fam.h1?.bytes)} · 장치 {(fam.dev?.files ?? 0) + (fam.dev1h?.files ?? 0)}개 · 1일 {fam.d1?.files ?? 0}개</div>
                 <div className="bmo-sub">상한 {x.node.capBytes ? gbText(x.node.capBytes) : '없음'}{x.node.dbPct != null ? ` · ${pctText1(x.node.dbPct)}` : ''}</div>
-                <div className="bmo-sub">피크 창 {x.node.peakPlan?.windowS ?? '—'}초(상한 {x.node.peakPlan?.capS ?? '—'}){x.node.peakPlan?.reason ? ` · ${x.node.peakPlan.reason}` : ''}</div>
+                <div className="bmo-sub">피크 창 {x.node.peakPlan?.windowS ?? '—'}초(상한 {x.node.peakPlan?.capS ?? '—'}){peakReasonText(x.node.peakPlan?.reason) ? ` · ${peakReasonText(x.node.peakPlan.reason)}` : ''}</div>
                 {x.via === 'edge' && <div className="bmo-sub">중앙 보관분 {x.snapAt ? daysSince(x.snapAt, now) : '—'}{x.lastAttempt ? ` · 마지막 당김 ${x.lastAttempt.ok ? '성공' : `실패(${x.lastAttempt.kind || '—'})`} ${msText(x.lastAttempt.ms)}` : ''}</div>}
               </div>
             );

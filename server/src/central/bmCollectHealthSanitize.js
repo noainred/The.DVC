@@ -9,6 +9,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { strOf } from '../util/coercionTrap.js';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
 import { HEALTH_REASON_CODES, NODE_FLAGS } from '../bmusage/collectHealth.js';
+import { PEAK_PLAN_REASONS } from '../bmusage/peakPlan.js';
 import { FAMILIES } from '../bmusage/monthStore.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -36,7 +37,7 @@ function cleanNode(x, now) {
     conc: isObj(x.conc) ? { max: N(x.conc.max), cap: N(x.conc.cap) } : null,
     ssh: isObj(x.ssh) ? { n: N(x.ssh.n), p50Ms: N(x.ssh.p50Ms), p95Ms: N(x.ssh.p95Ms) } : null,
     focus: isObj(x.focus) ? { running: N(x.focus.running), queued: N(x.focus.queued) } : null,
-    peakPlan: isObj(x.peakPlan) ? { windowS: N(x.peakPlan.windowS), capS: N(x.peakPlan.capS), reason: strOf(x.peakPlan.reason, 32), expectedMs: N(x.peakPlan.expectedMs), budgetMs: N(x.peakPlan.budgetMs) } : null,
+    peakPlan: isObj(x.peakPlan) ? { windowS: N(x.peakPlan.windowS), capS: N(x.peakPlan.capS), reason: PEAK_PLAN_REASONS.includes(x.peakPlan.reason) ? x.peakPlan.reason : null, expectedMs: N(x.peakPlan.expectedMs), budgetMs: N(x.peakPlan.budgetMs) } : null,
     db: isObj(x.db) ? { mainBytes: N(x.db.mainBytes), walBytes: N(x.db.walBytes), files: N(x.db.files), bytes: N(x.db.bytes), ...(N(x.db.unread) ? { unread: N(x.db.unread) } : {}), ...(x.db.error ? { error: 'readdir' } : {}), families: fams } : null,
     dbPct: N(x.dbPct), capBytes: N(x.capBytes), cells,
     th: isObj(x.th) ? { cyclePct: N(x.th.cyclePct), successPct: N(x.th.successPct), dbPct: N(x.th.dbPct), dbCapGb: N(x.th.dbCapGb) } : null,
