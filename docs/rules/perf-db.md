@@ -292,3 +292,8 @@
 - **(8a단계) 용량 소진 예측 — 요청 경로에서 함대 90일을 읽지 않는다**(`bmusage/capacity.js`): 함대 표 · 보드 KPI · 알림 규칙은 **수집 노드가 하루 1회**(포탈 날 01:10 뒤 첫 틱 — 기다리지 않는다 · 진행 중이면 그 프라미스 공유)
   미리 계산한 `bm-capacity.json`(원자 쓰기 · 손상 보존 · 결과 행만 · 상한 20,000) 을 읽는다. 계산은 서버마다 `usage_mount_daily` · `usage_daily` **키 점 조회**(PK 인덱스) + `createYielder(15)` —
   1,000대 × 90일을 한 문장으로 읽지 않는다. 서버 1대 상세만 요청 때 계산(31일 · 두 문장). 정비 창 판정 · 계수 상태(`maintenance-stats.json`)는 주기 끝 한 번 쓴다.
+  xfs 판별은 `db.latestTuningRows`(key · tuning_json 두 열 · 키 순 200행 조각 + 양보 — `SELECT *` 를 JSON 열까지 한 번에 동기로 읽지 않는다: 8a 반증 의심 항목).
+- ⚠⚠ **(8a 반증 F6) 정비 창 요청 경로 — 발생을 400일 전부 세지 않는다**(`maint/judge.js windowStatus` · `routes/api/bmMaint.js` · `maint/deploy.js` · `maint/store.js pruneOld`):
+  다음 · 지난 발생은 **지금에서 바깥으로 조각 탐색**(3일부터 두 배 · 64일 상한 · 만료에서 멈춤) · 목록은 행 사이 `createYielder(15)`(시험이 횟수를 센다) · 배포 현황은 창 상태를 한 번 세고 엣지마다 다시 쓴다 ·
+  쓰기 때 정리(`pruneOld`)는 가벼운 판정만(묘비 = 지운 시각 · 일회 = 유효 끝(창 판 id:rev 로 기억) · 반복 = 만료 시각). 같은 기계 실측(엣지 28 · `rv8a/r7` 재현 스크립트):
+  창 56 목록 10,853ms 한 덩어리 → 67ms(최장 정지 29ms) · 창 200 목록 38,192ms → 182ms(26ms) · 엣지 인출 응답 1,316ms → 71ms(16ms) · 만들기 1,337ms → 2ms. 매일 반복 창 windowStatus 7.5~8.3ms → 1.0~1.2ms.

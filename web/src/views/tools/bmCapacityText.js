@@ -95,7 +95,7 @@ export function sourceText(s = {}, minEdgeVersion = null, cfg = {}) {
   if (s.none) return `${name} — 아직 계산 전(하루 1회 · ${when} 뒤 첫 주기)`;
   const c = s.cap || null;
   const cut = c && (n(c.skippedServers) || n(c.trimmedServers))
-    ? ` · 상한 — ${n(c.skippedServers) ? `계산 안 한 서버 ${c.skippedServers}대` : ''}${n(c.skippedServers) && n(c.trimmedServers) ? ' · ' : ''}${n(c.trimmedServers) ? `마운트 일부만 ${c.trimmedServers}대(급한 마운트부터 · ${n(c.trimmedMounts) ?? '—'}개 뺌)` : ''}`
+    ? ` · 상한 — ${n(c.skippedServers) ? `계산 안 한 서버 ${c.skippedServers}대` : ''}${n(c.skippedServers) && n(c.trimmedServers) ? ' · ' : ''}${n(c.trimmedServers) ? `마운트 일부만 ${c.trimmedServers}대(급한 마운트부터 · ${n(c.trimmedMounts) != null ? `${c.trimmedMounts}개 뺌` : '뺀 수 모름'})` : ''}`
     : s.truncated ? ' · 일부만(상한)' : '';
   return `${name} — ${s.day || '—'} 기준${cut}`;
 }

@@ -47,6 +47,18 @@ describe('정비 창 문구 · 계약', () => {
     // 고치기 왕복
     const back = MT.windowToForm({ ...w, scopes: Object.keys(w.scopes) });
     expect(back.scopes.collect).toBe(false); expect(back.nth).toBe(2);
+    // 반증 F1 — 서버 창의 법인(고르면 그 법인 안에서 키를 찾는다 · 고르지 않으면 보내지 않는다 — 서버가 모호하면 400)
+    expect(MT.formToBody({ ...f, kind: 'server', keys: 'K1' }).vcenterId).toBeUndefined();
+    expect(MT.formToBody({ ...f, kind: 'server', keys: 'K1', serverCorp: 'vcB' }).vcenterId).toBe('vcB');
+    expect(MT.windowToForm({ ...w, target: { kind: 'server', keys: ['K1'] }, vcenterId: 'vcB', scopes: [] }).serverCorp).toBe('vcB');
+    expect(MT.emptyForm({ corp: 'vcA' }).serverCorp).toBe('', '새 서버 창은 법인 자동(첫 법인으로 굳히지 않는다)');
+  });
+  it('②-b 반증 문구 — 합 규칙 승인 안내 · 점검이 잡는 것과 못 잡는 것', () => {
+    expect(MT.approvalNote({ ownerOverMin: 720 })).toMatch(/같은 서버를 덮는 창들.*합이 어느 24시간에서든 12시간을 넘으면/);
+    expect(MT.leakText({ n: 0, last: 3 }).text).toMatch(/못 잡는 것: 판정 규칙 자체/);
+    expect(MT.leakText({ n: 1 }).text).toMatch(/창 끝 · 길이 상한 · 지움 · 끝내기 · 재확인 만료 · 배포본 시한/);
+    const html = renderToStaticMarkup(h(MaintForm, { form: MT.emptyForm({ corp: 'vcA' }), setForm: () => {}, vcenters: [{ id: 'vcA', name: 'KR-SEL' }, { id: 'vcB', name: 'US-B' }], limits: { ownerOverMin: 720 } }));
+    expect(html).toContain('자동 — 키로 찾기'); expect(html).toContain('US-B');
   });
   it('③ 일정 · 상태 · 계수 · 점검 문구 — 값이 없으면 지어내지 않는다', () => {
     expect(MT.scheduleText({ schedule: { kind: 'once', start: '2026-11-07T22:00', end: '2026-11-08T00:00' } })).toBe('2026-11-07 22:00 ~ 2026-11-08 00:00 (일회)');
@@ -116,6 +128,15 @@ describe('용량 예측 문구 · 그리기', () => {
     expect(CT.noteText({ kind: 'mem', grade: 'ref', reset: true, resetDay: '2026-10-28', excluded: 2 })).toMatch(/리셋형 — 10-28 뒤부터 창 · 정비 창 2일 제외 · 참고 등급/);
     expect(CT.sourceText({ via: 'edge', node: 'e1', old: true }, '2.950.0')).toMatch(/구버전.*v2\.950\.0/);
     expect(CT.sourceText({ via: 'edge', node: 'e1', none: true }, null, { recomputeAfterMin: 70 })).toMatch(/01:10 뒤/);
+  });
+  it('②-b 반증 F2 · F3 · F4 · F11 문구 — 도달(추세 불가) 기울기 없음 · 일상 몫 · 오래된 관측 · 상한 서버 수', () => {
+    expect(CT.slopeText({ status: 'reached', slope: 0.3, conf: null })).toBe('—');
+    expect(CT.slopeText({ status: 'reached', slope: 0.3, conf: 'high' })).toBe('+0.3%p');
+    expect(CT.noteText({ kind: 'fs', dailyWin: 120 })).toMatch(/하루 약 120분.*그보다 더 덮인 날만 뺌/);
+    expect(CT.currentText({ current: 85, stale: true, staleDays: 5 })).toBe('85% (5일 전)');
+    expect(CT.currentText({ current: null, stale: true, staleDays: 5 })).toBe('—');
+    expect(CT.sourceText({ via: 'local', day: '2026-11-08', truncated: true, cap: { skippedServers: 0, trimmedServers: 12, trimmedMounts: 40 } })).toMatch(/마운트 일부만 12대\(급한 마운트부터 · 40개 뺌\)/);
+    expect(CT.sourceText({ via: 'local', day: '2026-11-08', truncated: true })).toMatch(/일부만\(상한\)/);
   });
   it('③ 함대 표 SSR — 서버 행 그대로 · 데이터 부족 행에 0일 없음 · 요약은 서버 수', () => {
     const resp = { ok: true, cfg: { targetPct: 90, alertDays: 7 }, summary: { servers: 3, soon: 1, month: 2, unstable: 1, insufficient: 1, soonByKind: { fs: 1, inode: 0, mem: 0 }, monthByKind: { fs: 2, inode: 0, mem: 0 } },

@@ -28,6 +28,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { dayKey, DAY_MS, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { createYielder } from '../util/timeSlice.js';
+import { pushAll } from '../util/pushAll.js';
 import { maintJudge, localTargets } from './maint/runtime.js';
 import { targetIdOf } from './maint/judge.js';
 import { loadPerfRules } from './perfRules.js';
@@ -305,7 +306,7 @@ export function fairRows(rows = [], share = Infinity) {
   const mounts = [...byMount.entries()].sort((a, b) => score(a[1]) - score(b[1]) || String(a[0]).localeCompare(String(b[0])));
   const out = [...mem.slice(0, Math.max(0, share))];
   let kept = 0;
-  for (const [, list] of mounts) { if (out.length + list.length > share) break; out.push(...list); kept += 1; }
+  for (const [, list] of mounts) { if (out.length + list.length > share) break; pushAll(out, list); kept += 1; }
   return { rows: out, trimmedMounts: mounts.length - kept };
 }
 

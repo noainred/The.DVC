@@ -157,7 +157,11 @@ test('③ F6 — 창 200 · 엣지 28: 목록 · 배포 현황 · 엣지 인출 
     return { r, ms, maxGap };
   };
   const req = { user: { username: 'adm', role: 'admin', scope: null }, query: {} };
-  const list = await gapOf(() => bmMaintList(req, { vcenters: vcs.map((id) => ({ id })) }, { currentTargets: async () => ({ targets: [] }), ownerTier: async () => true, minEdgeVersion: async () => '0' }));
+  let yields = 0;
+  const { createYielder } = await import('../src/util/timeSlice.js');
+  const counting = () => { const y = createYielder(15); return async () => { yields += 1; return y(); }; };
+  const list = await gapOf(() => bmMaintList(req, { vcenters: vcs.map((id) => ({ id })) }, { currentTargets: async () => ({ targets: [] }), ownerTier: async () => true, minEdgeVersion: async () => '0', yielder: counting }));
+  assert.ok(yields >= 200, `목록 행마다 양보 기회(${yields})`);
   assert.equal(list.r.windows.length, 200); assert.equal(list.r.deploy.edges.length, 28);
   const pull = await gapOf(() => DP.deployFor('Edge-0', { verified: true, now: NOW }));
   assert.ok(pull.r.windows.length > 0);
@@ -165,5 +169,7 @@ test('③ F6 — 창 200 · 엣지 28: 목록 · 배포 현황 · 엣지 인출 
   const note = `목록 ${Math.round(list.ms)}ms(최장 정지 ${Math.round(list.maxGap)}ms) · 인출 ${Math.round(pull.ms)}ms(${Math.round(pull.maxGap)}ms) · 만들기 ${Math.round(add.ms)}ms(${Math.round(add.maxGap)}ms)`;
   // 반증 실측(창 200 · 엣지 28): 목록 37,716ms 한 덩어리 · 인출 1,313ms · 만들기 1,262ms. 시험 상한은 CI 변동을 넉넉히 둔다(실측은 보고서).
   assert.ok(list.maxGap < 150, note); assert.ok(pull.maxGap < 150, note); assert.ok(add.maxGap < 150, note);
+  // 양보가 실제로 나눈다 — 최장 정지가 전체의 절반 아래(기계 속도와 무관한 비율)
+  assert.ok(list.maxGap < Math.max(60, list.ms * 0.5), note);
   console.log(`[F6] ${note}`);
 });

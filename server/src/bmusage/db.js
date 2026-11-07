@@ -23,6 +23,7 @@
  * node:sqlite 미지원 환경은 no-op 폴백 — 수집·화면은 살고 DB 만 비활성(`available()` 이 밝힌다).
  */
 import fs from 'node:fs';
+import { pushAll } from '../util/pushAll.js';
 import path from 'node:path';
 import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -610,7 +611,7 @@ export async function latestTuningRows({ agent = '', chunk = 200, yieldFn = null
     let after = '';
     for (let i = 0; i < 10_000; i += 1) {
       const rows = st.all(String(agent || ''), after, chunk);
-      out.push(...rows);
+      pushAll(out, rows);
       if (rows.length < chunk) break;
       after = String(rows[rows.length - 1].key);
       if (yieldFn) await yieldFn();

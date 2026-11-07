@@ -45,6 +45,7 @@ function deps0(deps = {}) {
     minEdgeVersion: async () => (await import('../../central/featureMinEdgeVersion.js')).stage8aMinEdgeVersion(),
     audit: logAudit,
     now: () => Date.now(),
+    yielder: () => createYielder(15),   // 목록 행 사이 시간 기준 양보(시험이 횟수를 센다)
     ...deps,
   };
 }
@@ -193,7 +194,7 @@ export async function bmMaintList(req, snap, deps = {}) {
       edits: (w.edits || []).slice(-5),
     };
   };
-  const y = createYielder(15);
+  const y = D.yielder();
   const rows0 = [];
   for (const w of list) { rows0.push(view(w)); await y(); }   // 창마다 상태 한 번 · 사이 양보(F6)
   const rows = rows0.sort((a, b) => ({ active: 0, scheduled: 1, expired: 2, ended: 3 }[a.status] ?? 4) - ({ active: 0, scheduled: 1, expired: 2, ended: 3 }[b.status] ?? 4) || (a.next?.start ?? a.last?.start ?? 0) - (b.next?.start ?? b.last?.start ?? 0));

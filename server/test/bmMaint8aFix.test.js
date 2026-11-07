@@ -194,4 +194,10 @@ test('⑧ F5 — 합친 덮임 규칙(순수): 같은 서버 비소유자 창 �
   const lastSun = win({ id: 'mw-ls000001', target: { kind: 'server', keys: ['S1'] }, schedule: { kind: 'monthly', nth: 5, weekday: 0, time: '12:00', durMin: 720 } });
   const firstMon = win({ id: 'mw-fm000001', target: { kind: 'server', keys: ['S1'] }, schedule: { kind: 'monthly', nth: 1, weekday: 1, time: '00:00', durMin: 720 } });
   assert.equal(ST.coverNeedsOwner(firstMon, [lastSun], NOW), true, '마지막 일요일 다음 날이 첫 월요일인 달');
+  // 24시간 창의 끝을 후보 발생 끝에 맞춰야 드러나는 합(이 규칙 전에 만든 비소유자 창 둘이 22시간 이어짐 + 5시간 뒤 6시간 후보 → [9h, 33h) 에 19시간)
+  const t1 = NOW + 2 * HOUR;
+  const l1 = win({ id: 'mw-l1000001', target: { kind: 'server', keys: ['S9'] }, schedule: { kind: 'once', start: loc(t1), end: loc(t1 + 11 * HOUR) } });
+  const l2 = win({ id: 'mw-l2000001', target: { kind: 'server', keys: ['S9'] }, schedule: { kind: 'once', start: loc(t1 + 10 * HOUR), end: loc(t1 + 22 * HOUR) } });
+  const c6 = win({ id: 'mw-c6000001', target: { kind: 'server', keys: ['S9'] }, schedule: { kind: 'once', start: loc(t1 + 27 * HOUR), end: loc(t1 + 33 * HOUR) } });
+  assert.equal(ST.coverNeedsOwner(c6, [l1, l2], NOW), true, '창 시작만 보면 6시간 — 끝 맞춤에서 19시간');
 });

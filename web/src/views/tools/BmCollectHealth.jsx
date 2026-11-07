@@ -50,7 +50,7 @@ export function CollectHealthView({ resp, now = Date.now() }) {
               return (
                 <tr key={`${r.agent}|${r.vcenterId}`}>
                   <td data-sort={r.vcenterId}>{r.vcenterId || '귀속 없음'}</td>
-                  <td data-sort={r.agent} className="bmo-wrap" style={{ maxWidth: 200 }}>{r.agent || '—'}<div className="bmo-sub">{r.via === 'edge' ? '엣지' : '이 노드'}</div>
+                  <td data-sort={r.agent} className="bmo-wrap" style={{ minWidth: 140, maxWidth: 200 }}>{r.agent || '—'}<div className="bmo-sub">{r.via === 'edge' ? '엣지' : '이 노드'}</div>
                     {(() => { const rl = rttLine(r); return rl ? <div className="bmo-sub" style={{ color: toneVar(rl.tone) }}>{rl.text}</div> : null; })()}</td>
                   <td className="right" data-sort={r.servers ?? ''}>{r.servers ?? '—'}</td>
                   <td className="right" data-sort={r.cyclePct ?? ''}>{r.nodeHidden ? <span className="bmo-sub">노드 값 숨김</span> : cycleText(r.cycleMs, r.budgetMs)}</td>
