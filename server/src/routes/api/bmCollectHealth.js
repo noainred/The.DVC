@@ -133,7 +133,7 @@ export async function bmCollectHealthView(req, snap, deps = {}) {
       }
       rows.push({
         vcenterId: vc, agent: x.agent, via: x.via, nodeState: rowState, flags: rowFlags, nodeHidden,
-        ...(x.via === 'local' && rttOf ? rttCell(vc) : {}),
+        ...(x.via === 'local' && rttOf && vc ? rttCell(vc) : {}),   // 귀속 없는 행에는 RTT 가 없다(법인이 아니다)
         // 주기 실패면 이 법인 대상 수도 모른다(null — 0 이 아니다 · 반증 F1) · 주기 기록이 있고 이 법인 값이 없으면 사실 0(이번 주기 대상 없음).
         servers: c ? n(c.servers) : (x.health && !failed ? 0 : null), ok: c ? n(c.ok) : null, fail: c ? n(c.fail) : null,
         // 성공 수를 모르면 성공률도 모른다(0% 가 아니다 · 반증 F4).
