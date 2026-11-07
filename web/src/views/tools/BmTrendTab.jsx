@@ -26,6 +26,7 @@ import { changeMarks } from './bmPerfOpsText.js';
 // 6단계: 운영 주석 ◆ 핀(패널 행 · 겹침 카드) · 목록 · 입력.
 import AnnotationsCard, { useAnnotations } from './BmAnnotations.jsx';
 import { annotMarks } from './bmAnnotText.js';
+import { violationBands } from './bmRunbookText.js'; // 6단계 목표선 위반 띠(서버 판정 그대로)
 import BmTrendPopup from './BmTrendPopup.jsx';
 import {
   TREND_RANGES, trendRangeOf, SHOW_MODES, showAvg, showPeak, metricInfo, PANEL_ROWS, SOCKET_NOTE, SOURCE_TAGS, SOURCE_ORDER, RECO_TILES,
@@ -145,6 +146,10 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
   const ann = useAnnotations(itemKey ? [itemKey] : [], win, `${clock.n}|${annTick}`);
   const anMarks = useMemo(() => annotMarks(ann.list, win), [ann.list, win]);
   const chMarks = useMemo(() => [...chMarks0, ...anMarks], [chMarks0, anMarks]);
+  // 6단계: 목표선 위반 띠 — 켤 때만 읽는다(목표 지표마다 추이를 다시 읽는다 — 엣지 위임 서버는 그만큼 WAN 요청이 는다).
+  const [sloOn, setSloOn] = useState(false);
+  const slo = useOnceJson(itemKey && sloOn ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/slo?from=${Math.floor(win.from)}&to=${Math.floor(win.to)}` : '', clock.n);
+  const vb = useMemo(() => violationBands(slo.data), [slo.data]);
 
   useEffect(() => {
     if (narrowOverride != null || typeof window === 'undefined') return undefined;
@@ -299,7 +304,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
           const sub = [baseSub, groupFirst ? restNote(rp.rest) : '', groupFirst && rp.autoRows ? '8개 초과 — 행 나눔으로 바꿨습니다' : ''].filter(Boolean).join(' · ');
           return (
             <TrendRow key={rp.id} title={title} sub={sub} readout={readout} series={lines} win={win} yMax={yMax} cursor={cursorMs} sel={sel} baseline={isPeak ? null : baseline}
-              gaps={[]} noPeak={noPeak} message={lines.length ? '' : msg} note={lines.length ? msg : ''} legend={lg} unit={info.unit} marks={chMarks}
+              gaps={[]} noPeak={noPeak} message={lines.length ? '' : msg} note={lines.length ? msg : ''} legend={lg} unit={info.unit} marks={chMarks} vbands={!rp.dev ? (vb[r.metric] || []) : []}
               onHover={(ms) => setCur(ms == null ? null : { ms, panel: which })} onSelect={setSel}
               onOpen={() => open(first, { show: isPeak ? 'peak' : 'avg' })} />
           );
@@ -363,6 +368,10 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
       {/* ── ① 평균 · ② 피크 ── */}
       {showAvg(show) && renderPanel('avg')}
       {showPeak(show) && renderPanel('peak')}
+      <div className="bmt-ctl">
+        <label className="bmt-check"><input type="checkbox" checked={sloOn} onChange={(e) => setSloOn(e.target.checked)} /> 목표선 위반 띠(빨강) 겹치기</label>
+        {sloOn && <span className="bmt-hint">{slo.loading ? '목표를 대 보는 중…' : slo.err ? `목표를 읽지 못했습니다: ${trendErrorText(slo.err)}` : `목표 ${(slo.data?.items || []).length}개 · 위반 띠 ${Object.values(vb).reduce((a, x) => a + x.length, 0)}곳 — 목표선 탭에 달성률`}</span>}
+      </div>
       <p className="bmt-note">{SOCKET_NOTE}{chMarks0.length ? ` · 행 위 파란 점선 = 변경 이벤트(${chMarks0.length}곳 — 아래 목록)` : ''}{anMarks.length ? ` · 보라 ◆ = 운영 주석(${anMarks.length}곳 — 가리키면 내용)` : ''}</p>
 
       {/* ── v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 · 구간 비교 ── */}

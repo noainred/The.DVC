@@ -22,6 +22,10 @@ import { AnnotTable } from './BmAnnotations.jsx';
 import { TrendSvg } from './BmTrendChart.jsx';
 import { ANNOT_KINDS } from '../../../../server/src/bmusage/annotations.js';
 import * as S from './bmShare.js';
+import * as RB from './bmRunbookText.js';
+import { PlaybookView, SloTable } from './BmRunbookTabs.jsx';
+import { STEP_KINDS, playbookCatalog, allJudgmentIds } from '../../../../server/src/bmusage/playbooks.js';
+import { SLO_METRICS, SLO_BASES, SLO_OPS, evaluateGoal } from '../../../../server/src/bmusage/slo.js';
 import { inlineSvgPaint, captureName, footerHeight } from './bmCapture.js';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
@@ -223,5 +227,39 @@ describe('공유 링크 · 캡처', () => {
     expect(s4).not.toMatch(/import\(['"]html2canvas|from ['"](html-to-image|dom-to-image)/);
     const pkg = JSON.parse(fs.readFileSync(path.join(HERE, '../../../package.json'), 'utf8'));
     expect(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter((k) => /html-to-image|dom-to-image/.test(k))).toEqual([]);
+  });
+});
+
+describe('진단 플레이북 · 목표선', () => {
+  it('문구 표 = 서버 열거(1:1)', () => {
+    expect(Object.keys(RB.STEP_KIND_TEXT).sort()).toEqual([...STEP_KINDS].sort());
+    expect(Object.keys(RB.SLO_METRIC_TEXT).sort()).toEqual([...SLO_METRICS].sort());
+    expect(Object.keys(RB.SLO_BASIS_TEXT).sort()).toEqual([...SLO_BASES].sort());
+    expect(Object.keys(RB.SLO_OP_TEXT).sort()).toEqual([...SLO_OPS].sort());
+    const looks = new Set(playbookCatalog().flatMap((p) => p.steps.flatMap((x) => x.look || [])));
+    for (const l of looks) expect(RB.LOOK_TEXT[l]).toBeTruthy();
+    for (const id of allJudgmentIds()) expect(RB.judgmentText(id)).not.toBe('');
+  });
+  it('플레이북 SSR — 지금 판정에 맞는 것이 열리고 명령은 복사용(자리표시는 서버 값으로) · 포탈은 실행하지 않는다', () => {
+    const catalog = { playbooks: playbookCatalog() };
+    const pb = { ids: ['use:disk'], matched: [{ id: 'disk-await', ids: ['use:disk'] }], fill: { '{장치}': 'nvme1n1' }, portal: { values: { disk_await_ms: 212, disk_busy_pct: null } } };
+    const html = renderToStaticMarkup(h(PlaybookView, { pb, catalog, sel: '', onSel: () => {} }));
+    expect(html).toContain('/sys/block/nvme1n1/queue/scheduler'); expect(html).toContain('복사');
+    expect(html).toContain('포탈은 실행하지 않습니다'); expect(html).toContain('212ms'); expect(html).not.toContain('NaN');
+    expect(html).toContain('#/wiki/pub/search?q=');
+  });
+  it('목표선 SSR — 달성률 없으면 ‘—’ · 자료 없음 · 정비 창 원천 없음 · 일 추이 결측은 ·', () => {
+    const from = NOW - 2 * H; const to = NOW;
+    const g = { id: 'x', metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 80, objectivePct: 99, source: 'profile:gpdb' };
+    const ev = evaluateGoal(g, [], { from, to, stepMs: 300_000, now: NOW });
+    const html = renderToStaticMarkup(h(SloTable, { resp: { items: [{ goal: g, ...ev }] } }));
+    expect(html).toContain('자료 없음'); expect(html).toContain('원천 없음'); expect(html).toContain('용도 gpdb'); expect(html).not.toMatch(/>0%</);
+    expect(RB.dailySpark([{ pct: 100 }, { pct: null }, { pct: 0 }])).toBe('▁·█');
+    expect(RB.violationBands({ items: [{ goal: { metric: 'cpu_pct' }, bands: [{ from: 1, to: 2 }] }, { goal: { metric: 'mem_pct' }, error: 'x' }] })).toEqual({ cpu_pct: [{ from: 1, to: 2 }] });
+  });
+  it('소스 스윕 — 플레이북 화면은 명령을 보내지 않는다(POST 없음) · 폴링 없음', () => {
+    const s5 = strip(src('BmRunbookTabs.jsx')) + strip(src('bmRunbookText.js'));
+    expect(s5).not.toMatch(/postJson|sendJson\([^)]*POST/);
+    expect(s5).not.toMatch(/setInterval|usePolling/);
   });
 });

@@ -63,7 +63,7 @@ function usePointer({ win, onHover, onSelect, onOpen }) {
  * SVG 한 장 — 계열(선) 여러 개 · 결측 띠 · 피크 없는 띠 · 선택 구간 · 커서 · 기준선.
  * series: [{ points, gaps, pick:'avg'|'max'|'peak', color, dash, faint, width }]
  */
-export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = null, baseline = null, gaps = [], noPeak = [], label = '', height = 56, ptr = {}, marks = [], bandPolys = [], dots = [] }) {
+export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = null, baseline = null, gaps = [], noPeak = [], label = '', height = 56, ptr = {}, marks = [], bandPolys = [], dots = [], vbands = [] }) {
   const bands = gapBands(gaps, { ...win, w: W });
   const np = noPeak.length ? gapBands(noPeak.map((r) => ({ ...r, reason: 'no-peak' })), { ...win, w: W }) : [];
   const cx = cursor == null ? null : xOf(cursor, { ...win, w: W });
@@ -81,6 +81,8 @@ export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = nu
       {selA != null && selB != null && selB > selA && <rect x={selA} y="0" width={selB - selA} height={H} fill="var(--accent-2)" opacity="0.08" stroke="var(--accent-2)" strokeOpacity="0.4" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />}
       {/* v2.929(5단계): 베이스라인 띠(지난 N주 같은 요일 · 시각 평균 ± — 다각형은 bmPerfOpsText.bandPolys) · 변경 이벤트 점(위 가장자리) · 집중 1분 점 */}
       {bandPolys.map((pts, i) => <polygon key={`b${i}`} points={pts} fill="var(--accent-2)" opacity="0.13" />)}
+      {/* 6단계: 목표선 위반 구간(서버 slo.evaluateGoal 의 bands — 웹은 그리기만) */}
+      {vbands.map((b, i) => { const a = xOf(Math.max(b.from, win.from), { ...win, w: W }); const z = xOf(Math.min(b.to, win.to), { ...win, w: W }); return z > a ? <rect key={`v${i}`} x={a} y="0" width={Math.max(z - a, 0.5)} height={H} fill="var(--red)" opacity="0.12"><title>목표 위반 구간</title></rect> : null; })}
       {baseline && baseline.warn != null && baseline.warn <= yMax && <line x1="0" x2={W} y1={yOf(baseline.warn)} y2={yOf(baseline.warn)} stroke="var(--amber)" strokeDasharray="5 4" opacity="0.7" vectorEffect="non-scaling-stroke" />}
       {baseline && baseline.bad != null && baseline.bad <= yMax && <line x1="0" x2={W} y1={yOf(baseline.bad)} y2={yOf(baseline.bad)} stroke="var(--red)" strokeDasharray="5 4" opacity="0.7" vectorEffect="non-scaling-stroke" />}
       {series.map((s, i) => {
@@ -110,7 +112,7 @@ export function TrendSvg({ series = [], win, yMax = 100, cursor = null, sel = nu
 }
 
 /** 패널 한 행 — 이름(HTML) + SVG. 행을 누르면 확대 팝업. */
-export function TrendRow({ title, sub = '', readout = null, series = [], win, yMax, cursor, sel, baseline = null, gaps = [], noPeak = [], message = '', note = '', onHover, onSelect, onOpen, legend = null, height = 56, unit = '', marks = [] }) {
+export function TrendRow({ title, sub = '', readout = null, series = [], win, yMax, cursor, sel, baseline = null, gaps = [], noPeak = [], message = '', note = '', onHover, onSelect, onOpen, legend = null, height = 56, unit = '', marks = [], vbands = [] }) {
   const ptr = usePointer({ win, onHover, onSelect, onOpen });
   return (
     <div className="bmt-row">
@@ -122,7 +124,7 @@ export function TrendRow({ title, sub = '', readout = null, series = [], win, yM
         {readout && <div className="bmt-row-read">{readout}</div>}
       </div>
       <div className="bmt-row-plot">
-        <TrendSvg series={series} win={win} yMax={yMax} cursor={cursor} sel={sel} baseline={baseline} gaps={gaps} noPeak={noPeak} label={`${title} 추이`} height={height} ptr={ptr} marks={marks} />
+        <TrendSvg series={series} win={win} yMax={yMax} cursor={cursor} sel={sel} baseline={baseline} gaps={gaps} noPeak={noPeak} label={`${title} 추이`} height={height} ptr={ptr} marks={marks} vbands={vbands} />
         <span className="bmt-ymax" aria-hidden="true">{unit === '%' ? '100' : ''}</span>
         {message && <div className="bmt-row-msg">{message}</div>}
       </div>

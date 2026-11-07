@@ -46,3 +46,9 @@
 /* 보드 · 상세 ‘비교에 추가’ */
 .bmcmp-pick { margin-right: 6px; vertical-align: middle; width: 16px; height: 16px; }
 .bmcmp-tray { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+/* 진단 플레이북 · 목표선 */
+.bmrb-step { display: grid; gap: 6px; }
+.bmrb-cmd { display: flex; gap: 6px; align-items: flex-start; min-width: 0; }
+.bmrb-cmd pre { flex: 1 1 auto; min-width: 0; margin: 0; padding: 6px 8px; background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 6px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bmrb-items { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.6; }
+.bmrb-spark { font-family: ui-monospace, monospace; letter-spacing: -1px; white-space: nowrap; color: var(--accent-2); }

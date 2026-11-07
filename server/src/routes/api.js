@@ -49,6 +49,7 @@ import { registerBmPerfOps } from './api/bmPerfOps.js'; // v2.929 리눅스 성�
 import { registerBmCompare } from './api/bmCompare.js'; // 6단계 리눅스 성능 — 서버 비교(2~5대) · 5대 동시 집중 · 저장된 세트
 import { registerBmCollectHealth } from './api/bmCollectHealth.js'; // 6단계 — 수집 건강 보드(메타 모니터링)
 import { registerBmAnnotations } from './api/bmAnnotations.js'; // 6단계 — 운영 주석(중앙 저장)
+import { registerBmPlaybookSlo } from './api/bmPlaybookSlo.js'; // 6단계 — 진단 플레이북 · 목표선(SLO)
 import { registerServerSensors } from './api/serverSensors.js'; // 서버 온도 › 센서 상세(v2.659)
 import { registerCorpUsage } from './api/corpUsage.js'; // 법인별 서버 사용량(전체·물리·가상화, v2.625)
 import { registerSvcInventory } from './api/svcInventory.js'; // 서비스 인벤토리(VM + 베어메탈 · 법인 › 폴더 › 서비스 · 전역 카탈로그, v2.887)
@@ -170,6 +171,7 @@ registerBmPerfOps(api);
 registerBmCompare(api);
 registerBmCollectHealth(api);
 registerBmAnnotations(api);
+registerBmPlaybookSlo(api);
 registerCorpUsage(api);
 registerSvcInventory(api);
 registerServerSensors(api);
