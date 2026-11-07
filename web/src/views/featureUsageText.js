@@ -9,6 +9,8 @@
  * 문구에 백틱 금지 · 값 인용은 ‘ ’(BoldText 규약).
  */
 import { MENU_GROUPS } from './topMenu.js';
+import { PLATFORM_TABS } from './platform/platformText.js'; // v2.915 가상화 플랫폼 항목이 맡는 탭 이름
+const PLATFORM_TAB_LABEL = new Map(PLATFORM_TABS.map((t) => [t.k, t.label]));
 import { TOOLS } from './specialToolsList.js';
 
 export const PERIODS = Object.freeze([7, 30, 90, 365]);
@@ -45,6 +47,13 @@ function menuIndex(groups = MENU_GROUPS) {
       const where = Array.isArray(g.children) ? `${g.label} › ${c.label}` : g.label;
       const item = { group: g.id, groupLabel: g.label, label: c.label, where };
       if (c.tab) { if (!tab.has(c.tab)) tab.set(c.tab, item); items.push({ ...item, k: c.tab === 'tools' ? 'tab:tools' : `tab:${c.tab}` }); }
+      // v2.915: 한 항목이 맡는 나머지 탭(가상화 플랫폼의 hosts · vms) — 같은 자리(서버 › 가상화 플랫폼)이고 이름은 '항목 › 탭'. 추적 키(tab:vms)는 그대로다.
+      for (const t of Array.isArray(c.tabs) ? c.tabs : []) {
+        const tl = PLATFORM_TAB_LABEL.get(t) || t;
+        const sub = { ...item, label: `${c.label} › ${tl}`, where: `${where} › ${tl}` };
+        if (!tab.has(t)) tab.set(t, sub);
+        items.push({ ...sub, k: `tab:${t}` });
+      }
       if (c.tool) {
         const key = c.seg ? `${c.tool}/${c.seg}` : c.tool;
         if (!tool.has(key)) tool.set(key, { ...item, direct: true });

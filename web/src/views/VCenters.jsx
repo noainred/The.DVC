@@ -1,22 +1,60 @@
-import React, { useEffect, useRef, useState, lazy, Suspense } from 'react';
+import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { usePolling, fetchJson, toolAllowed, can } from '../api.js';
+// v2.915 가상화 플랫폼 허브(설계 docs/design/virt-platform-menu 시안 A ② · ⑨): 이 화면은 허브의 'vCenter 탭' 본문이다 — 제목 · 전체 vCenter/호스트/VM 카드 · 바로가기는
+//   허브(views/platform/PlatformHub.jsx)가 그리고, 여기는 카드 | 표 보기 ‖ vCenter 도구 줄 · 백업 KPI · 추이 · 카드/표만 남는다. 범위(리전 · vCenter · 검색)는 App 의 공용 바.
+import HubTabs, { toolsFor } from './platform/HubTabs.jsx';
+import { VC_TOOLS, VC_VIEWS, loadVcView, saveVcView } from './platform/platformText.js';
+const VcTable = lazy(() => import('./platform/VcTable.jsx'));
 import { growth, hasDsData, gbTb } from './tools/storageTrack.js'; // 추이 KPI(v2.358) 계산 재사용
-import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
+import { Loading, ErrorBox, StateBadge, usageColor } from '../components/ui.jsx';
 // v2.596(감사 PERFWEB-04): 상세는 recharts 를 쓴다 — 목록 화면이 그 청크를 받지 않게 상세를 열 때만 받는다.
 const VCenterDetail = lazy(() => import('./VCenterDetail.jsx'));
 // v2.671: VM 이름 검색 결과를 누르면 여는 상세 — 목록 화면이 그 청크를 받지 않게 열 때만 받는다.
 const EntityDetail = lazy(() => import('../components/EntityDetail.jsx').then((m) => ({ default: m.EntityDetail })));
-import { vcCardState, vcQuickDot, storageBarInfo, staleSinceText } from './vcCardText.js';
+import { vcCardState, storageBarInfo, staleSinceText } from './vcCardText.js';   // v2.915: 바로가기 칩(vcQuickDot)은 허브(PlatformHub)가 그린다
 import { dsTrendMeta } from './dsTrendKpiText.js'; // v2.631(감사 WEB2631-09)
 import BoldText from '../components/boldText.jsx';
 import { alarmsUnknown, restFallbackBadge } from './restFallbackText.js'; // v2.607 WEB2607-06
 import STable from '../components/STable.jsx';
 import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT } from './vcVmSearchText.js';
-import { countableTotals, PARTIAL_TITLE } from './corpSiteStatus.js'; // v2.741(WEB-01) 법인 표와 같은 '셀 수 있는 vCenter' 판정
+import { countableTotals } from './corpSiteStatus.js'; // v2.741(WEB-01) 법인 표와 같은 '셀 수 있는 vCenter' 판정(v2.915: 전체 VM 수 — 백업 KPI 의 분모)
 import { hostCapShort, hostCapFootnote, hostCapTotal } from './hostCapacityText.js'; // v2.742(LEFT-06): 용량 모름 호스트는 총량에서 빠졌다
 import { parseVcRoute, vcHash, currentHash, goHash, onHashChange } from './vcd/vcdRoute.js'; // v2.895: 상세 · 개체 보기 주소(#/vcenters/<id>[/vm|host/<id>])
-import { backupPairCell, backupTotals } from './veeamBadge.js'; // v2.757 카드의 VM 백업 수량 · v2.778.1 veeam/snapshot 두 수
-import useSearchHandoff from '../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
+import { backupPairCell, backupTotals } from './veeamBadge.js'; // v2.757 카드의 VM 백업 수량 · v2.778.1 veeam/snapshot 두 수 · v2.915 표기는 Veeam / Bareos(스냅샷 제외 — 사용자 지시)
+
+const lsSafe = () => { try { return typeof window !== 'undefined' ? window.localStorage : null; } catch { return null; } };
+
+/**
+ * v2.915 카드 · KPI 의 백업 칸 'veeam / bareos'(사용자 지시 2026-11-07 — 스냅샷 제외). Veeam 수는 v2.778.1 판정(backupPairCell — 못 읽으면 '—' · 부분이면 *)의 앞 수 그대로,
+ * Bareos 수는 Bareos 백업 현황(/tools/bareos-summary — 도구 권한이 있을 때만 읽는다)의 법인 줄 counts.jobs(잡이 등록된 VM — 등록부를 못 읽으면 null → '—').
+ * @returns {null|{ text:string, label:string, title:string, tone:string, sort:number|null }}
+ */
+export function backupVbCell(veeamEntry, bareosRow, vmTotal, now = Date.now(), { refreshError = '', bareosAllowed = true } = {}) {
+  const pair = backupPairCell(veeamEntry, vmTotal, now, { refreshError });
+  const v = pair ? pair.text.split('/')[0] : '—';
+  const bN = bareosRow && bareosRow.counts && Number.isFinite(bareosRow.counts.jobs) ? bareosRow.counts.jobs : null;
+  const b = bN == null ? '—' : String(bN);
+  if (!pair && bN == null) return null;
+  const veeamPara = pair ? pair.title.split('\n\n[스냅샷]')[0] : 'Veeam 서버와 연동되지 않았습니다 — 설정 › 백업 › Veeam 백업 서버에서 등록하면 Veeam 기준 수가 나옵니다.';
+  const bareosPara = !bareosAllowed ? 'Bareos 백업 현황 도구 권한이 없어 Bareos 수를 읽지 않았습니다.'
+    : bN == null ? 'Bareos: 이 법인의 Bareos 등록부를 아직 읽지 못했거나(Director 미등록 · 수집 전) 도구가 응답하지 않았습니다 — 0대가 아닙니다.'
+      : `Bareos: 잡이 등록된 VM ${bN}대(Bareos 백업 현황 › 법인 줄과 같은 수 · 성공 여부는 그 화면에서).`;
+  const vNum = pair && /^\d/.test(v) ? Number(v.replace('*', '')) : null;
+  return {
+    text: `${v}/${b}`, label: 'veeam/bareos', tone: pair ? pair.tone : 'none',
+    title: `veeam/bareos — Veeam 백업 대상 ${v} / Bareos 잡 등록 ${b}${Number.isFinite(vmTotal) ? ` (VM ${vmTotal}대 중)` : ''}\n\n${veeamPara.replace(/^veeam\/snapshot[^\n]*\n\n/, '')}\n\n${bareosPara}`,
+    sort: vNum == null && bN == null ? null : (vNum || 0) + (bN || 0),
+    ...(pair?.refreshFailed ? { refreshFailed: true } : {}),
+  };
+}
+
+/** 열린 vCenter 의 앞 · 뒤(상세 브레드크럼의 ‹ 이전 · 다음 ›) — 목록 순서 그대로. 없으면 null. */
+export function siblingsOf(sites, id) {
+  const list = Array.isArray(sites) ? sites : [];
+  const i = list.findIndex((s) => s && s.id === id);
+  if (i < 0) return { prev: null, next: null, index: -1, total: list.length };
+  return { prev: list[i - 1] || null, next: list[i + 1] || null, index: i, total: list.length };
+}
 
 /**
  * v2.732(점검 2회차 B2-01 후속, 그룹 i3): 위임(site) vCenter 의 담당 엣지 push 가 끊겨 값이 낡으면 서버는 status 를 엣지가 마지막으로 보낸
@@ -186,7 +224,7 @@ function Bar({ label, pct, detail, title }) {
   );
 }
 
-export default function VCenters({ onSelectSite, resetSignal }) {
+export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {}, summary = null }) {
   const { data, error, loading } = usePolling('/vcenters', {}, 15_000);
   // v2.895: 연 vCenter 는 주소에서 읽는다(#/vcenters/<id> — 새로고침 · 공유 · 뒤로 가기). 열고 닫기는 주소를 바꾸고, hashchange 가 상태를 맞춘다.
   const [openId, setOpenIdState] = useState(() => parseVcRoute(currentHash()).vcId);
@@ -203,9 +241,15 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   const backupBy = backupP.data?.byVc || null;
   // v2.763(V5-I1): 받은 값이 있는데 최근 갱신이 실패했다 — 칸은 그리되 '최근 갱신 실패' 표지(backupCell refreshError).
   const backupRefreshErr = backupP.data && backupP.error ? String(backupP.error) : '';
-  // 빠른 찾기(특수 기능의 '메뉴 빠른 찾기'와 동일 UX) — 훅은 조기 return 위에 선언(React #310).
-  const [query, setQuery] = useState('');
-  useSearchHandoff('vcenters', setQuery); // v2.909: ⌘K 검색의 ‘모두 보기’ 검색어
+  // v2.915: 찾기 칸은 App 의 공용 범위 바(세 탭 공용 — ⌘K '모두 보기' 검색어도 App 이 그 칸에 넣는다). 여기서는 받은 값으로만 거른다.
+  const query = String(scope?.q || '');
+  // v2.915 카드 | 표 보기(브라우저 기억) · Bareos 수(도구 권한이 있을 때만 · 상세를 연 동안은 멈춘다) — 훅은 조기 return 위에(React #310).
+  const [vcView, setVcViewState] = useState(() => loadVcView(lsSafe()));
+  const setVcView = (v) => { setVcViewState(v); saveVcView(lsSafe(), v); };
+  const bareosOk = toolAllowed('bareos-summary');
+  const bareosP = usePolling(openId || !bareosOk ? null : '/tools/bareos-summary', {}, 60_000);
+  const bareosBy = useMemo(() => new Map((Array.isArray(bareosP.data?.rows) ? bareosP.data.rows : []).map((r) => [r.id, r])), [bareosP.data]);
+  const byVc = useMemo(() => new Map((Array.isArray(summary?.byVc) ? summary.byVc : []).map((r) => [r.id, r])), [summary]);
   // 상단메뉴 Platform 재클릭(resetSignal 증가) 시 vCenter 상세 드릴다운을 닫고 전체 목록으로 복귀.
   // v2.895: 첫 렌더(주소로 바로 연 상세)에는 닫지 않는다 — 신호가 실제로 바뀐 뒤에만.
   const resetSeen = useRef(resetSignal);
@@ -215,33 +259,26 @@ export default function VCenters({ onSelectSite, resetSignal }) {
     setOpenIdState(null);
     goHash('#/vcenters');
   }, [resetSignal]);
-  const cardRefs = useRef({}); // vCenter id → 카드 DOM(바로가기 스크롤/반짝용)
-  // 바로가기 버튼 클릭: 해당 카드로 스크롤 이동 + 반짝 하이라이트.
-  const gotoCard = (id) => {
-    const el = cardRefs.current[id];
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el.classList.remove('flash');
-    void el.offsetWidth; // 리플로우로 애니메이션 재시작 보장
-    el.classList.add('flash');
-    // 제거 타이머는 CSS 애니메이션(vcFlash 3s)보다 살짝 길게 — 먼저 지우면 반짝임이 잘린다.
-    setTimeout(() => el.classList.remove('flash'), 3200);
-  };
+  const cardRefs = useRef({}); // vCenter id → 카드 DOM(v2.915: 바로가기 칩은 허브 범위를 바꾸므로 카드 스크롤 · 반짝(gotoCard)은 뺐다 — 고른 법인 카드만 남는다)
   if (loading && !data) return <Loading />;
   // 데이터 보유 중 일시 폴링 오류로 전체 화면을 갈아치우지 않는다(고RTT 깜빡임 방지).
   if (error && !data) return <ErrorBox message={error} />;
 
   const sites = data || [];
   const openSite = sites.find((s) => s.id === openId);
-  if (openSite) return <Suspense fallback={<Loading />}><VCenterDetail site={openSite} onBack={() => setOpenId(null)} /></Suspense>;
+  // v2.915: 상세에 ‹ 이전 · 다음 › vCenter(목록 순서) — 브레드크럼 줄에서 법인을 옮겨 다닌다(시안 ⑤)
+  if (openSite) return <Suspense fallback={<Loading />}><VCenterDetail site={openSite} onBack={() => setOpenId(null)} siblings={siblingsOf(sites, openId)} onOpen={(id) => setOpenId(id)} /></Suspense>;
+  // v2.915 허브 범위(리전 · vCenter)로 먼저 거른다 — 세 탭이 같은 범위를 쓴다. 검색은 그 다음.
+  const regSel = String(scope?.region || ''); const vcSel = String(scope?.vcenterId || '');
+  const inScope = sites.filter((s) => (!vcSel || s.id === vcSel) && (!regSel || s.location?.region === regSel));
   // 공백 구분 다중 키워드 AND — 이름·id·도시·국가·리전·버전에서 검색(허브 검색과 같은 규칙).
   const keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = keywords.length === 0 ? sites : sites.filter((s) => {
+  const shown = keywords.length === 0 ? inScope : inScope.filter((s) => {
     const hay = [s.name, s.id, s.location?.city, s.location?.country, s.location?.region, s.version]
       .filter(Boolean).join(' ').toLowerCase();
     return keywords.every((kw) => hay.includes(kw));
   });
-  const countMeta = vcCountMeta(sites); // v2.732(그룹 i3): 연결됨 수 + 그중 낡은 값
+  // v2.732(그룹 i3) vcCountMeta(연결됨 수 + 낡은 값)는 v2.915 부터 허브의 엔티티 탭이 서버 요약으로 말한다(이 파일의 export 는 테스트 · 다른 화면이 쓴다).
   // 다빈치/IRS 분류(사용자 요구): vCenter 이름에 'IRS'(단어, 대소문자 무시 — 예: AZ-IRS·GM1-IRS)가
   // 들어가면 IRS, 나머지(AZ·GM1 등)는 다빈치. 하이픈은 단어 경계라 '-IRS' 접미가 매칭된다.
   // VM(v2.323)·호스트(v2.324) 두 KPI 가 같은 규칙을 쓴다.
@@ -253,45 +290,34 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   // v2.778.1(사용자 결정 '알람 카드를 바꾼다'): 상단 '활성 알람' 자리에 VM 백업 — 전체 VM · Veeam 기준 · 스냅샷 기준(vCenter 카드와 같은 값의 합).
   //   알람 수는 vCenter 카드·알람 화면·상태바에 남는다.
   const bt = backupTotals(backupBy, sites.map((s) => s.id));
-  const btUnknown = bt ? [bt.veeamUnknown ? `Veeam 확인 불가 ${bt.veeamUnknown}곳` : '', bt.snapUnknown ? `스냅샷 확인 불가 ${bt.snapUnknown}곳` : ''].filter(Boolean).join(' · ') : '';
+  const btUnknown = bt ? [bt.veeamUnknown ? `Veeam 확인 불가 ${bt.veeamUnknown}곳` : ''].filter(Boolean).join(' · ') : '';
+  // v2.915 Bareos 합(도구 응답의 totals.jobs — 등록부를 못 읽은 법인이 있으면 partial) · 카드 · 표의 백업 칸 글자 하나(backupVbCell)
+  const bTot = bareosP.data?.totals || null;
+  const bareosSum = bTot && Number.isFinite(bTot.jobs) ? bTot.jobs : null;
+  const backupTextOf = (s) => backupVbCell(backupBy?.[s.id], bareosBy.get(s.id) || null, Number.isFinite(s.metrics?.vms) ? s.metrics.vms : null, Date.now(), { refreshError: backupRefreshErr, bareosAllowed: bareosOk });
+  // 허브 탭 줄: 카드 | 표 ‖ vCenter 성격의 특수 기능(권한 없는 도구는 숨김 — 도구 키 그대로)
+  const vcTools = toolsFor(VC_TOOLS);
 
   return (
     <>
       {error && <div className="card" style={{ marginBottom: 8, padding: '8px 12px', color: 'var(--red)', fontSize: 12 }}>일시적 갱신 오류: {String(error.message || error)} — 직전 데이터를 표시 중입니다.</div>}
-      <div className="kpis" style={{ marginBottom: 18 }}>
-        <div className="card kpi"><div className="label">전체 vCenter</div><div className="value">{sites.length}</div><div className="meta" title={countMeta.title}>{countMeta.text}</div></div>
-        <div className="card kpi"><div className="label">전체 호스트</div><div className="value">{num(tot.hosts)}</div><div className="meta">다빈치 {num(tot.davinciHosts)}개 · IRS {num(tot.irsHosts)}개</div>{tot.note && <div className="meta" data-partial-note="" title={PARTIAL_TITLE}>{tot.note}</div>}</div>
-        <div className="card kpi"><div className="label">전체 VM</div><div className="value">{num(tot.vms)}</div><div className="meta">다빈치 {num(tot.davinciVms)}개 · IRS {num(tot.irsVms)}개</div>{tot.note && <div className="meta" data-partial-note="" title={PARTIAL_TITLE}>{tot.note}</div>}</div>
+      {/* v2.915: 전체 vCenter · 호스트 · VM 카드 3장은 허브의 엔티티 탭이 대신한다 — 남은 KPI(백업 · 추이)만. 카드 폭이 넓어져 글자 축소 규칙은 그대로 둔다. */}
+      <HubTabs label="vCenter 보기 · 도구" active={vcView} tools={vcTools}
+        views={VC_VIEWS.map(([k, label]) => ({ k, label: k === 'table' ? `${label} · 법인별 비교` : label, onClick: () => setVcView(k) }))} />
+      <div className="kpis kpis-1row ph-kpis" style={{ margin: '12px 0 18px' }}>
         <div className="card kpi" data-kpi-backup=""
-          title={'VM 백업 — veeam/snapshot\nVeeam: 연동된 Veeam 서버가 백업 대상으로 가진 VM 수(vCenter 카드의 앞 수 합)\n스냅샷: vCenter 스냅샷·이벤트로 Veeam 백업 흔적이 보인 VM 수(뒤 수 합 — 백업 성공 여부는 모름)\n못 읽은 vCenter 는 0 으로 더하지 않고 따로 셉니다' + (bt?.partial ? '\n* 일부만 읽은 vCenter 가 있어 실제보다 적을 수 있습니다' : '')}>
-          <div className="label">VM 백업 (veeam/snapshot)</div>
+          title={'VM 백업 — veeam/bareos\nVeeam: 연동된 Veeam 서버가 백업 대상으로 가진 VM 수(vCenter 카드의 앞 수 합)\nBareos: 각 법인 Bareos 에 잡이 등록된 VM 수(Bareos 백업 현황의 법인 줄 합 — 도구 권한이 있을 때만)\n못 읽은 vCenter 는 0 으로 더하지 않고 따로 셉니다' + (bt?.partial || bTot?.partial?.jobs ? '\n* 일부만 읽은 vCenter 가 있어 실제보다 적을 수 있습니다' : '')}>
+          <div className="label">VM 백업 (Veeam / Bareos)</div>
           {(() => {
-            const t = bt ? `${num(bt.veeam)}/${num(bt.snap)}${bt.partial ? '*' : ''}` : '—';
-            // 실서버 규모(VM 5천+)면 '3,200/1,500' 처럼 길어진다 — 카드 폭(1440px 에서 약 150px)을 넘지 않게 글자를 줄인다
+            const t = `${bt ? `${num(bt.veeam)}${bt.partial ? '*' : ''}` : '—'}/${bareosSum == null ? '—' : `${num(bareosSum)}${bTot?.partial?.jobs ? '*' : ''}`}`;
+            // 실서버 규모(VM 5천+)면 '3,200/1,500' 처럼 길어진다 — 카드 폭을 넘지 않게 글자를 줄인다
             return <div className="value" style={{ color: 'var(--green)', whiteSpace: 'nowrap', ...(t.length > 9 ? { fontSize: t.length > 11 ? 18 : 22 } : {}) }}>{t}</div>;
           })()}
-          <div className="meta">전체 VM {num(tot.vms)} · Veeam {bt ? num(bt.veeam) : '—'} · 스냅샷 {bt ? num(bt.snap) : '—'}</div>
+          <div className="meta">전체 VM {num(tot.vms)} · Veeam {bt ? num(bt.veeam) : '—'} · Bareos {bareosSum == null ? (bareosOk ? '—' : '권한 없음') : num(bareosSum)}</div>
           {btUnknown && <div className="meta" data-partial-note="">{btUnknown} 제외</div>}
         </div>
         <TrendKpis />
       </div>
-
-      {sites.length > 0 && (
-        <div className="vc-quicknav">
-          <span className="qn-label">⚡ 바로가기</span>
-          {shown.map((s) => {
-            const { dot, down } = vcQuickDot(s); // v2.853: GPU 할당 계층의 법인 칩과 같은 판정(vcCardText.js) — v2.583 #39 규칙 그대로
-            return (
-              <button key={s.id} className={`qn-btn${down ? ' down' : ''}`} title={`${s.name} 카드로 이동`} onClick={() => gotoCard(s.id)}>
-                <span className="qn-dot" style={{ background: dot }} />{s.id}
-              </button>
-            );
-          })}
-          {/* 빠른 찾기 — 바로가기 박스 우측에 배치. 무결과여도 박스가 남아야 입력을 지울 수 있다. */}
-          <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 240, minWidth: 170 }}
-            value={query} onChange={setQuery} placeholder="vCenter · VM 이름 찾기" />
-        </div>
-      )}
 
       <VmNameSearch term={vmSearchTerm(query)} sites={sites} />
 
@@ -305,7 +331,12 @@ export default function VCenters({ onSelectSite, resetSignal }) {
       {hostCapFootnote(hostCapTotal(shown)) && (
         <div className="muted" data-hostcap-note="" style={{ fontSize: 12, margin: '0 0 8px', whiteSpace: 'normal', lineHeight: 1.6 }}>ⓘ {hostCapFootnote(hostCapTotal(shown))}</div>
       )}
-      <div className="vc-grid">
+      {vcView === 'table' && (
+        <Suspense fallback={<Loading />}>
+          <VcTable sites={shown} byVc={byVc} backupText={backupTextOf} onOpen={(id) => setOpenId(id)} onGoHosts={(id) => onSelectSite && onSelectSite(id)} onGoVms={(id) => onGoVms && onGoVms(id)} />
+        </Suspense>
+      )}
+      <div className="vc-grid" style={vcView === 'table' ? { display: 'none' } : undefined}>
         {shown.map((s) => {
           const m = s.metrics || {};
           const cs = vcCardState(s); // v2.583 #39: 상태별 본문(대기·점검·비활성·연결 실패를 나눈다)
@@ -334,13 +365,14 @@ export default function VCenters({ onSelectSite, resetSignal }) {
               ) : (
                 <>
                   <div className="vc-counts">
-                    <div className="vc-count"><b>{m.hosts}</b><span>호스트</span></div>
-                    <div className="vc-count"><b>{m.vms}</b><span>VM ({m.vmsPoweredOn} on)</span></div>
+                    {/* v2.915: 숫자를 누르면 허브 범위를 이 법인으로 두고 호스트 · VM 탭으로(카드 클릭(상세)과 겹치지 않게 전파를 막는다) */}
+                    <button type="button" className="vc-count vc-count-go" title="호스트 탭을 이 법인 범위로" onClick={(e) => { e.stopPropagation(); if (onSelectSite) onSelectSite(s.id); }}><b>{m.hosts}</b><span>호스트 →</span></button>
+                    <button type="button" className="vc-count vc-count-go" title="VM 탭을 이 법인 범위로" onClick={(e) => { e.stopPropagation(); if (onGoVms) onGoVms(s.id); }}><b>{m.vms}</b><span>VM ({m.vmsPoweredOn} on) →</span></button>
                     {alarmsUnknown(s)
                       ? <div className="vc-count" title="REST 폴백 수집 — 경보를 조회하지 않았습니다(0건이 아닙니다)"><b style={{ color: 'var(--text-dim)' }}>—</b><span>알람(미조회)</span></div>
                       : <div className="vc-count"><b style={{ color: m.alarmsCritical ? 'var(--red)' : m.alarmsWarning ? 'var(--amber)' : 'var(--green)' }}>{(m.alarmsCritical || 0) + (m.alarmsWarning || 0)}</b><span>알람</span></div>}
                     {(() => {
-                      const bk = backupPairCell(backupBy?.[s.id], Number.isFinite(m.vms) ? m.vms : null, Date.now(), { refreshError: backupRefreshErr });   // v2.778.1: veeam/snapshot
+                      const bk = backupTextOf(s);   // v2.915: veeam/bareos(스냅샷 제외) — Veeam 수는 v2.778.1 판정 그대로
                       return bk && <div className={`vc-count vc-bk ${bk.tone}`} data-backup={bk.tone} title={bk.title}><b>{bk.text}</b><span>{bk.label}</span></div>;
                     })()}
                   </div>

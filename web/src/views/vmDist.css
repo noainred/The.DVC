@@ -258,3 +258,7 @@
   .vmd .vmd-bin-fill,
   .vmd .vmd-seg-i { transition: none; }
 }
+
+/* v2.915 가상화 플랫폼 — 이름은 개체 보기 링크, 드로어는 옆의 '빠른 확인'(작은 글자 버튼). 1440 표 폭을 늘리지 않게 한 줄에 둔다. */
+.vmd .vmd-name .vmd-quick { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; font: inherit; font-size: 10.5px; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
+.vmd .vmd-name .vmd-quick:hover { color: var(--text); border-color: var(--accent); }

@@ -279,7 +279,8 @@ function TrendView({ vcenterId, clusters = [], hosts = [] }) {
   );
 }
 
-export default function VCenterDetail({ site, onBack }) {
+// v2.915(가상화 플랫폼 · 시안 ⑤): '← 목록' 대신 브레드크럼(가상화 플랫폼 › vCenter › 이름) + ‹ 이전 · 다음 › vCenter(siblings — 목록 순서 · onOpen). 주소 · 탭 · 기억은 그대로.
+export default function VCenterDetail({ site, onBack, siblings = null, onOpen = null }) {
   const vcenterId = site.id;
   // 상단 KPI 미니 스파크라인용 24시간 추이(v2.377). ⚠ 훅은 컴포넌트 최상단에서 선언한다 —
   // 조기 return 뒤에 두면 렌더 간 훅 개수가 달라져 React #310 으로 화면이 크래시한다
@@ -555,9 +556,21 @@ export default function VCenterDetail({ site, onBack }) {
 
   return (
     <div className="vcd">
+      <nav className="vcd-crumb" aria-label="경로" style={{ marginBottom: 8, fontSize: 12.5, gap: 8 }}>
+        <a href="#/vcenters" onClick={(e) => { e.preventDefault(); onBack(); }} style={{ color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'none' }}>가상화 플랫폼</a>
+        <span aria-hidden="true">›</span>
+        <a href="#/vcenters" onClick={(e) => { e.preventDefault(); onBack(); }} style={{ color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'none' }}>vCenter</a>
+        <span aria-hidden="true">›</span><b>{site.name}</b>
+        {siblings && onOpen && (siblings.prev || siblings.next) && (
+          <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {siblings.prev && <button type="button" className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => onOpen(siblings.prev.id)} title="이전 vCenter(목록 순서)">‹ {siblings.prev.name}</button>}
+            <span className="muted tabular" style={{ fontSize: 11.5 }}>{siblings.index + 1} / {siblings.total}</span>
+            {siblings.next && <button type="button" className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => onOpen(siblings.next.id)} title="다음 vCenter(목록 순서)">{siblings.next.name} ›</button>}
+          </span>
+        )}
+      </nav>
       <div className="flex between wrap" style={{ marginBottom: 12, alignItems: 'center' }}>
         <div className="flex gap" style={{ alignItems: 'center' }}>
-          <button className="tab" onClick={onBack}>← 목록</button>
           <div>
             <div className="section-title" style={{ margin: 0 }}>🗄️ {site.name}</div>
             <div className="muted" style={{ fontSize: 12 }}>{site.location?.city}, {site.location?.country} · v{site.version || '—'} · {vcenterId}</div>

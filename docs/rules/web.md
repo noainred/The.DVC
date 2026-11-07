@@ -691,3 +691,22 @@
      받는 쪽은 `useSearchHandoff`(검색 칸) · `useFocusHandoff`(상세) — **items 는 받기 전 undefined/null** 로 줄 것(빈 배열이면 '받았는데 없음' 으로 읽고 고른 장비를 잊는다 — PDU 실측).
      상세 여는 함수가 조기 return 아래에 있으면 ref 로 늦게 묶는다(SanSwitchTool `openDetailRef` — TDZ 를 만들지 않게).
   ② 단축키 글자는 `headerText.js cmdkLabel · modKeyLabel`(Mac ⌘ · 그 밖 Ctrl) — 화면에 ⌘ 를 박지 않는다.
+- **v2.915 — '서버 › 가상화 플랫폼' 허브(가상화 서버 · ESXi 호스트 · vCenter 세 메뉴 → 하나 · 사용자 요청 2026-11-07 · 설계 `docs/design/virt-platform-menu/README.md` 시안 A · 컨펌 '이름 가상화 플랫폼 · 표준 검증')**.
+  ① **탭 id(vcenters · hosts · vms) · 해시 · 권한 id · 도구 키는 그대로** — 합친 것은 메뉴 층뿐이다. `topMenu.js` 항목 `{ tab:'vcenters', tabs:['hosts','vms'], also:[도구 16] }` · `tabsOf(item)` 이 항목의 탭 전부 ·
+     `locate` 는 tabs 도 그 항목으로 · `visibleMenu` 는 **하나라도 허용이면** 보이고 처음 여는 탭은 허용된 것 중 첫째(`entryTab` — `hashOf` 가 읽는다). 권한 판정은 바뀌지 않는다(App `isAllowed` 그대로).
+  ② **저장 메뉴 별칭**(`sidebar/sideMenu.js itemAliases` — `tab:hosts` · `tab:vms` → 가상화 플랫폼 항목): 서버는 주소만 저장하고 탭 실재를 모르므로 별칭이 없으면 옛 항목이 `unknown` 으로 조용히 사라진다.
+     별칭 키는 `missingDefaults`('다시 넣기') 후보가 아니다. 그룹 별칭(`LEGACY_GROUP_LABELS`)과 별개 — 항목 별칭은 이것이 처음.
+  ③ **허브 셸은 App 이 세 탭 위에 그린다**(`views/platform/PlatformHub.jsx` — 제목 · 엔티티 탭 3 · 바로가기 칩). 상세 · 개체 보기(`#/vcenters/<id>…`)로 내려가면 허브 · 범위 바를 그리지 않는다(브레드크럼이 대신 — `vcDrill`).
+     숫자는 서버 `/platform/summary` 하나(`inventory/platformSummary.js` · memoJson 30초 · 범위 · 권한 · 설정 개정이 캐시 키) — 탭 배지를 위해 `/hosts/checks` 같은 무거운 집계를 다시 부르지 않는다.
+     응답 전 · 첫 수집 중 · 권한 없음은 **'—'**(0 금지 · `platformText.entityTabs`). 호스트 확인 대상 판정은 웹 `hostTriage.hostReasons` 와 같은 세 규칙(서버 `hostReasonKinds` — `platformHub2915.test.js` ① 이 같은 입력으로 대조).
+  ④ **범위(리전 · vCenter · 검색)는 세 탭이 한 칸(`PLATFORM_SCOPE_KEY`)으로 공유**하고 탭 고유 조건(상태 · 전원 · 메모 · IPMS · 호스트)은 그 탭 칸에 남는다(`patchFilter` 가 키를 나눈다). vCenter 탭도 범위 바를 쓴다(`noFilterTabs` 에서 뺐다 — 카드를 범위로 거른다).
+     공용 바 문구는 `platformText.SCOPE_SEARCH_PLACEHOLDER · SCOPE_NOTE` 하나. ⌘K 인계 target 에 'vcenters' 가 들어갔다(`INV_FILTER_TABS`).
+  ⑤ **탭 줄은 하나**(`views/platform/HubTabs.jsx` — v2.909 `VmHubTabs` 를 일반화 · 모양 `.vmh-tabs` 그대로): 이 화면 안의 보기 ‖ 그 탭 성격의 특수 기능(권한 없는 도구 숨김) ‖ 오른쪽 = 탭 고유 조건. 도구 목록은 `platformText.VC_TOOLS · HOST_TOOLS`(VM 6 은 `vmHubText.HUB_TOOLS`).
+     도구 라벨 줄 여백은 10px(`.vmh-tab.tool`) — 1440 에서 도구 6 + 조건이 한 줄에 들어가게(글자는 '메모' · 'IPMS' 로 짧게 — 뜻은 title).
+  ⑥ **상세 한 규칙**: 호스트 표 · VM 표의 이름 = 개체 보기(`vcHash(vc, {type,id})` — 브레드크럼). 전체 페이지 상세(`#/hosts/<id>`)는 개체 보기 안 버튼, VM 드로어는 이름 옆 '빠른 확인'(`VmNameCell href`). 주소는 전부 그대로 산다.
+     브레드크럼은 `가상화 플랫폼 › vCenter › <vCenter> › …`(`VCenterDetail` · `ObjectShell`) + ‹ 이전 · 다음 › vCenter(`VCenters.siblingsOf` — 목록 순서).
+  ⑦ **교차 링크**: vCenter 카드 · 표의 호스트 · VM 수 → 허브 범위를 그 법인으로 + 탭 이동(`onSelectSite` — v2.914 까지 선언만 되고 호출되지 않던 prop · `onGoVms`) · 호스트 표 VM 수 → VM 탭 `?host=`(App `vmHost`) · VM 표 호스트 → 호스트 탭 이름 일치(`nameFocus`). 칩으로 해제 · '필터 초기화' 가 함께 지운다.
+  ⑧ **백업 칸은 Veeam / Bareos**(사용자 지시 — 스냅샷 제외): Veeam 수는 v2.778.1 `backupPairCell` 의 앞 수 그대로, Bareos 는 `/tools/bareos-summary` 법인 줄 `counts.jobs`(도구 권한이 있을 때만 · 못 읽으면 '—') — `VCenters.backupVbCell`. 호스트 표 '백업' 열은 Veeam 뿐(Bareos 호스트별 수는 수집 없음 — 2차).
+  ⑨ vCenter 탭 보기는 **카드 | 표**(`platform/VcTable.jsx` — 법인별 비교 · `/vcenters` + 허브 요약만 · 새 집계 없음 · localStorage `platform.vcView`). '트리' 보기와 호스트 · VM 탭 '법인별' 흡수는 2차(README §4.0-12·13).
+     마지막 본 탭은 `platform.tab`, 바로가기 접힘은 `platform.chips`(전부 try/catch). 400px: 엔티티 탭 3칸 한 줄(수 + 이름 + 배지 — `.ph-tab .parts` 숨김 · 열린 탭의 분해는 아래 한 줄) · KPI 한 줄(`kpis-1row`)은 720 미만에서 세로로(추이 스파크 130px 가 넘쳤다 — Chromium 실측 8px).
+  ⑩ 기능 사용 현황(`featureUsageText.js menuIndex`)은 `tabs` 도 같은 자리로 센다(`tab:vms` 키 그대로 · 이름 '가상화 플랫폼 › 가상화 서버 · VM').

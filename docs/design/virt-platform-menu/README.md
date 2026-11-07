@@ -1,6 +1,6 @@
 # 설계: 서버 › 가상화 플랫폼 — vCenter · ESXi 호스트 · 가상화 서버 메뉴 3개 → 1개
 
-작성 2026-11-07 (main 82d95f6 · v2.914.0 기준) · 상태 **시안 · 컨펌 대기**(규칙: 설계는 Fable + Claude Design 시안 → 컨펌 뒤 Opus 구현 — 2026-11-03 '기억해') ·
+작성 2026-11-07 (main 82d95f6 · v2.914.0 기준) · 상태 **시안 A 구현됨 — v2.915.0**(컨펌 2026-11-07 21:19 "시안 A 로 구현해, 이름은 가상화 플랫폼, 표준 검증" · 구현 §8 · 규칙 `docs/rules/web.md` v2.915 항목) ·
 시안 캔버스: https://claude.ai/artifact/EgdqZtuep5B8GLEFZk8gSG (아트보드 9장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스 · HTML 프로토타입이지 복사 대상이 아님).
 **법인 · vCenter · 호스트 · VM 이름과 수치는 전부 가상**이고(규모만 운영값 28 vCenter · 658 호스트 · 5,850 VM 에 맞춤) 색 · 글자 · 사이드바 · 상단 바 · 상태바는
 `web/src/styles.css` `:root` 토큰과 목 서버 Chromium 캡처(2026-11-07 19:37~19:39 KST · `#/vcenters` · `#/hosts` · `#/vms` · 상세 · 400px)를 따랐다. 계정에 'Design System' 아티팩트가 없어 쓰지 않았다.
@@ -134,3 +134,22 @@
 - 미확인: ControlUp/Runecast 출처 0건(기억 바탕 — 근거로 쓰지 않음) · Nutanix 메뉴 라벨은 릴리스별 차이 있음(조사 결과대로 적음) · '새 API 없음' · vCenter 별 Bareos 수 부재는 추정.
 - 캔버스는 타입 규약대로 **브라우저 렌더 검증을 하지 않았다**(사용자가 요청하면 Chromium 으로 본다). 포탈 코드는 바꾸지 않았다 — 릴리스 없음.
 - 정정: 진행 메시지 하나에 시각을 확인하지 않고 '[19:52]' 라고 적었다(실제 19:44경). 이후 메시지는 `TZ=Asia/Seoul date` 값으로 적었다.
+
+## 8. 구현(v2.915.0 — 2026-11-07 21:23~ · 컨펌 "시안 A 로 구현해, 이름은 가상화 플랫폼, 표준 검증")
+
+실행 모델은 Fable(메인 — 컨펌이 같은 세션에서 바로 왔다). 규칙은 `docs/rules/web.md` v2.915 항목(①~⑩)에 적었고 여기는 시안 대비 결정 · 미룬 것만.
+
+| 시안 항목 | 구현 | 비고 |
+|---|---|---|
+| 메뉴 3 → 1 · 탭 id 유지 | `topMenu.js` 항목 `virt`(`tab:'vcenters'`, `tabs:['hosts','vms']`, `also` 16) · `tabsOf` · `visibleMenu` entryTab · `sideMenu.js itemAliases` | 테스트 8파일 기대값 갱신 + `platformHub2915.test.js` ④ |
+| 엔티티 탭 3 · 배지 · 칩 숫자 | 서버 `GET /platform/summary`(`inventory/platformSummary.js`) · `PlatformHub.jsx` · `platformText.js` | 호스트 판정은 웹 `hostTriage` 와 대조 테스트(①) · REST 폴백 알람은 '모름' |
+| 공용 범위 바 | App `PLATFORM_SCOPE_KEY`(리전 · vCenter · 검색 공유) · 탭 고유 조건은 탭 줄 오른쪽(`HubTabs right`) | vCenter 탭에도 범위 바(카드 · 표를 범위로 거른다) |
+| 도구 줄 ‖ | `HubTabs.jsx`(VmHubTabs 일반화) · `VC_TOOLS` 6 · `HOST_TOOLS` 4 | 도구 패널(`SpecialTools`)에 허브 줄을 얹는 것은 VM 6 만(v2.909 그대로) — vCenter · 호스트 도구 패널은 메뉴만 켜진다 |
+| 상세 한 규칙 · 브레드크럼 · 이전/다음 | `Hosts.jsx` 이름 → `vcHash` · `VmNameCell href` + '빠른 확인' · `VCenterDetail siblings` · `ObjectShell` 크럼 | VM 행 클릭 = 드로어 규약(v2.909)은 **이름 링크 + 빠른 확인** 으로 — 드로어는 남는다 |
+| 교차 링크 | 카드 · 표 호스트/VM 수 → 범위 + 탭 · 호스트 표 VM 수 → `?host=` · VM 표 호스트 → `nameFocus` | `selectSite` 죽은 prop 해소 |
+| 백업 Veeam / Bareos | `backupVbCell`(Veeam = v2.778.1 앞 수 · Bareos = `/tools/bareos-summary` `counts.jobs`) | 호스트 표 '백업' 열은 Veeam 뿐(2차) · VM '백업 없음' 신호는 안 함(2차 — 서버 신호 · Veeam per-VM 필요) |
+| vCenter 탭 표 보기(⑨) | `platform/VcTable.jsx`(카드 \| 표 전환 · `platform.vcView`) | '트리' 보기(⑦) · 법인별 두 벌 흡수(§4.0-12)는 **2차** |
+| 400px | 엔티티 탭 3칸 한 줄 · KPI 세로 | Chromium 실측에서 추이 스파크 8px 넘침 → `.ph-kpis` 미디어 규칙으로 잡음 |
+| 마지막 탭 · 접힘 기억 | `platform.tab` · `platform.chips`(localStorage) | 메뉴 클릭 = 마지막 본 탭(허용된 것만) · 처음은 vCenter |
+
+검증(표준): 관련 vitest(메뉴 · 사이드바 · 플랫폼 · 기능 사용 현황 · 감사 2741j) + 새 `platformText.test.js` · 서버 `platformHub2915.test.js`(순수 · 라우트 · 메뉴) · Chromium 1440/400(vCenter · 호스트 · VM 탭 · 상세 · 호스트 개체 · 클릭 4종 — 오류 0 · 가로 넘침 0) · 전량 verify 는 PR 전 1회.
