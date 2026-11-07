@@ -31,12 +31,13 @@ export default function BmShareButtons({ state, node, context, kind = 'view' }) 
     } catch (e) { setMsg({ tone: 'bad', text: `캡처하지 못했습니다: ${e?.message || e}` }); }
     finally { setBusy(false); }
   }
+  // data-export-hide — 캡처 코어(reportExport)가 그림에서 빼는 표지: 버튼 자신(‘캡처하는 중…’)이 결과에 찍히지 않게(Chromium 판독 r2).
   return (
     <>
-      <button type="button" className="btn btn-sm bmp-touch" onClick={copy} title={SHARE_HONEST}>링크 복사</button>
-      <button type="button" className="btn btn-sm bmp-touch" disabled={busy} onClick={capture}>{busy ? '캡처하는 중…' : '캡처 PNG'}</button>
+      <button type="button" className="btn btn-sm bmp-touch" onClick={copy} title={SHARE_HONEST} data-export-hide="1">링크 복사</button>
+      <button type="button" className="btn btn-sm bmp-touch" disabled={busy} onClick={capture} data-export-hide="1">{busy ? '캡처하는 중…' : '캡처 PNG'}</button>
       {msg && (
-        <span className="bmo-note" style={{ margin: 0, color: toneVar(msg.tone), flexBasis: '100%', minWidth: 0, overflowWrap: 'anywhere' }}>
+        <span className="bmo-note" data-export-hide="1" style={{ margin: 0, color: toneVar(msg.tone), flexBasis: '100%', minWidth: 0, overflowWrap: 'anywhere' }}>
           {msg.text}{msg.url && msg.tone !== 'ok' ? <input className="input" readOnly value={msg.url} onFocus={(e) => e.target.select()} style={{ width: '100%' }} aria-label="공유 링크" /> : null}
         </span>
       )}

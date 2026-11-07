@@ -22,7 +22,7 @@ import { isMockMode } from '../mock/demo/flags.js'; // v2.920 데모 성능 열(
 import { config, currentVersion } from '../config.js';
 import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive } from './settings.js';
 import { publicTarget } from './targets.js';
-import { currentTargets, bmUsageStatus, authStopsFor } from './poller.js';
+import { currentTargets, bmUsageStatus, authStopsFor, collectHealthNow } from './poller.js';
 import { latestUsage } from './db.js';
 import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from './perfView.js';
 import { hwFactsReader } from './hwFacts.js';
@@ -145,7 +145,6 @@ async function envelopeOps(now = Date.now()) {
   try { const A = await import('./perfAlerts.js'); out.perfAlertSent = (A.perfAlertStatus().sent || []).filter((r) => Number(r?.at) >= now - 86_400_000); } catch { /* */ }
   // 6단계 수집 건강 — 이 엣지가 매 주기 잰 값 + 주기 추이(7일 · 1시간 칸). 아직 주기가 없으면 싣지 않는다(지어내지 않는다 — 중앙은 ‘아직 주기 없음’).
   try {
-    const { collectHealthNow } = await import('./poller.js');
     const h = collectHealthNow();
     if (h) out.collectHealth = { ...h, trend: await collectTrend({ now }) };
   } catch { /* 그 필드만 빠진다 */ }

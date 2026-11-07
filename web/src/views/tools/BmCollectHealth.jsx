@@ -69,8 +69,8 @@ export function CollectHealthView({ resp, now = Date.now() }) {
         {cur && tp.ms ? (
           <>
             <svg className="bmcmp-ovsvg" style={{ height: 140 }} viewBox="0 0 1000 140" preserveAspectRatio="none" role="img" aria-label="주기 소요 추이">
-              {tp.budget && <path d={tp.budget} fill="none" stroke="var(--amber)" strokeDasharray="6 4" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />}
-              <path d={tp.ms} fill="none" stroke="var(--accent-2)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+              {tp.budget && <path d={tp.budget} fill="none" stroke="var(--amber)" strokeDasharray="6 4" strokeWidth="1.2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
+              <path d={tp.ms} fill="none" stroke="var(--accent-2)" strokeWidth="2.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             </svg>
             <div className="bmcmp-axis"><span>{trendRangeText(tp)}</span><span>최대 {msText(tp.yMax)}</span></div>
             <p className="bmo-note">실선 = 그 시간의 가장 긴 주기 · 점선 = 예산(주기). 기록은 그 노드 DB 에 30일 남습니다.</p>

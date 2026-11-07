@@ -24,7 +24,7 @@ import { freshMsFor } from '../../bmusage/useJudge.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { poolSettled } from '../../util/pool.js';
 import { config } from '../../config.js';
-import { resolvePerfTarget, bmAddressHosts } from './bmUsage.js';
+import { resolvePerfTarget, bmAddressHosts, demoPerfRows } from './bmUsage.js';
 
 const toolsPerm = requirePerm('tools');
 const adminOnly = requireRole('admin');
@@ -51,8 +51,9 @@ async function factsOf(found, D) {
   const s = loadBmUsageSettings();
   if (found.via === 'local') {
     const agent = config.agent?.name || '';
-    const row = (await D.latestUsage({ json: true }).catch(() => [])).find((r) => t(r.key) === found.realKey && t(r.agent) === agent) || null;
-    if (!row) return { entry: null, row: null, detail: null, tuning: null };
+    const row0 = (await D.latestUsage({ json: true }).catch(() => [])).find((r) => t(r.key) === found.realKey && t(r.agent) === agent) || null;
+    if (!row0) return { entry: null, row: null, detail: null, tuning: null };
+    const row = (await demoPerfRows([row0], found.tg?.targets || [found.target]))[0];   // 데모 대상만 겹침(상세 화면과 같은 판정)
     const hwOf = await D.hwFactsReader({ agent, freshMs: freshMsFor(s.intervalMs) }).catch(() => () => null);
     const entry = buildPerfEntry({ row, hw: hwOf(found.target) || null, th: s.perf, intervalMs: s.intervalMs, full: true });
     return { entry, row, detail: entry.detail || parseJsonCol(row.detail_json), tuning: entry.tuning || parseJsonCol(row.tuning_json) };

@@ -60,7 +60,8 @@ export function gbText(v) {
   if (x == null) return '—';
   const g = x / 1024 ** 3;
   if (g >= 1) return `${Math.round(g * 10) / 10}GB`;
-  return `${Math.round(x / 1024 ** 2)}MB`;
+  if (x >= 1024 ** 2) return `${Math.round(x / 1024 ** 2)}MB`;
+  return `${Math.round(x / 1024)}KB`;   // 1MB 아래를 ‘0MB’ 로 적지 않는다(Chromium 판독 r1)
 }
 /** ‘주기 소요 / 예산’ — 값이 없으면 ‘—’. */
 export function cycleText(ms, budgetMs) { return n(ms) == null ? '—' : `${msText(ms)} / ${msText(budgetMs)}`; }
@@ -82,14 +83,15 @@ export function trendPaths(points = [], { w = 1000, h = 140 } = {}) {
   const span = to > from ? to - from : 1;
   const yMax = Math.max(...pts.map((p) => Math.max(n(p.maxMs) ?? 0, n(p.budgetMs) ?? 0))) || 1;
   const path = (pick) => {
-    let d = ''; let pen = false;
+    let d = ''; let pen = false; let solo = false;
     for (const p of pts) {
       const v = n(p[pick]);
-      if (v == null) { pen = false; continue; }
-      const x = Math.round(((p.t - from) / span) * w * 10) / 10;
+      if (v == null) { if (solo) d += 'l0.01,0 '; pen = false; solo = false; continue; }
+      const x = pts.length === 1 ? w / 2 : Math.round(((p.t - from) / span) * w * 10) / 10;   // 칸이 하나뿐이면 가운데(가장자리에 반쯤 잘린 점이 되지 않게)
       const y = Math.round((h - (v / yMax) * h) * 10) / 10;
-      d += `${pen ? 'L' : 'M'}${x},${y} `; pen = true;
+      d += `${pen ? 'L' : 'M'}${x},${y} `; solo = !pen; pen = true;
     }
+    if (solo) d += 'l0.01,0 ';   // 홀로 남은 점(주기 기록 1개 등)도 보이게
     return d.trim();
   };
   return { ms: path('maxMs'), budget: path('budgetMs'), yMax, from, to };

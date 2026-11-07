@@ -45,7 +45,7 @@ import { capStr } from '../util/capStr.js'; // v2.744(RV2744F-WEB-03): 상주 �
 import { idracAuthStopFor as mainIdracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 import { withSlot, configureSlots, slotPeakReset } from './slots.js'; // v2.929(5단계): 전역 동시성 풀 — 집중 수집과 슬롯을 나눠 쓴다 · 6단계: 주기 최대 사용(수집 건강)
 import { summarizeCycle, dbFilesNow, collectCells } from './collectHealth.js'; // 6단계 수집 건강(메타 모니터링)
-import { focusActiveCount, registerFocusPollerHooks, focusHousekeeping, onFocusEnd, initFocus } from './focus/run.js'; // v2.929: 피크 창 예산에서 활성 집중 수만큼 동시성을 뺀다
+import { focusActiveCount, focusQueuedCount, registerFocusPollerHooks, focusHousekeeping, onFocusEnd, initFocus } from './focus/run.js'; // v2.929: 피크 창 예산에서 활성 집중 수만큼 동시성을 뺀다
 
 /*
  * v2.918(사용자 결정 2026-11-06 "동시성을 32개로 늘려줘"): 기본 4 → 32. 1,000대 법인에서 동시 4 · 서버당 ~5초면 한 주기에 약 21분이
@@ -776,7 +776,6 @@ let _healthSince = new Map();
 const HEALTH_SINCE_FROM = Date.now();
 async function recordCycleHealth({ results = [], t0, intervalMs, peakPlan = null, error = null } = {}) {
   try {
-    const { focusQueuedCount } = await import('./focus/run.js');
     const sum = summarizeCycle({ results, startedAt: t0, endedAt: Date.now(), intervalMs, concurrency: CONCURRENCY, slotPeak: slotPeakReset(),
       focus: { running: focusActiveCount(), queued: focusQueuedCount() }, peakPlan, sinceMap: _healthSince, error });
     _healthSince = sum.sinceMap;

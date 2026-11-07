@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **283개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **286개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-07)
@@ -56,7 +56,10 @@
 | `bareos-rehearsal.json` | 설정 | Bareos 복원 검증(리허설) 정책(v2.862 — 켜기 · 요일 · 시각 · 법인마다 대수 · 성공한 검증용 VM 지우기 · 법인별 데이터스토어. 비밀 없음) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
 | `bareos.json` | 설정 | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/settings.js |
 | `bm-perf-alert-state.json` | 설정 | 리눅스 성능 **알림 규칙**(v2.929 예정 · 5단계 · 설계 PROFILES §14 ① · 아트보드 Alerts). | ✅ | ✅ | ✅ | bmusage/perfAlerts.js |
+| `bm-perf-annotations.json` | 설정 | 리눅스 성능 6단계 **운영 주석**(설계 PROFILES §16 A · 아트보드 Annot) 저장소. | ✅ | ✅ | ✅ | bmusage/annotations.js |
+| `bm-perf-compare-sets.json` | 설정 | 리눅스 성능 6단계 **저장된 비교 세트**(사용자별 · 중앙 저장 · 설계 PROFILES §15 ‘저장된 세트(사용자별 · 서버 키 목록 · 범위 설정 포함)’). | ✅ | ✅ | ✅ | bmusage/compareSets.js |
 | `bm-perf-rules.json` | 설정 | 리눅스 성능 5단계(v2.929 예정) **알림 규칙 · 집중 모니터링 · 베이스라인 · 점검 소모품 · 변경 이벤트 · 구간 비교** 설정(설계 PROFILES §13·§14 · 아트보드 Aler | ✅ | ✅ | ✅ | bmusage/perfRules.js |
+| `bm-perf-slo.json` | 설정 | 리눅스 성능 6단계 **목표선(SLO)**(설계 PROFILES §16 D · 아트보드 Runbook ‘목표선’). | ✅ | ✅ | ✅ | bmusage/slo.js |
 | `bm-storage.json` | 설정 | 베어메탈 스토리지 서버 목록 + 설정(v2.340). | ✅ | ✅ | ✅ | bmstor/registry.js |
 | `bm-usage.db` | DB | 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |  | ✅ | ✅ | bmusage/db.js, bmusage/poller.js |
 | `bmstor-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bmstor/poller.js |

@@ -97,7 +97,8 @@ export function seriesStats(points = [], { from, to, stepMs, sparkMax = SPARK_MA
   const lastP = [...pts].reverse().find((p) => n(p.avg) != null || n(p.peak) != null) || null;
   const step = Math.max(1, n(stepMs) || RES_MS['5m']);
   const expected = from != null && to != null && to > from ? Math.max(1, Math.floor((to - from) / step)) : null;
-  const k = Math.max(1, Math.min(sparkMax, expected || sparkMax));
+  // 칸 수는 점 수를 넘지 않게(수집 주기가 칸보다 성기면 칸이 하나 걸러 비어 선이 점으로 끊긴다 — Chromium 판독 r1).
+  const k = Math.max(1, Math.min(sparkMax, expected || sparkMax, Math.max(2, pts.length)));
   const spark = [];
   if (from != null && to != null && to > from) {
     const w = (to - from) / k;

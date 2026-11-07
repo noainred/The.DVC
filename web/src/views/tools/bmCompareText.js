@@ -81,15 +81,16 @@ export function sparkPath(spark = [], { pick = 1, scale = 100, w = 100, h = 24, 
   const f = n(from) ?? n(pts[0][0]); const e = n(to) ?? n(pts.at(-1)[0]);
   const span = e > f ? e - f : 1;
   const ym = n(scale) && n(scale) > 0 ? n(scale) : 1;
-  let d = ''; let pen = false;
+  let d = ''; let pen = false; let solo = false;
   for (const p of pts) {
     const v = n(p[pick]);
-    if (v == null) { pen = false; continue; }
+    if (v == null) { if (solo) d += 'l0.01,0 '; pen = false; solo = false; continue; }
     const x = Math.round(((n(p[0]) - f) / span) * w * 10) / 10;
     const y = Math.round((h - (Math.max(0, Math.min(v, ym)) / ym) * h) * 10) / 10;
     d += `${pen ? 'L' : 'M'}${x},${y} `;
-    pen = true;
+    solo = !pen; pen = true;
   }
+  if (solo) d += 'l0.01,0 ';   // 홀로 남은 점은 점으로(둥근 끝 — 값이 있는데 안 보이면 거짓이다)
   return d.trim();
 }
 

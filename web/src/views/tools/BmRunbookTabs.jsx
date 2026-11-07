@@ -59,7 +59,7 @@ export function PlaybookView({ pb, catalog, sel, onSel }) {
       </div>
       {cur && cur.steps.map((s, i) => (
         <section key={i} className="bmo-card bmrb-step">
-          <div className="bmo-h"><span><b>{i + 1}</b> {STEP_KIND_TEXT[s.kind] || s.kind} — {s.title}</span>{!!s.sources?.length && <span className="bmo-sub">근거 {s.sources.join(' · ')}</span>}</div>
+          <div className="bmo-h"><span><b>{i + 1}</b> {STEP_KIND_TEXT[s.kind] || s.kind}{s.title && s.title !== STEP_KIND_TEXT[s.kind] ? ` — ${s.title}` : ''}</span>{!!s.sources?.length && <span className="bmo-sub">근거 {s.sources.join(' · ')}</span>}</div>
           {s.kind === 'portal' && (
             <div className="bmo-reads">
               {!!(s.metrics || []).length && <div>지금 값(수집 노드 판정 그대로): {(s.metrics || []).map((m) => `${SLO_METRIC_TEXT[m]?.label || m} ${valText(pb?.portal?.values?.[m], SLO_METRIC_TEXT[m]?.unit || '')}`).join(' · ')}</div>}

@@ -16,6 +16,7 @@ import Select from '../../components/Select.jsx';
 import { toneVar } from './toneVar.js';
 import { VerdictBadge } from './BmPerfBoard.jsx';
 import { fmtHm } from '../../components/vmperf/vmPerfText.js';
+import { shortStamp } from './bmOpsText.js';
 import {
   COMPARE_GROUP_TEXT, COMPARE_VIEW_TEXT, COMPARE_VIEWS, COMPARE_VALUE_TEXT, COMPARE_RANGES, columnStateView, metricLabel, metricUnit, cellPairText, cmpValText,
   colorPlan, sparkPath, corpsReadText, devText, COMPARE_TABLE_NOTE, COMPARE_HONEST, skewText, baselineCellText, focusStartSummary, compareCsv, compareCsvName,
@@ -43,8 +44,8 @@ function Spark({ spark, scale, from, to, stroke, valueMode = 'avgpeak', w = 120,
   if (!avg && !pk) return <span className="bmcmp-nospark">추이 없음</span>;
   return (
     <svg className="bmcmp-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden="true">
-      {avg && <path d={avg} fill="none" stroke="var(--text-faint)" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />}
-      {pk && <path d={pk} fill="none" stroke={stroke} strokeWidth="1.4" vectorEffect="non-scaling-stroke" />}
+      {avg && <path d={avg} fill="none" stroke="var(--text-faint)" strokeWidth="1.6" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
+      {pk && <path d={pk} fill="none" stroke={stroke} strokeWidth="1.6" strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
     </svg>
   );
 }
@@ -140,13 +141,13 @@ export function CompareOverlay({ resp, nameOf, colors, valueMode, metric, onMetr
           const pk = valueMode !== 'avg' ? sparkPath(s?.spark, { pick: 2, scale, w: W, h: H, from: resp.from, to: resp.to }) : '';
           return (
             <g key={c.key}>
-              {avg && <path d={avg} fill="none" stroke={st.stroke} strokeWidth="2" strokeDasharray={st.dash || undefined} vectorEffect="non-scaling-stroke" />}
-              {pk && <path d={pk} fill="none" stroke={st.stroke} strokeWidth="1.2" strokeDasharray="4 3" opacity="0.85" vectorEffect="non-scaling-stroke" />}
+              {avg && <path d={avg} fill="none" stroke={st.stroke} strokeWidth="2" strokeLinecap="round" strokeDasharray={st.dash || undefined} vectorEffect="non-scaling-stroke" />}
+              {pk && <path d={pk} fill="none" stroke={st.stroke} strokeWidth="1.2" strokeLinecap="round" strokeDasharray="4 3" opacity="0.85" vectorEffect="non-scaling-stroke" />}
             </g>
           );
         })}
       </svg>
-      <div className="bmcmp-axis"><span>{fmtHm(resp.from)}</span><span>{fmtHm(resp.to)}</span></div>
+      <div className="bmcmp-axis"><span>{span > 20 * 3_600_000 ? shortStamp(resp.from) : fmtHm(resp.from)}</span><span>{span > 20 * 3_600_000 ? shortStamp(resp.to) : fmtHm(resp.to)}</span></div>
       <div className="bmcmp-legend">
         {cols.map((c) => {
           const cell = (row.cells || []).find((x) => x.key === c.key);

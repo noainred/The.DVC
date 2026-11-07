@@ -44,7 +44,7 @@ export function AnnotTable({ list = [], onEdit, onDelete }) {
             <td data-sort={a.kind}>{ANNOT_KIND_SHORT[a.kind] || a.kind}</td>
             <td data-sort={a.text || ''} className="bmo-wrap">{a.deleted ? <i>삭제됨({a.deleted.by} · {annotWhenText({ at: a.deleted.at })})</i> : a.text}{!!a.edits?.length && !a.deleted && <div className="bmo-sub">수정 {a.edits.length}회 · 마지막 {a.edits.at(-1).by}</div>}</td>
             <td data-sort={annotTargetText(a)}>{TARGET_TYPE_TEXT[a.target?.type] || ''}<div className="bmo-sub">{annotTargetText(a)}</div></td>
-            <td data-sort={Object.keys(a.links || {}).length}>{annotLinks(a.links).map((l, i) => (l.href ? <div key={i}><a href={l.href}>{l.text}</a></div> : <div key={i} className="bmo-sub">{l.text}</div>))}{!annotLinks(a.links).length && '—'}</td>
+            <td data-sort={Object.keys(a.links || {}).length}>{annotLinks(a.links).map((l, i) => (l.href ? <div key={i}><a href={l.href} style={{ color: 'var(--accent-2)' }}>{l.text}</a></div> : <div key={i} className="bmo-sub">{l.text}</div>))}{!annotLinks(a.links).length && '—'}</td>
             <td data-sort={a.by}>{a.by}{a.auto ? <div className="bmo-sub">자동</div> : null}</td>
             <td data-nosort>{a.canEdit && <span className="bmcmp-btns"><button type="button" className="btn btn-sm bmp-touch" onClick={() => onEdit?.(a)}>고치기</button><button type="button" className="btn btn-sm bmp-touch" onClick={() => onDelete?.(a)}>지우기</button></span>}</td>
           </tr>

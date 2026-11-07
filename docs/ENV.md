@@ -637,7 +637,7 @@
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BMUSAGE_PULL_STALE_MS` | `30` |  | central/bmUsageEdgePull.js |
-| `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmPerfOpsPull.js, central/bmUsageEdgePull.js 외 1 |
+| `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmComparePull.js, central/bmPerfOpsPull.js 외 2 |
 | `CAPTURE_ACK_GRACE_MS` | `60000` |  | central/captureJobs.js |
 | `CENTRAL_AGENT_CONFIG_MAX_BYTES` | `32` |  | central/agentConfig.js |
 | `CENTRAL_AGENT_IDENTITY_MAX` |  |  | central/agentIdentity.js |

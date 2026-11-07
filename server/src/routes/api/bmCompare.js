@@ -29,7 +29,7 @@ import { freshMsFor } from '../../bmusage/useJudge.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { poolSettled } from '../../util/pool.js';
 import { config } from '../../config.js';
-import { resolvePerfTarget, bmAddressHosts } from './bmUsage.js';
+import { resolvePerfTarget, bmAddressHosts, demoPerfRows } from './bmUsage.js';
 import { depsOf as focusDepsOf, focusStartResolved } from './bmPerfOps.js';
 import * as M from '../../bmusage/multiCompare.js';
 
@@ -103,7 +103,8 @@ export async function bmCompareView(req, snap, deps = {}) {
   const corp = first ? t(first.found.target.vcenterId) : null;
   const s = loadBmUsageSettings();
   const agent = config.agent?.name || '';
-  const localRows = resolved.some((r) => r.found?.via === 'local') ? await D.latestUsage({ json: true }).catch(() => []) : [];
+  // 데모(mock) 대상은 상세 화면과 같은 겹침(demoPerfRows — mock 이 아니면 그대로) — 비교의 판정이 상세와 갈리지 않게.
+  const localRows = resolved.some((r) => r.found?.via === 'local') ? await demoPerfRows(await D.latestUsage({ json: true }).catch(() => []), (await D.currentTargets().catch(() => ({ targets: [] }))).targets || []) : [];
   const hwOf = resolved.some((r) => r.found?.via === 'local') ? await D.hwFactsReader({ agent, freshMs: freshMsFor(s.intervalMs) }).catch(() => () => null) : () => null;
   const minEdge = await D.minEdgeVersion().catch(() => null);
   const tg = await D.currentTargets().catch(() => ({ targets: [] }));

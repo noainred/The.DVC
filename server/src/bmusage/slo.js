@@ -161,7 +161,8 @@ export function evaluateGoal(goal, points = [], { from, to, stepMs, now = Date.n
   const p95 = goal.basis === 'p95' ? p95Of(vals.map((x) => x.v)) : null;
   const status = valid === 0 ? 'no-data' : (goal.basis === 'p95' ? (within(p95, goal.op, goal.value) ? 'met' : 'missed') : (achievementPct >= goal.objectivePct ? 'met' : 'missed'));
   return {
-    achievementPct, valid, expected, missing: Math.max(0, expected - valid), within: inCnt, violations: viol, violationMs: viol * step,
+    // 값이 하나도 없으면 위반도 모른다(0 시간이 아니다 — Chromium 판독 r1).
+    achievementPct, valid, expected, missing: Math.max(0, expected - valid), within: inCnt, violations: valid ? viol : null, violationMs: valid ? viol * step : null,
     longest: longest ? { from: longest.from, to: longest.to, cycles: longest.cycles } : null,
     daily: [...daily.values()].map((d) => ({ day: d.day, pct: d.n ? r1((d.in / d.n) * 100) : null })),
     status, p95: r1(p95), maintenance: { source: 'none', excluded: 0 },

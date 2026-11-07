@@ -13,11 +13,13 @@ import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
 import { stage6MinEdgeVersion } from './featureMinEdgeVersion.js';
+import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { SERIES_COLS } from '../bmusage/multiCompare.js';
 import { BASELINE_METRICS } from '../bmusage/perfRules.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
-const TIMEOUT_MS = Math.max(5_000, Number(process.env.BMUSAGE_PULL_TIMEOUT_MS) || 20_000);
+// 시한 env 는 [5초, 10분] 정규화(TIM2605-04 — agent/envTimeout.js). 같은 env 를 bmUsageEdgePull · bmPerfOpsPull 도 읽는다.
+const TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_PULL_TIMEOUT_MS, 20_000, { min: 5_000 });
 const SERIES = new Set(SERIES_COLS);
 const DEV_REASONS = new Set(['no-history', 'few-weeks', 'missing']);
 
@@ -56,7 +58,8 @@ export function sanitizeCompareSeries(b, now = Date.now()) {
 }
 /** 한 서버(엣지 위임)의 비교 계열 — 보관 없음. */
 export async function pullEdgeCompareSeries(agent, { key, metrics = [], from, to } = {}) {
-  const qs = new URLSearchParams({ key: capStr(String(key), 256), metrics: metrics.filter((c) => SERIES.has(c)).slice(0, 24).join(','), from: String(Math.floor(Number(from) || 0)), to: String(Math.floor(Number(to) || 0)) });
+  const ms = []; for (const c of metrics) { if (SERIES.has(c) && ms.length < 24) ms.push(c); }   // 지표 이름 화이트리스트 · 상한 24
+  const qs = new URLSearchParams({ key: capStr(String(key), 256), metrics: ms.join(','), from: String(Math.floor(Number(from) || 0)), to: String(Math.floor(Number(to) || 0)) });
   const r = await pullFromEdge(agent, `/api/collector/bm-usage/compare-series?${qs.toString()}`, {
     timeoutMs: TIMEOUT_MS, retries: 1, minVersion: stage6MinEdgeVersion(), what: '비교 계열을 읽을', label: '엣지 비교 계열 응답',
     missing401: true,   // 경로가 없는 구버전 엣지는 사용자 인증 미들웨어로 떨어져 401 — 토큰이 아니라 버전 문제다(5단계와 같은 판정)

@@ -209,8 +209,8 @@ function usageDetailPart(key, { admin = false, hosts = [] } = {}) {
   };
 }
 
-/** v2.920(반증 D2) — 데모(mock) 대상 최신값에 성능 열을 겹친다(응답 전용 · mock 이 아니면 그대로). */
-async function demoPerfRows(rows, targets) {
+/** v2.920(반증 D2) — 데모(mock) 대상 최신값에 성능 열을 겹친다(응답 전용 · mock 이 아니면 그대로). 6단계 라우트(비교 · 플레이북)도 같은 함수(판정이 화면마다 갈리지 않게). */
+export async function demoPerfRows(rows, targets) {
   if (!isMockMode()) return rows;
   return (await import('../../mock/demo/baremetal.js')).demoPerfLatestRows(rows, targets);
 }

@@ -46,7 +46,8 @@ export function sloSourceText(src) {
 }
 export function goalText(g = {}) {
   const m = SLO_METRIC_TEXT[g.metric] || { label: g.metric, unit: '' };
-  return `${m.label} ${SLO_BASIS_TEXT[g.basis] || g.basis} ${SLO_OP_TEXT[g.op] || g.op} ${valText(g.value, m.unit)} · 목표 ${n(g.objectivePct) ?? '—'}%`;
+  const o = n(g.objectivePct);
+  return `${m.label} ${SLO_BASIS_TEXT[g.basis] || g.basis} ${SLO_OP_TEXT[g.op] || g.op} ${valText(g.value, m.unit)} · 목표 ${o == null ? '—' : `${o}%`}`;
 }
 export function hoursText(ms) { const x = n(ms); if (x == null) return '—'; const h = x / 3_600_000; return h >= 24 ? `${Math.round((h / 24) * 10) / 10}일` : `${Math.round(h * 10) / 10}시간`; }
 export function longestText(l) { if (!l) return '—'; return `${shortStamp(l.from)} ~ ${fmtHm(l.to)} (${l.cycles}주기)`; }
