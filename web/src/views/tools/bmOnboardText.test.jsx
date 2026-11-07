@@ -51,4 +51,16 @@ describe('bmOnboardText', () => {
     for (const v of [...Object.values(T.MISS_REASON_TEXT), ...Object.values(T.BUCKET_TEXT)]) expect(v.includes('`')).toBe(false);
     expect(T.ymd(null)).toBe('—');
   });
+  it('7b r2 — bm-storage 인증 선택: 바뀌지 않으면 참조 칸을 보내지 않는다(서버가 묶음으로 보지 않게) · 떼기는 빈 값 · 키/계정 고르기', () => {
+    expect(T.authChoiceOf({ keyRef: 'k_1' })).toBe('key:k_1');
+    expect(T.authChoiceOf({ credRef: 'a_1' })).toBe('acc:a_1');
+    expect(T.authChoiceOf(null)).toBe('');
+    expect(T.authBodyOf('key:k_1', { keyRef: 'k_1' })).toEqual({});
+    expect(T.authBodyOf('', { keyRef: 'k_1' })).toEqual({ keyRef: '', credRef: '' });
+    expect(T.authBodyOf('acc:a_2', { keyRef: 'k_1' })).toEqual({ credRef: 'a_2', keyRef: '' });
+    expect(T.authBodyOf('', null)).toEqual({});
+    expect(T.HOSTKEY_OBSERVE_NOTE).toMatch(/observe/);
+    expect(T.BUCKET_ORDER).toContain('untracked');
+    expect(T.MISS_REASON_TEXT['registry-only']).toMatch(/성능 수집 대상이 아닙니다/);
+  });
 });
