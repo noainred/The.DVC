@@ -55,6 +55,8 @@ export const WARM_GC_HOLD_MS = envNum('SVCMON_EDGE_WARM_GC_HOLD_MS', 30 * 60_000
  */
 export const REGRESS_GC_HOLD_MS = envNum('SVCMON_EDGE_REGRESS_GC_HOLD_MS', 3 * 60_000);
 export const MAX_ROWS_PER_AGENT = envNum('SVCMON_EDGE_MAX_ROWS', 20000);
+/** v2.934: 한 스냅샷에서 기억하는 청크 번호 상한(행 상한 ÷ 최소 청크 250 = 80 보다 넉넉히). 넘으면 '다 받음' 으로 보지 않는다(보수 쪽). */
+const RECV_SEQS_MAX = 1000;
 /**
  * v2.932(점검 D1-03): 메타(대상·점검 이름·경로)가 아직 없는 행의 **알림 판정 보류 시한**(하한). 중앙 재시작 직후 엣지 첫 보고는 메타 없이 행만 오고
  *   (중앙이 needMeta 를 답한 다음 push 에 메타가 온다), 그 사이 판정하면 제목이 내부 테스트 ID · 경로가 빈 알림이 나갔다. 보류는 엣지 push 주기의
@@ -78,35 +80,96 @@ const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
 /**
  * v2.928(반증 재검토 N1 — 재현): 엣지 알림 키는 (경로 · 대상 이름 · 점검 이름)인데 **점검 이름은 유일하지 않다**(마법사 기본 이름 —
- *   TCP 22·443 둘 다 'TCP 포트 열림'). 같은 이름 키를 가진 메타가 둘 이상이면 그 행은 testId 키로 떨어뜨려야 한다 — 그 개수를 엣지별로 센다.
+ *   TCP 22·443 둘 다 'TCP 포트 열림'). 같은 이름 키를 가진 점검이 둘 이상이면 그 행은 testId 키로 떨어뜨려야 한다 — 엣지별로 센다(v2.934: 무엇을 세는지는 아래).
  */
 const nameKeyOfMeta = (m) => (m ? `${m.p}\u0001${m.n}\u0001${m.t}` : '');
+/*
+ * v2.934(v2.932 남긴 것 — 재현): 개수(nameCount)만 세면 재배정 직후 한 세대 동안 **GC 대기 중인 옛 id 행**(완결 GC 의 '직전 완결 허용'으로 남은 것)의
+ *   메타까지 세어 새 id 가 dupName → testId 키로 떨어졌고 이미 알린 같은 실패를 한 번 더 알렸다(키 `엣지·경로·대상·점검` 과 `엣지·#새id` 두 건).
+ *   그래서 이름 키마다 **id 를 기억하고**(대부분 하나라 문자열 하나, 둘 이상일 때만 Set — 행 2만 × 엣지 64 에서 Set 을 상주시키지 않게) 판정 때
+ *   '이번 창(nameWindowOf)에 실제로 보고된 행' 만 센다. metaSet/metaDelete 로만 고친다.
+ */
+function nameAdd(a, k, id) {
+  const cur = a.nameIds.get(k);
+  if (cur == null) a.nameIds.set(k, id);
+  else if (typeof cur === 'string') { if (cur !== id) a.nameIds.set(k, new Set([cur, id])); }
+  else cur.add(id);
+}
+function nameRemove(a, k, id) {
+  const cur = a.nameIds.get(k);
+  if (cur == null) return;
+  if (typeof cur === 'string') { if (cur === id) a.nameIds.delete(k); return; }
+  cur.delete(id);
+  if (cur.size === 1) a.nameIds.set(k, cur.values().next().value);
+  else if (!cur.size) a.nameIds.delete(k);
+}
 function metaSet(a, id, m) {
   const prev = a.meta.get(id);
-  if (prev) { const k = nameKeyOfMeta(prev); const c = (a.nameCount.get(k) || 0) - 1; if (c > 0) a.nameCount.set(k, c); else a.nameCount.delete(k); }
+  const k = nameKeyOfMeta(m);
+  if (prev) { const pk = nameKeyOfMeta(prev); if (pk !== k) nameRemove(a, pk, id); }
   a.meta.set(id, m);
-  const k = nameKeyOfMeta(m); a.nameCount.set(k, (a.nameCount.get(k) || 0) + 1);
+  nameAdd(a, k, id);
 }
 function metaDelete(a, id) {
   const prev = a.meta.get(id);
   if (!prev) return;
-  const k = nameKeyOfMeta(prev); const c = (a.nameCount.get(k) || 0) - 1;
-  if (c > 0) a.nameCount.set(k, c); else a.nameCount.delete(k);
+  nameRemove(a, nameKeyOfMeta(prev), id);
   a.meta.delete(id);
 }
-/** 알림 판정용 대상·점검 정보 — 이름 키가 겹치면 dupName(=testId 키로). 메타가 없으면 이름 없이(판정 보류). */
-function alertInfoOf(a, id) {
+/**
+ * v2.934: 이름 중복을 셀 때 '실제로 보고된 행' 으로 보는 스냅샷 창(snapId 집합).
+ *  - 이번 스냅샷을 **다 받았으면**(완결 청크 · 1..total 청크가 모두 도착 · 예열 아님) 이번 스냅샷만 — 엣지는 결과가 있는 행을 매번 전량 보내므로
+ *    여기 없는 행은 엣지에서 사라진(재배정 · 삭제) 점검이다. 완결 GC 가 '직전 완결 허용' 으로 남겨 둔 옛 id 행은 세지 않는다.
+ *  - 그 밖(완결 전 청크 · 청크 유실 · 예열 중)은 이번 + 직전 완결(+ 역행 중 직전) — 뒤 청크로 올 같은 이름 형제를 빼면 한쪽 실패를 다른 쪽 정상이
+ *    '복구' 로 지운다(반증 N1). 직전 완결보다 오래된 행(이미 GC 대기)은 세지 않는다.
+ */
+function nameWindowOf(a, snapId, narrow) {
+  if (narrow) return new Set([snapId]);
+  const w = new Set([snapId, a.prevCompleteSnapId]);
+  if (a.regressPrevSnapId) w.add(a.regressPrevSnapId);
+  return w;
+}
+/**
+ * 같은 이름 키를 가진 점검 수 — 자기 자신 + 창 안에 보고된 행 + **결과가 아직 없는 메타**(엣지 색인에는 있다 — 메타는 needMeta 때 색인 전량으로
+ *   온다 · 결과 없는 메타는 완결 GC 가 지우므로 오래 남지 않는다. 세지 않으면 첫 메타 직후 뒤 청크로 올 형제가 빠져 N1 이 깨진다). 둘이면 멈춘다.
+ *   win 이 없으면 메타 전부(예전 판정).
+ */
+function sameNameCount(a, id, mm, win) {
+  const cur = a.nameIds.get(nameKeyOfMeta(mm));
+  if (cur == null || typeof cur === 'string') return 1;
+  let n = 0;
+  for (const j of cur) {
+    if (j === id) { n += 1; } else {
+      const row = a.rows.get(j);
+      if (!win || !row || win.has(row.snapId)) n += 1;
+    }
+    if (n > 1) break;
+  }
+  return n;
+}
+/** 알림 판정용 대상·점검 정보 — 이름 키가 (창 안에서) 겹치면 dupName(=testId 키로). 메타가 없으면 이름 없이(판정 보류). */
+function alertInfoOf(a, id, win) {
   const mm = a.meta.get(id);
   return {
     target: { name: mm?.n, path: mm?.p, host: mm?.h },
-    test: { name: mm?.t, type: mm?.y, dupName: !!mm && (a.nameCount.get(nameKeyOfMeta(mm)) || 0) > 1 },
+    test: { name: mm?.t, type: mm?.y, dupName: !!mm && sameNameCount(a, id, mm, win) > 1 },
   };
+}
+/** 테스트 전용 — 이름 키별 id 색인이 메타와 맞는지(metaSet/metaDelete 로만 고친다). */
+export function _nameIndexForTest(agent) {
+  const a = agents[String(agent || '').trim()];
+  if (!a) return null;
+  const out = {};
+  for (const [k, v] of a.nameIds) out[k] = typeof v === 'string' ? [v] : [...v].sort();
+  return out;
 }
 
 function blank(agent) {
   return {
     agent,
-    nameCount: new Map(),   // v2.928: 메타 이름 키 → 개수(알림 키 충돌 판정)
+    nameIds: new Map(),     // v2.928 → v2.934: 메타 이름 키 → id(하나면 문자열 · 둘 이상이면 Set) — 알림 키 충돌 판정(창 안에 보고된 행만 센다)
+    recvSeqs: new Set(),    // v2.934: 이번 스냅샷(snapId · total)에서 받은 청크 번호 — 다 받았는지(nameWindowOf)
+    recvTotal: 0,
     firstAt: 0,
     lastAt: 0,
     lastSnapId: 0,
@@ -163,6 +226,11 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     a.complete = false;
     a.counters.snapshots += 1;
   }
+  // v2.934: 이번 스냅샷의 청크를 다 받았는가(이름 중복 창 — nameWindowOf). 413 축소 재전송은 같은 snapId 에 total 이 달라지므로 다시 센다.
+  //   seq ≤ total(위 max) 이라 서로 다른 seq 수 = total 이면 1..total 전부다. 상한은 청크 수 상한 대용(넘으면 '다 받음' 으로 보지 않는다 — 보수 쪽).
+  if (snapId !== a.lastSnapId || total !== a.recvTotal) { a.recvSeqs.clear(); a.recvTotal = total; }
+  if (a.recvSeqs.size < RECV_SEQS_MAX) a.recvSeqs.add(seq);
+  const fullyReceived = a.recvSeqs.size >= total;
   a.lastSnapId = snapId;
   a.lastSeq = seq;
   a.lastTotal = total;
@@ -191,6 +259,9 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   let accepted = 0;
   let dropped = 0;
   const rows = Array.isArray(body?.rows) ? body.rows : [];
+  // v2.934: 바뀐 행은 모아 두었다가 **이 청크의 행 · 메타를 다 반영한 뒤** 판정한다 — 이름 중복은 '이번 창에 보고된 행' 으로 세는데, 행 루프 안에서
+  //   판정하면 같은 청크의 뒤 행이 아직 옛 snapId 라 형제를 놓친다(행 순서에 따라 키가 바뀐다 → 거짓 복구). 같은 청크에 온 메타도 그 판정에 쓴다.
+  const changed = [];
   for (const r of rows) {
     const id = text(r?.i, 64);
     if (!id) { dropped += 1; a.counters.badRow += 1; continue; }
@@ -221,12 +292,7 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     // v2.915: 같은 측정의 재전송은 새 결과가 아니다 — 시간별 집계·알림에 두 번 세지 않는다. ⚠ measuredAt 비교로는 못 가른다
     //   (반증 M5 — 재현: measuredAt = 수신 시각 − 구간값이라 전송 지연만큼 ms 단위로 흔들린다). 새 측정은 상태가 바뀌거나 연속 횟수(k)가 바뀐다.
     const row = a.rows.get(id);
-    if (!prev || prev.s !== row.s || prev.k !== row.k) {
-      const info = alertInfoOf(a, id);
-      noteResult({ at: measuredAt, scope: a.agent, testId: id, prev: prev?.s || null, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info });
-      // 메타가 아직 없으면(중앙 재시작 직후) 알림 판정이 보류된다 — 아래(메타 루프 뒤)에서 다시 판정한다(N2 · v2.932 D1-03: 다음 요청에 메타가 와도 · 시한).
-      if (!info.target.name || !info.test.name) { if (!a.alertPending.has(id)) a.alertPending.set(id, recvAt); } else a.alertPending.delete(id);
-    }
+    if (!prev || prev.s !== row.s || prev.k !== row.k) changed.push({ id, prevS: prev?.s || null, row });
     accepted += 1;
   }
   a.counters.accepted += accepted;
@@ -252,6 +318,18 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     }
     a.metaSig = text(body?.metaSig, 64);
   }
+
+  // v2.934: 이름 중복 창 — 완결 청크이고 이번 스냅샷을 다 받았고 예열이 아니면 이번 스냅샷만(재배정으로 GC 대기 중인 옛 id 행을 세지 않는다).
+  //   warm 은 아래 GC 보류에도 쓴다(같은 판정).
+  const warm = seq >= total && (body?.warmingUp === true || (num(body?.items) > 0 && Number.isFinite(Number(body?.reported)) && num(body.reported) === 0));
+  const win = nameWindowOf(a, snapId, seq >= total && fullyReceived && !warm);
+  for (const c of changed) {
+    const { id, row } = c;
+    const info = alertInfoOf(a, id, win);
+    noteResult({ at: row.measuredAt, scope: a.agent, testId: id, prev: c.prevS, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info });
+    // 메타가 아직 없으면(중앙 재시작 직후) 알림 판정이 보류된다 — 아래에서 다시 판정한다(N2 · v2.932 D1-03: 다음 요청에 메타가 와도 · 시한).
+    if (!info.target.name || !info.test.name) { if (!a.alertPending.has(id)) a.alertPending.set(id, recvAt); } else a.alertPending.delete(id);
+  }
   // v2.928(반증 재검토 N2): 메타 없이 보류됐던 행은 메타가 오면 지금 다시 판정한다 — 같은 측정의 재전송은 다시 세지 않으므로(M5)
   //   여기서 놓치면 다음 측정(인증서·도메인은 하루)까지 알림이 늦었다. 시간별 집계·전이 이력은 이미 셌다(알림만).
   // v2.932(점검 D1-03): 보류는 **요청을 넘어** 이어진다 — 중앙 재시작 직후에는 메타가 needMeta 응답 뒤 **다음** push 에 오고 그 push 의 행은 같은
@@ -262,7 +340,7 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     for (const [id, since] of a.alertPending) {
       const row = a.rows.get(id);
       if (!row) { a.alertPending.delete(id); forgetHeld(a.agent, id); continue; }
-      const info = alertInfoOf(a, id);
+      const info = alertInfoOf(a, id, win);
       const named = !!(info.target.name && info.test.name);
       if (!named && recvAt - since < hold) continue;
       a.alertPending.delete(id);
@@ -281,7 +359,7 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   // v2.606 EDGE2606-02: 엣지가 재시작 직후 예열 중(첫 sweep 이 전 항목을 덮기 전)이면 '행 0(또는 일부)' 완결이 온다 — 그것으로 GC 하면
   //   재시작 전 행·메타가 전부 사라진다(코드 주석이 말하는 '즉시 지우면 모름' 그대로). `warmingUp` 이거나(v2.606 엣지) 구버전 엣지가
   //   '항목은 있는데 보고 0' 을 보내면 GC 를 건너뛴다. 보류는 WARM_GC_HOLD_MS 까지만 — 넘으면 예전대로 정리한다(시한 없는 보류 금지).
-  const warm = seq >= total && (body?.warmingUp === true || (num(body?.items) > 0 && Number.isFinite(Number(body?.reported)) && num(body.reported) === 0));
+  //   (warm 판정은 위 이름 중복 창과 같은 값 — v2.934 에서 판정 앞으로 옮겼다.)
   if (warm) {
     if (!a.warmHoldSince) a.warmHoldSince = recvAt;
   } else if (seq >= total) a.warmHoldSince = 0;
@@ -311,7 +389,7 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
         const live = new Set();
         let unknown = false;
         for (const id of a.rows.keys()) {
-          const k = alertKeyOf({ scope: a.agent, testId: id, ...alertInfoOf(a, id) });
+          const k = alertKeyOf({ scope: a.agent, testId: id, ...alertInfoOf(a, id, win) });   // v2.934: 판정과 같은 창
           if (!k) { unknown = true; break; }
           live.add(k);
         }
