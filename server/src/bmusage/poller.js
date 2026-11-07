@@ -26,14 +26,14 @@ import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../proxy/sshExec.js';
 import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
-import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays } from './settings.js';
+import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS } from './settings.js';
 import { resolveTargets } from './targets.js';
 import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
 import { buildUsage } from './usage.js';
 import { recordHbaBasis, pruneHbaBasis } from './hbaBasis.js'; // v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거(화면 각주)
 import { collectOsUsage, SESSION_BUDGET_MS as OS_BUDGET_MS } from './collectors/osSsh.js';
-import { insertUsage, pruneUsage, repairRollups } from './db.js';
+import { insertUsage, pruneUsage, repairRollups, snapshotPrune } from './db.js';
 import { ensureMonthMigration, migrationLast } from './monthMigrate.js';
 import { estimateBaseMs, planCycleWindow } from './peakPlan.js'; // v2.922: 피크 창 주기 예산 자동 맞춤
 import { recordBmUsage } from './activityLog.js';
@@ -475,6 +475,25 @@ function mainIdracStop(target) {
   try { return idracAuthStopFor({ id: i.regId, username: i.username, password: i.password }); } catch { return null; }
 }
 
+/**
+ * v2.923(4단계 — 진단 스냅샷): 사람이 누른 SSH 1회의 결과를 **주기 수집과 같은 가드 · 같은 식별자**에 반영한다(util/authGuard.js 규약).
+ *  · 인증 실패 문구면 정지를 기록한다 — 그 뒤 주기 수집이 같은 틀린 계정으로 다시 로그인하지 않게(계정 잠금).
+ *  · 성공이면 정지를 푼다 — 같은 계정으로 실제 로그인에 성공했다(v2.591 ‘수동 성공은 정지를 푼다’ 와 같은 판단).
+ *  · 스냅샷 자체는 막지 않는다(규칙 3 — 수동 실행은 막지 않는다). 호스트키 거부 · 시한 · 연결 실패는 인증 실패가 아니다(규칙 4).
+ */
+export function recordOsAuthOutcome(target, { ok = false, errorText = '' } = {}) {
+  const dev = authDev(target || {});
+  if (!dev) return null;
+  if (ok) { guard.clearAuthStop(dev.id); return null; }
+  if (isAuthFailureText(errorText)) return guard.markAuthStopped(dev.id, dev, String(errorText || '인증 실패').slice(0, 200));
+  return null;
+}
+/** v2.923 — 이 대상의 OS 인증 정지 기록(없으면 null · 자격증명이 바뀌었으면 풀린다). */
+export function osAuthStopFor(target) {
+  const dev = authDev(target || {});
+  return dev ? guard.authStopFor(dev) : null;
+}
+
 /** 화면이 '몇 대가 정지됐나' 를 말할 수 있게 이번 주기의 정지분을 기억한다. */
 const _authStopped = new Map();
 
@@ -727,6 +746,11 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
   const st = s.store || STORE_DEFAULTS;
   const keep = { raw: effectiveRawDays(s), h1: st.hourlyDays, d1: s.dailyRetentionDays, dev: st.devRawDays, dev1h: st.devHourlyDays };
   const r = await pruneUsage({ rawDays: s.rawRetentionDays, dailyDays: s.dailyRetentionDays, force: true, keep }).catch((e) => ({ ok: false, error: errText(e) }));
+  // v2.923(반증 R3): 진단 스냅샷 7일 보관 — 예전에는 ‘실행할 때만’ 지워져 아무도 누르지 않으면 프로세스 이름 · 커널 로그가 영구 보관됐다. 같은 스로틀 틱에 정리한다.
+  if (exists) {
+    try { const n = await snapshotPrune({ before: Date.now() - SNAPSHOT_KEEP_DAYS * 86_400_000 }); if (r && typeof r === 'object') r.snapshotsPruned = n; }
+    catch (e) { if (_srcErrLog('snap-prune', errText(e))) console.warn(`[bmusage] 스냅샷 보관 정리 실패: ${errText(e)}`); }
+  }
   _lastPrune = { at: Date.now(), ...r };
   if (r && r.ok === false && r.error && _srcErrLog('prune', r.error)) console.warn(`[bmusage] 보존 정리 실패: ${r.error}`);
   return r;

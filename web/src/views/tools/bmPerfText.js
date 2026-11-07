@@ -133,7 +133,7 @@ export function pathState(coverage, paths = [], which = 'os') {
 
 /**
  * 상태 9종(설계 §5 ④ · States.dc.html) + 2단계에서 데이터가 주는 보조 상태. 보드 행 칩(short)과 상세 머리 문구(title·body)를 함께 고정한다.
- * ⚠ ‘권한 부족’(진단 스냅샷의 /proc/pid/io)은 4단계 스냅샷 기능의 상태다 — 문구만 고정하고 2단계 화면은 그리지 않는다(없는 기능을 그리지 않는다).
+ * ⚠ ‘권한 부족’(진단 스냅샷의 /proc/pid/io · dmesg)은 4단계 진단 스냅샷 탭(BmSnapshotTab)이 그린다 — 행 상태 칩(rowStates)에는 넣지 않는다(주기 수집의 상태가 아니다).
  */
 export const STATE_TEXT = Object.freeze({
   off: { short: '꺼짐', tone: 'idle', title: '성능 수집이 꺼져 있습니다', body: '베어메탈 사용률 설정에서 수집을 켜고 법인을 고르면 다음 주기부터 사용률이, 그다음 주기부터 포화·오류 칸이 채워집니다. 켜기는 법인 단위이고 기본은 꺼짐입니다.' },
@@ -392,11 +392,16 @@ export function severityOrder(items = []) {
 }
 
 /* ───────────────────────── 서버 상세 ───────────────────────── */
-/** 탭 열 — 1단계 데이터로 가능한 것만(장애 기록 · 튜닝 · 용도 · 스냅샷 · 추이는 그 기능이 생길 때 여기에 더한다 — 없는 기능을 그리지 않는다). */
+/** 탭 열 — 기능이 있는 것만(없는 기능을 그리지 않는다). 순서는 아트보드 ② · ⑤ ⑥ ⑦ 의 탭 열 그대로. */
 export const DETAIL_TABS = Object.freeze([
   { id: 'summary', label: '요약' },
   { id: 'res', label: '자원(USE)' },
   { id: 'hw', label: '하드웨어(iDRAC)' },
+  // v2.923(4단계): 장애 기록 · 튜닝 · 용도 · 진단 스냅샷 — 서버 API(perf/:key/faults · tuning · profile · snapshot(s)) 가 생겨 더했다. 문구는 bmOpsText.js.
+  { id: 'faults', label: '장애 기록' },
+  { id: 'tuning', label: '튜닝' },
+  { id: 'profile', label: '용도' },
+  { id: 'snap', label: '진단 스냅샷' },
   // v2.923(3b): 추이 탭 — 서버 3a 의 추이 API(시간 단위 파일 · 평균/피크) 가 생겨 더했다. 문구는 bmTrendText.js.
   { id: 'trend', label: '추이(평균 · 피크)' },
 ]);
