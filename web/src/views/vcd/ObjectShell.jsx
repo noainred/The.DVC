@@ -9,12 +9,16 @@ export default function ObjectShell({ type, crumbs, onBack, backLabel, title, ba
   const base = objTabsOf(type);
   return (
     <div className="vcd-obj" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10, minWidth: 0 }}>
+      {/* v2.915(가상화 플랫폼 · 브레드크럼 3단): 가상화 플랫폼 › vCenter › <vCenter 이름 · 누르면 vCenter 탭으로> › 클러스터/폴더 › <이름>. '← 돌아가기' 는 줄 끝에 남긴다. */}
       <nav className="vcd-crumb" aria-label="경로">
-        <button type="button" className="vcd-more" onClick={onBack}>← {backLabel}</button>
+        <a href="#/vcenters" style={{ color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'none' }}>가상화 플랫폼</a>
+        <span aria-hidden="true">›</span>
+        <a href="#/vcenters" style={{ color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'none' }}>vCenter</a>
         {crumbs.filter(Boolean).map((c, i) => (
-          <React.Fragment key={`${c}-${i}`}><span aria-hidden="true">›</span><span>{c}</span></React.Fragment>
+          <React.Fragment key={`${c}-${i}`}><span aria-hidden="true">›</span>{i === 0 ? <button type="button" className="vcd-more" style={{ textDecoration: 'none', color: 'var(--text-dim)', fontWeight: 600 }} onClick={onBack} title={`${backLabel} 탭으로`}>{c}</button> : <span>{c}</span>}</React.Fragment>
         ))}
         <span aria-hidden="true">›</span><b>{title}</b>
+        <button type="button" className="vcd-more" style={{ marginLeft: 'auto' }} onClick={onBack}>← {backLabel}</button>
       </nav>
       <div className="card vcd-obj-head">
         <div style={{ minWidth: 0 }}>

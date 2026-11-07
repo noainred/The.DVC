@@ -14,10 +14,14 @@ const ctx = { settingsMeta: [{ k: 'audit', label: '감사 로그', groupLabel: '
 
 describe('keyMeta', () => {
   it('탭 · 도구 · 설정 · 콘솔의 이름과 메뉴 위치', () => {
-    expect(keyMeta('tab:vms', ctx)).toMatchObject({ label: '가상화 서버', where: '서버 › 가상화 서버', bucket: 'server', inMenu: true, kindLabel: '탭' });
+    // v2.915: 세 탭이 '서버 › 가상화 플랫폼' 한 항목 — 추적 키(tab:vms · tab:hosts)는 그대로이고 이름은 '항목 › 탭'
+    expect(keyMeta('tab:vms', ctx)).toMatchObject({ label: '가상화 플랫폼 › 가상화 서버 · VM', where: '서버 › 가상화 플랫폼 › 가상화 서버 · VM', bucket: 'server', inMenu: true, kindLabel: '탭' });
+    expect(keyMeta('tab:hosts', ctx)).toMatchObject({ label: '가상화 플랫폼 › ESXi 호스트', bucket: 'server', inMenu: true });
+    expect(keyMeta('tab:vcenters', ctx)).toMatchObject({ label: '가상화 플랫폼', where: '서버 › 가상화 플랫폼', bucket: 'server', inMenu: true });
     expect(keyMeta('tab:overview', ctx)).toMatchObject({ label: 'Overview', bucket: 'home' });
     expect(keyMeta('tool:storage-mon', ctx)).toMatchObject({ label: '스토리지 현황', where: '스토리지 › 스토리지 현황', bucket: 'storage', inMenu: true, adminOnly: true });
-    expect(keyMeta('tool:vmfinder', ctx)).toMatchObject({ where: '서버 › 가상화 서버 화면 위 탭', bucket: 'server', cardOnly: false });
+    expect(keyMeta('tool:vmfinder', ctx)).toMatchObject({ where: '서버 › 가상화 플랫폼 화면 위 탭', bucket: 'server', cardOnly: false });
+    expect(keyMeta('tool:host-hygiene', ctx)).toMatchObject({ where: '서버 › 가상화 플랫폼 화면 위 탭', bucket: 'server', cardOnly: false });
     expect(keyMeta('tool:serveranalysis/baremetal', ctx)).toMatchObject({ label: '물리 서버', where: '서버 › 물리 서버' });
     expect(keyMeta('tool:serveranalysis', ctx)).toMatchObject({ where: '자원관리 › 서버 분석' });
     const card = keyMeta('tool:login-fails', ctx);

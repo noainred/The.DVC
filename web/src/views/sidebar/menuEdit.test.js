@@ -48,13 +48,13 @@ describe('순서 · 추가 · 빼기 · 그룹', () => {
     const g = base();
     const gi = g.findIndex((x) => x.id === 'server');
     const m = moveItem(g, gi, 0, 1);
-    expect(m[gi].children.map((c) => c.id).slice(0, 2)).toEqual(['esxi', 'vm']);
+    expect(m[gi].children.map((c) => c.id).slice(0, 2)).toEqual(['bm', 'virt']);   // v2.915: 서버 그룹 첫 둘은 가상화 플랫폼 · 물리 서버
     expect(moveItem(g, gi, 0, -1)).toBe(g);
     expect(moveItem(g, 0, 0, 1)).toBe(g); // 단독 항목
     const r = removeItem(m, gi, 0);
-    expect(r[gi].children.map((c) => c.id)[0]).toBe('vm');
-    expect(changeCount(g, r)).toBe(1); // esxi 가 빠졌다(아래 항목이 밀린 것은 바뀐 것이 아니다)
-    expect(changeCount(g, m)).toBe(1); // vm·esxi 를 맞바꾼 것은 하나가 움직인 것
+    expect(r[gi].children.map((c) => c.id)[0]).toBe('virt');
+    expect(changeCount(g, r)).toBe(1); // bm 이 빠졌다(아래 항목이 밀린 것은 바뀐 것이 아니다)
+    expect(changeCount(g, m)).toBe(1); // virt·bm 을 맞바꾼 것은 하나가 움직인 것
   });
   it('특수 기능 도구를 더한다 — 같은 도구는 한 그룹에만, 단독 그룹에는 못 넣는다', () => {
     const g = base();

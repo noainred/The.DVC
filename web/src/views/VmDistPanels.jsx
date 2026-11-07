@@ -265,13 +265,16 @@ export function VmUsageBar({ pct }) {
 }
 
 /** VM 이름 칸 — 앞에 전원 점(색 + title + 화면판독 글자). */
-export function VmNameCell({ vm, onOpen }) {
+// v2.915(가상화 플랫폼 · 상세 한 규칙): href 가 있으면 이름은 개체 보기 링크(브레드크럼)이고 드로어는 옆의 '빠른 확인' 버튼 — 없으면 예전처럼 이름이 드로어(onOpen).
+export function VmNameCell({ vm, onOpen, href }) {
   const d = powerDot(vm?.powerState);
   return (
     <span className="vmd-name">
       <span className="vmd-pdot" style={{ background: d.color }} title={d.label} aria-hidden="true" />
       <span className="vmd-sr">{d.label} </span>
-      <button type="button" className="cell-link" onClick={() => onOpen(vm)}>{vm?.name}</button>
+      {href
+        ? <><a className="cell-link" href={href} title="개체 보기(요약 · 모니터 · 구성 …)">{vm?.name}</a><button type="button" className="vmd-quick" onClick={() => onOpen(vm)} title="빠른 확인(드로어 — ‹ › 로 이동)">빠른 확인</button></>
+        : <button type="button" className="cell-link" onClick={() => onOpen(vm)}>{vm?.name}</button>}
     </span>
   );
 }

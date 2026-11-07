@@ -5,6 +5,11 @@ import IpmsMatches from '../components/IpmsMatches.jsx';
 import Select from '../components/Select.jsx';
 import { cpuModelCell } from '../components/cpuModelText.js';
 import { hashSegments } from '../hooks/hashTab.js';
+// v2.915 가상화 플랫폼 허브(설계 docs/design/virt-platform-menu 시안 A ③): 이 화면은 허브의 '호스트 탭' 본문이다 — 제목은 허브가, 여기는 탭 줄(호스트별 · 법인별 ‖ 호스트 도구 4 ‖ 상태 · 메모 · IPMS) 부터.
+//   호스트 이름 = 개체 보기(브레드크럼 · 전체 페이지 상세는 그 안의 버튼) · VM 수 = VM 탭을 그 호스트 범위로 · 점검 집계 · 엑셀 버튼은 표 머리로.
+import HubTabs, { toolsFor } from './platform/HubTabs.jsx';
+import { HOST_TOOLS } from './platform/platformText.js';
+import { vcHash } from './vcd/vcdRoute.js';
 import { hostUsagePct } from './vcdOverview.js'; // v2.606 WEB2606-02: 끊긴·무응답 호스트의 0% 는 '못 읽음'(—)
 // v2.764: 시안 B '이상 우선' 배치 — 확인 대상·CPU 구간·클러스터 타일 판정은 hostTriage.js 하나(카드 숫자와 표 필터가 같은 판정).
 import { CPU_ATTENTION_PCT, CPU_BUCKETS, hostReasons, triageCounts, cpuDistribution, clusterTiles } from './hostTriage.js';
@@ -28,7 +33,7 @@ const hostIdOf = (hash) => { const s = hashSegments(hash); return s[0] === 'host
 const numText = (v) => (Number.isFinite(v) ? v.toLocaleString('en-US') : '—');
 const numTone = (v) => (Number.isFinite(v) && v > 0 ? 'var(--red)' : undefined);
 
-export default function Hosts({ filters }) {
+export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocus = null, onGoVms = null }) {
   const { data, error, loading } = usePolling('/hosts', filters, 15_000);
   const [tab, setTab] = useState(null); // null = 확인 대상이 있으면 그 탭, 없으면 전체
   const [focus, setFocus] = useState(null);
@@ -85,7 +90,9 @@ export default function Hosts({ filters }) {
   const curTab = tab || (counts.attention > 0 ? 'attention' : 'all');
   const byId = checks?.byId || null;
   const access = checks?.access || null;
-  const shown = filterHostsExt(rows, { tab: curTab, focus }, { secOf, checks: byId });
+  // v2.915: VM 표의 호스트 이름에서 넘어온 '그 호스트만'(nameFocus — 이름 정확 일치 · 칩으로 해제)은 탭 · 조건 위에 겹쳐 건다.
+  const shown0 = filterHostsExt(rows, { tab: curTab, focus }, { secOf, checks: byId });
+  const shown = nameFocus ? shown0.filter((h) => h.name === nameFocus) : shown0;
   // 카드·구간·타일·칩을 누르면 그 조건으로 걸러 표를 본다. 같은 것을 다시 누르면 해제.
   const pick = (f, nextTab) => {
     const same = focus && f && focus.kind === f.kind && focus.value === f.value;
@@ -126,7 +133,8 @@ export default function Hosts({ filters }) {
   const tone = (t) => ({ green: 'green', amber: 'amber', red: 'red', gray: 'gray' }[t] || 'gray');
   const vmOf = (h) => byId?.[h.id]?.vm || null;
   const R = {
-    name: { render: (h) => <a className="cell-link ht-link" href={`#/hosts/${encodeURIComponent(h.id)}`} title="호스트 상세(전체 페이지)">{h.name}</a> },
+    // v2.915(상세 한 규칙): 이름 = 개체 보기(#/vcenters/<vc>/host/<id> — 브레드크럼). 전체 페이지 상세(#/hosts/<id>)는 그 안의 '전체 페이지 상세 →' 버튼(주소는 그대로 산다).
+    name: { render: (h) => <a className="cell-link ht-link" href={vcHash(h.vcenterId, { type: 'host', id: h.id })} title="개체 보기(요약 · 모니터 · 구성 …) — 전체 페이지 상세는 그 안에서">{h.name}</a> },
     vcenterId: { render: (h) => <span className="muted">{h.vcenterId}</span> },
     cluster: { render: (h) => h.cluster || '—' },
     connectionState: { render: (h) => <StateBadge state={h.connectionState} /> },
@@ -142,7 +150,10 @@ export default function Hosts({ filters }) {
     memUsagePct: { sortValue: (h) => hostUsagePct(h, 'memUsagePct'), render: (h) => <UsageCell pct={hostUsagePct(h, 'memUsagePct')} /> },
     powerWatts: { sortValue: (h) => (h.powerWatts > 0 ? h.powerWatts : null), render: (h) => kwText(h.powerWatts) },
     tempC: { sortValue: (h) => (Number.isFinite(h.tempC) ? h.tempC : null), render: (h) => (Number.isFinite(h.tempC) ? `${h.tempC}℃` : '—') },
-    vmCount: { render: (h) => numText(h.vmCount) },
+    // v2.915 교차 링크: VM 수를 누르면 VM 탭을 그 호스트 범위로(서버 /vms?host — 이름으로 거른다). 0 이거나 모르면 글자만.
+    vmCount: { render: (h) => (onGoVms && Number.isFinite(h.vmCount) && h.vmCount > 0
+      ? <button type="button" className="cell-link tabular" onClick={() => onGoVms(h.name)} title="VM 탭을 이 호스트의 VM 으로">{numText(h.vmCount)} →</button>
+      : numText(h.vmCount)) },
     // VM 묶음 — 호스트 객체에는 VM 할당 합이 없다. /hosts/checks 의 vm(템플릿 제외 · 못 읽은 VM 은 unknown)을 쓰고, 아직 안 읽었으면 '—'.
     vcpu: { sortValue: (h) => vmOf(h)?.vcpu ?? null, render: (h) => { const v = vmOf(h); return v ? <span title={v.vcpuUnknown ? `vCPU 를 못 읽은 VM ${v.vcpuUnknown}` : undefined}>{numText(v.vcpu)}{v.vcpuUnknown ? <span className="muted">+?</span> : null}</span> : '—'; } },
     vcpuRatio: { sortValue: (h) => { const v = vmOf(h); return v && h.cpuCores > 0 ? v.vcpu / h.cpuCores : null; }, render: (h) => { const v = vmOf(h); return v ? ratioText(v.vcpu, h.cpuCores) : '—'; } },
@@ -180,22 +191,26 @@ export default function Hosts({ filters }) {
       {/* 폴링 지속 실패 시 낡은 데이터를 무경고로 표시하지 않고 배너로 알린다(v2.287, #20). */}
       {error && <div className="badge red" style={{ display: 'block', marginBottom: 10, padding: '6px 10px' }}>⚠ 갱신 실패 — 직전 데이터를 표시 중입니다({error}).</div>}
 
-      <div className="ht-top">
-        <div className="ht-title">
-          <b>ESXi 호스트</b>
-          <span className="muted">vCenter {fmt(vcIds.length)} · 호스트 {fmt(rows.length)}{data.generatedAt ? ` · 인벤토리 ${new Date(data.generatedAt).toLocaleTimeString('ko-KR')}` : ''}</span>
-        </div>
-        <div className="ht-actions">
-          <div className="hc-seg" role="group" aria-label="보기">
-            <button type="button" className={view === 'host' ? 'hc-seg-on' : ''} aria-pressed={view === 'host'} onClick={() => setView('host')}>호스트별</button>
-            <button type="button" className={view === 'corp' ? 'hc-seg-on' : ''} aria-pressed={view === 'corp'} onClick={() => setView('corp')}>법인별</button>
-          </div>
-          {view === 'host' && <button type="button" className="btn" onClick={loadChecks} disabled={checksBusy} title="iDRAC 부품 · 최근 재부팅 · Veeam 집계를 다시 읽습니다(무거운 집계라 자동 갱신하지 않습니다)">
-            {checksBusy ? '점검 집계 읽는 중…' : `점검 집계 다시 읽기${checks?.at ? ` (${new Date(checks.at).toLocaleTimeString('ko-KR')})` : ''}`}
-          </button>}
-          {csvOk && <button type="button" className="btn primary" onClick={openExport}>⤓ 호스트·클러스터 엑셀…</button>}
-        </div>
+      {/* v2.915: 제목 줄 대신 허브 탭 줄 — 호스트별 · 법인별(이 화면 안의 보기) ‖ 호스트 성격의 특수 기능 4 ‖ 오른쪽 = 이 탭 고유 조건(공용 범위 바에서 내려온 상태 · 메모 · IPMS) */}
+      <div style={{ marginBottom: 12 }}>
+        <HubTabs label="호스트 보기 · 도구" active={view} tools={toolsFor(HOST_TOOLS)}
+          views={[
+            { k: 'host', label: '호스트별', onClick: () => setView('host') },
+            { k: 'corp', label: '법인별', onClick: () => setView('corp') },
+          ]}
+          right={cond ? (
+            <>
+              {cond.menuFilter && (
+                <Select sort={false} className="select" value={cond.menuFilter.value} onChange={(e) => cond.menuFilter.onChange(e.target.value)} aria-label="상태">
+                  {cond.menuFilter.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </Select>
+              )}
+              <label title="메모 포함 — 체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)"><input type="checkbox" checked={cond.qNotes} onChange={(e) => cond.setQNotes(e.target.checked)} /> 메모</label>
+              <label title="IPMS 포함 — 체크하면 IP로 검색할 때 IPMS(IP 스캔) 자료의 해당 대역 IP도 함께 보여줍니다."><input type="checkbox" checked={cond.qIpms} onChange={(e) => cond.setQIpms(e.target.checked)} /> IPMS</label>
+            </>
+          ) : null} />
       </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>vCenter {fmt(vcIds.length)} · 호스트 {fmt(rows.length)}{data.generatedAt ? ` · 인벤토리 ${new Date(data.generatedAt).toLocaleTimeString('ko-KR')}` : ''}</div>
       {exportPick && !filters?.vcenterId && vcIds.length > 1 && (
         <div className="ht-pick">
           <span className="muted">엑셀은 vCenter 단위입니다 — 내보낼 vCenter 를 고르세요.</span>
@@ -209,6 +224,7 @@ export default function Hosts({ filters }) {
       {view === 'host' && checksErr && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>점검 집계를 읽지 못했습니다({checksErr}) — iDRAC · 재부팅 · Veeam 열은 ‘—’ 로 둡니다.</div>}
       {view === 'corp' && (
         <React.Suspense fallback={<Loading />}>
+          {csvOk && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}><button type="button" className="btn primary" onClick={openExport}>⤓ 호스트·클러스터 엑셀…</button></div>}
           <HostsCorp filters={filters} rows={rows} onOpenCluster={openCluster} />
         </React.Suspense>
       )}
@@ -340,9 +356,22 @@ export default function Hosts({ filters }) {
               <button type="button" className="ht-chip-x" onClick={() => setFocus(null)} aria-label="조건 해제">✕</button>
             </span>
           )}
+          {nameFocus && (
+            <span className="badge blue ht-chip" title="VM 표에서 넘어온 호스트 — 이 호스트 한 대만 보입니다">
+              호스트 {nameFocus}
+              <button type="button" className="ht-chip-x" onClick={() => onNameFocus && onNameFocus('')} aria-label="호스트 조건 해제">✕</button>
+            </span>
+          )}
           <span className="muted result-count">
             표시 <b style={{ color: 'var(--text)' }}>{fmt(shown.length)}</b> / 총 {fmt(rows.length)}개 호스트
             {filtered && <span className="badge blue" style={{ marginLeft: 8 }}>필터 적용 중</span>}
+          </span>
+          {/* v2.915: 점검 집계 · 엑셀 버튼은 표 머리(제목 줄은 허브로 올라갔다) */}
+          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn" onClick={loadChecks} disabled={checksBusy} title="iDRAC 부품 · 최근 재부팅 · Veeam 집계를 다시 읽습니다(무거운 집계라 자동 갱신하지 않습니다)">
+              {checksBusy ? '점검 집계 읽는 중…' : `점검 집계 다시 읽기${checks?.at ? ` (${new Date(checks.at).toLocaleTimeString('ko-KR')})` : ''}`}
+            </button>
+            {csvOk && <button type="button" className="btn primary" onClick={openExport}>⤓ 호스트·클러스터 엑셀…</button>}
           </span>
         </div>
         <div className="ht-groups" role="group" aria-label="열 묶음">
