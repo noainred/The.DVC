@@ -318,7 +318,8 @@ test('transitions — 바뀔 때만 기록 · 연속 N회째 한 번 알림 · �
   // 대량 — 창 안에 6건 이상이면 요약 1건
   sent.length = 0;
   TR._setAlertSettingsForTest({ enabled: true, failCount: 1, scope: 'all' });
-  for (let i = 0; i < 12; i++) TR.noteResult({ ...base, testId: `mass${i}`, status: 'bad', streak: 1, scope: 'edge-x' });
+  // v2.928: 엣지 알림 키는 (엣지 · 경로 · 대상 · 점검 이름) — 서로 다른 점검 12개로 만든다
+  for (let i = 0; i < 12; i++) TR.noteResult({ ...base, testId: `mass${i}`, status: 'bad', streak: 1, scope: 'edge-x', test: { name: `TCP ${i}`, type: 'tcp' } });
   await TR.flushAlerts();
   assert.equal(sent.length, 1, '요약 1건');
   assert.match(sent[0].title, /실패 12건/);
