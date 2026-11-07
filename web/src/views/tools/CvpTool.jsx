@@ -459,8 +459,8 @@ function DeviceModal({ target, onClose, onIntf }) {
                 <span>포트 이름을 누르면 사용률 추이를 봅니다. 사용률은 인터페이스 속도를 알 때만 방향별로 계산합니다. 설명은 부품 주기(기본 30분)마다 읽습니다.</span>
                 {onIntf && <button type="button" className="btn" style={{ padding: '2px 8px' }} onClick={() => onIntf(`${target.cvpId}|${target.key}`)}>인터페이스 세부 정보로 보기</button>}
               </div>
-              <STable minWidth={980} limit={1024}>
-                <thead><tr><th>포트</th><th>설명</th><th>속도</th><th>상태</th><th>관리</th><th>VLAN</th><th>LAG</th><th>수신</th><th>송신</th><th>수신 %</th><th>송신 %</th><th>오류(수/송)</th></tr></thead>
+              <STable minWidth={1060} limit={1024}>
+                <thead><tr><th>포트</th><th>설명</th><th>속도</th><th>상태</th><th>관리</th><th>VLAN</th><th>LAG</th><th>수신</th><th>송신</th><th>수신 %</th><th>송신 %</th><th>오류(수/송)</th><th title="스위치 discards 직전 주기 델타 — 텔레메트리 필드 이름은 실장비 미확인 추정">드롭(수/송)</th></tr></thead>
                 <tbody>
                   {ports.filter((p) => p && typeof p === 'object').slice().sort(byIntfName).map((p) => (
                     <tr key={p.name}>
@@ -477,6 +477,7 @@ function DeviceModal({ target, onClose, onIntf }) {
                       <td data-sort={p.inUtil ?? ''}>{pctText(p.inUtil)}</td>
                       <td data-sort={p.outUtil ?? ''}>{pctText(p.outUtil)}</td>
                       <td>{countText(p.inErr)} / {countText(p.outErr)}</td>
+                      <td data-sort={p.inDrop == null && p.outDrop == null ? '' : (p.inDrop ?? 0) + (p.outDrop ?? 0)}>{countText(p.inDrop)} / {countText(p.outDrop)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -754,8 +755,8 @@ function PortUsageCard({ servers, onOpen }) {
           {ports.length === 0 ? (
             <div style={{ ...NOTE, marginTop: 8 }}>{minUtil > 0 ? `사용률 ${minUtil}% 이상인 포트가 없습니다(사용률을 계산한 포트 기준).` : '사용률을 계산한 포트가 아직 없습니다 — 처리량은 두 번째 수집 주기부터 나오고, 포트 카운터를 읽지 못하면 계산하지 않습니다.'}</div>
           ) : (
-            <STable minWidth={900} style={{ marginTop: 8 }}>
-              <thead><tr><th>장비</th><th>포트</th><th>설명</th><th>속도</th><th>사용률(최대)</th><th>수신</th><th>송신</th><th>오류(수/송)</th><th>CVP</th><th>측정</th></tr></thead>
+            <STable minWidth={980} style={{ marginTop: 8 }}>
+              <thead><tr><th>장비</th><th>포트</th><th>설명</th><th>속도</th><th>사용률(최대)</th><th>수신</th><th>송신</th><th>오류(수/송)</th><th title="스위치 discards 직전 주기 델타 — 텔레메트리 필드 이름은 실장비 미확인 추정">드롭(수/송)</th><th>CVP</th><th>측정</th></tr></thead>
               <tbody>
                 {ports.map((p) => (
                   <tr key={`${p.agent}|${p.cvpId}|${p.key}|${p.port}`}>
@@ -767,6 +768,7 @@ function PortUsageCard({ servers, onOpen }) {
                     <td data-sort={p.inBps ?? ''} style={{ fontSize: 12 }}>{rateText(p.inBps, p.inUtil)}</td>
                     <td data-sort={p.outBps ?? ''} style={{ fontSize: 12 }}>{rateText(p.outBps, p.outUtil)}</td>
                     <td style={{ fontSize: 12 }}>{countText(p.inErr)} / {countText(p.outErr)}</td>
+                    <td style={{ fontSize: 12 }} data-sort={p.inDrop == null && p.outDrop == null ? '' : (p.inDrop ?? 0) + (p.outDrop ?? 0)}>{countText(p.inDrop)} / {countText(p.outDrop)}</td>
                     <td style={{ fontSize: 12 }}>{p.cvpName || p.cvpId}</td>
                     <td style={{ fontSize: 12 }} data-sort={p.rateAt || 0}>{agoText(p.rateAt)}</td>
                   </tr>
