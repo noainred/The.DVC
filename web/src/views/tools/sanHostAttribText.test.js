@@ -34,7 +34,7 @@ describe('호스트 귀속 문구', () => {
   });
 });
 
-describe('v2.938 귀속 표 ‘실측(스위치 플로우)’', () => {
+describe('v2.939 귀속 표 ‘실측(스위치 플로우)’', () => {
   it('합 · 일부만 읽음 · 속도 없음 · 없음', () => {
     expect(flowSumText({ n: 2, measured: 2, rxBps: 1000, txBps: 2000 })).toBe('16 Kbps / 8 Kbps');
     expect(flowSumText({ n: 3, measured: 2, rxBps: 1000, txBps: 2000 })).toBe('16 Kbps / 8 Kbps(2/3개)');

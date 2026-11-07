@@ -96,7 +96,7 @@ export function attribStateText(d) {
   return '';
 }
 
-/** v2.938(C-② 시안 — ‘실측(스위치 플로우)’): 호스트 → 스토리지 행의 Flow Vision 플로우 합(읽기 / 쓰기). 속도를 읽은 플로우가 없으면 개수만 · 없으면 ‘—’. */
+/** v2.939(C-② 시안 — ‘실측(스위치 플로우)’): 호스트 → 스토리지 행의 Flow Vision 플로우 합(읽기 / 쓰기). 속도를 읽은 플로우가 없으면 개수만 · 없으면 ‘—’. */
 export function flowSumText(flow) {
   if (!flow || !flow.n) return '—';
   if (flow.rxBps == null || flow.txBps == null || !flow.measured) return `플로우 ${flow.n}개 · 속도 없음`;

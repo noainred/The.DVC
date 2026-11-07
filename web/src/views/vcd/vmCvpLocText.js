@@ -27,7 +27,7 @@ export function locRows(d) {
     vlan: (r.locations || []).map((l) => l.vlan).filter((x) => x != null).join(', ') || '—',
     learned: (r.locations || []).map((l) => hm(l.learnedAt)).filter(Boolean)[0] || '—',
     reason: r.reason || '',
-    clock: edgeClockAheadMark(r),   // v2.938(C-③ L-10): 엣지 시계가 빨라 물어본 시각을 수신 시각으로 잘랐으면 그 차이(공용 표지)
+    clock: edgeClockAheadMark(r),   // v2.939(C-③ L-10): 엣지 시계가 빨라 물어본 시각을 수신 시각으로 잘랐으면 그 차이(공용 표지)
     note: r.note || '',   // 서버가 판정을 보류한 이유(LAG · 위치 모르는 업링크 NIC · DB 못 읽음)
   }));
 }

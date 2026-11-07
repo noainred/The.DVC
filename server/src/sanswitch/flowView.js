@@ -1,5 +1,5 @@
 /**
- * sanswitch/flowView.js — Flow Vision 플로우 기록 → 화면 값(순수 · v2.938). SAN 플로우 모니터 · 호스트 상세 '경로별 실측' · SAN 호스트 귀속 표가 같은 계산을 쓴다
+ * sanswitch/flowView.js — Flow Vision 플로우 기록 → 화면 값(순수 · v2.939). SAN 플로우 모니터 · 호스트 상세 '경로별 실측' · SAN 호스트 귀속 표가 같은 계산을 쓴다
  *   (판정 코어는 하나 — 예전에는 routes/api/sanFlow.js 안에만 있었다).
  *   못 읽은 카운터는 0 이 아니다(numOrNull) · 비활성 플로우는 장비가 세지 않으므로 속도를 비운다(0 으로 만들지 않는다).
  */

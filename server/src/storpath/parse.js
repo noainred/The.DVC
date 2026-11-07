@@ -83,7 +83,7 @@ export function summarizeHostPaths(byCounter, ids, { rtMap = new Map(), hbaByWwn
   const insts = new Set([...(rd ? rd.keys() : []), ...(wr ? wr.keys() : [])]);
   const byT = new Map();
   let unparsed = 0; let seen = 0; let truncated = false;
-  // v2.938: 못 푼 인스턴스 이름 원문 표본(최대 UNPARSED_SAMPLES · 120자) — 이름 형식이 실장비 미확인이라 처음 붙은 현장에서 형식을 확인할 근거.
+  // v2.939: 못 푼 인스턴스 이름 원문 표본(최대 UNPARSED_SAMPLES · 120자) — 이름 형식이 실장비 미확인이라 처음 붙은 현장에서 형식을 확인할 근거.
   const unparsedSamples = [];
   const keepSample = (inst, why) => { if (unparsedSamples.length < UNPARSED_SAMPLES) unparsedSamples.push({ name: sampleText(inst), why }); };
   for (const inst of insts) {
@@ -152,7 +152,7 @@ export function sanitizeHostSpath(v, now = Date.now()) {
     at, ...(at0 != null && at0 > now ? { edgeAt: Math.trunc(at0) } : {}),
     sampleSec: intOr(v.sampleSec, 1, 3600) ?? SPATH_SAMPLE_SEC, samples: intOr(v.samples, 0, 1000) ?? 0,
     instances: intOr(v.instances, 0, 100_000) ?? 0, unparsed: intOr(v.unparsed, 0, 100_000) ?? 0, truncated: v.truncated === true, targets,
-    // v2.938: 못 푼 이름 표본 — 아는 모양만 · 상한 · 글자 정리(엣지가 보낸 것은 정제한다)
+    // v2.939: 못 푼 이름 표본 — 아는 모양만 · 상한 · 글자 정리(엣지가 보낸 것은 정제한다)
     ...(Array.isArray(v.unparsedSamples) ? { unparsedSamples: v.unparsedSamples.slice(0, UNPARSED_SAMPLES).filter((x) => x && typeof x === 'object' && typeof x.name === 'string')
       .map((x) => ({ name: sampleText(x.name), why: SAMPLE_WHY.has(x.why) ? x.why : 'format' })) } : {}),
   };

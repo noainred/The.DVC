@@ -338,7 +338,7 @@ const PART_ITEM_KEYS = ['power', 'cooling', 'temperature', 'xcvr'];
  *   '이전 값' 은 시도하지 못한 장비에만 해당한다(시도한 장비는 이번 결과가 저장된다).
  */
 /**
- * v2.938(C-③ 남긴 것): EndpointLocation 주기 요약 — 마지막 부품 주기에 물은 MAC · 위치 있음 · 없음 · 오류 · 못 물음 · 멈춘 사유. 요약이 없으면 '—'(아직 안 돎 · 구버전 엣지).
+ * v2.939(C-③ 남긴 것): EndpointLocation 주기 요약 — 마지막 부품 주기에 물은 MAC · 위치 있음 · 없음 · 오류 · 못 물음 · 멈춘 사유. 요약이 없으면 '—'(아직 안 돎 · 구버전 엣지).
  * @returns {{ text:string, warn:boolean, title:string }}
  */
 export function epSummaryText(ep) {

@@ -51,7 +51,7 @@ describe('문구', () => {
   });
 });
 
-describe('v2.938 스위치 플로우 실측 줄(시안 C-②)', () => {
+describe('v2.939 스위치 플로우 실측 줄(시안 C-②)', () => {
   const d = { spath: { targets: [{ adapter: 'vmhba1', wwn: 't1', rKBps: 100, wKBps: 50 }] },
     flows: [{ name: 'dvc_a_01', hba: 'vmhba1', dstdev: 't1', state: 'active', rxBps: 50 * 1024, txBps: 100 * 1024, switchName: 'sw' },
       { name: 'dvc_a_02', hba: 'vmhba2', dstdev: 't2', state: 'inactive', rxBps: null, txBps: null, switchName: 'sw' }] };

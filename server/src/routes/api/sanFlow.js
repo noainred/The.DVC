@@ -25,8 +25,8 @@ import { cmpVersion } from '../../util/cmpVersion.js';
 const gate = [requirePerm('tools'), requireRole('admin'), fullReadWriteScopeOnlyWith('SAN 플로우 모니터(스위치 설정 변경)는 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 쓸 수 있습니다.')];
 /** 엣지가 flowNow 를 아는 첫 버전(반증 M-7 — 구버전 엣지는 작업을 모른 채 버린다). */
 export const MIN_FLOW_EDGE_VERSION = '2.935.0';
-/** 비활성화 · 다시 켜기를 아는 첫 엣지 버전(v2.938 — 그 전 엣지는 '알 수 없는 동작' 으로 실행하지 않고 회신한다). */
-export const MIN_FLOW_TOGGLE_EDGE_VERSION = '2.938.0';
+/** 비활성화 · 다시 켜기를 아는 첫 엣지 버전(v2.939 — 그 전 엣지는 '알 수 없는 동작' 으로 실행하지 않고 회신한다). */
+export const MIN_FLOW_TOGGLE_EDGE_VERSION = '2.939.0';
 /** 엣지 위임 전 확인 — 버전을 알고 낮으면 거부, 모르면(중앙 재시작 직후 등) 보낸다(시한이 지나면 '결과 모름'). */
 export function flowEdgeIssue(agent, version = edgeVersionOf(agent), action = '') {
   const v = String(version || '').trim();
@@ -48,7 +48,7 @@ async function devicesWithSnap() {
   return reg.map((d) => ({ d, s: snapOf.get(d.id) || null }));
 }
 
-// 속도 · ESXi 합 계산은 sanswitch/flowView.js 하나(호스트 상세 · 귀속 표와 같은 값 — v2.938). 테스트 호환으로 다시 내보낸다.
+// 속도 · ESXi 합 계산은 sanswitch/flowView.js 하나(호스트 상세 · 귀속 표와 같은 값 — v2.939). 테스트 호환으로 다시 내보낸다.
 export { rateOf, esxiBpsOf };
 
 const flowOut = (f) => ({ name: f.name, ingrport: f.ingrport, srcdev: f.srcdev, dstdev: f.dstdev, targetName: f.targetName });
@@ -250,7 +250,7 @@ export function registerSanFlow(api) {
   });
 
   /**
-   * 비활성화 · 다시 켜기(v2.938 — 시안 C-②) — 포탈 기록의 dvc_ 플로우만. 모니터 기능만 끄고 켠다(정의는 장비에 남는다 · 상한 개수에도 남는다).
+   * 비활성화 · 다시 켜기(v2.939 — 시안 C-②) — 포탈 기록의 dvc_ 플로우만. 모니터 기능만 끄고 켠다(정의는 장비에 남는다 · 상한 개수에도 남는다).
    *   스위치 설정을 바꾸므로 OTP 재인증 · 감사. 비활성화는 활성일 때만, 다시 켜기는 비활성일 때만.
    */
   for (const action of ['deactivate', 'activate']) {

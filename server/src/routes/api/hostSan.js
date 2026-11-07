@@ -246,11 +246,11 @@ export function registerHostSan(api) {
       // v2.935(C-①): 분배 방식 · IPF 요약(스위치별) · ESXi 경로 최근 표본(타깃별) · 표본 이력 상태
       split: sc.split, ipf: sc.ipf?.fabrics || [],
       spath: spath ? { at: spath.at, samples: spath.samples, sampleSec: spath.sampleSec, instances: spath.instances, unparsed: spath.unparsed, truncated: !!spath.truncated, mock: !!spath.mock,
-        unparsedSamples: Array.isArray(spath.unparsedSamples) ? spath.unparsedSamples.slice(0, 5) : [],   // v2.938: 못 푼 경로 이름 원문(형식 확인 근거)
+        unparsedSamples: Array.isArray(spath.unparsedSamples) ? spath.unparsedSamples.slice(0, 5) : [],   // v2.939: 못 푼 경로 이름 원문(형식 확인 근거)
         targets: pathTargetsOf(h, spath, fabrics, storageOf) } : null,
       pathWeights: (() => { const w = sc.pathWeightsOf(h); return w ? { samples: w.samples, firstAt: w.firstAt, lastAt: w.lastAt } : null; })(),
       storPathScan: !!config.storPathScan,
-      // v2.938(C-② 시안): 이 호스트의 Flow Vision 플로우 — ESXi 경로 실측과 나란히(같은 HBA · 타깃 WWN). 범위 법인의 스위치 것만(fabrics).
+      // v2.939(C-② 시안): 이 호스트의 Flow Vision 플로우 — ESXi 경로 실측과 나란히(같은 HBA · 타깃 WWN). 범위 법인의 스위치 것만(fabrics).
       flows: (() => { const sw = new Map(fabrics.map((f) => [f.deviceId, f.name])); return listFlows().filter((f) => f.hostId === h.id && FLOW_SHOWN_STATES.has(f.state) && sw.has(f.deviceId)).slice(0, 64).map((f) => hostFlowOut(f, sw.get(f.deviceId))); })(),
       switches: snaps.length, perfUnavailable: !!bytes?.unavailable, corpLimited: corp != null, corpMissing: corp === '',
       computedAt: bytes?.computedAt ?? Date.now(), cacheTtlMs: perfQueryTtlMs(), source: bytes?.source ?? null, ...(admin ? {} : { addressHidden: true }),
@@ -463,7 +463,7 @@ export function registerHostSan(api) {
       else if (locs.some((r) => isLag(r.port) && hostSwitches.has(`${r.cvpId}\u0000${r.key}`))) { verdict = 'unknown'; note = 'LAG(Port-Channel) — 멤버 포트를 몰라 판정을 보류합니다'; }
       else if (!nicsAllKnown) { verdict = 'unknown'; note = `호스트 업링크 NIC ${upNics}개 중 ${knownNics.size}개만 위치를 압니다 — 다른 NIC 으로 나갈 수 있어 판정을 보류합니다`; }
       else verdict = 'mismatch';
-      // v2.938(L-10): 엣지 시계가 빨라 물어본 시각이 수신 시각으로 잘렸으면 그 차이를 싣는다(화면 '엣지 시계 +n분').
+      // v2.939(L-10): 엣지 시계가 빨라 물어본 시각이 수신 시각으로 잘렸으면 그 차이를 싣는다(화면 '엣지 시계 +n분').
       const edgeAheadMs = meta?.edgeAt != null && meta.edgeAt > meta.at ? meta.edgeAt - meta.at : null;
       return { label: n.label, mac: n.mac, verdict, ...(note ? { note } : {}), askedAt: meta?.at ?? null, ...(edgeAheadMs ? { edgeClockAheadMs: edgeAheadMs } : {}), reason: mask(meta?.reason || null),
         locations: locs.slice(0, 4).map((r) => ({ cvpId: r.cvpId, hostname: r.hostname || r.key, port: r.port, vlan: r.vlan, learnedAt: r.learnedAt, macType: r.macType })) };
@@ -492,7 +492,7 @@ export function registerHostSan(api) {
     const vcDc = new Map((snap.vcenters || []).map((v) => [v.id, String(datacenterOfVcenter(v.id) || '')]));
     const hosts = (snap.hosts || []).filter((x) => Array.isArray(x.hbas) && x.hbas.length && (!dcSet || dcSet.has(vcDc.get(x.vcenterId) ?? '')));
     const sc = splitContext({ req, snap, fabrics, bytes });
-    // v2.938(C-② 시안): 호스트마다 그 호스트의 Flow Vision 플로우(보이는 스위치 것만) — 엔진이 타깃 → 스토리지로 묶어 행에 '스위치 플로우' 로 싣는다.
+    // v2.939(C-② 시안): 호스트마다 그 호스트의 Flow Vision 플로우(보이는 스위치 것만) — 엔진이 타깃 → 스토리지로 묶어 행에 '스위치 플로우' 로 싣는다.
     const swIds = new Set(fabrics.map((f) => f.deviceId));
     const flowsByHost = new Map();
     for (const f of listFlows()) { if (!FLOW_SHOWN_STATES.has(f.state) || !swIds.has(f.deviceId) || !f.hostId) continue; if (!flowsByHost.has(f.hostId)) flowsByHost.set(f.hostId, []); flowsByHost.get(f.hostId).push(hostFlowOut(f)); }

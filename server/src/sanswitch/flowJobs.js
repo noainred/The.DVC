@@ -187,7 +187,7 @@ function applyShow(rec, shown, now) {
     else if (rec.state === 'inactive' && p.active === true) { rec.state = 'active'; rec.deactivatedAt = null; }
   } else {
     rec.lastError = shown.issue?.text || '카운터 형식을 알아보지 못했습니다(원문 앞부분은 기록에)';
-    // v2.938: 출력 형식이 실장비 미확인이라 못 읽은 원문 앞부분을 기록에 남긴다(작업 기록은 1시간 뒤 사라진다 · 화면은 관리 주소를 가려 보여 준다).
+    // v2.939: 출력 형식이 실장비 미확인이라 못 읽은 원문 앞부분을 기록에 남긴다(작업 기록은 1시간 뒤 사라진다 · 화면은 관리 주소를 가려 보여 준다).
     rec.rawSample = String(shown.out || '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]+/g, ' ').slice(0, 400); // eslint-disable-line no-control-regex
   }
 }

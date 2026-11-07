@@ -119,7 +119,7 @@ describe('반증 1인 확정분(v2.935)', () => {
   });
 });
 
-describe('v2.938 비활성화 · 다시 켜기(시안 C-②)', () => {
+describe('v2.939 비활성화 · 다시 켜기(시안 C-②)', () => {
   it('활성은 비활성화 · 비활성은 다시 켜기 · 등록부에 없으면 둘 다 없음', () => {
     const rows = flowRows({ devices: [dev()], flows: [flow({ name: 'a' }), flow({ name: 'b', state: 'inactive', rxBps: null, txBps: null }), flow({ name: 'c', deviceKnown: false })] });
     expect(rows.slice(0, 3).map((r) => [r.state.label, r.canDeactivate, r.canActivate])).toEqual([['활성', true, false], ['비활성', false, true], ['활성', false, false]]);
