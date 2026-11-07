@@ -54,7 +54,7 @@ after(() => { try { srv?.close(); } catch { /* */ } fs.rmSync(DIR, { recursive: 
 function edgeOnce(token, { setup = '' } = {}) {
   const code = `
     const { store } = await import(${JSON.stringify(path.join(HERE, '../src/store.js'))});
-    store.snapshot = { ...store.get(), vcenters: [{ id: 'vcE', name: 'KR-EDGE' }] };
+    store.snapshot = { ...store.get(), vcenters: [{ id: 'vcE', name: 'KR-EDGE' }, { id: 'vcO', name: 'OTHER-CORP' }] };   // vcO 는 이 엣지가 알지만 수집하지 않는 법인
     const VAULT = await import(${JSON.stringify(path.join(HERE, '../src/security/secretVault.js'))});
     VAULT.saveSecretsPolicy({ mode: 'encrypted', level: 1 });
     const KS = await import(${JSON.stringify(path.join(HERE, '../src/bmusage/onboard/keyStore.js'))});
@@ -136,10 +136,12 @@ test('② 배포에서 빼면 엣지는 **자기가 만든 항목만** 지운다
   assert.equal(ED.applyEdgeChanges({ removes: [{ agent: 'edge-a', name: 'mv1' }] }, { by: 'adm' }).ok, true);
   // 엣지 저장소에 없는 키 이름을 가진 행 — 엣지 분석이 거부
   ED.applyEdgeChanges({ upserts: [{ agent: 'edge-a', row: { name: 'nokey', corp: 'vcE', osHost: '10.60.0.7', osUser: 'mon', osKey: 'missing-key', mounts: ['/'], enabled: true } }] }, { by: 'adm' });
+  // 엣지가 아는 법인이지만 자기 수집 법인(로컬 corps)이 아닌 행 — 엣지 쪽 분석이 거부(중앙 목록 문자열만 믿고 남의 법인 서버를 열지 않는다)
+  ED.applyEdgeChanges({ upserts: [{ agent: 'edge-a', row: { name: 'othercorp', corp: 'vcO', osHost: '10.60.0.8', osUser: 'mon', osKey: 'edge-key', mounts: ['/'], enabled: true } }] }, { by: 'adm' });
   const e = await edgeOnce(tokA, { setup });
   assert.equal(e.r.ok, true, JSON.stringify(e.r));
   assert.equal(e.r.removed, 1);
-  assert.equal(e.r.rejected, 1);
+  assert.equal(e.r.rejected, 2, '키 없음 · 남의 법인');
   const names = e.os.map((s) => s.name).sort();
   assert.deepEqual(names, ['e1', 'hand'], '만든 mv1 만 지웠고 손으로 둔 hand 는 남는다 · 거부 행은 등록하지 않는다');
 });
