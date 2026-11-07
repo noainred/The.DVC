@@ -30,6 +30,7 @@ describe('라이선스 · 권한 점검 배지', () => {
   it('스위치 행 — 개수 / 상한 · 실행 위치', () => {
     const [r] = deviceRows({ devices: [dev()] });
     expect(r.countText).toBe('9 / 128'); expect(r.where).toBe('엣지 us-edge-01');
+    expect(deviceRows({ devices: [dev({ flowCount: 11 })] })[0].countText).toBe('11 / 128');   // 점검 뒤 만든 것까지
     expect(deviceRows({ devices: [dev({ check: null, portalFlows: 0, agent: '' })] })[0]).toMatchObject({ countText: '0 / 128', where: '이 포탈' });
   });
 });

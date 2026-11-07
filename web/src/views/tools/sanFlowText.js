@@ -36,9 +36,10 @@ export function createBlock(dev) {
 
 export function deviceRows(d) {
   return (Array.isArray(d?.devices) ? d.devices : []).map((x) => {
-    const total = numOrNull(x.check?.total);
+    // 서버 flowCount = 점검 때 장비가 센 개수 + 그 뒤에 만든 것(상한 판정과 같은 값). 옛 응답이면 점검 개수 · 포탈 기록 수.
+    const count = numOrNull(x.flowCount) ?? numOrNull(x.check?.total) ?? numOrNull(x.portalFlows);
     return { ...x, fvB: fvBadge(x.fv), chk: checkBadge(x.check), block: createBlock(x),
-      countText: `${total ?? x.portalFlows ?? '—'} / ${x.limit}`, countSort: total ?? x.portalFlows ?? -1, where: x.agent ? `엣지 ${x.agent}` : '이 포탈' };
+      countText: `${count ?? '—'} / ${x.limit}`, countSort: count ?? -1, where: x.agent ? `엣지 ${x.agent}` : '이 포탈' };
   });
 }
 

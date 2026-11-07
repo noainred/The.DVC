@@ -68,6 +68,12 @@ const LIVE_STATES = new Set(['pending', 'active', 'unknown', 'conflict', 'gone']
  *   권한 점검(flow --show)을 통과한 스위치만(반증 L-2 — 화면 문구가 말한 규칙을 서버도 지킨다).
  * @returns {Promise<{status:number, reason:string} | {dev, h, row, flows, limit, known, onPort, ingr}>}
  */
+/** 스위치의 플로우 개수(추정) — 점검 때 장비가 센 개수 + 그 뒤에 포탈이 만든 것, 포탈 기록 수보다 작지 않게(반증 L-3). 점검 전이면 포탈 기록 수. */
+export function flowCountOf(live, check) {
+  const madeAfter = live.filter((f) => Number(f.createdAt || 0) > Number(check?.at || 0)).length;
+  return Math.max(live.length, (numOrNull(check?.total) ?? 0) + (check ? madeAfter : 0));
+}
+
 async function planCreate(b) {
   const dev = getDeviceWithSecret(String(b.deviceId || ''));
   if (!dev) return { status: 404, reason: '스위치를 찾을 수 없습니다.' };
@@ -104,8 +110,7 @@ async function planCreate(b) {
   }
   const limit = flowLimitOf(self.s.model);
   // 반증 L-3: 점검 때 장비가 센 개수 + 그 뒤에 포탈이 만든 것 — 둘 중 큰 쪽만 보면 사람이 만든 것이 많을 때 적게 셌다.
-  const madeAfter = existing.filter((f) => Number(f.createdAt || 0) > Number(check.at || 0)).length;
-  const known = Math.max(existing.length, (numOrNull(check.total) ?? 0) + madeAfter);
+  const known = flowCountOf(existing, check);
   if (known + flows.length > limit) return { status: 409, reason: `플로우 상한(${limit})을 넘습니다 — 지금 ${known}개(권한 점검 때 장비가 센 개수 + 그 뒤에 만든 것)` };
   const onPort = existing.filter((f) => String(f.ingrport) === ingr).length;
   if (onPort + flows.length > MONITOR_PER_PORT) return { status: 409, reason: `포트 ${ingr} 의 모니터 플로우 상한(${MONITOR_PER_PORT})을 넘습니다 — 포탈 플로우 ${onPort}개` };
@@ -145,9 +150,11 @@ export function registerSanFlow(api) {
     const devices = rows.map(({ d, s }) => {
       const mine = flows.filter((f) => f.deviceId === d.id);
       const ck = checks[d.id] || null;
+      const live = mine.filter((f) => LIVE_STATES.has(f.state));
       return { id: d.id, name: d.name || d.id, type: d.type, datacenterId: d.datacenterId || '', agent: d.agent || '', collectMethod: d.collectMethod || 'ssh',
         model: s?.model || '', fv: s ? fabricVisionOf(s) : { state: 'unknown', reason: '스냅샷 없음' }, limit: flowLimitOf(s?.model),
         check: ck ? { ...ck, text: mask(ck.text) } : null, portalFlows: mine.length, collectedAt: s?.collectedAt || null,
+        flowCount: flowCountOf(live, ck),   // 상한 판정(planCreate)과 같은 개수 — 점검 때 장비가 센 것 + 그 뒤 만든 것
         ...(d.agent ? { edgeIssue: flowEdgeIssue(d.agent) } : {}) };
     });
     const out = flows.map((f) => {
