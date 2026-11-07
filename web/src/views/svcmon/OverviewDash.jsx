@@ -87,7 +87,7 @@ export default function OverviewDash({ onPickTarget = null }) {
     <div className="tv-root">
       <div className="card tv-top">
         <h3>Monitoring · 개요</h3>
-        <span className="tv-var"><span>time</span><b>최근 24시간(재시작 이후)</b></span>
+        <span className="tv-var"><span>time</span><b>{`최근 ${Number.isInteger(d.limits?.hours) && d.limits.hours > 0 ? `${d.limits.hours}시간` : ''}(재시작 이후)`}</b></span>
         <span className="tv-var"><span>live</span><b className="tv-ok">60s</b></span>
         <span className="tv-var"><span>alerts</span><b className={d.alerts?.enabled ? 'tv-ok' : ''}>{d.alerts?.enabled ? `on · 알림 중 ${d.alerts.alerted}` : 'off'}</b></span>
         <span className="tv-spacer"><button type="button" className="btn" disabled={busy} onClick={load}>{busy ? '읽는 중…' : '새로고침'}</button></span>
@@ -201,7 +201,7 @@ export default function OverviewDash({ onPickTarget = null }) {
       </div>
 
       <div className="tv-w">
-        <div className="tv-wh">상태 전이 이벤트<em>결과 상태가 바뀐 것만 · 최근 60건 · 재시작 이후</em></div>
+        <div className="tv-wh">상태 전이 이벤트<em>{`결과 상태가 바뀐 것만 · ${Number.isInteger(d.limits?.transitions) && d.limits.transitions > 0 ? `최근 ${d.limits.transitions}건` : '최근'} · 재시작 이후`}</em></div>
         {(d.transitions || []).slice(0, 20).map((e, i) => (
           <div key={i} className="tv-ev">
             <span className="t">{hhmm(e.at)}</span>

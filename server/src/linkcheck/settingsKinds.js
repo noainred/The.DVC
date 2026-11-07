@@ -56,7 +56,8 @@ export const SETTINGS_PATHS = Object.freeze({
   veeam: { label: '설정 › 백업 › Veeam 백업 서버', hash: '#/settings/veeam' },
   veeamEm: { label: '설정 › 백업 › Veeam 백업 서버 › Enterprise Manager', hash: '#/settings/veeam' },
   bareos: { label: '설정 › 백업 › Bareos 백업 서버 › Director', hash: '#/settings/bareos' },
-  isidu: { label: '특수기능 › 아이실론 디렉터리 사용량 › 대상', hash: '#/tools/isilon-dirusage' },
+  // v2.927(점검 D1-07): 대상 편집은 v2.740 에 설정으로 옮겼다(IsiduViews.jsx 머리말 · isidu/mailHtml.js SETTINGS_PATH) — 도구 화면에는 편집이 없다.
+  isidu: { label: '설정 › 수집 주기·임계 › 아이실론 디렉터리 사용량(슈퍼 관리자 전용)', hash: '#/settings/isilon-dirusage' },
   llm: { label: '설정 › 알림·메일 › AI 검색', hash: '#/settings/ai-search' },
   central: { label: 'portal.env (CENTRAL_URL / CENTRAL_TOKEN)', hash: '' },
 });

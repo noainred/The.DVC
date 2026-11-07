@@ -49,8 +49,11 @@ import { loadLlmConfig } from '../llm/config.js';
 import { upgradeManager } from '../upgrade/manager.js';
 
 const len = (a) => { if (!Array.isArray(a)) throw new Error('not-a-list'); return a.length; };
-/** 설정 파일이 없고 손상 보존본(<파일>.corrupt.<시각>)만 있는가 — 로더가 손상본을 옮기고 기본값으로 시작한 상태. */
-const damaged = (name) => { const f = path.join(config.configDir, name); return !fs.existsSync(f) && !!corruptOnlyReason(f); };
+/**
+ * 설정 파일이 없고 손상 보존본(<파일>.corrupt.<시각>)만 있는가 — 로더가 손상본을 옮기고 기본값으로 시작한 상태.
+ * v2.927(점검 D1-01): 통신 점검 카탈로그(linkcheck/settingsLinks.js)도 load-error 표지가 없는 등록부에 이 판정을 쓴다 — 복제하지 않게 내보낸다.
+ */
+export const damaged = (name) => { const f = path.join(config.configDir, name); return !fs.existsSync(f) && !!corruptOnlyReason(f); };
 
 /** 키 → 사실 함수. grade.js RULES 와 같은 키. */
 export function settingsStatusSources({ now = Date.now() } = {}) {

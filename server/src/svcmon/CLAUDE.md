@@ -18,8 +18,11 @@
 - **게이트**: `/settings-sync/*` 는 조회도 **adminOnly + fullScopeOnly**(통신 점검 목록과 같다 — 반증 H1: canEdit 판본은 operator 에게 봉인 비밀 웹훅 URL·통합 계정 매핑을 줬다) ·
   행은 `safeAddress`(사용자 정보·쿼리 제거 · 제외 종류는 주소 없음)로 자른다 · `/overview` 는 `/state` 와 같은 조회 기준(엣지 sourceIp 없음) · `/alert-settings` 저장은 adminOnly + fullScopeOnly.
   등록된 대상의 이름·호스트·출처는 `/state` 로 범위 계정도 본다(svcmon 조회 N-2) — 그래서 관리자 전용 정보인 통합 계정 SSH 대상은 **제외 종류**다.
-- **손상된 등록부**는 로더가 `registryLoadError` 류를 보고 sourceErrors 로 올린다(반증 M2) → 그 종류의 연동 대상은 '보류'. **다시 나타난 사라짐 대상**은 '변경' 으로 올라 표지를 지우고
+- **손상된 등록부**는 로더가 `registryLoadError` 류를 보고 sourceErrors 로 올린다(반증 M2) → 그 종류의 연동 대상은 '보류'.
+  v2.927(점검 D1-01): 표지 함수가 없는 로더(vCenter · NSX · Horizon · 배포 대상 · 중계 토폴로지 · 물리 GPU 등 — 손상본을 보존하고 `[]` 를 준다)는 `linkcheck/settingsLinks.js REGISTRY_FILE_OF` 의 파일에 `settingsStatus/sources.js damaged` 판정을 쓴다(판정 복제 금지 — 파일 이름 표는 실제 로더로 손상본이 생기는지 시험 `sweep2927Svcmon` 이 대조한다). **다시 나타난 사라짐 대상**은 '변경' 으로 올라 표지를 지우고
   설정 연동이 끈 것(`origin.goneOff`)만 다시 켠다(M3). 재동기화는 포트·URL 만 고친다(사람이 바꾼 사용 여부·주기·이름은 그대로).
 - **전이·알림(`transitions.js`)**: 결과를 기록하는 두 자리(폴러 sweep · 엣지 ingestReport)에서만 `noteResult` — O(1), 던지지 않는다. 엣지 재전송(상태·연속 횟수가 같은 행)은 두 번 세지 않는다(measuredAt 은 전송 지연만큼 흔들린다 — 반증 M5).
+  v2.927(점검 D1-03 · D1-05 · D1-06): 메타 없이 온 엣지 행(needMeta 첫 보고)은 알림 판정만 미룬다(집계·전이는 기록 · 시한 = push 주기 × 2, 3~15분) · 복구 결과는 범위 · 끈 종류 검사보다 **먼저** 알린 상태를 닫는다(저장 때 일괄로 비우지 않는다 — 범위를 넓힐 때 중복 실패 알림) · 점검 삭제/중지 · 엣지 GC · 엣지 잊기에서도 그 키를 지운다 · 요약 키 판정은 `/:summary(:|$)/`.
   알림은 연속 N회째 한 번 · 복구 한 번 · 20초 창에 6건 이상이면 요약 1건(키에 시각 — 고정 키는 억제 창에 버려졌다, M4) · `enqueueNotify`(폴러를 멈추지 않게) · **기본 꺼짐**. 알린 상태는 메모리(재시작 뒤 한 번 더 알릴 수 있음 — 화면이 밝힌다).
 - **개요 집계(`dash.js`)**: 상태는 `status.js testState` · 엣지 `edgeState` 값 그대로(다시 판정하지 않는다). 중앙(실행 안 함)은 직접 결과를 세지 않는다. 30초 memo(저장소 rev 포함) · 엣지 행은 정렬하지 않고 읽는다 · 화면 60초 갱신(반증 M6 실측: 로컬 200k 0.39초 · 엣지 192k 0.86초 동기 — 양보 루프는 다음 과제).
+  → ✅ v2.927(점검 E1-05): 본문을 생성기 하나로 두고 `buildDashAsync`(createYielder · 128행마다 양보 · 안정 top-K)와 동기 판이 같은 코드를 쓴다 · 개요 라우트는 single-flight. 실측 1,158ms → 최대 정지 20~34ms. 남은 동기 구간은 `edgeSummary` 1회(192k 행 약 50ms — 다른 라우트와 공유).

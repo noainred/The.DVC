@@ -32,7 +32,7 @@ import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { listAssignments, noteExpectMs } from './svcmonAssign.js';
-import { noteResult } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림
+import { noteResult, noteAlertOnly, forgetAlerted, forgetAlertedWhere } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -55,6 +55,14 @@ export const WARM_GC_HOLD_MS = envNum('SVCMON_EDGE_WARM_GC_HOLD_MS', 30 * 60_000
  */
 export const REGRESS_GC_HOLD_MS = envNum('SVCMON_EDGE_REGRESS_GC_HOLD_MS', 3 * 60_000);
 export const MAX_ROWS_PER_AGENT = envNum('SVCMON_EDGE_MAX_ROWS', 20000);
+/**
+ * v2.927(점검 D1-03): 메타(대상·점검 이름·경로)가 아직 없는 행의 **알림 판정 보류 시한**(하한). 중앙 재시작 직후 엣지 첫 보고는 메타 없이 행만 오고
+ *   (중앙이 needMeta 를 답한 다음 push 에 메타가 온다), 그 사이 판정하면 제목이 내부 테스트 ID · 경로가 빈 알림이 나갔다. 보류는 엣지 push 주기의
+ *   2배(이 하한 ~ 15분 상한)까지만 — 넘으면 메타 없이 판정한다(루트 CLAUDE.md '보류에는 시한' · 행 낡음 판정 기본 5분보다 짧은 하한).
+ */
+export const META_ALERT_HOLD_MS = envNum('SVCMON_EDGE_META_ALERT_HOLD_MS', 3 * 60_000);
+const META_ALERT_HOLD_MAX_MS = 15 * 60_000;
+export function metaAlertHoldMs(a) { return Math.min(META_ALERT_HOLD_MAX_MS, Math.max(META_ALERT_HOLD_MS, 2 * (Number(a?.expectMs) || 60_000))); }
 /** 시계 오차 경고 임계 — 넘어도 결과를 버리지 않는다(경고만). */
 export const SKEW_WARN_MS = envNum('SVCMON_EDGE_SKEW_WARN_MS', 60_000);
 /** 무보고 판정 = max(3 × 엣지가 알려준 예상 간격, 이 하한). */
@@ -93,6 +101,7 @@ function blank(agent) {
     portalPort: 0,
     rows: new Map(),      // edgeTestId -> { s, r, m, k, measuredAt, snapId }
     meta: new Map(),      // edgeTestId -> { p, n, h, t, y, iv }
+    alertPending: new Map(), // v2.927(점검 D1-03): edgeTestId -> 보류 시작 시각(메타가 없어 알림 판정을 미룬 행)
     counters: { accepted: 0, dropped: 0, overflow: 0, badRow: 0, chunks: 0, snapshots: 0 },
     silent: null,         // svcmonSilence 가 관리(전환 알림용)
   };
@@ -186,8 +195,10 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     const row = a.rows.get(id);
     if (!prev || prev.s !== row.s || prev.k !== row.k) {
       const mm = a.meta.get(id);
+      // v2.927(점검 D1-03): 메타가 없으면 집계·전이만 기록하고 알림 판정은 메타가 온 뒤로 미룬다(아래 alertPending 처리 — 시한 있음).
       noteResult({ at: measuredAt, scope: a.agent, testId: id, prev: prev?.s || null, status: row.s, reply: row.r, ms: row.m, streak: row.k,
-        target: { name: mm?.n, path: mm?.p, host: mm?.h }, test: { name: mm?.t, type: mm?.y } });
+        target: { name: mm?.n, path: mm?.p, host: mm?.h }, test: { name: mm?.t, type: mm?.y }, deferAlert: !mm });
+      if (!mm) { if (!a.alertPending.has(id)) a.alertPending.set(id, recvAt); } else a.alertPending.delete(id);
     }
     accepted += 1;
   }
@@ -213,6 +224,21 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
       });
     }
     a.metaSig = text(body?.metaSig, 64);
+  }
+
+  // v2.927(점검 D1-03): 미룬 알림 판정 — 메타가 왔으면 그 이름·경로로(범위 '설정 연동 대상만' 판정도 이때), 시한을 넘기면 메타 없이 판정한다.
+  //   집계·전이는 이미 기록했다(noteAlertOnly 는 판정만). 행이 사라졌으면 버린다. 보류 집합은 행 id 의 부분집합이라 상한이 행 상한과 같다.
+  if (a.alertPending.size) {
+    const hold = metaAlertHoldMs(a);
+    for (const [id, since] of a.alertPending) {
+      const row = a.rows.get(id);
+      if (!row) { a.alertPending.delete(id); continue; }
+      const mm = a.meta.get(id);
+      if (!mm && recvAt - since < hold) continue;
+      a.alertPending.delete(id);
+      noteAlertOnly({ at: row.measuredAt, scope: a.agent, testId: id, status: row.s, reply: row.r, streak: row.k,
+        target: { name: mm?.n, path: mm?.p, host: mm?.h }, test: { name: mm?.t, type: mm?.y } });
+    }
   }
 
   // 스냅샷 완결: 마지막 청크를 받으면 이번/직전 완결 스냅샷에 속하지 않은 행을 정리한다
@@ -245,7 +271,8 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     } else { a.regressSince = 0; a.regressPrevSnapId = 0; }
     if (!warmHold && (snapId >= a.prevCompleteSnapId || regressReset)) {
       for (const [id, row] of a.rows) {
-        if (row.snapId !== snapId && row.snapId !== keepPrev) a.rows.delete(id);
+        // v2.927(점검 D1-05 ③): 엣지에서 지워진(또는 꺼진) 점검 — 결과가 더 오지 않으므로 '알린 상태' 도 닫는다(복구 알림 없음).
+        if (row.snapId !== snapId && row.snapId !== keepPrev) { a.rows.delete(id); a.alertPending.delete(id); forgetAlerted(a.agent, id); }
       }
       for (const id of a.meta.keys()) if (!a.rows.has(id)) a.meta.delete(id);
       a.prevCompleteSnapId = snapId;
@@ -377,6 +404,42 @@ export function edgeSummaryWithAssigned(now = Date.now()) {
 }
 
 /** 엣지 1개의 항목 목록(메타가 있으면 이름·경로까지). limit 로 잘라 응답 크기를 묶는다. */
+/** 행 1개 → 화면 항목(상태 판정은 여기 하나 — edgeState · edgeItems 가 같이 쓴다). */
+function edgeItemOf(a, id, r, m, silent, now) {
+  const iv = (m?.iv || 60) * 1000;
+  const limitMs = Math.max(3 * iv, 5 * (a.expectMs || 60_000));
+  const stale = now - r.measuredAt > limitMs;
+  return {
+    id,
+    state: silent ? 'unknown' : (stale ? 'stale' : r.s),
+    status: r.s,
+    reply: r.r,
+    ms: r.m,
+    streak: r.k,
+    ageMs: now - r.measuredAt,
+    path: m?.p || '',
+    target: m?.n || '',
+    host: m?.h || '',
+    test: m?.t || '',
+    type: m?.y || '',
+    intervalSec: m?.iv || null,
+  };
+}
+
+/**
+ * v2.927(점검 E1-05): Monitoring 개요용 **반복자** — edgeState 처럼 전 행을 배열로 모으지 않고 하나씩 낸다(엣지당 수만 행 × 엣지 수의 사본을 만들지 않는다).
+ *   소비자(svcmon/dash.js buildDashAsync)가 중간에 양보하므로 그 사이 들어온 보고가 행을 바꿀 수 있다 — Map 반복은 지운 항목을 건너뛰고 새 항목을
+ *   내므로 깨지지 않는다(개요는 '그 시점 근처' 의 표시다). 무보고 판정은 시작 시각 기준 한 번.
+ * @returns {null | {agent:string, silent:boolean, items:Iterable<object>}}
+ */
+export function edgeItems(agent, now = Date.now()) {
+  const a = agents[String(agent || '').trim()];
+  if (!a) return null;
+  const silent = isSilent(a, now);
+  function* gen() { for (const [id, r] of a.rows) yield edgeItemOf(a, id, r, a.meta.get(id) || null, silent, now); }
+  return { agent: a.agent, silent, items: gen() };
+}
+
 export function edgeState(agent, { path: scope = '', limit = 500, only = '', sort = true } = {}, now = Date.now()) {
   const a = agents[String(agent || '').trim()];
   if (!a) return null;
@@ -385,26 +448,9 @@ export function edgeState(agent, { path: scope = '', limit = 500, only = '', sor
   for (const [id, r] of a.rows) {
     const m = a.meta.get(id) || null;
     if (scope && m && !(m.p === scope || String(m.p).startsWith(`${scope}\\`))) continue;
-    const iv = (m?.iv || 60) * 1000;
-    const limitMs = Math.max(3 * iv, 5 * (a.expectMs || 60_000));
-    const stale = now - r.measuredAt > limitMs;
-    const state = silent ? 'unknown' : (stale ? 'stale' : r.s);
-    if (only && only !== state) continue;
-    items.push({
-      id,
-      state,
-      status: r.s,
-      reply: r.r,
-      ms: r.m,
-      streak: r.k,
-      ageMs: now - r.measuredAt,
-      path: m?.p || '',
-      target: m?.n || '',
-      host: m?.h || '',
-      test: m?.t || '',
-      type: m?.y || '',
-      intervalSec: m?.iv || null,
-    });
+    const it = edgeItemOf(a, id, r, m, silent, now);
+    if (only && only !== it.state) continue;
+    items.push(it);
   }
   // v2.915: Monitoring 개요 집계는 순서가 필요 없다(sort:false) — 수십만 행 localeCompare 정렬을 건너뛴다.
   if (sort) items.sort((x, y) => (x.path || '').localeCompare(y.path || '') || (x.target || '').localeCompare(y.target || ''));
@@ -442,6 +488,7 @@ export function forgetAgent(agent, user = '') {
   if (!agents[name]) return false;
   const rows = agents[name].rows.size;
   delete agents[name];
+  forgetAlertedWhere(name);   // v2.927(점검 D1-05 ③): 잊은 엣지의 '알린 상태' 도 닫는다
   logAudit({ user, action: 'svcmon.edge.forget', target: name, detail: `행 ${rows}개 폐기` });
   return true;
 }

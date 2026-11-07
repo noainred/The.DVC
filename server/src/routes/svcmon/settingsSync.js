@@ -14,13 +14,13 @@ import { logAudit } from '../../audit.js';
 import { listTargets, storeRevision, planBulkTargets } from '../../svcmon/store.js';
 import {
   readCatalog, planApply, previewOf, executePlan, detachTarget, getOptions, setOptions, kindMeta, driftRing, dailySummary, syncEvents,
-  lastDetection, syncAvailableHere, ackDrift, MAX_ROWS, MAX_APPLY, GONE_ACTIONS, EXCLUDED_KINDS, SYNC_ROOT,
+  lastDetection, syncAvailableHere, ackDrift, MAX_ROWS, MAX_APPLY, GONE_ACTIONS, EXCLUDED_KINDS, SYNC_ROOT, detectTiming,
 } from '../../svcmon/settingsSync.js';
 import { recordBatch } from '../../svcmon/batches.js';
-import { buildDash } from '../../svcmon/dash.js';
-import { recentTransitions, hourlySeries, getAlertSettings, saveAlertSettings, alertStats, transitionsSince } from '../../svcmon/transitions.js';
+import { buildDashAsync } from '../../svcmon/dash.js';
+import { recentTransitions, hourlySeries, getAlertSettings, saveAlertSettings, alertStats, transitionsSince, alertBatchInfo, HOURS_KEEP } from '../../svcmon/transitions.js';
 import { getResults, executesHere, pollerRole } from '../../svcmon/poller.js';
-import { edgeSummary, edgeState } from '../../central/svcmonEdge.js';
+import { edgeSummary, edgeItems, listAgentNames } from '../../central/svcmonEdge.js';
 import { listAssignments, setAssignment, DEFAULT_EXCEPT_TYPES } from '../../central/svcmonAssign.js';
 import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
 
@@ -83,6 +83,8 @@ svcmonRouter.get('/settings-sync/catalog', adminOnly, fullScopeOnly, async (req,
     options: getOptions(), drift: { ring: driftRing(), daily: dailySummary(), last: lastDetection() },
     edges: edgeRows().map((e) => ({ ...e, syncTargets: assignedTargets.get(e.agent) || 0 })),
     events: syncEvents().slice(0, 50), limits: { maxApply: MAX_APPLY, goneActions: GONE_ACTIONS }, root: SYNC_ROOT,
+    // v2.927(점검 D1-08): 화면 문구('기동 N 뒤부터 M마다')가 서버 상수를 박지 않게 감지 주기를 싣는다.
+    detect: detectTiming(),
     role: pollerRole(), storeRev: storeRevision(),
   });
 });
@@ -155,33 +157,49 @@ svcmonRouter.post('/settings-sync/detach/:id', adminOnly, fullScopeOnly, (req, r
 });
 
 /* ── Monitoring 개요(기술 뷰) ── */
-let _dashMemo = null;   // { key, at, body }
-svcmonRouter.get('/overview', (req, res) => {
-  const now = Date.now();
-  // 같은 저장소 세대·30초 안이면 재사용 — 20만 점검 + 엣지 행 전수 순회는 수백 ms 동기다(반증 M6 실측: 로컬 200k 0.39초 · 엣지 192k 0.86초).
-  //   화면은 60초마다 부르고(무거운 API 15초 폴링 금지), 엣지 행은 정렬하지 않고 읽는다(sort:false — localeCompare 정렬이 비용의 큰 몫).
-  const key = `${storeRevision()}|${Math.floor(now / 30_000)}`;
-  if (_dashMemo && _dashMemo.key === key) return res.json(_dashMemo.body);
+let _dashMemo = null;       // { key, at, body }
+let _dashInflight = null;   // { key, p } — 같은 세대의 동시 요청은 계산 하나를 함께 기다린다(single-flight)
+/*
+ * 같은 저장소 세대·30초 안이면 재사용. 화면은 60초마다 부른다(무거운 API 15초 폴링 금지).
+ * v2.927(점검 E1-05 — 측정): 계산을 **시간 기준 양보**(buildDashAsync · createYielder)로 돈다 — 예전에는 로컬 점검 20만 + 엣지 행 19.2만을 한 번에
+ *   동기로 돌아 약 1.2초 이벤트 루프를 잡았다(반증 M6 실측과 같은 규모). 엣지 행은 배열로 모으지 않고 반복자(edgeItems)로 넘긴다.
+ *   양보하는 동안 같은 세대의 다른 요청이 계산을 또 시작하지 않게 진행 중인 약속을 공유한다.
+ */
+const OVERVIEW_TRANSITIONS = 60;
+async function computeDash(now) {
   const edges = [];
-  for (const e of edgeSummary(now)) {
-    const st = edgeState(e.agent, { limit: 50_000, sort: false }, now);
-    if (st) edges.push({ agent: st.agent, silent: st.silent, items: st.items });
+  for (const name of listAgentNames()) {
+    const st = edgeItems(name, now);
+    if (st) edges.push(st);
   }
-  const dash = buildDash({ targets: listTargets(), results: getResults(), edgeStates: edges, now, executes: executesHere() });
-  const body = {
+  const dash = await buildDashAsync({ targets: listTargets(), results: getResults(), edgeStates: edges, now, executes: executesHere() });
+  return {
     ok: true, at: now, ...dash,
-    hourly: hourlySeries(now), transitions: recentTransitions(60), since: transitionsSince(),
+    hourly: hourlySeries(now), transitions: recentTransitions(OVERVIEW_TRANSITIONS), since: transitionsSince(),
+    limits: { hours: HOURS_KEEP, transitions: OVERVIEW_TRANSITIONS },   // v2.927(점검 D1-08): 화면 문구('최근 N시간 · 최근 N건')용
     edges: edgeRows(now), executes: executesHere(), role: pollerRole(),
     alerts: { enabled: getAlertSettings().enabled, ...alertStats() },
     kindLabels: Object.fromEntries(Object.entries(kindMeta()).map(([k, v]) => [k, v.label])),
   };
-  _dashMemo = { key, at: now, body };
-  res.json(body);
+}
+svcmonRouter.get('/overview', async (req, res) => {
+  const now = Date.now();
+  const key = `${storeRevision()}|${Math.floor(now / 30_000)}`;
+  if (_dashMemo && _dashMemo.key === key) return res.json(_dashMemo.body);
+  let fl = _dashInflight && _dashInflight.key === key ? _dashInflight : null;
+  if (!fl) {
+    fl = { key, p: computeDash(now) };
+    _dashInflight = fl;
+    fl.p.then((body) => { _dashMemo = { key, at: now, body }; }, () => {}).finally(() => { if (_dashInflight === fl) _dashInflight = null; });
+  }
+  try { res.json(await fl.p); }
+  catch (e) { res.status(500).json({ ok: false, error: `개요를 만들지 못했습니다: ${t(e?.message).slice(0, 200)}` }); }
 });
 
 /* ── 실패 알림 설정 ── */
 svcmonRouter.get('/alert-settings', canEdit, (req, res) => {
-  res.json({ ok: true, settings: getAlertSettings(), stats: alertStats() });
+  // v2.927(점검 D1-08): 요약 묶음 창·기준 건수를 싣는다 — 화면이 '20초 안에 6건' 을 박지 않게(+1 해석은 서버 alertBatchInfo 한 곳).
+  res.json({ ok: true, settings: getAlertSettings(), stats: alertStats(), batch: alertBatchInfo() });
 });
 svcmonRouter.put('/alert-settings', adminOnly, fullScopeOnly, (req, res) => {
   try {

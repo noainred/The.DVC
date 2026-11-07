@@ -6,7 +6,7 @@ import { requireChanged } from '../changeResult.js';
 import { STable } from '../../components/STable.jsx';
 import './techView.css';
 import {
-  SYNC_STATE_META, SELECTABLE, FACETS, emptySelection, filterRows, facetCounts, chipValue, toggleFacet, sparkPoints, stackedBars, fmtMs, fmtAge,
+  SYNC_STATE_META, SELECTABLE, FACETS, emptySelection, filterRows, facetCounts, chipValue, toggleFacet, sparkPoints, stackedBars, fmtMs, fmtAge, detectText,
 } from './syncLogic.js';
 
 /**
@@ -46,15 +46,16 @@ function QV({ title, sub, value, cls = '', note, spark, color }) {
 
 const timeOf = (at) => (at ? new Date(at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }) : '');
 
-function DriftChart({ ring }) {
+function DriftChart({ ring, detect }) {
   const W = 600; const H = 130;
   const { bars, max } = stackedBars(ring, STATE_KEYS, { w: W, h: H - 18, left: 34, right: 8, top: 8 });
-  if (!ring.length) return <div className="tv-empty">아직 감지 기록이 없습니다 — 포탈 기동 1분 뒤부터 5분마다 쌓입니다(재시작하면 비어 있습니다).</div>;
+  const dt = detectText(detect);
+  if (!ring.length) return <div className="tv-empty">{`아직 감지 기록이 없습니다 — ${dt.empty}(재시작하면 비어 있습니다).`}</div>;
   const color = { new: '#3b82f6', changed: '#f59e0b', gone: '#ef4444' };
   const first = ring[0]?.at; const last = ring[ring.length - 1]?.at; const mid = ring[Math.floor(ring.length / 2)]?.at;
   return (
     <svg className="tv-chart" viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img"
-      aria-label="5분 감지마다의 미등록·주소 변경·사라짐 건수 누적 막대">
+      aria-label={`${dt.every ? `${dt.every} ` : ''}감지마다의 미등록·주소 변경·사라짐 건수 누적 막대`}>
       <line x1="34" y1={H - 18} x2={W - 8} y2={H - 18} stroke="var(--border)" />
       <text x="2" y="14">{max || 0}</text><text x="2" y={H - 20}>0</text>
       {bars.map((b, i) => <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill={color[b.k]}><title>{`${timeOf(b.at)} ${SYNC_STATE_META[b.k].label} ${b.v}`}</title></rect>)}
@@ -123,6 +124,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
   const c = data.counts || {};
   const daily = data.drift?.daily || [];
   const ring = data.drift?.ring || [];
+  const detectEvery = detectText(data.detect).every;   // v2.927(점검 D1-08): 감지 주기는 서버 값
   const present = (c.total || 0) - (c.gone || 0) - (c.held || 0);
   const pickedRows = rows.filter((r) => picked.has(r.key));
   const togglePick = (k) => setPicked((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else if (n.size < maxApply) n.add(k); return n; });
@@ -214,8 +216,8 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
             </div>
           </div>
           <div className="tv-w">
-            <div className="tv-wh">미등록 · 변경 · 사라짐 추이 — 5분 감지<em>settingsDrift</em></div>
-            <DriftChart ring={ring} />
+            <div className="tv-wh">{`미등록 · 변경 · 사라짐 추이 — ${detectEvery ? `${detectEvery} ` : '주기 '}감지`}<em>settingsDrift</em></div>
+            <DriftChart ring={ring} detect={data.detect} />
             <div className="tv-legend">
               <span><i style={{ background: '#3b82f6' }} />미등록</span><span><i style={{ background: '#f59e0b' }} />주소 변경</span><span><i style={{ background: '#ef4444' }} />사라짐</span>
               <span style={{ marginLeft: 'auto' }}>감지 = 카탈로그 읽기만(네트워크 점검 아님) · 적용은 사람이</span>

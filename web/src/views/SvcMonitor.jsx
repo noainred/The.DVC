@@ -16,6 +16,8 @@ import { blankOr } from './blankOr.js';
 import { edgeCardKind, edgeCardWarn, edgeCardMeta, edgeNoReportTotal } from './svcmon/edgeCardText.js';
 import Select from '../components/Select.jsx';
 import OverviewDash from './svcmon/OverviewDash.jsx';   // v2.915 개요(기술 뷰 — Datadog 대시보드 참고)
+import { isFullScopeAdmin } from './svcmon/svcmonAccess.js';
+import { periodText } from './svcmon/syncLogic.js';
 import './svcmon/techView.css';
 
 /**
@@ -476,13 +478,13 @@ export default function SvcMonitor() {
   //   검토 화면이 관리자(전체 범위) 전용이라 그 밖의 계정에는 띄우지 않는다.
   const drift = data?.settingsDrift;
   const driftN = drift ? (drift.new || 0) + (drift.changed || 0) + (drift.gone || 0) : 0;
-  const fullScope = !(me?.scope?.vcenters?.length);
   const ackDrift = async () => { try { await postJson('/svcmon/settings-sync/ack', {}); setDriftHidden(true); refresh(); } catch (e) { window.alert(e.message); } };
-  const isAdminFull = me?.role === 'admin' && fullScope;   // 검토·확인 라우트가 adminOnly + fullScopeOnly(반증 H1)
+  const isAdminFull = isFullScopeAdmin(me);   // 검토·확인 라우트가 adminOnly + fullScopeOnly(반증 H1) — v2.927(점검 D1-09): 판정은 svcmonAccess.js 하나
+  const driftEvery = periodText(drift?.intervalMs);   // v2.927(점검 D1-08): 감지 주기는 서버 값(없으면 숫자 없이)
   const driftBanner = isAdminFull && !driftHidden && driftN > 0 ? (
     <div className="tv-banner" role="status">
       <span><b>설정이 바뀌었습니다</b>{` — 새 항목 ${drift.new || 0} · 주소 변경 ${drift.changed || 0} · 설정에서 사라짐 ${drift.gone || 0}`}
-        {drift.at ? ` · 마지막 확인 ${new Date(drift.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}(5분 주기 · 카탈로그 읽기만)` : ''}</span>
+        {drift.at ? ` · 마지막 확인 ${new Date(drift.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}(${driftEvery ? `${driftEvery} 주기` : '주기 감지'} · 카탈로그 읽기만)` : ''}</span>
       <a className="pc-btn accent" style={{ marginLeft: 'auto', textDecoration: 'none' }} href="#/tools/svcmon-config/sync">설정 연동에서 검토</a>
       {(drift.new || 0) > 0 && <button type="button" className="pc-btn" title="지금까지 생긴 새 항목을 본 것으로 둡니다(미등록은 설정 연동 탭에 그대로 남습니다)" onClick={ackDrift}>새 항목 확인</button>}
       <button type="button" className="pc-btn" onClick={() => setDriftHidden(true)}>나중에</button>
