@@ -406,9 +406,15 @@ describe('v2.554 — iDRAC 라이선스 인식과 Enterprise 대체 수집', () 
     expect(s.why).toContain('다시 눌러도 같습니다');
   });
 
-  it('엣지에서 꺼져 있으면 중앙에서 켤 수 없다고 말한다', () => {
+  it('엣지에서 꺼져 있으면 — v2.927 정정: 관리자에게는 중앙에서 켜기 버튼, 그 밖에는 관리자·법인 포탈이 켠다고 말한다(켤 수 없다고 하지 않는다)', () => {
     const s = edgePullState({ enabled: true, hasUrl: true, snapAt: Date.now(), enabledOnEdge: false });
-    expect(s.why).toContain('중앙에서는 켤 수 없습니다');
+    expect(s.state).toBe('off-edge');
+    expect(s.why).not.toContain('켤 수 없습니다');
+    expect(s.why).toContain('관리자가 중앙에서 켜거나 그 법인 포탈에서 켭니다');
+    expect(s.why).not.toContain('버튼');
+    const a = edgePullState({ enabled: true, hasUrl: true, snapAt: Date.now(), enabledOnEdge: false }, { canEnableCentral: true });
+    expect(a.why).toContain('**중앙에서 켜기** 버튼으로 켤 수 있습니다');
+    expect(a.why).not.toMatch(/`/);
   });
 
   it('⚠ 값은 있는데 마지막 시도가 실패면 그 사실을 말한다(낡은 값을 지금 값인 척하지 않는다)', () => {
