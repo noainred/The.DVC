@@ -273,7 +273,8 @@ export const TREND_MIN_EDGE_VERSION = '2.922.0';
  *   중앙은 결과만 받는다(저장하지 않는다). POST 는 재전송하지 않는다(retries 0 — 엣지 동작을 두 번 시키지 않게 · v2.612 EDGE2612-01).
  *   엣지 응답은 아는 필드만 · 상한(sanitizeSnapshotBody). 사유 · 실행자는 엣지 보관 행과 양쪽 감사 로그에 남는다.
  * ════════════════════════════════════════════════════════════════════════════ */
-export const SNAPSHOT_MIN_EDGE_VERSION = '2.923.0';
+// v2.933 정정: 4단계는 번호 충돌로 2.926.0 으로 게시됐다 — 2.923~2.925 는 다른 작업의 릴리스라 스냅샷 대행 라우트가 없다(예정 번호 2.923.0 이 남아 그 엣지에 요청을 보내 404 를 받았다).
+export const SNAPSHOT_MIN_EDGE_VERSION = '2.926.0';
 /** 엣지 시한(연결 15초 + 명령 30초 + 여유) — 엣지 세션 시한(50초)보다 길게. */
 export const SNAPSHOT_PULL_TIMEOUT_MS = 75_000;
 const SNAP_STATES = ['ok', 'perm', 'partial', 'absent', 'missing'];
