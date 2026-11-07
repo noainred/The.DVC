@@ -126,7 +126,6 @@ export default function AgentDeploy() {
     setDl((d) => ({ ...d, busy: true })); setResult(null);
     const results = [];
     for (const k of kinds) {
-      // eslint-disable-next-line no-await-in-loop
       const r = await postJson('/admin/packages/download', { kind: k, version: dl.version || undefined }).catch((e) => ({ ok: false, reason: e.message }));
       results.push({ ...r, kind: k });
     }

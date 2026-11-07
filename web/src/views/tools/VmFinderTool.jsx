@@ -38,7 +38,7 @@ export function VmFinder() {
     catch (e) { setData({ error: e.message, items: [], facets: { vcenters: [], folders: [], clusters: [], resourcePools: [] } }); }
     finally { setLoading(false); }
   };
-  useEffect(() => { search(false); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { search(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (key, val) => setF((s) => ({ ...s, [key]: s[key].includes(val) ? s[key].filter((x) => x !== val) : [...s[key], val] }));
   const facets = data?.facets || { vcenters: [], folders: [], clusters: [], resourcePools: [] };

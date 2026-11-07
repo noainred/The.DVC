@@ -54,7 +54,6 @@ export function IpamNetMap() {
     if (vc) qs.set('vcenterId', vc); if (base) qs.set('base', base); qs.set('days', String(days)); qs.set('buckets', String(bucketsFor(days)));
     fetchJson(`/tools/ipam/netmap?${qs.toString()}`).then((d) => { if (!active) return; setData(d); setError(null); setSel(null); if (!base && d.base) setBase(d.base); }).catch((e) => { if (active) setError(e.message); });
     return () => { active = false; };
-    // eslint-disable-next-line
   }, [vc, base, days]);
   if (error && !data) return <ErrorBox message={error} />; // v2.478(감사 B15): 데이터 보유 중 일시 오류는 화면 유지(아래 배너)
   if (!data) return <Loading />;
