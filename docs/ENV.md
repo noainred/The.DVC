@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **712개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **713개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-07)
@@ -392,7 +392,7 @@
 | `POWER_CURRENT_STALE_MS` | `2` |  | collector/state.js, idrac/service.js |
 | `UPGRADE_PUSH_CONCURRENCY` | `4` |  | collector/upgradePush.js |
 
-## 스토리지 수집 (26)
+## 스토리지 수집 (27)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -409,6 +409,7 @@
 | `STORAGE_HTTP_TIMEOUT_MS` |  |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
 | `STORAGE_ISILON_PORT` | `8080` |  | storage/collectors/isilon.js |
+| `STORAGE_NODELOAD_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_POLL_MS` | `60 * 60_000` |  | storage/intervals.js |
 | `STORAGE_POWERSTORE_LIST_LIMIT` | `2000` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_METRICS_INTERVAL` | `'OneDay'` |  | storage/collectors/powerstore.js |
@@ -901,4 +902,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 712
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 713

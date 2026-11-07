@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { setKeepDays, RAW_KEEP_DAYS_DEF, DAILY_KEEP_DAYS_DEF } from './db.js';
+import { setKeepDays, RAW_KEEP_DAYS_DEF, DAILY_KEEP_DAYS_DEF, NODE_LOAD_RAW_KEEP_DAYS_DEF } from './db.js';
 
 const FILE = () => path.join(config.configDir, 'storage-growth-settings.json');
 
@@ -36,6 +36,13 @@ export const GROWTH_SPEC = Object.freeze([
     label: '원시 표본 보존 기간',
     hint: '수집 주기마다 남기는 점입니다. 최근 구간을 세밀히 보는 용도라 짧게 둡니다 — 길게 두면 파일이 빠르게 커집니다(증가량 분석에는 쓰이지 않습니다).',
     presets: [{ days: 30, label: '30일' }, { days: 90, label: '90일(기본)' }, { days: 180, label: '180일' }, { days: 400, label: '400일' }],
+  },
+  {
+    // v2.926 — 노드 부하(네트워크·디스크·CPU) 원시. 노드 × 수집 주기라 용량 원시보다 크다 — 일 롤업(위 '사용량 저장 기간')은 따로 남는다.
+    key: 'nodeLoadRawKeepDays', def: NODE_LOAD_RAW_KEEP_DAYS_DEF, min: 1, max: 400,
+    label: '노드 부하 원시 보존 기간',
+    hint: '아이실론 노드별 네트워크·디스크·CPU 를 수집 주기마다 남기는 점입니다(노드 수 × 주기). 24시간·7일 보기와 그 ‘이전 구간’ 은 이 기간까지만 갈 수 있고, 30일·90일 보기는 일 단위 요약을 씁니다.',
+    presets: [{ days: 7, label: '7일' }, { days: 30, label: '30일(기본)' }, { days: 90, label: '90일' }, { days: 180, label: '180일' }],
   },
 ]);
 const SPEC_BY_KEY = new Map(GROWTH_SPEC.map((s) => [s.key, s]));
@@ -80,6 +87,7 @@ export function loadGrowthSettings() {
   // 다음 prune 에서 지워졌고, 화면은 '기본값' 이라 말했다.
   const envVals = normalizeGrowthSettings({
     rawKeepDays: process.env.STORAGE_HISTORY_KEEP_DAYS, dailyKeepDays: process.env.STORAGE_DAILY_KEEP_DAYS,
+    nodeLoadRawKeepDays: process.env.STORAGE_NODELOAD_KEEP_DAYS,
   }).values;
   const out = {};
   for (const s of GROWTH_SPEC) {
@@ -106,7 +114,7 @@ export function saveGrowthSettings(input) {
 /** 기동 시·저장 시 DB 모듈에 보존 일수를 주입한다. */
 export function applyGrowthSettings() {
   const v = loadGrowthSettings();
-  setKeepDays({ rawKeepDays: v.rawKeepDays, dailyKeepDays: v.dailyKeepDays });
+  setKeepDays({ rawKeepDays: v.rawKeepDays, dailyKeepDays: v.dailyKeepDays, nodeLoadRawKeepDays: v.nodeLoadRawKeepDays });
   return v;
 }
 
