@@ -1,5 +1,5 @@
 /**
- * GpuAllocDiag — GPU 할당율 '수집 점검'(v2.937 개선 2 — 실장비 확인 도구). 서버 /tools/gpu-alloc/diag(allocTree.allocDiag)는 이미 수집한
+ * GpuAllocDiag — GPU 할당율 '수집 점검'(v2.938 개선 2 — 실장비 확인 도구). 서버 /tools/gpu-alloc/diag(allocTree.allocDiag)는 이미 수집한
  * 스냅샷으로 이 화면이 기대는 가정(배치 정보 · 꺼진 VM 목록 · 패스스루 장치 주소 · 프로파일 이름)을 판정한다 — vCenter 에 새로 묻지 않는다.
  * 조회는 탭을 열 때 1회 + '다시 점검'. 늦게 온 이전 응답은 버린다(useLatest).
  */

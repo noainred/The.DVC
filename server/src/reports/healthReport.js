@@ -7,7 +7,7 @@
 import { localStamp } from '../util/dayKey.js'; // v2.583 #25: 프로세스 TZ 가 아니라 포탈 오프셋
 import { numOrNull } from '../util/numOrNull.js';
 import { dsUsageReadable, dsUsedOf, dsUsageUnknownOf, usageReadable } from '../store.js';
-import { buildGpuAllocTree } from '../gpu/allocTree.js';   // v2.937 GPU 할당율 개선 8: 법인 GPU 할당률 절(화면 · 엑셀과 같은 계층 합계) // v2.622(감사 RECENT-02): 판정 한 벌
+import { buildGpuAllocTree } from '../gpu/allocTree.js';   // v2.938 GPU 할당율 개선 8: 법인 GPU 할당률 절(화면 · 엑셀과 같은 계층 합계) // v2.622(감사 RECENT-02): 판정 한 벌
 
 const DAY = 86_400_000;
 
@@ -118,7 +118,7 @@ export function computeHealthReport(snap, opts = {}) {
     S('certs', lv(bad.length, bad.filter((c) => c.status !== 'expiring').length), bad.length, bad.slice(0, 50), 'TLS 인증서 만료/임박');
   }
 
-  // ⑨ v2.937(GPU 할당율 개선 8): 법인 GPU 할당률 — GPU 호스트가 있는 법인이 하나라도 있을 때만 절을 싣는다(GPU 없는 포탈에 빈 절을 만들지 않는다).
+  // ⑨ v2.938(GPU 할당율 개선 8): 법인 GPU 할당률 — GPU 호스트가 있는 법인이 하나라도 있을 때만 절을 싣는다(GPU 없는 포탈에 빈 절을 만들지 않는다).
   //   90% 이상 경고 · 예비 음수(할당 > 용량) 위험. 모르는 값이 섞여 할당률을 못 낸 법인은 '확인 불가' 로 센다(정상에 넣지 않는다).
   const gpuWarnPct = Number(opts.gpuWarnPct) || 90;
   const gtree = buildGpuAllocTree(snap);

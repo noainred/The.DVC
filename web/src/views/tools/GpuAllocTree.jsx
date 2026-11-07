@@ -15,9 +15,9 @@ import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { vcQuickDot } from '../vcCardText.js';
 import { STable } from '../../components/STable.jsx';
 import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, openAfterRefresh, numText, pctText, sumTotals, corpChips, corpChipText, allocExportQuery } from './gpuAllocText.js';
-import { GpuAllocPlace } from './GpuAllocPlace.jsx';       // v2.937 개선 4 — 배치 추천
-import { GpuAllocHistory } from './GpuAllocHistory.jsx';   // v2.937 개선 7 — 추이 · 소진 예상
-import { GpuAllocDiag } from './GpuAllocDiag.jsx';         // v2.937 개선 2 — 수집 점검
+import { GpuAllocPlace } from './GpuAllocPlace.jsx';       // v2.938 개선 4 — 배치 추천
+import { GpuAllocHistory } from './GpuAllocHistory.jsx';   // v2.938 개선 7 — 추이 · 소진 예상
+import { GpuAllocDiag } from './GpuAllocDiag.jsx';         // v2.938 개선 2 — 수집 점검
 import { GpuAllocExportModal } from './GpuAllocExportModal.jsx';   // v2.855 내보내기 창(시안)
 
 const KIND_BADGE = { vc: 'blue', dc: 'gray', cl: 'gray', host: 'blue', gpu: 'teal', pt: 'amber', vsga: 'gray', unplaced: 'gray', off: 'gray', vm: 'gray' };
@@ -54,8 +54,8 @@ export function GpuAllocTree({ scope }) {
   const [dlMsg, setDlMsg] = useState('');
   const [dlBusy, setDlBusy] = useState('');
   const [exportOpen, setExportOpen] = useState(false);   // v2.855: 엑셀은 창에서 단계·시트를 고른 뒤 받는다
-  const [tab, setTab] = useState('tree');   // v2.937: 계층 표 · 배치 추천 · 추이 · 수집 점검
-  // v2.937 개선 10: 새로 고침 뒤 새로 생긴 노드를 지금 단계대로 펼치려고 직전 계층 · 단계를 기억한다(openAfterRefresh).
+  const [tab, setTab] = useState('tree');   // v2.938: 계층 표 · 배치 추천 · 추이 · 수집 점검
+  // v2.938 개선 10: 새로 고침 뒤 새로 생긴 노드를 지금 단계대로 펼치려고 직전 계층 · 단계를 기억한다(openAfterRefresh).
   const dataRef = useRef(null);
   const levelRef = useRef(DEFAULT_LEVEL);
   // v2.853: 법인 칩(바로가기 모양 — 사용자 요청). 빈 Set = 전체. 여러 개 고를 수 있다.
@@ -89,7 +89,7 @@ export function GpuAllocTree({ scope }) {
   const clickSort = (key) => setSort((s) => (!s || s.key !== key ? { key, dir: key === 'name' ? 'asc' : 'desc' } : s.dir === (key === 'name' ? 'asc' : 'desc') ? { key, dir: key === 'name' ? 'desc' : 'asc' } : null));
   const download = async (fmt) => {
     setDlMsg(''); setDlBusy(fmt);
-    // v2.937 개선 9(사용자 결정 'CSV 도 모든 법인'): 엑셀 창(v2.869 — 모든 법인으로 시작)과 같은 규칙 — 화면 칩 선택과 무관하게 범위 안 법인 전부.
+    // v2.938 개선 9(사용자 결정 'CSV 도 모든 법인'): 엑셀 창(v2.869 — 모든 법인으로 시작)과 같은 규칙 — 화면 칩 선택과 무관하게 범위 안 법인 전부.
     //   화면이 법인 하나(scope)로 열려 있으면 그 법인이다. 서버가 조회 범위와 교집합을 먼저 낸다. 쿼리는 allocExportQuery 하나.
     const q = allocExportQuery({ scope });
     try { await downloadFile(`/tools/gpu-alloc.${fmt}${q}`); } catch (e) { setDlMsg(downloadFailText(e)); } finally { setDlBusy(''); }

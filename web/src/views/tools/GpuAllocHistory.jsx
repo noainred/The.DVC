@@ -1,5 +1,5 @@
 /**
- * GpuAllocHistory — GPU 할당율 '추이'(v2.937 개선 7). 서버 /tools/gpu-alloc/history(gpu/allocHistory.js — 법인별 하루 한 점) 를 그린다.
+ * GpuAllocHistory — GPU 할당율 '추이'(v2.938 개선 7). 서버 /tools/gpu-alloc/history(gpu/allocHistory.js — 법인별 하루 한 점) 를 그린다.
  * 조회는 탭을 열 때 1회 + 기간 바꿀 때(무거운 API 15초 폴링 금지 규약 — 하루 한 점이라 자주 볼 이유도 없다). 늦게 온 이전 응답은 버린다(useLatest).
  * 합계 선은 그날 **모든 법인의 점이 있을 때만** 이어진다(서버가 부분 합을 null 로 준다 — 선이 끊긴다).
  * 소진 예상은 최근 30일 기울기(점 7개 이상 · 늘어날 때 · 결정계수 0.3 이상)일 때만 — 아니면 '—'(모름이지 '소진 안 함' 이 아니다).
@@ -42,7 +42,7 @@ export function GpuAllocHistory({ vcSel, scope }) {
       {!data.available ? (
         <div className="card gpu-alloc-panel"><span className="muted">이력 저장소를 열지 못했습니다(이 서버의 Node 가 SQLite 를 지원하지 않거나 파일 권한 문제) — 추이를 쌓지 않습니다.</span></div>
       ) : pts.length < 2 ? (
-        <div className="card gpu-alloc-panel"><span className="muted">아직 이력이 {pts.length ? '하루치뿐' : '없습니다'}입니다. 이 버전(v2.937)부터 하루 한 점씩 쌓이므로 이틀째부터 선이 보입니다. 아래 표는 쌓인 만큼 보여 줍니다.</span></div>
+        <div className="card gpu-alloc-panel"><span className="muted">아직 이력이 {pts.length ? '하루치뿐' : '없습니다'}입니다. 이 버전(v2.938)부터 하루 한 점씩 쌓이므로 이틀째부터 선이 보입니다. 아래 표는 쌓인 만큼 보여 줍니다.</span></div>
       ) : (
         <div className="card gpu-alloc-panel" style={{ height: 320 }}>
           <ResponsiveContainer>

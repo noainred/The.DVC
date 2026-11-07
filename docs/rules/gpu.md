@@ -131,7 +131,7 @@
     정정: 처음에 '꺼진 VM GB 부분 합' 도 결함으로 보고 null 로 바꿨으나, main 의 v2.870 감사 A4-01 이 이미 '합 + 빠진 대수 비고' 로 다뤘고 이 모듈의
     할당 GB 도 같은 규칙(합 + '할당 모르는 VM N')이라 철회했다(넣었으면 할당과 꺼진 VM 의 규칙이 어긋난다).
     회귀: server `gpuAllocTree2852` v2.871 2건(변이: 주소 판정 끄기 · 대소문자 무시 끄기 둘 다 실패) · web `gpuAllocText` 1건(수정 전 판으로 실패 확인).
-  - **v2.937 개선 11가지(사용자 요청 '개선 포인트 제안' → '모두 적용' · 결정: 1회 릴리스 · CSV 도 모든 법인 · 배치 추천은 시안 없이 · 알림 기본 끔/90%)**:
+  - **v2.938 개선 11가지(사용자 요청 '개선 포인트 제안' → '모두 적용' · 결정: 1회 릴리스 · CSV 도 모든 법인 · 배치 추천은 시안 없이 · 알림 기본 끔/90%)**:
     ① **GPU 아닌 패스스루 판정 한 벌** — `gpu/vgpuProfile.js gpuDevicesOnHost`(+ `isGpuVmOnHost` · 화면용 `gpuViewOnHost` · `gpuModeOf` 를 allocTree 에서 옮김).
     GPU 할당율(allocTree)과 **GPU 인벤토리**(`hostGpu.summarizeHostGpu` 패스스루 장수 · `hardwareGpu.buildGpuInventory` 할당 VM 수 · `gpuVmCount` · `/tools/gpu/vms`)가 같은 함수.
     v2.871 은 할당율만 고쳐 인벤토리는 NIC 를 받은 VM 을 GPU VM 으로 셌다. ⚠ Bareos 백업 표지(`vmGpuMark`)는 쓰지 않는다 — 스냅샷 제약은 NIC 도 같다.
@@ -151,7 +151,7 @@
     ⑨ **CSV 도 모든 법인**(엑셀 창과 같은 규칙 — 화면 칩 선택과 무관) ⑩ **새로 고침 뒤 새로 생긴 노드만** 지금 단계대로 펼침(`openAfterRefresh`).
     ⑪ **엑셀 첫 요청 지연(v2.869 의 5.6초)** — 재현 측정: 기동 직후 약 85초 동안만 1.5~12.7초(같은 구간 loop-lag 688~803ms 로그 — 목 데이터 백필 등 기동 작업), 그 뒤 21회
     0.16~0.23초. 엑셀 자체가 아니라 기동 작업과 겹친 것으로 **추정**(원인 분리 측정은 하지 않음) — 코드 변경 없음. 엑셀을 만드는 동안 health 응답이 0.08~0.15초 늦어진다(동기 zip 구간 — 별건).
-    회귀: server `gpuAllocImprove2937`(10건 · 변이 8/8) · web `gpuAllocText`(v2.937 6건).
+    회귀: server `gpuAllocImprove2938`(10건 · 변이 8/8) · web `gpuAllocText`(v2.938 6건).
   - ⚠ 정직 기록: `HostGraphicsInfo.vm` 이 꺼진 VM 을 싣는지, 이 현장 vCenter 가 동적 DirectPath `assignedId` 를 주는지는 실장비로 확인하지 못했다
     (꺼진 VM 은 목록에 있어도 할당에 넣지 않으므로 결과는 같다). 한 VM 의 vGPU 장치 둘이 한 GPU 목록에 한 번만 오면 GPU 단위 할당이 한 장치분으로 적게 잡힌다(호스트 합은 정확).
 

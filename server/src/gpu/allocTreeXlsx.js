@@ -101,7 +101,7 @@ function totalsCells(t) {
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}장`);
   if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.870 감사 A4-01: 꺼진 VM 합에서 빠진 수(예전에는 어디에도 없었다)
   if (t.hostUseUnknown && t.hosts > 1) notes.push(`CPU·메모리 사용률은 ${t.hostUseUnknown}대 제외(못 읽음·끊김)`);
-  if (num(t.offOverGB) > 0) notes.push(`꺼진 VM 을 모두 켜면 예비보다 ${t.offOverGB} GB 더 필요(켜지지 않을 수 있음)`);   // v2.937 개선 5 — 호스트 행만
+  if (num(t.offOverGB) > 0) notes.push(`꺼진 VM 을 모두 켜면 예비보다 ${t.offOverGB} GB 더 필요(켜지지 않을 수 있음)`);   // v2.938 개선 5 — 호스트 행만
   if (num(t.spareGB) != null && t.spareGB < 0) notes.push('할당이 용량을 넘음 — 확인 필요');
   else if (pct != null && pct >= 90) notes.push('포화(90% 이상)');
   return { cap: num(t.capGB), alloc: num(t.allocGB), spare: num(t.spareGB), pct, bar: pct == null ? '' : barText(pct / 100, 10), off: t.offGB ? t.offGB : null, vms: `${t.vmsOn} / ${t.vmsOff}`, note: notes.join(' · '),

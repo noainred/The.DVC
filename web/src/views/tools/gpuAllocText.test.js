@@ -159,7 +159,7 @@ describe('v2.871 버그 점검', () => {
   });
 });
 
-describe('v2.937 GPU 할당율 개선(웹)', async () => {
+describe('v2.938 GPU 할당율 개선(웹)', async () => {
   const M = await import('./gpuAllocText.js');
   const g = (idx, model, vms, slots, o = {}) => ({ idx, model, mode: 'vgpu', capGB: 48, placement: true, vms, slots, allocGB: 0, ...o });
   const placeTree = () => ({
@@ -217,7 +217,7 @@ describe('v2.937 GPU 할당율 개선(웹)', async () => {
   });
 });
 
-describe('v2.937 추이 글자 — 화면 판독 정정', () => {
+describe('v2.938 추이 글자 — 화면 판독 정정', () => {
   it('이미 넘은 법인은 남은 일수 대신 이미 넘음 · 날짜는 지금 시각 기준(1970년이 아님)', async () => {
     const M = await import('./gpuAllocText.js');
     expect(M.trendText({ points: 30, gbPerDay: 1, change30: 30, daysLeft: null, over: true }).left).toBe('이미 넘음');

@@ -1472,7 +1472,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .gpu-alloc-kpi.spare .val { color: var(--mint); }
 .gpu-alloc-kpi.off .val { color: #fbbf24; }
 .gpu-alloc-ctl { align-items: center; margin-bottom: 10px; }
-/* v2.937 GPU 할당율 탭(계층 표 · 배치 추천 · 추이 · 수집 점검) */
+/* v2.938 GPU 할당율 탭(계층 표 · 배치 추천 · 추이 · 수집 점검) */
 .gpu-alloc-tabs { gap: 6px; margin-bottom: 10px; min-width: 0; }
 .gpu-alloc-panel { padding: 12px 14px; margin-bottom: 10px; min-width: 0; }
 .gpu-alloc-verdicts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-bottom: 12px; }

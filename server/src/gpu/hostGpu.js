@@ -44,7 +44,7 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
   let vmsOn = 0; let vmsRead = 0;
   let gpuErrors = 0; // v2.769(점검 R4-D5-3): 켜진 VM 게스트에서 '응답 없음' 으로 센 GPU 장수 합
   for (const v of vms || []) {
-    // v2.937(개선 1 — v2.871 GPU 할당율 수정의 형제): 패스스루가 전부 NIC · HBA 인 VM 은 GPU VM 이 아니다 — 예전에는 'GPU VM' 으로 세고
+    // v2.938(개선 1 — v2.871 GPU 할당율 수정의 형제): 패스스루가 전부 NIC · HBA 인 VM 은 GPU VM 이 아니다 — 예전에는 'GPU VM' 으로 세고
     //   패스스루 장수(passthroughOn)에도 넣었다. 판정은 vgpuProfile.gpuDevicesOnHost 하나(GPU 할당율과 같은 함수).
     const dev = gpuDevicesOnHost(v.gpu, gpus);
     if (!isGpuVmOnHost(dev)) continue;

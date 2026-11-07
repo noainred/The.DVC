@@ -411,6 +411,49 @@ async function backfillStorage(devices, now) {
 }
 
 /**
+ * v2.932(2차) — 5분 표본(경량 폴러 · 데모 아이실론): 1시간 스냅샷의 노드 값 위에 **클라이언트 상위·프로토콜·드라이브 busy·IOPS** 를 합성해 얹는다.
+ *  · 노드 2(두 번째) 가 쏠린다 — ops 약 2.6배 · 고정 클라이언트 여럿(재배치 보드가 후보를 내게). 노드 3 은 클라이언트 0(‘최근 작업한 클라이언트 없음’ 문구 확인용).
+ *  · 모양은 실제 수집기(isilonNodeLoad.buildNodeLoadSample)와 같다 — 그대로 db.saveNodeLoadSample 에 넣는다. 실패 스냅샷(수집 실패 흉내)이면 null.
+ */
+export function demoNodeLoadSample(dev, t = Date.now(), now = t) {
+  const snap = demoStorageSnapshot(dev, t, now);
+  if (!snap.ok || !Array.isArray(snap.nodes?.list) || !snap.nodes.list.length) return null;
+  const spec = SPEC_BY_ID.get(String(dev?.id || '')) || fallbackSpec(dev);
+  const slot = Math.floor(t / 300_000);
+  const jig = (seed, amp = 0.2) => 1 + (demoRand(`${spec.k}:${seed}:${slot}`) * 2 - 1) * amp;
+  const hourOfDay = new Date(t + 9 * HOUR).getUTCHours();
+  const dayProf = 0.62 + 0.38 * Math.sin(((hourOfDay - 7) / 24) * Math.PI * 2);
+  const PROTOS = ['nfs', 'smb', 'nfs', 'nfs', 'smb', 'http'];
+  const nodes = snap.nodes.list.map((n, i) => {
+    const skew = i === 1 ? 2.6 : 1;
+    const nClients = i === 2 ? 0 : 3 + (demoHash(`${spec.k}:nc${i}`) % 4);
+    const clients = Array.from({ length: nClients }, (_, c) => {
+      const seed = `${spec.k}:cl${i}:${c}`;
+      const ops = Math.round((80 + demoRand(seed) * 900) * dayProf * skew * jig(`co${i}${c}`, 0.3));
+      const proto = PROTOS[(demoHash(seed) >>> 3) % PROTOS.length];
+      return { ip: demoIp(`client:${seed}`, 172), name: `demo-${proto}-${(demoHash(seed) % 90) + 10}`, proto, ops,
+        in: ops * 12_000, out: ops * 40_000, lat: Math.round((0.4 + demoRand(`${seed}:l`) * 3) * 10) / 10 };
+    }).sort((a, b) => b.ops - a.ops);
+    const proto = {};
+    for (const c of clients) {
+      const p = proto[c.proto] || { ops: 0, lat: 0, in: 0, out: 0, n: 0 };
+      p.ops += c.ops; p.in += c.in; p.out += c.out; p.lat += c.lat; p.n += 1; proto[c.proto] = p;
+    }
+    for (const k of Object.keys(proto)) { const p = proto[k]; proto[k] = { ops: p.ops, lat: Math.round((p.lat / p.n) * 10) / 10, in: p.in, out: p.out }; }
+    const busy = n.diskInBytesPs == null ? null : Math.round(Math.min(98, 18 + 55 * dayProf * skew * jig(`b${i}`, 0.2)) * 10) / 10;
+    return {
+      id: n.id, in: n.inBps ?? null, out: n.outBps ?? null, din: n.diskInBytesPs ?? null, dout: n.diskOutBytesPs ?? null, cpu: n.cpuPct ?? null,
+      ops: clients.length ? clients.reduce((a, c) => a + c.ops, 0) : (n.inBps == null ? null : 0),
+      lat: clients.length ? Math.round((clients.reduce((a, c) => a + c.lat, 0) / clients.length) * 10) / 10 : null,
+      busy, iops: busy == null ? null : Math.round(busy * 38 * jig(`io${i}`, 0.15)), ...(busy != null ? { busyMax: Math.min(100, Math.round(busy * 1.2 * 10) / 10) } : {}),
+      proto: Object.keys(proto).length ? proto : null, clients: clients.slice(0, 10),
+    };
+  });
+  return { ts: t, nodes, probe: { source: 'demo', total: nodes.length, clients: nodes.filter((n) => n.clients.length).length, proto: nodes.filter((n) => n.proto).length,
+    drives: nodes.filter((n) => n.busy != null).length, latUnit: 'ms(합성)', clientsRead: 'ok', protocolsRead: 'ok', drivesRead: 'ok' } };
+}
+
+/**
  * v2.926 — 노드 부하(네트워크·디스크·CPU) 이력: 원시는 최근 30일 시간별, 그 앞 120일은 하루 4점(일 롤업이 차게). 데모 Isilon 만 ·
  * 그 장비에 노드 부하 기록이 하나도 없을 때만(재기동마다 다시 쌓지 않는다 — 용량 백필과 같은 멱등 규칙). 원시 보존(기본 30일)보다
  * 오래된 원시 행은 다음 정리에서 지워지고 일 롤업만 남는다 — 실제 운영과 같은 모양이다.
@@ -418,20 +461,35 @@ async function backfillStorage(devices, now) {
 async function backfillNodeLoad(devices, now) {
   const db = await import('../../storage/db.js');
   if (!(await db.dbAvailable())) return { devices: 0, points: 0, reason: 'db-unavailable' };
-  let nDev = 0; let points = 0;
+  let nDev = 0; let points = 0; let samples = 0; let sDev = 0;
   for (const d of devices) {
     if (!isDemoId(d.id) || d.type !== 'isilon') continue;
     const o = await db.nodeLoadOldest(d.id);
-    if (o.sampleTs != null || o.day != null) continue;
-    nDev += 1;
-    const base = Math.floor(now / HOUR) * HOUR - (demoHash(d.id) % 50) * 60_000;
-    for (let back = 150 * 24; back >= 1; back -= (back > 30 * 24 ? 6 : 1)) {
-      const r = await db.saveNodeLoadPoint(demoStorageSnapshot(d, base - back * HOUR, now)); if (r.saved) points += 1;
-      if (points % 100 === 0) await new Promise((res) => setImmediate(res)); // 100점마다 양보(이벤트 루프를 길게 잡지 않는다)
+    if (o.sampleTs == null && o.day == null) {
+      nDev += 1;
+      const base = Math.floor(now / HOUR) * HOUR - (demoHash(d.id) % 50) * 60_000;
+      for (let back = 150 * 24; back >= 1; back -= (back > 30 * 24 ? 6 : 1)) {
+        const r = await db.saveNodeLoadPoint(demoStorageSnapshot(d, base - back * HOUR, now)); if (r.saved) points += 1;
+        if (points % 100 === 0) await new Promise((res) => setImmediate(res)); // 100점마다 양보(이벤트 루프를 길게 잡지 않는다)
+      }
+      await new Promise((res) => setImmediate(res)); // 장비 사이 양보
     }
-    await new Promise((res) => setImmediate(res)); // 장비 사이 양보
+    // v2.932(2차) — 클라이언트·프로토콜 표본: 최근 48시간은 5분마다(원시 보존 2일과 같은 길이), 그 앞 5일은 1시간마다(시간 요약·7일 분포가 차게).
+    //   노드 부하 백필과 따로 판정한다(v2.931 설치본은 노드 기록은 있고 클라이언트 기록은 없다).
+    const c = await db.nodeClientOldest(d.id);
+    if (c.sampleTs == null && c.hourTs == null) {
+      sDev += 1;
+      const base5 = Math.floor(now / 300_000) * 300_000;
+      for (let back = 7 * 24 * 12; back >= 1; back -= (back > 48 * 12 ? 12 : 1)) {
+        const s = demoNodeLoadSample(d, base5 - back * 300_000, now);
+        if (!s) continue;
+        const r = await db.saveNodeLoadSample(d.id, s); if (r.saved) samples += 1;
+        if (samples % 24 === 0) await new Promise((res) => setImmediate(res));
+      }
+      await new Promise((res) => setImmediate(res));
+    }
   }
-  return { devices: nDev, points };
+  return { devices: nDev, points, sampleDevices: sDev, samples };
 }
 
 /** 베어메탈 12시간 이력 365일 — 그 슬롯에 합계가 없을 때만. */
