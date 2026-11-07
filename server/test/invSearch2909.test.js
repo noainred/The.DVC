@@ -421,6 +421,9 @@ test('v2.927 B4: 최근 연 장비는 완전 일치 바로 다음 · 보이지 �
   const rows = [row('vm', { id: 'a', name: 'web-01' }), row('vm', { id: 'b', name: 'web-02' }), row('vm', { id: 'c', name: 'web' })];
   const r = Q.searchRows(rows, Q.parseQuery('web'), { recent: new Set(['vm|b']) });
   assert.deepEqual(r.groups[0].rows.map((x) => x.id), ['c', 'b', 'a'], '완전 일치(c) › 최근(b) › 나머지');
+  // 완전 일치인 행이 최근에도 있으면 완전 일치 등급 그대로(가산점이 강등이 되면 안 된다 — 변이 M4)
+  const r2 = Q.searchRows([row('vm', { id: 'd', name: 'web' }), row('vm', { id: 'e', name: 'web' })], Q.parseQuery('web'), { recent: new Set(['vm|e']) });
+  assert.deepEqual(r2.groups[0].tiers, [Q.TIER.exact, Q.TIER.exact], '최근에 있어도 완전 일치는 등급 1');
   assert.equal(ROUTE.parseRecent('vm|a,zz|b,host|,|x, storage|st-1 ').size, 2);
   assert.equal(ROUTE.parseRecent(Array.from({ length: 30 }, (_, i) => `vm|v${i}`).join(',')).size, 10);
   assert.equal(ROUTE.parseRecent(['vm|a']), null);
@@ -448,4 +451,7 @@ test('v2.927 D1: 느린 색인 생성 로그는 10분에 한 번 · 실측은 �
   assert.equal(o.body.index, undefined);
   const r = await call(RANGE, { q: 'srv' });
   assert.equal(r.body.index, undefined, '전체 행 수는 범위와 무관한 값이라 범위 계정에 싣지 않는다');
+  const sa = await call({ username: 'adm-kr', role: 'admin', scope: { vcenters: ['vc1'] } }, { q: 'srv' });
+  assert.equal(sa.status, 200);
+  assert.equal(sa.body.index, undefined, '범위가 걸린 관리자에게도 싣지 않는다(변이 M7)');
 });
