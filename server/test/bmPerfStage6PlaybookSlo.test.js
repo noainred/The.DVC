@@ -122,7 +122,7 @@ test('④ ⑦ 실제 라우터 — 플레이북 · 목표선(실제 파일) · �
   await db.insertUsage(rows, config.agent?.name || '');
   const express = (await import('express')).default;
   const { api } = await import('../src/routes/api.js');
-  const USERS = { viewer: { username: 'v', role: 'viewer', scope: null }, opA: { username: 'opa', role: 'operator', scope: { vcenters: ['vcA'] } }, adm: { username: 'adm', role: 'admin', scope: null }, own: { username: 'noainred', role: 'admin', scope: null } };
+  const USERS = { viewer: { username: 'v', role: 'viewer', scope: null }, opA: { username: 'opa', role: 'operator', scope: { vcenters: ['vcA'] } }, adm: { username: 'adm', role: 'admin', scope: null }, admA: { username: 'ada', role: 'admin', scope: { vcenters: ['vcA'] } }, own: { username: 'noainred', role: 'admin', scope: null } };
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => { req.user = USERS[req.headers['x-u']] || null; next(); });
@@ -145,7 +145,7 @@ test('④ ⑦ 실제 라우터 — 플레이북 · 목표선(실제 파일) · �
   assert.equal(by.disk_await_ms.violations, 1, '피크 기준'); assert.equal(by.swap_out_ps.status, 'met');
   assert.equal(s1.body.maintenanceSource, 'none'); assert.equal(s1.body.res, '5m');
   // 저장 — 설정 소유자 등급만 · 감사
-  const body = { default: [{ metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 70, objectivePct: 99 }], servers: { PTAGA: [{ metric: 'runq_per_core', basis: 'avg', op: 'lt', value: 3, objectivePct: 99 }] } };
+  const body = { default: [{ metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 70, objectivePct: 99 }], servers: { PTAGA: [{ metric: 'runq_per_core', basis: 'avg', op: 'lt', value: 3, objectivePct: 99 }], PTAGB: [{ metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 60, objectivePct: 99 }] } };
   assert.equal((await call('opA', 'PUT', '/slo', body)).status, 403);
   assert.equal((await call('adm', 'PUT', '/slo', body)).status, 403, '소유자가 아닌 관리자');
   assert.equal((await call('own', 'PUT', '/slo', { default: [{ metric: 'evil' }] })).status, 400);
@@ -155,8 +155,14 @@ test('④ ⑦ 실제 라우터 — 플레이북 · 목표선(실제 파일) · �
   assert.ok(audit.auditEntriesWithAction('bm-perf.slo').length >= 1);
   const s2 = await call('opA', 'GET', `/perf/PTAGA/slo?from=${NOW - HOUR}&to=${NOW}`);
   assert.equal(s2.body.items.find((x) => x.goal.metric === 'runq_per_core').goal.source, 'server', '개별 목표가 이긴다');
+  const rdA = await call('admA', 'GET', '/slo');
+  assert.deepEqual(Object.keys(rdA.body.slo.servers), ['PTAGA'], '범위 관리자 — 범위 안 서버의 개별 목표만'); assert.equal(rdA.body.canEdit, false);
   const rd = await call('opA', 'GET', '/slo');
-  assert.deepEqual(Object.keys(rd.body.slo.servers), ['PTAGA'], '범위 안 서버의 개별 목표만'); assert.equal(rd.body.canEdit, false);
+  assert.deepEqual(rd.body.slo.servers, {}, '비관리자 — 서버 키(주소일 수 있다)를 싣지 않는다'); assert.equal(rd.body.serversHidden, 1, '보이는 서버의 개별 목표 개수만'); assert.equal(rd.body.canEdit, false);
+  const rv = await call('viewer', 'GET', '/slo');
+  assert.deepEqual(rv.body.slo.servers, {}); assert.equal(rv.body.serversHidden, 2);
+  const ro = await call('own', 'GET', '/slo');
+  assert.deepEqual(Object.keys(ro.body.slo.servers).sort(), ['PTAGA', 'PTAGB']); assert.equal(ro.body.canEdit, true);
   fs.writeFileSync(path.join(DIR, 'bm-perf-slo.json'), '{ broken');
   L._resetSloForTest();
   const s3 = await call('opA', 'GET', `/perf/PTAGA/slo?from=${NOW - HOUR}&to=${NOW}`);

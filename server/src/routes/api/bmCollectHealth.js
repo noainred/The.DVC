@@ -58,12 +58,23 @@ export async function bmCollectHealthView(req, snap, deps = {}) {
   if (lh || lEnabled) nodes0.push({ agent: config.agent?.name || '', via: 'local', enabled: lEnabled, health: lh ? { ...lh, trend: await D.localTrend().catch(() => []) } : null, corps: await D.localCorps().catch(() => []), hasField: true });
   for (const rec of await D.listEdgeBmUsage()) {
     const sn = rec?.snap || null;
+    const la = rec?.lastAttempt;
     nodes0.push({ agent: t(rec?.agent), via: 'edge', enabled: sn ? sn.enabled === true : null, health: sn?.collectHealth || null, hasField: !!sn?.collectHealth, corps: Array.isArray(sn?.settings?.corps) ? sn.settings.corps : [],
-      snapAt: rec?.snapAt ?? null, version: t(sn?.node?.version), lastAttempt: rec?.lastAttempt || null, noSnap: !sn });
+      // 엣지 봉투의 byCorp 법인 이름은 그 엣지의 대상 · 설정 법인과 맞는 것만 믿는다(봉투 문자열만으로 법인 행을 새로 만들지 않는다 — 아래 corpIds).
+      targetCorps: (Array.isArray(sn?.targets) ? sn.targets : []).map((x) => t(x?.vcenterId)).filter(Boolean),
+      snapAt: rec?.snapAt ?? null, version: t(sn?.node?.version), noSnap: !sn,
+      // 마지막 당김은 시각 · 성공 · 종류 · 소요만(사유 원문은 싣지 않는다 — 엣지 오류 문구가 섞인다).
+      lastAttempt: la && typeof la === 'object' ? { at: n(la.at), ok: la.ok === true, kind: t(la.kind).slice(0, 40), ms: n(la.ms) } : null });
   }
-  const nodes = []; const rows = []; let omitted = 0;
+  const nodes = []; const rows = []; let omitted = 0; let corpsDropped = 0;
   for (const x of nodes0) {
-    const byCorp = x.health?.byCorp || {};
+    const byCorp0 = x.health?.byCorp || {};
+    let byCorp = byCorp0;
+    if (x.via === 'edge') {
+      const own = new Set([...(x.corps || []).map(t), ...(x.targetCorps || [])].filter(Boolean));
+      byCorp = {};
+      for (const [vc, v] of Object.entries(byCorp0)) { if (own.has(vc)) byCorp[vc] = v; else corpsDropped += 1; }
+    }
     const corpIds = [...new Set([...(x.corps || []).map(t), ...Object.keys(byCorp)])].filter((v) => v !== undefined);
     const visible = allowed ? corpIds.filter((vc) => vc && allowed.has(vc)) : corpIds;
     if (allowed && !visible.length) { omitted += 1; continue; }
@@ -93,19 +104,23 @@ export async function bmCollectHealthView(req, snap, deps = {}) {
   for (const nd of nodes) for (const x of nd.node?.reasons || []) { const cur = agg.get(`${x.path}:${x.code}`); if (cur && n(x.since) != null) cur.since = cur.since == null ? x.since : Math.min(cur.since, x.since); }
   const { reasonState } = await import('../../bmusage/collectHealth.js');
   const reasons = [...agg.values()].map((x) => ({ ...x, state: reasonState(x.path, x.code) })).sort((a, b) => b.n - a.n);
-  const sum = (f) => rows.reduce((a, r) => a + (n(r[f]) ?? 0), 0);
-  const servers = sum('servers'); const okN = sum('ok');
+  // 합계는 **값이 있는 것만** 더하고 모르는 개수를 따로 센다(결측을 0 으로 더하지 않는다 — 모르는 법인 · 노드가 있으면 화면이 ‘n곳 모름’ 을 붙인다).
+  const known = rows.filter((r) => n(r.servers) != null && n(r.ok) != null);
+  const zero = rows.filter((r) => n(r.servers) === 0 && n(r.ok) == null);   // 이번 주기 대상이 없던 법인(사실 0 — 모름이 아니다)
+  const servers = known.reduce((a, r) => a + r.servers, 0); const okN = known.reduce((a, r) => a + r.ok, 0);
   const visibleNodes = nodes.filter((x) => x.node);
+  const sumKnown = (f) => { const v = visibleNodes.map(f).filter((x) => n(x) != null); return { sum: v.length ? v.reduce((a, x) => a + x, 0) : null, unknown: visibleNodes.length - v.length }; };
   const worst = visibleNodes.filter((x) => n(x.node.cyclePct) != null).sort((a, b) => b.node.cyclePct - a.node.cyclePct)[0] || null;
+  const db = sumKnown((x) => n(x.node.db?.bytes)); const fr = sumKnown((x) => n(x.node.focus?.running)); const fq = sumKnown((x) => n(x.node.focus?.queued));
   const kpi = {
     corps: rows.length, servers, successPct: servers ? Math.round((okN / servers) * 1000) / 10 : null, okN,
+    corpsUnknown: rows.length - known.length - zero.length,
     worstCycle: worst ? { agent: worst.agent, cyclePct: worst.node.cyclePct, cycleMs: worst.node.cycleMs, budgetMs: worst.node.budgetMs } : null,
-    dbBytes: visibleNodes.length ? visibleNodes.reduce((a, x) => a + (n(x.node.db?.bytes) ?? 0), 0) : null,
-    focusRunning: visibleNodes.length ? visibleNodes.reduce((a, x) => a + (n(x.node.focus?.running) ?? 0), 0) : null,
-    focusQueued: visibleNodes.length ? visibleNodes.reduce((a, x) => a + (n(x.node.focus?.queued) ?? 0), 0) : null,
+    dbBytes: db.sum, dbUnknown: db.unknown,
+    focusRunning: fr.sum, focusQueued: fq.sum, focusUnknown: Math.max(fr.unknown, fq.unknown),
     concNote: visibleNodes.length ? visibleNodes.map((x) => ({ agent: x.agent, max: x.node.conc?.max ?? null, cap: x.node.conc?.cap ?? null })) : [],
   };
-  return { ok: true, at: now, staleMs, ...(minEdgeVersion ? { minEdgeVersion } : {}), nodes, rows, reasons, kpi, ...(allowed ? { scoped: true, nodesOmitted: omitted } : {}) };
+  return { ok: true, at: now, staleMs, ...(minEdgeVersion ? { minEdgeVersion } : {}), nodes, rows, reasons, kpi, ...(corpsDropped ? { corpsDropped } : {}), ...(allowed ? { scoped: true, nodesOmitted: omitted } : {}) };
 }
 
 export function registerBmCollectHealth(api) {

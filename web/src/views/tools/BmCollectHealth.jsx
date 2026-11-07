@@ -13,7 +13,7 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import {
   nodeStateView, FLAG_TEXT, REASON_TEXT, REASON_STATE_TEXT, INFO_TEXT, PATH_TEXT, msText, pctText1, gbText, cycleText, concText, sshText, reasonsLine, daysSince,
-  trendPaths, trendRangeText, COLLECT_HONEST, collectCsv, collectCsvName,
+  trendPaths, trendRangeText, COLLECT_HONEST, collectCsv, collectCsvName, unknownText,
 } from './bmCollectText.js';
 import './bmStage6.css';
 
@@ -27,11 +27,11 @@ export function CollectHealthView({ resp, now = Date.now() }) {
   return (
     <>
       <div className="kpis">
-        <Kpi label="법인 · 대상" value={k.corps ?? 0} unit={`법인 / ${k.servers ?? 0}대`} meta={nodes.length ? `노드 ${nodes.length}곳` : '노드 없음'} />
-        <Kpi label="마지막 주기 성공률" value={pctText1(k.successPct)} meta={k.servers ? `${k.okN ?? 0}/${k.servers}` : '대상 없음'} accent={k.successPct != null && withNode.some((x) => x.flags?.includes('success')) ? toneVar('bad') : undefined} />
+        <Kpi label="법인 · 대상" value={k.corps ?? 0} unit={`법인 / ${k.servers ?? 0}대`} meta={`${nodes.length ? `노드 ${nodes.length}곳` : '노드 없음'}${unknownText(k.corpsUnknown, '법인')}`} />
+        <Kpi label="마지막 주기 성공률" value={pctText1(k.successPct)} meta={`${k.servers ? `${k.okN ?? 0}/${k.servers}` : '대상 없음'}${unknownText(k.corpsUnknown, '법인')}`} accent={k.successPct != null && withNode.some((x) => x.flags?.includes('success')) ? toneVar('bad') : undefined} />
         <Kpi label="주기 소요(최대 노드)" value={k.worstCycle ? msText(k.worstCycle.cycleMs) : '—'} meta={k.worstCycle ? `예산 ${msText(k.worstCycle.budgetMs)} · ${pctText1(k.worstCycle.cyclePct)} · ${k.worstCycle.agent}` : '노드 값 없음'} />
-        <Kpi label="수집 DB 크기(합 · 실측)" value={gbText(k.dbBytes)} meta="파일 크기 실측(추정 아님)" />
-        <Kpi label="집중 모니터링" value={k.focusRunning ?? '—'} unit={k.focusRunning == null ? '' : '진행'} meta={k.focusQueued == null ? '—' : `대기 ${k.focusQueued}`} />
+        <Kpi label="수집 DB 크기(합 · 실측)" value={gbText(k.dbBytes)} meta={`파일 크기 실측(추정 아님)${unknownText(k.dbUnknown, '노드')}`} />
+        <Kpi label="집중 모니터링" value={k.focusRunning ?? '—'} unit={k.focusRunning == null ? '' : '진행'} meta={`${k.focusQueued == null ? '—' : `대기 ${k.focusQueued}`}${unknownText(k.focusUnknown, '노드')}`} />
       </div>
       <section className="card" style={{ minWidth: 0 }}>
         <h5 className="bmo-h">법인별 수집 — 주기 소요 · 성공률 · 동시성 사용 · SSH · DB</h5>
@@ -59,6 +59,7 @@ export function CollectHealthView({ resp, now = Date.now() }) {
           </tbody>
         </STable>
         {!(resp?.rows || []).length && <p className="bmo-note">보이는 법인이 없습니다{resp?.nodesOmitted ? `(범위 밖 노드 ${resp.nodesOmitted}곳은 싣지 않았습니다)` : ''}.</p>}
+        {resp?.corpsDropped ? <p className="bmo-note">엣지가 보낸 법인별 값 중 그 엣지의 대상 · 설정 법인이 아닌 것 {resp.corpsDropped}건은 싣지 않았습니다.</p> : null}
         <p className="bmo-note"><BoldText text={'‘주기 소요’ 는 그 노드 폴러가 한 주기에 전 서버를 도는 데 걸린 벽시계 시간입니다. 예산(주기)에 가까우면 **재진입 가드**가 다음 주기를 건너뛰어 실제 간격이 늘어납니다 — 이 보드가 그 전에 알려 줍니다(기준은 설정 › 알림 규칙의 ‘수집 건강 기준’).'} /></p>
       </section>
       <section className="card" style={{ minWidth: 0 }}>
@@ -110,6 +111,7 @@ export function CollectHealthView({ resp, now = Date.now() }) {
               <div key={`${x.via}|${x.agent}`} className="bmh-cell" style={{ borderLeftColor: toneVar(x.flags?.includes('db') ? 'warn' : 'ok') }}>
                 <div className="bmh-head"><b>{x.agent || '이 노드'}</b><span className="bmo-sub">{x.via === 'edge' ? '엣지' : '이 노드'}</span></div>
                 <div className="bmh-v">{gbText(db.bytes)}</div>
+                {(db.error || db.unread) ? <div className="bmo-sub" style={{ color: toneVar('warn') }}>{db.error ? '데이터 폴더를 읽지 못해 크기를 모릅니다' : `파일 ${db.unread}개의 크기를 읽지 못해 합을 내지 않았습니다`}(0 으로 세지 않습니다)</div> : null}
                 <div className="bmo-sub">메인 {gbText(db.mainBytes)}{db.walBytes ? ` (+WAL ${gbText(db.walBytes)})` : ''} · 원시 {fam.raw?.files ?? 0}개 {gbText(fam.raw?.bytes)} · 1시간 {fam.h1?.files ?? 0}개 {gbText(fam.h1?.bytes)} · 장치 {(fam.dev?.files ?? 0) + (fam.dev1h?.files ?? 0)}개 · 1일 {fam.d1?.files ?? 0}개</div>
                 <div className="bmo-sub">상한 {x.node.capBytes ? gbText(x.node.capBytes) : '없음'}{x.node.dbPct != null ? ` · ${pctText1(x.node.dbPct)}` : ''}</div>
                 <div className="bmo-sub">피크 창 {x.node.peakPlan?.windowS ?? '—'}초(상한 {x.node.peakPlan?.capS ?? '—'}){x.node.peakPlan?.reason ? ` · ${x.node.peakPlan.reason}` : ''}</div>

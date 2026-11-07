@@ -141,6 +141,10 @@ describe('수집 건강 — 문구 표 = 서버 열거 · 결측은 ‘—’', 
     expect(html).toContain('시한 초과'); expect(html).toContain('3일째'); expect(html).toContain('OS 못 읽음');
     expect(html).toContain('노드 값 숨김'); expect(html).toContain('성공률 낮음');
     expect(html).not.toMatch(/>0GB</); expect(html).not.toContain('NaN');
+    // 합에서 뺀 ‘모름’ 개수 · 크기를 못 읽은 DB · 버린 엣지 법인 값
+    const html2 = renderToStaticMarkup(h(CollectHealthView, { resp: { ...resp, corpsDropped: 2, kpi: { ...resp.kpi, corpsUnknown: 1, dbUnknown: 1 }, nodes: [{ ...resp.nodes[0], node: { ...resp.nodes[0].node, db: { bytes: null, unread: 3, families: {} } } }] }, now: NOW }));
+    expect(html2).toContain('법인 1곳 모름(합에서 뺌)'); expect(html2).toContain('노드 1곳 모름'); expect(html2).toContain('파일 3개의 크기를 읽지 못해'); expect(html2).toContain('2건은 싣지 않았습니다');
+    expect(K.unknownText(0, '법인')).toBe(''); expect(K.unknownText(null, '법인')).toBe('');
   });
   it('CSV — 결측은 빈 칸', () => {
     const csv = K.collectCsv({ rows: [{ vcenterId: 'vcA', agent: 'e', servers: null, reasons: [] }] });

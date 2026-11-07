@@ -139,7 +139,8 @@ test('③ 봉투 · 중앙 정제 · ④ 실제 라우터(역할 · 범위 · �
   assert.deepEqual(ch.node.cells, { success: 'true' }, '열거 밖 칸 버림');
   assert.deepEqual(Object.keys(ch.byCorp), ['vcB']); assert.deepEqual(ch.byCorp.vcB.reasons, { 'os:timeout': 1 }); assert.equal(ch.byCorp.vcB.servers, 5);
   // 엣지 둘 — 6단계 엣지(vcB 만) · 구버전 엣지(봉투에 collectHealth 없음)
-  putEdgeBmUsage('edge-new', { ok: true, snap: { ...env, enabled: true, settings: { ...env.settings, corps: ['vcB'] }, collectHealth: { ...evil, byCorp: { vcB: evil.byCorp.vcB } } } });
+  // vcZ — 그 엣지의 설정 법인도 대상 법인도 아니다(봉투 문자열만으로 법인 행을 만들지 않는다 → 버리고 개수를 밝힌다)
+  putEdgeBmUsage('edge-new', { ok: true, snap: { ...env, enabled: true, settings: { ...env.settings, corps: ['vcB'] }, targets: [], collectHealth: { ...evil, byCorp: { vcB: evil.byCorp.vcB, vcZ: { servers: 7, ok: 0, fail: 7, reasons: {} } } } } });
   putEdgeBmUsage('edge-old', { ok: true, snap: { node: { agent: 'edge-old', version: '2.930.0' }, enabled: true, settings: { corps: ['vcC'] }, targets: [] } });
   const express = (await import('express')).default;
   const { api } = await import('../src/routes/api.js');
@@ -159,6 +160,11 @@ test('③ 봉투 · 중앙 정제 · ④ 실제 라우터(역할 · 범위 · �
   assert.ok(a.body.minEdgeVersion, '문구의 최소 버전(릴리스 노트 6단계 · 없으면 package.json)');
   assert.ok(byAgent['edge-new'].node, '전체 범위 — 노드 값이 보인다');
   assert.ok(a.body.rows.some((r) => r.vcenterId === 'vcB' && r.servers === 5));
+  assert.ok(!a.body.rows.some((r) => r.vcenterId === 'vcZ'), '엣지 대상 · 설정 법인이 아닌 byCorp 는 행이 되지 않는다'); assert.equal(a.body.corpsDropped, 1);
+  assert.equal(a.body.kpi.corpsUnknown, 1, '구버전 엣지의 법인(vcC)은 모름 — 0 으로 더하지 않고 개수를 센다');
+  assert.ok(a.body.kpi.servers >= 5 && a.body.rows.find((r) => r.vcenterId === 'vcC').servers === null);
+  const la = byAgent['edge-new'].lastAttempt;
+  assert.ok(la && la.reason === undefined, '마지막 당김은 사유 원문 없이');
   // 범위 계정(vcA) — 자기 법인 행만 · 로컬 노드는 vcB 도 켰으니 노드 값(주기 · SSH · DB · 추이 · 며칠째)은 숨김 · vcB/vcC 만 가진 엣지는 행 없음
   const o = await get('opA');
   assert.equal(o.status, 200);
@@ -167,4 +173,18 @@ test('③ 봉투 · 중앙 정제 · ④ 실제 라우터(역할 · 범위 · �
   assert.equal(o.body.nodesOmitted, 2, '보이는 법인이 없는 엣지는 행을 주지 않는다(개수만)');
   assert.ok(o.body.reasons.every((x) => x.since == null), '며칠째(노드 값)는 숨김');
   assert.equal(o.body.kpi.dbBytes, null);
+});
+
+test('⑤ 저장 실측 — 폴더 · 파일을 못 읽으면 크기는 모름(null) · 부분 합을 내지 않는다', async () => {
+  const miss = await CH.dbFilesNow(path.join(DIR, 'no-such-dir'));
+  assert.equal(miss.bytes, null, '폴더를 못 읽으면 0 이 아니다'); assert.equal(miss.files, null); assert.equal(miss.error, 'readdir');
+  assert.equal(CH.collectCells({ cyclePct: 10, successPct: 100 }, miss).cells.db, 'unread', '모르는 크기는 상한 대조 보류');
+  const d = fs.mkdtempSync(path.join(DIR, 'dbf-'));
+  fs.writeFileSync(path.join(d, 'bm-usage.db'), Buffer.alloc(1000));
+  fs.writeFileSync(path.join(d, 'bm-usage-2026-10.db'), Buffer.alloc(500));
+  const ok = await CH.dbFilesNow(d);
+  assert.equal(ok.bytes, 1500); assert.equal(ok.files, 1); assert.equal(ok.families.raw.files, 1);
+  fs.symlinkSync(path.join(d, 'gone.db'), path.join(d, 'bm-usage-2026-11.db'));   // 끊긴 링크 — stat 실패
+  const part = await CH.dbFilesNow(d);
+  assert.equal(part.bytes, null, '못 읽은 파일이 있으면 합을 내지 않는다(부분 합 금지)'); assert.equal(part.unread, 1);
 });

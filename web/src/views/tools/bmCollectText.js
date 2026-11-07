@@ -54,6 +54,8 @@ export function msText(v) {
   if (x < 60_000) return `${Math.round(x / 100) / 10}s`;
   return `${Math.round(x / 6000) / 10}분`;
 }
+/** 합에서 뺀 ‘모름’ 개수 → 꼬리 글자(없으면 빈 글자 — 결측을 0 으로 더하지 않았다는 표시). */
+export function unknownText(cnt, what) { const x = n(cnt); return x ? ` · ${what} ${x}곳 모름(합에서 뺌)` : ''; }
 export function pctText1(v) { const x = n(v); return x == null ? '—' : `${Math.round(x * 10) / 10}%`; }
 export function gbText(v) {
   const x = n(v);

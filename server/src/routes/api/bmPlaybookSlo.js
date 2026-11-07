@@ -143,15 +143,18 @@ export async function bmSloSettingsRead(req, snap) {
   const L = await import('../../bmusage/slo.js');
   const cfg = L.loadSlo();
   const allowed = scopedVcenterIds(req.user, snap);
-  let servers = cfg.servers;
-  if (allowed || !isAdminReq(req)) {
-    // 범위 계정 · 비관리자 — 서버별 목표는 보이는 서버 것만(키가 곧 서버 식별자다).
+  let servers = cfg.servers; let serversHidden = 0;
+  const isAdmin = isAdminReq(req);
+  if (allowed || !isAdmin) {
+    // 범위 계정 — 서버별 목표는 보이는 서버 것만(키가 곧 서버 식별자다).
+    // 비관리자 — 키(서버 주소일 수 있다 · 가림 대상)를 싣지 않고 보이는 서버의 개별 목표 **개수만** 밝힌다(서버별 값은 그 서버의 목표선 탭이 보여 준다).
     const D = deps0();
     const keep = {};
-    for (const k of Object.keys(cfg.servers || {})) { const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key: k }); if (f && !f.denied) keep[k] = cfg.servers[k]; }
-    servers = keep;
+    for (const k of Object.keys(cfg.servers || {})) { const f = await resolvePerfTarget(req, D, { allowed, isAdmin, key: k }); if (f && !f.denied) keep[k] = cfg.servers[k]; }
+    if (isAdmin) servers = keep;
+    else { servers = {}; serversHidden = Object.keys(keep).length; }
   }
-  return { ok: true, slo: { ...cfg, servers }, metrics: L.SLO_METRICS, bases: L.SLO_BASES, ops: L.SLO_OPS, profiles: L.SLO_PROFILES, limits: L.SLO_LIMITS, defaults: L.SLO_DEFAULTS,
+  return { ok: true, slo: { ...cfg, servers }, ...(serversHidden ? { serversHidden } : {}), metrics: L.SLO_METRICS, bases: L.SLO_BASES, ops: L.SLO_OPS, profiles: L.SLO_PROFILES, limits: L.SLO_LIMITS, defaults: L.SLO_DEFAULTS,
     canEdit: isAdminReq(req) && !allowed, ...(L.sloLoadError() ? { loadError: { reason: '목표 설정 파일을 읽지 못해 기본 목표로 동작 중입니다(저장하면 새 파일 · 손상본은 보존)' } } : {}) };
 }
 async function sloWrite(req, res) {

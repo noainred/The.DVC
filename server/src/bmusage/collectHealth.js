@@ -103,23 +103,26 @@ export function summarizeCycle({ results = [], startedAt, endedAt, intervalMs, c
  */
 export async function dbFilesNow(dir) {
   const fams = Object.fromEntries(Object.keys(FAMILIES).map((f) => [f, { files: 0, bytes: 0, first: null, last: null }]));
-  let mainBytes = null; let walBytes = null; let files = 0; let bytes = 0;
+  let mainBytes = null; let walBytes = null; let files = 0; let bytes = 0; let unread = 0;
   let names = [];
-  try { names = await fs.promises.readdir(dir); } catch { return { mainBytes, walBytes, families: fams, files, bytes, error: 'readdir' }; }
+  // 디렉터리를 못 읽으면 크기는 ‘모름’(null)이다 — 0 으로 두면 저장 상한 칸이 ‘기준 안’ 으로 읽힌다(결측은 0 이 아니다).
+  try { names = await fs.promises.readdir(dir); } catch { return { mainBytes, walBytes, families: fams, files: null, bytes: null, error: 'readdir' }; }
   const size = async (f) => { try { return (await fs.promises.stat(path.join(dir, f))).size; } catch { return null; } };
   for (const f of names) {
-    if (f === 'bm-usage.db') { mainBytes = await size(f); continue; }
-    if (f === 'bm-usage.db-wal') { walBytes = await size(f); continue; }
+    if (f === 'bm-usage.db') { mainBytes = await size(f); if (mainBytes == null) unread += 1; continue; }
+    if (f === 'bm-usage.db-wal') { walBytes = await size(f); continue; }   // WAL 은 체크포인트 사이에 사라질 수 있다(못 읽음으로 세지 않는다)
     const p = parseFileName(f);
     if (!p) continue;
     const s = await size(f);
-    if (s == null) continue;
+    if (s == null) { unread += 1; continue; }
     const fam = fams[p.family];
     fam.files += 1; fam.bytes += s;
     fam.first = fam.first == null || p.key < fam.first ? p.key : fam.first;
     fam.last = fam.last == null || p.key > fam.last ? p.key : fam.last;
     files += 1; bytes += s;
   }
+  // 크기를 못 읽은 파일이 있으면 합은 부분 합이다 — 합을 내지 않고(null) 못 읽은 수를 따로 센다(부분 합으로 상한 대조를 하지 않는다).
+  if (unread) return { mainBytes, walBytes, families: fams, files, bytes: null, unread };
   return { mainBytes, walBytes, families: fams, files, bytes: bytes + (mainBytes || 0) + (walBytes || 0) };
 }
 
