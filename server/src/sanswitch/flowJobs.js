@@ -168,6 +168,12 @@ export async function runFlowCommands(device, cmds, { onTrace = null } = {}) {
   return { ok: outputs.length > 0 && outputs.every((o) => o.ok), outputs };
 }
 
+/**
+ * 다시 켜짐(포탈 '다시 켜기' · 장비에서 켠 것 · 결과 모름에서 켜진 것으로 확인 — 판정 코어 하나, v2.939 반증 M-2): 카운터 기준을 새로 잡는다.
+ *   직전 카운터를 남기면 켠 뒤 첫 델타가 꺼져 있던 시간까지 나눠 속도를 낮게 말한다.
+ */
+function markActivated(rec) { Object.assign(rec, { state: 'active', deactivatedAt: null, prevCounters: null, prevAt: null, counters: null }); }
+
 /** 카운터 하나를 기록에 반영한다 — 못 읽으면 성공 시각(lastAt)을 움직이지 않는다(반증 M-4). */
 function applyShow(rec, shown, now) {
   rec.lastTryAt = now;
@@ -178,13 +184,15 @@ function applyShow(rec, shown, now) {
   }
   const p = parseFlowShow(shown.out);
   if (p.counters) {
-    if (rec.counters) { rec.prevCounters = rec.counters; rec.prevAt = rec.lastAt; }
+    // 활성이 아니던 기록이 켜져 있음을 읽으면(장비에서 켬 · 결과 모름 · 장비에 없음에서 돌아옴) 기준을 새로 잡는다 — 직전 카운터로 델타를 내지 않는다.
+    // 비활성 기록은 '켜짐' 을 실제로 읽었을 때만 켠다(활성 여부를 모르면 그대로) · 결과 모름 · 만드는 중 · 장비에 없음은 카운터를 읽은 것으로 활성.
+    const intoActive = rec.state !== 'active' && (p.active === true || (p.active == null && rec.state !== 'inactive'));
+    if (intoActive) markActivated(rec);
+    else if (rec.counters) { rec.prevCounters = rec.counters; rec.prevAt = rec.lastAt; }
     rec.counters = p.counters; rec.lastAt = now; rec.active = p.active; rec.lastError = null;
     rec.rawSample = null;
-    if (rec.state === 'unknown' || rec.state === 'pending' || rec.state === 'gone') rec.state = p.active === false ? 'inactive' : 'active';
-    // 장비에서 직접 끄거나 켰으면 따라간다(활성 여부를 읽었을 때만 — 모르면 그대로).
-    else if (rec.state === 'active' && p.active === false) { rec.state = 'inactive'; rec.deactivatedAt = rec.deactivatedAt || now; }
-    else if (rec.state === 'inactive' && p.active === true) { rec.state = 'active'; rec.deactivatedAt = null; }
+    // 장비에서 직접 껐으면 따라간다(활성 여부를 읽었을 때만 — 모르면 그대로).
+    if (p.active === false && rec.state !== 'inactive') { rec.state = 'inactive'; rec.deactivatedAt = rec.deactivatedAt || now; }
   } else {
     rec.lastError = shown.issue?.text || '카운터 형식을 알아보지 못했습니다(원문 앞부분은 기록에)';
     // v2.939: 출력 형식이 실장비 미확인이라 못 읽은 원문 앞부분을 기록에 남긴다(작업 기록은 1시간 뒤 사라진다 · 화면은 관리 주소를 가려 보여 준다).
@@ -193,7 +201,7 @@ function applyShow(rec, shown, now) {
 }
 
 /** 결과를 포탈 플로우 기록에 반영한다(중앙). 늦은 회신도 같은 함수(반증 M-2). */
-function applyResult(job, res) {
+function applyResult(job, res, { late = false } = {}) {
   const reg = load();
   const now = Date.now();
   const outs = Array.isArray(res?.outputs) ? res.outputs : [];
@@ -213,6 +221,9 @@ function applyResult(job, res) {
       const shown = outs.find((o) => o.cmd === `flow --show ${f.name}`);
       const deleted = outs.find((o) => o.cmd === `flow --delete ${f.name}`);
       const rec = reg.flows.find((x) => x.deviceId === job.deviceId && x.name === f.name && x.state !== 'deleted');
+      // v2.939 반증 L-1: 시한 뒤에 온 늦은 회신은 그 뒤에 시작한 작업이 이미 반영됐으면 상태를 바꾸지 않는다(끄기 늦은 회신이 그 뒤 켜기를 덮지 않게).
+      if (late && rec && Number(rec.lastJobAt || 0) > job.startedAt) continue;
+      if (rec) rec.lastJobAt = Math.max(Number(rec.lastJobAt || 0), job.startedAt);
       if (job.action === 'create' && rec) {
         const createCmd = job.cmds.find((c) => c.startsWith(`flow --create ${f.name} `));
         if (created?.ok) { rec.state = 'active'; rec.lastError = null; }
@@ -228,12 +239,14 @@ function applyResult(job, res) {
       }
       if (job.action === 'deactivate' || job.action === 'activate') {
         const tog = outs.find((o) => o.cmd.startsWith(`flow --${job.action} ${f.name} `));
+        const togCmd = job.cmds.find((c) => c.startsWith(`flow --${job.action} ${f.name} `));
         if (rec && tog?.ok) {
-          // 비활성화 뒤 카운터 기준을 새로 잡는다 — 다시 켠 뒤 첫 델타가 꺼져 있던 시간까지 나눠 속도를 낮게 보이지 않게(직전 카운터 버림).
           if (job.action === 'deactivate') Object.assign(rec, { state: 'inactive', deactivatedAt: now, lastError: null });
-          else Object.assign(rec, { state: 'active', deactivatedAt: null, prevCounters: null, prevAt: null, counters: null, lastError: null });
+          else { markActivated(rec); rec.lastError = null; }
         } else if (rec && tog?.issue?.kind === 'missing') { rec.state = 'gone'; rec.lastError = '장비에 이 플로우가 없습니다(장비에서 지워졌을 수 있습니다)'; }
-        else if (rec) rec.lastError = tog?.issue?.text || (timedOut ? `${job.action === 'deactivate' ? '비활성화' : '다시 켜기'} 결과를 모릅니다 — 카운터 읽기로 확인하세요` : res?.reason || '바꾸지 못했습니다');
+        // v2.939 반증 L-2: 보냈는데 결과를 모르면(시한 · 세션 끊김) '결과 모름' — 주기 카운터 읽기가 활성 여부를 읽어 바로잡는다(만들기와 같은 규칙).
+        else if (rec && !tog && !res?.notRun && (timedOut || res?.inFlight === togCmd)) { rec.state = 'unknown'; rec.lastError = `${job.action === 'deactivate' ? '비활성화' : '다시 켜기'} 결과를 모릅니다(${res?.reason || '결과 없음'}) — 다음 카운터 읽기가 장비 상태를 따라갑니다`; }
+        else if (rec) rec.lastError = tog?.issue?.text || res?.reason || '바꾸지 못했습니다';
       }
       if (job.action === 'delete') {
         if (deleted?.ok || deleted?.issue?.kind === 'missing') {
@@ -368,7 +381,7 @@ export function completeFlowJob(id, agent, result) {
     j.result = sanitizeFlowResult(result, j);
     trace(j, '시한이 지난 뒤 엣지 결과가 왔습니다 — 기록에 반영합니다', 'warn');
     for (const o of j.result.outputs) trace(j, `${o.ok ? '완료' : '실패'}: ${o.cmd}${o.issue ? ` — ${o.issue.text}` : ''}`, o.ok ? 'info' : 'warn');
-    applyResult(j, j.result);
+    applyResult(j, j.result, { late: true });
     return { ok: true, late: true };
   }
   finish(j, result);

@@ -99,7 +99,8 @@ export function attribStateText(d) {
 /** v2.939(C-② 시안 — ‘실측(스위치 플로우)’): 호스트 → 스토리지 행의 Flow Vision 플로우 합(읽기 / 쓰기). 속도를 읽은 플로우가 없으면 개수만 · 없으면 ‘—’. */
 export function flowSumText(flow) {
   if (!flow || !flow.n) return '—';
-  if (flow.rxBps == null || flow.txBps == null || !flow.measured) return `플로우 ${flow.n}개 · 속도 없음`;
+  const stale = flow.stale ? ` · 오래됨 ${flow.stale}` : '';   // v2.939 반증 M-1: 오래된 플로우는 합에 넣지 않고 따로 센다
+  if (flow.rxBps == null || flow.txBps == null || !flow.measured) return `플로우 ${flow.n}개 · 속도 없음${stale}`;
   const t = `${rateText(flow.txBps)} / ${rateText(flow.rxBps)}`;   // 읽기(장비 송신) / 쓰기(장비 수신)
-  return flow.measured < flow.n ? `${t}(${flow.measured}/${flow.n}개)` : t;
+  return flow.measured < flow.n ? `${t}(${flow.measured}/${flow.n}개${stale})` : t;
 }

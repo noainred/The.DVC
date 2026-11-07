@@ -6,7 +6,7 @@
  *  ④ '실측(스위치 플로우)' — 귀속 엔진이 플로우를 타깃 → 스토리지로 묶어 나란히(분배 값과 섞지 않음)
  *  ⑤ 원문 표본 — 못 푼 경로 이름(엣지 정제 포함) · 못 읽은 플로우 출력 앞부분
  */
-import { test, after } from 'node:test';
+import { test, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -148,6 +148,115 @@ test('③ 라우트 — OTP · 상태 맞춤 · dvc_ 만', async () => {
   J._resetFlowsForTest();
 });
 
+test('③ 반증 확정분 — 늦은 회신 순서(L-1) · 결과 모름(L-2) · 다시 켜질 때 기준(M-2)', async () => {
+  const J = await import('../src/sanswitch/flowJobs.js');
+  const V = await import('../src/sanswitch/flowView.js');
+  const N = 'dvc_esx1late1_01';
+  const D = `flow --deactivate ${N} -feature monitor`; const A = `flow --activate ${N} -feature monitor`; const S = `flow --show ${N}`;
+  const show = (state, rx = 1200, tx = 2400) => `Name : ${N}   Features: mon(${state})\n| Rx Frames Count | Tx Frames Count | Rx Bytes Count | Tx Bytes Count |\n|---|---|---|---|\n| 1 | 1 | ${rx} | ${tx} |\n`;
+  const base = { deviceId: 'sw-l', name: N, srcdev: INI, dstdev: T1, ingrport: '1/1', counters: { rxBytes: 1000, txBytes: 2000 }, lastAt: NOW - 60_000, prevCounters: { rxBytes: 500, txBytes: 1000 }, prevAt: NOW - 120_000 };
+  const dev = { id: 'sw-l', name: 'SW', host: 'x.invalid', username: 'u', password: 'p', agent: 'edge-a' };
+  const run = (action, result) => { const r = J.startFlowJob({ device: dev, action, flows: [{ name: N }], user: 'adm' }); assert.ok(r.id, r.issue); J.takeFlowJobsForAgent('edge-a'); if (result) J.completeFlowJob(r.id, 'edge-a', result); return r; };
+  const rec = () => J.listFlows().find((f) => f.name === N);
+  // L-1 + L-2: 끄기가 시한으로 닫힘(결과 모름) → 켜기 성공 → 끄기 늦은 회신은 켜기를 덮지 않는다
+  fs.writeFileSync(path.join(DIR, 'san-flows.json'), JSON.stringify({ flows: [{ ...base, state: 'active' }], checks: {} }));
+  J._resetFlowsForTest();
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: NOW });
+  let off;
+  try {
+    off = run('deactivate');
+    mock.timers.tick(J.EDGE_DEADLINE_MS + 1);
+    assert.equal(rec().state, 'unknown', 'L-2: 보냈는데 결과를 모르면 결과 모름(활성으로 남기지 않는다)');
+    assert.match(rec().lastError, /비활성화 결과를 모릅니다/);
+    mock.timers.tick(1000);
+    run('activate', { outputs: [{ cmd: A, ok: true, out: `Flow ${N} activated` }, { cmd: S, ok: true, out: show('Activated') }] });
+    assert.equal(rec().state, 'active');
+    assert.equal(J.completeFlowJob(off.id, 'edge-a', { outputs: [{ cmd: D, ok: true, out: `Flow ${N} deactivated` }, { cmd: S, ok: true, out: show('Deactivated') }] }).late, true);
+    assert.equal(rec().state, 'active', 'L-1: 그 뒤에 시작한 켜기가 이미 반영됐으면 끄기 늦은 회신은 상태를 바꾸지 않는다');
+  } finally { mock.timers.reset(); }
+  // L-2: 세션이 끊겨 보낸 명령의 결과를 모르면 결과 모름 · 실행하지 않았으면(notRun) 상태 그대로
+  fs.writeFileSync(path.join(DIR, 'san-flows.json'), JSON.stringify({ flows: [{ ...base, state: 'active' }], checks: {} }));
+  J._resetFlowsForTest();
+  run('deactivate', { outputs: [], notRun: true, reason: '실행하지 않았습니다' });
+  assert.equal(rec().state, 'active', '보내지 않았으면 상태 그대로');
+  run('deactivate', { outputs: [], inFlight: D, reason: '세션이 끊겼습니다' });
+  assert.equal(rec().state, 'unknown');
+  // M-2: 결과 모름 → 카운터 읽기가 켜져 있음을 읽으면 기준을 새로 잡는다(직전 카운터로 델타를 내지 않는다)
+  run('show', { outputs: [{ cmd: S, ok: true, out: show('Activated', 9000, 9000) }] });
+  assert.equal(rec().state, 'active'); assert.equal(rec().prevCounters, null);
+  assert.deepEqual(V.flowRatesOf(rec()), { rxBps: null, txBps: null }, '기준 하나로는 속도를 내지 않는다(꺼져 있던 시간까지 나누지 않는다)');
+  // M-2: 비활성 기록을 장비에서 직접 켠 것을 따라갈 때도 같다
+  fs.writeFileSync(path.join(DIR, 'san-flows.json'), JSON.stringify({ flows: [{ ...base, state: 'inactive', deactivatedAt: NOW - 600_000 }], checks: {} }));
+  J._resetFlowsForTest();
+  run('show', { outputs: [{ cmd: S, ok: true, out: show('Activated') }] });
+  assert.equal(rec().state, 'active'); assert.equal(rec().prevCounters, null, '장비에서 켠 것을 따라갈 때도 직전 카운터를 버린다');
+  assert.equal(rec().deactivatedAt, null);
+  run('show', { outputs: [{ cmd: S, ok: true, out: show('Activated', 1300, 2600) }] });
+  assert.deepEqual(rec().prevCounters?.rxBytes, 1200, '다음 읽기부터 델타');
+  // 활성 여부를 모르는 출력은 비활성을 켜지 않는다
+  fs.writeFileSync(path.join(DIR, 'san-flows.json'), JSON.stringify({ flows: [{ ...base, state: 'inactive' }], checks: {} }));
+  J._resetFlowsForTest();
+  run('show', { outputs: [{ cmd: S, ok: true, out: show('Activated').replace(/\s+Features: mon\(Activated\)/, '') }] });
+  assert.equal(rec().state, 'inactive');
+  J._resetFlowsForTest();
+});
+
+test('③ 반증 확정분 — 오래된 · 장비 상태가 불확실한 속도는 비운다(M-1)', async () => {
+  const V = await import('../src/sanswitch/flowView.js');
+  const A = await import('../src/sanswitch/attribution.js');
+  const f = { name: 'dvc_s_01', hba: 'vmhba1', srcdev: INI, dstdev: T1, deviceId: 'swA', counters: { rxBytes: 2000, txBytes: 4000 }, lastAt: NOW - 1000, prevCounters: { rxBytes: 1000, txBytes: 2000 }, prevAt: NOW - 2000 };
+  for (const state of ['gone', 'conflict', 'unknown', 'pending', 'inactive']) assert.deepEqual(V.flowRatesOf({ ...f, state }), { rxBps: null, txBps: null }, `${state} — 옛 속도를 지금으로 말하지 않는다`);
+  const staleMs = V.staleMsOf(15 * 60_000);
+  assert.equal(staleMs, 30 * 60_000); assert.equal(V.staleMsOf(0), 30 * 60_000); assert.equal(V.staleMsOf(10_000), 120_000, '주기 하한 1분');
+  assert.deepEqual(V.flowRatesOf({ ...f, state: 'active' }, { now: NOW, staleMs }), { rxBps: 1000, txBps: 2000 });
+  const old = { ...f, state: 'active', lastAt: NOW - staleMs - 1, prevAt: NOW - staleMs - 1001 };
+  assert.deepEqual(V.flowRatesOf(old, { now: NOW, staleMs }), { rxBps: null, txBps: null, stale: true });
+  const out = V.hostFlowOut(old, 'SW-A', { now: NOW, staleMs });
+  assert.equal(out.stale, true); assert.equal(out.rxBps, null);
+  assert.equal('stale' in V.hostFlowOut({ ...f, state: 'active' }, 'SW-A', { now: NOW, staleMs }), false);
+  const port = (index, attached) => ({ index, slotPort: `0/${index}`, name: `p${index}`, state: 'online', attached, inBps: 100, outBps: 200 });
+  const fabrics = A.buildFabrics([{ deviceId: 'swA', name: 'SW-A', collectedAt: NOW, ok: true, ports: { list: [port(0, [INI]), port(1, [T1])] },
+    zoning: { available: true, zones: [{ name: 'Z1', members: [INI, T1] }] }, nsRoles: { [INI]: 'initiator', [T1]: 'target' } }]);
+  const host = { id: 'vc:h1', name: 'esx1', vcenterId: 'vc', hbas: [{ name: 'vmhba1', wwn: INI }] };
+  const row = A.attributeFleet([host], fabrics, { flowsOf: () => [out, V.hostFlowOut({ ...f, name: 'dvc_s_02', state: 'active' }, 'SW-A', { now: NOW, staleMs })] }).rows.find((x) => x.flow);
+  assert.deepEqual(row.flow, { n: 2, measured: 1, stale: 1, rxBps: 1000, txBps: 2000 }, '오래된 것은 합에 넣지 않고 따로 센다');
+});
+
+test('③ 반증 확정분 — WWN 은 가리지 않는다(L-3) · 구버전 엣지는 OTP 전에 거부(L-4) · 화면 잠금 근거', async () => {
+  const R = await import('../src/routes/api/sanFlow.js');
+  const m = R.maskKeepWwn(`SrcDev: ${INI} DstDev: ${T1} via 10.1.2.3 fe80::1 https://sw9.example.invalid/x swt9.example.invalid`, ['swt9.example.invalid']);
+  assert.ok(m.includes(INI) && m.includes(T1), m);
+  assert.ok(!m.includes('10.1.2.3') && !m.includes('fe80::1') && !m.includes('swt9.example.invalid'), m);
+  assert.equal(R.maskKeepWwn(null), null);
+  assert.equal(R.maskKeepWwn('a \u00010\u0001 b'), 'a  b', '가짜 자리 표시는 남기지 않는다');
+  // 라우트 — 구버전 엣지(2.937.0) 스위치
+  fs.writeFileSync(path.join(DIR, 'collectors.json'), JSON.stringify({ collectors: [{ id: 'edge-old9', name: 'edge-old9', url: 'https://10.9.9.9:3001', token: 'synthetic-token-123456', enabled: true }] }));
+  const { setCollectorStatus } = await import('../src/collector/state.js');
+  setCollectorStatus('edge-old9', { ok: true, version: '2.937.0', agent: 'edge-old9' });
+  const J = await import('../src/sanswitch/flowJobs.js');
+  const reg = await import('../src/sanswitch/registry.js');
+  const dev = reg.saveDevice({ type: 'brocade', name: 'SW-O', host: 'swo.example.invalid', username: 'admin', password: 'PW', collectMethod: 'ssh', agent: 'edge-old9' });
+  fs.writeFileSync(path.join(DIR, 'san-flows.json'), JSON.stringify({ flows: [{ deviceId: dev.id, name: 'dvc_o000aaaaa_01', state: 'active', srcdev: INI, dstdev: T1, ingrport: '1/1',
+    lastError: '카운터 형식을 알아보지 못했습니다', rawSample: `SrcDev ${INI} mgmt 10.4.4.4` }], checks: {} }));
+  J._resetFlowsForTest();
+  const express = (await import('express')).default;
+  const app = express(); app.use(express.json()); app.use((req, _r, next) => { req.user = { username: 'adm', role: 'admin' }; next(); });
+  const api = express.Router(); R.registerSanFlow(api); app.use('/api', api);
+  const srv = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
+  closers.push(() => new Promise((r) => srv.close(() => r())));
+  const base = `http://127.0.0.1:${srv.address().port}/api/tools/san-flow`;
+  const x = await fetch(`${base}/deactivate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: dev.id, name: 'dvc_o000aaaaa_01' }) });
+  assert.equal(x.status, 409, 'OTP 재인증(이 계정이면 403) 전에 엣지 버전을 본다 — 거부할 요청이 OTP 를 써 버리지 않게');
+  assert.match((await x.json()).reason, /2\.939\.0 이상/);
+  const g = await (await fetch(base)).json();
+  const d = g.devices.find((v) => v.id === dev.id);
+  assert.match(d.toggleIssue || '', /2\.939\.0 이상/, '화면이 비활성화 버튼을 미리 잠근다');
+  assert.equal(d.edgeIssue, null, '다른 동작은 그대로');
+  const fl = g.flows.find((v) => v.name === 'dvc_o000aaaaa_01');
+  assert.ok(fl.rawSample.includes(INI) && !fl.rawSample.includes('10.4.4.4'), fl.rawSample);
+  J._resetFlowsForTest();
+});
+
 test('④ 실측(스위치 플로우) — 타깃 → 스토리지로 묶어 행에 · 분배 값과 섞지 않음', async () => {
   const A = await import('../src/sanswitch/attribution.js');
   const V = await import('../src/sanswitch/flowView.js');
@@ -163,9 +272,9 @@ test('④ 실측(스위치 플로우) — 타깃 → 스토리지로 묶어 행�
   const flowRows = withF.rows.filter((x) => x.flow);
   assert.equal(flowRows.length, 2, '타깃마다 그 스토리지 행에');
   const measured = flowRows.find((x) => x.flow.measured === 1);
-  assert.deepEqual(measured.flow, { n: 1, measured: 1, rxBps: 1000, txBps: 2000 });
+  assert.deepEqual(measured.flow, { n: 1, measured: 1, stale: 0, rxBps: 1000, txBps: 2000 });
   const inactive = flowRows.find((x) => x.flow.measured === 0);
-  assert.deepEqual(inactive.flow, { n: 1, measured: 0, rxBps: null, txBps: null }, '속도를 못 읽은 플로우는 개수에만');
+  assert.deepEqual(inactive.flow, { n: 1, measured: 0, stale: 0, rxBps: null, txBps: null }, '속도를 못 읽은 플로우는 개수에만');
   assert.equal(V.FLOW_SHOWN_STATES.has('failed'), false); assert.equal(V.FLOW_SHOWN_STATES.has('deleted'), false);
 });
 

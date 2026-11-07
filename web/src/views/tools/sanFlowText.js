@@ -62,17 +62,22 @@ const STATE = Object.freeze({
 });
 export function flowRows(d) {
   const devName = new Map((d?.devices || []).map((x) => [x.id, x.name]));
+  const toggleIssue = new Map((d?.devices || []).map((x) => [x.id, x.toggleIssue || null]));
   const portal = (Array.isArray(d?.flows) ? d.flows : []).map((f) => {
     const p = diffPct(f);
     const c = f.counters || null;
     const bytes = c && numOrNull(c.rxBytes) != null && numOrNull(c.txBytes) != null ? numOrNull(c.rxBytes) + numOrNull(c.txBytes) : null;   // 한쪽만이면 '—'(반증 M-5)
     return { key: `${f.deviceId}|${f.name}`, portal: true, name: f.name, deviceId: f.deviceId, sw: devName.get(f.deviceId) || f.deviceId,
       host: f.hostName ? `${String(f.hostName).split('.')[0]} · ${f.hba || '—'}` : '—', pair: `${shortWwn(f.srcdev)} → ${shortWwn(f.dstdev)}`, pairTitle: `${f.srcdev} → ${f.dstdev} · 포트 ${f.ingrport}`,
-      target: f.targetName || '—', rate: c ? `${rateText(f.rxBps)} / ${rateText(f.txBps)}` : '—', rateSort: (numOrNull(f.rxBps) ?? -1) + (numOrNull(f.txBps) ?? 0),
+      target: f.targetName || '—', rate: f.stale ? '오래됨(최근에 못 읽음)' : c ? `${rateText(f.rxBps)} / ${rateText(f.txBps)}` : '—', rateSort: (numOrNull(f.rxBps) ?? -1) + (numOrNull(f.txBps) ?? 0),
       bytes: bytesText(bytes), bytesSort: bytes ?? -1, diff: diffText(p), diffSort: p == null ? null : Math.abs(p), diffWarn: p != null && Math.abs(p) > 5,
       esxi: rateText(f.esxiBps), state: STATE[f.state] || { label: f.state || '—', tone: 'gray' }, lastAt: f.lastAt || null, lastError: f.lastError || null, rawSample: f.rawSample || null,
       canDelete: f.state !== 'deleted' && f.state !== 'failed' && f.deviceKnown !== false, canForget: f.deviceKnown === false && f.state !== 'deleted',
-      canDeactivate: f.state === 'active' && f.deviceKnown !== false, canActivate: f.state === 'inactive' && f.deviceKnown !== false };
+      // 반증 L-4: 엣지가 비활성화 · 다시 켜기를 모르는 버전이면 버튼을 잠근다(누르면 OTP 를 쓰고 거부되던 것)
+      canDeactivate: f.state === 'active' && f.deviceKnown !== false && !toggleIssue.get(f.deviceId), canActivate: f.state === 'inactive' && f.deviceKnown !== false && !toggleIssue.get(f.deviceId),
+      toggleIssue: toggleIssue.get(f.deviceId) || null,
+      // 잠근 이유를 버튼 자리에 말한다(버튼만 사라지면 왜 없는지 모른다)
+      toggleLocked: !!toggleIssue.get(f.deviceId) && f.deviceKnown !== false && (f.state === 'active' || f.state === 'inactive') };
   });
   const human = [];
   const blank = { host: '—', pair: '—', pairTitle: '', target: '—', rate: '—', rateSort: -1, bytes: '—', bytesSort: -1, diff: '—', diffSort: null, diffWarn: false, esxi: '—', lastError: null, canForget: false, canDeactivate: false, canActivate: false };

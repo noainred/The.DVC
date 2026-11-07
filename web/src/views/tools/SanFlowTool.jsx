@@ -218,7 +218,7 @@ export default function SanFlowTool() {
         {del && (
           <div className="flex wrap" style={{ gap: 8, alignItems: 'center', marginBottom: 8 }}>
             <span style={{ minWidth: 0 }}>{(CONFIRM[del.mode] || CONFIRM.delete).text(del.name)}</span>
-            <input className="input mono" style={OTP_IN} inputMode="numeric" autoComplete="one-time-code" placeholder="본인 OTP" aria-label="본인 OTP(지우기)" value={delOtp} onChange={(e) => setDelOtp(otpClean(e.target.value))} />
+            <input className="input mono" style={OTP_IN} inputMode="numeric" autoComplete="one-time-code" placeholder="본인 OTP" aria-label={`본인 OTP(${(CONFIRM[del.mode] || CONFIRM.delete).button})`} value={delOtp} onChange={(e) => setDelOtp(otpClean(e.target.value))} />
             <button type="button" className={`btn${(CONFIRM[del.mode] || CONFIRM.delete).danger ? ' danger' : ' primary'}`} onClick={doDelete}>{(CONFIRM[del.mode] || CONFIRM.delete).button}</button>
             <button type="button" className="btn" onClick={() => { setDel(null); setDelOtp(''); }}>취소</button>
           </div>
@@ -239,10 +239,11 @@ export default function SanFlowTool() {
                   <td data-sort={f.bytesSort} className="tabular">{f.bytes}</td>
                   <td className="muted">{f.sw}</td>
                   <td>
-                    {f.canDelete || f.canForget || f.canDeactivate || f.canActivate ? (
+                    {f.canDelete || f.canForget || f.canDeactivate || f.canActivate || f.toggleLocked ? (
                       <div className="flex wrap" style={{ gap: 6 }}>
                         {f.canDeactivate ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => ask(f, 'deactivate')} title="모니터만 끕니다(플로우는 장비에 남습니다)">비활성화</button> : null}
                         {f.canActivate ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => ask(f, 'activate')}>다시 켜기</button> : null}
+                        {f.toggleLocked ? <span className="muted" title={f.toggleIssue}>끄기 · 켜기 잠김(엣지 버전)</span> : null}
                         {f.canDelete ? <button type="button" className="btn danger" disabled={!!act.busy} onClick={() => ask(f, 'delete')}>지우기</button> : null}
                         {f.canForget ? <button type="button" className="btn" disabled={!!act.busy} onClick={() => ask(f, 'forget')} title="스위치가 등록부에 없습니다 — 장비 명령 없이 기록만 정리">기록 정리</button> : null}
                       </div>

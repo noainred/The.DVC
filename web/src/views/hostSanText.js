@@ -97,6 +97,7 @@ const FLOW_STATE = Object.freeze({ active: '활성', inactive: '비활성', pend
 /** v2.939(C-② 시안): 스위치 플로우 칸 — 속도(수신 / 송신) 또는 상태. 플로우가 없으면 ‘—’. */
 export function flowCellText(f) {
   if (!f) return '—';
+  if (f.stale) return '오래됨(최근에 못 읽음)';   // v2.939 반증 M-1: 옛 속도를 '지금' 으로 말하지 않는다
   const rx = numOrNull(f.rxBps); const tx = numOrNull(f.txBps);
   if (rx != null && tx != null) return `${rateText(tx)} / ${rateText(rx)}`;   // 읽기(장비 송신) / 쓰기(장비 수신) — ESXi 칸과 같은 순서
   return f.state === 'active' ? '활성 · 아직 속도 없음' : (FLOW_STATE[f.state] || f.state || '—');

@@ -12,8 +12,8 @@
 import { requirePerm, toolActorOf } from '../../auth/auth.js';
 import { inUserScope, inUserWriteScope, scopedVcenterIds } from '../../auth/scope.js';
 import { maskErrText } from './cvp.js';
-import { listFlows } from '../../sanswitch/flowJobs.js';
-import { hostFlowOut, FLOW_SHOWN_STATES } from '../../sanswitch/flowView.js';
+import { hostFlowOut, FLOW_SHOWN_STATES, staleMsOf } from '../../sanswitch/flowView.js';
+import { listFlows, SHOW_EVERY_MS as FLOW_SHOW_EVERY_MS } from '../../sanswitch/flowJobs.js';
 import { loadSettings as loadCvpSettings } from '../../cvp/settings.js';
 import { cvpDemoActive } from '../../mock/demo/cvp.js';
 import { PARTS_EVERY_MS } from '../../cvp/faults.js';   // v2.935 반증 M-4: 비-admin 오류 사유의 주소 가림(CVP 상태 오류와 같은 규칙)
@@ -252,7 +252,7 @@ export function registerHostSan(api) {
       pathWeights: (() => { const w = sc.pathWeightsOf(h); return w ? { samples: w.samples, firstAt: w.firstAt, lastAt: w.lastAt } : null; })(),
       storPathScan: !!config.storPathScan,
       // v2.939(C-② 시안): 이 호스트의 Flow Vision 플로우 — ESXi 경로 실측과 나란히(같은 HBA · 타깃 WWN). 범위 법인의 스위치 것만(fabrics).
-      flows: (() => { const sw = new Map(fabrics.map((f) => [f.deviceId, f.name])); return listFlows().filter((f) => f.hostId === h.id && FLOW_SHOWN_STATES.has(f.state) && sw.has(f.deviceId)).slice(0, 64).map((f) => hostFlowOut(f, sw.get(f.deviceId))); })(),
+      flows: (() => { const sw = new Map(fabrics.map((f) => [f.deviceId, f.name])); return listFlows().filter((f) => f.hostId === h.id && FLOW_SHOWN_STATES.has(f.state) && sw.has(f.deviceId)).slice(0, 64).map((f) => hostFlowOut(f, sw.get(f.deviceId), { staleMs: staleMsOf(FLOW_SHOW_EVERY_MS) })); })(),
       switches: snaps.length, perfUnavailable: !!bytes?.unavailable, corpLimited: corp != null, corpMissing: corp === '',
       computedAt: bytes?.computedAt ?? Date.now(), cacheTtlMs: perfQueryTtlMs(), source: bytes?.source ?? null, ...(admin ? {} : { addressHidden: true }),
     });
@@ -496,7 +496,7 @@ export function registerHostSan(api) {
     // v2.939(C-② 시안): 호스트마다 그 호스트의 Flow Vision 플로우(보이는 스위치 것만) — 엔진이 타깃 → 스토리지로 묶어 행에 '스위치 플로우' 로 싣는다.
     const swIds = new Set(fabrics.map((f) => f.deviceId));
     const flowsByHost = new Map();
-    for (const f of listFlows()) { if (!FLOW_SHOWN_STATES.has(f.state) || !swIds.has(f.deviceId) || !f.hostId) continue; if (!flowsByHost.has(f.hostId)) flowsByHost.set(f.hostId, []); flowsByHost.get(f.hostId).push(hostFlowOut(f)); }
+    for (const f of listFlows()) { if (!FLOW_SHOWN_STATES.has(f.state) || !swIds.has(f.deviceId) || !f.hostId) continue; if (!flowsByHost.has(f.hostId)) flowsByHost.set(f.hostId, []); flowsByHost.get(f.hostId).push(hostFlowOut(f, '', { staleMs: staleMsOf(FLOW_SHOW_EVERY_MS) })); }
     const r = attributeFleet(hosts, fabrics, { storageOf, portBytes: bytes?.ports || null, pathWeightsOf: sc.pathWeightsOf, ipf: sc.ipf, split: sc.split, flowsOf: (h) => flowsByHost.get(h.id) || [] });
     const dcNameOf = (() => { try { const mm = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (k) => mm.get(k) || k || '(법인 미지정)'; } catch { return (k) => k || '(법인 미지정)'; } })();
     const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));

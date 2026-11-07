@@ -18,16 +18,24 @@ export function esxiBpsOf(t) {
   const r = numOrNull(t?.rKBps); const w = numOrNull(t?.wKBps);
   return r == null || w == null ? null : Math.round((r + w) * 1024);
 }
-/** 플로우 기록 하나의 지금 속도(수신 = 호스트 쓰기 · 송신 = 호스트 읽기). 비활성이면 null. */
-export function flowRatesOf(f) {
-  if (!f || f.state === 'inactive') return { rxBps: null, txBps: null };
+/**
+ * 플로우 기록 하나의 지금 속도(수신 = 호스트 쓰기 · 송신 = 호스트 읽기). **활성이고 최근에 읽은 것만**(v2.939 반증 M-1):
+ *   비활성 · 장비에 없음 · 이름 충돌 · 결과 모름은 null(직전 카운터로 계산한 옛 속도를 '지금' 으로 말하지 않는다).
+ *   마지막 성공 읽기가 staleMs(기본 카운터 주기 2배)보다 오래되면 null + stale — 오래됨은 정상에 넣지 않고 따로 센다(루트 CLAUDE.md).
+ */
+export function flowRatesOf(f, { now = Date.now(), staleMs = null } = {}) {
+  if (!f || f.state !== 'active') return { rxBps: null, txBps: null };
+  const at = numOrNull(f.lastAt);
+  if (staleMs != null && at != null && now - at > staleMs) return { rxBps: null, txBps: null, stale: true };
   return { rxBps: rateOf(f.counters, f.prevCounters, f.lastAt, f.prevAt, 'rxBytes'), txBps: rateOf(f.counters, f.prevCounters, f.lastAt, f.prevAt, 'txBytes') };
 }
 /** 장비에 있을 수 있는 기록만(지움 · 만들지 못함 제외) — 호스트 화면에 싣는 것. */
 export const FLOW_SHOWN_STATES = new Set(['pending', 'active', 'inactive', 'unknown', 'conflict', 'gone']);
 /** 호스트 화면용 한 줄 — 비밀 · 관리 주소 없음(이름 · 상태 · HBA · 타깃 · 속도 · 마지막 읽은 시각). */
-export function hostFlowOut(f, switchName = '') {
-  const r = flowRatesOf(f);
+export function hostFlowOut(f, switchName = '', opts = {}) {
+  const r = flowRatesOf(f, opts);
   return { name: f.name, state: f.state, deviceId: f.deviceId, switchName: switchName || f.deviceId, hba: f.hba || '', srcdev: f.srcdev, dstdev: f.dstdev,
-    targetName: f.targetName || '', rxBps: r.rxBps, txBps: r.txBps, lastAt: numOrNull(f.lastAt) };
+    targetName: f.targetName || '', rxBps: r.rxBps, txBps: r.txBps, ...(r.stale ? { stale: true } : {}), lastAt: numOrNull(f.lastAt) };
 }
+/** 오래됨 기준 — 카운터 주기의 2배(주기 한 번을 놓친 것까지는 '지금' 으로 본다). */
+export const staleMsOf = (showEveryMs) => 2 * Math.max(60_000, Number(showEveryMs) || 15 * 60_000);

@@ -63,5 +63,6 @@ describe('v2.939 스위치 플로우 실측 줄(시안 C-②)', () => {
     expect(flowCellText(unmatchedFlows(d)[0])).toBe('비활성');
     expect(flowCellText(null)).toBe('—');
     expect(flowCellText({ state: 'active', rxBps: 5, txBps: null })).toBe('활성 · 아직 속도 없음');
+    expect(flowCellText({ state: 'active', stale: true, rxBps: null, txBps: null })).toBe('오래됨(최근에 못 읽음)');   // v2.939 반증 M-1
   });
 });

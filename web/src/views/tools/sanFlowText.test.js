@@ -125,6 +125,11 @@ describe('v2.939 비활성화 · 다시 켜기(시안 C-②)', () => {
     expect(rows.slice(0, 3).map((r) => [r.state.label, r.canDeactivate, r.canActivate])).toEqual([['활성', true, false], ['비활성', false, true], ['활성', false, false]]);
     expect(rows[3]).toMatchObject({ canDeactivate: false, canActivate: false });   // 사람이 만든 플로우
     expect(rows[1].rate).toBe('— / —');
+    // 반증 M-1 · L-4: 오래된 속도는 '오래됨' · 엣지가 끄기 · 켜기를 모르면 버튼을 잠근다
+    expect(flowRows({ devices: [dev()], flows: [flow({ stale: true, rxBps: null, txBps: null })] })[0].rate).toBe('오래됨(최근에 못 읽음)');
+    const locked = flowRows({ devices: [dev({ toggleIssue: '엣지 "e" 의 버전(2.937.0)은 …' })], flows: [flow({ name: 'a' }), flow({ name: 'b', state: 'inactive' })] });
+    expect(locked.slice(0, 2).map((r) => [r.canDeactivate, r.canActivate, r.toggleLocked])).toEqual([[false, false, true], [false, false, true]]);
+    expect(flowRows({ devices: [dev()], flows: [flow()] })[0].toggleLocked).toBe(false);
     const k = flowKpis({ devices: [dev()], flows: [flow({ name: 'a' }), flow({ name: 'b', state: 'inactive' }), flow({ name: 'c', state: 'failed' })] });
     expect(k[2].meta).toBe('활성 1 · 비활성 1 · 그 밖 1');
   });

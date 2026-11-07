@@ -339,8 +339,9 @@ export function attributeFleet(hosts = [], fabrics = [], opt = {}) {
       for (const f of fl) {
         const sid = sidOf.get(`${f.hba}|${f.dstdev}`);
         if (!sid) continue;
-        const e = flowBySid.get(sid) || { n: 0, measured: 0, rxBps: null, txBps: null };
+        const e = flowBySid.get(sid) || { n: 0, measured: 0, stale: 0, rxBps: null, txBps: null };
         e.n += 1;
+        if (f.stale) e.stale += 1;   // v2.939 반증 M-1: 오래된 플로우는 합에 넣지 않고 따로 센다
         if (numOrNull(f.rxBps) != null && numOrNull(f.txBps) != null) { e.measured += 1; e.rxBps = (e.rxBps ?? 0) + f.rxBps; e.txBps = (e.txBps ?? 0) + f.txBps; }
         flowBySid.set(sid, e);
       }

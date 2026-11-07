@@ -19,7 +19,7 @@ import { isMockMode } from '../../mock/demo/flags.js';
 import { ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import { demoSpath } from '../../mock/demo/storpath.js';
 import { numOrNull } from '../../util/numOrNull.js';
-import { rateOf, esxiBpsOf, flowRatesOf } from '../../sanswitch/flowView.js';
+import { rateOf, esxiBpsOf, flowRatesOf, staleMsOf } from '../../sanswitch/flowView.js';
 import { cmpVersion } from '../../util/cmpVersion.js';
 
 const gate = [requirePerm('tools'), requireRole('admin'), fullReadWriteScopeOnlyWith('SAN 플로우 모니터(스위치 설정 변경)는 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 쓸 수 있습니다.')];
@@ -115,10 +115,20 @@ export function edgeAuthStopOf(deviceId) {
   try { return edgeSanSwitchSnapshots().find((s) => s?.deviceId === deviceId)?.extra?.authStopped || null; } catch { return null; }
 }
 
-/** 비밀이 아닌 관리 주소도 응답에서 가린다(반증 L-4) — 등록 스위치 주소 + URL · IPv4 · IPv6. */
+/**
+ * 비밀이 아닌 관리 주소도 응답에서 가린다(반증 L-4) — 등록 스위치 주소 + URL · IPv4 · IPv6. WWN(콜론 8묶음)은 IPv6 꼴로 읽혀 지워졌다 — 출력 원문의 SrcDev · DstDev 가 형식 확인 근거라
+ *   WWN 은 남긴다(v2.939 반증 L-3 — 비밀이 아니고 같은 화면 표에도 이미 있다).
+ */
+const WWN_TOKEN_RE = /\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){7}\b/g;
+export function maskKeepWwn(v, hosts = []) {
+  if (v == null) return v;
+  const kept = [];
+  const s = String(v).replace(WWN_TOKEN_RE, (m) => { kept.push(m); return `\u0001${kept.length - 1}\u0001`; });
+  return maskErrText(s, hosts).replace(/\u0001(\d{1,4})\u0001/g, (_, i) => kept[Number(i)] ?? '');
+}
 function maskerOf() {
   const hosts = listSanDevices().map((d) => d.host).filter(Boolean);
-  return (v) => (v == null ? v : maskErrText(String(v), hosts));
+  return (v) => maskKeepWwn(v, hosts);
 }
 function maskJob(j, mask) {
   if (!j) return j;
@@ -148,7 +158,7 @@ export function registerSanFlow(api) {
         model: s?.model || '', fv: s ? fabricVisionOf(s) : { state: 'unknown', reason: '스냅샷 없음' }, limit: flowLimitOf(s?.model),
         check: ck ? { ...ck, text: mask(ck.text) } : null, portalFlows: mine.length, collectedAt: s?.collectedAt || null,
         flowCount: flowCountOf(live, ck),   // 상한 판정(planCreate)과 같은 개수 — 점검 때 장비가 센 것 + 그 뒤 만든 것
-        ...(d.agent ? { edgeIssue: flowEdgeIssue(d.agent) } : {}) };
+        ...(d.agent ? { edgeIssue: flowEdgeIssue(d.agent), toggleIssue: flowEdgeIssue(d.agent, undefined, 'deactivate') } : {}) };   // 반증 L-4: 화면이 비활성화 버튼을 미리 잠근다
     });
     const out = flows.map((f) => {
       const h = f.hostId ? hostById.get(f.hostId) : null;
@@ -157,7 +167,7 @@ export function registerSanFlow(api) {
       const t = sp?.targets?.find((x) => x.wwn === f.dstdev && (!f.hba || x.adapter === f.hba)) || null;
       return { ...f, lastError: mask(f.lastError), ...(f.rawSample ? { rawSample: mask(f.rawSample) } : {}), deviceKnown: known.has(f.deviceId),
         // 비활성 플로우는 장비가 세지 않는다 — 속도를 0 으로 만들지 않고 비운다(상태 '비활성' 이 이유를 말한다 · flowView.flowRatesOf).
-        ...flowRatesOf(f),
+        ...flowRatesOf(f, { staleMs: staleMsOf(SHOW_EVERY_MS) }),   // 오래됨은 속도를 비우고 stale 로(반증 M-1)
         esxiBps: esxiBpsOf(t), esxiAt: t ? (sp.at ?? null) : null };
     });
     res.set('Cache-Control', 'no-store').json({ ok: true, devices, flows: out, jobs: recentFlowJobs(10).map((j) => maskJob(j, mask)), showEveryMs: SHOW_EVERY_MS,
@@ -253,22 +263,32 @@ export function registerSanFlow(api) {
    * 비활성화 · 다시 켜기(v2.939 — 시안 C-②) — 포탈 기록의 dvc_ 플로우만. 모니터 기능만 끄고 켠다(정의는 장비에 남는다 · 상한 개수에도 남는다).
    *   스위치 설정을 바꾸므로 OTP 재인증 · 감사. 비활성화는 활성일 때만, 다시 켜기는 비활성일 때만.
    */
-  for (const action of ['deactivate', 'activate']) {
-    api.post(`/tools/san-flow/${action}`, ...gate, reauth, async (req, res) => {
-      const dev = getDeviceWithSecret(String(req.body?.deviceId || ''));
-      const name = String(req.body?.name || '');
-      if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
-      if (!FLOW_NAME_RE.test(name)) return res.status(400).json({ ok: false, reason: '포탈이 만든(dvc_) 플로우만 바꿀 수 있습니다.' });
-      const f = listFlows().find((x) => x.deviceId === dev.id && x.name === name);
-      if (!f) return res.status(404).json({ ok: false, reason: '포탈 플로우 기록에 없는 플로우입니다.' });
-      const need = action === 'deactivate' ? 'active' : 'inactive';
-      if (f.state !== need) return res.status(409).json({ ok: false, reason: action === 'deactivate' ? '활성 플로우만 비활성화할 수 있습니다.' : '비활성 플로우만 다시 켤 수 있습니다.' });
-      const r = start(req, dev, action, [{ name }]);
-      if (r.issue) return res.status(409).json({ ok: false, reason: r.issue });
-      res.locals.auditDetail = `SAN 플로우 ${action === 'deactivate' ? '비활성화' : '다시 켜기'} · ${dev.name || dev.id} · ${name}`;
-      res.json({ ok: true, id: r.id, target: r.target });
-    });
-  }
+  //   라우트는 둘을 따로 선언한다 — 반복문 안 템플릿 경로는 API 문서 생성기가 읽지 못해 문서에서 빠졌다(v2.939 Chromium 재확인 때 발견).
+  // 반증 L-4: 이름 · 기록 · 상태 · 엣지 버전을 OTP 재인증 **전에** 본다 — 뒤에서 거부하면 OTP 를 써 버려 다음 코드를 기다려야 했다.
+  const togglePrecheck = (action) => (req, res, next) => {
+    const dev = getDeviceWithSecret(String(req.body?.deviceId || ''));
+    const name = String(req.body?.name || '');
+    if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
+    if (!FLOW_NAME_RE.test(name)) return res.status(400).json({ ok: false, reason: '포탈이 만든(dvc_) 플로우만 바꿀 수 있습니다.' });
+    const f = listFlows().find((x) => x.deviceId === dev.id && x.name === name);
+    if (!f) return res.status(404).json({ ok: false, reason: '포탈 플로우 기록에 없는 플로우입니다.' });
+    const need = action === 'deactivate' ? 'active' : 'inactive';
+    if (f.state !== need) return res.status(409).json({ ok: false, reason: action === 'deactivate' ? '활성 플로우만 비활성화할 수 있습니다.' : '비활성 플로우만 다시 켤 수 있습니다.' });
+    const target = String(dev.agent || '').trim();
+    const why = target ? flowEdgeIssue(target, undefined, action) : null;
+    if (why) return res.status(409).json({ ok: false, reason: why });
+    res.locals.flowToggle = { dev, name };
+    next();
+  };
+  const toggleRun = (action, req, res) => {
+    const { dev, name } = res.locals.flowToggle;
+    const r = start(req, dev, action, [{ name }]);
+    if (r.issue) return res.status(409).json({ ok: false, reason: r.issue });
+    res.locals.auditDetail = `SAN 플로우 ${action === 'deactivate' ? '비활성화' : '다시 켜기'} · ${dev.name || dev.id} · ${name}`;
+    res.json({ ok: true, id: r.id, target: r.target });
+  };
+  api.post('/tools/san-flow/deactivate', ...gate, togglePrecheck('deactivate'), reauth, (req, res) => toggleRun('deactivate', req, res));
+  api.post('/tools/san-flow/activate', ...gate, togglePrecheck('activate'), reauth, (req, res) => toggleRun('activate', req, res));
 
   /** 기록 정리 — 등록부에서 지운 스위치의 플로우 기록만(장비에 명령을 보내지 않는다 — 반증 L-11). OTP 재인증. */
   api.post('/tools/san-flow/forget', ...gate, reauth, async (req, res) => {
