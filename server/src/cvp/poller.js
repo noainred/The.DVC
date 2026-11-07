@@ -26,7 +26,11 @@ import * as db from './db.js';
 import { putStatus, getStatus, keepOnly } from './store.js';
 import { scheduleCvpFaultScan } from './faultScan.js'; // v2.640: 중앙 직접 수집 뒤 장애 전이 판정(디바운스)
 import { isMockMode } from '../mock/demo/flags.js';            // v2.708 데모(mock 전용)
-import { demoCvpCollect, ensureCvpDemo, isDemoId, cvpDemoActive } from '../mock/demo/cvp.js';
+import { demoCvpCollect, ensureCvpDemo, isDemoId, cvpDemoActive, demoEndpoints } from '../mock/demo/cvp.js';
+import { store } from '../store.js';
+import { datacenterOfVcenter } from '../datacenter/store.js';
+import { pickEndpointMacs, noteVmHosts } from './endpoint.js';   // v2.929(C-③) EndpointLocation
+import { normMac } from './parse.js';
 
 export const cvpAuthGuard = createAuthGuard({ file: 'cvp-auth-stops.json' });
 import { PARTS_EVERY_MS } from './faults.js'; // v2.680: 장애 판정의 부품 신선도와 같은 값(한 벌)
@@ -99,6 +103,26 @@ export function applyDeltas(cvpId, dev, intervalMs, prevMap = _prevCounters, sla
   }
 }
 
+/**
+ * v2.929(C-③): 이번 부품 주기에 EndpointLocation 으로 물을 MAC — 이 CVP 법인(datacenterId)의 vCenter 호스트 NIC · 최근 이동 VM · 나머지 VM 순환.
+ *   법인 미지정 CVP 는 이 노드 스냅샷 전체(엣지는 자기 법인 vCenter 만 가진다). 설정에서 끄면 null.
+ */
+export async function endpointMacsFor(srv, settings, { now = Date.now(), snap = null } = {}) {
+  if (settings?.endpointScan === false) return null;
+  const s = snap || store.get?.() || {};
+  const dc = String(srv?.datacenterId || '');
+  const inCorp = (vcId) => !dc || String(datacenterOfVcenter(vcId) || '') === dc;
+  const allVms = Array.isArray(s.vms) ? s.vms : [];
+  const moved = noteVmHosts(allVms.map((v) => ({ id: v.id, host: `${v.vcenterId}|${v.host}` })), { now });
+  const ok = (m) => (m && m.length === 12 ? m : null);
+  const hostMacs = (s.hosts || []).filter((h) => inCorp(h.vcenterId)).flatMap((h) => (Array.isArray(h.nics) ? h.nics : []).map((n) => ok(normMac(n?.mac)))).filter(Boolean);
+  const vms = allVms.filter((v) => inCorp(v.vcenterId));
+  const macsOf = (v) => (Array.isArray(v?.dev?.nics) ? v.dev.nics : []).map((n) => ok(normMac(n?.mac))).filter(Boolean);
+  const askedAt = await db.epMetaFor(db.LOCAL_AGENT, srv.id).catch(() => new Map());
+  return pickEndpointMacs({ hostMacs, movedVmMacs: vms.filter((v) => moved.has(v.id)).flatMap(macsOf), vmMacs: vms.flatMap(macsOf), askedAt },
+    { now, max: settings?.endpointPerCycle ?? 200, staleMs: PARTS_EVERY_MS });
+}
+
 async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) {
   const full = getServerWithSecret(srv.id) || srv;
   // v2.708: 데모 CVP(mock-)는 접속하지 않고 합성 결과를 쓴다(인증 정지 판정도 하지 않는다). 사람이 등록한 CVP 는 mock 모드라도 예전 그대로.
@@ -119,9 +143,11 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
   const timeout = settings.deviceTimeoutMs;
   try {
     let r;
+    const epMacs = partsDue ? await endpointMacsFor(full, settings).catch(() => null) : null;   // v2.929(C-③)
     try {
       r = demo ? await demoCvpCollect(full, { now: Date.now(), optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm } })
-        : await withDeadline(timeout, (signal) => collectCvp(full, { signal, budgetMs: Math.max(20_000, timeout - 10_000), partsDue, prefer, optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm } }), 'CVP 수집 시한 초과');
+        : await withDeadline(timeout, (signal) => collectCvp(full, { signal, budgetMs: Math.max(20_000, timeout - 10_000), partsDue, prefer, optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm }, epMacs }), 'CVP 수집 시한 초과');
+      if (demo && epMacs?.length && r?.ok) r.endpoints = demoEndpoints(epMacs, Date.now());
     } catch (e) {
       const auth = !!e?.authFailed;
       const msg = e?.message || String(e);
@@ -204,12 +230,18 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
       const l2Items = r.devices.filter((d) => d.lldp !== undefined || d.fdb !== undefined)
         .map((d) => ({ key: d.key, ts: d.l2At ?? readAt, fdb: d.fdb, lldp: d.lldp, fdbMeta: d.fdbMeta, lldpTruncated: d.lldpTruncated, lldpPartial: d.lldpPartial === true }));
       if (l2Items.length) await db.saveL2(db.LOCAL_AGENT, full.id, l2Items);
+      // v2.929(C-③): EndpointLocation 결과(이번 주기에 물은 MAC 만 — 오류 · 미지원은 위치를 지우지 않고 메타만).
+      if (r.endpoints?.results?.length) await db.saveEndpoints(db.LOCAL_AGENT, full.id, r.endpoints.results);
     } catch (e) { saved = { error: e.message }; console.warn(`[cvp] ${full.name || full.id}: DB 적재 실패 — ${e.message}`); }
     putStatus(full.id, {
       name: full.name, ok: true, collectedAt: readAt, lastAttemptAt: readAt, durationMs: readAt - t0, deviceCount: r.devices.length,
       error: null, authStopped: null, usedPaths: r.usedPaths, missing: r.missing, seenFields: r.seenFields, truncated: r.truncated,
       cvpVersion: r.cvpVersion, partsRead: partsReadNow, ...(partsNotTried > 0 ? { partsDueUnread: true, partsNotTried } : {}),
       ...(pruneHeld ? { pruneHeld } : {}),
+      // v2.929(C-③): EndpointLocation 이번 주기 — 물은 수 · 위치 있음 · 없음 · 오류 · 미지원 · 예산으로 못 물은 수(부품 주기가 아니면 직전 값을 그대로 싣는다)
+      ...(r.endpoints ? { endpoints: { at: readAt, asked: r.endpoints.results.length, ok: r.endpoints.results.filter((x) => x.status === 'ok').length,
+        none: r.endpoints.results.filter((x) => x.status === 'none').length, errors: r.endpoints.results.filter((x) => x.status === 'error').length,
+        unsupported: !!r.endpoints.unsupported, cut: r.endpoints.cut || 0 } } : (getStatus(full.id)?.endpoints ? { endpoints: getStatus(full.id).endpoints } : {})),
       ...(saved?.unavailable ? { dbUnavailable: true } : {}), ...(saved?.error ? { dbError: saved.error } : {}),
       ...(r.samples ? { samples: r.samples } : {}), // v2.640(② 진단): 종류별 원문 표본(첫 성공 응답 앞 4KB) — 관리자 화면만 본다
       // v2.641: 경로 탐색 표본(부품 주기마다 갱신 — 없으면 직전 것을 유지한다: 진단 근거를 30분마다 지우지 않게)

@@ -131,6 +131,17 @@ function wwn(idx, p, salt = '') {
   const b = [(x >>> 24) & 255, (x >>> 16) & 255, (x >>> 8) & 255, (x & 0xfe) | (p & 1)].map((v) => v.toString(16).padStart(2, '0'));
   return `20:00:00:24:${b.join(':')}`;
 }
+/** v2.929(C-③): 데모 호스트 물리 NIC(soapClient parsePnics 와 같은 모양) — 업링크 매칭 · CVP 위치 · vmnic 카운터 데모가 NIC 이름 · MAC 을 쓴다.
+ *   예전 데모 호스트에는 NIC 목록이 없어 네트워크 카드가 '인벤토리에 없음' 이었다. MAC 은 사이트 · 호스트 이름으로 만든 결정적 값(가상값). */
+function mkPnics(idx, salt = '') {
+  return [0, 1, 2, 3].map((p) => {
+    let x = 2166136261 >>> 0;
+    for (const ch of `${salt}|nic|${p}`) x = Math.imul(x ^ ch.charCodeAt(0), 16777619) >>> 0;
+    const b = [(x >>> 16) & 255, (x >>> 8) & 255, x & 255].map((v) => v.toString(16).padStart(2, '0'));
+    return { device: `vmnic${p}`, mac: `b8:59:9f:${b.join(':')}`, speedMb: p < 2 ? 25000 : 10000, maxSpeedMb: p < 2 ? 25000 : 10000,
+      link: !(p === 3 && idx % 11 === 3), driver: p < 2 ? 'nmlx5_core' : 'ixgben', vendor: p < 2 ? 'Mellanox Technologies' : 'Intel Corporation', model: p < 2 ? 'ConnectX-4 Lx' : 'X710' };
+  });
+}
 function mkHbas(idx, salt = '') {
   const fc = HBA_FC[idx % HBA_FC.length];
   const hbas = fc.speeds.map((sp, p) => ({
@@ -627,6 +638,7 @@ export function generateSnapshot() {
         //   Dell 호스트는 자기 iDRAC 서버와 태그가 같다(다르면 hostMatch 가 '다른 장비' 로 본다 — v2.682 R3D-04).
         serviceTag: mockServiceTag(`${site.id}|${h.name}`),
         hbas: mkHbas(h.idx, `${site.id}|${h.name}`),
+        nics: mkPnics(h.idx, `${site.id}|${h.name}`),   // v2.929(C-③)
         gpus: mkGpus(h.idx, site),
         // v2.852: vSphere 데이터센터 이름(실수집 soapClient 와 같은 키) — VM 의 vcDcPath 와 같은 값. GPU 할당 계층의 '데이터센터' 단계.
         vcDatacenter: `DC-${site.id}`,

@@ -64,6 +64,11 @@ export default function HostDetail({ id }) {
       .catch((e) => { if (my === seq.current) setSt({ data: null, error: e }); });
   }, [id]);
 
+  // v2.929(C-③): CVP 위치 지금 조회 뒤 업링크 매칭을 다시 받는다(늦게 온 이전 응답은 seq 로 버린다).
+  const reloadNet = () => {
+    const my = seq.current;
+    fetchJson(`/hosts/${encodeURIComponent(id)}/net-uplinks`).then((u) => { if (my === seq.current) setNet(u); }).catch(() => { /* 직전 값 유지 */ });
+  };
   const h = st.data?.item || null;
   const now = Date.now();
   const sec = useMemo(() => (h ? secCountsOf(h, now) : null), [h]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -217,7 +222,7 @@ export default function HostDetail({ id }) {
                 {' · 포트그룹 전체는 ‘구성 점검 열기’ 에서'}
               </div>
             )}
-            {toolAllowed('cvp') ? (net ? <HostNetCvp data={net} nics={h.nics || []} /> : <div className="muted hd-note">CVP 업링크 매칭 읽는 중…</div>) : null}
+            {toolAllowed('cvp') ? (net ? <HostNetCvp data={net} nics={h.nics || []} hostId={h.id} onReload={reloadNet} /> : <div className="muted hd-note">CVP 업링크 매칭 읽는 중…</div>) : null}
             <HostNicCounters hostId={h.id} uplinks={toolAllowed('cvp') && Array.isArray(net?.uplinks) ? net.uplinks : null} />
           </Card>
           <Card id="st" title="스토리지" color="#fb923c" sub={`HBA ${Array.isArray(h.hbas) ? h.hbas.length : '—'}${mp ? ` · LUN ${mp.luns}(공유 ${mp.shared}) · 경로 ${mp.paths} · 죽은 경로 ${mp.dead}` : ' · 경로 정보 아직 안 읽음'}${h.hcfg?.vsan ? ` · vSAN ${h.hcfg.vsan.enabled === true ? '참여' : h.hcfg.vsan.enabled === false ? '참여 안 함' : '—'}` : ''}`}>

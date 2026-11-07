@@ -254,6 +254,16 @@ export async function demoCvpCollect(srv, { now = Date.now(), optics = {} } = {}
  *   LLDP 이웃(시스템 이름 = 호스트 이름 · 포트 ID = vmnic0/vmnic1) · MAC 테이블(vmnic0 포트에 그 호스트 VM 의 vNIC MAC 최대 16개 · VLAN 100).
  *   호스트 상세의 CVP 업링크 블록이 데모에서도 '확정(LLDP)' · '높음(VM MAC)' 근거를 보여 준다. 스냅샷·법인 지정이 아직 없으면 싣지 않는다(undefined — 저장소를 건드리지 않음).
  */
+const _demoEp = new Map();   // mac → { device, port, vlan, learnedAgoMs }
+/** v2.929(C-③) 데모 EndpointLocation 결과 — demoL2 가 채운 표에서(없는 MAC 은 'none'). 수치 · 위치는 가상값이다. */
+export function demoEndpoints(macs = [], now = Date.now()) {
+  const results = (Array.isArray(macs) ? macs : []).map((mac) => {
+    const e = _demoEp.get(mac);
+    return e ? { mac, at: now, status: 'ok', locations: [{ device: e.device, port: e.port, vlan: e.vlan, learnedAt: new Date(now - (e.learnedAgoMs || 600_000)).toISOString(), macType: 'MAC_TYPE_LEARNED_DYNAMIC', likelihood: 'LIKELIHOOD_VERY_LIKELY' }] }
+      : { mac, at: now, status: 'none', locations: [] };
+  });
+  return { results, unsupported: false, cut: 0 };
+}
 async function demoL2(srv, devices, now) {
   let hosts = []; let vms = [];
   try {
@@ -271,8 +281,29 @@ async function demoL2(srv, devices, now) {
   const slots = [];
   for (const d of leaves) for (const p of d.ports || []) if (p.oper === 'up' && !/\/1$/.test(p.name)) slots.push({ d, p });
   if (slots.length < 2) return;
+  const devId = (d) => String(d.serial || d.key || '');
   hosts.forEach((h, i) => {
     const a = slots[(2 * i) % slots.length]; const b = slots[(2 * i + 1) % slots.length];
+    // v2.929(C-③) 데모 EndpointLocation — 호스트 NIC MAC 은 LLDP 와 같은 포트 · VM MAC 은 vmnic0 포트(일곱 번째마다 다음 호스트 포트 = vMotion 직후 옛 위치처럼).
+    const nics = Array.isArray(h.nics) ? h.nics : [];
+    const other = slots[(2 * i + 2) % slots.length];
+    // 아홉 번째 호스트마다 vmnic1 의 CVP 위치를 LLDP 와 다른 포트로 둔다 — 화면의 ‘LLDP 와 CVP 위치가 다릅니다’ 를 데모에서도 보이게(가상).
+    nics.forEach((nic, k) => {
+      const mac = String(nic?.mac || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+      if (mac.length !== 12) return;
+      const slot = k === 1 && i % 9 === 4 ? other : k % 2 ? b : a;
+      _demoEp.set(mac, { device: devId(slot.d), port: slot.p.name, vlan: null });
+    });
+    let vi = 0;
+    for (const v of vms) {
+      if (v.vcenterId !== h.vcenterId || v.host !== h.name) continue;
+      for (const nic of v.dev?.nics || []) {
+        const mac = String(nic?.mac || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+        if (mac.length !== 12) continue;
+        const stale = (vi++ % 7) === 6;
+        _demoEp.set(mac, { device: devId(stale ? other.d : a.d), port: (stale ? other.p : a.p).name, vlan: 100, learnedAgoMs: stale ? 3 * 3600_000 : 10 * 60_000 });
+      }
+    }
     a.d.lldp.push({ port: a.p.name, idx: '1', sysName: h.name, portId: 'vmnic0', portDesc: 'vmnic0', chassisId: '' });
     b.d.lldp.push({ port: b.p.name, idx: '1', sysName: h.name, portId: 'vmnic1', portDesc: 'vmnic1', chassisId: '' });
     let n = 0;

@@ -7,6 +7,7 @@ import { numOrNull } from '../numOrNull.js';
 
 export const BASIS = Object.freeze({
   lldp: { label: '확정', note: 'LLDP 이웃', tone: 'green' },
+  endpoint: { label: '확정', note: 'CVP 위치(EndpointLocation) — CVP 가 이 NIC MAC 을 지금 배운 포트', tone: 'green' },   // v2.929(C-③)
   mac: { label: '높음', note: 'MAC 테이블 학습', tone: 'green' },
   'mac-vm': { label: '높음', note: 'MAC 테이블 — 이 호스트 VM MAC', tone: 'green' },   // v2.924(B-②)
   'desc-mac': { label: '보통', note: '포트 설명에 NIC MAC', tone: 'amber' },
@@ -116,3 +117,32 @@ export function uplinkTotals(uplinks = []) {
 
 export const SEVERITY_BADGE = Object.freeze({ critical: 'red', error: 'red', warning: 'amber', info: 'gray' });
 export const eventTimeText = (ts) => (Number.isFinite(ts) ? new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
+
+/**
+ * v2.929(C-③): CVP EndpointLocation 현황 한 줄 — 물어본 MAC 수 · 최근 시각 · 미지원 CVP · 대기 중인 요청.
+ *   물어본 적이 없으면 그 사실만(‘위치 없음’ 으로 단정하지 않는다).
+ */
+export function epStatusText(ep, now = Date.now()) {
+  if (!ep) return '';
+  if (ep.error) return 'CVP 위치(EndpointLocation)를 읽지 못했습니다';
+  const parts = [];
+  parts.push(ep.macs ? `CVP 위치 — 물어본 MAC ${ep.macs}개${Number.isFinite(ep.lastAt) ? ` · 최근 ${ageText(ep.lastAt, now)}` : ''}` : 'CVP 위치 — 아직 물어보지 않았습니다(부품 주기 30분 · 버튼으로 지금)');
+  if (ep.unsupported) parts.push(`EndpointLocation 미지원 CVP ${ep.unsupported}대(2021.1 이상 필요)`);
+  if (ep.pending) parts.push('엣지 조회 요청 대기 중');
+  return parts.join(' · ');
+}
+/** 지금 조회 결과 문구 — 직접 물은 CVP 결과 · 엣지로 보낸 요청. */
+export function epLocateText(r) {
+  if (!r) return '';
+  if (r.note) return r.note;
+  const parts = [];
+  for (const d of r.direct || []) parts.push(d.ok ? `${d.name}: 위치 있음 ${d.found ?? 0} · 없음 ${d.none ?? 0}${d.errors ? ` · 오류 ${d.errors}` : ''}${d.unsupported ? ' · 이 CVP 는 EndpointLocation 미지원' : ''}` : `${d.name}: 실패(${d.reason || '사유 미상'})`);
+  for (const q of r.queued || []) parts.push(`${q.name}: 담당 엣지 ${q.agent} 에 요청함(다음 설정 pull 때 묻고 결과를 올립니다)`);
+  if (!parts.length) parts.push('이 호스트 법인에 물을 CVP 가 없습니다');
+  return parts.join(' · ');
+}
+/** LLDP 와 CVP 위치가 다른 NIC — 둘 다 보여 준다(어느 쪽이 맞는지 정하지 않는다). */
+export function epDisagreeText(list = []) {
+  return (Array.isArray(list) ? list : []).map((x) => `${x.nic}: LLDP 는 ${x.lldp?.hostname || '?'} ${x.lldp?.port || ''} · CVP 위치는 ${x.endpoint?.hostname || '?'} ${x.endpoint?.port || ''}`);
+}
+

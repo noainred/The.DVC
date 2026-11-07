@@ -36,7 +36,10 @@ import { ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import * as cdb from '../../cvp/db.js';
 import { listServers as listCvpServers } from '../../cvp/registry.js';
 import { rowOwnerOf } from '../../cvp/overview.js';
-import { matchUplinks, hostMatchTerms, matchL2, mergeUplinks, BASIS_LABEL } from '../../cvp/hostMatch.js';
+import { requestEndpointLookup, pendingEndpointRequest } from '../../cvp/epRequests.js';   // v2.929(C-③)
+import { lookupEndpointsNow } from '../../cvp/endpointNow.js';
+import { normMac } from '../../cvp/parse.js';
+import { matchUplinks, hostMatchTerms, matchL2, mergeUplinks, matchEndpoint, BASIS_LABEL } from '../../cvp/hostMatch.js';
 
 const invHosts = requirePerm('inv.hosts');
 const toolsPerm = requirePerm('tools');
@@ -59,6 +62,31 @@ function perfAbortSignal(res) {
   return ac.signal;
 }
 const abandoned = (e) => e?.code === 'abandoned';
+
+/** v2.929(C-③): EndpointLocation '지금 조회' 를 누를 수 있나 — CVP '지금 수집' 과 같은 축(admin · operator). 인증이 꺼져 있으면 참. */
+const canLocate = (req) => !config.auth.enabled || ['admin', 'operator'].includes(req.user?.role);
+const macsOfNics = (list, max = 64) => [...new Set((Array.isArray(list) ? list : []).map((n) => normMac(n?.mac)).filter((m) => m && m.length === 12))].slice(0, max);
+/** 그 vCenter(법인)의 CVP — net-uplinks 와 같은 규칙(범위 계정은 자기 법인 · 호스트 법인 + 법인 미지정 CVP). */
+function cvpServersFor(req, snap, vcenterId) {
+  const corp = corpLimitOf(req, snap, { vcenterId });
+  const servers = listCvpServers().filter((s) => corp == null || String(s.datacenterId || '') === corp);
+  const hostCorp = String(datacenterOfVcenter(vcenterId) || '');
+  return hostCorp ? servers.filter((s) => !String(s.datacenterId || '') || String(s.datacenterId) === hostCorp) : servers;
+}
+/**
+ * v2.929(C-③): '지금 조회' — 위임 CVP(다른 엣지 담당)는 요청 큐(엣지가 다음 cvp-config pull 에 가져가 묻고 push 로 올린다), 이 노드가 직접 수집하는 CVP 는 지금 묻는다.
+ * @returns {Promise<{ direct: object[], queued: object[] }>}
+ */
+async function locateNow(servers, macs) {
+  const direct = []; const queued = [];
+  for (const s of servers.filter((x) => x.enabled !== false).slice(0, 8)) {
+    const agent = String(s.agent ?? '').trim();
+    if (agent && agent !== String(config.agent?.name || '')) { const q = requestEndpointLookup(agent, s.id, macs); queued.push({ cvpId: s.id, name: s.name || s.id, agent, macs: q.queued }); continue; }
+    const r = await lookupEndpointsNow(s.id, macs);
+    direct.push({ cvpId: s.id, name: s.name || s.id, ...r });
+  }
+  return { direct, queued };
+}
 
 /** 범위 계정의 법인 제한 — 전체 범위면 null(제한 없음), 범위 계정이면 그 호스트 vCenter 의 법인 id('' 이면 '법인 미지정' = 아무것도 못 본다). */
 function corpLimitOf(req, snap, host) {
@@ -260,11 +288,20 @@ export function registerHostSan(api) {
       const ownerKeys = matchServers.map((sv) => ({ agent: String(sv.agent ?? '').trim() ? sv.agent : '', cvpId: sv.id }));
       l2Info = { ...(await cdb.l2Status(ownerKeys)), ...(fdbTruncated ? { fdbTruncated: true } : {}) };
     } catch (e) { console.warn(`[hostsan] CVP LLDP·MAC 테이블 조회 실패: ${e.message}`); l2Info = { error: true }; }
+    // v2.929(SAN·CVP 설계 C-③): CVP EndpointLocation — 이 호스트 NIC MAC 을 CVP 가 지금 배운 포트(담당 행만). LLDP 와 다르면 disagree.
+    let ep = { uplinks: [], disagree: [] }; let epInfo = null;
+    try {
+      const ownerKeys = matchServers.map((sv) => ({ agent: String(sv.agent ?? '').trim() ? sv.agent : '', cvpId: sv.id }));
+      const er = await cdb.endpointsByMacs(terms.macs, { owners: ownerKeys });
+      ep = matchEndpoint({ host: h, epRows: (er.rows || []).filter(own), l2Uplinks: l2.uplinks });
+      epInfo = { ...(await cdb.epStatus(ownerKeys)), pending: matchServers.some((sv) => pendingEndpointRequest(sv.id)), canLocate: canLocate(req) };
+    } catch (e) { console.warn(`[hostsan] CVP EndpointLocation 조회 실패: ${e.message}`); epInfo = { error: true }; }
     const descKeys = new Set(md.uplinks.map((u) => `${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`));
-    const need = l2.uplinks.filter((u) => !descKeys.has(`${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`));
+    const l2All = [...l2.uplinks, ...ep.uplinks];   // v2.929(C-③)
+    const need = l2All.filter((u) => !descKeys.has(`${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`));
     const extra = need.length ? await cdb.portsByKeys(need) : { rows: [] };
     const rowsByKey = new Map((extra.rows || []).filter(own).map((r) => [`${r.agent ?? ''}\u0000${r.cvpId}\u0000${r.key}\u0000${r.port}`, r]));
-    const m = { uplinks: mergeUplinks(md.uplinks, l2.uplinks, rowsByKey), conflicts: [...md.conflicts, ...l2.conflicts], terms: md.terms };
+    const m = { uplinks: mergeUplinks(md.uplinks, l2All, rowsByKey), conflicts: [...md.conflicts, ...l2.conflicts], terms: md.terms };
     // 매칭된 장비의 최근 이벤트(장비 호스트명·시리얼·키가 devices 에 있는 것만) — 장비 수가 작아 cvp 단위로 읽고 거른다.
     const devKeys = new Set(); const cvpIds = new Set();
     for (const u of m.uplinks) { cvpIds.add(u.cvpId); for (const k of [u.key, u.hostname, u.serial]) if (k) devKeys.add(String(k).toLowerCase()); }
@@ -294,8 +331,73 @@ export function registerHostSan(api) {
         inDrop: u.inDrop ?? null, outDrop: u.outDrop ?? null, day: dayOf(u), hour: hourOf(u), rateTs: u.rateTs, ts: u.ts })),
       conflicts: m.conflicts, terms: m.terms, events, eventsUnavailable, cvpUnavailable: !!q.unavailable, truncated: !!q.truncated,
       servers: matchServers.length, hostCorpMatched: !!hostCorp, vmNicMacs: vmMacs, corpLimited: corp != null, corpMissing: corp === '', direction: { in: '서버 송신', out: '서버 수신' },
+      ep: epInfo, epDisagree: ep.disagree.slice(0, 16),   // v2.929(C-③): EndpointLocation 현황 · LLDP 와 다른 NIC
       l2: l2Info,   // v2.924(B-②): { fdbDevices, lldpDevices, lastAt } — 0 이면 'LLDP·MAC 테이블 수집 전'(엣지 업그레이드 · 30분 주기) · error 면 조회 실패
     });
+  });
+
+  // v2.929(SAN·CVP 설계 C-③): CVP EndpointLocation '지금 조회' — 호스트 NIC MAC(64) · VM vNIC MAC(16). 범위 밖 404 → 도구 키 403(cvp) → 역할(admin · operator).
+  //   상태를 바꾸지 않지만 운영 CVP 에 요청을 만들므로 '지금 수집' 과 같은 역할로 묶는다. 결과는 net-uplinks · /vms/:id/endpoint-locations 가 읽는다.
+  api.post('/hosts/:id/endpoint-locate', invHosts, async (req, res) => {
+    const snap = store.get();
+    const h = (snap.hosts || []).find((x) => x.id === String(req.params.id || ''));
+    if (!h || !inUserScope(req.user, snap, h.vcenterId)) return res.status(404).json(NOT_FOUND);
+    const issue = toolIssue(req, 'cvp');
+    if (issue) return res.status(403).json({ ok: false, error: 'forbidden', reason: issue.reason, tool: issue.tool });
+    if (!canLocate(req)) return res.status(403).json({ ok: false, error: 'forbidden', requiredRole: ['admin', 'operator'], reason: 'CVP 위치 조회는 관리자 · 운영자만 할 수 있습니다.' });
+    const macs = macsOfNics(h.nics, 64);
+    if (!macs.length) return res.json({ ok: true, macs: 0, direct: [], queued: [], note: '인벤토리에 이 호스트의 물리 NIC MAC 이 없습니다.' });
+    const r = await locateNow(cvpServersFor(req, snap, h.vcenterId), macs);
+    res.set('Cache-Control', 'no-store').json({ ok: true, macs: macs.length, ...r });
+  });
+  const VM_NOT_FOUND = { ok: false, error: 'VM을 찾을 수 없습니다.', reason: 'VM을 찾을 수 없습니다.' };
+  const invVms = requirePerm('inv.vms');
+  api.post('/vms/:id/endpoint-locate', invVms, async (req, res) => {
+    const snap = store.get();
+    const v = (snap.vms || []).find((x) => x.id === String(req.params.id || ''));
+    if (!v || !inUserScope(req.user, snap, v.vcenterId)) return res.status(404).json(VM_NOT_FOUND);
+    const issue = toolIssue(req, 'cvp');
+    if (issue) return res.status(403).json({ ok: false, error: 'forbidden', reason: issue.reason, tool: issue.tool });
+    if (!canLocate(req)) return res.status(403).json({ ok: false, error: 'forbidden', requiredRole: ['admin', 'operator'], reason: 'CVP 위치 조회는 관리자 · 운영자만 할 수 있습니다.' });
+    const macs = macsOfNics(v.dev?.nics, 16);
+    if (!macs.length) return res.json({ ok: true, macs: 0, direct: [], queued: [], note: '이 VM 의 vNIC MAC 을 아직 읽지 않았습니다(VM 장치 정보).' });
+    const r = await locateNow(cvpServersFor(req, snap, v.vcenterId), macs);
+    res.set('Cache-Control', 'no-store').json({ ok: true, macs: macs.length, ...r });
+  });
+  /**
+   * VM 상세 '네트워크 위치(CVP)' — vNIC 마다 CVP 가 답한 위치 · 지금 호스트 업링크와 일치 여부.
+   *   호스트 업링크 포트 = 그 호스트 NIC MAC 의 CVP 위치 ∪ 이웃 이름이 그 호스트인 LLDP 포트. 그 집합이 비면 판정 보류(단정하지 않는다).
+   */
+  api.get('/vms/:id/endpoint-locations', invVms, async (req, res) => {
+    const snap = store.get();
+    const v = (snap.vms || []).find((x) => x.id === String(req.params.id || ''));
+    if (!v || !inUserScope(req.user, snap, v.vcenterId)) return res.status(404).json(VM_NOT_FOUND);
+    const issue = toolIssue(req, 'cvp');
+    if (issue) return res.status(403).json({ ok: false, error: 'forbidden', reason: issue.reason, tool: issue.tool });
+    const servers = cvpServersFor(req, snap, v.vcenterId);
+    const owners = servers.map((sv) => ({ agent: String(sv.agent ?? '').trim() ? sv.agent : '', cvpId: sv.id }));
+    const own = rowOwnerOf(servers);
+    const host = (snap.hosts || []).find((x) => x.vcenterId === v.vcenterId && x.name === v.host) || null;
+    const nics = (Array.isArray(v.dev?.nics) ? v.dev.nics : []).slice(0, 16).map((n) => ({ label: String(n?.label || n?.name || n?.key || '').slice(0, 64), mac: normMac(n?.mac) })).filter((n) => n.mac && n.mac.length === 12);
+    const er = await cdb.endpointsByMacs(nics.map((n) => n.mac), { owners });
+    const hostPorts = new Set(); let hostPortsKnown = false;
+    if (host) {
+      const hr = await cdb.endpointsByMacs(macsOfNics(host.nics, 64), { owners });
+      for (const r of (hr.rows || []).filter(own)) { hostPorts.add(`${r.cvpId}\u0000${r.key}\u0000${r.port}`); hostPortsKnown = true; }
+      const terms = hostMatchTerms(host);
+      const lr = await cdb.lldpByNames([terms.full, terms.short]);
+      for (const r of (lr.rows || []).filter(own)) { hostPorts.add(`${r.cvpId}\u0000${r.key}\u0000${r.port}`); hostPortsKnown = true; }
+    }
+    const rows = nics.map((n) => {
+      const locs = (er.rows || []).filter((r) => r.mac === n.mac).filter(own);
+      const meta = (er.meta.get(n.mac) || [])[0] || null;
+      const inHost = locs.some((r) => hostPorts.has(`${r.cvpId}\u0000${r.key}\u0000${r.port}`));
+      const verdict = !locs.length ? (meta ? (meta.status === 'none' ? 'none' : meta.status) : 'not-asked') : !hostPortsKnown ? 'unknown' : inHost ? 'match' : 'mismatch';
+      return { label: n.label, mac: n.mac, verdict, askedAt: meta?.at ?? null, reason: meta?.reason || null,
+        locations: locs.slice(0, 4).map((r) => ({ cvpId: r.cvpId, hostname: r.hostname || r.key, port: r.port, vlan: r.vlan, learnedAt: r.learnedAt, macType: r.macType })) };
+    });
+    res.set('Cache-Control', 'no-store').json({ ok: true, vm: { id: v.id, name: v.name, host: v.host }, hostKnown: !!host, hostPortsKnown, rows,
+      servers: servers.length, pending: servers.some((sv) => pendingEndpointRequest(sv.id)), canLocate: canLocate(req) });
   });
 
   api.get('/tools/sanswitch/attribution', toolsPerm, fullScopeOnly, async (req, res) => {

@@ -1219,6 +1219,8 @@ function AdminPanel({ onChanged }) {
           <label style={LBL} title="링크가 올라온 포트의 수신 광량이 이 값 이하이면 장애로 판정합니다">광신호 장애(dBm 이하)<input className="input" inputMode="decimal" value={sform.xcvrRxFaultDbm} onChange={sset('xcvrRxFaultDbm')} /></label>
           <label style={{ ...LBL, alignContent: 'end' }} title="부품 장애·포트 down·BGP down 전이가 생길 때 알림 채널(설정 › 알림)로 보냅니다. 전이 기록은 이 값과 무관하게 남습니다."><span><input type="checkbox" checked={!!sform.faultAlerts} onChange={sset('faultAlerts')} /> 장애 전이 알림</span></label>
           <label style={{ ...LBL, alignContent: 'end' }}><span><input type="checkbox" checked={sform.faultAlertsClosed !== false} onChange={sset('faultAlertsClosed')} disabled={!sform.faultAlerts} /> 해소도 알림</span></label>
+          <label style={{ ...LBL, alignContent: 'end' }} title="부품 주기(30분)마다 호스트 NIC · 최근 이동 VM · 나머지 VM MAC 을 CVP EndpointLocation 에 묻습니다(CVP 2021.1 이상). 끄면 화면의 ‘지금 조회’ 버튼만 남습니다."><span><input type="checkbox" checked={sform.endpointScan !== false} onChange={sset('endpointScan')} /> 위치(EndpointLocation) 주기 조회</span></label>
+          <label style={LBL} title="CVP 서버 하나에 한 주기 동안 묻는 MAC 수 — 요청 1회 = MAC 1개, 나머지는 다음 주기">위치 조회 상한(주기당 MAC)<input className="input" inputMode="numeric" value={sform.endpointPerCycle} onChange={sset('endpointPerCycle')} disabled={sform.endpointScan === false} /></label>
         </div>
         <div style={{ ...ROW, marginTop: 6 }}>
           <button type="button" className="btn" onClick={saveSettings} disabled={busy}>설정 저장</button>

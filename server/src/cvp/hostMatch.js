@@ -128,7 +128,7 @@ export function matchUplinks(ports = [], host = {}) {
  * ⚠ ESXi 는 표준 vSwitch 에서 LLDP 를 보내지 않는다(분산 스위치에서 켜야 한다 — CDP 만 기본) · vmk0 MAC 은 대개 첫 vmnic MAC 이지만 아닐 수 있다 —
  *   그래서 근거가 없으면 '미매칭' 이고 설명 일치(보통)로 떨어진다(지어내지 않는다).
  */
-export const BASIS_RANK = Object.freeze({ lldp: 0, mac: 1, 'mac-vm': 2, 'desc-mac': 3, 'desc-nic': 4, 'desc-name': 5 });
+export const BASIS_RANK = Object.freeze({ lldp: 0, endpoint: 0.5, mac: 1, 'mac-vm': 2, 'desc-mac': 3, 'desc-nic': 4, 'desc-name': 5 });   // v2.929(C-③) endpoint = CVP EndpointLocation
 export const VM_MAC_SHARE_MIN = 0.5;   // 그 포트에서 배운 MAC 중 이 호스트 VM 비율 하한(트렁크·다른 호스트 포트를 거른다)
 const pkey = (u) => `${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`;
 const mac12 = (m) => { const h = normMac(m); return h.length === 12 ? h : null; };
@@ -231,9 +231,39 @@ export function mergeUplinks(descUplinks = [], l2Uplinks = [], rowsByKey = new M
   return [...out.values()].sort((a, b) => BASIS_RANK[a.basis] - BASIS_RANK[b.basis] || String(a.nic || '~').localeCompare(String(b.nic || '~')) || String(a.port).localeCompare(String(b.port)));
 }
 
+/**
+ * v2.929(SAN·CVP 설계 C-③): CVP EndpointLocation 근거 — 이 호스트 물리 NIC MAC 을 CVP 가 '지금 배운 곳' 이라고 답한 포트.
+ *   LLDP 가 같은 NIC 을 다른 포트로 말하면 disagree 로 둘 다 밝힌다(어느 쪽이 맞는지 정하지 않는다 — 화면이 둘 다 보여 준다).
+ * @param {{ host:object, epRows:Array, l2Uplinks?:Array }} input epRows = cvp/db.js endpointsByMacs rows
+ * @returns {{ uplinks: Array, disagree: Array<{nic, lldp:{hostname,port}, endpoint:{hostname,port}}> }}
+ */
+export function matchEndpoint({ host, epRows = [], l2Uplinks = [] } = {}) {
+  const nicByMac = new Map();
+  for (const n of Array.isArray(host?.nics) ? host.nics : []) { const m = mac12(n?.mac); if (m && n?.device) nicByMac.set(m, String(n.device)); }
+  const byPort = new Map();
+  for (const r of Array.isArray(epRows) ? epRows : []) {
+    const nic = nicByMac.get(r?.mac);
+    if (!nic || !r.port) continue;
+    const u = { agent: r.agent ?? '', cvpId: r.cvpId, key: r.key, hostname: r.hostname || '', port: r.port, nic, basis: 'endpoint',
+      evidence: `CVP 위치 ${nic}${r.vlan != null ? ` · VLAN ${r.vlan}` : ''}${r.macType ? ` · ${String(r.macType).replace(/^MAC_TYPE_/, '').toLowerCase()}` : ''}`, l2At: r.at ?? null };
+    const k = pkey(u);
+    if (!byPort.has(k)) byPort.set(k, u);
+  }
+  const uplinks = [...byPort.values()];
+  const disagree = [];
+  for (const u of uplinks) {
+    for (const l of Array.isArray(l2Uplinks) ? l2Uplinks : []) {
+      if (l.basis !== 'lldp' || l.nic !== u.nic || pkey(l) === pkey(u)) continue;
+      disagree.push({ nic: u.nic, lldp: { hostname: l.hostname || l.key, port: l.port }, endpoint: { hostname: u.hostname || u.key, port: u.port } });
+    }
+  }
+  return { uplinks, disagree };
+}
+
 /** 매칭 근거 라벨(서버·웹 공용 문구 — 웹 hostNetText 가 같은 표를 쓴다). */
 export const BASIS_LABEL = Object.freeze({
   lldp: { label: '확정', note: 'LLDP 이웃', tone: 'ok' },
+  endpoint: { label: '확정', note: 'CVP 위치(EndpointLocation)', tone: 'ok' },
   mac: { label: '높음', note: 'MAC 테이블 학습', tone: 'ok' },
   'mac-vm': { label: '높음', note: 'MAC 테이블 — 이 호스트 VM MAC', tone: 'ok' },
   'desc-mac': { label: '보통', note: '포트 설명에 NIC MAC', tone: 'warn' },

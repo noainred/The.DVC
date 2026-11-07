@@ -8,6 +8,8 @@
  *  - '지금 수집' 은 **기다리지 않는다**(한 CVP 가 수 분 걸릴 수 있다 — pull 을 붙잡으면 설정 반영이 밀린다). 수집 뒤 push 는 폴러가 한다.
  *  - 무음 실패 금지: 실패는 `_last` + 콘솔(같은 사유는 10분에 1줄). edgelog/spec.js 에 등재(pull.cvp).
  */
+import { lookupEndpointsNow } from '../cvp/endpointNow.js';   // v2.929(C-③)
+import { pushCvpNow } from '../cvp/push.js';
 import crypto from 'node:crypto';
 import { config, clampIntervalMs } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
@@ -83,13 +85,36 @@ async function _pull() {
         .then((r) => { if (!r.ok) console.warn(`[cvp-config] 중앙 요청 수집을 지금 하지 못했습니다(${r.reason}) — 요청은 중앙에서 한 번 더 내려옵니다`); })
         .catch((e) => console.warn(`[cvp-config] 중앙 요청 수집 실패: ${e.message}`));
     }
-    _last = { at: Date.now(), ok: true, applied, count: servers.length, removed: removed.length, settingsApplied, ...(settingsUnreadable ? { settingsUnreadable: true } : {}), collectRequested: wants.length };
+    // v2.929(C-③): EndpointLocation '지금 조회' — 이 엣지 몫 CVP 만(등록부 대조) · MAC 12자만 · 64개 · 한 번에 하나씩(pull 을 기다리게 하지 않는다).
+    const epReqs = Array.isArray(body?.epNow) ? body.epNow.filter((x) => x && typeof x.cvpId === 'string' && Array.isArray(x.macs)).slice(0, 10) : [];
+    if (epReqs.length) runEndpointRequests(epReqs);
+    _last = { at: Date.now(), ok: true, applied, count: servers.length, removed: removed.length, settingsApplied, ...(settingsUnreadable ? { settingsUnreadable: true } : {}), collectRequested: wants.length,
+      ...(epReqs.length ? { epRequested: epReqs.length } : {}) };
     return { ok: true, applied, unchanged: !applied, count: servers.length, removed: removed.length, settingsApplied, collectRequested: wants.length };
   } catch (e) {
     _last = { at: Date.now(), ok: false, error: e.message };
     if (_log('pull', e.message)) console.warn(`[cvp-config] 중앙 설정 pull 실패: ${e.message}`);
     return { ok: false, reason: e.message };
   }
+}
+
+let _epRun = null;
+/** v2.929(C-③): 중앙이 내려보낸 EndpointLocation 요청을 차례로 처리하고 곧바로 push 한다(다음 push 주기를 기다리지 않게). 단일비행. */
+export function runEndpointRequests(reqs) {
+  if (_epRun) return _epRun;
+  _epRun = (async () => {
+    const mine = new Set(serversForThisNode().map((s) => s.id));
+    let done = 0;
+    for (const r of reqs) {
+      if (!mine.has(r.cvpId)) continue;   // 이 엣지 몫이 아닌 CVP — 등록부가 원천(중앙 요청을 그대로 믿지 않는다)
+      const macs = r.macs.filter((m) => typeof m === 'string' && /^[0-9a-f]{12}$/.test(m)).slice(0, 64);
+      try { const x = await lookupEndpointsNow(r.cvpId, macs); if (x.ok) done += 1; else console.warn(`[cvp-config] EndpointLocation 지금 조회 실패(${r.cvpId}): ${x.reason}`); }
+      catch (e) { console.warn(`[cvp-config] EndpointLocation 지금 조회 실패(${r.cvpId}): ${e.message}`); }
+    }
+    if (done) { try { await pushCvpNow(); } catch (e) { console.warn(`[cvp-config] EndpointLocation 결과 push 실패(다음 주기에 다시 갑니다): ${e.message}`); } }
+    return done;
+  })().finally(() => { _epRun = null; });
+  return _epRun;
 }
 
 export function startCvpConfigPull() {

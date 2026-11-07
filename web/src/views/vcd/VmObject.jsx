@@ -10,6 +10,7 @@ import { ErrorBox, Loading, StateBadge, UsageCell, GpuBadge } from '../../compon
 import { STable } from '../../components/STable.jsx';
 import { VmIpPing, VmCfgSection, VmPartitionsSection, VmTagsSection, VmChangesSection, PerfcSection, ClusterCfgSection } from '../../components/EntityDetail.jsx';
 import { VmConsoleButton } from '../../components/VmConsole.jsx';
+import VmCvpLocation from './VmCvpLocation.jsx';   // v2.929(SAN·CVP 설계 C-③) 네트워크 위치(CVP)
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { VmReconfigButton } from '../../components/VmReconfig.jsx';
 import { dayStamp } from '../../dayStamp.js';
@@ -248,6 +249,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
             <Note>IP 는 VMware Tools 가 보고한 값입니다 — 꺼졌거나 Tools 가 없으면 비어 있습니다(‘IP 없음’ 이 아닙니다). 핑은 버튼을 누를 때만.</Note>
           </Card>
           <VmNicCard vm={vm} nics={nics} />
+          {toolAllowed('cvp') ? <VmCvpLocation vmId={vm.id} /> : null}
         </div>
       )}
 
