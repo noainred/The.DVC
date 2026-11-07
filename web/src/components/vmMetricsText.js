@@ -28,7 +28,7 @@ export function metricErrorState(err) {
     return { authStopped: { attempts, since, reason: String(body.reason || '') }, skip: null, message: String(body.reason || err.message || '') };
   }
   if (body && typeof body === 'object' && typeof body.skipReason === 'string' && body.skipReason) {
-    // v2.926: 엣지 위임이면 담당 엣지 이름(agent) — 안내가 '그 엣지 포탈에서 보세요' 로 말한다(주소는 오지 않는다)
+    // v2.927: 엣지 위임이면 담당 엣지 이름(agent) — 안내가 '그 엣지 포탈에서 보세요' 로 말한다(주소는 오지 않는다)
     const agent = typeof body.agent === 'string' && body.agent.trim() ? body.agent.trim().slice(0, 64) : null;
     return { authStopped: null, skip: { skipReason: body.skipReason, reason: String(body.reason || ''), ...(agent ? { agent } : {}) }, message: String(body.reason || err.message || '') };
   }

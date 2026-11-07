@@ -40,7 +40,7 @@ describe('metricAuthStopText', () => {
   });
 });
 
-describe('v2.926 엣지 위임 vCenter — 담당 엣지 이름으로 어디서 볼 수 있는지 말한다', () => {
+describe('v2.927 엣지 위임 vCenter — 담당 엣지 이름으로 어디서 볼 수 있는지 말한다', () => {
   it('skip 에 agent 를 싣고 안내 문장이 그 엣지 포탈을 말한다 · 다른 사유 · 이름 없음은 예전 그대로', async () => {
     const { skipSingleText } = await import('../views/vcAuthStopText.js');
     const s = metricErrorState({ body: { ok: false, skipReason: 'site', reason: 'x', agent: ' kr-edge ' } });

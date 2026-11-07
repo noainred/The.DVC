@@ -98,7 +98,7 @@ export function skipSingleText(info) {
   const k = info && typeof info === 'object' ? info.skipReason : null;
   if (typeof k !== 'string' || !k) return '';
   const how = SKIP_HOW[k] || '설정 › vCenter 에서 수집 방식·상태를 확인하세요';
-  // v2.926: 엣지 위임이고 담당 엣지 이름을 알면 어디서 볼 수 있는지 말한다(그 엣지 포탈은 이 vCenter 에 직접 로그인한다)
+  // v2.927: 엣지 위임이고 담당 엣지 이름을 알면 어디서 볼 수 있는지 말한다(그 엣지 포탈은 이 vCenter 에 직접 로그인한다)
   const agent = k === 'site' && typeof info.agent === 'string' && info.agent ? info.agent : '';
   return `**이 포탈이 직접 수집하지 않는 vCenter 라 조회하지 않았습니다**(${skipLabel(k)}) — ${how}${agent ? ` — 담당 엣지 ‘${agent}’ 의 포탈에서 볼 수 있습니다` : ''}. 값이 비어 있는 것은 사용량이 0 이라는 뜻이 아닙니다.`;
 }

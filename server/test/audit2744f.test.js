@@ -239,7 +239,7 @@ test('VC-04 ① 직접 수집 대상이 아닌 vCenter(점검중·엣지 위임�
     let r = await call('GET', `/api/vms/${encodeURIComponent(`${id}:vm-1`)}/metrics?type=cpu&interval=day`);
     assert.equal(r.status, 409, `${id} VM 성능 ${r.status}`); assert.equal(r.logins, 0, `${id} VM 성능 로그인 ${r.logins}`);
     assert.equal(r.j.skipReason, why);
-    // v2.926: 엣지 위임이면 담당 엣지 이름(스냅샷 collectedBy)을 싣는다 — 그 엣지 포탈에서 보라고 말하게. 다른 사유에는 없다 · 주소는 싣지 않는다
+    // v2.927: 엣지 위임이면 담당 엣지 이름(스냅샷 collectedBy)을 싣는다 — 그 엣지 포탈에서 보라고 말하게. 다른 사유에는 없다 · 주소는 싣지 않는다
     assert.equal(r.j.agent, why === 'site' ? 'edge1' : undefined);
     assert.equal(/https?:|url/i.test(JSON.stringify(r.j)), false, '엣지 주소를 싣지 않는다');
     r = await call('GET', `/api/vms/${encodeURIComponent(`${id}:vm-1`)}/metrics?type=cpu&interval=day&manual=1`);

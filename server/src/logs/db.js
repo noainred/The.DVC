@@ -365,7 +365,7 @@ function initSqlite() {
        *   since 가 없거나 entity 조회(전용 인덱스 — 행이 적다)면 한 문장 판 그대로.
        */
       /**
-       * v2.926(문서 후보 — 구성 변경 이력 보고서가 최신 2만 행만 읽어 '7일' 이 짧아지던 것): 추적 이벤트를 **최신 조각부터 흘려보낸다**(모으지 않는다).
+       * v2.927(문서 후보 — 구성 변경 이력 보고서가 최신 2만 행만 읽어 '7일' 이 짧아지던 것): 추적 이벤트를 **최신 조각부터 흘려보낸다**(모으지 않는다).
        *   호출부가 조각마다 바로 센다(메모리는 집계만). 조각 길이는 창의 1/500 이상 · 1시간 이상(조각 수 상한) · 조각 사이 시간 기준 양보.
        *   한 조각이 한 문장 상한(50,000)에 닿거나 전체 상한(maxRows)에 닿으면 거기서 멈추고 truncated — 그때 `coveredSince`(읽은 가장 오래된 시각)보다
        *   새 행은 빠짐없이 읽었다(조각 안은 최신 먼저). 맨 위 조각은 위가 열려 있다(vCenter 시계가 앞선 이벤트도 — trackedEventsAsync 와 같다).
@@ -807,7 +807,7 @@ function initJson() {
       .map((r) => ({ vcenterId: r.vcenterId, ts: r.ts, type: r.type, user: r.user, entity: r.entity, message: r.message, detail: r.detail ?? null })),
     opsEventsAsync: async (f = {}, limit = 5000) => api.opsEvents(f, limit),   // v2.719(S1-04): SQLite 판과 같은 API
     trackedEventsAsync: async (f = {}, limit = 5000) => api.trackedEvents(f, limit),   // v2.727(F-01): SQLite 판과 같은 API
-    // v2.926: SQLite 판과 같은 API — 폴백은 메모리 배열이라 한 번에(상한 + 1 로 잘림을 안다)
+    // v2.927: SQLite 판과 같은 API — 폴백은 메모리 배열이라 한 번에(상한 + 1 로 잘림을 안다)
     trackedEventsEach: async (f = {}, onRows, { maxRows = 300_000 } = {}) => {
       const rows = api.trackedEvents(f, Math.min(maxRows + 1, 50_000));
       const truncated = rows.length > maxRows;
