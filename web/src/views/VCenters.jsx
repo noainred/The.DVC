@@ -233,7 +233,9 @@ export default function VCenters({ onSelectSite, resetSignal }) {
 
   const sites = data || [];
   const openSite = sites.find((s) => s.id === openId);
-  if (openSite) return <Suspense fallback={<Loading />}><VCenterDetail site={openSite} onBack={() => setOpenId(null)} /></Suspense>;
+  // v2.926: key — 같은 페이지에서 해시로 **다른 vCenter 의 개체**로 건너뛰면 상세가 그대로 남아 옛 vCenter 의 개체 id(obj)로 새 목록을 찾다 '이 VM 이 없습니다' 가 떴다
+  //   (Chromium A/B 재현). vCenter 가 바뀌면 새로 마운트해 주소에서 다시 읽는다(검색 · 펼침 · 탭 상태도 그 vCenter 의 것으로).
+  if (openSite) return <Suspense fallback={<Loading />}><VCenterDetail key={openSite.id} site={openSite} onBack={() => setOpenId(null)} /></Suspense>;
   // 공백 구분 다중 키워드 AND — 이름·id·도시·국가·리전·버전에서 검색(허브 검색과 같은 규칙).
   const keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = keywords.length === 0 ? sites : sites.filter((s) => {

@@ -178,6 +178,14 @@
     호스트 · 데이터스토어 모달은 그대로 · `EntityDetail type='vm'` 을 쓰는 다른 5곳(알람 · 탐색 · Platform VM 검색 · VmLink · 호스트 전체 페이지)은 **그대로**(질문 ① 기본값 — 다음 후보).
   · 드로어 · 개체 보기 요약의 24h 스파크(`vmSeries.useDaySeries`)는 `types=cpu,mem` 한 번(예전 2회 로그인 → 1회).
   · 남긴 것: 엣지 위임 vCenter 의 성능을 그 엣지 포탈에서 보는 링크(`findRemoteServer` 안내)는 넣지 않았다(옛 모달에도 없던 것 — 다음 후보).
+- **v2.926 — VM 상세 · 성능 그래프 후속 3건(사용자 선택 A '성능 화면·드로어 후속' · 표준)**(웹 `components/EntityDetail.jsx` · `vmMetricsText.js` · `vmperf/VmPerfView.jsx` · `views/VCenters.jsx` ·
+  서버 `vcenter/authStopGate.js skipExtra` · `routes/api/vmMetrics.js edgeHint`. 회귀 `server/test/vmPerf2926.test.js`(3) · 웹 `views/vmPerf2926.test.jsx`(6) · `audit2744k`(링크)):
+  · **VM 상세는 드로어 한 벌** — `EntityDetail type='vm'` 은 `VmDrawer` 로 위임한다(동적 import — VmDrawer 가 EntityDetail 의 섹션을 import 하는 순환을 끊는다 · `rows:[]` 라 ‹ › 잠김 ·
+    signals 없는 항목은 '신호를 함께 받지 않았다'). 알람 · 탐색 · Platform VM 검색 · `VmLink`(도구 표 · 호스트 VM 목록 모달) · 호스트 전체 페이지가 자동으로 드로어다. 옛 VM 모달 본문은 지웠다.
+    모달(z 200) 안에서 연 드로어(z 151)는 그 모달의 쌓임 맥락 안에서 모달 본문 위에 그려진다(Chromium 확인) — 드로어 z 를 올리지 말 것(드로어가 여는 공용 Modal 이 아래로 간다).
+  · **엣지 위임 vCenter 의 성능**: 409 skip(site) 본문에 담당 엣지 포탈 주소 `edge:{id,name,url}` — **관리자만**(`isAdminReq` · 관리 주소 가림 규칙) · 수집 서버 등록부 `remoteAgent` 일치(id/name · 대소문자 무시) ·
+    url 없으면 싣지 않는다. 화면은 `edgePortalHref(edge, vcHash(...monitor))` 로 같은 화면 링크(새 창 · '따로 로그인' 안내). 판정 · 사유 문구 · 로그인 0 은 그대로(`respondIfVcAuthStopped` 의 `skipExtra` 훅).
+  · **vCenter 상세 `key={site.id}`**: 같은 페이지에서 해시로 다른 vCenter 의 개체로 건너뛰면 옛 `obj` 가 남아 '이 VM 이 없습니다' 가 떴다(A/B 재현) — vCenter 가 바뀌면 새로 마운트.
 - ⚠⚠ **v2.697 — VM 구성 속성(B10)은 30초 인벤토리 요청에 싣지 않는다 — 오래된 VM 부터 주기당 상한만큼 다시 읽는 캐시다**
   (`server/src/vmcfg/`{parse.js(순수 파서·판정·엣지 정제),cache.js,collect.js} + `soapClient.js` 배선 + 웹 `views/vmcfg/vmCfgText.js` + `EntityDetail.jsx VmCfgSection`.
   회귀 `server/test/vmCfg2697.test.js`(변이 5/5) + 웹 `vmCfgText.test.js`(서버·웹 판정 대조)):
