@@ -15,11 +15,11 @@ import { can, toolAllowed, fetchJson } from '../api.js';
 import { TOOLS } from '../views/specialToolsList.js';
 import { visibleTools, lockReasonOf } from '../views/toolVisibility.js'; // v2.613 CATALOG2613-07: 잠금 사유도 같은 모듈
 import { search, flatten, catsOfFrom } from './palette.js';
-import { handoffMany } from '../hooks/searchHandoff.js'; // v2.616 검색어 인계 — 검색어 · IP · 시리얼을 URL 에 싣지 않는다(v2.911 여러 칸)
+import { handoffMany, stashForNewTab } from '../hooks/searchHandoff.js'; // v2.616 검색어 인계 — 검색어 · IP · 시리얼을 URL 에 싣지 않는다(v2.911 여러 칸)
 import { modKeyLabel } from '../views/headerText.js';
 import {
   KIND_LABEL, KIND_SHORT, MODE_LABEL, splitPrefix, focusPlan, listPlan, canFilter, LIST_SCREEN, TO_LABEL,
-  readRecent, pushRecent, clearRecent, recentKeyFor, agoText, builtAgoText, highlightParts, metaParts,
+  readRecent, pushRecent, clearRecent, recentKeyFor, recentIdsParam, VIA_LABEL, agoText, builtAgoText, highlightParts, metaParts,
 } from './invSearchQuery.js';
 
 const KIND_TAG = { tool: '기능', tab: '탭' };
@@ -67,6 +67,8 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
   const [nonce, setNonce] = useState(0);            // '다시 시도'
   const recentKey = useMemo(() => recentKeyFor(username), [username]); // 계정별(반증 L-4) — App 이 넘기는 로그인 계정
   const [recent, setRecent] = useState(() => readRecent(undefined, recentKey));
+  // v2.928(B4): 최근 연 장비를 서버에 알려 같은 검색에서 앞으로(이미 보이는 행 안에서 순서만 — 서버가 범위 · 권한을 다시 건다).
+  const recentParam = useMemo(() => recentIdsParam(recent), [recent]);
   const inputRef = useRef(null);
   const seqRef = useRef(0);
 
@@ -117,7 +119,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
     const ctl = new AbortController();
     setLoading(true);
     const t = setTimeout(() => {
-      fetchJson('/search/inventory', { q: q.trim(), kinds: kindSel || undefined }, ctl.signal, { retries: 0 })
+      fetchJson('/search/inventory', { q: q.trim(), kinds: kindSel || undefined, recent: recentParam || undefined }, ctl.signal, { retries: 0 })
         .then((r) => { if (seq === seqRef.current) { setInv(r); setInvErr(null); setLoading(false); } })
         .catch((e) => {
           if (ctl.signal.aborted || seq !== seqRef.current) return;
@@ -125,7 +127,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
         });
     }, DEBOUNCE_MS);
     return () => { clearTimeout(t); ctl.abort(); };
-  }, [q, kindSel, devActive, nonce]);
+  }, [q, kindSel, devActive, nonce, recentParam]);
 
   useEffect(() => { inputRef.current?.focus(); if (restored) inputRef.current?.select(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setCur(0); }, [q, kindSel, inv]);
@@ -150,7 +152,12 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
   const go = (plan, newTab = false) => {
     if (!plan || !plan.hash) return;
     if (newTab) {
-      try { window.open(`${window.location.pathname}${window.location.search}${plan.hash}`, '_blank', 'noopener'); } catch { /* 팝업 차단 */ }
+      // v2.928(A5): 넘길 것이 있으면 일회용 칸 + 창 이름으로(searchHandoff.stashForNewTab — 주소에는 싣지 않는다). 같은 출처라 opener 만 끊는다.
+      try {
+        const name = (plan.handoffs || []).length ? stashForNewTab(plan.handoffs) : '';
+        const w = window.open(`${window.location.pathname}${window.location.search}${plan.hash}`, name || '_blank');
+        if (w) { try { w.opener = null; } catch { /* 무시 */ } }
+      } catch { /* 팝업 차단 */ }
       return;
     }
     if (q.trim()) rememberLastSearch({ q, kindSel, username });
@@ -159,7 +166,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
   };
   const pick = (item, newTab = false) => {
     if (!item || !item.plan) return;
-    if (item.type === 'dev') setRecent(pushRecent({ kind: item.row.kind, name: item.row.name, corp: item.row.corp, plan: item.plan }, undefined, Date.now(), recentKey));
+    if (item.type === 'dev') setRecent(pushRecent({ kind: item.row.kind, id: item.row.id, name: item.row.name, corp: item.row.corp, plan: item.plan }, undefined, Date.now(), recentKey));
     go(item.plan, newTab);
   };
   const goList = (kind) => go(listPlan(kind, text));
@@ -193,6 +200,11 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
   const nothing = q.trim() && !loading && toolRows.length === 0 && (!devActive || noDevice);
   const modeBadge = pre.prefix ? (pre.kind ? KIND_LABEL[pre.kind] : MODE_LABEL[pre.mode]) : '';
   let idx = -1;
+  // v2.928(C2): 스크린리더 — 입력칸이 combobox, 목록이 listbox, 커서 줄이 aria-activedescendant(포커스는 입력칸에 둔 채).
+  const optProps = (i) => ({ id: `inv-opt-${i}`, role: 'option', 'aria-selected': i === cur, tabIndex: -1 });
+  const srStatus = loading ? '찾는 중'
+    : !q.trim() ? ''
+      : `${devActive && inv ? `장비 ${(inv.matched || 0).toLocaleString('ko-KR')}건${devHidden > 0 ? `(표시 ${devShown})` : ''} · ` : ''}기능 · 탭 ${toolRows.length}개`;
 
   return (
     <div className="v4-palette-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -205,11 +217,13 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
             </button>
           )}
           <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} maxLength={256}
-            aria-label="장비 · 기능 찾기"
+            aria-label="장비 · 기능 찾기" role="combobox" aria-autocomplete="list" aria-controls="inv-pal-list"
+            aria-expanded={flat.length > 0} aria-activedescendant={flat[cur] ? `inv-opt-${cur}` : undefined}
             placeholder="장비 · 기능 찾기 — 이름 · 호스트명 · IP · 시리얼 · 모델 · 기능 이름" />
           {devActive && inv && <span className="v3-faint inv-count">{(inv.matched || 0).toLocaleString('ko-KR')}건</span>}
           {loading && <span className="v3-faint inv-count">찾는 중…</span>}
           <span className="v3-kbd">ESC</span>
+          <span className="inv-sr" role="status" aria-live="polite">{srStatus}</span>
         </div>
 
         {devActive && kindsMeta.length > 0 && (inv?.matched || 0) > 0 && (
@@ -249,7 +263,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
           <div className="inv-band info">관리 주소(스토리지 · SAN · PDU · 네트워크 스위치 · GPU 서버)는 <b>관리자에게만</b> 보입니다 — 그 장비는 이름 · 모델 · 시리얼로 찾으세요.</div>
         )}
 
-        <div className="v4-palette-list">
+        <div className="v4-palette-list" id="inv-pal-list" role="listbox" aria-label="찾은 장비 · 기능 · 탭">
           {restored && q === restored.q && q.trim() && (
             <div className="v3-note inv-restored">직전에 고른 검색입니다 — 새로 입력하면 바뀝니다.</div>
           )}
@@ -280,7 +294,8 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
                   {recent.map((r) => {
                     idx += 1; const i = idx;
                     return (
-                      <button key={`r:${r.plan.hash}|${r.at}`} type="button" className={`v4-palette-row${i === cur ? ' on' : ''}`} onMouseEnter={() => setCur(i)} onClick={() => pick(flat[i])}>
+                      <button key={`r:${r.plan.hash}|${r.at}`} type="button" className={`v4-palette-row${i === cur ? ' on' : ''}`} onMouseEnter={() => setCur(i)} onClick={() => pick(flat[i])}
+                        {...optProps(i)}>
                         <span className={`v3-tag inv-k-${r.kind}`}>{KIND_SHORT[r.kind] || '장비'}</span>
                         <span className="v4-palette-name">{r.name}</span>
                         <span className="v3-faint inv-meta">{[r.corp, agoText(r.at)].filter(Boolean).join(' · ')}</span>
@@ -300,8 +315,8 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
           {groups.map((g) => {
             const listTo = g.total > g.rows.length;
             return (
-              <div key={g.kind} className="inv-group">
-                <div className="inv-gh">
+              <div key={g.kind} className="inv-group" role="group" aria-label={`${KIND_LABEL[g.kind]} ${g.total}건`}>
+                <div className="inv-gh" aria-hidden={listTo ? undefined : 'true'}>
                   {KIND_LABEL[g.kind]} <span className="v3-faint">{g.total > g.rows.length ? `${g.total.toLocaleString('ko-KR')} 중 ${g.rows.length}` : g.total}</span>
                   {listTo && <button type="button" className="inv-link" onClick={() => goList(g.kind)}>{canFilter(g.kind) ? `${LIST_SCREEN[g.kind]}에서 모두 보기 ›` : `${LIST_SCREEN[g.kind]} 열기 ›`}</button>}
                 </div>
@@ -310,12 +325,17 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
                   const nameNeedle = pre.mode === 'all' ? needle : '';
                   return (
                     <button key={`${row.kind}:${row.id}:${row.name}`} type="button" className={`v4-palette-row inv-row${i === cur ? ' on' : ''}`}
-                      onMouseEnter={() => setCur(i)} onClick={(e) => pick(flat[i], e.metaKey || e.ctrlKey)}>
+                      onMouseEnter={() => setCur(i)} onClick={(e) => pick(flat[i], e.metaKey || e.ctrlKey)} {...optProps(i)}>
                       <span className={`v3-tag inv-tag inv-k-${row.kind}`}>{KIND_SHORT[row.kind]}</span>
                       <span className={`v4-palette-name${row.kind === 'ip' ? ' v3-mono' : ''}`}><Hl text={row.name} needle={row.kind === 'ip' && pre.mode === 'ip' ? needle : nameNeedle} /></span>
+                      {VIA_LABEL[row.via] && (
+                        <span className={`inv-via via-${row.via}`} title={row.via === 'tag' && row.tags?.length ? row.tags.join(' · ') : undefined}>
+                          {VIA_LABEL[row.via]}{row.via === 'tag' && row.tags?.[0] ? <> · <Hl text={row.tags[0]} needle={needle} /></> : null}
+                        </span>
+                      )}
                       <span className="inv-meta">
                         {metaParts(row, { mode: pre.mode, needle }).map((p, j) => (
-                          <span key={j} className={`${p.mono ? 'v3-mono ' : ''}${p.tone === 'dim' ? 'v3-faint' : ''}`}>{j > 0 && <span className="inv-sep" aria-hidden="true">·</span>}{p.dot && <span className={`inv-dot tone-${p.dot}`} aria-hidden="true" />}<Hl text={p.t} needle={pre.mode === 'all' ? '' : needle} /></span>
+                          <span key={j} className={`${p.mono ? 'v3-mono ' : ''}${p.tone === 'dim' ? 'v3-faint' : ''}`}>{j > 0 && <span className="inv-sep" aria-hidden="true">{'· '}</span>}{p.dot && <span className={`inv-dot tone-${p.dot}`} aria-hidden="true" />}<Hl text={p.t} needle={pre.mode === 'all' ? '' : needle} /></span>
                         ))}
                       </span>
                       <span className="v3-faint inv-to">{TO_LABEL[row.kind]}</span>
@@ -337,7 +357,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
             const lock = it.kind === 'tool' ? lockOf(it.k) : null;
             return (
               <button key={`${it.kind}:${it.k || it.id}`} type="button" className={`v4-palette-row${i === cur ? ' on' : ''}`}
-                title={lock || undefined} onMouseEnter={() => setCur(i)} onClick={() => pick(flat[i])}>
+                title={lock || undefined} onMouseEnter={() => setCur(i)} onClick={() => pick(flat[i])} {...optProps(i)}>
                 <span className="v3-tag inv-tag">{KIND_TAG[it.kind]}</span>
                 <span className="v4-palette-name">{lock ? '🔒 ' : ''}{it.label}</span>
                 <span className="v3-faint" style={{ fontSize: 11 }}>{it.group}</span>
