@@ -56,7 +56,7 @@ export function sanitizeLogSummary(list, { targetKeys = new Set(), now = Date.no
     if (!isObj(x) || typeof x.key !== 'string' || !targetKeys.has(x.key)) { dropped += 1; continue; }
     const st = isObj(x.status) && isObj(x.status.sources) ? { sources: Object.fromEntries(LOG_SOURCES.map((s) => [s, enumOr(x.status.sources[s], STAT, null)])), ended: x.status.ended !== false } : null;
     out.push({
-      key: capStr(x.key, 256), at: ts(x.at, now), cls: clsMap(x.cls), none: N(x.none), read: N(x.read), trunc: N(x.trunc), secHigh: N(x.secHigh),
+      key: capStr(x.key, 256), at: ts(x.at, now), wasRead: x.wasRead === true, cls: clsMap(x.cls), none: N(x.none), read: N(x.read), trunc: N(x.trunc), secHigh: N(x.secHigh),
       top: (Array.isArray(x.top) ? x.top : []).slice(0, 8).map((p) => topOf(p, now)).filter(Boolean), status: st,
     });
   }

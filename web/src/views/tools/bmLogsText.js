@@ -4,6 +4,8 @@
  * ⚠ 숫자(줄 상한 · 보관 · 집중 임계 · 연계 창)는 API 값만 쓴다 — 문구에 박지 않는다. 값이 없으면 ‘—’(0 이 아니다).
  * ⚠ 문구에 백틱 금지(BoldText 는 ‘**’ 만 해석) — 값 인용은 ‘ ’.
  */
+import { numOrNull } from '../../numOrNull.js';
+
 export const CLASS_ORDER = Object.freeze(['fault', 'perf', 'sec', 'issue']);
 /** 분류 색은 :root 토큰만(새 hex 없음). */
 export const CLASS_TEXT = Object.freeze({
@@ -38,7 +40,7 @@ export const SEC_ROWS = Object.freeze([
   { kind: 'acct', label: '계정 · 권한 변경', parts: [['acct', '동작 계정']] },
   { kind: 'avc', label: 'SELinux 거부(AVC)', parts: [['avc', '프로세스 · 클래스']] },
 ]);
-const n = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+const n = numOrNull;   // ‘못 읽은 값’ 판정은 하나(web/src/numOrNull.js — Number('')===0 함정)
 export const numText = (v) => { const x = n(v); return x == null ? '—' : x.toLocaleString('ko-KR'); };
 const pad = (x) => String(x).padStart(2, '0');
 export function stamp(ts, { date = true } = {}) {

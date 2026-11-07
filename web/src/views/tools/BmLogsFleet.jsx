@@ -76,10 +76,10 @@ export function LogsFleetView({ resp, onOpen, onReload, loading = false }) {
                 <td data-sort={r.vcenterId || ''}>{r.vcenterId || '—'}</td>
                 {CLASS_ORDER.map((c) => (
                   <td key={c} className="right" data-sort={r.cls?.[c]?.lines ?? ''}>
-                    {r.read ? <><span style={{ color: (r.cls?.[c]?.lines || 0) > 0 ? CLASS_TEXT[c].color : 'var(--muted)' }}>{numText(r.cls?.[c]?.patterns)}</span><div className="bmo-sub">줄 {numText(r.cls?.[c]?.lines)}</div></> : '—'}
+                    {r.wasRead ? <><span style={{ color: (r.cls?.[c]?.lines || 0) > 0 ? CLASS_TEXT[c].color : 'var(--muted)' }}>{numText(r.cls?.[c]?.patterns)}</span><div className="bmo-sub">줄 {numText(r.cls?.[c]?.lines)}</div></> : '—'}
                   </td>
                 ))}
-                <td className="right" data-sort={r.none ?? ''}>{r.read ? numText(r.none) : '—'}</td>
+                <td className="right" data-sort={r.none ?? ''}>{r.wasRead ? numText(r.none) : '—'}</td>
                 <td className="bmo-wrap bmo-mono" data-sort={r.top?.[0]?.ruleId || ''}>{topRuleText(r.top)}</td>
                 <td className="bmo-wrap" data-sort={Object.values(r.status?.sources || {}).filter((x) => x === 'perm').length}>
                   {Object.entries(r.status?.sources || {}).filter(([, v]) => v && v !== 'ok' && v !== 'absent').map(([s, v]) => `${SRC_LABEL[s] || s} ${STATUS_TEXT[v]?.label || v}`).join(' · ') || (r.status ? '읽음' : '—')}

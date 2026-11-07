@@ -55,6 +55,12 @@ test('쓰기 — 한 트랜잭션 · 읽기 위치 비교 후 쓰기(늦게 끝�
   assert.equal((await S.logWriteBatch({ agent: AG, items: [b3.write] })).written, 1);
   assert.equal((await mainDb()).prepare("SELECT bad_json FROM log_cursor WHERE agent=? AND key='K1'").get(AG).bad_json, '{not json');
   assert.equal((await S.logServerQuery({ agent: AG, key: 'K1', from: NOW - HOUR, to: NOW + HOUR })).cursor.corruptKept, true);
+  // 읽었는데 0줄 ≠ 못 읽음 — 요약의 wasRead(읽은 기록 행)로 가른다(read 합 0 을 ‘못 읽음’ 으로 그리지 않게)
+  const b9 = await RUN.buildLogWrite({ key: 'K9', stdout: out([]), prev: null, now: NOW });
+  assert.equal((await S.logWriteBatch({ agent: AG, items: [b9.write] })).written, 1);
+  V._resetLogViewForTest();
+  const sm = (await V.refreshLogSummary({ agent: AG, now: NOW })).list.find((x) => x.key === 'K9');
+  assert.equal(sm.wasRead, true); assert.equal(sm.read, 0);
 });
 
 test('상한 — 서버당 서명 수(묶음 행) · 보안 항목(시간 · 종류마다 · ‘(기타)’) · 청크 정리 · 사라진 서버의 읽기 위치', async (t) => {
@@ -73,7 +79,7 @@ test('상한 — 서버당 서명 수(묶음 행) · 보안 항목(시간 · 종
   assert.equal(db.prepare("SELECT count FROM log_sec WHERE agent=? AND key='K2' AND item='(기타)'").get(AG).count, 10);
   // 청크 정리 — 기준 앞 시간 행 · 마지막이 오래된 패턴 · 대상 밖 서버의 읽기 위치
   const p = await S.logPrune({ before: NOW + 2 * HOUR, agent: AG, keys: ['K1'] });
-  assert.ok(p.hours >= S.PATTERN_MAX && p.patterns >= S.PATTERN_MAX && p.cursors === 1, JSON.stringify(p));
+  assert.ok(p.hours >= S.PATTERN_MAX && p.patterns >= S.PATTERN_MAX && p.cursors === 2, JSON.stringify(p));   // 대상 밖 K2 · K9(앞 시험)
   assert.equal(db.prepare("SELECT COUNT(*) c FROM log_cursor WHERE agent=? AND key='K2'").get(AG).c, 0);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM log_cursor WHERE agent=? AND key='K1'").get(AG).c, 1, '대상 안 서버는 남긴다');
 });

@@ -56,7 +56,7 @@ test('① 성공 왕복 — 봉투(logsVer · logSummary) · 상세(pullEdgeLogs
   assert.equal(sn.logsVer, 1);
   const row = sn.logSummary.find((x) => x.key === 'RTAGA1');
   assert.ok(row, '정제를 지나 요약이 남는다');
-  assert.equal(row.cls.issue.lines, 1); assert.equal(row.status.sources.secure, 'perm', '권한 없음은 출처 상태로(0 이 아니다)');
+  assert.equal(row.wasRead, true); assert.equal(row.cls.issue.lines, 1); assert.equal(row.status.sources.secure, 'perm', '권한 없음은 출처 상태로(0 이 아니다)');
   assert.equal(row.top[0].ruleId, 'ISS-UNIT-FAIL');
   // 상세 대행 — bodyOk 명시(기본 판정이면 bad-body 였다)
   const d = await L.pullEdgeLogs('log-edge', { key: 'RTAGA1', range: '24h' });

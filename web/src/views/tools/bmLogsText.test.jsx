@@ -91,8 +91,8 @@ describe('7a 로그 분석 — 그리기(SSR · 서버 정제본 그대로)', ()
       ok: true, kpi: { servers: 2, faultServers: 1, secHighServers: 0, unread: 1, truncated: 0 }, commonWindowMs: HOUR,
       common: [{ ruleId: 'PERF-NVME-TIMEOUT', cls: 'perf', severity: 'medium', count: 2, from: NOW - HOUR, to: NOW, servers: [{ key: 'a', name: 'bm-a', agent: '' }, { key: 'b', name: 'bm-b', agent: 'e1' }] }],
       servers: [
-        { key: 'a', name: 'bm-a', vcenterId: 'vcA', read: 10, none: 1, cls: { fault: { patterns: 1, lines: 1 }, perf: { patterns: 1, lines: 3 }, sec: { patterns: 0, lines: 0 }, issue: { patterns: 0, lines: 0 } }, top: [{ ruleId: 'HW-MCE', count: 1 }], status: { sources: { secure: 'perm' } }, via: 'local' },
-        { key: 'b', name: 'bm-b', vcenterId: 'vcA', read: 0, none: null, cls: {}, top: [], status: null, via: 'edge', agent: 'e1' },
+        { key: 'a', name: 'bm-a', vcenterId: 'vcA', wasRead: true, read: 10, none: 1, cls: { fault: { patterns: 1, lines: 1 }, perf: { patterns: 1, lines: 3 }, sec: { patterns: 0, lines: 0 }, issue: { patterns: 0, lines: 0 } }, top: [{ ruleId: 'HW-MCE', count: 1 }], status: { sources: { secure: 'perm' } }, via: 'local' },
+        { key: 'b', name: 'bm-b', vcenterId: 'vcA', wasRead: false, read: 0, none: null, cls: {}, top: [], status: null, via: 'edge', agent: 'e1' },
       ],
       nodes: [{ via: 'edge', agent: 'old1', state: 'old-version' }],
     };

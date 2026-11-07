@@ -8,6 +8,7 @@ import React, { useMemo, useState } from 'react';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
+import { canCsv } from '../../api.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
 import {
   CLASS_ORDER, CLASS_TEXT, SEV_TEXT, SRC_LABEL, RANGE_OPTIONS, kpiCards, sourceChips, readCard, hourlyBars, secPanelRows, SEC_HONEST, SEC_HIDDEN_TEXT,
@@ -97,7 +98,7 @@ export function LogsView({ resp, range, onRange, onTab, onReload, loading = fals
           {RANGE_OPTIONS.map(([id, label]) => <button key={id} role="tab" aria-selected={range === id} className={range === id ? 'active' : ''} onClick={() => onRange?.(id)}>{label}</button>)}
         </div>
         <button className="btn btn-sm bmp-touch" onClick={onReload} disabled={loading}>{loading ? '읽는 중…' : '다시 읽기'}</button>
-        <button className="btn btn-sm bmp-touch" onClick={exportCsv} disabled={!resp?.patterns?.length}>CSV</button>
+        {canCsv() && <button className="btn btn-sm bmp-touch" onClick={exportCsv} disabled={!resp?.patterns?.length}>CSV</button>}
         {resp?.via === 'edge' && <span className="bmo-sub">엣지 {resp.agent} 대행(원문은 법인 밖으로 나가지 않음)</span>}
       </div>
       <div className="bml-kpis">
@@ -148,8 +149,8 @@ export function LogsView({ resp, range, onRange, onTab, onReload, loading = fals
                   <td className="right" data-sort={p.count ?? ''}>{numText(p.count)}{p.total != null && p.total !== p.count && <div className="bmo-sub">누적 {numText(p.total)}</div>}</td>
                   <td data-sort={p.last ?? ''}>{stamp(p.first)}<div className="bmo-sub">{stamp(p.last)}</div></td>
                   <td data-sort={p.src}>{SRC_LABEL[p.src] || p.src || '—'}<div className="bmo-sub">{p.unit || '—'}</div></td>
-                  <td className="bmo-wrap bmo-mono" data-sort={p.tmpl} style={{ minWidth: 170 }}>{p.tmpl || '—'}</td>
-                  <td className="bmo-wrap" data-nosort style={{ minWidth: 170 }}>
+                  <td className="bmo-wrap bmo-mono" data-sort={p.tmpl} style={{ minWidth: 160 }}>{p.tmpl || '—'}</td>
+                  <td className="bmo-wrap" data-nosort style={{ minWidth: 160 }}>
                     {p.samplesHidden ? <span className="bmo-sub">보안 분류 표본은 관리자 판본에만</span>
                       : (p.samples || []).length ? (
                         <details open={open === p.sig} onToggle={(e) => setOpen(e.currentTarget.open ? p.sig : '')}>
@@ -158,8 +159,8 @@ export function LogsView({ resp, range, onRange, onTab, onReload, loading = fals
                         </details>
                       ) : '—'}
                   </td>
-                  <td className="bmo-wrap" data-sort={p.ruleId} style={{ minWidth: 150 }}><span className="bmo-mono">{p.ruleId || '—'}</span><div><LogGrade grade={p.grade} /></div><div className="bmo-sub">{p.title}{(p.evidence || []).length ? ` · 근거 ${p.evidence.join(' · ')}` : ''}</div></td>
-                  <td className="bmo-wrap" data-nosort>
+                  <td className="bmo-wrap" data-sort={p.ruleId} style={{ minWidth: 140 }}><span className="bmo-mono">{p.ruleId || '—'}</span><div><LogGrade grade={p.grade} /></div><div className="bmo-sub">{p.title}{(p.evidence || []).length ? ` · 근거 ${p.evidence.join(' · ')}` : ''}</div></td>
+                  <td className="bmo-wrap" data-nosort style={{ minWidth: 132 }}>
                     {corrChips(p.corr).map((c, i) => (
                       <button key={i} type="button" className="bml-corr" onClick={() => onTab?.(c.tab)} title="그 탭으로">{c.text}</button>
                     ))}

@@ -115,7 +115,7 @@ export async function bmLogsFleet(req, snap, deps = {}) {
   const { commonCauseCandidates, COMMON_WINDOW_MS } = await import('../../bmusage/logs/view.js');
   let common = commonCauseCandidates(list);
   const kpi = { servers: list.length, faultServers: list.filter((r) => (r.cls?.fault?.lines || 0) > 0).length, secHighServers: list.filter((r) => (r.secHigh || 0) > 0).length,
-    byClass: Object.fromEntries(LOG_CLASSES.map((c) => [c, list.reduce((a, r) => a + (Number(r.cls?.[c]?.patterns) || 0), 0)])), unread: list.filter((r) => !r.read).length, truncated: list.filter((r) => (r.trunc || 0) > 0).length };
+    byClass: Object.fromEntries(LOG_CLASSES.map((c) => [c, list.reduce((a, r) => a + (Number(r.cls?.[c]?.patterns) || 0), 0)])), unread: list.filter((r) => !r.wasRead).length, truncated: list.filter((r) => (r.trunc || 0) > 0).length };
   if (!isAdmin) {
     const { hosts, match } = await perfAddressMatcher(D, tg);
     const sc = scrubberFor(hosts);

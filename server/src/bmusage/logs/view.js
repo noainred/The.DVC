@@ -126,12 +126,12 @@ export async function refreshLogSummary({ agent = config.agent?.name || '', now 
   const q = await logFleetQuery({ agent, since });
   if (!q) { _sum = { at: now, since, list: null, error: 'db-unavailable' }; return _sum; }
   const byKey = new Map();
-  const get = (k) => { if (!byKey.has(k)) byKey.set(k, { key: k, cls: emptyCls(), none: 0, read: 0, trunc: 0, secHigh: 0, top: [], at: null, status: null }); return byKey.get(k); };
+  const get = (k) => { if (!byKey.has(k)) byKey.set(k, { key: k, wasRead: false, cls: emptyCls(), none: 0, read: 0, trunc: 0, secHigh: 0, top: [], at: null, status: null }); return byKey.get(k); };
   const meta = new Map(q.metas.map((m) => [`${m.key}|${m.sig}`, m]));
   const sigN = new Map();
   for (const r of q.rows) {
     const e = get(r.key); const c = Number(r.c) || 0;
-    if (r.cls === 'read') { e.read += c; continue; }
+    if (r.cls === 'read') { e.read += c; e.wasRead = true; continue; }   // 읽었는데 0줄(read 0)과 못 읽음(wasRead false)을 가른다
     if (r.cls === 'trunc') { e.trunc += c; continue; }
     if (r.cls === 'none') { e.none += c; continue; }
     if (!e.cls[r.cls]) continue;
