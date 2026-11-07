@@ -29,17 +29,20 @@ export function redactKeyStoreText(text) {
 }
 
 /**
- * 복원 병합 — 번들의 가린 칸은 **지금 파일의 같은 키(지문) · 같은 계정(id)** 값으로 되살린다. 되살릴 수 없는 키는 빼고(쓸 수 없는 키를 남기지 않는다),
- * 비밀번호를 되살릴 수 없는 계정은 비밀번호 없이 남긴다(다시 입력). 지금 파일이 손상이면 번들의 가린 항목은 전부 빠진다.
- * @returns {{text:string, restored:number, dropped:string[]}}
+ * 복원 병합 — 번들의 가린 칸은 **지금 파일의 같은 키(지문) · 같은 계정(id)** 값으로 되살린다. 되살릴 수 없는 키는 빼고, 비밀번호를 되살릴 수 없는 계정은 비밀번호 없이 남긴다.
+ * 7b 반증 F13(결정): 번들에는 개인키가 없으므로 복원이 키를 **다시 만들 수 없다** → 지금 파일에만 있는 키 · 계정(백업 뒤 등록분)은 **지우지 않고 그대로 둔다**(합집합).
+ *   지우면 '복원 전' 자동 백업으로 되돌려도 개인키가 없어 영구 손실이다. 남긴 것은 kept 로 밝힌다(복원 결과 sshKeysKept).
+ * @returns {{text:string, restored:number, dropped:string[], kept:string[]}}
  */
 export function mergeRedactedKeyStore(bundleText, currentText) {
-  let b; try { b = JSON.parse(String(bundleText ?? '')); } catch { return { text: String(currentText ?? ''), restored: 0, dropped: ['(번들 내용을 읽지 못해 지금 파일을 유지)'] }; }
+  let b; try { b = JSON.parse(String(bundleText ?? '')); } catch { return { text: String(currentText ?? ''), restored: 0, dropped: ['(번들 내용을 읽지 못해 지금 파일을 유지)'], kept: [] }; }
   let cur = { keys: [], accounts: [] };
   try { const c = JSON.parse(String(currentText ?? '')); cur = { keys: Array.isArray(c?.keys) ? c.keys : [], accounts: Array.isArray(c?.accounts) ? c.accounts : [] }; } catch { /* 지금 파일 없음 · 손상 */ }
-  const curKeyByFp = new Map(cur.keys.filter((k) => k && typeof k === 'object').map((k) => [String(k.fingerprint || ''), k]));
-  const curAccById = new Map(cur.accounts.filter((a) => a && typeof a === 'object').map((a) => [String(a.id || ''), a]));
-  let restored = 0; const dropped = [];
+  const curKeys = cur.keys.filter((k) => k && typeof k === 'object');
+  const curAccs = cur.accounts.filter((a) => a && typeof a === 'object');
+  const curKeyByFp = new Map(curKeys.map((k) => [String(k.fingerprint || ''), k]));
+  const curAccById = new Map(curAccs.map((a) => [String(a.id || ''), a]));
+  let restored = 0; const dropped = []; const kept = [];
   const keys = [];
   for (const k of (Array.isArray(b?.keys) ? b.keys : [])) {
     if (!k || typeof k !== 'object') continue;
@@ -54,6 +57,16 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
     }
     keys.push(o);
   }
+  const fps = new Set(keys.map((k) => String(k.fingerprint || '')));
+  const ids = new Set(keys.map((k) => String(k.id || '')));
+  const names = new Set(keys.map((k) => lc(k.name)));
+  for (const c of curKeys) {
+    if (fps.has(String(c.fingerprint || ''))) continue;
+    const o = { ...c };
+    if (ids.has(String(o.id || ''))) o.id = `k_${String(o.id).replace(/^k_/, '').replace(/[^0-9a-f]/g, '0').padEnd(10, '0').slice(0, 10)}ff`;   // 다른 지문인데 id 가 같은 경우(무작위 48비트 — 사실상 없음)
+    if (names.has(lc(o.name))) o.name = `${String(o.name).slice(0, 55)}-restored`;
+    keys.push(o); kept.push(`key:${String(c.name || c.id || '').slice(0, 64)}`);
+  }
   const accounts = [];
   for (const a of (Array.isArray(b?.accounts) ? b.accounts : [])) {
     if (!a || typeof a !== 'object') continue;
@@ -66,5 +79,14 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
     if (o.keyRef && !keys.some((k) => k.id === o.keyRef)) o.keyRef = '';
     accounts.push(o);
   }
-  return { text: JSON.stringify({ keys, accounts }, null, 2), restored, dropped };
+  const accIds = new Set(accounts.map((a) => String(a.id || '')));
+  const accNames = new Set(accounts.map((a) => `${a.kind}|${lc(a.name)}`));
+  for (const c of curAccs) {
+    if (accIds.has(String(c.id || ''))) continue;
+    const o = { ...c };
+    if (accNames.has(`${o.kind}|${lc(o.name)}`)) o.name = `${String(o.name).slice(0, 55)}-restored`;
+    if (o.keyRef && !keys.some((k) => k.id === o.keyRef)) o.keyRef = '';
+    accounts.push(o); kept.push(`account:${String(c.name || c.id || '').slice(0, 64)}`);
+  }
+  return { text: JSON.stringify({ keys, accounts }, null, 2), restored, dropped, kept };
 }

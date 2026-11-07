@@ -1797,7 +1797,10 @@ centralRouter.get('/bm-onboard', requireCentral(), async (req, res) => {
   const agent = verified ? String(req.centralAuth.agent || '').trim() : String(req.query.agent || '').trim();
   const ED = await import('../bmusage/onboard/edgeDeploy.js');
   const num = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= 100000 ? n : null; };
-  if (verified) ED.recordOnboardPull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), applied: { ok: num(req.query.ok), rejected: num(req.query.rej), removed: num(req.query.rm) } });
+  if (verified) {
+    ED.recordOnboardPull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), applied: { ok: num(req.query.ok), rejected: num(req.query.rej), removed: num(req.query.rm) } });
+    try { ED.settlePending(agent, String(req.query.applied || '').slice(0, 64)); } catch { /* 정리 실패는 다음 인출에 다시 */ }   // 7b 반증 F14
+  }
   if (settingsUnreadable(res, ED.edgeDeployLoadError, '서버 등록 배포(bm-onboard-edge.json)')) return;   // 엣지는 지난 등록을 그대로 둔다
   const out = ED.deployFor(agent, { verified });
   res.set('Cache-Control', 'no-store');

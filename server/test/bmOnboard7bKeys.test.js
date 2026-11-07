@@ -65,8 +65,12 @@ test('① 키 판정 — ed25519 · RSA≥2048 · ECDSA 허용 / DSA · RSA<2048
 });
 
 test('② 비밀 원문 칸 판정 — 키 블록 · 공개키 줄 · password= · 비밀번호: · 긴 base64 / 일반 이름 · 경로 · 메모는 아니다 · 긴 입력도 선형', () => {
-  for (const s of [ED.pem, `ssh-ed25519 ${'A'.repeat(68)}`, 'password=Abc!1', 'PW: x', '비밀번호: 1234', `x ${'Q'.repeat(90)}`]) assert.equal(P.cellLooksSecret(s), true, s.slice(0, 30));
-  for (const s of ['kr-ops-ed25519', '/; /data', 'bm-kr1-db01', '비밀번호는 현장 관리', 'mypw=1', '10.20.3.4', '']) assert.equal(P.cellLooksSecret(s), false, s);
+  // 7b 반증 F11 표본(rv7b/h8): 소문자 머리글 · 머리글 없는 본문(여러 줄 · 한 줄 · 공백으로 이음) · PuTTY ppk · '"pw"="x"' · 'pw    = x'
+  const body = ED.pem.split('\n').filter((l) => l && !l.startsWith('-----'));
+  const F11 = [ED.pem.toLowerCase(), body.join('\n'), body[0], body.join(' '), 'PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none', 'Private-Lines: 1', '"pw"="Secret1"', 'pw    = Secret1'];
+  for (const s of [ED.pem, `ssh-ed25519 ${'A'.repeat(68)}`, 'password=Abc!1', 'PW: x', '비밀번호: 1234', ...F11]) assert.equal(P.cellLooksSecret(s), true, s.slice(0, 30));
+  for (const s of ['kr-ops-ed25519', '/; /data', 'bm-kr1-db01', '비밀번호는 현장 관리', 'mypw=1', '10.20.3.4', '', 'this server hosts the primary database for the finance reporting team in seoul',
+    '/var/lib/postgresql/data/base/12345/67890', `x ${'Q'.repeat(90)}`]) assert.equal(P.cellLooksSecret(s), false, s);
   // ReDoS 회귀는 비율로(절대 시간 단언 금지 — CI 러너 편차): 입력이 50배 길어도 시간이 길이에 비례해 늘지 않는다(앞 4KB 만 본다).
   const time = (s) => { const t0 = process.hrtime.bigint(); for (let i = 0; i < 20; i += 1) P.cellLooksSecret(s); return Number(process.hrtime.bigint() - t0); };
   time('p'.repeat(4000));

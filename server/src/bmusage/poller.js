@@ -27,7 +27,7 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../proxy/sshExec.js';
 import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
 import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS } from './settings.js';
-import { withResolvedAuth } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
+import { withResolvedAuth, authCredOf } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
 import { resolveTargets } from './targets.js';
 import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
@@ -456,8 +456,8 @@ function authDev(target) {
   if (!target.osHost) return null;
   return {
     id: `${config.agent?.name || 'central'}|os|${target.key}`,
-    // 7b: 키 인증은 키 지문을 자격 지문으로 — 키를 바꾸면(회전) 정지가 풀리는 신호가 된다(비밀번호를 바꿨을 때와 같다).
-    username: target.osHost.username, password: target.osHost.keyFingerprint ? `key:${target.osHost.keyFingerprint}` : target.osHost.password,
+    // 7b: 키 인증은 키 지문을 자격 지문으로 — 키를 바꾸면(회전) 정지가 풀리는 신호가 된다(bmstor 폴러와 같은 refs.authCredOf 하나).
+    username: authCredOf(target.osHost).username, password: authCredOf(target.osHost).password,
   };
 }
 /**

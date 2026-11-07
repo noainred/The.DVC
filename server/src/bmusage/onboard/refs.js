@@ -7,7 +7,10 @@
  *  · 접속 자격 해석 `resolveOsAuth` — 폴러 · 연결 시험이 같은 하나를 쓴다(판정 코어 하나).
  *    순서: 서버 keyRef → 공통 계정(credRef)의 기본 키 → 공통 계정 비밀번호 → 서버 비밀번호. 키 참조가 있는데 키가 없으면 **비밀번호로 몰래 넘어가지 않고** 오류다.
  */
+import crypto from 'node:crypto';
+import ssh2 from 'ssh2';
 import { listBmServersRaw, registryLoadError, bmServerRefCounts, replaceBmServerKeyRefs } from '../../bmstor/registry.js';
+import { loadRegistry as loadIdracRegistry, registryLoadError as idracLoadError } from '../../idrac/registry.js';
 import * as KS from './keyStore.js';
 
 const t = (v) => String(v ?? '').trim();
@@ -18,23 +21,40 @@ export function refUsage() {
   let counts = { byKey: new Map(), byAcc: new Map() };
   try { if (registryLoadError()) regOk = false; else counts = bmServerRefCounts(); } catch { regOk = false; }
   const accKey = new Map();
-  for (const a of KS.listAccountsRaw()) if (a.keyRef) accKey.set(a.keyRef, (accKey.get(a.keyRef) || 0) + 1);
+  const accs = KS.listAccountsRaw();
+  for (const a of accs) if (a.keyRef) accKey.set(a.keyRef, (accKey.get(a.keyRef) || 0) + 1);
+  // iDRAC 공통 계정 = 복사 방식 — 사본을 둔 iDRAC 항목(지금도 있는 id)을 센다. iDRAC 등록부를 못 읽으면 모름(null) — 7b 반증 F15.
+  let idrIds = null;
+  try { if (!idracLoadError()) idrIds = new Set(loadIdracRegistry().map((x) => String(x.id))); } catch { idrIds = null; }
+  const byId = new Map(accs.map((a) => [a.id, a]));
   return {
     known: regOk,
     key: (id) => ({ servers: regOk ? (counts.byKey.get(id) || 0) : null, accounts: accKey.get(id) || 0 }),
-    account: (id) => ({ servers: regOk ? (counts.byAcc.get(id) || 0) : null }),
+    account: (id) => {
+      const a = byId.get(id);
+      if (a && a.kind === 'idrac') return { servers: idrIds ? (a.copies || []).filter((x) => idrIds.has(x)).length : null };
+      return { servers: regOk ? (counts.byAcc.get(id) || 0) : null };
+    },
   };
 }
 
-export function listKeysView({ now = Date.now() } = {}) {
+/**
+ * @param {{scoped?:boolean}} o  scoped — 범위 계정(감사 L-7): 키는 법인 축이 없어 전 함대 목록이 된다 → 이름 · 사용처 · 등록자를 주지 않는다
+ *   (범위 계정은 저장 비밀을 주소에 묶을 수 없다 — 설정 소유자 등급 전용이라 목록이 필요 없다).
+ */
+export function listKeysView({ now = Date.now(), scoped = false } = {}) {
+  if (scoped) return { keys: [], usageKnown: null, hidden: 'scoped' };
   const u = refUsage();
   return { keys: KS.listKeysRaw().map((k) => KS.publicKeyView(k, { usage: u.key(k.id), now })), usageKnown: u.known };
 }
-/** @param {(corp:string)=>boolean} [visible] 범위 계정이 볼 수 있는 법인인가(전 법인 공용 '' 은 늘 보인다) */
-export function listAccountsView({ visible = null } = {}) {
+/**
+ * @param {(corp:string)=>boolean} [visible] 범위 계정이 볼 수 있는 법인인가
+ * @param {boolean} [scoped] 범위 계정 — 자기 조회 범위 법인 소속 계정만(전 법인 공용 '' 은 빼고) · 사용처 수는 주지 않는다(법인을 가로지른다 — L-7)
+ */
+export function listAccountsView({ visible = null, scoped = false } = {}) {
   const u = refUsage();
-  const list = KS.listAccountsRaw().filter((a) => !a.corp || typeof visible !== 'function' || visible(a.corp));
-  return { accounts: list.map((a) => KS.publicAccountView(a, { usage: u.account(a.id) })), usageKnown: u.known };
+  const list = KS.listAccountsRaw().filter((a) => (scoped ? !!a.corp && typeof visible === 'function' && visible(a.corp) : (!a.corp || typeof visible !== 'function' || visible(a.corp))));
+  return { accounts: list.map((a) => KS.publicAccountView(a, { usage: scoped ? null : u.account(a.id) })), usageKnown: scoped ? null : u.known };
 }
 
 /** 키 삭제 — 쓰는 서버 · 계정이 0 일 때만. 사용처를 모르면 거절. */
@@ -51,8 +71,8 @@ export function deleteAccountIfUnused(id) {
   const a = KS.accountById(id);
   if (!a) return { ok: false, code: 'not-found', status: 404, reason: '공통 계정을 찾을 수 없습니다.' };
   const u = refUsage().account(a.id);
-  if (u.servers == null) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 이 계정을 쓰는 서버 수를 모릅니다 — 삭제하지 않았습니다.' };
-  if (u.servers > 0) return { ok: false, code: 'in-use', status: 409, reason: `이 계정을 쓰는 서버 ${u.servers}대가 있어 지울 수 없습니다.` };
+  if (u.servers == null) return { ok: false, code: 'usage-unknown', status: 503, reason: '등록부를 읽지 못해 이 계정을 쓰는 서버 수를 모릅니다 — 삭제하지 않았습니다.' };
+  if (u.servers > 0) return { ok: false, code: 'in-use', status: 409, reason: a.kind === 'idrac' ? `iDRAC ${u.servers}대에 이 계정 비밀번호 사본이 있어 지울 수 없습니다 — 그 항목의 계정을 바꾼 뒤 지우세요.` : `이 계정을 쓰는 서버 ${u.servers}대가 있어 지울 수 없습니다.` };
   return KS._removeAccount(a.id);
 }
 
@@ -81,6 +101,8 @@ export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
 export const AUTH_ERROR = Object.freeze({
   'key-missing': 'SSH 키 참조가 가리키는 키가 키 저장소에 없습니다(삭제됨) — 서버 설정에서 키를 다시 고르세요.',
   'key-unreadable': 'SSH 키를 열지 못했습니다(봉인 해제 실패 — 자격증명 저장 방식이 바뀌었을 수 있음) — 키를 다시 등록하세요.',
+  'key-retired': '회전으로 퇴역한 SSH 키를 가리킵니다 — 퇴역 키로는 접속하지 않습니다. 서버 설정에서 새 키를 고르세요.',
+  'key-parse': 'SSH 키를 풀지 못했습니다(passphrase 불일치 또는 형식) — 키를 다시 등록하세요.',
   'account-missing': '공통 계정 참조가 가리키는 계정이 없습니다(삭제됨) — 서버 설정에서 계정을 다시 고르세요.',
   'account-kind': '공통 계정 참조가 OS 계정이 아닙니다.',
   'store-unreadable': 'SSH 키 저장소(ssh-keys.json)를 읽지 못해 키로 접속하지 않았습니다.',
@@ -102,18 +124,50 @@ export function resolveOsAuth(server = {}) {
     if (!acc) return { ok: false, code: 'account-missing', error: AUTH_ERROR['account-missing'] };
     if (acc.kind !== 'os') return { ok: false, code: 'account-kind', error: AUTH_ERROR['account-kind'] };
   }
-  const username = t(server.username) || (acc ? acc.username : '') || 'root';
+  // 7b 반증 F19: 공통 계정을 쓰면 접속 계정명도 **공통 계정 쪽**(서버 칸은 '개별' 일 때만) — 서버 칸 기본값 root 로 공통 비밀번호를 보내지 않게.
+  const username = (acc ? acc.username : '') || t(server.username) || 'root';
   // osAuth 'password' = 비밀번호 고정(공통 계정에 기본 키가 있어도 — CSV os_key ‘password’).
   const useKey = server.osAuth === 'password' ? '' : (keyRef || (acc && acc.keyRef) || '');
   if (useKey) {
     const m = KS.keyMaterial(useKey);
     if (!m.ok) return { ok: false, code: m.code, error: AUTH_ERROR[m.code] || AUTH_ERROR['key-missing'] };
+    // 감사 M-5: passphrase 가 있는 키(OpenSSH bcrypt — 실측 16라운드 약 175ms · 동기)는 접속마다 풀면 1,000대 주기에 이벤트 루프가 수 분 막힌다
+    //   → 한 번 푼 ssh2 키 객체를 메모리에 둔다(지문 + 원문 해시 열쇠 — 키를 바꾸면 열쇠가 바뀐다). 디스크의 봉인 원문은 그대로다.
+    const pk = m.passphrase ? parsedKeyFor(m) : m.privateKey;
+    if (!pk) return { ok: false, code: 'key-parse', error: AUTH_ERROR['key-parse'] };
     // 키 인증일 때 비밀번호는 보내지 않는다(인증 방식을 하나로 — 키가 거부되면 비밀번호로 몰래 넘어가지 않는다).
-    return { ok: true, username, password: '', privateKey: m.privateKey, passphrase: m.passphrase, authKind: 'key', keyFingerprint: m.fingerprint, keyName: m.name };
+    return { ok: true, username, password: '', privateKey: pk, passphrase: m.passphrase && typeof pk === 'string' ? m.passphrase : '', authKind: 'key', keyFingerprint: m.fingerprint, keyName: m.name };
   }
   if (acc && acc.password) return { ok: true, username, password: acc.password, authKind: 'password' };
   const pw = typeof server.password === 'string' ? server.password : '';
   return { ok: true, username, password: pw, authKind: pw ? 'password' : 'none' };
+}
+
+/* 감사 M-5 — 암호화 키 파싱 결과 캐시(메모리 · 상한 256). 값은 ssh2 키 객체(복호된 개인키 — resolveOsAuth 가 원문을 메모리에 두는 것과 같은 범위). */
+const _parsed = new Map();
+const PARSED_MAX = 256;
+let _parseCount = 0;
+export function _parsedKeyStats() { return { size: _parsed.size, parses: _parseCount }; }
+export function _resetParsedKeysForTest() { _parsed.clear(); _parseCount = 0; }
+function parsedKeyFor(m) {
+  const k = `${m.fingerprint}|${crypto.createHash('sha256').update(m.privateKey).update('\0').update(m.passphrase).digest('hex')}`;
+  const hit = _parsed.get(k);
+  if (hit) { _parsed.delete(k); _parsed.set(k, hit); return hit; }
+  let p;
+  try { _parseCount += 1; p = ssh2.utils.parseKey(m.privateKey, m.passphrase); } catch { p = null; }
+  if (!p || p instanceof Error) return null;
+  if (Array.isArray(p)) p = p[0];
+  if (_parsed.size >= PARSED_MAX) _parsed.delete(_parsed.keys().next().value);
+  _parsed.set(k, p);
+  return p;
+}
+
+/**
+ * 인증 정지(authGuard) 판정용 자격 지문 — 해석 **뒤**의 자격으로(키 = 'key:<지문>', 비밀번호 = 해석된 비밀번호). bmusage · bmstor 폴러가 같은 하나를 쓴다(7b 반증 F2 —
+ * bmstor 가 해석 전 원본으로 판정해 키 회전 · 공통 계정 비밀번호 변경 뒤에도 정지가 풀리지 않았다).
+ */
+export function authCredOf(s = {}) {
+  return { id: s.id, name: s.name, host: s.host, username: s.username, password: s.keyFingerprint ? `key:${s.keyFingerprint}` : (typeof s.password === 'string' ? s.password : '') };
 }
 
 /**

@@ -472,7 +472,7 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
   const excluded = []; // [{file, reason}] — 복원하지 않는 파일(v2.768)
   const toStage = {};
   const envWrites = [];
-  let envRestored = 0; const envDropped = []; const envPinned = [];
+  let envRestored = 0; const envDropped = []; const envPinned = []; const keysKept = [];
   let dirIssue = null;
   try { fs.accessSync(CONFIG_DIR, fs.constants.W_OK); } catch (e) { dirIssue = String(e?.code || e?.message || e).slice(0, 200); }
   for (const [name, content0] of Object.entries(archive.central.files)) {
@@ -499,6 +499,7 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
       const m = mergeRedactedKeyStore(String(content0), cur);   // 저장된 값(봉인 그대로)을 옮겨 붙인다 — 복호 · 재봉인 없음
       content = m.text;
       envDropped.push(...m.dropped.slice(0, 64).map((d) => `${base}:${d}`));   // 되살리지 못한 키 · 계정 비밀(.env 키를 못 살렸을 때와 같은 칸)
+      keysKept.push(...(m.kept || []).slice(0, 64));   // 7b 반증 F13: 백업 뒤 등록한 키 · 계정은 지우지 않고 남겼다(번들에 개인키가 없어 되살릴 수 없으므로)
     }
     // v2.769(점검 R4-D1-3): 예약 복원이 받지 않는 이름(공백·'+'·'@'·선행 '.' 등 — 백업 수집은 확장자만 본다)은 예약에서 조용히 빠졌다.
     //   지금 failed 에 사유와 함께 싣는다(v2.689 G2 B4 '실패를 삼키지 않는다').
@@ -540,7 +541,7 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
     restored, failed, excluded, warnings,
     staged: stage ? stage.files : [], stagedReplaced: !!stage?.replaced, pendingRestart: !!stage,
     envWritten: envWrites.length,
-    edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped, envKeysPinned: envPinned,
+    edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped, envKeysPinned: envPinned, sshKeysKept: keysKept,
   };
 }
 

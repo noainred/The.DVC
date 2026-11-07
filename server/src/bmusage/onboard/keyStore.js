@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements } from '../../util/registryCore.js';
-import { openSecretsDeep, sealSecretsDeep } from '../../security/secretVault.js';
+import { openSecretsDeep, sealSecretsDeep, decryptFailureCount } from '../../security/secretVault.js';
 import { parsePrivateKey, PASSPHRASE_MAX } from './keyParse.js';
 
 import { KEY_FILE_NAME } from './keyBundle.js';
@@ -39,6 +39,9 @@ const lc = (v) => t(v).toLowerCase();
 
 let cache = null;
 const loadErr = makeLoadError();
+// 7b 반증 F5 · 감사 L-5: 봉인을 못 푼 값(비밀키 교체 · SECRETS_KEY 불일치)은 openSecretsDeep 이 '' 로 준다 — 그 상태로 commit 하면
+//   봉인본이 '' 로 덮인다. 이 파일은 백업 · 엣지 push 에 개인키를 싣지 않으므로 봉인본이 **유일한 사본**이다 → 복호 실패가 하나라도 있으면 쓰기를 거절한다.
+let undecryptable = 0;
 export function keyStoreLoadError() { load(); return loadErr.get(); }
 
 function normKey(k) {
@@ -65,6 +68,8 @@ function normAccount(a) {
     password: typeof a.password === 'string' ? a.password : '',
     createdBy: t(a.createdBy, 64), createdAt: Number(a.createdAt) > 0 ? Number(a.createdAt) : 0,
     updatedAt: Number(a.updatedAt) > 0 ? Number(a.updatedAt) : 0,
+    // iDRAC 공통 계정은 적용 때 비밀번호가 iDRAC 항목에 **복사**된다 — 그 항목 id 를 남겨 사용처로 센다(7b 반증 F15).
+    copies: a.kind === 'idrac' && Array.isArray(a.copies) ? [...new Set(a.copies.map((x) => t(x, 128)).filter(Boolean))].slice(0, 5000) : [],
   };
 }
 
@@ -73,7 +78,9 @@ function load() {
   try {
     if (fs.existsSync(FILE)) {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      const failBefore = decryptFailureCount();
       const opened = openSecretsDeep({ keys: Array.isArray(j?.keys) ? j.keys : [], accounts: Array.isArray(j?.accounts) ? j.accounts : [] });
+      undecryptable = Math.max(0, decryptFailureCount() - failBefore);
       cache = {
         keys: filterObjectElements(opened.keys).list.map(normKey).filter(Boolean),
         accounts: filterObjectElements(opened.accounts).list.map(normAccount).filter(Boolean),
@@ -85,12 +92,16 @@ function load() {
 }
 
 /** 테스트 전용 — 메모리 캐시를 비워 다음 호출이 파일을 다시 읽게 한다. */
-export function _resetKeyStoreForTest() { cache = null; loadErr.clear(); }
+export function _resetKeyStoreForTest() { cache = null; loadErr.clear(); undecryptable = 0; }
+/** 봉인을 못 푼 값 수(0 이면 정상) — 화면 · 라우트가 '쓰기 거절' 사유를 말한다. */
+export function keyStoreUndecryptable() { load(); return undecryptable; }
 
 const unreadable = () => {
   load();   // ⚠ 로드를 먼저 — 첫 호출이 쓰기면 오류 상태가 아직 없다(손상 파일을 빈 저장소로 덮어쓰던 결함 · ⑦ 이 잡았다)
   const e = loadErr.get();
-  return e ? { ok: false, code: 'registry-unreadable', status: 503, reason: `SSH 키 저장소(${KEY_FILE_NAME})를 읽지 못해 바꾸지 않았습니다 — 손상 보존본(${KEY_FILE_NAME}.corrupt.*)을 확인해 되돌린 뒤 다시 시도하세요.` } : null;
+  if (e) return { ok: false, code: 'registry-unreadable', status: 503, reason: `SSH 키 저장소(${KEY_FILE_NAME})를 읽지 못해 바꾸지 않았습니다 — 손상 보존본(${KEY_FILE_NAME}.corrupt.*)을 확인해 되돌린 뒤 다시 시도하세요.` };
+  if (undecryptable) return { ok: false, code: 'secrets-undecryptable', status: 503, reason: `봉인을 풀지 못한 비밀 ${undecryptable}개가 있어(자격증명 비밀키 불일치 의심) 키 저장소를 바꾸지 않았습니다 — 봉인본을 지우지 않기 위해서입니다(이 파일은 백업에 개인키가 없습니다). 원래 비밀키로 되돌린 뒤 다시 시도하세요.` };
+  return null;
 };
 
 /** 사본을 바꿔 봉인 · 원자적으로 쓴 뒤에만 캐시를 바꾼다. 봉인 실패(정책 잠금)는 code 그대로. */
@@ -128,7 +139,22 @@ export function publicAccountView(a, { usage = null } = {}) {
     id: a.id, name: a.name, kind: a.kind, corp: a.corp, username: a.username, keyRef: a.keyRef,
     hasPassword: !!a.password, createdBy: a.createdBy, createdAt: a.createdAt || null, updatedAt: a.updatedAt || null,
     servers: usage && typeof usage === 'object' ? usage.servers : null,
+    ...(a.kind === 'idrac' ? { copyMode: true } : {}),   // iDRAC 은 복사 방식 — 비밀번호를 바꾸면 사본(쓰는 서버)마다 다시 적용해야 한다
   };
+}
+
+/** iDRAC 공통 계정 사본 기록(적용이 비밀번호를 복사한 iDRAC 항목 id). 한 번 쓰기. */
+export function noteAccountCopies(accountId, ids = [], { now = Date.now() } = {}) {
+  const u = unreadable(); if (u) return u;
+  const d = draft();
+  const a = d.accounts.find((x) => x.id === t(accountId, 32));
+  if (!a || a.kind !== 'idrac') return { ok: false, code: 'not-found', status: 404, reason: '공통 계정을 찾을 수 없습니다.' };
+  const before = a.copies.length;
+  a.copies = [...new Set([...a.copies, ...ids.map((x) => t(x, 128)).filter(Boolean)])].slice(0, 5000);
+  if (a.copies.length === before) return { ok: true, changed: 0 };
+  a.updatedAt = now;
+  const c = commit(d); if (!c.ok) return c;
+  return { ok: true, changed: a.copies.length - before };
 }
 
 /* ── 조회 ─────────────────────────────────────────────────────────────── */
@@ -153,6 +179,7 @@ export function accountByName(kind, name) {
 export function keyMaterial(id) {
   const k = load().keys.find((x) => x.id === t(id, 32));
   if (!k) return { ok: false, code: 'key-missing' };
+  if (k.status === 'retired') return { ok: false, code: 'key-retired' };   // 감사 L-11: 퇴역 키로는 접속하지 않는다
   if (!k.privateKey) return { ok: false, code: 'key-unreadable' };
   return { ok: true, privateKey: k.privateKey, passphrase: k.passphrase || '', fingerprint: k.fingerprint, name: k.name };
 }
@@ -309,11 +336,13 @@ export function saveAccount(body = {}, { by = '', now = Date.now() } = {}) {
   if (body.clearPassword === true) password = '';
   if (kind === 'idrac' && !password) return { ok: false, code: 'need-password', reason: 'iDRAC 공통 계정에는 비밀번호가 필요합니다(읽기 전용 역할 계정 권장).' };
   if (kind === 'os' && !keyRef && !password) return { ok: false, code: 'need-secret', reason: 'OS 공통 계정에는 기본 키 또는 비밀번호가 필요합니다(키 인증 권장).' };
-  const acc = existing || { id: `a_${crypto.randomBytes(6).toString('hex')}`, createdBy: t(by, 64), createdAt: now };
+  const acc = existing || { id: `a_${crypto.randomBytes(6).toString('hex')}`, createdBy: t(by, 64), createdAt: now, copies: [] };
+  const copiesStale = existing && kind === 'idrac' && (password !== existing.password || lc(username) !== lc(existing.username)) ? (existing.copies || []).length : 0;
   Object.assign(acc, { name, kind, corp, username, keyRef, password, updatedAt: now });
+  if (kind !== 'idrac') acc.copies = [];
   if (!existing) d.accounts.push(acc);
   const c = commit(d); if (!c.ok) return c;
-  return { ok: true, account: publicAccountView(acc), ...(dropped.length ? { droppedSecrets: dropped } : {}) };
+  return { ok: true, account: publicAccountView(acc), ...(dropped.length ? { droppedSecrets: dropped } : {}), ...(copiesStale ? { copiesStale } : {}) };
 }
 
 /** 계정 삭제 — 호출부가 사용처 0 을 확인한 뒤(refs.deleteAccountIfUnused). */

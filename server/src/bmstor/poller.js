@@ -13,7 +13,7 @@
  */
 
 import { listBmServersRaw, getBmSettings } from './registry.js';
-import { withResolvedAuth } from '../bmusage/onboard/refs.js'; // 7b: 키 · 공통 계정 참조 해석(판정 하나)
+import { withResolvedAuth, authCredOf } from '../bmusage/onboard/refs.js'; // 7b: 키 · 공통 계정 참조 해석 · 인증 정지 자격 지문(판정 하나)
 import { collectMany } from './collect.js';
 import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
 import { findCollectorForAgent } from '../central/idracScanPush.js';
@@ -162,12 +162,13 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
   const started = Date.now();
   try {
     const demo = isMockMode();
-    const enabled = listBmServersRaw().filter((s) => s.enabled !== false && (demo || !isDemoId(s.id)));
+    // 7b 반증 F2: 인증 정지 판정 · 기록은 **해석 뒤 자격**(키 지문 · 공통 계정 비밀번호)으로 — 원본으로 보면 키 회전 · 계정 비밀번호 변경 뒤에도 풀리지 않는다.
+    const enabled = withResolvedAuth(listBmServersRaw().filter((s) => s.enabled !== false && (demo || !isDemoId(s.id))));
     // v2.590: **주기 수집만** 인증 실패 정지 서버를 뺀다(수동 '지금 수집' 은 막지 않는다). 빠진 서버는 결과에
     // 정지 사실을 남긴다 — 조용히 빼면 화면이 마지막 값을 지금 값처럼 보여준다.
     let authStopped = 0;
     const servers = trigger === 'manual' ? enabled : enabled.filter((s) => {
-      const stop = authGuard.authStopFor(s);
+      const stop = authGuard.authStopFor(authCredOf(s));
       if (!stop) return true;
       authStopped++;
       const prev = latest.get(s.id);
@@ -182,7 +183,7 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     const realServers = demoOnly ? [] : realAll;
     const skippedNonDemo = realAll.length - realServers.length;
     // 7b: 중앙 직접 서버의 키 · 공통 계정 참조를 접속 자격으로 해석(bmusage 폴러와 같은 refs.withResolvedAuth).
-    const central = withResolvedAuth(realServers.filter((s) => !String(s.agent || '').trim()));
+    const central = realServers.filter((s) => !String(s.agent || '').trim());   // 이미 해석된 목록(위 enabled)
     const pushByAgent = new Map(); // 중앙→엣지 직접(PUSH) — 중앙이 엣지 URL 에 닿을 때
     const pollByAgent = new Map(); // 에이전트 폴링 — NAT 뒤 엣지(iDRAC/IP스캔과 동일, v2.341)
     // 7b: 키 · 공통 계정으로 인증하는 서버는 엣지 잡 · 엣지 PUSH 에 싣지 않는다 — 개인키를 법인 밖(중앙 → 엣지)으로 보내지 않고,
@@ -215,7 +216,7 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     const srvById = new Map(servers.map((s) => [s.id, s])); // O(N²) 방지 — 1,000대 상한에서 find 는 백만 비교(v2.342)
     for (const r of [...centralResults, ...edgeResults.flat()]) {
       const srv = srvById.get(r.id);
-      latest.set(r.id, noteAuth(srv, { ...r, at, agent: srv?.agent || '' }));
+      latest.set(r.id, noteAuth(srv ? authCredOf(srv) : srv, { ...r, at, agent: srv?.agent || '' }));
       if (r.ok) ok++; else errors++;
     }
     // 삭제된 서버의 잔존 결과 정리(유령 표시 방지).

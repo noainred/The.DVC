@@ -9,7 +9,7 @@
  *    OS 주소는 서버 이름이 FQDN 꼴일 때만 제안(DNS 를 조회하지 않는다 — 이름 일치 ‘제안’ 일 뿐).
  */
 const t = (v) => String(v ?? '').trim();
-export const BUCKETS = Object.freeze(['both', 'os', 'idrac', 'none', 'unassigned', 'unknown']);
+export const BUCKETS = Object.freeze(['both', 'os', 'idrac', 'none', 'unassigned', 'unknown', 'untracked']);
 const looksFqdn = (s) => /^[a-z0-9]([a-z0-9-]{0,62})(\.[a-z0-9]([a-z0-9-]{0,62}))+$/i.test(s) && !/^\d+(\.\d+){3}$/.test(s);
 
 /**
@@ -20,8 +20,17 @@ const looksFqdn = (s) => /^[a-z0-9]([a-z0-9-]{0,62})(\.[a-z0-9]([a-z0-9-]{0,62})
  * @param {(agent:string, key:string)=>object|null} [p.edgeEntry]  엣지 봉투 perf 항목
  * @param {(vc:string)=>string} [p.vcName]
  */
-export function missingCheck({ targets = [], skipped = [], entryByKey = new Map(), edgeEntry = null, vcName = (v) => v } = {}) {
+export function missingCheck({ targets = [], skipped = [], entryByKey = new Map(), edgeEntry = null, vcName = (v) => v, osRegistry = null } = {}) {
   const rows = [];
+  // 반증 F4: OS 계정 등록부에만 있고 이 노드 함대(iDRAC · vCenter)에 없는 서버 — 성능 수집 대상이 아니다(bmstor 디스크 용량만). 대상 집합은 바꾸지 않고 '보이게' 만 한다.
+  if (Array.isArray(osRegistry)) {
+    const usedIds = new Set(targets.map((x) => t(x.osHost?.id)).filter(Boolean));
+    const names = new Set([...targets, ...skipped].map((x) => t(x.name).toLowerCase()).filter(Boolean));
+    for (const e of osRegistry) {
+      if (!e || usedIds.has(t(e.id)) || names.has(t(e.name).toLowerCase())) continue;
+      rows.push({ key: `os:${t(e.id)}`, name: t(e.name), serviceTag: '', vcenterId: t(e.vcenterId), via: 'local', paths: [], bucket: 'untracked', reason: 'registry-only', idracHost: '', missing: [] });
+    }
+  }
   for (const x of targets) {
     const e = entryByKey.get(t(x.key));
     const cov = e && BUCKETS.includes(e.coverage) ? e.coverage : null;

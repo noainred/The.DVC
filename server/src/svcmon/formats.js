@@ -197,8 +197,59 @@ export function zipInflatedSize(buf, max = XLSX_MAX_UNCOMPRESSED) {
   return { ok: true, total };
 }
 
+/**
+ * 7b 감사 M-4: exceljs 는 로드할 때 시트의 mergeCell 을 **칸 단위로 전개**한다 — `<mergeCell ref="A1:XFD1048576"/>` 한 줄이 수십억 칸을 만든다(압축 해제 크기 상한으로는 막히지 않는다).
+ * 로드 **전에** 시트 XML 을 직접 풀어(예산 상한) mergeCell 개수 · 넓이 합을 센다. 이 파일의 두 파서(svcmon 가져오기 · 7b 서버 등록)가 같은 함수를 쓴다.
+ * ref 정규식은 고정 글자로 시작하고 반복 상한이 있다(선형).
+ */
+export const XLSX_MAX_MERGES = 2_000;
+export const XLSX_MAX_MERGE_AREA = 200_000;
+const colNum = (c) => { let n = 0; for (const ch of c) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
+export function xlsxMergeStats(buf, { maxUncompressed = XLSX_MAX_UNCOMPRESSED } = {}) {
+  if (!Buffer.isBuffer(buf) || buf.length < 22) return { ok: false, reason: 'no-eocd' };
+  const stop = Math.max(0, buf.length - 22 - 0xffff);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= stop; i -= 1) { if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) return { ok: false, reason: 'no-eocd' };
+  const count = buf.readUInt16LE(eocd + 10);
+  const cdOff = buf.readUInt32LE(eocd + 16);
+  let p = cdOff; let merges = 0; let area = 0; let budget = maxUncompressed;
+  for (let n = 0; n < count; n += 1) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) return { ok: false, reason: 'bad-cd' };
+    const method = buf.readUInt16LE(p + 10); const csize = buf.readUInt32LE(p + 20); const lho = buf.readUInt32LE(p + 42);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const name = buf.subarray(p + 46, p + 46 + nameLen).toString('latin1');
+    p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+    if (!/^xl\/worksheets\/[^/]{1,64}\.xml$/.test(name)) continue;
+    if (lho + 30 > buf.length || buf.readUInt32LE(lho) !== 0x04034b50) return { ok: false, reason: 'bad-entry' };
+    const start = lho + 30 + buf.readUInt16LE(lho + 26) + buf.readUInt16LE(lho + 28);
+    if (start + csize > buf.length) return { ok: false, reason: 'bad-entry' };
+    let xml;
+    try { xml = method === 0 ? buf.subarray(start, start + csize) : method === 8 ? zlib.inflateRawSync(buf.subarray(start, start + csize), { maxOutputLength: budget + 1 }) : null; }
+    catch { return { ok: false, reason: 'too-large' }; }
+    if (!xml) return { ok: false, reason: 'method' };
+    budget -= xml.length;
+    if (budget < 0) return { ok: false, reason: 'too-large' };
+    const text = xml.toString('latin1');
+    const re = /<mergeCell\s+ref="([A-Z]{1,3})(\d{1,7}):([A-Z]{1,3})(\d{1,7})"/g;
+    let m;
+    while ((m = re.exec(text))) {
+      merges += 1;
+      area += (Math.abs(colNum(m[3]) - colNum(m[1])) + 1) * (Math.abs(Number(m[4]) - Number(m[2])) + 1);
+      if (merges > XLSX_MAX_MERGES || area > XLSX_MAX_MERGE_AREA) return { ok: true, merges, area, over: true };
+    }
+  }
+  return { ok: true, merges, area, over: false };
+}
+export function assertXlsxMergesOk(buf) {
+  const r = xlsxMergeStats(buf);
+  if (r.ok && r.over) throw new Error(`XLSX 의 병합 셀이 너무 많거나 넓습니다(병합 ${XLSX_MAX_MERGES.toLocaleString()}개 · 넓이 ${XLSX_MAX_MERGE_AREA.toLocaleString()}칸 상한) — 병합을 풀고 값만 저장하세요.`);
+  return r;
+}
+
 async function xlsxToCsv(buffer) {
   assertXlsxSizeOk(buffer);
+  assertXlsxMergesOk(buffer);   // 7b 감사 M-4 — 로드 전에 병합 전개 상한
   const ExcelJS = (await import('exceljs')).default;
   const wb = new ExcelJS.Workbook();
   try { await wb.xlsx.load(buffer); } catch (e) { throw new Error(`XLSX 파싱 실패: ${e.message}`); }

@@ -35,7 +35,7 @@ test('① 누락 점검 — 보드 커버리지 값 그대로 · 기록 없음�
   assert.equal(by.K5.bucket, 'os'); assert.equal(by.K5.via, 'edge');
   assert.equal(by.K7.bucket, 'unknown', '엣지 보관분이 없으면 모름');
   assert.equal(by.K6.bucket, 'none'); assert.equal(by.K6.reason, 'no-os-cred');
-  assert.deepEqual(m.counts, { both: 1, os: 1, idrac: 1, none: 1, unassigned: 1, unknown: 2 });
+  assert.deepEqual(m.counts, { both: 1, os: 1, idrac: 1, none: 1, unassigned: 1, unknown: 2, untracked: 0 });
   assert.deepEqual(by.K1.suggest, { name: 'a1.corp.example', corp: 'name-vcA', service_tag: '', os_host: 'a1.corp.example', idrac_host: '10.0.0.1', collect_via: 'auto' }, 'FQDN 이름만 OS 주소로 제안');
   assert.equal(by.K5.suggest.collect_via, 'edge');
   assert.equal(by.K2.suggest, undefined); assert.equal(by.K3.suggest, undefined);

@@ -21,7 +21,7 @@ import * as RUN from '../../bmusage/onboard/onboardRun.js';
 import * as ED from '../../bmusage/onboard/edgeDeploy.js';
 import { testSavedOs } from '../../bmusage/onboard/connTest.js';   // 연결 시험 본체(접속 자격 해석은 라우트 밖 — 소스 스윕)
 import { ROW_CODE, WARN } from '../../bmusage/onboard/importAnalyze.js';
-import { TEMPLATE_COLUMNS, MAX_UPLOAD_BYTES, MAX_ROWS } from '../../bmusage/onboard/importParse.js';
+import { TEMPLATE_COLUMNS, MAX_UPLOAD_BYTES, MAX_ROWS, parseOnboardFile } from '../../bmusage/onboard/importParse.js';
 import * as KS from '../../bmusage/onboard/keyStore.js';
 import * as REFS from '../../bmusage/onboard/refs.js';
 
@@ -52,13 +52,23 @@ function unreadable503(res) {
   return true;
 }
 
+/** 미들웨어를 함수로 돌린다(응답을 가로챈다) — 게이트 판정을 라우트 안에서 순서대로 하기 위해. */
+export function runGate(mw, req) {
+  return new Promise((resolve) => {
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(body) { resolve({ ok: false, status: this.statusCode || 403, body }); return this; }, set() { return this; } };
+    try { mw(req, res, () => resolve({ ok: true })); } catch (e) { resolve({ ok: false, status: 500, body: { ok: false, reason: String(e?.message || e).slice(0, 200) } }); }
+  });
+}
+/** 설정 소유자 등급(소유자 ∧ 전체 범위)인가 — requireSettingsOwner 와 같은 판정 하나(routes/auth.js settingsOwnerTier 와 같은 방식). */
+export async function isOwnerTier(req) { return (await runGate(requireSettingsOwner, req)).ok; }
+
 export function registerBmOnboard(api, deps = {}) {
   /* ── SSH 키 저장소 ─────────────────────────────────────────────── */
   api.get('/tools/bm-usage/ssh-keys', adminOnly, toolsPerm, (req, res) => {
     if (unreadable503(res)) return;
-    const v = REFS.listKeysView();
+    const v = REFS.listKeysView({ scoped: !!scopedVcenterIds(req.user, store.get()) });   // 감사 L-7: 범위 계정에는 목록을 주지 않는다
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, ...v });
+    res.json({ ok: true, ...v, undecryptable: KS.keyStoreUndecryptable() || 0 });
   });
 
   api.post('/tools/bm-usage/ssh-keys', ...keyAdmin, (req, res) => {
@@ -103,7 +113,7 @@ export function registerBmOnboard(api, deps = {}) {
   api.get('/tools/bm-usage/accounts', adminOnly, toolsPerm, (req, res) => {
     if (unreadable503(res)) return;
     const snap = store.get();
-    const v = REFS.listAccountsView({ visible: (corp) => inUserScope(req.user, snap, corp) });
+    const v = REFS.listAccountsView({ visible: (corp) => inUserScope(req.user, snap, corp), scoped: !!scopedVcenterIds(req.user, snap) });
     res.set('Cache-Control', 'no-store');
     res.json({ ok: true, ...v });
   });
@@ -141,8 +151,22 @@ export function registerBmOnboard(api, deps = {}) {
       edgeOf = await (deps.edgeOfFactory || edgeOfFactory)();
       try { rttOf = await (await import('./hostCorp.js')).rttReader(); } catch { rttOf = null; }
     }
+    // 반증 F4 · F10: 지금 수집 대상(이 노드 분류 — 엣지 보고 서버 포함)으로 service_tag · 이름을 해석한다(purposeWrite 와 같은 '대상으로 해석될 때만').
+    let tagMap = null; let names = null;
+    try {
+      const tg = await (deps.currentTargets || (async () => (await import('../../bmusage/poller.js')).currentTargets()))();
+      tagMap = new Map(); names = new Set();
+      for (const x of [...(tg.targets || []), ...(tg.skipped || [])]) {
+        if (x?.serviceTag) tagMap.set(String(x.serviceTag).toLowerCase(), { vcenterId: String(x.vcenterId || '') });
+        if (x?.name) names.add(String(x.name).toLowerCase());
+      }
+    } catch { tagMap = null; names = null; }
+    const ownerTier = await isOwnerTier(req);
+    // ⚠ 반증 F12: 등록부 사본은 **여기(마지막 await 뒤)** 에서 잡는다 — 이후 분석 · 적용은 await 없이 이어진다.
     return RUN.buildOnboardCtx({
-      D, corps, isEdge, myCorps, edgeOf, rttOf,
+      D, corps, isEdge, myCorps, edgeOf, rttOf, ownerTier,
+      tagTarget: tagMap ? (tag) => tagMap.get(String(tag).toLowerCase()) || null : null,
+      fleetHas: names ? ({ name }) => names.has(String(name).toLowerCase()) : null,
       canView: (vc) => inUserScope(req.user, snap, vc), canWrite: (vc) => inUserWriteScope(req.user, snap, vc), fullScope: isFullReadWriteScope(req.user, snap),
     });
   };
@@ -170,14 +194,16 @@ export function registerBmOnboard(api, deps = {}) {
     const f = fileOf(bodyOf(req));
     if (f.err) return res.status(f.code === 'too-large' ? 413 : 400).json({ ok: false, code: f.code || 'bad-file', reason: f.err });
     const D = await D0();
+    const parsed = await parseOnboardFile(f.buf, { fileName: f.name });
+    if (!parsed.ok) return res.status(400).json({ ok: false, code: parsed.code, reason: parsed.reason });
     const { ctx, unread } = await ctxFor(req, D);
     if (unread.length) return res.status(503).json({ ok: false, code: 'registry-unreadable', registryUnreadable: true, reason: `등록부를 읽지 못해 분석하지 않았습니다(${unread.join(', ')}) — 빈 등록부로 보고 ‘신규’ 로 판정하지 않게.` });
-    const r = await RUN.analyzeUpload(f.buf, { fileName: f.name, ctx });
+    const r = RUN.analyzeParsed(f.buf, parsed, ctx);
     if (!r.ok) return res.status(400).json(r);
     const csv = await RUN.resultCsv(r.rows);
     res.set('Cache-Control', 'no-store');
     // 행의 적용 계획(plan)은 응답에 싣지 않는다(공통 계정 id 등 내부 참조 — 화면은 판정 · 사유 · 경고만 쓴다)
-    res.json({ ...r, rows: r.rows.map(({ plan: _p, ...row }) => row), resultCsv: csv, maxRows: MAX_ROWS });
+    res.json({ ...r, rows: r.rows.map(({ plan: _p, ...row }) => row), resultCsv: csv, maxRows: MAX_ROWS, ownerTier: ctx.ownerTier });
   });
 
   api.post('/tools/bm-usage/onboard/apply', adminOnly, toolsPerm, csvPerm, noDemo, async (req, res) => {
@@ -186,12 +212,20 @@ export function registerBmOnboard(api, deps = {}) {
     if (f.err) return res.status(f.code === 'too-large' ? 413 : 400).json({ ok: false, code: f.code || 'bad-file', reason: f.err });
     const out = await RUN.serialOnboard(async () => {
       const D = await D0();
+      // 반증 F12: 파일 해석(xlsx 는 비동기)을 **먼저** 끝내고, 문맥(등록부 사본)을 잡은 뒤에는 await 없이 분석 → 대조 → 적용한다.
+      const parsed = await parseOnboardFile(f.buf, { fileName: f.name });
+      if (!parsed.ok) return { status: 400, body: { ok: false, code: parsed.code, reason: parsed.reason } };
       const { ctx, unread } = await ctxFor(req, D);
       if (unread.length) return { status: 503, body: { ok: false, code: 'registry-unreadable', registryUnreadable: true, reason: `등록부를 읽지 못해 적용하지 않았습니다(${unread.join(', ')}).` } };
-      const a = await RUN.analyzeUpload(f.buf, { fileName: f.name, ctx });
-      if (!a.ok) return { status: 400, body: a };
+      const a = RUN.analyzeParsed(f.buf, parsed, ctx);
       // 사람이 본 판정과 지금 판정이 다르면(그 사이 등록부 · 키 · 범위 · 엣지 접속이 바뀜) 적용하지 않는다 — 다시 보게 한다.
       if (t(b.sig, 80) !== a.sig) return { status: 409, body: { ok: false, code: 'analysis-changed', reason: '분석한 뒤 등록부 · 키 · 엣지 상태가 바뀌어 판정이 달라졌습니다 — 다시 분석해 확인한 뒤 적용하세요.', sig: a.sig } };
+      // 메인 결정(감사 H-1): 공통 계정 · SSH 키를 주소에 묶는 행이 있으면 설정 소유자 등급 + 본인 OTP — OTP 는 다른 검사를 모두 통과한 **뒤 마지막**(소모 순서).
+      if (a.rows.some((r) => (r.action === 'new' || r.action === 'update') && r.plan?.binds && !r.plan?.hidden)) {
+        if (!ctx.ownerTier) return { status: 403, body: { ok: false, error: 'forbidden', requiredOwner: true, reason: '공통 계정 · SSH 키를 주소에 묶는 적용은 설정 소유자(전체 범위)만 할 수 있습니다.' } };
+        const g = await runGate(reauth, req);   // reauth 는 동기 — 이 await 사이에 다른 요청이 끼지 않는다(마이크로태스크)
+        if (!g.ok) return { status: g.status, body: g.body };
+      }
       const r = RUN.applyOnboard(a.rows, { D, by: who(req), isEdge: ctx.isEdge, fileSha: a.fileSha });
       logAudit({ user: who(req), action: 'bm-usage.onboard.apply', target: t(f.name, 120), ip: req.ip || '',
         detail: JSON.stringify({ ok: !!r.ok, file: a.fileSha.slice(0, 16), summary: a.summary, applied: r.applied, code: r.code, step: r.step }).slice(0, 600) });
@@ -210,7 +244,7 @@ export function registerBmOnboard(api, deps = {}) {
     const agents = ED.edgeSummary().map((s) => {
       const rows = ED.edgeRowsFor(s.agent).filter((r) => (r.corp ? inUserScope(req.user, snap, r.corp) : !scoped));
       const pull = ED.onboardPullOf(s.agent);
-      return { agent: s.agent, rows: rows.map((r) => ({ name: r.name, corp: r.corp, idracHost: !!r.idracHost, osHost: !!r.osHost, osKey: r.osKey, osCred: r.osCred, idracCred: r.idracCred, enabled: r.enabled })),
+      return { agent: s.agent, pending: scoped ? undefined : s.pending, rows: rows.map((r) => ({ name: r.name, corp: r.corp, idracHost: !!r.idracHost, osHost: !!r.osHost, osKey: r.osKey, osCred: r.osCred, idracCred: r.idracCred, enabled: r.enabled })),
         total: scoped ? rows.length : s.rows, at: s.at, sig: s.sig, pulledAt: pull?.at || null, appliedSig: pull?.appliedSig || '', applied: pull?.applied || null, inSync: pull ? pull.appliedSig === s.sig : null };
     }).filter((a) => a.rows.length || !scoped);
     let minEdgeVersion = '';
@@ -257,7 +291,9 @@ export function registerBmOnboard(api, deps = {}) {
         return (rec?.snap?.perf || []).find((p) => String(p.key) === key) || null;
       };
       const vcName = (vc) => ((snap?.vcenters || []).find((v) => v.id === vc)?.name) || vc;
-      const m = missingCheck({ targets: tg.targets, skipped: tg.skipped || [], entryByKey, edgeEntry, vcName });
+      let osRegistry = null;
+      try { osRegistry = (await import('../../bmstor/registry.js')).listBmServers(); } catch { osRegistry = null; }
+      const m = missingCheck({ targets: tg.targets, skipped: tg.skipped || [], entryByKey, edgeEntry, vcName, osRegistry });
       const visible = m.rows.filter((r) => (r.vcenterId ? (!allowed || allowed.has(r.vcenterId)) : !allowed));
       const full = (await import('../../auth/addressMask.js')).isAdminReq(req);
       const rows = visible.map((r) => (full ? r : { ...r, idracHost: r.idracHost ? '(가림)' : '', suggest: r.suggest ? { ...r.suggest, idrac_host: undefined, os_host: undefined } : undefined }));

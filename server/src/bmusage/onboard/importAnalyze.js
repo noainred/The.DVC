@@ -48,6 +48,9 @@ export const ROW_CODE = Object.freeze({
   'auto-unknown': 'auto 판정 보류 — 이 법인의 엣지가 지금 접속 중인지 모릅니다(끊겼거나 중앙 재시작 직후). edge 또는 central 을 직접 적으세요.',
   'idrac-cred-missing': 'iDRAC 공통 계정을 찾을 수 없습니다(값은 표시하지 않습니다).',
   'idrac-cred-required': '새 iDRAC 등록에는 idrac_cred(iDRAC 공통 계정 이름)가 필요합니다 — 개별 계정은 iDRAC 화면에서 등록하세요.',
+  'bind-owner-only': '공통 계정 · SSH 키를 새 주소에 묶는(또는 바꾸는) 행은 설정 소유자(전체 범위) + 본인 OTP 로만 적용합니다 — 개별 계정(개별:계정명)으로 올리거나 소유자에게 맡기세요.',
+  'class-full-scope': 'class(통합 서버 인벤토리 분류)는 전 법인 설정이라 전체 범위 계정만 바꿀 수 있습니다.',
+  'purpose-forbidden': '이 service_tag 가 가리키는 서버의 법인에 쓰기 권한이 없어 용도 · 역할을 바꿀 수 없습니다(조회 전용).',
   'edge-to-central': '엣지 배포 목록에 있는 서버입니다 — 엣지 → 중앙 이동은 배포 목록에서 먼저 뺀 뒤(엣지가 반영한 뒤) central 로 다시 올리세요(두 곳이 같은 서버를 여는 구간을 만들지 않게).',
   'bad-mounts': '마운트 경로가 올바르지 않습니다.',
   'os-cred-missing': 'OS 공통 계정을 찾을 수 없습니다(값은 표시하지 않습니다).',
@@ -86,6 +89,10 @@ export const WARN = Object.freeze({
   'rtt-high': '중앙 직접 수집인데 이 법인 RTT 가 800ms 이상입니다 — 엣지 수집을 권합니다.',
   'rtt-unknown': '이 법인 RTT 를 모릅니다(핑 값 없음).',
   'edge-deploy': '엣지 배포 목록으로 갑니다 — 엣지가 다음 인출에서 자기 키 · 공통 계정 이름으로 등록합니다.',
+  'os-only-untracked': '이 노드 함대(iDRAC · vCenter)에 없는 서버입니다 — OS 계정 등록부에는 들어가지만 리눅스 성능 수집 대상이 아닙니다(디스크 용량만 수집).',
+  'purpose-unresolved': '이 service_tag 가 지금 수집 대상 서버로 해석되지 않아 용도 · 역할은 적용하지 않습니다(수집 뒤 서버 상세에서).',
+  'rtt-stale': '이 법인 RTT 값이 오래됐습니다(핑 값이 30분보다 오래됨) — 지금 RTT 를 모릅니다.',
+  'needs-owner': '공통 계정 · SSH 키를 이 주소에 묶습니다 — 적용 때 본인 OTP 를 묻습니다(설정 소유자).',
   'edge-names': '공통 계정 · 키 이름은 엣지가 자기 저장소에서 찾습니다(중앙은 이름 꼴만 확인 — 키는 법인 밖으로 나가지 않음).',
   'idrac-cred-kept': 'idrac_cred 가 비어 기존 iDRAC 계정을 그대로 둡니다.',
   'os-cred-kept': 'os_cred 가 비어 기존 OS 계정을 그대로 둡니다.',
@@ -93,7 +100,9 @@ export const WARN = Object.freeze({
 
 const boolOf = (v) => { const s = lc(v); if (!s) return null; if (TRUE.includes(s)) return true; if (FALSE.includes(s)) return false; return undefined; };
 const listOf = (v) => t(v).split(/[;,\n]/).map((x) => x.trim()).filter(Boolean);
-const hostKeyOf = (h) => lc(h).replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/\/+$/, '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+/** 끝 '/' 들을 선형으로 뗀다(감사 L-10 — 앵커 끝 무제한 반복 정규식 금지). */
+const trimSlashes = (x) => { let e = x.length; while (e > 0 && x.charCodeAt(e - 1) === 47) e -= 1; return x.slice(0, e); };
+const hostKeyOf = (h) => trimSlashes(lc(h).slice(0, 300).replace(/^[a-z][a-z0-9+.-]*:\/\//, '')).replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
 
 /**
  * @param {object[]} rows  parseOnboardFile 의 rows
@@ -148,7 +157,15 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
   const edgeRowByName = new Map((Array.isArray(ctx.edgeRows) ? ctx.edgeRows : []).map((r) => [lc(r.name), r]));
   const seen = { name: new Map(), tag: new Map(), idrac: new Map(), os: new Map() };
   const out = [];
-  const summary = { total: rows.length, new: 0, update: 0, unchanged: 0, reject: 0, warn: 0, edge: 0, central: 0 };
+  const summary = { total: rows.length, new: 0, update: 0, unchanged: 0, reject: 0, warn: 0, edge: 0, central: 0, needOwner: 0 };
+  // 범위 계정이 볼 수 없는 기존 항목(조회 밖 법인 · 귀속 없음)은 **없는 것과 같은 꼴**로 판정한다(감사 L-1 · 반증 F18 — 존재 오라클 차단).
+  //   대신 그 행은 적용 단계에서 막는다(plan.hidden). 전체 범위 계정은 늘 보인다.
+  const hiddenEx = (vcOf) => !ctx.fullScope && (!vcOf || !canView(vcOf));
+  const pendingByName = new Map((Array.isArray(ctx.edgePending) ? ctx.edgePending : []).map((r) => [lc(r.name), r]));
+  const idrById = new Map(idr.map((e) => [t(e.id), e]));
+  const nameOfAcc = typeof ctx.accountNameById === 'function' ? ctx.accountNameById : () => '';
+  const nameOfKey = typeof ctx.keyNameById === 'function' ? ctx.keyNameById : () => '';
+  const idrCopyName = typeof ctx.idracCopyName === 'function' ? ctx.idracCopyName : () => '';   // 그 iDRAC 항목에 비밀번호 사본을 둔 공통 계정 이름
 
   for (const row of rows) {
     const c = row.cells || {};
@@ -197,7 +214,8 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
     let where = 'local'; let agent = '';
     if (ctx.isEdge) {
       if (via === 'central') { reject('via-central-on-edge'); done(); continue; }
-      if (vc && Array.isArray(ctx.myCorps) && ctx.myCorps.length && !ctx.myCorps.includes(vc)) { reject('corp-not-edge'); done(); continue; }
+      // 반증 F9: 자기 법인 목록이 비면 '모름' — 법인이 있는 행은 거부(검사를 끄지 않는다).
+      if (vc && (!Array.isArray(ctx.myCorps) || !ctx.myCorps.includes(vc))) { reject('corp-not-edge'); done(); continue; }
       res.via = 'edge';
     } else {
       const edge = vc && typeof ctx.edgeOf === 'function' ? ctx.edgeOf(vc) : null;
@@ -210,31 +228,58 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
       res.via = where === 'edge' ? 'edge' : 'central';
       if (where === 'local' && vc && typeof ctx.rttOf === 'function') {
         const r = ctx.rttOf(vc);
-        if (r && Number.isFinite(r.rttMs) && r.rttMs >= 800) warn('rtt-high', `(${r.rttMs}ms)`);
+        if (r && r.fresh === false) warn('rtt-stale');   // 감사 Q3: 오래된 핑 값으로 경고 · 무경고를 가르지 않는다
+        else if (r && Number.isFinite(r.rttMs) && r.rttMs >= 800) warn('rtt-high', `(${r.rttMs}ms)`);
         else if (!r || !Number.isFinite(r?.rttMs)) warn('rtt-unknown');
       }
     }
     res.agent = agent;
-    // ⑤ 기존 항목 대조(서로 다른 서버를 가리키면 거부)
-    const exIdr = (tag && idrByTag.get(lc(tag))) || (idracHost && idrByHost.get(hostKeyOf(idracHost))) || idrByName.get(lc(name)) || null;
-    const exIdrAlt = [tag && idrByTag.get(lc(tag)), idracHost && idrByHost.get(hostKeyOf(idracHost)), idrByName.get(lc(name))].filter(Boolean);
-    if (exIdrAlt.some((e) => e.id !== exIdrAlt[0].id)) { reject('existing-conflict', '(iDRAC 등록부)'); done(); continue; }
-    const exOs = (osHost && osByHost.get(`${hostKeyOf(osHost)}:${osPort}`)) || osByName.get(lc(name)) || null;
-    const exOsAlt = [osHost && osByHost.get(`${hostKeyOf(osHost)}:${osPort}`), osByName.get(lc(name))].filter(Boolean);
-    if (exOsAlt.some((e) => e.id !== exOsAlt[0].id)) { reject('existing-conflict', '(OS 계정 등록부)'); done(); continue; }
-    const exEdge = edgeRowByName.get(lc(name)) || null;
-    for (const ex of [exIdr, exOs]) {
+    // ⑤ 기존 항목 대조(서로 다른 서버를 가리키면 거부). 보이지 않는 항목(범위 밖)은 대조에서 빼고 hidden 으로 적용 단계에서 막는다.
+    //   반증 F16: iDRAC 은 **id 충돌**도 기존 항목이다(새 행 id = service_tag 또는 name — 그 값이 남의 항목 id 면 merge 가 덮어쓴다).
+    let hidden = false;
+    const vis = (e) => { if (!e) return null; if (hiddenEx(t(e.vcenterId))) { hidden = true; return null; } return e; };
+    const idrCands = [tag && idrByTag.get(lc(tag)), idracHost && idrByHost.get(hostKeyOf(idracHost)), idrByName.get(lc(name)), idracHost && idrById.get(tag || name)].map(vis).filter(Boolean);
+    if (idrCands.some((e) => e.id !== idrCands[0].id)) { reject('existing-conflict', '(iDRAC 등록부)'); done(); continue; }
+    const exIdr = idrCands[0] || null;
+    const osCands = [osHost && osByHost.get(`${hostKeyOf(osHost)}:${osPort}`), osByName.get(lc(name))].map(vis).filter(Boolean);
+    if (osCands.some((e) => e.id !== osCands[0].id)) { reject('existing-conflict', '(OS 계정 등록부)'); done(); continue; }
+    const exOs = osCands[0] || null;
+    // 반증 F17 · 감사 L-2: 엣지 배포 행도 범위 대조(행의 법인) · F14: 배포에서 뺐지만 엣지가 아직 반영하지 않은 행(제거 대기)도 같은 이름이면 겹친다.
+    const exEdge0 = edgeRowByName.get(lc(name)) || null;
+    const exEdge = exEdge0 && hiddenEx(t(exEdge0.corp)) ? ((hidden = true), null) : exEdge0;
+    const pend0 = pendingByName.get(lc(name)) || null;
+    const pend = pend0 && hiddenEx(t(pend0.corp)) ? ((hidden = true), null) : pend0;
+    for (const ex of [exIdr, exOs, exEdge && { vcenterId: exEdge.corp }]) {
       if (!ex) continue;
       const exVc = t(ex.vcenterId);
       if (!exVc) { if (!ctx.fullScope) { reject('existing-unassigned'); break; } }
-      else if (!canWrite(exVc)) { reject(canView(exVc) ? 'existing-forbidden' : 'existing-conflict'); break; }
+      else if (!canWrite(exVc)) { reject('existing-forbidden'); break; }
     }
     if (res.code) { done(); continue; }
-    if (where !== 'edge' && exEdge) { reject('edge-to-central'); done(); continue; }
+    // 반증 F8 · 감사 M-3: 엣지 적용은 '이 배포가 만든 항목' 또는 자기 법인 귀속 항목만 갱신한다(엣지 관리자가 손으로 둔 항목은 이름이 같아도 건드리지 않는다).
+    if (typeof ctx.canUpdateExisting === 'function' && ((exIdr && !ctx.canUpdateExisting(exIdr, 'idrac')) || (exOs && !ctx.canUpdateExisting(exOs, 'os')))) { reject('existing-conflict', '(이 배포가 만들지 않은 항목)'); done(); continue; }
+    if (where !== 'edge' && (exEdge || pend)) { reject('edge-to-central'); done(); continue; }
     // ⑥ 자격 칸 — 공통 계정 · 키(값은 결과에 싣지 않는다).
     //   엣지 배포 행(중앙 → 엣지)은 이름을 **엣지가 자기 저장소에서** 찾는다 — 중앙은 이름 꼴만 본다(키 · 비밀은 법인 밖으로 나가지 않는다).
     const remote = where === 'edge';
     const nameOk = (v) => NAME_RE.test(v);
+    /*
+     * 메인 결정(감사 H-1 · 반증 F1 · F1-b): 저장된 비밀(공통 계정 · SSH 키)을 **주소에 묶는 것**은 그 비밀을 관리하는 등급과 같다 — 설정 소유자 등급 + 본인 OTP.
+     *   묶음 = 행이 공통 계정 · 키 **이름**을 쓰고, (새 항목 · 주소가 바뀐 항목 · 지금 묶음과 다른 이름)일 때. 주소가 그대로이고 지금 묶음과 같은 이름이면 묶음이 아니다.
+     *   소유자가 아니면 **계정 · 키를 찾기 전에** 거부한다(다른 법인 계정 · 없는 키를 가르는 오라클을 만들지 않는다).
+     */
+    const osCredRaw = t(c.os_cred); const osKeyRaw = t(c.os_key); const idracCredRaw = t(c.idrac_cred);
+    const usesOsAcc = !!osHost && !!osCredRaw && !INDIVIDUAL.has(lc(osCredRaw)) && !/^(개별|individual|user)\s*:/i.test(osCredRaw);
+    const usesKey = !!osHost && !!osKeyRaw && lc(osKeyRaw) !== 'password';
+    const usesIdracAcc = !!idracHost && !!idracCredRaw && !INDIVIDUAL.has(lc(idracCredRaw));
+    const osSameAddr = !!exOs && hostKeyOf(exOs.host) === hostKeyOf(osHost) && (Number(exOs.port) || 22) === osPort;
+    const idrSameAddr = !!exIdr && hostKeyOf(exIdr.host) === hostKeyOf(idracHost);
+    const sameName = (a, b) => !!a && lc(a) === lc(b);
+    const bindOs = (usesOsAcc && !(osSameAddr && sameName(nameOfAcc(exOs.credRef), osCredRaw))) || (usesKey && !(osSameAddr && sameName(nameOfKey(exOs.keyRef), osKeyRaw)));
+    const bindIdrac = usesIdracAcc && !(idrSameAddr && sameName(idrCopyName(exIdr.id), idracCredRaw));
+    const binds = remote ? (usesOsAcc || usesKey || usesIdracAcc) && (!exEdge || edgeRowDiffers(exEdge, { ...exEdge, osHost, osPort, idracHost, osCred: usesOsAcc ? osCredRaw : '', osKey: osKeyRaw, idracCred: usesIdracAcc ? idracCredRaw : '' }))
+      : (bindOs || bindIdrac);
+    if (binds && !ctx.ownerTier) { reject('bind-owner-only'); done(); continue; }
     const credOk = (acc) => !acc.corp || !vc || lc(acc.corp) === lc(vc);
     let idracAcc = null; let idracCredName = '';
     const idracCred = t(c.idrac_cred);
@@ -313,6 +358,18 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
     const role = lc(c.role);
     if (role && !(ctx.knownRoles || []).includes(role)) { reject('bad-role'); done(); continue; }
     if ((cls || apps.length || role) && !tag) warn('purpose-no-tag');
+    // 감사 M-2 · 반증 F10: class(함대 분류 — exclude 포함)는 전 법인 설정(기존 PUT /fleet/tag = fleetFullScopeOnly) → 전체 범위만.
+    if (cls && tag && !ctx.fullScope) { reject('class-full-scope'); done(); continue; }
+    // purposes · role 은 그 service_tag 가 **쓰기 범위 안 수집 대상**으로 해석될 때만(purposeWrite 와 같은 판정: 조회 밖 = 없음 · 쓰기 밖 = 403).
+    let purposeOk = (apps.length || role) && !!tag;
+    if (purposeOk && typeof ctx.tagTarget === 'function') {
+      const tt = ctx.tagTarget(tag);
+      const tvc = tt ? t(tt.vcenterId) : '';
+      if (!tt || (tvc ? !canView(tvc) : !ctx.fullScope)) { purposeOk = false; warn('purpose-unresolved'); }
+      else if (tvc ? !canWrite(tvc) : false) { reject('purpose-forbidden'); done(); continue; }
+    }
+    // 반증 F4: OS 만 등록한 행이 이 노드 함대(iDRAC · vCenter)에 없으면 성능 수집 대상이 아니다 — 결과가 말한다(대상 집합은 바꾸지 않는다).
+    if (osHost && !idracHost && where !== 'edge' && typeof ctx.fleetHas === 'function' && !ctx.fleetHas({ name, osHost, tag })) warn('os-only-untracked');
     const sw = t(c.switch_port);
     if (sw) {
       const parts = listOf(sw);
@@ -361,19 +418,23 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
       if (lc(exEdge.agent) !== lc(agent)) changes.push('collect_via');
     }
     if (where !== 'edge' && exEdge) changes.push('collect_via');           // 엣지 배포 목록 → 중앙
-    if (cls || apps.length || role) changes.push('tags');
+    if (cls || (purposeOk && (apps.length || role))) changes.push('tags');
     res.changes = [...new Set(changes)];
-    const isNew = res.idrac === 'new' || res.os === 'new' || (where === 'edge' && !exEdge && !exIdr && !exOs);
+    const isNew = where === 'edge' ? (!exEdge && !exIdr && !exOs) : (res.idrac === 'new' || res.os === 'new');   // 반증 F17: 배포 행이 있으면 '갱신'
     res.action = isNew ? 'new' : (res.changes.length ? 'update' : 'unchanged');
     // 적용 계획(비밀 없음 — 이름 · id 참조만). apply 가 그대로 쓴다.
     res.plan = {
       where, agent, vc, name, tag,
-      idrac: idracHost ? { id: exIdr ? exIdr.id : (tag || name), host: idracHost, accountId: idracAcc ? idracAcc.id : '', keepCred: !idracAcc && !!exIdr, existing: !!exIdr } : null,
-      os: osHost ? { id: exOs ? exOs.id : '', host: osHost, port: osPort, username: osBody.username, credRef: osAcc ? osAcc.id : (osCred ? '' : (exOs?.credRef || '')), keyRef, osAuth, keepCred: !osCred && !!exOs, mounts: osBody.mounts, existing: !!exOs } : null,
-      enabled: en, note: t(c.note), cls, apps, role, via,
+      idrac: idracHost ? { id: exIdr ? exIdr.id : (tag || name), host: idracHost, accountId: idracAcc ? idracAcc.id : '', accountName: idracAcc ? idracAcc.name : '', keepCred: !idracAcc && !!exIdr, existing: !!exIdr } : null,
+      // 반증 F3: keepCred 는 os_cred 와 os_key 가 **둘 다** 비었을 때만 — os_key 만 바꾼 행은 키 · 인증 방식을 실제로 바꾸고 공통 계정만 잇는다.
+      os: osHost ? { id: exOs ? exOs.id : '', host: osHost, port: osPort, username: osBody.username, credRef: osAcc ? osAcc.id : (osCred ? '' : (exOs?.credRef || '')),
+        keyRef: osKey ? keyRef : (osCred ? '' : (exOs?.keyRef || '')), osAuth: osKey ? osAuth : (osCred ? '' : (exOs?.osAuth || '')), keepCred: !osCred && !osKey && !!exOs, mounts: osBody.mounts, existing: !!exOs } : null,
+      enabled: en, note: t(c.note), cls, apps: purposeOk ? apps : [], role: purposeOk ? role : '', via,
       edgeNames: { idracCred: idracCredName, osCred: osCredName, osUser, osKey: osKeyName },
       moveFromEdge: where !== 'edge' && !!exEdge ? lc(exEdge.agent) : '', moveToEdge: where === 'edge' && !!(exIdr || exOs),
+      hidden, binds,
     };
+    if (binds) { summary.needOwner += 1; warn('needs-owner'); }
     if (where === 'edge') summary.edge += 1; else summary.central += 1;
     done();
   }
@@ -396,7 +457,8 @@ const EDGE_ROW_KEYS = ['corp', 'serviceTag', 'idracHost', 'idracCred', 'osHost',
 export function edgeRowDiffers(a = {}, b = {}) { return EDGE_ROW_KEYS.some((k) => JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null)); }
 
 /** 판정 서명 — 분석과 적용 사이에 등록부 · 키 · 범위가 바뀌었는지(적용은 같은 파일을 다시 분석해 이 값이 같을 때만). */
-export function analysisSig(rows = []) {
-  const parts = rows.map((r) => `${r.line}|${r.action}|${r.code}|${r.via}|${r.agent}|${r.corp}|${(r.changes || []).join(',')}|${r.key}|${r.cred}|${(r.warnings || []).map((w) => w.code).join(',')}`);
-  return `${rows.length}-${crypto.createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 24)}`;
+export function analysisSig(rows = [], regGen = '') {
+  const parts = rows.map((r) => `${r.line}|${r.action}|${r.code}|${r.via}|${r.agent}|${r.corp}|${(r.changes || []).join(',')}|${r.key}|${r.cred}|${(r.warnings || []).map((w) => w.code).join(',')}|${r.plan?.hidden ? 'h' : ''}`);
+  // 반증 F12: 등록부 세대(mtime · 크기)도 넣는다 — 분석과 적용 사이에 다른 쓰기가 끼면 판정이 같아 보여도 409.
+  return `${rows.length}-${crypto.createHash('sha256').update(parts.join('\n')).update(`\n#${String(regGen)}`).digest('hex').slice(0, 24)}`;
 }

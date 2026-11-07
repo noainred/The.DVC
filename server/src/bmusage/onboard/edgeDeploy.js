@@ -40,7 +40,10 @@ function load() {
           name: r.name, vc: r.corp, tag: r.serviceTag, idracHost: r.idracHost, idracCred: r.idracCred, osHost: r.osHost, osPort: r.osPort, osCred: r.osCred, osUser: r.osUser, osKey: r.osKey,
           mounts: r.mounts, enabled: r.enabled, note: r.note, cls: r.cls, apps: r.apps, role: r.role,
         }, k)).filter((r) => r.name);
-        agents[k] = { rows, at: Number(v.at) > 0 ? Number(v.at) : 0, by: String(v.by || '').slice(0, 64) };
+        // 반증 F14: 배포에서 뺐지만 엣지가 아직 반영(적용 서명 확인)하지 않은 행 — 그 동안 같은 서버의 central 등록을 막는다.
+        const pending = (Array.isArray(v.pending) ? v.pending : []).filter((x) => x && typeof x === 'object' && x.name).slice(0, MAX_EDGE_ROWS)
+          .map((x) => ({ name: String(x.name).slice(0, 128), corp: String(x.corp || '').slice(0, 128), at: Number(x.at) > 0 ? Number(x.at) : 0 }));
+        agents[k] = { rows, pending, at: Number(v.at) > 0 ? Number(v.at) : 0, by: String(v.by || '').slice(0, 64) };
       }
       cache = { agents };
     }
@@ -54,7 +57,9 @@ export function _resetEdgeDeployForTest() { cache = null; loadErr.clear(); }
 export function edgeRowsFor(agent) { const v = load().agents[lc(agent)]; return v ? v.rows.map((r) => ({ ...r })) : []; }
 /** 전 엣지 행(분석의 경로 변경 판정용) — 행마다 agent. */
 export function allEdgeRows() { const out = []; for (const [a, v] of Object.entries(load().agents)) for (const r of v.rows) out.push({ ...r, agent: a }); return out; }
-export function edgeSummary() { return Object.entries(load().agents).map(([agent, v]) => ({ agent, rows: v.rows.length, at: v.at || null, by: v.by, sig: sigOf(v.rows) })); }
+export function edgeSummary() { return Object.entries(load().agents).map(([agent, v]) => ({ agent, rows: v.rows.length, pending: (v.pending || []).length, at: v.at || null, by: v.by, sig: sigOf(v.rows) })); }
+/** 제거 대기 행(엣지 반영 전) — 분석의 edge-to-central 판정 입력. */
+export function allPendingRemovals() { const out = []; for (const [a, v] of Object.entries(load().agents)) for (const r of v.pending || []) out.push({ ...r, agent: a }); return out; }
 
 export const sigOf = (rows) => crypto.createHash('sha256').update(JSON.stringify(rows || [])).digest('hex').slice(0, 32);
 
@@ -66,24 +71,27 @@ export function applyEdgeChanges({ upserts = [], removes = [] } = {}, { by = '',
   load();
   if (loadErr.get()) return { ok: false, code: 'registry-unreadable', reason: `엣지 배포 목록(${EDGE_FILE_NAME})을 읽지 못해 바꾸지 않았습니다.` };
   const next = Object.create(null);
-  for (const [a, v] of Object.entries(cache.agents)) next[a] = { ...v, rows: v.rows.map((r) => ({ ...r })) };
+  for (const [a, v] of Object.entries(cache.agents)) next[a] = { ...v, rows: v.rows.map((r) => ({ ...r })), pending: (v.pending || []).map((r) => ({ ...r })) };
   const touched = new Set();
   for (const { agent, name } of removes) {
     const a = lc(agent); if (!next[a]) continue;
-    const n = lc(name); const before = next[a].rows.length;
+    const n = lc(name);
+    const gone = next[a].rows.filter((r) => lc(r.name) === n);
     next[a].rows = next[a].rows.filter((r) => lc(r.name) !== n);
-    if (next[a].rows.length !== before) touched.add(a);
+    if (gone.length) { touched.add(a); for (const g of gone) next[a].pending.push({ name: g.name, corp: g.corp, at: now }); }
   }
   for (const { agent, row } of upserts) {
     const a = lc(agent); if (!a) continue;
-    if (!next[a]) { if (Object.keys(next).length >= MAX_EDGES) return { ok: false, code: 'too-many', reason: `엣지 배포 목록은 ${MAX_EDGES}개 엣지까지입니다.` }; next[a] = { rows: [], at: 0, by: '' }; }
+    if (!next[a]) { if (Object.keys(next).length >= MAX_EDGES) return { ok: false, code: 'too-many', reason: `엣지 배포 목록은 ${MAX_EDGES}개 엣지까지입니다.` }; next[a] = { rows: [], pending: [], at: 0, by: '' }; }
     const r = edgeRowFromPlan({ ...row, vc: row.corp ?? row.vc, tag: row.serviceTag ?? row.tag }, a);
     const i = next[a].rows.findIndex((x) => lc(x.name) === lc(r.name));
     if (i >= 0) next[a].rows[i] = r; else next[a].rows.push(r);
+    next[a].pending = next[a].pending.filter((x) => lc(x.name) !== lc(r.name));   // 다시 올리면 제거 대기에서 뺀다
     if (next[a].rows.length > MAX_EDGE_ROWS) return { ok: false, code: 'too-many', reason: `한 엣지의 배포 행은 ${MAX_EDGE_ROWS.toLocaleString()}개까지입니다.` };
     touched.add(a);
   }
-  for (const a of touched) { next[a].at = now; next[a].by = String(by || '').slice(0, 64); if (!next[a].rows.length) delete next[a]; }
+  // 반증 F14: 행이 0 이어도 엣지 항목을 남긴다(제거 대기 · 반영 상태를 화면이 보여야 한다). 반영이 확인되면 settlePending 이 정리한다.
+  for (const a of touched) { next[a].at = now; next[a].by = String(by || '').slice(0, 64); }
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     atomicWriteFileSync(FILE, JSON.stringify({ agents: next }, null, 2), { mode: 0o600 });
@@ -113,4 +121,22 @@ export function recordOnboardPull(agent, { appliedSig = '', applied = null, vers
     applied: applied && typeof applied === 'object' ? { ok: n(applied.ok), rejected: n(applied.rejected), removed: n(applied.removed) } : null });
 }
 export function onboardPullOf(agent) { return _pulls.get(lc(agent)) || null; }
+
+/**
+ * 엣지가 **지금 판**(서명)을 반영했다고 알리면 그 엣지의 제거 대기를 비운다(반증 F14). 행 · 대기가 모두 비면 항목을 지운다. 판이 다르면 아무것도 하지 않는다.
+ */
+export function settlePending(agent, appliedSig, { now = Date.now() } = {}) {
+  const a = lc(agent);
+  const v = load().agents[a];
+  if (loadErr.get() || !v || !(v.pending || []).length) return { ok: true, changed: false };
+  if (String(appliedSig || '') !== sigOf(v.rows)) return { ok: true, changed: false };
+  const next = Object.create(null);
+  for (const [k, x] of Object.entries(cache.agents)) next[k] = { ...x, rows: x.rows.map((r) => ({ ...r })), pending: (x.pending || []).map((r) => ({ ...r })) };
+  next[a].pending = [];
+  if (!next[a].rows.length) delete next[a];
+  try { atomicWriteFileSync(FILE, JSON.stringify({ agents: next }, null, 2), { mode: 0o600 }); } catch { return { ok: false, changed: false }; }
+  cache = { agents: next };
+  void now;
+  return { ok: true, changed: true };
+}
 export function _resetOnboardPullsForTest() { _pulls.clear(); }

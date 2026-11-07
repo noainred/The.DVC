@@ -98,6 +98,9 @@ export const SECRET_FILES = [
   'bareos.json',                   // Bareos Director 콘솔 비밀번호(bareos/settings.js, v2.820)
   'bareos-edge-directors.json',    // 엣지가 받은 법인 Director 대행 사본 — 콘솔 비밀번호(bareos/edgeStore.js, v2.824)
   'ssh-keys.json',                 // 7b: SSH 키 저장소 개인키 · passphrase + 법인 공통 계정 비밀번호(bmusage/onboard/keyStore.js)
+  // 7b 감사 L-4: 온보딩 적용 직전 스냅샷(원본 바이트 = 봉인 그대로) — 봉인 방식 전환 · 평문 점검이 이 사본도 같이 다루게.
+  'onboard-prev/bm-storage.json',
+  'onboard-prev/idrac.json',
 ];
 
 /**

@@ -187,7 +187,7 @@
 | `notices.json` | 설정 | 접속 공지(팝업)와 게시판 글 저장소(v2.722). | ✅ | ✅ | ✅ | bulletin/store.js |
 | `nsx-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | nsx/client.js |
 | `nsx.json` | 설정 | NSX Manager registry — read/write the managed list in CONFIG_DIR/nsx.json, | ✅ | ✅ | ✅ | nsx/registry.js |
-| `onboard-prev` | 디렉터리 | 서버 등록(온보딩) 분석 → 적용(7b단계 · 설계 PROFILES §18 '연결 시험 → 적용 → 엣지 배포'). |  |  | ✅ | bmusage/onboard/onboardRun.js |
+| `onboard-prev` | 디렉터리 | 서버 등록(온보딩) 분석 → 적용(7b단계 · 설계 PROFILES §18 '연결 시험 → 적용 → 엣지 배포'). | ✅ |  | ✅ | bmusage/onboard/onboardRun.js |
 | `os-inventory.json` | 설정 | 실제 OS 인벤토리 저장소(별도 DB) — VM별 1행, vmId 키로 upsert. | ✅ |  | ✅ | inventory/osStore.js |
 | `os-scan.json` | 설정 | 실제 OS 인벤토리 스캐너 — 주기적으로 'DB에 없는(또는 오래된) VM'을 찾아 게스트에서 실제 OS를 읽어 저장. | ✅ |  | ✅ | inventory/osScanner.js |
 | `packages` | 디렉터리 | 디렉터리 — 내려받은 설치/업그레이드 패키지 보관(PACKAGE_DIR) |  |  |  | config.js |

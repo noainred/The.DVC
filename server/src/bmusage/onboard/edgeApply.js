@@ -52,34 +52,40 @@ export async function applyEdgeDeployment(rows = [], { sig = '', D = null, corps
   const Dx = D || await defaultOnboardDeps();
   const prev = readAppliedState();
   if (prev.ok && prev.state.sig === sig && sig) return { ok: true, skipped: true, applied: 0, rejected: 0, removed: 0 };
+  // 반증 F9 · 감사 L-9: 이 엣지의 수집 법인(베어메탈 성능 설정 corps)이 비면 '모름' — 적용하지 않고 서명도 남기지 않는다(다음 인출에 다시).
+  const mine = (Array.isArray(myCorps) ? myCorps : []).map((x) => String(x)).filter(Boolean);
+  if (!mine.length) return { ok: false, applied: 0, rejected: 0, removed: 0, noCorps: true, reason: '이 엣지의 수집 법인이 비어 있어(설정 › 베어메탈 성능) 서버 등록 배포를 적용하지 않았습니다' };
   const list = (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r === 'object' && !Array.isArray(r)).slice(0, 5000);
   const parsedRows = list.map((r, i) => ({ line: i + 1, cells: cellsOfEdgeRow(r), flags: {} }));
-  const { ctx, unread } = buildOnboardCtx({ D: Dx, corps, isEdge: true, myCorps, canView: () => true, canWrite: () => true, fullScope: true });
+  const created = prev.ok ? { ...prev.state.created } : {};
+  const createdIds = new Set(Object.values(created).flatMap((x) => [x?.os, x?.idrac]).filter(Boolean).map(String));
+  const { ctx, unread } = buildOnboardCtx({ D: Dx, corps, isEdge: true, myCorps: mine, canView: () => true, canWrite: () => true, fullScope: true, ownerTier: true,
+    // 반증 F8 · 감사 M-3: 기존 항목은 **이 배포가 만든 것** 또는 이 엣지 법인 귀속인 것만 갱신한다(손으로 둔 귀속 없음 · 다른 법인 항목은 이름이 같아도 거부).
+    canUpdateExisting: (ex) => createdIds.has(String(ex.id)) || (!!ex.vcenterId && mine.includes(String(ex.vcenterId))) });
   if (unread.length) return { ok: false, applied: 0, rejected: 0, removed: 0, reason: `등록부를 읽지 못해 적용하지 않았습니다(${unread.join(', ')})` };
   const a = analyzeOnboardRows(parsedRows, ctx);
   const rejects = a.rows.filter((r) => r.action === 'reject').map((r) => ({ name: r.name, code: r.code }));
+  const osBefore = new Set(Dx.BM.listBmServersRaw().map((s) => String(s.id)));
+  const idrBefore = new Set(Dx.IDR.loadRegistry().map((s) => String(s.id)));
   const res = applyOnboard(a.rows, { D: Dx, by: 'central-deploy', now, isEdge: true });
-  if (!res.ok) return { ok: false, applied: 0, rejected: rejects.length, removed: 0, reason: res.reason, rejects };
-  // 만든 항목 기록(다음 배포에서 빠지면 그것만 지운다)
-  const created = prev.ok ? { ...prev.state.created } : {};
-  const osByName = new Map(Dx.BM.listBmServersRaw().map((s) => [lc(s.name), s.id]));
-  const idrByName = new Map(Dx.IDR.loadRegistry().map((s) => [lc(s.name), s.id]));
-  for (const r of a.rows) {
-    if (r.action !== 'new' || !r.plan) continue;
-    const k = lc(r.name);
-    created[k] = { ...(created[k] || {}), ...(r.plan.os && !r.plan.os.existing && osByName.get(k) ? { os: osByName.get(k) } : {}), ...(r.plan.idrac && !r.plan.idrac.existing && idrByName.get(k) ? { idrac: idrByName.get(k) } : {}) };
+  // 반증 F7: 만든 항목은 **적용 전후 비교**로 남긴다 — 중간(iDRAC 단계) 실패여도 이미 만든 OS 항목이 '손으로 만든 것' 으로 바뀌지 않게.
+  const rowNames = new Set(a.rows.filter((r) => r.plan).map((r) => lc(r.name)));
+  for (const s0 of Dx.BM.listBmServersRaw()) if (!osBefore.has(String(s0.id)) && rowNames.has(lc(s0.name))) created[lc(s0.name)] = { ...(created[lc(s0.name)] || {}), os: s0.id };
+  for (const s0 of Dx.IDR.loadRegistry()) if (!idrBefore.has(String(s0.id)) && rowNames.has(lc(s0.name))) created[lc(s0.name)] = { ...(created[lc(s0.name)] || {}), idrac: s0.id };
+  if (!res.ok) {
+    try { writeAppliedState({ sig: prev.ok ? prev.state.sig : '', at: now, created, result: prev.state.result || null, rejects: rejects.slice(0, 200), lastError: String(res.reason || '').slice(0, 200) }); } catch { /* 다음 주기 */ }
+    return { ok: false, applied: 0, rejected: rejects.length, removed: 0, reason: res.reason, rejects };
   }
-  // 빠진 행 — 이 배포가 만든 것만 지운다. 상태 파일을 못 읽었으면 지우지 않는다.
+  // 빠진 행 — 이 배포가 만든 것만 지운다(한 번씩 · 등록부마다 한 번 쓰기). 상태 파일을 못 읽었으면 지우지 않는다.
   let removed = 0;
   if (prev.ok) {
     const now2 = new Set(list.map((r) => lc(r.name)));
     const gone = Object.keys(created).filter((k) => !now2.has(k));
     const osIds = gone.map((k) => created[k].os).filter(Boolean);
+    const idrIds = gone.map((k) => created[k].idrac).filter(Boolean);
     if (osIds.length) { const r = Dx.BM.applyBmServerBatch([], { removeIds: osIds, now }); if (r.ok) removed += (r.removed || []).length; }
-    for (const k of gone) {
-      if (created[k].idrac) { const r = Dx.IDR.removeServer(created[k].idrac); if (r.ok) removed += 1; }
-      delete created[k];
-    }
+    if (idrIds.length) { const r = typeof Dx.IDR.removeServersBatch === 'function' ? Dx.IDR.removeServersBatch(idrIds) : { ok: false }; if (r.ok) removed += (r.removed || []).length; }
+    for (const k of gone) delete created[k];
   }
   const result = { applied: (res.applied?.os || 0) + (res.applied?.idrac || 0), rejected: rejects.length, removed, at: now };
   try { writeAppliedState({ sig, at: now, created, result, rejects: rejects.slice(0, 200) }); } catch (e) { return { ok: false, ...result, reason: `적용 상태를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)})`, rejects }; }

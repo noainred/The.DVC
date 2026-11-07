@@ -14,6 +14,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../../config.js';
 import { analyzeOnboardRows, analysisSig, edgeRowFromPlan } from './importAnalyze.js';
+import { atomicWriteFileSync } from '../../util/atomicWrite.js';
 import { parseOnboardFile } from './importParse.js';
 
 
@@ -44,15 +45,24 @@ export async function defaultOnboardDeps() {
  * @param {boolean} p.isEdge @param {string[]} [p.myCorps]
  * @param {(vc:string)=>({agent,online}|null)} [p.edgeOf] @param {(vc:string)=>object|null} [p.rttOf]
  */
-export function buildOnboardCtx({ D, corps = [], canView, canWrite, fullScope = false, isEdge = false, myCorps = [], edgeOf = null, rttOf = null }) {
+export function buildOnboardCtx({ D, corps = [], canView, canWrite, fullScope = false, isEdge = false, myCorps = [], edgeOf = null, rttOf = null, ownerTier = false, tagTarget = null, fleetHas = null, canUpdateExisting = null }) {
   const unread = [];
   if (D.BM.registryLoadError()) unread.push('bm-storage.json');
   if (D.IDR.registryLoadError()) unread.push('idrac.json');
   if (D.KS.keyStoreLoadError()) unread.push('ssh-keys.json');
   if (!isEdge && D.ED.edgeDeployLoadError()) unread.push('bm-onboard-edge.json');
   const pubAcc = (a) => (a ? { id: a.id, name: a.name, kind: a.kind, corp: a.corp, username: a.username, keyRef: a.keyRef, hasPassword: !!a.password } : null);
+  const accs = D.KS.listAccountsRaw();
+  const copyName = new Map();
+  for (const a of accs) if (a.kind === 'idrac') for (const id of a.copies || []) copyName.set(String(id), a.name);
   const ctx = {
-    corps, canView, canWrite, fullScope, isEdge, myCorps, edgeOf, rttOf,
+    corps, canView, canWrite, fullScope, isEdge, myCorps, edgeOf, rttOf, ownerTier, tagTarget, fleetHas, canUpdateExisting,
+    accountNameById: (id) => accs.find((a) => a.id === id)?.name || '',
+    keyNameById: (id) => (id ? D.KS.keyById(id)?.name || '' : ''),
+    idracCopyName: (id) => copyName.get(String(id)) || '',
+    edgePending: isEdge ? [] : (typeof D.ED.allPendingRemovals === 'function' ? D.ED.allPendingRemovals() : []),
+    // 반증 F12: 등록부 세대(파일 mtime · 크기) — 분석과 적용 사이에 다른 쓰기가 끼면 서명이 달라져 409.
+    regGen: regGenOf(['bm-storage.json', 'idrac.json', 'ssh-keys.json', 'bm-onboard-edge.json', 'fleet-tags.json']),
     idracRegistry: D.IDR.loadRegistry().map(({ password, ...rest }) => { void password; return rest; }),   // 비밀 없이
     osRegistry: D.BM.listBmServers(),
     edgeRows: isEdge ? [] : D.ED.allEdgeRows(),
@@ -66,15 +76,23 @@ export function buildOnboardCtx({ D, corps = [], canView, canWrite, fullScope = 
   return { ctx, unread };
 }
 
-/** 파일 → 파싱 → 분석. 결과에 비밀 없음. */
-export async function analyzeUpload(buf, { fileName = '', ctx }) {
-  const parsed = await parseOnboardFile(buf, { fileName });
+export function regGenOf(files = []) {
+  return files.map((f) => { try { const st = fs.statSync(path.join(config.configDir, f)); return `${f}:${st.mtimeMs}:${st.size}`; } catch { return `${f}:-`; } }).join('|');
+}
+
+/** 파일 → 파싱 → 분석. 결과에 비밀 없음. 반증 F12: 파싱(비동기 — xlsx)을 먼저 끝낸 뒤 문맥을 잡도록 parsed 를 따로 받을 수 있다. */
+export async function analyzeUpload(buf, { fileName = '', ctx, parsed: pre = null }) {
+  const parsed = pre || await parseOnboardFile(buf, { fileName });
   if (!parsed.ok) return { ok: false, code: parsed.code, reason: parsed.reason };
+  return analyzeParsed(buf, parsed, ctx);
+}
+/** 파싱 결과 → 분석(동기 — 문맥을 잡은 뒤 await 없이 적용까지 이어 갈 수 있다). */
+export function analyzeParsed(buf, parsed, ctx) {
   const a = analyzeOnboardRows(parsed.rows, ctx);
   const fileSha = crypto.createHash('sha256').update(buf).digest('hex');
   return {
     ok: true, format: parsed.format, encoding: parsed.encoding, columns: parsed.columns, fileWarnings: parsed.fileWarnings,
-    rows: a.rows, summary: a.summary, sig: analysisSig(a.rows), fileSha,
+    rows: a.rows, summary: a.summary, sig: analysisSig(a.rows, ctx.regGen), fileSha,
   };
 }
 
@@ -99,11 +117,12 @@ export function snapshotRegistries({ files = ['bm-storage.json', 'idrac.json', '
   for (const f of files) {
     const src = path.join(config.configDir, f);
     const dst = path.join(dir, f);
-    if (fs.existsSync(src)) { fs.copyFileSync(src, dst); try { fs.chmodSync(dst, 0o600); } catch { /* */ } saved.push(f); }
+    // 감사 L-4 · Q5: 원자적 쓰기(반쪽 스냅샷 없음) · 0600. bm-storage · idrac 사본은 SECRET_FILES(onboard-prev/…)로 봉인 이전 · 평문 점검 대상.
+    if (fs.existsSync(src)) { atomicWriteFileSync(dst, fs.readFileSync(src), { mode: 0o600 }); saved.push(f); }
     else if (fs.existsSync(dst)) fs.rmSync(dst);   // 그때 없던 파일은 스냅샷에도 없다(되돌리면 없는 것이 맞다)
   }
   const metaFile = `${dir}${path.sep}meta.json`;
-  fs.writeFileSync(metaFile, JSON.stringify({ at: now, by: String(by).slice(0, 64), files: saved, fileSha: String(fileSha).slice(0, 64) }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(metaFile, JSON.stringify({ at: now, by: String(by).slice(0, 64), files: saved, fileSha: String(fileSha).slice(0, 64) }, null, 2), { mode: 0o600 });
   return { dir: 'onboard-prev', files: saved, at: now };
 }
 
@@ -112,8 +131,11 @@ export function snapshotRegistries({ files = ['bm-storage.json', 'idrac.json', '
  * @param {object[]} rows  analyzeUpload(...).rows — 라우트가 서명 대조 뒤 넘긴다
  */
 export function applyOnboard(rows = [], { D, by = '', now = Date.now(), isEdge = false, fileSha = '' } = {}) {
-  const go = rows.filter((r) => (r.action === 'new' || r.action === 'update') && r.plan);
-  if (!go.length) return { ok: true, applied: { os: 0, idrac: 0, tags: 0, edge: 0, removed: 0 }, nothing: true };
+  const go0 = rows.filter((r) => (r.action === 'new' || r.action === 'update') && r.plan);
+  // 감사 L-1 · 반증 F18: 범위 밖 항목과 겹친 행(분석은 '없는 것' 꼴로 보였다)은 여기서 막는다 — 어느 행인지는 말하지 않고 수만.
+  const go = go0.filter((r) => !r.plan.hidden);
+  const blocked = go0.length - go.length;
+  if (!go.length) return { ok: true, applied: { os: 0, idrac: 0, tags: 0, edge: 0, removed: 0, blocked }, nothing: true };
   // 정책 잠금 · 등록부 못 읽음 → 쓰지 않는다
   const pol = D.VAULT.loadSecretsPolicy();
   if (pol && (pol.locked || (pol.mode !== 'plain' && pol.mode !== 'encrypted'))) return { ok: false, code: 'SECRETS_POLICY_UNAVAILABLE', status: 503, reason: '자격증명 저장 방식(secrets-policy.json)을 읽지 못해 적용하지 않았습니다 — 평문으로 저장하지 않기 위해서입니다.' };
@@ -124,6 +146,13 @@ export function applyOnboard(rows = [], { D, by = '', now = Date.now(), isEdge =
   if (unread.length) return { ok: false, code: 'registry-unreadable', status: 503, reason: `등록부를 읽지 못해 적용하지 않았습니다(${unread.join(', ')}).` };
 
   const osRaw = new Map(D.BM.listBmServersRaw().map((s) => [s.id, s]));
+  const idrIdsNow = new Set(D.IDR.loadRegistry().map((x) => String(x.id)));
+  const newIdrId = (want) => {   // 반증 F16 · 감사 M-1: 새 항목 id 가 지금 있는 id 와 겹치면 merge 가 덮어쓴다 → 겹치지 않는 id
+    if (want && !idrIdsNow.has(String(want))) { idrIdsNow.add(String(want)); return want; }
+    let id; do { id = `onb_${crypto.randomBytes(5).toString('hex')}`; } while (idrIdsNow.has(id));
+    idrIdsNow.add(id); return id;
+  };
+  const copies = new Map();   // 공통 계정 id → 이번에 비밀번호를 복사한 iDRAC 항목 id
   const osInputs = []; const osRemove = [];
   const idrIncoming = []; const idrRemove = [];
   const tagItems = []; const edgeUpserts = [];
@@ -147,8 +176,10 @@ export function applyOnboard(rows = [], { D, by = '', now = Date.now(), isEdge =
     }
     if (p.idrac) {
       const acc = p.idrac.accountId ? D.KS.accountById(p.idrac.accountId) : null;   // 원본(비밀 포함) — 등록부에 봉인 저장
+      const id = p.idrac.existing ? p.idrac.id : newIdrId(p.idrac.id);
+      if (acc) copies.set(acc.id, [...(copies.get(acc.id) || []), id]);
       idrIncoming.push({
-        id: p.idrac.id, name: p.name, host: p.idrac.host, serviceTag: p.tag, vcenterId: p.vc,
+        id, name: p.name, host: p.idrac.host, serviceTag: p.tag, vcenterId: p.vc,
         ...(acc ? { username: acc.username, password: acc.password } : {}),
         ...(p.enabled === null ? {} : { enabled: p.enabled }),
       });
@@ -156,9 +187,16 @@ export function applyOnboard(rows = [], { D, by = '', now = Date.now(), isEdge =
     if (p.tag && (p.cls || p.apps.length || p.role)) tagItems.push({ key: p.tag, ...(p.cls ? { tag: p.cls } : {}), ...((p.apps.length || p.role) ? { purpose: { apps: p.apps, role: p.role } } : {}) });
   }
   const snapshot = snapshotRegistries({ by, now, fileSha });
-  const applied = { os: 0, idrac: 0, tags: 0, edge: 0, removed: 0 };
+  const applied = { os: 0, idrac: 0, tags: 0, edge: 0, removed: 0, blocked };
   const fail = (step, reason, code = 'write-failed') => ({ ok: false, code, status: 500, partial: true, step, reason, applied, snapshot });
   try {
+    // 반증 F6: 중앙 → 엣지 이동은 **엣지 배포 목록을 먼저** 쓴다 — 실패하면 중앙 항목을 하나도 지우지 않는다(어디에도 없는 서버를 만들지 않는다).
+    //   둘 사이에 멈추면 '두 곳에 있음'(엣지가 아직 인출 전 — 다음 적용이 정리) 쪽이 안전하다.
+    if (edgeUpserts.length) {
+      const r = D.ED.applyEdgeChanges({ upserts: edgeUpserts }, { by, now });
+      if (!r.ok) return fail('edge', r.reason);
+      applied.edge = edgeUpserts.length;
+    }
     if (osInputs.length || osRemove.length) {
       const r = D.BM.applyBmServerBatch(osInputs, { now, removeIds: osRemove });
       if (!r.ok) return fail('os', r.reason, r.code || 'os-failed');
@@ -169,17 +207,18 @@ export function applyOnboard(rows = [], { D, by = '', now = Date.now(), isEdge =
       if (!r.ok) return fail('idrac', r.reason);
       applied.idrac = r.added + r.updated;
       if (r.skipped?.length) applied.idracSkipped = r.skipped.length;
+      // 반증 F15 · 감사 L-8: 비밀번호 사본을 둔 항목을 공통 계정 사용처로 남긴다(삭제 · 비밀번호 변경 때 '다시 적용할 대상' 이 보이게).
+      for (const [accId, ids] of copies) { try { D.KS.noteAccountCopies(accId, ids, { now }); } catch { /* 사용처 기록 실패는 적용을 되돌리지 않는다 */ } }
     }
-    for (const id of idrRemove) { const r = D.IDR.removeServer(id); if (r.ok) applied.removed += 1; }
+    if (idrRemove.length) {   // 감사 L-6: 한 번 쓰기
+      const r = typeof D.IDR.removeServersBatch === 'function' ? D.IDR.removeServersBatch(idrRemove) : { ok: false, reason: 'removeServersBatch 없음' };
+      if (!r.ok) return fail('idrac-remove', r.reason);
+      applied.removed += (r.removed || []).length;
+    }
     if (tagItems.length) {
       const r = D.FT.setFleetTagsBatch(tagItems, { by, knownApps: [...D.PROF.APP_IDS], knownRoles: [...D.CAT.ROLES] });
       if (!r.ok) return fail('tags', r.reason);
       applied.tags = tagItems.length;
-    }
-    if (edgeUpserts.length) {
-      const r = D.ED.applyEdgeChanges({ upserts: edgeUpserts }, { by, now });
-      if (!r.ok) return fail('edge', r.reason);
-      applied.edge = edgeUpserts.length;
     }
   } catch (e) {
     if (e?.code === 'SECRETS_POLICY_UNAVAILABLE') return fail('seal', e.message, 'SECRETS_POLICY_UNAVAILABLE');

@@ -173,6 +173,8 @@ server/config/bm-storage.json
 server/config/ssh-keys.json
 server/config/bm-onboard-*.json
 server/config/onboard-prev/
+server/config/onboard-prev/bm-storage.json
+server/config/onboard-prev/idrac.json
 server/config/*.ndjson
 sbp-shortcuts.csv
 sbp-proxy-shortcuts.json

@@ -119,9 +119,18 @@ export function parsePrivateKey(text, passphrase = '') {
 export function cellLooksSecret(v) {
   const s = String(v ?? '').slice(0, 4096);
   if (!s) return false;
-  if (/-----BEGIN [A-Z0-9 ]{0,40}(PRIVATE KEY|OPENSSH)/.test(s)) return true;
+  // 키 블록 머리 — 대소문자 무시(7b 반증 F11: 소문자 머리글이 지나갔다) · PuTTY ppk 머리 · Private-Lines
+  if (/-----begin [a-z0-9 ]{0,40}(private key|openssh)/i.test(s)) return true;
+  if (/putty-user-key-file-\d|private-lines\s*:|private-mac\s*:/i.test(s)) return true;
   if (/(^|\s)(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp\d{3}) AAAA[0-9A-Za-z+/]{16}/.test(s)) return true;
-  if (/(^|[^A-Za-z0-9])(pass(word|wd|phrase)?|pw|pwd|secret|비밀번호|암호)\s{0,3}[:=]/i.test(s)) return true;
-  if (/[0-9A-Za-z+/]{80}/.test(s)) return true;    // 키 본문 한 줄(64자 줄바꿈 + 여유) — 일반 이름 · 경로 · 메모에는 없다
+  // 'password=' · '"pw"="x"' · 'pw    = x' 꼴(공백 상한은 위 4KB 절단으로 충분 — 앞뒤가 고정 글자라 선형)
+  if (/(^|[^A-Za-z0-9])["']?(pass(word|wd|phrase)?|pw|pwd|secret|비밀번호|암호)["']?\s*[:=]/i.test(s)) return true;
+  // 키 본문 조각 — 머리글 없이 붙여 넣은 base64 줄(OpenSSH 70자 · PEM 64자 줄바꿈). 16자 이상 base64 토큰을 이어 붙여
+  // 64자 이상이고 대문자 · 소문자 · 숫자가 섞이면 비밀로 본다(일반 영어 문장은 낱말이 짧아 이어지지 않는다).
+  let run = '';
+  const hit = () => run.length >= 64 && /[A-Z]/.test(run) && /[a-z]/.test(run) && /[0-9]/.test(run);
+  for (const tok of s.split(/\s+/)) {
+    if (tok.length >= 16 && /^[0-9A-Za-z+/=]+$/.test(tok)) { run += tok; if (hit()) return true; } else run = '';
+  }
   return false;
 }

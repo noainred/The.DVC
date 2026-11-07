@@ -12,7 +12,7 @@
  *  · 머리글 별칭(한/영 · 대소문자 · 공백 · 밑줄 · 하이픈 · 별표 무시). 비밀 칸 이름(password · 비밀번호 · private_key …)은 **값을 읽지 않고** 그 칸에 값이 있는 행을 표시한다.
  */
 import { parseCsvRows, unguardCell, delimiterHint } from '../../util/csv.js';
-import { assertXlsxSizeOk } from '../../svcmon/formats.js';
+import { assertXlsxSizeOk, assertXlsxMergesOk } from '../../svcmon/formats.js';
 
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 export const MAX_ROWS = 5000;
@@ -100,6 +100,7 @@ function mergeRows(ref) {
 /** .xlsx 첫 시트 → 표(행 = 칸 문자열 배열) + 병합 행 집합(시트 행 번호). */
 async function readXlsx(buf) {
   assertXlsxSizeOk(buf, XLSX_MAX_UNCOMPRESSED);
+  assertXlsxMergesOk(buf);   // 감사 M-4: exceljs 가 로드하며 병합을 칸 단위로 전개하기 전에 막는다(svcmon 가져오기와 같은 함수)
   const ExcelJS = (await import('exceljs')).default;
   const wb = new ExcelJS.Workbook();
   try { await wb.xlsx.load(buf); } catch (e) { throw new Error(`XLSX 를 읽지 못했습니다(${String(e?.message || e).slice(0, 80)})`); }

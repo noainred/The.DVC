@@ -8,12 +8,14 @@ export const ACTION_TEXT = Object.freeze({ new: '신규', update: '갱신', unch
 export const ACTION_TONE = Object.freeze({ new: 'ok', update: 'info', unchanged: 'muted', reject: 'bad' });
 export const BUCKET_TEXT = Object.freeze({
   both: '둘 다(OS + iDRAC)', os: 'OS 만', idrac: 'iDRAC 만', none: '없음', unassigned: '미귀속', unknown: '모름(수집 기록 없음)',
+  untracked: 'OS 만 — 성능 수집 안 됨',
 });
-export const BUCKET_ORDER = Object.freeze(['both', 'os', 'idrac', 'none', 'unassigned', 'unknown']);
+export const BUCKET_ORDER = Object.freeze(['both', 'os', 'idrac', 'none', 'unassigned', 'unknown', 'untracked']);
 /** 누락 점검 사유 code → 문구(서버 NO_PATH_REASON 의 짧은 꼴 — 모르는 code 는 그대로). */
 export const MISS_REASON_TEXT = Object.freeze({
   'no-record': '아직 수집 기록이 없습니다(등록 직후이거나 주기가 돌지 않음)',
   'edge-no-record': '엣지 보관분에 이 서버 기록이 없습니다',
+  'registry-only': 'OS 계정 등록부에만 있습니다 — 이 노드 함대(iDRAC · vCenter)에 없어 성능 수집 대상이 아닙니다(디스크 용량만)',
   unassigned: '법인 귀속 없음 — 기본 제외',
   'corp-off': '이 법인은 수집을 켜지 않음',
   'no-idrac': 'iDRAC 등록 없음',
@@ -101,4 +103,24 @@ export function rttLine(r = {}) {
   if (r.rttHigh === true) return { text: `중앙 직접 · RTT ${numOr(r.rttMs)}ms — 엣지 수집 권장`, tone: 'warn' };
   if (r.rttHigh === false) return { text: `중앙 직접 · RTT ${numOr(r.rttMs)}ms`, tone: 'muted' };
   return { text: '중앙 직접 · RTT 모름(핑 값 없음)', tone: 'muted' };
+}
+
+/** 호스트키 정책 안내(감사 H-1 권고 ② 를 이번에 하지 않은 대신 정직하게 밝힌다). */
+export const HOSTKEY_OBSERVE_NOTE = '호스트키 정책이 observe(업그레이드 설치 기본)면 첫 접속에 지문 승인 없이 이 자격으로 접속합니다 — enforce 로 두면 설정 › 장비 신뢰에서 지문을 승인한 뒤에만 보냅니다.';
+
+/** 기존 서버 등록부 항목 → 인증 선택 값('' · key:<id> · acc:<id>). */
+export function authChoiceOf(c) {
+  if (!c) return '';
+  if (c.keyRef) return `key:${c.keyRef}`;
+  if (c.credRef) return `acc:${c.credRef}`;
+  return '';
+}
+/** 인증 선택 → 저장 본문의 참조 칸(바뀌지 않으면 보내지 않는다 — 서버가 '묶음' 으로 보지 않게). */
+export function authBodyOf(choice = '', c = null) {
+  const cur = authChoiceOf(c);
+  if ((choice || '') === cur) return {};
+  if (!choice) return { keyRef: '', credRef: '' };
+  if (choice.startsWith('key:')) return { keyRef: choice.slice(4), credRef: '' };
+  if (choice.startsWith('acc:')) return { credRef: choice.slice(4), keyRef: '' };
+  return {};
 }

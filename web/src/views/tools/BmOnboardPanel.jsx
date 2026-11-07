@@ -15,7 +15,7 @@ import { toneVar } from './toneVar.js';
 import { downloadBlob } from './bmCapture.js';
 import {
   ACTION_TEXT, ACTION_TONE, BUCKET_TEXT, BUCKET_ORDER, MISS_REASON_TEXT, KEY_STATUS_TEXT, ACCOUNT_KIND_TEXT,
-  numOr, summaryChips, applicable, edgeSyncText, shortFp, ymd, bufToBase64, suggestCsv, rowNote, canManageKeys,
+  numOr, summaryChips, applicable, edgeSyncText, shortFp, ymd, bufToBase64, suggestCsv, rowNote, canManageKeys, HOSTKEY_OBSERVE_NOTE,
 } from './bmOnboardText.js';
 import './bmOps.css';
 import './bmOnboard.css';
@@ -99,6 +99,8 @@ function KeysSection({ manage, onChanged }) {
         </STable>
       )}
       {st.resp && st.resp.usageKnown === false && <p className="bmo-note" style={{ color: toneVar('warn') }}>OS 계정 등록부를 읽지 못해 ‘쓰는 서버’ 를 모릅니다(—) — 이 동안 삭제는 막힙니다.</p>}
+      {st.resp?.hidden === 'scoped' && <p className="bmo-note">범위가 지정된 계정에는 키 목록(이름 · 사용처)을 보이지 않습니다 — 키 · 공통 계정을 서버에 묶는 것은 설정 소유자만 합니다.</p>}
+      {st.resp?.undecryptable > 0 && <p className="bmo-note" style={{ color: toneVar('bad') }}>봉인을 풀지 못한 비밀 {st.resp.undecryptable}개 — 자격증명 비밀키가 바뀐 것으로 보입니다. 봉인본을 지우지 않도록 키 저장소 변경을 막았습니다(원래 비밀키로 되돌리세요).</p>}
       {manage ? (
         <div className="bmob-forms">
           <fieldset className="bmob-form">
@@ -144,7 +146,7 @@ function AccountsSection({ manage, vcenters, keysRev }) {
       const body = { ...f, ...(f.id ? {} : { id: undefined }), password: f.password || undefined };
       const r = await postJson('/tools/bm-usage/accounts', body);
       if (r?.ok === false) { setMsg({ text: `저장하지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
-      setMsg({ text: `저장했습니다 — ${r.account.name}${r.droppedSecrets?.length ? ` (법인 · 계정명이 바뀌어 ${r.droppedSecrets.join(' · ')} 를 잇지 않았습니다 — 다시 입력하세요)` : ''}`, tone: r.droppedSecrets?.length ? 'warn' : 'ok' });
+      setMsg({ text: `저장했습니다 — ${r.account.name}${r.droppedSecrets?.length ? ` (법인 · 계정명이 바뀌어 ${r.droppedSecrets.join(' · ')} 를 잇지 않았습니다 — 다시 입력하세요)` : ''}${r.copiesStale ? ` · iDRAC ${r.copiesStale}대에 옛 비밀번호 사본이 있습니다 — 같은 CSV 를 다시 적용해야 새 비밀번호가 들어갑니다` : ''}`, tone: r.droppedSecrets?.length || r.copiesStale ? 'warn' : 'ok' });
       setF(blank); load();
     } catch (e) { setMsg({ text: `저장하지 못했습니다 — ${errText(e)}`, tone: 'bad' }); setF((x) => ({ ...x, otp: '' })); }
     finally { setBusy(false); }
@@ -162,7 +164,7 @@ function AccountsSection({ manage, vcenters, keysRev }) {
   return (
     <section className="bmob-sec">
       <h4>법인 공통 계정</h4>
-      <p className="bmo-note"><BoldText text={'CSV 의 os_cred · idrac_cred 칸은 **이 이름**을 가리킵니다. 비밀번호는 여기서 한 번 입력해 봉인합니다(CSV 에는 넣지 않습니다). OS 계정은 **기본 키**(키 인증 권장) 또는 비밀번호 · iDRAC 계정은 **읽기 전용 역할** 계정을 권합니다.'} /></p>
+      <p className="bmo-note"><BoldText text={'iDRAC 계정은 **복사 방식**입니다 — 적용 때 비밀번호가 iDRAC 항목에 복사되고 ‘쓰는 서버’ 는 그 사본 수입니다(비밀번호를 바꾸면 다시 적용). '} /><BoldText text={'CSV 의 os_cred · idrac_cred 칸은 **이 이름**을 가리킵니다. 비밀번호는 여기서 한 번 입력해 봉인합니다(CSV 에는 넣지 않습니다). OS 계정은 **기본 키**(키 인증 권장) 또는 비밀번호 · iDRAC 계정은 **읽기 전용 역할** 계정을 권합니다.'} /></p>
       <STable minWidth={900} className="bmo-t" style={{ fontSize: 12 }}>
         <thead><tr><th>이름</th><th>종류</th><th>법인</th><th>계정명</th><th>기본 키</th><th>비밀번호</th><th className="right">쓰는 서버</th>{manage && <th data-nosort>동작</th>}</tr></thead>
         <tbody>
@@ -206,6 +208,7 @@ function ImportSection({ onApplied }) {
   const [an, setAn] = useState({ busy: false, resp: null, err: null });
   const [ap, setAp] = useState({ busy: false, msg: '', tone: 'muted' });
   const [only, setOnly] = useState('');
+  const [otp, setOtp] = useState('');
   const gen = useRef(0);
   const pick = async (ev) => {
     const fl = ev.target.files?.[0]; ev.target.value = '';
@@ -229,12 +232,14 @@ function ImportSection({ onApplied }) {
     if (!window.confirm(`신규 ${r0.summary.new} · 갱신 ${r0.summary.update} 행을 적용합니다(거부 ${r0.summary.reject} 행은 적용하지 않습니다). 직전 등록부를 스냅샷으로 남깁니다.`)) return;
     setAp({ busy: true, msg: '', tone: 'muted' });
     try {
-      const r = await postJson('/tools/bm-usage/onboard/apply', { fileName: file.name, data: file.data, sig: r0.sig }, { timeoutMs: 180_000 });
+      const needOtp = Number(r0.summary?.needOwner) > 0;
+      const r = await postJson('/tools/bm-usage/onboard/apply', { fileName: file.name, data: file.data, sig: r0.sig, ...(needOtp ? { otp } : {}) }, { timeoutMs: 180_000 });
+      setOtp('');   // 1회용 — 실패해도 비운다
       if (r?.ok === false) { setAp({ busy: false, msg: r.code === 'analysis-changed' ? r.reason : `적용하지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
       const a = r.applied || {};
-      setAp({ busy: false, msg: r.nothing ? '적용할 행이 없습니다.' : `적용했습니다 — OS ${a.os} · iDRAC ${a.idrac} · 엣지 배포 ${a.edge} · 중앙에서 뺌 ${a.removed}${a.tags ? ` · 태그 ${a.tags}` : ''}(직전 등록부 스냅샷: 설정 폴더 onboard-prev).`, tone: 'ok' });
+      setAp({ busy: false, msg: r.nothing ? `적용할 행이 없습니다${a.blocked ? `(쓸 수 없는 값과 겹쳐 막은 행 ${a.blocked})` : ''}.` : `적용했습니다 — OS ${a.os} · iDRAC ${a.idrac} · 엣지 배포 ${a.edge} · 중앙에서 뺌 ${a.removed}${a.tags ? ` · 태그 ${a.tags}` : ''}${a.blocked ? ` · 쓸 수 없는 값과 겹쳐 막은 행 ${a.blocked}` : ''}(직전 등록부 스냅샷: 설정 폴더 onboard-prev).`, tone: a.blocked ? 'warn' : 'ok' });
       setAn({ busy: false, resp: null, err: null }); setFile(null); onApplied?.();
-    } catch (e) { setAp({ busy: false, msg: `적용하지 못했습니다 — ${errText(e)}${e?.body?.partial ? ` · 부분 적용(${e.body.step}) — 스냅샷으로 되돌릴 수 있습니다` : ''}`, tone: 'bad' }); }
+    } catch (e) { setOtp(''); setAp({ busy: false, msg: `적용하지 못했습니다 — ${errText(e)}${e?.body?.partial ? ` · 부분 적용(${e.body.step}) — 스냅샷으로 되돌릴 수 있습니다` : ''}`, tone: 'bad' }); }
   };
   const rows = an.resp?.rows || [];
   const shown = only ? rows.filter((r) => (only === 'warn' ? r.action !== 'reject' && r.warnings?.length : r.action === only)) : rows;
@@ -275,9 +280,11 @@ function ImportSection({ onApplied }) {
             </tbody>
           </STable>
           {shown.length > 500 && <p className="bmo-sub">앞 500행만 그립니다 — 전체는 결과 CSV 로 보세요.</p>}
+          {Number(an.resp.summary?.needOwner) > 0 && <p className="bmo-note" style={{ color: toneVar('warn') }}>공통 계정 · SSH 키를 주소에 묶는 행 {numOr(an.resp.summary.needOwner)}개 — 적용할 때 본인 OTP 를 묻습니다. {HOSTKEY_OBSERVE_NOTE}</p>}
           <div className="bmob-acts">
+            {Number(an.resp.summary?.needOwner) > 0 && <label className="bmo-sub">본인 OTP <input className="input" inputMode="numeric" maxLength={8} value={otp} onChange={(e) => setOtp(e.target.value)} autoComplete="one-time-code" style={{ width: 110 }} /></label>}
             <button className="btn" type="button" onClick={() => downloadBlob(new Blob([an.resp.resultCsv], { type: 'text/csv;charset=utf-8' }), 'bm-onboard-result.csv')}>결과 CSV(판정 열)</button>
-            <button className="btn btn-primary" type="button" disabled={ap.busy || !applicable(an.resp.summary)} onClick={apply}>{ap.busy ? '적용 중…' : '적용'}</button>
+            <button className="btn btn-primary" type="button" disabled={ap.busy || !applicable(an.resp.summary) || (Number(an.resp.summary?.needOwner) > 0 && !otp)} onClick={apply}>{ap.busy ? '적용 중…' : '적용'}</button>
           </div>
         </>
       )}
@@ -307,7 +314,7 @@ function EdgeRowsSection({ rev }) {
         const sy = edgeSyncText(a);
         return (
           <details key={a.agent} className="bmob-edge">
-            <summary><b>{a.agent}</b> · {numOr(a.total)}대 · <span style={{ color: toneVar(sy.tone) }}>{sy.text}</span>{a.applied ? <span className="bmo-sub"> · 엣지 적용 {numOr(a.applied.ok)} · 거부 {numOr(a.applied.rejected)} · 지움 {numOr(a.applied.removed)}</span> : null}</summary>
+            <summary><b>{a.agent}</b> · {numOr(a.total)}대{a.pending ? ` · 제거 대기 ${a.pending}` : ''} · <span style={{ color: toneVar(sy.tone) }}>{sy.text}</span>{a.applied ? <span className="bmo-sub"> · 엣지 적용 {numOr(a.applied.ok)} · 거부 {numOr(a.applied.rejected)} · 지움 {numOr(a.applied.removed)}</span> : null}</summary>
             <STable minWidth={640} className="bmo-t" style={{ fontSize: 12 }}>
               <thead><tr><th>name</th><th>법인</th><th>경로</th><th>공통 계정 · 키(이름)</th><th data-nosort>동작</th></tr></thead>
               <tbody>{a.rows.map((r) => (

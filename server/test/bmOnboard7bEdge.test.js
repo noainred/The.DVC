@@ -88,7 +88,7 @@ async function centralCtx(edgeOnline) {
   const D = await RUN.defaultOnboardDeps();
   return RUN.buildOnboardCtx({ D, corps: REGISTRY.map((v) => ({ id: v.id, name: v.name })), isEdge: false, myCorps: [],
     edgeOf: (vc) => (vc === 'vcE' ? { agent: 'edge-a', online: edgeOnline } : null), rttOf: () => null,
-    canView: () => true, canWrite: () => true, fullScope: true }).ctx;
+    canView: () => true, canWrite: () => true, fullScope: true, ownerTier: true }).ctx;
 }
 
 test('① 왕복 — 중앙 등록(edge) → 엣지 인출(개별 토큰) → 엣지가 다시 분석해 자기 키 · 공통 계정 이름으로 적용 · 결과 · 서명이 중앙에 남는다', async () => {

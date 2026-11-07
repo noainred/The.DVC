@@ -69,3 +69,30 @@ export function dsaKey() {
   const priv = Buffer.concat([sshStr('ssh-dss'), mpint(p), mpint(q), mpint(g), mpint(y), mpint(x)]);
   return { pem: opensshPem(pubBlob, priv) };
 }
+
+/**
+ * 암호화된 ed25519 OpenSSH 개인키(kdf bcrypt · aes256-ctr — `ssh-keygen -t ed25519 -N <pass>` 와 같은 형식). bcrypt 는 ssh2 가 쓰는 bcrypt-pbkdf.
+ * 감사 M-5(접속마다 bcrypt 비용) 측정 · 캐시 시험용.
+ */
+export async function ed25519KeyEncrypted(pass, rounds = 16) {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const bcrypt = require('bcrypt-pbkdf').pbkdf;
+  const { privateKey } = crypto.generateKeyPairSync('ed25519');
+  const j = privateKey.export({ format: 'jwk' });
+  const seed = b64url(j.d); const pub = b64url(j.x);
+  const pubBlob = Buffer.concat([sshStr('ssh-ed25519'), sshStr(pub)]);
+  const check = crypto.randomBytes(4);
+  let body = Buffer.concat([check, check, sshStr('ssh-ed25519'), sshStr(pub), sshStr(Buffer.concat([seed, pub])), sshStr('enc')]);
+  let pad = 1; while (body.length % 16) body = Buffer.concat([body, Buffer.from([pad++])]);
+  const salt = crypto.randomBytes(16);
+  const out = Buffer.alloc(48);
+  const pw = Buffer.from(pass, 'utf8');
+  bcrypt(pw, pw.length, salt, salt.length, out, out.length, rounds);
+  const c = crypto.createCipheriv('aes-256-ctr', out.subarray(0, 32), out.subarray(32, 48));
+  const enc = Buffer.concat([c.update(body), c.final()]);
+  const kdfOpts = Buffer.concat([sshStr(salt), u32(rounds)]);
+  const all = Buffer.concat([Buffer.from('openssh-key-v1\0', 'latin1'), sshStr('aes256-ctr'), sshStr('bcrypt'), sshStr(kdfOpts), u32(1), sshStr(pubBlob), sshStr(enc)]);
+  const b64 = all.toString('base64').replace(/(.{70})/g, '$1\n');
+  return { pem: `-----BEGIN OPENSSH PRIVATE KEY-----\n${b64}\n-----END OPENSSH PRIVATE KEY-----\n`, fingerprint: `SHA256:${crypto.createHash('sha256').update(pubBlob).digest('base64').replace(/=+$/, '')}` };
+}

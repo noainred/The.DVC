@@ -40,12 +40,12 @@ assert.ok(ACC.ok && IACC.ok && BACC.ok);
 const csv = (lines) => Buffer.from(`﻿${lines.join('\r\n')}\r\n`, 'utf8');
 const HDR = 'name,corp,idrac_host,idrac_cred,service_tag,os_host,os_port,os_cred,os_key,collect_via,mounts,enabled,note';
 const corps = [{ id: 'vcA', name: 'KR-SEL', dc: '서울' }, { id: 'vcB', name: 'PL-WAW', dc: '바르샤바' }, { id: 'vcC', name: 'US-EAST', dc: '' }];
-async function ctxOf({ view = null, write = null, full = true, isEdge = false, edgeOf = null, rttOf = null } = {}) {
+async function ctxOf({ view = null, write = null, full = true, isEdge = false, edgeOf = null, rttOf = null, owner = true, tagTarget = null, fleetHas = null } = {}) {
   const D = await RUN.defaultOnboardDeps();
   return RUN.buildOnboardCtx({
     D, corps, isEdge, myCorps: [], edgeOf: edgeOf || ((vc) => (vc === 'vcB' ? { agent: 'edge-waw', online: true } : vc === 'vcC' ? { agent: 'edge-us', online: null } : null)),
     rttOf: rttOf || ((vc) => (vc === 'vcA' ? { rttMs: 40 } : vc === 'vcC' ? { rttMs: 870 } : null)),
-    canView: (vc) => (view ? view.includes(vc) : true), canWrite: (vc) => (write ? write.includes(vc) : true), fullScope: full,
+    canView: (vc) => (view ? view.includes(vc) : true), canWrite: (vc) => (write ? write.includes(vc) : true), fullScope: full, ownerTier: owner && full, tagTarget, fleetHas,
   }).ctx;
 }
 
@@ -164,7 +164,16 @@ test('④ 분석 — 중복(이름 · 태그 · 주소) · SSRF(저장 규칙) �
   const s = Object.fromEntries(sc.rows.map((x) => [`${x.line}`, x]));
   assert.equal(s[8].code, 'corp-not-found'); assert.equal(s[8].reason, A.ROW_CODE['corp-not-found'], '조회 밖 = 없는 법인과 같은 문구');
   assert.equal(s[13].code, 'unassigned-scoped');
-  assert.equal(s[11].code, 'existing-unassigned');
+  // 메인 결정(감사 H-1): 범위 계정(설정 소유자 등급 아님)은 공통 계정 · 키를 주소에 묶지 못한다 — 계정을 찾기 전에 거부(오라클 없음)
+  assert.equal(s[11].code, 'bind-owner-only');
+  assert.equal(s[2].code, 'bind-owner-only');
+  // 감사 L-1 · 반증 F18: 범위 밖(귀속 없음) 기존 항목과 겹치는 행은 '신규' 와 같은 꼴(존재 오라클 없음) — 적용 단계에서 막는다
+  const hid = A.analyzeOnboardRows((await P.parseOnboardFile(csv([HDR, 'legacy,KR-SEL,,,,10.40.0.8,,개별:root,,central,/,,', 'fresh1,KR-SEL,,,,10.40.0.77,,개별:root,,central,/,,']))).rows, await ctxOf({ view: ['vcA'], write: ['vcA'], full: false }));
+  assert.deepEqual(hid.rows.map((x) => [x.action, x.code]), [['new', ''], ['new', '']], '숨은 겹침과 진짜 신규가 같은 꼴');
+  assert.equal(hid.rows[0].plan.hidden, true); assert.equal(hid.rows[1].plan.hidden, false);
+  const D0 = await RUN.defaultOnboardDeps();
+  const blockedApply = RUN.applyOnboard([hid.rows[0]], { D: D0, by: 'sa' });
+  assert.equal(blockedApply.applied.blocked, 1); assert.equal(BM.listBmServersRaw().filter((x) => x.name === 'legacy').length, 1, '범위 밖 항목을 덮어쓰지 않았다');
   // 조회는 되지만 쓰기 밖 → 403 꼴
   const ro = A.analyzeOnboardRows(rows, await ctxOf({ view: ['vcA', 'vcB'], write: ['vcA'], full: false }));
   assert.equal(ro.rows.find((x) => x.line === 8).code, 'corp-forbidden');
@@ -266,7 +275,7 @@ async function server(t) {
 
 test('⑦ 실제 라우터 — 운영자 403 · 분석 → 적용(서명 같을 때만 · 다르면 409) · 범위 계정은 자기 법인 행만 · 응답에 계획 · 비밀 없음 · 감사', async (t) => {
   const call = await server(t);
-  const file = csv([HDR, 'rt1,KR-SEL,,,,10.20.10.1,,kr-ops,,central,/,,', 'rt2,PL-WAW,,,,10.20.10.2,,b-ops,,central,/,,']);
+  const file = csv([HDR, 'rt1,KR-SEL,,,,10.20.10.1,,개별:mon,password,central,/,,', 'rt2,PL-WAW,,,,10.20.10.2,,개별:mon,password,central,/,,']);
   const body = { fileName: 'x.csv', data: file.toString('base64') };
   assert.equal((await call('op', 'POST', '/analyze', body)).s, 403);
   const an = await call('adm', 'POST', '/analyze', body);
