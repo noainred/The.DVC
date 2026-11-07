@@ -61,7 +61,11 @@ export function accessPlan(user, snap) {
     return !!row.vcenterId && allowed.has(row.vcenterId);
   };
   const addrSearchable = (row) => admin || !KIND_RULES[row?.kind]?.addr;
-  return { allowed, admin, kinds, visible, addrSearchable };
+  // v2.927(B3): VM 태그 · 사용자 지정 속성으로 찾기는 그 값이 보이는 화면(태그 · 속성 점검 'vm-tags' · VM 내보내기 — 둘 다 tools)을 쓸 수 있는 계정만.
+  //   메모는 가상머신 목록(inv.vms)의 '메모 포함' 검색과 같은 값이라 vm 종류를 볼 수 있으면 찾는다(판정 필요 없음).
+  let tagsSearchable = false;
+  try { tagsSearchable = kinds.vm === 'ok' && userHasPermission(user, 'tools') && userToolAllowed(user, 'vm-tags'); } catch { tagsSearchable = false; }
+  return { allowed, admin, kinds, visible, addrSearchable, tagsSearchable };
 }
 
 const LABEL = Object.fromEntries(KINDS.map((k) => [k.key, k.label]));

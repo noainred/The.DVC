@@ -10,6 +10,10 @@ import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import './styles.css';
 import { registerPwa, startAlertNotifications } from './pwa.js';
+import { consumeNewTabHandoff } from './hooks/searchHandoff.js';
+
+// v2.927(A5): ⌘K 검색에서 새 탭으로 연 경우 — 화면을 그리기 전에 넘겨받은 검색어 · 고른 장비를 메모리 인계로 옮긴다(창 이름의 일회용 번호).
+try { consumeNewTabHandoff(); } catch { /* 인계 실패가 앱 시작을 막지 않는다 */ }
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>

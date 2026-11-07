@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   splitPrefix, withKindPrefix, focusPlan, listPlan, canFilter, HANDOFF_TARGETS, FOCUS_TARGETS, readRecent, pushRecent, clearRecent, RECENT_MAX, agoText, recentKeyFor,
-  highlightParts, metaParts, shownSerial, shownIp, statusTone, builtAgoText,
+  highlightParts, metaParts, shownSerial, shownIp, statusTone, builtAgoText, recentIdsParam, VIA_LABEL, RECENT_ID_MAX,
 } from './invSearchQuery.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -108,6 +108,27 @@ describe('최근 연 항목(localStorage 10개)', () => {
     expect(recentKeyFor('')).toBe(null);
     expect(pushRecent({ kind: 'vm', name: 'x', plan: { hash: '#/a' } }, st, 1, null)).toEqual([]);
     expect(readRecent(st, null)).toEqual([]);
+  });
+  it('v2.927(B4) 행 id 를 저장하고 recent= 파라미터로 만든다(10개 · 구분자 든 id 제외 · 중복 제거)', () => {
+    const st = mem();
+    pushRecent({ kind: 'vm', id: 'vc-1:vm-9', name: 'web-01', plan: { hash: '#/vcenters/vc-1/vm/vm-9', handoffs: [] } }, st, 1);
+    pushRecent({ kind: 'storage', name: 'no-id', plan: { hash: '#/tools/storage-mon/devices', handoffs: [['storage-mon', 'u']] } }, st, 2);
+    pushRecent({ kind: 'ip', id: 'a,b', name: 'comma', plan: { hash: '#/ipam', handoffs: [['ipam', '10.0.0.1']] } }, st, 3);
+    pushRecent({ kind: 'host', id: 'h'.repeat(400), name: 'long', plan: { hash: '#/vcenters/vc-1/host/h', handoffs: [] } }, st, 4);
+    const r = readRecent(st);
+    expect(r.find((x) => x.name === 'web-01').id).toBe('vc-1:vm-9');
+    expect(r.find((x) => x.name === 'no-id').id).toBeUndefined();
+    expect(r.find((x) => x.name === 'long').id).toHaveLength(RECENT_ID_MAX);
+    const p = recentIdsParam(r);
+    expect(p.split(',')).toEqual([`host|${'h'.repeat(RECENT_ID_MAX)}`, 'vm|vc-1:vm-9']);
+    expect(recentIdsParam([{ kind: 'vm', id: 'x' }, { kind: 'vm', id: 'x' }, { kind: 'vm|z', id: 'y' }, { kind: 'vm', id: 5 }, null])).toBe('vm|x');
+    expect(recentIdsParam(Array.from({ length: 15 }, (_, i) => ({ kind: 'vm', id: `v${i}` }))).split(',')).toHaveLength(RECENT_MAX);
+    expect(recentIdsParam(undefined)).toBe('');
+  });
+  it('v2.927 일치 표지 글자 — 서버 via 값과 같은 키', () => {
+    expect(Object.keys(VIA_LABEL).sort()).toEqual(['notes', 'recent', 'tag']);
+    const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../server/src/routes/api/invSearch.js'), 'utf8');
+    for (const k of Object.keys(VIA_LABEL)) expect(src).toContain(`'${k}'`);
   });
   it('agoText · builtAgoText', () => {
     expect(agoText(0)).toBe('');

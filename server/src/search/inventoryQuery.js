@@ -41,6 +41,8 @@ export const PER_KIND = 5;         // 묶음당 기본 행 수
 export const PER_KIND_SINGLE = 30; // 종류 하나만 고른 경우
 export const TOTAL_MAX = 60;       // 응답 전체 상한
 export const WORDS_MAX = 6;        // 여러 낱말(AND) 검색에서 보는 낱말 수 상한
+/** 일치 등급 이름(라우트가 '무엇으로 걸렸나' 를 화면에 알릴 때 쓴다). 숫자가 작을수록 먼저 — 함수보다 위에 둔다(TDZ 규약). */
+export const TIER = Object.freeze({ exact: 1, recent: 1.5, prefix: 2, name: 3, alt: 4, ip: 5, serial: 6, model: 7, tag: 8, notes: 9, words: 10 });
 
 /** 시리얼 정규화 — insights/serialLookup.js normKey 와 같은 규칙(대소문자 · 공백 · : _ . - 무시). */
 export const normSerial = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
@@ -76,25 +78,26 @@ export function parseQuery(raw) {
  * addrSearchable=false(주소를 가리는 판본)면 주소는 물론 **주소가 들어 있는 이름 · 보조 이름 · 모델 칸**으로도 찾지 않는다(반증 M-1 —
  * SAN 이름이 관리 IP 로 떨어진 행을 이름 등급으로 찾아 id ↔ IP 대응을 복원할 수 있었다). 칸별 표시(_nAddr …)는 색인 때 mkRow 가 만든다.
  */
-export function matchTier(row, pq, { addrSearchable = true } = {}) {
+export function matchTier(row, pq, { addrSearchable = true, tagsOk = false } = {}) {
   const n = pq.needle;
   if (!n || pq.tooShort || pq.tooLong) return null;
   const sn = pq.snNeedle ?? normSerial(n);
   if (pq.mode === 'ip') return ipTier(row, n, addrSearchable);
   if (pq.mode === 'sn') return snTier(row, sn);
-  const whole = textTier(row, n, sn, addrSearchable);
+  const whole = textTier(row, n, sn, addrSearchable, tagsOk);
   if (whole != null || !pq.words) return whole;
-  // 여러 낱말: 낱말마다 어느 칸에든 있어야 한다(AND). 통째 일치보다 뒤(8).
-  for (const { w, sn: wsn } of pq.words) if (textTier(row, w, wsn, addrSearchable) == null) return null;
-  return 8;
+  // 여러 낱말: 낱말마다 어느 칸에든 있어야 한다(AND). 통째 일치보다 뒤.
+  for (const { w, sn: wsn } of pq.words) if (textTier(row, w, wsn, addrSearchable, tagsOk) == null) return null;
+  return TIER.words;
 }
+
 
 /**
  * 한 덩어리 검색어의 등급. v2.911(B1): **완전 일치가 맨 앞**(1) — 이름 · IP · 관리 주소 · 시리얼 중 하나가 검색어와 같으면.
  * 예전에는 IP 일치가 등급 하나뿐이라 `10.1.0.1` 을 치면 그 IP 를 가진 VM 이 10.1.0.1x 대 VM 사이에 이름순으로 섞였다.
  * 그 다음 이름 앞글자(2) › 이름 포함(3) › 보조 이름(4) › IP · 주소(5) › 시리얼(6) › 모델(7).
  */
-function textTier(row, n, sn, addrSearchable) {
+function textTier(row, n, sn, addrSearchable, tagsOk = false) {
   const nameOk = addrSearchable || !row._nAddr;
   const snOk = sn.length >= MIN_FIELD;
   if ((nameOk && row._n === n) || row._ip.includes(n) || (addrSearchable && row._addr && row._addr === n)
@@ -105,6 +108,9 @@ function textTier(row, n, sn, addrSearchable) {
   if (ipTier(row, n, addrSearchable) != null) return 5;
   if (snOk && snTier(row, sn) != null) return 6;
   if (row._m && (addrSearchable || !row._mAddr) && row._m.includes(n)) return 7;
+  // v2.927(B3): VM 태그 · 사용자 지정 속성(태그 도구 권한이 있을 때만) · 메모(가상머신 목록의 '메모 포함' 과 같은 값)
+  if (tagsOk && row._tags && row._tags.includes(n)) return TIER.tag;
+  if (row._notes && row._notes.includes(n)) return TIER.notes;
   return null;
 }
 
@@ -140,14 +146,19 @@ export function searchRows(rows, pq, opts = {}) {
   const perKind = Math.max(1, Number(opts.perKind) || (single ? PER_KIND_SINGLE : PER_KIND));
   const totalMax = Math.max(1, Number(opts.totalMax) || TOTAL_MAX);
   const addrOk = typeof opts.addrSearchable === 'function' ? opts.addrSearchable : () => true;
+  const tagsOk = !!opts.tagsOk;
+  // v2.927(B4): 이 계정이 최근 연 장비(웹이 보내는 'kind|id' — 자기 기록)는 같은 검색에서 완전 일치 바로 다음으로 올린다.
+  //   이미 범위 · 권한으로 거른 행 안에서 순서만 바꾼다 — 보이지 않는 장비를 끌어오지 않는다.
+  const recent = opts.recent instanceof Set ? opts.recent : null;
   const hits = new Map(KIND_KEYS.map((k) => [k, []]));
   const counts = Object.fromEntries(KIND_KEYS.map((k) => [k, 0]));
   if (!pq.tooShort && !pq.tooLong && pq.needle) {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const ok = addrOk(r);
-      const t = matchTier(r, pq, { addrSearchable: ok });
+      let t = matchTier(r, pq, { addrSearchable: ok, tagsOk });
       if (t == null) continue;
+      if (recent && t > TIER.exact && recent.has(`${r.kind}|${r.id}`)) t = TIER.recent;
       counts[r.kind] = (counts[r.kind] || 0) + 1; // 칩 개수는 종류 필터와 무관하게 센다(다른 칩의 수도 보이게)
       if (want && !want.has(r.kind)) continue;
       // 같은 등급 정렬 키: 이름에 가린 주소가 든 행은 원래 이름(=주소) 순으로 세우지 않는다 — 순서가 숨긴 주소를 알려 준다(반증 M-1).
@@ -162,9 +173,9 @@ export function searchRows(rows, pq, opts = {}) {
     matched += list.length;
     list.sort((a, b) => a.t - b.t || (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
     const room = Math.max(0, Math.min(perKind, totalMax - shown));
-    const take = list.slice(0, room).map((x) => x.r);
-    shown += take.length;
-    groups.push({ kind: k, total: list.length, rows: take });
+    const picked = list.slice(0, room);
+    shown += picked.length;
+    groups.push({ kind: k, total: list.length, rows: picked.map((x) => x.r), tiers: picked.map((x) => x.t) });
   }
   return { groups, counts, shown, matched, omitted: matched - shown };
 }
