@@ -125,7 +125,7 @@ export function BmCapacityCard({ itemKey }) {
     <section className="bmo-card">
       <h5 className="bmo-h">용량 소진 예측(참고)</h5>
       <OpsError err={st.err} />
-      {!d && !st.err && <p className="bmo-note">불러오는 중…</p>}
+      {!d && !st.err && <p className="bmo-note">용량 예측을 읽는 중…</p>}
       {d && d.ok === false && <p className="bmo-note" style={{ color: toneVar('warn') }}>{d.reason || '용량 예측을 읽지 못했습니다'}</p>}
       {d && d.ok !== false && !rows.length && <p className="bmo-note">자원 행이 없습니다(OS 경로 · 등록 마운트가 있어야 쌓입니다).</p>}
       {!!rows.length && (

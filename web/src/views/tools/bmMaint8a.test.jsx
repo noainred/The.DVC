@@ -18,6 +18,8 @@ import { normalizeWindow } from '../../../../server/src/bmusage/maint/store.js';
 import { CAP_STATUS, CAP_REASONS, CAP_KINDS } from '../../../../server/src/bmusage/capacity.js';
 import { RULE_IDS, RULE_CONDS } from '../../../../server/src/bmusage/perfRules.js';
 import { RULE_TEXT, FOCUS_CODE_TEXT } from './bmPerfOpsText.js';
+import { sloMaintText } from './bmRunbookText.js';
+import { capacityKpi } from './bmCapacityText.js';
 
 const h = React.createElement;
 const HERE = path.dirname(new URL(import.meta.url).pathname);
@@ -64,6 +66,15 @@ describe('정비 창 문구 · 계약', () => {
     expect(maintLeakCell({ maint: { judge: 'unavailable' } }).tone).toBe('warn');
     expect(maintRowText({ maintSkipped: 2, maintFail: 0 })).toBe('정비 중 건너뜀 2(성공률 분모 밖)');
     expect(maintRowText({ maintSkipped: null })).toBe('');
+  });
+  it('③-b 목표선 ‘정비 창’ 칸 · 보드 KPI — 서버 값 그대로(못 만들면 판정 불가 · 계산 전 ‘—’)', () => {
+    expect(sloMaintText({ maintenance: { source: 'windows', excluded: 6 } }, { maintenanceSource: 'windows' })).toBe('제외 6');
+    expect(sloMaintText({ maintenance: { source: 'none' } }, { maintenanceSource: 'windows' })).toBe('창 없음');
+    expect(sloMaintText({}, { maintenanceSource: 'unavailable' })).toBe('판정 불가');
+    expect(sloMaintText({ maintenance: { source: 'none' } }, {})).toBe('원천 없음');
+    expect(capacityKpi({ ok: true, sources: [{ none: true }], summary: { month: 0 } }).value).toBe('—');
+    expect(capacityKpi({ ok: true, sources: [{ day: '2026-11-06' }], summary: { month: 3, soon: 1 }, cfg: { alertDays: 7 } })).toEqual({ value: 3, meta: '7일 안 1 · 불안정 — · 부족 —', soon: 1 });
+    expect(capacityKpi(null).value).toBe('—');
   });
   it('④ 음영 · 변경 이벤트 묶음(서버 merged 그대로)', () => {
     const resp = { ok: true, items: [{ id: 'mw-a', name: 'OS 업그레이드' }], merged: [{ from: 100, to: 200, ids: ['mw-a'] }, { from: 300, to: 300, ids: [] }] };

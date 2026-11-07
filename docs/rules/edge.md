@@ -32,6 +32,7 @@
 - (7a단계) 리눅스 성능 7a단계 로그 분석 — 봉투 logsVer · logSummary(정제 · 키는 같은 봉투 대상만) · 상세 대행(bodyOk 명시 · 왕복 테스트) · 최소 버전 7a 표지
 
 - (7b단계 추가) 리눅스 성능 7b단계 서버 등록 배포(중앙 → 엣지) — 비밀 없는 이름 목록 · 개별 토큰만 · 엣지가 같은 분석을 다시 · 자기가 만든 항목만 지움 · 끊겨도 central 로 넘기지 않음
+- (8a단계 추가) 리눅스 성능 8a단계 정비 창 배포 · 봉투 maint/capacity · 용량 상세 대행 — 개별 토큰만 · 그 법인 창만 · 태그는 중앙이 키로 펼침 · 엣지 재정규화 · 24h 시한 · bodyOk 명시 · 최소 버전 8a 표지
 ## 본문
 
 - ⚠⚠ **엣지 로그·진행상태는 '당겨서' 본다 — 상시 수집하지 않는다**(`edgelog/` + `central/edgeLog*.js` +
@@ -884,3 +885,16 @@
   - (r3 · R-N1) 배포 행에 **중앙 승인 `bindOk`**(엄격한 true — 소유자 + OTP 를 통과한 중앙 적용이 묶음 행에만 싣는다 · 묶음 칸이 그대로인 갱신만 앞 승인을 잇는다).
     엣지 적용 문맥은 그 행의 bindOk 로만 '소유자' 다 — 승인 없는 행이 엣지 쪽 기존 항목의 공통 계정 · 키를 새 주소로 잇거나 새로 묶으면 엣지 분석이 `bind-owner-only` 로 거부하고,
     등록부 choke point(`bindApproved`)도 같은 판정. bindOk 는 내용 비교(`edgeRowDiffers`)에서 빼지만 서명(`sigOf`)에는 들어간다. 회귀 `bmOnboard7bReview` ⑪ (h).
+
+- ⚠⚠ **리눅스 성능 8a단계 — 정비 창 배포(중앙 → 엣지) · 봉투 `maint` · `capacity` · 용량 상세 대행**
+  (`bmusage/maint/deploy.js` · `routes/central.js GET /bm-maint` · `agent/bmMaintPull.js` · `central/bmMaintCapSanitize.js` · `central/bmCapacityPull.js` · `routes/collector.js /bm-usage/capacity` ·
+  `central/featureMinEdgeVersion.js STAGE8A_TITLE_RE` · 회귀 `bmMaint8aEdge`(엣지 = 자식 프로세스 · 실제 centralRouter ↔ 실제 `pullBmMaintNow`) · `bmCapacity8aRoute`(실제 collector ↔ 실제 `pullEdgeCapacity`)):
+  - 배포는 15차 · 7b 경로와 같은 꼴: 엣지 주기 인출(기본 10분 · `AGENT_BM_MAINT_PULL_MS`) · **개별 토큰으로 인증된 이름에만** · 결과(적용 서명)는 다음 인출의 쿼리 · 0건이어도 `_last` · edgelog spec 등재.
+  - 엣지는 **자기 법인 창만** 받는다 — 법인 = ‘중앙에서 켜기’ 매핑(`edgeCorpsSource`) ∪ 그 엣지 봉투 대상의 법인 · 진행 중 · 예정 창만 · 이력 없음. **태그 창은 중앙이 그 엣지 대상 중 그 태그(수동 용도 태그)를 가진 서버 키로 펼친다**
+    (엣지에는 중앙 태그가 없다 — 엣지 판정 = 중앙 판정을 테스트가 대조).
+  - 엣지는 받은 창을 **같은 `normalizeWindow`** 로 다시 자르고(형식 밖은 버리고 센다) `maintenance-windows-deployed.json` 에 둔다. distribute:false · 404 · 503 · 실패면 **바꾸지 않는다** —
+    대신 받은 지 24시간(`DEPLOY_TTL_MS`)이 지나면 판정에 넣지 않는다(중앙이 지운 창이 끊긴 엣지에서 계속 억제하지 않게 — 억제 시한).
+  - 봉투: `maintVer` · `capacityVer` 표지(계산 전에도 — 값 없음 ≠ 구버전) · `maint`(배포본 상태 · 창별 억제 계수 · 창 끝 뒤 억제 점검) · `capacity`(하루 계산 행 — 대상 키만 · 봉투 상한이면 예측 · 도달 행만 `truncated`).
+    중앙 정제(`bmMaintCapSanitize.js`): 아는 필드만 · 창 id 꼴 · 서명 16진 32 · 열거(종류 · 상태 · 사유 · 신뢰)는 서버 상수(`CAP_*`) · 문자열 수치는 수로 · **키는 같은 봉투 대상만** · 시각 clamp.
+    중앙은 엣지 계수로 억제를 판정하지 않는다(표시 · 합산만).
+  - 용량 상세 대행은 `pullFromEdge` 에 **`bodyOk: capacityBodyOk` 명시**(봉투 모양이 아니다 — 6단계 F2) · 구버전(401/404)은 old-version · 최소 버전 문구는 `stage8aMinEdgeVersion()`(숫자를 박지 않는다).

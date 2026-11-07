@@ -112,9 +112,19 @@ export function capChart(series = [], fit = null, { today = null, extendDays = 1
     const v = (d) => fit.intercept + fit.slope * d;
     fitD = `M${X(a).toFixed(1)} ${Y(v(a)).toFixed(1)} L${X(xEnd).toFixed(1)} ${Y(v(xEnd)).toFixed(1)}`;
   }
-  const dayStr = (k) => new Date(k * 86_400_000).toISOString().slice(0, 10);
+  const pad = (v) => String(v).padStart(2, '0');
+  const dayStr = (k) => { const dt = new Date(k * 86_400_000); return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`; };   // 달력 날짜 번호 → 글자(오늘 날짜가 아니다)
   return { line: line.trim(), fit: fitD, xToday: today ? X(dnum(today)) : null, target: Y(targetPct), days: [pts[0].day, dayStr(xEnd)], exX: pts.filter((p) => p.ex).map((p) => X(dnum(p.day))) };
 }
 export const CAPACITY_HONEST = '예측은 **참고**입니다(판정이 아닙니다 · ML 없음 — 최근 14일 일 최대의 직선). 계단형 적재 · 주기 정리(로그 로테이션 · VACUUM)는 직선이 틀리게 봅니다 — 그래서 ‘불안정 · 예측 안 함’ 으로 값을 쓰지 않고 최근 30일 최대만 적습니다. '
   + '메모리는 MemAvailable 기준이라 캐시 회수로 과대할 수 있고, 재부팅 리셋형은 누수라고 단정하지 않습니다. df 는 파일시스템 기준이라 씬 풀 · LVM 여유는 보지 않습니다. '
   + '마운트는 일 롤업만 저장해 하루 최대로 계산합니다 · 정비 창(⑤ 분모 제외)이 걸친 날은 추세에서 뺍니다 · 수집 노드가 하루 한 번 계산합니다.';
+
+/** 보드 KPI(순수) — 30일 안 소진 서버 수 · 7일 안 · 불안정 · 부족. 계산된 출처가 하나도 없으면 ‘—’(0 이 아니다). */
+export function capacityKpi(resp) {
+  if (!resp || resp.ok === false) return { value: '—', meta: '용량 예측을 읽지 못했습니다', soon: 0 };
+  const computed = (resp.sources || []).some((s) => !s.none && !s.old && !s.unreadable);
+  if (!computed) return { value: '—', meta: '아직 계산 전(하루 1회)', soon: 0 };
+  const s = resp.summary || {};
+  return { value: n(s.month) ?? '—', meta: `${n(resp.cfg?.alertDays) ?? '—'}일 안 ${n(s.soon) ?? '—'} · 불안정 ${n(s.unstable) ?? '—'} · 부족 ${n(s.insufficient) ?? '—'}`, soon: n(s.soon) || 0 };
+}
