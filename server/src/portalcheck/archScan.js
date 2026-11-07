@@ -63,6 +63,8 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   // routes/api/bmUsage.js — v2.922 베어메탈 NIC ↔ CVP 포트 수동 매핑: 범위 판정은 핸들러 안(조회 밖 404 · 쓰기 범위 밖 403 · 다른 법인 CVP 403)
   'PUT /api/tools/bm-usage/port-map': 'portMapWrite — resolvePerfTarget(조회 범위 404) → inUserWriteScope 무조건(403) → isFullReadWriteScope 아니면 법인 CVP 일치(403) · v2.922 반증 D1',
   'DELETE /api/tools/bm-usage/port-map': 'portMapWrite(remove) — 조회 범위 404 → inUserWriteScope 무조건 403 · v2.922 반증 D1',
+  // v2.923 베어메탈 용도 태그(기능 · 역할 — 판정 기준이고 서버에 쓰지 않는다): 같은 규칙(조회 밖 404 → 쓰기 밖 403 무조건)
+  'PUT /api/tools/bm-usage/purpose': 'purposeWrite — resolvePerfTarget(조회 범위 404) → inUserWriteScope 무조건(403) · v2.923',
   // routes/admin/backupNetSec.js — denyScopedRun·writeScopedVcenterIds·denyGuestScanOutOfScope(v2.606 AUTHZ2606)
   'PUT /api/admin/vclogs/settings': 'denyScopedRun — 범위 계정 403(v2.606)',
   'POST /api/admin/vclogs/collect': 'denyScopedRun — 범위 계정 403(v2.606)',

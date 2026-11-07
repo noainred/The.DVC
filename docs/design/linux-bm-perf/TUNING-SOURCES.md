@@ -63,3 +63,7 @@ Rocky 공식 문서에는 범용 ‘성능 튜닝 가이드’ 가 없다(검색
 - 위 ‘읽는 곳’ 전부를 Linux 수집 명령의 `##SYSCTL`·`##BLKQ`·`##IRQ`·`##NETINFO` 구획에 넣는다(README §4). `tuned-adm active` · `ethtool -g/-l/-S` · `ip -s link` · `/proc/net/softnet_stat` 추가.
 - 역할별 권장 프로파일 기본값은 이 표에서 시작하고, **근거 등급과 출처 번호를 데이터에 같이 둔다**(화면 각주가 번호를 가리킨다).
 - ◐ 항목은 구현 때 브라우저로 원문을 한 번 더 대조하고, 틀린 것이 있으면 이 표와 화면 문구를 같이 고친다.
+- **(v2.923 4단계 구현 — 2026-11-07)** 항목 26개를 `server/src/bmusage/tuning/catalog.js TUNING_ITEMS` 에, 출처를 `tuning/sources.js`(R1 · R2 · H1~H9 + 용도 A1~A6 · G1~G4 · R3 · 확인일 2026-11-06)에 옮겼다 — 화면은 항목마다 등급 기호 + 낱말과 출처 링크를 그린다.
+  - 읽은 것: 기존 `##SYSCTL`(14키 추가) · `##BLKQ`(read_ahead_kb 추가) · `##IRQ` · `##NETINFO` + 새 구획 `##KARGS`(isolcpus 등 화이트리스트 키) · `##SOFTNET`(앞 세 열) · `##NETQ`(tx_queue_len · 큐 수) · `##UNITS`(numad · irqbalance). TuneD 는 `/etc/tuned/active_profile` 파일(`tuned-adm` 실행 없음).
+  - **읽지 않은 것**: `ethtool -g/-l/-S`(ring 크기 · NIC 쪽 카운터 — 화면은 ‘확인 불가’) · IRQ 의 NUMA 노드 · DB 공유 버퍼 · RTT. 이 항목들은 권고로 세지 않는다.
+  - ◐ 항목의 원문 재대조는 **아직 하지 않았다**(Red Hat 문서 403 — 사용자 에이전트를 바꿔 우회하지 않는다는 판단 그대로). 등급 ◐ 를 화면에 그대로 둔다.

@@ -15,12 +15,12 @@
  */
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모 표시
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds, inUserWriteScope, isFullReadWriteScope } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserWriteScope, isFullReadWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { mergeScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.607 AUTHZ2607-05
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers, bmUsageCentralState, distributionStatus, saveDistribution } from '../../bmusage/settings.js';
-import { fullScopeOnlyWith } from '../admin/shared.js';
+import { fullScopeOnlyWith, requireSettingsOwner } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
@@ -422,7 +422,7 @@ async function resolvePerfTarget(req, D, { allowed, isAdmin, key }) {
   const target = realKey ? (tg.targets.find((x) => x.key === realKey) || null) : null;
   if (target) {
     if (allowed && (!target.vcenterId || !allowed.has(target.vcenterId))) return { denied: true };
-    return { via: 'local', agent: config.agent?.name || '', realKey, target };
+    return { via: 'local', agent: config.agent?.name || '', realKey, target, tg };
   }
   const regHosts = isAdmin ? [] : await D.bmAddressHosts(null);
   for (const rec of await D.listEdgeBmUsage()) {
@@ -433,9 +433,340 @@ async function resolvePerfTarget(req, D, { allowed, isAdmin, key }) {
     const tgt = (sn.targets || []).find((x) => t(x.key) === key || (!isAdmin && maskBmIdentity(x, em).key === key));
     if (!tgt) continue;
     if (allowed && (!t(tgt.vcenterId) || !allowed.has(t(tgt.vcenterId)))) return { denied: true };
-    return { via: 'edge', agent: rec.agent, realKey: t(tgt.key), target: tgt };
+    return { via: 'edge', agent: rec.agent, realKey: t(tgt.key), target: tgt, rec };
   }
   return null;
+}
+export { resolvePerfTarget as _resolvePerfTargetForTest };
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * v2.923(리눅스 성능 4단계) — 튜닝 · 용도 · 장애 기록 · 진단 스냅샷(설계 README §4.1·§4.3 · TUNING-SOURCES · PROFILES §1~§5).
+ *  · 권한 · 범위는 형제 라우트(bmPerfView)와 같다: tools + vCenter scope(범위 밖 · 귀속 없음 · 없는 키 → 404 · 비관리자는 주소인 key 를 가림 토큰으로도 찾는다).
+ *  · 판정 조립은 bmusage/opsView.js(튜닝 judge · 프로파일 match · 장애 incidents) — 이 파일은 사실을 모으고 범위 · 가림만 한다.
+ *  · 튜닝 · 용도 판정은 **이 응답을 만드는 노드**가 그 노드의 덮어쓰기 · 수동 태그로 한다(엣지는 사실만 보낸다 — 엣지 판정을 다시 하는 것이 아니다).
+ *  · 자동 적용 경로는 없다 — 쓰기 라우트는 판정 기준(덮어쓰기 · 용도 태그)뿐이고 서버에는 아무것도 쓰지 않는다.
+ * ════════════════════════════════════════════════════════════════════════════ */
+const OPS_NOT_FOUND = Object.freeze({ __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' });
+function opsDeps(deps = {}) {
+  return {
+    currentTargets, latestUsage, hwFactsReader, bmAddressHosts,
+    listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
+    purposeOf: async (k) => (await import('../../insights/fleetTags.js')).fleetPurposeOf(k),
+    overridesFor: async () => (await import('../../bmusage/tuning/overrides.js')).overridesFor,
+    ...deps,
+  };
+}
+/** 수동 용도 태그 — 서비스 태그(소문자) 우선, 없으면 서버 키(fleet-tags 와 같은 키 규약). */
+async function purposeFor(D, target, realKey) {
+  for (const k of [target?.serviceTag, realKey]) {
+    const v = k ? await D.purposeOf(String(k)).catch(() => null) : null;
+    if (v) return v;
+  }
+  return null;
+}
+/** 한 서버의 사실(이 노드 최신값 + 하드웨어 code · 또는 엣지 보관분). */
+async function opsFactsFor(found, D) {
+  if (found.via === 'local') {
+    const agent = config.agent?.name || '';
+    const row0 = (await D.latestUsage({ json: true }).catch(() => [])).find((r) => t(r.key) === found.realKey && t(r.agent) === agent) || null;
+    if (!row0) return { row: null, tuning: null, detail: null, entry: null, source: 'local' };
+    const row = (await demoPerfRows([row0], found.tg?.targets || [found.target]))[0];
+    const s = loadBmUsageSettings();
+    const hwOf = await D.hwFactsReader({ agent, freshMs: freshMsFor(s.intervalMs) }).catch(() => () => null);
+    const entry = buildPerfEntry({ row, hw: hwOf(found.target) || null, th: s.perf, intervalMs: s.intervalMs, full: false });
+    const O = await import('../../bmusage/opsView.js');
+    return { row, ...O.factsOfRow(row), entry, source: 'local', at: row.ts ?? null };
+  }
+  const sn = found.rec?.snap || null;
+  const entry = (sn?.perf || []).find((p) => t(p.key) === found.realKey) || null;
+  const row = (sn?.rows || []).find((r) => t(r.key) === found.realKey) || null;
+  return { row, tuning: entry?.tuning || null, detail: entry?.detail || null, entry, source: 'edge', snapAt: found.rec?.snapAt ?? null, ...(entry && !entry.cells ? { detailOmitted: true } : {}) };
+}
+async function opsResolve(req, snap, D) {
+  const allowed = scopedVcenterIds(req.user, snap);
+  const isAdmin = isAdminReq(req);
+  const key = t(req.params.key);
+  if (!key) return { err: { __status: 400, ok: false, reason: 'key 가 필요합니다.' } };
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
+  if (!found || found.denied) return { err: OPS_NOT_FOUND };
+  return { found, key, isAdmin, allowed };
+}
+
+/** GET /tools/bm-usage/perf/:key/tuning — 항목 26(현재 · 권장 · 누가 정했나 · 근거 · 출처 · 상태 · 등급). */
+export async function bmTuningView(req, snap, deps = {}) {
+  const D = opsDeps(deps);
+  const r = await opsResolve(req, snap, D);
+  if (r.err) return r.err;
+  const { found, key } = r;
+  const f = await opsFactsFor(found, D);
+  const overridesFor = await D.overridesFor();
+  const probe = overridesFor({ role: 'general', vcenterId: '' });
+  if (probe?.error) return { __status: 503, ok: false, code: 'settingsUnreadable', reason: probe.error.reason };
+  const O = await import('../../bmusage/opsView.js');
+  const manual = await purposeFor(D, found.target, found.realKey);
+  const view = O.tuningViewFor({ tuning: f.tuning, detail: f.detail, manual, vcenterId: t(found.target.vcenterId), overridesFor });
+  return { ok: true, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent, snapAt: f.snapAt ?? null } : {}),
+    factsAt: f.tuning?.at ?? f.at ?? null, noFacts: !f.tuning, ...(f.detailOmitted ? { detailOmitted: true } : {}), codes: O.OPS_CODES, ...view };
+}
+
+/** GET /tools/bm-usage/perf/:key/profile — 감지 · 수동 태그 · 프로파일별 점검/요구값 · 상태. */
+export async function bmProfileView(req, snap, deps = {}) {
+  const D = opsDeps(deps);
+  const r = await opsResolve(req, snap, D);
+  if (r.err) return r.err;
+  const { found, key } = r;
+  const f = await opsFactsFor(found, D);
+  const O = await import('../../bmusage/opsView.js');
+  const manual = await purposeFor(D, found.target, found.realKey);
+  const view = O.profileViewFor({ tuning: f.tuning, detail: f.detail, entry: f.entry, row: f.row, manual });
+  const { catalogView } = await import('../../bmusage/profiles/index.js');
+  return { ok: true, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent, snapAt: f.snapAt ?? null } : {}),
+    factsAt: f.tuning?.at ?? f.at ?? null, noFacts: !f.tuning, manual: manual ? { apps: manual.apps ?? null, role: manual.role ?? null, ...(r.isAdmin ? { by: manual.by, at: manual.at } : {}) } : null,
+    // 반증 W4: 쓰기 범위 밖(조회만 되는 법인)이면 태그 칸을 잠그고 이유를 보인다(서버도 PUT 403 — server/CLAUDE.md v2.733 ‘GET 에 writable’).
+    writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)),
+    canTag: r.isAdmin && inUserWriteScope(req.user, snap, t(found.target.vcenterId)), catalog: catalogView(), codes: O.OPS_CODES, ...view };
+}
+
+/** 함대 항목(보이는 서버의 사실) — 이 노드 대상 + 엣지 보관분. 범위 · 가림은 여기서. */
+async function opsFleetItems(req, snap, D) {
+  const allowed = scopedVcenterIds(req.user, snap);
+  const isAdmin = isAdminReq(req);
+  const tg = await D.currentTargets();
+  const agent = config.agent?.name || '';
+  const s = loadBmUsageSettings();
+  const local = applyScope(tg.targets, allowed);
+  const keys = new Set(local.map((x) => t(x.key)));
+  const latest = (await D.latestUsage({ json: true }).catch(() => [])).filter((r) => t(r.agent) === agent && keys.has(t(r.key)));
+  const rowsRaw = await demoPerfRows(latest, tg.targets);
+  const pf = await perfForRows(rowsRaw, tg.targets, s, { full: false });
+  const byKey = new Map(rowsRaw.map((r) => [t(r.key), r]));
+  const entryByKey = new Map(pf.perf.map((p) => [t(p.key), p]));
+  const O = await import('../../bmusage/opsView.js');
+  const items = [];
+  for (const x of local) {
+    const row = byKey.get(t(x.key)) || null;
+    items.push({ key: t(x.key), name: x.name || x.key, vcenterId: t(x.vcenterId), serviceTag: x.serviceTag || '', regId: x.idrac?.regId || '',
+      row, ...(row ? O.factsOfRow(row) : { tuning: null, detail: null }), entry: entryByKey.get(t(x.key)) || null, manual: await purposeFor(D, x, x.key) });
+  }
+  for (const rec of await D.listEdgeBmUsage()) {
+    const sn = rec?.snap;
+    if (!sn) continue;
+    for (const x of applyScope(sn.targets || [], allowed)) {
+      const k = t(x.key);
+      const entry = (sn.perf || []).find((p) => t(p.key) === k) || null;
+      items.push({ key: k, name: x.name || k, vcenterId: t(x.vcenterId), agent: rec.agent, serviceTag: x.serviceTag || '', regId: '',
+        row: (sn.rows || []).find((r) => t(r.key) === k) || null, tuning: entry?.tuning || null, detail: entry?.detail || null, entry, manual: await purposeFor(D, x, k) });
+    }
+  }
+  if (isAdmin) return { items, isAdmin, allowed };
+  // 비관리자 — 식별자 · 이름이 주소인 서버를 가린다(형제 목록과 같은 토큰).
+  const hosts = await D.bmAddressHosts(tg).catch(() => []);
+  const edgeHosts = (await D.listEdgeBmUsage()).flatMap((rec) => (rec?.snap?.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])).filter((h) => typeof h === 'string' && h);
+  const match = addressMatcher([...hosts, ...edgeHosts]);
+  return { items: items.map((it) => { const m = maskBmIdentity({ key: it.key, name: it.name }, match); return { ...it, key: m.key, name: m.name }; }), isAdmin, allowed, masked: true };
+}
+
+/** GET /tools/bm-usage/profiles — OS × 기능 매트릭스 · 프로파일 카탈로그 · 서버 목록 · 튜닝 항목별 상태 수(권고 n대). */
+export async function bmOpsFleetView(req, snap, deps = {}) {
+  const D = opsDeps(deps);
+  const overridesFor = await D.overridesFor();
+  const probe = overridesFor({ role: 'general', vcenterId: '' });
+  if (probe?.error) return { __status: 503, ok: false, code: 'settingsUnreadable', reason: probe.error.reason };
+  const { items, isAdmin, allowed, masked } = await opsFleetItems(req, snap, D);
+  const O = await import('../../bmusage/opsView.js');
+  const v = O.fleetProfileView(items.map((it) => ({ ...it, overridesFor })), { overridesFor });
+  let overrides = null;
+  if (isAdmin) {
+    const all = (await import('../../bmusage/tuning/overrides.js')).loadTuningOverrides();
+    overrides = allowed ? { all: all.all, corps: Object.fromEntries(Object.entries(all.corps).filter(([vc]) => allowed.has(vc))), by: all.by, at: all.at, corpsScoped: true } : all;
+  }
+  return { ok: true, at: Date.now(), ...v, codes: O.OPS_CODES, ...(overrides ? { overrides } : {}), canOverride: isAdmin && !allowed, canTag: isAdmin, ...(masked ? { addressHidden: true } : {}) };
+}
+
+/* ── 장애 기록(부품 장애 모듈 재사용 — 새 수집 없음) ─────────────────────────────── */
+const FAULT_DAYS = (v) => { const n = Math.trunc(Number(v)); return [30, 90, 365].includes(n) ? n : (String(v) === '0' ? 0 : 90); };
+async function partFaultGate(req, D) {
+  const issue = await D.partFaultToolIssue(req.user);
+  if (issue) return { ok: true, partFaultsAccess: false, reason: issue.reason };
+  return null;
+}
+function faultDeps(deps = {}) {
+  return {
+    ...opsDeps(deps),
+    computeIncidents: async (days) => (await import('./partFaults.js')).computeIncidents(days),
+    partFaultDbExists: async () => (await import('../../partfault/db.js')).partFaultDbExists(),
+    partFaultToolIssue: async (user) => (await import('../../auth/toolAccess.js')).issueFor(user, 'part-faults'),
+    maskIncident: async () => (await import('./partFaults.js')).maskIncident,
+    partFaultHosts: async () => (await import('./partFaults.js')).partFaultHosts().catch(() => []),
+    selOf: async (regId) => { try { return (await import('../../idrac/invCache.js')).getInventory(regId); } catch { return null; } },
+    ...deps,
+  };
+}
+const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
+const scrubIp = (v) => (typeof v === 'string' ? v.replace(IPV4_RE, (ip) => maskedIdToken(ip)) : v);
+
+/** GET /tools/bm-usage/perf/:key/faults?days= — 요약 5칸 · 발생 1건=1행 · 시간순(부품 전이 + SEL/LC). */
+export async function bmFaultsView(req, snap, deps = {}) {
+  const D = faultDeps(deps);
+  const r = await opsResolve(req, snap, D);
+  if (r.err) return r.err;
+  const { found, key, isAdmin } = r;
+  const days = FAULT_DAYS(req.query?.days);
+  const base = { ok: true, key, via: found.via, days, ...(found.via === 'edge' ? { agent: found.agent } : {}) };
+  const gate = await partFaultGate(req, D);
+  if (gate) return { ...base, ...gate };
+  if (!(await D.partFaultDbExists().catch(() => false))) return { ...base, available: false, reason: '부품 장애 DB 가 이 노드에 없습니다(부품 장애 수집이 꺼져 있거나 엣지 노드입니다 — 장애 판정은 중앙이 합니다).' };
+  const c = await D.computeIncidents(days);
+  if (!c?.available) return { ...base, available: false, reason: c?.error || '부품 장애 DB 를 읽지 못했습니다.' };
+  const O = await import('../../bmusage/opsView.js');
+  const regId = found.via === 'local' ? t(found.target.idrac?.regId) : '';
+  const mine = O.incidentsForServer(c.incidents, { agent: found.agent, serviceTag: found.target.serviceTag, regId });
+  const kpis = O.faultKpis(mine, { since: c.since });
+  let rows = mine.slice(0, 500).map(O.incidentRow);
+  // SEL/LC — 이 노드가 가진 인벤토리(엣지 위임 서버는 중앙에 이벤트 목록이 없다 — 개수만 성능 상세에).
+  let sel = null;
+  if (regId) { const inv = await D.selOf(regId); sel = Array.isArray(inv?.events) ? inv.events.slice(0, 15).map((e) => ({ severity: String(e?.severity || '').slice(0, 16), at: String(e?.created || '').slice(0, 40), message: String(e?.message || '').slice(0, 200) })) : null; }
+  if (!isAdmin) {
+    const mask = await D.maskIncident();
+    const hosts = await D.partFaultHosts();
+    const match = addressMatcher(hosts);
+    rows = mine.slice(0, 500).map((i) => O.incidentRow(mask(i, match, hosts)));
+    if (sel) sel = sel.map((e) => ({ ...e, message: scrubIp(e.message) }));
+  }
+  const { PART_STATE_LABEL, PART_KIND_LABEL } = await import('../../partfault/types.js');
+  return { ...base, partFaultsAccess: true, available: true, since: c.since, now: c.now, kpis, incidents: rows, omitted: Math.max(0, mine.length - rows.length), labels: { state: PART_STATE_LABEL, kind: PART_KIND_LABEL },
+    sel, selSource: regId ? 'local-inventory' : 'none', scan: c.scan ? { truncated: !!c.scan.truncated, coveredSince: c.scan.coveredSince ?? null } : null };
+}
+
+/** GET /tools/bm-usage/faults?days= — 함대 표(보이는 서버의 장애만 · 법인 · 종류 · 상태 필터는 화면). */
+export async function bmFaultsFleetView(req, snap, deps = {}) {
+  const D = faultDeps(deps);
+  const days = FAULT_DAYS(req.query?.days);
+  const gate = await partFaultGate(req, D);
+  if (gate) return { ...gate, days };
+  if (!(await D.partFaultDbExists().catch(() => false))) return { ok: true, partFaultsAccess: true, available: false, days, reason: '부품 장애 DB 가 이 노드에 없습니다.' };
+  const c = await D.computeIncidents(days);
+  if (!c?.available) return { ok: true, partFaultsAccess: true, available: false, days, reason: c?.error || '부품 장애 DB 를 읽지 못했습니다.' };
+  const { items, isAdmin } = await opsFleetItems(req, snap, D);
+  const O = await import('../../bmusage/opsView.js');
+  const mask = isAdmin ? null : await D.maskIncident();
+  const hosts = isAdmin ? [] : await D.partFaultHosts();
+  const match = isAdmin ? null : addressMatcher(hosts);
+  const rows = [];
+  for (const it of items) {
+    // ⚠ 가린 key 가 아니라 원문 식별(서비스 태그 · 등록부 id)로 고른다 — 가림은 표시용.
+    const mine = O.incidentsForServer(c.incidents, { agent: it.agent ?? (config.agent?.name || ''), serviceTag: it.serviceTag, regId: it.regId });
+    for (const i of mine) rows.push({ server: it.name, key: it.key, vcenterId: it.vcenterId, ...(it.agent ? { agent: it.agent } : {}), ...O.incidentRow(isAdmin ? i : mask(i, match, hosts)) });
+  }
+  rows.sort((a, b) => (Number(b.ongoing) - Number(a.ongoing)) || ((b.openedAt || 0) - (a.openedAt || 0)));
+  const shown = rows.slice(0, 2_000);
+  const { PART_STATE_LABEL, PART_KIND_LABEL } = await import('../../partfault/types.js');
+  return { ok: true, partFaultsAccess: true, available: true, days, since: c.since, now: c.now, incidents: shown, total: rows.length, omitted: rows.length - shown.length, labels: { state: PART_STATE_LABEL, kind: PART_KIND_LABEL },
+    kpis: O.faultKpis(rows, { since: c.since }), ...(isAdmin ? {} : { addressHidden: true }) };
+}
+
+/* ── 진단 스냅샷(원격 명령 실행 경로 — 규약은 bmusage/snapshot/run.js 머리말 · security-api.md v2.923) ─────────── */
+const _snapInflight = new Set();   // 중앙 → 엣지 대행 중복 전송 막기(같은 서버 동시 1건 — 엣지도 다시 막는다)
+function scrubSnapshot(res, isAdmin) {
+  if (isAdmin || !res || typeof res !== 'object') return res;
+  const r = res.result && typeof res.result === 'object' ? res.result : null;
+  const scrubResult = (x) => (x ? { ...x, dmesg: (x.dmesg || []).map(scrubIp), ss: (x.ss || []).map(scrubIp), ...(x.error ? { error: scrubIp(x.error) } : {}),
+    ...(x.idrac ? { idrac: { ...x.idrac, events: Array.isArray(x.idrac.events) ? x.idrac.events.map((e) => ({ ...e, message: scrubIp(e.message) })) : x.idrac.events } } : {}) } : x);
+  const out = { ...res, ...(r ? { result: scrubResult(r) } : {}), ...(res.reason ? { reason: scrubIp(res.reason) } : {}) };
+  if (Array.isArray(out.snapshots)) out.snapshots = out.snapshots.map(({ by: _b, ...x }) => ({ ...x, reason: scrubIp(x.reason) }));
+  if (out.snapshot) { const { by: _b, ...x } = out.snapshot; out.snapshot = { ...x, reason: scrubIp(x.reason), result: scrubResult(x.result) }; }
+  return out;
+}
+let _snapCodeStatus = null;
+async function snapStatusTable() { if (!_snapCodeStatus) _snapCodeStatus = (await import('../../bmusage/snapshot/command.js')).SNAPSHOT_CODE_STATUS; return _snapCodeStatus; }
+function snapStatus(code) { return _snapCodeStatus?.[code] ?? 200; }
+/** POST /tools/bm-usage/perf/:key/snapshot — operator 이상 · 사유 필수 · 조회 밖 404 → 쓰기 밖 403 · 감사 · 동시 1건 · 법인당 24시간 상한(실행 노드 설정). */
+export async function bmSnapshotRun(req, deps = {}) {
+  const D = {
+    ...opsDeps(deps),
+    runLocal: async (o) => (await import('../../bmusage/snapshot/run.js')).runSnapshotLocal(o),
+    runEdge: async (agent, o) => (await import('../../central/bmUsageEdgePull.js')).runEdgeSnapshot(agent, o),
+    audit: logAudit,
+    ...deps,
+  };
+  const snap = store.get();
+  const S = await import('../../bmusage/snapshot/run.js');
+  await snapStatusTable();
+  const reason = S.cleanReason(req.body?.reason);
+  if (!reason) return { status: 400, body: { ok: false, code: 'bad-reason', reason: '사유를 2자 이상 적어야 합니다(감사 기록에 남습니다).' } };
+  const r = await opsResolve(req, snap, D);
+  if (r.err) return { status: r.err.__status, body: { ok: false, code: r.err.__status === 404 ? 'not-found' : 'bad-request', reason: r.err.reason } };
+  const { found, key, isAdmin } = r;
+  // ⚠ 쓰기 범위는 조건 없이(조회 무제한 + writeVcenters 계정 — server/CLAUDE.md v2.733 함정). 조회 밖은 위에서 404.
+  if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return { status: 403, body: { ok: false, code: 'forbidden', error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용) — 진단 스냅샷은 원격 명령을 실행합니다.' } };
+  const by = String(req.user?.username || '').slice(0, 64);
+  const flightKey = `${found.agent}|${found.realKey}`;
+  if (_snapInflight.has(flightKey)) return { status: 409, body: { ok: false, code: 'busy', reason: '이 서버의 스냅샷이 이미 실행 중입니다 — 끝난 뒤 다시 누르세요.' } };
+  _snapInflight.add(flightKey);
+  let out;
+  try {
+    out = found.via === 'local'
+      ? await D.runLocal({ target: found.target, reason, by, settings: loadBmUsageSettings() })
+      : await D.runEdge(found.agent, { key: found.realKey, reason, by });
+  } finally { _snapInflight.delete(flightKey); }
+  if (!['bad-reason', 'not-found'].includes(out?.code)) {
+    D.audit({ user: req.user?.username, action: 'bm-usage.snapshot', target: found.realKey, ip: req.ip || '',
+      detail: JSON.stringify({ via: found.via, agent: found.agent || '', ok: !!out?.ok, code: out?.code || '', id: out?.id || null, reason: reason.slice(0, 120) }).slice(0, 300) });
+  }
+  const body = scrubSnapshot({ ...out, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}) }, isAdmin);
+  return { status: snapStatus(out?.code), body };
+}
+/** GET /tools/bm-usage/perf/:key/snapshots[/:id] — 보관분(이 노드 또는 엣지 대행). 조회 범위만(실행 권한과 다르다). */
+export async function bmSnapshotRead(req, snap, deps = {}) {
+  const D = {
+    ...opsDeps(deps),
+    listLocal: async (o) => (await import('../../bmusage/snapshot/run.js')).listSnapshotsLocal(o),
+    getLocal: async (o) => (await import('../../bmusage/snapshot/run.js')).getSnapshotLocal(o),
+    pullEdge: async (agent, o) => (await import('../../central/bmUsageEdgePull.js')).pullEdgeSnapshots(agent, o),
+    ...deps,
+  };
+  await snapStatusTable();
+  const r = await opsResolve(req, snap, D);
+  if (r.err) return r.err;
+  const { found, key, isAdmin } = r;
+  const id = t(req.params.id);
+  const res = found.via === 'local'
+    ? (id ? await D.getLocal({ key: found.realKey, id }) : await D.listLocal({ key: found.realKey }))
+    : await D.pullEdge(found.agent, { key: found.realKey, id });
+  const code = res?.code || (res?.ok ? 'ok' : 'edge');
+  // 반증 W4: 실행 칸을 잠글지 화면이 알 수 있게 — 쓰기 범위(조건 없이 · 실행 라우트와 같은 판정). 역할(operator 이상)은 화면이 따로 본다.
+  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)) }, isAdmin);
+  const st = code === 'ok' ? 200 : snapStatus(code);
+  return st === 200 ? body : { __status: st, ...body };
+}
+/** PUT /tools/bm-usage/purpose — 수동 용도 태그(기능 · 역할). admin · 조회 밖 404 → 쓰기 밖 403 · 감사. 서버에 아무것도 쓰지 않는다(판정 기준). */
+async function purposeWrite(req, res) {
+  const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  const snap = store.get();
+  const D = opsDeps();
+  try {
+    const found = await resolvePerfTarget(req, D, { allowed: scopedVcenterIds(req.user, snap), isAdmin: true, key: t(b.key) });
+    if (!found || found.denied) return res.status(404).json({ ok: false, reason: '대상 서버를 찾지 못했습니다.' });
+    if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용).' });
+    const FT = await import('../../insights/fleetTags.js');
+    const { APP_IDS } = await import('../../bmusage/profiles/index.js');
+    const { ROLES } = await import('../../bmusage/tuning/catalog.js');
+    const tagKey = t(found.target.serviceTag) || found.realKey;
+    const value = b.clear === true ? null : { ...(Array.isArray(b.apps) ? { apps: b.apps } : {}), ...(b.role != null ? { role: b.role } : {}) };
+    const r = FT.setFleetPurpose(tagKey, value, { by: req.user?.username || '', knownApps: [...APP_IDS], knownRoles: [...ROLES] });
+    logAudit({ user: req.user?.username, action: 'bm-usage.purpose', target: found.realKey, ip: req.ip || '', detail: JSON.stringify({ apps: value?.apps ?? null, role: value?.role ?? null, clear: b.clear === true, ok: r.ok }).slice(0, 300) });
+    res.status(r.ok ? 200 : 400).json(r);
+  } catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+}
+/** PUT /tools/bm-usage/tuning/overrides — 역할 권장값 덮어쓰기(설정 소유자 = 전체 범위 · 감사). 판정 기준일 뿐 서버에 적용하지 않는다. */
+function tuningOverrideWrite(req, res) {
+  const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  import('../../bmusage/tuning/overrides.js').then((O) => {
+    const r = O.saveTuningOverride({ scope: b.scope, role: b.role, itemId: b.itemId, value: b.value }, { by: req.user?.username || '' });
+    logAudit({ user: req.user?.username, action: 'bm-usage.tuning.override', target: t(b.itemId), ip: req.ip || '',
+      detail: JSON.stringify({ item: t(b.itemId), scope: t(b.scope) || 'all', role: t(b.role), prev: r.prev ?? null, next: r.next ?? null, cleared: !!r.cleared, ok: r.ok }).slice(0, 300) });
+    res.status(r.ok ? 200 : r.unreadable ? 503 : 400).json(r.unreadable ? { ...r, code: 'settingsUnreadable' } : r);
+  }).catch((e) => res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }));
 }
 export function registerBmUsage(api) {
 
@@ -552,6 +883,40 @@ api.get('/tools/bm-usage/perf/:key/history', toolsPerm, (req, res) => memoJson(r
 api.get('/tools/bm-usage/perf/:key/devices', toolsPerm, (req, res) => memoJson(req, res, 'bm-devices', (snap) => bmTrendView(req, snap, 'devices'), { extraKey: trendKey(req) }));
 
 api.get('/tools/bm-usage/perf/:key/ports', toolsPerm, (req, res) => memoJson(req, res, 'bm-ports', (snap) => bmPortsView(req, snap), { extraKey: trendKey(req) }));
+
+// v2.923(4단계): 튜닝 · 용도(서버 1대 · 함대) — 응답 캐시는 범위 서명 + 역할 + 마지막 수집 + 수동 태그 세대(fleetRev) + 덮어쓰기 저장 시각.
+//   세대가 바뀌면 지워지는 것: 새 표본(lastAt) · 용도 태그 저장(fleetRev) · 덮어쓰기 저장(tuningRev). 장애 기록 · 스냅샷은 캐시하지 않는다(누를 때만 · 부품 장애는 자체 30초 메모).
+const opsKey = async (req) => {
+  const [{ fleetRev }, O] = await Promise.all([import('../../insights/fleetRev.js'), import('../../bmusage/tuning/overrides.js')]);
+  let at = 0; try { at = O.loadTuningOverrides().at || 0; } catch { at = -1; }
+  // 반증 W4: 응답에 writable(쓰기 범위)이 실린다 — 조회 범위가 같고 쓰기 범위만 다른 두 계정이 캐시를 나누지 않게 쓰기 범위 서명도 키에.
+  let w = 'all'; try { const ws = writeScopedVcenterIds(req.user, store.get()); w = ws ? [...ws].sort().join(',') : 'all'; } catch { w = 'err'; }
+  return `${trendKey(req)}|f${fleetRev()}|o${at}|w${w}`;
+};
+api.get('/tools/bm-usage/perf/:key/tuning', toolsPerm, async (req, res) => memoJson(req, res, 'bm-tuning', (snap) => bmTuningView(req, snap), { extraKey: await opsKey(req) }));
+api.get('/tools/bm-usage/perf/:key/profile', toolsPerm, async (req, res) => memoJson(req, res, 'bm-profile', (snap) => bmProfileView(req, snap), { extraKey: await opsKey(req) }));
+api.get('/tools/bm-usage/profiles', toolsPerm, async (req, res) => memoJson(req, res, 'bm-profiles', (snap) => bmOpsFleetView(req, snap), { extraKey: await opsKey(req) }));
+api.put('/tools/bm-usage/purpose', adminOnly, toolsPerm, (req, res) => purposeWrite(req, res));
+api.put('/tools/bm-usage/tuning/overrides', adminOnly, requireSettingsOwner, toolsPerm, (req, res) => tuningOverrideWrite(req, res));
+// 장애 기록(부품 장애 모듈 재사용) — part-faults 도구 접근이 없으면 내용 없이 ‘권한 없음’(v2.922 D15 와 같은 판단).
+api.get('/tools/bm-usage/perf/:key/faults', toolsPerm, async (req, res) => {
+  try { const r = await bmFaultsView(req, store.get()); if (r.__status) { const { __status, ...rest } = r; return res.status(__status).json(rest); } res.json(r); }
+  catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+});
+api.get('/tools/bm-usage/faults', toolsPerm, async (req, res) => {
+  try { res.json(await bmFaultsFleetView(req, store.get())); } catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+});
+// 진단 스냅샷 — 실행은 operator 이상(writeRole) · 보관분 조회는 tools 권한 + 조회 범위.
+api.post('/tools/bm-usage/perf/:key/snapshot', writeRole, toolsPerm, async (req, res) => {
+  try { const r = await bmSnapshotRun(req); res.status(r.status).json(r.body); }
+  catch (e) { res.status(500).json({ ok: false, code: 'ssh-error', reason: String(e?.message || e).slice(0, 300) }); }
+});
+const snapRead = async (req, res) => {
+  try { const r = await bmSnapshotRead(req, store.get()); if (r.__status) { const { __status, ...rest } = r; return res.status(__status).json(rest); } res.json(r); }
+  catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+};
+api.get('/tools/bm-usage/perf/:key/snapshots', toolsPerm, (req, res) => snapRead(req, res));
+api.get('/tools/bm-usage/perf/:key/snapshots/:id', toolsPerm, (req, res) => snapRead(req, res));
 /**
  * v2.922 — 수동 매핑 확정/삭제(설정 소유자 = admin). 범위: 서버가 안 보이면 404 · 보이는데 매핑할 CVP 가 그 법인 것이 아니면 403(조회 밖 404 → 쓰기 밖 403).
  *   원자적 쓰기(portMap.js) · 감사 로그. body { key, nic, cvpId, deviceKey, port, remove? }.

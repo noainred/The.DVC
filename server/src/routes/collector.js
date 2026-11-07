@@ -201,6 +201,57 @@ collectorRouter.get('/bm-usage/devices', (req, res) => bmTrendCollector(req, res
 collectorRouter.get('/bm-usage/nics', (req, res) => bmTrendCollector(req, res, 'nics'));   // v2.922: CVP 대조 ⑤ 의 서버 쪽(NIC 최신 5분)
 
 /**
+ * v2.923(4단계) — 진단 스냅샷 엣지 대행(central/bmUsageEdgePull.js runEdgeSnapshot · pullEdgeSnapshots). 같은 url · 같은 토큰(새 포트 · 새 인증 없음).
+ *  · 이 엣지가 수집하는 서버만(대상 목록 밖 키는 not-found — 중앙이 범위를 먼저 잘랐어도 엣지가 다시 본다).
+ *  · 실행은 bmusage/snapshot/run.js 하나(상수 명령 · 읽기 전용 · 서버당 동시 1건 · 법인당 24시간 상한(이 엣지 설정) · 7일 보관 · 인증 가드).
+ *  · 업무 결과(busy · daily-cap · not-found …)는 200 + code 로 답한다 — 중앙이 code 를 HTTP 상태로 옮긴다. 본문 상한 4kb(사유 300자).
+ *  · 감사: 이 엣지의 감사 로그에 ‘중앙 대행 진단 스냅샷’ + 중앙이 보낸 실행자 · 사유(중앙도 자기 감사 로그에 남긴다).
+ */
+async function bmSnapTarget(key) {
+  const { currentTargets } = await import('../bmusage/poller.js');
+  const tg = await currentTargets();
+  const k = String(key || '').trim().slice(0, 256);
+  return k ? ((tg.targets || []).find((x) => x.key === k) || null) : null;
+}
+collectorRouter.post('/bm-usage/snapshot', tokenFirst('bm-usage-snapshot'), express.json({ limit: '4kb' }), async (req, res) => {
+  try {
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const S = await import('../bmusage/snapshot/run.js');
+    const reason = S.cleanReason(b.reason);
+    if (!reason) return res.json({ ok: false, code: 'bad-reason', reason: '사유가 필요합니다.' });
+    const target = await bmSnapTarget(b.key);
+    if (!target) return res.json({ ok: false, code: 'not-found', reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const by = `central-portal:${String(b.by || '').replace(/[^\w.@-]/g, '').slice(0, 48)}`;
+    const { loadBmUsageSettings } = await import('../bmusage/settings.js');
+    const r = await S.runSnapshotLocal({ target, reason, by, settings: loadBmUsageSettings() });
+    if (!['bad-reason', 'not-found'].includes(r.code)) {
+      logAudit({ user: 'central-portal', action: '중앙 대행 진단 스냅샷', target: target.key, detail: JSON.stringify({ by, code: r.code, id: r.id || null, reason: reason.slice(0, 120) }).slice(0, 300), ip: req.ip || '' });
+    }
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ ok: false, code: 'ssh-error', reason: String(err?.message || err).slice(0, 300) });
+  }
+});
+collectorRouter.get('/bm-usage/snapshots', tokenFirst('bm-usage-snapshots'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.json({ ok: false, code: 'not-found', reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const S = await import('../bmusage/snapshot/run.js');
+    const r = await S.listSnapshotsLocal({ key: target.key });
+    res.json({ ...r, code: r.code || 'ok' });
+  } catch (err) { res.status(500).json({ ok: false, code: 'ssh-error', reason: String(err?.message || err).slice(0, 300) }); }
+});
+collectorRouter.get('/bm-usage/snapshot', tokenFirst('bm-usage-snapshot-get'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.json({ ok: false, code: 'not-found', reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const S = await import('../bmusage/snapshot/run.js');
+    const r = await S.getSnapshotLocal({ key: target.key, id: String(req.query.id || '') });
+    res.json({ ...r, code: r.code || 'ok' });
+  } catch (err) { res.status(500).json({ ok: false, code: 'ssh-error', reason: String(err?.message || err).slice(0, 300) }); }
+});
+
+/**
  * 이 엣지의 **토큰 자기보고**(v2.560 — 사용자 요청 "등록된 모든 엣지/수집 서버의 모든 토큰 …
  * 중앙에 저장된 토큰과 엣지에 저장된 토큰이 동일한지 점검").
  *
