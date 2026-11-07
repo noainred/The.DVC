@@ -177,11 +177,17 @@ export function registerHostSan(api) {
           .map((e) => ({ ts: e.ts, severity: e.severity, title: e.title, desc: e.desc, type: e.type, cvpId: e.cvpId, devices: (e.devices || []).slice(0, 4) }));
       } catch (e) { console.warn(`[hostsan] CVP 이벤트 조회 실패: ${e.message}`); eventsUnavailable = true; }
     }
+    // v2.923(B-①): 매칭 포트의 최근 24시간 오류·드롭 합(원시 표본 — 값이 없는 표본은 세지 않는다). 포트 16개 상한.
+    let sums = new Map();
+    try { sums = await cdb.portWindowSums(m.uplinks.map((u) => ({ agent: u.agent, cvpId: u.cvpId, key: u.key, port: u.port })), { sinceMs: EVENT_SINCE_MS }); }
+    catch (e) { console.warn(`[hostsan] CVP 포트 24시간 합 조회 실패: ${e.message}`); }
+    const sumOf = (u) => sums.get(`${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`) || null;
     const vmMacs = (snap.vms || []).filter((v) => v.vcenterId === h.vcenterId && v.host === h.name).reduce((a, v) => a + ((v.dev?.nics || []).filter((n) => n?.mac).length), 0);
     res.set('Cache-Control', 'no-store').json({
       ok: true, host: { id: h.id, name: h.name, vcenterId: h.vcenterId },
       uplinks: m.uplinks.map((u) => ({ cvpId: u.cvpId, agent: u.agent, key: u.key, hostname: u.hostname, port: u.port, desc: u.desc, nic: u.nic, basis: u.basis, basisLabel: BASIS_LABEL[u.basis] || null,
-        oper: u.oper, admin: u.admin, speedBps: u.speedBps, vlan: u.vlan, lag: u.lag, inBps: u.inBps, outBps: u.outBps, inUtil: u.inUtil, outUtil: u.outUtil, inErr: u.inErr, outErr: u.outErr, rateTs: u.rateTs, ts: u.ts })),
+        oper: u.oper, admin: u.admin, speedBps: u.speedBps, vlan: u.vlan, lag: u.lag, inBps: u.inBps, outBps: u.outBps, inUtil: u.inUtil, outUtil: u.outUtil, inErr: u.inErr, outErr: u.outErr,
+        inDrop: u.inDrop ?? null, outDrop: u.outDrop ?? null, day: sumOf(u), rateTs: u.rateTs, ts: u.ts })),
       conflicts: m.conflicts, terms: m.terms, events, eventsUnavailable, cvpUnavailable: !!q.unavailable, truncated: !!q.truncated,
       servers: servers.length, vmNicMacs: vmMacs, corpLimited: corp != null, corpMissing: corp === '', direction: { in: '서버 송신', out: '서버 수신' },
     });

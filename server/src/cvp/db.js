@@ -665,6 +665,33 @@ export async function deviceDetail(agent, cvpId, key) {
 }
 
 /**
+ * v2.923(B-①): 포트 몇 개의 최근 창(기본 24시간) 오류·드롭 합 — 원시 표본(port_sample, 고유 인덱스 (agent,cvp,key,port,ts))을 읽어 JS 로 더한다
+ *   (집계 함수 두 개를 한 문장에 쓰지 않는다 — perf-db 규약). 값이 없는 표본(첫 주기·간격 비정상·리셋·드롭 수집 전·구버전 엣지)은 더하지 않고
+ *   n 에 세지 않는다 — 화면이 '표본 n/전체' 로 부분 합임을 밝힌다.
+ * @param {Array<{agent:string,cvpId:string,key:string,port:string}>} ports  상한 16
+ * @returns {Promise<Map<string,{inErr:number|null,outErr:number|null,inDrop:number|null,outDrop:number|null,samples:number,dropN:number,errN:number}>>} 키 `${agent}\u0000${cvpId}\u0000${key}\u0000${port}`
+ */
+export async function portWindowSums(ports = [], { sinceMs = 24 * 3600_000, now = Date.now() } = {}) {
+  const out = new Map();
+  const db = await open();
+  if (!db) return out;
+  const q = db.conn.prepare('SELECT in_err, out_err, in_drop, out_drop FROM port_sample WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND ts>=? LIMIT 5000');
+  for (const p of (Array.isArray(ports) ? ports : []).slice(0, 16)) {
+    const acc = { inErr: null, outErr: null, inDrop: null, outDrop: null, samples: 0, dropN: 0, errN: 0 };
+    for (const r of q.all(String(p.agent ?? ''), String(p.cvpId), String(p.key), String(p.port), now - sinceMs)) {
+      acc.samples += 1;
+      const add = (k, v) => { const n = numOrNull(v); if (n != null) acc[k] = (acc[k] ?? 0) + n; return n != null; };
+      const e1 = add('inErr', r.in_err); const e2 = add('outErr', r.out_err);
+      const d1 = add('inDrop', r.in_drop); const d2 = add('outDrop', r.out_drop);
+      if (e1 || e2) acc.errN += 1;
+      if (d1 || d2) acc.dropN += 1;
+    }
+    out.set(`${p.agent ?? ''}\u0000${p.cvpId}\u0000${p.key}\u0000${p.port}`, acc);
+  }
+  return out;
+}
+
+/**
  * v2.920(호스트 업링크 매칭): 포트 설명(descr)에 단서가 든 포트 행 — 호스트 짧은 이름·NIC MAC(콜론·하이픈·점·붙임 표기). SQL LIKE 로 거른 뒤
  *   토큰 경계 판정은 cvp/hostMatch.js 가 한다(여기서는 넉넉히 뽑는다). 장비 호스트명을 붙여 준다. 단서 8개·결과 200행 상한.
  * @param {string[]} terms 소문자 단서(LIKE 의 % _ 는 이스케이프)
@@ -1062,7 +1089,7 @@ export async function portUsage({ agent = null, cvpId = null, limit = 200, minUt
     if (util >= 80) counts.over80++; else if (util >= 50) counts.over50++;
     if (util < (Number(minUtil) || 0)) continue;
     list.push({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, hostname: r.hostname || '', port: r.port, desc: r.descr || '', speedBps: r.speed_bps,
-      inBps: r.in_bps, outBps: r.out_bps, inUtil: r.in_util, outUtil: r.out_util, util, inErr: r.in_err, outErr: r.out_err, rateAt: Number(r.rate_ts) });
+      inBps: r.in_bps, outBps: r.out_bps, inUtil: r.in_util, outUtil: r.out_util, util, inErr: r.in_err, outErr: r.out_err, inDrop: r.in_drop ?? null, outDrop: r.out_drop ?? null, rateAt: Number(r.rate_ts) });
   }
   list.sort((a, b) => b.util - a.util);
   const lim = Math.max(1, Math.min(2000, Number(limit) || 200));
