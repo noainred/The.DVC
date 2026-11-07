@@ -1262,6 +1262,16 @@ export async function nodeLoadNodeIds(deviceId, { from, to } = {}) {
   if (!db.selNodeIdsHourly) db.selNodeIdsHourly = db.conn.prepare('SELECT DISTINCT node_id AS n FROM node_load_hourly WHERE device_id = ? AND hour >= ? AND hour < ? ORDER BY node_id LIMIT 64');
   return db.selNodeIdsHourly.all(String(deviceId), hourIndex(from), hourIndex(to - 1) + 1).map((r) => r.n);
 }
+/**
+ * 창 안의 표본 수(node_load_sample) — 클라이언트 창 합(ops_sum)을 '창 평균 ops/s' 로 바꾸는 분모(표본에 없던 순간은 0 으로 센다).
+ * ⚠ 1시간 수집 스냅샷도 표본 한 줄이라(구분 열이 없다) 표본 폴러가 켜진 장비는 분모가 시간당 13 — 절대값이 약 8% 낮게 나올 수 있다(비율·순위는 영향 없음). 응답이 그 사실을 적는다.
+ */
+export async function nodeLoadSampleCount(deviceId, { from, to } = {}) {
+  const db = await open();
+  if (!db) return 0;
+  if (!db.selSampleCount) db.selSampleCount = db.conn.prepare('SELECT COUNT(*) AS n FROM node_load_sample WHERE device_id = ? AND ts >= ? AND ts < ?');
+  return Number(db.selSampleCount.get(String(deviceId), from, to)?.n) || 0;
+}
 /** 클라이언트 기록의 가장 오래된 시각(원시 · 시간 요약). */
 export async function nodeClientOldest(deviceId) {
   const db = await open();

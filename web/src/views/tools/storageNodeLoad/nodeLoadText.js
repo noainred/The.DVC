@@ -418,7 +418,7 @@ export function protoSummaryOf(rows) {
     .sort((a, b) => (b.ops ?? -1) - (a.ops ?? -1));
 }
 
-/** 분포 보기 — 노드 막대(합계 ops 대비 %) · 쏠림 표지. 노드 집합은 서버 skew.nodes(ops 0 노드 포함). */
+/** 분포 보기 — 노드 막대(창 평균 ops/s · 최대 노드 대비 %) · 쏠림 표지. 노드 집합은 서버 skew.nodes(ops 0 노드 포함). */
 export function skewBarsOf(resp) {
   const nodes = Array.isArray(resp?.nodes) ? resp.nodes : [];
   const max = Math.max(0, ...nodes.map((n) => numOrNull(n.total) ?? 0));
@@ -440,7 +440,7 @@ export function distNotes(resp) {
   const f = numOrNull(resp.thresholds?.skewFactor); const fs = numOrNull(resp.thresholds?.fixedShare);
   if (!(resp.clients || []).length) out.push({ tone: 'muted', text: resp.past ? '이 구간에는 클라이언트 기록이 없습니다.' : '아직 이 장비의 클라이언트 표본이 없습니다 — 표본 폴러가 돌기 시작하면 쌓입니다.' });
   else if (!skewed.length) out.push({ tone: 'muted', text: `쏠린 노드가 없습니다 — 모든 노드의 ops 합이 노드 평균의 ${f ?? '—'}배 미만입니다.` });
-  else if (!(resp.candidates || []).length) out.push({ tone: 'muted', text: `쏠린 노드 ${skewed.map((n) => n.id).join(', ')} 에 ‘고정’ 클라이언트(창 ops 의 ${fs != null ? Math.round(fs * 100) : '—'}% 이상을 한 노드에 보낸 클라이언트)가 없어 후보를 내지 못했습니다 — 여러 노드에 고르게 흩어진 클라이언트는 옮겨도 쏠림이 줄지 않습니다.` });
+  else if (!(resp.candidates || []).length) out.push({ tone: 'muted', text: `쏠린 노드 ${skewed.map((n) => n.id).join(', ')} 에 ‘고정’ 클라이언트(창 ops 의 ${fs != null ? `${Math.round(fs * 100)}%` : '기준 비중'} 이상을 한 노드에 보낸 클라이언트)가 없어 후보를 내지 못했습니다 — 여러 노드에 고르게 흩어진 클라이언트는 옮겨도 쏠림이 줄지 않습니다.` });
   const u = numOrNull(resp.names?.unknown);
   if (u > 0) out.push({ tone: 'muted', text: `이름을 찾지 못한 주소 ${u}개 — 포탈 인벤토리에 없는 주소입니다(역방향 DNS 없음).` });
   if (typeof resp.note === 'string' && resp.note) out.push({ tone: 'muted', text: resp.note });

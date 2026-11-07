@@ -126,7 +126,7 @@ function RankList({ d, sel, onPick }) {
   return (
     <div className="nl-rank">
       {rows.map((r) => (
-        <button type="button" key={r.id} className="nl-rankrow nl-rowbtn" onClick={() => onPick(r.id)} title={`노드 ${r.id} · 평균 ${valueText(unit, r.avg)} · 최대 ${valueText(unit, r.peak)} · 읽은 칸 ${r.n} / 빈 칸 ${r.missing} — 눌러서 이 노드의 클라이언트`}>
+        <button type="button" key={r.id} className="nl-rankbtn" onClick={() => onPick(r.id)} title={`노드 ${r.id} · 평균 ${valueText(unit, r.avg)} · 최대 ${valueText(unit, r.peak)} · 읽은 칸 ${r.n} / 빈 칸 ${r.missing} — 눌러서 이 노드의 클라이언트`}>
           <span>노드 {r.id}</span>
           <span className="nl-track"><i style={{ width: `${r.w}%` }} /></span>
           <span className="nl-num">{valueText(unit, r.avg)}</span>

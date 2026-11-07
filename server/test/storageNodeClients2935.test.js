@@ -327,7 +327,9 @@ test('⑦ api — node-load(프로토콜 표 · 디스크 4지표 · 표본 켜�
   assert.equal(cd.status, 200);
   assert.deepEqual(cd.body.nodes.map((n) => [n.id, n.skew]), [[1, false], [2, true], [3, false]], '노드 3(ops 0)도 분모 · 노드 2 쏠림');
   assert.equal(cd.body.candidates.length, 1);
-  assert.deepEqual([cd.body.candidates[0].client, cd.body.candidates[0].from, cd.body.candidates[0].to], ['10.1.1.1', 2, 3]);
+  assert.deepEqual([cd.body.candidates[0].client, cd.body.candidates[0].from, cd.body.candidates[0].to, cd.body.candidates[0].ops], ['10.1.1.1', 2, 3, 900], '후보 ops 는 창 평균 ops/s(창 합 10,800 / 표본 12)');
+  assert.equal(cd.body.samples, 12); assert.match(cd.body.basis, /창 평균 ops\/s/);
+  assert.equal(Math.round(cd.body.nodes.find((n) => n.id === 2).total), 1200, '노드 합도 창 평균 ops/s');
   assert.deepEqual([cd.body.thresholds.fixedShare, cd.body.thresholds.skewFactor, cd.body.proto, cd.body.protos], [0.9, 1.5, 'all', ['nfs', 'smb']]);
   assert.match(cd.body.note, /포탈은 장비·클라이언트 설정을 바꾸지 않습니다/);
   assert.equal(cd.body.clientsTotal, 3);

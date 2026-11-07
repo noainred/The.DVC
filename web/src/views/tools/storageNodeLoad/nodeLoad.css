@@ -59,7 +59,11 @@
 .nl .nl-key { display: inline-flex; align-items: center; gap: 6px; }
 .nl .nl-key i { display: inline-block; width: 14px; height: 2px; }
 .nl .nl-rank { display: flex; flex-direction: column; gap: 5px; }
-.nl .nl-rankrow { display: grid; grid-template-columns: 52px minmax(0, 1fr) 80px; gap: 8px; align-items: center; font-size: 12px; }
+.nl .nl-rankrow { display: grid; grid-template-columns: 52px minmax(0, 1fr) 92px; gap: 8px; align-items: center; font-size: 12px; }
+/* v2.935: 순위 행은 버튼(드로어) — 값 칸 92px('5,662 ops/s' 가 들어간다 · Chromium 1440 에서 48px 격자로 넘쳤던 것). */
+.nl .nl-rankbtn { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 52px minmax(0, 1fr) 92px; gap: 8px; align-items: center; font-size: 12px; cursor: pointer; padding: 2px 4px; border-radius: 6px; min-width: 0; }
+.nl .nl-rankbtn:hover { background: rgba(59,130,246,.12); }
+.nl .nl-rankbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .nl .nl-track { display: block; height: 10px; }
 .nl .nl-track i { display: block; height: 10px; border-radius: 0 4px 4px 0; background: #3987e5; min-width: 2px; }
 .nl .nl-num { text-align: right; font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }

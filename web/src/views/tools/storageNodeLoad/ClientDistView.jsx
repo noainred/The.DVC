@@ -4,7 +4,7 @@
  *  · 판정·문구는 nodeLoadText.js(순수 — vitest).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson } from '../../../api.js';
+import { fetchJson, canCsv } from '../../../api.js'; // CSV 는 data.csv 권한(canCsv)이 있을 때만 — csvGate2643
 import { STable } from '../../../components/STable.jsx';
 import { opsText, shareText, clientNameText, skewBarsOf, candidateText, distNotes, distCsv, sampleText, windowRangeText, HEAT_RAMP } from './nodeLoadText.js';
 
@@ -44,7 +44,7 @@ export default function ClientDistView({ deviceId, end = null, offsetMin = 540, 
         <div className="nl-segwrap"><span className="nl-seglabel">프로토콜</span>
           <div className="nl-seg" role="group" aria-label="프로토콜">{protos.map((p) => <button key={p} type="button" className={proto === p ? 'on' : ''} aria-pressed={proto === p} onClick={() => setProto(p)}>{p === 'all' ? '전체' : p}</button>)}</div></div>
         {busy && <span className="nl-muted">불러오는 중…</span>}
-        {ready && d.clients.length > 0 && <button type="button" className="nl-btn" onClick={download} title="클라이언트 × 노드 비중 표를 CSV 로">CSV 내려받기</button>}
+        {ready && d.clients.length > 0 && canCsv() && <button type="button" className="nl-btn" onClick={download} title="클라이언트 × 노드 비중 표를 CSV 로">CSV 내려받기</button>}
       </div>
       {err && <div className="nl-banner amber">분포 조회 오류: {String(err?.message || err)}</div>}
       {ready && <div className="nl-note">{windowRangeText(d.end, d.days, offsetMin)} · 쏠림 기준 노드 평균 × {d.thresholds.skewFactor} · 고정 기준 {Math.round(d.thresholds.fixedShare * 100)}% · 표본 주기 {sampleText(d.sample?.sampleMs)}{d.proto !== 'all' ? ` · ${d.proto} 만` : ''}</div>}
@@ -52,7 +52,7 @@ export default function ClientDistView({ deviceId, end = null, offsetMin = 540, 
       {ready && bars.length > 0 && (
         <div className="nl-body">
           <div className="nl-side nl-skew">
-            <div className="nl-sidehead">노드별 ops 합(창) · 노드 평균 {opsText(d.mean)}</div>
+            <div className="nl-sidehead">노드별 창 평균 ops/s · 노드 평균 {opsText(d.mean)}</div>
             {bars.map((b) => (
               <button type="button" key={b.id} className={`nl-rankrow nl-rowbtn${b.skew ? ' skew' : ''}`} onClick={() => onPickNode?.(b.id)}
                 title={`노드 ${b.id} · ${opsText(b.total)} · 평균의 ${b.ratio ?? '—'}배${b.skew ? ' · 쏠림' : ''} — 눌러서 이 노드의 클라이언트`}>
@@ -74,7 +74,7 @@ export default function ClientDistView({ deviceId, end = null, offsetMin = 540, 
           <STable minWidth={640 + nodes.length * 44}>
             <thead><tr>
               <th>클라이언트</th><th>이름</th><th>프로토콜</th>
-              <th style={{ textAlign: 'right' }}>합계 ops</th><th>주 노드</th><th style={{ textAlign: 'right' }}>비중</th>
+              <th style={{ textAlign: 'right' }} title="창 평균 ops/s(전 노드 합)">창 평균 ops/s</th><th>주 노드</th><th style={{ textAlign: 'right' }}>비중</th>
               {nodes.map((n) => <th key={n} style={{ textAlign: 'right' }}>노드 {n}</th>)}
             </tr></thead>
             <tbody>
@@ -96,7 +96,7 @@ export default function ClientDistView({ deviceId, end = null, offsetMin = 540, 
           </STable>
         </div>
       )}
-      {ready && <div className="nl-note">상위 {d.clients.length}{d.clientsTotal > d.clients.length ? ` / ${d.clientsTotal}` : ''} 클라이언트(창 ops 합 내림차순). 비중 = 그 클라이언트의 창 ops 중 그 노드 몫 · ‘고정’ = 한 노드 비중이 기준 이상. 통계에는 그 순간 요청을 보낸 클라이언트만 잡힙니다.</div>}
+      {ready && <div className="nl-note">상위 {d.clients.length}{d.clientsTotal > d.clients.length ? ` / ${d.clientsTotal}` : ''} 클라이언트(창 평균 ops/s 내림차순 — {d.basis || '창 합'}). 비중 = 그 클라이언트의 창 ops 중 그 노드 몫 · ‘고정’ = 한 노드 비중이 기준 이상. 통계에는 그 순간 요청을 보낸 클라이언트만 잡힙니다.</div>}
     </div>
   );
 }

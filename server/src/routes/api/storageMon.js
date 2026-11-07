@@ -15,7 +15,7 @@ import { listActivity } from '../../storage/activityLog.js';
 import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable,
   dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN, capacityResets,
   nodeLoadQuery, nodeLoadJobs, nodeLoadOldest,
-  nodeClientsQuery, nodeClientsLatest, nodeProtoQuery, nodeClientOldest, nodeLoadNodeIds } from '../../storage/db.js'; // v2.932 클라이언트·프로토콜
+  nodeClientsQuery, nodeClientsLatest, nodeProtoQuery, nodeClientOldest, nodeLoadNodeIds, nodeLoadSampleCount } from '../../storage/db.js'; // v2.932 클라이언트·프로토콜
 import { nodeLoadWindow, buildNodeLoadSeries, jobsSeriesOf, NODE_LOAD_GROUPS, BASELINE, CLUSTER_AGG, METRIC_BY_KEY,
   NODE_LOAD_LIMIT, clientNodeMatrix, nodeSkew, rebalanceCandidates, FIXED_SHARE_DEF, SKEW_FACTOR_DEF, protoKeyOf } from '../../storage/nodeLoad.js';   // v2.926 노드 부하 추이 · v2.932 재배치 판정
 import { buildClientNameIndex, nameClientRows, nameStats } from '../../storage/clientNames.js'; // v2.932 IP → 인벤토리 이름(역방향 DNS 없음)
@@ -722,7 +722,11 @@ api.get('/tools/storage/devices/:id/client-dist', toolsPerm, fullScopeOnly, asyn
   const fixedShare = clamp(req.query.fixed, 0.5, 1, FIXED_SHARE_DEF);
   const factor = clamp(req.query.skew, 1.1, 5, SKEW_FACTOR_DEF);
   const q = await nodeClientsQuery(id, { from: w.start, to: w.end });
-  const rows = q.rows.filter((r) => !proto || r.proto === proto).map((r) => ({ client: r.client, name: r.name, proto: r.proto, node: r.node, ops: r.opsSum }));
+  // 창 합(ops_sum — 표본마다의 ops/s 를 더한 값)을 표본 수로 나눠 **창 평균 ops/s** 로(Chromium 판독: 합을 ops/s 로 적으면 '1,345,191 ops/s' 같은 거짓 단위가 된다).
+  //   비율·고정·쏠림·후보 순서는 나누기 전과 같다(상수 배). 표본에 없던 순간은 0 으로 센 평균이다.
+  const samples = await nodeLoadSampleCount(id, { from: w.start, to: w.end });
+  const perS = (v) => (numOrNull(v) == null ? null : (samples > 0 ? v / samples : v));
+  const rows = q.rows.filter((r) => !proto || r.proto === proto).map((r) => ({ client: r.client, name: r.name, proto: r.proto, node: r.node, ops: perS(r.opsSum) }));
   const nodeIds = await nodeLoadNodeIds(id, { from: w.start, to: w.end });
   const matrix = clientNodeMatrix(rows, { fixedShare, limit: 50 });
   const skew = nodeSkew(matrix.nodeTotals, nodeIds, { factor });
@@ -735,6 +739,7 @@ api.get('/tools/storage/devices/:id/client-dist', toolsPerm, fullScopeOnly, asyn
     ok: true, db: q.db, deviceId: id, range, days: w.days, start: w.start, end: w.end, past: w.past, clamped: w.clamped, now, offsetMin: DAY_OFFSET_MIN,
     sample: si, source: q.source || null, proto: proto || 'all', protos: [...new Set(q.rows.map((r) => r.proto).filter(Boolean))].sort(),
     nodes: skew.nodes, mean: skew.mean, thresholds: { fixedShare, skewFactor: factor },
+    samples, basis: samples > 0 ? '창 평균 ops/s — 창의 표본 수로 나눈 값(표본에 없던 순간은 0 · 1시간 수집 스냅샷도 표본으로 세어 약간 낮을 수 있습니다)' : '창 합(표본 수를 세지 못해 나누지 않았습니다)',
     clients, clientsTotal: new Set(rows.map((r) => r.client)).size, candidates, names: nameStats(clients),
     note: '재배치 후보는 계산일 뿐입니다 — 포탈은 장비·클라이언트 설정을 바꾸지 않습니다. 고정 클라이언트를 다른 노드(SmartConnect 풀·마운트 대상)로 옮기는 작업은 운영자가 합니다.',
     oldest: await nodeClientOldest(id), retention: { clientRawDays: keep.clientRaw, clientHourlyDays: keep.clientHourly, clientDailyDays: keep.clientDaily },
