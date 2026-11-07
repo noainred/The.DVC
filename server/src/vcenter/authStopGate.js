@@ -73,9 +73,10 @@ export const authStopBody = (info) => ({ ok: false, ...info });
  * 보내고 true. `allowManual` 이면 사람이 누른 `manual=1` 은 막지 않는다(성능 모달 '다시 조회' — v2.591 규칙 3).
  * v2.744(감사 VC-04): 그보다 먼저 직접 수집 대상인지 본다 — 비활성·점검중·엣지 위임이면 manual 이어도 **409 + skipReason**.
  */
-export function respondIfVcAuthStopped(req, res, vc, { allowManual = false } = {}) {
+export function respondIfVcAuthStopped(req, res, vc, { allowManual = false, skipExtra = null } = {}) {
   const skip = vcSkipOf(vc);
-  if (skip) { res.status(409).json({ ok: false, ...skip }); return true; }
+  // v2.926: skipExtra — 호출부가 사유에 덧붙일 값(예: 엣지 위임이면 담당 엣지 이름). 사유 · 문구는 그대로다.
+  if (skip) { res.status(409).json({ ok: false, ...skip, ...((typeof skipExtra === 'function' && skipExtra(skip)) || {}) }); return true; }
   if (allowManual && req.query?.manual === '1') return false;
   const info = vcAuthStopOf(vc);
   if (!info) return false;

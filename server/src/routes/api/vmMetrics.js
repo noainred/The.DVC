@@ -23,7 +23,10 @@ import { loadCollectors } from '../../collector/registry.js';
  *   (응답 모양·문구는 그대로다 — authStop2591 F6 이 고정한다).
  * @returns {boolean} 응답을 보냈으면 true
  */
-const metricAuthStopped = (req, res, vc) => respondIfVcAuthStopped(req, res, vc, { allowManual: true });
+// v2.926(문서 '다음 후보' — 엣지 위임 vCenter 의 성능은 그 엣지 포탈에서): 409 site 에 **담당 엣지 이름**을 싣는다 — 스냅샷이 관측한 pusher(collectedBy).
+//   이름은 vCenter 객체로 이미 보이는 값이다(법인별 호스트 화면). 엣지 포탈 주소는 싣지 않는다(내부 주소를 조회 계정에 새로 내보내지 않는다).
+const siteAgentOf = (vcId) => { const v = (store.get().vcenters || []).find((x) => x.id === vcId); const a = typeof v?.collectedBy === 'string' ? v.collectedBy.trim().slice(0, 64) : ''; return a ? { agent: a } : null; };
+const metricAuthStopped = (req, res, vc) => respondIfVcAuthStopped(req, res, vc, { allowManual: true, skipExtra: (s) => (s.skipReason === 'site' ? siteAgentOf(vc?.id) : null) });
 const metricError = (res, vc, err) => respondVcError(res, vc, err);
 
 
