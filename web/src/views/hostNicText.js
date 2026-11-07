@@ -18,7 +18,7 @@ export function countCell(row, key) {
   const valid = numOrNull(row?.valid?.[key]);
   const total = numOrNull(row?.samples);
   const partial = valid != null && total != null && total > 0 && valid < total;
-  return { text: `${v.toLocaleString('en-US')}${partial ? ' (일부)' : ''}`, title: partial ? `값이 있는 표본 ${valid} / ${total}개만 더했습니다(수집 공백은 0 으로 세지 않습니다)` : `20초 표본 ${total ?? '—'}개 합`, partial };
+  return { text: `${v.toLocaleString('en-US')}${partial ? ' (일부)' : ''}`, title: partial ? `값이 있는 표본 ${valid} / ${total}개만 더했습니다(수집 공백은 0 으로 세지 않습니다)` : (total != null ? `20초 표본 ${total}개 합` : ''), partial };
 }
 
 /**
@@ -105,7 +105,7 @@ export function nicSummary(data) {
   if (!rows.length) notes.push('vCenter 가 vmnic 계열을 돌려주지 않았습니다(호스트 연결 끊김 · 실시간 통계 없음 등 — 이유는 응답만으로 단정할 수 없습니다)');
   if (rows.some((r) => r?.partial)) notes.push('(일부) 는 수집 공백이 섞인 합입니다 — 0 이어도 ‘드롭 없음’ 으로 판정하지 않습니다');
   const text = rows.length
-    ? `vmnic ${rows.length}개 · 실시간 최근 1시간${win}(20초 표본 ${n ?? '—'}개) · 수신 드롭 합 ${countText(sum('droppedRx'))} · 송신 드롭 합 ${countText(sum('droppedTx'))}`
+    ? `vmnic ${rows.length}개 · 실시간 최근 1시간${win}${n != null ? `(20초 표본 ${n}개)` : ''} · 수신 드롭 합 ${countText(sum('droppedRx'))} · 송신 드롭 합 ${countText(sum('droppedTx'))}`
     : `실시간 최근 1시간${win}`;
   return { text, notes };
 }
