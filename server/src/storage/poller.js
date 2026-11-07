@@ -21,7 +21,7 @@ import * as vplex from './collectors/vplex.js';           // v2.311(vplex·metro
 import { collectAreasOnce } from './areasCollector.js';
 import { areasExtraFields } from './onefsAreaSummary.js'; // v2.730 검토 I-03
 import { enabledAreas, ONEFS_AREAS } from './onefsCatalog.js';
-import { saveCapacityPoint, saveAreaResults } from './db.js';
+import { saveCapacityPoint, saveAreaResults, saveNodeLoadPoint } from './db.js';
 import { recordActivity } from './activityLog.js';
 import { runtimeIntervals, runtimeIntervalSource, centralIntervalsInfo, startAdaptiveTimer, applyOwnIntervals } from './intervals.js';
 
@@ -133,6 +133,8 @@ async function collectOneInner(dev, startedAt) {
   putSnapshot(snap);
   // 용량 시계열(v2.308) — 성공 수집마다 1점 적재(추이 그래프/DB 저장 요구).
   try { await saveCapacityPoint(snap); } catch { /* DB 비활성 환경 — 스냅샷 경로는 계속 */ }
+  // v2.926 — 노드 부하(네트워크·디스크·CPU) 시계열. 노드 값이 없는 타입은 nodeLoadRowsOf 가 'no-load' 로 건너뛴다(던지지 않는다).
+  try { await saveNodeLoadPoint(snap); } catch { /* DB 비활성 — 스냅샷 경로는 계속 */ }
   // OneFS API 전 영역 수집(v2.308, 40개 표) — 스냅샷보다 무거워 별도 주기(기본 60분)로.
   // mock 모드는 요약만 시뮬레이션. 실패는 영역별 요약에 그대로 남는다(은폐 금지).
   if (snap.ok && dev.type === 'isilon') {

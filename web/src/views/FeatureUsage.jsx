@@ -603,7 +603,7 @@ function UsageSettings() {
               {form.excluded.map((x) => (
                 <span key={x} className="fu-chipx">{x}<button type="button" aria-label={`${x} 제외 해제`} onClick={() => set({ excluded: form.excluded.filter((y) => y !== x) })}>×</button></span>
               ))}
-              <input className="input fu-exin" placeholder="계정 추가 후 Enter" aria-label="제외할 계정" value={exIn} onChange={(e) => setExIn(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEx(); } }} />
+              <input className="input fu-exin" placeholder="계정 추가 후 Enter" aria-label="제외할 계정" value={exIn} onChange={(e) => setExIn(e.target.value)} onKeyDown={(e) => { if (e.nativeEvent?.isComposing || e.keyCode === 229) return; if (e.key === 'Enter') { e.preventDefault(); addEx(); } }} />
               <button type="button" className="btn btn-sm" onClick={addEx}>추가</button>
             </div>
             <div className="note">데모 계정은 기본으로 제외되어 있습니다. 제외를 풀어도 지난 기록은 생기지 않습니다(최대 {data.limits.excluded}개).</div>

@@ -37,7 +37,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { DAY_OFFSET_MIN, dayKey } from '../util/dayKey.js';
 import { openSqlite, isSqliteLockError } from '../util/sqliteOpen.js';
@@ -148,7 +148,8 @@ export const SCHEMA = Object.freeze({
     PRIMARY KEY (agent, key, ts));
     CREATE INDEX IF NOT EXISTS idx_bmm_raw_ts ON usage_history(ts);
     CREATE TABLE IF NOT EXISTS _pend (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, h INTEGER NOT NULL, daily INTEGER NOT NULL DEFAULT 1, at INTEGER,
-      PRIMARY KEY (agent, key, h));`,
+      PRIMARY KEY (agent, key, h));
+    CREATE INDEX IF NOT EXISTS idx_bmm_pend_h ON _pend(h);`,
   h1: `CREATE TABLE IF NOT EXISTS usage_hourly (
     agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, h INTEGER NOT NULL, name TEXT, vcenter_id TEXT,
     samples INTEGER NOT NULL DEFAULT 0, last_ts INTEGER, peak_samples INTEGER NOT NULL DEFAULT 0, peak_src TEXT,
@@ -261,6 +262,7 @@ export function failedFiles() { return [..._failed.entries()].map(([name, v]) =>
 export function _resetMonthStoreForTest() {
   for (const h of _open.values()) { try { h.db.close(); } catch { /* */ } }
   _open.clear(); opening.clear(); _failed.clear(); _prepCache.clear(); _pruning = null; _counts = null; _countsRunning = null; _chain = Promise.resolve();
+  _repairFail.clear();
 }
 
 /* ════════════════════════ 적재 ════════════════════════ */
@@ -443,72 +445,140 @@ async function clearPend(list, agent) {
 }
 
 /** 5분 행들 → 롤업 한 줄의 값(순수 — 재집계용). 열 순서는 cols(H1_COLS · D1_COLS) 그대로. */
+/*
+ * v2.932(점검 E1-02): 재집계 비용의 대부분이 이 함수였다(하루 277행에 약 4ms — 행 × 열마다 `${p}_sum` 같은 열쇠 문자열을 새로 만들고 큰 객체에 썼다).
+ *   열쇠는 rolls 배열마다 한 번 만들고(WeakMap) 합·개수·최대·피크는 지역 배열에 모은 뒤 마지막에 한 번 쓴다. 더하는 순서(시각 순)·비교 규칙은 같다 —
+ *   결과가 예전 판본과 같음을 시험이 대조한다(sweep2932BmPerf).
+ */
+const _rollKeys = new WeakMap();
+function rollKeysOf(rolls) {
+  let k = _rollKeys.get(rolls);
+  if (!k) { k = rolls.map(({ col, p }) => ({ col, s: `${p}_sum`, c: `${p}_n`, m: `${p}_max` })); _rollKeys.set(rolls, k); }
+  return k;
+}
+const PEAK_KEYS = Object.freeze(PEAK_COLS.map((c) => Object.freeze({ v: `${c}_peak`, at: `${c}_peak_at` })));
 export function aggregateRows(rows, { agent, key, bucketCol, bucket, rolls }) {
   const sorted = [...rows].sort((a, b) => Number(a.ts) - Number(b.ts));
   const last = sorted.at(-1) || {};
   const o = { agent, key, [bucketCol]: bucket, name: String(last.name || ''), vcenter_id: String(last.vcenter_id ?? last.vcenterId ?? ''), samples: sorted.length,
     last_ts: last.ts == null ? null : Number(last.ts), peak_samples: 0, peak_src: null };
-  for (const { p } of rolls) { o[`${p}_sum`] = 0; o[`${p}_n`] = 0; o[`${p}_max`] = null; }
-  for (const c of PEAK_COLS) { o[`${c}_peak`] = null; o[`${c}_peak_at`] = null; }
+  const rk = rollKeysOf(rolls);
+  const R = rk.length; const P = PEAK_KEYS.length;
+  const sum = new Array(R).fill(0); const cnt = new Array(R).fill(0); const mx = new Array(R).fill(null);
+  const pk = new Array(P).fill(null); const pkAt = new Array(P).fill(null);
   for (const r of sorted) {
-    const hp = hasPeak(r);
+    let hp = false;
+    for (let j = 0; j < P; j++) if (n(r[PEAK_KEYS[j].v]) != null) { hp = true; break; }   // = hasPeak(r)
     if (hp) o.peak_samples += 1;
     o.peak_src = mergePeakSrc(o.peak_src, r.peak_src ? String(r.peak_src) : null, hp);
-    for (const { col, p } of rolls) {
-      const v = n(r[col]);
+    for (let i = 0; i < R; i++) {
+      const v = n(r[rk[i].col]);
       if (v == null) continue;
-      o[`${p}_sum`] += v; o[`${p}_n`] += 1;
-      if (o[`${p}_max`] == null || v > o[`${p}_max`]) o[`${p}_max`] = v;
+      sum[i] += v; cnt[i] += 1;
+      if (mx[i] == null || v > mx[i]) mx[i] = v;
     }
-    for (const c of PEAK_COLS) {
-      const v = n(r[`${c}_peak`]);
-      if (v != null && (o[`${c}_peak`] == null || v > o[`${c}_peak`])) { o[`${c}_peak`] = v; o[`${c}_peak_at`] = n(r[`${c}_peak_at`]); }
+    for (let j = 0; j < P; j++) {
+      const v = n(r[PEAK_KEYS[j].v]);
+      if (v != null && (pk[j] == null || v > pk[j])) { pk[j] = v; pkAt[j] = n(r[PEAK_KEYS[j].at]); }
     }
   }
+  for (let i = 0; i < R; i++) { o[rk[i].s] = sum[i]; o[rk[i].c] = cnt[i]; o[rk[i].m] = mx[i]; }
+  for (let j = 0; j < P; j++) { o[PEAK_KEYS[j].v] = pk[j]; o[PEAK_KEYS[j].at] = pkAt[j]; }
   return o;
+}
+
+/*
+ * v2.932(점검 E1-02): 보정은 한 번에 끝내지 않는다 — 롤업이 한 번 실패하면 대기가 서버 수만큼(200대면 200) 남고, 예전에는 다음 틱이
+ *   버킷·날마다 원시를 다시 읽어(하루 277행) **양보 없이** 재집계했다(200대 · 23시 실측 1.3초 정지). 1일 파일이 계속 안 열리면 그것을 매 틱 되풀이했다.
+ *   ① 버킷·날 사이 시간 기준 양보(createYielder) ② 한 번에 쓰는 시간 상한(REPAIR_BUDGET_MS — 남은 대기는 _pend 에 그대로 두고 다음 틱이 잇는다) ·
+ *   serial() 안이라 그동안 다른 적재가 기다린다 — 그 대기를 이 상한으로 묶는다 ③ 같은 (agent·key·날) 묶음은 하루 원시를 **한 번** 읽어 시간 버킷과
+ *   1일에 같이 쓴다(같은 행 — 시간 버킷은 하루 안에 들어간다) · 재집계에 쓰는 열만 읽는다 ④ 같은 롤업 파일이 보정에서 잇달아 실패하면 재시도 간격을
+ *   늘리고(두 번째부터 10분 · 20분 · 40분 · 상한 1시간) 그동안 그 파일로 가는 대기는 건드리지 않는다(skipped) — 상태는 결과의 backoff(파일 이름 · 횟수 ·
+ *   다음 시도 · 사유)로 밝힌다(poller _lastRepair → bmUsageStatus().rollupRepair). 한 실행 안에서도 한 번 실패한 파일은 다시 열지 않는다
+ *   (예전에는 날마다 손상 파일을 다시 열었다 — 200번).
+ */
+export const REPAIR_BUDGET_MS = clampIntervalMs(process.env.BMUSAGE_REPAIR_BUDGET_MS, 1_000, 50);   // 하한 50ms · 상한 타이머 한계(TIM2605-04)
+export const REPAIR_BACKOFF_BASE_MS = 10 * 60_000;
+export const REPAIR_BACKOFF_MAX_MS = 60 * 60_000;
+/** 연속 실패 횟수 → 다음 시도까지 기다릴 시간(첫 실패는 다음 틱에 바로 다시 — 일시 오류). */
+export const repairBackoffMs = (fails) => (fails < 2 ? 0 : Math.min(REPAIR_BACKOFF_MAX_MS, REPAIR_BACKOFF_BASE_MS * 2 ** (fails - 2)));
+const _repairFail = new Map();   // 롤업 파일 이름 → { fails, since, at, nextAt, reason }
+/** 재집계가 읽는 원시 열(aggregateRows 가 쓰는 것 — 시각 · 이름 · 법인 · 피크 출처 · 롤업 열 · 피크 값과 시각). 1일(D1_ROLL_ALL)도 같은 열 집합이다. */
+export const REPAIR_SRC_COLS = Object.freeze(['ts', 'name', 'vcenter_id', 'peak_src', ...ROLL.map(({ col }) => col), ...PEAK_COLS.flatMap((c) => [`${c}_peak`, `${c}_peak_at`])]);
+const REPAIR_WHERE = 'FROM usage_history WHERE agent=? AND key=? AND ts>=? AND ts<?';
+/** 열 이름으로 읽되, 열이 없는 예전 파일이면 예전처럼 * 로(같은 행 · 같은 집계). */
+function repairSelect(rawDb) {
+  try { return rawDb.prepare(`SELECT ${REPAIR_SRC_COLS.join(',')} ${REPAIR_WHERE}`); } catch { return rawDb.prepare(`SELECT * ${REPAIR_WHERE}`); }
 }
 
 /**
  * 보정 대기 처리 — 원시에서 그 시간(·하루) 버킷을 다시 집계해 롤업 행을 **바꾼다**(누적이 아니라 교체 — 다시 해도 같은 값).
  *  · 1일 재집계는 dailyLiveAfter 보다 나중 행만 센다(마이그레이션이 옮긴 예전 원시는 1일 사본 표가 따로 갖는다 — 두 번 세지 않게).
  *  · 하루의 원시가 보존 밖으로 일부 지워졌으면(rawKeepFrom 보다 하루 시작이 이르면) 1일은 다시 집계하지 않는다(덜 센 값으로 덮지 않게) — expiredDaily 로 센다.
- * @returns {Promise<{buckets:number, days:number, expiredDaily:number, errors:string[]}>}
+ *  · v2.932(점검 E1-02): budgetMs(시간 상한 — 넘으면 deferred · budgetHit) · sliceMs(양보 간격) · yielder(호출부 양보기) · ignoreBackoff(마이그레이션 — 자기 재시도 정책이 있다).
+ * @returns {Promise<{buckets:number, days:number, expiredDaily:number, errors:string[], skipped:number, deferred:number, budgetHit?:boolean, backoff?:Array}>}
  */
-export async function repairPending({ dailyLiveAfter = null, rawKeepFrom = null, max = 2_000 } = {}) {
-  return serial(() => repairPendingInner({ dailyLiveAfter, rawKeepFrom, max }));
+export async function repairPending({ dailyLiveAfter = null, rawKeepFrom = null, max = 2_000, budgetMs = REPAIR_BUDGET_MS, sliceMs = 15, ignoreBackoff = false, yielder = null } = {}) {
+  return serial(() => repairPendingInner({ dailyLiveAfter, rawKeepFrom, max, budgetMs, sliceMs, ignoreBackoff, yielder }));
 }
-async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max }) {
-  const out = { buckets: 0, days: 0, expiredDaily: 0, errors: [] };
+async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max, budgetMs, sliceMs, ignoreBackoff, yielder }) {
+  const out = { buckets: 0, days: 0, expiredDaily: 0, errors: [], skipped: 0, deferred: 0 };
+  const t0 = performance.now();
+  const nowMs = Date.now();
+  // 호출부의 양보기를 받으면 그 시계를 잇는다(마이그레이션 — 앞의 쓰기 시간과 보정 시간이 한 구간으로 합쳐지지 않게).
+  const maybeYield = typeof yielder === 'function' ? yielder : createYielder(sliceMs);
+  // 이번 실행에서 실패한 파일(이름 → 사유) · 성공한 파일 · 대기가 가리킨 파일
+  const run = { failed: new Map(), ok: new Set(), targeted: new Set() };
+  const blocked = (name) => run.failed.has(name) || (!ignoreBackoff && (_repairFail.get(name)?.nextAt ?? 0) > nowMs);
+  // 한 실행에 적어도 한 묶음은 끝낸다(앞 준비 — 파일 열기·대기 읽기 — 가 상한을 넘어도 대기가 영원히 줄지 않는 일이 없게).
+  let progressed = false;
+  const overBudget = () => progressed && performance.now() - t0 >= budgetMs;
   for (const f of listFamilyFiles('raw')) {
+    if (overBudget()) { out.budgetHit = true; break; }
     await withPeriodFile('raw', f.key, { create: false }, async (rawDb) => {
       if (!rawDb) return;
       let pend = [];
       try { pend = rawDb.prepare('SELECT agent, key, h, daily FROM _pend ORDER BY h LIMIT ?').all(max); } catch { return; }
       if (!pend.length) return;
-      const selHour = rawDb.prepare('SELECT * FROM usage_history WHERE agent=? AND key=? AND ts>=? AND ts<?');
-      const days = new Map();
-      const done = [];
+      const sel = repairSelect(rawDb);
+      // 묶음: 1일까지 다시 해야 하는 대기는 (agent·key·날), 1시간만이면 버킷 하나 — 묶음 단위로 끝내거나 통째로 다음으로 미룬다.
+      const groups = new Map();
       for (const pd of pend) {
-        const h = Number(pd.h);
-        const rows = selHour.all(pd.agent, pd.key, h, h + HOUR_MS);
-        const ok = await replaceRollup('h1', month0('h1', h), 'usage_hourly', H1_COLS, 'h', h, rows, { agent: pd.agent, key: pd.key, rolls: ROLL }, out);
-        if (!ok) continue;
-        out.buckets += 1;
-        if (Number(pd.daily)) {
-          const day = dayKey(h);
-          const dk = `${pd.agent}\u0000${pd.key}\u0000${day}`;
-          if (!days.has(dk)) days.set(dk, { agent: pd.agent, key: pd.key, day, ts: h, items: [] });
-          days.get(dk).items.push(pd);
-        } else done.push(pd);
+        const h = Number(pd.h); const daily = !!Number(pd.daily);
+        const day = daily ? dayKey(h) : null;
+        const gk = daily ? `d\u0000${pd.agent}\u0000${pd.key}\u0000${day}` : `h\u0000${pd.agent}\u0000${pd.key}\u0000${h}`;
+        if (!groups.has(gk)) groups.set(gk, { agent: pd.agent, key: pd.key, day, items: [] });
+        groups.get(gk).items.push(pd);
       }
-      for (const d of days.values()) {
-        const [ds, de] = dayRange(d.day);
-        if (rawKeepFrom != null && ds < rawKeepFrom) { out.expiredDaily += 1; for (const it of d.items) done.push(it); continue; }
-        const rows = rawDb.prepare('SELECT * FROM usage_history WHERE agent=? AND key=? AND ts>=? AND ts<?').all(d.agent, d.key, ds, de)
-          .filter((r) => dailyLiveAfter == null || Number(r.ts) > dailyLiveAfter);
-        const ok = await replaceRollup('d1', d.day.slice(0, 4), 'usage_daily', D1_COLS, 'day', d.day, rows, { agent: d.agent, key: d.key, rolls: D1_ROLL_ALL }, out);
+      const done = [];
+      for (const g of groups.values()) {
+        if (overBudget()) { out.budgetHit = true; out.deferred += g.items.length; continue; }
+        const [ds, de] = g.day ? dayRange(g.day) : [0, 0];
+        const expired = !!g.day && rawKeepFrom != null && ds < rawKeepFrom;
+        const targets = new Set(g.items.map((pd) => fileNameOf('h1', month0('h1', Number(pd.h)))));
+        if (g.day && !expired) targets.add(fileNameOf('d1', g.day.slice(0, 4)));
+        for (const t of targets) run.targeted.add(t);
+        if ([...targets].some(blocked)) { out.skipped += g.items.length; continue; }
+        progressed = true;
+        const dayRows = g.day ? sel.all(g.agent, g.key, ds, de) : null;
+        const hourOk = [];
+        for (const pd of g.items) {
+          const h = Number(pd.h);
+          if (run.failed.has(fileNameOf('h1', month0('h1', h)))) continue;   // 이 실행에서 이미 실패한 파일은 다시 열지 않는다
+          const rows = dayRows ? dayRows.filter((r) => Number(r.ts) >= h && Number(r.ts) < h + HOUR_MS) : sel.all(pd.agent, pd.key, h, h + HOUR_MS);
+          const ok = await replaceRollup('h1', month0('h1', h), 'usage_hourly', H1_COLS, 'h', h, rows, { agent: pd.agent, key: pd.key, rolls: ROLL }, out, run);
+          await maybeYield();
+          if (!ok) continue;
+          out.buckets += 1; hourOk.push(pd);
+        }
+        if (!g.day) { for (const it of hourOk) done.push(it); continue; }
+        if (!hourOk.length) continue;
+        if (expired) { out.expiredDaily += 1; for (const it of hourOk) done.push(it); continue; }
+        const rows = dailyLiveAfter == null ? dayRows : dayRows.filter((r) => Number(r.ts) > dailyLiveAfter);
+        const ok = await replaceRollup('d1', g.day.slice(0, 4), 'usage_daily', D1_COLS, 'day', g.day, rows, { agent: g.agent, key: g.key, rolls: D1_ROLL_ALL }, out, run);
+        await maybeYield();
         if (!ok) continue;
-        out.days += 1; for (const it of d.items) done.push(it);
+        out.days += 1; for (const it of hourOk) done.push(it);
       }
       if (done.length) {
         try { txn(rawDb, () => { const del = rawDb.prepare('DELETE FROM _pend WHERE agent=? AND key=? AND h=?'); for (const pd of done) del.run(pd.agent, pd.key, pd.h); }); }
@@ -516,27 +586,45 @@ async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max }) {
       }
     });
   }
+  // 재시도 간격 — 실패한 파일은 횟수를 올리고, 성공만 한 파일은 지운다. 아무 대기도 가리키지 않는 파일은(끝까지 본 실행에서만) 지운다.
+  for (const [name, reason] of run.failed) {
+    const prev = _repairFail.get(name); const fails = (prev?.fails || 0) + 1;
+    _repairFail.set(name, { fails, since: prev?.since ?? nowMs, at: nowMs, nextAt: nowMs + repairBackoffMs(fails), reason });
+  }
+  for (const name of [..._repairFail.keys()]) {
+    if (run.failed.has(name)) continue;
+    if (run.ok.has(name) || (!out.budgetHit && !run.targeted.has(name))) _repairFail.delete(name);
+  }
+  if (_repairFail.size) {
+    out.backoff = [..._repairFail.entries()].slice(0, 8).map(([file, v]) => ({ file, ...v }));
+    out.repeatFail = out.backoff.some((b) => b.fails >= 2);
+  }
   return out;
 }
+/** 재시도 간격 상태(진단 · 시험). */
+export function repairBackoffState() { return [..._repairFail.entries()].map(([file, v]) => ({ file, ...v })); }
 const month0 = (family, ts) => periodKeyOf(family, ts);
 /** 하루(포탈 시각) [시작, 끝) ms. */
 function dayRange(day) {
   const s0 = Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))) - OFF_MS;
   return [s0, s0 + DAY_MS];
 }
-/** 롤업 행 하나를 원시 집계로 교체(DELETE + INSERT 한 트랜잭션). 원시가 0행이면 지우기만. */
-async function replaceRollup(family, pkey, table, cols, bucketCol, bucket, rows, { agent, key, rolls }, out) {
+/** 롤업 행 하나를 원시 집계로 교체(DELETE + INSERT 한 트랜잭션). 원시가 0행이면 지우기만. run 이 있으면 파일별 성패를 적는다(재시도 간격). */
+async function replaceRollup(family, pkey, table, cols, bucketCol, bucket, rows, { agent, key, rolls }, out, run = null) {
+  const name = fileNameOf(family, pkey);
+  const fail = (reason) => { out.errors.push(`${name}: ${reason}`); if (run && !run.failed.has(name)) run.failed.set(name, reason); return false; };
   return withPeriodFile(family, pkey, { create: true }, (db) => {
-    if (!db) { out.errors.push(`${fileNameOf(family, pkey)}: 열기 실패`); return false; }
+    if (!db) return fail(_failed.get(name)?.reason || '열기 실패');
     try {
       txn(db, () => {
-        db.prepare(`DELETE FROM ${table} WHERE agent=? AND key=? AND ${bucketCol}=?`).run(agent, key, bucket);
+        prep(db, name, `rep-del-${table}`, `DELETE FROM ${table} WHERE agent=? AND key=? AND ${bucketCol}=?`).run(agent, key, bucket);
         if (!rows.length) return;
         const o = aggregateRows(rows, { agent, key, bucketCol, bucket, rolls });
-        db.prepare(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).run(...cols.map((c) => (o[c] === undefined ? null : o[c])));
+        prep(db, name, `rep-ins-${table}`, `INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).run(...cols.map((c) => (o[c] === undefined ? null : o[c])));
       });
+      run?.ok.add(name);
       return true;
-    } catch (e) { out.errors.push(`${fileNameOf(family, pkey)}: ${String(e?.message || e).slice(0, 120)}`); return false; }
+    } catch (e) { return fail(String(e?.message || e).slice(0, 120)); }
   });
 }
 /** 보정 대기 수(진단 — 파일마다 집계 하나). */

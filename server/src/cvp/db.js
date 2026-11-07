@@ -497,7 +497,21 @@ export async function pruneDevices(agent, keepByCvp = {}, { cvpIds = null } = {}
     for (const c of dropCvps) { await dropL2Where(db.conn, 'agent=? AND cvp_id=?', [agent, c]); await dropEpWhere(db.conn, 'agent=? AND cvp_id=?', [agent, c]); }   // v2.929 C-③
     for (const cvpId of Object.keys(keepByCvp || {})) {
       if (!Array.isArray(keepByCvp[cvpId])) continue;
-      await dropL2Where(db.conn, 'agent=? AND cvp_id=? AND device_key NOT IN (SELECT device_key FROM device_latest WHERE agent=? AND cvp_id=?)', [agent, cvpId, agent, cvpId]);
+      /*
+       * v2.932(점검 E1-06): 예전에는 push 마다 고아가 0건이어도 그 CVP 의 L2 행 전부를 NOT IN 으로 훑었다(40만 행 68ms — cvp-data 청크 0 마다).
+       *   고아 장비 키는 장비당 1행인 l2_meta 에서 먼저 고르고 그 키만 지운다(스캔 비용 = 장비 수). l2_meta 없이 남은 행(예외 경로)은
+       *   전체 훑기를 (agent, CVP)마다 L2_FULL_SWEEP_MS 에 한 번만 한다 — 정리를 없애지 않고 횟수만 줄인다.
+       */
+      const orphan = db.conn.prepare('SELECT device_key AS k FROM l2_meta WHERE agent=? AND cvp_id=? AND device_key NOT IN (SELECT device_key FROM device_latest WHERE agent=? AND cvp_id=?)')
+        .all(agent, cvpId, agent, cvpId).map((r) => r.k);
+      for (const k of orphan) await dropL2Where(db.conn, 'agent=? AND cvp_id=? AND device_key=?', [agent, cvpId, k]);
+      const sweepKey = `${agent}\u0000${cvpId}`;
+      const last = _l2FullSweepAt.get(sweepKey) || 0;
+      if (Date.now() - last >= L2_FULL_SWEEP_MS) {
+        _l2FullSweepAt.set(sweepKey, Date.now());
+        if (_l2FullSweepAt.size > 4096) _l2FullSweepAt.delete(_l2FullSweepAt.keys().next().value);
+        await dropL2Where(db.conn, 'agent=? AND cvp_id=? AND device_key NOT IN (SELECT device_key FROM device_latest WHERE agent=? AND cvp_id=?)', [agent, cvpId, agent, cvpId]);
+      }
     }
   } catch (e) { console.warn(`[cvp-db] L2 정리 실패(다음 정리 때 다시): ${e.message}`); }
   return { removed };
@@ -754,23 +768,36 @@ export async function portWindowSums(ports = [], { sinceMs = 24 * 3600_000, rece
  *   토큰 경계 판정은 cvp/hostMatch.js 가 한다(여기서는 넉넉히 뽑는다). 장비 호스트명을 붙여 준다. 단서 8개·결과 200행 상한.
  * @param {string[]} terms 소문자 단서(LIKE 의 % _ 는 이스케이프)
  */
-export async function portsByDesc(terms = [], { limit = 200 } = {}) {
+/*
+ * v2.932(점검 A1-07): 예전에는 단서를 앞 8개만 썼다 — 호스트가 MAC 표기 4가지 × NIC 수를 넘겨 vmnic2 부터의 MAC 은 묻지도 않았고 잘림 표시도 없었다.
+ *   이름 단서(`terms`)는 그대로 lower(descr) LIKE 로, MAC(`macs` — 12자 16진)은 설명에서 ':' '-' '.' 를 뺀 글자에 **한 표기로** 묻는다
+ *   (표기 4가지를 단서 4개로 늘리지 않는다 — 한 번 훑는 OR 길이를 NIC 수에 비례하게). 상한을 넘긴 단서는 `termsTruncated` 로 밝힌다.
+ *   경계 판정(다른 16진 문자열 안의 우연 일치)은 지금처럼 cvp/hostMatch matchUplinks 가 한다.
+ */
+export const DESC_NAME_TERMS_MAX = 8;
+export const DESC_MAC_TERMS_MAX = 32;
+export async function portsByDesc(terms = [], { limit = 200, macs = [] } = {}) {
   const db = await open();
   if (!db) return { rows: [], unavailable: true };
-  const ts = [...new Set((Array.isArray(terms) ? terms : []).map((t) => String(t || '').trim().toLowerCase()).filter((t) => t.length >= 3))].slice(0, 8);
-  if (!ts.length) return { rows: [] };
+  const all = [...new Set((Array.isArray(terms) ? terms : []).map((t) => String(t || '').trim().toLowerCase()).filter((t) => t.length >= 3))];
+  const macAll = [...new Set((Array.isArray(macs) ? macs : []).map((m) => String(m || '').toLowerCase().replace(/[^0-9a-f]/g, '')).filter((m) => m.length === 12))];
+  const ts = all.slice(0, DESC_NAME_TERMS_MAX);
+  const ms = macAll.slice(0, DESC_MAC_TERMS_MAX);
+  const termsTruncated = all.length > ts.length || macAll.length > ms.length;
+  if (!ts.length && !ms.length) return { rows: [] };
   const esc = (t) => t.replace(/[\\%_]/g, (c) => `\\${c}`);
-  const where = ts.map(() => "lower(p.descr) LIKE ? ESCAPE '\\'").join(' OR ');
+  const NORM = "replace(replace(replace(lower(p.descr), ':', ''), '-', ''), '.', '')";
+  const where = [...ts.map(() => "lower(p.descr) LIKE ? ESCAPE '\\'"), ...ms.map(() => `${NORM} LIKE ?`)].join(' OR ');
   const lim = Math.max(1, Math.min(1000, Math.trunc(Number(limit)) || 200));
   const rows = db.conn.prepare(`SELECT p.*, d.hostname AS dev_hostname, d.serial AS dev_serial FROM port_latest p
       LEFT JOIN device_latest d ON d.agent = p.agent AND d.cvp_id = p.cvp_id AND d.device_key = p.device_key
-      WHERE p.descr IS NOT NULL AND p.descr != '' AND (${where}) ORDER BY p.cvp_id, p.device_key, p.port LIMIT ?`).all(...ts.map((t) => `%${esc(t)}%`), lim + 1);
+      WHERE p.descr IS NOT NULL AND p.descr != '' AND (${where}) ORDER BY p.cvp_id, p.device_key, p.port LIMIT ?`).all(...ts.map((t) => `%${esc(t)}%`), ...ms.map((m) => `%${m}%`), lim + 1);
   const out = rows.slice(0, lim).map((p) => ({ agent: p.agent, cvpId: p.cvp_id, key: p.device_key, hostname: p.dev_hostname || '', serial: p.dev_serial || '',
     port: p.port, desc: p.descr, speedBps: p.speed_bps ?? null, oper: p.oper || 'unknown', admin: p.admin || 'unknown', vlan: p.vlan || '', lag: p.lag || '',
     inBps: p.in_bps ?? null, outBps: p.out_bps ?? null, inUtil: p.in_util ?? null, outUtil: p.out_util ?? null, inErr: p.in_err ?? null, outErr: p.out_err ?? null,
     inDrop: p.in_drop ?? null, outDrop: p.out_drop ?? null,   // v2.922(3a): 포트 드롭(추정 경로 — 못 읽으면 null)
     rateTs: p.rate_ts == null ? null : Number(p.rate_ts), ts: Number(p.ts), mac: p.mac ?? null, mtu: p.mtu ?? null }));
-  return { rows: out, ...(rows.length > lim ? { truncated: true, limit: lim } : {}) };
+  return { rows: out, ...(rows.length > lim ? { truncated: true, limit: lim } : {}), ...(termsTruncated ? { termsTruncated: true } : {}) };
 }
 
 /** 그 장비 행을 가진 agent 목록(최신 순) — 화면이 등록부 담당과 맞는 행을 고르는 데 쓴다. */
@@ -1460,6 +1487,10 @@ export async function l2Status(owners = []) {
   }
   return { fdbDevices, lldpDevices, lastAt, fdbFailing, lldpFailing };
 }
+/** v2.932(E1-06): l2_meta 없이 남은 고아 L2 행을 찾는 전체 훑기의 최소 간격((agent, CVP)마다 · 프로세스 메모리 — 재기동 뒤 첫 push 는 한 번 훑는다). */
+export const L2_FULL_SWEEP_MS = 6 * 3_600_000;
+const _l2FullSweepAt = new Map();
+export function _resetL2SweepForTest() { _l2FullSweepAt.clear(); }
 /** 장비 한 대가 정리되면 그 장비의 L2 행도 지운다(pruneDevices 트랜잭션 안 — 장비당 최대 4096 + 512 행). */
 function dropL2(conn, agent, cvpId, key) {
   for (const t of ['l2_fdb', 'l2_lldp', 'l2_meta']) conn.prepare(`DELETE FROM ${t} WHERE agent=? AND cvp_id=? AND device_key=?`).run(agent, cvpId, key);

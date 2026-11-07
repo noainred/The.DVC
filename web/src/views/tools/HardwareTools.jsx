@@ -261,7 +261,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
     fetchJson('/admin/idrac?parts=1').then((r) => { setScopeMeta(r?.scoped ? { scoped: true, omittedOutOfScope: r.omittedOutOfScope } : null); return r.servers || []; }),
     fetchJson('/admin/datacenters').then((r) => { setDcErr(null); return { datacenters: r.datacenters || [], assign: r.assign || {} }; }).catch((e) => { setDcErr(e); return { datacenters: [], assign: {} }; }),
   ]).then(([servers, dc]) => { setD(servers); setDcs(dc); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { setD(null); load(); }, []);
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const dcName = new Map((dcs.datacenters || []).map((x) => [x.id, x.name || x.id]));
@@ -797,7 +797,7 @@ function ServerTempFinder({ vc, onServer }) {
   // 세대 가드: 고RTT vCenter에서 스코프를 빠르게 바꾸면 느린 이전 응답이 나중에 도착해 최신
   // 스코프 데이터를 덮어쓰던 경쟁을 막는다(가장 마지막 요청 결과만 반영).
   const load = () => { const g = ++genRef.current; return fetchJson(`/admin/idrac/temps${vcQS(vc)}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
-  useEffect(() => { setD(null); load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [vc]);
+  useEffect(() => { setD(null); load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, [vc]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const ql = q.trim().toLowerCase();
@@ -852,7 +852,7 @@ function ServerFirmwareFinder({ vc }) {
   const [model, setModel] = useState(null);
   const genRef = useRef(0);
   const load = () => { const g = ++genRef.current; return fetchJson(`/admin/idrac/firmware-inventory${vcQS(vc)}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
-  useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, [vc]);
+  useEffect(() => { setD(null); load(); }, [vc]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const sel = model && d.models.find((m) => m.model === model);
@@ -920,7 +920,7 @@ function ServerGpuFinder({ vc, onServer }) {
   const [open, setOpen] = useState(null); // 펼친 모델
   const genRef = useRef(0);
   const load = () => { const g = ++genRef.current; return fetchJson(`/admin/idrac/gpu-inventory${vcQS(vc)}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
-  useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, [vc]);
+  useEffect(() => { setD(null); load(); }, [vc]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
   const ql = q.trim().toLowerCase();

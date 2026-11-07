@@ -613,6 +613,13 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
+- **v2.930 — 개선 포인트 1 · 3 · 2 · 4(사용자 '제 추천 순서는 1 → 3 → 2 → 4 진행해' · 4번 '같은 법인 + 공용만' · 검증 '표준' · 코드 · 테스트 표지는 v2.929 — 준비 중 main 이 2.927 → 2.928 → 2.929 로 올라가 릴리스 번호만 v2.930.0)**. 회귀 `web/src/cssSelectors2929.test.js` · `server/test/issuesFix2929.test.js`.
+  - **정정 ①(CSS 이름 겹침 재발)**: v2.908 이 SLA 업무 시간 입력에 `.iss-cal` 을 써서 이슈 캘린더 화면의 `.iss-cal` 에 점선 · 여백을 덧붙였다(같은 v2.908 에서 `.iss-filters` 겹침을 고치며 그 이름 하나만 막았다).
+    입력은 `.iss-slacal` 로. 이제 테스트가 **styles.css 전체**에서 '클래스 하나짜리 선택자가 두 규칙에 나오는 것' 을 찾고, 의도한 덧붙임(11개)만 `KNOWN` 에 사유와 함께 둔다.
+  - **정정 ②(인증서 만료)**: v2.908 은 '인증서 만료는 판정이 없어 대상이 아니다' 라고 화면 · DB 안내에 적었는데, 알람 엔진에만 없고 `security/certMonitor.js` 가
+    vCenter · NSX 443 을 12시간마다 확인한다. 그 결과(`onCertResults` 구독)로 이슈를 만든다(`alertIssues.js applyCertResults` — 30일 이하 · 만료, 갱신되면 해소 · 확인 실패는 보류).
+  - 알람 엔진 평가 → 구독 → 이슈 등록이 **실제로 이어지는지**를 테스트한다(`alerts._refreshStateForTest` — v2.908 은 판정 함수만 직접 불렀다). 판정 보류로 빠진 알람은 해소가 아니다.
+  - 위키 자동 체크는 **이슈의 법인 스페이스 + 공용만**(`checkIssueTasks(…, { vcenterId })` — 다른 법인 문서는 `outOfScope` 로 세기만). 변이 2/2(판정 줄 · 자동화가 법인을 넘기는 줄).
 - **v2.908 — 이슈 기능 추천 6~10(사용자 '모두 적용' · 시안 없이 기존 화면 틀대로 — 사용자 선택)**. 회귀 `server/test/issuesR4_2908.test.js` · `web/src/views/issues/features2908.test.js`.
   - 자동화 규칙은 **고정 4개**(`issues/automation.js` · 설정 `automation` — 기본 전부 꺼짐). 저장소 이벤트는 동기라 **setImmediate 로 미뤄** 돈다 — 상위를 하위와 함께
     완료(closeChildren)하는 도중 자식 완료 이벤트가 상위를 '검토' 로 되돌리지 않게(테스트가 고정). 위키 체크는 보기에서 체크와 같은 경로(판 없음 · checkLog · checkRev) ·
@@ -746,6 +753,9 @@
      받는 쪽은 `useSearchHandoff`(검색 칸) · `useFocusHandoff`(상세) — **items 는 받기 전 undefined/null** 로 줄 것(빈 배열이면 '받았는데 없음' 으로 읽고 고른 장비를 잊는다 — PDU 실측).
      상세 여는 함수가 조기 return 아래에 있으면 ref 로 늦게 묶는다(SanSwitchTool `openDetailRef` — TDZ 를 만들지 않게).
   ② 단축키 글자는 `headerText.js cmdkLabel · modKeyLabel`(Mac ⌘ · 그 밖 Ctrl) — 화면에 ⌘ 를 박지 않는다.
+  ③ v2.928 — 새 탭(⌘/Ctrl+Enter) 인계는 **localStorage 일회용 칸 + window.name 번호**(`searchHandoff.stashForNewTab · consumeNewTabHandoff`, main.jsx 가 그리기 전 1회) — 주소에 싣지 않는다.
+     새 창은 `window.open(url, name)` 뒤 `w.opener = null` 로 끊는다(이 경로로 Chromium 에서 창 이름 전달을 확인했다 — `noopener` 기능 문자열로 바꿀 때는 창 이름이 살아 있는지 다시 확인할 것). 팔레트 접근성은 combobox + `aria-activedescendant`(포커스를 줄로 옮기지 않는다) ·
+     일치 표지(`via` → `VIA_LABEL`)는 줄지 않게(`flex: 0 0 auto`) — 메타와 함께 줄면 일치한 값이 잘린다(1440 실측). 좁은 화면 2줄 메타의 구분자는 ‘· ’(뒤 공백) — 줄이 ‘·’ 로 시작하지 않게.
 - **v2.920 — 호스트 상세 ‘SAN 경로·트래픽’ 묶음 · ‘네트워크’ 카드 CVP 열 · SAN 도구 ‘호스트 귀속’ 모달** — 설계 `docs/design/san-cvp-traffic/README.md`:
   ① 묶음 `san` 은 `toolAllowed('san-switch')` 일 때만(hd-nav 도 같이) · 본문 `HostSanSection.jsx` 는 지연 로드(recharts) · 마운트 1회 + 기간 버튼(24h·7일)으로만 받는다(무거운 집계 —
      폴링 금지) · 403 은 `ErrorBox` 가 권한 안내로. 묶음 머리 한 줄은 `hostSanText.sanSubText`.

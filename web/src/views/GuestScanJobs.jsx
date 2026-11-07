@@ -28,7 +28,7 @@ export default function GuestScanJobs({ type }) {
   const [form, setForm] = useState(null);
   const [loadErr, setLoadErr] = useState(null); // v2.620(WEB2620-09): 조회 실패를 '없습니다' 로 보이지 않는다 — 권한·시한 실패는 사유와 함께.
   const load = () => fetchJson('/admin/security/guest-scans').then((r) => { setLoadErr(null); setJobs((r.jobs || []).filter((j) => !type || j.type === type)); }).catch((e) => { setLoadErr(e); setJobs([]); });
-  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [type]);
+  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, [type]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const blank = { name: '', type: type || 'login-fails', vcenterId: '', os: 'all', intervalMin: 60, days: 7, maxVms: 100, enabled: true, guestUser: '', guestPass: '' };
   // 점검 A5-09: 저장·실행·삭제·중지 실패를 삼키지 않는다 — 오류(던짐·ok:false)를 보이고, 저장 실패면 입력 창을 닫지 않는다.

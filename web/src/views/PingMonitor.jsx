@@ -85,7 +85,7 @@ export default function PingMonitor() {
       .then((r) => { if (!isCurrent()) return; if (r.ok) setSeries(r); else setSeriesErr(r.reason || '조회 실패'); })
       .catch((e) => { if (isCurrent()) setSeriesErr(e.message); });
   };
-  useEffect(() => { loadSeries(); /* eslint-disable-next-line */ }, [sel, range]);
+  useEffect(() => { loadSeries(); }, [sel, range]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     setBusy(true);

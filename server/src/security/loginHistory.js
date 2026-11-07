@@ -50,8 +50,20 @@ function cleanRow(r) {
   return { ts: r.ts, user, ip: clip(r.ip, 70), role: clip(r.role, 32), src };
 }
 
+/*
+ * v2.932(점검 C1-03): 첫 기동(파일 없음)의 첫 로그인이 2회로 세졌다 — routes/auth.js 가 같은 로그인의 감사 줄을 **먼저 동기로** 쓰고
+ *   (logAudit) 이어서 recordLoginSuccessEvent 를 부르므로, 그 안의 첫 load() 가 방금 쓴 줄까지 옮겨 온 뒤 같은 로그인을 다시 push 했다.
+ *   지금 기록하려는 로그인과 같은 계정 · 같은 IP(둘 다 있을 때) · 기록 시각 앞 BACKFILL_SKIP_MS 안의 감사 줄 **가장 늦은 한 줄만** 뺀다.
+ *   라우트 순서(logAudit 앞에 load)에 기대지 않는다 — 다른 로그인 경로가 생겨도 같은 순서면 같은 결과다. 한 줄만 빼므로 그 창 안의
+ *   다른 로그인(같은 계정이 몇 초 사이 두 번)은 남는다.
+ */
+const BACKFILL_SKIP_MS = 10_000;
+function isSameLogin(a, b) {
+  return a.user === b.user && a.ts <= b.ts + 1_000 && a.ts >= b.ts - BACKFILL_SKIP_MS && (!a.ip || !b.ip || a.ip === b.ip);
+}
+
 /** 감사 로그의 '로그인' 줄 → 레코드(첫 기동 1회). 역할은 detail 첫 조각이 알려진 역할일 때만 쓴다(지어내지 않는다). */
-function backfillFromAudit() {
+function backfillFromAudit(current = null) {
   let list = [];
   try { list = auditEntriesWithAction('로그인'); } catch { list = []; }
   const out = [];
@@ -63,6 +75,9 @@ function backfillFromAudit() {
     if (r) out.push(r);
   }
   out.sort((a, b) => a.ts - b.ts);
+  if (current) {
+    for (let i = out.length - 1; i >= 0; i--) if (isSameLogin(out[i], current)) { out.splice(i, 1); break; }
+  }
   return out;
 }
 
@@ -71,14 +86,15 @@ function writeAll(list) {
   atomicWriteFileSync(FILE, list.length ? list.map((r) => JSON.stringify(r)).join('\n') + '\n' : '', { mode: 0o600 });
 }
 
-function load() {
+/** @param {object|null} current 지금 기록하려는 로그인(recordLoginSuccessEvent — 첫 기동 backfill 에서 같은 줄을 뺀다, C1-03) */
+function load(current = null) {
   if (rows) return rows;
   rows = [];
   let text = null;
   try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) {
     if (e?.code === 'ENOENT') {
       // 처음 — 감사 로그에 남아 있는 로그인 줄을 옮겨 온다. 실패해도 빈 기록으로 시작한다(다음 로그인부터 쌓인다).
-      rows = backfillFromAudit();
+      rows = backfillFromAudit(current);
       meta.backfilled = rows.length;
       try { writeAll(rows); } catch (we) { console.warn(`[login-history] 첫 기록 파일을 쓰지 못했습니다(${safeLoadText(we) || '사유 미상'})`); }
       if (rows.length) console.log(`[login-history] 감사 로그에 남아 있던 로그인 ${rows.length}건을 옮겨 왔습니다(그 이전 기록은 없습니다)`);
@@ -120,7 +136,7 @@ export function recordLoginSuccessEvent(e = {}) {
   const now = Number.isFinite(e.at) ? e.at : Date.now();
   const r = cleanRow({ ts: now, user: e.user, ip: e.ip, role: e.role, src: e.src });
   if (!r) return false;
-  load();
+  load(r);
   rows.push(r);
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });

@@ -3,6 +3,8 @@
  * React 무의존 — vitest(syncLogic.test.js)가 고정한다. 판정(상태)은 서버(svcmon/settingsSync.js classifyCatalog)가 내려준 값을 그대로 쓴다.
  */
 
+import { numOrNull } from '../../numOrNull.js';
+
 /** 상태 표시 — 서버 SYNC_STATES 와 같은 키. */
 export const SYNC_STATE_META = Object.freeze({
   new: { label: '미등록', pill: 'NEW', cls: 'new' },
@@ -118,6 +120,29 @@ export function fmtMs(ms) {
   if (ms == null || !Number.isFinite(Number(ms))) return '—';
   const n = Number(ms);
   return n >= 1000 ? `${(n / 1000).toFixed(1)} s` : `${Math.round(n)} ms`;
+}
+
+/**
+ * v2.932(점검 D1-08): 서버가 준 주기·창(ms) → '20초' · '5분' · '1분 30초' · '2시간'. 못 읽으면 null(호출부가 숫자 없이 말한다 — 0 이나 기본값을 지어내지 않는다).
+ */
+export function periodText(ms) {
+  const n = numOrNull(ms);
+  if (n == null || n <= 0) return null;
+  const s = Math.round(n / 1000);
+  if (s < 60) return `${Math.max(1, s)}초`;
+  if (s < 3600) return s % 60 ? `${Math.floor(s / 60)}분 ${s % 60}초` : `${s / 60}분`;
+  const m = Math.round(s / 60);
+  return m % 60 ? `${Math.floor(m / 60)}시간 ${m % 60}분` : `${m / 60}시간`;
+}
+
+/** v2.932(점검 D1-08): 설정 연동 감지 주기 문구 — 서버 값(catalog `detect`)만 쓴다. 못 받으면 숫자 없이 말한다. */
+export function detectText(detect) {
+  const every = periodText(detect?.intervalMs);
+  const first = periodText(detect?.firstDelayMs);
+  return {
+    every,
+    empty: every && first ? `포탈 기동 ${first} 뒤부터 ${every}마다 쌓입니다` : '포탈 기동 뒤 주기 감지마다 쌓입니다',
+  };
 }
 
 /** 경과 시간 표기(서버가 준 ms). */
