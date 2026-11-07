@@ -336,3 +336,8 @@
     권한 점검 통과를 서버가 강제 · 상한 = 점검 때 장비 개수 + 그 뒤 만든 것 · 작업 사유의 관리 주소 가림 · 출력 분류는 표 줄 · 이름 낱말을 빼고 본다 · 미리보기는 감사 제외.
   - **SAN 스위치 쓰기 라우트 13개 + san-flow 는 조회 · 쓰기 모두 전체 범위**(`routes/admin/shared.js fullReadWriteScopeOnlyWith` — `isFullReadWriteScope`, v2.904 규칙). 예전 `fullScopeOnly` 는
     조회 범위만 봐서 writeVcenters 로 쓰기만 줄인 admin 이 스위치 등록 · 수집 · 설정 변경을 할 수 있었다(반증 L-1). 조회 라우트는 그대로 `fullScopeOnly`.
+  - **v2.938 남긴 것(회귀 `test/sanCvpRest2938.test.js` ③④⑤)**: 플로우 **비활성화 · 다시 켜기**(`flow --deactivate|--activate <name> -feature monitor` — 문서 기준 추정 · OTP · 상태 `inactive`
+    · 속도는 비움(0 아님) · 주기 카운터 제외 · 다시 켜면 델타 기준을 새로 잡는다 · 엣지 2.938.0 미만이면 위임 거부) · 장비에서 직접 끄고 켠 것은 show 의 활성 여부를 읽었을 때만 따라간다.
+    속도 계산은 `sanswitch/flowView.js` 하나(SAN 플로우 모니터 · 호스트 상세 · 귀속 표가 같은 값) — 호스트 상세 경로 표 '스위치 플로우 읽기 / 쓰기' 열 · 귀속 표 '● 실측(스위치 플로우)' 열은
+    분배 값(확정 · 실측 비율 · 추정)과 **섞지 않고 나란히** 보여 준다(시안 C-② — 하나를 고르지 않는다). 보이는 스위치(fabrics — 범위 법인)의 플로우만 싣는다.
+    못 읽은 `flow --show` 출력은 앞부분 400자를 기록(`rawSample`)에 남기고 화면은 관리 주소를 가린다(백업 지문에서는 실행 값).
