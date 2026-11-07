@@ -126,6 +126,16 @@ test('③ 중앙 창 파일 손상 → 503 · 엣지는 지난 배포본 유지'
   assert.equal(r.r.ok, false); assert.equal(r.deployed.n, 3, '지난 배포본 유지(24시간 시한)');
 });
 
+test('④-0 엣지 인출 본문 판정(순수) — 배포 판정 칸 · 서명 꼴 · 창 배열(봉투 모양 { ok, node } 가 아니다)', async () => {
+  const { maintBodyOk } = await import('../src/agent/bmMaintPull.js');
+  assert.equal(maintBodyOk({ ok: true, distribute: true, sig: 'a'.repeat(32), windows: [] }), true);
+  assert.equal(maintBodyOk({ ok: true, distribute: false }), true);
+  assert.equal(maintBodyOk({ ok: true, node: {} }), false);
+  assert.equal(maintBodyOk({ ok: true, distribute: true, sig: 'zz', windows: [] }), false);
+  assert.equal(maintBodyOk({ ok: true, distribute: true, sig: 'a'.repeat(32), windows: 'x' }), false);
+  assert.equal(maintBodyOk({ ok: false, distribute: false }), false);
+});
+
 test('④ 봉투 정제 — 정비 창 상태 · 용량 행(대상 밖 키 · 모르는 열거 · 문자열 수치 · 시각)', async () => {
   const { sanitizeBmUsageSnap } = await import('../src/central/bmUsageEdgePull.js');
   const rcv = Date.now();

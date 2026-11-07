@@ -135,6 +135,10 @@ test('② 파트 장애 전이 보류 — 닫지도 바꾸지도 열지도 않�
   resetAll();
   await addWin({ scopes: { alerts: true } });
   assert.equal((await P.partfaultMaintHold(devs, { deps: { targets } })).hold.size, 0, '② 를 켜지 않은 창은 보류하지 않는다');
+  // ② 를 켠 창이 다른 서버에 있어도 — 알림만 켠 창의 서버는 보류하지 않는다(변이 M20)
+  await addWin({ scopes: { hold: true }, target: { kind: 'server', keys: ['OTHER'], names: ['x'] } });
+  const r2 = await P.partfaultMaintHold(devs, { deps: { targets: [...targets, { agent: 'edge-a', key: 'OTHER', serviceTag: 'OTHER', vcenterId: 'vcA' }] } });
+  assert.deepEqual([...r2.hold], ['edge-a|d2'], '② 창의 서버(OTHER)만');
   // 폴러가 집합을 transition 에 넘긴다(소스 — 실제 파트 장애 폴러는 iDRAC 스캔이 필요해 여기서 돌리지 않는다)
   const src = fs.readFileSync(new URL('../src/partfault/poller.js', import.meta.url), 'utf8');
   assert.match(src, /partfaultMaintHold\(\[\.\.\.observed, \.\.\.prev\]\)/); assert.match(src, /maintHold: maint\.hold/);
@@ -236,4 +240,9 @@ test('억제 시한 — ‘창 끝 뒤 억제 0’ 점검: 시한을 넘긴 적�
   a = await R.auditCycle({ targetsByKey: new Map([['TAGA1', { key: 'TAGA1', vcenterId: 'vcA' }]]) });
   assert.deepEqual(a, { checked: 2, leak: 2 });
   assert.equal(R.maintStats().leak.n, 2);
+  // 겹친 창 — 짧은 창의 시한을 넘겨 적용했지만 긴 창이 아직 덮는다: 판정은 억제여도 ‘시한을 넘긴 적용’ 은 센다(변이 M28)
+  await addWin({ name: '긴 창', schedule: { kind: 'once', start: loc(T0 - 30 * MIN), end: loc(T0 + 3 * HOUR) }, scopes: { alerts: true } });
+  R.noteApplied('alerts', 'TAGA1', occ.until.alerts, [w.id], occ.until.alerts + MIN);
+  a = await R.auditCycle({ targetsByKey: new Map([['TAGA1', { key: 'TAGA1', vcenterId: 'vcA' }]]) });
+  assert.deepEqual(a, { checked: 1, leak: 1 });
 });

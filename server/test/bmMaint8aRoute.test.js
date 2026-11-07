@@ -17,7 +17,7 @@ const DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'bm8arou
 process.env.CONFIG_DIR = DIR;
 process.env.AUTH_ENABLED = 'true';
 process.env.DATA_SOURCE = 'live';
-process.env.SETTINGS_OWNERS = 'own,sown';
+process.env.SETTINGS_OWNERS = 'own,sown,wown';
 fs.writeFileSync(path.join(DIR, 'permissions.json'), JSON.stringify({ schemaVersion: 2, matrix: { operator: ['dashboard', 'tools'], viewer: ['dashboard', 'tools'], toolsDenied: { operator: [], viewer: [] } } }));
 delete process.env.CENTRAL_URL;
 test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
@@ -53,6 +53,7 @@ async function setup(t) {
     adm: { username: 'adm', role: 'admin', scope: null },
     own: { username: 'own', role: 'admin', scope: null },
     sown: { username: 'sown', role: 'admin', scope: { vcenters: ['vcA'] } },
+    wown: { username: 'wown', role: 'admin', scope: { vcenters: [], writeVcenters: ['vcA'] } },   // 소유자 · 조회 전체 · 쓰기 vcA 만
   };
   const app = express();
   app.use(express.json());
@@ -85,6 +86,10 @@ test('① ② 실제 라우터 — 권한 · 범위 · 승인 등급 · 고치�
     const r = await call(u, 'POST', P, win({ target: { kind: 'corp' }, vcenterId: 'vcA' }));
     assert.equal(r.status, 403, `${u} 법인 창`); assert.equal(r.body.code, 'owner-required', u);
   }
+  // 소유자 등급이어도 쓰기 범위 밖 법인은 403(등급 게이트가 쓰기 범위를 대신하지 않는다 — 변이 M11)
+  const wo = await call('wown', 'POST', P, win({ target: { kind: 'corp' }, vcenterId: 'vcB' }));
+  assert.equal(wo.status, 403); assert.equal(wo.body.code, 'forbidden');
+  assert.equal((await call('wown', 'POST', P, win({ target: { kind: 'corp' }, vcenterId: 'vcA', name: '쓰기 범위 안 법인 창' }))).status, 200);
   const corp = await call('own', 'POST', P, win({ name: '월간 패치', target: { kind: 'corp' }, vcenterId: 'vcA', schedule: { kind: 'weekly', days: [0, 1, 2, 3, 4, 5, 6], time: S.fmtLocal('Asia/Seoul', T0 - 20 * MIN).slice(11), durMin: 120 } }));
   assert.equal(corp.status, 200, JSON.stringify(corp.body));
   // 태그
@@ -150,4 +155,12 @@ test('③ 미리보기(다음 5회 · DST 표지) · 추이 음영 구간 · 형
   assert.ok(oc.body.items.some((x) => x.id === c.body.id && x.scopes.includes('exclude')));
   assert.equal(oc.body.merged.length >= 1, true);
   assert.equal((await call('opA', 'GET', `/maintenance/occurrences?key=MTAGB1&from=${T0 - HOUR}&to=${T0}`)).status, 404, '범위 밖 서버');
+  // 용량 예측 다시 계산 — 전체 범위만(범위 계정이 전 법인 계산을 일으키지 않게) · viewer 403 · 감사
+  assert.equal((await call('viewer', 'POST', '/capacity/recompute', {})).status, 403);
+  const sc = await call('opA', 'POST', '/capacity/recompute', {});
+  assert.equal(sc.status, 403); assert.equal(sc.body.code, 'full-scope-only');
+  const ok = await call('adm', 'POST', '/capacity/recompute', {});
+  assert.equal(ok.status, 200, JSON.stringify(ok.body)); assert.equal(ok.body.ok, true);
+  const audit = await import('../src/audit.js');
+  assert.ok(audit.auditEntriesWithAction('bm-perf.capacity.recompute').length >= 1);
 });
