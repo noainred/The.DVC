@@ -31,6 +31,7 @@ import { numOrNull } from '../../util/numOrNull.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { NO_REDIRECT, refuseRedirect } from '../../util/noRedirect.js';
 import { isiNodeHwFromRest } from './isilonHw.js';
+import { ISI_NODE_LOAD_REST_KEYS, restNodeLoadFields, nodeLoadProbeOf, ISI_REST_LOAD_SOURCE } from './isilonNodeLoad.js'; // v2.926 노드 디스크·CPU
 
 // Isilon 전용 로컬 TLS 디스패처(다른 fetch 에 주입 금지). 2026-10-09 S-02: 인증서는 deviceTlsConnect 가 판정한다 —
 // 미설정 = CA 체인 또는 장비별 승인 지문 · STORAGE_TLS_VERIFY=true 엄격 · =false 명시적 예외(restCommon.js 와 같은 env).
@@ -165,6 +166,8 @@ export function normalizeIsilon(device, raw) {
         //   ×8 은 sanswitch/rates.js toBps 와 같은 규칙이고, 못 읽은 값(null)은 그대로 null 이다.
         inBps: bytesRateToBps(st['node.net.ext.bytes.in.rate']),
         outBps: bytesRateToBps(st['node.net.ext.bytes.out.rate']),
+        // v2.926 — 디스크 쓰기·읽기(B/s 그대로 — 네트워크처럼 ×8 하지 않는다)·CPU %. 키가 없으면 필드를 만들지 않는다(isilonNodeLoad.js).
+        ...restNodeLoadFields(st),
         hdd: mkPool(Math.max(0, (st['node.ifs.bytes.total'] || 0) - (st['node.ifs.ssd.bytes.total'] || 0)),
                     has(st, 'node.ifs.bytes.used') && (has(st, 'node.ifs.ssd.bytes.used') || !((st['node.ifs.ssd.bytes.total'] || 0) > 0))
                       ? Math.max(0, st['node.ifs.bytes.used'] - (st['node.ifs.ssd.bytes.used'] || 0)) : null),
@@ -178,6 +181,8 @@ export function normalizeIsilon(device, raw) {
       snap.extra.nodeSerials = { source, read, total: snap.nodes.list.length, at: null, cached: false };
       if (!read && snap.nodes.list.length) snap.extra.nodeSerialProbe = { source, reason: 'no-field', detail: '노드 응답에 hardware.serial_number 가 없습니다' };
     }
+    // v2.926 — 노드 부하(디스크·CPU)를 몇 대에서 읽었는지(노드 통계를 받았을 때만 — 못 받았으면 sections.nodeStats 가 말한다).
+    if (raw.nodeStats) snap.extra.nodeLoadProbe = nodeLoadProbeOf(snap.nodes.list, ISI_REST_LOAD_SOURCE);
     snap.sections.nodes = 'ok';
   }
   if (raw.users) {
@@ -277,7 +282,9 @@ export async function collect(device, { signal = null } = {}) {
   // node.net.ext.bytes.{in,out}.rate = 외부망 처리량(B/s). 실패해도 노드 수/상태(nodes 섹션)는 유지.
   await trySection('nodeStats', () => get(device, '/platform/1/statistics/current?devid=all'
     + '&key=node.ifs.bytes.total&key=node.ifs.bytes.used&key=node.ifs.ssd.bytes.total&key=node.ifs.ssd.bytes.used'
-    + '&key=node.net.ext.bytes.in.rate&key=node.net.ext.bytes.out.rate'));
+    + '&key=node.net.ext.bytes.in.rate&key=node.net.ext.bytes.out.rate'
+    // v2.926 — 같은 호출에 디스크 쓰기·읽기·CPU 키(왕복 0). 장비가 모르는 키면 그 키만 빠진다(실장비 미확인 — isilonNodeLoad.js 머리말).
+    + ISI_NODE_LOAD_REST_KEYS.map((k) => `&key=${k}`).join('')));
   await trySection('users', () => get(device, '/platform/1/auth/users?limit=200'));
   await trySection('pools', () => getAny(device, ['/platform/1/storagepool/storagepools', '/platform/1/storagepool/nodepools']));
   await trySection('events', () => getAny(device, ['/platform/3/event/eventgroup-occurrences?resolved=false&limit=1', '/platform/1/event/events?resolved=false&limit=1']));
