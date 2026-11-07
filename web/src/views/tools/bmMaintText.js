@@ -137,7 +137,7 @@ export function approvalNote(limits = {}) {
   const h = n(limits.ownerOverMin) != null ? limits.ownerOverMin / 60 : null;
   const ht = h != null ? `${h}시간` : '—';
   return `법인 전체 · 태그 대상 · ${ht} 넘는 창은 설정 소유자 등급(소유자 + 전체 범위)만 저장할 수 있습니다 — 개별 서버 창은 운영자가 바로(쓰기 범위 안 서버만). `
-    + `같은 서버를 덮는 창들(소유자가 저장하지 않은 창)의 합이 어느 24시간에서든 ${ht}을 넘으면 그 창도 소유자 등급입니다(재확인 포함).`;
+    + `같은 서버를 덮는 창들(소유자 창 · 법인 · 태그 창 포함)의 합이 어느 24시간에서든 ${ht}을 넘으면 그 창도 소유자 등급입니다(재확인 포함).`;
 }
 export function limitsNote(limits = {}) {
   const o = n(limits.onceMaxMin); const r = n(limits.recurMaxMin); const c = n(limits.confirmDays);

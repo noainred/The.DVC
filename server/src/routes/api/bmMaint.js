@@ -6,8 +6,8 @@
  *   · 쓰기 = operator 이상 + tools · **조회 밖 404 → 쓰기 범위 밖 403**(한 함수 writeGate) · 서버 대상은 1~20대 · 한 법인(법인 간 대상 금지).
  *   · 서버 대상은 **(법인, 키) 쌍**(반증 F1): 법인을 고르면 그 법인 안에서만 키를 찾고, 고르지 않았는데 같은 키가 여러 법인에 보이면 400(ambiguous-key — 고르게 한다).
  *   · **승인 등급**: 법인 전체 · 태그 대상 · 12시간 초과 창은 설정 소유자 등급(소유자 ∧ 전체 범위 — requireSettingsOwner 와 같은 판정 isOwnerTier)만 만들고 · 고치고 · 재확인한다.
- *     12시간은 창 하나가 아니라 **같은 서버를 덮는 비소유자 창들의 합**으로도 본다(store.coverNeedsOwner — 어느 24시간에서든 12시간 초과: 반증 F5) — 재확인도 같은 규칙.
- *     소유자 등급이 저장한 창은 approvedBy 가 남는다(합 계산에서 빠진다) · 비소유자가 고치면 approvedBy 를 비운다.
+ *     12시간은 창 하나가 아니라 **같은 서버를 덮는 살아 있는 창 전부(소유자 창 · 법인 창 · 태그 창 포함)의 합**으로도 본다(store.coverNeedsOwner — 어느 24시간에서든
+ *     12시간 초과: 반증 F5 · 재확인 G1) — 재확인도 같은 규칙. approvedBy(소유자 등급이 저장했다 · 비소유자가 고치면 비운다)는 **기록일 뿐 합 판정에 쓰지 않는다**(G2).
  *     고치기는 **고치기 전과 뒤 중 하나라도** 소유자 등급이 필요하면 소유자 등급(범위 관리자가 법인 창을 서버 창으로 바꿔 쥐거나, 서버 창을 법인 창으로 넓히지 못하게).
  *     억제를 **줄이는** 동작(지금 끝내기 · 지우기)은 그 법인 쓰기 범위면 된다(안전한 쪽).
  *   · 엣지 배포본(origin central)은 엣지에서 고칠 수 없다(중앙에서 고친다 — 다음 인출에 반영).
@@ -137,8 +137,14 @@ async function ownerGate(req, D, wins, { combined = null, now = Date.now() } = {
   if (await D.ownerTier(req)) return;
   const ST = await D.store();
   if (wins.some((w) => w && ST.needsOwnerTier(w))) throw fail(403, 'owner-required', '법인 전체 · 태그 대상 · 12시간 넘는 창은 설정 소유자 등급(소유자 + 전체 범위)만 만들고 고칠 수 있습니다.');
-  if (combined && ST.coverNeedsOwner(combined, ST.listWindows(), now)) {
-    throw fail(403, 'owner-required', '같은 서버를 덮는 창들(설정 소유자가 저장하지 않은 창)의 합이 어느 24시간에서든 12시간을 넘습니다 — 설정 소유자 등급만 만들고 · 고치고 · 재확인할 수 있습니다.');
+  if (combined) {
+    // 이 노드의 창 + 신선한 배포본(엣지 노드라면 중앙 창도 그 서버를 덮는다) · 태그 창은 수동 용도 태그로
+    const dep = ST.loadDeployed(now);
+    const all = [...ST.listWindows(), ...(dep && !dep.unreadable && !ST.deployedStale(dep, now) ? dep.items : [])];
+    const tagsOf = await (await D.runtime()).tagsReader();
+    if (ST.coverNeedsOwner(combined, all, now, { tagsOf })) {
+      throw fail(403, 'owner-required', '같은 서버를 덮는 창들(설정 소유자 창 · 법인 · 태그 창 포함)의 합이 어느 24시간에서든 12시간을 넘습니다 — 설정 소유자 등급만 만들고 · 고치고 · 재확인할 수 있습니다.');
+    }
   }
 }
 /** 기존 창 찾기 — 조회 밖 404 → 쓰기 밖 403 · 엣지 배포본은 409. */
@@ -287,7 +293,9 @@ async function edit(req, res, D) {
     const now = D.now();
     const next = ST.normalizeWindow({ ...cur, ...(b.name !== undefined ? { name: b.name } : {}), ...(b.reason !== undefined ? { reason: b.reason } : {}), ...(b.tz !== undefined ? { tz: b.tz } : {}),
       ...(b.schedule !== undefined ? { schedule: b.schedule } : {}), ...(b.scopes !== undefined ? { scopes: b.scopes } : {}), target, vcenterId }, { strict: true, now, fresh: b.schedule !== undefined });
-    await ownerGate(req, D, [cur, next], { combined: { ...next, id: cur.id, confirmedAt: now }, now });
+    // 합 규칙은 덮임이 바뀌는 고치기(대상 · 시간대 · 일정 · 범위)에만 — 이름 · 사유만 고치는 것은 억제를 늘리지 않는다(창 하나 규칙은 그대로).
+    const coverChanged = ['target', 'tz', 'schedule', 'scopes'].some((k) => JSON.stringify(next[k]) !== JSON.stringify(cur[k]));
+    await ownerGate(req, D, [cur, next], { combined: coverChanged ? { ...next, id: cur.id, confirmedAt: now } : null, now });
     const owner = !!(await D.ownerTier(req));
     const by = String(req.user?.username || '');
     const rec = await ST.editWindow(cur.id, { name: next.name, reason: next.reason, tz: next.tz, schedule: next.schedule, scopes: next.scopes, target: next.target, vcenterId: next.vcenterId },

@@ -7,7 +7,7 @@
  *   ⑤ F10 엣지에 배포된 태그 창은 펼친 keys 만 — 엣지 로컬 용도 태그로 넓히지 않는다(엣지 판정 = 중앙 판정)
  *   ⑥ 의심 — 지운 창은 묘비: 지금 판정에서는 빠지고 지난 구간(분모 제외 · 음영)에는 지운 시각까지 남는다
  *   ⑦ F6  windowStatus 는 조각 탐색 — 400일 전부 세는 옛 답과 같고 창 하나가 가볍다
- *   ⑧ F5  합친 덮임 규칙(순수) — 같은 서버 · 다른 법인 · 소유자 창은 합에서 빠진다
+ *   ⑧ F5  합친 덮임 규칙(순수) — 같은 서버를 덮는 살아 있는 창 전부(소유자 창 · 법인 창 포함 — 재확인 G1 · G2) · 다른 법인 · 다른 서버 · 지운 창은 빠진다
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -171,12 +171,19 @@ test('⑦ F6 — windowStatus 조각 탐색: 400일 전부 세는 옛 답과 같
   assert.ok(per < 3, `매일 반복 창 하나 ${per.toFixed(2)}ms(반증 실측 7~11ms)`);
 });
 
-test('⑧ F5 — 합친 덮임 규칙(순수): 같은 서버 비소유자 창 합이 24시간 중 12시간 초과면 소유자 · 다른 법인 · 소유자 창 · 다른 서버는 빠진다', () => {
+test('⑧ F5 — 합친 덮임 규칙(순수): 같은 서버를 덮는 창 합(소유자 창 · 법인 창 포함)이 24시간 중 12시간 초과면 소유자 · 다른 법인 · 다른 서버 · 지운 창은 빠진다', () => {
   const all7 = [0, 1, 2, 3, 4, 5, 6];
   const am = win({ id: 'mw-am000001', target: { kind: 'server', keys: ['S1'] }, schedule: { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }, approvedBy: '' });
   const pm = win({ id: 'mw-pm000001', target: { kind: 'server', keys: ['S1'] }, schedule: { kind: 'weekly', days: all7, time: '12:00', durMin: 720 } });
   assert.equal(ST.coverNeedsOwner(pm, [am], NOW), true, '12h + 12h = 24h');
-  assert.equal(ST.coverNeedsOwner(pm, [{ ...am, approvedBy: 'own' }], NOW), false, '소유자가 저장한 창은 합에서 빠진다');
+  assert.equal(ST.coverNeedsOwner(pm, [{ ...am, approvedBy: 'own' }], NOW), true, '소유자가 저장한 창도 합에 든다(재확인 G1 — 소유자 12h 옆 운영자 12h = 24시간 상시)');
+  assert.equal(ST.coverNeedsOwner(pm, [{ ...am, deleted: { at: NOW - DAY } }], NOW), false, '지운 창은 빠진다');
+  const corpAm = { ...am, id: 'mw-corp0001', target: { kind: 'corp' }, approvedBy: 'own' };
+  assert.equal(ST.coverNeedsOwner(pm, [corpAm], NOW), true, '법인 창도 그 서버를 덮는다');
+  assert.equal(ST.coverNeedsOwner(pm, [{ ...corpAm, vcenterId: 'vcB' }], NOW), false, '다른 법인 창은 아니다');
+  const tagAm = { ...am, id: 'mw-tag00001', target: { kind: 'tag', tag: 'role:db' }, approvedBy: 'own' };
+  assert.equal(ST.coverNeedsOwner(pm, [tagAm], NOW, { tagsOf: (x) => (x.key === 'S1' ? ['role:db'] : []) }), true, '그 서버에 붙은 태그 창도');
+  assert.equal(ST.coverNeedsOwner(pm, [tagAm], NOW, { tagsOf: () => [] }), false, '태그가 없는 서버는 아니다');
   assert.equal(ST.coverNeedsOwner(pm, [{ ...am, vcenterId: 'vcB' }], NOW), false, '다른 법인(같은 키)은 다른 서버');
   assert.equal(ST.coverNeedsOwner(pm, [{ ...am, target: { kind: 'server', keys: ['S2'] } }], NOW), false, '다른 서버');
   const shortPm = { ...pm, schedule: { ...pm.schedule, time: '13:00', durMin: 600 } };   // 00~12 + 13~23 → 어느 24시간이든 22시간

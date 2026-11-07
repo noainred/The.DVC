@@ -54,7 +54,7 @@ describe('정비 창 문구 · 계약', () => {
     expect(MT.emptyForm({ corp: 'vcA' }).serverCorp).toBe('', '새 서버 창은 법인 자동(첫 법인으로 굳히지 않는다)');
   });
   it('②-b 반증 문구 — 합 규칙 승인 안내 · 점검이 잡는 것과 못 잡는 것', () => {
-    expect(MT.approvalNote({ ownerOverMin: 720 })).toMatch(/같은 서버를 덮는 창들.*합이 어느 24시간에서든 12시간을 넘으면/);
+    expect(MT.approvalNote({ ownerOverMin: 720 })).toMatch(/같은 서버를 덮는 창들\(소유자 창 · 법인 · 태그 창 포함\)의 합이 어느 24시간에서든 12시간을 넘으면/);
     expect(MT.leakText({ n: 0, last: 3 }).text).toMatch(/못 잡는 것: 판정 규칙 자체/);
     expect(MT.leakText({ n: 1 }).text).toMatch(/창 끝 · 길이 상한 · 지움 · 끝내기 · 재확인 만료 · 배포본 시한/);
     const html = renderToStaticMarkup(h(MaintForm, { form: MT.emptyForm({ corp: 'vcA' }), setForm: () => {}, vcenters: [{ id: 'vcA', name: 'KR-SEL' }, { id: 'vcB', name: 'US-B' }], limits: { ownerOverMin: 720 } }));
