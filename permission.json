@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)", "Bash(gh *)", "Bash(npm *)", "Bash(npx *)", "Bash(node *)",
+      "Bash(curl *)", "Bash(jq *)", "Bash(python3 *)", "Bash(scripts/release.sh *)",
+      "Bash(ls *)", "Bash(cat *)", "Bash(sed *)", "Bash(grep *)", "Bash(head *)", "Bash(tail *)",
+      "Bash(TZ=Asia/Seoul date *)", "Bash(date *)", "Bash(pgrep *)", "Bash(kill *)",
+      "Bash(cp *)", "Bash(mkdir *)", "Bash(rm -f /tmp/claude-0/*)",
+      "mcp__github"
+    ]
+  }
+}
