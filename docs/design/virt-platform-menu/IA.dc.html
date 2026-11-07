@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>가상화 플랫폼 — 메뉴 3 → 1 · 주소 · 참고 솔루션</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}
+.h2{font-size:14px;font-weight:800;display:flex;align-items:center;gap:10px}
+.h2 .no{width:22px;height:22px;border-radius:6px;background:#3b82f6;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-family:"JetBrains Mono",monospace}
+.sbm{width:236px;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:2px;box-sizing:border-box}
+.sbm a{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:12.5px;min-height:32px;box-sizing:border-box}
+.sbm a .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-family:"JetBrains Mono",monospace}
+.sbm a.grp{background:#141b2d;color:#22d3ee;box-shadow:inset 3px 0 0 #22d3ee}
+.sbm a.sub{padding:5px 10px 5px 26px;color:#8b9bb4;font-weight:500;min-height:28px;position:relative}
+.sbm a.sub::before{content:"";position:absolute;left:12px;top:50%;width:5px;height:5px;border-radius:50%;background:#5d6b85;transform:translateY(-50%)}
+.sbm a.sub.on{background:#1a2236;color:#22d3ee}.sbm a.sub.on::before{background:#22d3ee}
+.sbm a.sub.x{color:#f87171;text-decoration:line-through}.sbm a.sub.x::before{background:#ef4444}
+.arrow{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:#8b9bb4;font-size:12px;min-width:80px}
+.arrow svg{width:40px;height:20px}
+.ett{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.ett span{display:flex;flex-direction:column;gap:3px;padding:9px 11px;border-radius:9px;background:#141b2d;border:1px solid #243049;font-size:11.5px;color:#8b9bb4}
+.ett span b{font-size:18px;font-family:"JetBrains Mono",monospace;color:#e6edf6;line-height:1}
+.ett span.on{border-color:#3b82f6;background:#1a2236;box-shadow:inset 0 -3px 0 #3b82f6}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;background:#1a2236;border:1px solid #243049;color:#e6edf6;font-size:12px;font-weight:600;white-space:nowrap}
+.chip.on{border-color:#3b82f6;color:#93c5fd}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:7px 10px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:top}
+.ref{padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.ref b{font-size:13px}
+.ref .pt{font-size:11.5px;color:#93c5fd;font-weight:600}
+.ref p{margin:0;font-size:12px;color:#aebbd0;line-height:1.45}
+.ref p.no{color:#8b9bb4}
+.note{font-size:11.5px;color:#5d6b85}
+</style>
+</helmet>
+
+<div style="min-height:100%;background:#0a0e17;padding:24px 28px 28px;box-sizing:border-box;display:flex;flex-direction:column;gap:18px">
+
+  <header style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px">
+    <h1 style="margin:0;font-size:22px;font-weight:800">가상화 플랫폼 — 메뉴 3개를 1개로</h1>
+    <span class="muted" style="font-size:12.5px">서버 › 가상화 서버 · ESXi 호스트 · vCenter → 서버 › <b style="color:#e6edf6">가상화 플랫폼</b> 하나 · 세 화면은 그 안의 엔티티 탭 · 주소 · 권한 · 도구 키는 그대로</span>
+  </header>
+
+  <!-- ① 메뉴 -->
+  <section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px" aria-label="메뉴 변경">
+    <div class="h2"><span class="no">1</span>사이드바 — 서버 그룹 6항목 → 4항목</div>
+    <div style="display:grid;grid-template-columns:236px 80px 236px minmax(0,1fr);gap:14px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:6px"><span class="muted" style="font-size:11.5px;font-weight:700">지금</span>
+        <nav class="sbm" aria-label="지금 메뉴">
+          <a href="#" class="grp">서버 <span class="n">6 ▴</span></a>
+          <a href="#" class="sub x">가상화 서버</a><a href="#" class="sub x">ESXi 호스트</a><a href="#" class="sub x">vCenter</a><a href="#" class="sub">물리 서버</a><a href="#" class="sub">Backup</a><a href="#" class="sub">알람</a>
+        </nav>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 40 20" fill="none" stroke="#3b82f6" stroke-width="2" aria-hidden="true"><path d="M2 10h32M28 4l6 6-6 6"/></svg><span>합침</span></div>
+      <div style="display:flex;flex-direction:column;gap:6px"><span class="muted" style="font-size:11.5px;font-weight:700">제안</span>
+        <nav class="sbm" aria-label="제안 메뉴">
+          <a href="#" class="grp">서버 <span class="n">4 ▴</span></a>
+          <a href="Main.dc.html" class="sub on">가상화 플랫폼</a><a href="#" class="sub">물리 서버</a><a href="#" class="sub">Backup</a><a href="#" class="sub">알람</a>
+        </nav>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;min-width:0">
+        <span class="muted" style="font-size:11.5px;font-weight:700">메뉴를 누르면 — 화면 위 엔티티 탭 3개(시안 A) · 탭 안이 지금의 세 화면</span>
+        <div class="ett"><span class="on">vCenter · 법인<b>28</b>연결 27 · 낡은 값 1</span><span>ESXi 호스트<b>658</b>확인 대상 52</span><span>가상화 서버 · VM<b>5,850</b>조치 필요 641</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span class="muted" style="font-size:11.5px">이름 후보</span><span class="chip on">가상화 플랫폼 <span class="faint">(기본 · 사용자 표현)</span></span><span class="chip">가상 인프라 <span class="faint">(Veeam ONE ‘Virtual Infrastructure’ · VMAN ‘Virtualization’)</span></span><span class="chip">인벤토리 <span class="faint">(vSphere · Aria ‘Inventory’)</span></span></div>
+        <span class="note">'서버' 그룹의 다른 항목(물리 서버 · Backup · 알람)은 그대로. 사용자가 저장한 내 메뉴 · 배포 메뉴의 옛 항목(가상화 서버 · ESXi 호스트 · vCenter)은 이 항목으로 이어 붙인다(별칭 — 조용히 사라지지 않게).</span>
+      </div>
+    </div>
+  </section>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start">
+    <!-- ② 주소 -->
+    <section class="card" style="padding:0;overflow:hidden" aria-label="주소">
+      <div class="h2" style="padding:12px 16px;border-bottom:1px solid #1f2a40"><span class="no">2</span>주소(해시) · 탭 id · 권한 — 바꾸지 않는다</div>
+      <table>
+        <thead><tr><th>주소</th><th>어디에 열리나</th><th>권한</th><th>변경</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">#/vcenters</td><td>허브 · vCenter 탭(진입)</td><td class="mono">dashboard</td><td><span class="tag ok">그대로</span></td></tr>
+          <tr><td class="mono">#/hosts · #/hosts/&lt;id&gt;</td><td>허브 · 호스트 탭 · 호스트 상세 전체 페이지</td><td class="mono">inv.hosts</td><td><span class="tag ok">그대로</span></td></tr>
+          <tr><td class="mono">#/vms/&lt;list|corp|attention&gt;</td><td>허브 · VM 탭의 하위 보기 3</td><td class="mono">inv.vms</td><td><span class="tag ok">그대로</span></td></tr>
+          <tr><td class="mono">#/vcenters/&lt;id&gt;</td><td>드릴다운 · vCenter 상세 12탭(브레드크럼 추가)</td><td class="mono">dashboard</td><td><span class="tag ok">그대로</span></td></tr>
+          <tr><td class="mono">#/vcenters/&lt;vc&gt;/host|vm/&lt;id&gt;/&lt;탭&gt;</td><td>개체 보기(호스트 10탭 · VM 9탭 · 브레드크럼 추가)</td><td class="mono">dashboard+</td><td><span class="tag ok">그대로</span></td></tr>
+          <tr><td class="mono">#/tools/vmfinder … real-os</td><td>VM 탭 줄의 도구 6 — 열어도 ‘가상화 플랫폼’ 이 켜짐</td><td class="mono">도구 키</td><td><span class="tag ok">그대로</span></td></tr>
+          <tr><td class="mono">topMenu.js 서버 그룹</td><td>항목 하나 <span class="mono">{ tab:'vcenters', tabs:['hosts','vms'], also:[도구 6] }</span> + 별칭표</td><td>—</td><td><span class="tag warn">메뉴 층만</span></td></tr>
+        </tbody>
+      </table>
+      <div style="padding:8px 14px" class="note">탭 id(vms · hosts · vcenters)를 TABS 에서 빼면 북마크 · ⌘K · 관제 콘솔 내비 · Overview 법인 클릭 · 권한 집행이 깨진다 — 합치기는 메뉴 층(topMenu · sideMenu · 공용 탭 줄)에서만. 권한이 셋 중 하나라도 있으면 항목이 보이고 첫 허용 탭으로 들어간다.</div>
+    </section>
+
+    <!-- ④ 구현 뼈대 -->
+    <section class="card" style="padding:0;overflow:hidden" aria-label="구현 뼈대">
+      <div class="h2" style="padding:12px 16px;border-bottom:1px solid #1f2a40"><span class="no">3</span>시안 A 가 더하는 것 · 지키는 것(구현 전 확인 항목)</div>
+      <table>
+        <thead><tr><th>항목</th><th>내용</th><th>근거 · 비고</th></tr></thead>
+        <tbody>
+          <tr><td><b>엔티티 탭 3</b></td><td>vCenter · 호스트 · VM — 수와 ‘지금 볼 것’ 배지(확인 대상 · 조치 필요). 탭 = 기존 화면 셋, 제목 h1 만 허브로 올라간다</td><td>/health · /hosts/checks · /vms signals 집계 — 새 API 없음(추정)</td></tr>
+          <tr><td><b>범위 하나</b></td><td>리전 · vCenter · 검색은 세 탭에 함께(지금은 탭마다 따로 · vCenter 탭엔 없음). 상태 · 전원 · 메모/IPMS 는 탭 고유</td><td>App tabFilters 구조 변경 · vCenter 카드를 범위로 거른다(클라이언트)</td></tr>
+          <tr><td><b>교차 링크</b></td><td>vCenter 카드의 호스트 · VM 수 → 그 범위로 탭 이동 / 호스트 행의 VM 수 → VM 탭 / VM 행의 호스트 → 호스트 탭</td><td>selectSite 는 선언만 되고 호출되지 않는 죽은 prop(VCenters.jsx) · 지금 VM→호스트 링크 0건</td></tr>
+          <tr><td><b>브레드크럼 3단</b></td><td>가상화 플랫폼 › vCenter › 클러스터 › 호스트 › VM — ‘← 목록’ 대신. 이전 · 다음 vCenter</td><td>주소 그대로 · vcdRoute 파싱값으로 그린다</td></tr>
+          <tr><td><b>백업 표기</b></td><td>veeam/snapshot → <b>Veeam / Bareos</b>(스냅샷 제외) — 카드 배지 · KPI</td><td>사용자 지시 2026-11-07 · vCenter 별 Bareos 보호 VM 수 집계 필요 여부는 구현 때 확인</td></tr>
+          <tr><td><b>지키는 것</b></td><td>탭 id · 도구 키 · 해시 · 권한 id · 12탭 키 · localStorage 키 2개 · 15초 폴링 금지 · 판정 코어 하나 · 1440 열 늘리기 금지</td><td>테스트 8~9파일 기대값 갱신(topMenu · sideMenu · menuEdit · singleMenu · vmHub2909 · invSearchQuery …)</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <!-- ③ 참고 솔루션 -->
+  <section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px" aria-label="참고 솔루션">
+    <div class="h2"><span class="no">4</span>참고한 솔루션 — 무엇을 가져왔고 무엇을 두고 왔나 <span class="muted" style="font-size:11.5px;font-weight:500">(공식 문서 · 소스 기준 · 세부 출처는 docs/design/virt-platform-menu/README.md)</span></div>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
+      <div class="card ref" style="background:#0f1626"><b>vSphere Client 8</b><span class="pt">인벤토리 트리 + 개체 탭(Summary · Monitor · Configure …) · Global Inventory Lists</span><p>가져온 것 — 개체마다 같은 탭 틀(이미 v2.895) · 트리가 버거우면 유형별 평면 목록으로 가는 공식 우회로 = 시안 A 의 탭 3개</p><p class="no">두고 온 것 — 전 VM 트리(KB 403293: 많은 VM 은 트리에서 끄라고 권고) · ELM 15대 상한 · 30ms 지연 전제</p></div>
+      <div class="card ref" style="background:#0f1626"><b>VMware Aria Operations</b><span class="pt">Environment › Inventory — 트리 ↔ 목록 전환 · 메뉴는 개체 종류가 아니라 할 일 단위</span><p>가져온 것 — 왼쪽 메뉴는 늘리지 않고 개체 종류는 한 화면 안의 전환으로 · 루트 집계 개체(vSphere World) = 전체 법인 행</p><p class="no">두고 온 것 — 5단 트리 · 버전마다 바뀌는 메뉴 이름</p></div>
+      <div class="card ref" style="background:#0f1626"><b>Veeam ONE</b><span class="pt">Virtual Infrastructure 트리 + 선택 개체 탭 · 알람 롤업 · Top Objects</span><p>가져온 것 — 알람 수를 자식 합으로 노드에 붙이기(시안 B 트리) · ‘문제만’ 거르기</p><p class="no">두고 온 것 — 데스크톱 전용 트리 · 전 vCenter 평면 호스트 표 부재(500+ 호스트 트리 지연 보고)</p></div>
+      <div class="card ref" style="background:#0f1626"><b>SolarWinds VMAN</b><span class="pt">‘Virtualization’ 메뉴 하나 + Virtualization Assets 트리 + 개체 상세 페이지</span><p>가져온 것 — 최상위 메뉴 하나에 요약 · 문제별 보기 · 개체 상세를 넣는 구성 · vCenter 상세에 같은 트리를 다시 싣기</p><p class="no">두고 온 것 — 법인/지역 축 없음 · 리뷰의 ‘어수선한 콘솔’</p></div>
+      <div class="card ref" style="background:#0f1626"><b>Nutanix Prism Central</b><span class="pt">Infrastructure 앱 안의 엔티티 리스트(Clusters · Hosts · VMs) — Summary 탭 + List 탭 · Focus · Filters · View by</span><p>가져온 것 — <b>엔티티 종류별 형제 탭 + 모든 클러스터를 합친 평면 표</b> = 시안 A 의 뼈대 · 검색이 주 이동 수단</p><p class="no">두고 온 것 — 계층이 화면에 안 보임(그래서 브레드크럼 3단을 더함) · PC 1개 범위</p></div>
+      <div class="card ref" style="background:#0f1626"><b>Proxmox VE · PDM</b><span class="pt">평탄 자원 목록 하나를 Server/Folder/Pool/Tag 뷰로 재그룹 · Summary 가 항상 첫 탭</span><p>가져온 것 — 같은 데이터를 보기만 바꿔 그리기(허브 범위 하나) · 트리 상태를 브라우저에 기억</p><p class="no">두고 온 것 — 클러스터 1개 범위(다중은 PDM 별도) · 모든 개체를 담는 트리</p></div>
+      <div class="card ref" style="background:#0f1626"><b>Datadog vSphere · Infrastructure List</b><span class="pt">VM 과 ESXi 를 같은 개체(host)로 한 표에 · 소속은 태그 · 리스트↔맵↔대시보드 전환 · 저장 뷰</span><p>가져온 것 — 범위 · 검색을 ‘한 번 고르면 어디서나 같은 키’ 로 · 저장 보기 개념 = 시안 C</p><p class="no">두고 온 것 — vCenter · 클러스터가 개체가 아니라 태그(드릴다운 노드가 없음) · VM 이중 표시</p></div>
+      <div class="card ref" style="background:#0f1626"><b>Grafana vSphere 대시보드</b><span class="pt">vCenter → 클러스터 → ESXi → VM 캐스케이딩 변수 · 네 대시보드가 변수 공유 · 섹션 적층</span><p>가져온 것 — <b>상위 범위를 고르면 하위 탭 후보가 좁혀지는 공용 범위 바</b> · 개요 → 호스트 → VM 순서로 읽히는 적층</p><p class="no">두고 온 것 — 트리 · 검색 없는 드롭다운 탐색 · ‘All’ 에서 폭발하는 반복 패널</p></div>
+    </div>
+    <div class="note">그 밖에 본 것 — Zabbix VMware 템플릿(모든 개체를 ‘호스트’ 로 평탄화 + 호스트 그룹 이름으로 계층 투영 → 시안 C 의 근거), Microsoft SCVMM · Windows Admin Center(호스트 그룹 트리 + 워크스페이스 전환 · 연결 1개 범위). oVirt/RHV 관리 포털(Compute 아래 Hosts · Virtual Machines 형제 리스트 + 브레드크럼 + 상위 상세의 관계 탭 — 시안 A 와 같은 꼴). ControlUp/Runecast 는 문서를 열지 못해(출처 0건) 근거에서 뻐다.</div>
+  </section>
+
+  <div class="note">가상 데이터 · 법인 · vCenter · 호스트 · VM 이름과 수치는 전부 가상. 색 · 글자 · 사이드바 · 상단 바 · 상태바는 web/src/styles.css 토큰과 실제 셸(목 서버 Chromium 캡처 2026-11-07 19:4x KST)을 따랐다.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

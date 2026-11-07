@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>가상화 플랫폼 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.ic{width:16px;height:16px;flex:none}
+.tb{display:flex;align-items:center;gap:8px;height:44px;padding:0 12px;background:#0f1626;border-bottom:1px solid #243049;flex:none}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px;color:#e6edf6;text-decoration:none}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px;font-family:"JetBrains Mono",monospace}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.ava{width:26px;height:26px;border-radius:50%;background:#1d4ed8;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:12px}
+.stb{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid #243049;background:#0f1626;font-family:"JetBrains Mono",monospace;font-size:11px;color:#8b9bb4;flex:none}
+.stb div{padding:8px 10px;text-align:center;border-right:1px solid #1f2a40;border-bottom:1px solid #1f2a40}.stb b{color:#e6edf6;margin-left:6px}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;box-sizing:border-box;min-width:0}
+select.input{appearance:none;padding-right:26px;background-image:linear-gradient(45deg,transparent 50%,#8b9bb4 50%),linear-gradient(135deg,#8b9bb4 50%,transparent 50%);background-position:calc(100% - 14px) 14px,calc(100% - 9px) 14px;background-size:5px 5px;background-repeat:no-repeat}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}.btn.ghost{background:transparent}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}
+.bar{height:6px;background:#0f1626;border-radius:3px;overflow:hidden}.bar i{display:block;height:100%;border-radius:3px}
+.etw{position:relative;margin:0 -16px}
+.et{display:flex;gap:10px;overflow-x:auto;padding:0 16px 4px;scroll-snap-type:x mandatory}
+.et a{flex:0 0 236px;display:flex;flex-direction:column;gap:6px;padding:12px 14px 11px;border-radius:12px;background:#141b2d;border:1px solid #243049;color:#e6edf6;text-decoration:none;min-width:0;scroll-snap-align:start;box-sizing:border-box}
+.et a.on{border-color:#3b82f6;background:#1a2236;box-shadow:inset 0 -3px 0 #3b82f6}
+.et .lb{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#8b9bb4}
+.et a.on .lb{color:#93c5fd}
+.et .val{font-size:26px;font-weight:800;line-height:1;font-family:"JetBrains Mono",monospace}
+.et .sub{display:flex;flex-wrap:wrap;gap:3px 8px;font-size:11.5px;color:#8b9bb4}.et .sub b{color:#e6edf6;font-weight:600}
+.et .cnt{margin-left:auto;font-size:10.5px;font-weight:800;border-radius:999px;padding:1px 6px;font-family:"JetBrains Mono",monospace;height:auto}
+.fade{position:absolute;right:0;top:0;bottom:4px;width:40px;background:linear-gradient(90deg,rgba(10,14,23,0),#0a0e17);pointer-events:none}
+.kp{padding:12px 14px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.kp .lb{font-size:12px;font-weight:600;color:#8b9bb4}.kp .val{font-size:20px;font-weight:800;font-family:"JetBrains Mono",monospace;line-height:1.1}
+.chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:999px;background:#1a2236;border:1px solid #243049;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
+.chip i{width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block}
+.vc{padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.vch{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.vch b{font-size:14px;font-weight:800;font-family:"JetBrains Mono",monospace}
+.vcn{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;align-items:end}
+.vcn a,.vcn span.bk{display:flex;flex-direction:column;gap:2px;text-decoration:none;color:#e6edf6;min-width:0;min-height:44px;justify-content:flex-end}
+.vcn b{font-size:18px;font-weight:800;font-family:"JetBrains Mono",monospace;line-height:1}
+.vcn small{font-size:11px;color:#8b9bb4;white-space:nowrap}
+.vcn span.bk{border:1px solid rgba(34,197,94,.45);border-radius:8px;padding:5px 8px}
+.vcn span.bk b{color:#86efac;font-size:14px}
+.rw{display:grid;grid-template-columns:48px minmax(0,1fr) 116px;gap:8px;align-items:center;font-size:12px}
+.rw .r{text-align:right;color:#e6edf6;font-family:"JetBrains Mono",monospace;font-size:11px}
+.vcf{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #1f2a40;padding-top:8px;font-size:11.5px;color:#8b9bb4;font-family:"JetBrains Mono",monospace}
+.note{font-size:11.5px;color:#5d6b85}
+</style>
+</helmet>
+
+<div style="min-height:100%;display:flex;flex-direction:column;background:#0a0e17">
+
+  <header class="tb">
+    <button class="btn ghost" type="button" aria-label="메뉴 열기" style="border:0;padding:0 4px;min-height:32px;min-width:32px;justify-content:center"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+    <a class="logo" href="#"><span class="v">V</span>The Davinci</a>
+    <span class="ver">v2.915.0</span>
+    <span class="mock">MOCK</span>
+    <span style="flex:1"></span>
+    <span class="ava">A</span>
+  </header>
+  <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:#0f1626;border-bottom:1px solid #1f2a40;font-size:11.5px" class="mono muted">28/28 vCenter <b style="color:#86efac">OK</b> · 오전 10:38:45<span style="flex:1"></span><button class="btn sm" type="button">Out</button></div>
+
+  <main style="padding:12px 16px 20px;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+    <!-- 필터 바: 400px 에서는 두 줄(지금 화면과 같은 줄바꿈) -->
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px" aria-label="범위">
+      <select class="input" aria-label="리전"><option>전체 리전</option></select>
+      <select class="input" aria-label="vCenter"><option>전체 vCenter(28)</option></select>
+      <input class="input" placeholder="vCenter · 호스트 · VM 이름 · IP" style="grid-column:1/3" aria-label="검색">
+    </div>
+
+    <header style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px">
+      <h1 style="margin:0;font-size:18px;font-weight:800">가상화 플랫폼</h1>
+      <span class="mono muted" style="font-size:11.5px">스냅샷 10:38:45</span>
+    </header>
+
+    <!-- 엔티티 탭: 가로 스크롤(스냅) · 오른쪽 흐림으로 '더 있음' · 현재 탭이 먼저 보이게 스크롤 -->
+    <div class="etw">
+      <nav class="et" role="tablist" aria-label="가상화 플랫폼 보기">
+        <a href="Narrow.dc.html" class="on" aria-current="page">
+          <span class="lb">vCenter · 법인<span class="cnt tag ok">연결 27</span></span>
+          <span class="val">28</span>
+          <span class="sub"><span>호스트 <b>658</b></span><span>VM <b>5,850</b></span><span>알람 <b style="color:#fca5a5">58</b></span></span>
+        </a>
+        <a href="Hosts.dc.html">
+          <span class="lb">ESXi 호스트<span class="cnt tag warn">확인 52</span></span>
+          <span class="val">658</span>
+          <span class="sub"><span>연결 <b>640</b></span><span>점검 <b style="color:#fcd34d">11</b></span><span>끊김 <b style="color:#fca5a5">5</b></span></span>
+        </a>
+        <a href="Vms.dc.html">
+          <span class="lb">가상화 서버 · VM<span class="cnt tag crit">조치 641</span></span>
+          <span class="val">5,850</span>
+          <span class="sub"><span>구동 <b style="color:#86efac">5,120</b></span><span>정지 <b>730</b></span><span>CPU <b>51%</b></span></span>
+        </a>
+      </nav>
+      <div class="fade" aria-hidden="true"></div>
+    </div>
+
+    <section style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px" aria-label="플랫폼 추이">
+      <div class="card kp" style="grid-column:1/3"><span class="lb">VM 백업 (Veeam / Bareos)</span><span class="val" style="color:#86efac">3,912 <small style="font-size:12px;color:#8b9bb4">/</small> 1,204</span><span class="muted" style="font-size:11.5px">전체 5,850 · 둘 다 없음 734 · 확인 불가 2곳 제외</span></div>
+      <div class="card kp"><span class="lb">VM 증가(30일)</span><span class="val" style="color:#86efac">+84</span><span class="muted" style="font-size:11.5px">5,766 → 5,850</span></div>
+      <div class="card kp"><span class="lb">스토리지 증가(30일)</span><span class="val" style="color:#fcd34d">+2.1 TB</span><span class="muted" style="font-size:11.5px">1,204 → 1,206 TB</span></div>
+    </section>
+
+    <section class="card" style="padding:10px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center" aria-label="바로가기">
+      <a class="chip" href="Drill.dc.html"><i></i>vc-us-east</a><a class="chip" href="#"><i></i>vc-us-west</a><a class="chip" href="#"><i></i>vc-br-sao</a><a class="chip" href="#"><i></i>vc-eu-central</a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae</a><a class="chip" href="#" style="color:#8b9bb4">+23 더</a>
+    </section>
+
+    <article class="card vc">
+      <div class="vch"><div><b>vcenter-us-east-01</b><div class="muted" style="font-size:12px;margin-top:2px">Ashburn, USA · 북미</div></div><span class="tag ok">Connected</span></div>
+      <div class="vcn">
+        <a href="Hosts.dc.html"><b>24</b><small>호스트 →</small></a>
+        <a href="Vms.dc.html"><b>240</b><small>VM →</small></a>
+        <a href="#"><b style="color:#f87171">6</b><small>알람</small></a>
+        <span class="bk"><b>152/61</b><small>veeam/bareos</small></span>
+      </div>
+      <div class="rw"><span class="muted">CPU</span><span class="bar"><i style="width:53%;background:#22c55e"></i></span><span class="r">53% · 1,079/2,167 GHz</span></div>
+      <div class="rw"><span class="muted">메모리</span><span class="bar"><i style="width:63%;background:#22c55e"></i></span><span class="r">63% · 8.3/13.6 TB</span></div>
+      <div class="rw"><span class="muted">스토리지</span><span class="bar"><i style="width:64%;background:#22c55e"></i></span><span class="r">64% · 95.4/148 TB</span></div>
+      <div class="vcf"><span>v8.0.2 · 22617221</span><a href="Drill.dc.html" style="font-weight:700">상세 →</a></div>
+    </article>
+
+    <article class="card vc" style="border-color:rgba(245,158,11,.5)">
+      <div class="vch"><div><b>vcenter-me-uae-01</b><div class="muted" style="font-size:12px;margin-top:2px">Dubai, UAE · 중동 · 엣지 위임</div></div><span class="tag warn">낡은 값</span></div>
+      <div class="vcn">
+        <a href="Hosts.dc.html"><b>6</b><small>호스트 →</small></a>
+        <a href="Vms.dc.html"><b>60</b><small>VM →</small></a>
+        <a href="#"><b style="color:#fbbf24">2</b><small>알람</small></a>
+        <span class="bk" style="border-color:#243049"><b style="color:#8b9bb4">40/12</b><small>veeam/bareos</small></span>
+      </div>
+      <div class="rw"><span class="muted">CPU</span><span class="bar"><i style="width:50%;background:#f59e0b"></i></span><span class="r">50% · 206/413 GHz</span></div>
+      <div class="rw"><span class="muted">메모리</span><span class="bar"><i style="width:74%;background:#f59e0b"></i></span><span class="r">74% · 3.4/4.6 TB</span></div>
+      <div class="rw"><span class="muted">스토리지</span><span class="bar"><i style="width:63%;background:#f59e0b"></i></span><span class="r">63% · 14.8/23 TB</span></div>
+      <div class="vcf"><span style="color:#fcd34d">마지막 수신 2시간 12분 전</span><a href="#" style="font-weight:700">상세 →</a></div>
+    </article>
+
+    <div class="note">28개 중 2개 표시 · 카드는 한 열 · 호스트 탭의 표는 2줄 목록, VM 탭은 기존 400px 판(v2.909)이 그대로 들어간다</div>
+  </main>
+
+  <footer class="stb" aria-label="상태바">
+    <div>Uptime<b>2분</b></div><div>호스트<b>658</b></div><div>VM<b>5,850</b></div><div>알람<b style="color:#f87171">58</b></div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1360}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
