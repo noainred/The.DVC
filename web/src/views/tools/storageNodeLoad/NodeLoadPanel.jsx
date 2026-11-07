@@ -366,7 +366,7 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge, onSeries }) {
           )}
           {view === 'multi' && <Multiples d={d} sel={sel} />}
           {view === 'overlay' && <Overlay d={d} sel={sel} picks={picks} onToggle={togglePick} />}
-          <div className="nl-subhead">클러스터 {tiles.clusterKind} 추이 · 칸의 노드를 전부 읽었을 때만 합계를 냅니다{d.jobsKnown ? ' · 툴팁에 그때 돌던 잡' : ''}</div>
+          <div className="nl-subhead">클러스터 {tiles.clusterKind} 추이 · 칸의 노드를 전부 읽었을 때만 {unit === '%' ? '평균을' : '합계를'} 냅니다{d.jobsKnown ? ' · 툴팁에 그때 돌던 잡' : ''}</div>
           <ClusterChart d={d} sel={sel} jobsCol={jobsCol} />
           <div className="nl-note">읽는 법 — 값은 장비가 보고한 그 시점의 처리량·사용률이고 수집 주기마다 한 번 읽습니다(주기 사이는 모릅니다). 네트워크는 bps, 디스크는 B/s, CPU 는 %입니다. 디스크 쓰기(In)·읽기(Out) 방향과 CPU 키 단위는 실장비 확인 전 가정입니다. {d.jobsKnown ? '' : '잡 엔진은 SSH 수집 장비만 읽습니다.'}</div>
         </>

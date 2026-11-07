@@ -288,7 +288,11 @@ export function notesOf(resp, { snapCount = null, listed = null, isEdge = false,
       : `아직 이 장비의 노드 부하 기록이 없습니다 — 다음 수집부터 쌓입니다${isEdge ? '(엣지 장비는 중앙이 push 를 받은 시점부터)' : ''}. 최신값은 아래 노드 표에 있습니다.` });
   }
   const partial = partialColsOf(resp, sel);
-  if (!empty && partial) out.push({ tone: 'muted', text: `클러스터 합계를 비운 칸 ${partial}개 — 그 칸에 값을 읽지 못한 노드가 있어 일부 노드의 합을 전체처럼 그리지 않았습니다.` });
+  // CPU 는 노드 평균, 처리량은 노드 합 — 무엇을 비웠는지 그 이름으로 말한다(CPU 화면이 '합계' 라고 하지 않게).
+  const avg = selectOf(sel).unit === '%';
+  if (!empty && partial) out.push({ tone: 'muted', text: avg
+    ? `클러스터 평균을 비운 칸 ${partial}개 — 그 칸에 값을 읽지 못한 노드가 있어 일부 노드의 평균을 전체 평균처럼 그리지 않았습니다.`
+    : `클러스터 합계를 비운 칸 ${partial}개 — 그 칸에 값을 읽지 못한 노드가 있어 일부 노드의 합을 전체처럼 그리지 않았습니다.` });
   const c = numOrNull(snapCount); const l = numOrNull(listed);
   if (c != null && l != null && c > l) out.push({ tone: 'muted', text: `노드 ${c}대 중 ${l}대만 목록에 올라옵니다(목록 상한) — 나머지 ${c - l}대는 이력이 없고 합계는 ${l} 노드 합입니다.` });
   if (resp.truncated) out.push({ tone: 'muted', text: '조회 상한에 걸려 이 구간의 앞부분 일부를 읽지 못했습니다 — 기간을 줄여 보세요.' });

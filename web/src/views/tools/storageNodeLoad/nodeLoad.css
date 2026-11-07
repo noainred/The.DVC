@@ -2,7 +2,7 @@
  * 스토리지 장비 상세 › 노드 부하 추이(v2.926) — 전부 .nl 아래로만(전역 클래스를 바꾸지 않는다).
  * 색은 기존 토큰 + 차트 규약의 계열색·단일 색조 램프(nodeLoadText.js 상수). text-transform 은 쓰지 않는다.
  */
-.nl { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin: 4px 0 14px; padding: 12px 14px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+.nl { display: flex; flex-direction: column; gap: 10px; min-width: 0; margin: 4px 0 14px; padding: 12px 14px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); word-break: keep-all; }
 .nl .nl-muted { color: var(--text-dim); font-weight: 400; }
 .nl .nl-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .nl .nl-pills { display: flex; flex-wrap: wrap; gap: 6px; }

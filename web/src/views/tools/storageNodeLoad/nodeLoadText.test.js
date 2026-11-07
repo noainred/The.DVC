@@ -144,6 +144,9 @@ describe('잡 엔진 · 타일 · 안내', () => {
     const empty = notesOf({ db: true, cols: [], cluster: {}, clusterNodes: [] }, { isEdge: true });
     expect(empty[0].text).toContain('push 를 받은 시점부터');
     expect(notesOf({ db: true, past: true, cols: [] })[0].text).toContain('이 구간에는 노드 부하 기록이 없습니다');
+    const part = { db: true, cols: [1, 2], cluster: { in: [1, null], cpu: [5, null] }, clusterNodes: [2, 2] };
+    expect(notesOf(part, { sel: 'in' })[0].text).toContain('클러스터 합계를 비운 칸 1개');
+    expect(notesOf(part, { sel: 'cpu' })[0].text).toContain('클러스터 평균을 비운 칸 1개');
     const lim = notesOf({ db: true, cols: [1], cluster: { in: [1] }, clusterNodes: [64] }, { snapCount: 66, listed: 64 });
     expect(lim.some((n) => n.text.includes('나머지 2대는 이력이 없고'))).toBe(true);
   });
