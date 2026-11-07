@@ -152,6 +152,11 @@ test('실제 라우터 — 용도 태그 PUT(admin · 조회 밖 404 → 쓰기 
   const g1 = await (await fetch(`${base}/perf/TAGA/profile`, { headers: { 'x-u': 'adm' } })).json();
   assert.deepEqual(g1.manual.apps, ['airflow'], '태그 저장 뒤 캐시가 아니라 새 값(fleetRev 세대)');
   assert.deepEqual(g1.detection.activeApps, ['airflow']);
+  // 반증 W4: GET 에 writable — 조회 무제한 + 쓰기 vcA 만인 관리자는 vcB 서버의 태그 칸이 잠긴다(캐시를 adm 과 나누지 않는다).
+  assert.equal(g1.writable, true); assert.equal(g1.canTag, true);
+  const gb1 = await (await fetch(`${base}/perf/TAGB/profile`, { headers: { 'x-u': 'adm' } })).json();
+  const gb2 = await (await fetch(`${base}/perf/TAGB/profile`, { headers: { 'x-u': 'rw' } })).json();
+  assert.equal(gb1.writable, true); assert.equal(gb2.writable, false, '쓰기 밖 — 같은 조회 범위 · 같은 역할이어도 캐시를 나누지 않는다'); assert.equal(gb2.canTag, false);
   assert.ok(audit.auditEntriesWithAction('bm-usage.purpose').length >= 1);
   // 덮어쓰기 — 설정 소유자 + 전체 범위만
   const ov = { scope: 'vcA', role: 'db', itemId: 'mem.swappiness', value: '5' };
@@ -186,3 +191,13 @@ test('엣지 봉투(실제 buildBmUsageEnvelope) — 튜닝 사실의 감지 목
   assert.equal(p.tuning.sysctl['vm.swappiness'], '60', '목록 밖 사실은 그대로');
 });
 
+
+test('장애 기록 이벤트의 종료 사유 code(반증 W5) — 서버 incidents.js closeReasonToEnd 가 정하고 incidentRow 가 이벤트마다 싣는다(웹은 문구만)', async () => {
+  const { closeReasonToEnd, INCIDENT_END } = await import('../src/partfault/incidents.js');
+  const row = OPS.incidentRow({ id: 'x', events: [
+    { at: 1, event: 'open', state: 'fault' }, { at: 2, event: 'close', closeReason: 'removed' }, { at: 3, event: 'close', closeReason: 'key-migrated' },
+    { at: 4, event: 'close', closeReason: 'manual' }, { at: 5, event: 'close', closeReason: null }, { at: 6, event: 'change', state: 'warn', prevState: 'fault' },
+  ] });
+  assert.deepEqual(row.events.map((e) => e.endReason), [null, INCIDENT_END.removed, INCIDENT_END.migrated, INCIDENT_END.manual, INCIDENT_END.ok, null]);
+  for (const r of ['removed', 'key-migrated', 'manual', 'ok', null, 'weird']) assert.ok(Object.values(INCIDENT_END).includes(closeReasonToEnd(r)));
+});

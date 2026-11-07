@@ -245,6 +245,7 @@ export const SNAPSHOT_MIN_EDGE_VERSION = '2.923.0';
 /** 엣지 시한(연결 15초 + 명령 30초 + 여유) — 엣지 세션 시한(50초)보다 길게. */
 export const SNAPSHOT_PULL_TIMEOUT_MS = 75_000;
 const SNAP_STATES = ['ok', 'perm', 'partial', 'absent', 'missing'];
+const SNAP_TRIM_KEYS = ['dmesg', 'idrac', 'ss', 'cpuTop', 'memTop', 'ioTop', 'error'];   // snapshot/command.js fitSnapshotResult 가 덜어 내는 칸
 const procList = (v, max) => (Array.isArray(v) ? v.slice(0, max).filter(isObj).map((p) => ({ pid: numOrNull(p.pid), user: strOf(p.user, 32), cpuPct: numOrNull(p.cpuPct), rssKb: numOrNull(p.rssKb), name: strOf(p.name, 32) })) : []);
 /** 스냅샷 결과 본문 정제(엣지 → 중앙 · 아는 필드만). */
 export function sanitizeSnapshotResult(r) {
@@ -269,6 +270,9 @@ export function sanitizeSnapshotResult(r) {
       sensorAt: numOrNull(idr.sensorAt), cpuPct: numOrNull(idr.cpuPct), powerW: numOrNull(idr.powerW), powerAt: numOrNull(idr.powerAt),
     } : null,
     ...(r.error ? { error: strOf(r.error, 300) } : {}),
+    // 반증 R4: 보관 상한에 맞춰 덜어 낸 칸(아는 이름만) · 덜어 낸 커널 로그 줄 수.
+    ...(Array.isArray(r.trimmed) ? { trimmed: r.trimmed.filter((k) => SNAP_TRIM_KEYS.includes(k)).slice(0, 8) } : {}),
+    ...(numOrNull(r.dmesgDropped) != null ? { dmesgDropped: numOrNull(r.dmesgDropped) } : {}),
     ...(isObj(r.authStoppedBefore) ? { authStoppedBefore: { since: numOrNull(r.authStoppedBefore.since), attempts: numOrNull(r.authStoppedBefore.attempts) } } : {}),
   };
 }

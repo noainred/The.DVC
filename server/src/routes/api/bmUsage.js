@@ -15,7 +15,7 @@
  */
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모 표시
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds, inUserWriteScope, isFullReadWriteScope } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserWriteScope, isFullReadWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { mergeScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.607 AUTHZ2607-05
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
@@ -522,7 +522,9 @@ export async function bmProfileView(req, snap, deps = {}) {
   const { catalogView } = await import('../../bmusage/profiles/index.js');
   return { ok: true, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent, snapAt: f.snapAt ?? null } : {}),
     factsAt: f.tuning?.at ?? f.at ?? null, noFacts: !f.tuning, manual: manual ? { apps: manual.apps ?? null, role: manual.role ?? null, ...(r.isAdmin ? { by: manual.by, at: manual.at } : {}) } : null,
-    canTag: r.isAdmin, catalog: catalogView(), codes: O.OPS_CODES, ...view };
+    // 반증 W4: 쓰기 범위 밖(조회만 되는 법인)이면 태그 칸을 잠그고 이유를 보인다(서버도 PUT 403 — server/CLAUDE.md v2.733 ‘GET 에 writable’).
+    writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)),
+    canTag: r.isAdmin && inUserWriteScope(req.user, snap, t(found.target.vcenterId)), catalog: catalogView(), codes: O.OPS_CODES, ...view };
 }
 
 /** 함대 항목(보이는 서버의 사실) — 이 노드 대상 + 엣지 보관분. 범위 · 가림은 여기서. */
@@ -732,7 +734,8 @@ export async function bmSnapshotRead(req, snap, deps = {}) {
     ? (id ? await D.getLocal({ key: found.realKey, id }) : await D.listLocal({ key: found.realKey }))
     : await D.pullEdge(found.agent, { key: found.realKey, id });
   const code = res?.code || (res?.ok ? 'ok' : 'edge');
-  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}) }, isAdmin);
+  // 반증 W4: 실행 칸을 잠글지 화면이 알 수 있게 — 쓰기 범위(조건 없이 · 실행 라우트와 같은 판정). 역할(operator 이상)은 화면이 따로 본다.
+  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)) }, isAdmin);
   const st = code === 'ok' ? 200 : snapStatus(code);
   return st === 200 ? body : { __status: st, ...body };
 }
@@ -886,7 +889,9 @@ api.get('/tools/bm-usage/perf/:key/ports', toolsPerm, (req, res) => memoJson(req
 const opsKey = async (req) => {
   const [{ fleetRev }, O] = await Promise.all([import('../../insights/fleetRev.js'), import('../../bmusage/tuning/overrides.js')]);
   let at = 0; try { at = O.loadTuningOverrides().at || 0; } catch { at = -1; }
-  return `${trendKey(req)}|f${fleetRev()}|o${at}`;
+  // 반증 W4: 응답에 writable(쓰기 범위)이 실린다 — 조회 범위가 같고 쓰기 범위만 다른 두 계정이 캐시를 나누지 않게 쓰기 범위 서명도 키에.
+  let w = 'all'; try { const ws = writeScopedVcenterIds(req.user, store.get()); w = ws ? [...ws].sort().join(',') : 'all'; } catch { w = 'err'; }
+  return `${trendKey(req)}|f${fleetRev()}|o${at}|w${w}`;
 };
 api.get('/tools/bm-usage/perf/:key/tuning', toolsPerm, async (req, res) => memoJson(req, res, 'bm-tuning', (snap) => bmTuningView(req, snap), { extraKey: await opsKey(req) }));
 api.get('/tools/bm-usage/perf/:key/profile', toolsPerm, async (req, res) => memoJson(req, res, 'bm-profile', (snap) => bmProfileView(req, snap), { extraKey: await opsKey(req) }));

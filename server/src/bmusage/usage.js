@@ -547,7 +547,8 @@ export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = nu
      *   이 사실을 읽는다. ‘구획은 왔는데 0줄’(absent)은 ‘없음’ 의 양성 증거라 계정 · 커널 인자 · xfs 는 빈 목록으로, 못 읽음(missing)은 null 로 둔다.
      */
     os: perf.osrel?.value || null,
-    units: perf.units?.value ? { list: perf.units.value.units.slice(0, 256), failed: n(perf.units.value.failed), capped: !!perf.units.value.capped } : null,
+    // v2.923(반증 R7): systemctl 이 실패한 칸은 null(확인 불가) — running 목록 · 실패 수를 따로(한쪽만 읽혔을 수 있다).
+    units: perf.units?.value ? { list: Array.isArray(perf.units.value.units) ? perf.units.value.units.slice(0, 256) : null, failed: n(perf.units.value.failed), capped: !!perf.units.value.capped } : null,
     ports: perf.ports?.value ? { list: perf.ports.value.ports.slice(0, 512), capped: !!perf.ports.value.capped } : null,
     procs: perf.procs?.value ? { list: perf.procs.value.names.slice(0, 512), capped: !!perf.procs.value.capped } : null,
     accounts: perf.acct?.value || (perf.acct?.absent ? [] : null),

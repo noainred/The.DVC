@@ -19,6 +19,13 @@ const FILE = () => path.join(config.configDir, 'bmusage-tuning.json');
 const VALUE_RE = /^[A-Za-z0-9 ._:,+-]{1,64}$/;
 const VC_RE = /^[A-Za-z0-9._:@-]{1,128}$/;
 const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+/**
+ * v2.923(반증 R10) — scope(법인 키)는 화이트리스트: 'all' 또는 vCenter id 형식이면서 **Object.prototype 의 이름이 아닌 것**.
+ *   예전에는 ‘toString’ · ‘hasOwnProperty’ 가 형식을 통과했고 `(corps ||= {})[sc] ||= {}` 가 상속된 함수를 holder 로 잡아
+ *   저장은 안 되는데 ok:true 를 돌려주고 **전역 Object.prototype.toString 함수 객체를 고쳤다**(재현). 맵은 null 프로토타입 · 읽기는 Object.hasOwn.
+ */
+const okScopeKey = (k) => typeof k === 'string' && VC_RE.test(k) && !BAD_KEYS.has(k) && !(k in Object.prototype);
+const bare = () => Object.create(null);
 export const OVERRIDE_MAX = 2_000;
 
 let _cache = null; let _mtime = '';
@@ -32,15 +39,16 @@ export function tuningOverridesLoadError() { load(); return _err.get(); }
 
 /** 역할 → 항목 → 값 맵 정제(모르는 역할 · 항목 · 형식은 버린다). */
 function cleanRoleMap(m) {
-  const out = {};
+  const out = bare();
   if (!m || typeof m !== 'object' || Array.isArray(m)) return out;
   for (const r of ROLES) {
-    const rm = m[r];
+    const rm = Object.hasOwn(m, r) ? m[r] : null;
     if (!rm || typeof rm !== 'object' || Array.isArray(rm)) continue;
     for (const [id, v] of Object.entries(rm)) {
       if (BAD_KEYS.has(id) || !itemOf(id)?.overridable) continue;
       if (v !== null && !(typeof v === 'string' && VALUE_RE.test(v)) && !(typeof v === 'number' && Number.isFinite(v))) continue;
-      (out[r] ||= {})[id] = v === null ? null : String(v);
+      if (!Object.hasOwn(out, r)) out[r] = bare();
+      out[r][id] = v === null ? null : String(v);
     }
   }
   return out;
@@ -50,13 +58,13 @@ function load() {
   const mt = mtimeOf();
   if (_cache && mt === _mtime) return _cache;
   _mtime = mt;
-  if (!mt) { _err.missing(); _cache = { v: 1, all: {}, corps: {}, by: '', at: 0 }; return _cache; }
+  if (!mt) { _err.missing(); _cache = { v: 1, all: bare(), corps: bare(), by: '', at: 0 }; return _cache; }
   try {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닙니다');
-    const corps = {};
+    const corps = bare();
     for (const [vc, m] of Object.entries(raw.corps && typeof raw.corps === 'object' ? raw.corps : {})) {
-      if (BAD_KEYS.has(vc) || !VC_RE.test(vc)) continue;
+      if (!okScopeKey(vc)) continue;
       const c = cleanRoleMap(m);
       if (Object.keys(c).length) corps[vc] = c;
     }
@@ -65,7 +73,7 @@ function load() {
   } catch (e) {
     preserveCorrupt(FILE(), String(e?.message || e));
     _err.corrupt(e);
-    _cache = { v: 1, all: {}, corps: {}, by: '', at: 0 };
+    _cache = { v: 1, all: bare(), corps: bare(), by: '', at: 0 };
     _mtime = mtimeOf();
   }
   return _cache;
@@ -88,9 +96,10 @@ export function overridesFor({ role = 'general', vcenterId = '' } = {}) {
   const cur = load();
   if (_err.get()) return { map: {}, error: _err.get() };
   const map = {};
-  for (const [id, v] of Object.entries(cur.all?.[role] || {})) map[id] = { value: v, by: 'override:all' };
+  const roleOf = (m) => (m && Object.hasOwn(m, role) ? m[role] : null);
+  for (const [id, v] of Object.entries(roleOf(cur.all) || {})) map[id] = { value: v, by: 'override:all' };
   const corp = vcenterId && Object.hasOwn(cur.corps, vcenterId) ? cur.corps[vcenterId] : null;
-  for (const [id, v] of Object.entries(corp?.[role] || {})) map[id] = { value: v, by: 'override:corp' };
+  for (const [id, v] of Object.entries(roleOf(corp) || {})) map[id] = { value: v, by: 'override:corp' };
   return { map, error: null };
 }
 
@@ -106,17 +115,22 @@ export function saveTuningOverride({ scope = 'all', role, itemId, value } = {}, 
   if (!item) return { ok: false, reason: '모르는 항목입니다.' };
   if (!item.overridable) return { ok: false, reason: '이 항목은 권장값을 덮어쓸 수 없습니다(같다/다르다로 판정하지 않는 항목).' };
   const sc = String(scope || 'all');
-  if (sc !== 'all' && (BAD_KEYS.has(sc) || !VC_RE.test(sc))) return { ok: false, reason: 'scope 는 all 또는 vCenter id 입니다.' };
+  if (sc !== 'all' && !okScopeKey(sc)) return { ok: false, reason: 'scope 는 all 또는 vCenter id 입니다.' };
   const clear = value === '' || value === undefined;
   if (!clear && value !== null && !(typeof value === 'string' && VALUE_RE.test(value)) && !(typeof value === 'number' && Number.isFinite(value))) {
     return { ok: false, reason: '값은 1~64자(영숫자와 ._:,+- 공백) 또는 null(권장 없음)입니다.' };
   }
   if (!clear && value !== null && item.valueKind === 'num' && !Number.isFinite(Number(value))) return { ok: false, reason: '이 항목은 숫자 값입니다.' };
   const cur = JSON.parse(JSON.stringify(_cache));
-  const holder = sc === 'all' ? (cur.all ||= {}) : ((cur.corps ||= {})[sc] ||= {});
-  const prev = holder[role] && Object.hasOwn(holder[role], itemId) ? holder[role][itemId] : undefined;
-  if (clear) { if (holder[role]) delete holder[role][itemId]; }
-  else (holder[role] ||= {})[itemId] = value === null ? null : String(value);
+  if (!cur.all || typeof cur.all !== 'object') cur.all = {};
+  if (!cur.corps || typeof cur.corps !== 'object') cur.corps = {};
+  // 상속 속성을 holder 로 잡지 않는다(Object.hasOwn) — 반증 R10.
+  if (sc !== 'all' && !Object.hasOwn(cur.corps, sc)) cur.corps[sc] = {};
+  const holder = sc === 'all' ? cur.all : cur.corps[sc];
+  const rm = Object.hasOwn(holder, role) ? holder[role] : null;
+  const prev = rm && Object.hasOwn(rm, itemId) ? rm[itemId] : undefined;
+  if (clear) { if (rm) delete rm[itemId]; }
+  else { if (!rm) holder[role] = {}; holder[role][itemId] = value === null ? null : String(value); }
   let n = 0;
   for (const m of [cur.all, ...Object.values(cur.corps)]) for (const r of Object.values(m || {})) n += Object.keys(r || {}).length;
   if (n > OVERRIDE_MAX) return { ok: false, reason: `덮어쓰기 상한(${OVERRIDE_MAX})을 넘습니다.` };

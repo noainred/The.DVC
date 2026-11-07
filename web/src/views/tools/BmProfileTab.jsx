@@ -57,7 +57,7 @@ function TagEditor({ itemKey, manual, onSaved }) {
   );
 }
 
-export function ProfileView({ resp, itemKey = '', onReload = null, canTag = false }) {
+export function ProfileView({ resp, itemKey = '', onReload = null, canTag = false, showReadOnly = false }) {
   const det = resp?.detection || {};
   const st = PROFILE_STATUS_TEXT[resp?.status] || PROFILE_STATUS_TEXT.unknown;
   const notes = factsNotes(resp || {});
@@ -78,6 +78,8 @@ export function ProfileView({ resp, itemKey = '', onReload = null, canTag = fals
       {notes.map((x, i) => <p key={i} className="bmo-note"><BoldText text={x} /></p>)}
       {resp?.osProfileMissing && <p className="bmo-note"><BoldText text={`이 OS(${det.os?.label || '미확인'})에는 프로파일이 없습니다 — **점검하지 않습니다**(Rocky 9 만 만들었습니다 · 틀린 판정보다 낫습니다).`} /></p>}
       {canTag && <TagEditor itemKey={itemKey} manual={resp?.manual || null} onSaved={onReload} />}
+      {/* 반증 W4: 관리자라도 쓰기 범위 밖(조회만 되는 법인)이면 태그 칸 대신 이유(서버도 PUT 403). */}
+      {!canTag && showReadOnly && resp?.writable === false && <p className="bmo-note">이 서버의 법인에 쓰기 권한이 없어 수동 태그를 바꿀 수 없습니다(조회 전용).</p>}
       {(resp?.profiles || []).map((p) => {
         const ps = PROFILE_STATUS_TEXT[p.status] || PROFILE_STATUS_TEXT.unknown;
         return (
@@ -159,7 +161,7 @@ export default function BmProfileTab({ itemKey }) {
       </div>
       <OpsError err={err} />
       {!resp && !err && <p className="bmo-note">용도 판정을 불러오는 중…</p>}
-      {resp && <ProfileView resp={resp} itemKey={itemKey} onReload={reload} canTag={!!resp.canTag && hasRole('admin')} />}
+      {resp && <ProfileView resp={resp} itemKey={itemKey} onReload={reload} canTag={!!resp.canTag && hasRole('admin')} showReadOnly={hasRole('admin')} />}
     </div>
   );
 }

@@ -26,7 +26,7 @@ import {
   readSection, parseProcStatFull, parseLoadavg, parsePsi, parseVmstat, parseSnmpTcp, parseBlkq, parseSysctl, parseHugePages, parseIrq, parseDfInodes,
   SYSCTL_PATHS, MAX_CORES, MAX_BLKQ, MAX_IRQ_LINES, BLKQ_SHELL_LINES,
 } from '../parse/linuxProc.js';
-import { FACT_SHELL, FACT_LINE_CAP, FACT_LINE_BYTES, parseOsRel, parseUnits, parsePorts, parseProcs, parseAccts, parseKargs, parseSoftnet, parseNetq, parseXfs } from '../parse/linuxFacts.js'; // v2.923: 4단계 용도 감지 · 튜닝 사실
+import { FACT_SHELL, FACT_SECTIONS, FACT_LINE_CAP, FACT_LINE_BYTES, parseOsRel, parseUnits, parsePorts, parseProcs, parseAccts, parseKargs, parseSoftnet, parseNetq, parseXfs } from '../parse/linuxFacts.js'; // v2.923: 4단계 용도 감지 · 튜닝 사실
 import { planWindow, peakCommand, parsePeakOutput, computePeaks, PEAK_OVERHEAD_MS } from '../peakWindow.js'; // v2.922: 피크 A 안
 import { samplerCommand, parseSamplerFile, SAMPLER_MAX_LINES } from '../samplerSpec.js'; // v2.922: 피크 B 안(수거 자리만)
 import { parseWinPerf } from '../parse/winPerf.js';
@@ -91,6 +91,12 @@ const SYSCTL_FILES = Object.keys(SYSCTL_PATHS).join(' ');
  */
 const IRQ_AWK = "awk 'NR==1{n=NF;next} {nz=0; for(i=2;i<=n+1&&i<=NF;i++) if(($i+0)>0) nz++; nm=$NF; if (nm ~ /^(eth|en|em|p[0-9]|bond|mlx|i40e|ice|ixgbe|igb|bnxt|qede|nfp|virtio|be2net|tg3)/) print substr($1,1,12) \"|\" nz \"|\" n \"|\" substr(nm,1,48)}' /proc/interrupts 2>/dev/null";
 
+/**
+ * v2.923(반증 R1): 명령이 표지를 내는 **순서** — 파서(splitSections)는 이 순서에서 지금보다 뒤의 표지만 받는다(앞 구획을 다시 열지 않는다).
+ *   linuxCommand 의 echo 순서와 같아야 한다(테스트가 명령 문자열에서 표지를 뽑아 대조).
+ */
+export const LINUX_SECTIONS = Object.freeze(['STAT', 'MEM', 'DISK', 'NET', 'NETINFO', 'FC', 'TICK', 'DF', 'HOST', 'LOAD', 'PSI', 'VMSTAT', 'SNMP', 'BLKQ', 'SYSCTL', 'IRQ', 'DFI', ...FACT_SECTIONS, 'SAMPLER', 'END']);
+
 /** Linux 수집 명령 — 구획 표지로 나눈 한 방. */
 export function linuxCommand(mounts = [], { sampler = false } = {}) {
   const dfPart = mounts.length ? `df -P -k -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DF + 1} | cut -c1-1024` : 'true';
@@ -127,10 +133,11 @@ export function linuxCommand(mounts = [], { sampler = false } = {}) {
     // sysctl·THP·governor·numa_balancing·TuneD — grep -H 한 번으로 `<경로>:<값>`(키마다 프로세스를 띄우지 않는다). 없는 파일은 줄이 없다(= 확인 불가).
     // ⚠ 셸 `read` 내장으로 읽지 말 것 — dash 는 1바이트씩 읽는데 sysctl 정수 파일은 오프셋 0 이 아니면 EOF 를 준다(이 컨테이너 실측: swappiness 60 → '6').
     "echo '##SYSCTL'", `grep -H '' ${SYSCTL_FILES} 2>/dev/null | head -n ${SECTION_LINE_CAP.SYSCTL}`,
-    "echo '##IRQ'", `${IRQ_AWK} | head -n ${SECTION_LINE_CAP.IRQ}`, 'echo "irqbalance=`systemctl is-active irqbalance 2>/dev/null`"',
+    // v2.923(반증 R8): systemctl 은 D-Bus 기본 시한(25초)까지 기다릴 수 있다 — timeout 3 으로 감싼다(끊기면 빈 값 = 확인 불가). 주기 명령 전체가 시한 하나라 한 칸이 전 구획을 잃게 하지 않게.
+    "echo '##IRQ'", `${IRQ_AWK} | head -n ${SECTION_LINE_CAP.IRQ}`, 'echo "irqbalance=`timeout 3 systemctl is-active irqbalance 2>/dev/null`"',
     "echo '##DFI'", dfiPart,
     // ── v2.923(4단계) 용도 감지 · 튜닝 사실 — 전부 읽기 전용 상수 조각(parse/linuxFacts.js FACT_SHELL). 프로세스는 이름(comm)만 · 인자 없음 · sudo 없음.
-    ...['OSREL', 'UNITS', 'PORTS', 'PROCS', 'ACCT', 'KARGS', 'SOFTNET', 'NETQ', 'XFS'].flatMap((k) => [`echo '##${k}'`, FACT_SHELL[k]]),
+    ...FACT_SECTIONS.flatMap((k) => [`echo '##${k}'`, FACT_SHELL[k]]),
     // v2.922: 피크 B 안 수거 구획 — 옵트인일 때만(기본 명령은 그대로). 파일이 없으면 0줄(absent).
     ...(sampler ? ["echo '##SAMPLER'", samplerCommand()] : []),
     "echo '##END'",
@@ -165,7 +172,7 @@ export function winCommand(script = WIN_PS) {
 
 /** Linux 구획 출력 → 스냅샷 + 다음 주기용 누적값(순수 — 테스트 대상). */
 export function shapeLinux(stdout, mounts = [], { partitionIo = false, blkqMax = MAX_BLKQ, samplerSha = '' } = {}) {
-  const sec = splitSections(stdout);
+  const sec = splitSections(stdout, { order: LINUX_SECTIONS });   // v2.923(반증 R1): 순서 · 줄 머리 정확 일치 · 재개방 금지
   if (!Object.keys(sec).length) return null;              // 구획 표지 0개 = Linux 가 아니거나 셸이 다르다
   /*
    * v2.919(반증 D1): ① 출력이 잘렸으면(##END 미도착) **마지막 구획을 통째로 버린다** — 그 구획의 마지막 줄은 숫자 중간에서 잘렸을 수 있고

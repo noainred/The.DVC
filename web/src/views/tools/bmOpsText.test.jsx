@@ -12,7 +12,7 @@ import * as T from './bmOpsText.js';
 import { TuningView, Grade, GradeLegend } from './BmTuningTab.jsx';
 import { ProfileView } from './BmProfileTab.jsx';
 import { FaultsView, IncidentTable } from './BmFaultsTab.jsx';
-import BmSnapshotTab, { SnapshotResult } from './BmSnapshotTab.jsx';
+import BmSnapshotTab, { SnapshotResult, SnapshotListTable } from './BmSnapshotTab.jsx';
 import { setCurrentUser } from '../../api.js';
 import { PurposeFleetView, FaultsFleetView } from './BmOpsFleet.jsx';
 import { TUNING_STATUS, TUNING_REASON, ROLES } from '../../../../server/src/bmusage/tuning/catalog.js';
@@ -139,7 +139,7 @@ describe('서버 함수가 만든 응답을 그대로 그린다(SSR)', () => {
     expect(denied).toContain('권한 없음'); expect(denied).not.toContain('<table');
   });
   it('스냅샷 결과 — 권한 부족(④ 상태) · I/O 확인 불가는 0 이 아님 · dmesg 권한 · iDRAC 경로 없음', () => {
-    const out = ['##PSCPU', ' 10 root 5.0 1000 nginx', '##PSMEM', ' 10 root 5.0 1000 nginx', '##PIDS', '200', '##IO', 'readable=0', 'span=2', '##SS', 'TCP:   10 (estab 5, closed 1, orphaned 0, timewait 4)', '##DMESG', 'dmesg: read kernel buffer failed: Operation not permitted', '##END'].join('\n');
+    const out = ['##PSCPU', ' 10 root 5.0 1000 nginx', '##PSMEM', ' 10 root 5.0 1000 nginx', '##PIDS', '200', '##IO', 'readable=0', 'span=2', '##SS', 'TCP:   10 (estab 5, closed 1, orphaned 0, timewait 4)', '##DMESG', 'd:dmesg: read kernel buffer failed: Operation not permitted', '##END'].join('\n');
     const snap = { ok: true, code: 'ok', at: NOW, ms: 2300, used: 1, max: 20, stored: true, result: { ...parseSnapshot(out), idrac: null } };
     const html = renderToStaticMarkup(h(SnapshotResult, { snap }));
     expect(html).toContain('일부를 권한 때문에 읽지 못했습니다');
@@ -198,5 +198,61 @@ describe('소스 스윕 — 웹이 다시 판정하지 않는다 · 적용 경�
     const walk = (v) => { if (typeof v === 'string') strings.push(v); else if (v && typeof v === 'object') Object.values(v).forEach(walk); };
     walk([T.TUNING_REASON_TEXT, T.CHECK_REASON_TEXT, T.SNAP_CODE_TEXT, T.SNAP_STATE_TEXT, T.TUNING_HONEST, T.PROFILE_HONEST, T.FAULT_RULES_NOTE, T.SNAP_NOTE]);
     for (const s of strings) expect(s).not.toContain('`');
+  });
+});
+
+describe('4단계 반증 반영(W1~W5 · R4 · R5) — 화면', () => {
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const tab = strip(fs.readFileSync(path.join(import.meta.dirname, 'BmSnapshotTab.jsx'), 'utf8'));
+  it('W1 — 새 실행은 보관분 보기 상태를 비우고 시작한다(새 결과가 보인다) · W2 — 보기 응답은 세대가 맞을 때만 반영', () => {
+    const doRun = tab.slice(tab.indexOf('const doRun'), tab.indexOf('const open'));
+    expect(doRun.indexOf("setSel({ id: '', resp: null, err: null })")).toBeGreaterThan(-1);
+    expect(doRun.indexOf("setSel({ id: '', resp: null, err: null })")).toBeLessThan(doRun.indexOf('postJson('));
+    expect(doRun).toMatch(/selGen\.current \+= 1/);
+    const open = tab.slice(tab.indexOf('const open'), tab.indexOf('const snaps'));
+    expect(open).toMatch(/const gen = \+\+selGen\.current/);
+    expect((open.match(/if \(gen === selGen\.current\) setSel/g) || []).length).toBe(2);
+  });
+  it('W3 — 보관분 표 결과 칸은 code 원문이 아니라 짧은 낱말(모든 code 에 낱말 · 모르는 code 는 ‘알 수 없음’)', () => {
+    for (const c of SNAPSHOT_CODES) expect(T.SNAP_CODE_TEXT[c].short, c).toBeTruthy();
+    const html = renderToStaticMarkup(h(SnapshotListTable, { snaps: [{ id: 'a', at: NOW, code: 'daily-cap', ok: false, reason: 'r', ms: 1000 }, { id: 'b', at: NOW, code: 'weird', ok: false, reason: 'r2', ms: null }] }));
+    expect(html).toContain('하루 상한'); expect(html).not.toContain('>daily-cap<');
+    expect(html).toContain('알 수 없음'); expect(html).not.toContain('>weird<');
+  });
+  it('W4 — 실행 칸: operator 미만은 역할 안내 · 쓰기 범위 밖(writable:false)은 조회 전용 안내 · 응답 전(writable 없음)은 잠그지 않는다(서버가 403) · 용도 태그 칸도 같은 판정', () => {
+    expect(T.snapRunGate({ roleOk: false, writable: true })).toBe('role');
+    expect(T.snapRunGate({ roleOk: true, writable: false })).toBe('scope');
+    expect(T.snapRunGate({ roleOk: true, writable: true })).toBe('ok');
+    expect(T.snapRunGate({ roleOk: true })).toBe('ok');
+    expect(tab).toMatch(/snapRunGate\(\{ roleOk: hasRole\('admin', 'operator'\), writable: list\.resp\?\.writable \}\)/);
+    const resp = { ok: true, key: 'K', via: 'local', ...profileViewFor({ tuning: TU, manual: null }), writable: false, canTag: false };
+    const html = renderToStaticMarkup(h(ProfileView, { resp, itemKey: 'K', canTag: false, showReadOnly: true }));
+    expect(html).toContain('쓰기 권한이 없어 수동 태그를 바꿀 수 없습니다');
+    expect(html).not.toContain('태그 지우기');
+  });
+  it('W5 — 시간순 닫힘 문구는 서버가 실은 종료 사유 code(endReason)로만 고른다(웹이 closeReason 을 다시 매핑하지 않는다)', () => {
+    const tl = T.faultTimeline([{ label: 'Disk 1', events: [{ at: 2, event: 'close', closeReason: 'key-migrated', endReason: 'migrated' }, { at: 1, event: 'close', closeReason: 'removed', endReason: 'removed' }, { at: 0, event: 'close', closeReason: 'x', endReason: null }] }]);
+    expect(tl.map((x) => x.text)).toEqual(['Disk 1 — 닫힘 · 식별 키 변경', 'Disk 1 — 닫힘 · 부품 제거', 'Disk 1 — 닫힘 · 종료 기록 없음']);
+    const src2 = strip(fs.readFileSync(path.join(import.meta.dirname, 'bmOpsText.js'), 'utf8'));
+    expect(src2).not.toMatch(/closeReason\s*===/);
+    // 서버 incidentRow 가 실은 값과 대조(같은 입력 — 판정은 서버 한 곳).
+    const row = incidentRow({ id: 'x', label: 'Disk 1', events: [{ at: 1, event: 'close', closeReason: 'key-migrated' }] });
+    expect(T.faultTimeline([row])[0].text).toBe('Disk 1 — 닫힘 · 식별 키 변경');
+  });
+  it('R4 · R5 — 보관 상한으로 덜어 낸 칸을 밝힌다 · dmesg 자체 오류(권한 아님)는 받지 못함 문구', () => {
+    expect(T.snapTrimNote({ trimmed: ['dmesg'], dmesgDropped: 37 })).toContain('커널 로그(오래된 37줄)');
+    expect(T.snapTrimNote({})).toBe('');
+    const out = ['##PSCPU', ' 10 root 5.0 1000 nginx', '##PSMEM', ' 10 root 5.0 1000 nginx', '##PIDS', '1', '##IO', 'readable=1', 'span=2', '##SS', 'TCP:   1 (estab 1, closed 0, orphaned 0, timewait 0)', '##DMESG', "d:dmesg: unrecognized option '--level'", '##END'].join('\n');
+    const snap = { ok: true, code: 'ok', at: NOW, result: { ...parseSnapshot(out), idrac: null, trimmed: ['dmesg'], dmesgDropped: 3 } };
+    const html = renderToStaticMarkup(h(SnapshotResult, { snap }));
+    expect(html).toContain(T.SNAP_STATE_TEXT.missing); expect(html).toContain('오래된 3줄');
+    expect(html).not.toContain('권한 부족 — dmesg');
+  });
+  it('실패한 실행 · 보관분 — OS 칸을 빈 칸으로 그리지 않는다(결과가 { error } 뿐) · 보관분의 reason 은 ‘실행 사유’ 로(서버 사유와 섞지 않는다)', () => {
+    const fail = renderToStaticMarkup(h(SnapshotResult, { snap: { ok: false, code: 'auth', userReason: '새벽 백업 창 확인', result: { error: 'All configured authentication methods failed', idrac: null } } }));
+    expect(fail).not.toContain('CPU 상위'); expect(fail).not.toContain('프로세스 수명 평균');
+    expect(fail).toContain('iDRAC 경로 없음'); expect(fail).toContain('실행 사유: 새벽 백업 창 확인');
+    const tabSrc = fs.readFileSync(path.join(import.meta.dirname, 'BmSnapshotTab.jsx'), 'utf8');
+    expect(tabSrc).toMatch(/userReason: sel\.resp\.snapshot\.reason \|\| '', reason: undefined/);
   });
 });

@@ -36,6 +36,7 @@ import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
 import { PERF_COL_NAMES, PEAK_SQL_COLS, PEAK_META_COLS } from './perfCols.js';
 import * as month from './monthStore.js'; // v2.922: 5분 원시·롤업·장치별 이력은 시간 단위 파일(이 파일은 최신값·장치 목록·마이그레이션 상태)
+import { SNAPSHOT_RESULT_MAX } from './snapshot/command.js'; // v2.923 진단 스냅샷 보관 상한(반증 R4 — 단일 원천)
 const lockRetry = createLockRetry();
 export { DAY_OFFSET_MIN, dayKey };
 
@@ -644,7 +645,8 @@ export async function dailyRangeMergedMeta({ key = '', agent = '', from: fromMs,
 }
 
 /* ── v2.923 진단 스냅샷 보관(snapshot/run.js 만 쓴다) ─────────────────────────────── */
-export const SNAPSHOT_RESULT_MAX = 64 * 1024;
+// 보관 상한은 snapshot/command.js 가 단일 원천(fitSnapshotResult 가 그 안에 맞춘다 — 아래 통째 치환은 마지막 방어선).
+export { SNAPSHOT_RESULT_MAX };
 const snapRow = (r, full) => r && ({
   id: String(r.id), agent: String(r.agent || ''), key: String(r.key), vcenterId: r.vcenter_id || '', at: Number(r.at),
   by: r.by_user || '', reason: r.reason || '', ok: r.ok === 1, code: r.code || '', ms: r.ms == null ? null : Number(r.ms),
@@ -663,19 +665,21 @@ export async function snapshotInsert(rec) {
       String(rec.reason || '').slice(0, 300), rec.ok ? 1 : 0, String(rec.code || '').slice(0, 32), rec.ms == null ? null : Math.round(Number(rec.ms)), json);
   return { ok: true };
 }
-export async function snapshotList({ key = '', agent = null, limit = 50 } = {}) {
+/** 목록 — `since`(보관 기간 시작)보다 오래된 행은 정리 전이어도 내보내지 않는다(반증 R3 — 실행이 없으면 정리도 없던 시절의 7일 넘은 행). */
+export async function snapshotList({ key = '', agent = null, limit = 50, since = 0 } = {}) {
   const db = await getDb();
   if (!db) return null;
   const lim = Math.max(1, Math.min(200, Math.floor(Number(limit) || 50)));
+  const from = Math.max(0, Math.round(Number(since) || 0));
   const rows = agent == null
-    ? db.prepare('SELECT id,agent,key,vcenter_id,at,by_user,reason,ok,code,ms FROM bm_snapshots WHERE key=? ORDER BY at DESC LIMIT ?').all(String(key), lim)
-    : db.prepare('SELECT id,agent,key,vcenter_id,at,by_user,reason,ok,code,ms FROM bm_snapshots WHERE key=? AND agent=? ORDER BY at DESC LIMIT ?').all(String(key), String(agent), lim);
+    ? db.prepare('SELECT id,agent,key,vcenter_id,at,by_user,reason,ok,code,ms FROM bm_snapshots WHERE key=? AND at>=? ORDER BY at DESC LIMIT ?').all(String(key), from, lim)
+    : db.prepare('SELECT id,agent,key,vcenter_id,at,by_user,reason,ok,code,ms FROM bm_snapshots WHERE key=? AND agent=? AND at>=? ORDER BY at DESC LIMIT ?').all(String(key), String(agent), from, lim);
   return rows.map((r) => snapRow(r, false));
 }
-export async function snapshotGet(id) {
+export async function snapshotGet(id, { since = 0 } = {}) {
   const db = await getDb();
   if (!db) return null;
-  return snapRow(db.prepare('SELECT * FROM bm_snapshots WHERE id=?').get(String(id)), true) || null;
+  return snapRow(db.prepare('SELECT * FROM bm_snapshots WHERE id=? AND at>=?').get(String(id), Math.max(0, Math.round(Number(since) || 0))), true) || null;
 }
 /** 법인(vCenter)별 기간 안 실행 수 — 하루 상한. */
 export async function snapshotCountSince({ vcenterId = '', since = 0 } = {}) {

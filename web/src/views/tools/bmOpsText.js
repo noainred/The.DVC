@@ -195,7 +195,8 @@ export function faultTimeline(incidents = [], sel = null, labels = {}) {
   for (const i of Array.isArray(incidents) ? incidents : []) {
     for (const e of i.events || []) {
       const st = (s) => labels.state?.[s] || s || '?';
-      const what = e.event === 'open' ? `열림 ‘${st(e.state)}’` : e.event === 'change' ? `변화 ${st(e.prevState)} → ${st(e.state)}` : `닫힘 · ${(INCIDENT_END_TEXT[e.closeReason === 'key-migrated' ? 'migrated' : e.closeReason] || INCIDENT_END_TEXT.ok).label}`;
+      // 반증 W5: 닫힘의 종료 사유 code 는 서버가 이벤트마다 싣는다(incidentRow endReason — incidents.js closeReasonToEnd) — 웹은 문구로만.
+      const what = e.event === 'open' ? `열림 ‘${st(e.state)}’` : e.event === 'change' ? `변화 ${st(e.prevState)} → ${st(e.state)}` : `닫힘 · ${(INCIDENT_END_TEXT[e.endReason] || INCIDENT_END_TEXT.unknown).label}`;
       out.push({ at: n(e.at), src: '부품', text: `${t(i.label)} — ${what}` });
     }
   }
@@ -210,21 +211,36 @@ export { durationText, shortStamp, holdText };
 /* ── 진단 스냅샷 ─────────────────────────────────────────────── */
 /** 결과 code(서버 SNAPSHOT_CODES) → 문장 · 톤. */
 export const SNAP_CODE_TEXT = Object.freeze({
-  ok: { tone: 'ok', text: '스냅샷을 받았습니다.' },
-  'bad-reason': { tone: 'warn', text: '사유를 2자 이상 적어야 합니다(감사 기록에 남습니다).' },
-  'not-found': { tone: 'idle', text: '대상 서버를 찾지 못했습니다 — 대상에서 빠졌거나 볼 수 있는 범위 밖입니다.' },
-  forbidden: { tone: 'warn', text: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용) — 진단 스냅샷은 원격 명령을 실행합니다.' },
-  'no-os-path': { tone: 'idle', text: '이 서버에는 OS 계정이 없습니다 — 스냅샷은 SSH 경로가 있어야 합니다(베어메탈 스토리지 등록부).' },
-  busy: { tone: 'warn', text: '이 서버의 스냅샷이 이미 실행 중입니다 — 끝난 뒤 다시 누르세요(서버당 동시 1건).' },
-  'daily-cap': { tone: 'warn', text: '이 법인의 24시간 스냅샷 상한에 닿았습니다.' },
-  'store-unavailable': { tone: 'bad', text: '스냅샷 보관 DB 를 열 수 없어 실행하지 않았습니다(상한을 셀 수 없습니다).' },
-  'ssh-error': { tone: 'bad', text: 'SSH 로 읽지 못했습니다 — 아래 사유를 보세요.' },
-  auth: { tone: 'bad', text: 'SSH 자격증명이 거부됐습니다 — 계정 잠금을 막으려고 이 서버의 주기 수집을 멈췄습니다(등록부에서 고치면 다음 주기에 재개).' },
-  'host-key': { tone: 'bad', text: 'SSH 호스트키를 신뢰하지 않아 연결하지 않았습니다(비밀번호를 보내지 않음) — 설정 › 장비 신뢰에서 지문을 확인 · 승인하세요.' },
-  timeout: { tone: 'bad', text: '시한 안에 끝나지 않아 세션을 끊었습니다.' },
-  'not-linux': { tone: 'idle', text: '리눅스 셸 출력이 아닙니다(Windows 이거나 명령이 제한된 계정) — 스냅샷은 리눅스만 지원합니다.' },
-  edge: { tone: 'bad', text: '엣지에 닿지 못했습니다 — 엣지가 꺼졌거나 이 기능 이전 판일 수 있습니다.' },
+  ok: { tone: 'ok', short: '받음', text: '스냅샷을 받았습니다.' },
+  'bad-reason': { tone: 'warn', short: '사유 없음', text: '사유를 2자 이상 적어야 합니다(감사 기록에 남습니다).' },
+  'not-found': { tone: 'idle', short: '대상 없음', text: '대상 서버를 찾지 못했습니다 — 대상에서 빠졌거나 볼 수 있는 범위 밖입니다.' },
+  forbidden: { tone: 'warn', short: '쓰기 권한 없음', text: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용) — 진단 스냅샷은 원격 명령을 실행합니다.' },
+  'no-os-path': { tone: 'idle', short: 'OS 경로 없음', text: '이 서버에는 OS 계정이 없습니다 — 스냅샷은 SSH 경로가 있어야 합니다(베어메탈 스토리지 등록부).' },
+  busy: { tone: 'warn', short: '실행 중', text: '이 서버의 스냅샷이 이미 실행 중입니다 — 끝난 뒤 다시 누르세요(서버당 동시 1건).' },
+  'daily-cap': { tone: 'warn', short: '하루 상한', text: '이 법인의 24시간 스냅샷 상한에 닿았습니다.' },
+  'store-unavailable': { tone: 'bad', short: '보관 DB 없음', text: '스냅샷 보관 DB 를 열 수 없어 실행하지 않았습니다(상한을 셀 수 없습니다).' },
+  'ssh-error': { tone: 'bad', short: 'SSH 오류', text: 'SSH 로 읽지 못했습니다 — 아래 사유를 보세요.' },
+  auth: { tone: 'bad', short: '인증 거부', text: 'SSH 자격증명이 거부됐습니다 — 계정 잠금을 막으려고 이 서버의 주기 수집을 멈췄습니다(등록부에서 고치면 다음 주기에 재개).' },
+  'host-key': { tone: 'bad', short: '호스트키 미신뢰', text: 'SSH 호스트키를 신뢰하지 않아 연결하지 않았습니다(비밀번호를 보내지 않음) — 설정 › 장비 신뢰에서 지문을 확인 · 승인하세요.' },
+  timeout: { tone: 'bad', short: '시한 초과', text: '시한 안에 끝나지 않아 세션을 끊었습니다.' },
+  'not-linux': { tone: 'idle', short: '리눅스 아님', text: '리눅스 셸 출력이 아닙니다(Windows 이거나 명령이 제한된 계정) — 스냅샷은 리눅스만 지원합니다.' },
+  edge: { tone: 'bad', short: '엣지 불통', text: '엣지에 닿지 못했습니다 — 엣지가 꺼졌거나 이 기능 이전 판일 수 있습니다.' },
 });
+/**
+ * 실행 칸을 열지(반증 W4) — 'ok' | 'role'(operator 미만) | 'scope'(쓰기 범위 밖 — 서버 GET 의 writable:false). 서버가 다시 검사한다(403) — 이것은 버튼을 잠그는 표시일 뿐.
+ * writable 이 아직 없으면(목록 응답 전) 잠그지 않는다 — 판단 재료가 없을 때 막지 않는다(서버가 막는다).
+ */
+export function snapRunGate({ roleOk = false, writable } = {}) { return !roleOk ? 'role' : writable === false ? 'scope' : 'ok'; }
+/** 보관분 표 ‘결과’ 칸 — code 원문 대신 짧은 낱말(반증 W3 · 없는 code 는 원문을 그대로 두지 않고 ‘알 수 없음’). */
+export function snapCodeShort(code) { return SNAP_CODE_TEXT[code]?.short || '알 수 없음'; }
+/** 보관 상한에 맞춰 덜어 낸 칸(서버 fitSnapshotResult — 반증 R4). 없으면 ''. */
+const TRIM_LABEL = Object.freeze({ dmesg: '커널 로그', idrac: 'iDRAC 이벤트 문장', ss: 'ss 원문', cpuTop: 'CPU 상위', memTop: '메모리 상위', ioTop: 'I/O 상위', error: '오류 문장' });
+export function snapTrimNote(r) {
+  const k = Array.isArray(r?.trimmed) ? r.trimmed.filter((x) => TRIM_LABEL[x]) : [];
+  if (!k.length) return '';
+  const parts = k.map((x) => (x === 'dmesg' && n(r.dmesgDropped) != null ? `${TRIM_LABEL.dmesg}(오래된 ${r.dmesgDropped}줄)` : TRIM_LABEL[x]));
+  return `보관 상한(64KB)에 맞추려고 덜어 냈습니다: ${parts.join(' · ')} — 남은 칸은 그대로입니다.`;
+}
 /** 칸 상태(서버 SNAPSHOT_STATES). */
 export const SNAP_STATE_TEXT = Object.freeze({
   ok: '',

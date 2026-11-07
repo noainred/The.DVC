@@ -209,3 +209,56 @@ test('자동 적용 경로 없음 — 튜닝 · 용도 · 조립 · 라우트에
     for (const re of BAD) assert.ok(!re.test(src), `${path.relative(SRC, f)}: ${re}`);
   }
 });
+
+/* ── 반증 R9 — ‘a / b’ 묶음의 한쪽 결측 = 확인 불가(권고 아님) · 업그레이드 기간(엣지 v2.922 + 중앙 v2.923) ───────────── */
+test('묶음 값(‘a / b’) 한쪽 결측 → 확인 불가 — eqStr · gpdb SYS2 · 카탈로그 묶음 항목 전부 · v2.922 엣지 사실(새 sysctl 키 없음)이 섞여도 권고가 새지 않는다', async () => {
+  assert.equal(C.pairText(undefined, undefined), undefined);
+  assert.equal(C.pairText('2', undefined), '2 / —');
+  assert.equal(C.hasMissingPart('2 / —'), true); assert.equal(C.hasMissingPart('— / 95'), true); assert.equal(C.hasMissingPart('2 / 95'), false); assert.equal(C.hasMissingPart('—'), false);
+  assert.deepEqual(J.evalRule({ kind: 'eqStr', value: '2 / 95' }, '2 / —'), { status: 'unknown', reason: 'notRead' });
+  assert.deepEqual(J.evalRule({ kind: 'eqStr', value: '2 / 95' }, '2 / 90'), { status: 'advise', reason: null }, '둘 다 읽혔으면 그대로 판정');
+  // v2.922 엣지가 보내던 sysctl 키(기준판 SYSCTL_PATHS)만 — 4단계에 더한 14키(overcommit_ratio · rmem_default · wmem_default …)는 없다.
+  const OLD = {
+    'vm.swappiness': '1', 'vm.dirty_ratio': '10', 'vm.dirty_background_ratio': '3', 'vm.min_free_kbytes': '500000', 'vm.overcommit_memory': '2', 'vm.zone_reclaim_mode': '0',
+    'kernel.numa_balancing': '0', 'net.core.somaxconn': '4096', 'net.core.netdev_max_backlog': '10000', 'net.core.rmem_max': '16777216', 'thp.enabled': 'always madvise [never]',
+  };
+  const tu = { v: 1, os: { id: 'rocky', versionId: '9.4', pageSize: 4096 }, sysctl: OLD, memTotalKb: 16 * 1024 * 1024, sections: { sysctl: 'ok', osrel: 'ok' } };
+  const pv = M.profileView({ tuning: tu, manual: { apps: ['gpdb'], role: 'db' } });
+  const gp = pv.profiles.find((p) => p.id === 'gpdb');
+  const by = Object.fromEntries(gp.tunings.map((x) => [x.key, x]));
+  assert.equal(by['gp.overcommit'].current, '2 / —'); assert.equal(by['gp.overcommit'].status, 'unknown', 'overcommit_ratio 를 못 받았다 — 권고가 아니다');
+  assert.equal(by['gp.rmemMax'].current, '16777216 / —'); assert.equal(by['gp.rmemMax'].status, 'unknown');
+  assert.equal(by['gp.rmemDefault'].status, 'unknown');
+  for (const x of gp.tunings) if (typeof x.current === 'string' && C.hasMissingPart(x.current)) assert.notEqual(x.status, 'advise', `${x.key} ‘${x.current}’`);
+  const { tuningViewFor } = await import('../src/bmusage/opsView.js');
+  const tv = tuningViewFor({ tuning: tu, manual: { apps: ['gpdb'], role: 'db' } });
+  const rm = tv.items.find((x) => x.id === 'net.rmemMax');
+  assert.equal(rm.by, 'profile:gpdb'); assert.equal(rm.status, 'unknown', '튜닝 탭(기능 프로파일이 덮은 항목)도 확인 불가');
+  for (const x of tv.items) if (typeof x.current === 'string' && C.hasMissingPart(x.current)) assert.notEqual(x.status, 'advise', `${x.id} ‘${x.current}’`);
+  // 카탈로그 묶음 항목(역할 기본) — 한쪽만 있어도 권고 아님.
+  const dirty = J.judgeTuning({ tuning: { v: 1, sysctl: { 'vm.dirty_ratio': '20' }, sections: { sysctl: 'ok' } }, role: 'general' }).items.find((x) => x.id === 'mem.dirty');
+  assert.equal(dirty.status, 'unknown');
+});
+
+/* ── 반증 R10 — 덮어쓰기 scope 의 프로토타입 이름 ───────────────────────────────────────── */
+test('덮어쓰기 scope(반증 R10) — toString · hasOwnProperty · valueOf · __proto__ 는 거부(400 사유) · 전역 Object.prototype 을 고치지 않는다 · 파일에 그런 키가 있어도 읽지 않는다', () => {
+  OV._resetTuningOverridesForTest();
+  try { fs.unlinkSync(path.join(DIR, 'bmusage-tuning.json')); } catch { /* */ }
+  for (const sc of ['toString', 'hasOwnProperty', 'valueOf', '__proto__', 'constructor', 'isPrototypeOf', '__defineGetter__']) {
+    const r = OV.saveTuningOverride({ scope: sc, role: 'db', itemId: 'mem.swappiness', value: '1' }, { by: 't' });
+    assert.equal(r.ok, false, sc);
+  }
+  assert.equal(Object.hasOwn(Object.prototype.toString, 'db'), false, '전역 내장 함수 객체에 속성이 생기지 않는다');
+  assert.equal(Object.hasOwn(Object.prototype.hasOwnProperty, 'db'), false);
+  assert.equal(({}).db, undefined, 'Object.prototype 오염 없음');
+  const ok = OV.saveTuningOverride({ scope: 'vc-eu-central', role: 'db', itemId: 'mem.swappiness', value: '5' }, { by: 't' });
+  assert.equal(ok.ok, true);
+  assert.equal(OV.overridesFor({ role: 'db', vcenterId: 'vc-eu-central' }).map['mem.swappiness'].value, '5');
+  assert.deepEqual(OV.overridesFor({ role: 'db', vcenterId: 'toString' }).map['mem.swappiness'], undefined, '상속 이름으로 법인 덮어쓰기를 읽지 않는다');
+  // 손으로 고친 파일에 상속 이름 키가 있어도 버린다.
+  fs.writeFileSync(path.join(DIR, 'bmusage-tuning.json'), JSON.stringify({ v: 1, all: {}, corps: { toString: { db: { 'mem.swappiness': '9' } }, valueOf: { db: { 'mem.swappiness': '9' } } } }));
+  OV._resetTuningOverridesForTest();
+  assert.deepEqual(Object.keys(OV.loadTuningOverrides().corps), []);
+  assert.deepEqual(Object.keys(OV.overridesFor({ role: 'toString', vcenterId: 'toString' }).map), [], '역할 · 법인 이름이 상속 이름이어도 아무것도 읽지 않는다');
+  fs.unlinkSync(path.join(DIR, 'bmusage-tuning.json')); OV._resetTuningOverridesForTest();
+});

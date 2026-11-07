@@ -30,6 +30,10 @@ export const SNAPSHOT_DMESG_MAX = 200;
 export const SNAPSHOT_SS_MAX = 20;
 /** 전체 출력 상한(바이트) — 구획 상한의 합(약 80KB)보다 크고 sshExec EXEC_MAX_OUTPUT(4MB)보다 훨씬 작다(테스트가 산수를 고정). */
 export const SNAPSHOT_OUTPUT_MAX = 256 * 1024;
+/** 보관 결과 JSON 상한(글자) — db.js snapshotInsert 의 마지막 방어선과 같은 값(단일 원천). 넘치면 fitSnapshotResult 가 큰 칸부터 덜어 낸다(반증 R4). */
+export const SNAPSHOT_RESULT_MAX = 64 * 1024;
+/** 구획 순서 — 파서는 이 순서에서 지금보다 뒤의 표지만 받는다(반증 R6 — 이미 본 구획을 다시 열지 않는다). */
+export const SNAPSHOT_SECTIONS = Object.freeze(['PSCPU', 'PSMEM', 'PIDS', 'IO', 'SS', 'DMESG', 'END']);
 /** /proc/<pid>/io 두 표본 사이 간격(초) — 명령 안의 sleep 과 같은 값(상수). */
 export const SNAPSHOT_IO_GAP_S = 2;
 /** 구획 줄 폭(cut) — 파서 MAX_LINE 과 같다. */
@@ -65,7 +69,8 @@ export const SNAPSHOT_COMMAND = Object.freeze([
   "echo '##PIDS'; ls -d /proc/[0-9]* 2>/dev/null | wc -l;",
   `echo '##IO'; { ${UPTIME}; ${IO_SAMPLE}; echo '@@'; sleep ${SNAPSHOT_IO_GAP_S}; ${UPTIME}; ${IO_SAMPLE}; } 2>/dev/null | ${IO_AWK} | head -n ${SNAPSHOT_IO_MAX + 2} | cut -c1-120;`,
   `echo '##SS'; ss -s 2>/dev/null | head -n ${SNAPSHOT_SS_MAX} | cut -c1-${W.SS};`,
-  `echo '##DMESG'; dmesg --level=err,warn -T 2>&1 | tail -n ${SNAPSHOT_DMESG_MAX} | cut -c1-${W.DMESG};`,
+  // 반증 R6: 커널 로그 줄마다 `d:` 접두 — 이어진 줄(들여쓰기)이나 메시지 안 문자열이 ‘##IO’ 같은 표지가 되지 못하게(파서가 벗긴다).
+  `echo '##DMESG'; dmesg --level=err,warn -T 2>&1 | tail -n ${SNAPSHOT_DMESG_MAX} | cut -c1-${W.DMESG} | sed 's/^/d:/';`,
   "echo '##END';",
   `} | head -c ${SNAPSHOT_OUTPUT_MAX}`,
 ].join(' '));
@@ -80,14 +85,20 @@ const num = (v) => {
 const MAX_LINE = 320;
 const MAX_LINES = 400;
 
-/** 구획 표지로 쪼갠다(줄 길이 · 줄 수를 먼저 자른다). */
+/**
+ * 구획 표지로 쪼갠다(줄 길이 · 줄 수를 먼저 자른다).
+ * ⚠ 반증 R6(R1 과 같은 규칙): 표지는 줄 머리 그대로(trim 없이) 정확 일치 · SNAPSHOT_SECTIONS 순서에서 지금보다 뒤의 표지만 · 이미 본 표지는 다시 열지 않는다.
+ */
 export function splitSnapshot(text) {
-  const out = {}; let cur = null;
+  const out = {}; let cur = null; let curIdx = -1;
   const lines = String(text ?? '').split(/\r?\n/);
   for (const raw of lines) {
     const line = raw.length > MAX_LINE ? raw.slice(0, MAX_LINE) : raw;
-    const m = /^##([A-Z]{2,8})$/.exec(line.trim());
-    if (m) { cur = m[1]; out[cur] = []; continue; }
+    const m = /^##([A-Z]{2,8})$/.exec(line);
+    if (m && !Object.hasOwn(out, m[1])) {
+      const i = SNAPSHOT_SECTIONS.indexOf(m[1]);
+      if (i > curIdx) { cur = m[1]; curIdx = i; out[cur] = []; continue; }
+    }
     if (cur && out[cur].length < MAX_LINES && line.trim() !== '') out[cur].push(line);
   }
   return out;
@@ -143,20 +154,46 @@ export function parseSnapshot(stdout, { topN = 10, dmesgLines = 50 } = {}) {
     const total = /^TCP:\s{1,8}(\d{1,9})/.exec(l);
     return { total: total ? Number(total[1]) : null, estab: g('estab'), timewait: g('timewait'), orphaned: g('orphaned') };
   })();
-  // dmesg — 권한 실패 문구면 perm
-  const dm = (sec.DMESG || []).map((l) => String(l).slice(0, 300));
-  const dmesgPerm = dm.length > 0 && dm.length <= 3 && dm.every((l) => PERM_RE.test(l) || /^dmesg:/.test(l.trim()));
+  // dmesg — `d:` 접두 줄만(반증 R6). 권한 판정은 dmesg 자신의 오류 줄(`dmesg:` 로 시작)만 본다(반증 R5 — 커널 메시지 안의 ‘Permission denied’ 는 실제 오류다).
+  const dm = (sec.DMESG || []).filter((l) => String(l).startsWith('d:')).map((l) => String(l).slice(2, 302));
+  const dmesgSelfErr = dm.length > 0 && dm.length <= 3 && dm.every((l) => /^dmesg:/.test(l));
+  const dmesgPerm = dmesgSelfErr && dm.some((l) => PERM_RE.test(l));
+  const dmesgFail = dmesgSelfErr && !dmesgPerm;   // 권한이 아닌 dmesg 자체 오류(옵션 미지원 등) — 커널 로그로 보이지 않고 ‘받지 못함’
   const D = Math.max(1, Math.min(SNAPSHOT_DMESG_MAX, Math.floor(Number(dmesgLines) || 50)));
   return {
     v: 1,
     cpuTop: cpu, memTop: mem, ioTop: io,
     pids, ioReadable: readable, ioSpanS: span,
     ss: ss.slice(0, SNAPSHOT_SS_MAX), ssTcp,
-    dmesg: dmesgPerm ? [] : dm.slice(-D), dmesgTotal: dmesgPerm ? 0 : dm.length,
+    dmesg: dmesgSelfErr ? [] : dm.slice(-D), dmesgTotal: dmesgSelfErr ? 0 : dm.length,
     states: {
       cpu: state('PSCPU', cpu.length > 0), mem: state('PSMEM', mem.length > 0), io: ioState,
-      ss: state('SS', ss.length > 0), dmesg: dmesgPerm ? 'perm' : state('DMESG', true),
+      ss: state('SS', ss.length > 0), dmesg: dmesgPerm ? 'perm' : dmesgFail ? 'missing' : !has('DMESG') ? 'missing' : !dm.length ? 'absent' : 'ok',
     },
     truncated,
   };
+}
+
+/**
+ * 반증 R4 — 보관 결과가 SNAPSHOT_RESULT_MAX 를 넘으면 예전에는 db.js 가 결과를 통째로 `{truncated}` 로 바꿔 **다시 열면 모든 칸이 ‘받지 못함’** 이 됐다
+ *   (설정 상한 topN 30 · dmesgLines 200 × 300자 안에서 도달 — 반증 재현 70KB). 큰 칸부터 덜어 상한 안에 맞추고 덜어 낸 사실을 밝힌다(1단계 D1 ‘전부 버리지 않는다’):
+ *   ① 커널 로그를 **오래된 줄부터**(최근 줄을 남긴다) ② iDRAC 이벤트 문장 ③ ss 원문 ④ 프로세스 표(상위 5개만) ⑤ 오류 문장 100자.
+ * @returns {object} 상한 안이면 그대로, 아니면 `trimmed:[칸]` · `dmesgDropped` 를 단 사본.
+ */
+export function fitSnapshotResult(result, maxChars = SNAPSHOT_RESULT_MAX) {
+  if (!result || typeof result !== 'object') return result;
+  const len = (o) => { try { return JSON.stringify(o).length; } catch { return Infinity; } };
+  if (len(result) <= maxChars) return result;
+  let r = { ...result, trimmed: [] };
+  const mark = (k) => { if (!r.trimmed.includes(k)) r = { ...r, trimmed: [...r.trimmed, k] }; };
+  if (Array.isArray(r.dmesg) && r.dmesg.length) {
+    const all = r.dmesg; let excess = len(r) - maxChars; let cut = 0;
+    while (cut < all.length && excess > 0) { excess -= JSON.stringify(all[cut]).length + 1; cut += 1; }
+    r = { ...r, dmesg: all.slice(cut), dmesgDropped: cut }; mark('dmesg');
+  }
+  if (len(r) > maxChars && r.idrac && Array.isArray(r.idrac.events) && r.idrac.events.length) { r = { ...r, idrac: { ...r.idrac, events: r.idrac.events.map((e) => ({ ...e, message: String(e?.message || '').slice(0, 40) })) } }; mark('idrac'); }
+  if (len(r) > maxChars && Array.isArray(r.ss) && r.ss.length) { r = { ...r, ss: [] }; mark('ss'); }
+  if (len(r) > maxChars) { for (const k of ['cpuTop', 'memTop', 'ioTop']) if (Array.isArray(r[k]) && r[k].length > 5) { r = { ...r, [k]: r[k].slice(0, 5) }; mark(k); } }
+  if (len(r) > maxChars && typeof r.error === 'string' && r.error.length > 100) { r = { ...r, error: r.error.slice(0, 100) }; mark('error'); }
+  return r;
 }

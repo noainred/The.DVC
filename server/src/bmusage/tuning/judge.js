@@ -11,7 +11,7 @@
  *   그래서 중앙이 엣지 판정을 ‘다시’ 하는 것이 아니다(v2.548 규약과 충돌하지 않는다 — idrac-server.md v2.923 항목).
  */
 import { numOrNull } from '../../util/numOrNull.js';
-import { TUNING_ITEMS, ROLES, DEFAULT_ROLE, roleRule, NO_REC, osDropSum } from './catalog.js';
+import { TUNING_ITEMS, ROLES, DEFAULT_ROLE, roleRule, NO_REC, osDropSum, hasMissingPart } from './catalog.js';
 
 const RANK = { advise: 3, unknown: 2, ok: 1, info: 0 };
 const worst = (list) => list.reduce((a, b) => (RANK[b] > RANK[a] ? b : a), list.length ? list[0] : 'info');
@@ -152,6 +152,8 @@ export function evalRule(rule, value, { tu = null, detail = null, item = null } 
     return { status: r.status, reason: r.reason ?? null, ...(Array.isArray(r.devices) ? { devices: r.devices } : {}) };
   }
   if (value === undefined || value === null) return { status: 'unknown', reason: 'notRead' };
+  // 반증 R9: ‘a / b’ 묶음의 한쪽을 못 읽었으면 확인 불가(권고 아님) — 표시값만 ‘—’.
+  if (hasMissingPart(value)) return { status: 'unknown', reason: 'notRead' };
   if (rule.kind === 'oneOf') return rule.values.includes(String(value)) ? { status: 'ok', reason: null } : { status: 'advise', reason: null };
   if (rule.kind === 'eqNum') { const n = numOrNull(value); return n == null ? { status: 'unknown', reason: 'notRead' } : (n === rule.value ? { status: 'ok', reason: null } : { status: 'advise', reason: null }); }
   if (rule.kind === 'eqStr') return String(value).replace(/\s+/g, ' ').trim() === String(rule.value) ? { status: 'ok', reason: null } : { status: 'advise', reason: null };

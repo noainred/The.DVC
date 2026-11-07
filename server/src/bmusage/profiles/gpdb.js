@@ -9,8 +9,11 @@
  *   그 항목을 덮고 화면이 ‘누가 정했나 = gpdb’ 를 적는다. 나머지는 이 프로파일만의 요구값이다.
  * ⚠ 데이터 볼륨을 구분하지 못한다 — XFS 옵션은 시스템 마운트(/ · /boot · /var …)를 판정에서 빼고(추정), read-ahead 는 물리 디스크 전부를 본다(정직 기록).
  */
+import { pairText } from '../tuning/catalog.js';
+
 const SYSV = (k) => (tu) => (tu?.sysctl && Object.hasOwn(tu.sysctl, k) ? tu.sysctl[k] : undefined);
-const SYS2 = (a, b) => (tu) => { const x = SYSV(a)(tu); const y = SYSV(b)(tu); return x === undefined && y === undefined ? undefined : `${x ?? '—'} / ${y ?? '—'}`; };
+// v2.923(반증 R9): 묶음 값은 catalog pairText — 한쪽이 ‘—’ 면 판정하지 않는다(evalRule hasMissingPart → 확인 불가).
+const SYS2 = (a, b) => (tu) => pairText(SYSV(a)(tu), SYSV(b)(tu));
 const unitsOf = (tu) => (tu?.units && Array.isArray(tu.units.list) ? tu.units.list : null);
 const PHYS = /^(sd|nvme|vd|xvd|hd)/;
 export const SYSTEM_MOUNTS = Object.freeze(['/', '/boot', '/boot/efi', '/usr', '/var', '/home', '/tmp', '/opt']);

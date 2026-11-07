@@ -416,14 +416,22 @@
   ③ **sudo · su · pkexec · doas 자동 시도 0**(소스 스윕) — 권한이 없으면 그 칸은 ‘권한 부족 · 확인 불가’(/proc/<pid>/io 읽힌 수 < 전체 · dmesg_restrict) — 0 으로 두지 않는다.
   ④ **프로세스 인자 · 환경 0** — ps 는 comm · /proc/<pid>/comm 만(cmdline · environ 금지 — 인자에 비밀번호가 흔하다).
   ⑤ **출력 상한 세 겹** — 구획마다 head/tail · cut · 전체 `head -c SNAPSHOT_OUTPUT_MAX`(256KB · sshExec 4MB 보다 훨씬 작게) · 파서 줄 수 · 길이 · 설정 상위 N. 잘리면(END 없음) 뒤 구획은 missing.
+     **보관 상한(64KB)** 은 `fitSnapshotResult` 가 큰 칸부터(커널 로그 오래된 줄 → iDRAC 문장 → ss → 프로세스 표) 덜어 맞추고 `trimmed` · `dmesgDropped` 로 밝힌다 — 예전에는 결과를 통째로 `{truncated}` 로 바꿔 다시 열면 전 칸이 ‘받지 못함’ 이었다(반증 R4).
+     **표지는 위조되지 않게**(반증 R6 — 수집 명령 R1 과 같은 규칙): 줄 머리 정확 일치 · `SNAPSHOT_SECTIONS` 순서에서 뒤의 표지만 · 재개방 금지 · 커널 로그 줄은 `d:` 접두. dmesg ‘권한 부족’ 은 dmesg 자신의 오류 줄(`dmesg:`)만 본다(반증 R5 — 커널 메시지 안의 ‘Permission denied’ 는 실제 오류).
   ⑥ **권한**: 실행 = `writeRole`(operator 이상 — viewer 403) + tools · 조회 밖 404(존재 은닉) → **쓰기 범위 밖 403 무조건**(server/CLAUDE.md v2.733 함정 — 조회 무제한 + writeVcenters 계정) · 사유 2~300자 필수(400) ·
      보관분 조회는 tools + 조회 범위(실행 권한과 다르다) · 실행자(by)는 관리자에게만 · 비관리자에게는 dmesg · ss · 이벤트 · 사유의 IPv4 를 가린다.
-  ⑦ **서버당 동시 1건**(실행 노드의 실행 중 집합 — 검사와 등록 사이에 await 없음 · 중앙 대행도 같은 키 중복 전송을 막는다 · 409) · **법인당 24시간 상한**(실행 노드 설정 `snapshot.dailyCorpMax` · 보관 표의 실행 수 · 429) ·
+  ⑦ **서버당 동시 1건**(실행 노드의 실행 중 집합 — 검사와 등록 사이에 await 없음 · 중앙 대행도 같은 키 중복 전송을 막는다 · 409) · **법인당 24시간 상한**(실행 노드 설정 `snapshot.dailyCorpMax` · 429) —
+     ⚠ 상한은 **보관 행 + 실행 중** 으로 센다(반증 R2: 같은 법인 서로 다른 서버 6대를 동시에 누르면 상한 2 에 6건이 돌았다). 법인별 실행 중 수를 **동기적으로 예약**하고, [세기 → 검사 → 예약] 과 [보관 행 쓰기 → 해제] 를
+     법인 잠금 안에서 한다(세기와 해제 사이 틈 없음 · SSH 는 잠금 밖) · 보관 목록 · 조회도 7일 밖 행은 내지 않고 폴러 주기 정리가 지운다(반증 R3 — 예전에는 실행할 때만 지웠다) ·
      **보관 DB 를 못 열면 실행하지 않는다**(상한을 셀 수 없다 — 503). 실패한 시도도 보관 · 상한에 센다(SSH 세션을 열었으므로).
   ⑧ **SSH 는 공용 경로** — `withSsh`(호스트키 확인 S-01) + `withDeadline`(세션 시한 50초 > 연결 15 + 명령 30 — 시한이 세션을 실제로 끊는다) · 인증 실패는 **주기 수집과 같은 가드 · 같은 식별자**에 기록(`poller.recordOsAuthOutcome` — 계정 잠금 방지) ·
      성공은 정지를 푼다 · 수동 실행은 정지 중에도 막지 않는다(규칙 3 — 결과가 ‘정지 상태였다’ 를 말한다) · 호스트키 거부 · 시한은 인증 실패가 아니다.
   ⑨ **감사 로그** — 중앙 `bm-usage.snapshot`(실행자 · 사유 · via · code · id) · 엣지 `중앙 대행 진단 스냅샷`(central-portal:<계정 — 글자 제한>). 사유 · 실행자는 명령에 들어가지 않는다.
+     사유는 `cleanReason` 이 C0 · C1 제어 · 양방향 제어(U+202A~202E · U+2066~2069 — 감사 화면 글자 순서 뒤집기) · 폭 없는 문자를 뺀다(반증).
+     (기록 — 반증 E) 이 쓰기 경로는 감사가 두 줄이다: `auditMiddleware` 의 자동 줄 + 라우트의 `logAudit`(무엇이 · 어떻게). 같은 파일 port-map · purpose 와 같은 기존 패턴이라 고치지 않았다 · ip 는 `req.ip`(기존 패턴).
   ⑩ **엣지 대행 계약** — 같은 url · 같은 토큰(tokenFirst + 4kb 파서) · POST 재전송 0(retries 0) · 엣지는 자기 대상 목록 밖 키를 not-found · 업무 결과는 200 + code(중앙이 HTTP 로 옮긴다) · 중앙 정제 `sanitizeSnapshotBody`(아는 필드 · 상한 · enum 밖 code/상태 차단) ·
      결과는 엣지 7일 보관 · 중앙은 받기만(복제 적재 없음) · 다른 서버 키로 id 를 읽지 못한다.
   iDRAC 쪽은 명령이 아니라 **이미 가진 값**(인벤토리 SEL/LC 최근 5 · 센서 순간값 · 전력 최신 — Redfish 호출 0). 튜닝 탭에는 **쓰기 경로 자체가 없다**(sysctl -w · tuned-adm profile · ethtool -G 0 — 소스 스윕).
+  ⑪ **GET 에 writable**(반증 W4 — server/CLAUDE.md v2.733): 보관분 목록 · 용도 보기 응답에 쓰기 범위(`inUserWriteScope`)를 싣고 화면이 실행 · 태그 칸을 잠근다(서버는 그대로 403). 응답 캐시 키(opsKey)에 **쓰기 범위 서명**을 넣었다 — 조회 범위 · 역할이 같고 쓰기 범위만 다른 두 계정이 캐시를 나누면 writable 이 샌다.
+  ⑫ **덮어쓰기 scope(반증 R10)**: `PUT /tools/bm-usage/tuning/overrides` 의 scope 는 'all' 또는 vCenter id 형식이면서 Object.prototype 이름이 아닌 것만 · 맵은 null 프로토타입 · 읽기는 Object.hasOwn — 예전에는 ‘toString’ 이 ok:true 인데 저장되지 않고 전역 내장 함수 객체를 고쳤다(재현).
 

@@ -32,14 +32,26 @@ const num = (v) => {
 export const MAX_LINE_CHARS = 4_096;
 export const MAX_SECTION_LINES = 20_000;
 
-/** 구획 표지로 쪼갠다. 표지가 없으면 빈 객체 — '형식 미인식' 이다. */
-export function splitSections(text) {
+/**
+ * 구획 표지로 쪼갠다. 표지가 없으면 빈 객체 — '형식 미인식' 이다.
+ * ⚠⚠ v2.923(반증 R1 — 표지 위조): 비특권 사용자가 띄운 프로세스 이름(comm)이 ‘##MEM’ 이면 예전 규칙(trim 뒤 아무 표지나 · 이미 본 구획도 다시 연다)으로는
+ *   앞 구획(MEM …)을 그 프로세스 이름들로 덮어 가짜 메모리 100% 를 만들고, ‘##END’ 를 위조하면 잘림 보호(1단계 D1)까지 꺼졌다(이 컨테이너 재현).
+ *   그래서 ① 표지는 **줄 머리 그대로**(trim 없이) `##NAME` 과 정확히 같은 줄만 ② 이미 본 표지는 다시 열지 않는다 ③ `order` 를 주면 그 순서에서 **지금보다 뒤에 있는**
+ *   표지만 받는다(앞 · 모르는 표지는 그 구획의 내용 줄). 명령 쪽에서는 비특권 입력이 줄 머리에 오는 구획(##PROCS)에 고정 접두를 붙인다(linuxFacts.js).
+ * @param {string} text
+ * @param {{order?: string[]|null}} [o]  명령이 표지를 내는 순서(osSsh LINUX_SECTIONS) — 없으면 ①②만.
+ */
+export function splitSections(text, { order = null } = {}) {
   const out = {};
-  let cur = null;
+  const idx = Array.isArray(order) ? new Map(order.map((k, i) => [k, i])) : null;
+  let cur = null; let curIdx = -1;
   for (const raw of String(text ?? '').split(/\r?\n/)) {
     const line = raw.length > MAX_LINE_CHARS ? raw.slice(0, MAX_LINE_CHARS) : raw;
-    const m = /^##([A-Z]+)\s*$/.exec(line.trim());
-    if (m) { cur = m[1]; out[cur] = []; continue; }
+    const m = /^##([A-Z]{1,16})$/.exec(line);
+    if (m && !Object.hasOwn(out, m[1])) {
+      const i = idx ? idx.get(m[1]) : null;
+      if (!idx || (i != null && i > curIdx)) { cur = m[1]; curIdx = i ?? curIdx; out[cur] = []; continue; }
+    }
     if (cur && out[cur].length < MAX_SECTION_LINES) out[cur].push(line);
   }
   return out;

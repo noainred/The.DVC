@@ -133,7 +133,8 @@ export function tuningFactsOf(tu) {
     pageSize: num(tu.os.pageSize), selinux: tu.os.selinux == null ? null : str(tu.os.selinux, 16), removeIpc: oneOf(tu.os.removeIpc, ['yes', 'no'], null),
   } : null;
   const names = (v, max, re) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && re.test(x)).slice(0, max) : null);
-  const units = isObj(tu.units) ? { list: names(tu.units.list, 256, NAME_RE) || [], failed: num(tu.units.failed), capped: bool(tu.units.capped), filtered: bool(tu.units.filtered) } : null;
+  // v2.923(반증 R7): 목록이 null 이면(엣지가 systemctl 실패로 못 읽음) null 그대로 — 빈 목록으로 바꾸면 ‘running 0개’ 를 지어낸다.
+  const units = isObj(tu.units) ? { list: names(tu.units.list, 256, NAME_RE), failed: num(tu.units.failed), capped: bool(tu.units.capped), filtered: bool(tu.units.filtered) } : null;
   const ports = isObj(tu.ports) ? { list: (Array.isArray(tu.ports.list) ? tu.ports.list : []).map(num).filter((p) => p != null && Number.isInteger(p) && p >= 1 && p <= 65535).slice(0, 512), capped: bool(tu.ports.capped), filtered: bool(tu.ports.filtered) } : null;
   const procs = isObj(tu.procs) ? { list: names(tu.procs.list, 512, /^[\x21-\x7e][\x20-\x7e]{0,31}$/) || [], capped: bool(tu.procs.capped), filtered: bool(tu.procs.filtered) } : null;
   const accounts = Array.isArray(tu.accounts) ? tu.accounts.filter((a) => DETECT_ACCOUNTS.includes(a)) : null;

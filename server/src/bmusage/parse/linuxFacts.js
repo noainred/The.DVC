@@ -19,7 +19,17 @@ export const KARG_KEYS = Object.freeze(['isolcpus', 'nohz_full', 'rcu_nocbs', 'd
 /** 구획별 줄 상한(명령의 head -n 과 같은 값 — 상한+1 줄이 오면 ‘상한 도달’). */
 export const FACT_LINE_CAP = Object.freeze({ OSREL: 8, UNITS: 256, PORTS: 512, PROCS: 512, ACCT: 16, KARGS: 16, SOFTNET: 1_025, NETQ: 64, XFS: 32 });
 /** 줄 최대 바이트(가정 — cut 폭 + 개행). osSsh 의 SECTION_BYTES_SUM 산수에 더한다. */
-export const FACT_LINE_BYTES = Object.freeze({ OSREL: 129, UNITS: 97, PORTS: 65, PROCS: 33, ACCT: 33, KARGS: 201, SOFTNET: 41, NETQ: 129, XFS: 301 });
+export const FACT_LINE_BYTES = Object.freeze({ OSREL: 129, UNITS: 99, PORTS: 65, PROCS: 35, ACCT: 33, KARGS: 201, SOFTNET: 41, NETQ: 129, XFS: 301 });
+/** 구획 순서(linuxCommand 가 이 순서로 붙이고 splitSections 가 이 순서로만 받는다 — osSsh LINUX_SECTIONS). */
+export const FACT_SECTIONS = Object.freeze(['OSREL', 'UNITS', 'PORTS', 'PROCS', 'ACCT', 'KARGS', 'SOFTNET', 'NETQ', 'XFS']);
+/**
+ * v2.923(반증 R1) — **줄 머리에 비특권 입력이 오는 구획은 고정 접두를 붙인다**(파서가 벗긴다). 전수 점검 결과(줄 머리를 누가 정하나):
+ *   PROCS = 프로세스 이름(comm — **아무 사용자나** 정한다 · setproctitle 포함) → `p:` 필수. UNITS = 유닛 이름(root · ‘#’ 은 유닛 이름에 쓸 수 없다) → R7 형식 변경과 함께 `u:`.
+ *   PORTS(ss 의 숫자 주소) · ACCT(고정 이름 목록 · getent -s files) · KARGS(앵커 grep 키=) · SOFTNET(16진 수) · OSREL(앵커 grep · 고정 접두) · NETQ(인터페이스 이름 — root 만 만든다) ·
+ *   XFS(마운트 지점 — ‘/’ 로 시작) 는 줄 머리를 비특권 사용자가 정할 수 없다. 기존 구획(NETINFO · FC · DF · HOST)도 root · 커널이 정한다.
+ *   그래도 파서는 순서 · 정확 일치 · 재개방 금지로 표지를 받는다(splitSections) — 접두는 그 위의 둘째 겹.
+ */
+export const FACT_PREFIX = Object.freeze({ PROCS: 'p:', UNITS: 'u:' });
 
 const num = (v) => {
   if (v == null) return null;
@@ -49,14 +59,27 @@ export const FACT_SHELL = Object.freeze({
     'echo "selinux=`getenforce 2>/dev/null`"',
     "grep -h -E '^[[:space:]]*RemoveIPC[[:space:]]*=' /etc/systemd/logind.conf /etc/systemd/logind.conf.d/*.conf 2>/dev/null | tail -n 1 | sed 's/^/removeipc:/' | cut -c1-64",
   ].join('; '),
-  // systemctl 이 없으면(systemd 없는 서버 · 컨테이너) 아무것도 내지 않는다 — 구획은 왔는데 0줄(absent). ⚠ wc -l 은 명령이 없어도 0 을 내므로 그 앞에서 막는다(‘못 읽음’ 이 0 이 되지 않게).
-  UNITS: 'if command -v systemctl >/dev/null 2>&1; then '
-    + `systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null | awk '{print $1}' | head -n ${FACT_LINE_CAP.UNITS + 1} | cut -c1-96; `
-    + 'echo "failed=`systemctl list-units --state=failed --no-legend --plain 2>/dev/null | wc -l`"; fi',
+  /*
+   * systemctl 이 없으면(systemd 없는 서버) 아무것도 내지 않는다 — 구획은 왔는데 0줄(absent).
+   * ⚠⚠ v2.923(반증 R7): systemctl 이 **있지만 실패**하면(버스 오류 · PID 1 이 systemd 아님 · 바쁜 systemd 시한) 예전 `| wc -l` 은 그래도 0 을 내 ‘실패 유닛 0’ ·
+   *   빈 running 목록을 지어냈다(이 개발 컨테이너 재현 — systemctl 있음 · rc=1 ‘Failed to connect to bus’). 이제 두 호출 모두 **종료 코드를 보고** 성공했을 때만 값을 내고
+   *   (`running=ok` · `failed=<수>`), 실패면 `running=rc<코드>` · `failed=rc<코드>` 만 낸다 → 파서가 그 칸을 null(확인 불가)로. 줄 수는 wc 가 아니라 grep -c 로(빈 출력 = 0 줄).
+   *   (반증 R8) `timeout 3` — D-Bus 기본 시한(25초)까지 기다리면 주기 명령 전체가 시한 하나라 전 구획을 잃는다. `timeout` 이 없으면 rc 127 → 확인 불가.
+   */
+  UNITS: [
+    'if command -v systemctl >/dev/null 2>&1; then',
+    'l=$(timeout 3 systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null); r=$?;',
+    `if [ "$r" -eq 0 ]; then printf '%s\\n' "$l" | awk 'NF{print "u:" $1}' | head -n ${FACT_LINE_CAP.UNITS + 1} | cut -c1-98; echo 'running=ok'; else echo "running=rc$r"; fi;`,
+    'l=$(timeout 3 systemctl list-units --state=failed --no-legend --plain 2>/dev/null); r=$?;',
+    `if [ "$r" -eq 0 ]; then echo "failed=$(printf '%s\\n' "$l" | grep -c .)"; else echo "failed=rc$r"; fi;`,
+    'fi',
+  ].join(' '),
   PORTS: `ss -ltn 2>/dev/null | awk 'NR>1{print $4}' | head -n ${FACT_LINE_CAP.PORTS + 1} | cut -c1-64`,
   // '/' 가 든 이름은 커널 스레드(kworker/0:1 · ksoftirqd/3)라 뺀다 — 수백 개라 목록 상한을 먼저 채운다.
-  PROCS: `ps -e -o comm= 2>/dev/null | grep -v / | sort -u | head -n ${FACT_LINE_CAP.PROCS + 1} | cut -c1-32`,
-  ACCT: `getent passwd ${DETECT_ACCOUNTS.join(' ')} 2>/dev/null | cut -d: -f1 | head -n ${FACT_LINE_CAP.ACCT}`,
+  // ⚠ v2.923(반증 R1): 줄마다 `p:` 접두 — 비특권 사용자가 ‘##MEM’ · ‘##END’ 같은 이름의 프로세스를 띄워 구획 표지를 위조하지 못하게(파서가 벗긴다).
+  PROCS: `ps -e -o comm= 2>/dev/null | grep -v / | sort -u | head -n ${FACT_LINE_CAP.PROCS + 1} | cut -c1-32 | sed 's/^/p:/'`,
+  // v2.923(반증 R8): `-s files` — 로컬 /etc/passwd 만(SSSD · LDAP 디렉터리 왕복 없음: DC 불통이면 sssd 시한까지 주기 명령이 멈춘다). gpadmin · airflow 는 보통 로컬 계정이다(디렉터리 계정이면 ‘없음’ — 정직 기록).
+  ACCT: `getent -s files passwd ${DETECT_ACCOUNTS.join(' ')} 2>/dev/null | cut -d: -f1 | head -n ${FACT_LINE_CAP.ACCT}`,
   KARGS: `tr ' ' '\\n' < /proc/cmdline 2>/dev/null | grep -E '^(${KARG_KEYS.join('|')})=' | head -n ${FACT_LINE_CAP.KARGS} | cut -c1-200`,
   // 앞 세 열(처리 · 드롭 · time_squeeze)만 — 원문은 CPU 마다 13열(약 120B)이라 1,024코어면 바이트 산수(D1)를 넘긴다.
   SOFTNET: `awk '{print $1" "$2" "$3}' /proc/net/softnet_stat 2>/dev/null | head -n ${FACT_LINE_CAP.SOFTNET} | cut -c1-40`,
@@ -97,19 +120,30 @@ export function parseOsRel(lines = []) {
   return seen ? out : null;
 }
 
-/** ##UNITS → { units:[이름], failed:n|null, capped } — 실패 수 줄만 있어도 값이다(running 0개 서버는 드물지만 있다). */
+/**
+ * ##UNITS → { units:[이름]|null, failed:n|null, capped }.
+ *  · running 목록은 `running=ok` 줄이 왔을 때만 값이다(systemctl 성공) — `running=rc<코드>` 거나 줄이 없으면(잘림) null(확인 불가 — 빈 목록을 지어내지 않는다 · 반증 R7).
+ *  · 실패 수도 `failed=<수>` 일 때만 · `failed=rc<코드>` 면 null. 둘 다 못 읽었으면 null(→ 구획 missing).
+ *  · 유닛 이름 줄은 `u:` 접두(반증 R1)만 받는다.
+ */
 export function parseUnits(lines = []) {
-  const units = []; let failed = null; let names = 0;
+  const units = []; let failed = null; let names = 0; let runOk = false;
   for (const l of lines) {
-    const s = clip(l, 128).trim();
+    const raw = clip(l, 128);
+    if (raw.startsWith(FACT_PREFIX.UNITS)) {
+      const s = raw.slice(FACT_PREFIX.UNITS.length).trim();
+      if (!/^[A-Za-z0-9@._:\\-]{1,96}$/.test(s)) continue;
+      names += 1;
+      if (units.length < FACT_LINE_CAP.UNITS) units.push(s);
+      continue;
+    }
+    const s = raw.trim();
+    if (s === 'running=ok') { runOk = true; continue; }
     const f = /^failed=(\d{1,6})$/.exec(s);
-    if (f) { failed = num(f[1]); continue; }
-    if (!/^[A-Za-z0-9@._:\\-]{1,96}$/.test(s)) continue;
-    names += 1;
-    if (units.length < FACT_LINE_CAP.UNITS) units.push(s);
+    if (f) failed = num(f[1]);
   }
-  if (!names && failed == null) return null;
-  return { units, failed, capped: names > FACT_LINE_CAP.UNITS };
+  if (!runOk && failed == null) return null;
+  return { units: runOk ? units : null, failed, capped: runOk && names > FACT_LINE_CAP.UNITS };
 }
 
 /** ##PORTS → { ports:[수 — 오름차순 · 중복 제거], capped }. `0.0.0.0:22` · `[::]:5432` · `*:8080` · `127.0.0.1%lo:53` 모두 마지막 ':' 뒤. */
@@ -127,11 +161,13 @@ export function parsePorts(lines = []) {
   return { ports: [...set].sort((a, b) => a - b), capped: rows > FACT_LINE_CAP.PORTS };
 }
 
-/** ##PROCS → { names:[comm], capped } — 이름만(인자 없음). 인쇄 가능한 글자만 받는다. */
+/** ##PROCS → { names:[comm], capped } — 이름만(인자 없음). 인쇄 가능한 글자만 받는다. 줄은 `p:` 접두(반증 R1)가 있어야 한다(없는 줄은 버린다). */
 export function parseProcs(lines = []) {
   const names = []; let rows = 0;
   for (const l of lines) {
-    const s = clip(l, 32).trim();
+    const raw = String(l ?? '');
+    if (!raw.startsWith(FACT_PREFIX.PROCS)) continue;
+    const s = clip(raw.slice(FACT_PREFIX.PROCS.length), 32).trim();
     if (!s || !/^[\x21-\x7e][\x20-\x7e]{0,31}$/.test(s)) continue;
     rows += 1;
     if (names.length < FACT_LINE_CAP.PROCS) names.push(s);

@@ -53,6 +53,13 @@ export const TUNING_REASON = Object.freeze([
 ]);
 
 const SYS = (k) => (tu) => (tu?.sysctl && Object.hasOwn(tu.sysctl, k) ? tu.sysctl[k] : undefined);
+/**
+ * v2.923(반증 R9) — 두 값을 한 칸으로 묶은 사실(‘a / b’). 한쪽을 못 읽으면 그 자리는 ‘—’(표시용)이고, **판정은 하지 않는다**(judge.js evalRule 이 hasMissingPart 로
+ *   확인 불가 처리 — ‘16777216 / —’ 를 ‘16777216 / 16777216’ 과 비교해 권고로 만들지 않는다). 업그레이드 기간에 새 sysctl 키를 보내지 않는 엣지(v2.922)가 섞여도 권고가 새지 않게.
+ */
+export const PART_MISSING = '—';
+export function pairText(a, b) { return a === undefined && b === undefined ? undefined : `${a ?? PART_MISSING} / ${b ?? PART_MISSING}`; }
+export function hasMissingPart(v) { return typeof v === 'string' && v.includes(' / ') && v.split(' / ').some((x) => x.trim() === PART_MISSING); }
 /** 이번 주기 물리 NIC 드롭 증가분의 합(OS) — 읽은 NIC 가 없거나 전부 첫 표본이면 undefined(0 으로 두지 않는다). */
 export function osDropSum(detail) {
   if (!Array.isArray(detail?.nics)) return undefined;
@@ -163,7 +170,7 @@ export const TUNING_ITEMS = Object.freeze([
   },
   {
     id: 'mem.dirty', cat: 3, title: 'vm.dirty_ratio / dirty_background_ratio', reads: '/proc/sys/vm/dirty_ratio · dirty_background_ratio', section: 'sysctl',
-    fact: (tu) => { const a = SYS('vm.dirty_ratio')(tu); const b = SYS('vm.dirty_background_ratio')(tu); return a === undefined && b === undefined ? undefined : `${a ?? '—'} / ${b ?? '—'}`; },
+    fact: (tu) => pairText(SYS('vm.dirty_ratio')(tu), SYS('vm.dirty_background_ratio')(tu)),
     valueKind: 'str',
     rec: { all: { kind: 'custom', id: 'dirtyDefault', text: '기본 20 / 10 유지' } },
     evidence: 'dirty_ratio “a percentage of total system memory … starts writing those changes to disk. The default value is 20 percent.” background 는 백그라운드 쓰기 시작점, 기본 10. 바꿀 근거(쓰기 지연·캐시 급증)가 없으면 기본 유지.',
@@ -235,7 +242,7 @@ export const TUNING_ITEMS = Object.freeze([
   },
   {
     id: 'net.rmemMax', cat: 5, title: 'net.core.rmem_max / wmem_max', reads: '/proc/sys/net/core/{rmem_max,wmem_max}', section: 'sysctl',
-    fact: (tu) => { const a = SYS('net.core.rmem_max')(tu); const b = SYS('net.core.wmem_max')(tu); return a === undefined && b === undefined ? undefined : `${a ?? '—'} / ${b ?? '—'}`; },
+    fact: (tu) => pairText(SYS('net.core.rmem_max')(tu), SYS('net.core.wmem_max')(tu)),
     valueKind: 'str',
     rec: { all: { kind: 'hold', reason: 'noRtt', text: 'WAN 복제·대량 전송만 ↑' } },
     evidence: '기본 212992 바이트(208 KiB) — setsockopt() 가 요청할 수 있는 상한. 고처리량 예시는 16 MiB(RHEL 10 문서 — RHEL 9 원문 미확인). RTT 측정값이 없어 판단 불가.',

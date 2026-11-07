@@ -13,7 +13,7 @@ import { TUNING_ITEMS, CATEGORIES, ROLES, TUNING_STATUS, TUNING_REASON } from '.
 import { TUNING_SOURCES, PROFILE_SOURCES, SOURCES_CHECKED_AT } from './tuning/sources.js';
 import { profileView, appRulesForJudge, detectProfiles } from './profiles/match.js';
 import { catalogView, APP_IDS, CHECK_STATUS, CHECK_REASON, PROFILE_STATUS, PLANNED_PROFILES, PROFILES } from './profiles/index.js';
-import { INCIDENT_END } from '../partfault/incidents.js';
+import { INCIDENT_END, closeReasonToEnd } from '../partfault/incidents.js';
 
 const t = (v) => String(v ?? '').trim();
 
@@ -132,6 +132,7 @@ export function incidentRow(i) {
     durationMs: i.durationMs ?? null, state: i.state ?? null, peak: i.peak ?? null, rawState: i.rawState || '', endReason: i.endReason ?? null,
     holdReason: i.holdReason ?? null, startUnknown: !!i.startUnknown, startedBefore: !!i.startedBefore, migratedFrom: i.migratedFrom ? true : false,
     occurrences: i.occurrences ?? 1,
-    events: (i.events || []).slice(0, 20).map((e) => ({ at: e.at, event: e.event, state: e.state ?? null, prevState: e.prevState ?? null, closeReason: e.closeReason ?? null })),
+    // 반증 W5: 닫힘 이벤트의 종료 사유 code 는 서버(incidents.js closeReasonToEnd)가 정한다 — 웹은 문구로만 바꾼다.
+    events: (i.events || []).slice(0, 20).map((e) => ({ at: e.at, event: e.event, state: e.state ?? null, prevState: e.prevState ?? null, closeReason: e.closeReason ?? null, endReason: e.event === 'close' ? closeReasonToEnd(e.closeReason) : null })),
   };
 }
