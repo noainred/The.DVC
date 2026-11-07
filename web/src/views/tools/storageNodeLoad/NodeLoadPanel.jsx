@@ -269,15 +269,22 @@ function Overlay({ d, sel, picks, onToggle }) {
 }
 
 /**
- * @param {{deviceId:string, snap:object, isEdge:boolean}} props
+ * @param {{deviceId:string, snap:object, isEdge:boolean, openNode?:{id:number, at:number}|null}} props openNode — 바깥(노드 표 ID 열)이 열어 달라는 노드(v2.938)
  */
-export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
+export default function NodeLoadPanel({ deviceId, snap, isEdge, openNode = null }) {
+  const rootRef = useRef(null);
   const list = useMemo(() => (Array.isArray(snap?.nodes?.list) ? snap.nodes.list : []), [snap]);
   const [d, setD] = useState(null);
   // v2.932: 표본 폴러가 켜진 장비(응답 sample.sampleEnabled)는 디스크 busy·IOPS · 프로토콜 묶음 · 클라이언트 분포 보기를 연다.
   const sampleEnabled = d?.sample?.sampleEnabled === true;
   const avail = useMemo(() => groupsAvailable(list, { sampleEnabled }), [list, sampleEnabled]);
   const [drawerNode, setDrawerNode] = useState(null); // v2.932(2차 ③) 노드 드로어 — 열린 노드 번호
+  // v2.938: 노드 표(아래)에서 ID 를 누르면 드로어를 열고 구역을 화면에 보이게 올린다(같은 노드를 다시 눌러도 at 이 달라 다시 연다).
+  useEffect(() => {
+    if (!openNode || openNode.id == null) return;
+    setDrawerNode(openNode.id);
+    try { rootRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); } catch { /* 테스트 환경 */ }
+  }, [openNode]);
   const [range, setRange] = useState('24h');
   const [sel, setSel] = useState('in');
   const [view, setView] = useState('heat');
@@ -349,7 +356,7 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
   const ready = d && d.ok !== false && d.group === group && d.deviceId === deviceId;
 
   return (
-    <section className="nl" aria-label="노드 부하 추이">
+    <section className="nl" aria-label="노드 부하 추이" ref={rootRef}>
       <div className="nl-head">
         <div className="section-title" style={{ fontSize: 13, margin: 0 }}>노드 부하 추이 <span className="nl-muted">— {groups.map((g) => GROUP_TEXT[g]).join(' · ')}</span></div>
         <div className="nl-pills">
