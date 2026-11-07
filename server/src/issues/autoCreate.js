@@ -388,7 +388,7 @@ export async function applyPartFaultIssues(tr, { now = Date.now() } = {}) {
   // v2.904(점검 S-4 — 재현): 자동 댓글이 실패해도(이슈당 댓글 200개 상한 등) 그 전이의 나머지('검토' 로 옮기기)는 한다 — 출처(해소 · 다시 열림)는
   // 이미 기록돼 다음 폴링에 같은 전이가 다시 오지 않으므로, 댓글에서 던지면 상태 전이가 영영 빠졌다. 실패는 errors · error 로 밝힌다.
   const comment = (key, body) => {
-    try { addComment(key, { body: capStr(body, 1_900) }, SYSTEM_USER, { auto: true }); out.commented += 1; status.commented += 1; } // v2.930(점검 B1-03) 자동 댓글은 사람 몫과 따로 센다
+    try { addComment(key, { body: capStr(body, 1_900) }, SYSTEM_USER, { auto: true }); out.commented += 1; status.commented += 1; } // v2.931(점검 B1-03) 자동 댓글은 사람 몫과 따로 센다
     catch (e) { status.errors += 1; status.error = `comment ${key}: ${String(e?.message || e).slice(0, 160)}`; console.warn(`[issues] 파트 장애 자동 등록 댓글 실패(${status.error})`); }
   };
   const vcCtx = {};

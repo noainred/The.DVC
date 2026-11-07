@@ -221,7 +221,7 @@ export function AlertAutoSettings() {
       <h3 className="iss-h3">자동 등록 — 다른 알람 · 백업 실패</h3>
       {d.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>설정 파일(issue-alert-auto.json)을 읽지 못해 기본값(꺼짐)으로 동작 중입니다 — 손상본은 옆에 보존했습니다. 원인: {d.loadError}</div>}
       <label className="iss-check"><input type="checkbox" checked={form.enabled} onChange={(e) => upd({ enabled: e.target.checked })} /> 알람이 이어지면 이슈로 등록합니다</label>
-      <div className="muted" style={{ fontSize: 12.5 }}>알람이 아래 분 넘게 이어질 때 장애 이슈를 만들고(같은 알람의 열린 이슈가 있으면 만들지 않음), 해소되면 댓글을 답니다. 해소 뒤 다시 나서 아래 분 넘게 이어지면 같은 이슈에 ‘다시 발생’ 댓글{Number.isFinite(lim.noteWindowMin) ? `(깜빡이는 알람의 재발 · 해소 댓글은 ${lim.noteWindowMin}분에 한 번으로 묶습니다)` : ''}. 판정 보류(값을 못 읽음)는 해소로 보지 않습니다. 백업 실패는 잡마다 한 이슈 — 같은 잡이 또 실패하면 댓글, 성공해도 자동으로 닫지 않습니다. 인증서 만료는 알람 엔진에 판정이 없어 대상이 아닙니다.</div>
+      <div className="muted" style={{ fontSize: 12.5 }}>알람이 아래 분 넘게 이어질 때 장애 이슈를 만들고(같은 알람의 열린 이슈가 있으면 만들지 않음), 해소되면 댓글을 답니다. 해소 뒤 다시 나서 아래 분 넘게 이어지면 같은 이슈에 ‘다시 발생’ 댓글{Number.isFinite(lim.noteWindowMin) ? `(깜빡이는 알람의 재발 · 해소 댓글은 ${lim.noteWindowMin}분에 한 번으로 묶습니다)` : ''}. 판정 보류(값을 못 읽음)는 해소로 보지 않습니다. 백업 실패는 잡마다 한 이슈 — 같은 잡이 또 실패하면 댓글, 성공해도 자동으로 닫지 않습니다. 인증서 만료는 12시간마다 확인한 결과(vCenter · NSX 443 — 남은 30일 이하 · 만료)로 만들고(분 기준을 쓰지 않습니다), 갱신돼 남은 날이 30일을 넘으면 해소로 봅니다. 확인 실패는 판정 보류입니다.</div>
       <div className="iss-alert-kinds">
         {(d.kinds || []).map((k) => (
           <div key={k} className="iss-alert-kind">

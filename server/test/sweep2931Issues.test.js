@@ -1,5 +1,5 @@
 /**
- * sweep2930Issues.test.js — v2.930 최근 변경 점검(축 2) 확정분 B1-01 ~ B1-08(이슈 · 위키 · 알림함) 회귀.
+ * sweep2931Issues.test.js — v2.931 최근 변경 점검(축 2) 확정분 B1-01 ~ B1-08(이슈 · 위키 · 알림함) 회귀.
  *  B1-01 위키 댓글 '고치기 전 원문'(prev)이 문서 조회 · 고치기 · 해결 표시 응답에 실리지 않는다(저장은 그대로 — docs/rules/web.md '옛 본문 5개 보관')
  *  B1-02 깨진 링크 · 역링크는 볼 수 있는 문서로만 풀고 · 제목 바꾸기 링크 갱신은 그 링크가 든 문서의 독자 기준(같은 스페이스 · 공용만)
  *  B1-03 깜빡이는 알람 — 다시 발생에도 유예 · 재발/해소 댓글 시간 창 묶음 · 자동 댓글은 사람 몫(200)과 따로 센다
@@ -23,7 +23,7 @@ const SRC = path.resolve(HERE, '../src');
 const BASE = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 30 * 60_000;
 
 function run(body, { env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 's2930i-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 's2931i-'));
   const imp = (p) => JSON.stringify(path.join(SRC, p));
   const script = `
     const fs = await import('node:fs');

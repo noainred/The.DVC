@@ -8,7 +8,7 @@
  *   · 머문 조각은 한 번에 45초까지(화면은 30초마다 보낸다) · **계정당 벽시계를 넘지 않게**(창 두 개가 동시에 보내도 직전 조각 뒤 흐른 시간까지만 더한다).
  * 모으기 — 메모리 맵(날 × 계정 × 키)에 더했다가 60초마다 **한 트랜잭션**으로 DB 에 더한다(perf-db '대량 쓰기는 트랜잭션'). 종료 때는 동기로 한 번 더.
  *   DB 를 못 쓰면 버리지 않고 다음 주기에 다시 시도한다(상한 2만 칸 — 넘으면 새 칸은 버리고 센다).
- * 정리 — 약 1시간(60초 × 60틱)마다 보관 기간 밖을 청크로(기동 첫 틱 금지 — `(++pruneTick % N) === 0`). 기록 켜짐 · 신호와 무관한 별도 타이머다(v2.930 점검 C1-01).
+ * 정리 — 약 1시간(60초 × 60틱)마다 보관 기간 밖을 청크로(기동 첫 틱 금지 — `(++pruneTick % N) === 0`). 기록 켜짐 · 신호와 무관한 별도 타이머다(v2.931 점검 C1-01).
  * 집계(`buildUsageReport`) — 날마다 그 날 행만 읽고(PK 첫 열 = day) 시간 기준으로 양보한다(createYielder). 아직 저장하지 않은 메모리 분도 더한다.
  *   기록이 꺼져 있던 날은 0 이 아니라 '꺼짐' 으로 표시하고 하루 평균의 분모에서 뺀다(numOrNull 원칙 — 못 센 것은 0 이 아니다).
  */
@@ -144,13 +144,13 @@ export function flushUsage(now = Date.now()) {
     for (const [u, v] of lastHit) if (now - v.at > 3_600_000) lastHit.delete(u);
     for (const [u, at] of lastBeat) if (now - at > 3_600_000) lastBeat.delete(u);
     for (const [u, v] of rate) if (v.win < Math.floor(now / 60_000) - 1) rate.delete(u);
-    // 보관 기간 정리는 여기서 하지 않는다 — 아래 usagePruneTick(수집 켜짐 · 신호와 무관한 별도 타이머, v2.930 점검 C1-01).
+    // 보관 기간 정리는 여기서 하지 않는다 — 아래 usagePruneTick(수집 켜짐 · 신호와 무관한 별도 타이머, v2.931 점검 C1-01).
   })().finally(() => { flushing = null; });
   return flushing;
 }
 
 /*
- * ⚠⚠ v2.930(점검 C1-01): **보관 기간 정리는 기록 켜짐 · 신호 수신과 무관하게 돈다.** 예전에는 정리가 flushUsage 의 `(++tick % 60)` 하나였고
+ * ⚠⚠ v2.931(점검 C1-01): **보관 기간 정리는 기록 켜짐 · 신호 수신과 무관하게 돈다.** 예전에는 정리가 flushUsage 의 `(++tick % 60)` 하나였고
  *   그 타이머(ensureTimer)는 신호를 받아들였을 때만 시작돼, 기록을 끈 채 재시작하면(자동 업그레이드가 재시작을 만든다) 보관 기간 밖 일 집계가
  *   **영원히 지워지지 않았다**(고지 문구 'N일 뒤 지워집니다' 와 어긋남 — bmusage v2.628 EDGE2628-02 와 같은 유형). 모듈 로드 때 unref 타이머를 켜고
  *   스로틀은 `(++pruneTick % N) === 0`(기동 첫 틱 금지 — v2.453). DB 파일이 없으면 열지 않는다(켠 적 없는 노드에 빈 DB 를 만들지 않게).
@@ -426,7 +426,7 @@ export async function usageStatus(now = Date.now()) {
     today: stats.day === today ? { views: stats.dayViews, users: stats.dayUsers.size } : { views: 0, users: 0 },
     pending: pending.size,
     lastFlush: stats.lastFlush,
-    lastPrune,   // v2.930(점검 C1-01): 보관 기간 정리 결과(건너뜀 사유 · 실패 포함 — 무음 실패 금지). 기동 후 첫 정리 전에는 null
+    lastPrune,   // v2.931(점검 C1-01): 보관 기간 정리 결과(건너뜀 사유 · 실패 포함 — 무음 실패 금지). 기동 후 첫 정리 전에는 null
     flushEveryMs: FLUSH_MS,
     db,
   };
@@ -441,7 +441,7 @@ export async function purgeUsageRecords({ scope, user = '', before = '' }) {
   if (scope === 'all') pendingUsers.clear();
   if (scope === 'user') pendingUsers.delete(uk);
   if (scope === 'before') {
-    // v2.930(점검 C1-02): DB 쪽(fu_user last_ts < 그 날 시작)과 같은 기준으로 메모리의 계정 칸도 — 다음 저장이 지운 계정을 되살리지 않게.
+    // v2.931(점검 C1-02): DB 쪽(fu_user last_ts < 그 날 시작)과 같은 기준으로 메모리의 계정 칸도 — 다음 저장이 지운 계정을 되살리지 않게.
     const t = Date.parse(`${before}T00:00:00Z`);
     const cut = Number.isFinite(t) ? dayStartMs(dayIndex(t, 0)) : NaN;
     if (Number.isFinite(cut)) for (const [u, v] of pendingUsers) if (v.last < cut) pendingUsers.delete(u);

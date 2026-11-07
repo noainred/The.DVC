@@ -97,7 +97,7 @@ export function registerOpsSettings(adminRouter) {
 // Audit log viewer (누가 언제 무엇을 했는지).
 // v2.607 AUTHZ2607-07: 감사 로그는 전 사용자·전 법인 작업 기록이고 target 에 vCenter 축이 없는 항목이 많아 나눌 수
 //   없다 — 범위 계정 403(v2.525 규약. 같은 파일 /alerts 는 범위로 거른다).
-// v2.930(점검 C1-04): 거부는 fullScopeOnlyWith 모양({ok,error,reason}) — 예전 본문의 `requiredOwner:true` 때문에 화면(AccessDenied)이
+// v2.931(점검 C1-04): 거부는 fullScopeOnlyWith 모양({ok,error,reason}) — 예전 본문의 `requiredOwner:true` 때문에 화면(AccessDenied)이
 //   '설정 소유 계정 목록에 등록하라' 는 틀린 원인 · 틀린 조치를 말했다(실제 원인은 범위 — admin/shared.js v2.744 규약). 아래 /login-history 도 같다.
 const auditFullScope = fullScopeOnlyWith('감사 로그는 전 사용자·전 법인 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
 const loginHistoryFullScope = fullScopeOnlyWith('로그인 기록은 전 사용자의 접속 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');

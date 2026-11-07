@@ -1,4 +1,4 @@
-// palette2930.test.js — v2.930 최근 변경 점검 확정분(묶음 usage-login: C1-05 · C1-06) ⌘K 찾기(Palette.jsx) 회귀.
+// palette2931.test.js — v2.931 최근 변경 점검 확정분(묶음 usage-login: C1-05 · C1-06) ⌘K 찾기(Palette.jsx) 회귀.
 //  C1-05 한글 조합 중 Enter · Tab · Esc 를 선택 · 칩 순환 · 닫기로 먹지 않는다 — onKey 첫 줄이 조합 판정(isComposing · 229).
 //        같은 판정을 쓰는 형제(MentionBox · Wiki · IssuesPlus — docs/rules/web.md v2.904)도 함께 대조한다.
 //  C1-06 '직전 검색 복원' 이 계정을 구분한다 — 다른 계정이면 복원하지 않고 지운다(로그아웃은 새로 고침 없이 화면만 바꾼다).
@@ -20,7 +20,7 @@ describe('C1-05 한글 조합 판정(소스 대조)', () => {
       expect(body.indexOf(k), k).toBeGreaterThan(body.indexOf('isComposing'));
     }
   });
-  it('형제 입력칸도 같은 판정을 유지한다(MentionBox · Wiki · IssuesPlus · FeatureUsage 제외 계정 — v2.930)', () => {
+  it('형제 입력칸도 같은 판정을 유지한다(MentionBox · Wiki · IssuesPlus · FeatureUsage 제외 계정 — v2.931)', () => {
     for (const rel of ['./MentionBox.jsx', '../views/wiki/Wiki.jsx', '../views/issues/IssuesPlus.jsx', '../views/FeatureUsage.jsx']) {
       expect(read(rel), rel).toMatch(/e\.nativeEvent\?\.isComposing \|\| e\.keyCode === 229\) return;/);
     }

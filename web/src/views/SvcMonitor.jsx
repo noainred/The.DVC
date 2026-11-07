@@ -498,8 +498,8 @@ export default function SvcMonitor() {
   const drift = data?.settingsDrift;
   const driftN = drift ? (drift.new || 0) + (drift.changed || 0) + (drift.gone || 0) : 0;
   const ackDrift = async () => { try { await postJson('/svcmon/settings-sync/ack', {}); setDriftHidden(true); refresh(); } catch (e) { window.alert(e.message); } };
-  const isAdminFull = isFullScopeAdmin(me);   // 검토·확인 라우트가 adminOnly + fullScopeOnly(반증 H1) — v2.930(점검 D1-09): 판정은 svcmonAccess.js 하나
-  const driftEvery = periodText(drift?.intervalMs);   // v2.930(점검 D1-08): 감지 주기는 서버 값(없으면 숫자 없이)
+  const isAdminFull = isFullScopeAdmin(me);   // 검토·확인 라우트가 adminOnly + fullScopeOnly(반증 H1) — v2.931(점검 D1-09): 판정은 svcmonAccess.js 하나
+  const driftEvery = periodText(drift?.intervalMs);   // v2.931(점검 D1-08): 감지 주기는 서버 값(없으면 숫자 없이)
   const driftBanner = isAdminFull && !driftHidden && driftN > 0 ? (
     <div className="tv-banner" role="status">
       <span><b>설정이 바뀌었습니다</b>{` — 새 항목 ${drift.new || 0} · 주소 변경 ${drift.changed || 0} · 설정에서 사라짐 ${drift.gone || 0}`}

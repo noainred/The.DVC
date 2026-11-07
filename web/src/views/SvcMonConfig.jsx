@@ -46,7 +46,7 @@ function takePrefill() {
 export default function SvcMonConfig() {
   const me = getCurrentUser();
   const canEdit = me?.role === 'admin' || me?.role === 'operator';
-  // v2.930(점검 D1-09): 설정 연동 · 알림 저장은 서버가 adminOnly + fullScopeOnly — 범위 admin 에게 저장을 열지 않게 판정을 한 군데(svcmonAccess.js)에서.
+  // v2.931(점검 D1-09): 설정 연동 · 알림 저장은 서버가 adminOnly + fullScopeOnly — 범위 admin 에게 저장을 열지 않게 판정을 한 군데(svcmonAccess.js)에서.
   const adminFull = isFullScopeAdmin(me);
   // 프리필은 최초 렌더에서 1회만 읽는다(리렌더마다 읽으면 sessionStorage 를 이미 비운 뒤라 사라진다).
   const [prefill] = useState(takePrefill);

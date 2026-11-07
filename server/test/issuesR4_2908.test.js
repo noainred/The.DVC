@@ -153,7 +153,7 @@ test('10 판정 — 지연 · 중복 · 다시 발생 · 해소 · 하루 상한
   assert.deepEqual(p.actions.map((a) => [a.type, a.f.key]), [['create', 'vc:vc-a'], ['create', 'vcstale:vc-c']], '10분 미만 · 오버커밋 · 꺼진 종류(host) 는 만들지 않는다');
   assert.equal(p.capped, 1, '하루 상한 2건 — massoff 는 세고 만들지 않는다');
   const existing = [{ key: 'ISS-1', origin: { alertKey: 'vc:vc-a', resolvedAt: null } }, { key: 'ISS-2', origin: { alertKey: 'ds:d1', resolvedAt: 123 } }];
-  // v2.930(점검 B1-03): 다시 발생도 delayMin(10분) 넘게 이어질 때만 — 예전 1분짜리 재발은 이제 재발로 치지 않는다(sweep2930Issues 가 고정)
+  // v2.931(점검 B1-03): 다시 발생도 delayMin(10분) 넘게 이어질 때만 — 예전 1분짜리 재발은 이제 재발로 치지 않는다(sweep2931Issues 가 고정)
   const p2 = planAlertIssues({ firing: [f('vc:vc-a', 99), f('ds:d1', 11)], resolved: [{ key: 'vc:vc-a', alert: {} }, { key: 'ds:zz', alert: {} }] }, { ...cfg, kinds: { ...cfg.kinds, ds: true } }, { existing, now });
   assert.deepEqual(p2.actions.map((a) => [a.type, a.key]), [['again', 'ISS-2'], ['resolve', 'ISS-1']], '열린 이슈가 있으면 만들지 않고 · 해소된 뒤 다시 나면 다시 발생 · 이슈 없는 해소는 무시');
   assert.equal(alertKindOf('backup:x'), '', '백업은 알람 엔진 키가 아니다');
@@ -273,7 +273,7 @@ test('6 · 9 · 10 실제 경로 — 알림함 · 자동화 규칙 · 멈춤 · 
   assert.equal(out.read, 1); assert.equal(out.unreadAfter, 2);
   assert.equal(out.mails, 0, '메일 알림은 꺼져 있다(기본) — 알림함만');
   assert.ok(!out.inboxScoped.includes('ISS-1'), '범위 밖 법인(vc-a) 줄은 지금 범위로 다시 거른다');
-  // v2.930(점검 B1-05): 범위 계정은 공용 이슈 줄도 보지 않는다(이슈 · 위키 가시성 규칙과 같다) — 예전 단언 '공용 이슈 줄은 보인다' 를 뒤집었다
+  // v2.931(점검 B1-05): 범위 계정은 공용 이슈 줄도 보지 않는다(이슈 · 위키 가시성 규칙과 같다) — 예전 단언 '공용 이슈 줄은 보인다' 를 뒤집었다
   assert.deepEqual(out.inboxScoped, [], '범위 계정(vc-b)은 vc-a 줄도 공용 줄도 보지 않는다');
   assert.equal(out.inboxDemo.demo, true); assert.equal(out.inboxDemo.items.length, 0);
   assert.equal(out.inboxDemoRead, 403);

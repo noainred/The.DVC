@@ -82,7 +82,7 @@ async function persistView(req) {
 const fullWriter = (req) => canWrite(req) && isFullReadWriteScope(req.user, store.get());
 /**
  * 댓글 글 → 언급한 실제 이름(가장 긴 접두). 전체 범위 쓰기 계정은 알림과 같은 해석(로컬 계정 · 메일 주소 표 · 이 문서 참여자).
- * v2.930(점검 B1-06): 그 밖의 계정은 멘션 자동완성(mentionCandidates)과 같은 후보(참여자 + 볼 수 있는 이슈에 나온 이름 + 자기)로만 푼다 —
+ * v2.931(점검 B1-06): 그 밖의 계정은 멘션 자동완성(mentionCandidates)과 같은 후보(참여자 + 볼 수 있는 이슈에 나온 이름 + 자기)로만 푼다 —
  *   예전에는 담당자 400 문구 · 관찰자 · skipped 가 '그 이름의 계정이 있는가 · 그 법인을 보는가' 를 알려 주는 판정이 됐다(감사 A3-02 의 옆길).
  *   알림 수신 해석(notify.js queueWikiEvent)은 응답에 나오지 않으므로 그대로다.
  */
@@ -121,7 +121,7 @@ function issueFromComment(req, pageId, cid, want) {
   if (prev) { try { addLink(x.key, { type: 'relates', key: prev.key }, userOf(req), { access }); } catch { /* 옛 이슈를 볼 수 없거나 연결 상한 — 잇지 않는다 */ } }
   setCommentIssue(pageId, cid, x.key, { access });
   audit(req, plan.requestOnly ? 'issue.request' : 'issue.create', x.key, `위키 댓글 ${pageId}/${cid}${x.assignee ? ` → ${x.assignee}` : ''}`);
-  // v2.930(점검 B1-06): 뺀 사람(그 법인을 볼 수 없는 사람)의 이름은 전체 범위 쓰기 계정에게만 — 그 밖은 수만(skippedN)
+  // v2.931(점검 B1-06): 뺀 사람(그 법인을 볼 수 없는 사람)의 이름은 전체 범위 쓰기 계정에게만 — 그 밖은 수만(skippedN)
   return { key: x.key, assignee: x.assignee || '', watchers: plan.watchers, ...(restricted ? {} : { skipped: plan.skipped }), skippedN: plan.skipped.length, requestOnly: plan.requestOnly, relatedTo: prev?.key || '', ...mailOutlook(req, settings, [x.assignee, ...plan.watchers].filter(Boolean)) };
 }
 /** v2.907 기한이 지난 휴지통 항목을 영구히 지우고 그 첨부 · 즐겨찾기를 정리한다(목록 · 지우기 때 — 폴링하지 않는다). */

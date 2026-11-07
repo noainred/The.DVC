@@ -1,5 +1,5 @@
 /**
- * svcmon/svcmonAccess.js — Monitoring 화면의 **'전체 범위 관리자'** 판정(v2.930 점검 D1-09).
+ * svcmon/svcmonAccess.js — Monitoring 화면의 **'전체 범위 관리자'** 판정(v2.931 점검 D1-09).
  *
  * 서버 게이트 `adminOnly + fullScopeOnly`(routes/svcmon/shared.js · routes/admin/shared.js fullScopeOnlyWith → auth/scope.js scopedVcenterIds)와
  * 같은 기준을 화면이 **한 군데**에서 계산한다. 예전에는 Monitoring 설정 › 알림 · 설정 연동이 `role === 'admin'` 만 봐서 범위가 지정된 admin 에게

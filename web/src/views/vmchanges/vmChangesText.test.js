@@ -28,7 +28,7 @@ describe('vmChangesText', () => {
   it('잘림·상세 없음 문구', () => {
     expect(truncNote({ truncated: true, readMax: 20000 })).toContain('20,000');
     expect(truncNote({ truncated: false })).toBeNull();
-    // v2.930: 잘린 시각을 말한다(모르면 말하지 않는다)
+    // v2.931: 잘린 시각을 말한다(모르면 말하지 않는다)
     expect(truncNote({ truncated: true, readMax: 300000, coveredSince: Date.UTC(2026, 10, 5, 3, 0) })).toMatch(/300,000건까지만 분석했습니다 · .+ 이후 —/);
     expect(truncNote({ truncated: true, readMax: 300000, coveredSince: null })).not.toMatch(/이후/);
     expect(noDetailNote(0, 5)).toBeNull();

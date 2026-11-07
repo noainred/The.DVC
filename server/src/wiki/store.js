@@ -217,7 +217,7 @@ export function metaOf(p) {
   };
 }
 /**
- * v2.930(점검 B1-01 — 재현): 응답에 싣는 댓글 칸 — 화이트리스트(이슈 viewIssue 와 같은 모양). 예전에는 `{ ...c }` 로 펼쳐 '고치기 전 원문'(prev)이
+ * v2.931(점검 B1-01 — 재현): 응답에 싣는 댓글 칸 — 화이트리스트(이슈 viewIssue 와 같은 모양). 예전에는 `{ ...c }` 로 펼쳐 '고치기 전 원문'(prev)이
  * 그 문서를 읽는 사람 전부(viewer 포함)에게 나갔다(화면은 prev 를 쓰지 않아 사용자는 지워진 줄 알았다). prev 는 저장은 하되(docs/rules/web.md
  * '옛 본문 5개 보관') 어떤 응답에도 싣지 않는다 — 원문을 정말 없애려면 댓글을 지운다.
  */
@@ -492,13 +492,17 @@ export function toggleTask(id, body, user, { access = FULL_ACCESS } = {}) {
 }
 
 /**
- * v2.908 자동화 규칙 '완료 → 위키 체크 항목 완료'(서버 내부 — 범위 없음). 이슈 키(ISS-n — 뒤에 숫자가 이어지지 않는 것)를 적은 **체크 안 된**
+ * v2.908 자동화 규칙 '완료 → 위키 체크 항목 완료'(서버 내부). 이슈 키(ISS-n — 뒤에 숫자가 이어지지 않는 것)를 적은 **체크 안 된**
  * 체크리스트 항목을 체크한다. 보기에서 체크(toggleTask)와 같은 방식 — 판을 만들지 않고 지금 판 본문도 같이 고치고 checkLog · checkRev 를 남긴다.
- * 읽기 전용 스페이스 · 보관(archived) 문서는 건드리지 않는다. 문서 50개 · 문서당 50줄까지. @returns {{ pages: number, items: number, skipped: number }}
+ * 읽기 전용 스페이스 · 보관(archived) 문서는 건드리지 않는다. 문서 50개 · 문서당 50줄까지.
+ * v2.929(사용자 선택 '같은 법인 + 공용만'): v2.908 은 모든 스페이스를 건드려 법인 A 이슈의 완료가 B 법인 스페이스 문서를 바꿀 수 있었다 —
+ *   **이슈의 법인 스페이스 + 공용 스페이스만**(공용 이슈는 공용 스페이스만). 다른 법인 문서는 건너뛰고 센다(outOfScope).
+ * @returns {{ pages: number, items: number, skipped: number, outOfScope: number }}
  */
 export const AUTO_CHECK_LIMITS = Object.freeze({ pages: 50, lines: 50 });
-export function checkIssueTasks(issueKey, user = 'automation', { now = Date.now() } = {}) {
-  const out = { pages: 0, items: 0, skipped: 0 };
+export function checkIssueTasks(issueKey, user = 'automation', { now = Date.now(), vcenterId = '' } = {}) {
+  const out = { pages: 0, items: 0, skipped: 0, outOfScope: 0 };
+  const corp = String(vcenterId || '');
   const key = String(issueKey || '');
   if (!/^ISS-\d{1,9}$/.test(key)) return out;
   const re = new RegExp(`\\b${key}(?!\\d)`);
@@ -506,6 +510,7 @@ export function checkIssueTasks(issueKey, user = 'automation', { now = Date.now(
   for (const p of c.pages) {
     if (out.pages >= AUTO_CHECK_LIMITS.pages) { out.skipped += 1; continue; }
     if (!(p.issueKeys || []).includes(key)) continue;
+    if (p.spaceId !== PUB && p.spaceId !== corp) { out.outOfScope += 1; continue; } // v2.929 — 다른 법인 스페이스는 건드리지 않는다
     if (p.status === 'archived' || c.spaces[p.spaceId]?.readOnly) { out.skipped += 1; continue; }
     const lines = String(p.body || '').split(/\r\n?|\n/);
     const hit = [];
@@ -579,7 +584,7 @@ export function editComment(id, commentId, body, user, { access = FULL_ACCESS } 
   const before = new Set(mentionsOf(cm.body));
   const fresh = mentionsOf(next).filter((m) => !before.has(m));
   if (fresh.length) emit({ type: 'comment', edit: true, actor: user, page: evPage(x), excerpt: capStr(next, 200), mentions: fresh });
-  return commentView(edited); // v2.930(점검 B1-01): 작성자 응답에도 prev 를 싣지 않는다
+  return commentView(edited); // v2.931(점검 B1-01): 작성자 응답에도 prev 를 싣지 않는다
 }
 
 /* ───── v2.907 문서 링크 — 역링크 · 제목 바꿀 때 링크 갱신 · 깨진 링크(기능 추천 3) ─────
@@ -615,7 +620,7 @@ export function resolveRef(ref, pages, spaceId = '') {
   return hits.find((p) => p.spaceId === spaceId) || hits[0] || null;
 }
 /**
- * v2.930(점검 B1-02 — 재현): 링크를 풀 후보는 **이 사용자가 볼 수 있는 문서만**(화면 resolvePageRef 와 같다). 예전에는 전 문서로 풀어서
+ * v2.931(점검 B1-02 — 재현): 링크를 풀 후보는 **이 사용자가 볼 수 있는 문서만**(화면 resolvePageRef 와 같다). 예전에는 전 문서로 풀어서
  * 법인 A 범위 계정이 `[[추측한 제목]]` 을 적고 깨진 링크 목록에서 빠지는지로 다른 법인 문서 제목의 존재를 알아냈다. 전체 범위 계정은 그대로다.
  */
 const visiblePages = (all, access) => (access?.read ? all.filter((p) => canSeeSpace(p.spaceId, access)) : all);
@@ -645,7 +650,7 @@ export function brokenLinks({ access = FULL_ACCESS, spaceId = '', limit = 200 } 
  * 제목이 바뀐 문서를 '[[옛 제목]]' 으로 가리키던 링크를 새 제목으로 고친다 — 옛 제목이 **이 문서로 풀리던** 링크만(같은 제목의 다른 문서를 빼앗지 않는다).
  * 고칠 수 있는 문서(쓰기 범위 · 읽기 전용 아님)만 새 판으로(메모 '링크 갱신') · 나머지는 센다. renamedPage 는 바뀐 뒤의 문서.
  *
- * v2.930(점검 B1-02 — 재현): 고칠지는 **그 링크가 든 문서를 읽는 사람** 기준이다 — 바꾼 사람 기준으로만 보면 전체 범위 관리자가 법인 B 문서
+ * v2.931(점검 B1-02 — 재현): 고칠지는 **그 링크가 든 문서를 읽는 사람** 기준이다 — 바꾼 사람 기준으로만 보면 전체 범위 관리자가 법인 B 문서
  * 제목을 바꿀 때 법인 A 문서의 `[[옛 제목]]` 이 B 의 새 제목으로 고쳐져 A 범위 계정이 본문과 판 메모로 B 의 새 제목을 읽었다.
  *   · 같은 스페이스 문서 · 공용 스페이스 문서(공용을 읽는 사람은 전체 범위뿐 — canSeeSpace)만 고친다. 그 밖은 `crossSpace` 로 센다.
  *   · 바꾼 사람이 볼 수 없는 문서는 고치지도 세지도 않는다(셈이 그 문서의 존재를 알려 준다).
@@ -767,7 +772,7 @@ export function getComment(id, commentId, access = FULL_ACCESS) {
   const p = findFor(id, access);
   const cm = (p.comments || []).find((x) => x.id === commentId);
   if (!cm) throw notFound();
-  return { page: { id: p.id, title: p.title, spaceId: p.spaceId, createdBy: p.createdBy || '', watchers: [...(p.watchers || [])] }, comment: commentView(cm) }; // v2.930(점검 B1-01) prev 제외
+  return { page: { id: p.id, title: p.title, spaceId: p.spaceId, createdBy: p.createdBy || '', watchers: [...(p.watchers || [])] }, comment: commentView(cm) }; // v2.931(점검 B1-01) prev 제외
 }
 /** 이 문서의 참여자(만든 사람 · 고친 사람 · 지켜보는 사람 · 댓글 쓴 사람) — 멘션 후보(볼 수 있는 문서만). */
 export function pageParticipants(id, access = FULL_ACCESS) {
@@ -817,7 +822,7 @@ export function resolveComment(id, commentId, user, on, { access = FULL_ACCESS, 
   const x = { ...p, comments: p.comments.map((q) => (q.id === commentId ? next : q)) };
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
   commit({ changed: x });
-  return commentView(next); // v2.930(점검 B1-01): 해결 표시 응답에도 prev 를 싣지 않는다
+  return commentView(next); // v2.931(점검 B1-01): 해결 표시 응답에도 prev 를 싣지 않는다
 }
 export function setWatch(id, user, on, { access = FULL_ACCESS } = {}) {
   const c = load();

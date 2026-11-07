@@ -37,7 +37,7 @@ export function splitTarget(raw, { defaultPort = 443, defaultScheme = 'https' } 
 }
 
 /**
- * v2.930(점검 D1-01 — 재현): load-error 표지(`registryLoadError` 류)를 내보내지 않는 등록부 → 그 등록부 **파일 이름**.
+ * v2.931(점검 D1-01 — 재현): load-error 표지(`registryLoadError` 류)를 내보내지 않는 등록부 → 그 등록부 **파일 이름**.
  *   이 모듈들은 손상된 파일을 보존본(<파일>.corrupt.<시각>)으로 옮기고 빈 목록을 준다 — 그것을 '등록 0건' 으로 읽으면 설정 연동이
  *   그 종류의 연동 대상 전부를 '설정에서 사라짐' 으로 판정했다(vcenters.json 손상 → vCenter 대상 전부 gone → 적용하면 전부 중지).
  *   판정은 설정 메뉴 상태 배지와 같은 `settingsStatus/sources.js damaged`(파일 없음 ∧ 손상 보존본만 있음) 하나를 쓴다.
@@ -110,7 +110,7 @@ export async function buildSettingsTargets(deps = {}) {
       const name = fnNames.find((n) => typeof m[n] === 'function');
       if (!name) throw new Error(`${path} 에 ${fnNames.join('/')} 중 아무 함수도 없습니다(모듈이 바뀌었습니다 — 이 등록부는 점검에서 빠집니다).`);
       const list = pick(m, name) ?? [];
-      // v2.930(점검 D1-01): 표지 함수가 없는 모듈은 등록부 파일의 손상 보존본으로 본다(로더가 파일을 옮긴 **뒤**라야 보인다 — pick 다음).
+      // v2.931(점검 D1-01): 표지 함수가 없는 모듈은 등록부 파일의 손상 보존본으로 본다(로더가 파일을 옮긴 **뒤**라야 보인다 — pick 다음).
       if (!noteLoadError(key, m)) await noteDamagedFile(key);
       return list;
     }, errors);
