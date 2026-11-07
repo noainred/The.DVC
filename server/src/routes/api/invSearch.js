@@ -20,7 +20,7 @@ import { serialIndex } from '../../insights/serialLookup.js';
 const PART_KINDS = new Set(['server-part', 'sanswitch-part']);
 
 /**
- * v2.927(B4): `recent=vm|vc:vm-1,storage|st-1` — 이 계정이 최근 연 장비(웹 localStorage · 계정별). 순서 가산점에만 쓴다(이미 보이는 행 안에서).
+ * v2.928(B4): `recent=vm|vc:vm-1,storage|st-1` — 이 계정이 최근 연 장비(웹 localStorage · 계정별). 순서 가산점에만 쓴다(이미 보이는 행 안에서).
  * 아는 종류 · 10개 · 항목 300자까지만. 이 값으로 행을 더하거나 범위를 바꾸지 않는다.
  */
 export function parseRecent(v) {
@@ -77,7 +77,7 @@ export function registerInvSearch(api) {
       builtAt: idx.builtAt, scoped: !!plan.allowed,
       addressHidden: !plan.admin && ok.some((k) => ['gpu', 'storage', 'sanswitch', 'netswitch', 'pdu', 'server'].includes(k)),
       limits: { queryMax: QUERY_MAX, minText: MIN_TEXT, minField: MIN_FIELD, perKind: PER_KIND, totalMax: TOTAL_MAX },
-      // v2.927(D1): 색인 생성 실측(관리자 판본에게만 — 운영 규모 성능 확인용). 전체 행 수는 범위와 무관한 값이라 범위 · 비관리자에게 싣지 않는다.
+      // v2.928(D1): 색인 생성 실측(관리자 판본에게만 — 운영 규모 성능 확인용). 전체 행 수는 범위와 무관한 값이라 범위 · 비관리자에게 싣지 않는다.
       ...(plan.admin && !plan.allowed ? { index: { buildMs: idx.buildMs ?? null, yields: idx.yields ?? null, stepMs: idx.stepMs || null, rows: idx.rows.length } } : {}),
     };
     if (!pq.needle || pq.tooLong) {

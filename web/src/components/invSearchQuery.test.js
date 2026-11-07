@@ -109,7 +109,7 @@ describe('최근 연 항목(localStorage 10개)', () => {
     expect(pushRecent({ kind: 'vm', name: 'x', plan: { hash: '#/a' } }, st, 1, null)).toEqual([]);
     expect(readRecent(st, null)).toEqual([]);
   });
-  it('v2.927(B4) 행 id 를 저장하고 recent= 파라미터로 만든다(10개 · 구분자 든 id 제외 · 중복 제거)', () => {
+  it('v2.928(B4) 행 id 를 저장하고 recent= 파라미터로 만든다(10개 · 구분자 든 id 제외 · 중복 제거)', () => {
     const st = mem();
     pushRecent({ kind: 'vm', id: 'vc-1:vm-9', name: 'web-01', plan: { hash: '#/vcenters/vc-1/vm/vm-9', handoffs: [] } }, st, 1);
     pushRecent({ kind: 'storage', name: 'no-id', plan: { hash: '#/tools/storage-mon/devices', handoffs: [['storage-mon', 'u']] } }, st, 2);
@@ -125,7 +125,7 @@ describe('최근 연 항목(localStorage 10개)', () => {
     expect(recentIdsParam(Array.from({ length: 15 }, (_, i) => ({ kind: 'vm', id: `v${i}` }))).split(',')).toHaveLength(RECENT_MAX);
     expect(recentIdsParam(undefined)).toBe('');
   });
-  it('v2.927 일치 표지 글자 — 서버 via 값과 같은 키', () => {
+  it('v2.928 일치 표지 글자 — 서버 via 값과 같은 키', () => {
     expect(Object.keys(VIA_LABEL).sort()).toEqual(['notes', 'recent', 'tag']);
     const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../server/src/routes/api/invSearch.js'), 'utf8');
     for (const k of Object.keys(VIA_LABEL)) expect(src).toContain(`'${k}'`);

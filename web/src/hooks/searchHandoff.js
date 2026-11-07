@@ -55,7 +55,7 @@ export function takeSearch(target, now = Date.now()) {
 }
 
 /*
- * v2.927(A5): 새 탭(⌘/Ctrl+Enter)으로 열 때도 검색어 · 고른 장비를 넘긴다. 메모리 인계는 다른 문서에 닿지 않으므로
+ * v2.928(A5): 새 탭(⌘/Ctrl+Enter)으로 열 때도 검색어 · 고른 장비를 넘긴다. 메모리 인계는 다른 문서에 닿지 않으므로
  *   ① 보내는 탭이 localStorage 에 **일회용 칸**(`ui.invSearch.newtab:<무작위 16진>` · 60초)을 남기고
  *   ② 새 탭의 **창 이름**(window.name — 주소가 아니다)에 그 번호만 실어 연다.
  *   ③ 새 탭은 화면을 그리기 전에(main.jsx) 그 칸을 꺼내 지우고 메모리 인계(handoffMany)로 옮긴다 · 창 이름도 지운다.

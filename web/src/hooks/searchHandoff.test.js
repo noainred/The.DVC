@@ -60,7 +60,7 @@ describe('v2.911 — 한 이동에 검색어 + 고른 장비를 함께', async (
   });
 });
 
-// v2.927(A5): 새 탭 인계 — localStorage 일회용 칸 + 창 이름(주소에는 싣지 않는다).
+// v2.928(A5): 새 탭 인계 — localStorage 일회용 칸 + 창 이름(주소에는 싣지 않는다).
 import { stashForNewTab, consumeNewTabHandoff, NEWTAB_KEY, NEWTAB_PREFIX, NEWTAB_TTL_MS } from './searchHandoff.js';
 
 function memStorage() {
@@ -76,7 +76,7 @@ function memStorage() {
 }
 const NONCE = '0123456789abcdef';
 
-describe('새 탭 인계(v2.927)', () => {
+describe('새 탭 인계(v2.928)', () => {
   it('남긴 칸을 새 탭이 한 번 꺼내 메모리 인계로 옮기고 칸 · 창 이름을 지운다', () => {
     const st = memStorage();
     const name = stashForNewTab([['storage-mon', 'unity-01'], ['storage-mon:focus', 'st-7']], { storage: st, now: 1000, nonce: NONCE });

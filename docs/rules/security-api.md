@@ -390,7 +390,7 @@
      베어메탈 귀속은 서버 분석 범위 절단과 같은 함수(`idrac/corpAttribution.js idracServerVcOf`) — 사본을 만들지 않는다(반증 L-1).
   ⑥ 검색어에서 파생한 값(시리얼 정규화 등)은 **요청당 한 번**(반증 M-2 — 행마다 하면 조작한 254자 검색어가 5만 행에서 215ms). 색인 생성은 시간 기준 양보(createYielder).
   ④ 색인은 관리자 판본 하나를 30초 공유하고 범위 · 가림은 응답 때 건다(사용자별 색인 금지 — 캐시 키 실수로 새는 것을 막는다). 응답 캐시(memoJson)는 두지 않는다. 검색어 256자 상한(넘으면 아무것도 맞지 않음) · 정규식 없는 선형 일치.
-  ⑦ v2.927 — **VM 태그 · 사용자 지정 속성으로 찾기는 그 값이 보이는 화면(`vm-tags` 도구)을 쓸 수 있는 계정만**(`accessPlan.tagsSearchable` — tools ∧ `userToolAllowed('vm-tags')`, 아니면 태그 칸을
+  ⑦ v2.928 — **VM 태그 · 사용자 지정 속성으로 찾기는 그 값이 보이는 화면(`vm-tags` 도구)을 쓸 수 있는 계정만**(`accessPlan.tagsSearchable` — tools ∧ `userToolAllowed('vm-tags')`, 아니면 태그 칸을
      일치에서 뺀다 · 표지 `tags` 도 싣지 않는다). 메모(annotation)는 inv.vms 의 '메모 포함' 과 같은 값이라 vm 종류로 충분하지만 본문은 응답에 싣지 않는다(`_notes` 는 검색 키).
      `recent=`(클라이언트가 보낸 최근 장비 id)는 **이미 보이는 행의 순서에만** 쓴다 — 행을 더하거나 범위 판정에 쓰지 않는다. 색인 실측(`index` · 전체 행 수)은 관리자 판본(∧ 전체 범위)에게만.
   회귀 `server/test/invSearch2909.test.js` 21건 · 변이 22건 중 21 잡음(살아남은 1건은 `visible()` 의 이중 방어 줄 — 동등 변이) · 반증 1인 결과와 조치는 docs/design/inventory-search/README.md §7.4.

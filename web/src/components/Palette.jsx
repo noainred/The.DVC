@@ -56,7 +56,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
   const [nonce, setNonce] = useState(0);            // '다시 시도'
   const recentKey = useMemo(() => recentKeyFor(username), [username]); // 계정별(반증 L-4) — App 이 넘기는 로그인 계정
   const [recent, setRecent] = useState(() => readRecent(undefined, recentKey));
-  // v2.927(B4): 최근 연 장비를 서버에 알려 같은 검색에서 앞으로(이미 보이는 행 안에서 순서만 — 서버가 범위 · 권한을 다시 건다).
+  // v2.928(B4): 최근 연 장비를 서버에 알려 같은 검색에서 앞으로(이미 보이는 행 안에서 순서만 — 서버가 범위 · 권한을 다시 건다).
   const recentParam = useMemo(() => recentIdsParam(recent), [recent]);
   const inputRef = useRef(null);
   const seqRef = useRef(0);
@@ -141,7 +141,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
   const go = (plan, newTab = false) => {
     if (!plan || !plan.hash) return;
     if (newTab) {
-      // v2.927(A5): 넘길 것이 있으면 일회용 칸 + 창 이름으로(searchHandoff.stashForNewTab — 주소에는 싣지 않는다). 같은 출처라 opener 만 끊는다.
+      // v2.928(A5): 넘길 것이 있으면 일회용 칸 + 창 이름으로(searchHandoff.stashForNewTab — 주소에는 싣지 않는다). 같은 출처라 opener 만 끊는다.
       try {
         const name = (plan.handoffs || []).length ? stashForNewTab(plan.handoffs) : '';
         const w = window.open(`${window.location.pathname}${window.location.search}${plan.hash}`, name || '_blank');
@@ -188,7 +188,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
   const nothing = q.trim() && !loading && toolRows.length === 0 && (!devActive || noDevice);
   const modeBadge = pre.prefix ? (pre.kind ? KIND_LABEL[pre.kind] : MODE_LABEL[pre.mode]) : '';
   let idx = -1;
-  // v2.927(C2): 스크린리더 — 입력칸이 combobox, 목록이 listbox, 커서 줄이 aria-activedescendant(포커스는 입력칸에 둔 채).
+  // v2.928(C2): 스크린리더 — 입력칸이 combobox, 목록이 listbox, 커서 줄이 aria-activedescendant(포커스는 입력칸에 둔 채).
   const optProps = (i) => ({ id: `inv-opt-${i}`, role: 'option', 'aria-selected': i === cur, tabIndex: -1 });
   const srStatus = loading ? '찾는 중'
     : !q.trim() ? ''

@@ -108,7 +108,7 @@ function textTier(row, n, sn, addrSearchable, tagsOk = false) {
   if (ipTier(row, n, addrSearchable) != null) return 5;
   if (snOk && snTier(row, sn) != null) return 6;
   if (row._m && (addrSearchable || !row._mAddr) && row._m.includes(n)) return 7;
-  // v2.927(B3): VM 태그 · 사용자 지정 속성(태그 도구 권한이 있을 때만) · 메모(가상머신 목록의 '메모 포함' 과 같은 값)
+  // v2.928(B3): VM 태그 · 사용자 지정 속성(태그 도구 권한이 있을 때만) · 메모(가상머신 목록의 '메모 포함' 과 같은 값)
   if (tagsOk && row._tags && row._tags.includes(n)) return TIER.tag;
   if (row._notes && row._notes.includes(n)) return TIER.notes;
   return null;
@@ -147,7 +147,7 @@ export function searchRows(rows, pq, opts = {}) {
   const totalMax = Math.max(1, Number(opts.totalMax) || TOTAL_MAX);
   const addrOk = typeof opts.addrSearchable === 'function' ? opts.addrSearchable : () => true;
   const tagsOk = !!opts.tagsOk;
-  // v2.927(B4): 이 계정이 최근 연 장비(웹이 보내는 'kind|id' — 자기 기록)는 같은 검색에서 완전 일치 바로 다음으로 올린다.
+  // v2.928(B4): 이 계정이 최근 연 장비(웹이 보내는 'kind|id' — 자기 기록)는 같은 검색에서 완전 일치 바로 다음으로 올린다.
   //   이미 범위 · 권한으로 거른 행 안에서 순서만 바꾼다 — 보이지 않는 장비를 끌어오지 않는다.
   const recent = opts.recent instanceof Set ? opts.recent : null;
   const hits = new Map(KIND_KEYS.map((k) => [k, []]));

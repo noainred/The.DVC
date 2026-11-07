@@ -379,8 +379,8 @@ test('parseKinds: 아는 키만', () => {
 });
 
 
-// ── v2.927 남은 개선(B3 태그 · 메모 · B4 최근 가산점 · D1 생성 실측) ───────────────────────────────
-test('v2.927 B3: vmTagStrings — 스냅샷 vm.tags + tagInv 의 범주:태그 · 속성=값', () => {
+// ── v2.928 남은 개선(B3 태그 · 메모 · B4 최근 가산점 · D1 생성 실측) ───────────────────────────────
+test('v2.928 B3: vmTagStrings — 스냅샷 vm.tags + tagInv 의 범주:태그 · 속성=값', () => {
   const inv = { categories: [{ name: 'Env' }], tags: [{ name: 'Prod', cat: 0 }, { name: 'Gold' }], vmTags: { 'vm-7': [0, 1] },
     fields: [{ key: 101, name: 'Owner' }], vmCustom: { 'vm-7': { 101: 'InfraTeam' } } };
   const got = IDX.vmTagStrings({ id: 'vc1:vm-7', vcenterId: 'vc1', tags: ['Backup:Daily'] }, inv);
@@ -388,7 +388,7 @@ test('v2.927 B3: vmTagStrings — 스냅샷 vm.tags + tagInv 의 범주:태그 �
   assert.deepEqual(IDX.vmTagStrings({ id: 'x', vcenterId: 'vc1' }, null), []);
 });
 
-test('v2.927 B3: 메모는 vm 을 보는 계정 누구나 · 태그는 vm-tags 도구 권한이 있을 때만 · 등급은 이름 · 모델 뒤', () => {
+test('v2.928 B3: 메모는 vm 을 보는 계정 누구나 · 태그는 vm-tags 도구 권한이 있을 때만 · 등급은 이름 · 모델 뒤', () => {
   const r = row('vm', { id: 'vc1:a', name: 'app-01', notes: '담당: 인프라팀 · 마이그레이션 예정', tags: ['Env:Prod', 'Owner=InfraTeam'] });
   assert.equal(Q.matchTier(r, Q.parseQuery('마이그레이션')), Q.TIER.notes);
   assert.equal(Q.matchTier(r, Q.parseQuery('env:prod')), null, '태그 권한이 없으면 태그로 찾지 않는다');
@@ -399,7 +399,7 @@ test('v2.927 B3: 메모는 vm 을 보는 계정 누구나 · 태그는 vm-tags �
   assert.equal(Q.matchTier(long, Q.parseQuery('needle')), null, '메모는 앞 300자만');
 });
 
-test('v2.927 B3: 라우트 — 태그로 걸린 행은 via:tag + 걸린 태그만 · 권한 없는 계정은 태그로 못 찾는다', async () => {
+test('v2.928 B3: 라우트 — 태그로 걸린 행은 via:tag + 걸린 태그만 · 권한 없는 계정은 태그로 못 찾는다', async () => {
   IDX._setIndexForTest([
     row('vm', { id: 'vc1:a', name: 'app-01', vcenterId: 'vc1', notes: '마이그레이션 예정', tags: ['Env:Prod', 'Owner=InfraTeam', 'Backup:Daily'] }),
   ]);
@@ -417,7 +417,7 @@ test('v2.927 B3: 라우트 — 태그로 걸린 행은 via:tag + 걸린 태그�
   perms.setUserTools(name, { mode: 'off' });
 });
 
-test('v2.927 B4: 최근 연 장비는 완전 일치 바로 다음 · 보이지 않는 행을 끌어오지 않는다 · recent 값은 아는 종류 10개까지', async () => {
+test('v2.928 B4: 최근 연 장비는 완전 일치 바로 다음 · 보이지 않는 행을 끌어오지 않는다 · recent 값은 아는 종류 10개까지', async () => {
   const rows = [row('vm', { id: 'a', name: 'web-01' }), row('vm', { id: 'b', name: 'web-02' }), row('vm', { id: 'c', name: 'web' })];
   const r = Q.searchRows(rows, Q.parseQuery('web'), { recent: new Set(['vm|b']) });
   assert.deepEqual(r.groups[0].rows.map((x) => x.id), ['c', 'b', 'a'], '완전 일치(c) › 최근(b) › 나머지');
@@ -435,7 +435,7 @@ test('v2.927 B4: 최근 연 장비는 완전 일치 바로 다음 · 보이지 �
   assert.equal(via.body.groups[0].rows[0].via, 'recent');
 });
 
-test('v2.927 D1: 느린 색인 생성 로그는 10분에 한 번 · 실측은 전체 범위 관리자 응답에만', async () => {
+test('v2.928 D1: 느린 색인 생성 로그는 10분에 한 번 · 실측은 전체 범위 관리자 응답에만', async () => {
   IDX._resetSlowLogForTest();
   const logs = [];
   const b = { buildMs: IDX.SLOW_BUILD_MS + 1, rows: [1, 2], yields: 3, stepMs: { ip: 900, snapshot: 400 } };

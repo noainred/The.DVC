@@ -202,7 +202,7 @@ body {
 .hdr-palette .inv-k-netswitch { background: rgba(251,146,60,.18); color: #fdba74; border-color: transparent; }
 .hdr-palette .inv-k-pdu { background: rgba(236,72,153,.18); color: #f9a8d4; border-color: transparent; }
 .hdr-palette .inv-k-datastore, .hdr-palette .inv-k-ip { background: rgba(139,155,180,.16); color: #c3cee0; }
-/* v2.927: 이름에 없는데 왜 나왔는지(태그 · 메모 · 최근) 표지 · 스크린리더 전용 상태 줄 */
+/* v2.928: 이름에 없는데 왜 나왔는지(태그 · 메모 · 최근) 표지 · 스크린리더 전용 상태 줄 */
 .hdr-palette .inv-via { flex: 0 0 auto; min-width: 0; max-width: 260px; font-size: 10.5px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hdr-palette .inv-via.via-tag { border-color: rgba(52,224,180,.45); color: #99f6e4; }
 .hdr-palette .inv-via.via-notes { border-color: rgba(245,158,11,.45); color: #fde68a; }

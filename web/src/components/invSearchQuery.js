@@ -155,7 +155,7 @@ export function pushRecent(item, storage = globalThis.localStorage, now = Date.n
   const plan = normPlan(item?.plan);
   if (!plan) return readRecent(storage, key);
   const entry = { kind: String(item.kind || ''), name: String(item.name || '').slice(0, 120), corp: String(item.corp || '').slice(0, 80), plan, at: now };
-  // v2.927(B4): 행 id — 서버가 '최근 연 장비' 가산점을 줄 때만 쓴다(그 검색에서 이미 보이는 행 안에서). 없으면 싣지 않는다.
+  // v2.928(B4): 행 id — 서버가 '최근 연 장비' 가산점을 줄 때만 쓴다(그 검색에서 이미 보이는 행 안에서). 없으면 싣지 않는다.
   const id = typeof item.id === 'string' ? item.id.slice(0, RECENT_ID_MAX) : '';
   if (id) entry.id = id;
   const sig = (x) => `${x.plan.hash}|${x.plan.handoffs.map((h) => h.join('|')).join('|')}`;
@@ -165,7 +165,7 @@ export function pushRecent(item, storage = globalThis.localStorage, now = Date.n
 }
 
 /**
- * v2.927(B4): 최근 연 장비 → 검색 요청의 `recent=종류|id,…`(서버 `parseRecent` 와 같은 모양 · 10개).
+ * v2.928(B4): 최근 연 장비 → 검색 요청의 `recent=종류|id,…`(서버 `parseRecent` 와 같은 모양 · 10개).
  * id 에 구분자(',')가 든 항목은 뺀다 — 서버가 나눠 읽다 다른 값이 되지 않게. 이 값은 순서 가산점에만 쓰인다.
  */
 export function recentIdsParam(recent) {

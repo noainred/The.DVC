@@ -39,7 +39,7 @@ import { localSnapshots as pduLocal } from '../pdu/poller.js';
 import { edgePduSnapshots } from '../central/pduEdge.js';
 import { listDatacenters } from '../datacenter/store.js';
 import { KIND_KEYS, normSerial } from './inventoryQuery.js';
-import { vmRefOf, vmTagsOf } from '../tags/analyze.js'; // v2.927 B3: VM 태그 · 사용자 지정 속성(스냅샷 vc.tagInv — vCenter 왕복 0)
+import { vmRefOf, vmTagsOf } from '../tags/analyze.js'; // v2.928 B3: VM 태그 · 사용자 지정 속성(스냅샷 vc.tagInv — vCenter 왕복 0)
 import { createYielder } from '../util/timeSlice.js';
 
 export const INDEX_TTL_MS = 30_000;    // 시리얼 색인과 같은 수명(env 로 열지 않는다 — TIM2605-04)
@@ -91,7 +91,7 @@ export function mkRow(kind, f) {
   row._nAddr = addrs.some((a) => row._n.includes(a));
   row._aAddr = addrs.some((a) => row._a.includes(a));
   row._mAddr = addrs.some((a) => row._m.includes(a));
-  // v2.927(B3): VM 메모 · 태그 — 응답에는 싣지 않고 찾는 칸으로만 쓴다(메모는 길 수 있다). 태그는 그 도구 권한이 있는 계정만 찾는다(inventoryAccess.tagsSearchable).
+  // v2.928(B3): VM 메모 · 태그 — 응답에는 싣지 않고 찾는 칸으로만 쓴다(메모는 길 수 있다). 태그는 그 도구 권한이 있는 계정만 찾는다(inventoryAccess.tagsSearchable).
   if (f.notes) row._notes = String(f.notes).slice(0, NOTES_MAX).toLowerCase();
   if (Array.isArray(f.tags) && f.tags.length) { row.tags = f.tags.slice(0, TAGS_MAX).map((t) => str(t)); row._tags = row.tags.join('\n').toLowerCase(); }
   return row;
@@ -388,7 +388,7 @@ export async function buildInventoryIndex() {
   const dcNames = new Map(dcList.map((d) => [String(d.id), String(d.name || d.id)]));
   const dcName = (id) => (id ? dcNames.get(String(id)) || '' : '');
 
-  // v2.927(D1): 출처별 소요(ms)를 함께 적는다 — 운영 규모(VM 5,850 · IP 1만+)에서 어느 출처가 무거운지 실측하려고(관리자 응답 · 느린 생성 로그).
+  // v2.928(D1): 출처별 소요(ms)를 함께 적는다 — 운영 규모(VM 5,850 · IP 1만+)에서 어느 출처가 무거운지 실측하려고(관리자 응답 · 느린 생성 로그).
   const steps = [
     ['snapshot', () => fromSnapshot(snap, vcName, ctx)],
     ['server', () => fromServers(snap, dcName, vcName, ctx)],
@@ -408,7 +408,7 @@ export async function buildInventoryIndex() {
 }
 
 /**
- * v2.927(D1): 느린 색인 생성은 콘솔에 남긴다(10분에 한 번 — 30초마다 다시 만들어도 로그를 덮지 않게). 기준 SLOW_BUILD_MS.
+ * v2.928(D1): 느린 색인 생성은 콘솔에 남긴다(10분에 한 번 — 30초마다 다시 만들어도 로그를 덮지 않게). 기준 SLOW_BUILD_MS.
  * 벽시계 시간이고 양보(createYielder) 사이 다른 일이 끼어든 시간도 들어간다 — 그래서 양보 횟수를 함께 적는다.
  */
 export const SLOW_BUILD_MS = 1500;
