@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { CONF, RANGES, SPLITS, bytesText, rwText, attribKpis, storageBars, sortRows, filterRows, rowTotalText, attribStateText, ipfRows, licenseRows, flowSumText } from './sanHostAttribText.js';
+import { CONF, RANGES, SPLITS, bytesText, rwText, attribKpis, storageBars, sortRows, filterRows, rowTotalText, attribStateText, ipfRows, licenseRows, flowSumParts } from './sanHostAttribText.js';
 import { PERF_TABLE_PAGE, limitRows } from './sanSwitchPerfText.js';
 import { agoText } from './relTime.js';
 
@@ -129,14 +129,14 @@ export default function SanHostAttrib({ datacenterIds = [], datacenters = [], dc
                   <tr key={`${r.hostId}|${r.storageId}`}>
                     <td><a href={`#/hosts/${encodeURIComponent(r.hostId)}`} title="호스트 상세 열기"><b>{r.hostName}</b></a><div className="muted" style={{ fontSize: 11 }}>{r.vcenterName}</div></td>
                     <td>{r.datacenterName}</td>
-                    <td>{r.storageName}{r.registered ? <span className="badge blue" style={{ marginLeft: 4, fontSize: 10 }}>등록</span> : <span className="muted" style={{ fontSize: 11 }}> · {r.kind === 'array' ? '미등록' : '어레이 미확인'}</span>}</td>
+                    <td>{r.storageName}{r.registered ? <span className="badge blue" style={{ marginLeft: 4, fontSize: 10 }}>등록</span> : <div className="muted" style={{ fontSize: 11 }}>{r.kind === 'array' ? '미등록' : '어레이 미확인'}</div>}</td>
                     <td>{confBadge(r.conf)}</td>
                     <td style={{ textAlign: 'right' }}>{r.confirmedBytes != null ? bytesText(r.confirmedBytes) : '—'}</td>
                     <td style={{ textAlign: 'right' }}>{r.measuredBytes != null ? bytesText(r.measuredBytes) : '—'}</td>
                     <td style={{ textAlign: 'right' }}>{r.estimatedBytes != null ? `≈ ${bytesText(r.estimatedBytes)}` : '—'}</td>
                     <td style={{ textAlign: 'right' }} className="muted" title="확정분 + 실측 비율분 + 추정분 — 정렬·비교용 참고값이며 확정값이 아닙니다">{rowTotalText(r)}</td>
                     <td style={{ textAlign: 'right' }}>{rwText(r.nowRead, r.nowWrite)}</td>
-                    <td style={{ textAlign: 'right' }} className={r.flow ? '' : 'muted'} title={r.flow ? `플로우 ${r.flow.n}개 중 속도를 읽은 것 ${r.flow.measured}개의 합` : ''}>{flowSumText(r.flow)}</td>
+                    <td style={{ textAlign: 'right' }} className={r.flow ? '' : 'muted'} title={r.flow ? `플로우 ${r.flow.n}개 중 속도를 읽은 것 ${r.flow.measured}개의 합${r.flow.stale ? ` · 오래됨(최근에 못 읽음) ${r.flow.stale}개는 합에 넣지 않았습니다` : ''}` : ''}>{(() => { const [a, b] = flowSumParts(r.flow); return <>{a}{b ? <div className="muted" style={{ fontSize: 11 }}>{b}</div> : null}</>; })()}</td>
                     <td className="muted" style={{ fontSize: 11 }}>{CONF.confirmed.glyph}{r.ports?.confirmed ?? 0}{r.ports?.measured ? ` 실측${r.ports.measured}` : ''} {CONF.estimated.glyph}{r.ports?.estimated ?? 0}{r.ports?.unsplit ? ` —${r.ports.unsplit}` : ''}{r.ports?.unmeasured ? ` 측정없음${r.ports.unmeasured}` : ''}</td>
                   </tr>
                 ))}

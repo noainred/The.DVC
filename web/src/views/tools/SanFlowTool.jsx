@@ -225,19 +225,13 @@ export default function SanFlowTool() {
         )}
         <div className="table-wrap">
           <STable minWidth={1080}>
-            <thead><tr><th>플로우</th><th>상태</th><th>지금 Rx / Tx</th><th>ESXi 실측 대비</th><th>호스트 · HBA</th><th>SID → DID</th><th>스토리지</th><th>누적 바이트</th><th>스위치</th><th data-nosort>동작</th></tr></thead>
+            <thead><tr><th>플로우</th><th>상태</th><th data-nosort>동작</th><th>지금 Rx / Tx</th><th>ESXi 실측 대비</th><th>호스트 · HBA</th><th>SID → DID</th><th>스토리지</th><th>누적 바이트</th><th>스위치</th></tr></thead>
             <tbody>
               {flows.map((f) => (
                 <tr key={f.key}>
                   <td className="mono" style={{ fontSize: 12 }}>{f.name}</td>
                   <td data-sort={f.state.label} title={[f.state.note, f.lastError, f.rawSample ? `장비 출력 앞부분:\n${f.rawSample}` : ''].filter(Boolean).join(' — ') || undefined}><span className={`badge ${f.state.tone}`}>{f.state.label}</span>{f.lastError ? <div className="muted" style={{ fontSize: 11, maxWidth: 220, overflowWrap: 'anywhere' }}>{f.lastError}</div> : null}</td>
-                  <td data-sort={f.rateSort} className="tabular">{f.rate}</td>
-                  <td data-sort={f.diffSort ?? undefined} className="tabular" title={`ESXi 경로 실측 ${f.esxi}`} style={f.diffWarn ? { color: 'var(--amber, #fbbf24)' } : undefined}>{f.diff}{f.diffWarn ? ' △' : ''}</td>
-                  <td>{f.host}</td>
-                  <td className="mono muted" style={{ fontSize: 11 }} title={f.pairTitle}>{f.pair}</td>
-                  <td>{f.target}</td>
-                  <td data-sort={f.bytesSort} className="tabular">{f.bytes}</td>
-                  <td className="muted">{f.sw}</td>
+                  {/* 동작은 상태 바로 뒤 — 표가 넓어(1440px 에서도 가로 스크롤) 맨 끝에 두면 버튼이 처음 화면 밖에 있었다(v2.940 Chromium 판독) */}
                   <td>
                     {f.canDelete || f.canForget || f.canDeactivate || f.canActivate || f.toggleLocked ? (
                       <div className="flex wrap" style={{ gap: 6 }}>
@@ -249,6 +243,13 @@ export default function SanFlowTool() {
                       </div>
                     ) : <span className="muted">—</span>}
                   </td>
+                  <td data-sort={f.rateSort} className="tabular">{f.rate}</td>
+                  <td data-sort={f.diffSort ?? undefined} className="tabular" title={`ESXi 경로 실측 ${f.esxi}`} style={f.diffWarn ? { color: 'var(--amber, #fbbf24)' } : undefined}>{f.diff}{f.diffWarn ? ' △' : ''}</td>
+                  <td>{f.host}</td>
+                  <td className="mono muted" style={{ fontSize: 11 }} title={f.pairTitle}>{f.pair}</td>
+                  <td>{f.target}</td>
+                  <td data-sort={f.bytesSort} className="tabular">{f.bytes}</td>
+                  <td className="muted">{f.sw}</td>
                 </tr>
               ))}
             </tbody>
