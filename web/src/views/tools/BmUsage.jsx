@@ -281,18 +281,25 @@ export function BmUsage() {
     finally { setDistSaving(false); }
   }
 
-  /** v2.927 중앙에서 켜기/해제 — 엣지는 다음 인출에 받는다(응답 문구가 그 사실을 말한다). 실패하면 서버 사유(409 충돌 등)를 그대로 보인다. */
-  async function saveEdgeOn(agent, on) {
+  /**
+   * v2.927 중앙에서 켜기 · 다시 확인 · 해제 — 엣지는 다음 인출에 받는다(응답 문구가 그 사실을 말한다). 실패하면 서버 사유(409 충돌 등)를 그대로 보인다.
+   *   켤 때는 확인 상자에 보인 법인 목록(corps)을 함께 보낸다 — 서버가 지금 매핑과 다르면 409 corps-changed(관리자가 본 목록 = 저장 목록).
+   */
+  async function saveEdgeOn(agent, on, { corps = null, reconfirm = false } = {}) {
     setEdgeOnSaving(agent);
     try {
-      const r = await putJson('/tools/bm-usage/distribute/edge', { agent, on });
+      const r = await putJson('/tools/bm-usage/distribute/edge', { agent, on, ...(on && Array.isArray(corps) ? { corps } : {}) });
       // ⚠ sendJson 은 400·409 를 던지지 않고 본문을 돌려준다 — 충돌(409)·형식(400)을 성공으로 그리지 않는다(배포 현황을 undefined 로 덮지 않게).
-      if (r?.ok === false) throw new Error(r.reason || '저장하지 못했습니다.');
+      if (r?.ok === false) {
+        // 법인 매핑이 바뀌었으면 화면을 새로 읽는다 — 확인 상자가 새 목록을 보이고 관리자가 다시 저장한다.
+        if (r.conflict === 'corps-changed') load();
+        throw new Error(r.reason || '저장하지 못했습니다.');
+      }
       setData((d) => (d ? { ...d, distribution: r.distribution } : d));
-      setMsg({ tone: 'ok', text: edgeOnSavedText(r) });
+      setMsg({ tone: 'ok', text: edgeOnSavedText(r, { reconfirm }) });
       setEdgeAsk(null);
     } catch (e) {
-      // 409(제외·전체 배포와 충돌)·403·404 사유는 확인 상자 안에도 남긴다 — 400 폭에서는 상단 메시지가 화면 밖이다.
+      // 409(제외·전체 배포·비엣지·매핑 바뀜)·400(법인 0)·403·404 사유는 확인 상자 안에도 남긴다 — 400 폭에서는 상단 메시지가 화면 밖이다.
       const text = e?.message || String(e);
       setMsg({ tone: 'bad', text });
       setEdgeAsk((a) => (a && a.agent === agent ? { ...a, err: text } : a));
@@ -316,33 +323,43 @@ export function BmUsage() {
   const udNote = usageDetailNote(detailForSel, { enabled: data?.enabled });
   const fsNote = firstSampleNote(data?.rows || []);
   const skNotes = skippedNotes(data?.skippedCounts || {}, data?.reasons || {});
-  /** v2.927 중앙에서 켜기 확인 상자 — 무엇이 바뀌는지(법인 · 주기·보존·경로·알림 값)를 저장 전에 말한다. 연 곳(엣지 보관분 표 · 엣지에 배포 표) 아래에 그린다. */
+  /** v2.927 중앙에서 켜기 확인 상자 — 무엇이 바뀌는지(법인 · 주기·보존·경로·알림 값 · 보존 정리)를 저장 전에 말한다. 연 곳(엣지 보관분 표 · 엣지에 배포 표) 아래에 그린다. */
   const edgeAskBox = () => {
     if (!edgeAsk) return null;
     const dr = findDistRow(data?.distribution, edgeAsk.agent);
     const vcName = (id) => (data?.vcenters || []).find((v) => String(v.id) === String(id))?.name || id;
-    const lines = edgeAsk.on ? edgeOnConfirmLines({ agent: edgeAsk.agent, distRow: dr, dist: data?.distribution, vcName }) : edgeOffConfirmLines(edgeAsk.agent);
+    const lines = edgeAsk.on
+      ? edgeOnConfirmLines({ agent: edgeAsk.agent, distRow: dr, dist: data?.distribution, vcName, reconfirm: !!edgeAsk.reconfirm })
+      : edgeOffConfirmLines(edgeAsk.agent, dr);
+    // 법인을 모르거나 0 이면 저장 버튼을 열지 않는다(조회 실패 상태로 저장 금지 — 서버도 400 no-corps).
+    const blocked = edgeAsk.on && !(Array.isArray(dr?.corps) && dr.corps.length);
     return (
-      <div className="card" role="dialog" aria-label={edgeAsk.on ? '중앙에서 켜기 확인' : '중앙 켜기 해제 확인'}
+      <div className="card" role="dialog" aria-label={edgeAsk.on ? (edgeAsk.reconfirm ? '중앙 켜기 다시 확인' : '중앙에서 켜기 확인') : '중앙 켜기 해제 확인'}
         style={{ marginTop: 10, borderLeft: `3px solid ${toneVar('warn')}`, minWidth: 0 }}>
         {lines.map((l, i) => (
           <p key={i} style={{ margin: i ? '6px 0 0' : 0, fontSize: 12, lineHeight: 1.6 }}><BoldText text={l} /></p>
         ))}
         {edgeAsk.err && <p style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.6, color: toneVar('bad') }}><BoldText text={`저장하지 못했습니다 — ${edgeAsk.err}`} /></p>}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-          <button className="btn btn-sm bmp-touch" disabled={!!edgeOnSaving} onClick={() => saveEdgeOn(edgeAsk.agent, edgeAsk.on)}>
-            {edgeOnSaving ? '저장 중…' : (edgeAsk.on ? '중앙에서 켜기 저장' : '중앙 켜기 해제')}
+          <button className="btn btn-sm bmp-touch" disabled={!!edgeOnSaving || blocked}
+            onClick={() => saveEdgeOn(edgeAsk.agent, edgeAsk.on, { corps: dr?.corps, reconfirm: !!edgeAsk.reconfirm })}>
+            {edgeOnSaving ? '저장 중…' : (edgeAsk.on ? (edgeAsk.reconfirm ? '이 법인으로 다시 저장' : '중앙에서 켜기 저장') : '중앙 켜기 해제')}
           </button>
           <button className="btn btn-sm bmp-touch" disabled={!!edgeOnSaving} onClick={() => setEdgeAsk(null)}>취소</button>
         </div>
       </div>
     );
   };
-  /** v2.927: 엣지 보관분 한 줄 — 보관분 상태 + 중앙에서 켜기 판단(배포 현황은 전체 범위 관리자 · 중앙에만 온다). */
+  /** 버튼 이름 — edgeOnView 의 actions 낱말. */
+  const EDGE_ACTION_LABEL = { on: '중앙에서 켜기', reconfirm: '다시 확인', off: '중앙 켜기 해제' };
+  /**
+   * v2.927: 엣지 보관분 한 줄 — 보관분 상태 + 중앙에서 켜기 판단(배포 현황은 전체 범위 관리자 · 중앙에만 온다).
+   *   중앙 켜기 지시 상태(ev.instr)는 보관분 상태를 **대체하지 않고 함께** 보인다(반증 F8 — 보관분 오래됨·실패가 가려지지 않게).
+   */
   const edgeRowView = (r) => {
     const ev = edgeOnView(r, findDistRow(data?.distribution, r.agent), { canManage: !!data?.distribution });
-    const es0 = edgePullState(r, { minEdgeVersion: edges?.minEdgeVersion, staleMs: edges?.staleMs, canEnableCentral: ev.action === 'on' });
-    return { es: ev.override || es0, ev };
+    const es = edgePullState(r, { minEdgeVersion: edges?.minEdgeVersion, staleMs: edges?.staleMs, canEnableCentral: ev.actions.includes('on'), offWhy: ev.offWhy });
+    return { es, ev };
   };
 
   return (
@@ -654,9 +671,12 @@ export function BmUsage() {
                             {r.reportedAgent && r.reportedAgent !== r.agent && (
                               <div style={{ fontSize: 11, color: toneVar('warn') }}>엣지 보고 이름 {r.reportedAgent}</div>
                             )}
-                            {ev.badge && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{ev.badge}</div>}
                           </td>
-                          <td data-sort={es.state}><span style={{ color: toneVar(es.tone) }}>{es.label}</span></td>
+                          <td data-sort={es.state}>
+                            <span style={{ color: toneVar(es.tone) }}>{es.label}</span>
+                            {/* v2.927: 중앙 켜기 지시 상태는 보관분 상태와 **함께**(대체하지 않는다 — 반증 F8). */}
+                            {ev.instr && <div style={{ fontSize: 11, color: toneVar(ev.instr.tone) }}>중앙 켜기 · {ev.instr.label}</div>}
+                          </td>
                           <td className="right" data-sort={(r.targets || []).length}>{r.snapAt ? (r.targets || []).length : '—'}</td>
                           <td data-sort={r.version || ''}>{r.version || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                           <td data-sort={r.snapAt || 0}>{r.snapAt ? ageText(r.snapAt) : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
@@ -667,12 +687,12 @@ export function BmUsage() {
                                 {pulling === r.agent ? '가져오는 중…' : '지금 가져오기'}
                               </button>
                               {/* v2.927 중앙에서 켜기 — 전체 범위 관리자 · 중앙에만(서버가 배포 현황을 줄 때만). 누르면 표 아래 확인 상자. */}
-                              {ev.action && (
-                                <button className="btn btn-sm bmp-touch" disabled={edgeOnSaving === r.agent}
-                                  onClick={() => setEdgeAsk({ agent: r.agent, on: ev.action === 'on', where: 'edges' })}>
-                                  {edgeOnSaving === r.agent ? '저장 중…' : (ev.action === 'on' ? '중앙에서 켜기' : '중앙 켜기 해제')}
+                              {ev.actions.map((a) => (
+                                <button key={a} className="btn btn-sm bmp-touch" disabled={edgeOnSaving === r.agent}
+                                  onClick={() => setEdgeAsk({ agent: r.agent, on: a !== 'off', reconfirm: a === 'reconfirm', where: 'edges' })}>
+                                  {edgeOnSaving === r.agent ? '저장 중…' : EDGE_ACTION_LABEL[a]}
                                 </button>
-                              )}
+                              ))}
                             </div>
                           </td>
                         </tr>
@@ -684,10 +704,11 @@ export function BmUsage() {
               {/* ⚠ 사유는 **행 아래 한 번씩** — 표 안에 긴 문장을 넣으면 셀이 세로로 길어진다(v2.509). */}
               {(edges.rows || []).map((r) => {
                 const { es, ev } = edgeRowView(r);
-                if (es.state === 'ok' && !ev.note) return null;
+                const parts = [es.state === 'ok' ? '' : es.why, ev.instr ? `중앙 켜기: ${ev.instr.why}` : '', ev.note].filter(Boolean);
+                if (!parts.length) return null;
                 return (
                   <p key={`why-${r.agent}`} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
-                    <BoldText text={`**${r.agent}** — ${es.state === 'ok' ? '' : es.why}${es.state !== 'ok' && ev.note ? ' ' : ''}${ev.note}`} />
+                    <BoldText text={`**${r.agent}** — ${parts.join(' ')}`} />
                   </p>
                 );
               })}
@@ -865,7 +886,7 @@ export function BmUsage() {
               {/* v2.927: 중앙 켜기(이 엣지만) 엣지 목록 — 전체 배포가 꺼져 있어도 이 엣지들은 중앙 값을 받는다. */}
               {(data.distribution.rows || []).some((r) => r.perEdge) && (
                 <p style={{ margin: '0 0 8px', fontSize: 12, lineHeight: 1.6 }}>
-                  <BoldText text={`**중앙 켜기(이 엣지만)**: ${data.distribution.rows.filter((r) => r.perEdge).map((r) => `${r.agent}(${r.mode === 'per-edge' ? distStateOf(r.state).label : distModeLabel(r.mode)})`).join(' · ')} — 켜기는 '엣지 보관분' 표의 버튼으로, 해제는 그 표나 아래 표의 해제 버튼으로 합니다.`} />
+                  <BoldText text={`**중앙 켜기(이 엣지만)**: ${data.distribution.rows.filter((r) => r.perEdge).map((r) => `${r.agent}(${r.mode === 'per-edge' ? distStateOf(r.state).label : distModeLabel(r.mode)})`).join(' · ')} — 켜기는 '엣지 보관분' 표의 버튼으로, 다시 확인 · 해제는 그 표나 아래 표의 버튼으로 합니다.`} />
                 </p>
               )}
               {(data.distribution.rows || []).length > 0 && (
@@ -878,9 +899,16 @@ export function BmUsage() {
                         <tr key={r.agent}>
                           <td>{r.agent}</td>
                           <td data-sort={r.mode || ''}>{distModeLabel(r.mode)}{r.perEdgeSuperseded ? ' (중앙 켜기 가려짐)' : ''}{r.conflict ? ' (제외와 충돌)' : ''}
+                            {r.perEdge && r.corpsChanged === true && r.mode === 'per-edge' && <div style={{ fontSize: 11, color: toneVar('warn') }}>법인 매핑이 바뀜 — 다시 확인 필요</div>}
                             {r.perEdge && (
-                              <div><button className="btn btn-sm bmp-touch" style={{ marginTop: 4 }} disabled={!!edgeOnSaving}
-                                onClick={() => setEdgeAsk({ agent: r.agent, on: false, where: 'dist' })}>중앙 켜기 해제</button></div>
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                                {r.corpsChanged === true && r.mode === 'per-edge' && (
+                                  <button className="btn btn-sm bmp-touch" disabled={!!edgeOnSaving}
+                                    onClick={() => setEdgeAsk({ agent: r.agent, on: true, reconfirm: true, where: 'dist' })}>다시 확인</button>
+                                )}
+                                <button className="btn btn-sm bmp-touch" disabled={!!edgeOnSaving}
+                                  onClick={() => setEdgeAsk({ agent: r.agent, on: false, where: 'dist' })}>중앙 켜기 해제</button>
+                              </div>
                             )}</td>
                           <td title={ds.why} style={{ color: toneVar(ds.tone) }}>{ds.label}</td>
                           <td data-sort={r.lastPullAt || 0}>{r.lastPullAt ? fmtAgo(r.lastPullAt) : '—'}

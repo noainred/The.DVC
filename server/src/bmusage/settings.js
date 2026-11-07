@@ -233,7 +233,7 @@ const CACHE_MS = 3_000;
 // v2.631(EDGE2631-01): 중앙에서는 이 파일이 **배포 원본**이다. 손상이면 기본값(꺼짐·빈 법인)으로 떨어지는데, 그 기본값을
 //   배포 라우트가 200 으로 내려보내면 전 엣지의 수집이 꺼진다 — 로드 오류를 기억해 /api/central/bmusage-config 가 503 으로 답한다.
 const _localErr = makeSettingsLoadError(FILE, { label: '베어메탈 사용률 설정', confirm: () => saveBmUsageSettings({}) });
-const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포', confirm: ({ by } = {}) => saveDistribution({}, by || '') });
+const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포(전체 배포 · 제외 · 중앙 켜기 — 기본값으로 확정하면 모두 비워집니다)', confirm: ({ by } = {}) => saveDistribution({}, by || '') });
 function readFile() {
   if (!fs.existsSync(FILE())) { _localErr.missing(); return {}; }
   try {
@@ -382,11 +382,14 @@ export function loadDistribution() {
   } catch (e) { _distErr.corrupt(e); if (fs.existsSync(DIST_FILE())) preserveCorrupt(DIST_FILE(), e.message); return normalizeDistribution({}); }
 }
 /*
- * v2.927 '중앙에서 켜기'(사용자 요청 "중앙에서 엣지를 켜는 기능 추가" · 선택: 엣지별 버튼) — `perEdge: { [agent소문자]: { on, at, by } }`.
+ * v2.927 '중앙에서 켜기'(사용자 요청 "중앙에서 엣지를 켜는 기능 추가" · 선택: 엣지별 버튼) — `perEdge: { [agent소문자]: { on, at, by, corps } }`.
  *   전체 배포(위 enabled)를 켜지 않고 **한 엣지만** 중앙이 켠다. 내려가는 값은 중앙 로컬 설정의 배포 키 **전부**이되 켜기 = true ·
- *   법인 = 그 엣지 법인(perEdgeSettings). ⚠ 엣지 코드는 바꾸지 않는다 — 2.627 이상 엣지의 applyCentralBmUsage 는 받은 본문을
- *   normalizeSettings 로 채워 배포 키 **전부**를 덮으므로(빠진 키는 기본값이 된다), 일부 키만 보내면 엣지의 주기·보존이 기본값으로 바뀐다.
- *   그래서 주기·보존·경로·알림도 중앙 값으로 바뀐다 — 화면 확인 문구가 그 사실을 말한다(해제하면 엣지 로컬 설정으로 돌아간다).
+ *   법인 = **저장 때 확정한 그 엣지 법인**(`corps` — 관리자가 확인 상자에서 본 목록). ⚠ 엣지 코드는 바꾸지 않는다 — 2.627 이상 엣지의
+ *   applyCentralBmUsage 는 받은 본문을 normalizeSettings 로 채워 배포 키 **전부**를 덮으므로(빠진 키는 기본값이 된다), 일부 키만 보내면
+ *   엣지의 주기·보존이 기본값으로 바뀐다. 그래서 주기·보존·경로·알림도 중앙 값으로 바뀐다 — 화면 확인 문구가 그 사실을 말한다.
+ * ⚠⚠ 법인은 **저장 때 확정**한다(반증 F2·F3): 인출 때 매핑을 다시 계산하면 점검중 · 비활성 · push 전 · fleet 만료 · 중앙 재기동 같은 순간 상태에
+ *   법인이 빠지고, 0 이면 엣지가 사본을 지워 수집이 꺼졌다. 저장 목록을 그대로 보내고, 지금 매핑과 다르면 화면이 '다시 확인' 을 받는다.
+ *   법인 없는 항목은 만들 수 없다(라우트가 400 no-corps) — 손으로 고친 파일의 빈 항목은 버리고 개수를 밝힌다(perEdgeOmitted).
  * ⚠⚠ 우선순위(조용한 우선순위 금지 — 결정과 근거, 테스트 `bmUsageEdgeOn2927.test.js`):
  *   ① 전체 배포 켜짐 + 제외 아님 → 전체 배포(v2.627 동작 그대로 — 기존 구성의 동작을 바꾸지 않는다). 그 엣지의 중앙 켜기는 **가려지고**
  *      상태 행이 `perEdgeSuperseded` 로 밝힌다. 이미 전체 배포를 받는 엣지에 새로 켜기를 저장하는 것은 409(`conflict:'all'`)로 막는다.
@@ -394,26 +397,40 @@ export function loadDistribution() {
  *   ③ 제외 · 꺼짐 → 엣지 로컬.
  *   · 제외와 중앙 켜기는 **같은 엣지에 동시에 둘 수 없다**(저장이 양방향 409 — '이 엣지는 로컬 설정' 과 '중앙이 켠다' 는 서로 반대 지시다).
  *     관리자가 하나를 먼저 풀게 한다. 파일을 손으로 고쳐 둘 다 생기면 **제외가 이긴다**(장비 부하를 더하지 않는 쪽 · 행 `conflict:true`).
+ * ⚠ 손상 파일의 '기본값으로 확정'(설정 파일 점검 — saveDistribution({}))은 전체 배포 · 제외 · 중앙 켜기를 **모두 비운다**(라벨이 말한다).
  */
-const PER_EDGE_MAX = 256;
+export const PER_EDGE_MAX = 256;       // 중앙 켜기 엣지 수 상한(넘는 저장은 400 too-many — 조용히 버리지 않는다)
+export const PER_EDGE_CORPS_MAX = 64;  // 한 엣지에 저장하는 법인 수 상한(법인 · vCenter · 엣지 1:1:1 이라 보통 1)
+const CORP_ID_MAX = 128;
+/** 법인 id 목록 정규화(순수) — 글자만 · 앞뒤 공백 제거 · 길이 상한 · 중복 제거 · 정렬. 상한을 넘으면 null(저장 거절의 근거). */
+export function normalizeCorpIds(list) {
+  if (!Array.isArray(list)) return [];
+  const set = new Set();
+  for (const v of list) { if (typeof v !== 'string') continue; const k = capStr(v.trim(), CORP_ID_MAX); if (k) set.add(k); }
+  return set.size > PER_EDGE_CORPS_MAX ? null : [...set].sort();
+}
+const sameIds = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]);
 export function normalizeDistribution(raw = {}) {
   // v2.628(SEC2628-03): 엣지 이름은 외부 값이다 — '__proto__'·'constructor' 가 프로토타입을 건드리거나 상속 속성으로
   //   '제외됨' 이 되지 않게 프로토타입 없는 객체에 담고, 조회는 자기 속성만(isExcluded) 본다.
   const excluded = Object.create(null);
   const src = raw && typeof raw.excluded === 'object' && raw.excluded ? raw.excluded : {};
   for (const [k, v] of Object.entries(src)) { const a = lowerAgent(k); if (a && v === true) excluded[a] = true; }
-  // v2.927: 중앙 켜기도 같은 규약(프로토타입 없는 객체 · 자기 속성만 · 이름 정규화 · 켠 것만 남긴다 · 개수 상한).
+  // v2.927: 중앙 켜기도 같은 규약(프로토타입 없는 객체 · 자기 속성만 · 이름 정규화 · 켠 것만 · 개수 상한). 법인 없는 항목은 버리고 센다.
   const perEdge = Object.create(null);
   const pe = raw && typeof raw.perEdge === 'object' && raw.perEdge && !Array.isArray(raw.perEdge) ? raw.perEdge : {};
-  let n = 0;
+  let omitted = 0;
   for (const [k, v] of Object.entries(pe)) {
-    if (n >= PER_EDGE_MAX) break;
     const a = lowerAgent(k);
     if (!a || !v || typeof v !== 'object' || v.on !== true || Object.hasOwn(perEdge, a)) continue;
-    perEdge[a] = { on: true, at: Number(v.at) > 0 ? Math.round(Number(v.at)) : 0, by: t(v.by).slice(0, 64) };
-    n += 1;
+    const corps = normalizeCorpIds(v.corps);
+    if (!corps || !corps.length || Object.keys(perEdge).length >= PER_EDGE_MAX) { omitted += 1; continue; }
+    perEdge[a] = { on: true, at: Number(v.at) > 0 ? Math.round(Number(v.at)) : 0, by: t(v.by).slice(0, 64), corps };
   }
-  return { enabled: raw?.enabled === true, excluded, perEdge, updatedAt: Number(raw?.updatedAt) > 0 ? Number(raw.updatedAt) : 0, updatedBy: t(raw?.updatedBy).slice(0, 64) };
+  const out = { enabled: raw?.enabled === true, excluded, perEdge, updatedAt: Number(raw?.updatedAt) > 0 ? Number(raw.updatedAt) : 0, updatedBy: t(raw?.updatedBy).slice(0, 64) };
+  // 버린 항목 수 — 파일에 쓰지 않는다(열거 안 됨). 배포 현황이 밝힌다.
+  Object.defineProperty(out, 'perEdgeOmitted', { value: omitted, enumerable: false });
+  return out;
 }
 function writeDistribution(next) {
   fs.mkdirSync(path.dirname(DIST_FILE()), { recursive: true });
@@ -434,6 +451,8 @@ export function saveDistribution(patch = {}, by = '') {
 
 const isExcluded = (d, a) => Object.hasOwn(d.excluded, a) && d.excluded[a] === true;
 const perEdgeOf = (d, a) => (d.perEdge && Object.hasOwn(d.perEdge, a) && d.perEdge[a]?.on === true ? d.perEdge[a] : null);
+/** v2.927: 이 이름(대소문자 무시)의 중앙 켜기 항목 — 없으면 null. 해제는 등록부와 무관하게 이것으로 찾는다(반증 F1). */
+export function perEdgeFor(agent, d = loadDistribution()) { return perEdgeOf(d, lowerAgent(agent)); }
 
 /**
  * v2.927: 제외 저장 패치가 중앙 켜기와 부딪히는 엣지(소문자 이름 목록). 비면 충돌 없음 — 라우트가 409 로 막는다.
@@ -453,14 +472,16 @@ export function perEdgeSuperseded(d = loadDistribution()) {
 }
 
 /**
- * v2.927: 한 엣지의 중앙 켜기 저장/해제. 이름 검증(등록부)은 라우트가 한다 — 여기는 정규화·충돌·원자적 쓰기.
- * @returns {{ok:true, changed:boolean, distribution:object} | {ok:false, conflict:'excluded'|'all'|'bad-name', reason:string}}
+ * v2.927: 한 엣지의 중앙 켜기 저장(법인 확정 · 다시 확인)/해제. 이름 검증(등록부)·역할·매핑은 라우트가 한다 — 여기는 정규화·충돌·원자적 쓰기.
+ * @param {{corps?:string[]}} [o] 켤 때 저장할 법인(관리자가 확인한 목록 — 비면 거절)
+ * @returns {{ok:true, changed:boolean, distribution:object} | {ok:false, conflict:'excluded'|'all', reason:string} | {ok:false, code:'bad-name'|'no-corps'|'too-many', reason:string}}
  */
-export function setPerEdge(agent, on, by = '') {
+export function setPerEdge(agent, on, by = '', { corps = null } = {}) {
   const a = lowerAgent(agent);
-  if (!a) return { ok: false, conflict: 'bad-name', reason: '엣지 이름이 필요합니다.' };
+  if (!a) return { ok: false, code: 'bad-name', reason: '엣지 이름이 필요합니다.' };
   const cur = loadDistribution();
-  const had = !!perEdgeOf(cur, a);
+  const prev = perEdgeOf(cur, a);
+  let ids = null;
   if (on === true) {
     if (isExcluded(cur, a)) {
       return { ok: false, conflict: 'excluded', reason: `이 엣지(${t(agent)})는 '엣지에 배포' 표에서 제외(자기 로컬 설정 사용)로 지정돼 있습니다 — 중앙 켜기와 반대 지시라 함께 둘 수 없습니다. 제외를 먼저 해제하세요.` };
@@ -468,21 +489,24 @@ export function setPerEdge(agent, on, by = '') {
     if (cur.enabled) {
       return { ok: false, conflict: 'all', reason: `이 엣지(${t(agent)})는 이미 전체 배포를 받고 있습니다 — 켜짐 · 법인은 전체 배포 원본(이 중앙의 수집 설정)이 정합니다. 중앙 켜기는 전체 배포가 꺼져 있을 때 한 엣지만 켜는 기능입니다.` };
     }
-    if (had) return { ok: true, changed: false, distribution: cur };
-    if (Object.keys(cur.perEdge).length >= PER_EDGE_MAX) return { ok: false, conflict: 'bad-name', reason: `중앙 켜기는 ${PER_EDGE_MAX}곳까지입니다.` };
-  } else if (!had) {
+    ids = normalizeCorpIds(corps);
+    if (ids === null) return { ok: false, code: 'too-many', reason: `한 엣지에 저장하는 법인은 ${PER_EDGE_CORPS_MAX}곳까지입니다.` };
+    if (!ids.length) return { ok: false, code: 'no-corps', reason: '이 엣지의 법인을 찾지 못해 켤 수 없습니다(켜도 수집 대상이 없습니다).' };
+    if (prev && sameIds(prev.corps, ids)) return { ok: true, changed: false, distribution: cur };
+    if (!prev && Object.keys(cur.perEdge).length >= PER_EDGE_MAX) return { ok: false, code: 'too-many', reason: `중앙 켜기는 ${PER_EDGE_MAX}곳까지입니다 — 쓰지 않는 엣지의 중앙 켜기를 먼저 해제하세요.` };
+  } else if (!prev) {
     return { ok: true, changed: false, distribution: cur };
   }
   // ⚠ 프로토타입 없는 사본에 쓴다 — 일반 객체에 '__proto__' 이름을 대입하면 프로토타입이 바뀌고 항목이 사라진다(이름은 외부 값).
   const perEdge = Object.assign(Object.create(null), cur.perEdge);
-  if (on === true) perEdge[a] = { on: true, at: Date.now(), by: t(by).slice(0, 64) };
+  if (on === true) perEdge[a] = { on: true, at: Date.now(), by: t(by).slice(0, 64), corps: ids };
   else delete perEdge[a];
   const next = writeDistribution(normalizeDistribution({ enabled: cur.enabled, excluded: cur.excluded, perEdge, updatedAt: Date.now(), updatedBy: by }));
   return { ok: true, changed: true, distribution: next };
 }
 
 /**
- * v2.927: 한 엣지에 '중앙에서 켜기' 로 내려줄 설정(순수). 중앙 로컬 설정의 배포 키 **전부** + 켜기 true + 법인 = 그 엣지 법인.
+ * v2.927: 한 엣지에 '중앙에서 켜기' 로 내려줄 설정(순수). 중앙 로컬 설정의 배포 키 **전부** + 켜기 true + 법인 = 저장한 그 엣지 법인.
  * ⚠ 일부 키만 보내지 말 것 — 구버전 엣지(2.627~)가 빠진 키를 기본값으로 채워 엣지 설정을 조용히 바꾼다(위 머리말).
  */
 export function perEdgeSettings(local, corpIds = []) {
@@ -495,13 +519,11 @@ export function perEdgeSettings(local, corpIds = []) {
 /**
  * 중앙이 한 엣지에 내려줄 값. 배포 원본은 **중앙의 로컬 설정**이다(중앙은 사본을 갖지 않는다).
  * v2.927: `mode` 를 더한다('all' | 'per-edge' | 'off' | 'excluded') — 구버전 엣지는 distribute·settings·sig·reason 만 읽으므로 무시한다.
+ *   중앙 켜기 판의 법인은 **저장 목록**이다 — 인출 때 매핑을 다시 계산하지 않는다(매핑이 순간적으로 비어도 엣지를 끄지 않는다).
  * @param {string} agent
- * @param {{verified?:boolean, edgeCorps?:(agent:string)=>{ready:boolean, ids:string[]}}} [o]
- *   verified — **개별 토큰으로 인증된 이름**인가(공유 토큰의 ?agent= 는 남의 이름을 댈 수 있다 — 중앙 켜기 설정을 내주지 않는다).
- *   edgeCorps — 그 엣지 법인 조회(bmusage/edgeCorps.js). 없으면 매핑을 모르는 것으로 본다(hold).
- * @returns 배포 본문 · 또는 `hold:true`(매핑 준비 전 — 라우트가 503 으로 답해 엣지가 사본을 유지한다)
+ * @param {{verified?:boolean}} [o] verified — **개별 토큰으로 인증된 이름**인가(공유 토큰의 ?agent= 는 남의 이름을 댈 수 있다 — 중앙 켜기 설정을 내주지 않는다).
  */
-export function distributeFor(agent, { verified = false, edgeCorps = null } = {}) {
+export function distributeFor(agent, { verified = false } = {}) {
   const d = loadDistribution();
   const a = lowerAgent(agent);
   const excluded = isExcluded(d, a);
@@ -512,11 +534,7 @@ export function distributeFor(agent, { verified = false, edgeCorps = null } = {}
   const pe = perEdgeOf(d, a);
   if (pe && !excluded) {
     if (verified !== true) return { distribute: false, mode: 'per-edge', reason: 'per-edge-unverified' };
-    const m = typeof edgeCorps === 'function' ? edgeCorps(agent) : null;
-    if (!m || m.ready !== true) return { distribute: false, mode: 'per-edge', reason: 'mapping-not-ready', hold: true };
-    const ids = Array.isArray(m.ids) ? m.ids : [];
-    if (!ids.length) return { distribute: false, mode: 'per-edge', reason: 'no-corps' };
-    const settings = perEdgeSettings(loadLocalBmUsageSettings(), ids);
+    const settings = perEdgeSettings(loadLocalBmUsageSettings(), pe.corps);
     return { distribute: true, mode: 'per-edge', settings, sig: settingsSig(settings) };
   }
   if (!d.enabled) return { distribute: false, mode: 'off', reason: 'off', ...(pe ? { conflict: true } : {}) };
@@ -563,9 +581,10 @@ export function recordBmUsagePull(agent, { appliedSig = '', version = '', reason
 /**
  * 화면용 — 알려진 엣지 이름(대소문자 무시)과 인출 기록을 합친다.
  * v2.927: 행마다 **그 엣지에 실제로 보낼 판의 서명**과 엣지가 알린 판을 비교한다 — 전역 서명 하나와 비교하면 중앙 켜기(법인이 엣지마다
- *   다르다) 행은 영원히 '대기' 다. 행에 `mode`('all'|'per-edge'|'excluded'|'off') · 중앙 켜기 기록 · 그 엣지 법인(`corps`)을 싣는다.
+ *   다르다) 행은 영원히 '대기' 다. 행에 `mode`('all'|'per-edge'|'excluded'|'off') · 중앙 켜기 기록(저장 법인 `savedCorps`) · 지금 매핑(`corps`) ·
+ *   둘이 다른가(`corpsChanged` — 화면이 '다시 확인' 을 받는다)를 싣는다.
  * @param {string[]} knownNames 등록부 이름
- * @param {{edgeCorps?:Function, tokenAgents?:Set<string>}} [o] edgeCorps — 엣지 법인 조회(bmusage/edgeCorps.js) · tokenAgents — 개별 토큰이 발급된 이름(소문자)
+ * @param {{edgeCorps?:(agent:string)=>string[], tokenAgents?:Set<string>}} [o] edgeCorps — 지금 매핑(bmusage/edgeCorps.js) · tokenAgents — 개별 토큰이 발급된 이름(소문자)
  */
 export function distributionStatus(knownNames = [], { edgeCorps = null, tokenAgents = null } = {}) {
   const d = loadDistribution();
@@ -573,7 +592,7 @@ export function distributionStatus(knownNames = [], { edgeCorps = null, tokenAge
   const cur = settingsSig(local);
   const names = new Map();
   for (const n of knownNames || []) { const k = lowerAgent(n); if (k && !names.has(k)) names.set(k, t(n)); }
-  // v2.927: 중앙 켜기가 저장된 이름은 등록부에서 빠졌어도 행으로 싣는다(켜 둔 지시가 화면에서 사라지지 않게 — 조용한 상태 금지).
+  // v2.927: 중앙 켜기가 저장된 이름은 등록부에서 빠졌어도 행으로 싣는다(켜 둔 지시가 화면에서 사라지지 않게 — 해제는 등록부와 무관하게 된다).
   for (const k of Object.keys(d.perEdge || {})) if (!names.has(k)) names.set(k, k);
   // v2.632(감사 A6-2632-03): 등록부에 없는 **미검증** 이름(공유 토큰이 ?agent= 로 댄 것)은 최근 것 UNKNOWN_UNVERIFIED_ROWS_MAX 개만
   //   행으로 싣고 나머지는 개수만 밝힌다 — 가짜 이름 512행이 배포 현황을 덮지 않게. 검증된 이름은 전부 싣는다.
@@ -586,45 +605,38 @@ export function distributionStatus(knownNames = [], { edgeCorps = null, tokenAge
   for (const [k, p] of unknownUnverified.slice(0, UNKNOWN_UNVERIFIED_ROWS_MAX)) names.set(k, p.agent || k);
   const unknownUnverifiedOmitted = Math.max(0, unknownUnverified.length - UNKNOWN_UNVERIFIED_ROWS_MAX);
   const corpsOf = typeof edgeCorps === 'function' ? edgeCorps : null;
-  let mappingReady = corpsOf ? true : null;
   const rows = [...names].map(([k, name]) => {
     const p = _pulls.get(k) || null;
     const excluded = isExcluded(d, k);
     const pe = perEdgeOf(d, k);
-    const m = corpsOf ? corpsOf(name) : null;
-    if (m && m.ready !== true) mappingReady = false;
-    const corps = m && Array.isArray(m.ids) ? m.ids : null;
+    const now = corpsOf ? normalizeCorpIds(corpsOf(name)) : null;
     let mode; let sig = ''; let state = '';
     if (d.enabled && !excluded) { mode = 'all'; sig = cur; }
-    else if (pe && !excluded) {
-      mode = 'per-edge';
-      if (!m || m.ready !== true) state = 'not-ready';
-      else if (!corps.length) state = 'no-corps';
-      else sig = settingsSig(perEdgeSettings(local, corps));
-    } else mode = excluded ? 'excluded' : 'off';
-    if (!state) {
-      // v2.927: 배포를 끄거나 제외 · 중앙 켜기 해제 직후에는 엣지가 아직 사본을 쥐고 있다(다음 인출에 지운다) — '꺼짐' 이라 단정하지 않는다.
-      if (mode === 'off' || mode === 'excluded') state = p?.deliveredSig ? 'releasing' : mode;
-      else if (!p) state = 'no-pull';
-      // v2.927: 중앙 켜기는 개별 토큰 인출에만 내준다 — 마지막 인출이 공유 토큰(이름 미검증)이면 받지 못했다.
-      else if (mode === 'per-edge' && p.verified !== true) state = 'unverified';
-      else if (p.appliedSig && p.appliedSig === sig) state = 'applied';
-      // v2.628(R2628-05): 엣지는 받기 전 판을 알린다 — 마지막 응답이 지금 판을 보냈으면 '전달됨'(적용 확인은 다음 인출).
-      else if (p.deliveredSig && p.deliveredSig === sig) state = 'delivered';
-      else state = 'pending';
-    }
+    else if (pe && !excluded) { mode = 'per-edge'; sig = settingsSig(perEdgeSettings(local, pe.corps)); }
+    else mode = excluded ? 'excluded' : 'off';
+    // v2.927: 배포를 끄거나 제외 · 중앙 켜기 해제 직후에는 엣지가 아직 사본을 쥐고 있다(다음 인출에 지운다) — '꺼짐' 이라 단정하지 않는다.
+    if (mode === 'off' || mode === 'excluded') state = p?.deliveredSig ? 'releasing' : mode;
+    else if (!p) state = 'no-pull';
+    // v2.927: 중앙 켜기는 개별 토큰 인출에만 내준다 — 마지막 인출이 공유 토큰(이름 미검증)이면 받지 못했다.
+    else if (mode === 'per-edge' && p.verified !== true) state = 'unverified';
+    else if (p.appliedSig && p.appliedSig === sig) state = 'applied';
+    // v2.628(R2628-05): 엣지는 받기 전 판을 알린다 — 마지막 응답이 지금 판을 보냈으면 '전달됨'(적용 확인은 다음 인출).
+    else if (p.deliveredSig && p.deliveredSig === sig) state = 'delivered';
+    else state = 'pending';
     return {
       agent: name, excluded, lastPullAt: p?.at || 0, appliedSig: p?.appliedSig || '', state, verified: p ? p.verified === true : null,
       lapsedVerifiedAt: p?.lapsedVerifiedAt || null, pullReason: p?.reason || '',
-      mode, sig, corps,
-      perEdge: !!pe, perEdgeAt: pe?.at || 0, perEdgeBy: pe?.by || '',
+      mode, sig, corps: now,
+      perEdge: !!pe, perEdgeAt: pe?.at || 0, perEdgeBy: pe?.by || '', savedCorps: pe ? pe.corps : null,
+      // 지금 매핑이 저장 목록과 다르다(지금 매핑을 모르면 null) — 인출은 저장 목록 그대로 · 화면이 '다시 확인' 을 받는다.
+      corpsChanged: pe && now ? !sameIds(pe.corps, now) : (pe ? null : false),
       perEdgeSuperseded: !!pe && mode === 'all', conflict: !!pe && excluded,
       tokenIssued: tokenAgents instanceof Set ? tokenAgents.has(k) : null,
     };
   }).sort((a, b) => a.agent.localeCompare(b.agent));
   // 중앙 켜기로 내려갈 값(법인 제외) — 화면 확인 문구가 '무엇이 중앙 값으로 바뀌는지' 를 이 값으로 말한다(숫자를 화면에 박지 않는다).
   const { corps: _c, ...perEdgeBase } = perEdgeSettings(local, []);
-  return { ...d, sig: cur, keys: [...DISTRIBUTED_KEYS], rows, since: _startedAt, unknownUnverifiedOmitted, pullsOmitted: _pullsOmitted, perEdgeBase, mappingReady };
+  return { ...d, sig: cur, keys: [...DISTRIBUTED_KEYS], rows, since: _startedAt, unknownUnverifiedOmitted, pullsOmitted: _pullsOmitted, perEdgeBase, perEdgeOmitted: d.perEdgeOmitted || 0, perEdgeMax: PER_EDGE_MAX };
 }
 
 /*

@@ -262,18 +262,40 @@ export function siteAgentByVcenter(vcenters = []) {
 }
 
 /**
+ * v2.927 '중앙에서 켜기' — vCenter id → 담당 엣지 이름(원형 · 중앙 직접·모름이면 '')(순수).
+ *   우선순위(반증 F2 — 순간 상태에 흔들리지 않게 · 선례 vmclone/dispatch.js execTargetOf · ipam/scanDatacenter.js):
+ *   ① 등록부 `collectMode:'site'` 의 `remoteAgent`(관리자가 선언한 담당 엣지 — 디스크) → ② 위임 인벤토리 소유(`listInventory().agent` — 디스크)
+ *   → ③ 스냅샷 관측(siteAgentByVcenter — collectedBy). 점검중·비활성·push 전·기동 직후 골격이면 ③ 이 비지만 ①·② 는 남는다.
+ *   등록부에 `direct` 로 있는 vCenter 는 '' 다(등록부가 이긴다). 비활성 vCenter 도 담당 선언은 그대로 센다(엣지의 법인 축은 남아 있다).
+ */
+export function siteOwnerByVcenter({ registry = [], inventory = [], vcenters = [] } = {}) {
+  const observed = siteAgentByVcenter(vcenters);
+  const invOwner = new Map();
+  for (const e of inventory || []) if (e && typeof e === 'object' && e.vcenterId != null) invOwner.set(t(e.vcenterId), t(e.agent));
+  const out = new Map();
+  for (const r of registry || []) {
+    if (!r || typeof r !== 'object') continue;
+    const id = t(r.id);
+    if (!id) continue;
+    out.set(id, t(r.collectMode) === 'site' ? (t(r.remoteAgent) || invOwner.get(id) || observed.get(id) || '') : '');
+  }
+  for (const [id, a] of observed) if (id && !out.has(id)) out.set(id, a || invOwner.get(id) || '');
+  return out;
+}
+
+/**
  * v2.927 '중앙에서 켜기' — 엣지 이름(소문자) → 그 엣지 법인(vCenter id) 집합(순수).
- *  ① 사이트 위임 vCenter 를 그 엣지가 수집한다(siteAgentByVcenter — 법인 · vCenter · 엣지 1:1:1 의 기본 경우).
+ *  ① 담당 엣지가 그 엣지인 사이트 vCenter(siteOwnerByVcenter — 법인 · vCenter · 엣지 1:1:1 의 기본 경우).
  *  ② 그 엣지가 보고한 베어메탈(`remoteAgent` = 그 엣지)의 vcenterId — vCenter 는 중앙이 직접 수집하고 iDRAC 만 엣지에 맡긴 법인.
- *     ⚠ 엣지가 보낸 값이다(엣지 정제 규약): **중앙 vCenter 목록에 있는 id 만** 쓰고, 다른 엣지가 수집하는 사이트 vCenter 는
- *     그 엣지의 법인이라 넣지 않는다(엣지 보고만으로 남의 법인을 자기 법인으로 만들지 못하게).
- * 결과는 엣지에 내려갈 `corps` 의 근거다 — 엣지는 자기 대상만 이 표로 거른다(resolveTargets `corps[vc]`).
- * @param {{vcenters?:Array, bareMetal?:Array}} p  bareMetal 은 `{remoteAgent, vcenterId}` 를 가진 행(엣지 보고 베어메탈)
+ *     ⚠ 엣지가 보낸 값이다(엣지 정제 규약): **중앙이 아는 vCenter id 만** 쓰고, 다른 엣지가 담당하는 사이트 vCenter 는 넣지 않는다.
+ *     ⚠ 정직 기록(반증 F3): fleet 수신은 **모르는 이름**의 공유 토큰 push 귀속만 비운다 — 아는 이름을 댄 공유 토큰 push 는 이 ② 를 바꿀 수 있다.
+ *     그래서 이 결과는 **저장 때 한 번** 쓰고(확인 상자가 법인 이름을 보여 주고 관리자가 확인한 목록을 저장), 인출은 저장 목록을 그대로 보낸다.
+ * @param {{registry?:Array, inventory?:Array, vcenters?:Array, bareMetal?:Array}} p  bareMetal 은 `{remoteAgent, vcenterId}` 행(엣지 보고 베어메탈)
  * @returns {Map<string, Set<string>>}
  */
-export function edgeCorpIndex({ vcenters = [], bareMetal = [] } = {}) {
-  const site = siteAgentByVcenter(vcenters);
-  const known = new Set((vcenters || []).map((v) => (v && typeof v === 'object' ? t(v.id) : '')).filter(Boolean));
+export function edgeCorpIndex({ registry = [], inventory = [], vcenters = [], bareMetal = [] } = {}) {
+  const owners = siteOwnerByVcenter({ registry, inventory, vcenters });
+  const known = new Set([...owners.keys(), ...(vcenters || []).map((v) => (v && typeof v === 'object' ? t(v.id) : '')).filter(Boolean)]);
   const idx = new Map();
   const add = (agent, id) => {
     const k = norm(agent);
@@ -281,22 +303,22 @@ export function edgeCorpIndex({ vcenters = [], bareMetal = [] } = {}) {
     if (!idx.has(k)) idx.set(k, new Set());
     idx.get(k).add(id);
   };
-  for (const [vc, a] of site) add(a, vc);
+  for (const [vc, a] of owners) add(a, vc);
   for (const b of bareMetal || []) {
     if (!b || typeof b !== 'object') continue;
     const a = typeof b.remoteAgent === 'string' ? norm(b.remoteAgent) : '';
     const vc = typeof b.vcenterId === 'string' ? t(b.vcenterId) : '';
     if (!a || !vc || !known.has(vc)) continue;
-    const owner = norm(site.get(vc) || '');
+    const owner = norm(owners.get(vc) || '');
     if (owner && owner !== a) continue;
     add(a, vc);
   }
   return idx;
 }
 
-/** 한 엣지의 법인 id 목록(정렬 · 대소문자 무시). */
-export function edgeCorpIds({ vcenters = [], bareMetal = [], agent = '' } = {}, idx = null) {
-  const set = (idx || edgeCorpIndex({ vcenters, bareMetal })).get(norm(agent));
+/** 한 엣지의 법인 id 목록(정렬 · 대소문자 무시). idx 를 주면 그것으로(한 요청 안에서 한 번만 만든다). */
+export function edgeCorpIds(input = {}, idx = null) {
+  const set = (idx || edgeCorpIndex(input)).get(norm(input?.agent));
   return set ? [...set].sort() : [];
 }
 

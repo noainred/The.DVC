@@ -1770,16 +1770,11 @@ centralRouter.get('/bmusage-config', requireCentral(), async (req, res) => {
   }
   if (settingsUnreadable(res, bmUsageSettingsLoadError, '베어메탈 사용률')) return;
   // v2.927 '중앙에서 켜기': 한 엣지만 켜는 판은 **개별 토큰으로 검증된 이름**에만 내준다(공유 토큰의 ?agent= 는 남의 이름을 댈 수 있다 —
-  //   켜진 설정·그 엣지 법인 목록을 받아 가지 못하게). 법인 매핑은 그 엣지 법인으로만 만든다(bmusage/edgeCorps.js).
+  //   켜진 설정·그 엣지 법인 목록을 받아 가지 못하게). 법인은 **저장 때 확정한 목록**을 그대로 보낸다(인출 때 매핑을 다시 계산하지 않는다 —
+  //   점검중·push 전·fleet 만료·중앙 재기동 같은 순간 상태가 엣지 수집을 끄지 않게. 반증 F2).
   const verified = req.centralAuth?.mode === 'agent';
-  const { edgeCorpsSource } = await import('../bmusage/edgeCorps.js');
-  const out = distributeFor(agent, { verified, edgeCorps: edgeCorpsSource() });
+  const out = distributeFor(agent, { verified });
   recordBmUsagePull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), reason: out.distribute ? '' : out.reason, verified, deliveredSig: out.distribute ? String(out.sig || '') : '' });
-  if (out.hold) {
-    // 중앙 기동 직후 첫 병합 전 — 법인을 아직 모른다. distribute:false 로 답하면 켜 둔 엣지가 사본을 지운다(깜빡임) → 503(엣지는 사본 유지 · 시한은 edgeCorps.js).
-    persistent503(res).json({ ok: false, reason: 'mappingNotReady', detail: '중앙이 기동 직후라 이 엣지의 법인 매핑을 아직 모릅니다 — 엣지는 직전 설정을 유지하고 다음 인출에 다시 받습니다.' });
-    return;
-  }
   res.set('Cache-Control', 'no-store');
   res.json({ ok: true, ...out });
 });

@@ -149,6 +149,15 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
 }
 
 export function getEdgeBmUsage(agent) { return _store.get(t(agent).toLowerCase()) || null; }
+/**
+ * v2.927(반증 F7): 보관분이 말한 그 노드의 역할 — 'edge'(CENTRAL_URL 이 있다 = 배포 인출 워커가 돈다) · 'central'(중앙·단독 — 배포를 받지 않는다)
+ *   · 'unknown'(보관분 없음 · 역할 없음). '중앙에서 켜기' 는 'edge' 에만 제공한다(화면 버튼과 PUT 이 이 함수 하나로 판정한다).
+ *   값은 엣지 export(bmusage/edgePull.js node.role)를 중앙 정제(sanitizeBmUsageSnap)가 16자로 자른 글자다.
+ */
+export function edgeRoleOf(rec) {
+  const r = String(rec?.snap?.node?.role || '').trim().toLowerCase();
+  return r === 'edge' ? 'edge' : (r === 'central' ? 'central' : 'unknown');
+}
 export function listEdgeBmUsage() { return [..._store.values()]; }
 export function _resetForTest() { _store.clear(); }
 

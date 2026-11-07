@@ -969,28 +969,45 @@
     · ⚠ 정직 기록: 목 스택 2대(중앙+엣지 `Edge-Seoul`)로 꺼짐 → 켬(적용·폴러 주기 600초로 재무장) → 제외(로컬 복귀)를 실제로 돌렸다.
       실엣지 28곳 규모·구버전 엣지 혼재·인증 켠 상태의 viewer 화면은 보지 못했다(배포 절은 서버가 admin 이 아니면 null 로 준다).
     viewer 는 기본 권한에 `tools` 가 없어 막히는 것이 정상이고, tools 를 준 범위 viewer 로 허용 법인 1곳만 보이는 것을 확인했다.
-  - ⚠⚠ **v2.927 — '중앙에서 켜기'(한 엣지만)**(사용자 요청 "중앙에서 엣지를 켜는 기능 추가" · 선택: 엣지별 버튼 · 전체 검증.
-    `bmusage/settings.js` perEdge 절 + `bmusage/edgeCorps.js` + `targets.js siteAgentByVcenter/edgeCorpIndex` + `PUT /tools/bm-usage/distribute/edge` +
-    웹 `bmUsageDistText.js edgeOnView·edgeOnConfirmLines`. 회귀 `server/test/bmUsageEdgeOn2927.test.js` · `web/.../bmUsageEdgeOn2927.test.js`):
-    · **엣지 코드는 바꾸지 않았다** — 2.627 이상 엣지가 그대로 받는다. 그래서 중앙은 그 엣지에 **배포 키 전부**(중앙 로컬 값)를 보내되 켜기 = true · 법인 = 그 엣지 법인만.
+  - ⚠⚠ **v2.927 — '중앙에서 켜기'(한 엣지만)**(사용자 요청 "중앙에서 엣지를 켜는 기능 추가" · 선택: 엣지별 버튼 · 전체 검증 · 반증 1회 반영.
+    `bmusage/settings.js` perEdge 절 + `bmusage/edgeCorps.js` + `targets.js siteOwnerByVcenter/edgeCorpIndex` + `PUT /tools/bm-usage/distribute/edge` +
+    `central/bmUsageEdgePull.js edgeRoleOf` + 웹 `bmUsageDistText.js edgeOnView·edgeOnConfirmLines`. 회귀 `server/test/bmUsageEdgeOn2927.test.js`(실제 토큰 인증 경로) ·
+    `web/.../bmUsageEdgeOn2927.test.js`):
+    · **엣지 코드는 바꾸지 않았다** — 2.627 이상 엣지가 그대로 받는다. 그래서 중앙은 그 엣지에 **배포 키 전부**(중앙 로컬 값)를 보내되 켜기 = true · 법인 = 저장한 그 엣지 법인.
       ⚠ 일부 키만 보내지 말 것: 엣지 `applyCentralBmUsage` 가 `normalizeSettings` 로 빠진 키를 **기본값**으로 채워 주기·보존을 조용히 바꾼다(테스트가 키 집합을 고정).
-      부작용(주기·보존·OS SSH·iDRAC·알림이 중앙 값으로 바뀜 · 해제하면 엣지 로컬로 복귀)은 확인 상자가 **값과 함께**(서버 `perEdgeBase`) 말한다.
+      부작용(주기·보존·OS SSH·iDRAC·알림이 중앙 값으로 바뀜 · 해제하면 엣지 로컬로 복귀 · **보존이 짧아지면 넘친 이력은 정리되고 해제해도 돌아오지 않음**)은
+      확인 상자가 **값과 함께**(서버 `perEdgeBase`) 말한다.
+    · ⚠⚠ **법인은 저장 때 확정한다**(반증 F2·F3): 관리자가 확인 상자에서 본 목록을 `perEdge[agent].corps` 로 저장하고(화면이 그 목록을 PUT 에 싣는다 — 지금 매핑과 다르면
+      409 `corps-changed`), 엣지 인출은 **저장 목록을 그대로** 보낸다. 예전(인출마다 매핑 재계산)에는 점검중·비활성 site vCenter · 인벤토리 push 전 · fleet TTL 만료 ·
+      중앙 재기동 같은 순간 상태에서 법인이 빠지고, 0 이면 `no-corps` 로 엣지가 사본을 지워 **수집이 꺼졌다**(반증 실측). 지금 매핑이 저장 목록과 다르면 행·배포 패널이
+      '법인 매핑이 바뀜 — 다시 확인 필요' 를 보이고, '다시 확인'(같은 PUT)이 갱신한다. 저장 때 매핑 0 이면 400 `no-corps` — 이미 켜진 엣지에 0 을 보내 끄는 경로는 없다.
+      그래서 v1 의 첫 병합 전 503 `mappingNotReady` 보류도 없앴다(인출이 매핑을 보지 않는다). 법인 없는 항목(손으로 고친 파일)은 버리고 `perEdgeOmitted` 로 센다.
+    · 저장 시점 매핑(`edgeCorpIndex`): 담당 엣지 = **등록부 `remoteAgent` → 위임 인벤토리 소유(`listInventory().agent`) → 스냅샷 관측 collectedBy**(선례 vmclone/dispatch.js
+      execTargetOf · ipam/scanDatacenter.js — 디스크 원천이 먼저라 점검중·골격에도 흔들리지 않는다) + 엣지 보고 베어메탈 vcenterId(중앙이 아는 id 만 · 다른 엣지 담당 사이트
+      vCenter 제외). 관측 규칙은 resolveTargets 와 같은 `siteAgentByVcenter`(소스 스윕이 한 곳을 고정).
+      ⚠ 정직 기록(반증 F3 정정): fleet 수신은 **모르는 이름**의 공유 토큰 push 귀속만 비운다 — 아는 이름(토큰·인벤토리 등)을 댄 공유 토큰 push 는 그 엣지의 베어메탈 귀속을
+      바꿀 수 있고(직접 수집 vCenter 는 TOFU), 그래서 **저장 시점 매핑은 공유 토큰 push 영향을 받을 수 있다** — 확인 상자가 법인 이름을 보여 주고 관리자가 확인한 목록만 저장한다.
     · 우선순위: ① 전체 배포 켬 + 제외 아님 → 전체 배포(v2.627 그대로 — 기존 구성 동작 불변) ② 중앙 켜기 ③ 제외·꺼짐. 조용한 우선순위 금지:
       이미 전체 배포를 받는 엣지에 새 켜기 저장 = 409 `all` · 제외 ↔ 중앙 켜기는 **양방향 409**(반대 지시 — 하나를 먼저 푼다) · 전체 배포를 켜서 가려진
-      중앙 켜기는 응답 `perEdgeSuperseded` · 행 `perEdgeSuperseded` · 요약 문구가 밝힌다. 손으로 둘 다 만든 파일은 **제외가 이긴다**(장비 부하를 더하지 않는 쪽 · 행 `conflict`).
+      중앙 켜기는 응답 `perEdgeSuperseded` · 행 · 요약 문구가 밝힌다(가려진 행의 해제 문구는 '전체 배포가 계속 적용됩니다' — 반증 F4). 손으로 둘 다 만든 파일은
+      **제외가 이긴다**(장비 부하를 더하지 않는 쪽 · 행 `conflict`).
     · 중앙 켜기 판은 **개별 토큰으로 검증된 인출에만** 준다(공유 토큰 `?agent=` 는 남의 이름을 댈 수 있다 → `per-edge-unverified` · 엣지는 사본을 지운다 · 화면 '받지 못함(공유 토큰)').
       저장 화면은 개별 토큰이 발급되지 않은 엣지를 미리 경고한다(`tokenIssued`).
-    · 법인 매핑은 `edgeCorpIndex` 하나: 사이트 vCenter(`collectedBy`) + 엣지 보고 베어메탈 vcenterId(**중앙 목록에 있는 id 만 · 다른 엣지 소유 사이트 vCenter 제외** —
-      fleet 수신이 이미 미검증 push 의 귀속을 비우고 남의 vCenter 귀속을 막는다). 사이트 규칙은 resolveTargets 와 같은 `siteAgentByVcenter`(소스 스윕이 한 곳을 고정).
-      매핑 0 → `no-corps`(내려보내지 않음). ⚠ 중앙 기동 직후 첫 병합 전(골격)에는 매핑을 모른다 → **503 `mappingNotReady`**(엣지 사본 유지 — '법인 0' 으로 답하면 재시작마다 꺼졌다 켜진다).
-      보류 시한 `MAPPING_HOLD_MAX_MS`(15분) 뒤에는 있는 값으로 판정한다.
-    · 배포 현황은 **행마다 그 엣지에 보낼 판의 서명**과 비교한다(전역 서명 하나와 비교하면 중앙 켜기 행은 영원히 '대기'). 해제·배포 끔 직후 아직 사본을 쥔 엣지는 `releasing`(해제 대기).
-    · 라우트 게이트는 전체 배포와 같다(adminOnly + fleetOnly) · 이름은 등록부(`knownAgentNames`)에 있는 것만(404) · 엣지 노드 409 `edge-node` · 감사 `bm-usage.distribute.edge`(target = 엣지).
-    · 화면: '엣지에서 꺼짐' 행에만 '중앙에서 켜기'(배포 현황을 받은 전체 범위 관리자 · 중앙) → 표 아래 확인 상자 → 저장 뒤 '켜기 지시됨 — 다음 인출 대기' → 전달됨 → 적용됨
-      (엣지 보관분은 다시 가져와야 켜짐으로 바뀐다 — 그때 원래 상태). 예전 문구 '중앙에서는 켤 수 없습니다' 는 v2.627 부터 사실이 아니었다 — 정정했다.
+    · **엣지 노드에만**(반증 F7): 보관분 `node.role`(엣지 export — CENTRAL_URL 이 있으면 'edge')을 `edgeRoleOf` 하나로 판정해 `/edges` 행 `nodeRole` 로 싣는다. 'edge' 가
+      아니면 버튼 대신 '이 노드는 엣지가 아닙니다 — 그 포탈의 베어메탈 사용률 설정에서 직접 켜세요'(모르면 '역할을 확인할 수 없어 중앙 켜기를 제공하지 않습니다') · PUT 도 409 `not-edge`.
+      중앙·단독 노드는 배포 인출 워커가 없어 저장해도 영원히 '켜기 지시됨' 이었다.
+    · 배포 현황은 **행마다 그 엣지에 보낼 판(저장 법인)의 서명**과 비교한다(전역 서명 하나와 비교하면 중앙 켜기 행은 영원히 '대기' — 매핑이 바뀌어도 서명은 그대로).
+      해제·배포 끔 직후 아직 사본을 쥔 엣지는 `releasing`(해제 대기).
+    · 라우트 게이트는 전체 배포와 같다(adminOnly + fleetOnly) · 켜기 이름은 등록부(`knownAgentNames`)에 있는 것만(404) · **해제는 저장된 지시가 있으면 등록부와 무관하게**
+      (반증 F1 — 토큰 폐기로 등록부에서 빠진 엣지의 지시가 지워지지 않고 재발급하면 바로 켜졌다) · 엣지 노드 409 `edge-node` · 상한 넘는 저장 400 `too-many`(엣지 256 · 엣지당 법인 64 —
+      조용히 버리지 않는다) · 감사 `bm-usage.distribute.edge`(target = 엣지 · 법인 수).
+    · 화면: '엣지에서 꺼짐' 행에만 '중앙에서 켜기'(배포 현황을 받은 전체 범위 관리자 · 중앙 · 엣지 노드) → 표 아래 확인 상자 → 저장 뒤 지시 상태 '켜기 지시됨 — 다음 인출 대기'
+      → 전달됨 → 적용됨을 **보관분 상태와 함께**(대체하지 않는다 — 반증 F8, 보관분 오래됨·실패가 보이게). 전체 배포가 끈 엣지는 '중앙의 전체 배포 설정이 끄고 있습니다'(반증 F5).
+      예전 문구 '중앙에서는 켤 수 없습니다' 는 v2.627 부터 사실이 아니었다 — 정정했다.
+    · 손상된 배포 파일의 '기본값으로 확정'(설정 파일 점검)은 전체 배포 · 제외 · 중앙 켜기를 **모두 비운다** — 라벨이 그 사실을 말한다.
     · ⚠ 정직 기록: 중앙+엣지 목 스택 2대(개별 토큰 · 엣지 `AGENT_BMUSAGE_CONFIG_PULL_MS=60000`)로 꺼짐 → 켜기(적용 · 엣지 유효 설정 켜짐 · 그 법인 · 주기 10분) → 해제(로컬 복귀)를
-      실제로 돌렸다. 실엣지 28곳 · 구버전(2.627~2.924) 엣지 실물 · 엣지 보고 베어메탈만으로 매핑되는 법인(vCenter 직접 수집 + iDRAC 위임)은 보지 못했다.
-      사용자 화면의 'OC2' 가 중앙 자신을 수집 서버로 등록한 것이라면 중앙은 배포 인출 워커를 돌리지 않으므로(CENTRAL_URL 없음) '인출 기록 없음' 에서 멈춘다(추정 — 확인 못 함).
+      실제로 돌렸다. 실엣지 28곳 · 구버전(2.627~2.924) 엣지 실물 · 엣지 보고 베어메탈만으로 매핑되는 법인(vCenter 직접 수집 + iDRAC 위임)은 실물로 보지 못했다(순수·라우터 테스트만).
+      사용자 화면의 'OC2' 가 엣지인지 중앙·단독 노드인지는 확인하지 못했다 — 이제 화면이 보관분의 노드 역할로 판정해 버튼을 주거나 막는다.
 - ⚠⚠ **v2.634 — 폴러의 표본 시각은 '그 서버를 실제로 읽은 시각' 이고, 신선도 경계는 폴 주기 소요에 맞춰 넓힌다**
   (`idrac/poller.js` sensorAt·powerAt · `idrac/sensorStore.js sensorPollCycle` · `idrac/roomTemp.js effectiveMaxAgeMs`·
   `sampleMaxAgeMs` · 엣지 `compactSensors` 의 `cycleMs`·`intervalMs` · 웹 `roomTempView.staleCardMeta`·`staleBannerText` ·
