@@ -1,5 +1,5 @@
 /**
- * v2.929(C-③) 반증 1인 확정분 회귀 — EndpointLocation.
+ * v2.933(C-③) 반증 1인 확정분 회귀 — EndpointLocation.
  *  H-1 엣지에서는 법인 필터를 건너뛴다(법인 할당표는 중앙에만 있다 — 예전에는 묻는 MAC 이 0개)
  *  M-2 likelihood · 스위치 사이 포트 — 낮은 likelihood 위치 · 물리 아닌 인터페이스 · LLDP 이웃이 다른 장비인 포트는 업링크가 아니다
  *  M-3 VM 위치 — 위치 모르는 업링크 NIC 이 있으면 · LAG 이면 판정 보류 · 이름 규칙(도메인) · 담당 CVP 메타만
@@ -14,7 +14,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cvpeprv2929-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cvpeprv2933-'));
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true', SSRF_ALLOW_LOOPBACK: 'true' });
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));
 fs.writeFileSync(path.join(DIR, 'permissions.json'), JSON.stringify({ schemaVersion: 3, matrix: { viewer: ['dashboard', 'tools', 'inv.hosts', 'inv.vms'], operator: ['dashboard', 'tools', 'inv.hosts', 'inv.vms'] } }));

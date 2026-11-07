@@ -140,7 +140,7 @@ export const config = {
   contentionRefreshMs: clampIntervalMs(numEnv(process.env.CONTENTION_REFRESH_MS, 900_000), 900_000, 300_000),
   contentionPerCycle: Math.max(1, Math.min(5_000, Math.trunc(numEnv(process.env.CONTENTION_PER_CYCLE, 400)) || 400)),
   contentionSamples: Math.max(3, Math.min(180, Math.trunc(numEnv(process.env.CONTENTION_SAMPLES, 15)) || 15)),
-  // v2.929(C-①): ESXi 경로별 스토리지 카운터(storagePath 읽기·쓰기·지연) — FC HBA 가 있는 연결 호스트의 실시간 최근 창을 매시 한 번(storpath/collect.js).
+  // v2.933(C-①): ESXi 경로별 스토리지 카운터(storagePath 읽기·쓰기·지연) — FC HBA 가 있는 연결 호스트의 실시간 최근 창을 매시 한 번(storpath/collect.js).
   //   SAN 스위치 포트 합계를 스토리지별로 나누는 **실측 비율**의 근거다(라이선스 불필요). 경로 계열이 많아 표본은 기본 15(5분) · 묶음 4대 ·
   //   주기당 200대. 부담이 걱정되면 STORPATH_SCAN=false 로 끈다(귀속은 IPF · 타깃 포트 비율로 간다).
   storPathScan: process.env.STORPATH_SCAN !== 'false',

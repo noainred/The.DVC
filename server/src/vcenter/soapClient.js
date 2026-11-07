@@ -33,7 +33,7 @@ import { refreshHostCfg, HOST_CFG_BUDGET_MS } from '../hostcfg/collect.js';   //
 import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
 import { refreshContention, CONTENTION_BUDGET_MS } from '../contention/collect.js';   // v2.706(C2·C3)
 import { get as contentionGet } from '../contention/cache.js';
-import { refreshStorPath, STORPATH_BUDGET_MS, hasFcHba } from '../storpath/collect.js';   // v2.929(C-①) ESXi 경로 카운터
+import { refreshStorPath, STORPATH_BUDGET_MS, hasFcHba } from '../storpath/collect.js';   // v2.933(C-①) ESXi 경로 카운터
 import { get as storPathGet } from '../storpath/cache.js';
 import { dsUuidOf } from '../contention/parse.js';
 import { refreshDsCfg, getDsCfg, DS_CFG_BUDGET_MS } from '../dscfg/collect.js';   // v2.700(A17)
@@ -2262,7 +2262,7 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
       await runAux('contention', 'CPU 경합·디스크 지연', CONTENTION_BUDGET_MS, (budgetMs) => refreshContention(c, vc.id, { vms: liveVms, hostRefs: liveHosts, budgetMs, signal }));
       for (const [ref, h] of hostByRef) { const e = contentionGet(vc.id, 'host', ref); if (e) h.perfc = e; }
     }
-    // v2.929(C-①): ESXi 경로별 스토리지 카운터 — FC HBA 가 있는 연결 호스트만, 매시 한 번 최근 창(storpath/collect.js).
+    // v2.933(C-①): ESXi 경로별 스토리지 카운터 — FC HBA 가 있는 연결 호스트만, 매시 한 번 최근 창(storpath/collect.js).
     //   경로 이름을 풀 때 hcfg.mp.targets(rt) · hbas 를 쓰므로 hostcfg 뒤에 돈다. 캐시 값을 host.spath 로 싣는다.
     if (c.sc.perfManager) {
       const fcHosts = [...hostByRef].filter(([, h]) => h.connectionState !== 'DISCONNECTED' && hasFcHba(h)).map(([ref, h]) => ({ ref, host: h }));

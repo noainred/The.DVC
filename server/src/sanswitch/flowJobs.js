@@ -1,5 +1,5 @@
 /**
- * sanswitch/flowJobs.js — Flow Vision 플로우 작업(v2.929 SAN·CVP 설계 C-②) — 실행 등록부 · 포탈 플로우 기록 · 15분 카운터 주기.
+ * sanswitch/flowJobs.js — Flow Vision 플로우 작업(v2.933 SAN·CVP 설계 C-②) — 실행 등록부 · 포탈 플로우 기록 · 15분 카운터 주기.
  *
  * 틀은 SAN 연결 테스트 대행(testRuns.js)과 같다:
  *   · 중앙이 직접 수집하는 스위치는 중앙이 SSH 로 바로 실행하고, 엣지 위임 스위치는 큐에 두면 엣지가 `/api/central/sanswitch-config` pull 때

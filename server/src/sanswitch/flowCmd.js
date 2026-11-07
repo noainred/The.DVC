@@ -1,5 +1,5 @@
 /**
- * sanswitch/flowCmd.js — Brocade Flow Vision 명령 조립 · 출력 판독(v2.929 SAN·CVP 설계 C-② — docs/design/san-cvp-traffic/README.md §9). 순수.
+ * sanswitch/flowCmd.js — Brocade Flow Vision 명령 조립 · 출력 판독(v2.933 SAN·CVP 설계 C-② — docs/design/san-cvp-traffic/README.md §9). 순수.
  *
  * 왜 조심하나: 이 명령은 **스위치 설정을 바꾼다**(flow --create · --delete). 그래서
  *   ① 명령은 여기서만 만든다 — 화면 · 엣지가 보낸 글자를 이어 붙이지 않는다(셸 명령 조립 규약 — server/CLAUDE.md).

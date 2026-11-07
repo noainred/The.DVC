@@ -1,5 +1,5 @@
 /**
- * v2.929(SAN·CVP 설계 C-③) — CVP EndpointLocation(MAC → 지금 배운 스위치 · 포트) 버튼 + 주기.
+ * v2.933(SAN·CVP 설계 C-③) — CVP EndpointLocation(MAC → 지금 배운 스위치 · 포트) 버튼 + 주기.
  *  ① 파서 — 깊이 상관없이 interface + 장비 식별자 객체 · 줄마다 JSON · JSON 아님은 parsed:false(위치 없음과 구분) · 상한
  *  ② 조회 — ok · none · error · 404/501 이면 미지원으로 멈춤 · 시간 예산
  *  ③ 대상 고르기 — 호스트 NIC → 최근 이동 VM → 오래된 VM 순 · 이번 창에 물은 MAC 은 건너뜀 · 상한 · 이동 기억
@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cvpep2929-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cvpep2933-'));
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true', CENTRAL_TOKEN: 'ctok-2929', SSRF_ALLOW_LOOPBACK: 'true' });   // 직접 CVP 는 127.0.0.1:9(즉시 거부) — 이 테스트 전용
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));
 // viewer 도 도구(tools) · 인벤토리 권한이 있어야 '역할' 게이트(admin · operator)까지 간다 — 도구 키 403 과 역할 403 을 가른다.

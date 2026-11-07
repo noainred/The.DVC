@@ -255,7 +255,7 @@ export async function demoCvpCollect(srv, { now = Date.now(), optics = {} } = {}
  *   호스트 상세의 CVP 업링크 블록이 데모에서도 '확정(LLDP)' · '높음(VM MAC)' 근거를 보여 준다. 스냅샷·법인 지정이 아직 없으면 싣지 않는다(undefined — 저장소를 건드리지 않음).
  */
 const _demoEp = new Map();   // mac → { device, port, vlan, learnedAgoMs }
-/** v2.929(C-③) 데모 EndpointLocation 결과 — demoL2 가 채운 표에서(없는 MAC 은 'none'). 수치 · 위치는 가상값이다. */
+/** v2.933(C-③) 데모 EndpointLocation 결과 — demoL2 가 채운 표에서(없는 MAC 은 'none'). 수치 · 위치는 가상값이다. */
 export function demoEndpoints(macs = [], now = Date.now()) {
   const results = (Array.isArray(macs) ? macs : []).map((mac) => {
     const e = _demoEp.get(mac);
@@ -284,7 +284,7 @@ async function demoL2(srv, devices, now) {
   const devId = (d) => String(d.serial || d.key || '');
   hosts.forEach((h, i) => {
     const a = slots[(2 * i) % slots.length]; const b = slots[(2 * i + 1) % slots.length];
-    // v2.929(C-③) 데모 EndpointLocation — 호스트 NIC MAC 은 LLDP 와 같은 포트 · VM MAC 은 vmnic0 포트(일곱 번째마다 다음 호스트 포트 = vMotion 직후 옛 위치처럼).
+    // v2.933(C-③) 데모 EndpointLocation — 호스트 NIC MAC 은 LLDP 와 같은 포트 · VM MAC 은 vmnic0 포트(일곱 번째마다 다음 호스트 포트 = vMotion 직후 옛 위치처럼).
     const nics = Array.isArray(h.nics) ? h.nics : [];
     const other = slots[(2 * i + 2) % slots.length];
     // 아홉 번째 호스트마다 vmnic1 의 CVP 위치를 LLDP 와 다른 포트로 둔다 — 화면의 ‘LLDP 와 CVP 위치가 다릅니다’ 를 데모에서도 보이게(가상).

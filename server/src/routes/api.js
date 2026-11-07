@@ -39,7 +39,7 @@ import { registerBareosLive } from './api/bareosLive.js'; // v2.833 Bareos 진�
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
 import { registerHostSan } from './api/hostSan.js';
-import { registerSanFlow } from './api/sanFlow.js';       // v2.929(C-②) Brocade Flow Vision 플로우 모니터(포탈이 dvc_ 플로우를 만들고 읽는다)       // v2.920 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭
+import { registerSanFlow } from './api/sanFlow.js';       // v2.933(C-②) Brocade Flow Vision 플로우 모니터(포탈이 dvc_ 플로우를 만들고 읽는다)       // v2.920 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
 import { registerCvpBulk } from './api/cvpBulk.js';       // CVP 서버 CSV·자유텍스트 대량 등록(v2.641)
 import { registerPartFaults } from './api/partFaults.js'; // 파트 장애(물리 부품 장애 기록·알림, v2.547)
@@ -156,7 +156,7 @@ registerBareosLive(api);
 registerStorageMon(api);
 registerSanSwitch(api);
 registerHostSan(api);
-registerSanFlow(api);   // v2.929 — /tools/san-flow*(전체 범위 관리자 · 만들기 · 지우기는 OTP 재인증)   // v2.920 — /hosts/:id/san-attribution · /hosts/:id/net-uplinks · /tools/sanswitch/attribution
+registerSanFlow(api);   // v2.933 — /tools/san-flow*(전체 범위 관리자 · 만들기 · 지우기는 OTP 재인증)   // v2.920 — /hosts/:id/san-attribution · /hosts/:id/net-uplinks · /tools/sanswitch/attribution
 registerCvp(api);
 registerCvpBulk(api);
 registerPartFaults(api);

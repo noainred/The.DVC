@@ -1,5 +1,5 @@
 /**
- * v2.929(C-① — 설계 docs/design/san-cvp-traffic/README.md §9) — 라이선스 없이 호스트 × 스토리지 분배: ESXi 경로 카운터(실측 비율) + IPF 보정.
+ * v2.933(C-① — 설계 docs/design/san-cvp-traffic/README.md §9) — 라이선스 없이 호스트 × 스토리지 분배: ESXi 경로 카운터(실측 비율) + IPF 보정.
  *  ① 경로 인스턴스 이름 두 형식(fc. 전송 식별자 · 런타임 이름 + 멀티패스 rt 표) · 못 푸는 이름은 unparsed(0 이 아니다) · 타깃별 KB = KBps × 20초 합 · 결측은 partial
  *  ② 엣지 정제 — 아는 필드만 · 상한 · 엣지 시각은 수신 시각으로(원본 edgeAt) · 멀티패스 rt 추출 · 정제 화이트리스트
  *  ③ IPF — 행합 정확 · 열합 잔차 · 여유 행/열(다른 초기자 · 다른 스위치 타깃) · 후보 하나·실측 행 고정
@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'storpath2929-'));
+process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'storpath2933-'));
 const P = await import('../src/storpath/parse.js');
 const I = await import('../src/sanswitch/ipf.js');
 const A = await import('../src/sanswitch/attribution.js');

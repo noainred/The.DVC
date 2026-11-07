@@ -148,7 +148,7 @@
 | `servicemap/` | 4 | 988 | `servicemap/build.js` (1) | servicemap/build.js — 서비스 인벤토리 집계(순수, v2.887). 입력은 라우트(inputs.js)가 모은 구성원·파생 호스트와 저장소. |
 | `settingsStatus/` | 2 | 259 | `settingsStatus/sources.js` (2) | 설정 메뉴 상태 배지 — 사실 수집(v2.916). 판정은 grade.js 하나. |
 | `storage/` | 52 | 11,200 | `storage/registry.js` (20) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
-| `storpath/` | 4 | 361 | `storpath/cache.js` (2) | ESXi 경로 카운터 캐시(v2.929 C-①) — vCenter 별 · 호스트 moref 별 최근 표본 요약(storpath/parse.js summarizeHostPaths). 인메모리다. |
+| `storpath/` | 4 | 361 | `storpath/cache.js` (2) | ESXi 경로 카운터 캐시(v2.933 C-①) — vCenter 별 · 호스트 moref 별 최근 표본 요약(storpath/parse.js summarizeHostPaths). 인메모리다. |
 | `svcmon/` | 21 | 7,111 | `svcmon/store.js` (12) | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). |
 | `system/` | 2 | 315 | `system/nfsMounts.js` (4) | system/nfsMounts.js — Edge 노드 NFS 마운트 관리(v2.299). |
 | `tags/` | 4 | 498 | `tags/analyze.js` (6) | tags/analyze.js — 특수 기능 '태그·사용자 지정 속성 점검'(도구 키 `vm-tags`, v2.703 — A15) 판정(순수). |

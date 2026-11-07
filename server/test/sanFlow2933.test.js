@@ -1,5 +1,5 @@
 /**
- * v2.929(SAN·CVP 설계 C-②) — Brocade Flow Vision 플로우 모니터(도구 키 san-flow · ‘운영 작업’).
+ * v2.933(SAN·CVP 설계 C-②) — Brocade Flow Vision 플로우 모니터(도구 키 san-flow · ‘운영 작업’).
  *  ① 명령 조립 — 이름(dvc_ 고정) · 포트 · WWN 화이트리스트 · 주입 시도는 명령을 만들지 않는다 · 지우기는 dvc_ 만
  *  ② 출력 판독 — 오류 분류(라이선스 · 명령 없음 · 권한 · 이미 있음 · 없음) · 카운터 표 · 못 읽으면 parsed:false(0 으로 단정하지 않는다)
  *  ③ 작업 큐 — 엣지 위임 스위치는 큐(비밀 없음) · 그 엣지만 가져가고 회신한다 · 회신은 그 작업이 실행했어야 하는 명령 출력만
@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sanflow2929-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sanflow2933-'));
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true', CENTRAL_TOKEN: 'ctok-2929f' });
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));
 fs.writeFileSync(path.join(DIR, 'permissions.json'), JSON.stringify({ schemaVersion: 3, matrix: { viewer: ['dashboard', 'tools', 'inv.hosts'], operator: ['dashboard', 'tools', 'inv.hosts'] } }));

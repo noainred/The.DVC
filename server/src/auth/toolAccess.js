@@ -93,7 +93,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   rightsize: 'rightsizing',
   rma: 'rma',
   sanswitch: 'san-switch',
-  'san-flow': 'san-flow',            // v2.929(C-②) SAN 플로우 모니터(SanFlowTool.jsx 전용 — 세그먼트 = 키)
+  'san-flow': 'san-flow',            // v2.933(C-②) SAN 플로우 모니터(SanFlowTool.jsx 전용 — 세그먼트 = 키)
   'secret-scan': 'secret-scan',
   'serial-lookup': 'serial-lookup',
   snapshots: 'snapshots',

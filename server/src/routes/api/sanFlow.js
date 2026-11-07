@@ -1,4 +1,4 @@
-// SAN 플로우 모니터(v2.929 SAN·CVP 설계 C-② — 도구 키 san-flow · ‘운영 작업’). Brocade Flow Vision 플로우를 포탈이 만들고 · 지우고 · 카운터를 읽는다.
+// SAN 플로우 모니터(v2.933 SAN·CVP 설계 C-② — 도구 키 san-flow · ‘운영 작업’). Brocade Flow Vision 플로우를 포탈이 만들고 · 지우고 · 카운터를 읽는다.
 //   ⚠ 스위치 설정을 바꾸는 도구다 — 모든 라우트는 tools 권한 + admin + 전체 범위(fullScopeOnly), 만들기 · 지우기는 OTP 재인증(reauth)까지.
 //   감사 로그는 auditMiddleware 가 남기고 '무엇을 · 어디에' 를 res.locals.auditDetail 로 싣는다. 명령은 sanswitch/flowCmd.js 만 만든다(화면 글자를 잇지 않는다).
 //   응답에 스위치 비밀번호 · 관리 주소를 싣지 않는다(등록부 공개 필드 · 이름만).

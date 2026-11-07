@@ -378,7 +378,7 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
     l2ByCvp.get(x.cvpId).push(r);
     nL2++;
   }
-  // v2.929(SAN·CVP 설계 C-③): EndpointLocation 결과 — 소유한 CVP 만 · MAC 12자 16진 · 상태 4종 · 위치 16개 · 문자열 상한 · VLAN 범위 · 시각은 수신 시각으로 자른다.
+  // v2.933(SAN·CVP 설계 C-③): EndpointLocation 결과 — 소유한 CVP 만 · MAC 12자 16진 · 상태 4종 · 위치 16개 · 문자열 상한 · VLAN 범위 · 시각은 수신 시각으로 자른다.
   const epByCvp = new Map();
   let nEp = 0;
   for (const x of Array.isArray(b.ep) ? b.ep : []) {
@@ -394,7 +394,7 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
   return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped, devSamples, eventsByCvp, l2ByCvp, epByCvp };
 }
 
-/** v2.929(C-③): 한 번에 받는 EndpointLocation 결과 상한(엣지 push 한 번 — 엣지도 CVP 마다 500 개씩 보낸다). */
+/** v2.933(C-③): 한 번에 받는 EndpointLocation 결과 상한(엣지 push 한 번 — 엣지도 CVP 마다 500 개씩 보낸다). */
 export const EP_PUSH_MAX = 4000;
 const EP_STATUS = new Set(['ok', 'none', 'error', 'unsupported']);
 const epStr = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);

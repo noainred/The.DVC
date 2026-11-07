@@ -23,7 +23,7 @@
 - (원래 2809행) '전체 수집' 은 무엇을 했는지 나눠 말한다
 - (v2.748) 포트 사용량·포트 배치 탭 — 기간은 경계로 자르고, 빈 칸·부분 합·미래 칸을 값으로 만들지 않는다
 - (v2.920) 호스트 ↔ SAN 조닝·트래픽 귀속 — 판정 코어는 `attribution.js` 하나, 확정분과 추정분을 합치지 않는다
-- (v2.929) 귀속 실측 우선(ESXi 경로 비율 → IPF → 포트 비율) · Flow Vision 플로우 모니터(san-flow) — 스위치 설정을 바꾸는 명령은 서버만 만든다
+- (v2.933) 귀속 실측 우선(ESXi 경로 비율 → IPF → 포트 비율) · Flow Vision 플로우 모니터(san-flow) — 스위치 설정을 바꾸는 명령은 서버만 만든다
 
 ## 본문
 
@@ -319,7 +319,7 @@
     본다(법인 미지정 장비·법인 없는 vCenter 는 아무것도 — 'vCenter 귀속 없는 데이터 미노출'). 함대 라우트는 형제처럼 `fullScopeOnly`. 응답에 관리 주소를 싣지 않는다.
   - 시안의 '보기 세그먼트' 는 실제 화면에 없어(912행 세그먼트는 장비 상세 안의 것) **헤더 버튼 + 모달**(전체 점검·사용량 분석과 같은 틀)로 넣었다 — 법인 칩 선택을 범위로 쓴다.
 
-- **호스트 귀속 실측 우선 · Flow Vision 플로우 모니터(v2.929 — 설계 `docs/design/san-cvp-traffic/README.md` §9·§10, 회귀 `test/sanStorPath2929.test.js` · `sanFlow2929.test.js`)**
+- **호스트 귀속 실측 우선 · Flow Vision 플로우 모니터(v2.933 — 설계 `docs/design/san-cvp-traffic/README.md` §9·§10, 회귀 `test/sanStorPath2933.test.js` · `sanFlow2933.test.js`)**
   - 분배 우선순위는 `attribution.js attributeHost` 하나 — ESXi 경로 실측 비율(`measured`) → IPF(`ipf.js` — 패브릭을 조닝 서명으로 묶어 코어-엣지도 한 문제) → 타깃 포트 비율.
     실측 비율은 **비율만** 쓰고 양은 스위치 포트 바이트(정확)에 곱한다. 확정분 · 실측 비율분 · 추정분은 따로 센다(합쳐 ‘확정’ 이라 부르지 않는다).
   - Flow Vision(`flowCmd.js` · `flowJobs.js` · `routes/api/sanFlow.js`): **스위치 설정을 바꾼다** — 라우트 전부 tools + admin + 전체 범위, 만들기 · 지우기는 OTP 재인증(`reauth`) + 감사.

@@ -7,7 +7,7 @@ import { numOrNull } from '../numOrNull.js';
 /** 귀속 신뢰도 표기 — 조닝 그림의 ●/◐ 와 같은 식구(sanZoningView CONFIDENCE_LABEL). */
 export const CONF = Object.freeze({
   confirmed: { glyph: '●', label: '확정', tone: 'green', note: '닿을 수 있는 스토리지가 하나 · 타깃 역할 네임서버 확정 — 포트 카운터 전부가 이 스토리지' },
-  // v2.929(C-①): ESXi 경로 카운터(호스트 쪽 실측)가 잰 타깃별 비율 — 라이선스 불필요. 바이트 합은 스위치 포트 카운터.
+  // v2.933(C-①): ESXi 경로 카운터(호스트 쪽 실측)가 잰 타깃별 비율 — 라이선스 불필요. 바이트 합은 스위치 포트 카운터.
   measured: { glyph: '●', label: '실측 비율', tone: 'blue', note: 'ESXi 경로 카운터가 잰 타깃별 전송 비율로 HBA 포트 바이트를 나눔(라이선스 불필요 · 매시 최근 창 표본)' },
   estimated: { glyph: '◐', label: '추정', tone: 'amber', note: '후보 2개 이상 → IPF 보정(행합 · 열합 맞춤) 또는 같은 스위치 타깃 포트 바이트 비율로 분배(또는 타깃 역할이 추정)' },
   unsplit: { glyph: '—', label: '분배 불가', tone: 'gray', note: '후보 2개 이상인데 타깃 포트 바이트가 없어 나누지 못함 — 호스트 합계에는 들어가고 스토리지에는 주지 않음' },
@@ -15,7 +15,7 @@ export const CONF = Object.freeze({
   'zoned-only': { glyph: '○', label: '조닝만', tone: 'gray', note: 'zone 멤버이지만 어느 스위치에도 로그인해 있지 않음(정리 후보)' },
 });
 export const STATUS_LABEL = Object.freeze({ 'logged-in': '로그인', 'zoned-only': '조닝만', unseen: '미확인', 'no-wwn': 'WWN 없음' });
-/** v2.929(C-①): 후보 2개 이상인 포트를 무엇으로 나눴나(row.split). */
+/** v2.933(C-①): 후보 2개 이상인 포트를 무엇으로 나눴나(row.split). */
 export const SPLIT_LABEL = Object.freeze({ measured: 'ESXi 경로 비율', ipf: 'IPF 보정', ratio: '타깃 포트 비율' });
 
 /** 바이트 → 글자. util/fmt.fmtBytes 는 GB 까지라 SAN 기간 합(수십~수백 TB)이 '198238.4 GB' 로 나온다 — TB·PB 까지(1024 진법 · 같은 규칙: 없으면 ‘—’). */
@@ -70,7 +70,7 @@ const kbpsSum = (list, k) => { let v = null; for (const t of list || []) { const
 const hm = (ts) => { const n = numOrNull(ts); if (n == null || n <= 0) return '—'; const d = new Date(n); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const sumOrNull = (...xs) => (xs.every((x) => numOrNull(x) == null) ? null : xs.reduce((a, x) => a + (numOrNull(x) ?? 0), 0));
 
-/** KPI 5개(hd-kpis). 값이 없으면 ‘—’. 확정 · 실측 비율 · 추정을 한 숫자로 합치지 않는다(v2.929 — 확정 + 실측은 둘 다 근거가 있는 몫이라 한 칸에 두되 아래 줄에 따로 적는다). */
+/** KPI 5개(hd-kpis). 값이 없으면 ‘—’. 확정 · 실측 비율 · 추정을 한 숫자로 합치지 않는다(v2.933 — 확정 + 실측은 둘 다 근거가 있는 몫이라 한 칸에 두되 아래 줄에 따로 적는다). */
 export function sanKpis(d) {
   const t = d?.totals || {};
   const label = d?.hours === 24 || d?.hours == null ? '24h' : d.hours % 24 === 0 ? `${d.hours / 24}일` : `${d.hours}h`;
@@ -92,7 +92,7 @@ export function sanKpis(d) {
   ];
 }
 
-/** v2.929(C-①): ‘경로별 실측’ 표 행 — 최근 표본(spath.targets)을 화면 행으로. 속도는 바이트/초(KBps × 1024). */
+/** v2.933(C-①): ‘경로별 실측’ 표 행 — 최근 표본(spath.targets)을 화면 행으로. 속도는 바이트/초(KBps × 1024). */
 export function pathRows(d) {
   const list = Array.isArray(d?.spath?.targets) ? d.spath.targets : [];
   return list.map((t) => ({
@@ -113,7 +113,7 @@ export function pathStateText(r) {
 /** 지연 칸 — 값이 없으면 단위 없이 ‘—’. */
 export const latText = (a, b) => (numOrNull(a) == null && numOrNull(b) == null ? '—' : `${numOrNull(a) == null ? '—' : `${a} ms`} / ${numOrNull(b) == null ? '—' : `${b} ms`}`);
 
-/** v2.929(C-①): Fabric Vision 라이선스 띠 — 이 화면이 스위치 쪽 플로우 실측 없이 냈다는 사실과 스위치별 상태. */
+/** v2.933(C-①): Fabric Vision 라이선스 띠 — 이 화면이 스위치 쪽 플로우 실측 없이 냈다는 사실과 스위치별 상태. */
 export function licenseBand(fabrics = []) {
   const list = Array.isArray(fabrics) ? fabrics : [];
   const n = { yes: 0, no: 0, unknown: 0 };

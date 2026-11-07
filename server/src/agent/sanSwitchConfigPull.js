@@ -183,7 +183,7 @@ async function _pull() {
     //   같은 장비(호스트)에 세션이 겹치지 않게 테스트·재수집은 호스트 잠금(withHostLock)을 공유한다 — 먼저 등록된 쪽이 먼저 돈다.
     const tests = Array.isArray(body?.testNow) ? body.testNow.slice(0, 5) : [];
     for (const t of tests) runDelegatedTest(t).catch((e) => console.warn(`[sanswitch-config] 테스트 대행 실패 ${t?.id}: ${e.message}`));
-    // v2.929(C-②) Flow Vision 플로우 작업 대행 — 테스트와 같이 수집보다 먼저 호스트 잠금을 등록한다(같은 동기 구간).
+    // v2.933(C-②) Flow Vision 플로우 작업 대행 — 테스트와 같이 수집보다 먼저 호스트 잠금을 등록한다(같은 동기 구간).
     const flowJobs = Array.isArray(body?.flowNow) ? body.flowNow.slice(0, 5) : [];
     for (const j of flowJobs) runDelegatedFlow(j).catch((e) => console.warn(`[sanswitch-config] 플로우 작업 대행 실패 ${String(j?.id || '').slice(0, 20)}: ${e.message}`));
     // '지금 수집' 요청 — 구성이 안 바뀌어도 **매 pull 마다** 처리한다(재수집은 흔한 요청).
@@ -241,7 +241,7 @@ async function runDelegatedTest(t) {
 }
 
 /**
- * v2.929(C-②) 중앙이 큐에 둔 플로우 작업을 현지에서 실행한다.
+ * v2.933(C-②) 중앙이 큐에 둔 플로우 작업을 현지에서 실행한다.
  *   · 중앙이 보낸 명령 글자는 없다 — 동작 · 플로우 정의만 받아 buildFlowCommands 로 **다시 검사하고 직접 만든다**(형식 밖이면 실행하지 않고 그 사유를 회신).
  *   · 장치는 **이 엣지 등록부**에서 찾는다(중앙이 위임한 것만 있다) — 없으면 실행하지 않는다. 자격증명은 등록부의 것.
  *   · 같은 호스트의 '지금 수집' · 연결 테스트와 세션을 겹치지 않는다(withHostLock — 이 줄 앞에 await 를 두지 말 것).

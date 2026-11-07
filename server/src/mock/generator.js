@@ -122,7 +122,7 @@ const HBA_FC = [
   { model: 'QLogic QLE2692 16Gb FC', speeds: [16, 8] },
 ];
 const HBA_ISCSI = { model: 'Broadcom 57414 25GbE iSCSI', speeds: [25, 25] };
-// v2.929(C-①): 데모 WWN 은 사이트 · 호스트 이름으로 만든다 — 예전 식(idx 만)은 사이트마다 같은 WWN 이 반복되고(호스트 0번이 28개 사이트에 같은 WWN)
+// v2.933(C-①): 데모 WWN 은 사이트 · 호스트 이름으로 만든다 — 예전 식(idx 만)은 사이트마다 같은 WWN 이 반복되고(호스트 0번이 28개 사이트에 같은 WWN)
 //   idx 가 크면 한 바이트가 3자리 16진이 되어 WWN 형식이 깨졌다(데모 SAN 이 그 호스트를 합성 WWN 으로 바꿔 인벤토리 HBA 와 어긋났다).
 function wwn(idx, p, salt = '') {
   let x = 2166136261 >>> 0;
@@ -131,7 +131,7 @@ function wwn(idx, p, salt = '') {
   const b = [(x >>> 24) & 255, (x >>> 16) & 255, (x >>> 8) & 255, (x & 0xfe) | (p & 1)].map((v) => v.toString(16).padStart(2, '0'));
   return `20:00:00:24:${b.join(':')}`;
 }
-/** v2.929(C-③): 데모 호스트 물리 NIC(soapClient parsePnics 와 같은 모양) — 업링크 매칭 · CVP 위치 · vmnic 카운터 데모가 NIC 이름 · MAC 을 쓴다.
+/** v2.933(C-③): 데모 호스트 물리 NIC(soapClient parsePnics 와 같은 모양) — 업링크 매칭 · CVP 위치 · vmnic 카운터 데모가 NIC 이름 · MAC 을 쓴다.
  *   예전 데모 호스트에는 NIC 목록이 없어 네트워크 카드가 '인벤토리에 없음' 이었다. MAC 은 사이트 · 호스트 이름으로 만든 결정적 값(가상값). */
 function mkPnics(idx, salt = '') {
   return [0, 1, 2, 3].map((p) => {
@@ -360,7 +360,7 @@ function mkVmDev(vm, dsNames = [], nets = [], siteNo = 0) {
     const n = netAt(k);
     const dvs = n?.type === 'DISTRIBUTED_PORTGROUP';
     return { label, adapter: i % 29 === 0 ? 'E1000E' : 'VMXNET 3', backing: n ? (dvs ? 'dvs' : 'std') : 'other', net: n && !dvs ? n.name : null, netRef: n ? n.name : null,
-      // v2.929(C-③): 넷째 바이트에 사이트 번호 — 예전에는 사이트 안 순번만 써서 법인마다 같은 MAC 이 나왔고, 데모 CVP 위치가 다른 법인 것으로 덮였다(VM 위치 카드가 거의 '불일치').
+      // v2.933(C-③): 넷째 바이트에 사이트 번호 — 예전에는 사이트 안 순번만 써서 법인마다 같은 MAC 이 나왔고, 데모 CVP 위치가 다른 법인 것으로 덮였다(VM 위치 카드가 거의 '불일치').
       mac: `00:50:56:${(siteNo & 0xff).toString(16).padStart(2, '0')}:${((i >> 7) & 0xff).toString(16).padStart(2, '0')}:${((((i & 0x7f) << 1) | (k & 1)) & 0xff).toString(16).padStart(2, '0')}`,
       connected: !(i % 31 === 0 && k === 0), startConnected: true };
   };
@@ -639,7 +639,7 @@ export function generateSnapshot() {
         //   Dell 호스트는 자기 iDRAC 서버와 태그가 같다(다르면 hostMatch 가 '다른 장비' 로 본다 — v2.682 R3D-04).
         serviceTag: mockServiceTag(`${site.id}|${h.name}`),
         hbas: mkHbas(h.idx, `${site.id}|${h.name}`),
-        nics: mkPnics(h.idx, `${site.id}|${h.name}`),   // v2.929(C-③)
+        nics: mkPnics(h.idx, `${site.id}|${h.name}`),   // v2.933(C-③)
         gpus: mkGpus(h.idx, site),
         // v2.852: vSphere 데이터센터 이름(실수집 soapClient 와 같은 키) — VM 의 vcDcPath 와 같은 값. GPU 할당 계층의 '데이터센터' 단계.
         vcDatacenter: `DC-${site.id}`,
