@@ -1187,3 +1187,8 @@
   - **누락 점검**의 칸은 보드 커버리지 값(`perfForRows → buildPerfEntry → useJudge.coverageOf`의 entry.coverage — 엣지 서버는 그 엣지 봉투 perf 의 coverage)을 그대로 쓴다.
     수집 기록이 없으면 none 이 아니라 **unknown** · 수집 DB 를 못 읽으면 503 · ‘제안’ 은 CSV 줄을 채워 줄 뿐 등록하지 않는다(FQDN 이름만 OS 주소로 제안 — DNS 조회 없음).
   - 수집 대상 집합은 여전히 `classifyFleet().bareMetal` 이다 — OS 만 등록한 서버(iDRAC · vCenter 에 없는)는 등록부에는 들어가도 대상이 되지 않는다(정직 기록 · 다음 단계 후보).
+  - (r2 · 반증 F2 · F3 · F4 · F12 · F15 · F16 · 감사 M-1 · M-4 · M-5 · L-4 · L-6) bmstor 인증 정지 판정은 해석 뒤 자격(`refs.authCredOf` — bmusage authDev 와 같은 하나) ·
+    os_key 만 바꾼 행도 실제로 반영(keepCred 는 os_cred · os_key 둘 다 빌 때만) · OS 만 행이 함대에 없으면 경고(`os-only-untracked`) + 누락 점검 'OS 만 — 성능 수집 안 됨'(대상 집합은 그대로) ·
+    파일 해석을 먼저 하고 문맥 → 분석 → 적용은 await 없이 · 서명에 등록부 세대(mtime · 크기) · iDRAC 사본을 공통 계정 사용처로(`copies`) · 새 iDRAC id 가 기존 id 와 겹치면 기존 항목으로 대조(적용은 `onb_` 새 id) ·
+    xlsx 는 로드 전에 병합 개수 · 넓이 상한(`svcmon/formats.js assertXlsxMergesOk` — 두 파서 공통) · 암호화 키 파싱 캐시(실측 bcrypt 16라운드 175ms/회 → 키당 1회) ·
+    스냅샷 원자적 쓰기 + SECRET_FILES(`onboard-prev/bm-storage.json` · `idrac.json`) · iDRAC 제거는 한 번 쓰기(`removeServersBatch`).
