@@ -25,7 +25,7 @@ import { parsePrivateKey, PASSPHRASE_MAX } from './keyParse.js';
 
 import { KEY_FILE_NAME } from './keyBundle.js';
 export { KEY_FILE_NAME };
-const FILE = path.join(config.configDir, KEY_FILE_NAME);
+const FILE = path.join(config.configDir, 'ssh-keys.json');   // = KEY_FILE_NAME(문서 생성기가 글자 그대로 찾는다)
 export const MAX_KEYS = 200;
 export const MAX_ACCOUNTS = 500;
 /** 이름 규칙 — CSV os_key · os_cred · idrac_cred 칸이 이 이름으로 가리킨다(셸 · CSV 에 안전한 글자만). */

@@ -19,7 +19,7 @@ import { buildOnboardCtx, applyOnboard, defaultOnboardDeps } from './onboardRun.
 
 export const APPLIED_FILE_NAME = 'bm-onboard-applied.json';
 registerStateFile(APPLIED_FILE_NAME);
-const FILE = path.join(config.configDir, APPLIED_FILE_NAME);
+const FILE = path.join(config.configDir, 'bm-onboard-applied.json');   // = APPLIED_FILE_NAME
 const lc = (v) => String(v ?? '').trim().toLowerCase();
 
 export function readAppliedState() {

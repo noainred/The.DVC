@@ -17,7 +17,7 @@ import { makeLoadError } from '../../util/registryCore.js';
 import { edgeRowFromPlan } from './importAnalyze.js';
 
 export const EDGE_FILE_NAME = 'bm-onboard-edge.json';
-const FILE = path.join(config.configDir, EDGE_FILE_NAME);
+const FILE = path.join(config.configDir, 'bm-onboard-edge.json');   // = EDGE_FILE_NAME
 export const MAX_EDGE_ROWS = 5000;
 export const MAX_EDGES = 128;
 const lc = (v) => String(v ?? '').trim().toLowerCase();

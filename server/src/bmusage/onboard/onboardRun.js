@@ -102,7 +102,8 @@ export function snapshotRegistries({ files = ['bm-storage.json', 'idrac.json', '
     if (fs.existsSync(src)) { fs.copyFileSync(src, dst); try { fs.chmodSync(dst, 0o600); } catch { /* */ } saved.push(f); }
     else if (fs.existsSync(dst)) fs.rmSync(dst);   // 그때 없던 파일은 스냅샷에도 없다(되돌리면 없는 것이 맞다)
   }
-  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ at: now, by: String(by).slice(0, 64), files: saved, fileSha: String(fileSha).slice(0, 64) }, null, 2), { mode: 0o600 });
+  const metaFile = `${dir}${path.sep}meta.json`;
+  fs.writeFileSync(metaFile, JSON.stringify({ at: now, by: String(by).slice(0, 64), files: saved, fileSha: String(fileSha).slice(0, 64) }, null, 2), { mode: 0o600 });
   return { dir: 'onboard-prev', files: saved, at: now };
 }
 
