@@ -70,6 +70,7 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/bm-usage/onboard/analyze': 'analyzeOnboardRows — 행마다 inUserScope(밖 = 없는 법인 문구) → inUserWriteScope(403 꼴) · 기존 항목 법인 · 미귀속은 전체 범위만 · 7b',
   'POST /api/tools/bm-usage/onboard/apply': 'analyzeOnboardRows 재분석(같은 범위 판정) + 서명 대조 · 거부 행은 적용 안 함 · 7b',
   'DELETE /api/tools/bm-usage/onboard/edge-rows': '배포 행 법인 inUserScope(밖 404) → inUserWriteScope(403) · 귀속 없는 행은 전체 범위만 · 7b',
+  'POST /api/tools/bm-usage/onboard/test': '저장 항목 법인 inUserScope(밖 404) → inUserWriteScope(403) · 귀속 없는 항목은 전체 범위만 · 주소는 저장값(v2.480) · 7b',
   // routes/admin/backupNetSec.js — denyScopedRun·writeScopedVcenterIds·denyGuestScanOutOfScope(v2.606 AUTHZ2606)
   'PUT /api/admin/vclogs/settings': 'denyScopedRun — 범위 계정 403(v2.606)',
   'POST /api/admin/vclogs/collect': 'denyScopedRun — 범위 계정 403(v2.606)',

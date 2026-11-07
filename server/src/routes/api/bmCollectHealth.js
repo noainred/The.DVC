@@ -20,6 +20,8 @@ import { isCycleFailure, collectCells, reasonState } from '../../bmusage/collect
 const t = (v) => strOf(v, 4096).trim();
 const n = numOrNull;
 const opRole = requireRole('admin', 'operator');
+/** 7b: 중앙 직접 수집 경고 기준(설계 §18 — 800ms+ 법인은 엣지 수집 권장). 모르면(핑 값 없음) null — 0 이나 정상으로 보이지 않는다. */
+export const RTT_WARN_MS = 800;
 const toolsPerm = requirePerm('tools');
 
 function deps0(deps = {}) {
@@ -31,6 +33,8 @@ function deps0(deps = {}) {
     listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
     staleMs: async () => (await import('../../central/bmUsageEdgePull.js')).STALE_MS,
     minEdgeVersion: async () => (await import('../../central/featureMinEdgeVersion.js')).stage6MinEdgeVersion(),
+    // 7b: 중앙 직접 수집 법인의 RTT(핑 모니터 마지막 값 — hostCorp.rttReader 하나). 800ms 이상이면 행에 경고(엣지 수집 권장).
+    rttOf: async () => (await import('./hostCorp.js')).rttReader(),
     ...deps,
   };
 }
@@ -88,6 +92,13 @@ export async function bmCollectHealthView(req, snap, deps = {}) {
       lastAttempt: la && typeof la === 'object' ? { at: n(la.at), ok: la.ok === true, kind: t(la.kind).slice(0, 40), ms: n(la.ms) } : null });
   }
   const nodes = []; const rows = []; let omitted = 0; let corpsDropped = 0;
+  // 7b: 이 노드가 중앙이고 직접 수집하는 법인만 RTT 를 싣는다(엣지 법인은 그 법인 안에서 읽으므로 WAN RTT 가 수집에 걸리지 않는다).
+  const rttOf = !config.agent?.centralUrl ? await D.rttOf().catch(() => null) : null;
+  const rttCell = (vc) => {
+    const r = typeof rttOf === 'function' ? rttOf(vc) : null;
+    const ms = r && Number.isFinite(r.rttMs) ? r.rttMs : null;
+    return { rttMs: ms, rttHigh: ms != null ? ms >= RTT_WARN_MS : null, rttAt: r?.at ?? null };
+  };
   for (const x of nodes0) {
     const byCorp0 = x.health?.byCorp || {};
     let byCorp = byCorp0;
@@ -122,6 +133,7 @@ export async function bmCollectHealthView(req, snap, deps = {}) {
       }
       rows.push({
         vcenterId: vc, agent: x.agent, via: x.via, nodeState: rowState, flags: rowFlags, nodeHidden,
+        ...(x.via === 'local' && rttOf ? rttCell(vc) : {}),
         // 주기 실패면 이 법인 대상 수도 모른다(null — 0 이 아니다 · 반증 F1) · 주기 기록이 있고 이 법인 값이 없으면 사실 0(이번 주기 대상 없음).
         servers: c ? n(c.servers) : (x.health && !failed ? 0 : null), ok: c ? n(c.ok) : null, fail: c ? n(c.fail) : null,
         // 성공 수를 모르면 성공률도 모른다(0% 가 아니다 · 반증 F4).

@@ -230,7 +230,83 @@ export function registerBmOnboard(api, deps = {}) {
     send(res, r);
   });
 
+  /* 누락 점검 — 보드 커버리지와 같은 값(perfForRows → coverageOf) · 범위 계정은 자기 법인 서버만(미귀속 없음) · 주소는 관리자 판본만. */
+  api.get('/tools/bm-usage/onboard/missing', adminOnly, toolsPerm, async (req, res) => {
+    try {
+      const snap = store.get();
+      const allowed = scopedVcenterIds(req.user, snap);
+      const P = await import('../../bmusage/poller.js');
+      const DB = await import('../../bmusage/db.js');
+      const EP = await import('../../bmusage/edgePull.js');
+      const BU = await import('./bmUsage.js');
+      const { loadBmUsageSettings } = await import('../../bmusage/settings.js');
+      const { missingCheck } = await import('../../bmusage/onboard/missing.js');
+      const tg = await P.currentTargets();
+      const agent = config.agent?.name || '';
+      const keys = new Set(tg.targets.map((x) => String(x.key)));
+      const latest = (await DB.latestUsage({ json: true }).catch(() => null));
+      if (latest == null) return res.status(503).json({ ok: false, code: 'store-unreadable', reason: '수집 DB 를 읽지 못해 누락 점검을 하지 않았습니다(모두 ‘없음’ 으로 보이지 않게).' });
+      const rowsRaw = await BU.demoPerfRows(latest.filter((r) => String(r.agent) === agent && keys.has(String(r.key))), tg.targets);
+      const pf = await EP.perfForRows(rowsRaw, tg.targets, loadBmUsageSettings(), { full: false });
+      const entryByKey = new Map(pf.perf.map((p) => [String(p.key), p]));
+      let edges = [];
+      if (!config.agent?.centralUrl) { try { edges = (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(); } catch { edges = []; } }
+      const edgeEntry = (a, key) => {
+        const rec = edges.find((x) => String(x.agent || x.name || '').toLowerCase() === String(a).toLowerCase());
+        return (rec?.snap?.perf || []).find((p) => String(p.key) === key) || null;
+      };
+      const vcName = (vc) => ((snap?.vcenters || []).find((v) => v.id === vc)?.name) || vc;
+      const m = missingCheck({ targets: tg.targets, skipped: tg.skipped || [], entryByKey, edgeEntry, vcName });
+      const visible = m.rows.filter((r) => (r.vcenterId ? (!allowed || allowed.has(r.vcenterId)) : !allowed));
+      const full = (await import('../../auth/addressMask.js')).isAdminReq(req);
+      const rows = visible.map((r) => (full ? r : { ...r, idracHost: r.idracHost ? '(가림)' : '', suggest: r.suggest ? { ...r.suggest, idrac_host: undefined, os_host: undefined } : undefined }));
+      const counts = Object.fromEntries(Object.keys(m.counts).map((b) => [b, rows.filter((r) => r.bucket === b).length]));
+      res.set('Cache-Control', 'no-store');
+      res.json({ ok: true, counts, rows: rows.slice(0, 5000), total: rows.length, perfError: pf.perfError || undefined, sourceErrors: (tg.sourceErrors || []).length });
+    } catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 200) }); }
+  });
+
+  /*
+   * 연결 시험(표본) — **저장된 항목의 주소로만**(v2.480: 요청이 주소를 바꿀 수 없다 — id 만 받는다) · 키 · 공통 계정 해석은 폴러와 같은 refs.resolveOsAuth ·
+   * 한 번만(자동 재시도 없음) · 인증 거부는 '인증 정지 후보' 로 알리고(주기 수집은 authGuard 가 다음 실패에서 멈춘다) · 호스트키 미신뢰는 peerTrust 승인 안내.
+   */
+  api.post('/tools/bm-usage/onboard/test', adminOnly, toolsPerm, noDemo, async (req, res) => {
+    const id = t(bodyOf(req).id, 32);
+    const BMR = await import('../../bmstor/registry.js');
+    const s0 = BMR.listBmServersRaw().find((x) => x.id === id);
+    const snap = store.get();
+    const vc = t(s0?.vcenterId, 128);
+    const scoped = !!scopedVcenterIds(req.user, snap);
+    if (!s0 || (vc ? !inUserScope(req.user, snap, vc) : scoped)) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+    if (vc && !inUserWriteScope(req.user, snap, vc)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' });
+    const r = await (deps.testOs || testSavedOs)(s0);
+    logAudit({ user: who(req), action: 'bm-usage.onboard.test', target: s0.name || id, ip: req.ip || '', detail: JSON.stringify({ ok: !!r.ok, kind: r.kind, auth: r.authKind }).slice(0, 200) });
+    res.json(r);
+  });
+
   api.get('/tools/bm-usage/onboard/codes', adminOnly, toolsPerm, (_req, res) => res.json({ ok: true, rowCodes: ROW_CODE, warnCodes: WARN, columns: TEMPLATE_COLUMNS, maxRows: MAX_ROWS, maxBytes: MAX_UPLOAD_BYTES }));
+}
+
+/** 저장 항목 연결 시험(한 번 · 짧은 시한). 결과에 비밀 · 출력 원문을 싣지 않는다(종류 · 짧은 문구만). */
+export async function testSavedOs(s0) {
+  const { resolveOsAuth } = await import('../../bmusage/onboard/refs.js');
+  const a = resolveOsAuth(s0);
+  if (!a.ok) return { ok: false, kind: 'auth-unresolved', reason: a.error };
+  if (a.authKind === 'none') return { ok: false, kind: 'no-secret', reason: '인증 수단이 없습니다 — 키를 고르거나 비밀번호를 입력하세요.' };
+  const { withSsh } = await import('../../proxy/sshExec.js');
+  const { isAuthFailureText, isPeerRejectText } = await import('../../util/authGuard.js');
+  const t0 = Date.now();
+  try {
+    const out = await withSsh({ host: String(s0.host), port: Number(s0.port) || 22, username: a.username, password: a.password || '', privateKey: a.privateKey, passphrase: a.passphrase, readyTimeout: 15_000 },
+      async ({ exec }) => exec('uname -s', 10_000));
+    const os = String(out?.stdout || '').trim().slice(0, 32);
+    return { ok: true, kind: 'ok', authKind: a.authKind, os: /^[A-Za-z0-9_.-]{1,32}$/.test(os) ? os : '', ms: Date.now() - t0 };
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (isPeerRejectText(msg)) return { ok: false, kind: 'hostkey', authKind: a.authKind, reason: '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 장비 신뢰에서 지문을 확인 · 승인하세요(무음 신뢰 없음).' };
+    if (isAuthFailureText(msg)) return { ok: false, kind: 'auth-rejected', authKind: a.authKind, reason: '인증이 거부됐습니다 — 인증 정지 후보입니다(자동 재시도 없음 · 주기 수집은 다음 실패에서 멈춥니다). 키 · 계정을 확인하세요.' };
+    return { ok: false, kind: 'connect', authKind: a.authKind, reason: `접속하지 못했습니다(${msg.replace(/\s+/g, ' ').slice(0, 120)})` };
+  }
 }
 
 /**
