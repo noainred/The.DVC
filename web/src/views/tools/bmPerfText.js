@@ -404,6 +404,8 @@ export const DETAIL_TABS = Object.freeze([
   { id: 'snap', label: '진단 스냅샷' },
   // v2.923(3b): 추이 탭 — 서버 3a 의 추이 API(시간 단위 파일 · 평균/피크) 가 생겨 더했다. 문구는 bmTrendText.js.
   { id: 'trend', label: '추이(평균 · 피크)' },
+  // v2.929(5단계): 집중 모니터링 — 서버 API(perf/:key/focus) 가 생겨 더했다. 문구는 bmPerfOpsText.js.
+  { id: 'focus', label: '집중 모니터링' },
 ]);
 
 /** 상세 머리 아래 안내 — 응답이 말하는 사실(엣지 보관분 · 상세 생략 · 표본 없음 · 엣지 기준값)을 그대로. */

@@ -7,6 +7,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { Kpi } from '../../components/ui.jsx';
+import { BoardOpsStrip } from './BmPerfOpsParts.jsx'; // v2.929(5단계): ‘집중 n 건 진행 중’ · ‘소모품 주의 n대’
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
@@ -95,6 +96,7 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
   const top = useMemo(() => topBottlenecks(items, 5), [items]);
   const foot = useMemo(() => cellFootnotes(codesUsed(items.map((it) => it.entry).filter(Boolean))), [items]);
   const open = (key) => onOpen && onOpen(key);
+  const open2 = (key, tab) => onOpen && onOpen(key, tab);   // v2.929: 함대 표에서 상세의 그 탭으로(집중 · 요약)
   const keyOpen = (key) => (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(key); } };
   const thLine = th ? [['사용률', 'cpu_pct'], ['런큐/코어', 'runq_per_core'], ['대기열', 'disk_aqu'], ['PSI full', 'psi_io_full10']]
     .map(([l, kk]) => { const s = thresholdText(kk, th); return s ? `${l} ${s}` : ''; }).filter(Boolean).join(' · ') : '';
@@ -124,6 +126,7 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
         <Kpi label="정상" value={k.ok} meta={`주의 ${k.warn}`} />
         <Kpi label="판정 보류" value={k.held} meta="못 읽음 · 오래됨 등" title="판정 보류 — 판정 불가 · 오래됨 · 대부분 못 읽음 · 표본 없음" />
       </div>
+      <BoardOpsStrip items={items} onOpen={open2} now={now} />
 
       {/* ── USE 매트릭스 ── */}
       <div className="card" style={{ minWidth: 0 }}>

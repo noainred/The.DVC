@@ -1,0 +1,41 @@
+/* 리눅스 성능 5단계(v2.929) — 집중 모니터링 · 점검 소모품 · 변경 이벤트 · 베이스라인 · 구간 비교 · 알림 규칙. 색은 :root 토큰만(새 hex 없음). */
+.bmf-band { display: grid; grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); gap: 4px; margin: 6px 0 4px; min-width: 0; }
+.bmf-cell { position: relative; height: 26px; border: 1px solid var(--border); border-radius: 4px; background: rgba(255, 255, 255, 0.03); display: flex; align-items: flex-end; justify-content: center; min-width: 0; }
+.bmf-cell.bmf-done, .bmf-cell.bmf-partial { opacity: 0.85; }
+.bmf-cell.bmf-partial { background-image: repeating-linear-gradient(45deg, transparent 0 4px, rgba(0, 0, 0, 0.25) 4px 6px); }
+.bmf-cell.bmf-missing { border-style: dashed; border-color: var(--text-faint); background: transparent; }
+.bmf-cell.bmf-pending { opacity: 0.45; }
+.bmf-cell-t { font-size: 10px; line-height: 1; padding-bottom: 2px; color: var(--text); text-shadow: 0 0 2px rgba(0, 0, 0, 0.7); white-space: nowrap; }
+table.bmf-heat td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bmf-conclusion { border-left: 3px solid var(--accent-2); }
+/* 점검 소모품 카드 */
+.bmh-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 8px; min-width: 0; }
+.bmh-cell { min-width: 0; padding: 8px 10px; border: 1px solid var(--border-soft); border-left-width: 3px; border-radius: 8px; background: var(--panel-2); display: grid; gap: 2px; }
+.bmh-v { font-size: 17px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.bmh-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; justify-content: space-between; }
+/* 보드 줄(집중 · 소모품) */
+.bmb-strip { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.bmb-chip { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel-2); color: var(--text); font-size: 12.5px; cursor: pointer; }
+.bmb-chip[aria-pressed='true'] { border-color: var(--accent-2); }
+.bmb-chip b { font-size: 15px; }
+/* 추이 겹침(변경 이벤트 · 베이스라인 · 집중 점) */
+.bmx-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11.5px; color: var(--muted); align-items: center; }
+.bmx-sw { display: inline-block; width: 14px; height: 8px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+.bmx-plot { position: relative; min-width: 0; }
+/* 구간 비교 */
+.bmc-ab { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 8px; min-width: 0; }
+td.bmc-out { font-weight: 700; }
+/* 알림 규칙 */
+.bmr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 8px 12px; min-width: 0; }
+.bmr-grid label { font-size: 12px; display: grid; gap: 2px; min-width: 0; }
+.bmr-grid input.input { width: 100%; min-width: 0; }
+/* .bmr-grid label 의 grid 가 체크박스 줄을 덮지 않게 — 체크박스는 왼쪽, 글은 옆(1440·400 판독에서 가운데로 떠 있던 것) */
+.bmr-grid label.bmo-check { display: flex; align-items: flex-start; gap: 6px; }
+.bmr-grid label.bmo-check input, .bmr-corps label input { flex: none; margin-top: 2px; }
+table.bmr-t td { vertical-align: top; }
+table.bmr-t input.input { width: 78px; min-width: 0; }
+.bmr-corps { display: flex; flex-wrap: wrap; gap: 4px 10px; max-height: 120px; overflow: auto; font-size: 11.5px; }
+.bmr-corps label, .bmr-grid .bmr-corps label { display: inline-flex; align-items: center; gap: 4px; }
+@media (max-width: 640px) {
+  .bmf-band { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}

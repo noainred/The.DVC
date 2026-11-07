@@ -398,6 +398,114 @@ export function applyCertResults(items, { now = Date.now() } = {}) {
   return { created };
 }
 
+/* ───── v2.929(리눅스 성능 5단계) — 베어메탈 성능 알림 규칙 → 이슈(같은 문지기) ─────
+ * 규칙 열 ‘이슈 자동 등록’ 이 켜진 발송 건(bmusage/perfAlerts.js · 중앙 직접 수집분, 또는 엣지 봉투의 pending-central 을 중앙이 받아서)을 이슈로 만든다.
+ * 틀은 위와 같다: 출처(origin kind 'bmperf' · alertKey = agent|서버|규칙) · 같은 키의 열린 이슈가 있으면 댓글 · 하루 상한(규칙 설정 daily.issues — 이슈 문지기와 별도 축이라
+ *   다른 알람 상한과 따로 센다) · 법인 = 서버의 vCenter(없으면 공용 — 지어내지 않는다). 같은 발송 건(id)을 두 번 쓰지 않는다(엣지 봉투를 다시 당겨도).
+ * 판정(조건) · 발송은 그 서버를 수집하는 노드가 이미 했다 — 여기서 다시 판정하지 않는다.
+ */
+export const BMPERF_RULE_LABEL = Object.freeze({ use: 'USE 판정 변화', cross: '교차 판정', focusEnd: '집중 모니터링 결론', baseline: '베이스라인 이탈', health: '점검 소모품', profile: '용도 점검 실패' });
+/**
+ * 발송 건 → 할 일(순수).
+ *  · 중복 원천은 **받은 발송 건**이다(F2 · F3 · F12 반증): ① id 가 어느 이슈(닫힌 것 포함)의 partKeys 에 있으면 dup ② 그 열쇠(agent|서버|규칙)의 이슈들(닫힌 것 포함)이
+ *    이미 받은 가장 늦은 발송 시각(origin.lastAt)보다 이른 건은 dup — 엣지 봉투는 24시간 기록을 매번 다시 싣고, partKeys 는 64개 상한이라 밀려난 id 가 ‘새 건’ 이 되던 것을 막는다.
+ *  · 같은 묶음 안의 같은 열쇠는 하나로 — 첫 건이 만들면 나머지는 그 이슈에 댓글(만든 이슈를 byKey 에 바로 넣는다).
+ *  · 닫힌 이슈 뒤의 **새** 발생(lastAt 이후)은 새 이슈다 — 다른 알람 · 파트 장애 자동 등록과 같은 규약(‘열린 이슈가 있으면 댓글’ · 닫기는 사람의 판단이라 다시 열지 않는다).
+ *  · 하루 상한은 **법인별**(createdTodayByVc — F7: 예전에는 전 법인 합계 20 이라 한 법인이 다른 법인 이슈를 막았다).
+ * @param {Array} existing  findByOrigin(bmperf, { openOnly:false }) — 닫힌 이슈 포함
+ */
+export function planBmPerfIssues(fires, { existing = [], createdTodayByVc = new Map(), dailyMax = 20 } = {}) {
+  const actions = []; let capped = 0;
+  const byKey = new Map(); const seenIds = new Set(); const lastAt = new Map(); const lastIds = new Map();
+  for (const x of existing) {
+    const k = x.origin?.alertKey;
+    for (const id of x.origin?.partKeys || []) seenIds.add(String(id));
+    if (k) {
+      const la = Number(x.origin?.lastAt);
+      if (Number.isFinite(la) && la > (lastAt.get(k) ?? -Infinity)) { lastAt.set(k, la); lastIds.set(k, new Set((x.origin?.lastIds || []).map(String))); }
+      else if (Number.isFinite(la) && la === lastAt.get(k)) for (const id of x.origin?.lastIds || []) lastIds.get(k).add(String(id));
+      if (x.status !== 'done') byKey.set(k, x);
+    }
+  }
+  const room = new Map();
+  const roomOf = (vc) => { if (!room.has(vc)) room.set(vc, Math.max(0, dailyMax - (Number(createdTodayByVc.get(vc)) || 0))); return room.get(vc); };
+  const ordered = [...(fires || [])].sort((a, b) => (Number(a?.at) || 0) - (Number(b?.at) || 0));
+  for (const f of ordered) {
+    if (!f?.id || seenIds.has(String(f.id))) { actions.push({ type: 'dup', f }); continue; }
+    const k = `bmperf:${f.agent || ''}|${f.key}|${f.rule}`;
+    const at = Number(f.at);
+    // 같은 시각(ms)의 건은 그 시각에 받은 id 목록(lastIds)으로 가른다 — 더 이른 건은 이미 받은 것.
+    if (Number.isFinite(at) && lastAt.has(k) && (at < lastAt.get(k) || (at === lastAt.get(k) && lastIds.get(k)?.has(String(f.id))))) { actions.push({ type: 'dup', f }); continue; }
+    seenIds.add(String(f.id));
+    if (Number.isFinite(at) && at > (lastAt.get(k) ?? -Infinity)) { lastAt.set(k, at); lastIds.set(k, new Set([String(f.id)])); }
+    else if (Number.isFinite(at) && at === lastAt.get(k)) lastIds.get(k)?.add(String(f.id));
+    const ex = byKey.get(k);
+    if (ex) { actions.push({ type: 'again', key: ex.key, alertKey: k, f }); continue; }
+    const vc = String(f.vcenterId || '');
+    if (roomOf(vc) <= 0) { capped += 1; actions.push({ type: 'capped', f }); continue; }
+    room.set(vc, roomOf(vc) - 1);
+    actions.push({ type: 'create', alertKey: k, f });
+    byKey.set(k, { key: null, pendingOf: k, status: 'backlog' });   // 같은 묶음 다음 건은 이 이슈에 댓글(만든 뒤 열쇠를 채운다)
+  }
+  return { actions, capped };
+}
+let bmCapWarnedDay = '';
+function noteBmPerfCap(capped, dailyMax, now) {
+  if (!capped) return;
+  status.capped += capped; status.cappedAt = now;
+  const day = dayKey(now);
+  if (bmCapWarnedDay !== day) { bmCapWarnedDay = day; console.warn(`[issues] 베어메탈 성능 이슈 하루 상한(법인당 ${dailyMax}건)에 닿아 ${capped}건을 만들지 않았습니다 — 베어메탈 사용률 › 설정 › 리눅스 성능 알림 규칙`); }
+}
+/** 발송 건 → 이슈. 반환 byId: 발송 id → 'created' | 'commented' | 'daily-cap' | 'dup' | 'error'. 던지지 않는다. */
+export function applyBmPerfFires(fires, { now = Date.now(), dailyMax = 20 } = {}) {
+  const byId = {};
+  let plan;
+  try {
+    const existing = findByOrigin((o) => o.kind === 'bmperf', { openOnly: false });
+    const since = todayStartMs(now);
+    const vcs = new Set((fires || []).map((f) => String(f?.vcenterId || '')));
+    const createdTodayByVc = new Map([...vcs].map((vc) => [vc, originCreatedSince('bmperf', since, (x) => String(x.vcenterId || '') === vc)]));
+    plan = planBmPerfIssues(fires, { existing, createdTodayByVc, dailyMax });
+  } catch (e) { status.errors += 1; status.error = String(e?.message || e).slice(0, 200); return { byId, error: status.error }; }
+  if (plan.capped) noteBmPerfCap(plan.capped, dailyMax, now);
+  const settings = loadIssueSettings();
+  const viewers = settings.autoAssign?.enabled ? issueViewers() : null;
+  const madeKey = new Map();   // alertKey → 이번 묶음에서 만든 이슈 키
+  const bumpLast = (o, f) => {
+    const at = Number(f.at); const la = Number(o.lastAt) || 0;
+    if (!Number.isFinite(at)) return {};
+    if (at > la) return { lastAt: at, lastIds: [String(f.id)] };
+    if (at === la) return { lastIds: [...(o.lastIds || []), String(f.id)].slice(-64) };
+    return {};
+  };
+  for (const a of plan.actions) {
+    const f = a.f;
+    try {
+      if (a.type === 'dup') { byId[f.id] = 'dup'; continue; }
+      if (a.type === 'capped') { byId[f.id] = 'daily-cap'; continue; }
+      if (a.type === 'again') {
+        const key = a.key || madeKey.get(a.alertKey);
+        if (!key) { byId[f.id] = 'error'; continue; }
+        patchOrigin(key, (o) => ({ ...o, partKeys: [...(o.partKeys || []), String(f.id)].slice(-64), reopen: (o.reopen || 0) + 1, ...bumpLast(o, f) }));
+        comment(key, `다시 발생했습니다 — ${f.title || f.rule} (${portalTime(f.at)})`);
+        byId[f.id] = 'commented';
+        continue;
+      }
+      const label = BMPERF_RULE_LABEL[f.rule] || f.rule;
+      const made = make({
+        title: capStr(`[베어메탈 성능] ${f.title || `${f.name} ${label}`}`, 200), type: 'incident', priority: f.rule === 'use' || f.rule === 'profile' ? 'p1' : 'p2', labels: ['bm-perf', 'auto'], component: label,
+        vcenterId: String(f.vcenterId || ''), status: 'backlog',
+        body: capStr([`베어메탈 성능 알림 규칙 ‘${label}’ 이 이 서버에서 성립해 이슈로 등록했습니다.`, '', `■ ${f.title || ''}`, `서버: ${f.name || f.key}${f.agent ? ` · 수집 노드 ${f.agent}` : ''} · 발생 ${portalTime(f.at)}`, '',
+          '화면: 특수 기능 › 베어메탈 사용률 › 서버 상세(판정 근거 · 집중 모니터링).', '판정 · 발송은 그 서버를 수집하는 노드가 했습니다. 같은 규칙이 다시 성립하면 이 이슈에 댓글이 달립니다 — 닫기는 사람이 합니다.'].join('\n'), 9_000),
+      }, { kind: 'bmperf', alertKey: a.alertKey, alertKind: f.rule, title: f.title || '', deviceName: f.name || '', partKeys: [String(f.id)], lastAt: Number(f.at) || null, lastIds: [String(f.id)] }, settings, viewers);
+      if (made?.key) madeKey.set(a.alertKey, made.key);
+      status.created += 1;
+      byId[f.id] = 'created';
+    } catch (e) { status.errors += 1; status.error = `bmperf ${a.type}: ${String(e?.message || e).slice(0, 160)}`; byId[f.id] = 'error'; }
+  }
+  return { byId };
+}
+
 let started = false;
 /** index.js 가 기동 때 한 번 — 알람 엔진 · Bareos 실패 메일 틱 · 인증서 감시(v2.929)를 구독한다(그 모듈들은 이슈를 모른다). */
 export async function startAlertIssues() {
@@ -409,4 +517,4 @@ export async function startAlertIssues() {
   onCertResults((items) => applyCertResults(items));
 }
 /** 테스트 전용. */
-export function _resetAlertIssuesForTest() { cache = null; loadErr.clear(); Object.assign(status, freshStatus()); capWarnedDay = ''; }
+export function _resetAlertIssuesForTest() { cache = null; loadErr.clear(); Object.assign(status, freshStatus()); capWarnedDay = ''; bmCapWarnedDay = ''; }

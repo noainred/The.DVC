@@ -75,6 +75,24 @@ export const SNAPSHOT_COMMAND = Object.freeze([
   `} | head -c ${SNAPSHOT_OUTPUT_MAX}`,
 ].join(' '));
 
+/**
+ * v2.929(5단계) — 집중 모니터링의 **경량 스냅샷**(설계 PROFILES §13 ‘ps 상위 5 · /proc/pid/io 차이 · softnet · ss -s’). 진단 스냅샷의 같은 조각(상수)에서
+ *   CPU 상위 5 · PIDS · IO 차이(2초) · ss -s 만 — 커널 로그(dmesg 원문) · 메모리 상위는 넣지 않는다(분마다 원문을 남기지 않는다 · 개수는 주 명령의 ##DMESG).
+ *   softnet 은 주 명령(##SOFTNET)이 이미 읽는다. 같은 SSH 세션에서 주 명령 뒤에 돈다(collectOsUsage extraCommands — 세션을 더 열지 않는다).
+ *   규약은 SNAPSHOT_COMMAND 와 같다: 상수 · 읽기 전용 · sudo 없음 · 인자 없음(comm 만) · 출력 상한. 파서도 같다(parseSnapshot — 없는 구획은 missing).
+ */
+export const FOCUS_SNAPSHOT_TOP = 5;
+export const FOCUS_SNAPSHOT_OUTPUT_MAX = 16 * 1024;
+export const FOCUS_SNAPSHOT_COMMAND = Object.freeze([
+  'export LC_ALL=C; {',
+  `echo '##PSCPU'; ps -e -o pid=,user=,pcpu=,rss=,comm= --sort=-pcpu 2>/dev/null | head -n ${FOCUS_SNAPSHOT_TOP} | cut -c1-${W.PS};`,
+  "echo '##PIDS'; ls -d /proc/[0-9]* 2>/dev/null | wc -l;",
+  `echo '##IO'; { ${UPTIME}; ${IO_SAMPLE}; echo '@@'; sleep ${SNAPSHOT_IO_GAP_S}; ${UPTIME}; ${IO_SAMPLE}; } 2>/dev/null | ${IO_AWK} | head -n ${FOCUS_SNAPSHOT_TOP + 2} | cut -c1-120;`,
+  `echo '##SS'; ss -s 2>/dev/null | head -n 8 | cut -c1-${W.SS};`,
+  "echo '##END';",
+  `} | head -c ${FOCUS_SNAPSHOT_OUTPUT_MAX}`,
+].join(' '));
+
 const num = (v) => {
   if (v == null) return null;
   const s = String(v).trim();

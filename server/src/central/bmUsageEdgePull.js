@@ -199,6 +199,8 @@ export async function pullBmUsage(agent, { limit = 0 } = {}) {
     return { ok: false, kind: r.kind, reason: r.reason, ms: r.ms, rec };
   }
   const rec = putEdgeBmUsage(r.col.name || agent, { ok: true, ms: r.ms, snap: r.body });
+  // v2.929(5단계): 엣지 규칙이 이슈를 원한 발송 건(pending-central)을 중앙 문지기로 판단해 이슈로(같은 건은 두 번 만들지 않는다). 실패해도 당김은 성공이다.
+  try { if (rec?.snap) await (await import('./bmPerfOpsPull.js')).ingestEdgeAlertIssues(r.col.name || agent, rec.snap); } catch { /* 이슈 저장소 오류는 화면 당김을 막지 않는다 */ }
   return { ok: true, ms: r.ms, rec };
 }
 

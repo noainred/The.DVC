@@ -20,6 +20,9 @@ import BmFaultsTab from './BmFaultsTab.jsx';
 import BmTuningTab from './BmTuningTab.jsx';
 import BmProfileTab from './BmProfileTab.jsx';
 import BmSnapshotTab from './BmSnapshotTab.jsx';
+// v2.929(5단계): 집중 모니터링 탭 · 요약 탭의 점검 소모품 카드.
+import BmFocusTab from './BmFocusTab.jsx';
+import { HealthCard } from './BmPerfOpsParts.jsx';
 import {
   RES_ORDER, RES_LABEL, USE_KEYS, USE_LABEL, HW_USE_LABEL, cellView, cellFootnotes, verdictView, coverageView, rowStates, STATE_TEXT,
   mismatchText, readText, crossView, crossBandText, thresholdText, basisText, evidenceRows, DETAIL_TABS, detailNotes, pathAtText,
@@ -222,6 +225,7 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
                 </tbody>
               </STable>
               {cellFootnotes(usedCodes).map((f, i) => <p key={i} style={{ margin: 0, fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={f} /></p>)}
+              <HealthCard health={e.detail?.health || null} now={now} />
               <div>
                 <h5 style={{ margin: '0 0 4px', fontSize: 14 }}>교차 판정 — 두 경로가 다 읽혀야 켜집니다 · 상관은 ‘후보’ 로만</h5>
                 <div className="bmp-cross">
@@ -299,6 +303,7 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
           {tab === 'tuning' && <BmTuningTab key={itemKey} itemKey={itemKey} />}
           {tab === 'profile' && <BmProfileTab key={itemKey} itemKey={itemKey} />}
           {tab === 'snap' && <BmSnapshotTab key={itemKey} itemKey={itemKey} />}
+          {tab === 'focus' && <BmFocusTab key={itemKey} itemKey={itemKey} name={name} />}
 
           {tab === 'trend' && (
             // v2.923(3b): 추이 탭 — 서버를 바꾸면 상태를 새로(key). 최근 5분 장치 값(detail)은 장치 표가 함께 쓴다. 보존(일)은 이 노드 대상만 안다.
