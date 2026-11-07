@@ -4,7 +4,8 @@ import { inUserScope, inUserWriteScope, scopedVcenterIds } from '../../auth/scop
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { hostPower } from '../../idrac/service.js';
-import { fetchVmMetric, fetchHostMetric, fetchVmMetrics, fetchHostMetrics, pickPerfInterval, PERF_INTERVALS, PERF_RETENTION_DEFAULT, getVmConsole } from '../../vcenter/soapClient.js';
+import { fetchVmMetric, fetchHostMetric, fetchVmMetrics, fetchHostMetrics, pickPerfInterval, PERF_INTERVALS, PERF_RETENTION_DEFAULT, getVmConsole, fetchHostNicStats } from '../../vcenter/soapClient.js';
+import { NIC_REALTIME_SAMPLES } from '../../vcenter/nicPerf.js';   // v2.925(B-③)
 import { OVERLOAD_PCT } from '../../inventory/vmSignals.js'; // v2.911 성능 화면 기준선 — 신호 '과부하' 와 같은 값(화면에 90 을 박지 않는다)
 import { respondIfVcAuthStopped, respondVcError } from '../../vcenter/authStopGate.js'; // v2.733(C3-01): 판정을 공용 헬퍼로
 import { isAdminReq } from '../../auth/addressMask.js';
@@ -84,6 +85,31 @@ function synthMetric(vm, type, interval, range = {}) {
     points.push({ t, v: Math.round(v * 10) / 10 });
   }
   return { ok: true, type, interval, unit: METRIC_UNIT[type], points, mock: true, start: range.start || null, end: range.end || null };
+}
+
+/**
+ * v2.925(B-③) — 목 모드 vmnic 카운터(라이브 fetchHostNicStats 와 같은 모양). 호스트 id 로 결정적이고, 몇몇 호스트의 한 NIC 에만
+ * 수신 드롭을 넣어 화면의 판정('ESXi 쪽 · 스위치 쪽 · 드롭 없음')이 갈리게 한다. NIC 이름을 하나도 모르면 빈 목록.
+ */
+export function synthNicStats(host, now = Date.now()) {
+  const seed = [...String(host?.id || '')].reduce((a, c) => a + c.charCodeAt(0), 0);
+  const samples = NIC_REALTIME_SAMPLES;
+  const end = Math.floor(now / 20_000) * 20_000;
+  // 인벤토리 NIC 목록이 없는 데모 호스트는 가상 스위치 업링크 이름(hcfg.net)으로 — 라이브는 vCenter 가 답한 인스턴스를 그대로 쓴다.
+  const names = new Set((Array.isArray(host?.nics) ? host.nics : []).map((n) => String(n?.device || '')));
+  for (const sw of (Array.isArray(host?.hcfg?.net?.switches) ? host.hcfg.net.switches : [])) for (const u of (Array.isArray(sw?.uplinks) ? sw.uplinks : [])) names.add(String(u || ''));
+  const nics = [...names].filter((d) => /^vmnic\d{1,3}$/.test(d)).slice(0, 16)
+    .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+    .map((nic, i) => {
+      const up = (Array.isArray(host?.nics) ? host.nics : []).find((n) => n?.device === nic)?.link !== false;
+      const pk = up ? 180 * (1800 + ((seed * (i + 3)) % 900)) : 0;
+      const dropRx = up && (seed + i) % 4 === 0 ? 20 + (seed % 40) : 0;
+      return { nic, droppedRx: dropRx, droppedTx: 0, errorsRx: 0, errorsTx: 0, packetsRx: pk, packetsTx: Math.round(pk * 0.8),
+        valid: { droppedRx: samples, droppedTx: samples, errorsRx: samples, errorsTx: samples, packetsRx: samples, packetsTx: samples },
+        samples, partial: false };
+    });
+  return { ok: true, mock: true, interval: 'realtime', sampleSec: 20, nics, windowStart: new Date(end - (samples - 1) * 20_000).toISOString(), windowEnd: new Date(end).toISOString(),
+    samples, missingCounters: [], instancesTruncated: false };
 }
 
 /** 스냅샷 객체(VM·호스트) → { vcId, moref }. id 를 첫 콜론에서 자르지 않는다(v2.598 VC2598-06 — registry.morefOf 규약). */
@@ -177,6 +203,33 @@ api.get('/hosts/:id/metrics', requirePerm('inv.hosts'), async (req, res) => {
   if (metricAuthStopped(req, res, vc)) return;
   try {
     res.json(types.length ? withOverload(await fetchHostMetrics(vc, moref, types, interval, { start, end })) : await fetchHostMetric(vc, moref, type, interval, { start, end }));
+  } catch (err) {
+    metricError(res, vc, err);
+  }
+});
+
+// v2.925(B-③) — 호스트 vmnic 드롭·에러(vCenter 실시간 최근 1시간). 형제 /hosts/:id/metrics 와 같은 게이트(inv.hosts · 범위 밖 404 ·
+//   주 폴러 인증 정지면 로그인하지 않음). 주기 수집이 아니라 화면 버튼으로만 부른다. 같은 호스트를 동시에 물으면 진행 중인 조회 하나를 함께 쓴다.
+const _nicInflight = new Map();   // `${vcId}\u0000${moref}` -> Promise
+api.get('/hosts/:id/nic-stats', requirePerm('inv.hosts'), async (req, res) => {
+  const snap = store.get();
+  const host = (snap.hosts || []).find((h) => h.id === req.params.id);
+  if (!host) return res.status(404).json({ ok: false, reason: '호스트를 찾을 수 없습니다.' });
+  if (!inUserScope(req.user, snap, host.vcenterId)) return res.status(404).json({ ok: false, reason: '호스트를 찾을 수 없습니다.' });
+  res.set('Cache-Control', 'no-store');
+  if (snap.source === 'mock') return res.json({ ...synthNicStats(host), host: { id: host.id, name: host.name } });
+  const { vcId, moref } = vcRefOf(host);
+  const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcId);
+  if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
+  if (metricAuthStopped(req, res, vc)) return;
+  const k = `${vcId}\u0000${moref}`;
+  let p = _nicInflight.get(k);
+  if (!p) {
+    p = fetchHostNicStats(vc, moref).finally(() => { if (_nicInflight.get(k) === p) _nicInflight.delete(k); });
+    _nicInflight.set(k, p);
+  }
+  try {
+    res.json({ ...(await p), host: { id: host.id, name: host.name } });
   } catch (err) {
     metricError(res, vc, err);
   }

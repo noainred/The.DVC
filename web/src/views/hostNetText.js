@@ -87,7 +87,8 @@ export function l2Text(l2, now = Date.now()) {
 export function ageText(at, now = Date.now()) {
   const t = Number(at);
   if (!Number.isFinite(t) || t <= 0) return '';
-  const m = Math.max(0, Math.round((now - t) / 60_000));
+  const m = Math.max(0, Math.floor((now - t) / 60_000));
+  if (m < 1) return '1분 안';   // v2.925: '0분 전' 이 어색했다(B-② 화면 확인)
   return m < 60 ? `${m}분 전` : m < 48 * 60 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`;
 }
 /** v2.924(반증 M-3): L2 근거가 이만큼 넘게 오래되면 타일에 ‘오래됨’ 을 붙인다(부품 주기 30분 × 6). */

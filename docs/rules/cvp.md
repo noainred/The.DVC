@@ -168,4 +168,14 @@
     · L-9 이웃 섀시 MAC 이 NIC MAC 이면 LLDP 일치(IP 로 알린 이웃) · NIC 목록이 없어도 portId 가 vmnicN 이면 그 이름.
     · 남긴 것(정직): L-5 vMotion·유지보수 직후 30분 FDB 와 지금 VM 목록이 어긋나 VM MAC 근거가 옮겨 간 쪽 호스트에 잠깐 붙을 수 있다(근거 나이로만 드러난다) ·
       L-8 FDB 응답이 본문 상한(BODY_MAX_BYTES 8MB)을 넘으면 그 장비는 매 주기 못 읽는다(사유가 남는다).
+- **v2.925(SAN·CVP 설계 B-③) — ESXi vmnic 드롭·에러와 같은 1시간 스위치 드롭을 나란히 · ‘어느 쪽 드롭’ 판정**(`vcenter/nicPerf.js`(순수) · `soapClient.js fetchHostNicStats` ·
+  `GET /hosts/:id/nic-stats`(`routes/api/vmMetrics.js`) · `cvp/db.js portWindowSums recentMs` · net-uplinks `hour` · 웹 `HostNicCounters.jsx`·`hostNicText.js` · 회귀 `server/test/esxiNic2925.test.js` · 웹 `hostNicText.test.js`):
+  - ESXi 쪽은 **주기 수집이 아니다** — 호스트 상세 ‘네트워크’ 카드의 버튼으로만 vCenter QueryPerf 를 instance ‘*’ 로 한 번(로그인 1회 · `net.{droppedRx,droppedTx,errorsRx,errorsTx,packetsRx,packetsTx}.summation`
+    · 실시간 20초 × 180 = 최근 1시간). 게이트는 형제 `/hosts/:id/metrics` 와 같다(inv.hosts · 범위 밖 404 · 인증 정지 vCenter 는 로그인하지 않음). 같은 호스트 동시 요청은 진행 중인 조회 하나를 함께 쓴다(캐시는 아니다).
+  - 집계 계열(instance '')·이름이 이상한 인스턴스는 버리고 vmnic 은 64개 상한. vCenter 결측(-1)은 0 으로 세지 않는다 — 값이 있는 표본만 더하고 결측이 섞이면 `partial`(화면 ‘(일부)’).
+    카탈로그에 없는 카운터는 `missingCounters` + 그 칸 null. ⚠ ‘실시간은 통계 레벨과 무관’ 은 VMware 문서 기준이고 실장비로 확인하지 못했다(계열이 비면 ‘—’ 와 안내).
+  - 스위치 쪽은 net-uplinks 의 `hour`(같은 원시 표본에서 최근 1시간 — `portWindowSums({ recentMs })`, `day` 모양은 그대로). 판정은 **방향 짝**:
+    서버 수신 = 스위치 Out 드롭 ↔ ESXi droppedRx · 서버 송신 = 스위치 In 드롭 ↔ ESXi droppedTx. 양쪽 값이 다 있을 때만 ‘ESXi 쪽 · 스위치 쪽 · 양쪽 · 드롭 없음’,
+    결측이 섞인 0 · 매칭 포트 없음/둘 이상은 ‘판정 보류’(한쪽에만 드롭이 보이면 그쪽 드롭만 말한다). 판정 코어는 웹 `hostNicText.sideVerdict` 하나.
+  - 데모는 `synthNicStats`(인벤토리 NIC 이 없으면 가상 스위치 업링크 이름) — 몇몇 호스트의 한 NIC 에만 수신 드롭.
 
