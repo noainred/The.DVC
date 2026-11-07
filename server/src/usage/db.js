@@ -83,7 +83,7 @@ function stmts(db) {
     delUser: db.prepare('DELETE FROM fu_user WHERE user = ?'),
     delAllUsers: db.prepare('DELETE FROM fu_user'),
     // v2.927(점검 C1-02): 마지막 사용이 보관 기간 밖인 계정 — 계정 수만큼이라(수백) 한 문장으로 지운다(청크 불필요).
-    pruneUsers: db.prepare('DELETE FROM fu_user WHERE last_ts < ?'),
+    pruneUsers: db.prepare('DELETE FROM fu_user WHERE rowid IN (SELECT rowid FROM fu_user WHERE last_ts < ? LIMIT ?)'),   // 청크(chunkedDelete — perf-db 보존 정리 규약)
   };
   _stmtsFor = db;
   return _stmts;
@@ -160,10 +160,11 @@ function dayStartOfLabel(label) {
  *   앞인 계정(= 그 계정의 일 집계도 전부 그 날 앞)을 같이 지운다. 로컬 계정은 accountTable 이 지금 계정 목록으로 다시 채운다(마지막 사용은 '—').
  *   last_ts 가 NULL 인 행은 비교가 참이 아니라 남는다(시각을 모르는 행을 추측으로 지우지 않는다).
  */
-function pruneUsersBefore(st, day) {
+async function pruneUsersBefore(st, day, { maxRows } = {}) {
   const ms = dayStartOfLabel(day);
   if (!Number.isFinite(ms)) return 0;
-  return Number(st.pruneUsers.run(ms)?.changes) || 0;
+  const r = await chunkedDelete(st.pruneUsers, [ms], { label: 'usage.fu_user', ...(maxRows != null ? { maxRows } : {}) });
+  return Number(r?.deleted) || 0;
 }
 
 const _pruneFlight = createPruneFlight();
@@ -174,7 +175,7 @@ export async function pruneUsage(cutoffDay) {
   return _pruneFlight.run(cutoffDay, async () => {
     const st = stmts(db);
     const r = await chunkedDelete(st.pruneDaily, [cutoffDay], { label: 'usage.fu_daily' });
-    return { ...r, users: pruneUsersBefore(st, cutoffDay) };
+    return { ...r, users: await pruneUsersBefore(st, cutoffDay) };
   });
 }
 
@@ -196,7 +197,7 @@ export async function purgeUsage({ scope, user = '', before = '' }) {
   } else if (scope === 'before') {
     r = await chunkedDelete(st.pruneDaily, [before], { label: 'usage.purge-before', maxRows: 0 });
     // v2.927(점검 C1-02): '이전 기록 지우기' 도 그 날 앞에서 마지막으로 쓴 계정의 이름 · 역할 · 마지막 사용을 같이 지운다.
-    r = { ...r, users: pruneUsersBefore(st, before) };
+    r = { ...r, users: await pruneUsersBefore(st, before, { maxRows: 0 }) };
   } else return { ok: false, deleted: 0, reason: 'bad-scope' };
   return { ok: true, deleted: r.deleted, ...(r.users != null ? { users: r.users } : {}) };
 }

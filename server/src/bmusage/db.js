@@ -303,7 +303,8 @@ export async function repairRollups({ rawKeepFrom = null } = {}) {
   if (!db) return { ok: false, reason: 'db-unavailable' };
   const m = readMeta(db, MIGRATE_KEY);
   const r = await month.repairPending({ dailyLiveAfter: m && m.phase !== 'none' ? n(m.legacyMaxTs) : null, rawKeepFrom });
-  return { ok: !r.errors.length, ...r };
+  // v2.927(점검 E1-02): 재시도 간격 중인 파일(backoff)이 있으면 이번에 오류가 없어도 ok 가 아니다 — 대기가 그 파일 앞에 묶여 있다.
+  return { ok: !r.errors.length && !(r.backoff || []).length, ...r };
 }
 /** 메인 파일 핸들(마이그레이션 모듈 전용 — 같은 연결을 쓴다: 두 연결이 같은 파일에 쓰면 SQLITE_BUSY). */
 export async function mainDbForMigration() { return getDb(); }
@@ -330,23 +331,51 @@ export async function migrationReadRule() {
   return readRule(db ? readMeta(db, MIGRATE_KEY) : null);
 }
 
+/*
+ * v2.927(점검 E1-03): 한 주기 적재를 **서버 묶음(조각)** 으로 나눠, 조각마다 끝까지(원시 → 1시간 → 1일 → 보정 대기 정리 → 최신값 → 장치 5분·1시간 →
+ *   장치 목록 → 마운트) 넣고 조각 사이에 setImmediate 로 양보한다. 예전에는 한 주기 전부를 양보 없이 넣어 1,000대 × 장치 32 에서 5분마다 약 1초 멈췄다.
+ *   ⚠ 조각 경계는 **서버 경계**다(한 서버의 행·장치·마운트는 한 조각). 조각 안에는 예전처럼 매크로태스크 양보가 없어 요청 처리가 한 서버의
+ *   ‘원시만 있고 롤업·최신값은 아직’ 상태를 보지 못한다(서버 단위 원자성은 예전과 같다). 조각 사이의 서버는 이번 주기 적재가 끝났거나 아직 시작 전이다 —
+ *   한 서버의 부분 합은 생기지 않는다(지금 시간·날 버킷은 원래 진행 중인 값이다). 두 커밋 사이에 프로세스가 끝나는 경우는 예전과 같이 _pend 보정이 덮는다.
+ */
+export const INSERT_CHUNK_ROWS = Math.max(16, Number(process.env.BMUSAGE_INSERT_CHUNK_ROWS) || 256);
+/** 서버 키별로 묶어(처음 나온 순서 · 서버 안 순서 유지) 무게(서버 행 + 장치 행 + 마운트 행)가 상한을 넘기 전에 조각을 끊는다. 서버 하나는 쪼개지 않는다(순수). */
+export function chunkByServer(rows = [], devices = [], mounts = [], maxRows = INSERT_CHUNK_ROWS) {
+  const by = new Map();
+  const slot = (x) => { const k = String(x?.key || '').trim(); if (!by.has(k)) by.set(k, { rows: [], devices: [], mounts: [] }); return by.get(k); };
+  for (const r of rows) slot(r).rows.push(r);
+  for (const d of devices) slot(d).devices.push(d);
+  for (const m of mounts) slot(m).mounts.push(m);
+  const chunks = []; let cur = null; let w = 0;
+  for (const s of by.values()) {
+    const sw = s.rows.length + s.devices.length + s.mounts.length;
+    if (cur && w + sw > maxRows) { chunks.push(cur); cur = null; w = 0; }
+    if (!cur) cur = { rows: [], devices: [], mounts: [] };
+    // 큰 배열 전개 push 금지(v2.603 — RangeError)
+    for (const x of s.rows) cur.rows.push(x);
+    for (const x of s.devices) cur.devices.push(x);
+    for (const x of s.mounts) cur.mounts.push(x);
+    w += sw;
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+
 /**
  * 한 주기의 행들을 적재한다(v2.922): 5분 원시·1시간·1일 롤업은 **시간 단위 파일**(monthStore — 원시가 새로 들어간 행만 롤업),
- * 최신값·장치 목록은 이 메인 파일. 장치별 행(devices)·마운트(mounts)는 있으면 함께.
+ * 최신값·장치 목록은 이 메인 파일. 장치별 행(devices)·마운트(mounts)는 있으면 함께. v2.927(점검 E1-03): 서버 묶음 조각 + 조각 사이 양보(위 주석).
  * @param {Array} rows  `[{ key, ts, name, vcenterId, src, cpu_pct, … , <열>_peak, peak_src … }]`
  * @param {string} agent
- * @param {{devices?:Array, mounts?:Array}} [extra]
+ * @param {{devices?:Array, mounts?:Array, chunkRows?:number}} [extra]
  */
-export async function insertUsage(rows = [], agent = '', { devices = [], mounts = [] } = {}) {
+export async function insertUsage(rows = [], agent = '', { devices = [], mounts = [], chunkRows = INSERT_CHUNK_ROWS } = {}) {
   const db = await getDb();
   if (!db || !rows.length) return { ok: !!db, inserted: 0 };
   // v2.919(반증 D6): 열 목록은 **실제로 있는 열만** — ALTER 가 일부 실패한 DB 에서도 기존 다섯 지표 적재가 통째로 실패하지 않게 한다.
   const has = (table, col) => !_perfCols || !_perfCols[table] || _perfCols[table].has(col);
   const LC = PERF_COL_NAMES.filter((c) => has('usage_latest', c));
   const LX = LATEST_EXTRA_COLS.filter((c) => has('usage_latest', c));
-  // ① 5분 원시 → 1시간 → 1일(시간 단위 파일). INSERT OR IGNORE + 새로 들어간 행만 롤업(이중 계수 금지 — monthStore).
   const valid = rows.filter((r) => String(r?.key || '').trim() && Number.isFinite(Number(r?.ts)));
-  const w = await month.writeServerRows(valid, agent).catch((e) => ({ ok: false, inserted: 0, duplicates: 0, errors: [String(e?.message || e).slice(0, 200)] }));
   /* 최신값 테이블 — ⚠ **`ts` 가 더 클 때만** 갱신한다(엣지 push 는 순서대로 오지 않는다 — v2.531 규약). */
   /*
    * v2.919: 최신값에는 새 지표 열 + 두 경로 읽은 시각 + 장치별·튜닝 JSON 도 둔다. 읽은 시각은 **그 경로를 마지막으로 읽은 시각**이라
@@ -366,37 +395,53 @@ export async function insertUsage(rows = [], agent = '', { devices = [], mounts 
       net_pct=excluded.net_pct, net_bps=excluded.net_bps,
       hba_pct=excluded.hba_pct, hba_bps=excluded.hba_bps, io_pct=excluded.io_pct${LSET}${LXSET}
       WHERE excluded.ts > usage_latest.ts`);
-  const insertedSet = new Set((w.insertedRows || []).map((r) => r));
-  db.exec('BEGIN');
-  try {
-    for (const r of valid) {
-      // 원시가 이미 있던 행(같은 ts 재전송)은 최신값도 건드리지 않는다(예전과 같은 동작 — 원시 IGNORE 면 롤업·최신값 모두 그대로).
-      if (w.ok !== false && !insertedSet.has(r) && w.insertedRows) continue;
-      const key = String(r.key).trim(); const ts = Number(r.ts);
-      const vals = [n(r.cpu_pct), n(r.mem_pct), n(r.disk_busy_pct), n(r.disk_used_pct), n(r.net_pct), n(r.net_bps), n(r.hba_pct), n(r.hba_bps), n(r.io_pct)];
-      const lx = (c) => (c === 'detail_json' || c === 'tuning_json' ? jsonText(r[c]) : TEXT_EXTRA.has(c) ? (r[c] ? String(r[c]).slice(0, 16) : null) : n(r[c]));
-      upLatest.run(agent, key, ts, String(r.name || ''), String(r.vcenterId || ''), String(r.src || ''), ...vals, ...LC.map((c) => n(r[c])), ...LX.map(lx));
+  const acc = { wOk: true, inserted: 0, duplicates: 0, devInserted: 0, wErr: [], devErr: [], mntErr: [], latestErr: null };
+  const chunks = chunkByServer(valid, devices, mounts, chunkRows);
+  for (let ci = 0; ci < chunks.length; ci++) {
+    if (ci) await new Promise((r) => { setImmediate(r); });   // 조각 COMMIT 뒤 양보(v2.927 E1-03)
+    const c = chunks[ci];
+    // ① 5분 원시 → 1시간 → 1일(시간 단위 파일). INSERT OR IGNORE + 새로 들어간 행만 롤업(이중 계수 금지 — monthStore).
+    const w = await month.writeServerRows(c.rows, agent).catch((e) => ({ ok: false, inserted: 0, duplicates: 0, errors: [String(e?.message || e).slice(0, 200)] }));
+    if (w.ok === false) acc.wOk = false;
+    acc.inserted += w.inserted || 0; acc.duplicates += w.duplicates || 0;
+    for (const x of (w.errors || [])) acc.wErr.push(x);
+    const insertedSet = new Set((w.insertedRows || []).map((r) => r));
+    db.exec('BEGIN');
+    try {
+      for (const r of c.rows) {
+        // 원시가 이미 있던 행(같은 ts 재전송)은 최신값도 건드리지 않는다(예전과 같은 동작 — 원시 IGNORE 면 롤업·최신값 모두 그대로).
+        if (w.ok !== false && !insertedSet.has(r) && w.insertedRows) continue;
+        const key = String(r.key).trim(); const ts = Number(r.ts);
+        const vals = [n(r.cpu_pct), n(r.mem_pct), n(r.disk_busy_pct), n(r.disk_used_pct), n(r.net_pct), n(r.net_bps), n(r.hba_pct), n(r.hba_bps), n(r.io_pct)];
+        const lx = (col) => (col === 'detail_json' || col === 'tuning_json' ? jsonText(r[col]) : TEXT_EXTRA.has(col) ? (r[col] ? String(r[col]).slice(0, 16) : null) : n(r[col]));
+        upLatest.run(agent, key, ts, String(r.name || ''), String(r.vcenterId || ''), String(r.src || ''), ...vals, ...LC.map((col) => n(r[col])), ...LX.map(lx));
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch { /* */ }
+      // 예전에는 여기서 곧바로 돌아가 장치·마운트를 건너뛰었다 — 조각에서도 이 조각의 장치·마운트는 건너뛰고, 다른 조각은 계속한다(일시 잠금 하나로 나머지 서버를 잃지 않게).
+      if (!acc.latestErr) acc.latestErr = String(e?.message || e).slice(0, 200);
+      continue;
     }
-    db.exec('COMMIT');
-  } catch (e) {
-    try { db.exec('ROLLBACK'); } catch { /* */ }
-    return { ok: false, inserted: 0, error: String(e?.message || e).slice(0, 200) };
+    // ② 장치별(5분 → 1시간) · 마운트(일 롤업) · 장치 목록(메인 — 처음 본 순서가 색 순서).
+    if (c.devices.length) {
+      const dev = await month.writeDeviceRows(c.devices, agent).catch((e) => ({ ok: false, errors: [String(e?.message || e).slice(0, 200)] }));
+      acc.devInserted += dev?.inserted ?? 0;
+      for (const x of (dev?.errors || [])) acc.devErr.push(x);
+      upsertDeviceList(db, agent, c.devices);
+    }
+    if (c.mounts.length) {
+      const mnt = await month.writeMountRows(c.mounts, agent).catch((e) => ({ ok: false, errors: [String(e?.message || e).slice(0, 200)] }));
+      for (const x of (mnt?.errors || [])) acc.mntErr.push(x);
+      upsertDeviceList(db, agent, c.mounts.map((m) => ({ ...m, kind: 'mount', dev: m.mount })));
+    }
   }
-  // ② 장치별(5분 → 1시간) · 마운트(일 롤업) · 장치 목록(메인 — 처음 본 순서가 색 순서).
-  let dev = null; let mnt = null;
-  if (devices.length) {
-    dev = await month.writeDeviceRows(devices, agent).catch((e) => ({ ok: false, errors: [String(e?.message || e).slice(0, 200)] }));
-    upsertDeviceList(db, agent, devices);
-  }
-  if (mounts.length) {
-    mnt = await month.writeMountRows(mounts, agent).catch((e) => ({ ok: false, errors: [String(e?.message || e).slice(0, 200)] }));
-    upsertDeviceList(db, agent, mounts.map((m) => ({ ...m, kind: 'mount', dev: m.mount })));
-  }
-  if (w.inserted) { _counts = null; month.invalidateMonthCounts(); }
-  const errors = [...(w.errors || []), ...(dev?.errors || []), ...(mnt?.errors || [])];
+  if (acc.inserted) { _counts = null; month.invalidateMonthCounts(); }
+  if (acc.latestErr) return { ok: false, inserted: acc.inserted, error: acc.latestErr };
+  const errors = [...acc.wErr, ...acc.devErr, ...acc.mntErr];
   return {
-    ok: w.ok !== false, inserted: w.inserted || 0, duplicates: w.duplicates || 0,
-    ...(devices.length ? { devicesInserted: dev?.inserted ?? 0 } : {}),
+    ok: acc.wOk, inserted: acc.inserted, duplicates: acc.duplicates,
+    ...(devices.length ? { devicesInserted: acc.devInserted } : {}),
     ...(errors.length ? { error: errors.slice(0, 3).join(' · ').slice(0, 300) } : {}),
     ...(_migrateError ? { migrateError: _migrateError } : {}),
   };
@@ -404,20 +449,30 @@ export async function insertUsage(rows = [], agent = '', { devices = [], mounts 
 
 /**
  * 장치 목록(메인 파일) — 처음 보면 종류 안 순번(ord)을 받는다. ord 는 **바뀌지 않는다**(장치 색이 필터·추가로 바뀌지 않게 — 설계 §12).
- *   ord 는 `MAX(ord)+1`(집계 하나 · PK 선행열로 좁힌다). 이미 있으면 last_ts 만 올린다.
+ *   ord 는 그 서버·종류의 MAX(ord)+1 이다. 이미 있으면 last_ts 만 올린다.
+ *   v2.927(점검 E1-03): 예전에는 행마다 `SELECT 1`(있나) + `MAX(ord)` 를 물었다(1,000대 × 32 = 6.4만 문장). 이제 서버·종류마다 한 번 그 목록(dev·ord)을 읽어
+ *   JS 에서 있나·다음 번호를 정한다 — 같은 트랜잭션 안에서 앞 행이 넣은 장치도 그 집합에 더하므로 결과(ord)는 예전과 같다.
  */
 function upsertDeviceList(db, agent, list) {
   try {
-    const nextOrd = db.prepare('SELECT IFNULL(MAX(ord),0)+1 AS o FROM usage_devices WHERE agent=? AND key=? AND kind=?');
+    const existing = db.prepare('SELECT dev, ord FROM usage_devices WHERE agent=? AND key=? AND kind=?');
     const ins = db.prepare(`INSERT INTO usage_devices (agent,key,kind,dev,ord,first_ts,last_ts,info) VALUES (?,?,?,?,?,?,?,?)
       ON CONFLICT(agent,key,kind,dev) DO UPDATE SET last_ts=MAX(IFNULL(last_ts,0),excluded.last_ts), info=COALESCE(excluded.info, info)`);
-    const seen = db.prepare('SELECT 1 FROM usage_devices WHERE agent=? AND key=? AND kind=? AND dev=?');
+    const groups = new Map();   // key\0kind → { seen:Set<dev>, next:number }
     db.exec('BEGIN');
     try {
       for (const d of list) {
         const key = String(d.key || '').trim(); const kind = String(d.kind || ''); const dv = String(d.dev || '').slice(0, 256);
         if (!key || !kind || !dv) continue;
-        const ord = seen.get(agent, key, kind, dv) ? 0 : Number(nextOrd.get(agent, key, kind)?.o || 1);
+        const gk = `${key}\u0000${kind}`;
+        let g = groups.get(gk);
+        if (!g) {
+          g = { seen: new Set(), next: 1 };
+          for (const x of existing.all(agent, key, kind)) { g.seen.add(String(x.dev)); const o = Number(x.ord); if (Number.isFinite(o) && o + 1 > g.next) g.next = o + 1; }
+          groups.set(gk, g);
+        }
+        let ord = 0;
+        if (!g.seen.has(dv)) { ord = g.next; g.next += 1; g.seen.add(dv); }
         ins.run(agent, key, kind, dv, ord, Number(d.ts) || null, Number(d.ts) || null, d.info ? String(d.info).slice(0, 512) : null);
       }
       db.exec('COMMIT');

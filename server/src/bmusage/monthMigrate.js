@@ -119,14 +119,20 @@ async function runInner({ chunkRows = MIGRATE_CHUNK_ROWS, sliceMs = 15, stopAfte
           const w = await month.writeServerRows(recent, agent, { rollup: false, pend: 'all', pendDaily: false });
           failIfErrors(w, '원시 옮기기');
           st.copied.raw += w.inserted; st.copied.rawDup += w.duplicates; st.copied.rawOld += list.length - recent.length;
+          await maybeYield();   // v2.927(점검 E1-04): 쓰기 · 롤업 · 보정 사이에도 양보(예전에는 청크 사이에서만 — 청크 하나가 120~150ms 연속)
           const old = list.filter((r) => Number(r.ts) >= hourlyFrom && Number(r.ts) < st.rawCopyFrom);
           const h = await month.rollupServerRows(old, agent, { ok: true, errors: [] }, { daily: false, migKey: `legacy_raw|${agent}`, migRowid: '_rid' });
           failIfErrors(h, '1시간 롤업');
           st.copied.hourly += old.length + recent.filter((r) => Number(r.ts) >= hourlyFrom).length;
+          await maybeYield();
         }
-        // 이번 청크의 보정 대기(보존 안 버킷)를 원시에서 다시 집계 — 1일은 건드리지 않는다(예전 일 롤업은 사본 표가 갖는다).
-        const rp = await month.repairPending({ dailyLiveAfter: st.legacyMaxTs ?? null });
-        if (rp.errors.length) throw new Error(`1시간 재집계: ${rp.errors.slice(0, 2).join(' · ')}`);
+        /*
+         * 이번 청크의 보정 대기(보존 안 버킷)를 원시에서 다시 집계 — 1일은 건드리지 않는다(예전 일 롤업은 사본 표가 갖는다).
+         * v2.927(점검 E1-04): 보정 안에서 버킷 사이 시간 기준 양보(이 실행의 양보기를 넘긴다) · 시간 상한 없음(이 청크의 대기를 다 끝내야 대조가 맞는다 — 남기면 hourly 불일치) ·
+         *   재시도 간격 무시(마이그레이션은 자기 재시도 정책이 있다 — 실패를 바로 failed 로 올린다). 남은 대기(deferred·skipped)도 실패로 본다.
+         */
+        const rp = await month.repairPending({ dailyLiveAfter: st.legacyMaxTs ?? null, budgetMs: Infinity, yielder: maybeYield, ignoreBackoff: true });
+        if (rp.errors.length || rp.deferred || rp.skipped) throw new Error(`1시간 재집계: ${rp.errors.slice(0, 2).join(' · ') || `남은 대기 ${rp.deferred + rp.skipped}건`}`);
         st.rawCursor = Number(rows.at(-1)._rid);
         save();
         if (hooks.afterRawChunk) await hooks.afterRawChunk(st);
