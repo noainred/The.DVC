@@ -62,8 +62,13 @@ export function fitEnvelope(env, maxBytes = ENVELOPE_MAX_BYTES) {
   let out = { ...env, perf: (env.perf || []).map(compactPerfEntry) };
   let level = 'compact';
   let after = jsonBytes(out);
+  // 7a단계: 로그 요약은 성능 상세 다음으로 줄인다 — ① 상위 패턴의 표본 · 서명 글자 제거 ② (성능 항목 제거 뒤에도 넘치면) 상위 패턴 제거. 분류별 개수 · 출처 상태는 남는다. 뺀 사실은 logsTruncated.
+  let logLevel = null;
+  if (after > maxBytes && Array.isArray(out.logSummary)) { out = { ...out, logSummary: out.logSummary.map((x) => ({ ...x, top: (x.top || []).map(({ sample: _s, tmpl: _t, ...p }) => p) })) }; logLevel = 'compact'; after = jsonBytes(out); }
   if (after > maxBytes) { out = { ...out, perf: [] }; level = 'dropped'; after = jsonBytes(out); }
+  if (after > maxBytes && Array.isArray(out.logSummary)) { out = { ...out, logSummary: out.logSummary.map((x) => ({ ...x, top: [] })) }; logLevel = 'dropped'; after = jsonBytes(out); }
   out.perfTruncated = { reason: 'envelope-bytes', level, bytesBefore: before, bytesAfter: after, maxBytes, ...(after > maxBytes ? { overStill: true } : {}) };
+  if (logLevel) out.logsTruncated = { level: logLevel };
   return out;
 }
 
@@ -148,7 +153,8 @@ async function envelopeLogs(keys) {
   try {
     const V = await import('./logs/view.js');
     const sum = await V.logSummaryNow();
-    if (Array.isArray(sum?.list)) out.logSummary = sum.list.filter((x) => keys.has(t(x.key)));
+    // 봉투에는 상위 5 · 표본 160자 · 서명 120자(1,000대 ≈ 2MB 안팎 추정 — 상세는 볼 때 대행). 넘치면 fitEnvelope 가 더 줄이고 밝힌다.
+    if (Array.isArray(sum?.list)) out.logSummary = sum.list.filter((x) => keys.has(t(x.key))).map((x) => ({ ...x, top: (x.top || []).slice(0, 5).map((p) => ({ ...p, tmpl: String(p.tmpl || '').slice(0, 120), sample: String(p.sample || '').slice(0, 160) })) }));
   } catch { /* 그 필드만 빠진다 */ }
   return out;
 }

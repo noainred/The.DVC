@@ -65,6 +65,8 @@ test('① 성공 왕복 — 봉투(logsVer · logSummary) · 상세(pullEdgeLogs
   assert.equal(d.body.read.sources.secure.status, 'perm');
   assert.equal(d.body.patterns[0].ruleId, 'ISS-UNIT-FAIL');
   assert.ok(Array.isArray(d.body.hourly) && d.body.hourly.length === 24);
+  assert.equal(d.body.hourly[0].issue, null, '읽은 기록이 없는 시간 칸은 null(0 으로 채우지 않는다)');
+  assert.equal(d.body.hourly.filter((h) => h.issue != null).length >= 1, true, '읽은 시간 칸은 수');
   const nf = await L.pullEdgeLogs('log-edge', { key: 'NOPE' });
   assert.equal(nf.ok, false); assert.notEqual(nf.kind, 'bad-body', '대상 밖 키는 엣지가 404 로 답한다(왕복 성공)');
 });
@@ -91,7 +93,7 @@ test('② 구버전 엣지(경로 없음) → old-version · 최소 버전은 �
   F._resetFeatureMinEdgeVersionForTest(F.STAGE7A_TITLE_RE);
 });
 
-test('③ 정제 — 아는 필드만 · 규칙 id 카탈로그만 · 대상 밖 키 버림 · 수 · 제어문자 · 시각 clamp · 프로토타입', () => {
+test('③ 정제 — 아는 필드만 · 규칙 id 카탈로그만 · 대상 밖 키 버림 · 수 · 제어문자 · 시각 clamp · 프로토타입 · 봉투 상한', async () => {
   const now = NOW;
   const evil = [
     { key: 'K1', at: now + 10 * 86_400_000, cls: { fault: { patterns: '2', lines: '5' }, perf: 'x', __proto__: { polluted: 1 } }, read: '10', trunc: null, secHigh: 'abc',
@@ -120,5 +122,13 @@ test('③ 정제 — 아는 필드만 · 규칙 id 카탈로그만 · 대상 밖
   assert.equal(v.read.sources.journal.status, 'missing'); assert.equal(v.read.sources.journal.n, 3); assert.equal(v.read.cut, null);
   assert.equal(v.security.fail_ip[0].count, 2); assert.equal(v.security.evil, undefined);
   assert.equal(L.logViewBodyOk({ ok: true, node: {} }), false, '봉투 모양은 상세가 아니다');
+  // 봉투 바이트 상한 — 로그 요약은 표본 · 서명 글자 → 상위 패턴 순으로 줄이고(분류별 개수는 남김) logsTruncated 로 밝힌다
+  const EP = await import('../src/bmusage/edgePull.js');
+  const big = { node: {}, perf: [], logSummary: Array.from({ length: 40 }, (_, i) => ({ key: `k${i}`, cls: { fault: { patterns: 1, lines: 2 } }, top: [{ sig: 'a'.repeat(16), ruleId: 'HW-MCE', sample: 'x'.repeat(160), tmpl: 'y'.repeat(120) }] })) };
+  const f1 = EP.fitEnvelope(big, 6_000);
+  assert.equal(f1.logsTruncated.level, 'compact'); assert.equal(f1.logSummary[0].top[0].sample, undefined); assert.equal(f1.logSummary[0].top[0].ruleId, 'HW-MCE');
+  const f2 = EP.fitEnvelope(big, 3_000);
+  assert.equal(f2.logsTruncated.level, 'dropped'); assert.deepEqual(f2.logSummary[0].top, []); assert.equal(f2.logSummary[0].cls.fault.lines, 2);
+  assert.equal(EP.fitEnvelope(big, 10_000_000).logsTruncated, undefined, '상한 안이면 그대로');
   assert.equal(L.logViewBodyOk({ ok: true, patterns: [], hourly: [] }), true);
 });

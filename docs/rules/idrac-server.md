@@ -22,6 +22,7 @@
 - (v2.923) 리눅스 성능 4단계 — 튜닝 탭(항목 26 · 근거 등급 · 출처 · 자동 적용 없음) · 용도 프로파일(rocky9-base · airflow · gpdb) · 장애 기록(partfault 재사용) · 진단 스냅샷(원격 명령 — 규약은 security-api.md v2.923)
 - (v2.929) 리눅스 성능 5단계 — 집중 모니터링(별도 타이머 · 법인 상한 · 전역 슬롯 · 인증 즉시 중단) · 알림 규칙(엣지 판정 · 상태 파일 · 하루 상한) · 베이스라인 띠 · 점검 소모품 8칸 · 변경 이벤트(전이 · 해시만) · 구간 비교
 - (6단계) 리눅스 성능 6단계 — 서버 비교(같은 법인 기본 · 법인 간은 전체 범위만) · 수집 건강(폴러 계측 · 노드 한 칸 규칙) · 운영 주석 · 진단 플레이북(읽기 전용 · 실행 없음) · 목표선(결측 분모 제외)
+- (7a단계) 리눅스 성능 7a단계 로그 분석 — 같은 SSH 세션의 별도 exec · 증분(커서 · boot_id+초 · offset+inode) · 규칙 카탈로그(포탈 엔진 재사용) · 원문 미보관 · 못 읽음은 상태
 - (원래 746행) iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
 - (원래 844행) 서버 온도 — 히트맵 보드(시안 B). '못 읽은 값' 을 정상으로도 이상으로도 세지 않는다
 - (원래 1030행) v2.728 — 엣지 축약 인벤토리는 부품 이름·health·state 를 싣고, 중앙 `INV_SHAPE` 와 한 쌍으로 넓힌다
@@ -572,6 +573,28 @@
       목표 설정 조회는 대상 · 엣지 보관분을 요청당 한 번 읽어 O(N) 으로 대 본다(서버 목표 500건에 대상 해석 500번 → 1번).
   - ⚠ **정직 기록**: 샘플러(옵션 B)의 서버 부담은 계측하지 않는다 · 수집 건강 ‘며칠째’ 는 프로세스 시작 뒤부터 · 비교 · 목표선 계열은 3a 파일 그대로라 데모 백필(30분 간격)에서는 5분 칸 대부분이 결측으로 보인다(그대로 센다) ·
     월간 목표 리포트(메일)는 만들지 않았다.
+- ⚠⚠ **리눅스 성능 7a단계(서버 + 화면 — 버전 미정) — 로그 분석(성능 · 보안 · 이슈 · 장애). 엣지가 읽고 분류 · 집계 · 가림까지 하고, 원문 전체는 저장 · 전송하지 않는다. 못 읽음 · 권한 없음 · 잘림은 0 이 아니라 출처 상태다**
+  (`bmusage/logs/{rules,command,parse,classify,store,run,view}.js` · `poller.js`(주기 배선) · `perfRules.js`(설정 `logs` · 규칙 `logs`) · `perfAlerts.js`(조건) · `edgelog/redact.js`(`redactSystemLogLine`) ·
+  `mock/demo/bmLogs.js`. 설계 PROFILES §17 · README §8. 회귀 `server/test/bmLogs7a{Command,Parse,Rules,Store,Route,RoundTrip}.test.js` · 웹 `bmLogsText.test.jsx`):
+  - **읽기 = 같은 SSH 세션(로그인 1회)의 별도 exec**(`osSsh extraCommands` 이름 `logs` — 주 명령 · 피크 창 뒤 남은 예산 안에서만 · 모자라면 `skipped`). 주 명령에 섞지 않은 이유: 주 명령의 전체 바이트 상한과
+    ‘##END 미도착 = 마지막 구획 버림’(1단계 D1)이 로그 수천 줄 때문에 다섯 지표 구획을 밀어내면 안 된다(설계와 다른 결정 — 이름은 그대로 `##JOURNAL · ##DMESG · ##SECURE` + `##AUDIT · ##APPLOG`).
+  - **증분**: journald `-p warning` · `_TRANSPORT=journal|syslog|stdout`(커널 메시지는 dmesg 가 읽는다 — 두 번 세지 않게) · `--after-cursor`(없으면 최근 60분) · dmesg `-x` 는 **boot_id + 마지막 [초]**
+    (`--time-format` 에 기대지 않는다 · 재부팅이면 링 버퍼 처음부터) · 파일(secure · audit · 용도 로그)은 **offset + inode**(첫 읽기 = 마지막 200줄 · inode 가 바뀌면 같은 폴더에서 옛 inode 의 꼬리부터 —
+    못 찾으면 `lost` · 크기가 줄면 copytruncate 로 처음부터). 출처마다 주기당 줄 상한(설정 `logs.lineCap` 기본 5,000 · 100~20,000) — 넘친 줄은 ‘잘림’ 으로 세고 **위치는 끝까지 넘긴다**.
+  - **구획 위조 방지**: 모든 내용 줄에 고정 접두(`J| K| S| A| G| F|`) · 메타 `X#k=v` · journalctl 자기 줄은 글자 없이 표지(`J#err`) — 로그 줄 ‘##END’ · ‘J#cur=…’ 가 구획 · 커서를 바꾸지 못한다(실제 셸 테스트).
+    **명령 조립 값**(커서 · boot_id · 초 · inode · offset)은 화이트리스트 정규식(`CURSOR_RE` 등)을 지난 것만 — 아니면 첫 읽기 꼴. 용도 로그 경로는 **상수 카탈로그만**(`APP_LOGS` — `_paths` 는 테스트 전용, 소스 스윕).
+  - **분류**: 규칙 = 파일 하나(`rules.js` — 정규식 · 분류 4 · 심각도(엔진 SEVERITY_RANK) · 출처 태그 · 표본 1줄 · 근거 번호 · 등급 · 연계 표지). 엔진은 `loganalysis` 의 `normalizeRules` · `indexRules`(태그 규칙 → 태그 없는 규칙,
+    처음 맞는 하나) · `templateOf` · `safeKey` 재사용. **모든 규칙은 표본으로 자기 시험**(엔진에 넣어 그 규칙이 잡는지). SEC-LOGIN-FAIL 은 `logs/loginFailPattern.js MSG_RE` **같은 객체**.
+    SSH 실패 집중(`SEC-SSH-FAIL-BURST` high)은 파생 규칙 — 같은 IP 가 창(분) 안 임계 이상이면 그 줄을 옮긴다(두 번 세지 않음) · 주기 경계는 IP 별 최근 실패 시각 carry(IP 64 · IP 당 임계 개수).
+    분류 못 한 줄은 **세기만**(출처 · 시간별 `#none:<출처>` — 템플릿 · 원문 없음). 서명 = 출처 · 규칙 · (경로 · 보안 줄의 계정 · IP 치환 + `templateOf`)의 SHA-1 16자.
+  - **보관(메인 `bm-usage.db`)**: `log_cursor`(읽기 위치 + carry + 마지막 상태 — **rev 비교 후 쓰기**: 같은 rev 를 읽은 늦은 주기는 그 서버를 통째로 건너뛴다 · 손상 상태는 `bad_json` 에 보존하고 처음 읽기) ·
+    `log_pattern`(서명별 누적 · 가린 표본 최대 5 · 서버당 500 — 넘으면 분류별 `#over:<분류>` 한 행) · `log_hour`(시간 × 서명 — `#read:` · `#trunc:` · `#none:` 포함) · `log_sec`(시간 × 종류 × 항목 — 상위 20 + ‘(기타)’).
+    한 주기 서버 전부를 **한 트랜잭션 · 한 직렬 큐** · 정리는 `pruneTick` 같은 틱 청크 DELETE(보관 `logs.keepDays` 기본 30 · 대상에서 사라진 서버의 위치도) · 쓰기가 실패하면 위치가 넘어가지 않는다.
+  - **요약**: 주기 끝에 서버별 24시간 요약을 **메모리**에(`refreshLogSummary` — 봉투 · 함대 표가 요청마다 SQL 을 돌리지 않는다). 공통 원인 후보(`commonCauseCandidates`)는 같은 규칙(medium 이상)이
+    여러 서버에서 마지막 발생이 서로 1시간(`COMMON_WINDOW_MS`) 안 — ‘후보’ 일 뿐(화면이 말한다).
+  - **알림 규칙 ‘로그 — 장애/보안 high’(`logs` — 기본 꺼짐)**: 입력은 **이번 주기에 로그를 읽은 서버만**(못 읽음 = 보류 null) · 조건 fault-sec · fault · sec(장애 분류 줄 · 보안 high 이상 줄 — 집중 포함) · 자동 집중 허용.
+    포탈은 차단 · 계정 잠금을 하지 않는다. 설정 `logs.on`(기본 켬 — 끄면 exec 를 붙이지 않는다) · 노드 전용 파일(`bm-perf-rules.json` — 배포 서명과 무관).
+  - **데모**: 데모 대상은 SSH 를 열지 않고 명령 출력 꼴의 합성 텍스트(`demoLogStdout`)를 **같은 파서 · 분류 · 쓰기**에 넣는다(첫 주기 24시간 · 그 뒤 직전 읽기부터 · 값 · IP 는 가상 — RFC 5737 대역).
 - ⚠⚠ **iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
   관리자가 동의해야 켜진다**(`bmusage/license.js`·`collectors/idracEnterprise.js`·`parse/racadm.js`
   + `idrac/redfish.js fetchUsageSensors`, v2.554 — 사용자 신고 "idarc 텔레메트리는 data center

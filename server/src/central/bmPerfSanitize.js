@@ -256,6 +256,7 @@ export function sanitizePerfFields(snap, rcv = Date.now()) {
       // 7a단계 로그 분석 요약(서버별 24시간 — 화이트리스트 · 규칙 id 는 카탈로그만 · 키는 같은 봉투의 대상 목록 안만 · 시각 clamp). 표지는 첫 주기 전에도 실린다(값 없음 ≠ 구버전).
       ...(Array.isArray(snap?.logSummary) ? (() => { const r = sanitizeLogSummary(snap.logSummary, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }); return { logSummary: r.list, ...(r.dropped ? { logSummaryDropped: r.dropped } : {}) }; })() : {}),
       ...(Number.isInteger(snap?.logsVer) && snap.logsVer > 0 && snap.logsVer < 100 ? { logsVer: snap.logsVer } : {}),
+      ...(snap?.logsTruncated && typeof snap.logsTruncated === 'object' ? { logsTruncated: { level: oneOf(snap.logsTruncated.level, ['compact', 'dropped'], 'dropped') } } : {}),
     },
     dropped: arr.length - perf.length,
   };
