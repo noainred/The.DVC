@@ -6,6 +6,7 @@
  * 정렬은 **형제끼리만**(같은 부모 아래) — 표 전체를 한 줄로 정렬하면 계층이 깨진다. 값이 없는 형제는 항상 뒤.
  */
 import { numOrNull } from '../../numOrNull.js';
+import { dayStamp } from '../../dayStamp.js';
 
 export const ALLOC_LEVELS = Object.freeze([
   { depth: 1, label: '법인' }, { depth: 2, label: '데이터센터' }, { depth: 3, label: '클러스터' },
@@ -420,6 +421,6 @@ export function trendText(t, now = Date.now()) {
   const why = t.daysLeft != null ? '최근 30일 할당 증가 기울기로 낸 추정' : t.points < 7 ? `최근 30일 점이 ${t.points}개 — 7개 이상이어야 냅니다`
     : !(t.gbPerDay > 0) ? '최근 30일 할당이 늘지 않았습니다' : '증가가 들쭉날쭉해(결정계수 0.3 미만) 내지 않습니다';
   const left = t.daysLeft == null ? '—' : t.daysLeft === 0 ? '지금(예비 없음)'
-    : `${t.daysLeft}일 뒤 (${new Date(now + t.daysLeft * 86_400_000).toISOString().slice(0, 10)})`;
+    : `${t.daysLeft}일 뒤 (${dayStamp(now + t.daysLeft * 86_400_000)})`;   // 포탈 날짜(UTC 자르기 금지 — dayStamp 스윕)
   return { change: signed(t.change30, 'GB'), perDay: t.gbPerDay == null ? '—' : `${signed(Math.round(t.gbPerDay * 10) / 10, 'GB')}/일`, left, why };
 }
