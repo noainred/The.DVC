@@ -106,3 +106,27 @@ D-④ DataMap    화면 요소 ↔ 데이터(지금 있음 / 새 수집 / 계산
   호스트 업링크 매칭이 LLDP(확정) · 물리 NIC MAC(높음) · VM MAC 비율(높음) · 포트 설명(보통) 순으로 근거를 고르고 근거 문장을 보여 준다. 데모는 법인 호스트를 leaf 포트에 붙여 근거가 보인다.
 - **B-③ ESXi vmnic 드롭·에러 — v2.925**: 호스트 상세 ‘네트워크’ 카드 버튼으로 vCenter 실시간 통계(최근 1시간)를 vmnic 마다 읽고, 같은 1시간 CVP 업링크 드롭과 방향 짝으로 나란히 놓아
   ‘ESXi 쪽 · 스위치 쪽 · 양쪽 · 드롭 없음’ 을 판정한다(§4.2 ‘둘 다 있을 때만’). 결측이 섞인 0 · 매칭 포트 없음은 판정 보류. 주기 수집은 하지 않았다(고RTT vCenter 로그인 수를 늘리지 않게).
+
+## 9. C 단계 시안(2026-11-07 12:13~ KST · Fable + Claude Design — 사용자 'C 단계 시안 만들어줘')
+
+시안 캔버스: https://claude.ai/artifact/TJGrCnB5sVW4ma1FP4RbWg · 이 폴더의 `C1-HostSanPath` · `C1-SanAttribIpf` · `C2-FlowVision` · `C3-EndpointLoc` · `C4-DataMap` 5장이 캔버스와 같은 내용이다(포탈 룩 · 수치는 전부 가상값).
+
+### 9.1 사용자 결정(12:24) 과 추가 질문(12:25)
+① Flow Vision 라이선스 확인 방법 안내 ② 포탈이 플로우를 직접 만든다 ③ EndpointLocation 은 버튼 + 주기 둘 다 ④ IPF 보정 넣기.
+추가 질문 "라이선스 없이 … WWN 정보와 조닝 정보 … 활용하면 구현할 수 있을 것 같은데?" → **그렇다 — 짝 후보와 포트 합은 A 단계가 이미 조닝·WWN 으로 낸다.** 짝별 *분배*만 남는데 그것은
+(a) ESXi 경로별 카운터(vCenter perf `storagePath` 그룹 — 라이선스 불필요 · 실측 · 경로 이름에 타깃 WWN) (b) IPF 보정(추정) (c) Flow Vision(스위치 쪽 실측 · 라이선스) 중 하나다.
+그래서 시안은 **(a)+(b) 를 기본(C-①)** 으로, Flow Vision 은 **라이선스가 있을 때만 쓰는 교차검증(C-②)** 으로 바꿨다.
+
+### 9.2 아트보드
+- **C-① HostSanPath** — 호스트 상세 ‘SAN 경로·트래픽’ 묶음에 경로별 실측 표(HBA · 타깃 WWN · 스토리지 · 경로 상태 · 지금/1시간/24h 읽기·쓰기 · 지연 · 근거) · KPI(실측 분배 · IPF 추정 · 교차검증 차이) · 분배 규칙 카드(실측 → 확정 → IPF → 분배 불가) · 라이선스 띠.
+- **C-① SanAttribIpf** — SAN 도구 ‘호스트 귀속’ 모달에 분배 방식 세그먼트(실측 우선 → IPF / IPF 만 / 타깃 포트 비율) · IPF 수렴 카드(반복 · 행합/열합 잔차 · 기준) · 매트릭스에 행합(HBA 포트 Δ) · 열합(타깃 포트 Δ) · 일치 표시 · 스위치별 Fabric Vision 라이선스 띠.
+- **C-② FlowVision** — 새 도구 키 `san-flow`(운영 작업 · admin · OTP 재인증 · 감사 · 엣지 대행 큐 = testRuns 패턴) · 스위치 라이선스/계정 권한 점검 표 · 플로우 만들기 폼(호스트 → HBA → 포트 → 존 안 타깃 · 접두 `dvc_` · 명령 미리보기) · 실행 로그 타임라인 · 결과 표(ESXi 실측 대비 차이).
+- **C-③ EndpointLoc** — 호스트 상세 업링크 타일 근거 ‘확정(CVP 위치)’(BASIS_RANK 에 `endpoint` — LLDP 다음) · ‘CVP 위치 조회 · 지금’ 버튼 · VM 상세 ‘네트워크 위치(CVP)’ 카드(일치/불일치/응답 없음 — vMotion L-5 보완) · CVP 설정(주기 수집 켜기 · 주기당 상한 · 우선순위 · 지원 버전).
+- **C-④ DataMap** — 화면 요소 ↔ 데이터(지금 있음/새 수집/계산) · 규약 · 위험 · 단계 제안(① C-① → ② C-③ → ③ C-②) · 컨펌 질문 5.
+
+### 9.3 정직 기록
+- ESXi `storagePath` 카운터의 인스턴스 이름 형식 · 통계 레벨은 **실장비로 확인하지 못했다**(추정). 못 읽으면 IPF 로 떨어진다.
+- Flow Vision: `flow` 명령은 Fabric Vision 라이선스 필요 · `--create/--activate/--deactivate/--modify/--reset/--show/--delete` · 상한 128(스위치)/512(디렉터) · 포트당 모니터 64 — FOS 8.0.1 명령 참조(Dell/ManualOwl 미러) · Flow Vision 8.1 안내서(Lenovo 미러) 기준. REST 노출은 확인 못 함. 현장 rbash 계정은 `flow` 가 막혀 있을 수 있다(`fosParse.js:850` 의 다른 명령들이 그랬다).
+- CVP EndpointLocation: `GET /api/resources/endpointlocation/v1/EndpointLocation?key.searchTerm=<MAC|IP>` · CVP 2021.1+ · GetAll 없음(단건) — aristanetworks.github.io cloudvision-apis 기준.
+- Flow Vision 라이선스 확인 방법: 포탈 SAN 도구 장비 상세 ‘라이선스:’ 줄(REST `brocade-license/license` 또는 SSH `licenseshow`), 또는 스위치에서 `licenseshow` / `flow --show` 직접 실행. 스냅샷에 ‘Fabric Vision’ 이 없는 것과 못 읽은 것은 다르다.
+- 이 절은 컨펌 전 시안 기록이다 — 구현은 컨펌 뒤 Opus 가 한다.
