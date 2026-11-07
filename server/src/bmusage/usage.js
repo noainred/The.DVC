@@ -330,7 +330,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
   if ((idrac && idrac.ok) || (ent && ent.ok)) out.idrac_at = now;
   // v2.919: 장치별·튜닝 현재값은 **최신값 전용 JSON 열**(이력 적재는 3단계). Linux 가 아니면 비운다(Windows 는 이번 단계 대상이 아니다).
   out.detail_json = perfOut ? jsonCol(perfOut.detail) : (osOk && winShape ? jsonCol({ osKind: 'windows' }) : null);
-  out.tuning_json = perfOut ? jsonCol(perfOut.tuning) : null;
+  out.tuning_json = perfOut ? tuningCol(perfOut.tuning) : null;
   if (ent && ent.ok) {
     if (out.cpu_pct == null && n(ent.cpuPct) != null) { out.cpu_pct = n(ent.cpuPct); srcOf.cpu = 'idrac-ent'; }
     if (out.mem_pct == null && n(ent.memPct) != null) { out.mem_pct = n(ent.memPct); srcOf.mem = 'idrac-ent'; }
@@ -412,6 +412,21 @@ export function jsonCol(obj) {
   let sJson = '';
   try { sJson = JSON.stringify(obj); } catch { return null; }
   return sJson.length > JSON_COL_MAX ? JSON.stringify({ truncated: true, bytes: sJson.length }) : sJson;
+}
+
+/**
+ * v2.923 — 튜닝 열은 감지 목록(프로세스 이름 · 유닛 · 포트)이 커서 상한을 넘을 수 있다. 넘으면 통째로 `{truncated}` 가 되어 **sysctl 까지 잃는다** —
+ *   목록을 큰 것부터 빼고(빈 목록이 아니라 null + `trimmed` 로 밝힌다 — ‘없음’ 과 섞지 않는다) 다시 잰다. 그래도 넘으면 예전 규약(`{truncated}`).
+ */
+export function tuningCol(tuning) {
+  let cur = tuning;
+  const trimmed = [];
+  for (const k of ['procs', 'units', 'ports', 'xfs', 'netq']) {
+    const j = jsonCol(cur);
+    if (j == null || !j.startsWith('{"truncated":true')) return j;
+    if (cur && cur[k] != null) { cur = { ...cur, [k]: null, trimmed: [...trimmed, k] }; trimmed.push(k); }
+  }
+  return jsonCol(cur);
 }
 
 /** 구획 상태 한 글자 — 'ok' | 'absent' | 'missing'. */
@@ -527,7 +542,27 @@ export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = nu
     // v2.922(D7): 상한(store.blkqMax)·물리 우선으로 자르기 전 장치 수 — 화면이 ‘n개 중 m개’ 를 말할 수 있게.
     blkqTotal: bq ? (Number(bq.total) || bq.length) : null,
     irq: irq ? { irqbalance: irq.irqbalance, nicIrqs: irq.nicIrqs, spreadMin: irq.spreadMin, spreadMax: irq.spreadMax, cpus: irq.cpus } : null,
-    sections: { sysctl: sections.sysctl || 'missing', hugepages: sections.hugepages || 'missing', blkq: sections.blkq || 'missing', irq: sections.irq || 'missing' },
+    /*
+     * v2.923(4단계 — 튜닝 탭 · 용도 프로파일): 감지 · 튜닝 사실(parse/linuxFacts.js). 판정은 하지 않는다 — 튜닝(tuning/judge.js) · 용도(profiles/match.js)가
+     *   이 사실을 읽는다. ‘구획은 왔는데 0줄’(absent)은 ‘없음’ 의 양성 증거라 계정 · 커널 인자 · xfs 는 빈 목록으로, 못 읽음(missing)은 null 로 둔다.
+     */
+    os: perf.osrel?.value || null,
+    // v2.923(반증 R7): systemctl 이 실패한 칸은 null(확인 불가) — running 목록 · 실패 수를 따로(한쪽만 읽혔을 수 있다).
+    units: perf.units?.value ? { list: Array.isArray(perf.units.value.units) ? perf.units.value.units.slice(0, 256) : null, failed: n(perf.units.value.failed), capped: !!perf.units.value.capped } : null,
+    ports: perf.ports?.value ? { list: perf.ports.value.ports.slice(0, 512), capped: !!perf.ports.value.capped } : null,
+    procs: perf.procs?.value ? { list: perf.procs.value.names.slice(0, 512), capped: !!perf.procs.value.capped } : null,
+    accounts: perf.acct?.value || (perf.acct?.absent ? [] : null),
+    kargs: perf.kargs?.value || (perf.kargs?.absent ? {} : null),
+    softnet: perf.softnet?.value || null,
+    netq: perf.netq?.value || (perf.netq?.absent ? [] : null),
+    xfs: perf.xfs?.value || (perf.xfs?.absent ? [] : null),
+    memTotalKb: os?.mem?.totalBytes != null ? Math.round(os.mem.totalBytes / 1024) : null,
+    cores,
+    sections: {
+      sysctl: sections.sysctl || 'missing', hugepages: sections.hugepages || 'missing', blkq: sections.blkq || 'missing', irq: sections.irq || 'missing',
+      osrel: sections.osrel || 'missing', units: sections.units || 'missing', ports: sections.ports || 'missing', procs: sections.procs || 'missing', acct: sections.acct || 'missing',
+      kargs: sections.kargs || 'missing', softnet: sections.softnet || 'missing', netq: sections.netq || 'missing', xfs: sections.xfs || 'missing',
+    },
   };
   return { cols, detail, tuning, streak, notes, allDisks, nicDeltas: nics };
 }

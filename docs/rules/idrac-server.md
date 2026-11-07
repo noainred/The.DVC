@@ -19,6 +19,7 @@
 - (원래 526행) 인메모리 상태 맵은 대상 목록을 기준으로 정리한다
 - (v2.919) 리눅스 베어메탈 통합 성능 모니터링 1단계 — 같은 SSH 1회에 구획 추가 · USE 판정 코어 하나 · 하드웨어 축은 이미 가진 데이터만
 - (v2.922) 리눅스 성능 3a — 시간 단위 파일(5분·1시간·1일·장치) · 예전 표 마이그레이션(대조 뒤 삭제) · 피크 A 안 · 추이 API · CVP 포트 대조
+- (v2.923) 리눅스 성능 4단계 — 튜닝 탭(항목 26 · 근거 등급 · 출처 · 자동 적용 없음) · 용도 프로파일(rocky9-base · airflow · gpdb) · 장애 기록(partfault 재사용) · 진단 스냅샷(원격 명령 — 규약은 security-api.md v2.923)
 - (원래 746행) iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
 - (원래 844행) 서버 온도 — 히트맵 보드(시안 B). '못 읽은 값' 을 정상으로도 이상으로도 세지 않는다
 - (원래 1030행) v2.728 — 엣지 축약 인벤토리는 부품 이름·health·state 를 싣고, 중앙 `INV_SHAPE` 와 한 쌍으로 넓힌다
@@ -431,6 +432,46 @@
       **D15** 포트 대조는 CVP 도구 접근이 있어야 포트 값을 준다(없으면 ‘권한 없음’) · 비관리자에게 포트 설명 주소 가림 · **D10** 은 기록만(README §6-14).
   - ⚠ **정직 기록**: 표본은 커널 문서 형식 + 이 개발 컨테이너(커널 6.18 · dash) 실행 출력이다 — 이 현장 Rocky 9 / RHEL 8 베어메탈 출력은 보지 못했다. `/proc/interrupts` 의 NIC 큐 이름 패턴 ·
     PSI 유무 · `/etc/tuned/active_profile` 존재는 첫 실수집에서 `detail.sections`·`tuning.sections` 를 보고 좁힌다. 화면(2단계)·월 파일/3단 보존/장치별 이력(3단계)·진단 스냅샷(4단계)은 아직이다.
+- ⚠⚠ **리눅스 성능 4단계(v2.923 예정 — 서버 + 화면) — 튜닝 · 용도는 ‘사실은 엣지 · 판정은 응답 노드’, 장애 기록은 새 수집 없이 partfault 재사용, 스냅샷은 상수 명령 1회**
+  (`bmusage/{parse/linuxFacts.js,tuning/{sources,catalog,judge,overrides}.js,profiles/{rocky9-base,airflow,gpdb,index,match}.js,opsView.js,snapshot/{command,run}.js}` ·
+  `routes/api/bmUsage.js`(`/perf/:key/tuning|profile|faults|snapshot|snapshots[/:id]` · `/profiles` · `/faults` · `PUT /purpose` · `PUT /tuning/overrides`) · `routes/collector.js`(`/bm-usage/snapshot(s)`) ·
+  `central/bmUsageEdgePull.js runEdgeSnapshot · pullEdgeSnapshots` · `insights/fleetTags.js purposes`. 설계 README §4.1·§4.3 · TUNING-SOURCES · PROFILES §1~§5·§7.
+  회귀 `server/test/bmPerf2923{Tuning,Profiles,Facts,Snapshot,Ops}.test.js` · 웹 `bmOpsText.test.jsx`):
+  - **수집 구획(같은 SSH 1회 · 읽기 전용 · 상수 조각 `linuxFacts.js FACT_SHELL`)**: `##OSREL`(os-release ID · VERSION_ID · PRETTY_NAME + PAGE_SIZE + getenforce + logind RemoveIPC **명시 설정만**) ·
+    `##UNITS`(running 서비스 + 실패 수 — `systemctl` 이 없으면 아무것도 내지 않는다(absent). ⚠⚠ **정정(반증 R7)**: 초판 문서는 ‘wc -l 이 0 을 지어내던 것을 막았다(이 컨테이너 실측)’ 고 적었지만
+    그것은 systemctl 이 **없는** 경우만 막았다 — 이 컨테이너는 systemctl 이 **있고 실패**(rc=1 · ‘Failed to connect to bus’)해 여전히 `failed=0` · 빈 목록을 지어냈다(반증 재현 · 거짓 정상 · 거짓 적합 · 거짓 권고로 샜다).
+    이제 두 호출의 **종료 코드**를 보고 성공했을 때만 `running=ok` · `failed=<grep -c>` 를 내고, 실패면 `running=rc<n>` · `failed=rc<n>` → 파서가 그 칸을 null(확인 불가). 가짜 systemctl(실패 · 성공 · 3초 시한)로 실제 셸에서 고정(Facts 테스트)) ·
+    `##PORTS`(ss -ltn 로컬 포트 — `-p` 없음) · `##PROCS`(**comm 만** · 커널 스레드(‘/’ 든 이름) 제외 — 인자 · 환경 금지) · `##ACCT`(고정 이름 `DETECT_ACCOUNTS` 의 존재만) ·
+    `##KARGS`(/proc/cmdline 화이트리스트 키만 — root= · rd.* 는 싣지 않는다) · `##SOFTNET`(앞 세 열만 — 원문 13열이면 1,024코어에서 D1 바이트 산수를 넘겼다) · `##NETQ`(물리 NIC 의 tx_queue_len · 큐 수 —
+    셸 글롭으로 세어 프로세스를 띄우지 않는다) · `##XFS` · SYSCTL 14키(G1 요구값 · netdev_budget) · BLKQ `read_ahead_kb`. 바이트 산수(SECTION_BYTES_SUM < OUTPUT_MAX_BYTES < EXEC_MAX_OUTPUT)는 그대로 테스트가 고정.
+  - **튜닝 열 상한**: 감지 목록이 커서 64KB 를 넘으면 예전 규약은 `{truncated}` 로 **sysctl 까지 잃었다** — `usage.js tuningCol` 이 목록(procs → units → ports …)부터 null + `trimmed` 로 빼고 다시 잰다.
+  - **엣지 봉투는 감지 목록을 관찰 대상만**(`profiles/index.js ENVELOPE_WATCH · compactTuningForEnvelope`): 1,000대 × 프로세스 512 · 유닛 256 원목록이면 봉투 8MB 상한을 넘겨 **전 서버의 USE 근거까지 빠진다**(fitEnvelope).
+    ⚠ 프로파일이 새 이름 · 포트를 보게 되면 ENVELOPE_WATCH 에도 더할 것 — 테스트가 ‘원목록 감지 = 줄인 목록 감지’(튜닝 26 · 프로파일 점검 · 요구값까지)를 대조한다. 중앙 정제 `tuningFactsOf` 화이트리스트에도 새 필드를 넣는다.
+  - **튜닝 판정(`tuning/judge.js`)**: 상태 `advise · ok · info · unknown` + 사유 code(웹 문구 1:1). ⚠⚠ **확인 불가 ≠ 불일치** — 값이 없으면(구획 missing → notRead · 구획은 왔는데 값 없음 → notPresent) 권고로 세지 않는다.
+    장치 · NIC 항목은 장치마다 판정하고 가장 나쁜 것(권고 > 확인 불가 > 적합 > 참고). **역할 권장값의 근거는 DB 열뿐** — 다른 역할에 DB 전제 값(TuneD · governor · swappiness 10 · THP madvise · HugeTLB)을 두지 않았다(권장 없음 · 참고).
+    우선순위 **기능 프로파일 > 역할(관리자 덮어쓰기 법인 > 전체 > 기본) > OS** — 화면이 누가 정했나(by)를 적는다. 덮어쓰기는 `overridable`(같다/다르다 판정) 항목만 · 파일 `bmusage-tuning.json`(원자 쓰기 · 손상 보존 ·
+    util/settingsLoadError 등록 — 손상 · 보존본만 남음이면 판정도 저장도 503 settingsUnreadable: 덮어쓰기를 무시한 판정을 정상처럼 보이지 않게).
+  - ⚠ **판정 위치**: 튜닝 · 용도는 엣지가 판정해 보내지 않는다(현재값 사실만) — 응답 노드가 그 노드의 덮어쓰기 · 용도 태그로 판정한다. v2.548 ‘중앙이 엣지 판정을 다시 하지 않는다’ 와 충돌하지 않는다(다시 하는 판정이 아니다).
+    그 대가로 엣지 자신의 화면에는 중앙의 용도 태그 · 덮어쓰기가 없다(정직 기록).
+  - **용도 프로파일**: 파일 1개 = 프로파일 1개(rocky9-base · airflow · gpdb) + 등록부 · 카탈로그 테스트(출처 id · 등급 · 출처 없으면 ○ · catalogId). Ubuntu · Windows · Hadoop 은 **만들지 않았다**(감지 규칙도 없음 — 매트릭스 ‘프로파일 없음’).
+    감지: Airflow 는 유닛 `airflow*` · comm `airflow` 가 강한 단서(계정 · 8080/8974/8793 포트만으로는 아님) · GPDB 는 gpadmin + (postgres 또는 5432/6000대). **수동 태그가 덮는다**(fleet-tags.json `purposes` — 기존 tags 를 보존 · 비면 예전 모양).
+    점검 결과 `ok · warn · bad · unknown · notCollected · info` — CLI · HTTP · SQL · airflow.cfg 가 필요한 점검은 **미수집**(정상으로 세지 않는다 — 이 단계는 앱 명령을 실행하지 않는다). gpdb 의 NIC/RAID 점검은 USE code 그대로.
+  - **장애 기록(새 수집 없음)**: 라우트 `computeIncidents`(partFaults.js — 같은 30초 메모) → `opsView.incidentsForServer`(scope idrac · agent 축(hwFacts 와 같은 규칙) · 서비스 태그 또는 등록부 id) → 요약 5칸은 code 를 세기만.
+    part-faults 도구 접근이 없으면 내용 없이 ‘권한 없음’(v2.922 D15 와 같은 판단) · 비관리자는 `maskIncident` · SEL/LC 는 이 노드 인벤토리가 있는 서버만(엣지 위임 서버는 중앙에 목록이 없다).
+  - **진단 스냅샷** — 규약 · 테스트는 `security-api.md` v2.923. 보관은 메인 bm-usage.db `bm_snapshots`(7일 · 실행 때 정리 · 보존 DELETE 허용 목록에 유계 사유) · 설정 `snapshot.{dailyCorpMax 20 · topN 10 · dmesgLines 50}`(추정 시작값 · 배포 키 아님).
+  - ⚠⚠ **표지 위조(반증 R1 — 4단계가 연 새 경로)**: `##PROCS` 는 프로세스 이름(comm — 아무 사용자나 정한다)을 줄 머리에 내보낸다. 비특권 사용자가 ‘##MEM’ · ‘MemTotal: 9 kB’ 이름의 프로세스를 띄우면
+    예전 `splitSections`(trim 뒤 아무 표지 · 이미 본 구획 재개방)가 MEM 구획을 그 이름들로 덮어 **가짜 메모리 100%** 를 만들고 PROCS 를 비웠으며, ‘##END’ 이름이면 잘림 보호(1단계 D1)까지 꺼졌다(이 컨테이너 재현).
+    이제 ① `splitSections(text, { order: LINUX_SECTIONS })` — 줄 머리 그대로 정확 일치 · 명령의 표지 순서에서 **지금보다 뒤의 표지만** · 이미 본 표지는 다시 열지 않는다(스냅샷 파서도 같은 규칙 — R6)
+    ② 비특권 입력이 줄 머리에 오는 구획에 고정 접두(`PROCS` `p:` · `UNITS` `u:` · 스냅샷 `DMESG` `d:`) — 파서가 벗기고 접두 없는 줄은 버린다. 전수 점검 결과는 `linuxFacts.js FACT_PREFIX` 주석
+    (PORTS · ACCT · KARGS · SOFTNET · OSREL · NETQ · XFS · 기존 NETINFO · FC · DF · HOST 는 줄 머리를 root · 커널 · 고정 형식이 정한다). ⚠ 새 구획을 더하면 `LINUX_SECTIONS` 순서에 넣고, 줄 머리를 누가 정하는지 먼저 본다.
+    회귀: 실제 셸 + 실제 shapeLinux 에 ‘##MEM’ · ‘##END’ 이름 프로세스를 띄워 MEM 실제값 · PROCS · 잘림 판정을 대조(Facts 테스트).
+  - **주기 명령의 시한(반증 R8 · 추정 근거)**: 주기 수집 명령 전체가 exec 시한 하나라 한 칸이 멈추면 **전 구획(USE 포함)** 을 잃는다 — `systemctl` 3곳은 `timeout 3`(D-Bus 기본 25초) · `getent` 는 `-s files`(SSSD/LDAP 왕복 없음 —
+    디렉터리 계정의 gpadmin 은 ‘없음’ 으로 보인다: 정직 기록). SSSD · 바쁜 systemd 실측은 없다(추정).
+  - **묶음 값(반증 R9)**: ‘a / b’ 한 칸 사실(`catalog.js pairText` — gpdb SYS2 · mem.dirty · net.rmemMax)은 한쪽이라도 못 읽으면 표시만 ‘—’ 이고 판정은 확인 불가(`hasMissingPart`). 업그레이드 기간(엣지 v2.922 는 새 sysctl 14키를 보내지 않는다)에 GPDB 서버가 늘 권고로 보이던 것을 막는다.
+  - **장애 기록 탭의 범위(반증 P1 — 판단 기록)**: 파트 장애 도구 자체는 `fullScopeOnly`(‘부품 장애에는 법인 축이 없다’)지만, 이 탭은 **bm-usage 대상의 법인 귀속**(서버 → vCenter)을 축으로 범위 계정에도 **자기 법인 서버 것만** 보인다
+    (2단계 하드웨어 탭 · hwFacts 와 같은 판단 · part-faults 도구 접근은 따로 재검사). 함대 ‘장애 기록’ 보기도 같은 축으로 자른다. 모순이 아니라 축이 다르다 — 회귀 Ops 테스트 ①.
+  - ⚠ **정직 기록**: 수집 구획 · 스냅샷 명령은 이 개발 컨테이너(dash · 커널 6.18 · systemd 없음 · ss 없음)에서만 실행해 봤다 — Rocky 9 실장비 출력 미확인(getenforce · logind.conf.d · softnet 열 수 · NIC 큐 디렉터리).
+    Airflow 프로세스 comm 이 ‘airflow’ 인지 ‘python3’ 인지는 설치 방식에 따라 다를 수 있다(미확인). GPDB coordinator/segment 는 기본 포트로 **추정**한다. 설계 README §6-11 D12(selCritical 시간 창 · IRQ virtio)는 이번에도 미처리.
 - ⚠⚠ **iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
   관리자가 동의해야 켜진다**(`bmusage/license.js`·`collectors/idracEnterprise.js`·`parse/racadm.js`
   + `idrac/redfish.js fetchUsageSensors`, v2.554 — 사용자 신고 "idarc 텔레메트리는 data center

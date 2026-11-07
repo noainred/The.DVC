@@ -98,7 +98,10 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
   const rows00 = (latest || []).filter((r) => keys.has(t(r.key)));
   // v2.920(반증 D2): 데모(mock) 엣지는 데모 대상 성능 열을 봉투 단계에서만 겹친다(적재하지 않는다).
   const rows0 = isMockMode() ? (await import('../mock/demo/baremetal.js')).demoPerfLatestRows(rows00, tg.targets || []) : rows00;
-  const { perf, perfError } = await perfForRows(rows0, tg.targets || [], s, { full: true });
+  const { perf: perf0, perfError } = await perfForRows(rows0, tg.targets || [], s, { full: true });
+  // v2.923(4단계): 튜닝 사실의 감지 목록(유닛 · 프로세스 이름 · 포트)은 프로파일 · 카탈로그가 보는 것만 싣는다(봉투 상한 — profiles/index.js ENVELOPE_WATCH).
+  const { compactTuningForEnvelope } = await import('./profiles/index.js');
+  const perf = perf0.map((p) => (p && p.tuning ? { ...p, tuning: compactTuningForEnvelope(p.tuning) } : p));
   const rows = rows0.map(stripJsonCols);
   return {
     node: {
