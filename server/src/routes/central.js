@@ -1953,6 +1953,7 @@ centralRouter.get('/sanswitch-config', requireCentral(), async (req, res) => {
   if (registryUnreadable(res, sanRegErr, 'SAN 스위치')) return;
   const { takeRequestsForAgent, takePerfRequestForAgent } = await import('../sanswitch/collectRequests.js');
   const { takeTestRequestsForAgent } = await import('../sanswitch/testRuns.js');
+  const { takeFlowJobsForAgent } = await import('../sanswitch/flowJobs.js');
   const { loadPerfSettings, perfSettingsLoadError } = await import('../sanswitch/perfSettings.js');
   // v2.632(감사 EDGE2632-02): 포트 사용량 설정 파일을 못 읽었으면 기본값(꺼짐 · 보존 90일)을 perf 로 싣지 않는다 — 엣지가 그대로
   //   저장해 수집을 끄고 보존을 줄였다. 장비 목록·collectNow·testNow 는 등록부가 원천이라 그대로 준다(cvp-config 와 같은 모양).
@@ -1968,7 +1969,9 @@ centralRouter.get('/sanswitch-config', requireCentral(), async (req, res) => {
   // perf(v2.423): 중앙의 포트 사용량 수집 설정(켜짐/주기/표본/보관)을 위임 스위치에도 적용 — 엣지가 현지 수집 후 중앙으로 중계.
   // perfCollectNow(v2.517): 중앙의 '지금 수집'(포트 사용량)을 이 엣지가 현지에서 대행 — 엣지 단위
   // one-shot 플래그다(엣지의 pollPerfOnce 는 자기 몫 전체를 한 주기에 수집한다).
-  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent), ...perfPart, perfCollectNow: takePerfRequestForAgent(agent) });
+  // flowNow(v2.929 C-②): Flow Vision 플로우 작업(만들기 · 지우기 · 카운터 읽기 · 계정 점검) — 비밀 없음(장치 id · 동작 · 플로우 정의).
+  //   엣지는 명령 글자를 받지 않고 flowCmd.js 로 다시 검사해 직접 만든다 · 자기 등록부의 자격증명으로 실행한다.
+  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent), flowNow: takeFlowJobsForAgent(agent), ...perfPart, perfCollectNow: takePerfRequestForAgent(agent) });
 });
 
 /**
@@ -2043,6 +2046,18 @@ centralRouter.post('/sanswitch-test-result', requireCentral(), async (req, res) 
   const r = completeTestRun(String(req.body?.id || ''), agent, req.body?.result);
   if (!r.ok) return res.status(404).json(r);
   res.json({ ok: true });
+});
+
+// POST /api/central/sanswitch-flow-result — 엣지가 대행한 Flow Vision 플로우 작업 결과(v2.929 C-②).
+// 연결 테스트 회신과 같은 규약: 개별 토큰이면 바인딩 agent, 공유 토큰은 body.agent — 그 작업의 대상 엣지만(completeFlowJob 대조).
+//   결과는 sanitizeFlowResult 가 '그 작업이 실행했어야 하는 명령' 의 출력만 · 상한으로 자른다(임의 명령 출력 · 대용량 차단).
+centralRouter.post('/sanswitch-flow-result', requireCentral(), async (req, res) => {
+  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const { completeFlowJob } = await import('../sanswitch/flowJobs.js');
+  const r = completeFlowJob(String(req.body?.id || '').slice(0, 64), agent, req.body?.result);
+  if (!r.ok) return res.status(404).json(r);
+  res.json({ ok: true, ...(r.already ? { already: true } : {}) });
 });
 
 // POST /api/central/sanswitch-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라

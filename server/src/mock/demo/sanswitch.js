@@ -418,7 +418,8 @@ export function sanDemoOutputs(sw, t = Date.now()) {
     switchshow: switchshowText(sw),
     chassisshow: h.chassis,
     firmwareshow: `Appl     Primary/Secondary Versions\n------------------------------------------\nFOS      ${sw.fos}\n         ${sw.fos}`,
-    licenseshow: [`${lic}SbRZZ:`, '    Fabric license', '    Enhanced Group Management license', '    Fabric Vision license',
+    // v2.929(C-②): Fabric Vision 은 법인 셋 중 둘에만(가상) — 플로우 모니터 · 호스트 SAN 라이선스 띠가 데모에서도 ‘없음’ 을 보이게.
+    licenseshow: [`${lic}SbRZZ:`, '    Fabric license', '    Enhanced Group Management license', ...(demoHash(`${sw.vcId}|fv`) % 3 ? ['    Fabric Vision license'] : []),
       ...(sw.P - sw.licensed < sw.P / 4 && sw.P > 48 ? ['    Ports on Demand license - additional 16 port upgrade'] : [])].join('\n'),
     porterrshow: porterrshowText(sw, t),
     sfpshow: sfpshowText(sw, t),

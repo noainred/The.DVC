@@ -5,6 +5,13 @@ import { normWwn } from '../../sanswitch/zoning.js';
 
 const hash = (s) => [...String(s)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
 
+/** 데모 (초기자 WWN, 타깃 WWN) 짝의 읽기 · 쓰기(KB/s) — demoSpath 와 데모 Flow Vision 카운터(C-②)가 같은 값을 쓴다(교차검증 칸이 데모에서도 몇 % 안쪽). */
+export function demoTargetKBps(initWwn, wwn) {
+  const h = hash(`${initWwn}|${wwn}`);
+  const rKBps = 1500 + (h % 9000);
+  return { h, rKBps, wKBps: Math.round(rKBps * (0.25 + (h % 30) / 100)) };
+}
+
 /** @returns {object|null} storpath/parse.js summarizeHostPaths 와 같은 모양 */
 export function demoSpath(host, fabrics = [], now = Date.now()) {
   if (!host || !Array.isArray(host.hbas) || !host.hbas.length) return null;
@@ -22,9 +29,7 @@ export function demoSpath(host, fabrics = [], now = Date.now()) {
           const k = `${hba.name}|${p}`;
           if (seen.has(k) || targets.length >= 64) continue;
           seen.add(k);
-          const h = hash(`${host.id}|${k}`);
-          const rKBps = 1500 + (h % 9000);
-          const wKBps = Math.round(rKBps * (0.25 + (h % 30) / 100));
+          const { h, rKBps, wKBps } = demoTargetKBps(w, p);
           targets.push({ adapter: String(hba.name || '').slice(0, 32), init: w, wwn: p, readKB: rKBps * 300, writeKB: wKBps * 300, rKBps, wKBps,
             latR: Math.round((1 + (h % 25) / 10) * 10) / 10, latW: Math.round((1.4 + (h % 30) / 10) * 10) / 10, paths: 2 + (h % 6), partial: false });
         }

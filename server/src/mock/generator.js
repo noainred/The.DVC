@@ -353,14 +353,15 @@ function mkSnapTree(i, n) {
   return out;
 }
 
-function mkVmDev(vm, dsNames = [], nets = []) {
+function mkVmDev(vm, dsNames = [], nets = [], siteNo = 0) {
   const i = vm.idx;
   const netAt = (k) => (nets.length ? nets[(i + k) % nets.length] : null);
   const nic = (k, label) => {
     const n = netAt(k);
     const dvs = n?.type === 'DISTRIBUTED_PORTGROUP';
     return { label, adapter: i % 29 === 0 ? 'E1000E' : 'VMXNET 3', backing: n ? (dvs ? 'dvs' : 'std') : 'other', net: n && !dvs ? n.name : null, netRef: n ? n.name : null,
-      mac: `00:50:56:${((i >> 8) & 0xff).toString(16).padStart(2, '0')}:${(i & 0xff).toString(16).padStart(2, '0')}:${(10 + k).toString(16).padStart(2, '0')}`,
+      // v2.929(C-③): 넷째 바이트에 사이트 번호 — 예전에는 사이트 안 순번만 써서 법인마다 같은 MAC 이 나왔고, 데모 CVP 위치가 다른 법인 것으로 덮였다(VM 위치 카드가 거의 '불일치').
+      mac: `00:50:56:${(siteNo & 0xff).toString(16).padStart(2, '0')}:${((i >> 7) & 0xff).toString(16).padStart(2, '0')}:${((((i & 0x7f) << 1) | (k & 1)) & 0xff).toString(16).padStart(2, '0')}`,
       connected: !(i % 31 === 0 && k === 0), startConnected: true };
   };
   const dsAt = (k, fb) => (dsNames.length ? dsNames[(i + k) % dsNames.length] : fb);
@@ -747,7 +748,7 @@ export function generateSnapshot() {
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
         // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.
         // v2.906: 로컬 데이터스토어에는 그 호스트(마운트 목록의 한 대)의 VM 디스크만 — 예전에는 모든 호스트 VM 이 로컬 DS 에 놓여 마운트 카드가 '공유 호스트 24대' 였다(화면 판독)
-        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.filter((d) => d.storageType !== 'local' || !env.hosts.length || env.hosts[d.idx % env.hosts.length]?.name === vm.host.name).map((d) => d.name), env.networks) }),
+        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.filter((d) => d.storageType !== 'local' || !env.hosts.length || env.hosts[d.idx % env.hosts.length]?.name === vm.host.name).map((d) => d.name), env.networks, SITES.indexOf(site)) }),
         ...((() => { const pc = powered ? mkVmPerfc(vm.idx) : null; return pc ? { perfc: pc } : {}; })()),
       });
     }
