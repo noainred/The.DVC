@@ -53,3 +53,47 @@ export const PERF_COL_NAMES = Object.freeze(PERF_COLS.map((c) => c.col));
 export const LATEST_ONLY_COLS = Object.freeze(['os_at', 'idrac_at', 'detail_json', 'tuning_json']);
 /** JSON 열 크기 상한(바이트) — 넘치면 적재하지 않고 `{truncated:true}` 만 둔다(조용히 잘린 JSON 을 만들지 않는다). */
 export const JSON_COL_MAX = 64 * 1024;
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * v2.922(3a 단계) — 피크 열 · 장치별 열 계약(이 표가 단일 원천 — monthStore.js 스키마·적재·롤업과 추이 API 가 같이 쓴다).
+ * ════════════════════════════════════════════════════════════════════════════ */
+/**
+ * 서버 행의 피크 열 — `<열>_peak`(창 안 최대) · `<열>_peak_at`(그 시각, ms). 1초 창(A 안)이 직접 재는 지표만(PSI 는 커널이 이미 10초 평균을 준다 — C 안 보조).
+ *   5분 평균(기존 열)과 같은 정의의 1초 값이다: CPU 는 jiffies 비율, 디스크·NIC 는 장치 중 최대(대표값 규약 그대로).
+ */
+export const PEAK_COLS = Object.freeze(['cpu_pct', 'cpu_iowait_pct', 'disk_busy_pct', 'disk_iops', 'disk_await_ms', 'disk_aqu', 'net_pct', 'net_bps']);
+/** 피크 출처(화면이 피크 옆에 적는다) — A 세션 안 1초 창 · B 서버 샘플러 · C PSI 보조(피크 값은 없고 PSI avg10 이 보조) · 없음. */
+export const PEAK_SRC = Object.freeze(['window10', 'sampler', 'psi', 'none']);
+/** 피크 메타 열 — 출처 · 실제 창 길이(초 · 예산이 모자라 N 을 줄였으면 그 값) · 창 표본 수. */
+export const PEAK_META_COLS = Object.freeze([['peak_src', 'TEXT'], ['peak_window_s', 'INTEGER'], ['peak_n', 'INTEGER']]);
+/** 피크 열 SQL 정의(이력·최신값) — `<c>_peak REAL, <c>_peak_at INTEGER`. */
+export const PEAK_SQL_COLS = Object.freeze(PEAK_COLS.flatMap((c) => [[`${c}_peak`, 'REAL'], [`${c}_peak_at`, 'INTEGER']]));
+
+/**
+ * 장치별 이력 열(`usage_device_history` — 5분 · 장치마다 한 행). kind = disk | nic. 종류에 맞지 않는 칸은 null.
+ *   디스크: busy · await · IOPS r/w · 처리량 r/w · 평균 대기열 · in-flight · 오류(OS 경로에는 없다 — SMART 는 iDRAC: 늘 null).
+ *   NIC: rx/tx 처리량 · 사용률(max(rx,tx) ÷ 속도) · 오류·드롭 증가분 · 속도 · 상태(텍스트).
+ */
+export const DEVICE_COLS = Object.freeze([
+  { col: 'busy_pct', kind: 'disk', unit: '%', label: 'busy', peak: true },
+  { col: 'await_ms', kind: 'disk', unit: 'ms', label: 'await', peak: true },
+  { col: 'r_iops', kind: 'disk', unit: '/s', label: '읽기 IOPS', peak: false },
+  { col: 'w_iops', kind: 'disk', unit: '/s', label: '쓰기 IOPS', peak: false },
+  { col: 'iops', kind: 'disk', unit: '/s', label: 'IOPS', peak: true },
+  { col: 'r_bps', kind: 'disk', unit: 'B/s', label: '읽기 처리량', peak: false },
+  { col: 'w_bps', kind: 'disk', unit: 'B/s', label: '쓰기 처리량', peak: false },
+  { col: 'aqu', kind: 'disk', unit: '', label: '평균 대기열', peak: true },
+  { col: 'inflight', kind: 'disk', unit: '', label: 'in-flight(순간값)', peak: false },
+  { col: 'err_delta', kind: 'any', unit: '건', label: '오류 증가', peak: false },
+  { col: 'rx_bps', kind: 'nic', unit: 'B/s', label: '수신', peak: true },
+  { col: 'tx_bps', kind: 'nic', unit: 'B/s', label: '송신', peak: true },
+  { col: 'util_pct', kind: 'nic', unit: '%', label: '사용률', peak: true },
+  { col: 'drop_delta', kind: 'nic', unit: '건', label: '드롭 증가', peak: false },
+  { col: 'speed_bps', kind: 'nic', unit: 'bit/s', label: '속도', peak: false, roll: 'last' },
+]);
+export const DEVICE_COL_NAMES = Object.freeze(DEVICE_COLS.map((c) => c.col));
+export const DEVICE_PEAK_COLS = Object.freeze(DEVICE_COLS.filter((c) => c.peak).map((c) => c.col));
+/** 장치 종류 — 원시 5분이 있는 것(disk·nic)과 일 1회 롤업만 있는 것(mount — 공간·inode). */
+export const DEVICE_KINDS = Object.freeze(['disk', 'nic', 'mount']);
+/** 마운트 일 롤업 열(평균+최대 — 공간·inode 사용률) · 크기·사용은 마지막 값. */
+export const MOUNT_DAILY_COLS = Object.freeze(['used_pct', 'inode_pct']);

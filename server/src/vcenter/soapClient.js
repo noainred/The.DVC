@@ -20,6 +20,7 @@ import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
 import { splitHostPort } from '../util/hostPort.js';   // v2.603(LEFT2603-02): IPv6 host:port 분리
 import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v2.492: 다중 VM 기간 사용률(엔티티별 파싱)
+import { HOST_NIC_COUNTERS, NIC_REALTIME_SAMPLES, parsePerfInstancesXml, summarizeNicPerf } from './nicPerf.js'; // v2.925(B-③) vmnic 드롭·에러
 
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
 export { parseObjectContent, xmlUnescape };
@@ -586,6 +587,24 @@ export class VimSoapClient {
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
     );
     return parsePerfMultiXml(xml, ids);
+  }
+
+  /**
+   * v2.925(B-③) — 한 엔티티의 카운터 여러 개를 **인스턴스별로**(instance '*') 한 번의 QueryPerf 로. 호스트 net.* 은 인스턴스가 vmnic 이름이다.
+   * 반환은 parsePerfInstancesXml 모양(집계 계열 '' 은 버린다).
+   */
+  async queryEntityPerfInstances(entityType, ref, counterIds, intervalId, { maxSample = 0 } = {}) {
+    const ids = [...new Set((counterIds || []).filter(Boolean).map(String))];
+    if (!ids.length) return parsePerfInstancesXml('', []);
+    const metricIds = ids.map((id) => `<metricId><counterId>${id}</counterId><instance>*</instance></metricId>`).join('');
+    const spec =
+      `<querySpec><entity type="${entityType}">${ref}</entity>` +
+      (maxSample ? `<maxSample>${maxSample}</maxSample>` : '') +
+      metricIds + `<intervalId>${intervalId}</intervalId></querySpec>`;
+    const xml = await this.#call(
+      `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
+    );
+    return parsePerfInstancesXml(xml, ids);
   }
 
   /**
@@ -1383,6 +1402,28 @@ export async function fetchEntityMetrics(vc, entityType, moref, types, interval,
   }
 }
 export const fetchVmMetrics = (vc, moref, types, interval, opts) => fetchEntityMetrics(vc, 'VirtualMachine', moref, types, interval, opts);
+
+/**
+ * v2.925(B-③) — 호스트 물리 NIC(vmnic)별 드롭·에러·패킷·KBps, **실시간 최근 1시간**(로그인 1회 · QueryPerf 1회).
+ *   카탈로그에 없는 카운터는 던지지 않고 missingCounters 로(나머지는 보여 준다). 요약 규약은 nicPerf.js summarizeNicPerf.
+ *   주기 수집이 아니다 — 화면 버튼으로만 부른다(고RTT vCenter 에 로그인을 늘리지 않게).
+ */
+export async function fetchHostNicStats(vc, moref) {
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const map = await c.perfCounterMap();
+    const idOf = {}; const missing = [];
+    for (const [k, key] of Object.entries(HOST_NIC_COUNTERS)) { const id = map.get(key); if (id) idOf[k] = String(id); else missing.push(k); }
+    const parsed = Object.keys(idOf).length
+      ? await c.queryEntityPerfInstances('HostSystem', moref, Object.values(idOf), PERF_INTERVALS.realtime, { maxSample: NIC_REALTIME_SAMPLES })
+      : parsePerfInstancesXml('', []);
+    const sum = summarizeNicPerf(parsed, idOf);
+    return { ok: true, interval: 'realtime', sampleSec: PERF_INTERVALS.realtime, ...sum, missingCounters: missing, instancesTruncated: !!parsed.truncated };
+  } finally {
+    await c.logout();
+  }
+}
 export const fetchHostMetrics = (vc, moref, types, interval, opts) => fetchEntityMetrics(vc, 'HostSystem', moref, types, interval, opts);
 
 /**

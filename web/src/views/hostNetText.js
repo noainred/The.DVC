@@ -8,6 +8,7 @@ import { numOrNull } from '../numOrNull.js';
 export const BASIS = Object.freeze({
   lldp: { label: '확정', note: 'LLDP 이웃', tone: 'green' },
   mac: { label: '높음', note: 'MAC 테이블 학습', tone: 'green' },
+  'mac-vm': { label: '높음', note: 'MAC 테이블 — 이 호스트 VM MAC', tone: 'green' },   // v2.924(B-②)
   'desc-mac': { label: '보통', note: '포트 설명에 NIC MAC', tone: 'amber' },
   'desc-nic': { label: '보통', note: '포트 설명에 호스트 이름 + vmnic', tone: 'amber' },
   'desc-name': { label: '보통', note: '포트 설명에 호스트 이름(NIC 미확정)', tone: 'amber' },
@@ -24,6 +25,15 @@ export function bpsText(v) {
 }
 /** 송신/수신 — 스위치 In = 서버 송신 · Out = 서버 수신. */
 export const txRxText = (u) => (numOrNull(u?.inBps) == null && numOrNull(u?.outBps) == null ? '—' : `${bpsText(u?.inBps)} / ${bpsText(u?.outBps)}`);
+/** v2.923(B-①): 직전 주기 드롭(in / out). 수집 전·못 읽음은 ‘—’. */
+export const dropText = (u) => (numOrNull(u?.inDrop) == null && numOrNull(u?.outDrop) == null ? '—' : `${numOrNull(u?.inDrop) ?? '—'} / ${numOrNull(u?.outDrop) ?? '—'}`);
+/** v2.923(B-①): 최근 24시간 합(in / out) — 값이 있는 표본만 더한 부분 합이라 일부 표본만 값이 있으면 그 수를 함께 준다. 없으면 ‘—’. */
+export function daySumText(day, kind = 'drop') {
+  if (!day) return '—';
+  const [a, b, n] = kind === 'drop' ? [day.inDrop, day.outDrop, day.dropN] : [day.inErr, day.outErr, day.errN];
+  if (numOrNull(a) == null && numOrNull(b) == null) return '—';
+  return `${numOrNull(a) ?? '—'} / ${numOrNull(b) ?? '—'}${Number.isFinite(n) && Number.isFinite(day.samples) && n < day.samples ? ` (표본 ${n}/${day.samples})` : ''}`;
+}
 export const errText = (u) => (numOrNull(u?.inErr) == null && numOrNull(u?.outErr) == null ? '—' : `${numOrNull(u?.inErr) ?? '—'} / ${numOrNull(u?.outErr) ?? '—'}`);
 export const speedText = (bps) => { const n = numOrNull(bps); return n == null ? '—' : n >= 1e9 ? `${Math.round(n / 1e8) / 10} G` : `${Math.round(n / 1e6)} M`; };
 export const portLabel = (u) => `${u?.hostname || u?.key || '?'} ${u?.port || ''}`.trim();
@@ -46,20 +56,54 @@ export function nicUplinkText(list) {
 export function uplinkSummary(d, nics = []) {
   if (!d) return { text: '', note: '' };
   if (d.cvpUnavailable) return { text: 'CVP DB 없음', note: 'CVP 수집 DB 를 열지 못했습니다.' };
-  if (!d.servers) return { text: 'CVP 없음', note: d.corpLimited ? '이 법인에 등록된 CVP 서버가 없습니다(범위 계정은 자기 법인 CVP 만 봅니다).' : '등록된 CVP 서버가 없습니다(특수 기능 › Arista CloudVision).' };
+  if (!d.servers) return { text: 'CVP 없음', note: d.corpLimited || d.hostCorpMatched ? '이 호스트 법인에 등록된 CVP 서버가 없습니다(매칭은 그 호스트 법인의 CVP 만 봅니다 — 법인 · vCenter 1:1).' : '등록된 CVP 서버가 없습니다(특수 기능 › Arista CloudVision).' };
   const ups = Array.isArray(d.uplinks) ? d.uplinks : [];
   const byNic = uplinksByNic(ups);
   const nicN = Array.isArray(nics) ? nics.length : 0;
   const counts = {};
   for (const u of ups) counts[u.basis] = (counts[u.basis] || 0) + 1;
   const basisText = Object.entries(counts).map(([k, n]) => `${basisOf(k).label}(${basisOf(k).note}) ${n}`).join(' · ');
-  if (!ups.length) return { text: `CVP 매칭 0 / ${nicN} NIC`, note: `CVP 포트 설명에서 호스트 이름 ‘${d.terms?.short || ''}’ 이나 NIC MAC 을 찾지 못했습니다 — 스위치 포트 설명(description)에 호스트 이름 또는 MAC 을 적으면 매칭됩니다. LLDP·MAC 테이블 수집은 다음 단계입니다.` };
-  return { text: `CVP 매칭 ${byNic.size} / ${nicN} NIC${ups.length - [...byNic.values()].flat().length ? ` · 호스트 수준 ${hostLevelUplinks(ups).length}` : ''}`, note: `${basisText}${d.conflicts?.length ? ` · 충돌 ${d.conflicts.length}(같은 MAC 이 포트 3개 이상)` : ''}${d.truncated ? ' · 후보 상한 초과(일부만)' : ''}` };
+  const l2 = l2Text(d.l2);
+  if (!ups.length) return { text: `CVP 매칭 0 / ${nicN} NIC`, note: `LLDP 이웃 · MAC 테이블 · 포트 설명 어디에서도 이 호스트(‘${d.terms?.short || ''}’ · NIC MAC · VM MAC)를 찾지 못했습니다. ${l2}` };
+  // v2.924: 인벤토리에 물리 NIC 목록이 없으면 'n / 0 NIC' 대신 매칭한 포트 수로 말한다(Chromium 판독에서 발견).
+  const head = nicN ? `CVP 매칭 ${byNic.size} / ${nicN} NIC${ups.length - [...byNic.values()].flat().length ? ` · 호스트 수준 ${hostLevelUplinks(ups).length}` : ''}` : `CVP 매칭 포트 ${ups.length}(인벤토리에 NIC 목록 없음)`;
+  return { text: head, note: `${basisText}${d.conflicts?.length ? ` · 충돌 ${d.conflicts.length}(같은 MAC 이 포트 3개 이상)` : ''}${d.truncated ? ' · 후보 상한 초과(일부만)' : ''} · ${l2}` };
 }
 
+/**
+ * v2.924(B-②): LLDP·MAC 테이블 수집 현황 한 줄 — 근거의 출처를 말한다. 0대면 '수집 전'(엣지 업그레이드 · 부품 주기 30분 · 경로 추정),
+ *   조회 실패면 그렇다고. ESXi 는 표준 vSwitch 에서 LLDP 를 보내지 않는다(분산 스위치에서 켜야 한다) — LLDP 가 없다고 연결이 없는 것은 아니다.
+ */
+export function l2Text(l2, now = Date.now()) {
+  if (!l2) return '';
+  if (l2.error) return 'LLDP·MAC 테이블을 조회하지 못했습니다.';
+  if (l2.unavailable) return 'CVP DB 를 열지 못해 LLDP·MAC 테이블을 볼 수 없습니다.';
+  if (!l2.fdbDevices && !l2.lldpDevices) return 'LLDP·MAC 테이블은 아직 수집 전입니다(엣지 v2.924 이상 · 부품 주기 30분 · 텔레메트리 경로는 추정).';
+  // v2.924(반증 M-3): 근거가 언제 읽은 값인지 · 마지막 시도가 실패한 스위치 수를 말한다(실패한 스위치의 근거는 오래된 값이다).
+  const fail = (Number(l2.lldpFailing) || 0) + (Number(l2.fdbFailing) || 0);
+  return `LLDP 를 읽은 스위치 ${l2.lldpDevices}대 · MAC 테이블을 읽은 스위치 ${l2.fdbDevices}대${Number.isFinite(l2.lastAt) ? ` · 최근 ${ageText(l2.lastAt, now)}` : ''}${fail ? ` · 마지막 읽기 실패 ${fail}건(그 스위치의 근거는 오래된 값)` : ''}${l2.fdbTruncated ? ' · MAC 조회 상한 초과(일부만)' : ''}(ESXi 는 분산 스위치에서 LLDP 를 켜야 이웃으로 보입니다).`;
+}
+/** 경과 시간 글자 — 근거 나이(분 · 시간 · 일). 값이 없으면 ''. */
+export function ageText(at, now = Date.now()) {
+  const t = Number(at);
+  if (!Number.isFinite(t) || t <= 0) return '';
+  const m = Math.max(0, Math.floor((now - t) / 60_000));
+  if (m < 1) return '1분 안';   // v2.925: '0분 전' 이 어색했다(B-② 화면 확인)
+  return m < 60 ? `${m}분 전` : m < 48 * 60 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`;
+}
+/** v2.924(반증 M-3): L2 근거가 이만큼 넘게 오래되면 타일에 ‘오래됨’ 을 붙인다(부품 주기 30분 × 6). */
+export const L2_STALE_MS = 3 * 3600_000;
 /** 업링크 합계(매칭 포트의 In/Out 합 — 없는 값은 더하지 않고 센다). */
 export function uplinkTotals(uplinks = []) {
-  let tx = null; let rx = null; let unmeasured = 0; let err = null;
+  let tx = null; let rx = null; let unmeasured = 0; let err = null; let drop = null; let dropDay = null; let errDay = null;
+  for (const u of Array.isArray(uplinks) ? uplinks : []) {
+    // v2.923(B-①): 드롭(직전 주기 · 24시간 합)과 24시간 오류는 처리량 측정 여부와 따로 센다 — 값이 있는 것만 더한다.
+    for (const [k, a, b] of [['drop', u?.inDrop, u?.outDrop], ['dropDay', u?.day?.inDrop, u?.day?.outDrop], ['errDay', u?.day?.inErr, u?.day?.outErr]]) {
+      if (numOrNull(a) == null && numOrNull(b) == null) continue;
+      const v = (numOrNull(a) ?? 0) + (numOrNull(b) ?? 0);
+      if (k === 'drop') drop = (drop ?? 0) + v; else if (k === 'dropDay') dropDay = (dropDay ?? 0) + v; else errDay = (errDay ?? 0) + v;
+    }
+  }
   for (const u of Array.isArray(uplinks) ? uplinks : []) {
     const i = numOrNull(u?.inBps); const o = numOrNull(u?.outBps);
     if (i == null && o == null) { unmeasured += 1; continue; }
@@ -67,7 +111,7 @@ export function uplinkTotals(uplinks = []) {
     const e = (numOrNull(u?.inErr) ?? 0) + (numOrNull(u?.outErr) ?? 0);
     if (numOrNull(u?.inErr) != null || numOrNull(u?.outErr) != null) err = (err ?? 0) + e;
   }
-  return { tx, rx, unmeasured, err };
+  return { tx, rx, unmeasured, err, drop, dropDay, errDay };
 }
 
 export const SEVERITY_BADGE = Object.freeze({ critical: 'red', error: 'red', warning: 'amber', info: 'gray' });

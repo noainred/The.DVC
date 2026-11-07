@@ -527,7 +527,8 @@ test('⑬ DB — v2.918 스키마 DB 에 migratePerfColumns 를 돌리면 새 �
       cpu_pct REAL, mem_pct REAL, disk_busy_pct REAL, disk_used_pct REAL, net_pct REAL, net_bps REAL, hba_pct REAL, hba_bps REAL, io_pct REAL, PRIMARY KEY (agent, key));`);
   old.prepare('INSERT INTO usage_latest (agent,key,ts,cpu_pct) VALUES (?,?,?,?)').run('', 'OLD', 1, 33);
   const r1 = db.migratePerfColumns(old);
-  assert.equal(r1.added, PERF_COL_NAMES.length * 3 + 4, '이력·롤업·최신값 × 새 열 + 최신값 전용 4');
+  // v2.922: 최신값에 피크 열(8 × 2) · 피크 메타 3 · 장치 상한 초과 1 이 더해졌다(3a — 3단 저장 구조).
+  assert.equal(r1.added, PERF_COL_NAMES.length * 3 + 4 + 16 + 3 + 1, '이력·롤업·최신값 × 새 열 + 최신값 전용 4 + v2.922 피크 20');
   assert.equal(db.migratePerfColumns(old).added, 0, '멱등');
   const row = old.prepare("SELECT * FROM usage_latest WHERE key='OLD'").get();
   assert.equal(row.cpu_pct, 33, '기존 행 보존'); assert.equal(row.runq_per_core, null, '기존 행의 새 열은 null(0 이 아니다)');
@@ -541,7 +542,8 @@ test('⑬ DB — v2.918 스키마 DB 에 migratePerfColumns 를 돌리면 새 �
   const ins = await db.insertUsage([{ key: 'NEW', ts: hour + 60_000, src: 'os', cpu_pct: 10, runq_per_core: 1.25, disk_aqu: 3, os_at: hour + 60_000, detail_json: '{"v":1}', tuning_json: '{"v":1}' }], 'T');
   assert.deepEqual(ins, { ok: true, inserted: 1, duplicates: 0 });
   await db.insertUsage([{ key: 'NEW', ts: hour + 120_000, src: 'idrac', cpu_pct: 11, runq_per_core: '', idrac_at: hour + 120_000 }], 'T');
-  const L = (await db.latestUsage()).find((r) => r.key === 'NEW' && r.agent === 'T');
+  // v2.922(D13): JSON 열은 판정 소비처만 읽는다 — { json:true } 판본.
+  const L = (await db.latestUsage({ json: true })).find((r) => r.key === 'NEW' && r.agent === 'T');
   assert.equal(L.runq_per_core, null, "빈 문자열은 0 이 아니라 null(Number('')===0 함정)");
   assert.equal(L.os_at, hour + 60_000, 'OS 를 이번에 못 읽었으면 마지막 OS 시각을 지킨다(COALESCE)');
   assert.equal(L.idrac_at, hour + 120_000); assert.equal(L.detail_json, null, '장치별 JSON 은 마지막 표본 그대로(옛 장치값을 섞지 않는다)');

@@ -18,7 +18,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { setCvpCollectBaseResolver, ackCvpCollect } from '../cvp/collectRequests.js';
 import { CANDIDATES } from '../cvp/client.js';
-import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES, PSU_W_MAX } from '../cvp/parse.js';
+import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES, PSU_W_MAX, FDB_MAX, LLDP_MAX } from '../cvp/parse.js';
 import { cmpVersion } from '../util/cmpVersion.js'; // v2.613 CONTRACT2613-04: 엣지 버전 게이트
 
 const FILE = path.join(config.configDir, 'central-agent-cvp.json');
@@ -224,6 +224,7 @@ export function cleanDevice(x, now = Date.now(), cnt = { ports: 0 }) {
       duplex: sOrNull(p.duplex, 48), fwdModel: sOrNull(p.fwdModel, 48), mac: sOrNull(p.mac, 32), mtu: numOrNull(p.mtu), operRaw: sOrNull(p.operRaw, 48),
       oper: LINK.has(p.oper) ? p.oper : 'unknown', admin: LINK.has(p.admin) ? p.admin : 'unknown', vlan: s(p.vlan, 32), lag: s(p.lag, 64),
       inBps: numOrNull(p.inBps), outBps: numOrNull(p.outBps), inUtil: numOrNull(p.inUtil), outUtil: numOrNull(p.outUtil), inErr: numOrNull(p.inErr), outErr: numOrNull(p.outErr),
+      inDrop: numOrNull(p.inDrop), outDrop: numOrNull(p.outDrop),   // v2.922(3a): 포트 드롭(추정 경로 — 못 읽으면 null)
     })),
   };
   if (Array.isArray(x.ports) && x.ports.length > PORT_MAX) cnt.ports += x.ports.length - PORT_MAX;
@@ -319,7 +320,11 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
     if (!own(r[0])) { dropped.notOwned++; continue; }
     const key = s(r[1], 128); const port = s(r[2], 64); const ts = tsClamp(r[3], now);
     if (!key || !port || ts == null) { dropped.badRow++; continue; }
-    rows.push([r[0], key, port, ts, numOrNull(r[4]), numOrNull(r[5]), numOrNull(r[6]), numOrNull(r[7]), numOrNull(r[8]), numOrNull(r[9])]);
+    // v2.922(반증 D3): 새 엣지 행은 12칸(뒤 두 칸 = 포트 드롭 in/out — 추정 경로)이다. 정제가 10칸으로 자르면 드롭이 중앙에서 영원히 비었다.
+    //   구 엣지 10칸 행은 10칸 그대로 둔다 — 적재가 '드롭을 보내지 않은 행' 과 '드롭을 못 읽은(null) 행' 을 구분한다(db.importSamples).
+    const row = [r[0], key, port, ts, numOrNull(r[4]), numOrNull(r[5]), numOrNull(r[6]), numOrNull(r[7]), numOrNull(r[8]), numOrNull(r[9])];
+    if (r.length >= 12) row.push(numOrNull(r[10]), numOrNull(r[11]));
+    rows.push(row);
   }
   const touch = [];
   for (const t of Array.isArray(b.touch) ? b.touch.slice(0, 20_000) : []) {
@@ -359,7 +364,21 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
       eventsByCvp.set(cvpId, out);
     }
   }
-  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped, devSamples, eventsByCvp };
+  // v2.924(SAN·CVP 설계 B-②): LLDP 이웃 · MAC 테이블 — 소유한 CVP 만 · 장비 키·시각 · MAC 12자 16진 · VLAN 0..4095(모르면 null) · 문자열 상한 · 개수 상한.
+  //   fdb/lldp 가 배열이 아니면 그 쪽은 싣지 않는다(undefined — 중앙 저장소가 이전 목록을 그대로 둔다).
+  const l2ByCvp = new Map();
+  let nL2 = 0;
+  for (const x of Array.isArray(b.l2) ? b.l2 : []) {
+    if (!isPlainObj(x)) { dropped.notObject++; continue; }
+    if (!own(x.cvpId)) { dropped.notOwned++; continue; }
+    if (nL2 >= DEVICE_MAX) { dropped.overCount++; continue; }
+    const r = cleanL2(x, now);
+    if (!r) { dropped.badRow++; continue; }
+    if (!l2ByCvp.has(x.cvpId)) l2ByCvp.set(x.cvpId, []);
+    l2ByCvp.get(x.cvpId).push(r);
+    nL2++;
+  }
+  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped, devSamples, eventsByCvp, l2ByCvp };
 }
 
 /**
@@ -410,3 +429,49 @@ export function edgeCvpSummary() {
   });
 }
 export function _resetForTest() { _map = null; }
+
+/** v2.924(B-②): L2 레코드 1건 정제. 반환 null = 버림. fdb 행 [mac, vlan, port] · lldp 행 [port, idx, sysName, portId, portDesc, chassisId]. */
+const MAC12 = /^[0-9a-f]{12}$/;
+export function cleanL2(x, now = Date.now()) {
+  if (!isPlainObj(x)) return null;
+  const key = s(x.key, 128);
+  if (!key || key === '__proto__' || key === 'constructor' || key === 'prototype') return null;
+  const ts = tsClamp(x.ts, now);
+  if (ts == null) return null;
+  const out = { key, ts };
+  // v2.924(반증 M-3): 종류마다 읽은 시각(엣지 시각은 수신 시각으로 자른다) — 없으면 ts.
+  const fa = tsClamp(x.fdbAt, now); const la = tsClamp(x.lldpAt, now);
+  if (fa != null) out.fdbAt = fa;
+  if (la != null) out.lldpAt = la;
+  if (Array.isArray(x.fdb)) {
+    const rows = [];
+    for (const e of x.fdb) {
+      if (!Array.isArray(e) || e.length < 3) continue;
+      const mac = typeof e[0] === 'string' ? e[0].toLowerCase() : '';
+      const port = s(e[2], 64);
+      if (!MAC12.test(mac) || !port) continue;
+      const v = numOrNull(e[1]);
+      rows.push([mac, v != null && v >= 0 && v <= 4095 ? Math.trunc(v) : null, port]);
+      if (rows.length >= FDB_MAX) break;
+    }
+    out.fdb = rows;
+    const m = isPlainObj(x.fdbMeta) ? x.fdbMeta : {};
+    out.fdbMeta = { truncated: Math.max(0, numOrNull(m.truncated) ?? 0),
+      portsOverCap: Array.isArray(m.portsOverCap) ? m.portsOverCap.filter(isPlainObj).slice(0, 64).map((o) => ({ port: s(o.port, 64), macs: numOrNull(o.macs) })) : [] };
+  }
+  if (Array.isArray(x.lldp)) {
+    const rows = [];
+    for (const e of x.lldp) {
+      if (!Array.isArray(e) || e.length < 2) continue;
+      const port = s(e[0], 64);
+      if (!port) continue;
+      rows.push([port, s(e[1], 64) || '0', s(e[2], 255), s(e[3], 128), s(e[4], 200), s(e[5], 128)]);
+      if (rows.length >= LLDP_MAX) break;
+    }
+    out.lldp = rows;
+    out.lldpTruncated = Math.max(0, numOrNull(x.lldpTruncated) ?? 0);
+  }
+  if (out.fdb === undefined && out.lldp === undefined) return null;
+  return out;
+}
+

@@ -179,10 +179,10 @@ test('RUNTIME2613-05: bmusage 세션 예산은 장비 시한 − 5초 로 잘린
   assert.deepEqual(coupleBudget(45_000, 60_000, 15_000), { effective: 45_000, clamped: false, cap: 55_000 });
   // 수집기는 폴러가 준 예산을 쓴다(자기 상수가 아니라)
   const osSrc = bare('bmusage/collectors/osSsh.js');
-  assert.match(osSrc, /collectOsUsage\(osHost = \{\}, \{ signal, budgetMs = SESSION_BUDGET_MS \}/);
+  assert.match(osSrc, /collectOsUsage\(osHost = \{\}, \{ signal, budgetMs = SESSION_BUDGET_MS(?:, [^}]*)? \}/);
   assert.match(osSrc, /budgetMs - READY_TIMEOUT_MS/);
   const pl = bare('bmusage/poller.js');
-  assert.match(pl, /collectOsUsage\(target\.osHost, \{ signal, budgetMs: OS_BUDGET\.effective \}\)/);
+  assert.match(pl, /collectOsUsage\(target\.osHost, \{ signal, budgetMs: OS_BUDGET\.effective(?:, \.\.\.osStoreOpts\((?:storeOf\(\), peakPlan)?\))? \}\)/);   // v2.922: 저장 구조 옵션(예산은 그대로 폴러 값)
   assert.match(pl, /budgetMs: ENT_BUDGET\.effective/);
   // env 조합 — 자식 프로세스에서 모듈을 다시 로드해 본다(기본값 / 장비 시한 30초 / 예산을 시한보다 크게)
   const base = { CONFIG_DIR: CFG, DATA_SOURCE: 'mock', AUTH_ENABLED: 'false' };

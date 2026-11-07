@@ -242,6 +242,7 @@ const ENV_MS_OK = {
   'bmusage/collectors/idracEnterprise.js:BMUSAGE_ENT_SSH_READY_MS': LB,
   'bmusage/collectors/idracEnterprise.js:BMUSAGE_ENT_CMD_MS': LB,
   'bmusage/db.js:BMUSAGE_COUNT_CACHE_MS': LB,
+  'bmusage/monthStore.js:BMUSAGE_MONTH_COUNT_CACHE_MS': LB,   // v2.922(반증 D11): 시간 단위 파일 행 수 캐시 10분(하한 Math.max(0, …))
   'bmusage/poller.js:BMUSAGE_DEVICE_TIMEOUT_MS': LB,
   'central/bmUsageEdgePull.js:BMUSAGE_PULL_TIMEOUT_MS': LB,
   'central/bmUsageEdgePull.js:BMUSAGE_PULL_STALE_MS': LB,

@@ -16,7 +16,7 @@
 | [idrac-server.md](idrac-server.md) | 25 | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 | server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
 | [vcenter.md](vcenter.md) | 29 | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) | server/src/{vcenter,vcinfo,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
 | [gpu.md](gpu.md) | 8 | GPU 모니터링(할당·메모리·온도·수집 점검) | server/src/gpu/ · web/src/views/tools/Gpu* |
-| [cvp.md](cvp.md) | 12 | Arista CVP 수집·장애·GBIC·Overview | server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
+| [cvp.md](cvp.md) | 15 | Arista CVP 수집·장애·GBIC·Overview | server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
 | [isilon.md](isilon.md) | 7 | 아이실론 디렉터리 사용량·메일 | server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
 | [ipam.md](ipam.md) | 11 | IP 관리(IPMS·대역·스캔·원장·VM DNS) | server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | [horizon-curuser.md](horizon-curuser.md) | 6 | Horizon 세션·앱 사용·현재 사용자(Windows) | server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
