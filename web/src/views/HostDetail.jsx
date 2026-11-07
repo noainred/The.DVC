@@ -14,6 +14,7 @@ import { hostUsagePct } from './vcdOverview.js';
 import { REBOOT_KIND } from './hostcfg/hostCfgText.js';
 import { secCountsOf, secText, secTone, reasonBadges, bootCell, veeamCell, hwCell, uptimeDays, gbText, kwText, ratioText, nicLinkDownOf, uplinkDownOf } from './hostChecksText.js';
 import HostNetCvp from './HostNetCvp.jsx';   // v2.920 CVP 업링크 블록(시안 D-② HostNet)
+import HostNicCounters from './HostNicCounters.jsx';   // v2.925(B-③) ESXi vmnic 드롭·에러 — 버튼으로 읽는다
 import { uplinksByNic, nicUplinkText, txRxText, basisOf, uplinkSummary } from './hostNetText.js';
 import { sanSubText } from './hostSanText.js';
 
@@ -217,6 +218,7 @@ export default function HostDetail({ id }) {
               </div>
             )}
             {toolAllowed('cvp') ? (net ? <HostNetCvp data={net} nics={h.nics || []} /> : <div className="muted hd-note">CVP 업링크 매칭 읽는 중…</div>) : null}
+            <HostNicCounters hostId={h.id} uplinks={toolAllowed('cvp') && Array.isArray(net?.uplinks) ? net.uplinks : null} />
           </Card>
           <Card id="st" title="스토리지" color="#fb923c" sub={`HBA ${Array.isArray(h.hbas) ? h.hbas.length : '—'}${mp ? ` · LUN ${mp.luns}(공유 ${mp.shared}) · 경로 ${mp.paths} · 죽은 경로 ${mp.dead}` : ' · 경로 정보 아직 안 읽음'}${h.hcfg?.vsan ? ` · vSAN ${h.hcfg.vsan.enabled === true ? '참여' : h.hcfg.vsan.enabled === false ? '참여 안 함' : '—'}` : ''}`}>
             <div style={{ marginTop: -14 }}><HostHbaTable item={h} /></div>

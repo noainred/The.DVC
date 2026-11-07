@@ -703,21 +703,29 @@ export async function deviceDetail(agent, cvpId, key) {
  * @param {Array<{agent:string,cvpId:string,key:string,port:string}>} ports  상한 16
  * @returns {Promise<Map<string,{inErr:number|null,outErr:number|null,inDrop:number|null,outDrop:number|null,samples:number,dropN:number,errN:number}>>} 키 `${agent}\u0000${cvpId}\u0000${key}\u0000${port}`
  */
-export async function portWindowSums(ports = [], { sinceMs = 24 * 3600_000, now = Date.now() } = {}) {
+export async function portWindowSums(ports = [], { sinceMs = 24 * 3600_000, recentMs = 0, now = Date.now() } = {}) {
   const out = new Map();
   const db = await open();
   if (!db) return out;
-  const q = db.conn.prepare('SELECT in_err, out_err, in_drop, out_drop FROM port_sample WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND ts>=? LIMIT 5000');
+  const q = db.conn.prepare('SELECT ts, in_err, out_err, in_drop, out_drop FROM port_sample WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND ts>=? LIMIT 5000');
+  const rec = Number(recentMs) > 0 ? now - Number(recentMs) : null;
   for (const p of (Array.isArray(ports) ? ports : []).slice(0, 16)) {
-    const acc = { inErr: null, outErr: null, inDrop: null, outDrop: null, samples: 0, dropN: 0, errN: 0 };
-    for (const r of q.all(String(p.agent ?? ''), String(p.cvpId), String(p.key), String(p.port), now - sinceMs)) {
-      acc.samples += 1;
-      const add = (k, v) => { const n = numOrNull(v); if (n != null) acc[k] = (acc[k] ?? 0) + n; return n != null; };
+    const fresh = () => ({ inErr: null, outErr: null, inDrop: null, outDrop: null, samples: 0, dropN: 0, errN: 0 });
+    const acc = fresh();
+    const recent = rec != null ? fresh() : null;   // v2.925(B-③): 같은 행에서 최근 창(예: 1시간)도 함께 — ESXi 실시간 1시간과 나란히 놓는다
+    const addTo = (a, r) => {
+      a.samples += 1;
+      const add = (k, v) => { const n = numOrNull(v); if (n != null) a[k] = (a[k] ?? 0) + n; return n != null; };
       const e1 = add('inErr', r.in_err); const e2 = add('outErr', r.out_err);
       const d1 = add('inDrop', r.in_drop); const d2 = add('outDrop', r.out_drop);
-      if (e1 || e2) acc.errN += 1;
-      if (d1 || d2) acc.dropN += 1;
+      if (e1 || e2) a.errN += 1;
+      if (d1 || d2) a.dropN += 1;
+    };
+    for (const r of q.all(String(p.agent ?? ''), String(p.cvpId), String(p.key), String(p.port), now - sinceMs)) {
+      addTo(acc, r);
+      if (recent && Number(r.ts) >= rec) addTo(recent, r);
     }
+    if (recent) acc.recent = recent;
     out.set(`${p.agent ?? ''}\u0000${p.cvpId}\u0000${p.key}\u0000${p.port}`, acc);
   }
   return out;
