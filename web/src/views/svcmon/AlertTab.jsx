@@ -44,7 +44,7 @@ export default function AlertTab({ isAdmin = false }) {
   return (
     <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 760 }}>
       <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-        점검이 <b>연속 N회 실패</b>하면 포탈 알림 채널(설정 › 알림)로 보냅니다. 상태가 바뀔 때 한 번만 보내고, 정상으로 돌아오면 복구 알림을 한 번 보냅니다.
+        점검이 <b>연속 N회 실패</b>하면 포탈 알림 채널(설정 › 알림)로 보냅니다. 상태가 바뀔 때 한 번만 보내고, 정상으로 돌아오면 복구 알림을 한 번 보냅니다.{' '}
         {batchText} 요약 1건으로 묶습니다. 엣지 무보고 알림은 지금처럼 따로 나갑니다.
       </div>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
