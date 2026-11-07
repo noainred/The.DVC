@@ -19,7 +19,7 @@ import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../../util/settingsLoadError.js';
 import { SCHED_KINDS, ONCE_MAX_MIN, RECUR_MAX_MIN, parseLocal, parseTime, localToUtc, validTz, DEFAULT_TZ, MIN, DAY } from './schedule.js';
-import { SCOPES, TARGET_KINDS, TAG_RE, windowStatus, expiresAt, effectiveOccurrences } from './judge.js';
+import { SCOPES, TARGET_KINDS, TAG_RE, windowStatus, expiresAt, effectiveOccurrences, matchTarget } from './judge.js';
 
 const FILE = () => path.join(config.configDir, 'maintenance-windows.json');
 const DEPLOYED_FILE = () => path.join(config.configDir, 'maintenance-windows-deployed.json');
@@ -35,7 +35,7 @@ export const KEEP_ENDED_DAYS = 90;
 /** 엣지 배포본 신선도 — 받은 지 이보다 오래면 판정에 넣지 않는다(중앙이 지운 창이 끊긴 엣지에서 계속 억제하지 않게). 일회 창 상한(24h)과 같다. */
 export const DEPLOY_TTL_MS = 24 * 3_600_000;
 /** 소유자 등급이 필요한 길이(분) — 이보다 길면(일회 12~24h) 설정 소유자 등급. 반복은 상한이 12h 라 창 하나로는 해당 없음 —
- *  같은 서버를 덮는 비소유자 창들의 **합**이 어느 24시간에서든 이 값을 넘어도 소유자 등급(coverNeedsOwner — 반증 F5). */
+ *  같은 서버를 덮는 **살아 있는 창 전부(소유자 창 포함)**의 합이 어느 24시간에서든 이 값을 넘어도 소유자 등급(coverNeedsOwner — 반증 F5 · 재확인 G1 · G2). */
 export const OWNER_OVER_MIN = 12 * 60;
 /** 엣지 배포본 시각이 이만큼 넘게 미래면(엣지 시계가 앞서 있다가 바로잡힘) 지금으로 자른다 — 시한이 시계에 기대 무력해지지 않게(반증 F7). */
 export const DEPLOY_FUTURE_SKEW_MS = 5 * 60_000;
@@ -67,23 +67,27 @@ export function needsOwnerTier(w) {
 }
 
 /**
- * 합친 덮임 규칙(순수 — 반증 F5): 같은 대상(법인, 키)을 덮는 **비소유자 창**(approvedBy 없음 · 서버 창 · 지우지 않음 · 이 노드의 창)들과 후보 창을 합쳐,
- *   후보의 발생에 걸치는 어느 24시간 구간에서든 덮임이 OWNER_OVER_MIN(12시간)을 넘으면 true(소유자 등급 필요).
+ * 합친 덮임 규칙(순수 — 반증 F5 · 재확인 G1 · G2): 후보 서버 창이 덮는 (법인, 키)마다 그 서버를 덮는 **살아 있는 창 전부**(소유자가 저장한 창 · 법인 창 · 태그 창 포함 ·
+ *   지운 창 제외 · 만료 · 끝내기는 발생 계산이 자른다)와 후보를 합쳐, 후보의 발생에 걸치는 어느 24시간 구간에서든 덮임이 OWNER_OVER_MIN(12시간)을 넘으면 true(소유자 등급 필요).
+ *   ‘12시간 넘게 덮는 억제는 소유자 등급’ 이라는 원래 뜻 — 소유자 창 옆에 운영자가 12시간을 붙여 24시간 상시가 되는 길(G1)을 막는다. approvedBy 는 **기록일 뿐 합 판정에 쓰지 않는다**
+ *   (소유자가 운영자 창의 이름만 고쳐 approvedBy 가 붙어도 합에서 빠지지 않는다 — G2). 소유자 자신의 저장은 라우트가 이 검사 없이 허용한다.
  *   비용: 반복 창은 앞으로 36일(매월은 400일) · 일회 창은 그 발생 — 발생마다 앞뒤 2일만 다시 센다(쓰기 경로 · 같은 서버의 창 몇 개).
  * @param {object} cand  정규화한 후보(고치기 뒤 · 재확인이면 confirmedAt 을 지금으로)
- * @param {Array} all   이 노드의 창 전부(후보의 앞 판 · 같은 id 는 뺀다)
+ * @param {Array} all   이 노드의 창 전부 + 신선한 배포본(후보의 앞 판 · 같은 id 는 뺀다)
+ * @param {{tagsOf?:Function}} o  태그 창 판정(중앙 수동 용도 태그) — 없으면 태그 창은 펼친 keys 로만
  */
-export function coverNeedsOwner(cand, all = [], now = Date.now()) {
+export function coverNeedsOwner(cand, all = [], now = Date.now(), { tagsOf = null } = {}) {
   if (!cand || cand.target?.kind !== 'server' || cand.deleted) return false;
   const keys = cand.target.keys || [];
-  const peers = (Array.isArray(all) ? all : []).filter((w) => w && w.id !== cand.id && !w.deleted && w.origin !== 'central' && !w.approvedBy
-    && w.target?.kind === 'server' && w.vcenterId === cand.vcenterId && (w.target.keys || []).some((k) => keys.includes(k)));
+  const live = (Array.isArray(all) ? all : []).filter((w) => w && w.id !== cand.id && !w.deleted && w.schedule);
+  const peersOf = (key) => live.filter((w) => matchTarget(w, { key, vcenterId: cand.vcenterId }, { tagsOf }));
+  const peers = keys.length ? live.filter((w) => keys.some((k) => matchTarget(w, { key: k, vcenterId: cand.vcenterId }, { tagsOf }))) : [];
   if (!peers.length) return false;
   const horizon = (w) => (w.schedule?.kind === 'weekly' ? 36 * DAY : FUTURE_MAX_DAYS * DAY);
   const anchorsOf = (w) => effectiveOccurrences(w, now - DAY, now + horizon(w));
   const limit = OWNER_OVER_MIN * MIN;
   for (const key of keys) {
-    const ps = peers.filter((w) => w.target.keys.includes(key));
+    const ps = peersOf(key);
     if (!ps.length) continue;
     const group = [cand, ...ps];
     // 기준점 — 후보의 발생 + 매주가 아닌 동료의 발생(그 둘레에 후보 발생이 있으면 본다)

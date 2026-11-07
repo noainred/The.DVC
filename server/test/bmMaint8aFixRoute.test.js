@@ -1,6 +1,6 @@
 /**
  * 리눅스 성능 8a단계 반증 회귀 — 정비 창 **실제 api 라우터**.
- *   ① F5  ‘12시간 초과는 소유자’ 를 같은 서버를 덮는 비소유자 창들의 **합**으로(어느 24시간이든) — 창 2개로 넘기지 못한다 · 재확인 · 고치기도 같은 규칙 ·
+ *   ① F5  ‘12시간 초과는 소유자’ 를 같은 서버를 덮는 창들(소유자 창 · 법인 · 태그 창 포함 — 재확인 G1 · G2)의 **합**으로(어느 24시간이든) — 창 2개로 넘기지 못한다 · 재확인 · 고치기도 같은 규칙 ·
  *         ② 보류를 켠 비소유자 창만으로는 하루 12시간 넘게 덮지 못한다(파트 장애가 영영 안 열리는 경로 차단 — 판정기로 7일 검사)
  *   ② F1  서버 창의 대상은 (법인, 키) — 같은 키가 여러 법인에 보이면 법인을 고르게 한다(400) · 고르면 그 법인 서버로 저장
  *   ③ F6  창 200 · 엣지 28 — 목록 · 배포 현황 · 엣지 인출 응답 · 만들기가 이벤트 루프를 길게 막지 않는다(시간 기준 양보 · 상태 한 번)
@@ -56,7 +56,7 @@ async function setup(t) {
 const w = (key, name, schedule, scopes = { alerts: true, hold: true, focus: true }) => ({ name, reason: '상시', tz: 'Asia/Seoul', target: { kind: 'server', keys: [key] }, schedule, scopes });
 const P = '/maintenance';
 
-test('① F5 — 12시간 소유자 규칙은 같은 서버 비소유자 창들의 합(창 2개 · 일회 이어 붙이기 · 고치기 · 재확인) · ② 보류가 하루 12시간을 넘지 못한다', async (t) => {
+test('① F5 — 12시간 소유자 규칙은 같은 서버를 덮는 창들의 합(창 2개 · 일회 이어 붙이기 · 고치기 · 재확인 · 이름만 고치기는 예외) · ② 보류가 하루 12시간을 넘지 못한다', async (t) => {
   const { call } = await setup(t);
   // 반증 r4 재현 — 반복 12h × 2 = 매일 24시간
   const a = await call('opA', 'POST', P, w('MTAGA1', '오전', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }));
@@ -77,9 +77,11 @@ test('① F5 — 12시간 소유자 규칙은 같은 서버 비소유자 창들�
   // 소유자는 합을 넘겨 만들 수 있다(소유자 창은 approvedBy — 합에서 빠진다)
   const ob = await call('own', 'POST', P, w('MTAGA1', '오후(소유자)', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }));
   assert.equal(ob.status, 200, JSON.stringify(ob.body));
-  // 비소유자가 소유자 창을 고치면 approvedBy 가 비워져 합에 들어간다 → 24시간이 되므로 403
-  const e = await call('opA', 'PUT', `${P}/${ob.body.id}`, { rev: ob.body.rev, name: '오후 바꿈' });
+  // 비소유자가 소유자 창의 일정을 고치면(덮임이 바뀜) 합 규칙 — 24시간이므로 403 · 이름만 고치는 것은 억제를 늘리지 않아 된다(approvedBy 는 기록 — 비워진다)
+  const e = await call('opA', 'PUT', `${P}/${ob.body.id}`, { rev: ob.body.rev, schedule: { kind: 'weekly', days: all7, time: '12:00', durMin: 700 } });
   assert.equal(e.status, 403); assert.equal(e.body.code, 'owner-required');
+  const rn = await call('opA', 'PUT', `${P}/${ob.body.id}`, { rev: ob.body.rev, name: '오후 바꿈' });
+  assert.equal(rn.status, 200, JSON.stringify(rn.body));
   // 일회 12h 두 개 이어 붙이기(다른 서버)
   const s0 = NOW + HOUR;
   assert.equal((await call('opA', 'POST', P, w('MTAGA2', '전반', { kind: 'once', start: loc(s0), end: loc(s0 + 12 * HOUR) }))).status, 200);
@@ -88,8 +90,8 @@ test('① F5 — 12시간 소유자 규칙은 같은 서버 비소유자 창들�
   assert.equal(list.status, 200);
   const S1 = await import('../src/bmusage/maint/store.js');
   const mine = S1.listWindows().filter((x) => !x.deleted && x.target.keys.includes('MTAGA1') && !x.approvedBy);
-  assert.equal(mine.length, 2, '비소유자 창 — 오전 · 겹침');
-  assert.equal(S1.listWindows().find((x) => x.id === ob.body.id).approvedBy, 'own');
+  assert.equal(mine.length, 3, 'approvedBy 없는 창 — 오전 · 겹침 · 운영자가 이름을 고친 소유자 창(기록일 뿐 — 합에는 모두 든다)');
+  assert.equal(S1.listWindows().find((x) => x.id === ob.body.id).approvedBy, '', '비소유자가 고쳤다 — 소유자 승인 기록을 지운다(합 판정에는 쓰지 않는다)');
   // 재확인도 합 규칙 — 이 규칙 전에 만들어진 비소유자 창 둘(합 24시간)은 비소유자가 재확인하지 못한다(92일마다 혼자 연장 → 파트 장애가 영영 안 열림을 막는다)
   const legacy1 = await S1.addWindow({ ...w('MTAGA2', '옛 오전', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }), vcenterId: 'vcA' }, { by: 'opa', now: NOW });
   await S1.addWindow({ ...w('MTAGA2', '옛 오후', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }), vcenterId: 'vcA' }, { by: 'opa', now: NOW });
@@ -98,18 +100,35 @@ test('① F5 — 12시간 소유자 규칙은 같은 서버 비소유자 창들�
   assert.equal((await call('own', 'POST', `${P}/${legacy1.id}/confirm`, { rev: legacy1.rev })).status, 200, '소유자는 재확인한다');
 });
 
-test('① F5 — 비소유자가 소유자 창을 고치면 approvedBy 가 비워져 그 뒤 합 계산에 들어간다', async (t) => {
+test('① F5 재확인 G1 · G2 — 소유자 창도 합에 든다(소유자 12h 옆 운영자 12h 금지) · approvedBy 는 기록일 뿐(소유자가 운영자 창 이름만 고쳐도 합에 남는다)', async (t) => {
   const { call } = await setup(t);
   const S1 = await import('../src/bmusage/maint/store.js');
   for (const x of S1.listWindows().filter((y) => !y.deleted)) await S1.deleteWindow(x.id, { by: 'own', rev: x.rev, now: NOW });
-  const z = await call('own', 'POST', P, w('MTAGA2', '소유자 저녁', { kind: 'weekly', days: all7, time: '12:00', durMin: 600 }));
-  assert.equal(z.status, 200);
-  assert.equal(S1.getWindow(z.body.id).approvedBy, 'own');
-  const e = await call('opA', 'PUT', `${P}/${z.body.id}`, { rev: z.body.rev, name: '저녁(운영자 고침)' });
-  assert.equal(e.status, 200, JSON.stringify(e.body));
-  assert.equal(S1.getWindow(z.body.id).approvedBy, '', '비소유자가 고쳤다 — 소유자 승인 흔적을 지운다');
-  const add = await call('opA', 'POST', P, w('MTAGA2', '운영자 오전', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }));
-  assert.equal(add.status, 403, '10h(고친 창) + 12h > 12h');
+  // G1(반증 r12 ①) — 소유자 매일 00:00 12h + 운영자 매일 12:00 12h → 예전 200(24시간 상시 · ② 보류 포함)
+  const A = await call('own', 'POST', P, w('MTAGA2', 'A 소유자', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }));
+  assert.equal(A.status, 200); assert.equal(S1.getWindow(A.body.id).approvedBy, 'own', 'approvedBy 는 기록으로 남는다');
+  const B = await call('opA', 'POST', P, w('MTAGA2', 'B 운영자', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }));
+  assert.equal(B.status, 403); assert.equal(B.body.code, 'owner-required');
+  assert.equal((await call('opA', 'POST', P, w('MTAGA2', '겹침', { kind: 'weekly', days: all7, time: '03:00', durMin: 120 }))).status, 200, '소유자 창 안에 겹치는 창(합집합 12시간 그대로)은 된다');
+  const R = await import('../src/bmusage/maint/runtime.js');
+  const J = await R.maintJudge({ now: NOW });
+  let uncovered = 0;
+  for (let ts = NOW; ts < NOW + 7 * DAY; ts += 30 * MIN) if (!J.stateFor({ key: 'MTAGA2', vcenterId: 'vcA' }, ts).scopes.hold) uncovered += 1;
+  assert.ok(uncovered >= 7 * 24, `덮이지 않는 30분 칸 ${uncovered}/336(반증 r12: 0)`);
+  // G1 재확인 — 이 규칙 전에 만들어진 운영자 12:00 12h(소유자 창 옆)는 운영자 혼자 재확인하지 못한다
+  const legacyB = await S1.addWindow({ ...w('MTAGA2', '옛 운영자 오후', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }), vcenterId: 'vcA' }, { by: 'opa', now: NOW });
+  const cf = await call('opA', 'POST', `${P}/${legacyB.id}/confirm`, { rev: legacyB.rev });
+  assert.equal(cf.status, 403, '반증 r12 ② — 예전 200'); assert.equal(cf.body.code, 'owner-required');
+  for (const x of S1.listWindows().filter((y) => !y.deleted)) await S1.deleteWindow(x.id, { by: 'own', rev: x.rev, now: NOW });
+  // G2(반증 r12 ③) — 소유자가 운영자 창 이름만 고쳐 approvedBy 가 붙어도 그 창은 합에 남는다
+  const B1 = await call('opA', 'POST', P, w('MTAGA2', 'B1 운영자', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }));
+  assert.equal(B1.status, 200);
+  const rn = await call('own', 'PUT', `${P}/${B1.body.id}`, { rev: B1.body.rev, name: 'B1 오타 수정' });
+  assert.equal(rn.status, 200); assert.equal(S1.getWindow(B1.body.id).approvedBy, 'own');
+  const B2 = await call('opA', 'POST', P, w('MTAGA2', 'B2 운영자', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }));
+  assert.equal(B2.status, 403, '예전: B1 이 합에서 빠져 200');
+  // 소유자 자신의 저장은 그대로 허용
+  assert.equal((await call('own', 'POST', P, w('MTAGA2', '소유자 오후', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }))).status, 200);
 });
 
 test('② F1 — 같은 키가 여러 법인에 보이면 법인을 고르게 한다(400) · 고르면 그 법인 서버로 저장 · 범위 계정은 보이는 법인만', async (t) => {
