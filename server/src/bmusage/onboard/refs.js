@@ -103,7 +103,8 @@ export function resolveOsAuth(server = {}) {
     if (acc.kind !== 'os') return { ok: false, code: 'account-kind', error: AUTH_ERROR['account-kind'] };
   }
   const username = t(server.username) || (acc ? acc.username : '') || 'root';
-  const useKey = keyRef || (acc && acc.keyRef) || '';
+  // osAuth 'password' = 비밀번호 고정(공통 계정에 기본 키가 있어도 — CSV os_key ‘password’).
+  const useKey = server.osAuth === 'password' ? '' : (keyRef || (acc && acc.keyRef) || '');
   if (useKey) {
     const m = KS.keyMaterial(useKey);
     if (!m.ok) return { ok: false, code: m.code, error: AUTH_ERROR[m.code] || AUTH_ERROR['key-missing'] };

@@ -1789,6 +1789,21 @@ centralRouter.get('/bmusage-config', requireCentral(), async (req, res) => {
   res.json({ ok: true, ...out });
 });
 
+// 7b단계 서버 등록 배포 — 수집 경로 ‘edge’ 로 등록한 서버 목록(비밀 없음 — 공통 계정 · 키는 이름만). 엣지가 주기적으로 GET.
+//   **개별 토큰으로 인증된 이름에만** 행을 준다(공유 토큰의 ?agent= 는 남의 법인 서버 목록을 받아 갈 수 있다 — v2.589 규약).
+//   `?applied=<서명>&ok=&rej=&rm=` 은 엣지가 지금 적용한 판과 결과 수(숫자만) — 화면이 '반영됨 / 대기' 를 가른다(인메모리 기록).
+centralRouter.get('/bm-onboard', requireCentral(), async (req, res) => {
+  const verified = req.centralAuth?.mode === 'agent';
+  const agent = verified ? String(req.centralAuth.agent || '').trim() : String(req.query.agent || '').trim();
+  const ED = await import('../bmusage/onboard/edgeDeploy.js');
+  const num = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= 100000 ? n : null; };
+  if (verified) ED.recordOnboardPull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), applied: { ok: num(req.query.ok), rejected: num(req.query.rej), removed: num(req.query.rm) } });
+  if (settingsUnreadable(res, ED.edgeDeployLoadError, '서버 등록 배포(bm-onboard-edge.json)')) return;   // 엣지는 지난 등록을 그대로 둔다
+  const out = ED.deployFor(agent, { verified });
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, ...out });
+});
+
 // POST /api/central/storage-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
 // **인증된 agent**(개별 토큰 바인딩)만 쓴다. 공유 토큰(레거시)은 body.agent 신뢰(TOFU — 기존 축과 동일).
 centralRouter.post('/storage-data', requireCentral(), async (req, res) => {

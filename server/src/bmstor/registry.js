@@ -176,6 +176,8 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
     else if (!v) delete server.collectVia;
   }
   if (body.note !== undefined) { const v = String(body.note || '').trim().slice(0, 500); if (v) server.note = v; else delete server.note; }
+  // 7b: 인증 방식 고정 — 'password' 면 공통 계정에 기본 키가 있어도 비밀번호로(onboard/refs.js resolveOsAuth). 빈 값 = 키 우선(기본).
+  if (body.osAuth !== undefined) { if (body.osAuth === 'password') server.osAuth = 'password'; else delete server.osAuth; }
   if (body.onboardAt !== undefined && Number(body.onboardAt) > 0) server.onboardAt = Number(body.onboardAt);
   if (!existing) data.servers.push(server);
   return { ok: true, server: redact(server), created: !existing, ...(droppedSecrets.length ? { droppedSecrets } : {}) };
@@ -187,18 +189,22 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
  * @param {object[]} inputs  saveBmServer 와 같은 본문(id 있으면 갱신)
  * @returns {{ok:true, results:object[]} | {ok:false, reason:string, code?:string, index?:number}}
  */
-export function applyBmServerBatch(inputs = [], { now = Date.now() } = {}) {
+export function applyBmServerBatch(inputs = [], { now = Date.now(), removeIds = [] } = {}) {
   const data = load();
   if (loadErr.get()) return { ok: false, code: 'registry-unreadable', reason: 'OS 계정 등록부(bm-storage.json)를 읽지 못해 적용하지 않았습니다.' };
   const before = structuredClone(data.servers);
   const results = [];
+  // 7b: 경로 변경(중앙 → 엣지)으로 이 노드에서 빼는 항목 — 같은 한 번 쓰기 안에서.
+  const drop = new Set((Array.isArray(removeIds) ? removeIds : []).map((x) => String(x)));
+  const removed = drop.size ? data.servers.filter((x) => drop.has(String(x.id))).map((x) => x.id) : [];
+  if (drop.size) data.servers = data.servers.filter((x) => !drop.has(String(x.id)));
   for (let i = 0; i < inputs.length; i += 1) {
     const r = applyServerInput(data, inputs[i] || {}, { now });
     if (!r.ok) { data.servers = before; return { ok: false, reason: r.reason, index: i }; }
     results.push(r);
   }
   try { persist(); } catch (e) { data.servers = before; throw e; }
-  return { ok: true, results };
+  return { ok: true, results, removed };
 }
 
 /** 7b: 키 · 공통 계정 참조 수(사용처) — 원본에서 센다. */

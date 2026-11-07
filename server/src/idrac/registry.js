@@ -223,6 +223,15 @@ function normalize(body, existing = null) {
   return [entry, null, droppedSecrets];
 }
 
+/**
+ * 7b 온보딩 — 저장과 같은 규칙의 입력 검증(순수 · 단일 소스 — normalize 를 그대로 부른다). 통과면 null, 아니면 사유.
+ * 정규화한 host 도 돌려준다(분석이 기존 항목과 주소를 대조할 때 저장과 같은 꼴로 본다).
+ */
+export function idracInputIssue(body = {}, existing = null) {
+  const [entry, err] = normalize(body, existing);
+  return err ? { issue: err, host: '' } : { issue: null, host: entry.host };
+}
+
 export function addServer(body) {
   const list = loadRegistry();
   const [entry, err] = normalize(body);
