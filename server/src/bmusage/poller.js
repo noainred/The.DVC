@@ -475,6 +475,25 @@ function mainIdracStop(target) {
   try { return idracAuthStopFor({ id: i.regId, username: i.username, password: i.password }); } catch { return null; }
 }
 
+/**
+ * v2.923(4단계 — 진단 스냅샷): 사람이 누른 SSH 1회의 결과를 **주기 수집과 같은 가드 · 같은 식별자**에 반영한다(util/authGuard.js 규약).
+ *  · 인증 실패 문구면 정지를 기록한다 — 그 뒤 주기 수집이 같은 틀린 계정으로 다시 로그인하지 않게(계정 잠금).
+ *  · 성공이면 정지를 푼다 — 같은 계정으로 실제 로그인에 성공했다(v2.591 ‘수동 성공은 정지를 푼다’ 와 같은 판단).
+ *  · 스냅샷 자체는 막지 않는다(규칙 3 — 수동 실행은 막지 않는다). 호스트키 거부 · 시한 · 연결 실패는 인증 실패가 아니다(규칙 4).
+ */
+export function recordOsAuthOutcome(target, { ok = false, errorText = '' } = {}) {
+  const dev = authDev(target || {});
+  if (!dev) return null;
+  if (ok) { guard.clearAuthStop(dev.id); return null; }
+  if (isAuthFailureText(errorText)) return guard.markAuthStopped(dev.id, dev, String(errorText || '인증 실패').slice(0, 200));
+  return null;
+}
+/** v2.923 — 이 대상의 OS 인증 정지 기록(없으면 null · 자격증명이 바뀌었으면 풀린다). */
+export function osAuthStopFor(target) {
+  const dev = authDev(target || {});
+  return dev ? guard.authStopFor(dev) : null;
+}
+
 /** 화면이 '몇 대가 정지됐나' 를 말할 수 있게 이번 주기의 정지분을 기억한다. */
 const _authStopped = new Map();
 

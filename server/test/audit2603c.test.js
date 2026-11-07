@@ -303,6 +303,8 @@ const PRUNE_SINGLE_OK = {
   'partfault/db.js:part_event': '전이만 적재(상태가 바뀔 때만) — 유계',
   // v2.606(DB2606-02): storage/db.js api_history·capacity_history 는 청크 정리로 바꿔 목록에서 뺐다.
   'storage/db.js:capacity_daily': '장비 × 일 1행(5년) — 20대 3.6만 행',
+  // v2.923: 진단 스냅샷 보관 — 사람이 누를 때만 쌓이고 법인당 24시간 상한(설정 기본 20)이 있다 → 7일 × 상한 = 유계(수백 행).
+  'bmusage/db.js:bm_snapshots': '사람이 누른 진단 스냅샷만 · 법인당 하루 상한 · 7일 보관 — 유계(수백 행)',
 };
 test('추가①: 시계열 보존 정리에 청크 없는 한 방 DELETE 를 새로 만들지 않는다(허용 목록은 사유와 함께)', async () => {
   const { stripComments } = await import('./_stripComments.js');

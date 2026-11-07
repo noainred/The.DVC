@@ -402,7 +402,7 @@ export function parseSnmpTcp(lines = []) {
  */
 export const MAX_BLKQ = 64;
 /** v2.922(D7): 명령이 보내는 BLKQ 줄 상한(장치 × 3 파일) — 장치 수 상한은 설정(store.blkqMax)이 파서에서 정한다. */
-export const BLKQ_SHELL_LINES = 3 * 1_024;   // store.blkqMax 상한(1,024) × 3 파일 — 바이트 합 산수(D1)를 테스트가 고정한다
+export const BLKQ_SHELL_LINES = 4 * 1_024;   // store.blkqMax 상한(1,024) × 4 파일(v2.923: read_ahead_kb 추가) — 바이트 합 산수(D1)를 테스트가 고정한다
 /** 장치 이름 → 우선순위(물리 디스크 먼저 · md · dm 마지막 — 멀티패스 서버에서 dm-* 가 물리 디스크 큐를 밀어내지 않게 · D7). */
 export function blkqRank(name) {
   const n0 = String(name || '');
@@ -420,13 +420,13 @@ export function blkqRank(name) {
  */
 export function parseBlkq(lines = [], { max = MAX_BLKQ } = {}) {
   const map = new Map();
-  const get = (name) => { if (!map.has(name)) map.set(name, { name, raw: null, nr: null, ro: null }); return map.get(name); };
+  const get = (name) => { if (!map.has(name)) map.set(name, { name, raw: null, nr: null, ro: null, ra: null }); return map.get(name); };
   for (const l of lines) {
     const s0 = String(l).trim().slice(0, 512);
-    const g = /^\/sys\/block\/([A-Za-z0-9._:-]{1,64})\/queue\/(scheduler|nr_requests|rotational):(.*)$/.exec(s0);
+    const g = /^\/sys\/block\/([A-Za-z0-9._:-]{1,64})\/queue\/(scheduler|nr_requests|rotational|read_ahead_kb):(.*)$/.exec(s0);
     if (g) {
       const e = get(g[1]);
-      if (g[2] === 'scheduler') e.raw = g[3]; else if (g[2] === 'nr_requests') e.nr = g[3]; else e.ro = g[3];
+      if (g[2] === 'scheduler') e.raw = g[3]; else if (g[2] === 'nr_requests') e.nr = g[3]; else if (g[2] === 'read_ahead_kb') e.ra = g[3]; else e.ro = g[3];
       continue;
     }
     const f = s0.split('|');
@@ -443,6 +443,8 @@ export function parseBlkq(lines = [], { max = MAX_BLKQ } = {}) {
     return {
       name: e.name, scheduler: act ? act[1] : (list.length === 1 ? list[0] : null), schedulers: list,
       nrRequests: num(e.nr), rotational: num(e.ro) === 1 ? true : num(e.ro) === 0 ? false : null,
+      // v2.923: read_ahead_kb(KB — GPDB 요구 ‘blockdev 16384’ 는 512B 섹터 단위라 8192KB 와 같다 · 튜닝 판정이 단위를 맞춘다). 못 읽으면 null.
+      readAheadKb: num(e.ra),
     };
   });
   if (!out.length) return null;
@@ -476,6 +478,21 @@ export const SYSCTL_PATHS = Object.freeze({
   '/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor': 'cpu.governor',
   '/sys/devices/system/cpu/cpu0/cpufreq/scaling_driver': 'cpu.scaling_driver',
   '/etc/tuned/active_profile': 'tuned.active_profile',
+  // v2.923(4단계 — 튜닝 탭 · gpdb OS 요구값 G1): 읽기 전용 추가분. 없는 파일은 줄이 없다(= 확인 불가).
+  '/proc/sys/vm/overcommit_ratio': 'vm.overcommit_ratio',
+  '/proc/sys/vm/dirty_bytes': 'vm.dirty_bytes',
+  '/proc/sys/vm/dirty_background_bytes': 'vm.dirty_background_bytes',
+  '/proc/sys/kernel/shmall': 'kernel.shmall',
+  '/proc/sys/kernel/shmmax': 'kernel.shmmax',
+  '/proc/sys/kernel/shmmni': 'kernel.shmmni',
+  '/proc/sys/kernel/sem': 'kernel.sem',
+  '/proc/sys/kernel/core_pattern': 'kernel.core_pattern',
+  '/proc/sys/net/ipv4/ip_local_port_range': 'net.ipv4.ip_local_port_range',
+  '/proc/sys/net/core/rmem_default': 'net.core.rmem_default',
+  '/proc/sys/net/core/wmem_default': 'net.core.wmem_default',
+  '/proc/sys/net/ipv4/tcp_tw_reuse': 'net.ipv4.tcp_tw_reuse',
+  '/proc/sys/net/core/netdev_budget': 'net.core.netdev_budget',
+  '/proc/sys/net/core/netdev_budget_usecs': 'net.core.netdev_budget_usecs',
 });
 export function parseSysctl(lines = []) {
   const out = {};

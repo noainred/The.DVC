@@ -211,6 +211,15 @@
   선택 구간 요약 표 → 추천 지표 12행(출처 태그 SRE · NF · USE · DELL · ND · CM) → 장치별 보기(A 디스크 · B 마운트 · C 인터페이스 + CVP 열) → D 스위치 포트 연동(매핑 출처 4 · 대조 ⑤ · 상태) · 확대 팝업(§11 — 요약 4 · 큰 차트 · 구간 이동 · Esc · 400 전체 화면).
   화면 `web/src/views/tools/{BmTrendTab,BmTrendPopup,BmTrendChart}.jsx` · 문구 `bmTrendText.js` · 규칙 `docs/rules/web.md` v2.923 항목. 서버 변경 없음.
   설계와 다르게 둔 것(이유는 web.md): ‘기타(최대)’ 계열 없음 · 장치 칩은 그 장치의 확대 팝업을 연다(위 패널 계열은 토글 줄이 바꾼다) · 마운트 표의 ‘7일 증가 · 가득 예상’ 없음(서버 API 없음) · 소켓 · conntrack 등 이력 없는 큐는 행 없음 · 수동 매핑 편집 칸 없음(PUT API 만) · 피크 점은 1초 표본을 펼치지 않는다.
+- **4단계 구현됨(v2.923 예정 — 서버 + 화면)**: 서버 상세 탭 ‘장애 기록 · 튜닝 · 용도 · 진단 스냅샷’(탭 열 8개) + 함대 보기 ‘용도 분석(OS × 기능 매트릭스) · 장애 기록’.
+  서버 `bmusage/{parse/linuxFacts.js,tuning/{sources,catalog,judge,overrides}.js,profiles/{rocky9-base,airflow,gpdb,index,match}.js,opsView.js,snapshot/{command,run}.js}` · 화면 `web/src/views/tools/{BmTuningTab,BmProfileTab,BmFaultsTab,BmSnapshotTab,BmOpsFleet}.jsx` · 문구 `bmOpsText.js`.
+  규칙 `docs/rules/idrac-server.md` · `security-api.md`(스냅샷 규약 10개) · `web.md` 의 v2.923 항목. 튜닝 항목 26(분류 5 — 3/7/6/3/7) · 근거 등급과 출처 id 를 항목마다 · 자동 적용 경로 없음.
+  설계와 다르게 둔 것: ① 튜닝 · 용도 판정은 엣지가 아니라 **응답 노드**가 한다(엣지는 사실만 — 덮어쓰기 · 용도 태그가 응답 노드에 있으므로. 엣지 자신의 화면에는 중앙 태그가 없다) ·
+  ② 엣지 봉투에는 감지 목록을 관찰 대상 이름만 싣는다(`ENVELOPE_WATCH` — 원목록이면 1,000대에서 봉투 8MB 상한을 넘긴다. 테스트가 원목록 감지 = 줄인 목록 감지를 대조) ·
+  ③ `##PROCS` 는 comm 만(§1 의 `args` 를 뺐다 — 인자에 비밀이 실린다) → Airflow 스케줄러 · API 서버 구분 없음 · ④ `ethtool -g/-l/-S` 는 넣지 않았다 — ring · 드롭 카운터 일부는 ‘확인 불가(ethtoolNotRead)’, 채널 수는 `/sys/class/net/*/queues` 로 센다 ·
+  ⑤ 역할 권장값은 DB 열만 근거가 있어 다른 역할은 ‘권장 없음’ · 관리자 덮어쓰기는 같다/다르다로 판정되는 항목(`overridable`)만 · ⑥ 스냅샷 결과는 **실행 노드**(엣지)에 7일 보관하고 중앙은 받아 보여 주기만 한다 ·
+  ⑦ 스냅샷의 iDRAC 쪽은 Redfish 호출 없이 이미 가진 값(SEL/LC 최근 5 · 센서 · 전력) · ⑧ 장애 기록의 SEL/LC 는 이 노드 인벤토리가 있는 서버만(엣지 위임 서버는 중앙에 목록이 없다) · ⑨ PROFILES §5 중 보드 E 칸은 2단계 그대로(부품 장애 · SEL 입력 — 새 칸 없음) · 장애 탭 시간순에 스냅샷 dmesg 를 섞지 않았다(스냅샷 탭에서 본다) · 교차 판정 ‘연관’ 열은 만들지 않았다.
+  남은 것: 실장비 출력 미확인(Rocky 9 의 getenforce · logind.conf.d · softnet 열 수 · NIC 큐 디렉터리 · Airflow comm) · TUNING-SOURCES ◐ 항목 원문 재대조 · §6-11 D12 · B 샘플러 · Airflow/GPDB 앱 점검(CLI · HTTP · SQL — ‘미수집’ 으로 둠).
 `bmusage/collectors/osSsh.js linuxCommand` 구획 추가 → `parse/linuxProc.js` 파서(순수 · 테스트) → `rates.js`·`usage.js` 열 추가 → `db.js` 열·튜닝 표 → USE 판정 순수 모듈(테스트가 웹·서버 같은 입력으로 대조) → `edgePull.js` 봉투 + 중앙 정제 화이트리스트 → 스냅샷 엣지 대행 라우트 → 웹(보드 · 상세 · 400 · 상태) → 목 데이터 → Chromium 1440/400 → 릴리스.
 
 ## 9. 출처(검색 2026-11-06)

@@ -43,6 +43,7 @@
 - (v2.895 추가) 개체 보기 › 성능 튜닝(시안 ⑫⑬) — 판정은 기존 모듈(rightsize verdict · contention · vmcfg · hcfg · 가상화율 RATIO_LEVELS · 사용률 75/90 · DS 90/95)을 `vcd/tuning.js` 한 곳에서 모은다 · 새 서버 경로 없음 · 계획은 저장 없이 내보내기만
 - (v2.920 추가) 베어메탈 사용률(`bm-usage`) USE 매트릭스 보드 · 서버 성능 상세 — 판정은 서버 `useJudge.js`, 문구·칸 표기는 `views/tools/bmPerfText.js` 하나 · 기존 사용률 표는 토글로 유지
 - (v2.923 추가) 베어메탈 서버 상세 ‘추이’ 탭(평균 · 피크 두 패널 · 장치 토글 · 확대 팝업 · CVP 포트 절) — 창 · 해상도 · 결측 · 기준선은 서버 `trendWindow.js`, 문구 · 좌표는 `views/tools/bmTrendText.js` · 구간 이동은 공용 `vmPerfText.windowSpan`
+- (v2.923 추가) 베어메탈 서버 상세 ‘장애 기록 · 튜닝 · 용도 · 진단 스냅샷’ 탭 · 함대 ‘용도 분석 · 장애 기록’ 보기 — 판정은 서버, 문구는 `views/tools/bmOpsText.js`(서버 code 1:1) · 근거 등급은 기호 + 낱말
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -51,6 +52,17 @@
 
 ## 본문
 
+- ⚠⚠ **v2.923 — 베어메탈 서버 상세 ‘장애 기록 · 튜닝 · 용도 · 진단 스냅샷’ 탭 + 함대 ‘용도 분석 · 장애 기록’ 보기(리눅스 성능 4단계 · 아트보드 ⑤⑥⑦ · Server 스냅샷 · States ④)**.
+  화면 `views/tools/{BmFaultsTab,BmTuningTab,BmProfileTab,BmSnapshotTab,BmOpsFleet}.jsx`(그리기만) · 문구 `bmOpsText.js`(순수) · 스타일 `bmOps.css` · 회귀 `bmOpsText.test.jsx`(code 표 1:1 · 서버 함수로 만든 실제 응답 SSR · 소스 스윕):
+  - **판정을 웹에서 하지 않는다** — 튜닝 상태 · 사유 · 근거 등급 · 점검 결과 · 프로파일 상태 · 스냅샷 code/칸 상태는 서버 열거와 1:1 문구 표(테스트가 서버 모듈을 import 해 대조). 장애 기록의 상태 · 종료 사유 · 보류 사유는 기존 `partFaultText.js` 를 그대로 쓴다(복제 금지).
+  - **‘확인 불가’ ≠ ‘권고’** — 낱말 · 색 · 정렬 순위가 다르다(정렬: 권고 → 확인 불가 → 적합 → 참고). 사실을 못 받은 서버는 전 항목 확인 불가 · 권고 0 과 이유 문장.
+  - **자동 적용 버튼 없음** — 쓰기 요청은 용도 태그(PUT purpose · 관리자)와 스냅샷 실행(POST · operator 이상)뿐(테스트가 put/post 호출 경로를 스윕).
+  - **근거 등급은 기호 + 짧은 낱말**(‘◐ 발췌’ — `Grade` · `gradeView`) · 기호는 기호 글꼴을 앞에 둔 `.bmo-g`: Chromium(이 컨테이너 글꼴)에서 ◐ 가 작은 반원 ‘◖’ 로 보여 표 칸에서 읽기 어려웠다. 출처 링크는 `--accent-2`(기본 링크색은 어두운 판넬에서 거의 안 보였다 — 1440 판독).
+  - **표 칸은 배열로** — 조건부 칸(서버 · 법인 열 · I/O 표 열)을 `<>…</>` 로 감싸면 STable 이 머리 · 칸을 세지 못해 정렬 화살표가 사라졌다(1440 판독 — v2.920 D1 과 같은 함정). select 는 `Select` + `className="select select-sm"`(날 select 는 흰 바탕).
+  - 탭 열이 8개 — 400 폭은 한 줄 4개 두 줄(`.bmp-seg-tabs`) · 표는 카드 안 가로 스크롤 · 함대 보기에서 서버를 누르면 상세가 그 탭(용도 · 장애 기록)으로 열린다(`initialTab`).
+  - 조회는 탭을 고를 때 1회 + ‘다시 읽기’(폴링 없음 · 세대로 늦은 응답 버림 — `useOpsLoad` = createDetailLoader) · 기간 같은 선택은 키에 담아 다시 읽는다 · 403 은 ErrorBox, 404 는 ‘없거나 범위 밖’(`OpsError`).
+  - 스냅샷: 실행 칸은 operator 이상에게만(서버도 403) · 사유 2자 미만이면 버튼 잠금 · 결과의 ‘권한 부족’ 은 상태 9종 ④ 문구(`STATE_TEXT.perm`) · 정책 거부(사유 없음 · 경로 없음 · 권한)는 서버 사유를 겹쳐 쓰지 않는다(같은 말 두 번 — 판독).
+  - ⚠ 정직 기록: Chromium 판독은 목 서버(데모 사실 — mock/demo/baremetal.js `demoTuningFacts`)와 합성 응답(장애 기록 · 스냅샷 결과 — 서버 함수로 만든 것)으로 했다. 실장비 스냅샷 출력은 보지 못했다.
 - ⚠⚠ **v2.923 — 베어메탈 서버 상세 ‘추이(평균 · 피크)’ 탭(리눅스 성능 3b · 설계 `docs/design/linux-bm-perf/PROFILES.md` §8~§12 · 아트보드 AvgPeak · Toggle · Popup)**.
   화면 `views/tools/{BmTrendTab,BmTrendPopup,BmTrendChart}.jsx`(조립 · 그리기만) · 문구 · 좌표 · 토글 `bmTrendText.js`(순수) · 조회기 `bmTrendLoad.js` · 회귀 `bmTrendText.test.jsx`:
   - **창 · 해상도 · 결측 · 기준선 · 포트 상태 · 대조 ⑤ 판정은 서버**(`bmusage/trendWindow.js` · `portCompare.js`) — 웹은 응답을 그리기만 한다. 선은 값이 null 이거나 **서버 `gaps` 가 두 점 사이에 걸칠 때만** 끊는다(웹이 점 간격으로 결측을 다시 판정하지 않는다 — 테스트가 서버 `gapsOf` 결과로 대조). 홀로 남은 점은 점으로 그린다(선이 없다고 값이 안 보이면 거짓).

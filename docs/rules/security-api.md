@@ -23,6 +23,7 @@
 - (원래 5857행) CLI 계정 관리 메뉴(v2.723) — `server/src/tools/user-admin.js` + 래퍼 `user-admin.sh` → 설치본 `sudo vmware-port
 - (원래 5877행) super_admin 은 '저장 역할' 이고 요청 문맥에서는 admin + `superAdmin:true` 다
 - (v2.912 추가) 로그인 기록(최근 로그인 · 로그인 횟수)은 감사 로그가 아니라 `security/loginHistory.js` 하나로 센다
+- (v2.923 추가) 베어메탈 진단 스냅샷(원격 명령 실행 경로) — 상수 명령 · 읽기 전용 · sudo 0 · 인자 0 · 사유 · 감사 · 동시 1건 · 법인당 하루 상한 · 범위 404/403 · 인증 가드
 
 ## 본문
 
@@ -406,3 +407,23 @@
   ③ 라우트가 감사 줄에 '무엇이 어떻게' 를 남기려면 `res.locals.auditDetail`(문자열)을 세운다 — `auditMiddleware` 가 같은 줄의 detail 로 싣는다.
      쓰기 경로를 AUDIT_SKIP 에 넣어 두 줄을 피하지 말 것(데모 계정 쓰기 차단이 그 목록을 '읽기성 POST' 로 본다).
   회귀 `server/test/featureUsage2913.test.js` · 웹 `web/src/usageTracker.test.js` · `web/src/views/featureUsageText.test.js` · 설계 `docs/design/feature-usage/`.
+
+- ⚠⚠ **v2.923 — 베어메탈 진단 스냅샷(`POST /api/tools/bm-usage/perf/:key/snapshot`)은 원격 명령 실행 경로다 — 규약 10개를 테스트가 하나씩 고정한다**
+  (`bmusage/snapshot/{command,run}.js` · `routes/api/bmUsage.js bmSnapshotRun · bmSnapshotRead` · `routes/collector.js /bm-usage/snapshot(s)` · `central/bmUsageEdgePull.js runEdgeSnapshot`.
+  회귀 `server/test/bmPerf2923Snapshot.test.js`(실제 api 라우터 + 엣지 collector 라우트 포함) · 변이 검증):
+  ① **명령은 상수 하나**(`SNAPSHOT_COMMAND` — 함수가 아니라 값). 서버 이름 · 키 · 주소 · 사유 · 실행자 · 설정값(상위 N · 줄 수)을 명령에 넣지 않는다 — 설정은 파서가 결과를 자를 때만 쓴다(테스트가 악성 이름 · 사유로 SSH 에 간 명령 === 상수를 대조 · `exec(` 인자 스윕).
+  ② **읽기 전용 · 대상에 파일을 쓰지 않는다** — /proc/<pid>/io 두 표본의 차이는 awk 메모리에서 계산(임시 파일 없음) · 리다이렉트는 /dev/null 만 · rm · kill · tee 0.
+  ③ **sudo · su · pkexec · doas 자동 시도 0**(소스 스윕) — 권한이 없으면 그 칸은 ‘권한 부족 · 확인 불가’(/proc/<pid>/io 읽힌 수 < 전체 · dmesg_restrict) — 0 으로 두지 않는다.
+  ④ **프로세스 인자 · 환경 0** — ps 는 comm · /proc/<pid>/comm 만(cmdline · environ 금지 — 인자에 비밀번호가 흔하다).
+  ⑤ **출력 상한 세 겹** — 구획마다 head/tail · cut · 전체 `head -c SNAPSHOT_OUTPUT_MAX`(256KB · sshExec 4MB 보다 훨씬 작게) · 파서 줄 수 · 길이 · 설정 상위 N. 잘리면(END 없음) 뒤 구획은 missing.
+  ⑥ **권한**: 실행 = `writeRole`(operator 이상 — viewer 403) + tools · 조회 밖 404(존재 은닉) → **쓰기 범위 밖 403 무조건**(server/CLAUDE.md v2.733 함정 — 조회 무제한 + writeVcenters 계정) · 사유 2~300자 필수(400) ·
+     보관분 조회는 tools + 조회 범위(실행 권한과 다르다) · 실행자(by)는 관리자에게만 · 비관리자에게는 dmesg · ss · 이벤트 · 사유의 IPv4 를 가린다.
+  ⑦ **서버당 동시 1건**(실행 노드의 실행 중 집합 — 검사와 등록 사이에 await 없음 · 중앙 대행도 같은 키 중복 전송을 막는다 · 409) · **법인당 24시간 상한**(실행 노드 설정 `snapshot.dailyCorpMax` · 보관 표의 실행 수 · 429) ·
+     **보관 DB 를 못 열면 실행하지 않는다**(상한을 셀 수 없다 — 503). 실패한 시도도 보관 · 상한에 센다(SSH 세션을 열었으므로).
+  ⑧ **SSH 는 공용 경로** — `withSsh`(호스트키 확인 S-01) + `withDeadline`(세션 시한 50초 > 연결 15 + 명령 30 — 시한이 세션을 실제로 끊는다) · 인증 실패는 **주기 수집과 같은 가드 · 같은 식별자**에 기록(`poller.recordOsAuthOutcome` — 계정 잠금 방지) ·
+     성공은 정지를 푼다 · 수동 실행은 정지 중에도 막지 않는다(규칙 3 — 결과가 ‘정지 상태였다’ 를 말한다) · 호스트키 거부 · 시한은 인증 실패가 아니다.
+  ⑨ **감사 로그** — 중앙 `bm-usage.snapshot`(실행자 · 사유 · via · code · id) · 엣지 `중앙 대행 진단 스냅샷`(central-portal:<계정 — 글자 제한>). 사유 · 실행자는 명령에 들어가지 않는다.
+  ⑩ **엣지 대행 계약** — 같은 url · 같은 토큰(tokenFirst + 4kb 파서) · POST 재전송 0(retries 0) · 엣지는 자기 대상 목록 밖 키를 not-found · 업무 결과는 200 + code(중앙이 HTTP 로 옮긴다) · 중앙 정제 `sanitizeSnapshotBody`(아는 필드 · 상한 · enum 밖 code/상태 차단) ·
+     결과는 엣지 7일 보관 · 중앙은 받기만(복제 적재 없음) · 다른 서버 키로 id 를 읽지 못한다.
+  iDRAC 쪽은 명령이 아니라 **이미 가진 값**(인벤토리 SEL/LC 최근 5 · 센서 순간값 · 전력 최신 — Redfish 호출 0). 튜닝 탭에는 **쓰기 경로 자체가 없다**(sysctl -w · tuned-adm profile · ethtool -G 0 — 소스 스윕).
+

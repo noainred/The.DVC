@@ -119,7 +119,14 @@ async function openDb() {
         ord INTEGER NOT NULL, first_ts INTEGER, last_ts INTEGER, info TEXT,
         PRIMARY KEY (agent, key, kind, dev)
       );
-      CREATE TABLE IF NOT EXISTS bm_meta (k TEXT PRIMARY KEY, v TEXT, at INTEGER);`);
+      CREATE TABLE IF NOT EXISTS bm_meta (k TEXT PRIMARY KEY, v TEXT, at INTEGER);
+      /* v2.923(4단계): 진단 스냅샷 보관(이 노드가 실행한 것 — 7일 · 사람이 누를 때만 쓰므로 행이 적다). 결과는 파서가 자른 JSON(상한 64KB). */
+      CREATE TABLE IF NOT EXISTS bm_snapshots (
+        id TEXT PRIMARY KEY, agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, vcenter_id TEXT, at INTEGER NOT NULL,
+        by_user TEXT, reason TEXT, ok INTEGER, code TEXT, ms INTEGER, result_json TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_bm_snap_at ON bm_snapshots(at);
+      CREATE INDEX IF NOT EXISTS idx_bm_snap_key ON bm_snapshots(key, at);`);
     // v2.919(리눅스 성능 1단계): 새 열은 CREATE 문이 아니라 **ALTER 마이그레이션**으로 더한다 — 기존 DB(v2.918 이하)와 새 DB 가
     //   같은 경로를 탄다(두 벌 스키마가 갈라지지 않게). ADD COLUMN 은 표를 다시 쓰지 않는다(O(1)).
     const mig = migratePerfColumns(conn);
@@ -634,6 +641,53 @@ export async function dailyRangeMergedMeta({ key = '', agent = '', from: fromMs,
       missingPeriods: (files.missingPeriods || []).filter((x) => x.reason !== 'none'), filesCapped: files.filesCapped || 0,
     };
   } catch (e) { return { rows: [], missingPeriods: [], filesCapped: 0, error: String(e?.message || e).slice(0, 200) }; }
+}
+
+/* ── v2.923 진단 스냅샷 보관(snapshot/run.js 만 쓴다) ─────────────────────────────── */
+export const SNAPSHOT_RESULT_MAX = 64 * 1024;
+const snapRow = (r, full) => r && ({
+  id: String(r.id), agent: String(r.agent || ''), key: String(r.key), vcenterId: r.vcenter_id || '', at: Number(r.at),
+  by: r.by_user || '', reason: r.reason || '', ok: r.ok === 1, code: r.code || '', ms: r.ms == null ? null : Number(r.ms),
+  ...(full ? { result: (() => { try { return r.result_json ? JSON.parse(r.result_json) : null; } catch { return null; } })() } : {}),
+});
+/** 보관 DB 를 쓸 수 있는가(상한을 셀 수 없으면 스냅샷을 실행하지 않는다 — run.js). */
+export async function snapshotStoreAvailable() { return !!(await getDb()); }
+export async function snapshotInsert(rec) {
+  const db = await getDb();
+  if (!db) return { ok: false, reason: 'db-unavailable' };
+  let json = null;
+  try { json = rec.result == null ? null : JSON.stringify(rec.result); } catch { json = null; }
+  if (json && json.length > SNAPSHOT_RESULT_MAX) json = JSON.stringify({ truncated: true, bytes: json.length });
+  db.prepare(`INSERT OR REPLACE INTO bm_snapshots (id,agent,key,vcenter_id,at,by_user,reason,ok,code,ms,result_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(String(rec.id), String(rec.agent || ''), String(rec.key), String(rec.vcenterId || ''), Math.round(Number(rec.at)), String(rec.by || '').slice(0, 64),
+      String(rec.reason || '').slice(0, 300), rec.ok ? 1 : 0, String(rec.code || '').slice(0, 32), rec.ms == null ? null : Math.round(Number(rec.ms)), json);
+  return { ok: true };
+}
+export async function snapshotList({ key = '', agent = null, limit = 50 } = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  const lim = Math.max(1, Math.min(200, Math.floor(Number(limit) || 50)));
+  const rows = agent == null
+    ? db.prepare('SELECT id,agent,key,vcenter_id,at,by_user,reason,ok,code,ms FROM bm_snapshots WHERE key=? ORDER BY at DESC LIMIT ?').all(String(key), lim)
+    : db.prepare('SELECT id,agent,key,vcenter_id,at,by_user,reason,ok,code,ms FROM bm_snapshots WHERE key=? AND agent=? ORDER BY at DESC LIMIT ?').all(String(key), String(agent), lim);
+  return rows.map((r) => snapRow(r, false));
+}
+export async function snapshotGet(id) {
+  const db = await getDb();
+  if (!db) return null;
+  return snapRow(db.prepare('SELECT * FROM bm_snapshots WHERE id=?').get(String(id)), true) || null;
+}
+/** 법인(vCenter)별 기간 안 실행 수 — 하루 상한. */
+export async function snapshotCountSince({ vcenterId = '', since = 0 } = {}) {
+  const db = await getDb();
+  if (!db) return null;
+  return Number(db.prepare('SELECT COUNT(*) c FROM bm_snapshots WHERE vcenter_id=? AND at>=?').get(String(vcenterId), Math.round(Number(since)))?.c ?? 0);
+}
+/** 보관 기간 밖 삭제(at 단독 인덱스 · 행이 적어 청크 불필요 — 사람이 누를 때만 쌓인다). */
+export async function snapshotPrune({ before }) {
+  const db = await getDb();
+  if (!db) return 0;
+  return Number(db.prepare('DELETE FROM bm_snapshots WHERE at < ?').run(Math.round(Number(before))).changes || 0);
 }
 
 export function _resetForTest() { _legacyCols = null; _perfCols = null; _migrateError = null; _latestLiteSql = null; lockRetry.ok(); try { _db?.close?.(); } catch { /* */ } _db = null; _tried = false; _opening = null; _tick = 0; _counts = null; month._resetMonthStoreForTest(); }
