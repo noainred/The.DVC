@@ -26,6 +26,7 @@ import {
   readSection, parseProcStatFull, parseLoadavg, parsePsi, parseVmstat, parseSnmpTcp, parseBlkq, parseSysctl, parseHugePages, parseIrq, parseDfInodes,
   SYSCTL_PATHS, MAX_CORES, MAX_BLKQ, MAX_IRQ_LINES, BLKQ_SHELL_LINES,
 } from '../parse/linuxProc.js';
+import { FACT_SHELL, FACT_SECTIONS, FACT_LINE_CAP, FACT_LINE_BYTES, parseOsRel, parseUnits, parsePorts, parseProcs, parseAccts, parseKargs, parseSoftnet, parseNetq, parseXfs } from '../parse/linuxFacts.js'; // v2.923: 4단계 용도 감지 · 튜닝 사실
 import { planWindow, peakCommand, parsePeakOutput, computePeaks, PEAK_OVERHEAD_MS } from '../peakWindow.js'; // v2.922: 피크 A 안
 import { samplerCommand, parseSamplerFile, SAMPLER_MAX_LINES } from '../samplerSpec.js'; // v2.922: 피크 B 안(수거 자리만)
 import { parseWinPerf } from '../parse/winPerf.js';
@@ -66,12 +67,15 @@ export function osKindOf(host) { return _osKind.get(String(host || '').toLowerCa
 export const SECTION_LINE_CAP = Object.freeze({
   STAT_OTHER: 64, STAT_CPU: MAX_CORES + 1,
   MEM: 256, DISK: 10_000, NET: 1_026, NETINFO: 1_024, FC: 128, DF: 128,
-  PSI: 6, VMSTAT: 8, SNMP: 2, BLKQ: BLKQ_SHELL_LINES, SYSCTL: 32, IRQ: MAX_IRQ_LINES, DFI: 66, SAMPLER: SAMPLER_MAX_LINES,
+  PSI: 6, VMSTAT: 8, SNMP: 2, BLKQ: BLKQ_SHELL_LINES, SYSCTL: 48, IRQ: MAX_IRQ_LINES, DFI: 66, SAMPLER: SAMPLER_MAX_LINES,
+  // v2.923(4단계): 용도 감지 · 튜닝 사실 구획(parse/linuxFacts.js — 명령 조각도 그 모듈의 상수)
+  ...FACT_LINE_CAP,
 });
 /** 줄 최대 바이트(가정 — 개행 포함). cut 으로 자르는 구획은 그 폭, 커널 숫자 형식(DISK·NET)은 관측 폭의 여유값(추정 — 자르지 않는다: 숫자 중간 절단 금지). */
 export const SECTION_LINE_BYTES = Object.freeze({
   STAT_OTHER: 257, STAT_CPU: 257, MEM: 80, DISK: 220, NET: 260, NETINFO: 129, FC: 513, DF: 1_025,
   PSI: 128, VMSTAT: 32, SNMP: 300, BLKQ: 100, SYSCTL: 200, IRQ: 80, DFI: 1_025, SAMPLER: 257,
+  ...FACT_LINE_BYTES,
 });
 /** 기존 구획 중 줄 상한을 파서가 확인하는 것(splitSections 이름 → 상한). 상한+1 줄이 오면 상한 도달. */
 export const LEGACY_CAPPED = Object.freeze({ MEM: SECTION_LINE_CAP.MEM, DISK: SECTION_LINE_CAP.DISK, NET: SECTION_LINE_CAP.NET, NETINFO: SECTION_LINE_CAP.NETINFO, FC: SECTION_LINE_CAP.FC, DF: SECTION_LINE_CAP.DF });
@@ -86,6 +90,12 @@ const SYSCTL_FILES = Object.keys(SYSCTL_PATHS).join(' ');
  *   ⚠ 코어 수만큼 넓은 원문을 그대로 보내지 않는다(256코어면 줄당 3KB). 이름 패턴은 흔한 드라이버 접두사 — 못 잡은 NIC 는 ‘요약 없음’ 이다.
  */
 const IRQ_AWK = "awk 'NR==1{n=NF;next} {nz=0; for(i=2;i<=n+1&&i<=NF;i++) if(($i+0)>0) nz++; nm=$NF; if (nm ~ /^(eth|en|em|p[0-9]|bond|mlx|i40e|ice|ixgbe|igb|bnxt|qede|nfp|virtio|be2net|tg3)/) print substr($1,1,12) \"|\" nz \"|\" n \"|\" substr(nm,1,48)}' /proc/interrupts 2>/dev/null";
+
+/**
+ * v2.923(반증 R1): 명령이 표지를 내는 **순서** — 파서(splitSections)는 이 순서에서 지금보다 뒤의 표지만 받는다(앞 구획을 다시 열지 않는다).
+ *   linuxCommand 의 echo 순서와 같아야 한다(테스트가 명령 문자열에서 표지를 뽑아 대조).
+ */
+export const LINUX_SECTIONS = Object.freeze(['STAT', 'MEM', 'DISK', 'NET', 'NETINFO', 'FC', 'TICK', 'DF', 'HOST', 'LOAD', 'PSI', 'VMSTAT', 'SNMP', 'BLKQ', 'SYSCTL', 'IRQ', 'DFI', ...FACT_SECTIONS, 'SAMPLER', 'END']);
 
 /** Linux 수집 명령 — 구획 표지로 나눈 한 방. */
 export function linuxCommand(mounts = [], { sampler = false } = {}) {
@@ -118,12 +128,16 @@ export function linuxCommand(mounts = [], { sampler = false } = {}) {
     "echo '##BLKQ'",
     // v2.922(D7): 장치마다 프로세스 4개(basename + cat×3)를 띄우고 앞 64개만 읽던 루프 → grep -H 한 번(+ 가상 장치 거르는 grep 하나).
     //   장치 수 상한(store.blkqMax)과 ‘물리 디스크 먼저’ 는 파서(parseBlkq)가 정한다 — 멀티패스 서버에서 dm-* 가 물리 디스크 큐를 밀어내지 않게.
-    `grep -H '' /sys/block/*/queue/scheduler /sys/block/*/queue/nr_requests /sys/block/*/queue/rotational 2>/dev/null | grep -v -E '^/sys/block/(loop|ram|zram|sr)[0-9]' | head -n ${SECTION_LINE_CAP.BLKQ}`,
+    // v2.923: read_ahead_kb 추가(GPDB 요구 read-ahead · 튜닝 탭 ‘nr_requests · read_ahead_kb’) — 같은 grep 한 번.
+    `grep -H '' /sys/block/*/queue/scheduler /sys/block/*/queue/nr_requests /sys/block/*/queue/rotational /sys/block/*/queue/read_ahead_kb 2>/dev/null | grep -v -E '^/sys/block/(loop|ram|zram|sr)[0-9]' | head -n ${SECTION_LINE_CAP.BLKQ}`,
     // sysctl·THP·governor·numa_balancing·TuneD — grep -H 한 번으로 `<경로>:<값>`(키마다 프로세스를 띄우지 않는다). 없는 파일은 줄이 없다(= 확인 불가).
     // ⚠ 셸 `read` 내장으로 읽지 말 것 — dash 는 1바이트씩 읽는데 sysctl 정수 파일은 오프셋 0 이 아니면 EOF 를 준다(이 컨테이너 실측: swappiness 60 → '6').
     "echo '##SYSCTL'", `grep -H '' ${SYSCTL_FILES} 2>/dev/null | head -n ${SECTION_LINE_CAP.SYSCTL}`,
-    "echo '##IRQ'", `${IRQ_AWK} | head -n ${SECTION_LINE_CAP.IRQ}`, 'echo "irqbalance=`systemctl is-active irqbalance 2>/dev/null`"',
+    // v2.923(반증 R8): systemctl 은 D-Bus 기본 시한(25초)까지 기다릴 수 있다 — timeout 3 으로 감싼다(끊기면 빈 값 = 확인 불가). 주기 명령 전체가 시한 하나라 한 칸이 전 구획을 잃게 하지 않게.
+    "echo '##IRQ'", `${IRQ_AWK} | head -n ${SECTION_LINE_CAP.IRQ}`, 'echo "irqbalance=`timeout 3 systemctl is-active irqbalance 2>/dev/null`"',
     "echo '##DFI'", dfiPart,
+    // ── v2.923(4단계) 용도 감지 · 튜닝 사실 — 전부 읽기 전용 상수 조각(parse/linuxFacts.js FACT_SHELL). 프로세스는 이름(comm)만 · 인자 없음 · sudo 없음.
+    ...FACT_SECTIONS.flatMap((k) => [`echo '##${k}'`, FACT_SHELL[k]]),
     // v2.922: 피크 B 안 수거 구획 — 옵트인일 때만(기본 명령은 그대로). 파일이 없으면 0줄(absent).
     ...(sampler ? ["echo '##SAMPLER'", samplerCommand()] : []),
     "echo '##END'",
@@ -158,7 +172,7 @@ export function winCommand(script = WIN_PS) {
 
 /** Linux 구획 출력 → 스냅샷 + 다음 주기용 누적값(순수 — 테스트 대상). */
 export function shapeLinux(stdout, mounts = [], { partitionIo = false, blkqMax = MAX_BLKQ, samplerSha = '' } = {}) {
-  const sec = splitSections(stdout);
+  const sec = splitSections(stdout, { order: LINUX_SECTIONS });   // v2.923(반증 R1): 순서 · 줄 머리 정확 일치 · 재개방 금지
   if (!Object.keys(sec).length) return null;              // 구획 표지 0개 = Linux 가 아니거나 셸이 다르다
   /*
    * v2.919(반증 D1): ① 출력이 잘렸으면(##END 미도착) **마지막 구획을 통째로 버린다** — 그 구획의 마지막 줄은 숫자 중간에서 잘렸을 수 있고
@@ -256,6 +270,16 @@ export function shapePerfSections(sec = {}, { blkqMax = MAX_BLKQ } = {}) {
     hugepages: readSection(sec, 'MEM', parseHugePages),
     irq: readSection(sec, 'IRQ', parseIrq),
     dfi: readSection(sec, 'DFI', parseDfInodes),
+    // v2.923(4단계) — 용도 감지 · 튜닝 사실(구획 상태 규약 그대로: 표지 없음 missing · 0줄 absent)
+    osrel: readSection(sec, 'OSREL', parseOsRel),
+    units: readSection(sec, 'UNITS', parseUnits),
+    ports: readSection(sec, 'PORTS', parsePorts),
+    procs: readSection(sec, 'PROCS', parseProcs),
+    acct: readSection(sec, 'ACCT', parseAccts),
+    kargs: readSection(sec, 'KARGS', parseKargs),
+    softnet: readSection(sec, 'SOFTNET', parseSoftnet),
+    netq: readSection(sec, 'NETQ', parseNetq),
+    xfs: readSection(sec, 'XFS', parseXfs),
   };
 }
 

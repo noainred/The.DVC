@@ -107,7 +107,26 @@ export const DEFAULTS = Object.freeze({
    *   중앙 배포 키(DISTRIBUTED_KEYS)에는 넣지 않는다(넣으면 배포 서명이 바뀌어 구버전 엣지가 ‘적용 대기’ 로 남는다 — perf 와 같은 이유).
    */
   store: null,  // normalizeSettings 가 STORE_DEFAULTS 로 채운다
+  /*
+   * v2.923(4단계 — 진단 스냅샷 · 설계 README §4.1): 사람이 누를 때만 도는 SSH 1회 · 읽기 전용. 이 노드(법인 엣지)의 설정이고 배포 키에 넣지 않는다(perf · store 와 같은 이유).
+   *   법인 · 엣지 · Bareos 는 1:1:1 이라 ‘법인당 하루 상한’ 은 그 법인을 수집하는 노드가 지킨다(중앙 직접 수집분은 중앙이).
+   */
+  snapshot: null, // normalizeSettings 가 SNAPSHOT_DEFAULTS 로 채운다
 });
+
+/**
+ * v2.923 — 진단 스냅샷 기본값. dailyCorpMax 20(법인당 24시간 안 실행 상한 — 임의 시작값 · 추정) · topN 10(프로세스 상위 N) · dmesgLines 50(커널 로그 최근 N줄).
+ *   보존 7일은 설계 고정값(SNAPSHOT_KEEP_DAYS — 설정으로 늘리지 않는다: 프로세스 이름 · 커널 로그가 쌓인다).
+ */
+export const SNAPSHOT_DEFAULTS = Object.freeze({ dailyCorpMax: 20, topN: 10, dmesgLines: 50 });
+const SNAPSHOT_LIMITS = Object.freeze({ dailyCorpMax: [1, 500], topN: [3, 30], dmesgLines: [10, 200] });
+export const SNAPSHOT_KEEP_DAYS = 7;
+export function normalizeSnapshotSettings(raw = {}) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const out = {};
+  for (const [k, [min, max]] of Object.entries(SNAPSHOT_LIMITS)) out[k] = clampSetting(src[k], { min, max, def: SNAPSHOT_DEFAULTS[k] });
+  return out;
+}
 
 /**
  * v2.922 — 저장 구조·피크 기본값(설계 §4.4 · PROFILES §6 끝 ‘피크 수집 3안’ · §9 · §10).
@@ -274,6 +293,7 @@ export function normalizeSettings(raw = {}) {
     idracTelemetry: raw.idracTelemetry === undefined ? DEFAULTS.idracTelemetry : !!raw.idracTelemetry,
     perf: normalizePerfThresholds(raw.perf),   // v2.919
     store: normalizeStoreSettings(raw.store),   // v2.922
+    snapshot: normalizeSnapshotSettings(raw.snapshot),   // v2.923
   };
 }
 
@@ -505,6 +525,9 @@ export function saveBmUsageSettings(body = {}) {
   // v2.922: 저장 구조 설정도 키 단위로 겹친다(perf 와 같은 이유).
   if (patch.store && typeof patch.store === 'object' && !Array.isArray(patch.store)) patch.store = { ...prevLocal.store, ...patch.store };
   else delete patch.store;
+  // v2.923: 진단 스냅샷 설정도 키 단위로 겹친다.
+  if (patch.snapshot && typeof patch.snapshot === 'object' && !Array.isArray(patch.snapshot)) patch.snapshot = { ...prevLocal.snapshot, ...patch.snapshot };
+  else delete patch.snapshot;
   const local = normalizeSettings({ ...prevLocal, ...patch });
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(local, null, 2), { mode: 0o600 });

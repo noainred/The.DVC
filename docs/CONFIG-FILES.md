@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **279개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **280개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-06)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-07)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -66,6 +66,7 @@
 | `bmusage-distribute.json` | 설정 | 베어메탈 사용률 설정의 엣지 배포(켬·제외 엣지 — 중앙, v2.627) | ✅ | ✅ | ✅ | bmusage/settings.js |
 | `bmusage-portmap.json` | 설정 | 서버 NIC ↔ 스위치·포트 **수동 매핑 파일**(v2.922 · 3a · 설계 PROFILES §10 ①). 파일: `<configDir>/bmusage-portmap.json`. | ✅ | ✅ | ✅ | bmusage/portMap.js |
 | `bmusage-settings.json` | 설정 | 베어메탈 사용률 수집 설정(v2.550). | ✅ | ✅ | ✅ | bmusage/settings.js |
+| `bmusage-tuning.json` | 설정 | 역할별 권장값의 **관리자 덮어쓰기**(v2.923 예정 · 리눅스 성능 4단계 · 설계 §4.3 ‘권장 프로파일을 관리자가 설정에서 정한다’). | ✅ | ✅ | ✅ | bmusage/tuning/overrides.js |
 | `board.json` | 설정 | 접속 공지(팝업)와 게시판 글 저장소(v2.722). | ✅ | ✅ | ✅ | bulletin/store.js |
 | `capacity.db` | DB | 리소스 적정성(용량) 샘플 시계열 |  |  |  | config.js |
 | `capture-history.json` | 설정 | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 | ✅ |  | ✅ | net/captureHistory.js |

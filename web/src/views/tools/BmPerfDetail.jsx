@@ -2,7 +2,7 @@
  * 리눅스 베어메탈 통합 성능 — **서버 상세**(2단계 화면 · 설계 §5 ② · ③ 400 폭).
  *
  * 머리(판정 배지 · 경로 · 두 경로 읽은 시각 · 커버리지) → 판정 띠(서버 판정 한 줄 + 교차 판정 후보) → 탭(요약 · 자원 · 하드웨어).
- * ⚠ 탭은 **지금 데이터가 있는 것만** 둔다(`DETAIL_TABS`) — 장애 기록 · 튜닝 · 용도 · 스냅샷은 그 기능이 생길 때 더한다.
+ * ⚠ 탭은 **지금 데이터가 있는 것만** 둔다(`DETAIL_TABS`) — v2.923(4단계)에 장애 기록 · 튜닝 · 용도 · 진단 스냅샷을 더했다(각 탭 파일).
  *   추이(평균 · 피크)는 v2.923(3b)에 더했다 — `BmTrendTab.jsx`(탭을 고를 때만 마운트 → 그때 조회).
  * ⚠ 조회는 서버를 고를 때 1회 + ‘다시 읽기’ 버튼(폴링 금지) · 늦게 온 다른 서버 응답은 버린다 · 403 은 ErrorBox(권한 안내).
  * ⚠ 판정·문구는 서버(`useJudge.js`)와 `bmPerfText.js` 가 소유한다 — 이 파일은 조립만.
@@ -15,6 +15,11 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { VerdictBadge, StateChips } from './BmPerfBoard.jsx';
 import BmTrendTab from './BmTrendTab.jsx';
+// v2.923(4단계): 장애 기록 · 튜닝 · 용도 · 진단 스냅샷 탭 — 각 탭은 고를 때만 마운트 → 그때 조회(폴링 없음).
+import BmFaultsTab from './BmFaultsTab.jsx';
+import BmTuningTab from './BmTuningTab.jsx';
+import BmProfileTab from './BmProfileTab.jsx';
+import BmSnapshotTab from './BmSnapshotTab.jsx';
 import {
   RES_ORDER, RES_LABEL, USE_KEYS, USE_LABEL, HW_USE_LABEL, cellView, cellFootnotes, verdictView, coverageView, rowStates, STATE_TEXT,
   mismatchText, readText, crossView, crossBandText, thresholdText, basisText, evidenceRows, DETAIL_TABS, detailNotes, pathAtText,
@@ -101,7 +106,7 @@ export function createDetailLoader(fetcher = (key) => fetchJson(`/tools/bm-usage
   };
 }
 
-export default function BmPerfDetail({ itemKey, item = null, authStops = [], staleMs = null, onClose, off = false, keepDays = null }) {
+export default function BmPerfDetail({ itemKey, item = null, authStops = [], staleMs = null, onClose, off = false, keepDays = null, initialTab = '' }) {
   // ⚠ 훅은 전부 조기 return 위에.
   const [st, setSt] = useState({ resp: null, err: null, loading: false });
   const [tab, setTab] = useState('summary');
@@ -112,10 +117,10 @@ export default function BmPerfDetail({ itemKey, item = null, authStops = [], sta
   const load = useCallback((key) => loader.current.load(key, set), [set]);
   useEffect(() => {
     if (!itemKey) return;
-    setSt({ resp: null, err: null, loading: false }); setTab('summary');
+    setSt({ resp: null, err: null, loading: false }); setTab(DETAIL_TABS.some((x) => x.id === initialTab) ? initialTab : 'summary');
     load(itemKey);
     try { rootRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); } catch { /* 스크롤 실패는 무시 */ }
-  }, [itemKey, load]);
+  }, [itemKey, load, initialTab]);
   if (!itemKey) return null;
   return (
     <div ref={rootRef} style={{ minWidth: 0 }}>
@@ -196,7 +201,7 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
           </div>
 
           {/* ── 탭 ── */}
-          <div className="bmp-seg" role="tablist">
+          <div className="bmp-seg bmp-seg-tabs" role="tablist">
             {DETAIL_TABS.map((x) => (
               <button key={x.id} role="tab" aria-selected={tab === x.id} className={tab === x.id ? 'active' : ''} onClick={() => setTab(x.id)}>{x.label}</button>
             ))}
@@ -289,6 +294,11 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
               </Face>
             </div>
           )}
+
+          {tab === 'faults' && <BmFaultsTab key={itemKey} itemKey={itemKey} />}
+          {tab === 'tuning' && <BmTuningTab key={itemKey} itemKey={itemKey} />}
+          {tab === 'profile' && <BmProfileTab key={itemKey} itemKey={itemKey} />}
+          {tab === 'snap' && <BmSnapshotTab key={itemKey} itemKey={itemKey} />}
 
           {tab === 'trend' && (
             // v2.923(3b): 추이 탭 — 서버를 바꾸면 상태를 새로(key). 최근 5분 장치 값(detail)은 장치 표가 함께 쓴다. 보존(일)은 이 노드 대상만 안다.

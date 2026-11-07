@@ -238,9 +238,10 @@ describe('서버 상세 — 안내 · 경로 시각 · 하드웨어 사실', () 
     expect(T.detailErrorText({ status: 404, message: 'x' })).toContain('범위 밖');
     expect(T.detailErrorText(new Error('boom'))).toContain('boom');
   });
-  it('탭은 지금 데이터가 있는 것만 — 장애 기록 · 튜닝 · 용도 · 스냅샷은 없다(추이는 v2.923 3b 에 생겼다)', () => {
-    expect(T.DETAIL_TABS.map((x) => x.id)).toEqual(['summary', 'res', 'hw', 'trend']);
-    expect(T.DETAIL_TABS.map((x) => x.label).join(' ')).not.toMatch(/튜닝|스냅샷|장애 기록|용도/);
+  it('탭은 기능이 있는 것만 — 아트보드 탭 열 순서(장애 기록 · 튜닝 · 용도 · 진단 스냅샷은 4단계 · 추이는 3b)', () => {
+    // v2.923(4단계): 장애 기록 · 튜닝 · 용도 · 진단 스냅샷이 생겨 아트보드 탭 열 순서로 더했다(없는 기능은 여전히 그리지 않는다).
+    expect(T.DETAIL_TABS.map((x) => x.id)).toEqual(['summary', 'res', 'hw', 'faults', 'tuning', 'profile', 'snap', 'trend']);
+    expect(T.DETAIL_TABS.map((x) => x.label)).toEqual(['요약', '자원(USE)', '하드웨어(iDRAC)', '장애 기록', '튜닝', '용도', '진단 스냅샷', '추이(평균 · 피크)']);
   });
 });
 
