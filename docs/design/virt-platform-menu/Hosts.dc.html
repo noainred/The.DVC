@@ -51,6 +51,9 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
 .et .val{font-size:30px;font-weight:800;line-height:1;font-family:"JetBrains Mono",monospace}
 .et .sub{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:#8b9bb4}.et .sub b{color:#e6edf6;font-weight:600}
 .et .cnt{margin-left:auto;font-size:11px;font-weight:800;border-radius:999px;padding:1px 7px;font-family:"JetBrains Mono",monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;background:#1a2236;border:1px solid #243049;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
+.chip i{width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block}
+.chip.on{border-color:#3b82f6;color:#93c5fd}
 .seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
 .seg a{padding:7px 14px;color:#8b9bb4;font-weight:600;text-decoration:none;font-size:12.5px}
 .seg a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #3b82f6}
@@ -169,6 +172,15 @@ tr:hover td{background:rgba(59,130,246,.06)}
       </a>
     </nav>
 
+    <!-- 바로가기(② vCenter 탭과 같은 줄): 칩을 누르면 허브 범위가 그 vCenter 로 바뀌어 이 탭의 목록이 걸러진다. 찾기는 이 탭 안에서 vCenter · 호스트 이름 -->
+    <section class="card" style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center" aria-label="바로가기">
+      <span class="muted" style="font-size:12px;font-weight:600;margin-right:4px">바로가기</span>
+      <a class="chip" href="#" title="호스트 탭을 이 vCenter 범위로"><i></i>vc-us-east</a><a class="chip" href="#"><i></i>vc-us-west</a><a class="chip" href="#"><i></i>vc-br-sao</a><a class="chip" href="#"><i></i>vc-eu-central</a><a class="chip" href="#"><i></i>vc-eu-west</a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae</a><a class="chip" href="#"><i></i>vc-ap-northeast</a><a class="chip" href="#"><i></i>vc-ap-southeast</a><a class="chip" href="#"><i></i>vc-ap-south</a><a class="chip" href="#"><i></i>vc-cn-east</a><a class="chip" href="#"><i></i>vc-cn-north</a><a class="chip" href="#"><i></i>vc-pl-waw</a>
+      <a class="chip" href="#" style="color:#8b9bb4">+16 더</a>
+      <span style="flex:1"></span>
+      <label for="vq" class="muted" style="font-size:12px">찾기</label><input id="vq" class="input" placeholder="vCenter · 호스트 이름" style="width:200px;min-height:30px">
+    </section>
+
     <!-- 호스트 탭 본문 = 지금 ESXi 호스트 화면(v2.805 · v2.811) 그대로. 제목 줄의 '호스트별 · 법인별' 이 하위 보기 -->
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
       <nav class="seg" aria-label="호스트 보기"><a href="Hosts.dc.html" class="on" aria-current="page">호스트별</a><a href="#">법인별</a></nav>
@@ -261,7 +273,7 @@ tr:hover td{background:rgba(59,130,246,.06)}
   </footer>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1540}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1610}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }

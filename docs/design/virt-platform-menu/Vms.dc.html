@@ -51,6 +51,9 @@ select.input{appearance:none;padding-right:26px;background-image:linear-gradient
 .et .val{font-size:30px;font-weight:800;line-height:1;font-family:"JetBrains Mono",monospace}
 .et .sub{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:#8b9bb4}.et .sub b{color:#e6edf6;font-weight:600}
 .et .cnt{margin-left:auto;font-size:11px;font-weight:800;border-radius:999px;padding:1px 7px;font-family:"JetBrains Mono",monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;background:#1a2236;border:1px solid #243049;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
+.chip i{width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block}
+.chip.on{border-color:#3b82f6;color:#93c5fd}
 .tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
 .tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:3px solid transparent;margin-bottom:-1px;min-height:40px;box-sizing:border-box}
 .tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
@@ -168,6 +171,15 @@ tr:hover td{background:rgba(59,130,246,.06)}
         <span class="sub"><span>구동 <b style="color:#86efac">5,120</b></span><span>정지 <b>730</b></span><span>평균 CPU <b>51%</b></span><span>메모리 <b>59%</b></span><span>GPU <b>133</b></span></span>
       </a>
     </nav>
+
+    <!-- 바로가기(② vCenter 탭과 같은 줄): 칩을 누르면 허브 범위가 그 vCenter 로 바뀌어 이 탭의 목록이 걸러진다. 찾기는 이 탭 안에서 vCenter · VM 이름 -->
+    <section class="card" style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center" aria-label="바로가기">
+      <span class="muted" style="font-size:12px;font-weight:600;margin-right:4px">바로가기</span>
+      <a class="chip" href="#" title="VM 탭을 이 vCenter 범위로"><i></i>vc-us-east</a><a class="chip" href="#"><i></i>vc-us-west</a><a class="chip" href="#"><i></i>vc-br-sao</a><a class="chip" href="#"><i></i>vc-eu-central</a><a class="chip" href="#"><i></i>vc-eu-west</a><a class="chip" href="#"><i style="background:#f59e0b"></i>vc-me-uae</a><a class="chip" href="#"><i></i>vc-ap-northeast</a><a class="chip" href="#"><i></i>vc-ap-southeast</a><a class="chip" href="#"><i></i>vc-ap-south</a><a class="chip" href="#"><i></i>vc-cn-east</a><a class="chip" href="#"><i></i>vc-cn-north</a><a class="chip" href="#"><i></i>vc-pl-waw</a>
+      <a class="chip" href="#" style="color:#8b9bb4">+16 더</a>
+      <span style="flex:1"></span>
+      <label for="vq" class="muted" style="font-size:12px">찾기</label><input id="vq" class="input" placeholder="vCenter · VM 이름" style="width:200px;min-height:30px">
+    </section>
 
     <!-- VM 탭 본문 = 지금 가상화 서버 허브(v2.909 승인 시안) 그대로. 제목 줄 h1 만 빠지고 탭 줄 · 타일 · 분포 · 표는 그대로 -->
     <nav class="tabs" aria-label="가상화 서버 보기">
@@ -294,7 +306,7 @@ tr:hover td{background:rgba(59,130,246,.06)}
   </footer>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1440}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1510}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }
