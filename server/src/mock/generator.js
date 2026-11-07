@@ -122,13 +122,21 @@ const HBA_FC = [
   { model: 'QLogic QLE2692 16Gb FC', speeds: [16, 8] },
 ];
 const HBA_ISCSI = { model: 'Broadcom 57414 25GbE iSCSI', speeds: [25, 25] };
-function wwn(idx, p) { const h = (idx * 131 + p * 17).toString(16).padStart(2, '0'); return `20:00:00:24:ff:${h}:${(p).toString(16).padStart(2, '0')}:${(idx % 256).toString(16).padStart(2, '0')}`; }
-function mkHbas(idx) {
+// v2.929(C-①): 데모 WWN 은 사이트 · 호스트 이름으로 만든다 — 예전 식(idx 만)은 사이트마다 같은 WWN 이 반복되고(호스트 0번이 28개 사이트에 같은 WWN)
+//   idx 가 크면 한 바이트가 3자리 16진이 되어 WWN 형식이 깨졌다(데모 SAN 이 그 호스트를 합성 WWN 으로 바꿔 인벤토리 HBA 와 어긋났다).
+function wwn(idx, p, salt = '') {
+  let x = 2166136261 >>> 0;
+  for (const ch of `${salt}|${idx}|${p}`) x = Math.imul(x ^ ch.charCodeAt(0), 16777619) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 2246822507) >>> 0; x = Math.imul(x ^ (x >>> 13), 3266489909) >>> 0; x = (x ^ (x >>> 16)) >>> 0;   // 섞기(비슷한 입력의 충돌을 줄인다)
+  const b = [(x >>> 24) & 255, (x >>> 16) & 255, (x >>> 8) & 255, (x & 0xfe) | (p & 1)].map((v) => v.toString(16).padStart(2, '0'));
+  return `20:00:00:24:${b.join(':')}`;
+}
+function mkHbas(idx, salt = '') {
   const fc = HBA_FC[idx % HBA_FC.length];
   const hbas = fc.speeds.map((sp, p) => ({
     name: `vmhba${p + 1}`, type: 'FibreChannel', model: fc.model,
     speedGbps: idx % 23 === 0 && p === 1 ? Math.max(8, sp / 2) : sp, // a few links degraded
-    wwn: wwn(idx, p), status: 'online',
+    wwn: wwn(idx, p, salt), status: 'online',
   }));
   if (idx % 4 === 0) hbas.push({ name: 'vmhba64', type: 'iSCSI', model: HBA_ISCSI.model, speedGbps: HBA_ISCSI.speeds[0], wwn: '', status: 'online' });
   return hbas;
@@ -618,7 +626,7 @@ export function generateSnapshot() {
         // v2.716: 서비스태그 — 예전엔 없어서 시리얼 조회 'ESXi 호스트' 가 0건이었다. iDRAC 데모 시드(seed.js)와 같은 규칙이라
         //   Dell 호스트는 자기 iDRAC 서버와 태그가 같다(다르면 hostMatch 가 '다른 장비' 로 본다 — v2.682 R3D-04).
         serviceTag: mockServiceTag(`${site.id}|${h.name}`),
-        hbas: mkHbas(h.idx),
+        hbas: mkHbas(h.idx, `${site.id}|${h.name}`),
         gpus: mkGpus(h.idx, site),
         // v2.852: vSphere 데이터센터 이름(실수집 soapClient 와 같은 키) — VM 의 vcDcPath 와 같은 값. GPU 할당 계층의 '데이터센터' 단계.
         vcDatacenter: `DC-${site.id}`,

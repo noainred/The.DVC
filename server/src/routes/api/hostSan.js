@@ -22,7 +22,10 @@ import { listDevices as listSanDevices } from '../../sanswitch/registry.js';
 import { localSnapshots as sanLocalSnaps } from '../../sanswitch/store.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
 import { portBytesMulti, perfQueryTtlMs } from '../../sanswitch/perfDb.js';
-import { buildFabrics, attributeHost, attributeFleet } from '../../sanswitch/attribution.js';
+import { buildFabrics, attributeHost, attributeFleet, measuredSharesOf, identityOf, SPLIT_MODES } from '../../sanswitch/attribution.js';
+import { ipfForFabrics } from '../../sanswitch/ipf.js';   // v2.929(C-①) IPF 보정
+import { recordHosts, weightsFor, startStorPathHistory, historyStatus } from '../../storpath/history.js';   // v2.929(C-①) ESXi 경로 카운터 표본 이력
+import { demoSpath, demoWeights } from '../../mock/demo/storpath.js';
 import { normSerial } from '../../sanswitch/endpointKey.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
 import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
@@ -106,7 +109,56 @@ async function fabricSnapshots({ corp = null, dcSet = null, admin = true } = {})
   return out;
 }
 
+/**
+ * v2.929(C-①): 분배 문맥 — ESXi 경로 표본 가중치(호스트별) · IPF(스위치별) · 분배 방식. 두 라우트가 같은 규칙으로 쓴다.
+ *   실측 가중치는 기간 [since, until] 안의 표본만(없으면 null → IPF · 타깃 포트 비율). 데모는 조닝에서 만든 가상 표본(mock/demo/storpath.js).
+ *   IPF 의 고정 행 = 실측 몫이 있는 초기자(인벤토리 HBA WWN → 호스트 · 어댑터) — 같은 스위치의 다른 호스트 추정이 실측을 존중한다.
+ */
+function splitContext({ req, snap, fabrics, bytes }) {
+  const q = String(req.query.split || 'auto');
+  const split = SPLIT_MODES.includes(q) ? q : 'auto';
+  const mock = isMockMode();
+  if (!mock) recordHosts(snap.hosts || []);
+  const since = Number(bytes?.since) > 0 ? Number(bytes.since) : null;   // 빈 결과(since 0)는 기간 제한 없음이 아니라 '기간 모름' — 표본도 기간 없이 본다
+  const until = Number(bytes?.until) > 0 ? Number(bytes.until) : null;
+  const memo = new Map();
+  const spathOf = (h) => (mock ? demoSpath(h, fabrics) : (h?.spath || null));
+  const pathWeightsOf = (h) => {
+    if (!h || split !== 'auto') return null;
+    if (memo.has(h.id)) return memo.get(h.id);
+    const w = mock ? demoWeights(spathOf(h)) : weightsFor(h.id, { since, until });
+    memo.set(h.id, w);
+    return w;
+  };
+  let fixedOf = null;
+  if (split === 'auto') {
+    const byWwn = new Map();
+    for (const h of snap.hosts || []) for (const a of Array.isArray(h?.hbas) ? h.hbas : []) { const w = String(a?.wwn || '').toLowerCase(); if (w && !byWwn.has(w)) byWwn.set(w, { h, adapter: a.name }); }
+    fixedOf = (w) => { const x = byWwn.get(w); return x ? measuredSharesOf(pathWeightsOf(x.h), x.adapter) : null; };
+  }
+  const ipf = split === 'ratio' ? null : ipfForFabrics(fabrics, bytes?.ports || null, { fixedOf });
+  return { split, ipf, pathWeightsOf, spathOf, mock };
+}
+
+/** 호스트 상세 '경로별 실측' 표 — 최근 표본(host.spath)의 타깃마다 스토리지 이름 · 로그인한 스위치 포트 · 경로 상태(hcfg.mp.targets). */
+function pathTargetsOf(h, spath, fabrics, storageOf) {
+  if (!spath || !Array.isArray(spath.targets)) return null;
+  const mp = new Map((Array.isArray(h?.hcfg?.mp?.targets) ? h.hcfg.mp.targets : []).map((t) => [`${t.adapter}|${t.wwn}`, t]));
+  return spath.targets.slice(0, 64).map((t) => {
+    const f = fabrics.find((x) => x.portByWwn.has(t.wwn)) || null;
+    const idn = f ? identityOf(t.wwn, f, fabrics, storageOf) : null;
+    const port = f ? f.portByWwn.get(t.wwn) : null;
+    const m = mp.get(`${t.adapter}|${t.wwn}`) || null;
+    return { ...t, storage: idn ? { id: idn.id, name: idn.name, kind: idn.kind, registered: !!idn.registered } : null,
+      switch: f ? { deviceId: f.deviceId, name: f.name } : null, port: port ? { index: port.index, slotPort: port.slotPort ?? null } : null,
+      mp: m ? { live: m.live, dead: m.dead, luns: m.luns } : null };
+  });
+}
+const fabricOut = (f, extra = {}) => ({ deviceId: f.deviceId, name: f.name, datacenterId: f.datacenterId, agent: f.agent, collectedAt: f.collectedAt, zoneCount: f.zoneCount, nsKnown: f.nsKnown, portsComplete: f.portsComplete, fv: f.fv, ...extra });
+
 export function registerHostSan(api) {
+  // v2.929(C-①): ESXi 경로 카운터 표본 이력 — 이 노드 스냅샷을 5분마다 훑는다(새 엣지 계약 없음 · 인메모리).
+  startStorPathHistory(() => store.get()?.hosts || []);
   api.get('/hosts/:id/san-attribution', invHosts, async (req, res) => {
     const snap = store.get();
     const id = String(req.params.id || '');
@@ -126,7 +178,9 @@ export function registerHostSan(api) {
       try { bytes = await portBytesMulti(ids, { hours, from, to, series: true, signal: perfAbortSignal(res) }); }
       catch (e) { if (abandoned(e)) return; throw e; }
     }
-    const r = attributeHost(h, fabrics, { storageOf, portBytes: bytes?.ports || null });
+    const sc = splitContext({ req, snap, fabrics, bytes });
+    const r = attributeHost(h, fabrics, { storageOf, portBytes: bytes?.ports || null, pathWeights: sc.pathWeightsOf(h), ipf: sc.ipf, split: sc.split });
+    const spath = sc.spathOf(h);
     // 24h 추이 — 로그인한 HBA 포트의 버킷 평균 합(한 포트라도 표본이 있는 버킷만 · 일부 포트만 있는 버킷은 부분 합이라 null + partial 로 센다).
     let series = null;
     if (bytes?.buckets?.length) {
@@ -145,7 +199,13 @@ export function registerHostSan(api) {
     res.set('Cache-Control', 'no-store').json({
       ok: true, hours, from, to, rangeIssue: rangeIssue || null, since: bytes?.since ?? null, until: bytes?.until ?? null, bucketMs: bytes?.bucketMs ?? null,
       host: r.host, status: r.status, hbas: r.hbas, storages: r.storages, totals: r.totals, mpTargets: r.mpTargets, series,
-      fabrics: fabrics.map((f) => ({ deviceId: f.deviceId, name: f.name, datacenterId: f.datacenterId, agent: f.agent, collectedAt: f.collectedAt, zoneCount: f.zoneCount, nsKnown: f.nsKnown, portsComplete: f.portsComplete })),
+      fabrics: fabrics.map((f) => fabricOut(f)),
+      // v2.929(C-①): 분배 방식 · IPF 요약(스위치별) · ESXi 경로 최근 표본(타깃별) · 표본 이력 상태
+      split: sc.split, ipf: sc.ipf?.fabrics || [],
+      spath: spath ? { at: spath.at, samples: spath.samples, sampleSec: spath.sampleSec, instances: spath.instances, unparsed: spath.unparsed, truncated: !!spath.truncated, mock: !!spath.mock,
+        targets: pathTargetsOf(h, spath, fabrics, storageOf) } : null,
+      pathWeights: (() => { const w = sc.pathWeightsOf(h); return w ? { samples: w.samples, firstAt: w.firstAt, lastAt: w.lastAt } : null; })(),
+      storPathScan: !!config.storPathScan,
       switches: snaps.length, perfUnavailable: !!bytes?.unavailable, corpLimited: corp != null, corpMissing: corp === '',
       computedAt: bytes?.computedAt ?? Date.now(), cacheTtlMs: perfQueryTtlMs(), source: bytes?.source ?? null, ...(admin ? {} : { addressHidden: true }),
     });
@@ -256,7 +316,8 @@ export function registerHostSan(api) {
     // 법인을 골랐으면 그 법인 vCenter 의 호스트만(법인 : vCenter 1:1 — 루트 CLAUDE.md). 전체면 전 호스트.
     const vcDc = new Map((snap.vcenters || []).map((v) => [v.id, String(datacenterOfVcenter(v.id) || '')]));
     const hosts = (snap.hosts || []).filter((x) => Array.isArray(x.hbas) && x.hbas.length && (!dcSet || dcSet.has(vcDc.get(x.vcenterId) ?? '')));
-    const r = attributeFleet(hosts, fabrics, { storageOf, portBytes: bytes?.ports || null });
+    const sc = splitContext({ req, snap, fabrics, bytes });
+    const r = attributeFleet(hosts, fabrics, { storageOf, portBytes: bytes?.ports || null, pathWeightsOf: sc.pathWeightsOf, ipf: sc.ipf, split: sc.split });
     const dcNameOf = (() => { try { const mm = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (k) => mm.get(k) || k || '(법인 미지정)'; } catch { return (k) => k || '(법인 미지정)'; } })();
     const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
     const corpOf = (vcId) => { const d = vcDc.get(vcId) ?? ''; return { datacenterId: d || NONE_DC, datacenterName: dcNameOf(d) }; };
@@ -265,7 +326,8 @@ export function registerHostSan(api) {
       rows: r.rows.map((x) => ({ ...x, vcenterName: vcName.get(x.vcenterId) || x.vcenterId, ...corpOf(x.vcenterId) })),
       storages: r.storages, hosts: r.hosts.map((x) => ({ ...x, vcenterName: vcName.get(x.vcenterId) || x.vcenterId, ...corpOf(x.vcenterId) })),
       zonedOnly: r.zonedOnly.map((x) => ({ ...x, vcenterName: vcName.get(x.vcenterId) || x.vcenterId, ...corpOf(x.vcenterId) })), counts: r.counts,
-      fabrics: fabrics.map((f) => ({ deviceId: f.deviceId, name: f.name, datacenterId: f.datacenterId || NONE_DC, datacenterName: dcNameOf(f.datacenterId), collectedAt: f.collectedAt, zoneCount: f.zoneCount, nsKnown: f.nsKnown, portsComplete: f.portsComplete })),
+      fabrics: fabrics.map((f) => fabricOut(f, { datacenterId: f.datacenterId || NONE_DC, datacenterName: dcNameOf(f.datacenterId) })),
+      split: sc.split, ipf: sc.ipf?.fabrics || [], pathHistory: sc.mock ? { mock: true } : historyStatus(), storPathScan: !!config.storPathScan,   // v2.929(C-①)
       hostsTotal: (snap.hosts || []).length, hostsWithHba: hosts.length, perfUnavailable: !!bytes?.unavailable,
       computedAt: bytes?.computedAt ?? Date.now(), cacheTtlMs: perfQueryTtlMs(), source: bytes?.source ?? null, ...(admin ? {} : { addressHidden: true }),
     });

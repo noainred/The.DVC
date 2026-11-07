@@ -24,6 +24,7 @@ import { putFromEdge as putVcInfoFromEdge } from '../vcinfo/collect.js';
 import { sanitizeHostCfg } from '../hostcfg/parse.js';   // v2.699
 import { sanitizeDsCfg } from '../dscfg/parse.js';   // v2.700
 import { sanitizeVmPerfc, sanitizeHostPerfc } from '../contention/parse.js'; // v2.706(C2·C3)
+import { sanitizeHostSpath } from '../storpath/parse.js'; // v2.929(C-①) ESXi 경로 카운터
 import { sanitizeClusterCfgList } from '../clustercfg/parse.js';   // v2.701
 import { sanitizeTagInv } from '../tags/parse.js';   // v2.703
 import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
@@ -879,6 +880,8 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
       const v = Object.hasOwn(o.perfc, 'diskMaxMs') || Array.isArray(o.perfc?.ds) ? sanitizeHostPerfc(o.perfc) : sanitizeVmPerfc(o.perfc);
       if (v == null) dropped.coerced += 1; o.perfc = v;
     }
+    // v2.929(C-①): ESXi 경로 카운터(storpath/parse.js) — 아는 필드만 · 타깃 64 상한 · 엣지 시각은 수신 시각으로.
+    if (Object.hasOwn(o, 'spath') && o.spath != null) { const v = sanitizeHostSpath(o.spath); if (v == null) dropped.coerced += 1; o.spath = v; }
     if (Object.hasOwn(o, 'dsUuid') && o.dsUuid != null && !(typeof o.dsUuid === 'string' && /^[\w.:-]{1,64}$/.test(o.dsUuid))) { o.dsUuid = null; dropped.coerced += 1; }
     // v2.742(VC-05 후속): 호스트·VM 의 소속 클러스터 moref(clusterRef)와 vSphere 데이터센터 이름(vcDatacenter) — 수집기(soapClient)는
     //   글자 또는 null 만 싣는다. clusterRef 는 moref 꼴(64자) 글자만, vcDatacenter 는 글자만(128자로 자른다) — 객체·배열·숫자·형식 밖은

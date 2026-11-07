@@ -74,7 +74,7 @@ test('① 순수 귀속 엔진 — 추정(비율) · 확정 승격(멀티패스)
   assert.equal(st['key:PowerStore::PS12345'].estimatedBytes, 250); assert.deepEqual(st['key:PowerStore::PS12345'].zonedOnlyPorts, ['vmhba3@SW-A']);
   assert.equal(st['st:st1'].nowReadEst, 200 * 0.75 + 20); assert.equal(st['st:st1'].nowRead, null, '확정 포트가 없으면 확정 now 는 null');
   // 합계 — 호스트 합은 HBA 포트 카운터 그대로, 확정/추정 따로
-  assert.deepEqual(r.totals, { hostBytes: 1500, confirmedBytes: null, estimatedBytes: 1500, unsplitBytes: null, unattributedBytes: null, measuredPorts: 2, unmeasuredPorts: 0, loggedIn: 2, zonedOnly: 1, unseen: 1, nowRead: 220, nowWrite: 110 });
+  assert.deepEqual(r.totals, { hostBytes: 1500, confirmedBytes: null, estimatedBytes: 1500, pathMeasuredBytes: null, unsplitBytes: null, unattributedBytes: null, measuredPorts: 2, unmeasuredPorts: 0, loggedIn: 2, zonedOnly: 1, unseen: 1, nowRead: 220, nowWrite: 110 });
 
   // 멀티패스 살아 있는 타깃이 T1 뿐 → vmhba1 은 후보 1 + 네임서버 확정 → 확정 승격
   const r2 = A.attributeHost(hostX({ hcfg: { mp: { targets: [{ adapter: 'vmhba1', wwn: T1, live: 2, dead: 0, luns: 4 }, { adapter: 'vmhba1', wwn: T2, live: 0, dead: 2, luns: 1 }] } } }), fabrics, { storageOf, portBytes: pb });
@@ -106,7 +106,7 @@ test('② 함대 집계 — 호스트 × 스토리지 행 · 조닝만 · 개수
   const hosts = [hostX(), { id: 'h2', name: 'nohba', vcenterId: VC, hbas: [] }, { id: 'h3', name: 'unseen', vcenterId: VC, hbas: [{ name: 'vmhba1', wwn: H4 }] },
     { id: 'h4', name: 'esx02', vcenterId: VC, hbas: [{ name: 'vmhba1', wwn: H2 }] }];
   const f = A.attributeFleet(hosts, fabrics, { storageOf, portBytes: pb });
-  assert.deepEqual(f.counts, { hosts: 4, noHba: 1, unseen: 1, ok: 2, zonedOnly: 0, confirmedPairs: 1, estimatedPairs: 2, unsplitPairs: 0, zonedOnlyPairs: 0 });
+  assert.deepEqual(f.counts, { hosts: 4, noHba: 1, unseen: 1, ok: 2, zonedOnly: 0, confirmedPairs: 1, measuredPairs: 0, estimatedPairs: 2, unsplitPairs: 0, zonedOnlyPairs: 0, ipfPorts: 0, ratioPorts: 1, measuredSplitPorts: 0 });   // v2.929 — 실측 · 분배 방식별 포트 수
   const x = f.rows.filter((r) => r.hostId === `${VC}:h1`);
   assert.deepEqual(x.map((r) => [r.storageId, r.conf, r.confirmedBytes, r.estimatedBytes, r.measured]), [['st:st1', 'estimated', null, 1250, true], ['key:PowerStore::PS12345', 'estimated', null, 250, true]]);
   const y = f.rows.find((r) => r.hostId === 'h4');
@@ -124,8 +124,8 @@ test('③ hostcfg — 경로별 FC 타깃 WWN(어댑터별 live/dead) · 엣지 
     + `<path><name>i</name><pathState>active</pathState><lun>L3</lun><adapter>key-vim.host.InternetScsiHba-vmhba64</adapter><transport xsi:type="HostInternetScsiTargetTransport"></transport></path></lun>`;
   const m = P.parseMultipath(x);
   assert.deepEqual(m.targets, [
-    { adapter: 'vmhba1', wwn: '50:00:4a:ab:0b:20:00:01', live: 2, dead: 0, luns: 2 }, { adapter: 'vmhba1', wwn: '50:00:4a:ab:0b:20:00:02', live: 0, dead: 1, luns: 1 },
-    { adapter: 'vmhba2', wwn: '50:00:4a:ab:0b:20:00:01', live: 1, dead: 0, luns: 1 }]);
+    { adapter: 'vmhba1', wwn: '50:00:4a:ab:0b:20:00:01', live: 2, dead: 0, luns: 2, rt: [] }, { adapter: 'vmhba1', wwn: '50:00:4a:ab:0b:20:00:02', live: 0, dead: 1, luns: 1, rt: [] },
+    { adapter: 'vmhba2', wwn: '50:00:4a:ab:0b:20:00:01', live: 1, dead: 0, luns: 1, rt: [] }]);   // v2.929 rt — 이 표본의 경로 이름('n')은 런타임 이름이 아니다
   assert.equal(m.paths, 5); assert.equal(m.dead, 1);
   // 정제 — 아는 필드만 · WWN 표준형 · 어댑터 이름 · 배열이 아니면 키 없음(구버전 엣지)
   const s = P.sanitizeHostCfg({ mp: { luns: 1, targets: [{ adapter: 'vmhba1', wwn: '50:00:4A:AB:0B:20:00:01', live: 2, dead: -1, luns: 'x', extra: 1 }, { adapter: 'bad name', wwn: '50:00:4a:ab:0b:20:00:01' }, { adapter: 'vmhba2', wwn: 'nope' }, null, 'str'] } }).mp;
