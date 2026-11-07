@@ -13,6 +13,7 @@
  */
 
 import { listBmServersRaw, getBmSettings } from './registry.js';
+import { withResolvedAuth } from '../bmusage/onboard/refs.js'; // 7b: 키 · 공통 계정 참조 해석(판정 하나)
 import { collectMany } from './collect.js';
 import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
 import { findCollectorForAgent } from '../central/idracScanPush.js';
@@ -180,12 +181,17 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     const realAll = demo ? servers.filter((s) => !isDemoId(s.id)) : servers;
     const realServers = demoOnly ? [] : realAll;
     const skippedNonDemo = realAll.length - realServers.length;
-    const central = realServers.filter((s) => !String(s.agent || '').trim());
+    // 7b: 중앙 직접 서버의 키 · 공통 계정 참조를 접속 자격으로 해석(bmusage 폴러와 같은 refs.withResolvedAuth).
+    const central = withResolvedAuth(realServers.filter((s) => !String(s.agent || '').trim()));
     const pushByAgent = new Map(); // 중앙→엣지 직접(PUSH) — 중앙이 엣지 URL 에 닿을 때
     const pollByAgent = new Map(); // 에이전트 폴링 — NAT 뒤 엣지(iDRAC/IP스캔과 동일, v2.341)
+    // 7b: 키 · 공통 계정으로 인증하는 서버는 엣지 잡 · 엣지 PUSH 에 싣지 않는다 — 개인키를 법인 밖(중앙 → 엣지)으로 보내지 않고,
+    //   빈 비밀번호로 엣지가 시도해 계정을 잠그지 않게. 그 서버는 사유를 남긴다(엣지 포탈에 등록하면 엣지가 자기 키로 읽는다).
+    const keyDelegated = [];
     for (const s of realServers) {
       const a = String(s.agent || '').trim();
       if (!a) continue;
+      if (String(s.keyRef || '').trim() || String(s.credRef || '').trim()) { keyDelegated.push(s); continue; }
       const map = s.dispatch === 'push' ? pushByAgent : pollByAgent; // 기본 poll(엣지 표준 경로)
       if (!map.has(a)) map.set(a, []);
       map.get(a).push(s);
@@ -195,6 +201,10 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     for (const [agent, list] of pollByAgent) {
       enqueueBmstorJob(agent, list.map((s) => ({ id: s.id, host: s.host, port: s.port, username: s.username, password: s.password, mounts: s.mounts })));
       queued += list.length;
+    }
+    for (const s of keyDelegated) {
+      const prev = latest.get(s.id);
+      latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: 'SSH 키 · 공통 계정 인증 서버는 엣지 위임 잡으로 보내지 않습니다(키는 법인 밖으로 나가지 않음) — 이 서버를 그 엣지 포탈에 등록하세요.', at: Date.now(), agent: s.agent || '' });
     }
     const [centralResults, ...edgeResults] = await Promise.all([
       (async () => [...demoBmResults(demoServers), ...(central.length ? await collectMany(central) : [])])(),

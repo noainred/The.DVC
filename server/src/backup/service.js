@@ -14,7 +14,8 @@ import { promisify } from 'node:util';
 import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { createYielder } from '../util/timeSlice.js';
-import { redactEnvSecrets, mergeRedactedEnv, pinHostSecurityEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
+import { redactEnvSecrets, mergeRedactedEnv, pinHostSecurityEnv } from '../util/envRedact.js';
+import { KEY_FILE_NAME, redactKeyStoreText, mergeRedactedKeyStore } from '../bmusage/onboard/keyBundle.js'; // 7b: 번들의 SSH 키 저장소 가림 · 복원 병합 // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { isRegisteredStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01·08: 헬퍼가 만든 상태 파일은 스스로 등록한다
 import { DATA_FILE_NAMES, RESTORE_EXCLUDE, stageRestore, stagedNameIssue, reconcileAgentTokensText } from './stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원은 예약 → 기동 시 적용
@@ -254,6 +255,13 @@ function putCollected(out, name, content) {
     content = r.text;
     if (r.redacted) (out[REDACTED_META] ||= {})[name] = r.keys;
   }
+  // 7b: SSH 키 저장소는 번들(백업 · 엣지 설정 push)에 **지문 · 공개키 · 이름만** — 개인키 · passphrase · 공통 계정 비밀번호는 가린다
+  //   (봉인돼 있어도 싣지 않는다: 엣지 push 는 법인 밖으로 나가고, 백업은 다른 곳에 보관된다). 복원은 지금 파일의 같은 키로 되살린다.
+  if (name === KEY_FILE_NAME) {
+    const r = redactKeyStoreText(content);
+    content = r.text;
+    if (r.redacted) (out[REDACTED_META] ||= {})[name] = ['privateKey', 'passphrase', 'password'];
+  }
   out[name] = content;
 }
 /**
@@ -484,6 +492,13 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
       content = p.text; envPinned.push(...p.pinned.map((k) => `${base}:${k}`));
       envWrites.push([base, String(content)]);
       continue;
+    }
+    // 7b: 번들의 SSH 키 저장소는 개인키 · 비밀번호가 가려져 있다 — 지금 파일의 같은 키(지문) · 같은 계정(id)으로 되살리고, 못 살리는 키는 뺀다.
+    if (base === KEY_FILE_NAME) {
+      let cur = ''; try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch { /* 없음 */ }
+      const m = mergeRedactedKeyStore(String(content0), cur);   // 저장된 값(봉인 그대로)을 옮겨 붙인다 — 복호 · 재봉인 없음
+      content = m.text;
+      envDropped.push(...m.dropped.slice(0, 64).map((d) => `${base}:${d}`));   // 되살리지 못한 키 · 계정 비밀(.env 키를 못 살렸을 때와 같은 칸)
     }
     // v2.769(점검 R4-D1-3): 예약 복원이 받지 않는 이름(공백·'+'·'@'·선행 '.' 등 — 백업 수집은 확장자만 본다)은 예약에서 조용히 빠졌다.
     //   지금 failed 에 사유와 함께 싣는다(v2.689 G2 B4 '실패를 삼키지 않는다').

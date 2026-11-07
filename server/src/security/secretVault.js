@@ -97,6 +97,7 @@ export const SECRET_FILES = [
   'alerts.json',                   // 알림 채널 웹훅 URL(alerts.js — 파일 한정 추가 필드 'url')
   'bareos.json',                   // Bareos Director 콘솔 비밀번호(bareos/settings.js, v2.820)
   'bareos-edge-directors.json',    // 엣지가 받은 법인 Director 대행 사본 — 콘솔 비밀번호(bareos/edgeStore.js, v2.824)
+  'ssh-keys.json',                 // 7b: SSH 키 저장소 개인키 · passphrase + 법인 공통 계정 비밀번호(bmusage/onboard/keyStore.js)
 ];
 
 /**

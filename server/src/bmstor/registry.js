@@ -4,7 +4,10 @@
  * 수집 서버/배포 대상 레지스트리와 동일 계약.
  *
  * 서버: { id, name, host, port, username, password, agent(엣지 이름 — 빈 값=중앙 직접),
- *         groups(합산 그룹 배열 — 최대 3개, v2.344), mounts:[절대경로...], enabled }
+ *         groups(합산 그룹 배열 — 최대 3개, v2.344), mounts:[절대경로...], enabled,
+ *         keyRef(SSH 키 저장소 키 id — 7b) · credRef(법인 공통 계정 id — 7b) · vcenterId(법인 — 7b 온보딩) ·
+ *         collectVia('edge'|'central'|'auto' — 7b 온보딩이 기록 · 경계 판정은 agent 그대로) · viaChangedAt · note · onboardAt }
+ *   ⚠ 7b: keyRef · credRef 는 **비밀 참조**다 — 접속처(host · port · 계정)가 바뀌면 요청이 다시 고르지 않는 한 승계하지 않는다(secretCarry 와 같은 판정).
  * 설정: { intervalMinutes } — 사용자가 정하는 수집 주기(기본 10분, 1~1440 클램프).
  */
 
@@ -92,11 +95,35 @@ export function bmServerInputIssue(body = {}) {
   // 멀티 그룹(v2.344): 최대 3개 — 배열/문자열(쉼표·세미콜론 구분) 모두 허용, 구형 group 하위호환.
   const { error: gErr } = normalizeBmGroups(body.groups !== undefined ? body.groups : body.group);
   if (gErr) return gErr;
+  // 7b: 참조 칸은 id 꼴만(존재 판정은 호출부 — 키 저장소를 이 등록부가 import 하지 않는다).
+  if (body.keyRef !== undefined && body.keyRef !== '' && !REF_RE.key.test(String(body.keyRef))) return 'SSH 키 참조가 올바르지 않습니다.';
+  if (body.credRef !== undefined && body.credRef !== '' && !REF_RE.acc.test(String(body.credRef))) return '공통 계정 참조가 올바르지 않습니다.';
+  if (body.collectVia !== undefined && body.collectVia !== '' && !COLLECT_VIA.includes(String(body.collectVia))) return '수집 경로는 edge · central · auto 중 하나입니다.';
+  if (body.note !== undefined && String(body.note).length > 500) return '메모는 500자까지입니다.';
   return null;
 }
 
+/** 7b: 참조 id 꼴(키 저장소 `k_` · 공통 계정 `a_` + 12 hex). */
+export const REF_RE = Object.freeze({ key: /^k_[0-9a-f]{12}$/, acc: /^a_[0-9a-f]{12}$/ });
+export const COLLECT_VIA = Object.freeze(['edge', 'central', 'auto']);
+
 /** 추가/수정 — id 있으면 수정(빈 비밀번호는 기존 유지), 없으면 신규. 검증은 저장과 단일 소스. */
 export function saveBmServer(body = {}) {
+  const data = load();
+  const r = applyServerInput(data, body, { now: Date.now() });
+  if (!r.ok) return r;
+  persist();
+  return r;
+}
+
+/** 등록 상한(대). 7b 온보딩 일괄 적용도 같은 상한. */
+export const MAX_BM_SERVERS = 1000;
+
+/**
+ * 한 행을 메모리의 data 에 반영한다(쓰지 않는다 — saveBmServer · applyBmServerBatch 가 한 번 persist). 검증은 bmServerInputIssue 하나.
+ * @returns {{ok:true, server:object, created:boolean, droppedSecrets?:string[]} | {ok:false, reason:string}}
+ */
+function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
   const issue = bmServerInputIssue(body);
   if (issue) return { ok: false, reason: issue };
   const host = String(body.host || '').trim();
@@ -104,9 +131,8 @@ export function saveBmServer(body = {}) {
   const username = String(body.username ?? 'root').trim() || 'root';
   const { mounts } = sanitizeMounts(body.mounts);
 
-  const data = load();
   const existing = body.id ? data.servers.find((s) => s.id === body.id) : null;
-  if (!existing && data.servers.length >= 1000) return { ok: false, reason: '서버는 최대 1,000대까지 등록할 수 있습니다.' };
+  if (!existing && data.servers.length >= MAX_BM_SERVERS) return { ok: false, reason: '서버는 최대 1,000대까지 등록할 수 있습니다.' };
   const server = existing || { id: crypto.randomBytes(5).toString('hex') };
   const droppedSecrets = [];
   // v2.479(감사 S-2): host 변경 시 비밀번호 이월 금지. v2.607(감사 LEFT2607-06): host 만 보던 것을 공용 판정
@@ -138,9 +164,61 @@ export function saveBmServer(body = {}) {
     if (existing && server.password) droppedSecrets.push('password');
     server.password = '';
   }
+  // 7b: 키 · 공통 계정 참조 — 요청이 칸을 주면 그 값(빈 값 = 해제), 안 주면 기존 유지. ⚠ 접속처가 바뀌면 요청이 다시 고르지 않는 한 버린다.
+  for (const f of ['keyRef', 'credRef']) {
+    if (body[f] !== undefined) { const v = String(body[f] || '').trim(); if (v) server[f] = v; else delete server[f]; }
+    else if (hostChanged && server[f]) { droppedSecrets.push(f); delete server[f]; }
+  }
+  if (body.vcenterId !== undefined) { const v = String(body.vcenterId || '').trim().slice(0, 128); if (v) server.vcenterId = v; else delete server.vcenterId; }
+  if (body.collectVia !== undefined) {
+    const v = COLLECT_VIA.includes(String(body.collectVia)) ? String(body.collectVia) : '';
+    if (v && v !== server.collectVia) { if (server.collectVia || existing) server.viaChangedAt = now; server.collectVia = v; }
+    else if (!v) delete server.collectVia;
+  }
+  if (body.note !== undefined) { const v = String(body.note || '').trim().slice(0, 500); if (v) server.note = v; else delete server.note; }
+  if (body.onboardAt !== undefined && Number(body.onboardAt) > 0) server.onboardAt = Number(body.onboardAt);
   if (!existing) data.servers.push(server);
-  persist();
-  return { ok: true, server: redact(server), ...(droppedSecrets.length ? { droppedSecrets } : {}) };
+  return { ok: true, server: redact(server), created: !existing, ...(droppedSecrets.length ? { droppedSecrets } : {}) };
+}
+
+/**
+ * 7b 온보딩 일괄 적용 — 행마다 applyServerInput 후 **한 번** 원자적으로 쓴다(1,000행이 1,000번 쓰지 않게).
+ * 등록부를 못 읽었으면 쓰지 않는다(registry-unreadable — 빈 목록으로 덮어 보존본의 서버를 잃지 않게). 한 행이라도 실패하면 **아무것도 쓰지 않는다**(전부 또는 없음).
+ * @param {object[]} inputs  saveBmServer 와 같은 본문(id 있으면 갱신)
+ * @returns {{ok:true, results:object[]} | {ok:false, reason:string, code?:string, index?:number}}
+ */
+export function applyBmServerBatch(inputs = [], { now = Date.now() } = {}) {
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', reason: 'OS 계정 등록부(bm-storage.json)를 읽지 못해 적용하지 않았습니다.' };
+  const before = structuredClone(data.servers);
+  const results = [];
+  for (let i = 0; i < inputs.length; i += 1) {
+    const r = applyServerInput(data, inputs[i] || {}, { now });
+    if (!r.ok) { data.servers = before; return { ok: false, reason: r.reason, index: i }; }
+    results.push(r);
+  }
+  try { persist(); } catch (e) { data.servers = before; throw e; }
+  return { ok: true, results };
+}
+
+/** 7b: 키 · 공통 계정 참조 수(사용처) — 원본에서 센다. */
+export function bmServerRefCounts() {
+  const byKey = new Map(); const byAcc = new Map();
+  for (const s of load().servers) {
+    if (s.keyRef) byKey.set(s.keyRef, (byKey.get(s.keyRef) || 0) + 1);
+    if (s.credRef) byAcc.set(s.credRef, (byAcc.get(s.credRef) || 0) + 1);
+  }
+  return { byKey, byAcc };
+}
+
+/** 7b 키 회전: 서버의 keyRef 를 from → to 로(한 번 쓰기). 바꾼 서버 id 목록. 등록부를 못 읽었으면 쓰지 않는다. */
+export function replaceBmServerKeyRefs(fromId, toId) {
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', reason: 'OS 계정 등록부를 읽지 못해 키 참조를 바꾸지 않았습니다.' };
+  const ids = [];
+  for (const s of data.servers) if (s.keyRef === fromId) { s.keyRef = toId; ids.push(s.id); }
+  if (ids.length) persist();
+  return { ok: true, ids };
 }
 
 export function removeBmServer(id) {
