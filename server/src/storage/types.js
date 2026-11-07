@@ -29,6 +29,7 @@
  *     list: [{ id, ip, health,       // 노드별 상세(≤64 — isi status 노드 표와 동일 의미,
  *       inBps, outBps,               //   2026-08-15 사용자 요구): 외부망 처리량(bps)
  *       diskInBytesPs?, diskOutBytesPs?, cpuPct?,  // v2.926: 노드 디스크 쓰기·읽기(B/s — ×8 아님)·CPU %. 읽지 못하면 키가 없다
+ *       busyPct?, iops?, opsPs?, latencyMs?,       // v2.932: 디스크 busy %(노드 평균) · IOPS · 프로토콜 ops/s · 평균 지연 ms(5분 표본이 주로 채운다)
  *                                    //   (isilonNodeLoad.js — 실장비 미확인 키). 노드 부하 시계열(db.saveNodeLoadPoint)이 적재한다
  *       hdd:{usedBytes,totalBytes,pct}|null,   // 노드별 HDD 풀(무디스크 노드는 null — 'No Storage HDDs')
  *       ssd:{usedBytes,totalBytes,pct}|null,

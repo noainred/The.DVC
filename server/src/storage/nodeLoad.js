@@ -21,12 +21,21 @@ export const NODE_LOAD_METRICS = Object.freeze([
   { key: 'din', field: 'diskInBytesPs', col: 'disk_in', unit: 'B/s' },
   { key: 'dout', field: 'diskOutBytesPs', col: 'disk_out', unit: 'B/s' },
   { key: 'cpu', field: 'cpuPct', col: 'cpu_pct', unit: '%' },
+  // v2.932(2차): 프로토콜 ops/s · 평균 지연(ms) · 디스크 busy %(노드 평균) · IOPS. 1시간 스냅샷은 busy·iops 만(REST 키), 5분 표본은 넷 다.
+  { key: 'ops', field: 'opsPs', col: 'ops', unit: 'ops/s' },
+  { key: 'lat', field: 'latencyMs', col: 'lat', unit: 'ms' },
+  { key: 'busy', field: 'busyPct', col: 'busy', unit: '%' },
+  { key: 'iops', field: 'iops', col: 'iops', unit: 'ops/s' },
 ]);
 export const METRIC_BY_KEY = new Map(NODE_LOAD_METRICS.map((m) => [m.key, m]));
 /** 화면 묶음 — 한 번에 한 묶음만 그린다(bps 와 B/s 와 % 는 단위가 달라 한 차트에 겹치지 않는다 — 이중 축 금지). */
-export const NODE_LOAD_GROUPS = Object.freeze({ net: ['in', 'out'], disk: ['din', 'dout'], cpu: ['cpu'] });
-/** 클러스터 값 — 처리량은 노드 합, CPU 는 노드 평균. */
-export const CLUSTER_AGG = Object.freeze({ in: 'sum', out: 'sum', din: 'sum', dout: 'sum', cpu: 'avg' });
+export const NODE_LOAD_GROUPS = Object.freeze({ net: ['in', 'out'], disk: ['din', 'dout', 'busy', 'iops'], cpu: ['cpu'], proto: ['ops', 'lat'] });
+/** 클러스터 값 — 처리량·ops·IOPS 는 노드 합, CPU·busy·지연은 노드 평균. */
+export const CLUSTER_AGG = Object.freeze({ in: 'sum', out: 'sum', din: 'sum', dout: 'sum', cpu: 'avg', ops: 'sum', lat: 'avg', busy: 'avg', iops: 'sum' });
+/** 5분 표본 — 노드당 클라이언트 상위 N(기본 — 설정값은 폴러가 넘긴다) · 프로토콜 키 상한. */
+export const CLIENT_LIMIT_DEF = 10;
+export const CLIENT_LIMIT_MAX = 50;
+export const PROTO_KEYS_MAX = 12;
 /** 스냅샷 계약의 노드 목록 상한(types.js · edgeRecord.NODE_LIST_MAX 와 같은 값). */
 export const NODE_LOAD_LIMIT = 64;
 export const JOBS_MAX = 8;
@@ -34,9 +43,19 @@ export const JOBS_MAX = 8;
 const valueOf = (m, v) => {
   const n = numOrNull(v);
   if (n == null || n < 0) return null;
-  if (m.key === 'cpu' && n > 100) return null;
+  if ((m.key === 'cpu' || m.key === 'busy') && n > 100) return null;
   return n;
 };
+const PCT_KEYS = new Set(['cpu', 'busy']);
+const numMetric = (k, v) => { const n = numOrNull(v); if (n == null || n < 0) return null; if (PCT_KEYS.has(k) && n > 100) return null; return n; };
+const strCap = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+/** 프로토콜 이름 규칙(한 벌 — 수집기도 이것을 쓴다): 소문자 · 영숫자만 · 16자 · nfs3/nfs4 → nfs · smb1/2/3·cifs → smb · https → http. */
+const PROTO_ALIAS = { nfs3: 'nfs', nfs4: 'nfs', nfsv3: 'nfs', nfsv4: 'nfs', nfs41: 'nfs', smb1: 'smb', smb2: 'smb', smb3: 'smb', cifs: 'smb', https: 'http', lsassin: 'lsass', lsassout: 'lsass' };
+export function protoKeyOf(v) {
+  const s = String(v ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 16);
+  return PROTO_ALIAS[s] || s;
+}
+const protoKey = protoKeyOf;
 const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
 
 /**
@@ -186,4 +205,132 @@ export function jobsSeriesOf(samples) {
     if (j.running.length || j.paused) out.push({ ts, running: j.running, paused: j.paused });
   }
   return { known, list: out };
+}
+
+/* ── v2.932(2차) 5분 표본 ──────────────────────────────────────────────── */
+/**
+ * 표본 정제(순수 — 엣지가 올린 것도 이것을 거친다): 아는 필드만 · 노드 64 · 클라이언트 노드당 ≤ clientLimit · 프로토콜 ≤ 12 ·
+ * 문자열 수치는 수로 · 못 읽은 값은 null(0 이 아니다). ts 는 양의 정수. 모양이 아니면 null.
+ */
+export function sanitizeNodeLoadSample(raw, { clientLimit = CLIENT_LIMIT_DEF, maxTs = null } = {}) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  let ts = numOrNull(raw.ts);
+  if (ts == null || !(ts > 0)) return null;
+  ts = Math.floor(ts);
+  if (maxTs != null && ts > maxTs) ts = maxTs; // 엣지 시각은 수신 시각 이하로(원본은 호출부가 따로 둔다)
+  if (!Array.isArray(raw.nodes)) return null;
+  const lim = Math.max(1, Math.min(CLIENT_LIMIT_MAX, Math.floor(clientLimit) || CLIENT_LIMIT_DEF));
+  const nodes = []; const seen = new Set();
+  for (const n of raw.nodes) {
+    if (nodes.length >= NODE_LOAD_LIMIT) break;
+    if (!n || typeof n !== 'object' || Array.isArray(n)) continue;
+    const id = numOrNull(n.id);
+    if (id == null || !Number.isSafeInteger(id) || id < 0 || seen.has(id)) continue;
+    seen.add(id);
+    const o = { id };
+    for (const m of NODE_LOAD_METRICS) o[m.key] = numMetric(m.key, n[m.key]);
+    const bm = numMetric('busy', n.busyMax); if (bm != null) o.busyMax = bm;
+    o.proto = null;
+    if (n.proto && typeof n.proto === 'object' && !Array.isArray(n.proto)) {
+      const pr = {};
+      for (const [k0, v] of Object.entries(n.proto)) {
+        const k = protoKey(k0); if (!k || Object.keys(pr).length >= PROTO_KEYS_MAX || !v || typeof v !== 'object') continue;
+        pr[k] = { ops: numMetric('ops', v.ops), lat: numMetric('lat', v.lat), in: numMetric('in', v.in), out: numMetric('out', v.out) };
+      }
+      if (Object.keys(pr).length) o.proto = pr;
+    }
+    o.clients = [];
+    if (Array.isArray(n.clients)) {
+      for (const c of n.clients) {
+        if (o.clients.length >= lim) break;
+        if (!c || typeof c !== 'object') continue;
+        const ip = strCap(c.ip, 64).replace(/[^\x21-\x7e]/g, '');
+        if (!ip) continue;
+        o.clients.push({ ip, name: strCap(c.name, 80), proto: protoKey(c.proto), ops: numMetric('ops', c.ops), in: numMetric('in', c.in), out: numMetric('out', c.out), lat: numMetric('lat', c.lat) });
+      }
+    }
+    nodes.push(o);
+  }
+  if (!nodes.length) return null;
+  const probe = raw.probe && typeof raw.probe === 'object' && !Array.isArray(raw.probe)
+    ? Object.fromEntries(Object.entries(raw.probe).filter(([k, v]) => /^[a-zA-Z]{1,24}$/.test(k) && (typeof v === 'string' ? v.length <= 120 : typeof v === 'number' && Number.isFinite(v))).slice(0, 12))
+    : null;
+  return { ts, nodes, ...(probe ? { probe } : {}) };
+}
+
+/** 표본 → 적재 행(순수). 노드 값이 하나도 없고 클라이언트도 없으면 no-load. */
+export function sampleRowsOf(deviceId, sample) {
+  const id = String(deviceId ?? '');
+  if (!id) return { ok: false, reason: 'no-id' };
+  const s = sanitizeNodeLoadSample(sample, { clientLimit: CLIENT_LIMIT_MAX });
+  if (!s) return { ok: false, reason: 'no-nodes' };
+  let any = false;
+  const nodes = []; const clients = []; const protos = [];
+  for (const n of s.nodes) {
+    const row = { id: n.id };
+    for (const m of NODE_LOAD_METRICS) { row[m.key] = n[m.key]; if (row[m.key] != null) any = true; }
+    nodes.push(row);
+    for (const c of n.clients) { clients.push({ node: n.id, ...c }); any = true; }
+    if (n.proto) for (const [k, v] of Object.entries(n.proto)) protos.push({ node: n.id, proto: k, ops: v.ops, lat: v.lat });
+  }
+  if (!any) return { ok: false, reason: 'no-load' };
+  return { ok: true, deviceId: id, ts: s.ts, nodes, clients, protos };
+}
+
+/* ── 재배치 판정(순수) ─────────────────────────────────────────────────── */
+export const FIXED_SHARE_DEF = 0.9;   // '고정 클라이언트' — 창의 ops 중 한 노드 비중
+export const SKEW_FACTOR_DEF = 1.5;   // '쏠린 노드' — 노드 ops 합이 노드 평균의 배수
+/**
+ * 클라이언트 × 노드 행렬 — rows: [{ client, name?, proto?, node, ops }](창 합). 클라이언트는 ops 합 내림차순, 노드 비중 %(0~100).
+ * @returns {{ clients:Array<{client,name,proto,total,nodes:Object<number,number>,share:Object<number,number>,top:number|null,topShare:number,fixed:boolean}>, nodeTotals:Object<number,number> }}
+ */
+export function clientNodeMatrix(rows, { fixedShare = FIXED_SHARE_DEF, limit = 50 } = {}) {
+  const by = new Map(); const nodeTotals = {};
+  for (const r of rows || []) {
+    const client = strCap(r?.client, 64); const node = numOrNull(r?.node); const ops = numOrNull(r?.ops);
+    if (!client || node == null || ops == null || ops < 0) continue;
+    const cur = by.get(client) || { client, name: strCap(r.name, 80), proto: protoKey(r.proto), total: 0, nodes: {} };
+    if (!cur.name && r?.name) cur.name = strCap(r.name, 80);
+    if (!cur.proto && r?.proto) cur.proto = protoKey(r.proto);
+    cur.nodes[node] = (cur.nodes[node] || 0) + ops; cur.total += ops;
+    nodeTotals[node] = (nodeTotals[node] || 0) + ops;
+    by.set(client, cur);
+  }
+  const clients = [...by.values()].sort((a, b) => b.total - a.total || a.client.localeCompare(b.client)).slice(0, Math.max(1, limit)).map((c) => {
+    const share = {}; let top = null; let topShare = 0;
+    for (const [n, v] of Object.entries(c.nodes)) { const p = c.total > 0 ? v / c.total : 0; share[n] = Math.round(p * 1000) / 10; if (p > topShare) { topShare = p; top = Number(n); } }
+    return { ...c, share, top, topShare: Math.round(topShare * 1000) / 10, fixed: c.total > 0 && topShare >= fixedShare };
+  });
+  return { clients, nodeTotals };
+}
+/** 노드 쏠림 — 평균 대비 배수(소수 1자리) · skew = 배수 ≥ factor. 노드 목록은 표본의 노드(ops 0 도 포함). */
+export function nodeSkew(nodeTotals, nodeIds, { factor = SKEW_FACTOR_DEF } = {}) {
+  const ids = [...new Set([...(nodeIds || []), ...Object.keys(nodeTotals || {}).map(Number)])].filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  const totals = ids.map((n) => numOrNull(nodeTotals?.[n]) ?? 0);
+  const mean = ids.length ? totals.reduce((a, b) => a + b, 0) / ids.length : 0;
+  return { mean, factor, nodes: ids.map((n, i) => ({ id: n, total: totals[i], ratio: mean > 0 ? Math.round((totals[i] / mean) * 10) / 10 : null, skew: mean > 0 && totals[i] >= mean * factor })) };
+}
+/**
+ * 재배치 후보(탐욕) — 쏠린 노드의 '고정' 클라이언트를 ops 큰 순으로, 그때마다 가장 한가한 노드에 배정. 쏠린 노드가 평균 아래로 내려가면 멈춘다.
+ * 계산일 뿐이다(포탈은 바꾸지 않는다) — 응답에 그 사실을 적는 것은 호출부.
+ * @returns {Array<{client,name,proto,from,to,ops,fromAfter,toAfter}>}
+ */
+export function rebalanceCandidates(matrix, skew, { max = 10 } = {}) {
+  const load = {}; for (const n of skew.nodes) load[n.id] = n.total;
+  const out = [];
+  for (const sk of skew.nodes.filter((n) => n.skew).sort((a, b) => b.total - a.total)) {
+    const fixed = matrix.clients.filter((c) => c.fixed && c.top === sk.id).sort((a, b) => b.total - a.total);
+    for (const c of fixed) {
+      if (out.length >= max) break;
+      if (load[sk.id] <= skew.mean) break;
+      const idle = skew.nodes.map((n) => n.id).filter((id) => id !== sk.id).sort((a, b) => load[a] - load[b])[0];
+      if (idle == null) break;
+      const amt = c.nodes[sk.id] || 0;           // 옮기는 양 = 그 노드에서 낸 ops(다른 노드 몫은 그대로)
+      if (!(amt > 0)) continue;
+      if (Math.max(load[sk.id] - amt, load[idle] + amt) >= load[sk.id]) break; // 옮겨도 가장 바쁜 값이 안 내려가면 의미 없다
+      load[sk.id] -= amt; load[idle] += amt;
+      out.push({ client: c.client, name: c.name, proto: c.proto, from: sk.id, to: idle, ops: Math.round(amt), fromAfter: Math.round(load[sk.id]), toAfter: Math.round(load[idle]) });
+    }
+  }
+  return out;
 }

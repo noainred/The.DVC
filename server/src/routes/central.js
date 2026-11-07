@@ -1805,20 +1805,35 @@ centralRouter.post('/storage-data', requireCentral(), async (req, res) => {
     devices = r.list; notOwned += r.denied;
     if (r.denied) console.warn(`[central] storage-data: ${String(agent).slice(0, 64)} 중앙 직접 수집 장비 ${r.denied}건 거절`);
   }
+  let ownedSet = null; // v2.932: 개별 토큰 엣지의 위임 장비 집합 — 장비 목록과 표본 고리가 같은 집합으로 걸러진다
   if (req.centralAuth.mode === 'agent') {
     const { devicesForAgent } = await import('../storage/registry.js');
     const owned = new Set(devicesForAgent(agent).map((d) => d.id));
+    ownedSet = new Set([...owned].map((x) => String(x)));
     const before = devices.length;
     devices = devices.filter((d) => d && owned.has(d.deviceId));
     notOwned += before - devices.length;
     if (before - devices.length) console.warn(`[central] storage-data: ${agent} 미위임 deviceId ${notOwned}건 드롭(위조 방지)`);
+  }
+  // v2.932(2차 ⑨): 엣지 5분 표본 고리(`nodeLoadSamples`) — 장비 목록과 **같은 소유권 필터**(중앙 직접 장비 거절 · 개별 토큰은 위임분만)를 지난 뒤
+  //   중앙 DB 에 적재한다(storageEdge.saveEdgeNodeLoadSamples — 아는 필드만·상한·ts 는 수신 시각 이하). 응답 `nodeLoadSamples` 가 받은·적재·중복·뺀 수를 말한다
+  //   (엣지가 그것으로 고리를 비우고 상태에 남긴다). 본문에 키가 없으면(구버전 엣지) 아무것도 하지 않고 응답에도 싣지 않는다.
+  let sampleAck = null;
+  if (Array.isArray(req.body?.nodeLoadSamples) && req.body.nodeLoadSamples.length) {
+    let list = req.body.nodeLoadSamples.slice(0, 500);
+    let denied = 0;
+    { const r = await onlyDelegated(list, (d) => d.deviceId, '../storage/registry.js'); list = r.list; denied += r.denied; }
+    if (ownedSet) { const before = list.length; list = list.filter((d) => d && typeof d === 'object' && ownedSet.has(String(d.deviceId))); denied += before - list.length; }
+    const { saveEdgeNodeLoadSamples } = await import('../central/storageEdge.js');
+    sampleAck = { ...(await saveEdgeNodeLoadSamples(agent, list, { now })), ...(denied ? { notOwned: denied } : {}) };
+    if (denied) console.warn(`[central] storage-data: ${String(agent).slice(0, 64)} 미위임·중앙 직접 장비의 노드 부하 표본 ${denied}건 드롭`);
   }
   // v2.599(CEN-2599-03·04·05): 모듈이 원소를 정리하고(객체 아님·식별자 아님·크기 초과를 빼고 표시 필드의 객체 값은 null)
   //   뺀 개수를 info 에 싣는다 — 응답이 그 사실을 말한다(조용한 제외 금지).
   const info = {};
   const saved = saveEdgeStorage(agent, devices, info);
   if (info.refused) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
-  res.json({ ok: true, saved, ...(edgeDropSummary(withNotOwned(info, notOwned))) });
+  res.json({ ok: true, saved, ...(sampleAck ? { nodeLoadSamples: sampleAck } : {}), ...(edgeDropSummary(withNotOwned(info, notOwned))) });
 });
 
 /**

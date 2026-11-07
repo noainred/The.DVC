@@ -121,6 +121,7 @@ import { startBareosPolicy } from './bareos/policy.js'; // Bareos Director 정�
 import { startBareosGroupScheduler } from './bareos/groupRunner.js'; // v2.830 Bareos 백업 그룹 예약 실행(30초 틱 · 중앙만)
 import { startBareosPoller, pollerStatus as bareosPollerStatus } from './bareos/poller.js'; // Bareos VM 백업 실행 상태(v2.820) — Director 미설정이면 접속하지 않는다
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
+import { startNodeLoadPoller } from './storage/nodeLoadPoller.js'; // 아이실론 노드 부하 5분 표본(v2.932 2차 ⑨)
 import { applyGrowthSettings } from './storage/growthSettings.js'; // 사용량 보존 기간(v2.531)
 import { runCapacityBasisMigration } from './storage/capacityBasisMigration.js'; // 용량 기준 변경 1회 정리(v2.534)
 import { runZeroCapacityPurge } from './storage/zeroCapacityPurge.js'; // 0 바이트 용량 행 1회 정리(v2.541)
@@ -614,6 +615,7 @@ const stagger = [
   startRehearsal,    // Bareos 복원 검증(v2.862) — 1분 틱 · 기본 꺼짐 · 회차는 보내기 전에 기록 · 엣지는 기동하지 않는다
   startBareosPolicy, // Bareos 정책 수집(v2.839) — 1분 틱 · 정한 시각에 하루 한 번(실패 30분 뒤 · 3번) · 엣지는 기동하지 않는다
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
+  startNodeLoadPoller, // 〃 아이실론 노드 부하 표본(v2.932) — 수집 주기와 따로(기본 5분·중앙 배포값) · 재진입 가드 · 수집 주기와 장비 점유 공유 · 켜진 아이실론만
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
   startPduPoller, startPduPush, startPduConfigPull, // PDU(v2.424) — 동일 규약(자동 센서 탐지 + 재진입 가드 + 적응형 타이머)
   startCvpPoller, startCvpPush, startCvpConfigPull, // CVP(v2.608) — 기본 꺼짐 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함

@@ -73,8 +73,8 @@ describe('값과 단위', () => {
     expect(heatBin(5, 0)).toBe(0);
   });
   it('묶음 사용 가능 — 값이 있는 묶음만(디스크 키가 없는 장비에 버튼을 그리지 않는다)', () => {
-    expect(groupsAvailable([{ inBps: 1 }, { inBps: null }])).toEqual({ net: true, disk: false, cpu: false });
-    expect(groupsAvailable([{ diskOutBytesPs: '5', cpuPct: 0 }, null])).toEqual({ net: false, disk: true, cpu: true });
+    expect(groupsAvailable([{ inBps: 1 }, { inBps: null }])).toEqual({ net: true, disk: false, cpu: false, proto: false });
+    expect(groupsAvailable([{ diskOutBytesPs: '5', cpuPct: 0 }, null])).toEqual({ net: false, disk: true, cpu: true, proto: false });
   });
 });
 
@@ -168,5 +168,98 @@ describe('잡 엔진 · 타일 · 안내', () => {
   it('겹쳐 보기 색은 4개(선택 상한)', () => {
     expect(OVERLAY_COLORS.length).toBe(4);
     expect(selectOf('nope').key).toBe('in');
+  });
+});
+
+/* ── v2.932(2차) 디스크 busy·IOPS · 프로토콜 · 노드 드로어 · 클라이언트 분포 ─────────────────────── */
+import {
+  GROUP_ORDER, GROUP_FIRST, chartParts, opsText, latText, shareText, clientNameText, lateNote, drawerNotes, latestMapOf, protoSummaryOf,
+  skewBarsOf, candidateText, distNotes, distCsv,
+} from './nodeLoadText.js';
+
+describe('v2.932 — 묶음 4개 · 단위', () => {
+  it('묶음 순서·첫 선택은 서버 묶음과 같다', () => {
+    expect(GROUP_ORDER).toEqual(Object.keys(NODE_LOAD_GROUPS));
+    for (const g of GROUP_ORDER) expect(selectOf(GROUP_FIRST[g]).group).toBe(g);
+  });
+  it('차트 계열 — 처리량은 In·Out 둘, 그 밖은 고른 하나', () => {
+    expect(chartParts('in')).toEqual(['in', 'out']); expect(chartParts('disk')).toEqual(['din', 'dout']);
+    expect(chartParts('busy')).toEqual(['busy']); expect(chartParts('iops')).toEqual(['iops']); expect(chartParts('lat')).toEqual(['lat']); expect(chartParts('cpu')).toEqual(['cpu']);
+  });
+  it('ops/s · ms 표기 — 값이 없으면 — 이고 단위를 붙이지 않는다', () => {
+    expect(opsText(1234.6)).toBe('1,235 ops/s'); expect(opsText(null)).toBe('—'); expect(opsText(-1)).toBe('—');
+    expect(latText(1.25)).toBe('1.3 ms'); expect(latText('')).toBe('—');
+    expect(valueText('ops/s', 10)).toBe('10 ops/s'); expect(valueText('ms', 2)).toBe('2.0 ms'); expect(valueText('ms', null)).toBe('—');
+    expect(shareText(91.6)).toBe('92%'); expect(shareText(null)).toBe('—');
+  });
+  it('표본 폴러가 켜진 장비는 디스크·프로토콜 묶음을 연다 — 스냅샷에 키가 없어도', () => {
+    const list = [{ id: 1, inBps: 1 }];
+    expect(groupsAvailable(list)).toEqual({ net: true, disk: false, cpu: false, proto: false });
+    expect(groupsAvailable(list, { sampleEnabled: true })).toEqual({ net: true, disk: true, cpu: false, proto: true });
+    expect(groupsAvailable([{ id: 1, busyPct: 3 }]).disk).toBe(true);
+    expect(groupsAvailable([{ id: 1, opsPs: 3 }]).proto).toBe(true);
+  });
+});
+
+describe('v2.932 — 노드 드로어', () => {
+  const now = 1_800_000_000_000;
+  it('이름 칸 — 장비 보고 · VM · 호스트 · 못 찾음(IP 만) · 같은 IP 둘', () => {
+    expect(clientNameText({ name: '', client: '10.0.0.1' })).toEqual({ text: '—', hint: expect.stringContaining('역방향 DNS') });
+    expect(clientNameText({ name: 'vm-a', nameSource: 'vm' }).hint).toBe('VM 이름');
+    expect(clientNameText({ name: 'esx1', nameSource: 'host', ambiguous: true }).hint).toMatch(/호스트 이름 · 같은 IP/);
+    expect(clientNameText({ name: 'nas-cli', nameSource: 'device' }).hint).toBe('장비 보고 이름');
+  });
+  it('늦은 표본 — 표본 주기 ×3(lateMs)을 넘으면 노란 문구, 아니면 null, 표본이 없으면 null', () => {
+    expect(lateNote({ latest: { ts: now - 10 * 60_000 }, lateMs: 15 * 60_000, sample: { sampleMs: 300_000 } }, now)).toBeNull();
+    const n = lateNote({ latest: { ts: now - 40 * 60_000 }, lateMs: 15 * 60_000, sample: { sampleMs: 300_000 } }, now);
+    expect(n.tone).toBe('amber'); expect(n.text).toMatch(/마지막 표본 40분 전/); expect(n.text).toMatch(/5분/);
+    expect(lateNote({ latest: { ts: now - 3 * 3_600_000 }, lateMs: 15 * 60_000, sample: {} }, now).text).toMatch(/3시간 전/);
+    expect(lateNote({ latest: { ts: null }, lateMs: 1 }, now)).toBeNull();
+  });
+  it('안내문 — 클라이언트 없음은 연결 없음이 아니다 · 표본 꺼짐 · 이름 못 찾음 · DB 없음', () => {
+    expect(drawerNotes({ clients: [], names: { unknown: 0 } })[0].text).toMatch(/연결 없음.*아닙니다/);
+    expect(drawerNotes({ clients: [], past: true, names: {} })[0].text).toMatch(/기록이 없습니다/);
+    const t = drawerNotes({ clients: [{}], sample: { sampleEnabled: false }, names: { unknown: 2 } }).map((x) => x.text);
+    expect(t[0]).toMatch(/표본 수집이 꺼져/); expect(t[1]).toMatch(/이름을 찾지 못한 주소 2개/);
+    expect(drawerNotes({ db: false })).toHaveLength(1);
+  });
+  it('지금 열 — 클라이언트+프로토콜 키 · 프로토콜 요약은 ops 내림차순', () => {
+    const m = latestMapOf({ latest: { rows: [{ client: 'a', proto: 'nfs', ops: 1 }, { client: 'a', proto: 'smb', ops: 2 }] } });
+    expect(m.get('a|smb').ops).toBe(2); expect(m.has('a|')).toBe(false);
+    expect(protoSummaryOf([{ proto: 'smb', ops: 1 }, { proto: 'nfs', ops: 9, lat: 1.24 }]).map((p) => p.proto)).toEqual(['nfs', 'smb']);
+  });
+});
+
+describe('v2.932 — 클라이언트 분포 · 재배치', () => {
+  const resp = {
+    nodes: [{ id: 1, total: 100, ratio: 0.5, skew: false }, { id: 2, total: 500, ratio: 2.5, skew: true }, { id: 3, total: 0, ratio: 0, skew: false }],
+    mean: 200, thresholds: { fixedShare: 0.9, skewFactor: 1.5 },
+    clients: [{ client: '10.1.1.1', name: 'vm-a', proto: 'nfs', total: 300, top: 2, topShare: 100, fixed: true, share: { 2: 100 } }, { client: '10.1.1.2', name: 'x,"y"', proto: 'smb', total: 50, top: 1, topShare: 60, fixed: false, share: { 1: 60, 2: 40 } }],
+    candidates: [{ client: '10.1.1.1', name: 'vm-a', proto: 'nfs', from: 2, to: 3, ops: 300, fromAfter: 200, toAfter: 300 }],
+    names: { unknown: 1 }, note: '포탈은 바꾸지 않습니다',
+  };
+  it('노드 막대 — 최대 대비 폭 · ops 0 노드도 막대(폭 0) · 쏠림 표지', () => {
+    const b = skewBarsOf(resp);
+    expect(b.map((x) => x.w)).toEqual([20, 100, 0]); expect(b[1].skew).toBe(true); expect(b[2].ratio).toBe(0);
+  });
+  it('후보 한 줄 — 이름(IP) · 프로토콜 · 어디서 어디로 · 옮긴 뒤 값', () => {
+    expect(candidateText(resp.candidates[0])).toBe('vm-a (10.1.1.1) · nfs — 노드 2 → 노드 3 · 300 ops/s · 옮긴 뒤 노드 2 200 ops/s / 노드 3 300 ops/s');
+    expect(candidateText({ client: '10.9.9.9', from: 1, to: 2, ops: 5, fromAfter: 1, toAfter: 2 })).toMatch(/^10\.9\.9\.9 — 노드 1/);
+  });
+  it('안내문 — 쏠림 없음 · 고정 없음 · 이름 못 찾음 · 서버 note 그대로', () => {
+    const noSkew = distNotes({ ...resp, nodes: resp.nodes.map((n) => ({ ...n, skew: false })), names: {}, note: '' }).map((x) => x.text);
+    expect(noSkew[0]).toMatch(/쏠린 노드가 없습니다 — .*1\.5배 미만/);
+    const noCand = distNotes({ ...resp, candidates: [], names: {}, note: '' }).map((x) => x.text);
+    expect(noCand[0]).toMatch(/쏠린 노드 2 에 ‘고정’ 클라이언트.*90%/);
+    const t = distNotes(resp).map((x) => x.text);
+    expect(t.some((x) => /이름을 찾지 못한 주소 1개/.test(x))).toBe(true); expect(t[t.length - 1]).toBe('포탈은 바꾸지 않습니다');
+    expect(distNotes({ ...resp, clients: [], names: {} })[0].text).toMatch(/표본이 없습니다/);
+  });
+  it('CSV — 머리줄에 노드 열 · 쉼표·따옴표는 감싼다 · 비중 없는 칸은 빈 칸', () => {
+    const csv = distCsv(resp).split('\n');
+    expect(csv[0]).toBe('client,name,proto,total_ops,top_node,top_share_pct,fixed,node_1_pct,node_2_pct,node_3_pct');
+    expect(csv[1]).toBe('10.1.1.1,vm-a,nfs,300,2,100,Y,,100,');
+    expect(csv[2]).toBe('10.1.1.2,"x,""y""",smb,50,1,60,N,60,40,');
+    expect(csv[3]).toBe('');
   });
 });

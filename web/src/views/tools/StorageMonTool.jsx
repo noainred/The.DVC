@@ -715,7 +715,7 @@ export default function StorageMonTool() {
   return (
     <div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
-        <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ type: 'isilon', name: '', host: '', username: 'root', password: '', agent: '', datacenterId: '', collectMethod: 'ssh', sshPort: 22, enabled: true })}>+ 장비 등록</button>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ type: 'isilon', name: '', host: '', username: 'root', password: '', agent: '', datacenterId: '', collectMethod: 'ssh', sshPort: 22, enabled: true, nodeLoadEnabled: true })}>+ 장비 등록</button>
         {['devices', 'dc', 'type', 'faults', 'trend'].map((v) => (
           <button key={v} className={view === v ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px' }} onClick={() => setView(v)}
             title={v === 'faults' ? faultKpiTitle(fk) : undefined}>
@@ -1660,6 +1660,13 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
         <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}>
           <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 활성
         </label>
+        {/* v2.932(2차 ⑨): 노드 부하 표본 수집 — 아이실론만 · 기본 켬. 주기는 설정 › 스토리지 수집 주기(노드 부하 표본 주기)에서. SSH 장비는 표본마다 로그인이 생긴다(장비 로그). */}
+        {form.type === 'isilon' && (
+          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}
+            title="수집 주기와 따로 도는 가벼운 폴러가 노드별 부하·클라이언트·프로토콜 표본을 읽습니다(주기는 설정 › 스토리지 수집 주기). 끄면 1시간 수집 값만 남고 노드 드로어·클라이언트 분포가 비어 있습니다. SSH 장비는 표본마다 로그인이 생겨 장비 감사 로그가 늘어납니다.">
+            <input type="checkbox" checked={form.nodeLoadEnabled !== false} onChange={(e) => setForm({ ...form, nodeLoadEnabled: e.target.checked })} /> 노드 부하 표본 수집
+          </label>
+        )}
         {/* 연결 테스트 — 저장하지 않고 수집기를 1회 돌려 API 가 실제로 도는지 확인(v2.404).
             서버가 ssrfBlockReason 을 그대로 태우므로 임의 host 프로브로 쓰이지 않는다. */}
         <button className="tab" style={{ flex: 'none', padding: '8px 14px' }}

@@ -67,6 +67,22 @@ const _inFlight = new Map();
  *   주기 쪽은 이것을 실패가 아니라 `inFlightSkipped` 로 따로 센다(인증 정지 null 과 같은 취급 — 새 장애처럼 보이지 않게).
  */
 export const IN_FLIGHT_BUSY = Symbol('storage-in-flight');
+/*
+ * v2.932(2차 ⑨): 경량 표본 폴러(nodeLoadPoller.js)와 장비 점유를 나눈다 — 같은 장비에 세션을 둘 열지 않는다(Unity 세션 상한·SSH 로그인 수).
+ *  · 표본은 **수집 주기가 그 장비를 잡고 있으면 건너뛴다**(IN_FLIGHT_BUSY — 1시간 수집이 우선).
+ *  · 수집 주기가 시작될 때 표본이 진행 중이면 **그 표본이 끝날 때까지 기다린다**(표본 시한 60초가 상한) — 표본 때문에 1시간 수집이
+ *    한 주기 빠지는 쪽이 더 나쁘다(그 장비의 용량·영역·노드 상태가 2시간 묵는다). 기다린 뒤 다시 점유를 확인한다(같은 틱).
+ */
+const _sampleFlight = new Map(); // deviceId → Promise(진행 중 표본)
+/** 표본 폴러 전용 — 점유 중이면 IN_FLIGHT_BUSY(시작하지 않는다), 아니면 fn 의 결과. */
+export function runSampleExclusive(dev, fn) {
+  const id = dev?.id;
+  if (id == null || _inFlight.has(id) || _sampleFlight.has(id)) return Promise.resolve(IN_FLIGHT_BUSY);
+  const p = Promise.resolve().then(fn).finally(() => { if (_sampleFlight.get(id) === p) _sampleFlight.delete(id); });
+  _sampleFlight.set(id, p);
+  return p;
+}
+export function sampleInFlightIds() { return [..._sampleFlight.keys()]; }
 
 async function collectOne(dev, { periodic = false } = {}) {
   // v2.528: **주기 수집만** 인증 실패 장비를 건너뛴다. 수동 실행('지금 수집'·연결 테스트)은
@@ -75,6 +91,8 @@ async function collectOne(dev, { periodic = false } = {}) {
     const stop = authStopFor(dev);
     if (stop) return null;
   }
+  const sp = _sampleFlight.get(dev.id);
+  if (sp) await sp.catch(() => {}); // v2.932 — 진행 중인 5분 표본이 끝날 때까지(≤ 표본 시한). 실패해도 상관없다 — 점유만 본다.
   if (_inFlight.has(dev.id)) return IN_FLIGHT_BUSY; // v2.770(R5-E2-04) — 확인과 등록 사이에 await 가 없다(같은 틱)
   const startedAt = Date.now();
   const entry = { id: dev.id, name: dev.name || dev.id, at: startedAt };
@@ -324,6 +342,6 @@ export function startStoragePoller() {
 }
 export function storagePollerStatus() {
   // v2.733(감사 C4-03): snapshotSave — 스냅샷 파일 저장 상태(대기·쓰기·실패 횟수·마지막 오류 코드. 경로·원문 없음).
-  return { ..._last, intervalMs: pollMs(), areasMs: areasEveryMs(), busy: _busy, inFlight: [..._inFlight.values()],
+  return { ..._last, intervalMs: pollMs(), areasMs: areasEveryMs(), busy: _busy, inFlight: [..._inFlight.values()], sampleInFlight: sampleInFlightIds(),
     intervals: runtimeIntervalSource(), intervalsCentral: centralIntervalsInfo(), snapshotSave: snapshotStoreStatus() };
 }
