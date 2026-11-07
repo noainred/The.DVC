@@ -44,6 +44,7 @@ import BmPerfDetail from './BmPerfDetail.jsx';
 import { boardItems, allAuthStops } from './bmPerfText.js';
 // v2.923(리눅스 성능 4단계): 함대 ‘용도 분석’ · ‘장애 기록’ 보기(도구 키 그대로 — 이 화면 안의 보기 전환).
 import { BmPurposeFleet, BmFaultsFleet } from './BmOpsFleet.jsx';
+import BmPerfRulesPanel from './BmPerfRulesPanel.jsx'; // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
 
 /** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
 const VIEW_KEY = 'bmUsage.view';
@@ -871,6 +872,9 @@ export function BmUsage() {
           <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
             <BoldText text={'감시 지표는 **퍼센트 지표 6개**(CPU·메모리·디스크 I/O·디스크 공간·네트워크·HBA)입니다 — 처리량(B/s)은 장비마다 정상 범위가 달라 임계를 정하지 않습니다. **못 읽은 주기는 초과도 정상도 아닙니다**(판정 보류).'} />
           </p>
+
+          {/* ── v2.929(5단계) 리눅스 성능 알림 규칙 · 집중 모니터링 · 베이스라인 · 소모품 기준 — 별도 파일(bm-perf-rules.json) · 저장은 설정 소유자 ── */}
+          <BmPerfRulesPanel vcenters={data?.vcenters || []} />
 
           {/* ── 엣지에 배포(v2.627) — 중앙의 전체 범위 관리자에게만 온다(서버가 distribution 을 null 로 준다). ── */}
           {data?.distribution && (

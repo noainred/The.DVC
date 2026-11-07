@@ -252,6 +252,65 @@ collectorRouter.get('/bm-usage/snapshot', tokenFirst('bm-usage-snapshot-get'), a
 });
 
 /**
+ * v2.929(리눅스 성능 5단계) — 집중 모니터링 · 변경 이벤트 · 베이스라인 띠 · 구간 비교 엣지 대행(central/bmPerfOpsPull.js). 같은 url · 같은 토큰(새 포트 · 새 인증 없음).
+ *  · 이 엣지가 수집하는 서버만(대상 목록 밖 키는 not-found — 중앙이 범위를 먼저 잘랐어도 엣지가 다시 본다).
+ *  · 시작 · 중지는 bmusage/focus/run.js 하나(사유 · 법인당 동시 상한(이 엣지 설정) · 대기열 · 인증 가드 · 30일 보관) — 업무 결과는 200 + code. 본문 상한 4kb.
+ *  · 감사: 이 엣지 감사 로그에 ‘중앙 대행 집중 모니터링’ + 중앙이 보낸 실행자 · 사유(중앙도 자기 감사 로그에 남긴다).
+ *  · 조회는 보관하지 않는 계산 응답이다(중앙은 복제 적재하지 않는다).
+ */
+collectorRouter.post('/bm-usage/focus', tokenFirst('bm-usage-focus'), express.json({ limit: '4kb' }), async (req, res) => {
+  try {
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const S = await import('../bmusage/snapshot/run.js');
+    const reason = S.cleanReason(b.reason);
+    if (!reason) return res.json({ ok: false, code: 'bad-reason', reason: '사유가 필요합니다.' });
+    const target = await bmSnapTarget(b.key);
+    if (!target) return res.json({ ok: false, code: 'not-found', reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const by = `central-portal:${String(b.by || '').replace(/[^\w.@-]/g, '').slice(0, 48)}`;
+    const F = await import('../bmusage/focus/run.js');
+    const r = await F.startFocusLocal({ target, reason, by, trigger: 'manual' });
+    if (!['bad-reason', 'not-found'].includes(r.code)) {
+      logAudit({ user: 'central-portal', action: '중앙 대행 집중 모니터링', target: target.key, detail: JSON.stringify({ by, code: r.code, id: r.id || null, reason: reason.slice(0, 120) }).slice(0, 300), ip: req.ip || '' });
+    }
+    res.json(r);
+  } catch (err) { res.status(500).json({ ok: false, code: 'store-unavailable', reason: String(err?.message || err).slice(0, 300) }); }
+});
+collectorRouter.post('/bm-usage/focus/stop', tokenFirst('bm-usage-focus-stop'), express.json({ limit: '4kb' }), async (req, res) => {
+  try {
+    const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const target = await bmSnapTarget(b.key);
+    if (!target) return res.json({ ok: false, code: 'not-found', reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const F = await import('../bmusage/focus/run.js');
+    const r = await F.stopFocusLocal({ key: target.key, id: String(b.id || '').slice(0, 40) });
+    if (r.ok) logAudit({ user: 'central-portal', action: '중앙 대행 집중 모니터링 중지', target: target.key, detail: JSON.stringify({ by: String(b.by || '').replace(/[^\w.@-]/g, '').slice(0, 48), id: r.id }).slice(0, 300), ip: req.ip || '' });
+    res.json(r);
+  } catch (err) { res.status(500).json({ ok: false, code: 'store-unavailable', reason: String(err?.message || err).slice(0, 300) }); }
+});
+collectorRouter.get('/bm-usage/focus', tokenFirst('bm-usage-focus-get'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.json({ ok: false, code: 'not-found', reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const F = await import('../bmusage/focus/run.js');
+    const { loadPerfRules } = await import('../bmusage/perfRules.js');
+    const id = String(req.query.id || '').slice(0, 40);
+    res.json(id ? await F.getFocusLocal({ key: target.key, id }) : await F.listFocusLocal({ key: target.key, keepDays: loadPerfRules().focus?.keepDays ?? 30 }));
+  } catch (err) { res.status(500).json({ ok: false, code: 'store-unavailable', reason: String(err?.message || err).slice(0, 300) }); }
+});
+async function bmPerfOpsCollector(req, res, mode) {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const V = await import('../bmusage/perfOpsView.js');
+    const r = await V.localPerfOps(mode, { key: target.key, q: req.query || {} });
+    if (r && r.__status) { const { __status, ...rest } = r; return res.status(__status).json(rest); }
+    res.json(r);
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+}
+collectorRouter.get('/bm-usage/changes', tokenFirst('bm-usage-changes'), (req, res) => bmPerfOpsCollector(req, res, 'changes'));
+collectorRouter.get('/bm-usage/baseline', tokenFirst('bm-usage-baseline'), (req, res) => bmPerfOpsCollector(req, res, 'baseline'));
+collectorRouter.get('/bm-usage/compare', tokenFirst('bm-usage-compare'), (req, res) => bmPerfOpsCollector(req, res, 'compare'));
+
+/**
  * 이 엣지의 **토큰 자기보고**(v2.560 — 사용자 요청 "등록된 모든 엣지/수집 서버의 모든 토큰 …
  * 중앙에 저장된 토큰과 엣지에 저장된 토큰이 동일한지 점검").
  *

@@ -18,6 +18,7 @@ import { SNAPSHOT_COMMAND, parseSnapshot, fitSnapshotResult, SNAPSHOT_RESULT_MAX
 import { config } from '../../config.js';
 import { SNAPSHOT_KEEP_DAYS } from '../settings.js';
 import { isAuthFailureText, isPeerRejectText } from '../../util/authGuard.js';
+import { cleanReason } from './reason.js';
 
 /** 세션 시한(연결 + 명령 — 명령 안 sleep 2초 포함). 장비 시한보다 짧은 명령 시한(산수는 테스트가 고정). */
 export const SNAPSHOT_READY_MS = 15_000;
@@ -25,15 +26,8 @@ export const SNAPSHOT_CMD_MS = 30_000;
 export const SNAPSHOT_DEADLINE_MS = 50_000;
 export const SNAPSHOT_KEEP_MS = SNAPSHOT_KEEP_DAYS * 86_400_000;   // settings.js 단일 원천(폴러 주기 정리와 같은 값)
 export const SNAPSHOT_WINDOW_MS = 86_400_000;
-/**
- * 사유 — 줄바꿈 · 제어 문자를 빼고 2~300자. 비면 실행하지 않는다(400).
- * v2.923(반증): C1 제어 문자(U+0080~009F)와 양방향 제어(U+202A~202E · U+2066~2069 — 감사 화면에서 글자 순서를 뒤집어 보이게 한다) · 폭 없는 문자(U+200B~200F · U+FEFF)도 뺀다.
- */
-export function cleanReason(v) {
-  if (typeof v !== 'string') return '';
-  const s = v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]+/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, 300);
-  return s.length >= 2 ? s : '';
-}
+// 사유 정제는 snapshot/reason.js(v2.929 — 집중 모니터링도 같은 함수를 쓰는데 이 파일을 import 하면 poller 순환이 생겨 나눴다). 재수출은 그대로.
+export { cleanReason };
 
 export { SNAPSHOT_CODE_STATUS, SNAPSHOT_CODES };
 

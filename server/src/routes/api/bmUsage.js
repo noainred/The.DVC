@@ -445,7 +445,7 @@ async function resolvePerfTarget(req, D, { allowed, isAdmin, key }) {
   }
   return null;
 }
-export { resolvePerfTarget as _resolvePerfTargetForTest };
+export { resolvePerfTarget as _resolvePerfTargetForTest, resolvePerfTarget };   // v2.929: 5단계 라우트(bmPerfOps.js)가 같은 해석을 쓴다(범위 · 가림 토큰 · 엣지 보관분)
 
 /* ════════════════════════════════════════════════════════════════════════════
  * v2.923(리눅스 성능 4단계) — 튜닝 · 용도 · 장애 기록 · 진단 스냅샷(설계 README §4.1·§4.3 · TUNING-SOURCES · PROFILES §1~§5).

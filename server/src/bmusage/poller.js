@@ -42,7 +42,9 @@ import { isMockMode } from '../mock/demo/flags.js'; // v2.708: 데모(mock)는 �
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js'; // v2.744(RV2744F-WEB-03): 상주 상세 문자열 평탄화
-import { idracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
+import { idracAuthStopFor as mainIdracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
+import { withSlot, configureSlots } from './slots.js'; // v2.929(5단계): 전역 동시성 풀 — 집중 수집과 슬롯을 나눠 쓴다
+import { focusActiveCount, registerFocusPollerHooks, focusHousekeeping, onFocusEnd, initFocus } from './focus/run.js'; // v2.929: 피크 창 예산에서 활성 집중 수만큼 동시성을 뺀다
 
 /*
  * v2.918(사용자 결정 2026-11-06 "동시성을 32개로 늘려줘"): 기본 4 → 32. 1,000대 법인에서 동시 4 · 서버당 ~5초면 한 주기에 약 21분이
@@ -50,6 +52,7 @@ import { idracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // 
  * 엣지 자원이 작으면 BMUSAGE_CONCURRENCY=8 처럼). 회귀 `test/bmUsageConcurrency2918.test.js`.
  */
 const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 32);
+configureSlots({ capacity: CONCURRENCY }); // v2.929: 집중 수집과 나눠 쓰는 전역 슬롯 용량 = 이 값(단일 원천)
 const DEVICE_TIMEOUT_MS = Math.max(20_000, Number(process.env.BMUSAGE_DEVICE_TIMEOUT_MS) || 60_000);
 /**
  * v2.613 RUNTIME2613-05: '세션 예산 < 장비 시한' 은 v2.550.3·v2.554 가 **기본값 산수**로만 지킨 관계였다 — 세 env
@@ -472,7 +475,7 @@ function authDevIdrac(target) {
 function mainIdracStop(target) {
   const i = target?.idrac;
   if (!i?.regId) return null;
-  try { return idracAuthStopFor({ id: i.regId, username: i.username, password: i.password }); } catch { return null; }
+  try { return mainIdracAuthStopFor({ id: i.regId, username: i.username, password: i.password }); } catch { return null; }
 }
 
 /**
@@ -492,6 +495,30 @@ export function recordOsAuthOutcome(target, { ok = false, errorText = '' } = {})
 export function osAuthStopFor(target) {
   const dev = authDev(target || {});
   return dev ? guard.authStopFor(dev) : null;
+}
+/**
+ * v2.929(5단계 — 집중 모니터링): iDRAC 경로의 인증 정지(이 도구의 정지 + 주 iDRAC 폴러의 정지 — collectOne 과 같은 판정). 없으면 null.
+ */
+export function idracAuthStopFor(target) {
+  const dev = authDevIdrac(target || {});
+  if (!dev) return null;
+  return guard.authStopFor(dev) || mainIdracStop(target);
+}
+/**
+ * v2.929 — 집중 수집의 Redfish 1회 결과를 **주기 수집과 같은 가드 · 같은 식별자**에 반영한다(kind 'auth' = 자격증명 거부 → 정지 · 성공 → 해제).
+ *   시한 · 연결 실패는 인증 실패가 아니다(v2.535 — 정지하지 않는다).
+ */
+export function recordIdracAuthOutcome(target, { ok = false, kind = '', errorText = '' } = {}) {
+  const dev = authDevIdrac(target || {});
+  if (!dev) return null;
+  if (ok) { guard.clearAuthStop(dev.id); return null; }
+  if (kind === 'auth') return guard.markAuthStopped(dev.id, dev, String(errorText || 'iDRAC 인증 실패').slice(0, 200));
+  return null;
+}
+/** v2.929 — 집중 수집 첫 분의 누적 카운터 기준(이 대상의 마지막 주기 표본 **사본** — 주기 수집 상태는 바꾸지 않는다). 없으면 null(첫 분은 첫 표본). */
+export function prevCountersFor(key) {
+  const p = _prev.get(String(key));
+  return p ? structuredClone(p) : null;
 }
 
 /** 화면이 '몇 대가 정지됐나' 를 말할 수 있게 이번 주기의 정지분을 기억한다. */
@@ -735,6 +762,7 @@ function dropStaleState(live) {
  */
 let _pruneTick = 0;
 let _lastPrune = null;
+let _lastLiveKeys = null;   // v2.929: 마지막 성공 주기의 대상 키(null = 아직 모름 — 지우지 않는다)
 const BMUSAGE_DB_FILE = () => path.join(config.dbDir || config.configDir, 'bm-usage.db');
 export async function pruneTick({ every = PRUNE_EVERY } = {}) {
   if ((++_pruneTick % Math.max(1, every)) !== 0) return { ok: true, skipped: true };
@@ -750,6 +778,17 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
   if (exists) {
     try { const n = await snapshotPrune({ before: Date.now() - SNAPSHOT_KEEP_DAYS * 86_400_000 }); if (r && typeof r === 'object') r.snapshotsPruned = n; }
     catch (e) { if (_srcErrLog('snap-prune', errText(e))) console.warn(`[bmusage] 스냅샷 보관 정리 실패: ${errText(e)}`); }
+    // v2.929(5단계): 집중 모니터링(30일) · 변경 이벤트(30일) 보관 — 같은 스로틀 틱 · 청크 DELETE. 대상에서 사라진 서버의 변경 사실 최신값도 지운다.
+    try {
+      const rules = (await import('./perfRules.js')).loadPerfRules();
+      const O = await import('./opsDb.js');
+      const fp = await focusHousekeeping({ keepDays: rules.focus?.keepDays ?? 30 });
+      const cp = await O.changePrune({ before: Date.now() - (rules.changes?.keepDays ?? 30) * 86_400_000 });
+      // 대상 목록은 마지막 성공 주기의 것(이 틱에서 대상 해석을 다시 하지 않는다 — 등록부 · 분류를 정리 틱마다 읽지 않게). 모르면 지우지 않는다.
+      let gone = 0;
+      if (_lastLiveKeys) { try { gone = await O.changeLatestKeep({ agent: config.agent?.name || '', keys: [..._lastLiveKeys] }); } catch { /* 다음 틱 */ } }
+      if (r && typeof r === 'object') r.opsPruned = { focusSessions: fp?.sessions ?? 0, focusSamples: fp?.samples ?? 0, changeEvents: cp || 0, changeLatestGone: gone };
+    } catch (e) { if (_srcErrLog('ops-prune', errText(e))) console.warn(`[bmusage] 집중 · 변경 이벤트 보관 정리 실패: ${errText(e)}`); }
   }
   _lastPrune = { at: Date.now(), ...r };
   if (r && r.ok === false && r.error && _srcErrLog('prune', r.error)) console.warn(`[bmusage] 보존 정리 실패: ${r.error}`);
@@ -836,13 +875,15 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     // v2.744(RV2744F-WEB-03): 데모 합성 행에는 장치 상세가 없다 — 화면이 '아직 수집하지 않았다' 고 말하지 않게 데모라고 표시해 둔다.
     for (const r of demoResults) if (r?.target?.key) _detail.set(r.target.key, { state: 'demo', detail: null, at: Date.now() });
     // v2.922: 피크 창 주기 예산 자동 맞춤 — 예상 주기 소요가 주기 × peakCycleRatio 를 넘으면 창을 10 → 5 → 3 → 0초로 줄인다(설정값이 상한).
-    const peakPlan = planPeakForCycle(realTargets, { intervalMs });
+    // v2.929(5단계): 집중 수집은 이 예산 밖이다 — 대신 활성 집중 수만큼 슬롯을 쓰므로 그만큼 동시성을 빼고 계획한다(전역 풀 공유 — slots.js).
+    const peakPlan = planPeakForCycle(realTargets, { intervalMs, concurrency: Math.max(1, CONCURRENCY - focusActiveCount()) });
     _peakPlan = peakPlan;
     if (peakPlan.reason === 'reduced' || peakPlan.reason === 'base-over-budget') {
       const line = `피크 창 ${peakPlan.capS}초 → ${peakPlan.windowS}초(예상 주기 ${Math.round(peakPlan.expectedMs / 1000)}초 · 예산 ${Math.round(peakPlan.budgetMs / 1000)}초 · 서버당 기본 ${Math.round(peakPlan.baseMs / 1000)}초 ${peakPlan.baseSource === 'measured' ? '실측' : '기본값'})`;
       if (_srcErrLog('peak-plan', line)) console.log(`[bmusage] ${line}`);
     }
-    const realResults = realTargets.length ? await pool(realTargets, CONCURRENCY, (tg) => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0, peakPlan }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : [];
+    // v2.929: 서버 하나의 수집은 전역 슬롯 하나 안에서(집중 수집과 같은 풀 — 주기 수집은 풀 상한이 같아 스스로 기다리지 않는다).
+    const realResults = realTargets.length ? await pool(realTargets, CONCURRENCY, (tg) => withSlot(() => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0, peakPlan })).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : [];
     // 다음 주기 실측 근거 — 실제로 수집한 서버만(데모 합성·예외로 끝난 항목은 소요가 없다).
     const samplesNow = realResults.filter((r) => r && Number.isFinite(r.ms)).map((r) => ({ ms: r.ms, windowS: r.windowS || 0 }));
     if (samplesNow.length) _cycleSamples = samplesNow;
@@ -856,6 +897,18 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
      */
     const live = new Set(targets.map((t2) => t2.key));
     dropStaleState(live);
+    // v2.929: 변경 사실 최신값 정리(pruneTick)가 쓰는 대상 목록 — ⚠ 반증 L5: 대상이 **일부만** 해석된 주기(등록부 못 읽음 등 sourceErrors)의 목록으로는 지우지 않는다
+    //   (그 밖 서버의 change_latest 를 지우면 돌아올 때 ‘첫 관찰’ 이 돼 그 사이 변화 · 소모품 ‘며칠째’ 를 잃는다). 그 주기는 직전 목록을 그대로 둔다.
+    if (!sourceErrors.length) _lastLiveKeys = live;
+    /*
+     * v2.929(5단계): 점검 소모품 판정(detail_json 에 health — 이 노드 기준값) · 변경 이벤트 전이(직전 사실과 비교). **적재 전에** 해야 행이 소모품 칸을 싣는다.
+     *   실패해도 수집은 실패가 아니다(사유는 _last.cycleOps).
+     */
+    let rulesNow = null; try { rulesNow = (await import('./perfRules.js')).loadPerfRules(); } catch { rulesNow = null; }
+    const agentName = config.agent?.name || '';
+    let cycleOps = null;
+    try { cycleOps = await (await import('./cycleOps.js')).prepareCycleOps(results.filter((r) => r?.ok && r.built), { agent: agentName, rules: rulesNow || {}, now: Date.now() }); }
+    catch (e) { cycleOps = { items: [], error: String(e?.message || e).slice(0, 200) }; }
     // ⚠ `_perIf`·`_perFc` 는 화면 상세용 내부 배열이다 — DB 적재 경로로 넘기지 않는다(오염 방지).
     const rows = results.filter((r) => r?.ok && r.built)
       .map((r) => { const { _perIf: _a, _perFc: _b, ...row } = r.built.row; return row; });
@@ -864,6 +917,11 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     const devices = okBuilt.flatMap((r) => r.built.devices || []);
     const mounts = okBuilt.flatMap((r) => r.built.mounts || []);
     const ins = await insertUsage(rows, config.agent?.name || '', { devices, mounts });
+    let changeRes = null;
+    if (cycleOps?.items?.length) {
+      try { changeRes = await (await import('./opsDb.js')).changeWriteBatch({ agent: agentName, items: cycleOps.items }); }
+      catch (e) { changeRes = { ok: false, reason: String(e?.message || e).slice(0, 200) }; }
+    }
     /*
      * 임계 초과 알림(v2.551). ⚠ **적재 뒤에** 판정한다(알림은 저장된 값을 근거로 한다).
      * ⚠ 실패해도 수집을 실패로 만들지 않는다 — 알림은 부가 기능이고, 사유는 `_last` 에 남긴다.
@@ -873,6 +931,10 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     //   주기만으로 연속을 판정하면 수집이 긴 현장에서 지속 시간이 0 에 묶여 알림이 영원히 안 울린다.
     try { alerts = await runBmUsageAlerts(rows, { ...settings, runMs: Date.now() - t0 }); }
     catch (e) { alerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+    // v2.929(5단계): 리눅스 성능 알림 규칙(켠 규칙이 있을 때만 — 판정 입력은 이 노드가 이미 만든 값). 실패해도 수집은 실패가 아니다.
+    let perfAlerts = null;
+    try { perfAlerts = rulesNow ? await runCyclePerfAlerts(results, { settings, rules: rulesNow, agent: agentName }) : null; }
+    catch (e) { perfAlerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     const okCount = results.filter((r) => r?.ok).length;
     _last = {
       at: Date.now(), ms: Date.now() - t0, servers: runCount,
@@ -895,6 +957,10 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       migration: migrationLast(),
       dbOk: !!ins.ok, dbError: ins.error || null, ...(ins.migrateError ? { dbMigrateError: { count: ins.migrateError.count, at: ins.migrateError.at } } : {}), counts, ...srcErr, trigger, ...(demo ? { demo: true } : {}),
       alerts: alerts && !alerts.skipped ? { sent: alerts.sent ?? 0, suppressed: alerts.suppressed ?? 0, capped: alerts.capped ?? 0, over: alerts.counts?.over ?? 0, error: alerts.error || null } : null,
+      // v2.929(5단계): 소모품 · 변경 이벤트 · 성능 알림 규칙 — 개수만(서버 이름 없음 · status 는 무스코프로 나간다).
+      ...(perfAlerts?.skipped ? { perfAlertsSkipped: perfAlerts.skipped } : {}),
+      cycleOps: cycleOps ? { health: cycleOps.health ?? 0, events: cycleOps.events ?? 0, written: changeRes?.ok ? changeRes.events ?? 0 : null, error: cycleOps.error || (changeRes && !changeRes.ok ? changeRes.reason || 'write-failed' : null) } : null,
+      perfAlerts: perfAlerts && !perfAlerts.skipped ? { fires: perfAlerts.fires ?? 0, queued: perfAlerts.queued ?? 0, deferred: perfAlerts.deferred ?? 0, capped: perfAlerts.capped ?? 0, autoFocus: perfAlerts.autoFocus ?? 0, issues: perfAlerts.issues ?? 0, ...(perfAlerts.warmup ? { warmup: true } : {}), error: perfAlerts.error || null } : null,
     };
     return { ok: true, ...(_last) };
   } catch (e) {
@@ -903,8 +969,57 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
   } finally { _running = false; }
 }
 
+/**
+ * v2.929(5단계) — 이번 주기 알림 규칙 입력을 모은다: 성능 항목(이 노드 판정 — perfForRows 와 같은 buildPerfEntry) · 소모품 칸(방금 detail_json 에 넣은 것) ·
+ *   베이스라인 이탈(그 규칙이 켜졌을 때만 — 슬롯 평균은 한 시간에 한 번 읽는다) · 용도 점검(그 규칙이 켜졌을 때만 — 이 노드의 수동 태그 · 자동 감지).
+ */
+async function runCyclePerfAlerts(results, { settings, rules, agent }) {
+  // 규칙 파일 손상(보존본만 남음)이면 ‘켠 규칙 없음’ 과 구별해 상태에 남긴다 — 기본값(전부 꺼짐)으로 조용히 꺼진 것처럼 보이지 않게(규칙 화면 · 서비스 점검이 손상을 밝힌다).
+  if ((await import('./perfRules.js')).perfRulesLoadError()) return { ok: false, skipped: 'settings-unreadable' };
+  const on = Object.keys(rules?.rules || {});
+  if (!on.length) return { ok: true, skipped: 'no-rules' };
+  const { buildPerfEntry, parseJsonCol } = await import('./perfView.js');
+  const { freshMsFor } = await import('./useJudge.js');
+  const { hwFactsReader } = await import('./hwFacts.js');
+  const now = Date.now();
+  const hwOf = await hwFactsReader({ agent, now, freshMs: freshMsFor(settings.intervalMs) }).catch(() => () => null);
+  let bands = null;
+  if (on.includes('baseline')) {
+    try { bands = await (await import('./baseline.js')).slotBands({ agent, cfg: rules.baseline, intervalMs: settings.intervalMs, now }); } catch { bands = null; }
+  }
+  const B = bands ? await import('./baseline.js') : null;
+  const M = on.includes('profile') ? await import('./profiles/match.js') : null;
+  const FT = on.includes('profile') ? await import('../insights/fleetTags.js').catch(() => null) : null;
+  const items = [];
+  for (const r of results) {
+    if (!r?.ok || !r.built?.row || !r.target) continue;
+    const row = { ...r.built.row, key: r.target.key, ts: r.built.row.ts ?? now };
+    const entry = buildPerfEntry({ row, hw: hwOf(r.target) || null, th: settings.perf, intervalMs: settings.intervalMs, now, full: false });
+    const detail = parseJsonCol(row.detail_json);
+    let profile = null;
+    if (M) {
+      let manual = null;
+      try { manual = FT ? (FT.fleetPurposeOf(String(r.target.serviceTag || '')) || FT.fleetPurposeOf(r.target.key)) : null; } catch { manual = null; }
+      try { profile = M.profileView({ tuning: parseJsonCol(row.tuning_json), detail, entry, row, manual }); } catch { profile = null; }
+    }
+    items.push({ key: r.target.key, name: r.target.name || r.target.key, vcenterId: r.target.vcenterId || '', target: r.target, entry, health: detail?.health || null,
+      dev: B ? B.deviationsFor(bands, r.target.key, row) : null, profile });
+  }
+  return (await import('./perfAlerts.js')).runPerfAlerts(items, { rules, now });
+}
+let _focusEndHooked = false;
 export function startBmUsagePoller() {
   if (_timer) return;
+  // v2.929(5단계): 집중 결론 규칙 — 세션이 끝날 때 한 번(focus/run.js). 기동 때 한 번만 구독한다.
+  if (!_focusEndHooked) {
+    _focusEndHooked = true;
+    // 반증 F13: 재시작 뒤 남은 집중 세션(타이머 없음)을 기동 때 닫는다 — 봉투 · 함대 칩이 죽은 세션을 ‘진행 중’ 으로 보이지 않게.
+    initFocus().catch(() => {});
+    onFocusEnd(async (ev) => {
+      try { const rules = (await import('./perfRules.js')).loadPerfRules(); await (await import('./perfAlerts.js')).runFocusEndAlert(ev, { rules }); }
+      catch (e) { console.warn(`[bmusage] 집중 결론 알림 실패: ${String(e?.message || e).slice(0, 160)}`); }
+    });
+  }
   // ⚠ 인자 순서는 `(getMs, fn, opts)` — 매 틱 주기를 다시 읽어야 설정 변경이 재시작 없이 먹는다.
   _timer = startAdaptiveTimer(() => loadBmUsageSettings().intervalMs, bmUsageTimerTick,
     { name: 'bmusage', firstDelayMs: 45_000, subscribe: onBmUsageSettingsChange });
@@ -912,7 +1027,7 @@ export function startBmUsagePoller() {
 }
 
 export function stopBmUsagePoller() { _timer?.stop?.(); _timer = null; }
-export function _resetForTest() { _lastRepair = null; _cycleSamples = []; _peakPlan = null; _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; guard._resetForTest(); }
+export function _resetForTest() { _lastLiveKeys = null; _lastRepair = null; _cycleSamples = []; _peakPlan = null; _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; guard._resetForTest(); }
 /** 테스트 전용 — 분류 함수 대체(EDGE2628-03) · 인메모리 상태 주입(EDGE2628-02). */
 export function _setFleetForTest(fn) { _fleetOverride = typeof fn === 'function' ? fn : null; }
 export function _seedStateForTest({ prev = [], authStopped = [] } = {}) {
@@ -921,3 +1036,6 @@ export function _seedStateForTest({ prev = [], authStopped = [] } = {}) {
 }
 export { guard as _authGuardForTest };
 
+// v2.929(5단계): 집중 모니터링이 쓰는 폴러 함수 등록 — focus/run.js 가 이 파일을 import 하지 않게(순환 방지 · arch2579).
+// 같은 인증 가드(정지 · 해제) · 같은 이전 카운터 · 같은 iDRAC 텔레메트리 작업을 쓴다(두 벌 금지).
+registerFocusPollerHooks({ idracTelemetryJob, prevCountersFor, osAuthStopFor, idracAuthStopFor, recordOsAuthOutcome, recordIdracAuthOutcome });
