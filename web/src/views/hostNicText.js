@@ -83,12 +83,6 @@ export function nicRows(data, uplinks = null) {
 export function verdictText(row) {
   return `수신 ${row?.rx?.text || '판정 보류'} · 송신 ${row?.tx?.text || '판정 보류'}`;
 }
-/** 판정 칸 색 — 두 방향 중 더 나쁜 쪽. */
-export function verdictTone(row) {
-  const rank = { red: 3, amber: 2, gray: 1, green: 0 };
-  const a = row?.rx?.tone || 'gray'; const b = row?.tx?.tone || 'gray';
-  return (rank[a] ?? 1) >= (rank[b] ?? 1) ? a : b;
-}
 
 const hhmm = (iso) => {
   const t = Date.parse(iso || '');

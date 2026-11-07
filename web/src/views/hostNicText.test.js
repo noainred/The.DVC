@@ -1,6 +1,6 @@
 // v2.925(B-③) — vmnic 드롭·에러 판정 문구(hostNicText.js). '어느 쪽 드롭' 은 같은 창에 양쪽 값이 다 있을 때만 · 결측이 섞인 0 은 '없음' 이 아니다.
 import { describe, it, expect } from 'vitest';
-import { countText, countCell, sideVerdict, nicRows, verdictText, verdictTone, nicSummary } from './hostNicText.js';
+import { countText, countCell, sideVerdict, nicRows, verdictText, nicSummary } from './hostNicText.js';
 import { ageText } from './hostNetText.js';
 
 describe('sideVerdict — 한 방향 판정', () => {
@@ -39,7 +39,7 @@ describe('nicRows — vmnic 와 CVP 업링크(같은 1시간) 짝', () => {
     expect(rows[0].rx.side).toBe('esxi');
     expect(rows[0].tx.side).toBe('switch');
     expect(verdictText(rows[0])).toBe('수신 ESXi 쪽 · 송신 스위치 쪽');
-    expect(verdictTone(rows[0])).toBe('amber');
+    expect(rows[0].rx.tone).toBe('amber');
   });
   it('매칭 포트 없음 · 두 개 · 표본 없는 hour 는 판정 보류', () => {
     const rows = nicRows(data, [up('vmnic2', 'Ethernet3', null), up('vmnic2', 'Ethernet4', { inDrop: 0, outDrop: 0, samples: 3, dropN: 3 })]);
