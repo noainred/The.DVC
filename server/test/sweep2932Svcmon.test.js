@@ -277,9 +277,11 @@ test('D1-05 ③ 지우거나 끈 점검의 알린 상태가 닫힌다 — 이 �
   EDGE.ingestReport('EDGE-R', { snapId: NOW + 60_000, seq: 1, total: 1, rows: [{ i: 'n1', s: 'bad', r: 'x', k: 2, a: 0 }], meta: [mr('n1')], metaSig: 's2' }, NOW + 60_000);
   EDGE.ingestReport('EDGE-R', { snapId: NOW + 120_000, seq: 1, total: 1, rows: [{ i: 'n1', s: 'bad', r: 'x', k: 3, a: 0 }], metaSig: 's2' }, NOW + 120_000);
   assert.equal(EDGE.getAgentRaw('EDGE-R').rows.has('o1'), false, '옛 id 행은 GC 됐다');
-  // ⚠ 재배정 직후 한 세대는 옛 행·새 행 메타가 공존해 nameCount 2 → dupName → 새 id 는 testId 키로 한 번 더 알린다(main v2.928 동작 그대로 —
-  //   이 묶음에서 고치지 않았다 · 보고). GC 뒤에는 이름 키(옛 알림)만 남고 고아가 된 testId 키는 닫힌다.
-  assert.equal(TR.alertStats().alerted, 1, '같은 이름 키의 행이 남아 있으면 알린 상태를 지우지 않는다(고아 testId 키만 닫는다)');
+  // v2.934: 재배정 직후 한 세대는 옛 행·새 행 메타가 공존하지만 이름 수는 '이번 창에 보고된 행' 으로 센다 — 새 id 도 이름 키라 다시 알리지 않는다
+  //   (v2.932 까지는 메타 개수 2 → dupName → 새 id 가 testId 키로 한 번 더 알렸다 · 재배정 흐름 전체는 svcmonRealloc2934 이 고정).
+  await TR.flushAlerts();
+  assert.equal(sentR.filter((x) => x.severity === 'critical').length, 1, '재배정이 같은 실패를 다시 알리면 안 된다');
+  assert.equal(TR.alertStats().alerted, 1, '같은 이름 키의 행이 남아 있으면 알린 상태를 지우지 않는다');
   EDGE.ingestReport('EDGE-R', { snapId: NOW + 180_000, seq: 1, total: 1, rows: [{ i: 'n1', s: 'ok', r: '1ms', m: 1, k: 1, a: 0 }], metaSig: 's2' }, NOW + 180_000);
   assert.equal(TR.alertStats().alerted, 0, '새 id 의 복구가 남은 이름 키를 닫는다');
   await TR.flushAlerts();
