@@ -182,7 +182,7 @@ test('RUNTIME2613-05: bmusage 세션 예산은 장비 시한 − 5초 로 잘린
   assert.match(osSrc, /collectOsUsage\(osHost = \{\}, \{ signal, budgetMs = SESSION_BUDGET_MS(?:, [^}]*)? \}/);
   assert.match(osSrc, /budgetMs - READY_TIMEOUT_MS/);
   const pl = bare('bmusage/poller.js');
-  assert.match(pl, /collectOsUsage\(target\.osHost, \{ signal, budgetMs: OS_BUDGET\.effective(?:, \.\.\.osStoreOpts\((?:storeOf\(\), peakPlan)?\))? \}\)/);   // v2.922: 저장 구조 옵션(예산은 그대로 폴러 값)
+  assert.match(pl, /collectOsUsage\(target\.osHost, \{ signal, budgetMs: OS_BUDGET\.effective(?:, \.\.\.osStoreOpts\((?:storeOf\(\), peakPlan)?\))?(?:, \.\.\.\(logExtra \? \{ extraCommands: \[logExtra\] \} : \{\}\))? \}\)/);   // v2.922: 저장 구조 옵션(예산은 그대로 폴러 값) · 7a: 로그 읽기 exec(같은 세션)
   assert.match(pl, /budgetMs: ENT_BUDGET\.effective/);
   // env 조합 — 자식 프로세스에서 모듈을 다시 로드해 본다(기본값 / 장비 시한 30초 / 예산을 시한보다 크게)
   const base = { CONFIG_DIR: CFG, DATA_SOURCE: 'mock', AUTH_ENABLED: 'false' };

@@ -16,6 +16,7 @@ import { clampEdgeTs } from '../util/clampEdgeTs.js';
 import { DETECT_ACCOUNTS, KARG_KEYS } from '../bmusage/parse/linuxFacts.js'; // v2.923: 4단계 감지 · 튜닝 사실(화이트리스트 원천)
 import { HEALTH_CELLS, HEALTH_CODES } from '../bmusage/health.js'; // v2.929: 점검 소모품 칸(화이트리스트 원천)
 import { sanitizeFocusSummary, sanitizeAlertSent } from './bmPerfOpsPull.js'; // v2.929: 봉투의 집중 요약 · 알림 발송 기록
+import { sanitizeLogSummary } from './bmLogsPull.js'; // 7a단계 로그 분석 요약 정제
 
 export const PERF_LIST_MAX = 2_000;
 const DEV_MAX = 32;
@@ -252,6 +253,9 @@ export function sanitizePerfFields(snap, rcv = Date.now()) {
       ...(snap?.collectHealth && typeof snap.collectHealth === 'object' ? { collectHealth: sanitizeCollectHealth(snap.collectHealth, rcv) } : {}),
       // 6단계 표지(첫 주기 전에도 실린다 — 필드 없음 + 표지 = 아직 주기 없음 · 표지도 없음 = 구버전 · 반증 F3). 작은 양의 정수만.
       ...(Number.isInteger(snap?.collectHealthVer) && snap.collectHealthVer > 0 && snap.collectHealthVer < 100 ? { collectHealthVer: snap.collectHealthVer } : {}),
+      // 7a단계 로그 분석 요약(서버별 24시간 — 화이트리스트 · 규칙 id 는 카탈로그만 · 키는 같은 봉투의 대상 목록 안만 · 시각 clamp). 표지는 첫 주기 전에도 실린다(값 없음 ≠ 구버전).
+      ...(Array.isArray(snap?.logSummary) ? (() => { const r = sanitizeLogSummary(snap.logSummary, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }); return { logSummary: r.list, ...(r.dropped ? { logSummaryDropped: r.dropped } : {}) }; })() : {}),
+      ...(Number.isInteger(snap?.logsVer) && snap.logsVer > 0 && snap.logsVer < 100 ? { logsVer: snap.logsVer } : {}),
     },
     dropped: arr.length - perf.length,
   };

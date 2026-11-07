@@ -137,7 +137,20 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
     ...(perfError ? { perfError } : {}),
     // v2.929(5단계): 집중 모니터링 요약(진행 중 · 대기 · 최근 24시간 — 중앙 보드 ‘집중 n 건’ 칩 · 상세는 볼 때 엣지 대행으로) · 성능 알림 발송 기록(최근 24시간 · 채널 URL 없음).
     ...(await envelopeOps()),
+    // 7a단계: 로그 분석 요약(서버별 24시간 — 분류별 패턴/줄 · 읽은 양 · 상위 8 패턴 · 출처 상태). 원문 없음(가린 표본 1줄 · 서명 템플릿). 대상 목록 안의 서버만.
+    ...(await envelopeLogs(keys)),
   };
+}
+/** 7a단계 봉투 필드 — 표지(logsVer)는 첫 주기 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다 · 6단계 반증 F3). 실패해도 봉투는 나간다. */
+export const LOGS_VER = 1;
+async function envelopeLogs(keys) {
+  const out = { logsVer: LOGS_VER };
+  try {
+    const V = await import('./logs/view.js');
+    const sum = await V.logSummaryNow();
+    if (Array.isArray(sum?.list)) out.logSummary = sum.list.filter((x) => keys.has(t(x.key)));
+  } catch { /* 그 필드만 빠진다 */ }
+  return out;
 }
 /** 5단계 봉투 필드 — 실패해도 봉투는 나간다(그 필드만 빠진다). */
 async function envelopeOps(now = Date.now()) {

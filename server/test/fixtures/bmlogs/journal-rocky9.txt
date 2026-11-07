@@ -1,0 +1,6 @@
+2026-11-06T13:02:41+09:00 bm-kr1-db01 systemd[1]: postgresql.service: Failed with result 'exit-code'.
+2026-11-06T13:02:42+09:00 bm-kr1-db01 systemd[1]: airflow-scheduler.service: Start request repeated too quickly.
+2026-11-06T13:42:00+09:00 bm-kr1-db01 chronyd[812]: System clock wrong by 0.912345 seconds, adjustment started
+2026-11-06T13:43:10+09:00 bm-kr1-db01 NetworkManager[1022]: <warn>  [1762402800.1234] dhcp4 (eno2): request timed out
+    이어진 줄(들여쓴 연속 — 세지 않는다)
+2026-11-06T13:44:00+09:00 bm-kr1-db01 rsyslogd[1200]: file '/var/log/app/batch.log': write error - No space left on device [v8.2102.0]

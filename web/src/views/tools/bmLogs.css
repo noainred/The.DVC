@@ -1,0 +1,18 @@
+/* 리눅스 성능 7a단계 — 로그 분석(서버 상세 ‘로그’ 탭 · 함대 보기). 색은 :root 토큰만(새 hex 없음 — 분류 색 --red · --amber · --purple · --accent-2). */
+.bml-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 8px; min-width: 0; }
+.bml-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.bml-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.bml-chart { min-width: 0; }
+.bml-svg { display: block; width: 100%; height: 140px; background: var(--panel-deep); border-radius: 6px; }
+.bml-axis { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); margin-top: 4px; flex-wrap: wrap; }
+.bml-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--text-dim); margin-top: 4px; }
+.bml-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.bml-legend i.bml-unread { border: 1px dashed var(--text-faint); background: transparent; }
+.bml-corr { display: inline-block; margin: 0 4px 4px 0; padding: 2px 8px; font: inherit; font-size: 11.5px; line-height: 1.5; color: var(--text-dim); background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-soft); border-radius: 10px; cursor: pointer; text-align: left; overflow-wrap: anywhere; max-width: 100%; }
+.bml-corr:hover { border-color: var(--accent); color: var(--text); }
+.bml-q.input { flex: 1 1 160px; min-width: 0; max-width: 260px; }
+@media (max-width: 640px) {
+  .bml-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bml-corr { min-height: 32px; }
+}

@@ -150,7 +150,21 @@ async function openDb() {
       CREATE TABLE IF NOT EXISTS change_latest (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER, facts_json TEXT, PRIMARY KEY (agent, key));
       CREATE TABLE IF NOT EXISTS collect_cycle (agent TEXT NOT NULL DEFAULT '', ts INTEGER NOT NULL, ms INTEGER, budget_ms INTEGER, servers INTEGER, ok INTEGER,
         conc_max INTEGER, conc_cap INTEGER, ssh_p50 INTEGER, ssh_p95 INTEGER, PRIMARY KEY (agent, ts));
-      CREATE INDEX IF NOT EXISTS idx_bm_cycle_ts ON collect_cycle(ts);`);
+      CREATE INDEX IF NOT EXISTS idx_bm_cycle_ts ON collect_cycle(ts);
+      /* 7a단계(bmusage/logs/store.js — 서버 로그 분석): 읽기 위치(서버당 1행 · rev 로 비교 후 쓰기 — 늦게 끝난 옛 주기가 새 위치를 덮지 않게) ·
+         패턴(서명별 누적 · 가린 표본 5줄) · 시간 집계(패턴 · 분류 안 됨 · 읽은 양 · 잘림 — 시각 단독 인덱스로 청크 정리) · 보안 상위(IP · 계정 — 시간 · 종류마다 상한).
+         원문 전체는 없다(설계 §17). 보관은 perfRules logs.keepDays(청크 DELETE — 메인 파일). */
+      CREATE TABLE IF NOT EXISTS log_cursor (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER NOT NULL, rev INTEGER NOT NULL DEFAULT 0,
+        state_json TEXT, status_json TEXT, bad_json TEXT, PRIMARY KEY (agent, key));
+      CREATE TABLE IF NOT EXISTS log_pattern (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, sig TEXT NOT NULL, cls TEXT NOT NULL, severity TEXT, rule_id TEXT,
+        src TEXT, unit TEXT, tmpl TEXT, count INTEGER NOT NULL DEFAULT 0, first INTEGER, last INTEGER, samples_json TEXT, PRIMARY KEY (agent, key, sig));
+      CREATE INDEX IF NOT EXISTS idx_bm_logpat_last ON log_pattern(last);
+      CREATE TABLE IF NOT EXISTS log_hour (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, hour INTEGER NOT NULL, sig TEXT NOT NULL, cls TEXT NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (agent, key, hour, sig));
+      CREATE INDEX IF NOT EXISTS idx_bm_loghour_hour ON log_hour(hour);
+      CREATE TABLE IF NOT EXISTS log_sec (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, hour INTEGER NOT NULL, kind TEXT NOT NULL, item TEXT NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (agent, key, hour, kind, item));
+      CREATE INDEX IF NOT EXISTS idx_bm_logsec_hour ON log_sec(hour);`);
     // v2.919(리눅스 성능 1단계): 새 열은 CREATE 문이 아니라 **ALTER 마이그레이션**으로 더한다 — 기존 DB(v2.918 이하)와 새 DB 가
     //   같은 경로를 탄다(두 벌 스키마가 갈라지지 않게). ADD COLUMN 은 표를 다시 쓰지 않는다(O(1)).
     const mig = migratePerfColumns(conn);

@@ -607,7 +607,7 @@ export function planPeakForCycle(realTargets = [], { intervalMs, st = storeOf(),
   const { steps, ...rest } = plan;
   return { at: Date.now(), ...rest, baseSamples: est.n, steps: (steps || []).slice(0, 6) };
 }
-async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRunMs = 0, runT0 = null, peakPlan = null } = {}) {
+async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRunMs = 0, runT0 = null, peakPlan = null, logExtra = null } = {}) {
   const t0 = Date.now();
   const dev = authDev(target);
   // ⚠ **수동 실행은 막지 않는다** — 사람이 1회 누르는 것은 잠금 위험이 없고, 비밀번호를 고친 뒤
@@ -636,7 +636,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   let osMs = null;
   const osT0 = Date.now();
   jobs.push((target.paths.includes('os') && !stopped)
-    ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan) }), 'OS 수집 시한 초과')
+    ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan), ...(logExtra ? { extraCommands: [logExtra] } : {}) }), 'OS 수집 시한 초과')
       .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) }))
       .then((r) => { osMs = Date.now() - osT0; return r; })
     : Promise.resolve(stopped ? { ok: false, error: `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: stopped } : null));
@@ -826,6 +826,9 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
       let gone = 0;
       if (_lastLiveKeys) { try { gone = await O.changeLatestKeep({ agent: config.agent?.name || '', keys: [..._lastLiveKeys] }); } catch { /* 다음 틱 */ } }
       if (r && typeof r === 'object') r.opsPruned = { focusSessions: fp?.sessions ?? 0, focusSamples: fp?.samples ?? 0, changeEvents: cp || 0, changeLatestGone: gone, collectCycles: cyc || 0 };
+      // 7a단계 로그 분석 보관(설정 keepDays) + 대상에서 사라진 서버의 읽기 위치 — 같은 스로틀 틱 · 청크 DELETE.
+      try { const lp = await (await import('./logs/run.js')).logPruneTick({ agent: config.agent?.name || '', keys: _lastLiveKeys ? [..._lastLiveKeys] : null }); if (r && typeof r === 'object') r.logsPruned = lp; }
+      catch (e) { if (_srcErrLog('log-prune', errText(e))) console.warn(`[bmusage] 로그 분석 보관 정리 실패: ${errText(e)}`); }
     } catch (e) { if (_srcErrLog('ops-prune', errText(e))) console.warn(`[bmusage] 집중 · 변경 이벤트 보관 정리 실패: ${errText(e)}`); }
   }
   _lastPrune = { at: Date.now(), ...r };
@@ -927,7 +930,13 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       if (_srcErrLog('peak-plan', line)) console.log(`[bmusage] ${line}`);
     }
     // v2.929: 서버 하나의 수집은 전역 슬롯 하나 안에서(집중 수집과 같은 풀 — 주기 수집은 풀 상한이 같아 스스로 기다리지 않는다).
-    const realResults = realTargets.length ? await pool(realTargets, CONCURRENCY, (tg) => withSlot(() => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0, peakPlan })).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : [];
+    /*
+     * 7a단계(로그 분석): 주기 시작에 읽기 위치를 한 번 읽고(서버 수만큼 점 조회 없음) 서버마다 로그 읽기 exec 를 같은 SSH 세션에 붙인다(osSsh extraCommands — 남은 예산 안에서만).
+     *   실패해도 수집은 실패가 아니다(로그만 그 주기에 없다 — 위치가 넘어가지 않아 다음 주기에 같은 줄을 읽는다).
+     */
+    const L = await import('./logs/run.js');
+    const logCtx = await L.beginLogCycle({ agent: config.agent?.name || '' }).catch((e) => ({ on: true, cursors: null, error: String(e?.message || e).slice(0, 200) }));
+    const realResults = realTargets.length ? await pool(realTargets, CONCURRENCY, (tg) => withSlot(() => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0, peakPlan, logExtra: (tg.paths || []).includes('os') ? L.logExtraFor(tg, logCtx) : null })).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : [];
     // 다음 주기 실측 근거 — 실제로 수집한 서버만(데모 합성·예외로 끝난 항목은 소요가 없다).
     const samplesNow = realResults.filter((r) => r && Number.isFinite(r.ms)).map((r) => ({ ms: r.ms, windowS: r.windowS || 0 }));
     if (samplesNow.length) _cycleSamples = samplesNow;
@@ -966,6 +975,13 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       try { changeRes = await (await import('./opsDb.js')).changeWriteBatch({ agent: agentName, items: cycleOps.items }); }
       catch (e) { changeRes = { ok: false, reason: String(e?.message || e).slice(0, 200) }; }
     }
+    // 7a단계: 로그 분석 — 파싱 · 분류 · 한 트랜잭션 쓰기(위치 비교 후 쓰기) · 함대 요약. 데모 대상은 합성 출력(같은 파서 · 분류 · 쓰기).
+    let logRes = null;
+    try {
+      const DL = demo && demoTargets.length ? await import('../mock/demo/bmLogs.js') : null;
+      logRes = await L.finishLogCycle(results, logCtx, { demoStdout: DL ? (tg, nowT) => (demo.isDemoBmTarget(tg) ? DL.demoLogStdout(tg, nowT, logCtx?.cursors?.get(tg.key) || null) : null) : null });
+    } catch (e) { logRes = { error: String(e?.message || e).slice(0, 200) }; }
+    if (logRes?.error && _srcErrLog('logs', logRes.error)) console.warn(`[bmusage] 로그 분석 주기 실패(로그만 이번 주기에 없다 — 읽기 위치는 넘어가지 않는다): ${logRes.error}`);
     /*
      * 임계 초과 알림(v2.551). ⚠ **적재 뒤에** 판정한다(알림은 저장된 값을 근거로 한다).
      * ⚠ 실패해도 수집을 실패로 만들지 않는다 — 알림은 부가 기능이고, 사유는 `_last` 에 남긴다.
@@ -1006,6 +1022,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       // v2.929(5단계): 소모품 · 변경 이벤트 · 성능 알림 규칙 — 개수만(서버 이름 없음 · status 는 무스코프로 나간다).
       ...(perfAlerts?.skipped ? { perfAlertsSkipped: perfAlerts.skipped } : {}),
       cycleOps: cycleOps ? { health: cycleOps.health ?? 0, events: cycleOps.events ?? 0, written: changeRes?.ok ? changeRes.events ?? 0 : null, error: cycleOps.error || (changeRes && !changeRes.ok ? changeRes.reason || 'write-failed' : null) } : null,
+      // 7a단계 로그 분석 — 개수만(서버 이름 없음).
+      logs: logRes || null,
       perfAlerts: perfAlerts && !perfAlerts.skipped ? { fires: perfAlerts.fires ?? 0, queued: perfAlerts.queued ?? 0, deferred: perfAlerts.deferred ?? 0, capped: perfAlerts.capped ?? 0, autoFocus: perfAlerts.autoFocus ?? 0, issues: perfAlerts.issues ?? 0, ...(perfAlerts.warmup ? { warmup: true } : {}), error: perfAlerts.error || null } : null,
     };
     return { ok: true, ...(_last) };
@@ -1036,6 +1054,8 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
     try { bands = await (await import('./baseline.js')).slotBands({ agent, cfg: rules.baseline, intervalMs: settings.intervalMs, now }); } catch { bands = null; }
   }
   const B = bands ? await import('./baseline.js') : null;
+  // 7a단계: 로그 규칙 입력(이번 주기에 로그를 읽은 서버만 — 못 읽은 서버는 없음 = 판정 보류)
+  const LA = on.includes('logs') ? (await import('./logs/run.js')).logAlertInputs() : null;
   const M = on.includes('profile') ? await import('./profiles/match.js') : null;
   const FT = on.includes('profile') ? await import('../insights/fleetTags.js').catch(() => null) : null;
   const items = [];
@@ -1051,7 +1071,7 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
       try { profile = M.profileView({ tuning: parseJsonCol(row.tuning_json), detail, entry, row, manual }); } catch { profile = null; }
     }
     items.push({ key: r.target.key, name: r.target.name || r.target.key, vcenterId: r.target.vcenterId || '', target: r.target, entry, health: detail?.health || null,
-      dev: B ? B.deviationsFor(bands, r.target.key, row) : null, profile });
+      dev: B ? B.deviationsFor(bands, r.target.key, row) : null, profile, logs: LA ? LA.get(r.target.key) || null : null });
   }
   // 6단계 ‘수집 건강’ — 서버가 아니라 이 노드 한 칸(key '__node__' · 법인 공용). 칸은 이번 주기 recordCycleHealth 가 기준과 대 본 결과 그대로.
   const nodeItem = on.includes('collect') ? collectNodeItem(agent) : null;

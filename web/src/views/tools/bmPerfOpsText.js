@@ -321,6 +321,8 @@ export const RULE_TEXT = Object.freeze({
   profile: { label: '용도 프로파일 점검 실패', conds: { bad: '점검 결과 이상(CRITICAL)' } },
   // 6단계 — 서버가 아니라 수집 노드 한 칸(주기 소요 · 성공률 · DB 상한 · 인증 정지 — 기준은 아래 ‘수집 건강 기준’).
   collect: { label: '수집 건강(이 노드)', conds: { any: '기준 밖 칸이 하나라도', cycle: '주기 소요가 예산의 기준 % 이상', success: '성공률이 기준 % 미만', db: 'DB 가 상한의 기준 % 이상', auth: '인증 정지 서버가 있음', error: '주기가 실패함(분류 실패 · 예외 — 대상 · 결과를 모름)' } },
+  // 7a단계 — 로그 분석(이번 주기에 새로 읽은 줄 — 못 읽은 서버는 판정 보류 · 포탈은 차단 · 잠금을 하지 않는다).
+  logs: { label: '로그 — 장애/보안 high', conds: { 'fault-sec': '장애 분류 줄 또는 보안 high 이상(SSH 실패 집중 포함)', fault: '장애 분류 줄만', sec: '보안 high 이상만' } },
 });
 export const CHANNEL_TEXT = Object.freeze({ email: '메일', webhook: '웹훅', slack: 'Slack', teams: 'Teams' });
 export const SENT_RESULT_TEXT = Object.freeze({ queued: '보내는 중(대기열)', sent: '보냄', failed: '보내지 못함(채널 오류 — 재시도 규칙대로)', suppressed: '중복 억제', 'no-channel': '켜진 채널 없음', 'no-channel-config': '알림 설정 없음', 'daily-cap': '하루 상한', maintenance: '유지보수 창', error: '실패', '': '—' });
