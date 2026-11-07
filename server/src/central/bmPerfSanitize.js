@@ -12,6 +12,7 @@ import { PERF_COL_NAMES } from '../bmusage/perfCols.js';
 import { PERF_DEFAULTS } from '../bmusage/settings.js';
 import { SYSCTL_PATHS } from '../bmusage/parse/linuxProc.js';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
+import { DETECT_ACCOUNTS, KARG_KEYS } from '../bmusage/parse/linuxFacts.js'; // v2.923: 4단계 감지 · 튜닝 사실(화이트리스트 원천)
 
 export const PERF_LIST_MAX = 2_000;
 const DEV_MAX = 32;
@@ -114,10 +115,37 @@ function tuningOf(tu, rcv) {
     hugepages: numKeys(tu.hugepages, ['total', 'free', 'sizeKb']),
     blkq: Array.isArray(tu.blkq) ? list(tu.blkq, DEV_MAX, (x) => ({
       name: str(x.name, 64), scheduler: x.scheduler == null ? null : str(x.scheduler, 32), schedulers: strList(x.schedulers, 8, 32) || [],
-      nrRequests: num(x.nrRequests), rotational: x.rotational === true ? true : x.rotational === false ? false : null,
+      nrRequests: num(x.nrRequests), rotational: x.rotational === true ? true : x.rotational === false ? false : null, readAheadKb: num(x.readAheadKb),
     })) : null,
+    blkqTotal: num(tu.blkqTotal),
     irq: isObj(tu.irq) ? { irqbalance: tu.irq.irqbalance == null ? null : str(tu.irq.irqbalance, 32), ...numKeys(tu.irq, ['nicIrqs', 'spreadMin', 'spreadMax', 'cpus']) } : null,
-    sections: sections(tu.sections, ['sysctl', 'hugepages', 'blkq', 'irq']),
+    // v2.923(4단계) — 감지 · 튜닝 사실(엣지 tuning 의 새 필드 · 아는 필드만 · 상한 · 문자열 수치는 수로). 웹·튜닝 판정·용도 매칭이 읽는다.
+    ...tuningFactsOf(tu),
+    sections: sections(tu.sections, TUNING_SECTION_NAMES),
+  };
+}
+const TUNING_SECTION_NAMES = ['sysctl', 'hugepages', 'blkq', 'irq', 'osrel', 'units', 'ports', 'procs', 'acct', 'kargs', 'softnet', 'netq', 'xfs'];
+const NAME_RE = /^[A-Za-z0-9@._:\\-]{1,96}$/;
+/** v2.923 — 감지 · 튜닝 사실(엣지 usage.js tuning 의 같은 이름 필드). 목록 · 객체 모양이 아니면 null(못 읽음과 같다 — 지어내지 않는다). */
+export function tuningFactsOf(tu) {
+  const o = isObj(tu.os) ? {
+    id: tu.os.id == null ? null : str(tu.os.id, 32), versionId: tu.os.versionId == null ? null : str(tu.os.versionId, 32), prettyName: tu.os.prettyName == null ? null : str(tu.os.prettyName, 128),
+    pageSize: num(tu.os.pageSize), selinux: tu.os.selinux == null ? null : str(tu.os.selinux, 16), removeIpc: oneOf(tu.os.removeIpc, ['yes', 'no'], null),
+  } : null;
+  const names = (v, max, re) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && re.test(x)).slice(0, max) : null);
+  // v2.923(반증 R7): 목록이 null 이면(엣지가 systemctl 실패로 못 읽음) null 그대로 — 빈 목록으로 바꾸면 ‘running 0개’ 를 지어낸다.
+  const units = isObj(tu.units) ? { list: names(tu.units.list, 256, NAME_RE), failed: num(tu.units.failed), capped: bool(tu.units.capped), filtered: bool(tu.units.filtered) } : null;
+  const ports = isObj(tu.ports) ? { list: (Array.isArray(tu.ports.list) ? tu.ports.list : []).map(num).filter((p) => p != null && Number.isInteger(p) && p >= 1 && p <= 65535).slice(0, 512), capped: bool(tu.ports.capped), filtered: bool(tu.ports.filtered) } : null;
+  const procs = isObj(tu.procs) ? { list: names(tu.procs.list, 512, /^[\x21-\x7e][\x20-\x7e]{0,31}$/) || [], capped: bool(tu.procs.capped), filtered: bool(tu.procs.filtered) } : null;
+  const accounts = Array.isArray(tu.accounts) ? tu.accounts.filter((a) => DETECT_ACCOUNTS.includes(a)) : null;
+  let kargs = null;
+  if (isObj(tu.kargs)) { kargs = {}; for (const k of KARG_KEYS) if (Object.hasOwn(tu.kargs, k) && typeof tu.kargs[k] === 'string') kargs[k] = str(tu.kargs[k], 180); }
+  const softnet = isObj(tu.softnet) ? numKeys(tu.softnet, ['cpus', 'processed', 'dropped', 'squeezed']) : null;
+  const netq = Array.isArray(tu.netq) ? list(tu.netq, 64, (x) => ({ name: str(x.name, 32), txqlen: num(x.txqlen), rxq: num(x.rxq), txq: num(x.txq) })).filter((x) => x.name) : null;
+  const xfs = Array.isArray(tu.xfs) ? list(tu.xfs, 32, (x) => ({ mount: str(x.mount, 128), opts: strList(x.opts, 32, 64) || [] })).filter((x) => x.mount) : null;
+  return {
+    os: o, units, ports, procs, accounts, kargs, softnet, netq, xfs, memTotalKb: num(tu.memTotalKb), cores: num(tu.cores),
+    ...(Array.isArray(tu.trimmed) ? { trimmed: strList(tu.trimmed, 8, 16) } : {}),
   };
 }
 function hwOf(h, rcv) {

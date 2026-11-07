@@ -178,7 +178,7 @@
     호스트 · 데이터스토어 모달은 그대로 · `EntityDetail type='vm'` 을 쓰는 다른 5곳(알람 · 탐색 · Platform VM 검색 · VmLink · 호스트 전체 페이지)은 **그대로**(질문 ① 기본값 — 다음 후보).
   · 드로어 · 개체 보기 요약의 24h 스파크(`vmSeries.useDaySeries`)는 `types=cpu,mem` 한 번(예전 2회 로그인 → 1회).
   · 남긴 것: 엣지 위임 vCenter 의 성능을 그 엣지 포탈에서 보는 링크(`findRemoteServer` 안내)는 넣지 않았다(옛 모달에도 없던 것 — 다음 후보).
-- **v2.926 — VM 상세 · 성능 그래프 후속 3건(사용자 선택 A '성능 화면·드로어 후속' · 표준)**(웹 `components/EntityDetail.jsx` · `vmMetricsText.js` · `vmperf/VmPerfView.jsx` · `views/VCenters.jsx` ·
+- **v2.927 — VM 상세 · 성능 그래프 후속 3건(코드·테스트 표지는 v2.926 — 준비 중 main 이 2.926.0(리눅스 성능)을 먼저 써서 2.927.0 으로 게시)(사용자 선택 A '성능 화면·드로어 후속' · 표준)**(웹 `components/EntityDetail.jsx` · `vmMetricsText.js` · `vmperf/VmPerfView.jsx` · `views/VCenters.jsx` ·
   서버 `vcenter/authStopGate.js skipExtra` · `routes/api/vmMetrics.js edgeHint`. 회귀 `server/test/vmPerf2926.test.js`(3) · 웹 `views/vmPerf2926.test.jsx`(6) · `audit2744k`(링크)):
   · **VM 상세는 드로어 한 벌** — `EntityDetail type='vm'` 은 `VmDrawer` 로 위임한다(동적 import — VmDrawer 가 EntityDetail 의 섹션을 import 하는 순환을 끊는다 · `rows:[]` 라 ‹ › 잠김 ·
     signals 없는 항목은 '신호를 함께 받지 않았다'). 알람 · 탐색 · Platform VM 검색 · `VmLink`(도구 표 · 호스트 VM 목록 모달) · 호스트 전체 페이지가 자동으로 드로어다. 옛 VM 모달 본문은 지웠다.

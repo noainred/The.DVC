@@ -41,10 +41,14 @@ import Select from '../../components/Select.jsx';
 import BmPerfBoard from './BmPerfBoard.jsx';
 import BmPerfDetail from './BmPerfDetail.jsx';
 import { boardItems, allAuthStops } from './bmPerfText.js';
+// v2.923(리눅스 성능 4단계): 함대 ‘용도 분석’ · ‘장애 기록’ 보기(도구 키 그대로 — 이 화면 안의 보기 전환).
+import { BmPurposeFleet, BmFaultsFleet } from './BmOpsFleet.jsx';
 
 /** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
 const VIEW_KEY = 'bmUsage.view';
-function readView() { try { const v = localStorage.getItem(VIEW_KEY); return v === 'use' || v === 'util' ? v : null; } catch { return null; } }
+// 보기는 URL 해시가 아니라 localStorage 기억 + 자동 기본값(v2.920) — useHashTab 은 데이터 전 fallback 을 해시에 굳혀 ‘성능 항목이 있으면 USE’ 를 깬다(audit2613a 스윕의 명시 예외).
+const VIEWS = ['use', 'util', 'purpose', 'faults'];
+function readView() { try { const v = localStorage.getItem(VIEW_KEY); return VIEWS.includes(v) ? v : null; } catch { return null; } }
 function writeView(v) { try { localStorage.setItem(VIEW_KEY, v); } catch { /* 저장 실패는 무시 — 다음에 기본값 */ } }
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
@@ -218,8 +222,9 @@ export function BmUsage() {
       if (gen === detailGen.current) { setDetail(null); setDetailErr(e?.message || String(e)); }
     } finally { if (gen === detailGen.current) setDetailLoading(false); }
   }, []);
-  async function openDetail(key) {
-    setPerfSel(key);
+  const [perfTab, setPerfTab] = useState('');   // v2.923: 함대 보기에서 연 서버는 그 탭으로(용도 · 장애 기록)
+  async function openDetail(key, tab = '') {
+    setPerfSel(key); setPerfTab(tab);
     // 사용률 추이(history)는 이 노드가 수집하는 대상만 있다 — 엣지 위임 서버는 성능 상세만 연다(없는 추이를 404 로 보이지 않게).
     if (!(data?.targets || []).some((x) => String(x.key) === String(key))) { setSel(''); setDetail(null); return; }
     setSel(key); setDetail(null); setRangeKey('24h');
@@ -368,6 +373,8 @@ export function BmUsage() {
         <div className="bmp-seg bmp-seg-top" role="tablist" aria-label="보기">
           <button role="tab" aria-selected={view === 'use'} className={view === 'use' ? 'active' : ''} onClick={() => chooseView('use')}>USE 매트릭스</button>
           <button role="tab" aria-selected={view === 'util'} className={view === 'util' ? 'active' : ''} onClick={() => chooseView('util')}>사용률 표</button>
+          <button role="tab" aria-selected={view === 'purpose'} className={view === 'purpose' ? 'active' : ''} onClick={() => chooseView('purpose')}>용도 분석</button>
+          <button role="tab" aria-selected={view === 'faults'} className={view === 'faults' ? 'active' : ''} onClick={() => chooseView('faults')}>장애 기록</button>
         </div>
         <DeviceFacetBar
           dcChips={barFacets.dcChips} typeChips={barFacets.typeChips} dcSel={dcSel} typeSel={typeSel}
@@ -467,9 +474,12 @@ export function BmUsage() {
         />
       )}
       {/* v2.920: 서버 성능 상세(머리 · 판정 띠 · 탭 요약/자원/하드웨어) — 사용률 추이는 아래 기존 상세 카드에 그대로. */}
+      {/* v2.923: 함대 보기 — 서버를 누르면 아래 상세가 그 탭으로 열린다. */}
+      {view === 'purpose' && <BmPurposeFleet onOpen={(k) => openDetail(k, 'profile')} />}
+      {view === 'faults' && <BmFaultsFleet onOpen={(k) => openDetail(k, 'faults')} />}
       {perfSel && (
         <BmPerfDetail
-          itemKey={perfSel} item={perfItems.find((it) => it.key === perfSel) || null}
+          itemKey={perfSel} item={perfItems.find((it) => it.key === perfSel) || null} initialTab={perfTab}
           authStops={perfAuthStops} staleMs={edges?.staleMs ?? null}
           keepDays={{ server: data?.settings?.dailyRetentionDays ?? null, dev: data?.settings?.store?.devHourlyDays ?? null }}
           onClose={() => setPerfSel('')}

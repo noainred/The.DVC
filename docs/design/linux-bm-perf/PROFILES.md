@@ -7,6 +7,8 @@
 
 ## 1. 프로파일 모델(확장 구조)
 
+> **(v2.923 구현)** 경로는 `server/src/bmusage/profiles/<id>.js`(예정 경로 `bmperf/` 가 아니라 기존 bmusage 아래) · `##PROCS` 는 comm 만(아래 `args` 는 뺐다 — 인자에 비밀이 실린다) · 다르게 둔 결정은 README §8 ‘4단계 구현됨’.
+
 - **프로파일 1개 = 파일 1개**(`server/src/bmperf/profiles/<id>.js` 예정): `{ id, kind: 'os'|'app', match, checks[], tunings[], sources[] }`.
   - `match`(전부 읽기 전용 감지): OS 는 `/etc/os-release`(ID · VERSION_ID) 와 Windows `Caption`; 기능은 systemd running 유닛(이름은 설정값) · 프로세스 이름 · 수신 포트(`ss -ltn`) · 설정 파일 경로 · 계정 존재(`getent passwd`). **수동 태그가 덮어쓴다**(기존 fleet-tags 의 baremetal/virtualization/exclude 와 같은 저장소 형식에 `purposes[]` 를 더한다 — 새 등록부를 만들지 않는다).
   - `checks[]`: `{ id, title, how(명령·SQL·HTTP — 엣지가 실행), freq, severity, verdict(순수 함수), source }`.
