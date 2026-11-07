@@ -48,6 +48,7 @@ const num = (v, d) => { const n = Math.floor(Number(v)); return Number.isFinite(
 
 // v2.621(감사 RECENT-06): 범위 계정도 통과하는 svcmon 큰 본문 경로(canEdit 뿐 — 저장하지 않는 변환).
 const SVCMON_HOSTMAP_PARSE = '/api/svcmon/targets/hostmap/parse';
+const ONBOARD_UPLOAD = new Set(['/api/tools/bm-usage/onboard/analyze', '/api/tools/bm-usage/onboard/apply']);
 
 /**
  * v2.620(RECENT2620-03·SEC2620-06): 세션 계열 큰 본문은 **그 라우트를 통과할 수 있는 사용자만** 슬롯을 잡는다.
@@ -79,7 +80,9 @@ export function sessionBigBodyAllowed(user, full, deps = {}) {
   const role = String(user.role || '');
   const scoped = () => { try { return !!deps.scoped?.(user); } catch { return true; } }; // 판정 실패는 '범위 계정' 으로(파싱 안 함)
   const f = String(full || '');
-  if (f.startsWith('/api/admin/log-analysis/')) return role === 'admin' && !demo && !scoped();
+  // 7b 서버 등록 업로드(ONBOARD_UPLOAD) — 관리자 · 데모 계정 제외 · 범위 계정 포함(행 단위로 자기 법인만 적용된다). 로그 분석 붙여넣기와 한 판정.
+  const onboard = ONBOARD_UPLOAD.has(f);
+  if (onboard || f.startsWith('/api/admin/log-analysis/')) return role === 'admin' && !demo && (onboard || !scoped());
   if (f.startsWith('/api/svcmon/')) {
     if (role !== 'admin' && role !== 'operator') return false;
     if (role !== 'admin') { let set = null; try { set = deps.permsOf?.(role); } catch { set = null; } if (!set || !set.has?.('svcmon')) return false; }

@@ -28,6 +28,7 @@
 - (6단계 추가) 리눅스 성능 6단계 — 비교(법인 간은 전체 범위만 · 범위 밖 = 없음) · 5대 집중(전부 검사 뒤 시작) · 주석(작성자/관리자 · 흔적 삭제) · 목표 저장(설정 소유자) · 플레이북 실행 경로 없음 · 공유 링크 권한 없음
 - (7a단계 추가) 리눅스 성능 7a단계 로그 분석 — 조회 범위 교집합 먼저 · 단건 404 · 보안 패널(IP · 계정)은 관리자 판본만 원문 · 쓰기 경로 없음 · 차단 · 잠금 없음
 
+- (7b단계 추가) 리눅스 성능 7b단계 SSH 키 저장소 · 공통 계정 · 서버 등록 업로드 — 관리 = 설정 소유자 등급 + 본인 OTP(마지막 게이트) · 지문 · 공개키만 · 번들 가림 · 행 단위 범위 404/403 · 비밀 원문 행 거부
 ## 본문
 
 - ⚠⚠ **express 4 는 async 핸들러의 throw 를 잡지 않는다 — 라우터를 `wrapAsyncRouter` 로 감싼다**
@@ -494,3 +495,47 @@
      읽기는 tools — 범위 계정은 **자기 법인 예외 · 자기 법인 발송 기록만**(비관리자는 주소 가림 · 제목의 IPv4 가림) · 채널 URL 은 싣지 않는다(기존 알림 채널 설정의 사본만 쓴다).
   ⑦ **시험 실행(`POST /perf-rules/dry-run`)** = admin + **fullScopeOnly**(이 노드 전 서버를 대 본다 — 이름 · 법인이 실린다) + tools · 보내지 않고 상태도 바꾸지 않는다. (archScan `route-gate-missing` 이 이 게이트 누락을 잡았다.)
 
+- ⚠⚠ **리눅스 성능 7b단계 — SSH 키 저장소 · 법인 공통 계정 · 서버 등록(CSV/Excel) 업로드의 권한 · 비밀 · 범위**
+  (`bmusage/onboard/{keyParse,keyStore,keyBundle,refs,importParse,importAnalyze,onboardRun,edgeDeploy,edgeApply,missing,connTest}.js` · `routes/api/bmOnboard.js` ·
+  회귀 `server/test/bmOnboard7b{Keys,Import,Edge,Missing}.test.js`):
+  ① **키 · 공통 계정 관리**(등록 · 이름/회전 예정 · passphrase · 회전 · 삭제 · 계정 저장/삭제) = `adminOnly → tools → requireSettingsOwner(소유자 ∧ 전체 범위) → reauth(본인 OTP)` —
+     **reauth 는 마지막**: 권한이 없는 요청(소유자 아님 · 범위 소유자)이 OTP 코드를 소모하지 않는다(⑨ 가 순서를 고정). 감사 로그에는 이름 · 종류 · 지문 · code 만.
+  ② **응답 · 감사 · 내보내기 · 백업 · 엣지 설정 push 에는 지문 · 공개키만** — 라우트는 원본 목록(`listKeysRaw` · `listAccountsRaw` · `keyMaterial` · `resolveOsAuth`)을
+     쓰지 않는다(소스 스윕 ⑩). 접속 자격 원본은 `refs.withResolvedAuth`(폴러) · `connTest.testSavedOs`(연결 시험)만 만든다.
+     번들(`backup/service.js putCollected` — 백업과 엣지 push 가 같은 함수)은 ssh-keys.json 의 개인키 · passphrase · 비밀번호를 **봉인본도 싣지 않는다**(`keyBundle.redactKeyStoreText`) ·
+     복원은 지금 파일의 같은 지문 · 같은 계정의 저장값(봉인 그대로)을 옮겨 붙이고 못 살린 항목은 빼며 `envKeysDropped` 로 밝힌다.
+  ③ **키 판정은 키 자체로**(사람이 적은 종류 · 지문을 받지 않는다): DSA · RSA<2048 · 공개키만 · PKCS#8(ssh2 미지원) · 여러 개 · 틀린 passphrase 거부.
+  ④ **저장소 손상 = 쓰기 거절(503)** — 로드를 **먼저** 하고 오류를 본다(⑦ 이 잡은 결함: 첫 호출이 쓰기면 오류 상태가 비어 손상 파일을 빈 저장소로 덮어썼다).
+     정책 잠금(S-07)은 `SECRETS_POLICY_UNAVAILABLE` 그대로 · 메모리도 바꾸지 않는다(사본 수정 → 봉인 · 원자적 쓰기 → 성공 뒤 캐시 교체).
+  ⑤ **주소가 바뀌면 키 · 공통 계정 참조도 승계하지 않는다**(bm-storage `keyRef` · `credRef` — host · port · 계정, secretCarry 와 같은 판정 · `droppedSecrets`).
+     공통 계정은 법인 · 종류 · 계정명이 바뀌면 비밀번호 · 기본 키를 잇지 않는다. 키를 못 찾으면 **비밀번호로 몰래 넘어가지 않고** 접속하지 않는다(authError).
+  ⑥ **업로드**(`POST /tools/bm-usage/onboard/{analyze,apply}`) = admin + tools + `data.csv` + 데모 계정 403 · BIG_JSON(세션 풀 · `sessionBigBodyAllowed` 의 `ONBOARD_UPLOAD`) ·
+     파일 4MB · 5,000행 · 칸 1,024자 · .xlsx 는 압축 폭탄 가드(`svcmon/formats.js assertXlsxSizeOk` — 실제로 풀며 상한) · 파일 미보관 ·
+     **비밀 칸 값은 읽지 않고 그 행 거부 · 칸 내용이 키 블록 · password= 꼴이면 거부 · 자격 칸(os_cred · idrac_cred · os_key) 값은 결과 · 결과 CSV 에 다시 싣지 않는다** ·
+     결과 CSV 는 `csvLine`(수식 주입 `= + - @` 가드).
+  ⑦ **범위는 행 단위**(archScan `ROUTE_GATE_ALLOW` 에 사유): 조회 밖 법인 = '없는 법인' 과 같은 문구(corp-not-found — 404 꼴, 존재 은닉) → 쓰기 밖 = corp-forbidden(403 꼴) ·
+     바꾸려는 **기존 항목의 법인**도 쓰기 범위 · 미귀속 행 · 귀속 없는 기존 항목은 전체 범위만. 적용은 같은 파일을 **다시 분석**한 서명이 사람이 본 서명과 같을 때만(다르면 409).
+  ⑧ 연결 시험(`POST /onboard/test`)은 **id 만** 받는다(v2.480 — 요청 host 무시) · 한 번 · 인증 거부는 '정지 후보' 안내(자동 재시도 없음) · 호스트키 미신뢰는 peerTrust 승인 안내.
+  ⑨ **(r2 메인 결정 — 감사 H-1 · 반증 F1 · F1-b · F19 · Q4 · L-11) 저장된 비밀을 주소에 묶는 것 = 그 비밀을 관리하는 등급**: 공통 계정 · SSH 키 **이름**을 새 항목 · 주소가 바뀐 항목 ·
+     다른 묶음에 쓰는 CSV 행(`importAnalyze` binds) · `POST /tools/bm-storage/servers` 의 keyRef · credRef(`bmstor.js bmBindCheck` — 존재 · 퇴역 · 종류 확인) · iDRAC 공통 계정 사본 ·
+     엣지 배포 행은 **설정 소유자 등급 + 본인 OTP**(`runGate(requireSettingsOwner)` → 서명 대조 → `runGate(reauth)` 마지막). 비소유자 · 범위 관리자는 **계정 · 키를 찾기 전에** `bind-owner-only`
+     (다른 법인 계정 · 없는 키를 가르는 오라클 없음) — 개별 계정(개별:계정명)으로만 올린다. 주소 · 묶음이 그대로인 행은 묶음이 아니다(변화 없음).
+     공통 계정을 쓰면 접속 계정명은 **계정 쪽**(F19) · 퇴역 키는 접속에 쓰지 않는다(`keyMaterial` key-retired). 회귀 `bmOnboard7bReview` ① ⑨ · 변이 N1~N6.
+     감사 권고 ②(peerTrust 를 경로별로 강제 — observe 정책에서도 미승인 상대에 저장 비밀을 보내지 않기)는 **이번에 하지 않았다** — 묶는 권한을 소유자 + OTP 로 올려
+     권한 상승 경로(범위 · 비소유자 관리자가 비밀의 행선지를 고르는 것)가 닫혔고, 소유자 자신이 observe 정책에서 새 주소에 묶는 것은 의도된 동작이다. 화면이 'observe 면 첫 접속에 지문 승인 없이 보낸다' 를 밝힌다.
+  ⑩ (r2) 범위 계정: 범위 밖(조회 밖 법인 · 귀속 없음) 기존 항목 · 배포 행과 겹치는 행은 **신규와 같은 꼴**로 보이고(`plan.hidden` — 응답에 없음) 적용 단계에서 막는다(수만 `blocked`) —
+     존재 오라클 차단(감사 L-1 · 반증 F18). class 는 전체 범위만 · purposes/role 은 그 service_tag 가 쓰기 범위 안 수집 대상으로 해석될 때만(감사 M-2 · F10).
+     키 목록은 범위 계정에 주지 않고 · 공통 계정은 자기 법인 소속만(공용 이름 · 사용처 없음 — L-7). 키 저장소는 복호 실패가 있으면 쓰기 거절(F5 — 봉인본이 유일한 사본).
+     복원은 ssh-keys.json 을 **합집합**으로 병합(백업 뒤 키를 지우지 않음 · `sshKeysKept` — F13) · 중앙은 엣지 설정 사본의 ssh-keys.json 도 다시 가린다(L-3).
+  ⑪ (r3 · 재검증 R-N1) **묶음 판정은 `bmusage/onboard/bindRule.js` 하나 + 등록부 choke point**. R-N1: 소유자가 묶은 서버(credRef + osAuth=password)를 비소유자 · 범위 관리자가
+     `os_cred` 빈칸 + `os_key=password` + 새 주소로 올리면 예전 분석은 '이름을 쓰는 행' 만 묶음으로 봐 통과시켰고, 적용 계획이 기존 credRef 를 **명시로** 다시 실어
+     bm-storage 의 '주소가 바뀌면 버림' 가드를 지나 공통 계정 비밀번호가 새 주소로 나갔다(가짜 sshd 수신 재현). 고친 것:
+     (가) `bindDecision(existing, next)` — 토큰(접속처 = host · port · 계정, accessMoved 와 같은 정규화 · 참조 · osAuth)으로 '효력 참조가 있고 (새 항목 · 이동 · 다른 참조)
+     이거나 같은 주소에서 공통 계정의 인증 방식을 바꾼다' 를 판정. 분석(계정 · 키를 찾기 **전** 이름 토큰 + 찾은 뒤 적용 본문 그대로 `bindOfWrite`) · `bmBindCheck` ·
+     등록부가 같은 함수를 쓴다(예전 조각 `bindOs` · 라우트의 moved 계산은 지웠다 — 스윕). (나) **`bmstor/registry.js applyServerInput` = choke point**: 묶음 쓰기는
+     `bindApproved === true`(엄격) 일 때만 묶고, 아니면 주소가 바뀐 쓰기는 참조를 버리고 같은 주소면 기존 참조 · osAuth 를 둔다(`bindRefused` · `droppedSecrets`) · 떼기는 된다 ·
+     표지는 저장하지 않는다. 표지를 세우는 곳은 셋뿐(소스 스윕 ⑫): bm-storage 라우트(소유자 게이트 → OTP 게이트 **뒤** · 클라이언트가 보낸 값은 버림) ·
+     온보딩 적용(`plan.binds` — 라우트가 소유자 + OTP 를 통과시킨 행) · 엣지 적용은 같은 applyOnboard 를 지나되 **엣지 문맥의 소유자 = 행의 중앙 승인 `bindOk === true`**
+     (중앙 적용이 묶음 행에만 싣고, 묶음 칸 — 주소 · 이름 — 이 그대로인 갱신만 앞 승인을 잇는다). 엣지 쪽 기존 항목을 중앙이 모르므로 '잇는'(os_cred 빈칸 + os_key) 배포 행은
+     늘 묶음으로 본다 · 다른 엣지로 옮기는 행은 그 엣지에겐 새 묶음. 회귀 `bmOnboard7bReview` ⑩(h18 — 비소유자 · 범위 관리자 · 가짜 sshd 수신 0) ⑪(h20 — choke point ·
+     일괄 · 온보딩 · 엣지) ⑫(스윕) · 변이 R1~R10. 키 회전(`replaceBmServerKeyRefs` — 같은 주소의 키 교체, 소유자 + OTP 라우트)은 choke point 를 지나지 않는다(주소 불변).

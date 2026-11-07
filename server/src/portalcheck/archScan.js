@@ -65,6 +65,12 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'DELETE /api/tools/bm-usage/port-map': 'portMapWrite(remove) — 조회 범위 404 → inUserWriteScope 무조건 403 · v2.922 반증 D1',
   // v2.923 베어메탈 용도 태그(기능 · 역할 — 판정 기준이고 서버에 쓰지 않는다): 같은 규칙(조회 밖 404 → 쓰기 밖 403 무조건)
   'PUT /api/tools/bm-usage/purpose': 'purposeWrite — resolvePerfTarget(조회 범위 404) → inUserWriteScope 무조건(403) · v2.923',
+  // routes/api/bmOnboard.js — 7b 서버 등록: 행마다 법인 판정(analyzeOnboardRows — 조회 밖 corp-not-found(404 꼴) → 쓰기 밖 corp-forbidden(403 꼴) ·
+  //   바꾸려는 기존 항목의 법인도 쓰기 범위 · 미귀속 · 귀속 없는 기존 항목은 전체 범위만). 적용은 같은 파일을 다시 분석한 서명이 같을 때만.
+  'POST /api/tools/bm-usage/onboard/analyze': 'analyzeOnboardRows — 행마다 inUserScope(밖 = 없는 법인 문구) → inUserWriteScope(403 꼴) · 기존 항목 법인 · 미귀속은 전체 범위만 · 7b',
+  'POST /api/tools/bm-usage/onboard/apply': 'analyzeOnboardRows 재분석(같은 범위 판정) + 서명 대조 · 거부 행은 적용 안 함 · 7b',
+  'DELETE /api/tools/bm-usage/onboard/edge-rows': '배포 행 법인 inUserScope(밖 404) → inUserWriteScope(403) · 귀속 없는 행은 전체 범위만 · 7b',
+  'POST /api/tools/bm-usage/onboard/test': '저장 항목 법인 inUserScope(밖 404) → inUserWriteScope(403) · 귀속 없는 항목은 전체 범위만 · 주소는 저장값(v2.480) · 7b',
   // routes/admin/backupNetSec.js — denyScopedRun·writeScopedVcenterIds·denyGuestScanOutOfScope(v2.606 AUTHZ2606)
   'PUT /api/admin/vclogs/settings': 'denyScopedRun — 범위 계정 403(v2.606)',
   'POST /api/admin/vclogs/collect': 'denyScopedRun — 범위 계정 403(v2.606)',

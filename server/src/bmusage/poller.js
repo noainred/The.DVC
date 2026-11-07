@@ -27,6 +27,7 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../proxy/sshExec.js';
 import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
 import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS } from './settings.js';
+import { withResolvedAuth, authCredOf } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
 import { resolveTargets } from './targets.js';
 import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
@@ -356,7 +357,8 @@ export async function currentTargets() {
   })();
   const bmServers = (() => {
     try {
-      const list = listBmServersRaw();
+      // 7b: 키 · 공통 계정 참조를 접속 자격으로 해석한다(refs.resolveOsAuth 하나 — 연결 시험과 같은 판정). 해석 실패는 authError 로 남아 접속하지 않는다.
+      const list = withResolvedAuth(listBmServersRaw());
       const le = typeof bmRegistryLoadError === 'function' ? bmRegistryLoadError() : null;
       // v2.744(최종 검토 FB — RD-R1·RG2744-03): 원문(le.reason — JSON.parse 메시지의 파일 조각)이 아니라 요약(registrySourceError).
       if (le) sourceErrors.push(registrySourceError('os-registry', (why) => `OS 계정 등록부를 읽지 못했습니다 — 대상 서버가 no-os-cred 로 보일 수 있습니다(${why})`, le));
@@ -454,7 +456,8 @@ function authDev(target) {
   if (!target.osHost) return null;
   return {
     id: `${config.agent?.name || 'central'}|os|${target.key}`,
-    username: target.osHost.username, password: target.osHost.password,
+    // 7b: 키 인증은 키 지문을 자격 지문으로 — 키를 바꾸면(회전) 정지가 풀리는 신호가 된다(bmstor 폴러와 같은 refs.authCredOf 하나).
+    username: authCredOf(target.osHost).username, password: authCredOf(target.osHost).password,
   };
 }
 /**

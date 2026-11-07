@@ -11,6 +11,7 @@ import { ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
+import { rttLine } from './bmOnboardText.js'; // 7b: 중앙 직접 수집 법인 RTT(서버 rttHigh 그대로)
 import {
   nodeStateView, FLAG_TEXT, REASON_TEXT, REASON_STATE_TEXT, INFO_TEXT, PATH_TEXT, msText, pctText1, gbText, cycleText, concText, sshText, reasonsLine, daysSince,
   trendPaths, trendRangeText, COLLECT_HONEST, collectCsv, collectCsvName, unknownText, peakReasonText, NODE_ERROR_TEXT, famLine,
@@ -44,7 +45,8 @@ export function CollectHealthView({ resp, now = Date.now() }) {
               return (
                 <tr key={`${r.agent}|${r.vcenterId}`}>
                   <td data-sort={r.vcenterId}>{r.vcenterId || '귀속 없음'}</td>
-                  <td data-sort={r.agent}>{r.agent || '—'}<div className="bmo-sub">{r.via === 'edge' ? '엣지' : '이 노드'}</div></td>
+                  <td data-sort={r.agent}>{r.agent || '—'}<div className="bmo-sub">{r.via === 'edge' ? '엣지' : '이 노드'}</div>
+                    {(() => { const rl = rttLine(r); return rl ? <div className="bmo-sub" style={{ color: toneVar(rl.tone) }}>{rl.text}</div> : null; })()}</td>
                   <td className="right" data-sort={r.servers ?? ''}>{r.servers ?? '—'}</td>
                   <td className="right" data-sort={r.cyclePct ?? ''}>{r.nodeHidden ? <span className="bmo-sub">노드 값 숨김</span> : cycleText(r.cycleMs, r.budgetMs)}</td>
                   <td className="right" data-sort={r.successPct ?? ''}>{pctText1(r.successPct)}</td>

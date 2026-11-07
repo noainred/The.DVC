@@ -145,6 +145,40 @@ export function setFleetPurpose(key, value, { by = '', knownApps = [], knownRole
   return { ok: true, purpose };
 }
 
+/**
+ * 7b 온보딩 일괄 — 분류 태그 · 용도/역할을 **한 번** 쓴다(1,000행이 1,000번 쓰지 않게). 검증은 setFleetTag · setFleetPurpose 와 같은 규칙.
+ * @param {{key:string, tag?:string|null, purpose?:{apps?:string[], role?:string}|null}[]} items  tag/purpose 가 undefined 면 그 칸은 그대로
+ * @returns {{ok:true, tags:number, purposes:number} | {ok:false, reason:string, index?:number}}
+ */
+export function setFleetTagsBatch(items = [], { by = '', knownApps = [], knownRoles = [] } = {}) {
+  const tags = { ...loadFleetTags() };
+  const purposes = { ...purposesCache };
+  let nt = 0; let np = 0;
+  for (let i = 0; i < items.length; i += 1) {
+    const it = items[i] || {};
+    const k = String(it.key || '').trim().toLowerCase();
+    if (!k || k.length > 128 || k === '__proto__' || k === 'constructor' || k === 'prototype') return { ok: false, reason: 'key 형식이 아닙니다.', index: i };
+    if (it.tag !== undefined) {
+      if (it.tag == null || it.tag === '' || it.tag === 'auto') delete tags[k];
+      else if (VALID.has(it.tag)) tags[k] = it.tag;
+      else return { ok: false, reason: `잘못된 tag: ${it.tag}`, index: i };
+      nt += 1;
+    }
+    if (it.purpose !== undefined && it.purpose !== null) {
+      const apps = Array.isArray(it.purpose.apps) && it.purpose.apps.length ? [...new Set(it.purpose.apps.map(String))] : null;
+      if (apps && apps.some((a) => !PURPOSE_ID_RE.test(a) || !knownApps.includes(a))) return { ok: false, reason: '모르는 기능', index: i };
+      const role = it.purpose.role ? String(it.purpose.role) : '';
+      if (role && !knownRoles.includes(role)) return { ok: false, reason: '모르는 역할', index: i };
+      if (apps || role) { purposes[k] = { ...(apps ? { apps } : {}), ...(role ? { role } : {}), by: String(by || '').slice(0, 64), at: Date.now() }; np += 1; }
+    }
+  }
+  try { atomicWriteFileSync(FILE, JSON.stringify(fileBody(tags, purposes), null, 2)); }
+  catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+  cache = tags; purposesCache = purposes; cacheMtimeMs = fileMtimeMs();
+  bumpFleetRev();
+  return { ok: true, tags: nt, purposes: np };
+}
+
 /** 테스트/관리용 초기화. */
 export function resetFleetTags() {
   cache = {};

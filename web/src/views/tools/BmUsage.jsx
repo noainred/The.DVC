@@ -45,6 +45,7 @@ import { boardItems, allAuthStops } from './bmPerfText.js';
 // v2.923(리눅스 성능 4단계): 함대 ‘용도 분석’ · ‘장애 기록’ 보기(도구 키 그대로 — 이 화면 안의 보기 전환).
 import { BmPurposeFleet, BmFaultsFleet } from './BmOpsFleet.jsx';
 import BmPerfRulesPanel from './BmPerfRulesPanel.jsx';
+import BmOnboardPanel from './BmOnboardPanel.jsx'; // 7b단계 서버 등록 · SSH 키 저장소 · 누락 점검
 // 6단계: 서버 비교(2~5대) — 고른 서버 목록은 이 화면이 들고(보드 체크 · 상세 ‘비교에 추가’ · 병목 Top 5 · 용도 그룹) 비교 보기가 그린다.
 import BmCompareView from './BmCompareView.jsx';
 import BmCollectHealth from './BmCollectHealth.jsx'; // 6단계 수집 건강 보드(관리자 · 운영자)
@@ -923,6 +924,9 @@ export function BmUsage() {
 
           {/* ── v2.929(5단계) 리눅스 성능 알림 규칙 · 집중 모니터링 · 베이스라인 · 소모품 기준 — 별도 파일(bm-perf-rules.json) · 저장은 설정 소유자 ── */}
           <BmPerfRulesPanel vcenters={data?.vcenters || []} />
+
+          {/* ── 7b단계 서버 등록 · SSH 키 저장소 · 공통 계정 · 엣지 배포 목록 · 누락 점검(관리자) ── */}
+          <BmOnboardPanel vcenters={data?.vcenters || []} />
 
           {/* ── 엣지에 배포(v2.627) — 중앙의 전체 범위 관리자에게만 온다(서버가 distribution 을 null 로 준다). ── */}
           {data?.distribution && (
