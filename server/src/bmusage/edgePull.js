@@ -62,8 +62,13 @@ export function fitEnvelope(env, maxBytes = ENVELOPE_MAX_BYTES) {
   let out = { ...env, perf: (env.perf || []).map(compactPerfEntry) };
   let level = 'compact';
   let after = jsonBytes(out);
+  // 7a단계: 로그 요약은 성능 상세 다음으로 줄인다 — ① 상위 패턴의 표본 · 서명 글자 제거 ② (성능 항목 제거 뒤에도 넘치면) 상위 패턴 제거. 분류별 개수 · 출처 상태는 남는다. 뺀 사실은 logsTruncated.
+  let logLevel = null;
+  if (after > maxBytes && Array.isArray(out.logSummary)) { out = { ...out, logSummary: out.logSummary.map((x) => ({ ...x, top: (x.top || []).map(({ sample: _s, tmpl: _t, ...p }) => p) })) }; logLevel = 'compact'; after = jsonBytes(out); }
   if (after > maxBytes) { out = { ...out, perf: [] }; level = 'dropped'; after = jsonBytes(out); }
+  if (after > maxBytes && Array.isArray(out.logSummary)) { out = { ...out, logSummary: out.logSummary.map((x) => ({ ...x, top: [] })) }; logLevel = 'dropped'; after = jsonBytes(out); }
   out.perfTruncated = { reason: 'envelope-bytes', level, bytesBefore: before, bytesAfter: after, maxBytes, ...(after > maxBytes ? { overStill: true } : {}) };
+  if (logLevel) out.logsTruncated = { level: logLevel };
   return out;
 }
 
@@ -137,7 +142,21 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
     ...(perfError ? { perfError } : {}),
     // v2.929(5단계): 집중 모니터링 요약(진행 중 · 대기 · 최근 24시간 — 중앙 보드 ‘집중 n 건’ 칩 · 상세는 볼 때 엣지 대행으로) · 성능 알림 발송 기록(최근 24시간 · 채널 URL 없음).
     ...(await envelopeOps()),
+    // 7a단계: 로그 분석 요약(서버별 24시간 — 분류별 패턴/줄 · 읽은 양 · 상위 8 패턴 · 출처 상태). 원문 없음(가린 표본 1줄 · 서명 템플릿). 대상 목록 안의 서버만.
+    ...(await envelopeLogs(keys)),
   };
+}
+/** 7a단계 봉투 필드 — 표지(logsVer)는 첫 주기 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다 · 6단계 반증 F3). 실패해도 봉투는 나간다. */
+export const LOGS_VER = 1;
+async function envelopeLogs(keys) {
+  const out = { logsVer: LOGS_VER };
+  try {
+    const V = await import('./logs/view.js');
+    const sum = await V.logSummaryNow();
+    // 봉투에는 상위 5 · 표본 160자 · 서명 120자(1,000대 ≈ 2MB 안팎 추정 — 상세는 볼 때 대행). 넘치면 fitEnvelope 가 더 줄이고 밝힌다.
+    if (Array.isArray(sum?.list)) out.logSummary = sum.list.filter((x) => keys.has(t(x.key))).map((x) => ({ ...x, top: (x.top || []).slice(0, 5).map((p) => ({ ...p, tmpl: String(p.tmpl || '').slice(0, 120), sample: String(p.sample || '').slice(0, 160) })) }));
+  } catch { /* 그 필드만 빠진다 */ }
+  return out;
 }
 /** 5단계 봉투 필드 — 실패해도 봉투는 나간다(그 필드만 빠진다). */
 async function envelopeOps(now = Date.now()) {

@@ -311,6 +311,20 @@ collectorRouter.get('/bm-usage/baseline', tokenFirst('bm-usage-baseline'), (req,
 collectorRouter.get('/bm-usage/compare', tokenFirst('bm-usage-compare'), (req, res) => bmPerfOpsCollector(req, res, 'compare'));
 // 6단계 서버 비교 — 엣지 위임 서버 1대의 지표 여러 개 계열 통계(요청 1개 · 보관 없음 · central/bmComparePull.js). 대상 목록 밖 키는 404.
 collectorRouter.get('/bm-usage/compare-series', tokenFirst('bm-usage-compare-series'), (req, res) => bmPerfOpsCollector(req, res, 'compare-series'));
+/**
+ * 7a단계 — 로그 분석 엣지 대행(central/bmLogsPull.js pullEdgeLogs). 같은 url · 같은 토큰(새 포트 · 새 인증 없음) · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
+ *   집계 · 가린 표본 · 보안 상위만 돌려준다(원문 전체는 보관하지 않으므로 내줄 것이 없다). 보안 상위의 IP · 계정 가림은 중앙 라우트가 사람(관리자 판본 판정)에 맞춰 한다.
+ */
+collectorRouter.get('/bm-usage/logs', tokenFirst('bm-usage-logs'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const V = await import('../bmusage/logs/view.js');
+    const r = await V.logViewFor({ key: target.key, range: String(req.query.range || '24h').slice(0, 8) });
+    if (!r?.ok) return res.status(503).json(r || { ok: false, reason: '응답이 없습니다.' });
+    res.json(r);
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
 
 /**
  * 이 엣지의 **토큰 자기보고**(v2.560 — 사용자 요청 "등록된 모든 엣지/수집 서버의 모든 토큰 …

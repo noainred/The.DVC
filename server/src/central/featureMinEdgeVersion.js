@@ -11,9 +11,11 @@
 import fs from 'node:fs';
 import { currentVersion } from '../config.js';
 
-/** 5단계 · 6단계 표지(릴리스 노트 제목에 그대로 들어가는 문구). */
+/** 5단계 · 6단계 · 7a단계 표지(릴리스 노트 제목에 그대로 들어가는 문구). */
 export const STAGE5_TITLE_RE = /리눅스 통합 성능 모니터링 5단계/;
 export const STAGE6_TITLE_RE = /리눅스 통합 성능 모니터링 6단계/;
+/** 7a단계(로그 분석 — 봉투 logSummary · 엣지 대행 /bm-usage/logs) 표지. */
+export const STAGE7A_TITLE_RE = /리눅스 통합 성능 모니터링 7a단계/;
 
 const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 const _memo = new Map();   // re.source → 버전
@@ -40,4 +42,6 @@ export function featureMinEdgeVersion(titleRe, { notesFile = new URL('../release
 }
 /** 6단계(서버 비교 엣지 묶음 계열 · 수집 건강 봉투) 최소 엣지 버전. */
 export const stage6MinEdgeVersion = (o) => featureMinEdgeVersion(STAGE6_TITLE_RE, o);
+/** 7a단계(로그 분석 봉투 · 엣지 대행) 최소 엣지 버전. */
+export const stage7aMinEdgeVersion = (o) => featureMinEdgeVersion(STAGE7A_TITLE_RE, o);
 export function _resetFeatureMinEdgeVersionForTest(titleRe = null) { if (titleRe) _memo.delete(titleRe.source); else _memo.clear(); }

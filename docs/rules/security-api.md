@@ -26,6 +26,7 @@
 - (v2.923 추가) 베어메탈 진단 스냅샷(원격 명령 실행 경로) — 상수 명령 · 읽기 전용 · sudo 0 · 인자 0 · 사유 · 감사 · 동시 1건 · 법인당 하루 상한 · 범위 404/403 · 인증 가드
 - (v2.929 추가) 베어메탈 집중 모니터링(분마다 SSH · Redfish 를 여는 쓰기 경로) · 성능 알림 규칙 설정 · 시험 실행 — 스냅샷 규약 재사용 · 법인 상한 예약 · 인증 즉시 중단 · 설정 소유자 · 전체 범위
 - (6단계 추가) 리눅스 성능 6단계 — 비교(법인 간은 전체 범위만 · 범위 밖 = 없음) · 5대 집중(전부 검사 뒤 시작) · 주석(작성자/관리자 · 흔적 삭제) · 목표 저장(설정 소유자) · 플레이북 실행 경로 없음 · 공유 링크 권한 없음
+- (7a단계 추가) 리눅스 성능 7a단계 로그 분석 — 조회 범위 교집합 먼저 · 단건 404 · 보안 패널(IP · 계정)은 관리자 판본만 원문 · 쓰기 경로 없음 · 차단 · 잠금 없음
 
 ## 본문
 
@@ -458,6 +459,23 @@
      주석 목록이 엣지 호스트명(FQDN)을 비관리자에게 그대로 보내던 것을 막는다(응답은 `addressHidden:true` 라고 말하면서 원문을 실었다).
   ⑩ **범위 계정의 수집 건강 노드 상태**(반증 F8): 노드 값을 숨긴 노드는 상태도 숨기고(`hidden`) 법인 행은 그 법인 값으로 판정 — 다른 법인의 인증 정지가 ‘기준 밖’ 으로 새지 않는다.
   ⑧ **공유 링크는 권한을 주지 않는다**: 해시(`#/tools/bm-usage/share?…`)에는 보기 상태만 — 여는 사람의 권한 · 범위로 다시 조회한다(없으면 ‘찾지 못함’ — 존재 여부를 말하지 않는다). 캡처 PNG 는 브라우저가 화면을 그린 것(서버 경로 없음).
+- ⚠⚠ **리눅스 성능 7a단계 로그 분석의 권한 · 범위 · 가림(읽기 전용 — 새 쓰기 경로는 없다. 설정 · 규칙 저장은 5단계 perf-rules 하나)**
+  (`routes/api/bmLogs.js` · `central/bmLogsPull.js` · `edgelog/redact.js redactSystemLogLine`. 회귀 `server/test/bmLogs7a{Route,RoundTrip,Rules}.test.js`):
+  - 경로는 `/tools/bm-usage/perf/:key/logs` · `/tools/bm-usage/logs`(도구 키 ‘bm-usage’ 그대로 — toolGate 집행 · 테스트가 `toolKeyForPath` 로 고정) · `tools` + vCenter scope.
+    **조회 범위 교집합을 먼저**(`resolvePerfTarget` · 함대는 `applyScope` 뒤에 공통 원인 후보를 계산 — 범위 밖 서버가 후보 목록으로 새지 않게) · 범위 밖 · 귀속 없음(범위 계정) · 없는 키 = 같은 404.
+  - **누가 무엇을 보나** — 판정은 `isAdminDetailUser` 하나(`addressMask.isAdminReq`): 관리자(데모 계정 제외)는 실패 상위 IP · 계정 · 성공 로그인 · sudo(계정 → 대상 · 명령 이름) · 계정 변경 · 집중 IP ·
+    보안 패턴 표본까지. 그 밖은 **개수 · 분류 · 규칙은 같고** IP · 계정은 가림 토큰(`maskedIdToken` — 같은 값은 같은 토큰) · 보안 분류 패턴 표본은 싣지 않음(`samplesHidden`) · 다른 표본 · 연계 문구 ·
+    서버 이름은 공용 판정기(`perfAddressMatcher` — 엣지 대상 주소 포함) + IPv4 토큰. 근거: 로그인 실패 IP · 계정은 공격 표면 정보라 포탈 로그인 실패 분석(security/loginFails — 범위 계정 403)과 같은 등급.
+  - 응답 캐시 `memoJson` 열쇠 = 범위 서명 + **역할** + 마지막 수집 + 로그 주기 + 엣지 보관분 세대(관리자가 먼저 읽어도 비관리자는 가린 판본 — 테스트) · 엣지 대행 실패는 `__noStore`.
+  - **표본 가림**(`redactSystemLogLine` — 표본 5줄 · 서명 · 함대 표본 공통): 포탈 규칙(`redactLogLine`) + `pass=`/`pwd=`/`pw=`(소문자 — 대문자 `PWD=` 는 sudo 작업 폴더라 두었다) · `Authorization:` 줄 끝까지 ·
+    PEM 머리 줄 · 줄 전체 긴 base64 · 전자우편 · 주민번호 · 휴대전화 · 카드번호 · **sudo COMMAND 인자**. 줄 길이 먼저 자르고 길이 한정 반복만(ReDoS 비율 테스트). 완전할 수 없다 — 1차 방어는 원문 미보관.
+  - ⚠⚠ **가림 판정은 하나 — 표본 · 서명 · 보안 상위가 같은 줄에서 어긋나면 안 된다**(7a 반증 F7 — 서명 `templateFor` 가 `redactSystemLogLine` 을 건너뛰어 같은 줄의 표본은 [가림] 인데 서명에
+    계정 · 메일 · 토큰이 나갔고, 비관리자 보안 상위는 토큰인데 서명에 계정 원문이 있었다): 서명 = 보안 꼴 치환(OpenSSH 연결 식별 꼴 · GPDB `user "…"` 포함) → **같은 줄에서 뽑은 계정 · 주소 값 치환**
+    (`scrubFacts`) → `redactSystemLogLine` → 경로 → `templateOf`. 보관 · 봉투 · 중앙 정제에서 읽을 때도 `maskStoredTmpl`(멱등)로 다시 댄다. 비관리자 판본은 보안이 아닌 표본 · 서명의 계정 꼴
+    (`role "x"` · `user=x` · `acct="x"`)도 토큰(`maskAccountForms`). GPDB 로그인 실패는 보안 분류(표본은 관리자만 · 반증 F11).
+  - **함대 노드 목록도 범위**(반증 F10): 범위 계정의 `/tools/bm-usage/logs` `nodes` 는 자기 범위 대상이 보이는 노드(이 노드 · 엣지)만 — 엣지 이름 · 상태 · 시각도 다른 법인 운영 정보다
+    (`/tools/bm-usage/edges` v2.600 AUTHZ-2600-07 과 같은 규약) · 뺀 수는 `nodesOmitted`.
+  - 포탈은 **차단 · 계정 잠금을 하지 않는다**(보안 판정은 알림 규칙 ‘logs’ 까지).
 - ⚠⚠ **v2.929 — 베어메탈 집중 모니터링(`POST /api/tools/bm-usage/perf/:key/focus` · `/focus/:id/stop`)은 분마다 SSH · Redfish 를 여는 쓰기 경로다 — v2.923 스냅샷 규약을 그대로 쓰고, 넘는 부분만 더했다**
   (`routes/api/bmPerfOps.js bmFocusStart · bmFocusStop` · `bmusage/focus/run.js` · `routes/collector.js /bm-usage/focus[/stop]` · `central/bmPerfOpsPull.js runEdgeFocus · stopEdgeFocus`.
   회귀 `server/test/bmPerf2929Focus.test.js`(실제 api 라우터 + 엣지 collector 라우트) · `bmPerf2929Alerts.test.js ⑥` · 변이 20건 전부 잡힘):

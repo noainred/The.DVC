@@ -113,6 +113,6 @@ test('행: 주기 맞춤으로 창이 줄면 노트로 밝히고 peak_window_s �
   const b3 = U.buildUsage({ target: { key: 'K' }, os: { ...os, peak: { windowS: 3, wantS: 3, server: {}, devices: {}, cycle: { capS: 10, plannedS: 3, reason: 'reduced' } } }, now: 5_000 });
   assert.equal(b3.row.peak_window_s, 3); assert.equal(b3.row.peak_src, 'window10');
   const src = fs.readFileSync(path.join(import.meta.dirname, '../src/bmusage/poller.js'), 'utf8');
-  assert.match(src, /collectOne\(tg, \{ trigger, intervalMs, prevRunMs, runT0: t0, peakPlan \}\)/, '결정을 수집에 넘긴다');
+  assert.match(src, /collectOne\(tg, \{ trigger, intervalMs, prevRunMs, runT0: t0, peakPlan(?:, logExtra: [^}]{1,200})? \}\)/, '결정을 수집에 넘긴다');   // 7a: 로그 읽기 exec 를 함께
   assert.match(src, /osStoreOpts\(storeOf\(\), peakPlan\)/);
 });

@@ -81,6 +81,18 @@ export function ruleCondition(id, ctx = {}, rule = {}, prevOn = null) {
     if (rule.cond === 'errors') return v === 'errors';
     return BAD_VERDICT.has(v);
   }
+  if (id === 'logs') {
+    // 7a단계 로그 분석 — 이번 주기에 로그를 읽은 서버만(못 읽음 · 권한 없음 · 예산 부족은 입력이 없다 = 보류). 조건 = 이번 주기 새 줄 중 장애 분류 · 보안 high 이상(집중 포함).
+    //   분류를 담는 출처를 하나도 못 읽은 주기(cover none — rules.js classCover)는 ‘없음’ 이 아니라 보류(null) — 못 읽음을 해소로 보지 않는다. 일부만 읽은 주기는 읽은 쪽으로 판정한다.
+    const lg = ctx.logs;
+    if (!lg || lg.read !== true) return null;
+    const f = Number(lg.faultLines) || 0; const sh = Number(lg.secHigh) || 0;
+    const blind = (c) => lg.cover?.[c] === 'none';
+    if (rule.cond === 'fault') return f > 0 ? true : blind('fault') ? null : false;
+    if (rule.cond === 'sec') return sh > 0 ? true : blind('sec') ? null : false;
+    if (f > 0 || sh > 0) return true;
+    return blind('fault') || blind('sec') ? null : false;
+  }
   if (id === 'profile') {
     const st = ctx.profile?.status;
     if (!st || st === 'none' || st === 'unknown') return null;
@@ -197,6 +209,12 @@ export function perfAlertOf(f, { corpName = '' } = {}) {
     const on = Object.entries(x.cells || {}).filter(([, v]) => v === 'true').map(([k]) => LBL[k] || k);
     return { key, severity: x.cells?.success === 'true' || x.cells?.db === 'true' || x.cells?.error === 'true' ? 'critical' : 'warning', title: capStr(`${head} 수집 건강 기준 밖 — ${on.join(' · ')}`, 200),
       detail: capStr(`베어메탈 사용률 › 수집 건강 보드에서 법인별 실패 사유 · 조치를 확인하세요. 재진입 가드가 다음 주기를 건너뛰기 전에 알리는 것이 목적입니다.`, 1_500) };
+  }
+  if (f.rule === 'logs') {
+    const lg = c.logs || {};
+    const parts = [lg.faultLines ? `장애 분류 ${lg.faultLines}줄` : '', lg.secHigh ? `보안 high 이상 ${lg.secHigh}줄${lg.bursts ? `(SSH 실패 집중 ${lg.bursts}건)` : ''}` : ''].filter(Boolean);
+    return { key, severity: lg.faultLines ? 'critical' : 'warning', title: capStr(`${head} 로그 — ${parts.join(' · ') || '장애 · 보안'}`, 200),
+      detail: capStr('이번 주기에 새로 읽은 로그 줄의 분류 결과입니다(규칙 · 근거 · 가린 표본은 서버 상세 › 로그 탭). 포탈은 차단 · 계정 잠금을 하지 않습니다 — 조치는 담당자가 합니다.', 1_500) };
   }
   if (f.rule === 'focusEnd') {
     const s = c.summary || {};

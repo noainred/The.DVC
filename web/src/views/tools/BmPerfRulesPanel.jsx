@@ -25,6 +25,8 @@ const NUM_SECTIONS = Object.freeze([
   { k: 'compare', title: '구간 · 서버 비교', fields: [['diffPct', '구간 비교 차이 표시 ±%'], ['maxServers', '서버 비교 한 화면 상한(대)']] },
   // 6단계 수집 건강 — 보드 상태와 ‘수집 건강’ 알림 행이 같은 기준을 쓴다(DB 상한 0 = 없음 · DB 칸 판정 보류).
   { k: 'collect', title: '수집 건강 기준', fields: [['cyclePct', '주기 소요 % (예산 대비 이상)'], ['successPct', '성공률 % (미만)'], ['dbPct', 'DB % (상한 대비 이상)'], ['dbCapGb', 'DB 상한 GB(0 = 없음)']] },
+  // 7a단계 로그 분석 — 출처별 주기당 줄 상한(넘친 줄은 ‘잘림’) · 보관 · SSH 실패 집중(같은 IP · 창 안 줄 수). 끄면 로그 읽기 exec 를 붙이지 않는다.
+  { k: 'logs', title: '로그 분석', fields: [['lineCap', '출처별 주기당 줄 상한'], ['keepDays', '보관(일)'], ['burstCount', 'SSH 실패 집중 — 줄 수'], ['burstWindowMin', 'SSH 실패 집중 — 창(분)']] },
 ]);
 
 /** 이 계정이 저장할 수 있나 — 설정 소유자 등급(소유자 ∧ 전체 범위) · 인증 꺼짐(Anonymous admin). 서버가 다시 막는다. */
@@ -128,6 +130,9 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
                   </label>
                 );
               })}
+              {sec.k === 'logs' && (
+                <label className="bmo-check" style={{ fontSize: 12 }}><input type="checkbox" disabled={ro} checked={form.logs?.on !== false} onChange={(e) => setForm((f) => ({ ...f, logs: { ...f.logs, on: e.target.checked } }))} />로그 읽기 켬(같은 SSH 세션 · 읽기 전용)</label>
+              )}
               {sec.k === 'focus' && (
                 <details><summary className="bmo-sub">자동 집중을 쓰는 법인(옵트인) — {(form.focus?.autoCorps || []).length}곳</summary>
                   <div className="bmr-corps">{vcenters.map((vc) => (
