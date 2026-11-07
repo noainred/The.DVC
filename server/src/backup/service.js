@@ -130,7 +130,7 @@ export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json
   'central-svcmon-assign.json',
   // 2026-10-09 검토 S-01·S-02: 장비 지문 신뢰(peer-trust.json)는 승인·정책(설정)과 연결마다 바뀌는 lastSeen·lastSeenCount(실행)를 한 파일에 둔다.
   'peer-trust.json',
-  // v2.933(C-②): SAN 플로우 모니터 기록 — 플로우 정의(설정)와 15분마다 바뀌는 카운터 · 권한 점검 결과(실행)를 한 파일에 둔다.
+  // v2.934(C-②): SAN 플로우 모니터 기록 — 플로우 정의(설정)와 15분마다 바뀌는 카운터 · 권한 점검 결과(실행)를 한 파일에 둔다.
   'san-flows.json']);
 // 실행 필드 — last* 와 사용 횟수(useCount). 설정이 아니다.
 const RUN_FIELD_RE = /^(last[A-Z]|useCount$)/;
@@ -160,7 +160,7 @@ export const MIXED_EXTRA_RUN_FIELDS = new Map([
   }],
   // v2.830: 백업 그룹의 실행 상태 — 보내는 중 표지(sending)·놓친 회차(missed). lastKey·lastFire 는 last* 규칙이 뺀다.
   //   그룹 정의(이름·VM·스케줄·스토리지·anchorAt·고친 사람)만 남긴다 — 예약 회차마다 change 백업이 생기지 않게.
-  // v2.933(C-②): 플로우 카운터 · 직전 카운터 · 활성 여부 · 권한 점검 결과는 실행 — 15분 카운터 주기마다 change 백업이 생기지 않게.
+  // v2.934(C-②): 플로우 카운터 · 직전 카운터 · 활성 여부 · 권한 점검 결과는 실행 — 15분 카운터 주기마다 change 백업이 생기지 않게.
   ['san-flows.json', (obj) => {
     if (!obj || typeof obj !== 'object') return obj;
     const FLOW_RUN = new Set(['counters', 'prevCounters', 'prevAt', 'active']);

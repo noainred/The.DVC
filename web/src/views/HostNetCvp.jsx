@@ -6,7 +6,7 @@ import { basisOf, bpsText, errText, dropText, daySumText, speedText, portLabel, 
 import { agoText } from './tools/relTime.js';
 
 export default function HostNetCvp({ data, nics = [], hostId = null, onReload = null }) {
-  const [loc, setLoc] = useState({ busy: false, text: '', error: '' });   // v2.933(C-③) 지금 조회
+  const [loc, setLoc] = useState({ busy: false, text: '', error: '' });   // v2.934(C-③) 지금 조회
   if (!data) return null;
   const locate = () => {
     if (!hostId) return;

@@ -1,4 +1,4 @@
-// v2.933(SAN·CVP 설계 C-③): VM 상세 ‘네트워크 위치(CVP)’ 카드 — vNIC MAC 마다 CVP EndpointLocation 이 답한 스위치 · 포트 · VLAN · 학습 시각과
+// v2.934(SAN·CVP 설계 C-③): VM 상세 ‘네트워크 위치(CVP)’ 카드 — vNIC MAC 마다 CVP EndpointLocation 이 답한 스위치 · 포트 · VLAN · 학습 시각과
 //   지금 호스트 업링크와의 일치 여부. 열 때 1회 + 버튼(지금 조회 — admin · operator). 늦게 온 이전 응답은 버린다. 문구는 vmCvpLocText.js(순수).
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';

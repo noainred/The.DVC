@@ -1,5 +1,5 @@
 /**
- * vmCvpLocText.js — VM 상세 ‘네트워크 위치(CVP)’ 카드 문구(순수, v2.933 SAN·CVP 설계 C-③). 서버 /vms/:id/endpoint-locations 응답을 글자로.
+ * vmCvpLocText.js — VM 상세 ‘네트워크 위치(CVP)’ 카드 문구(순수, v2.934 SAN·CVP 설계 C-③). 서버 /vms/:id/endpoint-locations 응답을 글자로.
  *   판정은 서버(호스트 업링크 포트 집합과 비교)가 하고, 여기서는 이름 · 색 · 이유만 붙인다. 모르면 ‘판정 보류’ — ‘없음’ 으로 단정하지 않는다.
  */
 import { epCycleText } from '../hostNetText.js';

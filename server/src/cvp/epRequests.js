@@ -1,5 +1,5 @@
 /**
- * cvp/epRequests.js — EndpointLocation '지금 조회' 요청 큐(v2.933 SAN·CVP 설계 C-③). 엣지 위임 CVP 는 중앙이 직접 닿지 않는 것이 보통이라
+ * cvp/epRequests.js — EndpointLocation '지금 조회' 요청 큐(v2.934 SAN·CVP 설계 C-③). 엣지 위임 CVP 는 중앙이 직접 닿지 않는 것이 보통이라
  *   요청을 큐에 두고 엣지가 `/api/central/cvp-config` pull 때 `epNow` 로 가져가 현지에서 묻고 결과를 cvp-data push(ep)로 올린다.
  *   CVP 마다 한 건으로 모은다(같은 CVP 에 겹친 요청은 MAC 을 합친다 · 64개 상한). TTL 15분 — 가져가지 않으면 버리고 그 사실을 센다.
  *   비밀은 없다(MAC 목록뿐 — 엣지는 자기 등록부의 자격증명을 쓴다).

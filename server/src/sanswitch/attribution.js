@@ -8,9 +8,9 @@
  * 신뢰도 규약(화면의 ●/◐ 표기와 같다 — 조닝 그림 CONFIDENCE_LABEL 과 한 식구):
  *   · confirmed(● 확정) — 그 HBA 포트가 닿을 수 있는 스토리지가 **하나**이고 타깃 역할이 네임서버로 확정됐다. 포트 카운터 전부가 그 스토리지다.
  *       멀티패스의 경로별 타깃 WWN(hcfg.mp.targets — v2.920 수집)이 있으면 '지금 살아 있는 경로의 타깃' 으로 후보를 좁힌다(조닝 2개 → 실제 1개면 확정).
- *   · measured(● 실측 비율 — v2.933 C-①) — 후보가 2개 이상이고 그 호스트의 **ESXi 경로 카운터**(storpath — 경로별 읽기·쓰기)가 그 어댑터의 타깃별
+ *   · measured(● 실측 비율 — v2.934 C-①) — 후보가 2개 이상이고 그 호스트의 **ESXi 경로 카운터**(storpath — 경로별 읽기·쓰기)가 그 어댑터의 타깃별
  *       전송량을 쟀으면 그 비율로 나눈다(기간 안 표본 합 · 바이트 합은 스위치 포트 카운터). 라이선스가 필요 없다.
- *   · estimated(◐ 추정) — 실측이 없으면 **IPF 보정**(sanswitch/ipf.js — 행합 = 초기자 포트 · 열합 = 타깃 포트, v2.933)으로, IPF 를 못 쓰면
+ *   · estimated(◐ 추정) — 실측이 없으면 **IPF 보정**(sanswitch/ipf.js — 행합 = 초기자 포트 · 열합 = 타깃 포트, v2.934)으로, IPF 를 못 쓰면
  *       (미수렴 · 후보 타깃 포트가 이 스위치에 없음) **같은 스위치의 타깃 포트 바이트 비율**(A 단계)로 나눈다. 어느 방식인지 row.split 이 말한다.
  *       nsRoles 가 빈 패브릭은 타깃 역할 자체가 추정이라 후보가 하나여도 추정이다(없는 근거를 만들지 않는다).
  *   · unsplit(— 분배 불가) — 후보가 2개 이상인데 타깃 포트 바이트가 전부 없거나 0 이라 비율을 만들 수 없다. 합계에는 들어가되 어느 스토리지에도 주지 않는다.
@@ -33,7 +33,7 @@ import { numOrNull } from '../util/numOrNull.js';
 export const SPLIT_MODES = Object.freeze(['auto', 'ipf', 'ratio']);
 
 /**
- * v2.933(C-①): ESXi 경로 표본 가중치(storpath/history.js weightsFor · { kb: Map(`${adapter}|${wwn}` → KB) }) → 그 어댑터의 타깃 WWN 별 몫.
+ * v2.934(C-①): ESXi 경로 표본 가중치(storpath/history.js weightsFor · { kb: Map(`${adapter}|${wwn}` → KB) }) → 그 어댑터의 타깃 WWN 별 몫.
  *   그 어댑터 키가 하나도 없으면 null(잰 적 없음 — 0 이 아니다). 합이 0 이면(표본 창에 I/O 가 없었다) null — 비율을 만들 수 없다.
  */
 export function measuredSharesOf(pw, adapter) {
@@ -53,7 +53,7 @@ const lc = (w) => String(w || '').toLowerCase();
 const adapterShort = (k) => String(k || '').replace(/^key-vim\.host\.[A-Za-z]+-/, '').slice(0, 32);
 
 /**
- * v2.933(C-①): 스위치 스냅샷의 라이선스 목록(REST brocade-license · SSH licenseshow)에서 Fabric Vision(Flow Vision 포함) 여부.
+ * v2.934(C-①): 스위치 스냅샷의 라이선스 목록(REST brocade-license · SSH licenseshow)에서 Fabric Vision(Flow Vision 포함) 여부.
  *   있으면 'yes'(만료일은 장비 값) · 목록을 읽었는데 없으면 'no' · 목록을 못 읽었으면 'unknown'(rbash 계정의 licenseshow 막힘 등 — '없음' 으로 단정하지 않는다).
  */
 export function fabricVisionOf(snap) {
@@ -100,7 +100,7 @@ export function buildFabrics(snapshots = []) {
       agent: snap.agent || '', collectedAt: snap.collectedAt || null,
       portsComplete: !(snap.ports?.portsOmitted > 0) && !snap.ports?.truncated,
       portByWwn, names, aliasOf, roles, zonesOf, zoneCount: zones.length, nsKnown: Object.keys(nsRoles).length > 0,
-      fv: fabricVisionOf(snap),   // v2.933(C-①) Fabric Vision 라이선스
+      fv: fabricVisionOf(snap),   // v2.934(C-①) Fabric Vision 라이선스
     });
   }
   return out;
@@ -210,7 +210,7 @@ export function attributeHost(host, fabrics = [], { storageOf = null, portBytes 
       else if (!cands.size) conf = 'none';
       else if (cands.size === 1) { conf = roleEstimated ? 'estimated' : 'confirmed'; shares = [[cands.keys().next().value, 1]]; if (roleEstimated) basis += ' · 타깃 역할이 네임서버 확정이 아님'; }
       else {
-        // v2.933(C-①) ① 실측 비율 — ESXi 경로 카운터(그 어댑터의 타깃 WWN 별 전송량). 경로가 없는 후보는 실측 0 이다(그 어댑터로 그 타깃에 간 I/O 가 없다).
+        // v2.934(C-①) ① 실측 비율 — ESXi 경로 카운터(그 어댑터의 타깃 WWN 별 전송량). 경로가 없는 후보는 실측 0 이다(그 어댑터로 그 타깃에 간 I/O 가 없다).
         const ms = split === 'auto' ? measuredSharesOf(pathWeights, hba.name) : null;
         if (ms) {
           shares = [...cands.values()].map((c) => [c.idn.id, [...c.wwns].reduce((a, tw) => a + (ms.get(tw) || 0), 0)]);
@@ -302,7 +302,7 @@ export function attributeHost(host, fabrics = [], { storageOf = null, portBytes 
       add(totals, 'hostBytes', r.bytes);
       if (r.conf === 'confirmed') add(totals, 'confirmedBytes', r.bytes);
       else if (r.conf === 'estimated') add(totals, 'estimatedBytes', r.bytes);
-      else if (r.conf === 'measured') add(totals, 'pathMeasuredBytes', r.bytes);   // v2.933 — totals.measuredPorts(측정된 포트 수)와 이름이 겹치지 않게
+      else if (r.conf === 'measured') add(totals, 'pathMeasuredBytes', r.bytes);   // v2.934 — totals.measuredPorts(측정된 포트 수)와 이름이 겹치지 않게
       else if (r.conf === 'unsplit') add(totals, 'unsplitBytes', r.bytes);
       else add(totals, 'unattributedBytes', r.bytes);
     }

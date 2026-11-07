@@ -50,7 +50,7 @@ const _inFlight = new Map();
  * 정지 id 는 장비 id — 엣지는 자기 몫 장비·자기 정지 파일을 쓰므로 법인 사이에 충돌하지 않는다.
  */
 export const sanAuthGuard = createAuthGuard({ file: 'sanswitch-auth-stops.json' });
-/** v2.933(C-② 반증 L-11): 이 장비를 지금 수집 중인가 — 플로우 작업이 같은 스위치에 세션을 겹치지 않게 기다리는 데 쓴다. */
+/** v2.934(C-② 반증 L-11): 이 장비를 지금 수집 중인가 — 플로우 작업이 같은 스위치에 세션을 겹치지 않게 기다리는 데 쓴다. */
 export const isDeviceCollecting = (id) => _inFlight.has(String(id));
 
 /** 오류가 스위치 **자격증명 거부**인가(출처: ssh2 의 level·정식 문구, REST 로그인의 '인증 실패(401)'). */

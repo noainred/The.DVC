@@ -64,7 +64,7 @@ export default function HostDetail({ id }) {
       .catch((e) => { if (my === seq.current) setSt({ data: null, error: e }); });
   }, [id]);
 
-  // v2.933(C-③): CVP 위치 지금 조회 뒤 업링크 매칭을 다시 받는다(늦게 온 이전 응답은 seq 로 버린다).
+  // v2.934(C-③): CVP 위치 지금 조회 뒤 업링크 매칭을 다시 받는다(늦게 온 이전 응답은 seq 로 버린다).
   const reloadNet = () => {
     const my = seq.current;
     fetchJson(`/hosts/${encodeURIComponent(id)}/net-uplinks`).then((u) => { if (my === seq.current) setNet(u); }).catch(() => { /* 직전 값 유지 */ });

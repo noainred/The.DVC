@@ -106,7 +106,7 @@ test('② 함대 집계 — 호스트 × 스토리지 행 · 조닝만 · 개수
   const hosts = [hostX(), { id: 'h2', name: 'nohba', vcenterId: VC, hbas: [] }, { id: 'h3', name: 'unseen', vcenterId: VC, hbas: [{ name: 'vmhba1', wwn: H4 }] },
     { id: 'h4', name: 'esx02', vcenterId: VC, hbas: [{ name: 'vmhba1', wwn: H2 }] }];
   const f = A.attributeFleet(hosts, fabrics, { storageOf, portBytes: pb });
-  assert.deepEqual(f.counts, { hosts: 4, noHba: 1, unseen: 1, ok: 2, zonedOnly: 0, confirmedPairs: 1, measuredPairs: 0, estimatedPairs: 2, unsplitPairs: 0, zonedOnlyPairs: 0, ipfPorts: 0, ratioPorts: 1, measuredSplitPorts: 0 });   // v2.933 — 실측 · 분배 방식별 포트 수
+  assert.deepEqual(f.counts, { hosts: 4, noHba: 1, unseen: 1, ok: 2, zonedOnly: 0, confirmedPairs: 1, measuredPairs: 0, estimatedPairs: 2, unsplitPairs: 0, zonedOnlyPairs: 0, ipfPorts: 0, ratioPorts: 1, measuredSplitPorts: 0 });   // v2.934 — 실측 · 분배 방식별 포트 수
   const x = f.rows.filter((r) => r.hostId === `${VC}:h1`);
   assert.deepEqual(x.map((r) => [r.storageId, r.conf, r.confirmedBytes, r.estimatedBytes, r.measured]), [['st:st1', 'estimated', null, 1250, true], ['key:PowerStore::PS12345', 'estimated', null, 250, true]]);
   const y = f.rows.find((r) => r.hostId === 'h4');
@@ -125,7 +125,7 @@ test('③ hostcfg — 경로별 FC 타깃 WWN(어댑터별 live/dead) · 엣지 
   const m = P.parseMultipath(x);
   assert.deepEqual(m.targets, [
     { adapter: 'vmhba1', wwn: '50:00:4a:ab:0b:20:00:01', live: 2, dead: 0, luns: 2, rt: [] }, { adapter: 'vmhba1', wwn: '50:00:4a:ab:0b:20:00:02', live: 0, dead: 1, luns: 1, rt: [] },
-    { adapter: 'vmhba2', wwn: '50:00:4a:ab:0b:20:00:01', live: 1, dead: 0, luns: 1, rt: [] }]);   // v2.933 rt — 이 표본의 경로 이름('n')은 런타임 이름이 아니다
+    { adapter: 'vmhba2', wwn: '50:00:4a:ab:0b:20:00:01', live: 1, dead: 0, luns: 1, rt: [] }]);   // v2.934 rt — 이 표본의 경로 이름('n')은 런타임 이름이 아니다
   assert.equal(m.paths, 5); assert.equal(m.dead, 1);
   // 정제 — 아는 필드만 · WWN 표준형 · 어댑터 이름 · 배열이 아니면 키 없음(구버전 엣지)
   const s = P.sanitizeHostCfg({ mp: { luns: 1, targets: [{ adapter: 'vmhba1', wwn: '50:00:4A:AB:0B:20:00:01', live: 2, dead: -1, luns: 'x', extra: 1 }, { adapter: 'bad name', wwn: '50:00:4a:ab:0b:20:00:01' }, { adapter: 'vmhba2', wwn: 'nope' }, null, 'str'] } }).mp;

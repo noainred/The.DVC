@@ -1,5 +1,5 @@
 /**
- * v2.933(SAN·CVP 설계 C-②) — Brocade Flow Vision 플로우 모니터(도구 키 san-flow · ‘운영 작업’) + 반증 1인 확정분 회귀.
+ * v2.934(SAN·CVP 설계 C-②) — Brocade Flow Vision 플로우 모니터(도구 키 san-flow · ‘운영 작업’) + 반증 1인 확정분 회귀.
  *  ① 명령 조립 — 이름(dvc_ · 20자 이하 · 소문자 — 반증 H-1) · 포트 · WWN 화이트리스트 · 주입 거부 · 지우기는 dvc_ 만 · 출력 분류(이름 글자에 반응하지 않음 — L-5) · 정규식 비용(L-6)
  *  ② 출력 판독 — 오류 분류 · 카운터 표 · 못 읽으면 parsed:false(0 으로 단정하지 않는다)
  *  ③ 작업 큐 — 비밀 없음 · 그 엣지만 · 남은 시한(ttlMs) · 회신 정제 · pending 먼저 · 시한 뒤 늦은 회신 반영(M-2) · exists 판정(M-3) · 못 읽은 카운터(M-4)
@@ -15,8 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sanflow2933-'));
-Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true', CENTRAL_TOKEN: 'ctok-2933f' });
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sanflow2934-'));
+Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true', CENTRAL_TOKEN: 'ctok-2934f' });
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));
 fs.writeFileSync(path.join(DIR, 'permissions.json'), JSON.stringify({ schemaVersion: 3, matrix: { viewer: ['dashboard', 'tools', 'inv.hosts'], operator: ['dashboard', 'tools', 'inv.hosts'] } }));
 // 설정 소유자 = OTP 가 없는 계정의 재인증 경로(routes/api/reauth.js) — 'owner' 만 통과, 'adm' 은 막힌다.
@@ -172,7 +172,7 @@ before(async () => {
   cport = await new Promise((r) => central.listen(0, '127.0.0.1', () => r(central.address().port)));
   closers.push(() => new Promise((r) => central.close(() => r())));
 });
-const hdr = (agent) => ({ 'Content-Type': 'application/json', 'X-Central-Token': 'ctok-2933f', 'X-Agent-Name': agent });
+const hdr = (agent) => ({ 'Content-Type': 'application/json', 'X-Central-Token': 'ctok-2934f', 'X-Agent-Name': agent });
 
 test('④ 실제 중앙 라우트 — flowNow · flow-result agent 대조 · 기록 없는 dvc_', async () => {
   writeReg({ flows: [{ deviceId: 'sw-edge2', name: N1, state: 'active', srcdev: INI, dstdev: T1, ingrport: '1/12' }], checks: {} });
@@ -339,8 +339,8 @@ test('⑦ 속도 · 부분 합 · 엣지 버전 · 엣지 대행 소스', async 
   assert.equal(R.esxiBpsOf({ rKBps: 10, wKBps: 5 }), 15 * 1024);
   assert.equal(R.esxiBpsOf({ rKBps: 10, wKBps: null }), null);
   // 반증 M-7: 구버전 엣지
-  assert.match(R.flowEdgeIssue('edge-a', '2.932.0'), /2\.933\.0 이상/);
-  assert.equal(R.flowEdgeIssue('edge-a', '2.933.0'), null);
+  assert.match(R.flowEdgeIssue('edge-a', '2.932.0'), /2\.934\.0 이상/);
+  assert.equal(R.flowEdgeIssue('edge-a', '2.934.0'), null);
   assert.equal(R.flowEdgeIssue('edge-a', ''), null, '모르면 보낸다(시한이 지나면 결과 모름)');
   const src = fs.readFileSync(new URL('../src/agent/sanSwitchConfigPull.js', import.meta.url), 'utf8');
   const fn = src.slice(src.indexOf('async function runDelegatedFlow'), src.indexOf('export function startSanSwitchConfigPull'));

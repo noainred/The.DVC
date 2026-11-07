@@ -32,7 +32,7 @@ export const LIMITS = Object.freeze({
   //   기본값은 흔한 10G SR/LR 수신 감도 근처로 잡은 **추정**이다 — 현장 광 모듈에 맞춰 CVP 설정에서 바꾼다.
   xcvrRxWarnDbm: { min: -40, max: 0, def: -10 },
   xcvrRxFaultDbm: { min: -40, max: 0, def: -14 },
-  // v2.933(C-③): EndpointLocation 주기 수집 — 부품 주기(30분)마다 CVP 서버 하나에 묻는 MAC 수 상한(요청 1회 = MAC 1개 · 나머지는 다음 주기).
+  // v2.934(C-③): EndpointLocation 주기 수집 — 부품 주기(30분)마다 CVP 서버 하나에 묻는 MAC 수 상한(요청 1회 = MAC 1개 · 나머지는 다음 주기).
   endpointPerCycle: { min: 1, max: 2000, def: 200 },
 });
 
@@ -45,7 +45,7 @@ export function normalizeSettings(input = {}) {
    *   (파트 장애 v2.548 과 같은 opt-in — 켜지 않아도 전이 기록은 남는다). faultAlertsClosed — 해소도 알린다(기본 켬).
    *   판정은 중앙에서만 돈다(cvp/faultScan.js) — 엣지는 이 값을 받아도 쓰지 않는다.
    */
-  // v2.933(C-③): endpointScan — EndpointLocation 주기 수집(기본 켬 · CVP 수집 자체가 opt-in 이라 수집을 켠 CVP 에만 간다). 끄면 버튼 조회만 남는다.
+  // v2.934(C-③): endpointScan — EndpointLocation 주기 수집(기본 켬 · CVP 수집 자체가 opt-in 이라 수집을 켠 CVP 에만 간다). 끄면 버튼 조회만 남는다.
   const out = { enabled: src.enabled === true, faultAlerts: src.faultAlerts === true, faultAlertsClosed: src.faultAlertsClosed !== false, endpointScan: src.endpointScan !== false };
   for (const [k, l] of Object.entries(LIMITS)) {
     out[k] = clampSetting(src[k], l); // v2.613 DEPS2613-12: 빈 값·비숫자는 기본값(numOrNull 판정)
@@ -62,7 +62,7 @@ export function mergeSettings(cur, patch = {}) {
   if (typeof p.enabled === 'boolean') next.enabled = p.enabled;
   if (typeof p.faultAlerts === 'boolean') next.faultAlerts = p.faultAlerts;
   if (typeof p.faultAlertsClosed === 'boolean') next.faultAlertsClosed = p.faultAlertsClosed;
-  if (typeof p.endpointScan === 'boolean') next.endpointScan = p.endpointScan;   // v2.933(C-③)
+  if (typeof p.endpointScan === 'boolean') next.endpointScan = p.endpointScan;   // v2.934(C-③)
   for (const [k, l] of Object.entries(LIMITS)) {
     const n = numOrNull(p[k]);
     if (n == null) continue;            // 빈 칸·비숫자 = 미지정(이전 값 유지)

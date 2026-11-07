@@ -118,7 +118,7 @@ async function openInner() {
         fdb_at INTEGER, fdb_n INTEGER, fdb_truncated INTEGER, fdb_over_json TEXT, fdb_hash TEXT, fdb_fail_at INTEGER,
         lldp_at INTEGER, lldp_n INTEGER, lldp_truncated INTEGER, lldp_hash TEXT, lldp_fail_at INTEGER,
         PRIMARY KEY (agent, cvp_id, device_key));`);
-    // v2.933(SAN·CVP 설계 C-③): CVP EndpointLocation — MAC 마다 최신 위치 한 벌(교체) + 메타(물어본 시각 · 상태). vlan 은 모르면 -1.
+    // v2.934(SAN·CVP 설계 C-③): CVP EndpointLocation — MAC 마다 최신 위치 한 벌(교체) + 메타(물어본 시각 · 상태). vlan 은 모르면 -1.
     //   device 는 CVP 가 준 장비 식별자(보통 시리얼) — 화면은 device_latest 와 맞춰 호스트명을 붙인다. at 은 물어본 시각(이 노드 시계).
     conn.exec(`CREATE TABLE IF NOT EXISTS ep_loc (
         agent TEXT NOT NULL, cvp_id TEXT NOT NULL, mac TEXT NOT NULL, device TEXT NOT NULL, port TEXT NOT NULL, vlan INTEGER NOT NULL DEFAULT -1,
@@ -131,7 +131,7 @@ async function openInner() {
         PRIMARY KEY (agent, cvp_id, mac));
       CREATE INDEX IF NOT EXISTS idx_epmeta_at ON ep_meta (at);
       CREATE INDEX IF NOT EXISTS idx_epmeta_mac ON ep_meta (mac);`);
-    // v2.933 반증 L-5: 엣지 push 변경분 커서는 '물어본 시각' 이 아니라 쓸 때마다 늘어나는 순번(seq)이다 — 같은 at 이 상한 경계에 여럿이거나,
+    // v2.934 반증 L-5: 엣지 push 변경분 커서는 '물어본 시각' 이 아니라 쓸 때마다 늘어나는 순번(seq)이다 — 같은 at 이 상한 경계에 여럿이거나,
     //   늦게 커밋된 더 작은 at 이 있으면 시각 커서는 그 행을 건너뛰었다(재현). 이 브랜치의 개발 DB 에는 열이 없을 수 있어 없으면 더한다.
     { const have = new Set(conn.prepare('PRAGMA table_info(ep_meta)').all().map((r) => r.name));
       if (!have.has('seq')) { try { conn.exec('ALTER TABLE ep_meta ADD COLUMN seq INTEGER NOT NULL DEFAULT 0'); } catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; } }
@@ -494,7 +494,7 @@ export async function pruneDevices(agent, keepByCvp = {}, { cvpIds = null } = {}
   if (removed) _counts = null;
   // v2.924(B-② · 반증 L-2·L-6): 위임에서 빠진 CVP 의 L2 전체 · 목록을 받은 CVP 의 고아 L2(장비 행이 없는 키) — 조각으로 지운다.
   try {
-    for (const c of dropCvps) { await dropL2Where(db.conn, 'agent=? AND cvp_id=?', [agent, c]); await dropEpWhere(db.conn, 'agent=? AND cvp_id=?', [agent, c]); }   // v2.933 C-③
+    for (const c of dropCvps) { await dropL2Where(db.conn, 'agent=? AND cvp_id=?', [agent, c]); await dropEpWhere(db.conn, 'agent=? AND cvp_id=?', [agent, c]); }   // v2.934 C-③
     for (const cvpId of Object.keys(keepByCvp || {})) {
       if (!Array.isArray(keepByCvp[cvpId])) continue;
       /*
@@ -602,7 +602,7 @@ async function runAdopt(db, key, variants, chunkRows) {
   let moved = 0; let merged = 0;
   // v2.924(B-②): L2(LLDP·MAC 테이블)는 '장비마다 최신 한 벌' 이라 옮겨 합치면 두 시각의 목록이 섞인다 — 변형 이름의 행은 지운다.
   //   엣지가 지금 쓰는 이름(key)으로 다시 보내고(바뀐 장비 · 전량 갱신 주기), 그동안 매칭은 key 의 행만 쓴다.
-  for (const v of variants) { await dropL2Where(db.conn, 'agent=?', [v]); await dropEpWhere(db.conn, 'agent=?', [v]); }   // 반증 L-2: 조각으로 · v2.933 EndpointLocation 도
+  for (const v of variants) { await dropL2Where(db.conn, 'agent=?', [v]); await dropEpWhere(db.conn, 'agent=?', [v]); }   // 반증 L-2: 조각으로 · v2.934 EndpointLocation 도
   for (const v of variants) {
     for (const t of Object.keys(ADOPT_PK)) {
       const r = await adoptTable(db, t, key, v, chunkRows);
@@ -1222,7 +1222,7 @@ export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, no
     // v2.641: CPU·메모리 원시는 포트 원시와 같은 보존 · CVP 이벤트는 처음 받은 시각 기준 EVENT_RETENTION_DAYS.
     const d2 = await chunkedDelete(db.conn.prepare('DELETE FROM device_sample WHERE rowid IN (SELECT rowid FROM device_sample WHERE ts < ? LIMIT ?)'), [rawCut], { chunk: PRUNE_CHUNK });
     const e2 = await chunkedDelete(db.conn.prepare('DELETE FROM cvp_event WHERE rowid IN (SELECT rowid FROM cvp_event WHERE seen_at < ? LIMIT ?)'), [now - EVENT_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
-    // v2.933(C-③): EndpointLocation — 물어본 지 EP_RETENTION_DAYS 가 넘은 MAC(사라진 VM 등)은 지운다.
+    // v2.934(C-③): EndpointLocation — 물어본 지 EP_RETENTION_DAYS 가 넘은 MAC(사라진 VM 등)은 지운다.
     await chunkedDelete(db.conn.prepare('DELETE FROM ep_loc WHERE rowid IN (SELECT rowid FROM ep_loc WHERE at < ? LIMIT ?)'), [now - EP_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
     await chunkedDelete(db.conn.prepare('DELETE FROM ep_meta WHERE rowid IN (SELECT rowid FROM ep_meta WHERE at < ? LIMIT ?)'), [now - EP_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
     if (lost > 0) {
@@ -1509,7 +1509,7 @@ async function dropL2Where(conn, where, args) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
- * v2.933(SAN·CVP 설계 C-③) — CVP EndpointLocation(MAC → 지금 배운 스위치 · 포트). 경로 · 응답 필드는 추정(cvp/endpoint.js).
+ * v2.934(SAN·CVP 설계 C-③) — CVP EndpointLocation(MAC → 지금 배운 스위치 · 포트). 경로 · 응답 필드는 추정(cvp/endpoint.js).
  * ══════════════════════════════════════════════════════════════════════════════ */
 export const EP_RETENTION_DAYS = 8;
 export const EP_LOC_MAX = 16;   // MAC 하나의 위치 상한(트렁크 · MLAG 양쪽 · Vxlan)
@@ -1566,7 +1566,7 @@ export async function epMetaFor(agent, cvpId) {
   if (!db) return new Map();
   return new Map(db.conn.prepare('SELECT mac, at FROM ep_meta WHERE agent=? AND cvp_id=?').all(String(agent ?? ''), String(cvpId)).map((r) => [r.mac, Number(r.at)]));
 }
-/** 엣지 push — 순번 sinceSeq 뒤에 쓴 MAC 의 결과(메타 + 위치 + seq). 먼저 쓴 것부터 limit 개(v2.933 반증 L-5 — 시각 커서가 아니라 순번). */
+/** 엣지 push — 순번 sinceSeq 뒤에 쓴 MAC 의 결과(메타 + 위치 + seq). 먼저 쓴 것부터 limit 개(v2.934 반증 L-5 — 시각 커서가 아니라 순번). */
 export async function endpointsSince(agent, cvpId, sinceSeq = 0, limit = 500) {
   const db = await open();
   if (!db) return null;
@@ -1585,7 +1585,7 @@ export async function endpointsByMacs(macs = [], { owners = null } = {}) {
   if (!db) return { rows: [], meta: new Map(), unavailable: true };
   const list = [...new Set((Array.isArray(macs) ? macs : []).map((m) => String(m || '').toLowerCase().slice(0, 64).replace(/[^0-9a-f]/g, '')).filter((m) => /^[0-9a-f]{12}$/.test(m)))].slice(0, 256);   // 콜론 · 하이픈 표기도
   if (!list.length) return { rows: [], meta: new Map() };
-  // 담당 엣지 이름은 대소문자를 가리지 않는다(v2.933 반증 M-5 — 등록부 'Edge-A' · 저장 키 'edge-a' 행이 빠졌다).
+  // 담당 엣지 이름은 대소문자를 가리지 않는다(v2.934 반증 M-5 — 등록부 'Edge-A' · 저장 키 'edge-a' 행이 빠졌다).
   const own = Array.isArray(owners) ? new Set(owners.map((o) => `${String(o.agent ?? '').toLowerCase()}\u0000${o.cvpId}`)) : null;
   const ok = (r) => !own || own.has(`${String(r.agent ?? '').toLowerCase()}\u0000${r.cvp_id}`);
   const ph = list.map(() => '?').join(',');

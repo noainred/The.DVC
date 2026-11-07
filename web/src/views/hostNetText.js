@@ -7,7 +7,7 @@ import { numOrNull } from '../numOrNull.js';
 
 export const BASIS = Object.freeze({
   lldp: { label: '확정', note: 'LLDP 이웃', tone: 'green' },
-  endpoint: { label: '확정', note: 'CVP 위치(EndpointLocation) — CVP 가 이 NIC MAC 을 지금 배운 포트', tone: 'green' },   // v2.933(C-③)
+  endpoint: { label: '확정', note: 'CVP 위치(EndpointLocation) — CVP 가 이 NIC MAC 을 지금 배운 포트', tone: 'green' },   // v2.934(C-③)
   mac: { label: '높음', note: 'MAC 테이블 학습', tone: 'green' },
   'mac-vm': { label: '높음', note: 'MAC 테이블 — 이 호스트 VM MAC', tone: 'green' },   // v2.924(B-②)
   'desc-mac': { label: '보통', note: '포트 설명에 NIC MAC', tone: 'amber' },
@@ -121,13 +121,13 @@ export const SEVERITY_BADGE = Object.freeze({ critical: 'red', error: 'red', war
 export const eventTimeText = (ts) => (Number.isFinite(ts) ? new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
 
 /**
- * v2.933(C-③): CVP EndpointLocation 현황 한 줄 — 물어본 MAC 수 · 최근 시각 · 미지원 CVP · 대기 중인 요청.
+ * v2.934(C-③): CVP EndpointLocation 현황 한 줄 — 물어본 MAC 수 · 최근 시각 · 미지원 CVP · 대기 중인 요청.
  *   물어본 적이 없으면 그 사실만(‘위치 없음’ 으로 단정하지 않는다).
  */
 export function epStatusText(ep, now = Date.now()) {
   if (!ep) return '';
   if (ep.error) return 'CVP 위치(EndpointLocation)를 읽지 못했습니다';
-  // v2.933 반증 L-7: DB 를 못 읽은 것을 '아직 안 물음' 으로 말하지 않는다 · L-9: 주기 숫자 · 켜짐은 API 값으로.
+  // v2.934 반증 L-7: DB 를 못 읽은 것을 '아직 안 물음' 으로 말하지 않는다 · L-9: 주기 숫자 · 켜짐은 API 값으로.
   if (ep.unavailable) return 'CVP 위치 — 위치 DB 를 읽지 못했습니다(물어본 적이 없다는 뜻이 아닙니다)';
   const parts = [];
   parts.push(ep.macs ? `CVP 위치 — 물어본 MAC ${ep.macs}개${Number.isFinite(ep.lastAt) ? ` · 최근 ${ageText(ep.lastAt, now)}` : ''}` : `CVP 위치 — 아직 물어보지 않았습니다(${epCycleText(ep)})`);

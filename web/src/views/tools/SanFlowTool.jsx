@@ -1,4 +1,4 @@
-// v2.933(SAN·CVP 설계 C-②) SAN 플로우 모니터(도구 키 san-flow · ‘운영 작업’) — Brocade Flow Vision 플로우를 포탈이 만들고 · 지우고 · 카운터를 읽는다.
+// v2.934(SAN·CVP 설계 C-②) SAN 플로우 모니터(도구 키 san-flow · ‘운영 작업’) — Brocade Flow Vision 플로우를 포탈이 만들고 · 지우고 · 카운터를 읽는다.
 //   ⚠ 스위치 설정을 바꾸는 화면이다: 만들기 · 지우기는 본인 OTP 재인증 · 감사 로그. 명령은 서버만 만든다(미리보기도 서버가 만든 글자).
 //   무거운 폴링 금지 — 목록은 마운트 1회 + 버튼, 작업 기록만 진행 중일 때 1초 폴링(끝나면 멈춘다). 늦게 온 이전 응답은 버린다. 문구는 sanFlowText.js(순수).
 import React, { useEffect, useRef, useState } from 'react';

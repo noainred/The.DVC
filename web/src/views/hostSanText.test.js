@@ -16,7 +16,7 @@ describe('문구', () => {
   it('KPI — 확정·추정 따로 · 값 없음 —', () => {
     const k = sanKpis(d);
     expect(k[0].v).toBe('1.5 KB');
-    // v2.933(C-①): 확정 + 실측 비율(근거 있는 몫)과 추정(IPF · 포트 비율)을 따로 — 한 숫자로 합치지 않는다
+    // v2.934(C-①): 확정 + 실측 비율(근거 있는 몫)과 추정(IPF · 포트 비율)을 따로 — 한 숫자로 합치지 않는다
     expect(k[1].v).toBe('1000 B'); expect(k[1].s).toBe(`${CONF.confirmed.glyph} 확정 1000 B · ${CONF.measured.glyph} 실측 비율 —`);
     expect(k[2].v).toBe('≈ 500 B');
     expect(k[3].v).toBe('1.00 Gbps / —'); expect(k[4].v).toBe('—'); expect(k[4].s).toContain('아직 측정 전'); expect(k[4].s).toContain('멀티패스 타깃 3');

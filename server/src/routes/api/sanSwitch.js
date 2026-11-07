@@ -58,7 +58,7 @@ const toolsPerm = requirePerm('tools'); // 조회 라우트에도 기능 권한(
 // v2.612 AUTHZ2612-01·02: SAN 스위치 장비 등록·삭제·내보내기·수집·주기/임계 설정도 전 법인 공용이라 adminOnly 에 이 게이트를 함께 건다
 //   (조회만 막혀 있어 범위 제한 admin 이 다른 법인 장비를 내보내고 지울 수 있었다).
 const fullScopeOnly = fullScopeOnlyWith('SAN 스위치 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
-// v2.933(C-② 반증 L-1): 상태를 바꾸는 라우트는 쓰기 범위까지 전체여야 한다(writeVcenters 로 쓰기만 줄인 admin 이 지나갔다 — isFullReadWriteScope).
+// v2.934(C-② 반증 L-1): 상태를 바꾸는 라우트는 쓰기 범위까지 전체여야 한다(writeVcenters 로 쓰기만 줄인 admin 이 지나갔다 — isFullReadWriteScope).
 const fullRwOnly = fullReadWriteScopeOnlyWith('SAN 스위치 등록 · 수집 · 설정 변경은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다.');
 
 /*

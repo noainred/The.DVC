@@ -29,7 +29,7 @@ import { isMockMode } from '../mock/demo/flags.js';            // v2.708 데모(
 import { demoCvpCollect, ensureCvpDemo, isDemoId, cvpDemoActive, demoEndpoints } from '../mock/demo/cvp.js';
 import { store } from '../store.js';
 import { datacenterOfVcenter } from '../datacenter/store.js';
-import { pickEndpointMacs, noteVmHosts } from './endpoint.js';   // v2.933(C-③) EndpointLocation
+import { pickEndpointMacs, noteVmHosts } from './endpoint.js';   // v2.934(C-③) EndpointLocation
 import { normMac } from './parse.js';
 
 export const cvpAuthGuard = createAuthGuard({ file: 'cvp-auth-stops.json' });
@@ -104,13 +104,13 @@ export function applyDeltas(cvpId, dev, intervalMs, prevMap = _prevCounters, sla
 }
 
 /**
- * v2.933(C-③): 이번 부품 주기에 EndpointLocation 으로 물을 MAC — 이 CVP 법인(datacenterId)의 vCenter 호스트 NIC · 최근 이동 VM · 나머지 VM 순환.
+ * v2.934(C-③): 이번 부품 주기에 EndpointLocation 으로 물을 MAC — 이 CVP 법인(datacenterId)의 vCenter 호스트 NIC · 최근 이동 VM · 나머지 VM 순환.
  *   법인 미지정 CVP 는 이 노드 스냅샷 전체(엣지는 자기 법인 vCenter 만 가진다). 설정에서 끄면 null.
  */
 export async function endpointMacsFor(srv, settings, { now = Date.now(), snap = null } = {}) {
   if (settings?.endpointScan === false) return null;
   const s = snap || store.get?.() || {};
-  // v2.933 반증 H-1: 법인 할당표(datacenters.json)는 중앙에만 있다 — 엣지에서는 모든 vCenter 가 '' 로 읽혀 묻는 MAC 이 0개였다.
+  // v2.934 반증 H-1: 법인 할당표(datacenters.json)는 중앙에만 있다 — 엣지에서는 모든 vCenter 가 '' 로 읽혀 묻는 MAC 이 0개였다.
   //   엣지는 자기 법인 vCenter 만 수집하므로(법인 · vCenter 1:1) 엣지에서는 법인 필터를 건너뛴다.
   const dc = config.agent?.centralUrl ? '' : String(srv?.datacenterId || '');
   const inCorp = (vcId) => !dc || String(datacenterOfVcenter(vcId) || '') === dc;
@@ -145,7 +145,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
   const timeout = settings.deviceTimeoutMs;
   try {
     let r;
-    const epMacs = partsDue ? await endpointMacsFor(full, settings).catch(() => null) : null;   // v2.933(C-③)
+    const epMacs = partsDue ? await endpointMacsFor(full, settings).catch(() => null) : null;   // v2.934(C-③)
     try {
       r = demo ? await demoCvpCollect(full, { now: Date.now(), optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm } })
         : await withDeadline(timeout, (signal) => collectCvp(full, { signal, budgetMs: Math.max(20_000, timeout - 10_000), partsDue, prefer, optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm }, epMacs }), 'CVP 수집 시한 초과');
@@ -177,7 +177,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
     cvpAuthGuard.clearAuthStop(full.id);
     // v2.611(TIM2611-01): 부품을 **실제로 읽은 장비가 있을 때만** '부품 조회 시각' 을 올린다 — 예산·시한에 걸려 아무 장비도 못 읽은
     //   주기를 '읽었다' 로 적으면 다음 30분 동안 부품을 다시 보지 않고 화면은 partsRead 를 참으로 말한다.
-    // v2.933 반증 L-8: 위치 조회를 멈춘 · 건너뛴 사유를 콘솔에도 남긴다(무음 금지 — 같은 사유는 warnLog 가 묶는다).
+    // v2.934 반증 L-8: 위치 조회를 멈춘 · 건너뛴 사유를 콘솔에도 남긴다(무음 금지 — 같은 사유는 warnLog 가 묶는다).
     if (r.endpoints?.stopped) {
       const why = { budget: '수집 예산을 부품 단계가 다 써서 건너뜀', auth: '401 · 403 이 이어져 멈춤(자격증명 · 권한 확인)', conn: '연결 실패가 이어져 멈춤' }[r.endpoints.stopped] || r.endpoints.stopped;
       if (warnLog(`${full.id}:ep`, why)) console.warn(`[cvp] ${full.name || full.id}: EndpointLocation 위치 조회 — ${why} · 못 물은 MAC ${r.endpoints.cut || 0}개`);
@@ -237,7 +237,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
       const l2Items = r.devices.filter((d) => d.lldp !== undefined || d.fdb !== undefined)
         .map((d) => ({ key: d.key, ts: d.l2At ?? readAt, fdb: d.fdb, lldp: d.lldp, fdbMeta: d.fdbMeta, lldpTruncated: d.lldpTruncated, lldpPartial: d.lldpPartial === true }));
       if (l2Items.length) await db.saveL2(db.LOCAL_AGENT, full.id, l2Items);
-      // v2.933(C-③): EndpointLocation 결과(이번 주기에 물은 MAC 만 — 오류 · 미지원은 위치를 지우지 않고 메타만).
+      // v2.934(C-③): EndpointLocation 결과(이번 주기에 물은 MAC 만 — 오류 · 미지원은 위치를 지우지 않고 메타만).
       if (r.endpoints?.results?.length) await db.saveEndpoints(db.LOCAL_AGENT, full.id, r.endpoints.results);
     } catch (e) { saved = { error: e.message }; console.warn(`[cvp] ${full.name || full.id}: DB 적재 실패 — ${e.message}`); }
     putStatus(full.id, {
@@ -245,7 +245,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
       error: null, authStopped: null, usedPaths: r.usedPaths, missing: r.missing, seenFields: r.seenFields, truncated: r.truncated,
       cvpVersion: r.cvpVersion, partsRead: partsReadNow, ...(partsNotTried > 0 ? { partsDueUnread: true, partsNotTried } : {}),
       ...(pruneHeld ? { pruneHeld } : {}),
-      // v2.933(C-③): EndpointLocation 이번 주기 — 물은 수 · 위치 있음 · 없음 · 오류 · 미지원 · 예산으로 못 물은 수(부품 주기가 아니면 직전 값을 그대로 싣는다)
+      // v2.934(C-③): EndpointLocation 이번 주기 — 물은 수 · 위치 있음 · 없음 · 오류 · 미지원 · 예산으로 못 물은 수(부품 주기가 아니면 직전 값을 그대로 싣는다)
       ...(r.endpoints ? { endpoints: { at: readAt, asked: r.endpoints.results.length, ok: r.endpoints.results.filter((x) => x.status === 'ok').length, stopped: r.endpoints.stopped || null,
         none: r.endpoints.results.filter((x) => x.status === 'none').length, errors: r.endpoints.results.filter((x) => x.status === 'error').length,
         unsupported: !!r.endpoints.unsupported, cut: r.endpoints.cut || 0 } } : (getStatus(full.id)?.endpoints ? { endpoints: getStatus(full.id).endpoints } : {})),

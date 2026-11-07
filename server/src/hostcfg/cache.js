@@ -11,7 +11,7 @@ import { dropVcCache as dropTags } from '../tags/collect.js';
 //   쉬게 했다(dscfg·clustercfg 는 자기 dropVcCache 안에서 지운다 — 형제 비대칭). 순환 없음: 두 collect.js 는 config·parse·cache·dscfg/collect 만 import 한다.
 import { dropVcRetry as dropVmCfgRetry } from '../vmcfg/collect.js';
 import { dropVcRetry as dropContentionRetry } from '../contention/collect.js';
-import { dropVcCache as dropStorPath } from '../storpath/cache.js';   // v2.933(C-①)
+import { dropVcCache as dropStorPath } from '../storpath/cache.js';   // v2.934(C-①)
 import { dropVcRetry as dropStorPathRetry } from '../storpath/collect.js';
 import { dropVcCache as dropVcInfo, vcInfoIds } from '../vcinfo/collect.js'; // v2.898
 const _byVc = new Map();
@@ -92,7 +92,7 @@ const accessKeyOf = (vc) => String(vc?.host ?? '').trim().toLowerCase();
 const CACHE_DROPPERS = [
   dropVcCache, dropVmCfg, dropContention, dropDsCfg, dropClusterCfg, dropTags,
   dropVmCfgRetry, dropContentionRetry, // v2.727(F-04)
-  dropStorPath, dropStorPathRetry, // v2.933(C-①) ESXi 경로 카운터
+  dropStorPath, dropStorPathRetry, // v2.934(C-①) ESXi 경로 카운터
   dropVcInfo, // v2.898 vCenter 알람·작업·권한
 ];
 export function dropVcConfigCaches(vcId) { for (const d of CACHE_DROPPERS) d(vcId); }

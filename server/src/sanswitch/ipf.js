@@ -1,5 +1,5 @@
 /**
- * sanswitch/ipf.js — IPF(반복 비례 맞춤) 보정(v2.933 C-① — 설계 docs/design/san-cvp-traffic/README.md §4.1 · §9). 순수.
+ * sanswitch/ipf.js — IPF(반복 비례 맞춤) 보정(v2.934 C-① — 설계 docs/design/san-cvp-traffic/README.md §4.1 · §9). 순수.
  *
  * 무엇을 푸나: 스위치 하나에서 초기자 포트 i(호스트 HBA 등)의 기간 바이트 R_i 와 타깃 포트 t(스토리지)의 기간 바이트 C_t 를 안다(포트 카운터 — 확정값).
  *   조닝이 허용한 칸(i,t)에만 트래픽이 있을 수 있다. 행합 = R_i · 열합 = C_t 를 **동시에** 맞추는 표 x_it 를 찾아, 초기자 i 의 바이트를

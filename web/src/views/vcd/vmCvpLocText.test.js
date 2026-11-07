@@ -1,4 +1,4 @@
-// v2.933(C-③) — VM ‘네트워크 위치(CVP)’ 문구 · 호스트 업링크 블록의 EndpointLocation 문구.
+// v2.934(C-③) — VM ‘네트워크 위치(CVP)’ 문구 · 호스트 업링크 블록의 EndpointLocation 문구.
 import { describe, it, expect } from 'vitest';
 import { locRows, locSummary, verdictOf } from './vmCvpLocText.js';
 import { epStatusText, epLocateText, epDisagreeText, basisOf } from '../hostNetText.js';

@@ -10,7 +10,7 @@ import { ErrorBox, Loading, StateBadge, UsageCell, GpuBadge } from '../../compon
 import { STable } from '../../components/STable.jsx';
 import { VmIpPing, VmCfgSection, VmPartitionsSection, VmTagsSection, VmChangesSection, PerfcSection, ClusterCfgSection } from '../../components/EntityDetail.jsx';
 import { VmConsoleButton } from '../../components/VmConsole.jsx';
-import VmCvpLocation from './VmCvpLocation.jsx';   // v2.933(SAN·CVP 설계 C-③) 네트워크 위치(CVP)
+import VmCvpLocation from './VmCvpLocation.jsx';   // v2.934(SAN·CVP 설계 C-③) 네트워크 위치(CVP)
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { VmReconfigButton } from '../../components/VmReconfig.jsx';
 import { dayStamp } from '../../dayStamp.js';

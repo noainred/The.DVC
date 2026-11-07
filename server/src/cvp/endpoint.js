@@ -1,5 +1,5 @@
 /**
- * cvp/endpoint.js — CVP EndpointLocation(v2.933 SAN·CVP 설계 C-③ — docs/design/san-cvp-traffic/README.md §9). 파서 · 조회 · 대상 고르기.
+ * cvp/endpoint.js — CVP EndpointLocation(v2.934 SAN·CVP 설계 C-③ — docs/design/san-cvp-traffic/README.md §9). 파서 · 조회 · 대상 고르기.
  *
  * 무엇: CVP Resource API `GET /api/resources/endpointlocation/v1/EndpointLocation?key.searchTerm=<MAC|IP>` 는 '이 MAC 을 지금 어느 장비 ·
  *   어느 인터페이스에서 배웠나' 를 CVP 가 MAC · ARP · LLDP 표를 모아 답한다(CVP 2021.1+ · GetAll 없음 — MAC 하나에 요청 1회).
@@ -58,7 +58,7 @@ export function parseEndpointLocation(text) {
 }
 
 /**
- * 404 본문 판정(v2.933 반증 H-2 — 실장비 표본 전 추정). gRPC-gateway 오류 JSON 의 message 가 'Not Found' 보다 구체적(…not found)이면
+ * 404 본문 판정(v2.934 반증 H-2 — 실장비 표본 전 추정). gRPC-gateway 오류 JSON 의 message 가 'Not Found' 보다 구체적(…not found)이면
  *   '그 MAC 의 위치 없음' 이다. 'Not Found' 한 마디 · HTML · 빈 본문은 경로 없음(미지원)과 키 없음을 가를 수 없다 → 'ambiguous'.
  */
 export function notFoundKind(head) {
@@ -75,8 +75,8 @@ const headSample = (h) => String(h || '').replace(/[\u0000-\u001f\u007f]+/g, ' '
  * 세션(openSession 결과)으로 MAC 들을 묻는다 — 차례로(동시 2) · 시간 예산.
  *   · 501 → 미지원으로 멈춘다. 404 는 본문으로 가른다(notFoundKind): 구체적 not found = 위치 없음. 가를 수 없는 404 는
  *     이 조회에서 답한 MAC(200)이 하나라도 있으면 위치 없음, 답한 MAC 없이 AMBIG_STOP 번 이어지면 미지원으로 멈춘다(pNIC MAC 몇 개가
- *     안 배워졌다고 CVP 전체를 미지원으로 적지 않게 — v2.933 반증 H-2). 끝까지 못 가르면 오류(사유와 본문 표본)로 남긴다.
- *   · 연결 실패 · 401 · 403 이 FAIL_STOP 번 이어지면 그 CVP 는 이번에 그만 묻는다(v2.933 반증 L-6 — 틀린 자격증명으로 MAC 마다 로그인 금지).
+ *     안 배워졌다고 CVP 전체를 미지원으로 적지 않게 — v2.934 반증 H-2). 끝까지 못 가르면 오류(사유와 본문 표본)로 남긴다.
+ *   · 연결 실패 · 401 · 403 이 FAIL_STOP 번 이어지면 그 CVP 는 이번에 그만 묻는다(v2.934 반증 L-6 — 틀린 자격증명으로 MAC 마다 로그인 금지).
  * @returns {Promise<{ results: Array<{mac, at, status, reason?, locations}>, unsupported: boolean, cut: number, stopped: string|null }>}
  */
 export const AMBIG_STOP = 8;
@@ -128,7 +128,7 @@ export async function lookupEndpoints(session, macs = [], { budgetMs = 20_000, n
 /**
  * 주기 수집 대상 고르기(순수) — ① 호스트 물리 NIC MAC ② 최근에 호스트가 바뀐 VM(vMotion) ③ 나머지 VM. 셋 다 **가장 오래전에 물어본 것부터**.
  *   이미 이번 창(staleMs) 안에 물어본 MAC 은 건너뛴다. max 개까지. 호스트 몫은 max 의 절반까지(VM 이 있을 때) —
- *   v2.933 반증 M-1: 예전에는 호스트 MAC 을 스냅샷 순서로 골라, 호스트 MAC 이 상한보다 많으면 매 주기 같은 앞부분만 묻고 VM 은 한 번도 묻지 않았다.
+ *   v2.934 반증 M-1: 예전에는 호스트 MAC 을 스냅샷 순서로 골라, 호스트 MAC 이 상한보다 많으면 매 주기 같은 앞부분만 묻고 VM 은 한 번도 묻지 않았다.
  * @param {{ hostMacs:string[], movedVmMacs:string[], vmMacs:string[], askedAt:Map<string,number> }} input
  */
 export function pickEndpointMacs({ hostMacs = [], movedVmMacs = [], vmMacs = [], askedAt = new Map() } = {}, { now = Date.now(), max = 200, staleMs = 30 * 60_000 } = {}) {
