@@ -613,6 +613,13 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
+- **v2.930 — 개선 포인트 1 · 3 · 2 · 4(사용자 '제 추천 순서는 1 → 3 → 2 → 4 진행해' · 4번 '같은 법인 + 공용만' · 검증 '표준' · 코드 · 테스트 표지는 v2.929 — 준비 중 main 이 2.927 → 2.928 → 2.929 로 올라가 릴리스 번호만 v2.930.0)**. 회귀 `web/src/cssSelectors2929.test.js` · `server/test/issuesFix2929.test.js`.
+  - **정정 ①(CSS 이름 겹침 재발)**: v2.908 이 SLA 업무 시간 입력에 `.iss-cal` 을 써서 이슈 캘린더 화면의 `.iss-cal` 에 점선 · 여백을 덧붙였다(같은 v2.908 에서 `.iss-filters` 겹침을 고치며 그 이름 하나만 막았다).
+    입력은 `.iss-slacal` 로. 이제 테스트가 **styles.css 전체**에서 '클래스 하나짜리 선택자가 두 규칙에 나오는 것' 을 찾고, 의도한 덧붙임(11개)만 `KNOWN` 에 사유와 함께 둔다.
+  - **정정 ②(인증서 만료)**: v2.908 은 '인증서 만료는 판정이 없어 대상이 아니다' 라고 화면 · DB 안내에 적었는데, 알람 엔진에만 없고 `security/certMonitor.js` 가
+    vCenter · NSX 443 을 12시간마다 확인한다. 그 결과(`onCertResults` 구독)로 이슈를 만든다(`alertIssues.js applyCertResults` — 30일 이하 · 만료, 갱신되면 해소 · 확인 실패는 보류).
+  - 알람 엔진 평가 → 구독 → 이슈 등록이 **실제로 이어지는지**를 테스트한다(`alerts._refreshStateForTest` — v2.908 은 판정 함수만 직접 불렀다). 판정 보류로 빠진 알람은 해소가 아니다.
+  - 위키 자동 체크는 **이슈의 법인 스페이스 + 공용만**(`checkIssueTasks(…, { vcenterId })` — 다른 법인 문서는 `outOfScope` 로 세기만). 변이 2/2(판정 줄 · 자동화가 법인을 넘기는 줄).
 - **v2.908 — 이슈 기능 추천 6~10(사용자 '모두 적용' · 시안 없이 기존 화면 틀대로 — 사용자 선택)**. 회귀 `server/test/issuesR4_2908.test.js` · `web/src/views/issues/features2908.test.js`.
   - 자동화 규칙은 **고정 4개**(`issues/automation.js` · 설정 `automation` — 기본 전부 꺼짐). 저장소 이벤트는 동기라 **setImmediate 로 미뤄** 돈다 — 상위를 하위와 함께
     완료(closeChildren)하는 도중 자식 완료 이벤트가 상위를 '검토' 로 되돌리지 않게(테스트가 고정). 위키 체크는 보기에서 체크와 같은 경로(판 없음 · checkLog · checkRev) ·

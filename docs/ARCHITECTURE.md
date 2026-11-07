@@ -116,7 +116,7 @@
 | `inventory/` | 10 | 1,428 | `inventory/osKind.js` (3) | VM 게스트 OS 문자열 → 'windows' \| 'linux' \| 'other' \| null (v2.834 — Bareos 백업 대상 OS 구분). |
 | `ipam/` | 30 | 5,721 | `ipam/ledger.js` (7) | IPAM ledger builder — turns a snapshot into a per-center IP record list. |
 | `isidu/` | 21 | 4,828 | `isidu/digestRules.js` (6) | isidu/digestRules.js — 아이실론 디렉터리 사용량 **종합 메일**의 순수 규칙(v2.742). 파일·타이머·메일 발송 없음. |
-| `issues/` | 17 | 4,642 | `issues/store.js` (5) | issues/store.js — 이슈 트래커 저장소(v2.864). 포탈 공용 이슈(장애·작업·요청·개선)를 등록하고 담당자에게 할당해 끝날 때까지 추적한다. |
+| `issues/` | 17 | 4,728 | `issues/store.js` (5) | issues/store.js — 이슈 트래커 저장소(v2.864). 포탈 공용 이슈(장애·작업·요청·개선)를 등록하고 담당자에게 할당해 끝날 때까지 추적한다. |
 | `linkcheck/` | 12 | 2,869 | `linkcheck/links.js` (4) | linkcheck/links.js — **설정에서 통신 링크를 자동으로 뽑는다**(순수, v2.552). |
 | `llm/` | 5 | 594 | `llm/config.js` (4) | Local LLM (Ollama) settings for natural-language search. Stored in |
 | `loganalysis/` | 8 | 2,076 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › 로그 › 로그 분석 파사드(v2.583). |
@@ -144,7 +144,7 @@
 | `routes/` | 140 | 43,015 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
 | `sanswitch/` | 32 | 8,414 | `sanswitch/registry.js` (9) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 4 | 932 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
-| `security/` | 20 | 4,795 | `security/secretVault.js` (33) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
+| `security/` | 20 | 4,809 | `security/secretVault.js` (33) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
 | `servicemap/` | 4 | 988 | `servicemap/build.js` (1) | servicemap/build.js — 서비스 인벤토리 집계(순수, v2.887). 입력은 라우트(inputs.js)가 모은 구성원·파생 호스트와 저장소. |
 | `settingsStatus/` | 2 | 256 | `settingsStatus/grade.js` (1) | 설정 메뉴 상태 배지 — 판정 코어(v2.916, 설계 docs/design/settings-menu §4.4). |
 | `storage/` | 52 | 11,200 | `storage/registry.js` (20) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
@@ -168,10 +168,10 @@
 | `vmlife/` | 1 | 92 | `vmlife/analyze.js` (1) | vmlife/analyze.js — 특수 기능 'VM 생성·삭제 이력'(도구 키 `vm-lifecycle`, v2.706 — C5) 판정(순수). |
 | `vmseries/` | 9 | 1,367 | `vmseries/settings.js` (4) | vmseries/settings.js — 실시간 스파이크 수집 설정(v2.510). env 기본값 + CONFIG_DIR/vmseries.json 오버레이. |
 | `vmtrack/` | 4 | 1,798 | `vmtrack/db.js` (4) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
-| `wiki/` | 4 | 1,194 | `wiki/store.js` (6) | wiki/store.js — 위키(컨플루언스 같은 문서 공간) 저장소(v2.881 · 시안 docs/design/wiki-issues ①~⑤ · ⑫). |
+| `wiki/` | 4 | 1,199 | `wiki/store.js` (6) | wiki/store.js — 위키(컨플루언스 같은 문서 공간) 저장소(v2.881 · 시안 docs/design/wiki-issues ①~⑤ · ⑫). |
 | `xferspeed/` | 7 | 1,993 | `xferspeed/schedule.js` (4) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 94개 · 파일 1210개 · 275,996줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 94개 · 파일 1210개 · 276,101줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
