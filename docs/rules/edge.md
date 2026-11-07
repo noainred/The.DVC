@@ -679,9 +679,10 @@
   · **적용과 겹치지 않는다**: 확인·적용 중이면 동기화는 `skipped`, 적용은 진행 중인 동기화 `inflight` 를 기다린 뒤 자기 push 를 한다(같은 엣지에 두 번들을 동시에 올리지 않게).
     둘 다 `pushConcurrencyOf()`(기본 4)로 민다.
   · 상태 코드(`EDGE_SYNC_STATES`·`EDGE_SYNC_OUTCOMES`)는 서버, 문장은 웹(`EDGE_STATE_TEXT`·`SYNC_OUTCOME_TEXT`) — 웹 테스트가 서버 소스와 1:1 대조한다. 코드를 더하면 둘 다.
-    동기화 기록은 메모리뿐이다(재시작 전 기록은 지어내지 않는다 — 화면이 '기동 2분 뒤 첫 실행' 이라 말한다). 엣지별 push 결과는 수집 서버 상태 `upgrade` 에 남는다.
-  · ⚠ 정직 기록: `UPGRADE_EDGES`(upgrade.json edges — `/api/upgrade/bundle` 로 받는 옛 방식)는 버전을 보고하지 않아 동기화 대상이 아니다(적용 직후 1회 push 만 — 예전과 같다).
-    실제 WAN 엣지로는 확인하지 못했다(가짜 수집 서버 + 실제 서명 번들로 push 경로를 돌렸다).
+    ~~동기화 기록은 메모리뿐이다~~ → ✅ **v2.865 A 에 해결**(upgrade-status.json `lastEdgeSync` · 재시작 뒤 '재시작 전 기록'). 연속 실패 수·알린 사실도 ✅ **v2.938**(`edgeSyncState`). 엣지별 push 결과는 수집 서버 상태 `upgrade` 에 남는다.
+    (v2.938 정정 — 이 줄은 v2.865 에서 고친 뒤에도 정정하지 않은 채 남아 있었다.)
+  · ~~`UPGRADE_EDGES`(옛 방식)는 동기화 대상이 아니다~~ → ✅ **v2.865 B 에 해결**(`/api/health` 버전 질의 · `pushBundleToEdge` — 아래 v2.865 절). v2.938 정정(고친 뒤 정정하지 않았다).
+    실제 WAN 엣지로는 확인하지 못했다(가짜 수집 서버 + 실제 서명 번들로 push 경로를 돌렸다) → v2.938 부터 **포탈 점검 › 법인별 실환경 확인**의 '엣지 업그레이드 push' 칸이 법인마다 실제 수신 기록으로 확인한다.
   · **v2.865 후속(사용자 선택 A·B·C·D — '프로그램 개선', 회귀 `server/test/edgeAutoUpgrade2865.test.js`)**:
     A. 동기화 기록은 `upgrade-status.json` 의 `lastEdgeSync` 로 남는다(`autoState.sanitizeEdgeSync` 쓰기·읽기 공용 · runner `onRun` 훅 → manager `#save`) — 재시작 뒤
        `restored:true` 로 되살리고 모르는 결과 코드는 'error' 로 읽는다(화면 '재시작 전 기록'). 되살림 표지는 파일에 쓰지 않는다.
@@ -692,7 +693,7 @@
     C. `POST /api/upgrade/edge-sync`(관리자·전체 범위 · 꺼져 있으면 409 · 감사 로그)가 같은 `run()` 을 부른다(단일 진행 — 주기 실행과 겹치면 같은 약속). 업그레이드 화면 '지금 동기화' ·
        수집 서버 화면 '구버전 엣지 밀어 넣기'(한 줄 상태는 `GET /admin/collectors` 의 `edgeSync`). ⚠ 수집 서버 화면의 기존 '지금 동기화' 는 pull 이다 — 이름을 겹치지 않게 했다.
     D. 같은 엣지가 같은 대상 버전으로 **백오프 상한(6시간)에 닿을 만큼 연속 실패**(10분 주기면 7번째)하면 `alerts.js notify` 로 한 번 알리고(key `edgesync:<id>|<버전>`), 그 뒤
-       성공하면 `:close` 로 해소를 한 번 알린다(`edgeSyncAlert` 순수 — 백틱·별표 없음). 알린 사실은 메모리뿐 — 재시작하면 연속 실패 수가 0 부터라 같은 장애를 한 번 더 알릴 수 있다(정직 기록).
+       성공하면 `:close` 로 해소를 한 번 알린다(`edgeSyncAlert` 순수 — 백틱·별표 없음). ~~알린 사실은 메모리뿐~~ → ✅ **v2.938 해결**: 연속 실패 수·알린 사실을 upgrade-status.json `edgeSyncState` 로 재시작을 넘긴다(`persistState`·`restoreState` · 백오프도 이어진다 — 회귀 `edgeSyncPersist2938`).
        알림 발송이 던져도 동기화는 계속된다.
 - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
   (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
