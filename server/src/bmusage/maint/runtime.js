@@ -19,6 +19,17 @@ const STATS_FILE = () => path.join(config.configDir, 'maintenance-stats.json');
 const STATS_MAX = 2_000;
 const t = (v) => String(v ?? '').trim();
 
+/**
+ * 이 노드의 대상 목록 공급자 — bmusage/poller.js 가 모듈을 읽을 때 등록한다(정적 import 의 역방향을 만들지 않는다 — 파트 장애 · 대행 라우트가
+ *   폴러를 import 하면 bmusage ↔ idrac ↔ partfault 순환(SCC)이 생긴다: arch2579 ②-b). 등록 전이면 빈 목록(모르는 대상은 억제하지 않는다).
+ */
+let _targetsProvider = null;
+export function setLocalTargetsProvider(fn) { _targetsProvider = typeof fn === 'function' ? fn : null; }
+export async function localTargets() {
+  if (!_targetsProvider) return [];
+  try { return (await _targetsProvider())?.targets || []; } catch { return []; }
+}
+
 /** 이 노드의 수동 용도 태그 → ['role:<역할>', 'app:<용도>' …](없으면 []). 서비스 태그(소문자) 우선 · 아니면 서버 키(fleet-tags 키 규약). */
 export async function tagsReader() {
   let FT = null;

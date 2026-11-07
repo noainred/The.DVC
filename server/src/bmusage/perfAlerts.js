@@ -61,6 +61,17 @@ export function ruleCells(id, ctx = {}, rule = {}) {
     const cells = ctx.collect?.cells || {};
     const want = rule.cond && rule.cond !== 'any' ? [rule.cond] : Object.keys(cells);
     for (const k of want) out[k] = ['true', 'false'].includes(cells[k]) ? cells[k] : 'unread';
+  } else if (id === 'capacity') {
+    // 8a단계 용량 소진 예측 — 자원(종류:마운트)마다: 도달 ≤ N일(또는 이미 도달) = 참 · 더 멀거나 증가 없음 = 거짓 · 데이터 부족 · 불안정 · 상한 없음 = 못 읽음(판정 보류).
+    const days = Number(ctx.capacity?.days) || 7;
+    const kinds = { 'fs-inode': ['fs', 'inode'], any: ['fs', 'inode', 'mem'], fs: ['fs'], inode: ['inode'] }[rule.cond || 'fs-inode'] || ['fs', 'inode'];
+    for (const r of Array.isArray(ctx.capacity?.rows) ? ctx.capacity.rows : []) {
+      if (!kinds.includes(r?.kind)) continue;
+      const k = `${r.kind}:${r.res}`;
+      if (r.status === 'reached' || (r.status === 'forecast' && r.daysToTarget != null && r.daysToTarget <= days)) out[k] = 'true';
+      else if (r.status === 'forecast' || r.status === 'no-growth') out[k] = 'false';
+      else out[k] = 'unread';
+    }
   } else if (id === 'cross') {
     for (const [i, x] of (Array.isArray(ctx.entry?.cross) ? ctx.entry.cross : []).entries()) {
       const k = String(x?.id ?? i);
@@ -102,7 +113,8 @@ export function ruleCondition(id, ctx = {}, rule = {}, prevOn = null) {
     if (!st || st === 'none' || st === 'unknown') return null;
     return st === 'bad';
   }
-  if (id === 'health' || id === 'baseline' || id === 'cross' || id === 'collect') {
+  if (id === 'health' || id === 'baseline' || id === 'cross' || id === 'collect' || id === 'capacity') {
+    if (id === 'capacity' && !Array.isArray(ctx.capacity?.rows)) return null;   // 하루 계산 결과가 없으면 보류(0 · 안전으로 보지 않는다)
     if (id === 'health' && !ctx.health?.cells) return null;
     if (id === 'collect' && !ctx.collect?.cells) return null;
     if (id === 'cross' && !(Array.isArray(ctx.entry?.cross) && ctx.entry.cross.length)) return null;
@@ -220,6 +232,14 @@ export function perfAlertOf(f, { corpName = '' } = {}) {
     const parts = [lg.faultLines ? `장애 분류 ${lg.faultLines}줄` : '', lg.secHigh ? `보안 high 이상 ${lg.secHigh}줄${lg.bursts ? `(SSH 실패 집중 ${lg.bursts}건)` : ''}` : ''].filter(Boolean);
     return { key, severity: lg.faultLines ? 'critical' : 'warning', title: capStr(`${head} 로그 — ${parts.join(' · ') || '장애 · 보안'}`, 200),
       detail: capStr('이번 주기에 새로 읽은 로그 줄의 분류 결과입니다(규칙 · 근거 · 가린 표본은 서버 상세 › 로그 탭). 포탈은 차단 · 계정 잠금을 하지 않습니다 — 조치는 담당자가 합니다.', 1_500) };
+  }
+  if (f.rule === 'capacity') {
+    const days = Number(c.capacity?.days) || 7;
+    const KL = { fs: '', inode: 'inode ', mem: '메모리(참고) ' };
+    const hits = (c.capacity?.rows || []).filter((r) => r && (r.status === 'reached' || (r.status === 'forecast' && r.daysToTarget != null && r.daysToTarget <= days)))
+      .map((r) => `${KL[r.kind] ?? ''}${r.kind === 'mem' ? '' : r.res} ${r.current ?? '—'}% · ${r.status === 'reached' ? '이미 목표선 위' : `${r.daysToTarget}일 뒤 ${r.targetPct ?? 90}%(${r.dateToTarget})`}`);
+    return { key, severity: 'warning', title: capStr(`${head} 용량 소진 예측 ${days}일 안 — ${hits.slice(0, 3).join(' · ')}`, 200),
+      detail: capStr(`${hits.join('\n')}\n최근 14일 일 최대의 선형 추세(참고 — 계단형 적재 · 주기 정리는 틀리게 봅니다). 베어메탈 사용률 › 용량 예측에서 신뢰(R²)와 추세를 확인하세요.`, 1_500) };
   }
   if (f.rule === 'focusEnd') {
     const s = c.summary || {};

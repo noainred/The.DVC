@@ -327,6 +327,23 @@ collectorRouter.get('/bm-usage/logs', tokenFirst('bm-usage-logs'), async (req, r
 });
 
 /**
+ * 8a단계 — 용량 소진 예측 서버 상세 엣지 대행(central/bmCapacityPull.js pullEdgeCapacity). 같은 url · 같은 토큰 · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
+ *   그 서버 하나를 볼 때 계산한다(일 계열 · 맞춤선 · 이 엣지의 정비 창 제외 날짜) — 하루 계산 결과(함대 표)는 봉투로 간다.
+ */
+collectorRouter.get('/bm-usage/capacity', tokenFirst('bm-usage-capacity'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const C = await import('../bmusage/capacity.js');
+    const rules = (await import('../bmusage/perfRules.js')).loadPerfRules();
+    const R = await import('../bmusage/maint/runtime.js');
+    const judge = await R.maintJudge({ now: Date.now() }).catch(() => null);
+    const r = await C.computeServer({ agent: config.agent?.name || '', target, cfg: { targetPct: rules.capacity?.targetPct, minDays: rules.capacity?.minDays }, judge, series: true });
+    res.json({ ...r, key: target.key });
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+
+/**
  * 이 엣지의 **토큰 자기보고**(v2.560 — 사용자 요청 "등록된 모든 엣지/수집 서버의 모든 토큰 …
  * 중앙에 저장된 토큰과 엣지에 저장된 토큰이 동일한지 점검").
  *

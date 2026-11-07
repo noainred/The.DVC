@@ -7,7 +7,7 @@
  *   중앙 로컬(agent '')은 iDRAC 등록 id(deviceId) = 대상의 idrac.regId 도 본다. 맞는 서버가 없는 장비는 보류하지 않는다(모르는 장비를 억제하지 않는다).
  * 판정은 maint/judge.js 하나(② hold 를 켠 창 · 발생 끝까지 · 지금 끝내기 · 만료) — 여기서 다시 판정하지 않는다.
  */
-import { maintJudge, countSuppression, noteApplied } from './runtime.js';
+import { maintJudge, countSuppression, noteApplied, localTargets } from './runtime.js';
 
 const t = (v) => String(v ?? '').trim();
 const _counted = new Set();   // `${창}|${장비}` — 창마다 장비 한 번만 센다(인메모리 · 상한)
@@ -46,10 +46,8 @@ export function holdSetFor(devices = [], targets = [], judge, now = Date.now()) 
 /** 중앙의 대상 목록(로컬 + 엣지 보관분) — 장비 대응용 최소 필드. */
 async function centralTargets() {
   const out = [];
-  try {
-    const tg = await (await import('../poller.js')).currentTargets();
-    for (const x of tg.targets || []) out.push({ agent: '', key: x.key, serviceTag: x.serviceTag, vcenterId: x.vcenterId, regId: x.idrac?.regId || '' });
-  } catch { /* 로컬 대상을 모르면 로컬 장비는 보류하지 않는다 */ }
+  // 로컬 대상은 폴러가 등록한 공급자로(폴러를 import 하지 않는다 — 순환 방지). 모르면 로컬 장비는 보류하지 않는다.
+  for (const x of await localTargets()) out.push({ agent: '', key: x.key, serviceTag: x.serviceTag, vcenterId: x.vcenterId, regId: x.idrac?.regId || '' });
   try {
     for (const rec of (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage()) {
       for (const x of rec?.snap?.targets || []) out.push({ agent: String(rec.agent || '').toLowerCase(), key: x.key, serviceTag: x.serviceTag, vcenterId: x.vcenterId, regId: '' });

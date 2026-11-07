@@ -46,6 +46,7 @@ import { capStr } from '../util/capStr.js'; // v2.744(RV2744F-WEB-03): 상주 �
 import { idracAuthStopFor as mainIdracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 import { withSlot, configureSlots, slotPeakReset } from './slots.js'; // v2.929(5단계): 전역 동시성 풀 — 집중 수집과 슬롯을 나눠 쓴다 · 6단계: 주기 최대 사용(수집 건강)
 import { summarizeCycle, dbFilesNow, collectCells } from './collectHealth.js'; // 6단계 수집 건강(메타 모니터링)
+import { setLocalTargetsProvider } from './maint/runtime.js'; // 8a단계 — 정비 창 · 용량 예측이 이 노드 대상을 폴러 import 없이 얻는다(순환 방지)
 import { focusActiveCount, focusQueuedCount, registerFocusPollerHooks, focusHousekeeping, onFocusEnd, initFocus } from './focus/run.js'; // v2.929: 피크 창 예산에서 활성 집중 수만큼 동시성을 뺀다
 
 /*
@@ -856,6 +857,13 @@ export async function bmUsageTimerTick() {
       } catch (e) { _lastRepair = { at: Date.now(), ok: false, error: String(e?.message || e).slice(0, 200) }; }
     }
     await pruneTick().catch(() => {});
+    // 8a단계: 용량 소진 예측 — 하루 1회(01:10 뒤 첫 틱 · 진행 중이면 공유 · 시간 기준 양보). 기다리지 않는다(다음 주기를 막지 않게). DB 가 있을 때만.
+    if (fs.existsSync(BMUSAGE_DB_FILE())) {
+      try {
+        const C = await import('./capacity.js');
+        if (!C.capacityRunning() && C.dueForRecompute(C.loadCapacity())) currentTargets().then((tg) => C.recomputeCapacity({ targets: tg.targets || [] })).catch(() => {});
+      } catch { /* 다음 틱 */ }
+    }
   }
 }
 let _lastRepair = null;
@@ -1091,6 +1099,11 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
   const B = bands ? await import('./baseline.js') : null;
   // 7a단계: 로그 규칙 입력(이번 주기에 로그를 읽은 서버만 — 못 읽은 서버는 없음 = 판정 보류)
   const LA = on.includes('logs') ? (await import('./logs/run.js')).logAlertInputs() : null;
+  // 8a단계: 용량 소진 예측 규칙 입력(이 노드의 하루 계산 결과 — 없으면 보류)
+  let capByKey = null;
+  if (on.includes('capacity')) {
+    try { const C = (await import('./capacity.js')).loadCapacity(); if (C && !C.unreadable) { capByKey = new Map(); for (const x of C.rows || []) { if (!capByKey.has(x.key)) capByKey.set(x.key, []); capByKey.get(x.key).push(x); } } } catch { capByKey = null; }
+  }
   const M = on.includes('profile') ? await import('./profiles/match.js') : null;
   const FT = on.includes('profile') ? await import('../insights/fleetTags.js').catch(() => null) : null;
   const items = [];
@@ -1106,7 +1119,8 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
       try { profile = M.profileView({ tuning: parseJsonCol(row.tuning_json), detail, entry, row, manual }); } catch { profile = null; }
     }
     items.push({ key: r.target.key, name: r.target.name || r.target.key, vcenterId: r.target.vcenterId || '', target: r.target, entry, health: detail?.health || null,
-      dev: B ? B.deviationsFor(bands, r.target.key, row) : null, profile, logs: LA ? LA.get(r.target.key) || null : null });
+      dev: B ? B.deviationsFor(bands, r.target.key, row) : null, profile, logs: LA ? LA.get(r.target.key) || null : null,
+      ...(capByKey ? { capacity: { rows: capByKey.get(r.target.key) || null, days: rules.capacity?.days ?? 7 } } : {}) });
   }
   // 6단계 ‘수집 건강’ — 서버가 아니라 이 노드 한 칸(key '__node__' · 법인 공용). 칸은 이번 주기 recordCycleHealth 가 기준과 대 본 결과 그대로.
   const nodeItem = on.includes('collect') ? collectNodeItem(agent) : null;
@@ -1150,6 +1164,7 @@ export function markInMaint(results = [], maintOf = () => null) {
   return marked;
 }
 let _focusEndHooked = false;
+setLocalTargetsProvider(() => currentTargets());
 export function startBmUsagePoller() {
   if (_timer) return;
   // v2.929(5단계): 집중 결론 규칙 — 세션이 끝날 때 한 번(focus/run.js). 기동 때 한 번만 구독한다.

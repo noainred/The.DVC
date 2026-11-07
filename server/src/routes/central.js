@@ -1807,6 +1807,24 @@ centralRouter.get('/bm-onboard', requireCentral(), async (req, res) => {
   res.json({ ok: true, ...out });
 });
 
+// 8a단계 정비 창 배포 — 그 엣지 법인의 진행 중 · 예정 창(태그 창은 그 엣지 대상의 키로 펼친다 · bmusage/maint/deploy.js). 엣지가 주기적으로 GET.
+//   **개별 토큰으로 인증된 이름에만** 준다(공유 토큰의 ?agent= 는 남의 법인 정비 일정을 받아 갈 수 있다 · 억제 범위를 남에게 씌울 수 없다).
+//   중앙 창 파일을 못 읽으면 503(빈 목록을 보내 엣지 억제를 지우지 않는다 — 엣지는 받은 지 24시간까지 지난 배포본을 쓴다).
+//   `?applied=<서명>` 은 엣지가 지금 쓰는 판(숫자 · 서명만 — 화면 ‘반영됨 / 대기’).
+centralRouter.get('/bm-maint', requireCentral(), async (req, res) => {
+  const verified = req.centralAuth?.mode === 'agent';
+  const agent = verified ? String(req.centralAuth.agent || '').trim() : String(req.query.agent || '').trim();
+  const DP = await import('../bmusage/maint/deploy.js');
+  if (verified) DP.recordMaintPull(agent, { appliedSig: String(req.query.applied || '').slice(0, 64), version: String(req.get('x-agent-version') || '') });
+  const ST = await import('../bmusage/maint/store.js');
+  if (settingsUnreadable(res, ST.maintLoadError, '정비 창(maintenance-windows.json)')) return;
+  try {
+    const out = await DP.deployFor(agent, { verified });
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, ...out });
+  } catch (e) { res.status(e?.status === 503 ? 503 : 500).json({ ok: false, reason: String(e?.message || e).slice(0, 200) }); }
+});
+
 // POST /api/central/storage-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
 // **인증된 agent**(개별 토큰 바인딩)만 쓴다. 공유 토큰(레거시)은 body.agent 신뢰(TOFU — 기존 축과 동일).
 centralRouter.post('/storage-data', requireCentral(), async (req, res) => {

@@ -22,7 +22,8 @@ const FILE = () => path.join(config.configDir, 'bm-perf-rules.json');
 
 // 6단계: collect(수집 건강 — 서버가 아니라 이 수집 노드 한 칸: 주기 소요 · 성공률 · DB 상한 · 인증 정지).
 // 7a단계: logs(로그 분석 — 이번 주기에 읽은 줄 중 장애 분류 · 보안 high 이상이 있으면 · 기본 꺼짐).
-export const RULE_IDS = Object.freeze(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect', 'logs']);
+// 8a단계: capacity(용량 소진 예측 — 목표선 도달 ≤ N일 · 기본 꺼짐 · 수집 노드의 하루 계산 결과 bm-capacity.json 을 쓴다).
+export const RULE_IDS = Object.freeze(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect', 'logs', 'capacity']);
 /** 규칙별 조건 선택지(웹 문구 표와 1:1). */
 export const RULE_CONDS = Object.freeze({
   use: Object.freeze(['sat-err', 'bottleneck', 'errors']),
@@ -33,6 +34,7 @@ export const RULE_CONDS = Object.freeze({
   profile: Object.freeze(['bad']),
   collect: Object.freeze(['any', 'cycle', 'success', 'db', 'auth', 'error']),
   logs: Object.freeze(['fault-sec', 'fault', 'sec']),
+  capacity: Object.freeze(['fs-inode', 'any', 'fs', 'inode']),
 });
 /** 기존 알림 채널(alerts.js channels) — 새 채널을 만들지 않는다. */
 export const CHANNELS = Object.freeze(['email', 'webhook', 'slack', 'teams']);
@@ -49,6 +51,7 @@ export const RULE_DEFAULTS = Object.freeze({
   profile: Object.freeze({ cond: 'bad', sustain: 1, repeatMin: 30, channels: ['email', 'webhook'], issue: false, autoFocus: false }),
   collect: Object.freeze({ cond: 'any', sustain: 2, repeatMin: 360, channels: ['email'], issue: false, autoFocus: false }),
   logs: Object.freeze({ cond: 'fault-sec', sustain: 1, repeatMin: 60, channels: ['email'], issue: false, autoFocus: false }),
+  capacity: Object.freeze({ cond: 'fs-inode', sustain: 1, repeatMin: 1440, channels: ['email'], issue: false, autoFocus: false }),
 });
 export const LIMITS = Object.freeze({
   sustain: [1, 48], repeatMin: [0, 10_080], corpsOff: 200,
@@ -64,6 +67,8 @@ export const LIMITS = Object.freeze({
   // 7a단계 로그 분석 — 주기당 출처별 줄 상한 · 보관(일) · SSH 실패 집중(같은 IP · 창 분 · 임계 줄).
   //   줄 상한의 범위는 명령의 산수(command.js LINE_CAP_RANGE — 앱 두 개가 한 구획이라 2 × 상한 + 메타 < 구획 줄 상한 · 반증 F4)에서 온다.
   logs: { lineCap: [...LINE_CAP_RANGE], keepDays: [1, 90], burstCount: [2, 1_000], burstWindowMin: [1, 60] },
+  // 8a단계 용량 소진 예측 — 목표선(%) · 데이터 부족 기준(14일 창 안 점 수) · 알림 ‘소진 ≤ N일’.
+  capacity: { targetPct: [50, 99], minDays: [3, 14], days: [1, 90] },
 });
 export const DEFAULTS = Object.freeze({
   rules: {},
@@ -79,6 +84,8 @@ export const DEFAULTS = Object.freeze({
   collect: { cyclePct: 80, successPct: 90, dbPct: 90, dbCapGb: 20 },
   // 7a단계 로그 분석(설계 §17 — 줄 상한 5,000 · 보관 30일 · ‘외부 IP 집중’ 5분 20회 — 설정값). on=false 면 로그 읽기 exec 를 붙이지 않는다.
   logs: { on: true, lineCap: LINE_CAP_DEFAULT, keepDays: 30, burstCount: 20, burstWindowMin: 5 },
+  // 8a단계 용량 소진 예측(설계 ⑱ — 목표 90% · 데이터 부족 7일 · 알림 7일 — 설정값).
+  capacity: { targetPct: 90, minDays: 7, days: 7 },
   // 유지보수 창 억제(Bareos · Veeam 스케줄) — 베어메탈 서버의 백업 창을 읽는 원천이 아직 없다(perfAlerts.maintenanceFor 머리말). 켜 두면 원천이 생길 때 바로 쓴다.
   maintenance: { backupWindows: true },
 });
@@ -132,7 +139,7 @@ export function normalizeRules(raw, { strict = true } = {}) {
       channels,
       issue: x.issue === true,
       // 집중 결론 규칙은 그 자체가 집중의 끝이라 자동 집중을 걸지 않는다(되먹임 고리). 수집 건강은 서버가 아니라 노드 칸이라 집중 대상이 없다.
-      autoFocus: id === 'focusEnd' || id === 'collect' ? false : x.autoFocus === true,   // 7a ‘logs’ 는 자동 집중 허용(로그 장애 · 보안 → 그 서버 1분 집중 — 법인 옵트인 규약 그대로)
+      autoFocus: id === 'focusEnd' || id === 'collect' || id === 'capacity' ? false : x.autoFocus === true,   // 8a capacity 는 하루 추세라 1분 집중이 뜻이 없다   // 7a ‘logs’ 는 자동 집중 허용(로그 장애 · 보안 → 그 서버 1분 집중 — 법인 옵트인 규약 그대로)
       corpsOff: vcList(x.corpsOff, `rules.${id}.corpsOff`),
     };
   }
@@ -157,8 +164,9 @@ export function normalizeRules(raw, { strict = true } = {}) {
   const collect = sec('collect', DEFAULTS.collect, LIMITS.collect).out;
   const maintenance = sec('maintenance', DEFAULTS.maintenance, null).out;
   const logs = sec('logs', DEFAULTS.logs, LIMITS.logs).out;
+  const capacity = sec('capacity', DEFAULTS.capacity, LIMITS.capacity).out;
   return {
-    value: { v: 1, rules, daily, focus, baseline, health, changes, compare, collect, maintenance, logs, by: String(r.by || '').slice(0, 64), at: Number(r.at) || 0 },
+    value: { v: 1, rules, daily, focus, baseline, health, changes, compare, collect, maintenance, logs, capacity, by: String(r.by || '').slice(0, 64), at: Number(r.at) || 0 },
     dropped,
   };
 }
@@ -210,7 +218,7 @@ export function savePerfRules(body, { by = '' } = {}) {
 /** 감사 요약 — 켠 규칙 id · 바뀐 절(비밀 없음 · 300자). */
 export function rulesAuditSummary(prev, next) {
   const on = (x) => Object.keys(x?.rules || {}).sort().join(',');
-  const changed = ['daily', 'focus', 'baseline', 'health', 'changes', 'compare', 'collect', 'maintenance', 'logs'].filter((k) => JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]));
+  const changed = ['daily', 'focus', 'baseline', 'health', 'changes', 'compare', 'collect', 'maintenance', 'logs', 'capacity'].filter((k) => JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]));
   return JSON.stringify({ before: on(prev), after: on(next), changed }).slice(0, 300);
 }
 export function _resetPerfRulesForTest() { _cache = null; _mtime = ''; _err.ok(); _listeners.clear(); }

@@ -34,8 +34,7 @@ export async function localPerfOps(mode, { key, q = {}, now = Date.now(), deps =
     // 8a단계 ⑤: 이 노드의 정비 창 제외 구간(판정 코어 하나) — 대상은 이 노드의 대상 목록에서(법인 · 태그 판정).
     exclusion: async () => {
       const R = await import('./maint/runtime.js');
-      const tg = await (await import('./poller.js')).currentTargets().catch(() => ({ targets: [] }));
-      const tmap = new Map((tg.targets || []).map((x) => [x.key, x]));
+      const tmap = new Map((await R.localTargets()).map((x) => [x.key, x]));
       return R.exclusionFor(await R.maintJudge({ now }), (k) => tmap.get(k));
     },
     ...deps,
