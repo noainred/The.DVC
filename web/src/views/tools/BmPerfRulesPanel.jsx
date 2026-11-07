@@ -94,15 +94,15 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
                 <td data-sort={on ? 1 : 0}><input type="checkbox" checked={on} disabled={ro} onChange={(e) => setRule(id, { on: e.target.checked })} aria-label={`${RULE_TEXT[id]?.label} 켬`} /></td>
                 <td data-sort={RULE_TEXT[id]?.label || id} className="bmo-name">{RULE_TEXT[id]?.label || id}</td>
                 <td data-sort={v.cond}>
-                  <Select sort={false} className="select select-sm" value={v.cond} disabled={ro || !on} onChange={(e) => setRule(id, { cond: e.target.value })} aria-label="조건">
+                  <Select sort={false} className="select select-sm" value={v.cond} disabled={ro || !on} onChange={(e) => setRule(id, { cond: e.target.value })} aria-label="조건" title={RULE_TEXT[id]?.conds?.[v.cond] || v.cond}>
                     {(resp.conds?.[id] || []).map((c) => <option key={c} value={c}>{RULE_TEXT[id]?.conds?.[c] || c}</option>)}
                   </Select>
                 </td>
                 <td className="right" data-sort={v.sustain}><input className="input" type="number" min={1} max={48} value={v.sustain ?? ''} disabled={ro || !on} onChange={(e) => setRule(id, { sustain: e.target.value === '' ? '' : Number(e.target.value) })} /></td>
                 <td className="right" data-sort={v.repeatMin}><input className="input" type="number" min={0} max={10080} value={v.repeatMin ?? ''} disabled={ro || !on} onChange={(e) => setRule(id, { repeatMin: e.target.value === '' ? '' : Number(e.target.value) })} /></td>
-                <td data-sort={(v.channels || []).join(',')}>{(resp.channels || []).map((c) => (
-                  <label key={c} className="bmo-check" style={{ marginRight: 6 }}><input type="checkbox" disabled={ro || !on} checked={(v.channels || []).includes(c)} onChange={(e) => setRule(id, { channels: e.target.checked ? [...new Set([...(v.channels || []), c])] : (v.channels || []).filter((x) => x !== c) })} />{CHANNEL_TEXT[c] || c}</label>
-                ))}</td>
+                <td data-sort={(v.channels || []).join(',')}><div className="bmr-ch">{(resp.channels || []).map((c) => (
+                  <label key={c} className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={(v.channels || []).includes(c)} onChange={(e) => setRule(id, { channels: e.target.checked ? [...new Set([...(v.channels || []), c])] : (v.channels || []).filter((x) => x !== c) })} />{CHANNEL_TEXT[c] || c}</label>
+                ))}</div></td>
                 <td data-sort={v.issue ? 1 : 0}><label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.issue} onChange={(e) => setRule(id, { issue: e.target.checked })} />만들기</label></td>
                 <td data-sort={v.autoFocus ? 1 : 0}>{id === 'focusEnd' || id === 'collect' ? <span className="bmo-sub">해당 없음</span> : <label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.autoFocus} onChange={(e) => setRule(id, { autoFocus: e.target.checked })} />켜기</label>}</td>
                 <td data-sort={(v.corpsOff || []).length}>
