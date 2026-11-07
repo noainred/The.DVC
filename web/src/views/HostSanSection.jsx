@@ -56,22 +56,22 @@ export default function HostSanSection({ hostId, onData }) {
       {d.hbas?.length > 0 && (
         <div className="table-wrap" style={{ maxHeight: '36vh' }}>
           <STable minWidth={900}>
-            <thead><tr><th>어댑터</th><th>WWN</th><th>스위치 · 포트</th><th>로그인 · 역할</th><th>Zone</th><th>연결 스토리지</th><th>귀속</th><th style={{ textAlign: 'right' }}>지금 읽기 / 쓰기</th><th style={{ textAlign: 'right' }}>기간 전송</th></tr></thead>
+            <thead><tr><th>어댑터</th><th>연결 스토리지</th><th>귀속</th><th style={{ textAlign: 'right' }}>기간 전송</th><th style={{ textAlign: 'right' }}>지금 읽기 / 쓰기</th><th>스위치 · 포트</th><th>로그인 · 역할</th><th>Zone</th><th>WWN</th></tr></thead>
             <tbody>
               {d.hbas.map((r, i) => (
                 <tr key={`${r.hba}-${r.switch?.deviceId || ''}-${i}`}>
                   <td><b>{r.hba || '—'}</b>{r.model ? <div className="muted" style={{ fontSize: 11 }}>{r.model}{r.speedGbps ? ` · ${r.speedGbps} Gb` : ''}</div> : null}</td>
-                  <td className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{r.wwn || '—'}</td>
+                  <td>{hbaTargetsText(r)}{r.narrowed ? <span className="muted" style={{ fontSize: 11 }}> · 멀티패스로 좁힘</span> : null}</td>
+                  <td data-sort={r.conf || ''} title={r.basis}>{r.status === 'unseen' || r.status === 'no-wwn' ? <span className="muted">—</span> : <><Badge k={r.conf} />{r.split ? <div className="muted" style={{ fontSize: 11 }}>{SPLIT_LABEL[r.split] || r.split}{r.split === 'measured' && r.splitInfo?.samples ? ` · 표본 ${r.splitInfo.samples}` : ''}</div> : null}</>}</td>
+                  <td style={{ textAlign: 'right' }} data-sort={r.bytes ?? ''}>{r.measured ? bytesText(r.bytes) : <span className="muted" title="첫 수집·수집 공백·DB 없음 — 0 이 아니라 측정 없음">—</span>}</td>
+                  <td style={{ textAlign: 'right' }} data-sort={r.nowRead ?? ''}>{rwText(r.nowRead, r.nowWrite)}</td>
                   <td>{r.switch ? <>{r.switch.name}{r.port ? <span className="muted"> {r.port.slotPort ?? r.port.index}</span> : null}{r.switch.agent ? <div className="muted" style={{ fontSize: 11 }}>엣지 {r.switch.agent} · {agoText(r.switch.collectedAt)}</div> : <div className="muted" style={{ fontSize: 11 }}>{agoText(r.switch.collectedAt)}</div>}</> : <span className="muted">—</span>}</td>
                   <td data-sort={STATUS_LABEL[r.status] || ''}>
                     {r.status === 'logged-in' ? <span className="badge green">로그인</span> : <span className="badge gray">{STATUS_LABEL[r.status] || r.status}</span>}
                     {r.role ? <div className="muted" style={{ fontSize: 11 }} title={r.role.basis}>{r.role.side}{r.role.confidence === 'confirmed' ? ' · 네임서버' : ' · 추정'}</div> : null}
                   </td>
                   <td data-sort={r.zoneCount ?? 0}>{r.zoneCount ? <span title={(r.zones || []).join(', ')}>{r.zones?.slice(0, 2).join(', ')}{r.zoneCount > 2 ? ` 외 ${r.zoneCount - 2}` : ''}</span> : <span className="muted">—</span>}</td>
-                  <td>{hbaTargetsText(r)}{r.narrowed ? <span className="muted" style={{ fontSize: 11 }}> · 멀티패스로 좁힘</span> : null}</td>
-                  <td data-sort={r.conf || ''} title={r.basis}>{r.status === 'unseen' || r.status === 'no-wwn' ? <span className="muted">—</span> : <><Badge k={r.conf} />{r.split ? <div className="muted" style={{ fontSize: 11 }}>{SPLIT_LABEL[r.split] || r.split}{r.split === 'measured' && r.splitInfo?.samples ? ` · 표본 ${r.splitInfo.samples}` : ''}</div> : null}</>}</td>
-                  <td style={{ textAlign: 'right' }} data-sort={r.nowRead ?? ''}>{rwText(r.nowRead, r.nowWrite)}</td>
-                  <td style={{ textAlign: 'right' }} data-sort={r.bytes ?? ''}>{r.measured ? bytesText(r.bytes) : <span className="muted" title="첫 수집·수집 공백·DB 없음 — 0 이 아니라 측정 없음">—</span>}</td>
+                  <td className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{r.wwn || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -89,18 +89,18 @@ export default function HostSanSection({ hostId, onData }) {
       ) : (
         <div className="table-wrap" style={{ maxHeight: '32vh' }}>
           <STable minWidth={980}>
-            <thead><tr><th>어댑터</th><th>타깃 WWN</th><th>스토리지</th><th>스위치 · 포트</th><th>경로</th><th style={{ textAlign: 'right' }}>지금 읽기 / 쓰기</th><th style={{ textAlign: 'right' }} title="표본 창(기본 5분) 동안 이 타깃으로 오간 양">창 전송량</th><th style={{ textAlign: 'right' }}>지연 읽기 / 쓰기</th></tr></thead>
+            <thead><tr><th>어댑터</th><th>스토리지</th><th style={{ textAlign: 'right' }}>지금 읽기 / 쓰기</th><th style={{ textAlign: 'right' }} title="표본 창(기본 5분) 동안 이 타깃으로 오간 양">창 전송량</th><th style={{ textAlign: 'right' }}>지연 읽기 / 쓰기</th><th>경로</th><th>스위치 · 포트</th><th>타깃 WWN</th></tr></thead>
             <tbody>
               {prows.map((r) => (
                 <tr key={r.key}>
                   <td><b>{r.adapter}</b></td>
-                  <td className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{r.wwn}</td>
                   <td data-sort={r.storage || ''}>{r.storage ? <>{r.storage}{r.registered ? <span className="badge blue" style={{ marginLeft: 6 }}>등록</span> : null}</> : <span className="muted" title="이 타깃 WWN 이 수집된 SAN 스위치 어디에도 로그인해 있지 않습니다">스위치에서 못 찾음</span>}</td>
-                  <td data-sort={r.sw || ''}>{r.sw || <span className="muted">—</span>}</td>
-                  <td data-sort={r.live ?? r.paths ?? ''}>{pathStateText(r)}{r.dead ? <span className="badge red" style={{ marginLeft: 6 }}>죽은 경로</span> : null}</td>
                   <td style={{ textAlign: 'right' }} data-sort={r.read ?? ''}>{rwText(r.read, r.write)}</td>
                   <td style={{ textAlign: 'right' }} data-sort={r.windowBytes ?? ''} title={r.partial ? '표본이 빠진 경로가 있어 창 일부의 합입니다' : ''}>{bytesText(r.windowBytes)}{r.partial ? <span className="muted"> (일부)</span> : null}</td>
                   <td style={{ textAlign: 'right' }} data-sort={r.latR ?? ''}>{latText(r.latR, r.latW)}</td>
+                  <td data-sort={r.live ?? r.paths ?? ''}>{pathStateText(r)}{r.dead ? <span className="badge red" style={{ marginLeft: 6 }}>죽은 경로</span> : null}</td>
+                  <td data-sort={r.sw || ''}>{r.sw || <span className="muted">—</span>}</td>
+                  <td className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{r.wwn}</td>
                 </tr>
               ))}
             </tbody>

@@ -82,9 +82,9 @@ export function sanKpis(d) {
     : `표본 ${hm(sp.at)}${sp.samples ? ` · ${Math.round((sp.samples * (sp.sampleSec || 20)) / 60)}분 창` : ''} · 경로 ${sp.instances ?? '—'}${sp.unparsed ? ` · 이름 못 푼 경로 ${sp.unparsed}` : ''}`;
   return [
     { l: `${label} 전송 합 · HBA 포트`, v: bytesText(t.hostBytes), s: `${cov} · 읽기+쓰기 합산(portperfshow)` },
-    { l: '근거 있는 몫 · 확정 + 실측 비율', v: bytesText(sumOrNull(t.confirmedBytes, t.pathMeasuredBytes)),
+    { l: '확정 + 실측 비율', v: bytesText(sumOrNull(t.confirmedBytes, t.pathMeasuredBytes)),
       s: `${CONF.confirmed.glyph} 확정 ${bytesText(t.confirmedBytes)} · ${CONF.measured.glyph} 실측 비율 ${bytesText(t.pathMeasuredBytes)}` },
-    { l: '추정 몫 · IPF · 포트 비율', v: t.estimatedBytes == null ? '—' : `≈ ${bytesText(t.estimatedBytes)}`,
+    { l: '추정 · IPF · 포트 비율', v: t.estimatedBytes == null ? '—' : `≈ ${bytesText(t.estimatedBytes)}`,
       s: `IPF ${nIpf} · 포트 비율 ${nRatio} 포트${t.unsplitBytes != null ? ` · 분배 불가 ${bytesText(t.unsplitBytes)}` : ''}` },
     { l: '지금 읽기 / 쓰기 · 스위치', v: rwText(t.nowRead, t.nowWrite), s: '스위치 Tx = 읽기 · Rx = 쓰기 · 직전 수집 델타' },
     { l: '지금 읽기 / 쓰기 · ESXi 경로', v: sp ? rwText(kbpsSum(sp.targets, 'rKBps'), kbpsSum(sp.targets, 'wKBps')) : '—',
