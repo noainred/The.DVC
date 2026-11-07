@@ -181,7 +181,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
       {tab === 'monitor' && (
         <>
           {/* v2.911(시안 docs/design/vm-perf ②): 성능은 모달이 아니라 이 탭의 첫 섹션 — 4지표 1회 조회 · 과거 창 · 구간 요약. */}
-          <Lazy><VmPerfView entityType="vm" id={vm.id} name={vm.name} powered={powered} /></Lazy>
+          <Lazy><VmPerfView entityType="vm" id={vm.id} name={vm.name} vcenterId={vm.vcenterId} powered={powered} /></Lazy>
         <div className={GRID}>
           {/* 성능 카드가 빠져 혼자 남은 줄 — 한 줄을 다 쓴다(v2.911 Chromium 확인: 3열 격자에 혼자 좁게 남았다). */}
           <Card title="이벤트 · 이동" style={{ gridColumn: '1 / -1' }}><div style={{ padding: '0 14px 12px' }}>{toolAllowed('vm-changes') ? <VmChangesSection vm={vm} /> : <ErrorBox error={toolDenied('VM 이동·구성 변경 이력')} />}</div></Card>
