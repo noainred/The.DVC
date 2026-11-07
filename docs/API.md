@@ -865,7 +865,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/provision/saved/:id` | 권한 `vm.provision` | [server/src/routes/api/provision.js:48](../server/src/routes/api/provision.js#L48) |
 | GET | `/provision/sources` | 권한 `vm.provision` | [server/src/routes/api/provision.js:21](../server/src/routes/api/provision.js#L21) |
 | GET | `/release-notes` | — | [server/src/routes/api/searchNotes.js:33](../server/src/routes/api/searchNotes.js#L33) |
-| GET | `/search/inventory` | — | [server/src/routes/api/invSearch.js:34](../server/src/routes/api/invSearch.js#L34) |
+| GET | `/search/inventory` | — | [server/src/routes/api/invSearch.js:53](../server/src/routes/api/invSearch.js#L53) |
 | POST | `/search/nl` | — | [server/src/routes/api/searchNotes.js:15](../server/src/routes/api/searchNotes.js#L15) |
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:163](../server/src/routes/api/inventory.js#L163) |
 | POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:644](../server/src/routes/api/inventory.js#L644) |

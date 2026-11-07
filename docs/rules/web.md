@@ -746,6 +746,9 @@
      받는 쪽은 `useSearchHandoff`(검색 칸) · `useFocusHandoff`(상세) — **items 는 받기 전 undefined/null** 로 줄 것(빈 배열이면 '받았는데 없음' 으로 읽고 고른 장비를 잊는다 — PDU 실측).
      상세 여는 함수가 조기 return 아래에 있으면 ref 로 늦게 묶는다(SanSwitchTool `openDetailRef` — TDZ 를 만들지 않게).
   ② 단축키 글자는 `headerText.js cmdkLabel · modKeyLabel`(Mac ⌘ · 그 밖 Ctrl) — 화면에 ⌘ 를 박지 않는다.
+  ③ v2.928 — 새 탭(⌘/Ctrl+Enter) 인계는 **localStorage 일회용 칸 + window.name 번호**(`searchHandoff.stashForNewTab · consumeNewTabHandoff`, main.jsx 가 그리기 전 1회) — 주소에 싣지 않는다.
+     새 창은 `window.open(url, name)` 뒤 `w.opener = null` 로 끊는다(이 경로로 Chromium 에서 창 이름 전달을 확인했다 — `noopener` 기능 문자열로 바꿀 때는 창 이름이 살아 있는지 다시 확인할 것). 팔레트 접근성은 combobox + `aria-activedescendant`(포커스를 줄로 옮기지 않는다) ·
+     일치 표지(`via` → `VIA_LABEL`)는 줄지 않게(`flex: 0 0 auto`) — 메타와 함께 줄면 일치한 값이 잘린다(1440 실측). 좁은 화면 2줄 메타의 구분자는 ‘· ’(뒤 공백) — 줄이 ‘·’ 로 시작하지 않게.
 - **v2.920 — 호스트 상세 ‘SAN 경로·트래픽’ 묶음 · ‘네트워크’ 카드 CVP 열 · SAN 도구 ‘호스트 귀속’ 모달** — 설계 `docs/design/san-cvp-traffic/README.md`:
   ① 묶음 `san` 은 `toolAllowed('san-switch')` 일 때만(hd-nav 도 같이) · 본문 `HostSanSection.jsx` 는 지연 로드(recharts) · 마운트 1회 + 기간 버튼(24h·7일)으로만 받는다(무거운 집계 —
      폴링 금지) · 403 은 `ErrorBox` 가 권한 안내로. 묶음 머리 한 줄은 `hostSanText.sanSubText`.

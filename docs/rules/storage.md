@@ -776,7 +776,7 @@
   - 7일 증가는 `part_series` 의 기준 시각 이하 마지막 점(diff-저장)으로 낸다 — 기준 점이 없으면 null(관측 부족), 변화 기준(기본 1 GB) 미만 변화는 보이지 않는다. 가득 참 예상은 그 속도의 단순 추정.
   · v2.770(점검 R5-E2): 엣지 소비 전력의 부분 합 표지(`partial`·`missing`)도 중앙 정제 화이트리스트에(missing>0 일 때만 partial) — 빠지면 전체 전력이 부분 합을 '측정' 으로 센다.
     장비 출력 파서에 `m` 플래그 + 무제한 부정 클래스 금지(외로운 \r 마다 시작점) · `/^(\d+):\s*(.*)$/` 대신 `uemcliParse.recStart` 를 쓴다(한 벌) · 주기 수집은 `_inFlight` 를 보고 건너뛰며(`inFlightSkipped`), finally 는 자기 항목만 지운다.
-- ⚠⚠ **v2.926(릴리스 2.929.0) — 아이실론 노드 부하 시계열(네트워크 In/Out · 디스크 쓰기/읽기 · CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`(`saveNodeLoadPoint`·`nodeLoadQuery`), 수집 키는 `collectors/isilonNodeLoad.js`, 화면은 `views/tools/storageNodeLoad/`**
+- ⚠⚠ **v2.926(릴리스 2.930.0) — 아이실론 노드 부하 시계열(네트워크 In/Out · 디스크 쓰기/읽기 · CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`(`saveNodeLoadPoint`·`nodeLoadQuery`), 수집 키는 `collectors/isilonNodeLoad.js`, 화면은 `views/tools/storageNodeLoad/`**
   (사용자 요청 "노드별 io network 부하를 저장하고 차트로" · "기간별 시간별로 이전 기록" · "Disk io 추가" · 성능 추천 ①CPU ④잡 엔진 ⑤지난주 비교 — Claude Design 시안 v2 컨펌,
   `docs/design/isilon-node-load/`. 회귀 `server/test/storageNodeLoad2926.test.js` + 웹 `storageNodeLoad/nodeLoadText.test.js`(서버 묶음·기간·조립을 같은 소스로 대조)):
   · **장비 왕복을 늘리지 않는다** — REST 는 이미 부르는 `statistics/current?devid=all` 에 키 3개(`node.disk.bytes.{in,out}.rate.sum` · `node.cpu.idle.avg`)를 더하고(테스트가 statistics 호출 수 3 을 고정),
