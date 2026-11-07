@@ -433,7 +433,7 @@ export default function SanSwitchTool() {
       )}
 
       {attribOpen && (
-        <Modal title={`호스트 귀속 — SAN 조닝 · 트래픽${dcSel.size ? ` — ${[...dcSel].join(', ')}` : ' — 전체'}`} onClose={() => setAttribOpen(false)} width={1240}>
+        <Modal title={`호스트 귀속 — SAN 조닝 · 트래픽${dcSel.size ? ` — ${[...dcSel].join(', ')}` : ' — 전체'}`} onClose={() => setAttribOpen(false)} width={1400}>
           <SanHostAttrib datacenterIds={[...dcSel].map(dcIdOfName).filter(Boolean)} datacenters={data.datacenters || []} dcNameOf={dcName} />
         </Modal>
       )}

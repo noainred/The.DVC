@@ -2,7 +2,7 @@
  * sanHostAttribText.js — SAN 도구 ‘호스트 귀속’ 보기의 문구·정렬·막대 계산(순수, v2.920 — 시안 D-③ SanAttrib).
  * 서버 /tools/sanswitch/attribution(attributeFleet) 응답을 쓴다. 확정분·추정분을 한 숫자로 합치지 않고, 값 없음은 ‘—’.
  */
-import { CONF, bytesText, rwText } from '../hostSanText.js';
+import { CONF, bytesText, rwText, rateText } from '../hostSanText.js';
 
 const fmtBytes = bytesText;
 
@@ -94,4 +94,19 @@ export function attribStateText(d) {
   if (!d.hostsWithHba) return '선택한 법인의 vCenter 에 HBA 정보를 가진 호스트가 없습니다(법인 ↔ vCenter 지정은 설정 › 법인).';
   if (d.perfUnavailable) return '포트 사용량 DB 를 열지 못해 기간 바이트가 없습니다 — 조닝 관계만 표시합니다.';
   return '';
+}
+
+/** v2.940(C-② 시안 — ‘실측(스위치 플로우)’): 호스트 → 스토리지 행의 Flow Vision 플로우 합(읽기 / 쓰기). 속도를 읽은 플로우가 없으면 개수만 · 없으면 ‘—’. */
+/** 스위치 플로우 칸 두 줄 — [속도, 보조(읽은 개수 · 오래됨)]. 표가 넓어 보조는 둘째 줄로 내린다(1440px 에서 열이 화면 밖으로 밀리던 것 — v2.940 Chromium 판독). */
+export function flowSumParts(flow) {
+  if (!flow || !flow.n) return ['—', ''];
+  const stale = flow.stale ? `오래됨 ${flow.stale}` : '';   // v2.940 반증 M-1: 오래된 플로우는 합에 넣지 않고 따로 센다
+  if (flow.rxBps == null || flow.txBps == null || !flow.measured) return [`플로우 ${flow.n}개 · 속도 없음`, stale];
+  const t = `${rateText(flow.txBps)} / ${rateText(flow.rxBps)}`;   // 읽기(장비 송신) / 쓰기(장비 수신)
+  return [t, [flow.measured < flow.n ? `${flow.measured}/${flow.n}개` : '', stale].filter(Boolean).join(' · ')];
+}
+export function flowSumText(flow) {
+  const [a, b] = flowSumParts(flow);
+  if (a === '—' || !b) return a;
+  return /속도 없음$/.test(a) ? `${a} · ${b}` : `${a}(${b})`;
 }

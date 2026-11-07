@@ -121,7 +121,7 @@ test('③ 작업 큐 — 비밀 없음 · 그 엣지만 · ttl · pending · 늦
   assert.deepEqual(done.result.outputs.map((o) => o.cmd), [createCmd(N1), `flow --show ${N1}`], '실행했어야 하는 명령만');
   assert.ok(done.result.outputs[1].out.length <= C.OUT_MAX);
   assert.equal('extra' in done.result, false);
-  assert.equal(rec.lastError, '카운터 형식을 알아보지 못했습니다(원문은 작업 기록에)', '카운터를 못 읽으면 0 이 아니라 사유');
+  assert.equal(rec.lastError, '카운터 형식을 알아보지 못했습니다(원문 앞부분은 기록에)', '카운터를 못 읽으면 0 이 아니라 사유');
   assert.equal(rec.counters, undefined); assert.equal(rec.lastAt, undefined, '반증 M-4: 못 읽은 시도는 성공 시각을 움직이지 않는다'); assert.ok(rec.lastTryAt);
   assert.equal(J.completeFlowJob(r.id, 'edge-a', res).already, true, '두 번째 회신은 무시');
 

@@ -327,6 +327,25 @@ export function attributeFleet(hosts = [], fabrics = [], opt = {}) {
     counts.hosts += 1;
     if (r.status === 'no-hba') counts.noHba += 1; else if (r.status === 'unseen') counts.unseen += 1; else if (r.status === 'zoned-only') counts.zonedOnly += 1; else counts.ok += 1;
     hostRows.push({ id: r.host.id, name: r.host.name, vcenterId: r.host.vcenterId, status: r.status, totals: r.totals, hbas: r.hbas.length, mpTargets: r.mpTargets });
+    /*
+     * v2.940(C-② 시안 — '실측(스위치 플로우)' 줄): 이 호스트의 Flow Vision 플로우(HBA · 타깃 WWN)를 같은 호스트 귀속의 타깃 → 스토리지 대응으로 묶는다.
+     *   ESXi 경로 실측 · 포트 비율 분배와 **섞지 않는다**(나란히 보여 준다 — 하나를 고르지 않는다). 속도를 못 읽은 플로우는 개수에만 넣는다.
+     */
+    const flowBySid = new Map();
+    const fl = typeof opt.flowsOf === 'function' ? (opt.flowsOf(h) || []) : [];
+    if (fl.length) {
+      const sidOf = new Map();
+      for (const x of r.hbas) for (const t of x.targets || []) for (const w of t.wwns || []) sidOf.set(`${x.hba}|${w}`, t.id);
+      for (const f of fl) {
+        const sid = sidOf.get(`${f.hba}|${f.dstdev}`);
+        if (!sid) continue;
+        const e = flowBySid.get(sid) || { n: 0, measured: 0, stale: 0, rxBps: null, txBps: null };
+        e.n += 1;
+        if (f.stale) e.stale += 1;   // v2.940 반증 M-1: 오래된 플로우는 합에 넣지 않고 따로 센다
+        if (numOrNull(f.rxBps) != null && numOrNull(f.txBps) != null) { e.measured += 1; e.rxBps = (e.rxBps ?? 0) + f.rxBps; e.txBps = (e.txBps ?? 0) + f.txBps; }
+        flowBySid.set(sid, e);
+      }
+    }
     for (const s of r.storages) {
       const hasTraffic = s.confirmedPorts.length || s.measuredPorts.length || s.estimatedPorts.length || s.unsplitPorts.length;
       // 짝의 근거 — 가장 약한 포트 근거를 따른다(추정이 하나라도 섞이면 추정 · 실측과 확정만이면 실측 · 확정만이면 확정).
@@ -337,7 +356,8 @@ export function attributeFleet(hosts = [], fabrics = [], opt = {}) {
       const measuredAny = s.confirmedBytes != null || s.estimatedBytes != null || s.measuredBytes != null;
       const row = { hostId: r.host.id, hostName: r.host.name, vcenterId: r.host.vcenterId, storageId: s.id, storageName: s.name, kind: s.kind, registered: !!s.registered,
         conf, confirmedBytes: s.confirmedBytes, estimatedBytes: s.estimatedBytes, measuredBytes: s.measuredBytes, measured: measuredAny, nowRead: s.nowRead, nowWrite: s.nowWrite,
-        ports: { confirmed: s.confirmedPorts.length, measured: s.measuredPorts.length, estimated: s.estimatedPorts.length, unsplit: s.unsplitPorts.length, unmeasured: s.unmeasuredPorts.length, zonedOnly: s.zonedOnlyPorts.length }, fabrics: s.fabrics };
+        ports: { confirmed: s.confirmedPorts.length, measured: s.measuredPorts.length, estimated: s.estimatedPorts.length, unsplit: s.unsplitPorts.length, unmeasured: s.unmeasuredPorts.length, zonedOnly: s.zonedOnlyPorts.length }, fabrics: s.fabrics,
+        ...(flowBySid.has(s.id) ? { flow: flowBySid.get(s.id) } : {}) };
       if (!hasTraffic) { zonedOnly.push({ ...row, zones: s.zones.slice(0, 8) }); counts.zonedOnlyPairs += 1; continue; }
       rows.push(row);
       if (conf === 'confirmed') counts.confirmedPairs += 1; else if (conf === 'measured') counts.measuredPairs += 1; else if (conf === 'estimated') counts.estimatedPairs += 1; else if (conf === 'unsplit') counts.unsplitPairs += 1;
