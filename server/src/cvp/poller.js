@@ -200,6 +200,10 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
       if (r.inventoryComplete && !pruneHeld) { await db.pruneDevices(db.LOCAL_AGENT, { [full.id]: r.devices.map((d) => d.key) }); _zeroSince.delete(full.id); }
       // v2.641 ④: CVP 이벤트(읽었을 때만 — 못 읽은 주기에 빈 목록으로 지우지 않는다. 이벤트는 upsert 라 지우는 경로가 보존 정리뿐이다).
       if (r.events && Array.isArray(r.events.list)) await db.saveEvents(db.LOCAL_AGENT, full.id, r.events.list, { now: readAt });
+      // v2.924(SAN·CVP 설계 B-②): LLDP 이웃 · MAC 테이블 — 부품 주기에 시도한 장비만(배열 = 바꿈 · null = 실패 시각만 · undefined = 건드리지 않음).
+      const l2Items = r.devices.filter((d) => d.lldp !== undefined || d.fdb !== undefined)
+        .map((d) => ({ key: d.key, ts: d.l2At ?? readAt, fdb: d.fdb, lldp: d.lldp, fdbMeta: d.fdbMeta, lldpTruncated: d.lldpTruncated }));
+      if (l2Items.length) await db.saveL2(db.LOCAL_AGENT, full.id, l2Items);
     } catch (e) { saved = { error: e.message }; console.warn(`[cvp] ${full.name || full.id}: DB 적재 실패 — ${e.message}`); }
     putStatus(full.id, {
       name: full.name, ok: true, collectedAt: readAt, lastAttemptAt: readAt, durationMs: readAt - t0, deviceCount: r.devices.length,

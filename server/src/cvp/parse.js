@@ -1203,3 +1203,96 @@ export function parseEvents(text, { max = EVENT_MAX } = {}) {
   for (const e of all) bySeverity[e.severity]++;
   return { events: all.slice(0, max), bySeverity, total: all.length, truncated: Math.max(0, all.length - max), keys: [...keys] };
 }
+
+/* ── v2.924(SAN·CVP 설계 B-②) — LLDP 이웃 · MAC 테이블(FDB) ─────────────────────────────────────────────────────────────
+ * 호스트 업링크 매칭의 근거를 '포트 설명 일치(보통)' 에서 'LLDP 이웃(확정)' · 'MAC 테이블 학습(높음)' 으로 올린다(cvp/hostMatch.js).
+ * ⚠ 경로(`/Sysdb/l2discovery/lldp/status/local/1/portStatus` · `/Smash/bridging/status/smashFdbStatus`)와 필드 이름은 EOS Sysdb/Smash 관용으로
+ *   **추정**했다 — 실장비로 확인하지 못했다(다른 텔레메트리와 같은 처지 — 후보 체인 · 원문 표본 · 경로 탐색 표본으로 확인한다).
+ *   못 읽으면 null 이고 화면은 '수집 전/못 읽음' 으로 말한다(매칭을 지어내지 않는다).
+ */
+/** 개체 경로 구분자 — client.js PART_PATH_SEP 와 같은 글자(followPtrs 가 포인터 키를 이 글자로 이어 개체 이름을 짓는다 — 테스트가 대조). */
+export const ENTITY_PATH_SEP = ' › ';
+export const LLDP_MAX = 512;        // 장비당 이웃 상한
+export const FDB_MAX = 4096;        // 장비당 MAC 항목 상한(엣지 push · 중앙 정제가 같은 값)
+export const FDB_PORT_MAX = 512;    // 포트당 MAC 상한 — 넘는 포트는 스위치 사이 트렁크로 보고 버린다(개수는 portsOverCap 으로 밝힌다)
+/** MAC 정규화 — 콜론·하이픈·점·붙임 어느 표기든 12자 소문자 16진. 아니면 null. */
+export const normMac = (v) => { const h = String(v ?? '').slice(0, 64).toLowerCase().replace(/[^0-9a-f]/g, ''); return h.length === 12 ? h : null; };
+const MAC_IN_TEXT = /(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}|(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}/i;
+const INTF_NAME = /^(ethernet|management|port-channel|vlan|loopback|et|ma|po)[\d/.:]*/i;
+
+/**
+ * LLDP 이웃 → { neighbors:[{port, idx, sysName, portId, portDesc, chassisId}] | null, keys, truncated }.
+ * 개체 이름은 followPtrs 가 '포트 › remoteSystem › 번호' 로 짓는다 — 첫 조각이 로컬 포트다. 이름에서 포트를 못 찾으면 필드(localPort·intf)를 본다.
+ * 이웃 식별 필드(sysName·portId·chassisId)가 하나도 없는 개체는 세지 않는다(컨테이너 · 빈 슬롯).
+ */
+export function parseLldp(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  if (notRead(format, entities)) return { neighbors: null, keys };
+  const out = [];
+  for (const [name, f] of entities) {
+    const sysName = str(pick(f, ['sysName', 'systemName']) ?? '', 255);
+    const portId = str(pick(f, ['portId']) ?? '', 128);
+    const chassisId = str(pick(f, ['chassisId']) ?? '', 128);
+    if (!sysName && !portId && !chassisId) continue;
+    const segs = String(name).split(ENTITY_PATH_SEP);
+    let port = INTF_NAME.test(segs[0]) ? segs[0] : '';
+    if (!port) { const p = pick(f, ['localPort', 'localIntf', 'intf', 'interface', 'portName']); port = p == null ? '' : str(p, 64); }
+    if (!port) continue;
+    out.push({ port: str(port, 64), idx: str(segs.slice(1).join('/') || '0', 64), sysName, portId, portDesc: str(pick(f, ['portDescription', 'portDesc']) ?? '', 200), chassisId });
+  }
+  if (!out.length && entities.size) return { neighbors: null, keys };
+  return { neighbors: out.slice(0, LLDP_MAX), keys, truncated: Math.max(0, out.length - LLDP_MAX) };
+}
+
+/**
+ * MAC 테이블(FDB) → { entries:[{mac, vlan, port}] | null, keys, truncated, portsOverCap:[{port, macs}], total }.
+ * ⚠ entitiesOf 를 쓰지 않는다 — FDB 항목의 키는 `{fid, addr}` 같은 **복합 객체**라 updKey(첫 스칼라 = VLAN)로 이름을 지으면 같은 VLAN 의 MAC 이
+ *   전부 한 개체로 합쳐진다. update 마다 값 + 키 객체를 함께 펼쳐 읽는다. 알림 형식이 아니면 entitiesOf 로 떨어진다.
+ * 포트당 MAC 이 FDB_PORT_MAX 를 넘는 포트(스위치 사이 트렁크)는 버리고 portsOverCap 으로 밝힌다 — 그 포트는 모든 호스트의 MAC 을 배워 매칭 근거가 아니다.
+ */
+export function parseFdb(text) {
+  const all = [];
+  const keysSeen = new Set();
+  const take = (name, f) => {
+    for (const k of Object.keys(f)) if (keysSeen.size < 40) keysSeen.add(k.split('.').pop());
+    let mac = normMac(pick(f, ['addr', 'macAddr', 'macAddress', 'mac', 'address', 'ethAddr']));
+    if (!mac) { const m = MAC_IN_TEXT.exec(String(name).slice(0, 128)); mac = m ? normMac(m[0]) : null; }
+    const pv = pick(f, ['intf', 'interface', 'intfId', 'port']);
+    const port = pv == null ? '' : str(pv, 64);
+    if (!mac || !port) return;
+    const vl = numOrNull(pick(f, ['fid', 'vlanId', 'vlan', 'vid']));
+    all.push({ mac, vlan: vl != null && vl >= 0 && vl <= 4095 ? Math.trunc(vl) : null, port });
+  };
+  const { values } = splitJsonStream(text);
+  let format = null; let updates = 0;
+  for (const v of values) {
+    if (!isObj(v) || !Array.isArray(v.notifications)) continue;
+    format = 'notifications';
+    for (const n of v.notifications) {
+      if (!isObj(n) || !isObj(n.updates)) continue;
+      for (const [k, u] of Object.entries(n.updates)) {
+        updates++;
+        const raw = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u;
+        if (ptrSegs(raw) != null) continue;
+        const val = unwrap(raw);
+        if (!isObj(val)) continue;
+        const kf = isObj(u) && isObj(u.key) ? flatten(u.key, 'key') : {};
+        take(k, { ...kf, ...flatten(val) });
+        if (all.length > FDB_MAX * 4) break;   // 상한의 4배를 넘으면 더 읽지 않는다(포트당 상한 판정에 충분)
+      }
+    }
+  }
+  if (!format) {
+    const r = entitiesOf(text);
+    if (notRead(r.format, r.entities)) return { entries: null, keys: r.keys };
+    format = r.format;
+    for (const [name, f] of r.entities) take(name, f);
+  } else if (!updates) return { entries: null, keys: [] };
+  if (!all.length) return { entries: null, keys: [...keysSeen] };
+  const perPort = new Map();
+  for (const e of all) perPort.set(e.port, (perPort.get(e.port) || 0) + 1);
+  const overCap = [...perPort].filter(([, n]) => n > FDB_PORT_MAX).map(([port, macs]) => ({ port, macs }));
+  const over = new Set(overCap.map((x) => x.port));
+  const kept = all.filter((e) => !over.has(e.port));
+  return { entries: kept.slice(0, FDB_MAX), keys: [...keysSeen], truncated: Math.max(0, kept.length - FDB_MAX), portsOverCap: overCap.slice(0, 64), total: all.length };
+}

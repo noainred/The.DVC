@@ -19,6 +19,7 @@
  *   ts 단독 인덱스 · COUNT(*) 는 짧게 캐시하고 캐시임을 밝힌다(countsAt).
  */
 import fs from 'node:fs';
+import crypto from 'node:crypto';   // v2.924(B-②): L2 내용 해시
 import { pushAll } from '../util/pushAll.js';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -100,6 +101,23 @@ async function openInner() {
         PRIMARY KEY (agent, cvp_id, ev_key, ts));
       CREATE INDEX IF NOT EXISTS idx_ce_ts ON cvp_event (ts);
       CREATE INDEX IF NOT EXISTS idx_ce_seen ON cvp_event (seen_at);`);
+    // v2.924(SAN·CVP 설계 B-②): LLDP 이웃 · MAC 테이블(장비마다 최신 한 벌) + 메타(읽은 시각 · 개수 · 내용 해시 — 엣지 push 가 바뀐 장비만 보낸다).
+    //   vlan 은 모르면 -1(기본키 열에 NULL 을 두지 않는다). sys_lc·sys_short 는 호스트 이름 조회용 소문자(전체 · 첫 점 앞).
+    conn.exec(`CREATE TABLE IF NOT EXISTS l2_fdb (
+        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, mac TEXT NOT NULL, vlan INTEGER NOT NULL DEFAULT -1, port TEXT NOT NULL, ts INTEGER NOT NULL,
+        PRIMARY KEY (agent, cvp_id, device_key, mac, vlan));
+      CREATE INDEX IF NOT EXISTS idx_l2fdb_mac ON l2_fdb (mac);
+      CREATE TABLE IF NOT EXISTS l2_lldp (
+        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, port TEXT NOT NULL, idx TEXT NOT NULL,
+        sys_name TEXT, sys_lc TEXT, sys_short TEXT, port_id TEXT, port_desc TEXT, chassis_id TEXT, ts INTEGER NOT NULL,
+        PRIMARY KEY (agent, cvp_id, device_key, port, idx));
+      CREATE INDEX IF NOT EXISTS idx_l2lldp_lc ON l2_lldp (sys_lc);
+      CREATE INDEX IF NOT EXISTS idx_l2lldp_short ON l2_lldp (sys_short);
+      CREATE TABLE IF NOT EXISTS l2_meta (
+        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL,
+        fdb_at INTEGER, fdb_n INTEGER, fdb_truncated INTEGER, fdb_over_json TEXT, fdb_hash TEXT, fdb_fail_at INTEGER,
+        lldp_at INTEGER, lldp_n INTEGER, lldp_truncated INTEGER, lldp_hash TEXT, lldp_fail_at INTEGER,
+        PRIMARY KEY (agent, cvp_id, device_key));`);
     addDailyErrCountCols(conn);
     addDeviceInfoCols(conn);
     addPortDetailCols(conn);
@@ -439,6 +457,7 @@ export async function pruneDevices(agent, keepByCvp = {}, { cvpIds = null } = {}
       for (const c of have) if (!keep.has(c)) {
         removed += Number(db.conn.prepare('DELETE FROM device_latest WHERE agent=? AND cvp_id=?').run(agent, c).changes);
         db.conn.prepare('DELETE FROM port_latest WHERE agent=? AND cvp_id=?').run(agent, c);
+        dropL2(db.conn, agent, c);   // v2.924(B-②)
       }
     }
     for (const [cvpId, keys] of Object.entries(keepByCvp)) {
@@ -448,6 +467,7 @@ export async function pruneDevices(agent, keepByCvp = {}, { cvpIds = null } = {}
       for (const k of have) if (!keep.has(k)) {
         removed += Number(db.conn.prepare('DELETE FROM device_latest WHERE agent=? AND cvp_id=? AND device_key=?').run(agent, cvpId, k).changes);
         db.conn.prepare('DELETE FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=?').run(agent, cvpId, k);
+        dropL2(db.conn, agent, cvpId, k);   // v2.924(B-②)
       }
     }
     db.conn.exec('COMMIT');
@@ -539,6 +559,9 @@ async function adoptTable(db, t, key, variant, chunkRows) {
 }
 async function runAdopt(db, key, variants, chunkRows) {
   let moved = 0; let merged = 0;
+  // v2.924(B-②): L2(LLDP·MAC 테이블)는 '장비마다 최신 한 벌' 이라 옮겨 합치면 두 시각의 목록이 섞인다 — 변형 이름의 행은 지운다.
+  //   엣지가 지금 쓰는 이름(key)으로 다시 보내고(바뀐 장비 · 전량 갱신 주기), 그동안 매칭은 key 의 행만 쓴다.
+  for (const v of variants) for (const t of ['l2_fdb', 'l2_lldp', 'l2_meta']) db.conn.prepare(`DELETE FROM ${t} WHERE agent=?`).run(v);
   for (const v of variants) {
     for (const t of Object.keys(ADOPT_PK)) {
       const r = await adoptTable(db, t, key, v, chunkRows);
@@ -1185,4 +1208,189 @@ export async function portLatestRows({ cvpIds = null, limit = 50_000 } = {}) {
       p.in_bps, p.out_bps, p.in_util, p.out_util, p.in_err, p.out_err, p.in_drop, p.out_drop, p.rate_ts, d.hostname
     FROM port_latest p LEFT JOIN device_latest d ON d.agent=p.agent AND d.cvp_id=p.cvp_id AND d.device_key=p.device_key ${where} LIMIT ?`).all(...(ids || []), limit + 1);
   return { rows: rows.slice(0, limit), ...(rows.length > limit ? { truncated: true } : {}) };
+}
+
+/* ── v2.924(SAN·CVP 설계 B-②) — LLDP 이웃 · MAC 테이블 ────────────────────────────────────────────────────────────────────
+ * 장비마다 최신 한 벌만 둔다(읽을 때마다 그 장비 행을 바꾼다 — 이력은 두지 않는다). 배열을 받았을 때만 바꾸고, null(못 읽음)은 실패 시각만 적는다 —
+ *   이전 목록은 남고 화면이 시각으로 오래됨을 말한다. 내용 해시를 메타에 두어 엣지 push 가 바뀐 장비만 보낸다.
+ */
+const L2_FDB_MAX = 4096; const L2_LLDP_MAX = 512;   // parse.FDB_MAX · LLDP_MAX 와 같은 값(정제·push 가 같은 상한)
+const l2Hash = (rows) => crypto.createHash('sha1').update(JSON.stringify(rows)).digest('hex').slice(0, 20);
+const macOk = (m) => typeof m === 'string' && /^[0-9a-f]{12}$/.test(m);
+const vlanOf = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n <= 4095 ? Math.trunc(n) : -1; };
+/** 정렬된 FDB 행 [[mac, vlan, port]] — 해시·push·저장이 같은 순서를 쓴다. */
+export function fdbRowsOf(list) {
+  const out = [];
+  for (const e of Array.isArray(list) ? list : []) {
+    const mac = Array.isArray(e) ? e[0] : e?.mac; const port = txt(Array.isArray(e) ? e[2] : e?.port, 64);
+    if (!macOk(mac) || !port) continue;
+    out.push([mac, vlanOf(Array.isArray(e) ? e[1] : e?.vlan), port]);
+    if (out.length >= L2_FDB_MAX) break;
+  }
+  return out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]));
+}
+/** 정렬된 LLDP 행 [[port, idx, sysName, portId, portDesc, chassisId]]. */
+export function lldpRowsOf(list) {
+  const out = [];
+  for (const e of Array.isArray(list) ? list : []) {
+    const a = Array.isArray(e) ? e : [e?.port, e?.idx, e?.sysName, e?.portId, e?.portDesc, e?.chassisId];
+    const port = txt(a[0], 64); if (!port) continue;
+    out.push([port, txt(a[1], 64) || '0', txt(a[2], 255) || '', txt(a[3], 128) || '', txt(a[4], 200) || '', txt(a[5], 128) || '']);
+    if (out.length >= L2_LLDP_MAX) break;
+  }
+  return out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+}
+
+/**
+ * 장비별 L2 적재(로컬 수집 · 엣지 push 공용). items: [{ key, ts, fdb?: 배열|null|undefined, lldp?: 배열|null|undefined, fdbMeta?, lldpTruncated? }].
+ *   장비마다 트랜잭션 1회 · COMMIT 뒤 양보(v2.611 DB2611-04 — BEGIN 을 연 채 양보하지 않는다). 해시가 같으면 행을 다시 쓰지 않고 시각만 올린다.
+ * @returns {Promise<{devices:number, fdb:number, lldp:number, unavailable?:true}>}
+ */
+export async function saveL2(agent, cvpId, items = []) {
+  const db = await open();
+  if (!db) return { devices: 0, fdb: 0, lldp: 0, unavailable: true };
+  const c = db.conn;
+  const st = db.l2st || (db.l2st = {
+    meta: c.prepare('SELECT fdb_hash, lldp_hash FROM l2_meta WHERE agent=? AND cvp_id=? AND device_key=?'),
+    upMeta: c.prepare(`INSERT INTO l2_meta (agent,cvp_id,device_key) VALUES (?,?,?) ON CONFLICT(agent,cvp_id,device_key) DO NOTHING`),
+    fdbMeta: c.prepare('UPDATE l2_meta SET fdb_at=?, fdb_n=?, fdb_truncated=?, fdb_over_json=?, fdb_hash=? WHERE agent=? AND cvp_id=? AND device_key=?'),
+    fdbFail: c.prepare('UPDATE l2_meta SET fdb_fail_at=? WHERE agent=? AND cvp_id=? AND device_key=?'),
+    lldpMeta: c.prepare('UPDATE l2_meta SET lldp_at=?, lldp_n=?, lldp_truncated=?, lldp_hash=? WHERE agent=? AND cvp_id=? AND device_key=?'),
+    lldpFail: c.prepare('UPDATE l2_meta SET lldp_fail_at=? WHERE agent=? AND cvp_id=? AND device_key=?'),
+    delFdb: c.prepare('DELETE FROM l2_fdb WHERE agent=? AND cvp_id=? AND device_key=?'),
+    insFdb: c.prepare('INSERT OR IGNORE INTO l2_fdb (agent,cvp_id,device_key,mac,vlan,port,ts) VALUES (?,?,?,?,?,?,?)'),
+    delLldp: c.prepare('DELETE FROM l2_lldp WHERE agent=? AND cvp_id=? AND device_key=?'),
+    insLldp: c.prepare('INSERT OR IGNORE INTO l2_lldp (agent,cvp_id,device_key,port,idx,sys_name,sys_lc,sys_short,port_id,port_desc,chassis_id,ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'),
+  });
+  let nd = 0; let nf = 0; let nl = 0;
+  for (const it of Array.isArray(items) ? items : []) {
+    const key = txt(it?.key, 128); const ts = numOrNull(it?.ts);
+    if (!key || ts == null || (it.fdb === undefined && it.lldp === undefined)) continue;
+    if (nd > 0) await new Promise((r) => setImmediate(r));
+    c.exec('BEGIN');
+    try {
+      st.upMeta.run(agent, cvpId, key);
+      const m = st.meta.get(agent, cvpId, key) || {};
+      if (Array.isArray(it.fdb)) {
+        const rows = fdbRowsOf(it.fdb); const h = l2Hash(rows);
+        if (h !== m.fdb_hash) { st.delFdb.run(agent, cvpId, key); for (const r of rows) st.insFdb.run(agent, cvpId, key, r[0], r[1], r[2], ts); nf += rows.length; }
+        const meta = it.fdbMeta && typeof it.fdbMeta === 'object' ? it.fdbMeta : {};
+        const over = Array.isArray(meta.portsOverCap) ? meta.portsOverCap.slice(0, 64).map((x) => ({ port: txt(x?.port, 64) || '', macs: numOrNull(x?.macs) })) : [];
+        st.fdbMeta.run(ts, rows.length, numOrNull(meta.truncated) ?? 0, over.length ? JSON.stringify(over) : null, h, agent, cvpId, key);
+      } else if (it.fdb === null) st.fdbFail.run(ts, agent, cvpId, key);
+      if (Array.isArray(it.lldp)) {
+        const rows = lldpRowsOf(it.lldp); const h = l2Hash(rows);
+        if (h !== m.lldp_hash) {
+          st.delLldp.run(agent, cvpId, key);
+          for (const r of rows) { const lc = r[2].toLowerCase(); st.insLldp.run(agent, cvpId, key, r[0], r[1], r[2] || null, lc || null, lc ? lc.split('.')[0] : null, r[3] || null, r[4] || null, r[5] || null, ts); }
+          nl += rows.length;
+        }
+        st.lldpMeta.run(ts, rows.length, numOrNull(it.lldpTruncated) ?? 0, h, agent, cvpId, key);
+      } else if (it.lldp === null) st.lldpFail.run(ts, agent, cvpId, key);
+      c.exec('COMMIT');
+      nd++;
+    } catch (e) { try { c.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  }
+  return { devices: nd, fdb: nf, lldp: nl };
+}
+
+/** 엣지 push 용 메타(장비별 해시·시각) — 행은 읽지 않는다(바뀐 장비만 l2RecordFor 로 읽는다). */
+export async function l2MetaFor(agent, cvpId) {
+  const db = await open();
+  if (!db) return null;
+  return db.conn.prepare('SELECT device_key, fdb_at, fdb_hash, lldp_at, lldp_hash FROM l2_meta WHERE agent=? AND cvp_id=?').all(agent, cvpId)
+    .map((r) => ({ key: r.device_key, fdbAt: r.fdb_at ?? null, fdbHash: r.fdb_hash || '', lldpAt: r.lldp_at ?? null, lldpHash: r.lldp_hash || '' }));
+}
+/** 엣지 push 용 장비 한 대의 L2 레코드(배열 모양 — 정제가 같은 모양을 받는다). 읽은 적 없는 쪽은 싣지 않는다. */
+export async function l2RecordFor(agent, cvpId, key) {
+  const db = await open();
+  if (!db) return null;
+  const m = db.conn.prepare('SELECT * FROM l2_meta WHERE agent=? AND cvp_id=? AND device_key=?').get(agent, cvpId, key);
+  if (!m) return null;
+  const out = { key, ts: Math.max(Number(m.fdb_at) || 0, Number(m.lldp_at) || 0) };
+  if (m.fdb_at != null) {
+    out.fdb = db.conn.prepare('SELECT mac, vlan, port FROM l2_fdb WHERE agent=? AND cvp_id=? AND device_key=? ORDER BY mac, vlan LIMIT ?').all(agent, cvpId, key, L2_FDB_MAX).map((r) => [r.mac, r.vlan, r.port]);
+    out.fdbMeta = { truncated: Number(m.fdb_truncated) || 0, portsOverCap: (() => { try { return JSON.parse(m.fdb_over_json || '[]'); } catch { return []; } })() };
+  }
+  if (m.lldp_at != null) {
+    out.lldp = db.conn.prepare('SELECT port, idx, sys_name, port_id, port_desc, chassis_id FROM l2_lldp WHERE agent=? AND cvp_id=? AND device_key=? ORDER BY port, idx LIMIT ?').all(agent, cvpId, key, L2_LLDP_MAX)
+      .map((r) => [r.port, r.idx, r.sys_name || '', r.port_id || '', r.port_desc || '', r.chassis_id || '']);
+    out.lldpTruncated = Number(m.lldp_truncated) || 0;
+  }
+  return out;
+}
+
+const devNameJoin = 'LEFT JOIN device_latest d ON d.agent = x.agent AND d.cvp_id = x.cvp_id AND d.device_key = x.device_key';
+/** MAC 목록(정규화 12자)이 학습된 포트 — 500개씩 나눠 묻는다(IN 목록 상한). 장비 호스트명을 붙인다. */
+export async function fdbByMacs(macs = [], { limit = 2000 } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  const list = [...new Set((Array.isArray(macs) ? macs : []).filter(macOk))].slice(0, 2048);
+  const rows = [];
+  for (let i = 0; i < list.length && rows.length < limit; i += 500) {
+    const part = list.slice(i, i + 500);
+    for (const r of db.conn.prepare(`SELECT x.agent, x.cvp_id, x.device_key, x.mac, x.vlan, x.port, x.ts, d.hostname FROM l2_fdb x ${devNameJoin} WHERE x.mac IN (${part.map(() => '?').join(',')}) LIMIT ?`).all(...part, limit)) {
+      rows.push({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, hostname: r.hostname || '', mac: r.mac, vlan: r.vlan < 0 ? null : r.vlan, port: r.port, ts: Number(r.ts) });
+    }
+  }
+  return { rows: rows.slice(0, limit), ...(rows.length > limit ? { truncated: true } : {}) };
+}
+/** 장비들의 포트별 학습 MAC 수(장비마다 한 문장 · 집계 함수 하나). key: `${agent}\u0000${cvpId}\u0000${key}` → Map(port → n). */
+export async function fdbPortTotals(devices = []) {
+  const out = new Map();
+  const db = await open();
+  if (!db) return out;
+  const q = db.conn.prepare('SELECT port, COUNT(*) AS n FROM l2_fdb WHERE agent=? AND cvp_id=? AND device_key=? GROUP BY port');
+  for (const d of (Array.isArray(devices) ? devices : []).slice(0, 64)) {
+    out.set(`${d.agent ?? ''}\u0000${d.cvpId}\u0000${d.key}`, new Map(q.all(String(d.agent ?? ''), String(d.cvpId), String(d.key)).map((r) => [r.port, Number(r.n)])));
+  }
+  return out;
+}
+/** LLDP 이웃 시스템 이름(소문자 전체 또는 첫 점 앞)이 맞는 행. */
+export async function lldpByNames(names = [], { limit = 256 } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  const ns = [...new Set((Array.isArray(names) ? names : []).map((n) => String(n || '').trim().toLowerCase()).filter((n) => n.length >= 3))].slice(0, 8);
+  if (!ns.length) return { rows: [] };
+  const ph = ns.map(() => '?').join(',');
+  const rows = db.conn.prepare(`SELECT x.*, d.hostname FROM l2_lldp x ${devNameJoin} WHERE x.sys_lc IN (${ph}) OR x.sys_short IN (${ph}) LIMIT ?`).all(...ns, ...ns, limit);
+  return { rows: rows.map((r) => ({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, hostname: r.hostname || '', port: r.port, idx: r.idx, sysName: r.sys_name || '', sysLc: r.sys_lc || '', sysShort: r.sys_short || '', portId: r.port_id || '', portDesc: r.port_desc || '', chassisId: r.chassis_id || '', ts: Number(r.ts) })) };
+}
+/** 포트 행(처리량·오류·드롭) — L2 로만 찾은 포트에 지금 값을 붙인다. 64개 상한. */
+export async function portsByKeys(list = []) {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  const q = db.conn.prepare('SELECT p.*, d.hostname AS dev_hostname FROM port_latest p LEFT JOIN device_latest d ON d.agent = p.agent AND d.cvp_id = p.cvp_id AND d.device_key = p.device_key WHERE p.agent=? AND p.cvp_id=? AND p.device_key=? AND p.port=?');
+  const rows = [];
+  for (const k of (Array.isArray(list) ? list : []).slice(0, 64)) {
+    const p = q.get(String(k.agent ?? ''), String(k.cvpId), String(k.key), String(k.port));
+    if (!p) continue;
+    rows.push({ agent: p.agent, cvpId: p.cvp_id, key: p.device_key, hostname: p.dev_hostname || '', port: p.port, desc: p.descr ?? '', speedBps: p.speed_bps ?? null, oper: p.oper || 'unknown', admin: p.admin || 'unknown',
+      vlan: p.vlan || '', lag: p.lag || '', inBps: p.in_bps ?? null, outBps: p.out_bps ?? null, inUtil: p.in_util ?? null, outUtil: p.out_util ?? null, inErr: p.in_err ?? null, outErr: p.out_err ?? null,
+      inDrop: p.in_drop ?? null, outDrop: p.out_drop ?? null, rateTs: p.rate_ts == null ? null : Number(p.rate_ts), ts: Number(p.ts), mac: p.mac ?? null });
+  }
+  return { rows };
+}
+/** CVP 서버들의 L2 수집 현황 — 장비 수(MAC 테이블을 읽은 · LLDP 를 읽은) · 가장 최근 시각. 메타 표는 장비 수만큼이라 작다. */
+export async function l2Status(owners = []) {
+  const db = await open();
+  if (!db) return { unavailable: true, fdbDevices: 0, lldpDevices: 0, lastAt: null };
+  let fdbDevices = 0; let lldpDevices = 0; let lastAt = null;
+  const q = db.conn.prepare('SELECT fdb_at, lldp_at FROM l2_meta WHERE agent=? AND cvp_id=?');
+  for (const o of (Array.isArray(owners) ? owners : []).slice(0, 256)) {
+    for (const r of q.all(String(o.agent ?? ''), String(o.cvpId))) {
+      if (r.fdb_at != null) fdbDevices++;
+      if (r.lldp_at != null) lldpDevices++;
+      const t = Math.max(Number(r.fdb_at) || 0, Number(r.lldp_at) || 0);
+      if (t && (lastAt == null || t > lastAt)) lastAt = t;
+    }
+  }
+  return { fdbDevices, lldpDevices, lastAt };
+}
+/** 장비가 정리되면 L2 행도 지운다(pruneDevices 가 부른다 — 같은 트랜잭션 안). */
+function dropL2(conn, agent, cvpId, key = null) {
+  for (const t of ['l2_fdb', 'l2_lldp', 'l2_meta']) {
+    if (key == null) conn.prepare(`DELETE FROM ${t} WHERE agent=? AND cvp_id=?`).run(agent, cvpId);
+    else conn.prepare(`DELETE FROM ${t} WHERE agent=? AND cvp_id=? AND device_key=?`).run(agent, cvpId, key);
+  }
 }

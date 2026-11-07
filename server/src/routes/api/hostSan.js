@@ -33,7 +33,7 @@ import { ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import * as cdb from '../../cvp/db.js';
 import { listServers as listCvpServers } from '../../cvp/registry.js';
 import { rowOwnerOf } from '../../cvp/overview.js';
-import { matchUplinks, hostMatchTerms, BASIS_LABEL } from '../../cvp/hostMatch.js';
+import { matchUplinks, hostMatchTerms, matchL2, mergeUplinks, BASIS_LABEL } from '../../cvp/hostMatch.js';
 
 const invHosts = requirePerm('inv.hosts');
 const toolsPerm = requirePerm('tools');
@@ -164,7 +164,34 @@ export function registerHostSan(api) {
     const macForms = terms.macs.flatMap((m) => { const p = m.match(/../g); return [p.join(':'), p.join('-'), `${m.slice(0, 4)}.${m.slice(4, 8)}.${m.slice(8)}`, m]; });
     const q = await cdb.portsByDesc([...terms.names, ...macForms]);
     const rows = (q.rows || []).filter(own);
-    const m = matchUplinks(rows, h);
+    const md = matchUplinks(rows, h);
+    /*
+     * v2.924(SAN·CVP 설계 B-②): LLDP 이웃 · MAC 테이블 근거. 이 호스트 물리 NIC MAC + 지금 이 호스트에 있는 VM 의 vNIC MAC 을 학습한 포트,
+     *   이웃 시스템 이름이 이 호스트인 포트를 찾는다(담당 행 · 범위 법인만 — own). 설명 매칭과 포트 단위로 합치고 가장 강한 근거 하나를 쓴다.
+     *   L2 로만 찾은 포트는 port_latest 에서 지금 값(처리량·오류·드롭)을 붙인다.
+     */
+    const vmMacList = [];
+    for (const v of snap.vms || []) {
+      if (v.vcenterId !== h.vcenterId || v.host !== h.name) continue;
+      for (const n of v.dev?.nics || []) { const x = String(n?.mac || '').toLowerCase().replace(/[^0-9a-f]/g, ''); if (x.length === 12) vmMacList.push(x); }
+      if (vmMacList.length >= 1024) break;
+    }
+    let l2 = { uplinks: [], conflicts: [] }; let l2Info = null;
+    try {
+      const fdb = await cdb.fdbByMacs([...terms.macs, ...vmMacList]);
+      const lldp = await cdb.lldpByNames([terms.full, terms.short]);
+      const fdbRows = (fdb.rows || []).filter(own); const lldpRows = (lldp.rows || []).filter(own);
+      const devs = [...new Map(fdbRows.map((r) => [`${r.agent}\u0000${r.cvpId}\u0000${r.key}`, { agent: r.agent, cvpId: r.cvpId, key: r.key }])).values()];
+      const portTotals = devs.length ? await cdb.fdbPortTotals(devs) : new Map();
+      l2 = matchL2({ host: h, lldpRows, fdbRows, vmMacs: vmMacList, portTotals });
+      const ownerKeys = servers.map((sv) => ({ agent: String(sv.agent ?? '').trim() ? sv.agent : '', cvpId: sv.id }));
+      l2Info = await cdb.l2Status(ownerKeys);
+    } catch (e) { console.warn(`[hostsan] CVP LLDP·MAC 테이블 조회 실패: ${e.message}`); l2Info = { error: true }; }
+    const descKeys = new Set(md.uplinks.map((u) => `${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`));
+    const need = l2.uplinks.filter((u) => !descKeys.has(`${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`));
+    const extra = need.length ? await cdb.portsByKeys(need) : { rows: [] };
+    const rowsByKey = new Map((extra.rows || []).filter(own).map((r) => [`${r.agent ?? ''}\u0000${r.cvpId}\u0000${r.key}\u0000${r.port}`, r]));
+    const m = { uplinks: mergeUplinks(md.uplinks, l2.uplinks, rowsByKey), conflicts: [...md.conflicts, ...l2.conflicts], terms: md.terms };
     // 매칭된 장비의 최근 이벤트(장비 호스트명·시리얼·키가 devices 에 있는 것만) — 장비 수가 작아 cvp 단위로 읽고 거른다.
     const devKeys = new Set(); const cvpIds = new Set();
     for (const u of m.uplinks) { cvpIds.add(u.cvpId); for (const k of [u.key, u.hostname, u.serial]) if (k) devKeys.add(String(k).toLowerCase()); }
@@ -185,11 +212,13 @@ export function registerHostSan(api) {
     const vmMacs = (snap.vms || []).filter((v) => v.vcenterId === h.vcenterId && v.host === h.name).reduce((a, v) => a + ((v.dev?.nics || []).filter((n) => n?.mac).length), 0);
     res.set('Cache-Control', 'no-store').json({
       ok: true, host: { id: h.id, name: h.name, vcenterId: h.vcenterId },
-      uplinks: m.uplinks.map((u) => ({ cvpId: u.cvpId, agent: u.agent, key: u.key, hostname: u.hostname, port: u.port, desc: u.desc, nic: u.nic, basis: u.basis, basisLabel: BASIS_LABEL[u.basis] || null,
+      uplinks: m.uplinks.map((u) => ({ cvpId: u.cvpId, agent: u.agent, key: u.key, hostname: u.hostname, port: u.port, desc: u.desc ?? '', nic: u.nic, basis: u.basis, basisLabel: BASIS_LABEL[u.basis] || null,
+        evidence: u.evidence || null, also: (u.also || []).slice(0, 4).map((x) => ({ basis: x.basis, label: BASIS_LABEL[x.basis]?.label || '', evidence: x.evidence || null })),
         oper: u.oper, admin: u.admin, speedBps: u.speedBps, vlan: u.vlan, lag: u.lag, inBps: u.inBps, outBps: u.outBps, inUtil: u.inUtil, outUtil: u.outUtil, inErr: u.inErr, outErr: u.outErr,
         inDrop: u.inDrop ?? null, outDrop: u.outDrop ?? null, day: sumOf(u), rateTs: u.rateTs, ts: u.ts })),
       conflicts: m.conflicts, terms: m.terms, events, eventsUnavailable, cvpUnavailable: !!q.unavailable, truncated: !!q.truncated,
       servers: servers.length, vmNicMacs: vmMacs, corpLimited: corp != null, corpMissing: corp === '', direction: { in: '서버 송신', out: '서버 수신' },
+      l2: l2Info,   // v2.924(B-②): { fdbDevices, lldpDevices, lastAt } — 0 이면 'LLDP·MAC 테이블 수집 전'(엣지 업그레이드 · 30분 주기) · error 면 조회 실패
     });
   });
 

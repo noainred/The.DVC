@@ -33,6 +33,7 @@ export default function HostNetCvp({ data, nics = [] }) {
                     <b style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{portLabel(u)}</b>
                     <span className={`badge ${b.tone}`} style={{ flex: 'none' }}>{b.label}</span>
                   </div>
+                  {u.evidence ? <div className="muted" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={[u.evidence, ...(u.also || []).map((x) => `${x.label} — ${x.evidence || ''}`)].join('\n')}>근거 {u.evidence}{u.also?.length ? ` 외 ${u.also.length}` : ''}</div> : null}
                   <div className="muted" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.nic ? `${u.nic} · ` : 'NIC 미확정 · '}{u.oper === 'up' ? 'Up' : u.oper === 'down' ? 'Down' : u.oper || '—'} · {speedText(u.speedBps)}{u.lag ? ` · ${u.lag}` : ''}</div>
                   <div style={{ marginTop: 4 }}>송신 <b>{bpsText(u.inBps)}</b> · 수신 <b>{bpsText(u.outBps)}</b></div>
                   <div className="muted" style={{ fontSize: 11 }}>에러 in/out {errText(u)} · 드롭 in/out {dropText(u)} · 측정 {agoText(u.rateTs ?? u.ts)}</div>

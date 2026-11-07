@@ -1,6 +1,6 @@
 // v2.920 — 호스트 네트워크 카드 CVP 업링크 문구: 방향(In=송신) · 값 없음 — · 매칭 없음은 이유를 말한다.
 import { describe, it, expect } from 'vitest';
-import { basisOf, bpsText, txRxText, errText, dropText, daySumText, speedText, uplinksByNic, hostLevelUplinks, nicUplinkText, uplinkSummary, uplinkTotals } from './hostNetText.js';
+import { basisOf, l2Text, bpsText, txRxText, errText, dropText, daySumText, speedText, uplinksByNic, hostLevelUplinks, nicUplinkText, uplinkSummary, uplinkTotals } from './hostNetText.js';
 
 const ups = [
   { hostname: 'leaf1', port: 'Ethernet12', nic: 'vmnic0', basis: 'desc-nic', inBps: 1e9, outBps: 5e8, inErr: 3, outErr: 0, inDrop: 0, outDrop: 7, day: { inErr: 10, outErr: 0, inDrop: 2, outDrop: 40, samples: 288, dropN: 280, errN: 288 } },
@@ -19,6 +19,11 @@ describe('업링크 문구', () => {
     expect([...uplinksByNic(ups).keys()]).toEqual(['vmnic0', 'vmnic1']);
     expect(hostLevelUplinks(ups).map((u) => u.port)).toEqual(['Ethernet20']);
     expect(nicUplinkText(uplinksByNic(ups).get('vmnic0'))).toBe('leaf1 Ethernet12'); expect(nicUplinkText([])).toBe('');
+  });
+  it('v2.924 L2 수집 현황 — 수집 전 · 실패 · 대수', () => {
+    expect(l2Text(null)).toBe(''); expect(l2Text({ error: true })).toContain('조회하지 못했습니다');
+    expect(l2Text({ fdbDevices: 0, lldpDevices: 0 })).toContain('수집 전'); expect(l2Text({ fdbDevices: 3, lldpDevices: 2 })).toContain('LLDP 를 읽은 스위치 2대 · MAC 테이블을 읽은 스위치 3대');
+    expect(basisOf('mac-vm').label).toBe('높음'); expect(basisOf('lldp').label).toBe('확정');
   });
   it('요약 — 없음의 이유', () => {
     expect(uplinkSummary({ cvpUnavailable: true }).text).toBe('CVP DB 없음');

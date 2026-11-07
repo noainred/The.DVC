@@ -122,10 +122,88 @@ export function matchUplinks(ports = [], host = {}) {
   return { uplinks, byNic, conflicts, terms: { short: terms.short, macs: terms.macs.length, nics: terms.nics.length } };
 }
 
+/* ── v2.924(SAN·CVP 설계 B-②) — LLDP 이웃 · MAC 테이블로 올린 매칭 ────────────────────────────────────────────────────
+ * 근거 순위(작을수록 강함): lldp(확정 — 이웃 시스템 이름이 이 호스트) → mac(높음 — 물리 NIC MAC 이 그 포트에 학습) → mac-vm(높음 — 그 포트에서 배운 MAC 의
+ *   절반 이상이 이 호스트 VM vNIC) → desc-mac · desc-nic · desc-name(보통 — 포트 설명). 한 포트가 여러 근거로 잡히면 가장 강한 것 하나를 쓰고 나머지는 also 로 남긴다.
+ * ⚠ ESXi 는 표준 vSwitch 에서 LLDP 를 보내지 않는다(분산 스위치에서 켜야 한다 — CDP 만 기본) · vmk0 MAC 은 대개 첫 vmnic MAC 이지만 아닐 수 있다 —
+ *   그래서 근거가 없으면 '미매칭' 이고 설명 일치(보통)로 떨어진다(지어내지 않는다).
+ */
+export const BASIS_RANK = Object.freeze({ lldp: 0, mac: 1, 'mac-vm': 2, 'desc-mac': 3, 'desc-nic': 4, 'desc-name': 5 });
+export const VM_MAC_SHARE_MIN = 0.5;   // 그 포트에서 배운 MAC 중 이 호스트 VM 비율 하한(트렁크·다른 호스트 포트를 거른다)
+const pkey = (u) => `${u.agent ?? ''}\u0000${u.cvpId}\u0000${u.key}\u0000${u.port}`;
+const mac12 = (m) => { const h = normMac(m); return h.length === 12 ? h : null; };
+
+/**
+ * L2 근거로 업링크 포트를 찾는다(순수).
+ * @param {{ host:object, lldpRows:object[], fdbRows:object[], vmMacs?:Iterable<string>, portTotals?:Map }} a
+ *   lldpRows: db.lldpByNames 행 · fdbRows: db.fdbByMacs 행 · vmMacs: 이 호스트 VM vNIC MAC(정규화 12자) · portTotals: db.fdbPortTotals(장비 → 포트 → 학습 MAC 수)
+ * @returns {{ uplinks:object[], conflicts:object[] }}  uplinks[]: { agent, cvpId, key, hostname, port, nic, basis, evidence }
+ */
+export function matchL2({ host = {}, lldpRows = [], fdbRows = [], vmMacs = [], portTotals = new Map() } = {}) {
+  const terms = hostMatchTerms(host);
+  const byPort = new Map();
+  const put = (row, basis, nic, evidence) => {
+    const k = pkey(row);
+    const cur = byPort.get(k);
+    const cand = { agent: row.agent ?? '', cvpId: row.cvpId, key: row.key, hostname: row.hostname || '', port: row.port, nic: nic || null, basis, evidence };
+    if (!cur) { byPort.set(k, { ...cand, also: [] }); return; }
+    if (BASIS_RANK[basis] < BASIS_RANK[cur.basis]) byPort.set(k, { ...cand, nic: cand.nic || cur.nic, also: [...cur.also, { basis: cur.basis, evidence: cur.evidence }] });
+    else { cur.also.push({ basis, evidence }); if (!cur.nic && nic) cur.nic = nic; }
+  };
+  // ① LLDP — 이웃 시스템 이름이 호스트 이름(전체 · 첫 점 앞 3자 이상)과 같다. NIC 은 이웃 portId 가 vmnic 이름이거나 NIC MAC 일 때.
+  for (const r of Array.isArray(lldpRows) ? lldpRows : []) {
+    const lc = String(r.sysLc || r.sysName || '').toLowerCase(); const sh = String(r.sysShort || lc.split('.')[0]);
+    if (!((terms.full && lc === terms.full) || (terms.short.length >= 3 && sh === terms.short))) continue;
+    const pid = String(r.portId || '').toLowerCase(); const pmac = mac12(r.portId); const cmac = mac12(r.chassisId);
+    const nic = terms.nics.find((n) => n.device.toLowerCase() === pid || (n.mac && (n.mac === pmac))) || null;
+    put(r, 'lldp', nic?.device, `LLDP 이웃 ${r.sysName || lc}${r.portId ? ` · ${r.portId}` : ''}${!nic && cmac && terms.macs.includes(cmac) ? ' · 섀시 MAC 일치' : ''}`);
+  }
+  // ② MAC — 물리 NIC MAC 이 학습된 포트(그 NIC 의 업링크).
+  const nicByMac = new Map(terms.nics.filter((n) => n.mac).map((n) => [n.mac, n.device]));
+  const vmSet = new Set([...(vmMacs || [])].map(mac12).filter(Boolean));
+  const vmCount = new Map(); const samples = new Map();
+  const macPorts = new Map();
+  for (const r of Array.isArray(fdbRows) ? fdbRows : []) {
+    const mac = mac12(r.mac); if (!mac) continue;
+    if (nicByMac.has(mac)) {
+      put(r, 'mac', nicByMac.get(mac), `MAC 테이블 — ${nicByMac.get(mac)} MAC${r.vlan != null ? ` · VLAN ${r.vlan}` : ''}`);
+      if (!macPorts.has(mac)) macPorts.set(mac, new Set());
+      macPorts.get(mac).add(pkey(r));
+    } else if (vmSet.has(mac)) {
+      const k = pkey(r); vmCount.set(k, (vmCount.get(k) || 0) + 1); if (!samples.has(k)) samples.set(k, r);
+    }
+  }
+  // ③ VM MAC — 그 포트에서 배운 MAC 의 절반 이상이 이 호스트 VM 이고, VM MAC 이 2개 이상이거나 그 포트의 학습이 1개뿐일 때.
+  for (const [k, n] of vmCount) {
+    const r = samples.get(k);
+    const tot = portTotals instanceof Map ? portTotals.get(`${r.agent ?? ''}\u0000${r.cvpId}\u0000${r.key}`)?.get(r.port) : null;
+    if (tot == null || tot <= 0) continue;   // 포트 전체 학습 수를 모르면 비율을 판정하지 않는다(트렁크일 수 있다)
+    if (n / tot < VM_MAC_SHARE_MIN || !(n >= 2 || tot === 1)) continue;
+    put(r, 'mac-vm', null, `MAC 테이블 — 이 호스트 VM MAC ${n}개 / 그 포트 학습 ${tot}개`);
+  }
+  // 같은 NIC MAC 이 포트 3곳 이상에서 보이면 충돌(MLAG 양쪽 2곳은 정상) — 표시만 한다.
+  const conflicts = [...macPorts].filter(([, ps]) => ps.size > 2).map(([mac, ps]) => ({ nic: nicByMac.get(mac), ports: ps.size }));
+  return { uplinks: [...byPort.values()], conflicts };
+}
+
+/** 설명 매칭(matchUplinks)과 L2 매칭(matchL2)을 포트 단위로 합친다 — 가장 강한 근거 하나 · 나머지는 also. 포트 행 값(처리량 등)은 설명 쪽 행을 쓰고 없으면 rowsByKey 에서 붙인다. */
+export function mergeUplinks(descUplinks = [], l2Uplinks = [], rowsByKey = new Map()) {
+  const out = new Map();
+  for (const u of Array.isArray(descUplinks) ? descUplinks : []) out.set(pkey(u), { ...u, also: [] });
+  for (const u of Array.isArray(l2Uplinks) ? l2Uplinks : []) {
+    const k = pkey(u); const cur = out.get(k);
+    if (!cur) { const row = rowsByKey.get(k) || null; out.set(k, { ...(row || {}), ...u, desc: row?.desc ?? '', also: u.also || [] }); continue; }
+    if (BASIS_RANK[u.basis] < BASIS_RANK[cur.basis]) out.set(k, { ...cur, basis: u.basis, nic: u.nic || cur.nic, evidence: u.evidence, also: [...(u.also || []), { basis: cur.basis, evidence: cur.evidence || null }, ...cur.also] });
+    else { cur.also.push({ basis: u.basis, evidence: u.evidence }, ...(u.also || [])); if (!cur.nic && u.nic) cur.nic = u.nic; }
+  }
+  return [...out.values()].sort((a, b) => BASIS_RANK[a.basis] - BASIS_RANK[b.basis] || String(a.nic || '~').localeCompare(String(b.nic || '~')) || String(a.port).localeCompare(String(b.port)));
+}
+
 /** 매칭 근거 라벨(서버·웹 공용 문구 — 웹 hostNetText 가 같은 표를 쓴다). */
 export const BASIS_LABEL = Object.freeze({
   lldp: { label: '확정', note: 'LLDP 이웃', tone: 'ok' },
   mac: { label: '높음', note: 'MAC 테이블 학습', tone: 'ok' },
+  'mac-vm': { label: '높음', note: 'MAC 테이블 — 이 호스트 VM MAC', tone: 'ok' },
   'desc-mac': { label: '보통', note: '포트 설명에 NIC MAC', tone: 'warn' },
   'desc-nic': { label: '보통', note: '포트 설명에 호스트 이름 + NIC 이름(vmnic·eno 등)', tone: 'warn' },
   'desc-name': { label: '보통', note: '포트 설명에 호스트 이름', tone: 'warn' },

@@ -144,4 +144,17 @@
   CVP 도구 장비 상세 포트 표·포트 사용량 표 ‘드롭(수/송)’ 열(`portUsage` 행에 `inDrop/outDrop`) · 호스트 상세 네트워크 카드 CVP 업링크 블록 KPI ‘업링크 에러/드롭 · 최근 24시간’ +
   포트별 24시간 합. 24시간 합은 `db.portWindowSums`(원시 표본을 JS 로 더함 — 집계 함수 두 개를 한 문장에 쓰지 않는다)이고 **값이 있는 표본만** 더해 표본 수(`dropN/samples`)를
   같이 준다 — 드롭 수집 전·구버전 엣지 10칸 표본은 빠진다(부분 합을 전체 합처럼 말하지 않는다). 데모 합성 포트·백필 행에도 드롭. 회귀 `server/test/cvpDropUi2923.test.js` · 웹 `hostNetText.test.js`.
+- **v2.924(SAN·CVP 설계 B-②) — LLDP 이웃 · MAC 테이블(FDB) → 호스트 업링크 매칭 ‘확정 · 높음’**(`cvp/{client,parse,db,poller,push,hostMatch}.js` · `central/cvpEdge.js cleanL2` ·
+  `routes/central.js` · `routes/api/hostSan.js` · 웹 `hostNetText.l2Text` · 데모 `mock/demo/cvp.js demoL2` · 회귀 `server/test/cvpL2924.test.js`):
+  - **경로·필드는 추정**(LLDP `/Sysdb/l2discovery/lldp/status/local/1/portStatus` · FDB `/Smash/bridging/status/smashFdbStatus` — docs/CVP.md 표). 부품 주기(30분)에만 읽고
+    `CVP_L2=false` 로 끈다. 경로 탐색 표본에 두 경로를 더했다. LLDP 는 링크가 올라온 포트만 따라가고 개체 이름은 포인터 경로 전체(포트 › remoteSystem › 번호 — 첫 조각이 로컬 포트).
+  - ⚠ **FDB 는 `entitiesOf` 로 읽지 않는다** — 항목 키가 `{fid, addr}` 복합 객체라 `updKey`(첫 스칼라 = VLAN)로 이름을 지으면 같은 VLAN 의 MAC 이 한 개체로 합쳐진다.
+    update 마다 값 + 키 객체를 함께 펼친다. 포트당 MAC 이 `FDB_PORT_MAX`(512)를 넘는 포트(스위치 사이 트렁크)는 버리고 `portsOverCap` 으로 밝힌다. 장비당 `FDB_MAX` 4096 · LLDP 512.
+  - 저장은 **장비마다 최신 한 벌**(`l2_fdb`·`l2_lldp`·`l2_meta` — 배열이면 교체 · 같은 내용 해시면 다시 쓰지 않음 · null(못 읽음)은 실패 시각만 · undefined 는 그대로).
+    장비 정리(pruneDevices)가 L2 행도 지운다. 엣지 이름 변형 모으기(adopt)는 L2 를 옮기지 않고 변형 행을 지운다(두 시각의 목록이 섞이지 않게 — 다시 보낸다).
+  - **엣지 push 는 바뀐 장비만**(메타 해시 · 전량 갱신 주기) 별도 배열 `l2` 로 보낸다. **중앙이 `saved.l2` 를 수로 답할 때만** 보낸 것으로 친다 — 구버전 중앙은 필드를 버리고
+    그 칸이 없으므로 `L2_UNSUPPORTED_HOLD_MS`(6시간) 동안 L2 를 싣지 않는다(매 주기 큰 본문을 헛보내지 않게). 새 중앙은 L2 가 없어도 `saved.l2 = 0` 을 준다.
+  - 매칭 근거 순위 **LLDP(확정) > MAC(높음 — 물리 NIC MAC 학습) > VM MAC(높음 — 그 포트 학습의 절반 이상이 이 호스트 VM vNIC, 2개 이상 또는 학습 1개뿐) > 포트 설명(보통)**.
+    포트 학습 수를 모르면 VM MAC 비율을 판정하지 않는다(트렁크일 수 있다). 한 포트가 여러 근거면 가장 강한 하나 + also. 판정 코어는 `hostMatch.matchL2 · mergeUplinks` 하나 —
+    베어메탈 성능 화면(PROFILES §10 ‘③ LLDP · ④ MAC — 미구현’)도 같은 함수를 쓰면 된다(두 벌 금지). ⚠ ESXi 는 표준 vSwitch 에서 LLDP 를 보내지 않는다(분산 스위치에서 켜야 한다).
 
