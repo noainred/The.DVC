@@ -404,7 +404,9 @@ export function applyCertResults(items, { now = Date.now() } = {}) {
  *   다른 알람 상한과 따로 센다) · 법인 = 서버의 vCenter(없으면 공용 — 지어내지 않는다). 같은 발송 건(id)을 두 번 쓰지 않는다(엣지 봉투를 다시 당겨도).
  * 판정(조건) · 발송은 그 서버를 수집하는 노드가 이미 했다 — 여기서 다시 판정하지 않는다.
  */
-export const BMPERF_RULE_LABEL = Object.freeze({ use: 'USE 판정 변화', cross: '교차 판정', focusEnd: '집중 모니터링 결론', baseline: '베이스라인 이탈', health: '점검 소모품', profile: '용도 점검 실패', collect: '수집 건강', logs: '로그 장애 · 보안' });
+// 다음 점검 ②: 8a capacity(빠져 ‘성능 규칙’ 으로 보였다 — 정정) · 전력 4종 추가. 화면 이름(web bmPerfOpsText RULE_TEXT)과 같은 뜻.
+export const BMPERF_RULE_LABEL = Object.freeze({ use: 'USE 판정 변화', cross: '교차 판정', focusEnd: '집중 모니터링 결론', baseline: '베이스라인 이탈', health: '점검 소모품', profile: '용도 점검 실패', collect: '수집 건강', logs: '로그 장애 · 보안',
+  capacity: '용량 소진 예측', rack: '랙 여유 부족', inlet: '흡기 온도 지속 초과', surge: '전력 피크 급증', powerCap: 'PowerCap 걸림 지속' });
 /**
  * 발송 건 → 할 일(순수).
  *  · 중복 원천은 **받은 발송 건**이다(F2 · F3 · F12 반증): ① id 가 어느 이슈(닫힌 것 포함)의 partKeys 에 있으면 dup ② 그 열쇠(agent|서버|규칙)의 이슈들(닫힌 것 포함)이
@@ -495,7 +497,7 @@ export function applyBmPerfFires(fires, { now = Date.now(), dailyMax = 20 } = {}
       const made = make({
         title: capStr(`[베어메탈 성능] ${f.title || `${f.name} ${label}`}`, 200), type: 'incident', priority: f.rule === 'use' || f.rule === 'profile' ? 'p1' : 'p2', labels: ['bm-perf', 'auto'], component: label,
         vcenterId: String(f.vcenterId || ''), status: 'backlog',
-        body: capStr([`베어메탈 성능 알림 규칙 ‘${label}’ 이 이 서버에서 성립해 이슈로 등록했습니다.`, '', `■ ${f.title || ''}`, `서버: ${f.name || f.key}${f.agent ? ` · 수집 노드 ${f.agent}` : ''} · 발생 ${portalTime(f.at)}`, '',
+        body: capStr([`베어메탈 성능 알림 규칙 ‘${label}’ 이 이 ${f.rule === 'rack' ? '랙' : '서버'}에서 성립해 이슈로 등록했습니다.`, '', `■ ${f.title || ''}`, `${f.rule === 'rack' ? '랙' : '서버'}: ${f.name || f.key}${f.agent ? ` · 수집 노드 ${f.agent}` : ''} · 발생 ${portalTime(f.at)}`, '',
           '화면: 특수 기능 › 베어메탈 사용률 › 서버 상세(판정 근거 · 집중 모니터링).', '판정 · 발송은 그 서버를 수집하는 노드가 했습니다. 같은 규칙이 다시 성립하면 이 이슈에 댓글이 달립니다 — 닫기는 사람이 합니다.'].join('\n'), 9_000),
       }, { kind: 'bmperf', alertKey: a.alertKey, alertKind: f.rule, title: f.title || '', deviceName: f.name || '', partKeys: [String(f.id)], lastAt: Number(f.at) || null, lastIds: [String(f.id)] }, settings, viewers);
       if (made?.key) madeKey.set(a.alertKey, made.key);

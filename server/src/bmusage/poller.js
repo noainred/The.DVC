@@ -1070,7 +1070,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     await recordCycleHealth({ results, t0, intervalMs, peakPlan });
     // v2.929(5단계): 리눅스 성능 알림 규칙(켠 규칙이 있을 때만 — 판정 입력은 이 노드가 이미 만든 값). 실패해도 수집은 실패가 아니다.
     let perfAlerts = null;
-    try { perfAlerts = rulesNow ? await runCyclePerfAlerts(results, { settings, rules: rulesNow, agent: agentName }) : null; }
+    try { perfAlerts = rulesNow ? await runCyclePerfAlerts(results, { settings, rules: rulesNow, agent: agentName, targets }) : null; }
     catch (e) { perfAlerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     // 8a단계: ‘창 끝 뒤 억제 0’ 점검 — 이번 주기에 적용한 억제(수집 건너뜀 · 알림 보류 · 자동 집중)를 파일 기준으로 다시 만든 판정과 대조(수집 건강 행).
     let maintAudit = null;
@@ -1120,7 +1120,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
  * v2.929(5단계) — 이번 주기 알림 규칙 입력을 모은다: 성능 항목(이 노드 판정 — perfForRows 와 같은 buildPerfEntry) · 소모품 칸(방금 detail_json 에 넣은 것) ·
  *   베이스라인 이탈(그 규칙이 켜졌을 때만 — 슬롯 평균은 한 시간에 한 번 읽는다) · 용도 점검(그 규칙이 켜졌을 때만 — 이 노드의 수동 태그 · 자동 감지).
  */
-async function runCyclePerfAlerts(results, { settings, rules, agent }) {
+async function runCyclePerfAlerts(results, { settings, rules, agent, targets = [] }) {
   // 규칙 파일 손상(보존본만 남음)이면 ‘켠 규칙 없음’ 과 구별해 상태에 남긴다 — 기본값(전부 꺼짐)으로 조용히 꺼진 것처럼 보이지 않게(규칙 화면 · 서비스 점검이 손상을 밝힌다).
   if ((await import('./perfRules.js')).perfRulesLoadError()) return { ok: false, skipped: 'settings-unreadable' };
   const on = Object.keys(rules?.rules || {});
@@ -1167,6 +1167,15 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
   // 6단계 ‘수집 건강’ — 서버가 아니라 이 노드 한 칸(key '__node__' · 법인 공용). 칸은 이번 주기 recordCycleHealth 가 기준과 대 본 결과 그대로.
   const nodeItem = on.includes('collect') ? collectNodeItem(agent) : null;
   if (nodeItem) items.push(nodeItem);
+  /*
+   * 다음 점검 ②: 전력 · 온도 규칙 — 이 노드 주기 대상 **전부**(OS 수집 성패와 무관 — 전력 · 온도는 iDRAC 폴러 원천) · 이 노드 원천만(localOnly — 엣지 사본으로 다시 판정하지 않는다).
+   *   대상 목록은 currentTargets(엣지 위임 서버 제외)라 중앙과 엣지가 같은 서버를 두 번 판정하지 않는다. 실패해도 다른 규칙 판정은 그대로 간다.
+   */
+  const PA = await import('./powerAlerts.js');
+  if (on.some((id) => PA.isPowerRule(id))) {
+    try { for (const x of await PA.powerAlertItems({ targets, rules, now })) items.push(x); }
+    catch (e) { if (_srcErrLog('power-alerts', String(e?.message || e))) console.warn(`[bmusage] 전력 · 온도 알림 판정 입력을 만들지 못했습니다(그 규칙만 이번 주기에 보류): ${String(e?.message || e).slice(0, 160)}`); }
+  }
   return (await import('./perfAlerts.js')).runPerfAlerts(items, { rules, now });
 }
 function collectNodeItem(agent) {

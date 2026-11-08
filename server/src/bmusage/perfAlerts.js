@@ -16,6 +16,8 @@
  *   (제목 ‘창 안부터 초과’). 조건이 풀리면 상태가 지워져 창 뒤 발송도 없다. 억제는 그 발생의 끝(시한)까지 · 적용 기록은 ‘창 끝 뒤 억제 0’ 점검에 남긴다.
  * 채널은 기존 알림 설정(alerts.json — 메일 · 웹훅 · Slack · Teams)을 그대로 쓰고 규칙이 고른 채널만 켠 사본으로 보낸다(새 채널 없음 · 웹훅 URL 은 화면 · 상태 파일에 없다).
  * 알림 본문에 `**` 를 쓰지 않는다(Slack · 메일에는 BoldText 가 없다). 문구는 ‘무엇이 · 얼마나 · 무엇 대비 · 언제부터’ 이고 원인을 단정하지 않는다.
+ * 다음 점검 ②: 전력 · 온도 규칙 4종(rack · inlet · surge · powerCap)도 이 엔진이다 — 조건 · 관측 표지 · 문구는 bmusage/powerAlerts.js 하나. 그 규칙의 항목은 `power` 칸을 가진 별도 항목이고
+ *   (규칙 ↔ 항목 종류가 맞을 때만 대 본다 — ruleApplies) 상태 열쇠는 (법인, 키) 쌍(stateKeyOf — 키만 쓰지 않는다) · 랙 항목의 정비 창은 그 랙 서버 중 하나라도 창 안이면 창 안이다.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,6 +31,8 @@ import { RULE_IDS, BASELINE_METRICS } from './perfRules.js';
 import { VERDICT_LABEL } from './useJudge.js';
 import { MAX_SEND } from './notify.js';
 import { countSuppression, noteApplied, maintJudge, sinceOf } from './maint/runtime.js'; // 8a단계 ① 정비 창 판정기 · 억제 계수 · 점검
+import { targetIdOf } from './maint/judge.js';
+import { isPowerRule, POWER_RULE_KIND, powerCondition, powerObs, powerAlertOf } from './powerAlerts.js';
 
 const n = numOrNull;
 const FILE = () => path.join(config.configDir, 'bm-perf-alert-state.json');
@@ -89,6 +93,7 @@ export function ruleCells(id, ctx = {}, rule = {}) {
  * @param {{entry?:object, health?:object, dev?:object, profile?:object}} ctx  그 서버의 이번 주기 값(이 노드가 만든 것)
  */
 export function ruleCondition(id, ctx = {}, rule = {}, prevOn = null) {
+  if (isPowerRule(id)) return powerCondition(id, ctx, rule);
   if (id === 'use') {
     const v = ctx.entry?.verdict;
     if (!v || ['stale', 'partial', 'unknown'].includes(v)) return null;
@@ -156,6 +161,17 @@ export function stepRule(prev, cond, rule = {}, now = Date.now()) {
 }
 
 /**
+ * 규칙을 이 항목에 대 보나(순수) — 전력 규칙은 `power` 칸의 종류가 맞는 항목에만, 그 밖의 규칙은 `power` 칸이 없는 항목에만.
+ *   맞지 않는 쌍은 상태를 만들지 않는다(예전 항목의 같은 키 상태를 덮지 않게 — 같은 서버가 성능 항목 · 전력 항목 둘로 들어온다).
+ */
+export function ruleApplies(id, it) {
+  if (isPowerRule(id)) return !!it?.power && it.power.kind === POWER_RULE_KIND[id];
+  return !it?.power;
+}
+/** 규칙 상태 열쇠(순수) — 전력 규칙은 (법인, 키) 쌍(targetIdOf), 예전 규칙은 예전 그대로(키 — 바꾸면 진행 중 사건이 새 사건으로 다시 나간다). */
+export const stateKeyOf = (id, it) => (isPowerRule(id) ? `${id}|${targetIdOf(it)}` : `${id}|${String(it?.key || '')}`);
+
+/**
  * 한 주기 판정(순수).
  * @param {Array<{key,name,vcenterId,entry,health,dev,profile}>} items
  * @param {object} rules   perfRules.rules(켠 것만)
@@ -169,16 +185,21 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
   for (const it of items) {
     const key = String(it?.key || ''); if (!key) continue;
     for (const id of on) {
+      if (!ruleApplies(id, it)) continue;
       const rule = rules[id];
-      const sk = `${id}|${key}`; seen.add(sk);
+      const sk = stateKeyOf(id, it); seen.add(sk);
       if ((rule.corpsOff || []).includes(String(it.vcenterId || ''))) { counts.corpOff += 1; continue; }
       const prev = state?.[sk] || null;
-      const cond = ruleCondition(id, it, rule, prev?.on || null);
+      let cond = ruleCondition(id, it, rule, prev?.on || null);
+      // 다음 점검 ②: 관측 표지가 있는 규칙(전력)은 같은 표본을 두 주기 세지 않는다 — 아직 사건이 아닌데 표지가 직전과 같으면 보류(지속을 이어 가지도 끊지도 않는다).
+      const obs = isPowerRule(id) ? powerObs(id, it) : null;
+      if (cond === true && obs != null && prev && !prev.active && prev.obs === obs) cond = null;
       const out = stepRule(prev, cond, rule, now);
       const on = onCellsAfter(id, it, rule, cond, prev?.on || null);
-      next[sk] = on.length ? { ...out.state, on } : out.state;
+      const st1 = on.length ? { ...out.state, on } : out.state;
+      next[sk] = obs != null ? { ...st1, obs } : (prev?.obs != null && isPowerRule(id) ? { ...st1, obs: prev.obs } : st1);
       if (counts[out.reason] != null) counts[out.reason] += 1;
-      if (out.fire) { counts.fire += 1; fires.push({ rule: id, key, name: it.name || key, vcenterId: String(it.vcenterId || ''), ctx: it, prevState: prev, retry: out.reason === 'retry' }); }
+      if (out.fire) { counts.fire += 1; fires.push({ rule: id, key, sk, name: it.name || key, vcenterId: String(it.vcenterId || ''), ctx: it, prevState: prev, retry: out.reason === 'retry', since: out.state.since ?? now }); }
     }
   }
   // 이번 주기에 없던 서버(수집 실패 · 대상 제외)의 상태는 CARRY_MS 동안 들고 간다 — 켠 규칙만(끈 규칙의 상태는 버린다: 다시 켜면 처음부터).
@@ -195,7 +216,9 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
 export function perfAlertOf(f, { corpName = '' } = {}) {
   // 8a단계 ①: 창이 끝났는데 아직 초과라 그때 1회 보내는 발화는 제목 앞에 그 사실을 붙인다(‘창 안부터 초과’).
   const head = `${f.afterMaint ? '(정비 창 안부터 초과) ' : ''}${corpName || f.vcenterId ? `[${corpName || f.vcenterId}] ` : ''}${f.name}`;
-  const key = `bmperf:${f.rule}:${f.key}`;
+  // 전력 규칙의 알림 열쇠는 (법인, 키) 쌍 — 다른 법인의 같은 키 서버 알림이 채널 억제 창에서 섞이지 않게(예전 규칙은 예전 열쇠 그대로).
+  const key = isPowerRule(f.rule) ? `bmperf:${f.rule}:${targetIdOf(f)}` : `bmperf:${f.rule}:${f.key}`;
+  if (isPowerRule(f.rule)) { const al = powerAlertOf(f, head, key); if (al) return al; }
   const c = f.ctx || {};
   if (f.rule === 'use') {
     const v = c.entry?.verdict;
@@ -349,7 +372,7 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cy
   const issueFires = []; const sends = [];
   for (const f of fires) {
     const rule = rules.rules?.[f.rule] || {};
-    const sk = f.rule === 'focusEnd' ? null : `${f.rule}|${f.key}`;
+    const sk = f.rule === 'focusEnd' ? null : (f.sk || `${f.rule}|${f.key}`);
     if (sends.length >= cycleMax && alertCfg && sk) {
       // 주기 상한 — 이번에는 보내지 않고 상태를 되돌린다(다음 주기 다시 판정 · 지속은 그대로).
       const cur = st.rules?.[sk];
@@ -357,11 +380,13 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cy
       out.deferred += 1;
       continue;
     }
-    const tg = targetsByKey.get(f.key) || f.ctx?.target || null;
+    // 항목이 가진 대상이 먼저(같은 키 · 다른 법인 서버를 키 지도에서 잘못 집지 않게 — (법인, 키) 쌍).
+    const tg = f.ctx?.target || targetsByKey.get(f.key) || null;
     const rec = { id: crypto.randomUUID().slice(0, 12), at: now, rule: f.rule, key: f.key, name: capStr(f.name, 120), vcenterId: f.vcenterId, title: '', channels: rule.channels || [], result: '', issue: null, autoFocus: null, ...(f.retry ? { retry: true } : {}) };
     const mw = maintenanceFor(tg, now, rules.maintenance);
     // 8a단계 ① — 이 서버가 지금 알림 억제 창 안인가(판정 코어 하나). 노드 칸(__node__)은 서버가 아니라 창 대상이 아니다.
-    const ms = maint && f.key !== '__node__' ? maint.stateFor(tg || { key: f.key, vcenterId: f.vcenterId }, now) : null;
+    //   랙 항목(서버가 아니다)은 그 랙 서버 중 하나라도 창 안이면 창 안(합에 그 서버의 전력이 들어 있어 원인을 가를 수 없다 — 창 뒤에도 참이면 그때 1회).
+    const ms = maint && f.key !== '__node__' ? (Array.isArray(f.ctx?.members) ? groupMaintState(maint, f.ctx.members, now) : maint.stateFor(tg || { key: f.key, vcenterId: f.vcenterId }, now)) : null;
     const prevMaint = f.prevState?.maint || null;
     if (ms?.scopes?.alerts) {
       const ids = (ms.windows || []).filter((w) => (w.scopes || []).includes('alerts')).map((w) => w.id).sort();
@@ -441,6 +466,20 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cy
     _pendingSends.add(p);
   }
   return out;
+}
+
+/** 여러 서버의 정비 창 판정 합집합(순수에 가까움 — maintStateFor 결과 모양). 범위마다 OR · 시한은 가장 늦은 끝 · 창은 id 로 한 번. */
+export function groupMaintState(maint, members = [], now = Date.now()) {
+  const scopes = {}; const until = {}; const byId = new Map();
+  for (const m of members) {
+    let x = null;
+    try { x = maint.stateFor(m, now); } catch { x = null; }
+    if (!x) continue;
+    for (const [k, v] of Object.entries(x.scopes || {})) if (v) { scopes[k] = true; until[k] = Math.max(until[k] ?? 0, Number(x.until?.[k]) || 0); }
+    for (const w of x.windows || []) if (!byId.has(w.id)) byId.set(w.id, w);
+  }
+  const windows = [...byId.values()];
+  return { active: windows.length > 0, scopes, until, windows };
 }
 
 function depsOf(deps = {}) {

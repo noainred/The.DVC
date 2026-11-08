@@ -15,6 +15,8 @@ import { capStr } from '../util/capStr.js';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
 import { featureMinEdgeVersion, STAGE5_TITLE_RE, _resetFeatureMinEdgeVersionForTest } from './featureMinEdgeVersion.js';
 import { BMPERF_RULE_LABEL, applyBmPerfFires } from '../issues/alertIssues.js';
+import { RULE_IDS as PERF_RULE_IDS } from '../bmusage/perfRules.js';
+import { parseRackKey, rackKeyOf } from '../bmusage/powerAlerts.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 const TIMEOUT_MS = Math.max(5_000, Number(process.env.BMUSAGE_PULL_TIMEOUT_MS) || 20_000);
@@ -190,7 +192,8 @@ export async function pullEdgePerfOps(agent, mode, { key, query = {} } = {}) {
 }
 
 /* ── 봉투 요약 정제(central/bmPerfSanitize.js 가 부른다) ─────────────────── */
-const RULES = new Set(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect', 'logs']);
+// 규칙 id 는 규칙 목록 하나(perfRules.RULE_IDS)에서 — ⚠ 정정(다음 점검 ②): 손으로 적은 목록에 8a ‘capacity’ 가 빠져 엣지의 용량 예측 발송 건이 중앙 이력 · 이슈에서 ‘use’(USE 판정 변화)로 바뀌었다.
+const RULES = new Set(PERF_RULE_IDS);
 const RESULTS = new Set(['queued', 'sent', 'failed', 'suppressed', 'no-channel', 'no-channel-config', 'daily-cap', 'maintenance', 'error', '']);
 const ISSUE = new Set(['pending-central', 'daily-cap', 'created', 'commented', 'dup', 'error', 'skipped']);
 export function sanitizeFocusSummary(list, now = Date.now()) {
@@ -235,6 +238,21 @@ export async function centralizeEdgeSent(agent, snap, deps = {}) {
     if (r.rule === 'collect' && String(r.key || '') === '__node__') {
       const nm = safeEdgeName(`수집 노드 ${capStr(String(agent ?? ''), 64)}`, 80);
       list.push({ ...r, key: '__node__', name: nm, vcenterId: '', title: capStr(`${nm} — ${BMPERF_RULE_LABEL.collect}`, 200) });
+      continue;
+    }
+    /*
+     * 다음 점검 ② 랙 여유 — 서버가 아니라 랙 한 칸(키 rack:<법인>|<랙>): 대상 목록과 대지 않는다. 랙 이름은 엣지 글자라 형식(perfRules 랙 규칙 — 1~32자 · 쉼표 · 제어문자 없음)을
+     *   통과한 것만 받고 표시용으로 다시 정리한다. 법인은 **중앙이 정한다**(키 안의 법인 = 엣지 주장 → 그 엣지 담당 vCenter 일 때만 · 아니면 담당 하나 · 아니면 공용) —
+     *   키도 중앙이 정한 법인으로 다시 만든다(엣지가 다른 법인 이름을 키에 넣어 그 법인 이력 · 이슈에 끼워 넣지 못한다).
+     */
+    if (r.rule === 'rack') {
+      const rk = parseRackKey(r.key);
+      if (!rk || !/^[^\u0000-\u001f\u007f,]{1,32}$/.test(rk.rack)) { dropped += 1; continue; }
+      let vc = null;
+      try { vc = await resolve({ agent: ag, scope: 'idrac', deviceKeyKind: '', deviceKey: '', claimedVcenterId: strOf(rk.vcenterId, 128) }, ctx); } catch { vc = null; }
+      const vcId = String(vc?.id || '');
+      const nm = safeEdgeName(`랙 ${rk.rack}`, 80);
+      list.push({ ...r, key: rackKeyOf(vcId, rk.rack), name: nm, vcenterId: vcId, title: capStr(`${nm} — ${BMPERF_RULE_LABEL.rack}(수집 노드 ${ag})`, 200) });
       continue;
     }
     const tg = targets.get(String(r.key || ''));

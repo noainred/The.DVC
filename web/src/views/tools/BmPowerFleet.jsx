@@ -10,7 +10,7 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { unitText } from '../unitText.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
-import { powerCards, kwText, kwhText, wText, cText, marginText, capText, fanText, trendPath, hourText, unmeasuredText, POWER_HONEST, UNMEASURED_TEXT } from './bmPowerText.js';
+import { powerCards, kwText, kwhText, wText, cText, marginText, capText, capTitle, fanText, trendPath, hourText, unmeasuredText, POWER_HONEST, UNMEASURED_TEXT } from './bmPowerText.js';
 import './bmOps.css';
 import './bmMaint.css';
 
@@ -48,6 +48,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
         ))}
       </div>
       {resp?.addressHidden && <p className="bmo-sub">관리자 판본이 아닙니다 — 주소인 서버 이름은 가림 토큰으로 보입니다.</p>}
+      {resp?.capOldEdge ? <p className="bmo-sub">엣지 위임 서버 {resp.capOldEdge}대의 PowerCap 은 확인할 수 없습니다 — 그 엣지가 서버별 상한을 싣기 전 판입니다{resp.capMinEdgeVersion ? `(엣지 v${resp.capMinEdgeVersion} 이상)` : ''}. 그 서버의 걸림은 판정하지 않습니다.</p> : null}
       <section className="bmo-card">
         <h5 className="bmo-h">법인별 — 측정분 합 <span className="bmo-sub">(함대 원천 모으기 {unitText(resp?.gatherMs, 'ms')} · 60초 공유)</span></h5>
         <div className="bmo-bar"><button className="btn btn-sm" onClick={onReload} disabled={loading}>{loading ? '읽는 중…' : '다시 읽기'}</button></div>
@@ -95,7 +96,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
                     <td className="right" data-sort={s.w ?? ''}>{s.w == null ? (UNMEASURED_TEXT[s.unmeasured] || '—') : wText(s.w)}</td>
                     <td className="right" data-sort={s.avg24W ?? ''}>{wText(s.avg24W)}</td>
                     <td className="right" data-sort={s.inletC ?? ''}>{cText(s.inletC)}</td><td className="right" data-sort={s.maxC ?? ''}>{cText(s.maxC)}</td>
-                    <td data-sort={s.capPct ?? ''}>{capText(s, cfg)}</td><td data-sort={fanText(s)}>{fanText(s)}</td>
+                    <td data-sort={s.capPct ?? ''} title={capTitle(s)}>{capText(s, cfg, resp?.capMinEdgeVersion)}</td><td data-sort={fanText(s)}>{fanText(s)}</td>
                   </tr>))}</tbody>
               </STable>
             )}
@@ -124,7 +125,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
               <td className="right" data-sort={s.inletC ?? ''} style={{ color: toneVar(s.inletC != null && s.inletC >= (cfg.inletWarnC ?? 27) ? 'warn' : 'idle') }}>{cText(s.inletC)}</td>
               <td className="right" data-sort={s.maxC ?? ''}>{cText(s.maxC)}</td><td data-sort={fanText(s)}>{fanText(s)}</td>
               <td className="right" data-sort={s.w ?? ''}>{s.w == null ? (UNMEASURED_TEXT[s.unmeasured] || '—') : wText(s.w)}</td>
-              <td data-sort={s.capPct ?? ''} style={{ color: toneVar(s.capHit ? 'bad' : 'idle') }}>{capText(s, cfg)}</td>
+              <td data-sort={s.capPct ?? ''} style={{ color: toneVar(s.capHit ? 'bad' : 'idle') }} title={capTitle(s)}>{capText(s, cfg, resp?.capMinEdgeVersion)}</td>
             </tr>))}</tbody>
         </STable>
         {!(resp?.hot || []).length && <p className="bmo-note">기준을 넘은 서버가 없습니다(온도를 못 읽은 서버는 여기 없습니다 — 법인 표의 흡기 칸 · 미측정 수를 보세요).</p>}

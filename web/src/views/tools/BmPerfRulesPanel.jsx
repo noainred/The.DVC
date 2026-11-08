@@ -16,7 +16,7 @@ import { RULE_TEXT, CHANNEL_TEXT, RULES_HONEST, sentResultText, issueResultText,
 import './bmOps.css';
 import './bmPerfOps.css';
 
-const NUM_SECTIONS = Object.freeze([
+export const NUM_SECTIONS = Object.freeze([
   { k: 'daily', title: '하루 상한(법인당)', fields: [['alerts', '알림'], ['issues', '이슈'], ['autoFocus', '자동 집중'], ['manualFocus', '수동 집중']] },
   { k: 'focus', title: '집중 모니터링', fields: [['intervalS', '간격(초 · 하한 30)'], ['durationMin', '길이(분 · 상한 60)'], ['corpMax', '법인당 동시'], ['nodeMax', '이 노드 전체 동시'], ['keepDays', '보관(일)'], ['autoSuppressMin', '같은 서버 재발 억제(분)']] },
   { k: 'baseline', title: '베이스라인', fields: [['weeks', '지난 주 수'], ['bandPct', '띠 ±%'], ['minWeeks', '최소 표본 주'], ['maxMissingPct', '결측 상한 %']] },
@@ -37,8 +37,12 @@ const NUM_SECTIONS = Object.freeze([
     ['cpuAvgPct', 'CPU 평균 < %'], ['cpuMaxPct', 'CPU 일 최대 < %'], ['memAvgPct', '메모리 평균 < %'], ['diskBusyMaxPct', '디스크 일 최대 busy < %'], ['netMaxPct', '네트 일 최대 < %'],
     ['powerIdlePct', '전력 평균 ≤ 최소 × %'], ['periodicHighPct', '주기 사용 — 높은 날 기준 %']] },
   // 8b단계 ㉒ 전력 · 온도 — 흡기 기준(설정값 · 모델별 권장 아님) · PowerCap 걸림 % · 랙 여유 주의 %. 랙 배치는 아래 글 상자.
-  { k: 'power', title: '전력 · 온도', fields: [['inletWarnC', '흡기 기준 °C'], ['capHitPct', 'PowerCap 걸림(측정 ≥ 상한 × %)'], ['rackLowPct', '랙 여유 주의(% 미만)']] },
+  // 다음 점검 ②: 피크 급증 기준(앞 7일 피크 대비 +%) — 네 기준 모두 전력 보기와 알림 규칙이 같이 쓴다.
+  { k: 'power', title: '전력 · 온도', fields: [['inletWarnC', '흡기 기준 °C'], ['capHitPct', 'PowerCap 걸림(측정 ≥ 상한 × %)'], ['rackLowPct', '랙 여유 주의(% 미만)'], ['surgePct', '피크 급증(앞 7일 피크 대비 +%)']] },
 ]);
+
+/** 자동 집중을 걸지 않는 규칙 — 서버 목록(perfRules.AUTOFOCUS_OFF · 응답 autoFocusOff)이 원천. 구버전 응답이면 예전 두 개(서버가 어차피 false 로 저장한다). */
+export const autoFocusOff = (resp) => (Array.isArray(resp?.autoFocusOff) ? resp.autoFocusOff : ['focusEnd', 'collect']);
 
 /** 이 계정이 저장할 수 있나 — 설정 소유자 등급(소유자 ∧ 전체 범위) · 인증 꺼짐(Anonymous admin). 서버가 다시 막는다. */
 export function canEditRules(resp, u = getCurrentUser()) {
@@ -115,7 +119,7 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
                   <label key={c} className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={(v.channels || []).includes(c)} onChange={(e) => setRule(id, { channels: e.target.checked ? [...new Set([...(v.channels || []), c])] : (v.channels || []).filter((x) => x !== c) })} />{CHANNEL_TEXT[c] || c}</label>
                 ))}</div></td>
                 <td data-sort={v.issue ? 1 : 0}><label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.issue} onChange={(e) => setRule(id, { issue: e.target.checked })} />만들기</label></td>
-                <td data-sort={v.autoFocus ? 1 : 0}>{id === 'focusEnd' || id === 'collect' ? <span className="bmo-sub">해당 없음</span> : <label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.autoFocus} onChange={(e) => setRule(id, { autoFocus: e.target.checked })} />켜기</label>}</td>
+                <td data-sort={v.autoFocus ? 1 : 0}>{autoFocusOff(resp).includes(id) ? <span className="bmo-sub">해당 없음</span> : <label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.autoFocus} onChange={(e) => setRule(id, { autoFocus: e.target.checked })} />켜기</label>}</td>
                 <td data-sort={(v.corpsOff || []).length}>
                   <details><summary className="bmo-sub">{(v.corpsOff || []).length ? `${(v.corpsOff || []).length}곳 제외` : '없음'}</summary>
                     <div className="bmr-corps">{vcenters.map((vc) => (
@@ -164,6 +168,7 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
                   <span className="bmo-sub">등록 CSV 에 ‘랙/위치’ 열이 없어 이 칸이 랙의 유일한 원천입니다 · 서버 키는 함대 표의 서버 키(대개 서비스 태그) · 한 서버는 한 랙에만.</span>
                 </label>
               )}
+              {sec.k === 'power' && <span className="bmo-sub">알림 규칙 ‘랙 여유 부족 · 흡기 온도 지속 초과 · 전력 피크 급증 · PowerCap 걸림 지속’ 이 이 기준을 씁니다(전력 보기와 같은 값).</span>}
               {sec.k === 'baseline' && <span className="bmo-sub">감시 지표: {(resp.baselineMetrics || []).map((m) => FOCUS_METRIC_TEXT[m]?.label || m).join(' · ')}</span>}
               {sec.k === 'health' && <span className="bmo-sub">칸: {Object.values(HEALTH_CELL_TEXT).map((x) => x.label).slice(0, 4).join(' · ')} 등 8칸</span>}
             </div>

@@ -87,6 +87,14 @@ test('③ 하루 계산 — 실제 일 롤업 · 전력 0 W 시간 · 이력 · 
   const { config } = await import('../src/config.js');
   const agent = config.agent?.name || '';
   const db = await import('../src/bmusage/db.js');
+  /*
+   * ⚠ 정정(다음 점검 ② 작업 중 발견 — 기준판 d98a42e5 에서도 실패): 예전 기준 NOW(정시 −30분) + 2h/+14h 는 KST 22시대에 실행하면 행이 **다음 날**로 넘어가
+   *   d=1 행이 ‘오늘(끝나지 않은 날)’ 이 되어 NEW1 days 가 9 였다(시각 의존 — common.md 기준 시각 규약). 이 시험만 **포탈 날(KST) 시작 + 30분**(과거 · 한 시간 당겨 잡아
+   *   자정 직후에도 과거)을 기준으로 둔다 — 행은 늘 그 날 02:30 · 14:30 이다.
+   */
+  const { DAY_OFFSET_MIN } = await import('../src/util/dayKey.js');
+  const OFF = DAY_OFFSET_MIN * 60_000;
+  const NOW = Math.floor((Date.now() - HOUR + OFF) / DAY) * DAY - OFF + 30 * 60_000;
   const rows = [];
   for (let d = 25; d >= 1; d -= 1) for (const h of [2, 14]) {
     const ts = NOW - d * DAY + h * HOUR;

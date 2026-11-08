@@ -8,6 +8,8 @@
  * 권한 · 범위: tools + 조회 범위 — **범위로 서버 기록을 먼저 거른 뒤** 합한다(범위 밖 서버가 합계 · 랙 · 피크에 섞이지 않게 · 귀속 없음은 범위 계정에 숨김) ·
  *   랙 배치도 보이는 법인 것만 · 비관리자에게는 서버 이름 중 주소(등록부 · IPv4)를 가린다 · 응답 캐시 memoJson 열쇠 = 범위 서명 + 관리자 판본 + 함대 계산 세대.
  * 요청 경로 비용: 함대 원천 모으기(서버마다 시간 롤업 조회)는 60초 공유(powerAgg.sharedPowerFleet — 진행 중이면 같은 프라미스) · 서버 사이 시간 기준 양보.
+ * 다음 점검 ③: 엣지 위임 서버의 PowerCap 은 그 엣지 봉투의 powerCaps(중앙 정제본 — central/bmPowerCapSanitize.js)를 대상의 edgeCap 으로 넘겨 쓴다(보기 · 걸림 판정 모두).
+ *   봉투에 표지가 없는 엣지(old-version)일 때만 응답에 capMinEdgeVersion(안내 문구용 — 게이트 아님)을 싣는다. 원천 묶음은 bmusage/powerSources.js(알림 판정과 하나).
  */
 import { requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
@@ -18,11 +20,11 @@ import { currentTargets } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { memoJson, scopeKey } from './shared.js';
 import { bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
+import { edgeCapIndex } from '../../central/bmPowerCapSanitize.js';
 
 const toolsPerm = requirePerm('tools');
 const t = (v) => strOf(v, 4096).trim();
 const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
-const INV_FRESH_MS = 2 * 3_600_000;
 
 export function depsOf(deps = {}) {
   return {
@@ -30,25 +32,9 @@ export function depsOf(deps = {}) {
     listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
     rules: async () => (await import('../../bmusage/perfRules.js')).loadPerfRules(),
     agg: async () => import('../../bmusage/powerAgg.js'),
-    sources: async () => {
-      const [svc, ana, inv, ss, rt, pf, idb] = await Promise.all([import('../../idrac/service.js'), import('../../insights/analysisServers.js'), import('../../idrac/invCache.js'),
-        import('../../idrac/sensorStore.js'), import('../../idrac/roomTemp.js'), import('../../partfault/db.js'), import('../../idrac/db.js')]);
-      const now = Date.now();
-      return {
-        measured: () => svc.allMeasuredPower({ hosts: [] }),
-        analysisServers: async () => ana.analysisServersWithRemote(),
-        fanFaults: async () => (pf.partFaultDbExists() ? (await pf.openFaults({ scope: 'idrac' })).filter((f) => f.kind === 'fan') : null),
-        powerDb: () => idb.getDb(),
-        inventoryOf: (a, regId) => {
-          const x = a?.remote ? (a.inv || null) : inv.getInventory(String(a?.id || regId || ''));
-          if (!x) return null;
-          if (!a?.remote && !(Number(x.collectedAt) && now - Number(x.collectedAt) <= INV_FRESH_MS)) return null;   // 낡은 인벤토리는 ‘지금 사실’ 이 아니다(hwFacts 와 같은 판단)
-          return x;
-        },
-        sensorLatest: (id) => ss.getSensorSeries(id, { minutes: 0 }).latest || null,
-        temps: { classify: rt.classifySensor, maxAgeOf: (latest, remote) => rt.sampleMaxAgeMs(rt.DEFAULT_MAX_AGE_MS, latest, { remote, localCycle: ss.sensorPollCycle(now) }) },
-      };
-    },
+    // 원천 묶음은 도메인 하나(bmusage/powerSources.js — 알림 판정도 같은 함수 · 화면은 엣지 사본까지).
+    sources: async () => (await import('../../bmusage/powerSources.js')).powerSources({ now: Date.now() }),
+    minEdgeVersion: async () => (await import('../../central/featureMinEdgeVersion.js')).powerCapMinEdgeVersion(),
     now: () => Date.now(),
     ...deps,
   };
@@ -60,11 +46,12 @@ async function allTargets(D) {
   const out = (tg.targets || []).map((x) => ({ key: x.key, name: x.name, vcenterId: x.vcenterId || '', serviceTag: x.serviceTag || '', idrac: x.idrac ? { regId: x.idrac.regId } : null, paths: x.paths || [], node: config.agent?.name || '', via: 'local' }));
   const seen = new Set(out.map((x) => `${x.vcenterId}|${x.key}`));
   for (const rec of await D.listEdgeBmUsage().catch(() => [])) {
+    const capOf = edgeCapIndex(rec?.snap);   // 다음 점검 ③ — 봉투 서버별 PowerCap(표지 없음 = old-version)
     for (const x of rec?.snap?.targets || []) {
       const id = `${t(x.vcenterId)}|${t(x.key)}`;
       if (!t(x.key) || seen.has(id)) continue;
       seen.add(id);
-      out.push({ key: t(x.key), name: t(x.name), vcenterId: t(x.vcenterId), serviceTag: t(x.serviceTag), idrac: null, paths: Array.isArray(x.paths) ? x.paths : [], node: rec.agent, via: 'edge' });
+      out.push({ key: t(x.key), name: t(x.name), vcenterId: t(x.vcenterId), serviceTag: t(x.serviceTag), idrac: null, paths: Array.isArray(x.paths) ? x.paths : [], node: rec.agent, via: 'edge', edgeCap: capOf(t(x.key)) });
     }
   }
   return { list: out, tg };
@@ -79,7 +66,8 @@ export async function bmPowerView(req, snap, deps = {}) {
   const rules = await D.rules().catch(() => ({}));
   const now = D.now();
   const { list, tg } = await allTargets(D);
-  let h = 2166136261; for (const x of list) { const s = `${x.vcenterId}|${x.key}|${x.via}`; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } }
+  // 세대 서명 — 엣지 상한(상태 · 값 · 시각)도 넣는다(봉투를 새로 당겨 상한이 바뀌면 60초 공유 계산을 다시 한다).
+  let h = 2166136261; for (const x of list) { const s = `${x.vcenterId}|${x.key}|${x.via}|${x.edgeCap ? `${x.edgeCap.state}:${x.edgeCap.limitWatts ?? ''}:${x.edgeCap.at ?? ''}` : ''}`; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } }
   const genKey = `${Math.floor(now / 60_000)}|${list.length}|${h}`;
   const t0 = Date.now();
   const servers = await A.sharedPowerFleet(genKey, async () => A.gatherPower({ targets: list, deps: await D.sources(), now }), { now });
@@ -102,8 +90,12 @@ export async function bmPowerView(req, snap, deps = {}) {
     if (!allowed || allowed.has(vc)) rackServers = { vcenterId: vc, rack: rk, rows: ag.serversOf(vc, rk).map(mask) };
     else rackServers = { vcenterId: vc, rack: rk, rows: [] };
   }
+  // 엣지 버전 안내는 보이는 서버 중 old-version 이 있을 때만(시한 · 못 읽음에 버전 요구를 붙여 이유를 단정하지 않는다 — 8b 반증 F8 규약).
+  const oldEdge = vis.filter((s) => s.capState === 'old-version').length;
+  const capMin = oldEdge ? await D.minEdgeVersion().catch(() => null) : null;
   return {
     ok: true, now, fleet: ag.fleet, corps: ag.corps, racks: ag.racks, bins: ag.bins, hot: ag.hot.map(mask), capHit: ag.capHit.map(mask), cfg: ag.cfg,
+    ...(oldEdge ? { capOldEdge: oldEdge, ...(capMin ? { capMinEdgeVersion: capMin } : {}) } : {}),
     rackServers, racksConfigured: racks.length, gatherMs, ...(isAdmin ? {} : { addressHidden: true }),
     sources: { power: 'allMeasuredPower', temps: 'analysisServersWithRemote', fans: 'partfault', tempSeries: false },
   };

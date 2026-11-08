@@ -25,9 +25,20 @@ export function marginText(r) {
   if (num(r?.marginPct) == null) return '—';
   return r.marginPct < 0 ? `상한 초과 ${Math.abs(r.marginPct)}%` : `${r.marginPct}%`;
 }
-export function capText(s, cfg = {}) {
-  if (num(s?.capW) == null) return '—';
+/**
+ * 서버 상한 상태(서버 powerAgg capState) → 이유 문구. ⚠ ‘엣지 버전 낮음’ 은 old-version(봉투에 표지 없음)일 때만 — 못 읽음 · 낡음에 버전 이유를 붙이지 않는다.
+ */
+export const CAP_STATE_TEXT = Object.freeze({
+  set: '상한 설정', unset: '상한 값 없음(0 · 빈 값)', unread: '못 읽음(인벤토리 없음 · 2시간 넘음 · PowerLimit 미보고)', stale: '엣지가 읽은 지 2시간 넘음', 'old-version': '엣지 버전 낮음',
+});
+export function capText(s, cfg = {}, minEdgeVersion = null) {
+  if (num(s?.capW) == null) return s?.capState === 'old-version' ? `— 엣지 버전 낮음${minEdgeVersion ? `(v${minEdgeVersion} 이상)` : ''}` : '—';
   return `${s.capHit ? '걸림' : '설정'}(${Math.round(s.capW)} W${num(s.capPct) != null ? ` · ${s.capPct}%` : ''})`;
+}
+/** 상한 칸 마우스 설명(값이 없을 때 이유 — 화면 글은 ‘—’ 로 짧게). */
+export function capTitle(s) {
+  if (num(s?.capW) != null) return undefined;
+  return CAP_STATE_TEXT[s?.capState] || undefined;
 }
 export function fanText(s) {
   if (s?.fanRead === false) return '못 읽음';
@@ -62,6 +73,6 @@ export const POWER_HONEST = Object.freeze([
   '원천은 기존 iDRAC 폴러의 전력 표본 · 시간 롤업과 센서 표본입니다 — **전력 대시보드(법인 · 리전)와 같은 함수로 지금 값을 읽습니다**(vCenter 추정 전력은 넣지 않습니다).',
   '**미측정(iDRAC 없음 · 읽기 실패 · 0 W 보고)은 합계에서 빼고 수를 적습니다** — 0 W 를 꺼짐 · 유휴로 더하지 않습니다. PDU 측정은 범위 밖입니다.',
   '온도는 **지금 값만** 그립니다 — 흡기 시계열은 서버별 상세 온도 적재(옵트인 · 기본 꺼짐)를 켰을 때만 저장되어 이 화면은 추이를 그리지 않습니다. 흡기 기준은 설정값이고 모델별 Dell 권장 범위를 인용하지 않았습니다.',
-  '랙 · U 는 설정 › 알림 규칙의 **랙 배치**가 유일한 원천입니다(등록 CSV 에 ‘랙/위치’ 열이 없고 iDRAC 위치 속성은 읽지 않습니다) — 없는 서버는 ‘미매핑’ 으로 묶어 따로 셉니다. 엣지 위임 서버의 PowerCap 은 엣지 인벤토리 요약에 없어 ‘—’ 입니다.',
+  '랙 · U 는 설정 › 알림 규칙의 **랙 배치**가 유일한 원천입니다(등록 CSV 에 ‘랙/위치’ 열이 없고 iDRAC 위치 속성은 읽지 않습니다) — 없는 서버는 ‘미매핑’ 으로 묶어 따로 셉니다. 엣지 위임 서버의 PowerCap 은 **그 엣지가 봉투에 싣는 서버별 상한**(읽은 시각이 2시간 안인 것만)을 씁니다 — 그 기능 이전 판 엣지는 ‘— 엣지 버전 낮음’, 못 읽었으면 ‘—’(칸에 마우스를 올리면 이유)입니다.',
 ]);
 export const unitPct = (v) => unitText(num(v), '%');

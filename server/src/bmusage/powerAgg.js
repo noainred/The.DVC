@@ -6,8 +6,10 @@
  *     (vCenter 추정 source 'vcenter' 는 넣지 않는다 — power/total.js 와 같은 규칙). 교차 검증 시험이 같은 입력의 법인 합을 /power-breakdown 계산과 대조한다.
  *   · 24시간 평균 · 피크 · kWh · 월 누적 — iDRAC 폴러의 시간 롤업 power_hourly(시간 평균 W × 1h 합 · 피크 = 시간 최대의 최대) · 엣지 서버는 중앙 사본(rmt: 키 — collector/puller).
  *     법인 · 랙 24시간 피크는 **같은 시간의 합**(시간 평균 기준 — 1시간 안 순간 피크는 아님)이고 측정 서버가 다 모인 시간만으로 본다(부분 합을 피크로 쓰지 않는다).
- *   · PowerCap — 인벤토리 powerCap.limitWatts(이 노드 iDRAC 서버 · 2시간 넘은 인벤토리는 쓰지 않는다). ⚠ 엣지 인벤토리 축약(collector/compactInv.js)에는 powerCap 이 없어
- *     엣지 위임 서버의 상한은 ‘확인 불가’ 다(정직 기록 — 중앙 필드를 늘리지 않았다). ‘걸림’ = 지금 W ≥ 상한 × capHitPct%(기본 98%).
+ *   · PowerCap — 인벤토리 powerCap.limitWatts(이 노드 iDRAC 서버 · 2시간 넘은 인벤토리는 쓰지 않는다). ‘걸림’ = 지금 W ≥ 상한 × capHitPct%(기본 98%).
+ *     ⚠ 정정(다음 점검 ③ · 2026-11-08): 8b 판은 엣지 위임 서버의 상한을 ‘—’(엣지 인벤토리 축약에 없음)로 두었다 — 이제 엣지 봉투 powerCaps(서버별 limitWatts · 켜짐 · 읽은 시각 —
+ *     bmusage/edgePull.js envelopePowerCaps · 중앙 정제 central/bmPowerCapSanitize.js)를 대상의 edgeCap 으로 받아 쓴다. 상태 capState 로 이유를 가른다:
+ *     set(값 있음) · unset(상한 꺼짐 — 0 · 빈 값) · unread(인벤토리 없음 · 낡음 · PowerLimit 미보고) · stale(엣지가 읽은 시각이 2시간 넘음) · old-version(봉투에 표지 없음 — 그때만 ‘엣지 버전 낮음’).
  *   · 흡기 · 최대 온도 — 서버 분석 › 법인별 온도와 같은 원천(로컬 sensorStore 최신 · 엣지 export s.sensors · roomTemp 분류 · 신선도). **지금 값만** —
  *     흡기 시계열은 IDRAC_TEMP_SERIES_DETAIL=true(옵트인 · 기본 꺼짐)일 때만 metrics DB 에 있어 이 화면은 시계열을 그리지 않는다(지어내지 않는다).
  *   · 팬 경고 — 파트 장애(⑦)의 열린 팬 장애 수(재판정하지 않는다) · 센서 표본이 없거나 낡았으면 ‘못 읽음’(정상으로 세지 않는다 — 파트 장애 F1 규칙).
@@ -21,6 +23,7 @@ import { targetIdOf } from './maint/judge.js';
 import { periodKeyOf, periodRange } from './monthStore.js';
 import { dayKey, DAY_MS } from '../util/dayKey.js';
 import { DEFAULTS as RULE_DEFAULTS } from './perfRules.js';
+import { INV_FRESH_MS } from './powerSources.js';
 
 const n = numOrNull;
 const HOUR = 3_600_000;
@@ -29,6 +32,8 @@ export const UNMEASURED = Object.freeze(['no-idrac', 'read-fail', 'zero']);
 export const UNMAPPED_RACK = '';
 export const INLET_BINS = Object.freeze([18, 20, 22, 24, 26, 27, 29]);
 export const HOT_MAX = 200;
+/** 서버 상한 상태(capState) — 위 머리말. */
+export const CAP_STATES = Object.freeze(['set', 'unset', 'unread', 'stale', 'old-version']);
 const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
 const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
 
@@ -71,7 +76,9 @@ function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
    *   marginPartial(일부만 측정 n/m — 화면)로 남긴다. 부분 합으로 ‘주의 아님’ 을 확정하지 않게(루트 CLAUDE.md ‘부분 합은 정상에도 장애에도 넣지 않는다’).
    */
   const partial = g.servers > g.measured;
-  const margin = capKw != null && nowKw != null && !partial ? r1(((capKw - nowKw) / capKw) * 100) : null;
+  // ⚠ 정정(다음 점검 ②): 여유는 **반올림 전 W 합**으로 낸다 — 예전에는 0.01 kW 로 반올림한 nowKw 로 계산해 작은 랙에서 1%p 까지 흔들렸다
+  //   (상한 0.5 kW · 445 W → 0.45 kW → 10% · 실제 11%) — 기준(10% 미만) 바로 옆에서 화면 ‘주의’ 와 알림 규칙이 실제와 다르게 갈렸다.
+  const margin = capKw != null && g.measured && !partial ? r1(((capKw * 1000 - g.nowW) / (capKw * 1000)) * 100) : null;
   return {
     servers: g.servers, measured: g.measured, unmeasured: g.unmeasured, unmeasuredN: g.servers - g.measured,
     nowW: g.measured ? Math.round(g.nowW) : null, nowKw, avg24Kw: g.avg24N ? r2(g.avg24W / 1000) : null, avg24Servers: g.avg24N, peak24Kw: pk ? r2(pk.w / 1000) : null, peak24At: pk ? pk.t : null, peakServers: full,
@@ -140,11 +147,13 @@ export function aggregatePower(servers = [], { racks = [], cfg = {} } = {}) {
       inletBelow: below },
     corps: corpRows, racks: rackRows, hot, bins, cfg: c,
     capHit: list.filter((s) => s.capHit === true).map(serverView).slice(0, HOT_MAX),
+    // 다음 점검 ②: 알림 판정(bmusage/powerAlerts.js)이 같은 계산(랙 · 걸림 · 상한 %)의 서버 기록을 쓴다 — 응답에는 싣지 않는다(라우트가 고른 필드만 보낸다).
+    all: list,
     serversOf: (vc, rack) => list.filter((s) => s.vcenterId === vc && s.rack === rack).map(serverView).sort((a, b) => (a.u ?? 999) - (b.u ?? 999) || (b.w ?? -1) - (a.w ?? -1)),
   };
 }
 const serverView = (s) => ({ key: s.key, name: s.name, vcenterId: s.vcenterId, node: s.node, via: s.via, rack: s.rack, u: s.u, w: s.w, unmeasured: s.unmeasured || null,
-  avg24W: s.h24?.avgW ?? null, peak24W: s.h24?.peakW ?? null, capW: s.capW ?? null, capPct: s.capPct ?? null, capHit: s.capHit ?? null,
+  avg24W: s.h24?.avgW ?? null, peak24W: s.h24?.peakW ?? null, capW: s.capW ?? null, capPct: s.capPct ?? null, capHit: s.capHit ?? null, capState: s.capState ?? null, capAt: s.capAt ?? null,
   inletC: s.inletC ?? null, maxC: s.maxC ?? null, tempAt: s.tempAt ?? null, fanWarn: s.fanWarn ?? null, fanRead: s.fanRead ?? null });
 
 /* ════════════════════════ 원천 모으기(이 노드) ════════════════════════ */
@@ -156,7 +165,21 @@ const up = (v) => t(v).toUpperCase();
  */
 const _dayWh = new Map();
 export const DAY_WH_TTL_MS = 6 * HOUR;
-export function _resetPowerAggForTest() { _dayWh.clear(); _fleet = null; }
+/*
+ * 다음 점검 ② 피크 급증 — 서버마다 **24시간 창 바로 앞 7일**의 시간 행 요약(피크 · 시간 수). 창 끝 E = floor((now − 24h) / 1h) × 1h 이고
+ *   24시간 요약(h24 — hourlyStats(now − 24h, now) = hb ≥ E/1h)과 **겹치지도 비지도 않는다**(hourlyStats 는 hb ∈ [floor(from/1h), ceil(to/1h))).
+ *   E 는 정시마다 바뀐다 — 같은 E 안에서는 다시 읽지 않는다(값이 없으면 담지 않는다 — 늦게 채워지는 행을 다음 계산에서 다시 본다 · S2 와 같은 판단).
+ */
+const _week = new Map();   // dbKey → { e, v:{ peakW, hours } }
+export const SURGE_BASE_DAYS = 7;
+export const weekWindowEnd = (now) => Math.floor((now - DAY_MS) / HOUR) * HOUR;
+/** 시간 행 → { peakW(시간 최대의 최대 — hourSummary 의 피크와 같은 정의), hours } (순수 · 0 W 이하 시간은 미측정이라 뺀다). */
+export function peakSummary(rows = []) {
+  const ok = (Array.isArray(rows) ? rows : []).filter((h) => n(h?.avg) != null && Number(h.avg) > 0);
+  if (!ok.length) return null;
+  return { peakW: Math.round(Math.max(...ok.map((h) => n(h.max) ?? Number(h.avg)))), hours: ok.length };
+}
+export function _resetPowerAggForTest() { _dayWh.clear(); _week.clear(); _fleet = null; }
 
 /** 온도 최신(순수) — roomTemp 분류(흡기 = 흡기 계열 최대 · 최대 = CPU · 배기 계열 최대) · 신선도. */
 export function tempsOf(latest, { now = Date.now(), maxAgeMs = 15 * 60_000, classify }) {
@@ -177,7 +200,7 @@ export function tempsOf(latest, { now = Date.now(), maxAgeMs = 15 * 60_000, clas
  * 원천을 모아 서버 기록을 만든다(이 노드 — 중앙은 엣지 위임 서버도 중앙 사본으로 본다). deps 로 시험이 주입한다.
  * @param {{targets:Array<{key,name,vcenterId,serviceTag?,idrac?,node,via}>, deps:object, now?:number}} p
  */
-export async function gatherPower({ targets = [], deps, now = Date.now() }) {
+export async function gatherPower({ targets = [], deps, now = Date.now(), withWeek = false }) {
   const D = deps;
   const measured = (await D.measured().catch(() => [])).filter((m) => m && m.source !== 'vcenter');
   const byId = new Map(); const byTag = new Map();
@@ -210,7 +233,16 @@ export async function gatherPower({ targets = [], deps, now = Date.now() }) {
     else unmeasured = a || regId || (tg.paths || []).includes('idrac') ? 'read-fail' : 'no-idrac';
     // 24시간 · 월 누적 — 시간 롤업(같은 계열 키 — 로컬 iDRAC = 등록부 id · OME = 장비 키 · 엣지 = rmt: 사본)
     const dbKey = m ? t(m.source === 'remote' ? (m.dbKey || '') : m.serverId) : (regId || '');
-    let h24 = null; let kwhMonth = null;
+    let h24 = null; let kwhMonth = null; let base7 = null;
+    if (withWeek && dbKey && idb?.hourlyStats) {
+      const e = weekWindowEnd(now);
+      const c = _week.get(dbKey);
+      if (c && c.e === e) base7 = c.v;
+      else {
+        try { base7 = peakSummary(idb.hourlyStats(dbKey, e - SURGE_BASE_DAYS * DAY_MS, e) || []); } catch { base7 = null; }
+        if (base7) _week.set(dbKey, { e, v: base7 }); else _week.delete(dbKey);
+      }
+    }
     if (dbKey && idb?.hourlyStats) {
       try {
         const rows = idb.hourlyStats(dbKey, now - DAY_MS, now);
@@ -233,15 +265,32 @@ export async function gatherPower({ targets = [], deps, now = Date.now() }) {
         kwhMonth = any ? r1(wh / 1000) : null;
       } catch { h24 = null; kwhMonth = null; }
     }
-    // 상한 · 온도 · 팬
-    const inv = D.inventoryOf(a, regId);
-    const capW = n(inv?.powerCap?.limitWatts);
+    // 상한 · 온도 · 팬 — 엣지 위임 대상은 봉투의 서버별 상한(edgeCap · 다음 점검 ③) · 이 노드 대상은 인벤토리(2시간 안).
+    let capW = null; let capState = 'unread'; let capAt = null;
+    if (tg.via === 'edge') {
+      const ec = tg.edgeCap && typeof tg.edgeCap === 'object' ? tg.edgeCap : { state: 'unread' };
+      capState = CAP_STATES.includes(ec.state) ? ec.state : 'unread';
+      capAt = n(ec.at);
+      if (capState === 'set') {
+        const lw = n(ec.limitWatts);
+        if (lw == null || lw <= 0) capState = 'unread';
+        else if (capAt == null || now - capAt > INV_FRESH_MS) capState = 'stale';   // 엣지가 읽은 시각이 2시간 넘으면 ‘지금 사실’ 이 아니다(로컬과 같은 기준)
+        else capW = lw;
+      }
+    } else {
+      const inv = D.inventoryOf(a, regId);
+      if (inv && inv.powerCap && typeof inv.powerCap === 'object') {
+        const lw = n(inv.powerCap.limitWatts);
+        capAt = n(inv.collectedAt);
+        if (lw != null && lw > 0) { capW = lw; capState = 'set'; } else capState = 'unset';
+      }
+    }
     const latest = a ? (a.remote ? a.sensors : D.sensorLatest(t(a.id))) : (regId ? D.sensorLatest(regId) : null);
     const tp = tempsOf(latest, { now, maxAgeMs: maxAgeOf(latest, !!a?.remote), classify });
     let fanWarn = null;
     if (faults) { const ids = [t(a?.id), regId, tag].filter(Boolean); fanWarn = faults.filter((f) => ids.includes(t(f.deviceId)) || (tag && up(f.deviceKey) === tag)).length; }
     out.push({ key: t(tg.key), name: t(tg.name) || t(tg.key), vcenterId: vc, node: tg.node || '', via: tg.via || 'local', w, unmeasured: w == null ? unmeasured : null, at: m ? n(m.ts) : null,
-      h24, kwhMonth, capW: capW != null && capW > 0 ? capW : null, inletC: tp.inletC, maxC: tp.maxC, tempAt: tp.at, tempState: tp.state,
+      h24, kwhMonth, ...(withWeek ? { base7 } : {}), capW, capState, capAt, inletC: tp.inletC, maxC: tp.maxC, tempAt: tp.at, tempState: tp.state,
       fanWarn, fanRead: tp.state === 'ok' ? true : (a || regId ? false : null) });
     await y();
   }
@@ -249,6 +298,8 @@ export async function gatherPower({ targets = [], deps, now = Date.now() }) {
   //   대상에서 빠진 계열도 40일 안에 같이 빠진다. 이번 달 날은 31일 안이라 이 정리가 지우지 않는다(월말 · 자정 경계와 무관 — 시험 bmPower8b ③-2).
   const cut = dayKey(now - 40 * DAY_MS);
   for (const k of _dayWh.keys()) if (k.slice(k.lastIndexOf('|') + 1) < cut) _dayWh.delete(k);
+  // 7일 요약 — 지금 창 끝보다 이른 항목만 버린다(대상에서 빠진 계열도 다음 정시에 빠진다 · 상한 = 계열 수).
+  if (withWeek) { const e = weekWindowEnd(now); for (const [k, v] of _week) if (v.e < e) _week.delete(k); }
   return out;
 }
 
