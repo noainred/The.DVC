@@ -1263,3 +1263,21 @@
     ⚠ 반증 F6: **랙 상한 여유도 다 측정된 랙만** — 미측정이 1대라도 있으면 `marginPct`/`low` = null · `marginPartial`(화면 ‘일부만 측정(n/m)’) · 여유 최소 카드는 다 측정된 랙만 + `partialRacks` 따로.
     온도는 **지금 값만**(흡기 시계열은 `IDRAC_TEMP_SERIES_DETAIL` 옵트인일 때만 metrics DB 에 있다) · 랙은 설정 랙 배치가 유일한 원천(등록 CSV 에 ‘랙/위치’ 열 없음 · iDRAC 위치는 Redfish 왕복을 늘리므로 읽지 않음) ·
     엣지 위임 서버의 PowerCap 은 엣지 인벤토리 축약에 없어 ‘—’(중앙 필드를 늘리지 않았다).
+- ⚠⚠ **다음 점검 ①(2026-11-08 · 8b 반증 F9 의 남은 것) — 베어메탈 서버 = (법인, 키) 쌍: 조회 · 쓰기 · 화면 · 저장 단계 전부**
+  (`routes/api/bmUsage.js resolvePerfTarget · perfTargetFail · perfVcOf · perfPairsOf` · `bmusage/targets.js` 키 충돌 · 웹 `views/tools/bmPerfUrl.js` · 회귀 `server/test/bmPerfKeyPair.test.js` · 웹 `bmPerfKeyPair.test.jsx`):
+  - **왜**: 키 = 서비스 태그 || fleetId || serverId(`targets.js idOf`) — IP 로 등록한 iDRAC 은 키가 IP 라 사설 대역을 겹쳐 쓰는 법인끼리 같다. 조회가 키만 보던 판은 같은 키의 **첫 대상**을 골랐다
+    (기준판 재현 — 관리자는 늘 이 노드 서버 · 범위 계정은 자기 서버 404 · 엣지끼리 겹치면 첫 엣지에서 멈춤 · 보드(`bmPerfText.boardItems`)도 키로 합쳐 엣지 쪽 서버가 빠졌다).
+  - **해석 규칙(하나)**: 후보 = 이 노드 + 엣지 보관분 전부 → 법인(요청) → **범위 · 귀속 먼저** → 같은 쌍 하나 → 0 = 404 · 1 = 그 서버 · 2+ = 400 `ambiguous-key`(범위 안 후보 법인만). 새 라우트는
+    `resolvePerfTarget(req, D, { …, vcenterId: perfVcOf(req) })` 뒤 `perfTargetFail(found)` 로 답한다(시험 ⑤ 소스 스윕이 `routes/api/bm*.js` 의 모든 호출과 사본 금지를 고정).
+  - **화면**: 서버를 여는 곳(보드 행 · 병목 Top · 함대 보기 6종 · 비교 칩 · 공유 링크)은 행이 가진 `vcenterId` 를 함께 보낸다 · 서버 하나 경로는 `perfPath(키, 법인, 접미, 질의)` 하나(웹 시험 ⑥ 스윕) ·
+    비교에 담는 목록 · 비교 링크 = ‘법인|키’ 쌍 글자(`refOf` — 서버 `targetIdOf` · 비교 열 `cid` 와 같은 꼴 · 예전 판 목록(키만)은 법인 모름으로 읽는다) · 법인 없이 열었고 모호하면 상세가 **법인 고르기**
+    (후보 버튼 — 고르기 전에는 어느 서버의 머리도 그리지 않는다: Chromium 판독에서 목록 첫 항목의 머리가 답처럼 뜬 것을 잡았다) · 상세 공유 링크는 `vc` 를 싣는다.
+  - **저장 단계(사실 — 시험 ④ 실제 DB)**: 이 노드 표는 전부 `(agent, key, …)` 기본키(`db.js` usage_history · usage_daily · usage_latest · usage_devices · change_latest · log_cursor · log_pattern · log_hour · log_sec ·
+    `monthStore.js` usage_hourly · usage_mount_daily · usage_device_* · top_sample · top_proc · top_proc_hourly)이고 폴러 인메모리 맵(`_prev` 누적 카운터 · `_authStopped` · 상세 · 로그 커서)도 키 하나다 —
+    같은 노드의 같은 키 두 서버는 최신값 · 롤업 · 커서가 덮어써지고 이력이 번갈아 섞이며 한 서버의 인증 실패가 다른 서버 수집을 멈춘다. → **같은 키의 모든 대상을 수집하지 않고 `key-conflict` 로 밝힌다**
+    (v2.550.3 의 ‘빼지 않는다’ 를 뒤집었다 — 그 판의 결과는 오류 없는 틀린 값이었다 · 분류 순서가 전력값으로 바뀌어 하나를 고르면 주기마다 다른 쪽이 이긴다). 목록은 **서버마다 한 줄**(예전 한 줄 = 두 서버 이름 +
+    법인 하나라 범위 계정이 다른 법인 서버 이름을 봤다). ⚠ 기존 행의 키는 바꾸지 않았다(마이그레이션 없음 — 이미 섞인 이력은 보존일이 지나며 사라진다 · 화면 문구가 ‘지우지 않았습니다’ 로 밝힌다).
+    서로 다른 노드(이 노드 · 엣지마다)는 agent 열이 갈라 섞이지 않는다.
+  - **남은 것(고치지 않음 — 저장 키 이전이 필요해 메인 판단)**: 중앙 쪽 **키 단독** 저장소 — 용도 태그(`insights/fleetTags.js` — 서비스 태그 또는 키 · 서버 분석 태그와 같은 저장소) ·
+    서버별 목표(`bm-perf-slo.json` `servers` — 읽기 범위만 ‘법인 집합 중 하나라도’ 로 고쳤다) · 운영 주석의 여러 법인 · 여러 서버 주석(키 ↔ 법인 짝을 저장하지 않아 읽기는 ‘키 ∧ 법인 ∈ 집합’ 근사) ·
+    예전 판 비교 세트(법인 없이 저장 — 새로 저장하면 `vcenterIds` 를 함께 둔다).
