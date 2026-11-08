@@ -7,7 +7,7 @@ import { unitText } from '../unitText.js';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 export const UNMEASURED_TEXT = Object.freeze({ 'no-idrac': 'iDRAC 없음', 'read-fail': '읽기 실패', zero: '0 W 보고' });
-export const kwText = (v) => (num(v) == null ? '—' : `${v.toFixed(v >= 100 ? 0 : 1)} kW`);
+export const kwText = (v) => (num(v) == null ? '—' : v >= 10_000 ? `${(v / 1000).toFixed(2)} MW` : `${v.toFixed(v < 10 ? 2 : 1)} kW`);
 export const kwhText = (v) => (num(v) == null ? '—' : v >= 10_000 ? `${(v / 1000).toFixed(1)} MWh` : `${Math.round(v).toLocaleString()} kWh`);
 export const wText = (v) => (num(v) == null ? '—' : `${Math.round(v)} W`);
 export const cText = (v) => (num(v) == null ? '—' : `${v.toFixed(1)} °C`);

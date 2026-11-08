@@ -243,7 +243,7 @@ export const HEALTH_HONEST = '카드 한 칸 = 값 + 읽는 곳 + 기준(설정)
 /* ── 변경 이벤트 ───────────────────────────────────────────────────────── */
 export const CHANGE_KIND_TEXT = Object.freeze({
   reboot: '재부팅', kernel: '커널', 'needs-restart': '재부팅 필요', package: '패키지', sysctl: 'sysctl', 'sysctl-file': 'sysctl 파일', 'sysctl-all': 'sysctl 전체',
-  cron: '크론', tuned: 'TuneD', selinux: 'SELinux', firewalld: 'firewalld', 'units-failed': '실패 유닛', firmware: '펌웨어', 'cvp-map': 'CVP 매핑', health: '소모품 칸',
+  cron: '크론', tuned: 'TuneD', selinux: 'SELinux', firewalld: 'firewalld', 'units-failed': '실패 유닛', firmware: '펌웨어', 'cvp-map': 'CVP 매핑', health: '소모품 칸', idle: '저활용 후보',
 });
 export function changeKindText(k) { return CHANGE_KIND_TEXT[k] || String(k || '—'); }
 export const CHANGES_HONEST = '변경은 이전 주기와 다를 때만 적습니다(전이). 설정 파일 · crontab 은 CRC(해시)만 비교하고 내용은 보관하지 않습니다 — 무엇이 바뀌었는지는 sysctl 키 · 패키지 수 · 파일 이름까지만 압니다. ‘영향’ 은 추정하지 않습니다 — 추이 위 점과 시각이 겹치는지만 보십시오.';
