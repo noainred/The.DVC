@@ -26,7 +26,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { POWER_RULE_IDS, DEFAULTS as RULE_SET_DEFAULTS } from './perfRules.js';
-import { aggregatePower, gatherPower } from './powerAgg.js';
+// 집계(powerAgg — monthStore 등)는 판정 입력을 만들 때만 읽는다(동적) — 이 파일의 순수 함수는 perfAlerts 엔진이 정적으로 쓴다(엔진의 정적 그래프를 늘리지 않게).
 
 const n = numOrNull;
 /** 규칙 → 항목 종류(랙 칸 · 서버 칸). 종류가 맞지 않는 항목에는 그 규칙을 대지 않는다(상태를 만들지 않는다). */
@@ -87,7 +87,7 @@ export function powerAlertOf(f, head, key) {
   if (f.rule === 'rack') {
     const over = n(p.marginPct) != null && p.marginPct < 0;
     return { key, severity: over ? 'critical' : 'warning',
-      title: capStr(`${head} 랙 상한 ${over ? `초과 ${Math.abs(p.marginPct)}%` : `여유 ${p.marginPct ?? '—'}%`}(기준 ${p.rackLowPct ?? '—'}% 미만)`, 200),
+      title: capStr(`${head} 상한 ${over ? `초과 ${Math.abs(p.marginPct)}%` : `여유 ${p.marginPct ?? '—'}%`}(기준 ${p.rackLowPct ?? '—'}% 미만)`, 200),
       detail: capStr(`지금 ${kw(p.nowKw)} / 상한 ${kw(p.capKw)}(설정값) · 측정 ${p.measured ?? '—'}/${p.servers ?? '—'}대(미측정 서버가 있는 랙은 판정하지 않습니다)\n${since}\n어느 서버의 증가인지는 단정하지 않습니다 — 베어메탈 사용률 › 전력 · 온도에서 그 랙을 눌러 서버 목록을 확인하세요.`, 1_500) };
   }
   if (f.rule === 'inlet') {
@@ -116,6 +116,7 @@ export async function powerAlertItems({ targets = [], rules = {}, now = Date.now
   if (!on.length || !targets.length) return [];
   const cfg = { ...RULE_SET_DEFAULTS.power, ...Object.fromEntries(Object.entries(rules.power || {}).filter(([k, v]) => k !== 'racks' && k !== 'racksText' && v != null)) };
   const sources = deps.sources ? await deps.sources() : await (await import('./powerSources.js')).powerSources({ now, localOnly: true });
+  const { aggregatePower, gatherPower } = await import('./powerAgg.js');
   const list = targets.filter((x) => x && x.key).map((x) => ({ key: x.key, name: x.name, vcenterId: x.vcenterId || '', serviceTag: x.serviceTag || '', idrac: x.idrac ? { regId: x.idrac.regId } : null, paths: x.paths || [], node: '', via: 'local', _t: x }));
   const servers = await gatherPower({ targets: list, deps: sources, now, withWeek: on.includes('surge'), withMonth: false });
   const tgOf = new Map(list.map((x) => [`${x.vcenterId}|${x.key}`, x._t]));

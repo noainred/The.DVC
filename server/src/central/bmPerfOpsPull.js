@@ -15,7 +15,7 @@ import { capStr } from '../util/capStr.js';
 import { clampEdgeTs } from '../util/clampEdgeTs.js';
 import { featureMinEdgeVersion, STAGE5_TITLE_RE, _resetFeatureMinEdgeVersionForTest } from './featureMinEdgeVersion.js';
 import { BMPERF_RULE_LABEL, applyBmPerfFires } from '../issues/alertIssues.js';
-import { RULE_IDS as PERF_RULE_IDS } from '../bmusage/perfRules.js';
+import { RULE_IDS as PERF_RULE_IDS, loadPerfRules } from '../bmusage/perfRules.js';
 import { parseRackKey, rackKeyOf } from '../bmusage/powerAlerts.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -275,7 +275,7 @@ export async function ingestEdgeAlertIssues(agent, snap, deps = {}) {
   const pend = (Array.isArray(snap?.perfAlertSent) ? snap.perfAlertSent : []).filter((r) => isObj(r) && r.issue === 'pending-central');
   if (!pend.length) return { created: 0, dropped: 0 };
   const D = {
-    rules: async () => (await import('../bmusage/perfRules.js')).loadPerfRules(),
+    rules: async () => loadPerfRules(),
     apply: async (fires, o) => applyBmPerfFires(fires, o),
     ...deps,
   };

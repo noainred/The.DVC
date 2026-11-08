@@ -34,6 +34,7 @@
 - (7b단계 추가) 리눅스 성능 7b단계 서버 등록 배포(중앙 → 엣지) — 비밀 없는 이름 목록 · 개별 토큰만 · 엣지가 같은 분석을 다시 · 자기가 만든 항목만 지움 · 끊겨도 central 로 넘기지 않음
 - (8a단계 추가) 리눅스 성능 8a단계 정비 창 배포 · 봉투 maint/capacity · 용량 상세 대행 — 개별 토큰만 · 그 법인 창만 · 태그는 중앙이 키로 펼침 · 엣지 재정규화 · 24h 시한 · bodyOk 명시 · 최소 버전 8a 표지
 - (8b단계 추가) 리눅스 성능 8b단계 Top-N 대행 · 봉투 idle — bodyOk 명시 · comm · user 는 엣지 문자열(길이 → 제어문자) · hint 는 중앙이 다시 · 표지 topVer/idleVer · 최소 버전 8b 표지
+- (다음 점검 ②③ 추가) 봉투 powerCapVer/powerCaps(서버별 PowerCap) · 엣지 전력 알림 발송 기록(랙 키) — 정제 화이트리스트 · 랙 법인은 중앙이 · 버전 안내는 old-version 만
 ## 본문
 
 - ⚠⚠ **엣지 로그·진행상태는 '당겨서' 본다 — 상시 수집하지 않는다**(`edgelog/` + `central/edgeLog*.js` +
@@ -914,3 +915,12 @@
   - 최소 엣지 버전: `featureMinEdgeVersion.stage8bMinEdgeVersion`(표지 `STAGE8B_TITLE_RE = /리눅스 통합 성능 모니터링 8b단계/` — 숫자를 박지 않는다 · 노트에 없으면 지금 판).
   - 반증 F8: 대행 실패 응답의 `minEdgeVersion` 은 **kind === 'old-version' 일 때만**(시한 · 연결 실패 · 대상 아님 404 에 버전 요구를 붙여 원인을 단정하지 않는다 — 웹도 같은 조건) · 반증 F3: 점 본문 `reason: 'base-missing'` · 띠 `baseMissing` 은 정제를 통과한다(‘못 읽음’ 을 ‘없음’ 으로 바꾸지 않게).
   - 변경 이벤트 kind 에 `idle`(저활용 후보 진입/이탈)을 더했다 — 중앙 대행 정제(`bmPerfOpsPull.js CHANGE_KINDS`)에도 같은 값(둘을 같이 고칠 것).
+- ⚠⚠ **다음 점검 ②③ — 봉투 `powerCapVer` · `powerCaps`(서버별 PowerCap) · 엣지 전력 알림 발송 기록(규칙 rack · inlet · surge · powerCap)**
+  (`bmusage/edgePull.js envelopePowerCaps` · `central/bmPowerCapSanitize.js` · `central/bmPerfOpsPull.js centralizeEdgeSent` · 회귀 `server/test/bmPowerAlerts.test.js` ⑥ ⑥-2 ⑦ — 실제 collector 라우터 ↔ 실제 `pullBmUsage` 성공 왕복):
+  - 봉투: 표지 `powerCapVer` 는 값이 없어도 싣는다(값 없음 ≠ 구버전) · `powerCaps` 는 같은 봉투 대상 키 · iDRAC 인벤토리 캐시만(**장비 왕복 0** — 새 Redfish 호출 없음) · PowerLimit 미보고 · 인벤토리 없음은 싣지 않는다.
+    새 당기기 경로는 없다(기존 `/api/collector/bm-usage` — bodyOk 그대로).
+  - 정제: 아는 필드 4개 · 대상 키만 · 중복 첫 것 · limitWatts 수(1~100,000 W 밖 null) · enabled 불리언만(값 없는 true 는 null) · at 은 수신 시각으로 자르고 원본 `atRaw` · 뺀 수 `powerCapsDropped`.
+    중앙 보기는 at 이 2시간 넘으면 ‘낡음’(값을 쓰지 않는다 — 로컬 인벤토리와 같은 기준). **‘엣지 버전 낮음’ 은 표지가 없을 때만**(응답 `capOldEdge` · `capMinEdgeVersion` — 표지 `POWER_ALERT_TITLE_RE`
+    = `/베어메탈 사용률 — 전력 알림 규칙 · 엣지 PowerCap/` 의 릴리스 노트 첫 번호 · 노트에 없으면 지금 판 — 게이트 아님).
+  - 발송 기록: 중앙 정제의 규칙 열거는 `perfRules.RULE_IDS` 하나(⚠ 정정 — 손 목록에 8a capacity 가 빠져 ‘use’ 로 바뀌었다) · 랙 기록(키 `rack:<법인>|<랙>`)은 대상 목록과 대지 않고
+    랙 이름 형식만 받으며 **법인은 중앙이 정해**(엣지 주장 ∩ 그 엣지 담당) 키 · 이름 · 제목을 다시 만든다 — 엣지가 다른 법인 이름을 키에 넣어 그 법인 이력에 끼워 넣지 못한다.

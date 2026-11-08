@@ -1303,8 +1303,8 @@
   (`bmusage/powerAlerts.js`(조건 · 관측 표지 · 문구 · 항목) · `bmusage/powerSources.js`(원천 묶음 하나 — 라우트에서 옮김) · `bmusage/perfAlerts.js`(ruleApplies · stateKeyOf · groupMaintState) ·
   `bmusage/powerAgg.js`(capState · edgeCap · 앞 7일 피크) · `bmusage/edgePull.js envelopePowerCaps` · `central/bmPowerCapSanitize.js` · 회귀 `server/test/bmPowerAlerts.test.js` · 웹 `bmPowerAlerts.test.jsx`):
   - **엔진은 5단계 그대로**(직렬 큐 · 지속 · 한 사건 한 번 · 재발 억제 · 법인 하루 상한 · 채널 · 이슈(중앙 생성 · 엣지 pending-central) · 8a 정비 창 · 해제는 억제하지 않음). 전력 규칙 항목은 `power` 칸을 가진
-    **별도 항목**이고 규칙 ↔ 항목 종류가 맞을 때만 대 본다(`ruleApplies` — 같은 서버가 성능 항목 · 전력 항목 둘로 들어와 서로의 상태를 덮지 않게). 상태 열쇠 · 알림 열쇠는 (법인, 키) 쌍(`stateKeyOf` —
-    예전 규칙은 예전 열쇠 그대로: 바꾸면 진행 중 사건이 새 사건으로 다시 나간다). 기준값은 전력 보기와 같은 `power` 절(흡기 · 걸림 % · 랙 여유 % · 새 `surgePct` 20).
+    **별도 항목**이고 규칙 ↔ 항목 종류가 맞을 때만 대 본다(`ruleApplies` — 같은 서버가 성능 항목 · 전력 항목 둘로 들어와 서로의 상태를 덮지 않게). 상태 열쇠 · 알림 열쇠 · 이슈 열쇠는 (법인, 키) 쌍
+    (`stateKeyOf` · `perfAlertOf` · `planBmPerfIssues` — 예전 규칙은 예전 열쇠 그대로: 바꾸면 진행 중 사건 · 열린 이슈와 열쇠가 어긋나 같은 사건이 새로 나간다). 기준값은 전력 보기와 같은 `power` 절(흡기 · 걸림 % · 랙 여유 % · 새 `surgePct` 20).
   - **조건**: 랙 = aggregatePower 의 `low`(상한을 정한 · 매핑된 랙만 항목 · **미측정이 있으면 null** — F6) · 흡기 = `inletC ≥ inletWarnC`(화면과 같은 ≥ · 낡은 · 없는 센서는 null) ·
     PowerCap = `capHit`(미측정 · 상한 없음 · 낡음은 null) · 피크 급증 = **서버** 24시간 피크 ≥ **그 앞 7일 피크** × (1 + %)(앞 7일 시간 < 96 이면 null). 평균 대비가 아닌 이유(낮 · 밤 차이로 매일 걸림) ·
     전날 대비가 아닌 이유(월요일마다 걸림) · 법인 합이 아닌 이유(합의 피크는 ‘다 모인 시간만’ 이어야 해 대수가 많으면 7일 창에 남는 시간이 거의 없다 — 서버 시간 행은 부분 합이 없다)는 powerAlerts.js 머리말.

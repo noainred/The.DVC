@@ -29,6 +29,7 @@ import { dayKey, DAY_MS, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { createIssue, addComment, setStatus, findByOrigin, patchOrigin, originCreatedSince, issueStats, PRIORITIES } from './store.js';
 import { loadIssueSettings, suggestAssignee } from './settings.js';
 import { issueViewers } from './visibility.js';
+import { POWER_RULE_IDS } from '../bmusage/perfRules.js';   // 다음 점검 ②: 전력 규칙 이슈 열쇠는 (법인, 키) 쌍
 
 export const ALERT_ISSUE_KINDS = Object.freeze(['vc', 'vcstale', 'host', 'ds', 'alarm', 'massoff', 'backup', 'cert']);
 export const ALERT_KIND_LABEL = Object.freeze({
@@ -416,6 +417,7 @@ export const BMPERF_RULE_LABEL = Object.freeze({ use: 'USE 판정 변화', cross
  *  · 하루 상한은 **법인별**(createdTodayByVc — F7: 예전에는 전 법인 합계 20 이라 한 법인이 다른 법인 이슈를 막았다).
  * @param {Array} existing  findByOrigin(bmperf, { openOnly:false }) — 닫힌 이슈 포함
  */
+const BMPERF_PAIR_KEY_RULES = new Set(POWER_RULE_IDS);   // 규칙 목록 하나(perfRules — 사본 금지)
 export function planBmPerfIssues(fires, { existing = [], createdTodayByVc = new Map(), dailyMax = 20 } = {}) {
   const actions = []; let capped = 0;
   const byKey = new Map(); const seenIds = new Set(); const lastAt = new Map(); const lastIds = new Map();
@@ -434,7 +436,9 @@ export function planBmPerfIssues(fires, { existing = [], createdTodayByVc = new 
   const ordered = [...(fires || [])].sort((a, b) => (Number(a?.at) || 0) - (Number(b?.at) || 0));
   for (const f of ordered) {
     if (!f?.id || seenIds.has(String(f.id))) { actions.push({ type: 'dup', f }); continue; }
-    const k = `bmperf:${f.agent || ''}|${f.key}|${f.rule}`;
+    // 다음 점검 ②: 전력 규칙(새 규칙 — 기존 이슈와 열쇠가 겹칠 일 없음)은 (법인, 키) 쌍 — 같은 노드의 같은 키 · 다른 법인 서버를 한 이슈로 묶지 않는다.
+    //   예전 규칙은 예전 열쇠 그대로(바꾸면 열린 이슈와 열쇠가 어긋나 같은 사건이 새 이슈가 된다).
+    const k = BMPERF_PAIR_KEY_RULES.has(f.rule) ? `bmperf:${f.agent || ''}|${f.vcenterId || ''}|${f.key}|${f.rule}` : `bmperf:${f.agent || ''}|${f.key}|${f.rule}`;
     const at = Number(f.at);
     // 같은 시각(ms)의 건은 그 시각에 받은 id 목록(lastIds)으로 가른다 — 더 이른 건은 이미 받은 것.
     if (Number.isFinite(at) && lastAt.has(k) && (at < lastAt.get(k) || (at === lastAt.get(k) && lastIds.get(k)?.has(String(f.id))))) { actions.push({ type: 'dup', f }); continue; }

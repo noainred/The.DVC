@@ -28,6 +28,7 @@ import { latestUsage } from './db.js';
 import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from './perfView.js';
 import { hwFactsReader } from './hwFacts.js';
 import { freshMsFor } from './useJudge.js';
+import { getInventory } from '../idrac/invCache.js';   // 다음 점검 ③ 서버별 PowerCap(인벤토리 캐시 — 장비 왕복 0)
 
 /**
  * v2.919(리눅스 성능 1단계): 봉투에 판정이 붙은 성능 항목(`perf`)을 싣는다 — **엣지가 판정하고 중앙은 그대로 전한다**.
@@ -102,7 +103,6 @@ export async function buildBmUsageEnvelope(opt = {}) {
 }
 async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
   const cap = Math.min(MAX_LIMIT, Math.max(1, Number(limit) || DEFAULT_LIMIT));
-  await _loadInvGetter();
   const s = loadBmUsageSettings();
   const [tg, latest] = await Promise.all([
     currentTargets(),
@@ -172,8 +172,7 @@ export const POWER_CAP_VER = 1;
 export function envelopePowerCaps(targets = [], keys = new Set(), { inventoryOf = null } = {}) {
   const out = { powerCapVer: POWER_CAP_VER };
   try {
-    const get = inventoryOf || _invGet;
-    if (!get) return out;
+    const get = inventoryOf || getInventory;
     const list = [];
     for (const tg of targets) {
       const key = t(tg?.key); const regId = t(tg?.idrac?.regId);
@@ -189,9 +188,7 @@ export function envelopePowerCaps(targets = [], keys = new Set(), { inventoryOf 
   } catch { /* 표지만 — 중앙은 값 없음으로 본다 */ }
   return out;
 }
-let _invGet = null;
-// 인벤토리 캐시(idrac/invCache.js)는 봉투를 만들 때 한 번 읽어 둔다(정적 import 를 늘리지 않는다 — 순환 방지).
-export async function _loadInvGetter() { if (!_invGet) { try { _invGet = (await import('../idrac/invCache.js')).getInventory; } catch { _invGet = null; } } return _invGet; }
+
 /** 8b단계 봉투 필드 — 표지(topVer · idleVer)는 계산 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다). 실패해도 봉투는 나간다. */
 export const TOP_VER = 1;
 export const IDLE_VER = 1;

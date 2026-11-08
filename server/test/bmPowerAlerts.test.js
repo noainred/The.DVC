@@ -104,7 +104,9 @@ test('① 조건(순수) — 미측정 · 부분 합 · 낡은 센서 · 표본 
 
 test('② 판정 입력 — 실제 집계 · 상한 랙만 · 일부만 측정 = 보류 · (법인, 키) 쌍 · 24시간 ↔ 앞 7일 창 겹침 없음', async () => {
   AG._resetPowerAggForTest();
-  const E = AG.weekWindowEnd(NOW);
+  // 24시간 요약의 첫 행 = hourlyStats(now − 24h, now) 의 hb ≥ floor((now − 24h)/1h) — 시험이 제품 함수(weekWindowEnd)를 쓰지 않고 따로 센다(변이 M24).
+  const E = Math.floor((NOW - DAY) / HOUR) * HOUR;
+  assert.equal(AG.weekWindowEnd(NOW), E);
   const rowsFull = [];
   for (let ts = E - 7 * DAY; ts < E; ts += HOUR) rowsFull.push({ ts, avg: 800, max: 1000 });
   for (let ts = E; ts <= NOW; ts += HOUR) rowsFull.push({ ts, avg: 900, max: ts === E ? 1300 : 950 });   // 창 첫 시간(E)은 24시간 쪽
@@ -127,12 +129,12 @@ test('② 판정 입력 — 실제 집계 · 상한 랙만 · 일부만 측정 =
     { key: 'K1', name: 'a-k1', vcenterId: 'vcA', idrac: { regId: 'r1' } }, { key: 'K1', name: 'b-k1', vcenterId: 'vcB', idrac: { regId: 'r2' } },
     { key: 'K3', name: 'a-k3', vcenterId: 'vcA', idrac: { regId: 'r3' } }, { key: 'K4', name: 'a-k4', vcenterId: 'vcA', idrac: { regId: 'r4' } }, { key: 'K5', name: 'a-k5', vcenterId: 'vcA', idrac: { regId: 'r5' } },
   ];
-  const rules = rulesOf({ rack: {}, inlet: {}, surge: {}, powerCap: {} }, { power: { racksText: 'vcA,R1,1.0,K1 K3\nvcA,R2,0.2,K4 K5\nvcA,R3,,K9' } });
+  const rules = rulesOf({ rack: {}, inlet: {}, surge: {}, powerCap: {} }, { power: { racksText: 'vcA,R1,1.0,K1 K3\nvcA,R2,0.2,K4 K5\nvcB,R3,,K1' } });
   const items = await PA.powerAlertItems({ targets, rules, now: NOW, deps: { sources: src } });
   const srv = items.filter((x) => x.power.kind === 'server');
   const racks = items.filter((x) => x.power.kind === 'rack');
   assert.equal(srv.length, 5, '서버 칸은 대상마다');
-  assert.deepEqual(racks.map((x) => x.key).sort(), ['rack:vcA|R1', 'rack:vcA|R2'], '상한 없는 랙(R3) · 미매핑은 항목이 없다');
+  assert.deepEqual(racks.map((x) => x.key).sort(), ['rack:vcA|R1', 'rack:vcA|R2'], '상한 없는 랙(vcB R3 — 서버 있음) · 미매핑은 항목이 없다');
   const r1 = racks.find((x) => x.key === 'rack:vcA|R1');
   assert.equal(r1.power.marginPct, 5, '(1.0 − 0.95) / 1.0'); assert.equal(PA.powerCondition('rack', r1), true);
   assert.equal(r1.members.length, 2);
@@ -227,7 +229,7 @@ test('③ 실제 규칙 엔진 — 지속 = 서로 다른 표본 · 낡음은 �
   assert.equal(d4.sends.length, 0, '같은 표본(관측 표지 o3) 두 번은 1주기');
   await A.runPerfAlerts([rk(true, 'o4')], { rules: rules4, now: NOW + 20 * MIN, deps: d4.deps });
   await A._drainPerfAlertsForTest();
-  assert.equal(d4.sends.length, 1); assert.match(d4.sends[0].al.title, /^\[vcA\] 랙 R1 랙 상한 여유 5%\(기준 10% 미만\)$/);
+  assert.equal(d4.sends.length, 1); assert.match(d4.sends[0].al.title, /^\[vcA\] 랙 R1 상한 여유 5%\(기준 10% 미만\)$/);
   assert.match(d4.sends[0].al.detail, /측정 2\/2대/);
 });
 
@@ -245,20 +247,22 @@ test('④ 실제 정비 창 — 서버 · 랙(서버 하나라도 창 안) 기�
   A._resetPerfAlertsForTest();
   const d = depsOf({ maintJudge: async (now) => MR.maintJudge({ now }), clock: () => Date.now() });
   const rules = rulesOf({ inlet: { sustain: 1, issue: true }, rack: { sustain: 1 } });
-  const inl = (t, c = 31) => srvItem('K1', 'vcA', { inletC: c, tempAt: t - MIN });
+  const inl = (t, c = 31, vc = 'vcA') => srvItem('K1', vc, { inletC: c, tempAt: t - MIN });
   const rk = (t, low = true) => ({ key: 'rack:vcA|R1', name: '랙 R1', vcenterId: 'vcA', members: [{ key: 'K1', vcenterId: 'vcA' }, { key: 'K3', vcenterId: 'vcA' }],
     power: { kind: 'rack', rack: 'R1', capKw: 1, nowKw: 0.95, marginPct: low ? 5 : 50, low, marginPartial: false, measured: 2, servers: 2, rackLowPct: 10, obs: `o${t}` } });
-  let r = await A.runPerfAlerts([inl(T0), rk(T0)], { rules, now: T0, deps: d.deps });
+  // 같은 키 · 다른 법인(vcB K1 — 창 밖)을 함께 — 대상은 항목이 가진 (법인, 키) 대상으로 판정한다(키 지도에서 다른 법인 대상을 집지 않는다)
+  let r = await A.runPerfAlerts([inl(T0), inl(T0, 31, 'vcB'), rk(T0)], { rules, now: T0, deps: d.deps });
   await A._drainPerfAlertsForTest();
-  assert.equal(r.maintenance, 2, '서버 · 랙(K1 이 창 안) 모두 기록만'); assert.equal(d.sends.length, 0); assert.equal(d.issues.length, 0);
+  assert.equal(r.maintenance, 2, '서버 · 랙(K1 이 창 안) 모두 기록만'); assert.equal(d.issues.length, 1, 'vcB 이슈만');
+  assert.deepEqual(d.sends.map((x) => x.al.key), ['bmperf:inlet:vcB|K1'], '창 밖 vcB 는 보낸다 · vcA 는 창 안');
   const rec = A.perfAlertStatus().sent.filter((x) => x.result === 'maintenance');
-  assert.deepEqual(rec.map((x) => x.rule).sort(), ['inlet', 'rack']); assert.deepEqual(rec[0].maint.ids, [w.id]);
-  r = await A.runPerfAlerts([inl(T0 + 5 * MIN), rk(T0 + 5 * MIN)], { rules, now: T0 + 5 * MIN, deps: d.deps });
+  assert.deepEqual(rec.map((x) => `${x.rule}:${x.vcenterId}`).sort(), ['inlet:vcA', 'rack:vcA']); assert.deepEqual(rec[0].maint.ids, [w.id]);
+  r = await A.runPerfAlerts([inl(T0 + 5 * MIN), inl(T0 + 5 * MIN, 31, 'vcB'), rk(T0 + 5 * MIN)], { rules, now: T0 + 5 * MIN, deps: d.deps });
   assert.equal(r.maintHeld, 2, '같은 창 반복은 한 번만 센다');
-  r = await A.runPerfAlerts([inl(end + MIN), rk(end + MIN)], { rules, now: end + MIN, deps: d.deps });
+  r = await A.runPerfAlerts([inl(end + MIN), inl(end + MIN, 31, 'vcB'), rk(end + MIN)], { rules, now: end + MIN, deps: d.deps });
   await A._drainPerfAlertsForTest();
-  assert.equal(r.afterMaint, 2); assert.equal(d.sends.length, 2);
-  assert.ok(d.sends.every((x) => /^\(정비 창 안부터 초과\) /.test(x.al.title)), JSON.stringify(d.sends.map((x) => x.al.title)));
+  assert.equal(r.afterMaint, 2); assert.equal(d.sends.length, 3, 'vcB 는 진행 중(다시 보내지 않음) · 창 뒤 vcA 서버 · 랙 1회씩');
+  assert.ok(d.sends.slice(1).every((x) => /^\(정비 창 안부터 초과\) /.test(x.al.title)), JSON.stringify(d.sends.map((x) => x.al.title)));
   // 창 안에 해제 — 해제는 억제하지 않는다(상태가 지워져 창 뒤 발송도 없다)
   A._resetPerfAlertsForTest();
   const d2 = depsOf({ maintJudge: async (now) => MR.maintJudge({ now }), clock: () => Date.now() });
@@ -276,22 +280,25 @@ test('④ 실제 정비 창 — 서버 · 랙(서버 하나라도 창 안) 기�
 test('⑤ 실제 폴러 배선 — pollBmUsageOnce → 전력 규칙(실제 원천 · 이 노드 것만) → 발송 기록 · 상태 열쇠 쌍', async (t) => {
   if (!sqlite) return t.skip('node:sqlite 없음');
   fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [{ id: 'r-w1', name: 'idrac-w1', host: '10.9.9.1', username: 'root', password: 'p', serviceTag: 'WTAG1', vcenterId: 'vcW' }] }));
-  fs.writeFileSync(path.join(DIR, 'bm-storage.json'), JSON.stringify({ servers: [{ id: 'o-w1', name: 'bm-w1', host: '127.0.0.1', port: 9, username: 'mon', password: 'pw', mounts: [] }] }));
+  fs.writeFileSync(path.join(DIR, 'bm-storage.json'), JSON.stringify({ servers: [{ id: 'o-w1', name: 'bm-w1', host: '127.0.0.1', port: 9, username: 'mon', password: 'pw', mounts: [] },
+    { id: 'o-r1', name: 'bm-r1', host: '127.0.0.4', port: 9, username: 'mon', password: 'pw', mounts: [] }] }));
   fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcW: true }, osSsh: true, idracTelemetry: false }));
   const T = Date.now();
+  // 이 노드 대상인데 전력이 **엣지 사본(remote)** 뿐인 서버 — 판정 주체가 아니다(원천이 엣지). 사본으로 판정하면 랙 W-2(상한 1 kW · 999 W)가 걸린다.
+  (await import('../src/collector/state.js')).setRemoteHost('bm-r1', { collectorId: 'edge-x', watts: 999, ts: T - MIN, serviceTag: 'RTAG1', vcenterId: 'vcW', serverName: 'bm-r1', dbKey: 'rmt:bm-r1' });
   const idb = await (await import('../src/idrac/db.js')).getDb();
   idb.insert('r-w1', 445, T - MIN);
   (await import('../src/idrac/invCache.js')).setInventory('r-w1', { system: { serviceTag: 'WTAG1' }, powerCap: { limitWatts: 450 }, collectedAt: T - MIN });
   (await import('../src/idrac/sensorStore.js')).pushSensorSample('r-w1', { t: T - MIN, temps: [{ name: 'System Board Inlet Temp', celsius: 33 }] });
   const poller = await import('../src/bmusage/poller.js');
   const OSm = await import('../src/bmusage/collectors/osSsh.js');
-  poller._setFleetForTest(async () => ({ bareMetal: [{ serverId: 'r-w1', name: 'bm-w1', serviceTag: 'WTAG1', vcenterId: 'vcW' }], virtualizationHosts: [] }));
+  poller._setFleetForTest(async () => ({ bareMetal: [{ serverId: 'r-w1', name: 'bm-w1', serviceTag: 'WTAG1', vcenterId: 'vcW' }, { serverId: 'x-r1', name: 'bm-r1', serviceTag: 'RTAG1', vcenterId: 'vcW' }], virtualizationHosts: [] }));
   (await import('../src/bmusage/settings.js'))._resetForTest();
   const stdout = ['##STAT', 'cpu  10 0 10 1000 0 0 0 0 0 0', '##MEM', 'MemTotal: 1000000 kB', 'MemAvailable: 500000 kB', '##END'].join('\n');
   poller._setOsCollectorForTest(async () => { const sh = OSm.shapeLinux(stdout, []); return { ...sh, ok: true, peak: { windowS: 0 }, stderr: '' }; });
   t.after(() => { poller._setOsCollectorForTest(null); poller._setFleetForTest(null); poller._resetForTest(); R._resetPerfRulesForTest(); });
   R._resetPerfRulesForTest();
-  R.savePerfRules({ rules: { inlet: { on: true, sustain: 1 }, powerCap: { on: true, sustain: 1 }, rack: { on: true, sustain: 1 } }, power: { rackLowPct: 20, racksText: 'vcW,W-1,0.5,WTAG1' } }, { by: 'test' });
+  R.savePerfRules({ rules: { inlet: { on: true, sustain: 1 }, powerCap: { on: true, sustain: 1 }, rack: { on: true, sustain: 1 } }, power: { rackLowPct: 20, racksText: 'vcW,W-1,0.5,WTAG1\nvcW,W-2,1.0,RTAG1' } }, { by: 'test' });
   A._resetPerfAlertsForTest();
   AG._resetPowerAggForTest();
   const r = await poller.pollBmUsageOnce({ trigger: 'manual' });
@@ -302,9 +309,12 @@ test('⑤ 실제 폴러 배선 — pollBmUsageOnce → 전력 규칙(실제 원�
   assert.deepEqual(sent.map((x) => x.rule).sort(), ['inlet', 'powerCap', 'rack'], JSON.stringify(sent.map((x) => [x.rule, x.title])));
   assert.match(sent.find((x) => x.rule === 'inlet').title, /흡기 33 °C/);
   assert.match(sent.find((x) => x.rule === 'powerCap').title, /445 W \/ 상한 450 W/);
-  assert.match(sent.find((x) => x.rule === 'rack').title, /랙 W-1 랙 상한 여유 11%\(기준 20% 미만\)/);
+  assert.match(sent.find((x) => x.rule === 'rack').title, /\[vcW\] 랙 W-1 상한 여유 11%\(기준 20% 미만\)/);
   const keys = Object.keys(STATE().rules).sort();
-  assert.deepEqual(keys, ['inlet|vcW|WTAG1', 'powerCap|vcW|WTAG1', 'rack|vcW|rack:vcW|W-1']);
+  assert.ok(['inlet|vcW|WTAG1', 'powerCap|vcW|WTAG1', 'rack|vcW|rack:vcW|W-1'].every((k) => keys.includes(k)), JSON.stringify(keys));
+  // 엣지 사본뿐인 서버(RTAG1)는 이 노드가 판정하지 않는다 — 랙 W-2 는 미측정(부분)이라 보류 · 서버 칸도 보류
+  assert.ok(!sent.some((x) => x.key === 'rack:vcW|W-2' || x.key === 'RTAG1'), JSON.stringify(sent.map((x) => x.key)));
+  assert.equal(STATE().rules['rack|vcW|rack:vcW|W-2'].streak, 0, '사본 999 W 로 판정하지 않는다(localOnly)');
   // 원천이 이 노드 것만인지 — 같은 서버 측정이 엣지 사본(remote)뿐이면 판정하지 않는다(소스: powerSources localOnly)
   const PS = await import('../src/bmusage/powerSources.js');
   const loc = await PS.powerSources({ localOnly: true });
@@ -442,6 +452,10 @@ test('⑦ 중앙 이력 재구성(랙 · capacity 정정) · 최소 엣지 버�
   assert.throws(() => R.normalizeRules({ power: { surgePct: 4 } }), /power\.surgePct/);
   assert.deepEqual(Object.keys(R.normalizeRules({}).value.rules), [], '기본 꺼짐');
   for (const id of R.POWER_RULE_IDS) { assert.ok(R.RULE_IDS.includes(id)); assert.ok(R.AUTOFOCUS_OFF.includes(id)); assert.equal(R.RULE_DEFAULTS[id].autoFocus, false); }
-  const { BMPERF_RULE_LABEL } = await import('../src/issues/alertIssues.js');
+  const { BMPERF_RULE_LABEL, planBmPerfIssues } = await import('../src/issues/alertIssues.js');
   for (const id of R.RULE_IDS) assert.ok(BMPERF_RULE_LABEL[id], `이슈 라벨 ${id}`);
+  // 이슈 열쇠 — 전력 규칙은 (법인, 키) 쌍(같은 노드 · 같은 키 · 다른 법인은 다른 이슈) · 예전 규칙은 예전 열쇠
+  const plan = planBmPerfIssues([{ id: 'i1', at: NOW, rule: 'inlet', key: 'K1', vcenterId: 'vcA', agent: 'n' }, { id: 'i2', at: NOW, rule: 'inlet', key: 'K1', vcenterId: 'vcB', agent: 'n' },
+    { id: 'u1', at: NOW, rule: 'use', key: 'K1', vcenterId: 'vcA', agent: 'n' }]);
+  assert.deepEqual(plan.actions.map((a) => [a.type, a.alertKey]), [['create', 'bmperf:n|vcA|K1|inlet'], ['create', 'bmperf:n|vcB|K1|inlet'], ['create', 'bmperf:n|K1|use']]);
 });
