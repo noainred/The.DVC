@@ -44,7 +44,10 @@ export const MENU_GROUPS = Object.freeze([
     { id: 'usage', label: '스토리지 사용량 보고서', tool: 'storage-usage' },
     { id: 'track', label: '스토리지 사용량 추이', tool: 'storage-track' },
     { id: 'bmstor', label: '베어메탈 스토리지', tool: 'bm-storage' },
-    { id: 'san', label: 'SAN 스토리지 성능 측정', tool: 'san-switch' },
+    // v2.948(사용자 결정 '독립 도구 · 독립 메뉴 · 기존 메뉴도 보존'): 'san' 항목은 id · 도구 키 그대로 두고 **이름만** 'SAN 스위치 모니터링' 으로 —
+    //   새 항목 'SAN 스토리지 성능'(san-storage)이 그 이름을 쓴다. 옛 라벨 'SAN 스토리지 성능 측정' 은 두 항목을 헷갈리게 한다.
+    { id: 'san', label: 'SAN 스위치 모니터링', tool: 'san-switch' },
+    { id: 'san-storage', label: 'SAN 스토리지 성능', tool: 'san-storage' },
   ] },
   { id: 'network', label: '네트워크', children: [
     { id: 'cvp', label: '전체 네트워크 장비', tool: 'cvp' },
