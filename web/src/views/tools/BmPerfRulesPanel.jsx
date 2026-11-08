@@ -59,13 +59,15 @@ export function DryRunResult({ resp }) {
     </div>
   );
 }
-/** 지난 주기 상태(반증 n2 F3 — 무음 실패 금지): 판정 보류 수 · 전력 판정 입력 실패. 값이 없으면 그리지 않는다. */
+/** 지난 주기 상태(반증 n2 F3 — 무음 실패 금지): 판정 보류 수 · 전력 판정 입력 실패 · 판정 노드 넘어감(2차 M3). 값이 없으면 그리지 않는다. */
 export function LastCycleLine({ last }) {
   if (!last) return null;
   const parts = [];
   if (last.powerError) parts.push(<span key="e" style={{ color: toneVar('bad') }}>지난 주기 전력 · 온도 규칙 입력 실패: {last.powerError}</span>);
   if (last.held) parts.push(<span key="h">지난 주기 판정 보류 {last.held}건(못 읽음 · 부분 합 · 낡음 · 표본 부족 — 정상으로 세지 않음)</span>);
   if (last.powerItems != null) parts.push(<span key="p">전력 판정 항목 {last.powerItems}개</span>);
+  // 반증 n2 2차 M3: 판정 노드 넘어감은 발송 기록(알림 이력)에 쓰지 않는다 — 개수만 지난 주기 상태로.
+  if (last.released) parts.push(<span key="m">지난 주기 판정 노드 넘어감 {last.released}건(이 노드의 전력 규칙 상태를 비움 · 해소 알림 없음)</span>);
   if (last.error) parts.push(<span key="x" style={{ color: toneVar('bad') }}>지난 주기 규칙 판정 오류: {last.error}</span>);
   return parts.length ? <p className="bmo-sub" style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', margin: '0 0 6px' }}>{parts}</p> : null;
 }

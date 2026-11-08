@@ -8,7 +8,7 @@ import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import * as PT from './bmPowerText.js';
-import { RULE_TEXT, RULES_HONEST } from './bmPerfOpsText.js';
+import { RULE_TEXT, RULES_HONEST, SENT_RESULT_TEXT } from './bmPerfOpsText.js';
 import { PowerFleetView } from './BmPowerFleet.jsx';
 import { NUM_SECTIONS, autoFocusOff } from './BmPerfRulesPanel.jsx';
 import { POWER_RULE_IDS, RULE_CONDS, LIMITS, AUTOFOCUS_OFF } from '../../../../server/src/bmusage/perfRules.js';
@@ -25,6 +25,7 @@ describe('전력 규칙 4종 — 문구 표 = 서버 열거 · 설정 칸', () =
       for (const c of Object.values(RULE_TEXT[id].conds)) expect(c).not.toMatch(/`/);
     }
     expect(RULES_HONEST).toMatch(/전력 · 온도 규칙/); expect(RULES_HONEST).not.toMatch(/`|\*\*/);
+    expect(RULES_HONEST).toMatch(/주기 자체가 오래 걸리는 것은 끊지 않습니다/); expect(RULES_HONEST).toMatch(/재발 억제는 그 기간 동안 남깁니다/);   // 반증 n2 2차 M1 · M2
   });
   it('전력 · 온도 절의 칸 = 서버 범위 키(피크 급증 기준 포함)', () => {
     const p = NUM_SECTIONS.find((x) => x.k === 'power');
@@ -79,6 +80,10 @@ describe('반증 n2 — 시험 실행 · 지난 주기 상태 · 알림 판정 �
     const l = renderToStaticMarkup(h(LastCycleLine, { last: { held: 4, powerError: '전력 원천 실패', powerItems: 7 } }));
     expect(l).toContain('지난 주기 전력 · 온도 규칙 입력 실패: 전력 원천 실패'); expect(l).toContain('지난 주기 판정 보류 4건'); expect(l).toContain('전력 판정 항목 7개');
     expect(renderToStaticMarkup(h(LastCycleLine, { last: { held: 0 } }))).toBe('');
+    // 2차 M3 — 판정 노드 넘어감은 발송 기록이 아니라 지난 주기 상태(개수만) · 알림 이력 문구에서는 뺐다
+    expect(renderToStaticMarkup(h(LastCycleLine, { last: { released: 240 } }))).toContain('지난 주기 판정 노드 넘어감 240건');
+    expect(renderToStaticMarkup(h(LastCycleLine, { last: { released: 0 } }))).toBe('');
+    expect(SENT_RESULT_TEXT['judge-moved']).toBeUndefined();
   });
   it('F4 알림 판정 없음 — 사유 문구 = 서버 열거 · 칸 아래 한 줄 · 요약', async () => {
     const { JUDGE_REASONS } = await import('../../../../server/src/bmusage/powerJudge.js');

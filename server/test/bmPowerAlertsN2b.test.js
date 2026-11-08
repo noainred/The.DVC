@@ -3,7 +3,7 @@
  *   ① N1 보류 시한은 ‘조건이 null 인 진짜 보류’ 와 ‘주기가 없던 틈’ 만 잰다 — 같은 표본 보류(조건은 살아 있는 관측)는 시한을 늘리지도 끊지도 않는다
  *      (a) 피크 급증 지속 2 · 수집 5분 · 표지 시간 단위 (b) 흡기 지속 3 · 수집 1분 · 센서 5분 간격 (c) PowerCap 지속 3 · 표본 25분 간격 → 모두 발화
  *      (d) 48시간 낡음 뒤 표본 1개는 발화 아님(F5 유지) (e) 주기가 없던 1시간 틈 뒤 첫 표본도 1부터 (f) 주기 상한으로 이월된 발화도 같은 규칙(다음 새 표본에 발화)
- *   ② N2 판정 노드가 넘어가면 그 서버 · 랙의 전력 규칙 상태를 비운다(해소 알림 없이 · 이력 한 줄) — 다시 이 노드가 판정하면 새 사건으로 발화
+ *   ② N2 판정 노드가 넘어가면 그 서버 · 랙의 전력 규칙 상태를 비운다(해소 알림 없이 — 2차 M3: 발송 기록에는 쓰지 않는다) — 다시 이 노드가 판정하면 새 사건으로 발화
  *   ③ N4 법인을 맡은 엣지의 봉투가 없으면 ‘판정 여부 모름’(judge-unknown) — ‘판정 없음’ 합계와 따로 센다
  *   ④ N5 이 판 표지(powerCapVer)가 없는 구버전 엣지의 서버는 ‘엣지 버전 낮음’ 판정 없음(edge-old)
  * 기준 시각: 실제 시각을 정시로 내린 뒤 −20분(common.md).
@@ -70,14 +70,14 @@ test('① N1 — 같은 표본 보류는 시한에 들지 않는다(a · b · c 
   for (let i = 0; i < 6; i += 1) await run(NOW + (10 + i * 5) * MIN, srv({ inletC: 40, tempAt: NOW + 4 * MIN, tempState: 'stale' }));
   let r = await run(NOW + 48 * HOUR, inl(NOW + 48 * HOUR - MIN));
   assert.equal(r.fires, 0); assert.equal(r.counts.holdReset, 1); assert.equal(STATE().rules['inlet|vcA|K1'].streak, 1);
-  // 시한 = (지속 + 1) × 수집 주기 — 한 주기 여유(늦은 주기 · 이월로 거짓 재시작이 나지 않게)
-  assert.equal(A.holdMaxMs({ sustain: 3 }, 5 * MIN), 20 * MIN);
-  // 보류 15분(조건 null 세 주기)은 시한 안 — 잇는다
+  // 2차 M1: 시한은 주기 소요와 무관 — 진짜 보류는 주기 수(지속 3 → 보류 3주기까지 잇는다) · 주기가 없던 틈은 지속 × 수집 주기(15분)
+  assert.equal(A.holdMaxCycles({ sustain: 3 }), 3); assert.equal(A.gapMaxMs({ sustain: 3 }, 5 * MIN), 15 * MIN);
+  // 보류 세 주기(조건 null)는 시한 안 — 잇는다
   A._resetPerfAlertsForTest();
   await run(NOW, inl(NOW - MIN)); await run(NOW + 5 * MIN, inl(NOW + 4 * MIN));
   for (const k of [10, 15, 20]) await run(NOW + k * MIN, srv({ inletC: 40, tempAt: NOW + 4 * MIN, tempState: 'stale' }));
   r = await run(NOW + 25 * MIN, inl(NOW + 24 * MIN));
-  assert.equal(r.fires, 1, '마지막 관측(+5분) 뒤 20분 — 시한 안'); assert.equal(r.counts.holdReset, 0);
+  assert.equal(r.fires, 1, '보류 3주기 ≤ 지속 3 — 시한 안'); assert.equal(r.counts.holdReset, 0);
   // (e) 주기가 아예 없던 틈(재시작 · 주기 건너뜀 1시간) 뒤 첫 표본 — 1부터(기준판: 보류 주기가 없어 ‘3주기 지속’ 발화)
   A._resetPerfAlertsForTest();
   await run(NOW, inl(NOW - MIN)); await run(NOW + 5 * MIN, inl(NOW + 4 * MIN));
@@ -88,7 +88,7 @@ test('① N1 — 같은 표본 보류는 시한에 들지 않는다(a · b · c 
   assert.equal(f.resets, 0); assert.equal(f.sends, 1, '이월 뒤 다음 표본(15분)에 1회'); assert.equal(f.firstFireAt, NOW + 15 * MIN);
 });
 
-test('② N2 — 판정 노드가 넘어가면 상태를 비운다(해소 알림 없이 · 이력 한 줄) · 다시 이 노드가 판정하면 새 사건으로 발화', async () => {
+test('② N2 — 판정 노드가 넘어가면 상태를 비운다(해소 알림 없이 · 발송 기록에는 쓰지 않음) · 다시 이 노드가 판정하면 새 사건으로 발화', async () => {
   const rules = rulesOf({ powerCap: { sustain: 1, repeatMin: 0 }, rack: { sustain: 1, repeatMin: 0 } }, { power: { racksText: 'vcE,E-1,0.5,S1' } });
   const tgt = [{ key: 'S1', name: 'bm-s1', vcenterId: 'vcE', idrac: { regId: 'rS1' } }];
   const src = (w, at) => async () => ({
@@ -103,23 +103,17 @@ test('② N2 — 판정 노드가 넘어가면 상태를 비운다(해소 알림
   // day0 — 중앙 판정 · 걸림 → 발송(진행 중)
   let r = await cycle(NOW, 495);
   assert.equal(r.fires, 2, 'PowerCap + 랙(0.5 kW · 495 W)'); assert.equal(STATE().rules['powerCap|vcE|S1'].active, true);
-  // 엣지가 법인을 맡음 → 이 노드는 판정 노드 아님 → 상태를 비운다(보류로 남기지 않는다) · 해소 알림 없음 · 이력 한 줄
+  // 엣지가 법인을 맡음 → 이 노드는 판정 노드 아님 → 상태를 비운다(보류로 남기지 않는다) · 해소 알림 없음 · 발송 기록에 쓰지 않는다(2차 M3 — 개수만 주기 상태)
   owner = 'edge-e';
   r = await cycle(NOW + 5 * MIN, 300);
   assert.equal(r.fires, 0); assert.equal(r.counts.released, 2);
-  assert.equal(STATE().rules['powerCap|vcE|S1'], undefined, '판정 노드 아님 — 상태 비움(예전 active 보류)'); assert.equal(STATE().rules['rack|vcE|rack:vcE|E-1'], undefined);
-  const moved = A.perfAlertStatus().sent.filter((x) => x.result === 'judge-moved');
-  assert.deepEqual(moved.map((x) => x.rule).sort(), ['powerCap', 'rack']); assert.match(moved[0].title, /판정 노드 넘어감/);
-  // 엣지 봉투로 오는 같은 기록도 중앙 정제가 결과를 지키고(‘’ 로 지우지 않는다) 화면 문구가 있다
-  const OP = await import('../src/central/bmPerfOpsPull.js');
-  assert.equal(OP.sanitizeAlertSent(moved, NOW)[0].result, 'judge-moved');
-  const T = await import('../../web/src/views/tools/bmPerfOpsText.js');
-  assert.match(T.sentResultText('judge-moved'), /판정 노드 넘어감/);
+  assert.equal(STATE().rules['powerCap|vcE|S1'], undefined, '판정 노드 아님 — 상태 비움(예전 active 보류 · 재발 억제 0 이라 묘비도 없다)'); assert.equal(STATE().rules['rack|vcE|rack:vcE|E-1'], undefined);
+  assert.equal(A.perfAlertStatus().sent.length, 2, '발송 기록은 실제 발송 2줄 그대로');
   await A._drainPerfAlertsForTest();
   assert.equal(d.sends.length, 2, '해소 · 넘어감 알림은 보내지 않는다');
-  // 다음 주기에도 다시 적지 않는다(비운 상태라 한 번만)
+  // 다음 주기에는 다시 세지 않는다(비운 상태라 한 번만)
   r = await cycle(NOW + 10 * MIN, 300);
-  assert.equal(A.perfAlertStatus().sent.filter((x) => x.result === 'judge-moved').length, 2);
+  assert.equal(r.counts.released, 0);
   // day3 — 엣지 보고 만료(엣지 꺼짐) → 다시 중앙 판정 · 새로 걸림 → 발화(예전 0 · ongoing)
   owner = '';
   r = await cycle(NOW + 72 * HOUR, 499);

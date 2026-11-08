@@ -141,7 +141,7 @@ export function onCellsAfter(id, ctx, rule, cond, prevOn) {
 
 /**
  * 한 규칙 · 한 서버의 상태 전이(순수).
- * @param {object|null} prev  { streak, active, firedAt, since, seenAt }
+ * @param {object|null} prev  { streak, active, firedAt, since, seenAt } (+ 전력 규칙: holdN 연속 보류 주기 수 · obs 관측 표지 · tomb 재발 억제 묘비)
  * @returns {{ state:object, fire:boolean, reason:string }}
  */
 export function stepRule(prev, cond, rule = {}, now = Date.now()) {
@@ -162,11 +162,39 @@ export function stepRule(prev, cond, rule = {}, now = Date.now()) {
 
 /** 수집 주기를 모를 때의 기본(베어메탈 사용률 기본 주기 5분 — settings.js DEFAULTS.intervalMs). */
 export const DEFAULT_INTERVAL_MS = 5 * 60_000;
+/** 수집 주기(ms) — 못 읽으면 기본 5분 · 하한 60초(설정 하한 — 0 · 음수로 시한이 0 이 되지 않게). */
+const ivOf = (ms) => Math.max(60_000, n(ms) ?? DEFAULT_INTERVAL_MS);
 /**
- * 반증 n2 F5 · 재확인 N1: 보류 시한 = (지속 주기 + 1) × 수집 주기 — **마지막으로 조건을 읽은 주기(lastSeenAt)** 에서 이만큼 지나 온 새 표본은 지속을 1부터 센다.
- *   지속 구간(지속 × 주기)에 한 주기 여유를 더한 이유: 주기 하나가 늦거나(재진입 가드 · 긴 주기) 주기 상한으로 이월된 발화가 다음 주기로 밀려도 거짓 재시작이 나지 않게.
+ * 보류 시한(반증 n2 F5 · 재확인 N1 · 2차 M1 — 메인 결정). ⚠ 시한은 **주기 소요 시간에 따라 늘거나 줄지 않는다** — 두 가지를 따로 잰다:
+ *   ① 진짜 보류(조건 null — 낡음 · 미측정 · 못 읽음 · 이번 주기에 그 항목이 없음)는 **연속 보류 주기 수**(상태 holdN)로 센다 — 지속 주기 수를 넘긴 뒤 온 새 표본은 1부터.
+ *   ② 주기가 아예 없던 틈(재시작 · 주기 건너뜀 · 실패 주기)은 **폴러가 돌지 않은 시간** = 이번 주기 시작 − 직전 판정 주기 끝 − 설정 주기 로 잰다 — 지속 × 설정 주기를 넘으면 1부터.
+ *      주기 소요(수집 · 판정 뒤 롤업 보정 · 정리 꼬리)는 이 시간에 들지 않는다(adaptiveTimer 는 ‘이전 실행 종료 기준’ — 다음 시작 = 끝 + 주기).
+ *   ⚠ 정정(2차 M1): 직전 판(5139423c)은 ‘조건을 읽은 마지막 주기’ 부터의 벽시계 간격을 (지속 + 1) × 주기 와 대 봐, 주기 소요가 지속 × 주기를 넘는 노드
+ *   (주기 1분 · 소요 3.5분 / 주기 5분 · 소요 16분 — poller.js 머리말의 ‘실제 주기 20분 이상’ 사례)에서 매 주기 1로 돌아가 **영영 발화하지 않았다**.
  */
-export const holdMaxMs = (rule = {}, intervalMs = DEFAULT_INTERVAL_MS) => (Math.max(1, n(rule.sustain) ?? 1) + 1) * Math.max(60_000, n(intervalMs) ?? DEFAULT_INTERVAL_MS);
+export const holdMaxCycles = (rule = {}) => Math.max(1, n(rule.sustain) ?? 1);
+export const gapMaxMs = (rule = {}, intervalMs = DEFAULT_INTERVAL_MS) => holdMaxCycles(rule) * ivOf(intervalMs);
+/** 연속 보류 주기 수 상한(상태 파일이 자라지 않게 — 비교 대상인 지속은 최대 48). */
+export const HOLD_N_MAX = 10_000;
+/** 지속을 1부터 다시 셀 차례인가(순수) — 진행 중 사건 · 묘비 · 지속 0 은 끊지 않는다(끊으면 같은 사건을 다시 보낸다). 'gap' · 'hold' · false. */
+export function holdCutOf(prev, rule = {}, cond = null, { gapMs = null, intervalMs = DEFAULT_INTERVAL_MS } = {}) {
+  if (!prev || prev.active || prev.tomb || !((n(prev.streak) ?? 0) > 0) || cond === false) return false;
+  if (n(gapMs) != null && gapMs > gapMaxMs(rule, intervalMs)) return 'gap';
+  if (cond === true && (n(prev.holdN) ?? 0) > holdMaxCycles(rule)) return 'hold';
+  return false;
+}
+/**
+ * 판정 노드가 넘어갈 때 남기는 재발 억제 묘비(순수 — 반증 n2 2차 M2): 직전 발송(firedAt)이 재발 억제(repeatMin) 기간 안이면 { firedAt } 만 남긴 빈 상태,
+ *   아니면 null(지운다). 진행 중 · 지속 상태는 비운다(묵은 active 로 새 사건을 삼키지 않게) — 다시 판정 노드가 되면 첫 발화에 같은 재발 억제가 걸린다
+ *   (예전에는 firedAt 까지 버려 판정 노드가 깜빡일 때마다 같은 사건을 다시 보냈다 — PowerCap 재발 억제 720분 우회).
+ */
+export function tombOf(prev, rule = {}, now = Date.now()) {
+  const fa = n(prev?.firedAt); const rep = Math.max(0, n(rule?.repeatMin) ?? 0) * 60_000;
+  if (fa == null || rep <= 0 || now - fa >= rep) return null;
+  // 발송이 실패해 재시도를 기다리던 사건(retryAt)은 받은 채널이 없다 — 억제하지 않는다(다시 판정하면 새로 보낸다 · 예전과 같다).
+  if (!prev?.tomb && n(prev?.retryAt) != null) return null;
+  return { streak: 0, active: false, firedAt: fa, since: null, seenAt: now, tomb: n(prev?.tomb) ?? now };
+}
 
 /**
  * 규칙을 이 항목에 대 보나(순수) — 전력 규칙은 `power` 칸의 종류가 맞는 항목에만, 그 밖의 규칙은 `power` 칸이 없는 항목에만.
@@ -185,7 +213,7 @@ export const stateKeyOf = (id, it) => (isPowerRule(id) ? `${id}|${targetIdOf(it)
  * @param {object} rules   perfRules.rules(켠 것만)
  * @param {object} state   { '<rule>|<key>': {...} }
  */
-export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date.now(), { intervalMs = DEFAULT_INTERVAL_MS } = {}) {
+export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date.now(), { intervalMs = DEFAULT_INTERVAL_MS, gapMs = null } = {}) {
   const next = {}; const fires = [];
   const counts = { fire: 0, suppressed: 0, sustaining: 0, unknown: 0, ongoing: 0, corpOff: 0, retry: 0, clear: 0, holdReset: 0, released: 0 };
   const released = [];
@@ -195,14 +223,18 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
     const key = String(it?.key || ''); if (!key) continue;
     /*
      * 반증 n2 재확인 N2: ‘판정 노드 아님’(it.release — powerAlertItems)은 ‘못 읽음’(보류)과 다르다 — 이 노드는 그 서버 · 랙을 판정하지 않으므로 전력 규칙 상태를 **비운다**
-     *   (해소 알림 없이 · 진행 중이던 사건은 이력 한 줄). 보류로 남기면 판정 노드가 돌아왔을 때 묵은 진행 중 상태가 새 사건을 삼켰다. 다시 판정 노드가 되면 새 사건으로 시작한다.
+     *   (해소 알림 없이). 보류로 남기면 판정 노드가 돌아왔을 때 묵은 진행 중 상태가 새 사건을 삼켰다. 다시 판정 노드가 되면 새 사건으로 시작한다.
+     *   2차 M2: 비울 때 재발 억제 묘비(tombOf — firedAt 만)를 재발 억제 기간 동안 남긴다(깜빡일 때마다 같은 사건을 다시 보내지 않게).
+     *   2차 M3: 넘어감은 발송 기록(sent)에 쓰지 않는다 — 개수 · 사유만(주기 상태 · 콘솔 한 줄 — runPerfAlerts).
      */
     if (it.release) {
       for (const id of on) {
         if (!isPowerRule(id) || POWER_RULE_KIND[id] !== it.release.kind) continue;
         const sk = stateKeyOf(id, it); seen.add(sk);
         const prev = state?.[sk];
-        if (prev && (prev.active || (n(prev.streak) ?? 0) > 0)) { counts.released += 1; released.push({ rule: id, key, sk, name: it.name || key, vcenterId: String(it.vcenterId || ''), active: !!prev.active, reason: it.release.reason || '', node: it.release.node || '' }); }
+        if (prev && (prev.active || (n(prev.streak) ?? 0) > 0)) { counts.released += 1; released.push({ rule: id, reason: String(it.release.reason || ''), active: !!prev.active }); }
+        const tb = tombOf(prev, rules[id], now);
+        if (tb) next[sk] = tb;
       }
       continue;
     }
@@ -218,14 +250,13 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
       const obs = isPowerRule(id) ? powerObs(id, it) : null;
       if (cond === true && obs != null && prev && !prev.active && prev.obs === obs) cond = null;
       /*
-       * 반증 n2 F5 · 재확인 N1(메인 결정): 보류에도 **시한** — 시한은 ‘조건이 null 인 진짜 보류(낡음 · 미측정 · 못 읽음)’ 와 ‘주기가 아예 없던 틈(재시작 · 주기 건너뜀)’ 만 잰다:
-       *   조건을 읽은 마지막 주기(lastSeenAt — 같은 표본 보류 주기 포함)에서 holdMaxMs 를 넘겨 온 새 표본은 1부터 다시 센다(‘처음 성립’ 도 그때부터).
-       *   ⚠ 정정(N1): 첫 판(bdc88e73)은 같은 표본 보류에도 보류 시각(heldAt)을 달아, 표본 간격이 지속 × 주기를 넘는 경우(피크 급증 지속 2~11 · 수집 1분 + 센서 5분 · 느린 iDRAC 주기)
-       *   지속이 매번 1로 돌아가 **영영 발화하지 않았다**. 같은 표본 보류는 조건이 살아 있는 관측이라 시한을 늘리지도 끊지도 않는다.
-       *   진행 중 사건(active)은 끊지 않는다(끊으면 같은 사건을 다시 보낸다). 예전 규칙(5단계)은 그대로다(범위 밖 — 같은 stepRule).
+       * 반증 n2 F5 · 재확인 N1 · 2차 M1(메인 결정): 보류에도 **시한** — ① 연속 보류 주기 수(holdN) ② 폴러가 돌지 않은 시간(gapMs) 을 따로 잰다(holdCutOf — 위 머리말).
+       *   넘으면 1부터 다시 센다(‘처음 성립’ 도 그때부터). 틈은 그 주기의 조건과 무관하게 끊는다(틈 뒤 첫 주기가 보류여도 틈을 잊지 않게).
+       *   ⚠ 정정(N1): 첫 판(bdc88e73)은 같은 표본 보류에도 보류 시각(heldAt)을 달아 표본 간격이 지속 × 주기를 넘으면 영영 발화하지 않았다 — 같은 표본 보류는
+       *   조건이 살아 있는 관측이라 보류 주기로 세지 않는다(raw 가 null 이 아니다). 진행 중 사건(active)은 끊지 않는다. 예전 규칙(5단계)은 그대로다(같은 stepRule).
        */
       let prevEff = prev;
-      if (isPowerRule(id) && prev && !prev.active && cond === true && n(prev.lastSeenAt) != null && now - prev.lastSeenAt > holdMaxMs(rule, intervalMs)) {
+      if (isPowerRule(id) && holdCutOf(prev, rule, cond, { gapMs, intervalMs })) {
         prevEff = { ...prev, streak: 0, since: null };
         counts.holdReset += 1;
       }
@@ -233,9 +264,10 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
       const on = onCellsAfter(id, it, rule, cond, prev?.on || null);
       let st1 = on.length ? { ...out.state, on } : out.state;
       if (isPowerRule(id)) {
-        const { heldAt: _h, lastSeenAt: _l, ...rest } = st1;   // heldAt = 첫 판(bdc88e73)의 필드 — 상태 파일에 남아 있어도 버린다
-        const last = raw === null || raw === undefined ? n(prev?.lastSeenAt) : now;
-        st1 = last != null ? { ...rest, lastSeenAt: last } : rest;
+        // heldAt(bdc88e73) · lastSeenAt(5139423c)은 앞 판의 필드 — 상태 파일에 남아 있어도 버린다. 묘비(tomb)는 다시 판정하면 지운다(firedAt 은 stepRule 이 잇는다).
+        const { heldAt: _h, lastSeenAt: _l, holdN: _n, tomb: _t, ...rest } = st1;
+        const hn = raw === null || raw === undefined ? Math.min(HOLD_N_MAX, (n(prev?.holdN) ?? 0) + 1) : 0;
+        st1 = hn > 0 ? { ...rest, holdN: hn } : rest;
       }
       next[sk] = obs != null ? { ...st1, obs } : (prev?.obs != null && isPowerRule(id) ? { ...st1, obs: prev.obs } : st1);
       // ⚠ 정정(다음 점검 ② — 시험 실행 응답에서 발견): reason 'fire' 를 여기서도 세면 아래 out.fire 와 두 번 세어 counts.fire 가 발화 수의 2배였다(retry 는 retry · fire 각 1).
@@ -248,7 +280,15 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
     if (seen.has(sk) || next[sk]) continue;
     const id = sk.split('|')[0];
     if (!on.includes(id)) continue;
-    if (n(st?.seenAt) != null && now - st.seenAt < CARRY_MS) next[sk] = st;
+    // 2차 M2: 묘비는 재발 억제 기간까지만(24시간 들고 가기와 별개)
+    if (st?.tomb) { if (tombOf(st, rules[id], now)) next[sk] = st; continue; }
+    if (!(n(st?.seenAt) != null && now - st.seenAt < CARRY_MS)) continue;
+    if (isPowerRule(id) && st && !st.active) {
+      // 2차 M1: 이번 주기에 그 항목이 없었다(전력 입력 실패 · 대상에서 빠짐) — 못 읽은 주기다: 보류 주기 수 +1 · 틈이면 1부터(다음 주기에 틈을 잊지 않게 지금 끊는다).
+      const cut = holdCutOf(st, rules[id], null, { gapMs, intervalMs });
+      if (cut) counts.holdReset += 1;
+      next[sk] = { ...st, ...(cut ? { streak: 0, since: null } : {}), holdN: Math.min(HOLD_N_MAX, (n(st.holdN) ?? 0) + 1) };
+    } else next[sk] = st;
   }
   return { next, fires, counts, released };
 }
@@ -329,7 +369,9 @@ function load() {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닙니다');
     _state = { v: 1, rules: raw.rules && typeof raw.rules === 'object' ? raw.rules : {}, day: String(raw.day || ''), counts: raw.counts && typeof raw.counts === 'object' ? raw.counts : {},
-      sent: Array.isArray(raw.sent) ? raw.sent.slice(-SENT_LOG_MAX) : [], ...(raw.autoAt && typeof raw.autoAt === 'object' ? { autoAt: raw.autoAt } : {}) };
+      sent: Array.isArray(raw.sent) ? raw.sent.slice(-SENT_LOG_MAX) : [], ...(raw.autoAt && typeof raw.autoAt === 'object' ? { autoAt: raw.autoAt } : {}),
+      // 2차 M1 ②: 직전 판정 주기(판정 시각 · 그때 수집 주기) — 재시작 뒤 ‘폴러가 돌지 않은 시간’ 을 잰다. 모양이 다르면 버린다(틈을 모름 = 끊지 않음 · 보류 주기 수는 그대로 센다).
+      ...(raw.cycle && typeof raw.cycle === 'object' && n(raw.cycle.at) != null ? { cycle: { at: n(raw.cycle.at), intervalMs: n(raw.cycle.intervalMs) } } : {}) };
   } catch (e) {
     // 손상 — 보존하고 첫 주기는 기준만 잡는다(진행 중인 사건을 ‘새 사건’ 으로 한꺼번에 다시 보내지 않게).
     preserveCorrupt(FILE(), String(e?.message || e));
@@ -356,7 +398,7 @@ function withState(fn) {
   return run;
 }
 const _pendingSends = new Set();
-export function _resetPerfAlertsForTest({ unlink = true } = {}) { _state = null; _warmup = false; _loadError = null; _chain = Promise.resolve(); if (unlink) { try { fs.unlinkSync(FILE()); } catch { /* */ } } }
+export function _resetPerfAlertsForTest({ unlink = true } = {}) { _state = null; _warmup = false; _loadError = null; _chain = Promise.resolve(); _cycleEndAt = null; _judgedSinceNote = false; _lastCycle = null; if (unlink) { try { fs.unlinkSync(FILE()); } catch { /* */ } } }
 /** 테스트 · 종료용 — 대기열에 넣은 발송의 결과 기록까지 끝날 때까지 기다린다. */
 export async function _drainPerfAlertsForTest() { while (_pendingSends.size) await Promise.allSettled([..._pendingSends]); await _chain; }
 /** 화면 · 봉투용 — 추적 수 · 오늘 상한 사용 · 발송 기록(최근 SENT_LOG_MAX — 채널 URL 없음). */
@@ -560,7 +602,7 @@ function depsOf(deps = {}) {
  *   발송은 기다리지 않는다(대기열) — 돌려주는 queued 는 ‘대기열에 넣은 수’ 이고 결과는 발송 기록(sent)의 result 가 나중에 바뀐다.
  * @param {Array} items  [{ key, name, vcenterId, entry, health, dev, profile, target }]
  */
-export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps = {}, dryRun = false, cycleMax = MAX_SEND, intervalMs = DEFAULT_INTERVAL_MS } = {}) {
+export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps = {}, dryRun = false, cycleMax = MAX_SEND, intervalMs = DEFAULT_INTERVAL_MS, cycleStartAt = null } = {}) {
   const D = depsOf(deps);
   const on = RULE_IDS.filter((id) => id !== 'focusEnd' && rules?.rules?.[id]?.on);
   if (!on.length) return { ok: true, skipped: 'no-rules' };
@@ -573,15 +615,28 @@ export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps 
   if (await D.isMock().catch(() => false)) return { ok: true, skipped: 'demo' };
   _lastIntervalMs = intervalMs;
   return withState(async (st) => {
-    const { next, fires, counts, released } = evaluatePerfRules(items, rules.rules, st.rules, now, { intervalMs });
+    /*
+     * 2차 M1 ②: 폴러가 돌지 않은 시간 = 이번 주기 시작 − 직전 판정 주기 끝 − 설정 주기. 직전 끝은 폴러가 알린 실제 끝(notePerfCycleEnd — 판정 뒤 롤업 보정 · 정리 꼬리 포함)과
+     *   상태 파일의 판정 시각(재시작 뒤 — 꼬리를 모르면 판정 시각) 중 늦은 것. 설정 주기는 직전 · 이번 중 큰 것(주기를 줄이면 타이머가 ‘마지막 종료 기준 남은 시간’ 으로
+     *   재무장해 직전 주기 간격 안에서 바로 돈다 — 거짓 틈이 아니다). 시작을 모르면(폴러 밖 호출) 판정 시각을 시작으로 본다(틈을 놓치지 않는 쪽).
+     */
+    const iv = ivOf(intervalMs);
+    const prevEnd = Math.max(n(st.cycle?.at) ?? -Infinity, n(_cycleEndAt) ?? -Infinity);
+    const ivGap = Math.max(iv, ivOf(st.cycle?.intervalMs ?? iv));
+    const start = n(cycleStartAt) ?? now;
+    const gapMs = Number.isFinite(prevEnd) ? start - prevEnd - ivGap : null;
+    _lastCycle = { start, startGiven: n(cycleStartAt) != null, prevEnd: Number.isFinite(prevEnd) ? prevEnd : null, gapMs, intervalMs: ivGap };
+    const { next, fires, counts, released } = evaluatePerfRules(items, rules.rules, st.rules, now, { intervalMs: ivGap, gapMs });
     st.rules = next;
-    // 반증 n2 재확인 N2: 판정 노드가 넘어가 비운 상태 — 발송 · 해소 알림 없이 이력 한 줄(그 서버 · 랙을 이 노드가 더는 판정하지 않는다는 사실)
-    for (const x of released || []) {
-      st.sent = [...(st.sent || []), { id: crypto.randomUUID().slice(0, 12), at: now, rule: x.rule, key: x.key, name: capStr(x.name, 120), vcenterId: x.vcenterId,
-        title: capStr(`판정 노드 넘어감 — ${x.name}(${x.active ? '진행 중이던 사건 · 해소 알림 없음' : '지속 중이던 상태'} · ${x.node ? `판정 노드 ${x.node}` : `판정 노드 없음(${x.reason || '사유 모름'})`})`, 200),
-        channels: [], result: 'judge-moved', issue: null, autoFocus: null }].slice(-SENT_LOG_MAX);
+    st.cycle = { at: now, intervalMs: iv };
+    _judgedSinceNote = true;
+    // 반증 n2 재확인 N2 · 2차 M3: 판정 노드가 넘어가 비운 상태 — 발송 기록(sent — 최근 200, 화면 ‘알림 이력’ · 봉투가 같이 쓴다)에는 쓰지 않는다(실제 발송 기록을 밀어냈다).
+    //   개수 · 사유만 콘솔 한 줄(주기당) · 주기 상태(poller _last.perfAlerts.released ← counts.released). 이름은 싣지 않는다(상태는 무스코프로 나간다).
+    if (released?.length) {
+      const by = {};
+      for (const x of released) by[x.reason || '사유 모름'] = (by[x.reason || '사유 모름'] || 0) + 1;
+      console.log(`[bmusage] 전력 알림 판정 노드 넘어감 ${released.length}건(${Object.entries(by).map(([k, v]) => `${k} ${v}`).join(' · ')}) — 이 노드의 규칙 상태를 비웠습니다(해소 알림 없음 · 재발 억제 묘비만 남김)`);
     }
-    if (released?.length) console.log(`[bmusage] 전력 알림 판정 노드 넘어감 ${released.length}건 — 이 노드의 규칙 상태를 비웠습니다(해소 알림 없음)`);
     // 상태가 바뀐 적 없는 첫 주기(손상 뒤 warmup)는 기준만 잡는다.
     if (_warmup) { _warmup = false; return { ok: true, warmup: true, counts }; }
     const targetsByKey = new Map(items.filter((x) => x?.target).map((x) => [x.key, x.target]));
@@ -590,9 +645,23 @@ export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps 
   });
 }
 
-let _lastIntervalMs = null;
+let _lastIntervalMs = null; let _lastCycle = null;
 /** 시험 이음매(반증 n2 F5) — 마지막 주기 판정이 보류 시한에 쓴 수집 주기(폴러가 이 노드 설정을 넘기는지 확인). */
 export const _lastIntervalForTest = () => _lastIntervalMs;
+/** 시험 이음매(2차 M1) — 마지막 판정의 주기 시작 · 직전 끝 · 틈(폴러가 주기 시작 · 실제 끝을 넘기는지 확인). */
+export const _lastCycleForTest = () => _lastCycle;
+/*
+ * 2차 M1 ②: 폴러가 주기(틱)를 **실제로 끝낸 시각** — 판정 뒤에도 롤업 보정 · 정리가 이어져(bmUsageTimerTick) 판정 시각은 주기 끝이 아니다.
+ *   판정이 있었던 주기만 끝을 적는다(판정 없이 끝난 실패 주기는 ‘폴러가 판정하지 않은 시간’ 으로 다음 틈에 든다). 메모리만(재시작 뒤에는 상태 파일의 판정 시각).
+ */
+let _cycleEndAt = null; let _judgedSinceNote = false;
+export function notePerfCycleEnd(at = Date.now()) {
+  if (!_judgedSinceNote) return;
+  _judgedSinceNote = false;
+  const t = n(at); if (t != null) _cycleEndAt = t;
+}
+/** 시험 이음매(2차 M1) — 폴러가 알린 마지막 판정 주기의 실제 끝(없으면 null). */
+export const _cycleEndForTest = () => _cycleEndAt;
 
 /** 집중 결론 규칙 — 세션이 끝날 때 한 번(focus/run.js onFocusEnd 구독). 같은 직렬 큐. */
 export async function runFocusEndAlert(ev, { rules, now = Date.now(), deps = {} } = {}) {

@@ -5,7 +5,7 @@
  *   ③ F7 랙 억제 구간은 창들의 교집합 — ‘창 끝 뒤 억제’ 점검 거짓 경고(over-cap) 0
  *   ④ F3 시험 실행 · 폴러 상태가 전력 판정 입력 실패 · 판정 보류 수를 0건과 가른다
  *   ⑤ F4 판정 노드 함수 하나(judgeOf · rackJudgeOf) — 중앙 원천 + 엣지 대상 · 엣지 사본 + 이 노드 대상 = 판정 없음 + 사유 · 화면과 알림이 같은 함수 · S1(법인을 엣지가 맡은 서버) 이중 판정 없음
- *   ⑥ F5 보류에 시한 — 지속 구간(지속 × 주기)보다 긴 보류 뒤의 표본은 1부터 · ‘처음 성립’ 도 그때부터 · 짧은 보류는 잇는다
+ *   ⑥ F5 보류에 시한 — 지속 주기 수보다 긴 보류 뒤의 표본은 1부터(2차 M1 — 주기 수) · ‘처음 성립’ 도 그때부터 · 짧은 보류는 잇는다
  * 기준 시각: 실제 시각을 정시로 내린 뒤 −20분(common.md) — 정비 창 · 폴러 시험만 Date.now()(제품이 실제 시각으로 판정).
  */
 import test from 'node:test';
@@ -232,15 +232,15 @@ test('⑤ F4 — 판정 노드 함수 하나: 판정 없음 + 사유 · 화면�
   assert.deepEqual(view.fleet.noJudge.byReason, { 'source-central': 1, 'source-edge': 1 }); assert.equal(view.fleet.noJudge.servers, 2);
 });
 
-test('⑥ F5 — 보류 시한: 지속 구간(지속 × 주기)보다 긴 보류 뒤 표본은 1부터 · ‘처음 성립’ 도 그때 · 짧은 보류는 잇는다', async () => {
+test('⑥ F5 — 보류 시한: 지속 주기 수보다 긴 보류 뒤 표본은 1부터 · ‘처음 성립’ 도 그때 · 짧은 보류는 잇는다', async () => {
   const rules = rulesOf({ inlet: { sustain: 3, repeatMin: 0 } });
   const it = (t, state = 'ok') => ({ key: 'K1', name: 'bm-K1', vcenterId: 'vcA', target: { key: 'K1', vcenterId: 'vcA' }, power: { kind: 'server', inletWarnC: 27, tempState: state, inletC: 30, tempAt: t } });
   A._resetPerfAlertsForTest();
   const d = depsOf();
   const run = (t, state) => A.runPerfAlerts([it(t - MIN, state)], { rules, now: t, deps: d.deps, intervalMs: 5 * MIN });
   await run(NOW); await run(NOW + 5 * MIN);
-  for (let i = 0; i < 6; i += 1) await run(NOW + (10 + i * 5) * MIN, 'stale');   // 보류 30분 > 시한 20분
-  assert.equal(A.holdMaxMs(rules.rules.inlet, 5 * MIN), 20 * MIN, '(지속 + 1) × 주기 — 재확인 N1 에서 한 주기 여유');
+  for (let i = 0; i < 6; i += 1) await run(NOW + (10 + i * 5) * MIN, 'stale');   // 보류 6주기 > 지속 3
+  assert.equal(A.holdMaxCycles(rules.rules.inlet), 3, '보류 6주기 > 지속 3(2차 M1 — 시간이 아니라 주기 수)');
   let r = await run(NOW + 48 * HOUR);
   assert.equal(r.fires, 0, '긴 보류 뒤 표본 하나로 ‘3주기 지속’ 이 아니다(예전 발송)'); assert.equal(r.counts.holdReset, 1);
   assert.equal(STATE().rules['inlet|vcA|K1'].streak, 1); assert.equal(STATE().rules['inlet|vcA|K1'].since, NOW + 48 * HOUR);
@@ -251,7 +251,7 @@ test('⑥ F5 — 보류 시한: 지속 구간(지속 × 주기)보다 긴 보류
   const { DAY_OFFSET_MIN } = await import('../src/util/dayKey.js');
   const hm = (ms) => new Date(ms + DAY_OFFSET_MIN * 60_000).toISOString().slice(5, 16).replace('T', ' ');
   assert.match(d.sends[0].detail, new RegExp(`처음 성립 ${hm(NOW + 48 * HOUR)}`), '처음 성립 = 다시 센 첫 표본');
-  // 짧은 보류(10분 ≤ 15분)는 잇는다
+  // 짧은 보류(2주기 ≤ 지속 3)는 잇는다
   A._resetPerfAlertsForTest();
   const d2 = depsOf();
   const run2 = (t, state) => A.runPerfAlerts([it(t - MIN, state)], { rules, now: t, deps: d2.deps, intervalMs: 5 * MIN });

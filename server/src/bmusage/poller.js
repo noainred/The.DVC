@@ -877,6 +877,8 @@ export async function bmUsageTimerTick() {
       } catch (e) { _lastRepair = { at: Date.now(), ok: false, error: String(e?.message || e).slice(0, 200) }; }
     }
     await pruneTick().catch(() => {});
+    // 2차 M1 ②: 이 틱이 실제로 끝난 시각(adaptiveTimer 가 다음 주기를 재는 기준과 같은 끝 — 아래 두 작업은 기다리지 않는다). 판정 뒤 꼬리는 ‘폴러가 돌지 않은 시간’ 이 아니다.
+    await notePerfEnd();
     // 8a단계: 용량 소진 예측 — 하루 1회(01:10 뒤 첫 틱 · 진행 중이면 공유 · 시간 기준 양보). 기다리지 않는다(다음 주기를 막지 않게). DB 가 있을 때만.
     if (fs.existsSync(BMUSAGE_DB_FILE())) {
       try {
@@ -927,7 +929,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       const reason = `대상 분류(서버 인벤토리)에 실패해 이번 주기를 건너뛰었습니다 — ${sourceErrors.find((x) => x.source === 'classify')?.error || ''}`;
       _last = { at: Date.now(), ms: Date.now() - t0, servers: null, okCount: 0, failCount: 0, inserted: 0, error: reason, ...srcErr, trigger };
       await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'classify-failed' });
-      const na = await runNodeCollectAlert();
+      const na = await runNodeCollectAlert({ cycleStartAt: t0 });
       if (na && !na.skipped) _last.collectAlert = { fires: na.fires ?? 0, error: na.error || null };
       return { ok: false, reason, ...srcErr };
     }
@@ -936,7 +938,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       dropStaleState(new Set());
       _last = { at: Date.now(), ms: Date.now() - t0, servers: 0, okCount: 0, failCount: 0, inserted: 0, counts, ...srcErr, trigger };
       await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'no-targets' });
-      await runNodeCollectAlert();
+      await runNodeCollectAlert({ cycleStartAt: t0 });
       return { ok: true, servers: 0, counts, reason: '대상 서버가 없습니다.', ...srcErr };
     }
     _listBudget = LIST_BUDGET_PER_RUN;   // ⚠ 주기 시작마다 리셋(위 상수 주석 참조)
@@ -1070,7 +1072,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     await recordCycleHealth({ results, t0, intervalMs, peakPlan });
     // v2.929(5단계): 리눅스 성능 알림 규칙(켠 규칙이 있을 때만 — 판정 입력은 이 노드가 이미 만든 값). 실패해도 수집은 실패가 아니다.
     let perfAlerts = null;
-    try { perfAlerts = rulesNow ? await runCyclePerfAlerts(results, { settings, rules: rulesNow, agent: agentName, targets }) : null; }
+    try { perfAlerts = rulesNow ? await runCyclePerfAlerts(results, { settings, rules: rulesNow, agent: agentName, targets, cycleStartAt: t0 }) : null; }
     catch (e) { perfAlerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     // 8a단계: ‘창 끝 뒤 억제 0’ 점검 — 이번 주기에 적용한 억제(수집 건너뜀 · 알림 보류 · 자동 집중)를 파일 기준으로 다시 만든 판정과 대조(수집 건강 행).
     let maintAudit = null;
@@ -1107,22 +1109,27 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       top: topRes ? { samples: topRes.samples ?? 0, full: topRes.full ?? 0, procRows: topRes.procRows ?? 0, hourlyRows: topRes.hourlyRows ?? 0, error: topRes.ok ? null : (topRes.errors || [])[0] || 'write-failed' } : null,
       // 반증 n2 F3: 판정 보류 수(못 읽음 · 부분 합 · 낡음 · 표본 부족 — 0건과 가른다) · 전력 판정 입력 실패(powerError) · 전력 판정 항목 수.
       perfAlerts: perfAlerts && !perfAlerts.skipped ? { fires: perfAlerts.fires ?? 0, queued: perfAlerts.queued ?? 0, deferred: perfAlerts.deferred ?? 0, capped: perfAlerts.capped ?? 0, autoFocus: perfAlerts.autoFocus ?? 0, issues: perfAlerts.issues ?? 0, ...(perfAlerts.warmup ? { warmup: true } : {}),
-        held: perfAlerts.counts?.unknown ?? 0, ...(perfAlerts.powerError ? { powerError: perfAlerts.powerError } : {}), ...(perfAlerts.powerItems != null ? { powerItems: perfAlerts.powerItems } : {}), error: perfAlerts.error || null } : null,
+        held: perfAlerts.counts?.unknown ?? 0, ...(perfAlerts.counts?.released ? { released: perfAlerts.counts.released } : {}), ...(perfAlerts.powerError ? { powerError: perfAlerts.powerError } : {}), ...(perfAlerts.powerItems != null ? { powerItems: perfAlerts.powerItems } : {}), error: perfAlerts.error || null } : null,
     };
     return { ok: true, ...(_last) };
   } catch (e) {
     _last = { at: Date.now(), ms: Date.now() - t0, error: String(e?.message || e).slice(0, 300), trigger };
     await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'cycle-error' }).catch(() => {});
-    await runNodeCollectAlert();
+    await runNodeCollectAlert({ cycleStartAt: t0 });
     return { ok: false, reason: _last.error };
-  } finally { _running = false; }
+  } finally {
+    _running = false;
+    // 2차 M1 ②: 주기 끝(판정이 있었던 주기만 — perfAlerts 가 가린다). 자동 틱은 롤업 보정 · 정리까지 끝난 뒤 bmUsageTimerTick 이 적는다.
+    if (trigger !== 'auto') await notePerfEnd();
+  }
 }
+async function notePerfEnd() { try { (await import('./perfAlerts.js')).notePerfCycleEnd(); } catch { /* 알림 규칙 모듈을 못 읽으면 판정도 없었다 */ } }
 
 /**
  * v2.929(5단계) — 이번 주기 알림 규칙 입력을 모은다: 성능 항목(이 노드 판정 — perfForRows 와 같은 buildPerfEntry) · 소모품 칸(방금 detail_json 에 넣은 것) ·
  *   베이스라인 이탈(그 규칙이 켜졌을 때만 — 슬롯 평균은 한 시간에 한 번 읽는다) · 용도 점검(그 규칙이 켜졌을 때만 — 이 노드의 수동 태그 · 자동 감지).
  */
-async function runCyclePerfAlerts(results, { settings, rules, agent, targets = [] }) {
+async function runCyclePerfAlerts(results, { settings, rules, agent, targets = [], cycleStartAt = null }) {
   // 규칙 파일 손상(보존본만 남음)이면 ‘켠 규칙 없음’ 과 구별해 상태에 남긴다 — 기본값(전부 꺼짐)으로 조용히 꺼진 것처럼 보이지 않게(규칙 화면 · 서비스 점검이 손상을 밝힌다).
   if ((await import('./perfRules.js')).perfRulesLoadError()) return { ok: false, skipped: 'settings-unreadable' };
   const on = Object.keys(rules?.rules || {});
@@ -1183,8 +1190,8 @@ async function runCyclePerfAlerts(results, { settings, rules, agent, targets = [
       if (_srcErrLog('power-alerts', powerError)) console.warn(`[bmusage] 전력 · 온도 알림 판정 입력을 만들지 못했습니다(그 규칙만 이번 주기에 보류): ${powerError.slice(0, 160)}`);
     }
   }
-  // 반증 n2 F5: 보류 시한(지속 × 수집 주기)이 이 노드의 수집 주기를 쓴다.
-  const r = await (await import('./perfAlerts.js')).runPerfAlerts(items, { rules, now, intervalMs: settings?.intervalMs });
+  // 반증 n2 F5 · 2차 M1: 보류 시한의 ‘폴러가 돌지 않은 시간’ 은 이 노드의 수집 주기와 **이 주기 시작 시각**(t0)으로 잰다 — 주기 소요는 시한에 들지 않는다.
+  const r = await (await import('./perfAlerts.js')).runPerfAlerts(items, { rules, now, intervalMs: settings?.intervalMs, cycleStartAt });
   return { ...r, ...(powerError ? { powerError } : {}), ...(powerItems != null ? { powerItems } : {}) };
 }
 function collectNodeItem(agent) {
@@ -1196,7 +1203,7 @@ function collectNodeItem(agent) {
  * 실패 · 0대 주기(분류 실패 · 주기 예외 · 대상 없음)에도 ‘수집 건강’ 규칙만 돌린다(반증 F1 — 예전에는 이 경로가 알림 판정 전에 돌아가 규칙이 실패를 못 잡았다).
  *   서버 항목은 넣지 않는다(다른 규칙의 서버 상태는 evaluatePerfRules 가 CARRY_MS 동안 들고 간다 — 지우지 않는다). 실패해도 주기 결과를 바꾸지 않는다.
  */
-async function runNodeCollectAlert() {
+async function runNodeCollectAlert({ cycleStartAt = null } = {}) {
   try {
     const R = await import('./perfRules.js');
     if (R.perfRulesLoadError()) return { ok: false, skipped: 'settings-unreadable' };
@@ -1204,7 +1211,8 @@ async function runNodeCollectAlert() {
     if (!rules?.rules?.collect?.on) return { ok: true, skipped: 'off' };
     const item = collectNodeItem(config.agent?.name || '');
     if (!item) return { ok: true, skipped: 'no-health' };
-    return await (await import('./perfAlerts.js')).runPerfAlerts([item], { rules });
+    // 2차 M1: 이 실패 주기도 판정 주기다(전력 규칙 상태는 ‘못 읽은 주기’ 로 보류 주기 수 +1) — 주기 시작 · 수집 주기를 같이 넘긴다.
+    return await (await import('./perfAlerts.js')).runPerfAlerts([item], { rules, intervalMs: loadBmUsageSettings().intervalMs, cycleStartAt });
   } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 160) }; }
 }
 /**
