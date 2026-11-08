@@ -27,6 +27,8 @@ const NUM_SECTIONS = Object.freeze([
   { k: 'collect', title: '수집 건강 기준', fields: [['cyclePct', '주기 소요 % (예산 대비 이상)'], ['successPct', '성공률 % (미만)'], ['dbPct', 'DB % (상한 대비 이상)'], ['dbCapGb', 'DB 상한 GB(0 = 없음)']] },
   // 7a단계 로그 분석 — 출처별 주기당 줄 상한(넘친 줄은 ‘잘림’) · 보관 · SSH 실패 집중(같은 IP · 창 안 줄 수). 끄면 로그 읽기 exec 를 붙이지 않는다.
   { k: 'logs', title: '로그 분석', fields: [['lineCap', '출처별 주기당 줄 상한'], ['keepDays', '보관(일)'], ['burstCount', 'SSH 실패 집중 — 줄 수'], ['burstWindowMin', 'SSH 실패 집중 — 창(분)']] },
+  // 8a단계 용량 소진 예측 — 목표선(%) · 데이터 부족 기준(14일 창 안 점 수) · 알림 ‘소진 ≤ N일’ 의 N.
+  { k: 'capacity', title: '용량 소진 예측', fields: [['targetPct', '목표선 %'], ['minDays', '데이터 부족 기준(14일 중 점 수)'], ['days', '알림 — 소진 ≤ N일']] },
 ]);
 
 /** 이 계정이 저장할 수 있나 — 설정 소유자 등급(소유자 ∧ 전체 범위) · 인증 꺼짐(Anonymous admin). 서버가 다시 막는다. */

@@ -47,6 +47,8 @@ export const FOCUS_CODE_TEXT = Object.freeze({
   'store-unavailable': { text: '집중 모니터링 보관 DB 를 열 수 없어 시작하지 않았습니다.', tone: 'bad' },
   'settings-unreadable': { text: '집중 모니터링 설정을 읽지 못했습니다.', tone: 'bad' },
   edge: { text: '그 서버를 수집하는 엣지에 닿지 못했습니다.', tone: 'bad' },
+  // 8a단계 ③: 정비 창 안 — 자동 집중만 쉰다(수동 집중은 사유와 함께 허용).
+  maintenance: { text: '정비 창 안이라 자동 집중을 시작하지 않았습니다(수동 집중은 사유를 적고 실행할 수 있습니다).', tone: 'warn' },
 });
 /** 조치 제안 code(서버 summarizeFocus actions) → 문장. 단정하지 않는다(‘확인’). */
 export const ACTION_TEXT = Object.freeze({
@@ -323,11 +325,13 @@ export const RULE_TEXT = Object.freeze({
   collect: { label: '수집 건강(이 노드)', conds: { any: '기준 밖 칸이 하나라도', cycle: '주기 소요가 예산의 기준 % 이상', success: '성공률이 기준 % 미만', db: 'DB 가 상한의 기준 % 이상', auth: '인증 정지 서버가 있음', error: '주기가 실패함(분류 실패 · 예외 — 대상 · 결과를 모름)' } },
   // 7a단계 — 로그 분석(이번 주기에 새로 읽은 줄 — 못 읽은 서버는 판정 보류 · 포탈은 차단 · 잠금을 하지 않는다).
   logs: { label: '로그 — 장애/보안 high', conds: { 'fault-sec': '장애 분류 줄 또는 보안 high 이상(SSH 실패 집중 포함)', fault: '장애 분류 줄만', sec: '보안 high 이상만' } },
+  // 8a단계 — 용량 소진 예측(수집 노드의 하루 계산 결과 · 데이터 부족 · 불안정 · 상한 없음은 판정 보류). N일은 아래 ‘용량 소진 예측’ 절.
+  capacity: { label: '용량 소진 예측 ≤ N일', conds: { 'fs-inode': '파일시스템 · inode 가 N일 안 목표선 도달', any: '메모리(참고) 포함', fs: '파일시스템만', inode: 'inode 만' } },
 });
 export const CHANNEL_TEXT = Object.freeze({ email: '메일', webhook: '웹훅', slack: 'Slack', teams: 'Teams' });
-export const SENT_RESULT_TEXT = Object.freeze({ queued: '보내는 중(대기열)', sent: '보냄', failed: '보내지 못함(채널 오류 — 재시도 규칙대로)', suppressed: '중복 억제', 'no-channel': '켜진 채널 없음', 'no-channel-config': '알림 설정 없음', 'daily-cap': '하루 상한', maintenance: '유지보수 창', error: '실패', '': '—' });
+export const SENT_RESULT_TEXT = Object.freeze({ queued: '보내는 중(대기열)', sent: '보냄', failed: '보내지 못함(채널 오류 — 재시도 규칙대로)', suppressed: '중복 억제', 'no-channel': '켜진 채널 없음', 'no-channel-config': '알림 설정 없음', 'daily-cap': '하루 상한', maintenance: '정비 창 안 — 기록만(창 뒤에도 초과면 그때 1회)', error: '실패', '': '—' });
 export const ISSUE_RESULT_TEXT = Object.freeze({ 'pending-central': '중앙에서 판단', 'daily-cap': '하루 상한', created: '만듦', commented: '댓글', dup: '이미 처리', error: '실패', skipped: '안 만듦' });
-export const RULES_HONEST = '판정 · 발송은 그 서버를 수집하는 노드(엣지)가 합니다 — 이 설정은 이 노드 것이고 중앙에서 엣지로 배포하지 않습니다(다음 판). 유지보수 창 억제는 베어메탈 서버의 백업 창을 읽는 원천이 아직 없어 동작하지 않습니다(8단계 정비 창). 같은 상태가 이어지면 다시 보내지 않고, 재시작해도 다시 보내지 않습니다(상태 파일).';
+export const RULES_HONEST = '판정 · 발송은 그 서버를 수집하는 노드(엣지)가 합니다 — 이 설정은 이 노드 것이고 중앙에서 엣지로 배포하지 않습니다(다음 판). 정비 창(설정 › 정비 창 · 알림 억제)의 ① 알림 억제를 켠 창 안에서는 기록만 하고 보내지 않으며, 창이 끝난 뒤에도 조건이 참이면 그때 한 번 보냅니다(제목 ‘정비 창 안부터 초과’). 백업 창(Bareos · Veeam 스케줄) 억제는 베어메탈 서버의 원천이 없어 동작하지 않습니다. 같은 상태가 이어지면 다시 보내지 않고, 재시작해도 다시 보내지 않습니다(상태 파일).';
 export function sentResultText(r) { return SENT_RESULT_TEXT[r] ?? String(r || '—'); }
 export function issueResultText(r) { return r == null ? '—' : (ISSUE_RESULT_TEXT[r] ?? String(r)); }
 export function autoFocusText(r) {

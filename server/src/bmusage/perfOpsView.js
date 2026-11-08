@@ -31,6 +31,12 @@ export async function localPerfOps(mode, { key, q = {}, now = Date.now(), deps =
     outside: async (pts, series) => (await import('./baseline.js')).outsideOf(pts, series),
     compare: async (o) => (await import('./compare.js')).compareFor(o),
     latest: async () => (await import('./db.js')).latestUsage(),
+    // 8a단계 ⑤: 이 노드의 정비 창 제외 구간(판정 코어 하나) — 대상은 이 노드의 대상 목록에서(법인 · 태그 판정).
+    exclusion: async () => {
+      const R = await import('./maint/runtime.js');
+      const tmap = new Map((await R.localTargets()).map((x) => [x.key, x]));
+      return R.exclusionFor(await R.maintJudge({ now }), (k) => tmap.get(k));
+    },
     ...deps,
   };
   if (mode === 'changes') {
@@ -49,7 +55,10 @@ export async function localPerfOps(mode, { key, q = {}, now = Date.now(), deps =
   if (mode === 'baseline') {
     const [settings, rules] = [await D.settings(), await D.rules()];
     const metric = String(q.metric || 'cpu_pct');
-    const band = await D.band({ agent, key, metric, from: q.from, to: q.to, cfg: rules.baseline, intervalMs: settings.intervalMs, now });
+    let ex = null; try { ex = await D.exclusion(); } catch { ex = null; }
+    const WEEK = 7 * 86_400_000;
+    const exIv = ex ? ex.exclOf(key, (Number(q.from) || now - 86_400_000) - (rules.baseline?.weeks ?? 4) * WEEK - WEEK, Number(q.to) || now) : null;
+    const band = await D.band({ agent, key, metric, from: q.from, to: q.to, cfg: rules.baseline, intervalMs: settings.intervalMs, now, ...(ex ? { excludeIv: exIv, exclSig: ex.sig } : {}) });
     if (!band?.ok) return band;
     // 띠 밖 점은 서버가 판정한다(반증 L3) — 같은 창의 추이 점(trendFor — 화면 선과 같은 응답)을 같은 deviationOf 로 띠에 대 본다.
     let outside = null;
@@ -72,7 +81,8 @@ export async function localPerfOps(mode, { key, q = {}, now = Date.now(), deps =
     if (!w) return { __status: 400, ok: false, reason: 'from 이 to 보다 앞이어야 합니다.' };
     let latestRow = null; let bands = null; let B = null;
     try { latestRow = (await D.latest()).find((r) => String(r.key) === String(key) && String(r.agent || '') === agent) || null; } catch { latestRow = null; }
-    try { B = await import('./baseline.js'); bands = await B.slotBands({ agent, cfg: rules.baseline, intervalMs: settings.intervalMs, now }); } catch { bands = null; }
+    let ex = null; try { ex = await D.exclusion(); } catch { ex = null; }
+    try { B = await import('./baseline.js'); bands = await B.slotBands({ agent, cfg: rules.baseline, intervalMs: settings.intervalMs, now, ...(ex ? { exclOf: ex.exclOf, exclSig: ex.sig } : {}) }); } catch { bands = null; }
     const { createYielder } = await import('../util/timeSlice.js');
     return M.compareSeriesFor({ agent, key, metrics, from: w.from, to: w.to, settings, trendFor: D.trend, latestRow, bands, deviationsFor: B?.deviationsFor || null, yieldFn: createYielder(15) });
   }

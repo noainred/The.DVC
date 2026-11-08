@@ -64,6 +64,11 @@ export function fitEnvelope(env, maxBytes = ENVELOPE_MAX_BYTES) {
   let after = jsonBytes(out);
   // 7a단계: 로그 요약은 성능 상세 다음으로 줄인다 — ① 상위 패턴의 표본 · 서명 글자 제거 ② (성능 항목 제거 뒤에도 넘치면) 상위 패턴 제거. 분류별 개수 · 출처 상태는 남는다. 뺀 사실은 logsTruncated.
   let logLevel = null;
+  // 8a단계: 용량 예측 행은 성능 상세 다음으로 줄인다 — 도달 예측 · 도달 행만 남긴다(데이터 부족 · 불안정 · 상한 없음 · 증가 없음 행은 수만 — capacity.dropped). 뺀 사실은 capacity.truncated.
+  if (after > maxBytes && out.capacity && Array.isArray(out.capacity.rows)) {
+    const keep = out.capacity.rows.filter((r) => r?.status === 'forecast' || r?.status === 'reached');
+    out = { ...out, capacity: { ...out.capacity, rows: keep, truncated: 'forecast-only', dropped: out.capacity.rows.length - keep.length } }; after = jsonBytes(out);
+  }
   if (after > maxBytes && Array.isArray(out.logSummary)) { out = { ...out, logSummary: out.logSummary.map((x) => ({ ...x, top: (x.top || []).map(({ sample: _s, tmpl: _t, ...p }) => p) })) }; logLevel = 'compact'; after = jsonBytes(out); }
   if (after > maxBytes) { out = { ...out, perf: [] }; level = 'dropped'; after = jsonBytes(out); }
   if (after > maxBytes && Array.isArray(out.logSummary)) { out = { ...out, logSummary: out.logSummary.map((x) => ({ ...x, top: [] })) }; logLevel = 'dropped'; after = jsonBytes(out); }
@@ -144,7 +149,33 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
     ...(await envelopeOps()),
     // 7a단계: 로그 분석 요약(서버별 24시간 — 분류별 패턴/줄 · 읽은 양 · 상위 8 패턴 · 출처 상태). 원문 없음(가린 표본 1줄 · 서명 템플릿). 대상 목록 안의 서버만.
     ...(await envelopeLogs(keys)),
+    // 8a단계: 정비 창 상태(배포본 · 억제 계수 · 창 끝 뒤 억제 점검) · 용량 소진 예측(하루 계산 결과 행 — 대상 목록 안의 서버만).
+    ...(await envelopeMaintCapacity(keys)),
   };
+}
+/** 8a단계 봉투 필드 — 표지(maintVer · capacityVer)는 계산 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다). 실패해도 봉투는 나간다. */
+export const MAINT_VER = 1;
+export const CAPACITY_VER = 1;
+const CAP_FIELDS = ['key', 'kind', 'res', 'status', 'reason', 'grade', 'current', 'max30', 'slope', 'slope30', 'r2', 'conf', 'n', 'targetPct', 'daysToTarget', 'dateToTarget', 'daysTo100', 'dateTo100',
+  'beyondTarget', 'beyond100', 'reset', 'resetDay', 'resets30', 'excluded', 'missing', 'sizeBytes', 'dailyWin', 'lastDay', 'staleDays', 'stale'];
+async function envelopeMaintCapacity(keys) {
+  const out = { maintVer: MAINT_VER, capacityVer: CAPACITY_VER };
+  try {
+    const ST = await import('./maint/store.js'); const R = await import('./maint/runtime.js');
+    const w = ST.windowsForJudge(Date.now());
+    const s = R.maintStats();
+    out.maint = { deployed: w.deployed, local: w.windows.filter((x) => x.origin !== 'central' && !x.deleted).length, ...(w.localUnreadable ? { localUnreadable: true } : {}),
+      byWindow: Object.fromEntries(Object.entries(s.byWindow || {}).slice(0, 500)), leak: s.leak };
+  } catch { /* 그 필드만 빠진다 */ }
+  try {
+    const C = (await import('./capacity.js')).loadCapacity();
+    if (C) {
+      out.capacity = C.unreadable ? { unreadable: true, rows: [] }
+        : { at: C.at, day: C.day, cfg: C.cfg, ...(C.truncated ? { truncated: 'rows-cap' } : {}), ...(C.cap ? { cap: C.cap } : {}),
+          rows: (C.rows || []).filter((r) => keys.has(t(r.key))).map((r) => Object.fromEntries(CAP_FIELDS.filter((k) => r[k] !== undefined && r[k] !== null).map((k) => [k, r[k]]))) };
+    }
+  } catch { /* */ }
+  return out;
 }
 /** 7a단계 봉투 필드 — 표지(logsVer)는 첫 주기 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다 · 6단계 반증 F3). 실패해도 봉투는 나간다. */
 export const LOGS_VER = 1;

@@ -8,6 +8,7 @@
  * ⚠ 판정·문구는 서버(`useJudge.js`)와 `bmPerfText.js` 가 소유한다 — 이 파일은 조립만.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { BmCapacityCard } from './BmCapacityFleet.jsx'; // 8a단계 용량 소진 예측 카드
 import { fetchJson } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -240,6 +241,8 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
               </STable>
               {cellFootnotes(usedCodes).map((f, i) => <p key={i} style={{ margin: 0, fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={f} /></p>)}
               <HealthCard health={e.detail?.health || null} now={now} />
+              {/* 8a단계 용량 소진 예측(참고) — 그 서버를 열 때 1회(이 노드 계산 · 엣지 서버는 대행) */}
+              {itemKey && <BmCapacityCard itemKey={itemKey} />}
               <div>
                 <h5 style={{ margin: '0 0 4px', fontSize: 14 }}>교차 판정 — 두 경로가 다 읽혀야 켜집니다 · 상관은 ‘후보’ 로만</h5>
                 <div className="bmp-cross">

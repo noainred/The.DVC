@@ -57,10 +57,18 @@ export function dailySpark(daily = []) {
   return (Array.isArray(daily) ? daily : []).map((d) => { const v = n(d?.pct); if (v == null) return '·'; return B[Math.min(7, Math.max(0, Math.round(((100 - v) / 100) * 7)))]; }).join('');
 }
 export function resNote(res) { return res === '1h' ? '창이 길어 1시간 롤업으로 셉니다(‘주기’ 대신 ‘시간’ — 5분 원시는 20일 이하 창에서만).' : '5분 주기로 셉니다.'; }
-export const SLO_HONEST = '달성률 = 목표 안에 있던 주기 ÷ 값이 있는 주기(결측 주기는 분모에서 빼고 수를 적습니다). 정비 창도 분모에서 빼야 하지만 아직 원천이 없어 빼지 못합니다(8단계). 피크 기준은 피크 표본(10초 창 · 샘플러)이 있는 주기만 셉니다 — 피크 창이 꺼졌거나 예산 때문에 줄어 표본이 없는 주기는 평균으로 메우지 않고 결측으로 셉니다. p95 기준은 기간 안 주기 평균의 95번째 백분위를 목표와 대 봅니다. 위반 시간은 위반 주기 × 수집 간격입니다. 목표는 설정값(관리자)이고 우선순위는 개별 > 용도 > 역할입니다.';
+export const SLO_HONEST = '달성률 = 목표 안에 있던 주기 ÷ 값이 있는 주기(결측 주기는 분모에서 빼고 수를 적습니다). 정비 창(⑤ 분모 제외를 켠 창) 구간의 주기도 분모와 기대 주기에서 빼고 수를 적습니다(이 화면을 내주는 노드의 창 기준). 피크 기준은 피크 표본(10초 창 · 샘플러)이 있는 주기만 셉니다 — 피크 창이 꺼졌거나 예산 때문에 줄어 표본이 없는 주기는 평균으로 메우지 않고 결측으로 셉니다. p95 기준은 기간 안 주기 평균의 95번째 백분위를 목표와 대 봅니다. 위반 시간은 위반 주기 × 수집 간격입니다. 목표는 설정값(관리자)이고 우선순위는 개별 > 용도 > 역할입니다.';
 /** 위반 구간 → 추이 위반 띠(지표별). */
 export function violationBands(resp = {}) {
   const out = {};
   for (const it of resp?.items || []) if (Array.isArray(it.bands) && it.bands.length) (out[it.goal.metric] ||= []).push(...it.bands);
   return out;
+}
+
+/** 8a단계 — 목표선 표 ‘정비 창’ 칸: 서버가 뺀 주기 수 · 창 없음 · 판정 불가 · (예전 응답) 원천 없음. 지어내지 않는다. */
+export function sloMaintText(it = {}, resp = {}) {
+  if (resp?.maintenanceSource === 'unavailable') return '판정 불가';
+  if (it.maintenance?.source === 'windows') return `제외 ${it.maintenance.excluded ?? '—'}`;
+  if (resp?.maintenanceSource === 'windows') return '창 없음';
+  return '원천 없음';
 }

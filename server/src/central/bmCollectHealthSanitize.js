@@ -41,6 +41,10 @@ function cleanNode(x, now) {
     peakPlan: isObj(x.peakPlan) ? { windowS: N(x.peakPlan.windowS), capS: N(x.peakPlan.capS), reason: PEAK_PLAN_REASONS.includes(x.peakPlan.reason) ? x.peakPlan.reason : null, expectedMs: N(x.peakPlan.expectedMs), budgetMs: N(x.peakPlan.budgetMs) } : null,
     db: isObj(x.db) ? { mainBytes: N(x.db.mainBytes), walBytes: N(x.db.walBytes), files: N(x.db.files), bytes: N(x.db.bytes), ...(N(x.db.unread) ? { unread: N(x.db.unread) } : {}), ...(x.db.error ? { error: 'readdir' } : {}), ...(x.db.partial === true ? { partial: true } : {}), families: fams } : null,
     dbPct: N(x.dbPct), capBytes: N(x.capBytes), cells,
+    // 8a단계 정비 창: 건너뜀(④) · 창 안 실패 · 창 끝 뒤 억제(leak — 0 이어야 정상) · 판정 입력 상태(수만 · 표지만).
+    ...(isObj(x.maint) ? { maint: { skipped: N(x.maint.skipped), failInWindow: N(x.maint.failInWindow), leak: N(x.maint.leak), checked: N(x.maint.checked), windows: N(x.maint.windows),
+      ...(x.maint.localUnreadable === true ? { localUnreadable: true } : {}), ...(x.maint.judge === 'unavailable' ? { judge: 'unavailable' } : {}),
+      ...(isObj(x.maint.deployed) ? { deployed: { n: N(x.maint.deployed.n), stale: x.maint.deployed.stale === true, at: clampEdgeTs(N(x.maint.deployed.at), now), ...(x.maint.deployed.unreadable === true ? { unreadable: true } : {}) } } : {}) } } : {}),
     th: isObj(x.th) ? { cyclePct: N(x.th.cyclePct), successPct: N(x.th.successPct), dbPct: N(x.th.dbPct), dbCapGb: N(x.th.dbCapGb) } : null,
     // 주기 오류는 열거 code 만(엣지 원문을 싣지 않는다 — 모르는 값은 ‘수집 건강 계산 실패’ 로 본다 · 반증 F1).
     ...(x.error ? { error: NODE_ERRORS.includes(x.error) ? x.error : 'health-failed' } : {}), ...(x.recordError ? { recordError: strOf(x.recordError, 160) } : {}),
@@ -60,7 +64,7 @@ export function sanitizeCollectHealth(h, now = Date.now()) {
       if (BAD_KEYS.has(vc) || !VC_RE.test(vc) || !isObj(c)) continue;
       const reasons = {};
       if (isObj(c.reasons)) for (const k of Object.keys(c.reasons).slice(0, 32)) { const [p, code] = k.split(':'); if (PATHS.has(p) && CODES.has(code)) reasons[`${p}:${code}`] = N(c.reasons[k]); }
-      byCorp[vc] = { servers: N(c.servers), ok: N(c.ok), fail: N(c.fail), reasons };
+      byCorp[vc] = { servers: N(c.servers), ok: N(c.ok), fail: N(c.fail), reasons, ...(N(c.maintSkipped) != null ? { maintSkipped: N(c.maintSkipped) } : {}), ...(N(c.maintFail) != null ? { maintFail: N(c.maintFail) } : {}) };
       corps += 1;
     }
   }

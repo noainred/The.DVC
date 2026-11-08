@@ -173,7 +173,8 @@ test('④ ⑦ 실제 라우터 — 플레이북 · 목표선(실제 파일) · �
   const sB = await call('adm', 'GET', `/perf/PTAGB/slo?from=${NOW - HOUR}&to=${NOW}`);
   const awB = sB.body.items.find((x) => x.goal.metric === 'disk_await_ms');
   assert.equal(awB.status, 'no-data', JSON.stringify(awB).slice(0, 200)); assert.equal(awB.peakMissing, 12);
-  assert.equal(s1.body.maintenanceSource, 'none'); assert.equal(s1.body.res, '5m');
+  // 8a단계: 정비 창 판정이 생겨 원천은 'windows'(창이 없으면 제외 구간 0 — 6단계의 자리 표시 'none' 에서 바뀜).
+  assert.equal(s1.body.maintenanceSource, 'windows'); assert.deepEqual(s1.body.maintIntervals, []); assert.equal(s1.body.res, '5m');
   // 저장 — 설정 소유자 등급만 · 감사
   const body = { default: [{ metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 70, objectivePct: 99 }], servers: { PTAGA: [{ metric: 'runq_per_core', basis: 'avg', op: 'lt', value: 3, objectivePct: 99 }], PTAGB: [{ metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 60, objectivePct: 99 }] } };
   assert.equal((await call('opA', 'PUT', '/slo', body)).status, 403);

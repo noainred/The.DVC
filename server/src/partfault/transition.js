@@ -59,6 +59,11 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
   // v2.744(EDGE-01): 'agent|scope' → 사유 — 그 agent 가 그 장비군 등록부를 읽지 못했다(중앙 로컬은 agent '').
   const scopeUnreadable = scan.scopeUnreadable && typeof scan.scopeUnreadable === 'object' ? scan.scopeUnreadable : {};
   const scopeHeld = (o) => Object.hasOwn(scopeUnreadable, `${t(o.agent)}|${t(o.scope)}`);
+  // 8a단계 ②: 정비 창(전이 보류) 안 장비 — 'agent|deviceId'(agent 소문자). 이 장비는 이번 주기에 열기 · 바꾸기 · 닫기 전이를 하지 않는다(보류 · 이력에는 남긴다).
+  //   새 장애는 열지 않고 세기만 한다(maintDeferred) — 창 끝 뒤 첫 주기에 평소 규칙으로 다시 판정한다(그때 아직 나쁘면 그때 연다).
+  const maintHold = scan.maintHold instanceof Set ? scan.maintHold : null;
+  const inMaint = (p) => !!maintHold && maintHold.has(`${t(p.agent).toLowerCase()}|${t(p.deviceId)}`);
+  const maintDeferred = [];
   const REFINE = { 'edge-stale': HOLD_REASON.edgeStale, 'edge-legacy': HOLD_REASON.edgeLegacy };
   const failedHold = (dk) => REFINE[deviceReason[dk]] || HOLD_REASON.deviceFailed;
   const openBy = new Map();
@@ -118,6 +123,13 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
     seen.add(k);
     const prev = openBy.get(k);
 
+    if (inMaint(p)) {
+      // ② 보류 — 열린 장애는 그대로 두고 사유만(관측 상태는 기록) · 새 장애는 열지 않는다.
+      if (prev) held.push({ ...prev, lastSeenAt: now, holdReason: HOLD_REASON.maintenance, rawState: p.rawState, maintObserved: p.state });
+      else if (isBad(p.state)) maintDeferred.push({ ...p, observedAt: now });
+      continue;
+    }
+
     if (isBad(p.state)) {
       const old = !prev ? migrateFrom(p) : null;
       if (old) {
@@ -169,7 +181,8 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
     const dOk = deviceOk[dk];
     const kf = Array.isArray(kindFailed[dk]) && kindFailed[dk].includes(o.kind);
     let holdReason;
-    if (dOk === false) holdReason = failedHold(dk);
+    if (inMaint(o)) holdReason = HOLD_REASON.maintenance;
+    else if (dOk === false) holdReason = failedHold(dk);
     else if (dOk === true) holdReason = kf ? HOLD_REASON.collectionFailed : HOLD_REASON.missing;
     // 장비가 이번 판정 대상에 아예 없다(C5): 그 agent 가 보고는 했는데 이 장비가 빠졌으면 재배정·등록 삭제
     // (unassigned), 보고 자체가 없으면 no-report. 구 호출부(agentsReported 없음)는 예전대로 장비 실패.
@@ -181,8 +194,10 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
   }
 
   return {
-    opened, updated, closed, held,
+    opened, updated, closed, held, maintDeferred,
     stats: {
+      heldMaintenance: held.filter((h) => h.holdReason === HOLD_REASON.maintenance).length,   // 8a단계 ②
+      maintDeferred: maintDeferred.length,
       observed: observed.length,
       opened: opened.length,
       closed: closed.length,

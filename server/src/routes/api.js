@@ -50,6 +50,8 @@ import { registerBmCompare } from './api/bmCompare.js'; // 6단계 리눅스 성
 import { registerBmCollectHealth } from './api/bmCollectHealth.js'; // 6단계 — 수집 건강 보드(메타 모니터링)
 import { registerBmAnnotations } from './api/bmAnnotations.js'; // 6단계 — 운영 주석(중앙 저장)
 import { registerBmOnboard } from './api/bmOnboard.js'; // 7b단계 — SSH 키 저장소 · 공통 계정 · 서버 등록(온보딩) · 누락 점검
+import { registerBmMaint } from './api/bmMaint.js'; // 8a단계 — 정비 창 · 알림 억제
+import { registerBmCapacity } from './api/bmCapacity.js'; // 8a단계 — 용량 소진 예측
 import { registerBmPlaybookSlo } from './api/bmPlaybookSlo.js'; // 6단계 — 진단 플레이북 · 목표선(SLO)
 import { registerBmLogs } from './api/bmLogs.js'; // 7a단계 리눅스 성능 — 로그 분석(서버 상세 ‘로그’ 탭 · 함대 표)
 import { registerServerSensors } from './api/serverSensors.js'; // 서버 온도 › 센서 상세(v2.659)
@@ -174,6 +176,8 @@ registerBmCompare(api);
 registerBmCollectHealth(api);
 registerBmAnnotations(api);
 registerBmOnboard(api);
+registerBmMaint(api);
+registerBmCapacity(api);
 registerBmPlaybookSlo(api);
 registerBmLogs(api);
 registerCorpUsage(api);

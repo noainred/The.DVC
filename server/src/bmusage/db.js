@@ -23,6 +23,7 @@
  * node:sqlite 미지원 환경은 no-op 폴백 — 수집·화면은 살고 DB 만 비활성(`available()` 이 밝힌다).
  */
 import fs from 'node:fs';
+import { pushAll } from '../util/pushAll.js';
 import path from 'node:path';
 import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -596,6 +597,28 @@ export async function latestUsage({ json = false } = {}) {
   } catch { return []; }
 }
 let _latestLiteSql = null;
+
+/**
+ * 8a단계 용량 예측(xfs · btrfs 동적 inode 판별) — 이 노드(agent) 최신값의 **key · tuning_json 두 열만** 키 순 조각(기본 200행)으로 읽는다.
+ *   조각 사이 yieldFn(시간 기준 양보) — SELECT * 를 JSON 열까지 한 번에 동기로 읽지 않는다(반증 의심 항목). 기본 키(agent, key) 순서라 조각마다 인덱스로 이어 읽는다.
+ */
+export async function latestTuningRows({ agent = '', chunk = 200, yieldFn = null } = {}) {
+  const db = await getDb();
+  if (!db) return [];
+  const out = [];
+  try {
+    const st = db.prepare('SELECT key, tuning_json FROM usage_latest WHERE agent = ? AND key > ? AND tuning_json IS NOT NULL ORDER BY key LIMIT ?');
+    let after = '';
+    for (let i = 0; i < 10_000; i += 1) {
+      const rows = st.all(String(agent || ''), after, chunk);
+      pushAll(out, rows);
+      if (rows.length < chunk) break;
+      after = String(rows[rows.length - 1].key);
+      if (yieldFn) await yieldFn();
+    }
+  } catch { /* 열이 없는 옛 DB · 열기 실패 — 모르면 비운다(상한 있음으로 본다) */ }
+  return out;
+}
 
 /**
  * 원시 추이(한 서버). 상한을 두고 **잘렸으면 밝힌다**(조용한 상한 금지).
