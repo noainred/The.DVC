@@ -94,13 +94,14 @@ export function bandLayout(band, { width = 1000 } = {}) {
   const step = band.res === '1h' ? 3_600_000 : 300_000;
   const tot = (p) => comms.reduce((a, c) => a + (num(p.by?.[c]) || 0), 0) + (num(p.other) || 0);
   const yMax = Math.max(100, ...pts.map(tot));
-  const w = Math.max(1, (step / span) * width * 0.9);
+  // 막대 폭 — 칸 폭의 90%(표본이 드문 창에서도 보이게 최소 4) · 창 끝 표본이 그림 밖으로 잘리지 않게 [0, width − w] 안에 둔다(r1 판독: 마지막 막대가 오른쪽 끝에서 잘렸다)
+  const w = Math.min(width, Math.max(4, (step / span) * width * 0.9));
   const bars = pts.map((p) => {
     let y = 0; const segs = [];
     comms.forEach((c, i) => { const v = num(p.by?.[c]) || 0; if (v > 0) { segs.push({ c, y0: y, y1: y + v, color: BAND_COLORS[i % BAND_COLORS.length], v }); y += v; } });
     const o = num(p.other) || 0;
     if (o > 0) segs.push({ c: '기타 상위', y0: y, y1: y + o, color: OTHER_COLOR, v: o });
-    return { t: p.t, x: ((p.t - from) / span) * width, w, segs };
+    return { t: p.t, x: Math.min(width - w, Math.max(0, ((p.t - from) / span) * width - w / 2)), w, segs };
   });
   return { yMax, bars };
 }

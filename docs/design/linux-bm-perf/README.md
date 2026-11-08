@@ -313,6 +313,23 @@
       ⑩ 엣지 태그 창이 엣지 로컬 태그로 넓어졌다 → 펼친 keys 만. 그 밖: 지운 창은 묘비(지난 구간 분모 제외 · 음영은 지운 시각까지 — 소급 소거 금지 · 보관 90일) · rev 없는 쓰기 409 ·
       xfs 판별은 두 열 조각 읽기 · 수집 건강 표 1440 ‘상태’ 열 숨김(6단계부터 있던 결함)도 고쳤다.
 
+
+24. **(8b단계 구현 — 2026-11-08)** 밝혀 둘 것(프로세스 Top-N ⑳ · 저활용 ㉑ · 전력/온도 ㉒):
+    - **실장비 · 실엣지를 운영으로 보지 못했다** — `##TOP` 은 이 개발 컨테이너(procps-ng 4.0.4 · mawk · dash/bash)의 실제 top · /proc 으로만 돌렸다(가짜 top 출력 · comm 위조 실제 프로세스 시험 포함).
+      Rocky 9(procps-ng 3.3.17 · gawk)의 top 배치 형식은 미확인 — 머리글로 열을 찾고 못 찾으면 /proc 대안으로 넘어간다. 엣지 대행은 같은 프로세스 collector 라우터 왕복 시험 · 화면은 Chromium 목 서버(데모 합성 표본).
+    - **저장 크기는 실측하지 못했다** — 설계 추정(1,000대 7일 ≈ 3,000만 행 · 2~3GB → ‘변화 있을 때만’ 60~80% 감소)은 확인 전이다. 데모 합성 표본에서는 45% 표본만 전체 저장(55% 감소)이었지만
+      실장비의 프로세스 변동은 다르다 — **수집 건강 DB 실측(가족 top · toph)을 보고 보존일(설정 top.keepDays · hourlyDays)을 조정**할 것. 시간 집계는 서버 · 시간당 comm 24행 상한.
+    - **RSS 는 공유 페이지가 프로세스마다 중복**된다(합이 실제보다 크다 — PSS 는 느리고 권한이 필요해 쓰지 않는다) · **컨테이너 이름은 없다**(호스트 PID · comm 만) · 인자 · 환경은 읽지 않는다(16차) — Airflow 스케줄러 · 워커 구분은 comm 으로만.
+    - **I/O 는 CPU 측정 앞에 전 프로세스를 한 번(grep 1회 · 내보내지 않음) 읽는다** — 설계 ‘CPU 상위 후보 20 개만’ 과 다르다: 2회 차이를 같은 1초 창에 맞추려면 첫 읽기 때 후보를 아직 모른다(대안은 1초를 더 기다리는 것).
+      권한 없는 프로세스는 ‘권한’(값 없음). 비특권 SSH 계정이면 남의 프로세스 I/O 는 대부분 ‘권한’ 이다.
+    - 시간 집계의 comm 별 CPU 초는 **하한**(직전 주기에도 CPU 상위 후보 20 에 든 같은 프로세스만) — 1초 % × 주기로 늘려 추정하지 않았다. 띠의 5분 칸은 ‘변화 없음’ 표본을 기준 표본 값으로 그리고 그 수를 적는다.
+    - 주 명령의 최악 시한 합(조건부 needs-restarting · dnf 포함)은 **8b 전에도 30초 명령 시한을 넘었다**(34초) — `##TOP` 은 평소 약 1.2초 · 최악 5초(top 시한 3초 + 대안)를 더한다.
+    - **저활용**: 설계의 ‘프로세스 Top 에 사용자 프로세스 없음’ 활동 신호는 넣지 않았다(서버마다 7일 날 파일을 훑어야 해 하루 계산이 동기 SQLite 로 막힌다) — 활동 = SSH 로그인(로그를 읽는 서버만 · 모르면 칸 ‘—’) + 사람이 연 집중 + 스냅샷(보관 7일).
+      ‘대기 · DR’ 은 용도 태그에 없어(역할 5 · 기능 2) **검토 상태 ‘대기 · DR’**(중앙 운영 주석)로 정한다 — 제외 사유 dr · 점수는 남긴다. ‘주기 사용’ 은 일 최대 ≥ 설정 % 인 날이 2일 ~ 주 수+1 일이고 나머지 날이 그 절반 아래일 때(설계 문구 ‘주 1회만 높은’ 을 이렇게 정했다 — 같은 요일이면 표시).
+      ‘지난달 대비’ 는 행의 후보 시작 · 이탈일(지난 30일 진입 · 이탈)로 센다 — 그 노드의 계산 이력이 30일 안 되면 ‘—’. 기준값은 관행(설정 · 노드마다 · 감사).
+    - **전력 · 온도**: 랙 · U 원천이 저장소에 없었다 — 7b 등록 CSV 에 ‘랙/위치’ 열이 없고 iDRAC 위치 속성은 Redfish 왕복을 늘려야 해 읽지 않았다 → **설정 › 알림 규칙의 랙 배치(텍스트)** 가 유일한 원천(설계와 다르다) · 없으면 ‘미매핑’.
+      온도는 지금 값만(흡기 시계열은 옵트인 `IDRAC_TEMP_SERIES_DETAIL` 일 때만 metrics DB) · 엣지 위임 서버의 PowerCap 은 엣지 인벤토리 축약에 없어 ‘—’ · 모델별 Dell 권장 흡기 범위 미인용(설정값) · PDU 범위 밖 ·
+      전력 알림 규칙(랙 여유 · 흡기 지속 · 피크 급증 · 상한 걸림 — 설계 ‘기본 꺼짐’)은 **만들지 않았다**(다음 판).
 ## 7. 컨펌 때 정할 것(기본값을 적어 둔다)
 1. 방식 — **D(권장)** / B 연동 병행 / 다른 것.
 2. 진단 스냅샷의 프로세스별 I/O — **권한 있으면 읽고 없으면 ‘확인 불가’(기본)** / 넣지 않음.
@@ -325,7 +342,7 @@
 9. (4차) 용도 감지 — **자동 감지(유닛·프로세스·포트·계정) + 수동 태그 우선(기본)** / 수동 태그만.
 10. (4차) 장애 기록 탭 — **서버 탭 + 보드 E 칸 + 함대 표(기본)** / 서버 탭만.
 11. (확정 2026-11-06) 저장 구조 — 월 파일 + 해상도 3단 + 장치별 축소 + 메인 파일 최신값(§4.4) · 동시성 32(v2.918 적용).
-12. (14~17차) 로그 분석 · 등록/온보딩 · SSH 키 저장소 · 보안 · 용량 예측 · 정비 창 · 프로세스 Top-N · 저활용 · 전력/온도 — 시안 단계로 시작했고 7a · 7b · 8a(용량 예측 · 정비 창)는 구현됨(§8). 새 SSH 구획은 `##DFI`(inode)·`##TOP`(프로세스)·로그 증분 읽기뿐이고 나머지는 기존 저장값의 집계. 구현 순서·범위는 `PROFILES.md` §17~§20 의 정직 기록을 보고 정한다.
+12. (14~17차) 로그 분석 · 등록/온보딩 · SSH 키 저장소 · 보안 · 용량 예측 · 정비 창 · 프로세스 Top-N · 저활용 · 전력/온도 — 시안 단계로 시작했고 7a · 7b · 8a(용량 예측 · 정비 창) · 8b(프로세스 Top-N · 저활용 · 전력/온도)까지 **8단계 전부 구현됨**(§8). 새 SSH 구획은 `##DFI`(inode)·`##TOP`(프로세스)·로그 증분 읽기뿐이고 나머지는 기존 저장값의 집계. 구현 순서·범위는 `PROFILES.md` §17~§20 의 정직 기록을 보고 정한다.
 
 ## 8. 구현 범위(컨펌 뒤 — Opus)
 - **1단계 구현됨(v2.919 예정 — 서버만)**: 수집 구획·파서·rates·새 열·DB 마이그레이션·USE/교차 판정·커버리지·엣지 봉투/정제·API(`GET /tools/bm-usage` perf 확장 + `GET /tools/bm-usage/perf/:key` — 경로를 지시와 다르게 둔 이유는 `docs/rules/idrac-server.md` v2.919 항목). 화면은 2단계.
@@ -386,6 +403,12 @@
   서버 `bmusage/maint/{schedule,judge,store,runtime,alertHold,partfaultHold,deploy}.js` · `bmusage/capacity.js` · 라우트 `routes/api/{bmMaint,bmCapacity}.js` · 중앙 `routes/central.js GET /bm-maint` ·
   `central/{bmMaintCapSanitize,bmCapacityPull}.js` · 엣지 워커 `agent/bmMaintPull.js` · 엣지 대행 `routes/collector.js /bm-usage/capacity` · 화면 `web/src/views/tools/{BmMaintPanel,BmCapacityFleet}.jsx` · 문구 `bmMaintText.js` · `bmCapacityText.js`.
   규칙 `docs/rules/{idrac-server,security-api,edge,web,perf-db}.md` 8a 항목 · `server/CLAUDE.md` 정비 창 불변조건. 설계와 다르게 둔 것 · 남은 것은 §6-23.
+- **8b단계 구현됨(버전 미정 — 서버 + 화면 · 8단계 전부 완료)**: 프로세스 Top-N(⑳ — `##TOP` 구획 · top 둘째 프레임 · /proc 대안 · I/O 2회 차이 · comm 만 · 저장 날 파일 7일 + comm 시간 집계 90일 · ‘변화 있을 때만’ ·
+  추이 팝업 ‘이 시점 프로세스’(CPU · 메모리 · I/O · 프로파일 단서 · 지속 · PID 재사용 · ◀ ▶) · 시간 × 프로세스 띠 · 엣지 대행) · 저활용 서버 찾기(㉑ — 점수 · 분모 환산 · 제외 집계 · 주기 사용 · 검토 상태(운영 주석) ·
+  비교로 보내기 · 후보 진입/이탈 변경 이벤트 · 하루 계산 · 봉투 idle) · 전력 · 온도 집계(㉒ — 법인 · 랙 · 미매핑 · kW 지금/24h 평균/피크 · kWh · 월 누적 · 랙 여유 · PowerCap 걸림 · 흡기 상위 · 팬 경고 · 미측정 제외 · 전력 대시보드와 한 소스).
+  서버 `bmusage/{parse/linuxTop,topStore,idle,idleConst,powerAgg}.js` · monthStore 가족 `top` · `toph` · 라우트 `routes/api/{bmTop,bmIdle,bmPower}.js` · 엣지 대행 `routes/collector.js /bm-usage/top(/band)` + `central/bmTopPull.js` ·
+  `central/bmIdleSanitize.js` · 설정 `perfRules` top · idle · power(랙 배치) · 화면 `web/src/views/tools/{BmTopProc,BmIdleFleet,BmPowerFleet}.jsx` · 문구 `bmTopText.js` · `bmIdleText.js` · `bmPowerText.js`.
+  규칙 `docs/rules/{idrac-server,security-api,edge,web,perf-db}.md` 8b 항목 · `server/CLAUDE.md` 8b 불변조건. 설계와 다르게 둔 것 · 남은 것은 §6-24.
 `bmusage/collectors/osSsh.js linuxCommand` 구획 추가 → `parse/linuxProc.js` 파서(순수 · 테스트) → `rates.js`·`usage.js` 열 추가 → `db.js` 열·튜닝 표 → USE 판정 순수 모듈(테스트가 웹·서버 같은 입력으로 대조) → `edgePull.js` 봉투 + 중앙 정제 화이트리스트 → 스냅샷 엣지 대행 라우트 → 웹(보드 · 상세 · 400 · 상태) → 목 데이터 → Chromium 1440/400 → 릴리스.
 
 ## 9. 출처(검색 2026-11-06)

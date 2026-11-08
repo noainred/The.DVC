@@ -25,7 +25,7 @@ export const powerText = (m) => (num(m?.powerAvgW) == null ? '—' : `${Math.rou
 export function actText(m) {
   if (num(m?.ssh) == null) return '—';
   const ev = (m.ssh || 0) + (m.focus || 0) + (m.snap || 0);
-  return ev === 0 ? '흔적 없음' : `SSH ${m.ssh} · 집중 ${m.focus ?? '—'} · 스냅샷 ${m.snap ?? '—'}`;
+  return ev === 0 ? '흔적 없음' : `SSH ${m.ssh} · 집중 ${m.focus ?? '—'} · 스냅 ${m.snap ?? '—'}`;
 }
 /** 상태 칸 문장 — 제외 사유 · 주기 사용 · 데이터 부족 일수. */
 export function statusText(r) {

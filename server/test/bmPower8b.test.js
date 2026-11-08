@@ -155,3 +155,15 @@ test('⑤ 랙 배치 설정 — 텍스트 해석 · 중복 · 두 랙 · 상한 
   assert.throws(() => P.normalizeRules({ idle: { watch: 80, candidate: 70 } }, { strict: true }), (e) => e.field === 'idle.watch');
   assert.ok(P.rulesAuditSummary({ power: { inletWarnC: 27 } }, { power: { inletWarnC: 30 } }).includes('power'), '감사 요약에 바뀐 절');
 });
+
+test('⑥ 알림 규칙 GET — 랙 배치 · 편집 텍스트는 보이는 법인 것만', async () => {
+  const P = await import('../src/bmusage/perfRules.js');
+  P._resetPerfRulesForTest();
+  P.savePerfRules({ power: { racksText: 'vcA,RA,1,KA@1\nvcB,RB,2,KB@2' } }, { by: 't' });
+  const { bmRulesRead } = await import('../src/routes/api/bmPerfOps.js');
+  const opA = { user: { username: 'op', role: 'admin', scope: { vcenters: ['vcA'] } }, query: {}, params: {} };
+  const r = await bmRulesRead(opA, { vcenters: [{ id: 'vcA' }, { id: 'vcB' }] }, { listEdgeBmUsage: async () => [], currentTargets: async () => ({ targets: [] }), bmAddressHosts: async () => [] });
+  assert.deepEqual(r.rules.power.racks.map((x) => x.rack), ['RA']); assert.equal(r.rules.power.racksText, 'vcA,RA,1,KA@1');
+  assert.ok(!JSON.stringify(r).includes('vcB,RB'), '다른 법인 랙 · 서버 키가 응답에 없다');
+  P._resetPerfRulesForTest();
+});

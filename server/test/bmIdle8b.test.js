@@ -202,3 +202,12 @@ test('⑥ 봉투 — 엣지가 싣는 표지 · 저활용 행 → 중앙 정제(
   const fit = E.fitEnvelope(env, 30_000);
   assert.equal(fit.idle.truncated, 'non-active-only'); assert.ok(fit.idle.rows.every((r) => r.status !== 'active')); assert.equal(fit.idle.dropped, 300);
 });
+
+test('⑦ 변경 이벤트 kind idle — 수집 노드 목록 · 중앙 대행 정제가 같은 값(둘을 같이 고친다)', async () => {
+  const C = await import('../src/bmusage/changes.js');
+  const P = await import('../src/central/bmPerfOpsPull.js');
+  assert.ok(C.CHANGE_KINDS.includes('idle'));
+  const e = P.cleanChange({ id: 1, ts: Date.now(), kind: 'idle', item: '저활용 후보', before: '관찰 50점', after: '후보 80점' });
+  assert.equal(e?.kind, 'idle', '엣지 서버의 저활용 전이가 중앙 대행에서 버려지지 않는다');
+  for (const k of C.CHANGE_KINDS) assert.ok(P.cleanChange({ ts: Date.now(), kind: k, item: 'x' }), `중앙 정제가 ${k} 를 받는다`);
+});

@@ -56,7 +56,7 @@ export function IdleFleetView({ resp, onOpen, onCompare, onReload, loading = fal
   const toggle = (k) => setSel((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else if (n.size < 5) n.add(k); return n; });
   const recompute = async () => {
     setRe({ busy: true });
-    try { const r = await postJson('/tools/bm-usage/idle/recompute', {}, { timeoutMs: 600_000 }); setRe({ ok: r?.ok !== false, text: r?.ok === false ? (r.reason || r.error || '실패') : `다시 계산했습니다(서버 ${r?.rows ?? '—'}대)` }); onReload?.(); }
+    try { const r = await postJson('/tools/bm-usage/idle/recompute', {}, { timeoutMs: 600_000 }); setRe({ ok: r?.ok !== false, text: r?.ok === false ? (r.reason || r.error || '실패') : `다시 계산했습니다(서버 ${unitText(r?.rows, '대')})` }); onReload?.(); }
     catch (e) { setRe({ ok: false, text: e?.message || '실패' }); }
   };
   return (
@@ -88,8 +88,8 @@ export function IdleFleetView({ resp, onOpen, onCompare, onReload, loading = fal
           <span className="bmo-sub">{rows.length} / {all.length}대</span>
           {re && !re.busy && <span className="bmo-sub" style={{ color: toneVar(re.ok ? 'ok' : 'bad') }}>{re.text}</span>}
         </div>
-        <STable minWidth={1180} className="bmo-t" style={{ fontSize: 12 }} limit={500}>
-          <thead><tr><th data-nosort="1">선택</th><th>서버</th><th>법인</th><th className="right">점수</th><th style={{ minWidth: 110 }}>상태</th><th className="right">CPU 평균/최대</th><th className="right">메모리</th><th className="right">디스크</th><th className="right">네트</th><th className="right">전력 W(평균)</th><th>활동</th><th style={{ minWidth: 150 }}>검토</th></tr></thead>
+        <STable minWidth={1040} className="bmo-t" style={{ fontSize: 12 }} limit={500}>
+          <thead><tr><th data-nosort="1">선택</th><th>서버</th><th>법인</th><th className="right">점수</th><th>상태</th><th className="right">CPU 평균/최대</th><th className="right">메모리</th><th className="right">디스크</th><th className="right">네트</th><th className="right">전력 W</th><th style={{ minWidth: 90 }}>활동</th><th style={{ minWidth: 120 }}>검토</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <React.Fragment key={`${r.node}|${r.vcenterId}|${r.key}`}>
@@ -98,7 +98,7 @@ export function IdleFleetView({ resp, onOpen, onCompare, onReload, loading = fal
                   <td data-sort={r.name} style={{ whiteSpace: 'nowrap' }}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key); }}>{r.name}</span>{droppedText(r) && <div className="bmo-sub">{droppedText(r)}</div>}</td>
                   <td data-sort={r.vcenterId || ''}>{r.vcenterId || '—'}</td>
                   <td className="right" data-sort={r.score ?? ''} style={{ fontWeight: 600 }}>{r.score ?? '—'}</td>
-                  <td data-sort={r.status} className="bmo-wrap" style={{ color: toneVar(STATUS_TEXT[r.status]?.tone || 'idle') }}>{statusText(r)}</td>
+                  <td data-sort={r.status} className="bmo-wrap" style={{ color: toneVar(STATUS_TEXT[r.status]?.tone || 'idle'), wordBreak: 'keep-all', minWidth: 56 }}>{statusText(r)}</td>
                   <td className="right" data-sort={r.metrics?.cpuAvg ?? ''}>{cpuPairText(r.metrics)}</td>
                   <td className="right" data-sort={r.metrics?.memAvg ?? ''}>{unitText(r.metrics?.memAvg, '%')}</td>
                   <td className="right" data-sort={r.metrics?.diskMax ?? ''}>{unitText(r.metrics?.diskMax, '%')}</td>

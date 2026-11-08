@@ -55,7 +55,9 @@ export function reviewMap(items = []) {
     const k = `${t(a.target.vcenterIds?.[0])}|${t(a.target.keys?.[0])}`;
     const cur = out.get(k);
     if (cur && cur.at >= Number(a.created)) continue;
-    out.set(k, { status: st, reason: String(a.text || '').slice(0, 300), by: String(a.by || '').slice(0, 64), at: Number(a.created) || 0, id: a.id });
+    // 사유만(저장 문구의 머리 ‘[저활용 검토] 상태 — ’ 는 뗀다 — 화면이 상태를 따로 적는다)
+    const reason = String(a.text || '').replace(/^\[저활용 검토\] [^—]{0,24}(?:— )?/, '').slice(0, 300);
+    out.set(k, { status: st, reason, by: String(a.by || '').slice(0, 64), at: Number(a.created) || 0, id: a.id });
   }
   for (const [k, v] of [...out]) if (v.status === 'clear') out.delete(k);
   return out;

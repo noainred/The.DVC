@@ -8,6 +8,7 @@ import { fetchJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
+import { unitText } from '../unitText.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
 import { powerCards, kwText, kwhText, wText, cText, marginText, capText, fanText, trendPath, hourText, unmeasuredText, POWER_HONEST, UNMEASURED_TEXT } from './bmPowerText.js';
 import './bmOps.css';
@@ -48,7 +49,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
       </div>
       {resp?.addressHidden && <p className="bmo-sub">관리자 판본이 아닙니다 — 주소인 서버 이름은 가림 토큰으로 보입니다.</p>}
       <section className="bmo-card">
-        <h5 className="bmo-h">법인별 — 측정분 합 <span className="bmo-sub">(함대 원천 모으기 {resp?.gatherMs ?? '—'}ms · 60초 공유)</span></h5>
+        <h5 className="bmo-h">법인별 — 측정분 합 <span className="bmo-sub">(함대 원천 모으기 {unitText(resp?.gatherMs, 'ms')} · 60초 공유)</span></h5>
         <div className="bmo-bar"><button className="btn btn-sm" onClick={onReload} disabled={loading}>{loading ? '읽는 중…' : '다시 읽기'}</button></div>
         <STable minWidth={980} className="bmo-t" style={{ fontSize: 12 }}>
           <thead><tr><th>법인</th><th className="right">서버</th><th className="right">지금</th><th className="right">24h 평균</th><th className="right">24h 피크</th><th className="right">24h kWh</th><th className="right">월 누적</th><th>미측정</th><th className="right">흡기 평균/최대</th><th className="right">팬 경고</th></tr></thead>

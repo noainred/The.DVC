@@ -1,7 +1,7 @@
 /**
  * mock/demo/bmTop.js — 데모(mock) 대상의 **프로세스 Top-N 합성 표본**(8b단계 ⑳ — 화면 확인용). 장비에 접속하지 않는다 · 같은 저장 경로(topStore.topWriteBatch)로 들어간다.
  *   값은 parse/linuxTop.js parseTop 과 같은 모양 — 대상마다 용도 꼴(GPDB · Airflow · 일반)을 키 해시로 고르고 하루 주기 + 피크를 얹는다(수치는 가상).
- *   첫 호출은 최근 24시간(5분)을 함께 돌려준다(띠 · ◀ ▶ 확인용 · 대상 12대까지). I/O 는 한 프로세스를 ‘권한 없음’ 으로(— 칸 확인).
+ *   첫 호출은 최근 24시간(5분)을 함께 돌려준다(띠 · ◀ ▶ 확인용 · 대상 40대까지). I/O 는 한 프로세스를 ‘권한 없음’ 으로(— 칸 확인).
  */
 const HOUR = 3_600_000;
 const STEP = 5 * 60_000;
@@ -30,7 +30,7 @@ export function demoTopValue(tg, t) {
   const cpu = role.map(([comm, user], i) => {
     const v = Math.max(0, r1((i === 0 ? 55 : i === 1 ? 14 : 4 / (i + 1)) * (0.3 + day) * peak));
     const start = i < 2 ? 3_600 + i * 900 : 7_200 + i * 13;
-    return { pid: base + i * 7, user, state: v > 20 ? 'R' : i === 1 && peak > 1 ? 'D' : 'S', comm, cpu: v, cpuS: r1((t / 1000 - 1.7e9) * (i === 0 ? 0.55 : i === 1 ? 0.14 : 0.01)), start,
+    return { pid: base + i * 7, user, state: v > 20 ? 'R' : i === 1 && peak > 1 ? 'D' : 'S', comm, cpu: v, cpuS: r1(Math.max(0, upS - start) * (i === 0 ? 0.55 : i === 1 ? 0.14 : 0.01)), start,
       rssKb: Math.round((i < 2 ? 3_000_000 : 40_000) * (1 + (i % 3) * 0.1)), rd: i === 3 ? null : Math.round((i < 2 ? 200 : 2) * 1e6 * day), wr: i === 3 ? null : Math.round((i < 2 ? 40 : 1) * 1e6 * day), ioPerm: i === 3 };
   }).sort((a, b) => b.cpu - a.cpu);
   const mem = [...cpu].sort((a, b) => b.rssKb - a.rssKb).slice(0, 5).map((x) => ({ pid: x.pid, user: x.user, rssKb: x.rssKb, state: x.state, etimes: Math.max(0, Math.floor(upS - x.start)), comm: x.comm, start: x.start }));
@@ -40,13 +40,13 @@ export function demoTopValue(tg, t) {
     cpuTotal: tot, candidates: cpu.length, cpu, mem, io, ioPerm: 1, ioUnknown: 0, unparsed: 0, capped: false };
 }
 
-/** 이번 주기 항목(첫 호출은 최근 24시간 5분 표본을 앞에 붙인다 — 대상 12대까지). */
+/** 이번 주기 항목(첫 호출은 최근 24시간 5분 표본을 앞에 붙인다 — 대상 40대까지). */
 export function demoTopItems(targets = [], now = Date.now()) {
   const list = (targets || []).filter((x) => x?.key);
   const out = [];
   if (!_backfilled) {
     _backfilled = true;
-    for (const tg of list.slice(0, 12)) for (let t = Math.floor((now - 24 * HOUR) / STEP) * STEP; t < now - STEP; t += STEP) out.push({ key: tg.key, ts: t, top: demoTopValue(tg, t) });
+    for (const tg of list.slice(0, 40)) for (let t = Math.floor((now - 24 * HOUR) / STEP) * STEP; t < now - STEP; t += STEP) out.push({ key: tg.key, ts: t, top: demoTopValue(tg, t) });
   }
   for (const tg of list) out.push({ key: tg.key, ts: now, top: demoTopValue(tg, now) });
   return out;
