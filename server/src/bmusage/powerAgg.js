@@ -69,7 +69,7 @@ function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
   const margin = capKw != null && nowKw != null ? r1(((capKw - nowKw) / capKw) * 100) : null;
   return {
     servers: g.servers, measured: g.measured, unmeasured: g.unmeasured, unmeasuredN: g.servers - g.measured,
-    nowKw, avg24Kw: g.avg24N ? r2(g.avg24W / 1000) : null, avg24Servers: g.avg24N, peak24Kw: pk ? r2(pk.w / 1000) : null, peak24At: pk ? pk.t : null, peakServers: full,
+    nowW: g.measured ? Math.round(g.nowW) : null, nowKw, avg24Kw: g.avg24N ? r2(g.avg24W / 1000) : null, avg24Servers: g.avg24N, peak24Kw: pk ? r2(pk.w / 1000) : null, peak24At: pk ? pk.t : null, peakServers: full,
     partialHours: hrs.length - complete.length, kwh24: g.avg24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN,
     capKw, marginPct: margin, low: margin != null && margin < rackLowPct,
     inletAvg: g.inletN ? r1(g.inletSum / g.inletN) : null, inletMax: g.inletMax, maxC: g.maxC, inletServers: g.inletN,
@@ -83,7 +83,8 @@ function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
  * @returns {{ corps:Array, racks:Array, hot:Array, capHit:Array, fleet:object, bins:Array, rackOf:Map }}
  */
 export function aggregatePower(servers = [], { racks = [], cfg = {} } = {}) {
-  const c = { ...POWER_DEFAULTS, ...Object.fromEntries(Object.entries(cfg || {}).filter(([, v]) => v != null)) };
+  // 기준값만(랙 배치 목록은 cfg 로 받지 않는다 — 응답에 실리는 cfg 로 다른 법인 랙이 새지 않게)
+  const c = { ...POWER_DEFAULTS, ...Object.fromEntries(Object.entries(cfg || {}).filter(([k, v]) => v != null && k in POWER_DEFAULTS)) };
   const rackOf = new Map();
   for (const r of Array.isArray(racks) ? racks : []) for (const sv of r.servers || []) rackOf.set(`${r.vcenterId}|${sv.key}`, { rack: r.rack, u: sv.u ?? null, capKw: r.capKw ?? null });
   const rackCap = new Map((Array.isArray(racks) ? racks : []).map((r) => [`${r.vcenterId}|${r.rack}`, r.capKw ?? null]));

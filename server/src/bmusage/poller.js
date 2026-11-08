@@ -33,7 +33,10 @@ import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
 import { buildUsage } from './usage.js';
 import { recordHbaBasis, pruneHbaBasis } from './hbaBasis.js'; // v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거(화면 각주)
-import { collectOsUsage, SESSION_BUDGET_MS as OS_BUDGET_MS } from './collectors/osSsh.js';
+import { collectOsUsage as collectOsUsageReal, SESSION_BUDGET_MS as OS_BUDGET_MS } from './collectors/osSsh.js';
+/** 8b 시험 이음매 — 운영 경로는 늘 osSsh.collectOsUsage(_osCollector 는 시험만 바꾼다). */
+let _osCollector = null;
+const collectOsUsage = (osHost, opts) => (_osCollector || collectOsUsageReal)(osHost, opts);
 import { insertUsage, pruneUsage, repairRollups, snapshotPrune } from './db.js';
 import { ensureMonthMigration, migrationLast } from './monthMigrate.js';
 import { estimateBaseMs, planCycleWindow } from './peakPlan.js'; // v2.922: 피크 창 주기 예산 자동 맞춤
@@ -1211,6 +1214,8 @@ export function stopBmUsagePoller() { _timer?.stop?.(); _timer = null; }
 export function _resetForTest() { _lastLiveKeys = null; _lastRepair = null; _cycleSamples = []; _peakPlan = null; _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; _health = null; _healthSince = new Map(); guard._resetForTest(); }
 /** 테스트 전용 — 분류 함수 대체(EDGE2628-03) · 인메모리 상태 주입(EDGE2628-02). */
 export function _setFleetForTest(fn) { _fleetOverride = typeof fn === 'function' ? fn : null; }
+/** 시험 이음매(8b) — OS 수집기를 바꾼다(실제 폴러 주기 · 적재 배선을 SSH 없이 시험). 운영 경로는 늘 collectOsUsage. */
+export function _setOsCollectorForTest(fn) { _osCollector = typeof fn === 'function' ? fn : null; }
 export function _seedStateForTest({ prev = [], authStopped = [] } = {}) {
   for (const k of prev) _prev.set(k, { at: Date.now() });
   for (const k of authStopped) _authStopped.set(k, { attempts: 1 });

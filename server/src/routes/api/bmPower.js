@@ -87,7 +87,8 @@ export async function bmPowerView(req, snap, deps = {}) {
   // 범위 먼저(합하기 전) — 귀속 없음은 범위 계정에 숨김
   const vis = servers.filter((s) => !allowed || (s.vcenterId && allowed.has(s.vcenterId)));
   const racks = (rules.power?.racks || []).filter((r) => !allowed || allowed.has(r.vcenterId));
-  const ag = A.aggregatePower(vis, { racks, cfg: rules.power || {} });
+  const { racks: _all, ...pcfg } = rules.power || {};   // 랙 배치 원본(전 법인)은 응답에 싣지 않는다 — 보이는 법인 것만 racks 로
+  const ag = A.aggregatePower(vis, { racks, cfg: pcfg });
   let match = null;
   if (!isAdmin) ({ match } = await perfAddressMatcher(D, tg));
   const maskName = (nm) => (isAdmin ? nm : (match && match(nm) ? maskedIdToken(nm) : String(nm).replace(IPV4_RE, (ip) => maskedIdToken(ip))));

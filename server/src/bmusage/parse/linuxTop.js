@@ -20,7 +20,7 @@
  *     줄 머리에 오면 ‘##END’ · ‘##MEM’ 표지를 위조할 수 있다. comm 은 줄 **끝** 칸에만 온다 · awk 가 인쇄 가능한 ASCII 밖(개행 포함)을 ‘?’ 로 바꾼다 ·
  *     stat 파일의 comm 안 개행은 getline 으로 줄을 이어 붙여 한 줄로 만든다(그래도 접두가 앞에 있다). 파서는 접두 없는 줄을 버린다.
  *   · 출력 상한: 줄마다 `cut -c1-200` · 구획 `head -n 40` → 40 × 201 = 8,040 바이트 ≤ 8KB(설계 ‘40줄/8KB’ — 산수 시험이 고정).
- *   · 멈출 수 있는 명령은 `timeout 5`(top) — 주기 명령 전체가 시한 하나라 한 칸이 전 구획을 잃게 하지 않는다(5단계 R8).
+ *   · 멈출 수 있는 명령은 `timeout 3`(top) — 주기 명령 전체가 시한 하나라 한 칸이 전 구획을 잃게 하지 않는다(5단계 R8).
  *   · 비용: 1초 대기(top -d 1 또는 sleep 1) + /proc 읽기 — 세션 예산 산수(bmTop8b 시험 · bmUsagePerf2550 의 장비 시한)가 고정한다.
  *
  * ⚠ 정직 기록: Rocky 9(procps-ng 3.3.17)의 top 배치 출력 형식은 이 개발 컨테이너(procps-ng 4.0.4)에서만 확인했다 — 머리글로 열을 찾으므로
@@ -42,11 +42,15 @@ export const MEM_TOP = 5;
 /** comm · 사용자 길이 상한(설계 ‘사용자 이름 16자’ — comm 은 커널 TASK_COMM_LEN 15 지만 커널 스레드 이름은 더 길 수 있다). */
 export const COMM_MAX = 64;
 export const USER_MAX = 16;
-/** top 시한(초) · 1초 대기 — 세션 예산 산수에 쓴다(bmTop8b 시험). */
-export const TOP_TIMEOUT_S = 5;
+/** top 시한(초 — top -n 2 -d 1 은 실측 약 1.2초) · 1초 대기 — 세션 예산 산수에 쓴다(bmTop8b 시험). */
+export const TOP_TIMEOUT_S = 3;
 export const TOP_WAIT_S = 1;
-/** 이 구획이 주 명령에 더하는 최악 시간(ms) — top 시한 + /proc 읽기 여유(추정 2초). */
-export const TOP_WORST_MS = (TOP_TIMEOUT_S + 2) * 1000;
+/**
+ * 이 구획이 주 명령에 더하는 최악 시간(ms) — top 이 시한까지 멈추고(3초) 대안 경로(1초 대기 + /proc 읽기 여유 1초 추정)까지 도는 경우.
+ *   평소(top 정상)는 약 1.2초(이 컨테이너 실측 1.0~1.3초). ⚠ 주 명령 전체의 최악 timeout 합은 8b 전에도 30초 명령 시한을 넘는다(조건부 needs-restarting · dnf 포함 34초) —
+ *   이 구획은 그 합에 최악 5초를 더한다(정직 기록 · 시험이 이 값을 고정한다).
+ */
+export const TOP_WORST_MS = (TOP_TIMEOUT_S + TOP_WAIT_S + 1) * 1000;
 
 /*
  * top 둘째 프레임 → `C <pid> <%cpu> <state>`(상위 20) + `K <프로세스 수> <R 수> <D 수> <%CPU 합>`. 머리글을 못 찾으면 K 를 내지 않는다(→ 대안 경로).
