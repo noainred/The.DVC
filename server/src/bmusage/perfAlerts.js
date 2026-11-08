@@ -6,7 +6,8 @@
  *
  * 폭주를 막는 장치(v2.551 bmusage 알림과 같은 네 개 + 상한):
  *   ① 지속(sustain 주기) ② **한 사건에 한 번**(조건이 거짓이 될 때까지 다시 보내지 않는다 — ‘같은 상태가 계속이면 다시 보내지 않음’) ③ 재발 억제(repeatMin — 새 사건이어도 그 안이면 보내지 않는다)
- *   ④ 상태 파일(`bm-perf-alert-state.json` — 원자 쓰기 · 재시작 뒤 재발송 없음 · 손상이면 보존하고 **첫 주기는 기준만 잡는다**(warmup — 진행 중인 사건을 한꺼번에 다시 보내지 않게))
+ *   ④ 상태 파일(`bm-perf-alert-state.json` — 원자 쓰기 · 재시작 뒤 재발송 없음 · 손상이면 보존하고 **첫 주기는 기준만 잡는다**(warmup — 진행 중인 사건을 한꺼번에 다시 보내지 않게 ·
+ *      수집 노드 칸 · 서버 · 랙 종류별 — 아래 _warmKinds))
  *   ⑤ 법인당 하루 상한(알림 50 · 이슈 20 · 자동 집중 10 — 설정) — 넘으면 보내지 않고 센다(조용히 버리지 않는다).
  * ⚠⚠ `null`(못 읽음 · 오래됨 · 판정 불가)은 참도 거짓도 아니다 — 판정 보류(상태 유지). 0 을 정상으로 세지 않는다.
  * ⚠ 유지보수 창 억제(Bareos · Veeam 스케줄): 지금 저장소에는 **베어메탈 서버의 백업 창을 읽는 원천이 없다**(Bareos 그룹 스케줄 · Veeam 스케줄은 VM 대상) —
@@ -360,7 +361,16 @@ export function perfAlertOf(f, { corpName = '' } = {}) {
 export function maintenanceFor(_target, _now = Date.now(), _cfg = {}) { return { suppressed: false, source: 'none' }; }
 
 /* ── 상태 파일 ─────────────────────────────────────────────────────────── */
-let _state = null; let _warmup = false; let _loadError = null;
+let _state = null; let _loadError = null;
+/*
+ * 손상 뒤 ‘첫 주기는 기준만’ 보호(warmup) — **종류별**(4차 R1 · 메인 결정): 수집 노드 칸(`__node__`)과 서버 · 랙 항목. 손상이면 둘 다 기준만으로 시작하고,
+ *   한 주기에서 그 종류의 항목이 처음 판정되면 그 종류의 보호만 푼다 · 발송은 주기 시작 때 보호가 이미 풀려 있던 종류의 발화만(나머지는 기준만 — 상태는 ‘보낸 것’ 으로 남는다).
+ *   ⚠ 정정: e50dac58(Q1)은 보호 하나를 서버 · 랙 항목이 와야만 풀어, 손상 뒤 분류 실패가 이어지면 수집 건강 알림이 정상 주기가 올 때까지 나가지 않았다 —
+ *   그 앞 판(2225415f)은 수집 노드 칸만 있는 판정이 보호를 통째로 써 버려 다음 정상 주기에 진행 중이던 걸림을 새 사건으로 보냈다(Q1).
+ */
+const WARM_KINDS = Object.freeze(['node', 'target']);
+const warmKindOf = (key) => (String(key || '') === '__node__' ? 'node' : 'target');
+let _warmKinds = new Set();
 function fresh() { return { v: 1, rules: {}, day: '', counts: {}, sent: [] }; }
 function load() {
   if (_state) return _state;
@@ -376,7 +386,7 @@ function load() {
     // 손상 — 보존하고 첫 주기는 기준만 잡는다(진행 중인 사건을 ‘새 사건’ 으로 한꺼번에 다시 보내지 않게).
     preserveCorrupt(FILE(), String(e?.message || e));
     _loadError = { at: Date.now(), reason: '상태 파일 손상 — 보존본을 남기고 다음 주기부터 새로 셉니다' };
-    _warmup = true;
+    _warmKinds = new Set(WARM_KINDS);
     _state = fresh();
     console.warn('[bmusage] bm-perf-alert-state.json 을 읽지 못해 보존하고 기준을 다시 잡습니다(이번 주기는 알림을 보내지 않습니다)');
   }
@@ -398,7 +408,7 @@ function withState(fn) {
   return run;
 }
 const _pendingSends = new Set();
-export function _resetPerfAlertsForTest({ unlink = true } = {}) { _state = null; _warmup = false; _loadError = null; _chain = Promise.resolve(); _cycleEndAt = null; _lastJudgeAt = null; _lastCycle = null; if (unlink) { try { fs.unlinkSync(FILE()); } catch { /* */ } } }
+export function _resetPerfAlertsForTest({ unlink = true } = {}) { _state = null; _warmKinds = new Set(); _loadError = null; _chain = Promise.resolve(); _cycleEndAt = null; _lastJudgeAt = null; _lastCycle = null; if (unlink) { try { fs.unlinkSync(FILE()); } catch { /* */ } } }
 /** 테스트 · 종료용 — 대기열에 넣은 발송의 결과 기록까지 끝날 때까지 기다린다. */
 export async function _drainPerfAlertsForTest() { while (_pendingSends.size) await Promise.allSettled([..._pendingSends]); await _chain; }
 /** 화면 · 봉투용 — 추적 수 · 오늘 상한 사용 · 발송 기록(최근 SENT_LOG_MAX — 채널 URL 없음). */
@@ -637,17 +647,15 @@ export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps 
       for (const x of released) by[x.reason || '사유 모름'] = (by[x.reason || '사유 모름'] || 0) + 1;
       console.log(`[bmusage] 전력 알림 판정 노드 넘어감 ${released.length}건(${Object.entries(by).map(([k, v]) => `${k} ${v}`).join(' · ')}) — 이 노드의 규칙 상태를 비웠습니다(해소 알림 없음 · 재발 억제 묘비만 남김)`);
     }
-    // 상태가 바뀐 적 없는 첫 주기(손상 뒤 warmup)는 기준만 잡는다.
-    //   4차 Q1: 서버 · 랙 항목이 없는 판정(실패 주기의 빈 판정 · 수집 노드 칸만 — 3차 P2)은 이 보호를 **소비하지 않는다** — 그 판정도 보내지 않고(기준만),
-    //   서버 · 랙 기준은 다음 정상 주기가 잡는다. 예전에는 빈 판정이 보호를 써 버려 다음 정상 주기에 진행 중이던 걸림을 새 사건으로 보냈다(정상 주기 먼저 0 · 빈 판정 먼저 1).
-    //   보류 주기 수 · 판정 시각(위 st.cycle)은 그대로 남긴다.
-    if (_warmup) {
-      if (items.some((x) => x && x.key && x.key !== '__node__')) _warmup = false;
-      return { ok: true, warmup: true, counts };
-    }
+    // 손상 뒤 첫 주기는 기준만(위 _warmKinds — 종류별). 주기 시작 때 보호 중이던 종류의 발화는 보내지 않는다 — 그 종류의 항목이 이 주기에 왔으면 보호를 푼다.
+    //   4차 Q1: 서버 · 랙 항목이 없는 판정(실패 주기의 빈 판정 · 수집 노드 칸만 — 3차 P2)은 서버 · 랙 보호를 풀지 않는다. 보류 주기 수 · 판정 시각(위 st.cycle)은 그대로 남긴다.
+    const warmAtStart = new Set(_warmKinds);
+    for (const x of items) if (x && x.key) _warmKinds.delete(warmKindOf(x.key));
+    const held = warmAtStart.size ? fires.filter((f) => warmAtStart.has(warmKindOf(f.key))) : [];
+    const sendable = held.length ? fires.filter((f) => !warmAtStart.has(warmKindOf(f.key))) : fires;
     const targetsByKey = new Map(items.filter((x) => x?.target).map((x) => [x.key, x.target]));
-    const out = fires.length ? await dispatch(fires, { rules, st, now, D, targetsByKey, cycleMax }) : {};
-    return { ok: true, counts, fires: fires.length, ...out };
+    const out = sendable.length ? await dispatch(sendable, { rules, st, now, D, targetsByKey, cycleMax }) : {};
+    return { ok: true, counts, fires: sendable.length, ...out, ...(held.length ? { warmup: true, warmupHeld: held.length } : {}) };
   });
 }
 
