@@ -582,7 +582,7 @@
   - **읽기 = 같은 SSH 세션(로그인 1회)의 별도 exec**(`osSsh extraCommands` 이름 `logs` — 주 명령 · 피크 창 뒤 남은 예산 안에서만 · 모자라면 `skipped`). 주 명령에 섞지 않은 이유: 주 명령의 전체 바이트 상한과
     ‘##END 미도착 = 마지막 구획 버림’(1단계 D1)이 로그 수천 줄 때문에 다섯 지표 구획을 밀어내면 안 된다(설계와 다른 결정 — 이름은 그대로 `##JOURNAL · ##DMESG · ##SECURE` + `##JSEC · ##AUDIT · ##APPLOG`).
   - **증분**: journald 는 `-o json`(한 줄 = 한 항목) · `-p warning` · `_TRANSPORT=journal|syslog|stdout`(커널 메시지는 dmesg 가 읽는다 — 두 번 세지 않게) · **항목마다 커서**(awk 가 본 마지막 항목의 `__CURSOR` —
-    상한 · 바이트 상한 · `timeout 15`(rc 124 = ‘부분’)에서도 본 데까지 넘어가 같은 줄을 다시 세지 않는다 · 7a 반증 F5) · 커서가 없으면 최근 60분. **`-q` 를 쓰지 않는다**(systemd v239 · v252
+    상한 · 바이트 상한 · `timeout 6`(8b 반증 후속 — 예전 15 · 이 exec 안 timeout 합 산수 · rc 124 = ‘부분’)에서도 본 데까지 넘어가 같은 줄을 다시 세지 않는다 · 7a 반증 F5) · 커서가 없으면 최근 60분. **`-q` 를 쓰지 않는다**(systemd v239 · v252
     `journal_access_check_and_warn` 원문 — `-q` 면 ‘Hint: … not seeing messages from other users and the system’ 이 꺼진다 · 반증 F2): 힌트 = `perm/own`(자기 저널만 — 세지 않고 위치만) ·
     ‘No journal files were opened due to insufficient permissions’ = `perm/none` · ‘No journal files were found’ = `absent/nofiles` · 수집 계정 uid · 소속(systemd-journal · adm · wheel)을 메타로(화면 권한 안내).
     dmesg `-x` 는 **boot_id + 마지막 [초]**(`--time-format` 에 기대지 않는다 · 재부팅이면 링 버퍼 처음부터) · **첫 읽기는 가동 마지막 60분만**(그 앞은 `older` 로 세기만 — 옛 부팅 줄을 ‘지금’ 사건으로 세지 않는다 · 반증 F6 ·
