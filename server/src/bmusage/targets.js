@@ -49,6 +49,7 @@ export const NO_PATH_REASON = Object.freeze({
   'no-idrac-cred': 'iDRAC 등록에 계정·비밀번호가 없습니다.',
   'no-os-cred': 'OS 계정이 없습니다 — 설정 › 베어메탈 스토리지에 이 호스트를 등록하면 디스크·네트워크·HBA 까지 읽습니다.',
   'both-off': 'iDRAC 텔레메트리와 OS SSH 가 모두 꺼져 있습니다.',
+  'key-conflict': '식별 키가 이 노드의 다른 서버와 겹칩니다 — 두 서버의 값이 한 행에 섞이지 않게 수집하지 않습니다(설정 › iDRAC 등록에서 서비스태그를 채우면 키가 갈려 다음 주기부터 수집합니다).',
 });
 
 /**
@@ -198,6 +199,34 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     }
   }
 
+  /*
+   * ⚠⚠ **키 충돌을 조용히 두지 않는다**(v2.550.3) — 그리고 **수집하지 않는다**(다음 점검 ① · 2026-11-08 — v2.550.3 의 ‘대상에서 빼지 않는다’ 를 뒤집었다).
+   *   이 노드의 저장 표는 전부 `(agent, key, …)` 가 기본키다(db.js usage_history · usage_daily · usage_latest · usage_devices · change_latest · log_cursor ·
+   *   log_pattern · log_hour · log_sec · monthStore.js usage_hourly · usage_mount_daily · usage_device_* · top_sample · top_proc · top_proc_hourly) — 같은 키 두 서버는
+   *   ① 최신값 · 일 롤업 · 커서 · 변경 기준이 한 행에 덮어써지고 ② 이력 행이 번갈아 섞이며(추이가 두 서버를 오간다) ③ 폴러의 인메모리 맵(_prev 누적 카운터 ·
+   *   _authStopped 인증 정지 · 상세 · 로그 커서)도 키 하나를 같이 쓴다 — 한 서버의 인증 실패가 다른 서버 수집을 멈추고 카운터 차이가 두 서버 값으로 계산된다.
+   *   예전 판은 ‘어느 쪽을 버릴지 근거가 없어 빼지 않는다’ 였지만 그 결과는 오류 없이 **틀린 값**이었다 — 섞인 값보다 ‘수집 안 함 · 이유’ 가 낫다(못 읽음은 0 이 아니다).
+   *   그래서 같은 키의 **모든** 대상을 수집에서 빼고(어느 하나도 고르지 않는다 — 분류 순서는 전력값으로 바뀌어 매 주기 다른 쪽이 이긴다) `key-conflict` 로 밝힌다.
+   *   ⚠ 기존 행의 키는 바꾸지 않는다(마이그레이션 없음 — 이미 섞인 이력은 보존일이 지나며 사라진다) · 서비스태그를 채워 키가 갈리면 다음 주기부터 다시 수집한다.
+   *   목록은 **서버마다 한 줄**(그 서버의 법인 · 이름만) — 예전에는 한 줄에 두 서버 이름을 담고 법인은 하나라 범위 계정이 다른 법인 서버 이름을 봤다.
+   */
+  const groups = new Map();
+  for (const x of targets) { if (!groups.has(x.key)) groups.set(x.key, []); groups.get(x.key).push(x); }
+  const keyConflicts = [];
+  let conflictGroups = 0;
+  for (const [k, list] of groups) {
+    if (list.length < 2) continue;
+    conflictGroups += 1;
+    for (const x of list) {
+      keyConflicts.push({ key: k, names: [x.name].filter(Boolean), keyKind: x.keyKind, vcenterId: x.vcenterId || '', role: x.role, peers: list.length });
+      skipped.push({ serverId: x.serverId, fleetId: x.fleetId, name: x.name, serviceTag: x.serviceTag, key: x.key, keyKind: x.keyKind, role: x.role, reason: 'key-conflict', vcenterId: x.vcenterId || '' });
+    }
+  }
+  if (conflictGroups) {
+    const bad = new Set([...groups].filter(([, l]) => l.length > 1).map(([k]) => k));
+    for (let i = targets.length - 1; i >= 0; i -= 1) if (bad.has(targets[i].key)) targets.splice(i, 1);
+  }
+
   const counts = { targets: targets.length, skipped: skipped.length, idrac: 0, os: 0, both: 0 };
   counts.virt = targets.filter((x) => x.role === 'virt').length;
   for (const x of targets) {
@@ -219,22 +248,7 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
   for (const s of skipped) byReason[s.reason] = (byReason[s.reason] || 0) + 1;
   counts.byReason = byReason;
   counts.osDuplicates = os.duplicates;
-  /*
-   * ⚠⚠ **키 충돌을 조용히 두지 않는다**(v2.550.3). DB 기본키가 `(agent, key, ts)` 라 두 서버가 같은
-   *   `key` 를 쓰면 **한쪽이 다른쪽을 덮어쓴다** — 그 서버의 사용률이 다른 서버 값으로 보이고
-   *   오류도 나지 않는다(v2.548 F2 가 겪은 것과 같은 유형: 서비스태그가 비어 fleetId·serverId 로
-   *   떨어진 서버끼리, 또는 한쪽의 fleetId 가 다른쪽의 서비스태그와 같을 때 성립한다).
-   *   여기서 **대상에서 빼지는 않는다** — 어느 쪽을 버릴지 판단할 근거가 없고, 빼면 멀쩡한 서버가
-   *   조용히 사라진다. 개수와 목록을 올려 화면이 말하게 한다.
-   */
-  const seen = new Map();
-  const keyConflicts = [];
-  for (const x of targets) {
-    const prev = seen.get(x.key) || null;
-    if (prev) keyConflicts.push({ key: x.key, names: [prev.name, x.name].filter(Boolean), keyKind: x.keyKind, vcenterId: x.vcenterId || prev.vcenterId || '' });
-    else seen.set(x.key, x);
-  }
-  counts.keyConflicts = keyConflicts.length;
+  counts.keyConflicts = conflictGroups;   // 겹친 키 수(서버 수는 keyConflicts.length)
   return { targets, skipped, counts, keyConflicts };
 }
 

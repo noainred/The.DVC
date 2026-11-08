@@ -27,7 +27,8 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
 import { publicTarget, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
-import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, resolveMaskedToken, isAdminReq, scrubberFor, maskedIdToken } from '../../auth/addressMask.js';
+import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, isAdminReq, scrubberFor, maskedIdToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
+import { targetIdOf } from '../../bmusage/maint/judge.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 정비 창 판정과 같은 식별 함수
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor, sourceErrorsView, usageDetailFor } from '../../bmusage/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
@@ -257,15 +258,14 @@ export async function bmPerfView(req, snap, deps = {}) {
   const isAdmin = isAdminReq(req);
   const key = t(req.params.key);
   if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
-  const NOT_FOUND = { __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' };
   const s = loadBmUsageSettings();
-  const tg = await D.currentTargets();
-  const realKey = tg.targets.some((x) => x.key === key) ? key
-    : (isAdmin ? null : resolveMaskedToken(key, tg.targets.map((x) => x.key)));
-  const target = realKey ? (tg.targets.find((x) => x.key === realKey) || null) : null;
   const common = { perfThresholds: s.perf, perfDefaults: PERF_DEFAULTS, perfCols: PERF_COL_META, intervalMs: s.intervalMs, freshMs: freshMsFor(s.intervalMs) };
-  if (target) {
-    if (allowed && (!target.vcenterId || !allowed.has(target.vcenterId))) return NOT_FOUND;
+  // 다음 점검 ①: 대상은 (법인, 키) 쌍 — resolvePerfTarget 하나(예전에는 이 함수가 해석을 따로 두어 같은 키의 첫 대상을 골랐다).
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId: perfVcOf(req) });
+  const bad = perfTargetFail(found);
+  if (bad) return bad;
+  if (found.via === 'local') {
+    const { target, tg } = found;
     const agent = config.agent?.name || '';
     const row0 = (await D.latestUsage({ json: true }).catch(() => [])).find((r) => t(r.key) === target.key && t(r.agent) === agent) || null;
     const row = row0 ? (await demoPerfRows([row0], tg.targets))[0] : null;   // v2.920(반증 D2) — 데모 대상만, 응답 단계에서만
@@ -275,25 +275,19 @@ export async function bmPerfView(req, snap, deps = {}) {
     const hosts = await D.bmAddressHosts(tg);
     return { ok: true, key, via: 'local', target: maskTargetAddress(publicTarget(target), hosts), entry: entry ? { ...entry, key } : null, ...common, addressHidden: true, ...(row ? {} : { reason: 'no-sample' }) };
   }
-  // 엣지 위임 서버 — 보관분(중앙이 당겨 온 엣지 봉투)에서 찾는다. 범위 계정은 대상의 vCenter 가 범위 안일 때만(엣지 목록과 같은 규칙).
+  // 엣지 위임 서버 — 보관분(중앙이 당겨 온 엣지 봉투). 범위 계정은 대상의 vCenter 가 범위 안일 때만(위 해석이 먼저 거른다).
+  const { rec, target: tgt } = found;
+  const sn = rec.snap;
   const regHosts = isAdmin ? [] : await D.bmAddressHosts(null);
-  for (const rec of await D.listEdgeBmUsage()) {
-    const sn = rec?.snap;
-    if (!sn) continue;
-    const snapHosts = isAdmin ? [] : [...regHosts, ...(sn.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])].filter((h) => typeof h === 'string' && h);
-    const em = addressMatcher(snapHosts);
-    const tgt = (sn.targets || []).find((x) => t(x.key) === key || (!isAdmin && maskBmIdentity(x, em).key === key));
-    if (!tgt) continue;
-    if (allowed && (!t(tgt.vcenterId) || !allowed.has(t(tgt.vcenterId)))) return NOT_FOUND;
-    const entry = (sn.perf || []).find((p) => t(p.key) === t(tgt.key)) || null;
-    // v2.919(반증 D2): 봉투가 크기 상한으로 상세를 뺐으면 그 사실과 사유를 그대로 전한다(상세가 없는 것을 ‘모름’ 으로 뭉개지 않는다).
-    const base = { ok: true, key, via: entry ? 'edge' : 'edge-none', agent: rec.agent, snapAt: rec.snapAt || null, ...common,
-      perfThresholds: sn.perfThresholds || null, edgeThresholds: true,
-      ...(entry && !entry.cells ? { detailOmitted: true } : {}), ...(sn.perfTruncated ? { perfTruncated: sn.perfTruncated } : {}) };
-    if (isAdmin) return { ...base, target: tgt, entry };
-    return { ...base, target: maskTargetAddress(tgt, snapHosts, em), entry: entry ? { ...entry, key } : null, addressHidden: true };
-  }
-  return NOT_FOUND;
+  const snapHosts = isAdmin ? [] : [...regHosts, ...(sn.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])].filter((h) => typeof h === 'string' && h);
+  const em = addressMatcher(snapHosts);
+  const entry = (sn.perf || []).find((p) => t(p.key) === t(tgt.key)) || null;
+  // v2.919(반증 D2): 봉투가 크기 상한으로 상세를 뺐으면 그 사실과 사유를 그대로 전한다(상세가 없는 것을 ‘모름’ 으로 뭉개지 않는다).
+  const base = { ok: true, key, via: entry ? 'edge' : 'edge-none', agent: rec.agent, snapAt: rec.snapAt || null, ...common,
+    perfThresholds: sn.perfThresholds || null, edgeThresholds: true,
+    ...(entry && !entry.cells ? { detailOmitted: true } : {}), ...(sn.perfTruncated ? { perfTruncated: sn.perfTruncated } : {}) };
+  if (isAdmin) return { ...base, target: tgt, entry };
+  return { ...base, target: maskTargetAddress(tgt, snapHosts, em), entry: entry ? { ...entry, key } : null, addressHidden: true };
 }
 /**
  * v2.922(3a) — 서버 1대의 추이(평균·피크 두 계열) · 장치 목록. 3b 화면(추이 탭 · 확대 팝업 · 장치 토글)이 쓴다. 기존 `/tools/bm-usage/history`
@@ -316,30 +310,18 @@ export async function bmTrendView(req, snap, mode = 'history', deps = {}) {
   const isAdmin = isAdminReq(req);
   const key = t(req.params.key);
   if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
-  const NOT_FOUND = { __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' };
-  const tg = await D.currentTargets();
-  const realKey = tg.targets.some((x) => x.key === key) ? key : (isAdmin ? null : resolveMaskedToken(key, tg.targets.map((x) => x.key)));
-  const target = realKey ? (tg.targets.find((x) => x.key === realKey) || null) : null;
-  if (target) {
-    if (allowed && (!target.vcenterId || !allowed.has(target.vcenterId))) return NOT_FOUND;
+  // 다음 점검 ①: (법인, 키) 쌍 — resolvePerfTarget 하나(예전 이 함수의 따로 둔 해석은 같은 키의 첫 대상 · 첫 엣지에서 멈췄다).
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId: perfVcOf(req) });
+  const bad = perfTargetFail(found);
+  if (bad) return bad;
+  if (found.via === 'local') {
     const agent = config.agent?.name || '';
-    const r = mode === 'devices' ? await D.devicesFor({ agent, key: target.key }) : await D.trendFor({ agent, key: target.key, q: req.query || {}, settings: loadBmUsageSettings() });
+    const r = mode === 'devices' ? await D.devicesFor({ agent, key: found.realKey }) : await D.trendFor({ agent, key: found.realKey, q: req.query || {}, settings: loadBmUsageSettings() });
     return r && r.ok ? { ...r, key, via: 'local' } : r;
   }
-  const regHosts = isAdmin ? [] : await D.bmAddressHosts(null);
-  for (const rec of await D.listEdgeBmUsage()) {
-    const sn = rec?.snap;
-    if (!sn) continue;
-    const snapHosts = isAdmin ? [] : [...regHosts, ...(sn.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])].filter((h) => typeof h === 'string' && h);
-    const em = addressMatcher(snapHosts);
-    const tgt = (sn.targets || []).find((x) => t(x.key) === key || (!isAdmin && maskBmIdentity(x, em).key === key));
-    if (!tgt) continue;
-    if (allowed && (!t(tgt.vcenterId) || !allowed.has(t(tgt.vcenterId)))) return NOT_FOUND;
-    const r = await D.pullBmTrend(rec.agent, mode, t(tgt.key), req.query || {});
-    if (!r?.ok) return { ok: false, key, via: 'edge', agent: rec.agent, kind: r?.kind || 'error', reason: r?.reason || '엣지에서 추이를 읽지 못했습니다.' };
-    return { ...r.body, key, via: 'edge', agent: rec.agent, ms: r.ms };
-  }
-  return NOT_FOUND;
+  const r = await D.pullBmTrend(found.agent, mode, found.realKey, req.query || {});
+  if (!r?.ok) return { ok: false, key, via: 'edge', agent: found.agent, kind: r?.kind || 'error', reason: r?.reason || '엣지에서 추이를 읽지 못했습니다.' };
+  return { ...r.body, key, via: 'edge', agent: found.agent, ms: r.ms };
 }
 /**
  * v2.922(3a · 설계 PROFILES §10) — 서버 NIC ↔ CVP 스위치 포트: 매핑(수동 확정 · 설명 매칭 후보) · 상태 5종 · 양쪽 대조 ⑤.
@@ -370,10 +352,9 @@ export async function bmPortsView(req, snap, deps = {}) {
   const isAdmin = isAdminReq(req);
   const key = t(req.params.key);
   if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
-  const NOT_FOUND = { __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' };
-  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
-  if (!found) return NOT_FOUND;
-  if (found.denied) return NOT_FOUND;
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId: perfVcOf(req) });
+  const bad = perfTargetFail(found);
+  if (bad) return bad;
   const s = loadBmUsageSettings();
   const tol = s.store?.portTolPct ?? 5;
   const vc = t(found.target.vcenterId);
@@ -435,34 +416,94 @@ export async function bmPortsView(req, snap, deps = {}) {
   return { ...base, cvpAccess: true, cvpRegistered: true, nics: rows, candidates, ...(hiddenOutOfScope ? { hiddenOutOfScope } : {}), ...(nicRes?.ok === false ? { nicError: nicRes.reason } : {}) };
 }
 /**
- * 성능 상세 대상 해석(이 노드 · 엣지 보관분) — bmTrendView 와 같은 규칙. 범위 밖이면 { denied }.
- *   vcenterId 를 주면 **(법인, 키) 쌍**으로 찾는다(8b 반증 F9 — 키 충돌(targets.js keyConflicts) 때 다른 법인 서버를 잡지 않게 · 쓰기 경로는 반드시 준다).
+ * 성능 상세 대상 해석(이 노드 · 엣지 보관분) — **서버 = (법인, 키) 쌍**(maint/judge.js targetIdOf 하나 — 8a 반증 F1 · 8b 반증 F9).
+ *   다음 점검 ①(2026-11-08): 예전에는 vcenterId 를 안 주면 **같은 키의 첫 대상**을 골랐다 — 같은 키(IP 로 등록한 iDRAC 은 키 = IP)가 두 법인에 있으면
+ *   ⓐ 엉뚱한 법인 서버의 상세 · 추이 · 로그 · 쓰기가 열렸고 ⓑ 첫 대상이 범위 밖이면 범위 안의 같은 키 서버가 404 였고 ⓒ 엣지 보관분 탐색도 첫 일치에서 멈췄다.
+ *   규칙(한 함수 — 라우트 전부 · 시험 bmPerfKey2947 의 소스 스윕이 고정):
+ *     ① 후보 = 이 노드 대상 + 엣지 보관분 대상 **전부**에서 키(비관리자는 가림 토큰도)가 같은 것 — 첫 일치에서 멈추지 않는다
+ *     ② vcenterId 를 주면 그 법인 후보만 · **범위 밖 · 귀속 없음 후보는 세기 전에 뺀다**(범위 밖 법인을 세지도 싣지도 않는다 — 존재 오라클 금지)
+ *     ③ 같은 쌍은 하나(이 노드 > 엣지 — 엣지끼리는 최근 보관분: 담당이 옮겨 간 엣지의 옛 보관분이 이기지 않게)
+ *     ④ 0 → null(404 — 범위 밖만 있어도 없는 것과 같은 모양) · 1 → 그 대상 · 2+ → { ambiguous, candidates }(범위 안 법인만 — 400 ambiguous-key)
+ *   응답 모양은 perfTargetFail 하나(404 · 400) — 호출처가 따로 만들지 않는다. localOnly: 이 노드 대상만(사용률 추이 /history — 엣지 보관분에는 원시 이력이 없다).
+ *   비용: 엣지 보관분 전체를 한 번 훑는다(가림 토큰은 key 가 토큰 꼴일 때만 HMAC — 주소 판정기를 만들지 않는다 · 실측은 시험 bmPerfKey2947).
  */
-async function resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId = '' }) {
+async function resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId = '', localOnly = false }) {
+  const k = t(key);
+  if (!k) return null;
   const vc = t(vcenterId);
-  const corpOk = (x) => !vc || t(x?.vcenterId) === vc;
+  // 비관리자 화면의 key 는 주소면 가림 토큰이다(maskBmIdentity — 같은 키는 같은 토큰). 토큰 꼴일 때만 후보마다 토큰을 만든다(resolveMaskedToken 과 같은 대응).
+  const tokenish = !isAdmin && k.startsWith(MASK_TOKEN_PREFIX);
+  const hit = (x) => { const xk = t(x?.key); return !!xk && (xk === k || (tokenish && maskedIdToken(xk) === k)); };
+  const keep = (x) => { const v = t(x?.vcenterId); return (!vc || v === vc) && (!allowed || (!!v && allowed.has(v))); };
+  const byId = new Map();
   const tg = await D.currentTargets();
-  const cand = tg.targets.filter(corpOk);
-  const realKey = cand.some((x) => x.key === key) ? key : (isAdmin ? null : resolveMaskedToken(key, cand.map((x) => x.key)));
-  const target = realKey ? (cand.find((x) => x.key === realKey) || null) : null;
-  if (target) {
-    if (allowed && (!target.vcenterId || !allowed.has(target.vcenterId))) return { denied: true };
-    return { via: 'local', agent: config.agent?.name || '', realKey, target, tg };
+  const agent = config.agent?.name || '';
+  for (const x of tg?.targets || []) {
+    if (!x || typeof x !== 'object' || !hit(x) || !keep(x)) continue;
+    const id = targetIdOf(x);
+    if (!byId.has(id)) byId.set(id, { via: 'local', agent, realKey: t(x.key), target: x, tg });
   }
-  const regHosts = isAdmin ? [] : await D.bmAddressHosts(null);
-  for (const rec of await D.listEdgeBmUsage()) {
-    const sn = rec?.snap;
-    if (!sn) continue;
-    const snapHosts = isAdmin ? [] : [...regHosts, ...(sn.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])].filter((h) => typeof h === 'string' && h);
-    const em = addressMatcher(snapHosts);
-    const tgt = (sn.targets || []).find((x) => corpOk(x) && (t(x.key) === key || (!isAdmin && maskBmIdentity(x, em).key === key)));
-    if (!tgt) continue;
-    if (allowed && (!t(tgt.vcenterId) || !allowed.has(t(tgt.vcenterId)))) return { denied: true };
-    return { via: 'edge', agent: rec.agent, realKey: t(tgt.key), target: tgt, rec };
+  if (!localOnly) {
+    const recs = ((await D.listEdgeBmUsage()) || []).filter((r) => r?.snap && Array.isArray(r.snap.targets))
+      .sort((a, b) => (Number(b.snapAt) || 0) - (Number(a.snapAt) || 0));
+    for (const rec of recs) {
+      for (const x of rec.snap.targets) {
+        if (!x || typeof x !== 'object' || !hit(x) || !keep(x)) continue;
+        const id = targetIdOf(x);
+        if (!byId.has(id)) byId.set(id, { via: 'edge', agent: rec.agent, realKey: t(x.key), target: x, rec });
+      }
+    }
   }
-  return null;
+  if (!byId.size) return null;
+  if (byId.size === 1) return [...byId.values()][0];
+  const candidates = [...byId.values()].map((f) => ({ vcenterId: t(f.target.vcenterId), vcName: t(f.target.vcName) || null }))
+    .sort((a, b) => a.vcenterId.localeCompare(b.vcenterId));
+  return { ambiguous: true, key: k, candidates };
 }
 export { resolvePerfTarget as _resolvePerfTargetForTest, resolvePerfTarget };   // v2.929: 5단계 라우트(bmPerfOps.js)가 같은 해석을 쓴다(범위 · 가림 토큰 · 엣지 보관분)
+
+export const PERF_NOT_FOUND_REASON = '대상 서버를 찾지 못했습니다.';
+/**
+ * 해석 실패의 응답(하나 — 라우트마다 만들지 않는다). 대상이면 null.
+ *   없음 · 범위 밖 · 귀속 없음 → 404 not-found(같은 모양) · 같은 키가 범위 안 여러 법인 → 400 ambiguous-key + 후보 법인(범위 안만 — resolvePerfTarget ②).
+ *   400 인 까닭: 8a 정비 창 쓰기(bmMaint writeGate)가 처음 정한 계약 그대로다 — 요청에 법인이 빠져 서버 하나로 정해지지 않는다(요청을 고치면 된다).
+ * @returns {null | {__status:number, ok:false, code:string, reason:string, candidates?:Array}}
+ */
+export function perfTargetFail(found) {
+  if (found && found.ambiguous === true) {
+    const candidates = Array.isArray(found.candidates) ? found.candidates : [];
+    return { __status: 400, ok: false, code: 'ambiguous-key', reason: `같은 키의 서버가 ${candidates.length}개 법인에 있습니다 — 법인을 고르세요.`, candidates };
+  }
+  if (!found || found.denied || !found.target) return { __status: 404, ok: false, code: 'not-found', reason: PERF_NOT_FOUND_REASON };
+  return null;
+}
+/**
+ * 서버 쌍 목록(요청 — 비교 · 운영 주석처럼 여러 대를 받는 라우트) — keys 와 **같은 순서**의 vcenterIds(빈 칸 = 법인 모름 → 해석이 정한다).
+ *   쉼표 글자 · 배열 둘 다 받는다(글자 · 수만 — 객체는 버림). 같은 쌍은 한 번. 키 256자 · 법인 128자.
+ * @returns {{pairs:Array<{key:string, vcenterId:string}>, over:boolean}}
+ */
+export function perfPairsOf(keysIn, vcsIn, max = 8) {
+  const split = (v) => (Array.isArray(v) ? v : String(typeof v === 'string' ? v : '').split(','));
+  const ks = split(keysIn).map((k) => t(k).slice(0, 256));
+  const vs = split(vcsIn).map((v) => t(v).slice(0, 128));
+  const seen = new Set();
+  const out = [];
+  ks.forEach((k, i) => {
+    if (!k) return;
+    const vc = vs[i] || '';
+    const id = `${vc}|${k}`;
+    if (seen.has(id)) return;
+    seen.add(id); out.push({ key: k, vcenterId: vc });
+  });
+  return { pairs: out.slice(0, max), over: out.length > max };
+}
+/** perfTargetFail 결과를 { status, body } 로(쓰기 라우트 · res.status().json 경로). */
+export const failParts = (f) => { const { __status, ...body } = f; return { status: __status, body }; };
+/** 요청의 법인(vcenterId) — 본문(쓰기) 또는 질의(GET). 글자 · 수만(객체는 버림 — strOf) · 128자. */
+export const perfVcOf = (req) => {
+  const b = req?.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  return t(b.vcenterId != null && b.vcenterId !== '' ? b.vcenterId : req?.query?.vcenterId).slice(0, 128);
+};
 
 /* ════════════════════════════════════════════════════════════════════════════
  * v2.923(리눅스 성능 4단계) — 튜닝 · 용도 · 장애 기록 · 진단 스냅샷(설계 README §4.1·§4.3 · TUNING-SOURCES · PROFILES §1~§5).
@@ -471,7 +512,6 @@ export { resolvePerfTarget as _resolvePerfTargetForTest, resolvePerfTarget };   
  *  · 튜닝 · 용도 판정은 **이 응답을 만드는 노드**가 그 노드의 덮어쓰기 · 수동 태그로 한다(엣지는 사실만 보낸다 — 엣지 판정을 다시 하는 것이 아니다).
  *  · 자동 적용 경로는 없다 — 쓰기 라우트는 판정 기준(덮어쓰기 · 용도 태그)뿐이고 서버에는 아무것도 쓰지 않는다.
  * ════════════════════════════════════════════════════════════════════════════ */
-const OPS_NOT_FOUND = Object.freeze({ __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' });
 function opsDeps(deps = {}) {
   return {
     currentTargets, latestUsage, hwFactsReader, bmAddressHosts,
@@ -512,8 +552,9 @@ async function opsResolve(req, snap, D) {
   const isAdmin = isAdminReq(req);
   const key = t(req.params.key);
   if (!key) return { err: { __status: 400, ok: false, reason: 'key 가 필요합니다.' } };
-  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
-  if (!found || found.denied) return { err: OPS_NOT_FOUND };
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId: perfVcOf(req) });
+  const bad = perfTargetFail(found);
+  if (bad) return { err: bad };
   return { found, key, isAdmin, allowed };
 }
 
@@ -720,7 +761,7 @@ export async function bmSnapshotRun(req, deps = {}) {
   const reason = S.cleanReason(req.body?.reason);
   if (!reason) return { status: 400, body: { ok: false, code: 'bad-reason', reason: '사유를 2자 이상 적어야 합니다(감사 기록에 남습니다).' } };
   const r = await opsResolve(req, snap, D);
-  if (r.err) return { status: r.err.__status, body: { ok: false, code: r.err.__status === 404 ? 'not-found' : 'bad-request', reason: r.err.reason } };
+  if (r.err) return r.err.code ? failParts(r.err) : { status: r.err.__status, body: { ok: false, code: 'bad-request', reason: r.err.reason } };
   const { found, key, isAdmin } = r;
   // ⚠ 쓰기 범위는 조건 없이(조회 무제한 + writeVcenters 계정 — server/CLAUDE.md v2.733 함정). 조회 밖은 위에서 404.
   if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return { status: 403, body: { ok: false, code: 'forbidden', error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용) — 진단 스냅샷은 원격 명령을 실행합니다.' } };
@@ -770,8 +811,10 @@ async function purposeWrite(req, res) {
   const snap = store.get();
   const D = opsDeps();
   try {
-    const found = await resolvePerfTarget(req, D, { allowed: scopedVcenterIds(req.user, snap), isAdmin: true, key: t(b.key) });
-    if (!found || found.denied) return res.status(404).json({ ok: false, reason: '대상 서버를 찾지 못했습니다.' });
+    // 다음 점검 ①: 대상 = (법인, 키) 쌍 — 화면이 행의 vcenterId 를 함께 보낸다(없고 같은 키가 여러 법인이면 400 ambiguous-key).
+    const found = await resolvePerfTarget(req, D, { allowed: scopedVcenterIds(req.user, snap), isAdmin: true, key: t(b.key), vcenterId: perfVcOf(req) });
+    const bad = perfTargetFail(found);
+    if (bad) { const f = failParts(bad); return res.status(f.status).json(f.body); }
     if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용).' });
     const FT = await import('../../insights/fleetTags.js');
     const { APP_IDS } = await import('../../bmusage/profiles/index.js');
@@ -977,8 +1020,9 @@ async function portMapWrite(req, res, { remove = false } = {}) {
     listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
   };
   try {
-    const found = await resolvePerfTarget(req, D, { allowed, isAdmin: true, key: t(b.key) });
-    if (!found || found.denied) return res.status(404).json({ ok: false, reason: '대상 서버를 찾지 못했습니다.' });
+    const found = await resolvePerfTarget(req, D, { allowed, isAdmin: true, key: t(b.key), vcenterId: t(b.vcenterId).slice(0, 128) });
+    const bad = perfTargetFail(found);
+    if (bad) { const f = failParts(bad); return res.status(f.status).json(f.body); }
     if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용).' });
     const PM = await import('../../bmusage/portMap.js');
     if (remove || b.remove === true) {
@@ -1006,21 +1050,16 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
   if (!key) return res.status(400).json({ ok: false, reason: 'key 가 필요합니다.' });
   const allowed = scopedVcenterIds(req.user, store.get());
   try {
-    const tg = await currentTargets();
     const isAdmin = isAdminReq(req);
     // v2.601 AUTHZ-2601-01: 비-admin 은 주소인 key 를 토큰으로 받는다 — 토큰으로도 같은 대상을 찾는다.
-    const realKey = tg.targets.some((x) => x.key === key) ? key
-      : (isAdmin ? null : resolveMaskedToken(key, tg.targets.map((x) => x.key)));
-    const target = realKey ? (tg.targets.find((x) => x.key === realKey) || null) : null;
     // 범위 계정은 자기 법인 서버만 — 없는 것과 구분하지 않고 404(존재 은닉 규약).
-    // ⚠⚠ v2.574 SEC-02 — `allowed` 는 **Set 또는 null** 이다(`auth/scope.js:16-26`).
-    //   예전 코드는 `allowed.includes(...)` 라 **범위 제한 계정에서 항상 TypeError** 였고,
-    //   이 라우트가 async 라 express 4 가 그것을 잡지 못해 **응답 없이 매달렸다**(BUG-03 과 겹친다).
-    //   전체 범위 계정은 `allowed === null` 이라 `&&` 에서 단락돼 아무도 못 느꼈다.
-    //   저장소 전수: `allowed.has(` 110곳 vs `allowed.includes(` **이 한 곳뿐**이었다.
-    if (!target || (allowed && (!target.vcenterId || !allowed.has(target.vcenterId)))) {
-      return res.status(404).json({ ok: false, reason: '대상 서버를 찾지 못했습니다.' });
-    }
+    // ⚠⚠ v2.574 SEC-02 — `allowed` 는 **Set 또는 null** 이다(`auth/scope.js:16-26`). 예전 코드는 `allowed.includes(...)` 라 범위 제한 계정에서
+    //   항상 TypeError 였고 응답 없이 매달렸다(전수: `allowed.has(` 110곳 vs `allowed.includes(` 이 한 곳뿐이었다).
+    // 다음 점검 ①: 해석은 resolvePerfTarget 하나((법인, 키) 쌍 · 이 노드 대상만 — 원시 이력은 이 노드 것만 있다). 같은 키가 이 노드의 두 법인에 있으면 400 ambiguous-key.
+    const found = await resolvePerfTarget(req, { currentTargets, listEdgeBmUsage: async () => [] }, { allowed, isAdmin, key, vcenterId: perfVcOf(req), localOnly: true });
+    const bad = perfTargetFail(found);
+    if (bad) { const f = failParts(bad); return res.status(f.status).json(f.body); }
+    const { target, tg } = found;
     /*
      * ⚠⚠ **적재 키와 조회 키가 같아야 한다**(v2.550 자체 재검토에서 잡은 결함):
      *   `poller.js` 는 `insertUsage(rows, config.agent?.name || '')` 로 적재한다 — 엣지에서는

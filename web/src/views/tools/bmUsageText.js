@@ -167,7 +167,7 @@ export function skippedNotes(counts = {}, reasons = {}) {
   const out = [];
   for (const [kind, cnt] of Object.entries(counts)) {
     if (!cnt) continue;
-    out.push(`**${kind === 'edge-delegated' ? '엣지 수집' : kind === 'corp-off' ? '법인 미선택' : kind === 'unassigned' ? '법인 귀속 없음' : kind === 'no-idrac' ? 'iDRAC 등록 없음' : kind === 'no-idrac-cred' ? 'iDRAC 계정 없음' : kind === 'no-os-cred' ? 'OS 계정 없음' : kind === 'both-off' ? '두 경로 모두 꺼짐' : kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
+    out.push(`**${kind === 'edge-delegated' ? '엣지 수집' : kind === 'corp-off' ? '법인 미선택' : kind === 'unassigned' ? '법인 귀속 없음' : kind === 'no-idrac' ? 'iDRAC 등록 없음' : kind === 'no-idrac-cred' ? 'iDRAC 계정 없음' : kind === 'no-os-cred' ? 'OS 계정 없음' : kind === 'both-off' ? '두 경로 모두 꺼짐' : kind === 'key-conflict' ? '키 충돌' : kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
   }
   return out;
 }
@@ -400,13 +400,16 @@ export function hostsUnreadNote(h = null) {
 export function keyConflictNote(list = []) {
   const arr = Array.isArray(list) ? list : [];
   if (!arr.length) return '';
-  const shown = arr.slice(0, 3).map((x) => `${t(x.key)}(${(x.names || []).join(' · ')})`);
-  const more = arr.length > shown.length ? ` 외 ${arr.length - shown.length}건` : '';
-  return `**식별 키가 겹치는 서버 ${arr.length}건**이 있습니다 — ${shown.join(' / ')}${more}.`
-    + ' 같은 키를 쓰면 **한 서버의 값이 다른 서버 것으로 보입니다**(추이가 섞입니다).'
-    + ' 서비스태그가 비어 있어 이름·내부 id 로 키가 정해진 경우가 대부분이니'
-    + ' 설정 › iDRAC 등록에서 **서비스태그를 채우면** 해결됩니다.'
-    + ' 어느 쪽을 버릴지 판단할 근거가 없어 **수집에서 빼지는 않았습니다**.';
+  // 서버마다 한 줄(서버 keyConflicts — 다음 점검 ①) — 같은 키끼리 묶어 ‘키(이름 · 이름)’ 로 보인다(범위 계정에는 자기 법인 서버만 온다).
+  const byKey = new Map();
+  for (const x of arr) { const k = t(x?.key); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(...(Array.isArray(x?.names) ? x.names : [])); }
+  const keys = [...byKey.keys()];
+  const shown = keys.slice(0, 3).map((k) => `${k}(${byKey.get(k).join(' · ')})`);
+  const more = keys.length > shown.length ? ` 외 ${keys.length - shown.length}건` : '';
+  return `**식별 키가 겹치는 서버 ${arr.length}대**(키 ${keys.length}건)가 있습니다 — ${shown.join(' / ')}${more}.`
+    + ' 같은 키를 쓰면 **한 서버의 값이 다른 서버 것으로 보이고**(추이 · 최신값 · 인증 정지가 섞입니다) 오류도 나지 않아,'
+    + ' 이 서버들은 **수집하지 않습니다**(대상이 아닌 서버 › 키 충돌). 서비스태그가 비어 이름·내부 id·IP 로 키가 정해진 경우가 대부분이니'
+    + ' 설정 › iDRAC 등록에서 **서비스태그를 채우면** 키가 갈려 다음 주기부터 수집합니다. 이미 쌓인 값은 섞여 있을 수 있습니다(지우지 않았습니다).';
 }
 
 /** 보존·행 수 안내 — 서버가 준 값으로만 만든다(숫자를 박지 않는다). */

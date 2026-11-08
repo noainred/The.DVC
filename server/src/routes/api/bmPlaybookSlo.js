@@ -24,12 +24,11 @@ import { freshMsFor } from '../../bmusage/useJudge.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { poolSettled } from '../../util/pool.js';
 import { config } from '../../config.js';
-import { resolvePerfTarget, bmAddressHosts, demoPerfRows } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, perfVcOf, bmAddressHosts, demoPerfRows } from './bmUsage.js';
 
 const toolsPerm = requirePerm('tools');
 const adminOnly = requireRole('admin');
 const t = (v) => strOf(v, 4096).trim();
-const NOT_FOUND = Object.freeze({ __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' });
 
 function deps0(deps = {}) {
   return {
@@ -76,8 +75,9 @@ export async function bmPlaybookView(req, snap, deps = {}) {
   const allowed = scopedVcenterIds(req.user, snap);
   const key = t(req.params.key);
   if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
-  const found = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key });
-  if (!found || found.denied) return NOT_FOUND;
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key, vcenterId: perfVcOf(req) });   // 다음 점검 ①: (법인, 키) 쌍
+  const bad = perfTargetFail(found);
+  if (bad) return bad;
   const P = await import('../../bmusage/playbooks.js');
   const O = await import('../../bmusage/opsView.js');
   const f = await factsOf(found, D);
@@ -107,8 +107,9 @@ export async function bmSloView(req, snap, deps = {}) {
   const allowed = scopedVcenterIds(req.user, snap);
   const key = t(req.params.key);
   if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
-  const found = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key });
-  if (!found || found.denied) return NOT_FOUND;
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key, vcenterId: perfVcOf(req) });   // 다음 점검 ①: (법인, 키) 쌍
+  const bad = perfTargetFail(found);
+  if (bad) return bad;
   const L = await import('../../bmusage/slo.js');
   const q = req.query || {};
   const now = Date.now();
