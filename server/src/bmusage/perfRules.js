@@ -23,7 +23,15 @@ const FILE = () => path.join(config.configDir, 'bm-perf-rules.json');
 // 6단계: collect(수집 건강 — 서버가 아니라 이 수집 노드 한 칸: 주기 소요 · 성공률 · DB 상한 · 인증 정지).
 // 7a단계: logs(로그 분석 — 이번 주기에 읽은 줄 중 장애 분류 · 보안 high 이상이 있으면 · 기본 꺼짐).
 // 8a단계: capacity(용량 소진 예측 — 목표선 도달 ≤ N일 · 기본 꺼짐 · 수집 노드의 하루 계산 결과 bm-capacity.json 을 쓴다).
-export const RULE_IDS = Object.freeze(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect', 'logs', 'capacity']);
+// 다음 점검 ②(8b 남은 것): 전력 · 온도 규칙 4종(기본 꺼짐 — 설계 ㉒ ‘알림 ⑨’) — rack(랙 여유 부족) · inlet(흡기 지속 초과) · surge(24시간 피크 급증) · powerCap(PowerCap 걸림 지속).
+//   판정 입력은 전력 집계(powerAgg — 화면과 같은 함수)이고 조건 · 문구 · 관측 표지는 bmusage/powerAlerts.js 하나.
+export const POWER_RULE_IDS = Object.freeze(['rack', 'inlet', 'surge', 'powerCap']);
+export const RULE_IDS = Object.freeze(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect', 'logs', 'capacity', ...POWER_RULE_IDS]);
+/**
+ * 자동 집중을 걸지 않는 규칙(서버 정규화가 false 로 고정 · 화면 ‘해당 없음’ — 한 목록):
+ *   focusEnd(집중의 끝 — 되먹임) · collect(노드 칸) · capacity(하루 추세) · 전력 4종(랙은 서버가 아니고 · 흡기 · 전력 · 상한은 iDRAC 주기 값이라 1분 집중이 새 사실을 더하지 않는다).
+ */
+export const AUTOFOCUS_OFF = Object.freeze(['focusEnd', 'collect', 'capacity', ...POWER_RULE_IDS]);
 /** 규칙별 조건 선택지(웹 문구 표와 1:1). */
 export const RULE_CONDS = Object.freeze({
   use: Object.freeze(['sat-err', 'bottleneck', 'errors']),
@@ -35,6 +43,11 @@ export const RULE_CONDS = Object.freeze({
   collect: Object.freeze(['any', 'cycle', 'success', 'db', 'auth', 'error']),
   logs: Object.freeze(['fault-sec', 'fault', 'sec']),
   capacity: Object.freeze(['fs-inode', 'any', 'fs', 'inode']),
+  // 전력 4종 — 기준값은 아래 power 절(화면 보기와 같은 값 · 한 곳).
+  rack: Object.freeze(['low']),
+  inlet: Object.freeze(['over']),
+  surge: Object.freeze(['week-peak']),
+  powerCap: Object.freeze(['hit']),
 });
 /** 기존 알림 채널(alerts.js channels) — 새 채널을 만들지 않는다. */
 export const CHANNELS = Object.freeze(['email', 'webhook', 'slack', 'teams']);
@@ -52,6 +65,12 @@ export const RULE_DEFAULTS = Object.freeze({
   collect: Object.freeze({ cond: 'any', sustain: 2, repeatMin: 360, channels: ['email'], issue: false, autoFocus: false }),
   logs: Object.freeze({ cond: 'fault-sec', sustain: 1, repeatMin: 60, channels: ['email'], issue: false, autoFocus: false }),
   capacity: Object.freeze({ cond: 'fs-inode', sustain: 1, repeatMin: 1440, channels: ['email'], issue: false, autoFocus: false }),
+  // 전력 4종(설계 ‘랙 여유 < 10% · 흡기 > 설정값 지속 15분 · 24h 피크가 7일 피크 +20% · 서버 상한 걸림 지속’) — 지속은 ‘서로 다른 표본’ 주기 수(같은 표본은 한 번만 센다).
+  //   흡기 15분 = 기본 수집 주기 5분 × 3.
+  rack: Object.freeze({ cond: 'low', sustain: 2, repeatMin: 360, channels: ['email'], issue: false, autoFocus: false }),
+  inlet: Object.freeze({ cond: 'over', sustain: 3, repeatMin: 240, channels: ['email'], issue: false, autoFocus: false }),
+  surge: Object.freeze({ cond: 'week-peak', sustain: 1, repeatMin: 1440, channels: ['email'], issue: false, autoFocus: false }),
+  powerCap: Object.freeze({ cond: 'hit', sustain: 3, repeatMin: 720, channels: ['email'], issue: false, autoFocus: false }),
 });
 export const LIMITS = Object.freeze({
   sustain: [1, 48], repeatMin: [0, 10_080], corpsOff: 200,
@@ -75,7 +94,8 @@ export const LIMITS = Object.freeze({
   idle: { windowDays: [14, 90], minDays: [7, 90], candidate: [1, 100], watch: [0, 99], wCpu: [0, 100], wMem: [0, 100], wDisk: [0, 100], wNet: [0, 100], wPower: [0, 100], wAct: [0, 100],
     cpuAvgPct: [1, 50], cpuMaxPct: [1, 100], memAvgPct: [1, 90], diskBusyMaxPct: [1, 90], netMaxPct: [1, 90], powerIdlePct: [101, 300], periodicHighPct: [10, 100] },
   // 8b단계 ㉒ 전력 · 온도 — 흡기 기준(°C · 모델별 권장 아님 — 설정값) · PowerCap ‘걸림’(측정 ≥ 상한 × %) · 랙 여유 주의(%). 랙 배치는 racks(아래 normalizeRacks).
-  power: { inletWarnC: [15, 45], capHitPct: [80, 100], rackLowPct: [1, 50] },
+  // surgePct — 피크 급증 규칙(24시간 피크 ≥ 그 앞 7일 피크 × (1 + %)) · 다음 점검 ②.
+  power: { inletWarnC: [15, 45], capHitPct: [80, 100], rackLowPct: [1, 50], surgePct: [5, 300] },
   racks: { max: 500, serversPerRack: 256, textBytes: 64 * 1024 },
 });
 export const DEFAULTS = Object.freeze({
@@ -99,8 +119,8 @@ export const DEFAULTS = Object.freeze({
   // 8b단계 ㉑ 저활용(설계 점수표 그대로 — 가중 CPU 30 · 메모리 15 · 디스크 15 · 네트 15 · 전력 15 · 활동 10 · ≥70 후보 · 40~69 관찰 · 21일 미만 데이터 부족).
   idle: { on: true, windowDays: 30, minDays: 21, candidate: 70, watch: 40, wCpu: 30, wMem: 15, wDisk: 15, wNet: 15, wPower: 15, wAct: 10,
     cpuAvgPct: 5, cpuMaxPct: 20, memAvgPct: 20, diskBusyMaxPct: 5, netMaxPct: 2, powerIdlePct: 110, periodicHighPct: 50 },
-  // 8b단계 ㉒ 전력 · 온도(흡기 27 °C · 걸림 98% · 랙 여유 주의 10% — 설정값).
-  power: { inletWarnC: 27, capHitPct: 98, rackLowPct: 10 },
+  // 8b단계 ㉒ 전력 · 온도(흡기 27 °C · 걸림 98% · 랙 여유 주의 10% — 설정값) · 다음 점검 ② 피크 급증 +20%(설계 ‘24h 피크가 7일 피크 +20%’).
+  power: { inletWarnC: 27, capHitPct: 98, rackLowPct: 10, surgePct: 20 },
   // 유지보수 창 억제(Bareos · Veeam 스케줄) — 베어메탈 서버의 백업 창을 읽는 원천이 아직 없다(perfAlerts.maintenanceFor 머리말). 켜 두면 원천이 생길 때 바로 쓴다.
   maintenance: { backupWindows: true },
 });
@@ -154,7 +174,7 @@ export function normalizeRules(raw, { strict = true } = {}) {
       channels,
       issue: x.issue === true,
       // 집중 결론 규칙은 그 자체가 집중의 끝이라 자동 집중을 걸지 않는다(되먹임 고리). 수집 건강은 서버가 아니라 노드 칸이라 집중 대상이 없다.
-      autoFocus: id === 'focusEnd' || id === 'collect' || id === 'capacity' ? false : x.autoFocus === true,   // 8a capacity 는 하루 추세라 1분 집중이 뜻이 없다   // 7a ‘logs’ 는 자동 집중 허용(로그 장애 · 보안 → 그 서버 1분 집중 — 법인 옵트인 규약 그대로)
+      autoFocus: AUTOFOCUS_OFF.includes(id) ? false : x.autoFocus === true,   // 목록 · 사유는 AUTOFOCUS_OFF 머리말   // 7a ‘logs’ 는 자동 집중 허용(로그 장애 · 보안 → 그 서버 1분 집중 — 법인 옵트인 규약 그대로)
       corpsOff: vcList(x.corpsOff, `rules.${id}.corpsOff`),
     };
   }
