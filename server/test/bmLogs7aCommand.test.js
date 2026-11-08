@@ -344,3 +344,23 @@ test('명령 조립 값 화이트리스트 — 위조한 상태는 명령에 들
   assert.ok(C.logCommand({}, { lineCap: 1e9 }).includes(`cap=${C.LINE_CAP_RANGE[1]}`));
   assert.ok(C.logCommand({}, { lineCap: 'x' }).includes(`cap=${C.LINE_CAP_DEFAULT}`));
 });
+
+test('8b 반증 후속 — systemctl 한 번에 rsyslog · auditd(유닛 순서대로 한 줄씩) · systemctl 이 멈추면 시한 하나 뒤 둘 다 모름 · 시한 상수가 명령에 있다', (t) => {
+  const SB = path.join(DIR, 'svcbin');
+  fs.mkdirSync(SB, { recursive: true });
+  const env = { PATH: `${SB}:${BIN}:${process.env.PATH}` };
+  fs.writeFileSync(path.join(SB, 'systemctl'), '#!/bin/sh\n[ "$*" = "is-active rsyslog auditd" ] && { printf \'active\\ninactive\\n\'; exit 3; }\nexit 4\n', { mode: 0o755 });
+  const a = P.parseLogOutput(run({}, { env }), { prev: {}, now: Date.now() });
+  assert.equal(a.sources.secure.svc, 'active', 'rsyslog = 첫 줄'); assert.equal(a.sources.audit.svc, 'inactive', 'auditd = 둘째 줄');
+  // D-Bus 가 멈춘 것처럼 — 시한(SVC_TIMEOUT_S) 하나 뒤 둘 다 모름(예전: 3초 시한 두 번)
+  fs.writeFileSync(path.join(SB, 'systemctl'), '#!/bin/sh\nexec sleep 100\n', { mode: 0o755 });
+  const t0 = Date.now();
+  const b = P.parseLogOutput(run({}, { env }), { prev: {}, now: Date.now() });
+  const ms = Date.now() - t0;
+  assert.equal(b.sources.secure.svc ?? null, null); assert.equal(b.sources.audit.svc ?? null, null);
+  assert.ok(ms < (C.SVC_TIMEOUT_S + 3) * 1000, `systemctl 시한 한 번(${ms}ms)`);
+  assert.equal(b.sources.secure.status, 'ok', '활성 여부를 몰라도 파일 읽기는 그대로');
+  const cmd = C.logCommand({}, {});
+  assert.match(cmd, new RegExp(`timeout ${C.JOURNAL_TIMEOUT_S} journalctl`)); assert.match(cmd, new RegExp(`timeout ${C.DMESG_TIMEOUT_S} dmesg`));
+  assert.match(cmd, new RegExp(`timeout ${C.ROT_FIND_TIMEOUT_S} find`)); assert.equal((cmd.match(/systemctl/g) || []).length, 1, 'systemctl 은 한 번');
+});

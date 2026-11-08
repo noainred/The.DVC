@@ -69,6 +69,14 @@ export const LIMITS = Object.freeze({
   logs: { lineCap: [...LINE_CAP_RANGE], keepDays: [1, 90], burstCount: [2, 1_000], burstWindowMin: [1, 60] },
   // 8a단계 용량 소진 예측 — 목표선(%) · 데이터 부족 기준(14일 창 안 점 수) · 알림 ‘소진 ≤ N일’.
   capacity: { targetPct: [50, 99], minDays: [3, 14], days: [1, 90] },
+  // 8b단계 ⑳ 프로세스 Top-N — 5분 표본 보존(일 · 날 파일) · comm 별 시간 집계 보존(일). on=false 면 ##TOP 구획이 ‘꺼짐’ 한 줄(1초 대기 없음).
+  top: { keepDays: [1, 14], hourlyDays: [7, 365] },
+  // 8b단계 ㉑ 저활용 — 창(일 · 30 기본 · 90 옵션) · 데이터 부족(<21일) · 후보/관찰 점수 · 가중치 6 · ‘낮다’ 기준(관행 — 설정값) · 주기 사용 판정(높은 날 기준 %).
+  idle: { windowDays: [14, 90], minDays: [7, 90], candidate: [1, 100], watch: [0, 99], wCpu: [0, 100], wMem: [0, 100], wDisk: [0, 100], wNet: [0, 100], wPower: [0, 100], wAct: [0, 100],
+    cpuAvgPct: [1, 50], cpuMaxPct: [1, 100], memAvgPct: [1, 90], diskBusyMaxPct: [1, 90], netMaxPct: [1, 90], powerIdlePct: [101, 300], periodicHighPct: [10, 100] },
+  // 8b단계 ㉒ 전력 · 온도 — 흡기 기준(°C · 모델별 권장 아님 — 설정값) · PowerCap ‘걸림’(측정 ≥ 상한 × %) · 랙 여유 주의(%). 랙 배치는 racks(아래 normalizeRacks).
+  power: { inletWarnC: [15, 45], capHitPct: [80, 100], rackLowPct: [1, 50] },
+  racks: { max: 500, serversPerRack: 256, textBytes: 64 * 1024 },
 });
 export const DEFAULTS = Object.freeze({
   rules: {},
@@ -86,6 +94,13 @@ export const DEFAULTS = Object.freeze({
   logs: { on: true, lineCap: LINE_CAP_DEFAULT, keepDays: 30, burstCount: 20, burstWindowMin: 5 },
   // 8a단계 용량 소진 예측(설계 ⑱ — 목표 90% · 데이터 부족 7일 · 알림 7일 — 설정값).
   capacity: { targetPct: 90, minDays: 7, days: 7 },
+  // 8b단계 ⑳ 프로세스 Top-N(설계 — 5분 7일 · 시간 집계 90일 · 실측 뒤 보존 조정).
+  top: { on: true, keepDays: 7, hourlyDays: 90 },
+  // 8b단계 ㉑ 저활용(설계 점수표 그대로 — 가중 CPU 30 · 메모리 15 · 디스크 15 · 네트 15 · 전력 15 · 활동 10 · ≥70 후보 · 40~69 관찰 · 21일 미만 데이터 부족).
+  idle: { on: true, windowDays: 30, minDays: 21, candidate: 70, watch: 40, wCpu: 30, wMem: 15, wDisk: 15, wNet: 15, wPower: 15, wAct: 10,
+    cpuAvgPct: 5, cpuMaxPct: 20, memAvgPct: 20, diskBusyMaxPct: 5, netMaxPct: 2, powerIdlePct: 110, periodicHighPct: 50 },
+  // 8b단계 ㉒ 전력 · 온도(흡기 27 °C · 걸림 98% · 랙 여유 주의 10% — 설정값).
+  power: { inletWarnC: 27, capHitPct: 98, rackLowPct: 10 },
   // 유지보수 창 억제(Bareos · Veeam 스케줄) — 베어메탈 서버의 백업 창을 읽는 원천이 아직 없다(perfAlerts.maintenanceFor 머리말). 켜 두면 원천이 생길 때 바로 쓴다.
   maintenance: { backupWindows: true },
 });
@@ -165,10 +180,77 @@ export function normalizeRules(raw, { strict = true } = {}) {
   const maintenance = sec('maintenance', DEFAULTS.maintenance, null).out;
   const logs = sec('logs', DEFAULTS.logs, LIMITS.logs).out;
   const capacity = sec('capacity', DEFAULTS.capacity, LIMITS.capacity).out;
+  const top = sec('top', DEFAULTS.top, LIMITS.top).out;
+  const idle = sec('idle', DEFAULTS.idle, LIMITS.idle).out;
+  if (idle.watch >= idle.candidate) { bad('idle.watch', '관찰 기준은 후보 기준보다 작아야 합니다'); idle.watch = Math.min(DEFAULTS.idle.watch, idle.candidate - 1); }
+  if (idle.minDays > idle.windowDays) { bad('idle.minDays', '데이터 부족 기준은 창(windowDays)보다 클 수 없습니다'); idle.minDays = idle.windowDays; }
+  if (['wCpu', 'wMem', 'wDisk', 'wNet', 'wPower', 'wAct'].every((k) => !idle[k])) { bad('idle.wCpu', '가중치가 모두 0 입니다'); Object.assign(idle, { wCpu: DEFAULTS.idle.wCpu }); }
+  const p0 = sec('power', DEFAULTS.power, LIMITS.power);
+  const racks = normalizeRacks(p0.s, bad);
+  const power = { ...p0.out, racks };
   return {
-    value: { v: 1, rules, daily, focus, baseline, health, changes, compare, collect, maintenance, logs, capacity, by: String(r.by || '').slice(0, 64), at: Number(r.at) || 0 },
+    value: { v: 1, rules, daily, focus, baseline, health, changes, compare, collect, maintenance, logs, capacity, top, idle, power, by: String(r.by || '').slice(0, 64), at: Number(r.at) || 0 },
     dropped,
   };
+}
+
+/*
+ * 8b단계 ㉒ 랙 배치 — 등록 CSV(7b)에 ‘랙/위치’ 열이 없고 iDRAC 위치 속성은 읽지 않는다(Redfish 왕복을 늘리지 않는다) — 그래서 이 설정이 랙의 **유일한 원천**이다.
+ *   racks: [{ vcenterId, rack, capKw|null, servers: [{ key, u|null }] }] — 화면은 텍스트(한 줄 = `법인,랙,상한 kW(비우면 미설정),서버키[@U] 서버키[@U] …` · # 주석)로 고치고
+ *   서버가 이 함수로 읽는다(웹이 형식을 다시 해석하지 않는다). 같은 (법인, 랙) 두 번 · 한 서버(법인, 키)가 두 랙 · 형식 밖은 400(엄격) 또는 그 줄을 버린다(느슨).
+ */
+const RACK_RE = /^[^\u0000-\u001f\u007f,]{1,32}$/;
+const SKEY_RE = /^[^\s\u0000-\u001f\u007f,@]{1,256}$/;
+export function parseRackText(text, bad = () => {}) {
+  const out = [];
+  const lines = String(text ?? '').slice(0, LIMITS.racks.textBytes).split(/\r?\n/).slice(0, LIMITS.racks.max + 200);
+  lines.forEach((raw, i) => {
+    const l = raw.trim();
+    if (!l || l.startsWith('#')) return;
+    const f = l.split(',');
+    if (f.length < 4) { bad(`power.racksText.${i + 1}`, `${i + 1}번째 줄 — ‘법인,랙,상한 kW,서버 키 …’ 네 칸이 필요합니다`); return; }
+    const [vc, rack, cap, ...rest] = f.map((x) => x.trim());
+    const servers = rest.join(',').split(/\s+/).filter(Boolean).map((tok) => { const m = /^(.+?)(?:@(\d{1,2}))?$/.exec(tok); return { key: m ? m[1] : tok, u: m && m[2] ? Number(m[2]) : null }; });
+    out.push({ vcenterId: vc, rack, capKw: cap === '' || cap === '-' ? null : cap, servers, line: i + 1 });
+  });
+  return out;
+}
+export function normalizeRacks(src = {}, bad = () => {}) {
+  const list0 = typeof src?.racksText === 'string' ? parseRackText(src.racksText, bad) : (Array.isArray(src?.racks) ? src.racks : []);
+  if (list0.length > LIMITS.racks.max) bad('power.racks', `랙은 ${LIMITS.racks.max}개까지입니다`);
+  const seen = new Set(); const owner = new Map(); const out = [];
+  for (const [i, r] of list0.slice(0, LIMITS.racks.max).entries()) {
+    const at = r?.line ? `${r.line}번째 줄` : `${i + 1}번째 랙`;
+    const vc = String(r?.vcenterId ?? '').trim(); const rack = String(r?.rack ?? '').trim();
+    if (!VC_RE.test(vc) || BAD_KEYS.has(vc)) { bad('power.racks', `${at} — 법인(vCenter id) 형식이 다릅니다`); continue; }
+    if (!RACK_RE.test(rack)) { bad('power.racks', `${at} — 랙 이름은 1~32자(쉼표 · 제어문자 없음)입니다`); continue; }
+    const id = `${vc}|${rack}`;
+    if (seen.has(id)) { bad('power.racks', `${at} — 같은 법인에 같은 랙(${rack})이 두 번 있습니다`); continue; }
+    let capKw = null;
+    if (r.capKw != null && r.capKw !== '') {
+      const x = typeof r.capKw === 'number' ? r.capKw : (/^\d{1,4}(?:\.\d{1,2})?$/.test(String(r.capKw).trim()) ? Number(r.capKw) : NaN);
+      if (!(Number.isFinite(x) && x >= 0.1 && x <= 1000)) { bad('power.racks', `${at} — 상한 kW 는 0.1~1000 입니다(비우면 미설정)`); continue; }
+      capKw = Math.round(x * 100) / 100;
+    }
+    const servers = [];
+    for (const sv of Array.isArray(r.servers) ? r.servers.slice(0, LIMITS.racks.serversPerRack + 1) : []) {
+      const key = String(sv?.key ?? '').trim();
+      const u = sv?.u == null || sv.u === '' ? null : Number(sv.u);
+      if (!SKEY_RE.test(key) || (u != null && !(Number.isInteger(u) && u >= 1 && u <= 60))) { bad('power.racks', `${at} — 서버 키 형식이 다르거나 U 가 1~60 밖입니다(${String(key).slice(0, 40)})`); continue; }
+      const sid = `${vc}|${key}`;
+      if (owner.has(sid) && owner.get(sid) !== id) { bad('power.racks', `${at} — 서버 ${key} 가 다른 랙(${owner.get(sid).split('|')[1]})에도 있습니다`); continue; }
+      if (owner.has(sid)) continue;
+      owner.set(sid, id); servers.push({ key, u });
+    }
+    if ((r.servers || []).length > LIMITS.racks.serversPerRack) bad('power.racks', `${at} — 랙당 서버는 ${LIMITS.racks.serversPerRack}대까지입니다`);
+    seen.add(id);
+    out.push({ vcenterId: vc, rack, capKw, servers: servers.slice(0, LIMITS.racks.serversPerRack) });
+  }
+  return out;
+}
+/** 랙 배치 → 편집 텍스트(서버가 만든다 — 웹은 그대로 보여 주고 고친 텍스트를 보낸다). */
+export function racksToText(racks = []) {
+  return (Array.isArray(racks) ? racks : []).map((r) => `${r.vcenterId},${r.rack},${r.capKw == null ? '' : r.capKw},${(r.servers || []).map((x) => (x.u == null ? x.key : `${x.key}@${x.u}`)).join(' ')}`).join('\n');
 }
 
 function load() {
@@ -218,7 +300,7 @@ export function savePerfRules(body, { by = '' } = {}) {
 /** 감사 요약 — 켠 규칙 id · 바뀐 절(비밀 없음 · 300자). */
 export function rulesAuditSummary(prev, next) {
   const on = (x) => Object.keys(x?.rules || {}).sort().join(',');
-  const changed = ['daily', 'focus', 'baseline', 'health', 'changes', 'compare', 'collect', 'maintenance', 'logs', 'capacity'].filter((k) => JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]));
+  const changed = ['daily', 'focus', 'baseline', 'health', 'changes', 'compare', 'collect', 'maintenance', 'logs', 'capacity', 'top', 'idle', 'power'].filter((k) => JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]));
   return JSON.stringify({ before: on(prev), after: on(next), changed }).slice(0, 300);
 }
 export function _resetPerfRulesForTest() { _cache = null; _mtime = ''; _err.ok(); _listeners.clear(); }
