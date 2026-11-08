@@ -287,3 +287,32 @@ test('⑥ 실제 getFleetInventory — 전력 미보고 등록부 서버가 공�
   const src = fs.readFileSync(new URL('../src/routes/insights.js', import.meta.url), 'utf8');
   assert.match(src, /const \{ liveKeys, bareMetalDupes: _dupes, \.\.\.payload1 \} = full;/);
 });
+
+test('⑦ 같은 장비는 겹침이 아니다(전력 보고분과 같은 등록 id) · 공통 태그 서버의 주소 · 수집 경로를 남의 등록에서 집지 않는다', async (t) => {
+  await app(t);
+  // (a) 전력을 보고하는 등록부 서버는 서버 목록에 자기 id 로 이미 있다 — 자기 태그에 걸려 ‘겹침’ 으로 오르지 않는다 · 같은 공통 태그의 다른 서버만 오른다
+  fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [
+    { id: 'p-a1', name: 'pw-a1', host: 'https://10.70.0.11', username: 'u', password: 'p', vcenterId: 'vcA', serviceTag: 'To Be Filled By O.E.M.' },
+    { id: 'p-b1', name: 'pw-b1', host: 'https://10.70.0.12', username: 'u', password: 'p', vcenterId: 'vcB', serviceTag: 'To Be Filled By O.E.M.' },
+  ] }));
+  const { getDb } = await import('../src/idrac/db.js');
+  const db = await getDb();
+  db.insert('p-a1', 210, Date.now()); db.insert('p-b1', 220, Date.now());
+  const { getFleetInventory } = await import('../src/insights/fleetInventory.js');
+  const { store } = await import('../src/store.js');
+  const inv = await getFleetInventory({ ...store.get(), hosts: [] });
+  const d = inv.bareMetalDupes.filter((x) => String(x.serverId).startsWith('p-'));
+  assert.deepEqual(d.map((x) => x.serverId), ['p-b1'], '전력 보고분 자신(p-a1)은 겹침이 아니다 · 전력 집계가 같은 공통 태그로 뺀 p-b1 만');
+  // (b) 등록 id 가 아닌 겹침 서버(예: OME · 원격)의 공통 태그로 남의 등록(iDRAC 주소 · 계정)을 집지 않는다 — 목록 주소 · ‘추가’ 뒤 수집 경로 둘 다
+  const { resolveTargets } = await import('../src/bmusage/targets.js');
+  const registry = [{ id: 'r-a1', host: 'https://10.80.0.11', username: 'u', password: 'p', serviceTag: 'To Be Filled By O.E.M.' }];
+  const bareMetal = [{ serverId: 'r-a1', fleetId: 'to be filled by o.e.m.', name: 'a1', serviceTag: 'To Be Filled By O.E.M.', vcenterId: 'vcA' }];
+  const dupes = [{ serverId: 'ome:e1:x9', fleetId: 'to be filled by o.e.m.', name: 'ome-x9', serviceTag: 'To Be Filled By O.E.M.', source: 'ome', vcenterId: 'vcB', remoteAgent: '', dupOf: { name: 'a1', vcenterId: 'vcA', source: 'idrac' } }];
+  const settings = { corps: { vcA: true, vcB: true }, idracTelemetry: true };
+  const r = resolveTargets({ bareMetal, dupes, registry, settings });
+  assert.equal(r.keyOverlaps[0].idracHost, '', '남의 iDRAC 주소를 싣지 않는다');
+  const oid = r.keyOverlaps[0].oid;
+  const r2 = resolveTargets({ bareMetal, dupes, registry, settings, decisions: new Map([[oid, { oid, decision: 'add', key: 'vcB:ome:e1:x9' }]]) });
+  assert.deepEqual(r2.targets.map((x) => x.idrac?.regId), ['r-a1'], '추가한 서버가 남의 iDRAC(r-a1)으로 수집되지 않는다');
+  assert.deepEqual(r2.skipped.filter((x) => x.key === 'vcB:ome:e1:x9').map((x) => x.reason), ['no-idrac'], '경로 없음으로 밝힌다');
+});

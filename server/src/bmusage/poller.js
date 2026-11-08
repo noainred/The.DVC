@@ -394,7 +394,7 @@ export async function currentTargets() {
     agentName: config.agent?.name || '', isEdge,
     // ⚠ **캐시된** 인벤토리만 읽는다(장비 왕복 0) — 라이선스 등급 판정용(v2.554).
     inventoryOf: (id) => getInventory(id),
-    dupes, decisions: dec.ok ? dec.map : null,   // 다음 점검 ①(2차)
+    dupes, decisions: dec.map,   // 다음 점검 ①(2차) — 못 읽으면 readKeyDecisions 가 빈 맵(결정 미적용 · 사유는 위 sourceErrors)
   };
   let resolved = resolveTargets({ ...resolveInput, settings: s });
   if (demoMod) {
