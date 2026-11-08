@@ -245,7 +245,8 @@ export async function gatherPower({ targets = [], deps, now = Date.now() }) {
       fanWarn, fanRead: tp.state === 'ok' ? true : (a || regId ? false : null) });
     await y();
   }
-  // 캐시 정리 — 40일 넘은 날 · 이번 대상에 없는 계열은 버린다(누수 방지)
+  // 캐시 정리 — 40일 넘은 날만 버린다(누수 상한 = 계열 수 × 40일). ⚠ 정정(2026-11-08): 예전 주석의 ‘이번 대상에 없는 계열은 버린다’ 는 코드에 없다 —
+  //   대상에서 빠진 계열도 40일 안에 같이 빠진다. 이번 달 날은 31일 안이라 이 정리가 지우지 않는다(월말 · 자정 경계와 무관 — 시험 bmPower8b ③-2).
   const cut = dayKey(now - 40 * DAY_MS);
   for (const k of _dayWh.keys()) if (k.slice(k.lastIndexOf('|') + 1) < cut) _dayWh.delete(k);
   return out;
