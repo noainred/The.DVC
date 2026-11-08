@@ -6,6 +6,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, canCsv } from '../../api.js';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { unitText } from '../unitText.js';
@@ -24,7 +25,6 @@ import './bmOps.css';
 import './bmPerfOps.css';
 
 const BAND_METRICS = Object.freeze(['cpu_pct', 'disk_await_ms', 'disk_busy_pct', 'net_pct', 'mem_pct']);
-const enc = encodeURIComponent;
 
 /** 세대로 늦은 응답을 버리는 1회 조회(path 가 바뀌면 다시). */
 function useGenJson(path) {
@@ -75,11 +75,11 @@ export function ChangeTable({ events = [], maintBands = [] }) {
 }
 
 /** 베이스라인 · 변경 이벤트 · 집중 1분 점 겹침 카드. changes = 부모가 부른 변경 응답(같은 창). */
-export function BaselineOverlay({ itemKey, win, changes = null, narrow = false, annotMarks: pins = [], maintBands = [] }) {
+export function BaselineOverlay({ itemKey, vc = '', win, changes = null, narrow = false, annotMarks: pins = [], maintBands = [] }) {
   const [metric, setMetric] = useState('disk_await_ms');
   const q = `from=${Math.floor(win.from)}&to=${Math.floor(win.to)}`;
-  const band = useGenJson(itemKey ? `/tools/bm-usage/perf/${enc(itemKey)}/baseline?metric=${metric}&${q}` : '');
-  const hist = useGenJson(itemKey ? `/tools/bm-usage/perf/${enc(itemKey)}/history?metric=${metric}&${q}` : '');
+  const band = useGenJson(itemKey ? perfPath(itemKey, vc, '/baseline', `metric=${metric}&${q}`) : '');
+  const hist = useGenJson(itemKey ? perfPath(itemKey, vc, '/history', `metric=${metric}&${q}`) : '');
   const info = FOCUS_METRIC_TEXT[metric] || { label: metric, unit: '' };
   const pts = hist.data?.points || [];
   const bs = band.data?.series || [];
@@ -127,13 +127,13 @@ export function BaselineOverlay({ itemKey, win, changes = null, narrow = false, 
 }
 
 /** 구간 비교(아트보드 Compare ⑩). sel = 추이 탭의 끌어 고른 구간(있으면 B). */
-export function CompareView({ itemKey, sel = null, name = '' }) {
+export function CompareView({ itemKey, vc = '', sel = null, name = '' }) {
   const [preset, setPreset] = useState('yesterday');
   const [custom, setCustom] = useState('');
   const [sessId, setSessId] = useState('');
   const [st, setSt] = useState({ loading: false, data: null, err: null });
   const gen = useRef(0);
-  const sessions = useGenJson(preset === 'focus' && itemKey ? `/tools/bm-usage/perf/${enc(itemKey)}/focus` : '');
+  const sessions = useGenJson(preset === 'focus' && itemKey ? perfPath(itemKey, vc, '/focus') : '');
   const sessList = (sessions.data?.sessions || []).filter((x) => x.start);
   const session = sessList.find((x) => x.id === sessId) || sessList[0] || null;
   const customA = custom ? Date.parse(custom) : null;
@@ -142,7 +142,7 @@ export function CompareView({ itemKey, sel = null, name = '' }) {
     const g = ++gen.current;
     setSt({ loading: true, data: null, err: null });
     try {
-      const d = await fetchJson(`/tools/bm-usage/perf/${enc(itemKey)}/compare?aFrom=${Math.floor(pair.a.from)}&aTo=${Math.floor(pair.a.to)}&bFrom=${Math.floor(pair.b.from)}&bTo=${Math.floor(pair.b.to)}`, {}, undefined, { timeoutMs: 60_000 });
+      const d = await fetchJson(perfPath(itemKey, vc, '/compare', `aFrom=${Math.floor(pair.a.from)}&aTo=${Math.floor(pair.a.to)}&bFrom=${Math.floor(pair.b.from)}&bTo=${Math.floor(pair.b.to)}`), {}, undefined, { timeoutMs: 60_000 });
       if (g === gen.current) setSt({ loading: false, data: d, err: null });
     } catch (e) { if (g === gen.current) setSt({ loading: false, data: null, err: e }); }
   };

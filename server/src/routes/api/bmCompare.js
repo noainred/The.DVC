@@ -122,11 +122,12 @@ export async function bmCompareView(req, snap, deps = {}) {
 
   // ② 열마다(병렬 5) — 같은 법인만이면 다른 법인 열은 값을 당기지 않는다.
   const settled = await poolSettled(resolved, 5, async ({ key, askedVc, found, candidates }) => {
-    // 요청한 법인은 그대로 돌려준다(화면이 같은 키 두 열을 가른다 — 자기 입력이라 존재를 흘리지 않는다).
-    if (!found) return { key, ...(askedVc ? { vcenterId: askedVc } : {}), state: candidates ? 'ambiguous' : 'none', ...(candidates ? { candidates } : {}) };
+    // 열 식별 cid = 요청한 (법인, 키) 쌍 — 같은 키 · 다른 법인 두 열이 표에서 섞이지 않게(표는 cid 로 만든다) · 요청한 법인은 자기 입력이라 그대로 돌려준다.
+    const cid = `${askedVc}|${key}`;
+    if (!found) return { key, cid, ...(askedVc ? { vcenterId: askedVc } : {}), state: candidates ? 'ambiguous' : 'none', ...(candidates ? { candidates } : {}) };
     const target = found.target;
     const vc = t(target.vcenterId);
-    const base = { key, name: nameOf(target), vcenterId: vc || '', via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}) };
+    const base = { key, cid, name: nameOf(target), vcenterId: vc || '', via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}) };
     if (!cross && vc !== corp) return { ...base, state: 'other-corp' };
     let entry = null; let hw = null; let facts = {}; let readAt = null; let snapAt = null;
     if (found.via === 'local') {
@@ -165,7 +166,7 @@ export async function bmCompareView(req, snap, deps = {}) {
       dev, devWorst: M.worstDeviation(dev),
     };
   });
-  const columns = settled.map((x, i) => (x.status === 'fulfilled' ? x.value : { key: resolved[i].key, ...(resolved[i].askedVc ? { vcenterId: resolved[i].askedVc } : {}), state: 'none', reason: '처리 중 오류' }));
+  const columns = settled.map((x, i) => (x.status === 'fulfilled' ? x.value : { key: resolved[i].key, cid: `${resolved[i].askedVc}|${resolved[i].key}`, ...(resolved[i].askedVc ? { vcenterId: resolved[i].askedVc } : {}), state: 'none', reason: '처리 중 오류' }));
   // 법인별 읽은 시각(머리 — ‘법인 간’ 이면 법인마다 다르다).
   const corps = [];
   for (const c of columns) {
@@ -176,7 +177,8 @@ export async function bmCompareView(req, snap, deps = {}) {
     if (c.seriesAt != null) g.seriesAt = g.seriesAt == null ? c.seriesAt : Math.min(g.seriesAt, c.seriesAt);
     if (!g.states.includes(c.state)) g.states.push(c.state);
   }
-  const table = M.buildCompareTable(columns, { metrics, value });
+  // 표의 열 식별은 cid(쌍) — multiCompare 는 key 를 열 식별로 쓴다(셀 · 최고 · 스큐 · 판정 · 베이스라인이 같은 열을 가리키게).
+  const table = M.buildCompareTable(columns.map((c) => ({ ...c, key: c.cid })), { metrics, value });
   return {
     ok: true, at: Date.now(), corp, cross, crossAllowed: !allowed, maxServers, ...w, metrics, value,
     groups: M.COMPARE_GROUP_IDS, groupMetrics: M.COMPARE_GROUPS, metricMeta: Object.fromEntries(M.COMPARE_METRICS.map((m) => [m.col, { unit: m.unit, scaleMax: m.scaleMax, src: m.src }])),

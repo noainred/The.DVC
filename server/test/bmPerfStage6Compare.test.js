@@ -131,7 +131,8 @@ test('② 실제 라우터 — 같은 법인만 · cross 는 전체 범위만 ·
   assert.equal(byKey.TAGA2.series.cpu_pct.n, 8, '결측 4점은 세지 않는다');
   assert.ok(byKey.TAGA2.series.cpu_pct.missing >= 4, '결측 수를 밝힌다');
   const cpu = r1.body.table.rows.find((x) => x.col === 'cpu_pct');
-  assert.equal(cpu.top, 'TAGA2'); assert.equal(cpu.cells.length, 2, 'other-corp 열은 표에서 빠진다');
+  // 다음 점검 ①: 표의 열 식별은 요청한 (법인, 키) 쌍 cid(법인 없이 보냈으면 '|키') — 같은 키 · 다른 법인 두 열이 표에서 섞이지 않게
+  assert.equal(cpu.top, '|TAGA2'); assert.equal(byKey.TAGA2.cid, '|TAGA2'); assert.equal(cpu.cells.length, 2, 'other-corp 열은 표에서 빠진다');
   assert.equal(r1.body.crossAllowed, true);
   assert.ok(r1.body.corps.some((c) => c.vcenterId === 'vcA' && c.readAt != null), '법인별 읽은 시각');
   const r2 = await get('adm', `keys=TAGA1,TAGB1&cross=1&range=1h&to=${NOW}&from=${NOW - HOUR}`);
@@ -140,8 +141,8 @@ test('② 실제 라우터 — 같은 법인만 · cross 는 전체 범위만 ·
   assert.equal((await get('opA', 'keys=TAGA1,TAGA2&cross=1')).status, 404);
   const r3 = await get('opA', 'keys=TAGA1,TAGB1,NOPE');
   const s3 = Object.fromEntries(r3.body.columns.map((c) => [c.key, c]));
-  assert.deepEqual(s3.TAGB1, { key: 'TAGB1', state: 'none' }, '범위 밖');
-  assert.deepEqual(s3.NOPE, { key: 'NOPE', state: 'none' }, '없는 키 — 같은 모양(존재 은닉)');
+  assert.deepEqual(s3.TAGB1, { key: 'TAGB1', cid: '|TAGB1', state: 'none' }, '범위 밖');
+  assert.deepEqual(s3.NOPE, { key: 'NOPE', cid: '|NOPE', state: 'none' }, '없는 키 — 같은 모양(존재 은닉 · cid 는 요청 그대로)');
   assert.equal(r3.body.crossAllowed, false);
   const tooMany = await get('adm', 'keys=a,b,c,d,e,f');
   assert.equal(tooMany.status, 400); assert.equal(tooMany.body.code, 'too-many');

@@ -90,7 +90,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
                 <thead><tr><th>서버</th><th className="right">U</th><th className="right">지금 W</th><th className="right">24h 평균</th><th className="right">흡기</th><th className="right">최대(CPU/배기)</th><th>상한</th><th>팬</th></tr></thead>
                 <tbody>{rs.rows.map((s) => (
                   <tr key={s.key}>
-                    <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key); }}>{s.name}</span></td>
+                    <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key, s.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key, s.vcenterId); }}>{s.name}</span></td>
                     <td className="right" data-sort={s.u ?? ''}>{s.u ?? '—'}</td>
                     <td className="right" data-sort={s.w ?? ''}>{s.w == null ? (UNMEASURED_TEXT[s.unmeasured] || '—') : wText(s.w)}</td>
                     <td className="right" data-sort={s.avg24W ?? ''}>{wText(s.avg24W)}</td>
@@ -119,7 +119,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
           <thead><tr><th>서버</th><th>랙 · U</th><th className="right">흡기</th><th className="right">최대(CPU/배기)</th><th>팬</th><th className="right">전력 W</th><th>전력 상한</th></tr></thead>
           <tbody>{(resp?.hot || []).map((s) => (
             <tr key={`${s.vcenterId}|${s.key}`}>
-              <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key); }}>{s.name}</span><div className="bmo-sub">{s.vcenterId}</div></td>
+              <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key, s.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key, s.vcenterId); }}>{s.name}</span><div className="bmo-sub">{s.vcenterId}</div></td>
               <td data-sort={s.rack || 'zzz'}>{s.rack ? `${s.rack}${s.u != null ? ` · ${s.u}` : ''}` : '미매핑'}</td>
               <td className="right" data-sort={s.inletC ?? ''} style={{ color: toneVar(s.inletC != null && s.inletC >= (cfg.inletWarnC ?? 27) ? 'warn' : 'idle') }}>{cText(s.inletC)}</td>
               <td className="right" data-sort={s.maxC ?? ''}>{cText(s.maxC)}</td><td data-sort={fanText(s)}>{fanText(s)}</td>

@@ -13,6 +13,7 @@ import { BoardOpsStrip } from './BmPerfOpsParts.jsx'; // v2.929(5단계): ‘집
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
+import { refOf } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍
 import {
   RES_ORDER, RES_LABEL, USE_KEYS, HW_USE_LABEL, U_COL, cellView, cellFootnotes, codesUsed, verdictView, coverageView,
   rowStates, STATE_TEXT, cellCode, NO_ENTRY_CELL, NO_ENTRY_FOOTNOTE, trustCounts, trustBandParts, kpiCounts, byResText, topBottlenecks, severityOrder, crossBandText,
@@ -47,18 +48,19 @@ export function VerdictBadge({ verdict }) {
  * 열 순서(마지막 머리글 줄): 0 서버 · 1 경로 · 2~16 자원 5 × U·S·E · 17 판정.
  */
 export function matrixRows(items = [], { authStops = [], staleMs = null, now = Date.now(), th = null, selKey = '', open = () => {}, cmpKeys = null, onPickCmp = null } = {}) {
-  const keyOpen = (key) => (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(key); } };
+  const keyOpen = (key, vc) => (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(key, vc); } };
   return items.map((it) => {
+    const ref = refOf(it.key, it.vcenterId);   // 다음 점검 ①: 서버 = (법인, 키) 쌍
     const e = it.entry;
     const cov = coverageView(e?.coverage);
     const states = rowStates(e, it.target, { authStops, snapAt: it.snapAt, staleMs, now, off: !!it.off });
     const mm = e?.mismatch?.cpu?.flag ? mismatchText(e.mismatch, it.th || th) : '';
     return (
-      <tr key={`${it.agent}|${it.key}`} data-key={it.key} style={{ background: selKey === it.key ? 'rgba(103,232,249,0.06)' : undefined }}>
+      <tr key={`${it.agent}|${ref}`} data-key={it.key} style={{ background: selKey === ref ? 'rgba(103,232,249,0.06)' : undefined }}>
         <td data-sort={it.name}>
           {/* 6단계: 비교에 담기(체크 — 서버 칸 안에 둔다: 열을 늘리면 정렬 열 번호가 밀린다) */}
-          {onPickCmp && <input type="checkbox" className="bmcmp-pick" aria-label={`${it.name} 비교에 담기`} checked={!!cmpKeys?.includes(it.key)} onChange={() => onPickCmp(it.key)} />}
-          <span role="button" tabIndex={0} className="bmp-link" onClick={() => open(it.key)} onKeyDown={keyOpen(it.key)}>{it.name}</span>
+          {onPickCmp && <input type="checkbox" className="bmcmp-pick" aria-label={`${it.name} 비교에 담기`} checked={!!cmpKeys?.includes(ref)} onChange={() => onPickCmp(ref)} />}
+          <span role="button" tabIndex={0} className="bmp-link" onClick={() => open(it.key, it.vcenterId)} onKeyDown={keyOpen(it.key, it.vcenterId)}>{it.name}</span>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{it.vcenterId || '귀속 없음'}{it.agent ? ` · 엣지 ${it.agent}` : ''}</div>
         </td>
         <td data-sort={e ? cov.short : ''}>
@@ -112,9 +114,10 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
   const cap = useCapacityKpi();
   const top = useMemo(() => topBottlenecks(items, 5), [items]);
   const foot = useMemo(() => cellFootnotes(codesUsed(items.map((it) => it.entry).filter(Boolean))), [items]);
-  const open = (key) => onOpen && onOpen(key);
-  const open2 = (key, tab) => onOpen && onOpen(key, tab);   // v2.929: 함대 표에서 상세의 그 탭으로(집중 · 요약)
-  const keyOpen = (key) => (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(key); } };
+  // 다음 점검 ①: 여는 서버 = (법인, 키) 쌍 — onOpen(키, 탭, 법인)
+  const open = (key, vc = '') => onOpen && onOpen(key, '', vc);
+  const open2 = (key, tab, vc = '') => onOpen && onOpen(key, tab, vc);   // v2.929: 함대 표에서 상세의 그 탭으로(집중 · 요약)
+  const keyOpen = (key, vc = '') => (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(key, vc); } };
   const thLine = th ? [['사용률', 'cpu_pct'], ['런큐/코어', 'runq_per_core'], ['대기열', 'disk_aqu'], ['PSI full', 'psi_io_full10']]
     .map(([l, kk]) => { const s = thresholdText(kk, th); return s ? `${l} ${s}` : ''; }).filter(Boolean).join(' · ') : '';
 
@@ -212,11 +215,11 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
         ) : (
           <div className="bmp-top">
             {top.map((it) => (
-              <div key={`${it.agent}|${it.key}`} className="bmp-top-item">
+              <div key={`${it.agent}|${refOf(it.key, it.vcenterId)}`} className="bmp-top-item">
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>{RES_LABEL[it.entry.focus] || '—'}</div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                    <span role="button" tabIndex={0} className="bmp-link" onClick={() => open(it.key)} onKeyDown={keyOpen(it.key)} style={{ fontWeight: 600 }}>{it.name}</span>
+                    <span role="button" tabIndex={0} className="bmp-link" onClick={() => open(it.key, it.vcenterId)} onKeyDown={keyOpen(it.key, it.vcenterId)} style={{ fontWeight: 600 }}>{it.name}</span>
                     <VerdictBadge verdict={it.entry.verdict} />
                     <span style={{ fontSize: 11, color: 'var(--muted)' }}>{it.vcenterId || '귀속 없음'} · {coverageView(it.entry.coverage).label}</span>
                   </div>
@@ -225,7 +228,7 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
                     <div key={i} style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text-dim)' }}><BoldText text={`→ ${c}`} /></div>
                   ))}
                 </div>
-                <button className="btn btn-sm bmp-touch" onClick={() => open(it.key)}>상세</button>
+                <button className="btn btn-sm bmp-touch" onClick={() => open(it.key, it.vcenterId)}>상세</button>
               </div>
             ))}
           </div>

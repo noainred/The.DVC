@@ -10,6 +10,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { OpsError, useOpsLoad, Grade, GradeLegend } from './BmTuningTab.jsx';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import {
   PROFILE_STATUS_TEXT, CHECK_STATUS_TEXT, APP_LABEL, ROLE_LABEL, evidenceText, checkView, tuningStatusView, devicesText, sourceById, factsNotes, PROFILE_HONEST,
 } from './bmOpsText.js';
@@ -20,7 +21,7 @@ function SourceLinks({ ids = [], list = [] }) {
   return <span>{ids.map((id, i) => { const s = sourceById(list, id); return <React.Fragment key={id}>{i > 0 && ' · '}{s ? <a href={s.url} target="_blank" rel="noopener noreferrer" title={s.title}>{id}</a> : id}</React.Fragment>; })}</span>;
 }
 
-function TagEditor({ itemKey, manual, onSaved }) {
+function TagEditor({ itemKey, vc = '', manual, onSaved }) {
   const [apps, setApps] = useState(() => (Array.isArray(manual?.apps) ? manual.apps : null));
   const [role, setRole] = useState(manual?.role || '');
   const [busy, setBusy] = useState(false);
@@ -28,7 +29,8 @@ function TagEditor({ itemKey, manual, onSaved }) {
   const save = async (clear = false) => {
     setBusy(true); setMsg('');
     try {
-      const r = await putJson('/tools/bm-usage/purpose', clear ? { key: itemKey, clear: true } : { key: itemKey, ...(apps ? { apps } : {}), role });
+      const who = { key: itemKey, ...(vc ? { vcenterId: vc } : {}) };   // 다음 점검 ①: 대상 = (법인, 키) 쌍
+      const r = await putJson('/tools/bm-usage/purpose', clear ? { ...who, clear: true } : { ...who, ...(apps ? { apps } : {}), role });
       if (r?.ok === false) setMsg(r.reason || '저장하지 못했습니다.');
       else { setMsg(clear ? '수동 태그를 지웠습니다 — 자동 감지로 돌아갑니다.' : '저장했습니다.'); onSaved?.(); }
     } catch (e) { setMsg(String(e?.message || e)); } finally { setBusy(false); }
@@ -57,7 +59,7 @@ function TagEditor({ itemKey, manual, onSaved }) {
   );
 }
 
-export function ProfileView({ resp, itemKey = '', onReload = null, canTag = false, showReadOnly = false }) {
+export function ProfileView({ resp, itemKey = '', vc = '', onReload = null, canTag = false, showReadOnly = false }) {
   const det = resp?.detection || {};
   const st = PROFILE_STATUS_TEXT[resp?.status] || PROFILE_STATUS_TEXT.unknown;
   const notes = factsNotes(resp || {});
@@ -77,7 +79,7 @@ export function ProfileView({ resp, itemKey = '', onReload = null, canTag = fals
       </div>
       {notes.map((x, i) => <p key={i} className="bmo-note"><BoldText text={x} /></p>)}
       {resp?.osProfileMissing && <p className="bmo-note"><BoldText text={`이 OS(${det.os?.label || '미확인'})에는 프로파일이 없습니다 — **점검하지 않습니다**(Rocky 9 만 만들었습니다 · 틀린 판정보다 낫습니다).`} /></p>}
-      {canTag && <TagEditor itemKey={itemKey} manual={resp?.manual || null} onSaved={onReload} />}
+      {canTag && <TagEditor itemKey={itemKey} vc={vc} manual={resp?.manual || null} onSaved={onReload} />}
       {/* 반증 W4: 관리자라도 쓰기 범위 밖(조회만 되는 법인)이면 태그 칸 대신 이유(서버도 PUT 403). */}
       {!canTag && showReadOnly && resp?.writable === false && <p className="bmo-note">이 서버의 법인에 쓰기 권한이 없어 수동 태그를 바꿀 수 없습니다(조회 전용).</p>}
       {(resp?.profiles || []).map((p) => {
@@ -150,8 +152,8 @@ export function ProfileView({ resp, itemKey = '', onReload = null, canTag = fals
   );
 }
 
-export default function BmProfileTab({ itemKey }) {
-  const { resp, err, loading, reload } = useOpsLoad((k) => `/tools/bm-usage/perf/${encodeURIComponent(k)}/profile`, itemKey);
+export default function BmProfileTab({ itemKey, vc = '' }) {
+  const { resp, err, loading, reload } = useOpsLoad((k, v) => perfPath(k, v, '/profile'), itemKey, vc);
   return (
     <div style={{ minWidth: 0 }}>
       <div className="bmo-bar">
@@ -161,7 +163,7 @@ export default function BmProfileTab({ itemKey }) {
       </div>
       <OpsError err={err} />
       {!resp && !err && <p className="bmo-note">용도 판정을 불러오는 중…</p>}
-      {resp && <ProfileView resp={resp} itemKey={itemKey} onReload={reload} canTag={!!resp.canTag && hasRole('admin')} showReadOnly={hasRole('admin')} />}
+      {resp && <ProfileView resp={resp} itemKey={itemKey} vc={vc} onReload={reload} canTag={!!resp.canTag && hasRole('admin')} showReadOnly={hasRole('admin')} />}
     </div>
   );
 }

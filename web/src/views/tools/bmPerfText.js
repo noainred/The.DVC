@@ -297,8 +297,10 @@ export function boardItems(data = {}, edges = null) {
     const perfBy = new Map((perf || []).map((p) => [t(p?.key), p]));
     for (const tg of targets || []) {
       const k = t(tg?.key);
-      if (!k || seen.has(k)) continue;
-      seen.add(k);
+      // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 같은 키 · 다른 법인(IP 키 · 엣지 보관분)은 다른 서버다(예전에는 키만 봐 엣지의 같은 키 서버가 보드에서 빠졌다).
+      const id = `${t(tg?.vcenterId)}|${k}`;
+      if (!k || seen.has(id)) continue;
+      seen.add(id);
       out.push({ key: k, name: t(tg.name) || k, vcenterId: t(tg.vcenterId), target: tg, row: rowBy.get(k) || null, entry: perfBy.get(k) || null, ...extra });
     }
   };
