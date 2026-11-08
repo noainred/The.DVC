@@ -158,14 +158,16 @@ export async function bmSloSettingsRead(req, snap, deps = {}) {
     // 반증 F9: 예전에는 키마다 resolvePerfTarget(대상 해석 · 엣지 보관분 · 주소 목록)을 다시 돌아 500건이면 0.7초 동안 루프를 막았다 —
     //   대상(이 노드) · 엣지 보관분을 **요청당 한 번** 읽어 키 → 법인 맵을 만들고 O(N) 으로 대 본다(저장 키는 실제 키 — 가림 토큰을 풀 일이 없다).
     const D = deps0(deps);
+    // 다음 점검 ①: 키 → 법인 **집합**(같은 키가 여러 법인에 있으면 첫 법인만 보던 것 — 범위 계정이 자기 법인 서버의 목표를 못 보던 ⓑ 와 같은 유형).
+    //   ⚠ 서버별 목표는 키 하나에 걸린다(저장 키가 (법인, 키) 쌍이 아니다 — 같은 키 두 법인 서버가 목표를 같이 쓴다 · 정직 기록: 키를 바꾸려면 저장 이전이 필요해 고치지 않았다).
     const vcOf = new Map();
-    for (const x of (await D.currentTargets().catch(() => ({ targets: [] })))?.targets || []) if (x?.key) vcOf.set(String(x.key), t(x.vcenterId));
-    for (const rec of await D.listEdgeBmUsage().catch(() => [])) for (const x of rec?.snap?.targets || []) { const k = t(x?.key); if (k && !vcOf.has(k)) vcOf.set(k, t(x.vcenterId)); }
+    const addVc = (k, vc) => { if (!k) return; if (!vcOf.has(k)) vcOf.set(k, new Set()); vcOf.get(k).add(vc); };
+    for (const x of (await D.currentTargets().catch(() => ({ targets: [] })))?.targets || []) if (x?.key) addVc(String(x.key), t(x.vcenterId));
+    for (const rec of await D.listEdgeBmUsage().catch(() => [])) for (const x of rec?.snap?.targets || []) addVc(t(x?.key), t(x?.vcenterId));
     const keep = {};
     for (const k of Object.keys(cfg.servers || {})) {
       if (!vcOf.has(k)) continue;   // 지금 대상에 없는 서버(사라짐) — 예전과 같이 싣지 않는다
-      const vc = vcOf.get(k);
-      if (allowed && (!vc || !allowed.has(vc))) continue;
+      if (allowed && ![...vcOf.get(k)].some((vc) => vc && allowed.has(vc))) continue;
       keep[k] = cfg.servers[k];
     }
     if (isAdmin) servers = keep;

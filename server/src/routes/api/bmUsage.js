@@ -419,27 +419,27 @@ export async function bmPortsView(req, snap, deps = {}) {
  * 성능 상세 대상 해석(이 노드 · 엣지 보관분) — **서버 = (법인, 키) 쌍**(maint/judge.js targetIdOf 하나 — 8a 반증 F1 · 8b 반증 F9).
  *   다음 점검 ①(2026-11-08): 예전에는 vcenterId 를 안 주면 **같은 키의 첫 대상**을 골랐다 — 같은 키(IP 로 등록한 iDRAC 은 키 = IP)가 두 법인에 있으면
  *   ⓐ 엉뚱한 법인 서버의 상세 · 추이 · 로그 · 쓰기가 열렸고 ⓑ 첫 대상이 범위 밖이면 범위 안의 같은 키 서버가 404 였고 ⓒ 엣지 보관분 탐색도 첫 일치에서 멈췄다.
- *   규칙(한 함수 — 라우트 전부 · 시험 bmPerfKey2947 의 소스 스윕이 고정):
+ *   규칙(한 함수 — 라우트 전부 · 시험 bmPerfKeyPair 의 소스 스윕이 고정):
  *     ① 후보 = 이 노드 대상 + 엣지 보관분 대상 **전부**에서 키(비관리자는 가림 토큰도)가 같은 것 — 첫 일치에서 멈추지 않는다
  *     ② vcenterId 를 주면 그 법인 후보만 · **범위 밖 · 귀속 없음 후보는 세기 전에 뺀다**(범위 밖 법인을 세지도 싣지도 않는다 — 존재 오라클 금지)
  *     ③ 같은 쌍은 하나(이 노드 > 엣지 — 엣지끼리는 최근 보관분: 담당이 옮겨 간 엣지의 옛 보관분이 이기지 않게)
  *     ④ 0 → null(404 — 범위 밖만 있어도 없는 것과 같은 모양) · 1 → 그 대상 · 2+ → { ambiguous, candidates }(범위 안 법인만 — 400 ambiguous-key)
  *   응답 모양은 perfTargetFail 하나(404 · 400) — 호출처가 따로 만들지 않는다. localOnly: 이 노드 대상만(사용률 추이 /history — 엣지 보관분에는 원시 이력이 없다).
- *   비용: 엣지 보관분 전체를 한 번 훑는다(가림 토큰은 key 가 토큰 꼴일 때만 HMAC — 주소 판정기를 만들지 않는다 · 실측은 시험 bmPerfKey2947).
+ *   비용: 엣지 보관분 전체를 한 번 훑는다(가림 토큰은 key 가 토큰 꼴일 때만 · 대상 목록마다 한 번 만든 색인(tokenHits) — 주소 판정기를 만들지 않는다 · 실측은 시험 bmPerfKeyPair ⑥).
  */
 async function resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId = '', localOnly = false }) {
   const k = t(key);
   if (!k) return null;
   const vc = t(vcenterId);
-  // 비관리자 화면의 key 는 주소면 가림 토큰이다(maskBmIdentity — 같은 키는 같은 토큰). 토큰 꼴일 때만 후보마다 토큰을 만든다(resolveMaskedToken 과 같은 대응).
+  // 비관리자 화면의 key 는 주소면 가림 토큰이다(maskBmIdentity — 같은 키는 같은 토큰). 토큰 꼴일 때만 토큰 색인을 본다(resolveMaskedToken 과 같은 대응).
   const tokenish = !isAdmin && k.startsWith(MASK_TOKEN_PREFIX);
-  const hit = (x) => { const xk = t(x?.key); return !!xk && (xk === k || (tokenish && maskedIdToken(xk) === k)); };
+  const hits = (list) => { const out = list.filter((x) => x && typeof x === 'object' && t(x.key) === k); return tokenish ? out.concat(tokenHits(list, k)) : out; };
   const keep = (x) => { const v = t(x?.vcenterId); return (!vc || v === vc) && (!allowed || (!!v && allowed.has(v))); };
   const byId = new Map();
   const tg = await D.currentTargets();
   const agent = config.agent?.name || '';
-  for (const x of tg?.targets || []) {
-    if (!x || typeof x !== 'object' || !hit(x) || !keep(x)) continue;
+  for (const x of hits(Array.isArray(tg?.targets) ? tg.targets : [])) {
+    if (!keep(x)) continue;
     const id = targetIdOf(x);
     if (!byId.has(id)) byId.set(id, { via: 'local', agent, realKey: t(x.key), target: x, tg });
   }
@@ -447,8 +447,8 @@ async function resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId = ''
     const recs = ((await D.listEdgeBmUsage()) || []).filter((r) => r?.snap && Array.isArray(r.snap.targets))
       .sort((a, b) => (Number(b.snapAt) || 0) - (Number(a.snapAt) || 0));
     for (const rec of recs) {
-      for (const x of rec.snap.targets) {
-        if (!x || typeof x !== 'object' || !hit(x) || !keep(x)) continue;
+      for (const x of hits(rec.snap.targets)) {
+        if (!keep(x)) continue;
         const id = targetIdOf(x);
         if (!byId.has(id)) byId.set(id, { via: 'edge', agent: rec.agent, realKey: t(x.key), target: x, rec });
       }
@@ -459,6 +459,28 @@ async function resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId = ''
   const candidates = [...byId.values()].map((f) => ({ vcenterId: t(f.target.vcenterId), vcName: t(f.target.vcName) || null }))
     .sort((a, b) => a.vcenterId.localeCompare(b.vcenterId));
   return { ambiguous: true, key: k, candidates };
+}
+/*
+ * 가림 토큰 → 대상 색인(대상 목록 배열마다 한 번 — 요청마다 수천 개 HMAC 을 다시 하지 않는다 · 반증 대비 비용 실측은 시험 bmPerfKeyPair ⑥).
+ *   엣지 보관분 배열은 push 마다 새 배열(sanitizeBmUsageSnap)이라 WeakMap 이 낡지 않는다 · 이 노드 대상은 currentTargets 가 부를 때마다 새로 만든다.
+ *   원문 키가 이미 토큰 꼴이면 색인에 넣지 않는다(maskedIdToken 이 그대로 돌려줘 정확 일치가 이미 잡는다).
+ */
+const _tokIdx = new WeakMap();
+function tokenHits(list, tok) {
+  let idx = _tokIdx.get(list);
+  if (!idx) {
+    idx = new Map();
+    for (const x of list) {
+      if (!x || typeof x !== 'object') continue;
+      const xk = t(x.key);
+      if (!xk || xk.startsWith(MASK_TOKEN_PREFIX)) continue;
+      const tk = maskedIdToken(xk);
+      if (!idx.has(tk)) idx.set(tk, []);
+      idx.get(tk).push(x);
+    }
+    _tokIdx.set(list, idx);
+  }
+  return idx.get(tok) || [];
 }
 export { resolvePerfTarget as _resolvePerfTargetForTest, resolvePerfTarget };   // v2.929: 5단계 라우트(bmPerfOps.js)가 같은 해석을 쓴다(범위 · 가림 토큰 · 엣지 보관분)
 
