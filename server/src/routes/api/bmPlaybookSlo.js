@@ -43,8 +43,8 @@ function deps0(deps = {}) {
   };
 }
 async function manualOf(D, target, realKey) {
-  for (const k of [target?.serviceTag, realKey]) { const v = k ? await D.purposeOf(String(k)).catch(() => null) : null; if (v) return v; }
-  return null;
+  const { purposeOfTarget } = await import('../../bmusage/purposeKey.js');   // 키 규칙 하나(반증 F2)
+  return purposeOfTarget((k) => D.purposeOf(String(k)), target, realKey);
 }
 /** 서버 한 대의 사실(이 노드 최신값 + 하드웨어 · 또는 엣지 보관분 — 판정은 수집 노드가 이미 했다). */
 async function factsOf(found, D) {

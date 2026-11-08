@@ -46,6 +46,8 @@ import { boardItems, allAuthStops } from './bmPerfText.js';
 import { BmPurposeFleet, BmFaultsFleet } from './BmOpsFleet.jsx';
 import BmPerfRulesPanel from './BmPerfRulesPanel.jsx';
 import BmOnboardPanel from './BmOnboardPanel.jsx'; // 7b단계 서버 등록 · SSH 키 저장소 · 누락 점검
+import BmKeyOverlaps from './BmKeyOverlaps.jsx'; // 다음 점검 ①(2차) — 식별 키가 겹치는 서버 · 사용자 결정
+import { keyOverlapNote } from './bmKeyOverlapText.js';
 // 6단계: 서버 비교(2~5대) — 고른 서버 목록은 이 화면이 들고(보드 체크 · 상세 ‘비교에 추가’ · 병목 Top 5 · 용도 그룹) 비교 보기가 그린다.
 import BmCompareView from './BmCompareView.jsx';
 import BmCollectHealth from './BmCollectHealth.jsx'; // 6단계 수집 건강 보드(관리자 · 운영자)
@@ -277,7 +279,9 @@ export function BmUsage() {
     // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 행이 가진 법인을 그대로 · 법인을 모르면(예전 링크 · 키만 담은 목록) 보이는 항목에서 그 키가 한 법인뿐일 때만 채운다
     //   (둘 이상이면 비워 둔다 — 서버가 400 ambiguous-key 로 후보를 주고 상세가 법인 고르기를 보인다).
     let v = String(vc || '');
-    if (!v) { const same = perfItems.filter((it) => it.key === String(key)); if (same.length === 1) v = same[0].vcenterId || ''; }
+    // 반증 S2: 엣지 보관분 목록을 받았을 때만 채운다 — 못 받았으면(아직 · 실패) 목록에 이 노드 서버만 있어 엉뚱한 서버를 조용히 연다. 그때는 서버에 맡긴다(모호하면 400 → 법인 고르기).
+    const edgesOk = !!edges && edges.ok !== false && Array.isArray(edges.rows);
+    if (!v && edgesOk) { const same = perfItems.filter((it) => it.key === String(key)); if (same.length === 1) v = same[0].vcenterId || ''; }
     setPerfSel(key); setPerfVc(v); setPerfTab(tab);
     // 사용률 추이(history)는 이 노드가 수집하는 대상만 있다 — 엣지 위임 서버는 성능 상세만 연다(없는 추이를 404 로 보이지 않게).
     const local = (data?.targets || []).filter((x) => String(x.key) === String(key) && (!v || String(x.vcenterId || '') === v));
@@ -443,6 +447,12 @@ export function BmUsage() {
         {keyConflictNote(data?.keyConflicts || []) && (
           <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('bad') }}>
             <BoldText text={keyConflictNote(data.keyConflicts)} />
+          </p>
+        )}
+        {/* 다음 점검 ①(2차): 식별 키가 겹쳐 수집하지 않는 서버 — 조용한 제외 금지(설정의 표에서 사용자가 정한다). */}
+        {keyOverlapNote(data?.keyOverlaps) && (
+          <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}>
+            <BoldText text={keyOverlapNote(data.keyOverlaps)} />
           </p>
         )}
         {/* v2.605 LEFT2605-05: 호스트 미수집 vCenter 때문에 뺀 베어메탈 — 조용히 사라지지 않게 말한다. */}
@@ -975,6 +985,9 @@ export function BmUsage() {
 
           {/* ── 7b단계 서버 등록 · SSH 키 저장소 · 공통 계정 · 엣지 배포 목록 · 누락 점검(관리자) ── */}
           <BmOnboardPanel vcenters={data?.vcenters || []} />
+
+          {/* ── 다음 점검 ①(2차): 식별 키가 겹쳐 분류가 한 대만 남긴 서버 — 사용자가 수집에 추가 · 제외 유지 · 되돌리기(운영자 이상 + 그 법인 쓰기 범위) ── */}
+          <BmKeyOverlaps />
 
           {/* ── 엣지에 배포(v2.627) — 중앙의 전체 범위 관리자에게만 온다(서버가 distribution 을 null 로 준다). ── */}
           {data?.distribution && (

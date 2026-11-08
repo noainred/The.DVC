@@ -434,30 +434,45 @@ async function resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId = ''
   // 비관리자 화면의 key 는 주소면 가림 토큰이다(maskBmIdentity — 같은 키는 같은 토큰). 토큰 꼴일 때만 토큰 색인을 본다(resolveMaskedToken 과 같은 대응).
   const tokenish = !isAdmin && k.startsWith(MASK_TOKEN_PREFIX);
   const hits = (list) => { const out = list.filter((x) => x && typeof x === 'object' && t(x.key) === k); return tokenish ? out.concat(tokenHits(list, k)) : out; };
-  const keep = (x) => { const v = t(x?.vcenterId); return (!vc || v === vc) && (!allowed || (!!v && allowed.has(v))); };
+  /*
+   * 반증 F4: 귀속 없음(법인 '') 서버는 ‘법인을 안 줌’ 과 구별할 표현이 없었고, 이 노드 · 엣지의 귀속 없음 서버가 같은 쌍('|키')으로 합쳐졌다.
+   *   → 귀속 없음은 **노드까지** 가른다(id = `|키@노드`) · 고르는 값은 `-@<노드>`(이 노드는 `-@<이 노드 이름>` — 중앙은 `-@`) — 후보에 pick 으로 싣는다(사유 수 = 버튼 수).
+   *   범위 계정은 귀속 없음을 아예 못 본다(아래 allowed 거르기 — 그대로).
+   */
+  const unPick = vc.startsWith('-@') ? vc.slice(2) : null;
+  const keep = (x, ag) => {
+    const v = t(x?.vcenterId);
+    if (allowed && !(v && allowed.has(v))) return false;
+    if (unPick != null) return !v && ag === unPick;
+    return !vc || v === vc;
+  };
+  const pairIdOf = (x, ag) => (t(x?.vcenterId) ? targetIdOf(x) : `|${t(x?.key)}@${ag}`);
   const byId = new Map();
   const tg = await D.currentTargets();
   const agent = config.agent?.name || '';
   for (const x of hits(Array.isArray(tg?.targets) ? tg.targets : [])) {
-    if (!keep(x)) continue;
-    const id = targetIdOf(x);
+    if (!keep(x, agent)) continue;
+    const id = pairIdOf(x, agent);
     if (!byId.has(id)) byId.set(id, { via: 'local', agent, realKey: t(x.key), target: x, tg });
   }
   if (!localOnly) {
     const recs = ((await D.listEdgeBmUsage()) || []).filter((r) => r?.snap && Array.isArray(r.snap.targets))
       .sort((a, b) => (Number(b.snapAt) || 0) - (Number(a.snapAt) || 0));
     for (const rec of recs) {
+      const ag = t(rec.agent);
       for (const x of hits(rec.snap.targets)) {
-        if (!keep(x)) continue;
-        const id = targetIdOf(x);
+        if (!keep(x, ag)) continue;
+        const id = pairIdOf(x, ag);
         if (!byId.has(id)) byId.set(id, { via: 'edge', agent: rec.agent, realKey: t(x.key), target: x, rec });
       }
     }
   }
   if (!byId.size) return null;
   if (byId.size === 1) return [...byId.values()][0];
-  const candidates = [...byId.values()].map((f) => ({ vcenterId: t(f.target.vcenterId), vcName: t(f.target.vcName) || null }))
-    .sort((a, b) => a.vcenterId.localeCompare(b.vcenterId));
+  const candidates = [...byId.values()].map((f) => {
+    const v = t(f.target.vcenterId);
+    return v ? { vcenterId: v, vcName: t(f.target.vcName) || null } : { vcenterId: '', vcName: null, unassigned: true, agent: t(f.agent), pick: `-@${t(f.agent)}` };
+  }).sort((a, b) => (Number(!a.vcenterId) - Number(!b.vcenterId)) || a.vcenterId.localeCompare(b.vcenterId) || String(a.pick || '').localeCompare(String(b.pick || '')));   // 귀속 없음은 뒤 · 노드 이름순
   return { ambiguous: true, key: k, candidates };
 }
 /*
@@ -543,13 +558,10 @@ function opsDeps(deps = {}) {
     ...deps,
   };
 }
-/** 수동 용도 태그 — 서비스 태그(소문자) 우선, 없으면 서버 키(fleet-tags 와 같은 키 규약). */
+/** 수동 용도 태그 — 키 규칙은 bmusage/purposeKey.js 하나(서비스태그 키 · 아니면 (법인, 키) 쌍 → 예전 키 — 반증 F2). source 를 붙여 돌려준다. */
 async function purposeFor(D, target, realKey) {
-  for (const k of [target?.serviceTag, realKey]) {
-    const v = k ? await D.purposeOf(String(k)).catch(() => null) : null;
-    if (v) return v;
-  }
-  return null;
+  const { purposeOfTarget } = await import('../../bmusage/purposeKey.js');
+  return purposeOfTarget((k) => D.purposeOf(String(k)), target, realKey);
 }
 /** 한 서버의 사실(이 노드 최신값 + 하드웨어 code · 또는 엣지 보관분). */
 async function opsFactsFor(found, D) {
@@ -609,7 +621,8 @@ export async function bmProfileView(req, snap, deps = {}) {
   const view = O.profileViewFor({ tuning: f.tuning, detail: f.detail, entry: f.entry, row: f.row, manual });
   const { catalogView } = await import('../../bmusage/profiles/index.js');
   return { ok: true, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent, snapAt: f.snapAt ?? null } : {}),
-    factsAt: f.tuning?.at ?? f.at ?? null, noFacts: !f.tuning, manual: manual ? { apps: manual.apps ?? null, role: manual.role ?? null, ...(r.isAdmin ? { by: manual.by, at: manual.at } : {}) } : null,
+    // 반증 F2: 예전 키(법인 구분 없음) 행은 어느 법인 서버에 단 것인지 모른다 — 범위 계정에는 계정명을 싣지 않는다(다른 법인 관리자 이름).
+    factsAt: f.tuning?.at ?? f.at ?? null, noFacts: !f.tuning, manual: manual ? { apps: manual.apps ?? null, role: manual.role ?? null, keyScope: manual.source || null, ...(r.isAdmin && (!r.allowed || manual.source !== 'legacy') ? { by: manual.by, at: manual.at } : {}) } : null,
     // 반증 W4: 쓰기 범위 밖(조회만 되는 법인)이면 태그 칸을 잠그고 이유를 보인다(서버도 PUT 403 — server/CLAUDE.md v2.733 ‘GET 에 writable’).
     writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)),
     canTag: r.isAdmin && inUserWriteScope(req.user, snap, t(found.target.vcenterId)), catalog: catalogView(), codes: O.OPS_CODES, ...view };
@@ -841,10 +854,40 @@ async function purposeWrite(req, res) {
     const FT = await import('../../insights/fleetTags.js');
     const { APP_IDS } = await import('../../bmusage/profiles/index.js');
     const { ROLES } = await import('../../bmusage/tuning/catalog.js');
-    const tagKey = t(found.target.serviceTag) || found.realKey;
+    /*
+     * 반증 F2: 저장 키는 bmusage/purposeKey.js 하나 — 서비스태그 키면 그대로, 아니면 (법인, 키) 쌍(`<법인>|<키>`). 예전(키 단독) 행이 있으면
+     *   그 키의 서버(이 노드 + 엣지 보관분 — 같은 키 · 서비스태그 키가 아닌 것)가 **모두 이 계정의 쓰기 범위 안일 때만** 그 행을 법인마다 쌍으로 나눠 옮기고 지운다
+     *   (값 · 처음 단 사람 보존 — 판정이 바뀌지 않는다). 하나라도 쓰기 범위 밖이면 409 — 쓰기 범위 밖 법인 서버의 판정을 바꾸지 않는다(전체 범위 관리자가 정리).
+     */
+    const PK = await import('../../bmusage/purposeKey.js');
+    const wk = PK.purposeWriteKeyOf(found.target, found.realKey);
+    if (!wk) return res.status(400).json({ ok: false, reason: '이 서버의 용도 태그 키를 정하지 못했습니다.' });
+    const opts = { knownApps: [...APP_IDS], knownRoles: [...ROLES] };
+    let split = 0;
+    if (wk.source === 'pair') {
+      const legacy = FT.fleetPurposeOf(found.realKey);
+      if (legacy) {
+        const vcs = new Set();
+        const sameKey = (x) => x && typeof x === 'object' && t(x.key) === found.realKey && PK.purposeWriteKeyOf(x, found.realKey)?.source === 'pair';
+        for (const x of (await D.currentTargets()).targets || []) if (sameKey(x)) vcs.add(t(x.vcenterId));
+        for (const rec of await D.listEdgeBmUsage()) for (const x of rec?.snap?.targets || []) if (sameKey(x)) vcs.add(t(x.vcenterId));
+        if ([...vcs].some((vc) => !inUserWriteScope(req.user, snap, vc))) {
+          return res.status(409).json({ ok: false, code: 'legacy-shared', reason: '이 키의 예전 용도 태그(법인 구분 없이 저장된 것)가 쓰기 권한이 없는 다른 법인 서버에도 걸려 있습니다 — 전체 범위 관리자가 정리해야 합니다(바꾸지 않았습니다).' });
+        }
+        for (const vc of vcs) {
+          const pk = `${vc}|${found.realKey}`;
+          if (FT.fleetPurposeOf(pk)) continue;
+          const c = FT.setFleetPurpose(pk, { ...(Array.isArray(legacy.apps) ? { apps: legacy.apps } : {}), ...(legacy.role ? { role: legacy.role } : {}) }, { by: legacy.by || '', ...opts });
+          if (!c.ok) return res.status(500).json({ ok: false, reason: `예전 용도 태그를 법인별로 옮기지 못했습니다: ${c.reason || ''}`.slice(0, 300) });
+          split += 1;
+        }
+        const d = FT.setFleetPurpose(found.realKey, null, opts);
+        if (!d.ok) return res.status(500).json({ ok: false, reason: `예전 용도 태그를 지우지 못했습니다: ${d.reason || ''}`.slice(0, 300) });
+      }
+    }
     const value = b.clear === true ? null : { ...(Array.isArray(b.apps) ? { apps: b.apps } : {}), ...(b.role != null ? { role: b.role } : {}) };
-    const r = FT.setFleetPurpose(tagKey, value, { by: req.user?.username || '', knownApps: [...APP_IDS], knownRoles: [...ROLES] });
-    logAudit({ user: req.user?.username, action: 'bm-usage.purpose', target: found.realKey, ip: req.ip || '', detail: JSON.stringify({ apps: value?.apps ?? null, role: value?.role ?? null, clear: b.clear === true, ok: r.ok }).slice(0, 300) });
+    const r = FT.setFleetPurpose(wk.k, value, { by: req.user?.username || '', ...opts });
+    logAudit({ user: req.user?.username, action: 'bm-usage.purpose', target: found.realKey, ip: req.ip || '', detail: JSON.stringify({ vcenterId: t(found.target.vcenterId), keyScope: wk.source, legacySplit: split, apps: value?.apps ?? null, role: value?.role ?? null, clear: b.clear === true, ok: r.ok }).slice(0, 300) });
     res.status(r.ok ? 200 : 400).json(r);
   } catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
 }
@@ -910,6 +953,8 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       : (tg.counts.byReason || {});
     const counts = allowed
       ? { ...tg.counts, targets: targets.length, skipped: skipped.length, byReason: skippedCounts,
+          keyConflicts: new Set(applyScope(tg.keyConflicts || [], allowed).map((x) => x.key)).size,   // 반증 F3: 전역 수 대신 보이는 줄의 고유 키
+          keyOverlaps: applyScope(tg.keyOverlaps || [], allowed).length,
           idrac: targets.filter((x) => (x.paths || []).includes('idrac')).length,
           os: targets.filter((x) => (x.paths || []).includes('os')).length,
           both: targets.filter((x) => (x.paths || []).length > 1).length }
@@ -936,7 +981,10 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       skipped,
       counts,
       /* 키 충돌 — 범위 계정에는 보이는 것만(v2.550.3). 조용히 두면 한 서버 값이 다른 서버로 보인다. */
-      keyConflicts: (isAdmin ? (x) => x : (l) => maskBmList(l, match))(applyScope(tg.keyConflicts || [], allowed)),
+      // 반증 F3: 범위 계정에는 보이는 줄만 · `peers`(범위 밖 서버까지 센 수)는 싣지 않는다 — counts.keyConflicts 도 아래에서 보이는 줄로 다시 센다.
+      keyConflicts: (isAdmin ? (x) => x : (l) => maskBmList(l, match))(applyScope(tg.keyConflicts || [], allowed).map((x) => (allowed ? (({ peers: _p, ...r }) => r)(x) : x))),
+      // 다음 점검 ①(2차): 식별 키가 겹쳐 수집하지 않는(또는 결정한) 서버 수 — 보이는 법인 것만(목록 · 결정은 /tools/bm-usage/key-overlaps).
+      keyOverlaps: (() => { const l = applyScope(tg.keyOverlaps || [], allowed); return { total: l.length, pending: l.filter((o) => !o.decision).length, added: l.filter((o) => o.decision?.decision === 'add').length }; })(),
       metrics: METRICS, reasons: NO_PATH_REASON,
       vcenters: applyScope(tg.vcenters.map((v) => ({ ...v, vcenterId: v.id })), allowed),
       isEdge: tg.isEdge,

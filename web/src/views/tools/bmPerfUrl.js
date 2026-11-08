@@ -41,8 +41,12 @@ export function normCompareResp(resp) {
 export function ambiguousOf(x) {
   const b = x && typeof x === 'object' ? (x.body && typeof x.body === 'object' ? x.body : x) : null;
   if (!b || b.code !== 'ambiguous-key' || !Array.isArray(b.candidates)) return null;
-  return b.candidates.filter((c) => c && typeof c.vcenterId === 'string' && c.vcenterId).map((c) => ({ vcenterId: c.vcenterId, vcName: typeof c.vcName === 'string' && c.vcName ? c.vcName : null }));
+  // 반증 F4: 귀속 없음 후보는 노드까지 갈라 ‘-@<노드>’ 로 고른다(pick) — 예전에는 빈 법인 후보를 버려 사유 수와 버튼 수가 달랐다.
+  return b.candidates.filter((c) => c && typeof c === 'object' && ((typeof c.vcenterId === 'string' && c.vcenterId) || (c.unassigned === true && typeof c.pick === 'string' && c.pick.startsWith('-@'))))
+    .map((c) => (c.vcenterId ? { vcenterId: c.vcenterId, vcName: typeof c.vcName === 'string' && c.vcName ? c.vcName : null }
+      : { vcenterId: c.pick, vcName: null, unassigned: true, agent: typeof c.agent === 'string' ? c.agent : '' }));
 }
-/** 법인 고르기 버튼 글자 — 법인 이름이 있으면 ‘이름(id)’. */
-export const corpLabel = (c) => (c?.vcName && c.vcName !== c.vcenterId ? `${c.vcName}(${c.vcenterId})` : String(c?.vcenterId || ''));
+/** 법인 고르기 버튼 글자 — 법인 이름이 있으면 ‘이름(id)’ · 귀속 없음은 ‘귀속 없음(노드)’. */
+export const corpLabel = (c) => (c?.unassigned ? `귀속 없음(${c.agent ? `엣지 ${c.agent}` : '이 노드'})`
+  : (c?.vcName && c.vcName !== c.vcenterId ? `${c.vcName}(${c.vcenterId})` : String(c?.vcenterId || '')));
 export const AMBIGUOUS_TEXT = '같은 식별 키의 서버가 **여러 법인**에 있습니다 — 볼 서버의 법인을 고르세요(IP 로 등록한 iDRAC 은 키가 IP 라 법인끼리 겹칠 수 있습니다).';

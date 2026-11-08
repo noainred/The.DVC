@@ -67,8 +67,8 @@ function memoTargets(D) {
   return { ...D, currentTargets: () => (p ||= D.currentTargets()) };
 }
 async function purposeGroupOf(D, target, realKey, facts) {
-  let manual = null;
-  for (const k of [target?.serviceTag, realKey]) { if (!k || manual) continue; manual = await D.purposeOf(String(k)).catch(() => null); }
+  const { purposeOfTarget } = await import('../../bmusage/purposeKey.js');   // 키 규칙 하나(반증 F2)
+  const manual = await purposeOfTarget((k) => D.purposeOf(String(k)), target, realKey);
   try {
     const pv = await D.profileView({ tuning: facts.tuning || null, detail: facts.detail || null, entry: facts.entry || null, row: facts.row || null, manual });
     const apps = [...(pv?.detection?.activeApps || [])].sort();

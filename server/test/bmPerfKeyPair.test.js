@@ -234,66 +234,143 @@ test('②-2 사용률 추이(/history — 이 노드 원시만) · 목표 설정
   L.saveSlo({ servers: {} }, { by: 'own' });
 });
 
-test('④ 저장 단계 — 같은 노드 같은 키는 둘 다 수집하지 않는다(key-conflict) · 기본키 (agent, key) 가 섞임을 만든다(실제 DB)', async (t) => {
-  // 실제 폴러 대상 해석(currentTargets) — 다른 vCenter 의 같은 키 두 대(IP 로 등록한 iDRAC — 키 = IP)
+/*
+ * ④ 저장 단계 — ⚠ 정정(반증 F1): 처음 판은 ‘같은 노드 같은 키는 둘 다 수집하지 않는다 · 섞임은 사실’ 이라 적었지만, 실제 파이프라인에서는
+ *   분류(classifyFleet)가 같은 dk 의 둘째 서버를 bareMetal 에 넣지 않아(가상화 호스트는 targets.js 가 같은 키를 건너뛰어) key-conflict 경로에 닿지 않는다.
+ *   섞임은 ‘저장 기본키 (agent, key) 가 허용하는 상태’ 이지 파이프라인이 만든 사실이 아니다. 그래서:
+ *   (a) 실제 classifyFleet → 실제 currentTargets(공통 태그 두 대 · 숫자 태그 vs serverId · 대소문자만 다른 태그) — 남은 서버가 **keyOverlaps 로 보인다**(예전: 아무 데도 없음)
+ *   (b) key-conflict 는 분류가 만들 수 없는 입력에 대한 **방어 코드**로 남는다(직접 넣은 입력으로만 닿는다)
+ *   (c) 기본키가 섞임을 허용한다는 사실(실제 DB)
+ */
+test('④ 저장 단계 — 실제 분류의 같은 키 서버는 겹침 목록으로 보인다(조용한 제외 없음) · key-conflict 는 방어 코드 · 기본키 (agent, key) 는 섞임을 허용한다', async (t) => {
+  const poller = await import('../src/bmusage/poller.js');
+  const { classifyFleet } = await import('../src/insights/fleetInventory.js');
+  t.after(() => poller._setFleetForTest(null));
+  const vcenters = [{ id: 'vcA', name: 'A' }, { id: 'vcB', name: 'B' }];
+  const cases = {
+    junkTag: [{ serverId: 'r-a1', serverName: 'wb-a1', serviceTag: 'To Be Filled By O.E.M.', source: 'idrac', vcenterId: 'vcA' }, { serverId: 'r-b1', serverName: 'wb-b1', serviceTag: 'To Be Filled By O.E.M.', source: 'idrac', vcenterId: 'vcB' }],
+    tagVsId: [{ serverId: 'r-a2', serverName: 's-a2', serviceTag: '1234567', source: 'idrac', vcenterId: 'vcA' }, { serverId: '1234567', serverName: 's-b2', serviceTag: '', source: 'idrac', vcenterId: 'vcB' }],
+    caseOnly: [{ serverId: 'r-a3', serverName: 's-a3', serviceTag: 'abc12', source: 'idrac', vcenterId: 'vcA' }, { serverId: 'ABC12', serverName: 's-b3', serviceTag: '', source: 'idrac', vcenterId: 'vcB' }],
+  };
+  fs.writeFileSync(path.join(DIR, 'bm-storage.json'), JSON.stringify({ servers: [] }));
+  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true, vcB: true }, osSsh: false, idracTelemetry: true }));
+  (await import('../src/bmusage/settings.js'))._resetForTest();
+  for (const [name, servers] of Object.entries(cases)) {
+    fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: servers.map((x) => ({ id: x.serverId, name: x.serverName, host: `https://10.9.${name.length}.${x.serverId.length}`, username: 'u', password: 'p', vcenterId: x.vcenterId, serviceTag: x.serviceTag })) }));
+    poller._setFleetForTest(async () => classifyFleet({ hosts: [], vcenters, servers, tags: {}, assign: {} }));
+    const tg = await poller.currentTargets();
+    assert.equal(tg.targets.length, 1, `${name}: 분류는 그대로 한 대만 수집 대상(이미 수집 중인 서버의 키 · 이력은 그대로)`);
+    assert.equal(tg.targets[0].vcenterId, 'vcA');
+    assert.equal(tg.keyOverlaps.length, 1, `${name}: 남은 서버가 겹침 목록에 보인다(기준판 · 첫 판: skipped 0 · keyConflicts 0 — 아무 데도 없었다)`);
+    const o = tg.keyOverlaps[0];
+    assert.equal(o.vcenterId, 'vcB'); assert.equal(o.decision, null);
+    assert.equal(o.serviceTag, servers[1].serviceTag, '서비스태그 원문(공통 값 포함)');
+    assert.ok(o.idracHost.startsWith('https://10.9.'), '주소는 serverId 로 찾은 등록(서비스태그로 찾지 않는다 — 공통 태그면 남의 등록)');
+    assert.equal(o.dupOf.vcenterId, 'vcA', '겹친 상대(수집 중 서버)');
+    assert.equal(o.decidedKey, `vcB:${servers[1].serverId}`, '추가하면 쓸 별도 키');
+    assert.equal(tg.keyConflicts.length, 0, 'key-conflict 경로에는 닿지 않는다(방어 코드)');
+  }
+  // (b) 방어 코드 — 분류가 만들 수 없는 입력(서로 다른 serverId · 같은 fleetId)을 직접 넣으면 둘 다 빼고 밝힌다
   fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [
     { id: '10.1.1.5', name: 'ip-a', host: 'https://10.1.1.5', username: 'u', password: 'p', vcenterId: 'vcA' },
     { id: '10.1.1.6', name: 'ip-b', host: 'https://10.1.1.6', username: 'u', password: 'p', vcenterId: 'vcB' },
-    { id: '10.1.1.7', name: 'ip-c', host: 'https://10.1.1.7', username: 'u', password: 'p', vcenterId: 'vcA' },
   ] }));
-  fs.writeFileSync(path.join(DIR, 'bm-storage.json'), JSON.stringify({ servers: [] }));
-  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true, vcB: true }, osSsh: false, idracTelemetry: true }));
-  const poller = await import('../src/bmusage/poller.js');
-  // 분류가 같은 키를 두 번 내는 경우(가상화 호스트 동명 · 수동 합성 등) — resolveTargets 입력으로 직접 만든다
   poller._setFleetForTest(async () => ({ bareMetal: [
     { serverId: '10.1.1.5', fleetId: '10.1.1.9', name: 'ip-a', serviceTag: '', vcenterId: 'vcA' },
     { serverId: '10.1.1.6', fleetId: '10.1.1.9', name: 'ip-b', serviceTag: '', vcenterId: 'vcB' },
-    { serverId: '10.1.1.7', fleetId: '10.1.1.7', name: 'ip-c', serviceTag: '', vcenterId: 'vcA' },
   ], virtualizationHosts: [] }));
-  t.after(() => poller._setFleetForTest(null));
-  (await import('../src/bmusage/settings.js'))._resetForTest();
-  const tg = await poller.currentTargets();
-  assert.deepEqual(tg.targets.map((x) => x.key), ['10.1.1.7'], '같은 키 두 대는 수집 대상이 아니다(기준판: 둘 다 대상 — 한 행에 섞였다)');
-  assert.deepEqual(tg.skipped.filter((x) => x.reason === 'key-conflict').map((x) => `${x.vcenterId}|${x.name}`).sort(), ['vcA|ip-a', 'vcB|ip-b']);
-  assert.deepEqual(tg.keyConflicts.map((x) => `${x.vcenterId}|${x.names.join(',')}`).sort(), ['vcA|ip-a', 'vcB|ip-b'], '서버마다 한 줄 — 법인 B 범위 계정이 법인 A 서버 이름을 보지 않는다');
-  // 섞임이 사실인지 — 실제 DB: 같은 (agent, key) 두 서버의 최신값은 한 행 · 이력은 번갈아 한 계열(기준판에서 일어나던 것)
+  const tg2 = await poller.currentTargets();
+  assert.deepEqual(tg2.targets.map((x) => x.key), []);
+  assert.deepEqual(tg2.skipped.filter((x) => x.reason === 'key-conflict').map((x) => `${x.vcenterId}|${x.name}`).sort(), ['vcA|ip-a', 'vcB|ip-b']);
+  assert.deepEqual(tg2.keyConflicts.map((x) => `${x.vcenterId}|${x.names.join(',')}`).sort(), ['vcA|ip-a', 'vcB|ip-b'], '서버마다 한 줄');
+  // (c) 기본키 (agent, key) 는 같은 키 두 서버를 한 행 · 한 계열로 받는다(실제 DB — 파이프라인 사실이 아니라 저장이 허용하는 상태)
   let sqlite = true; try { await import('node:sqlite'); } catch { sqlite = false; }
   if (!sqlite) return t.diagnostic('node:sqlite 없음 — DB 확인 생략');
   const DB = await import('../src/bmusage/db.js');
   const ts0 = Math.floor(NOW / 300_000) * 300_000 - 3_600_000;
   await DB.insertUsage([{ key: '10.1.1.9', ts: ts0, cpu_pct: 10, mem_pct: 10 }, { key: '10.1.1.9', ts: ts0 + 1_000, cpu_pct: 90, mem_pct: 90 }], 'mixtest');
-  const latest = (await DB.latestUsage({})).filter((r) => r.agent === 'mixtest');
-  assert.equal(latest.length, 1, '두 서버 = 최신값 한 행(덮어쓴다)');
-  const hist = await DB.usageHistory('10.1.1.9', { agent: 'mixtest', hours: 24 });
-  assert.deepEqual(hist.rows.map((r) => r.cpu_pct), [10, 90], '이력은 두 서버 값이 한 계열에 번갈아 — 법인 축이 없다');
+  assert.equal((await DB.latestUsage({})).filter((r) => r.agent === 'mixtest').length, 1, '두 서버 = 최신값 한 행');
+  assert.deepEqual((await DB.usageHistory('10.1.1.9', { agent: 'mixtest', hours: 24 })).rows.map((r) => r.cpu_pct), [10, 90], '이력은 한 계열');
 });
 
-test('⑤ 소스 스윕 — 라우트의 대상 해석은 resolvePerfTarget 하나 · 호출마다 vcenterId · 응답 모양은 perfTargetFail', () => {
-  const files = fs.readdirSync(path.join(SRC, 'routes', 'api')).filter((f) => /^bm.*\.js$/.test(f));
+/*
+ * 소스 스윕(반증 F5 로 강화) — 라우트 파일(routes/api/bm*.js)에서
+ *   (a) resolvePerfTarget 호출은 **첫 인자 이름과 무관하게** 다 센다 · `vcenterId` 값은 요청에서 온 식(perfVcOf(req) · 쌍 변수 · 검사한 본문 값)만 — 글자 상수 금지 ·
+ *       호출 뒤 perfTargetFail(또는 f?.ambiguous)로 응답 모양을 정한다
+ *   (b) 대상 목록을 읽는 함수(currentTargets( · listEdgeBmUsage( 를 부르는 함수) 안에서 **키 비교로 하나를 고르는 곳**(`.find((x) => … x.key … ===`)과
+ *       키 → 대상 맵(`[x.key, …]`)은 허용 목록(파일 · 함수 · 줄 조각 — 행 · 판정 항목 찾기와 함대 목록)에 있어야 한다.
+ * 반증 mut-sweep 의 변형 5종(인자 이름 바꾼 find · 엣지 첫 일치 · 첫 인자 rq · vcenterId 글자 상수 · 키 맵)이 모두 걸린다(아래 시험이 고정).
+ */
+const SWEEP_ALLOW = Object.freeze({
+  // 함대 목록(여러 서버 — 범위로 거른 목록을 키로 잇는다 · 대상 하나를 고르지 않는다)
+  'bmCapacity.js:bmCapacityFleet': ['[x.key,', '[t(x.key),'], 'bmIdle.js:bmIdleFleet': ['[x.key,', '[t(x.key),'], 'bmLogs.js:bmLogsFleet': ['[x.key,'],
+  'bmLogs.js:inScope': ['[String(x.key),'], 'bmOnboard.js:fileOf': ['[String(p.key),'], 'bmPerfOps.js:bmFocusFleet': ['[x.key,', '[String(x.key),'],
+  'bmUsage.js:opsFleetItems': ['(p) => t(p.key) === k', '(r) => t(r.key) === k', '[t(r.key),', '[t(p.key),'],
+  // 해석이 끝난 대상의 행 · 판정 항목 찾기(resolvePerfTarget 뒤 — 같은 대상의 최신값 행 · 엣지 봉투의 그 서버 항목)
+  'bmUsage.js:bmPerfView': ['(r) => t(r.key) === target.key && t(r.agent) === agent', '(p) => t(p.key) === t(tgt.key)'],
+});
+const VC_EXPR_OK = /^\s*(?:perfVcOf\(req\)|want|vcIn|t\(b\.vcenterId\)\.slice\(0, 128\))\s*(?:,|\}|$)/;   // 요청에서 온 식만(축약형 `vcenterId` 는 쌍 변수 — 콜론 없음)
+function sweepIssues(files) {
+  const issues = [];
   let calls = 0;
-  for (const f of files) {
-    const src = stripComments(fs.readFileSync(path.join(SRC, 'routes', 'api', f), 'utf8'));
-    // 따로 둔 해석 금지(예전 bmPerfView · bmTrendView · /history 의 사본 — 같은 키의 첫 대상 · 첫 엣지에서 멈춤)
-    assert.ok(!/resolveMaskedToken\s*\(/.test(src), `${f}: 가림 토큰 대응은 resolvePerfTarget 안에서만`);
-    assert.ok(!/targets\.find\(\(x\)\s*=>\s*(?:t\()?x\.key\)?\s*===\s*(?:realKey|key)\b/.test(src), `${f}: 키로 대상을 직접 찾지 않는다`);
-    assert.ok(!/\.find\(\(x\)\s*=>\s*(?:corpOk\(x\)\s*&&\s*)?\(?t\(x\.key\)\s*===\s*key/.test(src), `${f}: 엣지 보관분을 키로 직접 찾지 않는다`);
-    const re = /(?<!function )resolvePerfTarget\(\s*req\s*,/g;
-    let m;
-    while ((m = re.exec(src))) {
+  const closeOf = (s, open) => { let d = 0; for (let i = open; i < s.length; i += 1) { if (s[i] === '(') d += 1; else if (s[i] === ')') { d -= 1; if (!d) return i; } } return -1; };
+  const chunksOf = (src) => {
+    const re = /(?:^|\n)[ \t]*(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(|(?:^|\n)[ \t]*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>/g;
+    const marks = []; let m;
+    while ((m = re.exec(src))) marks.push({ name: m[1] || m[2], at: m.index });
+    return marks.map((x, i) => ({ name: x.name, body: src.slice(x.at, i + 1 < marks.length ? marks[i + 1].at : src.length) }));
+  };
+  for (const [f, raw] of Object.entries(files)) {
+    const src = stripComments(raw);
+    if (/resolveMaskedToken\s*\(/.test(src)) issues.push(`${f}: 가림 토큰 대응은 resolvePerfTarget 안에서만`);
+    for (const m of src.matchAll(/(?<!function\s)resolvePerfTarget\(/g)) {
       calls += 1;
-      const end = src.indexOf(');', m.index);
-      const args = src.slice(m.index, end);
-      assert.ok(/\bvcenterId\s*(?::|,|\})/.test(args), `${f}: resolvePerfTarget 호출에 vcenterId 가 없다 — ${args.slice(0, 160)}`);
-      const after = src.slice(end, end + 400);
-      assert.ok(/perfTargetFail\(/.test(after) || /f\?\.ambiguous/.test(after), `${f}: 해석 뒤 perfTargetFail 로 응답 모양을 정하지 않는다 — ${after.slice(0, 160)}`);
+      const open = m.index + 'resolvePerfTarget'.length;
+      const close = closeOf(src, open);
+      const args = src.slice(open + 1, close);
+      const vm = /\bvcenterId\s*(:)?/.exec(args);
+      if (!vm) issues.push(`${f}: resolvePerfTarget 호출에 vcenterId 가 없다 — ${args.slice(0, 120)}`);
+      else if (vm[1] && !VC_EXPR_OK.test(args.slice(vm.index + vm[0].length))) issues.push(`${f}: vcenterId 값이 요청에서 온 식이 아니다 — ${args.slice(vm.index, vm.index + 60)}`);
+      const after = src.slice(close, close + 400);
+      if (!/perfTargetFail\(/.test(after) && !/f\?\.ambiguous/.test(after)) issues.push(`${f}: 해석 뒤 perfTargetFail 로 응답 모양을 정하지 않는다 — ${after.slice(0, 100)}`);
+    }
+    for (const c of chunksOf(src)) {
+      if (!/currentTargets\(|listEdgeBmUsage\(/.test(c.body)) continue;
+      const allow = SWEEP_ALLOW[`${f}:${c.name}`] || [];
+      for (const m of c.body.matchAll(/\.find\(/g)) {
+        const open = m.index + 5; const inner = c.body.slice(open + 1, closeOf(c.body, open));
+        const pm = /^\s*\(?\s*(\w+)\s*\)?\s*=>/.exec(inner);
+        if (pm && new RegExp(`\\b${pm[1]}\\??\\.key\\b`).test(inner) && /===/.test(inner) && !allow.some((a) => inner.includes(a))) issues.push(`${f}:${c.name}: 키 비교로 대상 하나를 고른다 — ${inner.slice(0, 80)}`);
+      }
+      for (const m of c.body.matchAll(/\[\s*(?:t\(|String\()?\s*\w+\??\.key\s*\)?\s*,/g)) if (!allow.includes(m[0])) issues.push(`${f}:${c.name}: 키 → 대상 맵 — ${m[0]}`);
     }
   }
-  assert.ok(calls >= 20, `호출처 ${calls}곳(라우트 10개 파일)`);
-  // 정의 — vcenterId · 범위를 세기 전에 거르고 · 첫 일치에서 멈추지 않는다(엣지 루프 안 return 금지) · 식별은 targetIdOf
-  const u = stripComments(fs.readFileSync(path.join(SRC, 'routes', 'api', 'bmUsage.js'), 'utf8'));
+  return { issues, calls };
+}
+const SWEEP_MUTANTS = Object.freeze([
+  ['M1 이 노드 대상 키 직접 찾기(인자 이름 s)', 'export async function _m1(req, D, key) { const tg = await D.currentTargets(); return tg.targets.find((s) => s.key === key) || null; }'],
+  ['M2 엣지 보관분 첫 일치(인자 이름 y)', 'export async function _m2(req, D, key) { for (const rec of await D.listEdgeBmUsage()) { const hit = (rec.snap.targets || []).find((y) => String(y.key) === key); if (hit) return hit; } return null; }'],
+  ['M3 첫 인자 이름 rq · vcenterId 없음 · denied 판정', 'export async function _m3(rq, D, key) { const f = await resolvePerfTarget(rq, D, { allowed: null, isAdmin: true, key }); if (!f || f.denied) return null; return f; }'],
+  ['M4 vcenterId 를 빈 글자로 박음', 'export async function _m4(req, D, key) { const f = await resolvePerfTarget(req, D, { allowed: null, isAdmin: true, key, vcenterId: "" }); const bad = perfTargetFail(f); if (bad) return bad; return f; }'],
+  ['M5 키 → 대상 Map 으로 찾기', 'export async function _m5(req, D, key) { const idx = new Map((await D.currentTargets()).targets.map((x) => [x.key, x])); return idx.get(key) || null; }'],
+]);
+
+test('⑤ 소스 스윕 — 라우트의 대상 해석은 resolvePerfTarget 하나 · 호출마다 요청의 vcenterId · 응답 모양은 perfTargetFail · 키로 직접 고르지 않는다(반증 F5 변형 5종)', () => {
+  const dir = path.join(SRC, 'routes', 'api');
+  const files = Object.fromEntries(fs.readdirSync(dir).filter((f) => /^bm.*\.js$/.test(f)).map((f) => [f, fs.readFileSync(path.join(dir, f), 'utf8')]));
+  const real = sweepIssues(files);
+  assert.deepEqual(real.issues, [], real.issues.join('\n'));
+  assert.ok(real.calls >= 20, `호출처 ${real.calls}곳(라우트 10개 파일)`);
+  // 반증 mut-sweep(rvn1/mut-sweep.sh) 재현 — 변형을 bmTop.js 사본 글자에 붙이면 각각 걸린다(작업 트리 소스는 바꾸지 않는다)
+  for (const [name, code] of SWEEP_MUTANTS) {
+    const r = sweepIssues({ ...files, 'bmTop.js': `${files['bmTop.js']}\n${code}\n` });
+    assert.ok(r.issues.length > 0, `${name} — 스윕이 잡지 못했다`);
+  }
+  // 정의 — 범위를 세기 전에 거르고 · 첫 일치에서 멈추지 않는다(엣지 루프 안 return 금지) · 식별은 targetIdOf(귀속 없음은 노드까지 — 반증 F4)
+  const u = stripComments(files['bmUsage.js']);
   const body = u.slice(u.indexOf('async function resolvePerfTarget('), u.indexOf('export { resolvePerfTarget'));
   assert.match(body, /targetIdOf\(x\)/);
-  assert.ok(!/for \(const x of rec\.snap\.targets\)[\s\S]*?return \{ via/.test(body.slice(0, body.indexOf('if (!byId.size)'))), '엣지 루프 안에서 첫 일치를 돌려주지 않는다');
+  assert.ok(!/for \(const x of hits\(rec\.snap\.targets\)\)[\s\S]*?return \{ via/.test(body.slice(0, body.indexOf('if (!byId.size)'))), '엣지 루프 안에서 첫 일치를 돌려주지 않는다');
   assert.match(body, /allowed\.has\(v\)/);
 });
 

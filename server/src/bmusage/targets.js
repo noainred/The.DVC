@@ -21,6 +21,7 @@
 import { licenseFromInventory } from './license.js';
 import { hbaBasisFor } from './hbaBasis.js'; // v2.744(감사 LEFT-08 ②)
 import { addressMatcher, extendMatcher, maskIdentityFields, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
+import { overlapIdOf, decidedKeyOf } from './keyDecisions.js'; // 다음 점검 ①(2차): 식별 키가 겹치는 서버 — 사용자 결정
 
 const t = (v) => String(v ?? '').trim();
 const norm = (v) => t(v).toLowerCase();
@@ -83,7 +84,7 @@ export function indexOsHosts(bmServers = []) {
  *   를 추측이 아니라 **근거로** 말한다(`bmusage/license.js` 머리말).
  * @returns {{targets:Array, skipped:Array, counts:object}}
  */
-export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], registry = [], bmServers = [], settings = {}, agentName = '', isEdge = false, inventoryOf = null, now = Date.now() } = {}) {
+export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], registry = [], bmServers = [], settings = {}, agentName = '', isEdge = false, inventoryOf = null, now = Date.now(), dupes = [], decisions = null } = {}) {
   const regById = new Map(registry.map((r) => [t(r.id), r]));
   const regByTag = new Map(registry.filter((r) => t(r.serviceTag)).map((r) => [norm(r.serviceTag), r]));
   const os = indexOsHosts(bmServers);
@@ -92,7 +93,40 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
 
   const targets = [];
   const skipped = [];
+  /*
+   * 다음 점검 ①(2차 · 사용자 결정): **식별 키가 겹치는 서버**를 조용히 버리지 않는다.
+   *   dupes = 분류(classifyFleet)가 같은 dk 라 bareMetal 에 넣지 않은 서버(bareMetalDupes) · 아래 가상화 호스트 루프의 같은 키 건너뜀 —
+   *   이 노드가 맡는(mine) · 켠 법인의 것만 keyOverlaps 로 올린다(법인 · 이름 · 주소 · 원문 서비스태그 · serverId · 출처 · 겹친 상대 · 결정).
+   *   decisions(oid → 결정)가 ‘수집에 추가’ 면 그 서버를 **별도 키**(keyDecisions.decidedKeyOf — `<법인>:<serverId>`)로 대상에 넣는다.
+   *   같은 결정은 그 서버가 더는 겹치지 않아도 키를 지킨다(키가 바뀌어 이력 · 주석 · 정비 창이 끊기지 않게).
+   *   결정이 없거나 ‘제외 유지’ 면 예전처럼 수집하지 않는다(이미 수집 중인 상대 서버의 키 · 이력은 그대로).
+   */
+  const decOf = (role, x) => { const d = decisions && typeof decisions.get === 'function' ? decisions.get(overlapIdOf({ role, vcenterId: x.vcenterId, serverId: x.serverId, name: x.name })) : null; return d || null; };
+  const isMine = (owner) => (isEdge ? (!owner || owner === me) : !owner);
+  const corpOn = (vc) => (vc ? !!corps[vc] : !!settings.includeUnassigned);
+  const keyOverlaps = [];
+  const bmIn = [];
   for (const b of bareMetal) {
+    if (!b || typeof b !== 'object') continue;
+    const d = decOf('bm', { ...b, vcenterId: t(b.vcenterId) });
+    bmIn.push(d?.decision === 'add' ? { ...b, keyOverride: d.key } : b);
+  }
+  for (const d0 of Array.isArray(dupes) ? dupes : []) {
+    if (!d0 || typeof d0 !== 'object') continue;
+    const vc = t(d0.vcenterId);
+    if (!isMine(norm(d0.remoteAgent)) || !corpOn(vc)) continue;   // 엣지가 맡는 서버는 그 엣지가 · 꺼진 법인은 대상이 아니다(겹침과 무관)
+    const dec = decOf('bm', { ...d0, vcenterId: vc });
+    const reg = regById.get(t(d0.serverId)) || null;   // ⚠ 서비스태그로 찾지 않는다 — 공통 태그(‘To Be Filled By O.E.M.’)면 남의 등록을 집는다
+    const osEntry = os.byHost.get(hostKey(reg?.host)) || os.byName.get(norm(d0.name)) || null;
+    const nat = idOf(d0);
+    keyOverlaps.push({ oid: overlapIdOf({ role: 'bm', vcenterId: vc, serverId: d0.serverId, name: d0.name }), role: 'bm', stage: 'classify',
+      serverId: t(d0.serverId), fleetId: t(d0.fleetId), name: t(d0.name), serviceTag: t(d0.serviceTag), key: nat.key, keyKind: nat.keyKind,
+      vcenterId: vc, vcName: t(d0.vcenter), source: t(d0.source), model: t(d0.model), idracHost: t(reg?.host), osHost: t(osEntry?.host),
+      dupOf: d0.dupOf && typeof d0.dupOf === 'object' ? { key: nat.key, name: t(d0.dupOf.name), vcenterId: t(d0.dupOf.vcenterId), source: t(d0.dupOf.source), edge: !!t(d0.dupOf.remoteAgent) } : null,
+      decision: dec, decidedKey: dec?.key || decidedKeyOf({ role: 'bm', vcenterId: vc, serverId: d0.serverId, name: d0.name }) });
+    if (dec?.decision === 'add') bmIn.push({ ...d0, keyOverride: dec.key, decided: true });
+  }
+  for (const b of bmIn) {
     const vc = t(b.vcenterId);
     const owner = norm(b.remoteAgent);
     // 이 노드가 담당하는 서버인가 — 엣지는 **자기 로컬 등록분**(remoteAgent 없음)과 자기 agent 것, 중앙은 agent 없는 것만.
@@ -107,7 +141,8 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
       skipped.push({ ...idOf(b), reason: 'corp-off', vcenterId: vc }); continue;
     }
 
-    const reg = regById.get(t(b.serverId)) || (t(b.serviceTag) ? regByTag.get(norm(b.serviceTag)) : null) || null;
+    // 다음 점검 ①(2차): 별도 키로 수집하는 서버(keyOverride)는 서비스태그로 등록을 찾지 않는다 — 공통 태그면 다른 서버의 iDRAC 을 집는다.
+    const reg = regById.get(t(b.serverId)) || (t(b.serviceTag) && !b.keyOverride ? regByTag.get(norm(b.serviceTag)) : null) || null;
     const osEntry = os.byHost.get(hostKey(reg?.host)) || os.byName.get(norm(b.name)) || os.byHost.get(hostKey(b.name)) || null;
 
     const paths = [];
@@ -169,9 +204,25 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     for (const h of virtHosts || []) {
       if (!h || typeof h !== 'object') continue;
       const vc = t(h.vcenterId);
-      const idv = idOf({ serverId: h.idracServerId, fleetId: h.fleetId, name: h.name, serviceTag: h.serviceTag });
+      let idv = idOf({ serverId: h.idracServerId, fleetId: h.fleetId, name: h.name, serviceTag: h.serviceTag });
       if (!vc) continue;                                   // 가상화 호스트는 늘 vCenter 에 매인다 — 없으면 합성 행(판정 불가)
-      if (bmKeys.has(idv.key)) continue;                   // 같은 물리 박스가 베어메탈로도 잡혔으면 한 번만
+      const vdec = decOf('virt', { vcenterId: vc, serverId: h.idracServerId, name: h.name });
+      if (vdec?.decision === 'add') idv = idOf({ serverId: h.idracServerId, fleetId: h.fleetId, name: h.name, serviceTag: h.serviceTag, keyOverride: vdec.key });
+      if (bmKeys.has(idv.key)) {
+        // 같은 키의 대상이 이미 있다(같은 물리 박스가 베어메탈로도 잡혔거나 · 이름 · 공통 태그가 겹친 다른 호스트) — 예전에는 사유 없이 건너뛰었다(반증 F1).
+        //   이 노드가 맡는 · 켠 법인의 호스트면 ‘식별 키가 겹치는 서버’ 로 올린다(같은 iDRAC 을 받치는 호스트면 sameIdrac — 같은 박스일 가능성).
+        const owner0 = norm(siteAgent.get(vc) || '');
+        if ((owner0 ? (isEdge && owner0 === me) : true) && corps[vc]) {
+          const peer = targets.find((x) => x.key === idv.key) || null;
+          const reg0 = regById.get(t(h.idracServerId)) || null;
+          keyOverlaps.push({ oid: overlapIdOf({ role: 'virt', vcenterId: vc, name: h.name }), role: 'virt', stage: 'virt',
+            serverId: t(h.idracServerId), fleetId: t(h.fleetId), name: t(h.name), serviceTag: t(h.serviceTag), key: idv.key, keyKind: idv.keyKind,
+            vcenterId: vc, vcName: t(h.vcenter), source: 'vcenter-host', model: t(h.model), idracHost: t(reg0?.host), osHost: '',
+            dupOf: peer ? { key: peer.key, name: t(peer.name), vcenterId: t(peer.vcenterId), source: peer.role === 'virt' ? 'vcenter-host' : 'bm', edge: false, sameIdrac: !!(reg0 && peer.idrac?.regId && t(reg0.id) === t(peer.idrac.regId)) } : null,
+            decision: vdec, decidedKey: vdec?.key || decidedKeyOf({ role: 'virt', vcenterId: vc, name: h.name }) });
+        }
+        continue;
+      }
       const owner = norm(siteAgent.get(vc) || '');
       const mine = owner ? (isEdge && owner === me) : true;
       if (!mine) { skipped.push({ ...idv, role: 'virt', reason: 'edge-delegated', agent: siteAgent.get(vc) || '', vcenterId: vc }); continue; }
@@ -249,19 +300,27 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
   counts.byReason = byReason;
   counts.osDuplicates = os.duplicates;
   counts.keyConflicts = conflictGroups;   // 겹친 키 수(서버 수는 keyConflicts.length)
-  return { targets, skipped, counts, keyConflicts };
+  // 다음 점검 ①(2차): 겹침 목록에 ‘지금 그 별도 키로 수집 대상인가’ 를 붙인다(결정 ‘추가’ 뒤 대상이 됐는지 — 경로 없음이면 skipped 사유로 따로 보인다).
+  const liveKeys = new Set(targets.map((x) => x.key));
+  for (const o of keyOverlaps) o.collecting = !!(o.decision?.decision === 'add' && liveKeys.has(o.decision.key));
+  counts.keyOverlaps = keyOverlaps.length;
+  return { targets, skipped, counts, keyConflicts, keyOverlaps };
 }
 
-/** 안정 키 — 서비스태그 우선(v2.548 `deviceKey` 와 같은 등급 판단). v2.625: 법인별 사용량 집계가 같은 키로 최신값을 찾도록 export. */
+/**
+ * 안정 키 — 서비스태그 우선(v2.548 `deviceKey` 와 같은 등급 판단). v2.625: 법인별 사용량 집계가 같은 키로 최신값을 찾도록 export.
+ *   다음 점검 ①(2차): `keyOverride` 가 있으면(식별 키 겹침 — 사용자가 ‘수집에 추가’ 를 고른 서버) 그 별도 키 · keyKind 'decided'.
+ */
 export function idOf(b) {
   const tag = t(b.serviceTag).toUpperCase();
+  const ov = t(b.keyOverride);
   return {
     serverId: t(b.serverId),
     fleetId: t(b.fleetId),
     name: t(b.name),
     serviceTag: tag,
-    key: tag || t(b.fleetId) || t(b.serverId),
-    keyKind: tag ? 'serviceTag' : (t(b.fleetId) ? 'fleetId' : 'serverId'),
+    key: ov || tag || t(b.fleetId) || t(b.serverId),
+    keyKind: ov ? 'decided' : (tag ? 'serviceTag' : (t(b.fleetId) ? 'fleetId' : 'serverId')),
   };
 }
 

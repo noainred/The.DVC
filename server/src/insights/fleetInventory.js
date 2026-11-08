@@ -121,6 +121,16 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
   // --- 1) 물리 서버 분류 → 베어메탈 추출 ---
   const bareMetal = [];
   const usedBmKeys = new Set();
+  /*
+   * 다음 점검 ①(2차 · 사용자 결정 2026-11-08 "겹치는 노드의 IP · hostname · service tag 등을 수집해서 사용자가 추가할지 여부를 결정"):
+   *   같은 dk(서비스태그 소문자 || serverId)의 둘째 서버는 예전처럼 bareMetal 에 넣지 않되(분류 · 전력 합 · 서버 분석은 그대로) **조용히 버리지 않는다** —
+   *   bareMetalDupes 에 법인 · 이름 · 원문 서비스태그 · serverId · 출처 · 겹친 상대를 싣는다(베어메탈 사용률의 ‘식별 키가 겹치는 서버’ 표 — 사용자가 추가 여부를 정한다).
+   *   공통 태그(‘To Be Filled By O.E.M.’ 같은 화이트박스 기본값) · 숫자만인 태그와 serverId · 대소문자만 다른 태그가 실제로 이렇게 겹친다(반증 F1 재현).
+   *   ⚠ 서버 분석 응답(routes/insights.js /fleet)에는 싣지 않는다 — 내부용(주소 가림 · 범위 거르기를 그 라우트가 하지 않는다).
+   */
+  const bareMetalDupes = [];
+  const bmByDk = new Map();
+  const dupOf = (k) => { const b = bmByDk.get(k); return b ? { serverId: b.serverId, name: b.name, vcenterId: b.vcenterId || '', source: b.source || '', remoteAgent: b.remoteAgent || '' } : null; };
   const claimedHostKeys = new Set(); // 강제 베어메탈 서버가 점유한 호스트 키 → 호스트 루프에서 가상화 제외(중복 방지)
   const orphanVirt = [];             // 'virtualization' 강제했지만 어느 ESXi 호스트에도 무매칭 → 합성 가상화 행
 
@@ -143,7 +153,15 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       }
     }
     const dk = norm(s.serviceTag) || norm(s.serverId);
-    if (usedBmKeys.has(dk)) continue;
+    if (usedBmKeys.has(dk)) {
+      const vcd = resolveVc(s.serviceTag, s.serverId, s);
+      bareMetalDupes.push({
+        serverId: s.serverId, fleetId: dk, name: s.serverName || s.host || s.serviceTag || s.serverId, model: s.model || '',
+        serviceTag: s.serviceTag || '', source: s.source, host: s.host || '', hostNames: Array.isArray(s.hostNames) ? s.hostNames.slice(0, 8) : [],
+        remoteAgent: s.remoteAgent || '', forced: t === 'baremetal', tag: t || '', stage: 'classify', dupOf: dupOf(dk), ...vcRow(vcd.id, vcd.src),
+      });
+      continue;
+    }
     usedBmKeys.add(dk);
     const vc = resolveVc(s.serviceTag, s.serverId, s);
     bareMetal.push({
@@ -155,6 +173,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       ...(s.untaggedServerId ? { untaggedServerId: s.untaggedServerId } : {}),
       ...vcRow(vc.id, vc.src),
     });
+    bmByDk.set(dk, bareMetal[bareMetal.length - 1]);
   }
 
   // --- 2) 가상화 호스트 목록(=vCenter ESXi 호스트, 권위 소스) ---
@@ -180,6 +199,14 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
           serverId: `host:${h.vcenterId}:${h.name}`, fleetId: hk, name: h.name, model: h.model || '',
           serviceTag: h.serviceTag || '', source: (m && m.source !== 'vcenter') ? m.source : 'vcenter',
           watts: posOrNull(w), forced: true, tag: 'baremetal', tagKey: hk, ...vcRow(vc.id, vc.src),
+        });
+        bmByDk.set(hk, bareMetal[bareMetal.length - 1]);
+      } else {
+        // 다음 점검 ①(2차): 강제 베어메탈 호스트도 같은 hk 가 이미 있으면 조용히 버리지 않는다(위 bareMetalDupes 와 같은 꼴).
+        const vcd = resolveVc(h.serviceTag, h.name, { vcenterId: h.vcenterId, source: 'host' });
+        bareMetalDupes.push({
+          serverId: `host:${h.vcenterId}:${h.name}`, fleetId: hk, name: h.name, model: h.model || '', serviceTag: h.serviceTag || '',
+          source: 'vcenter', host: h.name, hostNames: [h.name], remoteAgent: '', forced: true, tag: 'baremetal', stage: 'classify', dupOf: dupOf(hk), ...vcRow(vcd.id, vcd.src),
         });
       }
       continue;
@@ -257,6 +284,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     bareMetalUnassigned: bareMetal.filter((b) => !b.vcenterId).length,
     bareMetalInferred: bareMetal.filter((b) => b.vcSource === 'inferred').length,
     forcedBareMetal: bareMetal.filter((b) => b.forced).length,
+    bareMetalDupes: bareMetalDupes.length,   // 다음 점검 ①(2차): 같은 dk 라 bareMetal 에 넣지 않은 서버 수(목록은 bareMetalDupes — 베어메탈 사용률 표)
     excluded: Object.entries(tags).filter(([k, v]) => v === 'exclude' && liveKeys.has(k)).length, // live 제외만
     ghostKeys,
   };
@@ -266,7 +294,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
   for (const b of bareMetal) {
     if (b.vcenterId && !knownVcIds.has(b.vcenterId)) { knownVcIds.add(b.vcenterId); vcList.push({ id: b.vcenterId, name: b.vcenterId, region: '', external: true }); }
   }
-  return { virtualizationHosts, bareMetal, byVcenter, vcenters: vcList, summary, liveKeys: [...liveKeys] };
+  return { virtualizationHosts, bareMetal, bareMetalDupes, byVcenter, vcenters: vcList, summary, liveKeys: [...liveKeys] };
 }
 
 /**
