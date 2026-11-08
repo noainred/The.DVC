@@ -195,7 +195,10 @@ export async function bmRulesRead(req, snap, deps = {}) {
   const F = await D.focus();
   const rules = R.loadPerfRules();
   const keepVc = (arr) => (allowed ? (arr || []).filter((v) => allowed.has(v)) : (arr || []));
-  const scopedRules = { ...rules, rules: Object.fromEntries(Object.entries(rules.rules || {}).map(([id, x]) => [id, { ...x, corpsOff: keepVc(x.corpsOff) }])), focus: { ...rules.focus, autoCorps: keepVc(rules.focus?.autoCorps) } };
+  // 8b단계: 랙 배치는 보이는 법인 것만(범위 계정에 다른 법인의 랙 · 서버 키를 주지 않는다) · 편집 텍스트는 서버가 만든다(웹이 형식을 다시 해석하지 않는다).
+  const racks = (rules.power?.racks || []).filter((r) => !allowed || allowed.has(r.vcenterId));
+  const scopedRules = { ...rules, rules: Object.fromEntries(Object.entries(rules.rules || {}).map(([id, x]) => [id, { ...x, corpsOff: keepVc(x.corpsOff) }])), focus: { ...rules.focus, autoCorps: keepVc(rules.focus?.autoCorps) },
+    power: { ...(rules.power || {}), racks, racksText: R.racksToText(racks) } };
   const st = A.perfAlertStatus();
   const sent = [...(st.sent || []).map((x) => ({ ...x, agent: config.agent?.name || '', via: 'local' }))];
   // 엣지 발송 기록 — 서버 키 · 법인 · 제목은 중앙이 다시 세운다(반증 F9: 엣지가 준 vcenterId 로 범위를 가르지 않는다 · 그 엣지 대상 밖 키는 버린다).
@@ -226,7 +229,7 @@ async function rulesWrite(req, res) {
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     const out = R.savePerfRules(b, { by: req.user?.username || '' });
     logAudit({ user: req.user?.username, action: 'bm-perf.rules', target: 'bm-perf-rules.json', ip: req.ip || '', detail: R.rulesAuditSummary(out.prev, out.value) });
-    res.json({ ok: true, rules: out.value });
+    res.json({ ok: true, rules: { ...out.value, power: { ...(out.value.power || {}), racksText: R.racksToText(out.value.power?.racks || []) } } });
   } catch (e) {
     if (e?.status === 400) return res.status(400).json({ ok: false, field: e.field || null, reason: String(e.message || e).slice(0, 300) });
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });

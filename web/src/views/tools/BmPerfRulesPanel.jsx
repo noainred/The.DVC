@@ -29,6 +29,15 @@ const NUM_SECTIONS = Object.freeze([
   { k: 'logs', title: '로그 분석', fields: [['lineCap', '출처별 주기당 줄 상한'], ['keepDays', '보관(일)'], ['burstCount', 'SSH 실패 집중 — 줄 수'], ['burstWindowMin', 'SSH 실패 집중 — 창(분)']] },
   // 8a단계 용량 소진 예측 — 목표선(%) · 데이터 부족 기준(14일 창 안 점 수) · 알림 ‘소진 ≤ N일’ 의 N.
   { k: 'capacity', title: '용량 소진 예측', fields: [['targetPct', '목표선 %'], ['minDays', '데이터 부족 기준(14일 중 점 수)'], ['days', '알림 — 소진 ≤ N일']] },
+  // 8b단계 ⑳ 프로세스 Top-N — 5분 표본 보존(날 파일) · comm 별 시간 집계 보존. 끄면 ##TOP 이 ‘꺼짐’ 한 줄(1초 대기 없음).
+  { k: 'top', title: '프로세스 Top-N', fields: [['keepDays', '5분 표본 보존(일)'], ['hourlyDays', 'comm 별 시간 집계 보존(일)']] },
+  // 8b단계 ㉑ 저활용 — 창 · 데이터 부족 · 후보/관찰 점수 · 가중 6 · ‘낮다’ 기준(관행 — 설정값) · 주기 사용 판정.
+  { k: 'idle', title: '저활용 점수', fields: [['windowDays', '창(일 · 30 기본 · 90 옵션)'], ['minDays', '데이터 부족(일 미만)'], ['candidate', '후보 점수(이상)'], ['watch', '관찰 점수(이상)'],
+    ['wCpu', '가중 CPU'], ['wMem', '가중 메모리'], ['wDisk', '가중 디스크'], ['wNet', '가중 네트'], ['wPower', '가중 전력'], ['wAct', '가중 활동 흔적'],
+    ['cpuAvgPct', 'CPU 평균 < %'], ['cpuMaxPct', 'CPU 일 최대 < %'], ['memAvgPct', '메모리 평균 < %'], ['diskBusyMaxPct', '디스크 일 최대 busy < %'], ['netMaxPct', '네트 일 최대 < %'],
+    ['powerIdlePct', '전력 평균 ≤ 최소 × %'], ['periodicHighPct', '주기 사용 — 높은 날 기준 %']] },
+  // 8b단계 ㉒ 전력 · 온도 — 흡기 기준(설정값 · 모델별 권장 아님) · PowerCap 걸림 % · 랙 여유 주의 %. 랙 배치는 아래 글 상자.
+  { k: 'power', title: '전력 · 온도', fields: [['inletWarnC', '흡기 기준 °C'], ['capHitPct', 'PowerCap 걸림(측정 ≥ 상한 × %)'], ['rackLowPct', '랙 여유 주의(% 미만)']] },
 ]);
 
 /** 이 계정이 저장할 수 있나 — 설정 소유자 등급(소유자 ∧ 전체 범위) · 인증 꺼짐(Anonymous admin). 서버가 다시 막는다. */
@@ -141,6 +150,19 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
                     <label key={vc.id}><input type="checkbox" disabled={ro} checked={(form.focus?.autoCorps || []).includes(vc.id)} onChange={(e) => setForm((f) => ({ ...f, focus: { ...f.focus, autoCorps: e.target.checked ? [...new Set([...(f.focus?.autoCorps || []), vc.id])] : (f.focus?.autoCorps || []).filter((x) => x !== vc.id) } }))} />{vc.name}</label>
                   ))}</div>
                 </details>
+              )}
+              {sec.k === 'top' && (
+                <label className="bmo-check" style={{ fontSize: 12 }}><input type="checkbox" disabled={ro} checked={form.top?.on !== false} onChange={(e) => setForm((f) => ({ ...f, top: { ...f.top, on: e.target.checked } }))} />프로세스 Top-N 수집 켬(같은 SSH 1회 · 1초 대기 · comm 만)</label>
+              )}
+              {sec.k === 'idle' && (
+                <label className="bmo-check" style={{ fontSize: 12 }}><input type="checkbox" disabled={ro} checked={form.idle?.on !== false} onChange={(e) => setForm((f) => ({ ...f, idle: { ...f.idle, on: e.target.checked } }))} />저활용 하루 계산 켬(01:20 뒤 첫 틱)</label>
+              )}
+              {sec.k === 'power' && (
+                <label style={{ fontSize: 12 }}>랙 배치 — 한 줄에 ‘법인,랙,상한 kW(비우면 미설정),서버키[@U] 서버키[@U] …’ · # 은 주석{save.field && save.field.startsWith('power.racks') ? <span style={{ color: toneVar('bad') }}> — 형식 밖(아래 안내)</span> : null}
+                  <textarea className="input" rows={5} spellCheck={false} style={{ width: '100%', minWidth: 0, fontFamily: 'var(--mono, monospace)', fontSize: 12 }} disabled={ro}
+                    value={form.power?.racksText ?? ''} onChange={(e) => setForm((f) => ({ ...f, power: { ...f.power, racksText: e.target.value } }))} placeholder={'KR-SEL,A-07,10.2,SVCTAG1@38 SVCTAG2@36'} aria-label="랙 배치" />
+                  <span className="bmo-sub">등록 CSV 에 ‘랙/위치’ 열이 없어 이 칸이 랙의 유일한 원천입니다 · 서버 키는 함대 표의 서버 키(대개 서비스 태그) · 한 서버는 한 랙에만.</span>
+                </label>
               )}
               {sec.k === 'baseline' && <span className="bmo-sub">감시 지표: {(resp.baselineMetrics || []).map((m) => FOCUS_METRIC_TEXT[m]?.label || m).join(' · ')}</span>}
               {sec.k === 'health' && <span className="bmo-sub">칸: {Object.values(HEALTH_CELL_TEXT).map((x) => x.label).slice(0, 4).join(' · ')} 등 8칸</span>}
