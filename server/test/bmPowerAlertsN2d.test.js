@@ -119,3 +119,98 @@ test('② P2 — 수집 건강 규칙이 꺼진 노드의 실패 주기도 판�
   assert.equal(poller.bmUsageStatus().last.collectAlert, undefined, '수집 건강 규칙이 꺼져 있으면 그 칸은 그대로 없음');
   assert.equal(A.perfAlertStatus().sent.length, 0);
 });
+
+test('④ Q1 — 상태 파일 손상 뒤 서버 · 랙 항목이 없는 판정(실패 주기의 빈 판정 · 노드 칸만)은 ‘첫 주기는 기준만’ 을 소비하지 않는다', async () => {
+  const rules = rulesOf({ powerCap: { sustain: 1, repeatMin: 0 }, collect: { sustain: 1, repeatMin: 0 } });
+  const cap = (s) => ({ key: 'K1', name: 'bm-K1', vcenterId: 'vcA', target: { key: 'K1', vcenterId: 'vcA' }, power: { kind: 'server', capHitPct: 98, w: 900, at: s, capW: 900, capPct: 100, capHit: true } });
+  const node = { key: '__node__', name: '수집 노드 n', vcenterId: '', collect: { cells: { error: 'true' }, error: 'classify-failed' } };
+  for (const [label, first] of [['빈 판정', []], ['노드 칸만', [node]]]) {
+    await A._drainPerfAlertsForTest();
+    A._resetPerfAlertsForTest();
+    const d = depsOf();
+    // 손상(재시작 뒤 첫 로드) → 실패 주기의 판정이 먼저
+    fs.writeFileSync(FILE, '{broken');
+    const r0 = await A.runPerfAlerts(first, { rules, now: NOW, deps: d.deps, intervalMs: 5 * MIN, cycleStartAt: NOW - MIN });
+    assert.equal(r0.fires ?? 0, 0, `${label} — 그 판정도 보내지 않는다(기준만)`); assert.equal(d.sends.length, 0);
+    assert.equal(STATE().cycle.at, NOW, `${label} — 판정 시각(P2 동작)은 그대로 남긴다`);
+    // 다음 정상 주기 — 진행 중이던 걸림을 새 사건으로 보내지 않는다(이 판정이 기준만 잡는다)
+    const r1 = await A.runPerfAlerts([cap(NOW + 4 * MIN), node], { rules, now: NOW + 5 * MIN, deps: d.deps, intervalMs: 5 * MIN, cycleStartAt: NOW + 4 * MIN });
+    assert.equal(r1.warmup, true, `${label} 뒤 정상 주기가 기준을 잡는다(기준판: warmup false · 발송 1)`);
+    const r2 = await A.runPerfAlerts([cap(NOW + 9 * MIN), node], { rules, now: NOW + 10 * MIN, deps: d.deps, intervalMs: 5 * MIN, cycleStartAt: NOW + 9 * MIN });
+    await A._drainPerfAlertsForTest();
+    assert.equal(r2.fires, 0, '그 뒤에도 같은 사건은 진행 중'); assert.equal(d.sends.length, 0, `${label} — 발송 0`);
+  }
+  // 서버 항목이 있는 첫 판정은 예전처럼 보호를 소비한다(다음 주기 새 사건은 발송)
+  await A._drainPerfAlertsForTest();
+  A._resetPerfAlertsForTest();
+  const d = depsOf();
+  fs.writeFileSync(FILE, '{broken');
+  const r0 = await A.runPerfAlerts([cap(NOW - MIN)], { rules, now: NOW, deps: d.deps, intervalMs: 5 * MIN });
+  assert.equal(r0.warmup, true);
+  const ri = rulesOf({ powerCap: { sustain: 1, repeatMin: 0 }, inlet: { sustain: 1, repeatMin: 0 } });
+  const r1 = await A.runPerfAlerts([{ key: 'K2', name: 'bm-K2', vcenterId: 'vcA', target: { key: 'K2', vcenterId: 'vcA' }, power: { kind: 'server', inletWarnC: 27, tempState: 'ok', inletC: 30, tempAt: NOW + 4 * MIN } }], { rules: ri, now: NOW + 5 * MIN, deps: d.deps, intervalMs: 5 * MIN });
+  await A._drainPerfAlertsForTest();
+  assert.equal(r1.warmup, undefined); assert.equal(r1.fires, 1); assert.equal(d.sends.length, 1);
+});
+
+test('⑤ R1 — 손상 뒤 보호는 종류별(수집 노드 칸 · 서버 · 랙): 분류 실패가 이어져도 수집 건강 알림은 둘째 주기부터 나가고 서버 · 랙은 첫 정상 주기에 기준만', async () => {
+  const rules = rulesOf({ powerCap: { sustain: 1, repeatMin: 0 }, collect: { sustain: 2, repeatMin: 0 } });
+  const cap = (s) => ({ key: 'K1', name: 'bm-K1', vcenterId: 'vcA', target: { key: 'K1', vcenterId: 'vcA' }, power: { kind: 'server', capHitPct: 98, w: 900, at: s, capW: 900, capPct: 100, capHit: true } });
+  const node = { key: '__node__', name: '수집 노드 n', vcenterId: '', collect: { cells: { error: 'true' }, error: 'classify-failed' } };
+  await A._drainPerfAlertsForTest();
+  A._resetPerfAlertsForTest();
+  const d = depsOf();
+  fs.writeFileSync(FILE, '{broken');
+  const run = (k, items) => A.runPerfAlerts(items, { rules, now: NOW + k * 5 * MIN, deps: d.deps, intervalMs: 5 * MIN, cycleStartAt: NOW + k * 5 * MIN - MIN });
+  // 분류 실패 3주기(항목은 수집 노드 칸뿐 · 수집 건강 걸림 지속 2) — 첫 주기는 기준만, 둘째 주기에 발화 · 발송
+  const f = [];
+  for (const k of [0, 1, 2]) { const r = await run(k, [node]); f.push(r); }
+  await A._drainPerfAlertsForTest();
+  assert.equal(d.sends.length, 1, '수집 건강 알림이 나간다(e50dac58: 정상 주기가 올 때까지 0)'); assert.match(d.sends[0].title, /수집 건강/);
+  assert.equal(f[1].fires, 1, '둘째 주기 발화(첫 주기는 지속 1)'); assert.equal(f[1].warmup, undefined, '걸러진 발화가 없으면 warmup 표지 없음');
+  // 첫 정상 주기 — 서버 · 랙 쪽은 기준만(진행 중이던 걸림을 새 사건으로 보내지 않는다 — 2225415f: 발송) · 걸러졌으니 warmup 표지
+  const r3 = await run(3, [cap(NOW + 14 * MIN), node]);
+  assert.equal(r3.warmup, true); assert.equal(r3.warmupHeld, 1); assert.equal(r3.fires, 0);
+  const r4 = await run(4, [cap(NOW + 19 * MIN), node]);
+  await A._drainPerfAlertsForTest();
+  assert.equal(r4.fires, 0); assert.equal(r4.warmup, undefined);
+  assert.equal(d.sends.length, 1, '서버 · 랙은 기준만 — 총 발송은 수집 건강 1건');
+  // 한 주기에 두 종류가 처음 함께 오면 둘 다 기준만(손상 직후 정상 주기 — 예전과 같음)
+  await A._drainPerfAlertsForTest();
+  A._resetPerfAlertsForTest();
+  const d2 = depsOf();
+  fs.writeFileSync(FILE, '{broken');
+  const r0 = await A.runPerfAlerts([cap(NOW - MIN), node], { rules: rulesOf({ powerCap: { sustain: 1, repeatMin: 0 }, collect: { sustain: 1, repeatMin: 0 } }), now: NOW, deps: d2.deps, intervalMs: 5 * MIN });
+  await A._drainPerfAlertsForTest();
+  assert.equal(r0.warmup, true); assert.equal(r0.warmupHeld, 2); assert.equal(d2.sends.length, 0);
+});
+
+test('⑥ S5 — 손상 뒤 서버 · 랙 보호는 실제로 판정한 항목만 푼다(넘김 항목은 기준을 잡지 않으므로 풀지 않는다)', async () => {
+  const rules = rulesOf({ powerCap: { sustain: 1, repeatMin: 0 } });
+  const cap = (s) => ({ key: 'K1', name: 'bm-K1', vcenterId: 'vcA', target: { key: 'K1', vcenterId: 'vcA' }, power: { kind: 'server', capHitPct: 98, w: 900, at: s, capW: 900, capPct: 100, capHit: true } });
+  const rel = { key: 'K1', name: 'bm-K1', vcenterId: 'vcA', release: { kind: 'server', reason: 'corp-edge-owned', node: '' } };
+  await A._drainPerfAlertsForTest();
+  A._resetPerfAlertsForTest();
+  const d = depsOf();
+  fs.writeFileSync(FILE, '{broken');
+  // 손상 직후 첫 주기 — 서버 · 랙 항목이 전부 넘김(이 노드는 판정 노드가 아님)
+  const r0 = await A.runPerfAlerts([rel], { rules, now: NOW, deps: d.deps, intervalMs: 5 * MIN });
+  assert.equal(r0.fires, 0);
+  // 판정 노드가 이 노드로 돌아옴 — 진행 중이던 걸림은 이 판정이 기준만 잡는다(817f770b: 넘김 주기가 보호를 풀어 새 사건으로 발송)
+  const r1 = await A.runPerfAlerts([cap(NOW + 4 * MIN)], { rules, now: NOW + 5 * MIN, deps: d.deps, intervalMs: 5 * MIN });
+  assert.equal(r1.warmup, true, '넘김만 있던 주기는 보호를 풀지 않는다'); assert.equal(r1.warmupHeld, 1);
+  const r2 = await A.runPerfAlerts([cap(NOW + 9 * MIN)], { rules, now: NOW + 10 * MIN, deps: d.deps, intervalMs: 5 * MIN });
+  await A._drainPerfAlertsForTest();
+  assert.equal(r2.fires, 0); assert.equal(d.sends.length, 0, '발송 0');
+  // 같은 주기에 넘김 + 판정 항목이 함께 오면 판정 항목이 보호를 푼다(그 주기 발화는 기준만 — 다음 주기 새 사건은 발송)
+  await A._drainPerfAlertsForTest();
+  A._resetPerfAlertsForTest();
+  const d2 = depsOf();
+  fs.writeFileSync(FILE, '{broken');
+  const k2 = { ...cap(NOW - MIN), key: 'K2', name: 'bm-K2', target: { key: 'K2', vcenterId: 'vcA' } };
+  const q0 = await A.runPerfAlerts([rel, k2], { rules, now: NOW, deps: d2.deps, intervalMs: 5 * MIN });
+  assert.equal(q0.warmupHeld, 1);
+  const q1 = await A.runPerfAlerts([cap(NOW + 4 * MIN), { ...k2, power: { ...k2.power, at: NOW + 4 * MIN } }], { rules, now: NOW + 5 * MIN, deps: d2.deps, intervalMs: 5 * MIN });
+  await A._drainPerfAlertsForTest();
+  assert.equal(q1.warmup, undefined); assert.equal(q1.fires, 1, 'K1 은 이 노드가 처음 판정하는 새 사건 — 보호가 풀린 뒤라 발송'); assert.equal(d2.sends.length, 1);
+});
