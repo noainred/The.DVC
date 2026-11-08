@@ -14,6 +14,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { useOpsLoad, OpsError } from './BmTuningTab.jsx';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import { verdictView } from './bmPerfText.js';
 import { shortStamp } from './bmOpsText.js';
 import { fmtHm } from '../../components/vmperf/vmPerfText.js';
@@ -213,8 +214,8 @@ export function FocusSessionList({ sessions = [], selId = '', onOpen = () => {} 
   );
 }
 
-export default function BmFocusTab({ itemKey, name = '' }) {
-  const list = useOpsLoad((k) => `/tools/bm-usage/perf/${encodeURIComponent(k)}/focus`, itemKey);
+export default function BmFocusTab({ itemKey, vc = '', name = '' }) {
+  const list = useOpsLoad((k, v) => perfPath(k, v, '/focus'), itemKey, vc);
   const [reason, setReason] = useState('');
   const [run, setRun] = useState({ busy: false, resp: null, err: null });
   const [sel, setSel] = useState({ id: '', resp: null, err: null });
@@ -228,7 +229,7 @@ export default function BmFocusTab({ itemKey, name = '' }) {
   const plan = list.resp?.plan || null;
   // 6단계: 고른 세션 시간의 운영 주석(자동 주석 포함) — 세션을 고를 때 1회.
   const sessWin = useMemo(() => { const x = sel.resp?.session; return x ? { from: (x.start || x.created) - 60_000, to: (x.end || Date.now()) + 60_000 } : null; }, [sel.resp]);
-  const ann = useAnnotations(itemKey && sessWin ? [itemKey] : [], sessWin, 0);
+  const ann = useAnnotations(itemKey && sessWin ? [itemKey] : [], sessWin, 0, [vc]);
 
   // poll = 폴링 타이머가 부른 것 — 횟수 카운터를 되돌리지 않는다(반증 F8: 예전에는 open 이 늘 0 으로 돌려 상한이 동작하지 않고 목록도 매번 다시 읽었다).
   const open = async (id, { poll = false } = {}) => {
@@ -236,7 +237,7 @@ export default function BmFocusTab({ itemKey, name = '' }) {
     if (!poll) polls.current = 0;
     setSel((p) => ({ id, resp: p.id === id ? p.resp : null, err: null }));
     try {
-      const resp = await fetchJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/focus/${encodeURIComponent(id)}`, {}, undefined, { timeoutMs: 60_000 });
+      const resp = await fetchJson(perfPath(itemKey, vc, `/focus/${encodeURIComponent(id)}`), {}, undefined, { timeoutMs: 60_000 });
       if (g === gen.current) setSel({ id, resp, err: null });
     } catch (e) { if (g === gen.current) setSel({ id, resp: null, err: e }); }
   };
@@ -263,7 +264,7 @@ export default function BmFocusTab({ itemKey, name = '' }) {
   const start = async () => {
     setRun({ busy: true, resp: null, err: null });
     try {
-      const r = await postJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/focus`, { reason }, { timeoutMs: 60_000 });
+      const r = await postJson(perfPath(itemKey, vc, '/focus'), { reason }, { timeoutMs: 60_000 });
       setRun({ busy: false, resp: r, err: null }); setReason('');
       await list.reload();
       if (r?.id) open(r.id);
@@ -273,7 +274,7 @@ export default function BmFocusTab({ itemKey, name = '' }) {
     }
   };
   const stop = async (id) => {
-    try { await postJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/focus/${encodeURIComponent(id)}/stop`, {}, { timeoutMs: 60_000 }); } catch (e) { setRun({ busy: false, resp: null, err: e }); }
+    try { await postJson(perfPath(itemKey, vc, `/focus/${encodeURIComponent(id)}/stop`), {}, { timeoutMs: 60_000 }); } catch (e) { setRun({ busy: false, resp: null, err: e }); }
     await list.reload(); open(id);
   };
   const cv = run.resp ? focusCodeView(run.resp.code) : null;

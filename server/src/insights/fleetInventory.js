@@ -55,7 +55,7 @@ const isMeasured = (b) => Number.isFinite(b.watts) && b.watts > 0;
  * @param tags      { 소문자 키 -> 'baremetal'|'virtualization'|'exclude' }
  * @param assign    { 소문자 키 -> 소속 법인(vCenter) id } — 수동 귀속
  */
-export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = {}, assign = {} } = {}) {
+export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = {}, assign = {}, universeDupes = [] } = {}) {
   const vcName = new Map(vcenters.map((v) => [v.id, v.name || v.id]));
   const vcRegion = new Map(vcenters.map((v) => [v.id, v.location?.region || v.region || '']));
   const idx = buildHostIndex(hosts);
@@ -121,6 +121,16 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
   // --- 1) 물리 서버 분류 → 베어메탈 추출 ---
   const bareMetal = [];
   const usedBmKeys = new Set();
+  /*
+   * 다음 점검 ①(2차 · 사용자 결정 2026-11-08 "겹치는 노드의 IP · hostname · service tag 등을 수집해서 사용자가 추가할지 여부를 결정"):
+   *   같은 dk(서비스태그 소문자 || serverId)의 둘째 서버는 예전처럼 bareMetal 에 넣지 않되(분류 · 전력 합 · 서버 분석은 그대로) **조용히 버리지 않는다** —
+   *   bareMetalDupes 에 법인 · 이름 · 원문 서비스태그 · serverId · 출처 · 겹친 상대를 싣는다(베어메탈 사용률의 ‘식별 키가 겹치는 서버’ 표 — 사용자가 추가 여부를 정한다).
+   *   공통 태그(‘To Be Filled By O.E.M.’ 같은 화이트박스 기본값) · 숫자만인 태그와 serverId · 대소문자만 다른 태그가 실제로 이렇게 겹친다(반증 F1 재현).
+   *   ⚠ 서버 분석 응답(routes/insights.js /fleet)에는 싣지 않는다 — 내부용(주소 가림 · 범위 거르기를 그 라우트가 하지 않는다).
+   */
+  const bareMetalDupes = [];
+  const bmByDk = new Map();
+  const dupOf = (k) => { const b = bmByDk.get(k); return b ? { serverId: b.serverId, name: b.name, vcenterId: b.vcenterId || '', source: b.source || '', remoteAgent: b.remoteAgent || '' } : null; };
   const claimedHostKeys = new Set(); // 강제 베어메탈 서버가 점유한 호스트 키 → 호스트 루프에서 가상화 제외(중복 방지)
   const orphanVirt = [];             // 'virtualization' 강제했지만 어느 ESXi 호스트에도 무매칭 → 합성 가상화 행
 
@@ -143,7 +153,15 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       }
     }
     const dk = norm(s.serviceTag) || norm(s.serverId);
-    if (usedBmKeys.has(dk)) continue;
+    if (usedBmKeys.has(dk)) {
+      const vcd = resolveVc(s.serviceTag, s.serverId, s);
+      bareMetalDupes.push({
+        serverId: s.serverId, fleetId: dk, name: s.serverName || s.host || s.serviceTag || s.serverId, model: s.model || '',
+        serviceTag: s.serviceTag || '', source: s.source, host: s.host || '', hostNames: Array.isArray(s.hostNames) ? s.hostNames.slice(0, 8) : [],
+        remoteAgent: s.remoteAgent || '', forced: t === 'baremetal', tag: t || '', stage: 'classify', dupOf: dupOf(dk), ...vcRow(vcd.id, vcd.src),
+      });
+      continue;
+    }
     usedBmKeys.add(dk);
     const vc = resolveVc(s.serviceTag, s.serverId, s);
     bareMetal.push({
@@ -154,6 +172,24 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       // 엣지 보고분만: 태그가 없었을 때의 serverId(서비스 인벤토리 고정 승계 — 6차 2). 그 밖의 행에는 싣지 않는다.
       ...(s.untaggedServerId ? { untaggedServerId: s.untaggedServerId } : {}),
       ...vcRow(vc.id, vc.src),
+    });
+    bmByDk.set(dk, bareMetal[bareMetal.length - 1]);
+  }
+
+  // 다음 점검 ①(2차): 서버 목록을 만들 때(buildServerUniverse) 다른 서버와 태그 · 호스트명이 겹쳐 빠진 등록부 서버도 같은 목록으로(stage 'universe').
+  //   분류는 바꾸지 않는다(bareMetal · 전력 합 그대로) — ESXi 호스트를 받치는 것으로 보이거나 제외 태그면 올리지 않는다(베어메탈 후보가 아니다).
+  for (const u of Array.isArray(universeDupes) ? universeDupes : []) {
+    if (!u || typeof u !== 'object') continue;
+    const tu = tagOf(u.serviceTag, u.serverId);
+    if (tu === 'exclude' || tu === 'virtualization') continue;
+    if (tu !== 'baremetal' && matchesHost(u)) continue;
+    const dk = norm(u.serviceTag) || norm(u.serverId);
+    const vcd = resolveVc(u.serviceTag, u.serverId, u);
+    const o = u.owner || null;
+    bareMetalDupes.push({
+      serverId: u.serverId, fleetId: dk, name: u.serverName || u.host || u.serviceTag || u.serverId, model: '', serviceTag: u.serviceTag || '', source: u.source || 'idrac',
+      host: u.host || '', hostNames: u.hostNames || [], remoteAgent: '', forced: tu === 'baremetal', tag: tu || '', stage: 'universe', why: u.why || '',
+      dupOf: dupOf(dk) || (o ? { serverId: o.serverId, name: o.name, vcenterId: o.vcenterId, source: o.source, remoteAgent: o.remoteAgent } : null), ...vcRow(vcd.id, vcd.src),
     });
   }
 
@@ -180,6 +216,14 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
           serverId: `host:${h.vcenterId}:${h.name}`, fleetId: hk, name: h.name, model: h.model || '',
           serviceTag: h.serviceTag || '', source: (m && m.source !== 'vcenter') ? m.source : 'vcenter',
           watts: posOrNull(w), forced: true, tag: 'baremetal', tagKey: hk, ...vcRow(vc.id, vc.src),
+        });
+        bmByDk.set(hk, bareMetal[bareMetal.length - 1]);
+      } else {
+        // 다음 점검 ①(2차): 강제 베어메탈 호스트도 같은 hk 가 이미 있으면 조용히 버리지 않는다(위 bareMetalDupes 와 같은 꼴).
+        const vcd = resolveVc(h.serviceTag, h.name, { vcenterId: h.vcenterId, source: 'host' });
+        bareMetalDupes.push({
+          serverId: `host:${h.vcenterId}:${h.name}`, fleetId: hk, name: h.name, model: h.model || '', serviceTag: h.serviceTag || '',
+          source: 'vcenter', host: h.name, hostNames: [h.name], remoteAgent: '', forced: true, tag: 'baremetal', stage: 'classify', dupOf: dupOf(hk), ...vcRow(vcd.id, vcd.src),
         });
       }
       continue;
@@ -257,6 +301,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     bareMetalUnassigned: bareMetal.filter((b) => !b.vcenterId).length,
     bareMetalInferred: bareMetal.filter((b) => b.vcSource === 'inferred').length,
     forcedBareMetal: bareMetal.filter((b) => b.forced).length,
+    bareMetalDupes: bareMetalDupes.length,   // 다음 점검 ①(2차): 같은 dk 라 bareMetal 에 넣지 않은 서버 수(목록은 bareMetalDupes — 베어메탈 사용률 표)
     excluded: Object.entries(tags).filter(([k, v]) => v === 'exclude' && liveKeys.has(k)).length, // live 제외만
     ghostKeys,
   };
@@ -266,7 +311,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
   for (const b of bareMetal) {
     if (b.vcenterId && !knownVcIds.has(b.vcenterId)) { knownVcIds.add(b.vcenterId); vcList.push({ id: b.vcenterId, name: b.vcenterId, region: '', external: true }); }
   }
-  return { virtualizationHosts, bareMetal, byVcenter, vcenters: vcList, summary, liveKeys: [...liveKeys] };
+  return { virtualizationHosts, bareMetal, bareMetalDupes, byVcenter, vcenters: vcList, summary, liveKeys: [...liveKeys] };
 }
 
 /**
@@ -286,20 +331,39 @@ async function buildServerUniverse(hosts, vcSkip = {}) {
   const omeEntryVc = new Map(registry.filter((s) => s.type === 'ome' && s.vcenterId).map((s) => [s.id, s.vcenterId]));
 
   const extras = [];
+  /*
+   * 다음 점검 ①(2차 · 사용자 결정): 등록부(iDRAC)의 전력 미보고 서버가 이미 잡힌 **다른 서버**와 서비스태그 · 호스트명이 같아 빠지면(공통 태그 ‘To Be Filled By O.E.M.’ 이 대표)
+   *   예전에는 아무 데도 남지 않았다 — universeDupes 로 남겨 classifyFleet 이 bareMetalDupes(stage 'universe')로 올린다. 같은 등록 id 가 이미 있으면(전력 보고분 = 같은 장비) 남기지 않는다.
+   */
+  const universeDupes = [];
+  const seenIds = new Set(measured.map((s) => String(s.serverId ?? '')));
+  const ownerByKey = new Map();
+  for (const m of measured) { for (const k of [norm(m.serviceTag), ...(m.hostNames || []).map(norm)]) if (k && !ownerByKey.has(k)) ownerByKey.set(k, m); }
+  const noteUniverse = (s, why, k, serviceTag = s.serviceTag) => {
+    if (seenIds.has(String(s.id))) return;
+    const o = ownerByKey.get(k) || null;
+    universeDupes.push({ serverId: s.id, serverName: s.name || '', serviceTag: String(serviceTag || '').trim(), host: norm(s.host), hostNames: (s.hostNames || []).map(norm).filter(Boolean).slice(0, 8),
+      vcenterId: s.vcenterId || '', source: 'idrac', why, owner: o ? { serverId: o.serverId, name: o.serverName || o.host || '', vcenterId: o.vcenterId || '', source: o.source || '', remoteAgent: o.remoteAgent || '' } : null });
+  };
   for (const s of registry) {
     if (s.type === 'ome') continue;
     const keys = matchKeys(s);
     const regTag = norm(s.serviceTag);
-    if ((regTag && seenTag.has(regTag)) || keys.some((k) => seenHost.has(k))) continue; // 1차 빠른 skip
+    if ((regTag && seenTag.has(regTag)) || keys.some((k) => seenHost.has(k))) { // 1차 빠른 skip
+      noteUniverse(s, regTag && seenTag.has(regTag) ? 'tag' : 'host', regTag && seenTag.has(regTag) ? regTag : keys.find((k) => seenHost.has(k)));
+      continue;
+    }
     const inv = getInventory(s.id);
     const serviceTag = (inv?.system?.serviceTag || s.serviceTag || '').trim();
     const tag = norm(serviceTag);
-    if (tag && seenTag.has(tag)) continue;
+    if (tag && seenTag.has(tag)) { noteUniverse(s, 'tag', tag, serviceTag); continue; }
     const hostNames = [...new Set([...(s.hostNames || []).map(norm), tag].filter(Boolean))];
     extras.push({
       serverId: s.id, serverName: s.name, serviceTag, model: (inv?.system?.model || '').trim(),
       host: norm(s.host), hostNames, vcenterId: s.vcenterId || '', watts: null, source: 'idrac',
     });
+    seenIds.add(String(s.id));
+    for (const k of [tag, ...keys]) if (k && !ownerByKey.has(k)) ownerByKey.set(k, extras[extras.length - 1]);
     if (tag) seenTag.add(tag);
     keys.forEach((k) => seenHost.add(k));
   }
@@ -318,7 +382,9 @@ async function buildServerUniverse(hosts, vcSkip = {}) {
     if (nameKey) seenHost.add(nameKey);
   }
 
-  return [...measured, ...extras];
+  const out = [...measured, ...extras];
+  out.universeDupes = universeDupes;   // 배열 속성(직렬화되지 않는다 — getFleetInventory 가 classifyFleet 에 넘긴다)
+  return out;
 }
 
 /*
@@ -500,6 +566,7 @@ export async function getFleetInventory(snap) {
   const result = classifyFleet({
     hosts, vcenters: snap?.vcenters || [], servers,
     tags: loadFleetTags(), assign: loadFleetAssign(),
+    universeDupes: servers.universeDupes || [],   // 다음 점검 ①(2차)
   });
   result.summary.vcPowerSkipped = vcPowerSkippedOf(hostsIn, vcSkip); // v2.733(C2-02)
   // v2.783(점검 Q2 P-B3): 화면의 유령 키 수는 prune 미리보기와 **같은 판정**(fleetGhostReport)이다 — classifyFleet 의 ghostKeys 는

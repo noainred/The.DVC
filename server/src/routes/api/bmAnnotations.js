@@ -17,7 +17,7 @@ import { logAudit } from '../../audit.js';
 import { isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
-import { resolvePerfTarget, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, perfPairsOf, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -47,29 +47,38 @@ export function annotVisible(a, allowed) {
 }
 const annotWritable = (a, user, snap) => (a?.target?.vcenterIds || []).every((vc) => inUserWriteScope(user, snap, vc));
 
-/** GET /tools/bm-usage/annotations?keys=&corp=&from=&to= */
+/**
+ * 주석이 그 서버 것인가(순수) — 서버 = (법인, 키) 쌍(다음 점검 ①): 키가 대상 키에 있고 **법인이 주석의 법인에 있을 때만**.
+ *   예전에는 키만 봐 법인 A 서버의 주석이 같은 키의 법인 B 서버 추이에도 핀으로 떴다. ⚠ 여러 법인 · 여러 서버 주석은 키 ↔ 법인 짝을 저장하지 않아
+ *   (target.vcenterIds 는 집합) ‘키 ∧ 법인 ∈ 집합’ 으로 본다 — 법인 A 의 K · 법인 B 의 J 를 함께 단 주석은 법인 B 의 K 에도 맞는다(정직 기록 · 드물다).
+ */
+export const annotForPair = (a, realKey, vc) => (a?.target?.keys || []).includes(realKey) && (a?.target?.vcenterIds || []).includes(vc);
+
+/** GET /tools/bm-usage/annotations?keys=&vcenterIds=&corp=&from=&to= (vcenterIds 는 keys 와 같은 순서 — 다음 점검 ①) */
 export async function bmAnnotationsRead(req, snap, deps = {}) {
   const D = memo(deps0(deps));
   const allowed = scopedVcenterIds(req.user, snap);
   const isAdmin = isAdminReq(req);
   const q = req.query || {};
-  const keys = [...new Set(String(typeof q.keys === 'string' ? q.keys : '').split(',').map(t).filter(Boolean))].slice(0, 8);
+  const { pairs } = perfPairsOf(typeof q.keys === 'string' ? q.keys : '', typeof q.vcenterIds === 'string' ? q.vcenterIds : '', 8);
   const corp = t(q.corp);
   if (corp && allowed && !allowed.has(corp)) return { __status: 404, ok: false, reason: '대상 법인을 찾지 못했습니다.' };
   const asked = [];
-  for (const key of keys) {
-    const f = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
-    if (f && !f.denied) asked.push({ token: key, realKey: f.realKey, vc: t(f.target.vcenterId) });
+  for (const { key, vcenterId } of pairs) {
+    const f = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId });
+    // 범위 밖 · 없는 키는 조용히 빠진다(존재를 흘리지 않는다) · 같은 키가 범위 안 여러 법인이면 400(법인을 고르게 — 엉뚱한 법인 주석을 보이지 않는다).
+    if (f?.ambiguous) return perfTargetFail(f);
+    if (!perfTargetFail(f)) asked.push({ token: key, realKey: f.realKey, vc: t(f.target.vcenterId) });
   }
   const from = Number(q.from); const to = Number(q.to);
   const A = await D.store();
   let all;
   try { all = A.listAnnotations(); } catch (e) { return { __status: e?.status || 500, ok: false, code: e?.code || 'error', reason: String(e?.message || e).slice(0, 300) }; }
-  const realToToken = new Map(asked.map((x) => [x.realKey, x.token]));
   const vcs = new Set(asked.map((x) => x.vc).filter(Boolean));
+  const hitsOf = (a) => asked.filter((x) => annotForPair(a, x.realKey, x.vc));
   let list = all.filter((a) => annotVisible(a, allowed));
-  if (keys.length || corp) {
-    list = list.filter((a) => (a.target?.keys || []).some((k) => realToToken.has(k)) || (a.target?.type === 'corp' && (vcs.has(a.target.vcenterIds?.[0]) || a.target.vcenterIds?.[0] === corp)));
+  if (pairs.length || corp) {
+    list = list.filter((a) => hitsOf(a).length > 0 || (a.target?.type === 'corp' && (vcs.has(a.target.vcenterIds?.[0]) || a.target.vcenterIds?.[0] === corp)));
   }
   if (Number.isFinite(from) && Number.isFinite(to)) list = list.filter((a) => (a.end ?? a.at) >= from && a.at <= to);
   list.sort((a, b) => b.at - a.at);
@@ -83,7 +92,7 @@ export async function bmAnnotationsRead(req, snap, deps = {}) {
   const out = list.map((a) => ({
     id: a.id, at: a.at, end: a.end ?? null, kind: a.kind, text: a.deleted ? '' : a.text, by: a.by, created: a.created, auto: a.auto || null,
     target: { type: a.target?.type, count: (a.target?.keys || []).length, names: (a.target?.names || []).map(maskName), vcenterIds: a.target?.vcenterIds || [],
-      includes: (a.target?.keys || []).filter((k) => realToToken.has(k)).map((k) => realToToken.get(k)) },
+      includes: [...new Set(hitsOf(a).map((x) => x.token))], includesPairs: hitsOf(a).map((x) => ({ key: x.token, vcenterId: x.vc })) },
     links: a.deleted ? {} : (a.links || {}),
     edits: (a.edits || []).map((e) => ({ at: e.at, by: e.by, fields: e.fields })),
     ...(a.deleted ? { deleted: a.deleted } : {}),
@@ -107,14 +116,19 @@ async function writeTarget(req, snap, D, b) {
     if (!inUserWriteScope(req.user, snap, vc)) return { err: { status: 403, code: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' } };
     return { target: { type: 'corp', keys: [], names: [], vcenterIds: [vc] } };
   }
-  const keys = [...new Set((Array.isArray(b.keys) ? b.keys : []).map((k) => t(k)).filter(Boolean))];
-  if (!keys.length || keys.length > 8) return { err: { status: 400, code: 'bad-target', reason: '대상 서버는 1~8대입니다.' } };
+  // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 화면이 keys 와 같은 순서로 vcenterIds 를 보낸다(없고 같은 키가 범위 안 여러 법인이면 400 ambiguous-key).
+  const { pairs, over } = perfPairsOf(Array.isArray(b.keys) ? b.keys : [], Array.isArray(b.vcenterIds) ? b.vcenterIds : [], 8);
+  if (!pairs.length || over) return { err: { status: 400, code: 'bad-target', reason: '대상 서버는 1~8대입니다.' } };
   const found = [];
-  for (const key of keys) {
-    const f = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
-    if (!f || f.denied) return { err: { status: 404, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' } };
+  for (const { key, vcenterId } of pairs) {
+    const f = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId });
+    const bad = perfTargetFail(f);
+    if (bad) return { err: { status: bad.__status, code: bad.code, reason: bad.reason, ...(bad.candidates ? { candidates: bad.candidates } : {}) } };
     found.push(f);
   }
+  // 같은 서버(쌍)를 두 번 고른 요청은 한 번만(가림 토큰과 원문을 섞어 보낸 경우 — 쌍이 같다)
+  const seen = new Set();
+  for (let i = found.length - 1; i >= 0; i -= 1) { const id = `${t(found[i].target.vcenterId)}|${found[i].realKey}`; if (seen.has(id)) found.splice(i, 1); else seen.add(id); }
   if (found.some((f) => !inUserWriteScope(req.user, snap, t(f.target.vcenterId)))) return { err: { status: 403, code: 'forbidden', reason: '대상 중 쓰기 권한이 없는 법인의 서버가 있습니다(조회 전용).' } };
   return { target: { type: found.length === 1 ? 'server' : 'servers', keys: found.map((f) => f.realKey), names: found.map((f) => String(f.target.name || f.realKey)), vcenterIds: [...new Set(found.map((f) => t(f.target.vcenterId)))] } };
 }
@@ -124,7 +138,7 @@ async function annotCreate(req, res) {
     const snap = store.get();
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     const w = await writeTarget(req, snap, D, b);
-    if (w.err) return res.status(w.err.status).json({ ok: false, code: w.err.code, reason: w.err.reason });
+    if (w.err) return res.status(w.err.status).json({ ok: false, code: w.err.code, reason: w.err.reason, ...(w.err.candidates ? { candidates: w.err.candidates } : {}) });
     const A = await D.store();
     const rec = A.addAnnotation({ by: req.user?.username || '', at: b.at, end: b.end ?? null, kind: b.kind, text: b.text, target: w.target, links: b.links ?? null });
     D.audit({ user: req.user?.username, action: 'bm-perf.annotation', target: rec.id, ip: req.ip || '', detail: JSON.stringify({ op: 'create', kind: rec.kind, type: rec.target.type, n: rec.target.keys.length || 1, text: rec.text.slice(0, 120) }).slice(0, 300) });

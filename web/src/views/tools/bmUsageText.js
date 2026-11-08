@@ -103,6 +103,8 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
     if (by['no-idrac']) parts.push(`iDRAC 등록이 없는 서버 **${by['no-idrac']}대**`);
     if (by['no-os-cred']) parts.push(`OS 계정이 없는 서버 **${by['no-os-cred']}대**`);
     if (by['no-idrac-cred']) parts.push(`iDRAC 계정이 없는 서버 **${by['no-idrac-cred']}대**`);
+    if (by['os-ambiguous']) parts.push(`OS 등록을 하나로 못 정한 서버 **${by['os-ambiguous']}대**`);   // 2차 재확인 G3
+    if (by['os-foreign']) parts.push(`OS 등록이 다른 법인 것인 서버 **${by['os-foreign']}대**`);
     return {
       kind: 'no-target', waiting: false,
       text: parts.length
@@ -142,6 +144,8 @@ export const MISSING_MARK = Object.freeze({
   'no-os-cred': 'OS 계정 없음',
   'no-idrac': 'iDRAC 등록 없음',
   'no-idrac-cred': 'iDRAC 계정 없음',
+  'os-ambiguous': 'OS 등록 모호',      // 2차 재확인 G3 — 법인으로 하나를 못 정함
+  'os-foreign': 'OS 등록 다른 법인',
 });
 export function missingMark(list = []) {
   const parts = (list || []).map((k) => MISSING_MARK[k] || k);
@@ -159,6 +163,8 @@ export function missingFootnotes(rows = []) {
   if (kinds.has('no-os-cred')) out.push('**OS 계정 없음** — 그 서버는 CPU·메모리만(iDRAC 텔레메트리) 읽습니다. 디스크·네트워크·HBA 를 보려면 설정 › 베어메탈 스토리지에 그 호스트를 등록하세요(같은 계정을 두 번 등록하지 않도록 그 등록부를 재사용합니다).');
   if (kinds.has('no-idrac')) out.push('**iDRAC 등록 없음** — 수동 태그로 베어메탈이 된 ESXi 호스트일 수 있습니다. OS 계정만 있으면 다섯 지표를 모두 읽습니다.');
   if (kinds.has('no-idrac-cred')) out.push('**iDRAC 계정 없음** — 설정 › iDRAC 등록에서 계정·비밀번호를 채우세요.');
+  if (kinds.has('os-ambiguous')) out.push('**OS 등록 모호** — 같은 이름 · 주소의 OS 등록이 여럿(주소가 다름)이거나, ‘수집에 추가’ 한 서버에 법인이 지정되지 않은 등록뿐입니다. 어느 장비인지 몰라 OS 로 접속하지 않습니다 — 설정 › 베어메탈 스토리지에서 그 등록에 법인을 지정하세요.');
+  if (kinds.has('os-foreign')) out.push('**OS 등록 다른 법인** — 이름 · 주소가 맞는 OS 등록이 다른 법인으로 지정돼 있어 쓰지 않습니다(다른 법인 서버의 주소 · 계정으로 접속하지 않게).');
   return out;
 }
 
@@ -167,7 +173,7 @@ export function skippedNotes(counts = {}, reasons = {}) {
   const out = [];
   for (const [kind, cnt] of Object.entries(counts)) {
     if (!cnt) continue;
-    out.push(`**${kind === 'edge-delegated' ? '엣지 수집' : kind === 'corp-off' ? '법인 미선택' : kind === 'unassigned' ? '법인 귀속 없음' : kind === 'no-idrac' ? 'iDRAC 등록 없음' : kind === 'no-idrac-cred' ? 'iDRAC 계정 없음' : kind === 'no-os-cred' ? 'OS 계정 없음' : kind === 'both-off' ? '두 경로 모두 꺼짐' : kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
+    out.push(`**${kind === 'edge-delegated' ? '엣지 수집' : kind === 'corp-off' ? '법인 미선택' : kind === 'unassigned' ? '법인 귀속 없음' : kind === 'no-idrac' ? 'iDRAC 등록 없음' : kind === 'no-idrac-cred' ? 'iDRAC 계정 없음' : kind === 'no-os-cred' ? 'OS 계정 없음' : kind === 'both-off' ? '두 경로 모두 꺼짐' : kind === 'key-conflict' ? '키 충돌' : kind === 'os-ambiguous' ? 'OS 등록 모호' : kind === 'os-foreign' ? 'OS 등록 다른 법인' : kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
   }
   return out;
 }
@@ -400,13 +406,16 @@ export function hostsUnreadNote(h = null) {
 export function keyConflictNote(list = []) {
   const arr = Array.isArray(list) ? list : [];
   if (!arr.length) return '';
-  const shown = arr.slice(0, 3).map((x) => `${t(x.key)}(${(x.names || []).join(' · ')})`);
-  const more = arr.length > shown.length ? ` 외 ${arr.length - shown.length}건` : '';
-  return `**식별 키가 겹치는 서버 ${arr.length}건**이 있습니다 — ${shown.join(' / ')}${more}.`
-    + ' 같은 키를 쓰면 **한 서버의 값이 다른 서버 것으로 보입니다**(추이가 섞입니다).'
-    + ' 서비스태그가 비어 있어 이름·내부 id 로 키가 정해진 경우가 대부분이니'
-    + ' 설정 › iDRAC 등록에서 **서비스태그를 채우면** 해결됩니다.'
-    + ' 어느 쪽을 버릴지 판단할 근거가 없어 **수집에서 빼지는 않았습니다**.';
+  // 서버마다 한 줄(서버 keyConflicts — 다음 점검 ①) — 같은 키끼리 묶어 ‘키(이름 · 이름)’ 로 보인다(범위 계정에는 자기 법인 서버만 온다).
+  const byKey = new Map();
+  for (const x of arr) { const k = t(x?.key); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(...(Array.isArray(x?.names) ? x.names : [])); }
+  const keys = [...byKey.keys()];
+  const shown = keys.slice(0, 3).map((k) => `${k}(${byKey.get(k).join(' · ')})`);
+  const more = keys.length > shown.length ? ` 외 ${keys.length - shown.length}건` : '';
+  return `**식별 키가 겹치는 서버 ${arr.length}대**(키 ${keys.length}건)가 있습니다 — ${shown.join(' / ')}${more}.`
+    + ' 같은 키를 쓰면 **한 서버의 값이 다른 서버 것으로 보이고**(추이 · 최신값 · 인증 정지가 섞입니다) 오류도 나지 않아,'
+    + ' 이 서버들은 **수집하지 않습니다**(대상이 아닌 서버 › 키 충돌). 서비스태그가 비어 이름·내부 id·IP 로 키가 정해진 경우가 대부분이니'
+    + ' 설정 › iDRAC 등록에서 **서비스태그를 채우면** 키가 갈려 다음 주기부터 수집합니다. 이미 쌓인 값은 섞여 있을 수 있습니다(지우지 않았습니다).';
 }
 
 /** 보존·행 수 안내 — 서버가 준 값으로만 만든다(숫자를 박지 않는다). */

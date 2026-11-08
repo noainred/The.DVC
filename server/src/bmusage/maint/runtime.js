@@ -35,14 +35,14 @@ export async function localTargets() {
   try { return (await _targetsProvider())?.targets || []; } catch { return []; }
 }
 
-/** 이 노드의 수동 용도 태그 → ['role:<역할>', 'app:<용도>' …](없으면 []). 서비스 태그(소문자) 우선 · 아니면 서버 키(fleet-tags 키 규약). */
+/** 이 노드의 수동 용도 태그 → ['role:<역할>', 'app:<용도>' …](없으면 []). 키 규칙은 bmusage/purposeKey.js 하나(서비스태그 키 · 아니면 (법인, 키) 쌍 → 예전 키 — 반증 F2). */
 export async function tagsReader() {
-  let FT = null;
-  try { FT = await import('../../insights/fleetTags.js'); } catch { FT = null; }
+  let FT = null; let PK = null;
+  try { FT = await import('../../insights/fleetTags.js'); PK = await import('../purposeKey.js'); } catch { FT = null; }
   return (target) => {
-    if (!FT || !target) return [];
+    if (!FT || !PK || !target) return [];
     let p = null;
-    try { p = FT.fleetPurposeOf(t(target.serviceTag)) || FT.fleetPurposeOf(t(target.key)); } catch { p = null; }
+    try { p = PK.purposeOfTargetSync((k) => FT.fleetPurposeOf(k), target, t(target.key)); } catch { p = null; }
     if (!p) return [];
     return [...(p.role ? [`role:${String(p.role).toLowerCase()}`] : []), ...(Array.isArray(p.apps) ? p.apps.map((a) => `app:${String(a).toLowerCase()}`) : [])];
   };

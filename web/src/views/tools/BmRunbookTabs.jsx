@@ -11,6 +11,7 @@ import BoldText from '../../components/boldText.jsx';
 import Select from '../../components/Select.jsx';
 import { toneVar } from './toneVar.js';
 import { valText } from './bmTrendText.js';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import {
   STEP_KIND_TEXT, LOOK_TEXT, RUNBOOK_HONEST, judgmentText, fillLine, wikiSearchHref,
   SLO_METRIC_TEXT, SLO_BASIS_TEXT, SLO_OP_TEXT, SLO_STATUS_TEXT, sloSourceText, goalText, hoursText, longestText, dailySpark, resNote, SLO_HONEST,
@@ -79,11 +80,11 @@ export function PlaybookView({ pb, catalog, sel, onSel }) {
   );
 }
 
-export function BmPlaybookTab({ itemKey }) {
+export function BmPlaybookTab({ itemKey, vc = '' }) {
   const [tick, setTick] = useState(0);
   const [sel, setSel] = useState('');
   const cat = useOnce('/tools/bm-usage/playbooks');
-  const pb = useOnce(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/playbook` : '', tick);
+  const pb = useOnce(itemKey ? perfPath(itemKey, vc, '/playbook') : '', tick);
   const err = cat.err || pb.err;
   return (
     <div className="bmt-card" style={{ minWidth: 0 }}>
@@ -159,10 +160,10 @@ function GoalEditor({ cfg, meta, onSaved }) {
     </section>
   );
 }
-export function BmSloTab({ itemKey }) {
+export function BmSloTab({ itemKey, vc = '' }) {
   const [tick, setTick] = useState(0);
   const [edit, setEdit] = useState(false);
-  const r = useOnce(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/slo` : '', tick);
+  const r = useOnce(itemKey ? perfPath(itemKey, vc, '/slo') : '', tick);
   const cfg = useOnce(edit ? '/tools/bm-usage/slo' : '', tick);
   const u = getCurrentUser();
   const owner = hasRole('admin') && (u?.settingsOwnerTier === true || u?.name === 'Anonymous');
