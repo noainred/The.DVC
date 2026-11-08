@@ -962,7 +962,8 @@ const RESIDUAL = Object.freeze({
   d1: [['usage_daily', 'day'], ['usage_daily_mig', 'day'], ['usage_mount_daily', 'day']],
   dev: [['usage_device_history', 'ts']],
   dev1h: [['usage_device_hourly', 'h']],
-  top: [['top_sample', 'ts'], ['top_proc', 'ts']],
+  // 8b 반증 F3: 날 가족(top)은 **파일 삭제만** — 경계 청크가 ‘같음’ 머리의 기준 행(앞 시각)을 먼저 지워 머리가 빈 기준을 가리키게 했다(보존은 keepDays + 최대 1일).
+  top: [],
   toph: [['top_proc_hourly', 'hour']],
 });
 /**

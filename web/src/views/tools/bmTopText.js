@@ -64,6 +64,10 @@ export function sampleNotes(resp) {
   if (!resp.sample) return ['이 시각 가까이에 프로세스 표본이 없습니다 — 수집하지 못했거나(SSH 실패 · 정비 창) 이 기능을 켜기 전입니다(0 으로 그리지 않습니다).'];
   const s = resp.sample; const out = [];
   out.push(`표본 ${whenText(s.ts)} · ${SRC_TEXT[s.src] || '출처 모름'}${s.dtS != null ? ` · 측정 구간 ${s.dtS}초` : ''}`);
+  if (resp.reason === 'base-missing') {
+    out.push(`이 시각의 프로세스 행을 **읽지 못했습니다** — ${s.same ? `이 주기는 ${whenText(s.baseTs)} 표본과 같다고 적혔는데 그 기준 표본의 행이 없습니다` : '후보가 있었는데 행이 없습니다'}(적재 실패 · 보존 정리 등). 상위 프로세스가 ‘없다’ 는 뜻이 아닙니다.`);
+    return out;
+  }
   if (s.same) out.push(`이 주기는 상위 집합 · 값이 ${whenText(s.baseTs)} 표본과 같아(CPU ±5%p · RSS · I/O ±5%) 그 표본의 행을 보여 줍니다(저장은 머리 1행).`);
   if (num(s.ioPerm)) out.push(`I/O 를 읽지 못한 프로세스 ${s.ioPerm}개 — /proc/<pid>/io 는 같은 사용자 또는 CAP_SYS_PTRACE 가 필요합니다(‘권한’ 칸 · 0 으로 적지 않습니다).`);
   return out;
@@ -110,6 +114,7 @@ export function bandNotes(band) {
   if (band.ok === false) return [String(band.reason || '띠를 읽지 못했습니다.')];
   const out = [band.res === '1h' ? '1시간 칸 — comm 별 CPU 초 합 ÷ 1시간(직전 주기에도 후보였던 같은 프로세스만 — 하한)' : '5분 표본 — CPU 상위 5(같은 이름 PID 여러 개는 합산)'];
   if (num(band.approx)) out.push(`변화 없는 표본 ${band.approx}개는 기준 표본 값으로 그렸습니다(±5%p).`);
+  if (num(band.baseMissing)) out.push(`기준 표본의 행을 읽지 못한 표본 ${band.baseMissing}개는 빼고 그렸습니다(빈칸 — 0 이 아닙니다).`);
   if (!(band.points || []).length) out.push('이 구간에 프로세스 표본이 없습니다(0 으로 그리지 않습니다).');
   return out;
 }

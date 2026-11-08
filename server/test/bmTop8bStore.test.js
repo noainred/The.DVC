@@ -4,7 +4,10 @@
  *   ② 적재: 머리는 매 주기 · 전체 행은 바뀐 주기만 · 기준이 60분 넘으면 다시 전체 · 같은 ts 두 번은 하나 · 꺼짐 · 값 없음은 적지 않는다
  *   ③ 조회: 같음 표본은 기준 행 · 지속(같은 PID · 시작) · PID 재사용(같은 PID · 다른 시작) · 그 시각 표본 없음 · 띠 5분 · 1시간(시간 집계 = 누적 CPU 차이 — 하한)
  *   ④ 보존: pruneMonthFiles(top 7일)가 오래된 날 파일을 지운다 · 파일 이름 해석(날 · 월)
- *   ⑤ 폴러 배선: pollBmUsageOnce 가 ##TOP 값을 적재 · top.on=false 면 수집기에 top:false
+ *   ⑤ 폴러 배선: pollBmUsageOnce 가 Top-N 값(별도 exec 결과 perf.top)을 적재 · top.on=false 면 수집기에 top:false · 수집 계정 기록(반증 F5)
+ *   ⑥ 반증 F2: 메모리 상위 시작 시각 ±1초 흔들림(실장비 셸 실측 열)은 같음 — 전체 저장이 첫 주기 + 60분 만료뿐
+ *   ⑦ 반증 F3: 적재 실패 주기는 기준이 되지 않는다 · 날 가족 보존은 파일 삭제만(경계 날의 기준 행을 먼저 지우지 않는다) · 기준 행이 없으면 reason 'base-missing'(띠는 빼고 센다)
+ *   ⑧ 반증 F4: 시간당 comm 24행 상한은 재시작 뒤에도(파일의 기존 comm 으로 채운다)
  * 기준 시각: 실제 시각을 5분 경계로 떨어뜨린 기준(제품이 실제 시각으로 날 파일을 고른다 — common.md).
  */
 import test from 'node:test';
@@ -121,9 +124,11 @@ test('⑤ 실제 폴러 배선 — ##TOP 값 적재 · top.on=false 면 수집�
   poller._setFleetForTest(async () => ({ bareMetal: [{ serverId: 's-w1', name: 'bm-w1', serviceTag: 'WTAG1', vcenterId: 'vcW' }], virtualizationHosts: [] }));
   (await import('../src/bmusage/settings.js'))._resetForTest();
   const seen = [];
-  const stdout = ['##STAT', 'cpu  10 0 10 1000 0 0 0 0 0 0', '##MEM', 'MemTotal: 1000000 kB', 'MemAvailable: 500000 kB', '##TOP',
-    'tS:src=top dt=1.10 clk=100 pg=4096 up=5000.00 n=300 r=2 d=0 tot=40.0 c=1', 'tC:777|gpadmin|R|35.5|12000|100|1000|1000|2000|postgres', 'tM:777|gpadmin|4000|R|4900|postgres', '##END'].join('\n');
-  poller._setOsCollectorForTest(async (_h, opts) => { seen.push(opts.top); return { ...OSm.shapeLinux(stdout, []), ok: true, peak: { windowS: 0 }, stderr: '' }; });
+  const stdout = ['##STAT', 'cpu  10 0 10 1000 0 0 0 0 0 0', '##MEM', 'MemTotal: 1000000 kB', 'MemAvailable: 500000 kB', '##CHANGES', 'x:up=5000.00', 'x:sc=10.20.30.40', '##END'].join('\n');
+  const topOut = ['tS:src=top dt=1.10 clk=100 pg=4096 up=5000.00 n=300 r=2 d=0 tot=40.0 c=1', 'tC:777|gpadmin|R|35.5|12000|100|1000|1000|2000|postgres', 'tM:777|gpadmin|4000|R|4900|postgres'].join('\n');
+  const LT = await import('../src/bmusage/parse/linuxTop.js');
+  // 별도 exec(반증 F1) — 수집기가 perf.top 에 싣는 것과 같은 꼴(readTopOutput)
+  poller._setOsCollectorForTest(async (_h, opts) => { seen.push(opts.top); const sh = OSm.shapeLinux(stdout, []); return { ...sh, perf: { ...sh.perf, top: opts.top ? LT.readTopOutput(topOut) : { value: { off: true } } }, ok: true, peak: { windowS: 0 }, stderr: '' }; });
   t.after(() => { poller._setOsCollectorForTest(null); poller._setFleetForTest(null); poller._resetForTest(); });
   T._resetTopStoreForTest();
   const r = await poller.pollBmUsageOnce({ trigger: 'manual' });
@@ -133,10 +138,96 @@ test('⑤ 실제 폴러 배선 — ##TOP 값 적재 · top.on=false 면 수집�
   const { config } = await import('../src/config.js');
   const p = await T.topAt({ agent: config.agent?.name || '', key: 'WTAG1', ts: Date.now() });
   assert.equal(p.rows.cpu[0].pid, 777); assert.equal(p.rows.cpu[0].comm, 'postgres'); assert.equal(p.rows.cpu[0].hint, 'gpdb');
+  // 반증 F5 배선: 수집 계정(등록 'mon') · 대상이 본 출발 주소(sc)를 저활용 활동 판정에 넘긴다
+  const I = await import('../src/bmusage/idle.js');
+  assert.deepEqual(I.selfLoginOf('WTAG1', null), { user: 'mon', ip: '10.20.30.40' });
   // 끄면 수집기에 top:false(명령이 ‘꺼짐’ 한 줄)
   const R = await import('../src/bmusage/perfRules.js');
   R.savePerfRules({ top: { on: false, keepDays: 7, hourlyDays: 90 } }, { by: 'test' });
   await poller.pollBmUsageOnce({ trigger: 'manual' });
   assert.equal(seen.at(-1), false, 'top.on=false → 수집기 옵션 top:false');
   R._resetPerfRulesForTest();
+});
+
+test('⑥ 반증 F2 — 메모리 상위 시작 시각 ±1초 흔들림(실장비 셸 실측 열)은 같음 · ±3초는 다른 프로세스', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  // 반증 rv8b/jitter.mjs 실측(dash · procps top/ps · 14회 연속): 메모리 상위 5 PID 전부가 두 값을 오갔다 — pid 85: 1,2,2,1,2,2,1,1,2,2,1,2,2,1
+  const SEQ = [1, 2, 2, 1, 2, 2, 1, 1, 2, 2, 1, 2, 2, 1];
+  assert.equal(T.sameProcStart(1, 2), true); assert.equal(T.sameProcStart(65550, 65551), true); assert.equal(T.sameProcStart(5, 8), false, '±3초는 다른 프로세스(PID 재사용)');
+  assert.equal(T.sameProcStart(null, null), true); assert.equal(T.sameProcStart(null, 5), false);
+  T._resetTopStoreForTest();
+  const base = NOW - 13 * STEP;
+  const cpu = [proc(30, 100, 40), proc(31, 200, 5, { comm: 'java', user: 'app' })];
+  let full = 0;
+  for (let i = 0; i < SEQ.length; i += 1) {
+    const mem = [0, 1, 2, 3, 4].map((j) => ({ pid: 85 + j, user: 'root', rssKb: 400_000 + j, state: 'S', etimes: 100, comm: `m${j}`, start: SEQ[i] + j * 1000 }));
+    const w = await T.topWriteBatch({ agent: '', items: [{ key: 'J1', ts: base + i * STEP - STEP, top: topOf(cpu, { mem, upS: 100_000 + i * 300 }) }] });
+    full += w.full;
+  }
+  assert.equal(full, 2, `전체 저장은 첫 주기 + 60분 기준 만료만(예전 13/14) — ${full}/14`);
+  // 같은 PID · 3초 넘게 다른 시작이면 다른 프로세스 → 전체 저장
+  const mem2 = [0, 1, 2, 3, 4].map((j) => ({ pid: 85 + j, user: 'root', rssKb: 400_000 + j, state: 'S', etimes: 100, comm: `m${j}`, start: (j === 0 ? 9 : 1) + j * 1000 }));
+  const w2 = await T.topWriteBatch({ agent: '', items: [{ key: 'J1', ts: base + 14 * STEP, top: topOf(cpu, { mem: mem2, upS: 100_000 + 14 * 300 }) }] });
+  assert.equal(w2.full, 1, '시작 시각이 ±2초 밖이면 다른 프로세스');
+});
+
+test('⑦ 반증 F3 — 적재 실패 주기는 기준이 되지 않는다 · 보존 경계 날은 파일째 남는다 · 기준 행이 없으면 base-missing', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  // (가) 날 파일 열기 실패(그 이름에 디렉터리) → 다음 주기는 같은 내용이어도 전체 저장(빈 기준을 가리키는 ‘같음’ 머리가 생기지 않는다)
+  T._resetTopStoreForTest();
+  const d0 = Math.floor((NOW - 30 * DAY) / DAY) * DAY + 12 * HOUR;   // 다른 시험과 겹치지 않는 날 · 그 날 안
+  const dir = path.join(M.dbDir(), M.fileNameOf('top', M.periodKeyOf('top', d0)));
+  fs.mkdirSync(dir, { recursive: true });
+  const same = () => topOf([proc(40, 7, 33)], { upS: 200_000 });
+  const f1 = await T.topWriteBatch({ agent: '', items: [{ key: 'F3A', ts: d0, top: same() }] });
+  assert.equal(f1.ok, false, '파일을 열지 못했다');
+  fs.rmSync(dir, { recursive: true, force: true });
+  const f2 = await T.topWriteBatch({ agent: '', items: [{ key: 'F3A', ts: d0 + STEP, top: { ...same(), uptimeS: 200_300 } }] });
+  assert.equal(f2.ok, true); assert.equal(f2.full, 1, '실패한 주기는 기준이 아니다 → 전체 저장');
+  const pa = await T.topAt({ agent: '', key: 'F3A', ts: d0 + STEP });
+  assert.equal(pa.reason, undefined); assert.equal(pa.rows.cpu[0].pid, 40, '행이 있다(예전: same · 행 0 · reason 없음)');
+  // (나) 보존 경계: 기준 = cut − 10분(전체) · 같음 머리 = cut + 10분(같은 날 파일) → 보존 정리 뒤에도 기준 행이 남는다(날 가족은 파일 삭제만)
+  T._resetTopStoreForTest();
+  const b0 = d0 + 2 * HOUR; const cut = b0 + 10 * 60_000; const now = cut + 7 * DAY;
+  const g = await T.topWriteBatch({ agent: '', items: [{ key: 'F3B', ts: b0, top: same() }, { key: 'F3B', ts: b0 + 20 * 60_000, top: { ...same(), uptimeS: 201_200 } }] });
+  assert.equal(g.full, 1); assert.equal(g.samples, 2);
+  const older = Math.floor((d0 - 2 * DAY) / DAY) * DAY + HOUR;
+  await T.topWriteBatch({ agent: '', items: [{ key: 'F3C', ts: older, top: same() }] });
+  const pr = await M.pruneMonthFiles({ keepDays: { top: 7 }, now });
+  assert.equal(pr.residualDeleted, 0, '날 가족은 경계 청크를 지우지 않는다');
+  assert.ok(pr.filesDeleted.includes(M.fileNameOf('top', M.periodKeyOf('top', older))), '경계 앞 날 파일은 통째로 지운다');
+  const pb = await T.topAt({ agent: '', key: 'F3B', ts: b0 + 20 * 60_000 });
+  assert.equal(pb.sample.same, true); assert.equal(pb.rows.cpu.length, 1, `경계 날의 기준 행이 남는다(예전: 행 0 · reason 없음) — ${JSON.stringify(pb.reason)}`);
+  // (다) 기준 행을 어떤 이유로든 못 읽으면 ‘없음’ 이 아니라 base-missing(조회 방어) · 띠는 그 표본을 빼고 센다
+  await M.withPeriodFile('top', M.periodKeyOf('top', b0), { create: false }, async (db) => { db.prepare('DELETE FROM top_proc WHERE key=? AND ts=?').run('F3B', b0); });
+  const pc = await T.topAt({ agent: '', key: 'F3B', ts: b0 + 20 * 60_000 });
+  assert.equal(pc.reason, 'base-missing'); assert.ok(pc.sample, '표본 머리는 있다'); assert.equal(pc.rows.cpu.length + pc.rows.mem.length + pc.rows.io.length, 0);
+  const bb = await T.topBand({ agent: '', key: 'F3B', from: b0 - STEP, to: b0 + HOUR });
+  assert.equal(bb.points.length, 0); assert.equal(bb.baseMissing, 2, '행 없는 표본은 0 으로 그리지 않고 센다');
+  await M.withPeriodFile('top', M.periodKeyOf('top', b0), { create: false }, async (db) => { db.prepare('DELETE FROM top_sample WHERE key=? AND ts=?').run('F3B', b0); });
+  assert.equal((await T.topAt({ agent: '', key: 'F3B', ts: b0 + 20 * 60_000 })).reason, 'base-missing', '기준 머리가 없어도 base-missing');
+  // (라) 같은 묶음 안 기준 예정 표본이 들어가지 못하면(같은 ts 가 이미 있다 — 다른 내용) 뒤 ‘같음’ 은 전체로 적는다(남의 행을 가리키지 않게)
+  T._resetTopStoreForTest();
+  const t1 = d0 + 4 * HOUR;
+  await T.topWriteBatch({ agent: '', items: [{ key: 'F3D', ts: t1, top: topOf([proc(50, 9, 10)], { upS: 300_000 }) }] });
+  T._resetTopStoreForTest();   // 재시작
+  const y = await T.topWriteBatch({ agent: '', items: [{ key: 'F3D', ts: t1, top: topOf([proc(60, 9, 80)], { upS: 300_000 }) }, { key: 'F3D', ts: t1 + STEP, top: topOf([proc(60, 9, 81)], { upS: 300_300 }) }] });
+  assert.equal(y.samples, 1, '같은 ts 는 무시'); assert.equal(y.full, 1, '기준이 못 들어갔으니 뒤 표본을 전체로');
+  const pd = await T.topAt({ agent: '', key: 'F3D', ts: t1 + STEP });
+  assert.equal(pd.rows.cpu[0].pid, 60, `자기 행(예전 판이면 앞 표본 ts 의 다른 내용 pid 50 을 가리킨다) — ${pd.rows.cpu[0]?.pid}`);
+});
+
+test('⑧ 반증 F4 — 시간당 comm 24행 상한은 재시작 뒤에도 지킨다', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  T._resetTopStoreForTest();
+  const h0 = Math.floor((NOW - 40 * DAY) / HOUR) * HOUR + 5 * 60_000;
+  const many = (prefix, n, i0 = 0) => topOf([], { mem: Array.from({ length: n }, (_, j) => ({ pid: 1000 + i0 + j, user: 'u', rssKb: 1000 + j, state: 'S', etimes: 100, comm: `${prefix}${j}`, start: 5 })) });
+  await T.topWriteBatch({ agent: '', items: [{ key: 'F4', ts: h0, top: many('a', 30) }] });
+  T._resetTopStoreForTest();   // 재시작(인메모리 초기화)
+  await T.topWriteBatch({ agent: '', items: [{ key: 'F4', ts: h0 + STEP, top: many('c', 20, 100) }] });
+  let rows = [];
+  await M.withPeriodFile('toph', M.periodKeyOf('toph', h0), { create: false }, async (db) => { rows = db.prepare('SELECT comm FROM top_proc_hourly WHERE key=? AND hour=?').all('F4', M.hourOf(h0)); });
+  assert.equal(rows.length, T.HOURLY_COMMS_MAX + 1, `상한 24 + ‘(기타)’ 1 — 재시작 뒤에도(예전 45행) · ${rows.length}`);
+  assert.ok(rows.some((r) => r.comm === T.OTHER_COMM));
+  assert.ok(!rows.some((r) => String(r.comm).startsWith('c')), '재시작 뒤 새 comm 은 상한 밖이면 ‘(기타)’ 로');
 });

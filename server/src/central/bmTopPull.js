@@ -52,7 +52,7 @@ export function sanitizeTopPoint(b, key, now = Date.now()) {
     ts: clampEdgeTs(N(s.ts), now), baseTs: clampEdgeTs(N(s.baseTs), now), same: bool(s.same), src: SRC.has(s.src) ? s.src : null,
     nproc: N(s.nproc), nrun: N(s.nrun), nd: N(s.nd), cpuTotal: N(s.cpuTotal), dtS: N(s.dtS), upS: N(s.upS), cands: N(s.cands), ioPerm: N(s.ioPerm), ioUnknown: N(s.ioUnknown), boot: N(s.boot),
   } : null;
-  return { ok: true, key, sample, rows, prevTs: clampEdgeTs(N(b.prevTs), now), nextTs: clampEdgeTs(N(b.nextTs), now), ...(b.reason === 'no-sample' ? { reason: 'no-sample' } : {}) };
+  return { ok: true, key, sample, rows, prevTs: clampEdgeTs(N(b.prevTs), now), nextTs: clampEdgeTs(N(b.nextTs), now), ...(b.reason === 'no-sample' || b.reason === 'base-missing' ? { reason: b.reason } : {}) };   // 반증 F3: 기준 표본을 못 읽음(‘없음’ 과 구분)
 }
 /** 띠 본문 정제(순수). */
 export function sanitizeTopBand(b, key, now = Date.now()) {
@@ -64,7 +64,7 @@ export function sanitizeTopBand(b, key, now = Date.now()) {
     if (isObj(p.by)) for (const [c0, v] of Object.entries(p.by).slice(0, 8)) { const c = cleanComm(c0); if (c && keep.has(c) && N(v) != null) by[c] = N(v); }
     return { t: clampEdgeTs(N(p.t), now), total: N(p.total), by, other: N(p.other) };
   }).filter((p) => p.t != null);
-  return { ok: true, key, res: RES.has(b.res) ? b.res : '5m', from: N(b.from), to: N(b.to), comms, points, approx: N(b.approx) ?? 0, ...(b.clipped === true ? { clipped: true } : {}) };
+  return { ok: true, key, res: RES.has(b.res) ? b.res : '5m', from: N(b.from), to: N(b.to), comms, points, approx: N(b.approx) ?? 0, ...(N(b.baseMissing) > 0 ? { baseMissing: Math.min(2_000, Math.round(N(b.baseMissing))) } : {}), ...(b.clipped === true ? { clipped: true } : {}) };
 }
 
 async function pull(agent, path, bodyOk, label) {

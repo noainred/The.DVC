@@ -72,8 +72,8 @@ export default function BmTopProc({ itemKey, ts = null, win = null, narrow = fal
       </div>
       {point.err && <p className="bmt-note" style={{ color: 'var(--red)' }}>{point.err.message || '프로세스 표를 읽지 못했습니다'}</p>}
       {!r && !point.err && <p className="bmt-note">프로세스 표를 읽는 중…</p>}
-      {sampleNotes(r).map((x, i) => <p key={i} className="bmt-note">{x}</p>)}
-      {r?.ok === false && r.minEdgeVersion && <p className="bmt-note">엣지 v{r.minEdgeVersion} 이상이어야 이 표를 대행합니다.</p>}
+      {sampleNotes(r).map((x, i) => <p key={i} className="bmt-note"><BoldText text={x} /></p>)}
+      {r?.ok === false && r.kind === 'old-version' && r.minEdgeVersion && <p className="bmt-note">엣지 v{r.minEdgeVersion} 이상이어야 이 표를 대행합니다.</p>}
       {!!rows.length && (
         <STable minWidth={760} className="bmo-t" style={{ fontSize: 12 }}>
           <thead><tr><th className="right">#</th><th className="right">PID</th><th>사용자</th><th>명령(comm)</th><th className="right">{k.valLabel}</th>{kind !== 'mem' && <th className="right">RSS</th>}{kind === 'io' && <th className="right">읽기</th>}{kind === 'io' && <th className="right">쓰기</th>}<th>상태</th><th className="right">누적 CPU</th><th style={{ minWidth: 150 }}>프로파일 · 지속</th></tr></thead>
@@ -96,9 +96,9 @@ export default function BmTopProc({ itemKey, ts = null, win = null, narrow = fal
           </tbody>
         </STable>
       )}
-      {r?.sample && !rows.length && <p className="bmt-note">이 종류의 상위 행이 없습니다{kind === 'io' ? '(I/O 를 읽은 후보가 없다 — 권한 없음은 위 안내)' : ''}.</p>}
+      {r?.sample && !rows.length && r.reason !== 'base-missing' && <p className="bmt-note">이 종류의 상위 행이 없습니다{kind === 'io' ? '(I/O 를 읽은 후보가 없다 — 권한 없음은 위 안내)' : ''}.</p>}
       {r?.sample && <p className="bmo-sub" style={{ margin: '4px 0' }}>{footText(r)}</p>}
-      {r?.userHidden && <p className="bmo-sub">관리자 판본이 아닙니다 — 사용자 이름은 가림 토큰입니다(같은 값은 같은 토큰).</p>}
+      {r?.userHidden && <p className="bmo-sub">관리자 판본이 아닙니다 — 사용자 이름은 가림 토큰입니다(같은 값은 같은 토큰 · 계정에서 나온 프로파일 단서도 숨깁니다).</p>}
       <h5 className="bmo-h" style={{ margin: '10px 0 4px' }}>시간 × 프로세스 띠 — CPU 상위(누적)</h5>
       {band.err && <p className="bmt-note" style={{ color: 'var(--red)' }}>{band.err.message || '띠를 읽지 못했습니다'}</p>}
       {!band.resp && !band.err && <p className="bmt-note">띠를 읽는 중…</p>}
