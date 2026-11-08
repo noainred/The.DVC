@@ -1,6 +1,6 @@
 # 설계: SAN 스토리지 사용량 · 트렌드 — 실시간 · 트렌드 · 디렉터(VMAX · PowerMax) · 컨트롤러(PowerStore · Unity)별
 
-작성 2026-11-08 (main v2.914.0 기준 · 브랜치 `claude/festive-planck-vy0dg3`) · 상태 **시안 3차 — 결정 8개 반영 · 구현 착수 대기(남은 확인 §6)** ·
+작성 2026-11-08 (main v2.914.0 기준 · 브랜치 `claude/festive-planck-vy0dg3`) · 상태 **컨펌 완료(22:45 KST — 결정 8개 + 재확인 2개 · §6) · 구현 착수(규칙상 Opus)** ·
 시안 캔버스: https://claude.ai/artifact/ApZK6HEzp3yjk6h6LKbYxk (아트보드 7장 — ① 현황 1440 · ② 어레이 상세 1440 · ③ 디렉터 · 컨트롤러 벤더별 · ④ 400px · ⑤ 상태 8종 · ⑥ 성능 점검 탭 · ⑦ 분류 · 매핑 탭).
 **2차 보강(19:31~ KST)**: 사용자가 '디렉터별 · 컨트롤러별 성능' 을 다시 요청해 **어레이 측 성능(busy% · CPU · IOPS · 응답 시간 · 큐 깊이)을 2단계에서 이번 범위로** 올렸다 — ② 아래 패널 실값 · ③ 벤더 카드 실값 + API 확인 표 · ⑥ 판정표 신설.
 **3차(19:42~ KST · 사용자 답 8개)**: ① **독립 도구 `san-storage` + 독립 메뉴** '스토리지 › SAN 스토리지 성능'(기존 SAN 스위치 화면의 '스토리지 사용량 분석' 모달은 이 메뉴로 보내고 지운다) ③ 분류 · 디렉터 매핑 **탭(⑦)** 신설 ⑥ 1년 보기 포함 ⑦ 표준 검증 ⑧ 팔레트 4색 `:root` 토큰 추가. ④ 캡처 방법은 `CAPTURE-GUIDE.md` · ⑤ 벤더 · 컨설팅 권장 기준은 §10(점검 기본값을 **벤더 문서 값만**으로 채움) · 추가 기능 · 문서 검토는 §12.
@@ -91,7 +91,7 @@
   `server/src/toolcats/catalog.js` PRESET 'storage' 에 `'san-storage'` · `server/src/auth/toolAccess.js TOOL_PATH_KEYS` 에 `'san-storage':'san-storage'` · `auth/demoGuest.js` 의 데모 읽기 허용 목록(필요한 GET 만) · `components/invSearchQuery.js`(⌘K 검색에서 어레이 → 이 도구) ·
   회귀 테스트 대조: `test/audit2613a.test.js`(세그먼트↔키) · `toolCatalog2614`(adminOnly↔게이트) · `toolNames2679` · `linkCheck2552`(메뉴 링크) · `settingsLinks2685` · 문서 생성기 `scripts/api-doc.mjs`(docs/API.md) · `config-doc.mjs`(새 설정 파일 2개).
 - 탭은 해시(`useHashTab({ base:['tools','san-storage'], valid:['list','check','mapping'] })`) · 어레이 상세는 `#/tools/san-storage/array/<키>`(법인은 쿼리).
-- **기존 SAN 스위치 화면**: `DcGrid` 의 '스토리지 사용량 분석 →' 링크는 `#/tools/san-storage`(선택 법인을 쿼리로) · `DcStoragePerf` 모달은 **지운다**(판정 코어 하나 — 사용자 답 2 '독립적인 메뉴로') · `TrafficCard` 는 남기고 머리에 'SAN 스토리지 성능에서 자세히 →'. 장비 상세의 '사용량 분석(perf)' 탭은 스위치 단위라 그대로.
+- **기존 SAN 스위치 화면은 보존한다**(사용자 답 "기존 메뉴도 보존해줘"): `DcGrid` 의 '스토리지 사용량 분석 →' 과 `DcStoragePerf` 모달 · `TrafficCard` · 메뉴 항목 전부 그대로. 모달 머리와 카드에 **'SAN 스토리지 성능에서 자세히 →'**(`#/tools/san-storage?datacenterId=…` — 선택 법인을 쿼리로) 링크만 더한다. 장비 상세의 '사용량 분석(perf)' 탭도 그대로.
 
 ### 5.2 ② 가 바꾸는 것
 - 상세는 페이지(새로고침 · 공유 · 뒤로 가기) — 목록 행 · 편중 경고 · 기존 모달 표의 스토리지 이름에서 들어온다.
@@ -103,9 +103,9 @@
 | # | 질문 | 사용자 답(원문) | 반영 |
 |---|---|---|---|
 | 1 | 자리 | "독립 도구" | 새 도구 키 `san-storage`(§5.1) |
-| 2 | 기존 모달 · 카드 | "독립적인 메뉴로 만들어줘" | **해석**: 새 기능을 독립 메뉴('스토리지 › SAN 스토리지 성능')로 만들고 기존 '스토리지 사용량 분석' 모달은 그 메뉴로 보낸 뒤 지운다 · 트래픽 카드는 남긴다. ⚠ 다르게 뜻하셨으면(예: 기존 모달도 별개 메뉴로 유지) 알려 주실 것 — **남은 확인 1** |
+| 2 | 기존 모달 · 카드 | "독립적인 메뉴로 만들어줘" → 재확인 답(22:45) **"기존 메뉴도 보존해줘"** | 새 기능은 독립 메뉴('스토리지 › SAN 스토리지 성능')로 만들고, **기존 SAN 스위치 화면의 '스토리지 사용량 분석' 모달 · 트래픽 카드 · 메뉴 항목은 그대로 둔다**. 모달 머리와 카드에 '새 화면에서 보기 →' 링크만 더한다. 두 화면 모두 같은 서버 집계(`storage-summary` · `storageSeriesMulti`)를 읽으므로 판정 코어는 하나다(화면이 둘인 것이지 판정이 둘이 아니다 — 테스트가 같은 입력으로 대조) |
 | 3 | 수동 매핑 · 어레이로 지정 | "포함하고 더 구체적으로 표시할 수 있는 메뉴 추가 검토" | 포함 + **⑦ 분류 · 디렉터 매핑 탭**(관리자) 신설 — 분류 표 · 포트→디렉터 표 · 근거 배지 · 변경 이력 · 포트 이름 CSV |
-| 4 | 어레이 측 수집 | "어떤 장비를 어떻게 캡처해야 되는지 알려줘" | `CAPTURE-GUIDE.md`(우선순위 · 장비별 명령 · 가릴 것 · 파일 목록). 캡처가 오기 전에도 방어 구조로 구현은 시작할 수 있다 — **남은 확인 2**: 캡처를 기다렸다가 착수할지, 먼저 착수할지 |
+| 4 | 어레이 측 수집 | "어떤 장비를 어떻게 캡처해야 되는지 알려줘" → 재확인 답(22:45) **"먼저 착수하고 캡쳐가 오면 파서를 맞춰"** | `CAPTURE-GUIDE.md`(우선순위 · 장비별 명령 · 가릴 것 · 파일 목록). **구현은 바로 착수** — 세 벤더 모두 '장비가 주는 지표 목록을 먼저 읽고 없는 것은 — + 사유' 구조로 짜고, 파서는 가상 식별자 픽스처(웹 문서 형식)로 테스트한다. 캡처가 오면 픽스처를 실제 형식으로 바꾸고 파서를 맞춘다(그때 패치 릴리스). 릴리스 노트에 '첫 반영에서 어레이 측 칸이 비어 있을 수 있음' 을 적는다 |
 | 5 | 점검 기준 | "스토리지 벤더 및 컨설팅 업체의 추천 가이드 찾아줘" | §10 — 찾은 값만 기본값으로(PowerMax busy 70 · 큐 75 · Unity SP CPU 70/90 · PowerStore 노드 CPU 50/70 · 회선 포화 70) · 못 찾은 응답 시간은 비움 · 컨설팅 경험칙(10/20 ms)은 호스트 지연용이라 FE 응답 시간 기준으로 쓰지 않음 |
 | 6 | 1년 보기 | "1년" | 포함(1시간 집계 2년 · 하루 평균 365점) |
 | 7 | 검증 | "기본" | 표준(관련 테스트 + Chromium 1440/400 + 전량 verify) + 서버 변이 검증 1회 |
@@ -115,7 +115,7 @@
 
 - 서버(스위치 측): `sanswitch/directorOf.js`(순수) · `sanswitch/directorMap.js`(저장소) · `perfDb.js storageSeriesMulti` `withPorts` · `sanswitch/storageList.js`(순수 조립 — now · util · delta · imbalance · state) · `routes/api/sanSwitch.js` 라우트 3(목록 · 상세 · 매핑 PUT) · 목 `demoPerfSynth` 가 포트별 시리즈도 만든다(Chromium 검증이 비지 않게).
 - 서버(어레이 측): `storage/collectors/powermax.js`(FEDirector keys → help → metrics) · `powerstore.js`(`performance_metrics_by_node` — 기존 `fetchSpaceMetrics` 재사용) · `unity.js`(`metric/instances` → `metricValue`) · 순수 `storage/perfDetail.js`(벤더 응답 → 공통 `{unit, metric, value, at}` · 누적 카운터 델타) · `storage/perfDb.js`(SAN `perfRollup` 공용화) · 엣지 push 조각 + 중앙 정제 화이트리스트 · 목 합성 · `sanswitch/storagePerfCheck.js`(⑥ 판정) · 임계값 저장소.
-- 웹: `views/tools/SanStorageTool.jsx`(탭 3 — 현황 · 성능 점검 · 분류 · 매핑) · `SanStorageDetail.jsx` · `SanStorageCheck.jsx` · `SanStorageMapping.jsx` · 순수 `sanStorageText.js`(문구 · 상태 8종 · 7일 대비 · 히트맵 접기 · 보고 대조 · CSV 행) · 공용 창 계산 모듈(`components/windowScroll/`) · §5.1 의 등록 지점 전부 · `SanSwitchTool.jsx` 링크 교체 + `DcStoragePerf` 삭제 · 설정 › 수집 › 스토리지 성능 점검(임계값 — 벤더 기본값 표시 · '사용자 설정' 배지) · `:root --viz-1~4`.
+- 웹: `views/tools/SanStorageTool.jsx`(탭 3 — 현황 · 성능 점검 · 분류 · 매핑) · `SanStorageDetail.jsx` · `SanStorageCheck.jsx` · `SanStorageMapping.jsx` · 순수 `sanStorageText.js`(문구 · 상태 8종 · 7일 대비 · 히트맵 접기 · 보고 대조 · CSV 행) · 공용 창 계산 모듈(`components/windowScroll/`) · §5.1 의 등록 지점 전부 · `SanSwitchTool.jsx` 는 모달 · 카드에 링크만 추가(삭제 없음) · 설정 › 수집 › 스토리지 성능 점검(임계값 — 벤더 기본값 표시 · '사용자 설정' 배지) · `:root --viz-1~4`.
 - 서버(매핑 · 분류): `sanswitch/directorMap.js`(`CONFIG_DIR/san-storage-map.json` — 분류 재정의 + 포트→디렉터 · 관리자 PUT · 감사 로그 · '이름이 바뀜' 표지) · `GET /tools/san-storage/port-names.csv`(port_meta 내보내기 · `csvPerm + adminOnly`).
 - 테스트: 서버 `test/sanStorage29xx.test.js`(directorOf 벤더별 · 평평한 이름 · `OR-1C` · 목록 조립의 now/util/delta 결측 규칙 · 합계 = `sumArrayTraffic` 대조 · 매핑/임계값 PUT admin 게이트 · 비-admin 주소 가림 · 판정표 unknown 흡수 금지 · 벤더 응답 픽스처(가상 식별자) 파서) · 웹 `sanStorageText.test.js` · `sanSwitchViewText` 기존 통과.
 - 문서: `docs/rules/sanswitch.md` 에 '스토리지 보기 · 디렉터 해석 · 수동 매핑 · 성능 점검' 항목 · `docs/rules/storage.md` 에 '디렉터 · 노드 · SP 성능 수집' 항목 · 이 README §8 에 '시안과 달리 한 것'.
