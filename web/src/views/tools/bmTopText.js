@@ -76,9 +76,15 @@ export function sampleNotes(resp) {
 export function footText(resp) {
   const s = resp?.sample;
   if (!s) return '';
-  const shown = (resp.rows?.cpu || []).reduce((a, r) => a + (num(r.val) || 0), 0);
-  const rest = num(s.cpuTotal) == null ? null : Math.max(0, Math.round((s.cpuTotal - shown) * 10) / 10);
-  return [`나머지 합계 CPU ${rest == null ? '—' : `${rest}%`}`, `프로세스 수 ${s.nproc ?? '—'}`, `실행 중(R) ${s.nrun ?? '—'}`, `D(디스크 대기) ${s.nd ?? '—'}`].join(' · ');
+  // 반증 F3: 상위 행을 못 읽은 표본(base-missing)은 ‘나머지’ 를 셈하지 않는다(보인 행 0 을 빼면 전체가 나머지로 보인다) — 전 프로세스 합만.
+  const head = resp.reason === 'base-missing'
+    ? `전 프로세스 합 CPU ${num(s.cpuTotal) == null ? '—' : `${s.cpuTotal}%`}(상위 행을 못 읽어 나머지는 모름)`
+    : (() => {
+      const shown = (resp.rows?.cpu || []).reduce((a, r) => a + (num(r.val) || 0), 0);
+      const rest = num(s.cpuTotal) == null ? null : Math.max(0, Math.round((s.cpuTotal - shown) * 10) / 10);
+      return `나머지 합계 CPU ${rest == null ? '—' : `${rest}%`}`;
+    })();
+  return [head, `프로세스 수 ${s.nproc ?? '—'}`, `실행 중(R) ${s.nrun ?? '—'}`, `D(디스크 대기) ${s.nd ?? '—'}`].join(' · ');
 }
 export const TOP_HONEST = 'CPU % 는 **1초 구간 값**(수명 평균 아님 · 코어 하나 = 100%) · RSS 는 공유 페이지가 프로세스마다 중복 계산돼 합이 실제보다 큽니다(PSS 아님) · **명령 이름(comm)만** 읽습니다(인자 · 환경 없음) · 컨테이너 이름은 알 수 없습니다(호스트 PID) · 읽기 전용(kill 없음).';
 

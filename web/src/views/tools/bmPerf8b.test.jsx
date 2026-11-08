@@ -45,6 +45,8 @@ describe('⑳ 프로세스 Top-N 문구', () => {
     expect(bm).toMatch(/읽지 못했습니다.*기준 표본의 행이 없습니다.*‘없다’ 는 뜻이 아닙니다/); expect(bm).not.toMatch(/같아\(/); expect(bm).not.toMatch(/`/);
     expect(TT.footText({ sample: { cpuTotal: 10, nproc: 5, nrun: 1, nd: 0 }, rows: { cpu: [{ val: 12 }] } })).toMatch(/나머지 합계 CPU 0%/);
     expect(TT.footText({ sample: { cpuTotal: null }, rows: { cpu: [] } })).toMatch(/나머지 합계 CPU —/);
+    const fb = TT.footText({ reason: 'base-missing', sample: { cpuTotal: 97.2, nproc: 382 }, rows: { cpu: [] } });
+    expect(fb).toMatch(/전 프로세스 합 CPU 97.2%\(상위 행을 못 읽어 나머지는 모름\)/); expect(fb).not.toMatch(/나머지 합계/);
   });
   it('③ 띠 그리기 — 서버 값만 · 기타 상위 · 빈 띠', () => {
     const band = { res: '5m', from: 0, to: 600_000, comms: ['postgres', 'kswapd0'], points: [{ t: 0, by: { postgres: 60, kswapd0: 4 }, other: 3 }, { t: 300_000, by: { postgres: 120 }, other: 0 }] };
