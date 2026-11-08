@@ -175,9 +175,13 @@ td{padding:6px 8px;border-bottom:1px solid #1f2a40;font-size:12px;white-space:no
       </tbody>
     </table></div>
   </div>
-  <div class="card" style="border-style:dashed;border-color:#3b5bdb;background:rgba(59,130,246,.05)">
-    <h4>어레이가 보고하는 디렉터 성능 <span class="tag gray" style="margin-left:6px">수집 전 · 2단계</span></h4>
-    <div class="note">Unisphere for PowerMax 의 디렉터 busy% · IOPS · 응답 시간이 여기에 옵니다. 설정 › 수집 › 스토리지 성능에서 켭니다.</div>
+  <div class="card">
+    <h4>어레이가 보고하는 디렉터 성능 <span class="tag ok" style="margin-left:6px">최신 15분 · 4분 전</span></h4>
+    <div class="dir"><b><i style="background:#3987e5"></i>FA-1D</b><span class="v">40%</span><span class="m"><span>18,400 IOPS · 410 MB/s</span><span>0.9 / 1.4 ms · 큐 12%</span></span></div>
+    <div class="dir"><b><i style="background:#d95926"></i>FA-2D</b><span class="v">47%</span><span class="m"><span>22,100 IOPS · 520 MB/s</span><span>1.0 / 1.5 ms · 큐 15%</span></span></div>
+    <div class="dir"><b><i style="background:#199e70"></i>FA-3D</b><span class="v">54%</span><span class="m"><span>25,600 IOPS · 610 MB/s</span><span>1.1 / 1.7 ms · 큐 19%</span></span></div>
+    <div class="dir"><b><i style="background:#c98500"></i>FA-4D</b><span class="v">60%</span><span class="m"><span>28,900 IOPS · 690 MB/s</span><span>1.2 / 1.9 ms · 큐 23%</span></span></div>
+    <div class="note">busy % 가 큰 숫자 · 주의 70% · 이상 85%(설정값) · 보고 대조: 2,230 MB/s ≈ 17.8 Gb/s ↔ 스위치 20.7 Gb/s(차이 14%)</div>
   </div>
   <div class="note" style="color:#5d6b85">요일 × 시간 히트맵은 400px 에서 가로로 넘깁니다(24칸 유지 · 칸 12px). 상단 알약(해상도 · 읽은 시각)은 한 줄로 접힙니다.</div>
 </div>

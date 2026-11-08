@@ -14,7 +14,7 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 a{color:#93c5fd}a:hover{color:#bfdbfe}
 .mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
 .muted{color:#8b9bb4}.faint{color:#5d6b85}
-.shell{display:flex;min-height:2520px}
+.shell{display:flex;min-height:2800px}
 .side{width:236px;flex:none;background:#0f1626;border-right:1px solid #1f2a40;opacity:.45;padding:18px 16px;display:flex;flex-direction:column;gap:14px;font-size:13px;color:#8b9bb4}
 .side .on{color:#e6edf6;font-weight:700}
 .top{height:44px;background:rgba(12,17,30,.9);border-bottom:1px solid #1f2a40;opacity:.45}
@@ -271,16 +271,48 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;white-space
         </div>
       </div>
 
-      <!-- 2단계: 어레이가 보고하는 디렉터 성능 -->
-      <div class="card p2">
+      <!-- 어레이가 보고하는 디렉터 성능(Unisphere for PowerMax 성능 API · 법인 로컬 수집 · 15분 평균) -->
+      <div class="card">
         <div class="cardhead">
-          <div class="cardtitle"><h4>어레이가 보고하는 디렉터 성능 — 2단계(새 수집)</h4><span class="tag blue">수집 전</span></div>
-          <span class="muted" style="font-size:12px">Unisphere for PowerMax REST · 설정 › 수집 › 스토리지 성능에서 켜면 이 자리에 채워집니다</span>
+          <div class="cardtitle"><h4>어레이가 보고하는 디렉터 성능 — Unisphere for PowerMax</h4><span class="tag mint">최신 19:15~19:30 · 15분 평균</span><span class="muted" style="font-size:12px">스토리지 수집 주기(10분 · 설정값)마다 KR1 엣지가 읽어 올림 · 마지막 반영 4분 전</span></div>
+          <div class="legend"><span><i style="background:#3987e5"></i>FA-1D</span><span><i style="background:#d95926"></i>FA-2D</span><span><i style="background:#199e70"></i>FA-3D</span><span><i style="background:#c98500"></i>FA-4D</span><span><em style="border-top-color:#f59e0b"></em>busy 주의 70% · 이상 85%(설정값)</span></div>
         </div>
-        <div class="row"><b>디렉터 busy %</b><span class="muted">FA-1D · 2D · 3D · 4D 의 PercentBusy — 스위치 처리량과 나란히 두면 '회선은 한가한데 디렉터가 바쁜' 경우가 보입니다</span><span class="tag gray">— 수집 전</span></div>
-        <div class="row"><b>IOPS · 응답 시간</b><span class="muted">HostIOs · ReadResponseTime · WriteResponseTime(ms) — 디렉터별</span><span class="tag gray">— 수집 전</span></div>
-        <div class="row"><b>큐 깊이</b><span class="muted">QueueDepthUtilization — 포화 전조</span><span class="tag gray">— 수집 전</span></div>
-        <div class="info">⚠ 위 지표 이름은 Unisphere 성능 API 의 <b>일반적인 키 이름을 기억에서 적은 것</b>이고 실장비에서 확인하지 못했습니다(추정). 구현 때 실제 응답 키로 바꾸고, 못 읽는 지표는 '—' 로 둡니다. PowerStore(노드별) · Unity(SP 별)도 같은 자리에 벤더별 지표가 들어갑니다 — ③ 보드.</div>
+        <div class="two" style="grid-template-columns:minmax(0, 1.15fr) minmax(0, 1fr)">
+          <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+            <table aria-label="디렉터별 어레이 보고 성능">
+              <colgroup><col style="width:70px"><col style="width:150px"><col style="width:86px"><col style="width:84px"><col style="width:110px"><col style="width:86px"></colgroup>
+              <thead><tr><th>디렉터</th><th>busy</th><th class="r">IOPS</th><th class="r">MB/s</th><th class="r">읽기 / 쓰기 응답</th><th class="r">큐 깊이</th></tr></thead>
+              <tbody>
+                <tr><td class="mono"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3987e5;margin-right:6px"></i>FA-1D</td><td><div class="bar"><div class="tr"><span style="width:40%;background:#3987e5"></span></div><span class="mono" style="width:34px;text-align:right">40%</span></div></td><td class="r mono">18,400</td><td class="r mono">410</td><td class="r mono">0.9 / 1.4 ms</td><td class="r mono">12%</td></tr>
+                <tr><td class="mono"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#d95926;margin-right:6px"></i>FA-2D</td><td><div class="bar"><div class="tr"><span style="width:47%;background:#d95926"></span></div><span class="mono" style="width:34px;text-align:right">47%</span></div></td><td class="r mono">22,100</td><td class="r mono">520</td><td class="r mono">1.0 / 1.5 ms</td><td class="r mono">15%</td></tr>
+                <tr><td class="mono"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#199e70;margin-right:6px"></i>FA-3D</td><td><div class="bar"><div class="tr"><span style="width:54%;background:#199e70"></span></div><span class="mono" style="width:34px;text-align:right">54%</span></div></td><td class="r mono">25,600</td><td class="r mono">610</td><td class="r mono">1.1 / 1.7 ms</td><td class="r mono">19%</td></tr>
+                <tr><td class="mono"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#c98500;margin-right:6px"></i>FA-4D</td><td><div class="bar"><div class="tr"><span style="width:60%;background:#c98500"></span></div><span class="mono" style="width:34px;text-align:right">60%</span></div></td><td class="r mono">28,900</td><td class="r mono">690</td><td class="r mono">1.2 / 1.9 ms</td><td class="r mono">23%</td></tr>
+                <tr><td class="muted">합계</td><td class="muted" style="font-size:11.5px">최대 FA-4D 60% · 전부 기준 아래</td><td class="r mono"><b>95,000</b></td><td class="r mono"><b>2,230</b></td><td class="r mono muted">—</td><td class="r mono muted">—</td></tr>
+              </tbody>
+            </table>
+            <div class="note"><b>보고 대조</b>: 어레이가 보고한 호스트 대역폭 2,230 MB/s ≈ <b>17.8 Gb/s</b> · 스위치 처리량 20.7 Gb/s — 차이 14%(FC 프레임 헤더 · 제어 트래픽이 스위치 쪽에 더 잡힙니다). 30% 를 넘으면 '한쪽 계측이 빠졌을 수 있음' 으로 주의 표시만 하고 원인은 단정하지 않습니다.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+            <div class="muted" style="font-size:12px">디렉터 busy % · 24시간(15분 평균 · 어레이 보고)</div>
+            <div class="plot">
+              <svg viewBox="0 0 530 196" role="img" aria-label="디렉터별 busy 퍼센트 24시간 추이">
+                <g stroke="#1f2a40"><line x1="40" y1="170" x2="500" y2="170"/><line x1="40" y1="132.5" x2="500" y2="132.5"/><line x1="40" y1="95" x2="500" y2="95"/><line x1="40" y1="57.5" x2="500" y2="57.5"/><line x1="40" y1="20" x2="500" y2="20"/></g>
+                <g text-anchor="end"><text x="34" y="174">0</text><text x="34" y="136">25</text><text x="34" y="99">50</text><text x="34" y="61">75</text><text x="34" y="24">100</text></g>
+                <line x1="40" y1="65" x2="500" y2="65" stroke="#f59e0b" stroke-dasharray="4 4"/>
+                <line x1="40" y1="42.5" x2="500" y2="42.5" stroke="#ef4444" stroke-dasharray="2 4" stroke-opacity=".7"/>
+                <polyline fill="none" stroke="#3987e5" stroke-width="2" points="40,113 78.3,120.5 116.7,125 155,129.5 193.3,132.5 231.7,134 270,128 308.3,119 346.7,104 385,92 423.3,83 461.7,89 500,110"/>
+                <polyline fill="none" stroke="#d95926" stroke-width="2" points="40,102.5 78.3,111.5 116.7,117.5 155,123.5 193.3,126.5 231.7,128 270,120.5 308.3,110 346.7,92 385,78.5 423.3,68 461.7,75.5 500,99.5"/>
+                <polyline fill="none" stroke="#199e70" stroke-width="2" points="40,92 78.3,102.5 116.7,110 155,116 193.3,120.5 231.7,122 270,113 308.3,101 346.7,80 385,65 423.3,53 461.7,62 500,89"/>
+                <polyline fill="none" stroke="#c98500" stroke-width="2" points="40,83 78.3,95 116.7,102.5 155,110 193.3,114.5 231.7,116 270,107 308.3,92 346.7,71 385,54.5 423.3,44 461.7,51.5 500,80"/>
+                <circle cx="423.3" cy="44" r="4" fill="#c98500" stroke="#0a0e17" stroke-width="2"/>
+                <text x="430" y="40" style="fill:#fcd34d;font-size:10.5px">13:00 FA-4D 84% — 주의</text>
+                <g text-anchor="middle"><text x="40" y="188">17:00</text><text x="193.3" y="188">01:00</text><text x="346.7" y="188">09:00</text><text x="500" y="188">17:00</text></g>
+              </svg>
+            </div>
+            <div class="note">같은 시각의 스위치 처리량(위 차트)과 나란히 읽습니다 — <b>회선은 한가한데(8%) 디렉터가 바쁜(84%)</b> 구간이 13:00 에 있었습니다. 이런 구간은 디렉터 CPU · 캐시 쪽 원인 후보이고, 반대(회선 포화 · busy 낮음)면 포트 증설 후보입니다.</div>
+          </div>
+        </div>
+        <div class="info">지표 이름은 Unisphere 성능 API 의 <span class="mono">FEDirector</span> 분류(PercentBusy · HostIOs · HostMBs · ReadResponseTime · WriteResponseTime · QueueDepthUtilization)를 2차 자료(Dell Splunk 애드온 · Dynatrace 확장 · Dell KB 000213922)로 확인했습니다. ⚠ Dell KB 는 <b>V4 어레이(PowerMax 2500/8500)에서 일부 지표가 사라졌다</b>고 적고 있어, 구현은 장비의 help 엔드포인트(<span class="mono">/performance/FEDirector/help/&lt;SID&gt;/FEDirector/metrics/All</span>)로 지원 지표를 먼저 읽고 없는 지표는 '—' 로 둡니다. 실장비 응답은 아직 보지 못했습니다.</div>
       </div>
 
       <div class="foot">
@@ -291,7 +323,7 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;white-space
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2520}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2800}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }

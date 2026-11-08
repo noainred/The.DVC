@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>SAN 스토리지 성능 점검 — 디렉터 · 컨트롤러 판정표</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.wrap{padding:28px 32px;display:flex;flex-direction:column;gap:16px;min-width:0}
+h2{margin:0;font-size:20px;font-weight:800}
+h4{margin:0;font-size:14px;font-weight:700}
+.card{background:#141b2d;border:1px solid #243049;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.sum{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:999px;border:1px solid #243049;background:#0f1626;font-size:12.5px;color:#8b9bb4;white-space:nowrap}
+.pill b{color:#e6edf6;font-weight:700;font-family:"JetBrains Mono",ui-monospace,monospace}
+.st{display:inline-flex;align-items:center;justify-content:center;width:26px;height:22px;border-radius:6px;font-size:12px;font-weight:800}
+.ok{background:rgba(34,197,94,.16);color:#86efac}.warn{background:rgba(245,158,11,.18);color:#fcd34d}.bad{background:rgba(239,68,68,.18);color:#fca5a5}.unk{background:rgba(139,155,180,.16);color:#aebbd0;border:1px dashed #5d6b85}.na{color:#5d6b85}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{border:0}.tag.warn{border:0}.tag.bad{border:0}.tag.unk{border:1px dashed #5d6b85}
+.vend{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;font-size:10.5px;font-weight:700}
+.vend.pmax{background:rgba(57,135,229,.2);color:#9cc4f5}.vend.pstore{background:rgba(217,89,38,.2);color:#f4a988}.vend.unity{background:rgba(25,158,112,.22);color:#7fdcb9}.vend.etc{background:rgba(139,155,180,.16);color:#aebbd0}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:8px 8px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+th.c,td.c{text-align:center}
+td{padding:8px 8px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+td .sub{font-size:10.5px;color:#5d6b85}
+.two{display:grid;grid-template-columns:minmax(0, 1.55fr) minmax(0, 1fr);gap:14px;min-width:0}
+.rule td{white-space:normal;vertical-align:top;line-height:1.5}
+.note{font-size:12px;color:#8b9bb4;line-height:1.6}
+.note b{color:#e6edf6}
+.info{border:1px solid rgba(245,158,11,.4);background:rgba(245,158,11,.07);border-radius:10px;padding:10px 14px;font-size:12.5px;line-height:1.6}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#8b9bb4;align-items:center}
+</style>
+</helmet>
+<div class="wrap" style="width: 1440px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+    <div><h2>SAN 스토리지 성능 점검 — 어레이 × 항목 판정표</h2>
+      <div class="note">월간 점검(SAN 스위치)과 같은 틀: 판정은 네 가지(<b>정상 · 주의 · 이상 · 확인 불가</b>)이고 <b>확인 불가를 정상으로 뭉개지 않습니다</b>. 저장된 표본을 판정하므로 장비에 새로 접속하지 않습니다. 목록 ① 의 '성능 점검' 단추로 들어오고, PDF 로 내려받습니다.</div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button">기준(임계값) 설정</button><button class="btn" type="button">PDF 내려받기</button><button class="btn primary" type="button">지금 판정</button></div>
+  </div>
+
+  <div class="sum">
+    <span class="pill">어레이 <b>9</b></span>
+    <span class="pill"><span class="st ok">●</span> 정상 <b>4</b></span>
+    <span class="pill"><span class="st warn">▲</span> 주의 <b>2</b></span>
+    <span class="pill"><span class="st bad">✕</span> 이상 <b>1</b></span>
+    <span class="pill"><span class="st unk">?</span> 확인 불가 <b>2</b></span>
+    <span class="pill">판정 기준 시각 <b>2026-11-08 19:30</b> · 24시간 평균 · 어레이 측은 최신 15분</span>
+    <span class="legend" style="margin-left:auto"><span><span class="st na">—</span> 해당 없음(그 벤더에 그 항목이 없음)</span></span>
+  </div>
+
+  <div class="two">
+    <div class="card" style="padding:0;overflow:hidden">
+      <table aria-label="어레이별 성능 점검 판정표">
+        <colgroup><col style="width:200px"><col style="width:74px"><col style="width:74px"><col style="width:74px"><col style="width:84px"><col style="width:84px"><col style="width:74px"><col style="width:84px"><col style="width:84px"><col></colgroup>
+        <thead><tr>
+          <th>스토리지</th><th class="c">디렉터 편중</th><th class="c">팹 비대칭</th><th class="c">회선 포화</th><th class="c">디렉터 busy</th><th class="c">응답 시간</th><th class="c">큐 깊이</th><th class="c">노드·SP CPU</th><th class="c">보고 대조</th><th>종합 · 근거</th>
+        </tr></thead>
+        <tbody>
+          <tr><td><span class="vend pmax">PowerMax</span> <b>PMAX-KR1-01</b><div class="sub">KR1 · FA 4 · 포트 8</div></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st ok">●</span></td><td><span class="tag ok">정상</span> <span class="muted">최대 FA-4D 1.25× · busy 최대 60% · 쓰기 RT 1.9ms</span></td></tr>
+          <tr><td><span class="vend pstore">PowerStore</span> <b>PSTORE-KR1-02</b><div class="sub">KR1 · Node 2 · 포트 4</div></td><td class="c"><span class="st warn">▲</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st warn">▲</span></td><td class="c"><span class="st ok">●</span></td><td><span class="tag warn">주의</span> <span class="muted">Node A 1.7× · Node A CPU 74%(기준 70) · Node B 21%</span></td></tr>
+          <tr><td><span class="vend pmax">PowerMax</span> <b>PMAX-PL1-01</b><div class="sub">PL1 · FA 2 · 포트 4 · 16G</div></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st warn">▲</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st ok">●</span></td><td><span class="tag warn">주의</span> <span class="muted">피크 포화도 82%(FA-1D:4 · 16G) — 회선이 먼저 찬다</span></td></tr>
+          <tr><td><span class="vend unity">Unity</span> <b>UNITY-USE-01</b><div class="sub">USE · SP 2 · 포트 4 · 엣지</div></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td><span class="tag ok">정상(일부 미확인)</span> <span class="muted">SP 응답 시간 경로를 이 OE 버전이 주지 않음</span></td></tr>
+          <tr><td><span class="vend pstore">PowerStore</span> <b>PSTORE-KR1-01</b><div class="sub">KR1 · Node 2 · 포트 4</div></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td><span class="tag ok">정상</span></td></tr>
+          <tr><td><span class="vend pmax">VMAX</span> <b>VMAX-JP1-01</b><div class="sub">JP1 · FA 2 · 포트 4 · 16G</div></td><td class="c"><span class="st bad">✕</span></td><td class="c"><span class="st warn">▲</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st unk">?</span></td><td><span class="tag bad">이상</span> <span class="muted">FA-1D 2.1× 24시간 지속 · 팹 B 14% · 어레이 미등록(용량 · 성능 없음)</span></td></tr>
+          <tr><td><span class="vend pstore">PowerStore</span> <b>PSTORE-SG1-01</b><div class="sub">SG1 · Node 2</div></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st unk">?</span></td><td><span class="tag unk">확인 불가</span> <span class="muted">스위치 표본이 부분 합 구간뿐(SW-SG1-A1 42분 무응답)</span></td></tr>
+          <tr><td><span class="vend unity">Unity</span> <b>UNITY-DE1-01</b><div class="sub">DE1 · SP 2 · 엣지 미보고</div></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st unk">?</span></td><td class="c"><span class="st unk">?</span></td><td><span class="tag unk">확인 불가</span> <span class="muted">엣지 edge-de1 표본 · 성능 push 모두 없음</span></td></tr>
+          <tr><td><span class="vend etc">그 밖</span> <b>HUS-VM-PL1</b><div class="sub">PL1 · 디렉터 구분 못 함</div></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st ok">●</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st na">—</span></td><td class="c"><span class="st na">—</span></td><td><span class="tag ok">정상(스위치 측만)</span> <span class="muted">어레이 측 수집 대상 벤더 아님</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h4>판정 규칙 — 항목마다 근거 데이터와 기준의 출처가 다릅니다</h4>
+      <table class="rule" aria-label="판정 규칙">
+        <colgroup><col style="width:92px"><col><col style="width:132px"></colgroup>
+        <thead><tr><th>항목</th><th>규칙(스위치 측 = 24시간 평균 · 어레이 측 = 최신 15분 평균)</th><th>기준 출처</th></tr></thead>
+        <tbody>
+          <tr><td><b>디렉터 편중</b></td><td>디렉터 평균 ≥ 0.5 Gb/s 이고 한 디렉터가 평균의 1.4배 이상 → 주의 · 2배 이상이 24시간 지속 → 이상</td><td>포트 사용량 탭 기존 상수(API 로 전달)</td></tr>
+          <tr><td><b>팹 비대칭</b></td><td>팹 A/B 합이 각각 ≥ 0.5 Gb/s 일 때 한쪽이 전체의 30% 미만 → 주의 · 한쪽 0 이고 다른 쪽 흐름 → 이상(경로 끊김 후보)</td><td>새 규칙(제안 — 설정에서 조정)</td></tr>
+          <tr><td><b>회선 포화</b></td><td>포트 피크 포화도(표본 최대 ÷ 포트 속도) ≥ 70% → 주의 · ≥ 90% → 이상</td><td>포트 사용량 탭 '포화도' 계산 · 기준은 제안</td></tr>
+          <tr><td><b>디렉터 busy</b></td><td>PercentBusy ≥ 설정 임계값(주의/이상 두 단계). <b>임계값이 설정되지 않았으면 값만 보이고 '?'</b></td><td>관리자 설정(기본값 비움)</td></tr>
+          <tr><td><b>응답 시간</b></td><td>읽기/쓰기 응답 ms ≥ 설정 임계값 · PowerStore 는 노드 avg_latency · Unity 는 경로가 있을 때만</td><td>관리자 설정(기본값 비움)</td></tr>
+          <tr><td><b>큐 깊이</b></td><td>QueueDepthUtilization ≥ 설정 임계값(PowerMax 전용 — 다른 벤더는 '—')</td><td>관리자 설정(기본값 비움)</td></tr>
+          <tr><td><b>노드 · SP CPU</b></td><td>PowerStore 노드 CPU · Unity SP CPU 사용률 ≥ 설정 임계값(PowerMax 는 '—' · busy 로 대신)</td><td>관리자 설정(기본값 비움)</td></tr>
+          <tr><td><b>보고 대조</b></td><td>어레이가 보고한 호스트 대역폭 합(MB/s → Gb/s)과 스위치 처리량의 차이가 30% 이상 → 주의(한쪽 계측이 빠졌을 가능성 — 원인을 단정하지 않음)</td><td>새 규칙(제안)</td></tr>
+        </tbody>
+      </table>
+      <div class="info">⚠ <b>임계값을 지어내지 않습니다.</b> busy · 응답 시간 · 큐 깊이 · CPU 의 기본 임계값은 비워 두고(판정 '?' · 값은 표시), 관리자가 설정 › 수집 › 스토리지 성능 점검에서 넣으면 그때부터 판정합니다. 편중 · 포화의 상수는 포트 사용량 탭에 이미 있는 값을 그대로 씁니다. '제안' 표시는 컨펌 질문 5 입니다.</div>
+      <div class="note">점검 이력은 '판정 1회 = 기록 1회'(월간 점검 규약) · 확인 불가 → 정상은 '호전' 이 아니라 '처음 확인' 으로 적습니다. PDF 는 기존 벡터 인프라(<span class="mono">reportExport</span> · 한글 폰트)를 재사용합니다.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

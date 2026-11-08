@@ -126,6 +126,7 @@ tr.dim td{color:#8b9bb4}
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <span class="live"><span class="dot"></span><b>실시간</b> 마지막 표본 1분 전 · 수집 주기 5분(설정값) · 60초마다 다시 읽음</span>
           <span class="live" style="color:#8b9bb4"><b>읽은 곳</b> 15분 집계 표 + 원본 자투리 · 계산 17:21:40 · 기억 5분</span>
+          <a class="btn sm" href="Check.dc.html" title="어레이 × 항목 판정표(⑥) — 저장된 표본으로 판정 · 새 접속 없음">성능 점검</a>
           <button class="btn sm" type="button">CSV</button>
         </div>
       </div>
@@ -184,7 +185,7 @@ tr.dim td{color:#8b9bb4}
               <td class="r mono">21.0 / <b>28.5</b></td>
               <td class="r"><span class="delta up">▲ 9%</span></td>
               <td class="r mono">68%</td>
-              <td><span class="tag ok">정상</span></td>
+              <td><span class="tag ok">정상</span> <span class="tag gray" title="어레이가 보고한 디렉터 busy 최대(FA-4D)">busy 60%</span></td>
             </tr>
             <tr class="warn">
               <td><b>KR1</b></td>
@@ -197,7 +198,7 @@ tr.dim td{color:#8b9bb4}
               <td class="r mono">9.8 / <b>21.2</b></td>
               <td class="r"><span class="delta up">▲ 23%</span></td>
               <td class="r mono">54%</td>
-              <td><span class="tag warn">편중 · Node A 1.7×</span></td>
+              <td><span class="tag warn">편중 · Node A 1.7×</span> <span class="tag warn" title="어레이가 보고한 노드 CPU · 설정 임계값 70%">CPU 74%</span></td>
             </tr>
             <tr>
               <td><b>PL1</b></td>
@@ -294,6 +295,7 @@ tr.dim td{color:#8b9bb4}
         </table>
         <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:10px 18px;font-size:12px;color:#8b9bb4;border-top:1px solid #1f2a40">
           <span>지금 = 수집 주기(5분) 안에서 팹 A/B 표본이 다 모인 마지막 칸 · 회선 사용률 = 송수신 합 ÷ 연결 포트 속도 합(포트 사용량 탭 '포화도' 와 같은 계산)</span>
+          <span>상태 열의 busy · CPU 는 어레이가 보고한 최신 15분 값(수집 대상 벤더만)</span>
           <span style="margin-left:auto">정렬 기준 상위 200행 · 모르는 값('—')은 항상 뒤</span>
         </div>
       </div>

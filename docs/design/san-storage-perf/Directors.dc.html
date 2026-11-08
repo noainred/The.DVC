@@ -56,7 +56,7 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-al
 <div class="wrap" style="width: 1440px">
   <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
     <div><h2>디렉터 · 컨트롤러 — 스위치가 받은 이름으로 묶는 규칙과, 벤더별 패널</h2>
-      <div class="note">1단계(지금 있는 데이터): 스위치 네임서버의 <b>포트 심볼릭 이름</b>에서 디렉터/컨트롤러를 읽어 포트를 묶습니다 — 새 장비 접속이 없습니다. 2단계(새 수집): 어레이 관리 API 가 주는 디렉터/노드/SP 성능(busy% · IOPS · 응답 시간)을 같은 자리에 나란히 둡니다.</div>
+      <div class="note">스위치 측(지금 있는 데이터): 네임서버의 <b>포트 심볼릭 이름</b>에서 디렉터/컨트롤러를 읽어 포트를 묶습니다 — 새 장비 접속이 없습니다. 어레이 측(새 수집 · 이번 범위): 어레이 관리 API 가 주는 디렉터/노드/SP 성능(busy% · CPU · IOPS · 응답 시간)을 같은 카드에 나란히 둡니다. 두 쪽을 나란히 두면 '회선이 바쁜가 · 디렉터가 바쁜가' 를 나눠 볼 수 있습니다.</div>
     </div>
     <div class="legend"><span><i style="border:1px solid rgba(59,130,246,.8);background:#141b2d"></i>팹 A 포트</span><span><i style="border:1px solid rgba(52,224,180,.8);background:#141b2d"></i>팹 B 포트</span><span><i style="background:#3987e5"></i><i style="background:#d95926"></i><i style="background:#199e70"></i><i style="background:#c98500"></i>시리즈 색(검증된 다크 팔레트 4색 · 고정 순서)</span></div>
   </div>
@@ -77,12 +77,14 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-al
       </div>
       <div class="note">값 = 24시간 평균 Gb/s · 배수 = 어레이 디렉터 평균 대비. 디렉터가 5개 이상이면 시리즈 색은 4색 + '그 밖'(회색) 으로 접고 표는 전부 보여 줍니다(색을 늘리지 않습니다).</div>
       <div style="border-top:1px solid #1f2a40;padding-top:10px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:12.5px">2단계 · Unisphere for PowerMax</b><span class="tag blue">수집 전</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:12.5px">어레이 측 · Unisphere for PowerMax <span class="mono muted" style="font-weight:500">FEDirector</span></b><span class="tag ok">최신 15분 · 4분 전</span></div>
         <div class="bars">
-          <div class="row"><span class="muted">FA-1D busy</span><div class="tr"><span style="width:0%;background:#3987e5"></span></div><span class="v faint">—</span></div>
-          <div class="row"><span class="muted">FA-4D busy</span><div class="tr"><span style="width:0%;background:#c98500"></span></div><span class="v faint">—</span></div>
-          <div class="row"><span class="muted">응답 시간</span><div class="tr"></div><span class="v faint">— ms</span></div>
+          <div class="row"><span class="muted">FA-1D busy</span><div class="tr"><span style="width:40%;background:#3987e5"></span></div><span class="v">40% · 0.9/1.4 ms</span></div>
+          <div class="row"><span class="muted">FA-2D busy</span><div class="tr"><span style="width:47%;background:#d95926"></span></div><span class="v">47% · 1.0/1.5 ms</span></div>
+          <div class="row"><span class="muted">FA-3D busy</span><div class="tr"><span style="width:54%;background:#199e70"></span></div><span class="v">54% · 1.1/1.7 ms</span></div>
+          <div class="row"><span class="muted">FA-4D busy</span><div class="tr"><span style="width:60%;background:#c98500"></span></div><span class="v">60% · 1.2/1.9 ms</span></div>
         </div>
+        <div class="note" style="margin-top:6px">IOPS 합 95,000 · 호스트 대역폭 2,230 MB/s(≈ 17.8 Gb/s) ↔ 스위치 20.7 Gb/s(차이 14% · 정상 범위). 큐 깊이 최대 23%. 디렉터 ID 는 PowerMax 2500/8500(PowerMaxOS 10)에서 <span class="mono">OR-1C</span> 꼴로도 나옵니다 — 해석기가 함께 받습니다.</div>
       </div>
     </div>
 
@@ -103,8 +105,13 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-al
       </div>
       <div class="note"><b>편중 판정</b>은 포트 사용량 탭의 규칙 그대로(그룹 평균 0.5 Gb/s 이상 · 멤버가 평균의 1.4배 이상 — 상수는 API 로 받음). 흔한 원인: 호스트 멀티패스 정책(고정 경로) · 볼륨의 노드 친화도 쏠림 · 한쪽 노드 포트 다운. 화면은 <b>원인을 단정하지 않고</b> 확인할 곳만 안내합니다.</div>
       <div style="border-top:1px solid #1f2a40;padding-top:10px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:12.5px">2단계 · PowerStore REST (metrics/generate · 노드별)</b><span class="tag blue">수집 전</span></div>
-        <div class="note">지금 수집기는 <b>클러스터 전체</b> IOPS · 대역폭 · 지연(최신 1점)만 담습니다(<span class="mono">extra.perf</span>). 노드별 엔터티(<span class="mono">performance_metrics_by_node</span> — 추정)를 더 받으면 Node A/B 의 IOPS · 지연 · CPU 가 이 자리에 옵니다.</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:12.5px">어레이 측 · PowerStore REST <span class="mono muted" style="font-weight:500">metrics/generate · performance_metrics_by_node</span></b><span class="tag warn">Node A CPU 74%</span></div>
+        <div class="bars">
+          <div class="row"><span class="muted">Node A CPU</span><div class="tr"><span style="width:74%;background:#3987e5"></span></div><span class="v" style="color:#fcd34d">74% · 41,200 IOPS</span></div>
+          <div class="row"><span class="muted">Node B CPU</span><div class="tr"><span style="width:21%;background:#d95926"></span></div><span class="v">21% · 6,900 IOPS</span></div>
+          <div class="row"><span class="muted">평균 지연</span><div class="tr"></div><span class="v">A 1.6 ms · B 0.7 ms</span></div>
+        </div>
+        <div class="note" style="margin-top:6px">지금 수집기는 <b>클러스터 전체</b>(<span class="mono">performance_metrics_by_cluster</span> · <span class="mono">extra.perf</span>)만 담습니다. 노드별 엔터티 이름은 Dell 개발자 가이드 열거형에서 확인했고(<span class="mono">performance_metrics_by_node</span> · <span class="mono">performance_metrics_by_fe_fc_port</span>), <b>응답 필드 이름은 미확인</b>입니다(클러스터와 같은 <span class="mono">total_iops · avg_latency</span> 꼴로 추정). 노드 CPU 는 그 응답에 있을 때만 — 없으면 '—'.</div>
       </div>
     </div>
 
@@ -125,8 +132,13 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-al
       </div>
       <div class="note">값은 엣지(미국 동부 · RTT 800ms+)가 중계한 표본 — 마지막 반영 3분 전을 상단 배지로 말합니다. 중앙이 어레이에 직접 묻지 않습니다.</div>
       <div style="border-top:1px solid #1f2a40;padding-top:10px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:12.5px">2단계 · Unisphere(Unity) REST · SP 별</b><span class="tag blue">수집 전</span></div>
-        <div class="note">SP CPU 사용률 · FC 포트별 읽기/쓰기 바이트 · IOPS(<span class="mono">metricValue</span> 경로의 <span class="mono">sp.*.cpu.summary.utilization</span> 등 — 추정)를 **법인 엣지가 로컬에서** 받아 요약만 올립니다(백업·수집은 법인 로컬 규칙).</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:12.5px">어레이 측 · Unisphere(Unity) REST <span class="mono muted" style="font-weight:500">metricValue · metric 경로</span></b><span class="tag ok">SP 균형</span></div>
+        <div class="bars">
+          <div class="row"><span class="muted">SPA CPU</span><div class="tr"><span style="width:38%;background:#3987e5"></span></div><span class="v">38% · 12,300 IOPS</span></div>
+          <div class="row"><span class="muted">SPB CPU</span><div class="tr"><span style="width:35%;background:#d95926"></span></div><span class="v">35% · 11,800 IOPS</span></div>
+          <div class="row"><span class="muted">응답 시간</span><div class="tr"></div><span class="v faint">— (이 OE 가 SP 경로를 주지 않음)</span></div>
+        </div>
+        <div class="note" style="margin-top:6px">경로는 Dell 백서 · 지원 스크립트로 확인: CPU <span class="mono">sp.*.cpu.summary.utilization</span>(이력 · 60초) · FC 는 <span class="mono">sp.*.fibreChannel.target.*.readBytes / writeBytes</span>(<b>누적 카운터</b> — 스위치 rates.js 처럼 델타로 계산 · 첫 표본 null). 경로 목록은 장비마다 <span class="mono">GET /api/types/metric/instances</span> 로 먼저 읽어 없는 경로는 '—'. 법인 엣지가 로컬에서 읽어 요약만 올립니다.</div>
       </div>
     </div>
   </div>
@@ -139,7 +151,7 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-al
         <colgroup><col style="width:120px"><col><col style="width:150px"></colgroup>
         <thead><tr><th>벤더</th><th>셋째 조각 예 → 그룹 · 포트</th><th>확신</th></tr></thead>
         <tbody>
-          <tr><td><span class="vend pmax">PowerMax</span></td><td><span class="mono">FA-1D 4</span> → FA-1D · 4 &nbsp;|&nbsp; <span class="mono">FA-7E:0</span> → FA-7E · 0 &nbsp;|&nbsp; <span class="mono">SAF-1d 4</span>(VMAX) → SAF-1D · 4</td><td><span class="tag ok">현장 포맷 확인</span> <span class="faint">(perfDb 머리말 예시)</span></td></tr>
+          <tr><td><span class="vend pmax">PowerMax</span></td><td><span class="mono">FA-1D 4</span> → FA-1D · 4 &nbsp;|&nbsp; <span class="mono">FA-7E:0</span> → FA-7E · 0 &nbsp;|&nbsp; <span class="mono">SAF-1d 4</span>(VMAX) → SAF-1D · 4 &nbsp;|&nbsp; <span class="mono">OR-1C 1</span>(2500/8500) → OR-1C · 1</td><td><span class="tag ok">현장 포맷 확인</span> <span class="faint">(perfDb 머리말 · OR 은 Dell REST 예시)</span></td></tr>
           <tr><td><span class="vend pstore">PowerStore</span></td><td><span class="mono">NodeA FC0</span> → Node A · FC0</td><td><span class="tag warn">목 서버 형식</span></td></tr>
           <tr><td><span class="vend unity">Unity</span></td><td><span class="mono">SPA FC0</span> → SPA · FC0 &nbsp;|&nbsp; 못 읽으면 조닝 별칭 <span class="mono">Unity_SPA0_p8</span> 의 SPA/SPB</td><td><span class="tag warn">목 서버 형식 · 별칭은 현장 확인</span></td></tr>
           <tr><td>그 밖 · 평평한 이름</td><td>셋째 조각이 없거나 규칙에 안 맞음 → <b>'(구분 못 함)'</b> 한 그룹 + 포트별 보기</td><td><span class="tag gray">추정 안 함</span></td></tr>
@@ -148,14 +160,24 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-al
       <div class="note">⚠ 규칙에 맞지 않는 이름을 억지로 나누지 않습니다. '구분 못 함' 어레이는 목록에 그 사실을 배지로 보이고, 관리자가 <b>포트 → 디렉터 수동 매핑</b>을 등록할 수 있게 합니다(등록부 파일 · 원자 쓰기 · 손상 보존 — 자격증명 아님).</div>
     </div>
     <div class="card">
-      <h4>2단계 수집 — 어레이 측 디렉터 · 노드 · SP 성능</h4>
+      <h4>어레이 측 수집 — 디렉터 · 노드 · SP 성능(이번 범위)</h4>
       <div class="note">
         · <b>법인 로컬에서 돈다</b>: 엣지가 있는 법인은 엣지의 스토리지 수집기가 디렉터/노드/SP 지표를 읽고 요약(최신 1점 + 15분 평균)을 중앙으로 push 합니다. 중앙은 엣지 없는 법인만 직접 묻습니다(기존 storage 폴러 규약).<br>
         · <b>주기</b>: 스토리지 수집 주기(설정값)와 같이 — 별도 세션을 늘리지 않습니다. per-장비 시한 · 재진입 가드 · 인증 실패 정지 그대로.<br>
-        · <b>보관</b>: 새 표 <span class="mono">storage-perf.db</span>(SAN perfDb 와 같은 15분 · 1시간 집계 규약) — 트렌드는 1시간 표로 2년.<br>
-        · <b>매칭</b>: SAN 쪽 디렉터 이름(FA-1D)과 어레이 API 의 디렉터 ID(<span class="mono">FA-1D</span>)를 대조해 같은 카드에 둡니다. 대조가 안 되면 따로 보여 주고 억지로 합치지 않습니다.
+        · <b>보관</b>: 새 표 <span class="mono">storage-perf.db</span>(SAN perfDb 와 같은 15분 · 1시간 집계 규약 — 계획 함수를 공용으로 뽑아 복제하지 않음) — 트렌드는 1시간 표로 2년.<br>
+        · <b>매칭</b>: SAN 쪽 디렉터 이름(FA-1D)과 어레이 API 의 디렉터 ID(<span class="mono">FA-1D</span>)를 대조해 같은 카드에 둡니다. 대조가 안 되면 따로 보여 주고 억지로 합치지 않습니다.<br>
+        · <b>지원 지표 먼저 묻기</b>: PowerMax help 엔드포인트 · PowerStore 응답 필드 · Unity <span class="mono">metric/instances</span> 로 장비가 주는 것만 읽고, 없는 것은 '—' + 사유.
       </div>
-      <div class="info">정직 표기: 벤더별 API 경로 · 지표 키는 <b>기억에서 적은 추정</b>이라 구현 전에 실장비(또는 사용자가 준 응답 캡처)로 확인해야 합니다. 확인 못 한 지표는 화면에 '—' 와 사유('이 장비는 디렉터 성능 API 를 주지 않음')로 둡니다.</div>
+      <table aria-label="벤더별 API 확인 상태" style="margin-top:4px">
+        <colgroup><col style="width:92px"><col><col style="width:118px"></colgroup>
+        <thead><tr><th>벤더</th><th>경로 · 지표(2026-11-08 웹 문서 확인)</th><th>확인 수준</th></tr></thead>
+        <tbody>
+          <tr><td><span class="vend pmax">PowerMax</span></td><td><span class="mono">POST /performance/FEDirector/keys · /metrics</span> — PercentBusy · HostIOs · HostMBs · ReadResponseTime · WriteResponseTime · QueueDepthUtilization. V4(2500/8500)는 일부 지표 없음(Dell KB 000213922)</td><td><span class="tag ok">2차 자료 확인</span></td></tr>
+          <tr><td><span class="vend pstore">PowerStore</span></td><td><span class="mono">POST metrics/generate</span> entity <span class="mono">performance_metrics_by_node</span> · <span class="mono">performance_metrics_by_fe_fc_port</span>(개발자 가이드 열거형) — 응답 필드는 미확인</td><td><span class="tag warn">엔터티만 확인</span></td></tr>
+          <tr><td><span class="vend unity">Unity</span></td><td><span class="mono">GET metricValue/instances?filter=path EQ "sp.*.cpu.summary.utilization"</span> · FC <span class="mono">sp.*.fibreChannel.target.*.readBytes/writeBytes</span>(누적) · 실시간은 metricRealTimeQuery(이번엔 안 씀)</td><td><span class="tag ok">백서 · 지원 스크립트</span></td></tr>
+        </tbody>
+      </table>
+      <div class="info">정직 표기: 세 벤더 모두 <b>실장비 응답은 아직 보지 못했습니다</b>(웹 문서 · 2차 자료 기준). 구현 전에 각 1개씩 응답 캡처를 주시면 파서를 그 모양에 맞추고, 없으면 '장비가 준 목록만 읽는' 방어 구조로 짜되 첫 운영 반영 때 빈 칸이 생길 수 있습니다.</div>
     </div>
     <div class="card">
       <h4>묶음 보기 4가지(상세 ② 의 '묶음' 세그먼트)</h4>
@@ -173,7 +195,7 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-al
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1760}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }
