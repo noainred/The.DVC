@@ -1,6 +1,6 @@
 # 설계: SAN 스토리지 사용량 · 트렌드 — 실시간 · 트렌드 · 디렉터(VMAX · PowerMax) · 컨트롤러(PowerStore · Unity)별
 
-작성 2026-11-08 (main **v2.946.0** 기준 — ⚠ 정정: 처음에 v2.914.0 이라 적었던 것은 브랜치를 main 에 맞추기 전의 추정이었다 · 브랜치 `claude/festive-planck-vy0dg3`) · 상태 **구현 v2.947.0(§8 — 2026-11-08 23:00~ · 사용자 '그대로 진행' 으로 이 세션(Fable)이 구현 · 규칙상 Opus)** ·
+작성 2026-11-08 (main **v2.946.0** 기준 — ⚠ 정정: 처음에 v2.914.0 이라 적었던 것은 브랜치를 main 에 맞추기 전의 추정이었다 · 브랜치 `claude/festive-planck-vy0dg3`) · 상태 **구현 v2.948.0(§8 — 2026-11-08 23:00~ · 사용자 '그대로 진행' 으로 이 세션(Fable)이 구현 · 규칙상 Opus)** ·
 시안 캔버스: https://claude.ai/artifact/ApZK6HEzp3yjk6h6LKbYxk (아트보드 7장 — ① 현황 1440 · ② 어레이 상세 1440 · ③ 디렉터 · 컨트롤러 벤더별 · ④ 400px · ⑤ 상태 8종 · ⑥ 성능 점검 탭 · ⑦ 분류 · 매핑 탭).
 **2차 보강(19:31~ KST)**: 사용자가 '디렉터별 · 컨트롤러별 성능' 을 다시 요청해 **어레이 측 성능(busy% · CPU · IOPS · 응답 시간 · 큐 깊이)을 2단계에서 이번 범위로** 올렸다 — ② 아래 패널 실값 · ③ 벤더 카드 실값 + API 확인 표 · ⑥ 판정표 신설.
 **3차(19:42~ KST · 사용자 답 8개)**: ① **독립 도구 `san-storage` + 독립 메뉴** '스토리지 › SAN 스토리지 성능'(기존 SAN 스위치 화면의 '스토리지 사용량 분석' 모달은 이 메뉴로 보내고 지운다) ③ 분류 · 디렉터 매핑 **탭(⑦)** 신설 ⑥ 1년 보기 포함 ⑦ 표준 검증 ⑧ 팔레트 4색 `:root` 토큰 추가. ④ 캡처 방법은 `CAPTURE-GUIDE.md` · ⑤ 벤더 · 컨설팅 권장 기준은 §10(점검 기본값을 **벤더 문서 값만**으로 채움) · 추가 기능 · 문서 검토는 §12.
@@ -121,7 +121,7 @@
 - 문서: `docs/rules/sanswitch.md` 에 '스토리지 보기 · 디렉터 해석 · 수동 매핑 · 성능 점검' 항목 · `docs/rules/storage.md` 에 '디렉터 · 노드 · SP 성능 수집' 항목 · 이 README §8 에 '시안과 달리 한 것'.
 - 릴리스: 포탈 동작이 바뀌므로 버전업 + GitHub 릴리스 1회(`versions.json` latest 확인). 규모가 커서(스위치 측 + 어레이 측 3벤더 + 점검) **PR 2개로 나눌 수 있다**: ⓐ 스위치 측 목록 · 상세 · 디렉터 해석 · 점검 틀 ⓑ 어레이 측 수집 3벤더 — 질문 4 의 답에 따라 정한다.
 
-## 8. 구현(v2.947.0 — 2026-11-08 23:00~ KST · 스위치 측 PR ⓐ · 이 세션(Fable) — 사용자 "그대로 진행")
+## 8. 구현(v2.948.0 — 2026-11-08 23:00~ KST · 스위치 측 PR ⓐ · 이 세션(Fable) — 사용자 "그대로 진행")
 
 - 서버: `sanswitch/directorOf.js`(순수 — 벤더별 이름 규칙 · 별칭 폴백 · `OR-1C`) · `sanswitch/directorMap.js`(`san-storage-map.json` — 분류 재정의 + 포트→디렉터 · 원자 쓰기 · 손상 보존 · 전체 교체 · 바뀐 항목만 변경자/시각) ·
   `sanswitch/storageCheckSettings.js`(`storage-perf-check.json` — 벤더 문서 기본값 · null = 비움 · 빈 값 = 기본값 · 주의 ≤ 이상) · `sanswitch/storageList.js`(순수 조립 — 지금 · 24시간 · 7일 대비 · 디렉터 · 팹 · 회선 · 상태 코드) ·
@@ -131,8 +131,8 @@
 - 웹: `views/tools/SanStorageTool.jsx`(탭 3 + 어레이 상세 — SVG 쌓기 차트 · 스파크 · 히트맵 · CSV) · `SanStorageCheck.jsx`(판정표 · 규칙 표 · 기준 설정 모달) · `SanStorageMapping.jsx`(분류 · 포트→디렉터 · 최근 변경 · CSV) ·
   순수 `sanStorageText.js` · `sanStorage.css`(`.sst-*`) · `styles.css :root --viz-1~4` · `specialToolsList.js`(`san-storage` · adminOnly 는 san-switch 와 같이 true) · `SpecialTools.jsx` · `topMenu.js`(스토리지 › 'SAN 스토리지 성능' 추가 · 'san' 항목 라벨 'SAN 스위치 모니터링') ·
   `SanSwitchTool.jsx`(분석 모달 머리에 새 화면 링크 — 모달 보존) · `SanSwitchV2Parts.jsx`(트래픽 카드 제목에 링크) · `web/public/special-tools.json` 재생성.
-- 테스트: 서버 `test/sanStorage2947.test.js`(directorOf 15 케이스 · storageList 결측 · stale · edge-missing · partial-only · 편중 · 점검 · 임계값 · 매핑 · **실제 라우트 — 현황 지금 합계 == traffic-total** · 매핑 저장 뒤 분류 반영 · 상세 · CSV) ·
-  `test/sanStorage2947gate.test.js`(범위 admin 403 · operator/쓰기 범위 admin PUT 403 · 전체 범위 admin 400) · 웹 `sanStorageText.test.js`(23) · `topMenu.test.js` 갱신(메뉴 18 · 스토리지 라벨). 기존 `sanPerf2728` · `sanDemoPerf2715` · `audit2732g` · `toolCatalog2614` · `audit2613a` 통과.
+- 테스트: 서버 `test/sanStorage2948.test.js`(directorOf 15 케이스 · storageList 결측 · stale · edge-missing · partial-only · 편중 · 점검 · 임계값 · 매핑 · **실제 라우트 — 현황 지금 합계 == traffic-total** · 매핑 저장 뒤 분류 반영 · 상세 · CSV) ·
+  `test/sanStorage2948gate.test.js`(범위 admin 403 · operator/쓰기 범위 admin PUT 403 · 전체 범위 admin 400) · 웹 `sanStorageText.test.js`(23) · `topMenu.test.js` 갱신(메뉴 18 · 스토리지 라벨). 기존 `sanPerf2728` · `sanDemoPerf2715` · `audit2732g` · `toolCatalog2614` · `audit2613a` 통과.
 - 문서: `docs/rules/sanswitch.md` 항목 추가 · `docs/API.md` · `docs/CONFIG-FILES.md` 재생성 · 이 README.
 - **시안과 달리 한 것**(정직 기록):
   1. 구간 이동은 ◀ 이전 · 다음 ▶ · 최신(창 단위)만 — **슬라이더 · '날짜로 이동' 은 넣지 않았다**(공용 창 계산 모듈 공용화는 별건 — vmPerfText 와 xferSpeedText 의 통합을 이 PR 에서 하지 않음).
@@ -160,6 +160,15 @@
   본문 h1 에 같은 글자가 있고(DOM 확인 · 3곳) 넘침 0 · 오류 0. 기존 화면 회귀가 아니다(A/B 생략 — DOM 근거로 충분).
 - 데모 어레이 수가 첫 측정 3대 → 뒤 측정 30대로 달랐던 것은 목 서버 기동 직후 표본이 쌓이기 전이어서로 보인다(데모 합성이 시간 함수) — 실장비와 무관 · 미검증 추정.
 - 스크린샷(세션 스크래치패드 · 저장소에 넣지 않음): `sst-{1440,400}-{list,detail,check,mapping,sanswitch}.png`.
+- 전량 verify(Sonnet · 23:40~23:52 KST) 실패 7건과 조치(00:05~00:15 KST · 2026-11-09):
+  6. 성능 점검 판정표(11열)가 규칙 표와 나란히(1.6fr) 있어 1440 에서 78px 잘림(어레이 측 열이 스크롤 밖) → 두 표를 세로로 쌓고 항목 머리글을 두 줄까지 접음(`.sst-judge th.c`) · 스토리지 칸은 현황 표와 같은 보조줄. 실측 1154 = 1154.
+  7. 규칙 표 · 기준 설정 모달의 날 `<table>` 2개(audit2575 IMP-05 — 모든 표는 STable) → `STable`.
+  8. '설정 › 수집 › SAN 스위치 포트 사용량' 은 v2.916 이전 묶음 이름(settingsMenu2905) → '설정 › 수집 주기·임계 › …'.
+  9. 시험의 절대 시간 단언 `< 200ms`(audit2613h — CPU 에 따라 깨진다) → 200자 대 2만 자 처리 시간 **비율**로.
+  10. 상세 화면의 수제 `setInterval` 폴러(audit2613b — 폴링은 usePolling) → `usePolling` 으로. 과거 창은 자동 갱신이 없어야 하므로 `usePolling` 에 **`intervalMs ≤ 0 = 1회만`** 을 더했다(`web/src/api.js` · 탭 가시화에도 다시 읽지 않음).
+  11. `await putJson(...)` 반환값을 버리던 저장 2곳(audit2727e E-01 — 400 `{ok:false, reason}` 을 성공으로 지나간다) → `r.ok === false` 면 사유를 보여 주고 멈춤.
+  - `bmIdle8b` · `bmPower8b` 2건은 이 가지가 손대지 않은 베어메탈 시험(시각 의존 — main 이 그사이 `bmPower8b` 를 고쳤다 · 234be5df). main 병합 뒤 전량 재실행으로 확인한다.
+- **번호 정정**: 구현 중 main 이 **v2.947.0**(베어메탈 — 같은 서버 키 정리 · PR #975)을 먼저 썼다. 이 작업은 **v2.948.0** 이고, 이 문서 · 코드 머리말 · 규칙 문서 · 시험 파일 이름(`sanStorage2948*.test.js`)의 v2.947 표기를 v2.948 로 일괄 바꿨다(main 쪽 v2.947 기록은 손대지 않음).
 
 ## 9. 출처(어레이 측 API — 2026-11-08 웹 확인 · 실장비 미확인)
 

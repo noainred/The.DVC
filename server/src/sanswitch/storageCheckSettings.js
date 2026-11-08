@@ -1,5 +1,5 @@
 /**
- * sanswitch/storageCheckSettings.js — SAN 스토리지 성능 점검의 임계값 설정(v2.947).
+ * sanswitch/storageCheckSettings.js — SAN 스토리지 성능 점검의 임계값 설정(v2.948).
  *
  * ── 임계값을 지어내지 않는다(설계 §10 · 월간 점검 제2 규칙과 같은 정신) ──
  * 기본값은 **벤더 문서에서 찾은 값만** 넣고(출처를 함께 둔다 — 화면이 보여 준다), 못 찾은 항목은 null(비움)이다.

@@ -1,11 +1,11 @@
-// v2.947 — SAN 스토리지 성능 › 성능 점검 탭(설계 ⑥). 판정은 서버 storagePerfCheck(순수 · 저장 표본만 — 새 접속 없음) · 여기는 표와 기준 설정만.
+// v2.948 — SAN 스토리지 성능 › 성능 점검 탭(설계 ⑥). 판정은 서버 storagePerfCheck(순수 · 저장 표본만 — 새 접속 없음) · 여기는 표와 기준 설정만.
 //   상태 4종 + 해당 없음: 정상 · 주의 · 이상 · **확인 불가**(unknown 을 정상으로 뭉개지 않는다 — '정상(일부 미확인)'). 기준 기본값은 벤더 문서 값만(출처 열) · 못 찾은 것은 비움.
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { CHECK_MARK, overallText, thresholdText, rateText, dateClockText } from './sanStorageText.js';
+import { CHECK_MARK, overallText, thresholdText, rateText, dateClockText, VENDOR_SHORT } from './sanStorageText.js';
 
 const HEAVY_TIMEOUT_MS = 90_000;
 
@@ -48,17 +48,18 @@ export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
           <button type="button" className="sst-btn primary" onClick={() => setSeq((n) => n + 1)}>지금 판정</button>
         </div>
       </div>
-      <div className="sst-two" style={{ gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)' }}>
+      {/* 판정표(11열)는 한 줄 전체 폭 — 1440 에서 규칙 표와 나란히 두면 어레이 측 열이 가로 스크롤 밖으로 밀린다(v2.948 Chromium 판독). */}
+      <div className="sst" style={{ gap: 14 }}>
         <div className="sst-card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="sst-table-wrap">
-            <STable minWidth={980}>
-              <thead><tr><th>스토리지</th>{items.map((it) => <th key={it.k} className="c" title={it.side === 'array' ? '어레이 측(다음 판 수집)' : '스위치 측'}>{it.label}</th>)}<th>종합 · 근거</th></tr></thead>
+            <STable minWidth={1040} className="sst-judge">
+              <thead><tr><th>스토리지</th>{items.map((it) => <th key={it.k} className="c" title={`${it.label} — ${it.side === 'array' ? '어레이 측(다음 판 수집)' : '스위치 측'}`}>{it.label}</th>)}<th>종합 · 근거</th></tr></thead>
               <tbody>
                 {(got.results || []).map((r) => (
                   <tr key={`${r.datacenterId}|${r.key}`} className="click" onClick={() => onOpen({ key: r.key, datacenterId: r.datacenterId })} title="상세 보기">
-                    <td data-sort={r.name}><div className="sst-name"><span className={`sst-vend ${r.vendor || 'other'}`}>{r.vendorLabel}</span>{r.name}</div><div className="sst-sub">{r.datacenterName}</div></td>
+                    <td data-sort={r.name}><div className="sst-name">{r.name}</div><div className="sst-sub" title={`${r.vendorLabel} · ${r.datacenterName || ''}`}><span className={`sst-vend ${r.vendor || 'other'}`}>{VENDOR_SHORT[r.vendor] || r.vendorLabel}</span> {r.datacenterName}</div></td>
                     {items.map((it) => { const x = r.items?.[it.k]; const m = CHECK_MARK[x?.status] || CHECK_MARK.na; return <td key={it.k} className="c" data-sort={x?.status || 'na'} title={x?.text || ''}><span className={`sst-st ${m.cls}`}>{m.sym}</span></td>; })}
-                    <td data-sort={r.overall}><span className={`sst-tag ${CHECK_MARK[r.overall]?.cls === 'unk' ? 'gray' : CHECK_MARK[r.overall]?.cls || 'gray'}`}>{overallText(r)}</span> <span className="muted" style={{ fontSize: 11.5 }}>{reasonText(r)}</span></td>
+                    <td data-sort={r.overall} title={reasonText(r)}><span className={`sst-tag ${CHECK_MARK[r.overall]?.cls === 'unk' ? 'gray' : CHECK_MARK[r.overall]?.cls || 'gray'}`}>{overallText(r)}</span><div className="sst-sub" style={{ maxWidth: 220 }}>{reasonText(r)}</div></td>
                   </tr>
                 ))}
                 {!(got.results || []).length && <tr><td colSpan={items.length + 2}><div className="sst-empty"><b>판정할 어레이가 없습니다</b><span>현황 탭에 어레이가 보여야 판정합니다.</span></div></td></tr>}
@@ -70,7 +71,7 @@ export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
         <div className="sst-card">
           <h4>판정 규칙 — 기준의 출처가 항목마다 다릅니다</h4>
           <div className="sst-table-wrap">
-            <table className="sst-rule">
+            <STable className="sst-rule">
               <thead><tr><th>항목</th><th>규칙</th><th>기준 · 출처</th></tr></thead>
               <tbody>
                 <tr><td><b>디렉터 편중</b></td><td>디렉터 평균 ≥ {rateText(got.imbalanceRule?.minBps)} 이고 한 디렉터가 평균의 {got.imbalanceRule?.ratio}배 이상 → 주의 · {got.imbalanceRule?.badRatio}배 이상(24시간 평균) → 이상</td><td>포트 사용량 탭 기존 상수</td></tr>
@@ -83,7 +84,7 @@ export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
                 <tr><td><b>보고 대조</b></td><td>어레이 보고 대역폭과 스위치 처리량 차이 ≥ {thresholdText(itemOf(got, 'compareDiffPct'), v.compareDiffPct)} → 주의(원인 단정 없음)</td><td>{srcOf(got, 'compareDiffPct')}</td></tr>
                 <tr><td><b>수집 상태</b></td><td>정상 / 표본 지연(주의) / 엣지 미보고 · 표본 없음 · 부분 합만(확인 불가)</td><td>perfDiag · storageList 상태 코드</td></tr>
               </tbody>
-            </table>
+            </STable>
           </div>
           <div className="sst-info">임계값을 지어내지 않습니다 — 기본값은 벤더 문서에서 찾은 값만 넣었고(출처 열) 못 찾은 항목은 비워 '?' 로 둡니다. 바꾼 값은 '사용자 설정' 으로 표시됩니다. 확인 불가 → 정상은 '호전' 이 아니라 '처음 확인' 입니다.</div>
         </div>
@@ -113,7 +114,11 @@ function SettingsModal({ initial, onClose, onSaved }) {
     setBusy(true); setErr('');
     const body = {};
     for (const it of initial.items) body[it.k] = blank.has(it.k) ? null : (vals[it.k] === '' || vals[it.k] == null ? undefined : Number(vals[it.k]));
-    try { await putJson('/tools/san-storage/check-settings', { values: body }); onSaved(); }
+    try {
+      const r = await putJson('/tools/san-storage/check-settings', { values: body });
+      if (r?.ok === false) { setErr(r.reason || '저장하지 못했습니다'); return; }
+      onSaved();
+    }
     catch (e) { setErr(e.message || '저장 실패'); }
     finally { setBusy(false); }
   };
@@ -122,7 +127,7 @@ function SettingsModal({ initial, onClose, onSaved }) {
       <div className="sst" style={{ gap: 10 }}>
         <div className="sst-note">값을 지우고 '비움' 을 켜면 그 항목은 판정하지 않습니다(값만 표시 · '?'). 빈 칸으로 저장하면 기본값으로 돌아갑니다. 기본값은 벤더 문서 값(출처)이고 못 찾은 항목은 처음부터 비어 있습니다.</div>
         <div className="sst-table-wrap">
-          <table>
+          <STable>
             <thead><tr><th>항목</th><th>값</th><th>비움</th><th>기본값</th><th>출처</th></tr></thead>
             <tbody>
               {(initial?.items || []).map((it) => (
@@ -135,7 +140,7 @@ function SettingsModal({ initial, onClose, onSaved }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </STable>
         </div>
         {err && <div className="sst-info">{err}</div>}
         <div className="sst-acts" style={{ justifyContent: 'flex-end' }}>

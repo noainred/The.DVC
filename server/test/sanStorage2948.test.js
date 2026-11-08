@@ -1,5 +1,5 @@
 /**
- * test/sanStorage2947.test.js — v2.947 'SAN 스토리지 성능'(독립 도구 san-storage · 설계 docs/design/san-storage-perf · 컨펌 2026-11-08).
+ * test/sanStorage2948.test.js — v2.948 'SAN 스토리지 성능'(독립 도구 san-storage · 설계 docs/design/san-storage-perf · 컨펌 2026-11-08).
  *  ① directorOf — 벤더별 이름 규칙(PowerMax FA-1D · SAF-1d · FA-7E:0 · OR-1C / PowerStore NodeA / Unity SPA) · 평평한 이름은 null · 별칭 폴백 · 긴 입력
  *  ② storageList — 지금(한계 안) · 24시간 평균/피크(결측 제외) · 7일 대비(비교 구간 부족이면 null) · 디렉터 편중(24시간) · 회선 사용률 · 상태 코드
  *  ③ storagePerfCheck — unknown 을 ok 로 흡수하지 않는다 · 어레이 측은 이 판에서 unknown · 임계값 null 은 판정 안 함 · 벤더에 없는 항목은 na
@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sanstorage2947-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sanstorage2948-'));
 process.env.CONFIG_DIR = tmp;
 process.env.SANSW_PERF_ROLLUP_BACKFILL = '0';
 Object.assign(process.env, { DATA_SOURCE: 'mock', AUTH_ENABLED: 'false', IPAM_WRITE_WORKER: '0' });
@@ -51,7 +51,11 @@ test('① directorOf — 벤더별 이름 규칙 · 평평한 이름 · 별칭 �
   assert.equal(D.directorOf('', { alias: 'ESXSPARE_hba0' }).group, null);
   assert.equal(D.directorOf('', { alias: 'SPAIN_host' }).group, null);
   // 길이 상한 — 2만 자 입력도 즉시 none
-  const t0 = Date.now(); const long = D.directorOf('X'.repeat(20_000)); assert.equal(long.group, null); assert.ok(Date.now() - t0 < 200);
+  // 길이 상한(200자) 뒤는 입력이 100배 길어도 일이 늘지 않아야 한다 — 절대 시간이 아니라 비율로(CPU 에 따라 깨지는 상한 금지 · v2.611 규약)
+  const long = D.directorOf('X'.repeat(20_000)); assert.equal(long.group, null);
+  const bench = (len, n = 200) => { const inp = 'X'.repeat(len); const t0 = process.hrtime.bigint(); for (let i = 0; i < n; i++) D.directorOf(inp); return Number(process.hrtime.bigint() - t0); };
+  bench(200, 50); const short = bench(200); const huge = bench(20_000);
+  assert.ok(huge < short * 20 + 2_000_000, `2만 자가 200자의 ${(huge / Math.max(short, 1)).toFixed(1)}배 — 길이 상한이 풀렸다`);
   // 수동 재정의가 이긴다
   assert.deepEqual(D.applyDirectorOverride(D.directorOf('HITACHI HUS VM CL1-A'), { group: 'CL1', note: 'ctl1' }), { vendor: 'other', group: 'CL1', port: '', confidence: 'manual', note: 'ctl1' });
   assert.equal(D.groupLabel(null), D.UNPARSED_GROUP);

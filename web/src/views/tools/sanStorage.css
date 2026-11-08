@@ -1,6 +1,6 @@
 /*
- * sanStorage.css — 'SAN 스토리지 성능'(v2.947 · 시안 docs/design/san-storage-perf). 선택자는 전부 .sst 아래(전역 클래스를 바꾸지 않는다 — styles.css 겹침 검사 밖).
- * 색은 :root 토큰(--viz-1~4 는 v2.947 추가) · uppercase 금지 · 그리드 · 플렉스 자식 min-width:0 · 400px 에서 가로 넘침 0.
+ * sanStorage.css — 'SAN 스토리지 성능'(v2.948 · 시안 docs/design/san-storage-perf). 선택자는 전부 .sst 아래(전역 클래스를 바꾸지 않는다 — styles.css 겹침 검사 밖).
+ * 색은 :root 토큰(--viz-1~4 는 v2.948 추가) · uppercase 금지 · 그리드 · 플렉스 자식 min-width:0 · 400px 에서 가로 넘침 0.
  */
 .sst { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .sst .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
@@ -120,6 +120,9 @@
 .sst-st.ok { background: rgba(34,197,94,.16); color: #86efac; } .sst-st.warn { background: rgba(245,158,11,.18); color: #fcd34d; } .sst-st.bad { background: rgba(239,68,68,.18); color: #fca5a5; }
 .sst-st.unk { background: rgba(139,155,180,.16); color: #aebbd0; border: 1px dashed var(--text-faint); } .sst-st.na { color: var(--text-faint); }
 .sst-rule td { white-space: normal; vertical-align: top; line-height: 1.5; }
+/* 판정표 — 항목 머리글은 두 줄까지 접어 11열을 1440 안에 넣는다(기호 칸은 26px). */
+.sst-judge th.c { white-space: normal; max-width: 68px; line-height: 1.25; text-align: center; padding: 6px 4px; }
+.sst-judge td.c { padding: 6px 4px; }
 .sst-inp { height: 28px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-deep); color: var(--text); font-family: var(--mono); font-size: 12px; min-width: 90px; max-width: 100%; }
 .sst-inp.dash { border-style: dashed; color: var(--text-faint); }
 .sst-hist { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; font-size: 12px; color: var(--text-dim); }

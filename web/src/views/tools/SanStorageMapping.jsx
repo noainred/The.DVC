@@ -1,4 +1,4 @@
-// v2.947 — SAN 스토리지 성능 › 분류 · 디렉터 매핑 탭(설계 ⑦ · 관리자). 자동 해석이 못 읽은 것만 사람이 채운다 — 저장은 표시에만 영향(표본 · 판정 데이터 불변) · 감사 로그.
+// v2.948 — SAN 스토리지 성능 › 분류 · 디렉터 매핑 탭(설계 ⑦ · 관리자). 자동 해석이 못 읽은 것만 사람이 채운다 — 저장은 표시에만 영향(표본 · 판정 데이터 불변) · 감사 로그.
 //   저장은 전체 교체(지금 상태 + 편집) — 서버 directorMap.js 가 형식을 검사하고 400 사유를 돌려준다(조용히 버리지 않는다).
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, putJson, downloadFile, hasRole, canCsv } from '../../api.js';
@@ -44,7 +44,10 @@ export default function SanStorageMapping({ dc, isAdmin }) {
     setBusy(true); setMsg('');
     const dirBody = {};
     for (const [k, v] of Object.entries(dirs)) { const g = String(v?.group || '').trim(); if (g) dirBody[k] = { group: g, note: v.note || '', name: v.name || '' }; }
-    try { await putJson('/tools/san-storage/mapping', { kinds, directors: dirBody }); setMsg('저장했습니다 — 현황 · 점검은 다음 조회부터 반영됩니다(집계 기억은 수집 주기만큼 남을 수 있습니다).'); setSeq((n) => n + 1); }
+    try {
+      const r = await putJson('/tools/san-storage/mapping', { kinds, directors: dirBody });
+      if (r?.ok === false) { setMsg(`저장하지 못했습니다 — ${r.reason || '서버가 거부했습니다'}`); return; }
+      setMsg('저장했습니다 — 현황 · 점검은 다음 조회부터 반영됩니다(집계 기억은 수집 주기만큼 남을 수 있습니다).'); setSeq((n) => n + 1); }
     catch (e) { setMsg(e.message || '저장 실패'); }
     finally { setBusy(false); }
   };

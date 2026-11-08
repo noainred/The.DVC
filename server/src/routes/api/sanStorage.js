@@ -1,5 +1,5 @@
 /**
- * SAN 스토리지 성능 라우트(v2.947 — 독립 도구 `san-storage` · 설계 docs/design/san-storage-perf · 사용자 컨펌 2026-11-08).
+ * SAN 스토리지 성능 라우트(v2.948 — 독립 도구 `san-storage` · 설계 docs/design/san-storage-perf · 사용자 컨펌 2026-11-08).
  *
  * 무엇: 스위치 portperfshow 표본을 **어레이 → 디렉터(PowerMax FA) · 컨트롤러(PowerStore Node · Unity SP) → 포트**로 묶어
  *   지금 · 회선 사용률 · 24시간 평균/피크 · 7일 대비 · 편중 · 팹 비대칭 · 회선 포화 · 수집 상태를 보여 준다. 조립은 sanswitch/storageList.js(순수) ·

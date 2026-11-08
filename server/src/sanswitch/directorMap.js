@@ -1,5 +1,5 @@
 /**
- * sanswitch/directorMap.js — SAN 스토리지 성능의 관리자 재정의 저장소(v2.947).
+ * sanswitch/directorMap.js — SAN 스토리지 성능의 관리자 재정의 저장소(v2.948).
  *
  * 두 가지를 담는다(둘 다 **표시에만** 영향 — 수집 표본 · 판정 데이터는 바꾸지 않는다):
  *  · kinds     : 연결 대상 키(어레이 키 — perfDb.storageKey) → 'array' | 'host'. 자동 분류(endpointKind — `::` 이름이면 어레이 **추정**)가

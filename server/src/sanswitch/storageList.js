@@ -1,5 +1,5 @@
 /**
- * sanswitch/storageList.js — 'SAN 스토리지 성능' 현황 · 상세의 **순수 조립 코어**(v2.947 · 설계 docs/design/san-storage-perf).
+ * sanswitch/storageList.js — 'SAN 스토리지 성능' 현황 · 상세의 **순수 조립 코어**(v2.948 · 설계 docs/design/san-storage-perf).
  *
  * 이 파일은 DB 를 읽지 않는다 — 라우트가 perfDb.storageSeriesMulti 결과 두 벌(최근 1시간 · 최근 7일(포트별 포함))을 넘기면
  * 어레이마다 지금 · 회선 사용률 · 24시간 평균/피크 · 7일 대비 · 디렉터별 · 팹별 · 상태를 만든다. 그래서 테스트가 입력을 직접 넣어 고정한다.

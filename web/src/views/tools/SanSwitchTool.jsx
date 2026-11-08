@@ -1146,7 +1146,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
 
   return (
     <Modal title={`스토리지 사용량 분석 — ${scopeLabel}`} onClose={onClose} width={1180}>
-      {/* v2.947: 독립 도구 'SAN 스토리지 성능'(디렉터 · 컨트롤러별 · 트렌드 · 점검)으로 가는 링크 — 이 모달은 사용자 결정('기존 메뉴도 보존')대로 남긴다. 같은 서버 집계를 읽는다. */}
+      {/* v2.948: 독립 도구 'SAN 스토리지 성능'(디렉터 · 컨트롤러별 · 트렌드 · 점검)으로 가는 링크 — 이 모달은 사용자 결정('기존 메뉴도 보존')대로 남긴다. 같은 서버 집계를 읽는다. */}
       <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
         디렉터 · 컨트롤러별 처리량 · 1년 트렌드 · 성능 점검은 새 화면에서 — <a href="#/tools/san-storage" style={{ color: 'var(--mint)' }}>SAN 스토리지 성능 열기 →</a>
       </div>

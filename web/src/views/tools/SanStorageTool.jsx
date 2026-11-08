@@ -1,4 +1,4 @@
-// v2.947 — 'SAN 스토리지 성능'(독립 도구 san-storage · 메뉴 '스토리지 › SAN 스토리지 성능' · 설계 docs/design/san-storage-perf ①②④⑤ · 사용자 컨펌 2026-11-08).
+// v2.948 — 'SAN 스토리지 성능'(독립 도구 san-storage · 메뉴 '스토리지 › SAN 스토리지 성능' · 설계 docs/design/san-storage-perf ①②④⑤ · 사용자 컨펌 2026-11-08).
 //   스위치 portperfshow 표본을 어레이 → 디렉터(PowerMax FA) · 컨트롤러(PowerStore Node · Unity SP) → 포트로 묶어 지금 · 회선 사용률 · 24시간 평균/피크 · 7일 대비 · 트렌드를 본다.
 //   탭은 해시(useHashTab) — 현황(list) · 성능 점검(check) · 분류 · 매핑(mapping) · 어레이 상세(array/<키>/<법인>). 판정 · 조립은 서버(storageList · storagePerfCheck),
 //   그리기 · 문구는 sanStorageText.js(순수). 차트는 SVG 직접(recharts 를 더 싣지 않는다) · 결측은 선을 끊는다 · 값이 없으면 '—'.
@@ -12,13 +12,14 @@ import { hashSegments } from '../../hooks/hashTab.js';
 import SanStorageCheck from './SanStorageCheck.jsx';
 import SanStorageMapping from './SanStorageMapping.jsx';
 import { TABS, RANGES, rangeOf, rangeQuery, windowLabel, GROUPINGS, MODES, rateText, pctText, deltaOf, deltaNote, dayTB, stateTag, imbalanceTag, liveText, intervalText,
-  agoShort, clockText, dateClockText, kpisOf, filterRows, sortRowsBy, SORTS, sparkSegments, stackModel, tickLabels, seriesStats, foldHeatmap, foldSeries, csvText, csvFileName, gbps, vizColor } from './sanStorageText.js';
+  agoShort, clockText, dateClockText, kpisOf, filterRows, sortRowsBy, SORTS, sparkSegments, stackModel, tickLabels, seriesStats, foldHeatmap, foldSeries, csvText, csvFileName, gbps, vizColor, VENDOR_SHORT } from './sanStorageText.js';
 import './sanStorage.css';
 
 const BASE = ['tools', 'san-storage'];
 const TAB_KEYS = ['list', 'check', 'mapping', 'array'];
 const LIST_POLL_MS = 60_000;     // 수집은 수 분 주기 — 1분이면 충분(트래픽 카드와 같다)
 const HEAVY_TIMEOUT_MS = 90_000; // 서버 감시 60초보다 길게 · 재시도 0(같은 무거운 집계를 다시 줄 세우지 않게)
+const HEAVY_FETCH_OPTS = Object.freeze({ timeoutMs: HEAVY_TIMEOUT_MS, retries: 0 });
 const NONE_DC = '__none__';
 const DC_SEG_NONE = '-';
 
@@ -118,7 +119,7 @@ function ListTab({ dc, setDc, onOpen }) {
         {data.addressHidden ? <span className="sst-tag gray" title="관리자가 아니라 스위치 관리 주소는 가려져 옵니다">주소 가림</span> : null}
       </div>
       {data.enabled === false && (
-        <div className="sst-info">포트 사용량 수집이 꺼져 있습니다 — 설정 › 수집 › SAN 스위치 포트 사용량에서 켜면 {intervalText(data.intervalMs) || '주기'}마다 쌓기 시작합니다(기본 꺼짐). 아래 값은 마지막으로 쌓인 표본입니다.</div>
+        <div className="sst-info">포트 사용량 수집이 꺼져 있습니다 — 설정 › 수집 주기·임계 › SAN 스위치 포트 사용량에서 켜면 {intervalText(data.intervalMs) || '주기'}마다 쌓기 시작합니다(기본 꺼짐). 아래 값은 마지막으로 쌓인 표본입니다.</div>
       )}
       {data.unavailable && <div className="sst-info">이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다 — 값 전부 '—'.</div>}
       <div className="sst-kpis">
@@ -221,9 +222,6 @@ function emptyWhy(data) {
   if ((data.counts?.host || 0) > 0) return `어레이로 분류된 연결 대상이 없습니다(호스트 ${data.counts.host}개는 있습니다) — 평평한 이름의 어레이는 '분류 · 매핑' 탭에서 어레이로 지정할 수 있습니다.`;
   return '이 범위에서 수집된 포트 사용량이 없습니다 — 첫 주기(수집 주기 + 엣지 설정 pull) 뒤에 채워지거나, 장비 상세의 사용량 분석 탭이 사유를 말합니다.';
 }
-/** 현황 표 보조줄의 짧은 벤더 표기 — 긴 표기(PowerMax · VMAX)는 title · 상세 머리에. */
-const VENDOR_SHORT = Object.freeze({ powermax: 'PowerMax', powerstore: 'PowerStore', unity: 'Unity' });
-
 function Spark({ values }) {
   const segs = sparkSegments(values, 88, 26);
   if (!segs.length) return <span className="faint" style={{ fontSize: 11.5 }}>표본 없음</span>;
@@ -236,25 +234,14 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
   const [back, setBack] = useState(0);
   const [mode, setMode] = useState('avg');
   const [grouping, setGrouping] = useState('director');
-  const [got, setGot] = useState(null);       // { key, d }
-  const [errGot, setErrGot] = useState(null); // { key, msg }
   const [week, setWeek] = useState(null);     // 요일 × 시간용 7일(1시간 칸)
   const [hover, setHover] = useState(null);
   const plotRef = useRef(null);
   const range = rangeOf(rangeK);
-  const reqKey = JSON.stringify([arrayKey, dcId, rangeK, back]);
-  useEffect(() => {
-    if (!arrayKey) return undefined;
-    const ac = new AbortController();
-    const key = reqKey;
-    const load = () => fetchJson('/tools/san-storage/array', { key: arrayKey, datacenterId: dcId || NONE_DC, ...rangeQuery(rangeK, { back }) }, ac.signal, { timeoutMs: HEAVY_TIMEOUT_MS, retries: 0 })
-      .then((d) => { if (!ac.signal.aborted) { setGot({ key, d }); setErrGot(null); } })
-      .catch((e) => { if (!ac.signal.aborted) setErrGot({ key, msg: e.message }); });
-    load();
-    // 실시간 창(최신 1시간)만 주기 갱신 — 과거 창 · 긴 창은 열 때 1회(무거운 API 15초 폴링 금지).
-    const t = range.live && back === 0 ? setInterval(load, LIST_POLL_MS) : null;
-    return () => { ac.abort(); if (t) clearInterval(t); };
-  }, [reqKey, arrayKey, dcId, rangeK, back, range.live]);
+  // 조회 파라미터는 (어레이 · 법인 · 기간 · 창) 이 바뀔 때만 다시 만든다 — 과거 창의 from/to 는 그때의 시각으로 고정(매 렌더 바뀌면 폴러가 계속 다시 읽는다).
+  const query = useMemo(() => ({ key: arrayKey, datacenterId: dcId || NONE_DC, ...rangeQuery(rangeK, { back }) }), [arrayKey, dcId, rangeK, back]);
+  // 실시간 창(최신 1시간)만 주기 갱신 — 과거 창 · 긴 창은 열 때 1회(무거운 API 15초 폴링 금지 · usePolling 의 0 = 1회).
+  const { data, error } = usePolling(arrayKey ? '/tools/san-storage/array' : null, query, range.live && back === 0 ? LIST_POLL_MS : 0, HEAVY_FETCH_OPTS);
   useEffect(() => {
     if (!arrayKey) return undefined;
     const ac = new AbortController();
@@ -262,8 +249,6 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
       .then((d) => { if (!ac.signal.aborted) setWeek(d); }).catch(() => { if (!ac.signal.aborted) setWeek({ error: true }); });
     return () => ac.abort();
   }, [arrayKey, dcId]);
-  const data = got && got.key === reqKey ? got.d : null;
-  const error = errGot && errGot.key === reqKey ? errGot.msg : null;
   const peak = mode === 'peak';
   const series = useMemo(() => {
     if (!data) return [];

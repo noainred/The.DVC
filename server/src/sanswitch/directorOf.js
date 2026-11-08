@@ -1,5 +1,5 @@
 /**
- * sanswitch/directorOf.js — 어레이 포트 심볼릭 이름 → 디렉터 · 컨트롤러 해석(순수 · v2.947 'SAN 스토리지 성능').
+ * sanswitch/directorOf.js — 어레이 포트 심볼릭 이름 → 디렉터 · 컨트롤러 해석(순수 · v2.948 'SAN 스토리지 성능').
  *
  * 스위치 네임서버가 받은 포트 심볼릭 이름은 `벤더::시리얼::디렉터 포트::FC::펌웨어` 꼴이다(perfDb.storageKey 머리말 —
  * 앞 두 조각이 어레이 키). **셋째 조각**이 디렉터(PowerMax FA-1D · SAF-1d · OR-1C) · 노드(PowerStore NodeA) · SP(Unity SPA)와

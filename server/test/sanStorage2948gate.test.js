@@ -1,5 +1,5 @@
 /**
- * test/sanStorage2947gate.test.js — v2.947 SAN 스토리지 성능 라우트의 **권한 · 범위 게이트**(인증 켬 · req.user 주입 — toolNames2679 와 같은 방식).
+ * test/sanStorage2948gate.test.js — v2.948 SAN 스토리지 성능 라우트의 **권한 · 범위 게이트**(인증 켬 · req.user 주입 — toolNames2679 와 같은 방식).
  *  · 조회(GET)는 tools 권한 + 전체 범위 — 범위 제한 관리자는 403(SAN 은 vCenter 귀속 없는 인프라).
  *  · 매핑 · 임계값 PUT 은 admin + 조회 · 쓰기 전체 범위 — operator 403 · 범위 admin 403 · 쓰기 범위만 줄인 admin 403 · 전체 범위 admin 은 본문 검사까지 간다(400).
  *  · 포트 이름 CSV 는 data.csv + admin.
@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sanstorage2947g-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sanstorage2948g-'));
 process.env.CONFIG_DIR = tmp;
 process.env.SANSW_PERF_ROLLUP_BACKFILL = '0';
 Object.assign(process.env, { DATA_SOURCE: 'mock', AUTH_ENABLED: 'true', IPAM_WRITE_WORKER: '0' });

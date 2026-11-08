@@ -101,7 +101,7 @@ export function TrafficCard({ datacenterIds = [], selected = 0, isAdmin = false 
       <div className="flex wrap" style={{ alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
         <div className="san2-title">
           스토리지 트래픽 · {selected ? '선택 법인' : '전체'}
-          {/* v2.947: 어레이 · 디렉터 · 컨트롤러별은 독립 도구에서(같은 합계 함수 — 두 숫자가 다르면 결함) */}
+          {/* v2.948: 어레이 · 디렉터 · 컨트롤러별은 독립 도구에서(같은 합계 함수 — 두 숫자가 다르면 결함) */}
           <a className="san2-link" href="#/tools/san-storage" style={{ fontSize: 12, letterSpacing: 0 }} title="어레이별 · 디렉터 · 컨트롤러별 처리량 · 1년 트렌드 · 성능 점검">SAN 스토리지 성능 →</a>
           {badge.text && badge.live ? <span className="san2-badge-live">● {badge.text}</span> : null}
           {badge.text && !badge.live ? <span style={STALE_BADGE} title="지금 조회가 실패하고 있습니다 — 아래 값은 마지막 성공 시점의 것입니다">{badge.text}</span> : null}

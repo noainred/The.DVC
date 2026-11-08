@@ -191,7 +191,7 @@ export function perfAbortSignal(res) {
 export const abandoned = (e) => e?.code === 'abandoned';
 
 /**
- * 등록 스토리지의 최신 스냅샷(용량) 색인 — 시리얼 정규화 후 대조(storage-summary · v2.947 SAN 스토리지 성능이 같은 색인을 쓴다 — 코어 하나).
+ * 등록 스토리지의 최신 스냅샷(용량) 색인 — 시리얼 정규화 후 대조(storage-summary · v2.948 SAN 스토리지 성능이 같은 색인을 쓴다 — 코어 하나).
  * 법인별로 분리해 볼 때는 **그 법인의 스토리지 용량만** 붙여야 한다 — 그래서 키에 법인을 넣는다. 확실히 일치할 때만 붙이고 아니면 null(억지 매칭 금지).
  */
 export function capacityIndexFor({ dcSet = null, split = true, admin = false } = {}) {
@@ -945,7 +945,7 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   const memoHit = memo?.get(memoKey);
   if (memoHit && Date.now() - memoHit.at <= memoTtl) return res.json(memoHit.body);
 
-  // 등록 스토리지의 최신 스냅샷(용량) 색인 — v2.947 부터 capacityIndexFor(SAN 스토리지 성능과 같은 코어).
+  // 등록 스토리지의 최신 스냅샷(용량) 색인 — v2.948 부터 capacityIndexFor(SAN 스토리지 성능과 같은 코어).
   const capIdx = capacityIndexFor({ dcSet, split, admin });
 
   const nameOf = new Map(devices.map((d) => [d.id, d.name || d.host || d.id]));

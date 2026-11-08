@@ -1,5 +1,5 @@
 /**
- * sanswitch/storagePerfCheck.js — SAN 스토리지 성능 점검 판정(순수 · v2.947 · 설계 ⑥).
+ * sanswitch/storagePerfCheck.js — SAN 스토리지 성능 점검 판정(순수 · v2.948 · 설계 ⑥).
  *
  * 월간 점검(healthCheck.js)과 같은 틀: 상태는 네 가지 — `ok` · `warn` · `bad` · `unknown`(**확인하지 못함** — 사유를 함께) — 에
  * `na`(그 벤더 · 그 어레이에 없는 항목)를 더한다. **unknown 을 ok 로 흡수하지 않는다**: 종합이 ok 여도 uncheckedCount 를 따로 세어

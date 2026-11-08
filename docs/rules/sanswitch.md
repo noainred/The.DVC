@@ -22,7 +22,7 @@
 - (원래 2797행) 점검 이력은 '수집 1회 = 기록 1회' 다
 - (원래 2809행) '전체 수집' 은 무엇을 했는지 나눠 말한다
 - (v2.748) 포트 사용량·포트 배치 탭 — 기간은 경계로 자르고, 빈 칸·부분 합·미래 칸을 값으로 만들지 않는다
-- (v2.947) SAN 스토리지 성능 — 독립 도구 · 디렉터 해석은 이름 규칙만 · 지금 = 팹 A/B 다 모인 마지막 칸 · 점검 unknown 흡수 금지 · 임계값은 벤더 문서 값만
+- (v2.948) SAN 스토리지 성능 — 독립 도구 · 디렉터 해석은 이름 규칙만 · 지금 = 팹 A/B 다 모인 마지막 칸 · 점검 unknown 흡수 금지 · 임계값은 벤더 문서 값만
 - (v2.920) 호스트 ↔ SAN 조닝·트래픽 귀속 — 판정 코어는 `attribution.js` 하나, 확정분과 추정분을 합치지 않는다
 - (v2.935) 귀속 실측 우선(ESXi 경로 비율 → IPF → 포트 비율) · Flow Vision 플로우 모니터(san-flow) — 스위치 설정을 바꾸는 명령은 서버만 만든다
 
@@ -348,8 +348,8 @@
     ⓔ 화면 가림이 WWN(콜론 8묶음)을 IPv6 로 읽어 지우던 것 — `maskKeepWwn` ⓕ 사전 확인(`togglePrecheck` — 상태 · 엣지 버전)을 OTP 재인증 **앞에** 둔다(거부할 요청이 OTP 를 쓰지 않게) ·
     GET 이 `toggleIssue` 를 내려 화면이 버튼을 미리 잠근다. 라우트를 반복문 템플릿 경로로 선언하면 API 문서 생성기가 읽지 못한다(이번에 두 라우트가 문서에서 빠졌다) — 따로 선언할 것.
 
-- **v2.947 — SAN 스토리지 성능(독립 도구 `san-storage` · 설계 `docs/design/san-storage-perf` · 사용자 결정 2026-11-08: 독립 도구 · 독립 메뉴 · 기존 메뉴 보존 · 캡처 전 선착수 · 1년 · 표준 검증 · 팔레트 토큰)**
-  (`sanswitch/{directorOf,directorMap,storageCheckSettings,storageList,storagePerfCheck}.js` · `routes/api/sanStorage.js` · 웹 `views/tools/SanStorage*.jsx`·`sanStorageText.js`·`sanStorage.css` · 회귀 `test/sanStorage2947*.test.js` · 웹 `sanStorageText.test.js`):
+- **v2.948 — SAN 스토리지 성능(독립 도구 `san-storage` · 설계 `docs/design/san-storage-perf` · 사용자 결정 2026-11-08: 독립 도구 · 독립 메뉴 · 기존 메뉴 보존 · 캡처 전 선착수 · 1년 · 표준 검증 · 팔레트 토큰)**
+  (`sanswitch/{directorOf,directorMap,storageCheckSettings,storageList,storagePerfCheck}.js` · `routes/api/sanStorage.js` · 웹 `views/tools/SanStorage*.jsx`·`sanStorageText.js`·`sanStorage.css` · 회귀 `test/sanStorage2948*.test.js` · 웹 `sanStorageText.test.js`):
   · **디렉터 · 컨트롤러는 스위치 네임서버가 받은 포트 심볼릭 이름의 셋째 조각에서 읽는다**(`directorOf` — PowerMax `FA-1D 4`·`SAF-1d 4`·`FA-7E:0`·`OR-1C 1` / PowerStore `NodeA FC0` / Unity `SPA FC0`). 벤더별 아는 패턴만 읽고 안 맞으면
     `group: null`('(구분 못 함)') — **평평한 이름을 억지로 나누지 않는다**. PowerStore · Unity 꼴은 목 서버 형식이라 실장비 미확인(캡처 가이드 `CAPTURE-GUIDE.md`). 확신 등급 manual > name > alias > none 을 화면이 배지로 구분한다.
   · **'지금' 은 수집 주기 안에서 팹 A/B 표본이 다 모인 마지막 칸**(`storageList.nowOf` — 마지막 값이 carryMs + 칸 폭보다 오래됐으면 null + `stale`). 지금이 없으면 회선 사용률도 null(0 아님). 24시간 창은 열린 시작(1시간 칸 24개) ·

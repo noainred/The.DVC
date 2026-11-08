@@ -94,7 +94,7 @@ function* storageMultiSteps(metaRows, { since, until, bucketMs, groupOf = null, 
   }
   const series = [];
   for (const [, s] of byGroup) {
-    // v2.947: 어레이 합 = **포트별 시계열의 합**(demoPortSeries 와 같은 씨앗 — 포트 화면 · 스토리지 화면 · 디렉터별 보기가 같은 숫자를 본다).
+    // v2.948: 어레이 합 = **포트별 시계열의 합**(demoPortSeries 와 같은 씨앗 — 포트 화면 · 스토리지 화면 · 디렉터별 보기가 같은 숫자를 본다).
     //   예전에는 포트 기준값을 더한 뒤 한 시계열을 만들었다 — withPorts 유무로 합이 달라지면 '같은 함수여야 한다' 는 KPI 대조가 깨진다.
     const sum = new Array(buckets.length).fill(0);
     const peak = new Array(buckets.length).fill(0);

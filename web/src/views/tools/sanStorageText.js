@@ -1,5 +1,5 @@
 /**
- * sanStorageText.js — 'SAN 스토리지 성능'(도구 san-storage · v2.947 · 설계 docs/design/san-storage-perf) 화면의 **순수 계산 · 문구**.
+ * sanStorageText.js — 'SAN 스토리지 성능'(도구 san-storage · v2.948 · 설계 docs/design/san-storage-perf) 화면의 **순수 계산 · 문구**.
  * 웹 테스트가 node 환경이라 여기서 고정한다. 판정 코어는 서버(storageList · storagePerfCheck)에 있고, 여기는 받은 값을 **그리고 읽기 좋게** 만들 뿐이다.
  *
  * 정직 규칙: 값이 없으면 '—'(0 · 단위 금지) · 결측 칸은 선을 끊는다(연결하지 않는다) · 주기 · 상한 숫자는 API 값에서 만든다 · 추정은 추정이라 적는다.
@@ -313,3 +313,6 @@ export function thresholdText(item, value) {
   if (value == null) return '비움(판정 안 함)';
   return `${value}${item.unit}`;
 }
+
+/** 표 보조줄의 짧은 벤더 표기 — 긴 표기(PowerMax · VMAX)는 title · 상세 머리에. 모르는 벤더는 서버 표기(vendorLabel)를 그대로. */
+export const VENDOR_SHORT = Object.freeze({ powermax: 'PowerMax', powerstore: 'PowerStore', unity: 'Unity' });
