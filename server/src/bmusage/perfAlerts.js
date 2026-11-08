@@ -371,7 +371,7 @@ function load() {
     _state = { v: 1, rules: raw.rules && typeof raw.rules === 'object' ? raw.rules : {}, day: String(raw.day || ''), counts: raw.counts && typeof raw.counts === 'object' ? raw.counts : {},
       sent: Array.isArray(raw.sent) ? raw.sent.slice(-SENT_LOG_MAX) : [], ...(raw.autoAt && typeof raw.autoAt === 'object' ? { autoAt: raw.autoAt } : {}),
       // 2차 M1 ②: 직전 판정 주기(판정 시각 · 그때 수집 주기) — 재시작 뒤 ‘폴러가 돌지 않은 시간’ 을 잰다. 모양이 다르면 버린다(틈을 모름 = 끊지 않음 · 보류 주기 수는 그대로 센다).
-      ...(raw.cycle && typeof raw.cycle === 'object' && n(raw.cycle.at) != null ? { cycle: { at: n(raw.cycle.at), intervalMs: n(raw.cycle.intervalMs) } } : {}) };
+      ...(raw.cycle && typeof raw.cycle === 'object' && n(raw.cycle.at) != null ? { cycle: { at: n(raw.cycle.at), intervalMs: n(raw.cycle.intervalMs), ...(n(raw.cycle.endAt) != null ? { endAt: n(raw.cycle.endAt) } : {}) } } : {}) };
   } catch (e) {
     // 손상 — 보존하고 첫 주기는 기준만 잡는다(진행 중인 사건을 ‘새 사건’ 으로 한꺼번에 다시 보내지 않게).
     preserveCorrupt(FILE(), String(e?.message || e));
@@ -398,7 +398,7 @@ function withState(fn) {
   return run;
 }
 const _pendingSends = new Set();
-export function _resetPerfAlertsForTest({ unlink = true } = {}) { _state = null; _warmup = false; _loadError = null; _chain = Promise.resolve(); _cycleEndAt = null; _judgedSinceNote = false; _lastCycle = null; if (unlink) { try { fs.unlinkSync(FILE()); } catch { /* */ } } }
+export function _resetPerfAlertsForTest({ unlink = true } = {}) { _state = null; _warmup = false; _loadError = null; _chain = Promise.resolve(); _cycleEndAt = null; _lastJudgeAt = null; _lastCycle = null; if (unlink) { try { fs.unlinkSync(FILE()); } catch { /* */ } } }
 /** 테스트 · 종료용 — 대기열에 넣은 발송의 결과 기록까지 끝날 때까지 기다린다. */
 export async function _drainPerfAlertsForTest() { while (_pendingSends.size) await Promise.allSettled([..._pendingSends]); await _chain; }
 /** 화면 · 봉투용 — 추적 수 · 오늘 상한 사용 · 발송 기록(최근 SENT_LOG_MAX — 채널 URL 없음). */
@@ -617,11 +617,11 @@ export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps 
   return withState(async (st) => {
     /*
      * 2차 M1 ②: 폴러가 돌지 않은 시간 = 이번 주기 시작 − 직전 판정 주기 끝 − 설정 주기. 직전 끝은 폴러가 알린 실제 끝(notePerfCycleEnd — 판정 뒤 롤업 보정 · 정리 꼬리 포함)과
-     *   상태 파일의 판정 시각(재시작 뒤 — 꼬리를 모르면 판정 시각) 중 늦은 것. 설정 주기는 직전 · 이번 중 큰 것(주기를 줄이면 타이머가 ‘마지막 종료 기준 남은 시간’ 으로
+     *   상태 파일의 판정 시각 · 긴 꼬리의 끝(cycle.endAt — 3차 P1: 재시작 뒤에도 꼬리를 틈으로 세지 않게) 중 늦은 것. 설정 주기는 직전 · 이번 중 큰 것(주기를 줄이면 타이머가 ‘마지막 종료 기준 남은 시간’ 으로
      *   재무장해 직전 주기 간격 안에서 바로 돈다 — 거짓 틈이 아니다). 시작을 모르면(폴러 밖 호출) 판정 시각을 시작으로 본다(틈을 놓치지 않는 쪽).
      */
     const iv = ivOf(intervalMs);
-    const prevEnd = Math.max(n(st.cycle?.at) ?? -Infinity, n(_cycleEndAt) ?? -Infinity);
+    const prevEnd = Math.max(n(st.cycle?.at) ?? -Infinity, n(st.cycle?.endAt) ?? -Infinity, n(_cycleEndAt) ?? -Infinity);
     const ivGap = Math.max(iv, ivOf(st.cycle?.intervalMs ?? iv));
     const start = n(cycleStartAt) ?? now;
     const gapMs = Number.isFinite(prevEnd) ? start - prevEnd - ivGap : null;
@@ -629,7 +629,7 @@ export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps 
     const { next, fires, counts, released } = evaluatePerfRules(items, rules.rules, st.rules, now, { intervalMs: ivGap, gapMs });
     st.rules = next;
     st.cycle = { at: now, intervalMs: iv };
-    _judgedSinceNote = true;
+    _lastJudgeAt = now;
     // 반증 n2 재확인 N2 · 2차 M3: 판정 노드가 넘어가 비운 상태 — 발송 기록(sent — 최근 200, 화면 ‘알림 이력’ · 봉투가 같이 쓴다)에는 쓰지 않는다(실제 발송 기록을 밀어냈다).
     //   개수 · 사유만 콘솔 한 줄(주기당) · 주기 상태(poller _last.perfAlerts.released ← counts.released). 이름은 싣지 않는다(상태는 무스코프로 나간다).
     if (released?.length) {
@@ -652,13 +652,23 @@ export const _lastIntervalForTest = () => _lastIntervalMs;
 export const _lastCycleForTest = () => _lastCycle;
 /*
  * 2차 M1 ②: 폴러가 주기(틱)를 **실제로 끝낸 시각** — 판정 뒤에도 롤업 보정 · 정리가 이어져(bmUsageTimerTick) 판정 시각은 주기 끝이 아니다.
- *   판정이 있었던 주기만 끝을 적는다(판정 없이 끝난 실패 주기는 ‘폴러가 판정하지 않은 시간’ 으로 다음 틈에 든다). 메모리만(재시작 뒤에는 상태 파일의 판정 시각).
+ *   그 틱이 시작된 뒤(sinceAt) 판정이 있었을 때만 적는다(판정 없는 틱은 ‘폴러가 판정하지 않은 시간’ 으로 다음 틈에 든다 — 3차 P2 로 실패 주기도 판정한다).
+ *   3차 의심 ③: **늦은 쪽을 유지**한다 — 자동 틱의 꼬리 도중 수동 수집이 먼저 판정 · 끝을 알려도 자동 틱의 실제 끝이 남는다(예전에는 수동이 표지를 써 버려 자동 틱 끝이 적히지 않았다).
+ *   3차 P1: 꼬리(끝 − 판정)가 TAIL_PERSIST_MS 를 넘으면 상태 파일 cycle.endAt 에도 적는다(같은 직렬 큐) — 재시작 뒤 메모리 끝이 사라져도 꼬리를 틈으로 세지 않게.
+ *   짧은 꼬리는 쓰지 않는다(주기마다 상태 파일 전체를 다시 쓰지 않게 — 그때 재시작 뒤 오차는 꼬리 길이 < TAIL_PERSIST_MS).
  */
-let _cycleEndAt = null; let _judgedSinceNote = false;
-export function notePerfCycleEnd(at = Date.now()) {
-  if (!_judgedSinceNote) return;
-  _judgedSinceNote = false;
-  const t = n(at); if (t != null) _cycleEndAt = t;
+export const TAIL_PERSIST_MS = 60_000;
+let _cycleEndAt = null; let _lastJudgeAt = null;
+export function notePerfCycleEnd(at = Date.now(), { sinceAt = -Infinity } = {}) {
+  const t = n(at);
+  if (t == null || _lastJudgeAt == null || _lastJudgeAt < (n(sinceAt) ?? -Infinity)) return Promise.resolve(false);
+  if (_cycleEndAt != null && _cycleEndAt >= t) return Promise.resolve(false);
+  _cycleEndAt = t;
+  if (t - _lastJudgeAt <= TAIL_PERSIST_MS) return Promise.resolve(true);
+  return withState((st) => {
+    const c = st.cycle;
+    if (c && n(c.at) != null && t > c.at && !(n(c.endAt) >= t)) st.cycle = { ...c, endAt: t };
+  }).then(() => true, () => false);
 }
 /** 시험 이음매(2차 M1) — 폴러가 알린 마지막 판정 주기의 실제 끝(없으면 null). */
 export const _cycleEndForTest = () => _cycleEndAt;

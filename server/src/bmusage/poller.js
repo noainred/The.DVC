@@ -862,6 +862,7 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
 
 /** 폴러 한 틱 — 켜져 있으면 수집하고, **켜짐 여부와 무관하게** 보존 정리를 시도한다(위 주석). */
 export async function bmUsageTimerTick() {
+  const tickStart = Date.now();   // 3차 의심 ③: 이 틱이 시작된 뒤 판정이 있었으면(이 틱 · 끼어든 수동 수집) 틱의 실제 끝을 적는다
   // v2.922: 예전 표 → 시간 단위 파일 마이그레이션 — 기다리지 않는다(청크·양보·재개 — monthMigrate.js). DB 파일이 있을 때만.
   try { if (fs.existsSync(BMUSAGE_DB_FILE())) ensureMonthMigration(); } catch { /* 상태로 밝힌다 */ }
   try {
@@ -878,7 +879,7 @@ export async function bmUsageTimerTick() {
     }
     await pruneTick().catch(() => {});
     // 2차 M1 ②: 이 틱이 실제로 끝난 시각(adaptiveTimer 가 다음 주기를 재는 기준과 같은 끝 — 아래 두 작업은 기다리지 않는다). 판정 뒤 꼬리는 ‘폴러가 돌지 않은 시간’ 이 아니다.
-    await notePerfEnd();
+    await notePerfEnd(tickStart);
     // 8a단계: 용량 소진 예측 — 하루 1회(01:10 뒤 첫 틱 · 진행 중이면 공유 · 시간 기준 양보). 기다리지 않는다(다음 주기를 막지 않게). DB 가 있을 때만.
     if (fs.existsSync(BMUSAGE_DB_FILE())) {
       try {
@@ -930,7 +931,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       _last = { at: Date.now(), ms: Date.now() - t0, servers: null, okCount: 0, failCount: 0, inserted: 0, error: reason, ...srcErr, trigger };
       await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'classify-failed' });
       const na = await runNodeCollectAlert({ cycleStartAt: t0 });
-      if (na && !na.skipped) _last.collectAlert = { fires: na.fires ?? 0, error: na.error || null };
+      if (na && !na.skipped && !na.collectSkipped) _last.collectAlert = { fires: na.fires ?? 0, error: na.error || null };
       return { ok: false, reason, ...srcErr };
     }
     if (!targets.length) {
@@ -1120,10 +1121,10 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
   } finally {
     _running = false;
     // 2차 M1 ②: 주기 끝(판정이 있었던 주기만 — perfAlerts 가 가린다). 자동 틱은 롤업 보정 · 정리까지 끝난 뒤 bmUsageTimerTick 이 적는다.
-    if (trigger !== 'auto') await notePerfEnd();
+    if (trigger !== 'auto') await notePerfEnd(t0);
   }
 }
-async function notePerfEnd() { try { (await import('./perfAlerts.js')).notePerfCycleEnd(); } catch { /* 알림 규칙 모듈을 못 읽으면 판정도 없었다 */ } }
+async function notePerfEnd(sinceAt) { try { await (await import('./perfAlerts.js')).notePerfCycleEnd(Date.now(), { sinceAt }); } catch { /* 알림 규칙 모듈을 못 읽으면 판정도 없었다 */ } }
 
 /**
  * v2.929(5단계) — 이번 주기 알림 규칙 입력을 모은다: 성능 항목(이 노드 판정 — perfForRows 와 같은 buildPerfEntry) · 소모품 칸(방금 detail_json 에 넣은 것) ·
@@ -1200,7 +1201,7 @@ function collectNodeItem(agent) {
   return { key: '__node__', name: `수집 노드 ${agent || '(이 노드)'}`, vcenterId: '', collect: { cells: h.cells, cyclePct: h.cyclePct, successPct: h.successPct, dbPct: h.dbPct, th: h.th, error: h.error || null } };
 }
 /**
- * 실패 · 0대 주기(분류 실패 · 주기 예외 · 대상 없음)에도 ‘수집 건강’ 규칙만 돌린다(반증 F1 — 예전에는 이 경로가 알림 판정 전에 돌아가 규칙이 실패를 못 잡았다).
+ * 실패 · 0대 주기(분류 실패 · 주기 예외 · 대상 없음)에도 판정한다 — 항목은 ‘수집 건강’ 칸 하나뿐(반증 F1 — 예전에는 이 경로가 알림 판정 전에 돌아가 규칙이 실패를 못 잡았다 · 3차 P2 — 그 규칙이 꺼져도 빈 판정).
  *   서버 항목은 넣지 않는다(다른 규칙의 서버 상태는 evaluatePerfRules 가 CARRY_MS 동안 들고 간다 — 지우지 않는다). 실패해도 주기 결과를 바꾸지 않는다.
  */
 async function runNodeCollectAlert({ cycleStartAt = null } = {}) {
@@ -1208,11 +1209,15 @@ async function runNodeCollectAlert({ cycleStartAt = null } = {}) {
     const R = await import('./perfRules.js');
     if (R.perfRulesLoadError()) return { ok: false, skipped: 'settings-unreadable' };
     const rules = R.loadPerfRules();
-    if (!rules?.rules?.collect?.on) return { ok: true, skipped: 'off' };
-    const item = collectNodeItem(config.agent?.name || '');
-    if (!item) return { ok: true, skipped: 'no-health' };
-    // 2차 M1: 이 실패 주기도 판정 주기다(전력 규칙 상태는 ‘못 읽은 주기’ 로 보류 주기 수 +1) — 주기 시작 · 수집 주기를 같이 넘긴다.
-    return await (await import('./perfAlerts.js')).runPerfAlerts([item], { rules, intervalMs: loadBmUsageSettings().intervalMs, cycleStartAt });
+    const collectOn = !!rules?.rules?.collect?.on;
+    const item = collectOn ? collectNodeItem(config.agent?.name || '') : null;
+    /*
+     * 2차 M1 · 3차 P2: 이 실패 주기도 **판정 주기**다 — 수집 건강 규칙이 꺼졌거나 그 칸이 없어도 빈 항목으로 판정한다(켠 규칙이 하나도 없으면 엔진이 건너뛴다).
+     *   전력 규칙 상태는 ‘못 읽은 주기’ 로 보류 주기 수 +1 · 판정 시각과 틱 끝을 남겨 이 주기의 소요가 ‘폴러가 돌지 않은 시간’ 에 들지 않게(주기 소요는 틈이 아니다).
+     *   예전에는 수집 건강 규칙이 꺼진 노드에서 판정이 없어 실패 주기의 소요 전체가 틈이 되어 지속을 1부터 다시 셌다(같은 주기가 판정되면 보류 1주기라 잇는데 결과가 달랐다).
+     */
+    const r = await (await import('./perfAlerts.js')).runPerfAlerts(item ? [item] : [], { rules, intervalMs: loadBmUsageSettings().intervalMs, cycleStartAt });
+    return item ? r : { ...r, collectSkipped: collectOn ? 'no-health' : 'off' };
   } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 160) }; }
 }
 /**
