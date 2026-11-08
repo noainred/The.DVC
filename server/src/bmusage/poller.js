@@ -1035,6 +1035,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       if (topItems.length) topRes = await topWriteBatch({ agent: agentName, items: topItems });
     } catch (e) { topRes = { ok: false, errors: [String(e?.message || e).slice(0, 200)] }; }
     if (topRes && !topRes.ok && _srcErrLog('top', (topRes.errors || [])[0] || 'top-write')) console.warn(`[bmusage] 프로세스 Top-N 적재 실패(그 주기 표본만 없다): ${(topRes.errors || [])[0] || ''}`);
+    // 8b 반증 F5: 수집 세션의 접속 계정 · 대상이 본 출발 주소 — 저활용 ‘활동 흔적’ 이 포탈 자신의 SSH 로그인을 빼는 데 쓴다(인메모리 · 이 노드 · 계정 이름만 — 비밀 없음).
+    try { const I = await import('./idle.js'); for (const r of results) if (r?.target?.key && r?.os?.ok && r.target.osHost) I.noteSelfLogin(r.target.key, r.target.osHost.username || 'root', r.os.perf?.changes?.value?.selfIp ?? null); } catch { /* 기록 실패는 활동 판정을 ‘계정만’ 으로 둔다 */ }
     // 7a단계: 로그 분석 — 파싱 · 분류 · 한 트랜잭션 쓰기(위치 비교 후 쓰기) · 함대 요약. 데모 대상은 합성 출력(같은 파서 · 분류 · 쓰기).
     let logRes = null;
     try {

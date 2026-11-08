@@ -5,6 +5,8 @@
  *   ③ 하루 계산: 실제 일 롤업(1d 연 파일) · 전력 0 W 시간은 미측정 · 후보 시작/이탈 이어 쓰기 · 진입/이탈 = 변경 이벤트(kind idle) · 결과 파일
  *   ④ 봉투 정제: 대상 밖 키 · 모르는 상태 · 점수 범위 밖 · 엣지 시각 · 열거 밖 뺀 지표
  *   ⑤ 라우트: 이 노드 + 엣지 봉투 · 범위(법인) · 검토 상태(대기 · DR = 제외 사유 dr · 점수는 남김) · 쓰기 404(조회 밖) → 403(쓰기 밖) · 유지 사유 필수 · 감사
+ *   ⑧ 반증 F5: 실제 7a 분류 → 실제 logWriteBatch → 실제 recomputeIdle(활동 읽기 실제) — 포탈 수집 계정(+ 출발 주소)의 로그인은 활동이 아니다 · 못 가르면 모름(null)
+ *   ⑨ 반증 F9: 검토 쓰기 대상 = (법인, 키) 쌍 — 같은 키 두 법인에서 B 행 검토는 B 에 적히고 B 만 보는 운영자도 쓸 수 있다
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -164,12 +166,13 @@ test('⑤ 라우트 — 이 노드 + 엣지 · 범위 · 검토 상태(대기 ·
   assert.ok(fi.rows.every((x) => x.vcenterId === 'vcI'), '범위 계정은 자기 법인 행만'); assert.equal(fi.summary.candidate, 1);
   // 검토 상태 쓰기 — 조회 밖 404 · 쓰기 밖 403 · 유지 사유 필수 · 대기 · DR = 제외(dr) · 감사
   const rv = (user, body) => R.bmIdleReview({ user, body, ip: '' }, deps);
-  assert.equal((await rv(opI.user, { key: 'JTAG1', status: 'review' })).status, 404, '조회 범위 밖 = 404');
+  assert.equal((await rv(opI.user, { key: 'JTAG1', vcenterId: 'vcJ', status: 'review' })).status, 404, '조회 범위 밖 = 404');
+  assert.equal((await rv(adm.user, { key: 'IDLE1', status: 'review' })).status, 400, '법인(vcenterId) 없이는 쓰지 않는다(반증 F9)');
   const roI = { username: 'roi', role: 'operator', scope: { vcenters: ['vcI', 'vcJ'], writeVcenters: ['vcJ'] } };   // vcI 는 조회만
-  assert.equal((await rv(roI, { key: 'IDLE1', status: 'review' })).status, 403, '조회는 되지만 쓰기 밖 = 403(조회 전용)');
-  assert.equal((await rv(adm.user, { key: 'IDLE1', status: 'keep' })).status, 400, '유지는 사유 필수');
-  assert.equal((await rv(adm.user, { key: 'IDLE1', status: 'pwn' })).status, 400);
-  const ok = await rv(adm.user, { key: 'IDLE1', status: 'dr', reason: 'DR 대기 서버' });
+  assert.equal((await rv(roI, { key: 'IDLE1', vcenterId: 'vcI', status: 'review' })).status, 403, '조회는 되지만 쓰기 밖 = 403(조회 전용)');
+  assert.equal((await rv(adm.user, { key: 'IDLE1', vcenterId: 'vcI', status: 'keep' })).status, 400, '유지는 사유 필수');
+  assert.equal((await rv(adm.user, { key: 'IDLE1', vcenterId: 'vcI', status: 'pwn' })).status, 400);
+  const ok = await rv(adm.user, { key: 'IDLE1', vcenterId: 'vcI', status: 'dr', reason: 'DR 대기 서버' });
   assert.equal(ok.status, 200, JSON.stringify(ok));
   assert.ok(audits.some((a) => a.action === 'bm-perf.idle.review' && a.target === 'IDLE1'));
   const f2 = await R.bmIdleFleet(adm, { vcenters: [{ id: 'vcI' }, { id: 'vcJ' }] }, deps);
@@ -177,14 +180,14 @@ test('⑤ 라우트 — 이 노드 + 엣지 · 범위 · 검토 상태(대기 ·
   assert.equal(ir.status, 'excluded'); assert.equal(ir.reason, 'dr'); assert.equal(ir.scoredStatus, 'candidate', '점수 · 원래 상태는 남긴다'); assert.equal(ir.score, 92);
   assert.equal(f2.summary.excludedBy.dr, 1); assert.equal(f2.summary.candidate, 1);
   // 지우기 → 다시 후보
-  assert.equal((await rv(adm.user, { key: 'IDLE1', status: 'clear' })).status, 200);
+  assert.equal((await rv(adm.user, { key: 'IDLE1', vcenterId: 'vcI', status: 'clear' })).status, 200);
   assert.equal((await R.bmIdleFleet(adm, { vcenters: [{ id: 'vcI' }, { id: 'vcJ' }] }, deps)).rows.find((x) => x.key === 'IDLE1').status, 'candidate');
   // 주석 저장소에 남는다(감사 · 누가 · 언제)
   const A = await import('../src/bmusage/annotations.js');
   assert.ok(A.listAnnotations().filter((a) => a.auto?.startsWith('idle:')).length >= 2);
   // 비관리자 판본 — 검토한 사람은 가림 토큰
   const op = { user: { username: 'op', role: 'operator', scope: null }, query: {}, params: {}, body: {} };
-  await rv(adm.user, { key: 'IDLE1', status: 'review' });
+  await rv(adm.user, { key: 'IDLE1', vcenterId: 'vcI', status: 'review' });
   const fo = await R.bmIdleFleet(op, { vcenters: [{ id: 'vcI' }, { id: 'vcJ' }] }, deps);
   assert.notEqual(fo.rows.find((x) => x.key === 'IDLE1').review.by, 'adm');
 });
@@ -210,4 +213,70 @@ test('⑦ 변경 이벤트 kind idle — 수집 노드 목록 · 중앙 대행 �
   const e = P.cleanChange({ id: 1, ts: Date.now(), kind: 'idle', item: '저활용 후보', before: '관찰 50점', after: '후보 80점' });
   assert.equal(e?.kind, 'idle', '엣지 서버의 저활용 전이가 중앙 대행에서 버려지지 않는다');
   for (const k of C.CHANGE_KINDS) assert.ok(P.cleanChange({ ts: Date.now(), kind: k, item: 'x' }), `중앙 정제가 ${k} 를 받는다`);
+});
+
+test('⑧ 반증 F5 — 포탈 수집 계정의 SSH 로그인은 활동 흔적이 아니다(실제 분류 · 적재 · 활동 읽기) · 못 가르면 모름', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  // 순수 — 항목 `<계정> <주소>` · 접힘 ‘(기타)’
+  assert.equal(I.humanLogins([{ item: 'portalsvc 10.1.1.1', c: 864 }], { user: 'portalsvc', ip: '10.1.1.1' }), 0, '수집 계정 · 수집 주소 = 활동 아님');
+  assert.equal(I.humanLogins([{ item: 'portalsvc 10.1.1.1', c: 864 }, { item: 'root 10.2.2.2', c: 1 }], { user: 'root', ip: '10.1.1.1' }), 865, '같은 계정이라도 다른 주소면 사람(주소를 알 때)');
+  assert.equal(I.humanLogins([{ item: 'root 10.1.1.1', c: 864 }, { item: 'root 10.2.2.2', c: 1 }], { user: 'root', ip: null }), 0, '주소를 모르면 그 계정 줄은 모두 뺀다(정직 기록 — 적게 보일 수 있다)');
+  assert.equal(I.humanLogins([{ item: 'portalsvc 10.1.1.1', c: 9 }, { item: '(기타)', c: 4 }], { user: 'portalsvc', ip: '10.1.1.1' }), null, '접힌 항목만 남으면 가를 수 없다 → 모름');
+  assert.equal(I.humanLogins([{ item: 'alice 10.9.9.9', c: 2 }, { item: '(기타)', c: 4 }], { user: 'portalsvc', ip: null }), 2, '사람 접속이 하나라도 확인되면 그 수');
+  assert.equal(I.humanLogins([{ item: 'alice 10.9.9.9', c: 2 }], null), null, '수집 계정을 모르면 모름');
+  I._resetSelfLoginForTest();
+  assert.equal(I.selfLoginOf('X', { osHost: { username: 'mon', authError: '키 없음' } }), null, '자격 해석 실패 = 계정 모름');
+  assert.deepEqual(I.selfLoginOf('X', { osHost: { username: 'mon' } }), { user: 'mon', ip: null });
+  I.noteSelfLogin('X', 'mon', '10.1.1.1');
+  assert.deepEqual(I.selfLoginOf('X', { osHost: { username: 'mon' } }), { user: 'mon', ip: '10.1.1.1' });
+  assert.deepEqual(I.selfLoginOf('X', { osHost: { username: 'other' } }), { user: 'other', ip: null }, '등록 계정이 바뀌면 옛 주소를 쓰지 않는다');
+  I.noteSelfLogin('X', 'mon', '$(id)'); assert.equal(I.selfLoginOf('X', { osHost: { username: 'mon' } }).ip, null, '주소 형식 밖은 버린다');
+  // 실제 경로 — 반증 rv8b/idleact.mjs: SRV1 = 3일 동안 수집 계정 portalsvc@10.1.1.1 의 5분 로그인만 · SRV2 = 로그 읽기 · 로그인 0 · SRV3 = 같은 + 사람 alice 1회
+  const L = await import('../src/bmusage/logs/classify.js');
+  const LS = await import('../src/bmusage/logs/store.js');
+  const { config } = await import('../src/config.js');
+  const agent = config.agent?.name || '';
+  const now = NOW - 10 * 60_000;
+  const lines = [];
+  for (let ts = now - 3 * DAY; ts < now; ts += 300_000) lines.push({ src: 'secure', ts, msg: `Accepted publickey for portalsvc from 10.1.1.1 port ${40000 + ((ts / 300_000) % 20000)} ssh2: ED25519 SHA256:abc` });
+  const c1 = await L.classifyItems(lines, { now, authSrc: 'secure' });
+  const c3 = await L.classifyItems([...lines, { src: 'secure', ts: now - DAY, msg: 'Accepted password for alice from 10.9.9.9 port 51515 ssh2' }], { now, authSrc: 'secure' });
+  const item = (key, c) => ({ key, readRev: null, at: now, state: { pos: {} }, status: {}, patterns: c ? [...c.patterns.values()] : [], hours: c ? [...c.hours.values()] : [], sec: c ? [...c.sec.values()] : [] });
+  const w = await LS.logWriteBatch({ agent, items: [item('SRV1', c1), item('SRV2', null), item('SRV3', c3), item('SRV4', c1)] });
+  assert.equal(w.ok !== false, true, JSON.stringify(w));
+  const low = Array.from({ length: 30 }, (_, i) => ({ day: new Date(now - (i + 1) * DAY + 9 * HOUR).toISOString().slice(0, 10), cpu_sum: 288, cpu_n: 288, cpu_max: 3, mem_sum: 2880, mem_n: 288, disk_busy_max: 1, net_max: 0.5 }));
+  I._resetSelfLoginForTest(); I._resetIdleForTest();
+  I.noteSelfLogin('SRV1', 'portalsvc', '10.1.1.1'); I.noteSelfLogin('SRV3', 'portalsvc', '10.1.1.1');
+  const os1 = { username: 'portalsvc', host: '10.0.0.1' };
+  const targets = [{ key: 'SRV1', name: 's1', vcenterId: 'vcA', osHost: os1 }, { key: 'SRV2', name: 's2', vcenterId: 'vcA', osHost: os1 }, { key: 'SRV3', name: 's3', vcenterId: 'vcA', osHost: os1 },
+    { key: 'SRV4', name: 's4', vcenterId: 'vcA', osHost: { username: 'portalsvc', authError: '공통 계정 없음' } }];
+  const r = await I.recomputeIdle({ targets, now, force: true,
+    deps: { rules: { idle: {} }, judge: { cover: () => [], stateFor: () => null }, monthStore: { readDailyRange: async () => ({ live: low, mig: [] }) }, powerOf: () => null, opsDb: { changeWriteBatch: async () => ({ events: 0 }) } } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const by = Object.fromEntries(I.loadIdle().rows.map((x) => [x.key, x]));
+  assert.equal(by.SRV1.metrics.ssh, 0, `수집 계정 줄만 = 사람 접속 0(예전 864) — ${by.SRV1.metrics.ssh}`); assert.equal(by.SRV1.grades.act, 1, '활동 흔적 없음 = 만점');
+  assert.equal(by.SRV1.score, by.SRV2.score, '수집 로그인만 있는 서버 = 로그인 0 서버(예전 88 vs 100)');
+  assert.equal(by.SRV3.metrics.ssh, 1); assert.equal(by.SRV3.grades.act, 0, '사람 접속 1회 = 활동 있음');
+  assert.equal(by.SRV4.metrics.ssh, null, '수집 계정을 해석하지 못했으면 모름(0 이 아니다)'); assert.ok(by.SRV4.dropped.includes('act'), '모름은 분모에서 뺀다');
+});
+
+test('⑨ 반증 F9 — 검토 쓰기는 (법인, 키) 쌍: 같은 키 두 법인에서 B 행 검토가 B 에 적힌다', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  const R = await import('../src/routes/api/bmIdle.js');
+  const A = await import('../src/bmusage/annotations.js');
+  const targets = [{ key: '10.0.0.5', name: 'a-srv', vcenterId: 'vcA', paths: ['os'] }, { key: '10.0.0.5', name: 'b-srv', vcenterId: 'vcB', paths: ['os'] }];
+  const deps = { audit: () => {}, now: () => NOW, currentTargets: async () => ({ targets }), listEdgeBmUsage: async () => [], bmAddressHosts: async () => ['10.0.0.5'] };
+  const rv = (user, body) => R.bmIdleReview({ user, body, ip: '' }, deps);
+  const adm = { username: 'adm', role: 'admin', scope: null };
+  const before = A.listAnnotations().length;
+  const ok = await rv(adm, { key: '10.0.0.5', vcenterId: 'vcB', status: 'retire', reason: 'B 서버 반납' });
+  assert.equal(ok.status, 200, JSON.stringify(ok));
+  const rec = A.listAnnotations().slice(before).find((a) => a.auto === 'idle:retire');
+  assert.deepEqual(rec.target.vcenterIds, ['vcB'], 'B 행 검토는 B 서버에(예전: A 서버에 적힘)'); assert.deepEqual(rec.target.names, ['b-srv']);
+  // 법인 B 만 보는 운영자 — 자기 B 서버 검토가 된다(예전 404)
+  const opB = { username: 'opb', role: 'operator', scope: { vcenters: ['vcB'] } };
+  const b = await rv(opB, { key: '10.0.0.5', vcenterId: 'vcB', status: 'review' });
+  assert.equal(b.status, 200, JSON.stringify(b));
+  // 같은 운영자가 A 법인 쌍을 대면 조회 밖 404(쓰기 0)
+  assert.equal((await rv(opB, { key: '10.0.0.5', vcenterId: 'vcA', status: 'review' })).status, 404);
 });

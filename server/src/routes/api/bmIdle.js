@@ -120,7 +120,7 @@ export async function bmIdleFleet(req, snap, deps = {}) {
   };
 }
 
-/** 검토 상태 쓰기 — { key, status, reason }. 반환 { status, body }. */
+/** 검토 상태 쓰기 — { key, vcenterId, status, reason }(대상 = (법인, 키) 쌍 — 8b 반증 F9). 반환 { status, body }. */
 export async function bmIdleReview(req, deps = {}) {
   const D = memo(deps0(deps));
   const snap = store.get();
@@ -130,8 +130,11 @@ export async function bmIdleReview(req, deps = {}) {
   const A = await D.annotations();
   const reason = A.cleanText(typeof b.reason === 'string' ? b.reason : '', 300);
   if (st === 'keep' && !reason) return { status: 400, body: { ok: false, code: 'bad-reason', field: 'reason', reason: '‘유지’ 는 사유가 필요합니다.' } };
+  // 반증 F9: 표 행이 가진 (법인, 키) 쌍으로 찾는다 — 키만으로 찾으면 키 충돌 때 다른 법인 서버에 적히고 자기 법인 운영자는 404 였다(읽기 · 표는 이미 쌍 — targetIdOf).
+  const vcIn = t(b.vcenterId).slice(0, 128);
+  if (!vcIn) return { status: 400, body: { ok: false, code: 'bad-vcenter', field: 'vcenterId', reason: '대상 서버의 법인(vcenterId)이 필요합니다.' } };
   const allowed = scopedVcenterIds(req.user, snap);
-  const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key: t(b.key).slice(0, 256) });
+  const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key: t(b.key).slice(0, 256), vcenterId: vcIn });
   if (!f || f.denied) return { status: 404, body: { ok: false, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' } };
   const vc = t(f.target.vcenterId);
   if (!vc) return { status: 404, body: { ok: false, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' } };

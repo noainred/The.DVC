@@ -22,7 +22,7 @@ function ReviewEditor({ row, onDone }) {
   const save = async () => {
     setBusy({ busy: true });
     try {
-      const r = await postJson('/tools/bm-usage/idle/review', { key: row.key, status: st, reason }, { timeoutMs: 60_000 });
+      const r = await postJson('/tools/bm-usage/idle/review', { key: row.key, vcenterId: row.vcenterId, status: st, reason }, { timeoutMs: 60_000 });
       if (r?.ok === false) { setBusy({ err: r.reason || '저장하지 못했습니다' }); return; }
       setBusy(null); onDone?.(true);
     } catch (e) { setBusy({ err: e?.message || '저장하지 못했습니다' }); }

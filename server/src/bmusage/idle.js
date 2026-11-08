@@ -145,21 +145,77 @@ export function summarizeIdle(rows = []) {
   return s;
 }
 
+/* ── 포탈 자신의 수집 로그인(8b 반증 F5) ───────────────────────────────
+ * 포탈의 OS 수집은 서버마다 5분(집중이면 1분)마다 SSH 로 들어가고 sshd 는 매 접속을 ‘Accepted … for <계정> from <주소>’ 로 남긴다 → 그 줄을 활동으로 세면
+ *   로그를 읽는 모든 서버의 ‘활동 흔적’ 이 늘 ‘있음’ 이었다(재현: 수집 계정 줄만 3일 → ssh 864 · act 0). 그래서 SSH 활동은 **수집 계정(+ 대상이 본 출발 주소)을 뺀 것**만 센다.
+ *   · 계정: 이 노드 대상의 OS 접속 계정(키 · 공통 계정 참조를 해석한 이름 — withResolvedAuth 결과). 해석 실패 · OS 경로 없음이면 가를 수 없다 → ssh = null(모름 · 분모에서 뺀다).
+ *   · 주소: 주 명령이 대상에서 읽은 자기 세션 SSH_CONNECTION 의 첫 칸(parse/linuxHealth ‘sc’ — 다른 프로세스의 환경은 읽지 않는다). 폴러가 주기마다 여기 적는다(인메모리 ·
+ *     재시작 뒤 첫 주기 전에는 없다). 주소를 알면 (계정, 주소) 가 같은 줄만 빼고(같은 계정으로 다른 곳에서 들어온 사람은 센다), 모르면 그 계정 줄을 모두 뺀다
+ *     — ⚠ 정직 기록: 그때 같은 계정을 쓰는 사람의 접속은 활동에 들지 않는다(적게 보일 수 있다 — 후보가 더 나오는 쪽).
+ *   · 상한을 넘겨 ‘(기타)’ 로 접힌 항목이 있고 그 밖에 사람 접속이 0 이면 가를 수 없다 → null.
+ */
+const OTHER_ITEM = '(기타)';   // logs/classify.js 의 접힘 항목(상한 초과)
+const _selfLogin = new Map();   // key → { user, ip, at }
+const SELF_LOGIN_MAX = 20_000;
+const SELF_LOGIN_TTL_MS = 3 * DAY_MS;
+const LOGIN_USER_RE = /^[A-Za-z0-9._@-][A-Za-z0-9._@$-]{0,63}$/;
+const LOGIN_IP_RE = /^[0-9A-Fa-f:.]{2,45}$/;
+export function _resetSelfLoginForTest() { _selfLogin.clear(); }
+/** 폴러가 주기마다 — 대상 키 · 접속 계정 · 대상이 본 출발 주소(없으면 null). */
+export function noteSelfLogin(key, user, ip, at = Date.now()) {
+  const k = String(key || '').slice(0, 256); const u = String(user || '').trim();
+  if (!k || !LOGIN_USER_RE.test(u)) return;
+  const a = typeof ip === 'string' && LOGIN_IP_RE.test(ip) ? ip : null;
+  if (!_selfLogin.has(k) && _selfLogin.size >= SELF_LOGIN_MAX) _selfLogin.delete(_selfLogin.keys().next().value);
+  _selfLogin.set(k, { user: u, ip: a, at });
+}
+/** 대상의 수집 계정 · 주소(순수에 가까움 — 인메모리 기록이 오래됐거나 없으면 대상 등록의 계정 · 주소 없음). 가를 수 없으면 null. */
+export function selfLoginOf(key, target, { now = Date.now() } = {}) {
+  const rec = _selfLogin.get(String(key));
+  const fresh = rec && now - rec.at <= SELF_LOGIN_TTL_MS ? rec : null;
+  const oh = target && typeof target === 'object' ? target.osHost : null;
+  const regUser = oh && !oh.authError ? String(oh.username || 'root').trim() : '';
+  const user = (fresh && (!regUser || fresh.user === regUser)) ? fresh.user : regUser;
+  if (!user || !LOGIN_USER_RE.test(user)) return null;
+  return { user, ip: fresh && fresh.user === user ? fresh.ip : null };
+}
+/** log_sec ‘ok’ 항목(`<계정> <주소>` · 횟수) → 사람 접속 수(순수). 가를 수 없으면 null. */
+export function humanLogins(items = [], self = null) {
+  if (!self || !self.user) return null;
+  let human = 0; let folded = 0;
+  for (const it of Array.isArray(items) ? items : []) {
+    const c = Number(it?.c) || 0; if (c <= 0) continue;
+    const item = String(it?.item ?? '');
+    if (item === OTHER_ITEM) { folded += c; continue; }
+    const sp = item.indexOf(' ');
+    const u = sp < 0 ? item : item.slice(0, sp); const ip = sp < 0 ? '' : item.slice(sp + 1);
+    if (u === self.user && (!self.ip || ip === self.ip)) continue;
+    human += c;
+  }
+  if (human > 0) return human;
+  return folded > 0 ? null : 0;
+}
+
 /* ── 이 노드 데이터 읽기 ───────────────────────────────────────── */
-/** 활동 흔적(이 노드 메인 DB) — SSH 성공(로그를 읽는 서버만) · 사람이 연 집중 · 스냅샷. 키마다 PK · (key, 시각) 인덱스 범위. */
+/** 활동 흔적(이 노드 메인 DB) — SSH 성공(로그를 읽는 서버만 · 포탈 자신의 수집 로그인 제외 — 위) · 사람이 연 집중 · 스냅샷. 키마다 PK · (key, 시각) 인덱스 범위. */
 async function activityReader(agent, since) {
   let db = null;
   try { db = await (await import('./db.js')).mainDb(); } catch { db = null; }
   if (!db) return () => null;
   let cursors = new Set(); let sshQ = null; let focQ = null; let snapQ = null;
   try { cursors = new Set(db.prepare('SELECT key FROM log_cursor WHERE agent=?').all(String(agent)).map((r) => String(r.key))); } catch { cursors = new Set(); }
-  try { sshQ = db.prepare("SELECT SUM(count) c FROM log_sec WHERE agent=? AND key=? AND hour>=? AND kind='ok'"); } catch { sshQ = null; }
+  // 항목별 합(집계 함수 하나) — 수집 계정 줄을 JS 에서 뺀다.
+  try { sshQ = db.prepare("SELECT item, SUM(count) c FROM log_sec WHERE agent=? AND key=? AND hour>=? AND kind='ok' GROUP BY item LIMIT 2000"); } catch { sshQ = null; }
   try { focQ = db.prepare("SELECT COUNT(*) c FROM focus_session WHERE key=? AND created>=? AND agent=? AND trigger_kind='manual'"); } catch { focQ = null; }
   try { snapQ = db.prepare('SELECT COUNT(*) c FROM bm_snapshots WHERE key=? AND at>=? AND agent=?'); } catch { snapQ = null; }
-  return (key) => {
+  return (key, target = null) => {
     const k = String(key);
     const one = (q, args) => { try { return q ? Number(q.get(...args)?.c ?? 0) || 0 : null; } catch { return null; } };
-    return { ssh: cursors.has(k) && sshQ ? one(sshQ, [String(agent), k, since]) : null, focus: one(focQ, [k, since, String(agent)]), snap: one(snapQ, [k, since, String(agent)]) };
+    let ssh = null;
+    if (cursors.has(k) && sshQ) {
+      try { ssh = humanLogins(sshQ.all(String(agent), k, since), selfLoginOf(k, target)); } catch { ssh = null; }
+    }
+    return { ssh, focus: one(focQ, [k, since, String(agent)]), snap: one(snapQ, [k, since, String(agent)]) };
   };
 }
 /** 전력 시간 롤업 읽기(이 노드 iDRAC DB — 대상의 등록부 id). */
@@ -190,7 +246,7 @@ export async function computeIdleServer({ agent = '', target, now = Date.now(), 
   const kept = [...daily.values()].filter((r) => r.day !== today && !excludedDays.has(r.day)).sort((a, b) => String(a.day).localeCompare(String(b.day)));
   const metrics = windowMetrics(kept, { periodicHighPct: c.periodicHighPct });
   const power = deps.powerOf ? deps.powerOf(target, from, now) : null;
-  const activity = deps.activityOf ? deps.activityOf(target.key) : null;
+  const activity = deps.activityOf ? deps.activityOf(target.key, target) : null;
   const ms = judge ? judge.stateFor(target, now) : null;
   const sc = scoreIdle({ metrics, power, activity, cfg: c, maintActive: !!ms?.active });
   return {
