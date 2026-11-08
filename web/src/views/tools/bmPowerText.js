@@ -20,6 +20,8 @@ export function unmeasuredText(u = {}) {
 export function marginText(r) {
   if (r?.unmapped) return '—';
   if (num(r?.capKw) == null) return '상한 미설정';
+  // 8b 반증 F6: 미측정 서버가 있는 랙은 서버가 여유를 판정하지 않는다(부분 합) — 측정 수만 말한다(피크와 같은 규칙).
+  if (r?.marginPartial) return `일부만 측정(${r.measured ?? 0}/${r.servers ?? 0})`;
   if (num(r?.marginPct) == null) return '—';
   return r.marginPct < 0 ? `상한 초과 ${Math.abs(r.marginPct)}%` : `${r.marginPct}%`;
 }
@@ -39,7 +41,7 @@ export function powerCards(f = {}, cfg = {}) {
     { k: 'now', label: '지금 합계', value: kwText(f.nowKw), sub: `서버 표본 합 · 랙 ${f.racks ?? 0} · 미매핑 ${f.unmappedServers ?? 0}대` },
     { k: 'kwh', label: '24h 전력량', value: kwhText(f.kwh24), sub: `시간 평균 W × 1h 합 · 월 누적 ${kwhText(f.kwhMonth)}(${f.monthServers ?? 0}대)` },
     { k: 'peak', label: '24h 피크', value: kwText(f.peak24Kw), sub: f.peak24At ? `${hourText(f.peak24At)} · 같은 시간 합(시간 평균 기준)${f.partialHours ? ` · 부분 시간 ${f.partialHours}개는 뺌` : ''}` : '시간 롤업이 없습니다' },
-    { k: 'margin', label: '랙 상한 여유 최소', value: f.minMargin ? (f.minMargin.pct < 0 ? `상한 초과 ${Math.abs(f.minMargin.pct)}%` : `${f.minMargin.pct}%`) : '—', sub: f.minMargin ? `${f.minMargin.rack}(${f.minMargin.vcenterId}) · 상한은 설정값(kW) · PowerCap 설정 서버 ${f.capSet ?? 0} · 걸림 ${f.capHit ?? 0}` : `상한을 정한 랙이 없습니다 · PowerCap 설정 서버 ${f.capSet ?? 0} · 걸림 ${f.capHit ?? 0}` },
+    { k: 'margin', label: '랙 상한 여유 최소', value: f.minMargin ? (f.minMargin.pct < 0 ? `상한 초과 ${Math.abs(f.minMargin.pct)}%` : `${f.minMargin.pct}%`) : '—', sub: `${f.minMargin ? `${f.minMargin.rack}(${f.minMargin.vcenterId}) · 상한은 설정값(kW)` : (f.partialRacks ? '다 측정된 상한 랙이 없습니다' : '상한을 정한 랙이 없습니다')}${f.partialRacks ? ` · 일부만 측정된 랙 ${f.partialRacks}개는 판정하지 않음(부분 합)` : ''} · PowerCap 설정 서버 ${f.capSet ?? 0} · 걸림 ${f.capHit ?? 0}` },
     { k: 'hot', label: `흡기 ≥ ${cfg.inletWarnC ?? 27} °C`, value: `${f.hotCount ?? 0}대`, sub: f.hottest ? `최대 ${cText(f.hottest.inletC)} ${f.hottest.name} · 기준은 설정값(모델별 권장 아님)` : '기준은 설정값(모델별 권장 아님)' },
     { k: 'fan', label: '팬 경고', value: `${f.fanWarn ?? 0}`, sub: `파트 장애(⑦)에서 가져옴 · 재판정하지 않음 · 팬 못 읽음 ${f.fanUnread ?? 0}대(정상으로 세지 않음)` },
   ];

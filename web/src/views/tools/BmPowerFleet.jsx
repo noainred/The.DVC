@@ -75,7 +75,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
               <td data-sort={r.vcenterId}>{r.vcenterId || '—'}</td><td className="right" data-sort={r.servers}>{r.servers}{r.unmeasuredN ? <span className="bmo-sub"> (미측정 {r.unmeasuredN})</span> : null}</td>
               <td className="right" data-sort={r.nowKw ?? ''}>{kwText(r.nowKw)}</td><td className="right" data-sort={r.avg24Kw ?? ''}>{kwText(r.avg24Kw)}</td><td className="right" data-sort={r.peak24Kw ?? ''}>{kwText(r.peak24Kw)}</td>
               <td className="right" data-sort={r.capKw ?? ''}>{r.capKw == null ? (r.unmapped ? '—' : '미설정') : kwText(r.capKw)}</td>
-              <td className="right" data-sort={r.marginPct ?? ''} style={{ color: toneVar(r.low ? 'bad' : 'idle') }}>{marginText(r)}</td>
+              <td className="right" data-sort={r.marginPct ?? ''} style={{ color: toneVar(r.low === true ? 'bad' : 'idle') }} title={r.marginPartial ? '미측정 서버가 있어 부분 합으로 여유를 판정하지 않습니다' : undefined}>{marginText(r)}</td>
               <td className="right" data-sort={r.inletMax ?? ''}>{r.inletAvg == null ? '—' : `${r.inletAvg} / ${r.inletMax}`}</td>
               <td className="right" data-sort={r.fanWarn}>{r.fanWarn || '—'}</td>
             </tr>))}</tbody>

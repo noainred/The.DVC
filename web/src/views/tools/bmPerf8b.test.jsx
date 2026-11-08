@@ -40,6 +40,9 @@ describe('⑳ 프로세스 Top-N 문구', () => {
     expect(TT.hintText({ hint: 'gpdb', cont: true })).toMatch(/GPDB.*지속/); expect(TT.hintText({ pidReused: true })).toMatch(/PID 재사용/);
     expect(TT.sampleNotes({ ok: true, sample: null })[0]).toMatch(/표본이 없습니다.*0 으로 그리지 않습니다/);
     expect(TT.sampleNotes({ ok: true, sample: { ts: 1, src: 'proc', same: true, baseTs: 0, ioPerm: 2 } }).join(' ')).toMatch(/top 없음.*같아.*CAP_SYS_PTRACE/);
+    // 반증 F3: 기준 표본 행을 못 읽음 — ‘없다’ 가 아니라 ‘못 읽었다’ 로(같아 문구 · 권한 문구를 덧붙이지 않는다)
+    const bm = TT.sampleNotes({ ok: true, reason: 'base-missing', sample: { ts: 1, src: 'top', same: true, baseTs: 0 } }).join(' ');
+    expect(bm).toMatch(/읽지 못했습니다.*기준 표본의 행이 없습니다.*‘없다’ 는 뜻이 아닙니다/); expect(bm).not.toMatch(/같아\(/); expect(bm).not.toMatch(/`/);
     expect(TT.footText({ sample: { cpuTotal: 10, nproc: 5, nrun: 1, nd: 0 }, rows: { cpu: [{ val: 12 }] } })).toMatch(/나머지 합계 CPU 0%/);
     expect(TT.footText({ sample: { cpuTotal: null }, rows: { cpu: [] } })).toMatch(/나머지 합계 CPU —/);
   });
@@ -51,6 +54,7 @@ describe('⑳ 프로세스 Top-N 문구', () => {
     const html = renderToStaticMarkup(h(TopBand, { band }));
     expect(html).toContain('postgres'); expect(html).toContain('기타 상위');
     expect(TT.bandNotes({ ok: true, res: '1h', points: [], approx: 0 }).join(' ')).toMatch(/하한.*표본이 없습니다/);
+    expect(TT.bandNotes({ ok: true, res: '5m', points: [{ t: 1, by: {} }], baseMissing: 2 }).join(' ')).toMatch(/읽지 못한 표본 2개는 빼고.*0 이 아닙니다/);
   });
 });
 
@@ -92,6 +96,11 @@ describe('㉒ 전력 · 온도 문구 · 그리기', () => {
     expect(Object.keys(PT.UNMEASURED_TEXT).sort()).toEqual([...UNMEASURED].sort());
     expect(PT.kwText(null)).toBe('—'); expect(PT.cText(undefined)).toBe('—'); expect(PT.kwhText(null)).toBe('—');
     expect(PT.marginText({ unmapped: false, capKw: null })).toBe('상한 미설정'); expect(PT.marginText({ unmapped: true })).toBe('—');
+    // 반증 F6: 미측정이 있는 랙은 여유를 판정하지 않는다 — 측정 수만
+    expect(PT.marginText({ capKw: 5, marginPct: null, marginPartial: true, measured: 1, servers: 4 })).toBe('일부만 측정(1/4)');
+    expect(PT.marginText({ capKw: 5, marginPct: -4, marginPartial: false })).toBe('상한 초과 4%');
+    const mc = PT.powerCards({ minMargin: null, partialRacks: 2, capSet: 0, capHit: 0 }).find((c) => c.k === 'margin');
+    expect(mc.value).toBe('—'); expect(mc.sub).toMatch(/다 측정된 상한 랙이 없습니다.*일부만 측정된 랙 2개는 판정하지 않음/);
     expect(PT.fanText({ fanRead: false })).toBe('못 읽음');
     expect(PT.capText({ capW: 400, capHit: true, capPct: 103 })).toBe('걸림(400 W · 103%)');
     expect(PT.unmeasuredText({ zero: 2, 'no-idrac': 1 })).toBe('iDRAC 없음 1 · 0 W 보고 2');

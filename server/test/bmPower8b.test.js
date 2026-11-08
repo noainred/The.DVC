@@ -31,7 +31,19 @@ test('① 집계 — 미측정 제외 · 랙 · 미매핑 · 여유 · 걸림 ·
   assert.equal(r.fleet.nowKw, 0.9, '측정분만(400+300+200)'); assert.equal(r.fleet.measured, 3); assert.equal(r.fleet.unmeasuredN, 2);
   assert.deepEqual(r.fleet.unmeasured, { 'no-idrac': 1, 'read-fail': 0, zero: 1 }, '0 W 보고는 따로 센다(합에 0 으로 넣지 않는다)');
   const a07 = r.racks.find((x) => x.rack === 'A-07');
-  assert.equal(a07.servers, 3); assert.equal(a07.nowKw, 0.7); assert.equal(a07.marginPct, 6.7); assert.equal(a07.low, true, '여유 10% 미만');
+  // 반증 F6: A-07 은 3대 중 A3 미측정(0 W 보고) — 부분 합(0.7 kW)으로 여유를 판정하지 않는다(나머지가 쓰면 실제 여유는 더 작다)
+  assert.equal(a07.servers, 3); assert.equal(a07.nowKw, 0.7, '합은 측정분만(따로 표시)');
+  assert.equal(a07.marginPct, null, '일부만 측정된 랙은 여유를 내지 않는다(예전 6.7%)'); assert.equal(a07.low, null, '낮음 판정 보류(false 도 아니다)'); assert.equal(a07.marginPartial, true);
+  assert.equal(r.fleet.minMargin, null, '여유 최소 후보는 다 측정된 랙만'); assert.equal(r.fleet.partialRacks, 1);
+  // 다 측정된 랙은 그대로 판정(A3 를 측정했다고 하자)
+  const full = A.aggregatePower([srv('A1', 'v1', 400), srv('A2', 'v1', 300), srv('A3', 'v1', 0.000001)], { racks, cfg: { rackLowPct: 10 } });
+  const f07 = full.racks.find((x) => x.rack === 'A-07');
+  assert.equal(f07.marginPct, 6.7); assert.equal(f07.low, true, '여유 10% 미만'); assert.equal(f07.marginPartial, false);
+  assert.deepEqual(full.fleet.minMargin, { vcenterId: 'v1', rack: 'A-07', pct: 6.7 }); assert.equal(full.fleet.partialRacks, 0);
+  // 반증 재현(rv8b/rack.mjs): 상한 5 kW · 4대 중 1대만 4,000 W → 예전 여유 20% · 주의 아님 — 이제 판정 없음
+  const rp = A.aggregatePower([srv('R1', 'v', 4000), srv('R2', 'v', null), srv('R3', 'v', null), srv('R4', 'v', null, { unmeasured: 'zero' })],
+    { racks: [{ vcenterId: 'v', rack: 'R1', capKw: 5, servers: ['R1', 'R2', 'R3', 'R4'].map((key) => ({ key })) }] });
+  assert.equal(rp.racks[0].marginPct, null); assert.equal(rp.racks[0].low, null); assert.equal(rp.fleet.minMargin, null);
   const un = r.racks.find((x) => x.vcenterId === 'v1' && x.unmapped);
   assert.equal(un.servers, 1, 'A4 = 미매핑'); assert.equal(un.nowKw, null, '측정 0대면 합은 —(0 이 아니다)');
   assert.equal(r.fleet.capHit, 1, '400 ≥ 405 × 98% = 걸림'); assert.equal(r.capHit[0].key, 'A1');
@@ -79,8 +91,10 @@ test('② 교차 검증 — 전력 대시보드(computePowerBreakdown)와 같은
 
 test('③ 원천 모으기 — 매칭 · 사유 · 24h · 월 누적 캐시 · 온도 · 팬', async () => {
   A._resetPowerAggForTest();
-  let monthCalls = 0;
-  const idb = { hourlyStats: (key, from, to) => { if (to - from > 30 * HOUR) monthCalls += 1; return key === 'r1' ? hours(400, Math.min(24 * 40, Math.floor((to - from) / HOUR)), to) : key === 'rmt:bm-3' ? hours(250) : []; } };
+  const monthCalls = {}; let late = false;
+  const idb = { hourlyStats: (key, from, to) => { if (to - from > 23 * HOUR && !(to === NOW || to >= NOW - 1)) monthCalls[key] = (monthCalls[key] || 0) + 1;
+    if (key === 'r9' && late) return hours(300, Math.min(24 * 40, Math.floor((to - from) / HOUR)), to);
+    return key === 'r1' ? hours(400, Math.min(24 * 40, Math.floor((to - from) / HOUR)), to) : key === 'rmt:bm-3' ? hours(250) : []; } };
   const measured = [{ serverId: 'r1', watts: 400, vcenterId: 'vcA', serviceTag: 'T1', source: 'idrac' }, { serverId: 'r9', watts: 0, vcenterId: 'vcA', serviceTag: 'T9', source: 'idrac' },
     { serverId: 'remote:e:3', watts: 250, vcenterId: 'vcB', serviceTag: 'T3', source: 'remote', dbKey: 'rmt:bm-3' }];
   const analysis = [{ id: 'r1', serviceTag: 'T1' }, { id: 'edge:3', serviceTag: 'T3', remote: true, sensors: { t: NOW - 60_000, temps: { 'System Board Inlet Temp': 28.5, 'CPU1 Temp': 70, 'DIMM A1': 40 } } }, { id: 'r5', serviceTag: 'T5' }];
@@ -104,10 +118,21 @@ test('③ 원천 모으기 — 매칭 · 사유 · 24h · 월 누적 캐시 · �
   assert.equal(s.K5.unmeasured, 'read-fail', 'iDRAC 등록(서버 분석)은 있는데 전력 표본이 없다 = 읽기 실패');
   assert.equal(s.K6.unmeasured, 'no-idrac');
   assert.ok(s.K1.kwhMonth > 0);
-  // 끝난 날은 캐시 — 두 번째 모으기는 월 범위를 다시 읽지 않는다
-  const before = monthCalls;
+  // 끝난 날은 캐시 — 두 번째 모으기는 값이 있던 날(r1)을 다시 읽지 않는다 · 값이 없던 날(r9 — 0 W · rmt 사본 앞날)은 담지 않고 다시 읽는다(의심 S2)
+  const before = { ...monthCalls };
   await A.gatherPower({ targets, deps, now: NOW });
-  assert.equal(monthCalls, before, '끝난 날 Wh 는 캐시(요청마다 한 달을 다시 읽지 않는다)');
+  if (new Date(NOW).getDate() > 2) {
+    assert.equal(monthCalls.r1 ?? 0, before.r1 ?? 0, '끝난 날 Wh 는 캐시(요청마다 한 달을 다시 읽지 않는다)');
+    assert.ok((monthCalls.r9 ?? 0) > (before.r9 ?? 0), '값이 없던 날은 캐시하지 않는다(늦게 채워지는 롤업을 놓치지 않게)');
+  }
+  // 늦게 채워진 날 — 처음엔 없던 r9 의 지난 날 시간 롤업이 나중에 생기면 다음 계산이 반영한다(예전: 40일 동안 null 고정)
+  late = true;
+  const s2 = Object.fromEntries((await A.gatherPower({ targets, deps, now: NOW + 1000 })).map((x) => [x.key, x]));
+  if (new Date(NOW).getDate() > 2) assert.ok(s2.K9.kwhMonth > 0, `늦게 온 롤업 반영(${s2.K9.kwhMonth})`);
+  // 값이 있던 날도 DAY_WH_TTL_MS 뒤에는 다시 읽는다
+  const b2 = monthCalls.r1 ?? 0;
+  await A.gatherPower({ targets, deps, now: NOW + A.DAY_WH_TTL_MS + 1 });
+  if (new Date(NOW).getDate() > 2) assert.ok((monthCalls.r1 ?? 0) > b2, '담은 값도 TTL 뒤 다시 읽는다');
   // 함대 공유 — 같은 열쇠 60초 안에는 한 번만 계산
   let n = 0; const compute = async () => { n += 1; return []; };
   await Promise.all([A.sharedPowerFleet('k', compute, { now: NOW }), A.sharedPowerFleet('k', compute, { now: NOW + 1000 })]);

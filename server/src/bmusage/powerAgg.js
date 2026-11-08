@@ -66,12 +66,17 @@ function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
   const complete = hrs.filter(([, e]) => e.n === full);
   const pk = complete.reduce((a, [t, e]) => (a == null || e.w > a.w ? { t, w: e.w } : a), null);
   const nowKw = g.measured ? r2(g.nowW / 1000) : null;
-  const margin = capKw != null && nowKw != null ? r1(((capKw - nowKw) / capKw) * 100) : null;
+  /*
+   * 8b 반증 F6: 상한 여유는 **그 랙 서버가 다 측정됐을 때만**(피크의 ‘다 모인 시간만’ 과 같은 규칙) — 미측정이 1대라도 있으면 부분 합이라 여유 · 낮음 판정을 하지 않고
+   *   marginPartial(일부만 측정 n/m — 화면)로 남긴다. 부분 합으로 ‘주의 아님’ 을 확정하지 않게(루트 CLAUDE.md ‘부분 합은 정상에도 장애에도 넣지 않는다’).
+   */
+  const partial = g.servers > g.measured;
+  const margin = capKw != null && nowKw != null && !partial ? r1(((capKw - nowKw) / capKw) * 100) : null;
   return {
     servers: g.servers, measured: g.measured, unmeasured: g.unmeasured, unmeasuredN: g.servers - g.measured,
     nowW: g.measured ? Math.round(g.nowW) : null, nowKw, avg24Kw: g.avg24N ? r2(g.avg24W / 1000) : null, avg24Servers: g.avg24N, peak24Kw: pk ? r2(pk.w / 1000) : null, peak24At: pk ? pk.t : null, peakServers: full,
     partialHours: hrs.length - complete.length, kwh24: g.avg24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN,
-    capKw, marginPct: margin, low: margin != null && margin < rackLowPct,
+    capKw, marginPct: margin, low: margin != null ? margin < rackLowPct : null, marginPartial: capKw != null && partial,
     inletAvg: g.inletN ? r1(g.inletSum / g.inletN) : null, inletMax: g.inletMax, maxC: g.maxC, inletServers: g.inletN,
     fanWarn: g.fanWarn, fanUnread: g.fanUnread, capSet: g.capSet, capHit: g.capHit,
     trend: hrs.map(([t, e]) => ({ t, kw: r2(e.w / 1000), n: e.n, partial: e.n < full })),
@@ -125,10 +130,12 @@ export function aggregatePower(servers = [], { racks = [], cfg = {} } = {}) {
     if (k < 0) below += 1; else bins[k].n += 1;
   }
   const f = finishGroup(fleet);
+  // 여유 최소 — 다 측정된 랙만(반증 F6) · 일부만 측정된 상한 랙은 따로 센다(카드가 ‘n개 제외’ 를 말한다).
   const minRack = rackRows.filter((r) => r.marginPct != null).sort((a, b) => a.marginPct - b.marginPct)[0] || null;
+  const partialRacks = rackRows.filter((r) => !r.unmapped && r.marginPartial).length;
   return {
     fleet: { ...f, racks: rackRows.filter((r) => !r.unmapped).length, unmappedServers: rackRows.filter((r) => r.unmapped).reduce((a, r) => a + r.servers, 0),
-      minMargin: minRack ? { vcenterId: minRack.vcenterId, rack: minRack.rack, pct: minRack.marginPct } : null,
+      minMargin: minRack ? { vcenterId: minRack.vcenterId, rack: minRack.rack, pct: minRack.marginPct } : null, partialRacks,
       hotCount: list.filter((s) => s.inletC != null && s.inletC >= c.inletWarnC).length, hottest: hot[0] && hot[0].inletC != null ? { name: hot[0].name, inletC: hot[0].inletC } : null,
       inletBelow: below },
     corps: corpRows, racks: rackRows, hot, bins, cfg: c,
@@ -143,7 +150,12 @@ const serverView = (s) => ({ key: s.key, name: s.name, vcenterId: s.vcenterId, n
 /* ════════════════════════ 원천 모으기(이 노드) ════════════════════════ */
 const t = (v) => String(v ?? '').trim();
 const up = (v) => t(v).toUpperCase();
-const _dayWh = new Map();   // `${dbKey}|${YYYY-MM-DD}` → Wh(끝난 날만 — 값이 바뀌지 않는다)
+/*
+ * `${dbKey}|${YYYY-MM-DD}` → { wh, at }(끝난 날만). 8b 의심 S2: 처음 계산한 값(없으면 null)을 40일 고정하면 그 날 시간 롤업이 늦게 채워지는 경로(엣지 rmt: 사본 지연 ·
+ *   자정 직후 첫 요청)에서 부분 값 · ‘없음’ 이 남는다 → **null 은 담지 않고**(다음 계산에서 다시 읽는다) 값도 DAY_WH_TTL_MS 뒤 다시 읽는다(늦게 온 시간을 반영).
+ */
+const _dayWh = new Map();
+export const DAY_WH_TTL_MS = 6 * HOUR;
 export function _resetPowerAggForTest() { _dayWh.clear(); _fleet = null; }
 
 /** 온도 최신(순수) — roomTemp 분류(흡기 = 흡기 계열 최대 · 최대 = CPU · 배기 계열 최대) · 신선도. */
@@ -206,12 +218,16 @@ export async function gatherPower({ targets = [], deps, now = Date.now() }) {
         // 월 누적 = 끝난 날(캐시) + 오늘(24시간 행 중 오늘 것)
         let wh = 0; let any = false;
         const missDays = [];
-        for (let d = monthStart; d < todayStart; d += DAY_MS) { const k = `${dbKey}|${dayKey(d + HOUR)}`; if (_dayWh.has(k)) { const v = _dayWh.get(k); if (v != null) { wh += v; any = true; } } else missDays.push(d); }
+        for (let d = monthStart; d < todayStart; d += DAY_MS) { const k = `${dbKey}|${dayKey(d + HOUR)}`; const c = _dayWh.get(k); if (c && now - c.at < DAY_WH_TTL_MS) { wh += c.wh; any = true; } else missDays.push(d); }
         if (missDays.length) {
-          const mr = idb.hourlyStats(dbKey, missDays[0], todayStart);
+          // 이어진 빈 날 묶음마다 한 번(값이 없는 날을 담지 않으므로 — 등록 전 날이 매번 다시 읽혀도 행이 없는 범위라 싸다 · 담긴 날은 다시 읽지 않는다)
+          const runs = [];
+          for (const d of missDays) { const last = runs.at(-1); if (last && d === last[1] + DAY_MS) last[1] = d; else runs.push([d, d]); }
           const per = new Map();
-          for (const h of mr || []) { if (n(h.avg) == null || Number(h.avg) <= 0) continue; const k = dayKey(Number(h.ts) + 1); per.set(k, (per.get(k) || 0) + Number(h.avg)); }
-          for (const d of missDays) { const dk = dayKey(d + HOUR); const v = per.has(dk) ? per.get(dk) : null; _dayWh.set(`${dbKey}|${dk}`, v); if (v != null) { wh += v; any = true; } }
+          for (const [a, b] of runs) {
+            for (const h of idb.hourlyStats(dbKey, a, Math.min(todayStart, b + DAY_MS)) || []) { if (n(h.avg) == null || Number(h.avg) <= 0) continue; const k = dayKey(Number(h.ts) + 1); per.set(k, (per.get(k) || 0) + Number(h.avg)); }
+          }
+          for (const d of missDays) { const dk = dayKey(d + HOUR); const v = per.has(dk) ? per.get(dk) : null; if (v != null) { _dayWh.set(`${dbKey}|${dk}`, { wh: v, at: now }); wh += v; any = true; } else _dayWh.delete(`${dbKey}|${dk}`); }
         }
         for (const h of rows || []) if (Number(h.ts) >= todayStart && n(h.avg) != null && Number(h.avg) > 0) { wh += Number(h.avg); any = true; }
         kwhMonth = any ? r1(wh / 1000) : null;
