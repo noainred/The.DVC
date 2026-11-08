@@ -45,6 +45,9 @@ test('① 집계 — 미측정 제외 · 랙 · 미매핑 · 여유 · 걸림 ·
   assert.equal(A.aggregatePower([srv('D', 'v', 100), srv('D', 'v', 100), srv('D', 'w', 100)]).fleet.servers, 2);
   // 흡기 분포
   assert.equal(r.bins.find((b) => b.lo === 29).n, 1); assert.equal(r.bins.find((b) => b.lo === 24).n, 1);
+  // 응답에 실리는 cfg 는 기준값만 — 설정 원본(전 법인 랙 · 서버 키)을 넘겨도 싣지 않는다(이중 방어 · 라우트도 뗀다)
+  const leak = A.aggregatePower([], { cfg: { inletWarnC: 30, racks: [{ vcenterId: 'vcX', rack: 'SECRET-RACK', servers: [{ key: 'SECRETKEY' }] }], racksText: 'vcX,SECRET-RACK,,SECRETKEY' } });
+  assert.equal(leak.cfg.inletWarnC, 30); assert.ok(!JSON.stringify(leak.cfg).includes('SECRET'), '집계 cfg 에 랙 원본이 없다');
 });
 
 test('② 교차 검증 — 전력 대시보드(computePowerBreakdown)와 같은 입력 · 같은 법인 합', async () => {
