@@ -29,6 +29,7 @@ import { dayKey, DAY_MS, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { createIssue, addComment, setStatus, findByOrigin, patchOrigin, originCreatedSince, issueStats, PRIORITIES } from './store.js';
 import { loadIssueSettings, suggestAssignee } from './settings.js';
 import { issueViewers } from './visibility.js';
+import { POWER_RULE_IDS } from '../bmusage/perfRules.js';   // 다음 점검 ②: 전력 규칙 이슈 열쇠는 (법인, 키) 쌍
 
 export const ALERT_ISSUE_KINDS = Object.freeze(['vc', 'vcstale', 'host', 'ds', 'alarm', 'massoff', 'backup', 'cert']);
 export const ALERT_KIND_LABEL = Object.freeze({
@@ -404,7 +405,9 @@ export function applyCertResults(items, { now = Date.now() } = {}) {
  *   다른 알람 상한과 따로 센다) · 법인 = 서버의 vCenter(없으면 공용 — 지어내지 않는다). 같은 발송 건(id)을 두 번 쓰지 않는다(엣지 봉투를 다시 당겨도).
  * 판정(조건) · 발송은 그 서버를 수집하는 노드가 이미 했다 — 여기서 다시 판정하지 않는다.
  */
-export const BMPERF_RULE_LABEL = Object.freeze({ use: 'USE 판정 변화', cross: '교차 판정', focusEnd: '집중 모니터링 결론', baseline: '베이스라인 이탈', health: '점검 소모품', profile: '용도 점검 실패', collect: '수집 건강', logs: '로그 장애 · 보안' });
+// 다음 점검 ②: 8a capacity(빠져 ‘성능 규칙’ 으로 보였다 — 정정) · 전력 4종 추가. 화면 이름(web bmPerfOpsText RULE_TEXT)과 같은 뜻.
+export const BMPERF_RULE_LABEL = Object.freeze({ use: 'USE 판정 변화', cross: '교차 판정', focusEnd: '집중 모니터링 결론', baseline: '베이스라인 이탈', health: '점검 소모품', profile: '용도 점검 실패', collect: '수집 건강', logs: '로그 장애 · 보안',
+  capacity: '용량 소진 예측', rack: '랙 여유 부족', inlet: '흡기 온도 지속 초과', surge: '전력 피크 급증', powerCap: 'PowerCap 걸림 지속' });
 /**
  * 발송 건 → 할 일(순수).
  *  · 중복 원천은 **받은 발송 건**이다(F2 · F3 · F12 반증): ① id 가 어느 이슈(닫힌 것 포함)의 partKeys 에 있으면 dup ② 그 열쇠(agent|서버|규칙)의 이슈들(닫힌 것 포함)이
@@ -414,6 +417,7 @@ export const BMPERF_RULE_LABEL = Object.freeze({ use: 'USE 판정 변화', cross
  *  · 하루 상한은 **법인별**(createdTodayByVc — F7: 예전에는 전 법인 합계 20 이라 한 법인이 다른 법인 이슈를 막았다).
  * @param {Array} existing  findByOrigin(bmperf, { openOnly:false }) — 닫힌 이슈 포함
  */
+const BMPERF_PAIR_KEY_RULES = new Set(POWER_RULE_IDS);   // 규칙 목록 하나(perfRules — 사본 금지)
 export function planBmPerfIssues(fires, { existing = [], createdTodayByVc = new Map(), dailyMax = 20 } = {}) {
   const actions = []; let capped = 0;
   const byKey = new Map(); const seenIds = new Set(); const lastAt = new Map(); const lastIds = new Map();
@@ -432,7 +436,9 @@ export function planBmPerfIssues(fires, { existing = [], createdTodayByVc = new 
   const ordered = [...(fires || [])].sort((a, b) => (Number(a?.at) || 0) - (Number(b?.at) || 0));
   for (const f of ordered) {
     if (!f?.id || seenIds.has(String(f.id))) { actions.push({ type: 'dup', f }); continue; }
-    const k = `bmperf:${f.agent || ''}|${f.key}|${f.rule}`;
+    // 다음 점검 ②: 전력 규칙(새 규칙 — 기존 이슈와 열쇠가 겹칠 일 없음)은 (법인, 키) 쌍 — 같은 노드의 같은 키 · 다른 법인 서버를 한 이슈로 묶지 않는다.
+    //   예전 규칙은 예전 열쇠 그대로(바꾸면 열린 이슈와 열쇠가 어긋나 같은 사건이 새 이슈가 된다).
+    const k = BMPERF_PAIR_KEY_RULES.has(f.rule) ? `bmperf:${f.agent || ''}|${f.vcenterId || ''}|${f.key}|${f.rule}` : `bmperf:${f.agent || ''}|${f.key}|${f.rule}`;
     const at = Number(f.at);
     // 같은 시각(ms)의 건은 그 시각에 받은 id 목록(lastIds)으로 가른다 — 더 이른 건은 이미 받은 것.
     if (Number.isFinite(at) && lastAt.has(k) && (at < lastAt.get(k) || (at === lastAt.get(k) && lastIds.get(k)?.has(String(f.id))))) { actions.push({ type: 'dup', f }); continue; }
@@ -495,7 +501,7 @@ export function applyBmPerfFires(fires, { now = Date.now(), dailyMax = 20 } = {}
       const made = make({
         title: capStr(`[베어메탈 성능] ${f.title || `${f.name} ${label}`}`, 200), type: 'incident', priority: f.rule === 'use' || f.rule === 'profile' ? 'p1' : 'p2', labels: ['bm-perf', 'auto'], component: label,
         vcenterId: String(f.vcenterId || ''), status: 'backlog',
-        body: capStr([`베어메탈 성능 알림 규칙 ‘${label}’ 이 이 서버에서 성립해 이슈로 등록했습니다.`, '', `■ ${f.title || ''}`, `서버: ${f.name || f.key}${f.agent ? ` · 수집 노드 ${f.agent}` : ''} · 발생 ${portalTime(f.at)}`, '',
+        body: capStr([`베어메탈 성능 알림 규칙 ‘${label}’ 이 이 ${f.rule === 'rack' ? '랙' : '서버'}에서 성립해 이슈로 등록했습니다.`, '', `■ ${f.title || ''}`, `${f.rule === 'rack' ? '랙' : '서버'}: ${f.name || f.key}${f.agent ? ` · 수집 노드 ${f.agent}` : ''} · 발생 ${portalTime(f.at)}`, '',
           '화면: 특수 기능 › 베어메탈 사용률 › 서버 상세(판정 근거 · 집중 모니터링).', '판정 · 발송은 그 서버를 수집하는 노드가 했습니다. 같은 규칙이 다시 성립하면 이 이슈에 댓글이 달립니다 — 닫기는 사람이 합니다.'].join('\n'), 9_000),
       }, { kind: 'bmperf', alertKey: a.alertKey, alertKind: f.rule, title: f.title || '', deviceName: f.name || '', partKeys: [String(f.id)], lastAt: Number(f.at) || null, lastIds: [String(f.id)] }, settings, viewers);
       if (made?.key) madeKey.set(a.alertKey, made.key);

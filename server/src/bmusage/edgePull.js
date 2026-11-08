@@ -28,6 +28,7 @@ import { latestUsage } from './db.js';
 import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from './perfView.js';
 import { hwFactsReader } from './hwFacts.js';
 import { freshMsFor } from './useJudge.js';
+import { getInventory } from '../idrac/invCache.js';   // 다음 점검 ③ 서버별 PowerCap(인벤토리 캐시 — 장비 왕복 0)
 
 /**
  * v2.919(리눅스 성능 1단계): 봉투에 판정이 붙은 성능 항목(`perf`)을 싣는다 — **엣지가 판정하고 중앙은 그대로 전한다**.
@@ -158,8 +159,36 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
     ...(await envelopeMaintCapacity(keys)),
     // 8b단계: 표지(topVer — ##TOP 수집 · 엣지 대행 /bm-usage/top 이 있다) · 저활용 하루 계산 결과(행 — 대상 목록 안의 서버만 · 이력).
     ...(await envelopeIdle(keys)),
+    // 다음 점검 ③: 서버별 PowerCap(대상 목록 안 · 이 엣지 iDRAC 인벤토리 — 장비 왕복 0) · 표지 powerCapVer(값이 없어도 싣는다 — 중앙이 ‘구버전’ 과 ‘못 읽음’ 을 가른다).
+    ...envelopePowerCaps(tg.targets || [], keys),
   };
 }
+/**
+ * 다음 점검 ③ 봉투 필드 — 서버별 PowerCap { key, limitWatts, enabled, at }(at = 인벤토리를 읽은 시각). 새 Redfish 호출은 없다(iDRAC 폴러의 느린 주기 인벤토리 캐시만 읽는다).
+ *   enabled: 상한 값이 0 W 초과면 true · PowerLimit 은 있는데 값이 비거나 0 이면 false · PowerLimit 을 보고하지 않았으면 그 서버는 싣지 않는다(중앙 ‘못 읽음’).
+ *   인벤토리가 없는 서버도 싣지 않는다. 낡음(2시간) 판정은 중앙이 at 으로 한다(중앙은 at 을 수신 시각으로 자른다). 실패해도 봉투는 나간다(표지만).
+ */
+export const POWER_CAP_VER = 1;
+export function envelopePowerCaps(targets = [], keys = new Set(), { inventoryOf = null } = {}) {
+  const out = { powerCapVer: POWER_CAP_VER };
+  try {
+    const get = inventoryOf || getInventory;
+    const list = [];
+    for (const tg of targets) {
+      const key = t(tg?.key); const regId = t(tg?.idrac?.regId);
+      if (!key || !keys.has(key) || !regId) continue;
+      let inv = null; try { inv = get(regId); } catch { inv = null; }
+      const pc = inv && typeof inv === 'object' ? inv.powerCap : null;
+      if (!pc || typeof pc !== 'object') continue;
+      const lw = Number(pc.limitWatts);
+      const at = Number(inv.collectedAt);
+      list.push({ key, limitWatts: Number.isFinite(lw) && lw > 0 ? Math.round(lw) : null, enabled: Number.isFinite(lw) && lw > 0, at: Number.isFinite(at) && at > 0 ? at : null });
+    }
+    out.powerCaps = list;
+  } catch { /* 표지만 — 중앙은 값 없음으로 본다 */ }
+  return out;
+}
+
 /** 8b단계 봉투 필드 — 표지(topVer · idleVer)는 계산 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다). 실패해도 봉투는 나간다. */
 export const TOP_VER = 1;
 export const IDLE_VER = 1;

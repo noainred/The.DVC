@@ -327,11 +327,16 @@ export const RULE_TEXT = Object.freeze({
   logs: { label: '로그 — 장애/보안 high', conds: { 'fault-sec': '장애 분류 줄 또는 보안 high 이상(SSH 실패 집중 포함)', fault: '장애 분류 줄만', sec: '보안 high 이상만' } },
   // 8a단계 — 용량 소진 예측(수집 노드의 하루 계산 결과 · 데이터 부족 · 불안정 · 상한 없음은 판정 보류). N일은 아래 ‘용량 소진 예측’ 절.
   capacity: { label: '용량 소진 예측 ≤ N일', conds: { 'fs-inode': '파일시스템 · inode 가 N일 안 목표선 도달', any: '메모리(참고) 포함', fs: '파일시스템만', inode: 'inode 만' } },
+  // 다음 점검 ② — 전력 · 온도(기준은 아래 ‘전력 · 온도’ 절 — 전력 보기와 같은 값). 이 노드 iDRAC 폴러가 읽은 값만 · 같은 표본은 지속에 한 번만 센다.
+  rack: { label: '랙 여유 부족(전력)', conds: { low: '상한 여유가 기준 % 미만(다 측정된 랙만)' } },
+  inlet: { label: '흡기 온도 지속 초과', conds: { over: '흡기 ≥ 기준 °C(낡은 센서는 보류)' } },
+  surge: { label: '전력 피크 급증', conds: { 'week-peak': '24시간 피크 ≥ 앞 7일 피크 + 기준 %' } },
+  powerCap: { label: 'PowerCap 걸림 지속', conds: { hit: '지금 W ≥ 상한 × 기준 %' } },
 });
 export const CHANNEL_TEXT = Object.freeze({ email: '메일', webhook: '웹훅', slack: 'Slack', teams: 'Teams' });
 export const SENT_RESULT_TEXT = Object.freeze({ queued: '보내는 중(대기열)', sent: '보냄', failed: '보내지 못함(채널 오류 — 재시도 규칙대로)', suppressed: '중복 억제', 'no-channel': '켜진 채널 없음', 'no-channel-config': '알림 설정 없음', 'daily-cap': '하루 상한', maintenance: '정비 창 안 — 기록만(창 뒤에도 초과면 그때 1회)', error: '실패', '': '—' });
 export const ISSUE_RESULT_TEXT = Object.freeze({ 'pending-central': '중앙에서 판단', 'daily-cap': '하루 상한', created: '만듦', commented: '댓글', dup: '이미 처리', error: '실패', skipped: '안 만듦' });
-export const RULES_HONEST = '판정 · 발송은 그 서버를 수집하는 노드(엣지)가 합니다 — 이 설정은 이 노드 것이고 중앙에서 엣지로 배포하지 않습니다(다음 판). 정비 창(설정 › 정비 창 · 알림 억제)의 ① 알림 억제를 켠 창 안에서는 기록만 하고 보내지 않으며, 창이 끝난 뒤에도 조건이 참이면 그때 한 번 보냅니다(제목 ‘정비 창 안부터 초과’). 백업 창(Bareos · Veeam 스케줄) 억제는 베어메탈 서버의 원천이 없어 동작하지 않습니다. 같은 상태가 이어지면 다시 보내지 않고, 재시작해도 다시 보내지 않습니다(상태 파일).';
+export const RULES_HONEST = '판정 · 발송은 그 서버를 수집하는 노드(엣지)가 합니다 — 이 설정은 이 노드 것이고 중앙에서 엣지로 배포하지 않습니다(다음 판). 정비 창(설정 › 정비 창 · 알림 억제)의 ① 알림 억제를 켠 창 안에서는 기록만 하고 보내지 않으며, 창이 끝난 뒤에도 조건이 참이면 그때 한 번 보냅니다(제목 ‘정비 창 안부터 초과’). 백업 창(Bareos · Veeam 스케줄) 억제는 베어메탈 서버의 원천이 없어 동작하지 않습니다. 같은 상태가 이어지면 다시 보내지 않고, 재시작해도 다시 보내지 않습니다(상태 파일). 전력 · 온도 규칙(랙 여유 · 흡기 · 피크 급증 · PowerCap)은 그 서버의 판정 노드(대상과 전력 원천을 함께 가진 노드 — 전력 보기의 ‘알림 판정 없음’ 표시와 같은 기준)만 판정합니다 — 같은 표본은 지속에 한 번만 세고, 미측정 · 대상 목록에 없는 배치 서버가 있는 랙 · 낡은 센서 · 앞 7일 표본이 모자란 서버는 판정하지 않습니다(보류 — 정상으로 세지 않습니다). 보류(못 읽음 · 낡음)가 지속 주기 수보다 길게 이어졌거나 수집이 지속 × 수집 주기보다 오래 멈췄으면(재시작 · 실패) 지속을 처음부터 셉니다 — 주기 자체가 오래 걸리는 것은 끊지 않습니다. 판정 노드가 넘어가면 이 노드의 상태를 비우되(해소 알림 없음) 재발 억제는 그 기간 동안 남깁니다. 랙은 배치 서버 전부가 정비 창 안일 때만 억제하고, 일부만 창 안이면 보내되 본문에 정비 중 서버를 적습니다. 엣지 위임 서버는 그 엣지가 판정합니다.';
 export function sentResultText(r) { return SENT_RESULT_TEXT[r] ?? String(r || '—'); }
 export function issueResultText(r) { return r == null ? '—' : (ISSUE_RESULT_TEXT[r] ?? String(r)); }
 export function autoFocusText(r) {
