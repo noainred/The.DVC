@@ -55,6 +55,7 @@ import { registerBmMaint } from './api/bmMaint.js'; // 8a단계 — 정비 창 �
 import { registerBmCapacity } from './api/bmCapacity.js'; // 8a단계 — 용량 소진 예측
 import { registerBmTop } from './api/bmTop.js'; // 8b단계 — 프로세스 Top-N
 import { registerBmIdle } from './api/bmIdle.js'; // 8b단계 — 저활용 서버 찾기
+import { registerBmKeyOverlaps } from './api/bmKeyOverlaps.js'; // 다음 점검 ①(2차) — 식별 키가 겹치는 서버 · 사용자 결정
 import { registerBmPower } from './api/bmPower.js'; // 8b단계 — 전력 · 온도 집계
 import { registerBmPlaybookSlo } from './api/bmPlaybookSlo.js'; // 6단계 — 진단 플레이북 · 목표선(SLO)
 import { registerBmLogs } from './api/bmLogs.js'; // 7a단계 리눅스 성능 — 로그 분석(서버 상세 ‘로그’ 탭 · 함대 표)
@@ -185,6 +186,7 @@ registerBmMaint(api);
 registerBmCapacity(api);
 registerBmTop(api);
 registerBmIdle(api);
+registerBmKeyOverlaps(api);
 registerBmPower(api);
 registerBmPlaybookSlo(api);
 registerBmLogs(api);

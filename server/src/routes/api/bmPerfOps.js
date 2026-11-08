@@ -19,7 +19,7 @@ import { currentTargets, bmUsageStatus } from '../../bmusage/poller.js';
 import { memoJson, scopeKey } from './shared.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { config } from '../../config.js';
-import { resolvePerfTarget, bmAddressHosts, maskBmList, applyScope } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, perfVcOf, failParts, bmAddressHosts, maskBmList, applyScope } from './bmUsage.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -29,7 +29,6 @@ const fullScopeOnly = fullScopeOnlyWith('알림 규칙 시험 실행은 이 노�
 const t = (v) => strOf(v, 4096).trim();
 const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
 const scrubIp = (v) => (typeof v === 'string' ? v.replace(IPV4_RE, (ip) => maskedIdToken(ip)) : v);
-const NOT_FOUND = Object.freeze({ __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' });
 
 export function depsOf(deps = {}) {
   return {
@@ -50,8 +49,10 @@ async function resolve(req, snap, D) {
   const isAdmin = isAdminReq(req);
   const key = t(req.params.key);
   if (!key) return { err: { __status: 400, ok: false, reason: 'key 가 필요합니다.' } };
-  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
-  if (!found || found.denied) return { err: NOT_FOUND };
+  // 다음 점검 ①: (법인, 키) 쌍 — 화면이 행의 vcenterId 를 함께 보낸다(질의 · 본문). 같은 키가 범위 안 여러 법인이면 400 ambiguous-key.
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId: perfVcOf(req) });
+  const bad = perfTargetFail(found);
+  if (bad) return { err: bad };
   return { found, key, isAdmin, allowed };
 }
 /** 세션 · 표본의 비관리자 가림 — 실행자 · 사유 IPv4. */
@@ -95,7 +96,7 @@ export async function bmFocusStart(req, deps = {}) {
   const reason = S.cleanReason(req.body?.reason);
   if (!reason) return { status: 400, body: { ok: false, code: 'bad-reason', reason: '사유를 2자 이상 적어야 합니다(감사 기록에 남습니다).' } };
   const r = await resolve(req, snap, D);
-  if (r.err) return { status: r.err.__status, body: { ok: false, code: r.err.__status === 404 ? 'not-found' : 'bad-request', reason: r.err.reason } };
+  if (r.err) return r.err.code ? failParts(r.err) : { status: r.err.__status, body: { ok: false, code: 'bad-request', reason: r.err.reason } };
   const { found, key, isAdmin } = r;
   // ⚠ 쓰기 범위는 조건 없이(조회 무제한 + writeVcenters 계정 — server/CLAUDE.md v2.733). 조회 밖은 위에서 404.
   if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return { status: 403, body: { ok: false, code: 'forbidden', error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용) — 집중 모니터링은 SSH · Redfish 를 분마다 엽니다.' } };
@@ -125,7 +126,7 @@ export async function bmFocusStop(req, deps = {}) {
   const D = depsOf(deps);
   const snap = store.get();
   const r = await resolve(req, snap, D);
-  if (r.err) return { status: r.err.__status, body: { ok: false, code: 'not-found', reason: r.err.reason } };
+  if (r.err) return r.err.code ? failParts(r.err) : { status: r.err.__status, body: { ok: false, code: 'bad-request', reason: r.err.reason } };
   const { found, key, isAdmin } = r;
   if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return { status: 403, body: { ok: false, code: 'forbidden', error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용).' } };
   const id = t(req.params.id).slice(0, 40);

@@ -17,7 +17,7 @@ import { isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets, bmUsageStatus } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { memoJson, scopeKey } from './shared.js';
-import { resolvePerfTarget, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, failParts, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
 import { IDLE_REVIEW } from '../../bmusage/idleConst.js';
 
 const toolsPerm = requirePerm('tools');
@@ -135,7 +135,8 @@ export async function bmIdleReview(req, deps = {}) {
   if (!vcIn) return { status: 400, body: { ok: false, code: 'bad-vcenter', field: 'vcenterId', reason: '대상 서버의 법인(vcenterId)이 필요합니다.' } };
   const allowed = scopedVcenterIds(req.user, snap);
   const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key: t(b.key).slice(0, 256), vcenterId: vcIn });
-  if (!f || f.denied) return { status: 404, body: { ok: false, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' } };
+  const bad = perfTargetFail(f);
+  if (bad) return failParts(bad);
   const vc = t(f.target.vcenterId);
   if (!vc) return { status: 404, body: { ok: false, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' } };
   if (!inUserWriteScope(req.user, snap, vc)) return { status: 403, body: { ok: false, code: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' } };

@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **298개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **297개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-08)
@@ -57,6 +57,7 @@
 | `bareos.json` | 설정 | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/settings.js |
 | `bm-capacity.json` | 설정 | 리눅스 성능 8a단계 **용량 소진 예측**(설계 PROFILES §20 ⑱ · 아트보드 Capacity). 판정이 아니라 ‘참고’ 다(ML 없음 · 선형만). | ✅ | ✅ | ✅ | bmusage/capacity.js |
 | `bm-idle.json` | 설정 | 리눅스 성능 8b단계 **저활용 서버 찾기**(설계 PROFILES §20 ㉑ · 아트보드 Idle). 판정이 아니라 **후보 표시**다(‘저활용 ≠ 불필요’ — 사람이 확인하고 남긴다). | ✅ | ✅ | ✅ | bmusage/idle.js |
+| `bm-key-decisions.json` | 설정 | 다음 점검 ①(2차 · 사용자 결정 2026-11-08) **식별 키가 겹치는 서버의 수집 여부 결정** 저장소(`bm-key-decisions.json`). | ✅ | ✅ | ✅ | bmusage/keyDecisions.js |
 | `bm-onboard-applied.json` | 설정 | 엣지가 중앙의 **배포 목록**을 자기 등록부에 적용한다(7b단계 · 엣지 쪽). | ✅ | ✅ | ✅ | bmusage/onboard/edgeApply.js |
 | `bm-onboard-edge.json` | 설정 | 수집 경로 ‘edge’ 로 등록한 서버의 **엣지 배포 목록**(중앙 · 7b단계 · 설계 PROFILES §18 '엣지 배포(법인 단위)'). | ✅ | ✅ | ✅ | bmusage/onboard/edgeDeploy.js |
 | `bm-perf-alert-state.json` | 설정 | 리눅스 성능 **알림 규칙**(v2.929 예정 · 5단계 · 설계 PROFILES §14 ① · 아트보드 Alerts). | ✅ | ✅ | ✅ | bmusage/perfAlerts.js |
@@ -227,7 +228,6 @@
 | `runtime.json` | 설정 | Runtime-adjustable settings that can be changed from the portal UI (and | ✅ | ✅ | ✅ | runtime-settings.js |
 | `san-flows.json` | 설정 | Flow Vision 플로우 작업(v2.935 SAN·CVP 설계 C-②) — 실행 등록부 · 포탈 플로우 기록 · 카운터 주기. | ✅ | ✅ |  | sanswitch/flowJobs.js |
 | `san-health.db` | DB | SAN 점검 결과 이력 + **최근 N회 비교**(v2.522). |  |  | ✅ | sanswitch/healthHistory.js |
-| `san-storage-map.json` | 설정 | SAN 스토리지 성능의 관리자 재정의 저장소(v2.947). | ✅ | ✅ |  | sanswitch/directorMap.js |
 | `sanswitch-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | sanswitch/activityLog.js |
 | `sanswitch-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | sanswitch/poller.js |
 | `sanswitch-devices.json` | 설정 | SAN 스위치 등록부(v2.410). | ✅ | ✅ | ✅ | sanswitch/registry.js |
@@ -255,7 +255,6 @@
 | `storage-history.db` | DB | 스토리지 장비(8종) 용량 이력 |  |  | ✅ | storage/db.js |
 | `storage-intervals.json` | 설정 | 스토리지 수집 주기(중앙에서 엣지 설정, v2.409). | ✅ | ✅ | ✅ | storage/intervals.js |
 | `storage-latest.json` | 설정 | 이 노드가 수집한 최신 스냅샷 보관(v2.302). | ✅ | ✅ | ✅ | storage/store.js |
-| `storage-perf-check.json` | 설정 | SAN 스토리지 성능 점검의 임계값 설정(v2.947). | ✅ | ✅ |  | sanswitch/storageCheckSettings.js |
 | `storage-usage-mail-state.json` | 설정 | 스토리지 사용량 예약 메일 회차·기록(상태, v2.789) | ✅ | ✅ | ✅ | storage/usageMail.js |
 | `storage-usage-mail.json` | 설정 | 스토리지 사용량 예약 메일 설정(v2.789 — 켜기·요일·시각·받는 사람·표 단위. 비밀 없음, 주소는 담는다) | ✅ | ✅ | ✅ | storage/usageMail.js |
 | `svcmon-alert.json` | 설정 | Monitoring **점검 실패 알림 설정**(v2.915) — `CONFIG_DIR/svcmon-alert.json`. | ✅ | ✅ |  | svcmon/alertSettings.js |

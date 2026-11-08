@@ -16,16 +16,20 @@ import {
 } from './bmAnnotText.js';
 import './bmStage6.css';
 
-/** 창의 주석 — keys(서버 키들) · from/to. 늦게 온 이전 창 응답은 버린다. */
-export function useAnnotations(keys = [], win = null, tick = 0) {
+/**
+ * 창의 주석 — keys(서버 키들) · from/to. 늦게 온 이전 창 응답은 버린다.
+ * 다음 점검 ①: vcs = keys 와 같은 순서의 법인(서버 = (법인, 키) 쌍 — 같은 키 다른 법인 서버의 주석이 섞이지 않게 · 비면 서버가 정한다).
+ */
+export function useAnnotations(keys = [], win = null, tick = 0, vcs = []) {
   const [st, setSt] = useState({ list: [], err: null, loading: false });
   const gen = useRef(0);
-  const sig = `${keys.join(',')}|${Math.floor(win?.from || 0)}|${Math.floor(win?.to || 0)}|${tick}`;
+  const vcList = keys.map((_, i) => String(vcs?.[i] || ''));
+  const sig = `${keys.join(',')}|${vcList.join(',')}|${Math.floor(win?.from || 0)}|${Math.floor(win?.to || 0)}|${tick}`;
   useEffect(() => {
     if (!keys.length || !win) { setSt({ list: [], err: null, loading: false }); return; }
     const g = ++gen.current;
     setSt((p) => ({ ...p, loading: true, err: null }));
-    fetchJson('/tools/bm-usage/annotations', { keys: keys.join(','), from: Math.floor(win.from), to: Math.floor(win.to) }, undefined, { timeoutMs: 30_000 })
+    fetchJson('/tools/bm-usage/annotations', { keys: keys.join(','), ...(vcList.some(Boolean) ? { vcenterIds: vcList.join(',') } : {}), from: Math.floor(win.from), to: Math.floor(win.to) }, undefined, { timeoutMs: 30_000 })
       .then((r) => { if (g === gen.current) setSt({ list: r.annotations || [], err: null, loading: false }); })
       .catch((e) => { if (g === gen.current) setSt({ list: [], err: e, loading: false }); });
   }, [sig]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -74,7 +78,7 @@ export default function AnnotationsCard({ itemKey, name = '', vcenterId = '', se
         if (!Object.keys(patch).length) { setForm(null); setMsg({ tone: 'ok', text: '바뀐 것이 없습니다.' }); return; }
         r = await putJson(`/tools/bm-usage/annotations/${encodeURIComponent(form.id)}`, patch);
       } else {
-        const body = annotBody({ keys: [itemKey], corp: form.target === 'corp' ? vcenterId : '', at: msOfLocalInput(form.at), end: msOfLocalInput(form.end), kind: form.kind, text: form.text, issue: form.issue, wikiSpace: form.wikiSpace, wikiId: form.wikiId });
+        const body = annotBody({ keys: [itemKey], vcenterIds: [vcenterId], corp: form.target === 'corp' ? vcenterId : '', at: msOfLocalInput(form.at), end: msOfLocalInput(form.end), kind: form.kind, text: form.text, issue: form.issue, wikiSpace: form.wikiSpace, wikiId: form.wikiId });
         r = await postJson('/tools/bm-usage/annotations', body);
       }
       if (r?.ok === false) { setMsg({ tone: 'bad', text: r.reason || '저장하지 못했습니다.' }); return; }

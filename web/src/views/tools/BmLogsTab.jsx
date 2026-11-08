@@ -10,6 +10,7 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { canCsv } from '../../api.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import {
   CLASS_ORDER, CLASS_TEXT, SEV_TEXT, SRC_LABEL, RANGE_OPTIONS, kpiCards, sourceChips, permGuide, readCard, hourlyBars, secPanelRows, SEC_HONEST, SEC_HIDDEN_TEXT,
   corrChips, corrHeadText, patternCsv, methodLines, stamp, numText, LOG_GRADE_TEXT,
@@ -215,10 +216,10 @@ export function LogsView({ resp, range, onRange, onTab, onReload, loading = fals
   );
 }
 
-export default function BmLogsTab({ itemKey, onTab }) {
+export default function BmLogsTab({ itemKey, vc = '', onTab }) {
   const [range, setRange] = useState('24h');
   // 조회기는 한 번 만들어진다(useOpsLoad) — 기간은 열쇠에 실어 넘긴다(클로저에 묶으면 첫 기간으로 고정된다).
-  const st = useOpsLoad((k) => { const [key, rg] = String(k).split('\u0000'); return `/tools/bm-usage/perf/${encodeURIComponent(key)}/logs?range=${encodeURIComponent(rg || '24h')}`; }, `${itemKey}\u0000${range}`);
+  const st = useOpsLoad((k, v) => { const [key, rg] = String(k).split('\u0000'); return perfPath(key, v, '/logs', `range=${encodeURIComponent(rg || '24h')}`); }, `${itemKey}\u0000${range}`, vc);
   return (
     <div style={{ minWidth: 0 }}>
       <OpsError err={st.err} />

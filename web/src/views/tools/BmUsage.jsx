@@ -46,6 +46,8 @@ import { boardItems, allAuthStops } from './bmPerfText.js';
 import { BmPurposeFleet, BmFaultsFleet } from './BmOpsFleet.jsx';
 import BmPerfRulesPanel from './BmPerfRulesPanel.jsx';
 import BmOnboardPanel from './BmOnboardPanel.jsx'; // 7b단계 서버 등록 · SSH 키 저장소 · 누락 점검
+import BmKeyOverlaps from './BmKeyOverlaps.jsx'; // 다음 점검 ①(2차) — 식별 키가 겹치는 서버 · 사용자 결정
+import { keyOverlapNote } from './bmKeyOverlapText.js';
 // 6단계: 서버 비교(2~5대) — 고른 서버 목록은 이 화면이 들고(보드 체크 · 상세 ‘비교에 추가’ · 병목 Top 5 · 용도 그룹) 비교 보기가 그린다.
 import BmCompareView from './BmCompareView.jsx';
 import BmCollectHealth from './BmCollectHealth.jsx'; // 6단계 수집 건강 보드(관리자 · 운영자)
@@ -55,6 +57,7 @@ import BmIdleFleet from './BmIdleFleet.jsx'; // 8b단계 ㉑ 저활용 서버 �
 import BmPowerFleet from './BmPowerFleet.jsx'; // 8b단계 ㉒ 전력 · 온도 함대 보기
 import BmMaintPanel from './BmMaintPanel.jsx'; // 8a단계 정비 창 · 알림 억제(설정 절)
 import { addKey } from './bmCompareText.js';
+import { refOf, parseRef, normRef } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 상세 · 비교 · 공유 링크에 법인을 싣는다
 import { parseShareHash } from './bmShare.js'; // 6단계 공유 링크(#/tools/bm-usage/share?… — 도구 키 그대로) // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
 
 /** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
@@ -65,7 +68,8 @@ function readView() { try { const v = localStorage.getItem(VIEW_KEY); return VIE
 function writeView(v) { try { localStorage.setItem(VIEW_KEY, v); } catch { /* 저장 실패는 무시 — 다음에 기본값 */ } }
 /** 6단계: 비교에 담은 서버(사람별 편의 — 실패해도 빈 목록으로 그린다). */
 const CMP_KEY = 'bmUsage.compare';
-function readCmp() { try { const a = JSON.parse(localStorage.getItem(CMP_KEY) || '[]'); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x).slice(0, 8) : []; } catch { return []; } }
+// 비교에 담은 서버 = ‘법인|키’ 쌍 글자(예전 판이 저장한 키만도 읽는다 — 법인 모름 · 비교 화면이 법인 고르기를 보인다)
+function readCmp() { try { const a = JSON.parse(localStorage.getItem(CMP_KEY) || '[]'); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x).map(normRef).filter(Boolean).slice(0, 8) : []; } catch { return []; } }
 function writeCmp(a) { try { localStorage.setItem(CMP_KEY, JSON.stringify(a)); } catch { /* 무시 */ } }
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
@@ -97,6 +101,7 @@ export function BmUsage() {
   const [typeSel, setTypeSel] = useState(() => new Set());
   const [topMetric, setTopMetric] = useState('cpu_pct');
   const [sel, setSel] = useState('');
+  const [selVc, setSelVc] = useState('');   // 다음 점검 ①: 사용률 추이를 연 서버의 법인(이 노드 대상 — /history 에 함께)
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailErr, setDetailErr] = useState(null);   // v2.612 WEB2612-03: 실패를 패널 안에서 말한다
@@ -125,10 +130,11 @@ export function BmUsage() {
   // v2.920: 보기 — 'use'(USE 매트릭스 보드) | 'util'(기존 사용률 표). null 이면 자동(성능 항목이 있으면 USE).
   const [viewSel, setViewSel] = useState(readView);
   const [perfSel, setPerfSel] = useState('');   // 성능 상세를 연 서버(엣지 위임 서버도 — 사용률 추이는 이 노드 대상만)
+  const [perfVc, setPerfVc] = useState('');     // 다음 점검 ①: 그 서버의 법인(서버 = (법인, 키) 쌍 — 비면 서버가 정하고 모호하면 법인 고르기)
   const [cmpKeys, setCmpKeysState] = useState(readCmp);   // 6단계 서버 비교에 담은 서버
   const [cmpMsg, setCmpMsg] = useState('');
   const [cmpMax, setCmpMax] = useState(5);
-  const setCmpKeys = React.useCallback((a) => { const v = (Array.isArray(a) ? a : []).slice(0, 8); setCmpKeysState(v); writeCmp(v); }, []);
+  const setCmpKeys = React.useCallback((a) => { const v = [...new Set((Array.isArray(a) ? a : []).map(normRef).filter(Boolean))].slice(0, 8); setCmpKeysState(v); writeCmp(v); }, []);
   // 6단계 공유 링크 — 들어올 때 · 해시가 바뀔 때 한 번 적용한다(링크는 권한을 주지 않는다: 서버가 다시 판정 · 사라진 서버는 404/‘없음’).
   const [shareInit, setShareInit] = useState(() => (typeof window !== 'undefined' ? parseShareHash(window.location.hash) : null));
   useEffect(() => {
@@ -249,12 +255,13 @@ export function BmUsage() {
    * 상세 조회. ⚠ **폴링하지 않는다** — 행을 누를 때와 기간을 바꿀 때만 1회다(v2.508 규약).
    * 90일은 원시가 아니라 일 롤업을 쓰므로 `days` 로 묻는다(뜻이 다른 데이터라 화면이 밝힌다).
    */
-  const loadDetail = React.useCallback(async (key, rk) => {
+  const loadDetail = React.useCallback(async (key, rk, vc = '') => {
     const r = rangeOf(rk);
     const gen = ++detailGen.current;
     setDetailLoading(true); setDetailErr(null);
     try {
-      const q = r.source === 'daily' ? { key, days: r.days, hours: 1 } : { key, hours: r.hours, days: 90 };
+      const q0 = r.source === 'daily' ? { key, days: r.days, hours: 1 } : { key, hours: r.hours, days: 90 };
+      const q = vc ? { ...q0, vcenterId: vc } : q0;
       const d = await fetchJson('/tools/bm-usage/history', q);
       if (gen === detailGen.current) setDetail(d);
     } catch (e) {
@@ -266,26 +273,36 @@ export function BmUsage() {
   useEffect(() => {
     if (!shareInit) return;
     if (shareInit.view === 'compare') { setCmpKeys(shareInit.keys); setViewSel('compare'); }
-    else if (shareInit.view === 'detail') { setPerfSel(shareInit.key); setPerfTab(shareInit.tab || 'summary'); }
+    else if (shareInit.view === 'detail') { setPerfSel(shareInit.key); setPerfVc(shareInit.vc || ''); setPerfTab(shareInit.tab || 'summary'); }
   }, [shareInit, setCmpKeys]);
-  async function openDetail(key, tab = '') {
-    setPerfSel(key); setPerfTab(tab);
+  async function openDetail(key, tab = '', vc = '') {
+    // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 행이 가진 법인을 그대로 · 법인을 모르면(예전 링크 · 키만 담은 목록) 보이는 항목에서 그 키가 한 법인뿐일 때만 채운다
+    //   (둘 이상이면 비워 둔다 — 서버가 400 ambiguous-key 로 후보를 주고 상세가 법인 고르기를 보인다).
+    let v = String(vc || '');
+    // 반증 S2: 엣지 보관분 목록을 받았을 때만 채운다 — 못 받았으면(아직 · 실패) 목록에 이 노드 서버만 있어 엉뚱한 서버를 조용히 연다. 그때는 서버에 맡긴다(모호하면 400 → 법인 고르기).
+    const edgesOk = !!edges && edges.ok !== false && Array.isArray(edges.rows);
+    if (!v && edgesOk) { const same = perfItems.filter((it) => it.key === String(key)); if (same.length === 1) v = same[0].vcenterId || ''; }
+    setPerfSel(key); setPerfVc(v); setPerfTab(tab);
     // 사용률 추이(history)는 이 노드가 수집하는 대상만 있다 — 엣지 위임 서버는 성능 상세만 연다(없는 추이를 404 로 보이지 않게).
-    if (!(data?.targets || []).some((x) => String(x.key) === String(key))) { setSel(''); setDetail(null); return; }
-    setSel(key); setDetail(null); setRangeKey('24h');
-    await loadDetail(key, '24h');
+    const local = (data?.targets || []).filter((x) => String(x.key) === String(key) && (!v || String(x.vcenterId || '') === v));
+    if (local.length !== 1) { setSel(''); setSelVc(''); setDetail(null); return; }
+    setSel(key); setSelVc(String(local[0].vcenterId || '')); setDetail(null); setRangeKey('24h');
+    await loadDetail(key, '24h', String(local[0].vcenterId || ''));
   }
+  /** 상세의 법인 고르기(같은 키 여러 법인 — 서버 후보) — 그 법인으로 다시 연다(탭은 그대로). */
+  function pickCorp(vc) { openDetail(perfSel, perfTab, vc); }
   /** 6단계 비교 — 담기 · 빼기(상한은 서버가 준 maxServers · 넘치면 이유를 말한다) · 여러 대를 한 번에 담고 비교 보기로. */
-  function pickCmp(key) {
+  function pickCmp(ref0) {
+    const key = normRef(ref0);   // ‘법인|키’(다음 점검 ①)
     if (cmpKeys.includes(key)) { setCmpKeys(cmpKeys.filter((k) => k !== key)); setCmpMsg(''); return; }
     const r = addKey(cmpKeys, key, cmpMax);
     setCmpMsg(r.error); if (!r.error) setCmpKeys(r.list);
   }
-  function compareKeys(keys) { setCmpKeys((keys || []).slice(0, cmpMax)); setCmpMsg((keys || []).length > cmpMax ? `${cmpMax}대까지 비교합니다 — 앞 ${cmpMax}대만 담았습니다.` : ''); chooseView('compare'); }
+  function compareKeys(keys0) { const keys = (keys0 || []).map(normRef).filter(Boolean); setCmpKeys(keys.slice(0, cmpMax)); setCmpMsg((keys || []).length > cmpMax ? `${cmpMax}대까지 비교합니다 — 앞 ${cmpMax}대만 담았습니다.` : ''); chooseView('compare'); }
   useEffect(() => { fetchJson('/tools/bm-usage/compare/sets').then((r) => { if (Number.isInteger(r?.maxServers)) setCmpMax(r.maxServers); }).catch(() => {}); }, []);
   async function changeRange(rk) {
     setRangeKey(rk);
-    if (sel) await loadDetail(sel, rk);
+    if (sel) await loadDetail(sel, rk, selVc);
   }
 
   // v2.583 #36: 빈 칸을 0 으로 저장하지 않는다(서버가 하한으로 올려 보존일이 줄고 이력이 지워진다).
@@ -432,6 +449,12 @@ export function BmUsage() {
             <BoldText text={keyConflictNote(data.keyConflicts)} />
           </p>
         )}
+        {/* 다음 점검 ①(2차): 식별 키가 겹쳐 수집하지 않는 서버 — 조용한 제외 금지(설정의 표에서 사용자가 정한다). */}
+        {keyOverlapNote(data?.keyOverlaps) && (
+          <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}>
+            <BoldText text={keyOverlapNote(data.keyOverlaps)} />
+          </p>
+        )}
         {/* v2.605 LEFT2605-05: 호스트 미수집 vCenter 때문에 뺀 베어메탈 — 조용히 사라지지 않게 말한다. */}
         {hostsUnreadNote(data?.hostsUnread) && (
           <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}>
@@ -556,8 +579,8 @@ export function BmUsage() {
                     <td data-sort={r.name}>
                       <span
                         role="button" tabIndex={0}
-                        onClick={() => openDetail(r.key)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.key); } }}
+                        onClick={() => openDetail(r.key, '', r.vcenterId || '')}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.key, '', r.vcenterId || ''); } }}
                         style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3, color: 'inherit' }}
                       >{r.name}</span>
                       {r.role === 'virt' && <span title="ESXi(가상화) 호스트 — 설정의 'ESXi 호스트도 iDRAC 로 수집' 으로 들어온 서버입니다" style={{ marginLeft: 6, fontSize: 10, padding: '0 5px', borderRadius: 4, border: '1px solid var(--border)', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>ESXi</span>}
@@ -604,34 +627,34 @@ export function BmUsage() {
         <BmPerfBoard
           items={perfShown} th={data?.perfThresholds || null} intervalMs={st.intervalMs ?? data?.settings?.intervalMs}
           authStops={perfAuthStops} staleMs={edges?.staleMs ?? null} corpOff={data?.skippedCounts?.['corp-off'] || 0}
-          onOpen={openDetail} selKey={perfSel} perfError={data?.perfError || ''}
+          onOpen={openDetail} selKey={perfSel ? refOf(perfSel, perfVc) : ''} perfError={data?.perfError || ''}
           cmpKeys={cmpKeys} onPickCmp={pickCmp} onCompare={compareKeys} cmpMsg={cmpMsg}
         />
       )}
       {view === 'health' && hasRole('admin', 'operator') && <BmCollectHealth />}
       {view === 'compare' && (
-        <BmCompareView keys={cmpKeys} onKeys={(k) => { setCmpKeys(k); setCmpMsg(''); }} onOpen={(k) => openDetail(k)}
+        <BmCompareView keys={cmpKeys} onKeys={(k) => { setCmpKeys(k); setCmpMsg(''); }} onOpen={(ref) => { const p = parseRef(ref); openDetail(p.key, '', p.vc); }}
           key={shareInit?.view === 'compare' ? `share|${shareInit.keys.join(',')}` : 'cmp'}
           initial={shareInit?.view === 'compare' ? { view: shareInit.cv, group: shareInit.group, value: shareInit.value, range: shareInit.range, cross: shareInit.cross, metric: shareInit.metric } : {}}
-          names={Object.fromEntries(perfItems.map((it) => [it.key, it.name]))} />
+          names={Object.fromEntries(perfItems.map((it) => [refOf(it.key, it.vcenterId), it.name]))} />
       )}
       {/* v2.920: 서버 성능 상세(머리 · 판정 띠 · 탭 요약/자원/하드웨어) — 사용률 추이는 아래 기존 상세 카드에 그대로. */}
       {/* v2.923: 함대 보기 — 서버를 누르면 아래 상세가 그 탭으로 열린다. */}
-      {view === 'purpose' && <BmPurposeFleet onOpen={(k) => openDetail(k, 'profile')} onCompare={compareKeys} />}
-      {view === 'faults' && <BmFaultsFleet onOpen={(k) => openDetail(k, 'faults')} />}
+      {view === 'purpose' && <BmPurposeFleet onOpen={(k, vc) => openDetail(k, 'profile', vc)} onCompare={compareKeys} />}
+      {view === 'faults' && <BmFaultsFleet onOpen={(k, vc) => openDetail(k, 'faults', vc)} />}
       {/* 7a단계: 로그 분석 함대(KPI · 공통 원인 후보 · 서버 표) — 서버를 누르면 상세 ‘로그’ 탭. */}
-      {view === 'logs' && <BmLogsFleet onOpen={(k) => openDetail(k, 'logs')} />}
-      {view === 'capacity' && <BmCapacityFleet onOpen={(k) => openDetail(k, 'summary')} />}
+      {view === 'logs' && <BmLogsFleet onOpen={(k, vc) => openDetail(k, 'logs', vc)} />}
+      {view === 'capacity' && <BmCapacityFleet onOpen={(k, vc) => openDetail(k, 'summary', vc)} />}
       {/* 8b단계: 저활용(점수 · 검토 상태 · 비교로 보내기) · 전력 · 온도(법인 · 랙 · 미매핑 · 더운 서버) — 서버를 누르면 상세 요약 탭. */}
-      {view === 'idle' && <BmIdleFleet onOpen={(k) => openDetail(k, 'summary')} onCompare={compareKeys} />}
-      {view === 'power' && <BmPowerFleet onOpen={(k) => openDetail(k, 'summary')} />}
+      {view === 'idle' && <BmIdleFleet onOpen={(k, vc) => openDetail(k, 'summary', vc)} onCompare={compareKeys} />}
+      {view === 'power' && <BmPowerFleet onOpen={(k, vc) => openDetail(k, 'summary', vc)} />}
       {perfSel && (
         <BmPerfDetail
-          itemKey={perfSel} item={perfItems.find((it) => it.key === perfSel) || null} initialTab={perfTab}
+          itemKey={perfSel} itemVc={perfVc} onPickCorp={pickCorp} item={(() => { const c = perfItems.filter((it) => it.key === perfSel && (!perfVc || it.vcenterId === perfVc)); return c.length === 1 ? c[0] : null; })()} initialTab={perfTab}
           authStops={perfAuthStops} staleMs={edges?.staleMs ?? null}
           keepDays={{ server: data?.settings?.dailyRetentionDays ?? null, dev: data?.settings?.store?.devHourlyDays ?? null }}
-          onClose={() => setPerfSel('')}
-          inCompare={cmpKeys.includes(perfSel)} onCompareToggle={() => pickCmp(perfSel)} cmpMsg={cmpMsg} shareInit={shareInit?.view === 'detail' ? shareInit : null}
+          onClose={() => { setPerfSel(''); setPerfVc(''); }}
+          inCompare={cmpKeys.includes(refOf(perfSel, perfVc))} onCompareToggle={() => pickCmp(refOf(perfSel, perfVc))} cmpMsg={cmpMsg} shareInit={shareInit?.view === 'detail' ? shareInit : null}
         />
       )}
 
@@ -662,8 +685,8 @@ export function BmUsage() {
                     {top.list.map((r) => (
                       <tr key={r.key}>
                         <td data-sort={r.name}>
-                          <span role="button" tabIndex={0} onClick={() => openDetail(r.key)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.key); } }}
+                          <span role="button" tabIndex={0} onClick={() => openDetail(r.key, '', r.vcenterId || '')}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.key, '', r.vcenterId || ''); } }}
                             style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3, color: 'inherit' }}
                           >{r.name}</span>
                         </td>
@@ -962,6 +985,9 @@ export function BmUsage() {
 
           {/* ── 7b단계 서버 등록 · SSH 키 저장소 · 공통 계정 · 엣지 배포 목록 · 누락 점검(관리자) ── */}
           <BmOnboardPanel vcenters={data?.vcenters || []} />
+
+          {/* ── 다음 점검 ①(2차): 식별 키가 겹쳐 분류가 한 대만 남긴 서버 — 사용자가 수집에 추가 · 제외 유지 · 되돌리기(운영자 이상 + 그 법인 쓰기 범위) ── */}
+          <BmKeyOverlaps />
 
           {/* ── 엣지에 배포(v2.627) — 중앙의 전체 범위 관리자에게만 온다(서버가 distribution 을 null 로 준다). ── */}
           {data?.distribution && (

@@ -23,6 +23,9 @@ const DISK = Object.freeze(DISK_MODES.map((x) => x.k));
 const NET = Object.freeze(NET_MODES.map((x) => x.k));
 const LAYOUT = Object.freeze(LAYOUTS.map((x) => x.k));
 const KEY_RE = /^[^\s,&#?/\\]{1,256}$/;
+// 다음 점검 ①: 서버 = (법인, 키) 쌍 — 상세 링크에 법인(vCenter id)을 싣는다(없으면 예전처럼 키만 — 같은 키가 여러 법인이면 화면이 법인 고르기를 보인다).
+//   비교 링크의 keys 는 ‘법인|키’ 쌍 글자(bmPerfUrl.refOf — 법인 id 에는 ‘|’ 가 없다).
+const VC_RE = /^[A-Za-z0-9._:@-]{1,128}$/;
 const METRIC_RE = /^[a-z0-9_]{1,40}$/;
 const n = (v) => { if (typeof v !== 'string' || !/^\d{10,14}$/.test(v)) return null; const x = Number(v); return Number.isFinite(x) ? x : null; };
 const pick = (v, list) => (list.includes(v) ? v : null);
@@ -37,7 +40,7 @@ export function shareHashOf(st = {}) {
   put('view', view);
   if (view === 'detail') {
     if (!KEY_RE.test(String(st.key || ''))) return '#/tools/bm-usage';
-    put('key', st.key); put('tab', pick(st.tab, TABS)); put('range', pick(st.range, RANGES)); put('show', pick(st.show, SHOW));
+    put('key', st.key); put('vc', VC_RE.test(String(st.vc || '')) ? st.vc : null); put('tab', pick(st.tab, TABS)); put('range', pick(st.range, RANGES)); put('show', pick(st.show, SHOW));
     put('to', Number.isFinite(st.to) ? Math.round(st.to) : null); put('cur', Number.isFinite(st.cursor) ? Math.round(st.cursor) : null);
     if (st.sel && Number.isFinite(st.sel.from) && Number.isFinite(st.sel.to) && st.sel.to > st.sel.from) put('sel', `${Math.round(st.sel.from)}~${Math.round(st.sel.to)}`);
     put('disk', pick(st.disk, DISK)); put('net', pick(st.net, NET)); put('layout', pick(st.layout, LAYOUT));
@@ -67,7 +70,7 @@ export function parseShareHash(hash) {
   if (view === 'detail') {
     if (!KEY_RE.test(q.key || '')) return null;
     const [a, b] = String(q.sel || '').split('~').map(n);
-    return { view, key: q.key, tab: pick(q.tab, TABS) || 'summary', range: pick(q.range, RANGES), show: pick(q.show, SHOW), to: n(q.to), cursor: n(q.cur),
+    return { view, key: q.key, ...(VC_RE.test(q.vc || '') ? { vc: q.vc } : {}), tab: pick(q.tab, TABS) || 'summary', range: pick(q.range, RANGES), show: pick(q.show, SHOW), to: n(q.to), cursor: n(q.cur),
       sel: a != null && b != null && b > a ? { from: a, to: b } : null, disk: pick(q.disk, DISK), net: pick(q.net, NET), layout: pick(q.layout, LAYOUT) };
   }
   const keys = String(q.keys || '').split(',').filter((k) => KEY_RE.test(k)).slice(0, 8);

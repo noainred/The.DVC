@@ -13,7 +13,7 @@
 | [edge.md](edge.md) | 18 | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개 | server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed}/ |
 | [storage.md](storage.md) | 36 | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 | server/src/storage/ · web/src/views/tools/Storage* · bmstor |
 | [sanswitch.md](sanswitch.md) | 19 | SAN 스위치(수집·조닝·사용량·월간 점검) | server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
-| [idrac-server.md](idrac-server.md) | 25 | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 | server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
+| [idrac-server.md](idrac-server.md) | 26 | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 | server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
 | [vcenter.md](vcenter.md) | 30 | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) | server/src/{vcenter,vcinfo,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
 | [gpu.md](gpu.md) | 8 | GPU 모니터링(할당·메모리·온도·수집 점검) | server/src/gpu/ · web/src/views/tools/Gpu* |
 | [cvp.md](cvp.md) | 16 | Arista CVP 수집·장애·GBIC·Overview | server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
