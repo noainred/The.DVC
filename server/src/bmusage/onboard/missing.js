@@ -28,7 +28,7 @@ export function missingCheck({ targets = [], skipped = [], entryByKey = new Map(
     const names = new Set([...targets, ...skipped].map((x) => t(x.name).toLowerCase()).filter(Boolean));
     for (const e of osRegistry) {
       if (!e || usedIds.has(t(e.id)) || names.has(t(e.name).toLowerCase())) continue;
-      rows.push({ key: `os:${t(e.id)}`, name: t(e.name), serviceTag: '', vcenterId: t(e.vcenterId), via: 'local', paths: [], bucket: 'untracked', reason: 'registry-only', idracHost: '', missing: [] });
+      rows.push({ key: `os:${t(e.id)}`, name: t(e.name), serviceTag: '', vcenterId: t(e.vcenterId), via: 'local', paths: [], bucket: 'untracked', reason: 'registry-only', idracHost: '', osHost: t(e.host), missing: [] });
     }
   }
   for (const x of targets) {
@@ -57,6 +57,8 @@ export function missingCheck({ targets = [], skipped = [], entryByKey = new Map(
       collect_via: r.via === 'edge' ? 'edge' : 'auto',
     };
   }
+  // v2.945.1: 화면 필터(법인) 라벨 — 이름은 vcName 하나로(화면이 id 를 다시 풀지 않게).
+  for (const r of rows) r.corp = r.vcenterId ? t(vcName(r.vcenterId)) || r.vcenterId : '';
   const counts = Object.fromEntries(BUCKETS.map((b) => [b, rows.filter((r) => r.bucket === b).length]));
   return { rows, counts };
 }

@@ -36,7 +36,7 @@ import {
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote, hostsUnreadNote,
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes, usageDetailNote,
-  unassignedNote, edgePullState, edgePullNote, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote } from './bmUsageText.js';
+  unassignedNote, edgePullState, edgePullNote, edgeNoteRows, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote } from './bmUsageText.js';
 import Select from '../../components/Select.jsx';
 // v2.920(리눅스 성능 2단계 화면): USE 매트릭스 보드 · 서버 성능 상세 — 문구·표시 규약은 bmPerfText.js, 판정은 서버 useJudge.js.
 import BmPerfBoard from './BmPerfBoard.jsx';
@@ -102,6 +102,9 @@ export function BmUsage() {
   const [rangeKey, setRangeKey] = useState('24h');
   const [showSkipped, setShowSkipped] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // v2.945.1(사용자 보고 "설정을 켜도 꺼도 화면에 변화가 없어"): 수집 설정 카드는 보드 · 표 · 엣지 보관분 **뒤**에 열린다 —
+  //   열 때 그 카드로 화면을 옮긴다. 설정값을 못 받았으면(form 없음) 버튼 바로 아래에 이유를 보인다(조용히 아무것도 안 그리지 않는다).
+  const settingsRef = React.useRef(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(null);
   const [distSaving, setDistSaving] = useState(false); // v2.627 엣지 배포 저장 중
@@ -145,6 +148,12 @@ export function BmUsage() {
     finally { if (gen === loadGen.current) setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  const formReady = !!form;
+  useEffect(() => {
+    if (!showSettings || !formReady) return;
+    const el = settingsRef.current;
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [showSettings, formReady]);   // 열 때 · 설정값이 처음 도착할 때만 옮긴다(저장마다 옮기지 않게)
 
   /** 엣지 보관분 — 마운트 1회. ⚠ 실패해도 화면 전체를 오류로 갈아치우지 않는다(부가 패널이다). */
   const loadEdges = React.useCallback(async () => {
@@ -501,6 +510,15 @@ export function BmUsage() {
           </button>
           <button className="btn" onClick={load}>새로고침</button>
           <button className="btn" onClick={() => setShowSettings((v) => !v)}>{showSettings ? '설정 닫기' : '설정'}</button>
+          {showSettings && !form && (
+            <span role="status" style={{ fontSize: 12, color: toneVar('warn') }}>
+              {loading ? '설정값을 읽는 중…' : `설정값을 받지 못했습니다${error ? ` — ${String(error).slice(0, 160)}` : ''}. `}
+              {!loading && <button className="btn btn-sm" type="button" onClick={load}>다시 읽기</button>}
+            </span>
+          )}
+          {showSettings && form && (
+            <button className="btn btn-sm" type="button" onClick={() => settingsRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })}>수집 설정으로 이동 ↓</button>
+          )}
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>
             마지막 수집 {ageText(st.last?.at)} · 주기 {st.intervalMs ? `${Math.round(st.intervalMs / 60000)}분` : '—'} · 동시 {st.concurrency ?? '—'}
             {st.last?.alerts && (st.last.alerts.sent > 0 || st.last.alerts.over > 0) && (
@@ -715,10 +733,10 @@ export function BmUsage() {
                 <STable>
                   <thead><tr><th>엣지</th><th>상태</th><th className="right">서버</th><th>버전</th><th>가져온 때</th><th data-nosort>동작</th></tr></thead>
                   <tbody>
-                    {(edges.rows || []).map((r) => {
+                    {(edges.rows || []).map((r, i) => {
                       const { es, ev } = edgeRowView(r);
                       return (
-                        <tr key={r.agent}>
+                        <tr key={`${i}-${r.agent}`}>
                           <td data-sort={r.agent}>
                             {r.agent}
                             {/* ⚠ 엣지가 말한 이름이 다르면 **나란히** 보여준다 — 그 자체가 진단이다(v2.548 F5). */}
@@ -756,12 +774,14 @@ export function BmUsage() {
                 </STable>
               </div>
               {/* ⚠ 사유는 **행 아래 한 번씩** — 표 안에 긴 문장을 넣으면 셀이 세로로 길어진다(v2.509). */}
-              {(edges.rows || []).map((r) => {
+              {/* v2.945.1(사용자 보고 — 같은 엣지 안내가 십여 줄 반복): 이름별 한 줄 · 키에 위치를 넣어 겹치지 않게(같은 키는 React 가 옛 줄을 남길 수 있다) ·
+                  같은 이름이 등록부에 여러 개면 그 수를 밝힌다(조용히 합치지 않는다). */}
+              {edgeNoteRows(edges.rows).map(({ r, dup }, i) => {
                 const { es, ev } = edgeRowView(r);
-                const parts = [es.state === 'ok' ? '' : es.why, ev.instr ? `중앙 켜기: ${ev.instr.why}` : '', ev.note].filter(Boolean);
+                const parts = [es.state === 'ok' ? '' : es.why, ev.instr ? `중앙 켜기: ${ev.instr.why}` : '', ev.note, dup > 1 ? `(같은 이름이 등록부에 **${dup}개** 있습니다 — 설정 › 수집 서버(원격)에서 확인하세요)` : ''].filter(Boolean);
                 if (!parts.length) return null;
                 return (
-                  <p key={`why-${r.agent}`} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
+                  <p key={`why-${i}-${r.agent}`} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
                     <BoldText text={`**${r.agent}** — ${parts.join(' ')}`} />
                   </p>
                 );
@@ -773,7 +793,7 @@ export function BmUsage() {
       )}
 
       {showSettings && form && (
-        <div className="card" style={{ minWidth: 0 }}>
+        <div className="card" ref={settingsRef} style={{ minWidth: 0, scrollMarginTop: 72 }}>
           <h4 style={{ marginTop: 0 }}>수집 설정</h4>
           {centralManagedNote(data?.central, fmtAgo) && (
             <p style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}><BoldText text={centralManagedNote(data.central, fmtAgo)} /></p>

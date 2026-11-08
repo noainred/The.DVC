@@ -810,6 +810,23 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
  * 엣지 패널 머리말. ⚠ **'push 가 없다' 는 사실을 말한다** — 값이 낡은 것이 장애가 아니라 설계다
  * (사용자 선택: "중앙으로 전달은 중앙에서 조회할때만").
  */
+/**
+ * v2.945.1(사용자 보고 — 엣지 보관분 안내가 같은 이름으로 십여 줄 반복): 안내 줄은 **이름별 한 줄**. 같은 이름(대소문자 무시 · 앞뒤 공백 무시)이
+ *   여러 행이면 첫 행만 쓰고 그 수(dup)를 밝힌다 — 조용히 합치지 않는다(화면이 '등록부에 n개' 를 말한다). 표는 행을 그대로 둔다. 순수.
+ * @returns {{r:object, dup:number}[]}
+ */
+export function edgeNoteRows(rows = []) {
+  const out = [];
+  const at = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r !== 'object') continue;
+    const k = String(r.agent ?? '').trim().toLowerCase();
+    if (at.has(k)) { out[at.get(k)].dup += 1; continue; }
+    at.set(k, out.length);
+    out.push({ r, dup: 1 });
+  }
+  return out;
+}
 export function edgePullNote(rows = []) {
   const arr = Array.isArray(rows) ? rows : [];
   const have = arr.filter((r) => n(r.snapAt)).length;
