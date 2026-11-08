@@ -42,14 +42,14 @@ describe('문구 · 거르기', () => {
 describe('표(SSR) — 열 · 버튼 · 권한', () => {
   it('결정 전: 수집에 추가 · 제외 유지 / 추가함: 되돌리기 + 별도 키 / 쓰기 범위 밖: 잠금 + 이유 · 비관리자는 주소 열 없음', () => {
     const html = renderToStaticMarkup(React.createElement(KeyOverlapTable, { rows: [row(), row({ oid: 'x2', decision: { decision: 'add', key: 'vcB:r-b1', by: 'opb' }, collecting: true }), row({ oid: 'x3', writable: false })], canWrite: true, showAddr: true }));
-    expect((html.match(/<th[ >]/g) || []).length).toBe(8);
+    expect((html.match(/<th[ >]/g) || []).length).toBe(7);
     expect(html).toContain('수집에 추가'); expect(html).toContain('제외 유지'); expect(html).toContain('되돌리기');
     expect(html).toContain('키 vcB:r-b1 · 수집 대상');
     expect(html).toContain('https://10.20.0.12');
     expect(html).toContain('쓰기 권한 없음');
     expect(html).toContain('To Be Filled By O.E.M.');
     const nonAdmin = renderToStaticMarkup(React.createElement(KeyOverlapTable, { rows: [row({ idracHost: undefined })], canWrite: false, showAddr: false }));
-    expect((nonAdmin.match(/<th[ >]/g) || []).length).toBe(7);
+    expect((nonAdmin.match(/<th[ >]/g) || []).length).toBe(6);
     expect(nonAdmin).toContain('disabled');
   });
 });

@@ -14,9 +14,10 @@ import { readPageSize } from './bmMissingView.js';
 import { OVERLAP_STATUS_TEXT, statusOf, sourceText, peerText, KEY_OVERLAP_HONEST, overlapView, overlapCorps } from './bmKeyOverlapText.js';
 
 export function KeyOverlapTable({ rows = [], canWrite = false, busy = '', onDecide, onClear, showAddr = false }) {
+  // 1440 판독(2차): 처음 판은 열 8개 · 법인 칸에 ‘이름(id)’ 를 한 줄로 실어 결정 열이 오른쪽에서 잘렸다 — 출처는 서버 칸 아래 줄로 · 법인 id 는 아래 줄로 · 버튼은 세로로.
   return (
-    <STable minWidth={980} className="bmo-t" style={{ fontSize: 12 }}>
-      <thead><tr><th>서버</th><th>법인</th><th>서비스 태그(원문)</th>{showAddr && <th>주소(iDRAC · OS)</th>}<th>출처</th><th>겹친 상대(수집 중)</th><th>상태</th><th data-nosort>결정</th></tr></thead>
+    <STable minWidth={showAddr ? 860 : 760} className="bmo-t" style={{ fontSize: 12 }}>
+      <thead><tr><th>서버 · 출처</th><th>법인</th><th>서비스 태그(원문)</th>{showAddr && <th>주소(iDRAC · OS)</th>}<th>겹친 상대(수집 중)</th><th>상태</th><th data-nosort style={{ width: 112 }}>결정</th></tr></thead>
       <tbody>
         {rows.map((r) => {
           const st = statusOf(r);
@@ -24,17 +25,16 @@ export function KeyOverlapTable({ rows = [], canWrite = false, busy = '', onDeci
           const can = canWrite && r.writable && !busy;
           return (
             <tr key={r.oid}>
-              <td data-sort={r.name} className="bmo-name">{r.name || r.key}<div className="bmo-sub">{r.serverId}{r.role === 'virt' ? ' · 가상화 호스트' : ''}</div></td>
-              <td data-sort={r.vcenterId}>{r.vcName && r.vcName !== r.vcenterId ? `${r.vcName}(${r.vcenterId})` : (r.vcenterId || '귀속 없음')}</td>
+              <td data-sort={r.name} className="bmo-name" style={{ overflowWrap: 'anywhere' }}>{r.name || r.key}<div className="bmo-sub">{r.serverId}{r.role === 'virt' ? ' · 가상화 호스트' : ''}</div><div className="bmo-sub">{sourceText(r.source)}</div></td>
+              <td data-sort={r.vcenterId} style={{ overflowWrap: 'anywhere' }}>{r.vcName || r.vcenterId || '귀속 없음'}{r.vcName && r.vcName !== r.vcenterId ? <div className="bmo-sub">{r.vcenterId}</div> : null}</td>
               <td data-sort={r.serviceTag} style={{ overflowWrap: 'anywhere' }}>{r.serviceTag || '—'}<div className="bmo-sub">키 {r.key}</div></td>
               {showAddr && <td data-sort={r.idracHost || r.osHost || ''} style={{ overflowWrap: 'anywhere' }}>{r.idracHost || '—'}{r.osHost ? <div className="bmo-sub">OS {r.osHost}</div> : null}</td>}
-              <td data-sort={r.source}>{sourceText(r.source)}</td>
               <td data-sort={r.dupOf?.name || ''} className="bmo-wrap">{peerText(r)}</td>
-              <td data-sort={st}><span style={{ color: toneVar(sv.tone) }}>{sv.label}</span>
+              <td data-sort={st} style={{ overflowWrap: 'anywhere' }}><span style={{ color: toneVar(sv.tone) }}>{sv.label}</span>
                 {st === 'add' && <div className="bmo-sub">키 {r.decision?.key}{r.collecting ? ' · 수집 대상' : ' · 아직 대상 아님(경로 · 법인 확인)'}</div>}
                 {r.decision?.by ? <div className="bmo-sub">{r.decision.by}</div> : null}</td>
               <td data-nosort>
-                <span className="bmcmp-btns" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
                   {st !== 'add' && <button type="button" className="btn btn-sm bmp-touch" disabled={!can} title={`별도 키 ${r.decidedKey} 로 수집`} onClick={() => onDecide?.(r, 'add')}>수집에 추가</button>}
                   {st === 'pending' && <button type="button" className="btn btn-sm bmp-touch" disabled={!can} onClick={() => onDecide?.(r, 'exclude')}>제외 유지</button>}
                   {st !== 'pending' && <button type="button" className="btn btn-sm bmp-touch" disabled={!can} onClick={() => onClear?.(r)}>되돌리기</button>}
@@ -44,7 +44,7 @@ export function KeyOverlapTable({ rows = [], canWrite = false, busy = '', onDeci
             </tr>
           );
         })}
-        {!rows.length && <tr><td colSpan={showAddr ? 8 : 7} className="bmo-sub">겹치는 서버가 없습니다.</td></tr>}
+        {!rows.length && <tr><td colSpan={showAddr ? 7 : 6} className="bmo-sub">겹치는 서버가 없습니다.</td></tr>}
       </tbody>
     </STable>
   );
