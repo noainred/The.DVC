@@ -1,6 +1,6 @@
 # 설계: SAN 스토리지 사용량 · 트렌드 — 실시간 · 트렌드 · 디렉터(VMAX · PowerMax) · 컨트롤러(PowerStore · Unity)별
 
-작성 2026-11-08 (main v2.914.0 기준 · 브랜치 `claude/festive-planck-vy0dg3`) · 상태 **컨펌 완료(22:45 KST — 결정 8개 + 재확인 2개 · §6) · 구현 착수(규칙상 Opus)** ·
+작성 2026-11-08 (main **v2.946.0** 기준 — ⚠ 정정: 처음에 v2.914.0 이라 적었던 것은 브랜치를 main 에 맞추기 전의 추정이었다 · 브랜치 `claude/festive-planck-vy0dg3`) · 상태 **구현 v2.947.0(§8 — 2026-11-08 23:00~ · 사용자 '그대로 진행' 으로 이 세션(Fable)이 구현 · 규칙상 Opus)** ·
 시안 캔버스: https://claude.ai/artifact/ApZK6HEzp3yjk6h6LKbYxk (아트보드 7장 — ① 현황 1440 · ② 어레이 상세 1440 · ③ 디렉터 · 컨트롤러 벤더별 · ④ 400px · ⑤ 상태 8종 · ⑥ 성능 점검 탭 · ⑦ 분류 · 매핑 탭).
 **2차 보강(19:31~ KST)**: 사용자가 '디렉터별 · 컨트롤러별 성능' 을 다시 요청해 **어레이 측 성능(busy% · CPU · IOPS · 응답 시간 · 큐 깊이)을 2단계에서 이번 범위로** 올렸다 — ② 아래 패널 실값 · ③ 벤더 카드 실값 + API 확인 표 · ⑥ 판정표 신설.
 **3차(19:42~ KST · 사용자 답 8개)**: ① **독립 도구 `san-storage` + 독립 메뉴** '스토리지 › SAN 스토리지 성능'(기존 SAN 스위치 화면의 '스토리지 사용량 분석' 모달은 이 메뉴로 보내고 지운다) ③ 분류 · 디렉터 매핑 **탭(⑦)** 신설 ⑥ 1년 보기 포함 ⑦ 표준 검증 ⑧ 팔레트 4색 `:root` 토큰 추가. ④ 캡처 방법은 `CAPTURE-GUIDE.md` · ⑤ 벤더 · 컨설팅 권장 기준은 §10(점검 기본값을 **벤더 문서 값만**으로 채움) · 추가 기능 · 문서 검토는 §12.
@@ -121,9 +121,45 @@
 - 문서: `docs/rules/sanswitch.md` 에 '스토리지 보기 · 디렉터 해석 · 수동 매핑 · 성능 점검' 항목 · `docs/rules/storage.md` 에 '디렉터 · 노드 · SP 성능 수집' 항목 · 이 README §8 에 '시안과 달리 한 것'.
 - 릴리스: 포탈 동작이 바뀌므로 버전업 + GitHub 릴리스 1회(`versions.json` latest 확인). 규모가 커서(스위치 측 + 어레이 측 3벤더 + 점검) **PR 2개로 나눌 수 있다**: ⓐ 스위치 측 목록 · 상세 · 디렉터 해석 · 점검 틀 ⓑ 어레이 측 수집 3벤더 — 질문 4 의 답에 따라 정한다.
 
-## 8. 구현(컨펌 뒤 채움)
+## 8. 구현(v2.947.0 — 2026-11-08 23:00~ KST · 스위치 측 PR ⓐ · 이 세션(Fable) — 사용자 "그대로 진행")
 
-- (비어 있음 — 시안 단계)
+- 서버: `sanswitch/directorOf.js`(순수 — 벤더별 이름 규칙 · 별칭 폴백 · `OR-1C`) · `sanswitch/directorMap.js`(`san-storage-map.json` — 분류 재정의 + 포트→디렉터 · 원자 쓰기 · 손상 보존 · 전체 교체 · 바뀐 항목만 변경자/시각) ·
+  `sanswitch/storageCheckSettings.js`(`storage-perf-check.json` — 벤더 문서 기본값 · null = 비움 · 빈 값 = 기본값 · 주의 ≤ 이상) · `sanswitch/storageList.js`(순수 조립 — 지금 · 24시간 · 7일 대비 · 디렉터 · 팹 · 회선 · 상태 코드) ·
+  `sanswitch/storagePerfCheck.js`(순수 판정 — ok/warn/bad/unknown/na · unknown 흡수 금지 · 어레이 측은 이 판에서 unknown) · `perfDb.storageSeriesMulti` `withPorts`(포트별 시계열 · 기억 키에 포함) ·
+  `demoPerfSynth`(어레이 합 = 포트별 시계열의 합 — withPorts 유무와 무관하게 같은 숫자) · `routes/api/sanSwitch.js`(`capacityIndexFor` · `perfAbortSignal` · `abandoned` 를 모듈 범위로 — 두 라우터가 같은 코어) ·
+  `routes/api/sanStorage.js`(라우트 7 — 현황 · 상세 · 점검 · 임계값 GET/PUT · 매핑 GET/PUT · 포트 이름 CSV) · `auth/toolAccess.js`(`san-storage` 세그먼트 = 키) · `toolcats/catalog.js`(PRESET 스토리지) · `routes/api.js`.
+- 웹: `views/tools/SanStorageTool.jsx`(탭 3 + 어레이 상세 — SVG 쌓기 차트 · 스파크 · 히트맵 · CSV) · `SanStorageCheck.jsx`(판정표 · 규칙 표 · 기준 설정 모달) · `SanStorageMapping.jsx`(분류 · 포트→디렉터 · 최근 변경 · CSV) ·
+  순수 `sanStorageText.js` · `sanStorage.css`(`.sst-*`) · `styles.css :root --viz-1~4` · `specialToolsList.js`(`san-storage` · adminOnly 는 san-switch 와 같이 true) · `SpecialTools.jsx` · `topMenu.js`(스토리지 › 'SAN 스토리지 성능' 추가 · 'san' 항목 라벨 'SAN 스위치 모니터링') ·
+  `SanSwitchTool.jsx`(분석 모달 머리에 새 화면 링크 — 모달 보존) · `SanSwitchV2Parts.jsx`(트래픽 카드 제목에 링크) · `web/public/special-tools.json` 재생성.
+- 테스트: 서버 `test/sanStorage2947.test.js`(directorOf 15 케이스 · storageList 결측 · stale · edge-missing · partial-only · 편중 · 점검 · 임계값 · 매핑 · **실제 라우트 — 현황 지금 합계 == traffic-total** · 매핑 저장 뒤 분류 반영 · 상세 · CSV) ·
+  `test/sanStorage2947gate.test.js`(범위 admin 403 · operator/쓰기 범위 admin PUT 403 · 전체 범위 admin 400) · 웹 `sanStorageText.test.js`(23) · `topMenu.test.js` 갱신(메뉴 18 · 스토리지 라벨). 기존 `sanPerf2728` · `sanDemoPerf2715` · `audit2732g` · `toolCatalog2614` · `audit2613a` 통과.
+- 문서: `docs/rules/sanswitch.md` 항목 추가 · `docs/API.md` · `docs/CONFIG-FILES.md` 재생성 · 이 README.
+- **시안과 달리 한 것**(정직 기록):
+  1. 구간 이동은 ◀ 이전 · 다음 ▶ · 최신(창 단위)만 — **슬라이더 · '날짜로 이동' 은 넣지 않았다**(공용 창 계산 모듈 공용화는 별건 — vmPerfText 와 xferSpeedText 의 통합을 이 PR 에서 하지 않음).
+  2. 성능 점검은 **화면 판정만** — PDF 내려받기 · 점검 이력('판정 1회 = 기록 1회')은 넣지 않았다. 사용자가 고른 표준 검증 범위에서 PR ⓐ 를 작게 유지하려는 선택이며, 다음 후보 §8.1.
+  3. **어레이 측 성능 수집(busy% · IOPS · 응답 · CPU)은 PR ⓑ** — 이 판의 점검은 어레이 측 5항목을 전부 unknown('어레이 측 성능 미수집')으로 둔다. 상세의 그 카드는 '다음 판 — 수집 전' 이다.
+  4. 조닝 별칭 폴백(Unity_SPA0_p8)은 `directorOf` 에 있으나 **라우트가 별칭을 넘기지 않는다**(port_meta 에 별칭이 없고 조닝 스냅샷 대조는 실 Unity 캡처 뒤에).
+  5. 현황의 오른쪽 아래 카드는 '법인별 비중' 대신 **'합계 · 상태'**(법인별 비중은 SAN 스위치 화면의 트래픽 카드가 이미 보여 준다 — 중복 제거).
+  6. 상세의 '포트 배치 · 조닝' · '호스트별 플로우' 는 그 도구 첫 화면으로 가는 링크다(장비 · 타깃을 특정하는 딥링크 해시가 두 도구에 없다).
+  7. 1년 보기는 서버 `hours` 상한(90일) 때문에 from/to 로 묻는다(최대 366일).
+  8. 기존 메뉴 'san' 항목은 라벨만 'SAN 스위치 모니터링' 으로(id · 도구 키 그대로) — 새 항목이 'SAN 스토리지 성능' 을 쓴다.
+  9. 'kind=host' 조회(호스트 키 목록)는 라우트에 있으나 화면은 '분류 · 매핑' 탭의 후보 표(이름 규칙 · 재정의)로 대신한다 — 평평한 이름 호스트 수천 개를 표에 깔지 않는다.
+- **남긴 것**(§8.1): PR ⓑ 어레이 측 3벤더 수집 · 슬라이더/날짜 이동 · 점검 PDF/이력 · 별칭 전달 · 메일 알림 · 자기 기준선 이상 표시 · Flow Vision 타깃 필터 딥링크 · `invSearchQuery`(⌘K) 어레이 → 이 도구.
+
+### 8.1 Chromium 확인(1440 · 400 · 목 서버 `DATA_SOURCE=mock AUTH_ENABLED=false` — 2026-11-08 23:20~23:55 KST)
+- 측정(Sonnet 1회 + 메인 Playwright 3회): 현황 · 상세 · 성능 점검 · 분류 매핑 · 기존 SAN 스위치 화면, 1440/400 모두 **문서 가로 넘침 0 · pageerror 0 · console error 0**.
+  목 서버 첫 응답(`/tools/san-storage`, 86 스위치 · 7일 집계)은 약 5.8초 — 화면은 60초 폴링(`usePolling`) · `timeoutMs 90000` 이라 넘치지 않는다.
+- 메인 스크린샷 판독에서 찾은 결함과 고친 것(측정 보고에는 '넘침 0' 으로만 잡혔던 것 — v2.780 선례처럼 **표 안 가로 스크롤 밖의 열은 결함**으로 본다):
+  1. 1440 현황 표가 오른쪽 25~70px 잘려 '7일 대비 · 용량 · 상태' 열이 스크롤 밖 → '포트' 열을 없애고 스토리지 보조줄(벤더 · 시리얼 · 포트 수, 속도는 title)로,
+     24시간 평균/피크를 두 줄로, 스파크 120→88px · 사용률 막대 120→92px · 셀 패딩 9/10→8/8 · `minWidth` 1120→1040. 실측 표 1154 = 틀 1154(잘림 0) · 보조줄 말줄임 0/30행.
+  2. '읽은 곳' 알약이 데모에서 '계산 —' → `computedAt` 이 없으면 그 조각을 뺀다(값이 없으면 단위 · 표시를 붙이지 않는다).
+  3. 편중 경고 카드의 '디렉터별 보기 →' 링크가 배경과 대비가 낮음 → `.sst-alert a { color: var(--mint) }`.
+  4. 1440 상세 포트 표(그리드 오른쪽 1fr 칸 589px)가 27px 잘림 → 열 8→6 병합(디렉터 · 어레이 포트 / 스위치 : 포트 / 속도 / 평균 / 최고 / 피크 포화도) + 그리드 1.2fr→1.4fr. 실측 632 = 632.
+  5. 분류 매핑 탭 알약이 0 → 매핑 라우트 응답에 `counts` 가 빠져 있었다(화면은 `data.counts` 를 읽음) → 서버에 `counts: b.counts` 추가. 재확인 '어레이 3 · 호스트 51 · 미확인 1'.
+- 결함이 아닌 것: 400px `#/tools/san-switch` 에서 측정 스크립트가 'SAN 스위치 모니터링' 글자를 120초 안에 못 찾은 것은 **스크립트의 첫 일치가 접힌 사이드바 라벨(숨김)** 이어서다 —
+  본문 h1 에 같은 글자가 있고(DOM 확인 · 3곳) 넘침 0 · 오류 0. 기존 화면 회귀가 아니다(A/B 생략 — DOM 근거로 충분).
+- 데모 어레이 수가 첫 측정 3대 → 뒤 측정 30대로 달랐던 것은 목 서버 기동 직후 표본이 쌓이기 전이어서로 보인다(데모 합성이 시간 함수) — 실장비와 무관 · 미검증 추정.
+- 스크린샷(세션 스크래치패드 · 저장소에 넣지 않음): `sst-{1440,400}-{list,detail,check,mapping,sanswitch}.png`.
 
 ## 9. 출처(어레이 측 API — 2026-11-08 웹 확인 · 실장비 미확인)
 

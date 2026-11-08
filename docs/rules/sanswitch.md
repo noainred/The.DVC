@@ -2,7 +2,7 @@
 
 > 루트 `CLAUDE.md` 에서 옮긴 기록(2026-10-20, v2.746 시점). 문구는 원문 그대로이고 목록 들여쓰기만 한 단계 줄였다. "되돌리지 말 것" 규칙은 그대로 유효하다 — 이 영역 코드를 고치기 전에 이 파일을 읽을 것. 새 교훈은 테스트 → 이 파일 순으로 남기고 루트 CLAUDE.md 에는 쌓지 않는다.
 
-**언제 읽나**: server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san*
+**언제 읽나**: server/src/sanswitch/ · server/src/routes/api/{sanSwitch,sanStorage}.js · web/src/views/tools/SanSwitch*·SanStorage*·san*
 
 ## 목차
 
@@ -22,6 +22,7 @@
 - (원래 2797행) 점검 이력은 '수집 1회 = 기록 1회' 다
 - (원래 2809행) '전체 수집' 은 무엇을 했는지 나눠 말한다
 - (v2.748) 포트 사용량·포트 배치 탭 — 기간은 경계로 자르고, 빈 칸·부분 합·미래 칸을 값으로 만들지 않는다
+- (v2.947) SAN 스토리지 성능 — 독립 도구 · 디렉터 해석은 이름 규칙만 · 지금 = 팹 A/B 다 모인 마지막 칸 · 점검 unknown 흡수 금지 · 임계값은 벤더 문서 값만
 - (v2.920) 호스트 ↔ SAN 조닝·트래픽 귀속 — 판정 코어는 `attribution.js` 하나, 확정분과 추정분을 합치지 않는다
 - (v2.935) 귀속 실측 우선(ESXi 경로 비율 → IPF → 포트 비율) · Flow Vision 플로우 모니터(san-flow) — 스위치 설정을 바꾸는 명령은 서버만 만든다
 
@@ -346,3 +347,19 @@
     — 판정 코어 `markActivated` 하나 ⓒ 늦은 회신은 그 뒤에 시작한 작업이 반영됐으면 상태를 바꾸지 않는다(`lastJobAt`) ⓓ 끄기 · 켜기를 보냈는데 결과를 모르면 '결과 모름'
     ⓔ 화면 가림이 WWN(콜론 8묶음)을 IPv6 로 읽어 지우던 것 — `maskKeepWwn` ⓕ 사전 확인(`togglePrecheck` — 상태 · 엣지 버전)을 OTP 재인증 **앞에** 둔다(거부할 요청이 OTP 를 쓰지 않게) ·
     GET 이 `toggleIssue` 를 내려 화면이 버튼을 미리 잠근다. 라우트를 반복문 템플릿 경로로 선언하면 API 문서 생성기가 읽지 못한다(이번에 두 라우트가 문서에서 빠졌다) — 따로 선언할 것.
+
+- **v2.947 — SAN 스토리지 성능(독립 도구 `san-storage` · 설계 `docs/design/san-storage-perf` · 사용자 결정 2026-11-08: 독립 도구 · 독립 메뉴 · 기존 메뉴 보존 · 캡처 전 선착수 · 1년 · 표준 검증 · 팔레트 토큰)**
+  (`sanswitch/{directorOf,directorMap,storageCheckSettings,storageList,storagePerfCheck}.js` · `routes/api/sanStorage.js` · 웹 `views/tools/SanStorage*.jsx`·`sanStorageText.js`·`sanStorage.css` · 회귀 `test/sanStorage2947*.test.js` · 웹 `sanStorageText.test.js`):
+  · **디렉터 · 컨트롤러는 스위치 네임서버가 받은 포트 심볼릭 이름의 셋째 조각에서 읽는다**(`directorOf` — PowerMax `FA-1D 4`·`SAF-1d 4`·`FA-7E:0`·`OR-1C 1` / PowerStore `NodeA FC0` / Unity `SPA FC0`). 벤더별 아는 패턴만 읽고 안 맞으면
+    `group: null`('(구분 못 함)') — **평평한 이름을 억지로 나누지 않는다**. PowerStore · Unity 꼴은 목 서버 형식이라 실장비 미확인(캡처 가이드 `CAPTURE-GUIDE.md`). 확신 등급 manual > name > alias > none 을 화면이 배지로 구분한다.
+  · **'지금' 은 수집 주기 안에서 팹 A/B 표본이 다 모인 마지막 칸**(`storageList.nowOf` — 마지막 값이 carryMs + 칸 폭보다 오래됐으면 null + `stale`). 지금이 없으면 회선 사용률도 null(0 아님). 24시간 창은 열린 시작(1시간 칸 24개) ·
+    7일 대비는 비교 구간 값이 `MIN_PREV_HOURS`(6) 미만이면 null 이고 `prevHours` 로 사유를 센다. 회선 사용률 분모는 포트 사용량 탭과 같은 `capBpsOf`(속도 모르는 포트는 빼고 개수).
+  · **현황의 '지금 합계' 는 트래픽 카드와 같은 함수**(`trafficTotal.sumArrayTraffic` · 1시간 창 60초 칸)로 낸다 — 테스트가 `/tools/san-storage` 와 `/tools/sanswitch/perf/traffic-total?hours=1` 을 대조한다. 행별 '지금' 은 따로(마지막 칸 시각이 어레이마다 다르다).
+  · `storageSeriesMulti({ withPorts:true })` 는 포트별 시계열(`portsDetail` — 자기 표본이 있는 칸만 값 · 이월하지 않는다)을 싣고 기억 키에 withPorts 가 들어간다. **데모 수식은 어레이 합 = 포트별 시계열의 합**(withPorts 유무로 숫자가 달라지면 KPI 대조가 깨진다).
+  · **점검(`storagePerfCheck`)은 월간 점검 틀 그대로** — ok/warn/bad/**unknown**/na · unknown 을 ok 로 흡수하지 않는다('정상(일부 미확인)'). 어레이 측 5항목(busy · 응답 · 큐 · CPU · 보고 대조)은 수집기가 생기기 전까지 unknown('어레이 측 성능 미수집') —
+    거짓 정상 금지. 임계값(`storageCheckSettings`)은 **벤더 문서에서 찾은 값만 기본값**(PowerMax busy 이상 70 · 큐 75 — Unisphere 10.0 건강 점수 기본 · Unity SP CPU 70/90 — BP 가이드 · PowerStore 노드 CPU 50/70 — KB 000192018 간접 · 회선 포화 70 — Brocade MAPS TX 70 / 90 제안)이고
+    응답 시간은 **비움**(판정 안 함 — 공식 기준 못 찾음). null 은 '비움', 빈 값은 '기본값' — 둘의 뜻이 다르다(라우트 주석). 편중 상수는 `portUsage.IMBALANCE_*` 를 그대로(24시간 평균으로 판정 · 2배는 이상).
+  · 관리자 재정의(`directorMap` — 분류 array/host · 포트→디렉터)는 **표시에만** 영향(표본 · 판정 데이터 불변) · 전체 교체 · 그룹 이름 `GROUP_RE` · 바뀐 항목만 변경자/시각 · 이름이 바뀐 포트는 자동으로 지우지 않고 표지. 저장은 admin + `fullRwOnly` + 감사 로그.
+  · 게이트는 형제 sanswitch 와 같다 — 조회 `toolsPerm + fullScopeOnly`(SAN 은 vCenter 범위 밖) · 쓰기 `adminOnly + fullRwOnly` · CSV `csvPerm + adminOnly` · 비-admin 은 주소 가림. 도구 키는 **세그먼트 = 키**(`san-storage`) · 카탈로그 adminOnly 는 san-switch 와 같이 true.
+  · 기존 SAN 스위치 화면의 '스토리지 사용량 분석' 모달 · 트래픽 카드 · 메뉴 항목은 **보존**(사용자 결정)하고 새 화면 링크만 더했다 — 둘 다 같은 서버 집계를 읽는다(화면이 둘, 판정 코어는 하나).
+  · 남긴 것: 어레이 측 수집(PR ⓑ) · 구간 슬라이더/날짜 이동 · 점검 PDF/이력 · 별칭 전달(실 Unity 캡처 뒤) — `docs/design/san-storage-perf/README.md` §8.
