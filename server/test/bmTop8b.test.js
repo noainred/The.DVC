@@ -1,11 +1,12 @@
 /**
- * 리눅스 성능 8b단계 ⑳ — `##TOP` 구획(명령 조각 · 파서 · 표지 위조 · 상한 · 세션 예산 산수).
+ * 리눅스 성능 8b단계 ⑳ — 프로세스 Top-N(같은 세션의 별도 exec — 명령 조각 · 파서 · 표지 위조 · 상한). 시한 산수 · 실제 수집 경로는 bmTop8bBudget.test.js.
  *   ① 파서: top 경로 · /proc 대안 · 권한 없는 I/O = null(‘—’) · 접두 없는 줄 버림 · 꺼짐 · 값 0 개 = null(missing)
  *   ② 실제 셸(dash · bash) + 가짜 top(PATH 앞): **둘째 프레임**만 · COMMAND 열(인자)이 출력에 없다 · 대안 경로 강제
  *   ③ 실제 프로세스(이 컨테이너 /proc): comm 을 ‘##END’ · 개행 섞인 ‘\n##END\n##MEM’ 으로 바꾼 바쁜 자식 — 두 경로 모두 표지가 생기지 않고 그 PID 가 후보에 나온다
  *      (프로세스 이름은 /proc/<pid>/comm 으로 확인 · 못 읽으면 t.skip — CI 러너)
- *   ④ 상한 · 산수: 40줄 × 201바이트 ≤ 8KB · 바이트 합 < 출력 상한 < sshExec 상한 · 최악 추가 시간 · 세션 예산 < 장비 시한 · 인자 · 환경 · kill 을 읽거나 부르지 않는다
- *   ⑤ shapeLinux: 순서(LINUX_SECTIONS) · 표지 위조 줄이 다른 구획을 덮지 못한다 · 잘림이면 missing
+ *   ④ 상한: 40줄 × 201바이트 ≤ 8KB · 주 명령에 TOP 이 없다(반증 F1) · 인자 · 환경 · kill 을 읽거나 부르지 않는다
+ *   ⑤ readTopOutput: 접두 없는 줄(위조 표지) 버림 · 빈 출력 = missing · 주 명령 shapeLinux 에는 top 칸이 없다
+ *   ⑥ 반증 S3: top 머리글에서 공백이 들어갈 수 있는 열(COMMAND 등)이 PID · S · %CPU 앞이면 받지 않는다(→ /proc 대안) · 열 순서만 바뀐 머리글은 읽는다
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -110,16 +111,20 @@ test('③ 실제 프로세스 — comm 위조(##END · 개행 섞인 표지)는 
   let ca = ''; let cb = '';
   try { ca = fs.readFileSync(`/proc/${a.pid}/comm`, 'utf8'); cb = fs.readFileSync(`/proc/${b.pid}/comm`, 'utf8'); } catch { /* */ }
   if (ca.trim() !== '##END' || !cb.includes('##MEM')) return t.skip(`이 러너는 /proc/self/comm 쓰기가 반영되지 않는다(${JSON.stringify(ca)})`);
+  // 주 명령(같은 위조 프로세스가 도는 중) — 표지 진짜 하나씩 · 메모리 구획이 덮이지 않는다(TOP 은 이제 주 명령 밖이다 — 반증 F1)
+  const main = run(SHELLS[0], OS.linuxCommand([]));
+  const ml = main.split('\n');
+  assert.equal(ml.filter((l) => l === '##END').length, 1, '주 명령: 진짜 ##END 하나');
+  assert.equal(ml.filter((l) => l === '##MEM').length, 1, '주 명령: ##MEM 도 진짜 하나');
+  const msh = OS.shapeLinux(main, []);
+  assert.equal(msh.truncated, false); assert.ok(msh.mem && msh.mem.totalBytes > 1024 * 1024, '메모리 구획이 위조 줄로 덮이지 않는다');
+  assert.equal(Object.hasOwn(msh.perf, 'top'), false, '주 명령 shapeLinux 에는 top 칸이 없다(별도 exec)');
   for (const forceProc of [false, true]) {
     if (!forceProc && !HAS('top')) continue;
-    const full = run(SHELLS[0], OS.linuxCommand([], { top: true }).replace(T.topShell(), T.topShell({ forceProc })));
-    const lines = full.split('\n');
-    assert.equal(lines.filter((l) => l === '##END').length, 1, `forceProc=${forceProc}: 진짜 ##END 하나`);
-    assert.equal(lines.filter((l) => l === '##MEM').length, 1, '##MEM 도 진짜 하나');
-    const sh = OS.shapeLinux(full, []);
-    assert.equal(sh.truncated, false);
-    assert.ok(sh.mem && sh.mem.totalBytes > 1024 * 1024, '메모리 구획이 위조 줄로 덮이지 않는다');
-    const top = sh.perf.top.value;
+    const out = run(SHELLS[0], T.topCommand({ forceProc }));
+    const lines = out.split('\n').filter(Boolean);
+    assert.ok(lines.every((l) => /^t[SCM]:/.test(l)), `forceProc=${forceProc}: 모든 줄이 고정 접두(위조 이름은 줄 끝 칸)`);
+    const top = T.readTopOutput(out).value;
     assert.ok(top && top.candidates > 0);
     const pa = top.cpu.find((x) => x.pid === a.pid); const pb = top.cpu.find((x) => x.pid === b.pid);
     assert.ok(pa && pa.comm === '##END', `forceProc=${forceProc}: ##END 프로세스가 후보(이름은 값으로)`);
@@ -127,37 +132,59 @@ test('③ 실제 프로세스 — comm 위조(##END · 개행 섞인 표지)는 
   }
 });
 
-test('④ 상한 · 산수 · 읽지 않는 것', () => {
+test('④ 상한 · 주 명령 밖 · 읽지 않는 것', () => {
   assert.ok(T.TOP_LINE_CAP.TOP * T.TOP_LINE_BYTES.TOP <= 8192, '40줄 × 201바이트 ≤ 8KB');
   assert.equal(T.TOP_LINE_BYTES.TOP, T.TOP_LINE_WIDTH + 1);
-  assert.match(T.TOP_SHELL.TOP, new RegExp(`cut -c1-${T.TOP_LINE_WIDTH} \\| head -n ${T.TOP_LINE_CAP.TOP}$`), '구획 끝에 줄 폭 · 줄 수 상한');
-  assert.ok(OS.SECTION_BYTES_SUM < OS.OUTPUT_MAX_BYTES, '구획 상한 바이트 합 < 출력 상한');
-  assert.equal(OS.SECTION_LINE_CAP.TOP, T.TOP_LINE_CAP.TOP); assert.equal(OS.SECTION_LINE_BYTES.TOP, T.TOP_LINE_BYTES.TOP);
-  // 세션 예산: 이 구획의 최악 추가 시간(top 시한 + 대안)이 명령 시한보다 충분히 작고, 세션 예산 < 장비 시한(60초)은 그대로
-  assert.ok(T.TOP_WORST_MS <= 5_000, `최악 추가 ${T.TOP_WORST_MS}ms`);
-  assert.ok(OS.SESSION_BUDGET_MS < 60_000 && OS.SESSION_BUDGET_MS - 15_000 >= 30_000, '세션 예산 50초(READY 15 + 명령 30 안) < 장비 시한 60초');
-  assert.match(T.TOP_SHELL.TOP, /timeout 3 top -b -n 2 -d 1 -w 512 -o %CPU/);
-  // 인자 · 환경 · 열린 파일 · 조작 — 읽거나 부르지 않는다(명령 문자열 스윕)
-  for (const bad of [/cmdline/, /environ/, /\/fd\b/, /\bkill\b/, /\brenice\b/, /\bsudo\b/, /\bargs\b/, /\bcmd\b/]) assert.doesNotMatch(T.TOP_SHELL.TOP, bad, String(bad));
-  assert.match(T.TOP_SHELL.TOP, /HOME=\/nonexistent XDG_CONFIG_HOME=\/nonexistent/, '개인 toprc 를 읽지 않는다');
-  // 순서 — CHANGES 다음 · SAMPLER 앞
-  const i = OS.LINUX_SECTIONS.indexOf('TOP');
-  assert.ok(i > OS.LINUX_SECTIONS.indexOf('CHANGES') && i < OS.LINUX_SECTIONS.indexOf('SAMPLER'));
+  assert.match(T.TOP_COMMAND, new RegExp(`cut -c1-${T.TOP_LINE_WIDTH} \\| head -n ${T.TOP_LINE_CAP.TOP}$`), '명령 끝에 줄 폭 · 줄 수 상한');
+  assert.ok(T.TOP_LINE_CAP.TOP * T.TOP_LINE_BYTES.TOP < 64 * 1024, 'sshExec 출력 상한보다 훨씬 작다');
+  assert.ok(T.TOP_COMMAND.startsWith('export LC_ALL=C; '), 'C 로캘');
+  // 반증 F1: 주 명령에는 TOP 이 없다(표지 · top · /proc/*/io 읽기 모두) — 별도 exec
   const cmd = OS.linuxCommand([]);
+  assert.ok(!OS.LINUX_SECTIONS.includes('TOP'), 'LINUX_SECTIONS 에 TOP 없음');
+  assert.doesNotMatch(cmd, /##TOP|tS:|\btop -b|\/proc\/\[0-9\]\*\/io/, '주 명령에 Top-N 조각이 없다');
   const markers = [...cmd.matchAll(/echo '##([A-Z]+)'/g)].map((m) => m[1]);
   assert.deepEqual(markers, OS.LINUX_SECTIONS.filter((x) => x !== 'SAMPLER'), '명령 표지 순서 = LINUX_SECTIONS');
-  assert.ok(OS.linuxCommand([], { top: false }).includes("echo 'tS:off=1'"), '끄면 꺼짐 한 줄');
+  assert.match(T.TOP_COMMAND, /timeout 3 top -b -n 2 -d 1 -w 512 -o %CPU/);
+  // 인자 · 환경 · 열린 파일 · 조작 — 읽거나 부르지 않는다(명령 문자열 스윕)
+  for (const bad of [/cmdline/, /environ/, /\/fd\b/, /\bkill\b/, /\brenice\b/, /\bsudo\b/, /\bargs\b/, /\bcmd\b/]) assert.doesNotMatch(T.TOP_COMMAND, bad, String(bad));
+  assert.match(T.TOP_COMMAND, /HOME=\/nonexistent XDG_CONFIG_HOME=\/nonexistent/, '개인 toprc 를 읽지 않는다');
 });
 
-test('⑤ shapeLinux — 위조 표지 줄 · 잘림 · 순서', () => {
-  const base = ['##STAT', 'cpu  1 0 1 100 0 0 0 0 0 0', '##MEM', 'MemTotal: 1000 kB', 'MemAvailable: 500 kB'];
-  const out = [...base, '##TOP', 'tS:src=top dt=1 clk=100 pg=4096 up=10 n=1 r=1 d=0 tot=5 c=1', 'tC:9|root|R|5.0|10|1|10|0|0|##MEM', '##MEM', 'MemTotal: 9 kB', '##END'].join('\n');
-  const s = OS.shapeLinux(out, []);
-  assert.equal(s.mem.totalBytes, 1000 * 1024, '##TOP 안의 ##MEM(접두 없는 위조 줄)은 앞 구획을 다시 열지 못한다(재개방 금지)');
-  assert.equal(s.perf.top.value.cpu[0].comm, '##MEM');
-  assert.equal(s.perf.top.value.unparsed, 2, '접두 없는 줄은 버리고 센다');
-  // 잘림 — ##END 가 안 오면 마지막 구획(TOP)은 missing(0 · 정상으로 두지 않는다)
-  const cut = [...base, '##TOP', 'tS:src=top dt=1 clk=100 pg=4096 up=10 n=1 r=1 d=0 tot=5 c=1', 'tC:9|root|R|5.0|10'].join('\n');
-  const c = OS.shapeLinux(cut, []);
-  assert.equal(c.truncated, true); assert.equal(c.perf.top.missing, true); assert.equal(c.perf.top.value, null);
+test('⑤ readTopOutput — 위조 표지 줄 · 빈 출력 · 잘린 줄', () => {
+  const out = ['tS:src=top dt=1 clk=100 pg=4096 up=10 n=1 r=1 d=0 tot=5 c=1', 'tC:9|root|R|5.0|10|1|10|0|0|##MEM', '##MEM', 'MemTotal: 9 kB', '##END'].join('\n');
+  const s = T.readTopOutput(out);
+  assert.equal(s.missing, false); assert.equal(s.value.cpu[0].comm, '##MEM', '이름은 값으로');
+  assert.equal(s.value.unparsed, 3, '접두 없는 줄(위조 표지 포함)은 버리고 센다');
+  assert.deepEqual(T.readTopOutput(''), { value: null, absent: false, missing: true }, '빈 출력 = missing(없음으로 보지 않는다)');
+  assert.deepEqual(T.readTopOutput('garbage\n##END'), { value: null, absent: false, missing: true });
+  assert.deepEqual(T.readTopOutput('tS:off=1').value, { off: true });
+  // 잘린 마지막 줄(칸 모자람)은 버리고 센다 — 값을 지어내지 않는다
+  const cut = T.readTopOutput('tS:src=top dt=1 clk=100 pg=4096 up=10 n=1 r=1 d=0 tot=5 c=1\ntC:9|root|R|5.0|10');
+  assert.equal(cut.value.cpu.length, 0); assert.equal(cut.value.unparsed, 1);
+});
+
+test('⑥ 반증 S3 — 공백 든 열이 PID · S · %CPU 앞이면 머리글을 받지 않는다(→ /proc 대안) · 열 순서만 바뀐 머리글은 읽는다', async (t) => {
+  if (!SHELLS.length || !HAS_PROC) return t.skip('셸 · /proc 없음');
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'bmtop-s3-'));
+  t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
+  const self = process.pid;
+  const head = ['top - 10:00:00 up 1 day,  1 user,  load average: 1.00, 1.00, 1.00', 'Tasks: 2 total,   1 running,   1 sleeping,   0 stopped,   0 zombie', ''];
+  const write = (frame2) => fs.writeFileSync(path.join(bin, 'top'), `#!/bin/sh
+cat <<'EOF'
+${[...head, '    PID USER  S  %CPU COMMAND', '      1 root  S   1.0 init', '', ...head, ...frame2].join('\n')}
+EOF
+`, { mode: 0o755 });
+  // (가) /etc/topdefaultrc 가 COMMAND 를 앞으로 옮긴 판(procps-ng 4) — 공백 든 comm ‘a b 12.5’ 가 %CPU 자리를 민다 → 받지 않는다
+  write(['    PID COMMAND             S  %CPU', `${String(self).padStart(7)} my worker 12.5      R  33.0`, '      2 kthreadd            S   0.0', '']);
+  const a = T.parseTop(run(SHELLS[0], T.topShell(), bin).split('\n'));
+  assert.equal(a.src, 'proc', 'COMMAND 가 %CPU 앞인 머리글은 받지 않고 /proc 대안으로');
+  assert.ok(!a.cpu.some((x) => x.pid === self && x.cpu === 12.5), 'comm 조각(12.5)이 %CPU 로 들어가지 않는다');
+  // (나) 열 순서만 바뀐 판(공백 든 열은 뒤) — 머리글 이름으로 읽는다
+  write(['  %CPU S     PID USER      COMMAND', `  44.0 R ${String(self).padStart(7)} root      my worker 12.5`, '   0.0 S       2 root      kthreadd', '']);
+  const b = T.parseTop(run(SHELLS[0], T.topShell(), bin).split('\n'));
+  assert.equal(b.src, 'top'); assert.equal(b.cpu[0].pid, self); assert.equal(b.cpu[0].cpu, 44, '열 순서가 달라도 머리글로 찾는다');
+  // (다) procps-ng 4 기본 순서(공백 든 COMMAND 는 맨 끝) — 그대로 읽는다
+  write(['    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND', `${String(self).padStart(7)} root      20   0   10000   5000   1000 R  55.0   0.1   0:01.00 my worker 12.5`, '']);
+  const c = T.parseTop(run(SHELLS[0], T.topShell(), bin).split('\n'));
+  assert.equal(c.src, 'top'); assert.equal(c.cpu[0].cpu, 55);
 });

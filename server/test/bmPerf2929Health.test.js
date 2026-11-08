@@ -44,8 +44,9 @@ test('구획 순서 · 상수 조각 — LINUX_SECTIONS 에 ##CHRONY · ##DMESG 
   // 멈출 수 있는 명령은 timeout(R8)
   assert.match(H.HEALTH_SHELL.CHRONY, /timeout 3 chronyc/);
   assert.match(H.HEALTH_SHELL.DMESG, /timeout 3 dmesg/);
-  assert.match(H.HEALTH_SHELL.CHANGES, /timeout 8 needs-restarting/);
-  assert.match(H.HEALTH_SHELL.CHANGES, /timeout 8 dnf/);
+  // 8b 반증 F1: needs-restarting · dnf 는 한 주기에 하나만(각 DNF_TIMEOUT_S) — 주 명령 timeout 합 산수는 bmTop8bBudget 시험이 고정한다.
+  assert.match(H.HEALTH_SHELL.CHANGES, new RegExp(`timeout ${H.DNF_TIMEOUT_S} needs-restarting`));
+  assert.match(H.HEALTH_SHELL.CHANGES, new RegExp(`timeout ${H.DNF_TIMEOUT_S} dnf`));
   assert.match(H.HEALTH_SHELL.CHANGES, /timeout 3 systemctl is-active firewalld/);
 });
 
@@ -113,7 +114,7 @@ test('실제 셸(dash · bash) + 가짜 장비 명령 — 줄마다 접두 · �
     const ch = shaped.perf.changes.value;
     assert.equal(ch.needsRestart, true, 'needs-restarting -r 출력 표지 ‘Reboot is required’ = 재부팅 필요');
     assert.ok(ch.upS > 0 && /^[0-9a-f-]{36}$/.test(ch.bootId));
-    const chRaw = out.split('##CHANGES\n')[1].split('\n##TOP')[0].split('\n##END')[0].split('\n').filter(Boolean);   // 8b단계: CHANGES 다음 표지는 ##TOP
+    const chRaw = out.split('##CHANGES\n')[1].split('\n##END')[0].split('\n').filter(Boolean);
     assert.ok(chRaw.every((l) => l.startsWith('x:')), `${sh}: CHANGES 줄은 전부 x: 접두`);
     // dnf 는 rpmdb 가 최근에 바뀐 장비에서만 돈다(실행 여부는 장비 상태 — 단언하지 않는다) · 돌았더라도 파서가 명령줄을 버린다(보관 값에 없다).
     assert.ok(!JSON.stringify(shaped.perf.changes.value).includes('SECRET'), `${sh}: dnf 명령줄은 보관 값에 없다`);
@@ -125,7 +126,7 @@ test('실제 셸(dash · bash) + 가짜 장비 명령 — 줄마다 접두 · �
   const s2 = OS.shapeLinux(out2, []);
   assert.equal(s2.perf.chrony.missing, true, 'chronyc 실패 → missing');
   assert.deepEqual(s2.perf.dmesg.value, { failed: true, rc: 1 }, 'dmesg 실패 → 개수 없음');
-  assert.equal(s2.perf.changes.value.needsRestart, null, 'needs-restarting 시한(8초 · 124) → 확인 불가(재부팅 불필요로 보지 않는다)');
+  assert.equal(s2.perf.changes.value.needsRestart, null, `needs-restarting 시한(${H.DNF_TIMEOUT_S}초 · 124) → 확인 불가(재부팅 불필요로 보지 않는다)`);
   // L1: 종료 1 이지만 표지가 없으면(dnf 오류 · 비root · rpmdb 잠금) ‘재부팅 필요’ 를 지어내지 않는다 · 0 이어도 표지가 있어야 ‘불필요’
   const bin3 = fakeBin({ 'needs-restarting': "echo 'Error: rpmdb open failed' >&2; exit 1", date: 'echo 1500' });
   const bin4 = fakeBin({ 'needs-restarting': "printf 'No core libraries or services have been updated since boot-up.\\nReboot should not be necessary.\\n'; exit 0", date: 'echo 2109' });
@@ -135,10 +136,13 @@ test('실제 셸(dash · bash) + 가짜 장비 명령 — 줄마다 접두 · �
   // 하루 네 번 창 밖이고 방금 부팅 · rpmdb 최근 변경이 아니면 실행하지 않는다(skip — 직전 값을 이어 쓴다). 장비 조건은 이 장비에서 직접 계산해 기대값을 정한다.
   const bin5 = fakeBin({ 'needs-restarting': "printf 'Reboot is required\\n'; exit 1", date: 'echo 1234' });
   t.after(() => fs.rmSync(bin5, { recursive: true, force: true }));
-  const recentRpm = ['/var/lib/rpm/rpmdb.sqlite', '/var/lib/rpm/Packages'].some((f) => { try { return Date.now() - fs.statSync(f).mtimeMs < H.DNF_RECENT_MIN * 60_000; } catch { return false; } });
+  const rpmAge = (min) => ['/var/lib/rpm/rpmdb.sqlite', '/var/lib/rpm/Packages'].some((f) => { try { return Date.now() - fs.statSync(f).mtimeMs < min * 60_000; } catch { return false; } });
+  const recentRpm = rpmAge(H.NR_AFTER_RPM_MIN);
+  const dnfTurn = rpmAge(H.DNF_RECENT_MIN) && (() => { try { execFileSync('/bin/sh', ['-c', 'command -v dnf'], { stdio: 'ignore' }); return true; } catch { return false; } })();
   const justBooted = os.uptime() < 1800;
   const c5 = OS.shapeLinux(run(SHELLS[0], OS.linuxCommand([]), bin5), []).perf.changes.value;
-  if (recentRpm || justBooted) assert.equal(c5.needsRestart, true, '방금 부팅 · rpmdb 변경이면 창 밖이어도 실행');
+  if (dnfTurn) assert.equal(c5.nrSkipped, true, '8b 반증 F1: dnf history 차례면 needs-restarting 은 건너뛴다');
+  else if (recentRpm || justBooted) assert.equal(c5.needsRestart, true, '방금 부팅 · rpmdb 변경이면 창 밖이어도 실행');
   else { assert.equal(c5.nrSkipped, true, '창 밖 · 변화 없음 → 실행하지 않음(skip)'); assert.equal(c5.needsRestart, null); }
 });
 
