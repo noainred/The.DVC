@@ -638,7 +638,13 @@ export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps 
       console.log(`[bmusage] 전력 알림 판정 노드 넘어감 ${released.length}건(${Object.entries(by).map(([k, v]) => `${k} ${v}`).join(' · ')}) — 이 노드의 규칙 상태를 비웠습니다(해소 알림 없음 · 재발 억제 묘비만 남김)`);
     }
     // 상태가 바뀐 적 없는 첫 주기(손상 뒤 warmup)는 기준만 잡는다.
-    if (_warmup) { _warmup = false; return { ok: true, warmup: true, counts }; }
+    //   4차 Q1: 서버 · 랙 항목이 없는 판정(실패 주기의 빈 판정 · 수집 노드 칸만 — 3차 P2)은 이 보호를 **소비하지 않는다** — 그 판정도 보내지 않고(기준만),
+    //   서버 · 랙 기준은 다음 정상 주기가 잡는다. 예전에는 빈 판정이 보호를 써 버려 다음 정상 주기에 진행 중이던 걸림을 새 사건으로 보냈다(정상 주기 먼저 0 · 빈 판정 먼저 1).
+    //   보류 주기 수 · 판정 시각(위 st.cycle)은 그대로 남긴다.
+    if (_warmup) {
+      if (items.some((x) => x && x.key && x.key !== '__node__')) _warmup = false;
+      return { ok: true, warmup: true, counts };
+    }
     const targetsByKey = new Map(items.filter((x) => x?.target).map((x) => [x.key, x.target]));
     const out = fires.length ? await dispatch(fires, { rules, st, now, D, targetsByKey, cycleMax }) : {};
     return { ok: true, counts, fires: fires.length, ...out };

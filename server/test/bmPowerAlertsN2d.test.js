@@ -119,3 +119,36 @@ test('② P2 — 수집 건강 규칙이 꺼진 노드의 실패 주기도 판�
   assert.equal(poller.bmUsageStatus().last.collectAlert, undefined, '수집 건강 규칙이 꺼져 있으면 그 칸은 그대로 없음');
   assert.equal(A.perfAlertStatus().sent.length, 0);
 });
+
+test('④ Q1 — 상태 파일 손상 뒤 서버 · 랙 항목이 없는 판정(실패 주기의 빈 판정 · 노드 칸만)은 ‘첫 주기는 기준만’ 을 소비하지 않는다', async () => {
+  const rules = rulesOf({ powerCap: { sustain: 1, repeatMin: 0 }, collect: { sustain: 1, repeatMin: 0 } });
+  const cap = (s) => ({ key: 'K1', name: 'bm-K1', vcenterId: 'vcA', target: { key: 'K1', vcenterId: 'vcA' }, power: { kind: 'server', capHitPct: 98, w: 900, at: s, capW: 900, capPct: 100, capHit: true } });
+  const node = { key: '__node__', name: '수집 노드 n', vcenterId: '', collect: { cells: { error: 'true' }, error: 'classify-failed' } };
+  for (const [label, first] of [['빈 판정', []], ['노드 칸만', [node]]]) {
+    await A._drainPerfAlertsForTest();
+    A._resetPerfAlertsForTest();
+    const d = depsOf();
+    // 손상(재시작 뒤 첫 로드) → 실패 주기의 판정이 먼저
+    fs.writeFileSync(FILE, '{broken');
+    const r0 = await A.runPerfAlerts(first, { rules, now: NOW, deps: d.deps, intervalMs: 5 * MIN, cycleStartAt: NOW - MIN });
+    assert.equal(r0.warmup, true, `${label} — 그 판정도 보내지 않는다(기준만)`); assert.equal(r0.fires, undefined);
+    assert.equal(STATE().cycle.at, NOW, `${label} — 판정 시각(P2 동작)은 그대로 남긴다`);
+    // 다음 정상 주기 — 진행 중이던 걸림을 새 사건으로 보내지 않는다(이 판정이 기준만 잡는다)
+    const r1 = await A.runPerfAlerts([cap(NOW + 4 * MIN), node], { rules, now: NOW + 5 * MIN, deps: d.deps, intervalMs: 5 * MIN, cycleStartAt: NOW + 4 * MIN });
+    assert.equal(r1.warmup, true, `${label} 뒤 정상 주기가 기준을 잡는다(기준판: warmup false · 발송 1)`);
+    const r2 = await A.runPerfAlerts([cap(NOW + 9 * MIN), node], { rules, now: NOW + 10 * MIN, deps: d.deps, intervalMs: 5 * MIN, cycleStartAt: NOW + 9 * MIN });
+    await A._drainPerfAlertsForTest();
+    assert.equal(r2.fires, 0, '그 뒤에도 같은 사건은 진행 중'); assert.equal(d.sends.length, 0, `${label} — 발송 0`);
+  }
+  // 서버 항목이 있는 첫 판정은 예전처럼 보호를 소비한다(다음 주기 새 사건은 발송)
+  await A._drainPerfAlertsForTest();
+  A._resetPerfAlertsForTest();
+  const d = depsOf();
+  fs.writeFileSync(FILE, '{broken');
+  const r0 = await A.runPerfAlerts([cap(NOW - MIN)], { rules, now: NOW, deps: d.deps, intervalMs: 5 * MIN });
+  assert.equal(r0.warmup, true);
+  const ri = rulesOf({ powerCap: { sustain: 1, repeatMin: 0 }, inlet: { sustain: 1, repeatMin: 0 } });
+  const r1 = await A.runPerfAlerts([{ key: 'K2', name: 'bm-K2', vcenterId: 'vcA', target: { key: 'K2', vcenterId: 'vcA' }, power: { kind: 'server', inletWarnC: 27, tempState: 'ok', inletC: 30, tempAt: NOW + 4 * MIN } }], { rules: ri, now: NOW + 5 * MIN, deps: d.deps, intervalMs: 5 * MIN });
+  await A._drainPerfAlertsForTest();
+  assert.equal(r1.warmup, undefined); assert.equal(r1.fires, 1); assert.equal(d.sends.length, 1);
+});
