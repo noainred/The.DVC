@@ -39,7 +39,7 @@ function downloadText(text, name) {
  * @param {{itemKey:string, name?:string, init:{kind,metric,dev,rangeK,show,sel}, devices?:object, keepDays?:object|null, anchor?:number,
  *   initWin?:{from:number,to:number}|null, peakWindowS?:number|null, onClose:()=>void, onSel?:(sel)=>void, narrowOverride?:boolean}} p
  */
-export default function BmTrendPopup({ itemKey, name = '', init = {}, devices = {}, keepDays = null, anchor = null, initWin = null, peakWindowS = null, onClose, onSel, narrowOverride = null }) {
+export default function BmTrendPopup({ itemKey, vc = '', name = '', init = {}, devices = {}, keepDays = null, anchor = null, initWin = null, peakWindowS = null, onClose, onSel, narrowOverride = null }) {
   // ⚠ 훅은 전부 조기 return 위.
   const [spec, setSpec] = useState(() => ({ kind: init.kind || 'server', metric: init.metric || 'cpu_pct', dev: init.dev || '' }));
   const [rangeK, setRangeK] = useState(() => trendRangeOf(init.rangeK).k);
@@ -53,7 +53,7 @@ export default function BmTrendPopup({ itemKey, name = '', init = {}, devices = 
   const [res, setRes] = useState(null);
   const [narrow, setNarrow] = useState(() => (narrowOverride != null ? narrowOverride : typeof window !== 'undefined' && window.innerWidth < 720));
   const loader = useRef(null);
-  if (!loader.current) loader.current = createTrendLoader(trendFetcher(itemKey));
+  if (!loader.current) loader.current = createTrendLoader(trendFetcher(itemKey, vc));
   const span = trendRangeOf(rangeK).ms;
   const base = useMemo(() => (anchor != null ? anchor : Date.now()), [anchor]);
   const win = useMemo(() => {
@@ -207,7 +207,7 @@ export default function BmTrendPopup({ itemKey, name = '', init = {}, devices = 
         )}
 
         {/* ── 8b단계 ⑳: 이 시점 프로세스(누른 점 → 없으면 창의 피크 시각 → 창 끝) · 시간 × 프로세스 띠(이 창) — 서버 대표값 지표에서만 ── */}
-        {spec.kind === 'server' && <BmTopProc itemKey={itemKey} ts={pp?.t ?? sum.peakAt ?? sum.maxAt ?? win.to} win={win} narrow={narrow} />}
+        {spec.kind === 'server' && <BmTopProc itemKey={itemKey} vc={vc} ts={pp?.t ?? sum.peakAt ?? sum.maxAt ?? win.to} win={win} narrow={narrow} />}
 
         {/* ── 구간 이동 줄(공용 창 계산) ── */}
         <div className="bmt-nav">

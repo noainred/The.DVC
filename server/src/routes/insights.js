@@ -178,7 +178,8 @@ insightsRouter.get('/fleet', async (req, res) => {
     // 캐시 키: 스냅샷 생성시각 + 플릿 리비전(태그/소속/레지스트리 변경 시 즉시 +1). 매 요청 파일 읽기 없음.
     const key = `${snap.generatedAt}|${fleetRev()}`;
     const full = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
-    const { liveKeys, ...payload1 } = full; // liveKeys는 prune 내부용 — 응답에서 제외
+    // liveKeys는 prune 내부용 — 응답에서 제외. bareMetalDupes(다음 점검 ① 2차)도 내부용 — 베어메탈 사용률 라우트가 범위 · 가림을 걸어 따로 내준다.
+    const { liveKeys, bareMetalDupes: _dupes, ...payload1 } = full;
     // 서비스 인벤토리 6차 반증 F2: untaggedServerId(엣지 '태그 없을 때 id' — 고정 승계 내부용)도 응답에서 뺀다.
     //   IP 스캔 등록 iDRAC 은 등록부 id 가 곧 IP 라 'edge:<agent>:10.x.x.x' 가 되어 비관리자 주소 가림(maskFleetPayload)을 비켜 갔다(재현).
     const payload0 = { ...payload1, bareMetal: Array.isArray(payload1.bareMetal) ? payload1.bareMetal.map(({ untaggedServerId: _u, ...r }) => r) : payload1.bareMetal };

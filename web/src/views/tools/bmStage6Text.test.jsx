@@ -102,7 +102,8 @@ describe('서버 비교 — 그리기는 서버 값 그대로 · 결측은 ‘�
     expect(got.filter((x) => x.resp).map((x) => x.resp.n)).toEqual([2]);
   });
   it('보드 행 체크 — 서버 칸 안(열 수 불변)', () => {
-    const rows = matrixRows([{ key: 'k1', name: 's1', agent: '', target: { paths: [] }, entry: null }], { onPickCmp: () => {}, cmpKeys: ['k1'] });
+    // 다음 점검 ①: 비교에 담은 목록은 ‘법인|키’ 쌍 글자(bmPerfUrl.refOf — 법인 없는 항목은 ‘|키’)
+    const rows = matrixRows([{ key: 'k1', name: 's1', agent: '', target: { paths: [] }, entry: null }], { onPickCmp: () => {}, cmpKeys: ['|k1'] });
     const html = renderToStaticMarkup(h('table', null, h('tbody', null, rows)));
     expect((html.match(/<td/g) || []).length).toBe(18);
     expect(html).toContain('type="checkbox"'); expect(html).toContain('checked');

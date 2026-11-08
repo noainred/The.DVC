@@ -164,6 +164,8 @@ export function setFleetTagsBatch(items = [], { by = '', knownApps = [], knownRo
       else return { ok: false, reason: `잘못된 tag: ${it.tag}`, index: i };
       nt += 1;
     }
+    // 2차 재확인 G1: 서비스 태그를 전역 열쇠로 쓸 때 그 서버의 쌍 행(`<법인>|<키>`)을 지운다 — 읽기는 쌍 먼저라 남으면 새 값을 가린다(bmusage/purposeKey.js).
+    if (it.purposeClear === true) { if (Object.hasOwn(purposes, k)) { delete purposes[k]; np += 1; } continue; }
     if (it.purpose !== undefined && it.purpose !== null) {
       const apps = Array.isArray(it.purpose.apps) && it.purpose.apps.length ? [...new Set(it.purpose.apps.map(String))] : null;
       if (apps && apps.some((a) => !PURPOSE_ID_RE.test(a) || !knownApps.includes(a))) return { ok: false, reason: '모르는 기능', index: i };

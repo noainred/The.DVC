@@ -91,6 +91,7 @@ export const WARN = Object.freeze({
   'rtt-unknown': '이 법인 RTT 를 모릅니다(핑 값 없음).',
   'edge-deploy': '엣지 배포 목록으로 갑니다 — 엣지가 다음 인출에서 자기 키 · 공통 계정 이름으로 등록합니다.',
   'os-only-untracked': '이 노드 함대(iDRAC · vCenter)에 없는 서버입니다 — OS 계정 등록부에는 들어가지만 리눅스 성능 수집 대상이 아닙니다(디스크 용량만 수집).',
+  'purpose-common-tag': '이 service_tag 는 공통 값이라(같은 태그의 서버가 여럿 · 둘 이상 법인 · 화이트박스 기본값) 어느 서버 것인지 정할 수 없어 용도 · 역할은 적용하지 않습니다(수집 뒤 서버 상세 화면에서 서버마다 지정).',
   'purpose-unresolved': '이 service_tag 가 지금 수집 대상 서버로 해석되지 않아 용도 · 역할은 적용하지 않습니다(수집 뒤 서버 상세에서).',
   'rtt-stale': '이 법인 RTT 값이 오래됐습니다(핑 값이 30분보다 오래됨) — 지금 RTT 를 모릅니다.',
   'needs-owner': '공통 계정 · SSH 키를 이 주소에 묶습니다 — 적용 때 본인 OTP 를 묻습니다(설정 소유자).',
@@ -368,11 +369,15 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
     if (cls && tag && !ctx.fullScope) { reject('class-full-scope'); done(); continue; }
     // purposes · role 은 그 service_tag 가 **쓰기 범위 안 수집 대상**으로 해석될 때만(purposeWrite 와 같은 판정: 조회 밖 = 없음 · 쓰기 밖 = 403).
     let purposeOk = (apps.length || role) && !!tag;
+    let purposeKey = ''; let purposeClearPair = '';
     if (purposeOk && typeof ctx.tagTarget === 'function') {
       const tt = ctx.tagTarget(tag);
       const tvc = tt ? t(tt.vcenterId) : '';
       if (!tt || (tvc ? !canView(tvc) : !ctx.fullScope)) { purposeOk = false; warn('purpose-unresolved'); }
       else if (tvc ? !canWrite(tvc) : false) { reject('purpose-forbidden'); done(); continue; }
+      // 2차 재확인 G1: 공통 태그면(같은 태그 서버가 여럿 · 공통 기본값 · 둘 이상 법인) 어느 서버 것인지 몰라 적용하지 않는다 — 상세 화면에서 서버마다.
+      else if (tt.common === true) { purposeOk = false; warn('purpose-common-tag'); }
+      else { purposeKey = t(tt.purposeKey); purposeClearPair = t(tt.clearPair); }
     }
     // 반증 F4: OS 만 등록한 행이 이 노드 함대(iDRAC · vCenter)에 없으면 성능 수집 대상이 아니다 — 결과가 말한다(대상 집합은 바꾸지 않는다).
     if (osHost && !idracHost && where !== 'edge' && typeof ctx.fleetHas === 'function' && !ctx.fleetHas({ name, osHost, tag })) warn('os-only-untracked');
@@ -437,6 +442,7 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
       idrac: idracHost ? { id: exIdr ? exIdr.id : (tag || name), host: idracHost, accountId: idracAcc ? idracAcc.id : '', accountName: idracAcc ? idracAcc.name : '', keepCred: !idracAcc && !!exIdr, existing: !!exIdr } : null,
       os: osPlan,
       enabled: en, note: t(c.note), cls, apps: purposeOk ? apps : [], role: purposeOk ? role : '', via,
+      ...(purposeOk && purposeKey ? { purposeKey } : {}), ...(purposeOk && purposeClearPair ? { purposeClearPair } : {}),   // G1: 저장 키(상세 화면과 같은 규칙)
       edgeNames: { idracCred: idracCredName, osCred: osCredName, osUser, osKey: osKeyName },
       moveFromEdge: where !== 'edge' && !!exEdge ? lc(exEdge.agent) : '', moveToEdge: where === 'edge' && !!(exIdr || exOs),
       hidden, binds, edgeBindKeep,

@@ -14,12 +14,14 @@ import {
   PROFILE_STATUS_TEXT, APP_LABEL, PLANNED_LABEL, ROLE_LABEL, TUNING_STATUS_TEXT, matrixCellText, PROFILE_HONEST, faultKpiCards,
 } from './bmOpsText.js';
 import './bmOps.css';
+import { refOf } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍
 
 const SEGS = [['matrix', '매트릭스'], ['catalog', '카탈로그'], ['servers', '점검 결과'], ['tuning', '튜닝 차이']];
 /** 6단계: 용도 그룹(기능) 서버 키 — 용도 판정이 나쁜 순(서버 rank) · 상위 5(비교 상한은 비교 화면이 다시 자른다). 판정이 아니라 목록 고르기다. */
-export function groupCompareKeys(servers = [], app = '') {
+export function groupCompareKeys(servers = [], app = '', { ref = false } = {}) {
   const rank = (s) => (PROFILE_STATUS_TEXT[s.status] || PROFILE_STATUS_TEXT.unknown).rank ?? 9;   // 작을수록 나쁘다(이상 0 · 주의 1)
-  return (Array.isArray(servers) ? servers : []).filter((s) => (s.apps || []).includes(app)).sort((a, b) => rank(a) - rank(b)).slice(0, 5).map((s) => s.key);
+  // 다음 점검 ①: ref — 비교에 담는 ‘법인|키’ 쌍 글자(같은 키 · 다른 법인 서버가 한 칸으로 합쳐지지 않게)
+  return (Array.isArray(servers) ? servers : []).filter((s) => (s.apps || []).includes(app)).sort((a, b) => rank(a) - rank(b)).slice(0, 5).map((s) => (ref ? refOf(s.key, s.vcenterId) : s.key));
 }
 
 export function PurposeFleetView({ resp, onOpen, onCompare = null }) {
@@ -53,7 +55,7 @@ export function PurposeFleetView({ resp, onOpen, onCompare = null }) {
           {onCompare && (
             <div className="bmcmp-tray">
               {cols.filter((c) => c !== 'none').map((c) => {
-                const list = groupCompareKeys(resp?.servers, c);
+                const list = groupCompareKeys(resp?.servers, c, { ref: true });
                 return list.length >= 2 ? <button key={c} type="button" className="btn btn-sm bmp-touch" onClick={() => onCompare(list)}>‘{APP_LABEL[c] || c}’ 그룹 비교(상위 {Math.min(5, list.length)})</button> : null;
               })}
             </div>
@@ -93,7 +95,7 @@ export function PurposeFleetView({ resp, onOpen, onCompare = null }) {
                 const st = PROFILE_STATUS_TEXT[s.status] || PROFILE_STATUS_TEXT.unknown;
                 return (
                   <tr key={`${s.agent || ''}|${s.key}`}>
-                    <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key); }}>{s.name}</span>{s.agent && <div className="bmo-sub">엣지 {s.agent}</div>}</td>
+                    <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key, s.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key, s.vcenterId); }}>{s.name}</span>{s.agent && <div className="bmo-sub">엣지 {s.agent}</div>}</td>
                     <td data-sort={s.vcenterId}>{s.vcenterId || '—'}</td>
                     <td data-sort={s.os}>{s.os}</td>
                     <td data-sort={(s.apps || []).join(',')}>{(s.apps || []).map((a) => APP_LABEL[a] || a).join(' · ') || '—'}{s.manual && <div className="bmo-sub">수동 태그</div>}</td>
