@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디렉터 · 컨트롤러 — 벤더별 해석과 2단계</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.wrap{padding:28px 32px;display:flex;flex-direction:column;gap:18px;min-width:0}
+h2{margin:0;font-size:20px;font-weight:800}
+h4{margin:0;font-size:14px;font-weight:700}
+.card{background:#141b2d;border:1px solid #243049;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}
+.vend{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;font-size:11px;font-weight:700}
+.vend.pmax{background:rgba(57,135,229,.2);color:#9cc4f5}.vend.pstore{background:rgba(217,89,38,.2);color:#f4a988}.vend.unity{background:rgba(25,158,112,.22);color:#7fdcb9}
+.three{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:14px;min-width:0}
+.parse{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12.5px;align-items:center}
+.parse .k{color:#8b9bb4;white-space:nowrap}
+.code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;background:#0f1626;border:1px solid #243049;border-radius:6px;padding:6px 8px;overflow-wrap:anywhere;line-height:1.5}
+.code b{color:#34e0b4;font-weight:600}
+.code u{text-decoration:none;color:#fcd34d}
+.grp{display:flex;flex-direction:column;gap:8px}
+.g{display:grid;grid-template-columns:92px 1fr 70px 62px;gap:8px 10px;align-items:center;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:8px 10px;font-size:12.5px}
+.g .n{font-weight:700;display:flex;align-items:center;gap:8px}
+.g .n i{display:inline-block;width:10px;height:10px;border-radius:2px}
+.g .ports{display:flex;gap:4px;flex-wrap:wrap}
+.g .ports span{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;background:#141b2d;border:1px solid #243049;border-radius:4px;padding:1px 5px;white-space:nowrap}
+.g .ports span.a{border-color:rgba(59,130,246,.5)}.g .ports span.b{border-color:rgba(52,224,180,.5)}
+.g .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:700;text-align:right}
+.g .r{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;text-align:right;color:#8b9bb4}
+.g.hot .r{color:#fcd34d;font-weight:700}
+.bars{display:flex;flex-direction:column;gap:6px}
+.bars .row{display:grid;grid-template-columns:62px 1fr 64px;gap:8px;align-items:center;font-size:12px}
+.bars .tr{height:10px;border-radius:999px;background:#0f1626;overflow:hidden}
+.bars .tr span{display:block;height:100%}
+.bars .v{font-family:"JetBrains Mono",ui-monospace,monospace;text-align:right}
+.note{font-size:12px;color:#8b9bb4;line-height:1.6}
+.note b{color:#e6edf6}
+.info{border:1px solid rgba(245,158,11,.4);background:rgba(245,158,11,.07);border-radius:10px;padding:10px 14px;font-size:12.5px;line-height:1.6}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:8px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;vertical-align:top;overflow-wrap:anywhere}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:#8b9bb4;align-items:center}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+</style>
+</helmet>
+<div class="wrap" style="width: 1440px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+    <div><h2>디렉터 · 컨트롤러 — 스위치가 받은 이름으로 묶는 규칙과, 벤더별 패널</h2>
+      <div class="note">1단계(지금 있는 데이터): 스위치 네임서버의 <b>포트 심볼릭 이름</b>에서 디렉터/컨트롤러를 읽어 포트를 묶습니다 — 새 장비 접속이 없습니다. 2단계(새 수집): 어레이 관리 API 가 주는 디렉터/노드/SP 성능(busy% · IOPS · 응답 시간)을 같은 자리에 나란히 둡니다.</div>
+    </div>
+    <div class="legend"><span><i style="border:1px solid rgba(59,130,246,.8);background:#141b2d"></i>팹 A 포트</span><span><i style="border:1px solid rgba(52,224,180,.8);background:#141b2d"></i>팹 B 포트</span><span><i style="background:#3987e5"></i><i style="background:#d95926"></i><i style="background:#199e70"></i><i style="background:#c98500"></i>시리즈 색(검증된 다크 팔레트 4색 · 고정 순서)</span></div>
+  </div>
+
+  <div class="three">
+    <!-- PowerMax / VMAX -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h4><span class="vend pmax">PowerMax · VMAX</span> PMAX-KR1-01 · 디렉터 4</h4><span class="tag ok">편중 없음</span></div>
+      <div class="parse">
+        <span class="k">심볼릭 이름</span><div class="code">SYMMETRIX::000197900123::<b>FA-1D</b> <u>4</u>::FC::5978_711</div>
+        <span class="k">해석</span><span>제품군 SYMMETRIX · 시리얼 → 어레이 키 · 셋째 조각의 <b class="mono">FA-1D</b> = 디렉터(앞), <span class="mono" style="color:#fcd34d">4</span> = 디렉터 포트. 옛 VMAX 는 <span class="mono">SAF-1d 4</span>·<span class="mono">FA-7E:0</span> 꼴도 있어 '영문 2~3자-숫자+영문' 을 디렉터로 봅니다.</span>
+      </div>
+      <div class="grp">
+        <div class="g"><span class="n"><i style="background:#3987e5"></i>FA-1D</span><span class="ports"><span class="a">A1:12</span><span class="b">B1:12</span></span><span class="v">3.8</span><span class="r">0.72×</span></div>
+        <div class="g"><span class="n"><i style="background:#d95926"></i>FA-2D</span><span class="ports"><span class="a">A1:13</span><span class="b">B1:13</span></span><span class="v">4.9</span><span class="r">0.93×</span></div>
+        <div class="g"><span class="n"><i style="background:#199e70"></i>FA-3D</span><span class="ports"><span class="a">A1:14</span><span class="b">B1:14</span></span><span class="v">5.8</span><span class="r">1.10×</span></div>
+        <div class="g"><span class="n"><i style="background:#c98500"></i>FA-4D</span><span class="ports"><span class="a">A1:15</span><span class="b">B1:15</span></span><span class="v">6.5</span><span class="r">1.25×</span></div>
+      </div>
+      <div class="note">값 = 24시간 평균 Gb/s · 배수 = 어레이 디렉터 평균 대비. 디렉터가 5개 이상이면 시리즈 색은 4색 + '그 밖'(회색) 으로 접고 표는 전부 보여 줍니다(색을 늘리지 않습니다).</div>
+      <div style="border-top:1px solid #1f2a40;padding-top:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:12.5px">2단계 · Unisphere for PowerMax</b><span class="tag blue">수집 전</span></div>
+        <div class="bars">
+          <div class="row"><span class="muted">FA-1D busy</span><div class="tr"><span style="width:0%;background:#3987e5"></span></div><span class="v faint">—</span></div>
+          <div class="row"><span class="muted">FA-4D busy</span><div class="tr"><span style="width:0%;background:#c98500"></span></div><span class="v faint">—</span></div>
+          <div class="row"><span class="muted">응답 시간</span><div class="tr"></div><span class="v faint">— ms</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PowerStore -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h4><span class="vend pstore">PowerStore</span> PSTORE-KR1-02 · 노드 2</h4><span class="tag warn">편중 · Node A 1.7×</span></div>
+      <div class="parse">
+        <span class="k">심볼릭 이름</span><div class="code">PowerStore::PS1A2B3C4D5E::<b>NodeA</b> <u>FC0</u>::FC::3.6.0</div>
+        <span class="k">해석</span><span>셋째 조각의 <b class="mono">NodeA</b>/<b class="mono">NodeB</b> = 컨트롤러(노드), <span class="mono" style="color:#fcd34d">FC0</span> = 노드의 FC 포트. 어플라이언스가 2대 이상이면 시리얼(서비스 태그)마다 노드 A/B 가 따로 나옵니다.</span>
+      </div>
+      <div class="grp">
+        <div class="g hot"><span class="n"><i style="background:#3987e5"></i>Node A</span><span class="ports"><span class="a">A1:20</span><span class="b">B1:20</span></span><span class="v">8.4</span><span class="r">1.70×</span></div>
+        <div class="g"><span class="n"><i style="background:#d95926"></i>Node B</span><span class="ports"><span class="a">A1:21</span><span class="b">B1:21</span></span><span class="v">1.4</span><span class="r">0.30×</span></div>
+      </div>
+      <div class="bars">
+        <div class="row"><span class="muted">Node A</span><div class="tr"><span style="width:86%;background:#3987e5"></span></div><span class="v">8.4 Gb/s</span></div>
+        <div class="row"><span class="muted">Node B</span><div class="tr"><span style="width:14%;background:#d95926"></span></div><span class="v">1.4 Gb/s</span></div>
+      </div>
+      <div class="note"><b>편중 판정</b>은 포트 사용량 탭의 규칙 그대로(그룹 평균 0.5 Gb/s 이상 · 멤버가 평균의 1.4배 이상 — 상수는 API 로 받음). 흔한 원인: 호스트 멀티패스 정책(고정 경로) · 볼륨의 노드 친화도 쏠림 · 한쪽 노드 포트 다운. 화면은 <b>원인을 단정하지 않고</b> 확인할 곳만 안내합니다.</div>
+      <div style="border-top:1px solid #1f2a40;padding-top:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:12.5px">2단계 · PowerStore REST (metrics/generate · 노드별)</b><span class="tag blue">수집 전</span></div>
+        <div class="note">지금 수집기는 <b>클러스터 전체</b> IOPS · 대역폭 · 지연(최신 1점)만 담습니다(<span class="mono">extra.perf</span>). 노드별 엔터티(<span class="mono">performance_metrics_by_node</span> — 추정)를 더 받으면 Node A/B 의 IOPS · 지연 · CPU 가 이 자리에 옵니다.</div>
+      </div>
+    </div>
+
+    <!-- Unity -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h4><span class="vend unity">Unity</span> UNITY-USE-01 · SP 2</h4><span class="tag ok">편중 없음</span></div>
+      <div class="parse">
+        <span class="k">심볼릭 이름</span><div class="code">UNITY::APM00212345678::<b>SPA</b> <u>FC0</u>::FC::5.3.0 <span class="faint">(목 서버 형식)</span></div>
+        <span class="k">해석</span><span><b class="mono">SPA</b>/<b class="mono">SPB</b> = 스토리지 프로세서. ⚠ <b>실장비 Unity 의 심볼릭 이름 형식은 확인하지 못했습니다</b> — 이 현장 조닝 별칭은 <span class="mono">Unity_SPA0_p8</span> 꼴이라 이름에서 못 읽으면 <b>조닝 별칭</b>(alias)에서 SPA/SPB 를 한 번 더 찾고, 그래도 없으면 '(구분 못 함)' 입니다.</span>
+      </div>
+      <div class="grp">
+        <div class="g"><span class="n"><i style="background:#3987e5"></i>SPA</span><span class="ports"><span class="a">A2:4</span><span class="b">B2:4</span></span><span class="v">3.1</span><span class="r">1.03×</span></div>
+        <div class="g"><span class="n"><i style="background:#d95926"></i>SPB</span><span class="ports"><span class="a">A2:5</span><span class="b">B2:5</span></span><span class="v">2.9</span><span class="r">0.97×</span></div>
+      </div>
+      <div class="bars">
+        <div class="row"><span class="muted">SPA</span><div class="tr"><span style="width:52%;background:#3987e5"></span></div><span class="v">3.1 Gb/s</span></div>
+        <div class="row"><span class="muted">SPB</span><div class="tr"><span style="width:48%;background:#d95926"></span></div><span class="v">2.9 Gb/s</span></div>
+      </div>
+      <div class="note">값은 엣지(미국 동부 · RTT 800ms+)가 중계한 표본 — 마지막 반영 3분 전을 상단 배지로 말합니다. 중앙이 어레이에 직접 묻지 않습니다.</div>
+      <div style="border-top:1px solid #1f2a40;padding-top:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:12.5px">2단계 · Unisphere(Unity) REST · SP 별</b><span class="tag blue">수집 전</span></div>
+        <div class="note">SP CPU 사용률 · FC 포트별 읽기/쓰기 바이트 · IOPS(<span class="mono">metricValue</span> 경로의 <span class="mono">sp.*.cpu.summary.utilization</span> 등 — 추정)를 **법인 엣지가 로컬에서** 받아 요약만 올립니다(백업·수집은 법인 로컬 규칙).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 해석 규칙 표 + 2단계 수집 설계 -->
+  <div class="three" style="grid-template-columns:minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr)">
+    <div class="card">
+      <h4>이름 → 디렉터 · 컨트롤러 해석 규칙(순수 함수 <span class="mono">directorOf(name)</span> — 테스트가 고정)</h4>
+      <table aria-label="해석 규칙">
+        <colgroup><col style="width:120px"><col><col style="width:150px"></colgroup>
+        <thead><tr><th>벤더</th><th>셋째 조각 예 → 그룹 · 포트</th><th>확신</th></tr></thead>
+        <tbody>
+          <tr><td><span class="vend pmax">PowerMax</span></td><td><span class="mono">FA-1D 4</span> → FA-1D · 4 &nbsp;|&nbsp; <span class="mono">FA-7E:0</span> → FA-7E · 0 &nbsp;|&nbsp; <span class="mono">SAF-1d 4</span>(VMAX) → SAF-1D · 4</td><td><span class="tag ok">현장 포맷 확인</span> <span class="faint">(perfDb 머리말 예시)</span></td></tr>
+          <tr><td><span class="vend pstore">PowerStore</span></td><td><span class="mono">NodeA FC0</span> → Node A · FC0</td><td><span class="tag warn">목 서버 형식</span></td></tr>
+          <tr><td><span class="vend unity">Unity</span></td><td><span class="mono">SPA FC0</span> → SPA · FC0 &nbsp;|&nbsp; 못 읽으면 조닝 별칭 <span class="mono">Unity_SPA0_p8</span> 의 SPA/SPB</td><td><span class="tag warn">목 서버 형식 · 별칭은 현장 확인</span></td></tr>
+          <tr><td>그 밖 · 평평한 이름</td><td>셋째 조각이 없거나 규칙에 안 맞음 → <b>'(구분 못 함)'</b> 한 그룹 + 포트별 보기</td><td><span class="tag gray">추정 안 함</span></td></tr>
+        </tbody>
+      </table>
+      <div class="note">⚠ 규칙에 맞지 않는 이름을 억지로 나누지 않습니다. '구분 못 함' 어레이는 목록에 그 사실을 배지로 보이고, 관리자가 <b>포트 → 디렉터 수동 매핑</b>을 등록할 수 있게 합니다(등록부 파일 · 원자 쓰기 · 손상 보존 — 자격증명 아님).</div>
+    </div>
+    <div class="card">
+      <h4>2단계 수집 — 어레이 측 디렉터 · 노드 · SP 성능</h4>
+      <div class="note">
+        · <b>법인 로컬에서 돈다</b>: 엣지가 있는 법인은 엣지의 스토리지 수집기가 디렉터/노드/SP 지표를 읽고 요약(최신 1점 + 15분 평균)을 중앙으로 push 합니다. 중앙은 엣지 없는 법인만 직접 묻습니다(기존 storage 폴러 규약).<br>
+        · <b>주기</b>: 스토리지 수집 주기(설정값)와 같이 — 별도 세션을 늘리지 않습니다. per-장비 시한 · 재진입 가드 · 인증 실패 정지 그대로.<br>
+        · <b>보관</b>: 새 표 <span class="mono">storage-perf.db</span>(SAN perfDb 와 같은 15분 · 1시간 집계 규약) — 트렌드는 1시간 표로 2년.<br>
+        · <b>매칭</b>: SAN 쪽 디렉터 이름(FA-1D)과 어레이 API 의 디렉터 ID(<span class="mono">FA-1D</span>)를 대조해 같은 카드에 둡니다. 대조가 안 되면 따로 보여 주고 억지로 합치지 않습니다.
+      </div>
+      <div class="info">정직 표기: 벤더별 API 경로 · 지표 키는 <b>기억에서 적은 추정</b>이라 구현 전에 실장비(또는 사용자가 준 응답 캡처)로 확인해야 합니다. 확인 못 한 지표는 화면에 '—' 와 사유('이 장비는 디렉터 성능 API 를 주지 않음')로 둡니다.</div>
+    </div>
+    <div class="card">
+      <h4>묶음 보기 4가지(상세 ② 의 '묶음' 세그먼트)</h4>
+      <table aria-label="묶음 보기">
+        <colgroup><col style="width:84px"><col></colgroup>
+        <tbody>
+          <tr><td><b>합계</b></td><td>어레이 한 줄 + 24시간 평균 점선 — 기존 '스토리지 사용량 분석' 과 같은 값</td></tr>
+          <tr><td><b>디렉터별</b></td><td>디렉터 · 노드 · SP 로 쌓은 면적 — 어느 디렉터가 트래픽을 지는지 · 편중 배지</td></tr>
+          <tr><td><b>팹 A · B</b></td><td>스위치(팹)별 두 선 — 한쪽 팹만 흐르면 경로 장애 · ISL 문제의 단서</td></tr>
+          <tr><td><b>포트별</b></td><td>포트 8개 소형 다중 차트(최대 16, 넘으면 표만) — 포트 사용량 탭으로 연결</td></tr>
+        </tbody>
+      </table>
+      <div class="note">네 보기 모두 <b>같은 조회 한 번</b>(어레이 포트들의 15분/1시간 집계)에서 화면이 묶어 그립니다 — 보기 전환이 서버 호출을 늘리지 않습니다. 기존 <span class="mono">storageSeriesMulti</span> 결과에 포트별 시리즈(디렉터 라벨 포함)를 더 싣는 한 가지 확장입니다.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
