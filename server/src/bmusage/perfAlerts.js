@@ -162,8 +162,11 @@ export function stepRule(prev, cond, rule = {}, now = Date.now()) {
 
 /** 수집 주기를 모를 때의 기본(베어메탈 사용률 기본 주기 5분 — settings.js DEFAULTS.intervalMs). */
 export const DEFAULT_INTERVAL_MS = 5 * 60_000;
-/** 반증 n2 F5: 보류 시한 = 지속 주기 × 수집 주기(지속 1이면 한 주기) — 그보다 긴 보류 뒤의 표본은 지속을 1부터 센다. */
-export const holdMaxMs = (rule = {}, intervalMs = DEFAULT_INTERVAL_MS) => Math.max(1, n(rule.sustain) ?? 1) * Math.max(60_000, n(intervalMs) ?? DEFAULT_INTERVAL_MS);
+/**
+ * 반증 n2 F5 · 재확인 N1: 보류 시한 = (지속 주기 + 1) × 수집 주기 — **마지막으로 조건을 읽은 주기(lastSeenAt)** 에서 이만큼 지나 온 새 표본은 지속을 1부터 센다.
+ *   지속 구간(지속 × 주기)에 한 주기 여유를 더한 이유: 주기 하나가 늦거나(재진입 가드 · 긴 주기) 주기 상한으로 이월된 발화가 다음 주기로 밀려도 거짓 재시작이 나지 않게.
+ */
+export const holdMaxMs = (rule = {}, intervalMs = DEFAULT_INTERVAL_MS) => (Math.max(1, n(rule.sustain) ?? 1) + 1) * Math.max(60_000, n(intervalMs) ?? DEFAULT_INTERVAL_MS);
 
 /**
  * 규칙을 이 항목에 대 보나(순수) — 전력 규칙은 `power` 칸의 종류가 맞는 항목에만, 그 밖의 규칙은 `power` 칸이 없는 항목에만.
@@ -184,11 +187,25 @@ export const stateKeyOf = (id, it) => (isPowerRule(id) ? `${id}|${targetIdOf(it)
  */
 export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date.now(), { intervalMs = DEFAULT_INTERVAL_MS } = {}) {
   const next = {}; const fires = [];
-  const counts = { fire: 0, suppressed: 0, sustaining: 0, unknown: 0, ongoing: 0, corpOff: 0, retry: 0, clear: 0, holdReset: 0 };
+  const counts = { fire: 0, suppressed: 0, sustaining: 0, unknown: 0, ongoing: 0, corpOff: 0, retry: 0, clear: 0, holdReset: 0, released: 0 };
+  const released = [];
   const on = RULE_IDS.filter((id) => id !== 'focusEnd' && rules?.[id]?.on);
   const seen = new Set();
   for (const it of items) {
     const key = String(it?.key || ''); if (!key) continue;
+    /*
+     * 반증 n2 재확인 N2: ‘판정 노드 아님’(it.release — powerAlertItems)은 ‘못 읽음’(보류)과 다르다 — 이 노드는 그 서버 · 랙을 판정하지 않으므로 전력 규칙 상태를 **비운다**
+     *   (해소 알림 없이 · 진행 중이던 사건은 이력 한 줄). 보류로 남기면 판정 노드가 돌아왔을 때 묵은 진행 중 상태가 새 사건을 삼켰다. 다시 판정 노드가 되면 새 사건으로 시작한다.
+     */
+    if (it.release) {
+      for (const id of on) {
+        if (!isPowerRule(id) || POWER_RULE_KIND[id] !== it.release.kind) continue;
+        const sk = stateKeyOf(id, it); seen.add(sk);
+        const prev = state?.[sk];
+        if (prev && (prev.active || (n(prev.streak) ?? 0) > 0)) { counts.released += 1; released.push({ rule: id, key, sk, name: it.name || key, vcenterId: String(it.vcenterId || ''), active: !!prev.active, reason: it.release.reason || '', node: it.release.node || '' }); }
+      }
+      continue;
+    }
     for (const id of on) {
       if (!ruleApplies(id, it)) continue;
       const rule = rules[id];
@@ -196,16 +213,19 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
       if ((rule.corpsOff || []).includes(String(it.vcenterId || ''))) { counts.corpOff += 1; continue; }
       const prev = state?.[sk] || null;
       let cond = ruleCondition(id, it, rule, prev?.on || null);
+      const raw = cond;   // 같은 표본 보류 전의 조건 — null 이 아니면 이 주기에 조건을 읽은 것(관측이 살아 있다)
       // 다음 점검 ②: 관측 표지가 있는 규칙(전력)은 같은 표본을 두 주기 세지 않는다 — 아직 사건이 아닌데 표지가 직전과 같으면 보류(지속을 이어 가지도 끊지도 않는다).
       const obs = isPowerRule(id) ? powerObs(id, it) : null;
       if (cond === true && obs != null && prev && !prev.active && prev.obs === obs) cond = null;
       /*
-       * 반증 n2 F5(메인 결정): 보류(null)에도 **시한**이 있다 — 전력 규칙에서 보류가 지속 구간(지속 주기 × 수집 주기)보다 길게 이어진 뒤 온 표본은
-       *   이어 세지 않고 1부터 다시 센다(‘처음 성립’ 도 그때부터). 예전에는 48시간 낡았다 돌아온 표본 하나로 ‘3주기 지속 · 처음 성립 이틀 전’ 이 나갔다.
+       * 반증 n2 F5 · 재확인 N1(메인 결정): 보류에도 **시한** — 시한은 ‘조건이 null 인 진짜 보류(낡음 · 미측정 · 못 읽음)’ 와 ‘주기가 아예 없던 틈(재시작 · 주기 건너뜀)’ 만 잰다:
+       *   조건을 읽은 마지막 주기(lastSeenAt — 같은 표본 보류 주기 포함)에서 holdMaxMs 를 넘겨 온 새 표본은 1부터 다시 센다(‘처음 성립’ 도 그때부터).
+       *   ⚠ 정정(N1): 첫 판(bdc88e73)은 같은 표본 보류에도 보류 시각(heldAt)을 달아, 표본 간격이 지속 × 주기를 넘는 경우(피크 급증 지속 2~11 · 수집 1분 + 센서 5분 · 느린 iDRAC 주기)
+       *   지속이 매번 1로 돌아가 **영영 발화하지 않았다**. 같은 표본 보류는 조건이 살아 있는 관측이라 시한을 늘리지도 끊지도 않는다.
        *   진행 중 사건(active)은 끊지 않는다(끊으면 같은 사건을 다시 보낸다). 예전 규칙(5단계)은 그대로다(범위 밖 — 같은 stepRule).
        */
       let prevEff = prev;
-      if (isPowerRule(id) && prev && !prev.active && cond === true && n(prev.heldAt) != null && now - prev.heldAt > holdMaxMs(rule, intervalMs)) {
+      if (isPowerRule(id) && prev && !prev.active && cond === true && n(prev.lastSeenAt) != null && now - prev.lastSeenAt > holdMaxMs(rule, intervalMs)) {
         prevEff = { ...prev, streak: 0, since: null };
         counts.holdReset += 1;
       }
@@ -213,8 +233,9 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
       const on = onCellsAfter(id, it, rule, cond, prev?.on || null);
       let st1 = on.length ? { ...out.state, on } : out.state;
       if (isPowerRule(id)) {
-        const { heldAt: _h, ...rest } = st1;
-        st1 = cond === null || cond === undefined ? { ...rest, heldAt: n(prev?.heldAt) ?? now } : rest;   // 보류가 시작된 시각(이어지는 동안 그대로) — 판정되면 지운다
+        const { heldAt: _h, lastSeenAt: _l, ...rest } = st1;   // heldAt = 첫 판(bdc88e73)의 필드 — 상태 파일에 남아 있어도 버린다
+        const last = raw === null || raw === undefined ? n(prev?.lastSeenAt) : now;
+        st1 = last != null ? { ...rest, lastSeenAt: last } : rest;
       }
       next[sk] = obs != null ? { ...st1, obs } : (prev?.obs != null && isPowerRule(id) ? { ...st1, obs: prev.obs } : st1);
       // ⚠ 정정(다음 점검 ② — 시험 실행 응답에서 발견): reason 'fire' 를 여기서도 세면 아래 out.fire 와 두 번 세어 counts.fire 가 발화 수의 2배였다(retry 는 retry · fire 각 1).
@@ -229,7 +250,7 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
     if (!on.includes(id)) continue;
     if (n(st?.seenAt) != null && now - st.seenAt < CARRY_MS) next[sk] = st;
   }
-  return { next, fires, counts };
+  return { next, fires, counts, released };
 }
 
 /** 알림 본문(순수 — `**` 없음 · 원인 단정 없음). */
@@ -552,8 +573,15 @@ export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps 
   if (await D.isMock().catch(() => false)) return { ok: true, skipped: 'demo' };
   _lastIntervalMs = intervalMs;
   return withState(async (st) => {
-    const { next, fires, counts } = evaluatePerfRules(items, rules.rules, st.rules, now, { intervalMs });
+    const { next, fires, counts, released } = evaluatePerfRules(items, rules.rules, st.rules, now, { intervalMs });
     st.rules = next;
+    // 반증 n2 재확인 N2: 판정 노드가 넘어가 비운 상태 — 발송 · 해소 알림 없이 이력 한 줄(그 서버 · 랙을 이 노드가 더는 판정하지 않는다는 사실)
+    for (const x of released || []) {
+      st.sent = [...(st.sent || []), { id: crypto.randomUUID().slice(0, 12), at: now, rule: x.rule, key: x.key, name: capStr(x.name, 120), vcenterId: x.vcenterId,
+        title: capStr(`판정 노드 넘어감 — ${x.name}(${x.active ? '진행 중이던 사건 · 해소 알림 없음' : '지속 중이던 상태'} · ${x.node ? `판정 노드 ${x.node}` : `판정 노드 없음(${x.reason || '사유 모름'})`})`, 200),
+        channels: [], result: 'judge-moved', issue: null, autoFocus: null }].slice(-SENT_LOG_MAX);
+    }
+    if (released?.length) console.log(`[bmusage] 전력 알림 판정 노드 넘어감 ${released.length}건 — 이 노드의 규칙 상태를 비웠습니다(해소 알림 없음)`);
     // 상태가 바뀐 적 없는 첫 주기(손상 뒤 warmup)는 기준만 잡는다.
     if (_warmup) { _warmup = false; return { ok: true, warmup: true, counts }; }
     const targetsByKey = new Map(items.filter((x) => x?.target).map((x) => [x.key, x.target]));

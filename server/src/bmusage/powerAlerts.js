@@ -144,6 +144,8 @@ export async function powerAlertItems({ targets = [], rules = {}, now = Date.now
   const items = [];
   if (on.some((id) => POWER_RULE_KIND[id] === 'server')) {
     for (const s of ag.all) {
+      // 반증 n2 재확인 N2: 판정 노드가 이 노드가 아니면 판정 항목이 아니라 ‘넘김’ 항목 — 엔진이 그 서버의 전력 규칙 상태를 비운다(보류로 남기지 않는다).
+      if (s.judge && s.judge.node !== jctx.self) { items.push({ key: s.key, name: s.name || s.key, vcenterId: s.vcenterId, release: { kind: 'server', reason: s.judge.reason || '', node: s.judge.node || '' } }); continue; }
       const sg = on.includes('surge') ? surgeOf(s.h24, s.base7, cfg.surgePct) : null;
       items.push({ key: s.key, name: s.name || s.key, vcenterId: s.vcenterId, target: tgOf.get(`${s.vcenterId}|${s.key}`) || { key: s.key, vcenterId: s.vcenterId },
         power: { kind: 'server', w: s.w, at: s.at ?? null, unmeasured: s.unmeasured || null, capW: s.capW ?? null, capPct: s.capPct ?? null, capHit: s.capHit ?? null, capState: s.capState ?? null, capHitPct: cfg.capHitPct,
@@ -163,12 +165,16 @@ export async function powerAlertItems({ targets = [], rules = {}, now = Date.now
       const listed = new Map(mem.map((s) => [s.key, s]));
       const members = ag.rackKeysOf(r.vcenterId, r.rack).map((k) => (listed.has(k) ? (tgOf.get(`${r.vcenterId}|${k}`) || { key: k, vcenterId: r.vcenterId }) : { key: k, vcenterId: r.vcenterId, unknown: true }));
       const judge = J.rackJudgeOf(mem.map((s) => s.judge), r.notTarget || 0);
+      // N2: 랙 판정 노드가 이 노드가 아니면 넘김(상태 비움) — 단 목록에 없는 배치 서버(member-unknown)는 ‘못 읽음’ 이라 보류로 둔다(F1 — 진행 중 사건 유지).
+      if (judge.node !== jctx.self && judge.reason !== 'member-unknown') { items.push({ key: rackKeyOf(r.vcenterId, r.rack), name: `랙 ${r.rack}`, vcenterId: r.vcenterId, release: { kind: 'rack', reason: judge.reason || '', node: judge.node || '' } }); continue; }
       items.push({ key: rackKeyOf(r.vcenterId, r.rack), name: `랙 ${r.rack}`, vcenterId: r.vcenterId, members,
         power: { kind: 'rack', rack: r.rack, capKw: r.capKw, nowKw: r.nowKw, marginPct: r.marginPct, low: r.low, marginPartial: r.marginPartial, measured: r.measured, servers: r.servers, notTarget: r.notTarget || 0, rackLowPct: cfg.rackLowPct, obs, judge } });
     }
   }
   return items;
 }
+/** 판정 항목 수(넘김 항목 제외 — 시험 실행 · 폴러 상태의 ‘전력 판정 항목’). */
+export const judgedCount = (items = []) => items.filter((x) => x && !x.release).length;
 /** 시험 이음매(반증 n2 F3) — 폴러 배선 시험이 원천 실패를 재현한다. 운영 경로는 늘 powerSources. */
 let _sourcesOverride = null;
 export function _setPowerSourcesForTest(fn) { _sourcesOverride = typeof fn === 'function' ? fn : null; }

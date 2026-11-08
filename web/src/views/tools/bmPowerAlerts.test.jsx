@@ -87,6 +87,10 @@ describe('반증 n2 — 시험 실행 · 지난 주기 상태 · 알림 판정 �
     expect(PT.judgeTitle({ judgeNode: 'n', judgeReason: null })).toBeUndefined();
     expect(PT.noJudgeText({ servers: 2, racks: 1, byReason: { 'source-central': 1, 'source-edge': 1 } })).toMatch(/알림 판정 노드가 없는 서버 2대 · 상한 랙 1개\(원천 중앙 1 · 원천 엣지 사본 1\)/);
     expect(PT.noJudgeText({ servers: 0, racks: 0 })).toBe('');
+    // 재확인 N4 · N5 — 모름은 없음 합계와 따로 · 구버전 엣지는 없음
+    expect(PT.noJudgeText({ servers: 1, racks: 0, byReason: { 'edge-old': 1 }, unknown: 2, unknownRacks: 1 })).toMatch(/서버 1대 · 상한 랙 0개\(엣지 버전 낮음 1\).*판정 여부 모름 — 서버 2대 · 상한 랙 1개/);
+    expect(PT.noJudgeText({ servers: 0, racks: 0, unknown: 1 })).toMatch(/^판정 여부 모름/);
+    expect(PT.noJudgeLabel({ judgeReason: 'judge-unknown' })).toBe('알림 판정 모름'); expect(PT.noJudgeLabel({ judgeReason: 'edge-old' })).toBe('알림 판정 없음');
     const resp = { ok: true, fleet: { trend: [], noJudge: { servers: 1, racks: 1, byReason: { 'source-central': 1 } } }, corps: [], bins: [], cfg: {},
       racks: [{ vcenterId: 'vcX', rack: 'X-1', servers: 3, measured: 2, notTarget: 1, capKw: 5, marginPct: null, marginPartial: true, judgeNode: null, judgeReason: 'member-unknown' }],
       hot: [{ key: 'XT3', name: 'bm-x3', vcenterId: 'vcX', inletC: 30, w: 495, capW: 500, capHit: true, capPct: 99, capState: 'set', fanRead: true, judgeNode: null, judgeReason: 'source-central' }] };

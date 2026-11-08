@@ -14,16 +14,26 @@ export const JUDGE_REASON_TEXT = Object.freeze({
   'source-edge': '전력 원천이 엣지 사본뿐 — 이 노드 대상이지만 원천 노드가 아니라 어느 노드도 판정하지 않습니다',
   'source-central': '전력 원천이 중앙(OME 등)뿐 — 엣지 대상이지만 그 엣지에 표본이 없어 어느 노드도 판정하지 않습니다',
   'corp-edge-owned': '법인을 엣지가 맡아 중앙은 판정하지 않습니다 — 그 엣지의 대상이 아니면 아무도 판정하지 않습니다',
+  'judge-unknown': '법인을 맡은 엣지의 봉투가 없어(꺼짐 · 당기기 실패 · 아직 안 당김) 판정 여부를 모릅니다 — 중앙은 판정하지 않습니다',
+  'edge-old': '엣지 버전 낮음 — 그 엣지 판에는 전력 알림 규칙이 없어 아무도 판정하지 않습니다',
   'member-unknown': '배치 서버 일부가 대상 목록에 없어 랙을 판정하지 않습니다',
   'member-no-judge': '판정 노드가 없는 서버가 있어 랙을 판정하지 않습니다',
   'members-split': '서버마다 판정 노드가 달라 랙을 판정하지 않습니다',
 });
 export const judgeTitle = (x) => (x && x.judgeNode == null && x.judgeReason ? JUDGE_REASON_TEXT[x.judgeReason] || x.judgeReason : undefined);
 export const hasNoJudge = (x) => !!(x && x.judgeNode == null && x.judgeReason);
+/** 칸 아래 한 줄 — ‘모름’(엣지 봉투 없음)은 ‘없음’ 과 다르게 쓴다(반증 n2 재확인 N4). */
+export const noJudgeLabel = (x) => (x?.judgeReason === 'judge-unknown' ? '알림 판정 모름' : '알림 판정 없음');
+const REASON_SHORT = Object.freeze({ 'source-edge': '원천 엣지 사본', 'source-central': '원천 중앙', 'corp-edge-owned': '법인 엣지 담당', 'edge-old': '엣지 버전 낮음' });
 export function noJudgeText(nj = {}) {
-  if (!nj || !(nj.servers || nj.racks)) return '';
-  const by = Object.entries(nj.byReason || {}).map(([k, v]) => `${({ 'source-edge': '원천 엣지 사본', 'source-central': '원천 중앙', 'corp-edge-owned': '법인 엣지 담당' })[k] || k} ${v}`).join(' · ');
-  return `알림 판정 노드가 없는 서버 ${nj.servers || 0}대 · 상한 랙 ${nj.racks || 0}개${by ? `(${by})` : ''} — 화면 값은 보이지만 전력 알림 규칙은 그 서버 · 랙을 판정하지 않습니다(두 번 알리지 않는 쪽).`;
+  if (!nj) return '';
+  const parts = [];
+  if (nj.servers || nj.racks) {
+    const by = Object.entries(nj.byReason || {}).map(([k, v]) => `${REASON_SHORT[k] || k} ${v}`).join(' · ');
+    parts.push(`알림 판정 노드가 없는 서버 ${nj.servers || 0}대 · 상한 랙 ${nj.racks || 0}개${by ? `(${by})` : ''} — 화면 값은 보이지만 전력 알림 규칙은 그 서버 · 랙을 판정하지 않습니다(두 번 알리지 않는 쪽).`);
+  }
+  if (nj.unknown || nj.unknownRacks) parts.push(`판정 여부 모름 — 서버 ${nj.unknown || 0}대 · 상한 랙 ${nj.unknownRacks || 0}개(법인을 맡은 엣지의 봉투가 없어 그 엣지가 판정하는지 모릅니다 · 위 ‘없음’ 수에 넣지 않았습니다).`);
+  return parts.join(' ');
 }
 export const kwText = (v) => (num(v) == null ? '—' : v >= 10_000 ? `${(v / 1000).toFixed(2)} MW` : `${v.toFixed(v < 10 ? 2 : 1)} kW`);
 export const kwhText = (v) => (num(v) == null ? '—' : v >= 10_000 ? `${(v / 1000).toFixed(1)} MWh` : `${Math.round(v).toLocaleString()} kWh`);

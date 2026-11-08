@@ -194,7 +194,8 @@ export async function pullEdgePerfOps(agent, mode, { key, query = {} } = {}) {
 /* ── 봉투 요약 정제(central/bmPerfSanitize.js 가 부른다) ─────────────────── */
 // 규칙 id 는 규칙 목록 하나(perfRules.RULE_IDS)에서 — ⚠ 정정(다음 점검 ②): 손으로 적은 목록에 8a ‘capacity’ 가 빠져 엣지의 용량 예측 발송 건이 중앙 이력 · 이슈에서 ‘use’(USE 판정 변화)로 바뀌었다.
 const RULES = new Set(PERF_RULE_IDS);
-const RESULTS = new Set(['queued', 'sent', 'failed', 'suppressed', 'no-channel', 'no-channel-config', 'daily-cap', 'maintenance', 'error', '']);
+// judge-moved — 반증 n2 재확인 N2: 판정 노드가 넘어가 그 노드의 전력 규칙 상태를 비웠다는 이력 한 줄(발송 아님).
+const RESULTS = new Set(['queued', 'sent', 'failed', 'suppressed', 'no-channel', 'no-channel-config', 'daily-cap', 'maintenance', 'judge-moved', 'error', '']);
 const ISSUE = new Set(['pending-central', 'daily-cap', 'created', 'commented', 'dup', 'error', 'skipped']);
 export function sanitizeFocusSummary(list, now = Date.now()) {
   if (!Array.isArray(list)) return null;

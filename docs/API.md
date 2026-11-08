@@ -1064,7 +1064,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/bm-usage/playbooks` | 권한 `tools` | [server/src/routes/api/bmPlaybookSlo.js:195](../server/src/routes/api/bmPlaybookSlo.js#L195) |
 | DELETE | `/tools/bm-usage/port-map` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1139](../server/src/routes/api/bmUsage.js#L1139) |
 | PUT | `/tools/bm-usage/port-map` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1138](../server/src/routes/api/bmUsage.js#L1138) |
-| GET | `/tools/bm-usage/power` | 권한 `tools` | [server/src/routes/api/bmPower.js:131](../server/src/routes/api/bmPower.js#L131) |
+| GET | `/tools/bm-usage/power` | 권한 `tools` | [server/src/routes/api/bmPower.js:137](../server/src/routes/api/bmPower.js#L137) |
 | GET | `/tools/bm-usage/profiles` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1077](../server/src/routes/api/bmUsage.js#L1077) |
 | PUT | `/tools/bm-usage/purpose` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1078](../server/src/routes/api/bmUsage.js#L1078) |
 | PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:1477](../server/src/routes/api/bmUsage.js#L1477) |

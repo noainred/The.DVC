@@ -10,10 +10,10 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { unitText } from '../unitText.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
-import { powerCards, kwText, kwhText, wText, cText, marginText, capText, capTitle, fanText, trendPath, hourText, unmeasuredText, POWER_HONEST, UNMEASURED_TEXT, judgeTitle, hasNoJudge, noJudgeText } from './bmPowerText.js';
+import { powerCards, kwText, kwhText, wText, cText, marginText, capText, capTitle, fanText, trendPath, hourText, unmeasuredText, POWER_HONEST, UNMEASURED_TEXT, judgeTitle, hasNoJudge, noJudgeText, noJudgeLabel } from './bmPowerText.js';
 
-/** 알림 판정 노드가 없으면 칸 아래 한 줄(이유는 마우스 설명 — 반증 n2 F4). */
-const NoJudge = ({ x }) => (hasNoJudge(x) ? <div className="bmo-sub" title={judgeTitle(x)} style={{ color: 'var(--amber)' }}>알림 판정 없음</div> : null);
+/** 알림 판정 노드가 없으면 칸 아래 한 줄(이유는 마우스 설명 — 반증 n2 F4 · 엣지 봉투 없음은 ‘모름’ — 재확인 N4). */
+const NoJudge = ({ x }) => (hasNoJudge(x) ? <div className="bmo-sub" title={judgeTitle(x)} style={{ color: 'var(--amber)' }}>{noJudgeLabel(x)}</div> : null);
 import './bmOps.css';
 import './bmMaint.css';
 

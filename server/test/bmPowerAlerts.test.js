@@ -315,9 +315,10 @@ test('⑤ 실제 폴러 배선 — pollBmUsageOnce → 전력 규칙(실제 원�
   assert.ok(['inlet|vcW|WTAG1', 'powerCap|vcW|WTAG1', 'rack|vcW|rack:vcW|W-1'].every((k) => keys.includes(k)), JSON.stringify(keys));
   // 엣지 사본뿐인 서버(RTAG1)는 이 노드가 판정하지 않는다 — 랙 W-2 는 미측정(부분)이라 보류 · 서버 칸도 보류
   assert.ok(!sent.some((x) => x.key === 'rack:vcW|W-2' || x.key === 'RTAG1'), JSON.stringify(sent.map((x) => x.key)));
-  assert.equal(STATE().rules['rack|vcW|rack:vcW|W-2'].streak, 0, '사본 999 W 로 판정하지 않는다(판정 노드 없음 — source-edge)');
-  // 반증 n2 F3: 주기 상태에 판정 보류 수 · 전력 판정 항목 수가 남는다(0건과 가른다)
-  assert.equal(r.perfAlerts.powerItems, 4, '서버 2 + 랙 2'); assert.ok(r.perfAlerts.held >= 1, JSON.stringify(r.perfAlerts));
+  assert.equal(STATE().rules['rack|vcW|rack:vcW|W-2'], undefined, '사본 999 W 로 판정하지 않는다(판정 노드 없음 — source-edge · 재확인 N2: 상태도 두지 않는다)');
+  assert.equal(STATE().rules['powerCap|vcW|RTAG1'], undefined);
+  // 반증 n2 F3: 주기 상태에 판정 보류 수 · 전력 판정 항목 수가 남는다(0건과 가른다) — 판정 노드가 아닌 RTAG1 · W-2 는 판정 항목이 아니다
+  assert.equal(r.perfAlerts.powerItems, 2, '서버 1 + 랙 1'); assert.equal(r.perfAlerts.held, 0, '판정 노드가 아닌 서버는 보류가 아니라 넘김(판정 보류 수에 들지 않는다)');
   assert.equal(r.perfAlerts.powerError, undefined);
 });
 

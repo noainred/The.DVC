@@ -266,7 +266,7 @@ export async function bmRulesDryRun(req, deps = {}) {
   if (Object.keys(rules.rules || {}).some((id) => PA.isPowerRule(id))) {
     try {
       const px = await PA.powerAlertItems({ targets: tg.targets || [], rules, ...(deps.powerSources || deps.judgeCtx ? { deps: { ...(deps.powerSources ? { sources: deps.powerSources } : {}), ...(deps.judgeCtx ? { judgeCtx: deps.judgeCtx } : {}) } } : {}) });
-      powerItems = px.length; for (const x of px) items.push(x);
+      powerItems = PA.judgedCount(px); for (const x of px) items.push(x);
     } catch (e) { powerError = String(e?.message || e).slice(0, 200); }
   }
   const out = await A.runPerfAlerts(items, { rules, dryRun: true });

@@ -36,7 +36,7 @@ export function depsOf(deps = {}) {
     sources: async () => (await import('../../bmusage/powerSources.js')).powerSources({ now: Date.now() }),
     minEdgeVersion: async () => (await import('../../central/featureMinEdgeVersion.js')).powerCapMinEdgeVersion(),
     // 반증 n2 F4: 판정 노드 문맥(이 노드 이름 · 엣지 여부 · 중앙이면 법인 담당 엣지) — 알림 판정(powerAlerts)과 같은 함수.
-    judgeCtx: async (edgeHas) => (await import('../../bmusage/powerJudge.js')).judgeContext({ edgeHas }),
+    judgeCtx: async (edgeHas, edgeKnown) => (await import('../../bmusage/powerJudge.js')).judgeContext({ edgeHas, edgeKnown }),
     now: () => Date.now(),
     ...deps,
   };
@@ -48,7 +48,9 @@ async function allTargets(D) {
   const out = (tg.targets || []).map((x) => ({ key: x.key, name: x.name, vcenterId: x.vcenterId || '', serviceTag: x.serviceTag || '', idrac: x.idrac ? { regId: x.idrac.regId } : null, paths: x.paths || [], node: config.agent?.name || '', via: 'local' }));
   const seen = new Set(out.map((x) => `${x.vcenterId}|${x.key}`));
   const edgeKeys = new Map();   // (법인|키) → 그 서버를 대상으로 가진 엣지(이 노드 대상과 겹쳐도 — 판정 노드 함수의 edgeHas · S1)
+  const edgeSnaps = new Set();  // 봉투를 가진 엣지(소문자) — 없으면 그 엣지가 맡은 법인 서버의 판정 여부는 모른다(N4 judge-unknown)
   for (const rec of await D.listEdgeBmUsage().catch(() => [])) {
+    if (rec?.snap) edgeSnaps.add(t(rec.agent).toLowerCase());
     const capOf = edgeCapIndex(rec?.snap);   // 다음 점검 ③ — 봉투 서버별 PowerCap(표지 없음 = old-version)
     for (const x of rec?.snap?.targets || []) {
       const id = `${t(x.vcenterId)}|${t(x.key)}`;
@@ -58,7 +60,7 @@ async function allTargets(D) {
       out.push({ key: t(x.key), name: t(x.name), vcenterId: t(x.vcenterId), serviceTag: t(x.serviceTag), idrac: null, paths: Array.isArray(x.paths) ? x.paths : [], node: rec.agent, via: 'edge', edgeCap: capOf(t(x.key)) });
     }
   }
-  return { list: out, tg, edgeKeys };
+  return { list: out, tg, edgeKeys, edgeSnaps };
 }
 
 /** GET /tools/bm-usage/power */
@@ -69,7 +71,7 @@ export async function bmPowerView(req, snap, deps = {}) {
   const A = await D.agg();
   const rules = await D.rules().catch(() => ({}));
   const now = D.now();
-  const { list, tg, edgeKeys } = await allTargets(D);
+  const { list, tg, edgeKeys, edgeSnaps } = await allTargets(D);
   // 세대 서명 — 엣지 상한(상태 · 값 · 시각)도 넣는다(봉투를 새로 당겨 상한이 바뀌면 60초 공유 계산을 다시 한다).
   let h = 2166136261; for (const x of list) { const s = `${x.vcenterId}|${x.key}|${x.via}|${x.edgeCap ? `${x.edgeCap.state}:${x.edgeCap.limitWatts ?? ''}:${x.edgeCap.at ?? ''}` : ''}`; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } }
   const genKey = `${Math.floor(now / 60_000)}|${list.length}|${h}`;
@@ -78,7 +80,7 @@ export async function bmPowerView(req, snap, deps = {}) {
   const gatherMs = Date.now() - t0;
   // 반증 n2 F4: 서버마다 알림 판정 노드(판정 노드 함수 하나 — 알림 판정 입력과 같다). 판정 노드가 없으면 화면이 ‘알림 판정 없음 + 사유’.
   const J = await import('../../bmusage/powerJudge.js');
-  const jctx = await D.judgeCtx((vc, key) => edgeKeys.get(`${vc}|${key}`) || '').catch(() => ({ self: config.agent?.name || '', isEdge: !!config.agent?.centralUrl }));
+  const jctx = await D.judgeCtx((vc, key) => edgeKeys.get(`${vc}|${key}`) || '', (agent) => edgeSnaps.has(t(agent).toLowerCase())).catch(() => ({ self: config.agent?.name || '', isEdge: !!config.agent?.centralUrl }));
   const judged = servers.map((x) => ({ ...x, judge: J.judgeOf(x, jctx) }));
   // 범위 먼저(합하기 전) — 귀속 없음은 범위 계정에 숨김
   const vis = judged.filter((s) => !allowed || (s.vcenterId && allowed.has(s.vcenterId)));
@@ -93,10 +95,14 @@ export async function bmPowerView(req, snap, deps = {}) {
     const j = J.rackJudgeOf(byRack.get(`${r.vcenterId}|${r.rack}`) || [], r.notTarget || 0);
     return { ...r, judgeNode: j.node, judgeReason: j.reason };
   });
-  // 판정 노드 없는 서버 · 랙 수(보이는 것만 — 사유별)
-  const noJudge = { servers: 0, racks: 0, byReason: {} };
-  for (const x of vis) if (x.judge && x.judge.node == null) { noJudge.servers += 1; noJudge.byReason[x.judge.reason] = (noJudge.byReason[x.judge.reason] || 0) + 1; }
-  for (const r of rackRows) if (!r.unmapped && r.capKw != null && r.judgeNode == null) noJudge.racks += 1;
+  // 판정 노드 없는 서버 · 랙 수(보이는 것만 — 사유별). ‘판정 여부 모름’(judge-unknown — 엣지 봉투 없음)은 없음 합계에서 빼고 따로(unknown · unknownRacks — N4).
+  const noJudge = { servers: 0, racks: 0, byReason: {}, unknown: 0, unknownRacks: 0 };
+  for (const x of vis) {
+    if (!x.judge || x.judge.node != null) continue;
+    if (x.judge.reason === 'judge-unknown') { noJudge.unknown += 1; continue; }
+    noJudge.servers += 1; noJudge.byReason[x.judge.reason] = (noJudge.byReason[x.judge.reason] || 0) + 1;
+  }
+  for (const r of rackRows) if (!r.unmapped && r.capKw != null && r.judgeNode == null) { if (r.judgeReason === 'judge-unknown') noJudge.unknownRacks += 1; else noJudge.racks += 1; }
   let match = null;
   if (!isAdmin) ({ match } = await perfAddressMatcher(D, tg));
   const maskName = (nm) => (isAdmin ? nm : (match && match(nm) ? maskedIdToken(nm) : String(nm).replace(IPV4_RE, (ip) => maskedIdToken(ip))));

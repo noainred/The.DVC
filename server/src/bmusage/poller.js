@@ -1176,7 +1176,7 @@ async function runCyclePerfAlerts(results, { settings, rules, agent, targets = [
   const PA = await import('./powerAlerts.js');
   let powerError = null; let powerItems = null;
   if (on.some((id) => PA.isPowerRule(id))) {
-    try { const px = await PA.powerAlertItems({ targets, rules, now }); powerItems = px.length; for (const x of px) items.push(x); }
+    try { const px = await PA.powerAlertItems({ targets, rules, now }); powerItems = PA.judgedCount(px); for (const x of px) items.push(x); }
     catch (e) {
       // 반증 n2 F3: 콘솔 한 줄로 끝내지 않는다(무음 실패 금지) — 주기 상태(_last.perfAlerts.powerError)에 남겨 규칙 화면 상태 줄이 밝힌다.
       powerError = String(e?.message || e).slice(0, 200);

@@ -215,9 +215,9 @@ test('⑤ F4 — 판정 노드 함수 하나: 판정 없음 + 사유 · 화면�
   const tgt = [{ key: 'S1', name: 'bm-s1', vcenterId: 'vcE', idrac: { regId: 'rS1' } }];
   const central = await PA.powerAlertItems({ targets: tgt, rules, now: NOW, deps: { sources: src, judgeCtx: async () => C } });
   const edge = await PA.powerAlertItems({ targets: tgt, rules, now: NOW, deps: { sources: src, judgeCtx: async () => ({ self: 'edge-e', isEdge: true }) } });
-  const judged = [...central, ...edge].filter((x) => PA.powerCondition('powerCap', x) === true);
-  assert.equal(judged.length, 1, `S1 이중 판정 없음(예전 2) — ${JSON.stringify([...central, ...edge].map((x) => [x.power.judge, x.power.capHit]))}`);
-  assert.deepEqual(central[0].power.judge, { node: null, reason: 'corp-edge-owned', owner: 'edge-e' }); assert.equal(central[0].power.w, null);
+  const judged = [...central, ...edge].filter((x) => x.power && PA.powerCondition('powerCap', x) === true);
+  assert.equal(judged.length, 1, `S1 이중 판정 없음(예전 2) — ${JSON.stringify([...central, ...edge].map((x) => [x.power?.judge || x.release, x.power?.capHit]))}`);
+  assert.deepEqual(central[0].release, { kind: 'server', reason: 'corp-edge-owned', node: '' }, '중앙은 판정 항목이 아니라 넘김 항목(재확인 N2 — 상태 비움)'); assert.equal(central[0].power, undefined);
   // 화면 — 엣지 대상 · 중앙 OME 원천(반증 r5): 화면은 걸림을 보이되 ‘알림 판정 없음 + 사유’ · 이 노드 대상 · 엣지 사본 원천도 같은 함수
   const P = await import('../src/routes/api/bmPower.js');
   AG._resetPowerAggForTest();
@@ -239,8 +239,8 @@ test('⑥ F5 — 보류 시한: 지속 구간(지속 × 주기)보다 긴 보류
   const d = depsOf();
   const run = (t, state) => A.runPerfAlerts([it(t - MIN, state)], { rules, now: t, deps: d.deps, intervalMs: 5 * MIN });
   await run(NOW); await run(NOW + 5 * MIN);
-  for (let i = 0; i < 6; i += 1) await run(NOW + (10 + i * 5) * MIN, 'stale');   // 보류 30분 > 지속 구간 15분
-  assert.equal(A.holdMaxMs(rules.rules.inlet, 5 * MIN), 15 * MIN);
+  for (let i = 0; i < 6; i += 1) await run(NOW + (10 + i * 5) * MIN, 'stale');   // 보류 30분 > 시한 20분
+  assert.equal(A.holdMaxMs(rules.rules.inlet, 5 * MIN), 20 * MIN, '(지속 + 1) × 주기 — 재확인 N1 에서 한 주기 여유');
   let r = await run(NOW + 48 * HOUR);
   assert.equal(r.fires, 0, '긴 보류 뒤 표본 하나로 ‘3주기 지속’ 이 아니다(예전 발송)'); assert.equal(r.counts.holdReset, 1);
   assert.equal(STATE().rules['inlet|vcA|K1'].streak, 1); assert.equal(STATE().rules['inlet|vcA|K1'].since, NOW + 48 * HOUR);

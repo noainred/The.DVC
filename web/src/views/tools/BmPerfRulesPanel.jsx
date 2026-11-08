@@ -53,7 +53,7 @@ export function DryRunResult({ resp }) {
     <div className="bmo-band">
       <div>시험 실행 — 이 노드 대상 {unitText(resp.servers, '대')}{resp.powerItems != null ? ` · 전력 판정 항목 ${resp.powerItems}개(서버 · 랙)` : ''} · 걸린 규칙 {(resp.fires || []).length}건{resp.skipped ? `(${resp.skipped === 'no-rules' ? '켠 규칙이 없습니다' : resp.skipped})` : ''}</div>
       {resp.powerError && <div className="bmo-sub" style={{ color: toneVar('bad') }}>전력 · 온도 규칙을 대 보지 못했습니다(원천 실패 — 0건이 아닙니다): {resp.powerError}</div>}
-      {held > 0 && <div className="bmo-sub" style={{ color: toneVar('warn') }}>판정 보류 {held}건 — 못 읽음 · 미측정 · 부분 합(일부만 측정된 랙) · 낡은 센서 · 표본 부족 · 판정 노드 아님은 정상도 장애도 아닙니다(걸린 규칙 수에 들지 않습니다).</div>}
+      {held > 0 && <div className="bmo-sub" style={{ color: toneVar('warn') }}>판정 보류 {held}건 — 못 읽음 · 미측정 · 부분 합(일부만 측정된 랙) · 낡은 센서 · 표본 부족은 정상도 장애도 아닙니다(걸린 규칙 수에 들지 않습니다). 이 노드가 판정 노드가 아닌 서버 · 랙은 항목에서 빠집니다(전력 보기 ‘알림 판정 없음’).</div>}
       {(resp.fires || []).slice(0, 20).map((f, i) => <div key={i} className="bmo-sub">{RULE_TEXT[f.rule]?.label || f.rule} · {f.title}</div>)}
       <div className="bmo-sub">{resp.note}</div>
     </div>
