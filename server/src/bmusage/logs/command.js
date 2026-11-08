@@ -22,7 +22,12 @@
  *   숫자는 선행 0 없음 · 18자리까지 — dash 산술이 8진수로 읽거나 넘치지 않게 · 반증 F13). 통과하지 못하면 그 값은 없는 것으로(첫 읽기 꼴) 조립한다.
  * ⚠ 상한(반증 F4 — 산수를 테스트가 고정): 출처마다 줄 상한(설정 lineCap · LINE_CAP_RANGE)과 **바이트 상한**(SRC_BYTES = (OUTPUT_MAX − 메타 여유) / 출처 수)을 함께 건다 —
  *   넘친 줄은 ‘잘림 n줄’ 로 세고 위치는 본 데까지 넘긴다(잘린 줄은 다시 읽지 않는다 · 한 출처가 다른 구획을 밀어내 영구히 못 받는 일이 없다). 줄 폭 500자(JSON 1,200자) ·
- *   전체 head -c(OUTPUT_MAX — sshExec 상한 4MB 보다 작게 · 출처 상한 합 + 여유 이하라 실제로는 자르지 않는다) · 멈출 수 있는 명령은 timeout(journalctl 15 · dmesg 5 · systemctl 3 · find 5).
+ *   전체 head -c(OUTPUT_MAX — sshExec 상한 4MB 보다 작게 · 출처 상한 합 + 여유 이하라 실제로는 자르지 않는다) · 멈출 수 있는 명령은 timeout(journalctl 6 ×2 · dmesg 3 · systemctl 3(한 번에 둘) · find 1 × rdf 호출 수).
+ * ⚠⚠ 8b 반증 후속(F1 과 같은 불변조건 — 7a 부터의 결함): 이 exec 안 timeout 의 최악 합 + 여유(LOG_INNER_MARGIN_MS) ≤ exec 시한(run.js LOG_EXEC_TIMEOUT_MS 30초).
+ *   예전 합 46초(journalctl 15 ×2 · dmesg 5 · systemctl 3 ×2 · find 5 — find 는 rdf 호출마다라 실제 최악 61초)가 30초를 넘어 시한에 걸리면 sshExec 가 출력을 버려 **그 주기 로그 구획 전체**
+ *   (커서 · offset 전진 포함)를 잃었다 — 같은 서버가 계속 느리면 커서가 영원히 제자리다. 이제 최악 22초(journalctl 6 + 6 · dmesg 3 · systemctl 3 · find 1 × 4) + 여유 8초 ≤ 30초.
+ *   로그는 증분이라 한 주기에 덜 읽어도 된다 — journalctl 이 시한(rc 124)에 걸려도 awk 가 본 마지막 항목의 커서까지 전진하고(반증 F5) 다음 주기가 이어 읽는다.
+ *   bmTop8bBudget.test.js ① 이 명령 문자열에서 timeout 을 뽑아(rdf 함수 안 것은 호출 수만큼) 이 산수를 고정한다.
  * ⚠ 정직: Rocky 8 · 9 실장비에서 돌려 보지 못했다 — 이 개발 컨테이너(dash · mawk · coreutils)에서 가짜 journalctl · dmesg 와 임시 파일로 실행해 본 것이 전부다
  *   (test/bmLogs7aCommand.test.js). `-o json` · `--output-fields`(systemd 236+ — RHEL 8 = 239) · `_TRANSPORT=` 일치 · `--after-cursor` · 권한 힌트 문구는 systemd 문서 ·
  *   v239/v252 journal-util.c 원문(반증 F2 근거) 기준이다(실장비 실측 아님).
@@ -56,6 +61,13 @@ export const LINE_CAP_DEFAULT = 5_000;
 /** journald 보안 읽기(JSEC)의 식별자(상수 — 같은 필드는 OR). 주 저널(JOURNAL)의 같은 식별자 줄은 파서가 빼고 센다(두 번 세지 않게). */
 export const AUTH_IDENTS = Object.freeze(['sshd', 'sshd-session', 'sudo', 'su', 'login', 'useradd', 'usermod', 'userdel', 'groupadd', 'groupmod', 'groupdel', 'gpasswd', 'passwd', 'chpasswd', 'chage']);
 const OUTPUT_FIELDS = '--output-fields=MESSAGE,SYSLOG_IDENTIFIER,_COMM,_PID,PRIORITY';
+/** 멈출 수 있는 명령의 시한(초) — 합 산수는 위 머리말(8b 반증 후속). journalctl 은 시한에 걸려도 본 데까지 커서가 전진한다(다음 주기가 이어 읽는다). */
+export const JOURNAL_TIMEOUT_S = 6;
+export const DMESG_TIMEOUT_S = 3;
+export const SVC_TIMEOUT_S = 3;
+export const ROT_FIND_TIMEOUT_S = 1;
+/** 시한 없는 짧은 일(stat · tail · head · grep · wc 로 증분 읽기 — 한 파일 최대 MAX_INC_BYTES 두 번 · ls · id)과 ssh 왕복의 몫(추정). */
+export const LOG_INNER_MARGIN_MS = 8_000;
 
 /** 화이트리스트(셸에 들어가는 값 — 이 꼴이 아니면 넣지 않는다). 숫자는 선행 0 없음 · 18자리까지(dash 산술이 8진수로 읽거나 넘치지 않게 — 반증 F13). */
 export const CURSOR_RE = /^s=[0-9a-f]{32};i=[0-9a-f]{1,16};b=[0-9a-f]{32};m=[0-9a-f]{1,16};t=[0-9a-f]{1,16};x=[0-9a-f]{1,16}$/;
@@ -105,7 +117,7 @@ function rdfShell(cap) {
     'i=$(stat -c %i "$f" 2>/dev/null); s=$(stat -c %s "$f" 2>/dev/null);',
     'case "$i$s" in ""|*[!0-9]*) echo "$p#fail=stat"; return 0;; esac;',
     'echo "$p#ino=$i"; echo "$p#size=$s"; o=""; rs=0; d1=0; sk=0;',
-    'if [ -z "$pi" ]; then m=first; elif [ "$i" != "$pi" ]; then m=rot; o=$(timeout 5 find "$rd" -maxdepth 1 -name "$rg" -inum "$pi" 2>/dev/null | head -n 1);',
+    `if [ -z "$pi" ]; then m=first; elif [ "$i" != "$pi" ]; then m=rot; o=$(timeout ${ROT_FIND_TIMEOUT_S} find "$rd" -maxdepth 1 -name "$rg" -inum "$pi" 2>/dev/null | head -n 1);`,
     'elif [ -z "$po" ] || [ "$s" -lt "$po" ]; then m=shrink; else m=inc; rs=$po; fi;',
     `if [ "$m" = first ] && [ "$s" -gt ${FIRST_FILE_BYTES} ]; then rs=$((s-${FIRST_FILE_BYTES})); d1=1; fi;`,
     `if [ $((s-rs)) -gt ${MAX_INC_BYTES} ]; then sk=$((s-${MAX_INC_BYTES}-rs)); rs=$((s-${MAX_INC_BYTES})); d1=1; o=""; fi;`,
@@ -126,7 +138,7 @@ function rdfShell(cap) {
 
 /**
  * journald 읽기(상수 조각) — `-o json`(한 줄 = 한 항목 · `__CURSOR` · `__REALTIME_TIMESTAMP` 는 늘 실린다 — systemd 문서 --output-fields).
- *   ⚠ 반증 F5: 커서는 **awk 가 본 마지막 항목의 `__CURSOR`** — 줄 상한 · 바이트 상한 · 시한(timeout 15 → rc 124)에서도 본 지점까지 전진한다(같은 줄을 다시 세지 않는다 · 진행 보장).
+ *   ⚠ 반증 F5: 커서는 **awk 가 본 마지막 항목의 `__CURSOR`** — 줄 상한 · 바이트 상한 · 시한(timeout JOURNAL_TIMEOUT_S → rc 124)에서도 본 지점까지 전진한다(같은 줄을 다시 세지 않는다 · 진행 보장).
  *     본 항목은 전부 n 에 세고 내보낸 것(e)만 분류한다(나머지는 잘림). `--show-cursor` 에 기대지 않는다(journalctl 이 끝까지 가야 찍힌다).
  *   ⚠ 반증 F2: `-q` 를 쓰지 않는다 — systemd v239 · v252 `journal_access_check_and_warn()` 원문은 `-q` 가 아니고 EACCES 로 못 연 파일이 있으며 root · systemd-journal ·
  *     저널 ACL 그룹이 아닐 때만 ‘Hint: You are currently not seeing messages from …’ 을 찍는다 → #perm=own(자기 저널만 — 시스템 메시지는 못 본다).
@@ -138,7 +150,7 @@ function journalShell({ prefix, cap, pos, args }) {
   return [
     'if command -v journalctl >/dev/null 2>&1; then',
     `echo "${prefix}#uid=$(id -u 2>/dev/null | cut -c1-10)"; echo "${prefix}#grp=$(id -nG 2>/dev/null | tr ' ' '\\n' | grep -E -x 'systemd-journal|adm|wheel' | head -n 3 | tr '\\n' ',' | cut -c1-40)"`,
-    `{ timeout 15 journalctl --no-pager -o json ${OUTPUT_FIELDS} ${args} ${pos} 2>&1; echo "@rc=$?"; } |`,
+    `{ timeout ${JOURNAL_TIMEOUT_S} journalctl --no-pager -o json ${OUTPUT_FIELDS} ${args} ${pos} 2>&1; echo "@rc=$?"; } |`,
     `awk -v cap=${cap} -v bud=${SRC_BYTES} -v w=${JSON_WIDTH} -v p=${prefix} 'BEGIN{t=0;e=0;b=0;er=0;rc="";cur=""} /^@rc=/{rc=substr($0,5);next}`,
     // 커서 · 단조 시각 · boot_id 는 내보내는 줄에서 뺀다(파서는 쓰지 않는다 — 출처 바이트 상한 안에 줄을 더 싣는다). 커서 값에는 따옴표가 없다(s=…;x=… 16진).
     '/^\\{/{t++; i=index($0,"\\"__CURSOR\\":\\""); if(i>0){s=substr($0,i+12,200); j=index(s,"\\""); if(j>1) cur=substr(s,1,j-1)}',
@@ -185,7 +197,7 @@ export function logCommand(state = {}, { lineCap = LINE_CAP_DEFAULT, _paths = nu
     // ── dmesg(커널 링 버퍼) — boot_id 가 같으면 마지막 [초] 이후 줄만 · 첫 읽기는 가동 마지막 60분만(반증 F6) ─────
     "echo '##DMESG'",
     'if command -v dmesg >/dev/null 2>&1; then',
-    `{ timeout 5 dmesg -x --level=emerg,alert,crit,err,warn 2>&1; echo "@rc=$?"; } |`,
+    `{ timeout ${DMESG_TIMEOUT_S} dmesg -x --level=emerg,alert,crit,err,warn 2>&1; echo "@rc=$?"; } |`,
     `awk -v cap=${cap} -v bud=${SRC_BYTES} -v w=${LINE_WIDTH} -v fw=${FIRST_SINCE_MIN * 60} -v boot="$(cut -c1-36 ${sq(P.bootId)} 2>/dev/null)" -v lboot=${sq(boot)} -v last=${sq(last || '-1')} -v up="$(cut -d' ' -f1 ${sq(P.uptime)} 2>/dev/null)" -v now="$(date +%s 2>/dev/null)" \\`,
     `'BEGIN{t=0;e=0;b=0;old=0;mx=-1;rc="";perm=0;same=(boot!="" && boot==lboot);first=(lboot=="");lo=-1;if(first){if(up+0>0) lo=up-fw; else lo=1e18}} /^@rc=/{rc=substr($0,5);next} /^dmesg: /{if($0 ~ /not permitted|Permission denied/) perm=1; next}`,
     '{s=substr($0,1,60); i=index(s,"["); j=index(s,"]"); ts=-1; if(i>0 && j>i) ts=substr(s,i+1,j-i-1)+0; if(ts<0) next; if(ts>mx) mx=ts; if(same && ts<=last+0) next; if(first && ts<lo){old++; next}',
@@ -196,12 +208,14 @@ export function logCommand(state = {}, { lineCap = LINE_CAP_DEFAULT, _paths = nu
     'fi',
     // ── /var/log/secure — offset + inode ──────────────────────────────────────
     "echo '##SECURE'",
-    // rsyslog 활성 여부(secure 에 새 줄이 쌓이는지 — 멈췄으면 보안 줄은 journald 쪽을 쓴다: parse.js pickAuthSource)
-    `echo "S#svc=$(timeout 3 systemctl is-active rsyslog 2>/dev/null | head -n 1 | cut -c1-16)"`,
+    // rsyslog · auditd 활성 여부(secure 에 새 줄이 쌓이는지 — 멈췄으면 보안 줄은 journald 쪽을 쓴다: parse.js pickAuthSource).
+    //   8b 반증 후속: systemctl 한 번에 둘(유닛 순서대로 한 줄씩 — 시한 하나 · D-Bus 가 멈추면 둘 다 ‘모름’) — 예전에는 3초 시한 두 번이었다.
+    `sv=$(timeout ${SVC_TIMEOUT_S} systemctl is-active rsyslog auditd 2>/dev/null | head -n 2 | cut -c1-16 | tr '\\n' ' ')`,
+    'echo "S#svc=$(echo "$sv" | cut -d\' \' -f1)"',
     `rdf S ${sq(P.secure)} ${sIno} ${sOff} '' ${sq(dirOf(P.secure))} ${sq(`${baseOf(P.secure)}*`)}`,
     // ── auditd(있을 때만) — 활성 여부 + 관심 레코드 ───────────────────────────────
     "echo '##AUDIT'",
-    `echo "A#svc=$(timeout 3 systemctl is-active auditd 2>/dev/null | head -n 1 | cut -c1-16)"`,
+    'echo "A#svc=$(echo "$sv" | cut -d\' \' -f2)"',
     `rdf A ${sq(P.audit)} ${aIno} ${aOff} ${sq(AUDIT_FILTER)} ${sq(dirOf(P.audit))} ${sq(`${baseOf(P.audit)}*`)}`,
     // ── 용도 로그(상수 카탈로그) ─────────────────────────────────────────────────
     "echo '##APPLOG'",

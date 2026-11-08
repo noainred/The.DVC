@@ -4,8 +4,9 @@
  *   ① 기계 산수: 명령 문자열에서 `timeout N` · `sleep N` 을 뽑아 합 + 여유 ≤ exec 시한
  *      · 주 명령(linuxCommand — 샘플러 끔/켬 · 8b 끔/켬 같음: Top-N 은 주 명령 밖) — needs-restarting ↔ dnf 는 한 주기에 하나(②가 실제 셸로 확인)
  *      · Top-N 별도 exec(topCommand) · 전 프로세스 /proc 읽기 · ps 는 모두 timeout 안(S1)
- *      · 집중 모니터링 경로(run.js — top:false 명시 · 스냅샷 exec)
- *      ⚠ 8b 이전부터의 결함: 주 명령 최악 합이 34초(> 30초)였다 — 이 시험이 없어서 고정되지 않았다(반증 F1).
+ *      · 7a 로그 exec(logCommand — 셸 함수 rdf 안 timeout 은 호출 수만큼) · 집중 모니터링 경로(run.js — top:false 명시 · 스냅샷 exec)
+ *      모든 exec 가 같은 함수(worstOf)로 센다.
+ *      ⚠ 8b 이전부터의 결함: 주 명령 최악 합이 34초(> 30초 — 4 · 5단계) · 로그 exec 46초(rdf 호출 수까지 61초 — 7a)였다 — 이 시험이 없어서 고정되지 않았다(반증 F1 · 후속).
  *   ② 실제 셸(dash): CHANGES 조각을 가짜 find · dnf · needs-restarting(호출 기록)으로 돌려 둘이 한 주기에 함께 돌지 않는지
  *   ③ 실제 collectOsUsage + 실제 sshExec(exec 시한 · 출력 버림) — ssh2 Client 만 로컬 dash 로 바꾼 자식 프로세스(--experimental-test-module-mocks).
  *      가짜 PATH 에서 systemctl · chronyc · dmesg · needs-restarting · dnf · top 이 전부 멈춤(`sleep 100`) → 주 표본이 살아남고(ok · CPU · 메모리) Top-N 은 /proc 대안으로.
@@ -25,6 +26,11 @@ const T = await import('../src/bmusage/parse/linuxTop.js');
 const H = await import('../src/bmusage/parse/linuxHealth.js');
 const SNAP = await import('../src/bmusage/snapshot/command.js');
 const FOCUS = await import('../src/bmusage/focus/run.js');
+const LC = await import('../src/bmusage/logs/command.js');
+const LR = await import('../src/bmusage/logs/run.js');
+/** 이어 읽기 상태(커서 · inode · offset · boot — 화이트리스트를 지나는 꼴) — 로테이트 경로(find)가 명령에 들어간다. */
+const LOGSTATE = { journal: { cursor: `s=${'a'.repeat(32)};i=1f;b=${'b'.repeat(32)};m=2;t=3;x=4` }, jsec: { cursor: `s=${'c'.repeat(32)};i=1;b=${'d'.repeat(32)};m=2;t=3;x=4` },
+  kernel: { boot: '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0', last: '123.5' }, secure: { ino: '1234', off: '99' }, audit: { ino: '5678', off: '0' }, apps: { gpdb: { dir: 0, ino: '42', off: '7' } } };
 const SRC = (p) => fs.readFileSync(path.join(import.meta.dirname, '../src', p), 'utf8');
 const DASH = ['/bin/dash', '/bin/sh'].find((x) => fs.existsSync(x));
 
@@ -35,19 +41,42 @@ export function waitsOf(cmd) {
   return { t, sl };
 }
 const sum = (a) => a.reduce((x, y) => x + y, 0);
+/**
+ * 한 exec 명령의 최악 대기(초) — 줄 단위로 셸 함수 정의(`이름() {`)를 찾아 그 안 timeout · sleep 은 **호출 수만큼** 곱하고, 나머지 줄은 한 번씩 더한다.
+ *   exclusive = [[명령 a, 명령 b]] — 한 주기에 하나만 도는 쌍(실제 셸 시험이 따로 확인)은 작은 쪽을 뺀다(각각 바깥에 정확히 한 번 있어야 한다).
+ */
+export function worstOf(cmd, { exclusive = [] } = {}) {
+  const lines = String(cmd).split('\n');
+  const fns = new Map();
+  for (const l of lines) { const m = /^\s*([A-Za-z_]\w*)\(\) \{/.exec(l); if (m) fns.set(m[1], waitsOf(l)); }
+  const outer = lines.filter((l) => !/^\s*[A-Za-z_]\w*\(\) \{/.test(l)).join('\n');
+  const top = waitsOf(outer);
+  let total = sum(top.t.map((x) => x.s)) + sum(top.sl);
+  const calls = {};
+  for (const [name, w] of fns) {
+    const n = [...outer.matchAll(new RegExp(`(?:^|[\\s;&|(])${name}\\s`, 'g'))].length;
+    calls[name] = n;
+    total += n * (sum(w.t.map((x) => x.s)) + sum(w.sl));
+  }
+  for (const [a, b] of exclusive) {
+    const xa = top.t.filter((x) => x.what === a); const xb = top.t.filter((x) => x.what === b);
+    assert.equal(xa.length, 1, `배타 쌍 ${a} 는 한 번`); assert.equal(xb.length, 1, `배타 쌍 ${b} 는 한 번`);
+    total -= Math.min(xa[0].s, xb[0].s);
+  }
+  return { worstS: total, top: top.t, fns: Object.fromEntries([...fns].map(([k, w]) => [k, w.t])), calls };
+}
 
-test('① 기계 산수 — 주 명령 · Top-N exec · 집중 경로: 안 timeout · sleep 합 + 여유 ≤ exec 시한', () => {
+test('① 기계 산수 — 주 명령 · Top-N exec · 7a 로그 exec · 집중 경로: 안 timeout · sleep 합 + 여유 ≤ exec 시한(같은 함수)', () => {
   assert.equal(OS.CMD_TIMEOUT_MS, 30_000, '운영 기본값(env 없음)');
   for (const sampler of [false, true]) {
     const cmd = OS.linuxCommand(['/'], { sampler });
     // 8b 끔/켬: Top-N 은 주 명령 밖이라 옵션이 주 명령을 바꾸지 않는다(반증 F1 — 예전에는 켬이면 +3초 timeout +1초 대기)
     assert.equal(OS.linuxCommand(['/'], { sampler, top: true }), cmd, '주 명령은 top 옵션과 무관');
-    const { t, sl } = waitsOf(cmd);
+    const { t } = waitsOf(cmd);
     assert.ok(t.length >= 6, `timeout 을 뽑았다(${t.length})`);
     const nr = t.filter((x) => x.what === 'needs-restarting'); const dnf = t.filter((x) => x.what === 'dnf');
-    assert.equal(nr.length, 1); assert.equal(dnf.length, 1, 'needs-restarting · dnf 는 하나씩(배타 쌍 — ② 가 실제 셸로 확인)');
     assert.match(cmd, /\[ "\$_dh" = 1 \] && nrr=0;/, 'dnf 차례면 needs-restarting 을 건너뛰는 장치');
-    const worstS = sum(t.map((x) => x.s)) - Math.min(nr[0].s, dnf[0].s) + sum(sl);
+    const { worstS } = worstOf(cmd, { exclusive: [['needs-restarting', 'dnf']] });
     assert.ok(worstS * 1000 + OS.CMD_INNER_MARGIN_MS <= OS.CMD_TIMEOUT_MS,
       `sampler=${sampler}: 주 명령 최악 ${worstS}초 + 여유 ${OS.CMD_INNER_MARGIN_MS / 1000}초 ≤ ${OS.CMD_TIMEOUT_MS / 1000}초(${t.map((x) => `${x.what} ${x.s}`).join(' · ')})`);
     // 예전 값(배타 없이 8 + 8)이면 넘는다 — 산수가 실제로 무엇을 막는지 고정
@@ -55,10 +84,20 @@ test('① 기계 산수 — 주 명령 · Top-N exec · 집중 경로: 안 timeo
   }
   // Top-N 별도 exec — 전부 합(배타 없음) + 여유 5초 ≤ TOP_EXEC_TIMEOUT_MS · 그 시한은 세션 예산 안(남은 예산과 작은 쪽)
   for (const forceProc of [false, true]) {
-    const { t, sl } = waitsOf(T.topCommand({ forceProc }));
-    const worst = sum(t.map((x) => x.s)) + sum(sl);
+    const worst = worstOf(T.topCommand({ forceProc })).worstS;
     assert.ok(worst * 1000 + 5_000 <= T.TOP_EXEC_TIMEOUT_MS, `Top-N 최악 ${worst}초 + 여유 5초 ≤ ${T.TOP_EXEC_TIMEOUT_MS / 1000}초`);
   }
+  // 7a 로그 exec(반증 후속) — 첫 읽기 · 이어 읽기(커서 · offset · 로테이트) 명령 모두. rdf(파일 증분 함수) 안 find 시한은 호출(secure · audit · 앱 수)만큼
+  for (const state of [{}, LOGSTATE]) {
+    const lw = worstOf(LC.logCommand(state, {}));
+    assert.equal(lw.calls.rdf, 2 + LC.APP_LOGS.length, `rdf 호출 = secure · audit · 앱 ${LC.APP_LOGS.length}(${lw.calls.rdf})`);
+    assert.ok(lw.fns.rdf.some((x) => x.what === 'find'), 'rdf 안 find 시한을 함수 안 것으로 셌다');
+    assert.ok(lw.worstS * 1000 + LC.LOG_INNER_MARGIN_MS <= LR.LOG_EXEC_TIMEOUT_MS,
+      `로그 exec 최악 ${lw.worstS}초 + 여유 ${LC.LOG_INNER_MARGIN_MS / 1000}초 ≤ ${LR.LOG_EXEC_TIMEOUT_MS / 1000}초(${lw.top.map((x) => `${x.what} ${x.s}`).join(' · ')} · rdf ${lw.calls.rdf} × find)`);
+    assert.ok(LR.LOG_EXEC_TIMEOUT_MS < OS.SESSION_BUDGET_MS - 15_000 + 1, '로그 exec 시한 ≤ 세션 예산 − READY');
+  }
+  // 예전 값(journalctl 15 ×2 · dmesg 5 · systemctl 3 ×2 · find 5 × rdf 4 = 61초)은 넘었다 — 산수가 무엇을 막는지 고정
+  assert.ok((15 + 15 + 5 + 3 + 3 + 5 * (2 + LC.APP_LOGS.length)) * 1000 + LC.LOG_INNER_MARGIN_MS > LR.LOG_EXEC_TIMEOUT_MS, '예전 로그 exec 최악(61초)은 이 산수를 넘었다');
   assert.ok(T.TOP_EXEC_TIMEOUT_MS < OS.SESSION_BUDGET_MS - 15_000, 'Top-N exec 시한 < 세션 예산 − READY');
   // S1: 전 프로세스 · 후보 /proc 읽기와 ps 는 모두 timeout 안 — 커널 잠금 대기로 멈춰도 그 칸만 빈다
   const tc = T.TOP_COMMAND;
@@ -71,8 +110,7 @@ test('① 기계 산수 — 주 명령 · Top-N exec · 집중 경로: 안 timeo
   assert.match(fr, /_D\.collectOs\(tg\.osHost, \{[\s\S]{0,900}?top: false,[\s\S]{0,40}?\}\), '집중 수집 시한 초과'\)/, '집중 경로는 Top-N 을 끈다');
   const snapTmo = Number(/name: 'snap', cmd: FOCUS_SNAPSHOT_COMMAND, timeoutMs: (\d[\d_]*)/.exec(fr)?.[1]?.replace(/_/g, ''));
   assert.ok(snapTmo > 0);
-  const sw = waitsOf(SNAP.FOCUS_SNAPSHOT_COMMAND);
-  assert.ok((sum(sw.t.map((x) => x.s)) + sum(sw.sl)) * 1000 + 5_000 <= snapTmo, '집중 스냅샷 안 대기 + 여유 ≤ 스냅샷 exec 시한');
+  assert.ok(worstOf(SNAP.FOCUS_SNAPSHOT_COMMAND).worstS * 1000 + 5_000 <= snapTmo, '집중 스냅샷 안 대기 + 여유 ≤ 스냅샷 exec 시한');
   assert.ok(FOCUS.FOCUS_BUDGET_MS - 15_000 >= OS.CMD_TIMEOUT_MS && FOCUS.FOCUS_BUDGET_MS < FOCUS.FOCUS_DEADLINE_MS, '집중 예산 − READY ≥ 주 명령 시한 · 예산 < 집중 시한');
   // 폴러는 설정 top.on 을 넘긴다 · 수집기 기본값은 끔(호출부가 켜야 돈다)
   assert.match(SRC('bmusage/collectors/osSsh.js'), /extraCommands = \[\], top = false \} = \{\}\) \{/);

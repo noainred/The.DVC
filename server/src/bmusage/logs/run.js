@@ -19,7 +19,7 @@ import { refreshLogSummary } from './view.js';
 import { classCover } from './rules.js';
 
 export const LOG_DEFAULTS = Object.freeze({ on: true, lineCap: LINE_CAP_DEFAULT, keepDays: 30, burstCount: BURST_DEFAULTS.count, burstWindowMin: BURST_DEFAULTS.windowMin });
-/** 로그 exec 시한(같은 세션 남은 예산과 작은 쪽 — osSsh 가 자른다). journalctl 15 + dmesg 5 + find 5 + 여유. */
+/** 로그 exec 시한(같은 세션 남은 예산과 작은 쪽 — osSsh 가 자른다). ⚠ 안 timeout 최악 합 22초(journalctl 6 ×2 · dmesg 3 · systemctl 3 · find 1 × rdf 4) + 여유 8초 ≤ 이 값(command.js 머리말 · bmTop8bBudget 시험 — 예전 46초 > 30초). */
 export const LOG_EXEC_TIMEOUT_MS = 30_000;
 
 let _last = null;
