@@ -35,7 +35,7 @@ const USERS = {
 let _srv = null;
 async function app(t) {
   const { store } = await import('../src/store.js');
-  store.set?.({ ...store.get(), vcenters: [{ id: 'vcA', name: 'A 법인' }, { id: 'vcB', name: 'B 법인' }] });
+  store.snapshot = { ...(store.snapshot || {}), hosts: store.snapshot?.hosts || [], vcenters: [{ id: 'vcA', name: 'A 법인' }, { id: 'vcB', name: 'B 법인' }] };
   if (!_srv) {
     const express = (await import('express')).default;
     const { api } = await import('../src/routes/api.js');
@@ -260,4 +260,30 @@ test('⑤ 반증 r3(F4) — 귀속 없음 후보는 노드까지 갈라 ‘-@노
   assert.equal((await R({}, D, { allowed: null, isAdmin: true, key: 'K', vcenterId: 'vcB' })).target.name, 'edge-b');
   assert.equal(await R({}, D, { allowed: new Set(['vcB', 'vcC']), isAdmin: false, key: 'K', vcenterId: '-@Edge-C' }), null, '범위 계정은 귀속 없음을 못 고른다');
   assert.equal((await R({}, D, { allowed: new Set(['vcB']), isAdmin: false, key: 'K' })).target.name, 'edge-b', '범위 계정 후보는 B 하나');
+});
+
+test('⑥ 실제 getFleetInventory — 전력 미보고 등록부 서버가 공통 태그로 서버 목록 단계에서 빠지던 것(stage universe)도 겹침 목록에', async (t) => {
+  await app(t);
+  fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [
+    { id: 'u-a1', name: 'uw-a1', host: 'https://10.60.0.11', username: 'u', password: 'p', vcenterId: 'vcA', serviceTag: 'To Be Filled By O.E.M.' },
+    { id: 'u-b1', name: 'uw-b1', host: 'https://10.60.0.12', username: 'u', password: 'p', vcenterId: 'vcB', serviceTag: 'To Be Filled By O.E.M.' },
+  ] }));
+  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true, vcB: true }, osSsh: false, idracTelemetry: true }));
+  (await import('../src/bmusage/settings.js'))._resetForTest();
+  const { getFleetInventory } = await import('../src/insights/fleetInventory.js');
+  const { store } = await import('../src/store.js');
+  const inv = await getFleetInventory({ ...store.get(), hosts: [] });
+  assert.deepEqual(inv.bareMetal.filter((b) => b.serverId.startsWith('u-')).map((b) => b.serverId), ['u-a1'], '분류는 그대로(한 대)');
+  const d = inv.bareMetalDupes.filter((x) => x.serverId === 'u-b1');
+  assert.equal(d.length, 1, '예전: 서버 목록 단계에서 사유 없이 빠졌다');
+  assert.deepEqual([d[0].stage, d[0].why, d[0].vcenterId, d[0].dupOf?.serverId], ['universe', 'tag', 'vcB', 'u-a1']);
+  const poller = await import('../src/bmusage/poller.js');
+  poller._setFleetForTest(null);
+  const tg = await poller.currentTargets();
+  const o = tg.keyOverlaps.find((x) => x.serverId === 'u-b1');
+  assert.ok(o, '실제 대상 해석의 겹침 목록에 보인다');
+  assert.deepEqual([o.vcenterId, o.idracHost, o.dupOf?.name], ['vcB', 'https://10.60.0.12', 'uw-a1']);
+  // 서버 분석 응답(/insights/fleet)에는 싣지 않는다(내부용 — 범위 · 가림을 그 라우트가 하지 않는다)
+  const src = fs.readFileSync(new URL('../src/routes/insights.js', import.meta.url), 'utf8');
+  assert.match(src, /const \{ liveKeys, bareMetalDupes: _dupes, \.\.\.payload1 \} = full;/);
 });
