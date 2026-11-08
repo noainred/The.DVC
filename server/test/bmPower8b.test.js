@@ -92,7 +92,11 @@ test('② 교차 검증 — 전력 대시보드(computePowerBreakdown)와 같은
 test('③ 원천 모으기 — 매칭 · 사유 · 24h · 월 누적 캐시 · 온도 · 팬', async () => {
   A._resetPowerAggForTest();
   const monthCalls = {}; let late = false;
-  const idb = { hourlyStats: (key, from, to) => { if (to - from > 23 * HOUR && !(to === NOW || to >= NOW - 1)) monthCalls[key] = (monthCalls[key] || 0) + 1;
+  // v2.947 정정(CI 재현 — KST 18시 이후 실패): '월 조회' 판별을 `to >= NOW - 1` 로 하면 NOW + 6시간이 포탈 자정을 넘는 저녁에는
+  //   월 조회의 to(= 새 날의 시작)도 NOW 보다 뒤라 세지 않아 '담은 값도 TTL 뒤 다시 읽는다' 가 거짓 실패했다(코드는 다시 읽었다).
+  //   24시간 조회는 `to === 그 호출의 now` 로만 가른다 — 호출마다 curNow 를 맞춘다.
+  let curNow = NOW;
+  const idb = { hourlyStats: (key, from, to) => { if (to - from > 23 * HOUR && to !== curNow) monthCalls[key] = (monthCalls[key] || 0) + 1;
     if (key === 'r9' && late) return hours(300, Math.min(24 * 40, Math.floor((to - from) / HOUR)), to);
     return key === 'r1' ? hours(400, Math.min(24 * 40, Math.floor((to - from) / HOUR)), to) : key === 'rmt:bm-3' ? hours(250) : []; } };
   const measured = [{ serverId: 'r1', watts: 400, vcenterId: 'vcA', serviceTag: 'T1', source: 'idrac' }, { serverId: 'r9', watts: 0, vcenterId: 'vcA', serviceTag: 'T9', source: 'idrac' },
@@ -120,6 +124,7 @@ test('③ 원천 모으기 — 매칭 · 사유 · 24h · 월 누적 캐시 · �
   assert.ok(s.K1.kwhMonth > 0);
   // 끝난 날은 캐시 — 두 번째 모으기는 값이 있던 날(r1)을 다시 읽지 않는다 · 값이 없던 날(r9 — 0 W · rmt 사본 앞날)은 담지 않고 다시 읽는다(의심 S2)
   const before = { ...monthCalls };
+  curNow = NOW;
   await A.gatherPower({ targets, deps, now: NOW });
   if (new Date(NOW).getDate() > 2) {
     assert.equal(monthCalls.r1 ?? 0, before.r1 ?? 0, '끝난 날 Wh 는 캐시(요청마다 한 달을 다시 읽지 않는다)');
@@ -127,10 +132,12 @@ test('③ 원천 모으기 — 매칭 · 사유 · 24h · 월 누적 캐시 · �
   }
   // 늦게 채워진 날 — 처음엔 없던 r9 의 지난 날 시간 롤업이 나중에 생기면 다음 계산이 반영한다(예전: 40일 동안 null 고정)
   late = true;
+  curNow = NOW + 1000;
   const s2 = Object.fromEntries((await A.gatherPower({ targets, deps, now: NOW + 1000 })).map((x) => [x.key, x]));
   if (new Date(NOW).getDate() > 2) assert.ok(s2.K9.kwhMonth > 0, `늦게 온 롤업 반영(${s2.K9.kwhMonth})`);
   // 값이 있던 날도 DAY_WH_TTL_MS 뒤에는 다시 읽는다
   const b2 = monthCalls.r1 ?? 0;
+  curNow = NOW + A.DAY_WH_TTL_MS + 1;
   await A.gatherPower({ targets, deps, now: NOW + A.DAY_WH_TTL_MS + 1 });
   if (new Date(NOW).getDate() > 2) assert.ok((monthCalls.r1 ?? 0) > b2, '담은 값도 TTL 뒤 다시 읽는다');
   // 함대 공유 — 같은 열쇠 60초 안에는 한 번만 계산
