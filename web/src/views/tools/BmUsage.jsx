@@ -537,7 +537,8 @@ export function BmUsage() {
         {view === 'util' && (<>
           {/* ⚠ 표는 **가로 스크롤 컨테이너**로 감싼다 — 지표 열이 8개라 400px 에서 페이지를 밀어낸다. */}
           <div style={{ overflowX: 'auto', minWidth: 0 }}>
-            <STable>
+            {/* v2.945.1(릴리스 검증 — 기존 결함): 12열 표가 1440 에서 1164 > 영역 1118 이라 마지막 ‘수집’ 열이 숨었다 — 글자 12px · 머리 줄바꿈 허용. */}
+            <STable className="bmu-util" style={{ fontSize: 12 }}>
               <thead>
                 <tr>
                   <th>서버</th><th>법인</th><th>경로</th>
