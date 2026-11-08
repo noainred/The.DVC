@@ -19,6 +19,7 @@ import { IDLE_STATUS, IDLE_EXCLUDE, IDLE_METRICS, IDLE_REVIEW } from '../../../.
 import { UNMEASURED } from '../../../../server/src/bmusage/powerAgg.js';
 import { CHANGE_KINDS } from '../../../../server/src/bmusage/changes.js';
 import { CHANGE_KIND_TEXT } from './bmPerfOpsText.js';
+import { famLine } from './bmCollectText.js';
 
 const h = React.createElement;
 const HERE = path.dirname(new URL(import.meta.url).pathname);
@@ -109,6 +110,15 @@ describe('㉒ 전력 · 온도 문구 · 그리기', () => {
     const html = renderToStaticMarkup(h(PowerFleetView, { resp }));
     expect(html).toContain('187.4 kW'); expect(html).toContain('미매핑'); expect(html).toContain('읽기 실패 17'); expect(html).toContain('걸림(400 W · 103%)');
     expect(html).toMatch(/같은 함수로 지금 값을 읽습니다/); expect(html).not.toMatch(/\*\*/);
+  });
+});
+
+describe('수집 건강 저장 줄 — Top-N 가족(보존 조정 근거)', () => {
+  it('top + toph 개수 · 크기 · 구버전(가족 없음)은 칸 없음', () => {
+    const fam = { raw: { files: 1, bytes: 1 }, h1: { files: 1, bytes: 1 }, d1: { files: 1 }, dev: { files: 0 }, dev1h: { files: 0 }, top: { files: 7, bytes: 2 * 1024 ** 3 }, toph: { files: 3, bytes: 0 } };
+    expect(famLine({ mainBytes: 1, families: fam })).toMatch(/프로세스 Top-N 10개 2GB/);
+    const { top: _t, toph: _h, ...old } = fam;
+    expect(famLine({ mainBytes: 1, families: old })).not.toMatch(/Top-N/);
   });
 });
 
