@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js'; // 로드 오류 원문(파일 조각)은 콘솔·상태에 싣지 않는다(RG2744-02)
 import { registerExitFlush } from '../util/exitFlush.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { devicesForThisNode, getDeviceWithSecret, registryLoadError } from './registry.js';
@@ -164,9 +164,10 @@ function loadRing() {
     _ringPersist.loaded = n; _ringPersist.hasFile = true;
     if (n) console.log(`[storage-nodeload] 재시작 전 미전송 표본 ${n}개를 파일에서 되살렸습니다(장비 ${_ring.size}대) — 다음 push 에 싣습니다`);
   } catch (e) {
-    _ringPersist.error = capErr(e);
+    const why = safeLoadText(e); // 원문(JSON 조각)이 아니라 요약
+    _ringPersist.error = why;
     preserveCorrupt(file, e?.message);
-    console.warn(`[storage-nodeload] 미전송 표본 파일을 읽지 못해 빈 고리로 시작합니다(원본은 .corrupt 로 보존): ${capErr(e)}`);
+    console.warn(`[storage-nodeload] 미전송 표본 파일을 읽지 못해 빈 고리로 시작합니다(원본은 .corrupt 로 보존): ${why}`);
   }
 }
 const ringJson = () => JSON.stringify({ version: 1, at: Date.now(), devices: Object.fromEntries([..._ring]) });
