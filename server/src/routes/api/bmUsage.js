@@ -1078,7 +1078,7 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
     // ⚠⚠ v2.574 SEC-02 — `allowed` 는 **Set 또는 null** 이다(`auth/scope.js:16-26`). 예전 코드는 `allowed.includes(...)` 라 범위 제한 계정에서
     //   항상 TypeError 였고 응답 없이 매달렸다(전수: `allowed.has(` 110곳 vs `allowed.includes(` 이 한 곳뿐이었다).
     // 다음 점검 ①: 해석은 resolvePerfTarget 하나((법인, 키) 쌍 · 이 노드 대상만 — 원시 이력은 이 노드 것만 있다). 같은 키가 이 노드의 두 법인에 있으면 400 ambiguous-key.
-    const found = await resolvePerfTarget(req, { currentTargets, listEdgeBmUsage: async () => [] }, { allowed, isAdmin, key, vcenterId: perfVcOf(req), localOnly: true });
+    const found = await resolvePerfTarget(req, { currentTargets }, { allowed, isAdmin, key, vcenterId: perfVcOf(req), localOnly: true });
     const bad = perfTargetFail(found);
     if (bad) { const f = failParts(bad); return res.status(f.status).json(f.body); }
     const { target, tg } = found;
