@@ -23,6 +23,7 @@ import { loadBmUsageSettings } from '../../bmusage/settings.js';
 import { memoJson } from './shared.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { resolvePerfTarget, bmAddressHosts, perfAddressMatcher, noStoreFail, perfKey } from './bmUsage.js';
+import { procHint } from '../../bmusage/parse/linuxTop.js';
 
 const toolsPerm = requirePerm('tools');
 const t = (v) => strOf(v, 4096).trim();
@@ -44,18 +45,29 @@ export function depsOf(deps = {}) {
   };
 }
 
-/** 비관리자 판본(순수) — 사용자 이름 = 가림 토큰 · comm 의 주소 꼴 = 가림. */
+/**
+ * 비관리자 판본(순수) — 사용자 이름 = 가림 토큰 · comm 의 주소 꼴 = 가림.
+ *   ⚠ 8b 반증 F7: 프로파일 단서(hint)도 **가린 사용자로 다시 계산**한다 — ‘gpdb’ 는 계정 gpadmin 에서 나온 단서라, 원래 단서를 두면 그 행의 가림 토큰 = gpadmin 이
+ *   알려지고(같은 값 = 같은 토큰) 같은 응답 · 다른 서버의 같은 토큰도 풀린다. 사용자와 무관한 단서(airflow · kswapd · sshd · kernel)는 comm 만으로 같은 값이 나온다.
+ */
 export function maskTopRows(rows, scrub = (s) => s) {
   const tok = (v) => (v ? maskedIdToken(String(v)) : v);
   const clean = (s) => (typeof s === 'string' ? scrub(s).replace(IPV4_RE, (ip) => maskedIdToken(ip)) : s);
   const out = {};
-  for (const k of KINDS) out[k] = (rows?.[k] || []).map((r) => ({ ...r, user: tok(r.user), comm: clean(r.comm) }));
+  for (const k of KINDS) out[k] = (rows?.[k] || []).map((r) => { const comm = clean(r.comm); return { ...r, user: tok(r.user), comm, hint: procHint({ comm, user: null }) }; });
   return out;
 }
 export function maskBand(body, scrub = (s) => s) {
   const clean = (s) => (typeof s === 'string' ? scrub(s).replace(IPV4_RE, (ip) => maskedIdToken(ip)) : s);
   const map = new Map((body?.comms || []).map((c) => [c, clean(c)]));
   return { ...body, comms: (body?.comms || []).map((c) => map.get(c)), points: (body?.points || []).map((p) => ({ ...p, by: Object.fromEntries(Object.entries(p.by || {}).map(([c, v]) => [map.get(c) ?? clean(c), v])) })) };
+}
+
+/** 8b 반증 F8: 최소 엣지 버전 안내는 **구버전 엣지(old-version)** 일 때만 — 시한 · 연결 실패 · 대상 아님(disabled)에 버전 요구를 붙여 이유를 단정하지 않는다. */
+async function edgeVersionNote(r, D) {
+  if (r?.kind !== 'old-version') return {};
+  const v = await D.minEdgeVersion().catch(() => null);
+  return v ? { minEdgeVersion: v } : {};
 }
 
 async function resolve(req, D) {
@@ -81,7 +93,7 @@ export async function bmTopPoint(req, _snap, deps = {}) {
   let body;
   if (f.via === 'edge') {
     const r = await D.pullTop(f.agent, f.realKey, { ts });
-    if (!r.ok) return { ok: false, key, via: 'edge', agent: f.agent, kind: r.kind || 'error', reason: r.reason || '엣지에서 프로세스 표를 읽지 못했습니다.', minEdgeVersion: await D.minEdgeVersion().catch(() => null) };
+    if (!r.ok) return { ok: false, key, via: 'edge', agent: f.agent, kind: r.kind || 'error', reason: r.reason || '엣지에서 프로세스 표를 읽지 못했습니다.', ...(await edgeVersionNote(r, D)) };
     body = { ...r.body, via: 'edge', agent: f.agent };
   } else {
     const r = await D.topAt({ agent: f.agent, key: f.realKey, ts, toleranceMs: D.intervalMs() * 1.5 });
@@ -101,7 +113,7 @@ export async function bmTopBandView(req, _snap, deps = {}) {
   let body;
   if (f.via === 'edge') {
     const r = await D.pullBand(f.agent, f.realKey, { from, to });
-    if (!r.ok) return { ok: false, key, via: 'edge', agent: f.agent, kind: r.kind || 'error', reason: r.reason || '엣지에서 프로세스 띠를 읽지 못했습니다.', minEdgeVersion: await D.minEdgeVersion().catch(() => null) };
+    if (!r.ok) return { ok: false, key, via: 'edge', agent: f.agent, kind: r.kind || 'error', reason: r.reason || '엣지에서 프로세스 띠를 읽지 못했습니다.', ...(await edgeVersionNote(r, D)) };
     body = { ...r.body, via: 'edge', agent: f.agent };
   } else {
     const r = await D.topBand({ agent: f.agent, key: f.realKey, from, to });

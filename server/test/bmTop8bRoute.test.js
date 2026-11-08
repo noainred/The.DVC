@@ -71,8 +71,23 @@ test('① ② 엣지 대행 왕복 · 중앙 라우트 · 범위 · 가림', asy
   const op = { user: { username: 'op', role: 'operator', scope: null }, query: { ts: String(NOW) }, params: { key: 'TTAG1' } };
   const mp = await R.bmTopPoint(op, {});
   assert.notEqual(mp.rows.cpu[0].user, 'gpadmin', '비관리자 = 가림 토큰'); assert.equal(mp.userHidden, true); assert.equal(mp.rows.cpu[0].comm, 'postgres', 'comm 은 본문 — 그대로');
+  // 반증 F7: 계정에서 나온 단서(gpdb = postgres + gpadmin)는 비관리자 판본에 싣지 않는다 — 가림 토큰 ↔ gpadmin 대응이 새지 않게(관리자는 그대로)
+  assert.equal(lp.rows.cpu[0].hint, 'gpdb', '관리자 = 단서 그대로');
+  assert.equal(mp.rows.cpu[0].hint, null, `비관리자 = 계정 단서 없음(${mp.rows.cpu[0].hint})`);
+  assert.ok(!JSON.stringify(mp).includes('gpadmin') && !JSON.stringify(mp).includes('"gpdb"'), '응답 어디에도 계정 · 계정 단서가 없다');
+  const mk = R.maskTopRows({ cpu: [{ user: 'root', comm: 'kswapd0', hint: 'kswapd' }, { user: 'gpadmin', comm: 'postgres', hint: 'gpdb' }, { user: 'af', comm: 'airflow', hint: 'airflow' }] });
+  assert.deepEqual(mk.cpu.map((x) => x.hint), ['kswapd', null, 'airflow'], '계정과 무관한 단서는 comm 만으로 그대로');
   const ep = await R.bmTopPoint({ ...adm, params: { key: 'EKEY1' } }, {}, { pullTop: async (a, k, o) => ({ ok: true, body: { ok: true, key: k, sample: { ts: o.ts }, rows: { cpu: [], mem: [], io: [] }, agent: a } }) });
   assert.equal(ep.via, 'edge'); assert.equal(ep.agent, 'top-edge');
+  // 반증 F8: 엣지 대행 실패 — 최소 엣지 버전 안내는 구버전(old-version)일 때만(시한 · 연결 실패 · 대상 아님에 버전 요구를 붙이지 않는다)
+  for (const kind of ['timeout', 'unreachable', 'disabled', 'error']) {
+    const e1 = await R.bmTopPoint({ ...adm, params: { key: 'EKEY1' } }, {}, { pullTop: async () => ({ ok: false, kind, reason: 'x' }), minEdgeVersion: async () => '2.950.0' });
+    assert.equal(e1.kind, kind); assert.equal('minEdgeVersion' in e1, false, `${kind}: 버전 요구 없음`);
+    const e2 = await R.bmTopBandView({ ...adm, params: { key: 'EKEY1' }, query: { from: '1', to: '2' } }, {}, { pullBand: async () => ({ ok: false, kind, reason: 'x' }), minEdgeVersion: async () => '2.950.0' });
+    assert.equal('minEdgeVersion' in e2, false, `띠 ${kind}: 버전 요구 없음`);
+  }
+  const eo = await R.bmTopPoint({ ...adm, params: { key: 'EKEY1' } }, {}, { pullTop: async () => ({ ok: false, kind: 'old-version', reason: 'x' }), minEdgeVersion: async () => '2.950.0' });
+  assert.equal(eo.minEdgeVersion, '2.950.0', '구버전 엣지에만 최소 버전');
   const opA = { user: { username: 'opa', role: 'operator', scope: { vcenters: ['vcA'] } }, query: { ts: String(NOW) }, params: { key: 'EKEY1' } };
   assert.equal((await R.bmTopPoint(opA, {})).__status, 404, '범위 밖(vcB) 서버 = 404(존재 은닉)');
   assert.equal((await R.bmTopPoint({ ...adm, query: {} }, {})).__status, 400, 'ts 없으면 400');
@@ -95,9 +110,12 @@ test('③ 엣지 문자열 정제(순수)', async () => {
   assert.ok(!/‮/.test(c.user)); assert.equal(c.state, null, '상태는 한 글자만'); assert.equal(c.ioPerm, false, '불리언은 true 만');
   assert.equal(c.hint, null, '엣지가 준 hint 는 쓰지 않는다(중앙이 다시 붙인다 — 이 comm · user 는 단서 없음)');
   assert.equal(s.rows.mem.length, 5, '종류당 5행');
+  assert.equal(P.sanitizeTopPoint({ ...body, reason: 'base-missing' }, 'X', now).reason, 'base-missing', '반증 F3: 기준 표본 못 읽음은 엣지 대행에서도 그대로');
+  assert.equal(P.sanitizeTopPoint({ ...body, reason: 'evil' }, 'X', now).reason, undefined);
   assert.ok(!('evil' in s.rows));
   const band = P.sanitizeTopBand({ ok: true, key: 'X', res: '1h', comms: ['a\u0007', 'b', 'c', 'd', 'e', 'f', 'g'], points: [{ t: now, by: { 'a?': 3, zz: 9, b: 'x' }, other: '2' }, { t: 'bad' }] }, 'X', now);
   assert.equal(band.comms.length, 6); assert.deepEqual(band.points[0].by, { 'a?': 3 }, '띠 comm 은 목록 안 것만 · 수만'); assert.equal(band.points.length, 1);
+  assert.equal(P.sanitizeTopBand({ ok: true, key: 'X', points: [], baseMissing: '3' }, 'X', now).baseMissing, 3, '띠의 기준 못 읽음 수'); assert.equal(P.sanitizeTopBand({ ok: true, key: 'X', points: [], baseMissing: -1 }, 'X', now).baseMissing, undefined);
 });
 
 test('④ 구버전 엣지 → old-version · 8b 최소 버전은 릴리스 노트 표지', async (t) => {
