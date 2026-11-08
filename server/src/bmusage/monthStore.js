@@ -71,8 +71,11 @@ export const FAMILIES = Object.freeze({
   d1: { prefix: 'bm-usage-1d-', period: 'year', table: 'usage_daily', keep: 'd1' },
   dev: { prefix: 'bm-usage-dev-', period: 'month', table: 'usage_device_history', keep: 'dev' },
   dev1h: { prefix: 'bm-usage-dev1h-', period: 'month', table: 'usage_device_hourly', keep: 'dev1h' },
+  // 8b단계 프로세스 Top-N(topStore.js) — 5분 표본은 **날 파일**(보존 7일 = 파일 삭제만 · 경계 청크 없음) · comm 별 시간 집계는 월 파일(90일).
+  top: { prefix: 'bm-usage-top-', period: 'day', table: 'top_sample', keep: 'top' },
+  toph: { prefix: 'bm-usage-toph-', period: 'month', table: 'top_proc_hourly', keep: 'toph' },
 });
-const FILE_RE = /^bm-usage-(?:(1h|1d|dev|dev1h)-)?(\d{4})(?:-(\d{2}))?\.db$/;
+const FILE_RE = /^bm-usage-(?:(1h|1d|dev|dev1h|top|toph)-)?(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?\.db$/;
 
 export const dbDir = () => config.dbDir || config.configDir;
 
@@ -81,13 +84,15 @@ export const dbDir = () => config.dbDir || config.configDir;
 export function periodKeyOf(family, ts) {
   const d = dayKey(ts);
   if (!d) return null;
-  return FAMILIES[family].period === 'year' ? d.slice(0, 4) : d.slice(0, 7);
+  const per = FAMILIES[family].period;
+  return per === 'year' ? d.slice(0, 4) : per === 'day' ? d : d.slice(0, 7);
 }
 /** 기간 [시작, 끝) ms(포탈 시각 경계). */
 export function periodRange(family, key) {
   const y = Number(key.slice(0, 4));
   if (FAMILIES[family].period === 'year') return [Date.UTC(y, 0, 1) - OFF_MS, Date.UTC(y + 1, 0, 1) - OFF_MS];
   const m = Number(key.slice(5, 7)) - 1;
+  if (FAMILIES[family].period === 'day') { const d = Number(key.slice(8, 10)); return [Date.UTC(y, m, d) - OFF_MS, Date.UTC(y, m, d + 1) - OFF_MS]; }
   return [Date.UTC(y, m, 1) - OFF_MS, Date.UTC(y, m + 1, 1) - OFF_MS];
 }
 export const fileNameOf = (family, key) => `${FAMILIES[family].prefix}${key}.db`;
@@ -95,11 +100,12 @@ export const fileNameOf = (family, key) => `${FAMILIES[family].prefix}${key}.db`
 export function parseFileName(name) {
   const m = FILE_RE.exec(String(name || ''));
   if (!m) return null;
-  const family = m[1] === '1h' ? 'h1' : m[1] === '1d' ? 'd1' : m[1] === 'dev' ? 'dev' : m[1] === 'dev1h' ? 'dev1h' : 'raw';
+  const family = m[1] === '1h' ? 'h1' : m[1] === '1d' ? 'd1' : m[1] === 'dev' ? 'dev' : m[1] === 'dev1h' ? 'dev1h' : m[1] === 'top' ? 'top' : m[1] === 'toph' ? 'toph' : 'raw';
   const per = FAMILIES[family].period;
   if (per === 'year' && m[3]) return null;
-  if (per === 'month' && !m[3]) return null;
-  return { family, key: m[3] ? `${m[2]}-${m[3]}` : m[2] };
+  if (per === 'month' && (!m[3] || m[4])) return null;
+  if (per === 'day' && (!m[3] || !m[4])) return null;
+  return { family, key: m[4] ? `${m[2]}-${m[3]}-${m[4]}` : m[3] ? `${m[2]}-${m[3]}` : m[2] };
 }
 /** 창 [from, to] 에 걸리는 기간 키(오래된 것부터). */
 export function periodsInWindow(family, from, to) {
@@ -181,6 +187,20 @@ export const SCHEMA = Object.freeze({
     ${DEV_ROLL.map((c) => `${c}_sum REAL, ${c}_n INTEGER NOT NULL DEFAULT 0, ${c}_max REAL`).join(', ')}, ${peakColsSql(DEVICE_PEAK_COLS)},
     PRIMARY KEY (agent, key, kind, dev, h));
     CREATE INDEX IF NOT EXISTS idx_bmm_dev1h_h ON usage_device_hourly(h);`,
+  // 8b단계(topStore.js) — 표본 머리 1행/서버/주기 + ‘바뀐 표본’ 에만 종류(cpu · mem · io) × 순위 행. base_ts = 같은 내용의 기준 표본(바뀌지 않았으면 그 표본 · 바뀌었으면 자기 ts).
+  top: `CREATE TABLE IF NOT EXISTS top_sample (
+    agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, ts INTEGER NOT NULL, base_ts INTEGER NOT NULL, src TEXT, nproc INTEGER, nrun INTEGER, nd INTEGER,
+    cpu_total REAL, dt_s REAL, up_s REAL, cands INTEGER, io_perm INTEGER, io_unknown INTEGER, PRIMARY KEY (agent, key, ts));
+    CREATE INDEX IF NOT EXISTS idx_bmm_top_ts ON top_sample(ts);
+    CREATE TABLE IF NOT EXISTS top_proc (
+    agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, ts INTEGER NOT NULL, kind TEXT NOT NULL, rank INTEGER NOT NULL,
+    pid INTEGER, starttime INTEGER, user TEXT, comm TEXT, val REAL, rss REAL, state TEXT, cpu_s REAL, rd REAL, wr REAL, io_perm INTEGER,
+    PRIMARY KEY (agent, key, ts, kind, rank));
+    CREATE INDEX IF NOT EXISTS idx_bmm_topp_ts ON top_proc(ts);`,
+  toph: `CREATE TABLE IF NOT EXISTS top_proc_hourly (
+    agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, hour INTEGER NOT NULL, comm TEXT NOT NULL, cpu_s REAL NOT NULL DEFAULT 0, rss_max REAL, samples INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent, key, hour, comm));
+    CREATE INDEX IF NOT EXISTS idx_bmm_toph_hour ON top_proc_hourly(hour);`,
 });
 
 /* ════════════════════════ 핸들(진행 중인 open 공유 · LRU · pin) ════════════════════════ */
@@ -942,6 +962,8 @@ const RESIDUAL = Object.freeze({
   d1: [['usage_daily', 'day'], ['usage_daily_mig', 'day'], ['usage_mount_daily', 'day']],
   dev: [['usage_device_history', 'ts']],
   dev1h: [['usage_device_hourly', 'h']],
+  top: [['top_sample', 'ts'], ['top_proc', 'ts']],
+  toph: [['top_proc_hourly', 'hour']],
 });
 /**
  * 보존 집행. keepDays: { raw, h1, d1, dev, dev1h }(일). paused: 이 가족은 건너뛴다(마이그레이션 중 원시 — 대조 전에 지우지 않게).

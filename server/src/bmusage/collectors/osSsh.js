@@ -28,6 +28,7 @@ import {
 } from '../parse/linuxProc.js';
 import { FACT_SHELL, FACT_SECTIONS, FACT_LINE_CAP, FACT_LINE_BYTES, parseOsRel, parseUnits, parsePorts, parseProcs, parseAccts, parseKargs, parseSoftnet, parseNetq, parseXfs } from '../parse/linuxFacts.js'; // v2.923: 4단계 용도 감지 · 튜닝 사실
 import { HEALTH_SHELL, HEALTH_SECTIONS, HEALTH_LINE_CAP, HEALTH_LINE_BYTES, parseChrony, parseDmesgCounts, parseChanges } from '../parse/linuxHealth.js'; // v2.929(5단계): 점검 소모품 · 변경 이벤트
+import { TOP_SECTIONS, TOP_LINE_CAP, TOP_LINE_BYTES, topShell, parseTop } from '../parse/linuxTop.js'; // 8b단계: 프로세스 Top-N(##TOP)
 import { planWindow, peakCommand, parsePeakOutput, computePeaks, PEAK_OVERHEAD_MS } from '../peakWindow.js'; // v2.922: 피크 A 안
 import { samplerCommand, parseSamplerFile, SAMPLER_MAX_LINES } from '../samplerSpec.js'; // v2.922: 피크 B 안(수거 자리만)
 import { parseWinPerf } from '../parse/winPerf.js';
@@ -73,6 +74,8 @@ export const SECTION_LINE_CAP = Object.freeze({
   ...FACT_LINE_CAP,
   // v2.929(5단계): 점검 소모품 · 변경 이벤트(parse/linuxHealth.js — 줄마다 고정 접두)
   ...HEALTH_LINE_CAP,
+  // 8b단계: 프로세스 Top-N(parse/linuxTop.js — 줄마다 고정 접두 · 40줄 × 201바이트 ≤ 8KB)
+  ...TOP_LINE_CAP,
 });
 /** 줄 최대 바이트(가정 — 개행 포함). cut 으로 자르는 구획은 그 폭, 커널 숫자 형식(DISK·NET)은 관측 폭의 여유값(추정 — 자르지 않는다: 숫자 중간 절단 금지). */
 export const SECTION_LINE_BYTES = Object.freeze({
@@ -80,6 +83,7 @@ export const SECTION_LINE_BYTES = Object.freeze({
   PSI: 128, VMSTAT: 32, SNMP: 300, BLKQ: 100, SYSCTL: 200, IRQ: 80, DFI: 1_025, SAMPLER: 257,
   ...FACT_LINE_BYTES,
   ...HEALTH_LINE_BYTES,
+  ...TOP_LINE_BYTES,
 });
 /** 기존 구획 중 줄 상한을 파서가 확인하는 것(splitSections 이름 → 상한). 상한+1 줄이 오면 상한 도달. */
 export const LEGACY_CAPPED = Object.freeze({ MEM: SECTION_LINE_CAP.MEM, DISK: SECTION_LINE_CAP.DISK, NET: SECTION_LINE_CAP.NET, NETINFO: SECTION_LINE_CAP.NETINFO, FC: SECTION_LINE_CAP.FC, DF: SECTION_LINE_CAP.DF });
@@ -99,10 +103,10 @@ const IRQ_AWK = "awk 'NR==1{n=NF;next} {nz=0; for(i=2;i<=n+1&&i<=NF;i++) if(($i+
  * v2.923(반증 R1): 명령이 표지를 내는 **순서** — 파서(splitSections)는 이 순서에서 지금보다 뒤의 표지만 받는다(앞 구획을 다시 열지 않는다).
  *   linuxCommand 의 echo 순서와 같아야 한다(테스트가 명령 문자열에서 표지를 뽑아 대조).
  */
-export const LINUX_SECTIONS = Object.freeze(['STAT', 'MEM', 'DISK', 'NET', 'NETINFO', 'FC', 'TICK', 'DF', 'HOST', 'LOAD', 'PSI', 'VMSTAT', 'SNMP', 'BLKQ', 'SYSCTL', 'IRQ', 'DFI', ...FACT_SECTIONS, ...HEALTH_SECTIONS, 'SAMPLER', 'END']);
+export const LINUX_SECTIONS = Object.freeze(['STAT', 'MEM', 'DISK', 'NET', 'NETINFO', 'FC', 'TICK', 'DF', 'HOST', 'LOAD', 'PSI', 'VMSTAT', 'SNMP', 'BLKQ', 'SYSCTL', 'IRQ', 'DFI', ...FACT_SECTIONS, ...HEALTH_SECTIONS, ...TOP_SECTIONS, 'SAMPLER', 'END']);
 
 /** Linux 수집 명령 — 구획 표지로 나눈 한 방. */
-export function linuxCommand(mounts = [], { sampler = false } = {}) {
+export function linuxCommand(mounts = [], { sampler = false, top = true } = {}) {
   const dfPart = mounts.length ? `df -P -k -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DF + 1} | cut -c1-1024` : 'true';
   // v2.919: inode(##DFI) — 같은 sanitize 된 마운트만(변수 삽입은 이 화이트리스트뿐).
   const dfiPart = mounts.length ? `df -P -i -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DFI}` : 'true';
@@ -144,6 +148,8 @@ export function linuxCommand(mounts = [], { sampler = false } = {}) {
     ...FACT_SECTIONS.flatMap((k) => [`echo '##${k}'`, FACT_SHELL[k]]),
     // ── v2.929(5단계) 점검 소모품 · 변경 이벤트 — 상수 조각(parse/linuxHealth.js HEALTH_SHELL). 줄마다 고정 접두 · 내용은 CRC · 개수만(설정 파일 · dmesg 원문 없음).
     ...HEALTH_SECTIONS.flatMap((k) => [`echo '##${k}'`, HEALTH_SHELL[k]]),
+    // ── 8b단계 프로세스 Top-N — 상수 조각(parse/linuxTop.js). comm 만 · 인자 없음 · 줄마다 고정 접두. 끄면(설정 top.on=false) 표지 + ‘꺼짐’ 한 줄(1초 대기 없음).
+    ...TOP_SECTIONS.flatMap((k) => [`echo '##${k}'`, topShell({ off: !top })]),
     // v2.922: 피크 B 안 수거 구획 — 옵트인일 때만(기본 명령은 그대로). 파일이 없으면 0줄(absent).
     ...(sampler ? ["echo '##SAMPLER'", samplerCommand()] : []),
     "echo '##END'",
@@ -290,6 +296,8 @@ export function shapePerfSections(sec = {}, { blkqMax = MAX_BLKQ } = {}) {
     chrony: readSection(sec, 'CHRONY', parseChrony),
     dmesg: readSection(sec, 'DMESG', parseDmesgCounts),
     changes: readSection(sec, 'CHANGES', parseChanges),
+    // 8b단계 — 프로세스 Top-N(표지 없음 missing · 꺼짐 { off:true } · 형식이 다르면 missing — 0 · 정상으로 두지 않는다)
+    top: readSection(sec, 'TOP', parseTop),
   };
 }
 
@@ -298,7 +306,7 @@ export function shapePerfSections(sec = {}, { blkqMax = MAX_BLKQ } = {}) {
  * @param {object} osHost  `bmstor` 등록 항목(host·port·username·password·mounts)
  * @param {{signal?:AbortSignal}} opt
  */
-export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null, extraCommands = [] } = {}) {
+export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null, extraCommands = [], top = true } = {}) {
   const host = String(osHost.host || '').trim();
   if (!host) return { ok: false, error: 'OS host 가 없습니다.' };
   // 7b: 키 · 공통 계정 참조를 해석하지 못했으면(키 삭제 · 봉인 해제 실패 · 저장소 손상) 접속하지 않는다 — 빈 비밀번호로 시도해
@@ -324,7 +332,7 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
         // ⚠ `exec` 는 `(cmd, timeoutMs)` **위치 인자**다(`sshExec.js:87`). 객체를 넘기면
         //   `Math.max(1000, {…})` 이 **NaN** 이 되고 `setTimeout(fn, NaN)` 은 즉시 발화해
         //   **항상 즉시 타임아웃**된다(v2.550 자체 재검토에서 잡았다 — 목 데이터로는 드러나지 않는다).
-        const r = await exec(linuxCommand(mounts, { sampler }), slice());
+        const r = await exec(linuxCommand(mounts, { sampler, top }), slice());
         const shaped = shapeLinux(r.stdout || '', mounts, { partitionIo, blkqMax, samplerSha });
         if (!shaped) return null;
         // v2.922 피크 A 안 — 같은 세션에서 1초 창. 남은 예산이 모자라면 줄이고(planWindow) 그 사실을 남긴다. 1초 표본은 여기서 집계 뒤 버린다.

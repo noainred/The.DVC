@@ -113,7 +113,7 @@ test('실제 셸(dash · bash) + 가짜 장비 명령 — 줄마다 접두 · �
     const ch = shaped.perf.changes.value;
     assert.equal(ch.needsRestart, true, 'needs-restarting -r 출력 표지 ‘Reboot is required’ = 재부팅 필요');
     assert.ok(ch.upS > 0 && /^[0-9a-f-]{36}$/.test(ch.bootId));
-    const chRaw = out.split('##CHANGES\n')[1].split('\n##END')[0].split('\n').filter(Boolean);
+    const chRaw = out.split('##CHANGES\n')[1].split('\n##TOP')[0].split('\n##END')[0].split('\n').filter(Boolean);   // 8b단계: CHANGES 다음 표지는 ##TOP
     assert.ok(chRaw.every((l) => l.startsWith('x:')), `${sh}: CHANGES 줄은 전부 x: 접두`);
     // dnf 는 rpmdb 가 최근에 바뀐 장비에서만 돈다(실행 여부는 장비 상태 — 단언하지 않는다) · 돌았더라도 파서가 명령줄을 버린다(보관 값에 없다).
     assert.ok(!JSON.stringify(shaped.perf.changes.value).includes('SECRET'), `${sh}: dnf 명령줄은 보관 값에 없다`);

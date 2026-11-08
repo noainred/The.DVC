@@ -20,6 +20,8 @@ export const STAGE7A_TITLE_RE = /리눅스 통합 성능 모니터링 7a단계/;
 export const STAGE7B_TITLE_RE = /리눅스 통합 성능 모니터링 7b단계/;
 /** 8a단계(정비 창 배포 — 엣지 인출 /api/central/bm-maint · 봉투 maint · capacity · 엣지 대행 /bm-usage/capacity) 표지. */
 export const STAGE8A_TITLE_RE = /리눅스 통합 성능 모니터링 8a단계/;
+/** 8b단계(새 ##TOP 구획 · 봉투 idle · 엣지 대행 /bm-usage/top · /bm-usage/top/band) 표지. */
+export const STAGE8B_TITLE_RE = /리눅스 통합 성능 모니터링 8b단계/;
 
 const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 const _memo = new Map();   // re.source → 버전
@@ -52,4 +54,6 @@ export const stage7aMinEdgeVersion = (o) => featureMinEdgeVersion(STAGE7A_TITLE_
 export const stage7bMinEdgeVersion = (o) => featureMinEdgeVersion(STAGE7B_TITLE_RE, o);
 /** 8a단계(정비 창을 받고 용량 예측을 싣는 엣지) 최소 엣지 버전 — 숫자를 박지 않는다(릴리스 노트의 8a단계 첫 번호 · 없으면 지금 버전). */
 export const stage8aMinEdgeVersion = (o) => featureMinEdgeVersion(STAGE8A_TITLE_RE, o);
+/** 8b단계(프로세스 Top-N 을 수집 · 대행하고 저활용 결과를 싣는 엣지) 최소 엣지 버전 — 숫자를 박지 않는다(릴리스 노트의 8b단계 첫 번호 · 없으면 지금 버전). */
+export const stage8bMinEdgeVersion = (o) => featureMinEdgeVersion(STAGE8B_TITLE_RE, o);
 export function _resetFeatureMinEdgeVersionForTest(titleRe = null) { if (titleRe) _memo.delete(titleRe.source); else _memo.clear(); }

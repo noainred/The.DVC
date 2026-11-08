@@ -8,6 +8,7 @@
  */
 import { sanitizeCollectHealth } from './bmCollectHealthSanitize.js'; // 6단계 수집 건강
 import { sanitizeMaintEnvelope, sanitizeCapacityEnvelope } from './bmMaintCapSanitize.js'; // 8a단계
+import { sanitizeIdleEnvelope } from './bmIdleSanitize.js'; // 8b단계
 import { strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { PERF_COL_NAMES } from '../bmusage/perfCols.js';
@@ -263,6 +264,10 @@ export function sanitizePerfFields(snap, rcv = Date.now()) {
       ...(Number.isInteger(snap?.capacityVer) && snap.capacityVer > 0 && snap.capacityVer < 100 ? { capacityVer: snap.capacityVer } : {}),
       ...(snap?.maint && typeof snap.maint === 'object' ? { maint: sanitizeMaintEnvelope(snap.maint, rcv) } : {}),
       ...(snap?.capacity && typeof snap.capacity === 'object' ? { capacity: sanitizeCapacityEnvelope(snap.capacity, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }) } : {}),
+      // 8b단계: 표지(topVer · idleVer — 계산 전에도 실린다) · 저활용 결과(central/bmIdleSanitize.js — 화이트리스트 · 키는 같은 봉투의 대상 목록 안만 · 시각 clamp).
+      ...(Number.isInteger(snap?.topVer) && snap.topVer > 0 && snap.topVer < 100 ? { topVer: snap.topVer } : {}),
+      ...(Number.isInteger(snap?.idleVer) && snap.idleVer > 0 && snap.idleVer < 100 ? { idleVer: snap.idleVer } : {}),
+      ...(snap?.idle && typeof snap.idle === 'object' ? { idle: sanitizeIdleEnvelope(snap.idle, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }) } : {}),
     },
     dropped: arr.length - perf.length,
   };

@@ -33,7 +33,7 @@ const FOCUS_CODES = new Set(['ok', 'queued', 'bad-reason', 'bad-request', 'not-f
 const FOCUS_STATUS = new Set(['queued', 'running', 'done', 'stopped', 'auth', 'interrupted', 'failed']);
 const VERDICTS = new Set(['bottleneck', 'saturated', 'errors', 'warn', 'ok', 'partial', 'stale', 'unknown']);
 const MISS = new Set(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error']);
-const CHANGE_KINDS = new Set(['reboot', 'kernel', 'needs-restart', 'package', 'sysctl', 'sysctl-file', 'sysctl-all', 'cron', 'tuned', 'selinux', 'firewalld', 'units-failed', 'firmware', 'cvp-map', 'health']);
+const CHANGE_KINDS = new Set(['reboot', 'kernel', 'needs-restart', 'package', 'sysctl', 'sysctl-file', 'sysctl-all', 'cron', 'tuned', 'selinux', 'firewalld', 'units-failed', 'firmware', 'cvp-map', 'health', 'idle']);
 const VAL_KEYS = new Set(['cpu_pct', 'cpu_iowait_pct', 'runq_per_core', 'disk_busy_pct', 'disk_await_ms', 'disk_aqu', 'psi_io_full10', 'mem_pct', 'swap_out_ps', 'net_pct', 'net_drop_delta', 'net_err_delta', 'power_w', 'inlet_c', 'idrac_cpu_pct', 'dmesg_err']);
 const RES_KEYS = new Set(['cpu', 'mem', 'disk', 'net', 'hw']);
 const ts = (v, now) => clampEdgeTs(numOrNull(v), now);
