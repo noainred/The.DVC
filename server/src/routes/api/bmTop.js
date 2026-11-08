@@ -22,13 +22,12 @@ import { currentTargets } from '../../bmusage/poller.js';
 import { loadBmUsageSettings } from '../../bmusage/settings.js';
 import { memoJson } from './shared.js';
 import { strOf } from '../../util/coercionTrap.js';
-import { resolvePerfTarget, bmAddressHosts, perfAddressMatcher, noStoreFail, perfKey } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, perfVcOf, bmAddressHosts, perfAddressMatcher, noStoreFail, perfKey } from './bmUsage.js';
 import { procHint } from '../../bmusage/parse/linuxTop.js';
 
 const toolsPerm = requirePerm('tools');
 const t = (v) => strOf(v, 4096).trim();
 const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
-const NOT_FOUND = Object.freeze({ __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' });
 const KINDS = ['cpu', 'mem', 'io'];
 
 export function depsOf(deps = {}) {
@@ -73,8 +72,8 @@ async function edgeVersionNote(r, D) {
 async function resolve(req, D) {
   const allowed = scopedVcenterIds(req.user, store.get());
   const key = t(req.params?.key);
-  const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key });
-  return { f, key };
+  const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key, vcenterId: perfVcOf(req) });   // 다음 점검 ①: (법인, 키) 쌍
+  return { f, key, bad: perfTargetFail(f) };
 }
 async function scrubOf(req, D) {
   if (isAdminReq(req)) return null;
@@ -86,8 +85,8 @@ async function scrubOf(req, D) {
 /** GET /tools/bm-usage/perf/:key/top */
 export async function bmTopPoint(req, _snap, deps = {}) {
   const D = depsOf(deps);
-  const { f, key } = await resolve(req, D);
-  if (!f || f.denied) return NOT_FOUND;
+  const { f, key, bad } = await resolve(req, D);
+  if (bad) return bad;
   const ts = Number(req.query?.ts);
   if (!Number.isFinite(ts) || ts <= 0) return { __status: 400, ok: false, reason: 'ts(표본 시각 ms)가 필요합니다.' };
   let body;
@@ -106,8 +105,8 @@ export async function bmTopPoint(req, _snap, deps = {}) {
 /** GET /tools/bm-usage/perf/:key/top/band */
 export async function bmTopBandView(req, _snap, deps = {}) {
   const D = depsOf(deps);
-  const { f, key } = await resolve(req, D);
-  if (!f || f.denied) return NOT_FOUND;
+  const { f, key, bad } = await resolve(req, D);
+  if (bad) return bad;
   const from = Number(req.query?.from); const to = Number(req.query?.to);
   if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return { __status: 400, ok: false, reason: 'from < to(ms)가 필요합니다.' };
   let body;

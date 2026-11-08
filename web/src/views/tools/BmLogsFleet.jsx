@@ -47,7 +47,7 @@ export function LogsFleetView({ resp, onOpen, onReload, loading = false }) {
                   <td className="right" data-sort={c.count}>{numText(c.count)}</td>
                   <td data-sort={c.to}>{stamp(c.from)} ~ {stamp(c.to, { date: false })}</td>
                   <td className="bmo-wrap" data-sort={c.servers?.[0]?.name || ''}>
-                    {(c.servers || []).slice(0, 12).map((s) => <button key={`${s.agent}|${s.key}`} type="button" className="bml-corr" onClick={() => onOpen?.(s.key)}>{s.name}</button>)}
+                    {(c.servers || []).slice(0, 12).map((s) => <button key={`${s.agent}|${s.key}`} type="button" className="bml-corr" onClick={() => onOpen?.(s.key, s.vcenterId)}>{s.name}</button>)}
                     {(c.servers || []).length > 12 && <span className="bmo-sub"> 외 {c.servers.length - 12}</span>}
                   </td>
                 </tr>
@@ -72,7 +72,7 @@ export function LogsFleetView({ resp, onOpen, onReload, loading = false }) {
           <tbody>
             {rows.map((r) => (
               <tr key={`${r.agent}|${r.key}`}>
-                <td data-sort={r.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key); }}>{r.name}</span></td>
+                <td data-sort={r.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key, r.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key, r.vcenterId); }}>{r.name}</span></td>
                 <td data-sort={r.vcenterId || ''}>{r.vcenterId || '—'}</td>
                 {CLASS_ORDER.map((c) => {
                   const cell = fleetClsCell(r, c);

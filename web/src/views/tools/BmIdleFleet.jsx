@@ -14,6 +14,7 @@ import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
 import { STATUS_TEXT, REVIEW_OPTIONS, REVIEW_TEXT, cpuPairText, powerText, actText, statusText, droppedText, reviewText, idleCards, candPowerText, monthText, sourceText, ruleRows, IDLE_HONEST } from './bmIdleText.js';
 import './bmOps.css';
 import './bmMaint.css';
+import { refOf } from './bmPerfUrl.js'; // 다음 점검 ①: 비교로 보내는 서버 = ‘법인|키’ 쌍
 
 function ReviewEditor({ row, onDone }) {
   const [st, setSt] = useState(row.review?.status && row.review.status !== 'clear' ? row.review.status : 'review');
@@ -94,8 +95,8 @@ export function IdleFleetView({ resp, onOpen, onCompare, onReload, loading = fal
             {rows.map((r) => (
               <React.Fragment key={`${r.node}|${r.vcenterId}|${r.key}`}>
                 <tr>
-                  <td data-nosort="1"><input type="checkbox" checked={sel.has(r.key)} onChange={() => toggle(r.key)} aria-label={`${r.name} 선택`} /></td>
-                  <td data-sort={r.name} style={{ whiteSpace: 'nowrap' }}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key); }}>{r.name}</span>{droppedText(r) && <div className="bmo-sub">{droppedText(r)}</div>}</td>
+                  <td data-nosort="1"><input type="checkbox" checked={sel.has(refOf(r.key, r.vcenterId))} onChange={() => toggle(refOf(r.key, r.vcenterId))} aria-label={`${r.name} 선택`} /></td>
+                  <td data-sort={r.name} style={{ whiteSpace: 'nowrap' }}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key, r.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key, r.vcenterId); }}>{r.name}</span>{droppedText(r) && <div className="bmo-sub">{droppedText(r)}</div>}</td>
                   <td data-sort={r.vcenterId || ''}>{r.vcenterId || '—'}</td>
                   <td className="right" data-sort={r.score ?? ''} style={{ fontWeight: 600 }}>{r.score ?? '—'}</td>
                   <td data-sort={r.status} className="bmo-wrap" style={{ color: toneVar(STATUS_TEXT[r.status]?.tone || 'idle'), wordBreak: 'keep-all', minWidth: 56 }}>{statusText(r)}</td>

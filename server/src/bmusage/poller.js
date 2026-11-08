@@ -345,6 +345,16 @@ export async function currentTargets() {
   const { attributeBareMetalFromSnap } = await import('../idrac/corpAttribution.js');
   const attr = attributeBareMetalFromSnap(held.bareMetal, snap);
   const bareMetal = attr.bareMetal;
+  /*
+   * 다음 점검 ①(2차 · 사용자 결정): 분류가 같은 dk 라 넣지 않은 서버(bareMetalDupes)도 같은 순서(못 읽은 vCenter 거르기 → 귀속 채우기)를 거쳐
+   *   대상 해석에 넘긴다 — 겹침 목록(keyOverlaps)으로 보이고, 사용자가 ‘수집에 추가’ 를 고른 것만 별도 키로 대상이 된다.
+   *   결정 파일을 못 읽으면 결정을 하나도 적용하지 않는다(별도 키 수집도 멈춤 — 모르는 키로 적재하지 않는다) · 사유는 sourceErrors 로.
+   */
+  const wh = new Set(hostsUnread?.withheld || []);
+  const dupes0 = Array.isArray(fleet.bareMetalDupes) ? fleet.bareMetalDupes : [];
+  const dupes = attributeBareMetalFromSnap(wh.size ? dupes0.filter((d) => d && d.vcenterId && !wh.has(d.vcenterId)) : dupes0, snap).bareMetal || [];
+  const KD = await import('./keyDecisions.js');
+  const dec = KD.readKeyDecisions();
   const registry = (() => {
     // idrac/registry.js loadRegistry 는 파싱 실패 시 손상본을 옮기고(preserveCorrupt) 빈 목록을 준다 — 호출 전후 파일
     //   존재로 그 사실을 알아챈다(등록부 모듈을 건드리지 않고). 빈 목록이면 전 서버가 'no-idrac' 로 보이므로 밝혀야 한다.
@@ -370,6 +380,7 @@ export async function currentTargets() {
       return list;
     } catch (e) { sourceErrors.push({ source: 'os-registry', error: safeLoadText(e, 200) || 'unknown' }); return []; }
   })();
+  if (!dec.ok) sourceErrors.push({ source: 'key-decisions', error: `식별 키 겹침 결정 파일(bm-key-decisions.json)을 읽지 못했습니다 — 결정을 적용하지 않습니다(별도 키 수집 멈춤): ${dec.error?.reason || ''}`.slice(0, 300) });
   for (const se of sourceErrors) {
     if (_srcErrLog(`src:${se.source}`, se.error)) console.warn(`[bmusage] 대상 해석 입력 실패(${se.source}): ${se.error}`);
   }
@@ -383,6 +394,7 @@ export async function currentTargets() {
     agentName: config.agent?.name || '', isEdge,
     // ⚠ **캐시된** 인벤토리만 읽는다(장비 왕복 0) — 라이선스 등급 판정용(v2.554).
     inventoryOf: (id) => getInventory(id),
+    dupes, decisions: dec.map,   // 다음 점검 ①(2차) — 못 읽으면 readKeyDecisions 가 빈 맵(결정 미적용 · 사유는 위 sourceErrors)
   };
   let resolved = resolveTargets({ ...resolveInput, settings: s });
   if (demoMod) {
@@ -1135,6 +1147,7 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
   }
   const M = on.includes('profile') ? await import('./profiles/match.js') : null;
   const FT = on.includes('profile') ? await import('../insights/fleetTags.js').catch(() => null) : null;
+  const PK = FT ? await import('./purposeKey.js').catch(() => null) : null;
   const items = [];
   for (const r of results) {
     if (!r?.ok || !r.built?.row || !r.target) continue;
@@ -1144,7 +1157,7 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
     let profile = null;
     if (M) {
       let manual = null;
-      try { manual = FT ? (FT.fleetPurposeOf(String(r.target.serviceTag || '')) || FT.fleetPurposeOf(r.target.key)) : null; } catch { manual = null; }
+      try { manual = FT && PK ? PK.purposeOfTargetSync((k) => FT.fleetPurposeOf(k), r.target, r.target.key) : null; } catch { manual = null; }   // 키 규칙 하나(반증 F2)
       try { profile = M.profileView({ tuning: parseJsonCol(row.tuning_json), detail, entry, row, manual }); } catch { profile = null; }
     }
     items.push({ key: r.target.key, name: r.target.name || r.target.key, vcenterId: r.target.vcenterId || '', target: r.target, entry, health: detail?.health || null,

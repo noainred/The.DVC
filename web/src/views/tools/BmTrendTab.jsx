@@ -37,6 +37,7 @@ import {
   pairText, mapSourceRows, portStateCounts, portNotes,
 } from './bmTrendText.js';
 import './bmTrend.css';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 
 const DEV_SEGS = Object.freeze([
   { k: 'none', label: '서버 전체' },
@@ -127,32 +128,33 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
   const recoRef = useRef(null);
   const loader = useRef(null);
   const mLoader = useRef(null);
-  if (!loader.current) loader.current = createTrendLoader(trendFetcher(itemKey));
-  if (!mLoader.current) mLoader.current = createTrendLoader(trendFetcher(itemKey));
+  // 다음 점검 ①: 서버 = (법인, 키) 쌍 — vcenterId(상세가 정한 그 서버의 법인)를 모든 요청에 함께(서버를 바꾸면 이 탭은 새로 마운트된다 — key).
+  if (!loader.current) loader.current = createTrendLoader(trendFetcher(itemKey, vcenterId));
+  if (!mLoader.current) mLoader.current = createTrendLoader(trendFetcher(itemKey, vcenterId));
 
   const span = trendRangeOf(rangeK).ms;
   const win = useMemo(() => ({ from: clock.at - span, to: clock.at }), [clock.at, span]);
   const mWin = useMemo(() => ({ from: clock.at - MOUNT_SPAN, to: clock.at }), [clock.at]);
   const winKey = `${itemKey}|${win.from}|${win.to}|${clock.n}`;
-  const devs = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/devices` : '', clock.n);
-  const ports = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/ports` : '', clock.n);
+  const devs = useOnceJson(itemKey ? perfPath(itemKey, vcenterId, '/devices') : '', clock.n);
+  const ports = useOnceJson(itemKey ? perfPath(itemKey, vcenterId, '/ports') : '', clock.n);
   const devices = useMemo(() => (devs.data && devs.data.ok !== false && devs.data.devices) || { disk: [], nic: [], mount: [] }, [devs.data]);
   // v2.929: 같은 창의 변경 이벤트(+ 집중 1분 점) — 창이 바뀔 때 1회(폴링 없음). 패널 행 위 점과 겹침 카드가 같은 응답을 쓴다.
-  const changes = useOnceJson(itemKey ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/changes?from=${Math.floor(win.from)}&to=${Math.floor(win.to)}&focus=1` : '', clock.n);
+  const changes = useOnceJson(itemKey ? perfPath(itemKey, vcenterId, '/changes', `from=${Math.floor(win.from)}&to=${Math.floor(win.to)}&focus=1`) : '', clock.n);
   // 6단계: 공유 링크 · 캡처가 쓸 지금 상태를 부모에 알린다(렌더마다가 아니라 값이 바뀔 때만).
   useEffect(() => { onState?.({ range: rangeK, show, to: clock.at, cursor: cur?.ms ?? null, sel, disk: tg.avg?.disk, net: tg.avg?.net, layout: tg.avg?.layout, from: clock.at - span }); }, [rangeK, show, clock.at, cur?.ms, sel, tg, span]); // eslint-disable-line react-hooks/exhaustive-deps
   const chMarks0 = useMemo(() => changeMarks(changes.data?.events || [], win), [changes.data, win]);
   // 6단계: 같은 창의 운영 주석 — 창이 바뀌거나 저장할 때 1회(annTick). 기계 이벤트(●)와 같은 줄에 ◆ 핀.
   const [annTick, setAnnTick] = useState(0);
-  const ann = useAnnotations(itemKey ? [itemKey] : [], win, `${clock.n}|${annTick}`);
+  const ann = useAnnotations(itemKey ? [itemKey] : [], win, `${clock.n}|${annTick}`, [vcenterId]);
   const anMarks = useMemo(() => annotMarks(ann.list, win), [ann.list, win]);
   const chMarks = useMemo(() => [...chMarks0, ...anMarks], [chMarks0, anMarks]);
   // 6단계: 목표선 위반 띠 — 켤 때만 읽는다(목표 지표마다 추이를 다시 읽는다 — 엣지 위임 서버는 그만큼 WAN 요청이 는다).
   const [sloOn, setSloOn] = useState(false);
-  const slo = useOnceJson(itemKey && sloOn ? `/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/slo?from=${Math.floor(win.from)}&to=${Math.floor(win.to)}` : '', clock.n);
+  const slo = useOnceJson(itemKey && sloOn ? perfPath(itemKey, vcenterId, '/slo', `from=${Math.floor(win.from)}&to=${Math.floor(win.to)}`) : '', clock.n);
   const vb = useMemo(() => violationBands(slo.data), [slo.data]);
   // 8a단계: 정비 창 음영 — 그 서버를 덮는 창 구간(서버 판정 코어 · 창이 바뀔 때 1회 · 폴링 없음). 변경 이벤트 ‘정비 창 안’ 묶음도 같은 구간.
-  const maint = useOnceJson(itemKey ? `/tools/bm-usage/maintenance/occurrences?key=${encodeURIComponent(itemKey)}&from=${Math.floor(win.from)}&to=${Math.floor(win.to)}` : '', clock.n);
+  const maint = useOnceJson(itemKey ? `/tools/bm-usage/maintenance/occurrences?key=${encodeURIComponent(itemKey)}${vcenterId ? `&vcenterId=${encodeURIComponent(vcenterId)}` : ''}&from=${Math.floor(win.from)}&to=${Math.floor(win.to)}` : '', clock.n);
   const mb = useMemo(() => maintBands(maint.data), [maint.data]);
 
   useEffect(() => {
@@ -379,14 +381,14 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
       <p className="bmt-note">{SOCKET_NOTE}{chMarks0.length ? ` · 행 위 파란 점선 = 변경 이벤트(${chMarks0.length}곳 — 아래 목록)` : ''}{anMarks.length ? ` · 보라 ◆ = 운영 주석(${anMarks.length}곳 — 가리키면 내용)` : ''}{mb.length ? ` · 주황 음영 = 정비 창(${mb.length}곳 — 가리키면 이름)` : ''}</p>
 
       {/* ── v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 · 구간 비교 ── */}
-      <BaselineOverlay itemKey={itemKey} win={win} changes={changes.data && changes.data.ok !== false ? changes.data : null} narrow={narrow} annotMarks={anMarks} maintBands={mb} />
+      <BaselineOverlay itemKey={itemKey} vc={vcenterId} win={win} changes={changes.data && changes.data.ok !== false ? changes.data : null} narrow={narrow} annotMarks={anMarks} maintBands={mb} />
       <AnnotationsCard itemKey={itemKey} name={name} vcenterId={vcenterId} sel={sel} list={ann.list} err={ann.err} onChanged={() => setAnnTick((v) => v + 1)} />
       {changes.err && <p className="bmt-note" style={{ color: toneVar('warn') }}>변경 이벤트를 읽지 못했습니다: {trendErrorText(changes.err)}</p>}
       <div className="bmt-ctl">
         <button type="button" className="btn btn-sm bmp-touch" aria-expanded={cmpOn} onClick={() => setCmpOn((v) => !v)}>{cmpOn ? '구간 비교 닫기' : '구간 비교(A/B) 열기'}</button>
         <span className="bmt-hint">위 패널에서 끌어 고른 구간이 B 가 됩니다(없으면 최근 1시간).</span>
       </div>
-      {cmpOn && <CompareView itemKey={itemKey} sel={sel} name={name} />}
+      {cmpOn && <CompareView itemKey={itemKey} vc={vcenterId} sel={sel} name={name} />}
 
       {/* ── 선택 구간 요약 ── */}
       <section className="bmt-card" aria-label="선택 구간 요약">
@@ -687,7 +689,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
       </section>
 
       {pop && (
-        <BmTrendPopup itemKey={itemKey} name={name} init={pop} devices={devices} keepDays={keepDays} anchor={clock.at}
+        <BmTrendPopup itemKey={itemKey} vc={vcenterId} name={name} init={pop} devices={devices} keepDays={keepDays} anchor={clock.at}
           initWin={pop.rangeK === rangeK ? win : null} peakWindowS={devs.data?.peakWindowS ?? null}
           onClose={() => setPop(null)} onSel={(s) => setSel(s)} />
       )}

@@ -41,11 +41,13 @@ export function annotLinks(links = {}) {
   return out;
 }
 /** 입력 → 서버 본문(순수 — 빈 칸은 보내지 않는다 · 형식 판정은 서버). */
-export function annotBody({ keys = [], corp = '', at, end = null, kind = 'work', text = '', issue = '', wikiSpace = '', wikiId = '' } = {}) {
+export function annotBody({ keys = [], vcenterIds = [], corp = '', at, end = null, kind = 'work', text = '', issue = '', wikiSpace = '', wikiId = '' } = {}) {
   const links = {};
   if (String(issue).trim()) links.issue = String(issue).trim().toUpperCase();
   if (String(wikiId).trim()) links.wiki = { space: String(wikiSpace).trim() || 'pub', id: String(wikiId).trim().toUpperCase() };
-  return { ...(corp ? { corp } : { keys }), at, ...(n(end) != null ? { end } : {}), kind, text, ...(Object.keys(links).length ? { links } : {}) };
+  // 다음 점검 ①: 서버 대상 = (법인, 키) 쌍 — keys 와 같은 순서의 법인(비면 싣지 않는다 — 서버가 정하고 모호하면 400).
+  const vcs = keys.map((_, i) => String(vcenterIds?.[i] || ''));
+  return { ...(corp ? { corp } : { keys, ...(vcs.some(Boolean) ? { vcenterIds: vcs } : {}) }), at, ...(n(end) != null ? { end } : {}), kind, text, ...(Object.keys(links).length ? { links } : {}) };
 }
 /**
  * 고치기 본문(순수 — 반증 F10): **바뀐 칸만** 싣는다. 폼은 분 단위라 시각을 그대로 두면 원래 초를 보존하고(보내지 않는다),

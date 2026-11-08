@@ -190,8 +190,12 @@ describe('소스 스윕 — 웹이 다시 판정하지 않는다 · 적용 경�
     }
   });
   it('쓰기 요청은 용도 태그(PUT purpose)와 스냅샷 실행(POST snapshot)뿐 — 튜닝 적용 요청이 없다', () => {
-    const writes = Object.entries(src).flatMap(([f, s]) => [...s.matchAll(/(putJson|postJson|sendJson|patchJson)\(\s*[`'"]([^`'"]+)/g)].map((m) => `${f}:${m[1]}:${m[2]}`));
-    expect(writes.sort()).toEqual(['BmProfileTab.jsx:putJson:/tools/bm-usage/purpose', 'BmSnapshotTab.jsx:postJson:/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/snapshot'].sort());
+    // 다음 점검 ①: 서버 하나 경로는 perfPath(키, 법인, 접미) 로 만든다(법인을 싣는다) — 그 꼴도 잡는다(글자 경로만 보면 빠져 이 스윕이 무력해진다).
+    const writes = Object.entries(src).flatMap(([f, s]) => [
+      ...[...s.matchAll(/(putJson|postJson|sendJson|patchJson)\(\s*[`'"]([^`'"]+)/g)].map((m) => `${f}:${m[1]}:${m[2]}`),
+      ...[...s.matchAll(/(putJson|postJson|sendJson|patchJson)\(\s*perfPath\([^,()]+,[^,()]+,\s*[`'"]([^`'"]+)/g)].map((m) => `${f}:${m[1]}:perf${m[2]}`),
+    ]);
+    expect(writes.sort()).toEqual(['BmProfileTab.jsx:putJson:/tools/bm-usage/purpose', 'BmSnapshotTab.jsx:postJson:perf/snapshot'].sort());
   });
   it('문구 모듈에 백틱 인용 없음(BoldText 는 **강조** 만)', () => {
     const strings = [];

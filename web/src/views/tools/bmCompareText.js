@@ -28,6 +28,8 @@ export const COLUMN_STATE_TEXT = Object.freeze({
   'other-corp': { label: '다른 법인', tone: 'idle', note: '같은 법인만 비교합니다 — ‘법인 간 허용’ 으로 바꾸면 담을 수 있습니다' },
   'old-version': { label: '엣지 버전 낮음', tone: 'warn', note: '이 엣지는 비교 계열 경로가 없습니다 — 보관분 판정만 보입니다' },
   'no-sample': { label: '표본 없음', tone: 'idle', note: '아직 수집한 표본이 없습니다' },
+  // 다음 점검 ①: 같은 키의 서버가 범위 안 여러 법인에 있고 법인 없이 담았다(예전 판이 저장한 목록 · 세트 · 링크) — 아래 후보 법인 중 하나를 고른다.
+  ambiguous: { label: '법인 고르기', tone: 'warn', note: '같은 식별 키의 서버가 여러 법인에 있습니다 — 아래에서 법인을 고르세요' },
 });
 export function columnStateView(state, { minEdgeVersion = null } = {}) {
   const v = COLUMN_STATE_TEXT[state] || { label: String(state || '—'), tone: 'idle', note: '' };
