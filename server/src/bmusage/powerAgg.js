@@ -200,7 +200,7 @@ export function tempsOf(latest, { now = Date.now(), maxAgeMs = 15 * 60_000, clas
  * 원천을 모아 서버 기록을 만든다(이 노드 — 중앙은 엣지 위임 서버도 중앙 사본으로 본다). deps 로 시험이 주입한다.
  * @param {{targets:Array<{key,name,vcenterId,serviceTag?,idrac?,node,via}>, deps:object, now?:number}} p
  */
-export async function gatherPower({ targets = [], deps, now = Date.now(), withWeek = false }) {
+export async function gatherPower({ targets = [], deps, now = Date.now(), withWeek = false, withMonth = true }) {
   const D = deps;
   const measured = (await D.measured().catch(() => [])).filter((m) => m && m.source !== 'vcenter');
   const byId = new Map(); const byTag = new Map();
@@ -247,22 +247,24 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
       try {
         const rows = idb.hourlyStats(dbKey, now - DAY_MS, now);
         h24 = hourSummary(rows);
-        // 월 누적 = 끝난 날(캐시) + 오늘(24시간 행 중 오늘 것)
+        // 월 누적 = 끝난 날(캐시) + 오늘(24시간 행 중 오늘 것). 알림 판정(withMonth=false)은 쓰지 않아 읽지 않는다(첫 주기에 서버마다 한 달 행을 읽지 않게).
         let wh = 0; let any = false;
-        const missDays = [];
-        for (let d = monthStart; d < todayStart; d += DAY_MS) { const k = `${dbKey}|${dayKey(d + HOUR)}`; const c = _dayWh.get(k); if (c && now - c.at < DAY_WH_TTL_MS) { wh += c.wh; any = true; } else missDays.push(d); }
-        if (missDays.length) {
-          // 이어진 빈 날 묶음마다 한 번(값이 없는 날을 담지 않으므로 — 등록 전 날이 매번 다시 읽혀도 행이 없는 범위라 싸다 · 담긴 날은 다시 읽지 않는다)
-          const runs = [];
-          for (const d of missDays) { const last = runs.at(-1); if (last && d === last[1] + DAY_MS) last[1] = d; else runs.push([d, d]); }
-          const per = new Map();
-          for (const [a, b] of runs) {
-            for (const h of idb.hourlyStats(dbKey, a, Math.min(todayStart, b + DAY_MS)) || []) { if (n(h.avg) == null || Number(h.avg) <= 0) continue; const k = dayKey(Number(h.ts) + 1); per.set(k, (per.get(k) || 0) + Number(h.avg)); }
+        if (withMonth) {
+          const missDays = [];
+          for (let d = monthStart; d < todayStart; d += DAY_MS) { const k = `${dbKey}|${dayKey(d + HOUR)}`; const c = _dayWh.get(k); if (c && now - c.at < DAY_WH_TTL_MS) { wh += c.wh; any = true; } else missDays.push(d); }
+          if (missDays.length) {
+            // 이어진 빈 날 묶음마다 한 번(값이 없는 날을 담지 않으므로 — 등록 전 날이 매번 다시 읽혀도 행이 없는 범위라 싸다 · 담긴 날은 다시 읽지 않는다)
+            const runs = [];
+            for (const d of missDays) { const last = runs.at(-1); if (last && d === last[1] + DAY_MS) last[1] = d; else runs.push([d, d]); }
+            const per = new Map();
+            for (const [a, b] of runs) {
+              for (const h of idb.hourlyStats(dbKey, a, Math.min(todayStart, b + DAY_MS)) || []) { if (n(h.avg) == null || Number(h.avg) <= 0) continue; const k = dayKey(Number(h.ts) + 1); per.set(k, (per.get(k) || 0) + Number(h.avg)); }
+            }
+            for (const d of missDays) { const dk = dayKey(d + HOUR); const v = per.has(dk) ? per.get(dk) : null; if (v != null) { _dayWh.set(`${dbKey}|${dk}`, { wh: v, at: now }); wh += v; any = true; } else _dayWh.delete(`${dbKey}|${dk}`); }
           }
-          for (const d of missDays) { const dk = dayKey(d + HOUR); const v = per.has(dk) ? per.get(dk) : null; if (v != null) { _dayWh.set(`${dbKey}|${dk}`, { wh: v, at: now }); wh += v; any = true; } else _dayWh.delete(`${dbKey}|${dk}`); }
+          for (const h of rows || []) if (Number(h.ts) >= todayStart && n(h.avg) != null && Number(h.avg) > 0) { wh += Number(h.avg); any = true; }
+          kwhMonth = any ? r1(wh / 1000) : null;
         }
-        for (const h of rows || []) if (Number(h.ts) >= todayStart && n(h.avg) != null && Number(h.avg) > 0) { wh += Number(h.avg); any = true; }
-        kwhMonth = any ? r1(wh / 1000) : null;
       } catch { h24 = null; kwhMonth = null; }
     }
     // 상한 · 온도 · 팬 — 엣지 위임 대상은 봉투의 서버별 상한(edgeCap · 다음 점검 ③) · 이 노드 대상은 인벤토리(2시간 안).

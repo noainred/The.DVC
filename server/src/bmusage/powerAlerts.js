@@ -117,7 +117,7 @@ export async function powerAlertItems({ targets = [], rules = {}, now = Date.now
   const cfg = { ...RULE_SET_DEFAULTS.power, ...Object.fromEntries(Object.entries(rules.power || {}).filter(([k, v]) => k !== 'racks' && k !== 'racksText' && v != null)) };
   const sources = deps.sources ? await deps.sources() : await (await import('./powerSources.js')).powerSources({ now, localOnly: true });
   const list = targets.filter((x) => x && x.key).map((x) => ({ key: x.key, name: x.name, vcenterId: x.vcenterId || '', serviceTag: x.serviceTag || '', idrac: x.idrac ? { regId: x.idrac.regId } : null, paths: x.paths || [], node: '', via: 'local', _t: x }));
-  const servers = await gatherPower({ targets: list, deps: sources, now, withWeek: on.includes('surge') });
+  const servers = await gatherPower({ targets: list, deps: sources, now, withWeek: on.includes('surge'), withMonth: false });
   const tgOf = new Map(list.map((x) => [`${x.vcenterId}|${x.key}`, x._t]));
   const racks = Array.isArray(rules.power?.racks) ? rules.power.racks : [];
   const ag = aggregatePower(servers, { racks, cfg });
@@ -131,9 +131,11 @@ export async function powerAlertItems({ targets = [], rules = {}, now = Date.now
     }
   }
   if (on.includes('rack')) {
+    const byRack = new Map();
+    for (const s of ag.all) { if (!s.rack) continue; const k = `${s.vcenterId}|${s.rack}`; if (!byRack.has(k)) byRack.set(k, []); byRack.get(k).push(s); }
     for (const r of ag.racks) {
       if (r.unmapped || r.capKw == null) continue;   // 미매핑 · 상한 미설정 랙은 판정 대상이 아니다
-      const mem = ag.all.filter((s) => s.vcenterId === r.vcenterId && s.rack === r.rack);
+      const mem = byRack.get(`${r.vcenterId}|${r.rack}`) || [];
       // 관측 표지 — 측정 서버 표본 시각의 합 + 대수(한 대라도 새 표본이면 바뀐다)
       const obs = `r${mem.length}:${mem.reduce((a, s) => a + (n(s.at) ?? 0), 0)}`;
       items.push({ key: rackKeyOf(r.vcenterId, r.rack), name: `랙 ${r.rack}`, vcenterId: r.vcenterId, members: mem.map((s) => tgOf.get(`${s.vcenterId}|${s.key}`) || { key: s.key, vcenterId: s.vcenterId }),

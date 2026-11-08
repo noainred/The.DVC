@@ -198,7 +198,8 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
       const on = onCellsAfter(id, it, rule, cond, prev?.on || null);
       const st1 = on.length ? { ...out.state, on } : out.state;
       next[sk] = obs != null ? { ...st1, obs } : (prev?.obs != null && isPowerRule(id) ? { ...st1, obs: prev.obs } : st1);
-      if (counts[out.reason] != null) counts[out.reason] += 1;
+      // ⚠ 정정(다음 점검 ② — 시험 실행 응답에서 발견): reason 'fire' 를 여기서도 세면 아래 out.fire 와 두 번 세어 counts.fire 가 발화 수의 2배였다(retry 는 retry · fire 각 1).
+      if (out.reason !== 'fire' && counts[out.reason] != null) counts[out.reason] += 1;
       if (out.fire) { counts.fire += 1; fires.push({ rule: id, key, sk, name: it.name || key, vcenterId: String(it.vcenterId || ''), ctx: it, prevState: prev, retry: out.reason === 'retry', since: out.state.since ?? now }); }
     }
   }

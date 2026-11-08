@@ -151,10 +151,11 @@ test('② 판정 입력 — 실제 집계 · 상한 랙만 · 일부만 측정 =
   assert.equal(b1.power.surge.state, 'short'); assert.equal(PA.powerCondition('surge', b1), null, '앞 7일 50시간뿐');
   assert.equal(srv.find((x) => x.key === 'K5').power.w, null); assert.equal(PA.powerCondition('powerCap', srv.find((x) => x.key === 'K5')), null);
   // 같은 창 끝(E) 안에서는 앞 7일을 다시 읽지 않는다(정시마다 한 번)
-  let reads = 0; let readsEmpty = 0;
-  const src2 = async () => { const s = await src(); const db = await s.powerDb(); return { ...s, powerDb: async () => ({ hourlyStats: (k, f, t) => { if (t === E) { if (k === 'r1' || k === 'r2') reads += 1; else readsEmpty += 1; } return db.hourlyStats(k, f, t); } }) }; };
+  let reads = 0; let readsEmpty = 0; let other = 0;
+  const src2 = async () => { const s = await src(); const db = await s.powerDb(); return { ...s, powerDb: async () => ({ hourlyStats: (k, f, t) => { if (t === E) { if (k === 'r1' || k === 'r2') reads += 1; else readsEmpty += 1; } else if (t !== NOW + MIN) other += 1; return db.hourlyStats(k, f, t); } }) }; };
   await PA.powerAlertItems({ targets, rules, now: NOW + MIN, deps: { sources: src2 } });
   assert.equal(reads, 0, '앞 7일 요약은 캐시(값이 있는 계열 — 같은 창 끝 안)');
+  assert.equal(other, 0, '알림 판정은 월 누적(끝난 날 행)을 읽지 않는다 — 24시간 · 앞 7일만');
   assert.ok(readsEmpty >= 1, '값이 없던 계열은 다시 읽는다(늦게 채워지는 행 — 없음을 담지 않는다)');
   // 켠 규칙이 없으면 항목도 없다
   assert.deepEqual(await PA.powerAlertItems({ targets, rules: rulesOf({ use: {} }), now: NOW, deps: { sources: src } }), []);
@@ -200,6 +201,7 @@ test('③ 실제 규칙 엔진 — 지속 = 서로 다른 표본 · 낡음은 �
   r = await A.runPerfAlerts([cap('K1', 'vcA'), cap('K2', 'vcA'), cap('K1', 'vcB')], { rules: rules2, now: NOW, deps: d2.deps });
   await A._drainPerfAlertsForTest();
   assert.equal(r.fires, 2, 'vcB 는 법인 예외'); assert.equal(r.queued, 1); assert.equal(r.capped, 1, '법인 하루 상한 1');
+  assert.equal(r.counts.fire, 2, '정정: 발화 수를 두 번 세지 않는다(예전 4)'); assert.equal(r.counts.corpOff, 1);
   assert.ok(!STATE().rules['powerCap|vcB|K1'], '예외 법인은 상태도 없다');
   assert.equal(d2.issues.length, 2, '중앙은 이슈 문지기에 넘긴다(하루 상한은 이슈 저장소가 센다)'); assert.equal(d2.issues[0].rule, 'powerCap');
   assert.match(d2.sends[0].al.title, /PowerCap 걸림 — 지금 900 W \/ 상한 900 W\(100% · 기준 98%\)/);
