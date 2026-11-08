@@ -296,7 +296,7 @@ export function registerBmOnboard(api, deps = {}) {
       const m = missingCheck({ targets: tg.targets, skipped: tg.skipped || [], entryByKey, edgeEntry, vcName, osRegistry });
       const visible = m.rows.filter((r) => (r.vcenterId ? (!allowed || allowed.has(r.vcenterId)) : !allowed));
       const full = (await import('../../auth/addressMask.js')).isAdminReq(req);
-      const rows = visible.map((r) => (full ? r : { ...r, idracHost: r.idracHost ? '(가림)' : '', suggest: r.suggest ? { ...r.suggest, idrac_host: undefined, os_host: undefined } : undefined }));
+      const rows = visible.map((r) => (full ? r : { ...r, idracHost: r.idracHost ? '(가림)' : '', osHost: r.osHost ? '(가림)' : '', suggest: r.suggest ? { ...r.suggest, idrac_host: undefined, os_host: undefined } : undefined }));
       const counts = Object.fromEntries(Object.keys(m.counts).map((b) => [b, rows.filter((r) => r.bucket === b).length]));
       res.set('Cache-Control', 'no-store');
       res.json({ ok: true, counts, rows: rows.slice(0, 5000), total: rows.length, perfError: pf.perfError || undefined, sourceErrors: (tg.sourceErrors || []).length });

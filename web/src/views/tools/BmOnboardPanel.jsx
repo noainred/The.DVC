@@ -13,6 +13,7 @@ import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { downloadBlob } from './bmCapture.js';
+import { missingView, facetOptions, clampPageSize, readPageSize, writePageSize, nodeOf, corpOf, PAGE_SIZE_MIN, PAGE_SIZE_MAX } from './bmMissingView.js';
 import {
   ACTION_TEXT, ACTION_TONE, BUCKET_TEXT, BUCKET_ORDER, MISS_REASON_TEXT, KEY_STATUS_TEXT, ACCOUNT_KIND_TEXT,
   numOr, summaryChips, applicable, edgeSyncText, shortFp, ymd, bufToBase64, suggestCsv, rowNote, canManageKeys, HOSTKEY_OBSERVE_NOTE,
@@ -334,13 +335,33 @@ function EdgeRowsSection({ rev }) {
 }
 
 /* ── 누락 점검 ───────────────────────────────────────────────────── */
+/*
+ * v2.945.1(사용자 요청): 검색(IP · 호스트명 · 서비스 태그 · iDRAC/OS 주소) · 법인 · 수집 노드(이 노드 / 엣지 이름) · 사유 · 칸 필터와
+ *   쪽 단위 보기(기본 30개 · 10~500 · 브라우저에 기억). 거르기 · 정렬 · 쪽 자르기는 bmMissingView.js 하나(정렬은 거른 전체를 정렬한 뒤 자른다).
+ */
+const MISS_COLS = [['name', '서버'], ['corp', '법인'], ['node', '수집 노드'], ['bucket', '칸'], ['reason', '사유']];
 function MissingSection({ rev }) {
   const [st, load] = useLoad('/tools/bm-usage/onboard/missing');
   useEffect(() => { if (rev) load(); }, [rev]);   // eslint-disable-line react-hooks/exhaustive-deps -- 적용 뒤 신호에만 다시 읽는다
   const [only, setOnly] = useState('');
-  const rows = st.resp?.rows || [];
-  const shown = only ? rows.filter((r) => r.bucket === only) : rows.filter((r) => r.bucket !== 'both');
+  const [q, setQ] = useState('');
+  const [corp, setCorp] = useState('');
+  const [node, setNode] = useState('');
+  const [reason, setReason] = useState('');
+  const [sort, setSort] = useState({ col: '', dir: 'asc' });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSizeState] = useState(readPageSize);
+  const [sizeDraft, setSizeDraft] = useState(() => String(readPageSize()));
+  // 필터가 바뀌면 첫 쪽으로(빈 쪽을 보지 않게).
+  useEffect(() => { setPage(1); }, [only, q, corp, node, reason, pageSize]);
+  const respRows = st.resp?.rows;
+  const rows = React.useMemo(() => (Array.isArray(respRows) ? respRows : []), [respRows]);
+  const facets = React.useMemo(() => facetOptions(rows), [rows]);
+  const view = missingView(rows, { q, corp, node, reason, bucket: only, sortCol: sort.col, sortDir: sort.dir, page, pageSize });
   const sugg = rows.filter((r) => r.suggest);
+  const applySize = () => { const n = clampPageSize(sizeDraft); setPageSizeState(n); setSizeDraft(String(n)); writePageSize(n); };
+  const clickSort = (col) => setSort((s) => (s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' }));
+  const anyFilter = !!(q || corp || node || reason || only);
   if (st.err) return <section className="bmob-sec"><h4>누락 점검</h4><ErrorBox error={st.err} /></section>;
   return (
     <section className="bmob-sec">
@@ -353,22 +374,55 @@ function MissingSection({ rev }) {
             <button className="btn btn-sm" type="button" onClick={load}>다시 점검</button>
             {canCsv() && <button className="btn btn-sm" type="button" disabled={!sugg.length} onClick={() => downloadBlob(new Blob([suggestCsv(sugg)], { type: 'text/csv;charset=utf-8' }), 'bm-onboard-suggest.csv')}>제안 CSV {sugg.length}줄</button>}
           </div>
+          <div className="bmob-filters" role="search" aria-label="누락 점검 필터">
+            <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="IP · 호스트명 · 서비스 태그 · iDRAC 주소" aria-label="검색" maxLength={200} />
+            <Select className="select" value={corp} onChange={(e) => setCorp(e.target.value)} aria-label="법인">
+              <option value="">법인 전체</option>
+              {facets.corps.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.n})</option>)}
+            </Select>
+            <Select className="select" value={node} onChange={(e) => setNode(e.target.value)} aria-label="수집 노드">
+              <option value="">수집 노드 전체</option>
+              {facets.nodes.map((o) => <option key={o.value} value={o.value}>{o.value} ({o.n})</option>)}
+            </Select>
+            <Select className="select" value={reason} onChange={(e) => setReason(e.target.value)} aria-label="사유">
+              <option value="">사유 전체</option>
+              {facets.reasons.filter((o) => o.value).map((o) => <option key={o.value} value={o.value}>{MISS_REASON_TEXT[o.value] ? MISS_REASON_TEXT[o.value].slice(0, 40) : o.value} ({o.n})</option>)}
+            </Select>
+            {anyFilter && <button className="btn btn-sm" type="button" onClick={() => { setQ(''); setCorp(''); setNode(''); setReason(''); setOnly(''); }}>필터 지우기</button>}
+          </div>
           {st.resp?.sourceErrors ? <p className="bmo-note" style={{ color: toneVar('warn') }}>대상 해석 입력 {st.resp.sourceErrors}건을 읽지 못했습니다 — 일부 서버가 빠졌을 수 있습니다.</p> : null}
-          <STable minWidth={760} limit={500} className="bmo-t" style={{ fontSize: 12 }}>
-            <thead><tr><th>서버</th><th>법인</th><th>수집 노드</th><th>칸</th><th>사유</th></tr></thead>
+          {st.resp?.total > rows.length && <p className="bmo-note" style={{ color: toneVar('warn') }}>서버가 {numOr(st.resp.total)}대라 앞 {numOr(rows.length)}대만 받았습니다 — 필터는 받은 행 안에서만 겁니다.</p>}
+          <STable minWidth={760} className="bmo-t" style={{ fontSize: 12 }}>
+            <thead><tr>{MISS_COLS.map(([c, label]) => (
+              <th key={c} onClick={() => clickSort(c)} style={{ cursor: 'pointer' }} aria-sort={sort.col === c ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                {label} <span aria-hidden="true" style={{ color: 'var(--muted)' }}>{sort.col === c ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+              </th>
+            ))}</tr></thead>
             <tbody>
-              {shown.map((r) => (
-                <tr key={`${r.via}|${r.key}`}>
-                  <td className="bmo-name" data-sort={r.name}>{r.name || r.key}</td>
-                  <td data-sort={r.vcenterId}>{r.vcenterId || '미귀속'}</td>
-                  <td data-sort={r.via}>{r.via === 'edge' ? `엣지 ${r.agent || ''}` : '이 노드'}</td>
-                  <td data-sort={r.bucket}>{BUCKET_TEXT[r.bucket] || r.bucket}</td>
-                  <td className="bmo-wrap" data-sort={r.reason}>{r.reason ? (MISS_REASON_TEXT[r.reason] || r.reason) : '—'}</td>
+              {view.rows.map((r) => (
+                <tr key={`${r.via}|${r.agent || ''}|${r.key}`}>
+                  <td className="bmo-name">{r.name || r.key}{r.osHost && r.osHost !== r.name && r.osHost !== '(가림)' ? <div className="bmo-sub">{r.osHost}</div> : null}</td>
+                  <td>{corpOf(r)}</td>
+                  <td>{nodeOf(r)}</td>
+                  <td>{BUCKET_TEXT[r.bucket] || r.bucket}</td>
+                  <td className="bmo-wrap">{r.reason ? (MISS_REASON_TEXT[r.reason] || r.reason) : '—'}</td>
                 </tr>
               ))}
-              {!shown.length && <tr><td colSpan={5} className="bmo-sub">{only ? '해당 서버가 없습니다.' : '빠진 경로가 있는 서버가 없습니다.'}</td></tr>}
+              {!view.rows.length && <tr><td colSpan={5} className="bmo-sub">{anyFilter ? '필터에 맞는 서버가 없습니다.' : '빠진 경로가 있는 서버가 없습니다.'}</td></tr>}
             </tbody>
           </STable>
+          <div className="bmob-pager" aria-label="쪽 이동">
+            <span className="bmo-sub">{view.matched ? `${numOr(view.from)}–${numOr(view.to)} / ${numOr(view.matched)}대` : '0대'}{view.matched !== view.total ? (anyFilter ? ` (전체 ${numOr(view.total)}대 중 필터에 맞음)` : ` (‘둘 다’ ${numOr(view.total - view.matched)}대는 숨김 — 칸을 누르면 봅니다)`) : ''}</span>
+            <button className="btn btn-sm" type="button" disabled={view.page <= 1} onClick={() => setPage(1)}>처음</button>
+            <button className="btn btn-sm" type="button" disabled={view.page <= 1} onClick={() => setPage(view.page - 1)}>이전</button>
+            <span className="bmo-sub">{view.page} / {view.pages}쪽</span>
+            <button className="btn btn-sm" type="button" disabled={view.page >= view.pages} onClick={() => setPage(view.page + 1)}>다음</button>
+            <button className="btn btn-sm" type="button" disabled={view.page >= view.pages} onClick={() => setPage(view.pages)}>끝</button>
+            <label className="bmo-sub bmob-size">한 번에
+              <input className="input" type="number" min={PAGE_SIZE_MIN} max={PAGE_SIZE_MAX} value={sizeDraft} onChange={(e) => setSizeDraft(e.target.value)} onBlur={applySize} onKeyDown={(e) => { if (e.key === 'Enter') applySize(); }} aria-label="한 번에 보일 서버 수" />
+              대
+            </label>
+          </div>
         </>
       )}
     </section>

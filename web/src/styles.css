@@ -3288,3 +3288,8 @@ table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background
 .sf-step.warn { color: var(--amber); }
 .sf-step.error { color: var(--red); }
 .btn.danger { border-color: rgba(239, 68, 68, .45); color: var(--red); }
+
+/* v2.945.1(릴리스 검증 — 기존 결함): 베어메탈 사용률 ‘사용률 표’(12열)가 1440 에서 1164 > 영역 1118 이라 마지막 ‘수집’ 열이 숨었다.
+   칸 여백을 좁히고(14 → 10px) 머리글 줄바꿈을 허용한다 — 값 칸은 그대로 한 줄. */
+table.bmu-util thead th { padding: 9px 10px; white-space: normal; }
+table.bmu-util tbody td { padding: 9px 10px; }
