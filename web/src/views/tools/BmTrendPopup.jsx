@@ -17,6 +17,7 @@ import BoldText from '../../components/boldText.jsx';
 import { windowSpan, backForSpan, dateJumpEnd, dateInputOf, windowRangeText } from '../../components/vmperf/vmPerfText.js';
 import { createTrendLoader, trendFetcher } from './bmTrendLoad.js';
 import { TrendSvg, TimeAxis, usePointer } from './BmTrendChart.jsx';
+import BmTopProc from './BmTopProc.jsx'; // 8b단계 ⑳ — 이 시점 프로세스 · 시간 × 프로세스 띠
 import {
   TREND_RANGES, trendRangeOf, SHOW_MODES, showAvg, showPeak, metricInfo, SERVER_METRIC_INFO, DEVICE_METRIC_INFO, resText, resHint,
   peakSrcText, peakPointText, trendNotes, trendErrorText, valText, axisText, yMaxFor, noPeakRuns, nearestPoint, windowSummary, peakRatioText,
@@ -204,6 +205,9 @@ export default function BmTrendPopup({ itemKey, name = '', init = {}, devices = 
             <button type="button" className="btn btn-sm" onClick={() => setPicked(null)}>닫기</button>
           </div>
         )}
+
+        {/* ── 8b단계 ⑳: 이 시점 프로세스(누른 점 → 없으면 창의 피크 시각 → 창 끝) · 시간 × 프로세스 띠(이 창) — 서버 대표값 지표에서만 ── */}
+        {spec.kind === 'server' && <BmTopProc itemKey={itemKey} ts={pp?.t ?? sum.peakAt ?? sum.maxAt ?? win.to} win={win} narrow={narrow} />}
 
         {/* ── 구간 이동 줄(공용 창 계산) ── */}
         <div className="bmt-nav">

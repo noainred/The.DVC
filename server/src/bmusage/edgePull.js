@@ -69,6 +69,11 @@ export function fitEnvelope(env, maxBytes = ENVELOPE_MAX_BYTES) {
     const keep = out.capacity.rows.filter((r) => r?.status === 'forecast' || r?.status === 'reached');
     out = { ...out, capacity: { ...out.capacity, rows: keep, truncated: 'forecast-only', dropped: out.capacity.rows.length - keep.length } }; after = jsonBytes(out);
   }
+  // 8b단계: 저활용 행은 용량 예측 다음으로 줄인다 — 사용 중(active) 행을 빼고 수만 남긴다(후보 · 관찰 · 주기 사용 · 제외는 남긴다). 뺀 사실은 idle.truncated.
+  if (after > maxBytes && out.idle && Array.isArray(out.idle.rows)) {
+    const keep = out.idle.rows.filter((r) => r?.status !== 'active');
+    out = { ...out, idle: { ...out.idle, rows: keep, truncated: 'non-active-only', dropped: out.idle.rows.length - keep.length } }; after = jsonBytes(out);
+  }
   if (after > maxBytes && Array.isArray(out.logSummary)) { out = { ...out, logSummary: out.logSummary.map((x) => ({ ...x, top: (x.top || []).map(({ sample: _s, tmpl: _t, ...p }) => p) })) }; logLevel = 'compact'; after = jsonBytes(out); }
   if (after > maxBytes) { out = { ...out, perf: [] }; level = 'dropped'; after = jsonBytes(out); }
   if (after > maxBytes && Array.isArray(out.logSummary)) { out = { ...out, logSummary: out.logSummary.map((x) => ({ ...x, top: [] })) }; logLevel = 'dropped'; after = jsonBytes(out); }
@@ -151,7 +156,25 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
     ...(await envelopeLogs(keys)),
     // 8a단계: 정비 창 상태(배포본 · 억제 계수 · 창 끝 뒤 억제 점검) · 용량 소진 예측(하루 계산 결과 행 — 대상 목록 안의 서버만).
     ...(await envelopeMaintCapacity(keys)),
+    // 8b단계: 표지(topVer — ##TOP 수집 · 엣지 대행 /bm-usage/top 이 있다) · 저활용 하루 계산 결과(행 — 대상 목록 안의 서버만 · 이력).
+    ...(await envelopeIdle(keys)),
   };
+}
+/** 8b단계 봉투 필드 — 표지(topVer · idleVer)는 계산 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다). 실패해도 봉투는 나간다. */
+export const TOP_VER = 1;
+export const IDLE_VER = 1;
+const IDLE_FIELDS = ['key', 'status', 'reason', 'score', 'days', 'excludedDays', 'grades', 'dropped', 'metrics', 'periodic', 'candSince', 'candLeft'];
+async function envelopeIdle(keys) {
+  const out = { topVer: TOP_VER, idleVer: IDLE_VER };
+  try {
+    const I = (await import('./idle.js')).loadIdle();
+    if (I) {
+      out.idle = I.unreadable ? { unreadable: true, rows: [] }
+        : { at: I.at, day: I.day, firstDay: I.firstDay || null, cfg: I.cfg, history: I.history || [], ...(I.truncated ? { truncated: 'rows-cap' } : {}),
+          rows: (I.rows || []).filter((r) => keys.has(t(r.key))).map((r) => Object.fromEntries(IDLE_FIELDS.filter((k) => r[k] !== undefined && r[k] !== null).map((k) => [k, r[k]]))) };
+    }
+  } catch { /* 그 필드만 빠진다 */ }
+  return out;
 }
 /** 8a단계 봉투 필드 — 표지(maintVer · capacityVer)는 계산 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다). 실패해도 봉투는 나간다. */
 export const MAINT_VER = 1;

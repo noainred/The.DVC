@@ -29,7 +29,7 @@ function cleanNode(x, now) {
   const info = isObj(x.info) ? { 'no-telemetry': N(x.info['no-telemetry']), first: N(x.info.first), 'psi-absent': N(x.info['psi-absent']) } : null;
   // 폴더를 못 읽은 노드는 가족 값이 null(모름 — 0개 0KB 가 아니다 · 반증 F5)
   const fams = isObj(x.db?.families) ? {} : null;
-  if (isObj(x.db?.families)) for (const f of Object.keys(FAMILIES)) { const v = x.db.families[f]; if (isObj(v)) fams[f] = { files: N(v.files), bytes: N(v.bytes), first: v.first == null ? null : strOf(v.first, 8), last: v.last == null ? null : strOf(v.last, 8) }; }
+  if (isObj(x.db?.families)) for (const f of Object.keys(FAMILIES)) { const v = x.db.families[f]; if (isObj(v)) fams[f] = { files: N(v.files), bytes: N(v.bytes), first: v.first == null ? null : strOf(v.first, 10), last: v.last == null ? null : strOf(v.last, 10) }; }
   const cells = {};
   if (isObj(x.cells)) for (const k of NODE_FLAGS) if (CELL.has(x.cells[k])) cells[k] = x.cells[k];
   return {

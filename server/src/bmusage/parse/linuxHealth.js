@@ -8,7 +8,11 @@
  *     /etc/cron.d 파일 이름 · crontab 사용자 이름)이 줄 머리에 오지 않는다 → ‘##MEM’ · ‘##END’ 같은 표지를 위조할 수 없다. 파서는 접두 없는 줄을 버린다.
  *   · 표지는 정확 일치 · 순서 · 재개방 금지(splitSections — LINUX_SECTIONS 에 이 순서로 넣었다).
  *   · 구획마다 줄 수(head) · 줄 폭(cut) 상한 — 바이트 산수(SECTION_BYTES_SUM < OUTPUT_MAX_BYTES < EXEC_MAX_OUTPUT)에 더한다(osSsh).
- *   · 멈출 수 있는 명령은 `timeout`(chronyc 3 · dmesg 3 · systemctl 3 · needs-restarting 8 · dnf 8) — 주기 명령 전체가 시한 하나라 한 칸이 전 구획을 잃게 하지 않는다(R8).
+ *   · 멈출 수 있는 명령은 `timeout`(chronyc 3 · dmesg 3 · systemctl 3 · needs-restarting 6 · dnf 6) — 주기 명령 전체가 시한 하나라 한 칸이 전 구획을 잃게 하지 않는다(R8).
+ *     ⚠⚠ 8b 반증 F1(8b 이전부터의 결함): 구획 안 timeout 의 **합**이 바깥 exec 시한(osSsh CMD_TIMEOUT_MS 30초)보다 크면 그 목적이 성립하지 않는다 — 시한에 걸리면
+ *     sshExec 가 모은 출력을 버려 그 주기의 **전 구획**을 잃는다. 예전 최악 합 34초(systemctl 3×4 · chronyc 3 · dmesg 3 · needs-restarting 8 · dnf 8) > 30초였다.
+ *     이제 needs-restarting 과 dnf history 는 **한 주기에 둘 다 돌지 않고**(패키지 DB 가 20분 안에 바뀌면 dnf 차례 · needs-restarting 은 20~40분 창) 각 6초 —
+ *     최악 합 24초 + 여유 6초 ≤ 30초(bmTop8bBudget 시험이 명령 문자열에서 timeout 을 뽑아 합을 고정하고, 실제 셸로 ‘둘 다 돌지 않음’ 을 확인한다).
  *   · **실패 = missing** — 명령이 있는데 실패하면(종료 코드 ≠ 0) 값을 내지 않고 `rc=<코드>` 만 낸다 → 파서가 그 칸을 null(확인 불가). 0 을 지어내지 않는다(R7).
  *     명령이 없으면 아무것도 내지 않는다(구획은 왔는데 0줄 = absent — chrony 가 아닌 시각 동기를 쓰는 서버).
  *
@@ -28,7 +32,7 @@
 export const HEALTH_SECTIONS = Object.freeze(['CHRONY', 'DMESG', 'CHANGES']);
 /** 줄 고정 접두 — 줄 머리를 우리가 정한다(반증 R1). */
 export const HEALTH_PREFIX = Object.freeze({ CHRONY: 'c:', DMESG: 'k:', CHANGES: 'x:' });
-/** 구획별 줄 상한(명령의 head -n 과 같은 값). CHANGES = 고정 키 13줄 + dnf 6 + sysctl.d 32 + cron.d 32 + spool 32 + 여유. */
+/** 구획별 줄 상한(명령의 head -n 과 같은 값). CHANGES = 고정 키 14줄(8b: sc 추가) + dnf 6 + sysctl.d 32 + cron.d 32 + spool 32 + 여유. */
 export const HEALTH_LINE_CAP = Object.freeze({ CHRONY: 3, DMESG: 2, CHANGES: 120 });
 /** 줄 최대 바이트(가정 — cut 폭 + 접두 + 개행). osSsh SECTION_BYTES_SUM 산수에 더한다. */
 export const HEALTH_LINE_BYTES = Object.freeze({ CHRONY: 304, DMESG: 100, CHANGES: 170 });
@@ -38,6 +42,13 @@ export const HEALTH_FILES_MAX = 32;
 export const DNF_LINES_MAX = 6;
 /** rpmdb 가 이 분 안에 바뀌었을 때만 dnf history 를 읽는다(평소 주기 비용 0 — 5분 주기의 4배 여유). */
 export const DNF_RECENT_MIN = 20;
+/**
+ * 8b 반증 F1: 패키지 DB 가 바뀐 뒤 needs-restarting 을 돌리는 창(분) — DNF_RECENT_MIN 안은 dnf history 차례라 needs-restarting 은 건너뛰고(nr=skip · 직전 값)
+ *   DNF_RECENT_MIN ~ 이 값 사이에 돈다(둘을 한 주기에 함께 돌리지 않는다 — 주 명령 timeout 합 산수). 5분 주기면 약 4번.
+ */
+export const NR_AFTER_RPM_MIN = 40;
+/** needs-restarting · dnf history 시한(초) — 각자 한 주기에 하나만 돈다(위). 실장비 소요는 확인하지 못했다(이 컨테이너에 둘 다 없음 — 정직 기록 · 파이썬 dnf 기동 1~3초로 추정). */
+export const DNF_TIMEOUT_S = 6;
 
 /**
  * `sysctl -a` 전체 CRC 에서 뺄 휘발성 키(매 주기 값이 바뀐다 — 넣으면 매 주기 ‘바뀜’ 이 된다).
@@ -78,23 +89,30 @@ export const HEALTH_SHELL = Object.freeze({
    * 변경 감지 사실 — 줄마다 `x:<키>=<값>`(키는 고정). 파일 목록은 `x:sf:<이름>|<crc>` · `x:cf:` · `x:ct:` (이름은 root 가 만든 파일 · 사용자 이름).
    *   needs-restarting(반증 L1): 종료 코드 1 은 ‘재부팅 필요’ 와 ‘dnf 오류’ 가 같다 — **출력 표지**(LC_ALL=C · ‘Reboot is required’ / ‘should not be necessary’)로만 가르고
    *   못 가르면 `nr=x`(확인 불가 — 지어내지 않는다). 출력 원문은 셸 변수에만 있고 밖으로 나오지 않는다.
-   *   ⚠ 매 주기(집중이면 매 분) 파이썬 dnf 를 띄우지 않는다 — 결과는 부팅 · 패키지 DB 가 바뀔 때만 바뀐다: 방금 부팅(30분 안) · rpmdb 가 최근 바뀜 ·
+   *   ⚠ 매 주기(집중이면 매 분) 파이썬 dnf 를 띄우지 않는다 — 결과는 부팅 · 패키지 DB 가 바뀔 때만 바뀐다: 방금 부팅(30분 안) · rpmdb 가 최근(40분 안) 바뀜 ·
    *   하루 네 번 10분 창(03 · 09 · 15 · 21시 00~09분 — 처음 값과 안전망)에만 실행하고 그 밖에는 `nr=skip`(직전 값을 이어 쓴다 — cycleOps).
+   *   ⚠ 8b 반증 F1: dnf history 가 도는 주기(rpmdb 20분 안 · dnf 있음)에는 needs-restarting 을 건너뛴다(nr=skip) — 둘의 시한이 한 주기 명령 시간에 함께 들지 않게.
+   *     패키지 변경 직후 주기는 dnf 가 먼저라 변경 이벤트에 트랜잭션 번호가 붙고, 재부팅 필요 여부는 20~40분 창에서 읽는다.
    *   없으면 `nr=absent`.
    */
   CHANGES: [
     `echo "${P.CHANGES}up=$(cut -d' ' -f1 /proc/uptime 2>/dev/null)";`,
     `echo "${P.CHANGES}boot=$(cut -c1-36 /proc/sys/kernel/random/boot_id 2>/dev/null)";`,
     `echo "${P.CHANGES}kern=$(uname -r 2>/dev/null | cut -c1-80)";`,
-    `nrr=0; [ "$(cut -d. -f1 /proc/uptime 2>/dev/null)" -lt 1800 ] 2>/dev/null && nrr=1;`,
-    `[ -n "$(find /var/lib/rpm -maxdepth 1 \\( -name rpmdb.sqlite -o -name Packages \\) -mmin -${DNF_RECENT_MIN} 2>/dev/null | head -n 1)" ] && nrr=1;`,
+    // 8b 반증 F5: 이 수집 세션의 출발 주소(대상 sshd 가 정한 자기 세션 SSH_CONNECTION 첫 칸 — 다른 프로세스 환경은 읽지 않는다). 저활용 ‘활동 흔적’ 이 포탈 자신의 로그인을 뺀다.
+    `echo "${P.CHANGES}sc=$(echo "$SSH_CONNECTION" | cut -d' ' -f1 | cut -c1-64)";`,
+    `_r20=0; [ -n "$(find /var/lib/rpm -maxdepth 1 \\( -name rpmdb.sqlite -o -name Packages \\) -mmin -${DNF_RECENT_MIN} 2>/dev/null | head -n 1)" ] && _r20=1;`,
+    `_r40=$_r20; [ "$_r40" = 0 ] && [ -n "$(find /var/lib/rpm -maxdepth 1 \\( -name rpmdb.sqlite -o -name Packages \\) -mmin -${NR_AFTER_RPM_MIN} 2>/dev/null | head -n 1)" ] && _r40=1;`,
+    `nrr=0; [ "$(cut -d. -f1 /proc/uptime 2>/dev/null)" -lt 1800 ] 2>/dev/null && nrr=1; [ "$_r40" = 1 ] && nrr=1;`,
     `case "$(date +%H%M 2>/dev/null)" in 030?|090?|150?|210?) nrr=1;; esac;`,
-    `if command -v needs-restarting >/dev/null 2>&1; then if [ "$nrr" = 1 ]; then nro=$(LC_ALL=C timeout 8 needs-restarting -r 2>/dev/null | head -c 4096);`,
+    // 8b 반증 F1: dnf history 차례(rpmdb 20분 안 · dnf 있음)면 needs-restarting 은 이번 주기 건너뛴다 — 둘을 한 주기에 함께 돌리지 않는다(timeout 합 산수).
+    `_dh=0; [ "$_r20" = 1 ] && command -v dnf >/dev/null 2>&1 && _dh=1; [ "$_dh" = 1 ] && nrr=0;`,
+    `if command -v needs-restarting >/dev/null 2>&1; then if [ "$nrr" = 1 ]; then nro=$(LC_ALL=C timeout ${DNF_TIMEOUT_S} needs-restarting -r 2>/dev/null | head -c 4096);`,
     `case "$nro" in *"Reboot is required"*) echo '${P.CHANGES}nr=1';; *"should not be necessary"*) echo '${P.CHANGES}nr=0';; *) echo '${P.CHANGES}nr=x';; esac;`,
     `else echo '${P.CHANGES}nr=skip'; fi; else echo '${P.CHANGES}nr=absent'; fi;`,
     `echo "${P.CHANGES}pk=$(stat -c %Y /var/lib/rpm/rpmdb.sqlite /var/lib/rpm/Packages 2>/dev/null | head -n 1)";`,
-    `if [ -n "$(find /var/lib/rpm -maxdepth 1 \\( -name rpmdb.sqlite -o -name Packages \\) -mmin -${DNF_RECENT_MIN} 2>/dev/null | head -n 1)" ] && command -v dnf >/dev/null 2>&1; then`,
-    `timeout 8 dnf -q history list 2>/dev/null | head -n ${DNF_LINES_MAX + 2} | cut -c1-160 | sed 's/^/${P.CHANGES}h:/'; fi;`,
+    `if [ "$_dh" = 1 ]; then`,
+    `timeout ${DNF_TIMEOUT_S} dnf -q history list 2>/dev/null | head -n ${DNF_LINES_MAX + 2} | cut -c1-160 | sed 's/^/${P.CHANGES}h:/'; fi;`,
     `echo "${P.CHANGES}sx=$(sysctl -a 2>/dev/null | grep -v -E '${SYSCTL_VOLATILE_RE}' | cksum | cut -d' ' -f1)";`,
     `for f in /etc/sysctl.conf /etc/sysctl.d/*.conf; do if [ -f "$f" ]; then echo "${P.CHANGES}sf:\${f##*/}|$(cksum < "$f" 2>/dev/null | cut -d' ' -f1)"; fi; done 2>/dev/null | head -n ${HEALTH_FILES_MAX} | cut -c1-120;`,
     `for f in /etc/crontab /etc/cron.d/*; do if [ -f "$f" ]; then echo "${P.CHANGES}cf:\${f##*/}|$(cksum < "$f" 2>/dev/null | cut -d' ' -f1)"; fi; done 2>/dev/null | head -n ${HEALTH_FILES_MAX} | cut -c1-120;`,
@@ -199,7 +217,7 @@ export function parseDnfLine(s) {
 export function parseChanges(lines = []) {
   const ls = stripped(lines, P.CHANGES, 200);
   const out = {
-    upS: null, bootId: null, kernel: null, needsRestart: null, nrAbsent: false, nrSkipped: false, rpmdbAt: null, dnf: null,
+    upS: null, bootId: null, kernel: null, selfIp: null, needsRestart: null, nrAbsent: false, nrSkipped: false, rpmdbAt: null, dnf: null,
     sysctlCrc: null, sysctlFiles: {}, cronFiles: {}, spool: {}, spoolPerm: false, firewalld: null, fd: null, conntrack: null,
   };
   let seen = 0;
@@ -221,6 +239,7 @@ export function parseChanges(lines = []) {
     if ((m = /^up=([\d.]{1,16})$/.exec(s))) { out.upS = num(m[1]); seen += 1; continue; }
     if ((m = /^boot=([0-9a-f-]{36})$/.exec(s))) { out.bootId = m[1]; seen += 1; continue; }
     if ((m = /^kern=([A-Za-z0-9._+-]{1,80})$/.exec(s))) { out.kernel = m[1]; seen += 1; continue; }
+    if ((m = /^sc=([0-9A-Fa-f:.]{2,45})$/.exec(s))) { out.selfIp = m[1]; continue; }   // 수집 세션 출발 주소(활동 흔적에서 자기 로그인 빼기 — 값 칸으로 세지 않는다)
     if ((m = /^nr=(absent|skip|0|1|x)$/.exec(s))) {
       if (m[1] === 'absent') out.nrAbsent = true;
       else if (m[1] === 'skip') out.nrSkipped = true;   // 이번 주기는 실행하지 않음 — 직전 값을 이어 쓴다(cycleOps)

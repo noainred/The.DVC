@@ -33,7 +33,10 @@ import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
 import { buildUsage } from './usage.js';
 import { recordHbaBasis, pruneHbaBasis } from './hbaBasis.js'; // v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거(화면 각주)
-import { collectOsUsage, SESSION_BUDGET_MS as OS_BUDGET_MS } from './collectors/osSsh.js';
+import { collectOsUsage as collectOsUsageReal, SESSION_BUDGET_MS as OS_BUDGET_MS } from './collectors/osSsh.js';
+/** 8b 시험 이음매 — 운영 경로는 늘 osSsh.collectOsUsage(_osCollector 는 시험만 바꾼다). */
+let _osCollector = null;
+const collectOsUsage = (osHost, opts) => (_osCollector || collectOsUsageReal)(osHost, opts);
 import { insertUsage, pruneUsage, repairRollups, snapshotPrune } from './db.js';
 import { ensureMonthMigration, migrationLast } from './monthMigrate.js';
 import { estimateBaseMs, planCycleWindow } from './peakPlan.js'; // v2.922: 피크 창 주기 예산 자동 맞춤
@@ -46,6 +49,7 @@ import { capStr } from '../util/capStr.js'; // v2.744(RV2744F-WEB-03): 상주 �
 import { idracAuthStopFor as mainIdracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 import { withSlot, configureSlots, slotPeakReset } from './slots.js'; // v2.929(5단계): 전역 동시성 풀 — 집중 수집과 슬롯을 나눠 쓴다 · 6단계: 주기 최대 사용(수집 건강)
 import { summarizeCycle, dbFilesNow, collectCells } from './collectHealth.js'; // 6단계 수집 건강(메타 모니터링)
+import { topWriteBatch, dropTopState } from './topStore.js'; // 8b단계 ⑳ 프로세스 Top-N 저장(시간 단위 파일 top · toph)
 import * as MAINT from './maint/runtime.js'; // 8a단계 — 정비 창 판정기 · 억제 계수 · 점검 · 대상 공급자 등록(파트 장애 · 대행이 폴러를 import 하지 않게)
 import { focusActiveCount, focusQueuedCount, registerFocusPollerHooks, focusHousekeeping, onFocusEnd, initFocus } from './focus/run.js'; // v2.929: 피크 창 예산에서 활성 집중 수만큼 동시성을 뺀다
 
@@ -611,7 +615,7 @@ export function planPeakForCycle(realTargets = [], { intervalMs, st = storeOf(),
   const { steps, ...rest } = plan;
   return { at: Date.now(), ...rest, baseSamples: est.n, steps: (steps || []).slice(0, 6) };
 }
-async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRunMs = 0, runT0 = null, peakPlan = null, logExtra = null } = {}) {
+async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRunMs = 0, runT0 = null, peakPlan = null, logExtra = null, top = true } = {}) {
   const t0 = Date.now();
   const dev = authDev(target);
   // ⚠ **수동 실행은 막지 않는다** — 사람이 1회 누르는 것은 잠금 위험이 없고, 비밀번호를 고친 뒤
@@ -640,7 +644,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   let osMs = null;
   const osT0 = Date.now();
   jobs.push((target.paths.includes('os') && !stopped)
-    ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan), ...(logExtra ? { extraCommands: [logExtra] } : {}) }), 'OS 수집 시한 초과')
+    ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan), ...(logExtra ? { extraCommands: [logExtra] } : {}), top }), 'OS 수집 시한 초과')
       .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) }))
       .then((r) => { osMs = Date.now() - osT0; return r; })
     : Promise.resolve(stopped ? { ok: false, error: `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: stopped } : null));
@@ -757,6 +761,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
  */
 function dropStaleState(live) {
   for (const k of _prev.keys()) if (!live.has(k)) _prev.delete(k);
+  dropTopState(live);   // 8b단계: Top-N 기준 표본 · 누적 CPU · 시간 comm 집합
   pruneHbaBasis(live);   // v2.744(LEFT-08 ②)
   for (const k of _detail.keys()) if (!live.has(k)) _detail.delete(k);   // v2.744(RV2744F-WEB-03)
   for (const k of _authStopped.keys()) if (!live.has(String(k).replace(/\|idrac$/, ''))) _authStopped.delete(k);
@@ -813,7 +818,10 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
   const s = loadBmUsageSettings();
   // v2.922: 시간 단위 파일 보존(파일 삭제 + 경계 기간 청크) — 단계마다 보존일. 예전 표(마이그레이션 전 잔여)는 예전 규칙 그대로.
   const st = s.store || STORE_DEFAULTS;
-  const keep = { raw: effectiveRawDays(s), h1: st.hourlyDays, d1: s.dailyRetentionDays, dev: st.devRawDays, dev1h: st.devHourlyDays };
+  // 8b단계: Top-N 보존(이 노드 설정 bm-perf-rules.json top — 기본 7일 · 90일). 설정을 못 읽으면 기본값.
+  let topKeep = { keepDays: 7, hourlyDays: 90 };
+  try { const tr = (await import('./perfRules.js')).loadPerfRules().top; if (tr) topKeep = tr; } catch { /* 기본값 */ }
+  const keep = { raw: effectiveRawDays(s), h1: st.hourlyDays, d1: s.dailyRetentionDays, dev: st.devRawDays, dev1h: st.devHourlyDays, top: topKeep.keepDays, toph: topKeep.hourlyDays };
   const r = await pruneUsage({ rawDays: s.rawRetentionDays, dailyDays: s.dailyRetentionDays, force: true, keep }).catch((e) => ({ ok: false, error: errText(e) }));
   // v2.923(반증 R3): 진단 스냅샷 7일 보관 — 예전에는 ‘실행할 때만’ 지워져 아무도 누르지 않으면 프로세스 이름 · 커널 로그가 영구 보관됐다. 같은 스로틀 틱에 정리한다.
   if (exists) {
@@ -862,6 +870,11 @@ export async function bmUsageTimerTick() {
       try {
         const C = await import('./capacity.js');
         if (!C.capacityRunning() && C.dueForRecompute(C.loadCapacity())) currentTargets().then((tg) => C.recomputeCapacity({ targets: tg.targets || [] })).catch(() => {});
+      } catch { /* 다음 틱 */ }
+      // 8b단계: 저활용 — 하루 1회(01:20 뒤 첫 틱 · 진행 중이면 공유 · 시간 기준 양보). 기다리지 않는다.
+      try {
+        const I = await import('./idle.js');
+        if (!I.idleRunning() && I.dueForIdle(I.loadIdle())) currentTargets().then((tg) => I.recomputeIdle({ targets: tg.targets || [] })).catch(() => {});
       } catch { /* 다음 틱 */ }
     }
   }
@@ -953,6 +966,9 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
      *   ⚠ 인증 거부는 창과 무관하다(collectOne 의 authGuard 가 그대로 정지 · 이 표시는 인증 실패에 달지 않는다).
      *   판정기를 못 만들면(파일 손상 등) 억제하지 않는다(평소대로 수집).
      */
+    // 8b단계 ⑳: ##TOP 켬/끔(이 노드 설정 bm-perf-rules.json top.on — 기본 켬). 설정 파일을 못 읽어도 기본값(켬)이다(1초 대기 · 읽기 전용).
+    let topOn = true;
+    try { topOn = (await import('./perfRules.js')).loadPerfRules().top?.on !== false; } catch { topOn = true; }
     let mj = null;
     try { mj = await MAINT.maintJudge({ now: t0 }); } catch { mj = null; }
     const maintOf = (tg) => (mj ? mj.stateFor(tg, Date.now()) : null);
@@ -961,7 +977,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       const ms = maintOf(tg);
       if (ms?.scopes?.collect) maintSkip.push({ tg, ms }); else collectTargets.push(tg);
     }
-    const realResults0 = collectTargets.length ? await pool(collectTargets, CONCURRENCY, (tg) => withSlot(() => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0, peakPlan, logExtra: (tg.paths || []).includes('os') ? L.logExtraFor(tg, logCtx) : null })).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : [];
+    const realResults0 = collectTargets.length ? await pool(collectTargets, CONCURRENCY, (tg) => withSlot(() => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0, peakPlan, logExtra: (tg.paths || []).includes('os') ? L.logExtraFor(tg, logCtx) : null, top: topOn })).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : [];
     const MR = mj ? MAINT : null;
     for (const r of markInMaint(realResults0, maintOf)) MR?.countSuppression('collectFail', r.inMaint.ids);
     const skippedResults = maintSkip.map(({ tg, ms }) => {
@@ -1010,6 +1026,17 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       try { changeRes = await (await import('./opsDb.js')).changeWriteBatch({ agent: agentName, items: cycleOps.items }); }
       catch (e) { changeRes = { ok: false, reason: String(e?.message || e).slice(0, 200) }; }
     }
+    // 8b단계 ⑳: 프로세스 Top-N — ##TOP 을 읽은 서버만(missing · 꺼짐은 적지 않는다 — ‘표본 없음’). 데모 대상은 합성 값(같은 저장 경로). 실패해도 수집은 실패가 아니다.
+    let topRes = null;
+    try {
+      const topItems = results.filter((r) => r?.target?.key && r?.os?.ok && r.os.perf?.top?.value && !r.os.perf.top.value.off)
+        .map((r) => ({ key: r.target.key, ts: r.built?.row?.ts ?? Date.now(), top: r.os.perf.top.value }));
+      if (demo && demoTargets.length) { try { for (const x of (await import('../mock/demo/bmTop.js')).demoTopItems(demoTargets, Date.now())) topItems.push(x); } catch { /* 데모 합성 실패는 무시 */ } }
+      if (topItems.length) topRes = await topWriteBatch({ agent: agentName, items: topItems });
+    } catch (e) { topRes = { ok: false, errors: [String(e?.message || e).slice(0, 200)] }; }
+    if (topRes && !topRes.ok && _srcErrLog('top', (topRes.errors || [])[0] || 'top-write')) console.warn(`[bmusage] 프로세스 Top-N 적재 실패(그 주기 표본만 없다): ${(topRes.errors || [])[0] || ''}`);
+    // 8b 반증 F5: 수집 세션의 접속 계정 · 대상이 본 출발 주소 — 저활용 ‘활동 흔적’ 이 포탈 자신의 SSH 로그인을 빼는 데 쓴다(인메모리 · 이 노드 · 계정 이름만 — 비밀 없음).
+    try { const I = await import('./idle.js'); for (const r of results) if (r?.target?.key && r?.os?.ok && r.target.osHost) I.noteSelfLogin(r.target.key, r.target.osHost.username || 'root', r.os.perf?.changes?.value?.selfIp ?? null); } catch { /* 기록 실패는 활동 판정을 ‘계정만’ 으로 둔다 */ }
     // 7a단계: 로그 분석 — 파싱 · 분류 · 한 트랜잭션 쓰기(위치 비교 후 쓰기) · 함대 요약. 데모 대상은 합성 출력(같은 파서 · 분류 · 쓰기).
     let logRes = null;
     try {
@@ -1064,6 +1091,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       cycleOps: cycleOps ? { health: cycleOps.health ?? 0, events: cycleOps.events ?? 0, written: changeRes?.ok ? changeRes.events ?? 0 : null, error: cycleOps.error || (changeRes && !changeRes.ok ? changeRes.reason || 'write-failed' : null) } : null,
       // 7a단계 로그 분석 — 개수만(서버 이름 없음).
       logs: logRes || null,
+      // 8b단계 프로세스 Top-N — 개수만(머리 · 전체 저장 · 프로세스 행 · 시간 집계 행).
+      top: topRes ? { samples: topRes.samples ?? 0, full: topRes.full ?? 0, procRows: topRes.procRows ?? 0, hourlyRows: topRes.hourlyRows ?? 0, error: topRes.ok ? null : (topRes.errors || [])[0] || 'write-failed' } : null,
       perfAlerts: perfAlerts && !perfAlerts.skipped ? { fires: perfAlerts.fires ?? 0, queued: perfAlerts.queued ?? 0, deferred: perfAlerts.deferred ?? 0, capped: perfAlerts.capped ?? 0, autoFocus: perfAlerts.autoFocus ?? 0, issues: perfAlerts.issues ?? 0, ...(perfAlerts.warmup ? { warmup: true } : {}), error: perfAlerts.error || null } : null,
     };
     return { ok: true, ...(_last) };
@@ -1187,6 +1216,8 @@ export function stopBmUsagePoller() { _timer?.stop?.(); _timer = null; }
 export function _resetForTest() { _lastLiveKeys = null; _lastRepair = null; _cycleSamples = []; _peakPlan = null; _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; _health = null; _healthSince = new Map(); guard._resetForTest(); }
 /** 테스트 전용 — 분류 함수 대체(EDGE2628-03) · 인메모리 상태 주입(EDGE2628-02). */
 export function _setFleetForTest(fn) { _fleetOverride = typeof fn === 'function' ? fn : null; }
+/** 시험 이음매(8b) — OS 수집기를 바꾼다(실제 폴러 주기 · 적재 배선을 SSH 없이 시험). 운영 경로는 늘 collectOsUsage. */
+export function _setOsCollectorForTest(fn) { _osCollector = typeof fn === 'function' ? fn : null; }
 export function _seedStateForTest({ prev = [], authStopped = [] } = {}) {
   for (const k of prev) _prev.set(k, { at: Date.now() });
   for (const k of authStopped) _authStopped.set(k, { attempts: 1 });

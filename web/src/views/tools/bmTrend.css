@@ -105,3 +105,10 @@ table.bmt-t td.bmt-wrap { white-space: normal; min-width: 220px; overflow-wrap: 
 /* 6단계 운영 주석 ◆ 핀(HTML 겹침 — SVG 뷰박스는 가로로 늘어나 도형이 찌그러진다) */
 .bmt-pinwrap { position: relative; min-width: 0; }
 .bmt-pin { position: absolute; top: -7px; transform: translateX(-50%); color: var(--purple); font-size: 12px; line-height: 1; cursor: help; text-shadow: 0 0 2px var(--bg); pointer-events: auto; }
+
+/* 8b단계 ⑳ 이 시점 프로세스 · 시간 × 프로세스 띠(BmTopProc.jsx) */
+.bmtp { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; min-width: 0; }
+.bmtp-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; margin-bottom: 4px; }
+.bmtp-head > h5 { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.bmtp-band { min-width: 0; }
+.bmtp-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12px; margin-top: 4px; min-width: 0; }

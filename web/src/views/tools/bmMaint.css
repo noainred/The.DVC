@@ -17,3 +17,10 @@
 .bmc-axis { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
 .bmc-sel td { background: var(--panel-2); }
 .bmt-maint { position: relative; }
+
+/* 8b단계 ㉑ 저활용 검토 편집 · ㉒ 흡기 분포 막대(BmIdleFleet.jsx · BmPowerFleet.jsx) */
+.bmi-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.bmi-reason { flex: 1 1 220px; min-width: 0; max-width: 420px; }
+.bmw-bins { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; min-height: 80px; min-width: 0; }
+.bmw-bin { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; min-width: 44px; }
+.bmw-bar { width: 28px; background: var(--accent-2); border-radius: 2px 2px 0 0; min-height: 1px; }

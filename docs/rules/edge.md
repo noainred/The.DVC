@@ -33,6 +33,7 @@
 
 - (7b단계 추가) 리눅스 성능 7b단계 서버 등록 배포(중앙 → 엣지) — 비밀 없는 이름 목록 · 개별 토큰만 · 엣지가 같은 분석을 다시 · 자기가 만든 항목만 지움 · 끊겨도 central 로 넘기지 않음
 - (8a단계 추가) 리눅스 성능 8a단계 정비 창 배포 · 봉투 maint/capacity · 용량 상세 대행 — 개별 토큰만 · 그 법인 창만 · 태그는 중앙이 키로 펼침 · 엣지 재정규화 · 24h 시한 · bodyOk 명시 · 최소 버전 8a 표지
+- (8b단계 추가) 리눅스 성능 8b단계 Top-N 대행 · 봉투 idle — bodyOk 명시 · comm · user 는 엣지 문자열(길이 → 제어문자) · hint 는 중앙이 다시 · 표지 topVer/idleVer · 최소 버전 8b 표지
 ## 본문
 
 - ⚠⚠ **엣지 로그·진행상태는 '당겨서' 본다 — 상시 수집하지 않는다**(`edgelog/` + `central/edgeLog*.js` +
@@ -903,3 +904,13 @@
     엣지의 배포 태그 창은 **펼친 keys 만**으로 맞춘다(F10 — 엣지 로컬 수동 태그로 넓히지 않는다) · 배포본 받은 시각이 5분 넘게 미래면 **지금으로 자르고 파일에 남긴다**(F7 — 엣지 시계가 앞서 있다 바로잡히면
     24h 시한이 92일 재확인 만료까지 늘던 일 · 원래 값은 `atClampedFrom`) · 배포 현황은 창 상태를 **요청마다 한 번** 세고 엣지마다 다시 쓴다(F6 — 엣지 28곳마다 전 창을 다시 세던 것).
     봉투 `capacity` 는 행 상한 내역 `cap`(서버 수 · 계산 안 한 서버 · 마운트 일부만 서버 · 뺀 마운트 수 — 수만) · 행의 `lastDay · staleDays · stale` 을 싣고 중앙 정제 화이트리스트에도 넣었다.
+- ⚠⚠ **리눅스 성능 8b단계 — 프로세스 Top-N 엣지 대행(`/api/collector/bm-usage/top` · `/top/band`) · 봉투 `topVer` · `idleVer` · `idle`**
+  - 대행: 같은 url · 같은 토큰(`pullFromEdge`) · **bodyOk 명시**(`topPointBodyOk` · `topBandBodyOk` — 봉투 모양 `{ok,node}` 는 본문이 아니다) · 실제 collector 라우터 ↔ 실제 `pullEdgeTop` · `pullEdgeTopBand` 성공 왕복 시험(`bmTop8bRoute`) ·
+    대상 밖 키는 엣지가 404 · 보관 없음(프로세스 표는 법인 밖에 쌓지 않는다 — 볼 때 당긴다).
+  - 정제(`central/bmTopPull.js`): **comm · user 는 엣지(그리고 그 서버의 비특권 사용자)가 정한 문자열** — 길이를 먼저 자르고 제어 · 양방향 · 폭 없는 문자를 바꾼다(`cleanComm` · `cleanUser` — 선형) ·
+    상태는 한 글자 · 수는 numOrNull · 종류당 5행 · 띠 comm 은 목록 안 것만 · 엣지가 준 프로파일 단서(hint)는 버리고 중앙이 `procHint` 로 다시 붙인다 · 엣지 시각은 수신 시각으로 자른다.
+  - 봉투: `topVer` · `idleVer` 표지는 계산 전에도 싣는다(값 없음 ≠ 구버전) · `idle` 행은 같은 봉투의 대상 키만 · 상태 · 제외 사유 · 뺀 지표는 열거 밖이면 버린다 · 점수 0~100 정수 · 등급 0/0.5/1 ·
+    이름 · 법인은 행이 아니라 대상 목록에서(`central/bmIdleSanitize.js`) · 봉투 상한에서는 용량 예측 다음으로 ‘사용 중’ 행을 빼고 수만(`idle.truncated: 'non-active-only'`).
+  - 최소 엣지 버전: `featureMinEdgeVersion.stage8bMinEdgeVersion`(표지 `STAGE8B_TITLE_RE = /리눅스 통합 성능 모니터링 8b단계/` — 숫자를 박지 않는다 · 노트에 없으면 지금 판).
+  - 반증 F8: 대행 실패 응답의 `minEdgeVersion` 은 **kind === 'old-version' 일 때만**(시한 · 연결 실패 · 대상 아님 404 에 버전 요구를 붙여 원인을 단정하지 않는다 — 웹도 같은 조건) · 반증 F3: 점 본문 `reason: 'base-missing'` · 띠 `baseMissing` 은 정제를 통과한다(‘못 읽음’ 을 ‘없음’ 으로 바꾸지 않게).
+  - 변경 이벤트 kind 에 `idle`(저활용 후보 진입/이탈)을 더했다 — 중앙 대행 정제(`bmPerfOpsPull.js CHANGE_KINDS`)에도 같은 값(둘을 같이 고칠 것).

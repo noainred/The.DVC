@@ -434,11 +434,17 @@ export async function bmPortsView(req, snap, deps = {}) {
   })());
   return { ...base, cvpAccess: true, cvpRegistered: true, nics: rows, candidates, ...(hiddenOutOfScope ? { hiddenOutOfScope } : {}), ...(nicRes?.ok === false ? { nicError: nicRes.reason } : {}) };
 }
-/** 성능 상세 대상 해석(이 노드 · 엣지 보관분) — bmTrendView 와 같은 규칙. 범위 밖이면 { denied }. */
-async function resolvePerfTarget(req, D, { allowed, isAdmin, key }) {
+/**
+ * 성능 상세 대상 해석(이 노드 · 엣지 보관분) — bmTrendView 와 같은 규칙. 범위 밖이면 { denied }.
+ *   vcenterId 를 주면 **(법인, 키) 쌍**으로 찾는다(8b 반증 F9 — 키 충돌(targets.js keyConflicts) 때 다른 법인 서버를 잡지 않게 · 쓰기 경로는 반드시 준다).
+ */
+async function resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId = '' }) {
+  const vc = t(vcenterId);
+  const corpOk = (x) => !vc || t(x?.vcenterId) === vc;
   const tg = await D.currentTargets();
-  const realKey = tg.targets.some((x) => x.key === key) ? key : (isAdmin ? null : resolveMaskedToken(key, tg.targets.map((x) => x.key)));
-  const target = realKey ? (tg.targets.find((x) => x.key === realKey) || null) : null;
+  const cand = tg.targets.filter(corpOk);
+  const realKey = cand.some((x) => x.key === key) ? key : (isAdmin ? null : resolveMaskedToken(key, cand.map((x) => x.key)));
+  const target = realKey ? (cand.find((x) => x.key === realKey) || null) : null;
   if (target) {
     if (allowed && (!target.vcenterId || !allowed.has(target.vcenterId))) return { denied: true };
     return { via: 'local', agent: config.agent?.name || '', realKey, target, tg };
@@ -449,7 +455,7 @@ async function resolvePerfTarget(req, D, { allowed, isAdmin, key }) {
     if (!sn) continue;
     const snapHosts = isAdmin ? [] : [...regHosts, ...(sn.targets || []).flatMap((x) => [x?.idracHost, x?.osHostName])].filter((h) => typeof h === 'string' && h);
     const em = addressMatcher(snapHosts);
-    const tgt = (sn.targets || []).find((x) => t(x.key) === key || (!isAdmin && maskBmIdentity(x, em).key === key));
+    const tgt = (sn.targets || []).find((x) => corpOk(x) && (t(x.key) === key || (!isAdmin && maskBmIdentity(x, em).key === key)));
     if (!tgt) continue;
     if (allowed && (!t(tgt.vcenterId) || !allowed.has(t(tgt.vcenterId)))) return { denied: true };
     return { via: 'edge', agent: rec.agent, realKey: t(tgt.key), target: tgt, rec };

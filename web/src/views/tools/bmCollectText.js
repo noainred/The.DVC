@@ -75,7 +75,9 @@ export function famLine(db = {}) {
   if (!fam || typeof fam !== 'object') return `${head} · 기간 파일 —(폴더를 읽지 못함)`;
   const cnt = (v) => { const x = n(v); return x == null ? '—' : `${x}개`; };
   const dev = n(fam.dev?.files) != null || n(fam.dev1h?.files) != null ? `${(n(fam.dev?.files) ?? 0) + (n(fam.dev1h?.files) ?? 0)}개` : '—';
-  return `${head} · 원시 ${cnt(fam.raw?.files)} ${gbText(fam.raw?.bytes)} · 1시간 ${cnt(fam.h1?.files)} ${gbText(fam.h1?.bytes)} · 장치 ${dev} · 1일 ${cnt(fam.d1?.files)}${db?.partial ? ' (부분 — 일부 파일 크기를 못 읽음)' : ''}`;
+  // 8b: 프로세스 Top-N(날 파일 top + 월 파일 toph) — 저장 크기를 실측해 보존을 조정하라는 설계 정직 기록의 근거 칸(구버전 엣지는 가족이 없다 → 칸 없음)
+  const top = fam.top || fam.toph ? ` · 프로세스 Top-N ${n(fam.top?.files) != null || n(fam.toph?.files) != null ? `${(n(fam.top?.files) ?? 0) + (n(fam.toph?.files) ?? 0)}개` : '—'} ${gbText(n(fam.top?.bytes) != null || n(fam.toph?.bytes) != null ? (n(fam.top?.bytes) ?? 0) + (n(fam.toph?.bytes) ?? 0) : null)}` : '';
+  return `${head} · 원시 ${cnt(fam.raw?.files)} ${gbText(fam.raw?.bytes)} · 1시간 ${cnt(fam.h1?.files)} ${gbText(fam.h1?.bytes)} · 장치 ${dev} · 1일 ${cnt(fam.d1?.files)}${top}${db?.partial ? ' (부분 — 일부 파일 크기를 못 읽음)' : ''}`;
 }
 /** 합에서 뺀 ‘모름’ 개수 → 꼬리 글자(없으면 빈 글자 — 결측을 0 으로 더하지 않았다는 표시). */
 export function unknownText(cnt, what) { const x = n(cnt); return x ? ` · ${what} ${x}곳 모름(합에서 뺌)` : ''; }

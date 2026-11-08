@@ -43,7 +43,7 @@ export const CATS = Object.freeze([
   // v2.763(V2-3): Veeam 백업 상태는 인벤토리 칸에서 뺐다 — 공유 토큰 엣지의 veeam 403 이 'vCenter 인벤토리' 를 빨갛게 칠했다(인벤토리는 정상).
   { id: 'backup', label: 'Veeam 백업', test: /^central:\/veeam-(data|config)$/ },
   // v2.824: Bareos 법인 Director 대행 — 배정 pull 은 백업 칸 옆이 아니라 운영 작업 칸(작업·회신과 함께 본다)
-  { id: 'idrac', label: 'iDRAC·서버', test: /^central:\/(idrac-scan-(jobs|progress|result)|assignment|ip-scan-(assignment|result)|bmusage-config|bm-onboard|bm-maint)$|^collector:\/(idrac-scan|bm-usage|bm-usage\/(trend|devices|nics|snapshot|snapshots|focus|focus\/stop|changes|baseline|compare|compare-series|logs|capacity))$/ },
+  { id: 'idrac', label: 'iDRAC·서버', test: /^central:\/(idrac-scan-(jobs|progress|result)|assignment|ip-scan-(assignment|result)|bmusage-config|bm-onboard|bm-maint)$|^collector:\/(idrac-scan|bm-usage|bm-usage\/(trend|devices|nics|snapshot|snapshots|focus|focus\/stop|changes|baseline|compare|compare-series|logs|capacity|top|top\/band))$/ },
   { id: 'gpu', label: 'GPU', test: /^central:\/gpu-guest-(data|config)$/ },
   { id: 'power', label: '전력·PDU', test: /^central:\/pdu-(data|config)$/ },
   // v2.736: 아이실론 디렉터리 사용량(엣지가 그 법인 아이실론에 SSH 로 du — 대상 pull · 결과 push)도 스토리지 칸이다.

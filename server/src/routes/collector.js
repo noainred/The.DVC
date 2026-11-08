@@ -344,6 +344,33 @@ collectorRouter.get('/bm-usage/capacity', tokenFirst('bm-usage-capacity'), async
 });
 
 /**
+ * 8b단계 — 프로세스 Top-N 엣지 대행(central/bmTopPull.js pullEdgeTop · pullEdgeTopBand). 같은 url · 같은 토큰 · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
+ *   ‘이 시점 프로세스’(가까운 표본 · 기준 표본 행 · 지속 · PID 재사용) · 시간 × 프로세스 띠(창 ≤ 26시간 5분 표본 · 넘으면 시간 집계). 보관 없음(볼 때 당긴다).
+ */
+collectorRouter.get('/bm-usage/top', tokenFirst('bm-usage-top'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const ts = Number(req.query.ts);
+    if (!Number.isFinite(ts) || ts <= 0) return res.status(400).json({ ok: false, reason: 'ts 가 필요합니다.' });
+    const T = await import('../bmusage/topStore.js');
+    const { loadBmUsageSettings } = await import('../bmusage/settings.js');
+    const r = await T.topAt({ agent: config.agent?.name || '', key: target.key, ts, toleranceMs: (Number(loadBmUsageSettings().intervalMs) || 300_000) * 1.5 });
+    res.json({ ...r, key: target.key });
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+collectorRouter.get('/bm-usage/top/band', tokenFirst('bm-usage-top-band'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const T = await import('../bmusage/topStore.js');
+    const r = await T.topBand({ agent: config.agent?.name || '', key: target.key, from: Number(req.query.from), to: Number(req.query.to) });
+    if (!r.ok) return res.status(400).json(r);
+    res.json({ ...r, key: target.key });
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+
+/**
  * 이 엣지의 **토큰 자기보고**(v2.560 — 사용자 요청 "등록된 모든 엣지/수집 서버의 모든 토큰 …
  * 중앙에 저장된 토큰과 엣지에 저장된 토큰이 동일한지 점검").
  *
