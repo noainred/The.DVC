@@ -5,7 +5,9 @@
  * ⚠ 이 파일은 **조립만** 한다 — 칸 색 · 각주 · 상태 문구 · 수는 `bmPerfText.js`(순수 · vitest)가, 판정은 서버(`useJudge.js`)가 소유한다.
  * ⚠ 표는 `STable`(머리글 클릭 정렬 · ‘—’ 는 늘 뒤) + `minWidth`(가로 스크롤 박스를 컴포넌트가 함께 만든다).
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { fetchJson } from '../../api.js';
+import { capacityKpi } from './bmCapacityText.js'; // 8a단계 보드 KPI
 import { Kpi } from '../../components/ui.jsx';
 import { BoardOpsStrip } from './BmPerfOpsParts.jsx'; // v2.929(5단계): ‘집중 n 건 진행 중’ · ‘소모품 주의 n대’
 import { STable } from '../../components/STable.jsx';
@@ -44,7 +46,7 @@ export function VerdictBadge({ verdict }) {
  * 매트릭스 행들(tr 배열) — 보드와 정렬 회귀 테스트가 같은 함수를 쓴다(테스트는 이 결과에 실제 sortChildren 을 건다).
  * 열 순서(마지막 머리글 줄): 0 서버 · 1 경로 · 2~16 자원 5 × U·S·E · 17 판정.
  */
-export function matrixRows(items = [], { authStops = [], staleMs = null, now = Date.now(), th = null, selKey = '', open = () => {} } = {}) {
+export function matrixRows(items = [], { authStops = [], staleMs = null, now = Date.now(), th = null, selKey = '', open = () => {}, cmpKeys = null, onPickCmp = null } = {}) {
   const keyOpen = (key) => (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(key); } };
   return items.map((it) => {
     const e = it.entry;
@@ -54,6 +56,8 @@ export function matrixRows(items = [], { authStops = [], staleMs = null, now = D
     return (
       <tr key={`${it.agent}|${it.key}`} data-key={it.key} style={{ background: selKey === it.key ? 'rgba(103,232,249,0.06)' : undefined }}>
         <td data-sort={it.name}>
+          {/* 6단계: 비교에 담기(체크 — 서버 칸 안에 둔다: 열을 늘리면 정렬 열 번호가 밀린다) */}
+          {onPickCmp && <input type="checkbox" className="bmcmp-pick" aria-label={`${it.name} 비교에 담기`} checked={!!cmpKeys?.includes(it.key)} onChange={() => onPickCmp(it.key)} />}
           <span role="button" tabIndex={0} className="bmp-link" onClick={() => open(it.key)} onKeyDown={keyOpen(it.key)}>{it.name}</span>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{it.vcenterId || '귀속 없음'}{it.agent ? ` · 엣지 ${it.agent}` : ''}</div>
         </td>
@@ -87,12 +91,25 @@ export function StateChips({ states = [] }) {
   );
 }
 
-export default function BmPerfBoard({ items = [], th = null, intervalMs = null, authStops = [], staleMs = null, onOpen, selKey = '', perfError = '', corpOff = 0, now: nowProp = null }) {
+/** 8a단계 — 용량 예측 요약(보드를 열 때 1회 · 폴링 없음). 못 읽음 · 아직 계산 전은 ‘—’(0 이 아니다). */
+function useCapacityKpi() {
+  const [st, setSt] = useState({ value: '—', meta: '읽는 중…', soon: 0 });
+  useEffect(() => {
+    let live = true;
+    fetchJson('/tools/bm-usage/capacity', {}, undefined, { timeoutMs: 60_000 })
+      .then((r) => { if (live) setSt(capacityKpi(r)); })
+      .catch(() => { if (live) setSt({ value: '—', meta: '용량 예측을 읽지 못했습니다', soon: 0 }); });
+    return () => { live = false; };
+  }, []);
+  return st;
+}
+export default function BmPerfBoard({ items = [], th = null, intervalMs = null, authStops = [], staleMs = null, onOpen, selKey = '', perfError = '', corpOff = 0, now: nowProp = null, cmpKeys = null, onPickCmp = null, onCompare = null, cmpMsg = '' }) {
   const [all, setAll] = useState(false);
   const now = nowProp ?? Date.now();
   const ordered = useMemo(() => severityOrder(items), [items]);
   const tc = useMemo(() => trustCounts(items, { authStops, staleMs, now }), [items, authStops, staleMs, now]);
   const k = useMemo(() => kpiCounts(items), [items]);
+  const cap = useCapacityKpi();
   const top = useMemo(() => topBottlenecks(items, 5), [items]);
   const foot = useMemo(() => cellFootnotes(codesUsed(items.map((it) => it.entry).filter(Boolean))), [items]);
   const open = (key) => onOpen && onOpen(key);
@@ -125,6 +142,8 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
         <Kpi label="오류" value={k.errors} meta={byResText(k.errByRes) ? `E 초과 칸 ${byResText(k.errByRes)}` : 'E 초과 칸 없음'} accent={k.errors ? toneVar('bad') : undefined} />
         <Kpi label="정상" value={k.ok} meta={`주의 ${k.warn}`} />
         <Kpi label="판정 보류" value={k.held} meta="못 읽음 · 오래됨 등" title="판정 보류 — 판정 불가 · 오래됨 · 대부분 못 읽음 · 표본 없음" />
+        {/* 8a단계: 보드 KPI ‘30일 안 소진 n대’(용량 예측 — 수집 노드의 하루 계산 결과 · 보드를 열 때 1회) */}
+        <Kpi label="30일 안 소진(참고)" value={cap.value} unit={cap.value === '—' ? '' : '대'} meta={cap.meta} title="용량 소진 예측 — 목표선 도달이 30일 안인 서버 수(데이터 부족 · 불안정은 세지 않고 따로) · 함대 ‘용량 예측’ 보기에서 자세히" accent={cap.soon ? toneVar('bad') : undefined} />
       </div>
       <BoardOpsStrip items={items} onOpen={open2} now={now} />
 
@@ -134,6 +153,13 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
           <h4 style={{ margin: 0 }}>USE 매트릭스</h4>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>자원 5 × 사용률(U) · 포화(S) · 오류(E) · 심각도 순 · 머리글을 누르면 정렬</span>
         </div>
+        {onPickCmp && (
+          <div className="bmcmp-tray" style={{ marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>서버 칸의 체크로 비교에 담습니다 — 담은 서버 {cmpKeys?.length || 0}대</span>
+            {onCompare && <button type="button" className="btn btn-sm bmp-touch" disabled={(cmpKeys?.length || 0) < 2} onClick={() => onCompare(cmpKeys)}>비교 보기</button>}
+            {cmpMsg && <span style={{ fontSize: 12, color: toneVar('warn') }}>{cmpMsg}</span>}
+          </div>
+        )}
         {!items.length ? (
           <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>표시할 서버가 없습니다.</p>
         ) : (
@@ -151,7 +177,7 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
               </tr>
             </thead>
             <tbody>
-              {matrixRows(ordered, { authStops, staleMs, now, th, selKey, open })}
+              {matrixRows(ordered, { authStops, staleMs, now, th, selKey, open, cmpKeys, onPickCmp })}
             </tbody>
           </STable>
         )}
@@ -179,6 +205,7 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'baseline', marginBottom: 6 }}>
           <h4 style={{ margin: 0 }}>병목 Top</h4>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>서버 판정 등급 순 · 판정 한 줄은 서버 문장 그대로 · 두 경로가 다 읽힌 서버는 교차 판정을 붙입니다</span>
+          {onCompare && top.length >= 2 && <button type="button" className="btn btn-sm bmp-touch" onClick={() => onCompare(top.map((it) => it.key))}>Top {top.length} 비교</button>}
         </div>
         {!top.length ? (
           <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>병목·포화·오류·주의로 판정된 서버가 없습니다{k.held ? ` — 다만 판정 보류 ${k.held}대는 정상이라는 뜻이 아닙니다` : ''}.</p>

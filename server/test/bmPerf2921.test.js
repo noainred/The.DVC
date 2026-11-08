@@ -354,7 +354,7 @@ test('폴러: 보존 틱이 시간 단위 파일도 지운다(꺼져 있어도 �
   assert.ok(P.bmUsageStatus().lastPrune?.files?.deleted?.includes(oldName), JSON.stringify(P.bmUsageStatus().lastPrune));
   assert.deepEqual(P.osStoreOpts({ partitionIo: true, blkqMax: 9, peakWindowS: 4, peakSampler: false, peakSamplerSha256: '' }), { partitionIo: true, blkqMax: 9, peakWindowS: 4, sampler: false, samplerSha: '' });
   const src = SRC('bmusage/poller.js');
-  assert.match(src, /collectOsUsage\(target\.osHost, \{ signal, budgetMs: OS_BUDGET\.effective, \.\.\.osStoreOpts\(storeOf\(\), peakPlan\) \}\)/);   // v2.922: 주기 예산 결정을 함께
+  assert.match(src, /collectOsUsage\(target\.osHost, \{ signal, budgetMs: OS_BUDGET\.effective, \.\.\.osStoreOpts\(storeOf\(\), peakPlan\)(?:, \.\.\.\(logExtra \? \{ extraCommands: \[logExtra\] \} : \{\}\))?(?:, top)? \}\)/);   // v2.922: 주기 예산 결정을 함께 · 7a: 로그 읽기 exec
   assert.match(src, /insertUsage\(rows, config\.agent\?\.name \|\| '', \{ devices, mounts \}\)/);
   assert.match(src, /deviceMax: storeOf\(\)\.deviceMax/);
   assert.match(src, /ensureMonthMigration\(\)/);

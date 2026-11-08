@@ -6,6 +6,9 @@
  * ⚠ 중앙은 **다시 판정하지 않는다** — code·line 은 엣지가 만든 값을 허용 목록(enum) 안에서만 그대로 전한다. 목록 밖 값은 'missing'.
  * ⚠ 모르는 필드는 버리고, 버린 원소 수는 `sanitizeDropped` 에 더한다(조용한 축약 금지 — 호출부가 합친다).
  */
+import { sanitizeCollectHealth } from './bmCollectHealthSanitize.js'; // 6단계 수집 건강
+import { sanitizeMaintEnvelope, sanitizeCapacityEnvelope } from './bmMaintCapSanitize.js'; // 8a단계
+import { sanitizeIdleEnvelope } from './bmIdleSanitize.js'; // 8b단계
 import { strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { PERF_COL_NAMES } from '../bmusage/perfCols.js';
@@ -15,6 +18,7 @@ import { clampEdgeTs } from '../util/clampEdgeTs.js';
 import { DETECT_ACCOUNTS, KARG_KEYS } from '../bmusage/parse/linuxFacts.js'; // v2.923: 4단계 감지 · 튜닝 사실(화이트리스트 원천)
 import { HEALTH_CELLS, HEALTH_CODES } from '../bmusage/health.js'; // v2.929: 점검 소모품 칸(화이트리스트 원천)
 import { sanitizeFocusSummary, sanitizeAlertSent } from './bmPerfOpsPull.js'; // v2.929: 봉투의 집중 요약 · 알림 발송 기록
+import { sanitizeLogSummary } from './bmLogsPull.js'; // 7a단계 로그 분석 요약 정제
 
 export const PERF_LIST_MAX = 2_000;
 const DEV_MAX = 32;
@@ -247,6 +251,23 @@ export function sanitizePerfFields(snap, rcv = Date.now()) {
       // v2.929(5단계): 집중 모니터링 요약(진행 중 · 대기 · 최근 24시간 — 상세는 볼 때 당긴다) · 성능 알림 발송 기록(채널 URL 없음).
       ...(Array.isArray(snap?.focusSummary) ? { focusSummary: sanitizeFocusSummary(snap.focusSummary, rcv) } : {}),
       ...(Array.isArray(snap?.perfAlertSent) ? { perfAlertSent: sanitizeAlertSent(snap.perfAlertSent, rcv) } : {}),
+      // 6단계 수집 건강(엣지가 매 주기 쓴 값 — 화이트리스트 · 상한 · 시각 clamp). 구버전 엣지는 이 필드가 없다(중앙 화면이 ‘엣지 v… 이상’).
+      ...(snap?.collectHealth && typeof snap.collectHealth === 'object' ? { collectHealth: sanitizeCollectHealth(snap.collectHealth, rcv) } : {}),
+      // 6단계 표지(첫 주기 전에도 실린다 — 필드 없음 + 표지 = 아직 주기 없음 · 표지도 없음 = 구버전 · 반증 F3). 작은 양의 정수만.
+      ...(Number.isInteger(snap?.collectHealthVer) && snap.collectHealthVer > 0 && snap.collectHealthVer < 100 ? { collectHealthVer: snap.collectHealthVer } : {}),
+      // 7a단계 로그 분석 요약(서버별 24시간 — 화이트리스트 · 규칙 id 는 카탈로그만 · 키는 같은 봉투의 대상 목록 안만 · 시각 clamp). 표지는 첫 주기 전에도 실린다(값 없음 ≠ 구버전).
+      ...(Array.isArray(snap?.logSummary) ? (() => { const r = sanitizeLogSummary(snap.logSummary, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }); return { logSummary: r.list, ...(r.dropped ? { logSummaryDropped: r.dropped } : {}) }; })() : {}),
+      ...(Number.isInteger(snap?.logsVer) && snap.logsVer > 0 && snap.logsVer < 100 ? { logsVer: snap.logsVer } : {}),
+      ...(snap?.logsTruncated && typeof snap.logsTruncated === 'object' ? { logsTruncated: { level: oneOf(snap.logsTruncated.level, ['compact', 'dropped'], 'dropped') } } : {}),
+      // 8a단계: 정비 창 상태 · 용량 소진 예측(central/bmMaintCapSanitize.js — 화이트리스트 · 키는 같은 봉투의 대상 목록 안만 · 시각 clamp). 표지는 계산 전에도 실린다(값 없음 ≠ 구버전).
+      ...(Number.isInteger(snap?.maintVer) && snap.maintVer > 0 && snap.maintVer < 100 ? { maintVer: snap.maintVer } : {}),
+      ...(Number.isInteger(snap?.capacityVer) && snap.capacityVer > 0 && snap.capacityVer < 100 ? { capacityVer: snap.capacityVer } : {}),
+      ...(snap?.maint && typeof snap.maint === 'object' ? { maint: sanitizeMaintEnvelope(snap.maint, rcv) } : {}),
+      ...(snap?.capacity && typeof snap.capacity === 'object' ? { capacity: sanitizeCapacityEnvelope(snap.capacity, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }) } : {}),
+      // 8b단계: 표지(topVer · idleVer — 계산 전에도 실린다) · 저활용 결과(central/bmIdleSanitize.js — 화이트리스트 · 키는 같은 봉투의 대상 목록 안만 · 시각 clamp).
+      ...(Number.isInteger(snap?.topVer) && snap.topVer > 0 && snap.topVer < 100 ? { topVer: snap.topVer } : {}),
+      ...(Number.isInteger(snap?.idleVer) && snap.idleVer > 0 && snap.idleVer < 100 ? { idleVer: snap.idleVer } : {}),
+      ...(snap?.idle && typeof snap.idle === 'object' ? { idle: sanitizeIdleEnvelope(snap.idle, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }) } : {}),
     },
     dropped: arr.length - perf.length,
   };

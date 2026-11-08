@@ -16,7 +16,7 @@
  * ⚠ 전역 잠금을 쓰지 않는다 — 수집 중에도 설정을 고칠 수 있어야 한다(v2.529 규약).
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchJson, postJson, putJson, canCsv } from '../../api.js';
+import { fetchJson, postJson, putJson, canCsv, hasRole } from '../../api.js';
 import { scopeSaveSuffix } from '../scopeSaveText.js';
 import { fleetPartialsNote, fleetHeldNote } from '../fleetPartialText.js'; // v2.744(감사 후속 FC): fleetHeldNote — 등록부 손상으로 직전 목록 유지
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
@@ -36,7 +36,7 @@ import {
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote, hostsUnreadNote,
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes, usageDetailNote,
-  unassignedNote, edgePullState, edgePullNote, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote } from './bmUsageText.js';
+  unassignedNote, edgePullState, edgePullNote, edgeNoteRows, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote } from './bmUsageText.js';
 import Select from '../../components/Select.jsx';
 // v2.920(리눅스 성능 2단계 화면): USE 매트릭스 보드 · 서버 성능 상세 — 문구·표시 규약은 bmPerfText.js, 판정은 서버 useJudge.js.
 import BmPerfBoard from './BmPerfBoard.jsx';
@@ -44,14 +44,29 @@ import BmPerfDetail from './BmPerfDetail.jsx';
 import { boardItems, allAuthStops } from './bmPerfText.js';
 // v2.923(리눅스 성능 4단계): 함대 ‘용도 분석’ · ‘장애 기록’ 보기(도구 키 그대로 — 이 화면 안의 보기 전환).
 import { BmPurposeFleet, BmFaultsFleet } from './BmOpsFleet.jsx';
-import BmPerfRulesPanel from './BmPerfRulesPanel.jsx'; // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
+import BmPerfRulesPanel from './BmPerfRulesPanel.jsx';
+import BmOnboardPanel from './BmOnboardPanel.jsx'; // 7b단계 서버 등록 · SSH 키 저장소 · 누락 점검
+// 6단계: 서버 비교(2~5대) — 고른 서버 목록은 이 화면이 들고(보드 체크 · 상세 ‘비교에 추가’ · 병목 Top 5 · 용도 그룹) 비교 보기가 그린다.
+import BmCompareView from './BmCompareView.jsx';
+import BmCollectHealth from './BmCollectHealth.jsx'; // 6단계 수집 건강 보드(관리자 · 운영자)
+import BmLogsFleet from './BmLogsFleet.jsx'; // 7a단계 로그 분석 함대 보기
+import BmCapacityFleet from './BmCapacityFleet.jsx'; // 8a단계 용량 소진 예측 함대 보기
+import BmIdleFleet from './BmIdleFleet.jsx'; // 8b단계 ㉑ 저활용 서버 함대 보기
+import BmPowerFleet from './BmPowerFleet.jsx'; // 8b단계 ㉒ 전력 · 온도 함대 보기
+import BmMaintPanel from './BmMaintPanel.jsx'; // 8a단계 정비 창 · 알림 억제(설정 절)
+import { addKey } from './bmCompareText.js';
+import { parseShareHash } from './bmShare.js'; // 6단계 공유 링크(#/tools/bm-usage/share?… — 도구 키 그대로) // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
 
 /** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
 const VIEW_KEY = 'bmUsage.view';
 // 보기는 URL 해시가 아니라 localStorage 기억 + 자동 기본값(v2.920) — useHashTab 은 데이터 전 fallback 을 해시에 굳혀 ‘성능 항목이 있으면 USE’ 를 깬다(audit2613a 스윕의 명시 예외).
-const VIEWS = ['use', 'util', 'purpose', 'faults'];
+const VIEWS = ['use', 'util', 'purpose', 'faults', 'compare', 'health', 'logs', 'capacity', 'idle', 'power'];
 function readView() { try { const v = localStorage.getItem(VIEW_KEY); return VIEWS.includes(v) ? v : null; } catch { return null; } }
 function writeView(v) { try { localStorage.setItem(VIEW_KEY, v); } catch { /* 저장 실패는 무시 — 다음에 기본값 */ } }
+/** 6단계: 비교에 담은 서버(사람별 편의 — 실패해도 빈 목록으로 그린다). */
+const CMP_KEY = 'bmUsage.compare';
+function readCmp() { try { const a = JSON.parse(localStorage.getItem(CMP_KEY) || '[]'); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x).slice(0, 8) : []; } catch { return []; } }
+function writeCmp(a) { try { localStorage.setItem(CMP_KEY, JSON.stringify(a)); } catch { /* 무시 */ } }
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
 const COLS = [
@@ -89,6 +104,9 @@ export function BmUsage() {
   const [rangeKey, setRangeKey] = useState('24h');
   const [showSkipped, setShowSkipped] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // v2.945.1(사용자 보고 "설정을 켜도 꺼도 화면에 변화가 없어"): 수집 설정 카드는 보드 · 표 · 엣지 보관분 **뒤**에 열린다 —
+  //   열 때 그 카드로 화면을 옮긴다. 설정값을 못 받았으면(form 없음) 버튼 바로 아래에 이유를 보인다(조용히 아무것도 안 그리지 않는다).
+  const settingsRef = React.useRef(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(null);
   const [distSaving, setDistSaving] = useState(false); // v2.627 엣지 배포 저장 중
@@ -107,6 +125,17 @@ export function BmUsage() {
   // v2.920: 보기 — 'use'(USE 매트릭스 보드) | 'util'(기존 사용률 표). null 이면 자동(성능 항목이 있으면 USE).
   const [viewSel, setViewSel] = useState(readView);
   const [perfSel, setPerfSel] = useState('');   // 성능 상세를 연 서버(엣지 위임 서버도 — 사용률 추이는 이 노드 대상만)
+  const [cmpKeys, setCmpKeysState] = useState(readCmp);   // 6단계 서버 비교에 담은 서버
+  const [cmpMsg, setCmpMsg] = useState('');
+  const [cmpMax, setCmpMax] = useState(5);
+  const setCmpKeys = React.useCallback((a) => { const v = (Array.isArray(a) ? a : []).slice(0, 8); setCmpKeysState(v); writeCmp(v); }, []);
+  // 6단계 공유 링크 — 들어올 때 · 해시가 바뀔 때 한 번 적용한다(링크는 권한을 주지 않는다: 서버가 다시 판정 · 사라진 서버는 404/‘없음’).
+  const [shareInit, setShareInit] = useState(() => (typeof window !== 'undefined' ? parseShareHash(window.location.hash) : null));
+  useEffect(() => {
+    const on = () => { const x = parseShareHash(window.location.hash); if (x) setShareInit(x); };
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
 
   // v2.628 WEB2628-06: 늦게 온 이전 GET 이 방금 저장한 설정(form)을 덮지 않게 세대로 거른다(저장 성공도 세대를 올린다).
   const loadGen = React.useRef(0);
@@ -121,6 +150,12 @@ export function BmUsage() {
     finally { if (gen === loadGen.current) setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  const formReady = !!form;
+  useEffect(() => {
+    if (!showSettings || !formReady) return;
+    const el = settingsRef.current;
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [showSettings, formReady]);   // 열 때 · 설정값이 처음 도착할 때만 옮긴다(저장마다 옮기지 않게)
 
   /** 엣지 보관분 — 마운트 1회. ⚠ 실패해도 화면 전체를 오류로 갈아치우지 않는다(부가 패널이다). */
   const loadEdges = React.useCallback(async () => {
@@ -228,6 +263,11 @@ export function BmUsage() {
     } finally { if (gen === detailGen.current) setDetailLoading(false); }
   }, []);
   const [perfTab, setPerfTab] = useState('');   // v2.923: 함대 보기에서 연 서버는 그 탭으로(용도 · 장애 기록)
+  useEffect(() => {
+    if (!shareInit) return;
+    if (shareInit.view === 'compare') { setCmpKeys(shareInit.keys); setViewSel('compare'); }
+    else if (shareInit.view === 'detail') { setPerfSel(shareInit.key); setPerfTab(shareInit.tab || 'summary'); }
+  }, [shareInit, setCmpKeys]);
   async function openDetail(key, tab = '') {
     setPerfSel(key); setPerfTab(tab);
     // 사용률 추이(history)는 이 노드가 수집하는 대상만 있다 — 엣지 위임 서버는 성능 상세만 연다(없는 추이를 404 로 보이지 않게).
@@ -235,6 +275,14 @@ export function BmUsage() {
     setSel(key); setDetail(null); setRangeKey('24h');
     await loadDetail(key, '24h');
   }
+  /** 6단계 비교 — 담기 · 빼기(상한은 서버가 준 maxServers · 넘치면 이유를 말한다) · 여러 대를 한 번에 담고 비교 보기로. */
+  function pickCmp(key) {
+    if (cmpKeys.includes(key)) { setCmpKeys(cmpKeys.filter((k) => k !== key)); setCmpMsg(''); return; }
+    const r = addKey(cmpKeys, key, cmpMax);
+    setCmpMsg(r.error); if (!r.error) setCmpKeys(r.list);
+  }
+  function compareKeys(keys) { setCmpKeys((keys || []).slice(0, cmpMax)); setCmpMsg((keys || []).length > cmpMax ? `${cmpMax}대까지 비교합니다 — 앞 ${cmpMax}대만 담았습니다.` : ''); chooseView('compare'); }
+  useEffect(() => { fetchJson('/tools/bm-usage/compare/sets').then((r) => { if (Number.isInteger(r?.maxServers)) setCmpMax(r.maxServers); }).catch(() => {}); }, []);
   async function changeRange(rk) {
     setRangeKey(rk);
     if (sel) await loadDetail(sel, rk);
@@ -445,6 +493,12 @@ export function BmUsage() {
           <button role="tab" aria-selected={view === 'util'} className={view === 'util' ? 'active' : ''} onClick={() => chooseView('util')}>사용률 표</button>
           <button role="tab" aria-selected={view === 'purpose'} className={view === 'purpose' ? 'active' : ''} onClick={() => chooseView('purpose')}>용도 분석</button>
           <button role="tab" aria-selected={view === 'faults'} className={view === 'faults' ? 'active' : ''} onClick={() => chooseView('faults')}>장애 기록</button>
+          <button role="tab" aria-selected={view === 'compare'} className={view === 'compare' ? 'active' : ''} onClick={() => chooseView('compare')}>서버 비교{cmpKeys.length ? ` ${cmpKeys.length}` : ''}</button>
+          {hasRole('admin', 'operator') && <button role="tab" aria-selected={view === 'health'} className={view === 'health' ? 'active' : ''} onClick={() => chooseView('health')}>수집 건강</button>}
+          <button role="tab" aria-selected={view === 'logs'} className={view === 'logs' ? 'active' : ''} onClick={() => chooseView('logs')}>로그 분석</button>
+          <button role="tab" aria-selected={view === 'capacity'} className={view === 'capacity' ? 'active' : ''} onClick={() => chooseView('capacity')}>용량 예측</button>
+          <button role="tab" aria-selected={view === 'idle'} className={view === 'idle' ? 'active' : ''} onClick={() => chooseView('idle')}>저활용 서버</button>
+          <button role="tab" aria-selected={view === 'power'} className={view === 'power' ? 'active' : ''} onClick={() => chooseView('power')}>전력 · 온도</button>
         </div>
         <DeviceFacetBar
           dcChips={barFacets.dcChips} typeChips={barFacets.typeChips} dcSel={dcSel} typeSel={typeSel}
@@ -460,6 +514,15 @@ export function BmUsage() {
           </button>
           <button className="btn" onClick={load}>새로고침</button>
           <button className="btn" onClick={() => setShowSettings((v) => !v)}>{showSettings ? '설정 닫기' : '설정'}</button>
+          {showSettings && !form && (
+            <span role="status" style={{ fontSize: 12, color: toneVar('warn') }}>
+              {loading ? '설정값을 읽는 중…' : `설정값을 받지 못했습니다${error ? ` — ${String(error).slice(0, 160)}` : ''}. `}
+              {!loading && <button className="btn btn-sm" type="button" onClick={load}>다시 읽기</button>}
+            </span>
+          )}
+          {showSettings && form && (
+            <button className="btn btn-sm" type="button" onClick={() => settingsRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })}>수집 설정으로 이동 ↓</button>
+          )}
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>
             마지막 수집 {ageText(st.last?.at)} · 주기 {st.intervalMs ? `${Math.round(st.intervalMs / 60000)}분` : '—'} · 동시 {st.concurrency ?? '—'}
             {st.last?.alerts && (st.last.alerts.sent > 0 || st.last.alerts.over > 0) && (
@@ -478,7 +541,8 @@ export function BmUsage() {
         {view === 'util' && (<>
           {/* ⚠ 표는 **가로 스크롤 컨테이너**로 감싼다 — 지표 열이 8개라 400px 에서 페이지를 밀어낸다. */}
           <div style={{ overflowX: 'auto', minWidth: 0 }}>
-            <STable>
+            {/* v2.945.1(릴리스 검증 — 기존 결함): 12열 표가 1440 에서 1164 > 영역 1118 이라 마지막 ‘수집’ 열이 숨었다 — 글자 12px · 머리 줄바꿈 허용. */}
+            <STable className="bmu-util" style={{ fontSize: 12 }}>
               <thead>
                 <tr>
                   <th>서버</th><th>법인</th><th>경로</th>
@@ -541,18 +605,33 @@ export function BmUsage() {
           items={perfShown} th={data?.perfThresholds || null} intervalMs={st.intervalMs ?? data?.settings?.intervalMs}
           authStops={perfAuthStops} staleMs={edges?.staleMs ?? null} corpOff={data?.skippedCounts?.['corp-off'] || 0}
           onOpen={openDetail} selKey={perfSel} perfError={data?.perfError || ''}
+          cmpKeys={cmpKeys} onPickCmp={pickCmp} onCompare={compareKeys} cmpMsg={cmpMsg}
         />
+      )}
+      {view === 'health' && hasRole('admin', 'operator') && <BmCollectHealth />}
+      {view === 'compare' && (
+        <BmCompareView keys={cmpKeys} onKeys={(k) => { setCmpKeys(k); setCmpMsg(''); }} onOpen={(k) => openDetail(k)}
+          key={shareInit?.view === 'compare' ? `share|${shareInit.keys.join(',')}` : 'cmp'}
+          initial={shareInit?.view === 'compare' ? { view: shareInit.cv, group: shareInit.group, value: shareInit.value, range: shareInit.range, cross: shareInit.cross, metric: shareInit.metric } : {}}
+          names={Object.fromEntries(perfItems.map((it) => [it.key, it.name]))} />
       )}
       {/* v2.920: 서버 성능 상세(머리 · 판정 띠 · 탭 요약/자원/하드웨어) — 사용률 추이는 아래 기존 상세 카드에 그대로. */}
       {/* v2.923: 함대 보기 — 서버를 누르면 아래 상세가 그 탭으로 열린다. */}
-      {view === 'purpose' && <BmPurposeFleet onOpen={(k) => openDetail(k, 'profile')} />}
+      {view === 'purpose' && <BmPurposeFleet onOpen={(k) => openDetail(k, 'profile')} onCompare={compareKeys} />}
       {view === 'faults' && <BmFaultsFleet onOpen={(k) => openDetail(k, 'faults')} />}
+      {/* 7a단계: 로그 분석 함대(KPI · 공통 원인 후보 · 서버 표) — 서버를 누르면 상세 ‘로그’ 탭. */}
+      {view === 'logs' && <BmLogsFleet onOpen={(k) => openDetail(k, 'logs')} />}
+      {view === 'capacity' && <BmCapacityFleet onOpen={(k) => openDetail(k, 'summary')} />}
+      {/* 8b단계: 저활용(점수 · 검토 상태 · 비교로 보내기) · 전력 · 온도(법인 · 랙 · 미매핑 · 더운 서버) — 서버를 누르면 상세 요약 탭. */}
+      {view === 'idle' && <BmIdleFleet onOpen={(k) => openDetail(k, 'summary')} onCompare={compareKeys} />}
+      {view === 'power' && <BmPowerFleet onOpen={(k) => openDetail(k, 'summary')} />}
       {perfSel && (
         <BmPerfDetail
           itemKey={perfSel} item={perfItems.find((it) => it.key === perfSel) || null} initialTab={perfTab}
           authStops={perfAuthStops} staleMs={edges?.staleMs ?? null}
           keepDays={{ server: data?.settings?.dailyRetentionDays ?? null, dev: data?.settings?.store?.devHourlyDays ?? null }}
           onClose={() => setPerfSel('')}
+          inCompare={cmpKeys.includes(perfSel)} onCompareToggle={() => pickCmp(perfSel)} cmpMsg={cmpMsg} shareInit={shareInit?.view === 'detail' ? shareInit : null}
         />
       )}
 
@@ -662,10 +741,10 @@ export function BmUsage() {
                 <STable>
                   <thead><tr><th>엣지</th><th>상태</th><th className="right">서버</th><th>버전</th><th>가져온 때</th><th data-nosort>동작</th></tr></thead>
                   <tbody>
-                    {(edges.rows || []).map((r) => {
+                    {(edges.rows || []).map((r, i) => {
                       const { es, ev } = edgeRowView(r);
                       return (
-                        <tr key={r.agent}>
+                        <tr key={`${i}-${r.agent}`}>
                           <td data-sort={r.agent}>
                             {r.agent}
                             {/* ⚠ 엣지가 말한 이름이 다르면 **나란히** 보여준다 — 그 자체가 진단이다(v2.548 F5). */}
@@ -703,12 +782,14 @@ export function BmUsage() {
                 </STable>
               </div>
               {/* ⚠ 사유는 **행 아래 한 번씩** — 표 안에 긴 문장을 넣으면 셀이 세로로 길어진다(v2.509). */}
-              {(edges.rows || []).map((r) => {
+              {/* v2.945.1(사용자 보고 — 같은 엣지 안내가 십여 줄 반복): 이름별 한 줄 · 키에 위치를 넣어 겹치지 않게(같은 키는 React 가 옛 줄을 남길 수 있다) ·
+                  같은 이름이 등록부에 여러 개면 그 수를 밝힌다(조용히 합치지 않는다). */}
+              {edgeNoteRows(edges.rows).map(({ r, dup }, i) => {
                 const { es, ev } = edgeRowView(r);
-                const parts = [es.state === 'ok' ? '' : es.why, ev.instr ? `중앙 켜기: ${ev.instr.why}` : '', ev.note].filter(Boolean);
+                const parts = [es.state === 'ok' ? '' : es.why, ev.instr ? `중앙 켜기: ${ev.instr.why}` : '', ev.note, dup > 1 ? `(같은 이름이 등록부에 **${dup}개** 있습니다 — 설정 › 수집 서버(원격)에서 확인하세요)` : ''].filter(Boolean);
                 if (!parts.length) return null;
                 return (
-                  <p key={`why-${r.agent}`} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
+                  <p key={`why-${i}-${r.agent}`} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
                     <BoldText text={`**${r.agent}** — ${parts.join(' ')}`} />
                   </p>
                 );
@@ -720,7 +801,7 @@ export function BmUsage() {
       )}
 
       {showSettings && form && (
-        <div className="card" style={{ minWidth: 0 }}>
+        <div className="card" ref={settingsRef} style={{ minWidth: 0, scrollMarginTop: 72 }}>
           <h4 style={{ marginTop: 0 }}>수집 설정</h4>
           {centralManagedNote(data?.central, fmtAgo) && (
             <p style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}><BoldText text={centralManagedNote(data.central, fmtAgo)} /></p>
@@ -875,6 +956,12 @@ export function BmUsage() {
 
           {/* ── v2.929(5단계) 리눅스 성능 알림 규칙 · 집중 모니터링 · 베이스라인 · 소모품 기준 — 별도 파일(bm-perf-rules.json) · 저장은 설정 소유자 ── */}
           <BmPerfRulesPanel vcenters={data?.vcenters || []} />
+
+          {/* ── 8a단계 정비 창 · 알림 억제(중앙 저장 → 엣지 배포 · 쓰기는 운영자 이상 · 법인/태그/긴 창은 설정 소유자 등급) ── */}
+          <BmMaintPanel vcenters={data?.vcenters || []} />
+
+          {/* ── 7b단계 서버 등록 · SSH 키 저장소 · 공통 계정 · 엣지 배포 목록 · 누락 점검(관리자) ── */}
+          <BmOnboardPanel vcenters={data?.vcenters || []} />
 
           {/* ── 엣지에 배포(v2.627) — 중앙의 전체 범위 관리자에게만 온다(서버가 distribution 을 null 로 준다). ── */}
           {data?.distribution && (

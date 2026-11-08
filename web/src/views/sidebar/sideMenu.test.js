@@ -17,7 +17,7 @@ describe('resolveMenu — 내 메뉴 > 배포 메뉴 > 포탈 기본', () => {
     expect(r.groups.map((g) => g.id)).toEqual(MENU_GROUPS.map((g) => g.id));
     expect(r.groups.map((g) => g.label)).toEqual(MENU_GROUPS.map((g) => g.label));
     const server = r.groups.find((g) => g.id === 'server');
-    expect(server.children.map((c) => c.id)).toEqual(['vm', 'esxi', 'vc', 'bm', 'veeam', 'alarm']);   // v2.787 서버 › Veeam
+    expect(server.children.map((c) => c.id)).toEqual(['virt', 'bm', 'veeam', 'alarm']);   // v2.787 서버 › Veeam · v2.915 가상화 플랫폼(세 탭 한 항목)
     expect(server.children.find((c) => c.id === 'bm')).toMatchObject({ tool: 'serveranalysis', seg: 'baremetal', adminOnly: true });
     expect(server.custom).toBe(false);
   });
@@ -51,18 +51,19 @@ describe('resolveMenu — 내 메뉴 > 배포 메뉴 > 포탈 기본', () => {
     ] };
     const r = resolveMenu({ mine, catalog: TOOLS });
     expect(r.groups.map((g) => g.id)).toEqual(['a']);
-    expect(r.groups[0].children.map((c) => c.id)).toEqual(['vm', 'board']);
+    expect(r.groups[0].children.map((c) => c.id)).toEqual(['virt', 'board']);   // v2.915: tab:vms 는 가상화 플랫폼 항목(별칭)
     expect(r.unknown).toBe(0);
   });
   it('해석된 메뉴로도 locate·visibleMenu·hashOf 가 그대로 동작한다(사용자 그룹에 넣은 도구는 그 그룹이 켜진다)', () => {
     const mine = { v: 1, groups: [{ id: 'overview', tab: 'overview' }, { id: 'custom-1', label: '내 그룹', children: [{ tool: 'esxitemp' }, { tab: 'hosts' }] }, { id: 'tools', tab: 'tools' }] };
     const { groups } = resolveMenu({ mine, catalog: TOOLS });
     expect(locate('tools', '#/tools/esxitemp', groups)).toEqual({ group: 'custom-1', child: 't-esxitemp' });
-    expect(locate('hosts', '#/hosts', groups)).toEqual({ group: 'custom-1', child: 'esxi' });
+    expect(locate('hosts', '#/hosts', groups)).toEqual({ group: 'custom-1', child: 'virt' });   // v2.915: 별칭 — 가상화 플랫폼 항목이 그 그룹에 켜진다
+    expect(locate('vcenters', '#/vcenters', groups)).toEqual({ group: 'custom-1', child: 'virt' });
     expect(locate('tools', '#/tools/pdu', groups)).toEqual({ group: 'tools', child: null });
     expect(hashOf(groups[1].children[0])).toBe('#/tools/esxitemp');
     const vis = visibleMenu({ tabOk: () => true, toolOk: (k) => k !== 'esxitemp' }, groups);
-    expect(vis.find((g) => g.id === 'custom-1').children.map((c) => c.id)).toEqual(['esxi']);
+    expect(vis.find((g) => g.id === 'custom-1').children.map((c) => c.id)).toEqual(['virt']);
   });
 });
 
@@ -71,11 +72,14 @@ describe('missingDefaults · toolEligible · itemKey', () => {
     const mine = { v: 1, groups: [{ id: 'server', children: [{ tab: 'vms' }] }, { id: 'tools', tab: 'tools' }] };
     const { groups } = resolveMenu({ mine, catalog: TOOLS });
     const miss = missingDefaults(groups);
-    expect(miss.map((m) => m.key)).toContain('tab:hosts');
+    // v2.915: tab:vms 는 가상화 플랫폼(tab:vcenters) 의 별칭 — 그 항목이 있으니 hosts · vcenters 는 '다시 넣기' 후보가 아니고, 별칭 키 자체도 후보가 아니다
+    expect(miss.map((m) => m.key)).not.toContain('tab:hosts');
+    expect(miss.map((m) => m.key)).not.toContain('tab:vcenters');
+    expect(miss.map((m) => m.key)).toContain('tab:alarms');
     expect(miss.map((m) => m.key)).toContain('tool:serveranalysis/baremetal');
     expect(miss.map((m) => m.key)).toContain('tab:overview');
     expect(miss.map((m) => m.key)).not.toContain('tab:vms');
-    expect(miss.find((m) => m.key === 'tab:hosts').groupLabel).toBe('서버');
+    expect(miss.find((m) => m.key === 'tab:alarms').groupLabel).toBe('서버');
     expect(missingDefaults(MENU_GROUPS)).toEqual([]);
   });
   it('외부 포탈·승격 탭·준비 중 도구는 메뉴에 넣을 수 없다', () => {

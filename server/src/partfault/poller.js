@@ -87,7 +87,10 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     //   '재배정·등록 삭제(unassigned)' 가 아니라 '등록부 손상' 으로 보류한다(transition.js).
     const scopeUnreadable = { ...(edge.scopeUnreadable || {}) };
     for (const [sc, e] of Object.entries(local.registryUnreadable || {})) scopeUnreadable[`|${sc}`] = e?.reason || '사유 미상';
-    let tr = transition({ open: prev, observed, scan: { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason, scopeUnreadable } });
+    // 8a단계 ② 정비 창 — 전이 보류를 켠 창 안의 장비(판정 코어 maint/judge.js · 중앙 창). 못 만들면 빈 집합(평소대로 전이).
+    let maint = null;
+    try { maint = await (await import('../bmusage/maint/partfaultHold.js')).partfaultMaintHold([...observed, ...prev]); } catch { maint = null; }
+    let tr = transition({ open: prev, observed, scan: { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason, scopeUnreadable, ...(maint?.hold?.size ? { maintHold: maint.hold } : {}) } });
     const saved = await applyTransition(tr);
 
     // v2.880: 파트 장애 → 이슈 자동 등록(issues/autoCreate.js — 설정에서 켠 칸만). DB 에 쓴 뒤 · 알림 전에 한 번. 던지지 않는다.
@@ -123,6 +126,7 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     console.log(`[partfault] 점검(${reason}) ${Date.now() - t0}ms — 신규 ${tr.stats.opened} · 해소 ${tr.stats.closed} · 변화 ${tr.stats.changed}`
       + ` · 보류 unknown ${tr.stats.heldUnknown}/장비실패 ${tr.stats.heldDeviceFailed}/컬렉션실패 ${tr.stats.heldCollectionFailed}/누락 ${tr.stats.heldMissing}`
       + (tr.stats.heldRegistryUnreadable ? `/등록부손상 ${tr.stats.heldRegistryUnreadable}` : '')
+      + (tr.stats.heldMaintenance || tr.stats.maintDeferred ? `/정비창 ${tr.stats.heldMaintenance}(새 장애 보류 ${tr.stats.maintDeferred})` : '')
       + (note ? ` · 알림 ${note.sent}건${note.capped ? `(상한 ${note.capped}건 제외)` : ''}` : '')
       + (auto?.enabled ? ` · 이슈 생성 ${auto.created}/붙임 ${auto.attached}/댓글 ${auto.commented}${auto.capped ? `/상한 ${auto.capped}` : ''}` : ''));
     return { ok: true, ..._last };

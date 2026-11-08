@@ -240,8 +240,8 @@ describe('서버 상세 — 안내 · 경로 시각 · 하드웨어 사실', () 
   });
   it('탭은 기능이 있는 것만 — 아트보드 탭 열 순서(장애 기록 · 튜닝 · 용도 · 진단 스냅샷은 4단계 · 추이는 3b)', () => {
     // v2.923(4단계): 장애 기록 · 튜닝 · 용도 · 진단 스냅샷이 생겨 아트보드 탭 열 순서로 더했다(없는 기능은 여전히 그리지 않는다).
-    expect(T.DETAIL_TABS.map((x) => x.id)).toEqual(['summary', 'res', 'hw', 'faults', 'tuning', 'profile', 'snap', 'trend', 'focus']);
-    expect(T.DETAIL_TABS.map((x) => x.label)).toEqual(['요약', '자원(USE)', '하드웨어(iDRAC)', '장애 기록', '튜닝', '용도', '진단 스냅샷', '추이(평균 · 피크)', '집중 모니터링']);   // v2.929 집중 모니터링
+    expect(T.DETAIL_TABS.map((x) => x.id)).toEqual(['summary', 'res', 'hw', 'faults', 'tuning', 'profile', 'snap', 'trend', 'focus', 'playbook', 'slo', 'logs']);   // 6단계 진단 플레이북 · 목표선 · 7a단계 로그
+    expect(T.DETAIL_TABS.map((x) => x.label)).toEqual(['요약', '자원(USE)', '하드웨어(iDRAC)', '장애 기록', '튜닝', '용도', '진단 스냅샷', '추이(평균 · 피크)', '집중 모니터링', '진단 플레이북', '목표선', '로그']);   // v2.929 집중 모니터링
   });
 });
 

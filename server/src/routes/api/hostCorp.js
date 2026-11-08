@@ -20,7 +20,8 @@ const invHosts = requirePerm('inv.hosts');
 const RTT_FRESH_MS = 30 * 60_000;   // 30분보다 오래된 핑 값은 '지금 RTT' 로 보이지 않게 at 과 함께 싣는다(화면이 흐리게)
 
 /** 핑 모니터의 vCenter 대상(seedVcenterTargets 가 'vc_<id 소문자>' 로 만든다) 마지막 값. 실패하면 전부 null. */
-async function rttReader() {
+/** 법인(vCenter) RTT — 핑 모니터의 마지막 값. 7b 온보딩(중앙 직접 800ms+ 경고)도 같은 함수를 쓴다(복제 금지). */
+export async function rttReader() {
   try {
     const db = await getPingDb();
     const ids = new Set(listTargets('vcenter').filter((t) => t.enabled !== false).map((t) => t.id));

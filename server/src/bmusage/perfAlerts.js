@@ -10,7 +10,10 @@
  *   ⑤ 법인당 하루 상한(알림 50 · 이슈 20 · 자동 집중 10 — 설정) — 넘으면 보내지 않고 센다(조용히 버리지 않는다).
  * ⚠⚠ `null`(못 읽음 · 오래됨 · 판정 불가)은 참도 거짓도 아니다 — 판정 보류(상태 유지). 0 을 정상으로 세지 않는다.
  * ⚠ 유지보수 창 억제(Bareos · Veeam 스케줄): 지금 저장소에는 **베어메탈 서버의 백업 창을 읽는 원천이 없다**(Bareos 그룹 스케줄 · Veeam 스케줄은 VM 대상) —
- *   억제 훅(maintenanceFor)은 자리만 두고 항상 ‘원천 없음’ 이다(정직 기록 · 8단계 정비 창에서 채운다). 화면은 그 사실을 말한다.
+ *   그 훅(maintenanceFor)은 여전히 ‘원천 없음’ 이다(정직 기록).
+ * ⚠⚠ 8a단계 정비 창 ①(설계 §20 ⑲ — maint/judge.js 판정 코어 하나): 창(① alerts 를 켠 것) 안의 발화는 **기록만**(sent 의 result 'maintenance' · 창마다 한 번) 하고
+ *   발송 · 이슈를 하지 않는다. 규칙 상태는 ‘보내지 않음’ 으로 되돌리고 `maint`(창 · 시한)를 단다 → 창이 끝난 뒤 첫 주기에도 조건이 참이면 **그때 1회** 보낸다
+ *   (제목 ‘창 안부터 초과’). 조건이 풀리면 상태가 지워져 창 뒤 발송도 없다. 억제는 그 발생의 끝(시한)까지 · 적용 기록은 ‘창 끝 뒤 억제 0’ 점검에 남긴다.
  * 채널은 기존 알림 설정(alerts.json — 메일 · 웹훅 · Slack · Teams)을 그대로 쓰고 규칙이 고른 채널만 켠 사본으로 보낸다(새 채널 없음 · 웹훅 URL 은 화면 · 상태 파일에 없다).
  * 알림 본문에 `**` 를 쓰지 않는다(Slack · 메일에는 BoldText 가 없다). 문구는 ‘무엇이 · 얼마나 · 무엇 대비 · 언제부터’ 이고 원인을 단정하지 않는다.
  */
@@ -25,6 +28,7 @@ import { dayKey } from '../util/dayKey.js';
 import { RULE_IDS, BASELINE_METRICS } from './perfRules.js';
 import { VERDICT_LABEL } from './useJudge.js';
 import { MAX_SEND } from './notify.js';
+import { countSuppression, noteApplied, maintJudge, sinceOf } from './maint/runtime.js'; // 8a단계 ① 정비 창 판정기 · 억제 계수 · 점검
 
 const n = numOrNull;
 const FILE = () => path.join(config.configDir, 'bm-perf-alert-state.json');
@@ -52,6 +56,22 @@ export function ruleCells(id, ctx = {}, rule = {}) {
       if (!d || d.reason || !d.out) { out[m] = 'unread'; continue; }
       out[m] = d.out === 'above' || d.out === 'below' ? 'true' : 'false';
     }
+  } else if (id === 'collect') {
+    // 6단계 수집 건강 — 칸은 수집 노드가 기준과 대 본 결과(collectHealth.collectCells) 그대로 · 조건이 고른 칸만.
+    const cells = ctx.collect?.cells || {};
+    const want = rule.cond && rule.cond !== 'any' ? [rule.cond] : Object.keys(cells);
+    for (const k of want) out[k] = ['true', 'false'].includes(cells[k]) ? cells[k] : 'unread';
+  } else if (id === 'capacity') {
+    // 8a단계 용량 소진 예측 — 자원(종류:마운트)마다: 도달 ≤ N일(또는 이미 도달) = 참 · 더 멀거나 증가 없음 = 거짓 · 데이터 부족 · 불안정 · 상한 없음 = 못 읽음(판정 보류).
+    const days = Number(ctx.capacity?.days) || 7;
+    const kinds = { 'fs-inode': ['fs', 'inode'], any: ['fs', 'inode', 'mem'], fs: ['fs'], inode: ['inode'] }[rule.cond || 'fs-inode'] || ['fs', 'inode'];
+    for (const r of Array.isArray(ctx.capacity?.rows) ? ctx.capacity.rows : []) {
+      if (!kinds.includes(r?.kind)) continue;
+      const k = `${r.kind}:${r.res}`;
+      if (r.status === 'reached' || (r.status === 'forecast' && r.daysToTarget != null && r.daysToTarget <= days)) out[k] = 'true';
+      else if (r.status === 'forecast' || r.status === 'no-growth') out[k] = 'false';
+      else out[k] = 'unread';
+    }
   } else if (id === 'cross') {
     for (const [i, x] of (Array.isArray(ctx.entry?.cross) ? ctx.entry.cross : []).entries()) {
       const k = String(x?.id ?? i);
@@ -76,13 +96,27 @@ export function ruleCondition(id, ctx = {}, rule = {}, prevOn = null) {
     if (rule.cond === 'errors') return v === 'errors';
     return BAD_VERDICT.has(v);
   }
+  if (id === 'logs') {
+    // 7a단계 로그 분석 — 이번 주기에 로그를 읽은 서버만(못 읽음 · 권한 없음 · 예산 부족은 입력이 없다 = 보류). 조건 = 이번 주기 새 줄 중 장애 분류 · 보안 high 이상(집중 포함).
+    //   분류를 담는 출처를 하나도 못 읽은 주기(cover none — rules.js classCover)는 ‘없음’ 이 아니라 보류(null) — 못 읽음을 해소로 보지 않는다. 일부만 읽은 주기는 읽은 쪽으로 판정한다.
+    const lg = ctx.logs;
+    if (!lg || lg.read !== true) return null;
+    const f = Number(lg.faultLines) || 0; const sh = Number(lg.secHigh) || 0;
+    const blind = (c) => lg.cover?.[c] === 'none';
+    if (rule.cond === 'fault') return f > 0 ? true : blind('fault') ? null : false;
+    if (rule.cond === 'sec') return sh > 0 ? true : blind('sec') ? null : false;
+    if (f > 0 || sh > 0) return true;
+    return blind('fault') || blind('sec') ? null : false;
+  }
   if (id === 'profile') {
     const st = ctx.profile?.status;
     if (!st || st === 'none' || st === 'unknown') return null;
     return st === 'bad';
   }
-  if (id === 'health' || id === 'baseline' || id === 'cross') {
+  if (id === 'health' || id === 'baseline' || id === 'cross' || id === 'collect' || id === 'capacity') {
+    if (id === 'capacity' && !Array.isArray(ctx.capacity?.rows)) return null;   // 하루 계산 결과가 없으면 보류(0 · 안전으로 보지 않는다)
     if (id === 'health' && !ctx.health?.cells) return null;
+    if (id === 'collect' && !ctx.collect?.cells) return null;
     if (id === 'cross' && !(Array.isArray(ctx.entry?.cross) && ctx.entry.cross.length)) return null;
     const cells = ruleCells(id, ctx, rule);
     const vals = Object.values(cells);
@@ -159,7 +193,8 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
 
 /** 알림 본문(순수 — `**` 없음 · 원인 단정 없음). */
 export function perfAlertOf(f, { corpName = '' } = {}) {
-  const head = `${corpName || f.vcenterId ? `[${corpName || f.vcenterId}] ` : ''}${f.name}`;
+  // 8a단계 ①: 창이 끝났는데 아직 초과라 그때 1회 보내는 발화는 제목 앞에 그 사실을 붙인다(‘창 안부터 초과’).
+  const head = `${f.afterMaint ? '(정비 창 안부터 초과) ' : ''}${corpName || f.vcenterId ? `[${corpName || f.vcenterId}] ` : ''}${f.name}`;
   const key = `bmperf:${f.rule}:${f.key}`;
   const c = f.ctx || {};
   if (f.rule === 'use') {
@@ -183,6 +218,28 @@ export function perfAlertOf(f, { corpName = '' } = {}) {
   if (f.rule === 'profile') {
     const bad = (c.profile?.profiles || []).filter((p) => p?.status === 'bad').map((p) => p.id);
     return { key, severity: 'critical', title: capStr(`${head} 용도 프로파일 점검 실패 ${bad.join(' · ')}`, 200), detail: '용도 탭에서 실패한 점검(근거 · 출처)을 확인하세요.' };
+  }
+  if (f.rule === 'collect') {
+    const x = c.collect || {};
+    const LBL = { cycle: `주기 소요 ${x.cyclePct ?? '—'}%(예산 대비 · 기준 ${x.th?.cyclePct ?? '—'}%)`, success: `성공률 ${x.successPct ?? '—'}%(기준 ${x.th?.successPct ?? '—'}% 미만)`, db: `DB ${x.dbPct ?? '—'}%(상한 대비 · 기준 ${x.th?.dbPct ?? '—'}%)`, auth: '인증 정지 서버 있음',
+      error: `이번 주기 실패(${{ 'classify-failed': '대상 분류 실패', 'cycle-error': '주기 중 예외', 'health-failed': '수집 건강 계산 실패' }[x.error] || '원인 미상'} — 대상 · 결과를 모름)` };
+    const on = Object.entries(x.cells || {}).filter(([, v]) => v === 'true').map(([k]) => LBL[k] || k);
+    return { key, severity: x.cells?.success === 'true' || x.cells?.db === 'true' || x.cells?.error === 'true' ? 'critical' : 'warning', title: capStr(`${head} 수집 건강 기준 밖 — ${on.join(' · ')}`, 200),
+      detail: capStr(`베어메탈 사용률 › 수집 건강 보드에서 법인별 실패 사유 · 조치를 확인하세요. 재진입 가드가 다음 주기를 건너뛰기 전에 알리는 것이 목적입니다.`, 1_500) };
+  }
+  if (f.rule === 'logs') {
+    const lg = c.logs || {};
+    const parts = [lg.faultLines ? `장애 분류 ${lg.faultLines}줄` : '', lg.secHigh ? `보안 high 이상 ${lg.secHigh}줄${lg.bursts ? `(SSH 실패 집중 ${lg.bursts}건)` : ''}` : ''].filter(Boolean);
+    return { key, severity: lg.faultLines ? 'critical' : 'warning', title: capStr(`${head} 로그 — ${parts.join(' · ') || '장애 · 보안'}`, 200),
+      detail: capStr('이번 주기에 새로 읽은 로그 줄의 분류 결과입니다(규칙 · 근거 · 가린 표본은 서버 상세 › 로그 탭). 포탈은 차단 · 계정 잠금을 하지 않습니다 — 조치는 담당자가 합니다.', 1_500) };
+  }
+  if (f.rule === 'capacity') {
+    const days = Number(c.capacity?.days) || 7;
+    const KL = { fs: '', inode: 'inode ', mem: '메모리(참고) ' };
+    const hits = (c.capacity?.rows || []).filter((r) => r && (r.status === 'reached' || (r.status === 'forecast' && r.daysToTarget != null && r.daysToTarget <= days)))
+      .map((r) => `${KL[r.kind] ?? ''}${r.kind === 'mem' ? '' : r.res} ${r.current ?? '—'}% · ${r.status === 'reached' ? '이미 목표선 위' : `${r.daysToTarget}일 뒤 ${r.targetPct ?? 90}%(${r.dateToTarget})`}`);
+    return { key, severity: 'warning', title: capStr(`${head} 용량 소진 예측 ${days}일 안 — ${hits.slice(0, 3).join(' · ')}`, 200),
+      detail: capStr(`${hits.join('\n')}\n최근 14일 일 최대의 선형 추세(참고 — 계단형 적재 · 주기 정리는 틀리게 봅니다). 베어메탈 사용률 › 용량 예측에서 신뢰(R²)와 추세를 확인하세요.`, 1_500) };
   }
   if (f.rule === 'focusEnd') {
     const s = c.summary || {};
@@ -285,7 +342,8 @@ export function recordOutcome(st, { recId, sk = null, res, outcome, rule = {}, n
  */
 async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cycleMax = Infinity }) {
   const today = dayKey(now) || '';
-  const out = { queued: 0, capped: 0, deferred: 0, maintenance: 0, failed: 0, issues: 0, autoFocus: 0 };
+  const out = { queued: 0, capped: 0, deferred: 0, maintenance: 0, maintHeld: 0, afterMaint: 0, failed: 0, issues: 0, autoFocus: 0 };
+  const maint = D.maintJudge ? await D.maintJudge(now).catch(() => null) : null;
   const isEdge = !!config.agent?.centralUrl;
   const alertCfg = await D.alertConfig().catch(() => null);
   const issueFires = []; const sends = [];
@@ -302,7 +360,28 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cy
     const tg = targetsByKey.get(f.key) || f.ctx?.target || null;
     const rec = { id: crypto.randomUUID().slice(0, 12), at: now, rule: f.rule, key: f.key, name: capStr(f.name, 120), vcenterId: f.vcenterId, title: '', channels: rule.channels || [], result: '', issue: null, autoFocus: null, ...(f.retry ? { retry: true } : {}) };
     const mw = maintenanceFor(tg, now, rules.maintenance);
-    const al = perfAlertOf({ ...f, sustain: rule.sustain, weeks: rules.baseline?.weeks }, {});
+    // 8a단계 ① — 이 서버가 지금 알림 억제 창 안인가(판정 코어 하나). 노드 칸(__node__)은 서버가 아니라 창 대상이 아니다.
+    const ms = maint && f.key !== '__node__' ? maint.stateFor(tg || { key: f.key, vcenterId: f.vcenterId }, now) : null;
+    const prevMaint = f.prevState?.maint || null;
+    if (ms?.scopes?.alerts) {
+      const ids = (ms.windows || []).filter((w) => (w.scopes || []).includes('alerts')).map((w) => w.id).sort();
+      noteApplied('alerts', f.key, ms.until.alerts, ids, now, { since: sinceOf(ms, 'alerts') });
+      if (sk) {
+        // 상태를 ‘보내지 않음’ 으로 되돌리고 창 · 시한을 단다(지속 streak 은 그대로 — 창 뒤 첫 주기에 조건이 참이면 그때 1회).
+        const cur = st.rules?.[sk];
+        if (cur) st.rules[sk] = { ...cur, active: false, firedAt: f.prevState?.firedAt ?? null, maint: { ids, until: ms.until.alerts, since: prevMaint?.since ?? now } };
+      }
+      const same = prevMaint && JSON.stringify(prevMaint.ids || []) === JSON.stringify(ids);
+      if (same) { out.maintHeld += 1; continue; }   // 같은 창 안 반복 발화 — 기록 · 계수는 처음 한 번만
+      rec.result = 'maintenance'; rec.maint = { ids: ids.slice(0, 8), until: ms.until.alerts };
+      out.maintenance += 1;
+      countSuppression('alerts', ids, { now });
+      st.sent = [...(st.sent || []), rec].slice(-SENT_LOG_MAX);
+      continue;   // 이슈 · 자동 집중도 하지 않는다(발송 억제 = 알림 경로 전부)
+    }
+    const afterMaint = !!(prevMaint && sk);   // 창이 끝났는데 아직 초과 — 그때 1회(‘창 안부터 초과’)
+    if (afterMaint) { rec.afterMaint = { ids: (prevMaint.ids || []).slice(0, 8), since: prevMaint.since ?? null }; out.afterMaint += 1; countSuppression('after', prevMaint.ids || [], { now }); }
+    const al = perfAlertOf({ ...f, sustain: rule.sustain, weeks: rules.baseline?.weeks, afterMaint }, {});
     rec.title = al.title;
     if (mw.suppressed && rules.maintenance?.backupWindows) { rec.result = 'maintenance'; out.maintenance += 1; }
     else if (used(st, f.vcenterId, 'alerts', today) >= (rules.daily?.alerts ?? 50)) { rec.result = 'daily-cap'; out.capped += 1; }
@@ -372,6 +451,8 @@ function depsOf(deps = {}) {
     retryDelay: async () => (await import('../alerts.js')).retryDelayMs,
     applyIssues: async (fires, o) => (await import('../issues/alertIssues.js')).applyBmPerfFires(fires, o),
     startFocus: async (o) => (await import('./focus/run.js')).startFocusLocal(o),
+    // 8a단계 ①: 정비 창 판정기(주기마다 한 번 — 이 노드의 창 + 중앙 배포본). 호출부(폴러)가 같은 주기의 판정기를 넘기면 그것을 쓴다.
+    maintJudge: async (now) => maintJudge({ now }),
     isMock: async () => (await import('../mock/demo/flags.js')).isMockMode(),
     clock: () => Date.now(),   // 발송 결과를 받은 시각(재시도 기준 — 기존 경로와 같이 ‘결과를 받은 시각’)
     ...deps,

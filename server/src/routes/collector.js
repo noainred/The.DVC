@@ -309,6 +309,66 @@ async function bmPerfOpsCollector(req, res, mode) {
 collectorRouter.get('/bm-usage/changes', tokenFirst('bm-usage-changes'), (req, res) => bmPerfOpsCollector(req, res, 'changes'));
 collectorRouter.get('/bm-usage/baseline', tokenFirst('bm-usage-baseline'), (req, res) => bmPerfOpsCollector(req, res, 'baseline'));
 collectorRouter.get('/bm-usage/compare', tokenFirst('bm-usage-compare'), (req, res) => bmPerfOpsCollector(req, res, 'compare'));
+// 6단계 서버 비교 — 엣지 위임 서버 1대의 지표 여러 개 계열 통계(요청 1개 · 보관 없음 · central/bmComparePull.js). 대상 목록 밖 키는 404.
+collectorRouter.get('/bm-usage/compare-series', tokenFirst('bm-usage-compare-series'), (req, res) => bmPerfOpsCollector(req, res, 'compare-series'));
+/**
+ * 7a단계 — 로그 분석 엣지 대행(central/bmLogsPull.js pullEdgeLogs). 같은 url · 같은 토큰(새 포트 · 새 인증 없음) · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
+ *   집계 · 가린 표본 · 보안 상위만 돌려준다(원문 전체는 보관하지 않으므로 내줄 것이 없다). 보안 상위의 IP · 계정 가림은 중앙 라우트가 사람(관리자 판본 판정)에 맞춰 한다.
+ */
+collectorRouter.get('/bm-usage/logs', tokenFirst('bm-usage-logs'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const V = await import('../bmusage/logs/view.js');
+    const r = await V.logViewFor({ key: target.key, range: String(req.query.range || '24h').slice(0, 8) });
+    if (!r?.ok) return res.status(503).json(r || { ok: false, reason: '응답이 없습니다.' });
+    res.json(r);
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+
+/**
+ * 8a단계 — 용량 소진 예측 서버 상세 엣지 대행(central/bmCapacityPull.js pullEdgeCapacity). 같은 url · 같은 토큰 · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
+ *   그 서버 하나를 볼 때 계산한다(일 계열 · 맞춤선 · 이 엣지의 정비 창 제외 날짜) — 하루 계산 결과(함대 표)는 봉투로 간다.
+ */
+collectorRouter.get('/bm-usage/capacity', tokenFirst('bm-usage-capacity'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const C = await import('../bmusage/capacity.js');
+    const rules = (await import('../bmusage/perfRules.js')).loadPerfRules();
+    const R = await import('../bmusage/maint/runtime.js');
+    const judge = await R.maintJudge({ now: Date.now() }).catch(() => null);
+    const r = await C.computeServer({ agent: config.agent?.name || '', target, cfg: { targetPct: rules.capacity?.targetPct, minDays: rules.capacity?.minDays }, judge, series: true });
+    res.json({ ...r, key: target.key });
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+
+/**
+ * 8b단계 — 프로세스 Top-N 엣지 대행(central/bmTopPull.js pullEdgeTop · pullEdgeTopBand). 같은 url · 같은 토큰 · 이 엣지가 수집하는 서버만(대상 밖 키는 404).
+ *   ‘이 시점 프로세스’(가까운 표본 · 기준 표본 행 · 지속 · PID 재사용) · 시간 × 프로세스 띠(창 ≤ 26시간 5분 표본 · 넘으면 시간 집계). 보관 없음(볼 때 당긴다).
+ */
+collectorRouter.get('/bm-usage/top', tokenFirst('bm-usage-top'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const ts = Number(req.query.ts);
+    if (!Number.isFinite(ts) || ts <= 0) return res.status(400).json({ ok: false, reason: 'ts 가 필요합니다.' });
+    const T = await import('../bmusage/topStore.js');
+    const { loadBmUsageSettings } = await import('../bmusage/settings.js');
+    const r = await T.topAt({ agent: config.agent?.name || '', key: target.key, ts, toleranceMs: (Number(loadBmUsageSettings().intervalMs) || 300_000) * 1.5 });
+    res.json({ ...r, key: target.key });
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
+collectorRouter.get('/bm-usage/top/band', tokenFirst('bm-usage-top-band'), async (req, res) => {
+  try {
+    const target = await bmSnapTarget(req.query.key);
+    if (!target) return res.status(404).json({ ok: false, reason: '이 엣지의 대상 서버가 아닙니다.' });
+    const T = await import('../bmusage/topStore.js');
+    const r = await T.topBand({ agent: config.agent?.name || '', key: target.key, from: Number(req.query.from), to: Number(req.query.to) });
+    if (!r.ok) return res.status(400).json(r);
+    res.json({ ...r, key: target.key });
+  } catch (err) { res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) }); }
+});
 
 /**
  * 이 엣지의 **토큰 자기보고**(v2.560 — 사용자 요청 "등록된 모든 엣지/수집 서버의 모든 토큰 …

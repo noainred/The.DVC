@@ -26,11 +26,14 @@ const FILES = ['linkcheck-settings.json', 'rma-schedules.json', 'central-svcmon-
   'pdu-thresholds.json',   // v2.769(점검 R4-D4-02) PDU 임계치도 pdu-config 로 엣지에 배포한다(손상이면 thresholdsUnreadable)
   'vm-clone.json',         // v2.793 VM 백업 잡 정의도 담당 엣지에 위임(vm-clone-sync)한다 — 손상이면 503 settingsUnreadable
   'bmusage-tuning.json',   // v2.923 베어메탈 튜닝 권장값 덮어쓰기 — 손상이면 튜닝 판정 503 settingsUnreadable(덮어쓰기를 무시한 판정을 정상처럼 보이지 않게)
-  'bm-perf-rules.json'];   // v2.929 리눅스 성능 알림 규칙 · 집중 모니터링 — 손상이면 기본값(규칙 전부 꺼짐)으로 돌고 주기 상태에 skipped:'settings-unreadable' · 규칙 화면 · 서비스 점검이 손상을 밝힌다
+  'bm-perf-rules.json',    // v2.929 (아래 줄 계속)
+  // 6단계: 저장된 비교 세트 · 운영 주석(손상이면 읽기 503 · 쓰기 거부 — 빈 목록으로 덮지 않는다) · 목표선(손상이면 기본 목표 + loadError)
+  'bm-perf-compare-sets.json', 'bm-perf-annotations.json', 'bm-perf-slo.json',
+  'maintenance-windows.json'];   // 8a단계 정비 창 — 손상이면 읽기 503 · 쓰기 거부 · 이 노드 창으로 억제하지 않음 · 배포 인출 503   // v2.929 리눅스 성능 알림 규칙 · 집중 모니터링 — 손상이면 기본값(규칙 전부 꺼짐)으로 돌고 주기 상태에 skipped:'settings-unreadable' · 규칙 화면 · 서비스 점검이 손상을 밝힌다
 const MODULES = ['linkcheck/settings.js', 'rma/schedules.js', 'central/svcmonAssign.js', 'ipam/scanStore.js', 'bmusage/settings.js',
   'vmseries/settings.js', 'sanswitch/perfSettings.js', 'storage/intervals.js', 'cvp/settings.js', 'partfault/settings.js',
   'pdu/intervals.js', 'curuser/settings.js', 'central/assignments.js', 'central/agentGpuGuestConfig.js', 'isidu/settings.js', 'pdu/thresholds.js', 'vmclone/store.js',
-  'bmusage/tuning/overrides.js', 'bmusage/perfRules.js'];
+  'bmusage/tuning/overrides.js', 'bmusage/perfRules.js', 'bmusage/compareSets.js', 'bmusage/annotations.js', 'bmusage/slo.js', 'bmusage/maint/store.js'];
 for (const f of FILES) fs.writeFileSync(path.join(CFG, `${f}.corrupt.2026-09-27T00-00-00`), 'x');
 
 const express = (await import('express')).default;
@@ -63,7 +66,7 @@ before(async () => {
   SCOPED = { username: 'adm2', role: 'admin', scope: { vcenters: [vc] } };
 });
 
-test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을 준다(새 모듈이 빠지면 확정 버튼이 뜨지 않는다) — v2.736 16개 · v2.769 17개(PDU 임계치) · v2.793 18개(VM 백업 잡) · v2.923 19개(튜닝 덮어쓰기) · v2.929 20개(성능 알림 규칙)', () => {
+test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을 준다(새 모듈이 빠지면 확정 버튼이 뜨지 않는다) — v2.736 16개 · v2.769 17개(PDU 임계치) · v2.793 18개(VM 백업 잡) · v2.923 19개(튜닝 덮어쓰기) · v2.929 20개(성능 알림 규칙) · 6단계 23개(비교 세트 · 운영 주석 · 목표선) · 8a단계 24개(정비 창)', () => {
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const calls = [];
   for (const f of walk(SRC)) {
@@ -71,11 +74,11 @@ test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을
     const s = stripComments(fs.readFileSync(f, 'utf8'));
     for (const m of s.matchAll(/makeSettingsLoadError\(([^\n]*)/g)) calls.push({ f: path.relative(SRC, f), line: m[1] });
   }
-  assert.equal(calls.length, 20, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
+  assert.equal(calls.length, 24, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
   for (const c of calls) assert.ok(/label:\s*'[^']+'/.test(c.line) && /confirm:/.test(c.line), `${c.f}: label·confirm 이 없다 — ${c.line}`);
 });
 
-test('⑤ 서비스 점검 목록: 20개 전부 못 읽음 + 이름·확정 가능 표시(값은 싣지 않는다)', () => {
+test('⑤ 서비스 점검 목록: 23개 전부 못 읽음 + 이름·확정 가능 표시(값은 싣지 않는다)', () => {
   const errs = util.listSettingsLoadErrors();
   const names = errs.map((e) => e.file).sort();
   assert.deepEqual(names, [...FILES].sort());

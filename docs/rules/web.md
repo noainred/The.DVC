@@ -45,14 +45,49 @@
 - (v2.923 추가) 베어메탈 서버 상세 ‘추이’ 탭(평균 · 피크 두 패널 · 장치 토글 · 확대 팝업 · CVP 포트 절) — 창 · 해상도 · 결측 · 기준선은 서버 `trendWindow.js`, 문구 · 좌표는 `views/tools/bmTrendText.js` · 구간 이동은 공용 `vmPerfText.windowSpan`
 - (v2.923 추가) 베어메탈 서버 상세 ‘장애 기록 · 튜닝 · 용도 · 진단 스냅샷’ 탭 · 함대 ‘용도 분석 · 장애 기록’ 보기 — 판정은 서버, 문구는 `views/tools/bmOpsText.js`(서버 code 1:1) · 근거 등급은 기호 + 낱말
 - (v2.929 추가) 베어메탈 ‘집중 모니터링’ 탭 · 소모품 카드 · 보드 칩 · 추이 겹침(베이스라인 · 변경 · 집중 점) · 구간 비교 · 알림 규칙 절 — 판정은 서버, 문구 `bmPerfOpsText.js` · 폴링은 진행 중 집중 화면만(30초 · 상한)
+- (6단계 추가) 리눅스 성능 6단계 화면 — 서버 비교 · 수집 건강 · ◆ 주석 핀 · 플레이북 · 목표선 · 공유 링크 · 캡처 PNG — 판정은 서버, 결측은 ‘—’ · 개수
+- (7a단계 추가) 리눅스 성능 7a단계 화면 — 서버 상세 ‘로그’ 탭 · 함대 ‘로그 분석’ 보기 — 판정은 서버, 읽은 기록 없는 시간은 막대 없음(0 아님) · 숫자는 API 값
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
 - (원래 5853행) 게시판 답글·공감(v2.723)
 - (원래 5868행) 상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다
 
+- (7b단계 추가) 리눅스 성능 7b단계 설정 › 서버 등록 패널 — 판정은 서버 값 그대로 · 키 관리 버튼은 settingsOwnerTier · 모르는 수 ‘—’ · 수집 건강 RTT 줄은 rttHigh 그대로
+- (8a단계 추가) 리눅스 성능 8a단계 정비 창 패널 · 용량 예측 보기 — 일정 · 시간대 · 예측을 계산하지 않는다(서버 값 · 미리보기 API) · 버튼은 서버 can* · 못 읽음 ≠ 0일
+- (8b단계 추가) 리눅스 성능 8b단계 화면 — 이 시점 프로세스 · 띠 · 저활용 · 전력/온도 — 서버 값만(점수 · 합 · 단서 재계산 없음) · 권한 · 미측정 ≠ 0 · 폴링 없음
 ## 본문
 
+- ⚠⚠ **리눅스 성능 6단계 화면 — ‘서버 비교’ · ‘수집 건강’ 보기 · 상세 ‘진단 플레이북’ · ‘목표선’ 탭 · 추이 ◆ 주석 핀 · 목표 위반 띠 · 공유 링크 · 캡처 PNG(그리기만 — 판정 · 대조는 서버)**
+  화면 `views/tools/{BmCompareView,BmCollectHealth,BmAnnotations,BmRunbookTabs,BmShareButtons}.jsx` · 문구 · 좌표 `bm{Compare,Collect,Annot,Runbook}Text.js` · 공유 `bmShare.js` · 캡처 `bmCapture.js` · 스타일 `bmStage6.css` ·
+  회귀 `bmStage6Text.test.jsx`(서버 열거와 1:1 · SSR · 소스 스윕 · 35건). Chromium 1440/400 판독(r1~r5 — 가로 넘침 0):
+  - **판정을 웹에서 하지 않는다**: 편차 ×2 · 스큐 · 축 상한 · 칸 code(비교) · 기준 대조 칸 · 노드 상태(수집 건강) · 달성 · 미달 · 자료 없음 · 위반 띠(목표선) · 맞는 플레이북 · 자리표시 값은 전부 서버 응답 그대로 — 웹은 code → 문장 · 숫자 → 글자.
+    소스 스윕이 `cyclePct >=` · `successPct <` 같은 기준 비교와 setInterval · usePolling 을 막는다(전부 마운트 1회 + 버튼).
+  - **결측은 ‘—’ · 개수로**: 비교 스파크는 값 없는 칸을 잇지 않는다(홀로 남은 점은 점으로 — r1 결함 고침) · 목표 일 추이 막대는 값 없는 날 ‘·’ · 수집 건강 KPI 합은 모르는 법인 · 노드를 빼고 ‘n곳 모름(합에서 뺌)’ · DB 크기를 못 읽으면 ‘0’ 이 아니라 사유.
+  - **비교 고르기**: 보드 행 체크 → 아래 트레이(2~최대 · 상한은 API `maxServers`) · Top N 비교 · 함대 그룹 비교 · 상세 ‘비교에 추가’ — 고른 키는 `localStorage bmUsage.compare`(try/catch). 보기 3(나란히 · 겹쳐서 · 표) · 지표 묶음 4 · CSV(canCsv).
+    ‘법인 간 허용’ 토글은 전체 범위 계정에만 보인다(서버도 404) · 다른 법인 열은 ‘다른 법인 — 값을 당기지 않음’ · 없는 서버는 ‘없음’(범위 밖과 구분하지 않는다).
+  - **◆ 주석 핀**: 추이 차트 위 HTML 덧층(`.bmt-pinwrap/.bmt-pin` — SVG 밖이라 400px 에서도 눌린다) · 같은 핀이 비교 · 집중 이벤트 목록에도. 주석 추가 폼은 운영자 이상 · 고치기 · 지우기 버튼은 서버 `canEdit` 그대로.
+  - **목표 위반 띠는 선택(opt-in) 체크** — 추이 탭이 목표선 API 를 매번 부르지 않게(지표마다 계열을 읽는다).
+  - **공유 링크**: `#/tools/bm-usage/share?view=detail&key=&tab=&range=&to=&cur=&sel=…` · `view=compare&keys=&cross=&range=&cv=&grp=&val=&m=` — 값은 전부 열거 · 형식 화이트리스트(밖이면 버린다) · 도구 키(`bm-usage`)는 바꾸지 않는다 · 링크는 보기 상태만(권한 없음 — 버튼 title 이 말한다) · 서버가 없으면 ‘공유 링크의 서버를 찾지 못했습니다’.
+  - **반증 review-s6 반영(화면)**: 수집 건강 — 상태 ‘주기 실패’(빨강) · ‘노드 값 숨김(법인 행 기준)’ 과 노드별 실패 문구(`NODE_ERROR_TEXT` — 서버 열거 1:1) · 행의 기준 밖 칸은 서버가 준 행 `flags` ·
+    저장 카드 가족 값은 `famLine`(못 읽음 ‘—’ · 부분 ‘부분’ — `?? 0` 금지). 비교 — 피크 칸은 피크 표본만(‘—’) · 평균+피크에서 서버가 평균으로 대 봤으면 행에 ‘평균으로 비교’(`rowBasisNote`).
+    목표선 — 피크 열 없는 지표는 기준 목록에서 ‘피크’ 를 뺀다(`basesFor` · 서버 `peakMetrics`) · 피크 표본 없는 주기 수 표시. 운영 주석 고치기 — **바뀐 칸만** 보낸다(`annotEditPatch` — 원래 시각의 초 ·
+    집중 세션 · 백업 연결 보존 · 지운 칸은 null). 플레이북 문구 — ‘검토된 읽기 전용 목록에 글자 그대로 있는 줄뿐’(보증 수준대로).
+  - **캡처 PNG**: 리포트 저장의 캡처 코어(`reportExport.captureElementCanvas` — html2canvas 1.4.1 · MIT · **새 의존성 없음**)를 재사용 · SVG 칠을 인라인으로 옮겨 그린다 · 각주(서버 · 법인 · 기간 · 커서 · 출처 · 생성자 · 시각) ·
+    버튼 · 결과 문구는 `data-export-hide` 로 그림에서 뺀다(r2 판독 결함 — ‘캡처하는 중…’ 이 찍혔다).
+- ⚠⚠ **리눅스 성능 7a단계 화면 — 서버 상세 ‘로그’ 탭 · 함대 ‘로그 분석’ 보기(그리기만 — 분류 · 집중 · 공통 원인 후보는 서버)**
+  (`web/src/views/tools/{BmLogsTab,BmLogsFleet}.jsx` · 문구 `bmLogsText.js` · `bmLogs.css` · 탭 열 `DETAIL_TABS` 에 `logs` · 보기 `VIEWS` 에 `logs` · 규칙 패널 `logs` 절. 회귀 `bmLogsText.test.jsx`):
+  - 상세: 기간(1시간 · 24시간 · 7일) · 다시 읽기 · CSV(수식 주입 차단) → KPI 4(분류별 패턴 · 줄) + 읽은 양(상한 · 잘림 · 분류 안 됨 · 마지막 읽음) → 출처 상태 칩(권한 없음 · 없음 · 로테이트 · 재부팅 …) →
+    **필요한 권한 안내**(못 읽은 출처만 — 수집 계정 uid · 소속 · journald 그룹 · secure · audit 폴더 · 포탈은 권한을 바꾸지 않음 · 배포판 기본값은 ‘실장비 미확인’ 으로 밝힘) →
+    시간대별 누적 막대(**읽은 기록이 없는 시간은 막대 없이 점선 — 0 아님**) → 보안 패널(합계는 서버 — **그 종류를 담는 출처를 못 읽었으면 ‘—’ + 이유**(담는 출처 · 상태 · 권한 범위 · 다른 출처의 부분 합) · 7a 반증 F1) →
+    패턴 표(STable 8열 · 1440 에서 열 숨김 없음 — Chromium 판독으로 1100 → 960 줄임) →
+    규칙 카탈로그(등급 문구는 로그 뜻 ‘○ 실장비 표본 없음’ — 튜닝 근거 등급 문구를 빌리지 않는다) → 수집 방식(숫자는 API `method` — **주기도 `method.intervalMs`**: ‘5분 주기’ 를 박았던 결함 · 반증 F12).
+  - **분류 칸의 읽기 범위**(추가 수정): 서버가 그 분류를 담는 출처를 못 읽었으면 값을 null 로 보낸다 — 상세 KPI · 함대 표 칸은 ‘—’ + 이유(못 읽은 출처 — 칸 title) · 일부 출처만이면 값 + ‘일부’ ·
+    함대 KPI 덧말은 ‘모름 n대 · 일부 출처만 n대’(`kpi.unknown` · `kpi.partial`). 웹은 다시 판정하지 않는다(`coverNote` · `fleetClsCell` 은 글자만).
+  - 출처 칩 덧말은 서버가 센 값만: 권한 범위(자기 저널만 · 상위 폴더 · 파일) · 시한 부분 · 끝 줄 미완성 · 첫 읽기(dmesg 는 그 앞 n줄 안 셈) · 시각 모름 · 서버 시계 빠름 · 같은 기록(dup) · rsyslog/auditd 상태.
+  - 연계 칩은 그 탭으로(변경 → 추이 · 집중 → 집중 · 교차 · 소모품 → 요약 · 장애 → 장애 기록 · 플레이북) — 머리에 ‘±N분 시각 매칭 · 인과 아님’(N 은 API `corrWindowMs`).
+  - 조회기는 한 번 만들어진다(`useOpsLoad`) — **기간은 열쇠에 실어** 넘긴다(클로저에 묶으면 첫 기간으로 고정된다). 폴링 없음(소스 스윕).
+  - 함대: KPI 4(로그 장애 서버 · 보안 high 서버 · 요약 있는 서버 · 공통 원인 후보) → 노드 상태 문구(구버전 엣지 등) → 공통 원인 후보(후보 문구 · 창은 API `commonWindowMs`) → 서버 표(법인 · 분류 · 규칙 · 이름 거르기 — 24시간 못 읽은 서버는 ‘—’).
 - ⚠⚠ **v2.929 — 베어메탈 ‘집중 모니터링’ 탭 · 요약 탭 소모품 카드 · 보드 ‘집중 n건 · 소모품 주의’ 칩 · 추이 탭 겹침 카드 · 구간 비교 · 설정의 ‘리눅스 성능 알림 규칙’ 절(리눅스 성능 5단계 · 아트보드 Focus · Health · Alerts · Compare)**.
   화면 `views/tools/{BmFocusTab,BmPerfOpsParts,BmTrendOps,BmPerfRulesPanel}.jsx`(그리기만) · 문구 · 좌표 `bmPerfOpsText.js`(순수) · 스타일 `bmPerfOps.css` · 회귀 `bmPerfOpsText.test.jsx`(서버 열거와 1:1 · SSR · 소스 스윕):
   - **판정을 웹에서 하지 않는다** — 집중 상태 · 결측 사유 · 소모품 칸 code · 변경 종류 · 규칙 · 조건 · 채널 · 비교 지표는 서버 열거와 1:1 문구 표 · 기준값 키(chronyMs · fdPct · bandPct · diffPct …)와 비교 연산이 웹에 없다(스윕).
@@ -783,3 +818,57 @@
   ③ 확정(●)·추정(◐) 글리프와 배지 색은 `hostSanText.CONF` 하나(서버 `attribution.js` 신뢰도 키와 같다) — 확정분·추정분 열을 합치지 않고, 측정 없음은 '—'.
   ④ SAN 도구의 '호스트 귀속' 은 헤더 버튼 + `Modal`(폭 1240)이고 창 안에서 법인 칩을 바꾼다(`DcStoragePerf` 와 같은 이유). 표 제목 정렬은 `sanHostAttribText.sortRows`(null 뒤로).
 
+- **v2.942(코드 · 테스트 표지는 v2.915 — main 이 v2.941 까지 먼저 나가 번호만 올렸다) — '서버 › 가상화 플랫폼' 허브(가상화 서버 · ESXi 호스트 · vCenter 세 메뉴 → 하나 · 사용자 요청 2026-11-07 · 설계 `docs/design/virt-platform-menu/README.md` 시안 A · 컨펌 '이름 가상화 플랫폼 · 표준 검증')**.
+  ① **탭 id(vcenters · hosts · vms) · 해시 · 권한 id · 도구 키는 그대로** — 합친 것은 메뉴 층뿐이다. `topMenu.js` 항목 `{ tab:'vcenters', tabs:['hosts','vms'], also:[도구 16] }` · `tabsOf(item)` 이 항목의 탭 전부 ·
+     `locate` 는 tabs 도 그 항목으로 · `visibleMenu` 는 **하나라도 허용이면** 보이고 처음 여는 탭은 허용된 것 중 첫째(`entryTab` — `hashOf` 가 읽는다). 권한 판정은 바뀌지 않는다(App `isAllowed` 그대로).
+  ② **저장 메뉴 별칭**(`sidebar/sideMenu.js itemAliases` — `tab:hosts` · `tab:vms` → 가상화 플랫폼 항목): 서버는 주소만 저장하고 탭 실재를 모르므로 별칭이 없으면 옛 항목이 `unknown` 으로 조용히 사라진다.
+     별칭 키는 `missingDefaults`('다시 넣기') 후보가 아니다. 그룹 별칭(`LEGACY_GROUP_LABELS`)과 별개 — 항목 별칭은 이것이 처음.
+  ③ **허브 셸은 App 이 세 탭 위에 그린다**(`views/platform/PlatformHub.jsx` — 제목 · 엔티티 탭 3 · 바로가기 칩). 상세 · 개체 보기(`#/vcenters/<id>…`)로 내려가면 허브 · 범위 바를 그리지 않는다(브레드크럼이 대신 — `vcDrill`).
+     숫자는 서버 `/platform/summary` 하나(`inventory/platformSummary.js` · memoJson 30초 · 범위 · 권한 · 설정 개정이 캐시 키) — 탭 배지를 위해 `/hosts/checks` 같은 무거운 집계를 다시 부르지 않는다.
+     응답 전 · 첫 수집 중 · 권한 없음은 **'—'**(0 금지 · `platformText.entityTabs`). 호스트 확인 대상 판정은 웹 `hostTriage.hostReasons` 와 같은 세 규칙(서버 `hostReasonKinds` — `platformHub2915.test.js` ① 이 같은 입력으로 대조).
+  ④ **범위(리전 · vCenter · 검색)는 세 탭이 한 칸(`PLATFORM_SCOPE_KEY`)으로 공유**하고 탭 고유 조건(상태 · 전원 · 메모 · IPMS · 호스트)은 그 탭 칸에 남는다(`patchFilter` 가 키를 나눈다). vCenter 탭도 범위 바를 쓴다(`noFilterTabs` 에서 뺐다 — 카드를 범위로 거른다).
+     공용 바 문구는 `platformText.SCOPE_SEARCH_PLACEHOLDER · SCOPE_NOTE` 하나. ⌘K 인계 target 에 'vcenters' 가 들어갔다(`INV_FILTER_TABS`).
+  ⑤ **탭 줄은 하나**(`views/platform/HubTabs.jsx` — v2.909 `VmHubTabs` 를 일반화 · 모양 `.vmh-tabs` 그대로): 이 화면 안의 보기 ‖ 그 탭 성격의 특수 기능(권한 없는 도구 숨김) ‖ 오른쪽 = 탭 고유 조건. 도구 목록은 `platformText.VC_TOOLS · HOST_TOOLS`(VM 6 은 `vmHubText.HUB_TOOLS`).
+     도구 라벨 줄 여백은 10px(`.vmh-tab.tool`) — 1440 에서 도구 6 + 조건이 한 줄에 들어가게(글자는 '메모' · 'IPMS' 로 짧게 — 뜻은 title).
+  ⑥ **상세 한 규칙**: 호스트 표 · VM 표의 이름 = 개체 보기(`vcHash(vc, {type,id})` — 브레드크럼). 전체 페이지 상세(`#/hosts/<id>`)는 개체 보기 안 버튼, VM 드로어는 이름 옆 '빠른 확인'(`VmNameCell href`). 주소는 전부 그대로 산다.
+     브레드크럼은 `가상화 플랫폼 › vCenter › <vCenter> › …`(`VCenterDetail` · `ObjectShell`) + ‹ 이전 · 다음 › vCenter(`VCenters.siblingsOf` — 목록 순서).
+  ⑦ **교차 링크**: vCenter 카드 · 표의 호스트 · VM 수 → 허브 범위를 그 법인으로 + 탭 이동(`onSelectSite` — v2.914 까지 선언만 되고 호출되지 않던 prop · `onGoVms`) · 호스트 표 VM 수 → VM 탭 `?host=`(App `vmHost`) · VM 표 호스트 → 호스트 탭 이름 일치(`nameFocus`). 칩으로 해제 · '필터 초기화' 가 함께 지운다.
+  ⑧ **백업 칸은 Veeam / Bareos**(사용자 지시 — 스냅샷 제외): Veeam 수는 v2.778.1 `backupPairCell` 의 앞 수 그대로, Bareos 는 `/tools/bareos-summary` 법인 줄 `counts.jobs`(도구 권한이 있을 때만 · 못 읽으면 '—') — `VCenters.backupVbCell`. 호스트 표 '백업' 열은 Veeam 뿐(Bareos 호스트별 수는 수집 없음 — 2차).
+  ⑨ vCenter 탭 보기는 **카드 | 표**(`platform/VcTable.jsx` — 법인별 비교 · `/vcenters` + 허브 요약만 · 새 집계 없음 · localStorage `platform.vcView`). '트리' 보기와 호스트 · VM 탭 '법인별' 흡수는 2차(README §4.0-12·13).
+     마지막 본 탭은 `platform.tab`, 바로가기 접힘은 `platform.chips`(전부 try/catch). 400px: 엔티티 탭 3칸 한 줄(수 + 이름 + 배지 — `.ph-tab .parts` 숨김 · 열린 탭의 분해는 아래 한 줄) · KPI 한 줄(`kpis-1row`)은 720 미만에서 세로로(추이 스파크 130px 가 넘쳤다 — Chromium 실측 8px).
+  ⑩ 기능 사용 현황(`featureUsageText.js menuIndex`)은 `tabs` 도 같은 자리로 센다(`tab:vms` 키 그대로 · 이름 '가상화 플랫폼 › 가상화 서버 · VM').
+
+- **리눅스 성능 7b단계 설정 › 베어메탈 성능 › 서버 등록(`web/src/views/tools/BmOnboardPanel.jsx` · 문구 `bmOnboardText.js` · `bmOnboard.css` · vitest `bmOnboardText.test.jsx`)**:
+  - 순서: SSH 키 저장소 → 법인 공통 계정 → CSV · Excel 등록(파일 → 분석 표 → 결과 CSV · 적용) → 엣지 배포 목록(중앙) → 누락 점검. 마운트 1회 + 버튼(폴링 없음) · 늦은 응답은 gen 으로 버린다.
+  - 판정은 서버 값 그대로(행 action · code · reason · warnings · 누락 bucket · 수집 건강 `rttHigh`) — 화면이 800ms 를 다시 판정하지 않는다(테스트가 rttHigh false + 1000ms 를 고정).
+  - 키 · 공통 계정 관리 폼은 `settingsOwnerTier`(소유자 ∧ 전체 범위)일 때만 그린다(`isSettingsOwner` 아님 — server/CLAUDE.md) · 서버가 다시 막는다.
+  - postJson 은 409 를, delJson(sendJson)은 400 · 409 를 던지지 않는다 — 결과마다 `r?.ok === false` 를 먼저 본다(분석 서명 409 · 사용 중 키 409).
+  - 개인키 · passphrase · 비밀번호 입력 칸은 `autoComplete="new-password"`/`off` · 보낸 뒤 비운다 · OTP 는 실패해도 비운다(1회용 — 같은 코드 재시도는 잠금만 올린다).
+  - 모르는 수(null — 사용처를 모름 · 인출 기록 없음)는 ‘—’ / ‘모름’ 이다(0 · 반영됨으로 지어내지 않는다). 분석 표는 `STable limit={500}`(정렬 뒤 자름) · 전체는 결과 CSV.
+  - (r2) 분석 요약 `needOwner` 가 있으면 적용 옆에 **본인 OTP** 칸(1회용 — 실패해도 비운다) · 호스트키 정책 observe 안내 문구(`HOSTKEY_OBSERVE_NOTE`) · 범위 계정 키 목록 숨김 안내 ·
+    iDRAC 공통 계정 '복사 방식' · 비밀번호 변경 시 사본 수(`copiesStale`) 안내 · 누락 점검 칸 'OS 만 — 성능 수집 안 됨' · 엣지 배포 '제거 대기 n'.
+    베어메탈 스토리지 서버 폼(`BmStorageTool.jsx`)에 **인증(SSH 키 · 공통 계정) 드롭다운** — `settingsOwnerTier` 에만 보이고, 묶음이 바뀌면 본인 OTP 칸 · 바뀌지 않으면 참조 칸을 보내지 않는다(`authBodyOf`).
+
+- ⚠⚠ **리눅스 성능 8a단계 화면 — 설정 › 정비 창 · 알림 억제 / 함대 ‘용량 예측’ / 상세 용량 카드 / 추이 음영 · 변경 이벤트 묶음 / 수집 건강 정비 행 / 보드 KPI**
+  (`web/src/views/tools/{BmMaintPanel,BmCapacityFleet}.jsx` · `bmMaintText.js` · `bmCapacityText.js` · `bmMaint.css` · `BmTrendChart(mbands)` · `BmTrendOps ChangeTable(maintBands)` · `BmCollectHealth` · `BmPerfBoard` ·
+  회귀 `bmMaint8a.test.jsx` — 문구 표 = 서버 열거 · 폼 본문이 서버 `normalizeWindow` 를 그대로 통과 · SSR · 소스 스윕):
+  - **웹은 시간대 · 일정 · 회귀를 계산하지 않는다** — 상태 · 남은 시간 · 다음 발생 · 벽시계 표기는 목록 응답, 미리보기(다음 5회 · DST 표지)는 `POST /maintenance/preview`, 예측은 서버 행 그대로(스윕: `timeZone:` · 회귀 함수 이름 · `setInterval` 0).
+  - 버튼은 서버가 준 `canEdit · canEnd · canConfirm · canDelete` 로만 연다(소유자 등급 창은 운영자에게 잠김 — 서버가 다시 막는다) · 쓰기 응답 400/409 는 본문 `ok:false` 로 온다(api.js) — 둘 다 사유를 그대로.
+  - 숫자(길이 상한 · 소유자 기준 · 재확인 일수 · 배포 시한 · 재계산 시각 · 목표선 · 알림 N일)는 API `limits` · `cfg` 값만 — 문구에 박지 않는다.
+  - **못 읽음 ≠ 0**: 데이터 부족 · 불안정 · 증가 없음 · 상한 없음은 그 글자(‘0일’ 금지) · 출처가 구버전 · 계산 전 · 손상이면 행 대신 표지 · 보드 KPI 는 계산된 출처가 없으면 ‘—’.
+  - 추이 음영은 서버 `occurrences.merged` 를 주황 낮은 불투명도로(결측 띠 아래) · 변경 이벤트는 같은 구간으로 ‘정비 창 안’ 묶음(위) · 조회는 창이 바뀔 때 1회.
+  - 상세 용량 카드의 로딩 문구는 ‘용량 예측을 읽는 중…’(상세 본문의 ‘불러오는 중’ 과 구분 — bmPerfText D8 시험). 일 날짜 글자는 `toISOString().slice` 대신 직접 조립(dayStamp 스윕).
+  - **8a 반증 뒤**: 서버 창 폼에 법인 고르기(‘자동 — 키로 찾기’ 가 기본 · 고치기에서는 잠금 — 서버 대상은 (법인, 키) 쌍) · 승인 안내에 ‘같은 서버를 덮는 창들(소유자 창 · 법인 · 태그 창 포함)의 합’ 규칙(숫자는 `limits`) ·
+    점검 문구에 잡는 것(창 끝 · 길이 상한 · 지움 · 끝내기 · 재확인 만료 · 배포본 시한)과 못 잡는 것(판정 규칙 자체) · 용량 ‘현재’ 칸은 오래된 관측에 ‘(n일 전)’ · 메모에 일상 몫(분) ·
+    출처 줄에 상한 내역(계산 안 한 서버 n대 · 마운트 일부만 n대) · 도달 행인데 추세를 못 쓰면 기울기 ‘—’.
+  - **수집 건강 법인별 표 1440 열 숨김 수정**(6단계 첫 커밋부터 `STable minWidth 1100` · 열 10개라 본문 약 1,080px 에서 ‘상태’ 열이 잘렸다 — 8a 반증 확인): 최소 폭 960 · 노드 칸 줄바꿈(최대 200px) —
+    1440 에서 열마다 오른쪽 끝 좌표가 표 영역 안 · 400 은 표 안 가로 스크롤.
+- ⚠⚠ **리눅스 성능 8b단계 화면 — 추이 팝업 ‘이 시점 프로세스’ · 시간 × 프로세스 띠 / 함대 ‘저활용 서버’ · ‘전력 · 온도’ / 설정 Top-N · 저활용 · 전력 · 랙 배치**
+  (`web/src/views/tools/{BmTopProc,BmIdleFleet,BmPowerFleet}.jsx` · 문구 `bmTopText.js` · `bmIdleText.js` · `bmPowerText.js` · 회귀 `bmPerf8b.test.jsx`):
+  - 웹은 점수 · 합 · 피크 · 단서 · 지속 · PID 재사용을 **다시 계산하지 않는다**(소스 스윕) — 문구 표는 서버 열거와 1:1(시험이 대조). 전력 화면은 `.reduce(` 로 합을 내지 않는다.
+  - 못 읽음 ≠ 0: 권한 없는 I/O = ‘권한’ · 값 없음 = ‘—’(단위 없음) · 그 시각 표본 없음 = 문장(0 으로 그리지 않음) · 미측정은 사유별 수 · 랙 여유 음수는 ‘상한 초과 n%’ · 지난 30일은 계산 이력이 30일 안 되면 ‘—’.
+  - 팝업의 프로세스 표 기본 시각 = 누른 점 → 창의 피크 시각 → 창 끝 · ◀ ▶ = 서버가 준 앞뒤 표본 · 띠 막대를 누르면 그 표본 · 조회는 시각 · 창이 바뀔 때 1회(세대로 늦은 응답 버림 · 폴링 없음).
+  - 띠 막대는 최소 폭 4 · 창 끝 표본이 그림 밖으로 잘리지 않게 [0, 폭 − w] 안(r1 판독 결함). 1440 에서 저활용 표 열이 숨지 않게 minWidth 1040(r1 판독: ‘검토’ 열이 잘렸다) · 400 은 표 안 스크롤 · 페이지 넘침 0.
+  - 랙 배치는 텍스트 상자(서버가 만든 `racksText` 를 보이고 고친 텍스트를 보낸다 — 웹이 형식을 해석하지 않는다).
+  - 반증 F3 · F6 · F8: 이 시점 프로세스는 `reason: 'base-missing'` 이면 ‘상위 행이 없습니다’ 를 띄우지 않고 ‘**읽지 못했습니다** … ‘없다’ 는 뜻이 아닙니다’ · 바닥 줄은 ‘나머지 합계’ 대신 전 프로세스 합만 ·
+    띠는 `baseMissing` 수를 적는다 · 랙 여유 칸은 `marginPartial` 이면 ‘일부만 측정(n/m)’(낮음 색 없음 — `low === true` 만 빨강) · 여유 최소 카드는 부분 랙 수를 적는다 · 엣지 버전 안내는 `kind === 'old-version'` 일 때만.

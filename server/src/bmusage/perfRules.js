@@ -16,10 +16,14 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { HEALTH_DEFAULTS } from './health.js';
+import { LINE_CAP_RANGE, LINE_CAP_DEFAULT } from './logs/command.js';
 
 const FILE = () => path.join(config.configDir, 'bm-perf-rules.json');
 
-export const RULE_IDS = Object.freeze(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile']);
+// 6단계: collect(수집 건강 — 서버가 아니라 이 수집 노드 한 칸: 주기 소요 · 성공률 · DB 상한 · 인증 정지).
+// 7a단계: logs(로그 분석 — 이번 주기에 읽은 줄 중 장애 분류 · 보안 high 이상이 있으면 · 기본 꺼짐).
+// 8a단계: capacity(용량 소진 예측 — 목표선 도달 ≤ N일 · 기본 꺼짐 · 수집 노드의 하루 계산 결과 bm-capacity.json 을 쓴다).
+export const RULE_IDS = Object.freeze(['use', 'cross', 'focusEnd', 'baseline', 'health', 'profile', 'collect', 'logs', 'capacity']);
 /** 규칙별 조건 선택지(웹 문구 표와 1:1). */
 export const RULE_CONDS = Object.freeze({
   use: Object.freeze(['sat-err', 'bottleneck', 'errors']),
@@ -28,6 +32,9 @@ export const RULE_CONDS = Object.freeze({
   baseline: Object.freeze(['band']),
   health: Object.freeze(['any', 'bad']),
   profile: Object.freeze(['bad']),
+  collect: Object.freeze(['any', 'cycle', 'success', 'db', 'auth', 'error']),
+  logs: Object.freeze(['fault-sec', 'fault', 'sec']),
+  capacity: Object.freeze(['fs-inode', 'any', 'fs', 'inode']),
 });
 /** 기존 알림 채널(alerts.js channels) — 새 채널을 만들지 않는다. */
 export const CHANNELS = Object.freeze(['email', 'webhook', 'slack', 'teams']);
@@ -42,6 +49,9 @@ export const RULE_DEFAULTS = Object.freeze({
   baseline: Object.freeze({ cond: 'band', sustain: 3, repeatMin: 240, channels: ['webhook'], issue: false, autoFocus: false }),
   health: Object.freeze({ cond: 'any', sustain: 1, repeatMin: 720, channels: ['email'], issue: false, autoFocus: false }),
   profile: Object.freeze({ cond: 'bad', sustain: 1, repeatMin: 30, channels: ['email', 'webhook'], issue: false, autoFocus: false }),
+  collect: Object.freeze({ cond: 'any', sustain: 2, repeatMin: 360, channels: ['email'], issue: false, autoFocus: false }),
+  logs: Object.freeze({ cond: 'fault-sec', sustain: 1, repeatMin: 60, channels: ['email'], issue: false, autoFocus: false }),
+  capacity: Object.freeze({ cond: 'fs-inode', sustain: 1, repeatMin: 1440, channels: ['email'], issue: false, autoFocus: false }),
 });
 export const LIMITS = Object.freeze({
   sustain: [1, 48], repeatMin: [0, 10_080], corpsOff: 200,
@@ -50,7 +60,23 @@ export const LIMITS = Object.freeze({
   baseline: { weeks: [2, 12], bandPct: [5, 300], minWeeks: [2, 12], maxMissingPct: [0, 90] },
   health: { chronyMs: [1, 600_000], fdPct: [10, 99], conntrackPct: [10, 99], dmesgErr24h: [0, 100_000], certDays: [1, 365] },
   changes: { keepDays: [7, 400] },
-  compare: { diffPct: [1, 500] },
+  // 6단계: maxServers — 서버 비교 한 화면의 서버 수 상한(설계 §15 ‘2~5대 · 상한 설정 · 기본 5’ — 바깥 한계 8: 열이 늘면 400 폭 · 엣지 요청이 그만큼 는다).
+  compare: { diffPct: [1, 500], maxServers: [2, 8] },
+  // 6단계 수집 건강 기준(보드 상태 · 알림 규칙 ‘수집 건강’ 행이 같은 값 — collectHealth.collectCells). dbCapGb 0 = 상한 없음(DB 칸은 판정 보류).
+  collect: { cyclePct: [10, 100], successPct: [10, 100], dbPct: [10, 100], dbCapGb: [0, 10_000] },
+  // 7a단계 로그 분석 — 주기당 출처별 줄 상한 · 보관(일) · SSH 실패 집중(같은 IP · 창 분 · 임계 줄).
+  //   줄 상한의 범위는 명령의 산수(command.js LINE_CAP_RANGE — 앱 두 개가 한 구획이라 2 × 상한 + 메타 < 구획 줄 상한 · 반증 F4)에서 온다.
+  logs: { lineCap: [...LINE_CAP_RANGE], keepDays: [1, 90], burstCount: [2, 1_000], burstWindowMin: [1, 60] },
+  // 8a단계 용량 소진 예측 — 목표선(%) · 데이터 부족 기준(14일 창 안 점 수) · 알림 ‘소진 ≤ N일’.
+  capacity: { targetPct: [50, 99], minDays: [3, 14], days: [1, 90] },
+  // 8b단계 ⑳ 프로세스 Top-N — 5분 표본 보존(일 · 날 파일) · comm 별 시간 집계 보존(일). on=false 면 ##TOP 구획이 ‘꺼짐’ 한 줄(1초 대기 없음).
+  top: { keepDays: [1, 14], hourlyDays: [7, 365] },
+  // 8b단계 ㉑ 저활용 — 창(일 · 30 기본 · 90 옵션) · 데이터 부족(<21일) · 후보/관찰 점수 · 가중치 6 · ‘낮다’ 기준(관행 — 설정값) · 주기 사용 판정(높은 날 기준 %).
+  idle: { windowDays: [14, 90], minDays: [7, 90], candidate: [1, 100], watch: [0, 99], wCpu: [0, 100], wMem: [0, 100], wDisk: [0, 100], wNet: [0, 100], wPower: [0, 100], wAct: [0, 100],
+    cpuAvgPct: [1, 50], cpuMaxPct: [1, 100], memAvgPct: [1, 90], diskBusyMaxPct: [1, 90], netMaxPct: [1, 90], powerIdlePct: [101, 300], periodicHighPct: [10, 100] },
+  // 8b단계 ㉒ 전력 · 온도 — 흡기 기준(°C · 모델별 권장 아님 — 설정값) · PowerCap ‘걸림’(측정 ≥ 상한 × %) · 랙 여유 주의(%). 랙 배치는 racks(아래 normalizeRacks).
+  power: { inletWarnC: [15, 45], capHitPct: [80, 100], rackLowPct: [1, 50] },
+  racks: { max: 500, serversPerRack: 256, textBytes: 64 * 1024 },
 });
 export const DEFAULTS = Object.freeze({
   rules: {},
@@ -62,7 +88,19 @@ export const DEFAULTS = Object.freeze({
   baseline: { weeks: 4, bandPct: 40, minWeeks: 4, maxMissingPct: 25 },
   health: { ...HEALTH_DEFAULTS },
   changes: { keepDays: 30 },
-  compare: { diffPct: 20 },
+  compare: { diffPct: 20, maxServers: 5 },
+  collect: { cyclePct: 80, successPct: 90, dbPct: 90, dbCapGb: 20 },
+  // 7a단계 로그 분석(설계 §17 — 줄 상한 5,000 · 보관 30일 · ‘외부 IP 집중’ 5분 20회 — 설정값). on=false 면 로그 읽기 exec 를 붙이지 않는다.
+  logs: { on: true, lineCap: LINE_CAP_DEFAULT, keepDays: 30, burstCount: 20, burstWindowMin: 5 },
+  // 8a단계 용량 소진 예측(설계 ⑱ — 목표 90% · 데이터 부족 7일 · 알림 7일 — 설정값).
+  capacity: { targetPct: 90, minDays: 7, days: 7 },
+  // 8b단계 ⑳ 프로세스 Top-N(설계 — 5분 7일 · 시간 집계 90일 · 실측 뒤 보존 조정).
+  top: { on: true, keepDays: 7, hourlyDays: 90 },
+  // 8b단계 ㉑ 저활용(설계 점수표 그대로 — 가중 CPU 30 · 메모리 15 · 디스크 15 · 네트 15 · 전력 15 · 활동 10 · ≥70 후보 · 40~69 관찰 · 21일 미만 데이터 부족).
+  idle: { on: true, windowDays: 30, minDays: 21, candidate: 70, watch: 40, wCpu: 30, wMem: 15, wDisk: 15, wNet: 15, wPower: 15, wAct: 10,
+    cpuAvgPct: 5, cpuMaxPct: 20, memAvgPct: 20, diskBusyMaxPct: 5, netMaxPct: 2, powerIdlePct: 110, periodicHighPct: 50 },
+  // 8b단계 ㉒ 전력 · 온도(흡기 27 °C · 걸림 98% · 랙 여유 주의 10% — 설정값).
+  power: { inletWarnC: 27, capHitPct: 98, rackLowPct: 10 },
   // 유지보수 창 억제(Bareos · Veeam 스케줄) — 베어메탈 서버의 백업 창을 읽는 원천이 아직 없다(perfAlerts.maintenanceFor 머리말). 켜 두면 원천이 생길 때 바로 쓴다.
   maintenance: { backupWindows: true },
 });
@@ -115,8 +153,8 @@ export function normalizeRules(raw, { strict = true } = {}) {
       repeatMin: int(x.repeatMin, LIMITS.repeatMin, `rules.${id}.repeatMin`, d.repeatMin),
       channels,
       issue: x.issue === true,
-      // 집중 결론 규칙은 그 자체가 집중의 끝이라 자동 집중을 걸지 않는다(되먹임 고리).
-      autoFocus: id === 'focusEnd' ? false : x.autoFocus === true,
+      // 집중 결론 규칙은 그 자체가 집중의 끝이라 자동 집중을 걸지 않는다(되먹임 고리). 수집 건강은 서버가 아니라 노드 칸이라 집중 대상이 없다.
+      autoFocus: id === 'focusEnd' || id === 'collect' || id === 'capacity' ? false : x.autoFocus === true,   // 8a capacity 는 하루 추세라 1분 집중이 뜻이 없다   // 7a ‘logs’ 는 자동 집중 허용(로그 장애 · 보안 → 그 서버 1분 집중 — 법인 옵트인 규약 그대로)
       corpsOff: vcList(x.corpsOff, `rules.${id}.corpsOff`),
     };
   }
@@ -138,11 +176,81 @@ export function normalizeRules(raw, { strict = true } = {}) {
   const health = sec('health', DEFAULTS.health, LIMITS.health).out;
   const changes = sec('changes', DEFAULTS.changes, LIMITS.changes).out;
   const compare = sec('compare', DEFAULTS.compare, LIMITS.compare).out;
+  const collect = sec('collect', DEFAULTS.collect, LIMITS.collect).out;
   const maintenance = sec('maintenance', DEFAULTS.maintenance, null).out;
+  const logs = sec('logs', DEFAULTS.logs, LIMITS.logs).out;
+  const capacity = sec('capacity', DEFAULTS.capacity, LIMITS.capacity).out;
+  const top = sec('top', DEFAULTS.top, LIMITS.top).out;
+  const idle = sec('idle', DEFAULTS.idle, LIMITS.idle).out;
+  if (idle.watch >= idle.candidate) { bad('idle.watch', '관찰 기준은 후보 기준보다 작아야 합니다'); idle.watch = Math.min(DEFAULTS.idle.watch, idle.candidate - 1); }
+  if (idle.minDays > idle.windowDays) { bad('idle.minDays', '데이터 부족 기준은 창(windowDays)보다 클 수 없습니다'); idle.minDays = idle.windowDays; }
+  if (['wCpu', 'wMem', 'wDisk', 'wNet', 'wPower', 'wAct'].every((k) => !idle[k])) { bad('idle.wCpu', '가중치가 모두 0 입니다'); Object.assign(idle, { wCpu: DEFAULTS.idle.wCpu }); }
+  const p0 = sec('power', DEFAULTS.power, LIMITS.power);
+  const racks = normalizeRacks(p0.s, bad);
+  const power = { ...p0.out, racks };
   return {
-    value: { v: 1, rules, daily, focus, baseline, health, changes, compare, maintenance, by: String(r.by || '').slice(0, 64), at: Number(r.at) || 0 },
+    value: { v: 1, rules, daily, focus, baseline, health, changes, compare, collect, maintenance, logs, capacity, top, idle, power, by: String(r.by || '').slice(0, 64), at: Number(r.at) || 0 },
     dropped,
   };
+}
+
+/*
+ * 8b단계 ㉒ 랙 배치 — 등록 CSV(7b)에 ‘랙/위치’ 열이 없고 iDRAC 위치 속성은 읽지 않는다(Redfish 왕복을 늘리지 않는다) — 그래서 이 설정이 랙의 **유일한 원천**이다.
+ *   racks: [{ vcenterId, rack, capKw|null, servers: [{ key, u|null }] }] — 화면은 텍스트(한 줄 = `법인,랙,상한 kW(비우면 미설정),서버키[@U] 서버키[@U] …` · # 주석)로 고치고
+ *   서버가 이 함수로 읽는다(웹이 형식을 다시 해석하지 않는다). 같은 (법인, 랙) 두 번 · 한 서버(법인, 키)가 두 랙 · 형식 밖은 400(엄격) 또는 그 줄을 버린다(느슨).
+ */
+const RACK_RE = /^[^\u0000-\u001f\u007f,]{1,32}$/;
+const SKEY_RE = /^[^\s\u0000-\u001f\u007f,@]{1,256}$/;
+export function parseRackText(text, bad = () => {}) {
+  const out = [];
+  const lines = String(text ?? '').slice(0, LIMITS.racks.textBytes).split(/\r?\n/).slice(0, LIMITS.racks.max + 200);
+  lines.forEach((raw, i) => {
+    const l = raw.trim();
+    if (!l || l.startsWith('#')) return;
+    const f = l.split(',');
+    if (f.length < 4) { bad(`power.racksText.${i + 1}`, `${i + 1}번째 줄 — ‘법인,랙,상한 kW,서버 키 …’ 네 칸이 필요합니다`); return; }
+    const [vc, rack, cap, ...rest] = f.map((x) => x.trim());
+    const servers = rest.join(',').split(/\s+/).filter(Boolean).map((tok) => { const m = /^(.+?)(?:@(\d{1,2}))?$/.exec(tok); return { key: m ? m[1] : tok, u: m && m[2] ? Number(m[2]) : null }; });
+    out.push({ vcenterId: vc, rack, capKw: cap === '' || cap === '-' ? null : cap, servers, line: i + 1 });
+  });
+  return out;
+}
+export function normalizeRacks(src = {}, bad = () => {}) {
+  const list0 = typeof src?.racksText === 'string' ? parseRackText(src.racksText, bad) : (Array.isArray(src?.racks) ? src.racks : []);
+  if (list0.length > LIMITS.racks.max) bad('power.racks', `랙은 ${LIMITS.racks.max}개까지입니다`);
+  const seen = new Set(); const owner = new Map(); const out = [];
+  for (const [i, r] of list0.slice(0, LIMITS.racks.max).entries()) {
+    const at = r?.line ? `${r.line}번째 줄` : `${i + 1}번째 랙`;
+    const vc = String(r?.vcenterId ?? '').trim(); const rack = String(r?.rack ?? '').trim();
+    if (!VC_RE.test(vc) || BAD_KEYS.has(vc)) { bad('power.racks', `${at} — 법인(vCenter id) 형식이 다릅니다`); continue; }
+    if (!RACK_RE.test(rack)) { bad('power.racks', `${at} — 랙 이름은 1~32자(쉼표 · 제어문자 없음)입니다`); continue; }
+    const id = `${vc}|${rack}`;
+    if (seen.has(id)) { bad('power.racks', `${at} — 같은 법인에 같은 랙(${rack})이 두 번 있습니다`); continue; }
+    let capKw = null;
+    if (r.capKw != null && r.capKw !== '') {
+      const x = typeof r.capKw === 'number' ? r.capKw : (/^\d{1,4}(?:\.\d{1,2})?$/.test(String(r.capKw).trim()) ? Number(r.capKw) : NaN);
+      if (!(Number.isFinite(x) && x >= 0.1 && x <= 1000)) { bad('power.racks', `${at} — 상한 kW 는 0.1~1000 입니다(비우면 미설정)`); continue; }
+      capKw = Math.round(x * 100) / 100;
+    }
+    const servers = [];
+    for (const sv of Array.isArray(r.servers) ? r.servers.slice(0, LIMITS.racks.serversPerRack + 1) : []) {
+      const key = String(sv?.key ?? '').trim();
+      const u = sv?.u == null || sv.u === '' ? null : Number(sv.u);
+      if (!SKEY_RE.test(key) || (u != null && !(Number.isInteger(u) && u >= 1 && u <= 60))) { bad('power.racks', `${at} — 서버 키 형식이 다르거나 U 가 1~60 밖입니다(${String(key).slice(0, 40)})`); continue; }
+      const sid = `${vc}|${key}`;
+      if (owner.has(sid) && owner.get(sid) !== id) { bad('power.racks', `${at} — 서버 ${key} 가 다른 랙(${owner.get(sid).split('|')[1]})에도 있습니다`); continue; }
+      if (owner.has(sid)) continue;
+      owner.set(sid, id); servers.push({ key, u });
+    }
+    if ((r.servers || []).length > LIMITS.racks.serversPerRack) bad('power.racks', `${at} — 랙당 서버는 ${LIMITS.racks.serversPerRack}대까지입니다`);
+    seen.add(id);
+    out.push({ vcenterId: vc, rack, capKw, servers: servers.slice(0, LIMITS.racks.serversPerRack) });
+  }
+  return out;
+}
+/** 랙 배치 → 편집 텍스트(서버가 만든다 — 웹은 그대로 보여 주고 고친 텍스트를 보낸다). */
+export function racksToText(racks = []) {
+  return (Array.isArray(racks) ? racks : []).map((r) => `${r.vcenterId},${r.rack},${r.capKw == null ? '' : r.capKw},${(r.servers || []).map((x) => (x.u == null ? x.key : `${x.key}@${x.u}`)).join(' ')}`).join('\n');
 }
 
 function load() {
@@ -192,7 +300,7 @@ export function savePerfRules(body, { by = '' } = {}) {
 /** 감사 요약 — 켠 규칙 id · 바뀐 절(비밀 없음 · 300자). */
 export function rulesAuditSummary(prev, next) {
   const on = (x) => Object.keys(x?.rules || {}).sort().join(',');
-  const changed = ['daily', 'focus', 'baseline', 'health', 'changes', 'compare', 'maintenance'].filter((k) => JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]));
+  const changed = ['daily', 'focus', 'baseline', 'health', 'changes', 'compare', 'collect', 'maintenance', 'logs', 'capacity', 'top', 'idle', 'power'].filter((k) => JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]));
   return JSON.stringify({ before: on(prev), after: on(next), changed }).slice(0, 300);
 }
 export function _resetPerfRulesForTest() { _cache = null; _mtime = ''; _err.ok(); _listeners.clear(); }

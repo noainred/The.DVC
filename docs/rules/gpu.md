@@ -131,6 +131,28 @@
     정정: 처음에 '꺼진 VM GB 부분 합' 도 결함으로 보고 null 로 바꿨으나, main 의 v2.870 감사 A4-01 이 이미 '합 + 빠진 대수 비고' 로 다뤘고 이 모듈의
     할당 GB 도 같은 규칙(합 + '할당 모르는 VM N')이라 철회했다(넣었으면 할당과 꺼진 VM 의 규칙이 어긋난다).
     회귀: server `gpuAllocTree2852` v2.871 2건(변이: 주소 판정 끄기 · 대소문자 무시 끄기 둘 다 실패) · web `gpuAllocText` 1건(수정 전 판으로 실패 확인).
+  - **v2.939 개선 11가지(사용자 요청 '개선 포인트 제안' → '모두 적용' · 결정: 1회 릴리스 · CSV 도 모든 법인 · 배치 추천은 시안 없이 · 알림 기본 끔/90%)**:
+    ① **GPU 아닌 패스스루 판정 한 벌** — `gpu/vgpuProfile.js gpuDevicesOnHost`(+ `isGpuVmOnHost` · 화면용 `gpuViewOnHost` · `gpuModeOf` 를 allocTree 에서 옮김).
+    GPU 할당율(allocTree)과 **GPU 인벤토리**(`hostGpu.summarizeHostGpu` 패스스루 장수 · `hardwareGpu.buildGpuInventory` 할당 VM 수 · `gpuVmCount` · `/tools/gpu/vms`)가 같은 함수.
+    v2.871 은 할당율만 고쳐 인벤토리는 NIC 를 받은 VM 을 GPU VM 으로 셌다. ⚠ Bareos 백업 표지(`vmGpuMark`)는 쓰지 않는다 — 스냅샷 제약은 NIC 도 같다.
+    ② **수집 점검**(`allocTree.allocDiag` · `GET /tools/gpu-alloc/diag` · 탭 '수집 점검') — 실장비 가정 세 가지(꺼진 VM 이 GPU 별 목록에 오는가 · 켜진 패스스루 VM 장치 주소 ·
+    프로파일 이름 → GB)와 배치 정보 · NIC 패스스루를 **이미 수집한 스냅샷**으로 판정한다(vCenter 왕복 0 · 엣지 법인 동일). 관측할 대상이 없으면 '판단 불가'.
+    ③ **같은 GPU 의 vGPU 여러 장** — VM 이 vGPU GPU 목록 **하나에만** 있으면 그 VM 의 장치 수 × 프로파일 GB · 슬롯도 장치 수(`onGpu`). 여러 목록이면 한 장씩(예전).
+    ④ **배치 추천**(웹 `gpuAllocText.placementCandidates` · 탭 '배치 추천') — 같은 프로파일 GPU 의 남은 슬롯(남은 슬롯 적은 것부터) → 모델 계열이 맞는 빈 GPU(용량 ÷ GB).
+    끊긴 호스트 · 배치 모름 · 다른 프로파일 · 혼합 크기 · 용량 모름은 빼고 센다. 계열은 프로파일 `<접두>_<계열>-…` 를 GPU 모델 **낱말**과 맞춘다(L4 ≠ L40S). MIG 프로파일은 추정 표시.
+    프로파일 GB 는 웹 `profileGB` = 서버 `vgpuProfileGB`(서버 시험이 같은 입력으로 대조).
+    ⑤ **꺼진 VM 을 켜면 넘침** — 호스트 totals `offOverGB`(꺼진 VM GB > 예비 · 모르는 값이 섞이면 null) · 호스트 행 비고만(법인 · 클러스터 합계에는 없음 — `_t` 누적에 안 들어간다).
+    ⑥ **할당률 알림**(`alerts.js` 규칙 `gpuAllocPct` — 기본 끔 · 90%) — 계층 합계 그대로. 예비 음수면 위험. 할당률 모름 · 연결 불가 · 낡은 위임 보고 · 계층 상한 잘림은 **held**(해소로 기록하지 않음).
+    ⑦ **일 단위 이력**(`gpu/allocHistory.js` · `gpu-alloc.db` · 800일 · `GET /tools/gpu-alloc/history` · 탭 '추이') — 1시간마다 법인별 하루 한 점(같은 날은 `ts` 가 새것일 때만 덮음).
+    용량·할당을 모두 아는 법인만 · 지금 값을 못 읽은 법인 제외 · 계층이 잘렸으면 그 시각은 안 씀(부분 합 금지). 합계 선은 그날 모든 법인의 점이 있을 때만. 소진 예상은 최근 30일
+    점 7개 이상 · 증가 · R² ≥ 0.3 일 때만(`allocTrend` — `system/memtrack.linearTrend` 재사용), 이미 넘었으면 `over`('이미 넘음'). 화면 날짜는 **지금 시각**으로 낸다
+    (처음 판은 일 번호 `today` 를 넘겨 1970년 날짜가 나왔다 — Chromium 판독에서 찾음, 웹 시험이 고정).
+    ⑧ **일일 헬스체크 절** `gpuAlloc`(`reports/healthReport.js` — 90% 이상 경고 · 넘침 위험 · 할당 모름은 확인 불가 · GPU 법인이 없으면 절 없음).
+    ⑨ **CSV 도 모든 법인**(엑셀 창과 같은 규칙 — 화면 칩 선택과 무관) ⑩ **새로 고침 뒤 새로 생긴 노드만** 지금 단계대로 펼침(`openAfterRefresh`).
+    ⑪ **엑셀 첫 요청 지연(v2.869 의 5.6초)** — 재현 측정: 기동 직후 약 85초 동안만 1.5~12.7초(같은 구간 loop-lag 688~803ms 로그 — 목 데이터 백필 등 기동 작업), 그 뒤 21회
+    0.16~0.23초. 엑셀 자체가 아니라 기동 작업과 겹친 것으로 **추정**(원인 분리 측정은 하지 않음) — 코드 변경 없음. 측정 당시(워커 이전 판) 엑셀을 만드는 동안 health 응답이 0.08~0.15초 늦어졌는데,
+    이 '별건' 은 main 의 v2.938(PR #964 — GPU 엑셀 워커 `allocTreeXlsxWorker.js`)이 같은 때 다뤘다(이 묶음은 그 위에 병합 — 워커에서도 v2.939 비고가 그대로 나간다).
+    회귀: server `gpuAllocImprove2939`(10건 · 변이 8/8) · web `gpuAllocText`(v2.939 6건).
   - ⚠ 정직 기록: `HostGraphicsInfo.vm` 이 꺼진 VM 을 싣는지, 이 현장 vCenter 가 동적 DirectPath `assignedId` 를 주는지는 실장비로 확인하지 못했다
     (꺼진 VM 은 목록에 있어도 할당에 넣지 않으므로 결과는 같다). 한 VM 의 vGPU 장치 둘이 한 GPU 목록에 한 번만 오면 GPU 단위 할당이 한 장치분으로 적게 잡힌다(호스트 합은 정확).
 

@@ -6,7 +6,8 @@
 
 import { localStamp } from '../util/dayKey.js'; // v2.583 #25: 프로세스 TZ 가 아니라 포탈 오프셋
 import { numOrNull } from '../util/numOrNull.js';
-import { dsUsageReadable, dsUsedOf, dsUsageUnknownOf, usageReadable } from '../store.js'; // v2.622(감사 RECENT-02): 판정 한 벌
+import { dsUsageReadable, dsUsedOf, dsUsageUnknownOf, usageReadable } from '../store.js';
+import { buildGpuAllocTree } from '../gpu/allocTree.js';   // v2.939 GPU 할당율 개선 8: 법인 GPU 할당률 절(화면 · 엑셀과 같은 계층 합계) // v2.622(감사 RECENT-02): 판정 한 벌
 
 const DAY = 86_400_000;
 
@@ -115,6 +116,26 @@ export function computeHealthReport(snap, opts = {}) {
     const bad = certs.items.filter((c) => c.status === 'expired' || c.status === 'critical' || c.status === 'expiring')
       .map((c) => ({ name: c.name, host: c.host, status: c.status, daysLeft: c.daysLeft }));
     S('certs', lv(bad.length, bad.filter((c) => c.status !== 'expiring').length), bad.length, bad.slice(0, 50), 'TLS 인증서 만료/임박');
+  }
+
+  // ⑨ v2.939(GPU 할당율 개선 8): 법인 GPU 할당률 — GPU 호스트가 있는 법인이 하나라도 있을 때만 절을 싣는다(GPU 없는 포탈에 빈 절을 만들지 않는다).
+  //   90% 이상 경고 · 예비 음수(할당 > 용량) 위험. 모르는 값이 섞여 할당률을 못 낸 법인은 '확인 불가' 로 센다(정상에 넣지 않는다).
+  const gpuWarnPct = Number(opts.gpuWarnPct) || 90;
+  const gtree = buildGpuAllocTree(snap);
+  if (gtree.vcenters.length) {
+    const gpuItems = [];
+    let gpuUnknown = 0; let gpuOver = 0;
+    for (const vc of gtree.vcenters) {
+      const t = vc.totals;
+      if (numOrNull(t.allocPct) == null) { gpuUnknown += 1; continue; }
+      if (t.allocPct < gpuWarnPct) continue;
+      if (numOrNull(t.spareGB) != null && t.spareGB < 0) gpuOver += 1;
+      gpuItems.push({ name: vc.name || vc.id, vcenterId: vc.id, usagePct: t.allocPct, spareGB: t.spareGB, capGB: t.capGB });
+    }
+    gpuItems.sort((a, b) => b.usagePct - a.usagePct);
+    S('gpuAlloc', withUnknown(lv(gpuItems.length, gpuOver), gpuUnknown), gpuItems.length, gpuItems.slice(0, 50), `법인 GPU 할당률 ${gpuWarnPct}% 이상`,
+      unknownDetail([['할당을 모르는 VM 이 섞인 법인', gpuUnknown, '곳']]));
+    sec.gpuAlloc.unknown = gpuUnknown;
   }
 
   const sections = Object.values(sec);

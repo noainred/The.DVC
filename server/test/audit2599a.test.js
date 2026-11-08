@@ -48,7 +48,8 @@ test('RECENT2599-01 — 주기 300초 · 수집 160초(관측 간격 460초)에�
 });
 
 test('RECENT2599-01 — 폴러가 이번 수집 시간을 알림 판정까지 넘긴다', () => {
-  assert.match(read('bmusage/poller.js'), /runBmUsageAlerts\(rows,\s*\{\s*\.\.\.settings,\s*runMs:\s*Date\.now\(\)\s*-\s*t0\s*\}\)/);
+  // 8a단계: 같은 호출에 정비 창 판정기 · 대상 조회를 덧붙였다(runMs 는 그대로 넘긴다 — 뒤에 칸이 더 와도 된다).
+  assert.match(read('bmusage/poller.js'), /runBmUsageAlerts\(rows,\s*\{\s*\.\.\.settings,\s*runMs:\s*Date\.now\(\)\s*-\s*t0\s*[,}]/);
   assert.match(read('bmusage/notify.js'), /runMs:\s*settings\.runMs/);
 });
 

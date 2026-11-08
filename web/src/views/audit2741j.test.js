@@ -206,28 +206,30 @@ describe('WEB-01 corpVmChart — 미수집 vCenter 는 0 막대가 아니라 막
 });
 
 describe('WEB-01 화면 — Platform KPI 와 개요 차트가 그 판정을 쓴다', () => {
-  it('VCenters: 전체 호스트·VM KPI 가 미수집 곳을 더하지 않고 표지를 단다', async () => {
+  // v2.915(가상화 플랫폼 허브): 전체 vCenter · 호스트 · VM 카드 3장은 허브의 엔티티 탭(서버 /platform/summary — 모르는 법인은 null · unknownVcs 로 따로)이 맡는다.
+  //   VCenters 에 남은 백업 KPI 는 같은 countableTotals 로 분모(전체 VM)를 센다 — 미수집 곳을 더하지 않는다.
+  it('VCenters: 백업 KPI 의 전체 VM 분모가 미수집 곳을 더하지 않는다 · 전체 호스트 · VM 카드는 허브로 갔다', async () => {
     const { default: VCenters } = await import('./VCenters.jsx');
     H.api.usePolling = (p) => (p === '/vcenters' ? { data: SITES, error: null, loading: false } : { data: null, loading: true });
     const rt = mount(VCenters, {});
     const kpis = all(rt, (e) => e.props?.className === 'card kpi');
-    const host = kpis.find((k) => textOf(k).startsWith('전체 호스트'));
-    const vm = kpis.find((k) => textOf(k).startsWith('전체 VM'));
-    expect(textOf(host)).toContain('전체 호스트9');
-    expect(textOf(host)).toContain('다빈치 4개 · IRS 5개');
-    expect(textOf(host)).toContain('최소 · 미수집 3곳 제외');
-    expect(textOf(vm)).toContain('전체 VM35');
-    expect(textOf(vm)).toContain('최소 · 미수집 3곳 제외');
+    expect(kpis.some((k) => textOf(k).startsWith('전체 호스트'))).toBe(false);
+    const bk = kpis.find((k) => textOf(k).startsWith('VM 백업'));
+    expect(textOf(bk)).toContain('전체 VM 35');
+    expect(textOf(bk)).toContain('Veeam / Bareos');
     unmount(rt);
   });
-  it('VCenters: 전부 미수집이면 0 이 아니라 —', async () => {
-    const { default: VCenters } = await import('./VCenters.jsx');
-    H.api.usePolling = (p) => (p === '/vcenters' ? { data: SITES.slice(2, 5), error: null, loading: false } : { data: null, loading: true });
-    const rt = mount(VCenters, {});
-    const vm = all(rt, (e) => e.props?.className === 'card kpi').find((k) => textOf(k).startsWith('전체 VM'));
-    expect(textOf(vm)).toContain('전체 VM—');
-    expect(textOf(vm)).not.toMatch(/전체 VM0/);
-    unmount(rt);
+  it('허브 엔티티 탭: 개수를 모르는 법인은 0 으로 더하지 않고 따로 말한다(서버 unknownVcs → 글자)', async () => {
+    const { entityTabs } = await import('./platform/platformText.js');
+    const [, h, v] = entityTabs({ totals: {
+      vcenters: { total: 5, connected: 2, stale: 0, unreachable: 1, rest: 0, site: 0 }, alarms: { total: 0, critical: 0, unknownVcs: 0 },
+      hosts: { total: 9, connected: 9, maint: 0, down: 0, unread: 0, attention: 0, clusters: 2, unknownVcs: 3 },
+      vms: { total: 35, on: 32, off: 3, usageUnknown: 0, templates: 0, attention: 0, unknownVcs: 3 },
+    } });
+    expect(h.value).toBe('9'); expect(h.parts.map((p) => p.text)).toContain('개수 모름 3곳');
+    expect(v.value).toBe('35'); expect(v.parts.map((p) => p.text)).toContain('개수 모름 3곳');
+    const [, h2] = entityTabs({ totals: { vcenters: { total: 3 }, alarms: {}, hosts: null, vms: null } });
+    expect(h2.value).toBe('—');
   });
   it('Overview: VM 분포 막대에 미수집 vCenter 가 0 이 아니라 null 로 실리고 각주가 붙는다', async () => {
     const { default: Overview } = await import('./Overview.jsx');

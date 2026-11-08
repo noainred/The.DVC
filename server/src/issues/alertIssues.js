@@ -404,7 +404,7 @@ export function applyCertResults(items, { now = Date.now() } = {}) {
  *   다른 알람 상한과 따로 센다) · 법인 = 서버의 vCenter(없으면 공용 — 지어내지 않는다). 같은 발송 건(id)을 두 번 쓰지 않는다(엣지 봉투를 다시 당겨도).
  * 판정(조건) · 발송은 그 서버를 수집하는 노드가 이미 했다 — 여기서 다시 판정하지 않는다.
  */
-export const BMPERF_RULE_LABEL = Object.freeze({ use: 'USE 판정 변화', cross: '교차 판정', focusEnd: '집중 모니터링 결론', baseline: '베이스라인 이탈', health: '점검 소모품', profile: '용도 점검 실패' });
+export const BMPERF_RULE_LABEL = Object.freeze({ use: 'USE 판정 변화', cross: '교차 판정', focusEnd: '집중 모니터링 결론', baseline: '베이스라인 이탈', health: '점검 소모품', profile: '용도 점검 실패', collect: '수집 건강', logs: '로그 장애 · 보안' });
 /**
  * 발송 건 → 할 일(순수).
  *  · 중복 원천은 **받은 발송 건**이다(F2 · F3 · F12 반증): ① id 가 어느 이슈(닫힌 것 포함)의 partKeys 에 있으면 dup ② 그 열쇠(agent|서버|규칙)의 이슈들(닫힌 것 포함)이

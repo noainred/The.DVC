@@ -22,7 +22,22 @@ const NUM_SECTIONS = Object.freeze([
   { k: 'baseline', title: '베이스라인', fields: [['weeks', '지난 주 수'], ['bandPct', '띠 ±%'], ['minWeeks', '최소 표본 주'], ['maxMissingPct', '결측 상한 %']] },
   { k: 'health', title: '점검 소모품 기준', fields: [['chronyMs', '시각 오프셋 ms'], ['fdPct', 'FD %'], ['conntrackPct', 'conntrack %'], ['dmesgErr24h', '24시간 커널 오류'], ['certDays', '인증서 남은 일']] },
   { k: 'changes', title: '변경 이벤트', fields: [['keepDays', '보관(일)']] },
-  { k: 'compare', title: '구간 비교', fields: [['diffPct', '차이 표시 ±%']] },
+  { k: 'compare', title: '구간 · 서버 비교', fields: [['diffPct', '구간 비교 차이 표시 ±%'], ['maxServers', '서버 비교 한 화면 상한(대)']] },
+  // 6단계 수집 건강 — 보드 상태와 ‘수집 건강’ 알림 행이 같은 기준을 쓴다(DB 상한 0 = 없음 · DB 칸 판정 보류).
+  { k: 'collect', title: '수집 건강 기준', fields: [['cyclePct', '주기 소요 % (예산 대비 이상)'], ['successPct', '성공률 % (미만)'], ['dbPct', 'DB % (상한 대비 이상)'], ['dbCapGb', 'DB 상한 GB(0 = 없음)']] },
+  // 7a단계 로그 분석 — 출처별 주기당 줄 상한(넘친 줄은 ‘잘림’) · 보관 · SSH 실패 집중(같은 IP · 창 안 줄 수). 끄면 로그 읽기 exec 를 붙이지 않는다.
+  { k: 'logs', title: '로그 분석', fields: [['lineCap', '출처별 주기당 줄 상한'], ['keepDays', '보관(일)'], ['burstCount', 'SSH 실패 집중 — 줄 수'], ['burstWindowMin', 'SSH 실패 집중 — 창(분)']] },
+  // 8a단계 용량 소진 예측 — 목표선(%) · 데이터 부족 기준(14일 창 안 점 수) · 알림 ‘소진 ≤ N일’ 의 N.
+  { k: 'capacity', title: '용량 소진 예측', fields: [['targetPct', '목표선 %'], ['minDays', '데이터 부족 기준(14일 중 점 수)'], ['days', '알림 — 소진 ≤ N일']] },
+  // 8b단계 ⑳ 프로세스 Top-N — 5분 표본 보존(날 파일) · comm 별 시간 집계 보존. 끄면 ##TOP 이 ‘꺼짐’ 한 줄(1초 대기 없음).
+  { k: 'top', title: '프로세스 Top-N', fields: [['keepDays', '5분 표본 보존(일)'], ['hourlyDays', 'comm 별 시간 집계 보존(일)']] },
+  // 8b단계 ㉑ 저활용 — 창 · 데이터 부족 · 후보/관찰 점수 · 가중 6 · ‘낮다’ 기준(관행 — 설정값) · 주기 사용 판정.
+  { k: 'idle', title: '저활용 점수', fields: [['windowDays', '창(일 · 30 기본 · 90 옵션)'], ['minDays', '데이터 부족(일 미만)'], ['candidate', '후보 점수(이상)'], ['watch', '관찰 점수(이상)'],
+    ['wCpu', '가중 CPU'], ['wMem', '가중 메모리'], ['wDisk', '가중 디스크'], ['wNet', '가중 네트'], ['wPower', '가중 전력'], ['wAct', '가중 활동 흔적'],
+    ['cpuAvgPct', 'CPU 평균 < %'], ['cpuMaxPct', 'CPU 일 최대 < %'], ['memAvgPct', '메모리 평균 < %'], ['diskBusyMaxPct', '디스크 일 최대 busy < %'], ['netMaxPct', '네트 일 최대 < %'],
+    ['powerIdlePct', '전력 평균 ≤ 최소 × %'], ['periodicHighPct', '주기 사용 — 높은 날 기준 %']] },
+  // 8b단계 ㉒ 전력 · 온도 — 흡기 기준(설정값 · 모델별 권장 아님) · PowerCap 걸림 % · 랙 여유 주의 %. 랙 배치는 아래 글 상자.
+  { k: 'power', title: '전력 · 온도', fields: [['inletWarnC', '흡기 기준 °C'], ['capHitPct', 'PowerCap 걸림(측정 ≥ 상한 × %)'], ['rackLowPct', '랙 여유 주의(% 미만)']] },
 ]);
 
 /** 이 계정이 저장할 수 있나 — 설정 소유자 등급(소유자 ∧ 전체 범위) · 인증 꺼짐(Anonymous admin). 서버가 다시 막는다. */
@@ -90,17 +105,17 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
                 <td data-sort={on ? 1 : 0}><input type="checkbox" checked={on} disabled={ro} onChange={(e) => setRule(id, { on: e.target.checked })} aria-label={`${RULE_TEXT[id]?.label} 켬`} /></td>
                 <td data-sort={RULE_TEXT[id]?.label || id} className="bmo-name">{RULE_TEXT[id]?.label || id}</td>
                 <td data-sort={v.cond}>
-                  <Select sort={false} className="select select-sm" value={v.cond} disabled={ro || !on} onChange={(e) => setRule(id, { cond: e.target.value })} aria-label="조건">
+                  <Select sort={false} className="select select-sm" value={v.cond} disabled={ro || !on} onChange={(e) => setRule(id, { cond: e.target.value })} aria-label="조건" title={RULE_TEXT[id]?.conds?.[v.cond] || v.cond}>
                     {(resp.conds?.[id] || []).map((c) => <option key={c} value={c}>{RULE_TEXT[id]?.conds?.[c] || c}</option>)}
                   </Select>
                 </td>
                 <td className="right" data-sort={v.sustain}><input className="input" type="number" min={1} max={48} value={v.sustain ?? ''} disabled={ro || !on} onChange={(e) => setRule(id, { sustain: e.target.value === '' ? '' : Number(e.target.value) })} /></td>
                 <td className="right" data-sort={v.repeatMin}><input className="input" type="number" min={0} max={10080} value={v.repeatMin ?? ''} disabled={ro || !on} onChange={(e) => setRule(id, { repeatMin: e.target.value === '' ? '' : Number(e.target.value) })} /></td>
-                <td data-sort={(v.channels || []).join(',')}>{(resp.channels || []).map((c) => (
-                  <label key={c} className="bmo-check" style={{ marginRight: 6 }}><input type="checkbox" disabled={ro || !on} checked={(v.channels || []).includes(c)} onChange={(e) => setRule(id, { channels: e.target.checked ? [...new Set([...(v.channels || []), c])] : (v.channels || []).filter((x) => x !== c) })} />{CHANNEL_TEXT[c] || c}</label>
-                ))}</td>
+                <td data-sort={(v.channels || []).join(',')}><div className="bmr-ch">{(resp.channels || []).map((c) => (
+                  <label key={c} className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={(v.channels || []).includes(c)} onChange={(e) => setRule(id, { channels: e.target.checked ? [...new Set([...(v.channels || []), c])] : (v.channels || []).filter((x) => x !== c) })} />{CHANNEL_TEXT[c] || c}</label>
+                ))}</div></td>
                 <td data-sort={v.issue ? 1 : 0}><label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.issue} onChange={(e) => setRule(id, { issue: e.target.checked })} />만들기</label></td>
-                <td data-sort={v.autoFocus ? 1 : 0}>{id === 'focusEnd' ? <span className="bmo-sub">해당 없음</span> : <label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.autoFocus} onChange={(e) => setRule(id, { autoFocus: e.target.checked })} />켜기</label>}</td>
+                <td data-sort={v.autoFocus ? 1 : 0}>{id === 'focusEnd' || id === 'collect' ? <span className="bmo-sub">해당 없음</span> : <label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.autoFocus} onChange={(e) => setRule(id, { autoFocus: e.target.checked })} />켜기</label>}</td>
                 <td data-sort={(v.corpsOff || []).length}>
                   <details><summary className="bmo-sub">{(v.corpsOff || []).length ? `${(v.corpsOff || []).length}곳 제외` : '없음'}</summary>
                     <div className="bmr-corps">{vcenters.map((vc) => (
@@ -126,12 +141,28 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
                   </label>
                 );
               })}
+              {sec.k === 'logs' && (
+                <label className="bmo-check" style={{ fontSize: 12 }}><input type="checkbox" disabled={ro} checked={form.logs?.on !== false} onChange={(e) => setForm((f) => ({ ...f, logs: { ...f.logs, on: e.target.checked } }))} />로그 읽기 켬(같은 SSH 세션 · 읽기 전용)</label>
+              )}
               {sec.k === 'focus' && (
                 <details><summary className="bmo-sub">자동 집중을 쓰는 법인(옵트인) — {(form.focus?.autoCorps || []).length}곳</summary>
                   <div className="bmr-corps">{vcenters.map((vc) => (
                     <label key={vc.id}><input type="checkbox" disabled={ro} checked={(form.focus?.autoCorps || []).includes(vc.id)} onChange={(e) => setForm((f) => ({ ...f, focus: { ...f.focus, autoCorps: e.target.checked ? [...new Set([...(f.focus?.autoCorps || []), vc.id])] : (f.focus?.autoCorps || []).filter((x) => x !== vc.id) } }))} />{vc.name}</label>
                   ))}</div>
                 </details>
+              )}
+              {sec.k === 'top' && (
+                <label className="bmo-check" style={{ fontSize: 12 }}><input type="checkbox" disabled={ro} checked={form.top?.on !== false} onChange={(e) => setForm((f) => ({ ...f, top: { ...f.top, on: e.target.checked } }))} />프로세스 Top-N 수집 켬(같은 SSH 1회 · 1초 대기 · comm 만)</label>
+              )}
+              {sec.k === 'idle' && (
+                <label className="bmo-check" style={{ fontSize: 12 }}><input type="checkbox" disabled={ro} checked={form.idle?.on !== false} onChange={(e) => setForm((f) => ({ ...f, idle: { ...f.idle, on: e.target.checked } }))} />저활용 하루 계산 켬(01:20 뒤 첫 틱)</label>
+              )}
+              {sec.k === 'power' && (
+                <label style={{ fontSize: 12 }}>랙 배치 — 한 줄에 ‘법인,랙,상한 kW(비우면 미설정),서버키[@U] 서버키[@U] …’ · # 은 주석{save.field && save.field.startsWith('power.racks') ? <span style={{ color: toneVar('bad') }}> — 형식 밖(아래 안내)</span> : null}
+                  <textarea className="input" rows={5} spellCheck={false} style={{ width: '100%', minWidth: 0, fontFamily: 'var(--mono, monospace)', fontSize: 12 }} disabled={ro}
+                    value={form.power?.racksText ?? ''} onChange={(e) => setForm((f) => ({ ...f, power: { ...f.power, racksText: e.target.value } }))} placeholder={'KR-SEL,A-07,10.2,SVCTAG1@38 SVCTAG2@36'} aria-label="랙 배치" />
+                  <span className="bmo-sub">등록 CSV 에 ‘랙/위치’ 열이 없어 이 칸이 랙의 유일한 원천입니다 · 서버 키는 함대 표의 서버 키(대개 서비스 태그) · 한 서버는 한 랙에만.</span>
+                </label>
               )}
               {sec.k === 'baseline' && <span className="bmo-sub">감시 지표: {(resp.baselineMetrics || []).map((m) => FOCUS_METRIC_TEXT[m]?.label || m).join(' · ')}</span>}
               {sec.k === 'health' && <span className="bmo-sub">칸: {Object.values(HEALTH_CELL_TEXT).map((x) => x.label).slice(0, 4).join(' · ')} 등 8칸</span>}

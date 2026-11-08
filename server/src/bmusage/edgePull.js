@@ -22,7 +22,8 @@ import { isMockMode } from '../mock/demo/flags.js'; // v2.920 데모 성능 열(
 import { config, currentVersion } from '../config.js';
 import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive } from './settings.js';
 import { publicTarget } from './targets.js';
-import { currentTargets, bmUsageStatus, authStopsFor } from './poller.js';
+import { currentTargets, bmUsageStatus, authStopsFor, collectHealthNow } from './poller.js';
+import { COLLECT_HEALTH_VER, hourlyTrend } from './collectHealth.js';
 import { latestUsage } from './db.js';
 import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from './perfView.js';
 import { hwFactsReader } from './hwFacts.js';
@@ -61,8 +62,23 @@ export function fitEnvelope(env, maxBytes = ENVELOPE_MAX_BYTES) {
   let out = { ...env, perf: (env.perf || []).map(compactPerfEntry) };
   let level = 'compact';
   let after = jsonBytes(out);
+  // 7a단계: 로그 요약은 성능 상세 다음으로 줄인다 — ① 상위 패턴의 표본 · 서명 글자 제거 ② (성능 항목 제거 뒤에도 넘치면) 상위 패턴 제거. 분류별 개수 · 출처 상태는 남는다. 뺀 사실은 logsTruncated.
+  let logLevel = null;
+  // 8a단계: 용량 예측 행은 성능 상세 다음으로 줄인다 — 도달 예측 · 도달 행만 남긴다(데이터 부족 · 불안정 · 상한 없음 · 증가 없음 행은 수만 — capacity.dropped). 뺀 사실은 capacity.truncated.
+  if (after > maxBytes && out.capacity && Array.isArray(out.capacity.rows)) {
+    const keep = out.capacity.rows.filter((r) => r?.status === 'forecast' || r?.status === 'reached');
+    out = { ...out, capacity: { ...out.capacity, rows: keep, truncated: 'forecast-only', dropped: out.capacity.rows.length - keep.length } }; after = jsonBytes(out);
+  }
+  // 8b단계: 저활용 행은 용량 예측 다음으로 줄인다 — 사용 중(active) 행을 빼고 수만 남긴다(후보 · 관찰 · 주기 사용 · 제외는 남긴다). 뺀 사실은 idle.truncated.
+  if (after > maxBytes && out.idle && Array.isArray(out.idle.rows)) {
+    const keep = out.idle.rows.filter((r) => r?.status !== 'active');
+    out = { ...out, idle: { ...out.idle, rows: keep, truncated: 'non-active-only', dropped: out.idle.rows.length - keep.length } }; after = jsonBytes(out);
+  }
+  if (after > maxBytes && Array.isArray(out.logSummary)) { out = { ...out, logSummary: out.logSummary.map((x) => ({ ...x, top: (x.top || []).map(({ sample: _s, tmpl: _t, ...p }) => p) })) }; logLevel = 'compact'; after = jsonBytes(out); }
   if (after > maxBytes) { out = { ...out, perf: [] }; level = 'dropped'; after = jsonBytes(out); }
+  if (after > maxBytes && Array.isArray(out.logSummary)) { out = { ...out, logSummary: out.logSummary.map((x) => ({ ...x, top: [] })) }; logLevel = 'dropped'; after = jsonBytes(out); }
   out.perfTruncated = { reason: 'envelope-bytes', level, bytesBefore: before, bytesAfter: after, maxBytes, ...(after > maxBytes ? { overStill: true } : {}) };
+  if (logLevel) out.logsTruncated = { level: logLevel };
   return out;
 }
 
@@ -136,12 +152,86 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
     ...(perfError ? { perfError } : {}),
     // v2.929(5단계): 집중 모니터링 요약(진행 중 · 대기 · 최근 24시간 — 중앙 보드 ‘집중 n 건’ 칩 · 상세는 볼 때 엣지 대행으로) · 성능 알림 발송 기록(최근 24시간 · 채널 URL 없음).
     ...(await envelopeOps()),
+    // 7a단계: 로그 분석 요약(서버별 24시간 — 분류별 패턴/줄 · 읽은 양 · 상위 8 패턴 · 출처 상태). 원문 없음(가린 표본 1줄 · 서명 템플릿). 대상 목록 안의 서버만.
+    ...(await envelopeLogs(keys)),
+    // 8a단계: 정비 창 상태(배포본 · 억제 계수 · 창 끝 뒤 억제 점검) · 용량 소진 예측(하루 계산 결과 행 — 대상 목록 안의 서버만).
+    ...(await envelopeMaintCapacity(keys)),
+    // 8b단계: 표지(topVer — ##TOP 수집 · 엣지 대행 /bm-usage/top 이 있다) · 저활용 하루 계산 결과(행 — 대상 목록 안의 서버만 · 이력).
+    ...(await envelopeIdle(keys)),
   };
+}
+/** 8b단계 봉투 필드 — 표지(topVer · idleVer)는 계산 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다). 실패해도 봉투는 나간다. */
+export const TOP_VER = 1;
+export const IDLE_VER = 1;
+const IDLE_FIELDS = ['key', 'status', 'reason', 'score', 'days', 'excludedDays', 'grades', 'dropped', 'metrics', 'periodic', 'candSince', 'candLeft'];
+async function envelopeIdle(keys) {
+  const out = { topVer: TOP_VER, idleVer: IDLE_VER };
+  try {
+    const I = (await import('./idle.js')).loadIdle();
+    if (I) {
+      out.idle = I.unreadable ? { unreadable: true, rows: [] }
+        : { at: I.at, day: I.day, firstDay: I.firstDay || null, cfg: I.cfg, history: I.history || [], ...(I.truncated ? { truncated: 'rows-cap' } : {}),
+          rows: (I.rows || []).filter((r) => keys.has(t(r.key))).map((r) => Object.fromEntries(IDLE_FIELDS.filter((k) => r[k] !== undefined && r[k] !== null).map((k) => [k, r[k]]))) };
+    }
+  } catch { /* 그 필드만 빠진다 */ }
+  return out;
+}
+/** 8a단계 봉투 필드 — 표지(maintVer · capacityVer)는 계산 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다). 실패해도 봉투는 나간다. */
+export const MAINT_VER = 1;
+export const CAPACITY_VER = 1;
+const CAP_FIELDS = ['key', 'kind', 'res', 'status', 'reason', 'grade', 'current', 'max30', 'slope', 'slope30', 'r2', 'conf', 'n', 'targetPct', 'daysToTarget', 'dateToTarget', 'daysTo100', 'dateTo100',
+  'beyondTarget', 'beyond100', 'reset', 'resetDay', 'resets30', 'excluded', 'missing', 'sizeBytes', 'dailyWin', 'lastDay', 'staleDays', 'stale'];
+async function envelopeMaintCapacity(keys) {
+  const out = { maintVer: MAINT_VER, capacityVer: CAPACITY_VER };
+  try {
+    const ST = await import('./maint/store.js'); const R = await import('./maint/runtime.js');
+    const w = ST.windowsForJudge(Date.now());
+    const s = R.maintStats();
+    out.maint = { deployed: w.deployed, local: w.windows.filter((x) => x.origin !== 'central' && !x.deleted).length, ...(w.localUnreadable ? { localUnreadable: true } : {}),
+      byWindow: Object.fromEntries(Object.entries(s.byWindow || {}).slice(0, 500)), leak: s.leak };
+  } catch { /* 그 필드만 빠진다 */ }
+  try {
+    const C = (await import('./capacity.js')).loadCapacity();
+    if (C) {
+      out.capacity = C.unreadable ? { unreadable: true, rows: [] }
+        : { at: C.at, day: C.day, cfg: C.cfg, ...(C.truncated ? { truncated: 'rows-cap' } : {}), ...(C.cap ? { cap: C.cap } : {}),
+          rows: (C.rows || []).filter((r) => keys.has(t(r.key))).map((r) => Object.fromEntries(CAP_FIELDS.filter((k) => r[k] !== undefined && r[k] !== null).map((k) => [k, r[k]]))) };
+    }
+  } catch { /* */ }
+  return out;
+}
+/** 7a단계 봉투 필드 — 표지(logsVer)는 첫 주기 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다 · 6단계 반증 F3). 실패해도 봉투는 나간다. */
+export const LOGS_VER = 1;
+async function envelopeLogs(keys) {
+  const out = { logsVer: LOGS_VER };
+  try {
+    const V = await import('./logs/view.js');
+    const sum = await V.logSummaryNow();
+    // 봉투에는 상위 5 · 표본 160자 · 서명 120자(1,000대 ≈ 2MB 안팎 추정 — 상세는 볼 때 대행). 넘치면 fitEnvelope 가 더 줄이고 밝힌다.
+    if (Array.isArray(sum?.list)) out.logSummary = sum.list.filter((x) => keys.has(t(x.key))).map((x) => ({ ...x, top: (x.top || []).slice(0, 5).map((p) => ({ ...p, tmpl: String(p.tmpl || '').slice(0, 120), sample: String(p.sample || '').slice(0, 160) })) }));
+  } catch { /* 그 필드만 빠진다 */ }
+  return out;
 }
 /** 5단계 봉투 필드 — 실패해도 봉투는 나간다(그 필드만 빠진다). */
 async function envelopeOps(now = Date.now()) {
   const out = {};
   try { const F = await import('./focus/run.js'); const f = await F.focusEnvelopeSummary({ now }); if (f) out.focusSummary = f; } catch { /* */ }
   try { const A = await import('./perfAlerts.js'); out.perfAlertSent = (A.perfAlertStatus().sent || []).filter((r) => Number(r?.at) >= now - 86_400_000); } catch { /* */ }
+  // 6단계 수집 건강 — 이 엣지가 매 주기 잰 값 + 주기 추이(7일 · 1시간 칸). 아직 주기가 없으면 값은 싣지 않는다(지어내지 않는다 — 중앙은 ‘아직 주기 없음’).
+  //   표지(collectHealthVer)는 주기 전에도 싣는다 — 중앙이 ‘값 없음’ 을 ‘구버전’ 과 가른다(반증 F3: 재시작 직후 6단계 엣지가 ‘엣지 버전 낮음’ 으로 보였다).
+  out.collectHealthVer = COLLECT_HEALTH_VER;
+  try {
+    const h = collectHealthNow();
+    if (h) out.collectHealth = { ...h, trend: await collectTrend({ now }) };
+  } catch { /* 그 필드만 빠진다 */ }
   return out;
+}
+
+/** 6단계 — 이 노드의 주기 추이(메인 DB collect_cycle · 7일 → 1시간 칸). 못 읽으면 빈 배열. */
+export async function collectTrend({ now = Date.now(), days = 7 } = {}) {
+  try {
+    const O = await import('./opsDb.js');
+    const rows = await O.cycleRange({ agent: config.agent?.name || '', from: now - days * 86_400_000, to: now, limit: 20_000 });
+    return rows ? hourlyTrend(rows) : [];
+  } catch { return []; }
 }

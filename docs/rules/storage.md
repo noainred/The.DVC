@@ -814,5 +814,5 @@
   · 이름 붙이기는 `storage/clientNames.js` 하나 — 장비 보고 이름(remote_name) > VM IP > 호스트 이름/관리 IP(`hostLedgerIp` 와 같은 판정) · 같은 IP 둘은 `ambiguous` · 비정규 IPv4 표기는 같은 IP 가 아니다 · **역방향 DNS 는 하지 않는다**(SSRF·지연).
   · 화면: '클라이언트 없음' 은 '연결 없음' 이 아니다(쉬는 마운트는 통계에 없다 — 문장으로) · 마지막 표본이 주기 ×3 을 넘으면 노란 머리(`lateMs` 는 응답 값) · 드로어는 모달 위 모달이 아니라 구역 안 펼침 ·
     표본 꺼진 장비는 묶음 버튼이 1시간 값으로 그려지고 드로어·분포가 그 사실을 말한다 · 묶음 순서·첫 선택은 `GROUP_ORDER`·`GROUP_FIRST`(서버 묶음과 vitest 대조). 데모는 노드 2 쏠림 · 노드 3 클라이언트 0 을 합성한다(`demoNodeLoadSample` · 48시간 5분 + 5일 1시간 백필 — 클라이언트 기록이 없을 때만).
-  · v2.938(남긴 것 정리): CSV·자유텍스트에 `nodeLoad` 칸(`exportedNodeLoad` — 아이실론만 · 빈 칸은 `undefined` 로 **유지** · 가져오기는 키를 만들지 않는다 · 위치형 `TEXT_FIELDS` 는 **맨 끝**에 — 가운데 끼우면 옛 11열 파일의 note·password 가 밀린다) ·
+  · v2.947(남긴 것 정리 — 코드 주석 표지는 v2.938): CSV·자유텍스트에 `nodeLoad` 칸(`exportedNodeLoad` — 아이실론만 · 빈 칸은 `undefined` 로 **유지** · 가져오기는 키를 만들지 않는다 · 위치형 `TEXT_FIELDS` 는 **맨 끝**에 — 가운데 끼우면 옛 11열 파일의 note·password 가 밀린다) ·
     노드 표 ID 열 → `NodeLoadPanel openNode` prop 으로 드로어(구역 scrollIntoView) · 엣지 미전송 고리 파일 보존(`storage-nodeload-ring.json` — `registerStateFile` · 2초 디바운스 + exitFlush · 되살릴 때 `sanitizeNodeLoadSample`·장비당 RING_MAX·7일 · 손상은 `preserveCorrupt`).

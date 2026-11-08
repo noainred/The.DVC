@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **283개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **296개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-07)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-08)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -55,8 +55,15 @@
 | `bareos-rehearsal-state.json` | 설정 | Bareos 복원 검증 회차 · 마지막 검증 시각 · 최근 회차 20건(상태, v2.862) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
 | `bareos-rehearsal.json` | 설정 | Bareos 복원 검증(리허설) 정책(v2.862 — 켜기 · 요일 · 시각 · 법인마다 대수 · 성공한 검증용 VM 지우기 · 법인별 데이터스토어. 비밀 없음) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
 | `bareos.json` | 설정 | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/settings.js |
+| `bm-capacity.json` | 설정 | 리눅스 성능 8a단계 **용량 소진 예측**(설계 PROFILES §20 ⑱ · 아트보드 Capacity). 판정이 아니라 ‘참고’ 다(ML 없음 · 선형만). | ✅ | ✅ | ✅ | bmusage/capacity.js |
+| `bm-idle.json` | 설정 | 리눅스 성능 8b단계 **저활용 서버 찾기**(설계 PROFILES §20 ㉑ · 아트보드 Idle). 판정이 아니라 **후보 표시**다(‘저활용 ≠ 불필요’ — 사람이 확인하고 남긴다). | ✅ | ✅ | ✅ | bmusage/idle.js |
+| `bm-onboard-applied.json` | 설정 | 엣지가 중앙의 **배포 목록**을 자기 등록부에 적용한다(7b단계 · 엣지 쪽). | ✅ | ✅ | ✅ | bmusage/onboard/edgeApply.js |
+| `bm-onboard-edge.json` | 설정 | 수집 경로 ‘edge’ 로 등록한 서버의 **엣지 배포 목록**(중앙 · 7b단계 · 설계 PROFILES §18 '엣지 배포(법인 단위)'). | ✅ | ✅ | ✅ | bmusage/onboard/edgeDeploy.js |
 | `bm-perf-alert-state.json` | 설정 | 리눅스 성능 **알림 규칙**(v2.929 예정 · 5단계 · 설계 PROFILES §14 ① · 아트보드 Alerts). | ✅ | ✅ | ✅ | bmusage/perfAlerts.js |
+| `bm-perf-annotations.json` | 설정 | 리눅스 성능 6단계 **운영 주석**(설계 PROFILES §16 A · 아트보드 Annot) 저장소. | ✅ | ✅ | ✅ | bmusage/annotations.js |
+| `bm-perf-compare-sets.json` | 설정 | 리눅스 성능 6단계 **저장된 비교 세트**(사용자별 · 중앙 저장 · 설계 PROFILES §15 ‘저장된 세트(사용자별 · 서버 키 목록 · 범위 설정 포함)’). | ✅ | ✅ | ✅ | bmusage/compareSets.js |
 | `bm-perf-rules.json` | 설정 | 리눅스 성능 5단계(v2.929 예정) **알림 규칙 · 집중 모니터링 · 베이스라인 · 점검 소모품 · 변경 이벤트 · 구간 비교** 설정(설계 PROFILES §13·§14 · 아트보드 Aler | ✅ | ✅ | ✅ | bmusage/perfRules.js |
+| `bm-perf-slo.json` | 설정 | 리눅스 성능 6단계 **목표선(SLO)**(설계 PROFILES §16 D · 아트보드 Runbook ‘목표선’). | ✅ | ✅ | ✅ | bmusage/slo.js |
 | `bm-storage.json` | 설정 | 베어메탈 스토리지 서버 목록 + 설정(v2.340). | ✅ | ✅ | ✅ | bmstor/registry.js |
 | `bm-usage.db` | DB | 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |  | ✅ | ✅ | bmusage/db.js, bmusage/poller.js |
 | `bmstor-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bmstor/poller.js |
@@ -107,6 +114,7 @@
 | `finops.json` | 설정 | FinOps — 전력 수집(iDRAC/OME/원격) 데이터를 kWh·전기요금·CO2로 환산해 vCenter/지역별로 | ✅ | ✅ |  | insights/finops.js |
 | `fleet-assign.json` | 설정 | 통합 서버 인벤토리 — 베어메탈/물리 서버의 '소속 법인(vCenter)' 수동 등록 저장. | ✅ | ✅ |  | insights/fleetAssign.js |
 | `fleet-tags.json` | 설정 | 통합 서버 인벤토리 — 수동 분류 예외(override) 저장. | ✅ | ✅ |  | insights/fleetTags.js |
+| `gpu-alloc.db` | DB | GPU 할당율 **일 단위 이력**(v2.939 개선 7 · gpu-alloc.db). |  |  | ✅ | config.js, gpu/allocHistory.js |
 | `gpu-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | gpu/sshCollect.js |
 | `gpu-guest.json` | 설정 | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 | ✅ | ✅ | ✅ | gpu/settings.js |
 | `gpu-physical.json` | 설정 | 물리(베어메탈) GPU 서버 등록부 — 가상화하지 않은 서버를 IP+계정으로 등록해 SSH(nvidia-smi)로 | ✅ | ✅ | ✅ | gpu/physicalRegistry.js |
@@ -173,6 +181,9 @@
 | `login-policy-users.txt` | 텍스트 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `mail-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | mail/service.js |
 | `mail.json` | 설정 | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | ✅ | ✅ | ✅ | mail/settings.js |
+| `maintenance-stats.json` | 설정 | 정비 창 판정의 **노드 실행 면**(8a단계): 판정기 만들기 · 억제 계수 · ‘창 끝 뒤 억제’ 점검. | ✅ | ✅ | ✅ | bmusage/maint/runtime.js |
+| `maintenance-windows-deployed.json` | 설정 | 리눅스 성능 8a단계 **정비 창 저장소**(`maintenance-windows.json` · 엣지 배포본 `maintenance-windows-deployed.json`). | ✅ | ✅ | ✅ | bmusage/maint/store.js |
+| `maintenance-windows.json` | 설정 | 리눅스 성능 8a단계 **정비 창 저장소**(`maintenance-windows.json` · 엣지 배포본 `maintenance-windows-deployed.json`). | ✅ | ✅ | ✅ | bmusage/maint/store.js |
 | `metrics.json` | 설정 | Runtime-editable metrics sampler settings (온도/용량/GPU 수집 주기·보존기간). | ✅ | ✅ | ✅ | metrics/settings.js |
 | `net-issues-state.json` | 설정 | 게스트 네트워크 이슈 저장소 — 스캔마다 직전 카운터와 비교해 '증가분(델타)'을 산출하고, | ✅ |  | ✅ | security/netIssueStore.js |
 | `net-issues.ndjson` | 로그(NDJSON) | 게스트 네트워크 이슈 저장소 — 스캔마다 직전 카운터와 비교해 '증가분(델타)'을 산출하고, | ✅ |  | ✅ | security/netIssueStore.js |
@@ -181,6 +192,7 @@
 | `notices.json` | 설정 | 접속 공지(팝업)와 게시판 글 저장소(v2.722). | ✅ | ✅ | ✅ | bulletin/store.js |
 | `nsx-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | nsx/client.js |
 | `nsx.json` | 설정 | NSX Manager registry — read/write the managed list in CONFIG_DIR/nsx.json, | ✅ | ✅ | ✅ | nsx/registry.js |
+| `onboard-prev` | 디렉터리 | 서버 등록(온보딩) 분석 → 적용(7b단계 · 설계 PROFILES §18 '연결 시험 → 적용 → 엣지 배포'). | ✅ |  | ✅ | bmusage/onboard/onboardRun.js |
 | `os-inventory.json` | 설정 | 실제 OS 인벤토리 저장소(별도 DB) — VM별 1행, vmId 키로 upsert. | ✅ |  | ✅ | inventory/osStore.js |
 | `os-scan.json` | 설정 | 실제 OS 인벤토리 스캐너 — 주기적으로 'DB에 없는(또는 오래된) VM'을 찾아 게스트에서 실제 OS를 읽어 저장. | ✅ |  | ✅ | inventory/osScanner.js |
 | `packages` | 디렉터리 | 디렉터리 — 내려받은 설치/업그레이드 패키지 보관(PACKAGE_DIR) |  |  |  | config.js |
@@ -234,6 +246,7 @@
 | `session-state.json` | 설정 | 세션 폐기·유휴 상태(로그아웃·폐기 기록, 검토 S-05·S-06) | ✅ | ✅ | ✅ | auth/sessionState.js |
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `ssh` | 디렉터리 | 아이실론 디렉터리 사용량 SSH 키 디렉터리(ssh/isidu_key — 0700/0600, v2.736) |  |  | ✅ | isidu/sshKey.js |
+| `ssh-keys.json` | 설정 | SSH 키 저장소 + 법인 공통 계정(7b단계 · 설계 PROFILES §18 'SSH 키 저장소' · §19 자격증명). | ✅ | ✅ | ✅ | bmusage/onboard/keyStore.js |
 | `storage-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | storage/activityLog.js |
 | `storage-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | storage/authGuard.js |
 | `storage-devices.json` | 설정 | 스토리지 장비 등록부(v2.302). | ✅ | ✅ | ✅ | storage/registry.js |

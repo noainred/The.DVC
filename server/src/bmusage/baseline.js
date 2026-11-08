@@ -35,6 +35,9 @@ export function slotHours(at, weeks = 4) {
 export function bandOf(weekly = [], { bandPct = 40, minWeeks = 4, maxMissingPct = 25, expectedPerHour = 12 } = {}) {
   const exp = Math.max(1, Number(expectedPerHour) || 12);
   let have = 0; let got = 0; const vals = [];
+  // 8a단계 ⑤: 정비 창(⑤ 롤업 제외를 켠 창)이 걸친 주는 **표본에서 뺀다**(값도 결측도 아니다 — 분모에서 빠진다). 뺀 주 수를 적는다.
+  const excluded = weekly.filter((w) => w?.excluded).length;
+  weekly = weekly.filter((w) => !w?.excluded);
   for (const w of weekly) {
     const s = n(w?.samples) ?? 0;
     got += Math.min(exp, s);
@@ -42,12 +45,13 @@ export function bandOf(weekly = [], { bandPct = 40, minWeeks = 4, maxMissingPct 
   }
   const total = weekly.length * exp;
   const missingPct = total > 0 ? Math.round(((total - got) / total) * 1000) / 10 : 100;
-  if (have < minWeeks) return { reason: have === 0 ? 'no-history' : 'few-weeks', weeks: have, missingPct };
-  if (missingPct > maxMissingPct) return { reason: 'missing', weeks: have, missingPct };
+  const ex = excluded ? { excluded } : {};
+  if (have < minWeeks) return { reason: have === 0 ? 'no-history' : 'few-weeks', weeks: have, missingPct, ...ex };
+  if (missingPct > maxMissingPct) return { reason: 'missing', weeks: have, missingPct, ...ex };
   const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
   const p = Math.max(0, Number(bandPct) || 0) / 100;
   const r2 = (v) => Math.round(v * 100) / 100;
-  return { mean: r2(mean), lo: r2(mean * (1 - p)), hi: r2(mean * (1 + p)), weeks: have, missingPct };
+  return { mean: r2(mean), lo: r2(mean * (1 - p)), hi: r2(mean * (1 + p)), weeks: have, missingPct, ...ex };
 }
 
 /** 지금 값의 이탈(순수) — 띠가 없으면 null. ratio = 값 ÷ 평균(평균이 0 이면 null — 0 으로 나누지 않는다). */
@@ -76,12 +80,18 @@ export function hourlyAvgMap(rows = [], metric) {
  * @param {Map} avgMap   hourlyAvgMap(창 시작 − weeks 주 ~ 창 끝)
  * @returns {Promise<Array<{t:number, mean?:number, lo?:number, hi?:number, reason?:string}>>}
  */
-export async function bandSeries(avgMap, { from, to, cfg, yieldFn = async () => {} } = {}) {
+/** 8a단계 ⑤: 그 시간 [h, h+1h) 이 정비 창 제외 구간과 겹치는가(순수 — 구간은 maint/judge.js coverIntervals 결과 · 오름차순). */
+export function hourExcluded(h, iv = []) {
+  for (const x of iv) { if (x.from >= h + HOUR) break; if (x.to > h) return true; }
+  return false;
+}
+export async function bandSeries(avgMap, { from, to, cfg, yieldFn = async () => {}, excludeIv = null } = {}) {
   const out = [];
+  const iv = Array.isArray(excludeIv) ? excludeIv : [];
   for (let h = hourStart(from); h <= to; h += HOUR) {
-    const weekly = slotHours(h + 1, cfg.weeks).map((x) => ({ h: x, ...(avgMap.get(x) || { avg: null, samples: 0 }) }));
+    const weekly = slotHours(h + 1, cfg.weeks).map((x) => ({ h: x, ...(avgMap.get(x) || { avg: null, samples: 0 }), ...(iv.length && hourExcluded(x, iv) ? { excluded: true } : {}) }));
     const b = bandOf(weekly, cfg);
-    out.push({ t: h, ...(b.reason ? { reason: b.reason, weeks: b.weeks } : { mean: b.mean, lo: b.lo, hi: b.hi, weeks: b.weeks }) });
+    out.push({ t: h, ...(b.reason ? { reason: b.reason, weeks: b.weeks } : { mean: b.mean, lo: b.lo, hi: b.hi, weeks: b.weeks }), ...(b.excluded ? { excluded: b.excluded } : {}) });
     await yieldFn();
   }
   return out;
@@ -93,7 +103,7 @@ const MEMO_MS = 10 * 60_000;
 const MEMO_MAX = 500;
 /** 띠 계열 하나(라우트 · 엣지 대행 공용). 창은 최대 14일(띠는 시간 단위라 그 이상은 1시간 점이 너무 많다 — 넘으면 끝에서 14일). */
 export const BAND_MAX_SPAN_MS = 14 * 86_400_000;
-export async function readBandSeries({ agent = '', key, metric, from, to, cfg, intervalMs = 300_000, now = Date.now(), deps = {} } = {}) {
+export async function readBandSeries({ agent = '', key, metric, from, to, cfg, intervalMs = 300_000, now = Date.now(), deps = {}, excludeIv = null, exclSig = '' } = {}) {
   if (!BASELINE_METRICS.includes(metric)) return { ok: false, __status: 400, reason: `베이스라인 지표가 아닙니다(${BASELINE_METRICS.join('·')})` };
   let a = n(from); let b = n(to);
   if (b == null || b > now) b = now;
@@ -102,14 +112,14 @@ export async function readBandSeries({ agent = '', key, metric, from, to, cfg, i
   let capped = false;
   if (b - a > BAND_MAX_SPAN_MS) { a = b - BAND_MAX_SPAN_MS; capped = true; }
   const c = { ...cfg, expectedPerHour: Math.max(1, Math.round(HOUR / Math.max(60_000, Number(intervalMs) || 300_000))) };
-  const memoKey = `${agent}|${key}|${metric}|${hourStart(a)}|${hourStart(b)}|${c.weeks}|${c.bandPct}|${c.minWeeks}|${c.maxMissingPct}|${c.expectedPerHour}`;
+  const memoKey = `${agent}|${key}|${metric}|${hourStart(a)}|${hourStart(b)}|${c.weeks}|${c.bandPct}|${c.minWeeks}|${c.maxMissingPct}|${c.expectedPerHour}|${exclSig}`;
   const hit = _memo.get(memoKey);
   if (hit && now - hit.at < MEMO_MS) return { ...hit.value, cached: true };
   const read = deps.readHourlyRange || (async (o) => (await import('./monthStore.js')).readHourlyRange(o));
   const r = await read({ agent, key, from: hourStart(a) - c.weeks * WEEK, to: b });
   const avgMap = hourlyAvgMap(r.rows || [], metric);
   const y = createYielder(15);
-  const series = await bandSeries(avgMap, { from: a, to: b, cfg: c, yieldFn: y });
+  const series = await bandSeries(avgMap, { from: a, to: b, cfg: c, yieldFn: y, excludeIv });
   const value = { ok: true, key, metric, from: a, to: b, weeks: c.weeks, bandPct: c.bandPct, minWeeks: c.minWeeks, maxMissingPct: c.maxMissingPct, series,
     ...(capped ? { capped: true } : {}), ...((r.missingPeriods || []).length ? { missingPeriods: (r.missingPeriods || []).filter((x) => x.reason !== 'none').slice(0, 16) } : {}) };
   _memo.set(memoKey, { at: now, value });
@@ -122,10 +132,11 @@ export async function readBandSeries({ agent = '', key, metric, from, to, cfg, i
  *   파일마다 `SELECT … FROM usage_hourly WHERE agent=? AND h IN (?,?,?,?)` 한 문장(h 인덱스). 반환 Map(key → Map(metric → band)).
  */
 let _slot = null;   // { h, cfgSig, at, bands: Map }
-export async function slotBands({ agent = '', cfg, intervalMs = 300_000, now = Date.now(), deps = {} } = {}) {
+export async function slotBands({ agent = '', cfg, intervalMs = 300_000, now = Date.now(), deps = {}, exclOf = null, exclSig = '' } = {}) {
   const h = hourStart(now);
   const c = { ...cfg, expectedPerHour: Math.max(1, Math.round(HOUR / Math.max(60_000, Number(intervalMs) || 300_000))) };
-  const sig = `${agent}|${c.weeks}|${c.bandPct}|${c.minWeeks}|${c.maxMissingPct}|${c.expectedPerHour}`;
+  // 8a단계 ⑤: exclOf(key) → 그 서버의 제외 구간(정비 창) · exclSig = 창 세대(바뀌면 다시 계산 — 메모가 지난 창으로 남지 않게).
+  const sig = `${agent}|${c.weeks}|${c.bandPct}|${c.minWeeks}|${c.maxMissingPct}|${c.expectedPerHour}|${exclSig}`;
   if (_slot && _slot.h === h && _slot.cfgSig === sig) return _slot.bands;
   const hours = slotHours(now, c.weeks);
   const forEach = deps.forEachPeriod || (async (...a) => (await import('./monthStore.js')).forEachPeriod(...a));
@@ -142,9 +153,11 @@ export async function slotBands({ agent = '', cfg, intervalMs = 300_000, now = D
   const bands = new Map();
   for (const [key, list] of byKey) {
     const per = new Map();
+    let iv = null;
+    if (typeof exclOf === 'function') { try { iv = exclOf(key, Math.min(...hours), Math.max(...hours) + HOUR); } catch { iv = null; } }
     for (const m of BASELINE_METRICS) {
       const am = hourlyAvgMap(list, m);
-      per.set(m, bandOf(hours.map((x) => ({ h: x, ...(am.get(x) || { avg: null, samples: 0 }) })), c));
+      per.set(m, bandOf(hours.map((x) => ({ h: x, ...(am.get(x) || { avg: null, samples: 0 }), ...(iv?.length && hourExcluded(x, iv) ? { excluded: true } : {}) })), c));
     }
     bands.set(key, per);
   }

@@ -23,6 +23,7 @@
  * node:sqlite 미지원 환경은 no-op 폴백 — 수집·화면은 살고 DB 만 비활성(`available()` 이 밝힌다).
  */
 import fs from 'node:fs';
+import { pushAll } from '../util/pushAll.js';
 import path from 'node:path';
 import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -147,7 +148,24 @@ async function openDb() {
       );
       CREATE INDEX IF NOT EXISTS idx_bm_change_ts ON change_event(ts);
       CREATE INDEX IF NOT EXISTS idx_bm_change_key ON change_event(key, ts);
-      CREATE TABLE IF NOT EXISTS change_latest (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER, facts_json TEXT, PRIMARY KEY (agent, key));`);
+      CREATE TABLE IF NOT EXISTS change_latest (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER, facts_json TEXT, PRIMARY KEY (agent, key));
+      CREATE TABLE IF NOT EXISTS collect_cycle (agent TEXT NOT NULL DEFAULT '', ts INTEGER NOT NULL, ms INTEGER, budget_ms INTEGER, servers INTEGER, ok INTEGER,
+        conc_max INTEGER, conc_cap INTEGER, ssh_p50 INTEGER, ssh_p95 INTEGER, PRIMARY KEY (agent, ts));
+      CREATE INDEX IF NOT EXISTS idx_bm_cycle_ts ON collect_cycle(ts);
+      /* 7a단계(bmusage/logs/store.js — 서버 로그 분석): 읽기 위치(서버당 1행 · rev 로 비교 후 쓰기 — 늦게 끝난 옛 주기가 새 위치를 덮지 않게) ·
+         패턴(서명별 누적 · 가린 표본 5줄) · 시간 집계(패턴 · 분류 안 됨 · 읽은 양 · 잘림 — 시각 단독 인덱스로 청크 정리) · 보안 상위(IP · 계정 — 시간 · 종류마다 상한).
+         원문 전체는 없다(설계 §17). 보관은 perfRules logs.keepDays(청크 DELETE — 메인 파일). */
+      CREATE TABLE IF NOT EXISTS log_cursor (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, at INTEGER NOT NULL, rev INTEGER NOT NULL DEFAULT 0,
+        state_json TEXT, status_json TEXT, bad_json TEXT, PRIMARY KEY (agent, key));
+      CREATE TABLE IF NOT EXISTS log_pattern (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, sig TEXT NOT NULL, cls TEXT NOT NULL, severity TEXT, rule_id TEXT,
+        src TEXT, unit TEXT, tmpl TEXT, count INTEGER NOT NULL DEFAULT 0, first INTEGER, last INTEGER, samples_json TEXT, PRIMARY KEY (agent, key, sig));
+      CREATE INDEX IF NOT EXISTS idx_bm_logpat_last ON log_pattern(last);
+      CREATE TABLE IF NOT EXISTS log_hour (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, hour INTEGER NOT NULL, sig TEXT NOT NULL, cls TEXT NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (agent, key, hour, sig));
+      CREATE INDEX IF NOT EXISTS idx_bm_loghour_hour ON log_hour(hour);
+      CREATE TABLE IF NOT EXISTS log_sec (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, hour INTEGER NOT NULL, kind TEXT NOT NULL, item TEXT NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (agent, key, hour, kind, item));
+      CREATE INDEX IF NOT EXISTS idx_bm_logsec_hour ON log_sec(hour);`);
     // v2.919(리눅스 성능 1단계): 새 열은 CREATE 문이 아니라 **ALTER 마이그레이션**으로 더한다 — 기존 DB(v2.918 이하)와 새 DB 가
     //   같은 경로를 탄다(두 벌 스키마가 갈라지지 않게). ADD COLUMN 은 표를 다시 쓰지 않는다(O(1)).
     const mig = migratePerfColumns(conn);
@@ -579,6 +597,28 @@ export async function latestUsage({ json = false } = {}) {
   } catch { return []; }
 }
 let _latestLiteSql = null;
+
+/**
+ * 8a단계 용량 예측(xfs · btrfs 동적 inode 판별) — 이 노드(agent) 최신값의 **key · tuning_json 두 열만** 키 순 조각(기본 200행)으로 읽는다.
+ *   조각 사이 yieldFn(시간 기준 양보) — SELECT * 를 JSON 열까지 한 번에 동기로 읽지 않는다(반증 의심 항목). 기본 키(agent, key) 순서라 조각마다 인덱스로 이어 읽는다.
+ */
+export async function latestTuningRows({ agent = '', chunk = 200, yieldFn = null } = {}) {
+  const db = await getDb();
+  if (!db) return [];
+  const out = [];
+  try {
+    const st = db.prepare('SELECT key, tuning_json FROM usage_latest WHERE agent = ? AND key > ? AND tuning_json IS NOT NULL ORDER BY key LIMIT ?');
+    let after = '';
+    for (let i = 0; i < 10_000; i += 1) {
+      const rows = st.all(String(agent || ''), after, chunk);
+      pushAll(out, rows);
+      if (rows.length < chunk) break;
+      after = String(rows[rows.length - 1].key);
+      if (yieldFn) await yieldFn();
+    }
+  } catch { /* 열이 없는 옛 DB · 열기 실패 — 모르면 비운다(상한 있음으로 본다) */ }
+  return out;
+}
 
 /**
  * 원시 추이(한 서버). 상한을 두고 **잘렸으면 밝힌다**(조용한 상한 금지).
