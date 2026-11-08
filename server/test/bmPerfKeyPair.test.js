@@ -209,6 +209,23 @@ test('③ 쓰기 — 주석 · 검토 · 정비 창 · 집중 · 포트 매핑 �
   assert.notEqual(puA.status, 404);
 });
 
+test('②-2 사용률 추이(/history — 이 노드 원시만) · 목표 설정(서버별 목표 — 같은 키 여러 법인이면 범위 안 법인 하나라도 있으면 보인다)', async (t) => {
+  const { call } = await setup(t);
+  // /history 는 이 노드 대상만 본다(localOnly) — 엣지 보관분 B · C 가 같은 키여도 이 노드 A 하나라 모호하지 않다(엣지에는 원시 이력이 없다)
+  const h = await call('adm', 'GET', '/history?key=DUPK&hours=1&days=1');
+  assert.equal(h.status, 200, JSON.stringify(h.body).slice(0, 200)); assert.equal(h.body.target.vcenterId, 'vcA');
+  assert.equal((await call('opB', 'GET', '/history?key=DUPK&hours=1')).status, 404, '범위 운영자 B — 이 노드에 자기 서버가 없다(엣지 서버의 원시 이력은 중앙에 없다)');
+  assert.equal((await call('adm', 'GET', '/history?key=DUPK&hours=1&vcenterId=vcB')).status, 404);
+  // 목표 설정 읽기 — 서버별 목표는 키 하나에 걸린다(저장 키가 쌍이 아니다 — 정직 기록) · 그 키가 범위 안 법인에 하나라도 있으면 범위 계정에 보인다(예전: 첫 법인 A 만 봐 B 계정에 숨었다)
+  const L = await import('../src/bmusage/slo.js');
+  L.saveSlo({ servers: { DUPK: [{ id: 's-cpu', metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 80, objectivePct: 99 }], GONE: [{ id: 's-x', metric: 'cpu_pct', basis: 'avg', op: 'lt', value: 80, objectivePct: 99 }] } }, { by: 'own' });
+  const sB = await call('opB', 'GET', '/slo');
+  assert.equal(sB.status, 200); assert.equal(sB.body.serversHidden, 1, '비관리자 — 개수만(키는 싣지 않는다) · 범위 B 에 DUPK 가 있다(기준판 0)');
+  const sA = await call('admA', 'GET', '/slo');
+  assert.deepEqual(Object.keys(sA.body.slo.servers), ['DUPK']);
+  L.saveSlo({ servers: {} }, { by: 'own' });
+});
+
 test('④ 저장 단계 — 같은 노드 같은 키는 둘 다 수집하지 않는다(key-conflict) · 기본키 (agent, key) 가 섞임을 만든다(실제 DB)', async (t) => {
   // 실제 폴러 대상 해석(currentTargets) — 다른 vCenter 의 같은 키 두 대(IP 로 등록한 iDRAC — 키 = IP)
   fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [
