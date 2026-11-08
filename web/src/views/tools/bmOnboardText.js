@@ -22,6 +22,8 @@ export const MISS_REASON_TEXT = Object.freeze({
   'no-idrac-cred': 'iDRAC 계정 없음',
   'no-os-cred': 'OS 계정 없음',
   'both-off': 'iDRAC · OS 수집이 모두 꺼짐',
+  'os-ambiguous': 'OS 등록을 하나로 못 정함(같은 이름 · 주소 등록이 여럿이거나 법인 미지정) — 등록에 법인을 지정하면 풀립니다',   // 2차 재확인 G3
+  'os-foreign': 'OS 등록이 다른 법인으로 지정돼 있어 쓰지 않음',
   'key-conflict': '식별 키가 이 노드의 다른 서버와 겹쳐 수집하지 않음(값이 섞이지 않게) — 서비스태그를 채우면 풀립니다',   // 다음 점검 ①
 });
 export const KEY_STATUS_TEXT = Object.freeze({ active: '사용', retired: '퇴역(회전됨)' });

@@ -990,11 +990,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/bm-storage/servers` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:84](../server/src/routes/api/bmstor.js#L84) |
 | DELETE | `/tools/bm-storage/servers/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:106](../server/src/routes/api/bmstor.js#L106) |
 | PUT | `/tools/bm-storage/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:113](../server/src/routes/api/bmstor.js#L113) |
-| GET | `/tools/bm-usage` | 권한 `tools` | [server/src/routes/api/bmUsage.js:927](../server/src/routes/api/bmUsage.js#L927) |
+| GET | `/tools/bm-usage` | 권한 `tools` | [server/src/routes/api/bmUsage.js:951](../server/src/routes/api/bmUsage.js#L951) |
 | GET | `/tools/bm-usage/accounts` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:113](../server/src/routes/api/bmOnboard.js#L113) |
 | POST | `/tools/bm-usage/accounts` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:121](../server/src/routes/api/bmOnboard.js#L121) |
 | DELETE | `/tools/bm-usage/accounts/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:133](../server/src/routes/api/bmOnboard.js#L133) |
-| GET | `/tools/bm-usage/activity` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1189](../server/src/routes/api/bmUsage.js#L1189) |
+| GET | `/tools/bm-usage/activity` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1213](../server/src/routes/api/bmUsage.js#L1213) |
 | GET | `/tools/bm-usage/annotations` | 권한 `tools` | [server/src/routes/api/bmAnnotations.js:176](../server/src/routes/api/bmAnnotations.js#L176) |
 | POST | `/tools/bm-usage/annotations` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmAnnotations.js:180](../server/src/routes/api/bmAnnotations.js#L180) |
 | DELETE | `/tools/bm-usage/annotations/:id` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmAnnotations.js:182](../server/src/routes/api/bmAnnotations.js#L182) |
@@ -1002,26 +1002,26 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/bm-usage/capacity` | 권한 `tools` | [server/src/routes/api/bmCapacity.js:107](../server/src/routes/api/bmCapacity.js#L107) |
 | GET | `/tools/bm-usage/capacity/:key` | 권한 `tools` | [server/src/routes/api/bmCapacity.js:108](../server/src/routes/api/bmCapacity.js#L108) |
 | POST | `/tools/bm-usage/capacity/recompute` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmCapacity.js:109](../server/src/routes/api/bmCapacity.js#L109) |
-| POST | `/tools/bm-usage/collect` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1161](../server/src/routes/api/bmUsage.js#L1161) |
+| POST | `/tools/bm-usage/collect` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1185](../server/src/routes/api/bmUsage.js#L1185) |
 | GET | `/tools/bm-usage/collect-health` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmCollectHealth.js:173](../server/src/routes/api/bmCollectHealth.js#L173) |
 | GET | `/tools/bm-usage/compare` | 권한 `tools` | [server/src/routes/api/bmCompare.js:261](../server/src/routes/api/bmCompare.js#L261) |
 | POST | `/tools/bm-usage/compare/focus` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmCompare.js:262](../server/src/routes/api/bmCompare.js#L262) |
 | GET | `/tools/bm-usage/compare/sets` | 권한 `tools` | [server/src/routes/api/bmCompare.js:263](../server/src/routes/api/bmCompare.js#L263) |
 | PUT | `/tools/bm-usage/compare/sets` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmCompare.js:264](../server/src/routes/api/bmCompare.js#L264) |
 | DELETE | `/tools/bm-usage/compare/sets/:id` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmCompare.js:265](../server/src/routes/api/bmCompare.js#L265) |
-| PUT | `/tools/bm-usage/distribute` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/bmUsage.js:1380](../server/src/routes/api/bmUsage.js#L1380) |
-| PUT | `/tools/bm-usage/distribute/edge` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/bmUsage.js:1406](../server/src/routes/api/bmUsage.js#L1406) |
-| GET | `/tools/bm-usage/edges` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1247](../server/src/routes/api/bmUsage.js#L1247) |
-| POST | `/tools/bm-usage/edges/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1333](../server/src/routes/api/bmUsage.js#L1333) |
-| GET | `/tools/bm-usage/faults` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1061](../server/src/routes/api/bmUsage.js#L1061) |
+| PUT | `/tools/bm-usage/distribute` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/bmUsage.js:1404](../server/src/routes/api/bmUsage.js#L1404) |
+| PUT | `/tools/bm-usage/distribute/edge` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/bmUsage.js:1430](../server/src/routes/api/bmUsage.js#L1430) |
+| GET | `/tools/bm-usage/edges` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1271](../server/src/routes/api/bmUsage.js#L1271) |
+| POST | `/tools/bm-usage/edges/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1357](../server/src/routes/api/bmUsage.js#L1357) |
+| GET | `/tools/bm-usage/faults` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1085](../server/src/routes/api/bmUsage.js#L1085) |
 | GET | `/tools/bm-usage/focus` | 권한 `tools` | [server/src/routes/api/bmPerfOps.js:273](../server/src/routes/api/bmPerfOps.js#L273) |
-| GET | `/tools/bm-usage/history` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1118](../server/src/routes/api/bmUsage.js#L1118) |
+| GET | `/tools/bm-usage/history` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1142](../server/src/routes/api/bmUsage.js#L1142) |
 | GET | `/tools/bm-usage/idle` | 권한 `tools` | [server/src/routes/api/bmIdle.js:161](../server/src/routes/api/bmIdle.js#L161) |
 | POST | `/tools/bm-usage/idle/recompute` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmIdle.js:165](../server/src/routes/api/bmIdle.js#L165) |
 | POST | `/tools/bm-usage/idle/review` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmIdle.js:162](../server/src/routes/api/bmIdle.js#L162) |
-| GET | `/tools/bm-usage/key-overlaps` | 권한 `tools` | [server/src/routes/api/bmKeyOverlaps.js:143](../server/src/routes/api/bmKeyOverlaps.js#L143) |
-| DELETE | `/tools/bm-usage/key-overlaps/decision` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmKeyOverlaps.js:147](../server/src/routes/api/bmKeyOverlaps.js#L147) |
-| POST | `/tools/bm-usage/key-overlaps/decision` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmKeyOverlaps.js:146](../server/src/routes/api/bmKeyOverlaps.js#L146) |
+| GET | `/tools/bm-usage/key-overlaps` | 권한 `tools` | [server/src/routes/api/bmKeyOverlaps.js:144](../server/src/routes/api/bmKeyOverlaps.js#L144) |
+| DELETE | `/tools/bm-usage/key-overlaps/decision` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmKeyOverlaps.js:148](../server/src/routes/api/bmKeyOverlaps.js#L148) |
+| POST | `/tools/bm-usage/key-overlaps/decision` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmKeyOverlaps.js:147](../server/src/routes/api/bmKeyOverlaps.js#L147) |
 | GET | `/tools/bm-usage/logs` | 권한 `tools` | [server/src/routes/api/bmLogs.js:154](../server/src/routes/api/bmLogs.js#L154) |
 | GET | `/tools/bm-usage/maintenance` | 권한 `tools` | [server/src/routes/api/bmMaint.js:303](../server/src/routes/api/bmMaint.js#L303) |
 | POST | `/tools/bm-usage/maintenance` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmMaint.js:314](../server/src/routes/api/bmMaint.js#L314) |
@@ -1031,43 +1031,43 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/bm-usage/maintenance/:id/end` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmMaint.js:316](../server/src/routes/api/bmMaint.js#L316) |
 | GET | `/tools/bm-usage/maintenance/occurrences` | 권한 `tools` | [server/src/routes/api/bmMaint.js:307](../server/src/routes/api/bmMaint.js#L307) |
 | POST | `/tools/bm-usage/maintenance/preview` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmMaint.js:311](../server/src/routes/api/bmMaint.js#L311) |
-| POST | `/tools/bm-usage/onboard/analyze` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:193](../server/src/routes/api/bmOnboard.js#L193) |
-| POST | `/tools/bm-usage/onboard/apply` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:209](../server/src/routes/api/bmOnboard.js#L209) |
-| GET | `/tools/bm-usage/onboard/codes` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:324](../server/src/routes/api/bmOnboard.js#L324) |
-| DELETE | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:256](../server/src/routes/api/bmOnboard.js#L256) |
-| GET | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:238](../server/src/routes/api/bmOnboard.js#L238) |
-| GET | `/tools/bm-usage/onboard/missing` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:269](../server/src/routes/api/bmOnboard.js#L269) |
-| GET | `/tools/bm-usage/onboard/template.csv` | 역할 `admin` · 권한 `tools`, `data.csv` | [server/src/routes/api/bmOnboard.js:181](../server/src/routes/api/bmOnboard.js#L181) |
-| POST | `/tools/bm-usage/onboard/test` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:310](../server/src/routes/api/bmOnboard.js#L310) |
+| POST | `/tools/bm-usage/onboard/analyze` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:208](../server/src/routes/api/bmOnboard.js#L208) |
+| POST | `/tools/bm-usage/onboard/apply` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:224](../server/src/routes/api/bmOnboard.js#L224) |
+| GET | `/tools/bm-usage/onboard/codes` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:339](../server/src/routes/api/bmOnboard.js#L339) |
+| DELETE | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:271](../server/src/routes/api/bmOnboard.js#L271) |
+| GET | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:253](../server/src/routes/api/bmOnboard.js#L253) |
+| GET | `/tools/bm-usage/onboard/missing` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:284](../server/src/routes/api/bmOnboard.js#L284) |
+| GET | `/tools/bm-usage/onboard/template.csv` | 역할 `admin` · 권한 `tools`, `data.csv` | [server/src/routes/api/bmOnboard.js:196](../server/src/routes/api/bmOnboard.js#L196) |
+| POST | `/tools/bm-usage/onboard/test` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:325](../server/src/routes/api/bmOnboard.js#L325) |
 | GET | `/tools/bm-usage/perf-rules` | 권한 `tools` | [server/src/routes/api/bmPerfOps.js:283](../server/src/routes/api/bmPerfOps.js#L283) |
 | PUT | `/tools/bm-usage/perf-rules` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` | [server/src/routes/api/bmPerfOps.js:284](../server/src/routes/api/bmPerfOps.js#L284) |
 | POST | `/tools/bm-usage/perf-rules/dry-run` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/bmPerfOps.js:285](../server/src/routes/api/bmPerfOps.js#L285) |
-| GET | `/tools/bm-usage/perf/:key` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1034](../server/src/routes/api/bmUsage.js#L1034) |
-| GET | `/tools/bm-usage/perf/:key/devices` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1038](../server/src/routes/api/bmUsage.js#L1038) |
-| GET | `/tools/bm-usage/perf/:key/faults` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1057](../server/src/routes/api/bmUsage.js#L1057) |
+| GET | `/tools/bm-usage/perf/:key` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1058](../server/src/routes/api/bmUsage.js#L1058) |
+| GET | `/tools/bm-usage/perf/:key/devices` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1062](../server/src/routes/api/bmUsage.js#L1062) |
+| GET | `/tools/bm-usage/perf/:key/faults` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1081](../server/src/routes/api/bmUsage.js#L1081) |
 | GET | `/tools/bm-usage/perf/:key/focus` | 권한 `tools` | [server/src/routes/api/bmPerfOps.js:274](../server/src/routes/api/bmPerfOps.js#L274) |
 | POST | `/tools/bm-usage/perf/:key/focus` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmPerfOps.js:276](../server/src/routes/api/bmPerfOps.js#L276) |
 | GET | `/tools/bm-usage/perf/:key/focus/:id` | 권한 `tools` | [server/src/routes/api/bmPerfOps.js:275](../server/src/routes/api/bmPerfOps.js#L275) |
 | POST | `/tools/bm-usage/perf/:key/focus/:id/stop` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmPerfOps.js:277](../server/src/routes/api/bmPerfOps.js#L277) |
-| GET | `/tools/bm-usage/perf/:key/history` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1037](../server/src/routes/api/bmUsage.js#L1037) |
+| GET | `/tools/bm-usage/perf/:key/history` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1061](../server/src/routes/api/bmUsage.js#L1061) |
 | GET | `/tools/bm-usage/perf/:key/logs` | 권한 `tools` | [server/src/routes/api/bmLogs.js:155](../server/src/routes/api/bmLogs.js#L155) |
 | GET | `/tools/bm-usage/perf/:key/playbook` | 권한 `tools` | [server/src/routes/api/bmPlaybookSlo.js:196](../server/src/routes/api/bmPlaybookSlo.js#L196) |
-| GET | `/tools/bm-usage/perf/:key/ports` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1040](../server/src/routes/api/bmUsage.js#L1040) |
-| GET | `/tools/bm-usage/perf/:key/profile` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1052](../server/src/routes/api/bmUsage.js#L1052) |
+| GET | `/tools/bm-usage/perf/:key/ports` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1064](../server/src/routes/api/bmUsage.js#L1064) |
+| GET | `/tools/bm-usage/perf/:key/profile` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1076](../server/src/routes/api/bmUsage.js#L1076) |
 | GET | `/tools/bm-usage/perf/:key/slo` | 권한 `tools` | [server/src/routes/api/bmPlaybookSlo.js:197](../server/src/routes/api/bmPlaybookSlo.js#L197) |
-| POST | `/tools/bm-usage/perf/:key/snapshot` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1065](../server/src/routes/api/bmUsage.js#L1065) |
-| GET | `/tools/bm-usage/perf/:key/snapshots` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1073](../server/src/routes/api/bmUsage.js#L1073) |
-| GET | `/tools/bm-usage/perf/:key/snapshots/:id` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1074](../server/src/routes/api/bmUsage.js#L1074) |
+| POST | `/tools/bm-usage/perf/:key/snapshot` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1089](../server/src/routes/api/bmUsage.js#L1089) |
+| GET | `/tools/bm-usage/perf/:key/snapshots` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1097](../server/src/routes/api/bmUsage.js#L1097) |
+| GET | `/tools/bm-usage/perf/:key/snapshots/:id` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1098](../server/src/routes/api/bmUsage.js#L1098) |
 | GET | `/tools/bm-usage/perf/:key/top` | 권한 `tools` | [server/src/routes/api/bmTop.js:127](../server/src/routes/api/bmTop.js#L127) |
 | GET | `/tools/bm-usage/perf/:key/top/band` | 권한 `tools` | [server/src/routes/api/bmTop.js:128](../server/src/routes/api/bmTop.js#L128) |
-| GET | `/tools/bm-usage/perf/:key/tuning` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1051](../server/src/routes/api/bmUsage.js#L1051) |
+| GET | `/tools/bm-usage/perf/:key/tuning` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1075](../server/src/routes/api/bmUsage.js#L1075) |
 | GET | `/tools/bm-usage/playbooks` | 권한 `tools` | [server/src/routes/api/bmPlaybookSlo.js:195](../server/src/routes/api/bmPlaybookSlo.js#L195) |
-| DELETE | `/tools/bm-usage/port-map` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1115](../server/src/routes/api/bmUsage.js#L1115) |
-| PUT | `/tools/bm-usage/port-map` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1114](../server/src/routes/api/bmUsage.js#L1114) |
+| DELETE | `/tools/bm-usage/port-map` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1139](../server/src/routes/api/bmUsage.js#L1139) |
+| PUT | `/tools/bm-usage/port-map` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1138](../server/src/routes/api/bmUsage.js#L1138) |
 | GET | `/tools/bm-usage/power` | 권한 `tools` | [server/src/routes/api/bmPower.js:118](../server/src/routes/api/bmPower.js#L118) |
-| GET | `/tools/bm-usage/profiles` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1053](../server/src/routes/api/bmUsage.js#L1053) |
-| PUT | `/tools/bm-usage/purpose` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1054](../server/src/routes/api/bmUsage.js#L1054) |
-| PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:1453](../server/src/routes/api/bmUsage.js#L1453) |
+| GET | `/tools/bm-usage/profiles` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1077](../server/src/routes/api/bmUsage.js#L1077) |
+| PUT | `/tools/bm-usage/purpose` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmUsage.js:1078](../server/src/routes/api/bmUsage.js#L1078) |
+| PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:1477](../server/src/routes/api/bmUsage.js#L1477) |
 | GET | `/tools/bm-usage/slo` | 권한 `tools` | [server/src/routes/api/bmPlaybookSlo.js:198](../server/src/routes/api/bmPlaybookSlo.js#L198) |
 | PUT | `/tools/bm-usage/slo` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` | [server/src/routes/api/bmPlaybookSlo.js:199](../server/src/routes/api/bmPlaybookSlo.js#L199) |
 | GET | `/tools/bm-usage/ssh-keys` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:67](../server/src/routes/api/bmOnboard.js#L67) |
@@ -1076,7 +1076,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/bm-usage/ssh-keys/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:82](../server/src/routes/api/bmOnboard.js#L82) |
 | POST | `/tools/bm-usage/ssh-keys/:id/passphrase` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:89](../server/src/routes/api/bmOnboard.js#L89) |
 | POST | `/tools/bm-usage/ssh-keys/rotate` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:96](../server/src/routes/api/bmOnboard.js#L96) |
-| PUT | `/tools/bm-usage/tuning/overrides` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` | [server/src/routes/api/bmUsage.js:1055](../server/src/routes/api/bmUsage.js#L1055) |
+| PUT | `/tools/bm-usage/tuning/overrides` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` | [server/src/routes/api/bmUsage.js:1079](../server/src/routes/api/bmUsage.js#L1079) |
 | GET | `/tools/capacity` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:72](../server/src/routes/api/toolsCapacity.js#L72) |
 | GET | `/tools/capacity-forecast` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1787](../server/src/routes/api/toolsCapacity.js#L1787) |
 | GET | `/tools/capacity/disk-history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1698](../server/src/routes/api/toolsCapacity.js#L1698) |

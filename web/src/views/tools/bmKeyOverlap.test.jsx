@@ -52,13 +52,25 @@ describe('표(SSR) — 열 · 버튼 · 권한', () => {
     expect((nonAdmin.match(/<th[ >]/g) || []).length).toBe(6);
     expect(nonAdmin).toContain('disabled');
   });
+  it('2차 재확인 G3 — OS 등록을 법인으로 못 정한 행은 짧은 경고(긴 설명은 title) · 사유 없는 행은 없음 · 백틱 없음', () => {
+    const html = renderToStaticMarkup(React.createElement(KeyOverlapTable, { rows: [row({ osIssue: 'os-ambiguous' }), row({ oid: 'x2', osIssue: 'os-foreign' }), row({ oid: 'x3' })], canWrite: true, showAddr: true }));
+    expect(html).toContain('OS 등록 모호 — 추가해도 OS 경로 없음'); expect(html).toContain('OS 등록이 다른 법인 것 — OS 경로 없음');
+    expect((html.match(/OS 경로 없음/g) || []).length).toBe(2);
+    expect(html).toContain('title="OS 계정 등록을 하나로 정하지 못했습니다');
+    for (const v of Object.values(K.OS_ISSUE_TEXT)) { expect(v.short.length).toBeLessThan(30); expect(`${v.short}${v.long}`.includes('`')).toBe(false); }
+  });
 });
 
 describe('반증 F4 — 귀속 없음 후보도 버튼으로(노드까지)', () => {
   it('pick 이 있는 귀속 없음 후보를 남기고(값 = -@노드) · 이름은 귀속 없음(노드) · pick 없는 빈 법인은 버린다', () => {
-    const c = ambiguousOf({ body: { code: 'ambiguous-key', candidates: [{ vcenterId: 'vcB', vcName: 'B' }, { vcenterId: '', unassigned: true, agent: 'Edge-C', pick: '-@Edge-C' }, { vcenterId: '', unassigned: true, agent: '', pick: '-@' }, { vcenterId: '' }] } });
+    const c = ambiguousOf({ body: { code: 'ambiguous-key', candidates: [{ vcenterId: 'vcB', vcName: 'B' }, { vcenterId: '', unassigned: true, agent: 'Edge-C', via: 'edge', pick: '-@Edge-C' }, { vcenterId: '', unassigned: true, agent: '', pick: '-@' }, { vcenterId: '' }] } });
     expect(c.map((x) => x.vcenterId)).toEqual(['vcB', '-@Edge-C', '-@']);
     expect(c.map(corpLabel)).toEqual(['B(vcB)', '귀속 없음(엣지 Edge-C)', '귀속 없음(이 노드)']);
+  });
+  it('2차 재확인 G4 — 이 노드 후보도 agent 이름(호스트명)이 있다: via 가 local 이면 ‘이 노드’(엣지라 부르지 않는다) · via 없으면 이 노드', () => {
+    const c = ambiguousOf({ body: { code: 'ambiguous-key', candidates: [{ vcenterId: '', unassigned: true, agent: 'portal-vm', via: 'local', pick: '-@portal-vm' }, { vcenterId: '', unassigned: true, agent: 'Edge-C', via: 'edge', pick: '-@Edge-C' }, { vcenterId: '', unassigned: true, agent: 'x', pick: '-@x' }] } });
+    expect(c.map(corpLabel)).toEqual(['귀속 없음(이 노드)', '귀속 없음(엣지 Edge-C)', '귀속 없음(이 노드)']);
+    expect(c.map((x) => x.vcenterId)).toEqual(['-@portal-vm', '-@Edge-C', '-@x']);
   });
 });
 

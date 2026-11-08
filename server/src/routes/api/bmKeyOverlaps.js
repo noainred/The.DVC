@@ -43,6 +43,7 @@ export function overlapRowView(o, { allowed = null, isAdmin = false, match = nul
   const row = {
     oid: o.oid, role: o.role, stage: o.stage, vcenterId: o.vcenterId, vcName: o.vcName || '', name: o.name, serviceTag: o.serviceTag, serverId: o.serverId, fleetId: o.fleetId,
     key: o.key, keyKind: o.keyKind, source: o.source, model: o.model || '', decidedKey: o.decidedKey, decision: dec, collecting: !!o.collecting, writable,
+    osIssue: o.osIssue || '',   // G3: OS 등록을 법인으로 못 정함(os-ambiguous · os-foreign) — 주소가 아니라 사유 코드라 비관리자에게도 싣는다
     ...(isAdmin ? { idracHost: o.idracHost || '', osHost: o.osHost || '' } : {}),
     dupOf: peer0 ? { key: peer0.key, name: peer0.name, vcenterId: peer0.vcenterId, source: peer0.source, edge: !!peer0.edge, ...(peer0.sameIdrac ? { sameIdrac: true } : {}) } : null,
   };

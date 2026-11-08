@@ -471,7 +471,7 @@ async function resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId = ''
   if (byId.size === 1) return [...byId.values()][0];
   const candidates = [...byId.values()].map((f) => {
     const v = t(f.target.vcenterId);
-    return v ? { vcenterId: v, vcName: t(f.target.vcName) || null } : { vcenterId: '', vcName: null, unassigned: true, agent: t(f.agent), pick: `-@${t(f.agent)}` };
+    return v ? { vcenterId: v, vcName: t(f.target.vcName) || null } : { vcenterId: '', vcName: null, unassigned: true, agent: t(f.agent), via: f.via === 'edge' ? 'edge' : 'local', pick: `-@${t(f.agent)}` };   // 2차 재확인 G4: 이 노드도 agent 이름이 있다 — via 로 가른다
   }).sort((a, b) => (Number(!a.vcenterId) - Number(!b.vcenterId)) || a.vcenterId.localeCompare(b.vcenterId) || String(a.pick || '').localeCompare(String(b.pick || '')));   // 귀속 없음은 뒤 · 노드 이름순
   return { ambiguous: true, key: k, candidates };
 }
@@ -561,7 +561,17 @@ function opsDeps(deps = {}) {
 /** 수동 용도 태그 — 키 규칙은 bmusage/purposeKey.js 하나(서비스태그 키 · 아니면 (법인, 키) 쌍 → 예전 키 — 반증 F2). source 를 붙여 돌려준다. */
 async function purposeFor(D, target, realKey) {
   const { purposeOfTarget } = await import('../../bmusage/purposeKey.js');
-  return purposeOfTarget((k) => D.purposeOf(String(k)), target, realKey);
+  return purposeOfTarget((k) => D.purposeOf(String(k)), target, realKey, (await tagJudgeFor(D)) || {});
+}
+/**
+ * 2차 재확인 G1: 서비스 태그를 전역 열쇠로 써도 되는가 — 판정기 하나(bmusage/commonTag.js tagJudgeOf · 겹침 판정과 같은 근거).
+ *   못 만들면 null(= 판정기 없음 → 서비스 태그도 쌍 키 · 출처 'legacy' — 보수적).
+ */
+async function tagJudgeFor(D, tg = null) {
+  try {
+    const CT = await import('../../bmusage/commonTag.js');
+    return CT.tagJudgeOf(tg || await D.currentTargets(), (await D.listEdgeBmUsage()) || []);
+  } catch { return null; }
 }
 /** 한 서버의 사실(이 노드 최신값 + 하드웨어 code · 또는 엣지 보관분). */
 async function opsFactsFor(found, D) {
@@ -855,40 +865,54 @@ async function purposeWrite(req, res) {
     const { APP_IDS } = await import('../../bmusage/profiles/index.js');
     const { ROLES } = await import('../../bmusage/tuning/catalog.js');
     /*
-     * 반증 F2: 저장 키는 bmusage/purposeKey.js 하나 — 서비스태그 키면 그대로, 아니면 (법인, 키) 쌍(`<법인>|<키>`). 예전(키 단독) 행이 있으면
-     *   그 키의 서버(이 노드 + 엣지 보관분 — 같은 키 · 서비스태그 키가 아닌 것)가 **모두 이 계정의 쓰기 범위 안일 때만** 그 행을 법인마다 쌍으로 나눠 옮기고 지운다
-     *   (값 · 처음 단 사람 보존 — 판정이 바뀌지 않는다). 하나라도 쓰기 범위 밖이면 409 — 쓰기 범위 밖 법인 서버의 판정을 바꾸지 않는다(전체 범위 관리자가 정리).
+     * 반증 F2 · 2차 재확인 G1 · G2: 저장 키는 bmusage/purposeKey.js 하나 — 서비스 태그를 전역 열쇠로 써도 될 때만 그 태그(판정기 commonTag.js),
+     *   아니면 (법인, 키) 쌍(`<법인>|<키>`). 기본 열쇠의 예전 행(법인 구분 없음)은:
+     *   · 범위 계정 — **지우지 않는다**(쌍 행만 쓴다 · 읽기는 쌍 먼저라 자기 서버만 바뀐다). 예전에는 ‘지금 보이는 대상’ 이 모두 쓰기 범위 안이면
+     *     나눠 옮기고 지웠는데, 엣지 보관분이 아직 없으면(재시작 뒤 첫 당김 전 · 엣지의 대상이 아닌 서버) 다른 법인 서버의 태그가 사라졌다(G2).
+     *   · 전체 범위 계정 — 판정기가 complete(이 노드가 같은 저장소를 쓰는 서버를 다 앎 — 엣지 · 단일 노드)일 때만 그 열쇠의 서버(대상 · 대상이 아닌 서버)마다
+     *     쌍으로 나눠 옮기고 지운다(값 · 처음 단 사람 보존). 모르면 남긴다(legacyRemains — 화면이 말한다).
      */
     const PK = await import('../../bmusage/purposeKey.js');
-    const wk = PK.purposeWriteKeyOf(found.target, found.realKey);
+    const tg0 = await D.currentTargets();
+    const judge = (await tagJudgeFor(D, tg0)) || {};
+    const wk = PK.purposeWriteKeyOf(found.target, found.realKey, judge);
     if (!wk) return res.status(400).json({ ok: false, reason: '이 서버의 용도 태그 키를 정하지 못했습니다.' });
     const opts = { knownApps: [...APP_IDS], knownRoles: [...ROLES] };
-    let split = 0;
-    if (wk.source === 'pair') {
-      const legacy = FT.fleetPurposeOf(found.realKey);
-      if (legacy) {
-        const vcs = new Set();
-        const sameKey = (x) => x && typeof x === 'object' && t(x.key) === found.realKey && PK.purposeWriteKeyOf(x, found.realKey)?.source === 'pair';
-        for (const x of (await D.currentTargets()).targets || []) if (sameKey(x)) vcs.add(t(x.vcenterId));
-        for (const rec of await D.listEdgeBmUsage()) for (const x of rec?.snap?.targets || []) if (sameKey(x)) vcs.add(t(x.vcenterId));
-        if ([...vcs].some((vc) => !inUserWriteScope(req.user, snap, vc))) {
-          return res.status(409).json({ ok: false, code: 'legacy-shared', reason: '이 키의 예전 용도 태그(법인 구분 없이 저장된 것)가 쓰기 권한이 없는 다른 법인 서버에도 걸려 있습니다 — 전체 범위 관리자가 정리해야 합니다(바꾸지 않았습니다).' });
+    let split = 0; let legacyRemains = false;
+    if (wk.source === 'pair' && wk.legacy) {
+      const legacy = FT.fleetPurposeOf(wk.legacy);
+      if (legacy && isFullReadWriteScope(req.user, snap) && judge.complete === true) {
+        const lk = wk.legacy.toLowerCase();
+        const pairs = new Set();
+        for (const x of [...(tg0?.targets || []), ...(tg0?.skipped || [])]) {
+          if (!x || typeof x !== 'object' || !t(x.key)) continue;
+          const ks = PK.purposeKeysOf(x, t(x.key), judge);
+          const last = ks[ks.length - 1];
+          if (ks.length === 2 && last.source === 'legacy' && last.k.toLowerCase() === lk) pairs.add(ks[0].k);
         }
-        for (const vc of vcs) {
-          const pk = `${vc}|${found.realKey}`;
+        for (const pk of pairs) {
           if (FT.fleetPurposeOf(pk)) continue;
           const c = FT.setFleetPurpose(pk, { ...(Array.isArray(legacy.apps) ? { apps: legacy.apps } : {}), ...(legacy.role ? { role: legacy.role } : {}) }, { by: legacy.by || '', ...opts });
           if (!c.ok) return res.status(500).json({ ok: false, reason: `예전 용도 태그를 법인별로 옮기지 못했습니다: ${c.reason || ''}`.slice(0, 300) });
           split += 1;
         }
-        const d = FT.setFleetPurpose(found.realKey, null, opts);
+        const d = FT.setFleetPurpose(wk.legacy, null, opts);
         if (!d.ok) return res.status(500).json({ ok: false, reason: `예전 용도 태그를 지우지 못했습니다: ${d.reason || ''}`.slice(0, 300) });
-      }
+      } else if (legacy) legacyRemains = true;
     }
     const value = b.clear === true ? null : { ...(Array.isArray(b.apps) ? { apps: b.apps } : {}), ...(b.role != null ? { role: b.role } : {}) };
     const r = FT.setFleetPurpose(wk.k, value, { by: req.user?.username || '', ...opts });
-    logAudit({ user: req.user?.username, action: 'bm-usage.purpose', target: found.realKey, ip: req.ip || '', detail: JSON.stringify({ vcenterId: t(found.target.vcenterId), keyScope: wk.source, legacySplit: split, apps: value?.apps ?? null, role: value?.role ?? null, clear: b.clear === true, ok: r.ok }).slice(0, 300) });
-    res.status(r.ok ? 200 : 400).json(r);
+    // 전역 태그로 썼으면 이 서버의 쌍 행(판정기가 모를 때 쓴 것)을 지운다 — 읽기는 쌍 먼저라 남으면 새 값을 가린다.
+    let pairCleared = false;
+    if (r.ok && wk.source === 'tag' && wk.clearPair && FT.fleetPurposeOf(wk.clearPair)) { const c = FT.setFleetPurpose(wk.clearPair, null, opts); pairCleared = !!c.ok; }
+    logAudit({ user: req.user?.username, action: 'bm-usage.purpose', target: found.realKey, ip: req.ip || '', detail: JSON.stringify({ vcenterId: t(found.target.vcenterId), keyScope: wk.source, legacySplit: split, legacyRemains, pairCleared, apps: value?.apps ?? null, role: value?.role ?? null, clear: b.clear === true, ok: r.ok }).slice(0, 300) });
+    if (r.ok && legacyRemains) {
+      return res.json({ ...r, keyScope: wk.source, legacyRemains: true,
+        legacyNote: b.clear === true
+          ? '이 서버의 태그는 지웠지만, 법인 구분 없이 저장된 예전 태그가 남아 있어 그 값이 계속 보입니다 — 예전 태그는 다른 법인 서버에도 걸려 있을 수 있어 지우지 않았습니다(전체 범위 관리자가 엣지 · 단일 노드에서 정리).'
+          : '저장했습니다(이 서버 것만). 법인 구분 없이 저장된 예전 태그는 다른 법인 서버에도 걸려 있을 수 있어 그대로 두었습니다.' });
+    }
+    res.status(r.ok ? 200 : 400).json(r.ok ? { ...r, keyScope: wk.source } : r);
   } catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
 }
 /** PUT /tools/bm-usage/tuning/overrides — 역할 권장값 덮어쓰기(설정 소유자 = 전체 범위 · 감사). 판정 기준일 뿐 서버에 적용하지 않는다. */

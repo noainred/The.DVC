@@ -32,7 +32,8 @@ function TagEditor({ itemKey, vc = '', manual, onSaved }) {
       const who = { key: itemKey, ...(vc ? { vcenterId: vc } : {}) };   // 다음 점검 ①: 대상 = (법인, 키) 쌍
       const r = await putJson('/tools/bm-usage/purpose', clear ? { ...who, clear: true } : { ...who, ...(apps ? { apps } : {}), role });
       if (r?.ok === false) setMsg(r.reason || '저장하지 못했습니다.');
-      else { setMsg(clear ? '수동 태그를 지웠습니다 — 자동 감지로 돌아갑니다.' : '저장했습니다.'); onSaved?.(); }
+      // 2차 재확인 G2: 법인 구분 없는 예전 태그가 남으면(범위 계정은 지우지 않는다) 서버가 그 사실을 말한다 — ‘자동 감지로 돌아갑니다’ 라고 하지 않는다.
+      else { setMsg(r?.legacyRemains && typeof r.legacyNote === 'string' && r.legacyNote ? r.legacyNote : (clear ? '수동 태그를 지웠습니다 — 자동 감지로 돌아갑니다.' : '저장했습니다.')); onSaved?.(); }
     } catch (e) { setMsg(String(e?.message || e)); } finally { setBusy(false); }
   };
   const toggle = (id) => setApps((p) => { const cur = p || []; return cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]; });

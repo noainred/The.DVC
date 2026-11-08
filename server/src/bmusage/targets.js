@@ -50,6 +50,9 @@ export const NO_PATH_REASON = Object.freeze({
   'no-idrac-cred': 'iDRAC 등록에 계정·비밀번호가 없습니다.',
   'no-os-cred': 'OS 계정이 없습니다 — 설정 › 베어메탈 스토리지에 이 호스트를 등록하면 디스크·네트워크·HBA 까지 읽습니다.',
   'both-off': 'iDRAC 텔레메트리와 OS SSH 가 모두 꺼져 있습니다.',
+  // 2차 재확인 G3 — OS 등록을 법인으로 가른다(pickOsEntry). 0 · 정상이 아니다 — 등록을 고치면 다음 주기부터 OS 경로가 생긴다.
+  'os-ambiguous': 'OS 계정 등록을 하나로 정할 수 없습니다 — 같은 이름 · 주소의 등록이 여럿(주소가 다름)이거나, 법인을 지정하지 않은 등록입니다(‘수집에 추가’ 한 서버는 법인이 맞는 등록만 씁니다). 설정 › 베어메탈 스토리지에서 그 등록에 법인을 지정하세요.',
+  'os-foreign': 'OS 계정 등록이 다른 법인으로 지정돼 있어 쓰지 않습니다(다른 법인 서버의 주소 · 계정으로 접속하지 않게). 설정 › 베어메탈 스토리지에서 법인을 확인하세요.',
   'key-conflict': '식별 키가 이 노드의 다른 서버와 겹칩니다 — 두 서버의 값이 한 행에 섞이지 않게 수집하지 않습니다(설정 › iDRAC 등록에서 서비스태그를 채우면 키가 갈려 다음 주기부터 수집합니다).',
 });
 
@@ -60,14 +63,47 @@ export const NO_PATH_REASON = Object.freeze({
 export function indexOsHosts(bmServers = []) {
   const byHost = new Map();
   const byName = new Map();
+  // 2차 재확인 G3: 같은 host · 이름의 등록 **전부**(등록 순) — pickOsEntry 가 법인으로 가른다(첫 등록만 보면 다른 법인 등록을 집는다).
+  const allByHost = new Map();
+  const allByName = new Map();
+  const push = (m, k, s) => { const l = m.get(k); if (l) l.push(s); else m.set(k, [s]); };
   let dup = 0;
   for (const s of bmServers) {
+    if (!s || typeof s !== 'object') continue;
     const h = hostKey(s.host);
     const n = norm(s.name);
-    if (h) { if (byHost.has(h)) dup += 1; else byHost.set(h, s); }
-    if (n && !byName.has(n)) byName.set(n, s);
+    if (h) { if (byHost.has(h)) dup += 1; else byHost.set(h, s); push(allByHost, h, s); }
+    if (n) { if (!byName.has(n)) byName.set(n, s); push(allByName, n, s); }
   }
-  return { byHost, byName, duplicates: dup };
+  return { byHost, byName, allByHost, allByName, duplicates: dup };
+}
+
+/**
+ * OS 등록 고르기(순수 · 2차 재확인 G3) — 예전에는 iDRAC 주소 → 이름 → 이름 = 주소 순으로 **첫 등록**을 집어 법인을 보지 않았다
+ *   (같은 이름 ‘db01’ 이 두 법인에 등록돼 있으면 B 서버가 A 법인 등록의 주소 · 계정으로 SSH — 같은 B 키에 A 서버 값이 쌓였다).
+ *   단계(① iDRAC 주소 = OS 주소 ② 이름 ③ 이름 = 주소)마다 그 단계의 등록을 법인으로 가른다:
+ *   · 다른 법인으로 지정된 등록(vcenterId ≠ 이 서버 법인)은 **쓰지 않는다**(그 단계만 그러면 다음 단계로 · 끝까지 없으면 'os-foreign').
+ *   · 이 법인 등록이 있으면 그것만 · 법인 미지정(7b 이전 등록)은 strict 가 아닐 때만 — strict(‘수집에 추가’ 한 별도 키 서버)는 법인이 맞는 등록만(미지정이면 'os-ambiguous').
+ *   · 남은 등록의 주소가 하나면(같은 장비의 중복 등록 — 예전과 같은 첫 등록) 그것 · 주소가 여럿이면 'os-ambiguous'(어느 장비인지 모른다 — 0/정상 아님).
+ *   ⚠ 예전 동작과 달라지는 것은 셋뿐(시험 bmKeyOverlap ⑧ A/B): 다른 법인 등록을 집던 것 · 같은 이름 다른 주소(법인 미지정)를 첫 등록으로 집던 것 ·
+ *     법인 지정 등록과 미지정 등록이 섞이면 지정 등록을 먼저. 그 서버는 OS 경로 없이(iDRAC 만 · 둘 다 없으면 대상이 아닌 서버) 사유가 화면에 보인다.
+ * @returns {{ entry: object|null, reason: ''|'os-ambiguous'|'os-foreign' }}
+ */
+export function pickOsEntry(os, { regHost = '', name = '', vc = '', strict = false } = {}) {
+  const v = t(vc);
+  const stages = [os?.allByHost?.get(hostKey(regHost)), os?.allByName?.get(norm(name)), os?.allByHost?.get(hostKey(name))];
+  let foreign = false; let unknownStrict = false;
+  for (const list of stages) {
+    if (!Array.isArray(list) || !list.length) continue;
+    const own = v ? list.filter((s) => t(s.vcenterId) === v) : [];
+    const unk = list.filter((s) => !t(s.vcenterId));
+    if (list.some((s) => t(s.vcenterId) && t(s.vcenterId) !== v)) foreign = true;
+    const use = own.length ? own : (strict ? [] : unk);
+    if (!use.length) { if (strict && unk.length) unknownStrict = true; continue; }
+    if (new Set(use.map((s) => hostKey(s.host))).size === 1) return { entry: use[0], reason: '' };
+    return { entry: null, reason: 'os-ambiguous' };
+  }
+  return { entry: null, reason: unknownStrict ? 'os-ambiguous' : foreign ? 'os-foreign' : '' };
 }
 
 /**
@@ -117,11 +153,12 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     if (!isMine(norm(d0.remoteAgent)) || !corpOn(vc)) continue;   // 엣지가 맡는 서버는 그 엣지가 · 꺼진 법인은 대상이 아니다(겹침과 무관)
     const dec = decOf('bm', { ...d0, vcenterId: vc });
     const reg = regById.get(t(d0.serverId)) || null;   // ⚠ 서비스태그로 찾지 않는다 — 공통 태그(‘To Be Filled By O.E.M.’)면 남의 등록을 집는다
-    const osEntry = os.byHost.get(hostKey(reg?.host)) || os.byName.get(norm(d0.name)) || null;
+    const osPick = pickOsEntry(os, { regHost: reg?.host, name: d0.name, vc, strict: true });   // G3: 겹침 행 · ‘추가’ 뒤 경로는 법인이 맞는 OS 등록만
+    const osEntry = osPick.entry;
     const nat = idOf(d0);
     keyOverlaps.push({ oid: overlapIdOf({ role: 'bm', vcenterId: vc, serverId: d0.serverId, name: d0.name }), role: 'bm', stage: 'classify',
       serverId: t(d0.serverId), fleetId: t(d0.fleetId), name: t(d0.name), serviceTag: t(d0.serviceTag), key: nat.key, keyKind: nat.keyKind,
-      vcenterId: vc, vcName: t(d0.vcenter), source: t(d0.source), model: t(d0.model), idracHost: t(reg?.host), osHost: t(osEntry?.host),
+      vcenterId: vc, vcName: t(d0.vcenter), source: t(d0.source), model: t(d0.model), idracHost: t(reg?.host), osHost: t(osEntry?.host), osIssue: osPick.reason || '',
       dupOf: d0.dupOf && typeof d0.dupOf === 'object' ? { key: nat.key, name: t(d0.dupOf.name), vcenterId: t(d0.dupOf.vcenterId), source: t(d0.dupOf.source), edge: !!t(d0.dupOf.remoteAgent) } : null,
       decision: dec, decidedKey: dec?.key || decidedKeyOf({ role: 'bm', vcenterId: vc, serverId: d0.serverId, name: d0.name }) });
     if (dec?.decision === 'add') bmIn.push({ ...d0, keyOverride: dec.key, decided: true });
@@ -143,7 +180,10 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
 
     // 다음 점검 ①(2차): 별도 키로 수집하는 서버(keyOverride)는 서비스태그로 등록을 찾지 않는다 — 공통 태그면 다른 서버의 iDRAC 을 집는다.
     const reg = regById.get(t(b.serverId)) || (t(b.serviceTag) && !b.keyOverride ? regByTag.get(norm(b.serviceTag)) : null) || null;
-    const osEntry = os.byHost.get(hostKey(reg?.host)) || os.byName.get(norm(b.name)) || os.byHost.get(hostKey(b.name)) || null;
+    // 2차 재확인 G3: OS 등록은 법인으로 가른다(pickOsEntry) — 별도 키 서버(keyOverride)는 법인이 맞는 등록만(strict).
+    const osPick = pickOsEntry(os, { regHost: reg?.host, name: b.name, vc, strict: !!b.keyOverride });
+    const osEntry = osPick.entry;
+    const osReason = osPick.reason || 'no-os-cred';
 
     const paths = [];
     let idracReason = '';
@@ -157,8 +197,8 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     if (!paths.length) {
       const reason = (!settings.idracTelemetry && !settings.osSsh) ? 'both-off'
         : (settings.osSsh && !osEntry && idracReason) ? idracReason
-          : (idracReason || 'no-os-cred');
-      skipped.push({ ...idOf(b), reason, vcenterId: vc, osMissing: !osEntry });
+          : (idracReason || osReason);
+      skipped.push({ ...idOf(b), reason, vcenterId: vc, osMissing: !osEntry, ...(osPick.reason ? { osIssue: osPick.reason } : {}) });
       continue;
     }
     /*
@@ -183,7 +223,7 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
       idrac: paths.includes('idrac') ? { regId: t(reg.id), host: t(reg.host), username: t(reg.username), password: reg.password } : null,
       osHost: paths.includes('os') ? osEntry : null,
       // OS 계정은 있는데 iDRAC 이 없거나 반대인 경우 — 그 사실을 화면이 말해야 한다.
-      missing: [idracReason, (settings.osSsh && !osEntry) ? 'no-os-cred' : ''].filter(Boolean),
+      missing: [idracReason, (settings.osSsh && !osEntry) ? osReason : ''].filter(Boolean),
     });
   }
 

@@ -152,20 +152,35 @@ export function registerBmOnboard(api, deps = {}) {
       try { rttOf = await (await import('./hostCorp.js')).rttReader(); } catch { rttOf = null; }
     }
     // 반증 F4 · F10: 지금 수집 대상(이 노드 분류 — 엣지 보고 서버 포함)으로 service_tag · 이름을 해석한다(purposeWrite 와 같은 '대상으로 해석될 때만').
+    // 2차 재확인 G1: 용도 · 역할의 저장 키는 상세 화면과 같은 규칙(bmusage/purposeKey.js + 판정기 commonTag.js) — 공통 태그(‘To Be Filled By O.E.M.’ ·
+    //   둘 이상 서버 · 둘 이상 법인)는 어느 서버 것인지 정할 수 없어 적용하지 않는다(purpose-common-tag). 판정기를 못 만들면 적용하지 않는 쪽.
     let tagMap = null; let names = null;
     try {
       const tg = await (deps.currentTargets || (async () => (await import('../../bmusage/poller.js')).currentTargets()))();
-      tagMap = new Map(); names = new Set();
+      let judge = null;
+      try {
+        const CT = await import('../../bmusage/commonTag.js');
+        const edges = await (deps.listEdgeBmUsage || (async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage()))();
+        judge = CT.tagJudgeOf(tg, edges || []);
+      } catch { judge = null; }
+      const PK = await import('../../bmusage/purposeKey.js');
+      const seen = new Map(); names = new Set();
       for (const x of [...(tg.targets || []), ...(tg.skipped || [])]) {
-        if (x?.serviceTag) tagMap.set(String(x.serviceTag).toLowerCase(), { vcenterId: String(x.vcenterId || '') });
+        if (x?.serviceTag) { const k = String(x.serviceTag).toLowerCase(); const prev = seen.get(k); seen.set(k, prev ? { ...prev, n: prev.n + 1 } : { x, n: 1 }); }
         if (x?.name) names.add(String(x.name).toLowerCase());
+      }
+      tagMap = new Map();
+      for (const [k, { x, n }] of seen) {
+        const common = n > 1 || !judge || judge.isCommon(k);
+        const wk = common ? null : PK.purposeWriteKeyOf(x, String(x.key || ''), judge);
+        tagMap.set(k, { vcenterId: String(x.vcenterId || ''), common: common || !wk, purposeKey: wk?.k || '', clearPair: wk?.clearPair || '' });
       }
     } catch { tagMap = null; names = null; }
     const ownerTier = await isOwnerTier(req);
     // ⚠ 반증 F12: 등록부 사본은 **여기(마지막 await 뒤)** 에서 잡는다 — 이후 분석 · 적용은 await 없이 이어진다.
     return RUN.buildOnboardCtx({
       D, corps, isEdge, myCorps, edgeOf, rttOf, ownerTier,
-      tagTarget: tagMap ? (tag) => tagMap.get(String(tag).toLowerCase()) || null : null,
+      tagTarget: (tag) => (tagMap ? tagMap.get(String(tag).toLowerCase()) || null : null),   // G1: 대상을 못 읽으면 용도 · 역할은 적용하지 않는다(전역 태그로 쓰지 않게)
       fleetHas: names ? ({ name }) => names.has(String(name).toLowerCase()) : null,
       canView: (vc) => inUserScope(req.user, snap, vc), canWrite: (vc) => inUserWriteScope(req.user, snap, vc), fullScope: isFullReadWriteScope(req.user, snap),
     });

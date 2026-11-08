@@ -11,7 +11,7 @@ import BoldText from '../../components/boldText.jsx';
 import Select from '../../components/Select.jsx';
 import { toneVar } from './toneVar.js';
 import { readPageSize } from './bmMissingView.js';
-import { OVERLAP_STATUS_TEXT, statusOf, sourceText, peerText, KEY_OVERLAP_HONEST, overlapView, overlapCorps } from './bmKeyOverlapText.js';
+import { OVERLAP_STATUS_TEXT, OS_ISSUE_TEXT, statusOf, sourceText, peerText, KEY_OVERLAP_HONEST, overlapView, overlapCorps } from './bmKeyOverlapText.js';
 
 export function KeyOverlapTable({ rows = [], canWrite = false, busy = '', onDecide, onClear, showAddr = false }) {
   // 1440 판독(2차): 처음 판은 열 8개 · 법인 칸에 ‘이름(id)’ 를 한 줄로 실어 결정 열이 오른쪽에서 잘렸다 — 출처는 서버 칸 아래 줄로 · 법인 id 는 아래 줄로 · 버튼은 세로로.
@@ -32,7 +32,9 @@ export function KeyOverlapTable({ rows = [], canWrite = false, busy = '', onDeci
               <td data-sort={r.dupOf?.name || ''} className="bmo-wrap">{peerText(r)}</td>
               <td data-sort={st} style={{ overflowWrap: 'anywhere' }}><span style={{ color: toneVar(sv.tone) }}>{sv.label}</span>
                 {st === 'add' && <div className="bmo-sub">키 {r.decision?.key}{r.collecting ? ' · 수집 대상' : ' · 아직 대상 아님(경로 · 법인 확인)'}</div>}
-                {r.decision?.by ? <div className="bmo-sub">{r.decision.by}</div> : null}</td>
+                {r.decision?.by ? <div className="bmo-sub">{r.decision.by}</div> : null}
+                {/* 2차 재확인 G3 — 짧게(1440 판독: 긴 문장이 칸을 넓혀 결정 열을 밀어냈다) · 긴 설명은 title */}
+                {OS_ISSUE_TEXT[r.osIssue] ? <div className="bmo-sub" title={OS_ISSUE_TEXT[r.osIssue].long} style={{ color: toneVar('warn'), whiteSpace: 'normal', maxWidth: 200 }}>{OS_ISSUE_TEXT[r.osIssue].short}</div> : null}</td>
               <td data-nosort>
                 <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
                   {st !== 'add' && <button type="button" className="btn btn-sm bmp-touch" disabled={!can} title={`별도 키 ${r.decidedKey} 로 수집`} onClick={() => onDecide?.(r, 'add')}>수집에 추가</button>}

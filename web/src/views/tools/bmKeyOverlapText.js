@@ -17,6 +17,11 @@ export const OVERLAP_STATUS_TEXT = Object.freeze({
   add: { label: '수집에 추가함', tone: 'ok' },
   exclude: { label: '제외 유지', tone: 'idle' },
 });
+/** 2차 재확인 G3 — 서버가 OS 등록을 법인으로 못 정한 사유(겹침 행 · ‘추가’ 뒤 경로 없음). 0 · 정상이 아니다. */
+export const OS_ISSUE_TEXT = Object.freeze({
+  'os-ambiguous': { short: 'OS 등록 모호 — 추가해도 OS 경로 없음', long: 'OS 계정 등록을 하나로 정하지 못했습니다(법인을 지정하지 않은 등록이거나 같은 이름 · 다른 주소의 등록이 여럿). 추가해도 OS 로는 접속하지 않고 iDRAC 만 읽습니다 — 설정 › 베어메탈 스토리지에서 그 등록에 법인을 지정하세요.' },
+  'os-foreign': { short: 'OS 등록이 다른 법인 것 — OS 경로 없음', long: '이름 · 주소가 맞는 OS 계정 등록이 다른 법인으로 지정돼 있습니다. 다른 법인 서버의 주소 · 계정으로 접속하지 않도록 그 등록은 쓰지 않습니다(추가해도 iDRAC 만).' },
+});
 export const statusOf = (r) => (r?.decision?.decision === 'add' ? 'add' : r?.decision?.decision === 'exclude' ? 'exclude' : 'pending');
 export const sourceText = (s) => OVERLAP_SOURCE_TEXT[s] || t(s) || '—';
 /** 겹친 상대 한 줄 — 범위 밖 상대는 서버가 싣지 않는다(그때는 ‘범위 밖이거나 없음’ 으로만 — 개수도 말하지 않는다). */
