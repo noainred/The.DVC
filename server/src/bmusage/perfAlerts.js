@@ -160,6 +160,11 @@ export function stepRule(prev, cond, rule = {}, now = Date.now()) {
   return { state: { streak, since, active: true, firedAt: now, seenAt: now }, fire: true, reason: 'fire' };
 }
 
+/** 수집 주기를 모를 때의 기본(베어메탈 사용률 기본 주기 5분 — settings.js DEFAULTS.intervalMs). */
+export const DEFAULT_INTERVAL_MS = 5 * 60_000;
+/** 반증 n2 F5: 보류 시한 = 지속 주기 × 수집 주기(지속 1이면 한 주기) — 그보다 긴 보류 뒤의 표본은 지속을 1부터 센다. */
+export const holdMaxMs = (rule = {}, intervalMs = DEFAULT_INTERVAL_MS) => Math.max(1, n(rule.sustain) ?? 1) * Math.max(60_000, n(intervalMs) ?? DEFAULT_INTERVAL_MS);
+
 /**
  * 규칙을 이 항목에 대 보나(순수) — 전력 규칙은 `power` 칸의 종류가 맞는 항목에만, 그 밖의 규칙은 `power` 칸이 없는 항목에만.
  *   맞지 않는 쌍은 상태를 만들지 않는다(예전 항목의 같은 키 상태를 덮지 않게 — 같은 서버가 성능 항목 · 전력 항목 둘로 들어온다).
@@ -177,9 +182,9 @@ export const stateKeyOf = (id, it) => (isPowerRule(id) ? `${id}|${targetIdOf(it)
  * @param {object} rules   perfRules.rules(켠 것만)
  * @param {object} state   { '<rule>|<key>': {...} }
  */
-export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date.now()) {
+export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date.now(), { intervalMs = DEFAULT_INTERVAL_MS } = {}) {
   const next = {}; const fires = [];
-  const counts = { fire: 0, suppressed: 0, sustaining: 0, unknown: 0, ongoing: 0, corpOff: 0, retry: 0, clear: 0 };
+  const counts = { fire: 0, suppressed: 0, sustaining: 0, unknown: 0, ongoing: 0, corpOff: 0, retry: 0, clear: 0, holdReset: 0 };
   const on = RULE_IDS.filter((id) => id !== 'focusEnd' && rules?.[id]?.on);
   const seen = new Set();
   for (const it of items) {
@@ -194,9 +199,23 @@ export function evaluatePerfRules(items = [], rules = {}, state = {}, now = Date
       // 다음 점검 ②: 관측 표지가 있는 규칙(전력)은 같은 표본을 두 주기 세지 않는다 — 아직 사건이 아닌데 표지가 직전과 같으면 보류(지속을 이어 가지도 끊지도 않는다).
       const obs = isPowerRule(id) ? powerObs(id, it) : null;
       if (cond === true && obs != null && prev && !prev.active && prev.obs === obs) cond = null;
-      const out = stepRule(prev, cond, rule, now);
+      /*
+       * 반증 n2 F5(메인 결정): 보류(null)에도 **시한**이 있다 — 전력 규칙에서 보류가 지속 구간(지속 주기 × 수집 주기)보다 길게 이어진 뒤 온 표본은
+       *   이어 세지 않고 1부터 다시 센다(‘처음 성립’ 도 그때부터). 예전에는 48시간 낡았다 돌아온 표본 하나로 ‘3주기 지속 · 처음 성립 이틀 전’ 이 나갔다.
+       *   진행 중 사건(active)은 끊지 않는다(끊으면 같은 사건을 다시 보낸다). 예전 규칙(5단계)은 그대로다(범위 밖 — 같은 stepRule).
+       */
+      let prevEff = prev;
+      if (isPowerRule(id) && prev && !prev.active && cond === true && n(prev.heldAt) != null && now - prev.heldAt > holdMaxMs(rule, intervalMs)) {
+        prevEff = { ...prev, streak: 0, since: null };
+        counts.holdReset += 1;
+      }
+      const out = stepRule(prevEff, cond, rule, now);
       const on = onCellsAfter(id, it, rule, cond, prev?.on || null);
-      const st1 = on.length ? { ...out.state, on } : out.state;
+      let st1 = on.length ? { ...out.state, on } : out.state;
+      if (isPowerRule(id)) {
+        const { heldAt: _h, ...rest } = st1;
+        st1 = cond === null || cond === undefined ? { ...rest, heldAt: n(prev?.heldAt) ?? now } : rest;   // 보류가 시작된 시각(이어지는 동안 그대로) — 판정되면 지운다
+      }
       next[sk] = obs != null ? { ...st1, obs } : (prev?.obs != null && isPowerRule(id) ? { ...st1, obs: prev.obs } : st1);
       // ⚠ 정정(다음 점검 ② — 시험 실행 응답에서 발견): reason 'fire' 를 여기서도 세면 아래 out.fire 와 두 번 세어 counts.fire 가 발화 수의 2배였다(retry 는 retry · fire 각 1).
       if (out.reason !== 'fire' && counts[out.reason] != null) counts[out.reason] += 1;
@@ -386,12 +405,14 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cy
     const rec = { id: crypto.randomUUID().slice(0, 12), at: now, rule: f.rule, key: f.key, name: capStr(f.name, 120), vcenterId: f.vcenterId, title: '', channels: rule.channels || [], result: '', issue: null, autoFocus: null, ...(f.retry ? { retry: true } : {}) };
     const mw = maintenanceFor(tg, now, rules.maintenance);
     // 8a단계 ① — 이 서버가 지금 알림 억제 창 안인가(판정 코어 하나). 노드 칸(__node__)은 서버가 아니라 창 대상이 아니다.
-    //   랙 항목(서버가 아니다)은 그 랙 서버 중 하나라도 창 안이면 창 안(합에 그 서버의 전력이 들어 있어 원인을 가를 수 없다 — 창 뒤에도 참이면 그때 1회).
+    //   ⚠ 정정(반증 n2 F2 · F7 — 메인 결정): 랙 항목(서버가 아니다)은 **배치 서버 전부가 같은 시각에 창 안일 때만** 억제하고 억제 구간은 창들의 교집합이다
+    //   (groupMaintState). 일부만 창 안이면 억제하지 않고 보내되 본문이 정비 중 서버를 밝힌다(maintPartial). 첫 판은 ‘하나라도 창 안이면 랙 전체 억제’ 라
+    //   서버 한 대의 창이 랙 상한 초과 알림을 창 끝까지 숨겼고, 서로 다른 창의 시작 · 끝을 섞어 ‘창 끝 뒤 억제’ 점검에 거짓 경고를 남겼다.
     const ms = maint && f.key !== '__node__' ? (Array.isArray(f.ctx?.members) ? groupMaintState(maint, f.ctx.members, now) : maint.stateFor(tg || { key: f.key, vcenterId: f.vcenterId }, now)) : null;
     const prevMaint = f.prevState?.maint || null;
     if (ms?.scopes?.alerts) {
       const ids = (ms.windows || []).filter((w) => (w.scopes || []).includes('alerts')).map((w) => w.id).sort();
-      noteApplied('alerts', f.key, ms.until.alerts, ids, now, { since: sinceOf(ms, 'alerts') });
+      noteApplied('alerts', f.key, ms.until.alerts, ids, now, { since: ms.since?.alerts ?? sinceOf(ms, 'alerts') });
       if (sk) {
         // 상태를 ‘보내지 않음’ 으로 되돌리고 창 · 시한을 단다(지속 streak 은 그대로 — 창 뒤 첫 주기에 조건이 참이면 그때 1회).
         const cur = st.rules?.[sk];
@@ -407,7 +428,7 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cy
     }
     const afterMaint = !!(prevMaint && sk);   // 창이 끝났는데 아직 초과 — 그때 1회(‘창 안부터 초과’)
     if (afterMaint) { rec.afterMaint = { ids: (prevMaint.ids || []).slice(0, 8), since: prevMaint.since ?? null }; out.afterMaint += 1; countSuppression('after', prevMaint.ids || [], { now }); }
-    const al = perfAlertOf({ ...f, sustain: rule.sustain, weeks: rules.baseline?.weeks, afterMaint }, {});
+    const al = perfAlertOf({ ...f, sustain: rule.sustain, weeks: rules.baseline?.weeks, afterMaint, maintPartial: ms && !ms.scopes?.alerts && ms.partial?.length ? ms.partial : null }, {});
     rec.title = al.title;
     if (mw.suppressed && rules.maintenance?.backupWindows) { rec.result = 'maintenance'; out.maintenance += 1; }
     else if (used(st, f.vcenterId, 'alerts', today) >= (rules.daily?.alerts ?? 50)) { rec.result = 'daily-cap'; out.capped += 1; }
@@ -469,18 +490,32 @@ async function dispatch(fires, { rules, st, now, D, targetsByKey = new Map(), cy
   return out;
 }
 
-/** 여러 서버의 정비 창 판정 합집합(순수에 가까움 — maintStateFor 결과 모양). 범위마다 OR · 시한은 가장 늦은 끝 · 창은 id 로 한 번. */
+/**
+ * 랙 항목의 정비 창 판정(반증 n2 F2 · F7 — 메인 결정 · maintStateFor 결과 모양). **배치 서버 전부가 지금 알림 억제 창 안일 때만** scopes.alerts —
+ *   억제 구간은 창들의 교집합(since = 서버별 억제 시작 중 가장 늦은 것 · until = 서버별 억제 끝 중 가장 이른 것 — 다른 창의 시작 · 끝을 섞지 않는다).
+ *   창을 읽을 수 없는 배치 서버(이 노드 대상 아님 — members[].unknown)가 하나라도 있으면 ‘전부 창 안’ 으로 보지 않는다(억제 안 함).
+ *   일부만 창 안이면 partial(그 서버 키 · 이름 · 억제 끝)을 돌려준다 — 발송 본문이 밝힌다. 판정기가 던지면 그 서버는 창 밖으로 본다(모르는 값은 억제가 아니다 — judge.js 규약).
+ */
 export function groupMaintState(maint, members = [], now = Date.now()) {
-  const scopes = {}; const until = {}; const byId = new Map();
-  for (const m of members) {
+  const list = Array.isArray(members) ? members : [];
+  const per = [];
+  for (const m of list) {
+    if (!m || m.unknown) { per.push({ m, ms: null, inWin: false, unknown: true }); continue; }
     let x = null;
     try { x = maint.stateFor(m, now); } catch { x = null; }
-    if (!x) continue;
-    for (const [k, v] of Object.entries(x.scopes || {})) if (v) { scopes[k] = true; until[k] = Math.max(until[k] ?? 0, Number(x.until?.[k]) || 0); }
-    for (const w of x.windows || []) if (!byId.has(w.id)) byId.set(w.id, w);
+    per.push({ m, ms: x, inWin: !!x?.scopes?.alerts });
   }
-  const windows = [...byId.values()];
-  return { active: windows.length > 0, scopes, until, windows };
+  const inWin = per.filter((p) => p.inWin);
+  const partial = inWin.map((p) => ({ key: String(p.m.key || ''), name: String(p.m.name || p.m.key || ''), until: Number(p.ms.until?.alerts) || null }));
+  const all = per.length > 0 && inWin.length === per.length;
+  if (!all) return { active: inWin.length > 0, scopes: {}, until: {}, windows: [], partial, unknown: per.filter((p) => p.unknown).length };
+  let since = -Infinity; let until = Infinity; const byId = new Map();
+  for (const p of per) {
+    since = Math.max(since, sinceOf(p.ms, 'alerts') ?? -Infinity);
+    until = Math.min(until, Number(p.ms.until?.alerts) || Infinity);
+    for (const w of p.ms.windows || []) if ((w.scopes || []).includes('alerts') && !byId.has(w.id)) byId.set(w.id, w);
+  }
+  return { active: true, scopes: { alerts: true }, until: { alerts: Number.isFinite(until) ? until : null }, since: { alerts: Number.isFinite(since) ? since : null }, windows: [...byId.values()], partial: [] };
 }
 
 function depsOf(deps = {}) {
@@ -504,7 +539,7 @@ function depsOf(deps = {}) {
  *   발송은 기다리지 않는다(대기열) — 돌려주는 queued 는 ‘대기열에 넣은 수’ 이고 결과는 발송 기록(sent)의 result 가 나중에 바뀐다.
  * @param {Array} items  [{ key, name, vcenterId, entry, health, dev, profile, target }]
  */
-export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps = {}, dryRun = false, cycleMax = MAX_SEND } = {}) {
+export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps = {}, dryRun = false, cycleMax = MAX_SEND, intervalMs = DEFAULT_INTERVAL_MS } = {}) {
   const D = depsOf(deps);
   const on = RULE_IDS.filter((id) => id !== 'focusEnd' && rules?.rules?.[id]?.on);
   if (!on.length) return { ok: true, skipped: 'no-rules' };
@@ -515,8 +550,9 @@ export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps 
     return { ok: true, dryRun: true, counts, fires: fires.map((f) => ({ rule: f.rule, key: f.key, name: f.name, vcenterId: f.vcenterId, title: perfAlertOf(f).title })) };
   }
   if (await D.isMock().catch(() => false)) return { ok: true, skipped: 'demo' };
+  _lastIntervalMs = intervalMs;
   return withState(async (st) => {
-    const { next, fires, counts } = evaluatePerfRules(items, rules.rules, st.rules, now);
+    const { next, fires, counts } = evaluatePerfRules(items, rules.rules, st.rules, now, { intervalMs });
     st.rules = next;
     // 상태가 바뀐 적 없는 첫 주기(손상 뒤 warmup)는 기준만 잡는다.
     if (_warmup) { _warmup = false; return { ok: true, warmup: true, counts }; }
@@ -525,6 +561,10 @@ export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps 
     return { ok: true, counts, fires: fires.length, ...out };
   });
 }
+
+let _lastIntervalMs = null;
+/** 시험 이음매(반증 n2 F5) — 마지막 주기 판정이 보류 시한에 쓴 수집 주기(폴러가 이 노드 설정을 넘기는지 확인). */
+export const _lastIntervalForTest = () => _lastIntervalMs;
 
 /** 집중 결론 규칙 — 세션이 끝날 때 한 번(focus/run.js onFocusEnd 구독). 같은 직렬 큐. */
 export async function runFocusEndAlert(ev, { rules, now = Date.now(), deps = {} } = {}) {

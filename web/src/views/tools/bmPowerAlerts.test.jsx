@@ -67,3 +67,34 @@ describe('엣지 서버 PowerCap — 상태 이유', () => {
     expect(s).not.toMatch(/capHitPct\s*[<>*]|INV_FRESH|7_200_000|2 \* 3_600_000/);
   });
 });
+
+describe('반증 n2 — 시험 실행 · 지난 주기 상태 · 알림 판정 없음 · 목록 밖 배치 서버', () => {
+  it('F3 시험 실행: 원천 실패 · 판정 보류를 ‘걸린 규칙 0건’ 과 가른다', async () => {
+    const { DryRunResult, LastCycleLine } = await import('./BmPerfRulesPanel.jsx');
+    const h1 = renderToStaticMarkup(h(DryRunResult, { resp: { servers: 0, fires: [], counts: { unknown: 0 }, powerError: 'idrac-power.db 열기 실패', note: 'n' } }));
+    expect(h1).toContain('전력 · 온도 규칙을 대 보지 못했습니다'); expect(h1).toContain('idrac-power.db 열기 실패');
+    const h2 = renderToStaticMarkup(h(DryRunResult, { resp: { servers: 2, powerItems: 3, fires: [], counts: { unknown: 5 }, note: 'n' } }));
+    expect(h2).toContain('판정 보류 5건'); expect(h2).toContain('전력 판정 항목 3개');
+    expect(renderToStaticMarkup(h(DryRunResult, { resp: { servers: 2, fires: [], counts: { unknown: 0 }, note: 'n' } }))).not.toMatch(/판정 보류|대 보지 못했습니다/);
+    const l = renderToStaticMarkup(h(LastCycleLine, { last: { held: 4, powerError: '전력 원천 실패', powerItems: 7 } }));
+    expect(l).toContain('지난 주기 전력 · 온도 규칙 입력 실패: 전력 원천 실패'); expect(l).toContain('지난 주기 판정 보류 4건'); expect(l).toContain('전력 판정 항목 7개');
+    expect(renderToStaticMarkup(h(LastCycleLine, { last: { held: 0 } }))).toBe('');
+  });
+  it('F4 알림 판정 없음 — 사유 문구 = 서버 열거 · 칸 아래 한 줄 · 요약', async () => {
+    const { JUDGE_REASONS } = await import('../../../../server/src/bmusage/powerJudge.js');
+    expect(Object.keys(PT.JUDGE_REASON_TEXT).sort()).toEqual([...JUDGE_REASONS].sort());
+    expect(PT.judgeTitle({ judgeNode: null, judgeReason: 'source-central' })).toMatch(/엣지 대상이지만/);
+    expect(PT.judgeTitle({ judgeNode: 'n', judgeReason: null })).toBeUndefined();
+    expect(PT.noJudgeText({ servers: 2, racks: 1, byReason: { 'source-central': 1, 'source-edge': 1 } })).toMatch(/알림 판정 노드가 없는 서버 2대 · 상한 랙 1개\(원천 중앙 1 · 원천 엣지 사본 1\)/);
+    expect(PT.noJudgeText({ servers: 0, racks: 0 })).toBe('');
+    const resp = { ok: true, fleet: { trend: [], noJudge: { servers: 1, racks: 1, byReason: { 'source-central': 1 } } }, corps: [], bins: [], cfg: {},
+      racks: [{ vcenterId: 'vcX', rack: 'X-1', servers: 3, measured: 2, notTarget: 1, capKw: 5, marginPct: null, marginPartial: true, judgeNode: null, judgeReason: 'member-unknown' }],
+      hot: [{ key: 'XT3', name: 'bm-x3', vcenterId: 'vcX', inletC: 30, w: 495, capW: 500, capHit: true, capPct: 99, capState: 'set', fanRead: true, judgeNode: null, judgeReason: 'source-central' }] };
+    const html = renderToStaticMarkup(h(PowerFleetView, { resp }));
+    expect(html).toContain('알림 판정 노드가 없는 서버 1대'); expect((html.match(/>알림 판정 없음</g) || []).length).toBe(2);
+    expect(html).toContain('일부만 측정(2/3)');
+  });
+  it('F1 미측정 사유 — 대상 목록에 없음 · 판정 노드 아님(서버 열거와 1:1)', () => {
+    expect(PT.UNMEASURED_TEXT['not-target']).toBe('대상 목록에 없음'); expect(PT.unmeasuredText({ 'not-target': 1 })).toBe('대상 목록에 없음 1');
+  });
+});

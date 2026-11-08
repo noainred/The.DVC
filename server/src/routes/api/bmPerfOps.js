@@ -261,14 +261,17 @@ export async function bmRulesDryRun(req, deps = {}) {
   });
   const servers = items.length;
   // 다음 점검 ②: 전력 · 온도 규칙도 같은 입력(이 노드 원천 · 이 노드 대상 — 폴러와 같은 powerAlertItems)으로 대 본다(켠 것이 있을 때만).
-  let powerError = null;
+  let powerError = null; let powerItems = null;
   const PA = await import('../../bmusage/powerAlerts.js');
   if (Object.keys(rules.rules || {}).some((id) => PA.isPowerRule(id))) {
-    try { for (const x of await PA.powerAlertItems({ targets: tg.targets || [], rules, ...(deps.powerSources ? { deps: { sources: deps.powerSources } } : {}) })) items.push(x); }
-    catch (e) { powerError = String(e?.message || e).slice(0, 200); }
+    try {
+      const px = await PA.powerAlertItems({ targets: tg.targets || [], rules, ...(deps.powerSources || deps.judgeCtx ? { deps: { ...(deps.powerSources ? { sources: deps.powerSources } : {}), ...(deps.judgeCtx ? { judgeCtx: deps.judgeCtx } : {}) } } : {}) });
+      powerItems = px.length; for (const x of px) items.push(x);
+    } catch (e) { powerError = String(e?.message || e).slice(0, 200); }
   }
   const out = await A.runPerfAlerts(items, { rules, dryRun: true });
-  return { status: 200, body: { ...out, servers, ...(powerError ? { powerError } : {}), note: '지금 값에 대 본 결과입니다 — 보내지 않았고 상태도 바꾸지 않았습니다(이 노드가 직접 수집하는 서버만 · 지속 주기는 1주기로 봅니다 · 전력 규칙은 같은 표본 보류 없이 지금 표본 하나로 봅니다).' } };
+  // 반증 n2 F3: 전력 판정 입력 실패(powerError) · 전력 항목 수(powerItems) · 판정 보류 수(counts.unknown)를 화면이 0건과 갈라 그린다(BmPerfRulesPanel DryRunResult).
+  return { status: 200, body: { ...out, servers, ...(powerItems != null ? { powerItems } : {}), ...(powerError ? { powerError } : {}), note: '지금 값에 대 본 결과입니다 — 보내지 않았고 상태도 바꾸지 않았습니다(이 노드가 직접 수집하는 서버만 · 지속 주기는 1주기로 봅니다 · 전력 규칙은 같은 표본 보류 없이 지금 표본 하나로 봅니다).' } };
 }
 
 export function registerBmPerfOps(api) {

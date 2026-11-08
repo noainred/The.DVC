@@ -28,7 +28,9 @@ import { INV_FRESH_MS } from './powerSources.js';
 const n = numOrNull;
 const HOUR = 3_600_000;
 export const POWER_DEFAULTS = Object.freeze({ ...RULE_DEFAULTS.power });
-export const UNMEASURED = Object.freeze(['no-idrac', 'read-fail', 'zero']);
+// 반증 n2: not-target = 랙 배치에는 있는데 이 보기의 서버 목록에 없음(엣지 위임 · 키 충돌 제외 · 법인 끔 · 등록 삭제 — F1) ·
+//   not-judge = 이 노드가 그 서버의 알림 판정 노드가 아님(알림 판정 입력에서만 — powerJudge.js · F4). 둘 다 미측정으로 센다(부분 합).
+export const UNMEASURED = Object.freeze(['no-idrac', 'read-fail', 'zero', 'not-target', 'not-judge']);
 export const UNMAPPED_RACK = '';
 export const INLET_BINS = Object.freeze([18, 20, 22, 24, 26, 27, 29]);
 export const HOT_MAX = 200;
@@ -54,7 +56,7 @@ const emptyGroup = () => ({ servers: 0, measured: 0, unmeasured: { 'no-idrac': 0
   hours: new Map(), inletSum: 0, inletN: 0, inletMax: null, maxC: null, fanWarn: 0, fanUnread: 0, capSet: 0, capHit: 0 });
 function addTo(g, s) {
   g.servers += 1;
-  if (s.w != null) { g.measured += 1; g.nowW += s.w; } else g.unmeasured[UNMEASURED.includes(s.unmeasured) ? s.unmeasured : 'read-fail'] += 1;
+  if (s.w != null) { g.measured += 1; g.nowW += s.w; } else { const k = UNMEASURED.includes(s.unmeasured) ? s.unmeasured : 'read-fail'; g.unmeasured[k] = (g.unmeasured[k] || 0) + 1; }
   if (s.h24) { g.avg24W += s.h24.avgW; g.avg24N += 1; g.kwh24 += s.h24.kwh; for (const h of s.h24.byHour) { const e = g.hours.get(h.t) || { w: 0, n: 0 }; e.w += h.w; e.n += 1; g.hours.set(h.t, e); } }
   if (s.kwhMonth != null) { g.kwhMonth += s.kwhMonth; g.monthN += 1; }
   if (s.inletC != null) { g.inletSum += s.inletC; g.inletN += 1; g.inletMax = g.inletMax == null ? s.inletC : Math.max(g.inletMax, s.inletC); }
@@ -85,7 +87,7 @@ function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
     partialHours: hrs.length - complete.length, kwh24: g.avg24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN,
     capKw, marginPct: margin, low: margin != null ? margin < rackLowPct : null, marginPartial: capKw != null && partial,
     inletAvg: g.inletN ? r1(g.inletSum / g.inletN) : null, inletMax: g.inletMax, maxC: g.maxC, inletServers: g.inletN,
-    fanWarn: g.fanWarn, fanUnread: g.fanUnread, capSet: g.capSet, capHit: g.capHit,
+    fanWarn: g.fanWarn, fanUnread: g.fanUnread, capSet: g.capSet, capHit: g.capHit, notTarget: g.notTarget || 0,
     trend: hrs.map(([t, e]) => ({ t, kw: r2(e.w / 1000), n: e.n, partial: e.n < full })),
   };
 }
@@ -100,6 +102,9 @@ export function aggregatePower(servers = [], { racks = [], cfg = {} } = {}) {
   const rackOf = new Map();
   for (const r of Array.isArray(racks) ? racks : []) for (const sv of r.servers || []) rackOf.set(`${r.vcenterId}|${sv.key}`, { rack: r.rack, u: sv.u ?? null, capKw: r.capKw ?? null });
   const rackCap = new Map((Array.isArray(racks) ? racks : []).map((r) => [`${r.vcenterId}|${r.rack}`, r.capKw ?? null]));
+  // 반증 n2 F1: 랙의 서버 수는 **배치에 있는 서버 수**다 — 이 보기의 서버 목록에 없는 배치 서버도 미측정(not-target)으로 센다(아래). 예전에는 목록에 있는 서버만 세어
+  //   부분 합을 ‘다 측정’ 으로 판정했다(배치 3대 · 목록 2대 → 2/2 여유 20% 정상 · 같은 시각 화면 3/3 −10%).
+  const rackKeys = new Map((Array.isArray(racks) ? racks : []).map((r) => [`${r.vcenterId}|${r.rack}`, (r.servers || []).map((sv) => String(sv?.key ?? '').trim()).filter(Boolean)]));
   const fleet = emptyGroup(); const corps = new Map(); const rg = new Map();
   const seen = new Set();
   const list = [];
@@ -119,6 +124,15 @@ export function aggregatePower(servers = [], { racks = [], cfg = {} } = {}) {
     const rid = `${s.vcenterId}|${s.rack}`;
     if (!rg.has(rid)) rg.set(rid, emptyGroup());
     addTo(rg.get(rid), s);
+  }
+  // 목록에 없는 배치 서버 — 수만 센다(이름 · 키를 응답에 싣지 않는다 — 범위 밖 서버일 수 있다).
+  for (const [rid, keys] of rackKeys) {
+    const vc = rid.slice(0, rid.indexOf('|'));
+    const miss = keys.filter((k) => !seen.has(targetIdOf({ vcenterId: vc, key: k }))).length;
+    if (!miss) continue;
+    if (!rg.has(rid)) rg.set(rid, emptyGroup());
+    const g = rg.get(rid);
+    g.servers += miss; g.unmeasured['not-target'] = (g.unmeasured['not-target'] || 0) + miss; g.notTarget = (g.notTarget || 0) + miss;
   }
   const rackRows = [...rg.entries()].map(([rid, g]) => {
     const [vc, rack] = [rid.slice(0, rid.indexOf('|')), rid.slice(rid.indexOf('|') + 1)];
@@ -149,12 +163,15 @@ export function aggregatePower(servers = [], { racks = [], cfg = {} } = {}) {
     capHit: list.filter((s) => s.capHit === true).map(serverView).slice(0, HOT_MAX),
     // 다음 점검 ②: 알림 판정(bmusage/powerAlerts.js)이 같은 계산(랙 · 걸림 · 상한 %)의 서버 기록을 쓴다 — 응답에는 싣지 않는다(라우트가 고른 필드만 보낸다).
     all: list,
+    // 반증 n2 F1 · F2: 랙 배치의 서버 키(목록에 없는 것 포함 — 알림 판정의 정비 창 ‘전부 창 안’ 판단이 쓴다 · 응답에 싣지 않는다).
+    rackKeysOf: (vc, rack) => rackKeys.get(`${vc}|${rack}`) || [],
     serversOf: (vc, rack) => list.filter((s) => s.vcenterId === vc && s.rack === rack).map(serverView).sort((a, b) => (a.u ?? 999) - (b.u ?? 999) || (b.w ?? -1) - (a.w ?? -1)),
   };
 }
 const serverView = (s) => ({ key: s.key, name: s.name, vcenterId: s.vcenterId, node: s.node, via: s.via, rack: s.rack, u: s.u, w: s.w, unmeasured: s.unmeasured || null,
   avg24W: s.h24?.avgW ?? null, peak24W: s.h24?.peakW ?? null, capW: s.capW ?? null, capPct: s.capPct ?? null, capHit: s.capHit ?? null, capState: s.capState ?? null, capAt: s.capAt ?? null,
-  inletC: s.inletC ?? null, maxC: s.maxC ?? null, tempAt: s.tempAt ?? null, fanWarn: s.fanWarn ?? null, fanRead: s.fanRead ?? null });
+  inletC: s.inletC ?? null, maxC: s.maxC ?? null, tempAt: s.tempAt ?? null, fanWarn: s.fanWarn ?? null, fanRead: s.fanRead ?? null,
+  ...(s.judge ? { judgeNode: s.judge.node ?? null, judgeReason: s.judge.reason ?? null } : {}) });
 
 /* ════════════════════════ 원천 모으기(이 노드) ════════════════════════ */
 const t = (v) => String(v ?? '').trim();
@@ -292,6 +309,7 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
     let fanWarn = null;
     if (faults) { const ids = [t(a?.id), regId, tag].filter(Boolean); fanWarn = faults.filter((f) => ids.includes(t(f.deviceId)) || (tag && up(f.deviceKey) === tag)).length; }
     out.push({ key: t(tg.key), name: t(tg.name) || t(tg.key), vcenterId: vc, node: tg.node || '', via: tg.via || 'local', w, unmeasured: w == null ? unmeasured : null, at: m ? n(m.ts) : null,
+      src: m ? (t(m.source) || null) : null,   // 반증 n2 F4: 전력 원천(idrac · ome · remote) — 판정 노드(powerJudge.js)가 쓴다
       h24, kwhMonth, ...(withWeek ? { base7 } : {}), capW, capState, capAt, inletC: tp.inletC, maxC: tp.maxC, tempAt: tp.at, tempState: tp.state,
       fanWarn, fanRead: tp.state === 'ok' ? true : (a || regId ? false : null) });
     await y();

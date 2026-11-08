@@ -19,8 +19,10 @@
  * 관측 표지(obs): 같은 표본을 두 주기 세지 않는다 — iDRAC 폴러가 멈춰 2시간 신선도 안의 같은 값이 되풀이되면 ‘지속’ 이 아니다. 아직 사건이 아닌데(비활성) 표지가 직전과 같으면
  *   그 주기는 보류(null)로 본다(perfAlerts.evaluatePerfRules).
  * 식별: 서버 규칙 상태 열쇠는 (법인, 키) 쌍(maint/judge.js targetIdOf — 키만 쓰지 않는다) · 랙 항목 키는 `rack:<법인>|<랙>`(법인이 키에 들어 있어 다른 법인의 같은 랙 이름과 섞이지 않는다).
- * 판정 주체: 전력 원천(iDRAC 폴러)이 있는 노드 — 폴러 주기 대상(엣지 위임 서버 제외 — targets.js edge-delegated)을 localOnly 원천(powerSources)으로만 본다.
- *   엣지 위임 서버는 그 엣지가 판정해 봉투 발송 기록(perfAlertSent)으로 올리고 중앙은 다시 판정하지 않는다(중앙과 엣지가 같은 서버를 두 번 알리지 않는다).
+ * 판정 주체: **판정 노드 함수 하나**(bmusage/powerJudge.js judgeOf — 중앙 전력 보기와 같은 함수 · 반증 n2 F4). 이 노드가 판정 노드가 아닌 서버는
+ *   값을 지우고(미측정 not-judge — 랙은 부분 합 · 서버 칸은 보류) 판정하지 않는다. 엣지 위임 서버는 그 엣지가 판정해 봉투 발송 기록(perfAlertSent)으로 올리고
+ *   중앙은 다시 판정하지 않는다(중앙과 엣지가 같은 서버를 두 번 알리지 않는다 · 법인을 엣지가 맡으면 중앙 대상이어도 판정하지 않는다 — 반증 의심 S1).
+ *   ⚠ 정정(반증 n2 F4): 첫 판은 ‘localOnly 원천’ 으로 거르기만 해서 판정 노드가 없는 경우를 문서보다 좁게 적었고 화면에 표시가 없었다.
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
@@ -80,6 +82,15 @@ export function powerObs(id, ctx = {}) {
 
 const hm = (ms) => (n(ms) == null || ms <= 0 ? '모름' : new Date(ms + DAY_OFFSET_MIN * 60_000).toISOString().slice(5, 16).replace('T', ' '));
 const kw = (v) => (n(v) == null ? '—' : `${v} kW`);
+/**
+ * 반증 n2 F2: 랙 서버 **일부만** 정비 창 안이면 억제하지 않고 보내되 그 사실을 본문에 밝힌다(창 안 서버 이름 · 창 끝 — 같은 법인 랙 배치의 서버라 범위 안 이름).
+ *   이름은 8개까지(나머지는 수) — 알림 본문 상한(1,500자) 안.
+ */
+export function maintLine(partial) {
+  if (!Array.isArray(partial) || !partial.length) return '';
+  const shown = partial.slice(0, 8).map((x) => `${capStr(String(x.name || x.key || ''), 60)}(창 끝 ${hm(x.until)})`);
+  return `\n정비 창 안 서버 ${partial.length}대 포함 — ${shown.join(' · ')}${partial.length > 8 ? ` 외 ${partial.length - 8}대` : ''} · 랙 서버 전부가 창 안일 때만 억제합니다.`;
+}
 /** 알림 본문(순수 — `**` 없음 · 원인 단정 없음 · ‘무엇이 · 얼마나 · 무엇 대비 · 언제부터’). */
 export function powerAlertOf(f, head, key) {
   const p = f.ctx?.power || {};
@@ -88,7 +99,7 @@ export function powerAlertOf(f, head, key) {
     const over = n(p.marginPct) != null && p.marginPct < 0;
     return { key, severity: over ? 'critical' : 'warning',
       title: capStr(`${head} 상한 ${over ? `초과 ${Math.abs(p.marginPct)}%` : `여유 ${p.marginPct ?? '—'}%`}(기준 ${p.rackLowPct ?? '—'}% 미만)`, 200),
-      detail: capStr(`지금 ${kw(p.nowKw)} / 상한 ${kw(p.capKw)}(설정값) · 측정 ${p.measured ?? '—'}/${p.servers ?? '—'}대(미측정 서버가 있는 랙은 판정하지 않습니다)\n${since}\n어느 서버의 증가인지는 단정하지 않습니다 — 베어메탈 사용률 › 전력 · 온도에서 그 랙을 눌러 서버 목록을 확인하세요.`, 1_500) };
+      detail: capStr(`지금 ${kw(p.nowKw)} / 상한 ${kw(p.capKw)}(설정값) · 측정 ${p.measured ?? '—'}/${p.servers ?? '—'}대(미측정 서버가 있는 랙은 판정하지 않습니다)\n${since}${maintLine(f.maintPartial)}\n어느 서버의 증가인지는 단정하지 않습니다 — 베어메탈 사용률 › 전력 · 온도에서 그 랙을 눌러 서버 목록을 확인하세요.`, 1_500) };
   }
   if (f.rule === 'inlet') {
     return { key, severity: 'warning', title: capStr(`${head} 흡기 ${p.inletC ?? '—'} °C(기준 ${p.inletWarnC ?? '—'} °C 이상)`, 200),
@@ -107,7 +118,7 @@ export function powerAlertOf(f, head, key) {
 }
 
 /**
- * 판정 항목(이 노드 원천 — localOnly) — 서버 칸(inlet · surge · powerCap) + 랙 칸(rack · 상한을 정한 랙만).
+ * 판정 항목(판정 노드가 이 노드인 서버만 값이 남는다 — powerJudge.js) — 서버 칸(inlet · surge · powerCap) + 랙 칸(rack · 상한을 정한 랙만).
  * @param {{ targets:Array, rules:object, now?:number, deps?:object }} p  targets = 폴러 주기 대상(이 노드 수집분) · rules = perfRules(power 기준 · 랙 배치 · 켠 규칙)
  * @returns {Promise<Array>}
  */
@@ -115,10 +126,18 @@ export async function powerAlertItems({ targets = [], rules = {}, now = Date.now
   const on = POWER_RULE_IDS.filter((id) => rules?.rules?.[id]?.on);
   if (!on.length || !targets.length) return [];
   const cfg = { ...RULE_SET_DEFAULTS.power, ...Object.fromEntries(Object.entries(rules.power || {}).filter(([k, v]) => k !== 'racks' && k !== 'racksText' && v != null)) };
-  const sources = deps.sources ? await deps.sources() : await (await import('./powerSources.js')).powerSources({ now, localOnly: true });
+  const sources = deps.sources ? await deps.sources() : _sourcesOverride ? await _sourcesOverride() : await (await import('./powerSources.js')).powerSources({ now });
   const { aggregatePower, gatherPower } = await import('./powerAgg.js');
+  const J = await import('./powerJudge.js');
+  const jctx = deps.judgeCtx ? await deps.judgeCtx() : await J.judgeContext();
   const list = targets.filter((x) => x && x.key).map((x) => ({ key: x.key, name: x.name, vcenterId: x.vcenterId || '', serviceTag: x.serviceTag || '', idrac: x.idrac ? { regId: x.idrac.regId } : null, paths: x.paths || [], node: '', via: 'local', _t: x }));
-  const servers = await gatherPower({ targets: list, deps: sources, now, withWeek: on.includes('surge'), withMonth: false });
+  const servers0 = await gatherPower({ targets: list, deps: sources, now, withWeek: on.includes('surge'), withMonth: false });
+  // 판정 노드가 이 노드가 아닌 서버는 값을 지운다(미측정 not-judge — 랙은 부분 합 → 보류 · 서버 칸은 보류). 지운 사유는 judge 로 남긴다.
+  const servers = servers0.map((x) => {
+    const judge = J.judgeOf(x, jctx);
+    if (judge.node === jctx.self) return { ...x, judge };
+    return { ...x, judge, w: null, unmeasured: 'not-judge', at: null, h24: null, base7: null, capW: null, inletC: null, maxC: null, tempAt: null, tempState: 'not-judge' };
+  });
   const tgOf = new Map(list.map((x) => [`${x.vcenterId}|${x.key}`, x._t]));
   const racks = Array.isArray(rules.power?.racks) ? rules.power.racks : [];
   const ag = aggregatePower(servers, { racks, cfg });
@@ -128,7 +147,8 @@ export async function powerAlertItems({ targets = [], rules = {}, now = Date.now
       const sg = on.includes('surge') ? surgeOf(s.h24, s.base7, cfg.surgePct) : null;
       items.push({ key: s.key, name: s.name || s.key, vcenterId: s.vcenterId, target: tgOf.get(`${s.vcenterId}|${s.key}`) || { key: s.key, vcenterId: s.vcenterId },
         power: { kind: 'server', w: s.w, at: s.at ?? null, unmeasured: s.unmeasured || null, capW: s.capW ?? null, capPct: s.capPct ?? null, capHit: s.capHit ?? null, capState: s.capState ?? null, capHitPct: cfg.capHitPct,
-          inletC: s.inletC ?? null, tempState: s.tempState || 'none', tempAt: s.tempAt ?? null, inletWarnC: cfg.inletWarnC, surge: sg, surgePct: cfg.surgePct, rack: s.rack || '', u: s.u ?? null } });
+          inletC: s.inletC ?? null, tempState: s.tempState || 'none', tempAt: s.tempAt ?? null, inletWarnC: cfg.inletWarnC, surge: sg, surgePct: cfg.surgePct, rack: s.rack || '', u: s.u ?? null,
+          judge: s.judge || null } });
     }
   }
   if (on.includes('rack')) {
@@ -139,9 +159,16 @@ export async function powerAlertItems({ targets = [], rules = {}, now = Date.now
       const mem = byRack.get(`${r.vcenterId}|${r.rack}`) || [];
       // 관측 표지 — 측정 서버 표본 시각의 합 + 대수(한 대라도 새 표본이면 바뀐다)
       const obs = `r${mem.length}:${mem.reduce((a, s) => a + (n(s.at) ?? 0), 0)}`;
-      items.push({ key: rackKeyOf(r.vcenterId, r.rack), name: `랙 ${r.rack}`, vcenterId: r.vcenterId, members: mem.map((s) => tgOf.get(`${s.vcenterId}|${s.key}`) || { key: s.key, vcenterId: s.vcenterId }),
-        power: { kind: 'rack', rack: r.rack, capKw: r.capKw, nowKw: r.nowKw, marginPct: r.marginPct, low: r.low, marginPartial: r.marginPartial, measured: r.measured, servers: r.servers, rackLowPct: cfg.rackLowPct, obs } });
+      // 정비 창 판단용 배치 서버 전부(반증 n2 F2) — 목록에 없는 배치 서버는 unknown(창을 읽을 수 없다 → ‘전부 창 안’ 으로 보지 않는다).
+      const listed = new Map(mem.map((s) => [s.key, s]));
+      const members = ag.rackKeysOf(r.vcenterId, r.rack).map((k) => (listed.has(k) ? (tgOf.get(`${r.vcenterId}|${k}`) || { key: k, vcenterId: r.vcenterId }) : { key: k, vcenterId: r.vcenterId, unknown: true }));
+      const judge = J.rackJudgeOf(mem.map((s) => s.judge), r.notTarget || 0);
+      items.push({ key: rackKeyOf(r.vcenterId, r.rack), name: `랙 ${r.rack}`, vcenterId: r.vcenterId, members,
+        power: { kind: 'rack', rack: r.rack, capKw: r.capKw, nowKw: r.nowKw, marginPct: r.marginPct, low: r.low, marginPartial: r.marginPartial, measured: r.measured, servers: r.servers, notTarget: r.notTarget || 0, rackLowPct: cfg.rackLowPct, obs, judge } });
     }
   }
   return items;
 }
+/** 시험 이음매(반증 n2 F3) — 폴러 배선 시험이 원천 실패를 재현한다. 운영 경로는 늘 powerSources. */
+let _sourcesOverride = null;
+export function _setPowerSourcesForTest(fn) { _sourcesOverride = typeof fn === 'function' ? fn : null; }

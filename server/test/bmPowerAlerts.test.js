@@ -233,14 +233,15 @@ test('③ 실제 규칙 엔진 — 지속 = 서로 다른 표본 · 낡음은 �
   assert.match(d4.sends[0].al.detail, /측정 2\/2대/);
 });
 
-test('④ 실제 정비 창 — 서버 · 랙(서버 하나라도 창 안) 기록만 → 창 뒤 1회 · 창 안 해제는 억제하지 않는다', async () => {
+test('④ 실제 정비 창 — 서버 · 랙(배치 서버 전부가 창 안) 기록만 → 창 뒤 1회 · 창 안 해제는 억제하지 않는다', async () => {
   const S = await import('../src/bmusage/maint/schedule.js');
   const ST = await import('../src/bmusage/maint/store.js');
   const MR = await import('../src/bmusage/maint/runtime.js');
   ST._resetMaintStoreForTest(); MR._resetMaintRuntimeForTest();
   const T0 = Date.now();
   const loc = (ms) => S.fmtLocal('Asia/Seoul', ms).replace(' ', 'T');
-  const w = await ST.addWindow({ name: '전력 시험 창', reason: '시험', target: { kind: 'server', keys: ['K1'], names: ['bm-K1'] }, vcenterId: 'vcA', tz: 'Asia/Seoul',
+  // 반증 n2 F2: 랙은 배치 서버 전부가 창 안일 때만 억제 — 이 창은 랙 R1 의 두 서버(K1 · K3)를 다 덮는다(한 대만 덮는 경우는 bmPowerAlertsN2 ②).
+  const w = await ST.addWindow({ name: '전력 시험 창', reason: '시험', target: { kind: 'server', keys: ['K1', 'K3'], names: ['bm-K1', 'bm-K3'] }, vcenterId: 'vcA', tz: 'Asia/Seoul',
     schedule: { kind: 'once', start: loc(T0 - 30 * MIN), end: loc(T0 + 60 * MIN) }, scopes: { alerts: true } }, { by: 'op', now: T0 });
   const end = (await MR.maintJudge({ now: T0 })).stateFor({ key: 'K1', vcenterId: 'vcA' }, T0).until.alerts;
   assert.ok(end > T0);
@@ -253,7 +254,7 @@ test('④ 실제 정비 창 — 서버 · 랙(서버 하나라도 창 안) 기�
   // 같은 키 · 다른 법인(vcB K1 — 창 밖)을 함께 — 대상은 항목이 가진 (법인, 키) 대상으로 판정한다(키 지도에서 다른 법인 대상을 집지 않는다)
   let r = await A.runPerfAlerts([inl(T0), inl(T0, 31, 'vcB'), rk(T0)], { rules, now: T0, deps: d.deps });
   await A._drainPerfAlertsForTest();
-  assert.equal(r.maintenance, 2, '서버 · 랙(K1 이 창 안) 모두 기록만'); assert.equal(d.issues.length, 1, 'vcB 이슈만');
+  assert.equal(r.maintenance, 2, '서버 · 랙(K1 · K3 모두 창 안) 기록만'); assert.equal(d.issues.length, 1, 'vcB 이슈만');
   assert.deepEqual(d.sends.map((x) => x.al.key), ['bmperf:inlet:vcB|K1'], '창 밖 vcB 는 보낸다 · vcA 는 창 안');
   const rec = A.perfAlertStatus().sent.filter((x) => x.result === 'maintenance');
   assert.deepEqual(rec.map((x) => `${x.rule}:${x.vcenterId}`).sort(), ['inlet:vcA', 'rack:vcA']); assert.deepEqual(rec[0].maint.ids, [w.id]);
@@ -277,7 +278,7 @@ test('④ 실제 정비 창 — 서버 · 랙(서버 하나라도 창 안) 기�
   for (const f of ['maintenance-windows.json', 'maintenance-windows-deployed.json']) { try { fs.unlinkSync(path.join(DIR, f)); } catch { /* */ } }
 });
 
-test('⑤ 실제 폴러 배선 — pollBmUsageOnce → 전력 규칙(실제 원천 · 이 노드 것만) → 발송 기록 · 상태 열쇠 쌍', async (t) => {
+test('⑤ 실제 폴러 배선 — pollBmUsageOnce → 전력 규칙(실제 원천 · 판정 노드 = 이 노드인 서버만) → 발송 기록 · 상태 열쇠 쌍', async (t) => {
   if (!sqlite) return t.skip('node:sqlite 없음');
   fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [{ id: 'r-w1', name: 'idrac-w1', host: '10.9.9.1', username: 'root', password: 'p', serviceTag: 'WTAG1', vcenterId: 'vcW' }] }));
   fs.writeFileSync(path.join(DIR, 'bm-storage.json'), JSON.stringify({ servers: [{ id: 'o-w1', name: 'bm-w1', host: '127.0.0.1', port: 9, username: 'mon', password: 'pw', mounts: [] },
@@ -314,14 +315,10 @@ test('⑤ 실제 폴러 배선 — pollBmUsageOnce → 전력 규칙(실제 원�
   assert.ok(['inlet|vcW|WTAG1', 'powerCap|vcW|WTAG1', 'rack|vcW|rack:vcW|W-1'].every((k) => keys.includes(k)), JSON.stringify(keys));
   // 엣지 사본뿐인 서버(RTAG1)는 이 노드가 판정하지 않는다 — 랙 W-2 는 미측정(부분)이라 보류 · 서버 칸도 보류
   assert.ok(!sent.some((x) => x.key === 'rack:vcW|W-2' || x.key === 'RTAG1'), JSON.stringify(sent.map((x) => x.key)));
-  assert.equal(STATE().rules['rack|vcW|rack:vcW|W-2'].streak, 0, '사본 999 W 로 판정하지 않는다(localOnly)');
-  // 원천이 이 노드 것만인지 — 같은 서버 측정이 엣지 사본(remote)뿐이면 판정하지 않는다(소스: powerSources localOnly)
-  const PS = await import('../src/bmusage/powerSources.js');
-  const loc = await PS.powerSources({ localOnly: true });
-  assert.ok((await loc.measured()).every((m) => m.source === 'idrac' || m.source === 'ome'));
-  assert.ok((await loc.analysisServers()).every((a) => !a.remote));
-  const src = fs.readFileSync(new URL('../src/bmusage/powerAlerts.js', import.meta.url), 'utf8');
-  assert.match(src, /powerSources\(\{ now, localOnly: true \}\)/, '알림 판정은 localOnly 원천');
+  assert.equal(STATE().rules['rack|vcW|rack:vcW|W-2'].streak, 0, '사본 999 W 로 판정하지 않는다(판정 노드 없음 — source-edge)');
+  // 반증 n2 F3: 주기 상태에 판정 보류 수 · 전력 판정 항목 수가 남는다(0건과 가른다)
+  assert.equal(r.perfAlerts.powerItems, 4, '서버 2 + 랙 2'); assert.ok(r.perfAlerts.held >= 1, JSON.stringify(r.perfAlerts));
+  assert.equal(r.perfAlerts.powerError, undefined);
 });
 
 test('⑥ 엣지 PowerCap — 실제 collector 라우터 · pullBmUsage 왕복 → 정제 → 중앙 전력 보기 · 걸림 · 구버전(그때만 버전 안내) · 낡음', async (t) => {

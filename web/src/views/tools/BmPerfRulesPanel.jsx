@@ -44,6 +44,32 @@ export const NUM_SECTIONS = Object.freeze([
 /** 자동 집중을 걸지 않는 규칙 — 서버 목록(perfRules.AUTOFOCUS_OFF · 응답 autoFocusOff)이 원천. 구버전 응답이면 예전 두 개(서버가 어차피 false 로 저장한다). */
 export const autoFocusOff = (resp) => (Array.isArray(resp?.autoFocusOff) ? resp.autoFocusOff : ['focusEnd', 'collect']);
 
+/**
+ * 시험 실행 결과(반증 n2 F3) — 전력 판정 입력 실패(powerError)와 판정 보류(counts.unknown — 못 읽음 · 부분 합 · 낡음 · 표본 부족)를 ‘걸린 규칙 0건’ 과 갈라 보인다.
+ */
+export function DryRunResult({ resp }) {
+  const held = resp?.counts?.unknown ?? 0;
+  return (
+    <div className="bmo-band">
+      <div>시험 실행 — 이 노드 대상 {unitText(resp.servers, '대')}{resp.powerItems != null ? ` · 전력 판정 항목 ${resp.powerItems}개(서버 · 랙)` : ''} · 걸린 규칙 {(resp.fires || []).length}건{resp.skipped ? `(${resp.skipped === 'no-rules' ? '켠 규칙이 없습니다' : resp.skipped})` : ''}</div>
+      {resp.powerError && <div className="bmo-sub" style={{ color: toneVar('bad') }}>전력 · 온도 규칙을 대 보지 못했습니다(원천 실패 — 0건이 아닙니다): {resp.powerError}</div>}
+      {held > 0 && <div className="bmo-sub" style={{ color: toneVar('warn') }}>판정 보류 {held}건 — 못 읽음 · 미측정 · 부분 합(일부만 측정된 랙) · 낡은 센서 · 표본 부족 · 판정 노드 아님은 정상도 장애도 아닙니다(걸린 규칙 수에 들지 않습니다).</div>}
+      {(resp.fires || []).slice(0, 20).map((f, i) => <div key={i} className="bmo-sub">{RULE_TEXT[f.rule]?.label || f.rule} · {f.title}</div>)}
+      <div className="bmo-sub">{resp.note}</div>
+    </div>
+  );
+}
+/** 지난 주기 상태(반증 n2 F3 — 무음 실패 금지): 판정 보류 수 · 전력 판정 입력 실패. 값이 없으면 그리지 않는다. */
+export function LastCycleLine({ last }) {
+  if (!last) return null;
+  const parts = [];
+  if (last.powerError) parts.push(<span key="e" style={{ color: toneVar('bad') }}>지난 주기 전력 · 온도 규칙 입력 실패: {last.powerError}</span>);
+  if (last.held) parts.push(<span key="h">지난 주기 판정 보류 {last.held}건(못 읽음 · 부분 합 · 낡음 · 표본 부족 — 정상으로 세지 않음)</span>);
+  if (last.powerItems != null) parts.push(<span key="p">전력 판정 항목 {last.powerItems}개</span>);
+  if (last.error) parts.push(<span key="x" style={{ color: toneVar('bad') }}>지난 주기 규칙 판정 오류: {last.error}</span>);
+  return parts.length ? <p className="bmo-sub" style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', margin: '0 0 6px' }}>{parts}</p> : null;
+}
+
 /** 이 계정이 저장할 수 있나 — 설정 소유자 등급(소유자 ∧ 전체 범위) · 인증 꺼짐(Anonymous admin). 서버가 다시 막는다. */
 export function canEditRules(resp, u = getCurrentUser()) {
   if (!resp || resp.readOnly) return false;
@@ -188,15 +214,10 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
       </div>
       {save.err && <ErrorBox error={save.err} />}
       {dry.err && <ErrorBox error={dry.err} />}
-      {dry.resp && (
-        <div className="bmo-band">
-          <div>시험 실행 — 이 노드 대상 {unitText(dry.resp.servers, '대')} · 걸린 규칙 {(dry.resp.fires || []).length}건{dry.resp.skipped ? `(${dry.resp.skipped === 'no-rules' ? '켠 규칙이 없습니다' : dry.resp.skipped})` : ''}</div>
-          {(dry.resp.fires || []).slice(0, 20).map((f, i) => <div key={i} className="bmo-sub">{RULE_TEXT[f.rule]?.label || f.rule} · {f.title}</div>)}
-          <div className="bmo-sub">{dry.resp.note}</div>
-        </div>
-      )}
+      {dry.resp && <DryRunResult resp={dry.resp} />}
       <section className="bmo-card">
         <h5 className="bmo-h">알림 이력 — 이 노드 + 엣지 봉투(최근) <span className="bmo-sub">추적 중 {unitText(resp.status?.tracked, '건')} · 집중 진행 {resp.status?.focusActive ?? '—'} · 대기 {resp.status?.focusQueued ?? '—'} · 슬롯 {resp.status?.slots?.used ?? '—'}/{resp.status?.slots?.capacity ?? '—'}</span></h5>
+        <LastCycleLine last={resp.status?.last} />
         {!(resp.sent || []).length ? <p className="bmo-note">보낸 기록이 없습니다.</p> : (
           <STable minWidth={860} limit={100} className="bmo-t" style={{ fontSize: 12 }}>
             <thead><tr><th>시각</th><th>규칙</th><th>서버</th><th>법인</th><th>제목</th><th>결과</th><th>이슈</th><th>자동 집중</th></tr></thead>

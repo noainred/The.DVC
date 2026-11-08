@@ -1105,7 +1105,9 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       logs: logRes || null,
       // 8b단계 프로세스 Top-N — 개수만(머리 · 전체 저장 · 프로세스 행 · 시간 집계 행).
       top: topRes ? { samples: topRes.samples ?? 0, full: topRes.full ?? 0, procRows: topRes.procRows ?? 0, hourlyRows: topRes.hourlyRows ?? 0, error: topRes.ok ? null : (topRes.errors || [])[0] || 'write-failed' } : null,
-      perfAlerts: perfAlerts && !perfAlerts.skipped ? { fires: perfAlerts.fires ?? 0, queued: perfAlerts.queued ?? 0, deferred: perfAlerts.deferred ?? 0, capped: perfAlerts.capped ?? 0, autoFocus: perfAlerts.autoFocus ?? 0, issues: perfAlerts.issues ?? 0, ...(perfAlerts.warmup ? { warmup: true } : {}), error: perfAlerts.error || null } : null,
+      // 반증 n2 F3: 판정 보류 수(못 읽음 · 부분 합 · 낡음 · 표본 부족 — 0건과 가른다) · 전력 판정 입력 실패(powerError) · 전력 판정 항목 수.
+      perfAlerts: perfAlerts && !perfAlerts.skipped ? { fires: perfAlerts.fires ?? 0, queued: perfAlerts.queued ?? 0, deferred: perfAlerts.deferred ?? 0, capped: perfAlerts.capped ?? 0, autoFocus: perfAlerts.autoFocus ?? 0, issues: perfAlerts.issues ?? 0, ...(perfAlerts.warmup ? { warmup: true } : {}),
+        held: perfAlerts.counts?.unknown ?? 0, ...(perfAlerts.powerError ? { powerError: perfAlerts.powerError } : {}), ...(perfAlerts.powerItems != null ? { powerItems: perfAlerts.powerItems } : {}), error: perfAlerts.error || null } : null,
     };
     return { ok: true, ...(_last) };
   } catch (e) {
@@ -1168,15 +1170,22 @@ async function runCyclePerfAlerts(results, { settings, rules, agent, targets = [
   const nodeItem = on.includes('collect') ? collectNodeItem(agent) : null;
   if (nodeItem) items.push(nodeItem);
   /*
-   * 다음 점검 ②: 전력 · 온도 규칙 — 이 노드 주기 대상 **전부**(OS 수집 성패와 무관 — 전력 · 온도는 iDRAC 폴러 원천) · 이 노드 원천만(localOnly — 엣지 사본으로 다시 판정하지 않는다).
+   * 다음 점검 ②: 전력 · 온도 규칙 — 이 노드 주기 대상 **전부**(OS 수집 성패와 무관 — 전력 · 온도는 iDRAC 폴러 원천) · 판정 노드가 이 노드인 서버만(powerJudge.js — 엣지 사본 · 엣지가 맡은 법인은 다시 판정하지 않는다).
    *   대상 목록은 currentTargets(엣지 위임 서버 제외)라 중앙과 엣지가 같은 서버를 두 번 판정하지 않는다. 실패해도 다른 규칙 판정은 그대로 간다.
    */
   const PA = await import('./powerAlerts.js');
+  let powerError = null; let powerItems = null;
   if (on.some((id) => PA.isPowerRule(id))) {
-    try { for (const x of await PA.powerAlertItems({ targets, rules, now })) items.push(x); }
-    catch (e) { if (_srcErrLog('power-alerts', String(e?.message || e))) console.warn(`[bmusage] 전력 · 온도 알림 판정 입력을 만들지 못했습니다(그 규칙만 이번 주기에 보류): ${String(e?.message || e).slice(0, 160)}`); }
+    try { const px = await PA.powerAlertItems({ targets, rules, now }); powerItems = px.length; for (const x of px) items.push(x); }
+    catch (e) {
+      // 반증 n2 F3: 콘솔 한 줄로 끝내지 않는다(무음 실패 금지) — 주기 상태(_last.perfAlerts.powerError)에 남겨 규칙 화면 상태 줄이 밝힌다.
+      powerError = String(e?.message || e).slice(0, 200);
+      if (_srcErrLog('power-alerts', powerError)) console.warn(`[bmusage] 전력 · 온도 알림 판정 입력을 만들지 못했습니다(그 규칙만 이번 주기에 보류): ${powerError.slice(0, 160)}`);
+    }
   }
-  return (await import('./perfAlerts.js')).runPerfAlerts(items, { rules, now });
+  // 반증 n2 F5: 보류 시한(지속 × 수집 주기)이 이 노드의 수집 주기를 쓴다.
+  const r = await (await import('./perfAlerts.js')).runPerfAlerts(items, { rules, now, intervalMs: settings?.intervalMs });
+  return { ...r, ...(powerError ? { powerError } : {}), ...(powerItems != null ? { powerItems } : {}) };
 }
 function collectNodeItem(agent) {
   if (!_health?.node?.cells) return null;
