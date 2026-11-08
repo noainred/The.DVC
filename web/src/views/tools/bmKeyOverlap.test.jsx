@@ -9,6 +9,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import * as K from './bmKeyOverlapText.js';
 import { KeyOverlapTable } from './BmKeyOverlaps.jsx';
 import { ambiguousOf, corpLabel } from './bmPerfUrl.js';
+import { skippedNotes, missingFootnotes, missingMark } from './bmUsageText.js';
+import { MISS_REASON_TEXT } from './bmOnboardText.js';
+import { NO_PATH_REASON } from '../../../../server/src/bmusage/targets.js';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const row = (o = {}) => ({ oid: 'bm|vcB|r-b1', role: 'bm', stage: 'classify', vcenterId: 'vcB', vcName: 'B 법인', name: 'wb-b1', serviceTag: 'To Be Filled By O.E.M.', serverId: 'r-b1', fleetId: 'to be filled by o.e.m.',
@@ -80,5 +83,16 @@ describe('반증 S2 — 법인 자동 채움은 엣지 목록을 받았을 때�
     const body = src.slice(src.indexOf('async function openDetail('), src.indexOf('function pickCorp('));
     expect(body).toMatch(/const edgesOk = !!edges && edges\.ok !== false && Array\.isArray\(edges\.rows\);/);
     expect(body).toMatch(/if \(!v && edgesOk\)/);
+  });
+});
+
+describe('3차 재확인 H2 — OS 등록을 법인 불일치로 잃은 서버의 사유가 보드 · 누락 점검 · 각주에 보인다', () => {
+  it('대상이 아닌 서버(사유별) · 누락 점검 사유 · 행 표지 · 각주', () => {
+    expect(skippedNotes({ 'os-foreign': 1, 'os-ambiguous': 2 }, NO_PATH_REASON)).toEqual([
+      expect.stringMatching(/^\*\*OS 등록 다른 법인 1대\*\* — OS 계정 등록이 다른 법인으로/), expect.stringMatching(/^\*\*OS 등록 모호 2대\*\* — OS 계정 등록을 하나로/)]);
+    expect(MISS_REASON_TEXT['os-foreign']).toMatch(/다른 법인/); expect(MISS_REASON_TEXT['os-ambiguous']).toMatch(/법인을 지정/);
+    expect(missingMark(['os-foreign', 'os-ambiguous'])).toBe('OS 등록 다른 법인 · OS 등록 모호');
+    expect(missingFootnotes([{ missing: ['os-foreign'] }, { missing: ['os-ambiguous'] }]).join(' ')).toMatch(/OS 등록 다른 법인.*OS 등록 모호|OS 등록 모호.*OS 등록 다른 법인/);
+    for (const v of [NO_PATH_REASON['os-foreign'], NO_PATH_REASON['os-ambiguous'], MISS_REASON_TEXT['os-foreign'], MISS_REASON_TEXT['os-ambiguous']]) expect(v.includes('`')).toBe(false);
   });
 });

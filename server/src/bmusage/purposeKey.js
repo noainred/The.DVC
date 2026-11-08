@@ -59,3 +59,25 @@ export function purposeOfTargetSync(lookup, target, realKey, ctx = {}) {
   }
   return null;
 }
+
+/**
+ * 7b 일괄 등록(중앙 라우트 · 엣지 배포 적용 둘 다 — 3차 재확인 H1)의 서비스 태그 → 대상 · 저장 키(순수).
+ *   rows = 그 노드의 대상 · 대상이 아닌 서버 · judge = commonTag.js 판정기. 같은 태그가 둘 이상 · 판정기가 공통이라 하거나 판정기가 없으면 common.
+ * @returns {Map<string, {vcenterId:string, common:boolean, purposeKey:string, clearPair:string}>}  열쇠 = 서비스 태그 소문자
+ */
+export function tagTargetsOf(rows = [], judge = null) {
+  const seen = new Map();
+  for (const x of Array.isArray(rows) ? rows : []) {
+    if (!x || typeof x !== 'object' || !t(x.serviceTag)) continue;
+    const k = t(x.serviceTag).toLowerCase();
+    const prev = seen.get(k);
+    seen.set(k, prev ? { ...prev, n: prev.n + 1 } : { x, n: 1 });
+  }
+  const out = new Map();
+  for (const [k, { x, n }] of seen) {
+    const common = n > 1 || !judge || judge.isCommon(k);
+    const wk = common ? null : purposeWriteKeyOf(x, t(x.key), judge);
+    out.set(k, { vcenterId: t(x.vcenterId), common: common || !wk, purposeKey: wk?.k || '', clearPair: wk?.clearPair || '' });
+  }
+  return out;
+}

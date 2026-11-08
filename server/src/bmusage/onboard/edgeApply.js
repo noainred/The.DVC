@@ -48,7 +48,33 @@ export function cellsOfEdgeRow(row) {
  * @param {object} o  { sig, D?, corps?(엣지 스냅샷 법인), myCorps?, now?, by? }
  * @returns {{ok:boolean, applied:number, rejected:number, removed:number, skipped?:boolean, reason?:string, rejects?:object[]}}
  */
-export async function applyEdgeDeployment(rows = [], { sig = '', D = null, corps = [], myCorps = [], now = Date.now() } = {}) {
+/**
+ * 3차 재확인 H1: 배포 행의 용도 · 역할 저장 키 — 중앙 라우트(bmOnboard.js)와 같은 규칙(purposeKey.tagTargetsOf + 판정기 commonTag.js).
+ *   예전에는 엣지 적용 문맥에 tagTarget 이 없어 서비스 태그 전역 열쇠로 썼다(공통 태그 ‘To Be Filled By O.E.M.’ 도 — 같은 엣지의 다른 서버 판정이 바뀐다).
+ *   아직 이 엣지 대상이 아닌 새 서버는 배포 행의 태그로 판정한다 — 판정기가 전역 열쇠로 써도 된다고 하고 이번 배포에 그 태그 행이 하나뿐일 때만 적용 ·
+ *   대상을 못 읽으면 적용하지 않는다(purpose-unresolved — 전역 태그로 쓰지 않는 쪽).
+ */
+async function edgeTagTargetOf(list, currentTargets) {
+  let map; let judge;
+  try {
+    const tg = await (currentTargets || (async () => (await import('../poller.js')).currentTargets()))();
+    const CT = await import('../commonTag.js');
+    const PK = await import('../purposeKey.js');
+    judge = CT.tagJudgeOf(tg, []);
+    map = PK.tagTargetsOf([...(tg?.targets || []), ...(tg?.skipped || [])], judge);
+  } catch { return () => null; }
+  const rowTags = new Map();
+  for (const r of list) { const k = lc(r.serviceTag); if (k) rowTags.set(k, (rowTags.get(k) || 0) + 1); }
+  return (tag) => {
+    const k = lc(tag);
+    const hit = map.get(k);
+    if (hit) return (rowTags.get(k) || 0) > 1 ? { ...hit, common: true } : hit;
+    if ((rowTags.get(k) || 0) === 1 && judge.tagKeyOk(tag)) return { vcenterId: '', common: false, purposeKey: String(tag), clearPair: '' };
+    return { vcenterId: '', common: true, purposeKey: '', clearPair: '' };
+  };
+}
+
+export async function applyEdgeDeployment(rows = [], { sig = '', D = null, corps = [], myCorps = [], now = Date.now(), currentTargets = null } = {}) {
   const Dx = D || await defaultOnboardDeps();
   const prev = readAppliedState();
   if (prev.ok && prev.state.sig === sig && sig) return { ok: true, skipped: true, applied: 0, rejected: 0, removed: 0 };
@@ -61,7 +87,8 @@ export async function applyEdgeDeployment(rows = [], { sig = '', D = null, corps
   const parsedRows = list.map((r, i) => ({ line: i + 1, cells: cellsOfEdgeRow(r), flags: { bindOk: r.bindOk === true } }));
   const created = prev.ok ? { ...prev.state.created } : {};
   const createdIds = new Set(Object.values(created).flatMap((x) => [x?.os, x?.idrac]).filter(Boolean).map(String));
-  const { ctx, unread } = buildOnboardCtx({ D: Dx, corps, isEdge: true, myCorps: mine, canView: () => true, canWrite: () => true, fullScope: true,
+  const tagTarget = await edgeTagTargetOf(list, currentTargets);   // H1 — 중앙 라우트와 같은 공통 태그 판정
+  const { ctx, unread } = buildOnboardCtx({ D: Dx, corps, isEdge: true, myCorps: mine, canView: () => true, canWrite: () => true, fullScope: true, tagTarget,
     ownerTier: (row) => row?.flags?.bindOk === true,
     // 반증 F8 · 감사 M-3: 기존 항목은 **이 배포가 만든 것** 또는 이 엣지 법인 귀속인 것만 갱신한다(손으로 둔 귀속 없음 · 다른 법인 항목은 이름이 같아도 거부).
     canUpdateExisting: (ex) => createdIds.has(String(ex.id)) || (!!ex.vcenterId && mine.includes(String(ex.vcenterId))) });

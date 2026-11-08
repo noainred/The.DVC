@@ -164,17 +164,9 @@ export function registerBmOnboard(api, deps = {}) {
         judge = CT.tagJudgeOf(tg, edges || []);
       } catch { judge = null; }
       const PK = await import('../../bmusage/purposeKey.js');
-      const seen = new Map(); names = new Set();
-      for (const x of [...(tg.targets || []), ...(tg.skipped || [])]) {
-        if (x?.serviceTag) { const k = String(x.serviceTag).toLowerCase(); const prev = seen.get(k); seen.set(k, prev ? { ...prev, n: prev.n + 1 } : { x, n: 1 }); }
-        if (x?.name) names.add(String(x.name).toLowerCase());
-      }
-      tagMap = new Map();
-      for (const [k, { x, n }] of seen) {
-        const common = n > 1 || !judge || judge.isCommon(k);
-        const wk = common ? null : PK.purposeWriteKeyOf(x, String(x.key || ''), judge);
-        tagMap.set(k, { vcenterId: String(x.vcenterId || ''), common: common || !wk, purposeKey: wk?.k || '', clearPair: wk?.clearPair || '' });
-      }
+      const all = [...(tg.targets || []), ...(tg.skipped || [])];
+      names = new Set(all.filter((x) => x?.name).map((x) => String(x.name).toLowerCase()));
+      tagMap = PK.tagTargetsOf(all, judge);   // 엣지 배포 적용(edgeApply.js)과 같은 함수(3차 재확인 H1)
     } catch { tagMap = null; names = null; }
     const ownerTier = await isOwnerTier(req);
     // ⚠ 반증 F12: 등록부 사본은 **여기(마지막 await 뒤)** 에서 잡는다 — 이후 분석 · 적용은 await 없이 이어진다.

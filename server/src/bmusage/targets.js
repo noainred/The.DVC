@@ -97,7 +97,8 @@ export function pickOsEntry(os, { regHost = '', name = '', vc = '', strict = fal
     if (!Array.isArray(list) || !list.length) continue;
     const own = v ? list.filter((s) => t(s.vcenterId) === v) : [];
     const unk = list.filter((s) => !t(s.vcenterId));
-    if (list.some((s) => t(s.vcenterId) && t(s.vcenterId) !== v)) foreign = true;
+    // 3차 재확인 H2: 이 서버의 법인을 모르면(귀속 없음) 법인 지정 등록은 ‘다른 법인’ 이 아니라 ‘어느 것인지 모름’ 이다.
+    if (list.some((s) => t(s.vcenterId) && t(s.vcenterId) !== v)) { if (v) foreign = true; else unknownStrict = true; }
     const use = own.length ? own : (strict ? [] : unk);
     if (!use.length) { if (strict && unk.length) unknownStrict = true; continue; }
     if (new Set(use.map((s) => hostKey(s.host))).size === 1) return { entry: use[0], reason: '' };
@@ -195,10 +196,13 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     if (settings.osSsh && osEntry) paths.push('os');
 
     if (!paths.length) {
+      // 3차 재확인 H2: OS 등록이 있는데 법인이 맞지 않아 쓰지 않았으면(os-foreign · os-ambiguous) 그것이 사유다 — 예전에는 iDRAC 사유(no-idrac)만 보여
+      //   기준판에서 OS 로 수집되던 서버가 왜 빠졌는지 화면이 말하지 못했다. iDRAC 쪽 사유는 idracIssue 로 함께 싣는다.
       const reason = (!settings.idracTelemetry && !settings.osSsh) ? 'both-off'
-        : (settings.osSsh && !osEntry && idracReason) ? idracReason
-          : (idracReason || osReason);
-      skipped.push({ ...idOf(b), reason, vcenterId: vc, osMissing: !osEntry, ...(osPick.reason ? { osIssue: osPick.reason } : {}) });
+        : (settings.osSsh && osPick.reason) ? osPick.reason
+          : (settings.osSsh && !osEntry && idracReason) ? idracReason
+            : (idracReason || osReason);
+      skipped.push({ ...idOf(b), reason, vcenterId: vc, osMissing: !osEntry, ...(osPick.reason ? { osIssue: osPick.reason } : {}), ...(idracReason && reason !== idracReason ? { idracIssue: idracReason } : {}) });
       continue;
     }
     /*

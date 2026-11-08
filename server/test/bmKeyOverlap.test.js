@@ -468,9 +468,14 @@ test('⑬ G1 판정기(순수) — 공통 기본값 · 꼴 · 둘 이상 법인 
   const PK = await import('../src/bmusage/purposeKey.js');
   for (const x of ['To Be Filled By O.E.M.', 'Default string', 'System Serial Number', '0000000', 'XXXXXXXX', '1234567', 'N/A', '.', '', '  ']) assert.equal(CT.isPlaceholderTag(x), true, x);
   for (const x of ['ABCD123', '7XK9P2J', 'CZ1234ABCD', 'SGH123ABC']) assert.equal(CT.isPlaceholderTag(x), false, x);
+  // 3차 재확인 보강(반증 r12 — 목록 밖 값): 끝 점 없음 · 붙여 씀 · 밑줄 · 접두 · 전각 · 0폭 문자
+  for (const x of ['To Be Filled By O.E.M', 'NotSpecified', 'Not_Specified', 'Unspecified', 'S/N: N/A', 'SerialNumber', 'CHANGEME', 'Ｔｏ Ｂｅ Ｆｉｌｌｅｄ Ｂｙ Ｏ．Ｅ．Ｍ．', 'To Be Filled By O.E.M.\u200b', '\ufeffDefault String', 'Not\u00adSpecified']) assert.equal(CT.isPlaceholderTag(x), true, JSON.stringify(x));
   const j = CT.commonTagJudge({ rows: [{ serviceTag: 'MULTI01', vcenterId: 'vcA' }, { serviceTag: 'multi01', vcenterId: 'vcB' }, { serviceTag: 'ONE0001', vcenterId: 'vcA' }, { serviceTag: 'ONE0001', vcenterId: 'vcA' }], overlapTags: ['DUP0001'] });
   assert.deepEqual(['MULTI01', 'ONE0001', 'DUP0001', 'To Be Filled By O.E.M.'].map((x) => j.tagKeyOk(x)), [false, true, false, false]);
   assert.equal(CT.commonTagJudge({ rows: [], complete: false }).tagKeyOk('ONE0001'), false, '모르면 전역 열쇠로 쓰지 않는다');
+  // 둘 이상 법인 판정도 같은 정규화(0폭 문자 · 전각) — 보이지 않는 글자 하나로 다른 태그처럼 보이지 않게
+  const jz = CT.commonTagJudge({ rows: [{ serviceTag: 'ZWS1234', vcenterId: 'vcA' }, { serviceTag: 'ZWS1234\u200b', vcenterId: 'vcB' }, { serviceTag: 'FWD1234', vcenterId: 'vcA' }, { serviceTag: 'ＦＷＤ１２３４', vcenterId: 'vcB' }] });
+  assert.deepEqual([jz.tagKeyOk('ZWS1234'), jz.tagKeyOk('FWD1234')], [false, false]);
   assert.equal(CT.tagJudgeOf({ isEdge: true, targets: [] }, []).complete, true, '엣지는 자기 함대를 다 안다');
   assert.equal(CT.tagJudgeOf({ targets: [], skipped: [{ reason: 'edge-delegated', serviceTag: 'Q' }] }, []).complete, false, '중앙이 엣지에 맡긴 서버가 있으면 모름');
   const tg = { key: 'ONE0001', serviceTag: 'ONE0001', keyKind: 'serviceTag', vcenterId: 'vcA' };
@@ -501,4 +506,42 @@ test('⑭ G1 — 7b 일괄 등록의 용도 · 역할도 같은 규칙: 공통 �
   assert.equal(RUN.applyOnboard(a.rows, { D, by: 'own' }).ok, true);
   assert.deepEqual([FT.fleetPurposeOf('TAGG01')?.role, FT.fleetPurposeOf('vcA|TAGG01')], ['db', null], '전역 태그로 쓰면 그 서버의 쌍 행을 지운다');
   for (const k of ['vcA|TAGP01', 'TAGG01']) FT.setFleetPurpose(k, null, {});
+});
+
+test('⑮ 3차 재확인 H1(r13) — 7b 엣지 배포 적용도 같은 공통 태그 판정: 공통 태그 · 같은 태그 행 둘은 용도를 적용하지 않음 · 고유 태그는 그 태그로 · 대상을 못 읽으면 적용하지 않음', async () => {
+  const EA = await import('../src/bmusage/onboard/edgeApply.js');
+  const FT = await import('../src/insights/fleetTags.js');
+  const TAG = 'To Be Filled By O.E.M.';
+  const row = (name, tag, host, role) => ({ name, corp: 'vcB', serviceTag: tag, osHost: host, osPort: 22, osUser: 'mon', apps: [], role, mounts: ['/'], enabled: true, bindOk: true });
+  const edgeTg = async () => ({ isEdge: true, targets: [], skipped: [] });
+  const r = await EA.applyEdgeDeployment([row('h1-b1', TAG, '10.2.5.11', 'db'), row('h1-u1', 'UNIQ7X1', '10.2.5.12', 'web')], { sig: 'h1-s1', corps: [{ id: 'vcB', name: 'B 법인' }], myCorps: ['vcB'], currentTargets: edgeTg });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const P = FT.loadFleetPurposes();
+  assert.equal(Object.hasOwn(P, TAG.toLowerCase()), false, '예전: 공통 태그 전역 열쇠로 role db 저장(반증 r13)');
+  assert.equal(FT.fleetPurposeOf('UNIQ7X1')?.role, 'web', '고유 태그(이번 배포에 하나 · 판정기 complete)는 예전처럼 그 태그로');
+  const r2 = await EA.applyEdgeDeployment([row('h1-u2', 'UNIQ7X2', '10.2.5.13', 'db')], { sig: 'h1-s2', corps: [{ id: 'vcB', name: 'B 법인' }], myCorps: ['vcB'], currentTargets: async () => { throw new Error('대상 못 읽음'); } });
+  assert.equal(r2.ok, true); assert.equal(FT.fleetPurposeOf('UNIQ7X2'), null, '대상을 못 읽으면 적용하지 않는다(전역 태그로 쓰지 않는 쪽)');
+  const r3 = await EA.applyEdgeDeployment([row('h1-u3', 'UNIQ7X3', '10.2.5.14', 'db')], { sig: 'h1-s3', corps: [{ id: 'vcB', name: 'B 법인' }], myCorps: ['vcB'],
+    currentTargets: async () => ({ isEdge: true, targets: [{ key: 'UNIQ7X3', keyKind: 'serviceTag', serviceTag: 'UNIQ7X3', vcenterId: 'vcB' }, { key: 'vcB:r9', keyKind: 'decided', serviceTag: 'UNIQ7X3', vcenterId: 'vcB' }], skipped: [] }) });
+  assert.equal(r3.ok, true); assert.equal(FT.fleetPurposeOf('UNIQ7X3'), null, '그 엣지에 같은 태그 서버가 둘이면 어느 것인지 몰라 적용하지 않는다');
+  const r4 = await EA.applyEdgeDeployment([row('h1-d1', 'DUP7X1', '10.2.5.15', 'db'), row('h1-d2', 'DUP7X1', '10.2.5.16', 'web')], { sig: 'h1-s4', corps: [{ id: 'vcB', name: 'B 법인' }], myCorps: ['vcB'], currentTargets: edgeTg });
+  assert.equal(r4.ok, true); assert.equal(FT.fleetPurposeOf('DUP7X1'), null, '이번 배포에 같은 태그 행이 둘이면(둘째는 dup-tag 거부) 첫 행도 어느 서버 것인지 몰라 적용하지 않는다');
+  FT.setFleetPurpose('UNIQ7X1', null, {});
+});
+
+test('⑯ 3차 재확인 H2(r14) — iDRAC 없이 OS 등록을 법인 불일치로 잃은 서버는 사유가 OS 쪽(os-foreign · os-ambiguous)으로 보인다 · 귀속 없음 대상의 법인 지정 등록은 os-ambiguous', async () => {
+  const { resolveTargets, indexOsHosts, pickOsEntry, NO_PATH_REASON } = await import('../src/bmusage/targets.js');
+  const E = (id, name, host, vc) => ({ id, name, host, ...(vc ? { vcenterId: vc } : {}), port: 22, username: `u-${id}`, password: 'p', mounts: [] });
+  const bm = [{ serverId: 'b', fleetId: 'b', name: 'db01', serviceTag: 'BBBBBB1', vcenterId: 'vcB' }];
+  const r = resolveTargets({ bareMetal: bm, registry: [], bmServers: [E('a1', 'db01', '10.1.0.5', 'vcA')], settings: { corps: { vcB: true }, idracTelemetry: true, osSsh: true } });
+  assert.deepEqual(r.skipped.map((x) => [x.reason, x.osIssue, x.idracIssue]), [['os-foreign', 'os-foreign', 'no-idrac']], '예전: reason no-idrac 하나(OS 등록 문제를 모름)');
+  assert.deepEqual(r.counts.byReason, { 'os-foreign': 1 });
+  assert.ok(NO_PATH_REASON['os-foreign'] && NO_PATH_REASON['os-ambiguous']);
+  const r2 = resolveTargets({ bareMetal: bm, registry: [], bmServers: [E('u1', 'db01', '10.0.0.5'), E('u2', 'db01', '10.0.0.6')], settings: { corps: { vcB: true }, idracTelemetry: true, osSsh: true } });
+  assert.equal(r2.skipped[0].reason, 'os-ambiguous');
+  const r3 = resolveTargets({ bareMetal: bm, registry: [], bmServers: [], settings: { corps: { vcB: true }, idracTelemetry: true, osSsh: true } });
+  assert.equal(r3.skipped[0].reason, 'no-idrac', 'OS 등록 자체가 없으면 예전 사유 그대로');
+  const P = (list, o) => pickOsEntry(indexOsHosts(list), o).reason;
+  assert.equal(P([E('b1', 'db01', '10.2.0.5', 'vcB')], { name: 'db01', vc: '', strict: true }), 'os-ambiguous', '법인을 모르는 대상에게 법인 지정 등록은 ‘다른 법인’ 이 아니라 ‘모름’(예전 표기 os-foreign)');
+  assert.equal(P([E('b1', 'db01', '10.2.0.5', 'vcB')], { name: 'db01', vc: '' }), 'os-ambiguous');
 });

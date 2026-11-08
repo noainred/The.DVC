@@ -12,23 +12,30 @@
  */
 import { pushAll } from '../util/pushAll.js';
 
-const norm = (v) => String(v ?? '').trim().toLowerCase().slice(0, 128);
+// 3차 재확인 보강: 전각 · 호환 문자는 NFKC 로 · 0폭 문자(ZWSP · ZWJ · BOM · 방향 표시)는 지운다 — ‘To Be Filled By O.E.M.’ 에 0폭 문자를 붙여 목록을 비켜 가지 않게.
+const ZW_RE = /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff\u00ad]/g;
+const norm = (v) => String(v ?? '').slice(0, 256).normalize('NFKC').replace(ZW_RE, '').trim().toLowerCase().slice(0, 128);
+const alnumOf = (n) => n.replace(/[^a-z0-9]/g, '');
 
 /** 알려진 공통 기본값(소문자 · BIOS/IPMI/화이트박스가 채우는 자리표시). 꼴 판정(isPlaceholderTag)이 짧은 값 · 반복 · 연속 숫자를 따로 잡는다. */
 export const KNOWN_COMMON_TAGS = Object.freeze([
   'to be filled by o.e.m.', 'to be filled by oem', 'to be filled', 'default string', 'default', 'system serial number', 'chassis serial number',
   'base board serial number', 'baseboard serial number', 'serial number', 'system serial', 'not specified', 'not applicable', 'not available',
   'not set', 'none', 'unknown', 'invalid', 'empty', 'o.e.m.', 'oem', 'system product name', 'type1productconfigid', 'product serial',
+  // 3차 재확인 보강(반증 r12 — 목록 밖 값): 끝 점 없는 꼴 · 붙여 쓴 꼴 · 접두가 붙은 꼴은 아래 영숫자 비교가 잡는다
+  'unspecified', 's/n: n/a', 'changeme', 'to be filled by o.e.m',
 ]);
 const KNOWN = new Set(KNOWN_COMMON_TAGS);
+// 영숫자만 남긴 꼴로도 비교한다 — ‘NotSpecified’ · ‘Not_Specified’ · ‘To Be Filled By O.E.M’ · ‘SerialNumber’ 가 같은 값으로 잡힌다.
+const KNOWN_ALNUM = new Set(KNOWN_COMMON_TAGS.map(alnumOf).filter((a) => a.length >= 4));
 const SEQ = ['0123456789', '1234567890', '9876543210'];
 
 /** 꼴로 보아 공통 기본값인가(순수) — 알려진 값 · 영숫자 4자 미만 · 한 글자 반복(0000000 · xxxxxxx) · 연속 숫자(1234567). */
 export function isPlaceholderTag(tag) {
   const n = norm(tag);
   if (!n || KNOWN.has(n)) return true;
-  const a = n.replace(/[^a-z0-9]/g, '');
-  if (a.length < 4) return true;
+  const a = alnumOf(n);
+  if (a.length < 4 || KNOWN_ALNUM.has(a)) return true;
   if (/^(.)\1*$/.test(a)) return true;             // 길이 128 상한 · 앵커 — 선형
   return SEQ.some((s) => s.includes(a));
 }
