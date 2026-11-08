@@ -181,9 +181,12 @@ export function BmPerfDetailView({ itemKey, itemVc = '', onPickCorp = null, item
         <button className="btn btn-sm bmp-touch" onClick={onReload} disabled={loading || !onReload}>{loading ? '읽는 중…' : '다시 읽기'}</button>
         {onClose && <button className="btn btn-sm bmp-touch" onClick={onClose}>닫기</button>}
       </div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, marginTop: 4 }}>
-        {[target.serviceTag && `서비스 태그 ‘${target.serviceTag}’`, target.vcenterId || '귀속 없음', target.model, item?.agent && `엣지 ${item.agent}`].filter(Boolean).join(' · ')}
-      </div>
+      {/* 법인을 고르기 전에는 어느 서버의 머리도 그리지 않는다(한 법인 서버의 정보를 답처럼 보이지 않게 — 다음 점검 ①) */}
+      {!amb && (
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, marginTop: 4 }}>
+          {[target.serviceTag && `서비스 태그 ‘${target.serviceTag}’`, target.vcenterId || '귀속 없음', target.model, item?.agent && `엣지 ${item.agent}`].filter(Boolean).join(' · ')}
+        </div>
+      )}
       {e && (
         <div style={{ fontSize: 12, lineHeight: 1.6 }}>
           {pathAtText(e, target.paths || [])}{readText(e.read) ? ` · ${readText(e.read)}` : ''}

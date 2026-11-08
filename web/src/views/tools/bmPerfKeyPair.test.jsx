@@ -128,6 +128,9 @@ describe('⑤ 상세 — 법인을 넘기고 · 모호하면 법인 고르기', 
     expect(html).toContain('A 법인(vcA)'); expect(html).toContain('B 법인(vcB)');
     expect(html).toContain('여러 법인');
     expect(html).not.toContain('법인을 고르세요.</p>');   // 서버 사유 문장을 오류 줄로 다시 그리지 않는다
+    // 고르기 전에는 한 법인 서버의 머리(서비스 태그 · 법인 · 모델)를 답처럼 그리지 않는다(Chromium 판독에서 잡은 것 — 목록의 첫 항목 머리가 떴다)
+    const withItem = renderToStaticMarkup(React.createElement(BmPerfDetailView, { itemKey: '10.0.0.5', item: { key: '10.0.0.5', target: { serviceTag: 'TAGX', vcenterId: 'vcA', model: 'R750' } }, err, onPickCorp: () => {}, now: 1 }));
+    expect(withItem).not.toContain('서비스 태그'); expect(withItem).not.toContain('R750');
     const nf = renderToStaticMarkup(React.createElement(BmPerfDetailView, { itemKey: 'K', err: Object.assign(new Error('대상 서버를 찾지 못했습니다.'), { status: 404, body: { code: 'not-found' } }), now: 1 }));
     expect(nf).not.toContain('법인 고르기');
   });

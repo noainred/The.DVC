@@ -640,7 +640,7 @@ export function BmUsage() {
       {view === 'power' && <BmPowerFleet onOpen={(k, vc) => openDetail(k, 'summary', vc)} />}
       {perfSel && (
         <BmPerfDetail
-          itemKey={perfSel} itemVc={perfVc} onPickCorp={pickCorp} item={perfItems.find((it) => it.key === perfSel && (!perfVc || it.vcenterId === perfVc)) || null} initialTab={perfTab}
+          itemKey={perfSel} itemVc={perfVc} onPickCorp={pickCorp} item={(() => { const c = perfItems.filter((it) => it.key === perfSel && (!perfVc || it.vcenterId === perfVc)); return c.length === 1 ? c[0] : null; })()} initialTab={perfTab}
           authStops={perfAuthStops} staleMs={edges?.staleMs ?? null}
           keepDays={{ server: data?.settings?.dailyRetentionDays ?? null, dev: data?.settings?.store?.devHourlyDays ?? null }}
           onClose={() => { setPerfSel(''); setPerfVc(''); }}
