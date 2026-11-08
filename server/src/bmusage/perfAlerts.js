@@ -650,7 +650,8 @@ export async function runPerfAlerts(items = [], { rules, now = Date.now(), deps 
     // 손상 뒤 첫 주기는 기준만(위 _warmKinds — 종류별). 주기 시작 때 보호 중이던 종류의 발화는 보내지 않는다 — 그 종류의 항목이 이 주기에 왔으면 보호를 푼다.
     //   4차 Q1: 서버 · 랙 항목이 없는 판정(실패 주기의 빈 판정 · 수집 노드 칸만 — 3차 P2)은 서버 · 랙 보호를 풀지 않는다. 보류 주기 수 · 판정 시각(위 st.cycle)은 그대로 남긴다.
     const warmAtStart = new Set(_warmKinds);
-    for (const x of items) if (x && x.key) _warmKinds.delete(warmKindOf(x.key));
+    // 5차 S5: 넘김 항목(release — 이 노드가 판정하지 않는 서버 · 랙)은 기준을 잡지 않으므로 보호를 풀지 않는다(실제로 판정한 항목만 그 종류의 보호를 푼다).
+    for (const x of items) if (x && x.key && !x.release) _warmKinds.delete(warmKindOf(x.key));
     const held = warmAtStart.size ? fires.filter((f) => warmAtStart.has(warmKindOf(f.key))) : [];
     const sendable = held.length ? fires.filter((f) => !warmAtStart.has(warmKindOf(f.key))) : fires;
     const targetsByKey = new Map(items.filter((x) => x?.target).map((x) => [x.key, x.target]));

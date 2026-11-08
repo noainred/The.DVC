@@ -184,3 +184,33 @@ test('⑤ R1 — 손상 뒤 보호는 종류별(수집 노드 칸 · 서버 · �
   await A._drainPerfAlertsForTest();
   assert.equal(r0.warmup, true); assert.equal(r0.warmupHeld, 2); assert.equal(d2.sends.length, 0);
 });
+
+test('⑥ S5 — 손상 뒤 서버 · 랙 보호는 실제로 판정한 항목만 푼다(넘김 항목은 기준을 잡지 않으므로 풀지 않는다)', async () => {
+  const rules = rulesOf({ powerCap: { sustain: 1, repeatMin: 0 } });
+  const cap = (s) => ({ key: 'K1', name: 'bm-K1', vcenterId: 'vcA', target: { key: 'K1', vcenterId: 'vcA' }, power: { kind: 'server', capHitPct: 98, w: 900, at: s, capW: 900, capPct: 100, capHit: true } });
+  const rel = { key: 'K1', name: 'bm-K1', vcenterId: 'vcA', release: { kind: 'server', reason: 'corp-edge-owned', node: '' } };
+  await A._drainPerfAlertsForTest();
+  A._resetPerfAlertsForTest();
+  const d = depsOf();
+  fs.writeFileSync(FILE, '{broken');
+  // 손상 직후 첫 주기 — 서버 · 랙 항목이 전부 넘김(이 노드는 판정 노드가 아님)
+  const r0 = await A.runPerfAlerts([rel], { rules, now: NOW, deps: d.deps, intervalMs: 5 * MIN });
+  assert.equal(r0.fires, 0);
+  // 판정 노드가 이 노드로 돌아옴 — 진행 중이던 걸림은 이 판정이 기준만 잡는다(817f770b: 넘김 주기가 보호를 풀어 새 사건으로 발송)
+  const r1 = await A.runPerfAlerts([cap(NOW + 4 * MIN)], { rules, now: NOW + 5 * MIN, deps: d.deps, intervalMs: 5 * MIN });
+  assert.equal(r1.warmup, true, '넘김만 있던 주기는 보호를 풀지 않는다'); assert.equal(r1.warmupHeld, 1);
+  const r2 = await A.runPerfAlerts([cap(NOW + 9 * MIN)], { rules, now: NOW + 10 * MIN, deps: d.deps, intervalMs: 5 * MIN });
+  await A._drainPerfAlertsForTest();
+  assert.equal(r2.fires, 0); assert.equal(d.sends.length, 0, '발송 0');
+  // 같은 주기에 넘김 + 판정 항목이 함께 오면 판정 항목이 보호를 푼다(그 주기 발화는 기준만 — 다음 주기 새 사건은 발송)
+  await A._drainPerfAlertsForTest();
+  A._resetPerfAlertsForTest();
+  const d2 = depsOf();
+  fs.writeFileSync(FILE, '{broken');
+  const k2 = { ...cap(NOW - MIN), key: 'K2', name: 'bm-K2', target: { key: 'K2', vcenterId: 'vcA' } };
+  const q0 = await A.runPerfAlerts([rel, k2], { rules, now: NOW, deps: d2.deps, intervalMs: 5 * MIN });
+  assert.equal(q0.warmupHeld, 1);
+  const q1 = await A.runPerfAlerts([cap(NOW + 4 * MIN), { ...k2, power: { ...k2.power, at: NOW + 4 * MIN } }], { rules, now: NOW + 5 * MIN, deps: d2.deps, intervalMs: 5 * MIN });
+  await A._drainPerfAlertsForTest();
+  assert.equal(q1.warmup, undefined); assert.equal(q1.fires, 1, 'K1 은 이 노드가 처음 판정하는 새 사건 — 보호가 풀린 뒤라 발송'); assert.equal(d2.sends.length, 1);
+});
