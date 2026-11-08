@@ -45,7 +45,7 @@ td .sub{font-size:10.5px;color:#5d6b85}
 <div class="wrap" style="width: 1440px">
   <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
     <div><h2>SAN 스토리지 성능 점검 — 어레이 × 항목 판정표</h2>
-      <div class="note">월간 점검(SAN 스위치)과 같은 틀: 판정은 네 가지(<b>정상 · 주의 · 이상 · 확인 불가</b>)이고 <b>확인 불가를 정상으로 뭉개지 않습니다</b>. 저장된 표본을 판정하므로 장비에 새로 접속하지 않습니다. 목록 ① 의 '성능 점검' 단추로 들어오고, PDF 로 내려받습니다.</div></div>
+      <div class="note">월간 점검(SAN 스위치)과 같은 틀: 판정은 네 가지(<b>정상 · 주의 · 이상 · 확인 불가</b>)이고 <b>확인 불가를 정상으로 뭉개지 않습니다</b>. 저장된 표본을 판정하므로 장비에 새로 접속하지 않습니다. 'SAN 스토리지 성능' 의 두 번째 탭(<span class="mono">#/tools/san-storage/check</span>)이고, PDF 로 내려받습니다.</div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" type="button">기준(임계값) 설정</button><button class="btn" type="button">PDF 내려받기</button><button class="btn primary" type="button">지금 판정</button></div>
   </div>
 
@@ -88,15 +88,15 @@ td .sub{font-size:10.5px;color:#5d6b85}
         <tbody>
           <tr><td><b>디렉터 편중</b></td><td>디렉터 평균 ≥ 0.5 Gb/s 이고 한 디렉터가 평균의 1.4배 이상 → 주의 · 2배 이상이 24시간 지속 → 이상</td><td>포트 사용량 탭 기존 상수(API 로 전달)</td></tr>
           <tr><td><b>팹 비대칭</b></td><td>팹 A/B 합이 각각 ≥ 0.5 Gb/s 일 때 한쪽이 전체의 30% 미만 → 주의 · 한쪽 0 이고 다른 쪽 흐름 → 이상(경로 끊김 후보)</td><td>새 규칙(제안 — 설정에서 조정)</td></tr>
-          <tr><td><b>회선 포화</b></td><td>포트 피크 포화도(표본 최대 ÷ 포트 속도) ≥ 70% → 주의 · ≥ 90% → 이상</td><td>포트 사용량 탭 '포화도' 계산 · 기준은 제안</td></tr>
-          <tr><td><b>디렉터 busy</b></td><td>PercentBusy ≥ 설정 임계값(주의/이상 두 단계). <b>임계값이 설정되지 않았으면 값만 보이고 '?'</b></td><td>관리자 설정(기본값 비움)</td></tr>
-          <tr><td><b>응답 시간</b></td><td>읽기/쓰기 응답 ms ≥ 설정 임계값 · PowerStore 는 노드 avg_latency · Unity 는 경로가 있을 때만</td><td>관리자 설정(기본값 비움)</td></tr>
-          <tr><td><b>큐 깊이</b></td><td>QueueDepthUtilization ≥ 설정 임계값(PowerMax 전용 — 다른 벤더는 '—')</td><td>관리자 설정(기본값 비움)</td></tr>
-          <tr><td><b>노드 · SP CPU</b></td><td>PowerStore 노드 CPU · Unity SP CPU 사용률 ≥ 설정 임계값(PowerMax 는 '—' · busy 로 대신)</td><td>관리자 설정(기본값 비움)</td></tr>
+          <tr><td><b>회선 포화</b></td><td>포트 피크 포화도(표본 최대 ÷ 포트 속도) ≥ 70% → 주의(Brocade MAPS 기본 FPI 과가입 트리거 TX 70% 와 같은 값) · ≥ 90% → 이상(제안 — Brocade 혼잡 가이드의 90%/hr 대역폭 경보 수준)</td><td>포트 사용량 탭 계산 · Broadcom MAPS 9.1 · 혼잡 가이드</td></tr>
+          <tr><td><b>디렉터 busy</b></td><td>PercentBusy ≥ 임계값. 기본 <b>이상 70</b>(Unisphere for PowerMax 건강 점수의 기본 critical 값) · 주의는 비움(설정하면 판정)</td><td>Dell Unisphere 10.0 제품 가이드</td></tr>
+          <tr><td><b>응답 시간</b></td><td>읽기/쓰기 응답 ms ≥ 임계값 · PowerStore 는 노드 avg_latency · Unity 는 경로가 있을 때만. <b>벤더 공식 기준을 찾지 못해 기본값 비움</b>(호스트 쪽 10/20 ms 경험칙은 FE 응답 시간 기준으로 쓰지 않음)</td><td>관리자 설정(기본값 비움)</td></tr>
+          <tr><td><b>큐 깊이</b></td><td>QueueDepthUtilization ≥ 임계값. 기본 <b>이상 75</b>(Unisphere 기본 critical) · PowerMax 전용</td><td>Dell Unisphere 10.0 제품 가이드</td></tr>
+          <tr><td><b>노드 · SP CPU</b></td><td>Unity SP CPU: 기본 <b>주의 70 · 이상 90</b>(Dell Unity Best Practices 의 지속 사용률 구간 50~70 정상 · 70~90 높음 · 90↑) · PowerStore 노드 CPU: 기본 <b>주의 50 · 이상 70</b>(Dell KB — 업그레이드 전 점검 기준이라 간접 근거 · 설정에서 바꿀 수 있음)</td><td>Dell Unity BP 가이드 · PowerStore KB 000192018</td></tr>
           <tr><td><b>보고 대조</b></td><td>어레이가 보고한 호스트 대역폭 합(MB/s → Gb/s)과 스위치 처리량의 차이가 30% 이상 → 주의(한쪽 계측이 빠졌을 가능성 — 원인을 단정하지 않음)</td><td>새 규칙(제안)</td></tr>
         </tbody>
       </table>
-      <div class="info">⚠ <b>임계값을 지어내지 않습니다.</b> busy · 응답 시간 · 큐 깊이 · CPU 의 기본 임계값은 비워 두고(판정 '?' · 값은 표시), 관리자가 설정 › 수집 › 스토리지 성능 점검에서 넣으면 그때부터 판정합니다. 편중 · 포화의 상수는 포트 사용량 탭에 이미 있는 값을 그대로 씁니다. '제안' 표시는 컨펌 질문 5 입니다.</div>
+      <div class="info">⚠ <b>임계값을 지어내지 않습니다.</b> 기본값은 벤더 문서에서 찾은 값만 넣고(출처 열 · README §10) 못 찾은 항목(응답 시간 · 주의 단계 일부)은 비워 '?' 로 둡니다. 전부 '기준 설정' 에서 바꿀 수 있고, 바꾼 값은 판정표 머리에 '사용자 설정' 배지로 보입니다. 편중 · 포화 계산은 포트 사용량 탭의 기존 코어를 그대로 씁니다.</div>
       <div class="note">점검 이력은 '판정 1회 = 기록 1회'(월간 점검 규약) · 확인 불가 → 정상은 '호전' 이 아니라 '처음 확인' 으로 적습니다. PDF 는 기존 벡터 인프라(<span class="mono">reportExport</span> · 한글 폰트)를 재사용합니다.</div>
     </div>
   </div>

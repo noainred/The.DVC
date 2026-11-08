@@ -1,8 +1,9 @@
 # 설계: SAN 스토리지 사용량 · 트렌드 — 실시간 · 트렌드 · 디렉터(VMAX · PowerMax) · 컨트롤러(PowerStore · Unity)별
 
-작성 2026-11-08 (main v2.914.0 기준 · 브랜치 `claude/festive-planck-vy0dg3`) · 상태 **시안 2차 — 컨펌 대기** ·
-시안 캔버스: https://claude.ai/artifact/ApZK6HEzp3yjk6h6LKbYxk (아트보드 6장 — ① 목록 1440 · ② 어레이 상세 1440 · ③ 디렉터 · 컨트롤러 벤더별 · ④ 400px · ⑤ 상태 8종 · ⑥ 성능 점검 판정표).
-**2차 보강(19:31~ KST)**: 사용자가 '디렉터별 · 컨트롤러별 성능' 을 다시 요청해 **어레이 측 성능(busy% · CPU · IOPS · 응답 시간 · 큐 깊이)을 2단계에서 이번 범위로** 올렸다 — ② 아래 패널 실값 · ③ 벤더 카드 실값 + API 확인 표 · ⑥ 판정표 신설 · ① 상태 열 배지 · '성능 점검' 단추.
+작성 2026-11-08 (main v2.914.0 기준 · 브랜치 `claude/festive-planck-vy0dg3`) · 상태 **시안 3차 — 결정 8개 반영 · 구현 착수 대기(남은 확인 §6)** ·
+시안 캔버스: https://claude.ai/artifact/ApZK6HEzp3yjk6h6LKbYxk (아트보드 7장 — ① 현황 1440 · ② 어레이 상세 1440 · ③ 디렉터 · 컨트롤러 벤더별 · ④ 400px · ⑤ 상태 8종 · ⑥ 성능 점검 탭 · ⑦ 분류 · 매핑 탭).
+**2차 보강(19:31~ KST)**: 사용자가 '디렉터별 · 컨트롤러별 성능' 을 다시 요청해 **어레이 측 성능(busy% · CPU · IOPS · 응답 시간 · 큐 깊이)을 2단계에서 이번 범위로** 올렸다 — ② 아래 패널 실값 · ③ 벤더 카드 실값 + API 확인 표 · ⑥ 판정표 신설.
+**3차(19:42~ KST · 사용자 답 8개)**: ① **독립 도구 `san-storage` + 독립 메뉴** '스토리지 › SAN 스토리지 성능'(기존 SAN 스위치 화면의 '스토리지 사용량 분석' 모달은 이 메뉴로 보내고 지운다) ③ 분류 · 디렉터 매핑 **탭(⑦)** 신설 ⑥ 1년 보기 포함 ⑦ 표준 검증 ⑧ 팔레트 4색 `:root` 토큰 추가. ④ 캡처 방법은 `CAPTURE-GUIDE.md` · ⑤ 벤더 · 컨설팅 권장 기준은 §10(점검 기본값을 **벤더 문서 값만**으로 채움) · 추가 기능 · 문서 검토는 §12.
 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스(HTML 프로토타입 — 복사 대상이 아님). **법인 · 스토리지 · 스위치 이름(KR1 · PL1 · PMAX-KR1-01 · SW-KR1-A1 …)과 수치는 전부 가상**이다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰과 `.san2-*`(SAN Switch v2) · `components/vmperf/vmPerf.css` 그대로. 차트 시리즈 4색(`#3987e5 #d95926 #199e70 #c98500`)만 dataviz 검증기(다크 표면 `#141b2d`)를 통과한 참조 팔레트다 — 기존 `LINE_COLORS` 8색은 다크 밝기 대역 검사에서 FAIL 이라 §6 질문 7 로 둔다.
 규칙(2026-11-03 '기억해'): 설계는 Fable + Claude Design 시안 → **컨펌 뒤** Opus 구현. §2 는 이 세션(Fable)이 코드로 확인한 사실이고, **목 서버 캡처('지금' 보드)는 만들지 않았다**(시안 시간을 줄이려고 — 기존 화면은 §2 표로 대신한다).
@@ -80,33 +81,42 @@
 | ③ | `Directors.dc.html` | **벤더별 패널 3**(PowerMax 디렉터 4 · PowerStore 노드 2(편중 · CPU 74% 예) · Unity SP 2(엣지 중계 예)) — 심볼릭 이름 해석 예 · 그룹 행(포트 칩 팹 A/B · 24시간 평균 · 배수) · **어레이 측 지표 실값**(busy/CPU 바 · IOPS · 응답) · **해석 규칙 표**(확신 등급 · `OR-1C` 추가) · 어레이 측 수집 설계 + **벤더별 API 확인 표** · 묶음 보기 4가지 설명 |
 | ④ | `Narrow.dc.html` | 400px — 목록은 카드 행(지금 · 회선 바 · 스파크 · 평균/피크 · 7일 대비 · 상태) · 상세는 KPI 2×2 · 세그먼트 줄바꿈 · 차트 뷰박스 400 · 디렉터 카드 세로 · 포트 표 가로 넘김 · 어레이 보고 성능 카드(디렉터 4행) · 히트맵 가로 넘김 |
 | ⑤ | `States.dc.html` | 상태 8종 — 수집 꺼짐 · 첫 주기 대기 · 엣지 미보고 · 부분 합 구간(빗금) · 보고 멈춤(held) · **디렉터 구분 못 함(수동 매핑 · 어레이로 지정)** · 용량 미매칭 · 과거 구간/데모/DB 불가 — 어느 것이 기존 판정이고 어느 것이 새 판정인지 밝힘 |
-| ⑥ | `Check.dc.html` | **성능 점검 판정표**(목록 ① 의 '성능 점검' 단추): 어레이 × 항목 9(디렉터 편중 · 팹 비대칭 · 회선 포화 · 디렉터 busy · 응답 시간 · 큐 깊이 · 노드/SP CPU · 보고 대조 · 수집 상태) · 판정 4종 + 해당 없음 · 종합 배지('정상(일부 미확인)' 포함) · **판정 규칙 표(기준 출처 — 기존 상수 / 관리자 설정(기본값 비움) / 제안)** · 기준 설정 · PDF · 지금 판정 |
+| ⑥ | `Check.dc.html` | **성능 점검 탭**(`#/tools/san-storage/check`): 어레이 × 항목 9(디렉터 편중 · 팹 비대칭 · 회선 포화 · 디렉터 busy · 응답 시간 · 큐 깊이 · 노드/SP CPU · 보고 대조 · 수집 상태) · 판정 4종 + 해당 없음 · 종합 배지('정상(일부 미확인)' 포함) · **판정 규칙 표(기준 출처 — 기존 상수 / 벤더 문서 기본값 / 관리자 설정(비움))** · 기준 설정 · PDF · 지금 판정 |
+| ⑦ | `Mapping.dc.html` | **분류 · 디렉터 매핑 탭(관리자 · `#/tools/san-storage/mapping`)**: 요약 알약(연결 대상 · 어레이/호스트 · 자동 해석/구분 못 함 · 수동) · ① 연결 대상 분류 표(자동 근거 · 적용 · 어레이로/호스트로 지정 · 자동으로 되돌리기) · ② 포트 → 디렉터 매핑 표(심볼릭 이름 · 자동 해석 · 수동 그룹 입력 · 메모/변경자) · 해석 순서 · 저장 규약 · 최근 변경 · **'포트 이름 CSV 내보내기'**(port_meta — 벤더 이름 형식 확인용 · 스위치 접속 없음) |
 
-### 5.1 ① 이 바꾸는 것
-- `SanSwitchTool.jsx` 상단에 보기 전환(`useHashTab({ base:['tools','sanswitch'], valid:['switches','storage'] })`) — 기존 화면은 그대로 'switches', 새 화면 `views/tools/SanStorageTool.jsx`(+ 순수 `sanStorageText.js`). 기존 '스토리지 사용량 분석' 모달 · 트래픽 카드는 **남긴다**(질문 2).
-- 상단 메뉴 · 카탈로그는 바꾸지 않는다(도구 키 동일 · `aka` 추가 없음).
+### 5.1 ① 이 바꾸는 것(3차 — 독립 도구)
+- **새 도구 키 `san-storage`**(세그먼트 = 키 규칙 — `auth/toolAccess.js` 머리말). 등록 지점 전부:
+  `web/src/views/specialToolsList.js`(`k:'san-storage'` · `aka:['SAN 스토리지','디렉터 성능','컨트롤러 성능','SAN storage']` · `adminOnly` 는 실제 게이트와 맞춘다 — 조회는 `toolsPerm + fullScopeOnly` 이므로 SAN 스위치 항목의 값과 같게) ·
+  `web/src/views/SpecialTools.jsx`(`tool === 'san-storage'` → `SanStorageTool`) · `web/src/views/topMenu.js` '스토리지' 그룹에 `{ id:'san-storage', label:'SAN 스토리지 성능', tool:'san-storage' }` 추가(기존 `san` 항목은 id · tool 그대로 두고 **라벨만** 'SAN 스위치 모니터링' 으로 — 지금 라벨 'SAN 스토리지 성능 측정' 이 새 메뉴와 헷갈린다) ·
+  `server/src/toolcats/catalog.js` PRESET 'storage' 에 `'san-storage'` · `server/src/auth/toolAccess.js TOOL_PATH_KEYS` 에 `'san-storage':'san-storage'` · `auth/demoGuest.js` 의 데모 읽기 허용 목록(필요한 GET 만) · `components/invSearchQuery.js`(⌘K 검색에서 어레이 → 이 도구) ·
+  회귀 테스트 대조: `test/audit2613a.test.js`(세그먼트↔키) · `toolCatalog2614`(adminOnly↔게이트) · `toolNames2679` · `linkCheck2552`(메뉴 링크) · `settingsLinks2685` · 문서 생성기 `scripts/api-doc.mjs`(docs/API.md) · `config-doc.mjs`(새 설정 파일 2개).
+- 탭은 해시(`useHashTab({ base:['tools','san-storage'], valid:['list','check','mapping'] })`) · 어레이 상세는 `#/tools/san-storage/array/<키>`(법인은 쿼리).
+- **기존 SAN 스위치 화면**: `DcGrid` 의 '스토리지 사용량 분석 →' 링크는 `#/tools/san-storage`(선택 법인을 쿼리로) · `DcStoragePerf` 모달은 **지운다**(판정 코어 하나 — 사용자 답 2 '독립적인 메뉴로') · `TrafficCard` 는 남기고 머리에 'SAN 스토리지 성능에서 자세히 →'. 장비 상세의 '사용량 분석(perf)' 탭은 스위치 단위라 그대로.
 
 ### 5.2 ② 가 바꾸는 것
 - 상세는 페이지(새로고침 · 공유 · 뒤로 가기) — 목록 행 · 편중 경고 · 기존 모달 표의 스토리지 이름에서 들어온다.
 - 차트는 SVG 직접 그리기(vmperf · 전송 속도와 같은 방식 — 이 경로에 recharts 를 더 싣지 않는다) · 결측은 선을 끊고 부분 합은 빗금.
 - 구간 이동은 `vmPerfText` 의 창 계산을 **공용 순수 모듈로 뽑아** 세 번째로 쓴다(복제 금지 — v2.913 README 의 같은 메모).
 
-## 6. 컨펌 질문(기본값 — '기본값대로' 면 이대로 구현)
+## 6. 컨펌 결과(2026-11-08 19:41 KST 사용자 답 — 원문 그대로 · 해석 · 남은 확인)
 
-1. **자리** — 기본: SAN 스위치 모니터링 안의 보기 전환(①). 대안: 특수 기능에 독립 도구 '**SAN 스토리지**'(새 도구 키 + 카탈로그 PRESET + 권한 매핑 — 범위가 더 크다).
-2. **기존 '스토리지 사용량 분석' 모달 · 트래픽 카드** — 기본: 남기고, 모달 표의 스토리지 이름 → ② 로 링크. 대안: 모달을 ② 로 대체(삭제).
-3. **디렉터 · 컨트롤러 수동 매핑 + '어레이로 지정'**(⑤-06) — 기본: 포함(관리자 전용 · 파일 저장소). 빼면 '(구분 못 함)' 안내만.
-4. **어레이 측 성능 수집(이번 범위)** — 기본: 세 벤더 모두 '장비가 주는 지표 목록을 먼저 읽는' 방어 구조로 구현하고, **실장비 응답 캡처(PowerMax Unisphere · PowerStore · Unity 각 1개)를 주시면 파서를 그 모양에 맞춘다**. 캡처 없이 가면 첫 운영 반영 때 일부 칸이 '—' 로 비고 사유를 보일 수 있다(그 사실을 릴리스 노트에 적는다). 대안: 캡처를 받은 뒤 착수.
-5. **성능 점검(⑥) 기준** — 기본: busy · 응답 시간 · 큐 깊이 · CPU 는 임계값 **기본값 비움**(설정 전엔 '?' 로 표시) · 팹 비대칭 30% · 보고 대조 30% 는 **제안값**으로 넣고 설정에서 바꿀 수 있게. 대안: 제안값도 비우고 전부 관리자 설정 뒤에만 판정.
-6. **1년 보기** — 기본: 포함(1시간 집계 2년 — 365점을 하루 평균으로 접어 화면이 그린다). 빼면 90일까지.
-7. **검증 수준** — 기본: 표준(관련 테스트 + Chromium 1440/400 + 전량 verify) + **서버 변이 검증 1회**(수동 매핑 PUT · 임계값 PUT 의 admin 게이트 · 비-admin 주소 가림 · `fullScopeOnly` · 엣지 push 정제 화이트리스트). '전체 검증' 이면 반증 1인 추가(이월 · 부분 합 · 편중 · unknown 흡수 금지).
-8. **시리즈 색** — 기본: 기존 `LINE_COLORS` 유지(포탈 일관성 — 단, 디렉터별 쌓기는 4색까지만 쓰고 5개 이상은 '그 밖' 으로 접음). 대안: 시안의 검증 팔레트 4색을 `:root` 토큰으로 추가(새 hex 4개).
+| # | 질문 | 사용자 답(원문) | 반영 |
+|---|---|---|---|
+| 1 | 자리 | "독립 도구" | 새 도구 키 `san-storage`(§5.1) |
+| 2 | 기존 모달 · 카드 | "독립적인 메뉴로 만들어줘" | **해석**: 새 기능을 독립 메뉴('스토리지 › SAN 스토리지 성능')로 만들고 기존 '스토리지 사용량 분석' 모달은 그 메뉴로 보낸 뒤 지운다 · 트래픽 카드는 남긴다. ⚠ 다르게 뜻하셨으면(예: 기존 모달도 별개 메뉴로 유지) 알려 주실 것 — **남은 확인 1** |
+| 3 | 수동 매핑 · 어레이로 지정 | "포함하고 더 구체적으로 표시할 수 있는 메뉴 추가 검토" | 포함 + **⑦ 분류 · 디렉터 매핑 탭**(관리자) 신설 — 분류 표 · 포트→디렉터 표 · 근거 배지 · 변경 이력 · 포트 이름 CSV |
+| 4 | 어레이 측 수집 | "어떤 장비를 어떻게 캡처해야 되는지 알려줘" | `CAPTURE-GUIDE.md`(우선순위 · 장비별 명령 · 가릴 것 · 파일 목록). 캡처가 오기 전에도 방어 구조로 구현은 시작할 수 있다 — **남은 확인 2**: 캡처를 기다렸다가 착수할지, 먼저 착수할지 |
+| 5 | 점검 기준 | "스토리지 벤더 및 컨설팅 업체의 추천 가이드 찾아줘" | §10 — 찾은 값만 기본값으로(PowerMax busy 70 · 큐 75 · Unity SP CPU 70/90 · PowerStore 노드 CPU 50/70 · 회선 포화 70) · 못 찾은 응답 시간은 비움 · 컨설팅 경험칙(10/20 ms)은 호스트 지연용이라 FE 응답 시간 기준으로 쓰지 않음 |
+| 6 | 1년 보기 | "1년" | 포함(1시간 집계 2년 · 하루 평균 365점) |
+| 7 | 검증 | "기본" | 표준(관련 테스트 + Chromium 1440/400 + 전량 verify) + 서버 변이 검증 1회 |
+| 8 | 시리즈 색 | "검증 팔레트 4색 토큰 추가" | `web/src/styles.css :root` 에 `--viz-1: #3987e5 · --viz-2: #d95926 · --viz-3: #199e70 · --viz-4: #c98500`(dataviz 검증기 다크 표면 통과) — 새 hex 4개 · 디렉터/컨트롤러 시리즈 전용 · 5개 이상은 '그 밖'(회색) |
 
 ## 7. 구현 메모(컨펌 뒤 · Opus)
 
 - 서버(스위치 측): `sanswitch/directorOf.js`(순수) · `sanswitch/directorMap.js`(저장소) · `perfDb.js storageSeriesMulti` `withPorts` · `sanswitch/storageList.js`(순수 조립 — now · util · delta · imbalance · state) · `routes/api/sanSwitch.js` 라우트 3(목록 · 상세 · 매핑 PUT) · 목 `demoPerfSynth` 가 포트별 시리즈도 만든다(Chromium 검증이 비지 않게).
 - 서버(어레이 측): `storage/collectors/powermax.js`(FEDirector keys → help → metrics) · `powerstore.js`(`performance_metrics_by_node` — 기존 `fetchSpaceMetrics` 재사용) · `unity.js`(`metric/instances` → `metricValue`) · 순수 `storage/perfDetail.js`(벤더 응답 → 공통 `{unit, metric, value, at}` · 누적 카운터 델타) · `storage/perfDb.js`(SAN `perfRollup` 공용화) · 엣지 push 조각 + 중앙 정제 화이트리스트 · 목 합성 · `sanswitch/storagePerfCheck.js`(⑥ 판정) · 임계값 저장소.
-- 웹: `views/tools/SanStorageTool.jsx` · `SanStorageDetail.jsx` · `SanStorageCheck.jsx` · 순수 `sanStorageText.js`(문구 · 상태 8종 · 7일 대비 · 히트맵 접기 · 보고 대조 · CSV 행) · 공용 창 계산 모듈(`components/windowScroll/`) · `SanSwitchTool.jsx` 보기 전환 · 기존 모달 표 링크 · 설정 › 수집 › 스토리지 성능 점검(임계값).
+- 웹: `views/tools/SanStorageTool.jsx`(탭 3 — 현황 · 성능 점검 · 분류 · 매핑) · `SanStorageDetail.jsx` · `SanStorageCheck.jsx` · `SanStorageMapping.jsx` · 순수 `sanStorageText.js`(문구 · 상태 8종 · 7일 대비 · 히트맵 접기 · 보고 대조 · CSV 행) · 공용 창 계산 모듈(`components/windowScroll/`) · §5.1 의 등록 지점 전부 · `SanSwitchTool.jsx` 링크 교체 + `DcStoragePerf` 삭제 · 설정 › 수집 › 스토리지 성능 점검(임계값 — 벤더 기본값 표시 · '사용자 설정' 배지) · `:root --viz-1~4`.
+- 서버(매핑 · 분류): `sanswitch/directorMap.js`(`CONFIG_DIR/san-storage-map.json` — 분류 재정의 + 포트→디렉터 · 관리자 PUT · 감사 로그 · '이름이 바뀜' 표지) · `GET /tools/san-storage/port-names.csv`(port_meta 내보내기 · `csvPerm + adminOnly`).
 - 테스트: 서버 `test/sanStorage29xx.test.js`(directorOf 벤더별 · 평평한 이름 · `OR-1C` · 목록 조립의 now/util/delta 결측 규칙 · 합계 = `sumArrayTraffic` 대조 · 매핑/임계값 PUT admin 게이트 · 비-admin 주소 가림 · 판정표 unknown 흡수 금지 · 벤더 응답 픽스처(가상 식별자) 파서) · 웹 `sanStorageText.test.js` · `sanSwitchViewText` 기존 통과.
 - 문서: `docs/rules/sanswitch.md` 에 '스토리지 보기 · 디렉터 해석 · 수동 매핑 · 성능 점검' 항목 · `docs/rules/storage.md` 에 '디렉터 · 노드 · SP 성능 수집' 항목 · 이 README §8 에 '시안과 달리 한 것'.
 - 릴리스: 포탈 동작이 바뀌므로 버전업 + GitHub 릴리스 1회(`versions.json` latest 확인). 규모가 커서(스위치 측 + 어레이 측 3벤더 + 점검) **PR 2개로 나눌 수 있다**: ⓐ 스위치 측 목록 · 상세 · 디렉터 해석 · 점검 틀 ⓑ 어레이 측 수집 3벤더 — 질문 4 의 답에 따라 정한다.
@@ -120,3 +130,48 @@
 - PowerMax FEDirector 지표: Dell PowerMax Splunk 애드온 `fe_dir.rst` · Dynatrace 'dell emc powermax' 확장 지표 표 · Dell KB 000213922(V4 지표 제거 · help 엔드포인트) · Dell KB 000214283(디바이스 레벨 지표) · PowerShell 모듈 샘플 payload(FrontEnd.xml) · Dell infohub 'What's new in PowerMax REST API 10.0'(`directorId: "OR-1C"` 예).
 - PowerStore metrics/generate 엔터티: PowerStore 3000X REST API Developers Guide(열거형) · Dell 커뮤니티 'API Sample Data' · Dell KB 000490125(요청 형식) · Netdata PowerStore 수집기(노드 · FC 포트 · Five_Mins).
 - Unity 지표 경로: Dell EMC Unity Performance Metrics 백서(H15161) · Dell 지원 스크립트 getPerformance.pl(FC 경로) · Dell 커뮤니티(metricValue filter 예) · dell/gounity metrics.go.
+
+## 10. 권장 기준 가이드 — 벤더 · 컨설팅(2026-11-08 웹 검색 · 사용자 답 5)
+
+> ⚠ 이 세션은 `www.dell.com` 직접 열람이 네트워크 정책에 막혀(ENOTFOUND) 본문을 읽지 못했다 — 아래 숫자는 검색 결과 요약에 인용된 값이고 출처 링크를 붙였다. 구현 전에 Unisphere 제품 가이드 · Unity BP 가이드 원문에서 한 번 더 대조할 것. **찾지 못한 값은 비워 두었다 — 지어내지 않는다.**
+
+| 항목 | 벤더 · 컨설팅 권장 | 출처 | 시안 기본값 |
+|---|---|---|---|
+| PowerMax FE 디렉터 % busy | Unisphere for PowerMax 건강 점수 기본 **critical 70** (FE port % busy 는 항목만 있고 기본값 미기재) | [Unisphere 10.0 Product Guide — System Health Score](https://www.dell.com/support/manuals/en-us/powermax-os-10/esd_p_mt_unisph_u4p_product_guide_10_0_0/understanding-the-system-health-score?guid=guid-52ed4b8e-8c13-4384-96c7-c3f35db5aed7&lang=en-us) | 이상 70 · 주의 비움 |
+| PowerMax 큐 깊이 사용률 | 기본 **critical 75** | 같은 문서 | 이상 75 · 주의 비움 |
+| PowerMax 응답 시간 | 공식 권장값 **못 찾음**(Dell RAS 백서는 FE 연결을 물리 부품에 분산하라는 설계 권고만) | [PowerMax RAS 백서](https://www.delltechnologies.com/asset/en-us/products/storage/industry-market/h17064-dell-powermax-ras-white-paper.pdf) | 비움 |
+| PowerStore 노드 CPU | 업그레이드 전 점검 KB: **≤50% 진행 · >50% 연기 · 지속 ≥70% 는 부하 높음**. 노드 친화도 자동 조정도 CPU 50% 를 본다(30분마다) | [KB 000192018](https://www.dell.com/support/kbdoc/en-us/000192018/powerstore-cpu-utilization-level-too-high-reduce-system-load-prior-to-ndu-cpu-usage-level-exceeded) · [Clustering & HA](https://www.dell.com/en-us/infohub/articles/dell-powerstore-clustering-and-high-availability) | 주의 50 · 이상 70 (**간접 근거** — 업그레이드 문맥) |
+| PowerStore 지연 | 공식 알림 기준 **못 찾음**(용량 알림 70/85% 만 문서화) | [KB 000123351](https://www.dell.com/support/kbdoc/en-us/000123351/powerstore-alerts-capacity-utilization) | 비움 |
+| Unity SP CPU | Best Practices Guide Table 2 지속 사용률 구간: **<50 여유 · 50~70 정상 · 70~90 높음 · >90 과부하** · 두 SP 를 비슷하게 맞출 것 · Data Reduction 추가는 70% 근처면 비권장(KB) | [Dell Unity Best Practices Guide](https://www.dell.com/en-us/infohub/articles/dell-unity-best-practices-guide-1) · [H15093 PDF](https://dl.dell.com/content/docu69891) · [KB 000022795](https://www.dell.com/support/kbdoc/en-us/000022795/unity-how-to-use-compression-considerations-and-best-practices) | 주의 70 · 이상 90 |
+| Unity 포트 상한 | 포트당 최대 **16Gb FC 1,500 MB/s · 32Gb FC 3,000 MB/s**(45,000 IOPS) | 같은 가이드 | 회선 사용률 분모(`capBpsOf`)와 일치 — 추가 기준 없음 |
+| Brocade 포트 사용률 | MAPS 기본 FPI 과가입 트리거 **TX 70%**(F/E 포트) · 혼잡 가이드의 대역폭 경보 60/75/90 %/hr(기본값인지 미확인) · 기본 정책 3종(conservative/moderate/aggressive) · 스토리지 포트는 코어로 과가입하지 말 것 | [FOS 9.1.x MAPS User Guide](https://techdocs.broadcom.com/content/dam/broadcom/techdocs/us/en/pdf/fc-networking/software-maps/fos-91x-maps.pdf) · [Fabric Congestion Troubleshooting](https://sanview.thorington.uk/wp-content/uploads/2018/08/fabric-congestion-troubleshooting-guide.pdf) · [SAN Design and Best Practices](https://docs.broadcom.com/doc/53-1004781) | 회선 포화 주의 70 · 이상 90(**90 은 제안**) |
+| 호스트 지연(컨설팅 · 벤더 중립 경험칙) | <10 ms 양호 · >20 ms 느림(경험칙) · VMware 계열 블로그 읽기 5/20 · 쓰기 10/30 ms · Microsoft SQL 데이터 ≤20 ms · 로그 ≤5 ms · 모니터링 벤더 매트릭스 20/50 ms + SAN 업링크 70% | [Paessler](https://blog.paessler.com/the-storage-monitoring-matrix-10-critical-metrics-every-it-team-must-track?hs_amp=true) · [matrixpost](https://blog.matrixpost.net/analyzing-vmware-storage-performance-from-latency-to-iops/) · [House of Brick](https://houseofbrick.com/blog/storage-performance-metrics/) | FE 응답 시간 기준으로 **쓰지 않음**(계측 지점이 다르다) — 나중에 vCenter 데이터스토어 지연을 붙일 때 참고 |
+
+종합: 벤더가 숫자로 준 것은 PowerMax busy 70 · 큐 75, Unity SP CPU 구간, PowerStore CPU 50/70(간접), Brocade TX 70 이다. 응답 시간 · 지연은 어느 벤더도 디렉터/노드 단위 공식 기준을 공개한 것을 찾지 못했다 → 비워 두고 관리자 설정. 컨설팅 자료는 대부분 호스트 관점 경험칙이라 참고만.
+
+## 11. 캡처 가이드
+
+`CAPTURE-GUIDE.md` — 우선순위 1 은 **PowerStore · Unity 어레이 포트의 심볼릭 이름**(포탈 `port_meta` 에서 바로 뽑을 수 있다 → 구현에서 '포트 이름 CSV 내보내기' 단추로). 2~4 는 PowerMax Unisphere · PowerStore · Unity REST 응답 각 2~4개(curl 예 포함). 공개 저장소에 커밋하지 않는다.
+
+## 12. 추가 기능 · 문서 검토(사용자 요청 "더 찾아서 한번 더 검토")
+
+### 12.1 이번 구현에 같이 넣을 만한 것(작고 근거가 있는 것)
+1. **포트 이름 CSV 내보내기**(⑦ 탭) — 심볼릭 이름 형식 확인을 스위치 접속 없이. `port_meta` 읽기 1문장 · `csvPerm + adminOnly`.
+2. **SAN 플로우 모니터(`san-flow` · v2.935 Flow Vision) 연결** — 어레이 상세 ② 머리에 '호스트별 플로우 ↗'(그 어레이 타깃 WWN 으로 필터). 디렉터 처리량을 **어느 호스트가 만드는지**는 이미 있는 도구가 답한다 — 다시 만들지 않는다.
+3. **메뉴 라벨 정리** — '스토리지 › SAN 스토리지 성능 측정'(→ `san-switch`)을 'SAN 스위치 모니터링' 으로(라벨만 · id · tool 불변).
+4. **스토리지 경로 도구(`storage-paths`) 링크** — 어레이 ↔ 데이터스토어/LUN 경로가 이미 있다면 상세 ② 에서 링크(있는지 구현 때 확인 — `web/src/views/tools/StoragePathsTool.jsx` 존재 확인만 했다).
+5. **설정 요약 알약** — 상단에 '수집 주기 5분 · 어레이 측 10분 · 임계값 사용자 설정 2개' 처럼 API 값으로(숫자 하드코딩 금지).
+
+### 12.2 후속 후보(별도 작업 — 우선순위 순)
+6. **알림(메일)** — 편중 · 포화 · 임계값 초과 · 보고 끊김을 법인 단위로(스토리지 `usageMail` 규약 재사용 · 1:1:1 법인 묶음). 상태가 **바뀐 순간만**(파트 장애 규약).
+7. **자기 기준선 대비 이상 표시** — 요일 × 시간 기준선(지난 4주)에서 ±N% 벗어난 칸을 '평소와 다름' 으로 — 벤더 임계값이 없는 응답 시간에도 쓸 수 있는 **지어내지 않는 기준**(기준선 = 자기 과거).
+8. **월간 성능 점검 PDF 자동 발송** — ⑥ 판정표 + 상위 어레이 추이(월간 점검 PDF 인프라 재사용).
+9. **ISL 사용량 연계** — 팹 비대칭의 원인 단서(헬스체크 ISL 항목 + 포트 사용량의 E-포트).
+10. **어레이 측 경보 연동** — 스토리지 수집기가 이미 세는 알람 수를 상세 ② 머리에(링크 → 스토리지 현황).
+11. **publicapi 노출** — `/api/public/san-storage/...`(외부 모니터링 연동 · 기존 publicapi 토큰 규약).
+12. **용량 × 성능 교차 보기** — 스토리지 증가량(`growth.js`)과 디렉터 처리량 추세를 한 표에(증설 판단 — '찼는데 한가함' / '바쁜데 여유').
+13. **Unity · PowerStore 포트 단위 어레이 측 지표**(`performance_metrics_by_fe_fc_port` · Unity fePort) — 1차는 노드/SP 단위까지.
+
+### 12.3 문서
+- 저장소: `docs/rules/sanswitch.md`(스토리지 성능 도구 · 디렉터 해석 · 매핑 · 점검 기본값 출처) · `docs/rules/storage.md`(디렉터 · 노드 · SP 수집 · 누적 카운터 델타) · `docs/API.md` 재생성(`scripts/api-doc.mjs`) · `docs/CONFIG-FILES.md` 재생성(`config-doc.mjs` — `san-storage-map.json` · `storage-perf-check.json`) · 운영 안내 `docs/OPS-SAN-STORAGE.md`(캡처 · 임계값 설정 · 판정표 읽는 법 · '확인 불가' 의 뜻) · 릴리스 노트에 '첫 반영에서 어레이 측 칸이 비어 있을 수 있는 이유'.
+- 확보해야 할 외부 문서: Unisphere for PowerMax REST 문서(장비 로컬 `https://<unisphere>:8443/univmax/restapi/docs` — FEDirector 절) · PowerStore REST API Developers Guide(dell.com/powerstoredocs — `metrics/generate` 응답 스키마) · Unity Unisphere Management REST API Programmer's Guide + Performance Metrics 백서 H15161 · 운영 중인 FOS 버전의 MAPS User Guide(기본 임계값 표) · Broadcom SAN Design and Best Practices 53-1004781.

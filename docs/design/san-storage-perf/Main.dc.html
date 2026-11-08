@@ -96,37 +96,38 @@ tr.dim td{color:#8b9bb4}
     <div style="font-weight:800;color:#e6edf6">THE DAVINCI</div>
     <div>개요</div><div>vCenter</div><div>가상화 서버</div><div>ESXi 호스트</div>
     <div style="margin-top:8px;font-size:11px;letter-spacing:.1em;color:#5d6b85">특수 기능</div>
-    <div>스토리지 모니터링</div><div class="on">SAN 스위치 모니터링</div><div>iDRAC</div><div>GPU</div><div>IP 관리</div>
-    <div style="margin-top:8px;font-size:11px;letter-spacing:.1em;color:#5d6b85">운영 작업</div>
-    <div>백업</div><div>설정</div>
+    <div style="margin-top:8px;font-size:11px;letter-spacing:.1em;color:#5d6b85">스토리지</div>
+    <div>스토리지 현황</div><div>데이터스토어</div><div>스토리지 증가량 보고서</div><div class="on">SAN 스토리지 성능 <span class="new">NEW</span></div><div>SAN 스위치 모니터링</div>
+    <div style="margin-top:8px;font-size:11px;letter-spacing:.1em;color:#5d6b85">특수 기능 · 설정</div>
+    <div>특수 기능</div><div>설정</div>
   </nav>
   <div class="main">
     <div class="top"></div>
     <div class="content">
-      <div class="crumb">특수 기능 <span class="faint">›</span> <b>SAN 스위치 모니터링</b> <span class="faint">›</span> 스토리지 <span class="mono faint">#/tools/sanswitch/storage</span></div>
+      <div class="crumb">스토리지 <span class="faint">›</span> <b>SAN 스토리지 성능</b> <span class="faint">›</span> 현황 <span class="mono faint">#/tools/san-storage</span></div>
 
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
         <div style="min-width:0">
-          <h1>SAN 스위치 모니터링</h1>
-          <div class="san-status"><span class="dot" style="background:#22c55e"></span><span>스위치 14대 정상 · 법인 6</span><span>· 마지막 수집 2분 전</span><span>· 20초마다 갱신</span></div>
+          <h1>SAN 스토리지 성능</h1>
+          <div class="san-status"><span class="dot" style="background:#22c55e"></span><span>어레이 9대 · 법인 6 · 스위치 14대에서 집계</span><span>· 마지막 표본 1분 전</span><span>· 어레이 측 성능 마지막 반영 4분 전</span></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn" type="button">전체 점검</button>
-          <button class="btn" type="button">전체 수집</button>
-          <button class="btn primary" type="button">+ 스위치 등록</button>
+          <a class="btn" href="#" title="스위치 · 포트 용량 · 조닝 · 월간 점검은 기존 도구에서(새 창 아님 — 같은 포탈 안 이동)">SAN 스위치 모니터링 ↗</a>
+          <button class="btn" type="button" title="중앙 직접 스위치는 지금 수집 · 엣지 위임은 재수집 요청(기존 규약)">지금 수집</button>
+          <button class="btn primary" type="button">기준(임계값) 설정</button>
         </div>
       </div>
 
-      <!-- 보기 전환: 기존 스위치 화면 ↔ 새 스토리지 화면. 도구 키(#/tools/sanswitch)는 그대로, 하위 해시만 붙는다(useHashTab). -->
+      <!-- 독립 도구(도구 키 san-storage · 메뉴 '스토리지 › SAN 스토리지 성능'). 탭은 해시(useHashTab): 현황 · 성능 점검 · 분류 · 매핑(관리자). -->
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:space-between">
-        <nav class="view" aria-label="보기">
-          <a href="#">스위치 · 포트 용량 <span class="mono faint" style="font-weight:500">14대</span></a>
-          <a href="#" class="on" aria-current="page">스토리지 · 사용량 · 트렌드 <span class="new">NEW</span></a>
+        <nav class="view" aria-label="탭">
+          <a href="#" class="on" aria-current="page">현황 <span class="mono faint" style="font-weight:500">9대</span></a>
+          <a href="Check.dc.html">성능 점검 <span class="mono faint" style="font-weight:500">주의 2 · 이상 1</span></a>
+          <a href="Mapping.dc.html">분류 · 매핑 <span class="mono faint" style="font-weight:500;color:#aebbd0">관리자</span></a>
         </nav>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <span class="live"><span class="dot"></span><b>실시간</b> 마지막 표본 1분 전 · 수집 주기 5분(설정값) · 60초마다 다시 읽음</span>
           <span class="live" style="color:#8b9bb4"><b>읽은 곳</b> 15분 집계 표 + 원본 자투리 · 계산 17:21:40 · 기억 5분</span>
-          <a class="btn sm" href="Check.dc.html" title="어레이 × 항목 판정표(⑥) — 저장된 표본으로 판정 · 새 접속 없음">성능 점검</a>
           <button class="btn sm" type="button">CSV</button>
         </div>
       </div>
@@ -316,7 +317,7 @@ tr.dim td{color:#8b9bb4}
             <span class="code">JP1</span><div class="tr"><span style="width:7%"></span></div><span class="mono muted">4.8 Gb/s · 7%</span>
             <span class="code muted">SG1 · DE1</span><div class="tr"></div><span class="mono faint">— 측정 없음</span>
           </div>
-          <div class="note">기존 '스토리지 트래픽' 카드와 같은 합계(trafficTotal)입니다 — 두 숫자가 다르면 결함입니다.</div>
+          <div class="note">SAN 스위치 모니터링의 '스토리지 트래픽' 카드와 같은 합계(trafficTotal)입니다 — 두 숫자가 다르면 결함입니다. 그 화면의 '스토리지 사용량 분석 →' 링크는 이제 이 메뉴로 옵니다(옛 모달은 지웁니다 — 판정 코어 하나).</div>
         </div>
       </div>
 

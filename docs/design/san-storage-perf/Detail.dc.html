@@ -104,12 +104,13 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;white-space
     <div style="font-weight:800;color:#e6edf6">THE DAVINCI</div>
     <div>개요</div><div>vCenter</div><div>가상화 서버</div><div>ESXi 호스트</div>
     <div style="margin-top:8px;font-size:11px;letter-spacing:.1em;color:#5d6b85">특수 기능</div>
-    <div>스토리지 모니터링</div><div class="on">SAN 스위치 모니터링</div><div>iDRAC</div><div>GPU</div><div>IP 관리</div>
+    <div style="margin-top:8px;font-size:11px;letter-spacing:.1em;color:#5d6b85">스토리지</div>
+    <div>스토리지 현황</div><div>데이터스토어</div><div class="on">SAN 스토리지 성능</div><div>SAN 스위치 모니터링</div>
   </nav>
   <div class="main">
     <div class="top"></div>
     <div class="content">
-      <div class="crumb"><a href="Main.dc.html">← 스토리지 목록</a> <span class="faint">·</span> 특수 기능 <span class="faint">›</span> SAN 스위치 모니터링 <span class="faint">›</span> 스토리지 <span class="faint">›</span> <b>PMAX-KR1-01</b> <span class="mono faint">#/tools/sanswitch/storage/SYMMETRIX::000197900123</span></div>
+      <div class="crumb"><a href="Main.dc.html">← 현황</a> <span class="faint">·</span> 스토리지 <span class="faint">›</span> SAN 스토리지 성능 <span class="faint">›</span> <b>PMAX-KR1-01</b> <span class="mono faint">#/tools/san-storage/array/SYMMETRIX::000197900123</span></div>
 
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
         <div style="min-width:0;display:flex;flex-direction:column;gap:8px">
@@ -123,8 +124,9 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;white-space
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn" type="button">포트 배치</button>
-          <button class="btn" type="button">조닝</button>
+          <a class="btn" href="#" title="SAN 스위치 모니터링 › 이 어레이가 물린 스위치의 포트 배치 탭">포트 배치 ↗</a>
+          <a class="btn" href="#" title="SAN 스위치 모니터링 › 조닝 탭">조닝 ↗</a>
+          <a class="btn" href="#" title="SAN 플로우 모니터(Flow Vision) — 이 어레이 타깃으로 가는 호스트별 실측 플로우(v2.935 기존 도구)">호스트별 플로우 ↗</a>
           <button class="btn" type="button">CSV</button>
           <button class="btn primary" type="button">지금 수집</button>
         </div>
