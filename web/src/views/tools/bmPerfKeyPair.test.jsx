@@ -19,6 +19,9 @@ import { createDetailLoader, BmPerfDetailView } from './BmPerfDetail.jsx';
 import { annotBody } from './bmAnnotText.js';
 import { groupCompareKeys } from './BmOpsFleet.jsx';
 import { targetIdOf } from '../../../../server/src/bmusage/maint/judge.js';
+import { NO_PATH_REASON } from '../../../../server/src/bmusage/targets.js';
+import { MISS_REASON_TEXT } from './bmOnboardText.js';
+import { skippedNotes } from './bmUsageText.js';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 
@@ -133,6 +136,14 @@ describe('⑤ 상세 — 법인을 넘기고 · 모호하면 법인 고르기', 
     expect(withItem).not.toContain('서비스 태그'); expect(withItem).not.toContain('R750');
     const nf = renderToStaticMarkup(React.createElement(BmPerfDetailView, { itemKey: 'K', err: Object.assign(new Error('대상 서버를 찾지 못했습니다.'), { status: 404, body: { code: 'not-found' } }), now: 1 }));
     expect(nf).not.toContain('법인 고르기');
+  });
+});
+
+describe('⑤-2 저장 단계 — key-conflict 사유를 화면이 이름으로 말한다(사유 코드가 그대로 새지 않게)', () => {
+  it('서버 사유 표에 있고 · 대상 아닌 서버 각주 · 등록 누락 점검이 같은 사유를 글로', () => {
+    expect(NO_PATH_REASON['key-conflict']).toMatch(/수집하지 않습니다/);
+    expect(skippedNotes({ 'key-conflict': 2 }, NO_PATH_REASON)[0]).toMatch(/^\*\*키 충돌 2대\*\*/);
+    expect(MISS_REASON_TEXT['key-conflict']).toMatch(/서비스태그/);
   });
 });
 

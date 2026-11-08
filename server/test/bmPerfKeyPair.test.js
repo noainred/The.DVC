@@ -142,6 +142,14 @@ test('② ambiguous 모양 · 범위 밖 법인은 후보에도 본문에도 없
   assert.deepEqual(cmp.body.columns.map((c) => [c.vcenterId || '', c.state === 'ambiguous' ? 'amb' : c.via]), [['vcA', 'local'], ['vcB', 'edge'], ['', 'amb']]);
   assert.deepEqual(cmp.body.columns[2].candidates.map((c) => c.vcenterId), ['vcA', 'vcB']);
   assert.ok(!JSON.stringify(cmp.body).includes('vcC'), '비교 응답에도 범위 밖 법인이 없다');
+  // 비교 세트 — 같은 키 · 다른 법인 두 서버를 쌍으로 저장(예전: 키로 합쳐 1대 → 400) · 같은 쌍 두 번은 한 번
+  const set = await call('adm', 'PUT', '/compare/sets', { name: '같은 키 두 법인', keys: ['DUPK', 'DUPK'], vcenterIds: ['vcA', 'vcB'] });
+  assert.equal(set.status, 200, JSON.stringify(set.body)); assert.deepEqual(set.body.set.keys, ['DUPK', 'DUPK']); assert.deepEqual(set.body.set.vcenterIds, ['vcA', 'vcB']);
+  const dup = await call('adm', 'PUT', '/compare/sets', { name: '같은 쌍', keys: ['DUPK', 'DUPK'], vcenterIds: ['vcA', 'vcA'] });
+  assert.equal(dup.status, 400, '같은 쌍 두 번은 한 대(2대 미만)');
+  assert.equal((await call('adm', 'PUT', '/compare/sets', { name: 'x', keys: ['A', 'B'], vcenterIds: ['bad vc', ''] })).status, 400, '법인 형식 밖 400');
+  const old = await call('adm', 'PUT', '/compare/sets', { name: '예전 모양', keys: ['DUPK', 'EDK'] });
+  assert.equal(old.status, 200); assert.equal(old.body.set.vcenterIds, undefined, '법인 없이 저장한 세트는 예전 모양 그대로');
 });
 
 test('③ 쓰기 — 주석 · 검토 · 정비 창 · 집중 · 포트 매핑 · 용도 태그는 고른 법인 서버에만(법인 없으면 400 · 범위 계정은 자기 서버)', async (t) => {

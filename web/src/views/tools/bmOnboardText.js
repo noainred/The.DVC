@@ -22,6 +22,7 @@ export const MISS_REASON_TEXT = Object.freeze({
   'no-idrac-cred': 'iDRAC 계정 없음',
   'no-os-cred': 'OS 계정 없음',
   'both-off': 'iDRAC · OS 수집이 모두 꺼짐',
+  'key-conflict': '식별 키가 이 노드의 다른 서버와 겹쳐 수집하지 않음(값이 섞이지 않게) — 서비스태그를 채우면 풀립니다',   // 다음 점검 ①
 });
 export const KEY_STATUS_TEXT = Object.freeze({ active: '사용', retired: '퇴역(회전됨)' });
 export const ACCOUNT_KIND_TEXT = Object.freeze({ os: 'OS(SSH)', idrac: 'iDRAC' });
