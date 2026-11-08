@@ -912,4 +912,5 @@
   - 봉투: `topVer` · `idleVer` 표지는 계산 전에도 싣는다(값 없음 ≠ 구버전) · `idle` 행은 같은 봉투의 대상 키만 · 상태 · 제외 사유 · 뺀 지표는 열거 밖이면 버린다 · 점수 0~100 정수 · 등급 0/0.5/1 ·
     이름 · 법인은 행이 아니라 대상 목록에서(`central/bmIdleSanitize.js`) · 봉투 상한에서는 용량 예측 다음으로 ‘사용 중’ 행을 빼고 수만(`idle.truncated: 'non-active-only'`).
   - 최소 엣지 버전: `featureMinEdgeVersion.stage8bMinEdgeVersion`(표지 `STAGE8B_TITLE_RE = /리눅스 통합 성능 모니터링 8b단계/` — 숫자를 박지 않는다 · 노트에 없으면 지금 판).
+  - 반증 F8: 대행 실패 응답의 `minEdgeVersion` 은 **kind === 'old-version' 일 때만**(시한 · 연결 실패 · 대상 아님 404 에 버전 요구를 붙여 원인을 단정하지 않는다 — 웹도 같은 조건) · 반증 F3: 점 본문 `reason: 'base-missing'` · 띠 `baseMissing` 은 정제를 통과한다(‘못 읽음’ 을 ‘없음’ 으로 바꾸지 않게).
   - 변경 이벤트 kind 에 `idle`(저활용 후보 진입/이탈)을 더했다 — 중앙 대행 정제(`bmPerfOpsPull.js CHANGE_KINDS`)에도 같은 값(둘을 같이 고칠 것).

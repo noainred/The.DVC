@@ -1239,21 +1239,27 @@
 - ⚠⚠ **리눅스 성능 8b단계 프로세스 Top-N(⑳) · 저활용(㉑) · 전력/온도(㉒) — comm 만 · 접두 · 못 읽음 ≠ 0 · 점수는 후보 표시 · 전력은 한 소스**
   (`bmusage/parse/linuxTop.js` · `bmusage/topStore.js` · `bmusage/idle.js` · `bmusage/powerAgg.js` · 라우트 `routes/api/{bmTop,bmIdle,bmPower}.js` · 설계 PROFILES §20 ⑳ ㉑ ㉒ · 아트보드 TopProc · Idle · Power ·
   회귀 `server/test/{bmTop8b,bmTop8bStore,bmTop8bRoute,bmIdle8b,bmPower8b}.test.js` · 웹 `bmPerf8b.test.jsx`):
-  - **`##TOP` 구획**(같은 SSH 1회 · CHANGES 다음 · SAMPLER 앞): `top -b -n 2 -d 1 -w 512 -o %CPU` **둘째 프레임**(첫 프레임 = 부팅 이후 평균 — 버린다) · 머리글이 없거나 top 이 없으면 대안 `/proc/[0-9]*/stat` 1초 간격 2회 차이.
+  - **Top-N exec**(⚠ 반증 F1: 처음 판의 주 명령 구획 `##TOP` 을 **같은 세션의 별도 exec** 로 옮겼다 — `parse/linuxTop.js topCommand` · 주 명령 · 피크 · 7a 로그 뒤 남은 예산 안 · 실패 · 시한이어도 본 표본 유지 · 수집기 기본값 끔(폴러가 설정 top.on 을 넘긴다 · 집중 경로는 top:false 명시 — F10)):
+    `top -b -n 2 -d 1 -w 512 -o %CPU` **둘째 프레임**(첫 프레임 = 부팅 이후 평균 — 버린다) · 머리글이 없거나 top 이 없으면 대안 `/proc/[0-9]*/stat` 1초 간격 2회 차이.
     ⚠ top 의 COMMAND 열은 **셸 밖으로 내지 않는다**(awk 가 머리글로 PID · S · %CPU 열만 고른다 · `HOME`/`XDG_CONFIG_HOME` 을 없는 곳으로 — 개인 toprc 의 명령줄 모드가 인자를 싣지 않게) — 이름은 `/proc/<pid>/stat` comm 만.
     I/O = `/proc/<pid>/io` 를 CPU 측정 앞(전 프로세스 · grep 1회 · 내보내지 않음) · 뒤(CPU 상위 후보 20 만) 두 번 읽은 차이 · 못 읽으면 `p`(권한) → 값 null(‘—’ · 0 아님).
     메모리 상위 5 = `ps … --sort=-rss`(RSS — 공유 페이지 중복 · PSS 아님). 출력 = 줄마다 `tS:`/`tC:`/`tM:` 접두 · `cut -c1-200 | head -n 40`(≤ 8KB — 시험이 산수 고정) · `timeout 3 top`.
+    ⚠ 반증 S1: 전 프로세스 · 후보 /proc 읽기(grep -H)와 ps 는 전부 `timeout`(/proc/<pid>/io 는 대상의 exec 잠금을 기다릴 수 있다 — D 상태 대기는 timeout 으로도 못 끊어 그때는 이 exec 만 시한) · 후보 stat · status 는 파일마다 프로세스를 띄우지 않고 grep 한 번씩.
+    ⚠ 반증 S3: top 머리글에서 공백이 들어갈 수 있는 열(COMMAND · ENVIRON · CGROUPS · SUPGRPS · CGNAME · LXC)이 PID · S · %CPU **앞**이면 받지 않는다(시스템 /etc/topdefaultrc 가 열을 옮긴 procps-ng 4 — 공백 든 comm 이 %CPU 자리를 민다) → /proc 대안.
   - ⚠⚠ **awk 의 getline 으로 /proc 파일을 읽지 말 것**: mawk 는 `/proc/<pid>/io` 의 읽기 오류(EACCES — 열기는 되고 읽을 때 거부)를 **프로그램 전체 중단**으로 다룬다(이 컨테이너 재현 — 첫 후보 뒤 전부 사라졌다).
     파일 읽기는 셸(grep · tr — 오류를 넘긴다)이 하고 awk 는 입력 줄만 받는다. awk 에서 `A[p]=(p in A)?…` 는 좌변이 먼저 원소를 만든다(mawk) — `if (p in A)` 로 나눌 것.
   - ⚠ **comm 위조**: comm 은 아무 사용자나 정한다(`/proc/self/comm` 쓰기 · 개행 포함 가능). 줄 머리는 늘 고정 접두라 ‘##END’ · ‘##MEM’ 이 표지가 되지 못한다(재개방 금지 규약과 함께) ·
     대안 경로의 stat 읽기는 `grep -H ''`(파일 이름이 줄마다 붙는다)로 개행 섞인 comm 을 **파일 이름으로 다시 잇는다** — 예전 판 `cat` 은 그 프로세스를 통째로 놓쳐 목록에서 숨을 수 있었다(실제 프로세스 시험).
   - **저장**(monthStore 가족 `top` = **날 파일**(보존 기본 7일 — 파일 삭제) · `toph` = 월 파일(90일)): 머리(top_sample)는 매 주기 · 종류 × 순위 행(top_proc)은 ‘바뀐 표본’ 만 —
     기준 = 직전 전체 표본과 상위 5 (PID, 시작) 집합이 같고 CPU ±5%p · RSS · I/O ±5%(I/O 둘 다 1MB/s 미만이면 같음) · 기준이 60분 넘거나 날이 바뀌거나 재시작 뒤 첫 표본이면 전체.
-    ##TOP 이 missing · 꺼짐이면 머리도 적지 않는다(‘표본 없음’ 과 ‘변화 없음’ 을 가른다). comm 별 시간 집계 = 직전에도 후보였던 같은 (PID, 시작)의 누적 CPU 초 차이(**하한** — 1초 % × 주기로 늘려 추정하지 않는다).
+    ##TOP 이 missing · 꺼짐이면 머리도 적지 않는다(‘표본 없음’ 과 ‘변화 없음’ 을 가른다). 같음 판정의 시작 시각은 ±2초(`sameProcStart` — 메모리 상위는 uptime − etimes 라 흔들린다 · 반증 F2) ·
+    ‘같음’ 머리의 기준 머리 · 행을 못 읽으면 조회는 `reason: 'base-missing'`(화면 ‘못 읽음’ · 띠는 빼고 `baseMissing` 으로 센다 — ‘상위 행 없음’ 으로 말하지 않는다 · 반증 F3). comm 별 시간 집계 = 직전에도 후보였던 같은 (PID, 시작)의 누적 CPU 초 차이(**하한** — 1초 % × 주기로 늘려 추정하지 않는다).
   - **저활용 점수**는 판정이 아니라 후보 표시(‘저활용 ≠ 불필요’): 수집 노드가 하루 1회(01:20 뒤 첫 틱 · `bm-idle.json`) · 지표가 없으면 **분모에서 빼고 100 으로 환산**(뺀 지표를 행에) ·
     데이터 부족(<21일) · 지금 정비 창 안은 제외(수를 센다) · 주기 사용(높은 날 2 ~ 주 수+1 · 나머지 낮음)은 후보에서 뺀다 · ‘대기 · DR’ 은 용도 태그가 없어 **검토 상태**(중앙 주석 auto `idle:dr`)로 라우트가 뺀다 ·
     전력 ‘유휴’ = 그 서버 창 안 최소 시간 평균 기준(상대값) · 0 W 시간은 미측정 · 활동 흔적은 SSH 신호를 모르면 칸 전체 ‘—’(집중 · 스냅샷만으로 ‘흔적 없음’ 이라 하지 않는다) · 후보 진입/이탈 = 변경 이벤트 kind `idle`.
+    ⚠ 반증 F5: SSH 활동은 **포탈 수집 계정(+ 대상이 본 출발 주소 — 주 명령 CHANGES `sc`)의 로그인을 뺀 것**(`idle.humanLogins` · `selfLoginOf` — 폴러가 주기마다 `noteSelfLogin`) · 계정을 모르면 · 접힌 항목만 남으면 모름(null — 분모 제외).
   - **전력 · 온도**: 지금 W 는 `idrac/service.js allMeasuredPower`(전력 대시보드와 **같은 함수** · vCenter 추정 제외) — 교차 검증 시험이 같은 입력의 법인 합을 `computePowerBreakdown` 과 대조(W 합 — kW 반올림이 아니라).
-    **미측정(iDRAC 없음 · 읽기 실패 · 0 W)은 합계에서 빼고 사유별로 센다** · 법인 · 랙 24h 피크 = 측정 서버가 다 모인 시간의 합(부분 시간 제외) · kWh = 시간 평균 W × 1h · 월 누적은 끝난 날 Wh 캐시.
+    **미측정(iDRAC 없음 · 읽기 실패 · 0 W)은 합계에서 빼고 사유별로 센다** · 법인 · 랙 24h 피크 = 측정 서버가 다 모인 시간의 합(부분 시간 제외) · kWh = 시간 평균 W × 1h · 월 누적은 끝난 날 Wh 캐시(값 있는 날만 · 6시간 TTL — S2).
+    ⚠ 반증 F6: **랙 상한 여유도 다 측정된 랙만** — 미측정이 1대라도 있으면 `marginPct`/`low` = null · `marginPartial`(화면 ‘일부만 측정(n/m)’) · 여유 최소 카드는 다 측정된 랙만 + `partialRacks` 따로.
     온도는 **지금 값만**(흡기 시계열은 `IDRAC_TEMP_SERIES_DETAIL` 옵트인일 때만 metrics DB 에 있다) · 랙은 설정 랙 배치가 유일한 원천(등록 CSV 에 ‘랙/위치’ 열 없음 · iDRAC 위치는 Redfish 왕복을 늘리므로 읽지 않음) ·
     엣지 위임 서버의 PowerCap 은 엣지 인벤토리 축약에 없어 ‘—’(중앙 필드를 늘리지 않았다).
