@@ -50,12 +50,6 @@ export const GROUPS = Object.freeze([
     desc: 'vCenter 알람과 물리 부품 장애. 장비·엔티티 이름이 들어갑니다.',
     sensitivity: 'medium',
   },
-  {
-    key: 'san',
-    label: 'SAN 스토리지 성능',
-    desc: 'SAN 스위치 포트 사용량으로 본 스토리지 어레이별 처리량 · 편중 · 성능 점검 판정과 어레이 측(디렉터 · 노드 · SP) 값. 어레이 이름 · 시리얼 · 법인이 들어가고 vCenter 범위로 나눌 수 없어 전체 범위 키만 씁니다(v2.950).',
-    sensitivity: 'medium',
-  },
 ]);
 
 export const GROUP_KEYS = Object.freeze(GROUPS.map((g) => g.key));
@@ -133,18 +127,6 @@ export const ENDPOINTS = Object.freeze([
     path: '/faults/parts', group: 'faults', method: 'GET', scoped: false, requiresFullScope: true,
     summary: '물리 부품 장애 — 확인 불가(unknown)를 정상으로도 장애로도 세지 않는다',
     fields: ['partKey', 'agent', 'scope', 'deviceKey', 'kind', 'partId', 'state', 'openedAt', 'lastSeenAt', 'reason'],
-  },
-  // v2.950 — SAN 스토리지 성능(법인 축만 · vCenter 범위 미적용 → 범위 지정 키는 403 needs-full-scope · 어레이 이름·시리얼이 들어간다).
-  {
-    path: '/san-storage/arrays', group: 'san', method: 'GET', scoped: false,
-    summary: '어레이별 스위치 측 처리량 — 지금 · 회선 사용률 · 24시간 평균/피크 · 7일 대비 · 편중 · 수집 상태 · 30일 용량 증가(짝 지은 스토리지)',
-    fields: ['key', 'name', 'vendor', 'serial', 'datacenterId', 'datacenterName', 'state', 'nowBps', 'nowAt', 'utilPct', 'avg24Bps', 'peak24Bps', 'delta7dPct',
-      'imbalanceGroup', 'imbalanceRatio', 'directors', 'ports', 'switches', 'storageDeviceId', 'capacityPct', 'alertsUnresolved', 'growth30dBytes', 'daysToFull'],
-  },
-  {
-    path: '/san-storage/check', group: 'san', method: 'GET', scoped: false,
-    summary: '어레이별 성능 점검 판정 — 종합 · 미확인 수 · 항목별 상태(스위치 측 4 + 어레이 측 5) · 어레이 측 표본 유무',
-    fields: ['key', 'name', 'datacenterId', 'datacenterName', 'overall', 'uncheckedCount', 'items', 'arraySideKeys', 'arraySideLastSampleAt', 'judgedAt'],
   },
 ]);
 

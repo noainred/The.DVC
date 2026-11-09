@@ -133,7 +133,7 @@ test('거부 기본값 — 키 없음 401 · 분류 없음 403 · 다른 분류 
 
 test('투사 계약 — 응답 키 집합이 선언 fields 와 정확히 같다(내부 필드 유출 0)', () => {
   const r = runLive(`
-    const k = keys.issueApiKey({ name: 'all', groups: ['inventory', 'capacity', 'faults', 'san'] }).plaintext;   // v2.950: san 분류(SAN 스토리지 성능)
+    const k = keys.issueApiKey({ name: 'all', groups: ['inventory', 'capacity', 'faults'] }).plaintext;
     const { ENDPOINTS } = await import(${JSON.stringify(path.join(SRC, 'publicapi/allowlist.js'))});
     const out = {};
     for (const ep of ENDPOINTS) {

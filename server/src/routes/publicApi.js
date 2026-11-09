@@ -33,7 +33,6 @@ import { msOrNull } from '../publicapi/time.js';
 import { isAdminReq, addressMatcher, extendMatcher, maskedNameLabel } from '../auth/addressMask.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
-import { deviceContextOf, buildListCore, runCheck } from './api/sanStorage.js';   // v2.950 — SAN 스토리지 성능(판정 코어 하나 · 화면과 같은 함수)
 export const API_VERSION = 'v1';
 /** 목록 응답 상한 — 넘치면 `meta.truncated`·`meta.omitted` 로 **밝힌다**. */
 const LIST_MAX = 5000;
@@ -572,46 +571,6 @@ v1.get('/faults/parts', guarded('/faults/parts', async ({ req, res, fields, apiP
 v1.use((req, res) => res.status(404).json({
   ok: false, error: 'unknown-endpoint', code: 'unknown-endpoint',
   reason: '공개되지 않은 경로입니다 — GET /api/v1/ 로 이 키가 쓸 수 있는 목록을 확인하세요.',
-}));
-
-
-/* ── v2.950 SAN 스토리지 성능 — 법인 축만(vCenter 범위로 나눌 수 없다 → 범위 지정 키는 403 needs-full-scope · 빈 목록을 주지 않는다 — /capacity/storage 와 같은 규약) ── */
-function sanNeedsFullScope(res, scopeMeta, apiPath) {
-  if (scopeMeta?.scopedToVcenters == null) return false;
-  res.status(403).json({ ok: false, error: 'needs-full-scope', code: 'needs-full-scope', endpoint: apiPath,
-    reason: 'SAN 스토리지 성능은 vCenter 범위로 나눌 수 없습니다(법인 축) — 범위가 없는 키로 조회하세요.' });
-  return true;
-}
-v1.get('/san-storage/arrays', guarded('/san-storage/arrays', async ({ req, res, fields, scopeMeta, apiPath }) => {
-  if (sanNeedsFullScope(res, scopeMeta, apiPath)) return undefined;
-  const ctx = await deviceContextOf({ admin: isAdminReq(req), dcQuery: req.query.datacenterId });
-  const b = await buildListCore(ctx, null);
-  const rows = b.rows.map((r) => ({
-    key: r.key, name: r.name, vendor: r.vendor, serial: r.serial || null, datacenterId: r.datacenterId || null, datacenterName: r.datacenterName || null, state: r.state,
-    nowBps: r.now?.bps ?? null, nowAt: r.now?.ts ?? null, utilPct: r.utilPct ?? null, avg24Bps: r.avg24 ?? null, peak24Bps: r.peak24 ?? null, delta7dPct: r.delta7d ?? null,
-    imbalanceGroup: r.imbalance?.group ?? null, imbalanceRatio: r.imbalance?.ratio ?? null,
-    directors: (r.directors || []).filter((d) => d.parsed).length, ports: r.portCount ?? null, switches: (r.switches || []).length,
-    storageDeviceId: r.capacity?.deviceId ?? null, capacityPct: r.capacity?.pct ?? null, alertsUnresolved: r.capacity?.alerts ?? null,
-    growth30dBytes: r.growth?.bytes30d ?? null, daysToFull: r.growth?.daysToFull ?? null,
-  }));
-  const c = capped(rows);
-  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, computedAt: b.agg7d?.computedAt ?? null, intervalMs: b.st?.intervalMs ?? null,
-    hostsExcluded: b.counts?.host ?? null, unit: 'bytesPerSec',
-    note: 'nowBps 는 수집 주기 안에서 팹 A/B 표본이 다 모인 마지막 칸(없으면 null — 0 이 아닙니다). growth30dBytes · daysToFull 은 시리얼로 짝 지은 스토리지 장비의 일 롤업(없으면 null).' });
-}));
-v1.get('/san-storage/check', guarded('/san-storage/check', async ({ req, res, fields, scopeMeta, apiPath }) => {
-  if (sanNeedsFullScope(res, scopeMeta, apiPath)) return undefined;
-  const ctx = await deviceContextOf({ admin: isAdminReq(req), dcQuery: req.query.datacenterId });
-  const b = await buildListCore(ctx, null);
-  const r = await runCheck(b, { signal: null });
-  const rows = r.results.map((x) => ({
-    key: x.key, name: x.name, datacenterId: x.datacenterId || null, datacenterName: x.datacenterName || null, overall: x.overall, uncheckedCount: x.uncheckedCount ?? 0,
-    items: Object.fromEntries(Object.entries(x.items || {}).map(([k, v]) => [k, v.status])),
-    arraySideKeys: x.arraySide?.keys || [], arraySideLastSampleAt: x.arraySide?.lastSampleTs ?? null, judgedAt: r.judgedAt,
-  }));
-  const c = capped(rows);
-  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, summary: r.summary, itemLabels: Object.fromEntries((r.items || []).map((i) => [i.k, i.label])),
-    note: "unknown 은 '확인 불가'(기준 없음 · 표본 없음 · 짝 없음) — 정상이 아닙니다. 항목 상태 ok · warn · bad · unknown · na." });
 }));
 
 export default v1;
