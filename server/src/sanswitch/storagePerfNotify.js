@@ -9,7 +9,7 @@ import { config } from '../config.js';
 import { notify as sendAlert } from '../alerts.js';
 import { startAdaptiveTimer } from '../storage/intervals.js';
 import { loadPerfSettings } from './perfSettings.js';
-import { loadNotifySettings, notifyLoadError, loadNotifyState, saveNotifyState, recordNotify, snapshotOf, diffCheck, alertsOf } from './storagePerfNotifyStore.js';
+import { loadNotifySettings, notifyLoadError, loadNotifyState, saveNotifyState, recordNotify, snapshotOf, carryKnown, diffCheck, alertsOf } from './storagePerfNotifyStore.js';
 import { CHECK_ITEMS } from './storagePerfCheck.js';
 import { deviceContextOf, buildListCore, runCheck } from './storagePerfCore.js';   // 판정 코어(라우트가 아니다 — 방향 위반 · 순환 금지)
 
@@ -42,7 +42,8 @@ export async function pollStoragePerfNotifyOnce({ now = Date.now(), send = sendA
       const line = Array.isArray(res) ? res.join(' · ') : String(res);
       sent.push({ dc: a.dc, title: a.title, severity: a.severity, counts: a.counts, result: line.slice(0, 200) });
     }
-    const next = { ...st, last: cur, at: now, lastTick: { at: now, arrays: r.results.length, opened: d.opened.length, recovered: d.recovered.length, alerts: alerts.length, first: d.first } };
+    const next = { ...st, last: carryKnown(st.last, cur), at: now,   // v2.954(점검 B-2): unknown 이 직전 수준을 지우지 않게 이월
+      lastTick: { at: now, arrays: r.results.length, opened: d.opened.length, recovered: d.recovered.length, alerts: alerts.length, first: d.first } };
     if (sent.length) next.history = [...sent.map((s) => ({ at: now, ...s })), ...st.history].slice(0, 20);
     saveNotifyState(next);
     _last = { at: now, action: d.first ? 'baseline' : (alerts.length ? 'sent' : 'quiet'), arrays: r.results.length, opened: d.opened.length, recovered: d.recovered.length, alerts: alerts.length, sent };
