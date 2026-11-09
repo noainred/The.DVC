@@ -34,7 +34,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}
 .tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
 /* 셸(흐림) */
-.shell{display:flex;min-height:2160px}
+.shell{display:flex;min-height:2400px}
 .side{width:236px;flex:none;background:#0f1626;border-right:1px solid #1f2a40;opacity:.45;padding:18px 16px;display:flex;flex-direction:column;gap:14px;font-size:13px;color:#8b9bb4}
 .side .on{color:#e6edf6;font-weight:700}
 .top{height:44px;background:rgba(12,17,30,.9);border-bottom:1px solid #1f2a40;opacity:.45}
@@ -247,6 +247,18 @@ td .sub{display:block;font-size:11px;color:#8b9bb4;font-weight:400;white-space:n
         </div>
       </div>
 
+      <!-- 장비별 디스크 성능 차트 — 요청 3차(보드 ⑥) 가 들어가는 자리 -->
+      <div class="card" style="padding:18px 22px;border-style:dashed">
+        <div class="sech">
+          <div class="lbl">▸ 장비별 디스크 성능 <span style="letter-spacing:0;color:#8b9bb4">· 평균 막대 + 피크 표지 · 추이(실선 평균 · 점선 피크) · 실시간 1시간 / 24시간 / 7일 / 30일</span></div>
+          <span class="hint">자세한 모양은 보드 ⑥ — 이 자리에 두 구역(막대 비교 · 추이)이 들어갑니다</span>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:14px;min-width:0">
+          <div style="border:1px dashed #243049;border-radius:12px;height:150px;display:flex;align-items:center;justify-content:center;color:#8b9bb4;font-size:12.5px">막대 비교 — 장비마다 평균 ■ · 피크 ▌ · 평균 높은 순</div>
+          <div style="border:1px dashed #243049;border-radius:12px;height:150px;display:flex;align-items:center;justify-content:center;color:#8b9bb4;font-size:12.5px">추이 — 고른 장비(최대 8) · 베어메탈 점 1분 · SAN 점 5분 · 30초 갱신(실시간)</div>
+        </div>
+      </div>
+
       <!-- 베어메탈 서버별 디스크 I/O -->
       <div class="card" style="padding:18px 22px">
         <div class="sech">
@@ -287,7 +299,7 @@ td .sub{display:block;font-size:11px;color:#8b9bb4;font-weight:400;white-space:n
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2160}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2400}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }
