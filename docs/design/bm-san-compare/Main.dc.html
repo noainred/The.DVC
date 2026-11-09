@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>베어메탈 스토리지 › SAN 비교 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.num{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 11px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:rgba(59,130,246,.22);color:#93c5fd;font-weight:700}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:14px;border:1px solid #243049;background:#0f1626;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.chip.on{border-color:#34e0b4;color:#34e0b4}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.bm{background:rgba(52,224,180,.14);color:#5eead4}
+.tag.pmax{background:rgba(59,130,246,.16);color:#93c5fd}
+.tag.vmax{background:rgba(168,85,247,.16);color:#d8b4fe}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+/* 셸(흐림) */
+.shell{display:flex;min-height:2080px}
+.side{width:236px;flex:none;background:#0f1626;border-right:1px solid #1f2a40;opacity:.45;padding:18px 16px;display:flex;flex-direction:column;gap:14px;font-size:13px;color:#8b9bb4}
+.side .on{color:#e6edf6;font-weight:700}
+.top{height:44px;background:rgba(12,17,30,.9);border-bottom:1px solid #1f2a40;opacity:.45}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.content{padding:14px 24px 40px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.crumb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:#8b9bb4}
+.crumb b{color:#e6edf6}
+/* 하위 탭(현황 · SAN 비교) */
+.subtabs{display:flex;align-items:flex-end;gap:4px;border-bottom:1px solid #243049}
+.subtab{height:36px;padding:0 14px;border:0;border-bottom:2px solid transparent;background:transparent;color:#8b9bb4;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.subtab.on{color:#e6edf6;border-bottom-color:#34e0b4}
+.lbl{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.16em;color:#8b9bb4}
+.lbl::first-letter{color:#34e0b4}
+.status{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:#8b9bb4;line-height:1.8}
+.status b{color:#e6edf6;font-weight:600}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px}
+.tgroup{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.tname{font-size:12px;color:#8b9bb4;white-space:nowrap}
+/* 비교 요약 */
+.sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));min-width:0}
+.sum > div{padding:18px 22px;border-right:1px solid #1f2a40;min-width:0}
+.sum > div:last-child{border-right:0}
+.who{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:#8b9bb4;margin-top:12px}
+.sw{width:10px;height:10px;border-radius:3px;flex:none}
+.big{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:4px}
+.big .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:34px;font-weight:700;line-height:1;white-space:nowrap}
+.big .v small{font-size:16px;color:#8b9bb4;font-weight:600;margin-left:2px}
+.big .s{font-size:12.5px;color:#8b9bb4}
+.bar{display:block;position:relative;height:8px;border-radius:8px;background:#1f2a40;overflow:hidden;margin-top:8px}
+.bar > span{position:absolute;left:0;top:0;bottom:0;border-radius:8px}
+.delta{margin-top:14px;padding-top:12px;border-top:1px dashed #243049;font-size:12.5px;color:#8b9bb4;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.delta b{color:#e6edf6;font-family:"JetBrains Mono",ui-monospace,monospace}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12.5px;margin-top:12px}
+.kv dt{color:#8b9bb4;white-space:nowrap}.kv dd{margin:0;color:#e6edf6}
+.kv dd small{color:#8b9bb4;display:block;font-size:11.5px}
+/* 표 */
+.tblwrap{overflow-x:auto;min-width:0}
+table{border-collapse:collapse;width:100%;min-width:1080px;font-size:12.5px}
+th{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;font-weight:600;letter-spacing:.04em;color:#8b9bb4;text-align:left;padding:8px 10px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer}
+th.r,td.r{text-align:right}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+tr.pin td{background:#0f1626;font-weight:700}
+td .sub{display:block;font-size:11px;color:#8b9bb4;font-weight:400;white-space:normal}
+.pbar{display:inline-block;position:relative;width:76px;height:5px;border-radius:5px;background:rgba(148,163,184,.15);overflow:hidden;vertical-align:middle;margin-right:6px}
+.pbar > span{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+.pct{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:700;font-size:12px}
+.part{color:#fbbf24}
+/* 한눈에 막대 */
+.glance{display:grid;grid-template-columns:200px 92px minmax(120px,1fr) 64px minmax(120px,1fr) 110px;gap:8px 12px;align-items:center;font-size:12.5px}
+.glance .h{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;color:#8b9bb4;letter-spacing:.04em;padding-bottom:6px;border-bottom:1px solid #243049}
+.gbar{position:relative;height:12px;border-radius:6px;background:#1f2a40;overflow:hidden}
+.gbar > span{position:absolute;left:0;top:0;bottom:0;border-radius:6px}
+.gbar .mark{position:absolute;top:-3px;bottom:-3px;width:2px;background:#fbbf24;left:75%}
+.nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nm small{display:block;font-weight:400;color:#8b9bb4;font-size:11px}
+.sech{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 12px;margin-bottom:10px}
+.sech .hint{font-size:11.5px;color:#8b9bb4}
+.note{font-size:12.5px;line-height:1.7;color:#c7d2e2}
+.note li{margin:4px 0}
+.note b{color:#e6edf6}
+.foot{font-size:11.5px;color:#8b9bb4;margin-top:10px;line-height:1.6}
+</style>
+</helmet>
+<div class="shell">
+  <aside class="side" aria-hidden="true">
+    <div style="font-weight:800;color:#e6edf6">The Davinci</div>
+    <div>개요</div><div>vCenter</div><div>가상화 서버</div><div>스토리지</div><div class="on">특수 기능</div><div>설정</div>
+  </aside>
+  <div class="main">
+    <div class="top" aria-hidden="true"></div>
+    <div class="content">
+
+      <div class="crumb"><span>특수 기능</span><span>›</span><b>베어메탈 스토리지</b><span class="mono muted" style="margin-left:auto">#/tools/bm-storage/compare</span></div>
+
+      <div class="subtabs">
+        <button class="subtab" type="button">현황</button>
+        <button class="subtab on" type="button">SAN 비교</button>
+        <span class="muted" style="margin-left:auto;font-size:11.5px;padding-bottom:8px">현황 탭의 서버 등록 · 주기 · CSV 는 그대로입니다</span>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:10px 16px">
+        <div style="flex:1 1 520px;min-width:0">
+          <div class="muted" style="font-size:13.5px;line-height:1.6">베어메탈 서버의 디스크 <b style="color:#e6edf6">용량 사용률</b>과 <b style="color:#e6edf6">전송 속도</b>를 SAN 어레이(VMAX · PowerMax)의 용량 사용률 · 포트 전송 속도와 <b style="color:#e6edf6">같은 표에서 숫자로</b> 비교합니다. 두 값의 뜻과 측정 시각이 다르므로 기준을 함께 보여 줍니다.</div>
+          <div class="status"><span style="color:#22c55e">●</span> 베어메탈 <b>10대</b> 수집 정상 · 디스크 I/O 측정 <b>9대</b> · <span style="color:#fbbf24">측정 불가 1대</span> · 최근 수집 <b>3분 전</b>(주기 10분) · SAN 어레이 <b>4대</b> · 포트 표본 <b>2분 전</b>(주기 5분) · 용량 스냅샷 <b>41분 전</b></div>
+        </div>
+        <div class="tgroup">
+          <button class="btn primary" type="button">지금 측정</button>
+          <button class="btn" type="button">새로 고침</button>
+          <button class="btn" type="button">CSV</button>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="tgroup">
+          <span class="tname">SAN 종류</span>
+          <button class="chip on" type="button">VMAX · PowerMax</button>
+          <button class="chip" type="button">Unity</button>
+          <button class="chip" type="button">PowerStore</button>
+          <button class="chip" type="button">XtremIO</button>
+        </div>
+        <div class="tgroup">
+          <span class="tname">SAN 전송 속도 범위</span>
+          <div class="seg"><button class="on" type="button">최근 1시간</button><button type="button">24시간</button><button type="button">7일</button></div>
+          <div class="seg"><button class="on" type="button">평균</button><button type="button">피크</button></div>
+        </div>
+      </div>
+
+      <!-- 비교 요약 -->
+      <div class="card sum">
+        <div>
+          <div class="lbl">▸ 용량 사용률</div>
+          <div class="who"><span class="sw" style="background:#34e0b4"></span>베어메탈 전체 · 10대 합산</div>
+          <div class="big"><span class="v">67.4<small>%</small></span><span class="s">463.3 TB / 687.2 TB</span></div>
+          <span class="bar"><span style="width:67.4%;background:#34e0b4"></span></span>
+          <div class="who"><span class="sw" style="background:#3b82f6"></span>SAN 어레이 전체 · VMAX · PowerMax 4대</div>
+          <div class="big"><span class="v">62.8<small>%</small></span><span class="s">414.2 TB / 660.0 TB</span></div>
+          <span class="bar"><span style="width:62.8%;background:#3b82f6"></span></span>
+          <div class="delta">차이 <b>+4.6%p</b> 베어메탈이 더 찼습니다 <span class="muted">· 전체 합 기준, 그룹 겹침 없음</span></div>
+        </div>
+        <div>
+          <div class="lbl">▸ 전송 속도 (읽기 + 쓰기)</div>
+          <div class="who"><span class="sw" style="background:#34e0b4"></span>베어메탈 · 9대 측정 합</div>
+          <div class="big"><span class="v">412<small>MB/s</small></span><span class="s">읽기 217 · 쓰기 195 MB/s</span></div>
+          <div class="muted" style="font-size:11.5px;margin-top:6px">수집 시점 2초 표본 · 서버 전체 물리 디스크 합 · <span class="part">측정 불가 1대는 합에 없음</span></div>
+          <div class="who"><span class="sw" style="background:#3b82f6"></span>SAN · 3대 측정 합 (1시간 평균)</div>
+          <div class="big"><span class="v">1.84<small>GB/s</small></span><span class="s">피크 합 상한 4.24 GB/s</span></div>
+          <div class="muted" style="font-size:11.5px;margin-top:6px">스위치 포트 트래픽 합(어레이 FC 포트) · <span class="part">시리얼 미대조 1대는 합에 없음</span></div>
+          <div class="delta">배율 <b>4.5배</b> SAN 쪽이 많습니다 <span class="muted">· 표본 방식이 달라 추세가 아닌 ‘지금 크기’ 비교입니다</span></div>
+        </div>
+        <div>
+          <div class="lbl">▸ 기준 · 신선도</div>
+          <dl class="kv">
+            <dt>베어메탈 용량</dt><dd>df · used / (used + avail)<small>3분 전 · 주기 10분 · 마운트 지정분만</small></dd>
+            <dt>베어메탈 전송</dt><dd>/proc/diskstats 2초 표본<small>3분 전 · 서버 전체 물리 디스크(마운트별 아님)</small></dd>
+            <dt>SAN 용량</dt><dd>Unisphere 데이터 감축 후 실사용<small>41분 전 · 주기 60분 · 구독(씬) 아님</small></dd>
+            <dt>SAN 전송</dt><dd>SAN 스위치 포트 사용량 합<small>2분 전 · 주기 5분 · 최근 1시간 평균 · 시리얼로 어레이 대조</small></dd>
+          </dl>
+          <div class="delta"><span class="muted">기준이 다른 값을 한 표에 둔 것이므로 <b style="font-family:inherit">배율·차이는 참고치</b>입니다. 어레이 자체 성능 API 는 수집하지 않습니다.</span></div>
+        </div>
+      </div>
+
+      <!-- 비교 표 -->
+      <div class="card" style="padding:18px 22px">
+        <div class="sech">
+          <div class="lbl">▸ 비교 표 <span style="letter-spacing:0;color:#8b9bb4">· 베어메탈 그룹 7 + SAN 어레이 4 · 사용률 높은 순</span></div>
+          <span class="hint">열 제목을 누르면 정렬 · ‘—’ 와 측정 없음은 항상 뒤 · 합계 행은 고정</span>
+        </div>
+        <div class="tblwrap">
+        <table>
+          <thead><tr>
+            <th>구분</th><th>이름</th><th>법인 · 그룹</th><th class="r">총 용량</th><th class="r">사용량</th><th>사용률</th><th class="r">전송 속도</th><th class="r">피크</th><th>측정 기준</th><th>상태</th>
+          </tr></thead>
+          <tbody>
+            <tr class="pin"><td><span class="tag bm">베어메탈</span></td><td>전체 합계<span class="sub">서버 10대 · 그룹 겹침 없이</span></td><td class="muted">—</td><td class="r num">687.2 TB</td><td class="r num">463.3 TB</td><td><span class="pbar"><span style="width:67.4%;background:#f59e0b"></span></span><span class="pct" style="color:#fbbf24">67.4%</span></td><td class="r num">412 MB/s<span class="sub part">9/10대 측정 합</span></td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · I/O 2초 표본 · 3분 전</td><td><span class="tag ok">정상</span></td></tr>
+            <tr class="pin"><td><span class="tag pmax">SAN</span></td><td>전체 합계<span class="sub">VMAX · PowerMax 4대</span></td><td class="muted">법인 4곳</td><td class="r num">660.0 TB</td><td class="r num">414.2 TB</td><td><span class="pbar"><span style="width:62.8%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">62.8%</span></td><td class="r num">1.84 GB/s<span class="sub part">3/4대 측정 합 · 1시간 평균</span></td><td class="r num">4.24 GB/s<span class="sub">피크 합 = 상한</span></td><td class="muted" style="font-size:11.5px">Unisphere 41분 전 · 포트 28 · 스위치 8</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag vmax">VMAX</span></td><td>VMAX-100K-PL1<span class="sub">시리얼 000296800331</span></td><td>폴란드</td><td class="r num">64.0 TB</td><td class="r num">52.0 TB</td><td><span class="pbar"><span style="width:81.3%;background:#f59e0b"></span></span><span class="pct" style="color:#fbbf24">81.3%</span></td><td class="r num muted">—<span class="sub part">시리얼 미대조</span></td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">Unisphere 38분 전 · 포트 대조 0</td><td><span class="tag warn">전송 측정 없음</span></td></tr>
+            <tr><td><span class="tag bm">베어메탈</span></td><td>백업<span class="sub">backup-media-01 · 02</span></td><td class="muted">그룹 · 2대</td><td class="r num">240.8 TB</td><td class="r num">191.4 TB</td><td><span class="pbar"><span style="width:79.5%;background:#f59e0b"></span></span><span class="pct" style="color:#fbbf24">79.5%</span></td><td class="r num">96 MB/s</td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · 2초 표본 · 3분 전 · 2/2대</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag vmax">VMAX</span></td><td>VMAX-250F-FRA1<span class="sub">시리얼 000197800128</span></td><td>프랑크푸르트</td><td class="r num">96.0 TB</td><td class="r num">71.8 TB</td><td><span class="pbar"><span style="width:74.8%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">74.8%</span></td><td class="r num">612 MB/s</td><td class="r num">1.20 GB/s</td><td class="muted" style="font-size:11.5px">Unisphere 41분 전 · 포트 4 · 스위치 2</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag bm">베어메탈</span></td><td>DB<span class="sub">oradb-prod-01 · 02</span></td><td class="muted">그룹 · 2대</td><td class="r num">48.6 TB</td><td class="r num">34.6 TB</td><td><span class="pbar"><span style="width:71.2%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">71.2%</span></td><td class="r num">148 MB/s</td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · 2초 표본 · 3분 전 · 2/2대</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag pmax">PowerMax</span></td><td>PMAX-2500-KR1<span class="sub">시리얼 000120001234</span></td><td>서울</td><td class="r num">180.0 TB</td><td class="r num">124.0 TB</td><td><span class="pbar"><span style="width:68.9%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">68.9%</span></td><td class="r num">1.03 GB/s</td><td class="r num">2.40 GB/s</td><td class="muted" style="font-size:11.5px">Unisphere 41분 전 · 포트 8 · 스위치 2</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag bm">베어메탈</span></td><td>HPC<span class="sub">hpc-node-01 · 02 · 03</span></td><td class="muted">그룹 · 3대</td><td class="r num">181.5 TB</td><td class="r num">116.2 TB</td><td><span class="pbar"><span style="width:64%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">64.0%</span></td><td class="r num part">88 MB/s<span class="sub part">2/3대 — 부분 합</span></td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · 2초 표본 · 3분 전</td><td><span class="tag warn">1대 측정 불가</span></td></tr>
+            <tr><td><span class="tag bm">베어메탈</span></td><td>로그<span class="sub">log-archive-01</span></td><td class="muted">그룹 · 1대</td><td class="r num">24.3 TB</td><td class="r num">14.9 TB</td><td><span class="pbar"><span style="width:61.5%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">61.5%</span></td><td class="r num">21 MB/s</td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · 2초 표본 · 3분 전 · 1/1대</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag bm">베어메탈</span></td><td>서울<span class="sub">hpc-node-01 · 03 · oradb-prod-01 · ai-train-01</span></td><td class="muted">그룹 · 4대 · 다른 그룹과 겹침</td><td class="r num">149.8 TB</td><td class="r num">90.2 TB</td><td><span class="pbar"><span style="width:60.2%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">60.2%</span></td><td class="r num part">190 MB/s<span class="sub part">3/4대 — 부분 합</span></td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · 2초 표본 · 3분 전</td><td><span class="tag warn">1대 측정 불가</span></td></tr>
+            <tr><td><span class="tag bm">베어메탈</span></td><td>프랑크푸르트<span class="sub">oradb-prod-02</span></td><td class="muted">그룹 · 1대</td><td class="r num">24.3 TB</td><td class="r num">14.1 TB</td><td><span class="pbar"><span style="width:58%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">58.0%</span></td><td class="r num">51 MB/s</td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · 2초 표본 · 3분 전 · 1/1대</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag bm">베어메탈</span></td><td>AI<span class="sub">ai-train-01 · 02</span></td><td class="muted">그룹 · 2대</td><td class="r num">192.0 TB</td><td class="r num">106.2 TB</td><td><span class="pbar"><span style="width:55.3%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">55.3%</span></td><td class="r num">59 MB/s</td><td class="r num muted">—</td><td class="muted" style="font-size:11.5px">df · 2초 표본 · 3분 전 · 2/2대</td><td><span class="tag ok">정상</span></td></tr>
+            <tr><td><span class="tag pmax">PowerMax</span></td><td>PMAX-8000-US1<span class="sub">시리얼 000120000987</span></td><td>미국 동부</td><td class="r num">320.0 TB</td><td class="r num">166.4 TB</td><td><span class="pbar"><span style="width:52%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">52.0%</span></td><td class="r num">198 MB/s</td><td class="r num">640 MB/s</td><td class="muted" style="font-size:11.5px">Unisphere 44분 전 · 포트 16 · 스위치 4</td><td><span class="tag ok">정상</span></td></tr>
+          </tbody>
+        </table>
+        </div>
+        <div class="foot">베어메탈 그룹은 서버가 여러 그룹(최대 3개)에 속할 수 있어 그룹 행의 합이 전체보다 클 수 있습니다(겹침은 ‘법인 · 그룹’ 열이 말합니다). 부분 합(측정 불가 서버가 섞인 그룹)은 호박색으로 따로 표시하고 전체 합에는 측정된 서버만 넣습니다.</div>
+      </div>
+
+      <!-- 한눈에 막대 -->
+      <div class="card" style="padding:18px 22px">
+        <div class="sech">
+          <div class="lbl">▸ 한눈에 <span style="letter-spacing:0;color:#8b9bb4">· 왼쪽 사용률(0~100%, 노란 선 = 75% 주의) · 오른쪽 전송 속도(표 최댓값 1.03 GB/s 대비)</span></div>
+          <span class="hint">같은 순서(사용률 높은 순) · 민트 = 베어메탈 · 파랑 = SAN</span>
+        </div>
+        <div class="glance">
+          <div class="h">이름</div><div class="h">구분</div><div class="h">사용률</div><div class="h" style="text-align:right">%</div><div class="h">전송 속도</div><div class="h" style="text-align:right">값</div>
+          <div class="nm">VMAX-100K-PL1<small>폴란드</small></div><span class="tag vmax">VMAX</span><div class="gbar"><span style="width:81.3%;background:#3b82f6"></span><span class="mark"></span></div><div class="num" style="text-align:right">81.3</div><div class="gbar"></div><div class="num muted" style="text-align:right">— 미대조</div>
+          <div class="nm">백업<small>베어메탈 그룹 · 2대</small></div><span class="tag bm">베어메탈</span><div class="gbar"><span style="width:79.5%;background:#34e0b4"></span><span class="mark"></span></div><div class="num" style="text-align:right">79.5</div><div class="gbar"><span style="width:9.3%;background:#34e0b4"></span></div><div class="num" style="text-align:right">96 MB/s</div>
+          <div class="nm">VMAX-250F-FRA1<small>프랑크푸르트</small></div><span class="tag vmax">VMAX</span><div class="gbar"><span style="width:74.8%;background:#3b82f6"></span><span class="mark"></span></div><div class="num" style="text-align:right">74.8</div><div class="gbar"><span style="width:59.4%;background:#3b82f6"></span></div><div class="num" style="text-align:right">612 MB/s</div>
+          <div class="nm">DB<small>베어메탈 그룹 · 2대</small></div><span class="tag bm">베어메탈</span><div class="gbar"><span style="width:71.2%;background:#34e0b4"></span><span class="mark"></span></div><div class="num" style="text-align:right">71.2</div><div class="gbar"><span style="width:14.4%;background:#34e0b4"></span></div><div class="num" style="text-align:right">148 MB/s</div>
+          <div class="nm">PMAX-2500-KR1<small>서울</small></div><span class="tag pmax">PowerMax</span><div class="gbar"><span style="width:68.9%;background:#3b82f6"></span><span class="mark"></span></div><div class="num" style="text-align:right">68.9</div><div class="gbar"><span style="width:100%;background:#3b82f6"></span></div><div class="num" style="text-align:right">1.03 GB/s</div>
+          <div class="nm">HPC<small>베어메탈 그룹 · 3대 · 부분 합</small></div><span class="tag bm">베어메탈</span><div class="gbar"><span style="width:64%;background:#34e0b4"></span><span class="mark"></span></div><div class="num" style="text-align:right">64.0</div><div class="gbar"><span style="width:8.5%;background:#f59e0b"></span></div><div class="num part" style="text-align:right">88 MB/s</div>
+          <div class="nm">로그<small>베어메탈 그룹 · 1대</small></div><span class="tag bm">베어메탈</span><div class="gbar"><span style="width:61.5%;background:#34e0b4"></span><span class="mark"></span></div><div class="num" style="text-align:right">61.5</div><div class="gbar"><span style="width:2%;background:#34e0b4"></span></div><div class="num" style="text-align:right">21 MB/s</div>
+          <div class="nm">서울<small>베어메탈 그룹 · 4대 · 부분 합</small></div><span class="tag bm">베어메탈</span><div class="gbar"><span style="width:60.2%;background:#34e0b4"></span><span class="mark"></span></div><div class="num" style="text-align:right">60.2</div><div class="gbar"><span style="width:18.4%;background:#f59e0b"></span></div><div class="num part" style="text-align:right">190 MB/s</div>
+          <div class="nm">프랑크푸르트<small>베어메탈 그룹 · 1대</small></div><span class="tag bm">베어메탈</span><div class="gbar"><span style="width:58%;background:#34e0b4"></span><span class="mark"></span></div><div class="num" style="text-align:right">58.0</div><div class="gbar"><span style="width:5%;background:#34e0b4"></span></div><div class="num" style="text-align:right">51 MB/s</div>
+          <div class="nm">AI<small>베어메탈 그룹 · 2대</small></div><span class="tag bm">베어메탈</span><div class="gbar"><span style="width:55.3%;background:#34e0b4"></span><span class="mark"></span></div><div class="num" style="text-align:right">55.3</div><div class="gbar"><span style="width:5.7%;background:#34e0b4"></span></div><div class="num" style="text-align:right">59 MB/s</div>
+          <div class="nm">PMAX-8000-US1<small>미국 동부</small></div><span class="tag pmax">PowerMax</span><div class="gbar"><span style="width:52%;background:#3b82f6"></span><span class="mark"></span></div><div class="num" style="text-align:right">52.0</div><div class="gbar"><span style="width:19.2%;background:#3b82f6"></span></div><div class="num" style="text-align:right">198 MB/s</div>
+        </div>
+      </div>
+
+      <!-- 베어메탈 서버별 디스크 I/O -->
+      <div class="card" style="padding:18px 22px">
+        <div class="sech">
+          <div class="lbl">▸ 베어메탈 서버별 디스크 I/O <span style="letter-spacing:0;color:#8b9bb4">· 10대 · 수집 시점 2초 표본</span></div>
+          <span class="hint">서버 전체 물리 디스크(sd · nvme · vd) 합 · dm · md · 파티션은 중복이라 세지 않음 · ‘바쁨’ 은 가장 바쁜 디스크 하나의 값</span>
+        </div>
+        <div class="tblwrap">
+        <table style="min-width:960px">
+          <thead><tr><th>서버</th><th>그룹</th><th class="r">물리 디스크</th><th class="r">읽기</th><th class="r">쓰기</th><th class="r">합계</th><th>바쁨 (가장 바쁜 디스크)</th><th>표본</th><th>상태</th></tr></thead>
+          <tbody>
+            <tr><td><b>oradb-prod-01</b></td><td class="muted">DB · 서울</td><td class="r num">4</td><td class="r num">62 MB/s</td><td class="r num">35 MB/s</td><td class="r num"><b>97 MB/s</b></td><td><span class="pbar"><span style="width:63%;background:#f59e0b"></span></span><span class="pct" style="color:#fbbf24">63%</span> <span class="muted mono" style="font-size:11px">nvme0n1</span></td><td class="muted" style="font-size:11.5px">3분 전 · 2.0초</td><td><span class="tag ok">측정 완료</span></td></tr>
+            <tr><td><b>backup-media-01</b></td><td class="muted">백업</td><td class="r num">12</td><td class="r num">3 MB/s</td><td class="r num">71 MB/s</td><td class="r num"><b>74 MB/s</b></td><td><span class="pbar"><span style="width:38%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">38%</span> <span class="muted mono" style="font-size:11px">sdh</span></td><td class="muted" style="font-size:11.5px">3분 전 · 2.0초</td><td><span class="tag ok">측정 완료</span></td></tr>
+            <tr><td><b>oradb-prod-02</b></td><td class="muted">DB · 프랑크푸르트</td><td class="r num">4</td><td class="r num">38 MB/s</td><td class="r num">13 MB/s</td><td class="r num"><b>51 MB/s</b></td><td><span class="pbar"><span style="width:41%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">41%</span> <span class="muted mono" style="font-size:11px">nvme1n1</span></td><td class="muted" style="font-size:11.5px">3분 전 · 2.1초</td><td><span class="tag ok">측정 완료</span></td></tr>
+            <tr><td><b>ai-train-01</b></td><td class="muted">AI · 서울</td><td class="r num">8</td><td class="r num">44 MB/s</td><td class="r num">6 MB/s</td><td class="r num"><b>50 MB/s</b></td><td><span class="pbar"><span style="width:35%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">35%</span> <span class="muted mono" style="font-size:11px">nvme2n1</span></td><td class="muted" style="font-size:11.5px">3분 전 · 2.0초</td><td><span class="tag ok">측정 완료</span></td></tr>
+            <tr><td><b>hpc-node-02</b></td><td class="muted">HPC</td><td class="r num">6</td><td class="r num">28 MB/s</td><td class="r num">17 MB/s</td><td class="r num"><b>45 MB/s</b></td><td><span class="pbar"><span style="width:19%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">19%</span> <span class="muted mono" style="font-size:11px">sdb</span></td><td class="muted" style="font-size:11.5px">3분 전 · 2.0초</td><td><span class="tag ok">측정 완료</span></td></tr>
+            <tr><td><b>hpc-node-01</b></td><td class="muted">HPC · 서울</td><td class="r num">6</td><td class="r num">31 MB/s</td><td class="r num">12 MB/s</td><td class="r num"><b>43 MB/s</b></td><td><span class="pbar"><span style="width:22%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">22%</span> <span class="muted mono" style="font-size:11px">sdb</span></td><td class="muted" style="font-size:11.5px">3분 전 · 2.0초</td><td><span class="tag ok">측정 완료</span></td></tr>
+            <tr><td><b>backup-media-02</b></td><td class="muted">백업</td><td class="r num">12</td><td class="r num">2 MB/s</td><td class="r num">20 MB/s</td><td class="r num"><b>22 MB/s</b></td><td><span class="pbar"><span style="width:11%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">11%</span> <span class="muted mono" style="font-size:11px">sdc</span></td><td class="muted" style="font-size:11.5px">3분 전 · 2.0초</td><td><span class="tag ok">측정 완료</span></td></tr>
+            <tr><td><b>log-archive-01</b></td><td class="muted">로그</td><td class="r num">2</td><td class="r num">1 MB/s</td><td class="r num">20 MB/s</td><td class="r num"><b>21 MB/s</b></td><td><span class="pbar"><span style="width:9%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">9%</span> <span class="muted mono" style="font-size:11px">sda</span></td><td class="muted" style="font-size:11.5px">3분 전 · 2.0초</td><td><span class="tag ok">측정 완료</span></td></tr>
+            <tr><td><b>ai-train-02</b></td><td class="muted">AI</td><td class="r num">8</td><td class="r num">8 MB/s</td><td class="r num">1 MB/s</td><td class="r num"><b>9 MB/s</b></td><td><span class="pbar"><span style="width:4%;background:#22c55e"></span></span><span class="pct" style="color:#4ade80">4%</span> <span class="muted mono" style="font-size:11px">nvme0n1</span></td><td class="muted" style="font-size:11.5px">3분 전 · 2.0초</td><td><span class="tag ok">측정 완료</span></td></tr>
+            <tr><td><b>hpc-node-03</b></td><td class="muted">HPC · 서울</td><td class="r num muted">—</td><td class="r num muted">—</td><td class="r num muted">—</td><td class="r num muted">—</td><td class="muted">—</td><td class="muted" style="font-size:11.5px">3분 전</td><td><span class="tag warn">측정 불가</span><span class="sub" style="white-space:normal;max-width:260px">엣지 ‘fra-edge’ 회신에 I/O 값이 없음 — 엣지가 이 기능 이전 버전입니다(용량은 수집됨)</span></td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+
+      <!-- 알아 둘 것 -->
+      <div class="card" style="padding:16px 22px">
+        <div class="lbl">▸ 숫자를 비교할 때 알아 둘 것</div>
+        <ul class="note" style="margin:8px 0 0;padding-left:18px">
+          <li><b>용량의 뜻이 다릅니다.</b> 베어메탈은 df 의 used / (used + avail)(지정 마운트만, ext4 예약 블록 제외). SAN 은 Unisphere 가 보고한 <b>데이터 감축 후 실사용</b>(usable_used_tb)이며 호스트에 약속한 씬 구독량이 아닙니다.</li>
+          <li><b>전송 속도의 출처가 다릅니다.</b> 베어메탈은 서버에서 /proc/diskstats 를 2초 간격 두 번 읽은 <b>그 순간의 표본</b>(서버 전체 물리 디스크 합 — 마운트별이 아님). SAN 은 <b>SAN 스위치 포트 트래픽</b>을 어레이 시리얼로 묶은 1시간 평균(또는 피크)이고, 어레이 자체 성능 API 는 수집하지 않습니다.</li>
+          <li><b>시각이 다릅니다.</b> 베어메탈은 수집 주기(기본 10분, 최소 1분)마다, ‘지금 측정’ 을 누르면 즉시 다시 잽니다. SAN 포트 표본은 5분 주기, 용량 스냅샷은 60분 주기입니다. 표의 ‘측정 기준’ 열이 각 값의 시각을 말합니다.</li>
+          <li><b>못 읽은 값은 0 이 아닙니다.</b> 측정 불가 서버·시리얼 미대조 어레이는 ‘—’ 로 두고 합에서 빼며 몇 대가 빠졌는지 씁니다. 부분 합은 호박색입니다.</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2080}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
