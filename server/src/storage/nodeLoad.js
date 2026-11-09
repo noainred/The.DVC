@@ -26,7 +26,7 @@ export const NODE_LOAD_METRICS = Object.freeze([
   { key: 'lat', field: 'latencyMs', col: 'lat', unit: 'ms' },
   { key: 'busy', field: 'busyPct', col: 'busy', unit: '%' },
   { key: 'iops', field: 'iops', col: 'iops', unit: 'ops/s' },
-  // v2.949(SAN 스토리지 성능 ⓑ): 어레이 프런트엔드 단위(PowerMax FE 디렉터 · PowerStore 노드 · Unity SP)의 호스트 처리량(B/s · 어레이 보고)과
+  // v2.951(SAN 스토리지 성능 ⓑ): 어레이 프런트엔드 단위(PowerMax FE 디렉터 · PowerStore 노드 · Unity SP)의 호스트 처리량(B/s · 어레이 보고)과
   //   큐 깊이 사용률(% · PowerMax QueueDepthUtilization). busy = PercentBusy · cpu = 노드/SP CPU · iops · lat = 응답(ms)은 위 열을 그대로 쓴다.
   //   다른 장비(아이실론)는 이 두 열이 null 이다 — 0 이 아니다.
   { key: 'hbps', field: 'hostBytesPs', col: 'hbps', unit: 'B/s' },
@@ -35,7 +35,7 @@ export const NODE_LOAD_METRICS = Object.freeze([
 export const METRIC_BY_KEY = new Map(NODE_LOAD_METRICS.map((m) => [m.key, m]));
 /** 화면 묶음 — 한 번에 한 묶음만 그린다(bps 와 B/s 와 % 는 단위가 달라 한 차트에 겹치지 않는다 — 이중 축 금지). */
 export const NODE_LOAD_GROUPS = Object.freeze({ net: ['in', 'out'], disk: ['din', 'dout', 'busy', 'iops'], cpu: ['cpu'], proto: ['ops', 'lat'],
-  // v2.949: 어레이 프런트엔드 단위 묶음(SAN 스토리지 성능 상세 ② · 점검 어레이 측 5항목) — 단위가 섞이므로 화면은 지표 하나씩 그린다.
+  // v2.951: 어레이 프런트엔드 단위 묶음(SAN 스토리지 성능 상세 ② · 점검 어레이 측 5항목) — 단위가 섞이므로 화면은 지표 하나씩 그린다.
   fe: ['busy', 'cpu', 'iops', 'lat', 'hbps', 'queue'] });
 /** 클러스터 값 — 처리량·ops·IOPS 는 노드 합, CPU·busy·지연은 노드 평균. */
 export const CLUSTER_AGG = Object.freeze({ in: 'sum', out: 'sum', din: 'sum', dout: 'sum', cpu: 'avg', ops: 'sum', lat: 'avg', busy: 'avg', iops: 'sum', hbps: 'sum', queue: 'avg' });
@@ -284,7 +284,7 @@ export function sampleRowsOf(deviceId, sample) {
   return { ok: true, deviceId: id, ts: s.ts, nodes, clients, protos };
 }
 
-/* ── v2.949 어레이 프런트엔드 단위 카탈로그(순수) ─────────────────────── */
+/* ── v2.951 어레이 프런트엔드 단위 카탈로그(순수) ─────────────────────── */
 /** 단위 종류 — fa(PowerMax FE 디렉터) · node(PowerStore 노드) · sp(Unity SP) · port(FC 포트 — 부모 단위 아래). 모르면 ''. */
 export const NODE_UNIT_KINDS = Object.freeze(['fa', 'node', 'sp', 'port', '']);
 export const NODE_UNIT_NAME_MAX = 60;

@@ -1,5 +1,5 @@
 /**
- * sanswitch/arraySideLoad.js — 어레이 측 성능을 DB 에서 읽어 화면 · 점검 모양으로(v2.949 · 설계 ⓑ). 순수 조립은 arraySide.js, 여기는 DB · 주기만 안다.
+ * sanswitch/arraySideLoad.js — 어레이 측 성능을 DB 에서 읽어 화면 · 점검 모양으로(v2.951 · 설계 ⓑ). 순수 조립은 arraySide.js, 여기는 DB · 주기만 안다.
  *
  *  · 어레이(SAN 키)와 스토리지 장비의 짝은 **시리얼**(capacityIndexFor — 등록 스토리지 스냅샷의 serial · PowerStore appliance serviceTag)이다. 짝이 없거나
  *    SSH 수집 장비(성능 경로 없음) · 표본 토글 꺼짐이면 `eligible:false` 와 사유를 돌려주고 값을 지어내지 않는다.

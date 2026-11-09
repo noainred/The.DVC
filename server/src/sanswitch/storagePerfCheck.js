@@ -6,7 +6,7 @@
  * 화면이 '정상(일부 미확인)' 으로 쓴다. 임계값은 storageCheckSettings(벤더 문서 값만 · 못 찾은 것은 null = 판정 안 함).
  *
  * 항목 9(설계 ⑥): 스위치 측 — 디렉터 편중 · 팹 비대칭 · 회선 포화 · 수집 상태 / 어레이 측 — 디렉터 busy · 응답 시간 · 큐 깊이 · 노드/SP CPU · 보고 대조.
- * 어레이 측 값(arraySide)은 v2.949 부터 storage/collectors/arrayPerf.js 가 5분 표본으로 읽고 sanswitch/arraySideLoad.js 가 넣는다 — 값이 없으면(짝 없음 · SSH 수집 ·
+ * 어레이 측 값(arraySide)은 v2.951 부터 storage/collectors/arrayPerf.js 가 5분 표본으로 읽고 sanswitch/arraySideLoad.js 가 넣는다 — 값이 없으면(짝 없음 · SSH 수집 ·
  * 표본 없음 · 오래됨) **unknown** 에 그 사유(arraySideText)를 적는다. 거짓 정상을 만들지 않는다.
  */
 import { IMBALANCE_MIN_BPS, IMBALANCE_RATIO } from './portUsage.js';

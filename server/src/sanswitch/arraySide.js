@@ -1,5 +1,5 @@
 /**
- * sanswitch/arraySide.js — 어레이가 보고하는 프런트엔드 성능을 SAN 스토리지 성능 화면 · 점검에 맞춰 조립(순수 · v2.949 · 설계 ⓑ §4.2).
+ * sanswitch/arraySide.js — 어레이가 보고하는 프런트엔드 성능을 SAN 스토리지 성능 화면 · 점검에 맞춰 조립(순수 · v2.951 · 설계 ⓑ §4.2).
  *
  * 입력은 노드 부하 표(storage/db.js nodeLoadQuery · nodeUnitsOf — 수집은 storage/collectors/arrayPerf.js)이고, 여기서는
  *  ① 단위 카탈로그에서 이 어레이 것만 고르고(PowerMax 는 Unisphere 하나가 여러 어레이를 관리하면 `<시리얼>::FA-1D` 로 이름이 붙는다),

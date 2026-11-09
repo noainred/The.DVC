@@ -37,7 +37,7 @@ import { isCredReject } from './collectors/restCommon.js';
 import { ISI_NODE_LOAD_REST_KEYS, ISI_SUMMARY_PATHS, ISI_SAMPLE_CMDS, restSampleNodes, nodeIdMapOf, parseIsiSystemStats,
   parseClientRows, parseProtocolRows, parseDriveRows, buildNodeLoadSample } from './collectors/isilonNodeLoad.js';
 import { saveNodeLoadSample, saveNodeUnits } from './db.js';
-import { sampleArrayPerf, isFePerfType } from './collectors/arrayPerf.js'; // v2.949 어레이 프런트엔드(디렉터 · 노드 · SP) 표본
+import { sampleArrayPerf, isFePerfType } from './collectors/arrayPerf.js'; // v2.951 어레이 프런트엔드(디렉터 · 노드 · SP) 표본
 import { CLIENT_LIMIT_DEF, CLIENT_LIMIT_MAX, sanitizeNodeLoadSample } from './nodeLoad.js';
 import { isMockMode, isDemoId, demoNodeLoadSample } from '../mock/demo/storage.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // 시한 env 단일 관문(TIM2605-04 — [하한, 상한] 밖·NaN 은 기본값)
@@ -60,7 +60,7 @@ let _busy = false;
 let _last = null;
 
 /**
- * 표본 대상(순수): 활성 · 토글 켬(기본)인 아이실론, 그리고 v2.949 부터 REST 로 수집하는 어레이(PowerMax · VMAX · PowerStore · Unity — SSH 변형은 성능 경로가 없다).
+ * 표본 대상(순수): 활성 · 토글 켬(기본)인 아이실론, 그리고 v2.951 부터 REST 로 수집하는 어레이(PowerMax · VMAX · PowerStore · Unity — SSH 변형은 성능 경로가 없다).
  * 어레이 표본은 디렉터 · 노드 · SP 단위 성능(arrayPerf.js) — 같은 5분 주기 · 같은 시한 · 같은 인증 정지 레코드.
  */
 export function sampleTargets(devs) {
@@ -242,7 +242,7 @@ async function sampleOne(dev) {
     if (!useDemoSynth(dev)) clearAuthStop(dev.id);
     let saved;
     try { saved = await saveNodeLoadSample(dev.id, sample); } catch (e) { saved = { saved: false, reason: capErr(e) }; }
-    // v2.949: 어레이 단위 카탈로그(id ↔ 이름 · 종류 · 부모)는 표본과 함께 — 엣지는 push 본문의 표본 안(sample.units)에 실려 중앙이 같은 함수로 저장한다.
+    // v2.951: 어레이 단위 카탈로그(id ↔ 이름 · 종류 · 부모)는 표본과 함께 — 엣지는 push 본문의 표본 안(sample.units)에 실려 중앙이 같은 함수로 저장한다.
     if (Array.isArray(sample.units) && sample.units.length) { try { await saveNodeUnits(dev.id, sample.units); } catch (e) { console.warn(`[storage-nodeload] 단위 카탈로그 저장 실패(${dev.id}): ${capErr(e)}`); } }
     if (isEdge()) ringPush(dev.id, sample);
     return { ok: true, saved, nodes: sample.nodes.length, ms: Date.now() - t0 };

@@ -227,7 +227,7 @@ test('⑤ 폴러 — 주기 항목 · 대상 · 장비 점유 공유 · 미전�
   const n = IV.normalizeIntervals({ nodeLoadMs: 3 * H, pollMs: 48 * H, areasMs: '' });
   assert.deepEqual(n.values, { nodeLoadMs: H, pollMs: 24 * H }, '항목별 상한(60분) · 공통 상한(24시간) · 빈 값은 미설정');
   assert.ok(n.issues.some((s) => /노드 부하 표본 주기: 상한 60분/.test(s)));
-  // v2.949: REST 어레이(unity480 · collectMethod 기본 api)도 표본 대상이다(디렉터 · 노드 · SP 성능 — arrayPerf.js). SSH 변형은 제외.
+  // v2.951: REST 어레이(unity480 · collectMethod 기본 api)도 표본 대상이다(디렉터 · 노드 · SP 성능 — arrayPerf.js). SSH 변형은 제외.
   assert.deepEqual(NLP.sampleTargets([{ type: 'isilon', id: 'a' }, { type: 'isilon', id: 'b', nodeLoadEnabled: false }, { type: 'unity480', id: 'c' }, { type: 'isilon', id: 'd', enabled: false }, null,
     { type: 'unity480', id: 'e', collectMethod: 'ssh' }, { type: 'powermax', id: 'f', collectMethod: 'api', nodeLoadEnabled: false }]).map((d) => d.id), ['a', 'c']);
   // 장비 점유 — 표본 둘은 겹치지 않고, 두 번째는 IN_FLIGHT_BUSY
@@ -260,9 +260,9 @@ test('⑤ 폴러 — 주기 항목 · 대상 · 장비 점유 공유 · 미전�
   assert.equal(REG.listDevices().find((d) => d.id === a.id).nodeLoadEnabled, false);
   REG.saveDevice({ ...REG.getDeviceWithSecret(a.id), name: 'isi-t1b' });
   assert.equal(REG.listDevices().find((d) => d.id === a.id).nodeLoadEnabled, false, '다른 필드만 바꿔 저장해도 토글은 보존된다');
-  // v2.949: REST 어레이(Unity · PowerStore · PowerMax · VMAX)는 같은 토글을 갖는다(디렉터 · 노드 · SP 성능 표본 — 기본 켬). SSH 변형은 경로가 없어 필드를 만들지 않는다.
+  // v2.951: REST 어레이(Unity · PowerStore · PowerMax · VMAX)는 같은 토글을 갖는다(디렉터 · 노드 · SP 성능 표본 — 기본 켬). SSH 변형은 경로가 없어 필드를 만들지 않는다.
   const u = REG.saveDevice({ type: 'unity480', name: 'un-1', host: '10.9.9.2', username: 'u', password: 'p', nodeLoadEnabled: true });
-  assert.equal(REG.listDevices().find((d) => d.id === u.id).nodeLoadEnabled, true, 'REST 어레이는 토글을 갖는다(v2.949)');
+  assert.equal(REG.listDevices().find((d) => d.id === u.id).nodeLoadEnabled, true, 'REST 어레이는 토글을 갖는다(v2.951)');
   const us = REG.saveDevice({ type: 'unity480', name: 'un-2', host: '10.9.9.3', username: 'u', password: 'p', collectMethod: 'ssh', nodeLoadEnabled: true });
   assert.equal(REG.listDevices().find((d) => d.id === us.id).nodeLoadEnabled, undefined, 'SSH 변형은 필드를 만들지 않는다');
   // 서비스 점검·엣지 로그 표

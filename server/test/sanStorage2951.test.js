@@ -1,5 +1,5 @@
 /**
- * test/sanStorage2949.test.js — v2.949 'SAN 스토리지 성능' ⓑ 어레이 측 성능 + 후속(조닝 별칭 폴백 · ISL 단서).
+ * test/sanStorage2951.test.js — v2.951 'SAN 스토리지 성능' ⓑ 어레이 측 성능 + 후속(조닝 별칭 폴백 · ISL 단서).
  *  ① arrayPerf 파서(픽스처 — ⚠ 실장비 미확인 · 벤더 문서 모양): PowerMax keys/metrics(응답 시간은 둘 중 큰 값 · HostMBs×1e6) · PowerStore nodes(slot→Node A/B) ·
  *     ports(이름 줄임) · point(µs→ms · total 없으면 read+write · CPU 는 있을 때만) · Unity entries(시각 내림차순) · 누적 카운터 델타(리셋 · 단일 항목은 null) · buildFeSample(부모 먼저 · 64 상한 · 정제)
  *  ② nodeLoad 확장: hbps · queue 지표 · fe 묶음 · 100 초과 % 는 null · sanitizeNodeUnits(아는 필드 · 상한 · 종류) · unitIdOf 는 구분자 · 대소문자 무시
@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sanstorage2949-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sanstorage2951-'));
 process.env.CONFIG_DIR = tmp;
 process.env.SANSW_PERF_ROLLUP_BACKFILL = '0';
 Object.assign(process.env, { DATA_SOURCE: 'mock', AUTH_ENABLED: 'false', IPAM_WRITE_WORKER: '0' });
@@ -118,7 +118,7 @@ test('③ arraySide 순수 — 접두 · 짝짓기 · 최신 · 시계열 · 요
 test('④ db — 단위 카탈로그 · fe 표본 적재 · 조회', async (t) => {
   if (!sqlite) return t.skip('node:sqlite 없음');
   const db = await import('../src/storage/db.js');
-  const id = 'st-2949';
+  const id = 'st-2951';
   const sample = A.buildFeSample({ ts: NOW - 5 * MIN, type: 'powermax', source: 't', units: [{ name: 'FA-1D', kind: 'fa', busy: 41, iops: 3000, hbps: 2e8, queue: 9, lat: 0.8 }, { name: 'FA-2D', kind: 'fa', busy: 33, iops: 2000, hbps: 1e8 }] });
   const su = await db.saveNodeUnits(id, sample.units, NOW);
   assert.equal(su.saved, 2);
@@ -148,10 +148,10 @@ test('⑤ 중앙 수신 — 표본 안 units 정제 저장', async (t) => {
   if (!sqlite) return t.skip('node:sqlite 없음');
   const E = await import('../src/central/storageEdge.js');
   const db = await import('../src/storage/db.js');
-  const out = await E.saveEdgeNodeLoadSamples('edge-x', [{ deviceId: 'st-edge-2949', samples: [{ ts: NOW - MIN, nodes: [{ id: 11, busy: 20, hbps: 1e6 }],
+  const out = await E.saveEdgeNodeLoadSamples('edge-x', [{ deviceId: 'st-edge-2951', samples: [{ ts: NOW - MIN, nodes: [{ id: 11, busy: 20, hbps: 1e6 }],
     units: [{ id: 11, name: 'Node A', kind: 'node' }, { name: '', kind: 'node' }, { id: 12, name: 'Node A FC0', kind: 'bogus', parent: 11 }] }] }], { now: NOW });
   assert.equal(out.saved, 1); assert.equal(out.units, 2);
-  const units = await db.nodeUnitsOf('st-edge-2949');
+  const units = await db.nodeUnitsOf('st-edge-2951');
   assert.deepEqual(units.map((u) => [u.id, u.name, u.kind, u.parent]).sort((a, b) => a[0] - b[0]), [[11, 'Node A', 'node', null], [12, 'Node A FC0', '', 11]], '모르는 종류는 빈 값 · 이름 없는 것은 버린다');
 });
 

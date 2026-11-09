@@ -17,8 +17,8 @@
 import { isMockMode, demoHash, demoRand, demoIp } from './flags.js';
 // v2.730(검토 I-03): 영역 요약 모양은 실제 수집기(storage/areasCollector.js)와 같은 순수 모듈 하나 — import 없는 잎 모듈이라 순환이 생기지 않는다.
 import { triedAreaEntry, notTriedAreaEntry, disabledAreaEntry, areaTotals } from '../../storage/onefsAreaSummary.js';
-import { sanDemoArraySerial } from './sanswitch.js';                       // v2.949 — SAN 데모 어레이와 같은 시리얼
-import { buildFeSample, isFePerfType } from '../../storage/collectors/arrayPerf.js'; // v2.949 — 어레이 프런트엔드 표본 모양(수집기와 같은 조립)
+import { sanDemoArraySerial } from './sanswitch.js';                       // v2.951 — SAN 데모 어레이와 같은 시리얼
+import { buildFeSample, isFePerfType } from '../../storage/collectors/arrayPerf.js'; // v2.951 — 어레이 프런트엔드 표본 모양(수집기와 같은 조립)
 
 export { isMockMode };
 
@@ -122,7 +122,7 @@ export function demoStorageSnapshot(dev, t = Date.now(), now = t) {
   const h = demoHash(spec.k);
   const hour = Math.floor(t / HOUR);
   const jig = (seed, amp = 0.15) => 1 + (demoRand(`${spec.k}:${seed}:${hour}`) * 2 - 1) * amp;
-  // v2.949: 어레이(PowerMax · VMAX · PowerStore · Unity)는 같은 법인의 SAN 데모 어레이 시리얼을 쓴다 — SAN 스토리지 성능 화면이 용량 · 알람 · 어레이 측 성능을 붙일 수 있게.
+  // v2.951: 어레이(PowerMax · VMAX · PowerStore · Unity)는 같은 법인의 SAN 데모 어레이 시리얼을 쓴다 — SAN 스토리지 성능 화면이 용량 · 알람 · 어레이 측 성능을 붙일 수 있게.
   const feKind = { powermax: 'powermax', vmax: 'powermax', powerstore: 'powerstore', unity480: 'unity' }[spec.type] || null;
   const sanSerial = feKind ? sanDemoArraySerial(spec.vc, feKind) : null;
   const snap = { ...base, ok: true, version: VERSION[spec.type] || '', serial: sanSerial || `DEMO${String(h).slice(0, 8)}` };
@@ -420,7 +420,7 @@ async function backfillStorage(devices, now) {
  *  · 노드 2(두 번째) 가 쏠린다 — ops 약 2.6배 · 고정 클라이언트 여럿(재배치 보드가 후보를 내게). 노드 3 은 클라이언트 0(‘최근 작업한 클라이언트 없음’ 문구 확인용).
  *  · 모양은 실제 수집기(isilonNodeLoad.buildNodeLoadSample)와 같다 — 그대로 db.saveNodeLoadSample 에 넣는다. 실패 스냅샷(수집 실패 흉내)이면 null.
  */
-/** v2.949 — 어레이 FE 단위(디렉터 · 노드 · SP + Unity · PowerStore 포트) 5분 표본 합성 — 수집기와 같은 조립(buildFeSample). 첫 단위가 쏠린다(SAN 데모 편중과 같은 방향). */
+/** v2.951 — 어레이 FE 단위(디렉터 · 노드 · SP + Unity · PowerStore 포트) 5분 표본 합성 — 수집기와 같은 조립(buildFeSample). 첫 단위가 쏠린다(SAN 데모 편중과 같은 방향). */
 const FE_DEMO_UNITS = { powermax: ['FA-1D', 'FA-2D'], vmax: ['FA-1D', 'FA-2D'], powerstore: ['Node A', 'Node B'], unity480: ['SPA', 'SPB'] };
 export function demoArrayPerfSample(spec, t = Date.now()) {
   const type = spec?.type; const names = FE_DEMO_UNITS[type];
@@ -448,7 +448,7 @@ export function demoArrayPerfSample(spec, t = Date.now()) {
 }
 
 export function demoNodeLoadSample(dev, t = Date.now(), now = t) {
-  if (isFePerfType(dev?.type)) return demoArrayPerfSample(SPEC_BY_ID.get(String(dev?.id || '')) || fallbackSpec(dev || {}), t);   // v2.949 어레이 FE 단위
+  if (isFePerfType(dev?.type)) return demoArrayPerfSample(SPEC_BY_ID.get(String(dev?.id || '')) || fallbackSpec(dev || {}), t);   // v2.951 어레이 FE 단위
   const snap = demoStorageSnapshot(dev, t, now);
   if (!snap.ok || !Array.isArray(snap.nodes?.list) || !snap.nodes.list.length) return null;
   const spec = SPEC_BY_ID.get(String(dev?.id || '')) || fallbackSpec(dev);
@@ -497,7 +497,7 @@ async function backfillNodeLoad(devices, now) {
   let nDev = 0; let points = 0; let samples = 0; let sDev = 0; let feDev = 0; let feSamples = 0;
   for (const d of devices) {
     if (!isDemoId(d.id)) continue;
-    // v2.949 — 어레이 FE 단위 표본(REST 수집 장비만 — 폴러의 대상 규칙과 같다): 기록이 하나도 없을 때만 30일(최근 48시간 5분 · 그 앞 1시간).
+    // v2.951 — 어레이 FE 단위 표본(REST 수집 장비만 — 폴러의 대상 규칙과 같다): 기록이 하나도 없을 때만 30일(최근 48시간 5분 · 그 앞 1시간).
     if (isFePerfType(d.type) && (d.collectMethod || 'api') === 'api') {
       const o = await db.nodeLoadOldest(d.id);
       if (o.sampleTs == null && o.day == null) {

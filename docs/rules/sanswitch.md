@@ -23,7 +23,7 @@
 - (원래 2809행) '전체 수집' 은 무엇을 했는지 나눠 말한다
 - (v2.748) 포트 사용량·포트 배치 탭 — 기간은 경계로 자르고, 빈 칸·부분 합·미래 칸을 값으로 만들지 않는다
 - (v2.948) SAN 스토리지 성능 — 독립 도구 · 디렉터 해석은 이름 규칙만 · 지금 = 팹 A/B 다 모인 마지막 칸 · 점검 unknown 흡수 금지 · 임계값은 벤더 문서 값만
-- (v2.949) 어레이 측 성능 ⓑ — 노드 부하 5분 표본 재사용(hbps · queue · node_unit) · 시리얼 짝 · 이름 정규화 대조 · 부분 합 금지 · 조닝 별칭 폴백 · ISL 단서는 문구만
+- (v2.951) 어레이 측 성능 ⓑ — 노드 부하 5분 표본 재사용(hbps · queue · node_unit) · 시리얼 짝 · 이름 정규화 대조 · 부분 합 금지 · 조닝 별칭 폴백 · ISL 단서는 문구만
 - (v2.920) 호스트 ↔ SAN 조닝·트래픽 귀속 — 판정 코어는 `attribution.js` 하나, 확정분과 추정분을 합치지 않는다
 - (v2.935) 귀속 실측 우선(ESXi 경로 비율 → IPF → 포트 비율) · Flow Vision 플로우 모니터(san-flow) — 스위치 설정을 바꾸는 명령은 서버만 만든다
 
@@ -364,7 +364,7 @@
   · 게이트는 형제 sanswitch 와 같다 — 조회 `toolsPerm + fullScopeOnly`(SAN 은 vCenter 범위 밖) · 쓰기 `adminOnly + fullRwOnly` · CSV `csvPerm + adminOnly` · 비-admin 은 주소 가림. 도구 키는 **세그먼트 = 키**(`san-storage`) · 카탈로그 adminOnly 는 san-switch 와 같이 true.
   · 기존 SAN 스위치 화면의 '스토리지 사용량 분석' 모달 · 트래픽 카드 · 메뉴 항목은 **보존**(사용자 결정)하고 새 화면 링크만 더했다 — 둘 다 같은 서버 집계를 읽는다(화면이 둘, 판정 코어는 하나).
   · 남긴 것: 어레이 측 수집(PR ⓑ) · 구간 슬라이더/날짜 이동 · 점검 PDF/이력 · 별칭 전달(실 Unity 캡처 뒤) — `docs/design/san-storage-perf/README.md` §8.
-- **v2.949 — 어레이 측 성능 ⓑ + 후속(C · D · H · I · L · B — 설계 README §8.2 · 사용자 '남긴것들 만들어줘' 2026-11-09)**
+- **v2.951 — 어레이 측 성능 ⓑ + 후속(C · D · H · I · L · B — 설계 README §8.2 · 사용자 '남긴것들 만들어줘' 2026-11-09)**
   · **새 DB 금지 — 노드 부하 5분 표본 경로 재사용**: 지표 열은 `storage/nodeLoad.js NODE_LOAD_METRICS` 가 유일한 원천이고 `storage/db.js` 의 원시 INSERT · 일/시간 upsert 문장은 거기서 **생성**한다(열을
     더할 때 세 문장을 손으로 맞추지 않는다 · 없는 열은 `ensureColumns` 로). 단위 이름은 `node_unit`(id = `unitIdOf(name)` — 구분자 · 대소문자 무시 FNV) — 엣지 · 중앙 · 데모가 같은 함수.
   · 수집(`storage/collectors/arrayPerf.js`)은 **순수 파서 + probe** — 응답 필드는 문서 추정(실장비 미확인)이라 못 읽은 값은 null 이고 `probe.fields · errors · counterNote` 가 말한다. 조회 전용 POST 만 ·
@@ -374,5 +374,5 @@
   · 점검(`storagePerfCheck.checkArray`)의 어레이 측 unknown 문구는 **사유**다 — `arraySideText`(짝 없음 · SSH 수집 · 토글 꺼짐 · 표본 없음 · 오래됨) 또는 '값 없음 — 이 지표가 없음'. 거짓 정상 금지는 그대로.
   · (C) 조닝 별칭 폴백은 `directorResolver(map, aliasFor)` — port_meta WWN → 장비별 최신 스냅샷 `zoning.zones[].aliasOf`(`attribution.buildFabrics`). 별칭은 **셋째 조각을 못 읽는 포트**에만 뜻이 있다(어레이 키는
     여전히 심볼릭 이름 `storageKey`) · (H) ISL 단서(`islClue.js`)는 E-포트 24시간 피크 포화도를 **문구에만** 붙인다(판정 불변 · 속도 모르면 null) · (I) 알람 수는 스냅샷 `alerts.unresolved`(못 읽으면 null).
-  · 시험 `test/sanStorage2949.test.js`(파서 픽스처 · nodeLoad 확장 · arraySide 순수 · db · 중앙 수신 units · 점검 사유 · 실제 라우트 + 별칭 폴백 + ISL) · 웹 `sanStorage2949.test.js`(문구 · 선 차트 · 소스 규약).
+  · 시험 `test/sanStorage2951.test.js`(파서 픽스처 · nodeLoad 확장 · arraySide 순수 · db · 중앙 수신 units · 점검 사유 · 실제 라우트 + 별칭 폴백 + ISL) · 웹 `sanStorage2951.test.js`(문구 · 선 차트 · 소스 규약).
   · 남긴 것: 어레이 측 **실장비 캡처 확인**(PowerStore cpu_utilization · Unity 이력 수집 켜짐) · PowerMax 포트 단위(FEPort 경로 미사용) · 장비 CSV 가져오기의 `nodeLoadEnabled` 칸(아이실론 때부터 없음).

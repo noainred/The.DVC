@@ -22,7 +22,7 @@ test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
 let sqlite = true; try { await import('node:sqlite'); } catch { sqlite = false; }
 const HOUR = 3_600_000; const DAY = 86_400_000;
 const { DAY_OFFSET_MIN } = await import('../src/util/dayKey.js');
-// v2.949(시험 결함 고침): 기준 시각은 **포탈 하루(DAY_OFFSET_MIN) 안쪽** — 어제 12:30(포탈 시각). 예전 '정시 − 30분(UTC)' 은 UTC 14~16시(KST 23~01시)에
+// v2.951(시험 결함 고침): 기준 시각은 **포탈 하루(DAY_OFFSET_MIN) 안쪽** — 어제 12:30(포탈 시각). 예전 '정시 − 30분(UTC)' 은 UTC 14~16시(KST 23~01시)에
 //   +2h 표본이 다음 날로 넘어가 NEW1 의 완결된 날 수가 10 → 9 가 됐다(main 에서도 같은 시각에 실패 · 제품은 맞다). bmPower8b 234be5df 와 같은 부류.
 const OFF_MS = DAY_OFFSET_MIN * 60_000;
 const NOW = Math.floor((Date.now() + OFF_MS) / DAY) * DAY - OFF_MS - 12 * HOUR + 30 * 60_000;
