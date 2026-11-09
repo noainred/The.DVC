@@ -36,7 +36,8 @@ import { get as isiGet, getAny as isiGetAny } from './collectors/isilon.js';
 import { isCredReject } from './collectors/restCommon.js';
 import { ISI_NODE_LOAD_REST_KEYS, ISI_SUMMARY_PATHS, ISI_SAMPLE_CMDS, restSampleNodes, nodeIdMapOf, parseIsiSystemStats,
   parseClientRows, parseProtocolRows, parseDriveRows, buildNodeLoadSample } from './collectors/isilonNodeLoad.js';
-import { saveNodeLoadSample } from './db.js';
+import { saveNodeLoadSample, saveNodeUnits } from './db.js';
+import { sampleArrayPerf, isFePerfType } from './collectors/arrayPerf.js'; // v2.952 어레이 프런트엔드(디렉터 · 노드 · SP) 표본
 import { CLIENT_LIMIT_DEF, CLIENT_LIMIT_MAX, sanitizeNodeLoadSample } from './nodeLoad.js';
 import { isMockMode, isDemoId, demoNodeLoadSample } from '../mock/demo/storage.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // 시한 env 단일 관문(TIM2605-04 — [하한, 상한] 밖·NaN 은 기본값)
@@ -58,9 +59,13 @@ let _timer = null;
 let _busy = false;
 let _last = null;
 
-/** 표본 대상(순수): 아이실론 · 활성 · 토글 켬(기본). */
+/**
+ * 표본 대상(순수): 활성 · 토글 켬(기본)인 아이실론, 그리고 v2.952 부터 REST 로 수집하는 어레이(PowerMax · VMAX · PowerStore · Unity — SSH 변형은 성능 경로가 없다).
+ * 어레이 표본은 디렉터 · 노드 · SP 단위 성능(arrayPerf.js) — 같은 5분 주기 · 같은 시한 · 같은 인증 정지 레코드.
+ */
 export function sampleTargets(devs) {
-  return (devs || []).filter((d) => d && d.type === 'isilon' && d.enabled !== false && d.nodeLoadEnabled !== false);
+  return (devs || []).filter((d) => d && d.enabled !== false && d.nodeLoadEnabled !== false
+    && (d.type === 'isilon' || (isFePerfType(d.type) && (d.collectMethod || 'api') === 'api')));
 }
 
 // ── REST ─────────────────────────────────────────────────────────────────────
@@ -228,7 +233,8 @@ async function sampleOne(dev) {
     else {
       try {
         sample = await withDeadline(SAMPLE_TIMEOUT_MS,
-          (signal) => (full.collectMethod === 'api' ? sampleRest(full, signal, CLIENT_LIMIT_DEF) : sampleSsh(full, signal, CLIENT_LIMIT_DEF)), '표본 시한');
+          (signal) => (isFePerfType(full.type) ? sampleArrayPerf(full, { signal, now: t0 })
+            : full.collectMethod === 'api' ? sampleRest(full, signal, CLIENT_LIMIT_DEF) : sampleSsh(full, signal, CLIENT_LIMIT_DEF)), '표본 시한');
       } catch (e) { error = capErr(e); auth = isCredReject(e) || isSshAuthError(e); }
     }
     if (auth) markAuthStopped(dev.id, full, error || '인증 실패'); // 수집 주기와 같은 레코드 — 재시도하지 않는다(계정 잠금)
@@ -236,6 +242,8 @@ async function sampleOne(dev) {
     if (!useDemoSynth(dev)) clearAuthStop(dev.id);
     let saved;
     try { saved = await saveNodeLoadSample(dev.id, sample); } catch (e) { saved = { saved: false, reason: capErr(e) }; }
+    // v2.952: 어레이 단위 카탈로그(id ↔ 이름 · 종류 · 부모)는 표본과 함께 — 엣지는 push 본문의 표본 안(sample.units)에 실려 중앙이 같은 함수로 저장한다.
+    if (Array.isArray(sample.units) && sample.units.length) { try { await saveNodeUnits(dev.id, sample.units); } catch (e) { console.warn(`[storage-nodeload] 단위 카탈로그 저장 실패(${dev.id}): ${capErr(e)}`); } }
     if (isEdge()) ringPush(dev.id, sample);
     return { ok: true, saved, nodes: sample.nodes.length, ms: Date.now() - t0 };
   });

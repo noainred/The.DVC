@@ -50,6 +50,16 @@ function makeArray(vcId, i) {
   return { kind, serial, label: `PSTORE_${serial.slice(-4)}`, ctl: ['NodeA', 'NodeB'], symb: (c, p) => `PowerStore::${serial}::${c} FC${p}::FC::3.6.0`, prefix: ['58', 'cc', 'f0', '9' + (h % 8), hx(h >>> 4)] };
 }
 
+/**
+ * v2.952 — 그 vCenter(법인)의 데모 어레이 중 종류(powermax · unity · powerstore)가 맞는 첫 번째의 시리얼. 스토리지 데모 스냅샷이 같은 시리얼을 쓰면
+ * SAN 스토리지 성능 화면이 등록 스토리지(용량 · 알람 · 어레이 측 성능)와 짝을 짓는다. 그 법인에 그 종류가 없으면 null(스토리지 쪽은 제 시리얼을 쓴다).
+ */
+export function sanDemoArraySerial(vcId, kind) {
+  const n = 2 + (demoHash(`${vcId}|arrays`) % 2);
+  for (let i = 0; i < n; i++) { const a = makeArray(String(vcId || ''), i); if (a.kind === kind) return a.serial; }
+  return null;
+}
+
 /** 호스트 HBA 두 개(팹 A/B). 메인 스냅샷의 FC HBA WWN 이 형식에 맞으면 그것을, 아니면 합성(Emulex OUI). */
 function hostHbas(h, used) {
   const fc = (h.hbas || []).filter((x) => /fibre/i.test(String(x.type || '')));

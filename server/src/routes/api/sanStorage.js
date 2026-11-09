@@ -9,7 +9,8 @@
  *   비-admin 응답은 스위치 주소를 가린다(maskDeviceAddress · addressHidden) — 등록부 이름 폴백도 가린 행으로.
  * 무거운 집계는 perfDb.heavyQuery(기억 TTL = 수집 주기 · lane multi · 취소 전달)만 — memoJson 을 겹치지 않는다. 조회 두 번(최근 1시간 60초 칸 ·
  *   최근 7일 1시간 칸 + 포트별)이고 '지금 합계' KPI 는 트래픽 카드와 **같은 함수**(trafficTotal.sumArrayTraffic)로 낸다.
- * 어레이 측 성능(busy% · IOPS · 응답 시간 · CPU)은 다음 판(수집기) — 이 판의 점검은 그 항목을 unknown('어레이 측 성능 미수집')으로 둔다(거짓 정상 금지).
+ * 어레이 측 성능(디렉터 busy% · IOPS · 응답 시간 · 노드/SP CPU · 큐 · 호스트 처리량)은 v2.952 부터 스토리지 수집기의 5분 표본(storage/collectors/arrayPerf.js)에서
+ *   시리얼로 짝 지어 읽는다(sanswitch/arraySideLoad.js — 장비 호출 0). 값이 없으면 점검은 unknown 에 사유를 적는다(거짓 정상 금지).
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from '../admin/shared.js';
@@ -22,6 +23,12 @@ import { loadPerfSettings } from '../../sanswitch/perfSettings.js';
 import { sumArrayTraffic } from '../../sanswitch/trafficTotal.js';
 import { buildStorageRows, rowTotals, STATE_TEXT, MIN_PREV_HOURS } from '../../sanswitch/storageList.js';
 import { checkArray, summarizeChecks, CHECK_ITEMS, IMBALANCE_BAD_RATIO, FABRIC_MIN_BPS } from '../../sanswitch/storagePerfCheck.js';
+import { loadArraySide, checkInputFor } from '../../sanswitch/arraySideLoad.js';   // v2.952 어레이 측 성능(디렉터 · 노드 · SP)
+import { localSnapshots as sanLocalSnaps } from '../../sanswitch/store.js';          // v2.952(C) 조닝 별칭 폴백 — 장비별 최신 스냅샷의 zone 멤버
+import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
+import { buildFabrics } from '../../sanswitch/attribution.js';
+import { normWwn } from '../../sanswitch/zoning.js';
+import { islCluesFor, islClueText } from '../../sanswitch/islClue.js';              // v2.952(H) 팹 비대칭 단서 — E-포트 피크 포화도
 import { loadCheckSettings, saveCheckSettings, publicCheckSettings } from '../../sanswitch/storageCheckSettings.js';
 import { loadDirectorMap, saveDirectorMap, directorMapKey, MAP_LIMITS } from '../../sanswitch/directorMap.js';
 import { directorOf, applyDirectorOverride, VENDOR_LABEL, UNPARSED_GROUP, groupLabel } from '../../sanswitch/directorOf.js';
@@ -80,9 +87,34 @@ function kindResolver(capIdx, map) {
     return { kind: k, basis: k === 'unknown' ? 'none' : (String(key).includes('::') ? 'name' : 'flat') };
   };
 }
-/** 디렉터 — 관리자 매핑 > 이름 규칙(> 조닝 별칭 — 이 판은 별칭을 넘기지 않는다 · README §8). */
-function directorResolver(map) {
-  return (port, key) => applyDirectorOverride(directorOf(port.name), map.directors[directorMapKey(key, port.deviceId, port.port)] || null);
+/** 디렉터 — 관리자 매핑 > 이름 규칙 > 조닝 별칭(v2.952 C — 심볼릭 이름이 없는 Unity SPA/SPB 포트는 zone 별칭 `Unity_SPA0_p8` 로). */
+function directorResolver(map, aliasFor = null) {
+  return (port, key) => applyDirectorOverride(directorOf(port.name, { alias: aliasFor ? aliasFor(port.deviceId, port.port) : '' }), map.directors[directorMapKey(key, port.deviceId, port.port)] || null);
+}
+/**
+ * v2.952(C): 포트 → 조닝 별칭. port_meta 의 연결 WWN 을 장비별 최신 스냅샷 zone 멤버 별칭(attribution.buildFabrics aliasOf)에서 찾는다.
+ * 스냅샷 · DB 가 없으면 빈 조회(별칭 없음 = 폴백 없음 — 판정이 바뀌지 않는다). 요청마다 한 번 만든다.
+ */
+async function aliasLookupFor(ctx) {
+  const snapOf = new Map();
+  try {
+    for (const s of [...sanLocalSnaps(), ...edgeSanSwitchSnapshots()]) {
+      if (!s?.deviceId || !ctx.deviceMeta.has(String(s.deviceId))) continue;
+      const cur = snapOf.get(s.deviceId);
+      if (!cur || (s.collectedAt || 0) > (cur.collectedAt || 0)) snapOf.set(s.deviceId, s);
+    }
+  } catch { /* 스냅샷 저장소 불가 — 별칭 없음 */ }
+  const aliasOf = new Map();
+  try {
+    for (const f of buildFabrics([...snapOf.values()].map((s) => { const m = ctx.deviceMeta.get(String(s.deviceId)) || {}; return { ...s, name: m.name || s.name, datacenterId: m.datacenterId || '' }; }))) {
+      for (const [w, a] of f.aliasOf || []) { const k = normWwn(w); if (k && a && !aliasOf.has(k)) aliasOf.set(k, String(a).slice(0, 120)); }
+    }
+  } catch { /* 조닝 해석 실패 — 별칭 없음 */ }
+  let wwnOf = new Map();
+  if (aliasOf.size) { try { wwnOf = new Map((await metaFor(ctx.ids)).map((r) => [`${r.d}|${Number(r.p)}`, normWwn(r.wwn || '')])); } catch { wwnOf = new Map(); } }
+  const fn = (deviceId, port) => { const w = wwnOf.get(`${deviceId}|${Number(port)}`); return w ? (aliasOf.get(w) || '') : ''; };
+  fn.size = aliasOf.size;
+  return fn;
 }
 
 async function loadAggs(ctx, signal) {
@@ -104,7 +136,8 @@ async function buildList(req, res) {
   const map = loadDirectorMap();
   const capIdx = capacityIndexFor({ dcSet: ctx.dcSet, split: true, admin: ctx.admin });
   const kindOf = kindResolver(capIdx, map);
-  const directorFor = directorResolver(map);
+  const aliasFor = await aliasLookupFor(ctx);
+  const directorFor = directorResolver(map, aliasFor);
   const carryMs = numOrNull(agg1h.carryMs) ?? (Number(st.intervalMs) || 300_000) * 2;
   const now = Date.now();
   const { rows, counts } = buildStorageRows({
@@ -119,7 +152,7 @@ async function buildList(req, res) {
   let lastSampleAt = null;
   for (const v of lastTs.values()) if (Number.isFinite(Number(v)) && (lastSampleAt == null || Number(v) > lastSampleAt)) lastSampleAt = Number(v);
   const edgeRaw = ctx.devices.filter((d) => String(d.agent || '').trim());
-  return { ctx, st, agg1h, agg7d, lastTs, map, rows, counts, total, carryMs, now, lastSampleAt,
+  return { ctx, st, agg1h, agg7d, lastTs, map, rows, counts, total, carryMs, now, lastSampleAt, aliasCount: aliasFor.size,
     edgeSwitches: edgeRaw.length, edgeMissing: edgeRaw.filter((d) => !lastTs.get(String(d.id))).length };
 }
 
@@ -181,7 +214,7 @@ export function registerSanStorage(api) {
     const map = loadDirectorMap();
     const capIdx = capacityIndexFor({ dcSet: ctx.dcSet, split: true, admin: ctx.admin });
     const kindOf = kindResolver(capIdx, map);
-    const directorFor = directorResolver(map);
+    const directorFor = directorResolver(map, await aliasLookupFor(ctx));
     const cands = (agg.series || []).filter((s) => s.key === key);
     const s = cands.length <= 1 ? cands[0] : (cands.find((x) => ctx.dcs.includes(x.group ?? '')) || cands[0]);
     if (!s) return res.status(404).json({ ok: false, reason: '이 범위 · 기간에서 그 스토리지의 표본을 찾지 못했습니다.', ...(isMockMode() ? { demo: true } : {}) });
@@ -201,6 +234,18 @@ export function registerSanStorage(api) {
     const kind = kindOf(key, dcId);
     const vendor = ports[0] ? directorOf(ports[0].name).vendor : 'other';
     const capacity = capIdx.lookup(arraySerialOf(key), dcId);
+    // v2.952 — 어레이가 보고하는 디렉터 · 노드 · SP 성능(시리얼로 짝 지은 스토리지 장비의 5분 표본). 스위치 '지금' = 합계 선의 마지막 값(없으면 대조 없음).
+    const nowSwitchBps = (() => { const a = s.sum || []; for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; })();
+    const winFrom = agg.since ?? (agg.buckets?.[0] ?? null); const winTo = agg.until ?? (agg.buckets?.length ? agg.buckets[agg.buckets.length - 1] + (agg.bucketMs || 0) : null);
+    // v2.952(H) — 팹 비대칭 단서: 이 어레이가 물린 스위치의 ISL(E-포트) 24시간 피크 포화도(판정 아님 · 문구).
+    let isl = [];
+    try { const m = await islCluesFor((s.deviceIds || []).map((id) => ({ id: String(id), name: (ctx.deviceMeta.get(String(id)) || { name: String(id) }).name })), { signal: perfAbortSignal(res) }); isl = [...m.values()]; }
+    catch (e) { if (abandoned(e)) return; isl = []; }
+    let arraySide = null;
+    try {
+      arraySide = await loadArraySide(capacity, { serial: arraySerialOf(key), from: winFrom ?? Date.now() - hours * 3_600_000, to: winTo ?? Date.now(), now: Date.now(),
+        groups: directors, ports, switchBps: nowSwitchBps });
+    } catch (e) { arraySide = { eligible: false, reason: 'error', text: `어레이 측 값을 읽지 못했습니다: ${String(e?.message || e).slice(0, 120)}` }; }
     res.json({
       ok: true, unit: 'bytesPerSec', key, name: capacity?.name || key, serial: arraySerialOf(key), vendor, vendorLabel: VENDOR_LABEL[vendor] || VENDOR_LABEL.other,
       kind: kind.kind, kindBasis: kind.basis, datacenterId: dcId, datacenterName: ctx.dcNameOf(dcId),
@@ -208,7 +253,7 @@ export function registerSanStorage(api) {
       hours, from, to, rangeIssue: issue || null, buckets: agg.buckets, bucketMs: agg.bucketMs, since: agg.since ?? null, until: agg.until ?? null,
       sum: s.sum, peak: s.peak, avgTotal: s.avgTotal, maxTotal: s.maxTotal, peakAvg: s.peakAvg, peakTotal: s.peakTotal,
       partial: s.partial || [], partialBuckets: s.partialBuckets || 0, carriedCells: s.carriedCells || 0,
-      directors, fabrics, ports, capacity, unparsedGroup: UNPARSED_GROUP,
+      directors, fabrics, ports, capacity, unparsedGroup: UNPARSED_GROUP, arraySide, isl,
       intervalMs: st.intervalMs, carryMs: agg.carryMs ?? null, enabled: demoOn(st.enabled), unavailable: !!agg.unavailable, offsetMin: DAY_OFFSET_MIN,
       computedAt: agg.computedAt ?? null, cacheTtlMs: perfQueryTtlMs(), source: agg.source ?? null,
       ...(isMockMode() ? { demo: true } : {}), ...(ctx.admin ? {} : { addressHidden: true }),
@@ -220,7 +265,25 @@ export function registerSanStorage(api) {
     const b = await buildList(req, res);
     if (!b) return;
     const settings = loadCheckSettings();
-    const results = b.rows.map((r) => ({ ...checkArray(r, settings), name: r.name, vendor: r.vendor, vendorLabel: r.vendorLabel, datacenterName: r.datacenterName, state: r.state }));
+    // v2.952(H) — 어레이가 물린 스위치의 ISL 피크 포화도(24시간)를 팹 비대칭 문구에 붙인다(판정은 바꾸지 않는다). 조회 실패는 문구에 '조회 실패'.
+    let islMap = new Map();
+    try {
+      const sws = new Map(); for (const r of b.rows) for (const f of r.fabrics || []) if (f.deviceId) sws.set(String(f.deviceId), { id: String(f.deviceId), name: f.name || String(f.deviceId) });
+      islMap = await islCluesFor([...sws.values()], { signal: perfAbortSignal(res) });
+    } catch (e) { if (abandoned(e)) return; islMap = new Map(); }
+    // v2.952 — 어레이 측 입력(최근 표본 · 장비 호출 0). 짝이 없거나 표본이 없으면 그 사유가 unknown 문구가 된다.
+    const results = [];
+    for (const r of b.rows) {
+      let as = { input: {}, text: '', reason: 'no-device', lastSampleTs: null, eligible: false };
+      try { as = await checkInputFor(r.capacity, { serial: r.serial, now: b.now, switchBps: r.now?.bps ?? null }); }
+      catch (e) { as = { input: {}, text: `어레이 측 값을 읽지 못했습니다: ${String(e?.message || e).slice(0, 100)}`, reason: 'error', lastSampleTs: null, eligible: false }; }
+      const res1 = checkArray(r, settings, { arraySide: Object.keys(as.input).length ? as.input : null, arraySideText: as.text });
+      const clue = islClueText(r.fabrics || [], islMap, { warnPct: settings?.values?.portSatWarnPct ?? null });
+      if (clue && res1.items.fabric && res1.items.fabric.status !== 'na') res1.items.fabric = { ...res1.items.fabric, text: `${res1.items.fabric.text} · ${clue}`, isl: (r.fabrics || []).map((f) => islMap.get(String(f.deviceId)) || null) };
+      results.push({ ...res1,
+        name: r.name, vendor: r.vendor, vendorLabel: r.vendorLabel, datacenterName: r.datacenterName, state: r.state,
+        arraySide: { eligible: as.eligible, reason: as.reason, lastSampleTs: as.lastSampleTs, keys: Object.keys(as.input) } });
+    }
     res.json({ ok: true, ...commonMeta(b), items: CHECK_ITEMS, results, summary: summarizeChecks(results), settings: publicCheckSettings(), judgedAt: b.now });
   });
 

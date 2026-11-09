@@ -3,7 +3,7 @@
 `server/src` 가 실제로 읽는 환경변수 **732개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-08)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-09)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -426,12 +426,12 @@
 | `STORAGE_POLL_MS` | `60 * 60_000` |  | storage/intervals.js |
 | `STORAGE_POWERSTORE_LIST_LIMIT` | `2000` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_METRICS_INTERVAL` | `'OneDay'` |  | storage/collectors/powerstore.js |
-| `STORAGE_POWERSTORE_PORT` | `443` |  | storage/collectors/powerstore.js |
+| `STORAGE_POWERSTORE_PORT` | `443` |  | storage/collectors/arrayPerf.js, storage/collectors/powerstore.js |
 | `STORAGE_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | storage/push.js |
 | `STORAGE_PUSH_MS` | `5 * 60_000` |  | storage/intervals.js |
 | `STORAGE_TLS_VERIFY` |  |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
-| `STORAGE_UNISPHERE_PORT` | `8443` |  | storage/collectors/powermax.js |
-| `STORAGE_UNITY_PORT` | `443` |  | storage/collectors/unity.js |
+| `STORAGE_UNISPHERE_PORT` | `8443` |  | storage/collectors/arrayPerf.js, storage/collectors/powermax.js |
+| `STORAGE_UNITY_PORT` | `443` |  | storage/collectors/arrayPerf.js, storage/collectors/unity.js |
 | `STORAGE_VPLEX_PORT` | `443` |  | storage/collectors/vplex.js |
 | `STORAGE_XLSX_TIMEOUT_MS` | `300000` |  | storage/usageXlsx.js |
 | `STORAGE_XLSX_WORKER` | `'1'` |  | storage/usageXlsx.js |
