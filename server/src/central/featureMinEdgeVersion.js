@@ -22,6 +22,8 @@ export const STAGE7B_TITLE_RE = /리눅스 통합 성능 모니터링 7b단계/;
 export const STAGE8A_TITLE_RE = /리눅스 통합 성능 모니터링 8a단계/;
 /** 8b단계(새 ##TOP 구획 · 봉투 idle · 엣지 대행 /bm-usage/top · /bm-usage/top/band) 표지. */
 export const STAGE8B_TITLE_RE = /리눅스 통합 성능 모니터링 8b단계/;
+/** 다음 점검 ②③(전력 알림 규칙 4종 · 봉투 powerCapVer/powerCaps — 엣지 서버별 PowerCap) 표지 — 릴리스 노트 제목에 이 문구를 그대로 넣는다. */
+export const POWER_ALERT_TITLE_RE = /베어메탈 사용률 — 전력 알림 규칙 · 엣지 PowerCap/;
 
 const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 const _memo = new Map();   // re.source → 버전
@@ -56,4 +58,6 @@ export const stage7bMinEdgeVersion = (o) => featureMinEdgeVersion(STAGE7B_TITLE_
 export const stage8aMinEdgeVersion = (o) => featureMinEdgeVersion(STAGE8A_TITLE_RE, o);
 /** 8b단계(프로세스 Top-N 을 수집 · 대행하고 저활용 결과를 싣는 엣지) 최소 엣지 버전 — 숫자를 박지 않는다(릴리스 노트의 8b단계 첫 번호 · 없으면 지금 버전). */
 export const stage8bMinEdgeVersion = (o) => featureMinEdgeVersion(STAGE8B_TITLE_RE, o);
+/** 다음 점검 ③(서버별 PowerCap 을 봉투에 싣는 엣지) 최소 엣지 버전 — 숫자를 박지 않는다(릴리스 노트의 그 표지 첫 번호 · 없으면 지금 버전). ‘엣지 버전 낮음’ 안내(old-version)에만 쓴다. */
+export const powerCapMinEdgeVersion = (o) => featureMinEdgeVersion(POWER_ALERT_TITLE_RE, o);
 export function _resetFeatureMinEdgeVersionForTest(titleRe = null) { if (titleRe) _memo.delete(titleRe.source); else _memo.clear(); }

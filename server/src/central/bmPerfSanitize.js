@@ -9,6 +9,7 @@
 import { sanitizeCollectHealth } from './bmCollectHealthSanitize.js'; // 6단계 수집 건강
 import { sanitizeMaintEnvelope, sanitizeCapacityEnvelope } from './bmMaintCapSanitize.js'; // 8a단계
 import { sanitizeIdleEnvelope } from './bmIdleSanitize.js'; // 8b단계
+import { sanitizePowerCaps } from './bmPowerCapSanitize.js';   // 다음 점검 ③ 서버별 PowerCap
 import { strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { PERF_COL_NAMES } from '../bmusage/perfCols.js';
@@ -268,6 +269,9 @@ export function sanitizePerfFields(snap, rcv = Date.now()) {
       ...(Number.isInteger(snap?.topVer) && snap.topVer > 0 && snap.topVer < 100 ? { topVer: snap.topVer } : {}),
       ...(Number.isInteger(snap?.idleVer) && snap.idleVer > 0 && snap.idleVer < 100 ? { idleVer: snap.idleVer } : {}),
       ...(snap?.idle && typeof snap.idle === 'object' ? { idle: sanitizeIdleEnvelope(snap.idle, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }) } : {}),
+      // 다음 점검 ③: 서버별 PowerCap(central/bmPowerCapSanitize.js — 아는 필드 · 수치 · 상한 · 키는 같은 봉투의 대상 목록 안만 · 시각 clamp + 원본 atRaw). 표지는 값이 없어도 실린다(값 없음 ≠ 구버전).
+      ...(Number.isInteger(snap?.powerCapVer) && snap.powerCapVer > 0 && snap.powerCapVer < 100 ? { powerCapVer: snap.powerCapVer } : {}),
+      ...(Array.isArray(snap?.powerCaps) ? (() => { const r = sanitizePowerCaps(snap.powerCaps, { targetKeys: new Set((Array.isArray(snap?.targets) ? snap.targets : []).map((x) => (x && typeof x.key === 'string' ? x.key : '')).filter(Boolean)), now: rcv }); return { powerCaps: r.list, ...(r.dropped ? { powerCapsDropped: r.dropped } : {}) }; })() : {}),
     },
     dropped: arr.length - perf.length,
   };

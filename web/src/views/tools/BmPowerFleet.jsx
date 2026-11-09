@@ -10,7 +10,10 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { unitText } from '../unitText.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
-import { powerCards, kwText, kwhText, wText, cText, marginText, capText, fanText, trendPath, hourText, unmeasuredText, POWER_HONEST, UNMEASURED_TEXT } from './bmPowerText.js';
+import { powerCards, kwText, kwhText, wText, cText, marginText, capText, capTitle, fanText, trendPath, hourText, unmeasuredText, POWER_HONEST, UNMEASURED_TEXT, judgeTitle, hasNoJudge, noJudgeText, noJudgeLabel } from './bmPowerText.js';
+
+/** 알림 판정 노드가 없으면 칸 아래 한 줄(이유는 마우스 설명 — 반증 n2 F4 · 엣지 봉투 없음은 ‘모름’ — 재확인 N4). */
+const NoJudge = ({ x }) => (hasNoJudge(x) ? <div className="bmo-sub" title={judgeTitle(x)} style={{ color: 'var(--amber)' }}>{noJudgeLabel(x)}</div> : null);
 import './bmOps.css';
 import './bmMaint.css';
 
@@ -36,7 +39,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
   const openRack = async (r) => {
     const id = `${r.vcenterId}|${r.rack}`;
     setRack(id); setRs({ loading: true });
-    try { const x = await fetchJson('/tools/bm-usage/power', { rack: id }, undefined, { timeoutMs: 60_000 }); setRs({ rows: x?.rackServers?.rows || [] }); }
+    try { const x = await fetchJson('/tools/bm-usage/power', { rack: id }, undefined, { timeoutMs: 60_000 }); setRs({ rows: x?.rackServers?.rows || [], notTarget: x?.rackServers?.notTarget || 0 }); }
     catch (e) { setRs({ err: e?.message || '읽지 못했습니다' }); }
   };
   const binMax = Math.max(1, ...(resp?.bins || []).map((b) => b.n));
@@ -48,6 +51,8 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
         ))}
       </div>
       {resp?.addressHidden && <p className="bmo-sub">관리자 판본이 아닙니다 — 주소인 서버 이름은 가림 토큰으로 보입니다.</p>}
+      {noJudgeText(f.noJudge) ? <p className="bmo-sub" style={{ color: 'var(--amber)' }}>{noJudgeText(f.noJudge)}</p> : null}
+      {resp?.capOldEdge ? <p className="bmo-sub">엣지 위임 서버 {resp.capOldEdge}대의 PowerCap 은 확인할 수 없습니다 — 그 엣지가 서버별 상한을 싣기 전 판입니다{resp.capMinEdgeVersion ? `(엣지 v${resp.capMinEdgeVersion} 이상)` : ''}. 그 서버의 걸림은 판정하지 않습니다.</p> : null}
       <section className="bmo-card">
         <h5 className="bmo-h">법인별 — 측정분 합 <span className="bmo-sub">(함대 원천 모으기 {unitText(resp?.gatherMs, 'ms')} · 60초 공유)</span></h5>
         <div className="bmo-bar"><button className="btn btn-sm" onClick={onReload} disabled={loading}>{loading ? '읽는 중…' : '다시 읽기'}</button></div>
@@ -71,7 +76,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
           <thead><tr><th>랙</th><th>법인</th><th className="right">서버</th><th className="right">지금</th><th className="right">24h 평균</th><th className="right">24h 피크</th><th className="right">상한(설정)</th><th className="right">여유</th><th className="right">흡기 평균/최대</th><th className="right">팬</th></tr></thead>
           <tbody>{(resp?.racks || []).map((r) => (
             <tr key={`${r.vcenterId}|${r.rack}`} className={rack === `${r.vcenterId}|${r.rack}` ? 'bmc-sel' : ''}>
-              <td data-sort={r.unmapped ? 'zzz' : r.rack}><span className="bmp-link" role="button" tabIndex={0} onClick={() => openRack(r)} onKeyDown={(e) => { if (e.key === 'Enter') openRack(r); }}>{r.unmapped ? '미매핑' : r.rack}</span></td>
+              <td data-sort={r.unmapped ? 'zzz' : r.rack}><span className="bmp-link" role="button" tabIndex={0} onClick={() => openRack(r)} onKeyDown={(e) => { if (e.key === 'Enter') openRack(r); }}>{r.unmapped ? '미매핑' : r.rack}</span>{r.capKw != null ? <NoJudge x={r} /> : null}</td>
               <td data-sort={r.vcenterId}>{r.vcenterId || '—'}</td><td className="right" data-sort={r.servers}>{r.servers}{r.unmeasuredN ? <span className="bmo-sub"> (미측정 {r.unmeasuredN})</span> : null}</td>
               <td className="right" data-sort={r.nowKw ?? ''}>{kwText(r.nowKw)}</td><td className="right" data-sort={r.avg24Kw ?? ''}>{kwText(r.avg24Kw)}</td><td className="right" data-sort={r.peak24Kw ?? ''}>{kwText(r.peak24Kw)}</td>
               <td className="right" data-sort={r.capKw ?? ''}>{r.capKw == null ? (r.unmapped ? '—' : '미설정') : kwText(r.capKw)}</td>
@@ -85,17 +90,18 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
             <div className="bmo-k">{rack.split('|').slice(1).join('|') || '미매핑'} — 서버(U 순 · 전력 · 온도)</div>
             {rs?.loading && <p className="bmo-note">읽는 중…</p>}
             {rs?.err && <p className="bmo-note" style={{ color: toneVar('bad') }}>{rs.err}</p>}
+            {rs?.notTarget ? <p className="bmo-note">배치에는 있으나 대상 목록에 없는 서버 {rs.notTarget}대(이름 생략 — 미측정으로 세어 이 랙은 일부만 측정)</p> : null}
             {rs?.rows && (
               <STable minWidth={860} className="bmo-t" style={{ fontSize: 12 }}>
                 <thead><tr><th>서버</th><th className="right">U</th><th className="right">지금 W</th><th className="right">24h 평균</th><th className="right">흡기</th><th className="right">최대(CPU/배기)</th><th>상한</th><th>팬</th></tr></thead>
                 <tbody>{rs.rows.map((s) => (
                   <tr key={s.key}>
-                    <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key, s.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key, s.vcenterId); }}>{s.name}</span></td>
+                    <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key, s.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key, s.vcenterId); }}>{s.name}</span><NoJudge x={s} /></td>
                     <td className="right" data-sort={s.u ?? ''}>{s.u ?? '—'}</td>
                     <td className="right" data-sort={s.w ?? ''}>{s.w == null ? (UNMEASURED_TEXT[s.unmeasured] || '—') : wText(s.w)}</td>
                     <td className="right" data-sort={s.avg24W ?? ''}>{wText(s.avg24W)}</td>
                     <td className="right" data-sort={s.inletC ?? ''}>{cText(s.inletC)}</td><td className="right" data-sort={s.maxC ?? ''}>{cText(s.maxC)}</td>
-                    <td data-sort={s.capPct ?? ''}>{capText(s, cfg)}</td><td data-sort={fanText(s)}>{fanText(s)}</td>
+                    <td data-sort={s.capPct ?? ''} title={capTitle(s)}>{capText(s, cfg, resp?.capMinEdgeVersion)}</td><td data-sort={fanText(s)}>{fanText(s)}</td>
                   </tr>))}</tbody>
               </STable>
             )}
@@ -119,12 +125,12 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
           <thead><tr><th>서버</th><th>랙 · U</th><th className="right">흡기</th><th className="right">최대(CPU/배기)</th><th>팬</th><th className="right">전력 W</th><th>전력 상한</th></tr></thead>
           <tbody>{(resp?.hot || []).map((s) => (
             <tr key={`${s.vcenterId}|${s.key}`}>
-              <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key, s.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key, s.vcenterId); }}>{s.name}</span><div className="bmo-sub">{s.vcenterId}</div></td>
+              <td data-sort={s.name}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(s.key, s.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(s.key, s.vcenterId); }}>{s.name}</span><div className="bmo-sub">{s.vcenterId}</div><NoJudge x={s} /></td>
               <td data-sort={s.rack || 'zzz'}>{s.rack ? `${s.rack}${s.u != null ? ` · ${s.u}` : ''}` : '미매핑'}</td>
               <td className="right" data-sort={s.inletC ?? ''} style={{ color: toneVar(s.inletC != null && s.inletC >= (cfg.inletWarnC ?? 27) ? 'warn' : 'idle') }}>{cText(s.inletC)}</td>
               <td className="right" data-sort={s.maxC ?? ''}>{cText(s.maxC)}</td><td data-sort={fanText(s)}>{fanText(s)}</td>
               <td className="right" data-sort={s.w ?? ''}>{s.w == null ? (UNMEASURED_TEXT[s.unmeasured] || '—') : wText(s.w)}</td>
-              <td data-sort={s.capPct ?? ''} style={{ color: toneVar(s.capHit ? 'bad' : 'idle') }}>{capText(s, cfg)}</td>
+              <td data-sort={s.capPct ?? ''} style={{ color: toneVar(s.capHit ? 'bad' : 'idle') }} title={capTitle(s)}>{capText(s, cfg, resp?.capMinEdgeVersion)}</td>
             </tr>))}</tbody>
         </STable>
         {!(resp?.hot || []).length && <p className="bmo-note">기준을 넘은 서버가 없습니다(온도를 못 읽은 서버는 여기 없습니다 — 법인 표의 흡기 칸 · 미측정 수를 보세요).</p>}

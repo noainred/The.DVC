@@ -79,7 +79,7 @@ function seriesOf(base, seed, buckets) {
  *   (결과가 갈라지지 않게 — v2.731 ipam ledger 와 같은 방식). 생성기는 포트 행 256개마다·시리즈 하나마다 한 번 멈추고, 양보판은 그때
  *   호출자가 준 onYield(시간 기준 양보·취소 확인)를 부른다. 데모 260대(시리즈 수천 × 버킷 97)는 한 덩어리 약 430ms 였다(verify-B6).
  */
-function* storageMultiSteps(metaRows, { since, until, bucketMs, groupOf = null, storageKey, carryMs = null }) {
+function* storageMultiSteps(metaRows, { since, until, bucketMs, groupOf = null, storageKey, carryMs = null, withPorts = false }) {
   const buckets = demoBuckets(since, until, bucketMs);
   const byGroup = new Map();
   let n = 0;
@@ -87,17 +87,27 @@ function* storageMultiSteps(metaRows, { since, until, bucketMs, groupOf = null, 
     const st = storageKey(m.attached_name);
     const g = groupOf ? (groupOf.get(String(m.device_id)) ?? '') : null;
     const gk = groupOf ? `${g}\u0000${st}` : st;
-    if (!byGroup.has(gk)) byGroup.set(gk, { key: st, group: g, ports: [], base: 0 });
+    if (!byGroup.has(gk)) byGroup.set(gk, { key: st, group: g, ports: [] });
     const s = byGroup.get(gk);
-    s.ports.push({ deviceId: String(m.device_id), port: Number(m.port) });
-    s.base += portBase(m.device_id, m.port, m.attached_name);
+    s.ports.push({ deviceId: String(m.device_id), port: Number(m.port), name: m.attached_name || '', speed: m.speed || '', portType: m.port_type || '' });
     if ((++n & 255) === 0) yield;
   }
   const series = [];
-  for (const [gk, s] of byGroup) {
-    const { sum, peak } = seriesOf(s.base, hash01(gk) * 1000, buckets);
+  for (const [, s] of byGroup) {
+    // v2.948: 어레이 합 = **포트별 시계열의 합**(demoPortSeries 와 같은 씨앗 — 포트 화면 · 스토리지 화면 · 디렉터별 보기가 같은 숫자를 본다).
+    //   예전에는 포트 기준값을 더한 뒤 한 시계열을 만들었다 — withPorts 유무로 합이 달라지면 '같은 함수여야 한다' 는 KPI 대조가 깨진다.
+    const sum = new Array(buckets.length).fill(0);
+    const peak = new Array(buckets.length).fill(0);
+    const details = [];
+    for (const p of s.ports) {
+      const ps = seriesOf(portBase(p.deviceId, p.port, p.name), hash01(`${p.deviceId}|${p.port}`) * 1000, buckets);
+      for (let i = 0; i < buckets.length; i++) { sum[i] += ps.sum[i]; peak[i] += ps.peak[i]; }
+      if (withPorts) details.push({ deviceId: p.deviceId, port: p.port, name: p.name, speed: p.speed, portType: p.portType, avg: ps.sum, peak: ps.peak });
+    }
+    const ports = s.ports.map((p) => ({ deviceId: p.deviceId, port: p.port }));
     series.push({
-      key: s.key, group: s.group, ports: s.ports, deviceIds: [...new Set(s.ports.map((p) => p.deviceId))], sum, peak,
+      key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum, peak,
+      ...(withPorts ? { portsDetail: details } : {}),
       ...totals(sum, peak), partial: [], partialBuckets: 0, carriedCells: 0,
     });
     yield;
