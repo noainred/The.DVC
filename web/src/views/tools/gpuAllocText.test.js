@@ -179,7 +179,7 @@ describe('v2.939 GPU 할당율 개선(웹)', async () => {
     expect(r.per).toBe(24); expect(r.family).toBe('a40');
     expect(r.rows.map((x) => [x.host, x.gpu, x.kind, x.fit])).toEqual([['esx1', 0, 'same', 1], ['esx1', 1, 'empty', 2]]);
     expect([r.same, r.empty]).toEqual([1, 2]);
-    expect(r.skipped).toEqual({ down: 1, noPlacement: 1, mixed: 0, otherProfile: 1, capUnknown: 0, small: 0 });
+    expect(r.skipped).toEqual({ down: 1, maint: 0, noPlacement: 1, mixed: 0, otherProfile: 1, capUnknown: 0, small: 0 });
     expect(M.placementCandidates(placeTree(), 'nonsense').rows).toEqual([]);
     expect(M.modelHasFamily('NVIDIA L40S', 'l4')).toBe(false);
     expect(M.modelHasFamily('GA102GL [A40]', 'a40')).toBe(true);
@@ -228,5 +228,26 @@ describe('v2.939 추이 글자 — 화면 판독 정정', () => {
     const fs = await import('node:fs');
     const src = fs.readFileSync(new URL('./GpuAllocHistory.jsx', import.meta.url), 'utf8');
     expect(src).not.toMatch(/trendText\([^)]*today/);
+  });
+});
+
+describe('v2.951 점검', () => {
+  it('배치 추천 — 유지보수 모드 호스트의 GPU 는 놓을 수 있는 자리가 아니다', async () => {
+    const M = await import('./gpuAllocText.js');
+    const g = (idx, vms, slots) => ({ idx, model: 'NVIDIA A40', mode: 'vgpu', capGB: 48, placement: true, vms, slots, allocGB: 0 });
+    const h = (id, cs, gpus) => ({ id, name: id, connectionState: cs, unplaced: [], off: [], totals: tot(), models: [], gpus });
+    const t = { vcenters: [{ id: 'vc1', name: 'kr', totals: tot(), datacenters: [{ name: 'DC', totals: tot(), clusters: [{ key: 'c', name: 'CL', totals: tot(), hosts: [
+      h('esx-maint', 'MAINTENANCE', [g(0, [vmr('a', 'a', 24, { profile: 'grid_a40-24q' })], { profile: 'grid_a40-24q', used: 1, total: 2, free: 1 }), g(1, [], { total: null, used: 0, free: null, profile: null })]),
+      h('esx-ok', 'CONNECTED', [g(0, [], { total: null, used: 0, free: null, profile: null })]),
+    ] }] }] }] };
+    const r = M.placementCandidates(t, 'grid_a40-24q');
+    expect(r.rows.map((x) => x.host)).toEqual(['esx-ok']);
+    expect(r.skipped.maint).toBe(2);
+  });
+  it('추이 글자 — 보고가 멈춘 법인은 소진 예상 대신 보고 없음 N일', async () => {
+    const M = await import('./gpuAllocText.js');
+    const t = M.trendText({ points: 20, gbPerDay: null, change30: 0, daysLeft: null, stale: 10 });
+    expect(t.left).toBe('— (보고 없음 10일)');
+    expect(t.why).toMatch(/10일 전/);
   });
 });
