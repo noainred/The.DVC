@@ -410,7 +410,9 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
         const live = new Set();
         let unknown = false;
         for (const id of a.rows.keys()) {
-          const k = alertKeyOf({ scope: a.agent, testId: id, ...alertInfoOf(a, id, win) });   // v2.934: 판정과 같은 창
+          // v2.954 반증: 판정과 같은 창 · 같은 보류 — 넓은 창에서 확정할 수 없는 중복(dupPending)은 키를 모름으로 보고 정리를 건너뛴다
+          //   (narrowSnap 없이 계산하면 그 행이 testId 키로 확정돼 이름 키 '알린 상태' 를 지우고 같은 실패를 한 번 더 알렸다 — 재현)
+          const k = alertKeyOf({ scope: a.agent, testId: id, ...alertInfoOf(a, id, win, narrowSnap) });
           if (!k) { unknown = true; break; }
           live.add(k);
         }

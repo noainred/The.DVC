@@ -99,7 +99,7 @@ export function sanitizeIsiduStatus(st) {
         .map((r) => ({ targetId: str(r.targetId, 64), at: num(r.at), outcome: str(r.outcome, 16), note: str(r.note, 300), resumes: num(r.resumes) })) : [],
       // v2.954(개선 검토 3번): 대상별 마지막 실행 방식 — 법인별 실환경 확인의 '아이실론 분리 실행' 근거(아는 값만 · 상한).
       lastRuns: Array.isArray(poller.lastRuns) ? poller.lastRuns.filter((r) => r && typeof r === 'object' && RUN_MODES.has(r.mode)).slice(0, 20)
-        .map((r) => ({ targetId: str(r.targetId, 64), at: num(r.at), mode: r.mode, detach: r.detach !== false, ...(r.attached === true ? { attached: true } : {}), ...(typeof r.fallback === 'string' && r.fallback ? { fallback: str(r.fallback, 200) } : {}) })) : [],
+        .map((r) => ({ targetId: str(r.targetId, 64), at: num(r.at), mode: r.mode, ok: r.ok === true, detach: r.detach !== false, ...(r.attached === true ? { attached: true } : {}), ...(typeof r.fallback === 'string' && r.fallback ? { fallback: str(r.fallback, 200) } : {}) })) : [],
     } : null,
     targets: num(s.targets),
     version: str(s.version, 32) || null,

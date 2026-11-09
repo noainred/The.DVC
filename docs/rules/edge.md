@@ -927,7 +927,7 @@
   - 반증 n2 F4: 중앙 · 엣지 사이 판정 분담은 `bmusage/powerJudge.js judgeOf` 하나 — 대상 노드와 전력 원천 노드가 같을 때만 판정 · 중앙은 **법인을 엣지가 맡으면** 자기 대상이어도 판정하지 않는다
     (`edgeCorps.corpOwnerSource` · 같은 서버가 두 iDRAC 등록부에 있을 때의 이중 알림 S1 방지) · 중앙 전력 보기가 같은 함수로 ‘알림 판정 없음 + 사유’ 를 보인다.
 - **`routes/central.js` 는 v2.954 에 영역별 파일로 나뉘었다(개선 검토 4번 · 사용자 선택 '동작 그대로 영역별 파일 이동')** — `routes/central/{storageRoutes,pduSanRoutes,cvpIsiduRoutes,opsRoutes}.js`.
-  - 등록은 central.js 의 **원래 자리**에서 `register*(centralRouter, { 공용 판정 })` 로 한다(라우트 순서 · 미들웨어 · 응답 불변 — 분할 때 centralRouter.stack 69칸을 경로 · 메서드 · 핸들러 본문 해시로 분할 전과 대조해 0 차이).
+  - 등록은 central.js 의 **원래 자리**에서 `register*(centralRouter, { 공용 판정 })` 로 한다(라우트 순서 · 미들웨어 · 응답 불변 — 분할 때 centralRouter.stack 69칸을 경로 · 메서드 · 순서로, 라우트 본문 · 옮긴 선언은 acorn 원문 비교로 분할 전과 대조해 0 차이. ⚠ 정정: 처음에는 '핸들러 본문 해시' 로 대조했다고 적었으나 wrapAsyncRouter 래퍼 때문에 해시가 전부 같아 본문은 대조되지 않았다 — 반증이 잡았다).
   - 영역 파일은 **central.js 를 import 하지 않는다**(순환 — archScan `IMPORT_CYCLE_MAX` 가 막는다). 공용 판정(requireCentral · 503 응답 · strAgent 등)은 인자로 받는다.
   - 경로 문자열을 받아 동적 import 하는 공용 함수(`onlyDelegated`)는 **routes/ 기준**으로 푼다 — 분할 직후 이것이 영역 파일 기준으로 풀려 미위임 필터가 500 이었다(기계 대조는 핸들러 본문만 봐서 못 잡았고 기존 수신 테스트가 잡았다).
   - 'central 라우트 소스에 X 가 있다' 스윕은 `test/_centralSource.js centralSource()`(central.js + 영역 파일, 등록 순서)로 읽는다 · 새 영역 파일은 `CENTRAL_PARTS` 에도 넣는다(`centralSplit2954` 가 대조).

@@ -9,10 +9,12 @@
  *   · 공유 토큰(`?agent=` 를 댈 수 있다)에는 주지 않는다(distribute:false — 엣지는 지난 배포본을 TTL 까지만 쓴다).
  *   · 중앙 창 파일을 못 읽으면 라우트가 503(빈 목록을 보내 엣지 억제를 지우지 않는다 · 엣지는 TTL 까지 지난 배포본).
  * 엣지 쪽은 agent/bmMaintPull.js → store.saveDeployed(같은 normalizeWindow 로 다시 자름).
- * ⚠ v2.954(점검 D-1): 태그 창의 keys 는 중앙이 그 엣지 대상(엣지 봉투 — central/bmUsageEdgePull 인메모리 · 사람이 인출할 때만 채워진다)으로 펼친다.
- *   중앙 재시작 뒤 · 첫 인출 전에는 대상을 **모른다** — 그때 그 엣지 법인에 살아 있는 태그 창이 있으면 빈 keys 로 배포하지 않고 보류한다
- *   (distribute:false · reason 'targets-unknown' — 엣지는 지난 배포본을 받은 지 24시간까지 쓴다). 보류에는 시한(TARGETS_HOLD_MS — 엣지 TTL 보다 짧게):
- *   넘기면 예전처럼 배포한다(새 창 · 끝낸 창이 엣지에 닿지 못하는 상태를 끝없이 끌지 않는다 — 그 판의 태그 창은 대상 0대). 배포 현황은 'targets-unknown' 으로 따로 말한다.
+ * ⚠ v2.954(점검 D-1 → 반증 재수정): 태그 창의 keys 는 중앙이 그 엣지 대상(엣지 봉투 — central/bmUsageEdgePull 인메모리 · 사람이 인출할 때만 채워졌다)으로 펼친다.
+ *   중앙 재시작 뒤 · 첫 인출 전에는 대상을 **모른다** — 예전에는 그때 빈 keys 로 배포해 엣지 억제가 꺼졌다. 첫 수정은 배포를 12시간 보류했는데,
+ *   중앙은 자동 업그레이드로 자주 재시작하고 배포본은 통째 교체라 그동안 **억제를 줄이는 쓰기(지금 끝내기 · 지우기)까지** 엣지에 닿지 않았다(반증 — 억제가 계속되는 쪽).
+ *   이제 보류하지 않는다: 대상을 모르면 그 태그 창에 `target.keysUnknown: true` 를 달아 보내고(엣지 store.saveDeployed 가 직전 배포본의 같은 창 keys 를 이어 쓴다 —
+ *   새 태그 창이면 0대) · 그 엣지 봉투를 **한 번 자동 인출**한다(엣지별 10분에 한 번 — 다음 인출 주기부터 펼친 keys). 옛 엣지(keysUnknown 을 모름)는 첫 인출 전 한 주기 동안
+ *   예전처럼 빈 keys 다. 배포 현황은 'targets-unknown' 으로 따로(빈 keys 판을 '반영됨' 으로 보이지 않게).
  * ⚠ 요청 경로 비용(반증 F6): 창 상태(진행 중 · 예정)는 **요청마다 한 번**(liveWindows — 시간 기준 양보) 계산하고 엣지마다 그 결과를 다시 쓴다
  *   (배포 현황이 엣지 28곳마다 전 창을 다시 세지 않는다).
  */
@@ -42,7 +44,7 @@ export async function liveWindows(windows = [], now = Date.now(), { yieldFn = cr
  * 한 엣지에 보낼 창(순수 — 입력 주입). live = liveWindows 결과(엣지마다 다시 세지 않는다).
  * @param {{ live:Array, corps:Set<string>, edgeTargets:Array<{key,serviceTag,vcenterId}>, tagsOf:(t)=>string[] }} p
  */
-export function windowsForEdge({ live = [], corps = new Set(), edgeTargets = [], tagsOf = () => [] } = {}) {
+export function windowsForEdge({ live = [], corps = new Set(), edgeTargets = [], tagsOf = () => [], targetsKnown = true } = {}) {
   const out = [];
   for (const w of live) {
     const pick = Object.fromEntries(SEND_FIELDS.filter((k) => w[k] !== undefined).map((k) => [k, w[k]]));
@@ -50,7 +52,7 @@ export function windowsForEdge({ live = [], corps = new Set(), edgeTargets = [],
     if (w.target.kind === 'corp' || w.target.kind === 'server') { out.push(pick); continue; }
     if (w.target.kind === 'tag') {
       const ks = edgeTargets.filter((x) => t(x.vcenterId) === w.vcenterId && (tagsOf(x) || []).includes(w.target.tag)).map((x) => t(x.key)).filter(Boolean);
-      out.push({ ...pick, target: { kind: 'tag', tag: w.target.tag, keys: [...new Set(ks)].slice(0, 5_000) } });
+      out.push({ ...pick, target: { kind: 'tag', tag: w.target.tag, keys: [...new Set(ks)].slice(0, 5_000), ...(targetsKnown ? {} : { keysUnknown: true }) } });
     }
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
@@ -82,15 +84,18 @@ export function tagWindowsBlind({ live = [], corps = new Set(), targetsKnown = f
   if (targetsKnown) return false;
   return live.some((w) => w?.target?.kind === 'tag' && corps.has(w.vcenterId));
 }
-/** 보류 시한 — 엣지 배포본 TTL(24h)보다 짧게(보류가 끝나기 전에 엣지 배포본이 먼저 만료되지 않게). */
-export const TARGETS_HOLD_MS = Math.floor(DEPLOY_TTL_MS / 2);
-const _blindSince = new Map();   // agent(소문자) → 처음 '대상 모름 + 태그 창' 을 본 시각(인메모리 — 중앙 재시작이 곧 시작점)
-function blindHold(agent, blind, now) {
-  const k = t(agent).toLowerCase();
-  if (!blind) { _blindSince.delete(k); return { hold: false }; }
-  if (!_blindSince.has(k)) { _blindSince.set(k, now); if (_blindSince.size > 512) _blindSince.delete(_blindSince.keys().next().value); }
-  const since = _blindSince.get(k);
-  return { hold: now - since < TARGETS_HOLD_MS, since };
+/** 대상을 모를 때 그 엣지 봉투 자동 인출 — 엣지별 간격(같은 엣지를 인출 주기마다 다시 당기지 않게). */
+export const AUTO_PULL_GAP_MS = 10 * 60_000;
+const _autoPullAt = new Map();   // agent(소문자) → 마지막 자동 인출 시각
+let _autoPull = async (agent) => (await import('../../central/bmUsageEdgePull.js')).pullBmUsage(agent);
+export function _setAutoPullForTest(fn) { _autoPull = fn; _autoPullAt.clear(); }
+function autoPullTargets(agent, now) {
+  const k = t(agent).toLowerCase(); if (!k) return false;
+  if (now - (_autoPullAt.get(k) || 0) < AUTO_PULL_GAP_MS) return false;
+  _autoPullAt.set(k, now); if (_autoPullAt.size > 512) _autoPullAt.delete(_autoPullAt.keys().next().value);
+  // 기다리지 않는다(인출 응답을 늦추지 않게) — 실패는 bmUsageEdgePull 이 보관소에 기록하고 다음 간격에 다시 시도한다
+  Promise.resolve().then(() => _autoPull(agent)).catch((e) => console.warn(`[bmusage] 정비 창 배포 — 엣지 '${agent}' 대상 자동 인출 실패: ${String(e?.message || e).slice(0, 160)}`));
+  return true;
 }
 
 /**
@@ -103,11 +108,11 @@ export async function deployFor(agent, { verified = false, now = Date.now() } = 
   const { corps, edgeTargets, targetsKnown } = await edgeContext(agent);
   const tagsOf = await tagsReader();
   const live = await liveWindows(windows, now);
-  // v2.954(점검 D-1): 대상을 모르는 채 태그 창을 빈 keys 로 보내면 엣지 억제(알림 · 수집 · 집중)가 꺼진다 — 시한 안에서는 보류
-  const bh = blindHold(agent, tagWindowsBlind({ live, corps, targetsKnown }), now);
-  if (bh.hold) return { distribute: false, reason: 'targets-unknown' };
-  const list = windowsForEdge({ live, corps, edgeTargets, tagsOf });
-  return { distribute: true, sig: sigOf(list), windows: list, ...(bh.since != null ? { targetsUnknown: true } : {}) };
+  // v2.954(점검 D-1 → 반증 재수정): 대상을 모르면 보류하지 않고 keysUnknown(엣지가 직전 keys 를 이어 쓴다)으로 보내며 봉투를 자동 인출한다
+  const blind = tagWindowsBlind({ live, corps, targetsKnown });
+  if (blind) autoPullTargets(agent, now);
+  const list = windowsForEdge({ live, corps, edgeTargets, tagsOf, targetsKnown });
+  return { distribute: true, sig: sigOf(list), windows: list, ...(blind ? { targetsUnknown: true } : {}) };
 }
 
 /**
@@ -137,4 +142,4 @@ export async function deployStatusView(edges = [], now = Date.now()) {
   }
   return { edges: rows, now, ...(windows ? {} : { unreadable: true }) };
 }
-export function _resetMaintDeployForTest() { _pulls.clear(); _blindSince.clear(); }
+export function _resetMaintDeployForTest() { _pulls.clear(); _autoPullAt.clear(); }

@@ -85,7 +85,8 @@ export function judgeOnefsDetach({ site, agent, isidu, mock }) {
   if (mock) return cell('unknown', '목 데이터 — 실장비 근거가 아닙니다');
   if (!site) return cell('na', '중앙 직접 수집 vCenter — 법인 엣지가 없습니다');
   if (!agent) return cell('pending', '이 법인 vCenter 를 보내는 엣지를 아직 모릅니다(인벤토리 수신 전)');
-  if (!isidu) return cell('na', `엣지 '${agent}' 가 아이실론 디렉터리 사용량 상태를 보내지 않습니다(조사 대상 없음)`);
+  // 반증(v2.954): 상태를 아직 받지 않은 것(중앙 재시작 직후 첫 push 전 · 옛 엣지)과 '대상 없음' 을 가르지 않는다 — 이유를 단정하지 않고 대기로
+  if (!isidu) return cell('pending', `엣지 '${agent}' 의 아이실론 디렉터리 사용량 상태를 아직 받지 않았습니다(첫 push 전이거나 조사 대상이 없을 수 있음)`);
   const st = isidu.status || {};
   const recvAt = num(isidu.at);
   const runs = Array.isArray(st.poller?.lastRuns) ? st.poller.lastRuns : null;
@@ -95,12 +96,14 @@ export function judgeOnefsDetach({ site, agent, isidu, mock }) {
   const on = runs.filter((r) => r && r.detach !== false);
   if (!runs.length) return cell('pending', '엣지가 시작한 뒤 아직 조사한 대상이 없습니다', recvAt);
   if (!on.length) return cell('na', '분리 실행을 끈 대상만 있습니다(설정 › 아이실론 대상 ‘장비에서 분리 실행’)', recvAt);
-  const ok = on.filter((r) => r.mode === 'detached' || (r.mode === 'attached' && r.attached === true));
+  // 반증(v2.954 — 재현): 접속 · 인증 실패(SSH 예외)에도 runMode 'detached' 가 붙는다 — 조사가 성공한 실행만 근거다(ok 를 보내지 않는 판은 근거 아님)
+  const ok = on.filter((r) => r.ok === true && (r.mode === 'detached' || (r.mode === 'attached' && r.attached === true)));
   if (ok.length) {
     const last = ok.reduce((m, r) => (num(r.at) > num(m.at) ? r : m), ok[0]);
     return cell('confirmed', `분리 실행 ${ok.length}/${on.length} 대상${last.attached ? ' · 재시작 전 작업을 이어 받음' : ''}`, clip(last.at));
   }
   const fb = on.find((r) => r.mode === 'attached-fallback');
+  if (!fb && on.some((r) => r.ok !== true)) return cell('pending', '최근 조사가 실패해(접속 · 인증 · 시한) 분리 실행 여부를 확인하지 못했습니다', recvAt);
   if (fb) return cell('failed', `분리 실행을 시작하지 못해 세션에 묶어 실행 — ${txt(fb.fallback, 200) || '사유 없음'}`, clip(fb.at));
   return cell('pending', '분리 실행 기록이 아직 없습니다', recvAt);
 }

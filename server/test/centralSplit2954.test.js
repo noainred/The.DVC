@@ -1,6 +1,7 @@
 /**
  * centralSplit2954.test.js — routes/central.js 영역별 분할(v2.954 · 개선 검토 4번 · 사용자 선택 '동작 그대로 영역별 파일 이동').
- *  분할 때 한 번: 분할 전(main 1164e80d) · 분할 뒤 centralRouter.stack 69칸을 (경로 · 메서드 · 핸들러 본문 해시 · use 정규식)로 대조해 0 차이를 확인했다.
+ *  분할 때 한 번: 분할 전(main 1164e80d) · 분할 뒤 centralRouter.stack 69칸을 (경로 · 메서드 · 순서 · 개수)로 대조해 0 차이 — ⚠ 정정(반증): '핸들러 본문 해시' 도 대조했다고
+ *  적었으나 wrapAsyncRouter 래퍼 때문에 69칸 해시가 전부 같은 값이라 본문은 대조되지 않았다. 반증 담당이 acorn 원문 비교로 라우트 69건 본문 · 옮긴 최상위 선언을 따로 대조해 0 차이(의도한 onlyDelegated 경로 해석 1건 제외).
  *  여기서는 그 구조가 유지되는지 고정한다:
  *   ① 영역 파일은 central.js 를 import 하지 않는다(순환 금지 — archScan IMPORT_CYCLE_MAX) · 공용 판정은 register*(centralRouter, deps) 인자로
  *   ② central.js 의 register 호출 순서 == _centralSource.CENTRAL_PARTS == routes/central/ 의 파일 집합

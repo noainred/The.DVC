@@ -31,11 +31,27 @@ export function readAppliedState() {
     if (!fs.existsSync(FILE)) return { ok: true, state: { sig: '', appliedSig: '', lost: false, created: {} } };
     const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     const created = j && typeof j.created === 'object' && j.created && !Array.isArray(j.created) ? j.created : {};
-    const appliedSig = String(j?.sig || '').slice(0, 64); const lost = j?.lost === true;
+    const appliedSig = String(j?.sig || '').slice(0, 64);
+    // 반증(v2.954): lost 보류에도 시한 — LOST_HOLD_MS 를 넘기면 풀고 콘솔에 밝힌다(중앙 제거 대기가 영원히 묶이지 않게 · 루트 CLAUDE.md '보류에는 시한')
+    const lostSince = Number(j?.lostSince) || Number(j?.at) || 0;
+    let lost = j?.lost === true;
+    if (lost && lostSince && Date.now() - lostSince > LOST_HOLD_MS) {
+      lost = false;
+      if (!_lostExpiredWarned) { _lostExpiredWarned = true; console.warn(`[bm-onboard] 적용 상태를 잃은 보류가 ${Math.round(LOST_HOLD_MS / 86_400_000)}일을 넘어 풉니다 — 엣지 등록부에 중앙 제거 대기 이름이 남아 있으면 두 노드가 같은 서버를 열 수 있습니다(수동 확인)`); }
+    }
     // sig = 중앙에 보고할 서명(lost 면 빈 값 — D-3 ②) · appliedSig = 이 엣지가 실제로 적용한 판(같은 판 건너뛰기용)
-    return { ok: true, state: { sig: lost ? '' : appliedSig, appliedSig, lost, created, at: Number(j?.at) || 0, result: j?.result || null } };
-  } catch (e) { preserveCorrupt(FILE, e?.message); return { ok: false, state: { sig: '', appliedSig: '', lost: true, created: {} } }; }
+    return { ok: true, state: { sig: lost ? '' : appliedSig, appliedSig, lost, ...(lost ? { lostSince } : {}), created, at: Number(j?.at) || 0, result: j?.result || null } };
+  } catch (e) {
+    preserveCorrupt(FILE, e?.message);
+    // 반증(v2.954 — 재현): 손상본을 옆으로 치운 뒤 다음 읽기가 '파일 없음 = 신규 설치' 로 lost 를 잃었다(인출 워커가 쿼리용으로 먼저 읽는다).
+    //   lost 표지를 그 자리에서 파일로 남긴다(쓰기 실패면 이번 결과만 lost — 다음 주기에 다시 시도).
+    try { writeAppliedState({ sig: '', lost: true, lostSince: Date.now(), at: Date.now(), created: {}, result: null, lastError: '적용 상태 파일 손상' }); } catch { /* 이번 판만 */ }
+    return { ok: false, state: { sig: '', appliedSig: '', lost: true, lostSince: Date.now(), created: {} } };
+  }
 }
+/** lost 보류 시한 — 7일(사람이 확인할 시간 · 중앙 화면이 제거 대기를 계속 보여 준다). */
+export const LOST_HOLD_MS = 7 * 86_400_000;
+let _lostExpiredWarned = false;
 function writeAppliedState(st) { atomicWriteFileSync(FILE, JSON.stringify(st, null, 2), { mode: 0o600 }); }
 /** 같은 판에서 lost 만 바꿀 때 — 파일의 나머지 칸을 그대로 둔다. */
 function readRawForRewrite() { return JSON.parse(fs.readFileSync(FILE, 'utf8')); }
@@ -129,7 +145,7 @@ export async function applyEdgeDeployment(rows = [], { sig = '', D = null, corps
   for (const s0 of Dx.BM.listBmServersRaw()) if (!osBefore.has(String(s0.id)) && rowNames.has(lc(s0.name))) created[lc(s0.name)] = { ...(created[lc(s0.name)] || {}), os: s0.id };
   for (const s0 of Dx.IDR.loadRegistry()) if (!idrBefore.has(String(s0.id)) && rowNames.has(lc(s0.name))) created[lc(s0.name)] = { ...(created[lc(s0.name)] || {}), idrac: s0.id };
   if (!res.ok) {
-    try { writeAppliedState({ sig: prev.ok ? prev.state.appliedSig : '', ...(lostBefore ? { lost: true } : {}), at: now, created, result: prev.state.result || null, rejects: rejects.slice(0, 200), lastError: String(res.reason || '').slice(0, 200) }); } catch { /* 다음 주기 */ }
+    try { writeAppliedState({ sig: prev.ok ? prev.state.appliedSig : '', ...(lostBefore ? { lost: true, lostSince: prev.state.lostSince || now } : {}), at: now, created, result: prev.state.result || null, rejects: rejects.slice(0, 200), lastError: String(res.reason || '').slice(0, 200) }); } catch { /* 다음 주기 */ }
     return { ok: false, applied: 0, rejected: rejects.length, removed: 0, reason: res.reason, rejects };
   }
   // 빠진 행 — 이 배포가 만든 것만 지운다(한 번씩 · 등록부마다 한 번 쓰기). 상태 파일을 못 읽었으면 지우지 않는다.
@@ -157,7 +173,7 @@ export async function applyEdgeDeployment(rows = [], { sig = '', D = null, corps
   const result = { applied: (res.applied?.os || 0) + (res.applied?.idrac || 0), rejected: rejects.length, removed, at: now };
   // ① 제거가 실패한 판은 새 서명을 남기지 않는다(직전 판 유지 → 다음 인출에 다시 적용 · 제거 · 중앙 제거 대기도 그대로)
   const keepSig = removeFailed ? (prev.ok ? prev.state.appliedSig : '') : sig;
-  try { writeAppliedState({ sig: keepSig, ...(lost ? { lost: true } : {}), at: now, created, result, rejects: rejects.slice(0, 200), ...(removeFailed ? { lastError: '빠진 행 제거 실패' } : {}) }); } catch (e) { return { ok: false, ...result, reason: `적용 상태를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)})`, rejects }; }
+  try { writeAppliedState({ sig: keepSig, ...(lost ? { lost: true, lostSince: prev.state.lostSince || now } : {}), at: now, created, result, rejects: rejects.slice(0, 200), ...(removeFailed ? { lastError: '빠진 행 제거 실패' } : {}) }); } catch (e) { return { ok: false, ...result, reason: `적용 상태를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)})`, rejects }; }
   if (removeFailed) return { ok: false, ...result, reason: '배포에서 빠진 항목을 등록부에서 지우지 못했습니다 — 적용 서명을 보고하지 않고 다음 인출에 다시 지웁니다', rejects };
   return { ok: true, ...result, rejects, ...(lost ? { lost: true, reason: lostReason(lr.names) } : {}) };
 }

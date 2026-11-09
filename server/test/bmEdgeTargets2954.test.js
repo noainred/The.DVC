@@ -1,6 +1,7 @@
 /**
  * v2.954(점검 D-1 · D-2 · D-3) — 중앙 → 엣지 배포 계약에서 ‘엣지 대상을 모름’ · ‘제거를 못 함’ 을 조용히 성공으로 바꾸지 않는다.
- *   D-1 정비 창 배포: 중앙 재시작 뒤(엣지 봉투 없음) 그 엣지 법인에 태그 창이 살아 있으면 빈 keys 로 배포하지 않고 보류(시한 안) ·
+ *   D-1 정비 창 배포: 중앙 재시작 뒤(엣지 봉투 없음) 그 엣지 법인에 태그 창이 살아 있으면 — 반증 재수정: 보류(12h)는 억제를 줄이는 쓰기까지 막아 버렸다 —
+ *       보류하지 않고 태그 창에 keysUnknown 을 달아 보내 엣지가 직전 배포본의 keys 를 이어 쓰게 하고, 그 엣지 봉투를 한 번 자동 인출한다 ·
  *       배포 현황은 ‘targets-unknown’(빈 keys 판을 ‘applied’ 로 보이지 않게).
  *   D-2 파트 장애 보류: 엣지 대상을 모르는 엣지 장비를 ‘대상 모름’ 으로 센다(보류하지는 않는다 — 모르는 장비를 억제하지 않는다).
  *   D-3 7b 엣지 적용: 빠진 행 제거가 실패한 판 · 적용 상태를 잃은 판에서는 새 서명을 보고하지 않는다(중앙 제거 대기 F14 가 풀리지 않게) · 실패 항목은 created 에 남는다.
@@ -37,34 +38,58 @@ after(() => fs.rmSync(DIR, { recursive: true, force: true }));
 const loc = (ms) => S.fmtLocal('Asia/Seoul', ms).replace(' ', 'T');
 const sched = () => ({ kind: 'once', start: loc(T0 - 30 * MIN), end: loc(T0 + 20 * HOUR) });
 
-test('① D-1 — 엣지 대상을 모르는데 그 법인에 태그 창이 살아 있으면 빈 keys 로 배포하지 않는다(보류) · 대상을 알면 펼쳐 배포', async () => {
+test('① D-1 — 대상을 모르면 배포는 하되 태그 창에 keysUnknown · 봉투 자동 인출(엣지별 간격) · 대상을 알면 펼쳐 배포', async () => {
   await ST.addWindow({ name: '법인 패치', reason: 'r', target: { kind: 'corp' }, vcenterId: 'vcE', tz: 'Asia/Seoul', schedule: sched(), scopes: { alerts: true } }, { by: 'own', now: T0 });
   const tag = await ST.addWindow({ name: 'DB 롤아웃', reason: 'r', target: { kind: 'tag', tag: 'role:db' }, vcenterId: 'vcE', tz: 'Asia/Seoul', schedule: sched(), scopes: { alerts: true, collect: true } }, { by: 'own', now: T0 });
   assert.ok(tag?.id, JSON.stringify(tag));
   DP._resetMaintDeployForTest(); E._resetForTest();
+  const pulled = [];
+  DP._setAutoPullForTest(async (a) => { pulled.push(a); });
   const blind = await DP.deployFor('Edge-A', { verified: true, now: T0 });
-  assert.equal(blind.distribute, false, `빈 keys 판을 보내면 엣지 억제가 꺼진다: ${JSON.stringify(blind).slice(0, 300)}`);
-  assert.equal(blind.reason, 'targets-unknown');
-  // 태그 창이 없는 법인의 엣지는 대상을 몰라도 그대로 배포(보류 대상 아님)
+  assert.equal(blind.distribute, true, '보류하지 않는다(억제를 줄이는 쓰기 · 다른 창까지 막지 않게 — 반증)');
+  assert.equal(blind.targetsUnknown, true);
+  const tw = blind.windows.find((w) => w.id === tag.id);
+  assert.equal(tw.target.keysUnknown, true); assert.deepEqual(tw.target.keys, []);
+  assert.ok(!blind.windows.some((w) => w.target.kind !== 'tag' && w.target.keysUnknown), '태그 창에만');
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(pulled, ['Edge-A'], '봉투 자동 인출 한 번');
+  await DP.deployFor('Edge-A', { verified: true, now: T0 + MIN });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(pulled.length, 1, '간격 안에는 다시 당기지 않는다');
+  await DP.deployFor('Edge-A', { verified: true, now: T0 + DP.AUTO_PULL_GAP_MS + MIN });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(pulled.length, 2, '간격이 지나면 다시 시도');
+  // 태그 창이 없는 법인의 엣지는 대상을 몰라도 그대로(자동 인출 없음)
   const other = await DP.deployFor('Edge-B', { verified: true, now: T0 });
-  assert.equal(other.distribute, true);
-  // 대상을 알면(사람이 엣지 인출) 펼쳐서 배포
+  assert.equal(other.distribute, true); assert.equal(other.targetsUnknown, undefined);
+  // 대상을 알면(봉투 인출) 펼쳐서 배포
   E.putEdgeBmUsage('Edge-A', { ok: true, snap: { targets: [{ key: 'E1', serviceTag: 'E1', vcenterId: 'vcE' }, { key: 'E2', serviceTag: 'E2', vcenterId: 'vcE' }], maintVer: 1 } });
   const FT = await import('../src/insights/fleetTags.js');
   assert.equal(FT.setFleetPurpose('e2', { role: 'db' }, { knownRoles: ['db', 'web', 'cache', 'file', 'general'] }).ok, true);
   const known = await DP.deployFor('Edge-A', { verified: true, now: T0 });
   assert.equal(known.distribute, true);
-  assert.deepEqual(known.windows.find((w) => w.id === tag.id).target.keys, ['E2']);
+  const kw = known.windows.find((w) => w.id === tag.id);
+  assert.deepEqual(kw.target.keys, ['E2']); assert.equal(kw.target.keysUnknown, undefined);
   assert.equal(known.targetsUnknown, undefined);
+  DP._setAutoPullForTest(async () => {});
 });
 
-test('② D-1 — 보류에는 시한(엣지 배포본 TTL 보다 짧게) — 넘기면 배포하고 그 사실을 표시한다', async () => {
-  DP._resetMaintDeployForTest(); E._resetForTest();
-  assert.ok(DP.TARGETS_HOLD_MS < ST.DEPLOY_TTL_MS);
-  assert.equal((await DP.deployFor('Edge-A', { verified: true, now: T0 })).distribute, false);
-  const late = await DP.deployFor('Edge-A', { verified: true, now: T0 + DP.TARGETS_HOLD_MS + MIN });
-  assert.equal(late.distribute, true);
-  assert.equal(late.targetsUnknown, true);
+test('② D-1 — 엣지: keysUnknown 태그 창은 직전 배포본의 같은 창 keys 를 이어 쓴다(직전 판에 없던 창은 0대)', async () => {
+  const live = await DP.liveWindows(ST.listWindows(), T0);
+  const ctx = { live, corps: new Set(['vcE']), tagsOf: () => ['role:db'] };
+  const full = DP.windowsForEdge({ ...ctx, edgeTargets: [{ key: 'E2', serviceTag: 'E2', vcenterId: 'vcE' }] });
+  const blind = DP.windowsForEdge({ ...ctx, edgeTargets: [], targetsKnown: false });
+  const tagId = full.find((w) => w.target.kind === 'tag').id;
+  // 직전 판에 태그 창이 없으면 이어 쓸 것이 없다(0대 — 예전과 같다)
+  assert.equal(ST.saveDeployed(full.filter((w) => w.target.kind !== 'tag'), { sig: 'a'.repeat(32), now: T0 }).ok, true);
+  const r0 = ST.saveDeployed(blind, { sig: 'b'.repeat(32), now: T0 + MIN });
+  assert.equal(r0.carried, undefined, JSON.stringify(r0));
+  assert.deepEqual(ST.loadDeployed(T0 + MIN).items.find((x) => x.id === tagId).target.keys, []);
+  // 직전 판에 같은 창(같은 태그)이 있으면 그 keys 를 이어 쓴다 — 빈 keys 로 억제가 꺼지지 않게
+  assert.equal(ST.saveDeployed(full, { sig: 'c'.repeat(32), now: T0 + 2 * MIN }).ok, true);
+  const r = ST.saveDeployed(blind, { sig: 'd'.repeat(32), now: T0 + 3 * MIN });
+  assert.equal(r.carried, 1, JSON.stringify(r));
+  assert.deepEqual(ST.loadDeployed(T0 + 3 * MIN).items.find((x) => x.id === tagId).target.keys, ['E2']);
 });
 
 test('③ D-1 — 배포 현황: 대상을 모르면 빈 keys 판을 적용했어도 ‘applied’ 가 아니라 ‘targets-unknown’', async () => {

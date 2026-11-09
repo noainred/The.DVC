@@ -745,7 +745,7 @@
 | `RIGHTSIZE_MIN_COVERAGE_PCT` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_MIN_DAYS` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_READY_WARN_PCT` |  |  | routes/api/toolsCapacity.js |
-| `RMA_CRED_RATE_PER_MIN` | `120` |  | routes/central.js |
+| `RMA_CRED_RATE_PER_MIN` | `120` |  | routes/central/pduSanRoutes.js |
 | `SANSW_PROBLEM_PORT_MAX` | `40` |  | routes/api/sanSwitch.js |
 | `SECRETS_KEY` |  |  | routes/admin/opsSettings.js, security/secretVault.js |
 | `SVCMON_XLSX_MAX_BYTES` | `8000000` |  | routes/svcmon/shared.js |

@@ -79,3 +79,16 @@ test('⑤ 보류에는 시한 — 마지막 청크가 계속 유실되면 시한
   assert.equal(TR.alertStats().metaPending, 0, '시한을 넘기면 확정한다(무기한 보류 금지)');
   assert.equal(crit(sent).length, 2, '넓은 창 판정 — 예전과 같이 testId 키로 한 번 더(거짓 복구 쪽이 아니다)');
 });
+
+test('④ 반증 — 재배정 + 첫 청크 유실 + 같은 완결의 GC 가 겹쳐도 정리 경로가 보류 행의 키를 확정하지 않는다(실패 알림 1건)', async () => {
+  const sent = reset();
+  const m = (i, n) => ({ i, p: 'US', n, h: 'h', t: 'TCP 22', y: 'tcp', iv: 60 });
+  push('E', NOW, [{ rows: [R('o1', 'bad', 1)], meta: [m('o1', 'esx1')] }, { rows: [R('y', 'ok', 1)], meta: [m('y', 'yy')] }], { sig: 'a' });
+  push('E', NOW + MIN, [{ rows: [R('o1', 'bad', 2)] }, { rows: [] }], { sig: 'a' });   // y 는 엣지에서 지워졌다(GC 대상)
+  push('E', NOW + 2 * MIN, [{ rows: [] }, { rows: [R('n1', 'bad', 1)], meta: [m('n1', 'esx1')] }], { sig: 'b', lost: [1] });
+  push('E', NOW + 3 * MIN, [{ rows: [] }, { rows: [R('n1', 'bad', 2)] }], { sig: 'b' });
+  push('E', NOW + 4 * MIN, [{ rows: [] }, { rows: [R('n1', 'bad', 3)] }], { sig: 'b' });
+  await TR.flushAlerts();
+  assert.equal(crit(sent).length, 1, `실패 알림 ${crit(sent).map((a) => a.key.replaceAll(SEP, '·')).join(' , ')}`);
+  assert.equal(info(sent).length, 0);
+});

@@ -3,7 +3,7 @@
  *
  * v2.954(개선 검토 4번 — 사용자 선택 '동작 그대로 영역별 파일 이동'): routes/central.js(2,966줄)에서 이 영역의 엣지 수신 · 설정 인출 라우트를
  *   **글자 그대로** 옮겼다. 등록은 central.js 가 원래 자리에서 `registerPduSanRoutes(centralRouter)` 로 부른다 — 라우트 순서 · 미들웨어 · 응답이 같다
- *   (회귀 `test/centralSplit2954.test.js` 가 분할 전 라우트 표와 기계 대조한다). 공용 판정(requireCentral · 503 응답 등)은 central.js 의 것을 그대로 쓴다.
+ *   (회귀 `test/centralSplit2954.test.js` 가 등록 순서 · 개수 · 순환 없음을 고정한다 — 분할 때 라우트 본문은 원문 비교로 0 차이). 공용 판정(requireCentral · 503 응답 등)은 central.js 의 것을 그대로 쓴다.
  */
 import { logAudit } from '../../audit.js';
 import { REJECT_KIND } from '../../central/ingestReject.js';

@@ -14,6 +14,7 @@
  *   · 모든 쓰기는 이 모듈의 직렬 큐(_chain) 하나를 지난다(읽기-수정-쓰기 경쟁 — 5단계 반증 F1 과 같은 대책).
  * ⚠ 상태 JSON 이 손상(파싱 실패)이면 ‘처음 읽기’ 로 돌아가되 손상본을 bad_json 에 **보존**한다(조용히 덮지 않는다 · 화면이 cursorReset 으로 말한다).
  */
+import { pushAll } from '../../util/pushAll.js';
 import { mainDb } from '../db.js';
 import { SAMPLES_MAX, SEC_ITEMS_MAX } from './classify.js';
 import { SEVERITY_RANK } from '../../loganalysis/rules.js';
@@ -86,7 +87,7 @@ export function logWriteBatch({ agent = '', items = [], sliceMs = 15 } = {}) {
     let bWritten = 0; let bConflicts = 0; let bOverflow = 0; let bKeys = [];
     const maybeYield = createYielder(sliceMs);
     let batches = 0; let txAt = 0;
-    const settle = () => { written += bWritten; conflicts += bConflicts; overflow += bOverflow; writtenKeys.push(...bKeys); bWritten = 0; bConflicts = 0; bOverflow = 0; bKeys = []; };
+    const settle = () => { written += bWritten; conflicts += bConflicts; overflow += bOverflow; pushAll(writtenKeys, bKeys); bWritten = 0; bConflicts = 0; bOverflow = 0; bKeys = []; };
     let open = false;
     try {
       for (const it of items) {

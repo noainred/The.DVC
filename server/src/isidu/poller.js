@@ -251,7 +251,7 @@ function runOne(t, trigger, manual, { resumeOf = null } = {}) {
       _lastTry.set(t.id, { ts: rec.ts, ok: rec.ok, durationMs: rec.durationMs ?? null });
       if (rec.runMode) {
         if (!_lastRun.has(t.id) && _lastRun.size >= LAST_RUN_MAX) _lastRun.delete(_lastRun.keys().next().value);
-        _lastRun.set(t.id, { at: rec.ts, mode: rec.runMode, detach: t.detach !== false, ...(rec.attached ? { attached: true } : {}), ...(rec.detachFallback ? { fallback: String(rec.detachFallback).slice(0, 200) } : {}) });
+        _lastRun.set(t.id, { at: rec.ts, mode: rec.runMode, ok: rec.ok === true, detach: t.detach !== false, ...(rec.attached ? { attached: true } : {}), ...(rec.detachFallback ? { fallback: String(rec.detachFallback).slice(0, 200) } : {}) });
       }
       const how = rec.attached ? ' · 재시작 전 장비에서 돌던 du 결과를 이어 받음' : rec.runMode === 'attached-fallback' ? ` · 분리 실행 불가로 직접 실행(${rec.detachFallback || '사유 없음'})` : '';
       if (rec.ok) note('info', `${t.label || t.id}: 폴더 ${rec.count.toLocaleString()}개 조사 (${Math.round(rec.durationMs / 1000)}초)${rec.errLines ? ` · 권한 오류 ${rec.errLines}줄` : ''}${how}${prior ? ' · 자동 재개' : ''}`);
