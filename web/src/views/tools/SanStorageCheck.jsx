@@ -1,7 +1,7 @@
 // v2.948 — SAN 스토리지 성능 › 성능 점검 탭(설계 ⑥). 판정은 서버 storagePerfCheck(순수 · 저장 표본만 — 새 접속 없음) · 여기는 표와 기준 설정만.
 //   상태 4종 + 해당 없음: 정상 · 주의 · 이상 · **확인 불가**(unknown 을 정상으로 뭉개지 않는다 — '정상(일부 미확인)'). 기준 기본값은 벤더 문서 값만(출처 열) · 못 찾은 것은 비움.
 import React, { useEffect, useState } from 'react';
-import { fetchJson, putJson } from '../../api.js';
+import { fetchJson, putJson, postJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -14,6 +14,8 @@ export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
   const [err, setErr] = useState(null);
   const [seq, setSeq] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notifyOpen, setNotifyOpen] = useState(false);   // v2.953 알림(§12.2-6)
+  const [reportOpen, setReportOpen] = useState(false);   // v2.953 월간 보고서(§12.2-8)
   useEffect(() => {
     const ac = new AbortController();
     setGot(null); setErr(null);
@@ -46,6 +48,8 @@ export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
             {(got.allDatacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </Select>
           {isAdmin && <button type="button" className="sst-btn" onClick={() => setSettingsOpen(true)}>기준(임계값) 설정</button>}
+          <button type="button" className="sst-btn" onClick={() => setNotifyOpen(true)} title="상태가 바뀐 순간만 · 법인 단위 · 알림 채널(설정 › 알림)">알림</button>
+          <button type="button" className="sst-btn" onClick={() => setReportOpen(true)} title="매달 정한 날 · 시각에 판정표 보고서(HTML)를 메일로">월간 보고서</button>
           <button type="button" className="sst-btn primary" onClick={() => setSeq((n) => n + 1)}>지금 판정</button>
         </div>
       </div>
@@ -91,6 +95,8 @@ export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
         </div>
       </div>
       {settingsOpen && <SettingsModal initial={got.settings} onClose={() => setSettingsOpen(false)} onSaved={() => { setSettingsOpen(false); setSeq((n) => n + 1); }} />}
+      {notifyOpen && <NotifyModal isAdmin={isAdmin} items={got.items || []} onClose={() => setNotifyOpen(false)} />}
+      {reportOpen && <ReportModal isAdmin={isAdmin} onClose={() => setReportOpen(false)} />}
     </>
   );
 }
@@ -150,6 +156,127 @@ function SettingsModal({ initial, onClose, onSaved }) {
           <button type="button" className="sst-btn" onClick={onClose}>닫기</button>
           <button type="button" className="sst-btn primary" disabled={busy} onClick={save}>저장</button>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ── v2.953 알림(§12.2-6) — 상태가 바뀐 순간만 · 법인 단위 · 채널은 설정 › 알림(Slack · Teams · 웹훅 · 메일). 첫 실행은 기준만 잡는다. ── */
+function NotifyModal({ isAdmin, items, onClose }) {
+  const [got, setGot] = useState(null);
+  const [err, setErr] = useState('');
+  const [form, setForm] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const load = () => fetchJson('/tools/san-storage/notify').then((d) => { setGot(d); setForm({ enabled: !!d.settings?.enabled, minLevel: d.settings?.minLevel || 'warn', recoveries: d.settings?.recoveries !== false }); }).catch((e) => setErr(e.message));
+  useEffect(() => { load(); }, []);
+  const save = async () => {
+    setBusy(true); setErr(''); setMsg('');
+    try { const r = await putJson('/tools/san-storage/notify-settings', form); if (r?.ok === false) { setErr(r.reason || '저장하지 못했습니다'); return; } setMsg('저장했습니다 — 다음 틱부터 적용됩니다.'); await load(); }
+    catch (e) { setErr(e.message || '저장 실패'); } finally { setBusy(false); }
+  };
+  const runNow = async () => {
+    setBusy(true); setErr(''); setMsg('');
+    try { const r = await postJson('/tools/san-storage/notify/run-now', {}); setMsg(r.action === 'baseline' ? '첫 실행 — 지금 상태를 기준으로만 잡았습니다(다음 변화부터 알립니다).' : r.action === 'sent' ? `알림 ${r.alerts}건(법인) 보냈습니다 — 열림 ${r.opened} · 회복 ${r.recovered}` : r.action === 'quiet' ? '바뀐 상태가 없어 보내지 않았습니다.' : `${r.action}${r.error ? ` — ${r.error}` : ''}`); await load(); }
+    catch (e) { setErr(e.message || '실행 실패'); } finally { setBusy(false); }
+  };
+  const st = got?.status || {};
+  const labelOf = (k) => (items.find((i) => i.k === k) || {}).label || k;
+  return (
+    <Modal title="SAN 스토리지 성능 알림" onClose={onClose} width={760}>
+      <div className="sst" style={{ gap: 10 }}>
+        <div className="sst-note">판정(현황 · 점검과 같은 함수)을 포트 사용량 수집 주기(하한 5분)마다 돌려 <b>상태가 바뀐 순간만</b> 법인 단위로 알립니다(정상 → 주의 · 주의 → 이상 · 회복 · 수집 상태의 보고 끊김). 확인 불가(값 없음)는 올리지도 내리지도 않습니다. 채널 · 수신자는 설정 › 알림의 알림 규칙과 같습니다. 엣지는 보내지 않습니다.</div>
+        {err && <div className="sst-info">{err}</div>}
+        {!got ? <Loading label="알림 설정" /> : (
+          <>
+            <div className="sst-acts" style={{ flexWrap: 'wrap', gap: 14 }}>
+              <label className="muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}><input type="checkbox" disabled={!isAdmin} checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 알림 켬</label>
+              <label className="muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>최소 수준
+                <Select className="sst-inp" disabled={!isAdmin} value={form.minLevel} onChange={(e) => setForm({ ...form, minLevel: e.target.value })} aria-label="최소 수준" style={{ fontFamily: 'inherit' }}>
+                  <option value="warn">주의부터</option><option value="bad">이상만</option>
+                </Select></label>
+              <label className="muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}><input type="checkbox" disabled={!isAdmin} checked={form.recoveries} onChange={(e) => setForm({ ...form, recoveries: e.target.checked })} /> 회복도 알림</label>
+            </div>
+            <div className="sst-hist">
+              <span>마지막 틱</span><b>{st.lastTick?.at ? `${dateClockText(st.lastTick.at)} · 어레이 ${st.lastTick.arrays} · 열림 ${st.lastTick.opened} · 회복 ${st.lastTick.recovered} · 알림 ${st.lastTick.alerts}${st.lastTick.first ? ' · 기준만' : ''}` : '아직 없음'}</b>
+              <span>기준 어레이</span><b>{got.arraysTracked ?? 0}대{st.baselineAt ? ` · ${dateClockText(st.baselineAt)}` : ''}</b>
+              <span>주기</span><b>{st.intervalMs ? `${Math.round(st.intervalMs / 60_000)}분` : '—'}{st.edge ? ' · 엣지(보내지 않음)' : ''}</b>
+              <span>감시 항목</span><b>{(got.settings?.items || items.map((i) => i.k)).map(labelOf).join(' · ')}</b>
+            </div>
+            {(st.history || []).length ? (
+              <div className="sst-table-wrap"><STable minWidth={520}>
+                <thead><tr><th>시각</th><th>법인</th><th>심각도</th><th>내용</th><th>결과</th></tr></thead>
+                <tbody>{st.history.slice(0, 10).map((h, i) => <tr key={i}><td className="mono" data-sort={h.at}>{dateClockText(h.at)}</td><td>{h.dc || '—'}</td><td><span className={`sst-tag ${h.severity === 'critical' ? 'crit' : h.severity === 'warning' ? 'warn' : 'ok'}`}>{h.severity}</span></td><td style={{ whiteSpace: 'normal', fontSize: 12 }}>{h.title}</td><td className="muted" style={{ fontSize: 11.5 }}>{h.result}</td></tr>)}</tbody>
+              </STable></div>
+            ) : <div className="sst-note">보낸 기록이 없습니다.</div>}
+            {msg && <div className="sst-info">{msg}</div>}
+            <div className="sst-acts" style={{ justifyContent: 'flex-end' }}>
+              <button type="button" className="sst-btn" onClick={onClose}>닫기</button>
+              {isAdmin && <button type="button" className="sst-btn" disabled={busy} onClick={runNow} title="설정이 꺼져 있어도 1회 판정해 변화를 보냅니다(첫 실행은 기준만)">지금 판정해 보내기</button>}
+              {isAdmin && <button type="button" className="sst-btn primary" disabled={busy} onClick={save}>저장</button>}
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/* ── v2.953 월간 보고서(§12.2-8) — 자급형 HTML(브라우저에서 PDF 저장). PDF 직접 생성은 한글 글꼴 동봉이 필요해 이번 판은 아니다(정직 기록). ── */
+function ReportModal({ isAdmin, onClose }) {
+  const [got, setGot] = useState(null);
+  const [form, setForm] = useState(null);
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = () => fetchJson('/tools/san-storage/report').then((d) => { setGot(d); const s = d.settings || {}; setForm({ enabled: !!s.enabled, dayOfMonth: s.dayOfMonth ?? 1, time: s.time || '09:00', to: (s.to || []).join(', '), topN: s.topN ?? 10 }); }).catch((e) => setErr(e.message));
+  useEffect(() => { load(); }, []);
+  const save = async () => {
+    setBusy(true); setErr(''); setMsg('');
+    try { const r = await putJson('/tools/san-storage/report-settings', { ...form, to: form.to }); if (r?.ok === false) { setErr(r.reason || '저장하지 못했습니다'); return; } setMsg('저장했습니다.'); await load(); }
+    catch (e) { setErr(e.message || '저장 실패'); } finally { setBusy(false); }
+  };
+  const sendNow = async () => {
+    setBusy(true); setErr(''); setMsg('');
+    try { const r = await postJson('/tools/san-storage/report/send-now', {}); setMsg(r.ok ? `보냈습니다 — 받는 사람 ${r.to}명 · 어레이 ${r.arrays}대` : `보내지 않았습니다(${r.state}) — ${r.reason || ''}`); await load(); }
+    catch (e) { setErr(e.message || '발송 실패'); } finally { setBusy(false); }
+  };
+  const preview = () => { downloadFile('/tools/san-storage/report/preview', `san-storage-report_preview.html`); };
+  return (
+    <Modal title="월간 성능 점검 보고서" onClose={onClose} width={760}>
+      <div className="sst" style={{ gap: 10 }}>
+        <div className="sst-note">매달 정한 날 · 시각(포탈 시각)에 판정표 · 주의/이상 항목 · 상위 어레이 처리량 · 기준 표를 <b>자급형 HTML</b> 로 만들어 메일(설정 › 알림·메일 · 종류 'SAN 스토리지 성능 월간 보고서')에 첨부합니다. 브라우저에서 열어 인쇄 → PDF 로 저장하면 PDF 가 됩니다 — 이번 판은 PDF 를 직접 만들지 않습니다(한글 글꼴을 동봉해야 해서). 놓친 회차는 몰아서 보내지 않습니다.</div>
+        {err && <div className="sst-info">{err}</div>}
+        {!got || !form ? <Loading label="보고서 설정" /> : (
+          <>
+            <div className="sst-acts" style={{ flexWrap: 'wrap', gap: 14 }}>
+              <label className="muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}><input type="checkbox" disabled={!isAdmin} checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 정기 발송 켬</label>
+              <label className="muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>매달 <input className="sst-inp" type="number" min={1} max={28} disabled={!isAdmin} value={form.dayOfMonth} onChange={(e) => setForm({ ...form, dayOfMonth: e.target.value })} style={{ width: 64 }} aria-label="날" />일</label>
+              <label className="muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}><input className="sst-inp" type="time" disabled={!isAdmin} value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} aria-label="시각" /></label>
+              <label className="muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>상위 <input className="sst-inp" type="number" min={1} max={50} disabled={!isAdmin} value={form.topN} onChange={(e) => setForm({ ...form, topN: e.target.value })} style={{ width: 64 }} aria-label="상위 N" />대</label>
+            </div>
+            <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5 }}>받는 사람(쉼표 · 비우면 설정 › 알림·메일의 기본 수신자)
+              <input className="sst-inp" type="text" disabled={!isAdmin} value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} placeholder="storage-team@example.com, ..." style={{ fontFamily: 'inherit', width: '100%' }} aria-label="받는 사람" /></label>
+            <div className="sst-hist">
+              <span>다음 회차</span><b>{got.nextSlot ? dateClockText(got.nextSlot) : (form.enabled ? '—' : '꺼짐')}</b>
+              <span>마지막 발송</span><b>{got.lastSentAt ? dateClockText(got.lastSentAt) : '없음'}</b>
+              <span>마지막 틱</span><b>{got.lastTick?.at ? `${dateClockText(got.lastTick.at)} · ${got.lastTick.action}` : '—'}{got.edge ? ' · 엣지(보내지 않음)' : ''}</b>
+            </div>
+            {(got.history || []).length ? (
+              <div className="sst-table-wrap"><STable minWidth={480}>
+                <thead><tr><th>시각</th><th>종류</th><th>상태</th><th>내용</th></tr></thead>
+                <tbody>{got.history.slice(0, 10).map((h, i) => <tr key={i}><td className="mono" data-sort={h.at}>{dateClockText(h.at)}</td><td>{h.kind === 'manual' ? '수동' : '정기'}</td><td><span className={`sst-tag ${h.state === 'sent' ? 'ok' : h.state === 'failed' ? 'crit' : 'gray'}`}>{h.state}</span></td><td style={{ whiteSpace: 'normal', fontSize: 12 }}>{h.state === 'sent' ? `${h.month || ''} · 받는 사람 ${h.to} · 어레이 ${h.arrays}` : (h.reason || h.code || '')}</td></tr>)}</tbody>
+              </STable></div>
+            ) : <div className="sst-note">보낸 기록이 없습니다.</div>}
+            {msg && <div className="sst-info">{msg}</div>}
+            <div className="sst-acts" style={{ justifyContent: 'flex-end' }}>
+              <button type="button" className="sst-btn" onClick={onClose}>닫기</button>
+              <button type="button" className="sst-btn" disabled={busy} onClick={preview} title="지금 값으로 만든 보고서 HTML 을 내려받습니다(보내지 않음)">미리보기(HTML)</button>
+              {isAdmin && <button type="button" className="sst-btn" disabled={busy} onClick={sendNow}>지금 보내기</button>}
+              {isAdmin && <button type="button" className="sst-btn primary" disabled={busy} onClick={save}>저장</button>}
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );

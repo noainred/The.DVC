@@ -116,7 +116,7 @@ export function judgeArraySide(k, a, v, vendor) {
       if (val == null) return item('unknown', '값 없음');
       const lim = v.compareDiffPct;
       if (lim == null) return item('unknown', `기준 없음 — 차이 ${val}%`, { value: val });
-      return Math.abs(val) >= lim ? item('warn', `차이 ${val}% ≥ ${lim}%`, { value: val }) : item('ok', `차이 ${val}%`, { value: val });
+      return Math.abs(val) >= lim ? item('warn', `차이 ${val}%(절댓값 ${lim}% 이상)`, { value: val }) : item('ok', `차이 ${val}%`, { value: val });
     }
     default: return item('unknown', '모르는 항목');
   }

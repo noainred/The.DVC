@@ -376,3 +376,14 @@
     여전히 심볼릭 이름 `storageKey`) · (H) ISL 단서(`islClue.js`)는 E-포트 24시간 피크 포화도를 **문구에만** 붙인다(판정 불변 · 속도 모르면 null) · (I) 알람 수는 스냅샷 `alerts.unresolved`(못 읽으면 null).
   · 시험 `test/sanStorage2952.test.js`(파서 픽스처 · nodeLoad 확장 · arraySide 순수 · db · 중앙 수신 units · 점검 사유 · 실제 라우트 + 별칭 폴백 + ISL) · 웹 `sanStorage2952.test.js`(문구 · 선 차트 · 소스 규약).
   · 남긴 것: 어레이 측 **실장비 캡처 확인**(PowerStore cpu_utilization · Unity 이력 수집 켜짐) · PowerMax 포트 단위(FEPort 경로 미사용) · 장비 CSV 가져오기의 `nodeLoadEnabled` 칸(아이실론 때부터 없음).
+- **v2.953 — SAN 스토리지 성능 2차: 알림 · 자기 기준선 · 월간 보고서(HTML) · 공개 API · 용량 × 성능**(설계 README §8.3)
+  · 알림(`storagePerfNotifyStore.js` 순수 + `storagePerfNotify.js` 실행기)은 **현황 · 점검과 같은 함수**로 판정한 스냅샷을 직전과 비교해 **상태가 바뀐 순간만** 법인 단위로 보낸다 —
+    unknown · na 는 수준이 아니다(올리지도 내리지도 않음) · `collect` ok → unknown 만 '보고 끊김' · 첫 비교는 baseline(보내지 않음) · 타이머 하한 5분 · 중앙만 · 설정 파일 손상은 preserveCorrupt.
+  · 자기 기준선(`storageBaseline.js`)은 창 **시작 전** 4주 같은 요일 × 시간 칸 평균이고 허용 폭은 기준 설정 `baselineTolerancePct`(null = 끔) — 표본 3개 미만 · 0.5 Gb/s 미만 차이는 판정하지 않는다.
+    화면은 `baseline.applicable` 일 때만 marks 를 쓴다(없으면 범례 · 테두리 없음). 기준선은 판정 항목이 아니다(점검 overall 불변).
+  · 월간 보고서는 **자급형 HTML**(스크립트 없음 · 절마다 `overflow-x:auto`) — PDF 를 직접 만들지 않는다(글꼴 동봉 필요 · 정직 기록). `planMonthlyTick` 은 놓친 회차를 몰아서 보내지 않고
+    `missed` 로 기록만 · 유예 30분 · 설정이 바뀌면 rebase. '지금 보내기' 는 SMTP 꺼짐 · 실패면 **409** 로 '보내지 않았다' 고 말한다. 기준 표의 값은 `settings.values`(items 는 정의만 — 전부 '비움' 으로 적던 결함).
+  · 공개 API `/san-storage/*` 는 허용 목록에 `requiresFullScope: true` 로 선언한다 — 범위 거절은 `endpointAllowed` 게이트 **하나**(핸들러에 두 벌 두지 않는다) · 핸들러는 404 catch-all **앞**에 등록
+    (뒤에 두면 닿지 않는다 — 시험 ④ 가 잡았다).
+  · 용량 × 성능은 **표시 규칙**(`QUADRANT_RULE` 80% · 20%)이지 판정이 아니다 — 각주에 적고 점검에 넣지 않는다. `growthLookup` 의 `daysToFull` 은 일수(숫자)다(growth.js 객체를 그대로 내보내지 말 것).
+  · 시험 `test/sanStorage2953.test.js` · 웹 `sanStorage2953.test.js`. 시각 의존 거짓 실패(참고): `veeam2761b` 의 포트 '9419' 포함 검사가 epoch ms 에 9419 가 드는 구간에 실패했다 → 숫자 경계 정규식.

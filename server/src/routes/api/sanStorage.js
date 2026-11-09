@@ -16,28 +16,26 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { isAdminReq, maskDeviceAddress } from '../../auth/addressMask.js';
 import { logAudit } from '../../audit.js';
-import { listDevices } from '../../sanswitch/registry.js';
-import { listDatacenters } from '../../datacenter/store.js';
-import { storageSeriesMulti, latestSampleTs, endpointKind, perfQueryTtlMs, arraySerialOf, storageKey, metaFor } from '../../sanswitch/perfDb.js';
+import { storageSeriesMulti, endpointKind, perfQueryTtlMs, arraySerialOf, storageKey, metaFor } from '../../sanswitch/perfDb.js';
 import { loadPerfSettings } from '../../sanswitch/perfSettings.js';
 import { sumArrayTraffic } from '../../sanswitch/trafficTotal.js';
-import { buildStorageRows, rowTotals, STATE_TEXT, MIN_PREV_HOURS } from '../../sanswitch/storageList.js';
-import { checkArray, summarizeChecks, CHECK_ITEMS, IMBALANCE_BAD_RATIO, FABRIC_MIN_BPS } from '../../sanswitch/storagePerfCheck.js';
-import { loadArraySide, checkInputFor } from '../../sanswitch/arraySideLoad.js';   // v2.952 어레이 측 성능(디렉터 · 노드 · SP)
-import { localSnapshots as sanLocalSnaps } from '../../sanswitch/store.js';          // v2.952(C) 조닝 별칭 폴백 — 장비별 최신 스냅샷의 zone 멤버
-import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
-import { buildFabrics } from '../../sanswitch/attribution.js';
-import { normWwn } from '../../sanswitch/zoning.js';
-import { islCluesFor, islClueText } from '../../sanswitch/islClue.js';              // v2.952(H) 팹 비대칭 단서 — E-포트 피크 포화도
+import { rowTotals, STATE_TEXT, MIN_PREV_HOURS } from '../../sanswitch/storageList.js';
+import { CHECK_ITEMS, IMBALANCE_BAD_RATIO, FABRIC_MIN_BPS } from '../../sanswitch/storagePerfCheck.js';
+import { loadArraySide } from '../../sanswitch/arraySideLoad.js';   // v2.952 어레이 측 성능(디렉터 · 노드 · SP)
+import { islCluesFor } from '../../sanswitch/islClue.js';              // v2.952(H) 팹 비대칭 단서 — E-포트 피크 포화도
+import { foldBaseline, compareToBaseline, baselineSummary, BASELINE_WEEKS_DEF } from '../../sanswitch/storageBaseline.js';   // v2.950(§12.2-7) 자기 기준선
+import { loadNotifySettings, saveNotifySettings, notifyLoadError, loadNotifyState, MIN_LEVELS } from '../../sanswitch/storagePerfNotifyStore.js';   // v2.950(§12.2-6) 알림 설정 · 상태(러너는 동적 import — 순환 방지)
 import { loadCheckSettings, saveCheckSettings, publicCheckSettings } from '../../sanswitch/storageCheckSettings.js';
 import { loadDirectorMap, saveDirectorMap, directorMapKey, MAP_LIMITS } from '../../sanswitch/directorMap.js';
-import { directorOf, applyDirectorOverride, VENDOR_LABEL, UNPARSED_GROUP, groupLabel } from '../../sanswitch/directorOf.js';
+import { directorOf, VENDOR_LABEL, UNPARSED_GROUP, groupLabel } from '../../sanswitch/directorOf.js';
 import { IMBALANCE_MIN_BPS, IMBALANCE_RATIO } from '../../sanswitch/portUsage.js';
 import { rangeParams, NONE_DC, capacityIndexFor, perfAbortSignal, abandoned } from './sanSwitch.js';
+import { LIST_WINDOWS, deviceContextOf, buildListCore, growthLookup, runCheck, _resetGrowthMemoForTest, kindResolver, directorResolver, aliasLookupFor } from '../../sanswitch/storagePerfCore.js';   // v2.953 판정 코어(라우트 밖 — 알림 · 보고서 · 공개 API 와 공유)
+export { LIST_WINDOWS, deviceContextOf, buildListCore, growthLookup, runCheck, _resetGrowthMemoForTest };
+import { storagePerfNotifyStatus, pollStoragePerfNotifyOnce } from '../../sanswitch/storagePerfNotify.js';
+import { storagePerfReportStatus, saveReportSettings, buildReport, sendReportNow } from '../../sanswitch/storagePerfReportMail.js';
 import { isMockMode, demoOn } from '../../mock/demo/flags.js';
-import { ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
-import { numOrNull } from '../../util/numOrNull.js';
 import { DAY_OFFSET_MIN, todayStamp } from '../../util/dayKey.js';   // 요일 × 시간 히트맵은 포탈 하루(한국 시각) 기준으로 화면이 접는다 · 파일명 날짜도 포탈 날짜(BUG-3 — UTC 날짜 금지)
 
 const toolsPerm = requirePerm('tools');
@@ -46,114 +44,15 @@ const csvPerm = requirePerm('data.csv');
 const fullScopeOnly = fullScopeOnlyWith('SAN 스토리지 성능은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 const fullRwOnly = fullReadWriteScopeOnlyWith('SAN 스토리지 성능의 기준 · 분류 · 매핑 변경은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다.');
 
-/** 최근 1시간(지금 · 스파크 — 60초 칸) · 최근 7일(24시간 창 · 앞 6일 · 디렉터 · 포트 — 1시간 칸). 숫자는 설계 §4.1 — 화면에 박지 않고 응답에 싣는다. */
-export const LIST_WINDOWS = Object.freeze({ nowHours: 1, nowPoints: 60, trendHours: 168, trendPoints: 168 });
 const KEY_MAX = 160;
 
 /** 요청의 법인 필터 · 장비 · 이름 · 가림 — 형제 라우트(storage-summary)와 같은 규칙. */
-async function deviceContext(req) {
-  if (isMockMode()) { try { await ensureSanSwitchDemo(); } catch { /* 데모 시드 실패는 빈 목록 */ } }
-  const admin = isAdminReq(req);
-  const dcs = String(req.query.datacenterId || '').split(',').map((x) => x.trim()).filter(Boolean).map((x) => (x === NONE_DC ? '' : x));
-  const dcSet = dcs.length ? new Set(dcs) : null;
-  const raw = listDevices().filter((d) => d.enabled !== false && (!dcSet || dcSet.has(String(d.datacenterId || ''))));
-  const devices = admin ? raw : raw.map(maskDeviceAddress);
-  const dcNameOf = (() => {
-    try { const m = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (id) => m.get(id) || id || '(법인 미지정)'; }
-    catch { return (id) => id || '(법인 미지정)'; }
-  })();
-  const deviceMeta = new Map(devices.map((d) => [String(d.id), { name: d.name || d.host || d.id, datacenterId: String(d.datacenterId || ''), datacenterName: dcNameOf(d.datacenterId), agent: String(d.agent || '').trim() }]));
-  const groupOf = new Map(devices.map((d) => [String(d.id), String(d.datacenterId || '')]));
-  const allDatacenters = (() => {
-    const m = new Map();
-    for (const d of listDevices().filter((x) => x.enabled !== false)) {
-      const id = String(d.datacenterId || '');
-      if (!m.has(id)) m.set(id, { id: id || NONE_DC, name: dcNameOf(id), switches: 0 });
-      m.get(id).switches++;
-    }
-    return [...m.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  })();
-  return { admin, dcs, dcSet, devices, ids: devices.map((d) => d.id), deviceMeta, groupOf, dcNameOf, allDatacenters };
-}
-
-/** 분류 — 관리자 재정의 > 등록 스토리지 시리얼 일치 > 이름 규칙(endpointKind — `::` 이면 어레이 추정) . 근거도 함께 준다. */
-function kindResolver(capIdx, map) {
-  return (key, dcId) => {
-    const ov = map.kinds[String(key)];
-    if (ov) return { kind: ov.kind, basis: 'manual' };
-    const serial = arraySerialOf(key);
-    if (serial && capIdx.lookup(serial, dcId)) return { kind: 'array', basis: 'serial' };
-    const k = endpointKind(key, { matched: false });
-    return { kind: k, basis: k === 'unknown' ? 'none' : (String(key).includes('::') ? 'name' : 'flat') };
-  };
-}
-/** 디렉터 — 관리자 매핑 > 이름 규칙 > 조닝 별칭(v2.952 C — 심볼릭 이름이 없는 Unity SPA/SPB 포트는 zone 별칭 `Unity_SPA0_p8` 로). */
-function directorResolver(map, aliasFor = null) {
-  return (port, key) => applyDirectorOverride(directorOf(port.name, { alias: aliasFor ? aliasFor(port.deviceId, port.port) : '' }), map.directors[directorMapKey(key, port.deviceId, port.port)] || null);
-}
-/**
- * v2.952(C): 포트 → 조닝 별칭. port_meta 의 연결 WWN 을 장비별 최신 스냅샷 zone 멤버 별칭(attribution.buildFabrics aliasOf)에서 찾는다.
- * 스냅샷 · DB 가 없으면 빈 조회(별칭 없음 = 폴백 없음 — 판정이 바뀌지 않는다). 요청마다 한 번 만든다.
- */
-async function aliasLookupFor(ctx) {
-  const snapOf = new Map();
-  try {
-    for (const s of [...sanLocalSnaps(), ...edgeSanSwitchSnapshots()]) {
-      if (!s?.deviceId || !ctx.deviceMeta.has(String(s.deviceId))) continue;
-      const cur = snapOf.get(s.deviceId);
-      if (!cur || (s.collectedAt || 0) > (cur.collectedAt || 0)) snapOf.set(s.deviceId, s);
-    }
-  } catch { /* 스냅샷 저장소 불가 — 별칭 없음 */ }
-  const aliasOf = new Map();
-  try {
-    for (const f of buildFabrics([...snapOf.values()].map((s) => { const m = ctx.deviceMeta.get(String(s.deviceId)) || {}; return { ...s, name: m.name || s.name, datacenterId: m.datacenterId || '' }; }))) {
-      for (const [w, a] of f.aliasOf || []) { const k = normWwn(w); if (k && a && !aliasOf.has(k)) aliasOf.set(k, String(a).slice(0, 120)); }
-    }
-  } catch { /* 조닝 해석 실패 — 별칭 없음 */ }
-  let wwnOf = new Map();
-  if (aliasOf.size) { try { wwnOf = new Map((await metaFor(ctx.ids)).map((r) => [`${r.d}|${Number(r.p)}`, normWwn(r.wwn || '')])); } catch { wwnOf = new Map(); } }
-  const fn = (deviceId, port) => { const w = wwnOf.get(`${deviceId}|${Number(port)}`); return w ? (aliasOf.get(w) || '') : ''; };
-  fn.size = aliasOf.size;
-  return fn;
-}
-
-async function loadAggs(ctx, signal) {
-  return Promise.all([
-    storageSeriesMulti(ctx.ids, { hours: LIST_WINDOWS.nowHours, points: LIST_WINDOWS.nowPoints, groupOf: ctx.groupOf, signal }),
-    storageSeriesMulti(ctx.ids, { hours: LIST_WINDOWS.trendHours, points: LIST_WINDOWS.trendPoints, groupOf: ctx.groupOf, withPorts: true, signal }),
-  ]);
-}
-
+async function deviceContext(req) { return deviceContextOf({ admin: isAdminReq(req), dcQuery: req.query.datacenterId }); }
 /** 현황 · 점검이 같이 쓰는 조립 — 응답하지 않고 돌려준다(abandoned 면 null). */
 async function buildList(req, res) {
   const ctx = await deviceContext(req);
-  const st = loadPerfSettings();
-  let agg1h; let agg7d;
-  try { [agg1h, agg7d] = await loadAggs(ctx, perfAbortSignal(res)); }
+  try { return await buildListCore(ctx, perfAbortSignal(res)); }
   catch (e) { if (abandoned(e)) return null; throw e; }
-  let lastTs = new Map();
-  try { lastTs = await latestSampleTs(ctx.ids); } catch { /* DB 불가 — unavailable 이 말한다 */ }
-  const map = loadDirectorMap();
-  const capIdx = capacityIndexFor({ dcSet: ctx.dcSet, split: true, admin: ctx.admin });
-  const kindOf = kindResolver(capIdx, map);
-  const aliasFor = await aliasLookupFor(ctx);
-  const directorFor = directorResolver(map, aliasFor);
-  const carryMs = numOrNull(agg1h.carryMs) ?? (Number(st.intervalMs) || 300_000) * 2;
-  const now = Date.now();
-  const { rows, counts } = buildStorageRows({
-    agg1h, agg7d, deviceMeta: ctx.deviceMeta, deviceLastTs: lastTs, now, carryMs,
-    kindOf: (key, dc) => kindOf(key, dc).kind,
-    capacityOf: (key, dc) => capIdx.lookup(arraySerialOf(key), dc),
-    directorFor,
-  });
-  for (const r of rows) { r.vendorLabel = VENDOR_LABEL[r.vendor] || VENDOR_LABEL.other; r.kindBasis = kindOf(r.key, r.datacenterId).basis; r.name = r.capacity?.name || r.key; }
-  // 지금 합계 — 트래픽 카드(traffic-total)와 같은 함수 · 같은 분류(둘이 다르면 결함).
-  const total = sumArrayTraffic(agg1h, { isArray: (s) => kindOf(s.key, s.group ?? '').kind === 'array', carryMs, activeDeviceIds: new Set(ctx.ids.map(String)), deviceLastTs: lastTs });
-  let lastSampleAt = null;
-  for (const v of lastTs.values()) if (Number.isFinite(Number(v)) && (lastSampleAt == null || Number(v) > lastSampleAt)) lastSampleAt = Number(v);
-  const edgeRaw = ctx.devices.filter((d) => String(d.agent || '').trim());
-  return { ctx, st, agg1h, agg7d, lastTs, map, rows, counts, total, carryMs, now, lastSampleAt, aliasCount: aliasFor.size,
-    edgeSwitches: edgeRaw.length, edgeMissing: edgeRaw.filter((d) => !lastTs.get(String(d.id))).length };
 }
 
 const commonMeta = (b) => ({
@@ -241,6 +140,20 @@ export function registerSanStorage(api) {
     let isl = [];
     try { const m = await islCluesFor((s.deviceIds || []).map((id) => ({ id: String(id), name: (ctx.deviceMeta.get(String(id)) || { name: String(id) }).name })), { signal: perfAbortSignal(res) }); isl = [...m.values()]; }
     catch (e) { if (abandoned(e)) return; isl = []; }
+    // v2.950(§12.2-7) 자기 기준선 — 창 앞 4주의 1시간 집계(같은 스위치들)를 요일 × 시간으로 접어 창의 칸과 견준다(1시간 이하 칸에서만 · 판정 불변 · 폭은 설정 baselineTolerancePct · 비움 = 끔).
+    let baseline = { applicable: false, reason: 'bucket', marks: [], offCount: 0, compared: 0 };
+    try {
+      const tolPct = loadCheckSettings()?.values?.baselineTolerancePct ?? null;
+      if (tolPct == null) baseline = { applicable: false, reason: 'disabled', marks: [], offCount: 0, compared: 0 };
+      else if ((agg.bucketMs || 0) > 0 && agg.bucketMs <= 3_600_000 && (agg.buckets || []).length) {
+        const winFrom = agg.since ?? agg.buckets[0];
+        const base = await storageSeriesMulti(s.deviceIds || [], { from: winFrom - BASELINE_WEEKS_DEF * 7 * 86_400_000, to: winFrom, points: BASELINE_WEEKS_DEF * 168, groupOf: ctx.groupOf, signal: perfAbortSignal(res) });
+        const bs = (base.series || []).find((x) => x.key === key && (x.group ?? '') === dcId) || (base.series || []).find((x) => x.key === key) || null;
+        const fold = foldBaseline(base.buckets || [], bs?.sum || [], { until: winFrom, weeks: BASELINE_WEEKS_DEF });
+        const cmp = compareToBaseline(agg.buckets, s.sum, fold, { bucketMs: agg.bucketMs, tolerance: tolPct / 100 });
+        baseline = { ...cmp, weeks: fold.weeks, from: fold.from, until: fold.until, measured: fold.measured, tolerancePct: tolPct, ...baselineSummary(fold) };
+      }
+    } catch (e) { if (abandoned(e)) return; baseline = { applicable: false, reason: 'error', marks: [], offCount: 0, compared: 0 }; }
     let arraySide = null;
     try {
       arraySide = await loadArraySide(capacity, { serial: arraySerialOf(key), from: winFrom ?? Date.now() - hours * 3_600_000, to: winTo ?? Date.now(), now: Date.now(),
@@ -253,7 +166,7 @@ export function registerSanStorage(api) {
       hours, from, to, rangeIssue: issue || null, buckets: agg.buckets, bucketMs: agg.bucketMs, since: agg.since ?? null, until: agg.until ?? null,
       sum: s.sum, peak: s.peak, avgTotal: s.avgTotal, maxTotal: s.maxTotal, peakAvg: s.peakAvg, peakTotal: s.peakTotal,
       partial: s.partial || [], partialBuckets: s.partialBuckets || 0, carriedCells: s.carriedCells || 0,
-      directors, fabrics, ports, capacity, unparsedGroup: UNPARSED_GROUP, arraySide, isl,
+      directors, fabrics, ports, capacity, unparsedGroup: UNPARSED_GROUP, arraySide, isl, baseline, growth: capacity?.deviceId ? (await growthLookup(Date.now()))(String(capacity.deviceId)) : null,
       intervalMs: st.intervalMs, carryMs: agg.carryMs ?? null, enabled: demoOn(st.enabled), unavailable: !!agg.unavailable, offsetMin: DAY_OFFSET_MIN,
       computedAt: agg.computedAt ?? null, cacheTtlMs: perfQueryTtlMs(), source: agg.source ?? null,
       ...(isMockMode() ? { demo: true } : {}), ...(ctx.admin ? {} : { addressHidden: true }),
@@ -264,27 +177,9 @@ export function registerSanStorage(api) {
   api.get('/tools/san-storage/check', toolsPerm, fullScopeOnly, async (req, res) => {
     const b = await buildList(req, res);
     if (!b) return;
-    const settings = loadCheckSettings();
-    // v2.952(H) — 어레이가 물린 스위치의 ISL 피크 포화도(24시간)를 팹 비대칭 문구에 붙인다(판정은 바꾸지 않는다). 조회 실패는 문구에 '조회 실패'.
-    let islMap = new Map();
-    try {
-      const sws = new Map(); for (const r of b.rows) for (const f of r.fabrics || []) if (f.deviceId) sws.set(String(f.deviceId), { id: String(f.deviceId), name: f.name || String(f.deviceId) });
-      islMap = await islCluesFor([...sws.values()], { signal: perfAbortSignal(res) });
-    } catch (e) { if (abandoned(e)) return; islMap = new Map(); }
-    // v2.952 — 어레이 측 입력(최근 표본 · 장비 호출 0). 짝이 없거나 표본이 없으면 그 사유가 unknown 문구가 된다.
-    const results = [];
-    for (const r of b.rows) {
-      let as = { input: {}, text: '', reason: 'no-device', lastSampleTs: null, eligible: false };
-      try { as = await checkInputFor(r.capacity, { serial: r.serial, now: b.now, switchBps: r.now?.bps ?? null }); }
-      catch (e) { as = { input: {}, text: `어레이 측 값을 읽지 못했습니다: ${String(e?.message || e).slice(0, 100)}`, reason: 'error', lastSampleTs: null, eligible: false }; }
-      const res1 = checkArray(r, settings, { arraySide: Object.keys(as.input).length ? as.input : null, arraySideText: as.text });
-      const clue = islClueText(r.fabrics || [], islMap, { warnPct: settings?.values?.portSatWarnPct ?? null });
-      if (clue && res1.items.fabric && res1.items.fabric.status !== 'na') res1.items.fabric = { ...res1.items.fabric, text: `${res1.items.fabric.text} · ${clue}`, isl: (r.fabrics || []).map((f) => islMap.get(String(f.deviceId)) || null) };
-      results.push({ ...res1,
-        name: r.name, vendor: r.vendor, vendorLabel: r.vendorLabel, datacenterName: r.datacenterName, state: r.state,
-        arraySide: { eligible: as.eligible, reason: as.reason, lastSampleTs: as.lastSampleTs, keys: Object.keys(as.input) } });
-    }
-    res.json({ ok: true, ...commonMeta(b), items: CHECK_ITEMS, results, summary: summarizeChecks(results), settings: publicCheckSettings(), judgedAt: b.now });
+    let r;
+    try { r = await runCheck(b, { signal: perfAbortSignal(res) }); } catch (e) { if (abandoned(e)) return; throw e; }
+    res.json({ ok: true, ...commonMeta(b), ...r });
   });
 
   api.get('/tools/san-storage/check-settings', toolsPerm, fullScopeOnly, (_req, res) => {
@@ -299,6 +194,47 @@ export function registerSanStorage(api) {
   });
 
   /** 분류 · 디렉터 매핑 — 현재 저장값 + 후보(자동이 못 읽은 포트 · 이름 규칙만으로 분류된 키 · 재정의된 것). */
+  /* ── v2.950(§12.2-6) 알림 — 설정(켬 · 최소 수준 · 회복 · 항목) + 상태(마지막 틱 · 기준 어레이 수 · 발송 기록). 발송은 상태가 바뀐 순간만 · 법인 단위 · 중앙만. ── */
+  api.get('/tools/san-storage/notify', toolsPerm, fullScopeOnly, async (_req, res) => {
+    res.json({ ok: true, settings: loadNotifySettings(), loadError: notifyLoadError(), status: storagePerfNotifyStatus(), minLevels: MIN_LEVELS, items: CHECK_ITEMS, arraysTracked: Object.keys(loadNotifyState().last || {}).length });
+  });
+  api.put('/tools/san-storage/notify-settings', adminOnly, fullRwOnly, (req, res) => {
+    const r = saveNotifySettings(req.body || {}, { by: req.user?.username || '' });
+    if (r.issue) return res.status(400).json({ ok: false, reason: r.issue });
+    logAudit({ user: req.user?.username, action: 'SAN 스토리지 성능 알림 설정 변경', target: 'san-storage-notify.json', detail: `${r.settings.enabled ? '켬' : '끔'} · 최소 ${r.settings.minLevel} · 회복 ${r.settings.recoveries ? '알림' : '안 함'}${r.settings.items ? ` · 항목 ${r.settings.items.join(',')}` : ''}` });
+    res.json({ ok: true, settings: r.settings });
+  });
+  /** 지금 판정해 전이를 보낸다(관리자 · 사람이 누름 — 설정이 꺼져 있어도 1회 돈다 · 첫 실행은 기준만 잡는다). */
+  api.post('/tools/san-storage/notify/run-now', adminOnly, fullRwOnly, async (req, res) => {
+    const r = await pollStoragePerfNotifyOnce({ force: true });
+    logAudit({ user: req.user?.username, action: 'SAN 스토리지 성능 알림 지금 실행', target: 'san-storage-notify-state.json', detail: `${r.action} · 알림 ${r.alerts ?? 0}건 · 열림 ${r.opened ?? 0} · 회복 ${r.recovered ?? 0}` });
+    res.json({ ok: r.action !== 'error', ...r });
+  });
+
+  /* ── v2.950(§12.2-8) 월간 보고서 — 설정 · 상태 · 미리보기(HTML) · 지금 보내기. 보고서는 자급형 HTML(브라우저에서 PDF 저장) — PDF 직접 생성은 한글 글꼴 동봉이 필요해 이번 판은 아니다. ── */
+  api.get('/tools/san-storage/report', toolsPerm, fullScopeOnly, async (_req, res) => {
+    res.json({ ok: true, ...storagePerfReportStatus() });
+  });
+  api.put('/tools/san-storage/report-settings', adminOnly, fullRwOnly, async (req, res) => {
+    const r = saveReportSettings(req.body || {}, { by: req.user?.username || '' });
+    if (r.issue) return res.status(400).json({ ok: false, reason: r.issue });
+    logAudit({ user: req.user?.username, action: 'SAN 스토리지 성능 월간 보고서 설정 변경', target: 'san-storage-report.json', detail: `${r.settings.enabled ? '켬' : '끔'} · 매달 ${r.settings.dayOfMonth}일 ${r.settings.time} · 받는 사람 ${r.settings.to.length || '기본'}` });
+    res.json({ ok: true, settings: r.settings });
+  });
+  /** 미리보기 — 지금 값으로 만든 보고서 HTML 그대로(보내지 않는다 · 관리자 아닌 조회자도 주소 가림 판본). */
+  api.get('/tools/san-storage/report/preview', toolsPerm, fullScopeOnly, async (req, res) => {
+    const b = await buildReport({ now: Date.now() });
+    if (String(req.query.format || '') === 'json') return res.json({ ok: true, model: b.model, parts: b.parts, arrays: b.arrays });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="${b.parts.filename}"`);
+    res.send(b.html);
+  });
+  api.post('/tools/san-storage/report/send-now', adminOnly, fullRwOnly, async (req, res) => {
+    const r = await sendReportNow(req.user?.username || 'admin');
+    logAudit({ user: req.user?.username, action: 'SAN 스토리지 성능 월간 보고서 지금 보내기', target: 'san-storage-report.json', detail: `${r.state}${r.reason ? ` · ${r.reason}` : ''}${r.to ? ` · 받는 사람 ${r.to}` : ''}` });
+    res.status(r.ok ? 200 : 409).json(r);
+  });
+
   api.get('/tools/san-storage/mapping', toolsPerm, fullScopeOnly, async (req, res) => {
     const b = await buildList(req, res);
     if (!b) return;

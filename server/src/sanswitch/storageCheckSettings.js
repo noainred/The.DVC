@@ -35,6 +35,8 @@ export const THRESHOLDS = Object.freeze([
   { k: 'pstoreCpuWarnPct', label: 'PowerStore 노드 CPU — 주의', def: 50, min: 1, max: 100, unit: '%', source: 'Dell KB 000192018(업그레이드 전 점검 — 50% 초과 연기 · 간접 근거)', group: 'array', pair: 'pstoreCpuBadPct' },
   { k: 'pstoreCpuBadPct', label: 'PowerStore 노드 CPU — 이상', def: 70, min: 1, max: 100, unit: '%', source: 'Dell KB 000192018(지속 70% 이상 부하 높음 — 간접 근거)', group: 'array' },
   { k: 'compareDiffPct', label: '보고 대조 — 스위치 · 어레이 차이 주의', def: 30, min: 1, max: 100, unit: '%', source: '제안(새 규칙)', group: 'array' },
+  // v2.950(§12.2-7): 자기 기준선 — 지난 4주 같은 요일 · 시간 평균 대비 허용 폭(±%). 판정이 아니라 '평소와 다름' 표시의 폭(비움 = 표시 안 함).
+  { k: 'baselineTolerancePct', label: '자기 기준선 — 평소와 다름 허용 폭(± · 지난 4주 같은 요일 · 시간 평균 대비)', def: 50, min: 5, max: 500, unit: '%', source: '제안(새 규칙 — 기준은 그 어레이의 자기 과거)', group: 'baseline' },
 ]);
 const BY_KEY = new Map(THRESHOLDS.map((t) => [t.k, t]));
 

@@ -191,6 +191,32 @@
 - 정직: PR ⓑ 의 벤더 응답 필드는 문서 · 공개 예제에서 가져온 추정이다. 특히 PowerStore `cpu_utilization` · Unity `fibreChannel.target.*` 이력 수집 켜짐 여부는 장비에서 확인해야 한다
   (`probe.fields` · `probe.counterNote`). 시험 ⑦ 은 실제 라우트를 돌리지만 표본은 합성이다.
 
+### 8.3 2차 — 알림 · 자기 기준선 · 월간 보고서 · 공개 API · 용량 × 성능(v2.953.0 — 2026-11-09 · 같은 요청의 2차 PR)
+- (E) 알림 `sanswitch/storagePerfNotifyStore.js`(순수 — 설정 · 상태 · `diffCheck` · `alertsOf`) + `storagePerfNotify.js`(실행기 — `alerts.notify` · 적응 타이머 하한 5분 · 중앙만):
+  현황 · 점검과 **같은 함수**(`buildListCore → runCheck`)로 판정해 어레이별 스냅샷을 두고 직전과 비교한다 — **상태가 바뀐 순간만**(파트 장애 규약) · 법인 단위 묶음(`san-storage:<dc>`) ·
+  unknown · na 는 수준이 아니라 올리지도 내리지도 않는다 · `collect` 항목의 ok → unknown 은 '보고 끊김' 으로 올린다 · 첫 비교는 기준만(`action: 'baseline'`) · 엣지는 보내지 않는다.
+  설정 `san-storage-notify.json` · 상태 `-state.json`(손상은 preserveCorrupt). 라우트 `GET /notify` · `PUT /notify-settings` · `POST /notify/run-now`.
+- (F) 자기 기준선 `sanswitch/storageBaseline.js`(순수) — 창 시작 전 4주의 어레이 합 시계열을 요일 × 시간 칸으로 접고(`foldBaseline` · 포탈 하루 오프셋), 창의 각 칸을 같은 칸 평균과 비교해
+  허용 폭(기준 설정 `baselineTolerancePct` · 기본 50 · null 이면 끔) 을 벗어나면 `off`. 표본 3개 미만 칸 · 차이 0.5 Gb/s 미만은 판정하지 않는다(`minSamples` · `minAbs`). `/array` 응답 `baseline`
+  (`applicable · marks · summary · reason`). 화면: 선 차트의 고리 표시 + 범례 '평소와 다름 n/m칸' · 히트맵 칸 테두리(`foldHeatmap(..., marks)` 가 칸마다 `off` 수를 센다).
+- (G) 월간 보고서 `sanswitch/storagePerfReport.js`(순수 — 설정 정규화 · `monthlySlot` · `planMonthlyTick`(none/send/missed/rebase · 유예 30분 · 몰아서 보내지 않음) · `buildReportModel` ·
+  `renderReportHtml`(자급형 HTML · 스크립트 없음 · 인쇄 CSS · 절마다 가로 스크롤) · `reportMailParts`) + `storagePerfReportMail.js`(실행기 60초 틱 · 메일 종류 `san-storage-report`).
+  **PDF 는 직접 만들지 않는다**(정직 — §12.2-8 의 '월간 점검 PDF 인프라 재사용' 전제가 틀렸다: 저장소에 PDF 생성기 · 한글 글꼴이 없다. 브라우저 인쇄 → PDF 로 안내). 라우트 `GET /report` ·
+  `PUT /report-settings` · `GET /report/preview`(HTML · `?format=json`) · `POST /report/send-now`(SMTP 꺼짐 · 실패면 409 — 보냈다고 말하지 않는다).
+- (J) 공개 API — 허용 목록 분류 `san` · `/san-storage/arrays` · `/san-storage/check`(`requiresFullScope` — 범위 지정 키는 게이트에서 403 `needs-full-scope`). 처음엔 핸들러를 404 catch-all
+  **뒤에** 등록해 닿지 않았고(시험 ④ 가 잡았다), 범위 거절도 핸들러 안에 한 벌 더 두었다가 게이트 하나로 합쳤다(판정 코어 하나).
+- (K) 용량 × 성능 교차 보기 — `growthLookup`(storage `dailySeries + growthMatrix` 30일 · 10분 기억 · DB 없으면 전부 null)을 현황 행 `growth` 에 붙이고 웹 `CrossView` 가 표시 규칙
+  `QUADRANT_RULE`(용량 80% · 회선 20%)로 사분면 라벨을 적는다 — **판정이 아니라 표시**(각주). `daysToFull` 은 growth.js 의 `{days, basis}` 객체를 그대로 내보내 '—' 로만 보이던 것을
+  일수(숫자)로 고쳤다(Chromium 에서 발견). 짝이 없으면 '—'.
+- 시험 `test/sanStorage2953.test.js`(기준선 · 알림 저장소 · 보고서 순수 · 실제 라우트 — 알림 run-now baseline → quiet · 보고서 미리보기 HTML/JSON · 보내기 409 · 공개 API 키 3종) ·
+  웹 `sanStorage2953.test.js`(히트맵 marks · 사분면 · 소스 규약 — 모달은 PUT/POST 반환값 확인 · 날 table 없음 · 훅은 조기 return 위).
+- Chromium(목 서버 · 1440/400 · 11:25~11:34 KST): 현황 교차 보기(30대 · 사분면 알약 · 소진 예상 일수) · 상세(기준선 범례 '평소와 다름 0/97칸' — 데모는 벗어난 칸이 없어 고리 표시 자체는
+  단위 시험으로만 확인) · 점검 '알림' · '월간 보고서' 모달 · 보고서 HTML 1440/400 — 가로 넘침 0 · pageerror 0 · 1440 표 잘림 0(보고서 HTML 직접 열기의 console 404 는 `/favicon.ico`).
+  판독에서 고친 것: 보고서 '판정 기준' 표가 기본값을 전부 '비움' 으로 적던 결함(`settings.items` 에는 정의만 있고 값은 `settings.values`) · 보고서 400px 넘침 557px(절마다 `overflow-x:auto`) ·
+  현황 상태 알약 400px 잘림(PR ⓐ 때부터 — 600px 이하 줄바꿈).
+- 정직: 알림 · 보고서의 발송은 시험에서 SMTP 가 꺼져 있어 '보내지 않음(409 · skipped)' 경로만 실행했다 — 실제 메일 본문 · 첨부는 `reportMailParts` 단위 시험과 미리보기로 확인. 기준선은
+  데모 데이터(수식)라 벗어난 칸이 생기지 않았다.
+
 ## 9. 출처(어레이 측 API — 2026-11-08 웹 확인 · 실장비 미확인)
 
 - PowerMax FEDirector 지표: Dell PowerMax Splunk 애드온 `fe_dir.rst` · Dynatrace 'dell emc powermax' 확장 지표 표 · Dell KB 000213922(V4 지표 제거 · help 엔드포인트) · Dell KB 000214283(디바이스 레벨 지표) · PowerShell 모듈 샘플 payload(FrontEnd.xml) · Dell infohub 'What's new in PowerMax REST API 10.0'(`directorId: "OR-1C"` 예).

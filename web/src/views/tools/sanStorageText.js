@@ -257,8 +257,9 @@ export function seriesStats(values = [], peaks = [], buckets = [], { until = nul
   return { now: last >= 0 && !stale ? values[last] : null, nowTs: last >= 0 ? buckets[last] : null, stale, avg: cnt ? sum / cnt : null, max, maxTs, peakMax, measured: cnt, total: values.length };
 }
 /** 요일 × 시간 접기(포탈 하루 — offsetMin · 서버 값). 빈 칸은 평균에서 뺀다. */
-export function foldHeatmap(buckets = [], values = [], offsetMin = 540) {
-  const cells = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ sum: 0, n: 0, avg: null })));
+export function foldHeatmap(buckets = [], values = [], offsetMin = 540, marks = null) {
+  // v2.953: marks(서버 baseline.marks — 같은 길이)가 있으면 칸마다 '평소와 다름' 표본 수(off)를 센다. 없으면 0.
+  const cells = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ sum: 0, n: 0, avg: null, off: 0 })));
   let max = null;
   for (let i = 0; i < buckets.length; i++) {
     const v = values[i];
@@ -267,6 +268,7 @@ export function foldHeatmap(buckets = [], values = [], offsetMin = 540) {
     const day = (local.getUTCDay() + 6) % 7;   // 월=0
     const hour = local.getUTCHours();
     const c = cells[day][hour]; c.sum += v; c.n++;
+    if (marks?.[i]?.off) c.off += 1;
   }
   for (const row of cells) for (const c of row) { c.avg = c.n ? c.sum / c.n : null; if (c.avg != null && (max == null || c.avg > max)) max = c.avg; }
   const busiest = (() => { let best = null; for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) { const c = cells[d][h]; if (c.avg != null && (!best || c.avg > best.avg)) best = { day: d, hour: h, avg: c.avg }; } return best; })();
@@ -356,4 +358,30 @@ export function lineModel(cols = [], seriesList = [], { w = 1140, h = 200, padL 
 export function feMetricsPresent(side) {
   const units = side?.units || [];
   return (side?.metrics || []).filter((m) => units.some((u) => u?.latest?.[m.k] != null || (side?.series?.byUnit?.[u.id]?.[m.k] || []).some((v) => v != null)));
+}
+
+/* ── v2.953 용량 × 성능 교차 보기(§12.2-12) ───────────────────────────────── */
+/** 표시 규칙(설정 없음 · 각주에 적는다): 용량 사용률 fullPct 이상 = '찼음' · 회선 사용률 busyUtilPct 이상 = '바쁨'. 둘 중 하나라도 없으면 판정 없음. */
+export const QUADRANT_RULE = Object.freeze({ fullPct: 80, busyUtilPct: 20 });
+export function capPerfQuadrant(r, rule = QUADRANT_RULE) {
+  const used = r?.capacity?.pct ?? r?.growth?.pctUsed ?? null;
+  const util = r?.utilPct ?? null;
+  if (used == null || util == null) return { key: 'unknown', label: '판정 없음', tone: 'gray', why: used == null ? '용량(등록 스토리지 짝) 없음' : '회선 사용률 없음' };
+  const full = used >= rule.fullPct; const busy = util >= rule.busyUtilPct;
+  if (full && busy) return { key: 'full-busy', label: '찼고 바쁨', tone: 'crit', why: '용량 · 성능 모두 증설 후보' };
+  if (full) return { key: 'full-idle', label: '찼는데 한가함', tone: 'warn', why: '용량만 — 정리 · 이관 후보' };
+  if (busy) return { key: 'free-busy', label: '바쁜데 여유', tone: 'blue', why: '성능만 — 포트 · 디렉터 증설 후보' };
+  return { key: 'ok', label: '여유 · 한가함', tone: 'ok', why: '' };
+}
+/** 바이트 → TB(소수 1자리 · 부호) · 없으면 '—'. */
+export function tbText(bytes) {
+  if (bytes == null || bytes === '' || Number.isNaN(Number(bytes))) return '—';
+  const tb = Number(bytes) / 1e12;
+  return `${tb > 0 ? '+' : ''}${(Math.round(tb * 10) / 10).toFixed(1)} TB`;
+}
+/** 소진 예상 일수 → 문구. */
+export function daysText(d) {
+  if (d == null || d === '' || Number.isNaN(Number(d))) return '—';
+  const n = Math.round(Number(d));
+  return n > 3650 ? '10년 이상' : `${n.toLocaleString('en-US')}일`;
 }

@@ -6,7 +6,6 @@
  *    노출하지 않는다('vCenter 귀속 없는 데이터는 범위 계정에 노출 금지' — server/CLAUDE.md).
  *  - 변경(등록/수정/삭제/테스트/수집): adminOnly + 감사로그.
  */
-import { numOrNull } from '../../util/numOrNull.js';
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import crypto from 'node:crypto';
 import { snapMemo, sendCached } from '../../util/snapCache.js';   // v2.731(A6-05): 목록 응답 기억 — 내용 지문 키
@@ -41,15 +40,14 @@ import { saveBaseline, getBaseline, clearBaseline, publicBaseline, listBaselines
 import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable, invalidatePerfQueries, perfQueryTtlMs } from '../../sanswitch/perfDb.js';
 import * as pu from '../../sanswitch/portUsage.js';   // v2.748 포트 사용량 화면(순수 조립)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
-import { listDevices as listStorageDevices } from '../../storage/registry.js';
-import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
-import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 import * as swBulk from '../../sanswitch/bulk.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { isDemoGuest, DEMO_ONLY_REASON } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03·B2-01·R1-06)
 import { isSanDemoId } from '../../mock/demo/sanswitch.js';
+import { NONE_DC, abandoned, capacityIndexFor } from '../../sanswitch/storagePerfCore.js';   // v2.953: 라우트 밖(알림 · 보고서 · 공개 API)도 쓰는 코어 — 재수출
+export { NONE_DC, abandoned, capacityIndexFor };
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -125,7 +123,6 @@ export function sanListKeyOf({ local = [], edge = [], devices = [], pending = []
 }
 
 /** `?ports=1,2,3` 파싱(순수). 빈 값/빈 토큰은 무시 — `''.split(',')` → [''] → Number('') → 0 함정 방지. */
-export const NONE_DC = '__none__';
 
 /**
  * 조회 기간 파라미터(v2.420, 사용자 요구 '조회 조건에 내가 원하는 기간의 값을 볼 수 있는 기능').
@@ -188,39 +185,7 @@ export function perfAbortSignal(res) {
   res.on('close', () => { if (!res.writableEnded) ac.abort(); });
   return ac.signal;
 }
-/** 요청한 화면이 떠나 멈춘 조회 — 받을 사람이 없으니 응답하지 않는다(소켓은 이미 닫혔다). */
-export const abandoned = (e) => e?.code === 'abandoned';
 
-/**
- * 등록 스토리지의 최신 스냅샷(용량) 색인 — 시리얼 정규화 후 대조(storage-summary · v2.948 SAN 스토리지 성능이 같은 색인을 쓴다 — 코어 하나).
- * 법인별로 분리해 볼 때는 **그 법인의 스토리지 용량만** 붙여야 한다 — 그래서 키에 법인을 넣는다. 확실히 일치할 때만 붙이고 아니면 null(억지 매칭 금지).
- */
-export function capacityIndexFor({ dcSet = null, split = true, admin = false } = {}) {
-  const norm = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
-  const stDevById = new Map(listStorageDevices().map((d) => [d.id, admin ? d : maskDeviceAddress(d)]));
-  const capBySerial = new Map();   // `${dc}\u0000${serial}` 또는 split 아니면 serial
-  const capKey = (dcId, serial) => (split ? `${dcId}\u0000${serial}` : serial);
-  for (const snap of [...storageLocalSnaps(), ...edgeStorageSnapshots()]) {
-    if (!snap?.ok) continue;
-    const d = stDevById.get(snap.deviceId) || {};
-    if (dcSet && !dcSet.has(String(d.datacenterId || ''))) continue;  // 범위 밖 법인의 어레이는 붙이지 않는다
-    const info = {
-      deviceId: snap.deviceId, name: d.name || snap.name || '', type: d.type || '',
-      totalBytes: snap.capacity?.totalBytes ?? null, usedBytes: snap.capacity?.usedBytes ?? null,
-      pct: snap.capacity?.pct ?? null,
-      // v2.952(SAN 스토리지 성능 ⓑ): 어레이 측 성능 · 경보 연동에 필요한 것 — 미해결 알람 수(못 읽었으면 null) · 수집 시각 · 수집 방식 · 표본 토글 · 위임 엣지.
-      alerts: numOrNull(snap.alerts?.unresolved), collectedAt: numOrNull(snap.collectedAt), collectMethod: d.collectMethod || 'api',
-      nodeLoadEnabled: d.nodeLoadEnabled !== false, agent: String(d.agent || ''),
-    };
-    // v2.606(감사 CEN2606-04): appliances 가 배열이 아니거나 원소가 null 이면 이 요약 전체가 500 이었다 — 객체 원소의 글자만 읽는다.
-    const apps = Array.isArray(snap.extra?.appliances) ? snap.extra.appliances : [];
-    const keys = [snap.serial, ...apps.map((a) => (a && typeof a === 'object' ? a.serviceTag : null))];
-    for (const key of keys) {
-      if (key && (typeof key === 'string' || typeof key === 'number')) capBySerial.set(capKey(String(d.datacenterId || ''), norm(key)), info);
-    }
-  }
-  return { lookup: (serial, dcId = '') => (serial ? (capBySerial.get(capKey(String(dcId ?? ''), norm(serial))) || null) : null), size: capBySerial.size };
-}
 
 export function registerSanSwitch(api) {
 
