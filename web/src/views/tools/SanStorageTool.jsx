@@ -12,7 +12,7 @@ import { hashSegments } from '../../hooks/hashTab.js';
 import SanStorageCheck from './SanStorageCheck.jsx';
 import SanStorageMapping from './SanStorageMapping.jsx';
 import { TABS, RANGES, rangeOf, rangeQuery, windowLabel, GROUPINGS, MODES, rateText, pctText, deltaOf, deltaNote, dayTB, stateTag, imbalanceTag, liveText, intervalText,
-  agoShort, clockText, dateClockText, kpisOf, filterRows, sortRowsBy, SORTS, sparkSegments, stackModel, tickLabels, seriesStats, foldHeatmap, foldSeries, csvText, csvFileName, gbps, vizColor, VENDOR_SHORT, feValueText, lineModel, feMetricsPresent, FE_UNIT_TEXT } from './sanStorageText.js';
+  agoShort, clockText, dateClockText, kpisOf, filterRows, sortRowsBy, SORTS, sparkSegments, stackModel, tickLabels, seriesStats, foldHeatmap, foldSeries, csvText, csvFileName, gbps, vizColor, VENDOR_SHORT, feValueText, lineModel, feMetricsPresent, FE_UNIT_TEXT, capPerfQuadrant, tbText, daysText, QUADRANT_RULE } from './sanStorageText.js';
 import './sanStorage.css';
 
 const BASE = ['tools', 'san-storage'];
@@ -99,6 +99,7 @@ function Header({ tab, setTab, isAdmin }) {
 /* ── 현황 ─────────────────────────────────────────────────────────────────────── */
 function ListTab({ dc, setDc, onOpen }) {
   const [vendor, setVendor] = useState('');
+  const [view, setView] = useState('table');   // v2.953 표 · 용량 × 성능 교차 보기(훅은 조기 return 위)
   const [sortK, setSortK] = useState('now');
   const [q, setQ] = useState('');
   const params = dc ? { datacenterId: dc } : {};
@@ -157,9 +158,14 @@ function ListTab({ dc, setDc, onOpen }) {
             {imb.length ? <span className="sst-tag warn">편중 {imb.length}</span> : null}
             {data.totals?.unmeasured ? <span className="sst-tag gray">측정 없음 {data.totals.unmeasured}</span> : null}
             {data.edgeMissing ? <span className="sst-tag crit">엣지 미보고 {data.edgeMissing}</span> : null}
+            <div className="sst-seg" role="group" aria-label="보기" style={{ marginLeft: 6 }}>
+              <button type="button" className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}>표</button>
+              <button type="button" className={view === 'cross' ? 'on' : ''} onClick={() => setView('cross')} title="용량(등록 스토리지 사용률 · 30일 증가 · 소진 예상) × 성능(24시간 평균 · 회선 사용률 · 7일 대비)">용량 × 성능</button>
+            </div>
           </div>
           <span className="muted" style={{ fontSize: 12 }}>호스트(HBA)로 분류된 연결 대상 {data.counts?.host ?? 0}개는 이 표에 없습니다 — 어레이인데 호스트로 잡혔으면 '분류 · 매핑' 탭에서 지정</span>
         </div>
+        {view === 'cross' ? <CrossView rows={rows} onOpen={onOpen} /> : (
         <div className="sst-table-wrap">
           <STable minWidth={1040}>
             <thead><tr>
@@ -188,6 +194,7 @@ function ListTab({ dc, setDc, onOpen }) {
             </tbody>
           </STable>
         </div>
+        )}
         <div className="sst-foot" style={{ padding: '10px 18px', borderTop: '1px solid var(--border-soft)' }}>
           지금 = 수집 주기({intervalText(data.intervalMs) || '—'}) 안에서 팹 A/B 표본이 다 모인 마지막 칸 · 회선 사용률 = 송수신 합 ÷ 연결 포트 속도 합(포트 사용량 탭 '포화도' 와 같은 계산 · FC 는 전이중이라 이론상 200% 까지) · 모르는 값('—')은 정렬에서 항상 뒤
         </div>
@@ -222,6 +229,49 @@ function emptyWhy(data) {
   if ((data.counts?.host || 0) > 0) return `어레이로 분류된 연결 대상이 없습니다(호스트 ${data.counts.host}개는 있습니다) — 평평한 이름의 어레이는 '분류 · 매핑' 탭에서 어레이로 지정할 수 있습니다.`;
   return '이 범위에서 수집된 포트 사용량이 없습니다 — 첫 주기(수집 주기 + 엣지 설정 pull) 뒤에 채워지거나, 장비 상세의 사용량 분석 탭이 사유를 말합니다.';
 }
+/* ── v2.953 용량 × 성능 교차 보기(§12.2-12) — 증가량(storage/growth.js 30일 · 짝 지은 스토리지)과 디렉터 처리량 추세를 한 표에. 사분면 라벨은 표시 규칙(각주)이지 판정이 아니다. */
+function CrossView({ rows, onOpen }) {
+  const quad = (r) => capPerfQuadrant(r);
+  const counts = {};
+  for (const r of rows) { const k = quad(r).key; counts[k] = (counts[k] || 0) + 1; }
+  return (
+    <>
+      <div className="sst-row" style={{ padding: '10px 18px 0' }}>
+        {[['full-busy', '찼고 바쁨'], ['full-idle', '찼는데 한가함'], ['free-busy', '바쁜데 여유'], ['ok', '여유 · 한가함'], ['unknown', '판정 없음']].map(([k, l]) => (
+          <span key={k} className={`sst-tag ${k === 'full-busy' ? 'crit' : k === 'full-idle' ? 'warn' : k === 'free-busy' ? 'blue' : k === 'ok' ? 'ok' : 'gray'}`}>{l} {counts[k] || 0}</span>
+        ))}
+      </div>
+      <div className="sst-table-wrap">
+        <STable minWidth={1040}>
+          <thead><tr><th>법인</th><th>스토리지</th><th className="r">용량 사용률</th><th className="r">30일 증가</th><th className="r">소진 예상</th><th className="r">24시간 평균</th><th>회선 사용률</th><th className="r">7일 대비</th><th>사분면</th></tr></thead>
+          <tbody>
+            {rows.map((r) => {
+              const qd = quad(r); const d = deltaOf(r.delta7d); const g = r.growth || null;
+              return (
+                <tr key={`${r.datacenterId}|${r.key}`} className="click" onClick={() => onOpen(r)} title="상세 보기">
+                  <td><b>{r.datacenterName || '—'}</b></td>
+                  <td data-sort={r.name}><div className="sst-name">{r.name}</div><div className="sst-sub mono"><span className={`sst-vend ${r.vendor || 'other'}`}>{VENDOR_SHORT[r.vendor] || r.vendorLabel}</span> {r.capacity?.name ? `등록 ${r.capacity.name}` : '등록 스토리지 짝 없음'}</div></td>
+                  <td className="r mono" data-sort={r.capacity?.pct ?? ''}>{r.capacity?.pct != null ? `${Math.round(r.capacity.pct)}%` : '—'}</td>
+                  <td className="r mono" data-sort={g?.bytes30d ?? ''} title={g?.reason ? `30일 증가량 없음 — ${g.reason}` : g?.exact === false ? '정확히 30일 전 기준선이 없어 가까운 날로 셈' : ''}>{tbText(g?.bytes30d)}</td>
+                  <td className="r mono" data-sort={g?.daysToFull ?? ''}>{daysText(g?.daysToFull)}</td>
+                  <td className="r mono" data-sort={r.avg24 ?? ''}>{rateText(r.avg24)}</td>
+                  <td data-sort={r.utilPct ?? ''}><div className="sst-bar"><div className="tr">{r.utilPct != null ? <span style={{ width: `${Math.min(100, r.utilPct)}%` }} /> : null}</div><span className="pct">{pctText(r.utilPct)}</span></div></td>
+                  <td className="r" data-sort={r.delta7d ?? ''}><span className={`sst-delta ${d.tone}`}>{d.text}</span></td>
+                  <td data-sort={qd.key}><span className={`sst-tag ${qd.tone}`} title={qd.why}>{qd.label}</span></td>
+                </tr>
+              );
+            })}
+            {!rows.length && <tr><td colSpan={9}><div className="sst-empty"><b>어레이가 없습니다</b></div></td></tr>}
+          </tbody>
+        </STable>
+      </div>
+      <div className="sst-foot" style={{ padding: '10px 18px', borderTop: '1px solid var(--border-soft)' }}>
+        표시 규칙(설정 없음): 용량 사용률 {QUADRANT_RULE.fullPct}% 이상 = '찼음' · 회선 사용률 {QUADRANT_RULE.busyUtilPct}% 이상 = '바쁨'. 용량 · 30일 증가 · 소진 예상은 시리얼로 짝 지은 등록 스토리지의 일 롤업(스토리지 증가량 화면과 같은 계산) — 짝이 없으면 '—' · 판정 없음.
+      </div>
+    </>
+  );
+}
+
 function Spark({ values }) {
   const segs = sparkSegments(values, 88, 26);
   if (!segs.length) return <span className="faint" style={{ fontSize: 11.5 }}>표본 없음</span>;
@@ -260,7 +310,8 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
   }, [data, grouping, peak]);
   const model = useMemo(() => (data ? stackModel(data.buckets || [], series, { w: 1140, h: 240 }) : null), [data, series]);
   const stats = useMemo(() => (data ? seriesStats(data.sum || [], data.peak || [], data.buckets || [], { until: data.until, carryMs: data.carryMs, bucketMs: data.bucketMs }) : null), [data]);
-  const heat = useMemo(() => (week && !week.error && week.buckets ? foldHeatmap(week.buckets, week.sum, week.offsetMin ?? 540) : null), [week]);
+  const heat = useMemo(() => (week && !week.error && week.buckets ? foldHeatmap(week.buckets, week.sum, week.offsetMin ?? 540, week.baseline?.applicable ? week.baseline.marks : null) : null), [week]);
+  const marks = data?.baseline?.applicable ? data.baseline.marks : null;   // v2.953 자기 기준선 — 같은 요일 · 시간 4주 평균 대비 '평소와 다름' 칸
   const weekStats = useMemo(() => (week && !week.error && week.buckets ? seriesStats(week.sum || [], week.peak || [], week.buckets || [], { until: week.until }) : null), [week]);
   if (!arrayKey) return <div className="sst-empty"><b>어레이 키가 없습니다</b><button type="button" className="sst-btn sm" onClick={onBack}>← 현황</button></div>;
   const onMove = (e) => {
@@ -327,7 +378,7 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
           <div className="sst-card">
             <div className="sst-cardhead">
               <div className="sst-title"><h4>처리량 추이 — {GROUPINGS.find(([k]) => k === grouping)?.[1]}{grouping !== 'total' ? ' 쌓기' : ''}</h4><span className="sst-tag gray">{intervalText(data.bucketMs)} {peak ? '피크' : '평균'}</span><span className="muted" style={{ fontSize: 12 }}>세로축 Gb/s · 송수신 합</span></div>
-              <div className="sst-legend">{series.map((s) => <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>)}{stats?.avg != null && grouping === 'total' ? <span><em />구간 평균 {rateText(stats.avg)}</span> : null}{model?.gaps?.length ? <span><i style={{ background: 'repeating-linear-gradient(135deg, var(--border) 0 3px, transparent 3px 6px)' }} />부분 합 · 결측 {model.gaps.length}칸 — 그리지 않음</span> : null}</div>
+              <div className="sst-legend">{series.map((s) => <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>)}{stats?.avg != null && grouping === 'total' ? <span><em />구간 평균 {rateText(stats.avg)}</span> : null}{data.baseline?.applicable ? <span title={`지난 ${data.baseline.weeks}주 같은 요일 · 시간 평균(자기 기준선) 대비 ±${data.baseline.tolerancePct}% 를 벗어난 칸 — 판정이 아니라 표시 · 표본 ${data.baseline.measured}칸 · 기준선 칸 ${data.baseline.cells}/168`}><i className="sst-ring" />평소와 다름 {data.baseline.offCount}/{data.baseline.compared}칸</span> : data.baseline?.reason === 'disabled' ? <span className="faint" title="기준 설정의 '자기 기준선 허용 폭' 을 비우면 표시하지 않습니다">기준선 끔</span> : null}{model?.gaps?.length ? <span><i style={{ background: 'repeating-linear-gradient(135deg, var(--border) 0 3px, transparent 3px 6px)' }} />부분 합 · 결측 {model.gaps.length}칸 — 그리지 않음</span> : null}</div>
             </div>
             {model && model.n > 1 ? (
               <div className="sst-plot" ref={plotRef} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
@@ -337,12 +388,14 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
                   {model.gaps.map((i) => <rect key={i} x={model.x(i) - (model.w - model.padL - model.padR) / Math.max(1, model.n - 1) / 2} y={model.padT} width={(model.w - model.padL - model.padR) / Math.max(1, model.n - 1)} height={model.h - model.padT - model.padB} fill="url(#sst-hatch)" />)}
                   {model.areas.map((a) => <path key={a.key} d={a.d} fill={a.color} fillOpacity={grouping === 'total' ? 0.18 : 0.85} stroke={grouping === 'total' ? a.color : 'none'} strokeWidth={grouping === 'total' ? 1.6 : 0} />)}
                   {grouping === 'total' && stats?.avg != null ? <line x1={model.padL} x2={model.w - model.padR} y1={model.y(gbps(stats.avg))} y2={model.y(gbps(stats.avg))} stroke="var(--text-dim)" strokeDasharray="4 4" /> : null}
+                  {marks ? marks.map((m, i) => (m?.off && (peak ? data.peak : data.sum)[i] != null ? <circle key={`m${i}`} cx={model.x(i)} cy={model.y(gbps((peak ? data.peak : data.sum)[i]))} r="3.4" fill="none" stroke="var(--amber)" strokeWidth="1.6" /> : null)) : null}
                   {hover != null ? <line x1={model.x(hover)} x2={model.x(hover)} y1={model.padT} y2={model.h - model.padB} stroke="var(--text)" strokeOpacity=".5" strokeDasharray="2 3" /> : null}
                   {ticks.map((t) => <text key={t.i} x={model.x(t.i)} y={model.h + 12} textAnchor="middle">{t.label}</text>)}
                 </svg>
                 {hover != null && (
                   <div className="sst-card" style={{ position: 'absolute', top: 8, left: model.x(hover) > model.w / 2 ? undefined : `${(model.x(hover) / model.w) * 100 + 1}%`, right: model.x(hover) > model.w / 2 ? `${100 - (model.x(hover) / model.w) * 100 + 1}%` : undefined, padding: '8px 10px', gap: 2, fontSize: 12, minWidth: 180, pointerEvents: 'none', background: 'var(--panel-2)' }}>
                     <div className="mono" style={{ fontWeight: 600 }}>{dateClockText(data.buckets[hover])} · 합계 {rateText((peak ? data.peak : data.sum)[hover])}</div>
+                    {marks?.[hover] ? <div className={marks[hover].off ? 'sst-tag warn' : 'faint'} style={{ fontSize: 11.5 }}>평소(같은 요일 · 시간 {data.baseline.weeks}주 평균) {rateText(marks[hover].mean)} · {marks[hover].ratio != null ? `${marks[hover].ratio}×` : '—'}{marks[hover].off ? ' · 평소와 다름' : ''}</div> : null}
                     {series.map((s) => <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span><i style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: s.color, marginRight: 6 }} />{s.label}</span><b className="mono">{rateText(s.values?.[hover])}</b></div>)}
                   </div>
                 )}
@@ -403,12 +456,12 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
                     {heat.cells.map((row, d) => (
                       <React.Fragment key={d}>
                         <span className="d">{heat.days[d]}</span>
-                        {row.map((c, h) => <i key={h} className={c.avg == null ? 'none' : ''} style={c.avg == null ? undefined : { opacity: Math.max(0.08, c.avg / (heat.max || 1)) }} title={`${heat.days[d]} ${h}시 · ${c.avg == null ? '값 없음' : `${rateText(c.avg)} (${c.n}칸)`}`} />)}
+                        {row.map((c, h) => <i key={h} className={c.avg == null ? 'none' : (c.off ? 'off' : '')} style={c.avg == null ? undefined : { opacity: Math.max(0.08, c.avg / (heat.max || 1)) }} title={`${heat.days[d]} ${h}시 · ${c.avg == null ? '값 없음' : `${rateText(c.avg)} (${c.n}칸)`}${c.off ? ` · 평소와 다름 ${c.off}칸` : ''}`} />)}
                       </React.Fragment>
                     ))}
                     <span />{Array.from({ length: 24 }, (_, h) => <span key={h} className="x">{h % 3 === 0 ? h : ''}</span>)}
                   </div>
-                  <div className="sst-note">{heat.busiest ? <>가장 바쁜 칸 <b>{heat.days[heat.busiest.day]} {heat.busiest.hour}시</b> — {rateText(heat.busiest.avg)}</> : '값이 있는 칸이 없습니다.'}</div>
+                  <div className="sst-note">{heat.busiest ? <>가장 바쁜 칸 <b>{heat.days[heat.busiest.day]} {heat.busiest.hour}시</b> — {rateText(heat.busiest.avg)}</> : '값이 있는 칸이 없습니다.'}{week?.baseline?.applicable ? <> · 테두리 = 지난 {week.baseline.weeks}주 같은 칸 평균 대비 ±{week.baseline.tolerancePct}% 밖(<b>{week.baseline.offCount}</b>칸)</> : null}</div>
                 </>
               ) : week?.error ? <div className="sst-note">7일 집계를 불러오지 못했습니다.</div> : <Loading label="7일 집계" />}
             </div>
