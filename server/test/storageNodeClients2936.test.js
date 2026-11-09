@@ -258,8 +258,11 @@ test('⑤ 폴러 — 주기 항목 · 대상 · 장비 점유 공유 · 미전�
   assert.equal(REG.listDevices().find((d) => d.id === a.id).nodeLoadEnabled, false);
   REG.saveDevice({ ...REG.getDeviceWithSecret(a.id), name: 'isi-t1b' });
   assert.equal(REG.listDevices().find((d) => d.id === a.id).nodeLoadEnabled, false, '다른 필드만 바꿔 저장해도 토글은 보존된다');
+  // v2.949: REST 어레이(Unity · PowerStore · PowerMax · VMAX)는 같은 토글을 갖는다(디렉터 · 노드 · SP 성능 표본 — 기본 켬). SSH 변형은 경로가 없어 필드를 만들지 않는다.
   const u = REG.saveDevice({ type: 'unity480', name: 'un-1', host: '10.9.9.2', username: 'u', password: 'p', nodeLoadEnabled: true });
-  assert.equal(REG.listDevices().find((d) => d.id === u.id).nodeLoadEnabled, undefined, '아이실론이 아니면 필드를 만들지 않는다');
+  assert.equal(REG.listDevices().find((d) => d.id === u.id).nodeLoadEnabled, true, 'REST 어레이는 토글을 갖는다(v2.949)');
+  const us = REG.saveDevice({ type: 'unity480', name: 'un-2', host: '10.9.9.3', username: 'u', password: 'p', collectMethod: 'ssh', nodeLoadEnabled: true });
+  assert.equal(REG.listDevices().find((d) => d.id === us.id).nodeLoadEnabled, undefined, 'SSH 변형은 필드를 만들지 않는다');
   // 서비스 점검·엣지 로그 표
   const { STATUS_SPEC } = await import('../src/edgelog/spec.js');
   const row = STATUS_SPEC.find((s) => s.key === 'collect.storageNodeLoad');
