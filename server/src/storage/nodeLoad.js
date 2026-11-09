@@ -26,12 +26,19 @@ export const NODE_LOAD_METRICS = Object.freeze([
   { key: 'lat', field: 'latencyMs', col: 'lat', unit: 'ms' },
   { key: 'busy', field: 'busyPct', col: 'busy', unit: '%' },
   { key: 'iops', field: 'iops', col: 'iops', unit: 'ops/s' },
+  // v2.949(SAN 스토리지 성능 ⓑ): 어레이 프런트엔드 단위(PowerMax FE 디렉터 · PowerStore 노드 · Unity SP)의 호스트 처리량(B/s · 어레이 보고)과
+  //   큐 깊이 사용률(% · PowerMax QueueDepthUtilization). busy = PercentBusy · cpu = 노드/SP CPU · iops · lat = 응답(ms)은 위 열을 그대로 쓴다.
+  //   다른 장비(아이실론)는 이 두 열이 null 이다 — 0 이 아니다.
+  { key: 'hbps', field: 'hostBytesPs', col: 'hbps', unit: 'B/s' },
+  { key: 'queue', field: 'queuePct', col: 'queue', unit: '%' },
 ]);
 export const METRIC_BY_KEY = new Map(NODE_LOAD_METRICS.map((m) => [m.key, m]));
 /** 화면 묶음 — 한 번에 한 묶음만 그린다(bps 와 B/s 와 % 는 단위가 달라 한 차트에 겹치지 않는다 — 이중 축 금지). */
-export const NODE_LOAD_GROUPS = Object.freeze({ net: ['in', 'out'], disk: ['din', 'dout', 'busy', 'iops'], cpu: ['cpu'], proto: ['ops', 'lat'] });
+export const NODE_LOAD_GROUPS = Object.freeze({ net: ['in', 'out'], disk: ['din', 'dout', 'busy', 'iops'], cpu: ['cpu'], proto: ['ops', 'lat'],
+  // v2.949: 어레이 프런트엔드 단위 묶음(SAN 스토리지 성능 상세 ② · 점검 어레이 측 5항목) — 단위가 섞이므로 화면은 지표 하나씩 그린다.
+  fe: ['busy', 'cpu', 'iops', 'lat', 'hbps', 'queue'] });
 /** 클러스터 값 — 처리량·ops·IOPS 는 노드 합, CPU·busy·지연은 노드 평균. */
-export const CLUSTER_AGG = Object.freeze({ in: 'sum', out: 'sum', din: 'sum', dout: 'sum', cpu: 'avg', ops: 'sum', lat: 'avg', busy: 'avg', iops: 'sum' });
+export const CLUSTER_AGG = Object.freeze({ in: 'sum', out: 'sum', din: 'sum', dout: 'sum', cpu: 'avg', ops: 'sum', lat: 'avg', busy: 'avg', iops: 'sum', hbps: 'sum', queue: 'avg' });
 /** 5분 표본 — 노드당 클라이언트 상위 N(기본 — 설정값은 폴러가 넘긴다) · 프로토콜 키 상한. */
 export const CLIENT_LIMIT_DEF = 10;
 export const CLIENT_LIMIT_MAX = 50;
@@ -40,13 +47,13 @@ export const PROTO_KEYS_MAX = 12;
 export const NODE_LOAD_LIMIT = 64;
 export const JOBS_MAX = 8;
 
+const PCT_KEYS = new Set(['cpu', 'busy', 'queue']);
 const valueOf = (m, v) => {
   const n = numOrNull(v);
   if (n == null || n < 0) return null;
-  if ((m.key === 'cpu' || m.key === 'busy') && n > 100) return null;
+  if (PCT_KEYS.has(m.key) && n > 100) return null;
   return n;
 };
-const PCT_KEYS = new Set(['cpu', 'busy']);
 const numMetric = (k, v) => { const n = numOrNull(v); if (n == null || n < 0) return null; if (PCT_KEYS.has(k) && n > 100) return null; return n; };
 const strCap = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 /** 프로토콜 이름 규칙(한 벌 — 수집기도 이것을 쓴다): 소문자 · 영숫자만 · 16자 · nfs3/nfs4 → nfs · smb1/2/3·cifs → smb · https → http. */
@@ -275,6 +282,46 @@ export function sampleRowsOf(deviceId, sample) {
   }
   if (!any) return { ok: false, reason: 'no-load' };
   return { ok: true, deviceId: id, ts: s.ts, nodes, clients, protos };
+}
+
+/* ── v2.949 어레이 프런트엔드 단위 카탈로그(순수) ─────────────────────── */
+/** 단위 종류 — fa(PowerMax FE 디렉터) · node(PowerStore 노드) · sp(Unity SP) · port(FC 포트 — 부모 단위 아래). 모르면 ''. */
+export const NODE_UNIT_KINDS = Object.freeze(['fa', 'node', 'sp', 'port', '']);
+export const NODE_UNIT_NAME_MAX = 60;
+/**
+ * 단위 이름 → 안정된 정수 id(FNV-1a 32비트의 하위 31비트). 노드 부하 표의 node_id 는 정수라 이름을 따로 둔다(node_unit 표).
+ * 같은 이름은 어디서 계산해도 같은 id — 엣지·중앙·데모가 모두 이 함수를 쓴다. 0 은 피한다(아이실론 lnn 과 겹치지 않게 하려는 뜻은 아니다 — 장비가 다르다).
+ */
+export function unitIdOf(name) {
+  const str = String(name ?? '').trim().toUpperCase().replace(/[\s:_.-]+/g, '');
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  const id = h & 0x7fffffff;
+  return id === 0 ? 1 : id;
+}
+/** 이름 정규화 비교 키(SAN 쪽 디렉터 그룹 'FA-1D' · 'Node A' · 'SPA' 와 어레이 API 의 'FA-1D' · 'NodeA' · 'spa' 를 같은 칸에 — 대소문자 · 구분자 무시). */
+export const unitMatchKey = (name) => String(name ?? '').trim().toUpperCase().replace(/[\s:_.-]+/g, '');
+/**
+ * 엣지·수집기가 준 단위 목록 정제 — 아는 필드만 · 상한 64 · id 는 안전한 정수 · 이름 1~60자 · 종류는 목록 안 · parent 는 정수 또는 null.
+ * @returns {Array<{id:number, name:string, kind:string, parent:number|null}>}
+ */
+export function sanitizeNodeUnits(list) {
+  if (!Array.isArray(list)) return [];
+  const out = []; const seen = new Set();
+  for (const u of list) {
+    if (out.length >= NODE_LOAD_LIMIT) break;
+    if (!u || typeof u !== 'object' || Array.isArray(u)) continue;
+    const name = strCap(u.name, NODE_UNIT_NAME_MAX);
+    if (!name) continue;
+    const idRaw = numOrNull(u.id);
+    const id = idRaw != null && Number.isSafeInteger(idRaw) && idRaw >= 0 ? idRaw : unitIdOf(name);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const kind = NODE_UNIT_KINDS.includes(u.kind) ? u.kind : '';
+    const parent = numOrNull(u.parent);
+    out.push({ id, name, kind, parent: parent != null && Number.isSafeInteger(parent) && parent >= 0 ? parent : null });
+  }
+  return out;
 }
 
 /* ── 재배치 판정(순수) ─────────────────────────────────────────────────── */

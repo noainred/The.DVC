@@ -316,3 +316,44 @@ export function thresholdText(item, value) {
 
 /** 표 보조줄의 짧은 벤더 표기 — 긴 표기(PowerMax · VMAX)는 title · 상세 머리에. 모르는 벤더는 서버 표기(vendorLabel)를 그대로. */
 export const VENDOR_SHORT = Object.freeze({ powermax: 'PowerMax', powerstore: 'PowerStore', unity: 'Unity' });
+
+/* ── v2.949 어레이 측(디렉터 · 노드 · SP) 성능 ─────────────────────────────── */
+/** 지표 키 → 표시 단위(화면 · CSV). hbps 는 B/s 를 Gb/s 로 바꿔 그린다(스위치 처리량과 같은 눈). */
+export const FE_UNIT_TEXT = Object.freeze({ busy: '%', cpu: '%', queue: '%', iops: 'IO/s', lat: 'ms', hbps: 'Gb/s' });
+/** 값 → 문구. 없으면 '—'(단위 없음). */
+export function feValueText(k, v) {
+  if (v == null || v === '' || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  if (k === 'busy' || k === 'cpu' || k === 'queue') return pctText(n);
+  if (k === 'iops') return `${Math.round(n).toLocaleString('en-US')} IO/s`;
+  if (k === 'lat') return `${(Math.round(n * 10) / 10).toFixed(1)} ms`;
+  if (k === 'hbps') return rateText(n);
+  return String(n);
+}
+/**
+ * 선 차트 모델(쌓지 않는다 — 단위가 같은 여러 선). values 는 이미 표시 단위로 바꾼 값(hbps 는 gbps()). null 은 선을 끊는다(gaps 와 같은 뜻).
+ * @returns {{lines:Array<{key,label,color,d}>, x:Function, y:Function, yMax:number, n:number, w,h,padL,padR,padT,padB}}
+ */
+export function lineModel(cols = [], seriesList = [], { w = 1140, h = 200, padL = 60, padR = 20, padT = 10, padB = 30, yMax = null } = {}) {
+  const n = cols.length;
+  const x = (i) => padL + (n <= 1 ? 0 : (i / (n - 1)) * (w - padL - padR));
+  let top = 0;
+  for (const s of seriesList) for (const v of s.values || []) if (v != null && v > top) top = v;
+  const ymax = yMax ?? niceMax(top);
+  const y = (v) => padT + (h - padT - padB) * (1 - (ymax ? Math.min(v, ymax) / ymax : 0));
+  const lines = seriesList.map((s) => {
+    const segs = []; let cur = [];
+    for (let i = 0; i < n; i++) { const v = s.values?.[i]; if (v == null) { if (cur.length) segs.push(cur); cur = []; } else cur.push(i); }
+    if (cur.length) segs.push(cur);
+    const d = segs.map((seg) => (seg.length === 1
+      ? `M${x(seg[0]).toFixed(1)},${y(s.values[seg[0]]).toFixed(1)} h0.01`
+      : `M${seg.map((i) => `${x(i).toFixed(1)},${y(s.values[i]).toFixed(1)}`).join(' L')}`)).join(' ');
+    return { key: s.key, label: s.label, color: s.color, d, points: segs.filter((g) => g.length === 1).map((g) => ({ cx: x(g[0]), cy: y(s.values[g[0]]) })) };
+  });
+  return { lines, x, y, yMax: ymax, n, w, h, padL, padR, padT, padB };
+}
+/** 어레이 측 단위 중 값이 하나라도 있는 지표만 세그먼트에 올린다(없는 지표를 눌러도 빈 차트뿐). 첫 지표가 기본. */
+export function feMetricsPresent(side) {
+  const units = side?.units || [];
+  return (side?.metrics || []).filter((m) => units.some((u) => u?.latest?.[m.k] != null || (side?.series?.byUnit?.[u.id]?.[m.k] || []).some((v) => v != null)));
+}

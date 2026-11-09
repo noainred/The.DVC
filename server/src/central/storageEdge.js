@@ -184,7 +184,7 @@ function narrowStorageSnapshotRest(d) {
 }
 import { recordActivity } from '../storage/activityLog.js';
 import { sanitizeEdgeResources } from '../storage/resources.js'; // v2.789
-import { saveCapacityPoint, saveNodeLoadPoint, saveNodeLoadSample } from '../storage/db.js';
+import { saveCapacityPoint, saveNodeLoadPoint, saveNodeLoadSample, saveNodeUnits } from '../storage/db.js';
 import { sanitizeNodeLoadSample, CLIENT_LIMIT_MAX } from '../storage/nodeLoad.js'; // v2.932(2차 ⑨)
 import { ackCollect, setCollectBaseResolver } from '../storage/collectRequests.js';
 
@@ -308,6 +308,8 @@ export async function saveEdgeNodeLoadSamples(agent, list, { now = Date.now() } 
       out.received += 1;
       const s = sanitizeNodeLoadSample(raw, { clientLimit: CLIENT_LIMIT_MAX, maxTs: now });
       if (!s) { out.dropped += 1; continue; }
+      // v2.949: 어레이 단위 카탈로그(표본 안 units — 아는 필드만 · 64 · 이름 60자 · 종류 목록) — 표본이 중복이어도 이름은 갱신한다(이름 바뀜).
+      if (Array.isArray(raw.units) && raw.units.length) { try { const su = await saveNodeUnits(id, raw.units, now); out.units = (out.units || 0) + (su?.saved || 0); } catch { /* 표본 적재와 따로 — 조용히 넘기지 않고 아래 saved 로 드러난다 */ } }
       let r;
       try { r = await saveNodeLoadSample(id, s); } catch { r = { saved: false, reason: 'db-error' }; }
       if (r?.saved) out.saved += 1;

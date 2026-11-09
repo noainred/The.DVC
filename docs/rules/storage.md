@@ -815,3 +815,10 @@
   · 화면: '클라이언트 없음' 은 '연결 없음' 이 아니다(쉬는 마운트는 통계에 없다 — 문장으로) · 마지막 표본이 주기 ×3 을 넘으면 노란 머리(`lateMs` 는 응답 값) · 드로어는 모달 위 모달이 아니라 구역 안 펼침 ·
     표본 꺼진 장비는 묶음 버튼이 1시간 값으로 그려지고 드로어·분포가 그 사실을 말한다 · 묶음 순서·첫 선택은 `GROUP_ORDER`·`GROUP_FIRST`(서버 묶음과 vitest 대조). 데모는 노드 2 쏠림 · 노드 3 클라이언트 0 을 합성한다(`demoNodeLoadSample` · 48시간 5분 + 5일 1시간 백필 — 클라이언트 기록이 없을 때만).
   · 남긴 것(정직): 장비 CSV 가져오기/내보내기·일괄 변경에는 `nodeLoadEnabled` 칸이 없다(장비 편집 폼만) · 노드 표(ID 열)에서 드로어를 열지 않는다(노드 부하 구역의 히트맵 이름·순위·분포 막대에서만) · 엣지 미전송 고리는 재시작하면 비워진다(로컬 DB 에는 남는다).
+- **v2.949 — 어레이 프런트엔드 5분 표본(PowerMax FE 디렉터 · PowerStore 노드/포트 · Unity SP/포트 — `storage/collectors/arrayPerf.js` · 폴러 `nodeLoadPoller.js`)**
+  · 대상은 REST 로 수집하는 어레이(`collectMethod 'api'`)만 — SSH 변형(uemcli · pstcli)은 성능 경로가 없어 토글 자체가 없다(`registry.normalizeDevice sampleCapable`). 토글 `nodeLoadEnabled` 는 아이실론과 같은 키 · 기본 켬.
+  · 노드 부하 표에 지표 `hbps`(B/s) · `queue`(%) 가 늘었다(아이실론은 null — 0 이 아니다) · 묶음 `fe` · `CLUSTER_AGG` hbps sum · queue avg · 단위 카탈로그 `node_unit`(`saveNodeUnits · nodeUnitsOf`) —
+    엣지 push 표본 안 `units` 를 중앙이 `sanitizeNodeUnits` 로 정제해 저장(모르는 종류 '' · 이름 없는 것 버림 · 64).
+  · Unity FC 바이트 · IOPS 는 **누적 카운터** — metricValue 최신 두 항목의 델타 ÷ 시각 차(하나면 null · 줄면 리셋 null). PowerStore 지연은 µs → ms(가정 · probe.latUnit). PowerMax HostMBs × 1e6.
+  · 데모: 어레이 데모 장비의 시리얼은 같은 법인 SAN 데모 어레이 시리얼(`mock/demo/sanswitch.js sanDemoArraySerial`) · FE 표본 30일 백필(`backfillNodeLoad feDevices`) · `demoArrayPerfSample` 은 수집기와 같은 `buildFeSample`.
+  · 화면 · 점검은 `docs/rules/sanswitch.md` v2.949.

@@ -170,6 +170,27 @@
   - `bmIdle8b` · `bmPower8b` 2건은 이 가지가 손대지 않은 베어메탈 시험(시각 의존 — main 이 그사이 `bmPower8b` 를 고쳤다 · 234be5df). main 병합 뒤 전량 재실행으로 확인한다.
 - **번호 정정**: 구현 중 main 이 **v2.947.0**(베어메탈 — 같은 서버 키 정리 · PR #975)을 먼저 썼다. 이 작업은 **v2.948.0** 이고, 이 문서 · 코드 머리말 · 규칙 문서 · 시험 파일 이름(`sanStorage2948*.test.js`)의 v2.947 표기를 v2.948 로 일괄 바꿨다(main 쪽 v2.947 기록은 손대지 않음).
 
+### 8.2 ⓑ 어레이 측 성능 + 후속(v2.949.0 — 2026-11-09 08:35~ KST · 사용자 "남긴것들 만들어줘" → 범위 '전부' · 검증 '표준')
+- **수집은 새 DB 를 만들지 않고 노드 부하 5분 표본 경로를 재사용했다**(§4.2 의 `storage-perf.db` 계획을 바꿈 — 근거: 표 · 보존 · 시간/일 롤업 · 엣지 push 고리 · 중앙 정제 · 조회 API 가
+  이미 있고 '복제 금지' 규칙). 지표 열 `hbps`(호스트 처리량 B/s) · `queue`(큐 깊이 사용률 %)를 더하고(`node_load_*` 세 표 ALTER · 문장은 `NODE_LOAD_METRICS` 에서 생성), 단위 이름은
+  `node_unit` 표(id = 이름의 FNV 해시 31비트 · 종류 fa/node/sp/port · 부모)로 둔다. 묶음 `fe` = busy · cpu · iops · lat · hbps · queue.
+- 수집기 `storage/collectors/arrayPerf.js` — PowerMax `performance/FEDirector/keys → metrics`(디렉터마다 POST · 전체 지표 거부 시 핵심 3개) · PowerStore `metrics/generate`
+  노드 + `fc_port` 포트 · Unity `metricValue`(cpu.summary · fibreChannel.target 누적 → 최신 두 항목 델타). 폴러 `nodeLoadPoller.js` 가 REST 어레이(토글 `nodeLoadEnabled` 기본 켬)를
+  같은 5분 주기 · 시한 · 인증 정지로 돈다. **실장비 미확인** — 파서는 전부 순수 함수 + 픽스처 시험이고 `probe` 가 읽은 필드 · 오류를 남긴다(캡처가 오면 파서만 맞춘다).
+- SAN 쪽 조립 `sanswitch/arraySide.js`(순수) + `arraySideLoad.js`(DB): 시리얼로 짝(PowerMax 여러 어레이는 `<시리얼>::FA-1D` 접두) · 이름 정규화 비교로 SAN 디렉터 묶음 · 포트와 대조 ·
+  최신(null 은 덮지 않음 · 주기 ×3 오래됨) · 창 시계열(26시간 원시 · 8일 1시간 · 그 위 하루) · 요약(합은 부모 전부 읽었을 때만) · 보고 대조(차이 % · 스위치 0.5Gb/s 미만이면 없음).
+  `/array` 응답 `arraySide` · `/check` 는 어레이 측 5항목을 **판정**(값 없으면 unknown 에 사유 — 짝 없음 · SSH · 토글 꺼짐 · 표본 없음 · 오래됨 · 지표 없음).
+- 화면: 상세 ② 패널(지표 세그 · 단위 카드 + SAN 대조 배지 · 선 차트 · 포트 표 · 보고 대조 문장 · 미해결 알람 링크 → 스토리지 모니터링) · 점검 탭 '어레이 측 값 N/M' 알약.
+- 후속 같이 넣은 것: (C) 조닝 별칭 폴백 — port_meta WWN → 장비별 최신 스냅샷 zone 별칭(`attribution.buildFabrics`) → `directorOf(name, {alias})` · (D) 기준 설정 슬라이더(숫자 칸과 같은 상태) ·
+  (H) ISL 단서 — 어레이가 물린 스위치 E-포트 24시간 피크 포화도를 팹 비대칭 문구 · 상세 `isl` 에(판정 불변) · (I) 미해결 알람 수(`capacityIndexFor` 에 alerts · collectedAt · agent · 토글) ·
+  (L) Unity · PowerStore 포트 단위(kind port · 64 상한 안에서 부모 먼저) · (B) `bmIdle8b` 시각 의존 시험 고침(main 결함 — 포탈 하루 안쪽 기준 시각).
+- 데모: 스토리지 데모 어레이의 시리얼을 같은 법인의 SAN 데모 어레이 시리얼로 맞췄고(`sanDemoArraySerial`) FE 표본 30일을 백필한다(최근 48시간 5분 · 그 앞 1시간) —
+  목 서버에서 상세 ② · 점검 어레이 측 항목이 채워진다(기동 뒤 첫 스토리지 수집까지 약 40초는 '시리얼 불일치' 로 보인다 — 데모 한정).
+- Chromium(목 서버 · 1440/400 · 10:40~10:52 KST): 현황 · PowerMax 상세(② 패널 5지표 · 카드 2 · 선 차트 · 보고 대조) · Unity 상세(7일 · 포트 표 4행 · SAN 포트 대조) · 점검(알약 '어레이 측 값 6/30') ·
+  기준 설정 모달(슬라이더 14개 — 슬라이더를 42 로 움직이면 숫자 칸이 42) 모두 가로 넘침 0 · pageerror 0 · console error 0 · 1440 표 잘림 0. 스크린샷은 스크래치패드(`sst-b2-*.png`).
+- 정직: PR ⓑ 의 벤더 응답 필드는 문서 · 공개 예제에서 가져온 추정이다. 특히 PowerStore `cpu_utilization` · Unity `fibreChannel.target.*` 이력 수집 켜짐 여부는 장비에서 확인해야 한다
+  (`probe.fields` · `probe.counterNote`). 시험 ⑦ 은 실제 라우트를 돌리지만 표본은 합성이다.
+
 ## 9. 출처(어레이 측 API — 2026-11-08 웹 확인 · 실장비 미확인)
 
 - PowerMax FEDirector 지표: Dell PowerMax Splunk 애드온 `fe_dir.rst` · Dynatrace 'dell emc powermax' 확장 지표 표 · Dell KB 000213922(V4 지표 제거 · help 엔드포인트) · Dell KB 000214283(디바이스 레벨 지표) · PowerShell 모듈 샘플 payload(FrontEnd.xml) · Dell infohub 'What's new in PowerMax REST API 10.0'(`directorId: "OR-1C"` 예).

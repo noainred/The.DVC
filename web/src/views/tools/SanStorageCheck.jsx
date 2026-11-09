@@ -38,6 +38,7 @@ export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
           <span className="sst-pill"><span className="sst-st bad">✕</span> 이상 <b>{s.bad ?? 0}</b></span>
           <span className="sst-pill"><span className="sst-st unk">?</span> 확인 불가 <b>{s.unknown ?? 0}</b></span>
           <span className="sst-pill">판정 {dateClockText(got.judgedAt)} · 스위치 측 24시간 평균{userSet.size ? ` · 사용자 설정 ${userSet.size}` : ' · 기본 기준'}</span>
+          <span className="sst-pill" title="시리얼로 짝 지은 스토리지 장비의 5분 표본에서 어레이 측 항목(busy · 응답 · 큐 · CPU · 보고 대조)을 읽은 어레이 수 — 나머지는 '확인 불가'(사유는 칸의 도움말)"><b>어레이 측 값</b> {(got.results || []).filter((r) => r.arraySide?.keys?.length).length} / {(got.results || []).length}</span>
         </div>
         <div className="sst-acts">
           <Select className="sst-inp" value={dc} onChange={(e) => setDc(e.target.value)} aria-label="법인" style={{ fontFamily: 'inherit' }}>
@@ -133,7 +134,9 @@ function SettingsModal({ initial, onClose, onSaved }) {
               {(initial?.items || []).map((it) => (
                 <tr key={it.k}>
                   <td style={{ whiteSpace: 'normal' }}>{it.label}</td>
-                  <td><input className="sst-inp" type="number" step={it.unit === 'ms' ? 0.1 : 1} min={it.min} max={it.max} disabled={blank.has(it.k)} value={blank.has(it.k) ? '' : (vals[it.k] ?? '')} onChange={(e) => setVals((p) => ({ ...p, [it.k]: e.target.value }))} aria-label={it.label} /> <span className="faint">{it.unit}</span></td>
+                  <td><div className="sst-valrow"><input className="sst-inp" type="number" step={it.unit === 'ms' ? 0.1 : 1} min={it.min} max={it.max} disabled={blank.has(it.k)} value={blank.has(it.k) ? '' : (vals[it.k] ?? '')} onChange={(e) => setVals((p) => ({ ...p, [it.k]: e.target.value }))} aria-label={it.label} /> <span className="faint">{it.unit}</span>
+                    {it.min != null && it.max != null ? <input type="range" className="sst-range" min={it.min} max={it.max} step={it.unit === 'ms' ? 0.1 : 1} disabled={blank.has(it.k)} value={blank.has(it.k) || vals[it.k] === '' || vals[it.k] == null ? Number(it.def ?? it.min) : Number(vals[it.k])} onChange={(e) => setVals((p) => ({ ...p, [it.k]: e.target.value }))} aria-label={`${it.label} 슬라이더`} title={`${it.min}~${it.max}${it.unit} — 숫자 칸과 같은 값`} /> : null}
+                  </div></td>
                   <td><label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={blank.has(it.k)} onChange={(e) => setBlank((p) => { const n = new Set(p); e.target.checked ? n.add(it.k) : n.delete(it.k); return n; })} /> 판정 안 함</label></td>
                   <td className="mono">{it.def == null ? '비움' : `${it.def}${it.unit}`}</td>
                   <td style={{ whiteSpace: 'normal', fontSize: 11.5 }} className="muted">{it.source}</td>

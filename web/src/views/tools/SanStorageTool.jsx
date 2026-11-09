@@ -12,7 +12,7 @@ import { hashSegments } from '../../hooks/hashTab.js';
 import SanStorageCheck from './SanStorageCheck.jsx';
 import SanStorageMapping from './SanStorageMapping.jsx';
 import { TABS, RANGES, rangeOf, rangeQuery, windowLabel, GROUPINGS, MODES, rateText, pctText, deltaOf, deltaNote, dayTB, stateTag, imbalanceTag, liveText, intervalText,
-  agoShort, clockText, dateClockText, kpisOf, filterRows, sortRowsBy, SORTS, sparkSegments, stackModel, tickLabels, seriesStats, foldHeatmap, foldSeries, csvText, csvFileName, gbps, vizColor, VENDOR_SHORT } from './sanStorageText.js';
+  agoShort, clockText, dateClockText, kpisOf, filterRows, sortRowsBy, SORTS, sparkSegments, stackModel, tickLabels, seriesStats, foldHeatmap, foldSeries, csvText, csvFileName, gbps, vizColor, VENDOR_SHORT, feValueText, lineModel, feMetricsPresent, FE_UNIT_TEXT } from './sanStorageText.js';
 import './sanStorage.css';
 
 const BASE = ['tools', 'san-storage'];
@@ -414,10 +414,7 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
             </div>
           </div>
 
-          <div className="sst-card" style={{ borderStyle: 'dashed' }}>
-            <div className="sst-cardhead"><div className="sst-title"><h4>어레이가 보고하는 디렉터 성능</h4><span className="sst-tag gray">다음 판 — 수집 전</span></div></div>
-            <div className="sst-note">PowerMax 디렉터 busy% · IOPS · 응답 시간 · 큐 깊이 · PowerStore 노드 · Unity SP 의 CPU · IOPS 는 어레이 관리 API(Unisphere · PowerStore REST · Unity REST)에서 법인 로컬로 읽어 이 자리에 나란히 둡니다. 이 판은 스위치 측 값만 있어 성능 점검의 어레이 측 항목은 '확인 불가' 입니다(거짓 정상을 만들지 않습니다). 캡처 가이드: docs/design/san-storage-perf/CAPTURE-GUIDE.md</div>
-          </div>
+          <ArraySidePanel side={data.arraySide} />
           <div className="sst-foot">
             '지금' 은 수집 주기({intervalText(data.intervalMs) || '—'}) 안에서 팹 A/B 스위치 표본이 모두 들어온 마지막 칸의 값입니다. 캡처 시각이 어긋난 칸은 직전 표본을 수집 주기의 2배 안에서만 이어 쓰고, 그보다 오래 빠진 칸은 부분 합을 그리지 않습니다(빗금). 과거 구간(◀ 이전)은 자동 갱신하지 않습니다.
           </div>
@@ -426,6 +423,115 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
     </>
   );
 }
+/* ── 어레이가 보고하는 디렉터 · 노드 · SP 성능(v2.949 ⓑ) ───────────────────────────
+ * 서버 arraySide(sanswitch/arraySideLoad.js): 시리얼로 짝 지은 스토리지 장비의 5분 표본. 값이 없으면 사유 문구만(지어내지 않는다).
+ * 단위 카드 = 부모 단위(디렉터 · 노드 · SP) · 선 차트 = 고른 지표 하나(단위가 달라 겹치지 않는다) · 포트 표 = Unity · PowerStore 포트 단위 · 보고 대조 = 어레이 호스트 처리량 합 대 스위치 지금. */
+function ArraySidePanel({ side }) {
+  const [feMetric, setFeMetric] = useState('');
+  const [hover, setHover] = useState(null);
+  if (!side) return null;
+  const metrics = feMetricsPresent(side);
+  const sel = metrics.find((m) => m.k === feMetric) || metrics[0] || null;
+  const units = side.units || [];
+  const parents = units.filter((u) => u.kind !== 'port');
+  const ports = units.filter((u) => u.kind === 'port');
+  const cols = side.series?.cols || [];
+  const toDisp = (k, v) => (v == null ? null : k === 'hbps' ? gbps(v) : v);
+  const seriesList = sel ? parents.map((u, i) => ({ key: String(u.id), label: u.name, color: vizColor(i), values: (side.series?.byUnit?.[u.id]?.[sel.k] || []).map((v) => toDisp(sel.k, v)) })) : [];
+  const model = sel && cols.length ? lineModel(cols, seriesList, { w: 1140, h: 200 }) : null;
+  const ticks = tickLabels(cols, 6);
+  const ready = side.eligible && !side.reason;
+  const lastAgo = side.lastSampleTs ? agoShort(Date.now() - side.lastSampleTs) : null;
+  const unitOf = (k) => FE_UNIT_TEXT[k] || '';
+  const hoverIdx = hover != null && cols[hover] != null ? hover : null;
+  return (
+    <div className="sst-card">
+      <div className="sst-cardhead">
+        <div className="sst-title">
+          <h4>어레이가 보고하는 디렉터 · 컨트롤러 성능</h4>
+          {ready ? <span className="sst-tag ok" title="스토리지 수집기의 5분 표본(장비 호출 없이 DB 에서 읽음)">5분 표본</span> : <span className="sst-tag gray">값 없음</span>}
+          <span className="sst-tag gray" title={side.docBasis || ''}>문서 기준 · 실장비 확인 전</span>
+          {side.alerts != null ? <a className={`sst-tag ${side.alerts > 0 ? 'warn' : 'ok'}`} href="#/tools/storage-mon" title="스토리지 모니터링 › 장비 상세(미해결 알람)">미해결 알람 {side.alerts}</a> : null}
+        </div>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {side.name ? <>{side.name}{side.type ? ` (${side.type})` : ''}</> : '짝 지은 스토리지 없음'}{lastAgo ? ` · 마지막 표본 ${lastAgo} 전` : ''}{side.sampleMs ? ` · 표본 주기 ${intervalText(side.sampleMs)}` : ''}
+        </span>
+      </div>
+      {!ready ? <div className="sst-note">{side.text || '어레이 측 값이 없습니다.'}{side.reason === 'no-device' ? ' — 스토리지 모니터링에 이 어레이를 등록(REST)하면 시리얼로 짝을 짓습니다.' : ''}</div> : (
+        <>
+          <div className="sst-row">
+            <div className="sst-seg" role="tablist" aria-label="어레이 측 지표">
+              {metrics.map((m) => <button type="button" key={m.k} className={sel?.k === m.k ? 'on' : ''} onClick={() => setFeMetric(m.k)}>{m.label}</button>)}
+            </div>
+            <span className="muted" style={{ fontSize: 12 }}>단위 {parents.length}{ports.length ? ` · 포트 ${ports.length}` : ''}{side.matched != null ? ` · SAN 대조 ${side.matched}/${parents.length}` : ''}</span>
+          </div>
+          <div className="sst-dirs">
+            {parents.map((u, i) => (
+              <div key={u.id} className="sst-dir">
+                <div className="h">
+                  <b><i style={{ background: vizColor(i) }} />{u.name}</b>
+                  <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+                    {u.group ? <span className="sst-tag ok" title="SAN 쪽 디렉터 묶음과 같은 이름(대소문자 · 구분자 무시)">SAN {u.group}</span> : <span className="sst-tag gray" title="SAN 포트 심볼릭 이름에서 이 단위를 찾지 못했습니다 — 억지로 합치지 않습니다">SAN 대조 없음</span>}
+                    {u.stale ? <span className="sst-tag warn" title={u.ts ? `마지막 표본 ${dateClockText(u.ts)}` : '표본 없음'}>오래됨</span> : null}
+                  </span>
+                </div>
+                <div className="v">{sel ? feValueText(sel.k, u.latest?.[sel.k]) : '—'}<small>{sel?.label || ''}</small></div>
+                <div className="kv">
+                  {metrics.filter((m) => m.k !== sel?.k && u.latest?.[m.k] != null).slice(0, 4).map((m) => <React.Fragment key={m.k}><span>{m.label}</span><b>{feValueText(m.k, u.latest[m.k])}</b></React.Fragment>)}
+                </div>
+              </div>
+            ))}
+            {!parents.length && <div className="sst-note">이 어레이의 단위(디렉터 · 노드 · SP)가 아직 없습니다.</div>}
+          </div>
+          {model ? (
+            <div className="sst-plot" onMouseLeave={() => setHover(null)}>
+              <svg viewBox={`0 0 ${model.w} ${model.h + 22}`} role="img" aria-label={`어레이 측 ${sel.label} 추이`}
+                onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); const px = ((e.clientX - r.left) / r.width) * model.w; const i = Math.round(((px - model.padL) / Math.max(1, model.w - model.padL - model.padR)) * (model.n - 1)); setHover(Math.max(0, Math.min(model.n - 1, i))); }}>
+                {[0, 0.25, 0.5, 0.75, 1].map((f) => <g key={f}><line x1={model.padL} x2={model.w - model.padR} y1={model.y(model.yMax * f)} y2={model.y(model.yMax * f)} stroke="var(--border-soft)" /><text x={model.padL - 8} y={model.y(model.yMax * f) + 4} textAnchor="end">{sel.k === 'iops' ? Math.round(model.yMax * f).toLocaleString('en-US') : (Math.round(model.yMax * f * 10) / 10)}</text></g>)}
+                {model.lines.map((l) => <g key={l.key}><path d={l.d} fill="none" stroke={l.color} strokeWidth="1.8" strokeLinejoin="round" />{l.points.map((p, j) => <circle key={j} cx={p.cx} cy={p.cy} r="2" fill={l.color} />)}</g>)}
+                {hoverIdx != null ? <line x1={model.x(hoverIdx)} x2={model.x(hoverIdx)} y1={model.padT} y2={model.h - model.padB} stroke="var(--text-faint)" strokeDasharray="3 3" /> : null}
+                {ticks.map((tk) => <text key={tk.i} x={model.x(tk.i)} y={model.h + 12} textAnchor="middle">{tk.label}</text>)}
+                <text x={model.padL - 8} y={model.padT - 2} textAnchor="end" style={{ fontSize: 10 }}>{unitOf(sel.k)}</text>
+              </svg>
+              {hoverIdx != null ? (
+                <div className="sst-card" style={{ position: 'absolute', top: 8, left: model.x(hoverIdx) > model.w / 2 ? undefined : `${(model.x(hoverIdx) / model.w) * 100 + 1}%`, right: model.x(hoverIdx) > model.w / 2 ? `${100 - (model.x(hoverIdx) / model.w) * 100 + 1}%` : undefined, padding: '8px 10px', gap: 2, fontSize: 12, minWidth: 180, pointerEvents: 'none', background: 'var(--panel-2)' }}>
+                  <div className="mono muted">{dateClockText(cols[hoverIdx])}</div>
+                  {seriesList.map((s) => <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span><i className="sst-sw" style={{ background: s.color }} />{s.label}</span><b className="mono">{s.values[hoverIdx] == null ? '—' : sel.k === 'hbps' ? `${s.values[hoverIdx].toFixed(2)} Gb/s` : feValueText(sel.k, s.values[hoverIdx])}</b></div>)}
+                </div>
+              ) : null}
+            </div>
+          ) : <div className="sst-note">이 창에 어레이 측 표본이 없습니다 — 0 이 아닙니다.</div>}
+          <div className="sst-legend">{seriesList.map((s) => <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>)}{side.seriesKind ? <span className="faint">{side.seriesKind === 'raw' ? '표본 그대로' : side.seriesKind === 'bucket' ? '1시간 칸 평균' : '하루 평균'}{side.truncated ? ' · 일부 잘림' : ''}</span> : null}</div>
+          {ports.length ? (
+            <div className="sst-table-wrap">
+              <STable minWidth={560}>
+                <thead><tr><th>어레이 포트</th><th>단위</th><th>SAN 포트 대조</th><th className="r">IOPS</th><th className="r">처리량</th><th className="r">응답</th><th>표본</th></tr></thead>
+                <tbody>
+                  {ports.map((p) => (
+                    <tr key={p.id}>
+                      <td className="mono">{p.name}</td><td className="mono">{parents.find((x) => x.id === p.parent)?.name || '—'}</td>
+                      <td>{p.group ? <span className="sst-tag ok">{p.group}{p.port ? ` ${p.port}` : ''}</span> : <span className="muted">—</span>}</td>
+                      <td className="r mono" data-sort={p.latest?.iops ?? ''}>{feValueText('iops', p.latest?.iops)}</td>
+                      <td className="r mono" data-sort={p.latest?.hbps ?? ''}>{feValueText('hbps', p.latest?.hbps)}</td>
+                      <td className="r mono" data-sort={p.latest?.lat ?? ''}>{feValueText('lat', p.latest?.lat)}</td>
+                      <td className="muted" style={{ fontSize: 11.5 }} data-sort={p.ts ?? ''}>{p.ts ? agoShort(Date.now() - p.ts) + ' 전' : '—'}{p.stale ? ' · 오래됨' : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </STable>
+            </div>
+          ) : null}
+          <div className="sst-note">
+            보고 대조: 어레이가 보고한 호스트 처리량 합 <b>{rateText(side.compare?.arrayBps)}</b>{side.compare?.partial ? '(일부 단위 미측정 — 합계 없음)' : ''} · 스위치 지금 <b>{rateText(side.compare?.switchBps)}</b> · 차이 <b>{side.compare?.diffPct != null ? `${side.compare.diffPct > 0 ? '+' : ''}${side.compare.diffPct}%` : '—'}</b>
+            {side.compare?.diffPct == null ? ' (둘 중 하나가 없거나 스위치가 한가해 비율을 내지 않습니다)' : ' — 차이의 원인(FC 프레임 헤더 · 제어 트래픽 · 한쪽 계측 누락)은 여기서 단정하지 않습니다. 판정은 성능 점검 탭의 보고 대조 항목.'}
+          </div>
+          {side.unmatchedGroups?.length ? <div className="sst-note">SAN 쪽에만 있는 묶음: <b>{side.unmatchedGroups.join(' · ')}</b> — 어레이 API 의 단위 이름과 달라 짝을 짓지 못했습니다(분류 · 매핑 탭에서 SAN 쪽 이름을 어레이 이름으로 바꾸면 맞습니다).</div> : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 function Stat({ label, sub, value, tone = '', mm = [] }) {
   return (
     <div className="sst-stat">

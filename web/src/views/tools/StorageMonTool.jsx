@@ -1660,11 +1660,12 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
         <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}>
           <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> 활성
         </label>
-        {/* v2.932(2차 ⑨): 노드 부하 표본 수집 — 아이실론만 · 기본 켬. 주기는 설정 › 스토리지 수집 주기(노드 부하 표본 주기)에서. SSH 장비는 표본마다 로그인이 생긴다(장비 로그). */}
-        {form.type === 'isilon' && (
+        {/* v2.932(2차 ⑨): 노드 부하 표본 수집 — 아이실론 · 기본 켬. 주기는 설정 › 스토리지 수집 주기(노드 부하 표본 주기)에서. SSH 장비는 표본마다 로그인이 생긴다(장비 로그).
+            v2.949: REST 로 수집하는 어레이(PowerMax · VMAX · PowerStore · Unity)도 같은 토글 — 디렉터 · 노드 · SP 성능 표본(SAN 스토리지 성능 상세 · 점검이 쓴다). SSH 변형은 경로가 없어 토글이 없다. */}
+        {(form.type === 'isilon' || (['powermax', 'vmax', 'powerstore', 'unity480'].includes(form.type) && (form.collectMethod || 'api') === 'api')) && (
           <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, padding: '6px 0' }}
             title="수집 주기와 따로 도는 가벼운 폴러가 노드별 부하·클라이언트·프로토콜 표본을 읽습니다(주기는 설정 › 스토리지 수집 주기). 끄면 1시간 수집 값만 남고 노드 드로어·클라이언트 분포가 비어 있습니다. SSH 장비는 표본마다 로그인이 생겨 장비 감사 로그가 늘어납니다.">
-            <input type="checkbox" checked={form.nodeLoadEnabled !== false} onChange={(e) => setForm({ ...form, nodeLoadEnabled: e.target.checked })} /> 노드 부하 표본 수집
+            <input type="checkbox" checked={form.nodeLoadEnabled !== false} onChange={(e) => setForm({ ...form, nodeLoadEnabled: e.target.checked })} /> {form.type === 'isilon' ? '노드 부하 표본 수집' : '디렉터 · 노드 · SP 성능 표본 수집(5분 · SAN 스토리지 성능)'}
           </label>
         )}
         {/* 연결 테스트 — 저장하지 않고 수집기를 1회 돌려 API 가 실제로 도는지 확인(v2.404).

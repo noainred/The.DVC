@@ -140,3 +140,7 @@
   .sst-dirs { grid-template-columns: minmax(0, 1fr); }
   .sst-hm { gap: 2px; } .sst-hm i { height: 14px; }
 }
+/* v2.949 어레이 측 패널 — 툴팁 색 견본 · 카드 태그 묶음 */
+.sst-sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: 0; }
+.sst-valrow { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.sst-range { width: 120px; accent-color: var(--mint); }
