@@ -94,10 +94,11 @@
 
 - 시안과 달라진 것(정직 기록):
   · 엣지 → 중앙 표본은 스냅샷 `extra` 가 아니라 **push 본문 최상위 `nodeLoadSamples`** 로 보낸다 — `extra` 에 싣으면 중앙 정제 화이트리스트와 `central-agent-storage.json` 보관분까지 표본이 섞여 커진다. 소유권 필터는 장비 목록과 같은 함수로 따로 건다.
-  · 드로어는 장비 상세 모달 위의 모달이 아니라 **노드 부하 구역 안에 펼치는 구획**이다(모달 겹침 회피). 열리는 곳은 히트맵 노드 이름 · 노드 순위 · 분포 막대(노드 표 ID 열은 아니다 — 남긴 것).
+  · 드로어는 장비 상세 모달 위의 모달이 아니라 **노드 부하 구역 안에 펼치는 구획**이다(모달 겹침 회피). 열리는 곳은 히트맵 노드 이름 · 노드 순위 · 분포 막대 · **노드 표 ID 열(v2.950 — 드로어를 화면 위로 올리고 연다)**.
   · 수집 주기 폴러는 표본이 진행 중이면 **끝날 때까지 기다린다**(≤60초) — 시안은 '표본이 수집 중이면 건너뜀' 만 적었는데, 반대 경우(표본 때문에 1시간 수집이 한 주기 빠짐)가 더 나빠 추가했다.
   · 비교 구간(지난주)이 노드 원시 보존(7일) 경계에 걸려 비던 것은 **원시 보존 밖 창을 시간 요약 1시간 칸으로** 내려 해결했다(원시 폴백 아님).
-  · 일괄 변경·CSV 의 `nodeLoadEnabled` 칸은 넣지 않았다(장비 편집 폼만) — 남긴 것.
+  · CSV·자유텍스트의 `nodeLoad` 칸은 **v2.950**(코드 주석 표지 v2.938)에 넣었다(아이실론만 true|false · 빈 칸은 유지 · 위치형은 맨 끝 열 — 옛 파일의 note·password 가 밀리지 않게). 가져오기가 빈 칸으로 꺼 둔 장비를 켜지 않는다.
+  · 엣지 미전송 표본 고리는 **v2.950** 부터 파일(`storage-nodeload-ring.json` — 상태 파일)로도 남겨 재시작 뒤 첫 push 에 싣는다(정제·장비당 3·7일 이내만 되살림 · 손상은 보존).
   · 묶음 버튼은 표본 폴러가 켜진 장비면 디스크(busy·IOPS)·프로토콜을 **응답 `sample.sampleEnabled`** 로 연다(1시간 스냅샷에는 그 키가 없다).
 - 실장비 미확인 항목(첫 수집 뒤 `probe` 를 보고 보정할 것): REST `summary/{client,protocol,drive}` 경로·필드 · `isi statistics client/protocol/drive --format json` 행 모양 · 행의 node 가 lnn 인지 devid 인지(lnn 으로 본다) · 지연 단위(µs→ms 가정) · `isi statistics system` 의 Net In/Out 단위(B/s 가정 ×8).
 - 파일: `storage/nodeLoadPoller.js`(새) · `storage/clientNames.js`(새) · `collectors/isilonNodeLoad.js`(파서·REST 표본 노드·system net 옵션) · `nodeLoad.js`(정제·행렬·쏠림·후보) · `db.js`(표 6개·열 4·시간 요약·조회) · `intervals.js nodeLoadMs` · `poller.js runSampleExclusive` · `push.js` · `central/storageEdge.js` · `routes/central.js` · `routes/api/storageMon.js`(라우트 3) · `growthSettings.js`(칸 4) · `mock/demo/storage.js` · `edgelog/spec.js` · `health/services.js` · `index.js` · 웹 `storageNodeLoad/{NodeClientsDrawer,ClientDistView}.jsx` · `NodeLoadPanel.jsx` · `nodeLoadText.js`(+vitest) · `StorageMonTool.jsx`(토글).

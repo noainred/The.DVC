@@ -470,6 +470,7 @@ api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, (re
       agent: row.agent, enabled: row.enabled, note: row.note,
     };
     if (row._hasPassword) input.password = row.password; // 비우면 기존 유지(saveDevice 규칙)
+    if (row.nodeLoadEnabled !== undefined) input.nodeLoadEnabled = row.nodeLoadEnabled; // v2.938: 빈 칸은 키를 만들지 않는다(normalizeDevice 가 기존 값을 유지)
     try {
       saveDevice(input);
       if (id) updated++; else added++;

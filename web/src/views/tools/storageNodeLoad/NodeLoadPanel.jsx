@@ -269,15 +269,20 @@ function Overlay({ d, sel, picks, onToggle }) {
 }
 
 /**
- * @param {{deviceId:string, snap:object, isEdge:boolean}} props
+ * @param {{deviceId:string, snap:object, isEdge:boolean, openNode?:{id:number, at:number}|null}} props openNode — 바깥(노드 표 ID 열)이 열어 달라는 노드(v2.938)
  */
-export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
+export default function NodeLoadPanel({ deviceId, snap, isEdge, openNode = null }) {
   const list = useMemo(() => (Array.isArray(snap?.nodes?.list) ? snap.nodes.list : []), [snap]);
   const [d, setD] = useState(null);
   // v2.932: 표본 폴러가 켜진 장비(응답 sample.sampleEnabled)는 디스크 busy·IOPS · 프로토콜 묶음 · 클라이언트 분포 보기를 연다.
   const sampleEnabled = d?.sample?.sampleEnabled === true;
   const avail = useMemo(() => groupsAvailable(list, { sampleEnabled }), [list, sampleEnabled]);
   const [drawerNode, setDrawerNode] = useState(null); // v2.932(2차 ③) 노드 드로어 — 열린 노드 번호
+  // v2.939: 노드 표(아래)에서 ID 를 누르면 드로어를 연다(같은 노드를 다시 눌러도 at 이 달라 다시 연다). 화면 올리기는 드로어가 자기를 올린다(scrollKey).
+  useEffect(() => {
+    if (!openNode || openNode.id == null) return;
+    setDrawerNode(openNode.id);
+  }, [openNode]);
   const [range, setRange] = useState('24h');
   const [sel, setSel] = useState('in');
   const [view, setView] = useState('heat');
@@ -368,7 +373,7 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
       {err && <div className="nl-banner amber">노드 부하 조회 오류: {String(err?.message || err)}</div>}
       {ready && view !== 'dist' && <WindowRow d={d} back={back} dragBack={dragBack} anchor={anchor} onDrag={setDragBack} onGo={goScroll} onJumpEnd={jumpEnd} />}
       {drawerNode != null && (
-        <NodeClientsDrawer deviceId={deviceId} node={drawerNode} end={end} offsetMin={d?.offsetMin ?? 540} onClose={() => setDrawerNode(null)} onOverlay={addOverlay} />
+        <NodeClientsDrawer deviceId={deviceId} node={drawerNode} end={end} offsetMin={d?.offsetMin ?? 540} onClose={() => setDrawerNode(null)} onOverlay={addOverlay} scrollKey={openNode?.at ?? null} />
       )}
       {view === 'dist' && <ClientDistView deviceId={deviceId} end={end} offsetMin={d?.offsetMin ?? 540} onPickNode={openDrawer} />}
       {view !== 'dist' && notes.map((n) => <div key={n.text} className={`nl-banner ${n.tone}`}>{n.text}</div>)}

@@ -20,7 +20,12 @@
  *   클라이언트·프로토콜 행의 node 가 lnn 인지 devid 인지(lnn 으로 본다) · statistics/current 의 devid 는 /cluster/nodes 의 id 라(v2.603) NODE_MAP_TTL 마다 한 번
  *   노드 목록을 읽어 devid→lnn 으로 바꾼다(못 읽으면 devid 그대로 — probe.idMap 이 밝힌다). 첫 실장비 수집에서 probe(clientsRead 등)를 보고 보정할 것.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js'; // 로드 오류 원문(파일 조각)은 콘솔·상태에 싣지 않는다(RG2744-02)
+import { registerExitFlush } from '../util/exitFlush.js';
+import { registerStateFile } from '../util/stateFiles.js';
 import { devicesForThisNode, getDeviceWithSecret, registryLoadError } from './registry.js';
 import { authStopFor, markAuthStopped, clearAuthStop } from './authGuard.js';
 import { runtimeIntervals, startAdaptiveTimer } from './intervals.js';
@@ -32,7 +37,7 @@ import { isCredReject } from './collectors/restCommon.js';
 import { ISI_NODE_LOAD_REST_KEYS, ISI_SUMMARY_PATHS, ISI_SAMPLE_CMDS, restSampleNodes, nodeIdMapOf, parseIsiSystemStats,
   parseClientRows, parseProtocolRows, parseDriveRows, buildNodeLoadSample } from './collectors/isilonNodeLoad.js';
 import { saveNodeLoadSample } from './db.js';
-import { CLIENT_LIMIT_DEF } from './nodeLoad.js';
+import { CLIENT_LIMIT_DEF, CLIENT_LIMIT_MAX, sanitizeNodeLoadSample } from './nodeLoad.js';
 import { isMockMode, isDemoId, demoNodeLoadSample } from '../mock/demo/storage.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // 시한 env 단일 관문(TIM2605-04 — [하한, 상한] 밖·NaN 은 기본값)
 
@@ -122,32 +127,95 @@ async function sampleSsh(full, signal, clientLimit) {
 }
 
 // ── 엣지 미전송 고리 ─────────────────────────────────────────────────────────
+/*
+ * v2.938: 고리를 **파일로도 남긴다**(`storage-nodeload-ring.json` — 상태 파일로 등록, 백업·설정 감시 대상 아님). 예전에는 메모리뿐이라 엣지가
+ * 재시작하면 최대 15분치(표본 3개)가 중앙에 오르지 않았다(엣지 로컬 DB 에는 있었다). 저장은 2초 디바운스 + 종료 시 동기 flush(exitFlush),
+ * 기동 시 첫 사용에서 읽어 **정제(sanitizeNodeLoadSample)·장비당 RING_MAX·7일 이내**만 되살린다. 손상이면 원본을 보존하고 빈 고리로 간다(무음 금지 — 콘솔·상태).
+ * 엣지(중앙 URL·토큰)가 아니면 쓰지 않는다(중앙은 고리를 쓰지 않는다).
+ */
 const _ring = new Map(); // deviceId → [sample]
 let _ringDropped = 0;
+const RING_FILE = () => path.join(config.configDir, 'storage-nodeload-ring.json');
+const RING_MAX_DEVICES = 500;
+const RING_MAX_AGE_MS = 7 * 86_400_000;
+let _ringLoaded = false; let _ringTimer = null; let _ringDirty = false; let _ringForce = false;
+const _ringPersist = { loaded: 0, saved: 0, error: null, hasFile: false };
+function loadRing() {
+  if (_ringLoaded) return;
+  _ringLoaded = true;
+  const file = RING_FILE();
+  registerStateFile(file);
+  registerExitFlush('storage-nodeload-ring', flushRingSync);
+  try {
+    if (!fs.existsSync(file)) return;
+    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const dev = j && typeof j === 'object' && !Array.isArray(j) && j.devices && typeof j.devices === 'object' && !Array.isArray(j.devices) ? j.devices : null;
+    if (!dev) throw new Error('고리 파일 모양이 아닙니다');
+    const now = Date.now(); let n = 0;
+    for (const [id, arr] of Object.entries(dev).slice(0, RING_MAX_DEVICES)) {
+      if (!Array.isArray(arr)) continue;
+      const keep = [];
+      for (const raw of arr.slice(-RING_MAX)) {
+        const s = sanitizeNodeLoadSample(raw, { clientLimit: CLIENT_LIMIT_MAX });
+        if (s && now - s.ts <= RING_MAX_AGE_MS) keep.push(s);
+      }
+      if (keep.length) { _ring.set(String(id).slice(0, 128), keep); n += keep.length; }
+    }
+    _ringPersist.loaded = n; _ringPersist.hasFile = true;
+    if (n) console.log(`[storage-nodeload] 재시작 전 미전송 표본 ${n}개를 파일에서 되살렸습니다(장비 ${_ring.size}대) — 다음 push 에 싣습니다`);
+  } catch (e) {
+    const why = safeLoadText(e); // 원문(JSON 조각)이 아니라 요약
+    _ringPersist.error = why;
+    preserveCorrupt(file, e?.message);
+    console.warn(`[storage-nodeload] 미전송 표본 파일을 읽지 못해 빈 고리로 시작합니다(원본은 .corrupt 로 보존): ${why}`);
+  }
+}
+const ringJson = () => JSON.stringify({ version: 1, at: Date.now(), devices: Object.fromEntries([..._ring]) });
+function flushRingSync() {
+  if (_ringTimer) { clearTimeout(_ringTimer); _ringTimer = null; }
+  if (!_ringDirty) return;
+  _ringDirty = false;
+  try { atomicWriteFileSync(RING_FILE(), ringJson(), { mode: 0o600 }); _ringPersist.saved += 1; _ringPersist.error = null; _ringPersist.hasFile = true; }
+  catch (e) { _ringPersist.error = capErr(e); console.warn(`[storage-nodeload] 미전송 표본 파일 저장 실패: ${capErr(e)}`); }
+}
+function saveRing() {
+  if (!isEdge() && !_ringForce) return;
+  _ringDirty = true;
+  if (_ringTimer) return;
+  _ringTimer = setTimeout(() => { _ringTimer = null; flushRingSync(); }, 2_000);
+  _ringTimer.unref?.();
+}
 function ringPush(id, sample) {
+  loadRing();
   const a = _ring.get(String(id)) || [];
   a.push(sample);
   while (a.length > RING_MAX) { a.shift(); _ringDropped += 1; }
   _ring.set(String(id), a);
+  saveRing();
 }
 /** push 본문에 실을 미전송 표본 — [{ deviceId, samples:[…] }](사본 — 보내는 동안 새 표본이 들어와도 섞이지 않게). */
 export function pendingNodeLoadSamples() {
+  loadRing();
   const out = [];
   for (const [deviceId, a] of _ring) if (a.length) out.push({ deviceId, samples: a.slice() });
   return out;
 }
 /** 중앙이 받은 표본(pendingNodeLoadSamples 가 돌려준 목록)을 고리에서 지운다 — ts 로 대조(보내는 동안 들어온 새 표본은 남는다). */
 export function markNodeLoadSamplesSent(list) {
+  let changed = false;
   for (const ent of list || []) {
     const a = _ring.get(String(ent?.deviceId));
     if (!a) continue;
     const sent = new Set((ent.samples || []).map((s) => s?.ts));
     const left = a.filter((s) => !sent.has(s.ts));
+    if (left.length === a.length) continue;
+    changed = true;
     if (left.length) _ring.set(String(ent.deviceId), left); else _ring.delete(String(ent.deviceId));
   }
+  if (changed) saveRing();
 }
-function ringStatus() { let n = 0; for (const a of _ring.values()) n += a.length; return { devices: _ring.size, samples: n, dropped: _ringDropped, max: RING_MAX }; }
-function pruneRing(liveIds) { for (const k of [..._ring.keys()]) if (!liveIds.has(k)) _ring.delete(k); }
+function ringStatus() { let n = 0; for (const a of _ring.values()) n += a.length; return { devices: _ring.size, samples: n, dropped: _ringDropped, max: RING_MAX, persist: { ..._ringPersist } }; }
+function pruneRing(liveIds) { let removed = 0; for (const k of [..._ring.keys()]) if (!liveIds.has(k)) { _ring.delete(k); removed += 1; } if (removed) saveRing(); }
 
 // ── 장비 1대 ─────────────────────────────────────────────────────────────────
 async function sampleOne(dev) {
@@ -213,3 +281,10 @@ export function nodeLoadPollerStatus() {
 }
 export function _resetForTest() { _ring.clear(); _ringDropped = 0; _nodeMap.clear(); _last = null; _busy = false; }
 export function _ringPushForTest(id, sample) { ringPush(id, sample); }
+/** 테스트 — 엣지가 아니어도 파일에 쓰게(force) · 지금 flush · '재시작' 흉내(메모리 비우고 파일에서 다시 읽기). */
+export function _ringPersistForTest({ force = null, flush = false, reload = false } = {}) {
+  if (force != null) _ringForce = !!force;
+  if (flush) flushRingSync();
+  if (reload) { _ring.clear(); _ringLoaded = false; _ringPersist.loaded = 0; _ringPersist.error = null; loadRing(); }
+  return { ..._ringPersist, file: RING_FILE() };
+}
