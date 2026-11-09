@@ -423,7 +423,7 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
     </>
   );
 }
-/* ── 어레이가 보고하는 디렉터 · 노드 · SP 성능(v2.951 ⓑ) ───────────────────────────
+/* ── 어레이가 보고하는 디렉터 · 노드 · SP 성능(v2.952 ⓑ) ───────────────────────────
  * 서버 arraySide(sanswitch/arraySideLoad.js): 시리얼로 짝 지은 스토리지 장비의 5분 표본. 값이 없으면 사유 문구만(지어내지 않는다).
  * 단위 카드 = 부모 단위(디렉터 · 노드 · SP) · 선 차트 = 고른 지표 하나(단위가 달라 겹치지 않는다) · 포트 표 = Unity · PowerStore 포트 단위 · 보고 대조 = 어레이 호스트 처리량 합 대 스위치 지금. */
 function ArraySidePanel({ side }) {

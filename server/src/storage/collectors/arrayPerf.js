@@ -1,5 +1,5 @@
 /**
- * storage/collectors/arrayPerf.js — 어레이 **프런트엔드 성능 5분 표본**(v2.951 · SAN 스토리지 성능 ⓑ · 설계 `docs/design/san-storage-perf/README.md` §4.2).
+ * storage/collectors/arrayPerf.js — 어레이 **프런트엔드 성능 5분 표본**(v2.952 · SAN 스토리지 성능 ⓑ · 설계 `docs/design/san-storage-perf/README.md` §4.2).
  *
  * 어레이가 스스로 보고하는 디렉터 · 노드 · SP 성능을 읽어 노드 부하 표본(storage/nodeLoad.js — 5분 표본 경로 · DB · 엣지 push · 조회)에 싣는다.
  * 스위치 처리량(SAN 포트 사용량)과 **같은 단위 이름**(FA-1D · Node A · SPA)으로 묶여 'SAN 스토리지 성능' 상세 ② 와 성능 점검 어레이 측 5항목이 쓴다.

@@ -317,7 +317,7 @@ export function thresholdText(item, value) {
 /** 표 보조줄의 짧은 벤더 표기 — 긴 표기(PowerMax · VMAX)는 title · 상세 머리에. 모르는 벤더는 서버 표기(vendorLabel)를 그대로. */
 export const VENDOR_SHORT = Object.freeze({ powermax: 'PowerMax', powerstore: 'PowerStore', unity: 'Unity' });
 
-/* ── v2.951 어레이 측(디렉터 · 노드 · SP) 성능 ─────────────────────────────── */
+/* ── v2.952 어레이 측(디렉터 · 노드 · SP) 성능 ─────────────────────────────── */
 /** 지표 키 → 표시 단위(화면 · CSV). hbps 는 B/s 를 Gb/s 로 바꿔 그린다(스위치 처리량과 같은 눈). */
 export const FE_UNIT_TEXT = Object.freeze({ busy: '%', cpu: '%', queue: '%', iops: 'IO/s', lat: 'ms', hbps: 'Gb/s' });
 /** 값 → 문구. 없으면 '—'(단위 없음). */

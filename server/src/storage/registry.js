@@ -138,7 +138,7 @@ export function saveDevice(input = {}) {
   const sshPort = Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22));
   Object.assign(dev, { type, name, host, username, agent, datacenterId, collectMethod, sshPort, enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200) });
   // v2.932(2차 ⑨): 노드 부하 5분 표본 — 아이실론만 뜻이 있고 기본 켬. 요청에 없으면 이전 값 유지(옛 화면이 끄지 않게) · 처음이면 켬.
-  // v2.951: REST 로 수집하는 어레이(PowerMax · VMAX · PowerStore · Unity)도 같은 토글 — 디렉터 · 노드 · SP 성능 5분 표본(arrayPerf.js). SSH 변형은 경로가 없어 토글을 두지 않는다.
+  // v2.952: REST 로 수집하는 어레이(PowerMax · VMAX · PowerStore · Unity)도 같은 토글 — 디렉터 · 노드 · SP 성능 5분 표본(arrayPerf.js). SSH 변형은 경로가 없어 토글을 두지 않는다.
   const sampleCapable = type === 'isilon' || (['powermax', 'vmax', 'powerstore', 'unity480'].includes(type) && collectMethod === 'api');
   if (sampleCapable) dev.nodeLoadEnabled = Object.hasOwn(input, 'nodeLoadEnabled') ? input.nodeLoadEnabled !== false : (existing ? existing.nodeLoadEnabled !== false : true);
   else delete dev.nodeLoadEnabled;

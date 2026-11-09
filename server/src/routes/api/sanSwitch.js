@@ -208,7 +208,7 @@ export function capacityIndexFor({ dcSet = null, split = true, admin = false } =
       deviceId: snap.deviceId, name: d.name || snap.name || '', type: d.type || '',
       totalBytes: snap.capacity?.totalBytes ?? null, usedBytes: snap.capacity?.usedBytes ?? null,
       pct: snap.capacity?.pct ?? null,
-      // v2.951(SAN 스토리지 성능 ⓑ): 어레이 측 성능 · 경보 연동에 필요한 것 — 미해결 알람 수(못 읽었으면 null) · 수집 시각 · 수집 방식 · 표본 토글 · 위임 엣지.
+      // v2.952(SAN 스토리지 성능 ⓑ): 어레이 측 성능 · 경보 연동에 필요한 것 — 미해결 알람 수(못 읽었으면 null) · 수집 시각 · 수집 방식 · 표본 토글 · 위임 엣지.
       alerts: numOrNull(snap.alerts?.unresolved), collectedAt: numOrNull(snap.collectedAt), collectMethod: d.collectMethod || 'api',
       nodeLoadEnabled: d.nodeLoadEnabled !== false, agent: String(d.agent || ''),
     };

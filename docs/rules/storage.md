@@ -817,10 +817,10 @@
   · v2.950(남긴 것 정리 — 코드 주석 표지는 v2.938): CSV·자유텍스트에 `nodeLoad` 칸(`exportedNodeLoad` — 아이실론만 · 빈 칸은 `undefined` 로 **유지** · 가져오기는 키를 만들지 않는다 · 위치형 `TEXT_FIELDS` 는 **맨 끝**에 — 가운데 끼우면 옛 11열 파일의 note·password 가 밀린다) ·
     노드 표 ID 열 → `NodeLoadPanel openNode` prop 으로 드로어(구역 scrollIntoView) · 엣지 미전송 고리 파일 보존(`storage-nodeload-ring.json` — `registerStateFile` · 2초 디바운스 + exitFlush · 되살릴 때 `sanitizeNodeLoadSample`·장비당 RING_MAX·7일 · 손상은 `preserveCorrupt`).
   · 남긴 것(정직): 장비 CSV 가져오기/내보내기·일괄 변경에는 `nodeLoadEnabled` 칸이 없다(장비 편집 폼만) · 노드 표(ID 열)에서 드로어를 열지 않는다(노드 부하 구역의 히트맵 이름·순위·분포 막대에서만) · 엣지 미전송 고리는 재시작하면 비워진다(로컬 DB 에는 남는다).
-- **v2.951 — 어레이 프런트엔드 5분 표본(PowerMax FE 디렉터 · PowerStore 노드/포트 · Unity SP/포트 — `storage/collectors/arrayPerf.js` · 폴러 `nodeLoadPoller.js`)**
+- **v2.952 — 어레이 프런트엔드 5분 표본(PowerMax FE 디렉터 · PowerStore 노드/포트 · Unity SP/포트 — `storage/collectors/arrayPerf.js` · 폴러 `nodeLoadPoller.js`)**
   · 대상은 REST 로 수집하는 어레이(`collectMethod 'api'`)만 — SSH 변형(uemcli · pstcli)은 성능 경로가 없어 토글 자체가 없다(`registry.normalizeDevice sampleCapable`). 토글 `nodeLoadEnabled` 는 아이실론과 같은 키 · 기본 켬.
   · 노드 부하 표에 지표 `hbps`(B/s) · `queue`(%) 가 늘었다(아이실론은 null — 0 이 아니다) · 묶음 `fe` · `CLUSTER_AGG` hbps sum · queue avg · 단위 카탈로그 `node_unit`(`saveNodeUnits · nodeUnitsOf`) —
     엣지 push 표본 안 `units` 를 중앙이 `sanitizeNodeUnits` 로 정제해 저장(모르는 종류 '' · 이름 없는 것 버림 · 64).
   · Unity FC 바이트 · IOPS 는 **누적 카운터** — metricValue 최신 두 항목의 델타 ÷ 시각 차(하나면 null · 줄면 리셋 null). PowerStore 지연은 µs → ms(가정 · probe.latUnit). PowerMax HostMBs × 1e6.
   · 데모: 어레이 데모 장비의 시리얼은 같은 법인 SAN 데모 어레이 시리얼(`mock/demo/sanswitch.js sanDemoArraySerial`) · FE 표본 30일 백필(`backfillNodeLoad feDevices`) · `demoArrayPerfSample` 은 수집기와 같은 `buildFeSample`.
-  · 화면 · 점검은 `docs/rules/sanswitch.md` v2.951.
+  · 화면 · 점검은 `docs/rules/sanswitch.md` v2.952.

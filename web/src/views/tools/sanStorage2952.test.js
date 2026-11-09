@@ -1,5 +1,5 @@
 /**
- * sanStorage2951.test.js — v2.951 어레이 측(디렉터 · 노드 · SP) 패널의 순수 계산 · 문구.
+ * sanStorage2952.test.js — v2.952 어레이 측(디렉터 · 노드 · SP) 패널의 순수 계산 · 문구.
  *  ① feValueText — 값 없음은 '—'(단위 없음) · 지표별 단위 · ② lineModel — 결측은 선을 끊고 외톨이 점은 점으로 · yMax 는 보기 좋은 값 · ③ feMetricsPresent — 값 있는 지표만
  *  ④ 소스 규약 — 패널은 usePolling 데이터(data.arraySide)만 쓰고 자기 폴러 · 날 <table> 이 없다 · 기준 설정 모달의 슬라이더는 숫자 칸과 같은 상태를 쓴다
  */

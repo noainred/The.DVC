@@ -31,7 +31,7 @@ import { nodeLoadRowsOf, sampleRowsOf, METRIC_BY_KEY, NODE_LOAD_GROUPS, NODE_LOA
 const FILE = () => path.join(config.dbDir || config.configDir, 'storage-history.db');
 const MAX_JSON_BYTES = 512 * 1024; // 엔드포인트당 원문 상한 — 512KB 초과는 절단 표기(폭주 방지)
 /**
- * v2.951 — 노드 지표 열은 `NODE_LOAD_METRICS` 가 유일한 원천: 원시 INSERT · 일/시간 upsert 문장을 여기서 만든다(v2.932 까지는 세 문장을 손으로
+ * v2.952 — 노드 지표 열은 `NODE_LOAD_METRICS` 가 유일한 원천: 원시 INSERT · 일/시간 upsert 문장을 여기서 만든다(v2.932 까지는 세 문장을 손으로
  * 적어 지표를 더할 때마다 열 목록 · 자리표 · ON CONFLICT 절을 맞춰야 했다). 열 이름은 고정 상수라 SQL 조립이 안전하다(사용자 입력 아님).
  * ⚠ max 는 스칼라 max() 를 쓰지 않는다 — SQLite 의 max(a, NULL) 은 NULL 이라 못 읽은 표본 하나가 그 날 최대를 지운다.
  */
@@ -277,7 +277,7 @@ async function openInner() {
     // v2.932 — 1차 표에 열 추가(멱등 · bmusage/db.js v2.919 와 같은 방식: 없는 열만 ALTER).
     ensureColumns(conn, 'node_load_history', [['ops', 'REAL'], ['lat', 'REAL'], ['busy', 'REAL'], ['iops', 'REAL']]);
     ensureColumns(conn, 'node_load_daily', ['ops', 'lat', 'busy', 'iops'].flatMap((k) => [[`${k}_sum`, 'REAL NOT NULL DEFAULT 0'], [`${k}_n`, 'INTEGER NOT NULL DEFAULT 0'], [`${k}_max`, 'REAL']]));
-    // v2.951 — 어레이 프런트엔드 단위 지표(hbps · queue) 열 + 단위 카탈로그 표(node_id ↔ 이름 · 종류 · 부모). 세 표 모두 없는 열만 더한다.
+    // v2.952 — 어레이 프런트엔드 단위 지표(hbps · queue) 열 + 단위 카탈로그 표(node_id ↔ 이름 · 종류 · 부모). 세 표 모두 없는 열만 더한다.
     ensureColumns(conn, 'node_load_history', [['hbps', 'REAL'], ['queue', 'REAL']]);
     for (const tbl of ['node_load_daily', 'node_load_hourly']) {
       ensureColumns(conn, tbl, ['hbps', 'queue'].flatMap((k) => [[`${k}_sum`, 'REAL NOT NULL DEFAULT 0'], [`${k}_n`, 'INTEGER NOT NULL DEFAULT 0'], [`${k}_max`, 'REAL']]));
@@ -420,7 +420,7 @@ async function openInner() {
       insNodeRaw: conn.prepare(NODE_RAW_SQL),
       upNodeDaily: conn.prepare(nodeAggUpsertSql('node_load_daily', 'day')),
       upNodeHourly: conn.prepare(nodeAggUpsertSql('node_load_hourly', 'hour')),
-      // v2.951 — 단위 카탈로그(어레이 FE 단위 이름 · 종류). 이름은 마지막 값 · first_seen 은 유지.
+      // v2.952 — 단위 카탈로그(어레이 FE 단위 이름 · 종류). 이름은 마지막 값 · first_seen 은 유지.
       upNodeUnit: conn.prepare(`INSERT INTO node_unit (device_id, node_id, name, kind, parent, first_seen, last_seen) VALUES (?,?,?,?,?,?,?)
         ON CONFLICT(device_id, node_id) DO UPDATE SET name = excluded.name, kind = excluded.kind, parent = excluded.parent, last_seen = excluded.last_seen`),
       selNodeUnits: conn.prepare('SELECT node_id AS id, name, kind, parent, first_seen AS firstSeen, last_seen AS lastSeen FROM node_unit WHERE device_id = ? ORDER BY kind, name LIMIT 256'),
@@ -1200,7 +1200,7 @@ export async function nodeLoadJobs(deviceId, from, to) {
 }
 
 /**
- * v2.951 — 어레이 프런트엔드 단위 카탈로그 저장(표본과 함께 · 정제는 nodeLoad.sanitizeNodeUnits). 같은 id 는 이름 · 종류를 갱신하고 first_seen 은 지킨다.
+ * v2.952 — 어레이 프런트엔드 단위 카탈로그 저장(표본과 함께 · 정제는 nodeLoad.sanitizeNodeUnits). 같은 id 는 이름 · 종류를 갱신하고 first_seen 은 지킨다.
  * @returns {Promise<{saved:number}>}
  */
 export async function saveNodeUnits(deviceId, units, now = Date.now()) {

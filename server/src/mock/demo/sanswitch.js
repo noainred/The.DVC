@@ -51,7 +51,7 @@ function makeArray(vcId, i) {
 }
 
 /**
- * v2.951 — 그 vCenter(법인)의 데모 어레이 중 종류(powermax · unity · powerstore)가 맞는 첫 번째의 시리얼. 스토리지 데모 스냅샷이 같은 시리얼을 쓰면
+ * v2.952 — 그 vCenter(법인)의 데모 어레이 중 종류(powermax · unity · powerstore)가 맞는 첫 번째의 시리얼. 스토리지 데모 스냅샷이 같은 시리얼을 쓰면
  * SAN 스토리지 성능 화면이 등록 스토리지(용량 · 알람 · 어레이 측 성능)와 짝을 짓는다. 그 법인에 그 종류가 없으면 null(스토리지 쪽은 제 시리얼을 쓴다).
  */
 export function sanDemoArraySerial(vcId, kind) {

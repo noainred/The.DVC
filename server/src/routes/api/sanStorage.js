@@ -9,7 +9,7 @@
  *   비-admin 응답은 스위치 주소를 가린다(maskDeviceAddress · addressHidden) — 등록부 이름 폴백도 가린 행으로.
  * 무거운 집계는 perfDb.heavyQuery(기억 TTL = 수집 주기 · lane multi · 취소 전달)만 — memoJson 을 겹치지 않는다. 조회 두 번(최근 1시간 60초 칸 ·
  *   최근 7일 1시간 칸 + 포트별)이고 '지금 합계' KPI 는 트래픽 카드와 **같은 함수**(trafficTotal.sumArrayTraffic)로 낸다.
- * 어레이 측 성능(디렉터 busy% · IOPS · 응답 시간 · 노드/SP CPU · 큐 · 호스트 처리량)은 v2.951 부터 스토리지 수집기의 5분 표본(storage/collectors/arrayPerf.js)에서
+ * 어레이 측 성능(디렉터 busy% · IOPS · 응답 시간 · 노드/SP CPU · 큐 · 호스트 처리량)은 v2.952 부터 스토리지 수집기의 5분 표본(storage/collectors/arrayPerf.js)에서
  *   시리얼로 짝 지어 읽는다(sanswitch/arraySideLoad.js — 장비 호출 0). 값이 없으면 점검은 unknown 에 사유를 적는다(거짓 정상 금지).
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
@@ -23,12 +23,12 @@ import { loadPerfSettings } from '../../sanswitch/perfSettings.js';
 import { sumArrayTraffic } from '../../sanswitch/trafficTotal.js';
 import { buildStorageRows, rowTotals, STATE_TEXT, MIN_PREV_HOURS } from '../../sanswitch/storageList.js';
 import { checkArray, summarizeChecks, CHECK_ITEMS, IMBALANCE_BAD_RATIO, FABRIC_MIN_BPS } from '../../sanswitch/storagePerfCheck.js';
-import { loadArraySide, checkInputFor } from '../../sanswitch/arraySideLoad.js';   // v2.951 어레이 측 성능(디렉터 · 노드 · SP)
-import { localSnapshots as sanLocalSnaps } from '../../sanswitch/store.js';          // v2.951(C) 조닝 별칭 폴백 — 장비별 최신 스냅샷의 zone 멤버
+import { loadArraySide, checkInputFor } from '../../sanswitch/arraySideLoad.js';   // v2.952 어레이 측 성능(디렉터 · 노드 · SP)
+import { localSnapshots as sanLocalSnaps } from '../../sanswitch/store.js';          // v2.952(C) 조닝 별칭 폴백 — 장비별 최신 스냅샷의 zone 멤버
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
 import { buildFabrics } from '../../sanswitch/attribution.js';
 import { normWwn } from '../../sanswitch/zoning.js';
-import { islCluesFor, islClueText } from '../../sanswitch/islClue.js';              // v2.951(H) 팹 비대칭 단서 — E-포트 피크 포화도
+import { islCluesFor, islClueText } from '../../sanswitch/islClue.js';              // v2.952(H) 팹 비대칭 단서 — E-포트 피크 포화도
 import { loadCheckSettings, saveCheckSettings, publicCheckSettings } from '../../sanswitch/storageCheckSettings.js';
 import { loadDirectorMap, saveDirectorMap, directorMapKey, MAP_LIMITS } from '../../sanswitch/directorMap.js';
 import { directorOf, applyDirectorOverride, VENDOR_LABEL, UNPARSED_GROUP, groupLabel } from '../../sanswitch/directorOf.js';
@@ -87,12 +87,12 @@ function kindResolver(capIdx, map) {
     return { kind: k, basis: k === 'unknown' ? 'none' : (String(key).includes('::') ? 'name' : 'flat') };
   };
 }
-/** 디렉터 — 관리자 매핑 > 이름 규칙 > 조닝 별칭(v2.951 C — 심볼릭 이름이 없는 Unity SPA/SPB 포트는 zone 별칭 `Unity_SPA0_p8` 로). */
+/** 디렉터 — 관리자 매핑 > 이름 규칙 > 조닝 별칭(v2.952 C — 심볼릭 이름이 없는 Unity SPA/SPB 포트는 zone 별칭 `Unity_SPA0_p8` 로). */
 function directorResolver(map, aliasFor = null) {
   return (port, key) => applyDirectorOverride(directorOf(port.name, { alias: aliasFor ? aliasFor(port.deviceId, port.port) : '' }), map.directors[directorMapKey(key, port.deviceId, port.port)] || null);
 }
 /**
- * v2.951(C): 포트 → 조닝 별칭. port_meta 의 연결 WWN 을 장비별 최신 스냅샷 zone 멤버 별칭(attribution.buildFabrics aliasOf)에서 찾는다.
+ * v2.952(C): 포트 → 조닝 별칭. port_meta 의 연결 WWN 을 장비별 최신 스냅샷 zone 멤버 별칭(attribution.buildFabrics aliasOf)에서 찾는다.
  * 스냅샷 · DB 가 없으면 빈 조회(별칭 없음 = 폴백 없음 — 판정이 바뀌지 않는다). 요청마다 한 번 만든다.
  */
 async function aliasLookupFor(ctx) {
@@ -234,10 +234,10 @@ export function registerSanStorage(api) {
     const kind = kindOf(key, dcId);
     const vendor = ports[0] ? directorOf(ports[0].name).vendor : 'other';
     const capacity = capIdx.lookup(arraySerialOf(key), dcId);
-    // v2.951 — 어레이가 보고하는 디렉터 · 노드 · SP 성능(시리얼로 짝 지은 스토리지 장비의 5분 표본). 스위치 '지금' = 합계 선의 마지막 값(없으면 대조 없음).
+    // v2.952 — 어레이가 보고하는 디렉터 · 노드 · SP 성능(시리얼로 짝 지은 스토리지 장비의 5분 표본). 스위치 '지금' = 합계 선의 마지막 값(없으면 대조 없음).
     const nowSwitchBps = (() => { const a = s.sum || []; for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; })();
     const winFrom = agg.since ?? (agg.buckets?.[0] ?? null); const winTo = agg.until ?? (agg.buckets?.length ? agg.buckets[agg.buckets.length - 1] + (agg.bucketMs || 0) : null);
-    // v2.951(H) — 팹 비대칭 단서: 이 어레이가 물린 스위치의 ISL(E-포트) 24시간 피크 포화도(판정 아님 · 문구).
+    // v2.952(H) — 팹 비대칭 단서: 이 어레이가 물린 스위치의 ISL(E-포트) 24시간 피크 포화도(판정 아님 · 문구).
     let isl = [];
     try { const m = await islCluesFor((s.deviceIds || []).map((id) => ({ id: String(id), name: (ctx.deviceMeta.get(String(id)) || { name: String(id) }).name })), { signal: perfAbortSignal(res) }); isl = [...m.values()]; }
     catch (e) { if (abandoned(e)) return; isl = []; }
@@ -265,13 +265,13 @@ export function registerSanStorage(api) {
     const b = await buildList(req, res);
     if (!b) return;
     const settings = loadCheckSettings();
-    // v2.951(H) — 어레이가 물린 스위치의 ISL 피크 포화도(24시간)를 팹 비대칭 문구에 붙인다(판정은 바꾸지 않는다). 조회 실패는 문구에 '조회 실패'.
+    // v2.952(H) — 어레이가 물린 스위치의 ISL 피크 포화도(24시간)를 팹 비대칭 문구에 붙인다(판정은 바꾸지 않는다). 조회 실패는 문구에 '조회 실패'.
     let islMap = new Map();
     try {
       const sws = new Map(); for (const r of b.rows) for (const f of r.fabrics || []) if (f.deviceId) sws.set(String(f.deviceId), { id: String(f.deviceId), name: f.name || String(f.deviceId) });
       islMap = await islCluesFor([...sws.values()], { signal: perfAbortSignal(res) });
     } catch (e) { if (abandoned(e)) return; islMap = new Map(); }
-    // v2.951 — 어레이 측 입력(최근 표본 · 장비 호출 0). 짝이 없거나 표본이 없으면 그 사유가 unknown 문구가 된다.
+    // v2.952 — 어레이 측 입력(최근 표본 · 장비 호출 0). 짝이 없거나 표본이 없으면 그 사유가 unknown 문구가 된다.
     const results = [];
     for (const r of b.rows) {
       let as = { input: {}, text: '', reason: 'no-device', lastSampleTs: null, eligible: false };

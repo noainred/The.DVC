@@ -137,7 +137,9 @@ export async function allocHistoryRows(days = 90, now = Date.now()) {
  * 아니면 null(모름 — '소진 안 함' 이 아니다). 남은 일수 = (지금 용량 − 지금 할당) / 하루 증가량. 용량이 바뀌면 지금 용량 기준이다.
  * @param {number[][]} series [[day, cap, alloc]] 날짜 순
  */
-export function allocTrend(series, { windowDays = 30, minPoints = 7, minR2 = 0.3 } = {}) {
+export const TREND_STALE_DAYS = 3;     // 마지막 점이 이보다 오래면 '지금 추세' 를 모른다 — 소진 예상을 내지 않는다
+export const TOTAL_RETIRE_DAYS = 7;    // 마지막 점이 이보다 오래된 법인은 합계에서 통째로 뺀다(퇴역 · 장기 미보고)
+export function allocTrend(series, { windowDays = 30, minPoints = 7, minR2 = 0.3, today = null, staleDays = TREND_STALE_DAYS } = {}) {
   const s = (Array.isArray(series) ? series : []).filter((x) => Array.isArray(x) && Number.isFinite(x[0]) && Number.isFinite(x[1]) && Number.isFinite(x[2]))
     .sort((a, b) => a[0] - b[0]);
   if (!s.length) return { points: 0, gbPerDay: null, change30: null, daysLeft: null, r2: null, over: false };
@@ -146,6 +148,9 @@ export function allocTrend(series, { windowDays = 30, minPoints = 7, minR2 = 0.3
   const first = win[0];
   const change30 = win.length >= 2 ? Math.round((last[2] - first[2]) * 10) / 10 : null;
   const over = last[2] > last[1];   // 이미 할당이 용량을 넘음 — 남은 일수가 아니라 '넘음' 으로 말한다
+  // v2.951(점검): 마지막 점이 오래된 법인(보고가 멈춤)도 그 옛 추세로 '오늘부터 N일 뒤' 를 냈다 — 지금 값이 아니므로 내지 않고 며칠 전인지 싣는다.
+  const stale = today != null && Number.isFinite(today) && today - last[0] > staleDays ? today - last[0] : 0;
+  if (stale) return { points: win.length, gbPerDay: null, change30, daysLeft: null, r2: null, over, stale };
   if (win.length < minPoints) return { points: win.length, gbPerDay: null, change30, daysLeft: null, r2: null, over };
   const tr = linearTrend(win.map((x) => ({ ts: dayStartMs(x[0]), v: x[2] })));
   if (!tr) return { points: win.length, gbPerDay: null, change30, daysLeft: null, r2: null, over };
@@ -158,23 +163,31 @@ export function allocTrend(series, { windowDays = 30, minPoints = 7, minR2 = 0.3
 /**
  * 화면 응답(순수). byVc = allocHistoryRows 결과(이미 범위로 자른 것). 합계 줄은 **그날 모든 법인의 점이 있을 때만** 낸다
  * (어느 법인이 빠진 날의 합은 부분 합 — 그 날은 null 로 두어 선이 끊긴다).
+ * v2.951(점검): 마지막 점이 TOTAL_RETIRE_DAYS 보다 오래된 법인(퇴역 · 장기 미보고)은 합계에서 **창 전체에 걸쳐** 뺀다 — 예전에는 그 법인 하나 때문에
+ *   그 뒤 모든 날의 합계가 null 이 되어 선이 통째로 사라졌다. 날마다 넣었다 뺐다 하지 않으므로 합계가 그 법인만큼 계단처럼 꺾이는 부분 합은 없다.
+ *   뺀 법인은 totalExcluded 로 밝힌다(화면이 말한다).
  */
 export function allocHistoryView(byVc, { names = new Map(), now = Date.now() } = {}) {
   if (!byVc) return { available: false, corps: [], total: [], totalTrend: null };
+  const today = dayIndex(now);
   const corps = [...byVc.entries()].map(([id, pts]) => {
     const last = pts[pts.length - 1];
-    return { id, name: names.get(id) || id, points: pts, lastDay: last ? dayLabel(last[0]) : null,
-      pct: last && last[1] > 0 ? Math.round((last[2] / last[1]) * 100) : null, trend: allocTrend(pts) };
+    const silentDays = last ? today - last[0] : null;
+    return { id, name: names.get(id) || id, points: pts, lastDay: last ? dayLabel(last[0]) : null, silentDays,
+      retired: silentDays != null && silentDays > TOTAL_RETIRE_DAYS,
+      pct: last && last[1] > 0 ? Math.round((last[2] / last[1]) * 100) : null, trend: allocTrend(pts, { today }) };
   }).sort((a, b) => a.id.localeCompare(b.id));
   const days = [...new Set(corps.flatMap((c) => c.points.map((p) => p[0])))].sort((a, b) => a - b);
-  const byDay = corps.map((c) => new Map(c.points.map((p) => [p[0], p])));
+  const live = corps.filter((c) => !c.retired);
+  const byDay = live.map((c) => new Map(c.points.map((p) => [p[0], p])));
   const total = days.map((d) => {
     let cap = 0; let alloc = 0;
     for (const m of byDay) { const p = m.get(d); if (!p) return [d, null, null]; cap += p[1]; alloc += p[2]; }
     return [d, Math.round(cap * 10) / 10, Math.round(alloc * 10) / 10];
   });
   const full = total.filter((x) => x[1] != null);
-  return { available: true, today: dayIndex(now), corps, total, totalTrend: full.length ? allocTrend(full) : null,
+  return { available: true, today, corps, total, totalTrend: full.length && live.length ? allocTrend(full, { today }) : null,
+    totalExcluded: corps.filter((c) => c.retired).map((c) => c.id), retireDays: TOTAL_RETIRE_DAYS,
     labels: Object.fromEntries(days.map((d) => [d, dayLabel(d)])) };
 }
 

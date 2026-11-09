@@ -197,3 +197,30 @@ test('④ 배치 추천의 프로파일 GB(웹 gpuAllocText.profileGB)는 서버
     assert.equal(profileGB(p), vgpuProfileGB(p), String(p));
   }
 });
+
+test('v2.951 점검 — 보고가 멈춘 법인: 합계에서 기간 전체로 빼고(선이 사라지지 않게) · 소진 예상을 내지 않는다', async () => {
+  const H = await import('../src/gpu/allocHistory.js');
+  const { dayIndex } = await import('../src/util/dayKey.js');
+  const now = Date.now();
+  const today = dayIndex(now);
+  const series = (from, to, cap, alloc0, step) => { const out = []; for (let d = from; d <= to; d++) out.push([d, cap, alloc0 + (d - from) * step]); return out; };
+  const byVc = new Map([
+    ['live', series(today - 29, today, 48, 10, 0.5)],
+    ['gone', series(today - 29, today - 10, 24, 12, 0)],   // 10일 전에 보고가 멈춤(퇴역 · 장기 미보고)
+    ['blip', series(today - 29, today - 5, 24, 6, 0.2)],    // 5일째 보고 없음 — 합계 기준(7일) 안
+  ]);
+  const v = H.allocHistoryView(byVc, { now });
+  assert.deepEqual(v.totalExcluded, ['gone']);
+  assert.equal(v.retireDays, H.TOTAL_RETIRE_DAYS);
+  const lastTotal = v.total.find((x) => x[0] === today - 6);
+  assert.equal(lastTotal[1], 48 + 24, '예전에는 gone 때문에 이 날 합계가 null(선이 사라짐) — 이제 live + blip');
+  assert.equal(v.total.find((x) => x[0] === today - 20)[1], 48 + 24, 'gone 은 기간 전체에서 빠진다(그날만 넣었다 빼지 않음 — 계단 없음)');
+  assert.equal(v.total.find((x) => x[0] === today)[1], null, 'blip 이 없는 최근 날은 부분 합이라 null(예전 규칙 그대로)');
+  const gone = v.corps.find((c) => c.id === 'gone');
+  assert.equal(gone.retired, true); assert.equal(gone.silentDays, 10);
+  assert.equal(gone.trend.daysLeft, null); assert.equal(gone.trend.stale, 10, '옛 추세로 오늘부터 N일 뒤를 내지 않는다');
+  const blip = v.corps.find((c) => c.id === 'blip');
+  assert.equal(blip.trend.stale, 5); assert.equal(blip.retired, false);
+  const live = v.corps.find((c) => c.id === 'live');
+  assert.equal(live.trend.stale, undefined); assert.equal(live.trend.gbPerDay, 0.5);
+});
