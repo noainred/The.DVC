@@ -39,6 +39,7 @@
 - (원래 5142행) v2.635 — 베어메탈 스토리지 디스크 사용량 12시간 이력. 새 수집이 아니라 '최신 결과를 떼어 적재' 한다
 - (v2.749) 게스트 파티션 사용률 경보 — 원천은 게스트 디스크 수집의 part_latest · 경로 모양으로 OS · 정규식 없는 패턴 · 메일은 아이실론 코어
 - (v2.789) 스토리지 사용량 보고서(일간·주간·월간 표 · LUN·파일시스템 · CSV · 법인/종류 비교 · 예약 메일)
+- (v2.915) 베어메탈 ↔ SAN 비교 — 디스크 I/O 표본(diskstats) · I/O 시계열 DB · 법인 축 · 비교/시계열 API · ‘SAN 비교’ 탭
 - v2.926 — 아이실론 노드 부하 시계열(네트워크·디스크·CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`, 수집 키는 `collectors/isilonNodeLoad.js`
 
 ## 본문
@@ -776,6 +777,15 @@
   - 7일 증가는 `part_series` 의 기준 시각 이하 마지막 점(diff-저장)으로 낸다 — 기준 점이 없으면 null(관측 부족), 변화 기준(기본 1 GB) 미만 변화는 보이지 않는다. 가득 참 예상은 그 속도의 단순 추정.
   · v2.770(점검 R5-E2): 엣지 소비 전력의 부분 합 표지(`partial`·`missing`)도 중앙 정제 화이트리스트에(missing>0 일 때만 partial) — 빠지면 전체 전력이 부분 합을 '측정' 으로 센다.
     장비 출력 파서에 `m` 플래그 + 무제한 부정 클래스 금지(외로운 \r 마다 시작점) · `/^(\d+):\s*(.*)$/` 대신 `uemcliParse.recStart` 를 쓴다(한 벌) · 주기 수집은 `_inFlight` 를 보고 건너뛰며(`inFlightSkipped`), finally 는 자기 항목만 지운다.
+
+- **v2.915 — 베어메탈 ↔ SAN(VMAX · PowerMax) 비교**(사용자 요청 2026-11-09 "베어메탈 스토리지의 실시간 디스크 사용율을 … SAN vmax, pmax 사용율/전송 속도와 숫자로 비교" + "법인별로 볼 수 있는 기능" + "각 장비별로 peak / average 디스크 access 성능을 비교하는 차트 … 실시간/트렌드" · 승인 시안 `docs/design/bm-san-compare` ①~⑥ · 컨펌 '진행해' 기본값 · 릴리스 번호는 main 이 앞서 v2.956.0 — 코드 · 테스트 표지는 v2.915). 화면 `views/tools/BmSanCompare.jsx` + `BmIoChart.jsx` · 문구 `bmSanCompareText.js` · `bmIoChartText.js` · 서버 `bmstor/{diskstats,ioDb,ioSeries,compare,corp}.js` · 회귀 `server/test/bmstorIo2915.test.js` + 웹 두 테스트):
+  - **디스크 I/O 표본은 df 와 같은 SSH 세션의 상수 명령 하나**(`diskstats.ioSampleCommand` — `cat /proc/uptime; cat /proc/diskstats; sleep N; …` · 입력이 끼는 자리 없음 · N = `BMSTOR_IO_SAMPLE_SEC` 기본 2 · 0 = 끔). **통짜 디스크만**(`WHOLE_DISK_RE` — dm · md · 파티션은 같은 I/O 의 중복) · 섹터 512B 고정 · 카운터 역행 장치는 뺀다 · df 가 성공했으면 I/O 실패가 서버를 오류로 만들지 않는다(`io:null` + `ioError`).
+  - **엣지 회신 두 경로(폴링 · PUSH)는 `poller.sanitizeBmResult` 하나**로 정제한다 — v2.914 까지 PUSH 회신은 정제 없이 latest 에 들어갔다(발견 · 정정). 엣지 워커 회신 화이트리스트에 `io · ioError` 를 더했다 — 새 엣지 export 필드 = 중앙 정제 필드(루트 규칙). 구버전 엣지(io 없음)는 `ioError:'edge-legacy'`(화면 문장은 웹).
+  - **I/O 시계열 DB `bmstor-io.db`(`bmstor/ioDb.js`)** — 12시간 용량 이력과 따로(보존 · 정리 주기가 다르다). 원시(서버 × 수집 1회) + `io_last`(차분용 — '키별 최신값' 을 GROUP BY+MAX 로 만들지 않는다) + 15분 · 1시간 집계(적재 때 upsert · 백필 없음). **평균 = 누적 카운터 차분 ÷ 경과**(uptime 차 — 수집 사이 구간 전체의 진짜 평균 · 첫 행 · 재부팅 · 공백 > 주기×2 는 null), **피크 = 2초 표본 최댓값(하한)** — 화면이 둘 다 말한다. 집계 함수는 **한 문장에 하나**(`ioRank` 는 세 문장). 보존 env 3 · 31 · 730일. 엣지 위임 서버 값도 **중앙이 적재**(엣지에 DB 없음). 상한 산수는 파일 머리말.
+  - **법인 축**(`bmstor/corp.js datacenterOfBmServer`): 서버 폼 ‘법인’(`datacenterId` · CSV 열 `datacenter` — id 또는 이름 · 미등록은 가져오기 오류) → 비우면 **엣지의 법인**(수집 서버 `vcenterId` → `datacenterOfVcenter` · 조회는 `findCollectorByName` 하나 — EDGE2613-08) → `''`(미지정 · 센티널 `__none__`). 수집 서버의 자유 문자열 `datacenter` 로 이름 대조하지 않는다. 그룹 이름을 법인으로 간주하지 않는다.
+  - **API** `GET /tools/bm-storage/compare?hours&types&datacenterId`(어레이 용량 = 최신 스냅샷 중앙 · 엣지 중 늦은 것 · 전송 속도 = `storageSeriesMulti` 를 시리얼로 대조 · 법인 분리 집계에서는 같은 법인 계열만 · 사유는 코드) · `GET /tools/bm-storage/io/series?range&metric&ids&rank=1`(격자 = SAN `rangeOf` 의 bucketMs — 15분 · 1시간 정배수 · 1h 원시 · 24h 15분 · 7d/30d 1시간 · `bm:all` 은 측정 서버 전부에 값이 있는 칸만 합). 둘 다 adminOnly + fullScopeOnly 이고 **응답에 관리 주소를 싣지 않는다**(`stripHost`). 데모는 `demoBmIoSeries`(수식 — 적재 없음)이고 PowerMax · VMAX 데모 시리얼은 SAN 데모 포트 이름과 맞춘다(`sanDemoArraysFor`).
+  - **화면**: 하위 탭 `useHashTab`(`#/tools/bm-storage/compare`) · 법인 · SAN 종류 칩은 공용 `DeviceFacetBar`(이름 키 → id) · 실시간 1시간 재조회는 공용 `usePolling`(WEB2613-09) · 합계 행은 STable 규약대로 **맨 아래 고정**(시안은 맨 위 — 저장소 규약을 따랐다) · 피크는 전송 속도 칸의 둘째 줄(1440 에서 열이 넘쳐 열 하나를 합쳤다) · CSV 는 `canCsv()` 뒤.
+  - ⚠ 테스트가 src 모듈을 **정적 import 하면 CONFIG_DIR env 보다 먼저 config.js 가 평가**되어 개발용 `server/config/` 에 테스트 서버가 쌓인다(이 작업에서 실측 — 12대). 설정을 읽는 경로가 하나라도 끼면 `before()` 에서 동적 import 한다(`bmstorIo2915.test.js` 머리말).
 - ⚠⚠ **v2.926(릴리스 2.931.0) — 아이실론 노드 부하 시계열(네트워크 In/Out · 디스크 쓰기/읽기 · CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`(`saveNodeLoadPoint`·`nodeLoadQuery`), 수집 키는 `collectors/isilonNodeLoad.js`, 화면은 `views/tools/storageNodeLoad/`**
   (사용자 요청 "노드별 io network 부하를 저장하고 차트로" · "기간별 시간별로 이전 기록" · "Disk io 추가" · 성능 추천 ①CPU ④잡 엔진 ⑤지난주 비교 — Claude Design 시안 v2 컨펌,
   `docs/design/isilon-node-load/`. 회귀 `server/test/storageNodeLoad2926.test.js` + 웹 `storageNodeLoad/nodeLoadText.test.js`(서버 묶음·기간·조립을 같은 소스로 대조)):

@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **734개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **739개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-09)
@@ -321,7 +321,7 @@
 | `BACKUP_STARTUP_DELAY_MS` |  |  | backup/settings.js |
 | `CONFIG_DIR` |  | ✅ | backup/stagedRestore.js, config.js 외 2 |
 
-## 베어메탈 스토리지 (8)
+## 베어메탈 스토리지 (13)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -331,6 +331,11 @@
 | `BMSTOR_HISTORY_DB_PATH` |  |  | bmstor/historyDb.js |
 | `BMSTOR_HISTORY_INTERVAL_HOURS` |  |  | bmstor/history.js |
 | `BMSTOR_HISTORY_RETENTION_DAYS` |  |  | bmstor/history.js |
+| `BMSTOR_IO_DB_PATH` |  |  | bmstor/ioDb.js |
+| `BMSTOR_IO_R15_DAYS` |  |  | bmstor/ioDb.js |
+| `BMSTOR_IO_R1H_DAYS` |  |  | bmstor/ioDb.js |
+| `BMSTOR_IO_RAW_DAYS` |  |  | bmstor/ioDb.js |
+| `BMSTOR_IO_SAMPLE_SEC` |  |  | bmstor/diskstats.js |
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
 | `BMSTOR_SSH_TIMEOUT_MS` |  |  | bmstor/collect.js |
 
@@ -923,4 +928,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 734
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 739

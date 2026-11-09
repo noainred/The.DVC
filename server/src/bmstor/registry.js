@@ -22,6 +22,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { sanitizeMounts } from './collect.js';
 import { accessMoved } from '../util/secretCarry.js'; // v2.607 LEFT2607-06
 import { normalizeBmGroups, groupsOf } from './agg.js';
+import { datacenterInputIssue } from './corp.js'; // v2.915: 법인(선택) — 설계 bm-san-compare §4.4
 import { bindOfWrite } from '../bmusage/onboard/bindRule.js'; // 7b r3(R-N1): 비밀을 주소에 묶는 판정 하나(choke point)
 
 const FILE = path.join(config.configDir, 'bm-storage.json');
@@ -96,6 +97,8 @@ export function bmServerInputIssue(body = {}) {
   // 멀티 그룹(v2.344): 최대 3개 — 배열/문자열(쉼표·세미콜론 구분) 모두 허용, 구형 group 하위호환.
   const { error: gErr } = normalizeBmGroups(body.groups !== undefined ? body.groups : body.group);
   if (gErr) return gErr;
+  const dcErr = datacenterInputIssue(body.datacenterId);   // v2.915: 법인 id(선택 · 64자 · 제어 문자 금지)
+  if (dcErr) return dcErr;
   // 7b: 참조 칸은 id 꼴만(존재 판정은 호출부 — 키 저장소를 이 등록부가 import 하지 않는다).
   if (body.keyRef !== undefined && body.keyRef !== '' && !REF_RE.key.test(String(body.keyRef))) return 'SSH 키 참조가 올바르지 않습니다.';
   if (body.credRef !== undefined && body.credRef !== '' && !REF_RE.acc.test(String(body.credRef))) return '공통 계정 참조가 올바르지 않습니다.';
@@ -165,6 +168,9 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
     server.groups = groupsOf(server);
   }
   delete server.group;
+  // v2.915(설계 §4.4): 법인(DataCenter id · 선택). 미전달이면 기존 유지(무관 편집이 지우지 않게) · 빈 문자열이면 지운다(폼의 '선택 안 함').
+  if (body.datacenterId !== undefined) server.datacenterId = String(body.datacenterId || '').trim().slice(0, 64);
+  else if (typeof server.datacenterId !== 'string') server.datacenterId = '';
   server.mounts = mounts;
   server.enabled = body.enabled !== false;
   // 빈/마스킹 비밀번호는 기존 유지(편집 시 재입력 강요 안 함) — 신규인데 비었으면 빈 값 저장(무비번 SSH 허용 안 하는 서버는 수집 실패로 표시됨).
@@ -263,6 +269,7 @@ export function seedBmServersIfEmpty(list) {
       id: String(b.id), host: String(b.host).trim(), port: 22, username: String(b.username || 'root'),
       name: String(b.name || b.host), agent: '', dispatch: 'poll',
       groups: normalizeBmGroups(b.groups).groups, mounts: sanitizeMounts(b.mounts).mounts,
+      datacenterId: String(b.datacenterId || '').trim().slice(0, 64),   // v2.915: 데모 법인(데모 vCenter 의 DataCenter)
       enabled: b.enabled !== false, password: String(b.password || ''),
     });
   }

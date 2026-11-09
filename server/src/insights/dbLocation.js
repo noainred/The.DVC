@@ -57,6 +57,7 @@ export const MIGRATABLE = [
   { file: 'bm-usage.db', label: '베어메탈 사용률(CPU·메모리·디스크·네트워크·HBA, v2.550)' },
   { file: 'link-check.db', label: '통신 점검 이력(중앙↔엣지·vCenter 링크, v2.552)' },
   { file: 'bmstor-history.db', label: '베어메탈 스토리지 디스크 사용량 12시간 이력(서버·그룹·합계, v2.635)' },
+  { file: 'bmstor-io.db', label: '베어메탈 스토리지 디스크 I/O 시계열(원시·15분·1시간 집계, v2.915)' },
   { file: 'cvp.db', label: 'Arista CloudVision(CVP) 네트워크 스위치 — 장비·포트 최신값·포트 사용량 이력(v2.608)' },
   { file: 'vm-dns.db', label: 'VM DNS 서버 설정 변경 이력(바뀐 것만 — v2.696)' },
   { file: 'xfer-speed.db', label: '법인 간 전송 속도 측정 이력(중앙↔엣지 10MB 왕복 — 원시 + 일 요약, v2.735)' },
