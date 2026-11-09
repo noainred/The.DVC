@@ -124,7 +124,7 @@ test('T33 최근 50건만 유지 — 먼저 기록된 것부터 버린다', () =
   // 기대 개수는 **리터럴 50**으로 단정한다 — 상수를 그대로 기대값에 쓰면 값을 5로 줄여도
   // 통과하는 자기참조 테스트가 된다(회귀 보호 0).
   assert.equal(batches.MAX_BATCHES, 50);
-  assert.deepEqual(batches.SOURCES, ['import', 'generate', 'template']);
+  assert.deepEqual(batches.SOURCES, ['import', 'generate', 'template', 'settings']);
   const ids = [];
   const base = Date.now() - 100000;
   for (let i = 0; i < batches.MAX_BATCHES + 5; i += 1) {

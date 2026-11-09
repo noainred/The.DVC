@@ -38,11 +38,27 @@ import { registerBareosManage } from './api/bareosManage.js'; // v2.845 법인�
 import { registerBareosLive } from './api/bareosLive.js'; // v2.833 Bareos 진행 현황판(관리 도구 bareos-backup 의 '진행 현황' 탭 — 화면이 열린 동안만 Director 상태 조회) // v2.830 Bareos 백업 그룹(관리 도구 bareos-backup 의 '백업 그룹' 탭 — 포탈이 스케줄 실행)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
+import { registerHostSan } from './api/hostSan.js';
+import { registerSanStorage } from './api/sanStorage.js'; // v2.948 SAN 스토리지 성능(독립 도구 san-storage — 어레이 · 디렉터 · 컨트롤러별 처리량 · 점검 · 매핑)
+import { registerSanFlow } from './api/sanFlow.js';       // v2.935(C-②) Brocade Flow Vision 플로우 모니터(포탈이 dvc_ 플로우를 만들고 읽는다)       // v2.920 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
 import { registerCvpBulk } from './api/cvpBulk.js';       // CVP 서버 CSV·자유텍스트 대량 등록(v2.641)
 import { registerPartFaults } from './api/partFaults.js'; // 파트 장애(물리 부품 장애 기록·알림, v2.547)
 import { registerEdgeLog } from './api/edgeLog.js'; // 엣지 로그·진행상태(중앙이 당긴다 + 폴백, v2.549)
 import { registerBmUsage } from './api/bmUsage.js'; // 베어메탈 사용률(CPU·MEM·디스크·NET·HBA, v2.550)
+import { registerBmPerfOps } from './api/bmPerfOps.js'; // v2.929 리눅스 성능 5단계(집중 모니터링 · 변경 이벤트 · 베이스라인 · 구간 비교 · 알림 규칙)
+import { registerBmCompare } from './api/bmCompare.js'; // 6단계 리눅스 성능 — 서버 비교(2~5대) · 5대 동시 집중 · 저장된 세트
+import { registerBmCollectHealth } from './api/bmCollectHealth.js'; // 6단계 — 수집 건강 보드(메타 모니터링)
+import { registerBmAnnotations } from './api/bmAnnotations.js'; // 6단계 — 운영 주석(중앙 저장)
+import { registerBmOnboard } from './api/bmOnboard.js'; // 7b단계 — SSH 키 저장소 · 공통 계정 · 서버 등록(온보딩) · 누락 점검
+import { registerBmMaint } from './api/bmMaint.js'; // 8a단계 — 정비 창 · 알림 억제
+import { registerBmCapacity } from './api/bmCapacity.js'; // 8a단계 — 용량 소진 예측
+import { registerBmTop } from './api/bmTop.js'; // 8b단계 — 프로세스 Top-N
+import { registerBmIdle } from './api/bmIdle.js'; // 8b단계 — 저활용 서버 찾기
+import { registerBmKeyOverlaps } from './api/bmKeyOverlaps.js'; // 다음 점검 ①(2차) — 식별 키가 겹치는 서버 · 사용자 결정
+import { registerBmPower } from './api/bmPower.js'; // 8b단계 — 전력 · 온도 집계
+import { registerBmPlaybookSlo } from './api/bmPlaybookSlo.js'; // 6단계 — 진단 플레이북 · 목표선(SLO)
+import { registerBmLogs } from './api/bmLogs.js'; // 7a단계 리눅스 성능 — 로그 분석(서버 상세 ‘로그’ 탭 · 함대 표)
 import { registerServerSensors } from './api/serverSensors.js'; // 서버 온도 › 센서 상세(v2.659)
 import { registerCorpUsage } from './api/corpUsage.js'; // 법인별 서버 사용량(전체·물리·가상화, v2.625)
 import { registerSvcInventory } from './api/svcInventory.js'; // 서비스 인벤토리(VM + 베어메탈 · 법인 › 폴더 › 서비스 · 전역 카탈로그, v2.887)
@@ -153,11 +169,27 @@ registerBareosManage(api);
 registerBareosLive(api);
 registerStorageMon(api);
 registerSanSwitch(api);
+registerSanStorage(api);   // v2.948 — /tools/san-storage*(조회 tools+전체 범위 · 매핑 · 임계값 PUT 은 전체 범위 관리자)
+registerHostSan(api);
+registerSanFlow(api);   // v2.935 — /tools/san-flow*(전체 범위 관리자 · 만들기 · 지우기는 OTP 재인증)   // v2.920 — /hosts/:id/san-attribution · /hosts/:id/net-uplinks · /tools/sanswitch/attribution
 registerCvp(api);
 registerCvpBulk(api);
 registerPartFaults(api);
 registerEdgeLog(api);
 registerBmUsage(api);
+registerBmPerfOps(api);
+registerBmCompare(api);
+registerBmCollectHealth(api);
+registerBmAnnotations(api);
+registerBmOnboard(api);
+registerBmMaint(api);
+registerBmCapacity(api);
+registerBmTop(api);
+registerBmIdle(api);
+registerBmKeyOverlaps(api);
+registerBmPower(api);
+registerBmPlaybookSlo(api);
+registerBmLogs(api);
 registerCorpUsage(api);
 registerSvcInventory(api);
 registerServerSensors(api);

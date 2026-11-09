@@ -174,7 +174,7 @@ export default function BmSanCompare() {
             <dt>SAN 용량</dt><dd>Unisphere 데이터 감축 후 실사용<small>{sanCapAgo || '스냅샷 없음'} · 구독(씬) 아님</small></dd>
             <dt>SAN 전송</dt><dd>SAN 스위치 포트 사용량 합<small>{sanPerfAgo || '표본 없음'}{san.perfIntervalMs ? ` · 주기 ${Math.round(san.perfIntervalMs / 60000)}분` : ''} · {hoursLabel} {peak ? '피크' : '평균'} · 시리얼로 어레이 대조</small></dd>
           </dl>
-          <div className="bmc-delta"><span className="muted">기준이 다른 값을 한 표에 둔 것이므로 <b style={{ fontFamily: 'inherit' }}>배율 · 차이는 참고치</b>입니다. 어레이 자체 성능 API 는 수집하지 않습니다.</span></div>
+          <div className="bmc-delta"><span className="muted">기준이 다른 값을 한 표에 둔 것이므로 <b style={{ fontFamily: 'inherit' }}>배율 · 차이는 참고치</b>입니다. 이 화면의 SAN 전송 속도는 스위치 포트 트래픽이고, 어레이가 스스로 보고하는 프런트엔드 성능 표본은 ‘SAN 스토리지 성능’ 화면이 따로 봅니다.</span></div>
           {!san.perfEnabled && <div style={{ fontSize: 12, color: 'var(--amber)', marginTop: 8 }}>{reasonText('perf-disabled')}</div>}
           {san.perfEnabled && !san.switches && <div style={{ fontSize: 12, color: 'var(--amber)', marginTop: 8 }}>{reasonText('no-switches')}</div>}
           {san.perfError && <div style={{ fontSize: 12, color: 'var(--amber)', marginTop: 8 }}>포트 사용량 집계 오류 — {san.perfError}</div>}
@@ -301,7 +301,7 @@ export default function BmSanCompare() {
         <div className="bm2-label">▸ 숫자를 비교할 때 알아 둘 것</div>
         <ul className="bmc-note">
           <li><b>용량의 뜻이 다릅니다.</b> 베어메탈은 df 의 used / (used + avail)(지정 마운트만, ext4 예약 블록 제외). SAN 은 Unisphere 가 보고한 <b>데이터 감축 후 실사용</b>이며 호스트에 약속한 씬 구독량이 아닙니다.</li>
-          <li><b>전송 속도의 출처가 다릅니다.</b> 베어메탈은 서버에서 /proc/diskstats 를 {sampleSec}초 간격 두 번 읽은 <b>그 순간의 표본</b>(서버 전체 물리 디스크 합 — 마운트별이 아님). SAN 은 <b>SAN 스위치 포트 트래픽</b>을 어레이 시리얼로 묶은 {hoursLabel} 평균(또는 피크)이고, 어레이 자체 성능 API 는 수집하지 않습니다.</li>
+          <li><b>전송 속도의 출처가 다릅니다.</b> 베어메탈은 서버에서 /proc/diskstats 를 {sampleSec}초 간격 두 번 읽은 <b>그 순간의 표본</b>(서버 전체 물리 디스크 합 — 마운트별이 아님). SAN 은 <b>SAN 스위치 포트 트래픽</b>을 어레이 시리얼로 묶은 {hoursLabel} 평균(또는 피크)입니다. 어레이가 스스로 보고하는 성능 표본(‘SAN 스토리지 성능’ 화면)은 수집 방식이 REST 인 어레이에만 있어 이 비교에는 섞지 않습니다 — 모든 어레이에 같은 기준을 쓰기 위해서입니다.</li>
           <li><b>시각이 다릅니다.</b> 베어메탈은 수집 주기(지금 {bm.settings?.intervalMinutes}분 · 현황 탭에서 1분까지)마다, ‘지금 측정’ 을 누르면 즉시 다시 잽니다. SAN 포트 표본은 {san.perfIntervalMs ? `${Math.round(san.perfIntervalMs / 60000)}분` : '포트 수집'} 주기, 용량 스냅샷은 스토리지 수집 주기입니다. 표의 ‘측정 기준’ 열이 각 값의 시각을 말합니다.</li>
           <li><b>못 읽은 값은 0 이 아닙니다.</b> 측정 불가 서버 · 시리얼 미대조 어레이는 ‘—’ 로 두고 합에서 빼며 몇 대가 빠졌는지 씁니다. 부분 합은 호박색입니다.</li>
         </ul>

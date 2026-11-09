@@ -67,6 +67,7 @@ import { startAlertEngine } from './alerts.js';
 import { startDirUsageScheduler } from './dirusage/scheduler.js'; // 폴더 사용량 Top-N 리포트(v2.454)
 import { startMetricsSampler } from './metrics/sampler.js';
 import { startGpuGuestPoller } from './gpu/poller.js';
+import { startGpuAllocHistory } from './gpu/allocHistory.js';   // GPU 할당율 일 단위 이력(v2.939) — 1시간 · 재진입 가드 · 스냅샷만 읽는다
 import { startPhysicalGpuPoller } from './gpu/physicalPoller.js';
 import { startIpScanPoller } from './ipam/scanPoller.js';
 import { startIpScanAgent } from './agent/ipScanWorker.js';
@@ -94,6 +95,7 @@ import { capacityRouter } from './routes/capacity.js';
 import { startCapacitySampler } from './capacity/sampler.js';
 import { startCapacityPush } from './agent/capacityPush.js';
 import { startSvcmonPoller } from './svcmon/poller.js';
+import { startSettingsSyncDetector } from './svcmon/settingsSync.js';
 import { startSvcmonPush } from './agent/svcmonPush.js';
 import { startSvcmonConfigPull } from './agent/svcmonConfigPull.js';
 import { startSvcmonSilenceWatch } from './central/svcmonSilence.js';
@@ -120,6 +122,9 @@ import { startBareosPolicy } from './bareos/policy.js'; // Bareos Director 정�
 import { startBareosGroupScheduler } from './bareos/groupRunner.js'; // v2.830 Bareos 백업 그룹 예약 실행(30초 틱 · 중앙만)
 import { startBareosPoller, pollerStatus as bareosPollerStatus } from './bareos/poller.js'; // Bareos VM 백업 실행 상태(v2.820) — Director 미설정이면 접속하지 않는다
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
+import { startNodeLoadPoller } from './storage/nodeLoadPoller.js'; // 아이실론 노드 부하 5분 표본(v2.932 2차 ⑨)
+import { startStoragePerfNotify } from './sanswitch/storagePerfNotify.js'; // SAN 스토리지 성능 알림(v2.950) — 상태가 바뀐 순간만 · 법인 단위 · 중앙만
+import { startStoragePerfReport } from './sanswitch/storagePerfReportMail.js'; // SAN 스토리지 성능 월간 보고서 메일(v2.950) — 1분 틱 · 회차는 보내기 전에 기록 · 중앙만
 import { applyGrowthSettings } from './storage/growthSettings.js'; // 사용량 보존 기간(v2.531)
 import { runCapacityBasisMigration } from './storage/capacityBasisMigration.js'; // 용량 기준 변경 1회 정리(v2.534)
 import { runZeroCapacityPurge } from './storage/zeroCapacityPurge.js'; // 0 바이트 용량 행 1회 정리(v2.541)
@@ -151,6 +156,8 @@ import { startPartFaultPoller } from './partfault/poller.js';       // 파트 �
 import { startPartFaultPush } from './partfault/push.js';           // 〃 엣지: 로컬 판정 후 '장애 + 전체 요약' 을 중앙 push(v2.548 프로토콜 2)
 import { startPartFaultConfigPull } from './agent/partFaultConfigPull.js'; // 〃 중앙→엣지 스위치 배포(v2.548)
 import { startBmUsageConfigPull } from './agent/bmUsageConfigPull.js'; // v2.627 베어메탈 사용률 설정 중앙→엣지 배포
+import { startBmOnboardPull } from './agent/bmOnboardPull.js'; // 7b단계 서버 등록 배포(중앙 → 엣지 — 수집 경로 edge)
+import { startBmMaintPull } from './agent/bmMaintPull.js'; // 8a단계 정비 창 배포(중앙 → 엣지 — 그 법인 창)
 import { startEdgeLogWorker } from './agent/edgeLogWorker.js';  // 엣지 로그 폴백 워커(v2.549) — 중앙이 못 닿는 법인에서만 쓰인다
 import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 사용률 수집(v2.550) — 기본 꺼짐, 법인 단위 opt-in
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
@@ -403,6 +410,9 @@ app.use('/api/central/sanswitch-perf', BIG_JSON);
 //   그 상한을 채우면 기본 1MB 파서가 413 을 주고, 413 은 재시도 대상이 아니라 중앙 run 은 시한까지 'running' → 화면은 '엣지 무응답' 으로
 //   읽는다(실제로는 결과가 컸다). ⚠ 정직 기록: 실측이 아니라 상한 산수다 — 정상 테스트는 수십 KB 다.
 app.use('/api/central/sanswitch-test-result', BIG_JSON);
+// v2.935(C-②): Flow Vision 플로우 작업 대행 결과 — 명령 32개(플로우 16 × 만들기 · 보기) × 출력 16KB(flowCmd OUT_MAX) = 512KB 에 JSON 이스케이프가
+//   붙으면 기본 1MB 를 넘을 수 있다(413 = 결과 소실 · 작업은 시한까지 '엣지 실행 중'). 상한 산수이고 실측이 아니다.
+app.use('/api/central/sanswitch-flow-result', BIG_JSON);
 // v2.608: CVP push — 장비 레코드(포트 구성·부품·BGP)와 원시 표본이 청크 700KB 로 오지만 해제 후 1MB 를 넘을 수 있다(413 = 조용한 소실).
 app.use('/api/central/cvp-data', BIG_JSON);
 app.use('/api/central/isidu-data', BIG_JSON);   // v2.736 — 사용자 폴더 수천 개 × 스캔 여러 건(해제 후 1MB 를 넘는다 — 413 은 조용한 소실)
@@ -433,6 +443,9 @@ app.use('/api/central/fleet', BIG_JSON);
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
 // 로그 분석 붙여넣기(v2.583) — 폐쇄망 현장이 다른 서버의 journalctl 출력을 붙여넣는다(라우트가 8MB 상한을 다시 건다).
 app.use('/api/admin/log-analysis/paste', BIG_JSON);
+// 7b: 서버 등록 CSV/Excel(파일 4MB → base64 약 5.4MB — 전역 1MB 파서면 413). 세션 풀 · 관리자만(sessionBigBodyAllowed) · 본문 상한은 라우트가 다시 본다.
+app.use('/api/tools/bm-usage/onboard/analyze', BIG_JSON);
+app.use('/api/tools/bm-usage/onboard/apply', BIG_JSON);
 app.use('/api/svcmon/targets/import', BIG_JSON);
 app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);
 // TRUST_PROXY(v2.428, 구성도 미스매치 #8): 중앙/엣지가 HAProxy·nginx 뒤에 있으면 홉 수(예 1)를 지정 — req.ip 가 X-Forwarded-For 의
@@ -596,6 +609,7 @@ const stagger = [
   // 엣지 위임(RMA): 엣지는 결과를 밀어 올리고(push), 중앙은 무보고를 감시한다.
   // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
   startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,
+  startSettingsSyncDetector, // v2.915 Monitoring 설정 연동 — 5분마다 설정 카탈로그를 **읽기만** 해 새 항목·주소 변경·사라짐을 센다(네트워크 왕복 0) · 엣지는 기동하지 않는다
   startVmCloneScheduler, // VM 복제(백업식) — 60초 틱, 재진입 가드 + 전역 직렬 실행 큐(runner)
   startVmBackupMail,     // 〃 실패 메일(v2.794) — 1분 틱, 엣지는 기동하지 않는다
   startVmCloneWorker,    // 〃 법인 위임(v2.793) — 엣지가 담당 vCenter 의 잡 정의·작업을 당기고 상태를 올린다. 재진입 가드, CENTRAL_URL 미설정이면 자기기동 안 함
@@ -609,7 +623,10 @@ const stagger = [
   startRehearsal,    // Bareos 복원 검증(v2.862) — 1분 틱 · 기본 꺼짐 · 회차는 보내기 전에 기록 · 엣지는 기동하지 않는다
   startBareosPolicy, // Bareos 정책 수집(v2.839) — 1분 틱 · 정한 시각에 하루 한 번(실패 30분 뒤 · 3번) · 엣지는 기동하지 않는다
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
+  startNodeLoadPoller, // 〃 아이실론 노드 부하 표본(v2.932) — 수집 주기와 따로(기본 5분·중앙 배포값) · 재진입 가드 · 수집 주기와 장비 점유 공유 · 켜진 아이실론만
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
+  startStoragePerfNotify, // SAN 스토리지 성능 알림(v2.950) — 포트 사용량 수집 주기(하한 5분)마다 점검 → 전이만 알림(첫 틱은 기준) · 재진입 가드 · 엣지는 기동하지 않음
+  startStoragePerfReport, // SAN 스토리지 성능 월간 보고서(v2.950) — 1분 틱 · 매달 정한 날 · 시각 · 놓친 회차는 기록만 · 엣지는 기동하지 않음
   startPduPoller, startPduPush, startPduConfigPull, // PDU(v2.424) — 동일 규약(자동 센서 탐지 + 재진입 가드 + 적응형 타이머)
   startCvpPoller, startCvpPush, startCvpConfigPull, // CVP(v2.608) — 기본 꺼짐 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startSanSwitchPerfPoller, // SAN 포트 사용량(v2.411) — 설정에서 꺼져 있으면 틱만 돌고 아무것도 안 한다
@@ -618,6 +635,7 @@ const stagger = [
   startBmstorPoller, // 베어메탈 스토리지(v2.340) — 30초 틱 + 재진입 가드, 등록 0대면 대기
   startBmstorHistory, // 〃 12시간 이력(v2.635) — 60초 틱 + 재진입 가드, 슬롯당 1회(부분 합이면 새 수집마다 보강)
   startBmstorWorker, // 〃 폴링 위임 워커(v2.341) — CENTRAL_URL 미설정이면 자기기동 안 함
+  () => startGpuAllocHistory(() => store.get()), // GPU 할당율 일 단위 이력(v2.939) — 기동 2분 뒤 첫 회 · 1시간 · 재진입 가드 · vCenter 왕복 0
   startVmtrackPoller, // VM 수량 추이(v2.345) — 60초 틱, 슬롯(00/12시) 미기록 시에만 수집 + 재진입 가드
   startVmHygieneNotifier, // VM 스냅샷 정책 일일 알림(v2.698) — 10분마다 확인, 설정이 켜졌을 때만 하루 1회
   startVmDnsHistory, // VM DNS 변경 이력(v2.696) — 적응형 타이머(기본 10분) + 재진입 가드, 스냅샷만 비교(vCenter 왕복 0)
@@ -636,6 +654,8 @@ const stagger = [
   // 중앙은 직접 수집분 + 엣지 보고를 합쳐 전이(열림/변화/해소)를 계산해 DB 에 남기고 알린다.
   // 둘 다 opt-in/조건부이며(PARTFAULT_ENABLED · CENTRAL_URL) 왜 안 도는지 로그가 말한다.
   startPartFaultPoller, startPartFaultPush, startPartFaultConfigPull, startBmUsageConfigPull,
+  startBmOnboardPull, // 7b 서버 등록 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
+  startBmMaintPull, // 8a 정비 창 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
   startEdgeLogWorker,
   startBmUsagePoller,
   startLinkCheckPoller,

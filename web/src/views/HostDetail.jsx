@@ -13,17 +13,22 @@ import { STable } from '../components/STable.jsx';
 import { hostUsagePct } from './vcdOverview.js';
 import { REBOOT_KIND } from './hostcfg/hostCfgText.js';
 import { secCountsOf, secText, secTone, reasonBadges, bootCell, veeamCell, hwCell, uptimeDays, gbText, kwText, ratioText, nicLinkDownOf, uplinkDownOf } from './hostChecksText.js';
+import HostNetCvp from './HostNetCvp.jsx';   // v2.920 CVP 업링크 블록(시안 D-② HostNet)
+import HostNicCounters from './HostNicCounters.jsx';   // v2.925(B-③) ESXi vmnic 드롭·에러 — 버튼으로 읽는다
+import { uplinksByNic, nicUplinkText, txRxText, basisOf, uplinkSummary } from './hostNetText.js';
+import { sanSubText } from './hostSanText.js';
 
 const HostPowerPanel = React.lazy(() => import('../components/HostPowerPanel.jsx'));
 const HostGpuPanel = React.lazy(() => import('../components/HostGpuPanel.jsx'));
 const HostMetricButton = React.lazy(() => import('../components/VmMetrics.jsx').then((m) => ({ default: m.HostMetricButton })));
 const IdracTrendLinkButton = React.lazy(() => import('../components/IdracTrendLinkButton.jsx'));
 const HostExportDialog = React.lazy(() => import('./HostExportDialog.jsx'));
+const HostSanSection = React.lazy(() => import('./HostSanSection.jsx'));   // v2.920 SAN 경로·트래픽 묶음(시안 D-① HostSan) — recharts 를 끌고 오므로 지연 로드
 const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React.Suspense>;
 
 const SECTIONS = [
   ['basic', '기본', '#3b82f6'], ['sec', '구성·보안', '#ef4444'], ['perfc', '경합·지연', '#f59e0b'], ['cluster', '클러스터', '#22d3ee'],
-  ['net', '네트워크', '#60a5fa'], ['st', '스토리지', '#fb923c'], ['gpu', 'GPU', '#a78bfa'], ['idrac', '전력 · iDRAC', '#f59e0b'], ['boot', '재부팅', '#94a3b8'], ['vm', 'VM', '#22c55e'],
+  ['net', '네트워크', '#60a5fa'], ['st', '스토리지', '#fb923c'], ['san', 'SAN 경로·트래픽', '#2dd4bf'], ['gpu', 'GPU', '#a78bfa'], ['idrac', '전력 · iDRAC', '#f59e0b'], ['boot', '재부팅', '#94a3b8'], ['vm', 'VM', '#22c55e'],
 ];
 const timeText = (t) => (Number.isFinite(t) ? new Date(t).toLocaleString('ko-KR') : '—');
 const numText = (v) => (Number.isFinite(v) ? v.toLocaleString('en-US') : '—');
@@ -38,13 +43,15 @@ export default function HostDetail({ id }) {
   const [st, setSt] = useState({ data: null, error: null });
   const [checks, setChecks] = useState(null);
   const [vms, setVms] = useState(null);
+  const [net, setNet] = useState(null);       // v2.920 CVP 업링크 매칭(/hosts/:id/net-uplinks) — 도구 키 cvp 가 허용될 때만 받는다
+  const [san, setSan] = useState(null);       // v2.920 SAN 귀속 응답(묶음 머리 한 줄용 — 본문은 HostSanSection 이 그린다)
   const [showVms, setShowVms] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const seq = useRef(0);
 
   useEffect(() => {
     const my = ++seq.current;
-    setSt({ data: null, error: null }); setChecks(null); setVms(null);
+    setSt({ data: null, error: null }); setChecks(null); setVms(null); setNet(null); setSan(null);
     fetchJson(`/hosts/${encodeURIComponent(id)}`)
       .then((d) => {
         if (my !== seq.current) return;
@@ -52,10 +59,16 @@ export default function HostDetail({ id }) {
         const h = d.item;
         fetchJson('/hosts/checks', { vcenterId: h.vcenterId, q: h.name }).then((c) => { if (my === seq.current) setChecks(c); }).catch(() => { if (my === seq.current) setChecks({ error: true }); });
         fetchJson('/vms', { host: h.name, vcenterId: h.vcenterId, limit: 5000, sortBy: 'name', order: 'asc' }).then((v) => { if (my === seq.current) setVms(v); }).catch((e) => { if (my === seq.current) setVms({ error: e?.message || String(e) }); });
+        if (toolAllowed('cvp')) fetchJson(`/hosts/${encodeURIComponent(id)}/net-uplinks`).then((u) => { if (my === seq.current) setNet(u); }).catch((e) => { if (my === seq.current) setNet({ error: e?.message || String(e) }); });
       })
       .catch((e) => { if (my === seq.current) setSt({ data: null, error: e }); });
   }, [id]);
 
+  // v2.935(C-③): CVP 위치 지금 조회 뒤 업링크 매칭을 다시 받는다(늦게 온 이전 응답은 seq 로 버린다).
+  const reloadNet = () => {
+    const my = seq.current;
+    fetchJson(`/hosts/${encodeURIComponent(id)}/net-uplinks`).then((u) => { if (my === seq.current) setNet(u); }).catch(() => { /* 직전 값 유지 */ });
+  };
   const h = st.data?.item || null;
   const now = Date.now();
   const sec = useMemo(() => (h ? secCountsOf(h, now) : null), [h]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -83,8 +96,11 @@ export default function HostDetail({ id }) {
   const up = uptimeDays(h, now);
   const vmOn = vmList.filter((v) => v.powerState === 'POWERED_ON').length;
   const vmSum = c?.vm || null;
-  const net = h.hcfg?.net || null;
+  const vnet = h.hcfg?.net || null;   // 가상 스위치 구성(hcfg.net) — CVP 업링크 응답(net)과 이름이 겹쳐 v2.920 에 vnet 으로
   const mp = h.hcfg?.mp || null;
+  const cvpCols = toolAllowed('cvp');   // v2.920: NIC 표의 CVP 열 3개(도구 키가 허용될 때만)
+  const byNic = uplinksByNic(net && !net.error ? net.uplinks : []);
+  const cvpSum = cvpCols ? uplinkSummary(net && !net.error ? net : null, h.nics || []) : { text: '' };
   const nicDown = nicLinkDownOf(h);
   const upDown = uplinkDownOf(h, sec);
   const kpis = [
@@ -141,7 +157,7 @@ export default function HostDetail({ id }) {
         </div>
       </div>
       <nav className="hd-nav" aria-label="묶음 이동">
-        {SECTIONS.filter(([k]) => k !== 'gpu' || h.gpus?.length > 0).map(([k, label, color]) => <a key={k} href={`#hd-${k}`} onClick={(e) => { e.preventDefault(); document.getElementById(`hd-${k}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}><i className="ht-gdot" style={{ background: color }} aria-hidden="true" />{label}</a>)}
+        {SECTIONS.filter(([k]) => (k !== 'gpu' || h.gpus?.length > 0) && (k !== 'san' || toolAllowed('san-switch'))).map(([k, label, color]) => <a key={k} href={`#hd-${k}`} onClick={(e) => { e.preventDefault(); document.getElementById(`hd-${k}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}><i className="ht-gdot" style={{ background: color }} aria-hidden="true" />{label}</a>)}
       </nav>
 
       <div className="hd-kpis">
@@ -169,23 +185,29 @@ export default function HostDetail({ id }) {
           </Card>
         </div>
         <div className="hd-col">
-          <Card id="net" title="네트워크" color="#60a5fa" sub={`물리 NIC ${Array.isArray(h.nics) ? h.nics.length : '—'} · 링크 끊김 ${nicDown == null ? '—' : nicDown} · 쓰는 업링크 끊김 ${upDown == null ? '—' : upDown}${net ? ` · 가상 스위치 ${(net.switches || []).length} · 포트그룹 ${Number.isFinite(net.pgsTotal) ? net.pgsTotal : (net.pgs || []).length}` : ''}${h.mgmtIp ? ` · 관리 IP ${h.mgmtIp}` : ''}`}>
+          <Card id="net" title="네트워크" color="#60a5fa" sub={`물리 NIC ${Array.isArray(h.nics) ? h.nics.length : '—'} · 링크 끊김 ${nicDown == null ? '—' : nicDown} · 쓰는 업링크 끊김 ${upDown == null ? '—' : upDown}${vnet ? ` · 가상 스위치 ${(vnet.switches || []).length} · 포트그룹 ${Number.isFinite(vnet.pgsTotal) ? vnet.pgsTotal : (vnet.pgs || []).length}` : ''}${h.mgmtIp ? ` · 관리 IP ${h.mgmtIp}` : ''}${cvpSum.text ? ` · ${cvpSum.text}` : ''}`}>
             {Array.isArray(h.nics) && h.nics.length ? (
               <div className="table-wrap" style={{ maxHeight: '32vh' }}>
                 <STable>
-                  <thead><tr><th>장치</th><th>모델</th><th style={{ textAlign: 'right' }}>속도</th><th>링크</th><th>스위치</th><th>MAC</th><th>드라이버</th></tr></thead>
+                  <thead><tr><th>장치</th><th>모델</th><th style={{ textAlign: 'right' }}>속도</th><th>링크</th><th>스위치</th><th>MAC</th><th>드라이버</th>{cvpCols && <><th title="CVP 포트 설명에서 이 NIC(vmnic 이름·MAC)을 찾은 스위치 포트">CVP 스위치 · 포트</th><th title="매칭 근거 — LLDP(확정) · MAC 테이블(높음) · 포트 설명(보통)">매칭</th><th style={{ textAlign: 'right' }} title="스위치 포트 기준 In = 서버 송신 · Out = 서버 수신">지금 송신 / 수신</th></>}</tr></thead>
                   <tbody>
                     {h.nics.map((n, i) => {
-                      const sw = (net?.switches || []).find((x) => Array.isArray(x.uplinks) && x.uplinks.includes(n.device));
+                      const sw = (vnet?.switches || []).find((x) => Array.isArray(x.uplinks) && x.uplinks.includes(n.device));
+                      const ups = byNic.get(n.device) || [];
                       return (
                         <tr key={`${n.device || 'nic'}-${i}`}>
                           <td><b>{n.device || '—'}</b></td>
                           <td className="muted" style={{ fontSize: 12 }}>{[n.vendor, n.model].filter(Boolean).join(' ') || '—'}</td>
                           <td style={{ textAlign: 'right' }} data-sort={Number.isFinite(n.speedMb) ? n.speedMb : ''}>{Number.isFinite(n.speedMb) && n.speedMb > 0 ? `${n.speedMb >= 1000 ? `${n.speedMb / 1000} Gb` : `${n.speedMb} Mb`}` : '—'}{Number.isFinite(n.maxSpeedMb) && n.maxSpeedMb > 0 && n.maxSpeedMb !== n.speedMb ? <span className="muted"> / {n.maxSpeedMb >= 1000 ? `${n.maxSpeedMb / 1000} Gb` : `${n.maxSpeedMb} Mb`}</span> : null}</td>
                           <td>{n.link === true ? <span className="badge green">Up</span> : n.link === false ? <span className="badge red">Down</span> : <span className="muted">—</span>}</td>
-                          <td>{sw ? `${sw.name}${sw.kind === 'dvs' ? '(분산)' : '(표준)'}` : <span className="muted">{net ? '안 씀' : '—'}</span>}</td>
+                          <td>{sw ? `${sw.name}${sw.kind === 'dvs' ? '(분산)' : '(표준)'}` : <span className="muted">{vnet ? '안 씀' : '—'}</span>}</td>
                           <td className="muted" style={{ fontSize: 11 }}>{n.mac || '—'}</td>
                           <td className="muted" style={{ fontSize: 12 }}>{n.driver || '—'}</td>
+                          {cvpCols && <>
+                            <td data-sort={nicUplinkText(ups)}>{ups.length ? nicUplinkText(ups) : <span className="muted">—</span>}</td>
+                            <td data-sort={ups.length ? basisOf(ups[0].basis).label : ''}>{ups.length ? <span className={`badge ${basisOf(ups[0].basis).tone}`} title={basisOf(ups[0].basis).note}>{basisOf(ups[0].basis).label}</span> : <span className="muted" title={net?.error ? '업링크를 읽지 못함' : '포트 설명에 이 NIC 의 단서 없음'}>미매칭</span>}</td>
+                            <td style={{ textAlign: 'right' }} data-sort={ups[0]?.inBps ?? ''}>{ups.length ? txRxText(ups[0]) : <span className="muted">—</span>}</td>
+                          </>}
                         </tr>
                       );
                     })}
@@ -193,13 +215,15 @@ export default function HostDetail({ id }) {
                 </STable>
               </div>
             ) : <div className="muted">물리 NIC 정보가 인벤토리에 없습니다(REST 폴백 수집이거나 아직 읽지 않음).</div>}
-            {net && (
+            {vnet && (
               <div className="muted hd-note">
-                {(net.switches || []).map((x) => `${x.name}(${x.kind === 'dvs' ? '분산' : '표준'} · 업링크 ${(x.uplinks || []).length ? x.uplinks.join('+') : '없음'} · 포트그룹 ${Number.isFinite(x.pgs) ? x.pgs : '—'})`).join(' · ') || '가상 스위치 없음'}
-                {Array.isArray(net.pgs) && net.pgs.some((p) => p.promisc === true) ? ` · 무차별 모드 켜진 포트그룹 ${net.pgs.filter((p) => p.promisc === true).length}` : ''}
+                {(vnet.switches || []).map((x) => `${x.name}(${x.kind === 'dvs' ? '분산' : '표준'} · 업링크 ${(x.uplinks || []).length ? x.uplinks.join('+') : '없음'} · 포트그룹 ${Number.isFinite(x.pgs) ? x.pgs : '—'})`).join(' · ') || '가상 스위치 없음'}
+                {Array.isArray(vnet.pgs) && vnet.pgs.some((p) => p.promisc === true) ? ` · 무차별 모드 켜진 포트그룹 ${vnet.pgs.filter((p) => p.promisc === true).length}` : ''}
                 {' · 포트그룹 전체는 ‘구성 점검 열기’ 에서'}
               </div>
             )}
+            {toolAllowed('cvp') ? (net ? <HostNetCvp data={net} nics={h.nics || []} hostId={h.id} onReload={reloadNet} /> : <div className="muted hd-note">CVP 업링크 매칭 읽는 중…</div>) : null}
+            <HostNicCounters hostId={h.id} uplinks={toolAllowed('cvp') && Array.isArray(net?.uplinks) ? net.uplinks : null} />
           </Card>
           <Card id="st" title="스토리지" color="#fb923c" sub={`HBA ${Array.isArray(h.hbas) ? h.hbas.length : '—'}${mp ? ` · LUN ${mp.luns}(공유 ${mp.shared}) · 경로 ${mp.paths} · 죽은 경로 ${mp.dead}` : ' · 경로 정보 아직 안 읽음'}${h.hcfg?.vsan ? ` · vSAN ${h.hcfg.vsan.enabled === true ? '참여' : h.hcfg.vsan.enabled === false ? '참여 안 함' : '—'}` : ''}`}>
             <div style={{ marginTop: -14 }}><HostHbaTable item={h} /></div>
@@ -211,6 +235,11 @@ export default function HostDetail({ id }) {
               </div>
             )}
           </Card>
+          {toolAllowed('san-switch') && (
+            <Card id="san" title="SAN 경로 · 트래픽" color="#2dd4bf" sub={san ? sanSubText(san) : 'HBA WWN ↔ 스위치 포트 · zone ↔ 스토리지 귀속 · 확정분/추정분 분리'}>
+              <Lazy><HostSanSection hostId={h.id} onData={setSan} /></Lazy>
+            </Card>
+          )}
           {h.gpus?.length > 0 && (
             <Card id="gpu" title={`GPU — ${h.gpus.length}`} color="#a78bfa">
               <div className="flex gap wrap">

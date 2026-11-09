@@ -25,6 +25,7 @@ import { registerTemplates } from './svcmon/templates.js';
 import { registerGenerate } from './svcmon/generate.js';
 import { registerEdge } from './svcmon/edge.js';
 import { registerLogs } from './svcmon/logs.js';
+import { registerSettingsSync } from './svcmon/settingsSync.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 export const svcmonRouter = express.Router();
@@ -39,3 +40,4 @@ registerTemplates(svcmonRouter);  // /templates*
 registerGenerate(svcmonRouter);   // /targets/generate /batches*
 registerEdge(svcmonRouter);       // /assign* /config-pull-now /edges* /edge-state /push-now /silence-check
 registerLogs(svcmonRouter);       // /log*
+registerSettingsSync(svcmonRouter); // v2.915 /settings-sync/* /overview /alert-settings

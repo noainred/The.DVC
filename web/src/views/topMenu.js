@@ -21,11 +21,16 @@ export const MENU_GROUPS = Object.freeze([
   { id: 'overview', label: 'Overview', tab: 'overview' },
   { id: 'summary', label: 'Summary', tab: 'summary' },
   { id: 'server', label: '서버', children: [
-    // v2.909(가상화 서버 허브 · 시안 docs/design/vm-screen): VM 도구 6개는 이 화면 위 탭이기도 하다 — 그 도구를 열어도 이 메뉴가 켜진다(locate · also).
-    //   도구 키는 그대로(권한 파일의 값). 목록은 views/vms/vmHubText.js HUB_TOOL_KEYS 와 같다(테스트 대조).
-    { id: 'vm', label: '가상화 서버', tab: 'vms', also: ['vmfinder', 'guestos', 'vmtools', 'vm-track', 'curuser', 'real-os'] },
-    { id: 'esxi', label: 'ESXi 호스트', tab: 'hosts' },
-    { id: 'vc', label: 'vCenter', tab: 'vcenters' },
+    // v2.915(사용자 요청 '세 메뉴를 하나로' · 설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07 이름 '가상화 플랫폼'):
+    //   가상화 서버(vms) · ESXi 호스트(hosts) · vCenter(vcenters) 세 항목이 **항목 하나**가 됐다. 탭 id · 해시 · 권한 id 는 그대로다 —
+    //   `tab` 이 처음 여는 탭(계층의 루트 vCenter)이고 `tabs` 가 같은 항목이 맡는 나머지 탭(locate · visibleMenu · 저장 메뉴 별칭이 읽는다).
+    //   `also` 는 그 탭 줄의 특수 기능(VM 6 — v2.909 HUB_TOOL_KEYS · vCenter 6 · 호스트 4 — views/platform/platformText.js). 도구 키는 그대로(권한 파일의 값).
+    //   옛 항목 id(vm · esxi · vc)는 사라졌다 — 저장된 내 메뉴 · 배포 메뉴의 tab:vms · tab:hosts 는 sidebar/sideMenu.js 의 별칭이 이 항목으로 잇는다.
+    { id: 'virt', label: '가상화 플랫폼', tab: 'vcenters', tabs: ['hosts', 'vms'], also: [
+      'vmfinder', 'guestos', 'vmtools', 'vm-track', 'curuser', 'real-os',
+      'vcversion', 'solutions', 'licenses', 'license-expiry', 'cert-expiry', 'change-history',
+      'host-hygiene', 'esxi', 'hba', 'cluster-check',
+    ] },
     { id: 'bm', label: '물리 서버', tool: 'serveranalysis', seg: BAREMETAL_SEG },
     // v2.787(사용자 요청 + 시안): Veeam 백업 현황 — 메뉴는 하나, 화면 위 Summary | Detail 탭으로 두 도구를 오간다.
     //   also: 이 항목이 함께 맡는 도구(Detail 화면에서도 이 메뉴가 켜진다 — locate). 도구 키는 그대로(권한 파일·북마크).
@@ -39,7 +44,10 @@ export const MENU_GROUPS = Object.freeze([
     { id: 'usage', label: '스토리지 사용량 보고서', tool: 'storage-usage' },
     { id: 'track', label: '스토리지 사용량 추이', tool: 'storage-track' },
     { id: 'bmstor', label: '베어메탈 스토리지', tool: 'bm-storage' },
-    { id: 'san', label: 'SAN 스토리지 성능 측정', tool: 'san-switch' },
+    // v2.948(사용자 결정 '독립 도구 · 독립 메뉴 · 기존 메뉴도 보존'): 'san' 항목은 id · 도구 키 그대로 두고 **이름만** 'SAN 스위치 모니터링' 으로 —
+    //   새 항목 'SAN 스토리지 성능'(san-storage)이 그 이름을 쓴다. 옛 라벨 'SAN 스토리지 성능 측정' 은 두 항목을 헷갈리게 한다.
+    { id: 'san', label: 'SAN 스위치 모니터링', tool: 'san-switch' },
+    { id: 'san-storage', label: 'SAN 스토리지 성능', tool: 'san-storage' },
   ] },
   { id: 'network', label: '네트워크', children: [
     { id: 'cvp', label: '전체 네트워크 장비', tool: 'cvp' },
@@ -74,11 +82,17 @@ export const MENU_GROUPS = Object.freeze([
 
 const segsOf = (hash) => String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
 
-/** 하위 메뉴(또는 하위 메뉴 없는 대메뉴)가 여는 주소. */
+/** 항목이 맡는 탭 전부 — 처음 여는 탭 + 같은 항목의 나머지 탭(v2.915 `tabs`). 도구 항목은 빈 배열. */
+export function tabsOf(item) {
+  if (!item || !item.tab) return [];
+  return [item.tab, ...(Array.isArray(item.tabs) ? item.tabs.filter((t) => t && t !== item.tab) : [])];
+}
+
+/** 하위 메뉴(또는 하위 메뉴 없는 대메뉴)가 여는 주소. v2.915: 여러 탭을 맡는 항목은 visibleMenu 가 고른 '처음 허용 탭'(entryTab)으로. */
 export function hashOf(item) {
   if (!item) return '#/overview';
   if (item.tool) return `#/tools/${item.tool}${item.seg ? `/${item.seg}` : ''}`;
-  return `#/${item.tab}`;
+  return `#/${item.entryTab || item.tab}`;
 }
 
 /**
@@ -98,11 +112,11 @@ export function locate(tab, hash, groups = MENU_GROUPS) {
   }
   for (const g of groups) {
     if (!g.children) {
-      if (g.tab === tab) return { group: g.id, child: null };
+      if (tabsOf(g).includes(tab)) return { group: g.id, child: null };
       continue;
     }
     for (const c of g.children) {
-      if (c.tab && c.tab === tab) return { group: g.id, child: c.id };
+      if (c.tab && tabsOf(c).includes(tab)) return { group: g.id, child: c.id };   // v2.915: 같은 항목이 맡는 탭(tabs)도 그 항목
     }
   }
   return { group: null, child: null };
@@ -130,11 +144,15 @@ function groupOfTool(k, seg3, groups) {
  * @param {(k:string)=>boolean} toolOk  도구 잠금이 없는가(toolVisibility.lockReasonOf 가 null)
  */
 export function visibleMenu({ tabOk = () => true, toolOk = () => true } = {}, groups = MENU_GROUPS) {
-  const ok = (it) => (it.tool ? toolOk(it.tool) : tabOk(it.tab));
+  // v2.915: 여러 탭을 맡는 항목은 **하나라도 허용이면** 보이고, 처음 여는 탭은 허용된 것 중 첫 번째(entryTab) — inv.vms 가 없는 계정이
+  //   호스트 · vCenter 까지 잃지 않게(권한 판정은 바뀌지 않는다 — 탭은 App 의 isAllowed 가 그대로 집행한다).
+  const entry = (it) => (it.tool ? null : tabsOf(it).find((t) => tabOk(t)) || null);
+  const ok = (it) => (it.tool ? toolOk(it.tool) : entry(it) != null);
+  const withEntry = (it) => { const e = entry(it); return e && e !== it.tab ? { ...it, entryTab: e } : it; };
   const out = [];
   for (const g of groups) {
-    if (!g.children) { if (g.tab === 'tools' || ok(g)) out.push(g); continue; }
-    const children = g.children.filter(ok);
+    if (!g.children) { if (g.tab === 'tools' || ok(g)) out.push(withEntry(g)); continue; }
+    const children = g.children.filter(ok).map(withEntry);
     if (children.length) out.push({ ...g, children });
   }
   return out;

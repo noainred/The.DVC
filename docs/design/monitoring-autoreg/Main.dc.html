@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>설정 연동 — 기술 뷰 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:12.5px;line-height:1.4}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.rail{width:56px;flex:none;background:#0d1322;border-right:1px solid #1f2a40;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0}
+.rail i{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:#8b9bb4}
+.rail i.on{background:#12213a;color:#9fcaff}
+.rail .logo{width:28px;height:28px;border-radius:7px;background:#2563eb;margin-bottom:8px}
+.top{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid #1f2a40;background:#0b101c;flex-wrap:wrap}
+.top h1{margin:0;font-size:14px;font-weight:600;color:#e6edf6}
+.tv{display:inline-flex;align-items:center;height:26px;border:1px solid #243049;border-radius:6px;background:#0f1626;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#9fcaff;overflow:hidden}
+.tv span{padding:0 8px;color:#8b9bb4;background:#131b2c;border-right:1px solid #243049;height:100%;display:inline-flex;align-items:center}
+.tv b{padding:0 9px;font-weight:500}
+.btn{height:28px;padding:0 11px;border-radius:6px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.btn.primary{border-color:#1d4ed8;background:#2563eb;color:#fff;font-weight:600}
+.w{background:#121a2c;border:1px solid #1f2a40;border-radius:8px;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.wh{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #1a2236;font-size:11px;letter-spacing:.06em;color:#8b9bb4;font-family:"JetBrains Mono",monospace;text-transform:none}
+.wh em{font-style:normal;margin-left:auto;color:#5d7392;letter-spacing:0;font-size:10.5px}
+.qv{padding:10px 12px 8px;display:flex;flex-direction:column;gap:4px}
+.qv b{font-family:"JetBrains Mono",monospace;font-size:28px;font-weight:600;line-height:1.05;color:#e6edf6}
+.qv .d{font-family:"JetBrains Mono",monospace;font-size:11px;color:#8b9bb4;display:flex;align-items:center;gap:8px}
+.up{color:#22c55e}.dn{color:#ef4444}.am{color:#f59e0b}.bl{color:#9fcaff}
+.tl{display:flex;flex-direction:column;gap:5px;padding:10px 12px}
+.tl div{display:grid;grid-template-columns:118px minmax(0,1fr) 72px;align-items:center;gap:8px;font-size:11.5px}
+.tl .bar{height:9px;background:#1a2236;border-radius:2px;overflow:hidden}
+.tl .bar i{display:block;height:100%;background:#3b82f6}
+.tl .n{font-family:"JetBrains Mono",monospace;color:#c3cfe0;text-align:right;font-size:11px}
+.tl .k{color:#c3cfe0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legend{display:flex;gap:12px;font-size:11px;color:#8b9bb4;padding:0 12px 8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.pill{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:4px;font-family:"JetBrains Mono",monospace;font-size:10.5px;font-weight:600;letter-spacing:.04em;white-space:nowrap}
+.pill.new{background:#1f2a40;color:#c3cfe0}.pill.ok{background:#0f3d24;color:#4ade80}.pill.chg{background:#4a3105;color:#fbbf24}.pill.gone{background:#4c1414;color:#f87171}.pill.ex{background:#1a2236;color:#8b9bb4}.pill.prob{background:#3b2a05;color:#f59e0b}
+.tag{display:inline-block;padding:1px 6px;border-radius:4px;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#9fb4cc;background:#0f1626;border:1px solid #243049;margin-right:3px;white-space:nowrap}
+.tag.k{color:#c4b5fd;border-color:#3b2f6b}.tag.c{color:#7dd3fc;border-color:#164e63}.tag.e{color:#86efac;border-color:#14532d}.tag.d{color:#fcd34d;border-color:#5a3d07}
+.chk{display:inline-block;padding:1px 6px;border-radius:4px;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8b9bb4;background:#0f1626;border:1px solid #1f2a40;margin-right:3px;white-space:nowrap}
+.facet{padding:8px 10px;border-bottom:1px solid #1a2236}
+.facet h4{margin:0 0 5px;font-size:10.5px;letter-spacing:.06em;color:#8b9bb4;font-family:"JetBrains Mono",monospace;display:flex}
+.facet h4 em{font-style:normal;margin-left:auto;color:#5d7392}
+.facet label{display:flex;align-items:center;gap:7px;font-size:12px;color:#c3cfe0;padding:2px 0;cursor:pointer}
+.facet label .n{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8b9bb4}
+.cb{width:14px;height:14px;border-radius:3px;border:1px solid #3b4a66;background:#0f1626;display:inline-block;position:relative;flex:none}
+.cb.on{background:#2563eb;border-color:#2563eb}
+.cb.on::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.cb.half::after{content:"";position:absolute;left:3px;top:6px;width:6px;height:2px;background:#9fcaff}
+table{border-collapse:collapse;width:100%;table-layout:fixed}
+th{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.05em;font-weight:500;color:#8b9bb4;text-align:left;padding:7px 9px;background:#0f1626;border-bottom:1px solid #1f2a40;white-space:nowrap}
+td{padding:6px 9px;border-bottom:1px solid #161e30;vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+tr:hover td{background:#16203a}
+tr.off td{opacity:.55}
+.ev{display:grid;grid-template-columns:52px 86px minmax(0,1fr);gap:10px;padding:5px 12px;border-bottom:1px solid #161e30;font-size:11.5px;align-items:center}
+.ev .t{font-family:"JetBrains Mono",monospace;color:#8b9bb4;font-size:11px}
+.inp{height:28px;padding:0 10px;border-radius:6px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12px;font-family:"JetBrains Mono",monospace}
+.inp::placeholder{color:#8b9bb4}
+svg text{font-family:"JetBrains Mono",monospace;font-size:9.5px;fill:#8b9bb4}
+</style>
+</helmet>
+<div style="width:1440px;height:1280px;box-sizing:border-box;display:flex;background:#0a0e17;overflow:hidden">
+  <nav class="rail" aria-label="포탈 메뉴(접힘)">
+    <span class="logo" aria-hidden="true"></span>
+    <i aria-label="Overview"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg></i>
+    <i aria-label="서버"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/></svg></i>
+    <i aria-label="네트워크"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v5M12 12l-6 5M12 12l6 5"/></svg></i>
+    <i class="on" aria-label="특수 기능"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20l9-9M14 4l6 6-4 4-6-6z"/></svg></i>
+    <i aria-label="설정"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.3 2.9a7 7 0 0 0-1.7 1l-2.4-1-2 3.5L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1l.3 2.9h5l.3-2.9a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5c.1-.3.1-.7.1-1z"/></svg></i>
+  </nav>
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+    <div class="top">
+      <h1>Monitoring 설정 › 설정 연동</h1>
+      <span class="tv"><span>kind</span><b>*</b></span>
+      <span class="tv"><span>corp</span><b>*</b></span>
+      <span class="tv"><span>edge</span><b>*</b></span>
+      <span class="tv"><span>state</span><b>new,changed,gone</b></span>
+      <span class="tv"><span>depth</span><b>*</b></span>
+      <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">
+        <span class="tv"><span>time</span><b>최근 24시간</b></span>
+        <span class="tv"><span>refresh</span><b>5m · 14:50</b></span>
+        <button class="btn" type="button">카탈로그 다시 읽기</button>
+        <button class="btn primary" type="button">선택 12건 등록…</button>
+      </span>
+    </div>
+
+    <div style="padding:12px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden">
+
+      <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px">
+        <div class="w"><div class="wh">설정된 시스템<em>catalog</em></div><div class="qv"><b>278</b><div class="d"><span class="up">▲ 6</span><span>24h · 25종 · 등록부 19/19</span><svg width="84" height="24" viewBox="0 0 84 24" aria-hidden="true" style="margin-left:auto"><polyline fill="none" stroke="#3b82f6" stroke-width="1.5" points="0,18 10,18 20,17 30,17 40,15 50,15 60,12 70,11 84,9"/></svg></div></div></div>
+        <div class="w"><div class="wh">등록됨<em>linked</em></div><div class="qv"><b class="up">96</b><div class="d"><span class="bl">34.5%</span><span>커버리지</span><svg width="84" height="24" viewBox="0 0 84 24" aria-hidden="true" style="margin-left:auto"><polyline fill="none" stroke="#22c55e" stroke-width="1.5" points="0,22 14,20 28,19 42,14 56,13 70,8 84,6"/></svg></div></div></div>
+        <div class="w"><div class="wh">미등록<em>new</em></div><div class="qv"><b>176</b><div class="d"><span>iDRAC 78 · 서버 외 98</span><svg width="84" height="24" viewBox="0 0 84 24" aria-hidden="true" style="margin-left:auto"><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,4 14,6 28,7 42,10 56,11 70,15 84,16"/></svg></div></div></div>
+        <div class="w"><div class="wh">주소 변경<em>host-changed</em></div><div class="qv"><b class="am">2</b><div class="d"><span class="am">▲ 1</span><span>14:50 감지</span><svg width="84" height="24" viewBox="0 0 84 24" aria-hidden="true" style="margin-left:auto"><polyline fill="none" stroke="#f59e0b" stroke-width="1.5" points="0,20 20,20 40,20 55,14 70,14 84,8"/></svg></div></div></div>
+        <div class="w"><div class="wh">설정에서 사라짐<em>gone</em></div><div class="qv"><b class="dn">1</b><div class="d"><span>대상 유지 · 중지</span><svg width="84" height="24" viewBox="0 0 84 24" aria-hidden="true" style="margin-left:auto"><polyline fill="none" stroke="#ef4444" stroke-width="1.5" points="0,20 30,20 60,20 70,8 84,8"/></svg></div></div></div>
+        <div class="w"><div class="wh">카탈로그 읽기<em>buildSettingsTargets</em></div><div class="qv"><b class="bl">38<span style="font-size:14px;color:#8b9bb4"> ms</span></b><div class="d"><span>문제 1 · 제외 3 · 오류 0</span><svg width="84" height="24" viewBox="0 0 84 24" aria-hidden="true" style="margin-left:auto"><polyline fill="none" stroke="#22d3ee" stroke-width="1.5" points="0,12 12,10 24,13 36,9 48,12 60,11 72,13 84,10"/></svg></div></div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:400px minmax(0,1fr) 380px;gap:10px">
+        <div class="w">
+          <div class="wh">등록 커버리지 · 종류별<em>linked / total</em></div>
+          <div class="tl">
+            <div><span class="k">iDRAC</span><span class="bar"><i style="width:44%"></i></span><span class="n">61 / 139</span></div>
+            <div><span class="k">vCenter</span><span class="bar"><i style="width:44%"></i></span><span class="n">4 / 9</span></div>
+            <div><span class="k">스토리지(API)</span><span class="bar"><i style="width:50%"></i></span><span class="n">3 / 6</span></div>
+            <div><span class="k">스토리지(SSH)</span><span class="bar"><i style="width:67%"></i></span><span class="n">2 / 3</span></div>
+            <div><span class="k">SAN 스위치</span><span class="bar"><i style="width:100%"></i></span><span class="n">4 / 4</span></div>
+            <div><span class="k">PDU</span><span class="bar"><i style="width:100%"></i></span><span class="n">3 / 3</span></div>
+            <div><span class="k">NSX</span><span class="bar"><i style="width:100%"></i></span><span class="n">2 / 2</span></div>
+            <div><span class="k">수집 서버(엣지)</span><span class="bar"><i style="width:0%"></i></span><span class="n">0 / 5</span></div>
+            <div><span class="k">통합 계정 SSH</span><span class="bar"><i style="width:21%"></i></span><span class="n">14 / 66</span></div>
+            <div><span class="k">SMTP · AD</span><span class="bar"><i style="width:100%"></i></span><span class="n">2 / 2</span></div>
+            <div><span class="k" style="color:#fbbf24">CVP · Veeam · Bareos</span><span class="bar"><i style="width:0%;background:#f59e0b"></i></span><span class="n">0 / 5 <span style="color:#fbbf24">신규</span></span></div>
+          </div>
+        </div>
+        <div class="w">
+          <div class="wh">드리프트 감지 추이 · 24시간 · 5분 버킷<em>settingsDrift</em></div>
+          <svg viewBox="0 0 600 150" width="100%" height="150" role="img" aria-label="24시간 드리프트 감지 추이 — 새 항목·주소 변경·사라짐을 5분 버킷으로 쌓은 막대">
+            <line x1="40" y1="120" x2="590" y2="120" stroke="#243049"/><line x1="40" y1="80" x2="590" y2="80" stroke="#1a2236"/><line x1="40" y1="40" x2="590" y2="40" stroke="#1a2236"/>
+            <text x="10" y="124">0</text><text x="10" y="84">4</text><text x="10" y="44">8</text>
+            <text x="40" y="140">14:50</text><text x="175" y="140">21:00</text><text x="310" y="140">03:00</text><text x="445" y="140">09:00</text><text x="560" y="140">14:50</text>
+            <rect x="92" y="100" width="6" height="20" fill="#3b82f6"/><rect x="92" y="90" width="6" height="10" fill="#f59e0b"/>
+            <rect x="150" y="110" width="6" height="10" fill="#3b82f6"/>
+            <rect x="238" y="110" width="6" height="10" fill="#3b82f6"/><rect x="238" y="100" width="6" height="10" fill="#f59e0b"/>
+            <rect x="330" y="80" width="6" height="40" fill="#3b82f6"/>
+            <rect x="402" y="110" width="6" height="10" fill="#ef4444"/>
+            <rect x="470" y="100" width="6" height="20" fill="#3b82f6"/>
+            <rect x="548" y="90" width="6" height="30" fill="#3b82f6"/><rect x="548" y="80" width="6" height="10" fill="#f59e0b"/><rect x="548" y="70" width="6" height="10" fill="#ef4444"/>
+            <rect x="574" y="100" width="6" height="20" fill="#3b82f6"/>
+          </svg>
+          <div class="legend"><span><i style="background:#3b82f6"></i>새 항목 감지 17</span><span><i style="background:#f59e0b"></i>주소 변경 4</span><span><i style="background:#ef4444"></i>사라짐 2</span><span style="margin-left:auto">감지 = 카탈로그 읽기만(네트워크 점검 아님) · 적용은 사람이</span></div>
+        </div>
+        <div class="w">
+          <div class="wh">엣지별 배정 · 보고<em>svcmon assign · edge-state</em></div>
+          <table>
+            <colgroup><col><col style="width:88px"><col style="width:70px"><col style="width:64px"></colgroup>
+            <thead><tr><th>엣지</th><th>대상 / 상한</th><th>보고</th><th>상태</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">mock-Edge-Frankfurt</td><td class="mono">41 / 20,000</td><td class="mono">12s</td><td><span class="pill ok">OK</span></td></tr>
+              <tr><td class="mono">mock-Edge-Virginia</td><td class="mono">18 / 20,000</td><td class="mono">41s</td><td><span class="pill ok">OK</span></td></tr>
+              <tr><td class="mono">mock-Edge-Shanghai</td><td class="mono">9 / 20,000</td><td class="mono">2m 10s</td><td><span class="pill ok">OK</span></td></tr>
+              <tr><td class="mono">mock-Edge-Singapore</td><td class="mono">6 / 20,000</td><td class="mono">—</td><td><span class="pill gone">무보고</span></td></tr>
+              <tr><td class="mono">mock-Edge-Seoul</td><td class="mono">0 / 20,000</td><td class="mono">8s</td><td><span class="pill ex">배정 없음</span></td></tr>
+              <tr><td class="mono">중앙(직접)</td><td class="mono">22 / —</td><td class="mono">live</td><td><span class="pill ok">OK</span></td></tr>
+            </tbody>
+          </table>
+          <div style="padding:8px 12px;font-size:11px;color:#8b9bb4">선택 12건 등록 시 Frankfurt +8 · Virginia +1 · Shanghai +1 · 중앙 +2</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:218px minmax(0,1fr);gap:10px;align-items:start">
+        <div class="w">
+          <div class="facet"><h4>STATE<em>278</em></h4>
+            <label><span class="cb on" role="checkbox" aria-checked="true" aria-label="미등록"></span>미등록<span class="n">176</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="등록됨"></span>등록됨<span class="n">96</span></label>
+            <label><span class="cb on" role="checkbox" aria-checked="true" aria-label="주소 변경"></span>주소 변경<span class="n">2</span></label>
+            <label><span class="cb on" role="checkbox" aria-checked="true" aria-label="사라짐"></span>사라짐<span class="n">1</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="제외"></span>제외(비밀 URL 등)<span class="n">3</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="설정 문제"></span>설정 문제<span class="n">1</span></label>
+          </div>
+          <div class="facet"><h4>KIND<em>25</em></h4>
+            <label><span class="cb half" role="checkbox" aria-checked="mixed" aria-label="iDRAC"></span>iDRAC<span class="n">139</span></label>
+            <label><span class="cb half" role="checkbox" aria-checked="mixed" aria-label="통합 계정 SSH"></span>통합 계정 SSH<span class="n">66</span></label>
+            <label><span class="cb half" role="checkbox" aria-checked="mixed" aria-label="vCenter"></span>vCenter<span class="n">9</span></label>
+            <label><span class="cb half" role="checkbox" aria-checked="mixed" aria-label="스토리지"></span>스토리지<span class="n">9</span></label>
+            <label><span class="cb on" role="checkbox" aria-checked="true" aria-label="수집 서버"></span>수집 서버(엣지)<span class="n">5</span></label>
+            <label><span class="cb on" role="checkbox" aria-checked="true" aria-label="CVP·Veeam·Bareos"></span>CVP · Veeam · Bareos<span class="n">5</span></label>
+            <a href="#more" style="font-size:11px">19개 더…</a>
+          </div>
+          <div class="facet"><h4>CORP<em>9 + 전역</em></h4>
+            <label><span class="cb on" role="checkbox" aria-checked="true" aria-label="PL-WRO"></span>PL-WRO<span class="n">19</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="KR-ICN"></span>KR-ICN<span class="n">24</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="US-IAD"></span>US-IAD<span class="n">31</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="CN-SHA"></span>CN-SHA<span class="n">12</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="전역"></span>전역<span class="n">7</span></label>
+          </div>
+          <div class="facet"><h4>EDGE<em>5</em></h4>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="Frankfurt"></span>mock-Edge-Frankfurt<span class="n">43</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="중앙"></span>중앙(직접)<span class="n">61</span></label>
+          </div>
+          <div class="facet" style="border:0"><h4>DEPTH</h4>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="identity"></span>identity<span class="n">153</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="http"></span>http<span class="n">22</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="ssh"></span>ssh<span class="n">86</span></label>
+            <label><span class="cb" role="checkbox" aria-checked="false" aria-label="tls/tcp"></span>tls · tcp · smtp<span class="n">17</span></label>
+          </div>
+        </div>
+
+        <div class="w">
+          <div class="wh" style="letter-spacing:0;font-family:inherit;font-size:12px;color:#c3cfe0;gap:10px">
+            <span class="mono" style="color:#8b9bb4">state:(new OR changed OR gone) corp:PL-WRO</span>
+            <input class="inp" type="search" aria-label="필터 질의" placeholder="name:vc-* host:10.20.* kind:idrac" style="width:260px;margin-left:auto">
+            <span class="mono" style="color:#8b9bb4;font-size:11px">23 rows · 선택 12</span>
+          </div>
+          <div style="overflow:auto;max-height:470px">
+          <table>
+            <colgroup><col style="width:30px"><col style="width:92px"><col style="width:168px"><col style="width:300px"><col style="width:232px"><col><col style="width:88px"></colgroup>
+            <thead><tr><th><span class="cb half" role="checkbox" aria-checked="mixed" aria-label="전체 선택"></span></th><th>STATE</th><th>NAME</th><th>TAGS</th><th>HOST:PORT</th><th>CHECKS (기본 템플릿)</th><th>LAST SYNC</th></tr></thead>
+            <tbody>
+              <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="vc-eu-central"></span></td><td><span class="pill new">NEW</span></td><td style="color:#e6edf6;font-weight:500">vc-eu-central</td><td><span class="tag k">kind:vcenter</span><span class="tag c">corp:PL-WRO</span><span class="tag e">edge:Frankfurt</span><span class="tag d">depth:identity</span></td><td class="mono">vcenter-eu-central-01.demo.invalid:443</td><td><span class="chk">tcp:443</span><span class="chk">cert:443 D-30</span><span class="chk">http:/sdk/vimServiceVersions.xml 200</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+              <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="mock-Edge-Frankfurt"></span></td><td><span class="pill new">NEW</span></td><td style="color:#e6edf6;font-weight:500">mock-Edge-Frankfurt</td><td><span class="tag k">kind:collector</span><span class="tag c">corp:PL-WRO</span><span class="tag e">edge:central</span><span class="tag d">depth:identity</span></td><td class="mono">edge-frankfurt.demo.invalid:443</td><td><span class="chk">tcp:443</span><span class="chk">cert:443</span><span class="chk">http:/api/health 200 kw:status</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+              <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="r750-fra-a01"></span></td><td><span class="pill new">NEW</span></td><td style="color:#e6edf6;font-weight:500">r750-fra-a01 <span class="mono" style="color:#8b9bb4;font-size:10.5px">7KX2M93</span></td><td><span class="tag k">kind:idrac</span><span class="tag c">corp:PL-WRO</span><span class="tag e">edge:Frankfurt</span><span class="tag d">depth:identity</span></td><td class="mono">10.20.1.11:443</td><td><span class="chk">tcp:443</span><span class="chk">http:/redfish/v1/ 200 insecure</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+              <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="r750-fra-a02"></span></td><td><span class="pill new">NEW</span></td><td style="color:#e6edf6;font-weight:500">r750-fra-a02 <span class="mono" style="color:#8b9bb4;font-size:10.5px">7KX2M94</span></td><td><span class="tag k">kind:idrac</span><span class="tag c">corp:PL-WRO</span><span class="tag e">edge:Frankfurt</span><span class="tag d">depth:identity</span></td><td class="mono">10.20.1.12:443</td><td><span class="chk">tcp:443</span><span class="chk">http:/redfish/v1/ 200 insecure</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+              <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="unity-480-fra"></span></td><td><span class="pill new">NEW</span></td><td style="color:#e6edf6;font-weight:500">unity-480-fra</td><td><span class="tag k">kind:storage-api</span><span class="tag c">corp:PL-WRO</span><span class="tag e">edge:Frankfurt</span><span class="tag d">depth:http</span></td><td class="mono">unity-fra.demo.invalid:443</td><td><span class="chk">tcp:443</span><span class="chk">cert:443</span><span class="chk">http:/ &lt;500</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+              <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="san-brocade-fra-01"></span></td><td><span class="pill new">NEW</span></td><td style="color:#e6edf6;font-weight:500">san-brocade-fra-01</td><td><span class="tag k">kind:sanswitch-ssh</span><span class="tag c">corp:PL-WRO</span><span class="tag e">edge:Frankfurt</span><span class="tag d">depth:ssh</span></td><td class="mono">10.20.3.21:22</td><td><span class="chk">ssh:22 banner</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+              <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="cvp-fra"></span></td><td><span class="pill new">NEW</span></td><td style="color:#e6edf6;font-weight:500">cvp-fra</td><td><span class="tag k" style="color:#fbbf24;border-color:#5a3d07">kind:cvp (신규)</span><span class="tag c">corp:PL-WRO</span><span class="tag e">edge:Frankfurt</span><span class="tag d">depth:tls</span></td><td class="mono">cvp.demo.invalid:443</td><td><span class="chk">tcp:443</span><span class="chk">cert:443</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+              <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="veeam-br-fra"></span></td><td><span class="pill new">NEW</span></td><td style="color:#e6edf6;font-weight:500">veeam-br-fra</td><td><span class="tag k" style="color:#fbbf24;border-color:#5a3d07">kind:veeam (신규)</span><span class="tag c">corp:PL-WRO</span><span class="tag e">edge:Frankfurt</span><span class="tag d">depth:tls</span></td><td class="mono">veeam-fra.demo.invalid:9419</td><td><span class="chk">tcp:9419</span><span class="chk">cert:9419</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+              <tr><td><span class="cb on" role="checkbox" aria-checked="true" aria-label="bareos-dir-fra"></span></td><td><span class="pill new">NEW</span></td><td style="color:#e6edf6;font-weight:500">bareos-dir-fra</td><td><span class="tag k" style="color:#fbbf24;border-color:#5a3d07">kind:bareos (신규)</span><span class="tag c">corp:PL-WRO</span><span class="tag e">edge:Frankfurt</span><span class="tag d">depth:tcp</span></td><td class="mono">bareos-fra.demo.invalid:9101</td><td><span class="chk">tcp:9101</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+              <tr><td><span class="cb" role="checkbox" aria-checked="false" aria-label="vc-cn-east"></span></td><td><span class="pill chg">CHANGED</span></td><td style="color:#e6edf6;font-weight:500">vc-cn-east</td><td><span class="tag k">kind:vcenter</span><span class="tag c">corp:CN-SHA</span><span class="tag e">edge:Shanghai</span><span class="tag d">depth:identity</span></td><td class="mono"><s style="color:#8b9bb4">10.30.1.5</s> → vcenter-cn-east-01…:443</td><td><span class="chk">3 checks · id 승계</span></td><td class="mono">14:50</td></tr>
+              <tr><td><span class="cb" role="checkbox" aria-checked="false" aria-label="pmax-2500-icn"></span></td><td><span class="pill chg">CHANGED</span></td><td style="color:#e6edf6;font-weight:500">pmax-2500-icn</td><td><span class="tag k">kind:storage-api</span><span class="tag c">corp:KR-ICN</span><span class="tag e">edge:central</span><span class="tag d">depth:http</span></td><td class="mono"><s style="color:#8b9bb4">:443</s> → unisphere-icn.demo.invalid:8443</td><td><span class="chk">포트 변경 → 점검 2 갱신</span></td><td class="mono">11:35</td></tr>
+              <tr class="off"><td><span class="cb" role="checkbox" aria-checked="false" aria-label="isilon-sgp"></span></td><td><span class="pill gone">GONE</span></td><td style="color:#e6edf6;font-weight:500">isilon-sgp</td><td><span class="tag k">kind:storage-ssh</span><span class="tag c">corp:SG-SIN</span><span class="tag e">edge:Singapore</span><span class="tag d">depth:ssh</span></td><td class="mono">isilon-sgp.demo.invalid:22</td><td><span class="chk">g-9f21ab 중지 · 결과 보존</span></td><td class="mono">03:20</td></tr>
+              <tr><td><span class="cb" role="checkbox" aria-checked="false" aria-label="nsx-mgr-frankfurt"></span></td><td><span class="pill ok">LINKED</span></td><td style="color:#e6edf6;font-weight:500">nsx-mgr-frankfurt</td><td><span class="tag k">kind:nsx</span><span class="tag c">corp:PL-WRO</span><span class="tag e">edge:Frankfurt</span><span class="tag d">depth:http</span></td><td class="mono">nsx-fra.corp.local:443</td><td><span class="chk">tcp</span><span class="chk">cert D-21 <span class="am">warn</span></span><span class="chk">http:/api/v1/node 401</span></td><td class="mono">어제 14:24</td></tr>
+              <tr class="off"><td><span class="cb" role="checkbox" aria-checked="false" aria-label="Slack #ops" aria-disabled="true"></span></td><td><span class="pill ex">EXCLUDED</span></td><td style="color:#e6edf6;font-weight:500">Slack #ops</td><td><span class="tag k">kind:alerts</span><span class="tag c">corp:global</span></td><td class="mono">hooks.slack.com:443</td><td><span class="chk">URL 이 비밀(sealed) — 등록 안 함</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+              <tr><td><span class="cb" role="checkbox" aria-checked="false" aria-label="pdu-apc-icn-01"></span></td><td><span class="pill prob">PROBLEM</span></td><td style="color:#e6edf6;font-weight:500">pdu-apc-icn-01</td><td><span class="tag k">kind:pdu</span><span class="tag c">corp:KR-ICN</span><span class="tag e">edge:central</span><span class="tag d">depth:ssh</span></td><td class="mono">10.10.9.31:22</td><td><span class="chk">카탈로그 443 ≠ 등록부 sshPort 22 → 보강(§4.1)</span></td><td class="mono" style="color:#8b9bb4">—</td></tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="w">
+        <div class="wh">이벤트 스트림 · 설정 연동<em>svcmon-batches · settingsDrift · audit</em></div>
+        <div class="ev"><span class="t">14:50:02</span><span class="pill chg">DRIFT</span><span>감지 — 새 항목 3 (iDRAC r750-fra-a01 · r750-fra-a02 · 스토리지 unity-480-fra) · 주소 변경 1 (vc-cn-east) · 카탈로그 38ms</span></div>
+        <div class="ev"><span class="t">11:35:17</span><span class="pill chg">DRIFT</span><span>주소 변경 — pmax-2500-icn 포트 443 → 8443 (storage-devices.json)</span></div>
+        <div class="ev"><span class="t">03:20:41</span><span class="pill gone">GONE</span><span>설정에서 사라짐 — isilon-sgp (storage|st-7e20) · 대상 g-9f21ab 는 유지(중지 대기)</span></div>
+        <div class="ev"><span class="t">어제 14:24</span><span class="pill ok">APPLY</span><span>배치 settings:20261105-1424 — 추가 7 · 변경 0 · 중지 0 · 배정 동기화 Frankfurt(+5) Virginia(+2) · by admin</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1280}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

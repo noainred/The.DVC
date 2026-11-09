@@ -103,6 +103,8 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
     if (by['no-idrac']) parts.push(`iDRAC 등록이 없는 서버 **${by['no-idrac']}대**`);
     if (by['no-os-cred']) parts.push(`OS 계정이 없는 서버 **${by['no-os-cred']}대**`);
     if (by['no-idrac-cred']) parts.push(`iDRAC 계정이 없는 서버 **${by['no-idrac-cred']}대**`);
+    if (by['os-ambiguous']) parts.push(`OS 등록을 하나로 못 정한 서버 **${by['os-ambiguous']}대**`);   // 2차 재확인 G3
+    if (by['os-foreign']) parts.push(`OS 등록이 다른 법인 것인 서버 **${by['os-foreign']}대**`);
     return {
       kind: 'no-target', waiting: false,
       text: parts.length
@@ -142,6 +144,8 @@ export const MISSING_MARK = Object.freeze({
   'no-os-cred': 'OS 계정 없음',
   'no-idrac': 'iDRAC 등록 없음',
   'no-idrac-cred': 'iDRAC 계정 없음',
+  'os-ambiguous': 'OS 등록 모호',      // 2차 재확인 G3 — 법인으로 하나를 못 정함
+  'os-foreign': 'OS 등록 다른 법인',
 });
 export function missingMark(list = []) {
   const parts = (list || []).map((k) => MISSING_MARK[k] || k);
@@ -159,6 +163,8 @@ export function missingFootnotes(rows = []) {
   if (kinds.has('no-os-cred')) out.push('**OS 계정 없음** — 그 서버는 CPU·메모리만(iDRAC 텔레메트리) 읽습니다. 디스크·네트워크·HBA 를 보려면 설정 › 베어메탈 스토리지에 그 호스트를 등록하세요(같은 계정을 두 번 등록하지 않도록 그 등록부를 재사용합니다).');
   if (kinds.has('no-idrac')) out.push('**iDRAC 등록 없음** — 수동 태그로 베어메탈이 된 ESXi 호스트일 수 있습니다. OS 계정만 있으면 다섯 지표를 모두 읽습니다.');
   if (kinds.has('no-idrac-cred')) out.push('**iDRAC 계정 없음** — 설정 › iDRAC 등록에서 계정·비밀번호를 채우세요.');
+  if (kinds.has('os-ambiguous')) out.push('**OS 등록 모호** — 같은 이름 · 주소의 OS 등록이 여럿(주소가 다름)이거나, ‘수집에 추가’ 한 서버에 법인이 지정되지 않은 등록뿐입니다. 어느 장비인지 몰라 OS 로 접속하지 않습니다 — 설정 › 베어메탈 스토리지에서 그 등록에 법인을 지정하세요.');
+  if (kinds.has('os-foreign')) out.push('**OS 등록 다른 법인** — 이름 · 주소가 맞는 OS 등록이 다른 법인으로 지정돼 있어 쓰지 않습니다(다른 법인 서버의 주소 · 계정으로 접속하지 않게).');
   return out;
 }
 
@@ -167,7 +173,7 @@ export function skippedNotes(counts = {}, reasons = {}) {
   const out = [];
   for (const [kind, cnt] of Object.entries(counts)) {
     if (!cnt) continue;
-    out.push(`**${kind === 'edge-delegated' ? '엣지 수집' : kind === 'corp-off' ? '법인 미선택' : kind === 'unassigned' ? '법인 귀속 없음' : kind === 'no-idrac' ? 'iDRAC 등록 없음' : kind === 'no-idrac-cred' ? 'iDRAC 계정 없음' : kind === 'no-os-cred' ? 'OS 계정 없음' : kind === 'both-off' ? '두 경로 모두 꺼짐' : kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
+    out.push(`**${kind === 'edge-delegated' ? '엣지 수집' : kind === 'corp-off' ? '법인 미선택' : kind === 'unassigned' ? '법인 귀속 없음' : kind === 'no-idrac' ? 'iDRAC 등록 없음' : kind === 'no-idrac-cred' ? 'iDRAC 계정 없음' : kind === 'no-os-cred' ? 'OS 계정 없음' : kind === 'both-off' ? '두 경로 모두 꺼짐' : kind === 'key-conflict' ? '키 충돌' : kind === 'os-ambiguous' ? 'OS 등록 모호' : kind === 'os-foreign' ? 'OS 등록 다른 법인' : kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
   }
   return out;
 }
@@ -400,13 +406,16 @@ export function hostsUnreadNote(h = null) {
 export function keyConflictNote(list = []) {
   const arr = Array.isArray(list) ? list : [];
   if (!arr.length) return '';
-  const shown = arr.slice(0, 3).map((x) => `${t(x.key)}(${(x.names || []).join(' · ')})`);
-  const more = arr.length > shown.length ? ` 외 ${arr.length - shown.length}건` : '';
-  return `**식별 키가 겹치는 서버 ${arr.length}건**이 있습니다 — ${shown.join(' / ')}${more}.`
-    + ' 같은 키를 쓰면 **한 서버의 값이 다른 서버 것으로 보입니다**(추이가 섞입니다).'
-    + ' 서비스태그가 비어 있어 이름·내부 id 로 키가 정해진 경우가 대부분이니'
-    + ' 설정 › iDRAC 등록에서 **서비스태그를 채우면** 해결됩니다.'
-    + ' 어느 쪽을 버릴지 판단할 근거가 없어 **수집에서 빼지는 않았습니다**.';
+  // 서버마다 한 줄(서버 keyConflicts — 다음 점검 ①) — 같은 키끼리 묶어 ‘키(이름 · 이름)’ 로 보인다(범위 계정에는 자기 법인 서버만 온다).
+  const byKey = new Map();
+  for (const x of arr) { const k = t(x?.key); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(...(Array.isArray(x?.names) ? x.names : [])); }
+  const keys = [...byKey.keys()];
+  const shown = keys.slice(0, 3).map((k) => `${k}(${byKey.get(k).join(' · ')})`);
+  const more = keys.length > shown.length ? ` 외 ${keys.length - shown.length}건` : '';
+  return `**식별 키가 겹치는 서버 ${arr.length}대**(키 ${keys.length}건)가 있습니다 — ${shown.join(' / ')}${more}.`
+    + ' 같은 키를 쓰면 **한 서버의 값이 다른 서버 것으로 보이고**(추이 · 최신값 · 인증 정지가 섞입니다) 오류도 나지 않아,'
+    + ' 이 서버들은 **수집하지 않습니다**(대상이 아닌 서버 › 키 충돌). 서비스태그가 비어 이름·내부 id·IP 로 키가 정해진 경우가 대부분이니'
+    + ' 설정 › iDRAC 등록에서 **서비스태그를 채우면** 키가 갈려 다음 주기부터 수집합니다. 이미 쌓인 값은 섞여 있을 수 있습니다(지우지 않았습니다).';
 }
 
 /** 보존·행 수 안내 — 서버가 준 값으로만 만든다(숫자를 박지 않는다). */
@@ -766,7 +775,7 @@ export function unassignedNote(info = null) {
  * 이 표 최악의 거짓이다. 이유를 **순서대로** 말한다(v2.552 `rowState` 와 같은 규약).
  * @returns {{state:string, label:string, why:string, tone:string}}
  */
-export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60_000, now = Date.now() } = {}) {
+export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60_000, now = Date.now(), canEnableCentral = false, offWhy = '' } = {}) {
   const at = n(row.snapAt);
   const att = row.lastAttempt || null;
   if (row.enabled === false) return { state: 'off-central', label: '중앙에서 비활성', why: '중앙에서 이 수집 서버를 비활성으로 두었습니다 — 켜야 가져올 수 있습니다.', tone: 'idle' };
@@ -782,7 +791,21 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
     };
   }
   if (row.enabledOnEdge === false) {
-    return { state: 'off-edge', label: '엣지에서 꺼짐', why: '그 엣지에서 베어메탈 사용률 수집이 꺼져 있습니다 — 그 법인 포탈에서 켜야 값이 생깁니다(중앙에서는 켤 수 없습니다).', tone: 'warn' };
+    /*
+     * v2.927 정정: v2.627 부터 중앙이 엣지 설정을 내려줄 수 있고, v2.927 '중앙에서 켜기' 로 한 엣지만 켤 수 있다 — 예전 문구 '중앙에서는 켤 수
+     *   없습니다' 는 사실과 달랐다. 버튼을 쓸 수 있는 사람(전체 범위 관리자 · 중앙 · 그 엣지가 전체 배포·제외에 묶이지 않음)에게만 버튼을 말한다.
+     */
+    // 반증 F7: 그 노드가 엣지가 아니면(중앙·단독 — 배포 인출 워커가 없다) 중앙 켜기는 닿지 않는다 — 노드 역할은 서버가 보관분에서 판정해 준다(nodeRole).
+    if (row.nodeRole === 'central') return { state: 'off-edge', label: '그 노드에서 꺼짐', tone: 'warn', why: '그 노드에서 베어메탈 사용률 수집이 꺼져 있습니다 — 이 노드는 엣지가 아닙니다(중앙·단독 — 배포를 받지 않습니다). 그 포탈의 베어메탈 사용률 설정에서 직접 켜세요.' };
+    const base = '그 엣지에서 베어메탈 사용률 수집이 꺼져 있습니다 — ';
+    return { state: 'off-edge', label: '엣지에서 꺼짐', tone: 'warn',
+      // offWhy — 관리자 화면이 배포 현황으로 아는 더 정확한 사유(중앙 켜기 저장됨 · 전체 배포가 끔 — bmUsageDistText.edgeOnView). 완결된 문장이다.
+      why: offWhy ? String(offWhy)
+        : canEnableCentral
+          ? `${base}**중앙에서 켜기** 버튼으로 켤 수 있습니다(그 법인 포탈에서 켜도 됩니다).`
+          : row.nodeRole === 'edge' || row.nodeRole == null
+            ? `${base}관리자가 중앙에서 켜거나 그 법인 포탈에서 켭니다.`
+            : `${base}이 노드의 역할을 확인할 수 없어 중앙 켜기를 제공하지 않습니다 — 그 법인 포탈에서 켭니다(보관분에 노드 역할이 없습니다).` };
   }
   const old = now - at > staleMs;
   if (att && !att.ok) {
@@ -796,6 +819,23 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
  * 엣지 패널 머리말. ⚠ **'push 가 없다' 는 사실을 말한다** — 값이 낡은 것이 장애가 아니라 설계다
  * (사용자 선택: "중앙으로 전달은 중앙에서 조회할때만").
  */
+/**
+ * v2.945.1(사용자 보고 — 엣지 보관분 안내가 같은 이름으로 십여 줄 반복): 안내 줄은 **이름별 한 줄**. 같은 이름(대소문자 무시 · 앞뒤 공백 무시)이
+ *   여러 행이면 첫 행만 쓰고 그 수(dup)를 밝힌다 — 조용히 합치지 않는다(화면이 '등록부에 n개' 를 말한다). 표는 행을 그대로 둔다. 순수.
+ * @returns {{r:object, dup:number}[]}
+ */
+export function edgeNoteRows(rows = []) {
+  const out = [];
+  const at = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r !== 'object') continue;
+    const k = String(r.agent ?? '').trim().toLowerCase();
+    if (at.has(k)) { out[at.get(k)].dup += 1; continue; }
+    at.set(k, out.length);
+    out.push({ r, dup: 1 });
+  }
+  return out;
+}
 export function edgePullNote(rows = []) {
   const arr = Array.isArray(rows) ? rows : [];
   const have = arr.filter((r) => n(r.snapAt)).length;

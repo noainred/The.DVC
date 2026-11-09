@@ -3,7 +3,8 @@
 // 서버는 표(컬럼) 형식 폼으로 등록하고, 그룹을 지정하면 그룹 합산 카드가 생긴다.
 // 수집 주체: 중앙 직접(기본) 또는 글로벌 엣지 위임(중앙→엣지 PUSH — 수집 서버(원격) URL 필요).
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson, canCsv } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, canCsv, getCurrentUser } from '../../api.js';
+import { canManageKeys, authChoiceOf, authBodyOf, HOSTKEY_OBSERVE_NOTE } from './bmOnboardText.js'; // 7b: 인증(키 · 공통 계정) 드롭다운 — 설정 소유자 등급만
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx'; // CSV 일괄 관리(v2.341)
@@ -46,6 +47,16 @@ export default function BmStorageTool() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null); // 서버 추가/수정 폼 | null
+  const owner = canManageKeys(getCurrentUser(), true);
+  const [authOpts, setAuthOpts] = useState({ keys: [], accounts: [] });
+  useEffect(() => {
+    if (!owner || !form) return;
+    let alive = true;
+    Promise.all([fetchJson('/tools/bm-usage/ssh-keys').catch(() => null), fetchJson('/tools/bm-usage/accounts').catch(() => null)]).then(([k, a]) => {
+      if (alive) setAuthOpts({ keys: (k?.keys || []).filter((x) => x.status === 'active'), accounts: (a?.accounts || []).filter((x) => x.kind === 'os') });
+    });
+    return () => { alive = false; };
+  }, [owner, !!form]);   // eslint-disable-line react-hooks/exhaustive-deps -- 폼을 열 때 한 번
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [ivEdit, setIvEdit] = useState(null); // 주기 편집값(분) | null
@@ -84,12 +95,15 @@ export default function BmStorageTool() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await postJson('/tools/bm-storage/servers', { ...form, port: Number(form.port) || 22 });
+      // 7b: 인증 참조(키 · 공통 계정)는 설정 소유자 등급만 보내고(서버가 다시 막는다), 묶음이 바뀌면 본인 OTP 를 함께 보낸다.
+      const { auth, otp, ...base } = form;
+      const extra = owner ? { ...authBodyOf(auth, cfgOf(form.id)), ...(otp ? { otp } : {}) } : {};
+      const r = await postJson('/tools/bm-storage/servers', { ...base, ...extra, port: Number(form.port) || 22 });
       const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: 주소·포트·계정 변경으로 저장 비밀번호 폐기 — 폼 유지
       if (r.ok && dropNote) { setForm((f) => ({ ...f, password: '' })); refresh(); setMsg(dropNote); }
       else if (r.ok) { setForm(null); refresh(); }
       else setMsg(r.reason);
-    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
+    } catch (e) { setMsg(e?.body?.reason || e.message); setForm((f) => (f ? { ...f, otp: '' } : f)); } finally { setBusy(false); }
   };
   const del = async (s) => {
     if (!window.confirm(`'${s.name}' (${s.host}) 서버를 목록에서 삭제할까요?`)) return;
@@ -113,7 +127,7 @@ export default function BmStorageTool() {
   };
   const edit = (s) => {
     const c = cfgOf(s.id);
-    setForm({ ...EMPTY, ...c, password: '', mounts: (c?.mounts || []).join('\n'), groups: (c?.groups || []).join(', '), datacenterId: c?.datacenterId || '' });
+    setForm({ ...EMPTY, ...c, password: '', mounts: (c?.mounts || []).join('\n'), groups: (c?.groups || []).join(', '), auth: authChoiceOf(c), otp: '', datacenterId: c?.datacenterId || '' });
   };
   // v2.599(C2599-09): 사용률은 서버가 df 와 같은 정의로 주고, 분모 0(마운트 미수집)이면 null 이다 — 'null%'·0% 로 그리지 않는다.
   const pctCell = (p) => (p == null ? <span className="muted">—</span> : <span style={{ whiteSpace: 'nowrap' }}>{bar(p)} <b style={{ fontSize: 12, color: pctColor(p) }}>{p}%</b></span>);
@@ -385,6 +399,19 @@ export default function BmStorageTool() {
               <label>SSH 포트<input className="input" type="number" min={1} max={65535} value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} /></label>
               <label>계정<input className="input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
               <label>비밀번호<input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={form.id ? '비우면 기존 유지' : ''} autoComplete="new-password" /></label>
+              {owner && (
+                <label>인증(SSH 키 · 공통 계정) <span className="muted" style={{ fontSize: 11 }}>(설정 소유자 — 묶음을 바꾸면 본인 OTP)</span>
+                  <Select sort={false} className="input" value={form.auth || ''} onChange={(e) => setForm({ ...form, auth: e.target.value })}>
+                    <option value="">개별 비밀번호(위 칸)</option>
+                    {authOpts.keys.map((k) => <option key={k.id} value={`key:${k.id}`}>키 · {k.name} ({k.algo})</option>)}
+                    {authOpts.accounts.map((a) => <option key={a.id} value={`acc:${a.id}`}>공통 계정 · {a.name} ({a.username})</option>)}
+                  </Select>
+                </label>
+              )}
+              {owner && (form.auth || '') !== authChoiceOf(cfgOf(form.id)) && (form.auth || '') && (
+                <label>본인 OTP<input className="input" inputMode="numeric" maxLength={8} value={form.otp || ''} onChange={(e) => setForm({ ...form, otp: e.target.value })} autoComplete="one-time-code" /></label>
+              )}
+              {owner && <p className="muted" style={{ fontSize: 11, margin: 0, gridColumn: '1 / -1' }}>{HOSTKEY_OBSERVE_NOTE}</p>}
               <label>수집 주체 <span className="muted" style={{ fontSize: 11 }}>(등록된 수집 서버(원격)에서 선택)</span>
                 <Select className="input" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
                   <option value="">중앙 직접(SSH)</option>

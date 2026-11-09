@@ -337,7 +337,7 @@ function LogIssues() {
   // 세대 가드: vCenter/기간을 빠르게 바꿀 때 느린 이전 응답이 최신을 덮어쓰지 않게.
   const genRef = useRef(0);
   const load = () => { const g = ++genRef.current; return fetchJson(`/admin/net/log-issues?days=${days}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [vc, days]);
+  useEffect(() => { load(); }, [vc, days]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="card" style={{ padding: 16 }}>
       <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>

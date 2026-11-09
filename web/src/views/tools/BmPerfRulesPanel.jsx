@@ -1,0 +1,246 @@
+/**
+ * 설정 › 베어메탈 성능 › **알림 규칙 · 집중 모니터링 · 베이스라인 · 소모품 기준**(리눅스 성능 5단계 · 아트보드 Alerts ⑨). 기존 ‘수집 설정’ 카드 안의 절(도구 키 그대로).
+ * ⚠ 판정 · 발송은 서버(perfAlerts.js — 수집 노드). 이 화면은 규칙 값만 고친다 — 저장은 설정 소유자 등급(서버 403 · 감사) · 그 밖의 계정은 읽기 전용.
+ * ⚠ 켠 규칙만 저장된다(서버 normalizeRules) · 웹훅 URL 은 비밀이라 싣지 않는다(채널 이름만) · 조회는 펼칠 때 1회 + 저장 · 시험 실행 뒤(폴링 없음).
+ */
+import React, { useEffect, useRef, useState } from 'react';
+import { fetchJson, putJson, postJson, hasRole, getCurrentUser } from '../../api.js';
+import { ErrorBox } from '../../components/ui.jsx';
+import { STable } from '../../components/STable.jsx';
+import { unitText } from '../unitText.js';
+import Select from '../../components/Select.jsx';
+import BoldText from '../../components/boldText.jsx';
+import { toneVar } from './toneVar.js';
+import { shortStamp } from './bmOpsText.js';
+import { RULE_TEXT, CHANNEL_TEXT, RULES_HONEST, sentResultText, issueResultText, autoFocusText, HEALTH_CELL_TEXT, FOCUS_METRIC_TEXT } from './bmPerfOpsText.js';
+import './bmOps.css';
+import './bmPerfOps.css';
+
+export const NUM_SECTIONS = Object.freeze([
+  { k: 'daily', title: '하루 상한(법인당)', fields: [['alerts', '알림'], ['issues', '이슈'], ['autoFocus', '자동 집중'], ['manualFocus', '수동 집중']] },
+  { k: 'focus', title: '집중 모니터링', fields: [['intervalS', '간격(초 · 하한 30)'], ['durationMin', '길이(분 · 상한 60)'], ['corpMax', '법인당 동시'], ['nodeMax', '이 노드 전체 동시'], ['keepDays', '보관(일)'], ['autoSuppressMin', '같은 서버 재발 억제(분)']] },
+  { k: 'baseline', title: '베이스라인', fields: [['weeks', '지난 주 수'], ['bandPct', '띠 ±%'], ['minWeeks', '최소 표본 주'], ['maxMissingPct', '결측 상한 %']] },
+  { k: 'health', title: '점검 소모품 기준', fields: [['chronyMs', '시각 오프셋 ms'], ['fdPct', 'FD %'], ['conntrackPct', 'conntrack %'], ['dmesgErr24h', '24시간 커널 오류'], ['certDays', '인증서 남은 일']] },
+  { k: 'changes', title: '변경 이벤트', fields: [['keepDays', '보관(일)']] },
+  { k: 'compare', title: '구간 · 서버 비교', fields: [['diffPct', '구간 비교 차이 표시 ±%'], ['maxServers', '서버 비교 한 화면 상한(대)']] },
+  // 6단계 수집 건강 — 보드 상태와 ‘수집 건강’ 알림 행이 같은 기준을 쓴다(DB 상한 0 = 없음 · DB 칸 판정 보류).
+  { k: 'collect', title: '수집 건강 기준', fields: [['cyclePct', '주기 소요 % (예산 대비 이상)'], ['successPct', '성공률 % (미만)'], ['dbPct', 'DB % (상한 대비 이상)'], ['dbCapGb', 'DB 상한 GB(0 = 없음)']] },
+  // 7a단계 로그 분석 — 출처별 주기당 줄 상한(넘친 줄은 ‘잘림’) · 보관 · SSH 실패 집중(같은 IP · 창 안 줄 수). 끄면 로그 읽기 exec 를 붙이지 않는다.
+  { k: 'logs', title: '로그 분석', fields: [['lineCap', '출처별 주기당 줄 상한'], ['keepDays', '보관(일)'], ['burstCount', 'SSH 실패 집중 — 줄 수'], ['burstWindowMin', 'SSH 실패 집중 — 창(분)']] },
+  // 8a단계 용량 소진 예측 — 목표선(%) · 데이터 부족 기준(14일 창 안 점 수) · 알림 ‘소진 ≤ N일’ 의 N.
+  { k: 'capacity', title: '용량 소진 예측', fields: [['targetPct', '목표선 %'], ['minDays', '데이터 부족 기준(14일 중 점 수)'], ['days', '알림 — 소진 ≤ N일']] },
+  // 8b단계 ⑳ 프로세스 Top-N — 5분 표본 보존(날 파일) · comm 별 시간 집계 보존. 끄면 ##TOP 이 ‘꺼짐’ 한 줄(1초 대기 없음).
+  { k: 'top', title: '프로세스 Top-N', fields: [['keepDays', '5분 표본 보존(일)'], ['hourlyDays', 'comm 별 시간 집계 보존(일)']] },
+  // 8b단계 ㉑ 저활용 — 창 · 데이터 부족 · 후보/관찰 점수 · 가중 6 · ‘낮다’ 기준(관행 — 설정값) · 주기 사용 판정.
+  { k: 'idle', title: '저활용 점수', fields: [['windowDays', '창(일 · 30 기본 · 90 옵션)'], ['minDays', '데이터 부족(일 미만)'], ['candidate', '후보 점수(이상)'], ['watch', '관찰 점수(이상)'],
+    ['wCpu', '가중 CPU'], ['wMem', '가중 메모리'], ['wDisk', '가중 디스크'], ['wNet', '가중 네트'], ['wPower', '가중 전력'], ['wAct', '가중 활동 흔적'],
+    ['cpuAvgPct', 'CPU 평균 < %'], ['cpuMaxPct', 'CPU 일 최대 < %'], ['memAvgPct', '메모리 평균 < %'], ['diskBusyMaxPct', '디스크 일 최대 busy < %'], ['netMaxPct', '네트 일 최대 < %'],
+    ['powerIdlePct', '전력 평균 ≤ 최소 × %'], ['periodicHighPct', '주기 사용 — 높은 날 기준 %']] },
+  // 8b단계 ㉒ 전력 · 온도 — 흡기 기준(설정값 · 모델별 권장 아님) · PowerCap 걸림 % · 랙 여유 주의 %. 랙 배치는 아래 글 상자.
+  // 다음 점검 ②: 피크 급증 기준(앞 7일 피크 대비 +%) — 네 기준 모두 전력 보기와 알림 규칙이 같이 쓴다.
+  { k: 'power', title: '전력 · 온도', fields: [['inletWarnC', '흡기 기준 °C'], ['capHitPct', 'PowerCap 걸림(측정 ≥ 상한 × %)'], ['rackLowPct', '랙 여유 주의(% 미만)'], ['surgePct', '피크 급증(앞 7일 피크 대비 +%)']] },
+]);
+
+/** 자동 집중을 걸지 않는 규칙 — 서버 목록(perfRules.AUTOFOCUS_OFF · 응답 autoFocusOff)이 원천. 구버전 응답이면 예전 두 개(서버가 어차피 false 로 저장한다). */
+export const autoFocusOff = (resp) => (Array.isArray(resp?.autoFocusOff) ? resp.autoFocusOff : ['focusEnd', 'collect']);
+
+/**
+ * 시험 실행 결과(반증 n2 F3) — 전력 판정 입력 실패(powerError)와 판정 보류(counts.unknown — 못 읽음 · 부분 합 · 낡음 · 표본 부족)를 ‘걸린 규칙 0건’ 과 갈라 보인다.
+ */
+export function DryRunResult({ resp }) {
+  const held = resp?.counts?.unknown ?? 0;
+  return (
+    <div className="bmo-band">
+      <div>시험 실행 — 이 노드 대상 {unitText(resp.servers, '대')}{resp.powerItems != null ? ` · 전력 판정 항목 ${resp.powerItems}개(서버 · 랙)` : ''} · 걸린 규칙 {(resp.fires || []).length}건{resp.skipped ? `(${resp.skipped === 'no-rules' ? '켠 규칙이 없습니다' : resp.skipped})` : ''}</div>
+      {resp.powerError && <div className="bmo-sub" style={{ color: toneVar('bad') }}>전력 · 온도 규칙을 대 보지 못했습니다(원천 실패 — 0건이 아닙니다): {resp.powerError}</div>}
+      {held > 0 && <div className="bmo-sub" style={{ color: toneVar('warn') }}>판정 보류 {held}건 — 못 읽음 · 미측정 · 부분 합(일부만 측정된 랙) · 낡은 센서 · 표본 부족은 정상도 장애도 아닙니다(걸린 규칙 수에 들지 않습니다). 이 노드가 판정 노드가 아닌 서버 · 랙은 항목에서 빠집니다(전력 보기 ‘알림 판정 없음’).</div>}
+      {(resp.fires || []).slice(0, 20).map((f, i) => <div key={i} className="bmo-sub">{RULE_TEXT[f.rule]?.label || f.rule} · {f.title}</div>)}
+      <div className="bmo-sub">{resp.note}</div>
+    </div>
+  );
+}
+/** 지난 주기 상태(반증 n2 F3 — 무음 실패 금지): 판정 보류 수 · 전력 판정 입력 실패 · 판정 노드 넘어감(2차 M3). 값이 없으면 그리지 않는다. */
+export function LastCycleLine({ last }) {
+  if (!last) return null;
+  const parts = [];
+  if (last.powerError) parts.push(<span key="e" style={{ color: toneVar('bad') }}>지난 주기 전력 · 온도 규칙 입력 실패: {last.powerError}</span>);
+  if (last.held) parts.push(<span key="h">지난 주기 판정 보류 {last.held}건(못 읽음 · 부분 합 · 낡음 · 표본 부족 — 정상으로 세지 않음)</span>);
+  if (last.powerItems != null) parts.push(<span key="p">전력 판정 항목 {last.powerItems}개</span>);
+  // 반증 n2 2차 M3: 판정 노드 넘어감은 발송 기록(알림 이력)에 쓰지 않는다 — 개수만 지난 주기 상태로.
+  if (last.released) parts.push(<span key="m">지난 주기 판정 노드 넘어감 {last.released}건(이 노드의 전력 규칙 상태를 비움 · 해소 알림 없음)</span>);
+  if (last.error) parts.push(<span key="x" style={{ color: toneVar('bad') }}>지난 주기 규칙 판정 오류: {last.error}</span>);
+  return parts.length ? <p className="bmo-sub" style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', margin: '0 0 6px' }}>{parts}</p> : null;
+}
+
+/** 이 계정이 저장할 수 있나 — 설정 소유자 등급(소유자 ∧ 전체 범위) · 인증 꺼짐(Anonymous admin). 서버가 다시 막는다. */
+export function canEditRules(resp, u = getCurrentUser()) {
+  if (!resp || resp.readOnly) return false;
+  if (!hasRole('admin')) return false;
+  return u?.settingsOwnerTier === true || u?.name === 'Anonymous';
+}
+
+export default function BmPerfRulesPanel({ vcenters = [] }) {
+  const [st, setSt] = useState({ loading: true, resp: null, err: null });
+  const [form, setForm] = useState(null);
+  const [save, setSave] = useState({ busy: false, msg: '', err: null, field: '' });
+  const [dry, setDry] = useState({ busy: false, resp: null, err: null });
+  const gen = useRef(0);
+  const load = async () => {
+    const g = ++gen.current;
+    setSt((p) => ({ ...p, loading: true, err: null }));
+    try { const r = await fetchJson('/tools/bm-usage/perf-rules', {}, undefined, { timeoutMs: 60_000 }); if (g === gen.current) { setSt({ loading: false, resp: r, err: null }); setForm(JSON.parse(JSON.stringify(r.rules))); } }
+    catch (e) { if (g === gen.current) setSt({ loading: false, resp: null, err: e }); }
+  };
+  useEffect(() => { load(); }, []);
+  const resp = st.resp;
+  const edit = canEditRules(resp);
+  const ro = !edit;
+  const ruleOf = (id) => form?.rules?.[id] || null;
+  const setRule = (id, patch) => setForm((f) => {
+    const cur = f.rules?.[id] || { ...(resp?.ruleDefaults?.[id] || {}), on: false, corpsOff: [] };
+    return { ...f, rules: { ...f.rules, [id]: { ...cur, ...patch } } };
+  });
+  const setNum = (sec, k, v) => setForm((f) => ({ ...f, [sec]: { ...f[sec], [k]: v === '' ? '' : Number(v) } }));
+  const doSave = async () => {
+    setSave({ busy: true, msg: '', err: null, field: '' });
+    try {
+      const body = { ...form, rules: Object.fromEntries(Object.entries(form.rules || {}).filter(([, x]) => x?.on)) };
+      const r = await putJson('/tools/bm-usage/perf-rules', body, { timeoutMs: 60_000 });
+      if (r?.ok === false) { setSave({ busy: false, msg: `저장하지 못했습니다 — ${r.reason || '형식 밖 값'}`, err: null, field: r.field || '' }); return; }
+      if (r?.rules) setForm(JSON.parse(JSON.stringify(r.rules)));   // 서버가 정규화한 값(켠 규칙만)으로 바로 맞춘다
+      setSave({ busy: false, msg: '저장했습니다(감사 기록 · 켠 규칙만 저장).', err: null, field: '' });
+      load();
+    } catch (e) { setSave({ busy: false, msg: '', err: e, field: e?.body?.field || '' }); }
+  };
+  const doDry = async () => {
+    setDry({ busy: true, resp: null, err: null });
+    try { setDry({ busy: false, resp: await postJson('/tools/bm-usage/perf-rules/dry-run', { ...form, rules: Object.fromEntries(Object.entries(form.rules || {}).filter(([, x]) => x?.on)) }, { timeoutMs: 60_000 }), err: null }); }
+    catch (e) { setDry({ busy: false, resp: null, err: e }); }
+  };
+  if (st.err) return <div style={{ marginTop: 10 }}><h4 style={{ margin: '14px 0 6px' }}>리눅스 성능 알림 규칙</h4><ErrorBox error={st.err} /></div>;
+  if (!resp || !form) return <p className="bmo-note" style={{ marginTop: 10 }}>리눅스 성능 알림 규칙을 읽는 중…</p>;
+  const vcName = (id) => vcenters.find((v) => v.id === id)?.name || id;
+  return (
+    <div style={{ display: 'grid', gap: 10, minWidth: 0, marginTop: 14 }}>
+      <h4 style={{ margin: 0 }}>리눅스 성능 알림 규칙 · 집중 모니터링 · 베이스라인</h4>
+      <p className="bmo-note"><BoldText text={'규칙 조건은 수집 노드가 판정한 값의 **변화**에만 걸립니다 — 같은 상태가 이어지면 다시 보내지 않고, 지속 · 재발 억제 · 하루 상한이 있습니다. 채널은 설정 › 알림(메일 · 웹훅 · Slack · Teams)을 그대로 씁니다. **켠 규칙만 저장합니다.**'} /></p>
+      {resp.loadError && <p className="bmo-note" style={{ color: toneVar('warn') }}>설정 파일을 읽지 못해 기본값(전부 꺼짐)으로 동작 중입니다 — {resp.loadError.reason}. 저장하면 새 파일로 바뀝니다(손상본은 보존).</p>}
+      {ro && <p className="bmo-note">읽기 전용 — 저장은 설정 소유자(전체 범위 관리자)만 할 수 있습니다{resp.readOnly && hasRole('admin') ? '(범위가 지정된 계정은 자기 법인 예외만 봅니다)' : ''}.</p>}
+      <STable minWidth={1040} className="bmo-t bmr-t" style={{ fontSize: 12 }}>
+        <thead><tr><th>켬</th><th>규칙</th><th>조건</th><th className="right">지속(주기)</th><th className="right">재발 억제(분)</th><th>채널</th><th>이슈 자동 등록</th><th>자동 집중</th><th>법인 예외</th></tr></thead>
+        <tbody>
+          {(resp.ruleIds || []).map((id) => {
+            const r = ruleOf(id); const on = !!r?.on; const d = resp.ruleDefaults?.[id] || {};
+            const v = r || { ...d, on: false, corpsOff: [] };
+            return (
+              <tr key={id}>
+                <td data-sort={on ? 1 : 0}><input type="checkbox" checked={on} disabled={ro} onChange={(e) => setRule(id, { on: e.target.checked })} aria-label={`${RULE_TEXT[id]?.label} 켬`} /></td>
+                <td data-sort={RULE_TEXT[id]?.label || id} className="bmo-name">{RULE_TEXT[id]?.label || id}</td>
+                <td data-sort={v.cond}>
+                  <Select sort={false} className="select select-sm" value={v.cond} disabled={ro || !on} onChange={(e) => setRule(id, { cond: e.target.value })} aria-label="조건" title={RULE_TEXT[id]?.conds?.[v.cond] || v.cond}>
+                    {(resp.conds?.[id] || []).map((c) => <option key={c} value={c}>{RULE_TEXT[id]?.conds?.[c] || c}</option>)}
+                  </Select>
+                </td>
+                <td className="right" data-sort={v.sustain}><input className="input" type="number" min={1} max={48} value={v.sustain ?? ''} disabled={ro || !on} onChange={(e) => setRule(id, { sustain: e.target.value === '' ? '' : Number(e.target.value) })} /></td>
+                <td className="right" data-sort={v.repeatMin}><input className="input" type="number" min={0} max={10080} value={v.repeatMin ?? ''} disabled={ro || !on} onChange={(e) => setRule(id, { repeatMin: e.target.value === '' ? '' : Number(e.target.value) })} /></td>
+                <td data-sort={(v.channels || []).join(',')}><div className="bmr-ch">{(resp.channels || []).map((c) => (
+                  <label key={c} className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={(v.channels || []).includes(c)} onChange={(e) => setRule(id, { channels: e.target.checked ? [...new Set([...(v.channels || []), c])] : (v.channels || []).filter((x) => x !== c) })} />{CHANNEL_TEXT[c] || c}</label>
+                ))}</div></td>
+                <td data-sort={v.issue ? 1 : 0}><label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.issue} onChange={(e) => setRule(id, { issue: e.target.checked })} />만들기</label></td>
+                <td data-sort={v.autoFocus ? 1 : 0}>{autoFocusOff(resp).includes(id) ? <span className="bmo-sub">해당 없음</span> : <label className="bmo-check"><input type="checkbox" disabled={ro || !on} checked={!!v.autoFocus} onChange={(e) => setRule(id, { autoFocus: e.target.checked })} />켜기</label>}</td>
+                <td data-sort={(v.corpsOff || []).length}>
+                  <details><summary className="bmo-sub">{(v.corpsOff || []).length ? `${(v.corpsOff || []).length}곳 제외` : '없음'}</summary>
+                    <div className="bmr-corps">{vcenters.map((vc) => (
+                      <label key={vc.id}><input type="checkbox" disabled={ro || !on} checked={(v.corpsOff || []).includes(vc.id)} onChange={(e) => setRule(id, { corpsOff: e.target.checked ? [...new Set([...(v.corpsOff || []), vc.id])] : (v.corpsOff || []).filter((x) => x !== vc.id) })} />{vc.name}</label>
+                    ))}</div>
+                  </details>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </STable>
+      <div className="bmr-grid">
+        {NUM_SECTIONS.map((sec) => (
+          <fieldset key={sec.k} className="bmo-card" style={{ margin: 0 }}>
+            <legend className="bmo-k">{sec.title}</legend>
+            <div style={{ display: 'grid', gap: 6 }}>
+              {sec.fields.map(([k, label]) => {
+                const lim = resp.limits?.[sec.k]?.[k];
+                return (
+                  <label key={k} style={{ fontSize: 12 }}>{label}{save.field === `${sec.k}.${k}` ? <span style={{ color: toneVar('bad') }}> — 범위 밖</span> : null}
+                    <input className="input" type="number" min={lim?.[0]} max={lim?.[1]} value={form[sec.k]?.[k] ?? ''} disabled={ro} onChange={(e) => setNum(sec.k, k, e.target.value)} />
+                  </label>
+                );
+              })}
+              {sec.k === 'logs' && (
+                <label className="bmo-check" style={{ fontSize: 12 }}><input type="checkbox" disabled={ro} checked={form.logs?.on !== false} onChange={(e) => setForm((f) => ({ ...f, logs: { ...f.logs, on: e.target.checked } }))} />로그 읽기 켬(같은 SSH 세션 · 읽기 전용)</label>
+              )}
+              {sec.k === 'focus' && (
+                <details><summary className="bmo-sub">자동 집중을 쓰는 법인(옵트인) — {(form.focus?.autoCorps || []).length}곳</summary>
+                  <div className="bmr-corps">{vcenters.map((vc) => (
+                    <label key={vc.id}><input type="checkbox" disabled={ro} checked={(form.focus?.autoCorps || []).includes(vc.id)} onChange={(e) => setForm((f) => ({ ...f, focus: { ...f.focus, autoCorps: e.target.checked ? [...new Set([...(f.focus?.autoCorps || []), vc.id])] : (f.focus?.autoCorps || []).filter((x) => x !== vc.id) } }))} />{vc.name}</label>
+                  ))}</div>
+                </details>
+              )}
+              {sec.k === 'top' && (
+                <label className="bmo-check" style={{ fontSize: 12 }}><input type="checkbox" disabled={ro} checked={form.top?.on !== false} onChange={(e) => setForm((f) => ({ ...f, top: { ...f.top, on: e.target.checked } }))} />프로세스 Top-N 수집 켬(같은 SSH 1회 · 1초 대기 · comm 만)</label>
+              )}
+              {sec.k === 'idle' && (
+                <label className="bmo-check" style={{ fontSize: 12 }}><input type="checkbox" disabled={ro} checked={form.idle?.on !== false} onChange={(e) => setForm((f) => ({ ...f, idle: { ...f.idle, on: e.target.checked } }))} />저활용 하루 계산 켬(01:20 뒤 첫 틱)</label>
+              )}
+              {sec.k === 'power' && (
+                <label style={{ fontSize: 12 }}>랙 배치 — 한 줄에 ‘법인,랙,상한 kW(비우면 미설정),서버키[@U] 서버키[@U] …’ · # 은 주석{save.field && save.field.startsWith('power.racks') ? <span style={{ color: toneVar('bad') }}> — 형식 밖(아래 안내)</span> : null}
+                  <textarea className="input" rows={5} spellCheck={false} style={{ width: '100%', minWidth: 0, fontFamily: 'var(--mono, monospace)', fontSize: 12 }} disabled={ro}
+                    value={form.power?.racksText ?? ''} onChange={(e) => setForm((f) => ({ ...f, power: { ...f.power, racksText: e.target.value } }))} placeholder={'KR-SEL,A-07,10.2,SVCTAG1@38 SVCTAG2@36'} aria-label="랙 배치" />
+                  <span className="bmo-sub">등록 CSV 에 ‘랙/위치’ 열이 없어 이 칸이 랙의 유일한 원천입니다 · 서버 키는 함대 표의 서버 키(대개 서비스 태그) · 한 서버는 한 랙에만.</span>
+                </label>
+              )}
+              {sec.k === 'power' && <span className="bmo-sub">알림 규칙 ‘랙 여유 부족 · 흡기 온도 지속 초과 · 전력 피크 급증 · PowerCap 걸림 지속’ 이 이 기준을 씁니다(전력 보기와 같은 값).</span>}
+              {sec.k === 'baseline' && <span className="bmo-sub">감시 지표: {(resp.baselineMetrics || []).map((m) => FOCUS_METRIC_TEXT[m]?.label || m).join(' · ')}</span>}
+              {sec.k === 'health' && <span className="bmo-sub">칸: {Object.values(HEALTH_CELL_TEXT).map((x) => x.label).slice(0, 4).join(' · ')} 등 8칸</span>}
+            </div>
+          </fieldset>
+        ))}
+        <fieldset className="bmo-card" style={{ margin: 0 }}>
+          <legend className="bmo-k">유지보수 창 억제</legend>
+          <label className="bmo-check"><input type="checkbox" disabled={ro} checked={!!form.maintenance?.backupWindows} onChange={(e) => setForm((f) => ({ ...f, maintenance: { ...f.maintenance, backupWindows: e.target.checked } }))} />백업 창(Bareos · Veeam 스케줄)에서 알리지 않기</label>
+          <p className="bmo-note" style={{ color: toneVar('warn') }}>지금은 원천이 없습니다 — 베어메탈 서버의 백업 창을 읽는 스케줄이 없어(그 스케줄은 VM 대상) 억제가 일어나지 않습니다.</p>
+        </fieldset>
+      </div>
+      <div className="bmo-tagrow">
+        {edit && <button type="button" className="btn bmp-touch" disabled={save.busy} onClick={doSave}>{save.busy ? '저장하는 중…' : '저장'}</button>}
+        {hasRole('admin') && resp && !resp.readOnly && <button type="button" className="btn bmp-touch" disabled={dry.busy} onClick={doDry}>{dry.busy ? '대 보는 중…' : '시험 실행(지금 값에 대 보기 — 보내지 않음)'}</button>}
+        <button type="button" className="btn bmp-touch" onClick={load} disabled={st.loading}>{st.loading ? '읽는 중…' : '다시 읽기'}</button>
+        {save.msg && <span className="bmo-sub" style={{ color: toneVar('ok') }}>{save.msg}</span>}
+      </div>
+      {save.err && <ErrorBox error={save.err} />}
+      {dry.err && <ErrorBox error={dry.err} />}
+      {dry.resp && <DryRunResult resp={dry.resp} />}
+      <section className="bmo-card">
+        <h5 className="bmo-h">알림 이력 — 이 노드 + 엣지 봉투(최근) <span className="bmo-sub">추적 중 {unitText(resp.status?.tracked, '건')} · 집중 진행 {resp.status?.focusActive ?? '—'} · 대기 {resp.status?.focusQueued ?? '—'} · 슬롯 {resp.status?.slots?.used ?? '—'}/{resp.status?.slots?.capacity ?? '—'}</span></h5>
+        <LastCycleLine last={resp.status?.last} />
+        {!(resp.sent || []).length ? <p className="bmo-note">보낸 기록이 없습니다.</p> : (
+          <STable minWidth={860} limit={100} className="bmo-t" style={{ fontSize: 12 }}>
+            <thead><tr><th>시각</th><th>규칙</th><th>서버</th><th>법인</th><th>제목</th><th>결과</th><th>이슈</th><th>자동 집중</th></tr></thead>
+            <tbody>
+              {resp.sent.map((x) => (
+                <tr key={`${x.agent}|${x.id}`}>
+                  <td data-sort={x.at}>{shortStamp(x.at)}</td>
+                  <td data-sort={x.rule}>{RULE_TEXT[x.rule]?.label || x.rule}</td>
+                  <td data-sort={x.name}>{x.name}{x.via === 'edge' ? <span className="bmo-sub"> · 엣지 {x.agent}</span> : null}</td>
+                  <td data-sort={x.vcenterId}>{vcName(x.vcenterId) || '—'}</td>
+                  <td data-sort={x.title} className="bmo-wrap">{x.title}</td>
+                  <td data-sort={x.result}>{sentResultText(x.result)}{(x.channels || []).length ? <span className="bmo-sub"> · {(x.channels || []).map((c) => CHANNEL_TEXT[c] || c).join(' · ')}</span> : null}</td>
+                  <td data-sort={x.issue || ''}>{issueResultText(x.issue)}</td>
+                  <td data-sort={x.autoFocus || ''}>{autoFocusText(x.autoFocus)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </STable>
+        )}
+      </section>
+      <p className="bmo-note bmo-card bmo-honest">{RULES_HONEST}</p>
+    </div>
+  );
+}

@@ -31,6 +31,7 @@ import {
   CHART_MODES, seriesGeometryBps, chartCutNote, faultKindLabel, faultRowView, faultEventText, faultKpi, faultScanNote, FAULT_INTRO,
   sampleRows, SAMPLE_NOTE, PREVIEW_NOTE, previewSummary, previewColumns, sampleBadge, SYS_HIGH_PCT,
   eventDeviceRefs, eventDeviceSort,
+  epSummaryText,   // v2.940 위치 조회 주기 요약
 } from './cvpText.js';
 import Select from '../../components/Select.jsx';
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
@@ -300,8 +301,8 @@ export default function CvpTool() {
         {servers.length === 0 ? (
           <div style={{ ...NOTE, marginTop: 8 }}>등록된 CVP 서버가 없습니다. {isAdmin ? '아래 ‘등록·설정’ 에서 추가하세요.' : ''}</div>
         ) : (
-          <STable minWidth={760} style={{ marginTop: 8 }}>
-            <thead><tr><th>이름</th><th>주소</th><th>수집 위치</th><th>인증</th><th>상태</th><th>장비</th><th>수집 시각</th><th>읽은 경로</th></tr></thead>
+          <STable minWidth={920} style={{ marginTop: 8 }}>
+            <thead><tr><th>이름</th><th>주소</th><th>수집 위치</th><th>인증</th><th>상태</th><th>장비</th><th>수집 시각</th><th>읽은 경로</th><th>위치 조회(주기)</th></tr></thead>
             <tbody>
               {servers.map((s) => {
                 const st = s.status || {};
@@ -321,6 +322,10 @@ export default function CvpTool() {
                       {used.length ? `${used.length}개 항목` : '—'}{miss.length ? ` · 미확인 ${miss.length}` : ''}
                       {st.cvpVersion ? <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>CVP {st.cvpVersion}</div> : null}
                     </td>
+                    {(() => { const e = epSummaryText(st.endpoints); return (
+                      <td style={{ fontSize: 12, whiteSpace: 'normal', minWidth: 160, color: e.warn ? 'var(--amber)' : undefined }} title={e.title} data-sort={st.endpoints?.asked ?? undefined}>
+                        {e.text}{st.endpoints?.at ? <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{agoText(st.endpoints.at)}</div> : null}
+                      </td>); })()}
                   </tr>
                 );
               })}
@@ -459,8 +464,8 @@ function DeviceModal({ target, onClose, onIntf }) {
                 <span>포트 이름을 누르면 사용률 추이를 봅니다. 사용률은 인터페이스 속도를 알 때만 방향별로 계산합니다. 설명은 부품 주기(기본 30분)마다 읽습니다.</span>
                 {onIntf && <button type="button" className="btn" style={{ padding: '2px 8px' }} onClick={() => onIntf(`${target.cvpId}|${target.key}`)}>인터페이스 세부 정보로 보기</button>}
               </div>
-              <STable minWidth={980} limit={1024}>
-                <thead><tr><th>포트</th><th>설명</th><th>속도</th><th>상태</th><th>관리</th><th>VLAN</th><th>LAG</th><th>수신</th><th>송신</th><th>수신 %</th><th>송신 %</th><th>오류(수/송)</th></tr></thead>
+              <STable minWidth={1060} limit={1024}>
+                <thead><tr><th>포트</th><th>설명</th><th>속도</th><th>상태</th><th>관리</th><th>VLAN</th><th>LAG</th><th>수신</th><th>송신</th><th>수신 %</th><th>송신 %</th><th>오류(수/송)</th><th title="스위치 discards 직전 주기 델타 — 텔레메트리 필드 이름은 실장비 미확인 추정">드롭(수/송)</th></tr></thead>
                 <tbody>
                   {ports.filter((p) => p && typeof p === 'object').slice().sort(byIntfName).map((p) => (
                     <tr key={p.name}>
@@ -477,6 +482,7 @@ function DeviceModal({ target, onClose, onIntf }) {
                       <td data-sort={p.inUtil ?? ''}>{pctText(p.inUtil)}</td>
                       <td data-sort={p.outUtil ?? ''}>{pctText(p.outUtil)}</td>
                       <td>{countText(p.inErr)} / {countText(p.outErr)}</td>
+                      <td data-sort={p.inDrop == null && p.outDrop == null ? '' : (p.inDrop ?? 0) + (p.outDrop ?? 0)}>{countText(p.inDrop)} / {countText(p.outDrop)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -754,8 +760,8 @@ function PortUsageCard({ servers, onOpen }) {
           {ports.length === 0 ? (
             <div style={{ ...NOTE, marginTop: 8 }}>{minUtil > 0 ? `사용률 ${minUtil}% 이상인 포트가 없습니다(사용률을 계산한 포트 기준).` : '사용률을 계산한 포트가 아직 없습니다 — 처리량은 두 번째 수집 주기부터 나오고, 포트 카운터를 읽지 못하면 계산하지 않습니다.'}</div>
           ) : (
-            <STable minWidth={900} style={{ marginTop: 8 }}>
-              <thead><tr><th>장비</th><th>포트</th><th>설명</th><th>속도</th><th>사용률(최대)</th><th>수신</th><th>송신</th><th>오류(수/송)</th><th>CVP</th><th>측정</th></tr></thead>
+            <STable minWidth={980} style={{ marginTop: 8 }}>
+              <thead><tr><th>장비</th><th>포트</th><th>설명</th><th>속도</th><th>사용률(최대)</th><th>수신</th><th>송신</th><th>오류(수/송)</th><th title="스위치 discards 직전 주기 델타 — 텔레메트리 필드 이름은 실장비 미확인 추정">드롭(수/송)</th><th>CVP</th><th>측정</th></tr></thead>
               <tbody>
                 {ports.map((p) => (
                   <tr key={`${p.agent}|${p.cvpId}|${p.key}|${p.port}`}>
@@ -767,6 +773,7 @@ function PortUsageCard({ servers, onOpen }) {
                     <td data-sort={p.inBps ?? ''} style={{ fontSize: 12 }}>{rateText(p.inBps, p.inUtil)}</td>
                     <td data-sort={p.outBps ?? ''} style={{ fontSize: 12 }}>{rateText(p.outBps, p.outUtil)}</td>
                     <td style={{ fontSize: 12 }}>{countText(p.inErr)} / {countText(p.outErr)}</td>
+                    <td style={{ fontSize: 12 }} data-sort={p.inDrop == null && p.outDrop == null ? '' : (p.inDrop ?? 0) + (p.outDrop ?? 0)}>{countText(p.inDrop)} / {countText(p.outDrop)}</td>
                     <td style={{ fontSize: 12 }}>{p.cvpName || p.cvpId}</td>
                     <td style={{ fontSize: 12 }} data-sort={p.rateAt || 0}>{agoText(p.rateAt)}</td>
                   </tr>
@@ -1217,6 +1224,8 @@ function AdminPanel({ onChanged }) {
           <label style={LBL} title="링크가 올라온 포트의 수신 광량이 이 값 이하이면 장애로 판정합니다">광신호 장애(dBm 이하)<input className="input" inputMode="decimal" value={sform.xcvrRxFaultDbm} onChange={sset('xcvrRxFaultDbm')} /></label>
           <label style={{ ...LBL, alignContent: 'end' }} title="부품 장애·포트 down·BGP down 전이가 생길 때 알림 채널(설정 › 알림)로 보냅니다. 전이 기록은 이 값과 무관하게 남습니다."><span><input type="checkbox" checked={!!sform.faultAlerts} onChange={sset('faultAlerts')} /> 장애 전이 알림</span></label>
           <label style={{ ...LBL, alignContent: 'end' }}><span><input type="checkbox" checked={sform.faultAlertsClosed !== false} onChange={sset('faultAlertsClosed')} disabled={!sform.faultAlerts} /> 해소도 알림</span></label>
+          <label style={{ ...LBL, alignContent: 'end' }} title="부품 주기(30분)마다 호스트 NIC · 최근 이동 VM · 나머지 VM MAC 을 CVP EndpointLocation 에 묻습니다(CVP 2021.1 이상). 끄면 화면의 ‘지금 조회’ 버튼만 남습니다."><span><input type="checkbox" checked={sform.endpointScan !== false} onChange={sset('endpointScan')} /> 위치(EndpointLocation) 주기 조회</span></label>
+          <label style={LBL} title="CVP 서버 하나에 한 주기 동안 묻는 MAC 수 — 요청 1회 = MAC 1개, 나머지는 다음 주기">위치 조회 상한(주기당 MAC)<input className="input" inputMode="numeric" value={sform.endpointPerCycle} onChange={sset('endpointPerCycle')} disabled={sform.endpointScan === false} /></label>
         </div>
         <div style={{ ...ROW, marginTop: 6 }}>
           <button type="button" className="btn" onClick={saveSettings} disabled={busy}>설정 저장</button>

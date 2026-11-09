@@ -2,7 +2,8 @@
 import { requirePerm, requireRole } from '../../auth/auth.js';
 import { userHasPermission } from '../../auth/permissions.js'; // v2.583: /top 의 inv.* 집행
 import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
-import { store, usageReadable, dsUsageReadable, dsUsedOf, dsUsageUnknownOf, hostCapacityKnown } from '../../store.js'; // v2.771(R6-F3-2) 용량 판정도 store 하나
+import { store, usageReadable, dsUsageReadable, dsUsedOf, dsUsageUnknownOf, hostCapacityKnown, siteInventoryStale } from '../../store.js'; // v2.771(R6-F3-2) 용량 판정도 store 하나 · v2.915 낡은 값 판정
+import { platformSummaryOf } from '../../inventory/platformSummary.js'; // v2.915 가상화 플랫폼 허브
 import { numOrNull } from '../../util/numOrNull.js';
 import { clusterCountOf } from '../../clustercfg/analyze.js'; // v2.743 LEFT-07 — 클러스터 개수(묶음 키)
 const pctOrNullR = (u, t) => (t > 0 ? Math.round((u / t) * 100) : null);
@@ -503,6 +504,30 @@ api.get('/vms/lookup', invVms, (req, res) => {
     vm = vms.find((v) => (v.name || '').toLowerCase() === n) || vms.find((v) => (v.name || '').toLowerCase().includes(n));
   }
   res.json({ vm: vm || null });
+});
+
+// v2.915 '서버 › 가상화 플랫폼' 허브(설계 docs/design/virt-platform-menu) — 엔티티 탭 배지 · 바로가기 칩 숫자를 한 응답으로(inventory/platformSummary.js).
+//   범위(scope)가 먼저이고 요청 region · vcenterId 는 그 안에서 좁힐 뿐이다. 호스트 · VM 칸은 그 권한(inv.hosts · inv.vms)이 있을 때만 싣는다(없으면 null — 화면은 '—').
+//   캐시 키에 범위 · 두 권한 · VM 구성 점검 설정 개정(신호 판정)을 넣는다. 30초 — 탭 배지를 위해 무거운 집계를 15초마다 다시 돌리지 않는다.
+api.get('/platform/summary', (req, res) => {
+  const sig = vmSignalCtx();
+  const canHosts = userHasPermission(req.user, 'inv.hosts');
+  const canVms = userHasPermission(req.user, 'inv.vms');
+  return memoJson(req, res, 'platform:summary', (snap) => {
+    const allowed = scopedVcenterIds(req.user, snap);
+    const vcId = typeof req.query.vcenterId === 'string' && req.query.vcenterId ? req.query.vcenterId : null;
+    const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
+    // 법인 줄은 /vcenters 와 같은 롤업 사이트(metrics — 알람 수 · 상태 · 낡은 값)에서 — 없으면(첫 병합 전) 등록 목록
+    const vcenters = (Array.isArray(snap.rollups?.sites) && snap.rollups.sites.length ? snap.rollups.sites : (snap.vcenters || []))
+      .filter((v) => !allowed || allowed.has(v.id))
+      .filter((v) => !vcId || v.id === vcId)
+      .filter((v) => !region || v.location?.region === region);
+    const ids = new Set(vcenters.map((v) => v.id));
+    const hosts = canHosts ? (snap.hosts || []).filter((h) => ids.has(h.vcenterId)) : null;
+    const vms = canVms ? (snap.vms || []).filter((v) => ids.has(v.vcenterId)) : null;
+    const r = platformSummaryOf({ vcenters, hosts, vms, ctx: sig.ctx, readable: usageReadable, staleOf: siteInventoryStale });
+    return { ok: true, ...r, generatedAt: snap.generatedAt ?? null, initial: snap.initial === true, snapAgeDays: sig.ctx?.hygiene?.snapAgeDays ?? null };
+  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|h${sig.rev}|p${canHosts ? 1 : 0}${canVms ? 1 : 0}` });
 });
 
 api.get('/datastores', invDs, (req, res) => memoJson(req, res, 'inv:datastores', (snap) => {

@@ -2,7 +2,7 @@
 
 > 루트 `CLAUDE.md` 에서 옮긴 기록(2026-10-20, v2.746 시점). 문구는 원문 그대로이고 목록 들여쓰기만 한 단계 줄였다. "되돌리지 말 것" 규칙은 그대로 유효하다 — 이 영역 코드를 고치기 전에 이 파일을 읽을 것. 새 교훈은 테스트 → 이 파일 순으로 남기고 루트 CLAUDE.md 에는 쌓지 않는다.
 
-**언제 읽나**: server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san*
+**언제 읽나**: server/src/sanswitch/ · server/src/routes/api/{sanSwitch,sanStorage}.js · web/src/views/tools/SanSwitch*·SanStorage*·san*
 
 ## 목차
 
@@ -22,6 +22,10 @@
 - (원래 2797행) 점검 이력은 '수집 1회 = 기록 1회' 다
 - (원래 2809행) '전체 수집' 은 무엇을 했는지 나눠 말한다
 - (v2.748) 포트 사용량·포트 배치 탭 — 기간은 경계로 자르고, 빈 칸·부분 합·미래 칸을 값으로 만들지 않는다
+- (v2.948) SAN 스토리지 성능 — 독립 도구 · 디렉터 해석은 이름 규칙만 · 지금 = 팹 A/B 다 모인 마지막 칸 · 점검 unknown 흡수 금지 · 임계값은 벤더 문서 값만
+- (v2.952) 어레이 측 성능 ⓑ — 노드 부하 5분 표본 재사용(hbps · queue · node_unit) · 시리얼 짝 · 이름 정규화 대조 · 부분 합 금지 · 조닝 별칭 폴백 · ISL 단서는 문구만
+- (v2.920) 호스트 ↔ SAN 조닝·트래픽 귀속 — 판정 코어는 `attribution.js` 하나, 확정분과 추정분을 합치지 않는다
+- (v2.935) 귀속 실측 우선(ESXi 경로 비율 → IPF → 포트 비율) · Flow Vision 플로우 모니터(san-flow) — 스위치 설정을 바꾸는 명령은 서버만 만든다
 
 ## 본문
 
@@ -122,7 +126,7 @@
 - **'사용량이 왜 비어 있나' 는 판정해서 말한다 — 한 문구로 덮지 말 것**(`sanswitch/perfDiag.js` +
   웹 `views/tools/sanPerfDiagText.js`, v2.517 — 사용자 신고 "데이터 수집이 안되, edge 의 사용량도
   분석하게 해줘"):
-  - v2.516 까지 포트 사용량 패널의 빈 상태는 **무조건** "설정 › 수집 › SAN 스위치 포트 사용량
+  - v2.516 까지 포트 사용량 패널의 빈 상태는 **무조건** "설정 › 수집 주기·임계 › SAN 스위치 포트 사용량
     에서 수집을 켜면 쌓기 시작합니다" 였다. 그 한 문구가 **행동이 정반대인 상황들**을 덮었다 —
     꺼짐(켜면 된다) / 첫 주기(**기다리면** 된다) / REST 장비(portperfshow 를 쓰지 않아 **켜도·
     기다려도 영원히** 안 쌓인다) / 명령 부재·제한 셸(**기다려도 안 된다**) / 엣지 미보고(엣지
@@ -297,3 +301,101 @@
     연결 테스트는 처리량 기준값을 건드리지 않는다(`noRates`) · 비밀번호 승계는 `sanAccessMoved` 하나(saveDevice 와 공유) · 주기 수집은 진행 중 장비를 건너뛰고 `inFlightSkipped` 로 센다.
   · v2.771(점검 R6-F1): 축약은 상한을 넘을 때 **심각도 순으로 고르고**(faulty > 링크 에러 > rx ≤ -12 > disabled > disc_c3·rx 주의) 반환은 포트 순 — 포트 번호 순 slice 는 뒤 번호 장애 포트를 잘랐다.
     중앙 ports 항목은 `portsOmitted>0` 이면 엣지 전체 집계 `ports.faulty` 를 본다. 리셋은 **포트 단위**(한 키라도 cur<base 면 그 포트의 축약 아닌 키 전부 하한 = cur, held='reset').
+- **호스트 ↔ SAN 조닝·트래픽 귀속(v2.920 — 설계 `docs/design/san-cvp-traffic/README.md`, 기본값 A 단계)** — 판정 코어는 `sanswitch/attribution.js`(순수) 하나
+  (`buildFabrics` → `attributeHost`/`attributeFleet`), 기간 바이트는 `perfDb.portBytesMulti`(heavyQuery — 기억·합류·감시 · 데모는 `demoPortSeries` 수식),
+  라우트 `routes/api/hostSan.js`(`GET /hosts/:id/san-attribution` · `GET /tools/sanswitch/attribution`), 화면 `HostSanSection.jsx`·`hostSanText.js` ·
+  `SanHostAttrib.jsx`·`sanHostAttribText.js`. 회귀 `server/test/sanAttrib2920.test.js` · 웹 `hostSanText.test.js`·`sanHostAttribText.test.js`.
+  - **신뢰도는 조닝 그림의 ●/◐ 와 한 식구다**: ● 확정 = 그 HBA 포트가 닿을 수 있는 스토리지가 **하나**이고 타깃 역할이 **네임서버 확정**(nsRoles) — 포트 카운터 전부가
+    그 스토리지. 멀티패스 경로별 타깃 WWN(`hcfg.mp.targets`, 같은 SOAP 경로 `config.storageDevice.multipathInfo` 에서 `parseMultipath` 가 어댑터별로 센다 — 새 vCenter 호출 없음)이
+    있으면 '살아 있는 경로의 타깃' 으로 후보를 좁힌다(조닝 2개 → 실제 1개면 확정). ◐ 추정 = 후보 2개 이상을 **같은 스위치의 타깃 포트 바이트 비율**로 나눈다(IPF 보정은
+    다음 단계) · nsRoles 가 빈 패브릭은 후보가 하나여도 추정(없는 근거를 만들지 않는다). 분배 불가 = 타깃 포트 바이트가 없어 못 나눔(호스트 합에는 들어가고 스토리지에는
+    주지 않는다). 조닝만 = zone 멤버인데 어느 스위치에도 로그인 없음(통계 밖 · 정리 후보 표). 미확인 = 어느 스냅샷에도 없는 WWN.
+  - **확정분과 추정분을 한 숫자로 합치지 않는다**(부분 합 규약) — 표·KPI 는 두 열이고 '합(참고)' 은 정렬용이라고 말한다. 측정 없음은 **0 이 아니라 null('—')**:
+    표본 없는 포트는 `portBytesMulti` 의 Map 에 아예 없고, 엔진은 `measured:false` + `unmeasuredPorts` 로 센다. 호스트 합계는 HBA 포트 카운터 그대로(귀속과 무관).
+  - 기간 바이트는 portperfshow 합산값이라 **방향이 없다**(읽기+쓰기 합) — 화면이 그렇게 적는다. 방향은 '지금' 값(스냅샷 델타 `inBps/outBps`)만: 호스트 F_Port 의
+    스위치 Tx(`outBps`) = 읽기 · Rx(`inBps`) = 쓰기. '버킷 평균 × 폭' 은 어림(≈)이고 가장자리 버킷은 구간 안쪽 폭만 센다.
+  - 스토리지 신원은 타깃 포트 `attachedName` → `storageKey` → `arraySerialOf` → 등록 스토리지 시리얼 일치(storage-summary 와 같은 판정 — 순수 함수는 v2.920 에
+    `sanswitch/endpointKey.js` 로 옮기고 perfDb 가 다시 내보낸다). 평평한 이름(`::` 없음)은 포트마다 다른 키가 되어 한 어레이가 여러 행이 될 수 있다 — 화면이
+    '어레이 미확인' 으로 말한다(억지로 합치지 않는다).
+  - 범위: 호스트 단건 라우트는 `inv.hosts` + `tools` + 도구 키 `san-switch`(`issueFor`) + 범위 밖 404 이고, **범위 계정은 그 호스트 법인(`datacenterOfVcenter`)의 스위치·스토리지만**
+    본다(법인 미지정 장비·법인 없는 vCenter 는 아무것도 — 'vCenter 귀속 없는 데이터 미노출'). 함대 라우트는 형제처럼 `fullScopeOnly`. 응답에 관리 주소를 싣지 않는다.
+  - 시안의 '보기 세그먼트' 는 실제 화면에 없어(912행 세그먼트는 장비 상세 안의 것) **헤더 버튼 + 모달**(전체 점검·사용량 분석과 같은 틀)로 넣었다 — 법인 칩 선택을 범위로 쓴다.
+
+- **호스트 귀속 실측 우선 · Flow Vision 플로우 모니터(v2.935 — 설계 `docs/design/san-cvp-traffic/README.md` §9·§10, 회귀 `test/sanStorPath2935.test.js` · `sanFlow2935.test.js`)**
+  - 분배 우선순위는 `attribution.js attributeHost` 하나 — ESXi 경로 실측 비율(`measured`) → IPF(`ipf.js` — 패브릭을 조닝 서명으로 묶어 코어-엣지도 한 문제) → 타깃 포트 비율.
+    실측 비율은 **비율만** 쓰고 양은 스위치 포트 바이트(정확)에 곱한다. 확정분 · 실측 비율분 · 추정분은 따로 센다(합쳐 ‘확정’ 이라 부르지 않는다).
+  - Flow Vision(`flowCmd.js` · `flowJobs.js` · `routes/api/sanFlow.js`): **스위치 설정을 바꾼다** — 라우트 전부 tools + admin + 전체 범위, 만들기 · 지우기는 OTP 재인증(`reauth`) + 감사.
+    명령은 `buildFlowCommands` 만 만들고(이름 `dvc_` 고정 · 포트 · WWN 화이트리스트 — 선행 `-` · 공백 · 대문자 거부), 엣지는 중앙이 보낸 **정의**를 다시 검사해 직접 만든다(명령 글자를 받지 않는다).
+    포트 · 타깃은 화면 값을 믿지 않고 `planCreate` 가 귀속 엔진으로 다시 판정한다(미리보기도 같은 함수 — 판정 코어 하나). 지우기는 포탈 기록에 있는 `dvc_` 만.
+    엣지 위임은 testRuns 와 같은 틀(큐 → `sanswitch-config` 의 `flowNow` → `sanswitch-flow-result`, 대상 엣지만 회신 · 회신은 그 작업이 실행했어야 하는 명령 출력만 · 상한).
+    세션 시한 4분(`flowSessionMs` — 회신 시한 5분 안). 카운터를 못 읽으면 0 이 아니라 사유. `san-flows.json` 은 혼합 상태 파일(카운터 · 점검 결과는 지문에서 뺀다).
+  - ⚠ 문법 · 출력 · 상한은 FOS 8.0.1 명령 참조 기준 — 실장비 미확인. 데모(`mock-san-`)는 접속하지 않고 ESXi 데모 실측 ±3% 의 가상 카운터를 만든다.
+  - **반증 1인 확정분(v2.935 — `test/sanFlow2935.test.js` ①~⑦ · 변이 5)**: 이름은 `dvc_` + 호스트 앞 7자 + 해시 5자 + 차례 = **19자 이하 · 소문자**(FOS 20자 — 문서 검색 요약 기준 추정) ·
+    카운터 주기는 **꺼짐 · 인증 실패 정지**(이 노드 `sanAuthGuard` + 엣지 스냅샷 `extra.authStopped`)를 건너뛰고 인증 실패는 정지 기록에 남긴다(폴러와 같은 기록 — 계정 잠금 방지) ·
+    live 모드 데모 장비 접속 금지 · 만들기는 실행 전에 기록을 `pending` 으로 먼저 쓰고, 결과를 모르면 `unknown`(failed 로 단정하지 않음) · 시한 뒤 늦은 회신도 반영 ·
+    엣지는 `ttlMs` 가 지난 작업을 실행하지 않는다 · 권한 점검이 찾은 '포탈 기록 없는 dvc_' 는 보여 주고 지울 수 있다 · `exists` 는 show 에 초기자 · 타깃이 보일 때만 활성(아니면 `conflict`) ·
+    못 읽은 카운터는 성공 시각을 움직이지 않는다 · 주기 작업은 사용자 작업 상한과 따로(64) · 오래된 것부터 · 건너뛴 사유를 남긴다 · 엣지 버전 2.935.0 미만이면 위임하지 않는다 ·
+    권한 점검 통과를 서버가 강제 · 상한 = 점검 때 장비 개수 + 그 뒤 만든 것 · 작업 사유의 관리 주소 가림 · 출력 분류는 표 줄 · 이름 낱말을 빼고 본다 · 미리보기는 감사 제외.
+  - **SAN 스위치 쓰기 라우트 13개 + san-flow 는 조회 · 쓰기 모두 전체 범위**(`routes/admin/shared.js fullReadWriteScopeOnlyWith` — `isFullReadWriteScope`, v2.904 규칙). 예전 `fullScopeOnly` 는
+    조회 범위만 봐서 writeVcenters 로 쓰기만 줄인 admin 이 스위치 등록 · 수집 · 설정 변경을 할 수 있었다(반증 L-1). 조회 라우트는 그대로 `fullScopeOnly`.
+  - **v2.940 남긴 것(회귀 `test/sanCvpRest2940.test.js` ③④⑤)**: 플로우 **비활성화 · 다시 켜기**(`flow --deactivate|--activate <name> -feature monitor` — 문서 기준 추정 · OTP · 상태 `inactive`
+    · 속도는 비움(0 아님) · 주기 카운터 제외 · 다시 켜면 델타 기준을 새로 잡는다 · 엣지 2.940.0 미만이면 위임 거부) · 장비에서 직접 끄고 켠 것은 show 의 활성 여부를 읽었을 때만 따라간다.
+    속도 계산은 `sanswitch/flowView.js` 하나(SAN 플로우 모니터 · 호스트 상세 · 귀속 표가 같은 값) — 호스트 상세 경로 표 '스위치 플로우 읽기 / 쓰기' 열 · 귀속 표 '● 실측(스위치 플로우)' 열은
+    분배 값(확정 · 실측 비율 · 추정)과 **섞지 않고 나란히** 보여 준다(시안 C-② — 하나를 고르지 않는다). 보이는 스위치(fabrics — 범위 법인)의 플로우만 싣는다.
+    못 읽은 `flow --show` 출력은 앞부분 400자를 기록(`rawSample`)에 남기고 화면은 관리 주소를 가린다(백업 지문에서는 실행 값).
+    반증 확정분(같은 회귀 파일 '③ 반증 확정분' 3건 · 변이 9/9): ⓐ 속도는 **활성이고 최근(카운터 주기 2배 — `staleMsOf`) 읽은 것만** — 장비에 없음 · 이름 충돌 · 결과 모름 ·
+    오래됨은 옛 델타를 '지금' 으로 말하지 않고 비운다(오래됨은 `stale` 로 따로 세고 귀속 표 합에 넣지 않는다) ⓑ 활성이 아니던 기록이 켜짐을 읽으면(포탈 · 장비 · 결과 모름) 기준을 새로 잡는다
+    — 판정 코어 `markActivated` 하나 ⓒ 늦은 회신은 그 뒤에 시작한 작업이 반영됐으면 상태를 바꾸지 않는다(`lastJobAt`) ⓓ 끄기 · 켜기를 보냈는데 결과를 모르면 '결과 모름'
+    ⓔ 화면 가림이 WWN(콜론 8묶음)을 IPv6 로 읽어 지우던 것 — `maskKeepWwn` ⓕ 사전 확인(`togglePrecheck` — 상태 · 엣지 버전)을 OTP 재인증 **앞에** 둔다(거부할 요청이 OTP 를 쓰지 않게) ·
+    GET 이 `toggleIssue` 를 내려 화면이 버튼을 미리 잠근다. 라우트를 반복문 템플릿 경로로 선언하면 API 문서 생성기가 읽지 못한다(이번에 두 라우트가 문서에서 빠졌다) — 따로 선언할 것.
+
+- **v2.948 — SAN 스토리지 성능(독립 도구 `san-storage` · 설계 `docs/design/san-storage-perf` · 사용자 결정 2026-11-08: 독립 도구 · 독립 메뉴 · 기존 메뉴 보존 · 캡처 전 선착수 · 1년 · 표준 검증 · 팔레트 토큰)**
+  (`sanswitch/{directorOf,directorMap,storageCheckSettings,storageList,storagePerfCheck}.js` · `routes/api/sanStorage.js` · 웹 `views/tools/SanStorage*.jsx`·`sanStorageText.js`·`sanStorage.css` · 회귀 `test/sanStorage2948*.test.js` · 웹 `sanStorageText.test.js`):
+  · **디렉터 · 컨트롤러는 스위치 네임서버가 받은 포트 심볼릭 이름의 셋째 조각에서 읽는다**(`directorOf` — PowerMax `FA-1D 4`·`SAF-1d 4`·`FA-7E:0`·`OR-1C 1` / PowerStore `NodeA FC0` / Unity `SPA FC0`). 벤더별 아는 패턴만 읽고 안 맞으면
+    `group: null`('(구분 못 함)') — **평평한 이름을 억지로 나누지 않는다**. PowerStore · Unity 꼴은 목 서버 형식이라 실장비 미확인(캡처 가이드 `CAPTURE-GUIDE.md`). 확신 등급 manual > name > alias > none 을 화면이 배지로 구분한다.
+  · **'지금' 은 수집 주기 안에서 팹 A/B 표본이 다 모인 마지막 칸**(`storageList.nowOf` — 마지막 값이 carryMs + 칸 폭보다 오래됐으면 null + `stale`). 지금이 없으면 회선 사용률도 null(0 아님). 24시간 창은 열린 시작(1시간 칸 24개) ·
+    7일 대비는 비교 구간 값이 `MIN_PREV_HOURS`(6) 미만이면 null 이고 `prevHours` 로 사유를 센다. 회선 사용률 분모는 포트 사용량 탭과 같은 `capBpsOf`(속도 모르는 포트는 빼고 개수).
+  · **현황의 '지금 합계' 는 트래픽 카드와 같은 함수**(`trafficTotal.sumArrayTraffic` · 1시간 창 60초 칸)로 낸다 — 테스트가 `/tools/san-storage` 와 `/tools/sanswitch/perf/traffic-total?hours=1` 을 대조한다. 행별 '지금' 은 따로(마지막 칸 시각이 어레이마다 다르다).
+  · `storageSeriesMulti({ withPorts:true })` 는 포트별 시계열(`portsDetail` — 자기 표본이 있는 칸만 값 · 이월하지 않는다)을 싣고 기억 키에 withPorts 가 들어간다. **데모 수식은 어레이 합 = 포트별 시계열의 합**(withPorts 유무로 숫자가 달라지면 KPI 대조가 깨진다).
+  · **점검(`storagePerfCheck`)은 월간 점검 틀 그대로** — ok/warn/bad/**unknown**/na · unknown 을 ok 로 흡수하지 않는다('정상(일부 미확인)'). 어레이 측 5항목(busy · 응답 · 큐 · CPU · 보고 대조)은 수집기가 생기기 전까지 unknown('어레이 측 성능 미수집') —
+    거짓 정상 금지. 임계값(`storageCheckSettings`)은 **벤더 문서에서 찾은 값만 기본값**(PowerMax busy 이상 70 · 큐 75 — Unisphere 10.0 건강 점수 기본 · Unity SP CPU 70/90 — BP 가이드 · PowerStore 노드 CPU 50/70 — KB 000192018 간접 · 회선 포화 70 — Brocade MAPS TX 70 / 90 제안)이고
+    응답 시간은 **비움**(판정 안 함 — 공식 기준 못 찾음). null 은 '비움', 빈 값은 '기본값' — 둘의 뜻이 다르다(라우트 주석). 편중 상수는 `portUsage.IMBALANCE_*` 를 그대로(24시간 평균으로 판정 · 2배는 이상).
+  · 관리자 재정의(`directorMap` — 분류 array/host · 포트→디렉터)는 **표시에만** 영향(표본 · 판정 데이터 불변) · 전체 교체 · 그룹 이름 `GROUP_RE` · 바뀐 항목만 변경자/시각 · 이름이 바뀐 포트는 자동으로 지우지 않고 표지. 저장은 admin + `fullRwOnly` + 감사 로그.
+  · 게이트는 형제 sanswitch 와 같다 — 조회 `toolsPerm + fullScopeOnly`(SAN 은 vCenter 범위 밖) · 쓰기 `adminOnly + fullRwOnly` · CSV `csvPerm + adminOnly` · 비-admin 은 주소 가림. 도구 키는 **세그먼트 = 키**(`san-storage`) · 카탈로그 adminOnly 는 san-switch 와 같이 true.
+  · 기존 SAN 스위치 화면의 '스토리지 사용량 분석' 모달 · 트래픽 카드 · 메뉴 항목은 **보존**(사용자 결정)하고 새 화면 링크만 더했다 — 둘 다 같은 서버 집계를 읽는다(화면이 둘, 판정 코어는 하나).
+  · 남긴 것: 어레이 측 수집(PR ⓑ) · 구간 슬라이더/날짜 이동 · 점검 PDF/이력 · 별칭 전달(실 Unity 캡처 뒤) — `docs/design/san-storage-perf/README.md` §8.
+- **v2.952 — 어레이 측 성능 ⓑ + 후속(C · D · H · I · L · B — 설계 README §8.2 · 사용자 '남긴것들 만들어줘' 2026-11-09)**
+  · **새 DB 금지 — 노드 부하 5분 표본 경로 재사용**: 지표 열은 `storage/nodeLoad.js NODE_LOAD_METRICS` 가 유일한 원천이고 `storage/db.js` 의 원시 INSERT · 일/시간 upsert 문장은 거기서 **생성**한다(열을
+    더할 때 세 문장을 손으로 맞추지 않는다 · 없는 열은 `ensureColumns` 로). 단위 이름은 `node_unit`(id = `unitIdOf(name)` — 구분자 · 대소문자 무시 FNV) — 엣지 · 중앙 · 데모가 같은 함수.
+  · 수집(`storage/collectors/arrayPerf.js`)은 **순수 파서 + probe** — 응답 필드는 문서 추정(실장비 미확인)이라 못 읽은 값은 null 이고 `probe.fields · errors · counterNote` 가 말한다. 조회 전용 POST 만 ·
+    401 은 즉시 던져 authGuard 가 멈춘다 · 단위 64 상한(부모 먼저 · 포트는 남는 자리) · Unity 누적 카운터는 최신 두 항목 델타(하나면 null · 줄면 리셋 → null).
+  · SAN 쪽은 **시리얼로만 짝**(`capacityIndexFor`) · 단위 ↔ SAN 묶음은 `unitMatchKey` 정규화 비교(억지로 합치지 않는다 — `unmatchedGroups` 로 밝힌다) · 합(iops · hbps)은 부모 단위를 **전부** 읽었을 때만
+    (`summarizeLatest partial`) · 최신값은 null 표본이 덮지 않는다 · 주기 ×3 이면 오래됨(요약에서 뺀다) · 보고 대조는 스위치 0.5Gb/s 미만이면 null.
+  · 점검(`storagePerfCheck.checkArray`)의 어레이 측 unknown 문구는 **사유**다 — `arraySideText`(짝 없음 · SSH 수집 · 토글 꺼짐 · 표본 없음 · 오래됨) 또는 '값 없음 — 이 지표가 없음'. 거짓 정상 금지는 그대로.
+  · (C) 조닝 별칭 폴백은 `directorResolver(map, aliasFor)` — port_meta WWN → 장비별 최신 스냅샷 `zoning.zones[].aliasOf`(`attribution.buildFabrics`). 별칭은 **셋째 조각을 못 읽는 포트**에만 뜻이 있다(어레이 키는
+    여전히 심볼릭 이름 `storageKey`) · (H) ISL 단서(`islClue.js`)는 E-포트 24시간 피크 포화도를 **문구에만** 붙인다(판정 불변 · 속도 모르면 null) · (I) 알람 수는 스냅샷 `alerts.unresolved`(못 읽으면 null).
+  · 시험 `test/sanStorage2952.test.js`(파서 픽스처 · nodeLoad 확장 · arraySide 순수 · db · 중앙 수신 units · 점검 사유 · 실제 라우트 + 별칭 폴백 + ISL) · 웹 `sanStorage2952.test.js`(문구 · 선 차트 · 소스 규약).
+  · 남긴 것: 어레이 측 **실장비 캡처 확인**(PowerStore cpu_utilization · Unity 이력 수집 켜짐) · PowerMax 포트 단위(FEPort 경로 미사용) · 장비 CSV 가져오기의 `nodeLoadEnabled` 칸(아이실론 때부터 없음).
+- **v2.953 — SAN 스토리지 성능 2차: 알림 · 자기 기준선 · 월간 보고서(HTML) · 공개 API · 용량 × 성능**(설계 README §8.3)
+  · 알림(`storagePerfNotifyStore.js` 순수 + `storagePerfNotify.js` 실행기)은 **현황 · 점검과 같은 함수**로 판정한 스냅샷을 직전과 비교해 **상태가 바뀐 순간만** 법인 단위로 보낸다 —
+    unknown · na 는 수준이 아니다(올리지도 내리지도 않음) · `collect` ok → unknown 만 '보고 끊김' · 첫 비교는 baseline(보내지 않음) · 타이머 하한 5분 · 중앙만 · 설정 파일 손상은 preserveCorrupt.
+  · 자기 기준선(`storageBaseline.js`)은 창 **시작 전** 4주 같은 요일 × 시간 칸 평균이고 허용 폭은 기준 설정 `baselineTolerancePct`(null = 끔) — 표본 3개 미만 · 0.5 Gb/s 미만 차이는 판정하지 않는다.
+    화면은 `baseline.applicable` 일 때만 marks 를 쓴다(없으면 범례 · 테두리 없음). 기준선은 판정 항목이 아니다(점검 overall 불변).
+  · 월간 보고서는 **자급형 HTML**(스크립트 없음 · 절마다 `overflow-x:auto`) — 메일 첨부 PDF 는 서버 생성기가 없어 만들지 않는다(⚠ v2.955 정정: '글꼴 동봉 필요' 는 틀렸다 — 웹에는 jsPDF + 임베드 한글 글꼴이 있고 v2.955 가 화면 'PDF 로 저장' 을 그걸로 붙였다). `planMonthlyTick` 은 놓친 회차를 몰아서 보내지 않고
+    `missed` 로 기록만 · 유예 30분 · 설정이 바뀌면 rebase. '지금 보내기' 는 SMTP 꺼짐 · 실패면 **409** 로 '보내지 않았다' 고 말한다. 기준 표의 값은 `settings.values`(items 는 정의만 — 전부 '비움' 으로 적던 결함).
+  · 공개 API `/san-storage/*` 는 허용 목록에 `requiresFullScope: true` 로 선언한다 — 범위 거절은 `endpointAllowed` 게이트 **하나**(핸들러에 두 벌 두지 않는다) · 핸들러는 404 catch-all **앞**에 등록
+    (뒤에 두면 닿지 않는다 — 시험 ④ 가 잡았다).
+  · 용량 × 성능은 **표시 규칙**(`QUADRANT_RULE` 80% · 20%)이지 판정이 아니다 — 각주에 적고 점검에 넣지 않는다. `growthLookup` 의 `daysToFull` 은 일수(숫자)다(growth.js 객체를 그대로 내보내지 말 것).
+  · 시험 `test/sanStorage2953.test.js` · 웹 `sanStorage2953.test.js`. 시각 의존 거짓 실패(참고): `veeam2761b` 의 포트 '9419' 포함 검사가 epoch ms 에 9419 가 드는 구간에 실패했다 → 숫자 경계 정규식.
+- **v2.955 — SAN 스토리지 성능 3차: 점검 결과 이력 · 운영 안내 · 임의 구간 · ⌘K/Flow 인계 · PowerMax 포트 · 데모 보정 · 보고서 PDF(화면)**(설계 README §8.4)
+  · 점검 이력(`storageCheckHistory.js`)은 **바뀌었거나 1시간**(`shouldRecord` · `MIN_GAP_MS`)에만 적는다 — 5분 틱마다 같은 값을 쌓지 않는다. 1시간 반복 기록이 있으니 '마지막 두 건' 비교로 변화를 찾지 말고 `lastChangeOf`
+    (최신부터 서명이 달라지는 첫 쌍)를 쓴다. 비교 · 전이 뜻은 healthHistory 와 같다(unknown 은 ok 로 흡수하지 않음). DB 못 열면 `available:false` 를 화면이 그대로 보인다. 기록은 알림 틱(알림 꺼져 있어도 · 중앙만) + '지금 판정'.
+  · 인계는 URL 이 아니라 **메모리**(v2.616 규약 · `hooks/searchHandoff.js`) — 팔레트 행 `san-storage`(검색어) · 상세 → Flow Vision `san-flow:targets`(포트 WWN 쉼표 · 최대 8). 도구 라우터(`SpecialTools.jsx`)는 해시의 `?` 를 모르므로
+    `#/tools/san-flow?targets=` 같은 주소를 만들지 말 것. SCREEN 표 밖의 target 은 `invSearchQuery.EXTRA_HANDOFF_TARGETS` 에 적고 받는 화면이 있어야 한다(시험이 소스로 대조).
+  · 상세 임의 구간은 서버 `rangeParams` from/to(최대 366일)를 그대로 쓴다 — 구간이 있으면 ◀ ▶ 창 이동 · 자동 갱신을 잠근다(과거 창 규약과 같다).
+  · 기준선은 **1시간 칸까지만** 붙는다(2시간 칸은 reason 'bucket') — 7일 히트맵은 `points: 168` 로 1시간 칸을 받아야 한다(v2.953 은 2시간 칸이라 테두리가 한 번도 안 나왔다 · 시험 ⑤ 가 고정).
+  · PowerMax 포트 단위는 **디렉터를 다 읽은 뒤** 남는 자리에만 · 디렉터당 4 · 전체 24호출(`PMAX_PORTS_PER_DIR` · `PMAX_PORT_CALLS_MAX`) — WAN 어레이에서 호출 폭주를 막는다. 포트 지표 이름(IOs · MBs · ResponseTime)은 디렉터와 다르다.
+  · CSV `nodeLoad` 칸은 **표본을 낼 수 있는 장비**(아이실론 · REST 어레이 — registry sampleCapable 과 같은 조건)만 true|false, SSH 변형은 빈칸(가져오기도 빈칸 유지).
+  · 보고서 PDF 는 기존 벡터 인프라(`reportExport.saveDocAsPdf`)만 — 새 라이브러리 금지 · 파일명 ASCII · 임베드 글꼴 밖 글자(✕) 금지(`PDF_MARK`). 메일 첨부는 HTML(서버 생성기 없음 — 바뀌면 이 줄을 고친다).
+  · 데모 포트 사용량은 **표본을 쌓지 않고 `demoPerfSynth.js` 가 조회 때 수식으로 만든다**(v2.715) — 데모 값을 바꾸려면 그쪽이다(`sanDemoPortBps` 는 실시간 샘플러 경로일 뿐 · v2.955 가 한 번 헛짚음). 이상치 창 `demoAnomalyFactor` 는 `Date.now()` 기준 최근 24시간(수식 데모의 유일한 예외 · 기준선 표시용) — 다른 데모 값에 퍼뜨리지 말 것.
+  · 메일 첨부 `contentType` 은 매개변수 없이(`'text/html'`) — `util/smtp.js` 가 text/* 에 charset 을 붙이고 `'; charset='` 이 든 값은 거부한다. v2.953 보고서 발송이 이 때문에 항상 실패했다 → **발송 경로는 가짜 SMTP 로 끝까지 보낸다**(`sanStorage2955` ⑤).

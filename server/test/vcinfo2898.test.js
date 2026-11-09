@@ -215,7 +215,9 @@ async function serve(user) {
 test('④ 라우트 — 범위 밖 · 없는 vCenter 404 · 권한 목록 관리자만 · 사용자 이름은 관리자 판본만 · 아직 읽지 않음은 따로 말한다', async () => {
   await seedSnapshot({ vcenters: [{ id: 'vcA', name: 'A', status: 'connected' }, { id: 'vcB', name: 'B', status: 'connected' }] });
   C._resetVcInfo();
-  await C.refreshVcInfo(fakeClient(), { id: 'vcA' }, { now: Date.now() });
+  // v2.915 정정: 예전 `now: Date.now()` 는 고정 날짜 작업 기록(TASK_INFO 2026-11-05)이 보관 기한(TASK_KEEP_MS 24시간)을 넘는 날부터
+  //   mergeTasks 가 전부 버려 items[0] 이 없었다(시한폭탄 — 2026-11-06 기준 커밋에서도 실패). 기준 시각을 기록과 같은 날로 고정한다.
+  await C.refreshVcInfo(fakeClient(), { id: 'vcA' }, { now: Date.parse('2026-11-05T03:00:00Z') });
   const admin = await serve({ username: 'adm', role: 'admin', scope: null });
   const viewer = await serve({ username: 'v', role: 'viewer', scope: null });
   const scoped = await serve({ username: 's', role: 'admin', scope: { vcenters: ['vcB'] } });

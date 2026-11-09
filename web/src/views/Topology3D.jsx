@@ -79,7 +79,6 @@ export default function Topology3D() {
       graphRef.current = null;
       try { if (Graph?.__resize) window.removeEventListener('resize', Graph.__resize); Graph?._destructor?.(); } catch { /* */ }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadGen = useRef(0); // vCenter/호스트 연타 시 늦은 응답이 최신 그래프를 덮거나, 언마운트 후 파괴된 그래프에 접근하는 것 방지

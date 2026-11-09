@@ -1,0 +1,42 @@
+/* 리눅스 성능 4단계(v2.923) — 서버 상세 튜닝 · 용도 · 장애 기록 · 진단 스냅샷 탭과 함대 보기. 색은 :root 토큰만(새 hex 없음). */
+.bmo-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; min-width: 0; }
+.bmo-band { display: grid; gap: 4px; padding: 8px 10px; border-left: 3px solid var(--border); background: rgba(255, 255, 255, 0.03); min-width: 0; font-size: 13px; }
+.bmo-counts { display: flex; flex-wrap: wrap; gap: 4px; }
+.bmo-k { color: var(--muted); font-size: 12px; }
+.bmo-card { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--panel-2); }
+.bmo-h { margin: 0 0 4px; font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bmo-reads { font-size: 11.5px; color: var(--muted); margin: 0 0 6px; overflow-wrap: anywhere; }
+.bmo-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-dim); overflow-wrap: anywhere; }
+.bmo-sub { font-size: 11px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+.bmo-grade { font-weight: 700; color: var(--text-dim); white-space: nowrap; }
+table.bmo-t td, table.bmo-t th { vertical-align: top; }
+table.bmo-t td.bmo-wrap { white-space: normal; overflow-wrap: anywhere; }
+table.bmo-t td.bmo-ev { min-width: 260px; max-width: 520px; line-height: 1.5; color: var(--text-dim); }
+table.bmo-t td.bmo-name { white-space: nowrap; font-weight: 600; }
+.bmo-mono { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
+.bmo-honest { border-style: dashed; }
+.bmo-tagrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.bmo-check { font-size: 12.5px; display: inline-flex; gap: 4px; align-items: center; }
+.bmo-input.input { flex: 1 1 260px; min-width: 0; }
+.bmo-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 8px; min-width: 0; }
+.bmo-kpi { padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--panel-2); min-width: 0; }
+.bmo-kv { font-size: 22px; font-weight: 700; line-height: 1.3; }
+.bmo-tl { display: grid; gap: 2px; min-width: 0; }
+.bmo-tl-row { display: grid; grid-template-columns: 128px auto minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--border-soft); font-size: 12px; min-width: 0; }
+.bmo-tl-at { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.bmo-snapgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 10px; min-width: 0; }
+.bmo-snapgrid .bmo-wide { grid-column: 1 / -1; }
+.bmo-pre { margin: 4px 0 0; padding: 6px 8px; background: var(--panel-deep); border-radius: 6px; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+/* 서버 상세 탭 열 — 8개라 좁은 폭에서는 두 줄(한 줄 4개) */
+.bmp-seg.bmp-seg-tabs { width: auto; }
+@media (max-width: 640px) {
+  .bmp-seg.bmp-seg-tabs button { flex: 1 1 calc(25% - 1px); border-left: 0; border-top: 1px solid var(--border); }
+  .bmo-tl-row { grid-template-columns: minmax(0, 1fr); }
+  .bmo-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* 출처 · 문서 링크 — 기본 링크색(진한 파랑)은 어두운 판넬에서 거의 보이지 않았다(Chromium 1440 판독) → 토큰 --accent-2 */
+.bmo-card a, .bmo-band a, .bmo-note a { color: var(--accent-2); text-decoration: underline; text-underline-offset: 2px; }
+.bmo-card a:visited { color: var(--accent-2); }
+/* 근거 등급 기호 — 기호 글리프가 있는 글꼴을 앞에(UI 글꼴의 ◐ 가 작게 보였다) + 짧은 낱말 */
+.bmo-g { font-family: 'Segoe UI Symbol', 'Apple Symbols', 'DejaVu Sans', 'Noto Sans Symbols 2', sans-serif; font-size: 1.1em; margin-right: 2px; }
+table.bmo-t td.bmo-cur { min-width: 96px; }

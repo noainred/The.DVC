@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>정비 창 · 알림 억제</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.dim{color:#8b9bb4}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.tile{border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px}
+.tile .h{font-size:11.5px;color:#8b9bb4;font-weight:600}.tile .v{font-size:20px;font-weight:800;line-height:1.1}.tile .s{font-size:11.5px;color:#8b9bb4;overflow-wrap:anywhere}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+h2{margin:0;font-size:15px;font-weight:700}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+.ev{display:inline-block;width:14px;text-align:center;font-weight:700}.ev.a{color:#4ade80}.ev.b{color:#fbbf24}.ev.c{color:#8b9bb4}
+</style>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+  <div style="min-width:0">
+    <div style="font-size:12px;color:#8b9bb4"><a href="Main.dc.html">설정</a> › <b style="color:#e6edf6">정비 창 · 알림 억제</b> · 추천 3</div>
+    <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">정비 창 — 패치·작업 시간대를 미리 등록해 알림 · 장애 전이 · 자동 집중 모니터링을 억제하고 추이에 음영으로 남긴다</h1>
+    <div class="dim" style="font-size:12px;margin-top:4px">11차 ⑨ ‘유지보수 창 억제’ 와 ⑭ ‘목표선 분모 제외’ 가 가리키던 설정 화면 · 창은 중앙에 저장하고 15차 경로로 엣지에 배포 · 억제는 ‘기록은 하되 보내지 않는다’ — 판정 자체를 지우지 않는다 · 수치는 가상</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>정비 창 목록 — 법인 KR-SEL</h2><span class="chip warn">진행 중 1</span><span class="chip">예정 3</span><span class="chip">지난 창 90일 이력</span><span class="dim" style="font-size:12px;margin-left:auto">시간대 = 법인 시간대(Asia/Seoul)</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>이름</th><th>대상</th><th>일정</th><th>억제 범위</th><th>상태</th><th>등록</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><b>OS 업그레이드 app07</b></td><td class="mono">bm-us1-app07</td><td>11-07 00:05 ~ 02:00 (일회)</td><td>알림 · 전이 보류 · 자동 집중</td><td><span class="chip warn">진행 중 · 남은 1:35</span></td><td class="dim">kim · 사유 “Rocky 9.4→9.5 사전 검증”</td><td><a href="#">지금 끝내기</a></td></tr>
+        <tr><td><b>GPDB 세그먼트 디스크 교체</b></td><td class="mono">bm-kr1-gp04</td><td>11-07 22:00 ~ 24:00 (일회)</td><td>알림 · 전이 보류 · 자동 집중 · <b>수집 중단</b></td><td><span class="chip">예정</span></td><td class="dim">hong · 승인 park</td><td><a href="#">편집</a></td></tr>
+        <tr><td><b>월간 패치</b></td><td>법인 KR-SEL 전체(1,000대)</td><td>매월 둘째 토 02:00 ~ 06:00 (반복)</td><td>알림 · 전이 보류 · 자동 집중</td><td><span class="chip">다음 11-08 02:00</span></td><td class="dim">hong · 승인 park</td><td><a href="#">편집</a></td></tr>
+        <tr><td><b>펌웨어 롤아웃 web</b></td><td>태그 <span class="mono">role:web</span> (PL-WAW 46대)</td><td>11-10 01:00 ~ 03:00 (일회)</td><td>알림만</td><td><span class="chip">예정</span></td><td class="dim">nowak</td><td><a href="#">편집</a></td></tr>
+        <tr><td class="dim">10월 패치</td><td class="dim">법인 KR-SEL 전체</td><td class="dim">10-11 02:00 ~ 06:00</td><td class="dim">알림 · 전이 보류 · 자동 집중</td><td><span class="chip">끝남 · 억제 알림 212 · 창 뒤 발송 3</span></td><td class="dim">hong</td><td><a href="#">기록</a></td></tr>
+      </tbody></table></div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px">‘창 뒤 발송’ = 창이 끝났는데도 아직 초과 중이던 지표를 그때 1회 알림(‘창 안부터 초과’ 표시). 범위 계정은 자기 법인 창만 보고 만든다(법인 간 대상 금지).</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">창 등록 — 폼</h2>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px">
+        <div><div class="dim" style="font-size:11.5px">이름 · 사유(필수 · 감사에 남는다)</div><div class="mono" style="border:1px solid #243049;border-radius:6px;padding:6px 8px;background:#0f1626">GPDB 세그먼트 디스크 교체 — /data1 소진 대응(⑱ 3일)</div></div>
+        <div><div class="dim" style="font-size:11.5px">대상 — 서버 · 태그 · 법인 중 하나(섞지 않는다)</div><div style="display:flex;gap:6px;flex-wrap:wrap"><span class="chip ok">서버 bm-kr1-gp04</span><span class="chip">태그 role:…</span><span class="chip">법인 전체</span></div></div>
+        <div><div class="dim" style="font-size:11.5px">일정 — 일회(시작·끝) 또는 반복(매주 요일 · 매월 n째 요일 · 시간) · 최대 길이 일회 24h · 반복 12h</div><div class="mono" style="border:1px solid #243049;border-radius:6px;padding:6px 8px;background:#0f1626">일회 · 2026-11-07 22:00 → 24:00 · Asia/Seoul</div><div class="dim" style="font-size:11.5px;margin-top:4px">미리보기: 다음 5회 — 반복이면 날짜 5개를 보여 주고 틀리면 여기서 걸린다</div></div>
+        <div><div class="dim" style="font-size:11.5px">억제 범위 — 켠 것만 저장</div>
+          <div style="display:grid;grid-template-columns:1fr;gap:4px">
+            <div>☑ ① 알림 발송 억제 — 판정·초과 기록은 그대로, 발송만 막는다(⑨)</div>
+            <div>☑ ② 하드웨어 장애 전이 ‘보류’ — 기존 파트 장애 HOLD_REASON 에 <span class="mono">maintenance</span> 추가 · 창 끝에 재판정(⑦)</div>
+            <div>☑ ③ 자동 집중 모니터링 억제 — 수동 집중은 허용(사유 적고 실행)(②-집중)</div>
+            <div>☐ ④ 수집 자체 중단 — 기본 꺼짐 · 켜면 ‘정비 중’ 상태(④ 상태에 1종 추가) · 기존 vCenter 의 maintenance 플래그와 같은 뜻</div>
+            <div>☑ ⑤ 목표선 분모 제외 · 베이스라인 롤업 제외(⑭ ⑨)</div>
+          </div></div>
+        <div><div class="dim" style="font-size:11.5px">승인 — 법인 전체 · 태그 대상 · 12h 넘는 창은 설정 소유자 승인(개별 서버 · 4h 이하는 operator 바로)</div></div>
+        <div style="display:flex;gap:8px"><span class="chip ok">저장 · 엣지 배포</span><span class="chip">취소</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">추이 위 음영 · 변경 이벤트 띠 연동 — bm-us1-app07</h2>
+      <svg viewBox="0 0 760 200" width="100%" style="display:block">
+        <defs><pattern id="mh" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 8L8 0" stroke="#fbbf24" stroke-width="1" opacity=".5"/></pattern></defs>
+        <rect x="0" y="0" width="760" height="200" fill="#0f1626" rx="8"/>
+        <g font-size="10" fill="#8b9bb4" font-family="JetBrains Mono,monospace"><text x="8" y="36">100%</text><text x="8" y="100">50%</text><text x="8" y="164">0%</text><text x="60" y="190">22:00</text><text x="260" y="190">23:00</text><text x="460" y="190">00:00</text><text x="660" y="190">01:00</text></g>
+        <rect x="470" y="20" width="270" height="150" fill="url(#mh)"/><rect x="470" y="20" width="270" height="150" fill="none" stroke="#fbbf24" stroke-dasharray="4 3"/>
+        <text x="476" y="34" font-size="10" fill="#fbbf24">정비 창 00:05~02:00 · OS 업그레이드 app07 · kim</text>
+        <polyline fill="none" stroke="#22d3ee" stroke-width="2" points="48,120 108,118 168,122 228,116 288,119 348,117 408,120 468,121 490,60 520,40 560,44 600,38 640,70 700,128 740,124"/>
+        <polyline fill="none" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="3 3" points="48,126 108,125 168,126 228,124 288,125 348,125 408,126 468,126 490,126 740,126"/>
+        <text x="50" y="118" font-size="9" fill="#f472b6">베이스라인(4주)</text>
+        <rect x="48" y="172" width="692" height="10" fill="#141b2d"/>
+        <circle cx="500" cy="177" r="4" fill="#fbbf24"/><text x="507" y="181" font-size="9" fill="#8b9bb4">dnf 패키지 212</text>
+        <circle cx="610" cy="177" r="4" fill="#f87171"/><text x="617" y="181" font-size="9" fill="#8b9bb4">재부팅</text>
+        <text x="560" y="58" font-size="10" fill="#fbbf24">CPU 92% 초과 — 기록만 · 알림 억제</text>
+      </svg>
+      <div class="dim" style="font-size:11.5px;margin:8px 0">창 안 전이(패키지 · 재부팅)는 띠에서 ‘정비 창 안’ 으로 묶여 표시 · 창 안 샘플은 베이스라인 롤업에서 제외 · 집중 모니터링 자동 규칙은 쉬고, 수동 집중은 사유와 함께 허용.</div>
+      <h2 style="margin:12px 0 8px">엣지가 적용하는 억제 규칙</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>상황</th><th>창 안</th><th>창 끝난 뒤</th></tr></thead>
+        <tbody>
+          <tr><td>지표 초과(알림 규칙)</td><td>기록 ○ · 발송 ×(‘억제’ 로 센다)</td><td>아직 초과면 그때 1회 발송 · ‘창 안부터 초과’ 표시</td></tr>
+          <tr><td>하드웨어 장애 전이</td><td>보류(hold) · 이력에는 남긴다</td><td>재판정 → 남아 있으면 그때 전이</td></tr>
+          <tr><td>수집 실패(SSH/iDRAC)</td><td>‘정비 중’ 로 표시 · 수집 건강 성공률에서 제외하고 따로 센다</td><td>즉시 정상 집계</td></tr>
+          <tr><td>인증 거부</td><td class="bad">창과 무관하게 즉시 정지(authGuard 그대로)</td><td>—</td></tr>
+          <tr><td>베이스라인 · 목표선</td><td>롤업 제외 · 분모 제외(그 수를 적는다)</td><td>—</td></tr>
+          <tr><td>용량 예측 ⑱</td><td>추세 창에서 제외</td><td>—</td></tr>
+        </tbody></table></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:8px">경계 · 저장 · 정직하게 적어 둘 것</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:10px">
+      <div class="tile"><div class="h">저장 · 배포</div><div class="s">중앙 <span class="mono">maintenance-windows.json</span>(법인별) → 엣지 배포(15차 경로) · 엣지는 자기 법인 창만 받는다 · 겹치는 창은 합집합 · 감사 로그(등록 · 수정 · 조기 종료 · 누가 승인)</div></div>
+      <div class="tile"><div class="h">지금 코드와의 관계 ○</div><div class="s">기존에는 vCenter 단위 <span class="mono">maintenance</span> 플래그(수집 일시 중단)만 있다. 서버·태그 단위 · 일정 · 억제 종류 구분은 새 설계이고, 파트 장애 보류 사유 추가는 전이 규칙(전이만 기록) 을 지키는지 반증이 필요하다.</div></div>
+      <div class="tile"><div class="h">반복 일정의 범위</div><div class="s">RRULE 전부가 아니라 ‘매주 요일 · 매월 n째 요일’ 두 꼴만 · 시간대는 법인 시간대 고정 · DST 가 있는 법인은 미리보기 5회로 확인</div></div>
+      <div class="tile"><div class="h">안전장치</div><div class="s">창 최대 길이 · ‘지금 끝내기’ · 90일 이상 반복 창은 분기마다 재확인 알림 · 창이 끝나도 억제가 풀리지 않는 버그가 가장 위험 → 끝 시각 뒤 1주기 안에 억제 0 인지 수집 건강 ⑫ 에서 센다</div></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1750}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

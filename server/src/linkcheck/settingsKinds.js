@@ -39,18 +39,26 @@ export const SETTINGS_PATHS = Object.freeze({
   sanswitch: { label: '특수기능 › SAN 스위치 › 장비 등록', hash: '#/tools/san-switch' },
   pdu: { label: '특수기능 › PDU › 장비 등록', hash: '#/tools/pdu' },
   bmstor: { label: '특수기능 › 베어메탈 스토리지 › 서버 등록', hash: '#/tools/bm-storage' },
-  gpuPhysical: { label: '설정 › 수집 › GPU 게스트 수집 › 물리 GPU 서버', hash: '#/settings/gpu-guest' },
+  gpuPhysical: { label: '설정 › 게스트·GPU › GPU 게스트 수집 › 물리 GPU 서버', hash: '#/settings/gpu-guest' },
   remote: { label: '설정 › 엣지·원격 › 원격접속 설정', hash: '#/settings/remote' },
   capture: { label: '특수기능 › 네트워크 캡처 › 캡처 호스트', hash: '#/tools/net-traffic' },
   deploy: { label: '설정 › 엣지·원격 › 원격 법인(DC)에 Edge 노드 포탈 설치', hash: '#/settings/agent-deploy' },
   relaytopo: { label: '특수기능 › 중계 토폴로지', hash: '#/tools/relaytopo' },
   credentials: { label: '특수기능 › 통합 계정 관리', hash: '#/tools/credentials' },
-  mail: { label: '설정 › 알림·연동 › 메일 발송', hash: '#/settings/mail' },
-  alerts: { label: '설정 › 알림·연동 › 알림', hash: '#/settings/alerts' },
+  mail: { label: '설정 › 알림·메일 › 메일 발송', hash: '#/settings/mail' },
+  alerts: { label: '설정 › 알림·메일 › 알림', hash: '#/settings/alerts' },
   ad: { label: '설정 › 사용자 › 인증(AD)', hash: '#/settings/auth-ad' },
   upgrade: { label: '설정 › 시스템 › 업그레이드', hash: '#/settings/upgrade' },
   packages: { label: '설정 › 시스템 › 업그레이드 › 패키지 저장소', hash: '#/settings/upgrade' },
   svcmon: { label: '서비스 모니터 › 대상 관리', hash: '#/svcmon' },
+  // v2.915(설정 연동): 통신 점검 카탈로그에 빠져 있던 등록부 6종.
+  cvp: { label: '특수기능 › Arista CloudVision(CVP) › 서버 등록', hash: '#/tools/cvp' },
+  veeam: { label: '설정 › 백업 › Veeam 백업 서버', hash: '#/settings/veeam' },
+  veeamEm: { label: '설정 › 백업 › Veeam 백업 서버 › Enterprise Manager', hash: '#/settings/veeam' },
+  bareos: { label: '설정 › 백업 › Bareos 백업 서버 › Director', hash: '#/settings/bareos' },
+  // v2.932(점검 D1-07): 대상 편집은 v2.740 에 설정으로 옮겼다(IsiduViews.jsx 머리말 · isidu/mailHtml.js SETTINGS_PATH) — 도구 화면에는 편집이 없다.
+  isidu: { label: '설정 › 수집 주기·임계 › 아이실론 디렉터리 사용량(슈퍼 관리자 전용)', hash: '#/settings/isilon-dirusage' },
+  llm: { label: '설정 › 알림·메일 › AI 검색', hash: '#/settings/ai-search' },
   central: { label: 'portal.env (CENTRAL_URL / CENTRAL_TOKEN)', hash: '' },
 });
 
@@ -127,9 +135,11 @@ export const SETTING_KINDS = Object.freeze({
     desc: 'FOS REST 는 로그인이 POST 라 무인증 GET 이 뜻이 없다 — TLS·인증서까지만 본다.',
   },
   'set:pdu': {
-    label: 'PDU', group: '전력', settings: 'pdu', depth: 'http',
-    probe: { mode: 'http', path: '/', authMode: 'none' }, defaultPort: 443,
-    desc: 'APC Rack PDU 관리 웹. 무인증 응답까지 본다.',
+    label: 'PDU', group: '전력', settings: 'pdu', depth: 'ssh',
+    // v2.915: PDU 는 **SSH 로 수집**한다(pdu/registry.js sshPort 기본 22 · pdu/poller.js). 예전 프로브는 관리 웹(https 443)을 찔러
+    //   수집 경로가 아닌 포트를 '정상' 이라 말했다(SSH 가 막혀 수집이 멈춰도 초록). 등록된 sshPort 의 KEX·배너까지만 본다.
+    probe: { mode: 'ssh', authMode: 'none' }, defaultPort: 22,
+    desc: 'APC Rack PDU NMC SSH(수집 경로). KEX·배너까지만 본다(로그인하지 않는다).',
   },
   'set:bmstor': {
     label: '베어메탈 스토리지(SSH)', group: '서버', settings: 'bmstor', depth: 'ssh',
@@ -196,6 +206,37 @@ export const SETTING_KINDS = Object.freeze({
     probe: { mode: 'http', path: '', authMode: 'none' },
     desc: '오프라인 패키지 저장소.',
   },
+  /* v2.915(설정 연동 — 사용자 요청 'cvp 등 수집하는 모든 정보'): 카탈로그에 없던 등록부 6종. 전부 무인증(로그인 없음). */
+  'set:cvp': {
+    label: 'Arista CVP', group: '네트워크', settings: 'cvp', depth: 'tls',
+    probe: { mode: 'tls', authMode: 'none' }, defaultPort: 443,
+    desc: 'CloudVision 포탈. 로그인 API 가 POST 라 무인증 GET 이 뜻이 없다 — TLS·인증서까지만 본다.',
+  },
+  'set:veeam': {
+    label: 'Veeam B&R', group: '백업', settings: 'veeam', depth: 'tls',
+    probe: { mode: 'tls', authMode: 'none' }, defaultPort: 9419,
+    desc: 'Veeam Backup & Replication REST(9419). 토큰 발급이 POST 라 TLS·인증서까지만 본다.',
+  },
+  'set:veeam-em': {
+    label: 'Veeam Enterprise Manager', group: '백업', settings: 'veeamEm', depth: 'tls',
+    probe: { mode: 'tls', authMode: 'none' }, defaultPort: 9398,
+    desc: 'Veeam EM REST(9398). 세션 발급이 POST 라 TLS·인증서까지만 본다.',
+  },
+  'set:bareos-dir': {
+    label: 'Bareos Director', group: '백업', settings: 'bareos', depth: 'tcp',
+    probe: { mode: 'tcp', authMode: 'none' }, defaultPort: 9101,
+    desc: 'Bareos Director 콘솔 포트(9101). 포트 열림까지만 — 콘솔 인증(CRAM-MD5)은 시도하지 않는다. 담당 엣지가 있으면 중앙은 재지 않는다(백업은 법인 로컬).',
+  },
+  'set:isidu-host': {
+    label: '아이실론 디렉터리 사용량(SSH)', group: '스토리지', settings: 'isidu', depth: 'ssh',
+    probe: { mode: 'ssh', authMode: 'none' }, defaultPort: 22,
+    desc: '스토리지 등록부를 거치지 않고 주소를 직접 적은 아이실론 SSH 대상. 인증 시도 없음.',
+  },
+  'set:llm': {
+    label: 'LLM(Ollama)', group: 'AI', settings: 'llm', depth: 'http',
+    probe: { mode: 'http', path: '/api/tags', authMode: 'none' },
+    desc: '자연어 검색·로그 분석이 쓰는 Ollama API. 모델 목록(GET /api/tags)까지 본다.',
+  },
 });
 
 export const SETTING_KIND_KEYS = Object.freeze(Object.keys(SETTING_KINDS));
@@ -211,4 +252,4 @@ export const DEPTH_LABEL = Object.freeze({
 });
 
 /** 그룹 표시 순서(화면 묶음). 목록에 없는 그룹은 뒤에 붙는다. */
-export const GROUP_ORDER = Object.freeze(['중앙↔엣지', '가상화', '서버', '스토리지', '네트워크', '전력', '원격접속', '알림', '인증', '업그레이드']);
+export const GROUP_ORDER = Object.freeze(['중앙↔엣지', '가상화', '서버', '스토리지', '네트워크', '전력', '백업', '원격접속', '알림', '인증', '업그레이드', 'AI']);

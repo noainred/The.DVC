@@ -71,7 +71,7 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
       {tab === 'monitor' && (
         <>
           {/* v2.911(시안 docs/design/vm-perf ② · 질문 ⑤ 기본값): 호스트 성능도 같은 화면 — 모니터 탭 첫 섹션. */}
-          <Lazy><VmPerfView entityType="host" id={host.id} name={host.name} powered={host.powerState !== 'POWERED_OFF'} /></Lazy>
+          <Lazy><VmPerfView entityType="host" id={host.id} name={host.name} vcenterId={host.vcenterId} powered={host.powerState !== 'POWERED_OFF'} /></Lazy>
         <div className={GRID}>
           {/* 성능 카드가 빠져 혼자 남은 줄 — 한 줄을 다 쓴다(v2.911 Chromium 확인). */}
           <div style={{ gridColumn: '1 / -1', minWidth: 0 }}><HostEvents vcenterId={vcenterId} host={host} /></div>

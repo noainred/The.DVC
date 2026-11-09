@@ -56,7 +56,18 @@ export function dropSummaryOf(j) {
     coerced: numOf(j.coerced),
     zoningTrimmed: numOf(j.zoningTrimmed),
     evicted: typeof j.evicted === 'string' && j.evicted ? j.evicted.slice(0, 64) : null,
+    // v2.932(2차 ⑨): storage-data 가 받은 노드 부하 표본 확인(devices·received·saved·duplicate·dropped — 수만). 없으면 null(구버전 중앙).
+    nodeLoadSamples: sampleAckOf(j.nodeLoadSamples),
   });
+}
+const ACK_KEYS = Object.freeze(['devices', 'received', 'saved', 'duplicate', 'dropped', 'notOwned']);
+function sampleAckOf(v) {
+  const o = plainObj(v);
+  if (!o) return null;
+  const out = {};
+  for (const k of ACK_KEYS) { const n = Number(o[k]); if (Number.isFinite(n) && n >= 0) out[k] = n; }
+  if (o.dbUnavailable === true) out.dbUnavailable = true;
+  return out;
 }
 
 /** `dropped` 객체를 '사유 n · 사유 m' 글자로(0 은 뺀다). 비었으면 '사유 미상'. */
@@ -76,7 +87,10 @@ function finalize(out) {
   if (out.coerced) parts.push(`표시 필드 정정 ${out.coerced}`);
   if (out.zoningTrimmed) parts.push(`조닝 일부만 저장 ${out.zoningTrimmed}`);
   if (out.evicted) parts.push(`중앙이 오래 조용한 엣지 ‘${out.evicted}’ 보관분을 내림`);
-  if (!parts.length) return null;
+  // 표본 확인은 '뺀 것' 이 아니라 '받은 것' 이다 — 문장에는 뺀 수(dropped·notOwned)만 들어간다. 확인만 있고 뺀 것이 없으면 요약 객체는 돌려주되 text 는 비운다.
+  const ack = out.nodeLoadSamples;
+  if (ack && ((ack.dropped || 0) + (ack.notOwned || 0) > 0)) parts.push(`노드 부하 표본 ${(ack.dropped || 0) + (ack.notOwned || 0)}개 받지 않음`);
+  if (!parts.length) return ack ? { ...out, text: '' } : null;
   return { ...out, text: parts.join(' · ') };
 }
 
@@ -97,6 +111,7 @@ export function mergeDrop(a, b) {
     unregistered: n('unregistered'), omitted: n('omitted'), vcenterBlanked: n('vcenterBlanked'),
     held: Boolean(a.held || b.held), rejectedFiles: n('rejectedFiles'), unverifiedAgent: Boolean(a.unverifiedAgent || b.unverifiedAgent),
     coerced: n('coerced'), zoningTrimmed: n('zoningTrimmed'), evicted: a.evicted || b.evicted || null,
+    nodeLoadSamples: a.nodeLoadSamples || b.nodeLoadSamples || null,
   });
 }
 

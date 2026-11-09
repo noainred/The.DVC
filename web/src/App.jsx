@@ -33,7 +33,10 @@ const Upgrade = lazy(() => import('./views/Upgrade.jsx'));
 const Settings = lazy(() => import('./views/Settings.jsx'));
 const SpecialTools = lazy(() => import('./views/SpecialTools.jsx'));
 const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
-import { movedTabHash, legacyShellHash, LEGACY_SHELL_KEY } from './hooks/hashTab.js';
+import { movedTabHash, legacyShellHash, LEGACY_SHELL_KEY, hashSegments } from './hooks/hashTab.js';
+// v2.915 '서버 › 가상화 플랫폼' 허브(설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07): vcenters · hosts · vms 세 탭 위에 한 셸 — 탭 id · 해시는 그대로.
+import PlatformHub from './views/platform/PlatformHub.jsx';
+import { isPlatformTab, PLATFORM_TAB_KEYS, loadLastTab, saveLastTab, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE } from './views/platform/platformText.js';
 // v2.725 상단 메뉴 재구성(시안 A '2단 탭') — 대메뉴·하위 메뉴·현재 위치 판정은 views/topMenu.js 하나가 소유한다.
 import { visibleMenu, locate, entryOf, hashOf } from './views/topMenu.js';
 import { lockReasonOf } from './views/toolVisibility.js';
@@ -104,7 +107,12 @@ import { MODE_KEY, normMode, resolveMode } from './views/overviewMode.js';
 import { statusCounts } from './views/statusBarText.js'; // v2.675 — 첫 수집 중 상태바는 0 이 아니라 '—'
 import { runtimeBanner } from './views/runtimeBannerText.js'; // 2026-10-09 검토 I-06
 import { takeSearch, onSearchHandoff } from './hooks/searchHandoff.js'; // v2.909 ⌘K 통합 장비 검색 — 검색어 인계(메모리)
-const INV_FILTER_TABS = ['vms', 'hosts', 'datastores'];
+const INV_FILTER_TABS = ['vms', 'hosts', 'datastores', 'vcenters'];   // v2.915: vCenter 탭도 공용 범위 바의 검색 칸을 쓴다(허브 세 탭 공용)
+// v2.915 가상화 플랫폼 허브 — 세 탭이 범위(리전 · vCenter · 검색어)를 한 칸으로 공유한다. 탭 고유 조건은 그 탭 칸에 남는다.
+const PLATFORM_SCOPE_KEY = 'platform';
+const SHARED_FILTER_KEYS = ['region', 'vcenterId', 'q'];
+const pickKeys = (o, keys) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
+const lsSafe = () => { try { return window.localStorage; } catch { return null; } };
 const readOvMode = () => { try { return normMode(window.localStorage.getItem(MODE_KEY)); } catch { return null; } };
 const writeOvMode = (m) => { try { window.localStorage.setItem(MODE_KEY, m); } catch { /* 저장 실패는 기능을 막지 않는다 */ } };
 
@@ -298,6 +306,9 @@ function Portal({ user, onLogout }) {
   // (or shows on) another menu. Each tab has its own { region, vcenterId, q }.
   const [tabFilters, setTabFilters] = useState({}); // { [tabId]: { region, vcenterId, q } }
   const [menuFilter, setMenuFilter] = useState({}); // { [tabId]: value }
+  // v2.915 허브 교차 링크 — 호스트 표의 VM 수 → VM 탭을 그 호스트로(서버 /vms?host) · VM 표의 호스트 → 호스트 탭을 그 이름으로(화면 거르기).
+  const [vmHost, setVmHost] = useState('');
+  const [hostFocusName, setHostFocusName] = useState('');
   const [showNotes, setShowNotes] = useState(false);
   const [showVcDown, setShowVcDown] = useState(false); // 헤더 상태 칩의 '(N 불가)' 클릭 → 연결 안 되는 vCenter 목록 모달(v2.300)
   // 통합 관제 콘솔 표시 여부(v2.487) — 해시 첫 세그먼트 'console' 로 판단해 새로고침해도 콘솔에 머문다.
@@ -311,13 +322,24 @@ function Portal({ user, onLogout }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [consoleOn]);
 
-  const cur = tabFilters[tab] || {};
+  // v2.915: vCenter · 호스트 · VM 탭은 범위(리전 · vCenter · 검색어)를 한 칸(PLATFORM_SCOPE_KEY)으로 공유한다(사용자 요청 '공용 바').
+  //   탭 고유 조건(메모 포함 · IPMS · 상태 · 전원 · 호스트)은 그 탭 칸에 남고, 그 밖의 탭은 예전처럼 탭마다 따로다.
+  const scopeKeyOf = (t) => (isPlatformTab(t) ? PLATFORM_SCOPE_KEY : t);
+  const cur = { ...(tabFilters[tab] || {}), ...pickKeys(tabFilters[scopeKeyOf(tab)] || {}, SHARED_FILTER_KEYS) };
   const region = cur.region || '';
   const vcenterId = cur.vcenterId || '';
   const q = cur.q || '';
   const qNotes = !!cur.qNotes; // 메모 포함 검색 (기본 꺼짐)
   const qIpms = !!cur.qIpms;   // IPMS(IP 스캔) 자료 포함 — IP 검색 시 해당 대역 스캔 IP도 표시
-  const patchFilter = (patch, t = tab) => setTabFilters((m) => ({ ...m, [t]: { ...(m[t] || {}), ...patch } }));
+  const patchFilter = (patch, t = tab) => setTabFilters((m) => {
+    const sk = scopeKeyOf(t);
+    const shared = pickKeys(patch, SHARED_FILTER_KEYS);
+    const own = Object.fromEntries(Object.entries(patch).filter(([k]) => !SHARED_FILTER_KEYS.includes(k)));
+    const n = { ...m };
+    if (Object.keys(shared).length) n[sk] = { ...(n[sk] || {}), ...shared };
+    if (Object.keys(own).length) n[t] = { ...(n[t] || {}), ...own };
+    return n;
+  });
   const setRegion = (v) => patchFilter({ region: v, vcenterId: '' });
   const setVcenterId = (v) => patchFilter({ vcenterId: v });
   const setQ = (v) => patchFilter({ q: v });
@@ -326,15 +348,19 @@ function Portal({ user, onLogout }) {
   // v2.909 헤더 ⌘K 통합 장비 검색 — 가상머신 · VM호스트 · 스토리지(데이터스토어) 탭은 상단 필터바의 검색이 그 화면의 검색 칸이다.
   //   팔레트가 남긴 검색어(장비 이름 · ‘모두 보기’ 검색어)를 그 탭의 필터로 넣는다 — 팔레트가 범위 안 전 vCenter 에서 센 결과이므로
   //   리전 · vCenter 선택은 비운다(남겨 두면 '모두 보기' 가 일부만 보인다). 인계는 메모리다(hooks/searchHandoff.js — URL 에 싣지 않는다).
-  useEffect(() => onSearchHandoff((t) => {
-    if (!INV_FILTER_TABS.includes(t)) return;
-    const s = takeSearch(t);
-    if (s) patchFilter({ q: s, region: '', vcenterId: '' }, t);
+  useEffect(() => {
+    // v2.928(A5): 새 탭으로 열렸으면 main.jsx 가 이미 남겨 둔 것이 있다 — 마운트 때 한 번 꺼낸다(구독은 이후 것만 받는다).
+    for (const t of INV_FILTER_TABS) { const s = takeSearch(t); if (s) patchFilter({ q: s, region: '', vcenterId: '' }, t); }
+    return onSearchHandoff((t) => {
+      if (!INV_FILTER_TABS.includes(t)) return;
+      const s = takeSearch(t);
+      if (s) patchFilter({ q: s, region: '', vcenterId: '' }, t);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), []);
+  }, []);
 
   // Keep the URL hash in sync with the active tab, and follow back/forward.
-  const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; setHashNow(`#/${id}`); };
+  const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; setHashNow(`#/${id}`); if (isPlatformTab(id)) saveLastTab(lsSafe(), id); };   // v2.915: 허브는 마지막 본 탭을 기억
   // Platform 탭 재클릭 신호 — vCenter 상세로 드릴다운한 상태에서 상단메뉴 Platform을 다시
   // 누르면 전체 vCenter 목록으로 복귀한다(드릴다운은 VCenters 내부 상태라 탭 클릭만으론 못 되돌림).
   const [platformResetSeq, setPlatformResetSeq] = useState(0);
@@ -506,8 +532,10 @@ function Portal({ user, onLogout }) {
       if (window.location.hash !== h) window.location.hash = h;
       return;
     }
-    if (item.tab === 'vcenters') setPlatformResetSeq((n) => n + 1);
-    setTab(item.tab);
+    // v2.915 가상화 플랫폼(탭 여러 개를 맡는 항목): 마지막으로 본 탭(허용된 것만) · 처음은 vCenter(계층의 루트)
+    const dest = Array.isArray(item.tabs) && item.tabs.length ? (loadLastTab(lsSafe(), isAllowed) || item.entryTab || item.tab) : item.tab;
+    if (dest === 'vcenters') setPlatformResetSeq((n) => n + 1);
+    setTab(dest);
   };
 
   // 현재 탭이 권한/필터로 더 이상 접근 불가하면 안전한 탭(overview)으로 되돌린다.
@@ -523,8 +551,9 @@ function Portal({ user, onLogout }) {
     if (q) { f.q = q; if (qNotes) f.notes = '1'; if (qIpms) f.qIpms = '1'; }
     const mf = MENU_FILTERS[tab];
     if (mf && menuFilter[tab]) f[mf.key] = menuFilter[tab];
+    if (tab === 'vms' && vmHost) f.host = vmHost;   // v2.915 호스트 표에서 넘어온 '그 호스트의 VM'
     return f;
-  }, [vcenterId, region, q, qNotes, qIpms, tab, menuFilter]);
+  }, [vcenterId, region, q, qNotes, qIpms, tab, menuFilter, vmHost]);
 
   // Scope (region/vCenter) without the free-text query, used by Summary.
   const scope = useMemo(() => {
@@ -539,14 +568,28 @@ function Portal({ user, onLogout }) {
   // 아닌 경우. 성능점검(svcmon)은 트리 검색·상태 칩·Test name 검색을 자체로 갖고 상단 필터값을
   // 받지도 않아(<SvcMonitor /> 는 filters 미전달) 상단 검색이 눌러도 아무 일이 없는 죽은 UI 였다.
   // IP관리(ipam)는 화면 안에 자체 vCenter 범위 선택자가 있어 상단 필터바를 쓰지 않는다.
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'settings', 'svcmon', 'ipam', 'board', 'issues', 'wiki'];
-  const showFilters = !noFilterTabs.includes(tab);
+  // v2.915: vCenter 탭도 공용 범위 바를 쓴다(허브 세 탭 공용 — 카드를 범위로 거른다). 다만 vCenter 상세 · 개체 보기(#/vcenters/<id>…)로 내려가면
+  //   허브(엔티티 탭 · 바로가기)와 범위 바는 그리지 않는다 — 그 자리는 브레드크럼이다(시안 ⑤).
+  const noFilterTabs = ['overview', 'summary', 'upgrade', 'tools', 'settings', 'svcmon', 'ipam', 'board', 'issues', 'wiki'];
+  const vcDrill = tab === 'vcenters' && hashSegments(hashNow).length >= 2;
+  const showFilters = !noFilterTabs.includes(tab) && !vcDrill;
+  const platformOn = isPlatformTab(tab) && !vcDrill;
+  // 허브 탭 배지 · 바로가기 칩 숫자 — 한 응답(30초). 허브 밖 탭에서는 묻지 않는다.
+  const { data: platformSummary } = usePolling(isPlatformTab(tab) ? '/platform/summary' : null, scope, 30_000);
 
   // Drill into a site → set the HOSTS tab's own vCenter filter, then go there.
+  //   v2.915: 세 탭이 범위를 공유하므로 '호스트 탭의 vCenter 필터' = 허브 범위다. VM 탭으로도 같은 식(goVms).
   const selectSite = (id) => {
     patchFilter({ vcenterId: id, region: '' }, 'hosts');
+    setHostFocusName('');
     setTab('hosts');
   };
+  const goVms = (id, host = '') => {
+    if (id) patchFilter({ vcenterId: id, region: '' }, 'vms');
+    setVmHost(host || '');
+    setTab('vms');
+  };
+  const goHostsByName = (name) => { setHostFocusName(name || ''); setTab('hosts'); };
 
   // 필터바·본문·오버레이.
   // 2026-10-09 검토 I-06: 서버 Node 런타임 불일치 — 장비 수집 실패를 장비 장애로 오판하기 전에 원인을 먼저 말한다(세 셸 공통).
@@ -568,28 +611,37 @@ function Portal({ user, onLogout }) {
               <option value="">전체 vCenter</option>
               {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </Select>
-            {MENU_FILTERS[tab] && (
+            {/* v2.915: 허브 세 탭은 공용 바가 똑같다(범위 · 검색 · 안내) — 탭 고유 조건(상태 · 전원 · 메모 · IPMS)은 그 탭의 탭 줄 오른쪽으로 내렸다 */}
+            {MENU_FILTERS[tab] && !platformOn && (
               <Select sort={false} className="select" value={menuFilter[tab] || ''}
                 onChange={(e) => setMenuFilter((m) => ({ ...m, [tab]: e.target.value }))}>
                 {MENU_FILTERS[tab].options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </Select>
             )}
-            <SearchBox placeholder="이름 / IP / OS 검색…" value={q} onChange={setQ} />
-            <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
-              title="체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)">
-              <input type="checkbox" checked={qNotes} onChange={(e) => setQNotes(e.target.checked)} /> 메모 포함
-            </label>
-            {['vms', 'networks', 'hosts', 'datastores'].includes(tab) && (
+            <SearchBox placeholder={platformOn ? SCOPE_SEARCH_PLACEHOLDER : '이름 / IP / OS 검색…'} value={q} onChange={setQ} />
+            {!platformOn && (
+              <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
+                title="체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)">
+                <input type="checkbox" checked={qNotes} onChange={(e) => setQNotes(e.target.checked)} /> 메모 포함
+              </label>
+            )}
+            {['networks', 'datastores'].includes(tab) && (
               <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
                 title="체크하면 IP로 검색할 때 IPMS(IP 스캔) 자료의 해당 대역 IP도 함께 보여줍니다. (vCenter가 모르는 스캔 IP 포함)">
                 <input type="checkbox" checked={qIpms} onChange={(e) => setQIpms(e.target.checked)} /> IPMS 포함
               </label>
             )}
-            {(region || vcenterId || q || menuFilter[tab]) && (
-              <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '', qNotes: false, qIpms: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
+            {platformOn && <span className="muted ph-scope-note" style={{ fontSize: 11.5 }}>{SCOPE_NOTE}</span>}
+            {(region || vcenterId || q || menuFilter[tab] || (tab === 'vms' && vmHost) || (tab === 'hosts' && hostFocusName)) && (
+              <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '', qNotes: false, qIpms: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); setVmHost(''); setHostFocusName(''); }}>필터 초기화</button>
             )}
           </div>
         ));
+  // v2.915: 탭 고유 조건을 그 탭의 탭 줄 오른쪽에 그리기 위해 넘긴다(호스트: 상태 · 메모 · IPMS / VM: 전원 · 메모 · IPMS · 호스트 칩)
+  const platformCond = platformOn ? {
+    menuFilter: MENU_FILTERS[tab] ? { options: MENU_FILTERS[tab].options, value: menuFilter[tab] || '', onChange: (v) => setMenuFilter((m) => ({ ...m, [tab]: v })) } : null,
+    qNotes, setQNotes, qIpms, setQIpms,
+  } : null;
   const ovMode = resolveMode({ query: ovModeHash, stored: ovModeStored, role: user?.role });
   const ovToggle = (
     <OverviewModeToggle mode={ovMode} onChange={(m) => {
@@ -604,12 +656,13 @@ function Portal({ user, onLogout }) {
             ? <ExecOverview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />
             : <Overview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />)}
           {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
-          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} resetSignal={platformResetSeq} />}
+          {/* v2.915: vCenter 탭은 허브 범위(리전 · vCenter · 검색)로 카드를 거르고, 카드의 호스트 · VM 수는 그 법인 범위로 탭을 바꾼다(죽은 prop 이던 onSelectSite 를 실제로 쓴다) */}
+          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} onGoVms={(id) => goVms(id)} resetSignal={platformResetSeq} scope={{ region, vcenterId, q }} summary={platformSummary} />}
           {tab === 'svcmon' && <SvcMonitor />}
           {tab === 'ipam' && <Ipam />}
-          {tab === 'hosts' && <Hosts filters={filters} />}
-          {/* v2.909: 법인별 탭에서 법인을 고르면 이 탭(vms)의 vCenter 필터를 바꾼다(현황 탭으로 돌아간다) */}
-          {tab === 'vms' && <Vms filters={filters} onPickVcenter={(id) => patchFilter({ vcenterId: id, region: '' }, 'vms')} />}
+          {tab === 'hosts' && <Hosts filters={filters} cond={platformCond} nameFocus={hostFocusName} onNameFocus={setHostFocusName} onGoVms={(host) => goVms('', host)} />}
+          {/* v2.909: 법인별 탭에서 법인을 고르면 이 탭(vms)의 vCenter 필터를 바꾼다(현황 탭으로 돌아간다) · v2.915: 호스트 칩 · 호스트 이름 → 호스트 탭 */}
+          {tab === 'vms' && <Vms filters={filters} onPickVcenter={(id) => patchFilter({ vcenterId: id, region: '' }, 'vms')} cond={platformCond} host={vmHost} onHost={setVmHost} onGoHost={goHostsByName} />}
           {tab === 'datastores' && <Datastores filters={filters} />}
           {tab === 'networks' && <Networks filters={filters} />}
           {tab === 'alarms' && <Alarms filters={filters} />}
@@ -795,6 +848,12 @@ function Portal({ user, onLogout }) {
         <main className="content">
           {rtBannerEl}
           {filterBar}
+          {/* v2.915 가상화 플랫폼 허브 — 엔티티 탭 3장 + 바로가기(vCenter · 호스트 · VM 세 탭 공용). 상세로 내려가면 그리지 않는다(브레드크럼이 대신). */}
+          {platformOn && (
+            <PlatformHub tab={tab} tabs={PLATFORM_TAB_KEYS.filter((t) => isAllowed(t))} summary={platformSummary}
+              onTab={(t) => { if (t === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t); }}
+              vcenters={vcenters} vcenterId={vcenterId} onPickVcenter={(id) => patchFilter({ vcenterId: id, region: '' })} />
+          )}
 
           {tabBody}
         </main>

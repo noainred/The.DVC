@@ -51,13 +51,19 @@ function makeArray(vcId, i) {
 }
 
 /**
- * 한 vCenter(법인)의 데모 어레이 계획(순수 · 결정적) — planSanDemo 가 쓰는 것과 같은 목록.
- * v2.915: 스토리지 데모(mock/demo/storage.js)가 PowerMax · VMAX 스냅샷의 시리얼을 여기서 가져와 **포트 이름의 시리얼과 맞춘다** —
- *   그래야 데모의 ‘SAN 비교’ 에서 어레이 전송 속도 대조(arraySerialOf ↔ 스냅샷 serial)가 성립한다(없는 법인은 미대조 상태 그대로).
+ * 한 vCenter(법인)의 데모 어레이 계획(순수 · 결정적) — planSanDemo 가 쓰는 것과 같은 목록(v2.915). 스토리지 데모가 PowerMax · VMAX 등의 시리얼을
+ * 여기서 가져와 포트 이름의 시리얼과 맞춘다(아래 sanDemoArraySerial — v2.952).
  * @returns {Array<{kind:string, serial:string, label:string}>}
  */
 export function sanDemoArraysFor(vcId) {
-  return Array.from({ length: 2 + (demoHash(`${vcId}|arrays`) % 2) }, (_, i) => makeArray(vcId, i));
+  return Array.from({ length: 2 + (demoHash(`${vcId}|arrays`) % 2) }, (_, i) => makeArray(String(vcId || ''), i));
+}
+/**
+ * v2.952 — 그 vCenter(법인)의 데모 어레이 중 종류(powermax · unity · powerstore)가 맞는 첫 번째의 시리얼. 스토리지 데모 스냅샷이 같은 시리얼을 쓰면
+ * SAN 스토리지 성능 화면 · 베어메탈 SAN 비교가 등록 스토리지(용량 · 알람 · 어레이 측 성능)와 짝을 짓는다. 그 법인에 그 종류가 없으면 null.
+ */
+export function sanDemoArraySerial(vcId, kind) {
+  return sanDemoArraysFor(vcId).find((a) => a.kind === kind)?.serial ?? null;
 }
 
 /** 호스트 HBA 두 개(팹 A/B). 메인 스냅샷의 FC HBA WWN 이 형식에 맞으면 그것을, 아니면 합성(Emulex OUI). */
@@ -428,7 +434,8 @@ export function sanDemoOutputs(sw, t = Date.now()) {
     switchshow: switchshowText(sw),
     chassisshow: h.chassis,
     firmwareshow: `Appl     Primary/Secondary Versions\n------------------------------------------\nFOS      ${sw.fos}\n         ${sw.fos}`,
-    licenseshow: [`${lic}SbRZZ:`, '    Fabric license', '    Enhanced Group Management license', '    Fabric Vision license',
+    // v2.935(C-②): Fabric Vision 은 법인 셋 중 둘에만(가상) — 플로우 모니터 · 호스트 SAN 라이선스 띠가 데모에서도 ‘없음’ 을 보이게.
+    licenseshow: [`${lic}SbRZZ:`, '    Fabric license', '    Enhanced Group Management license', ...(demoHash(`${sw.vcId}|fv`) % 3 ? ['    Fabric Vision license'] : []),
       ...(sw.P - sw.licensed < sw.P / 4 && sw.P > 48 ? ['    Ports on Demand license - additional 16 port upgrade'] : [])].join('\n'),
     porterrshow: porterrshowText(sw, t),
     sfpshow: sfpshowText(sw, t),

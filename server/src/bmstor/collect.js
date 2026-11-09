@@ -113,10 +113,13 @@ export function parseDfOutput(stdout, requestedMounts, stderr = '') {
 export async function collectServer(server) {
   const { mounts, errors } = sanitizeMounts(server.mounts);
   if (!mounts.length) return { ok: false, mounts: [], error: errors[0] || '측정할 마운트 포인트가 없습니다.' };
+  // 7b: 키 · 공통 계정 참조를 해석하지 못했으면 접속하지 않는다(bmusage/onboard/refs.js withResolvedAuth — 빈 비밀번호로 시도해 계정을 잠그지 않게).
+  if (server.authError) return { ok: false, mounts: [], error: String(server.authError).slice(0, 300) };
   try {
     const r = await withSsh({
       host: server.host, port: Number(server.port) || 22,
       username: server.username || 'root', password: server.password || '',
+      privateKey: server.privateKey || undefined, passphrase: server.passphrase || undefined,
       readyTimeout: reqTimeoutMs(process.env.BMSTOR_SSH_TIMEOUT_MS, 15_000),   // v2.605 TIM2605-04: [1초, 10분]
     }, async ({ exec }) => {
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);

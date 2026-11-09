@@ -23,6 +23,11 @@ const VALID = new Set(['baremetal', 'virtualization', 'exclude']);
 
 let cache = null;
 let cacheMtimeMs = '';
+/*
+ * v2.923(리눅스 성능 4단계 — 설계 PROFILES §1 ‘수동 태그가 덮어쓴다 · 새 등록부를 만들지 않는다’): 같은 파일에 **용도 태그** `purposes` 를 더한다.
+ *   `{ tags:{…}, purposes:{ <키>:{ apps:[…], role, by, at } } }` — tags 를 쓰는 함수들도 purposes 를 **보존**한다(한쪽 저장이 다른 쪽을 지우지 않게).
+ */
+let purposesCache = {};
 
 // (mtimeMs, size) 복합 토큰 — coarse mtime 동일-틱에 외부 편집된 경우도 size 변화로 무효화.
 function fileMtimeMs() {
@@ -35,9 +40,11 @@ export function loadFleetTags() {
   try {
     const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     cache = p && typeof p.tags === 'object' && p.tags ? p.tags : {};
+    purposesCache = p && p.purposes && typeof p.purposes === 'object' && !Array.isArray(p.purposes) ? p.purposes : {};
   } catch (e) {
     preserveCorrupt(FILE, e.message);
     cache = {};
+    purposesCache = {};
   }
   cacheMtimeMs = mtime;
   return cache;
@@ -56,7 +63,7 @@ export function setFleetTag(key, tag) {
   } else {
     return { ok: false, reason: `잘못된 tag: ${tag}` };
   }
-  try { atomicWriteFileSync(FILE, JSON.stringify({ tags: next }, null, 2)); }
+  try { atomicWriteFileSync(FILE, JSON.stringify(fileBody(next, purposesCache), null, 2)); }
   catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
   cache = next;                 // 디스크 쓰기 성공 후에만 캐시 갱신
   cacheMtimeMs = fileMtimeMs();
@@ -73,7 +80,7 @@ export function pruneFleetTags(liveKeys) {
   for (const [k, v] of Object.entries(cur)) { if (live.has(k)) next[k] = v; else removed += 1; }
   if (!removed) return 0;
   // 쓰기 실패는 '0건 제거'와 구분해 throw — 라우트가 부분실패를 500으로 드러낼 수 있게(조용한 은폐 방지).
-  atomicWriteFileSync(FILE, JSON.stringify({ tags: next }, null, 2));
+  atomicWriteFileSync(FILE, JSON.stringify(fileBody(next, purposesCache), null, 2));
   cache = next;
   cacheMtimeMs = fileMtimeMs();
   bumpFleetRev();
@@ -94,9 +101,90 @@ export function applyFleetExclude(measured) {
   return (measured || []).filter((m) => !isExcluded(m));
 }
 
+/** 파일 본문 — purposes 가 비면 예전 모양({tags}) 그대로 쓴다(이 기능을 안 쓰는 현장의 파일이 바뀌지 않게). */
+function fileBody(tags, purposes) {
+  return purposes && Object.keys(purposes).length ? { tags, purposes } : { tags };
+}
+
+/** v2.923 — 용도 태그 전체(키 → { apps, role, by, at }). */
+export function loadFleetPurposes() { loadFleetTags(); return purposesCache; }
+/** 한 서버의 용도 태그(없으면 null). 키는 서비스태그(또는 서버 ID) — 대소문자 무시. */
+export function fleetPurposeOf(key) {
+  const k = String(key || '').trim().toLowerCase();
+  if (!k) return null;
+  const p = loadFleetPurposes();
+  return Object.hasOwn(p, k) ? p[k] : null;
+}
+const PURPOSE_ID_RE = /^[a-z][a-z0-9-]{0,31}$/;
+/**
+ * 용도 태그 지정/해제(v2.923). value 가 null 이면 해제(자동 감지로 복귀). apps 는 알려진 기능 프로파일 id 만(호출부가 knownApps 로 넘긴다) ·
+ * role 은 knownRoles 중 하나 또는 ''(역할 미지정 → 일반). 반환 { ok, purpose?, reason? }. 디스크 쓰기 성공 뒤에만 캐시를 바꾼다.
+ */
+export function setFleetPurpose(key, value, { by = '', knownApps = [], knownRoles = [] } = {}) {
+  const k = String(key || '').trim().toLowerCase();
+  if (!k) return { ok: false, reason: 'key(서비스태그 또는 서버 ID)가 필요합니다.' };
+  if (k.length > 128 || k === '__proto__' || k === 'constructor' || k === 'prototype') return { ok: false, reason: 'key 형식이 아닙니다.' };
+  const tags = loadFleetTags();
+  const next = { ...purposesCache };
+  let purpose = null;
+  if (value == null) delete next[k];
+  else {
+    const apps = Array.isArray(value.apps) ? [...new Set(value.apps.map((x) => String(x)))] : null;
+    if (apps && apps.some((a) => !PURPOSE_ID_RE.test(a) || !knownApps.includes(a))) return { ok: false, reason: `기능은 ${knownApps.join(' · ') || '(없음)'} 중에서만 고를 수 있습니다(프로파일이 없는 기능은 태그하지 않습니다).` };
+    const role = value.role == null || value.role === '' ? '' : String(value.role);
+    if (role && !knownRoles.includes(role)) return { ok: false, reason: `역할은 ${knownRoles.join(' · ')} 중 하나입니다.` };
+    if (!apps && !role) return { ok: false, reason: 'apps 또는 role 중 하나는 있어야 합니다(둘 다 지우려면 해제).' };
+    purpose = { ...(apps ? { apps } : {}), ...(role ? { role } : {}), by: String(by || '').slice(0, 64), at: Date.now() };
+    next[k] = purpose;
+  }
+  try { atomicWriteFileSync(FILE, JSON.stringify(fileBody(tags, next), null, 2)); }
+  catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+  purposesCache = next;
+  cacheMtimeMs = fileMtimeMs();
+  bumpFleetRev();
+  return { ok: true, purpose };
+}
+
+/**
+ * 7b 온보딩 일괄 — 분류 태그 · 용도/역할을 **한 번** 쓴다(1,000행이 1,000번 쓰지 않게). 검증은 setFleetTag · setFleetPurpose 와 같은 규칙.
+ * @param {{key:string, tag?:string|null, purpose?:{apps?:string[], role?:string}|null}[]} items  tag/purpose 가 undefined 면 그 칸은 그대로
+ * @returns {{ok:true, tags:number, purposes:number} | {ok:false, reason:string, index?:number}}
+ */
+export function setFleetTagsBatch(items = [], { by = '', knownApps = [], knownRoles = [] } = {}) {
+  const tags = { ...loadFleetTags() };
+  const purposes = { ...purposesCache };
+  let nt = 0; let np = 0;
+  for (let i = 0; i < items.length; i += 1) {
+    const it = items[i] || {};
+    const k = String(it.key || '').trim().toLowerCase();
+    if (!k || k.length > 128 || k === '__proto__' || k === 'constructor' || k === 'prototype') return { ok: false, reason: 'key 형식이 아닙니다.', index: i };
+    if (it.tag !== undefined) {
+      if (it.tag == null || it.tag === '' || it.tag === 'auto') delete tags[k];
+      else if (VALID.has(it.tag)) tags[k] = it.tag;
+      else return { ok: false, reason: `잘못된 tag: ${it.tag}`, index: i };
+      nt += 1;
+    }
+    // 2차 재확인 G1: 서비스 태그를 전역 열쇠로 쓸 때 그 서버의 쌍 행(`<법인>|<키>`)을 지운다 — 읽기는 쌍 먼저라 남으면 새 값을 가린다(bmusage/purposeKey.js).
+    if (it.purposeClear === true) { if (Object.hasOwn(purposes, k)) { delete purposes[k]; np += 1; } continue; }
+    if (it.purpose !== undefined && it.purpose !== null) {
+      const apps = Array.isArray(it.purpose.apps) && it.purpose.apps.length ? [...new Set(it.purpose.apps.map(String))] : null;
+      if (apps && apps.some((a) => !PURPOSE_ID_RE.test(a) || !knownApps.includes(a))) return { ok: false, reason: '모르는 기능', index: i };
+      const role = it.purpose.role ? String(it.purpose.role) : '';
+      if (role && !knownRoles.includes(role)) return { ok: false, reason: '모르는 역할', index: i };
+      if (apps || role) { purposes[k] = { ...(apps ? { apps } : {}), ...(role ? { role } : {}), by: String(by || '').slice(0, 64), at: Date.now() }; np += 1; }
+    }
+  }
+  try { atomicWriteFileSync(FILE, JSON.stringify(fileBody(tags, purposes), null, 2)); }
+  catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
+  cache = tags; purposesCache = purposes; cacheMtimeMs = fileMtimeMs();
+  bumpFleetRev();
+  return { ok: true, tags: nt, purposes: np };
+}
+
 /** 테스트/관리용 초기화. */
 export function resetFleetTags() {
   cache = {};
+  purposesCache = {};
   cacheMtimeMs = '';
   try { if (fs.existsSync(FILE)) fs.unlinkSync(FILE); } catch { /* */ }
 }
