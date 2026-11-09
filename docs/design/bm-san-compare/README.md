@@ -1,7 +1,7 @@
 # 설계: 베어메탈 스토리지 ↔ SAN(VMAX · PowerMax) 비교 — 디스크 사용률 · 전송 속도를 숫자로 한 표에
 
 작성 2026-11-09 (main v2.914.0 기준 · 브랜치 `claude/festive-curie-16lmut`) · 상태 **시안 — 컨펌 대기**
-시안 캔버스: https://claude.ai/artifact/Ww4x7UTUS5CYbY3cVJhAdB (아트보드 5장 — ⓪ 지금 · ① 1440 · ② 400 · ③ 상태 6종 · ④ 대안).
+시안 캔버스: https://claude.ai/artifact/Ww4x7UTUS5CYbY3cVJhAdB (아트보드 6장 — ⓪ 지금 · ① 1440 · ② 400 · ③ 상태 6종 · ④ 대안 · ⑤ 법인별 보기).
 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스(HTML 프로토타입 — 복사 대상이 아님). **서버 · 어레이 이름과 수치는 전부 가상**(베어메탈은 데모(mock) 사양, 어레이 `PMAX-2500-KR1` 등은 지어낸 이름).
 색 · 글자는 `web/src/styles.css` `:root` 토큰과 `.bm2-*`(v2.688 베어메탈 시안) 그대로(새 hex 없음). 계정의 ‘Design System’ 아티팩트는 없다(목록으로 확인).
 규칙(2026-11-03 ‘기억해’): 설계는 Fable + Claude Design 시안 → **컨펌 뒤** Opus 구현. §2 는 이 세션(Fable)이 코드로 확인한 사실이다.
@@ -10,6 +10,7 @@
 
 > "베어메탈 스토리지 라는 특수기능이있는데, 그 베어메탈 스토리지의 실시간 디스크 사용율을 파악하고 싶어, 그래서 SAN vmax, pmax 사용율/전송 속도와 숫자로 비교하고 싶어, 기능 만들어줘"
 > → 진행 방식 질문에 "시안 보여줘".
+> → 시안을 본 뒤(10:30 KST) 다른 화면의 ‘⚡ 바로가기’ 칩 줄 캡처(AZ · AZ-IRS · GM1 … 숫자 = 그 vCenter 의 조치 필요 VM · 고른 법인은 파랗게 · 접기)와 함께 **"법인별로 볼 수 있는 기능 추가"** → 보드 ⑤ · §4.4.
 
 ## 2. 지금 코드에서 확인한 것(설계의 근거 — 2026-11-09 08:49~08:53 KST)
 
@@ -61,6 +62,17 @@
 ### 4.3 바뀌지 않는 것
 도구 키 `bm-storage` · 권한 · 카탈로그 · 12시간 이력 DB · SAN 스위치 화면 · 스토리지 모니터링 화면 · vCenter 호출 0.
 
+### 4.4 법인별 보기(요청 2차 — 보드 ⑤)
+- **칩 줄은 공용 `DeviceFacetBar`(`views/tools/DeviceFacetBar.jsx` · 판정 `deviceFacets.js facetState`)** 를 쓴다 — 캡처의 ‘바로가기’ 칩(`.vc-quicknav` · `.qn-btn` · `.qn-dot`)과 같은 모양이고 스토리지 모니터링 · 증가량 화면이 이미 쓰는 부품이다(‘다른 화면과 동일하게’ = 같은 컴포넌트). 여러 법인 선택 · `✕ 필터 해제` · 주소 `?dc=a,b` 로 북마크. `dcMeta` 로 점(그 법인의 최고 사용률 색)과 숫자(비교 대상 = 베어메탈 서버 + 어레이 수)를 붙인다. 숫자의 뜻은 캡처(조치 필요 VM)와 다르므로 칩 줄 아래 한 줄로 밝힌다.
+- **베어메탈 서버에는 지금 법인 축이 없다**(`agent` 뿐 — v2.612 ‘베어메탈 서버는 법인 축이 없다(엣지만)’). 출처를 이 순서로 정한다(순수 함수 `bmstor/corp.js datacenterOfBmServer(server, { collectors, datacenterOfVcenter })`):
+  1. 서버 등록 폼의 **‘법인’ 선택(새 필드 `datacenterId` · 선택)** — 스토리지 장비 폼과 같은 DataCenter 목록(`listDatacenters()`). CSV 열 `datacenter`(id 또는 이름 — 저장은 id · 모르는 값은 드라이런 오류). 비우면 기존 유지.
+  2. 비어 있고 `agent` 가 있으면 **그 엣지의 법인** — 수집 서버(원격) 레코드의 `vcenterId` → `datacenterOfVcenter()`(법인 · vCenter · 엣지 1:1:1). 응답에 `datacenterSource: 'edge'` 를 실어 화면이 ‘엣지로 추정’ 표지를 붙인다. 수집 서버의 자유 문자열 `datacenter`(이름)는 id 가 아니라 쓰지 않는다 — 이름 대조로 억지 매칭하지 않는다.
+  3. 둘 다 없으면 `''` → 칩 ‘(법인 미지정)’(`NONE_DC` 센티널 — SAN 스위치 화면과 같은 규칙). 숨기지 않는다.
+- SAN 쪽은 이미 있다 — 어레이 `datacenterId`(등록값), 전송 속도는 **그 법인 스위치만** 합산(`storageSeriesMulti` 에 `groupOf` = 법인 → `series.group`; 어레이 대조 키에 법인을 넣는다 — `storage-summary` 의 `capKey(dc, serial)` 와 같은 이유: 법인별로 볼 때 다른 법인 어레이의 트래픽을 붙이지 않는다).
+- 비교 API: `?datacenterId=a,b`(빈 값 = 전체 · `__none__` = 미지정). 법인을 고르면 `bm.groups` 는 **그 법인 서버만으로 다시 합산**(`aggregate(servers.filter(inDc), latest)` — 코어 재사용 · 복제 금지)하고 표의 ‘법인 · 그룹’ 열이 ‘서울 2/3대’(그룹 전체 중 이 법인 대수)를 말한다. 어레이는 그 법인 것만. 여러 법인이면 법인마다 합계 행(SAN 스위치 split 규칙). 법인 칩의 개수 · 점은 **필터 전 전체**로 계산해 응답에 `datacenters: [{id,name,servers,arrays,maxPct}]` 로 싣는다(화면이 다시 세지 않는다).
+- 그룹과 법인을 섞지 않는다 — 그룹은 관점별 묶음(최대 3개) · 법인은 서버당 하나. 데모 시드의 ‘서울’ · ‘프랑크푸르트’ 는 그룹 이름이므로 데모 서버에 `datacenterId` 를 따로 넣는다(데모 법인 = 데모 vCenter 의 DataCenter).
+- 범위 계정은 이 화면에 오지 않는다(403 — 전체 범위 관리자 전용)이므로 법인 필터와 scope 교집합 문제는 없다. 비-관리자 상세 계정 가림도 해당 없음(주소를 싣지 않는다).
+
 ## 5. 화면(IA) — 아트보드 5장
 
 | 보드 | 파일 | 내용 |
@@ -70,6 +82,7 @@
 | ② | `Narrow.dc.html` | **400** — 같은 화면. 요약은 세로, 비교 표는 행 카드, 서버별 I/O 는 접힘 |
 | ③ | `States.dc.html` | 상태 6종 — SAN 어레이 없음 · 포트 사용량 수집 꺼짐 · 시리얼 미대조 · 베어메탈 측정 불가 4가지 · 측정 중 · 403 |
 | ④ | `Alt.dc.html` | 대안 — A 탭(추천) vs B 새 특수 기능 ‘스토리지 비교’ · C 주기 하한 1분 + 버튼(추천) vs D 화면이 열려 있는 동안 자동 1분 측정 |
+| ⑤ | `Corp.dc.html` | **법인별 보기(요청 2차)** — ① 의 도구 모음 아래 ‘법인 바로가기’ 칩 줄(공용 DeviceFacetBar · 점 = 최고 사용률 색 · 숫자 = 비교 대상 수 · 고른 법인은 파랗게 · 여러 개 선택). ‘서울’ 을 고른 화면: 요약 · 비교 표가 그 법인으로 좁혀지고 베어메탈 그룹은 그 법인 서버만으로 다시 합산(‘서울 2/3대’). 아래 패널이 **베어메탈 서버의 법인 출처 4규칙**과 서버 폼의 새 칸 ‘법인(선택 · 비우면 엣지의 법인)’ 을 보인다. ① · ② 에도 같은 칩 줄을 넣었다 |
 
 색 규칙: 베어메탈 = 민트(`--mint`), SAN = 파랑(`--accent`), VMAX 배지 보라 · PowerMax 배지 파랑, 부분 합 · 측정 없음 = 호박색(`--amber`), 사용률 색은 현황 탭의 `pctColor`(90 빨강 · 75 호박). `BoldText` 규약(백틱 금지 · 인용은 ‘ ’) · `STable`(`data-sort` · `data-pin` 합계 행 · null 은 뒤) · `text-transform` 없음.
 
@@ -83,11 +96,12 @@
 | 4 | SAN 종류 | VMAX · PowerMax 기본, 칩으로 Unity · PowerStore · XtremIO 확장 | VMAX · PowerMax 고정 |
 | 5 | 전송 속도 기준 | 1시간 평균 기본 · 피크 토글 · 24시간 · 7일 | 24시간 기본 |
 | 6 | 검증 | 표준(변경 모듈 테스트 + 엣지 회신 정제 변이 확인 + 전량 1회 + Chromium 1440/400) | 전체(반증 에이전트 · A/B) / 빠르게(Chromium 생략) |
+| 7 | 베어메탈 법인 축(요청 2차) | 서버 폼 ‘법인’ 선택(새 필드) → 비우면 엣지의 법인 → ‘(법인 미지정)’ | 폼 필드 없이 엣지 법인만(중앙 직접 서버는 전부 미지정) / 그룹 이름을 법인으로 간주(권하지 않음 — 그룹은 관점별 묶음) |
 
 ## 7. 구현 순서(컨펌 뒤 · 규칙상 Opus)
 
 1. `bmstor/diskstats.js`(순수 — parse · rate) + `collect.js` 명령 1개 추가 + `poller.js sanitizeBmResult`(폴링 · PUSH 공용) + `agent/bmstorWorker.js` 회신 필드 + `agg.js` io 합 + 데모 I/O. 테스트 `server/test/bmstorIo29xx.test.js`(파서 · 중복 장치 제외 · 카운터 역행 · 정제 변이 · PUSH 정제 · 부분 합).
-2. `bmstor/compare.js`(순수 — 시리얼 대조 · 요약 계산) + `routes/api/bmstor.js` compare 라우트 + 테스트(범위 계정 403 · 주소 미포함 · 미대조 사유 코드).
-3. 웹 `views/tools/BmSanCompare.jsx` + `bmSanCompareText.js`(fmtBps · 차이 · 배율 · 기준 문장 · 사유 코드→문장) + `BmStorageTool.jsx` 하위 탭(`useHashTab`) + vitest.
+2. `bmstor/compare.js`(순수 — 시리얼 대조 · 요약 계산 · 법인 칩 개수) + `bmstor/corp.js`(서버 법인 출처) + 등록부 `datacenterId` 필드 · CSV 열 + `routes/api/bmstor.js` compare 라우트(`datacenterId` 필터) + 테스트(범위 계정 403 · 주소 미포함 · 미대조 사유 코드 · 법인 출처 3규칙 · 법인별 재합산).
+3. 웹 `views/tools/BmSanCompare.jsx` + `bmSanCompareText.js`(fmtBps · 차이 · 배율 · 기준 문장 · 사유 코드→문장 · ‘서울 2/3대’) + `DeviceFacetBar` 재사용(법인 칩 · `?dc=`) + `BmStorageTool.jsx` 하위 탭(`useHashTab`) + 서버 폼 ‘법인’ 선택 + vitest.
 4. 문서 — `docs/rules/storage.md` 항목 · `specialToolsList.js` 설명에 ‘SAN 비교’ · API 문서 생성기 · 릴리스 노트 · 버전.
 5. 검증 — 변경 모듈 테스트 → 빌드 → Chromium 1440/400(admin) → 전량 verify(백그라운드) → PR → CI → 머지 → 릴리스 → `versions.json`.
