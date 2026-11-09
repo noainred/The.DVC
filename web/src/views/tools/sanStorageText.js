@@ -85,6 +85,25 @@ export function imbalanceTag(row) {
   if (!row?.imbalance) return null;
   return { tone: 'warn', text: `편중 · ${row.imbalance.group} ${row.imbalance.ratio}×` };
 }
+/**
+ * v2.954(점검 E-3): 어레이 상세의 '편중 후보' 판정 — 서버 storageList.directorsOf 와 같은 규칙(테스트가 같은 입력으로 대조)을 API 의 imbalanceRule
+ * (minBps · ratio — /tools/san-storage/check-settings)로 본다. 디렉터 평균 ≥ minBps · 표본 있는 디렉터 2개 이상 · 최대 디렉터 배수(소수 둘째 자리) ≥ ratio.
+ * 예전에는 화면 상수 1.4 만 보고 최소 처리량 조건이 없어 한가한 어레이에서 현황 · 점검('편중 없음')과 다른 결론을 냈다.
+ * @param {Array<{group:string, avg:number|null}>} dirs  디렉터별 평균 처리량(bytes/s · 결측 null)
+ * @param {{minBps:number, ratio:number}|null} rule
+ * @returns {{state:'unknown'|'none'|'low'|'skewed', group?:string, ratio?:number, mean?:number|null}}
+ */
+export function directorSkew(dirs = [], rule = null) {
+  const minBps = numOrNull(rule?.minBps); const ratio = numOrNull(rule?.ratio);
+  if (minBps == null || ratio == null) return { state: 'unknown' };
+  const measured = (Array.isArray(dirs) ? dirs : []).map((d) => ({ group: d?.group, avg: numOrNull(d?.avg) })).filter((d) => d.avg != null);
+  const mean = measured.length ? measured.reduce((a, d) => a + d.avg, 0) / measured.length : null;
+  if (mean == null || measured.length < 2) return { state: 'none', mean };
+  if (mean < minBps) return { state: 'low', mean };
+  const top = measured.reduce((a, d) => (a == null || d.avg > a.avg ? d : a), null);
+  const r = mean > 0 ? Math.round((top.avg / mean) * 100) / 100 : null;
+  return r != null && r >= ratio ? { state: 'skewed', group: top.group, ratio: r, mean } : { state: 'none', mean };
+}
 
 /** '실시간' 알약 — 마지막 표본 · 주기(API 값) · 화면 갱신 주기. 숫자를 박지 않는다. */
 export function liveText({ lastSampleAt, intervalMs, pollMs, now = Date.now() } = {}) {
@@ -138,7 +157,7 @@ export function kpisOf(data) {
     { k: 'now', label: '지금 합계 처리량', sub: '어레이 포트만', value: nowB == null ? '—' : gbps(nowB).toFixed(1), unit: nowB == null ? '' : 'Gb/s', tone: 'mint',
       meta: nowB == null ? '팹 A/B 표본이 다 모인 칸이 아직 없습니다 — 0 이 아닙니다' : `1시간 평균 ${rateText(avgB)}${diff != null ? ` 보다 ${diff >= 0 ? `${diff}% 높음` : `${-diff}% 낮음`}` : ''}${tb != null ? ` · 하루 환산 약 ${tb >= 10 ? tb.toFixed(0) : tb.toFixed(1)} TB` : ''}` },
     { k: 'util', label: '회선 사용률(합)', value: util == null ? '—' : util.toFixed(1), unit: util == null ? '' : '%', tone: '',
-      meta: t.speedSumBps ? `분모 = 어레이 포트 속도 합 ${rateText(t.speedSumBps)}${t.unknownSpeedPorts ? ` · 속도 모르는 포트 ${t.unknownSpeedPorts}개 제외` : ''}` : '포트 속도를 아직 모릅니다' },
+      meta: t.speedSumBps ? `분모 = 지금 값이 있는 어레이의 포트 속도 합 ${rateText(t.speedSumBps)}${t.unknownSpeedPorts ? ` · 속도 모르는 포트 ${t.unknownSpeedPorts}개 제외` : ''}` : '포트 속도를 아직 모릅니다' },
     { k: 'arrays', label: '스토리지 어레이', value: String(t.arrays ?? 0), unit: '대', tone: '',
       meta: `호스트(HBA) ${counts.host ?? 0} · 미확인 ${counts.unknown ?? 0} · 법인 ${(data?.allDatacenters || []).length}` },
     { k: 'imbalance', label: '디렉터 · 컨트롤러 편중', value: String(t.imbalance ?? 0), unit: '건', tone: (t.imbalance || 0) > 0 ? 'warn' : '',
@@ -384,4 +403,15 @@ export function daysText(d) {
   if (d == null || d === '' || Number.isNaN(Number(d))) return '—';
   const n = Math.round(Number(d));
   return n > 3650 ? '10년 이상' : `${n.toLocaleString('en-US')}일`;
+}
+
+/**
+ * 월간 보고서 '받는 사람' 칸의 안내(v2.954 점검 A-3). 비관리자 판본은 서버가 주소 대신 개수(toCount · toHidden)만 준다 —
+ * 빈 칸이 '비우면 기본 수신자' 로 읽히지 않게 지정 수를 알린다. 개수를 못 읽었으면 단정하지 않는다.
+ */
+export function reportToPlaceholder(settings) {
+  if (!settings?.toHidden) return 'storage-team@example.com, ...';
+  const n = Number.isFinite(settings.toCount) ? settings.toCount : null;
+  if (n == null) return '받는 사람 주소는 관리자만 봅니다';
+  return n > 0 ? `받는 사람 ${n}명 지정됨 — 주소는 관리자만 봅니다` : '지정 없음 — 기본 수신자로 보냅니다';
 }
