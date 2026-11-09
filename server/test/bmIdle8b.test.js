@@ -91,6 +91,15 @@ test('③ 하루 계산 — 실제 일 롤업 · 전력 0 W 시간 · 이력 · 
   const { config } = await import('../src/config.js');
   const agent = config.agent?.name || '';
   const db = await import('../src/bmusage/db.js');
+  /*
+   * ⚠ 정정(다음 점검 ② 작업 중 발견 — 기준판 d98a42e5 에서도 실패): 예전 기준 NOW(정시 −30분)로는 **KST 23:00~00:59** 에 실행하면(가짜 시계 재현 — 22:59 통과 · 23:00 · 00:59 실패 ·
+   *   01:00 통과) d=1 의 +2h 행(= NOW − 22h)이 ‘오늘(KST · 끝나지 않은 날)’ 로 들어와 NEW1 days 가 9 였다(시각 의존 — common.md 기준 시각 규약).
+   *   ⚠ 정정(반증 n2 F6): 첫 판 주석은 이 구간을 ‘KST 22시대’ 라고 잘못 적었다. 이 시험만 **포탈 날(KST) 시작 + 30분**(과거 · 한 시간 당겨 잡아 자정 직후에도 과거)을
+   *   기준으로 둔다 — 행은 늘 그 날 02:30 · 14:30 이다.
+   */
+  const { DAY_OFFSET_MIN } = await import('../src/util/dayKey.js');
+  const OFF = DAY_OFFSET_MIN * 60_000;
+  const NOW = Math.floor((Date.now() - HOUR + OFF) / DAY) * DAY - OFF + 30 * 60_000;
   const rows = [];
   for (let d = 25; d >= 1; d -= 1) for (const h of [2, 14]) {
     const ts = NOW - d * DAY + h * HOUR;
@@ -147,12 +156,19 @@ test('⑤ 라우트 — 이 노드 + 엣지 · 범위 · 검토 상태(대기 ·
   poller._setFleetForTest(async () => ({ bareMetal: [{ serverId: 's-i1', name: 'bm-idle', serviceTag: 'IDLE1', vcenterId: 'vcI' }, { serverId: 's-j1', name: 'bm-j1', serviceTag: 'JTAG1', vcenterId: 'vcJ' }], virtualizationHosts: [] }));
   (await import('../src/bmusage/settings.js'))._resetForTest();
   t.after(() => poller._setFleetForTest(null));
-  I.saveIdle({ v: 1, at: NOW, day: '2026-11-08', firstDay: '2026-09-01', cfg: I.IDLE_DEFAULTS, rows: [
+  /*
+   * ⚠ 정정(반증 n2 F8 — 기준판도 같다): 엣지 firstDay 를 '2026-11-01' 로 박아 두어 **2026-12-01 10:00 KST 부터 상시 실패**했다(30일이 지나 ‘이력 30일 미만’ 단언이 거짓이 됨 ·
+   *   가짜 시계 재현). 날짜는 전부 NOW 에서 만든다(포탈 날 dayKey — 로컬 60일 전 · 엣지 10일 전 → 30일 미만 · 아래에서 40일 전 → 값 있음).
+   */
+  const { dayKey } = await import('../src/util/dayKey.js');
+  const dk = (ms) => dayKey(ms);
+  I.saveIdle({ v: 1, at: NOW, day: dk(NOW), firstDay: dk(NOW - 60 * DAY), cfg: I.IDLE_DEFAULTS, rows: [
     { key: 'IDLE1', vcenterId: 'vcI', name: 'bm-idle', status: 'candidate', score: 92, metrics: { powerAvgW: 150 }, candSince: new Date(NOW - 3 * DAY).toISOString().slice(0, 10) },
     { key: 'JTAG1', vcenterId: 'vcJ', name: 'bm-j1', status: 'candidate', score: 80, metrics: {} },
   ], history: [] });
   const E = await import('../src/central/bmUsageEdgePull.js');
-  E.putEdgeBmUsage('edge-i', { ok: true, snap: { targets: [{ key: 'EI1', name: 'bm-e', vcenterId: 'vcI' }], idleVer: 1, idle: { at: NOW, day: '2026-11-08', firstDay: '2026-11-01', rows: [{ key: 'EI1', status: 'watch', score: 55 }] } } });
+  const edgeIdle = (firstDay) => E.putEdgeBmUsage('edge-i', { ok: true, snap: { targets: [{ key: 'EI1', name: 'bm-e', vcenterId: 'vcI' }], idleVer: 1, idle: { at: NOW, day: dk(NOW), firstDay, rows: [{ key: 'EI1', status: 'watch', score: 55 }] } } });
+  edgeIdle(dk(NOW - 10 * DAY));
   E.putEdgeBmUsage('edge-old', { ok: true, snap: { targets: [{ key: 'OI1', name: 'bm-o', vcenterId: 'vcI' }] } });
   t.after(() => E._resetForTest());
   const audits = [];
@@ -165,6 +181,9 @@ test('⑤ 라우트 — 이 노드 + 엣지 · 범위 · 검토 상태(대기 ·
   const src = Object.fromEntries(f.sources.map((s) => [s.node, s]));
   assert.equal(src['edge-old'].old, true, '구버전 엣지 = 표지');
   assert.equal(f.summary.month, null, '엣지 계산 이력이 30일 안 되면 지난 30일 칸은 —(모두 새 후보로 보이지 않게)');
+  edgeIdle(dk(NOW - 40 * DAY));
+  assert.notEqual((await R.bmIdleFleet(adm, { vcenters: [{ id: 'vcI' }, { id: 'vcJ' }] }, deps)).summary.month, null, '이력이 30일을 넘으면 지난 30일 칸에 값(대조 — 같은 단언이 날짜와 무관하게 갈린다)');
+  edgeIdle(dk(NOW - 10 * DAY));
   const opI = { user: { username: 'opi', role: 'operator', scope: { vcenters: ['vcI'] } }, query: {}, params: {}, body: {} };
   const fi = await R.bmIdleFleet(opI, { vcenters: [{ id: 'vcI' }, { id: 'vcJ' }] }, deps);
   assert.ok(fi.rows.every((x) => x.vcenterId === 'vcI'), '범위 계정은 자기 법인 행만'); assert.equal(fi.summary.candidate, 1);

@@ -37,3 +37,27 @@ export function edgeCorpsSource() {
     return edgeCorpIds({ agent }, idx);
   };
 }
+
+/**
+ * 반증 n2 F4(전력 알림 판정 노드 — powerJudge.js): 법인(vCenter id) → 그 법인을 맡은 엣지 이름(원형 · 없으면 '').
+ *   같은 edgeCorpIndex(입력 네 가지)를 뒤집는다. 두 엣지가 같은 법인을 주장하면 이름순 첫 엣지(어느 쪽이든 ‘엣지가 맡음’ 이라 중앙은 판정하지 않는다).
+ *   ⚠ 매핑은 순간 상태다(점검중 · 엣지 보고 만료면 비는 원천이 있다) — 이 함수는 저장하지 않고 판정할 때마다 만든다(그 순간 비면 중앙이 판정할 수 있다 — 정직 기록).
+ * @returns {(vc:string) => string}
+ */
+export function corpOwnerSource() {
+  let owners = null;
+  return (vc) => {
+    if (!owners) {
+      owners = new Map();
+      const safe = (fn) => { try { const v = fn(); return Array.isArray(v) ? v : []; } catch { return []; } };
+      const idx = edgeCorpIndex({
+        registry: safe(() => loadVcenterConfig().vcenters),
+        inventory: safe(() => listInventory()),
+        vcenters: safe(() => store.get()?.vcenters),
+        bareMetal: safe(() => getEdgeFleetServers()),
+      });
+      for (const agent of [...idx.keys()].sort()) for (const id of idx.get(agent)) if (!owners.has(id)) owners.set(id, agent);
+    }
+    return owners.get(String(vc ?? '').trim()) || '';
+  };
+}

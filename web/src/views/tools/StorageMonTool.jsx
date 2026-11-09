@@ -982,6 +982,8 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   // v2.540: 용량 산정이 쓰는 추이 점 — `CapacityTrend` 가 이미 불러온 것을 올려받는다(새 API 왕복 0).
   // ⚠ 훅은 조기 return 위에 둔다(React #310 — v2.202 실제 사고).
   const [trendPoints, setTrendPoints] = useState(null);
+  // v2.938: 노드 표 ID 열 → 노드 부하 구역의 드로어(그 노드의 클라이언트·프로토콜). 같은 노드를 다시 눌러도 열리게 시각을 함께 둔다.
+  const [nodeReq, setNodeReq] = useState(null);
   const s = r.snap;
   // 수집 방식/타입별 UI 분기(v2.325, 사용자 요구 '가져오는 정보에 맞는 최적 UI·최대한 많은 정보').
   // SSH(isi status): 시리얼 없음 · 클러스터 헬스/감축비/효율/VHS/L3/Critical Events/Job Status +
@@ -1186,7 +1188,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               노드 표제도 타입에 맞춘다(컨트롤러/SP/디렉터). */}
           {/* v2.926 노드 부하 추이(사용자 요청 — 아이실론 노드별 네트워크·디스크·CPU 저장 + 차트 · 이전 구간 · 지난주 비교 · 잡 엔진).
               Isilon 만(다른 타입 수집기는 노드 처리량을 재지 않는다 — 값이 없으면 패널이 스스로 그리지 않는다). */}
-          {r.type === 'isilon' && nodeList.length > 0 && <NodeLoadPanel deviceId={r.id} snap={s} isEdge={!!r.agent} />}
+          {r.type === 'isilon' && nodeList.length > 0 && <NodeLoadPanel deviceId={r.id} snap={s} isEdge={!!r.agent} openNode={nodeReq} />}
           {nodeList.length > 0 && (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '스토리지 컨트롤러' : r.type === 'unity480' ? '스토리지 프로세서(SP)' : (r.type === 'vplex' || r.type === 'metronode') ? '디렉터' : '노드'} {nodeList.length}{s.nodes.count > nodeList.length ? ` (표시 상한 — 전체 ${s.nodes.count})` : ''}</div>
@@ -1210,7 +1212,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                   <tbody>
                     {nodeList.map((n) => (
                       <tr key={n.id}>
-                        <td style={{ textAlign: 'right' }}>{n.id}</td>
+                        <td style={{ textAlign: 'right' }} data-sort={String(n.id)}>{r.type === 'isilon'
+                          ? <button type="button" className="cell-link" title="이 노드의 클라이언트·프로토콜 — 위 노드 부하 구역에 드로어로 펼칩니다" onClick={() => setNodeReq({ id: n.id, at: Date.now() })}>{n.id}</button>
+                          : n.id}</td>
                         {ncol.name && <td style={{ whiteSpace: 'nowrap' }}>{n.name || '—'}</td>}
                         <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{n.ip || '—'}</td>
                         {ncol.serial && <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, whiteSpace: 'nowrap' }} title={nodeSerialTitle(n) || undefined}>{n.serial || <span className="muted">—</span>}</td>}

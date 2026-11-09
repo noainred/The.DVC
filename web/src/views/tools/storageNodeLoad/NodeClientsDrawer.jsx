@@ -11,8 +11,14 @@ import { opsText, latText, rateText, shareText, clientNameText, lateNote, drawer
 
 const RANGES = [{ key: '24h', label: '24시간' }, { key: '7d', label: '7일' }];
 
-export default function NodeClientsDrawer({ deviceId, node, end = null, offsetMin = 540, onClose, onOverlay }) {
+export default function NodeClientsDrawer({ deviceId, node, end = null, offsetMin = 540, onClose, onOverlay, scrollKey = null }) {
   const [range, setRange] = useState('24h');
+  const rootRef = useRef(null);
+  // v2.939: 바깥(노드 표 ID 열)이 열었으면 드로어 자체를 화면 위로 — 구역 머리를 올리면 400px 에서 드로어가 뷰 아래로 밀렸다(Chromium 판독).
+  useEffect(() => {
+    if (scrollKey == null) return;
+    try { rootRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); } catch { /* 테스트 환경 */ }
+  }, [scrollKey]);
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -33,7 +39,7 @@ export default function NodeClientsDrawer({ deviceId, node, end = null, offsetMi
   const protos = ready ? protoSummaryOf(d.protos) : [];
   const fixedN = ready ? d.clients.filter((c) => c.fixed).length : 0;
   return (
-    <section className="nl-drawer" aria-label={`노드 ${node} 클라이언트`}>
+    <section className="nl-drawer" aria-label={`노드 ${node} 클라이언트`} ref={rootRef}>
       <div className="nl-drawerhead">
         <b>노드 {node} · 클라이언트와 프로토콜</b>
         <div className="nl-seg" role="group" aria-label="드로어 기간">
