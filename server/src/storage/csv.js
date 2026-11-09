@@ -20,6 +20,7 @@ import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../u
 import { analyzeBulkImport } from '../util/bulkImport.js';
 import { parseFreeRows, rowsToFreeText, unmark, EMPTY_MARK } from '../util/bulkText.js';
 import { isKnownType, isImplementedType, STORAGE_TYPES, collectMethodsFor, defaultCollectMethod } from './types.js';
+import { isFePerfType } from './collectors/arrayPerf.js';   // v2.955 REST 어레이도 nodeLoad 칸
 
 // 내보내기/샘플 공통 컬럼 순서(password 는 가져오기 전용이라 맨 끝 — export 는 값 비움).
 // v2.938: `nodeLoad` — 아이실론의 '노드 부하 표본 수집'(registry.nodeLoadEnabled). 헤더로 읽으므로 위치는 자유지만 password 는 끝(가져오기 전용).
@@ -32,9 +33,13 @@ const bool = (v, dflt = true) => {
 };
 /** 세 값 불리언 — 빈 칸은 **undefined(유지)**. `enabled` 와 달리 비웠다고 켜지 않는다(가져오기가 꺼 둔 장비를 조용히 켜지 않게). */
 const triBool = (v) => (String(v ?? '').trim() === '' ? undefined : bool(v));
-/** 내보낼 노드 부하 표본 수집 값 — 아이실론만 true|false, 다른 타입은 빈칸(해당 없음 — 가져오기도 빈칸은 유지). */
+/**
+ * 내보낼 노드 부하 표본 수집 값 — 표본을 낼 수 있는 장비(아이실론 · REST 로 수집하는 PowerMax/PowerStore/Unity — registry.normalizeDevice sampleCapable 과 같은 조건)만 true|false,
+ * 그 밖은 빈칸(해당 없음 — 가져오기도 빈칸은 유지). v2.955: v2.951 의 REST 어레이 토글(디렉터 · 노드 · SP 성능 표본)이 CSV 에 빠져 있던 것을 채움.
+ */
 export function exportedNodeLoad(d) {
-  return d?.type === 'isilon' ? (d.nodeLoadEnabled === false ? 'false' : 'true') : '';
+  const capable = d?.type === 'isilon' || (isFePerfType(d?.type) && String(d?.collectMethod || 'api') === 'api');
+  return capable ? (d.nodeLoadEnabled === false ? 'false' : 'true') : '';
 }
 
 
@@ -163,7 +168,7 @@ export function sampleCsv() {
     csvLine([`# type: ${impl} 중 하나`, '# name: 표시명', '# host: IP/FQDN', '# username: 접속 계정',
       '# collectMethod: 방식이 둘인 타입(isilon·powerstore·unity480)은 ssh|api — 비우면 그 타입 기본값으로 저장됩니다',
       '# sshPort: ssh 일 때만 의미(기본 22)', '# datacenter: 법인 이름 또는 ID(비우면 미지정)',
-      '# agent: 엣지 이름(비우면 중앙 직접 수집)', '# enabled: true|false', '# nodeLoad: 아이실론만 true|false(노드 부하 표본 수집 — 비우면 기존 유지·신규는 켬)', '# note: 메모', '# password: 비우면 기존 유지(신규는 없음)']),
+      '# agent: 엣지 이름(비우면 중앙 직접 수집)', '# enabled: true|false', '# nodeLoad: 아이실론 · REST 어레이(PowerMax/PowerStore/Unity) true|false(노드 부하 · 디렉터 성능 표본 수집 — 비우면 기존 유지·신규는 켬)', '# note: 메모', '# password: 비우면 기존 유지(신규는 없음)']),
     csvLine(['isilon', 'WA-Isilon-01', '10.20.0.50', 'root', 'ssh', '22', 'WA', 'WA-Edge', 'true', 'true', '법인 WA 아카이브', 'ChangeMe!1']),
     csvLine(['unity480', 'KR-Unity-01', '10.10.0.9', 'service', 'ssh', '22', '한국', '', 'true', '', 'SSH(uemcli) 수집', 'ChangeMe!2']),
   ];

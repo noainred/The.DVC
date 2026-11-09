@@ -433,7 +433,7 @@ export function demoArrayPerfSample(spec, t = Date.now()) {
   const units = names.map((name, i) => {
     const skew = i === 0 ? 1.35 : 0.85;
     const load = Math.min(1, Math.max(0.05, dayProf * skew * jig(`l${i}`, 0.2)));
-    const u = { name, kind, iops: Math.round(4000 + 26000 * load), hbps: Math.round(60e6 + 420e6 * load), lat: type === 'unity480' ? null : Math.round((0.4 + 2.2 * load * load) * 10) / 10 };
+    const u = { name, kind, iops: Math.round(4000 + 26000 * load), hbps: Math.round(110e6 + 760e6 * load), lat: type === 'unity480' ? null : Math.round((0.4 + 2.2 * load * load) * 10) / 10 };
     if (kind === 'fa') { u.busy = Math.round(Math.min(98, 15 + 62 * load) * 10) / 10; u.queue = Math.round(Math.min(95, 8 + 55 * load * load) * 10) / 10; }
     else u.cpu = Math.round(Math.min(97, 12 + 58 * load) * 10) / 10;
     return u;

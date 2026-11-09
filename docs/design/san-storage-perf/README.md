@@ -201,7 +201,7 @@
   (`applicable · marks · summary · reason`). 화면: 선 차트의 고리 표시 + 범례 '평소와 다름 n/m칸' · 히트맵 칸 테두리(`foldHeatmap(..., marks)` 가 칸마다 `off` 수를 센다).
 - (G) 월간 보고서 `sanswitch/storagePerfReport.js`(순수 — 설정 정규화 · `monthlySlot` · `planMonthlyTick`(none/send/missed/rebase · 유예 30분 · 몰아서 보내지 않음) · `buildReportModel` ·
   `renderReportHtml`(자급형 HTML · 스크립트 없음 · 인쇄 CSS · 절마다 가로 스크롤) · `reportMailParts`) + `storagePerfReportMail.js`(실행기 60초 틱 · 메일 종류 `san-storage-report`).
-  **PDF 는 직접 만들지 않는다**(정직 — §12.2-8 의 '월간 점검 PDF 인프라 재사용' 전제가 틀렸다: 저장소에 PDF 생성기 · 한글 글꼴이 없다. 브라우저 인쇄 → PDF 로 안내). 라우트 `GET /report` ·
+  **PDF 는 직접 만들지 않는다**(v2.953 당시 기록 — ⚠ v2.955 정정: '저장소에 PDF 생성기 · 한글 글꼴이 없다' 는 **틀렸다**. 웹에 jsPDF + Pretendard KS X 1001 서브셋(`reportExport.saveDocAsPdf` · SAN 월간 점검이 이미 씀)이 있었고 §8.4 에서 화면 PDF 를 붙였다. 서버 쪽 생성기가 없는 것만 맞다. 브라우저 인쇄 → PDF 로 안내). 라우트 `GET /report` ·
   `PUT /report-settings` · `GET /report/preview`(HTML · `?format=json`) · `POST /report/send-now`(SMTP 꺼짐 · 실패면 409 — 보냈다고 말하지 않는다).
 - (J) 공개 API — 허용 목록 분류 `san` · `/san-storage/arrays` · `/san-storage/check`(`requiresFullScope` — 범위 지정 키는 게이트에서 403 `needs-full-scope`). 처음엔 핸들러를 404 catch-all
   **뒤에** 등록해 닿지 않았고(시험 ④ 가 잡았다), 범위 거절도 핸들러 안에 한 벌 더 두었다가 게이트 하나로 합쳤다(판정 코어 하나).
@@ -216,6 +216,30 @@
   현황 상태 알약 400px 잘림(PR ⓐ 때부터 — 600px 이하 줄바꿈).
 - 정직: 알림 · 보고서의 발송은 시험에서 SMTP 가 꺼져 있어 '보내지 않음(409 · skipped)' 경로만 실행했다 — 실제 메일 본문 · 첨부는 `reportMailParts` 단위 시험과 미리보기로 확인. 기준선은
   데모 데이터(수식)라 벗어난 칸이 생기지 않았다.
+
+### 8.4 3차 — 남은 작업 일괄(v2.955.0 — 2026-11-09 16:13~ KST · 사용자 "권장 순서로 진행해줘" → "대기작업 모두 수행" · 검증 '표준')
+- **점검 결과 이력** `sanswitch/storageCheckHistory.js` — SAN 점검 이력(healthHistory)과 같은 규약(`san-storage-check.db` · node:sqlite 없으면 available:false · 어레이당 48건 · `compareRuns` 재사용).
+  '1회' 의 정의가 다르다: 스토리지 판정은 창(24시간 평균 · 최근 표본)을 보므로 '수집 1회 = 기록 1회' 가 없어 **판정이 바뀌었거나 마지막 기록에서 1시간**이 지났을 때만 적는다(`shouldRecord`).
+  기록은 알림 틱(알림이 꺼져 있어도 · 중앙만)과 점검 탭 '지금 판정'. 1시간 반복 기록 때문에 '마지막 두 건' 비교가 변화를 놓치므로 `lastChangeOf` 가 최신부터 서명이 달라지는 첫 쌍을 찾는다.
+  라우트 `GET /check/history`(key 없으면 어레이 목록 + 최근 7일 변화 · key 있으면 최근 N회 + 비교 + 마지막 변화) · 점검 탭 '이력' 모달.
+- **운영 안내** `docs/OPS-SAN-STORAGE.md`(INDEX §1) — 준비 순서(시리얼 · REST · 표본 토글 · 캡처) · 화면 읽는 법 · 확인 불가의 뜻 · 알림 · 보고서 · 공개 API · 문제 해결 · 파일.
+- **화면 4건** — ① CSV `nodeLoad` 칸을 REST 어레이(PowerMax/PowerStore/Unity)까지(`storage/csv.js exportedNodeLoad` — registry sampleCapable 과 같은 조건 · SSH 변형은 빈칸 유지) ② 상세 **임의 구간**(datetime-local 시작 · 끝 · 최대 366일 — 서버 `rangeParams` from/to 는 이미 받았다 · 구간 중엔 ◀ ▶ 잠금)
+  ③ ⌘K 팔레트에 두 글자 이상이면 'SAN 스토리지 성능에서 ‘q’ 찾기' 행(검색어는 URL 이 아니라 **인계**(`useSearchHandoff('san-storage')` — v2.616 규약) · 상세 '호스트별 플로우 ↗' 는 어레이 포트 WWN(최대 8 · `portsDetail.wwn` 새 필드)을 `san-flow:targets` 로 인계해 Flow Vision 이 타깃을 미리 고른다(해시에 쿼리를 싣지 않는다 — 도구 라우터가 `?` 를 모른다)
+  ④ 상세 머리 '스토리지 경로 ↗'(`storage-paths`).
+- **PowerMax 포트 단위** `arrayPerf.js` — `performance/FEPort/keys → metrics`(문서 기준 · 실장비 미확인). 디렉터를 다 읽은 뒤 남는 자리에만 · 디렉터당 4포트 · 전체 24호출 상한 · 지표 이름이 디렉터와 다르다(IOs · MBs · ResponseTime — 디렉터 이름으로 와도 읽는다) · `probe.ports` 가 읽음 · 실패 · 호출 수 · 건너뜀을 말한다. 단위 이름 `FA-1D:4` → SAN 포트 `FA-1D 4` 와 `unitMatchKey` 로 짝.
+- **데모 보정** — 어레이 측 호스트 처리량을 스위치 트래픽 자릿수로(전 어레이가 '보고 대조 주의 −45%' 로 보이던 것) · 해시로 고른 어레이 약 12% 에 **최근 24시간 KST 10~12시 ×2.4** 창(`sanswitch/demoPerfSynth.js demoAnomalyFactor` — 수식 데모에 Date.now() 가 들어가는 유일한 자리 · 기준선 '평소와 다름' 이 화면에 보이게).
+  ⚠ 처음엔 `mock/demo/sanswitch.js sanDemoPortBps` 에 넣었다가 Chromium 에서 표시가 안 나와 확인하니 **데모 조회는 표본을 쌓지 않고 `demoPerfSynth` 가 수식으로 만든다**(v2.715) — 그쪽으로 옮기고 샘플러 쪽은 되돌렸다.
+- **발송 경로 시험** — 가짜 SMTP(net 서버 · audit2742g 방식)로 월간 보고서 '지금 보내기' 와 알림 틱(상태 전이 → alerts.notify → 메일)을 실제로 보내 봤다(아래 시험 ⑤). **결함 발견**: v2.953 의 보고서 첨부가 `contentType: 'text/html; charset=utf-8'` 이라 `util/smtp.js` 화이트리스트(`^[a-z]+/[a-z0-9.+-]+$`)에 걸려 '지금 보내기' · 정기 발송이 **항상 실패**했다(알림 메일은 첨부가 없어 무관). `'text/html'` 로 고침 — v2.953 보고의 '보내지 않음 경로만 시험했다' 가 왜 부족했는지의 실례. `storagePerfReportStatus` 를 edgelog spec `service.sanStorageReport` 로 등재.
+- **보고서 PDF(화면)** — `reportPdfDoc`(순수 · `sanStorageText.js`) → `reportExport.saveDocAsPdf`(jsPDF + Pretendard KSX 벡터 · 동적 import). 임베드 글꼴이 KS X 1001 서브셋이라 ✕(U+2715) 대신 ×. 파일명 ASCII(`san-storage-report_YYYY-MM.pdf`). 메일 첨부는 HTML 그대로(서버 생성기 없음).
+  ⚠ **정정**: v2.953 보고의 'PDF 라이브러리 · 한글 글꼴 부재' 는 웹 쪽을 보지 않은 틀린 말이었다(SAN 월간 점검 PDF 가 이미 같은 인프라를 쓴다 — `docs/rules/sanswitch.md` v2.52x 항목).
+- **v2.953 결함 2건 발견 · 고침**(Chromium · 가짜 SMTP 가 잡았다): ① 요일 × 시간 히트맵의 '평소와 다름' 테두리는 **한 번도 나올 수 없었다** — 7일 요청이 2시간 칸(85점)으로 내려와 서버가 기준선을 붙이지 않았다(reason 'bucket'). `/array` 에 `points` 를 더하고 화면이 `points: 168`(1시간 칸)로 요청한다. ② 월간 보고서 메일 첨부 형식(위).
+- 시험 `test/sanStorage2955.test.js` · 웹 `sanStorage2955.test.js`. `storageNodeClients2936` ⑨ 의 'nodeLoad 칸은 아이실론만' 기대를 REST 어레이 포함으로 갱신.
+- Chromium(목 서버 · 1440/400 · 16:43~17:03 KST): 이력 모달(어레이 3대 기록 · 비교 · 표) · 상세 임의 구간(시작 · 끝 → '임의 구간 · 11/9 04:55 ~ 07:55' · ◀ 비활성) · 기준선(PowerStore::PS667B96EC — 범례 '평소와 다름 8/97칸' ·
+  차트 고리 8개 · 히트맵 테두리 2칸 + 각주) · 보고서 'PDF 로 저장'(실제 내려받기 `san-storage-report_2026-10.pdf` 43,994바이트 · `%PDF-`) · ⌘K 'SAN 스토리지 성능에서 ‘PMAX’ 찾기' 행(누르면 현황 검색 칸에 PMAX) ·
+  '호스트별 플로우 ↗' → `#/tools/san-flow` — 가로 넘침 0 · pageerror 0 · console error 0 · 1440 표 잘림 0. 판독에서 고친 것: ① 상세가 통째로 깨짐(`const live = live && !custom` — 치환이 새 줄까지 바꿔 TDZ ·
+  CLAUDE.md '치환 뒤 전수 확인' 교훈 재발) ② 히트맵 테두리 0칸 → 7일 요청이 2시간 칸이라 기준선이 안 붙던 v2.953 결함 → `points: 168` ③ 데모 이상치가 안 보임 → 수식 데모 경로(`demoPerfSynth`)로 옮김
+  ④ 팔레트 행이 목록에만 들고 그려지지 않음 → 기능 목록(`toolRowsAll`)에 넣음. 스크린샷은 스크래치패드 `shots3/`.
+- 남긴 것: 실장비 캡처 확인(PowerMax FEPort 포함) · 메일 첨부 PDF(서버 생성기 — 별도 결정).
 
 ## 9. 출처(어레이 측 API — 2026-11-08 웹 확인 · 실장비 미확인)
 
@@ -257,7 +281,7 @@
 ### 12.2 후속 후보(별도 작업 — 우선순위 순)
 6. **알림(메일)** — 편중 · 포화 · 임계값 초과 · 보고 끊김을 법인 단위로(스토리지 `usageMail` 규약 재사용 · 1:1:1 법인 묶음). 상태가 **바뀐 순간만**(파트 장애 규약).
 7. **자기 기준선 대비 이상 표시** — 요일 × 시간 기준선(지난 4주)에서 ±N% 벗어난 칸을 '평소와 다름' 으로 — 벤더 임계값이 없는 응답 시간에도 쓸 수 있는 **지어내지 않는 기준**(기준선 = 자기 과거).
-8. **월간 성능 점검 PDF 자동 발송** — ⑥ 판정표 + 상위 어레이 추이(월간 점검 PDF 인프라 재사용).
+8. **월간 성능 점검 PDF 자동 발송** — ⑥ 판정표 + 상위 어레이 추이(월간 점검 PDF 인프라 재사용). → v2.953 메일 첨부 HTML · v2.955 화면 'PDF 로 저장'(같은 벡터 PDF 인프라). 메일 첨부 PDF 는 서버 생성기가 없어 아직 아니다.
 9. **ISL 사용량 연계** — 팹 비대칭의 원인 단서(헬스체크 ISL 항목 + 포트 사용량의 E-포트).
 10. **어레이 측 경보 연동** — 스토리지 수집기가 이미 세는 알람 수를 상세 ② 머리에(링크 → 스토리지 현황).
 11. **publicapi 노출** — `/api/public/san-storage/...`(외부 모니터링 연동 · 기존 publicapi 토큰 규약).

@@ -22,10 +22,10 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1447개** |
+| 엔드포인트 | **1448개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 148개 |
-| GET | 765개 |
+| GET | 766개 |
 | POST | 456개 |
 | PUT | 146개 |
 | PATCH | 3개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 12 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 828 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 829 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -1341,21 +1341,22 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/san-flow/job/:id` | 역할 `admin` · 권한 `tools` · `fullReadWriteScopeOnlyWith` | [server/src/routes/api/sanFlow.js:314](../server/src/routes/api/sanFlow.js#L314) |
 | POST | `/tools/san-flow/preview` | 역할 `admin` · 권한 `tools` · `fullReadWriteScopeOnlyWith` | [server/src/routes/api/sanFlow.js:226](../server/src/routes/api/sanFlow.js#L226) |
 | POST | `/tools/san-flow/show` | 역할 `admin` · 권한 `tools` · `fullReadWriteScopeOnlyWith` | [server/src/routes/api/sanFlow.js:303](../server/src/routes/api/sanFlow.js#L303) |
-| GET | `/tools/san-storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:111](../server/src/routes/api/sanStorage.js#L111) |
-| GET | `/tools/san-storage/array` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:129](../server/src/routes/api/sanStorage.js#L129) |
-| GET | `/tools/san-storage/check` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:202](../server/src/routes/api/sanStorage.js#L202) |
-| GET | `/tools/san-storage/check-settings` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:210](../server/src/routes/api/sanStorage.js#L210) |
-| PUT | `/tools/san-storage/check-settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:214](../server/src/routes/api/sanStorage.js#L214) |
-| GET | `/tools/san-storage/mapping` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:264](../server/src/routes/api/sanStorage.js#L264) |
-| PUT | `/tools/san-storage/mapping` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:297](../server/src/routes/api/sanStorage.js#L297) |
-| GET | `/tools/san-storage/notify` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:223](../server/src/routes/api/sanStorage.js#L223) |
-| PUT | `/tools/san-storage/notify-settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:227](../server/src/routes/api/sanStorage.js#L227) |
-| POST | `/tools/san-storage/notify/run-now` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:234](../server/src/routes/api/sanStorage.js#L234) |
-| GET | `/tools/san-storage/port-names.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:305](../server/src/routes/api/sanStorage.js#L305) |
-| GET | `/tools/san-storage/report` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:241](../server/src/routes/api/sanStorage.js#L241) |
-| PUT | `/tools/san-storage/report-settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:244](../server/src/routes/api/sanStorage.js#L244) |
-| GET | `/tools/san-storage/report/preview` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:251](../server/src/routes/api/sanStorage.js#L251) |
-| POST | `/tools/san-storage/report/send-now` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:258](../server/src/routes/api/sanStorage.js#L258) |
+| GET | `/tools/san-storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:113](../server/src/routes/api/sanStorage.js#L113) |
+| GET | `/tools/san-storage/array` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:131](../server/src/routes/api/sanStorage.js#L131) |
+| GET | `/tools/san-storage/check` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:206](../server/src/routes/api/sanStorage.js#L206) |
+| GET | `/tools/san-storage/check-settings` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:230](../server/src/routes/api/sanStorage.js#L230) |
+| PUT | `/tools/san-storage/check-settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:234](../server/src/routes/api/sanStorage.js#L234) |
+| GET | `/tools/san-storage/check/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:218](../server/src/routes/api/sanStorage.js#L218) |
+| GET | `/tools/san-storage/mapping` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:284](../server/src/routes/api/sanStorage.js#L284) |
+| PUT | `/tools/san-storage/mapping` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:317](../server/src/routes/api/sanStorage.js#L317) |
+| GET | `/tools/san-storage/notify` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:243](../server/src/routes/api/sanStorage.js#L243) |
+| PUT | `/tools/san-storage/notify-settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:247](../server/src/routes/api/sanStorage.js#L247) |
+| POST | `/tools/san-storage/notify/run-now` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:254](../server/src/routes/api/sanStorage.js#L254) |
+| GET | `/tools/san-storage/port-names.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:325](../server/src/routes/api/sanStorage.js#L325) |
+| GET | `/tools/san-storage/report` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:261](../server/src/routes/api/sanStorage.js#L261) |
+| PUT | `/tools/san-storage/report-settings` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:264](../server/src/routes/api/sanStorage.js#L264) |
+| GET | `/tools/san-storage/report/preview` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:271](../server/src/routes/api/sanStorage.js#L271) |
+| POST | `/tools/san-storage/report/send-now` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:278](../server/src/routes/api/sanStorage.js#L278) |
 | GET | `/tools/sanswitch` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:196](../server/src/routes/api/sanSwitch.js#L196) |
 | GET | `/tools/sanswitch/activity` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1051](../server/src/routes/api/sanSwitch.js#L1051) |
 | GET | `/tools/sanswitch/attribution` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/hostSan.js:477](../server/src/routes/api/hostSan.js#L477) |
@@ -1619,7 +1620,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
-| `fullScopeOnly` | 300 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
+| `fullScopeOnly` | 301 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `fleetOnly` | 205 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
 | `requireCentral` | 66 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
 | `requireSettingsOwner` | 58 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |

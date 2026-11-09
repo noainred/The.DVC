@@ -102,6 +102,13 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
     const allow = JSON.parse(allowKey);
     return (k) => lockReasonOf(byKey.get(k), { isAdmin, toolsAllowed: allow, can, toolAllowed });
   }, [isAdmin, allowKey, byKey]);
+  // v2.955: 어레이는 인벤토리 종류가 아니라 검색 색인에 없다 — 두 글자 이상이면 'SAN 스토리지 성능에서 찾기' 행을 기능 목록 끝에 둔다
+  //   (검색어는 URL 이 아니라 인계 — 그 화면의 검색 칸이 이름 · 시리얼 · 스위치로 거른다 · 도구가 잠긴 계정에는 보이지 않는다).
+  const toolRowsAll = useMemo(() => {
+    const term = q.trim();
+    if (term.length < 2 || lockOf('san-storage')) return toolRows;
+    return [...toolRows, { kind: 'tool', k: 'san-storage', label: `SAN 스토리지 성능에서 ‘${term}’ 찾기`, group: '스토리지 어레이 · 시리얼 · 스위치', hash: '#/tools/san-storage', handoffs: [['san-storage', term]] }];
+  }, [toolRows, q, lockOf]);
 
   // 빈 입력의 '찾는 범위'(종류별 개수) — 열 때 한 번.
   useEffect(() => {
@@ -144,8 +151,8 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
     if (!q.trim()) return recent.map((r) => ({ type: 'recent', key: `r:${r.plan.hash}|${r.at}`, plan: r.plan, item: r }));
     const dev = [];
     for (const g of groups) for (const row of g.rows) dev.push({ type: 'dev', key: `d:${row.kind}:${row.id}:${row.name}`, plan: focusPlan(row), row });
-    return [...dev, ...toolRows.map((it) => ({ type: 'tool', key: `${it.kind}:${it.k || it.id}`, plan: { hash: it.hash, handoffs: [] }, it }))];
-  }, [q, recent, groups, toolRows]);
+    return [...dev, ...toolRowsAll.map((it) => ({ type: 'tool', key: `${it.kind}:${it.k || it.id}`, plan: { hash: it.hash, handoffs: it.handoffs || [] }, it }))];
+  }, [q, recent, groups, toolRowsAll]);
 
   // 이동 = 주소 + (있으면) 검색어 인계. 인계를 먼저 남기고 주소를 바꾼다 — 이미 열린 화면은 구독으로, 새로 열리는 화면은 마운트 때 받는다.
   //   새 탭(⌘/Ctrl+Enter)은 다른 문서라 메모리 인계가 닿지 않는다 — 주소만 연다(검색어는 그 탭에서 다시).
@@ -197,14 +204,14 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
   const devHidden = inv ? Math.max(0, (inv.matched || 0) - devShown) : 0;
   const builtAgo = builtAgoText((inv || stats)?.builtAt);
   const noDevice = devActive && inv && !loading && (inv.matched || 0) === 0;
-  const nothing = q.trim() && !loading && toolRows.length === 0 && (!devActive || noDevice);
+  const nothing = q.trim() && !loading && toolRowsAll.length === 0 && (!devActive || noDevice);
   const modeBadge = pre.prefix ? (pre.kind ? KIND_LABEL[pre.kind] : MODE_LABEL[pre.mode]) : '';
   let idx = -1;
   // v2.928(C2): 스크린리더 — 입력칸이 combobox, 목록이 listbox, 커서 줄이 aria-activedescendant(포커스는 입력칸에 둔 채).
   const optProps = (i) => ({ id: `inv-opt-${i}`, role: 'option', 'aria-selected': i === cur, tabIndex: -1 });
   const srStatus = loading ? '찾는 중'
     : !q.trim() ? ''
-      : `${devActive && inv ? `장비 ${(inv.matched || 0).toLocaleString('ko-KR')}건${devHidden > 0 ? `(표시 ${devShown})` : ''} · ` : ''}기능 · 탭 ${toolRows.length}개`;
+      : `${devActive && inv ? `장비 ${(inv.matched || 0).toLocaleString('ko-KR')}건${devHidden > 0 ? `(표시 ${devShown})` : ''} · ` : ''}기능 · 탭 ${toolRowsAll.length}개`;
 
   return (
     <div className="v4-palette-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -351,8 +358,8 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
               <button type="button" className="inv-link" onClick={() => goList('parts')}>시리얼 조회에서 ‘{text}’ 보기 ›</button></div>
           )}
 
-          {toolRows.length > 0 && <div className="inv-gh">기능 · 탭 <span className="v3-faint">{toolRows.length}</span></div>}
-          {toolRows.map((it) => {
+          {toolRowsAll.length > 0 && <div className="inv-gh">기능 · 탭 <span className="v3-faint">{toolRowsAll.length}</span></div>}
+          {toolRowsAll.map((it) => {
             idx += 1; const i = idx;
             const lock = it.kind === 'tool' ? lockOf(it.k) : null;
             return (

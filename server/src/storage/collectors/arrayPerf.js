@@ -33,6 +33,11 @@ export const FE_KEYS = Object.freeze(['busy', 'cpu', 'iops', 'lat', 'hbps', 'que
 export const PMAX_FE_METRICS = Object.freeze(['PercentBusy', 'HostIOs', 'HostMBs', 'ReadResponseTime', 'WriteResponseTime', 'QueueDepthUtilization']);
 export const PMAX_FE_CORE = Object.freeze(['PercentBusy', 'HostIOs', 'HostMBs']);
 export const PMAX_WINDOW_MS = 20 * 60_000;   // 진단(5분) 표본 몇 개가 들어오는 창 — 마지막 점만 쓴다
+/** v2.955 PowerMax FE **포트** 단위(performance/FEPort keys → metrics · 문서 기준 — 실장비 확인 전). 디렉터(부모)를 다 읽은 뒤 남는 자리에만 · 호출 상한(디렉터당 · 전체). */
+export const PMAX_FE_PORT_METRICS = Object.freeze(['PercentBusy', 'IOs', 'MBs', 'ResponseTime']);
+export const PMAX_FE_PORT_CORE = Object.freeze(['PercentBusy', 'IOs', 'MBs']);
+export const PMAX_PORTS_PER_DIR = 4;
+export const PMAX_PORT_CALLS_MAX = 24;
 export const MAX_ARRAYS = 4;                 // Unisphere 하나가 관리하는 로컬 어레이 상한(powermax.js MAX_LOCAL_ARRAYS 와 같은 뜻)
 export const UNITY_CPU_PATH = 'sp.*.cpu.summary.utilization';
 export const UNITY_FC_PATHS = Object.freeze({ readBytes: 'sp.*.fibreChannel.target.*.readBytes', writeBytes: 'sp.*.fibreChannel.target.*.writeBytes',
@@ -97,6 +102,27 @@ export function parsePmaxMetrics(data) {
   return {
     ts: numOrNull(last.timestamp), busy: pct(last.PercentBusy), iops: nonneg(last.HostIOs), hbps: mbs == null ? null : mbs * 1e6,
     lat: rd == null && wr == null ? null : Math.max(rd ?? 0, wr ?? 0), queue: pct(last.QueueDepthUtilization),
+    fields: Object.keys(last).filter((k) => k !== 'timestamp').slice(0, 24),
+  };
+}
+/** FEPort/keys 응답 → 포트 id 목록(순수). `{fePortInfo:[{portId, firstAvailableDate, lastAvailableDate}]}` — 중복 제거 · 디렉터당 상한. */
+export function parsePmaxPortKeys(data, { max = PMAX_PORTS_PER_DIR } = {}) {
+  const list = Array.isArray(data?.fePortInfo) ? data.fePortInfo : (Array.isArray(data?.portInfo) ? data.portInfo : []);
+  const out = [];
+  for (const p of list) { const id = str(p?.portId, 16); if (id && !out.includes(id)) out.push(id); if (out.length >= max) break; }
+  return out;
+}
+/** FEPort/metrics 응답 → 마지막 점(순수). 포트 지표 이름은 디렉터와 다르다(IOs · MBs · ResponseTime) — 디렉터 이름(HostIOs · HostMBs)으로 와도 읽는다. */
+export function parsePmaxPortMetrics(data) {
+  const rows = Array.isArray(data?.resultList?.result) ? data.resultList.result : (Array.isArray(data?.result) ? data.result : []);
+  let last = null;
+  for (const r of rows) { if (!r || typeof r !== 'object') continue; const t = numOrNull(r.timestamp); if (last == null || (t ?? -1) >= (numOrNull(last.timestamp) ?? -1)) last = r; }
+  if (!last) return null;
+  const mbs = nonneg(last.MBs ?? last.HostMBs);
+  const rd = nonneg(last.ReadResponseTime); const wr = nonneg(last.WriteResponseTime); const rt = nonneg(last.ResponseTime);
+  return {
+    ts: numOrNull(last.timestamp), busy: pct(last.PercentBusy), iops: nonneg(last.IOs ?? last.HostIOs), hbps: mbs == null ? null : mbs * 1e6,
+    lat: rt != null ? rt : (rd == null && wr == null ? null : Math.max(rd ?? 0, wr ?? 0)), queue: null,
     fields: Object.keys(last).filter((k) => k !== 'timestamp').slice(0, 24),
   };
 }
@@ -165,9 +191,36 @@ export async function samplePowermax(full, { signal = null, now = Date.now(), po
       // Unisphere 하나가 어레이 여럿을 관리하면 이름을 어레이 번호로 구분한다(상세는 시리얼로 자기 것만 고른다 — arraySide.unitsForArray).
       units.push({ name: multi ? `${sid}::${dirId}` : dirId, kind: 'fa', ...(parsed || {}) });
     }
+    // v2.955 포트 단위 — 디렉터를 다 읽은 뒤, 남는 자리(64 상한)와 호출 상한(전체 PMAX_PORT_CALLS_MAX · 디렉터당 PMAX_PORTS_PER_DIR) 안에서만. 문서 기준(실장비 확인 전) — probe.ports 가 읽은 수 · 실패를 말한다.
+    probe.ports = probe.ports || { read: 0, failed: 0, calls: 0, skipped: 0 };
+    for (const dirId of dirs) {
+      if (signal?.aborted || units.length >= NODE_LOAD_LIMIT || probe.ports.calls >= PMAX_PORT_CALLS_MAX) { probe.ports.skipped += 1; continue; }
+      let portIds = [];
+      try { probe.ports.calls += 1; const r = await tryPost(post, pathsFor(vers, '/performance/FEPort/keys'), { symmetrixId: sid, directorId: dirId }); portIds = parsePmaxPortKeys(r.data); }
+      catch (e) { if (isCredReject(e)) throw e; probe.ports.failed += 1; if (probe.errors.length < 8) probe.errors.push(`port keys ${dirId}: ${capErr(e)}`); continue; }
+      const parentName = multi ? `${sid}::${dirId}` : dirId;
+      for (const portId of portIds) {
+        if (signal?.aborted || units.length >= NODE_LOAD_LIMIT || probe.ports.calls >= PMAX_PORT_CALLS_MAX) { probe.ports.skipped += 1; break; }
+        const pbody = (metrics) => ({ symmetrixId: sid, directorId: dirId, portId, startDate: now - PMAX_WINDOW_MS, endDate: now, dataFormat: 'Average', metrics: [...metrics] });
+        let parsed = null;
+        try {
+          probe.ports.calls += 1;
+          let r;
+          try { r = await tryPost(post, pathsFor(vers, '/performance/FEPort/metrics'), pbody(probe.portMetricSet === 'core' ? PMAX_FE_PORT_CORE : PMAX_FE_PORT_METRICS)); }
+          catch (e) {
+            if (isCredReject(e)) throw e;
+            if (probe.portMetricSet !== 'core' && looksUnsupportedMetric(e)) { probe.portMetricSet = 'core'; r = await tryPost(post, pathsFor(vers, '/performance/FEPort/metrics'), pbody(PMAX_FE_PORT_CORE)); }
+            else throw e;
+          }
+          parsed = parsePmaxPortMetrics(r.data);
+          if (parsed) probe.ports.read += 1; else probe.ports.failed += 1;
+        } catch (e) { if (isCredReject(e)) throw e; probe.ports.failed += 1; if (probe.errors.length < 8) probe.errors.push(`port ${dirId}:${portId}: ${capErr(e)}`); }
+        units.push({ name: `${parentName}:${portId}`, kind: 'port', parent: parentName, ...(parsed || {}) });
+      }
+    }
   }
   if (!units.length) throw new Error(probe.errors[0] ? `FE 디렉터를 읽지 못했습니다 — ${probe.errors[0]}` : 'FE 디렉터가 없습니다(keys 응답 비어 있음)');
-  return buildFeSample({ ts: now, type: 'powermax', source: 'Unisphere performance/FEDirector', units, probe });
+  return buildFeSample({ ts: now, type: 'powermax', source: probe.ports?.read ? 'Unisphere performance/FEDirector + FEPort' : 'Unisphere performance/FEDirector', units, probe });
 }
 
 /* ── PowerStore ──────────────────────────────────────────────────────────── */

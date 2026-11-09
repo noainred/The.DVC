@@ -179,6 +179,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'service.issueAutomation', label: '이슈 자동화 규칙', group: 'service', mod: '../issues/automation.js', fn: 'automationStatus' },
   { key: 'service.issueAlertAuto', label: '다른 알람 → 이슈 자동 등록', group: 'service', mod: '../issues/alertIssues.js', fn: 'alertIssuesStatus' },
   { key: 'service.sanStorageNotify', label: 'SAN 스토리지 성능 알림', group: 'service', mod: '../sanswitch/storagePerfNotify.js', fn: 'storagePerfNotifyStatus' }, // v2.953 — 중앙만(엣지는 보내지 않음 · 상태는 꺼짐으로 보고)
+  { key: 'service.sanStorageReport', label: 'SAN 스토리지 성능 월간 보고서', group: 'service', mod: '../sanswitch/storagePerfReportMail.js', fn: 'storagePerfReportStatus' }, // v2.955 — 알림과 같은 짝(인자 없이 부르면 지금 시각)
 ]);
 
 /** 표의 키 집합 — 중앙 수신이 모르는 키를 조용히 받아들이지 않게 한다. */

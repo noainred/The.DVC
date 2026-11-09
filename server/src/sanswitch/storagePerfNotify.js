@@ -12,6 +12,7 @@ import { loadPerfSettings } from './perfSettings.js';
 import { loadNotifySettings, notifyLoadError, loadNotifyState, saveNotifyState, recordNotify, snapshotOf, carryKnown, diffCheck, alertsOf } from './storagePerfNotifyStore.js';
 import { CHECK_ITEMS } from './storagePerfCheck.js';
 import { deviceContextOf, buildListCore, runCheck } from './storagePerfCore.js';   // 판정 코어(라우트가 아니다 — 방향 위반 · 순환 금지)
+import { recordCheckRuns } from './storageCheckHistory.js';   // v2.955 점검 결과 이력 — 알림이 꺼져 있어도 틱마다(바뀌었거나 1시간) 적는다
 
 export const NOTIFY_MIN_MS = 5 * 60_000;
 const isEdge = () => !!(config.agent.centralUrl && config.agent.centralToken);
@@ -27,10 +28,13 @@ export async function pollStoragePerfNotifyOnce({ now = Date.now(), send = sendA
     if (isEdge()) return { action: 'edge' };
     if (notifyLoadError()) { _last = { at: now, action: 'unreadable' }; return _last; }
     const cfg = loadNotifySettings();
-    if (!cfg.enabled && !force) { _last = { at: now, action: 'disabled' }; return _last; }
     const ctx = await deviceContextOf({ admin: true });
     const b = await buildListCore(ctx, null);
     const r = await runCheck(b, { signal: null });
+    // v2.955 — 점검 결과 이력은 알림 설정과 무관하게 적는다(중앙만 · 바뀌었거나 1시간 — storageCheckHistory 가 거른다). 실패해도 알림은 계속.
+    let history = null;
+    try { history = await recordCheckRuns(r.results, { at: now }); } catch (e) { history = { available: false, saved: 0, skipped: 0, reason: String(e?.message || e).slice(0, 120) }; }
+    if (!cfg.enabled && !force) { _last = { at: now, action: 'disabled', arrays: r.results.length, history }; return _last; }
     const st = loadNotifyState();
     const cur = snapshotOf(r.results);
     const d = diffCheck(st.last, cur, { minLevel: cfg.minLevel, recoveries: cfg.recoveries, items: cfg.items });
@@ -46,7 +50,7 @@ export async function pollStoragePerfNotifyOnce({ now = Date.now(), send = sendA
       lastTick: { at: now, arrays: r.results.length, opened: d.opened.length, recovered: d.recovered.length, alerts: alerts.length, first: d.first } };
     if (sent.length) next.history = [...sent.map((s) => ({ at: now, ...s })), ...st.history].slice(0, 20);
     saveNotifyState(next);
-    _last = { at: now, action: d.first ? 'baseline' : (alerts.length ? 'sent' : 'quiet'), arrays: r.results.length, opened: d.opened.length, recovered: d.recovered.length, alerts: alerts.length, sent };
+    _last = { at: now, action: d.first ? 'baseline' : (alerts.length ? 'sent' : 'quiet'), arrays: r.results.length, opened: d.opened.length, recovered: d.recovered.length, alerts: alerts.length, sent , history };
     if (alerts.length) console.log(`[san-storage-notify] 알림 ${alerts.length}건(법인) — 열림 ${d.opened.length} · 회복 ${d.recovered.length}`);
     return _last;
   } catch (e) {

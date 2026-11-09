@@ -5,9 +5,10 @@ import { fetchJson, putJson, postJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { CHECK_MARK, overallText, thresholdText, rateText, dateClockText, VENDOR_SHORT, reportToPlaceholder } from './sanStorageText.js';
+import { CHECK_MARK, overallText, thresholdText, rateText, dateClockText, VENDOR_SHORT, reportPdfDoc, reportToPlaceholder } from './sanStorageText.js';
 
 const HEAVY_TIMEOUT_MS = 90_000;
+const NONE_DC = '__none__';   // 서버 routes/api/sanSwitch.js NONE_DC 와 같은 토큰(법인 미지정)
 
 export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
   const [got, setGot] = useState(null);
@@ -16,6 +17,7 @@ export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);   // v2.953 알림(§12.2-6)
   const [reportOpen, setReportOpen] = useState(false);   // v2.953 월간 보고서(§12.2-8)
+  const [historyOpen, setHistoryOpen] = useState(false); // v2.955 점검 결과 이력(설계 §8.1)
   useEffect(() => {
     const ac = new AbortController();
     setGot(null); setErr(null);
@@ -50,6 +52,7 @@ export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
           {isAdmin && <button type="button" className="sst-btn" onClick={() => setSettingsOpen(true)}>기준(임계값) 설정</button>}
           <button type="button" className="sst-btn" onClick={() => setNotifyOpen(true)} title="상태가 바뀐 순간만 · 법인 단위 · 알림 채널(설정 › 알림)">알림</button>
           <button type="button" className="sst-btn" onClick={() => setReportOpen(true)} title="매달 정한 날 · 시각에 판정표 보고서(HTML)를 메일로">월간 보고서</button>
+          <button type="button" className="sst-btn" onClick={() => setHistoryOpen(true)} title="판정이 바뀌었거나 1시간마다 적힌 최근 기록 · 상태 전이 비교">이력</button>
           <button type="button" className="sst-btn primary" onClick={() => setSeq((n) => n + 1)}>지금 판정</button>
         </div>
       </div>
@@ -97,6 +100,7 @@ export default function SanStorageCheck({ dc, setDc, onOpen, isAdmin }) {
       {settingsOpen && <SettingsModal initial={got.settings} onClose={() => setSettingsOpen(false)} onSaved={() => { setSettingsOpen(false); setSeq((n) => n + 1); }} />}
       {notifyOpen && <NotifyModal isAdmin={isAdmin} items={got.items || []} onClose={() => setNotifyOpen(false)} />}
       {reportOpen && <ReportModal isAdmin={isAdmin} onClose={() => setReportOpen(false)} />}
+      {historyOpen && <HistoryModal dc={dc} onOpen={onOpen} onClose={() => setHistoryOpen(false)} />}
     </>
   );
 }
@@ -242,10 +246,20 @@ function ReportModal({ isAdmin, onClose }) {
     catch (e) { setErr(e.message || '발송 실패'); } finally { setBusy(false); }
   };
   const preview = () => { downloadFile('/tools/san-storage/report/preview', `san-storage-report_preview.html`); };
+  // v2.955 PDF 는 화면에서 — jsPDF + 임베드 한글 글꼴(reportExport.saveDocAsPdf · 클릭 때 동적 import). 서버 메일 첨부는 HTML 그대로(서버에는 PDF 생성기가 없다 — 정직 기록).
+  const savePdf = async () => {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const d = await fetchJson('/tools/san-storage/report/preview', { format: 'json' });
+      const { saveDocAsPdf } = await import('./reportExport.js');
+      const r = await saveDocAsPdf(reportPdfDoc(d.model), String(d.parts?.filename || 'san-storage-report.html').replace(/\.html$/i, '.pdf'));
+      setMsg(`PDF 를 만들었습니다 — ${r.pages}쪽(벡터 · 임베드 한글 글꼴)`);
+    } catch (e) { setErr(e.message || 'PDF 생성 실패'); } finally { setBusy(false); }
+  };
   return (
     <Modal title="월간 성능 점검 보고서" onClose={onClose} width={760}>
       <div className="sst" style={{ gap: 10 }}>
-        <div className="sst-note">매달 정한 날 · 시각(포탈 시각)에 판정표 · 주의/이상 항목 · 상위 어레이 처리량 · 기준 표를 <b>자급형 HTML</b> 로 만들어 메일(설정 › 알림·메일 · 종류 'SAN 스토리지 성능 월간 보고서')에 첨부합니다. 브라우저에서 열어 인쇄 → PDF 로 저장하면 PDF 가 됩니다 — 이번 판은 PDF 를 직접 만들지 않습니다(한글 글꼴을 동봉해야 해서). 놓친 회차는 몰아서 보내지 않습니다.</div>
+        <div className="sst-note">매달 정한 날 · 시각(포탈 시각)에 판정표 · 주의/이상 항목 · 상위 어레이 처리량 · 기준 표를 <b>자급형 HTML</b> 로 만들어 메일(설정 › 알림·메일 · 종류 'SAN 스토리지 성능 월간 보고서')에 첨부합니다. 메일 첨부는 HTML 이고, <b>PDF 로 저장</b> 은 이 화면에서 임베드 한글 글꼴로 벡터 PDF 를 만듭니다(서버에는 PDF 생성기가 없어 메일에는 붙이지 않습니다). 놓친 회차는 몰아서 보내지 않습니다.</div>
         {err && <div className="sst-info">{err}</div>}
         {!got || !form ? <Loading label="보고서 설정" /> : (
           <>
@@ -272,11 +286,95 @@ function ReportModal({ isAdmin, onClose }) {
             <div className="sst-acts" style={{ justifyContent: 'flex-end' }}>
               <button type="button" className="sst-btn" onClick={onClose}>닫기</button>
               <button type="button" className="sst-btn" disabled={busy} onClick={preview} title="지금 값으로 만든 보고서 HTML 을 내려받습니다(보내지 않음)">미리보기(HTML)</button>
+              <button type="button" className="sst-btn" disabled={busy} onClick={savePdf} title="지금 값으로 벡터 PDF(임베드 한글 글꼴)를 브라우저에서 만들어 내려받습니다 — 메일 첨부는 HTML 입니다">PDF 로 저장</button>
               {isAdmin && <button type="button" className="sst-btn" disabled={busy} onClick={sendNow}>지금 보내기</button>}
               {isAdmin && <button type="button" className="sst-btn primary" disabled={busy} onClick={save}>저장</button>}
             </div>
           </>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+/* ── v2.955 점검 결과 이력(설계 §8.1 '점검 이력') — 서버 storageCheckHistory(SAN 점검 이력과 같은 규약). 판정이 바뀌었거나 1시간마다 한 건 · 어레이당 최근 N건 ·
+   비교는 상태 전이(악화 · 호전 · 이제 확인됨 · 확인 불가로)로 말한다 — unknown 을 ok 로 흡수하지 않는다. DB 를 못 열면 available:false 를 그대로 보인다(빈 표로 숨기지 않음). ── */
+const DIR_KO = Object.freeze({ worse: '악화', better: '호전', nowKnown: '이제 확인됨', nowUnknown: '확인 불가로' });
+function HistoryModal({ dc, onOpen, onClose }) {
+  const [ov, setOv] = useState(null);
+  const [err, setErr] = useState(null);
+  const [sel, setSel] = useState('');
+  const [det, setDet] = useState(null);
+  const [detErr, setDetErr] = useState(null);
+  useEffect(() => {
+    let live = true;
+    fetchJson('/tools/san-storage/check/history', { days: 7 }).then((d) => { if (live) setOv(d); }).catch((e) => { if (live) setErr(e); });
+    return () => { live = false; };
+  }, []);
+  useEffect(() => {
+    if (!sel) { setDet(null); return undefined; }
+    const i = sel.indexOf('|'); const key = sel.slice(i + 1); const dcId = sel.slice(0, i);
+    let live = true; setDet(null); setDetErr(null);
+    fetchJson('/tools/san-storage/check/history', { key, datacenterId: dcId || NONE_DC, limit: 10 }).then((d) => { if (live) setDet(d); }).catch((e) => { if (live) setDetErr(e); });
+    return () => { live = false; };
+  }, [sel]);
+  const arrays = (ov?.arrays || []).filter((a) => !dc || a.dc === dc);
+  const changes = (ov?.changes || []).filter((c) => !dc || c.dc === dc);
+  const mark = (st) => { const m = CHECK_MARK[st] || CHECK_MARK.unknown; return <span className={`sst-st ${m.cls}`} title={m.label}>{m.sym}</span>; };
+  const gapMin = Math.round((ov?.minGapMs || 3_600_000) / 60_000);
+  return (
+    <Modal title="성능 점검 결과 이력" onClose={onClose} width={920}>
+      <div className="sst-modal-body">
+        {err ? <ErrorBox error={err} /> : !ov ? <Loading /> : (
+          <>
+            <div className="sst-note">판정이 <b>바뀌었을 때</b>와 마지막 기록에서 <b>{gapMin}분</b>이 지났을 때만 적습니다(알림 틱 · '지금 판정' — 5분마다 같은 값을 쌓지 않습니다). 어레이당 최근 {ov.maxRuns}건.
+              비교는 상태 전이로 말합니다 — '확인 불가 → 정상' 은 호전이 아니라 <b>이제 확인됨</b>입니다.</div>
+            {!ov.available && <div className="sst-info">이력 DB 를 열지 못했습니다{ov.db?.error ? ` — ${ov.db.error}` : ''}. 기록 · 비교는 DB 가 열릴 때까지 비활성입니다(빈 이력이 아닙니다).</div>}
+            <h4 style={{ margin: '12px 0 6px' }}>최근 7일 변화 <span className="faint">{changes.length}건{dc ? ' · 고른 법인만' : ''}</span></h4>
+            {changes.length ? (
+              <div className="sst-table-wrap"><STable minWidth={640} limit={50}>
+                <thead><tr><th>시각</th><th>법인</th><th>스토리지</th><th>항목</th><th>전이</th><th>방향</th></tr></thead>
+                <tbody>{changes.map((c, i) => (
+                  <tr key={`${c.arrayKey}|${c.dc}|${c.item}|${i}`}>
+                    <td className="mono" data-sort={c.at}>{dateClockText(c.at)}</td><td>{c.dc || '(법인 미지정)'}</td>
+                    <td><button type="button" className="sst-link" onClick={() => onOpen?.({ key: c.arrayKey, datacenterId: c.dc })}>{c.name || c.arrayKey}</button></td>
+                    <td>{c.label}</td><td data-sort={`${c.from}>${c.to}`}>{mark(c.from)} → {mark(c.to)}</td>
+                    <td data-sort={c.dir}><span className={`sst-tag ${c.dir === 'worse' ? 'bad' : c.dir === 'better' ? 'ok' : 'gray'}`}>{DIR_KO[c.dir] || c.dir}</span></td>
+                  </tr>))}</tbody>
+              </STable></div>
+            ) : <div className="sst-note">{ov.available ? (arrays.length ? '최근 7일에 판정이 바뀐 어레이가 없습니다.' : '아직 기록이 없습니다 — 알림 틱(수집 주기 · 하한 5분)이나 \'지금 판정\' 뒤에 쌓입니다.') : '—'}</div>}
+            <h4 style={{ margin: '14px 0 6px' }}>어레이별 최근 기록</h4>
+            <div className="sst-acts" style={{ marginBottom: 8 }}>
+              <Select className="sst-inp" value={sel} onChange={(e) => setSel(e.target.value)} aria-label="어레이" style={{ fontFamily: 'inherit', minWidth: 260 }}>
+                <option value="">어레이 선택 ({arrays.length}대 기록됨)</option>
+                {arrays.map((a) => <option key={`${a.dc}|${a.key}`} value={`${a.dc}|${a.key}`}>{a.name || a.key} · {a.dc || '(법인 미지정)'} · {a.runs}건</option>)}
+              </Select>
+            </div>
+            {detErr ? <ErrorBox error={detErr} /> : sel && !det ? <Loading /> : det ? (
+              <>
+                <div className="sst-hist">
+                  <span>비교</span><b>{det.compare?.note || `최근 ${det.compare?.compared ?? 0}회 · 새 문제 ${det.compare?.newProblems?.length ?? 0} · 해소 ${det.compare?.resolved?.length ?? 0}`}</b>
+                  <span>마지막 변화</span><b>{det.lastChange ? `${dateClockText(det.lastChange.at)} — ${det.lastChange.changes.map((c) => `${c.label} ${(CHECK_MARK[c.from] || {}).label || c.from} → ${(CHECK_MARK[c.to] || {}).label || c.to}`).join(' · ')}` : '기록 안에 변화 없음'}</b>
+                  {(det.compare?.persistent || []).length ? <><span>계속 문제</span><b>{det.compare.persistent.map((p) => `${p.label}(${p.runs}회)`).join(' · ')}</b></> : null}
+                </div>
+                <div className="sst-table-wrap"><STable minWidth={560}>
+                  <thead><tr><th>시각</th><th>종합</th><th className="c">정상</th><th className="c">주의</th><th className="c">이상</th><th className="c">확인 불가</th><th>어레이 측 값</th></tr></thead>
+                  <tbody>{(det.runs || []).map((r) => (
+                    <tr key={r.id}>
+                      <td className="mono" data-sort={r.at}>{dateClockText(r.at)}</td>
+                      <td data-sort={r.overall}><span className={`sst-tag ${CHECK_MARK[r.overall]?.cls === 'unk' ? 'gray' : CHECK_MARK[r.overall]?.cls || 'gray'}`}>{CHECK_MARK[r.overall]?.label || r.overall}</span></td>
+                      <td className="c" data-sort={r.counts.ok}>{r.counts.ok}</td><td className="c" data-sort={r.counts.warn}>{r.counts.warn}</td>
+                      <td className="c" data-sort={r.counts.bad}>{r.counts.bad}</td><td className="c" data-sort={r.counts.unknown}>{r.counts.unknown}</td>
+                      <td data-sort={(r.arraySide?.keys || []).length}>{(r.arraySide?.keys || []).length ? `${r.arraySide.keys.length}항목` : '—'}</td>
+                    </tr>))}</tbody>
+                </STable></div>
+              </>
+            ) : null}
+          </>
+        )}
+        <div className="sst-acts" style={{ justifyContent: 'flex-end' }}>
+          <button type="button" className="sst-btn" onClick={onClose}>닫기</button>
+        </div>
       </div>
     </Modal>
   );
