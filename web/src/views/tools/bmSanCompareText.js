@@ -45,7 +45,7 @@ export function ratioText(ratio) {
 
 /** 사유 코드 → 문장(코드가 아니면 원문 그대로). */
 const REASONS = {
-  'perf-disabled': 'SAN 스위치 포트 사용량 수집이 꺼져 있어 전송 속도 표본이 없습니다(설정 › 수집 › SAN 스위치 포트 사용량).',
+  'perf-disabled': 'SAN 스위치 포트 사용량 수집이 꺼져 있어 전송 속도 표본이 없습니다(설정 › 수집 주기·임계 › SAN 스위치 포트 사용량).',
   'perf-unavailable': '포트 사용량 DB 를 열 수 없어 전송 속도를 읽지 못했습니다.',
   'no-switches': '이 범위에 등록된 SAN 스위치가 없어 전송 속도 표본이 없습니다.',
   'serial-unmatched': '스위치 포트 이름에서 이 어레이의 시리얼을 찾지 못했습니다 — 전송 속도를 붙이지 않습니다.',
