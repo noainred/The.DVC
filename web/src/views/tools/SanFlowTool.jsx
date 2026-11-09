@@ -8,6 +8,7 @@ import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText, existingPairs, cycleText, deadlineText, CONFIRM } from './sanFlowText.js';
+import useSearchHandoff from '../../hooks/useSearchHandoff.js';   // v2.954 어레이 포트 WWN 인계(SAN 스토리지 성능 상세 → 타깃 미리 고르기)
 
 const OTP_IN = { width: 120 };
 const WRAP = { whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: '100%' };   // 긴 작업 제목 · 버튼이 좁은 화면에서 넘치지 않게(400px 가로 넘침 31px — 화면 판독)
@@ -20,6 +21,8 @@ function CreateForm({ dev, existing = [], onStarted, onClose }) {
   const [cand, setCand] = useState({ d: null, error: null });
   const [hba, setHba] = useState('');
   const [picked, setPicked] = useState([]);
+  const [pre, setPre] = useState('');   // v2.954 SAN 스토리지 성능 상세가 넘긴 어레이 포트 WWN(쉼표) — 타깃 목록이 생기면 그것부터 고른다
+  useSearchHandoff('san-flow:targets', setPre);
   const [pv, setPv] = useState({ d: null, error: '' });
   const [otp, setOtp] = useState('');
   const [busy, setBusy] = useState(false);
@@ -47,7 +50,12 @@ function CreateForm({ dev, existing = [], onStarted, onClose }) {
   const targets = targetOptions(cur);
   // 이미 같은 정의(이 스위치 · 이 초기자 · 이 타깃)의 활성 포탈 플로우가 있는 타깃은 고르지 못한다 — 서버도 같은 규칙으로 거부한다.
   const has = new Set(existingPairs(existing, dev.id, cur?.wwn));
-  useEffect(() => { setPicked(targets.filter((t) => !has.has(t.wwn)).slice(0, 1).map((t) => t.wwn)); }, [hba, cand.d]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const want = new Set(String(pre || '').split(',').map(normWwnKey).filter(Boolean));
+    const avail = targets.filter((t) => !has.has(t.wwn));
+    const hit = want.size ? avail.filter((t) => want.has(normWwnKey(t.wwn))).slice(0, 8) : [];
+    setPicked((hit.length ? hit : avail.slice(0, 1)).map((t) => t.wwn));
+  }, [hba, cand.d, pre]); // eslint-disable-line react-hooks/exhaustive-deps
   // 미리보기 — 서버가 만들기와 같은 판정 · 같은 명령 조립으로 답한다(스위치는 건드리지 않는다).
   useEffect(() => {
     const my = ++pvSeq.current;
@@ -117,6 +125,9 @@ function CreateForm({ dev, existing = [], onStarted, onClose }) {
     </div>
   );
 }
+
+/** WWN 비교 키 — 구분자 · 대소문자 무시(port_meta 의 WWN 과 타깃 후보의 WWN 표기가 다를 수 있다). */
+const normWwnKey = (v) => String(v || '').toLowerCase().replace(/[^0-9a-f]/g, '');
 
 export default function SanFlowTool() {
   const [st, setSt] = useState({ d: null, error: null });

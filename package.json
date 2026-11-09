@@ -1,6 +1,6 @@
 {
   "name": "vmware-global-monitoring-portal",
-  "version": "2.953.0",
+  "version": "2.954.0",
   "private": true,
   "description": "Unified monitoring portal/dashboard for VMware vCenter infrastructure across global data centers",
   "type": "module",

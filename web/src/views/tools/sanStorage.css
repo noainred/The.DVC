@@ -148,3 +148,9 @@
 /* v2.953 자기 기준선 — 평소와 다름 표시 */
 .sst-legend .sst-ring { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--amber); background: transparent; margin-right: 6px; vertical-align: -1px; }
 .sst-hm i.off { outline: 2px solid var(--amber); outline-offset: -2px; }
+/* v2.954 점검 이력 모달 — 표 안의 어레이 이름은 상세로 가는 글자 단추(새 표 틀 없이 STable 그대로) */
+.sst-link { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: var(--text); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.sst-link:hover { color: var(--accent, #7dd3fc); }
+/* v2.954 상세 임의 구간 — 세그 옆 한 줄(datetime-local 둘 + 단추) · 400px 에서는 줄바꿈 */
+.sst-custom { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.sst-custom .sst-inp { height: 30px; padding: 0 8px; font-size: 12px; min-width: 0; max-width: 100%; }

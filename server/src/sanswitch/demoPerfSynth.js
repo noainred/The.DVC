@@ -62,12 +62,31 @@ function totals(sum, peak) {
   };
 }
 
-/** 한 시계열(기준값 base)을 버킷마다 만든다 — 평균과 피크(평균의 1.1~1.4배). */
-function seriesOf(base, seed, buckets) {
+const DAY = 24 * HOUR;
+/** 이상치 창의 어레이 단위 키 — 심볼릭 이름의 앞 두 조각(`SYMMETRIX::시리얼` · `PowerStore::PSxxx`), 구분자가 없으면 이름 그대로(포트 단위). */
+export function demoAnomalyKey(name) {
+  const n = String(name || '');
+  return n.includes('::') ? n.split('::').slice(0, 2).join('::') : n;
+}
+/**
+ * v2.954 '평소와 다름' 창(데모) — 해시로 고른 어레이 약 12% 에만, **지금 기준 최근 24시간 안의** 한국 시각 10~12시에 2.4배.
+ * 지난 4주 같은 요일 · 시간 칸에는 없으므로 자기 기준선(storageBaseline)이 그 칸을 off 로 표시한다 — 화면에서 고리 · 테두리를 볼 수 있게.
+ * 수식 데모에서 Date.now() 가 들어가는 유일한 자리다(같은 시각 · 같은 키면 같은 값 — '지금' 이 하루 지나면 창도 함께 옮겨 간다).
+ */
+export function demoAnomalyFactor(name, ts, { now = Date.now() } = {}) {
+  if (hash01(`anomaly|${demoAnomalyKey(name)}`) >= 0.12) return 1;
+  if (ts < now - DAY || ts > now) return 1;
+  const h = (((ts / HOUR) + 9) % 24 + 24) % 24;
+  return h >= 10 && h < 12 ? 2.4 : 1;
+}
+
+/** 한 시계열(기준값 base)을 버킷마다 만든다 — 평균과 피크(평균의 1.1~1.4배). name 이 있으면 이상치 창(demoAnomalyFactor)을 곱한다. */
+function seriesOf(base, seed, buckets, name = '') {
   const sum = new Array(buckets.length);
   const peak = new Array(buckets.length);
+  const now = Date.now();
   for (let i = 0; i < buckets.length; i++) {
-    const v = Math.max(0, Math.round(base * diurnal(buckets[i]) * wobble(seed, buckets[i])));
+    const v = Math.max(0, Math.round(base * diurnal(buckets[i]) * wobble(seed, buckets[i]) * (name ? demoAnomalyFactor(name, buckets[i], { now }) : 1)));
     sum[i] = v;
     peak[i] = Math.round(v * (1.1 + 0.3 * (0.5 + 0.5 * Math.sin(seed * 13 + i))));
   }
@@ -100,7 +119,7 @@ function* storageMultiSteps(metaRows, { since, until, bucketMs, groupOf = null, 
     const peak = new Array(buckets.length).fill(0);
     const details = [];
     for (const p of s.ports) {
-      const ps = seriesOf(portBase(p.deviceId, p.port, p.name), hash01(`${p.deviceId}|${p.port}`) * 1000, buckets);
+      const ps = seriesOf(portBase(p.deviceId, p.port, p.name), hash01(`${p.deviceId}|${p.port}`) * 1000, buckets, p.name);
       for (let i = 0; i < buckets.length; i++) { sum[i] += ps.sum[i]; peak[i] += ps.peak[i]; }
       if (withPorts) details.push({ deviceId: p.deviceId, port: p.port, name: p.name, speed: p.speed, portType: p.portType, avg: ps.sum, peak: ps.peak });
     }
@@ -152,7 +171,7 @@ export function demoPortSeries(deviceId, metaRows, { since, until, bucketMs, por
   for (const m of metaRows) {
     const p = Number(m.port);
     if (want && !want.has(p)) continue;
-    const { sum, peak } = seriesOf(portBase(deviceId, p, m.attached_name), hash01(`${deviceId}|${p}`) * 1000, buckets);
+    const { sum, peak } = seriesOf(portBase(deviceId, p, m.attached_name), hash01(`${deviceId}|${p}`) * 1000, buckets, m.attached_name);
     series.push({ port: p, name: m.attached_name || '', speed: m.speed || '', portType: m.port_type || '', avg: sum, peak, max: peak.length ? Math.max(...peak) : 0 });
   }
   series.sort((a, b) => a.port - b.port);

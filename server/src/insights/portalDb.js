@@ -103,6 +103,7 @@ const PURPOSES = {
   'guest-disk.db': '게스트 디스크 회수 리포트 추이(변경분 저장, v2.459)',
   'curuser.db': "'현재 사용자' 로그인 사용자 수 추이(v2.520)",
   'san-health.db': 'SAN 스위치 월간 점검 이력(최근 N회 비교, v2.522)',
+  'san-storage-check.db': 'SAN 스토리지 성능 점검 결과 이력(바뀌었거나 1시간마다 한 건 · 최근 N회 비교, v2.954)',
   'horizon-sessions.db': 'Horizon 실시간 사용자(세션) 추이(v2.525)',
   'part-faults.db': '물리 파트(부품) 장애 이력 — 열림/변화/해소 전이만 적재(v2.547)',
   'bm-usage.db': '베어메탈 사용률(CPU·메모리·디스크·네트워크·HBA) 원시 90일 + 일 롤업(v2.550)',

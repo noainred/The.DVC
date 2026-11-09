@@ -16,10 +16,13 @@ const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/
 describe('① 상세 폴링', () => {
   const tool = strip(read('./SanStorageTool.jsx'));
   it('usePolling 으로 읽고 실시간 창만 주기 — 과거 창은 0', () => {
-    expect(tool).toMatch(/usePolling\(arrayKey \? '\/tools\/san-storage\/array' : null, query, range\.live && back === 0 \? LIST_POLL_MS : 0, HEAVY_FETCH_OPTS\)/);
+    // v2.954: 실시간 판정은 `live`(= 실시간 창 · 최신 창 · 임의 구간 아님) 한 변수로 — 폴링 · 알약 · 창 이동이 같은 값을 본다
+    expect(tool).toMatch(/const live = range\.live && back === 0 && !custom;/);
+    expect(tool).toMatch(/usePolling\(arrayKey \? '\/tools\/san-storage\/array' : null, query, live \? LIST_POLL_MS : 0, HEAVY_FETCH_OPTS\)/);
     expect(tool).not.toMatch(/\bsetInterval\(/);
     // 조회 파라미터는 useMemo — 과거 창의 from/to 가 매 렌더 바뀌면 폴러가 데이터를 비우고 계속 다시 읽는다
-    expect(tool).toMatch(/const query = useMemo\(\(\) => \(\{ key: arrayKey, datacenterId: dcId \|\| NONE_DC, \.\.\.rangeQuery\(rangeK, \{ back \}\) \}\), \[arrayKey, dcId, rangeK, back\]\)/);
+    // v2.954: 임의 구간(custom)이 있으면 from/to · 없으면 rangeQuery — 의존성에 custom 포함
+    expect(tool).toMatch(/const query = useMemo\(\(\) => \(\{ key: arrayKey, datacenterId: dcId \|\| NONE_DC, \.\.\.\(custom \? \{ from: custom\.from, to: custom\.to \} : rangeQuery\(rangeK, \{ back \}\)\) \}\), \[arrayKey, dcId, rangeK, back, custom\]\)/);
   });
 });
 

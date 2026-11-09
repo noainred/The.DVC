@@ -86,6 +86,8 @@ const SCREEN = Object.freeze({
 export const canFilter = (kind) => !!SCREEN[kind]?.target;
 export const HANDOFF_TARGETS = Object.freeze([...new Set(Object.values(SCREEN).map((s) => s.target).filter(Boolean))]);
 export const FOCUS_TARGETS = Object.freeze(Object.values(SCREEN).map((s) => s.focus).filter(Boolean));
+/** v2.954: SCREEN 표 밖의 인계 target — 팔레트의 'SAN 스토리지 성능에서 찾기' 행 · SAN 스토리지 성능 상세 → Flow Vision 타깃 WWN. 받는 화면이 있어야 한다(테스트가 소스로 대조). */
+export const EXTRA_HANDOFF_TARGETS = Object.freeze(['san-storage', 'san-flow:targets']);
 
 const masked = (row) => !!row?.addrHidden && String(row?.name || '').endsWith('(이름 가림)');
 

@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **732개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **734개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-09)
@@ -856,13 +856,15 @@
 | `PDU_SESSION_BUDGET_MS` | `75000` |  | pdu/collectors/apcSsh.js |
 | `PDU_THRESHOLDS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/thresholds.js |
 
-## SAN 스위치 (35)
+## SAN 스위치 (37)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `SAN_FLOW_SHOW_MS` | `15` |  | sanswitch/flowJobs.js |
 | `SANHEALTH_DB_PATH` |  |  | sanswitch/healthHistory.js |
 | `SANHEALTH_MAX_RUNS` | `24` |  | sanswitch/healthHistory.js |
+| `SANSTORAGE_CHECK_DB_PATH` |  |  | sanswitch/storageCheckHistory.js |
+| `SANSTORAGE_CHECK_MAX_RUNS` | `48` |  | sanswitch/storageCheckHistory.js |
 | `SANSW_ALIAS_MAX` | `8000` |  | sanswitch/zoning.js |
 | `SANSW_CAPS_TTL_MS` | `6` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CLI_RAW_LIMIT` | `4000` |  | sanswitch/collectors/fosSsh.js |
@@ -921,4 +923,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 732
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 734

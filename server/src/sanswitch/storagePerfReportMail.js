@@ -92,7 +92,8 @@ export function sendReport({ slot = null, manual = false, by = 'system', now = D
       if (!to.length) return { ok: false, state: 'skipped', ...record({ slot, kind, state: 'skipped', code: 'no-recipients', reason: "받는 사람이 없습니다 — 보고서 설정의 '받는 사람' 또는 설정 › 알림·메일의 기본 수신자" }) };
       const b = await buildReport({ now, monthLabel: slot ? monthLabelOf(slot) : '' });
       if (!b.arrays) return { ok: false, state: 'skipped', ...record({ slot, kind, state: 'skipped', code: 'no-arrays', reason: '판정할 어레이가 없어 보내지 않았습니다.' }) };
-      const attachments = [{ filename: b.parts.filename, contentType: 'text/html; charset=utf-8', content: Buffer.from(b.html, 'utf8') }];
+      // ⚠ v2.954: contentType 은 매개변수 없이 'text/html' — util/smtp.js 가 text/* 에 charset 을 붙이고, '; charset=' 이 든 값은 화이트리스트에 걸려 **항상 실패**했다(v2.953 결함 · 가짜 SMTP 시험이 잡았다).
+      const attachments = [{ filename: b.parts.filename, contentType: 'text/html', content: Buffer.from(b.html, 'utf8') }];
       const r = await sendPortalMail({ kind: REPORT_KIND, subject: b.parts.subject, html: b.parts.html, text: b.parts.text, to, by: manual ? (by || 'admin') : 'system', attachments });
       if (r.ok) { state().lastSentAt = Date.now(); return { ok: true, state: 'sent', ...record({ slot, kind, state: 'sent', to: to.length, arrays: b.arrays, month: b.model.monthLabel, bytes: attachments[0].content.length }) }; }
       const code = r.skipped ? (r.authStopped ? 'auth-stopped' : 'mail-off') : null;

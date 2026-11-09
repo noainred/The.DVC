@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **304개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **305개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-09)
@@ -228,6 +228,7 @@
 | `runtime.json` | 설정 | Runtime-adjustable settings that can be changed from the portal UI (and | ✅ | ✅ | ✅ | runtime-settings.js |
 | `san-flows.json` | 설정 | Flow Vision 플로우 작업(v2.935 SAN·CVP 설계 C-②) — 실행 등록부 · 포탈 플로우 기록 · 카운터 주기. | ✅ | ✅ |  | sanswitch/flowJobs.js |
 | `san-health.db` | DB | SAN 점검 결과 이력 + **최근 N회 비교**(v2.522). |  |  | ✅ | sanswitch/healthHistory.js |
+| `san-storage-check.db` | DB | SAN 스토리지 성능 점검 **결과 이력 + 최근 N회 비교**(v2.954 · 설계 §8.1 '점검 이력'). |  |  | ✅ | sanswitch/storageCheckHistory.js |
 | `san-storage-map.json` | 설정 | SAN 스토리지 성능의 관리자 재정의 저장소(v2.948). | ✅ | ✅ |  | sanswitch/directorMap.js |
 | `san-storage-notify-state.json` | 설정 | SAN 스토리지 성능 **알림** 설정 · 상태 · 전이 판정(순수 부분 포함 · v2.950 · 설계 §12.2-6). | ✅ | ✅ | ✅ | sanswitch/storagePerfNotifyStore.js |
 | `san-storage-notify.json` | 설정 | SAN 스토리지 성능 **알림** 설정 · 상태 · 전이 판정(순수 부분 포함 · v2.950 · 설계 §12.2-6). | ✅ | ✅ | ✅ | sanswitch/storagePerfNotifyStore.js |

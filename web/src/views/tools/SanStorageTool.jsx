@@ -14,6 +14,8 @@ import SanStorageMapping from './SanStorageMapping.jsx';
 import { TABS, RANGES, rangeOf, rangeQuery, windowLabel, GROUPINGS, MODES, rateText, pctText, deltaOf, deltaNote, dayTB, stateTag, imbalanceTag, liveText, intervalText,
   agoShort, clockText, dateClockText, kpisOf, filterRows, sortRowsBy, SORTS, sparkSegments, stackModel, tickLabels, seriesStats, foldHeatmap, foldSeries, csvText, csvFileName, gbps, vizColor, VENDOR_SHORT, feValueText, lineModel, feMetricsPresent, FE_UNIT_TEXT, capPerfQuadrant, tbText, daysText, QUADRANT_RULE } from './sanStorageText.js';
 import './sanStorage.css';
+import useSearchHandoff from '../../hooks/useSearchHandoff.js';   // v2.954 ⌘K 검색 → 현황 검색 칸(검색어는 URL 에 싣지 않는다 — v2.616 규약)
+import { handoffMany } from '../../hooks/searchHandoff.js';   // v2.954 Flow Vision 으로 어레이 포트 WWN 인계
 
 const BASE = ['tools', 'san-storage'];
 const TAB_KEYS = ['list', 'check', 'mapping', 'array'];
@@ -102,6 +104,7 @@ function ListTab({ dc, setDc, onOpen }) {
   const [view, setView] = useState('table');   // v2.953 표 · 용량 × 성능 교차 보기(훅은 조기 return 위)
   const [sortK, setSortK] = useState('now');
   const [q, setQ] = useState('');
+  useSearchHandoff('san-storage', setQ);   // v2.954 ⌘K · 다른 화면에서 넘긴 검색어
   const params = dc ? { datacenterId: dc } : {};
   const { data, error, errorInfo } = usePolling('/tools/san-storage', params, LIST_POLL_MS, { timeoutMs: HEAVY_TIMEOUT_MS, retries: 0 });
   const rows = useMemo(() => sortRowsBy(filterRows(data?.rows || [], { vendor, q }), sortK), [data, vendor, q, sortK]);
@@ -282,20 +285,32 @@ function Spark({ values }) {
 function ArrayDetail({ arrayKey, dcId, onBack }) {
   const [rangeK, setRangeK] = useState('24h');
   const [back, setBack] = useState(0);
+  const [custom, setCustom] = useState(null);                    // v2.954 임의 구간 {from,to}(ms) — 있으면 기간 세그 · 창 이동 대신 이 구간(서버 rangeParams from/to · 최대 366일)
+  const [customIn, setCustomIn] = useState({ from: '', to: '' });
+  const [customErr, setCustomErr] = useState('');
   const [mode, setMode] = useState('avg');
   const [grouping, setGrouping] = useState('director');
   const [week, setWeek] = useState(null);     // 요일 × 시간용 7일(1시간 칸)
   const [hover, setHover] = useState(null);
   const plotRef = useRef(null);
   const range = rangeOf(rangeK);
+  const live = range.live && back === 0 && !custom;   // 실시간 창 = 최근 1시간 · 최신 창 · 임의 구간 아님(폴링 · 알약 · 창 이동이 같이 본다)
+  const applyCustom = () => {
+    const f = customIn.from ? new Date(customIn.from).getTime() : NaN; const t = customIn.to ? new Date(customIn.to).getTime() : NaN;
+    if (!Number.isFinite(f) || !Number.isFinite(t)) { setCustomErr('시작과 끝을 모두 넣어 주세요.'); return; }
+    if (f >= t) { setCustomErr('시작이 끝보다 앞서야 합니다.'); return; }
+    if (t - f > 366 * 86_400_000) { setCustomErr('한 번에 볼 수 있는 구간은 최대 366일입니다.'); return; }
+    setCustomErr(''); setBack(0); setCustom({ from: f, to: Math.min(t, Date.now() + 3_600_000) });
+  };
   // 조회 파라미터는 (어레이 · 법인 · 기간 · 창) 이 바뀔 때만 다시 만든다 — 과거 창의 from/to 는 그때의 시각으로 고정(매 렌더 바뀌면 폴러가 계속 다시 읽는다).
-  const query = useMemo(() => ({ key: arrayKey, datacenterId: dcId || NONE_DC, ...rangeQuery(rangeK, { back }) }), [arrayKey, dcId, rangeK, back]);
+  const query = useMemo(() => ({ key: arrayKey, datacenterId: dcId || NONE_DC, ...(custom ? { from: custom.from, to: custom.to } : rangeQuery(rangeK, { back })) }), [arrayKey, dcId, rangeK, back, custom]);
   // 실시간 창(최신 1시간)만 주기 갱신 — 과거 창 · 긴 창은 열 때 1회(무거운 API 15초 폴링 금지 · usePolling 의 0 = 1회).
-  const { data, error } = usePolling(arrayKey ? '/tools/san-storage/array' : null, query, range.live && back === 0 ? LIST_POLL_MS : 0, HEAVY_FETCH_OPTS);
+  const { data, error } = usePolling(arrayKey ? '/tools/san-storage/array' : null, query, live ? LIST_POLL_MS : 0, HEAVY_FETCH_OPTS);
   useEffect(() => {
     if (!arrayKey) return undefined;
     const ac = new AbortController();
-    fetchJson('/tools/san-storage/array', { key: arrayKey, datacenterId: dcId || NONE_DC, hours: 168 }, ac.signal, { timeoutMs: HEAVY_TIMEOUT_MS, retries: 0 })
+    // v2.954: points 168 = 1시간 칸 — 기본(2시간 칸)이면 서버가 기준선을 붙이지 않아(reason 'bucket') 히트맵 '평소와 다름' 테두리가 영영 안 나왔다(v2.953 결함).
+    fetchJson('/tools/san-storage/array', { key: arrayKey, datacenterId: dcId || NONE_DC, hours: 168, points: 168 }, ac.signal, { timeoutMs: HEAVY_TIMEOUT_MS, retries: 0 })
       .then((d) => { if (!ac.signal.aborted) setWeek(d); }).catch(() => { if (!ac.signal.aborted) setWeek({ error: true }); });
     return () => ac.abort();
   }, [arrayKey, dcId]);
@@ -352,18 +367,29 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
             </div>
             <div className="sst-acts">
               <a className="sst-btn" href="#/tools/san-switch" title="SAN 스위치 모니터링 › 장비 상세 › 포트 배치 · 조닝">포트 배치 · 조닝 ↗</a>
-              <a className="sst-btn" href="#/tools/san-flow" title="SAN 플로우 모니터(Flow Vision) — 이 어레이 타깃으로 가는 호스트별 실측 플로우">호스트별 플로우 ↗</a>
+              <button type="button" className="sst-btn" onClick={() => { const w = [...new Set((data.ports || []).map((p) => p.wwn).filter(Boolean))].slice(0, 8); if (w.length) handoffMany([['san-flow:targets', w.join(',')]]); window.location.hash = '#/tools/san-flow'; }}
+                title="SAN 플로우 모니터(Flow Vision) — 이 어레이 포트 WWN(최대 8개)을 타깃으로 미리 고릅니다. 호스트 · HBA 는 거기서 고릅니다.">호스트별 플로우 ↗</button>
+              <a className="sst-btn" href="#/tools/storage-paths" title="데이터스토어 · 경로 점검 — 호스트 → 어레이 경로 · 데이터스토어 운영(설계 §12.1-4)">스토리지 경로 ↗</a>
               {canCsv() && <button type="button" className="sst-btn" onClick={downloadCsv}>CSV</button>}
             </div>
           </div>
           <div className="sst-row">
             <div className="sst-filters">
-              <div className="sst-seg mint" role="group" aria-label="기간">{RANGES.map((r) => <button key={r.k} type="button" className={rangeK === r.k ? 'on' : ''} onClick={() => { setRangeK(r.k); setBack(0); }}>{r.label}</button>)}</div>
+              <div className="sst-seg mint" role="group" aria-label="기간">{RANGES.map((r) => <button key={r.k} type="button" className={rangeK === r.k ? 'on' : ''} onClick={() => { setRangeK(r.k); setBack(0); setCustom(null); setCustomErr(''); }}>{r.label}</button>)}</div>
               <div className="sst-seg" role="group" aria-label="기준">{MODES.map(([k, l]) => <button key={k} type="button" className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{l}</button>)}</div>
               <div className="sst-seg" role="group" aria-label="묶음">{GROUPINGS.map(([k, l]) => <button key={k} type="button" className={grouping === k ? 'on' : ''} onClick={() => setGrouping(k)}>{l}</button>)}</div>
+              {/* v2.954 임의 구간 — 서버는 from/to 를 이미 받는다(rangeParams · 최대 366일). 구간이 있으면 ◀ ▶ 창 이동은 잠근다. */}
+              <div className="sst-custom" role="group" aria-label="임의 구간">
+                <input className="sst-inp" type="datetime-local" value={customIn.from} onChange={(e) => setCustomIn((c) => ({ ...c, from: e.target.value }))} aria-label="시작" />
+                <span className="faint">~</span>
+                <input className="sst-inp" type="datetime-local" value={customIn.to} onChange={(e) => setCustomIn((c) => ({ ...c, to: e.target.value }))} aria-label="끝" />
+                <button type="button" className={`sst-btn sm${custom ? ' primary' : ''}`} onClick={applyCustom}>구간 보기</button>
+                {custom && <button type="button" className="sst-btn sm" onClick={() => { setCustom(null); setCustomErr(''); }}>해제</button>}
+              </div>
             </div>
+            {customErr && <div className="sst-info">{customErr}</div>}
             <div className="sst-filters">
-              <span className="sst-pill"><span className={`sst-dot${range.live && back === 0 && stats && !stats.stale && stats.now != null ? ' live' : ''}`} /><b>{range.live && back === 0 ? '실시간' : '구간'}</b> {stats?.nowTs ? `마지막 표본 ${agoShort(Date.now() - stats.nowTs)}` : '표본 없음'} · 주기 {intervalText(data.intervalMs) || '—'}{range.live && back === 0 ? ` · ${intervalText(LIST_POLL_MS)}마다 다시 읽음` : ' · 자동 갱신 없음'}</span>
+              <span className="sst-pill"><span className={`sst-dot${live && stats && !stats.stale && stats.now != null ? ' live' : ''}`} /><b>{live ? '실시간' : '구간'}</b> {stats?.nowTs ? `마지막 표본 ${agoShort(Date.now() - stats.nowTs)}` : '표본 없음'} · 주기 {intervalText(data.intervalMs) || '—'}{live ? ` · ${intervalText(LIST_POLL_MS)}마다 다시 읽음` : ' · 자동 갱신 없음'}</span>
               <span className="sst-pill"><b>{intervalText(data.bucketMs) || '—'} 칸</b> · {(data.buckets || []).length}점 · {data.source?.kind === 'rollup' ? '집계 표' : '원본'}</span>
             </div>
           </div>
@@ -402,10 +428,10 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
               </div>
             ) : <div className="sst-empty"><b>그릴 값이 없습니다</b><span>{data.enabled === false ? '포트 사용량 수집이 꺼져 있습니다.' : '이 기간에 이 어레이 포트의 표본이 없습니다 — 0 이 아닙니다.'}</span></div>}
             <div className="sst-win">
-              <button type="button" className="sst-btn sm" disabled={range.live} onClick={() => setBack((b) => b + 1)} title={range.live ? '실시간 창은 최근 1시간만 보관합니다' : ''}>◀ 이전 {range.label}</button>
+              <button type="button" className="sst-btn sm" disabled={range.live || !!custom} onClick={() => setBack((b) => b + 1)} title={range.live ? '실시간 창은 최근 1시간만 보관합니다' : custom ? '임의 구간에서는 창 이동 대신 시작 · 끝을 바꿉니다' : ''}>◀ 이전 {range.label}</button>
               <button type="button" className="sst-btn sm" disabled={back <= 0} onClick={() => setBack((b) => Math.max(0, b - 1))}>다음 ▶</button>
               <button type="button" className="sst-btn sm" disabled={back <= 0} onClick={() => setBack(0)}>최신</button>
-              <span>{windowLabel(rangeK, back)} · {data.since ? dateClockText(data.since) : '—'} ~ {data.until ? dateClockText(data.until) : '—'}{back > 0 ? ' · 과거 구간은 자동 갱신하지 않습니다' : ''} · 15분 집계 31일 · 1시간 집계는 설정 보관 기간까지</span>
+              <span>{custom ? '임의 구간' : windowLabel(rangeK, back)} · {data.since ? dateClockText(data.since) : '—'} ~ {data.until ? dateClockText(data.until) : '—'}{back > 0 ? ' · 과거 구간은 자동 갱신하지 않습니다' : ''} · 15분 집계 31일 · 1시간 집계는 설정 보관 기간까지</span>
             </div>
           </div>
 

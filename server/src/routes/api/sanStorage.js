@@ -34,6 +34,8 @@ import { LIST_WINDOWS, deviceContextOf, buildListCore, growthLookup, runCheck, _
 export { LIST_WINDOWS, deviceContextOf, buildListCore, growthLookup, runCheck, _resetGrowthMemoForTest };
 import { storagePerfNotifyStatus, pollStoragePerfNotifyOnce } from '../../sanswitch/storagePerfNotify.js';
 import { storagePerfReportStatus, saveReportSettings, buildReport, sendReportNow } from '../../sanswitch/storagePerfReportMail.js';
+import { recordCheckRuns, listCheckRuns, checkHistoryOverview, checkHistoryStatus } from '../../sanswitch/storageCheckHistory.js';   // v2.954 점검 결과 이력
+import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { isMockMode, demoOn } from '../../mock/demo/flags.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { DAY_OFFSET_MIN, todayStamp } from '../../util/dayKey.js';   // 요일 × 시간 히트맵은 포탈 하루(한국 시각) 기준으로 화면이 접는다 · 파일명 날짜도 포탈 날짜(BUG-3 — UTC 날짜 금지)
@@ -105,10 +107,12 @@ export function registerSanStorage(api) {
     const key = String(req.query.key || '').slice(0, KEY_MAX);
     if (!key) return res.status(400).json({ ok: false, reason: 'key(어레이 키)가 필요합니다' });
     const { hours, from, to, issue } = rangeParams(req.query);
+    // v2.954: `points` — 칸 수를 화면이 정할 수 있게(상한 2000). 요일 × 시간 히트맵은 7일을 1시간 칸(168)으로 받아야 자기 기준선이 붙는다(2시간 칸은 reason 'bucket').
+    const points = Math.min(2000, Math.max(0, Number(req.query.points) || 0)) || undefined;
     const ctx = await deviceContext(req);
     const st = loadPerfSettings();
     let agg;
-    try { agg = await storageSeriesMulti(ctx.ids, { hours, from, to, groupOf: ctx.groupOf, withPorts: true, signal: perfAbortSignal(res) }); }
+    try { agg = await storageSeriesMulti(ctx.ids, { hours, from, to, ...(points ? { points } : {}), groupOf: ctx.groupOf, withPorts: true, signal: perfAbortSignal(res) }); }
     catch (e) { if (abandoned(e)) return; throw e; }
     const map = loadDirectorMap();
     const capIdx = capacityIndexFor({ dcSet: ctx.dcSet, split: true, admin: ctx.admin });
@@ -123,7 +127,7 @@ export function registerSanStorage(api) {
       const d = directorFor({ deviceId: String(p.deviceId), port: Number(p.port), name: p.name || '' }, key);
       const meta = ctx.deviceMeta.get(String(p.deviceId)) || { name: String(p.deviceId) };
       const vals = (p.avg || []).filter((v) => v != null); const pk = (p.peak || []).filter((v) => v != null);
-      return { deviceId: String(p.deviceId), deviceName: meta.name, port: Number(p.port), name: p.name || '', speed: p.speed || '', portType: p.portType || '',
+      return { deviceId: String(p.deviceId), deviceName: meta.name, port: Number(p.port), name: p.name || '', wwn: p.wwn || '', speed: p.speed || '', portType: p.portType || '',
         group: groupLabel(d.group), confidence: d.confidence, directorPort: d.port || '', avg: p.avg, peak: p.peak,
         avgTotal: vals.length ? vals.reduce((a, c) => a + c, 0) / vals.length : null, maxPeak: pk.length ? Math.max(...pk) : null };
     });
@@ -179,7 +183,23 @@ export function registerSanStorage(api) {
     if (!b) return;
     let r;
     try { r = await runCheck(b, { signal: perfAbortSignal(res) }); } catch (e) { if (abandoned(e)) return; throw e; }
-    res.json({ ok: true, ...commonMeta(b), ...r });
+    // v2.954 — '지금 판정' 도 이력에 적는다(바뀌었거나 1시간 — 틱과 같은 규칙 · 실패해도 판정 응답은 그대로).
+    let history = null;
+    try { history = await recordCheckRuns(r.results, { at: b.now }); } catch { history = null; }
+    res.json({ ok: true, ...commonMeta(b), ...r, history });
+  });
+
+  /** v2.954 점검 결과 이력 — key 가 있으면 그 어레이의 최근 N회 + 상태 전이 비교, 없으면 기록된 어레이 목록 + 최근 days 일의 변화. DB 못 열면 available:false(빈 표로 숨기지 않는다). */
+  api.get('/tools/san-storage/check/history', toolsPerm, fullScopeOnly, async (req, res) => {
+    const key = String(req.query.key || '').slice(0, KEY_MAX);
+    const dcRaw = String(req.query.datacenterId || '');
+    const db = scopeDbStatus(await checkHistoryStatus(), req.user);
+    if (key) {
+      const r = await listCheckRuns(key, dcRaw === NONE_DC ? '' : dcRaw, Number(req.query.limit) || 10);
+      return res.json({ ok: true, key, datacenterId: dcRaw, ...r, db });
+    }
+    const o = await checkHistoryOverview({ days: Math.min(90, Math.max(1, Number(req.query.days) || 7)) });
+    res.json({ ok: true, ...o, db });
   });
 
   api.get('/tools/san-storage/check-settings', toolsPerm, fullScopeOnly, (_req, res) => {

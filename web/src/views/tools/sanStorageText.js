@@ -385,3 +385,44 @@ export function daysText(d) {
   const n = Math.round(Number(d));
   return n > 3650 ? '10년 이상' : `${n.toLocaleString('en-US')}일`;
 }
+
+/* ── v2.954 월간 보고서 PDF(화면) — reportExport.saveDocAsPdf 의 문서 모델(순수 · 시험이 고정). 임베드 글꼴(DVC Sans KSX = Pretendard 의 KS X 1001 서브셋)에 있는 글자만 쓴다:
+   화면의 ✕(U+2715)는 서브셋에 없어 ×(U+00D7)로, 나머지 ● ▲ ? — 는 그대로. 메일 첨부는 서버가 만드는 HTML 이고(서버에는 PDF 생성기가 없다), PDF 는 사용자가 화면에서 만든다. ── */
+export const PDF_MARK = Object.freeze({ ok: '●', warn: '▲', bad: '×', unknown: '?', na: '—' });
+export function reportPdfDoc(m) {
+  const s = m?.summary || {}; const items = m?.items || []; const t = m?.totals || {};
+  const col = (st) => (st === 'bad' ? 'red' : st === 'warn' ? 'amber' : st === 'ok' ? 'green' : 'muted');
+  const cell = (text, extra = {}) => ({ text: text == null || text === '' ? '—' : String(text), ...extra });
+  const label = (st) => CHECK_MARK[st]?.label || st;
+  const blocks = [];
+  blocks.push({ type: 'kvrow', items: [
+    { k: '정상', v: String(s.ok ?? 0), color: 'green' }, { k: '주의', v: String(s.warn ?? 0), color: 'amber' }, { k: '이상', v: String(s.bad ?? 0), color: 'red' },
+    { k: '확인 불가', v: String(s.unknown ?? 0), color: 'muted' }, { k: '어레이', v: String(t.arrays ?? 0), sub: `어레이 측 값 ${m?.arraySide?.withValues ?? 0}/${m?.arraySide?.total ?? 0}` },
+  ] });
+  blocks.push({ type: 'note', text: `지금 합계 ${rateText(t.nowBps)} · 편중 ${t.imbalance ?? 0}건 · 측정 없음 · 미보고 ${t.unmeasured ?? 0}대 · 판정 기준 = 스위치 측 24시간 평균 + 어레이 측 최근 표본. 확인 불가는 정상이 아닙니다.` });
+  blocks.push({ type: 'heading', text: '법인별' });
+  blocks.push({ type: 'table', columns: [{ label: '법인', w: 3 }, { label: '어레이', align: 'right', w: 1 }, { label: '이상', align: 'right', w: 1 }, { label: '주의', align: 'right', w: 1 }, { label: '정상', align: 'right', w: 1 }, { label: '확인 불가', align: 'right', w: 1.2 }],
+    rows: (m?.byDc || []).map((g) => [cell(g.dc), cell(g.arrays, { align: 'right' }), cell(g.bad || 0, { align: 'right', color: g.bad ? 'red' : undefined }), cell(g.warn || 0, { align: 'right', color: g.warn ? 'amber' : undefined }), cell(g.ok || 0, { align: 'right' }), cell(g.unknown || 0, { align: 'right' })]) });
+  blocks.push({ type: 'heading', text: '주의 · 이상 항목' });
+  if ((m?.findings || []).length) {
+    blocks.push({ type: 'table', columns: [{ label: '상태', w: 1.2 }, { label: '법인', w: 1.6 }, { label: '스토리지', w: 2.6 }, { label: '항목', w: 1.6 }, { label: '내용', w: 3.4 }],
+      rows: m.findings.map((f) => [cell(`${PDF_MARK[f.status] || '?'} ${label(f.status)}`, { color: col(f.status) }), cell(f.dc), cell(f.name), cell((items.find((i) => i.k === f.item) || {}).label || f.item), cell(f.text)]) });
+  } else blocks.push({ type: 'note', text: '주의 · 이상 항목이 없습니다(원인은 단정하지 않습니다 — 화면의 도움말 · 디렉터별 보기로 확인).' });
+  blocks.push({ type: 'heading', text: '판정표' });
+  blocks.push({ type: 'table', columns: [{ label: '법인', w: 1.6 }, { label: '스토리지', w: 2.6 }, ...items.map((i) => ({ label: i.label, align: 'center', w: 1 })), { label: '종합', w: 1.9 }],
+    rows: (m?.results || []).map((r) => [cell(r.dc), cell(r.name), ...items.map((i) => { const st = r.items?.[i.k]?.status || 'na'; return cell(PDF_MARK[st] || '?', { align: 'center', color: col(st) }); }),
+      cell(`${PDF_MARK[r.overall] || '?'} ${label(r.overall)}${r.uncheckedCount ? ` (미확인 ${r.uncheckedCount})` : ''}`, { color: col(r.overall) })]) });
+  blocks.push({ type: 'note', text: '● 정상 · ▲ 주의 · × 이상 · ? 확인 불가(값은 보이되 기준이 없거나 표본이 없음) · — 해당 없음. 확인 불가는 정상이 아닙니다.' });
+  blocks.push({ type: 'heading', text: `상위 어레이 처리량 ${(m?.top || []).length}` });
+  blocks.push({ type: 'table', columns: [{ label: '#', align: 'right', w: 0.5 }, { label: '스토리지', w: 2.6 }, { label: '법인', w: 1.6 }, { label: '24시간 평균', align: 'right', w: 1.4 }, { label: '24시간 피크', align: 'right', w: 1.4 }, { label: '회선 사용률', align: 'right', w: 1.2 }, { label: '7일 대비', align: 'right', w: 1 }],
+    rows: (m?.top || []).map((x, i) => [cell(i + 1, { align: 'right' }), cell(x.name), cell(x.dc), cell(rateText(x.avg24), { align: 'right' }), cell(rateText(x.peak24), { align: 'right' }), cell(pctText(x.utilPct), { align: 'right' }), cell(x.delta7d == null ? '—' : `${x.delta7d > 0 ? '+' : ''}${x.delta7d}%`, { align: 'right' })]) });
+  blocks.push({ type: 'heading', text: '판정 기준' });
+  blocks.push({ type: 'table', columns: [{ label: '기준', w: 3 }, { label: '값', align: 'right', w: 1.3 }, { label: '출처', w: 3.5 }],
+    rows: (m?.thresholds || []).map((x) => [cell(x.label), cell(x.value == null ? '비움(판정 안 함)' : `${x.value}${x.unit || ''}${x.userSet ? ' (사용자 설정)' : ''}`, { align: 'right' }), cell(x.source || '', { color: 'muted' })]) });
+  return {
+    title: `${m?.monthLabel || ''} SAN 스토리지 성능 월간 점검`.trim(),
+    subtitle: `생성 ${m?.generatedAt ? dateClockText(m.generatedAt) : '—'} (포탈 시각)${m?.portal ? ` · ${m.portal}` : ''}`,
+    meta: 'VMware Global Monitoring Portal · SAN 스토리지 성능(san-storage) · 값이 없으면 —(0 이 아닙니다)',
+    blocks,
+  };
+}
