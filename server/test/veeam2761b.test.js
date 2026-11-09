@@ -189,7 +189,9 @@ test('라우트 — B1·B7 가림 · B2·B5 stale · D5 runningStale · A5 hostM
     // B1·B7 — viewer
     const v1 = await get(`/veeam/badges?vcenterId=${VC1}`);
     const raw = JSON.stringify(v1);
-    for (const leak of ['vbr-pl.corp.local', '9419', '10.20.30.40', 'AB:CD:EF']) assert.equal(raw.includes(leak), false, `viewer badges 에 ${leak}`);
+    for (const leak of ['vbr-pl.corp.local', '10.20.30.40', 'AB:CD:EF']) assert.equal(raw.includes(leak), false, `viewer badges 에 ${leak}`);
+    // 포트 9419 는 숫자 경계로 본다 — 응답의 epoch ms(예 1794191945239 · 2026-11-09 02:26~04:53 UTC 구간)에 '9419' 가 들어 있어 includes 로는 거짓 실패였다(v2.951 CI 재현).
+    assert.equal(/(?<!\d)9419(?!\d)/.test(raw), false, 'viewer badges 에 9419(포트)');
     assert.equal(v1.servers[0].notes.length, 3, '비고 개수는 그대로(문구만 일반화)');
     assert.ok(v1.servers[0].notes[0].startsWith('작업 상태을(를) 읽지 못했습니다'));
     assert.equal(v1.servers[0].counts, null, 'B7: 서버 전체 집계는 관리자만');
