@@ -25,14 +25,14 @@ export function GpuAllocHistory({ vcSel, scope }) {
   if (err && !data) return <ErrorBox error={err} />;
   if (!data) return <Loading />;
   const pts = (data.total || []).map(([d, cap, alloc]) => ({ d, label: data.labels?.[d] || String(d), cap, alloc }));
-  const tt = data.totalTrend ? trendText(data.totalTrend) : null;   // 지금 시각 기준(일 번호 today 를 넘기면 1970년 날짜가 된다 — 화면 판독에서 찾음)
+  const tt = data.totalTrend ? trendText(data.totalTrend, Date.now(), { total: true }) : null;   // 지금 시각 기준(일 번호 today 를 넘기면 1970년 날짜가 된다 — 화면 판독에서 찾음)
   return (
     <div className="gpu-alloc-history" data-gpu-alloc-history="">
       <div className="card gpu-alloc-panel">
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <b style={{ fontSize: 14 }}>할당 추이</b>
           {DAYS.map((n) => <button key={n} type="button" className={`qn-btn${days === n ? ' on' : ''}`} aria-pressed={days === n} onClick={() => setDays(n)}>{n}일</button>)}
-          {tt && <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>합계 — 30일 변화 {tt.change} · 하루 {tt.perDay} · 소진 예상 <b style={{ color: 'var(--text)' }}>{tt.left}</b></span>}
+          {tt && <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }} title={tt.why}>합계 — 30일 변화 {tt.change} · 하루 {tt.perDay} · 소진 예상 <b style={{ color: 'var(--text)' }}>{tt.left}</b></span>}
         </div>
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.6, marginTop: 6 }}>
           법인마다 하루 한 점(그날 마지막 값)을 1시간마다 쌓습니다. 용량이나 할당을 모르는 값이 섞인 날, 수집하지 못한 날은 점을 쌓지 않습니다(부분 합을 추이에 넣지 않음).

@@ -250,4 +250,11 @@ describe('v2.951 점검', () => {
     expect(t.left).toBe('— (보고 없음 10일)');
     expect(t.why).toMatch(/10일 전/);
   });
+  it('추이 글자 — 합계는 보고 없음이 아니라 합계 없음(다른 법인은 보고 중일 수 있다)', async () => {
+    const M = await import('./gpuAllocText.js');
+    const t = M.trendText({ points: 20, gbPerDay: null, change30: 5, daysLeft: null, stale: 5 }, Date.now(), { total: true });
+    expect(t.left).toBe('— (합계 없음 5일)');
+    expect(t.why).toMatch(/보고가 빠진 법인/);
+    expect(t.left).not.toMatch(/보고 없음/);
+  });
 });

@@ -161,9 +161,11 @@
     응답 `totalExcluded`(법인 id) · `retireDays` — 화면은 이 값으로 문구 · '합계 제외' 표지를 낸다(숫자를 화면에 박지 않는다). 법인 표에는 그대로 남는다.
     ② **보고가 멈춘 법인에도 '소진 예상 N일 뒤' 를 냈다**(`allocTrend` — 마지막 점 기준 기울기를 오늘 기준 날짜처럼 보여 줌). 고침: 마지막 점이 오늘보다 `TREND_STALE_DAYS`(3일) 넘게 전이면
     기울기 · 소진 예상을 null 로 두고 `stale`(일수)을 싣는다 — 웹 `trendText` 는 '— (보고 없음 N일)'(모름이지 '소진 안 함' 이 아니다). 30일 변화는 그대로 보여 준다.
+    합계 줄은 `trendText(t, now, { total: true })` 로 '— (합계 없음 N일)' — 7일 안쪽으로 멈춘 법인이 있으면 다른 법인이 보고 중이어도 합계 끝이 그날에 멈추기 때문이다
+    (Chromium 판독에서 찾음: 처음 판은 합계에도 '보고 없음 5일' 이 떠 전 법인이 멈춘 것처럼 읽혔다).
     ③ **배치 추천이 유지보수 모드 호스트를 후보로 냈다**(`placementCandidates` — 끊김만 뺐음). 유지보수 모드는 새 VM 을 켤 수 없으므로 `connectionState === 'MAINTENANCE'`
     (`soapClient` 가 inMaintenanceMode 를 이 값으로 싣는다)를 빼고 `skipped.maint` 로 따로 센다.
-    회귀: server `gpuAllocImprove2939` 'v2.951 점검 — 보고가 멈춘 법인…' · web `gpuAllocText` 'v2.951 점검'(유지보수 모드 · 보고 없음 문구).
+    회귀: server `gpuAllocImprove2939` 'v2.951 점검 — 보고가 멈춘 법인…' · web `gpuAllocText` 'v2.951 점검'(유지보수 모드 · 보고 없음 · 합계 없음 문구).
     - 다시 보고 결함 없음으로 둔 것: 할당률 알림(낡은 위임 보고 · 연결 불가 · 상한 잘림 모두 held) · 수집 점검(스냅샷만) · 라우트 범위(`scopedVcenterIds` 먼저).
       헬스체크 절은 계층 상한 잘림(`truncated` — GPU 호스트 5,000대 상한, 운영 전체 약 658 호스트)을 보류로 보지 않는다 — 운영 규모에서 일어나지 않아 고치지 않았다(남긴 것).
 

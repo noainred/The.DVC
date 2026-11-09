@@ -418,10 +418,15 @@ export function historyQuery({ days = 90, vcSel = null, scope = '' } = {}) {
 }
 const signed = (v, unit) => (v == null ? '—' : `${v > 0 ? '+' : ''}${numText(v)} ${unit}`);
 /** 추세 → 글자. 소진 예상이 없으면 '—' 와 그 이유(점 부족 · 늘지 않음 · 들쭉날쭉) — '소진 안 함' 으로 단정하지 않는다. */
-export function trendText(t, now = Date.now()) {
+export function trendText(t, now = Date.now(), { total = false } = {}) {
   if (!t) return { change: '—', perDay: '—', left: '—', why: '이력 없음' };
-  // v2.951(점검): 마지막 보고가 오래된 법인은 '오늘부터 N일 뒤' 를 내지 않는다(서버 allocTrend 가 stale 일수를 싣는다)
-  if (t.stale) return { change: signed(t.change30, 'GB'), perDay: '—', left: `— (보고 없음 ${t.stale}일)`, why: `마지막 보고가 ${t.stale}일 전 — 지금 추세를 모릅니다` };
+  // v2.951(점검): 마지막 보고가 오래된 법인은 '오늘부터 N일 뒤' 를 내지 않는다(서버 allocTrend 가 stale 일수를 싣는다).
+  //   합계는 '보고 없음' 이 아니라 '합계 없음' — 법인 하나가 빠진 날은 합계를 내지 않으므로(부분 합 금지) 다른 법인은 보고 중이어도 합계 끝이 멈춘다.
+  if (t.stale) {
+    return total
+      ? { change: signed(t.change30, 'GB'), perDay: '—', left: `— (합계 없음 ${t.stale}일)`, why: `최근 ${t.stale}일은 보고가 빠진 법인이 있어 합계를 내지 않았습니다 — 아래 표에서 '보고 없음' 법인을 확인하세요` }
+      : { change: signed(t.change30, 'GB'), perDay: '—', left: `— (보고 없음 ${t.stale}일)`, why: `마지막 보고가 ${t.stale}일 전 — 지금 추세를 모릅니다` };
+  }
   if (t.over) return { change: signed(t.change30, 'GB'), perDay: t.gbPerDay == null ? '—' : `${signed(Math.round(t.gbPerDay * 10) / 10, 'GB')}/일`, left: '이미 넘음', why: '마지막 날 할당이 용량보다 큽니다 — 확인이 필요합니다' };
   const why = t.daysLeft != null ? '최근 30일 할당 증가 기울기로 낸 추정' : t.points < 7 ? `최근 30일 점이 ${t.points}개 — 7개 이상이어야 냅니다`
     : !(t.gbPerDay > 0) ? '최근 30일 할당이 늘지 않았습니다' : '증가가 들쭉날쭉해(결정계수 0.3 미만) 내지 않습니다';
