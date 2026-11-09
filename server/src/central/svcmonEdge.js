@@ -147,12 +147,26 @@ function sameNameCount(a, id, mm, win) {
   }
   return n;
 }
-/** 알림 판정용 대상·점검 정보 — 이름 키가 (창 안에서) 겹치면 dupName(=testId 키로). 메타가 없으면 이름 없이(판정 보류). */
-function alertInfoOf(a, id, win) {
+/**
+ * 알림 판정용 대상·점검 정보 — 이름 키가 (창 안에서) 겹치면 dupName(=testId 키로). 메타가 없으면 이름 없이(판정 보류).
+ * v2.954(개선 검토 2번 — v2.934 '남긴 것' ① ③): 넓은 창(이번 스냅샷을 아직 다 받지 못함)에서는 이름 중복을 **확정할 수 없는** 두 경우가 있다 —
+ *   ① 형제가 직전 완결에만 보이고 이번 스냅샷에는 아직 없다(재배정으로 GC 대기 중인 옛 id 인지, 뒤 청크로 올 진짜 형제인지 모른다)
+ *   ③ 이번 스냅샷에 메타가 오는 중이다(뒤 청크의 메타가 같은 이름 형제를 더할 수 있다).
+ *   예전에는 ①을 중복으로 ③을 유일로 정해 버려, 다 받은 뒤 키가 바뀌며 같은 실패를 한 번 더 알렸다. 이제 `dupPending` 으로 판정을 미루고
+ *   (alertKeyOf → null · 보류) 이번 스냅샷을 다 받으면(좁은 창) 다시 판정한다. 보류 시한(metaAlertHoldMs)을 넘기면 예전 판정(넓은 창 —
+ *   중복이면 testId 키 · 거짓 복구 없음)으로 확정한다. narrowSnap = 이번 snapId(넓은 창일 때만 준다).
+ */
+function alertInfoOf(a, id, win, narrowSnap = 0) {
   const mm = a.meta.get(id);
+  const dupName = !!mm && sameNameCount(a, id, mm, win) > 1;
+  let dupPending = false;
+  if (mm && narrowSnap) {
+    if (dupName) dupPending = sameNameCount(a, id, mm, new Set([narrowSnap])) <= 1;   // ① 형제가 직전 완결에만
+    else if (a.metaSnapId === narrowSnap) dupPending = true;                            // ③ 메타가 이번 스냅샷에 오는 중
+  }
   return {
     target: { name: mm?.n, path: mm?.p, host: mm?.h },
-    test: { name: mm?.t, type: mm?.y, dupName: !!mm && sameNameCount(a, id, mm, win) > 1 },
+    test: { name: mm?.t, type: mm?.y, dupName, ...(dupPending ? { dupPending: true } : {}) },
   };
 }
 /** 테스트 전용 — 이름 키별 id 색인이 메타와 맞는지(metaSet/metaDelete 로만 고친다). */
@@ -317,18 +331,22 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
       });
     }
     a.metaSig = text(body?.metaSig, 64);
+    a.metaSnapId = snapId;   // v2.954: 이번 스냅샷에 메타가 오는 중(다 받기 전 이름 중복 판정 보류 — alertInfoOf ③)
   }
 
   // v2.934: 이름 중복 창 — 완결 청크이고 이번 스냅샷을 다 받았고 예열이 아니면 이번 스냅샷만(재배정으로 GC 대기 중인 옛 id 행을 세지 않는다).
   //   warm 은 아래 GC 보류에도 쓴다(같은 판정).
   const warm = seq >= total && (body?.warmingUp === true || (num(body?.items) > 0 && Number.isFinite(Number(body?.reported)) && num(body.reported) === 0));
-  const win = nameWindowOf(a, snapId, seq >= total && fullyReceived && !warm);
+  const narrow = seq >= total && fullyReceived && !warm;
+  const win = nameWindowOf(a, snapId, narrow);
+  const narrowSnap = narrow ? 0 : snapId;   // v2.954: 넓은 창일 때만 '확정할 수 없는 중복' 을 가린다(alertInfoOf)
   for (const c of changed) {
     const { id, row } = c;
-    const info = alertInfoOf(a, id, win);
+    const info = alertInfoOf(a, id, win, narrowSnap);
     noteResult({ at: row.measuredAt, scope: a.agent, testId: id, prev: c.prevS, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info });
     // 메타가 아직 없으면(중앙 재시작 직후) 알림 판정이 보류된다 — 아래에서 다시 판정한다(N2 · v2.932 D1-03: 다음 요청에 메타가 와도 · 시한).
-    if (!info.target.name || !info.test.name) { if (!a.alertPending.has(id)) a.alertPending.set(id, recvAt); } else a.alertPending.delete(id);
+    // v2.954: 이름 중복을 아직 확정할 수 없어도(dupPending) 같은 보류로 — 이번 스냅샷을 다 받으면 다시 판정한다.
+    if (!info.target.name || !info.test.name || info.test.dupPending) { if (!a.alertPending.has(id)) a.alertPending.set(id, recvAt); } else a.alertPending.delete(id);
   }
   // v2.928(반증 재검토 N2): 메타 없이 보류됐던 행은 메타가 오면 지금 다시 판정한다 — 같은 측정의 재전송은 다시 세지 않으므로(M5)
   //   여기서 놓치면 다음 측정(인증서·도메인은 하루)까지 알림이 늦었다. 시간별 집계·전이 이력은 이미 셌다(알림만).
@@ -340,9 +358,12 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     for (const [id, since] of a.alertPending) {
       const row = a.rows.get(id);
       if (!row) { a.alertPending.delete(id); forgetHeld(a.agent, id); continue; }
-      const info = alertInfoOf(a, id, win);
+      const info = alertInfoOf(a, id, win, narrowSnap);
       const named = !!(info.target.name && info.test.name);
-      if (!named && recvAt - since < hold) continue;
+      const expired = recvAt - since >= hold;
+      if ((!named || info.test.dupPending) && !expired) continue;
+      // 시한을 넘긴 '확정할 수 없는 중복' 은 넓은 창 판정(dupName — 중복이면 testId 키)으로 확정한다(거짓 복구보다 한 번 더 알림 쪽)
+      if (info.test.dupPending) delete info.test.dupPending;
       a.alertPending.delete(id);
       noteAlertOnly({ at: row.measuredAt, scope: a.agent, testId: id, status: row.s, reply: row.r, ms: row.m, streak: row.k, ...info, ...(named ? {} : { metaTimeout: true }) });
     }

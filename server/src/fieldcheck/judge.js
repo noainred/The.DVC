@@ -17,11 +17,12 @@
  *  - vapi-tags     vSphere 태그(vAPI REST) 응답을 실제로 읽었는가(인벤토리 vcenter.tagInv)
  *  - lacp-path     vDS 의 LACP 경로(config.lacpGroupConfig)를 실제로 읽었는가(vCenter 정보 dvpg — lagError 없음)
  *  - bareos-dir    법인 Bareos Director 콘솔에 실제로 접속했는가(Bareos 사전 점검 'Director 콘솔' 항목)
- *  ⚠ 아이실론 분리 실행(OneFS nohup)은 중앙이 실행 방식을 저장하지 않아 근거가 없다 — 항목에 넣지 않았다(지어내지 않는다).
+ *  - onefs-detach  아이실론 du 분리 실행(OneFS nohup)이 그 법인 엣지에서 실제로 동작했는가(엣지 isidu 상태의 대상별 마지막 실행 방식 — v2.954)
+ *    v2.938 에는 중앙이 실행 방식을 받지 않아 항목에서 뺐다. v2.954 부터 엣지가 상태 push 에 `poller.lastRuns` 를 싣는다(옛 엣지는 '대기').
  */
 
 export const FIELD_STATES = Object.freeze(['confirmed', 'failed', 'pending', 'na', 'unknown']);
-export const FIELD_CHECKS = Object.freeze(['upgrade-push', 'vapi-tags', 'lacp-path', 'bareos-dir']);
+export const FIELD_CHECKS = Object.freeze(['upgrade-push', 'vapi-tags', 'lacp-path', 'bareos-dir', 'onefs-detach']);
 
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -76,16 +77,46 @@ export function judgeBareosDir({ corp }) {
 }
 
 /**
- * 법인별 표 — vCenter(= 법인) 한 줄에 항목 넷.
+ * ⑤ 아이실론 분리 실행 — 그 법인 엣지의 isidu 상태(central/isiduEdge 정제본). 대상 여럿이면 하나라도 분리 실행이 됐으면 확인,
+ *   분리 실행을 켠 대상이 모두 직접 실행으로 물러났으면 실패(사유), 분리 실행을 켠 대상이 없으면 해당 없음.
+ *   엣지 시각은 수신 시각(status 받은 때)을 넘지 않게 자른다.
+ */
+export function judgeOnefsDetach({ site, agent, isidu, mock }) {
+  if (mock) return cell('unknown', '목 데이터 — 실장비 근거가 아닙니다');
+  if (!site) return cell('na', '중앙 직접 수집 vCenter — 법인 엣지가 없습니다');
+  if (!agent) return cell('pending', '이 법인 vCenter 를 보내는 엣지를 아직 모릅니다(인벤토리 수신 전)');
+  if (!isidu) return cell('na', `엣지 '${agent}' 가 아이실론 디렉터리 사용량 상태를 보내지 않습니다(조사 대상 없음)`);
+  const st = isidu.status || {};
+  const recvAt = num(isidu.at);
+  const runs = Array.isArray(st.poller?.lastRuns) ? st.poller.lastRuns : null;
+  if (num(st.targets) === 0) return cell('na', '이 엣지에 배정된 아이실론 조사 대상이 없습니다', recvAt);
+  if (!runs) return cell('pending', `실행 방식을 보내지 않는 엣지입니다${st.version ? `(v${txt(st.version, 32)} — v2.954 이상에서 보냄)` : ''}`, recvAt);
+  const clip = (at) => { const a = num(at); return a == null ? null : recvAt != null ? Math.min(a, recvAt) : a; };
+  const on = runs.filter((r) => r && r.detach !== false);
+  if (!runs.length) return cell('pending', '엣지가 시작한 뒤 아직 조사한 대상이 없습니다', recvAt);
+  if (!on.length) return cell('na', '분리 실행을 끈 대상만 있습니다(설정 › 아이실론 대상 ‘장비에서 분리 실행’)', recvAt);
+  const ok = on.filter((r) => r.mode === 'detached' || (r.mode === 'attached' && r.attached === true));
+  if (ok.length) {
+    const last = ok.reduce((m, r) => (num(r.at) > num(m.at) ? r : m), ok[0]);
+    return cell('confirmed', `분리 실행 ${ok.length}/${on.length} 대상${last.attached ? ' · 재시작 전 작업을 이어 받음' : ''}`, clip(last.at));
+  }
+  const fb = on.find((r) => r.mode === 'attached-fallback');
+  if (fb) return cell('failed', `분리 실행을 시작하지 못해 세션에 묶어 실행 — ${txt(fb.fallback, 200) || '사유 없음'}`, clip(fb.at));
+  return cell('pending', '분리 실행 기록이 아직 없습니다', recvAt);
+}
+
+/**
+ * 법인별 표 — vCenter(= 법인) 한 줄에 항목 다섯.
  * @param {object} o
  * @param {object[]} o.registry 등록 vCenter(id·name·collectMode)
  * @param {(id:string)=>object|null} o.vcOf 스냅샷 vCenter 객체(tagInv · collectedBy)
  * @param {(id:string)=>string} o.agentOf 그 vCenter 를 보내는 엣지 이름
  * @param {object[]} o.collectors 수집 서버 등록부 @param {Record<string,object>} o.statusById 수집 서버 상태
  * @param {(id:string)=>object|null} o.vcInfoOf · @param {(id:string)=>object|null} o.corpOf Bareos 사전 점검
+ * @param {(agent:string)=>object|null} o.isiduOf 엣지 isidu 상태(central/isiduEdge isiduEdgeStatus — v2.954)
  * @param {(id:string)=>boolean} o.isMock @param {string} o.centralVersion
  */
-export function buildFieldChecks({ registry = [], vcOf = () => null, agentOf = () => '', collectors = [], statusById = {}, vcInfoOf = () => null, corpOf = () => null, isMock = () => false, centralVersion = '' } = {}) {
+export function buildFieldChecks({ registry = [], vcOf = () => null, agentOf = () => '', collectors = [], statusById = {}, vcInfoOf = () => null, corpOf = () => null, isiduOf = () => null, isMock = () => false, centralVersion = '' } = {}) {
   const colByName = new Map();
   for (const c of Array.isArray(collectors) ? collectors : []) {
     if (!c || typeof c !== 'object') continue;
@@ -106,6 +137,7 @@ export function buildFieldChecks({ registry = [], vcOf = () => null, agentOf = (
     safe('vapi-tags', () => judgeVapiTags({ vc, mock }));
     safe('lacp-path', () => judgeLacpPath({ vcInfo: vcInfoOf(id), mock }));
     safe('bareos-dir', () => judgeBareosDir({ corp: corpOf(id) }));
+    safe('onefs-detach', () => judgeOnefsDetach({ site, agent, isidu: agent ? isiduOf(agent) : null, mock }));
     rows.push({ id, name: String(r.name || id).slice(0, 200), mode: site ? 'site' : 'direct', agent: agent || null, cells });
   }
   const counts = Object.fromEntries(FIELD_STATES.map((s) => [s, 0]));

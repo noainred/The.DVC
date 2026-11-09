@@ -17,6 +17,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { setIsiduBaseResolver } from '../isidu/collectRequests.js';
 
 const FUTURE_SKEW_MS = 5 * 60_000;
+const RUN_MODES = new Set(['detached', 'attached-fallback', 'attached']);
 const AGENT_MAX = 256;
 const SCANS_PER_POST = 50;
 // 상주 저장소에 들어가는 문자열은 capStr(자르고 평탄화 — v2.607 TIM2607-01: slice 는 원문을 붙잡는다). 문자열만 받는다.
@@ -96,6 +97,9 @@ export function sanitizeIsiduStatus(st) {
         .map((r) => ({ targetId: str(r.targetId, 64), since: num(r.since), detectedAt: num(r.detectedAt), nextAt: num(r.nextAt), resumes: num(r.resumes) })) : [],
       resumes: Array.isArray(poller.resumes) ? poller.resumes.filter((r) => r && typeof r === 'object').slice(0, 10)
         .map((r) => ({ targetId: str(r.targetId, 64), at: num(r.at), outcome: str(r.outcome, 16), note: str(r.note, 300), resumes: num(r.resumes) })) : [],
+      // v2.954(개선 검토 3번): 대상별 마지막 실행 방식 — 법인별 실환경 확인의 '아이실론 분리 실행' 근거(아는 값만 · 상한).
+      lastRuns: Array.isArray(poller.lastRuns) ? poller.lastRuns.filter((r) => r && typeof r === 'object' && RUN_MODES.has(r.mode)).slice(0, 20)
+        .map((r) => ({ targetId: str(r.targetId, 64), at: num(r.at), mode: r.mode, detach: r.detach !== false, ...(r.attached === true ? { attached: true } : {}), ...(typeof r.fallback === 'string' && r.fallback ? { fallback: str(r.fallback, 200) } : {}) })) : [],
     } : null,
     targets: num(s.targets),
     version: str(s.version, 32) || null,

@@ -76,6 +76,7 @@ import { getVcInfo } from '../../vcinfo/collect.js';
 import { healthView as bareosHealthView } from '../../bareos/health.js';
 import { isMockVcenter } from '../../mock/generator.js';
 import { getInventory } from '../../central/inventory.js';
+import { isiduEdgeStatus } from '../../central/isiduEdge.js';   // v2.954 법인별 실환경 확인 — 아이실론 분리 실행
 import { gatherArchInputs, scanArch, scopeArchPaths, ARCH_CODES, ARCH_STATES } from '../../portalcheck/archScan.js';
 
 // vc 별 위임 여부만 필요하다 — redact() 는 이미 password 를 뺀다(vcenter/registry.js:45).
@@ -437,6 +438,7 @@ api.get('/tools/portal-check/field', adminOnly, fullScopeOnly, (req, res) => {
     statusById: safe(() => allCollectorStatus(), {}),
     vcInfoOf: (id) => safe(() => getVcInfo(id), null),
     corpOf: (id) => corps.get(id) || null,
+    isiduOf: (agent) => safe(() => isiduEdgeStatus(agent), null),
     isMock: mock,
     centralVersion: safe(() => currentVersion(), ''),
   });

@@ -19,6 +19,7 @@ import net from 'node:net';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stripComments } from './_stripComments.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2770d-'));
 process.env.CONFIG_DIR = DIR;
@@ -260,7 +261,7 @@ test('E1-1 실제 엣지 pull — 중앙이 {} 를 보내면 직전 중앙 임�
 });
 
 test('E1-1 배선 — pdu-config 는 thresholdsForEdge 의 {} 도 싣는다(if (th) — {} 는 참)', () => {
-  const central = stripComments(read('routes/central.js'));
+  const central = stripComments(centralSource());
   const seg = central.slice(central.indexOf("centralRouter.get('/pdu-config'"), central.indexOf("centralRouter.post('/pdu-data'"));
   assert.match(seg, /const th = thresholdsForEdge\(\); if \(th\) thPart = \{ thresholds: th \}/);
 });
