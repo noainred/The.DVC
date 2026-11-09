@@ -9,6 +9,7 @@
 
 import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
+import { ioSampleSec, ioSampleCommand, ioResultFromExec } from './diskstats.js'; // v2.915: 디스크 I/O 표본(설계 bm-san-compare §4.1)
 
 /** 마운트 경로 검증 — 절대경로 + 안전 문자만(공백/따옴표/셸 메타문자 거부 = 명령 주입 방어). */
 export const MOUNT_RE = /^\/[A-Za-z0-9._\/-]*$/;
@@ -119,14 +120,20 @@ export async function collectServer(server) {
       readyTimeout: reqTimeoutMs(process.env.BMSTOR_SSH_TIMEOUT_MS, 15_000),   // v2.605 TIM2605-04: [1초, 10분]
     }, async ({ exec }) => {
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);
-      return { out };
+      // v2.915: 같은 세션에서 디스크 I/O 표본(상수 명령 · 입력 없음). df 가 요청 마운트를 하나도 못 찾았으면 I/O 는 시도하지 않는다.
+      //   시한 = 표본 간격 + 20초(명령 자체는 cat 넷 · sleep 하나). 0 이면 끔(df 만 — 예전 동작).
+      const sec = ioSampleSec();
+      const dfOk = parseDfOutput(out.stdout, mounts, out.stderr).mounts.length > 0;
+      const io = sec > 0 && dfOk ? await exec(ioSampleCommand(sec), (sec + 20) * 1000) : null;
+      return { out, io, sec };
     });
     const { mounts: rows, missing } = parseDfOutput(r.out.stdout, mounts, r.out.stderr);
     if (!rows.length) {
       const err = (r.out.stderr || '').trim().split('\n')[0] || 'df 출력에서 요청 마운트를 찾지 못했습니다.';
       return { ok: false, mounts: [], missing, error: err };
     }
-    return { ok: true, mounts: rows, missing };
+    const ioPart = r.sec > 0 ? ioResultFromExec(r.io) : { io: null, ioError: 'I/O 표본 꺼짐(BMSTOR_IO_SAMPLE_SEC=0)' };
+    return { ok: true, mounts: rows, missing, ...ioPart };
   } catch (e) {
     // v2.590(감사 F2): 자격증명 거부를 출처에서 못 박는다 — 폴러가 주기 수집을 멈출 수 있게. 엣지 폴링 위임은
     // 회신에서 이 플래그를 빼므로(agent/bmstorWorker.js 가 용량 필드만 싣는다) 폴러는 문구(ssh2 정식 문구)도 본다.

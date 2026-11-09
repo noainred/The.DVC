@@ -50,6 +50,16 @@ function makeArray(vcId, i) {
   return { kind, serial, label: `PSTORE_${serial.slice(-4)}`, ctl: ['NodeA', 'NodeB'], symb: (c, p) => `PowerStore::${serial}::${c} FC${p}::FC::3.6.0`, prefix: ['58', 'cc', 'f0', '9' + (h % 8), hx(h >>> 4)] };
 }
 
+/**
+ * 한 vCenter(법인)의 데모 어레이 계획(순수 · 결정적) — planSanDemo 가 쓰는 것과 같은 목록.
+ * v2.915: 스토리지 데모(mock/demo/storage.js)가 PowerMax · VMAX 스냅샷의 시리얼을 여기서 가져와 **포트 이름의 시리얼과 맞춘다** —
+ *   그래야 데모의 ‘SAN 비교’ 에서 어레이 전송 속도 대조(arraySerialOf ↔ 스냅샷 serial)가 성립한다(없는 법인은 미대조 상태 그대로).
+ * @returns {Array<{kind:string, serial:string, label:string}>}
+ */
+export function sanDemoArraysFor(vcId) {
+  return Array.from({ length: 2 + (demoHash(`${vcId}|arrays`) % 2) }, (_, i) => makeArray(vcId, i));
+}
+
 /** 호스트 HBA 두 개(팹 A/B). 메인 스냅샷의 FC HBA WWN 이 형식에 맞으면 그것을, 아니면 합성(Emulex OUI). */
 function hostHbas(h, used) {
   const fc = (h.hbas || []).filter((x) => /fibre/i.test(String(x.type || '')));
@@ -78,7 +88,7 @@ export function planSanDemo(snapshot = {}) {
     const short = shortOf(vcId);
     const n = [6, 8, 10][demoHash(`${vcId}|n`) % 3];
     const m = n / 2;                        // 팹당 스위치 수(코어 1 + 엣지 m-1)
-    const arrays = Array.from({ length: 2 + (demoHash(`${vcId}|arrays`) % 2) }, (_, i) => makeArray(vcId, i));
+    const arrays = sanDemoArraysFor(vcId);
     const used = new Set();
     const hosts = hostsAll.filter((h) => h && String(h.vcenterId) === vcId).sort((a, b) => String(a.name).localeCompare(String(b.name)))
       .map((h) => ({ name: String(h.name || 'host').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 40), kind: 'host', hbas: hostHbas(h, used) }));

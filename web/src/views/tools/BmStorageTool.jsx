@@ -19,6 +19,8 @@ import {
   groupColors, groupKeyOf, NO_GROUP, WARN_PCT,
 } from './bmStorHistoryText.js';
 import Select from '../../components/Select.jsx';
+import { useHashTab } from '../../hooks/useHashTab.js'; // v2.915: 하위 탭(현황 · SAN 비교) — 주소 #/tools/bm-storage/compare
+import BmSanCompare from './BmSanCompare.jsx';          // v2.915: SAN 비교 탭(시안 docs/design/bm-san-compare)
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -37,7 +39,8 @@ const Dot = ({ c }) => <span style={{ display: 'inline-block', width: 8, height:
 const GROUP_FOLD = 12;
 const SORTS = [{ key: 'pct', label: '사용률 높은 순' }, { key: 'avail', label: '여유 적은 순' }, { key: 'name', label: '이름순' }];
 
-const EMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', agent: '', dispatch: 'poll', groups: '', mounts: '/', enabled: true };
+const EMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', agent: '', dispatch: 'poll', groups: '', datacenterId: '', mounts: '/', enabled: true };
+const VIEWS = [{ k: 'status', label: '현황' }, { k: 'compare', label: 'SAN 비교' }];
 
 export default function BmStorageTool() {
   const [data, setData] = useState(null);
@@ -54,6 +57,8 @@ export default function BmStorageTool() {
   const [sortBy, setSortBy] = useState('pct');
   const [q, setQ] = useState('');
   const [groupsOpen, setGroupsOpen] = useState(false);
+  // v2.915: 하위 탭 — 훅이므로 조기 return 위에서 부른다(React #310).
+  const [view, setView] = useHashTab({ base: ['tools', 'bm-storage'], valid: VIEWS.map((v) => v.k), fallback: 'status' });
 
   // 수동 로드 + 15초 재조회(저장/수집 직후 즉시 refresh 가 필요해 usePolling 대신 직접 관리).
   // v2.629 WEB2629-03: 403(전체 범위 관리자 전용)은 다시 물어도 같다 — 15초 폴링을 멈추고, 오류는 객체째 들어 ErrorBox 가 권한 안내로 바꾸게 한다.
@@ -64,7 +69,16 @@ export default function BmStorageTool() {
 
   if (error && !data) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
-  const { total, groups, servers, config: cfgs, settings, status, agents } = data;
+  const { total, groups, servers, config: cfgs, settings, status, agents, datacenters = [] } = data;
+  const subTabs = (
+    <div className="bmc-subtabs" role="tablist">
+      {VIEWS.map((v) => (
+        <button key={v.k} type="button" role="tab" aria-selected={view === v.k} className={`bmc-subtab${view === v.k ? ' on' : ''}`} onClick={() => setView(v.k)}>{v.label}</button>
+      ))}
+      <span className="muted" style={{ marginLeft: 'auto', fontSize: 11.5, paddingBottom: 8 }}>{view === 'compare' ? '서버 등록 · 주기 · CSV 는 현황 탭에 그대로 있습니다' : 'SAN 비교 — VMAX · PowerMax 용량 사용률 · 전송 속도와 숫자로 비교'}</span>
+    </div>
+  );
+  if (view === 'compare') return <div className="bm2">{subTabs}<BmSanCompare /></div>;
   const cfgOf = (id) => (cfgs || []).find((c) => c.id === id);
 
   const save = async () => {
@@ -99,7 +113,7 @@ export default function BmStorageTool() {
   };
   const edit = (s) => {
     const c = cfgOf(s.id);
-    setForm({ ...EMPTY, ...c, password: '', mounts: (c?.mounts || []).join('\n'), groups: (c?.groups || []).join(', ') });
+    setForm({ ...EMPTY, ...c, password: '', mounts: (c?.mounts || []).join('\n'), groups: (c?.groups || []).join(', '), datacenterId: c?.datacenterId || '' });
   };
   // v2.599(C2599-09): 사용률은 서버가 df 와 같은 정의로 주고, 분모 0(마운트 미수집)이면 null 이다 — 'null%'·0% 로 그리지 않는다.
   const pctCell = (p) => (p == null ? <span className="muted">—</span> : <span style={{ whiteSpace: 'nowrap' }}>{bar(p)} <b style={{ fontSize: 12, color: pctColor(p) }}>{p}%</b></span>);
@@ -133,6 +147,7 @@ export default function BmStorageTool() {
 
   return (
     <div className="bm2">
+      {subTabs}
       <div className="flex between wrap" style={{ alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
         <div style={{ minWidth: 0, flex: '1 1 420px' }}>
           <div className="muted" style={{ fontSize: 13.5, lineHeight: 1.6 }}>
@@ -375,6 +390,14 @@ export default function BmStorageTool() {
                   <option value="">중앙 직접(SSH)</option>
                   {(() => { const m = missingChoice(agents || [], form.agent); return m ? <option value={m.value}>엣지 위임 — {m.label}</option> : null; })()}
                   {(agents || []).map((a) => <option key={a} value={a}>엣지 위임 — {a}</option>)}
+                </Select>
+              </label>
+              <label>법인 <span className="muted" style={{ fontSize: 11 }}>(선택 · 비우면 엣지의 법인)</span>
+                <Select className="input" value={form.datacenterId || ''} onChange={(e) => setForm({ ...form, datacenterId: e.target.value })}
+                  title="SAN 비교 탭의 법인별 보기에 쓰입니다. 비우면 수집 주체(엣지)에 귀속된 vCenter 의 법인으로 추정하고, 그마저 없으면 '(법인 미지정)' 으로 셉니다.">
+                  <option value="">선택 안 함</option>
+                  {(() => { const m = missingChoice(datacenters.map((d) => d.id), form.datacenterId); return m ? <option value={m.value}>{m.label}</option> : null; })()}
+                  {datacenters.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </Select>
               </label>
               {form.agent

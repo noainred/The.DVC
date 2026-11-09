@@ -25,6 +25,9 @@ import { isSshAuthError } from '../proxy/sshExec.js';
 import { numOrNull } from '../util/numOrNull.js';
 // v2.708 데모(mock): 접속 없이 df 결과를 만든다. live 에서는 mock- 서버(데모 시드 잔재)를 수집하지 않는다.
 import { isMockMode, demoBmResults, isDemoId } from '../mock/demo/storage.js';
+// v2.915(설계 bm-san-compare §4.1·§4.5): 디스크 I/O 표본 — 결과 묶음마다 중앙 I/O 시계열 DB 에 적재(엣지 위임 서버도 중앙이 적재한다).
+import { ioSampleSec } from './diskstats.js';
+import { recordIoSamples, pruneBmIo } from './ioDb.js';
 
 /**
  * 베어메탈 스토리지 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F2, server/CLAUDE.md v2.541 '아직 가드가 없는
@@ -72,7 +75,26 @@ let lastRunAt = 0;
 let lastRunSummary = null;
 
 export function getBmLatest() { return latest; }
-export function bmPollerStatus() { return { running, lastRunAt, lastRunSummary, intervalMinutes: getBmSettings().intervalMinutes }; }
+export function bmPollerStatus() { return { running, lastRunAt, lastRunSummary, intervalMinutes: getBmSettings().intervalMinutes, ioSampleSec: ioSampleSec() }; }
+
+/**
+ * v2.915: 수집 결과 묶음의 I/O 표본을 시계열 DB 에 적재한다(비동기 · 실패는 콘솔 한 줄 — 수집 자체는 막지 않는다).
+ * 적재 대상은 ok 이고 io 에 누적 카운터가 있는 행뿐(구버전 엣지 회신 · 측정 불가 서버는 빠진다). 적재 뒤 prune 은 스로틀(ioDb 가 센다).
+ */
+let _ioLogAt = 0;
+function recordIoFromResults(entries, at) {
+  const rows = [];
+  for (const { id, result, name } of entries) {
+    if (!result?.ok || !result.io || typeof result.io !== 'object' || !result.io.counters) continue;
+    rows.push({ serverId: String(id), name: name || '', ts: at, io: result.io });
+  }
+  if (!rows.length) return;
+  const intervalMs = Math.max(60_000, (getBmSettings().intervalMinutes || 10) * 60_000);
+  recordIoSamples(rows, { intervalMs })
+    .then((r) => { if (!r.ok && Date.now() - _ioLogAt > 10 * 60_000) { _ioLogAt = Date.now(); console.warn(`[bmstor-io] 적재 실패: ${r.reason}`); } })
+    .then(() => pruneBmIo().catch(() => {}))
+    .catch((e) => { if (Date.now() - _ioLogAt > 10 * 60_000) { _ioLogAt = Date.now(); console.warn(`[bmstor-io] 적재 예외: ${e?.message || e}`); } });
+}
 
 /**
  * 폴링 위임 결과 반영(v2.341) — 엣지가 POST /api/central/bmstor-result 로 회신한 결과를
@@ -99,24 +121,58 @@ export function sanitizeBmMounts(list) {
 }
 const sanitizeMissing = (list) => (Array.isArray(list) ? list.filter((x) => typeof x === 'string' && x).slice(0, MAX_MOUNTS).map((x) => x.slice(0, 512)) : []);
 
+/*
+ * v2.915: 엣지가 보낸 디스크 I/O 표본 — 아는 필드만 · 수는 수로 · 문자열 상한. 읽기 · 쓰기 속도가 없으면 통째로 null(반쪽 값을 그리지 않는다).
+ *   counters(누적 카운터)는 넷 다 수일 때만 — 하나라도 없으면 null(시계열 DB 가 구간 평균을 내지 못하므로 적재하지 않는다 — 2초 표본만 화면에).
+ */
+export function sanitizeBmIo(io) {
+  if (!io || typeof io !== 'object' || Array.isArray(io)) return null;
+  const readBps = numOrNull(io.readBps); const writeBps = numOrNull(io.writeBps);
+  if (readBps == null || writeBps == null) return null;
+  const c = io.counters && typeof io.counters === 'object' ? io.counters : null;
+  const counters = c ? { rdSectors: numOrNull(c.rdSectors), wrSectors: numOrNull(c.wrSectors), ioMs: numOrNull(c.ioMs), uptimeSec: numOrNull(c.uptimeSec) } : null;
+  const countersOk = counters && counters.rdSectors != null && counters.wrSectors != null && counters.ioMs != null;
+  return {
+    readBps, writeBps, totalBps: numOrNull(io.totalBps) ?? readBps + writeBps,
+    busyPct: numOrNull(io.busyPct), busiestDev: mStr(io.busiestDev, 64),
+    disks: Math.max(0, Math.round(numOrNull(io.disks) ?? 0)), skipped: Math.max(0, Math.round(numOrNull(io.skipped) ?? 0)),
+    sampleMs: numOrNull(io.sampleMs), counters: countersOk ? counters : null,
+  };
+}
+
+/**
+ * 엣지 회신 한 건 정제 — **폴링 회신(applyBmstorResults)과 중앙→엣지 PUSH(collectViaEdge) 두 경로가 같은 함수를 쓴다**(v2.915 — 설계 §4.1.
+ *   PUSH 경로는 v2.914 까지 정제 없이 latest 에 들어갔다 — 발견한 간극을 여기서 닫는다). io 가 없으면(구버전 엣지) ioError 'edge-legacy'.
+ */
+export function sanitizeBmResult(r, { at = Date.now(), agent = '' } = {}) {
+  const io = sanitizeBmIo(r?.io);
+  const ioErrRaw = typeof r?.ioError === 'string' && r.ioError ? r.ioError.slice(0, 300) : null;
+  return {
+    ok: !!r?.ok,
+    mounts: sanitizeBmMounts(r?.mounts),
+    missing: sanitizeMissing(r?.missing),
+    error: typeof r?.error === 'string' && r.error ? r.error.slice(0, 500) : r?.error ? '(형식 오류)' : null,
+    io, ioError: io ? null : (ioErrRaw || (r?.io === undefined ? 'edge-legacy' : (r?.io == null ? null : '(형식 오류)'))),
+    at, agent: String(agent || ''),
+  };
+}
+
 export function applyBmstorResults(agent, results) {
   const at = Date.now();
   let applied = 0;
   let byId = null;
+  const ioEntries = [];
   for (const r of Array.isArray(results) ? results : []) {
     if (!r || !r.id) continue;
-    const row = {
-      ok: !!r.ok,
-      mounts: sanitizeBmMounts(r.mounts),
-      missing: sanitizeMissing(r.missing),
-      error: typeof r.error === 'string' && r.error ? r.error.slice(0, 500) : r.error ? '(형식 오류)' : null,
-      at, agent: String(agent || ''),
-    };
+    const row = sanitizeBmResult(r, { at, agent });
     // v2.590: 엣지 회신의 자격증명 거부도 정지 기록에 반영한다(중앙이 다음 주기의 잡 대상에서 뺀다).
     if (!byId) { try { byId = new Map(listBmServersRaw().map((s) => [String(s.id), s])); } catch { byId = new Map(); } }
-    latest.set(String(r.id), noteAuth(byId.get(String(r.id)), row));
+    const srv = byId.get(String(r.id));
+    latest.set(String(r.id), noteAuth(srv, row));
+    ioEntries.push({ id: String(r.id), result: row, name: srv?.name || srv?.host || '' });
     applied++;
   }
+  recordIoFromResults(ioEntries, at);
   return applied;
 }
 
@@ -146,7 +202,8 @@ async function collectViaEdge(agent, servers) {
     try { j = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, '엣지 bmstor 응답'); } catch { j = null; }
     if (!r.ok || !j?.ok || !Array.isArray(j.results)) { const why = strOf(j?.reason, 300); return fail(`엣지 응답 오류(HTTP ${r.status})${why ? `: ${why}` : ''}`); }
     const byId = new Map(j.results.filter((x) => x && typeof x === 'object' && !Array.isArray(x)).map((x) => [x.id, x]));
-    return servers.map((s) => byId.get(s.id) || { id: s.id, ok: false, mounts: [], error: '엣지 응답에 결과 없음' });
+    // v2.915: PUSH 회신도 폴링 회신과 **같은 정제**를 거친다(아는 필드만 · 상한 · 수는 수로). at · agent 는 호출부가 덮는다.
+    return servers.map((s) => (byId.has(s.id) ? { id: s.id, ...sanitizeBmResult(byId.get(s.id), { agent }) } : { id: s.id, ok: false, mounts: [], error: '엣지 응답에 결과 없음' }));
   } catch (e) {
     return fail(`엣지 전송 실패: ${e.message}`);
   }
@@ -203,11 +260,15 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
     const at = Date.now();
     let ok = 0, errors = 0;
     const srvById = new Map(servers.map((s) => [s.id, s])); // O(N²) 방지 — 1,000대 상한에서 find 는 백만 비교(v2.342)
+    const ioEntries = [];
     for (const r of [...centralResults, ...edgeResults.flat()]) {
       const srv = srvById.get(r.id);
-      latest.set(r.id, noteAuth(srv, { ...r, at, agent: srv?.agent || '' }));
+      const row = noteAuth(srv, { ...r, at, agent: srv?.agent || '' });
+      latest.set(r.id, row);
+      ioEntries.push({ id: r.id, result: row, name: srv?.name || srv?.host || '' });
       if (r.ok) ok++; else errors++;
     }
+    recordIoFromResults(ioEntries, at);   // v2.915: 디스크 I/O 표본 적재(비동기)
     // 삭제된 서버의 잔존 결과 정리(유령 표시 방지).
     // v2.478(감사 B12): 정리 기준은 '등록된 전체'(비활성 포함) — 활성만 기준이면 서버를 비활성으로 바꾼 순간
     // 마지막 수집 결과가 지워져 화면에 용량 0·'미수집'으로 남는다.

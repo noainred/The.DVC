@@ -10,6 +10,23 @@
 const pct = (used, avail) => (used + avail > 0 ? Math.round((used / (used + avail)) * 1000) / 10 : null);
 const zero = () => ({ totalBytes: 0, usedBytes: 0, availBytes: 0 });
 
+/*
+ * v2.915(설계 bm-san-compare §4.1): 디스크 I/O 합 — **측정된 서버만** 더하고 개수를 밝힌다. 못 읽은 서버를 0 으로 더하지 않는다.
+ *   measured < total 이면 부분 합(partial) — 화면이 호박색으로 따로 그린다. 측정 0 이면 속도는 null.
+ */
+const ioZero = () => ({ readBps: 0, writeBps: 0, totalBps: 0, busyMax: null, measured: 0, total: 0, partial: false });
+function ioAdd(acc, io) {
+  acc.total += 1;
+  if (!io || !Number.isFinite(Number(io.totalBps))) return;
+  acc.measured += 1;
+  acc.readBps += Number(io.readBps) || 0; acc.writeBps += Number(io.writeBps) || 0; acc.totalBps += Number(io.totalBps) || 0;
+  if (Number.isFinite(Number(io.busyPct)) && (acc.busyMax == null || Number(io.busyPct) > acc.busyMax)) acc.busyMax = Number(io.busyPct);
+}
+function ioClose(acc) {
+  if (!acc.measured) return { ...acc, readBps: null, writeBps: null, totalBps: null, partial: false };
+  return { ...acc, partial: acc.measured < acc.total };
+}
+
 // 서버당 그룹 상한(v2.344, 사용자 요구 — 한 서버가 여러 합산 그룹에 속할 수 있게).
 export const MAX_GROUPS_PER_SERVER = 3;
 
@@ -42,6 +59,7 @@ export function aggregate(servers, latest) {
   const perServer = [];
   const groupMap = new Map();
   const total = { ...zero(), servers: 0, ok: 0, errors: 0, pending: 0 };
+  const totalIo = ioZero();
 
   for (const s of servers || []) {
     const r = (latest && latest.get(s.id)) || null;
@@ -52,15 +70,19 @@ export function aggregate(servers, latest) {
       sums.availBytes += m.availBytes || 0;
     }
     const groups = groupsOf(s);
+    const io = r?.ok && r.io && typeof r.io === 'object' ? r.io : null;   // v2.915: 디스크 I/O 표본(없으면 ioError 가 사유)
     const row = {
       id: s.id, name: s.name || s.host, host: s.host,
       groups, group: groups.join(', '), // group(문자열)은 표시/하위호환용 — 진실은 groups 배열
       agent: s.agent || '',
+      // v2.915(설계 §4.4): 법인 — 호출부가 corp.datacenterOfBmServer 로 채워 넣은 값을 그대로 싣는다(없으면 '').
+      datacenterId: String(s.datacenterId || ''), datacenterSource: String(s.datacenterSource || ''),
       enabled: s.enabled !== false, mountCount: (s.mounts || []).length,
       ...sums, usedPct: pct(sums.usedBytes, sums.availBytes),
       ok: !!r?.ok, error: r?.error || null, missing: r?.missing || [], at: r?.at || null,
       authStopped: r?.authStopped || null,   // v2.590: 인증 실패로 주기 수집이 멈췄다(화면이 말한다)
       mounts: r?.mounts || [],
+      io, ioError: r?.ok ? (io ? null : (r.ioError || (r.io === undefined ? 'edge-legacy' : null))) : null,
     };
     perServer.push(row);
     if (s.enabled === false) continue;      // 비활성 서버는 합계·그룹에서 제외(표에는 남김)
@@ -69,22 +91,24 @@ export function aggregate(servers, latest) {
     else if (r.ok) {
       total.ok++;
       total.totalBytes += sums.totalBytes; total.usedBytes += sums.usedBytes; total.availBytes += sums.availBytes;
+      ioAdd(totalIo, io);
     } else total.errors++;
 
     // 멀티 그룹(v2.344): 서버가 속한 '모든' 그룹에 합산된다 — 그룹 표의 합이 전체 KPI 보다
     // 클 수 있음(의도: 그룹은 관점별 묶음이지 분할이 아님). 전체 KPI 는 서버당 1회만 집계.
     for (const g of groups.length ? groups : ['']) {
-      if (!groupMap.has(g)) groupMap.set(g, { name: g || '(그룹 없음)', servers: 0, ok: 0, errors: 0, pending: 0, ...zero() });
+      if (!groupMap.has(g)) groupMap.set(g, { name: g || '(그룹 없음)', servers: 0, ok: 0, errors: 0, pending: 0, ...zero(), io: ioZero(), members: [] });
       const gm = groupMap.get(g);
       gm.servers++;
+      gm.members.push(s.id);
       if (!r) gm.pending++;
-      else if (r.ok) { gm.ok++; gm.totalBytes += sums.totalBytes; gm.usedBytes += sums.usedBytes; gm.availBytes += sums.availBytes; }
+      else if (r.ok) { gm.ok++; gm.totalBytes += sums.totalBytes; gm.usedBytes += sums.usedBytes; gm.availBytes += sums.availBytes; ioAdd(gm.io, io); }
       else gm.errors++;
     }
   }
 
   const groups = [...groupMap.values()]
-    .map((g) => ({ ...g, usedPct: pct(g.usedBytes, g.availBytes) }))
+    .map((g) => ({ ...g, usedPct: pct(g.usedBytes, g.availBytes), io: ioClose(g.io) }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  return { total: { ...total, usedPct: pct(total.usedBytes, total.availBytes) }, groups, perServer };
+  return { total: { ...total, usedPct: pct(total.usedBytes, total.availBytes), io: ioClose(totalIo) }, groups, perServer };
 }
