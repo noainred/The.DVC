@@ -91,6 +91,8 @@ export function leakText(leak) {
 export const DEPLOY_STATUS_TEXT = Object.freeze({
   applied: { label: '반영됨', tone: 'ok' }, pending: { label: '대기 — 다음 인출에 반영', tone: 'warn' }, never: { label: '인출 기록 없음(이 중앙 기동 뒤)', tone: 'idle' },
   old: { label: '구버전 엣지 — 정비 창을 받지 못함', tone: 'bad' },
+  // v2.954(점검 D-1): 중앙이 그 엣지 대상을 몰라(재시작 뒤 · 엣지 인출 전) 태그 창을 펼 수 없다 — 배포를 보류하고 엣지는 지난 배포본을 24시간까지 쓴다
+  'targets-unknown': { label: '대상 모름 — 태그 창 배포 보류(베어메탈 엣지 인출 필요)', tone: 'warn' },
 });
 /** 추이 음영 띠(서버 occurrences 응답의 merged — 그리기만). */
 export function maintBands(resp) {

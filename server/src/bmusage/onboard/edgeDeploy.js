@@ -108,7 +108,10 @@ export function applyEdgeChanges({ upserts = [], removes = [] } = {}, { by = '',
 export function deployFor(agent, { verified = false } = {}) {
   if (!verified) return { distribute: false, reason: 'unverified' };
   const rows = edgeRowsFor(agent);
-  return { distribute: true, rows, sig: sigOf(rows) };
+  // v2.954(점검 D-3): 제거 대기 이름(그 엣지 자기 행만 · 이름만) — 적용 상태를 잃은 엣지가 ‘남은 것이 없음’ 을 확인한 뒤에만 서명을 보고하게
+  const v = load().agents[lc(agent)];
+  const pending = (v?.pending || []).map((x) => String(x.name || '')).filter(Boolean).slice(0, MAX_EDGE_ROWS);
+  return { distribute: true, rows, sig: sigOf(rows), pending };
 }
 
 /* 엣지별 마지막 인출(인메모리 — 중앙 재시작 직후엔 비어 있고 화면이 그 사실을 말한다). */
