@@ -381,13 +381,13 @@
     unknown · na 는 수준이 아니다(올리지도 내리지도 않음) · `collect` ok → unknown 만 '보고 끊김' · 첫 비교는 baseline(보내지 않음) · 타이머 하한 5분 · 중앙만 · 설정 파일 손상은 preserveCorrupt.
   · 자기 기준선(`storageBaseline.js`)은 창 **시작 전** 4주 같은 요일 × 시간 칸 평균이고 허용 폭은 기준 설정 `baselineTolerancePct`(null = 끔) — 표본 3개 미만 · 0.5 Gb/s 미만 차이는 판정하지 않는다.
     화면은 `baseline.applicable` 일 때만 marks 를 쓴다(없으면 범례 · 테두리 없음). 기준선은 판정 항목이 아니다(점검 overall 불변).
-  · 월간 보고서는 **자급형 HTML**(스크립트 없음 · 절마다 `overflow-x:auto`) — 메일 첨부 PDF 는 서버 생성기가 없어 만들지 않는다(⚠ v2.954 정정: '글꼴 동봉 필요' 는 틀렸다 — 웹에는 jsPDF + 임베드 한글 글꼴이 있고 v2.954 가 화면 'PDF 로 저장' 을 그걸로 붙였다). `planMonthlyTick` 은 놓친 회차를 몰아서 보내지 않고
+  · 월간 보고서는 **자급형 HTML**(스크립트 없음 · 절마다 `overflow-x:auto`) — 메일 첨부 PDF 는 서버 생성기가 없어 만들지 않는다(⚠ v2.955 정정: '글꼴 동봉 필요' 는 틀렸다 — 웹에는 jsPDF + 임베드 한글 글꼴이 있고 v2.955 가 화면 'PDF 로 저장' 을 그걸로 붙였다). `planMonthlyTick` 은 놓친 회차를 몰아서 보내지 않고
     `missed` 로 기록만 · 유예 30분 · 설정이 바뀌면 rebase. '지금 보내기' 는 SMTP 꺼짐 · 실패면 **409** 로 '보내지 않았다' 고 말한다. 기준 표의 값은 `settings.values`(items 는 정의만 — 전부 '비움' 으로 적던 결함).
   · 공개 API `/san-storage/*` 는 허용 목록에 `requiresFullScope: true` 로 선언한다 — 범위 거절은 `endpointAllowed` 게이트 **하나**(핸들러에 두 벌 두지 않는다) · 핸들러는 404 catch-all **앞**에 등록
     (뒤에 두면 닿지 않는다 — 시험 ④ 가 잡았다).
   · 용량 × 성능은 **표시 규칙**(`QUADRANT_RULE` 80% · 20%)이지 판정이 아니다 — 각주에 적고 점검에 넣지 않는다. `growthLookup` 의 `daysToFull` 은 일수(숫자)다(growth.js 객체를 그대로 내보내지 말 것).
   · 시험 `test/sanStorage2953.test.js` · 웹 `sanStorage2953.test.js`. 시각 의존 거짓 실패(참고): `veeam2761b` 의 포트 '9419' 포함 검사가 epoch ms 에 9419 가 드는 구간에 실패했다 → 숫자 경계 정규식.
-- **v2.954 — SAN 스토리지 성능 3차: 점검 결과 이력 · 운영 안내 · 임의 구간 · ⌘K/Flow 인계 · PowerMax 포트 · 데모 보정 · 보고서 PDF(화면)**(설계 README §8.4)
+- **v2.955 — SAN 스토리지 성능 3차: 점검 결과 이력 · 운영 안내 · 임의 구간 · ⌘K/Flow 인계 · PowerMax 포트 · 데모 보정 · 보고서 PDF(화면)**(설계 README §8.4)
   · 점검 이력(`storageCheckHistory.js`)은 **바뀌었거나 1시간**(`shouldRecord` · `MIN_GAP_MS`)에만 적는다 — 5분 틱마다 같은 값을 쌓지 않는다. 1시간 반복 기록이 있으니 '마지막 두 건' 비교로 변화를 찾지 말고 `lastChangeOf`
     (최신부터 서명이 달라지는 첫 쌍)를 쓴다. 비교 · 전이 뜻은 healthHistory 와 같다(unknown 은 ok 로 흡수하지 않음). DB 못 열면 `available:false` 를 화면이 그대로 보인다. 기록은 알림 틱(알림 꺼져 있어도 · 중앙만) + '지금 판정'.
   · 인계는 URL 이 아니라 **메모리**(v2.616 규약 · `hooks/searchHandoff.js`) — 팔레트 행 `san-storage`(검색어) · 상세 → Flow Vision `san-flow:targets`(포트 WWN 쉼표 · 최대 8). 도구 라우터(`SpecialTools.jsx`)는 해시의 `?` 를 모르므로
@@ -397,5 +397,5 @@
   · PowerMax 포트 단위는 **디렉터를 다 읽은 뒤** 남는 자리에만 · 디렉터당 4 · 전체 24호출(`PMAX_PORTS_PER_DIR` · `PMAX_PORT_CALLS_MAX`) — WAN 어레이에서 호출 폭주를 막는다. 포트 지표 이름(IOs · MBs · ResponseTime)은 디렉터와 다르다.
   · CSV `nodeLoad` 칸은 **표본을 낼 수 있는 장비**(아이실론 · REST 어레이 — registry sampleCapable 과 같은 조건)만 true|false, SSH 변형은 빈칸(가져오기도 빈칸 유지).
   · 보고서 PDF 는 기존 벡터 인프라(`reportExport.saveDocAsPdf`)만 — 새 라이브러리 금지 · 파일명 ASCII · 임베드 글꼴 밖 글자(✕) 금지(`PDF_MARK`). 메일 첨부는 HTML(서버 생성기 없음 — 바뀌면 이 줄을 고친다).
-  · 데모 포트 사용량은 **표본을 쌓지 않고 `demoPerfSynth.js` 가 조회 때 수식으로 만든다**(v2.715) — 데모 값을 바꾸려면 그쪽이다(`sanDemoPortBps` 는 실시간 샘플러 경로일 뿐 · v2.954 가 한 번 헛짚음). 이상치 창 `demoAnomalyFactor` 는 `Date.now()` 기준 최근 24시간(수식 데모의 유일한 예외 · 기준선 표시용) — 다른 데모 값에 퍼뜨리지 말 것.
-  · 메일 첨부 `contentType` 은 매개변수 없이(`'text/html'`) — `util/smtp.js` 가 text/* 에 charset 을 붙이고 `'; charset='` 이 든 값은 거부한다. v2.953 보고서 발송이 이 때문에 항상 실패했다 → **발송 경로는 가짜 SMTP 로 끝까지 보낸다**(`sanStorage2954` ⑤).
+  · 데모 포트 사용량은 **표본을 쌓지 않고 `demoPerfSynth.js` 가 조회 때 수식으로 만든다**(v2.715) — 데모 값을 바꾸려면 그쪽이다(`sanDemoPortBps` 는 실시간 샘플러 경로일 뿐 · v2.955 가 한 번 헛짚음). 이상치 창 `demoAnomalyFactor` 는 `Date.now()` 기준 최근 24시간(수식 데모의 유일한 예외 · 기준선 표시용) — 다른 데모 값에 퍼뜨리지 말 것.
+  · 메일 첨부 `contentType` 은 매개변수 없이(`'text/html'`) — `util/smtp.js` 가 text/* 에 charset 을 붙이고 `'; charset='` 이 든 값은 거부한다. v2.953 보고서 발송이 이 때문에 항상 실패했다 → **발송 경로는 가짜 SMTP 로 끝까지 보낸다**(`sanStorage2955` ⑤).

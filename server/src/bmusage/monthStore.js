@@ -521,6 +521,8 @@ export const REPAIR_BUDGET_MS = clampIntervalMs(process.env.BMUSAGE_REPAIR_BUDGE
 export const REPAIR_BACKOFF_BASE_MS = 10 * 60_000;
 export const REPAIR_BACKOFF_MAX_MS = 60 * 60_000;
 /** 연속 실패 횟수 → 다음 시도까지 기다릴 시간(첫 실패는 다음 틱에 바로 다시 — 일시 오류). */
+/** v2.954: 한 보정 실행에서 raw 파일 하나당 읽는 대기 쪽 수 상한(쪽 = max 건 — 기본 2,000 × 10 = 2만 건). */
+export const PEND_PAGES_MAX = 10;
 export const repairBackoffMs = (fails) => (fails < 2 ? 0 : Math.min(REPAIR_BACKOFF_MAX_MS, REPAIR_BACKOFF_BASE_MS * 2 ** (fails - 2)));
 const _repairFail = new Map();   // 롤업 파일 이름 → { fails, since, at, nextAt, reason }
 /** 재집계가 읽는 원시 열(aggregateRows 가 쓰는 것 — 시각 · 이름 · 법인 · 피크 출처 · 롤업 열 · 피크 값과 시각). 1일(D1_ROLL_ALL)도 같은 열 집합이다. */
@@ -557,53 +559,67 @@ async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max, budgetMs, 
     if (overBudget()) { out.budgetHit = true; break; }
     await withPeriodFile('raw', f.key, { create: false }, async (rawDb) => {
       if (!rawDb) return;
-      let pend = [];
-      try { pend = rawDb.prepare('SELECT agent, key, h, daily FROM _pend ORDER BY h LIMIT ?').all(max); } catch { return; }
-      if (!pend.length) return;
-      const sel = repairSelect(rawDb);
-      // 묶음: 1일까지 다시 해야 하는 대기는 (agent·key·날), 1시간만이면 버킷 하나 — 묶음 단위로 끝내거나 통째로 다음으로 미룬다.
-      const groups = new Map();
-      for (const pd of pend) {
-        const h = Number(pd.h); const daily = !!Number(pd.daily);
-        const day = daily ? dayKey(h) : null;
-        const gk = daily ? `d\u0000${pd.agent}\u0000${pd.key}\u0000${day}` : `h\u0000${pd.agent}\u0000${pd.key}\u0000${h}`;
-        if (!groups.has(gk)) groups.set(gk, { agent: pd.agent, key: pd.key, day, items: [] });
-        groups.get(gk).items.push(pd);
-      }
-      const done = [];
-      for (const g of groups.values()) {
-        if (overBudget()) { out.budgetHit = true; out.deferred += g.items.length; continue; }
-        const [ds, de] = g.day ? dayRange(g.day) : [0, 0];
-        const expired = !!g.day && rawKeepFrom != null && ds < rawKeepFrom;
-        const targets = new Set(g.items.map((pd) => fileNameOf('h1', month0('h1', Number(pd.h)))));
-        if (g.day && !expired) targets.add(fileNameOf('d1', g.day.slice(0, 4)));
-        for (const t of targets) run.targeted.add(t);
-        if ([...targets].some(blocked)) { out.skipped += g.items.length; continue; }
-        progressed = true;
-        const dayRows = g.day ? sel.all(g.agent, g.key, ds, de) : null;
-        const hourOk = [];
-        for (const pd of g.items) {
-          const h = Number(pd.h);
-          if (run.failed.has(fileNameOf('h1', month0('h1', h)))) continue;   // 이 실행에서 이미 실패한 파일은 다시 열지 않는다
-          const rows = dayRows ? dayRows.filter((r) => Number(r.ts) >= h && Number(r.ts) < h + HOUR_MS) : sel.all(pd.agent, pd.key, h, h + HOUR_MS);
-          const ok = await replaceRollup('h1', month0('h1', h), 'usage_hourly', H1_COLS, 'h', h, rows, { agent: pd.agent, key: pd.key, rolls: ROLL }, out, run);
+      // v2.954(개선 검토 1번 — audits '보정 대기 읽기는 파일당 LIMIT 2,000'): 앞 쪽이 전부 재시도 간격 중인 파일로 가는 대기면 예전에는 그 2,000건만 다시 읽고
+      //   끝나, 뒤의 정상 대기(다른 파일로 가는 1시간 대기)가 간격이 풀릴 때까지(손상 파일이면 끝없이) 밀렸다. 이제 (h, rowid) 키셋으로 다음 쪽을 잇는다 —
+      //   쪽이 가득 찼을 때만 · 시간 상한(overBudget) 안에서만 · 파일당 PEND_PAGES_MAX 쪽까지(건너뛰기는 읽기만이라 싸다).
+      let cursor = null;
+      for (let page = 0; page < PEND_PAGES_MAX; page += 1) {
+        let pend = [];
+        try {
+          pend = cursor
+            ? rawDb.prepare('SELECT rowid AS rid, agent, key, h, daily FROM _pend WHERE h > ? OR (h = ? AND rowid > ?) ORDER BY h, rowid LIMIT ?').all(cursor.h, cursor.h, cursor.rid, max)
+            : rawDb.prepare('SELECT rowid AS rid, agent, key, h, daily FROM _pend ORDER BY h, rowid LIMIT ?').all(max);
+        } catch { return; }
+        if (!pend.length) return;
+        cursor = { h: Number(pend[pend.length - 1].h), rid: Number(pend[pend.length - 1].rid) };
+        const sel = repairSelect(rawDb);
+        // 묶음: 1일까지 다시 해야 하는 대기는 (agent·key·날), 1시간만이면 버킷 하나 — 묶음 단위로 끝내거나 통째로 다음으로 미룬다.
+        const groups = new Map();
+        for (const pd of pend) {
+          const h = Number(pd.h); const daily = !!Number(pd.daily);
+          const day = daily ? dayKey(h) : null;
+          const gk = daily ? `d\u0000${pd.agent}\u0000${pd.key}\u0000${day}` : `h\u0000${pd.agent}\u0000${pd.key}\u0000${h}`;
+          if (!groups.has(gk)) groups.set(gk, { agent: pd.agent, key: pd.key, day, items: [] });
+          groups.get(gk).items.push(pd);
+        }
+        const done = [];
+        for (const g of groups.values()) {
+          if (overBudget()) { out.budgetHit = true; out.deferred += g.items.length; continue; }
+          const [ds, de] = g.day ? dayRange(g.day) : [0, 0];
+          const expired = !!g.day && rawKeepFrom != null && ds < rawKeepFrom;
+          const targets = new Set(g.items.map((pd) => fileNameOf('h1', month0('h1', Number(pd.h)))));
+          if (g.day && !expired) targets.add(fileNameOf('d1', g.day.slice(0, 4)));
+          for (const t of targets) run.targeted.add(t);
+          if ([...targets].some(blocked)) { out.skipped += g.items.length; continue; }
+          progressed = true;
+          const dayRows = g.day ? sel.all(g.agent, g.key, ds, de) : null;
+          const hourOk = [];
+          for (const pd of g.items) {
+            const h = Number(pd.h);
+            if (run.failed.has(fileNameOf('h1', month0('h1', h)))) continue;   // 이 실행에서 이미 실패한 파일은 다시 열지 않는다
+            const rows = dayRows ? dayRows.filter((r) => Number(r.ts) >= h && Number(r.ts) < h + HOUR_MS) : sel.all(pd.agent, pd.key, h, h + HOUR_MS);
+            const ok = await replaceRollup('h1', month0('h1', h), 'usage_hourly', H1_COLS, 'h', h, rows, { agent: pd.agent, key: pd.key, rolls: ROLL }, out, run);
+            await maybeYield();
+            if (!ok) continue;
+            out.buckets += 1; hourOk.push(pd);
+          }
+          if (!g.day) { for (const it of hourOk) done.push(it); continue; }
+          if (!hourOk.length) continue;
+          if (expired) { out.expiredDaily += 1; for (const it of hourOk) done.push(it); continue; }
+          const rows = dailyLiveAfter == null ? dayRows : dayRows.filter((r) => Number(r.ts) > dailyLiveAfter);
+          const ok = await replaceRollup('d1', g.day.slice(0, 4), 'usage_daily', D1_COLS, 'day', g.day, rows, { agent: g.agent, key: g.key, rolls: D1_ROLL_ALL }, out, run);
           await maybeYield();
           if (!ok) continue;
-          out.buckets += 1; hourOk.push(pd);
+          out.days += 1; for (const it of hourOk) done.push(it);
         }
-        if (!g.day) { for (const it of hourOk) done.push(it); continue; }
-        if (!hourOk.length) continue;
-        if (expired) { out.expiredDaily += 1; for (const it of hourOk) done.push(it); continue; }
-        const rows = dailyLiveAfter == null ? dayRows : dayRows.filter((r) => Number(r.ts) > dailyLiveAfter);
-        const ok = await replaceRollup('d1', g.day.slice(0, 4), 'usage_daily', D1_COLS, 'day', g.day, rows, { agent: g.agent, key: g.key, rolls: D1_ROLL_ALL }, out, run);
-        await maybeYield();
-        if (!ok) continue;
-        out.days += 1; for (const it of hourOk) done.push(it);
+        if (done.length) {
+          try { txn(rawDb, () => { const del = rawDb.prepare('DELETE FROM _pend WHERE agent=? AND key=? AND h=?'); for (const pd of done) del.run(pd.agent, pd.key, pd.h); }); }
+          catch (e) { out.errors.push(`${f.name}: ${String(e?.message || e).slice(0, 120)}`); }
+        }
+        if (pend.length < max || overBudget()) return;
+        out.pages = (out.pages || 0) + 1;
       }
-      if (done.length) {
-        try { txn(rawDb, () => { const del = rawDb.prepare('DELETE FROM _pend WHERE agent=? AND key=? AND h=?'); for (const pd of done) del.run(pd.agent, pd.key, pd.h); }); }
-        catch (e) { out.errors.push(`${f.name}: ${String(e?.message || e).slice(0, 120)}`); }
-      }
+      out.pendMore = true;   // 쪽 상한까지 가득 — 뒤에 못 본 대기가 있다(아래 '가리키지 않는 파일' 정리를 하지 않는다)
     });
   }
   // 재시도 간격 — 실패한 파일은 횟수를 올리고, 성공만 한 파일은 지운다. 아무 대기도 가리키지 않는 파일은(끝까지 본 실행에서만) 지운다.
@@ -613,7 +629,7 @@ async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max, budgetMs, 
   }
   for (const name of [..._repairFail.keys()]) {
     if (run.failed.has(name)) continue;
-    if (run.ok.has(name) || (!out.budgetHit && !run.targeted.has(name))) _repairFail.delete(name);
+    if (run.ok.has(name) || (!out.budgetHit && !out.pendMore && !run.targeted.has(name))) _repairFail.delete(name);
   }
   if (_repairFail.size) {
     out.backoff = [..._repairFail.entries()].slice(0, 8).map(([file, v]) => ({ file, ...v }));

@@ -1,5 +1,5 @@
 /**
- * sanStorage2954.test.js — v2.954 SAN 스토리지 성능 3차(점검 이력 모달 · 임의 구간 · ⌘K/Flow 인계 · 보고서 PDF)의 순수 계산 · 소스 규약.
+ * sanStorage2955.test.js — v2.955 SAN 스토리지 성능 3차(점검 이력 모달 · 임의 구간 · ⌘K/Flow 인계 · 보고서 PDF)의 순수 계산 · 소스 규약.
  *  ① reportPdfDoc — 문서 모델(머리 · 블록 순서 · 표 열 수 = 2 + 항목 + 1) · 임베드 글꼴 밖 글자(✕) 없음 · 값 없으면 '—'
  *  ② 소스 규약 — 인계는 URL 이 아니라 handoffMany/useSearchHandoff · 해시에 ?targets= 금지 · 임의 구간 입력 · 이력 모달 available:false 표시 · PDF 는 reportExport 동적 import
  */

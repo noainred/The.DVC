@@ -34,7 +34,7 @@ import { LIST_WINDOWS, deviceContextOf, buildListCore, growthLookup, runCheck, _
 export { LIST_WINDOWS, deviceContextOf, buildListCore, growthLookup, runCheck, _resetGrowthMemoForTest };
 import { storagePerfNotifyStatus, pollStoragePerfNotifyOnce } from '../../sanswitch/storagePerfNotify.js';
 import { storagePerfReportStatus, saveReportSettings, buildReport, sendReportNow } from '../../sanswitch/storagePerfReportMail.js';
-import { recordCheckRuns, listCheckRuns, checkHistoryOverview, checkHistoryStatus } from '../../sanswitch/storageCheckHistory.js';   // v2.954 점검 결과 이력
+import { recordCheckRuns, listCheckRuns, checkHistoryOverview, checkHistoryStatus } from '../../sanswitch/storageCheckHistory.js';   // v2.955 점검 결과 이력
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { isMockMode, demoOn } from '../../mock/demo/flags.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -47,6 +47,31 @@ const fullScopeOnly = fullScopeOnlyWith('SAN 스토리지 성능은 전체 범�
 const fullRwOnly = fullReadWriteScopeOnlyWith('SAN 스토리지 성능의 기준 · 분류 · 매핑 변경은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다.');
 
 const KEY_MAX = 160;
+
+/*
+ * v2.954(점검 A-3): 비관리자 판본(조회는 tools + 전체 범위라 operator · viewer 도 부른다 — 카탈로그 adminOnly 는 서버 집행이 아니다) —
+ *   받는 사람 메일 주소는 개수로만(형제 아이실론 · 종합 메일과 같은 결: 받는 사람은 관리자 판본에만) · 설정한 관리자 계정명(updatedBy)은 뺀다 ·
+ *   발송 기록의 결과 · 사유 문구 안 메일 주소(SMTP 거부 문구 등)도 가린다. 관리자 판정은 isAdminReq(= demoGuest.js isAdminDetailUser 하나).
+ */
+const MAIL_RE = /[^\s<>@,;:"'()[\]]+@[^\s<>@,;:"'()[\]]+/g;
+const scrubMail = (v) => (typeof v === 'string' ? v.slice(0, 400).replace(MAIL_RE, '(메일 가림)') : v);
+export function settingsView(s, admin) {
+  if (admin || !s || typeof s !== 'object') return s;
+  const { updatedBy: _u, ...rest } = s; void _u;
+  return Array.isArray(rest.to) ? { ...rest, to: [], toCount: rest.to.length, toHidden: true } : rest;
+}
+const historyView = (list, admin) => (admin || !Array.isArray(list) ? list : list.map((h) => (h && typeof h === 'object'
+  ? { ...h, ...(h.result !== undefined ? { result: scrubMail(h.result) } : {}), ...(h.reason !== undefined ? { reason: scrubMail(h.reason) } : {}), ...(typeof h.to === 'string' ? { to: scrubMail(h.to) } : {}) } : h)));
+/** 알림 상태(마지막 실행 · 발송 기록) 비관리자 판본. */
+export function notifyStatusView(st, admin) {
+  if (admin || !st || typeof st !== 'object') return st;
+  return { ...st, ...(Array.isArray(st.history) ? { history: historyView(st.history, false) } : {}), ...(Array.isArray(st.sent) ? { sent: historyView(st.sent, false) } : {}), ...(st.error !== undefined ? { error: scrubMail(st.error) } : {}) };
+}
+/** 월간 보고서 상태 비관리자 판본. */
+export function reportStatusView(st, admin) {
+  if (admin || !st || typeof st !== 'object') return st;
+  return { ...st, settings: settingsView(st.settings, false), history: historyView(st.history, false) };
+}
 
 /** 요청의 법인 필터 · 장비 · 이름 · 가림 — 형제 라우트(storage-summary)와 같은 규칙. */
 async function deviceContext(req) { return deviceContextOf({ admin: isAdminReq(req), dcQuery: req.query.datacenterId }); }
@@ -107,7 +132,7 @@ export function registerSanStorage(api) {
     const key = String(req.query.key || '').slice(0, KEY_MAX);
     if (!key) return res.status(400).json({ ok: false, reason: 'key(어레이 키)가 필요합니다' });
     const { hours, from, to, issue } = rangeParams(req.query);
-    // v2.954: `points` — 칸 수를 화면이 정할 수 있게(상한 2000). 요일 × 시간 히트맵은 7일을 1시간 칸(168)으로 받아야 자기 기준선이 붙는다(2시간 칸은 reason 'bucket').
+    // v2.955: `points` — 칸 수를 화면이 정할 수 있게(상한 2000). 요일 × 시간 히트맵은 7일을 1시간 칸(168)으로 받아야 자기 기준선이 붙는다(2시간 칸은 reason 'bucket').
     const points = Math.min(2000, Math.max(0, Number(req.query.points) || 0)) || undefined;
     const ctx = await deviceContext(req);
     const st = loadPerfSettings();
@@ -183,13 +208,13 @@ export function registerSanStorage(api) {
     if (!b) return;
     let r;
     try { r = await runCheck(b, { signal: perfAbortSignal(res) }); } catch (e) { if (abandoned(e)) return; throw e; }
-    // v2.954 — '지금 판정' 도 이력에 적는다(바뀌었거나 1시간 — 틱과 같은 규칙 · 실패해도 판정 응답은 그대로).
+    // v2.955 — '지금 판정' 도 이력에 적는다(바뀌었거나 1시간 — 틱과 같은 규칙 · 실패해도 판정 응답은 그대로).
     let history = null;
     try { history = await recordCheckRuns(r.results, { at: b.now }); } catch { history = null; }
     res.json({ ok: true, ...commonMeta(b), ...r, history });
   });
 
-  /** v2.954 점검 결과 이력 — key 가 있으면 그 어레이의 최근 N회 + 상태 전이 비교, 없으면 기록된 어레이 목록 + 최근 days 일의 변화. DB 못 열면 available:false(빈 표로 숨기지 않는다). */
+  /** v2.955 점검 결과 이력 — key 가 있으면 그 어레이의 최근 N회 + 상태 전이 비교, 없으면 기록된 어레이 목록 + 최근 days 일의 변화. DB 못 열면 available:false(빈 표로 숨기지 않는다). */
   api.get('/tools/san-storage/check/history', toolsPerm, fullScopeOnly, async (req, res) => {
     const key = String(req.query.key || '').slice(0, KEY_MAX);
     const dcRaw = String(req.query.datacenterId || '');
@@ -202,8 +227,8 @@ export function registerSanStorage(api) {
     res.json({ ok: true, ...o, db });
   });
 
-  api.get('/tools/san-storage/check-settings', toolsPerm, fullScopeOnly, (_req, res) => {
-    res.json({ ok: true, ...publicCheckSettings(), imbalanceRule: { minBps: IMBALANCE_MIN_BPS, ratio: IMBALANCE_RATIO, badRatio: IMBALANCE_BAD_RATIO } });
+  api.get('/tools/san-storage/check-settings', toolsPerm, fullScopeOnly, (req, res) => {
+    res.json({ ok: true, ...settingsView(publicCheckSettings(), isAdminReq(req)), imbalanceRule: { minBps: IMBALANCE_MIN_BPS, ratio: IMBALANCE_RATIO, badRatio: IMBALANCE_BAD_RATIO } });
   });
   /** 임계값 저장 — null = 비움(판정 안 함) · 빈 값 · 미지정 = 기본값으로. 형식 오류 400. 감사 로그. */
   api.put('/tools/san-storage/check-settings', adminOnly, fullRwOnly, (req, res) => {
@@ -215,8 +240,9 @@ export function registerSanStorage(api) {
 
   /** 분류 · 디렉터 매핑 — 현재 저장값 + 후보(자동이 못 읽은 포트 · 이름 규칙만으로 분류된 키 · 재정의된 것). */
   /* ── v2.950(§12.2-6) 알림 — 설정(켬 · 최소 수준 · 회복 · 항목) + 상태(마지막 틱 · 기준 어레이 수 · 발송 기록). 발송은 상태가 바뀐 순간만 · 법인 단위 · 중앙만. ── */
-  api.get('/tools/san-storage/notify', toolsPerm, fullScopeOnly, async (_req, res) => {
-    res.json({ ok: true, settings: loadNotifySettings(), loadError: notifyLoadError(), status: storagePerfNotifyStatus(), minLevels: MIN_LEVELS, items: CHECK_ITEMS, arraysTracked: Object.keys(loadNotifyState().last || {}).length });
+  api.get('/tools/san-storage/notify', toolsPerm, fullScopeOnly, async (req, res) => {
+    const admin = isAdminReq(req);
+    res.json({ ok: true, settings: settingsView(loadNotifySettings(), admin), loadError: notifyLoadError(), status: notifyStatusView(storagePerfNotifyStatus(), admin), minLevels: MIN_LEVELS, items: CHECK_ITEMS, arraysTracked: Object.keys(loadNotifyState().last || {}).length });
   });
   api.put('/tools/san-storage/notify-settings', adminOnly, fullRwOnly, (req, res) => {
     const r = saveNotifySettings(req.body || {}, { by: req.user?.username || '' });
@@ -232,8 +258,8 @@ export function registerSanStorage(api) {
   });
 
   /* ── v2.950(§12.2-8) 월간 보고서 — 설정 · 상태 · 미리보기(HTML) · 지금 보내기. 보고서는 자급형 HTML(브라우저에서 PDF 저장) — PDF 직접 생성은 한글 글꼴 동봉이 필요해 이번 판은 아니다. ── */
-  api.get('/tools/san-storage/report', toolsPerm, fullScopeOnly, async (_req, res) => {
-    res.json({ ok: true, ...storagePerfReportStatus() });
+  api.get('/tools/san-storage/report', toolsPerm, fullScopeOnly, async (req, res) => {
+    res.json({ ok: true, ...reportStatusView(storagePerfReportStatus(), isAdminReq(req)) });
   });
   api.put('/tools/san-storage/report-settings', adminOnly, fullRwOnly, async (req, res) => {
     const r = saveReportSettings(req.body || {}, { by: req.user?.username || '' });

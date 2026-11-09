@@ -51,7 +51,7 @@ export const MIGRATABLE = [
   { file: 'guest-disk.db', label: '게스트 디스크 회수 리포트 추이(v2.459)' },
   { file: 'curuser.db', label: "'현재 사용자' 로그인 사용자 수 추이(v2.520)" },
   { file: 'san-health.db', label: 'SAN 스위치 점검 이력(최근 N회 비교, v2.522)' },
-  { file: 'san-storage-check.db', label: 'SAN 스토리지 성능 점검 결과 이력(바뀌었거나 1시간마다 · 최근 N회 비교, v2.954)' },
+  { file: 'san-storage-check.db', label: 'SAN 스토리지 성능 점검 결과 이력(바뀌었거나 1시간마다 · 최근 N회 비교, v2.955)' },
   { file: 'horizon-sessions.db', label: 'Horizon 실시간 사용자(세션) 추이(v2.525)' },
   { file: 'part-faults.db', label: '물리 파트(부품) 장애 이력 — 열림/변화/해소 전이(v2.547)' },
   { file: 'bm-usage.db', label: '베어메탈 사용률(CPU·메모리·디스크·네트워크·HBA, v2.550)' },

@@ -143,7 +143,7 @@ export const CORE_RULES = [
     link: '', linkLabel: '' }),
   R({ id: 'central-agent-config', tag: 'central', severity: 'info', category: 'noise', entity: 1,
     re: /^\[central\] agent-config 수신: agent=(\S+) /,
-    src: 'server/src/routes/central.js', probe: 'agent-config 수신', sample: '[central] agent-config 수신: agent=EDGE-A (14개)',
+    src: 'server/src/routes/central/opsRoutes.js', probe: 'agent-config 수신', sample: '[central] agent-config 수신: agent=EDGE-A (14개)',
     title: '엣지 설정 사본 수신(정상)',
     meaning: '엣지가 자기 설정 사본을 올린 정상 기록입니다.',
     action: '조치할 것이 없습니다.',

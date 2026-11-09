@@ -228,7 +228,7 @@
 | `runtime.json` | 설정 | Runtime-adjustable settings that can be changed from the portal UI (and | ✅ | ✅ | ✅ | runtime-settings.js |
 | `san-flows.json` | 설정 | Flow Vision 플로우 작업(v2.935 SAN·CVP 설계 C-②) — 실행 등록부 · 포탈 플로우 기록 · 카운터 주기. | ✅ | ✅ |  | sanswitch/flowJobs.js |
 | `san-health.db` | DB | SAN 점검 결과 이력 + **최근 N회 비교**(v2.522). |  |  | ✅ | sanswitch/healthHistory.js |
-| `san-storage-check.db` | DB | SAN 스토리지 성능 점검 **결과 이력 + 최근 N회 비교**(v2.954 · 설계 §8.1 '점검 이력'). |  |  | ✅ | sanswitch/storageCheckHistory.js |
+| `san-storage-check.db` | DB | SAN 스토리지 성능 점검 **결과 이력 + 최근 N회 비교**(v2.955 · 설계 §8.1 '점검 이력'). |  |  | ✅ | sanswitch/storageCheckHistory.js |
 | `san-storage-map.json` | 설정 | SAN 스토리지 성능의 관리자 재정의 저장소(v2.948). | ✅ | ✅ |  | sanswitch/directorMap.js |
 | `san-storage-notify-state.json` | 설정 | SAN 스토리지 성능 **알림** 설정 · 상태 · 전이 판정(순수 부분 포함 · v2.950 · 설계 §12.2-6). | ✅ | ✅ | ✅ | sanswitch/storagePerfNotifyStore.js |
 | `san-storage-notify.json` | 설정 | SAN 스토리지 성능 **알림** 설정 · 상태 · 전이 판정(순수 부분 포함 · v2.950 · 설계 §12.2-6). | ✅ | ✅ | ✅ | sanswitch/storagePerfNotifyStore.js |

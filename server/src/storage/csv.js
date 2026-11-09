@@ -20,7 +20,7 @@ import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../u
 import { analyzeBulkImport } from '../util/bulkImport.js';
 import { parseFreeRows, rowsToFreeText, unmark, EMPTY_MARK } from '../util/bulkText.js';
 import { isKnownType, isImplementedType, STORAGE_TYPES, collectMethodsFor, defaultCollectMethod } from './types.js';
-import { isFePerfType } from './collectors/arrayPerf.js';   // v2.954 REST 어레이도 nodeLoad 칸
+import { isFePerfType } from './collectors/arrayPerf.js';   // v2.955 REST 어레이도 nodeLoad 칸
 
 // 내보내기/샘플 공통 컬럼 순서(password 는 가져오기 전용이라 맨 끝 — export 는 값 비움).
 // v2.938: `nodeLoad` — 아이실론의 '노드 부하 표본 수집'(registry.nodeLoadEnabled). 헤더로 읽으므로 위치는 자유지만 password 는 끝(가져오기 전용).
@@ -35,7 +35,7 @@ const bool = (v, dflt = true) => {
 const triBool = (v) => (String(v ?? '').trim() === '' ? undefined : bool(v));
 /**
  * 내보낼 노드 부하 표본 수집 값 — 표본을 낼 수 있는 장비(아이실론 · REST 로 수집하는 PowerMax/PowerStore/Unity — registry.normalizeDevice sampleCapable 과 같은 조건)만 true|false,
- * 그 밖은 빈칸(해당 없음 — 가져오기도 빈칸은 유지). v2.954: v2.951 의 REST 어레이 토글(디렉터 · 노드 · SP 성능 표본)이 CSV 에 빠져 있던 것을 채움.
+ * 그 밖은 빈칸(해당 없음 — 가져오기도 빈칸은 유지). v2.955: v2.951 의 REST 어레이 토글(디렉터 · 노드 · SP 성능 표본)이 CSV 에 빠져 있던 것을 채움.
  */
 export function exportedNodeLoad(d) {
   const capable = d?.type === 'isilon' || (isFePerfType(d?.type) && String(d?.collectMethod || 'api') === 'api');

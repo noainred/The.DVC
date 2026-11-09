@@ -8,7 +8,7 @@ import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText, existingPairs, cycleText, deadlineText, CONFIRM } from './sanFlowText.js';
-import useSearchHandoff from '../../hooks/useSearchHandoff.js';   // v2.954 어레이 포트 WWN 인계(SAN 스토리지 성능 상세 → 타깃 미리 고르기)
+import useSearchHandoff from '../../hooks/useSearchHandoff.js';   // v2.955 어레이 포트 WWN 인계(SAN 스토리지 성능 상세 → 타깃 미리 고르기)
 
 const OTP_IN = { width: 120 };
 const WRAP = { whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: '100%' };   // 긴 작업 제목 · 버튼이 좁은 화면에서 넘치지 않게(400px 가로 넘침 31px — 화면 판독)
@@ -21,7 +21,7 @@ function CreateForm({ dev, existing = [], onStarted, onClose }) {
   const [cand, setCand] = useState({ d: null, error: null });
   const [hba, setHba] = useState('');
   const [picked, setPicked] = useState([]);
-  const [pre, setPre] = useState('');   // v2.954 SAN 스토리지 성능 상세가 넘긴 어레이 포트 WWN(쉼표) — 타깃 목록이 생기면 그것부터 고른다
+  const [pre, setPre] = useState('');   // v2.955 SAN 스토리지 성능 상세가 넘긴 어레이 포트 WWN(쉼표) — 타깃 목록이 생기면 그것부터 고른다
   useSearchHandoff('san-flow:targets', setPre);
   const [pv, setPv] = useState({ d: null, error: '' });
   const [otp, setOtp] = useState('');

@@ -89,15 +89,23 @@ export async function bmAnnotationsRead(req, snap, deps = {}) {
   if (!isAdmin) { const tg = await D.currentTargets().catch(() => ({ targets: [] })); ({ match } = await perfAddressMatcher(D, tg)); }
   const maskName = (nm) => (isAdmin ? nm : (match && match(nm) ? maskedIdToken(nm) : String(nm).replace(IPV4_RE, (ip) => maskedIdToken(ip))));
   const user = String(req.user?.username || '');
-  const out = list.map((a) => ({
-    id: a.id, at: a.at, end: a.end ?? null, kind: a.kind, text: a.deleted ? '' : a.text, by: a.by, created: a.created, auto: a.auto || null,
-    target: { type: a.target?.type, count: (a.target?.keys || []).length, names: (a.target?.names || []).map(maskName), vcenterIds: a.target?.vcenterIds || [],
-      includes: [...new Set(hitsOf(a).map((x) => x.token))], includesPairs: hitsOf(a).map((x) => ({ key: x.token, vcenterId: x.vc })) },
-    links: a.deleted ? {} : (a.links || {}),
-    edits: (a.edits || []).map((e) => ({ at: e.at, by: e.by, fields: e.fields })),
-    ...(a.deleted ? { deleted: a.deleted } : {}),
-    canEdit: !a.deleted && (isAdmin || (a.by === user && a.by !== 'system')) && annotWritable(a, req.user, snap),
-  }));
+  // v2.954(점검 A-2): 비관리자 판본 — 작성 · 수정 · 삭제한 사람은 가림 토큰(형제 저활용 화면 maskBy 와 같은 maskedIdToken · 'system' 은 그대로) ·
+  //   본문의 주소(등록부 주소 · IPv4)는 대상 이름과 같은 판정기(maskName)로 단어마다 가린다(집중 화면 scrubFocus 의 사유 가림과 같은 결).
+  //   ⚠ 본인이 쓴 주석의 본문은 가리지 않는다 — 비관리자가 고칠 수 있는 것은 자기 주석뿐이라, 가린 본문을 고쳐 저장하면 원문이 토큰으로 덮인다.
+  const maskBy = (v) => (isAdmin || !v || v === 'system' ? v : maskedIdToken(String(v)));
+  const maskText = (v) => (isAdmin || typeof v !== 'string' ? v : v.replace(/[^\s,;()[\]<>'"]+/g, (w) => maskName(w)));
+  const out = list.map((a) => {
+    const own = a.by === user && a.by !== 'system';
+    return {
+      id: a.id, at: a.at, end: a.end ?? null, kind: a.kind, text: a.deleted ? '' : (own ? a.text : maskText(a.text)), by: maskBy(a.by), created: a.created, auto: a.auto || null,
+      target: { type: a.target?.type, count: (a.target?.keys || []).length, names: (a.target?.names || []).map(maskName), vcenterIds: a.target?.vcenterIds || [],
+        includes: [...new Set(hitsOf(a).map((x) => x.token))], includesPairs: hitsOf(a).map((x) => ({ key: x.token, vcenterId: x.vc })) },
+      links: a.deleted ? {} : (a.links || {}),
+      edits: (a.edits || []).map((e) => ({ at: e.at, by: maskBy(e.by), fields: e.fields })),
+      ...(a.deleted ? { deleted: { ...a.deleted, by: maskBy(a.deleted.by) } } : {}),
+      canEdit: !a.deleted && (isAdmin || own) && annotWritable(a, req.user, snap),
+    };
+  });
   return { ok: true, annotations: out, ...(truncated ? { truncated: true } : {}), kinds: A.ANNOT_KINDS, textMax: A.TEXT_MAX, ...(isAdmin ? {} : { addressHidden: true }) };
 }
 

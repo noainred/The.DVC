@@ -877,7 +877,7 @@
   - 기준선 표시는 서버 `baseline.applicable` 일 때만(범례 '평소와 다름 n/m칸' · 차트 고리 · 히트맵 테두리 `.sst-hm i.off`). 데모는 벗어난 칸이 없으니 표시 자체는 단위 시험으로 확인한다고 적는다.
   - 알림 · 보고서 모달은 `putJson/postJson` 의 **반환값(`ok === false`)을 보고** 실패를 알린다 · 미리보기는 `downloadFile`(토큰 헤더 — `window.open` 금지) · 보내기 409 는 '보내지 않음' 문구.
   - 상태 알약 `.sst-pill` 은 600px 이하에서 줄바꿈(`white-space: normal`) — 400px 에서 잘리던 것(PR ⓐ 때부터). 1440 은 한 줄 그대로.
-- **v2.954 SAN 스토리지 성능 3차 화면(이력 모달 · 임의 구간 · ⌘K 행 · Flow 인계 · PDF 저장)**
+- **v2.955 SAN 스토리지 성능 3차 화면(이력 모달 · 임의 구간 · ⌘K 행 · Flow 인계 · PDF 저장)**
   - 이력 모달은 서버 `available:false` 를 `sst-info` 로 그대로 보인다(빈 표 금지) · 표는 STable · 어레이 이름은 `.sst-link` 글자 단추로 상세 열기(새 표 틀 없음).
   - 임의 구간 입력은 `datetime-local` 둘 + '구간 보기'(검증: 둘 다 · 시작<끝 · ≤366일 — 서버 상한과 같다) · 구간 중 ◀ ▶ 비활성 · 기간 세그를 누르면 구간 해제. 400px 은 `.sst-custom` 줄바꿈.
   - 검색어 · WWN 은 해시에 싣지 않고 `handoffMany` 로 넘긴다(받는 쪽 `useSearchHandoff('san-storage' | 'san-flow:targets')`). 팔레트 추가 행은 `lockOf('san-storage')` 가 잠긴 계정에는 보이지 않는다.

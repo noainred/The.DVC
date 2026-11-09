@@ -1,5 +1,5 @@
 /**
- * sanswitch/storageCheckHistory.js — SAN 스토리지 성능 점검 **결과 이력 + 최근 N회 비교**(v2.954 · 설계 §8.1 '점검 이력').
+ * sanswitch/storageCheckHistory.js — SAN 스토리지 성능 점검 **결과 이력 + 최근 N회 비교**(v2.955 · 설계 §8.1 '점검 이력').
  *
  * SAN 점검 이력(healthHistory.js · v2.522)과 같은 규약이다 — 파일 `san-storage-check.db` · node:sqlite 없으면 `available:false` 로 정직하게 ·
  * 어레이당 최근 N건만 · 항목 상세는 200자 · 비교는 **상태 전이**(악화 · 호전 · 이제 확인됨 · 확인 불가로) — `compareRuns` 는 그쪽 순수 함수를 그대로 쓴다.

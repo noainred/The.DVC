@@ -12,10 +12,10 @@ import { hashSegments } from '../../hooks/hashTab.js';
 import SanStorageCheck from './SanStorageCheck.jsx';
 import SanStorageMapping from './SanStorageMapping.jsx';
 import { TABS, RANGES, rangeOf, rangeQuery, windowLabel, GROUPINGS, MODES, rateText, pctText, deltaOf, deltaNote, dayTB, stateTag, imbalanceTag, liveText, intervalText,
-  agoShort, clockText, dateClockText, kpisOf, filterRows, sortRowsBy, SORTS, sparkSegments, stackModel, tickLabels, seriesStats, foldHeatmap, foldSeries, csvText, csvFileName, gbps, vizColor, VENDOR_SHORT, feValueText, lineModel, feMetricsPresent, FE_UNIT_TEXT, capPerfQuadrant, tbText, daysText, QUADRANT_RULE } from './sanStorageText.js';
+  agoShort, clockText, dateClockText, kpisOf, filterRows, sortRowsBy, SORTS, sparkSegments, stackModel, tickLabels, seriesStats, foldHeatmap, foldSeries, csvText, csvFileName, gbps, vizColor, VENDOR_SHORT, feValueText, lineModel, feMetricsPresent, FE_UNIT_TEXT, capPerfQuadrant, tbText, daysText, QUADRANT_RULE, directorSkew } from './sanStorageText.js';
 import './sanStorage.css';
-import useSearchHandoff from '../../hooks/useSearchHandoff.js';   // v2.954 ⌘K 검색 → 현황 검색 칸(검색어는 URL 에 싣지 않는다 — v2.616 규약)
-import { handoffMany } from '../../hooks/searchHandoff.js';   // v2.954 Flow Vision 으로 어레이 포트 WWN 인계
+import useSearchHandoff from '../../hooks/useSearchHandoff.js';   // v2.955 ⌘K 검색 → 현황 검색 칸(검색어는 URL 에 싣지 않는다 — v2.616 규약)
+import { handoffMany } from '../../hooks/searchHandoff.js';   // v2.955 Flow Vision 으로 어레이 포트 WWN 인계
 
 const BASE = ['tools', 'san-storage'];
 const TAB_KEYS = ['list', 'check', 'mapping', 'array'];
@@ -104,7 +104,7 @@ function ListTab({ dc, setDc, onOpen }) {
   const [view, setView] = useState('table');   // v2.953 표 · 용량 × 성능 교차 보기(훅은 조기 return 위)
   const [sortK, setSortK] = useState('now');
   const [q, setQ] = useState('');
-  useSearchHandoff('san-storage', setQ);   // v2.954 ⌘K · 다른 화면에서 넘긴 검색어
+  useSearchHandoff('san-storage', setQ);   // v2.955 ⌘K · 다른 화면에서 넘긴 검색어
   const params = dc ? { datacenterId: dc } : {};
   const { data, error, errorInfo } = usePolling('/tools/san-storage', params, LIST_POLL_MS, { timeoutMs: HEAVY_TIMEOUT_MS, retries: 0 });
   const rows = useMemo(() => sortRowsBy(filterRows(data?.rows || [], { vendor, q }), sortK), [data, vendor, q, sortK]);
@@ -285,7 +285,7 @@ function Spark({ values }) {
 function ArrayDetail({ arrayKey, dcId, onBack }) {
   const [rangeK, setRangeK] = useState('24h');
   const [back, setBack] = useState(0);
-  const [custom, setCustom] = useState(null);                    // v2.954 임의 구간 {from,to}(ms) — 있으면 기간 세그 · 창 이동 대신 이 구간(서버 rangeParams from/to · 최대 366일)
+  const [custom, setCustom] = useState(null);                    // v2.955 임의 구간 {from,to}(ms) — 있으면 기간 세그 · 창 이동 대신 이 구간(서버 rangeParams from/to · 최대 366일)
   const [customIn, setCustomIn] = useState({ from: '', to: '' });
   const [customErr, setCustomErr] = useState('');
   const [mode, setMode] = useState('avg');
@@ -309,11 +309,19 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
   useEffect(() => {
     if (!arrayKey) return undefined;
     const ac = new AbortController();
-    // v2.954: points 168 = 1시간 칸 — 기본(2시간 칸)이면 서버가 기준선을 붙이지 않아(reason 'bucket') 히트맵 '평소와 다름' 테두리가 영영 안 나왔다(v2.953 결함).
+    // v2.955: points 168 = 1시간 칸 — 기본(2시간 칸)이면 서버가 기준선을 붙이지 않아(reason 'bucket') 히트맵 '평소와 다름' 테두리가 영영 안 나왔다(v2.953 결함).
     fetchJson('/tools/san-storage/array', { key: arrayKey, datacenterId: dcId || NONE_DC, hours: 168, points: 168 }, ac.signal, { timeoutMs: HEAVY_TIMEOUT_MS, retries: 0 })
       .then((d) => { if (!ac.signal.aborted) setWeek(d); }).catch(() => { if (!ac.signal.aborted) setWeek({ error: true }); });
     return () => ac.abort();
   }, [arrayKey, dcId]);
+  // v2.954(점검 E-3): 편중 판정 기준(최소 처리량 · 배수)은 서버 상수 — 현황 · 점검과 같은 값을 가벼운 check-settings 응답에서 한 번 읽는다(화면에 1.4 를 박지 않는다).
+  const [skewRule, setSkewRule] = useState(null);
+  useEffect(() => {
+    const ac = new AbortController();
+    fetchJson('/tools/san-storage/check-settings', {}, ac.signal)
+      .then((d) => { if (!ac.signal.aborted) setSkewRule(d?.imbalanceRule || null); }).catch(() => { if (!ac.signal.aborted) setSkewRule(null); });
+    return () => ac.abort();
+  }, []);
   const peak = mode === 'peak';
   const series = useMemo(() => {
     if (!data) return [];
@@ -339,6 +347,8 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
   };
   const dirCards = (data?.directors || []).map((g) => ({ ...g, stats: seriesStats(peak ? g.peak : g.sum, g.peak, data.buckets, { until: data.until, carryMs: data.carryMs, bucketMs: data.bucketMs }) }));
   const dirMean = (() => { const v = dirCards.map((d) => d.stats.avg).filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; })();
+  // 판정은 피크 보기여도 평균 선으로(서버 판정과 같은 양 — 피크 평균끼리 견주면 다른 결론이 난다).
+  const skew = directorSkew((data?.directors || []).map((g) => ({ group: g.group, avg: peak ? seriesStats(g.sum, g.peak, data.buckets, { until: data.until, carryMs: data.carryMs, bucketMs: data.bucketMs }).avg : dirCards.find((d) => d.group === g.group)?.stats.avg ?? null })), skewRule);
   const speedSum = (data?.ports || []).reduce((a, p) => a + (speedBps(p.speed) || 0), 0);
   const downloadCsv = () => {
     if (!data) return;
@@ -378,7 +388,7 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
               <div className="sst-seg mint" role="group" aria-label="기간">{RANGES.map((r) => <button key={r.k} type="button" className={rangeK === r.k ? 'on' : ''} onClick={() => { setRangeK(r.k); setBack(0); setCustom(null); setCustomErr(''); }}>{r.label}</button>)}</div>
               <div className="sst-seg" role="group" aria-label="기준">{MODES.map(([k, l]) => <button key={k} type="button" className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{l}</button>)}</div>
               <div className="sst-seg" role="group" aria-label="묶음">{GROUPINGS.map(([k, l]) => <button key={k} type="button" className={grouping === k ? 'on' : ''} onClick={() => setGrouping(k)}>{l}</button>)}</div>
-              {/* v2.954 임의 구간 — 서버는 from/to 를 이미 받는다(rangeParams · 최대 366일). 구간이 있으면 ◀ ▶ 창 이동은 잠근다. */}
+              {/* v2.955 임의 구간 — 서버는 from/to 를 이미 받는다(rangeParams · 최대 366일). 구간이 있으면 ◀ ▶ 창 이동은 잠근다. */}
               <div className="sst-custom" role="group" aria-label="임의 구간">
                 <input className="sst-inp" type="datetime-local" value={customIn.from} onChange={(e) => setCustomIn((c) => ({ ...c, from: e.target.value }))} aria-label="시작" />
                 <span className="faint">~</span>
@@ -437,7 +447,13 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
 
           <div className="sst-card">
             <div className="sst-cardhead"><div className="sst-title"><h4>디렉터 · 컨트롤러별 — {dirCards.filter((d) => d.parsed).length}</h4><span className="muted" style={{ fontSize: 12 }}>{range.label} {peak ? '피크' : '평균'} 기준 · 배수 = 디렉터 평균 대비</span></div>
-              {dirMean != null && dirCards.some((d) => d.stats.avg != null && d.stats.avg / dirMean >= 1.4) ? <span className="sst-tag warn">편중 후보 — 1.4배 이상</span> : <span className="sst-tag ok">편중 없음</span>}</div>
+              {skew.state === 'skewed'
+                ? <span className="sst-tag warn" title={`${range.label} 평균 기준 · 디렉터 평균 ${rateText(skewRule?.minBps)} 이상일 때만 판정(현황 · 점검과 같은 서버 기준)`}>편중 후보 — {skew.group} {skew.ratio}×(기준 {skewRule?.ratio}배)</span>
+                : skew.state === 'low'
+                  ? <span className="sst-tag ok" title={`디렉터 평균 ${rateText(skew.mean)} — ${rateText(skewRule?.minBps)} 미만은 편중을 판정하지 않습니다(현황 · 점검과 같은 서버 기준)`}>편중 없음 · 처리량 낮음</span>
+                  : skew.state === 'unknown'
+                    ? <span className="sst-tag gray" title="편중 판정 기준(서버 값)을 읽지 못했습니다">편중 판정 —</span>
+                    : <span className="sst-tag ok">편중 없음</span>}</div>
             <div className="sst-dirs">
               {dirCards.map((g, i) => (
                 <div key={g.group} className="sst-dir">

@@ -33,7 +33,7 @@ export const FE_KEYS = Object.freeze(['busy', 'cpu', 'iops', 'lat', 'hbps', 'que
 export const PMAX_FE_METRICS = Object.freeze(['PercentBusy', 'HostIOs', 'HostMBs', 'ReadResponseTime', 'WriteResponseTime', 'QueueDepthUtilization']);
 export const PMAX_FE_CORE = Object.freeze(['PercentBusy', 'HostIOs', 'HostMBs']);
 export const PMAX_WINDOW_MS = 20 * 60_000;   // 진단(5분) 표본 몇 개가 들어오는 창 — 마지막 점만 쓴다
-/** v2.954 PowerMax FE **포트** 단위(performance/FEPort keys → metrics · 문서 기준 — 실장비 확인 전). 디렉터(부모)를 다 읽은 뒤 남는 자리에만 · 호출 상한(디렉터당 · 전체). */
+/** v2.955 PowerMax FE **포트** 단위(performance/FEPort keys → metrics · 문서 기준 — 실장비 확인 전). 디렉터(부모)를 다 읽은 뒤 남는 자리에만 · 호출 상한(디렉터당 · 전체). */
 export const PMAX_FE_PORT_METRICS = Object.freeze(['PercentBusy', 'IOs', 'MBs', 'ResponseTime']);
 export const PMAX_FE_PORT_CORE = Object.freeze(['PercentBusy', 'IOs', 'MBs']);
 export const PMAX_PORTS_PER_DIR = 4;
@@ -191,7 +191,7 @@ export async function samplePowermax(full, { signal = null, now = Date.now(), po
       // Unisphere 하나가 어레이 여럿을 관리하면 이름을 어레이 번호로 구분한다(상세는 시리얼로 자기 것만 고른다 — arraySide.unitsForArray).
       units.push({ name: multi ? `${sid}::${dirId}` : dirId, kind: 'fa', ...(parsed || {}) });
     }
-    // v2.954 포트 단위 — 디렉터를 다 읽은 뒤, 남는 자리(64 상한)와 호출 상한(전체 PMAX_PORT_CALLS_MAX · 디렉터당 PMAX_PORTS_PER_DIR) 안에서만. 문서 기준(실장비 확인 전) — probe.ports 가 읽은 수 · 실패를 말한다.
+    // v2.955 포트 단위 — 디렉터를 다 읽은 뒤, 남는 자리(64 상한)와 호출 상한(전체 PMAX_PORT_CALLS_MAX · 디렉터당 PMAX_PORTS_PER_DIR) 안에서만. 문서 기준(실장비 확인 전) — probe.ports 가 읽은 수 · 실패를 말한다.
     probe.ports = probe.ports || { read: 0, failed: 0, calls: 0, skipped: 0 };
     for (const dirId of dirs) {
       if (signal?.aborted || units.length >= NODE_LOAD_LIMIT || probe.ports.calls >= PMAX_PORT_CALLS_MAX) { probe.ports.skipped += 1; continue; }
@@ -254,16 +254,19 @@ export function parsePstorePorts(list, nodes) {
   }
   return out;
 }
+/** 두 항이 모두 있을 때만 합(순수 — v2.954 점검 B-3). 한쪽만 읽힌 값은 '합' 이 아니다(못 읽은 값은 0 이 아니다). */
+export const bothSum = (x, y) => (x == null || y == null ? null : x + y);
 /** metrics/generate 응답 → 마지막 점(순수). 지연은 µs → ms(가정 — probe.latUnit). CPU 는 응답에 있을 때만. */
 export function parsePstorePoint(points) {
   const rows = Array.isArray(points) ? points : (points && typeof points === 'object' ? [points] : []);
   let last = null;
   for (const r of rows) { if (!r || typeof r !== 'object') continue; const t = Date.parse(r.timestamp || '') || numOrNull(r.timestamp) || 0; if (!last || t >= last._t) last = { ...r, _t: t }; }
   if (!last) return null;
+  // v2.954(점검 B-3): total 이 없으면 읽기 · 쓰기가 **둘 다** 있을 때만 합(한쪽만이면 부분 합 — null · flowView.esxiBpsOf 와 같은 규칙).
   const ri = nonneg(last.read_iops); const wi = nonneg(last.write_iops);
-  const iops = nonneg(last.total_iops) ?? (ri == null && wi == null ? null : (ri ?? 0) + (wi ?? 0));
+  const iops = nonneg(last.total_iops) ?? bothSum(ri, wi);
   const rb = nonneg(last.read_bandwidth); const wb = nonneg(last.write_bandwidth);
-  const hbps = nonneg(last.total_bandwidth) ?? (rb == null && wb == null ? null : (rb ?? 0) + (wb ?? 0));
+  const hbps = nonneg(last.total_bandwidth) ?? bothSum(rb, wb);
   const latUs = nonneg(last.avg_latency);
   const cpu = pct(last.cpu_utilization ?? last.avg_cpu_utilization ?? last.cpu_utilization_pct);
   return { ts: last._t || null, iops, hbps, lat: latUs == null ? null : latUs / 1000, cpu, fields: Object.keys(last).filter((k) => k !== '_t').slice(0, 24) };
@@ -360,14 +363,17 @@ export function unityCounterRate(entries) {
   for (const [sp, va] of Object.entries(a.values)) {
     const vb = b.values?.[sp];
     if (va && typeof va === 'object') {
-      let s = 0; let any = false;
+      // v2.954(점검 B-3): SP 합은 그 SP 포트를 **전부** 읽었을 때만(리셋 · 누락 포트를 빼고 나머지만 더한 부분 합은 null).
+      let s = 0; let all = true; let cnt = 0;
       for (const [port, x] of Object.entries(va)) {
         const n1 = numOrNull(x); const n0 = numOrNull(vb?.[port]);
         const rate = n1 != null && n0 != null && n1 >= n0 ? (n1 - n0) / dt : null;
         perPort[port] = { sp, rate };
-        if (rate != null) { s += rate; any = true; }
+        cnt += 1;
+        if (rate != null) s += rate; else all = false;
       }
-      perSp[sp] = any ? s : null;
+      if (vb && typeof vb === 'object') for (const port of Object.keys(vb)) if (!Object.hasOwn(va, port)) all = false;   // 직전에 있던 포트가 최신 항목에서 빠짐
+      perSp[sp] = all && cnt > 0 ? s : null;
     } else {
       const n1 = numOrNull(va); const n0 = numOrNull(vb);
       perSp[sp] = n1 != null && n0 != null && n1 >= n0 ? (n1 - n0) / dt : null;
@@ -377,6 +383,27 @@ export function unityCounterRate(entries) {
 }
 const unityPortName = (port) => String(port || '').toUpperCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();   // spa_fc4 → SPA FC4
 const spName = (sp) => String(sp || '').toUpperCase();
+/**
+ * SP · 포트 단위 조립(순수 — v2.954 점검 B-3에서 sampleUnity 밖으로 뺐다). 읽기 + 쓰기는 **둘 다** 있을 때만 합 —
+ * 한쪽 경로(writeBytes 등) 조회만 실패하면 부분 합이 '최신 hbps' 가 되어 보고 대조가 거짓 주의였다. partial = 한쪽만 있어 null 로 둔 값 수.
+ */
+export function unityUnits({ cpu = {}, rb, wb, rd, wr }, { withPorts = true } = {}) {
+  let partial = 0;
+  const add = (x, y) => { if ((x == null) !== (y == null)) partial += 1; return bothSum(x, y); };
+  const sps = new Set([...Object.keys(cpu), ...Object.keys(rb.perSp), ...Object.keys(rd.perSp)]);
+  const units = [];
+  for (const sp of [...sps].sort()) {
+    units.push({ name: spName(sp), kind: 'sp', cpu: cpu[sp] ?? null, hbps: add(rb.perSp[sp], wb.perSp[sp]), iops: add(rd.perSp[sp], wr.perSp[sp]) });
+  }
+  if (withPorts) {
+    const ports = new Set([...Object.keys(rb.perPort), ...Object.keys(rd.perPort)]);
+    for (const p of [...ports].sort()) {
+      const sp = rb.perPort[p]?.sp || rd.perPort[p]?.sp || '';
+      units.push({ name: unityPortName(p), kind: 'port', parent: spName(sp), hbps: add(rb.perPort[p]?.rate, wb.perPort[p]?.rate), iops: add(rd.perPort[p]?.rate, wr.perPort[p]?.rate) });
+    }
+  }
+  return { units, partial };
+}
 export async function sampleUnity(full, { signal = null, now = Date.now(), port = Number(process.env.STORAGE_UNITY_PORT) || 443, withPorts = true } = {}) {
   const get = makeGetter(full, { port, headers: { 'X-EMC-REST-CLIENT': 'true' }, signal });
   const q = (path, n) => `/api/types/metricValue/instances?filter=path EQ "${path}"&per_page=${n}&compact=true`;
@@ -395,19 +422,9 @@ export async function sampleUnity(full, { signal = null, now = Date.now(), port 
   const rb = unityCounterRate(rbE); const wb = unityCounterRate(wbE); const rd = unityCounterRate(rdE); const wr = unityCounterRate(wrE);
   const sps = new Set([...Object.keys(cpu), ...Object.keys(rb.perSp), ...Object.keys(rd.perSp)]);
   if (!sps.size) throw new Error(`SP 값을 읽지 못했습니다(metricValue 비어 있음${probe.errors[0] ? ` — ${probe.errors[0]}` : ''})`);
-  const add = (x, y) => (x == null && y == null ? null : (x ?? 0) + (y ?? 0));
-  const units = [];
-  for (const sp of [...sps].sort()) {
-    units.push({ name: spName(sp), kind: 'sp', cpu: cpu[sp] ?? null, hbps: add(rb.perSp[sp], wb.perSp[sp]), iops: add(rd.perSp[sp], wr.perSp[sp]) });
-  }
-  if (withPorts) {
-    const ports = new Set([...Object.keys(rb.perPort), ...Object.keys(rd.perPort)]);
-    for (const p of [...ports].sort()) {
-      const sp = rb.perPort[p]?.sp || rd.perPort[p]?.sp || '';
-      units.push({ name: unityPortName(p), kind: 'port', parent: spName(sp), hbps: add(rb.perPort[p]?.rate, wb.perPort[p]?.rate), iops: add(rd.perPort[p]?.rate, wr.perPort[p]?.rate) });
-    }
-  }
+  const { units, partial } = unityUnits({ cpu, rb, wb, rd, wr }, { withPorts });
   probe.counterIntervalS = rb.intervalS ?? rd.intervalS ?? null;
+  if (partial) probe.partialSums = partial;   // 읽기 · 쓰기 한쪽만 읽혀 null 로 둔 값 수(사유는 probe.errors · probe.paths)
   probe.counterNote = rb.intervalS == null ? '누적 항목이 둘 미만 — 첫 표본(또는 이력 수집 꺼짐)이라 처리량 · IOPS 는 null' : '';
   return buildFeSample({ ts: now, type: 'unity480', source: 'Unity metricValue(cpu.summary · fibreChannel.target 누적 델타)', units, probe });
 }

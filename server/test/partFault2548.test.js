@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'partfault2548-'));
 process.env.CONFIG_DIR = dir;
@@ -231,7 +232,7 @@ test('배선: 엣지 push 는 스위치를 보고, 중앙 poller 는 엣지에�
   assert.equal(/atomicWriteFileSync|writeFileSync/.test(src('central/partFaultEdge.js')), false);
   assert.match(src('idrac/poller.js'), /onSnapshotRefreshed\('idrac'\)/);
   assert.match(src('index.js'), /startPartFaultConfigPull/);
-  assert.match(src('routes/central.js'), /partfault-config/);
+  assert.match(centralSource(), /partfault-config/);
   assert.match(src('index.js'), /app\.use\('\/api\/central\/part-faults', BIG_JSON\)/);
 });
 

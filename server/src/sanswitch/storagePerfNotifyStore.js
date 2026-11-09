@@ -5,6 +5,7 @@
  *  · 수준: ok(0) < warn(1) < bad(2). unknown · na 는 수준이 아니다 — 올리지도 내리지도 않는다(못 읽은 것은 정상도 이상도 아니다).
  *    예외: `collect`(수집 상태) 항목은 ok → unknown(엣지 미보고 · 표본 없음)이 '보고 끊김' 이고 unknown → ok 가 회복이다(사용자 요구 '보고 끊김').
  *  · 열림: 새 수준이 minLevel(기본 warn) 이상이고 이전보다 높을 때. 회복: 이전이 warn 이상이고 지금 ok 일 때(recoveries 가 켜져 있을 때만).
+ *    '이전' 은 항목별 **마지막으로 알던 수준**이다(v2.954 점검 B-2 — 상태에 known 으로 이월: carryKnown).
  *  · 설정 `san-storage-notify.json` · 상태 `san-storage-notify-state.json`(마지막 판정 · 발송 기록 20) — 원자적 쓰기 + 손상 보존(server/CLAUDE.md).
  *  · 엣지는 보내지 않는다(중앙만 — 러너가 판단). 러너는 storagePerfNotify.js(라우트 함수를 쓰므로 여기와 분리 — 순환 import 방지).
  */
@@ -103,6 +104,32 @@ export function snapshotOf(results = []) {
   return out;
 }
 const levelOf = (s) => (Object.hasOwn(LEVELS, s) ? LEVELS[s] : null);
+/** 항목의 '마지막으로 알던 수준'(ok · warn · bad) — 지금 판정이 수준이면 그 값, 아니면(unknown · na) 이월분(known). 모르면 'unknown'. */
+const knownOf = (snap, k) => {
+  const s = snap?.items?.[k];
+  if (levelOf(s) != null) return s;
+  const kn = snap?.known?.[k];
+  return levelOf(kn) != null ? kn : 'unknown';
+};
+/**
+ * 다음 상태 스냅샷(순수) — v2.954(점검 B-2): unknown · na 는 직전 수준을 지우지 않는다. 지금 판정이 수준이 아닌 항목은
+ * 직전 스냅샷에서 마지막으로 알던 수준을 `known` 으로 이월한다(collect 항목 제외 — unknown 이 '보고 끊김' 이라는 뜻이 있다).
+ * 이게 없으면 warn → unknown → warn 이 같은 주의를 다시 보내고 warn → unknown → ok 는 회복을 보내지 않았다.
+ */
+export function carryKnown(prev, cur) {
+  const out = {};
+  for (const [id, c] of Object.entries(cur || {})) {
+    const p = prev?.[id];
+    const known = {};
+    for (const [k, s] of Object.entries(c.items || {})) {
+      if (k === 'collect' || levelOf(s) != null) continue;
+      const kn = knownOf(p, k);
+      if (kn !== 'unknown') known[k] = kn;
+    }
+    out[id] = Object.keys(known).length ? { ...c, known } : c;
+  }
+  return out;
+}
 /**
  * 전이(순수): prev · cur 스냅샷 → 열림 · 회복 목록. 첫 비교(prev 가 비어 있음)는 기준만 잡고 아무것도 열지 않는다(기동 직후 전량 발송 금지).
  * @returns {{opened:Array<{id,name,dc,dcName,item,from,to,text}>, recovered:Array<…>, first:boolean}}
@@ -118,7 +145,9 @@ export function diffCheck(prev, cur, { minLevel = 'warn', recoveries = true, ite
     if (!p) continue;   // 새 어레이 — 다음 비교부터
     for (const [k, to] of Object.entries(c.items || {})) {
       if (items && !items.includes(k)) continue;
-      const from = p.items?.[k] ?? 'unknown';
+      // v2.954(점검 B-2): collect 밖 항목은 '마지막으로 알던 수준'(carryKnown 이월분 포함)과 비교하고, 지금이 수준이 아니면(unknown · na) 아무것도 하지 않는다.
+      if (k !== 'collect' && levelOf(to) == null) continue;
+      const from = k === 'collect' ? (p.items?.[k] ?? 'unknown') : knownOf(p, k);
       if (from === to) continue;
       const base = { id, name: c.name, dc: c.dc, dcName: c.dcName, item: k, from, to, text: c.texts?.[k] || '' };
       if (k === 'collect') {   // 보고 끊김 · 회복(unknown 이 뜻을 가진 유일한 항목)

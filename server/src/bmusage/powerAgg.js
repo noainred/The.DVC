@@ -41,23 +41,29 @@ const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
 
 /**
  * 서버 한 대의 시간 행 → 24시간 요약(순수). 0 W 이하 시간은 미측정(빼고 센다).
+ * v2.954(점검 B-4): kWh 는 kwhFrom · kwhTo(정시 경계 [from, to) — 끝난 24칸)를 주면 그 칸만 더한다. hourlyStats(now − 24h, now) 는
+ *   정시가 아니면 앞 · 뒤 부분 시간까지 25행이라 '24h 전력량' 이 25시간치(약 +4.2%)였다. 그 칸에 행이 없으면 kwh = null(0 이 아니다).
+ *   평균 · 피크 · 시간 추이는 그대로 받은 행 전부(피크 급증의 7일 창과 이어지는 경계 — 아래 weekWindowEnd).
  * @param {Array<{ts,avg,max}>} hours
+ * @param {{kwhFrom?:number, kwhTo?:number}} [o]
  */
-export function hourSummary(hours = []) {
+export function hourSummary(hours = [], { kwhFrom = null, kwhTo = null } = {}) {
   const ok = (Array.isArray(hours) ? hours : []).filter((h) => n(h?.avg) != null && Number(h.avg) > 0);
   if (!ok.length) return null;
   const wh = ok.reduce((a, h) => a + Number(h.avg), 0);
-  return { avgW: Math.round(wh / ok.length), peakW: Math.round(Math.max(...ok.map((h) => n(h.max) ?? Number(h.avg)))), kwh: r2(wh / 1000), hours: ok.length,
+  const inKwh = ok.filter((h) => (kwhFrom == null || Number(h.ts) >= kwhFrom) && (kwhTo == null || Number(h.ts) < kwhTo));
+  const kwh = inKwh.length ? r2(inKwh.reduce((a, h) => a + Number(h.avg), 0) / 1000) : null;
+  return { avgW: Math.round(wh / ok.length), peakW: Math.round(Math.max(...ok.map((h) => n(h.max) ?? Number(h.avg)))), kwh, hours: ok.length,
     byHour: ok.map((h) => ({ t: Math.floor(Number(h.ts) / HOUR) * HOUR, w: Number(h.avg) })) };
 }
 
 /** 그룹 한 칸(누적용). */
-const emptyGroup = () => ({ servers: 0, measured: 0, unmeasured: { 'no-idrac': 0, 'read-fail': 0, zero: 0 }, nowW: 0, avg24W: 0, avg24N: 0, kwh24: 0, kwhMonth: 0, monthN: 0,
+const emptyGroup = () => ({ servers: 0, measured: 0, unmeasured: { 'no-idrac': 0, 'read-fail': 0, zero: 0 }, nowW: 0, avg24W: 0, avg24N: 0, kwh24: 0, kwh24N: 0, kwhMonth: 0, monthN: 0,
   hours: new Map(), inletSum: 0, inletN: 0, inletMax: null, maxC: null, fanWarn: 0, fanUnread: 0, capSet: 0, capHit: 0 });
 function addTo(g, s) {
   g.servers += 1;
   if (s.w != null) { g.measured += 1; g.nowW += s.w; } else { const k = UNMEASURED.includes(s.unmeasured) ? s.unmeasured : 'read-fail'; g.unmeasured[k] = (g.unmeasured[k] || 0) + 1; }
-  if (s.h24) { g.avg24W += s.h24.avgW; g.avg24N += 1; g.kwh24 += s.h24.kwh; for (const h of s.h24.byHour) { const e = g.hours.get(h.t) || { w: 0, n: 0 }; e.w += h.w; e.n += 1; g.hours.set(h.t, e); } }
+  if (s.h24) { g.avg24W += s.h24.avgW; g.avg24N += 1; if (s.h24.kwh != null) { g.kwh24 += s.h24.kwh; g.kwh24N += 1; } for (const h of s.h24.byHour) { const e = g.hours.get(h.t) || { w: 0, n: 0 }; e.w += h.w; e.n += 1; g.hours.set(h.t, e); } }
   if (s.kwhMonth != null) { g.kwhMonth += s.kwhMonth; g.monthN += 1; }
   if (s.inletC != null) { g.inletSum += s.inletC; g.inletN += 1; g.inletMax = g.inletMax == null ? s.inletC : Math.max(g.inletMax, s.inletC); }
   if (s.maxC != null) g.maxC = g.maxC == null ? s.maxC : Math.max(g.maxC, s.maxC);
@@ -84,7 +90,7 @@ function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
   return {
     servers: g.servers, measured: g.measured, unmeasured: g.unmeasured, unmeasuredN: g.servers - g.measured,
     nowW: g.measured ? Math.round(g.nowW) : null, nowKw, avg24Kw: g.avg24N ? r2(g.avg24W / 1000) : null, avg24Servers: g.avg24N, peak24Kw: pk ? r2(pk.w / 1000) : null, peak24At: pk ? pk.t : null, peakServers: full,
-    partialHours: hrs.length - complete.length, kwh24: g.avg24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN,
+    partialHours: hrs.length - complete.length, kwh24: g.kwh24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN,
     capKw, marginPct: margin, low: margin != null ? margin < rackLowPct : null, marginPartial: capKw != null && partial,
     inletAvg: g.inletN ? r1(g.inletSum / g.inletN) : null, inletMax: g.inletMax, maxC: g.maxC, inletServers: g.inletN,
     fanWarn: g.fanWarn, fanUnread: g.fanUnread, capSet: g.capSet, capHit: g.capHit, notTarget: g.notTarget || 0,
@@ -263,7 +269,8 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
     if (dbKey && idb?.hourlyStats) {
       try {
         const rows = idb.hourlyStats(dbKey, now - DAY_MS, now);
-        h24 = hourSummary(rows);
+        const h0 = Math.floor(now / HOUR) * HOUR;   // v2.954(점검 B-4): kWh 는 끝난 정시 24칸만(부분 시간 둘을 더하면 25시간치)
+        h24 = hourSummary(rows, { kwhFrom: h0 - DAY_MS, kwhTo: h0 });
         // 월 누적 = 끝난 날(캐시) + 오늘(24시간 행 중 오늘 것). 알림 판정(withMonth=false)은 쓰지 않아 읽지 않는다(첫 주기에 서버마다 한 달 행을 읽지 않게).
         let wh = 0; let any = false;
         if (withMonth) {

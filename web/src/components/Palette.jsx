@@ -102,7 +102,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
     const allow = JSON.parse(allowKey);
     return (k) => lockReasonOf(byKey.get(k), { isAdmin, toolsAllowed: allow, can, toolAllowed });
   }, [isAdmin, allowKey, byKey]);
-  // v2.954: 어레이는 인벤토리 종류가 아니라 검색 색인에 없다 — 두 글자 이상이면 'SAN 스토리지 성능에서 찾기' 행을 기능 목록 끝에 둔다
+  // v2.955: 어레이는 인벤토리 종류가 아니라 검색 색인에 없다 — 두 글자 이상이면 'SAN 스토리지 성능에서 찾기' 행을 기능 목록 끝에 둔다
   //   (검색어는 URL 이 아니라 인계 — 그 화면의 검색 칸이 이름 · 시리얼 · 스위치로 거른다 · 도구가 잠긴 계정에는 보이지 않는다).
   const toolRowsAll = useMemo(() => {
     const term = q.trim();

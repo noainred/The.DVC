@@ -73,6 +73,7 @@
 .sst-spark { display: block; width: 88px; height: 26px; }
 .sst-delta { font-family: var(--mono); font-size: 12px; } .sst-delta.up { color: #fcd34d; } .sst-delta.dn { color: #86efac; } .sst-delta.flat, .sst-delta.none { color: var(--text-dim); }
 .sst-two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 14px; min-width: 0; }
+.sst-two.map { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }   /* v2.954(점검 E-4): 분류 · 매핑 탭 비율 — 인라인이면 아래 1100px 한 칼럼 규칙을 이긴다 */
 .sst-alert { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: var(--panel-deep); border: 1px solid var(--border); font-size: 12.5px; line-height: 1.5; min-width: 0; }
 .sst-alert a { color: var(--mint); font-weight: 600; }
 .sst-alert .ic { width: 28px; height: 28px; border-radius: 8px; flex: none; display: grid; place-items: center; background: rgba(245,158,11,.16); color: #fcd34d; font-weight: 800; }
@@ -131,7 +132,7 @@
 @media (max-width: 1100px) {
   .sst-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sst-stats, .sst-dirs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .sst-two { grid-template-columns: minmax(0, 1fr); }
+  .sst-two, .sst-two.map { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 600px) {
   .sst-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -148,9 +149,9 @@
 /* v2.953 자기 기준선 — 평소와 다름 표시 */
 .sst-legend .sst-ring { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--amber); background: transparent; margin-right: 6px; vertical-align: -1px; }
 .sst-hm i.off { outline: 2px solid var(--amber); outline-offset: -2px; }
-/* v2.954 점검 이력 모달 — 표 안의 어레이 이름은 상세로 가는 글자 단추(새 표 틀 없이 STable 그대로) */
+/* v2.955 점검 이력 모달 — 표 안의 어레이 이름은 상세로 가는 글자 단추(새 표 틀 없이 STable 그대로) */
 .sst-link { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: var(--text); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 .sst-link:hover { color: var(--accent, #7dd3fc); }
-/* v2.954 상세 임의 구간 — 세그 옆 한 줄(datetime-local 둘 + 단추) · 400px 에서는 줄바꿈 */
+/* v2.955 상세 임의 구간 — 세그 옆 한 줄(datetime-local 둘 + 단추) · 400px 에서는 줄바꿈 */
 .sst-custom { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .sst-custom .sst-inp { height: 30px; padding: 0 8px; font-size: 12px; min-width: 0; max-width: 100%; }

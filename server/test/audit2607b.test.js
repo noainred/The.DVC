@@ -12,6 +12,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2607b-'));
 Object.assign(process.env, {
@@ -210,7 +211,7 @@ test('EDGE2607-02: ip-scan-result 는 alive 상한으로 버린 수를 omitted �
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.omitted, 3);
   });
-  const src = stripComments(SRC('routes/central.js'));
+  const src = stripComments(centralSource());
   const pf = src.slice(src.indexOf("centralRouter.post('/part-faults'"), src.indexOf("centralRouter.get('/edge-log-jobs'"));
   assert.match(pf, /partsOmitted/, 'part-faults 응답에 partsOmitted');
 });

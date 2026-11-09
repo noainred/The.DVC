@@ -53,6 +53,15 @@ export function edgeSyncText(a = {}) {
   return { tone: 'warn', text: '대기 — 엣지가 다음 인출에서 반영합니다' };
 }
 
+/**
+ * 엣지 배포 행의 공통 계정 · 키 칸(v2.954 점검 A-4). 범위 계정에는 서버가 이름 대신 '있는지(true/false)' 만 준다 —
+ * 불리언을 그대로 이으면 'true · true' 가 된다. 이름이면 이름, true 면 '종류 지정됨', 없으면 뺀다.
+ */
+export function edgeCredText(r = {}) {
+  const part = (v, label) => (v === true ? `${label} 지정됨` : (typeof v === 'string' && v ? v : ''));
+  return [part(r.idracCred, 'iDRAC 계정'), part(r.osCred, 'OS 계정'), part(r.osKey, 'SSH 키')].filter(Boolean).join(' · ') || '—';
+}
+
 /** 지문 줄임(화면 폭) — 전체는 title. */
 export const shortFp = (fp) => { const s = String(fp || ''); return s.length > 28 ? `${s.slice(0, 18)}…${s.slice(-6)}` : s; };
 

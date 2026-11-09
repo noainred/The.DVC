@@ -1,5 +1,5 @@
 /**
- * test/sanStorage2954.test.js — v2.954 'SAN 스토리지 성능' 3차(남은 작업 일괄 · 설계 README §8.4).
+ * test/sanStorage2955.test.js — v2.955 'SAN 스토리지 성능' 3차(남은 작업 일괄 · 설계 README §8.4).
  *  ① storageCheckHistory(순수): shouldRecord(첫 · 바뀜 · 1시간 · 같음) · lastChangeOf(1시간 반복 기록 뒤에서도 실제 변화를 찾는다)
  *  ② PowerMax 포트 파서(순수): FEPort keys(중복 · 상한) · metrics(포트 이름 IOs/MBs/ResponseTime · 디렉터 이름으로 와도 · 마지막 점)
  *  ③ CSV nodeLoad 칸: 아이실론 · REST 어레이 true|false · SSH 변형 빈칸 · 모르는 타입 빈칸
@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sanstorage2954-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sanstorage2955-'));
 process.env.CONFIG_DIR = tmp;
 process.env.SANSW_PERF_ROLLUP_BACKFILL = '0';
 process.env.SANSTORAGE_CHECK_DB_PATH = path.join(tmp, 'san-storage-check.db');
