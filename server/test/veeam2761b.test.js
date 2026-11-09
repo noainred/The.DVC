@@ -189,7 +189,8 @@ test('라우트 — B1·B7 가림 · B2·B5 stale · D5 runningStale · A5 hostM
     // B1·B7 — viewer
     const v1 = await get(`/veeam/badges?vcenterId=${VC1}`);
     const raw = JSON.stringify(v1);
-    for (const leak of ['vbr-pl.corp.local', '9419', '10.20.30.40', 'AB:CD:EF']) assert.equal(raw.includes(leak), false, `viewer badges 에 ${leak}`);
+    // v2.951: 포트는 'host:포트' 꼴(':9419')로 찾는다 — 맨 '9419' 는 실제 시각 ts(예 1794190447028 — 2026-11-09 01:06~03:53Z)에도 들어 있어 그 시간대에만 실패했다.
+    for (const leak of ['vbr-pl.corp.local', ':9419', '10.20.30.40', 'AB:CD:EF']) assert.equal(raw.includes(leak), false, `viewer badges 에 ${leak}`);
     assert.equal(v1.servers[0].notes.length, 3, '비고 개수는 그대로(문구만 일반화)');
     assert.ok(v1.servers[0].notes[0].startsWith('작업 상태을(를) 읽지 못했습니다'));
     assert.equal(v1.servers[0].counts, null, 'B7: 서버 전체 집계는 관리자만');
