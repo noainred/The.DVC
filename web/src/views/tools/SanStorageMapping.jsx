@@ -70,7 +70,8 @@ export default function SanStorageMapping({ dc, isAdmin }) {
       </div>
       {!canEdit && <div className="sst-info">관리자만 분류 · 매핑을 바꿀 수 있습니다 — 지금은 보기만 됩니다.</div>}
       {msg && <div className="sst-note">{msg}</div>}
-      <div className="sst-two" style={{ gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)' }}>
+      {/* v2.954(점검 E-4): 비율은 클래스(sst-two map)로 — 인라인 gridTemplateColumns 가 1100px 이하 한 칼럼 미디어 쿼리를 이겨 400px 에서도 두 칼럼이었다. */}
+      <div className="sst-two map">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
           <div className="sst-card" style={{ padding: 0, overflow: 'hidden' }}>
             <div className="sst-cardhead" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-soft)' }}><div className="sst-title"><h4>① 연결 대상 분류 — 어레이 / 호스트</h4><span className="muted" style={{ fontSize: 12 }}>· 어레이 전부와 이름 규칙만으로 분류된 것 · 재정의된 것</span></div>{got.targetsOmitted ? <span className="muted" style={{ fontSize: 12 }}>{got.targetsOmitted}개 더(상한)</span> : null}</div>

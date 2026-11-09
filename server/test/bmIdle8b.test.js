@@ -210,9 +210,12 @@ test('⑤ 라우트 — 이 노드 + 엣지 · 범위 · 검토 상태(대기 ·
   assert.ok(A.listAnnotations().filter((a) => a.auto?.startsWith('idle:')).length >= 2);
   // 비관리자 판본 — 검토한 사람은 가림 토큰
   const op = { user: { username: 'op', role: 'operator', scope: null }, query: {}, params: {}, body: {} };
-  await rv(adm.user, { key: 'IDLE1', vcenterId: 'vcI', status: 'review' });
+  await rv(adm.user, { key: 'IDLE1', vcenterId: 'vcI', status: 'review', reason: '10.20.30.40 백업 대상 확인' });
   const fo = await R.bmIdleFleet(op, { vcenters: [{ id: 'vcI' }, { id: 'vcJ' }] }, deps);
   assert.notEqual(fo.rows.find((x) => x.key === 'IDLE1').review.by, 'adm');
+  // v2.954 반증(A-2 후속): 검토 사유도 주석 본문과 같은 가림(주소) — 관리자는 원문
+  assert.ok(!String(fo.rows.find((x) => x.key === 'IDLE1').review.reason).includes('10.20.30.40'), fo.rows.find((x) => x.key === 'IDLE1').review.reason);
+  assert.ok(String((await R.bmIdleFleet(adm, { vcenters: [{ id: 'vcI' }, { id: 'vcJ' }] }, deps)).rows.find((x) => x.key === 'IDLE1').review.reason).includes('10.20.30.40'));
 });
 
 test('⑥ 봉투 — 엣지가 싣는 표지 · 저활용 행 → 중앙 정제(sanitizePerfFields) 왕복 · 봉투 상한에서 사용 중 행만 뺀다', async () => {

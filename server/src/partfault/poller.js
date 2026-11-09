@@ -121,12 +121,15 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
       ...(auto?.enabled ? { issues: { created: auto.created, attached: auto.attached, commented: auto.commented, review: auto.review, capped: auto.capped } } : {}),
       notify: note ? { ...note, dropped: countDropped(note.results) } : null,
       ...(demoOnly ? { demo: true, notifySuppressed: 'demo' } : {}),
+      // v2.954(점검 D-2): 정비 창 보류 판정을 못 한 엣지 장비(중앙이 그 엣지 대상을 모름 — 재시작 뒤 · 베어메탈 엣지 인출 전). 보류하지 않았다는 사실을 숨기지 않는다.
+      ...(maint?.targetsUnknown ? { maintTargetsUnknown: maint.targetsUnknown } : {}),
     };
     // 성공·실패 **둘 다** 로그를 남긴다(무음 실패 금지).
     console.log(`[partfault] 점검(${reason}) ${Date.now() - t0}ms — 신규 ${tr.stats.opened} · 해소 ${tr.stats.closed} · 변화 ${tr.stats.changed}`
       + ` · 보류 unknown ${tr.stats.heldUnknown}/장비실패 ${tr.stats.heldDeviceFailed}/컬렉션실패 ${tr.stats.heldCollectionFailed}/누락 ${tr.stats.heldMissing}`
       + (tr.stats.heldRegistryUnreadable ? `/등록부손상 ${tr.stats.heldRegistryUnreadable}` : '')
       + (tr.stats.heldMaintenance || tr.stats.maintDeferred ? `/정비창 ${tr.stats.heldMaintenance}(새 장애 보류 ${tr.stats.maintDeferred})` : '')
+      + (maint?.targetsUnknown ? ` · 정비창 판정 못 함(엣지 대상 모름) ${maint.targetsUnknown.devices}대/${maint.targetsUnknown.agents.length}엣지` : '')
       + (note ? ` · 알림 ${note.sent}건${note.capped ? `(상한 ${note.capped}건 제외)` : ''}` : '')
       + (auto?.enabled ? ` · 이슈 생성 ${auto.created}/붙임 ${auto.attached}/댓글 ${auto.commented}${auto.capped ? `/상한 ${auto.capped}` : ''}` : ''));
     return { ok: true, ..._last };

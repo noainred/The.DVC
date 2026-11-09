@@ -26,6 +26,7 @@ import path from 'node:path';
 import http from 'node:http';
 import url from 'node:url';
 import express from 'express';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nodeclients2935-'));
 Object.assign(process.env, { CONFIG_DIR: TMP, DATA_SOURCE: 'live', AUTH_ENABLED: 'false' });
@@ -293,7 +294,7 @@ test('⑥ 중앙 수신 — 표본 고리 정제·중복·상한 · 응답 확�
   const push = src('storage/push.js');
   assert.ok(/nodeLoadSamples = pendingNodeLoadSamples\(\)/.test(push) && /markNodeLoadSamplesSent\(nodeLoadSamples\)/.test(push));
   assert.ok(/dropSummaryOf\(await readCentralReply\(res\)\)/.test(push), '공용 판독기 리터럴(EDGE2613-05)');
-  const route = src('routes/central.js');
+  const route = centralSource();
   const i = route.indexOf("centralRouter.post('/storage-data'"); const seg = route.slice(i, route.indexOf('\n});', i));
   assert.ok(/req\.body\?\.nodeLoadSamples/.test(seg) && /onlyDelegated\(list, \(d\) => d\.deviceId/.test(seg) && /ownedSet\.has\(String\(d\.deviceId\)\)/.test(seg), '표본 고리도 중앙 직접 장비 거절 + 개별 토큰 위임 필터');
   assert.ok(/nodeLoadSamples: sampleAck/.test(seg), '응답에 확인을 싣는다');

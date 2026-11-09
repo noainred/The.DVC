@@ -5,7 +5,7 @@ import { fetchJson, putJson, postJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { CHECK_MARK, overallText, thresholdText, rateText, dateClockText, VENDOR_SHORT } from './sanStorageText.js';
+import { CHECK_MARK, overallText, thresholdText, rateText, dateClockText, VENDOR_SHORT, reportToPlaceholder } from './sanStorageText.js';
 
 const HEAVY_TIMEOUT_MS = 90_000;
 
@@ -256,7 +256,7 @@ function ReportModal({ isAdmin, onClose }) {
               <label className="muted" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>상위 <input className="sst-inp" type="number" min={1} max={50} disabled={!isAdmin} value={form.topN} onChange={(e) => setForm({ ...form, topN: e.target.value })} style={{ width: 64 }} aria-label="상위 N" />대</label>
             </div>
             <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12.5 }}>받는 사람(쉼표 · 비우면 설정 › 알림·메일의 기본 수신자)
-              <input className="sst-inp" type="text" disabled={!isAdmin} value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} placeholder="storage-team@example.com, ..." style={{ fontFamily: 'inherit', width: '100%' }} aria-label="받는 사람" /></label>
+              <input className="sst-inp" type="text" disabled={!isAdmin} value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} placeholder={reportToPlaceholder(got.settings)} style={{ fontFamily: 'inherit', width: '100%' }} aria-label="받는 사람" /></label>
             <div className="sst-hist">
               <span>다음 회차</span><b>{got.nextSlot ? dateClockText(got.nextSlot) : (form.enabled ? '—' : '꺼짐')}</b>
               <span>마지막 발송</span><b>{got.lastSentAt ? dateClockText(got.lastSentAt) : '없음'}</b>

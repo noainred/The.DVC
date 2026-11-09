@@ -251,7 +251,9 @@ export function registerBmOnboard(api, deps = {}) {
     const agents = ED.edgeSummary().map((s) => {
       const rows = ED.edgeRowsFor(s.agent).filter((r) => (r.corp ? inUserScope(req.user, snap, r.corp) : !scoped));
       const pull = ED.onboardPullOf(s.agent);
-      return { agent: s.agent, pending: scoped ? undefined : s.pending, rows: rows.map((r) => ({ name: r.name, corp: r.corp, idracHost: !!r.idracHost, osHost: !!r.osHost, osKey: r.osKey, osCred: r.osCred, idracCred: r.idracCred, enabled: r.enabled })),
+      // v2.954(점검 A-4): 범위 계정에는 키 · 공통 계정 **이름**을 주지 않는다(있는지만) — /ssh-keys · /accounts 가 범위 계정에 가린 이름이 이 길로 나갔다(L-7 우회).
+      return { agent: s.agent, pending: scoped ? undefined : s.pending, rows: rows.map((r) => ({ name: r.name, corp: r.corp, idracHost: !!r.idracHost, osHost: !!r.osHost,
+        osKey: scoped ? !!r.osKey : r.osKey, osCred: scoped ? !!r.osCred : r.osCred, idracCred: scoped ? !!r.idracCred : r.idracCred, enabled: r.enabled })),
         total: scoped ? rows.length : s.rows, at: s.at, sig: s.sig, pulledAt: pull?.at || null, appliedSig: pull?.appliedSig || '', applied: pull?.applied || null, inSync: pull ? pull.appliedSig === s.sig : null };
     }).filter((a) => a.rows.length || !scoped);
     let minEdgeVersion = '';
@@ -266,7 +268,8 @@ export function registerBmOnboard(api, deps = {}) {
     const snap = store.get();
     const row = ED.edgeRowsFor(agent).find((r) => r.name.toLowerCase() === name.toLowerCase());
     if (!row || (row.corp ? !inUserScope(req.user, snap, row.corp) : !!scopedVcenterIds(req.user, snap))) return res.status(404).json({ ok: false, reason: '배포 행을 찾을 수 없습니다.' });
-    if (row.corp ? !inUserWriteScope(req.user, snap, row.corp) : false) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' });
+    // v2.954(점검 A-1): 귀속 없는 행은 조회 ∧ 쓰기 전체 범위만(적용 경로 ctx.fullScope 와 같은 판정) — 예전에는 쓰기 범위를 보지 않아 쓰기만 줄인 admin 이 뺄 수 있었다.
+    if (row.corp ? !inUserWriteScope(req.user, snap, row.corp) : !isFullReadWriteScope(req.user, snap)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' });
     const r = ED.applyEdgeChanges({ removes: [{ agent, name: row.name }] }, { by: who(req) });
     logAudit({ user: who(req), action: 'bm-usage.onboard.edge-remove', target: `${agent}/${row.name}`, ip: req.ip || '', detail: JSON.stringify({ ok: !!r.ok, code: r.code }).slice(0, 200) });
     send(res, r);
@@ -322,7 +325,8 @@ export function registerBmOnboard(api, deps = {}) {
     const vc = t(s0?.vcenterId, 128);
     const scoped = !!scopedVcenterIds(req.user, snap);
     if (!s0 || (vc ? !inUserScope(req.user, snap, vc) : scoped)) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
-    if (vc && !inUserWriteScope(req.user, snap, vc)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' });
+    // v2.954(점검 A-1): 귀속 없는 서버(vc 없음)의 시험 접속(저장된 비밀 사용)은 조회 ∧ 쓰기 전체 범위만.
+    if (vc ? !inUserWriteScope(req.user, snap, vc) : !isFullReadWriteScope(req.user, snap)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' });
     const r = await (deps.testOs || testSavedOs)(s0);
     logAudit({ user: who(req), action: 'bm-usage.onboard.test', target: s0.name || id, ip: req.ip || '', detail: JSON.stringify({ ok: !!r.ok, kind: r.kind, auth: r.authKind }).slice(0, 200) });
     res.json(r);

@@ -106,9 +106,10 @@ export async function finishLogCycle(results = [], ctx = null, { now = Date.now(
   }
   let w = { ok: true, written: 0, conflicts: 0, overflow: 0 };
   if (items.length) w = await logWriteBatch({ agent: ctx.agent, items });
-  if (!w.ok) _alertIn = new Map();   // 못 쓴 주기는 알림 입력도 버린다(다음 주기에 같은 줄을 다시 읽어 그때 센다 — 두 번 알리지 않게)
-  else {
+  {
     // 비교 후 쓰기에서 진 서버(conflicts — 다른 주기가 먼저 썼다)는 이번 결과를 버렸다 → 알림 입력에서도 뺀다(반증 의심 — 쓰지 않은 줄로 알리지 않게)
+    // 못 쓴 서버도 알림 입력을 버린다(다음 주기에 같은 줄을 다시 읽어 그때 센다 — 두 번 알리지 않게).
+    //   v2.954(점검 C-1): 쓰기가 묶음 트랜잭션이라 ok:false 여도 앞 묶음은 커밋됐다 — 그 서버(writtenKeys)의 줄은 다시 읽지 않으므로 알림 입력을 남긴다.
     const wrote = new Set(Array.isArray(w.writtenKeys) ? w.writtenKeys : []);
     for (const k of [..._alertIn.keys()]) if (!wrote.has(k)) _alertIn.delete(k);
   }

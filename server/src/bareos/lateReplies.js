@@ -21,7 +21,9 @@ import { logAudit } from '../audit.js';
 
 const posInt = (v) => (Number.isInteger(v) && v > 0 ? v : null);
 const note = (action, target, detail) => { try { logAudit({ user: 'central-portal', action, target, detail, ip: '' }); } catch { /* 감사 기록 실패는 반영을 막지 않는다 */ } };
-const warn = (msg) => console.warn(`[bareos] ${msg}`);
+// v2.954(개선 검토 3번 — v2.938 반증 B-6 후속): 시작을 알린 회신을 반영하지 못한 일은 콘솔뿐 아니라 감사 로그에도 남긴다(화면 › 감사 로그에서 보인다 —
+//   Director 에서는 그 백업·복원이 돌고 있을 수 있어 사람이 확인해야 한다). 원장 저장 실패도 같은 길.
+const warn = (msg) => { console.warn(`[bareos] ${msg}`); note('Bareos 늦은 회신 미반영', 'bareos', String(msg).slice(0, 300)); };
 const errText = (e) => String(e?.message || e).slice(0, 160);
 /** 보낸 시점의 대상 상태(Director) — onLate 를 만들 때(= 보낼 때) 잡는다. */
 const dirOf = (jobId) => getJob(jobId)?.directorId || '';
