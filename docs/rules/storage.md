@@ -40,6 +40,7 @@
 - (v2.749) 게스트 파티션 사용률 경보 — 원천은 게스트 디스크 수집의 part_latest · 경로 모양으로 OS · 정규식 없는 패턴 · 메일은 아이실론 코어
 - (v2.789) 스토리지 사용량 보고서(일간·주간·월간 표 · LUN·파일시스템 · CSV · 법인/종류 비교 · 예약 메일)
 - (v2.915) 베어메탈 ↔ SAN 비교 — 디스크 I/O 표본(diskstats) · I/O 시계열 DB · 법인 축 · 비교/시계열 API · ‘SAN 비교’ 탭
+- (v2.962) 베어메탈 스토리지 ‘비교 세트’ — SAN 어레이 · 베어메탈 서버 · 그룹 · 법인 합계를 섞어 2~4개 · IOPS · 응답 시간 · 어레이 측 FE 표본 · 격자 하한
 - v2.926 — 아이실론 노드 부하 시계열(네트워크·디스크·CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`, 수집 키는 `collectors/isilonNodeLoad.js`
 
 ## 본문
@@ -786,6 +787,14 @@
   - **API** `GET /tools/bm-storage/compare?hours&types&datacenterId`(어레이 용량 = 최신 스냅샷 중앙 · 엣지 중 늦은 것 · 전송 속도 = `storageSeriesMulti` 를 시리얼로 대조 · 법인 분리 집계에서는 같은 법인 계열만 · 사유는 코드) · `GET /tools/bm-storage/io/series?range&metric&ids&rank=1`(격자 = SAN `rangeOf` 의 bucketMs — 15분 · 1시간 정배수 · 1h 원시 · 24h 15분 · 7d/30d 1시간 · `bm:all` 은 측정 서버 전부에 값이 있는 칸만 합). 둘 다 adminOnly + fullScopeOnly 이고 **응답에 관리 주소를 싣지 않는다**(`stripHost`). 데모는 `demoBmIoSeries`(수식 — 적재 없음)이고 PowerMax · VMAX 데모 시리얼은 SAN 데모 포트 이름과 맞춘다(`sanDemoArraysFor`).
   - **화면**: 하위 탭 `useHashTab`(`#/tools/bm-storage/compare`) · 법인 · SAN 종류 칩은 공용 `DeviceFacetBar`(이름 키 → id) · 실시간 1시간 재조회는 공용 `usePolling`(WEB2613-09) · 합계 행은 STable 규약대로 **맨 아래 고정**(시안은 맨 위 — 저장소 규약을 따랐다) · 피크는 전송 속도 칸의 둘째 줄(1440 에서 열이 넘쳐 열 하나를 합쳤다) · CSV 는 `canCsv()` 뒤.
   - ⚠ 테스트가 src 모듈을 **정적 import 하면 CONFIG_DIR env 보다 먼저 config.js 가 평가**되어 개발용 `server/config/` 에 테스트 서버가 쌓인다(이 작업에서 실측 — 12대). 설정을 읽는 경로가 하나라도 끼면 `before()` 에서 동적 import 한다(`bmstorIo2915.test.js` 머리말).
+- **v2.962 — 베어메탈 스토리지 ‘비교 세트’**(사용자 요청 2026-11-10 "SAN A / SAN B · 가 법인의 SAN A / 가 법인의 베어메탈 AA … 다양하게 각각의 스토리지의 성능을 비교" · 컨펌 '바로 구현 · IOPS · 응답 시간까지 · 표준'. 기록 `docs/design/bm-san-compare/README.md` §9 · 회귀 `server/test/bmCompareSet2962.test.js` + 웹 `compareSetText.test.js`):
+  - **대상 id 는 종류:키**(`san:<시리얼>` · `bm:<id>` · `bmg:<그룹>` · `bmc:<법인 id>` — `compareSet.parseSetIds` · 상한 4 · 웹 `normalizeIds` 와 같은 규칙). 주소 `#/tools/bm-storage/set/<ids>` 로 공유 — `useHashTab` 은 둘째 조각(`set`)만 본다.
+  - **IOPS · 응답 시간은 diskstats 열 3 · 7(완료 수) · 6 · 10(소요 ms)** — 넷 중 하나라도 숫자가 아니면 그 장치는 IOPS 를 null(섹터 · busy 는 그대로). 응답 시간은 I/O 가중(Σ소요 ÷ ΣI/O)이고 I/O 0 이면 null(0 ms 가 아니다). 묶음 합도 Σ로 다시 낸다(서버별 평균의 평균 금지).
+  - **DB 열 추가는 `ioDb.ensureColumns`**(PRAGMA table_info → 빠진 열만 ADD COLUMN · NOT NULL 은 DEFAULT 필수) — v2.956 DB 로 기동하는 테스트가 고정. 새 열을 더할 때 `ADD_COLUMNS` 에도.
+  - **SAN IOPS · 응답 시간 · 바쁨 = 어레이 측 5분 FE 표본**(`storage/db.nodeLoadQuery` group 'fe') — 합의 '전부' 는 그 창에 나온 부모 단위(카탈로그 전체가 아니다 — 빠진 디렉터 하나로 전부 null 이 되지 않게) · 하나라도 빠진 시각은 null · 응답 시간은 최대 · 바쁨은 FA busy 또는 노드/SP CPU 최대. 자격 판정은 기존 `feEligibility`(SSH 는 `fe-ssh`). 실장비 미확인.
+  - **격자는 표본 간격보다 잘게 만들지 않는다**(`compareSet.gridMs` — v2.956 `/io/series` 1시간이 1분 격자였다) · 재격자는 평균/최대(합 금지).
+  - ⚠ `ioSeries.summarize` 의 avgTotal 은 **정수 반올림**(B/s · IOPS 용) — ms · % 지표에 그대로 쓰면 평균이 피크보다 커 보인다(화면 확인에서 발견). `compareSet.finishMetric` 이 반올림 없이 다시 낸다.
+  - 화면: 차트 세로축 선형/로그(로그는 0 이하 점을 빈칸으로 — 0 으로 그리지 않는다) · IOPS 축 눈금은 짧게(`axisIops`) · 같은 사유 문장은 한 열에서 바로 위와 같으면 생략.
 - ⚠⚠ **v2.926(릴리스 2.931.0) — 아이실론 노드 부하 시계열(네트워크 In/Out · 디스크 쓰기/읽기 · CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`(`saveNodeLoadPoint`·`nodeLoadQuery`), 수집 키는 `collectors/isilonNodeLoad.js`, 화면은 `views/tools/storageNodeLoad/`**
   (사용자 요청 "노드별 io network 부하를 저장하고 차트로" · "기간별 시간별로 이전 기록" · "Disk io 추가" · 성능 추천 ①CPU ④잡 엔진 ⑤지난주 비교 — Claude Design 시안 v2 컨펌,
   `docs/design/isilon-node-load/`. 회귀 `server/test/storageNodeLoad2926.test.js` + 웹 `storageNodeLoad/nodeLoadText.test.js`(서버 묶음·기간·조립을 같은 소스로 대조)):

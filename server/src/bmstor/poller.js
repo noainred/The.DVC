@@ -133,11 +133,19 @@ export function sanitizeBmIo(io) {
   const c = io.counters && typeof io.counters === 'object' ? io.counters : null;
   const counters = c ? { rdSectors: numOrNull(c.rdSectors), wrSectors: numOrNull(c.wrSectors), ioMs: numOrNull(c.ioMs), uptimeSec: numOrNull(c.uptimeSec) } : null;
   const countersOk = counters && counters.rdSectors != null && counters.wrSectors != null && counters.ioMs != null;
+  // v2.962(비교 세트): I/O 횟수 · 소요 ms 카운터 — 셋 다 수일 때만 싣는다(v2.956 엣지는 없다 — 그때는 IOPS · 응답 시간만 비고 처리량은 그대로).
+  if (countersOk) {
+    const io3 = [numOrNull(c.rdIos), numOrNull(c.wrIos), numOrNull(c.rwTicks)];
+    if (io3.every((v) => v != null && v >= 0)) { counters.rdIos = io3[0]; counters.wrIos = io3[1]; counters.rwTicks = io3[2]; }
+  }
+  const nn = (v) => { const n = numOrNull(v); return n == null || n < 0 ? null : n; };
   return {
     readBps, writeBps, totalBps: numOrNull(io.totalBps) ?? readBps + writeBps,
     busyPct: numOrNull(io.busyPct), busiestDev: mStr(io.busiestDev, 64),
     disks: Math.max(0, Math.round(numOrNull(io.disks) ?? 0)), skipped: Math.max(0, Math.round(numOrNull(io.skipped) ?? 0)),
-    sampleMs: numOrNull(io.sampleMs), counters: countersOk ? counters : null,
+    sampleMs: numOrNull(io.sampleMs),
+    readIops: nn(io.readIops), writeIops: nn(io.writeIops), iops: nn(io.iops), latMs: nn(io.latMs),   // v2.962 — 없으면 null(구버전 엣지)
+    counters: countersOk ? counters : null,
   };
 }
 
