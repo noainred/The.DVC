@@ -41,7 +41,8 @@ export function missingCheck({ targets = [], skipped = [], entryByKey = new Map(
     const base = { key: t(s.key), name: t(s.name), serviceTag: t(s.serviceTag), vcenterId: t(s.vcenterId), paths: [], idracHost: '', missing: [] };
     if (s.reason === 'unassigned') { rows.push({ ...base, via: 'local', bucket: 'unassigned', reason: 'unassigned' }); continue; }
     if (s.reason === 'edge-delegated') {
-      const e = typeof edgeEntry === 'function' ? edgeEntry(t(s.agent), t(s.key)) : null;
+      // 반증 의심 1: 원격 위임 행은 엣지 쪽 키(edgeKey — 서비스태그 없는 서버의 엣지 등록 id)로 찾는다. 없으면 중앙 키(서비스태그면 두 노드가 같다).
+      const e = typeof edgeEntry === 'function' ? edgeEntry(t(s.agent), t(s.edgeKey) || t(s.key)) : null;
       const cov = e && BUCKETS.includes(e.coverage) ? e.coverage : null;
       rows.push({ ...base, via: 'edge', agent: t(s.agent), bucket: cov || 'unknown', reason: cov ? '' : 'edge-no-record' });
       continue;

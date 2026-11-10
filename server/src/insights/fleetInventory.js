@@ -251,6 +251,8 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       // v2.625: 받치는 iDRAC 등록 id — 사용률 수집(bmusage)이 ESXi 호스트의 iDRAC 을 찾는 연결 고리.
       //   받침이 없거나 엣지 보고분(serverByTag 에서 제외)이면 빈 값이고, 그 호스트는 iDRAC 경로가 없다.
       idracServerId: backed ? (m.serverId || '') : '',
+      // 반증 F4(v2.959): 받침이 원격 전력(수집 서버 pull) 항목이면 그 수집 서버 id — 베어메탈 사용률이 이 호스트를 ‘엣지 수집 — 그 엣지’ 로 판정한다(내부용 · /insights/fleet 응답에서 뺀다).
+      ...(backed && m.source === 'remote' && m.collectorId != null && String(m.collectorId).trim() ? { idracCollectorId: String(m.collectorId).trim() } : {}),
       // v2.733(C2-02): vCenter 추정 전력을 지금 값으로 쓰지 않은 사유(getFleetInventory 가 비운 호스트만 — 없으면 싣지 않는다).
       ...(h.powerUnread ? { powerUnread: h.powerUnread } : {}),
     });
@@ -437,10 +439,15 @@ function readCollectorsOnce() {
 /**
  * v2.959: 원격 수집 서버 id → 등록부 이름(엣지 보관분 표의 agent 와 같은 값) 색인 — 베어메탈 사용률의 ‘엣지 수집 — 어느 엣지’ 판정 입력(bmusage/targets.js remoteCollectorNameOf).
  *   못 읽었으면 readable:false(이름을 추측하지 않는다). 토큰 · URL 은 싣지 않는다(이름만). 원 id 와 소문자 id 둘 다 넣는다(등록부는 id 대소문자 중복을 합친다).
+ *   반증 F2: aliases = 별칭(id · name 소문자) → name — fleet 보고 경로의 엣지 이름(인증 agent — 등록부 id 인 경우가 많다)을 같은 name 으로 맞춘다(targets.js canonicalAgentOf).
+ *   같은 글자가 두 항목에 걸리면 목록 앞 항목이 이긴다(collector/registry.js findCollectorByName 과 같은 순서 — 항목마다 id 또는 name).
+ *   그 항목의 name 이 비면 별칭에 넣지 않는다(받은 이름 그대로 둔다 — 지어내지 않는다).
  */
 export function remoteCollectorIndex(col) {
   const names = new Map();
-  if (!col || col.error || !Array.isArray(col.list)) return { readable: false, names };
+  const aliases = new Map();
+  if (!col || col.error || !Array.isArray(col.list)) return { readable: false, names, aliases };
+  const taken = new Set();
   for (const c of col.list) {
     if (!c || typeof c !== 'object') continue;
     const id = String(c.id ?? '').trim();
@@ -448,8 +455,13 @@ export function remoteCollectorIndex(col) {
     const name = String(c.name ?? '').trim();
     names.set(id, name);
     if (!names.has(id.toLowerCase())) names.set(id.toLowerCase(), name);
+    for (const k of [id.toLowerCase(), name.toLowerCase()]) {
+      if (!k || taken.has(k)) continue;
+      taken.add(k);
+      if (name) aliases.set(k, name);
+    }
   }
-  return { readable: true, names };
+  return { readable: true, names, aliases };
 }
 
 /**

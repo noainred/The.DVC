@@ -209,6 +209,24 @@ export function edgeDelegatedByAgent(skipped = [], { stateOf = null } = {}) {
   return out.sort((a, b) => b.count - a.count || a.agent.localeCompare(b.agent));
 }
 
+/**
+ * 반증 의심 2(v2.959): '수집 서버 모름' 의 갈래(서버 collectorIssue)를 사실대로 — 등록부를 못 읽음 · 등록부에 없음(삭제) · 이름이 빈 등록.
+ *   응답 제외 목록에서 센다(범위 계정은 범위 안 행만). 해당 행이 없으면 ''. 모르는 갈래 값은 '사유 미상' 으로 센다(지어내지 않는다).
+ */
+export const COLLECTOR_ISSUE_TEXT = Object.freeze({ unread: '수집 서버 등록부를 읽지 못함', 'not-found': '등록부에 없는 수집 서버(삭제됨)', 'no-name': '이름이 빈 수집 서버 등록' });
+export function remoteUnknownNote(skipped = []) {
+  const by = new Map();
+  for (const s of Array.isArray(skipped) ? skipped : []) {
+    if (!s || typeof s !== 'object' || s.reason !== 'remote-collector-unknown') continue;
+    const k = COLLECTOR_ISSUE_TEXT[t(s.collectorIssue)] ? t(s.collectorIssue) : '';
+    by.set(k, (by.get(k) || 0) + 1);
+  }
+  if (!by.size) return '';
+  const parts = [...by].map(([k, cnt]) => `${k ? COLLECTOR_ISSUE_TEXT[k] : '사유 미상'} **${cnt}대**`);
+  const fix = by.has('no-name') ? ' — 이름이 빈 등록은 설정 › 엣지·원격 › 수집 서버(원격)에서 이름을 채우면 다음 조회부터 그 엣지로 보입니다.' : '';
+  return `수집 서버 모름 — ${parts.join(' · ')}${fix}`;
+}
+
 /** v2.959 — 엣지별 한 칸의 문구(엣지 이름 · 대수 · 상태). 이름이 비면 '이름 모름'. 상태를 모르면 그 사실을 말한다(지어내지 않는다). */
 export function edgeDelegatedChip(x = {}) {
   const name = t(x.agent) ? `‘${t(x.agent)}’` : '이름 모름';

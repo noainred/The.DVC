@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, skippedNotes, SKIP_LABEL, emptyDiag, edgePullState } from './bmUsageText.js';
+import { edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, skippedNotes, SKIP_LABEL, emptyDiag, edgePullState, remoteUnknownNote, COLLECTOR_ISSUE_TEXT } from './bmUsageText.js';
 import { MISS_REASON_TEXT } from './bmOnboardText.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -72,5 +72,26 @@ describe('v2.959 엣지 수집 — 엣지별', () => {
     expect(seg.length).toBeGreaterThan(200);
     expect(seg).toMatch(/flexWrap: 'wrap'/);
     expect(seg).not.toMatch(/uppercase/);
+  });
+  it('반증 의심 2 — 수집 서버 모름의 갈래를 사실대로(못 읽음 · 등록부에 없음 · 이름이 빈 등록) · 모르는 갈래는 사유 미상', () => {
+    const sk = [
+      { reason: 'remote-collector-unknown', collectorIssue: 'unread' },
+      { reason: 'remote-collector-unknown', collectorIssue: 'no-name' },
+      { reason: 'remote-collector-unknown', collectorIssue: 'no-name' },
+      { reason: 'remote-collector-unknown', collectorIssue: 'not-found' },
+      { reason: 'remote-collector-unknown', collectorIssue: 'weird' },
+      { reason: 'edge-delegated', agent: 'x' }, null,
+    ];
+    const t = remoteUnknownNote(sk);
+    expect(t).toMatch(/^수집 서버 모름 — /);
+    expect(t).toMatch(new RegExp(`${COLLECTOR_ISSUE_TEXT.unread} \\*\\*1대\\*\\*`));
+    expect(t).toMatch(new RegExp(`${COLLECTOR_ISSUE_TEXT['no-name']} \\*\\*2대\\*\\*`));
+    expect(t).toMatch(/등록부에 없는 수집 서버\(삭제됨\) \*\*1대\*\*/);
+    expect(t).toMatch(/사유 미상 \*\*1대\*\*/);
+    expect(t).toMatch(/이름을 채우면/);   // 이름 없는 등록이 있을 때만 조치
+    expect(remoteUnknownNote([{ reason: 'remote-collector-unknown', collectorIssue: 'unread' }])).not.toMatch(/이름을 채우면/);
+    expect(remoteUnknownNote([])).toBe('');
+    expect(remoteUnknownNote(undefined)).toBe('');
+    expect(MISS_REASON_TEXT['remote-collector-unknown']).toMatch(/이름이 빈 등록/);
   });
 });

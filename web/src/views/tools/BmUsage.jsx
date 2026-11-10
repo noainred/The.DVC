@@ -37,7 +37,7 @@ import {
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes, usageDetailNote,
   unassignedNote, edgePullState, edgePullNote, edgeNoteRows, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote,
-  edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide } from './bmUsageText.js';   // v2.959 엣지 수집 — 엣지별
+  edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, remoteUnknownNote } from './bmUsageText.js';   // v2.959 엣지 수집 — 엣지별 · 수집 서버 모름 갈래
 import Select from '../../components/Select.jsx';
 // v2.920(리눅스 성능 2단계 화면): USE 매트릭스 보드 · 서버 성능 상세 — 문구·표시 규약은 bmPerfText.js, 판정은 서버 useJudge.js.
 import BmPerfBoard from './BmPerfBoard.jsx';
@@ -441,6 +441,7 @@ export function BmUsage() {
    *   표에 그 엣지가 없으면 상태를 지어내지 않는다(edgeDelegatedChip 이 '엣지 보관분 표에 없음' 으로 말한다).
    */
   const edgeRows = Array.isArray(edges?.rows) ? edges.rows : [];
+  const rmUnknown = remoteUnknownNote(data?.skipped || []);
   const edgeDel = edgeDelegatedByAgent(data?.skipped || [], {
     stateOf: (agent) => { const r = edgeRows.find((x) => String(x?.agent || '').trim().toLowerCase() === String(agent).trim().toLowerCase()); return r ? edgeRowView(r).es : null; },
   });
@@ -762,6 +763,10 @@ export function BmUsage() {
           {showSkipped && skNotes.map((s, i) => (
             <p key={i} style={{ margin: '6px 0 0', fontSize: 12, lineHeight: 1.6 }}><BoldText text={s} /></p>
           ))}
+          {/* v2.959 반증 의심 2: 수집 서버 모름 — 갈래(등록부 못 읽음 · 등록부에 없음 · 이름이 빈 등록)별 대수 */}
+          {showSkipped && !!rmUnknown && (
+            <p style={{ margin: '6px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--muted)' }}><BoldText text={rmUnknown} /></p>
+          )}
           {/* v2.959 엣지 수집 — 엣지별 대수 · 그 엣지의 보관분 상태 · 엣지 표로 이동 */}
           {showSkipped && !!edgeDel.length && (
             <div style={{ margin: '8px 0 0', minWidth: 0 }}>

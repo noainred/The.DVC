@@ -907,10 +907,20 @@ async function purposeWrite(req, res) {
     if (r.ok && wk.source === 'tag' && wk.clearPair && FT.fleetPurposeOf(wk.clearPair)) { const c = FT.setFleetPurpose(wk.clearPair, null, opts); pairCleared = !!c.ok; }
     logAudit({ user: req.user?.username, action: 'bm-usage.purpose', target: found.realKey, ip: req.ip || '', detail: JSON.stringify({ vcenterId: t(found.target.vcenterId), keyScope: wk.source, legacySplit: split, legacyRemains, pairCleared, apps: value?.apps ?? null, role: value?.role ?? null, clear: b.clear === true, ok: r.ok }).slice(0, 300) });
     if (r.ok && legacyRemains) {
-      return res.json({ ...r, keyScope: wk.source, legacyRemains: true,
-        legacyNote: b.clear === true
-          ? '이 서버의 태그는 지웠지만, 법인 구분 없이 저장된 예전 태그가 남아 있어 그 값이 계속 보입니다 — 예전 태그는 다른 법인 서버에도 걸려 있을 수 있어 지우지 않았습니다(전체 범위 관리자가 엣지 · 단일 노드에서 정리).'
-          : '저장했습니다(이 서버 것만). 법인 구분 없이 저장된 예전 태그는 다른 법인 서버에도 걸려 있을 수 있어 그대로 두었습니다.' });
+      /*
+       * 반증 F3(v2.959): 예전 안내는 '전체 범위 관리자가 엣지 · 단일 노드에서 정리' 였지만 예전 태그는 **이 노드의 저장소**에 있어 엣지에서 정리할 수 없다.
+       *   정리는 이 노드에서 전체 범위 관리자가 저장할 때, 이 노드가 그 열쇠를 쓰는 서버를 다 알 때(판정기 complete — 엣지에 맡긴 서버 · 엣지 보관분이 없을 때)만 일어난다.
+       *   무엇이 막았는지(legacyWhy: scope = 범위 계정 · incomplete = 다 알지 못함)를 싣고 문구가 사실대로 말한다. 지우는 경로는 만들지 않았다 — 다 알지 못하는 동안에는
+       *   이 노드에 보이지 않는 서버(당겨 오지 않은 엣지 서버)가 같은 열쇠를 쓰는지 판정할 근거가 없다(다른 법인 값을 지울 수 있다).
+       */
+      const legacyWhy = isFullReadWriteScope(req.user, snap) ? 'incomplete' : 'scope';
+      const head = b.clear === true
+        ? '이 서버의 태그는 지웠지만, 법인 구분 없이 저장된 예전 태그가 남아 있어 그 값이 계속 보입니다 — '
+        : '저장했습니다(이 서버 것만). 법인 구분 없이 저장된 예전 태그는 그대로 두었습니다 — ';
+      const tail = legacyWhy === 'scope'
+        ? '예전 태그는 다른 법인 서버에도 걸려 있을 수 있어 범위가 지정된 계정은 지우지 않습니다. 이 노드에서 전체 범위 관리자가 저장하면 법인별로 나눠 정리됩니다(이 노드가 그 태그를 쓰는 서버를 다 알 때만 — 엣지에 맡긴 서버가 있으면 정리하지 않습니다).'
+        : '예전 태그는 이 노드의 저장소에 있고, 이 노드에 엣지가 맡은 서버(또는 엣지 보관분)가 있어 그 태그를 쓰는 서버를 다 알지 못하므로 지우지 않았습니다(보이지 않는 다른 법인 서버의 태그일 수 있습니다). 엣지에서는 정리할 수 없고, 엣지에 맡긴 서버가 있는 동안은 이 화면에서도 지울 수 없습니다.';
+      return res.json({ ...r, keyScope: wk.source, legacyRemains: true, legacyWhy, legacyNote: head + tail });
     }
     res.status(r.ok ? 200 : 400).json(r.ok ? { ...r, keyScope: wk.source } : r);
   } catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }

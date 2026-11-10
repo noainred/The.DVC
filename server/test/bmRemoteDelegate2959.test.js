@@ -51,7 +51,8 @@ test('① 원격 출처 · 이 노드 등록 없음 → 엣지 수집(등록부 
   assert.equal(r.targets.length, 0);
   assert.deepEqual([by.RMT001.reason, by.RMT001.agent, by.RMT001.vcenterId, by.RMT001.delegatedBy], ['edge-delegated', 'edge-pl', 'vcA', 'collector']);
   assert.deepEqual([by.RMT002.reason, by.RMT002.collectorIssue, by.RMT002.agent], ['remote-collector-unknown', 'not-found', undefined], '없는 id — 이름을 지어내지 않는다');
-  assert.deepEqual([by.RMT003.reason, by.RMT003.collectorIssue], ['remote-collector-unknown', 'not-found'], '이름 없는 수집 서버 — 엣지 표에 없는 이름을 대지 않는다');
+  // 반증 의심 2: 등록부에 있는데 이름이 빈 항목은 '삭제됨(not-found)' 이 아니라 'no-name'
+  assert.deepEqual([by.RMT003.reason, by.RMT003.collectorIssue], ['remote-collector-unknown', 'no-name'], '이름 없는 수집 서버 — 엣지 표에 없는 이름을 대지 않는다 · 사유는 사실대로');
   // 대소문자만 다른 id(등록부는 id 대소문자 중복을 합친다) · 귀속 없음 · includeUnassigned 꺼짐이어도 엣지 수집(중앙 설정과 무관)
   assert.deepEqual([by.RMT004.reason, by.RMT004.agent, by.RMT004.vcenterId], ['edge-delegated', 'edge-pl', '']);
   for (const rc of [null, NAMES([['c1', 'edge-pl']], false), { readable: true, names: {} }]) {
@@ -71,6 +72,8 @@ const REG = [
   { id: 'r-loc', host: 'https://10.1.0.10', username: 'u', password: 'p', serviceTag: 'LOC001', vcenterId: 'vcA' },
   { id: 'r-cen', host: 'https://10.1.0.11', username: 'u', password: 'p', serviceTag: 'RMT010', vcenterId: 'vcA' },   // 같은 서버를 중앙도 등록 — 중앙 수집 유지
   { id: 'r-nocred', host: 'https://10.1.0.12', username: '', password: '', serviceTag: 'RMT011', vcenterId: 'vcA' },
+  { id: 'r-esx3', host: 'https://10.1.0.33', username: 'u', password: 'p', serviceTag: 'ESX003', vcenterId: 'vcA' },   // 가상화 호스트 — 중앙도 받침 iDRAC 을 등록(중앙 수집 유지)
+  { id: 'r-esx5', host: 'https://10.1.0.35', username: 'u', password: 'p', serviceTag: 'ESX005', vcenterId: 'vcA' },
 ];
 const OSREG = [
   { id: 'o1', name: 'os-only-01', host: '10.2.0.1', vcenterId: 'vcA', username: 'u', password: 'p' },             // OS 계정만 있음 — 중앙 수집 유지
@@ -93,43 +96,72 @@ const BM = [
   { serverId: 'edge:edge-x:EDG001', name: 'edge-x-01', serviceTag: 'EDG001', source: 'edge', remoteAgent: 'edge-x', vcenterId: 'vcB' },
   { serverId: 'ome:1:OME001', name: 'ome-01', serviceTag: 'OME001', source: 'ome', vcenterId: 'vcA' },
 ];
+// 반증 F4: 가상화 호스트(ESXi) — 받침 iDRAC 이 엣지 원격 전력뿐(idracCollectorId) · 중앙도 등록 · 모르는 수집 서버 · 중앙 로컬 받침
+const VIRT = [
+  { name: 'esx-02', vcenterId: 'vcA', vcenter: 'A', serviceTag: 'ESX002', idracServerId: 'remote:c1:32', idracCollectorId: 'c1', fleetId: 'esx002' },
+  { name: 'esx-03', vcenterId: 'vcA', vcenter: 'A', serviceTag: 'ESX003', idracServerId: 'remote:c1:33', idracCollectorId: 'c1', fleetId: 'esx003' },
+  { name: 'esx-04', vcenterId: 'vcB', vcenter: 'B', serviceTag: '', idracServerId: 'remote:c9:34', idracCollectorId: 'c9', fleetId: 'esx-04' },
+  { name: 'esx-05', vcenterId: 'vcA', vcenter: 'A', serviceTag: 'ESX005', idracServerId: 'r-esx5', fleetId: 'esx005' },
+];
+// 기준판 = collectorId · idracCollectorId 를 지운 같은 입력(새 판정은 그 둘이 있을 때만 갈린다 — 머리말).
 const strip = (list) => list.map(({ collectorId: _c, ...r }) => r);
-const keysOf = (r) => new Set(r.targets.map((x) => x.key));
+const stripV = (list) => list.map(({ idracCollectorId: _c, ...r }) => r);
+const keysOf = (r) => new Set(r.targets.map((x) => `${x.role}|${x.key}`));
 const SETTINGS = [];
 for (const corps of [{}, { vcA: true }, { vcA: true, vcB: true }]) {
   for (const includeUnassigned of [false, true]) {
-    for (const [idracTelemetry, osSsh] of [[true, true], [true, false], [false, true], [false, false]]) SETTINGS.push({ corps, includeUnassigned, idracTelemetry, osSsh });
+    for (const [idracTelemetry, osSsh] of [[true, true], [true, false], [false, true], [false, false]]) {
+      for (const includeVirtualization of [false, true]) SETTINGS.push({ corps, includeUnassigned, idracTelemetry, osSsh, includeVirtualization });
+    }
   }
 }
 const RCS = [RC, NAMES([], false), null, NAMES([['c1', 'edge-pl']])];
+// 반증 F1: 등록부 상태 — 정상 · iDRAC 등록부 못 읽음(빈 목록 + 표지) · OS 등록부 못 읽음 · 둘 다(poller 가 넘기는 모양 그대로)
+const REG_STATES = [
+  { name: '정상', registry: REG, bmServers: OSREG, registryUnread: null },
+  { name: 'iDRAC 못 읽음', registry: [], bmServers: OSREG, registryUnread: { idrac: true, os: false } },
+  { name: 'OS 못 읽음', registry: REG, bmServers: [], registryUnread: { idrac: false, os: true } },
+  { name: '둘 다 못 읽음', registry: [], bmServers: [], registryUnread: { idrac: true, os: true } },
+];
+const BM_MOVABLE = ['remote:c1:1', 'remote:c2:7', 'remote:c1:8', 'remote:c1:9', 'remote:c1:10'];
+const VIRT_MOVABLE = ['remote:c1:32', 'remote:c9:34'];
 
-test('② 불변식 — 기준판 대상 집합 ⊆ 새 대상 집합(중앙 등록 있음 · OS 계정만 · 모르는 수집 서버 · 등록부 손상 · 설정 24조합 × 색인 4종 = 96)', () => {
-  let delegatedSeen = 0; let unknownSeen = 0; let combos = 0;
-  for (const settings of SETTINGS) {
-    for (const remoteCollectors of RCS) {
-      combos += 1;
-      const input = { bareMetal: BM, registry: REG, bmServers: OSREG, vcenters: VCS, settings, isEdge: false, agentName: '' };
-      const base = resolveTargets({ ...input, bareMetal: strip(BM) });
-      const now = resolveTargets({ ...input, remoteCollectors });
-      const nk = keysOf(now);
-      for (const k of keysOf(base)) assert.ok(nk.has(k), `기준판 대상 ${k} 가 빠졌다 — ${JSON.stringify(settings)}`);
-      // 이 판정은 대상을 늘리지도 않는다(대상에는 이 노드 등록이 필요하다) — 대상 목록이 그대로다.
-      assert.deepEqual(now.targets.map((x) => x.key), base.targets.map((x) => x.key));
-      // 바뀐 행은 '이 노드 등록이 없는 원격 출처 서버' 뿐이고, 그 밖의 제외 사유는 한 글자도 같다.
-      const moved = new Set(now.skipped.filter((s) => s.delegatedBy === 'collector' || s.reason === 'remote-collector-unknown').map((s) => s.serverId));
-      for (const id of moved) assert.ok(['remote:c1:1', 'remote:c2:7', 'remote:c1:8', 'remote:c1:9', 'remote:c1:10'].includes(id), `등록이 있는 서버(${id})를 위임으로 옮기면 안 된다`);
-      assert.deepEqual(now.skipped.filter((s) => !moved.has(s.serverId)), base.skipped.filter((s) => !moved.has(s.serverId)));
-      for (const s of now.skipped.filter((x) => moved.has(x.serverId))) {
-        assert.ok(s.reason === 'edge-delegated' ? s.agent === 'edge-pl' : (s.reason === 'remote-collector-unknown' && !s.agent), JSON.stringify(s));
-        if (s.reason === 'edge-delegated') delegatedSeen += 1; else unknownSeen += 1;
+test('② 불변식 — 기준판 대상 집합 ⊆ 새 대상 집합(베어메탈 · 가상화 호스트 · 등록부 4상태 · 설정 48조합 × 색인 4종 = 768)', () => {
+  let delegatedSeen = 0; let unknownSeen = 0; let virtSeen = 0; let combos = 0;
+  for (const rs of REG_STATES) {
+    for (const settings of SETTINGS) {
+      for (const remoteCollectors of RCS) {
+        combos += 1;
+        const input = { bareMetal: BM, virtHosts: VIRT, registry: rs.registry, bmServers: rs.bmServers, vcenters: VCS, settings, isEdge: false, agentName: '', registryUnread: rs.registryUnread };
+        const base = resolveTargets({ ...input, bareMetal: strip(BM), virtHosts: stripV(VIRT) });
+        const now = resolveTargets({ ...input, remoteCollectors });
+        const nk = keysOf(now);
+        for (const k of keysOf(base)) assert.ok(nk.has(k), `기준판 대상 ${k} 가 빠졌다 — ${rs.name} ${JSON.stringify(settings)}`);
+        // 이 판정은 대상을 늘리지도 않는다(대상에는 이 노드 등록이 필요하다) — 대상 목록이 그대로다.
+        assert.deepEqual(now.targets.map((x) => `${x.role}|${x.key}`), base.targets.map((x) => `${x.role}|${x.key}`));
+        // 바뀐 행은 '이 노드 등록이 없는 원격 출처 서버' 뿐이고, 그 밖의 제외 사유는 한 글자도 같다.
+        const moved = new Set(now.skipped.filter((s) => s.delegatedBy === 'collector' || s.reason === 'remote-collector-unknown').map((s) => s.serverId));
+        for (const id of moved) {
+          const virt = VIRT_MOVABLE.includes(id);
+          assert.ok(virt || BM_MOVABLE.includes(id), `등록이 있는 서버(${id})를 위임으로 옮기면 안 된다 — ${rs.name}`);
+          // 반증 F1: 등록부를 못 읽은 동안은 '등록 없음' 을 모른다 — 베어메탈은 iDRAC · OS 어느 쪽이든, 가상화 호스트는 iDRAC 을 못 읽으면 옮기지 않는다
+          if (!virt) assert.ok(!rs.registryUnread, `등록부 못 읽음(${rs.name})인데 베어메탈 ${id} 를 엣지 위임으로 단정했다`);
+          else assert.ok(!rs.registryUnread?.idrac, `iDRAC 등록부 못 읽음인데 가상화 호스트 ${id} 를 엣지 위임으로 단정했다`);
+        }
+        assert.deepEqual(now.skipped.filter((s) => !moved.has(s.serverId)), base.skipped.filter((s) => !moved.has(s.serverId)));
+        for (const s of now.skipped.filter((x) => moved.has(x.serverId))) {
+          assert.ok(s.reason === 'edge-delegated' ? s.agent === 'edge-pl' : (s.reason === 'remote-collector-unknown' && !s.agent), JSON.stringify(s));
+          if (s.role === 'virt') virtSeen += 1;
+          if (s.reason === 'edge-delegated') delegatedSeen += 1; else unknownSeen += 1;
+        }
+        // 등록이 있는 원격 서버의 사유는 예전 그대로(no-idrac-cred · os-foreign · os-ambiguous 등 — 이 노드 설정의 문제)
+        const cred = now.skipped.find((s) => s.serverId === 'remote:c1:3');
+        if (cred) assert.notEqual(cred.reason, 'edge-delegated');
       }
-      // 등록이 있는 원격 서버의 사유는 예전 그대로(no-idrac-cred · os-foreign · os-ambiguous 등 — 이 노드 설정의 문제)
-      const cred = now.skipped.find((s) => s.serverId === 'remote:c1:3');
-      if (cred) assert.notEqual(cred.reason, 'edge-delegated');
     }
   }
-  assert.equal(combos, 96);
-  assert.ok(delegatedSeen > 0 && unknownSeen > 0, '두 갈래가 실제로 돌았다');
+  assert.equal(combos, 768);
+  assert.ok(delegatedSeen > 0 && unknownSeen > 0 && virtSeen > 0, '세 갈래가 실제로 돌았다');
 });
 
 test('② 기준판 대상의 예: 중앙도 등록한 원격 서버 · OS 계정만 있는 원격 서버는 계속 중앙 대상', () => {
@@ -168,35 +200,48 @@ async function app() {
     const srv = await new Promise((r) => { const s = a.listen(0, '127.0.0.1', () => r(s)); });
     _srv = { srv, base: `http://127.0.0.1:${srv.address().port}/api` };
   }
-  return async (u, p) => { const r = await fetch(`${_srv.base}${p}`, { headers: { 'x-u': u } }); return { status: r.status, body: await r.json() }; };
+  return async (u, p, method = 'GET', body = null) => {
+    const r = await fetch(`${_srv.base}${p}`, { method, headers: { 'x-u': u, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    return { status: r.status, body: await r.json() };
+  };
 }
 test.after(() => { _srv?.srv.close(); });
 
 let _gen = 0;
-async function scene({ collectors = 'ok' } = {}) {
+const COL_OK = [{ id: 'c1', name: 'edge-pl', url: 'https://10.9.0.1:3443', enabled: true }];
+/**
+ * 실제 경로 장면. collectors: 'ok' | 'corrupt' | 'none' | 배열 · idrac: 등록 배열 | 'corrupt'(손상 — 못 읽음) · os: 등록 배열(bmstor 등록부는 프로세스 첫 읽기를 캐시한다 — OS 손상은 별도 시험 파일 bmRemoteDelegate2959os) · fleetAgent/collectorId: 엣지 이름 · 수집 서버 id ·
+ * extraRemote: 원격 전력 항목 더 · hosts: 스냅샷 ESXi 호스트 · envelope: { agent, snap } | null(엣지 보관분 없음) · settings: bm-usage 설정 덮어쓰기.
+ */
+async function scene({ collectors = 'ok', idrac = [], os = [], fleetAgent = 'edge-pl', collectorId = 'c1', extraRemote = [], hosts = [], envelope, settings = {}, fleet = true } = {}) {
   const { store } = await import('../src/store.js');
-  store.snapshot = { generatedAt: `g-${++_gen}`, vcenters: VCS, hosts: [] };
-  for (const f of fs.readdirSync(DIR)) if (f.startsWith('collectors.json')) fs.rmSync(path.join(DIR, f), { force: true });
-  if (collectors === 'ok') fs.writeFileSync(path.join(DIR, 'collectors.json'), JSON.stringify({ collectors: [{ id: 'c1', name: 'edge-pl', url: 'https://10.9.0.1:3443', enabled: true }] }));
+  store.snapshot = { generatedAt: `g-${++_gen}`, vcenters: VCS, hosts };
+  for (const f of fs.readdirSync(DIR)) if (/^(collectors|idrac|bm-storage)\.json/.test(f)) fs.rmSync(path.join(DIR, f), { force: true });
+  if (collectors === 'ok') fs.writeFileSync(path.join(DIR, 'collectors.json'), JSON.stringify({ collectors: COL_OK }));
+  else if (Array.isArray(collectors)) fs.writeFileSync(path.join(DIR, 'collectors.json'), JSON.stringify({ collectors }));
   else if (collectors === 'corrupt') fs.writeFileSync(path.join(DIR, 'collectors.json'), '{"collectors": [ {"id": "c1", "name": "edge-pl"');   // 손상 — 못 읽음
-  fs.writeFileSync(path.join(DIR, 'idrac.json'), JSON.stringify({ servers: [] }));
-  fs.writeFileSync(path.join(DIR, 'bm-storage.json'), JSON.stringify({ servers: [] }));
+  fs.writeFileSync(path.join(DIR, 'idrac.json'), idrac === 'corrupt' ? '{"servers": [ {"id": "r-cen"' : JSON.stringify({ servers: idrac }));
+  fs.writeFileSync(path.join(DIR, 'bm-storage.json'), JSON.stringify({ servers: os }));
   fs.writeFileSync(path.join(DIR, 'fleet-tags.json'), JSON.stringify({ tags: { rmt001: 'baremetal', rmt002: 'baremetal' } }));
-  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true }, osSsh: true, idracTelemetry: true, includeUnassigned: false }));
+  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true }, osSsh: true, idracTelemetry: true, includeUnassigned: false, ...settings }));
   (await import('../src/bmusage/settings.js'))._resetForTest();
   const { setEdgeFleet, resetEdgeFleet } = await import('../src/central/fleet.js');
   const { setRemoteHost, clearCollectorHosts } = await import('../src/collector/state.js');
-  resetEdgeFleet(); clearCollectorHosts('c1');
+  resetEdgeFleet(); for (const c of ['c1', 'gm1', 'c2']) clearCollectorHosts(c);
   // 사용자 환경 재현: 엣지 edge-pl 이 스캔해 자기 등록부에 넣은 두 서버를 fleet 보고로 올리고, 그중 RMT001 은 그 엣지가 iDRAC 전력을 폴링해 원격 전력으로도 올라온다.
-  setEdgeFleet('edge-pl', [
-    { serviceTag: 'RMT001', name: 'bm-oracle-01', vcenterId: 'vcA' },
-    { serviceTag: 'RMT002', name: 'bm-nopower', vcenterId: 'vcA' },
-  ], null);
-  setRemoteHost('10.0.0.5', { collectorId: 'c1', serverId: 7, serverName: 'bm-oracle-01', serviceTag: 'RMT001', watts: 310, ts: NOW, vcenterId: 'vcA' });
+  if (fleet) {
+    setEdgeFleet(fleetAgent, [
+      { serviceTag: 'RMT001', name: 'bm-oracle-01', vcenterId: 'vcA' },
+      { serviceTag: 'RMT002', name: 'bm-nopower', vcenterId: 'vcA' },
+    ], null);
+  }
+  setRemoteHost('10.0.0.5', { collectorId, serverId: 7, serverName: 'bm-oracle-01', serviceTag: 'RMT001', watts: 310, ts: NOW, vcenterId: 'vcA' });
+  for (const r of extraRemote) { const { host, ...rest } = r; setRemoteHost(host, { collectorId, watts: 300, ts: NOW, vcenterId: 'vcA', ...rest }); }
   const E = await import('../src/central/bmUsageEdgePull.js');
   E._resetForTest();
   // 그 엣지 보관분: 엣지에서 꺼짐(사용자 화면의 '엣지에서 꺼짐 → 중앙에서 켜기')
-  E.putEdgeBmUsage('edge-pl', { ok: true, snap: { node: { agent: 'edge-pl', role: 'edge' }, enabled: false, targets: [{ key: 'RMT001', name: 'bm-oracle-01', vcenterId: 'vcA' }] } });
+  const env = envelope === undefined ? { agent: 'edge-pl', snap: { node: { agent: 'edge-pl', role: 'edge' }, enabled: false, targets: [{ key: 'RMT001', name: 'bm-oracle-01', vcenterId: 'vcA' }] } } : envelope;
+  if (env) E.putEdgeBmUsage(env.agent, { ok: true, snap: env.snap });
   const poller = await import('../src/bmusage/poller.js');
   poller._setFleetForTest(null);
   return poller;
@@ -301,4 +346,135 @@ test('⑤ 소비처 — 공통 태그 판정기(complete) · 누락 점검(수�
   const m = missingCheck({ skipped: [{ key: 'B', name: 'b', serviceTag: 'B', vcenterId: 'vcA', reason: 'remote-collector-unknown', collectorIssue: 'unread' }] });
   assert.deepEqual([m.rows[0].bucket, m.rows[0].reason, m.rows[0].via], ['unknown', 'remote-collector-unknown', 'edge'], '못 읽음 ≠ 없음');
   assert.equal(m.counts.none, 0);
+});
+
+// ── 반증 2차(v2.959) — F1 · F2 · F3 · F4 · 의심 1 · 의심 2 ─────────────────────
+const REG_CEN = [{ id: 'r-cen', name: 'cen-10', host: 'https://10.1.0.11', username: 'root', password: 'pw', serviceTag: 'RMT010', vcenterId: 'vcA' }];
+const RMT010 = { host: '10.5.0.10', serverId: 10, serverName: 'rm-cenreg', serviceTag: 'RMT010' };
+
+test('반증 F1 — iDRAC 등록부를 못 읽으면 원격 서버를 엣지 수집으로 단정하지 않는다(실제 currentTargets · 라우트 · 누락 점검)', async () => {
+  // 정상: 중앙이 RMT010 을 iDRAC 등록으로 수집 · RMT001(등록 없음)은 엣지 수집
+  let tg = await (await scene({ idrac: REG_CEN, extraRemote: [RMT010] })).currentTargets();
+  assert.deepEqual(tg.targets.map((x) => [x.key, x.paths]), [['RMT010', ['idrac']]]);
+  assert.equal(tg.skipped.find((s) => s.serviceTag === 'RMT001').delegatedBy, 'collector');
+  // 손상: 등록부를 못 읽음 — 예전(기준판) 사유 그대로 · 엣지 수집 0(원격 경로) · 경고가 그 이유를 말한다
+  const poller = await scene({ idrac: 'corrupt', extraRemote: [RMT010] });
+  tg = await poller.currentTargets();
+  const by = Object.fromEntries(tg.skipped.map((s) => [s.serviceTag, s]));
+  assert.equal(tg.targets.length, 0);
+  assert.equal(by.RMT010.reason, 'no-idrac', '예전: no-idrac(중앙이 수집하던 서버) · 1차 판: edge-delegated(단정)');
+  assert.equal(by.RMT001.reason, 'no-idrac', '등록이 없는지도 모른다 — 엣지 수집으로 단정하지 않는다');
+  assert.ok(!tg.skipped.some((s) => s.delegatedBy === 'collector' || s.reason === 'remote-collector-unknown'));
+  assert.equal(by.RMT002.reason, 'edge-delegated', 'fleet 보고 경로(인증된 엣지 이름)는 등록부와 무관 — 그대로');
+  const se = tg.sourceErrors.find((e) => e.source === 'idrac-registry');
+  assert.match(se.error, /no-idrac 로 보일 수 있습니다/);
+  assert.match(se.error, /‘엣지 수집’ 으로 가르지 않습니다/, '경고가 왜 엣지 수집이 아닌지 말한다');
+  // 라우트 · 누락 점검 · 공통 태그 판정기도 그 단정을 따르지 않는다(같은 장면)
+  const call = await app();
+  const a = await call('adm', '/tools/bm-usage');
+  assert.ok(!a.body.skipped.some((s) => s.delegatedBy === 'collector'));
+  assert.equal(a.body.skippedCounts['edge-delegated'], 1, 'fleet 경로 1대만');
+  const m = await call('adm', '/tools/bm-usage/onboard/missing');
+  assert.deepEqual(['RMT001', 'RMT010'].map((k) => m.body.rows.find((r) => r.serviceTag === k)?.via), ['local', 'local']);
+});
+
+test('반증 F2 — 같은 엣지는 이름 하나(수집 서버 등록부 name)로 · 등록부에 없는 이름 · 못 읽음은 받은 이름 그대로', async () => {
+  const CT = await import('../src/bmusage/targets.js');
+  const { remoteCollectorIndex } = await import('../src/insights/fleetInventory.js');
+  const idx = remoteCollectorIndex({ list: [{ id: 'gm1', name: 'Gdansk Main' }, { id: 'c2', name: 'edge-us' }, { id: 'c3', name: '' }, { id: 'x', name: 'gm1' }], error: null });
+  assert.equal(CT.canonicalAgentOf(idx, 'gm1'), 'Gdansk Main', 'id 별칭 → name');
+  assert.equal(CT.canonicalAgentOf(idx, ' GDANSK main '), 'Gdansk Main', 'name 별칭(대소문자 · 공백 무시)');
+  assert.equal(CT.canonicalAgentOf(idx, 'c3'), 'c3', '이름 빈 항목 — 받은 이름 그대로');
+  assert.equal(CT.canonicalAgentOf(idx, 'edge-zz'), 'edge-zz', '등록부에 없는 이름 — 그대로');
+  assert.equal(CT.canonicalAgentOf(remoteCollectorIndex({ list: [], error: { reason: 'x' } }), 'gm1'), 'gm1', '못 읽음 — 그대로');
+  assert.equal(CT.canonicalAgentOf(null, 'gm1'), 'gm1');
+  // 실제 경로: 자기등록 항목(id = 엣지 agent 'gm1')의 표시 이름을 관리자가 바꾼 꼴 — 예전에는 칩 두 개('Gdansk Main' 2대 · 'gm1' 1대 표에 없음)
+  const cols = [{ id: 'gm1', name: 'Gdansk Main', url: 'https://10.9.0.1:3443', enabled: true }];
+  await scene({ collectors: cols, fleetAgent: 'gm1', collectorId: 'gm1', envelope: { agent: 'Gdansk Main', snap: { node: { agent: 'gm1', role: 'edge' }, enabled: false, targets: [{ key: 'RMT001', name: 'bm-oracle-01', vcenterId: 'vcA' }] } } });
+  const call = await app();
+  const a = await call('adm', '/tools/bm-usage');
+  const del = a.body.skipped.filter((s) => s.reason === 'edge-delegated');
+  assert.deepEqual(del.map((s) => [s.serviceTag, s.agent]).sort(), [['RMT001', 'Gdansk Main'], ['RMT002', 'Gdansk Main']]);
+  const e = await call('adm', '/tools/bm-usage/edges');
+  assert.deepEqual(e.body.rows.map((r) => r.agent), ['Gdansk Main'], '엣지 표 · 중앙에서 켜기 · 당기기가 쓰는 이름과 같다');
+  const m = await call('adm', '/tools/bm-usage/onboard/missing');
+  assert.deepEqual(m.body.rows.filter((r) => r.via === 'edge').map((r) => r.agent), ['Gdansk Main', 'Gdansk Main']);
+});
+
+test('반증 F3 — 예전 용도 태그를 정리할 수 없는 중앙의 안내는 사실대로(엣지에서 정리 불가 · 지우지 않음) · 다 알 때는 그대로 정리', async () => {
+  const REGL = [{ id: 'r-loc', name: 'loc-01', host: 'https://10.1.0.10', username: 'root', password: 'pw', serviceTag: 'LOC001', vcenterId: 'vcA' }];
+  const FT = await import('../src/insights/fleetTags.js');
+  const roles = { by: 'legacy-user', knownRoles: ['web', 'db', 'general', 'batch', 'storage'], knownApps: [] };
+  const call = await app();
+  // 엣지가 맡은 원격 서버가 있는 중앙(엣지 보관분 없음 = 재시작 직후 꼴) — 판정기 complete 거짓
+  await scene({ idrac: REGL, fleet: false, envelope: null });
+  assert.equal(FT.setFleetPurpose('LOC001', { role: 'web' }, roles).ok, true);
+  const full = await call('adm', '/tools/bm-usage/purpose', 'PUT', { key: 'LOC001', vcenterId: 'vcA', clear: true });
+  assert.equal(full.status, 200, JSON.stringify(full.body));
+  assert.deepEqual([full.body.legacyRemains, full.body.legacyWhy], [true, 'incomplete']);
+  assert.match(full.body.legacyNote, /예전 태그가 남아/);
+  assert.match(full.body.legacyNote, /이 노드의 저장소/);
+  assert.match(full.body.legacyNote, /엣지에서는 정리할 수 없/);
+  assert.doesNotMatch(full.body.legacyNote, /엣지 · 단일 노드에서 정리/, '예전 안내(사실과 다름)');
+  assert.equal(FT.fleetPurposeOf('LOC001')?.role, 'web', '지우지 않는다(보이지 않는 다른 법인 서버의 값일 수 있다)');
+  const sc = await call('adma', '/tools/bm-usage/purpose', 'PUT', { key: 'LOC001', vcenterId: 'vcA', clear: true });
+  assert.deepEqual([sc.status, sc.body.legacyWhy], [200, 'scope']);
+  assert.match(sc.body.legacyNote, /범위가 지정된 계정은 지우지 않습니다/);
+  assert.equal(FT.fleetPurposeOf('LOC001')?.role, 'web');
+  // 엣지가 맡은 서버 · 엣지 보관분이 없는 노드(다 앎) — 전체 범위 지우기는 예전처럼 정리한다(안내 없음)
+  const { clearCollectorHosts } = await import('../src/collector/state.js');
+  clearCollectorHosts('c1');
+  const ok = await call('adm', '/tools/bm-usage/purpose', 'PUT', { key: 'LOC001', vcenterId: 'vcA', clear: true });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal(ok.body.legacyRemains, undefined);
+  assert.equal(FT.fleetPurposeOf('LOC001'), null, '다 알 때는 법인별로 나눠 옮기고 예전 행을 지운다(기존 동작)');
+  FT.setFleetPurpose('vcA|LOC001', null, {});
+});
+
+test('반증 F4 — 가상화 호스트(ESXi)도: 받침 iDRAC 이 엣지 원격 전력뿐이면 엣지 수집 · 중앙 등록이 있으면 그대로 · /insights/fleet 내부 필드 없음', async () => {
+  const hosts = [{ name: 'esx-02', vcenterId: 'vcA', serviceTag: 'ESX002', connectionState: 'connected' }, { name: 'esx-03', vcenterId: 'vcA', serviceTag: 'ESX003', connectionState: 'connected' }];
+  const extraRemote = [{ host: 'esx-02', serverId: 32, serverName: 'esx-02', serviceTag: 'ESX002' }, { host: 'esx-03', serverId: 33, serverName: 'esx-03', serviceTag: 'ESX003' }];
+  const reg3 = [{ id: 'r-esx3', name: 'esx-03-idrac', host: 'https://10.1.0.33', username: 'root', password: 'pw', serviceTag: 'ESX003', vcenterId: 'vcA' }];
+  const poller = await scene({ idrac: reg3, hosts, extraRemote, settings: { includeVirtualization: true } });
+  const { getFleetInventory } = await import('../src/insights/fleetInventory.js');
+  const { store } = await import('../src/store.js');
+  const inv = await getFleetInventory(store.snapshot);
+  const v2 = inv.virtualizationHosts.find((h) => h.name === 'esx-02');
+  assert.deepEqual([v2.idracServerId, v2.idracCollectorId], ['remote:c1:32', 'c1']);
+  const tg = await poller.currentTargets();
+  const sv = tg.skipped.find((s) => s.role === 'virt' && s.serviceTag === 'ESX002');
+  assert.deepEqual([sv.reason, sv.agent, sv.vcenterId, sv.delegatedBy], ['edge-delegated', 'edge-pl', 'vcA', 'collector'], '예전: virt no-idrac');
+  assert.deepEqual(tg.targets.filter((x) => x.role === 'virt').map((x) => [x.key, x.paths]), [['ESX003', ['idrac']]], '중앙이 등록한 받침은 중앙 대상 그대로');
+  // iDRAC 등록부를 못 읽으면 가상화 호스트도 단정하지 않는다(F1 과 같은 규칙)
+  const tgBad = await (await scene({ idrac: 'corrupt', hosts, extraRemote, settings: { includeVirtualization: true } })).currentTargets();
+  assert.equal(tgBad.skipped.find((s) => s.role === 'virt' && s.serviceTag === 'ESX002').reason, 'no-idrac');
+  await scene({ idrac: reg3, hosts, extraRemote, settings: { includeVirtualization: true } });
+  const call = await app();
+  const f = await call('adm', '/insights/fleet');
+  assert.ok(f.body.virtualizationHosts.length >= 2 && f.body.virtualizationHosts.every((h) => !('idracCollectorId' in h)), '내부 필드 미포함');
+});
+
+test('반증 의심 1(재현 — 고침) — 서비스태그 없는 원격 서버의 누락 점검은 엣지 봉투를 엣지 쪽 키로 찾는다 · 그 키가 주소면 비관리자에게 가린다', async () => {
+  const extraRemote = [{ host: '10.5.0.29', serverId: 'SRV-29', serverName: 'rm-notag', serviceTag: '' }, { host: '10.5.0.30', serverId: '10.5.0.30', serverName: 'rm-notag-ip', serviceTag: '' }];
+  const envelope = { agent: 'edge-pl', snap: { node: { agent: 'edge-pl', role: 'edge' }, enabled: true,
+    targets: [{ key: 'srv-29', name: 'rm-notag', vcenterId: 'vcA' }, { key: '10.5.0.30', name: 'rm-notag-ip', vcenterId: 'vcA' }],
+    perf: [{ key: 'srv-29', coverage: 'both' }, { key: '10.5.0.30', coverage: 'os' }] } };
+  const poller = await scene({ extraRemote, envelope });
+  const tg = await poller.currentTargets();
+  const s29 = tg.skipped.find((s) => s.serverId === 'remote:c1:SRV-29');
+  assert.deepEqual([s29.reason, s29.key, s29.edgeKey], ['edge-delegated', 'remote:c1:srv-29', 'srv-29'], '중앙 키와 엣지 키는 다르다 — 엣지 쪽 키를 싣는다');
+  assert.equal(tg.skipped.find((s) => s.serviceTag === 'RMT001').edgeKey, undefined, '서비스태그가 있으면 두 노드 키가 같다(싣지 않음)');
+  const call = await app();
+  const m = await call('adm', '/tools/bm-usage/onboard/missing');
+  const rowOf = (name) => m.body.rows.find((r) => r.name === name);
+  assert.deepEqual([rowOf('rm-notag').bucket, rowOf('rm-notag').reason], ['both', ''], '예전: unknown · edge-no-record');
+  assert.equal(rowOf('rm-notag-ip').bucket, 'os');
+  // 엣지 쪽 키가 주소면(IP 로 등록한 엣지 iDRAC) 비관리자 응답에서 가린다
+  const o = await call('opa', '/tools/bm-usage');
+  const ip = o.body.skipped.find((s) => s.name !== 'rm-notag' && String(s.serverId || '').length && s.delegatedBy === 'collector' && s.reason === 'edge-delegated' && s.edgeKey && s.edgeKey !== 'srv-29');
+  assert.ok(ip, JSON.stringify(o.body.skipped));
+  assert.notEqual(ip.edgeKey, '10.5.0.30', '주소 가림');
+  assert.equal(JSON.stringify(o.body.skipped).includes('10.5.0.30'), false);
+  const ad = await call('adm', '/tools/bm-usage');
+  assert.ok(ad.body.skipped.some((s) => s.edgeKey === '10.5.0.30'), '관리자 판본은 원문');
 });

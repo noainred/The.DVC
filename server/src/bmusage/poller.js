@@ -319,6 +319,9 @@ export function sourceErrorsView(list, { detail = false } = {}) {
   });
 }
 const IDRAC_REGISTRY_FILE = () => path.join(config.configDir, 'idrac.json');
+/** 반증 F1(v2.959): 등록부를 못 읽은 동안 원격 수집 서버(엣지)가 맡은 서버를 '엣지 수집' 으로 가르지 않는다는 사실(targets.js registryUnread) — 경고 문구에 붙인다. */
+const REMOTE_HELD_NOTE_TEXT = ' · 원격 수집 서버(엣지)가 맡은 서버도 이 동안은 ‘엣지 수집’ 으로 가르지 않습니다(이 노드에 등록이 있는지 모릅니다)';
+const remoteHeldNote = () => (config.agent?.centralUrl ? '' : REMOTE_HELD_NOTE_TEXT);   // 엣지 노드에는 원격 위임 판정이 없다
 
 /** 대상 해석 — 스냅샷·등록부를 읽어 온다(장비에 접속하지 않는다). */
 export async function currentTargets() {
@@ -365,7 +368,7 @@ export async function currentTargets() {
       if (!fs.existsSync(IDRAC_REGISTRY_FILE())) {
         // 방금 손상본으로 옮겨졌거나(existed) 재시작 전에 옮겨져 보존본만 남은 경우(corruptOnlyReason).
         const why = existed ? '손상본 보존' : corruptOnlyReason(IDRAC_REGISTRY_FILE());
-        if (why) sourceErrors.push({ source: 'idrac-registry', error: `iDRAC 등록부(idrac.json)를 읽지 못했습니다(${why}) — 대상 서버가 no-idrac 로 보일 수 있습니다` });
+        if (why) sourceErrors.push({ source: 'idrac-registry', error: `iDRAC 등록부(idrac.json)를 읽지 못했습니다(${why}) — 대상 서버가 no-idrac 로 보일 수 있습니다${remoteHeldNote()}` });
       }
       return list;
     } catch (e) { sourceErrors.push({ source: 'idrac-registry', error: safeLoadText(e, 200) || 'unknown' }); return []; } // v2.744(최종 검토 FB): 따옴표 든 원문은 요약
@@ -376,7 +379,7 @@ export async function currentTargets() {
       const list = withResolvedAuth(listBmServersRaw());
       const le = typeof bmRegistryLoadError === 'function' ? bmRegistryLoadError() : null;
       // v2.744(최종 검토 FB — RD-R1·RG2744-03): 원문(le.reason — JSON.parse 메시지의 파일 조각)이 아니라 요약(registrySourceError).
-      if (le) sourceErrors.push(registrySourceError('os-registry', (why) => `OS 계정 등록부를 읽지 못했습니다 — 대상 서버가 no-os-cred 로 보일 수 있습니다(${why})`, le));
+      if (le) sourceErrors.push(registrySourceError('os-registry', (why) => `OS 계정 등록부를 읽지 못했습니다 — 대상 서버가 no-os-cred 로 보일 수 있습니다(${why})${remoteHeldNote()}`, le));
       return list;
     } catch (e) { sourceErrors.push({ source: 'os-registry', error: safeLoadText(e, 200) || 'unknown' }); return []; }
   })();
@@ -398,6 +401,8 @@ export async function currentTargets() {
     // v2.959: 원격 수집 서버 id → 등록부 이름(getFleetInventory 가 유령 키 판정과 같은 한 번의 읽기로 만든 열거 안 되는 속성 — 여기서 등록부를 다시 읽지 않는다).
     //   없으면(분류 실패 · 시험 이음매) null = '못 읽음' — 원격 출처 서버는 이름을 추측하지 않고 remote-collector-unknown.
     remoteCollectors: fleet.remoteCollectors || null,
+    // 반증 F1: 이 노드의 iDRAC · OS 등록부를 못 읽은 동안은 '등록 없음' 을 알 수 없다 — 원격 위임('엣지 수집')을 단정하지 않는다(위 sourceErrors 와 같은 판정).
+    registryUnread: { idrac: sourceErrors.some((e) => e.source === 'idrac-registry'), os: sourceErrors.some((e) => e.source === 'os-registry') },
   };
   let resolved = resolveTargets({ ...resolveInput, settings: s });
   if (demoMod) {
