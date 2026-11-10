@@ -84,7 +84,8 @@ export async function runBmstorWorkerOnce() {
       try { results = await collectMany(Array.isArray(job.servers) ? job.servers : []); }
       catch (e) { results = (job.servers || []).map((s) => ({ id: s.id, ok: false, mounts: [], error: e.message })); }
       // 결과에서 자격증명이 나가지 않게 용량 필드만 회신(collectMany 결과가 이미 그 형태지만 명시 필터).
-      const safe = results.map((x) => ({ id: x.id, ok: x.ok, mounts: x.mounts, missing: x.missing, error: x.error }));
+      // v2.915: 디스크 I/O 표본(io · ioError)도 올린다 — 수치뿐이다. 중앙은 sanitizeBmResult 로 아는 필드만 받는다(엣지 export 필드 = 중앙 화이트리스트).
+      const safe = results.map((x) => ({ id: x.id, ok: x.ok, mounts: x.mounts, missing: x.missing, error: x.error, io: x.io ?? null, ioError: x.ioError ?? null }));
       // 회신 실패 시 중앙 reap 이 재인출시킨다(claim→ack 설계 그대로) — 그래도 실패 사실은 상태·콘솔에 남긴다(v2.591 PR-5).
       const jobErr = await postResult(`${config.agent.centralUrl}/api/central/bmstor-result`, JSON.stringify({ reqId: job.reqId, results: safe }), 30_000);
       postErr = jobErr || postErr;

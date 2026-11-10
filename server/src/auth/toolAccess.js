@@ -94,6 +94,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   rma: 'rma',
   sanswitch: 'san-switch',
   'san-flow': 'san-flow',            // v2.935(C-②) SAN 플로우 모니터(SanFlowTool.jsx 전용 — 세그먼트 = 키)
+  'san-storage': 'san-storage',      // v2.948 SAN 스토리지 성능(SanStorageTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/san-storage-perf)
   'secret-scan': 'secret-scan',
   'serial-lookup': 'serial-lookup',
   snapshots: 'snapshots',

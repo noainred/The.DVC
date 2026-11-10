@@ -19,7 +19,7 @@ import { currentTargets, bmUsageStatus } from '../../bmusage/poller.js';
 import { memoJson, scopeKey } from './shared.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { config } from '../../config.js';
-import { resolvePerfTarget, bmAddressHosts, maskBmList, applyScope } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, perfVcOf, failParts, bmAddressHosts, maskBmList, applyScope } from './bmUsage.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -29,7 +29,6 @@ const fullScopeOnly = fullScopeOnlyWith('알림 규칙 시험 실행은 이 노�
 const t = (v) => strOf(v, 4096).trim();
 const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
 const scrubIp = (v) => (typeof v === 'string' ? v.replace(IPV4_RE, (ip) => maskedIdToken(ip)) : v);
-const NOT_FOUND = Object.freeze({ __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' });
 
 export function depsOf(deps = {}) {
   return {
@@ -50,8 +49,10 @@ async function resolve(req, snap, D) {
   const isAdmin = isAdminReq(req);
   const key = t(req.params.key);
   if (!key) return { err: { __status: 400, ok: false, reason: 'key 가 필요합니다.' } };
-  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
-  if (!found || found.denied) return { err: NOT_FOUND };
+  // 다음 점검 ①: (법인, 키) 쌍 — 화면이 행의 vcenterId 를 함께 보낸다(질의 · 본문). 같은 키가 범위 안 여러 법인이면 400 ambiguous-key.
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId: perfVcOf(req) });
+  const bad = perfTargetFail(found);
+  if (bad) return { err: bad };
   return { found, key, isAdmin, allowed };
 }
 /** 세션 · 표본의 비관리자 가림 — 실행자 · 사유 IPv4. */
@@ -95,7 +96,7 @@ export async function bmFocusStart(req, deps = {}) {
   const reason = S.cleanReason(req.body?.reason);
   if (!reason) return { status: 400, body: { ok: false, code: 'bad-reason', reason: '사유를 2자 이상 적어야 합니다(감사 기록에 남습니다).' } };
   const r = await resolve(req, snap, D);
-  if (r.err) return { status: r.err.__status, body: { ok: false, code: r.err.__status === 404 ? 'not-found' : 'bad-request', reason: r.err.reason } };
+  if (r.err) return r.err.code ? failParts(r.err) : { status: r.err.__status, body: { ok: false, code: 'bad-request', reason: r.err.reason } };
   const { found, key, isAdmin } = r;
   // ⚠ 쓰기 범위는 조건 없이(조회 무제한 + writeVcenters 계정 — server/CLAUDE.md v2.733). 조회 밖은 위에서 404.
   if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return { status: 403, body: { ok: false, code: 'forbidden', error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용) — 집중 모니터링은 SSH · Redfish 를 분마다 엽니다.' } };
@@ -125,7 +126,7 @@ export async function bmFocusStop(req, deps = {}) {
   const D = depsOf(deps);
   const snap = store.get();
   const r = await resolve(req, snap, D);
-  if (r.err) return { status: r.err.__status, body: { ok: false, code: 'not-found', reason: r.err.reason } };
+  if (r.err) return r.err.code ? failParts(r.err) : { status: r.err.__status, body: { ok: false, code: 'bad-request', reason: r.err.reason } };
   const { found, key, isAdmin } = r;
   if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return { status: 403, body: { ok: false, code: 'forbidden', error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용).' } };
   const id = t(req.params.id).slice(0, 40);
@@ -214,6 +215,7 @@ export async function bmRulesRead(req, snap, deps = {}) {
   const loadError = R.perfRulesLoadError();
   return {
     ok: true, rules: scopedRules, defaults: R.DEFAULTS, ruleDefaults: R.RULE_DEFAULTS, limits: R.LIMITS, ruleIds: R.RULE_IDS, conds: R.RULE_CONDS, channels: R.CHANNELS, baselineMetrics: R.BASELINE_METRICS,
+    autoFocusOff: R.AUTOFOCUS_OFF,   // 자동 집중을 걸지 않는 규칙(서버 정규화와 같은 목록 — 화면 ‘해당 없음’)
     ...(loadError ? { loadError: { at: loadError.at, reason: isAdmin ? loadError.reason : '설정 파일을 읽지 못했습니다' } } : {}),
     status: { tracked: st.tracked, day: st.day, counts: allowed ? Object.fromEntries(Object.entries(st.counts || {}).filter(([vc]) => allowed.has(vc))) : st.counts, ...(st.loadError ? { stateError: st.loadError.reason } : {}),
       slots: slotStatus(), focusActive: F.focusActiveCount(), focusQueued: F.focusQueuedCount(), last: bmUsageStatus().last?.perfAlerts || null },
@@ -257,8 +259,19 @@ export async function bmRulesDryRun(req, deps = {}) {
     const detail = parseJsonCol(r.detail_json);
     return { key: tgt.key, name: tgt.name || tgt.key, vcenterId: tgt.vcenterId || '', entry: buildPerfEntry({ row: r, hw: null, th: s.perf, intervalMs: s.intervalMs, full: false }), health: detail?.health || null, dev: bands ? B.deviationsFor(bands, tgt.key, r) : null, profile: null };
   });
+  const servers = items.length;
+  // 다음 점검 ②: 전력 · 온도 규칙도 같은 입력(이 노드 원천 · 이 노드 대상 — 폴러와 같은 powerAlertItems)으로 대 본다(켠 것이 있을 때만).
+  let powerError = null; let powerItems = null;
+  const PA = await import('../../bmusage/powerAlerts.js');
+  if (Object.keys(rules.rules || {}).some((id) => PA.isPowerRule(id))) {
+    try {
+      const px = await PA.powerAlertItems({ targets: tg.targets || [], rules, ...(deps.powerSources || deps.judgeCtx ? { deps: { ...(deps.powerSources ? { sources: deps.powerSources } : {}), ...(deps.judgeCtx ? { judgeCtx: deps.judgeCtx } : {}) } } : {}) });
+      powerItems = PA.judgedCount(px); for (const x of px) items.push(x);
+    } catch (e) { powerError = String(e?.message || e).slice(0, 200); }
+  }
   const out = await A.runPerfAlerts(items, { rules, dryRun: true });
-  return { status: 200, body: { ...out, servers: items.length, note: '지금 값에 대 본 결과입니다 — 보내지 않았고 상태도 바꾸지 않았습니다(이 노드가 직접 수집하는 서버만 · 지속 주기는 1주기로 봅니다).' } };
+  // 반증 n2 F3: 전력 판정 입력 실패(powerError) · 전력 항목 수(powerItems) · 판정 보류 수(counts.unknown)를 화면이 0건과 갈라 그린다(BmPerfRulesPanel DryRunResult).
+  return { status: 200, body: { ...out, servers, ...(powerItems != null ? { powerItems } : {}), ...(powerError ? { powerError } : {}), note: '지금 값에 대 본 결과입니다 — 보내지 않았고 상태도 바꾸지 않았습니다(이 노드가 직접 수집하는 서버만 · 지속 주기는 1주기로 봅니다 · 전력 규칙은 같은 표본 보류 없이 지금 표본 하나로 봅니다).' } };
 }
 
 export function registerBmPerfOps(api) {

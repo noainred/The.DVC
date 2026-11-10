@@ -345,6 +345,16 @@ export async function currentTargets() {
   const { attributeBareMetalFromSnap } = await import('../idrac/corpAttribution.js');
   const attr = attributeBareMetalFromSnap(held.bareMetal, snap);
   const bareMetal = attr.bareMetal;
+  /*
+   * 다음 점검 ①(2차 · 사용자 결정): 분류가 같은 dk 라 넣지 않은 서버(bareMetalDupes)도 같은 순서(못 읽은 vCenter 거르기 → 귀속 채우기)를 거쳐
+   *   대상 해석에 넘긴다 — 겹침 목록(keyOverlaps)으로 보이고, 사용자가 ‘수집에 추가’ 를 고른 것만 별도 키로 대상이 된다.
+   *   결정 파일을 못 읽으면 결정을 하나도 적용하지 않는다(별도 키 수집도 멈춤 — 모르는 키로 적재하지 않는다) · 사유는 sourceErrors 로.
+   */
+  const wh = new Set(hostsUnread?.withheld || []);
+  const dupes0 = Array.isArray(fleet.bareMetalDupes) ? fleet.bareMetalDupes : [];
+  const dupes = attributeBareMetalFromSnap(wh.size ? dupes0.filter((d) => d && d.vcenterId && !wh.has(d.vcenterId)) : dupes0, snap).bareMetal || [];
+  const KD = await import('./keyDecisions.js');
+  const dec = KD.readKeyDecisions();
   const registry = (() => {
     // idrac/registry.js loadRegistry 는 파싱 실패 시 손상본을 옮기고(preserveCorrupt) 빈 목록을 준다 — 호출 전후 파일
     //   존재로 그 사실을 알아챈다(등록부 모듈을 건드리지 않고). 빈 목록이면 전 서버가 'no-idrac' 로 보이므로 밝혀야 한다.
@@ -370,6 +380,7 @@ export async function currentTargets() {
       return list;
     } catch (e) { sourceErrors.push({ source: 'os-registry', error: safeLoadText(e, 200) || 'unknown' }); return []; }
   })();
+  if (!dec.ok) sourceErrors.push({ source: 'key-decisions', error: `식별 키 겹침 결정 파일(bm-key-decisions.json)을 읽지 못했습니다 — 결정을 적용하지 않습니다(별도 키 수집 멈춤): ${dec.error?.reason || ''}`.slice(0, 300) });
   for (const se of sourceErrors) {
     if (_srcErrLog(`src:${se.source}`, se.error)) console.warn(`[bmusage] 대상 해석 입력 실패(${se.source}): ${se.error}`);
   }
@@ -383,6 +394,7 @@ export async function currentTargets() {
     agentName: config.agent?.name || '', isEdge,
     // ⚠ **캐시된** 인벤토리만 읽는다(장비 왕복 0) — 라이선스 등급 판정용(v2.554).
     inventoryOf: (id) => getInventory(id),
+    dupes, decisions: dec.map,   // 다음 점검 ①(2차) — 못 읽으면 readKeyDecisions 가 빈 맵(결정 미적용 · 사유는 위 sourceErrors)
   };
   let resolved = resolveTargets({ ...resolveInput, settings: s });
   if (demoMod) {
@@ -850,6 +862,7 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
 
 /** 폴러 한 틱 — 켜져 있으면 수집하고, **켜짐 여부와 무관하게** 보존 정리를 시도한다(위 주석). */
 export async function bmUsageTimerTick() {
+  const tickStart = Date.now();   // 3차 의심 ③: 이 틱이 시작된 뒤 판정이 있었으면(이 틱 · 끼어든 수동 수집) 틱의 실제 끝을 적는다
   // v2.922: 예전 표 → 시간 단위 파일 마이그레이션 — 기다리지 않는다(청크·양보·재개 — monthMigrate.js). DB 파일이 있을 때만.
   try { if (fs.existsSync(BMUSAGE_DB_FILE())) ensureMonthMigration(); } catch { /* 상태로 밝힌다 */ }
   try {
@@ -865,6 +878,8 @@ export async function bmUsageTimerTick() {
       } catch (e) { _lastRepair = { at: Date.now(), ok: false, error: String(e?.message || e).slice(0, 200) }; }
     }
     await pruneTick().catch(() => {});
+    // 2차 M1 ②: 이 틱이 실제로 끝난 시각(adaptiveTimer 가 다음 주기를 재는 기준과 같은 끝 — 아래 두 작업은 기다리지 않는다). 판정 뒤 꼬리는 ‘폴러가 돌지 않은 시간’ 이 아니다.
+    await notePerfEnd(tickStart);
     // 8a단계: 용량 소진 예측 — 하루 1회(01:10 뒤 첫 틱 · 진행 중이면 공유 · 시간 기준 양보). 기다리지 않는다(다음 주기를 막지 않게). DB 가 있을 때만.
     if (fs.existsSync(BMUSAGE_DB_FILE())) {
       try {
@@ -915,8 +930,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       const reason = `대상 분류(서버 인벤토리)에 실패해 이번 주기를 건너뛰었습니다 — ${sourceErrors.find((x) => x.source === 'classify')?.error || ''}`;
       _last = { at: Date.now(), ms: Date.now() - t0, servers: null, okCount: 0, failCount: 0, inserted: 0, error: reason, ...srcErr, trigger };
       await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'classify-failed' });
-      const na = await runNodeCollectAlert();
-      if (na && !na.skipped) _last.collectAlert = { fires: na.fires ?? 0, error: na.error || null };
+      const na = await runNodeCollectAlert({ cycleStartAt: t0 });
+      if (na && !na.skipped && !na.collectSkipped) _last.collectAlert = { fires: na.fires ?? 0, error: na.error || null };
       return { ok: false, reason, ...srcErr };
     }
     if (!targets.length) {
@@ -924,7 +939,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       dropStaleState(new Set());
       _last = { at: Date.now(), ms: Date.now() - t0, servers: 0, okCount: 0, failCount: 0, inserted: 0, counts, ...srcErr, trigger };
       await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'no-targets' });
-      await runNodeCollectAlert();
+      await runNodeCollectAlert({ cycleStartAt: t0 });
       return { ok: true, servers: 0, counts, reason: '대상 서버가 없습니다.', ...srcErr };
     }
     _listBudget = LIST_BUDGET_PER_RUN;   // ⚠ 주기 시작마다 리셋(위 상수 주석 참조)
@@ -1058,7 +1073,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     await recordCycleHealth({ results, t0, intervalMs, peakPlan });
     // v2.929(5단계): 리눅스 성능 알림 규칙(켠 규칙이 있을 때만 — 판정 입력은 이 노드가 이미 만든 값). 실패해도 수집은 실패가 아니다.
     let perfAlerts = null;
-    try { perfAlerts = rulesNow ? await runCyclePerfAlerts(results, { settings, rules: rulesNow, agent: agentName }) : null; }
+    try { perfAlerts = rulesNow ? await runCyclePerfAlerts(results, { settings, rules: rulesNow, agent: agentName, targets, cycleStartAt: t0 }) : null; }
     catch (e) { perfAlerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     // 8a단계: ‘창 끝 뒤 억제 0’ 점검 — 이번 주기에 적용한 억제(수집 건너뜀 · 알림 보류 · 자동 집중)를 파일 기준으로 다시 만든 판정과 대조(수집 건강 행).
     let maintAudit = null;
@@ -1093,22 +1108,29 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       logs: logRes || null,
       // 8b단계 프로세스 Top-N — 개수만(머리 · 전체 저장 · 프로세스 행 · 시간 집계 행).
       top: topRes ? { samples: topRes.samples ?? 0, full: topRes.full ?? 0, procRows: topRes.procRows ?? 0, hourlyRows: topRes.hourlyRows ?? 0, error: topRes.ok ? null : (topRes.errors || [])[0] || 'write-failed' } : null,
-      perfAlerts: perfAlerts && !perfAlerts.skipped ? { fires: perfAlerts.fires ?? 0, queued: perfAlerts.queued ?? 0, deferred: perfAlerts.deferred ?? 0, capped: perfAlerts.capped ?? 0, autoFocus: perfAlerts.autoFocus ?? 0, issues: perfAlerts.issues ?? 0, ...(perfAlerts.warmup ? { warmup: true } : {}), error: perfAlerts.error || null } : null,
+      // 반증 n2 F3: 판정 보류 수(못 읽음 · 부분 합 · 낡음 · 표본 부족 — 0건과 가른다) · 전력 판정 입력 실패(powerError) · 전력 판정 항목 수.
+      perfAlerts: perfAlerts && !perfAlerts.skipped ? { fires: perfAlerts.fires ?? 0, queued: perfAlerts.queued ?? 0, deferred: perfAlerts.deferred ?? 0, capped: perfAlerts.capped ?? 0, autoFocus: perfAlerts.autoFocus ?? 0, issues: perfAlerts.issues ?? 0, ...(perfAlerts.warmup ? { warmup: true } : {}),
+        held: perfAlerts.counts?.unknown ?? 0, ...(perfAlerts.counts?.released ? { released: perfAlerts.counts.released } : {}), ...(perfAlerts.powerError ? { powerError: perfAlerts.powerError } : {}), ...(perfAlerts.powerItems != null ? { powerItems: perfAlerts.powerItems } : {}), error: perfAlerts.error || null } : null,
     };
     return { ok: true, ...(_last) };
   } catch (e) {
     _last = { at: Date.now(), ms: Date.now() - t0, error: String(e?.message || e).slice(0, 300), trigger };
     await recordCycleHealth({ results: [], t0, intervalMs: loadBmUsageSettings().intervalMs, error: 'cycle-error' }).catch(() => {});
-    await runNodeCollectAlert();
+    await runNodeCollectAlert({ cycleStartAt: t0 });
     return { ok: false, reason: _last.error };
-  } finally { _running = false; }
+  } finally {
+    _running = false;
+    // 2차 M1 ②: 주기 끝(판정이 있었던 주기만 — perfAlerts 가 가린다). 자동 틱은 롤업 보정 · 정리까지 끝난 뒤 bmUsageTimerTick 이 적는다.
+    if (trigger !== 'auto') await notePerfEnd(t0);
+  }
 }
+async function notePerfEnd(sinceAt) { try { await (await import('./perfAlerts.js')).notePerfCycleEnd(Date.now(), { sinceAt }); } catch { /* 알림 규칙 모듈을 못 읽으면 판정도 없었다 */ } }
 
 /**
  * v2.929(5단계) — 이번 주기 알림 규칙 입력을 모은다: 성능 항목(이 노드 판정 — perfForRows 와 같은 buildPerfEntry) · 소모품 칸(방금 detail_json 에 넣은 것) ·
  *   베이스라인 이탈(그 규칙이 켜졌을 때만 — 슬롯 평균은 한 시간에 한 번 읽는다) · 용도 점검(그 규칙이 켜졌을 때만 — 이 노드의 수동 태그 · 자동 감지).
  */
-async function runCyclePerfAlerts(results, { settings, rules, agent }) {
+async function runCyclePerfAlerts(results, { settings, rules, agent, targets = [], cycleStartAt = null }) {
   // 규칙 파일 손상(보존본만 남음)이면 ‘켠 규칙 없음’ 과 구별해 상태에 남긴다 — 기본값(전부 꺼짐)으로 조용히 꺼진 것처럼 보이지 않게(규칙 화면 · 서비스 점검이 손상을 밝힌다).
   if ((await import('./perfRules.js')).perfRulesLoadError()) return { ok: false, skipped: 'settings-unreadable' };
   const on = Object.keys(rules?.rules || {});
@@ -1135,6 +1157,7 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
   }
   const M = on.includes('profile') ? await import('./profiles/match.js') : null;
   const FT = on.includes('profile') ? await import('../insights/fleetTags.js').catch(() => null) : null;
+  const PK = FT ? await import('./purposeKey.js').catch(() => null) : null;
   const items = [];
   for (const r of results) {
     if (!r?.ok || !r.built?.row || !r.target) continue;
@@ -1144,7 +1167,7 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
     let profile = null;
     if (M) {
       let manual = null;
-      try { manual = FT ? (FT.fleetPurposeOf(String(r.target.serviceTag || '')) || FT.fleetPurposeOf(r.target.key)) : null; } catch { manual = null; }
+      try { manual = FT && PK ? PK.purposeOfTargetSync((k) => FT.fleetPurposeOf(k), r.target, r.target.key) : null; } catch { manual = null; }   // 키 규칙 하나(반증 F2)
       try { profile = M.profileView({ tuning: parseJsonCol(row.tuning_json), detail, entry, row, manual }); } catch { profile = null; }
     }
     items.push({ key: r.target.key, name: r.target.name || r.target.key, vcenterId: r.target.vcenterId || '', target: r.target, entry, health: detail?.health || null,
@@ -1154,7 +1177,23 @@ async function runCyclePerfAlerts(results, { settings, rules, agent }) {
   // 6단계 ‘수집 건강’ — 서버가 아니라 이 노드 한 칸(key '__node__' · 법인 공용). 칸은 이번 주기 recordCycleHealth 가 기준과 대 본 결과 그대로.
   const nodeItem = on.includes('collect') ? collectNodeItem(agent) : null;
   if (nodeItem) items.push(nodeItem);
-  return (await import('./perfAlerts.js')).runPerfAlerts(items, { rules, now });
+  /*
+   * 다음 점검 ②: 전력 · 온도 규칙 — 이 노드 주기 대상 **전부**(OS 수집 성패와 무관 — 전력 · 온도는 iDRAC 폴러 원천) · 판정 노드가 이 노드인 서버만(powerJudge.js — 엣지 사본 · 엣지가 맡은 법인은 다시 판정하지 않는다).
+   *   대상 목록은 currentTargets(엣지 위임 서버 제외)라 중앙과 엣지가 같은 서버를 두 번 판정하지 않는다. 실패해도 다른 규칙 판정은 그대로 간다.
+   */
+  const PA = await import('./powerAlerts.js');
+  let powerError = null; let powerItems = null;
+  if (on.some((id) => PA.isPowerRule(id))) {
+    try { const px = await PA.powerAlertItems({ targets, rules, now }); powerItems = PA.judgedCount(px); for (const x of px) items.push(x); }
+    catch (e) {
+      // 반증 n2 F3: 콘솔 한 줄로 끝내지 않는다(무음 실패 금지) — 주기 상태(_last.perfAlerts.powerError)에 남겨 규칙 화면 상태 줄이 밝힌다.
+      powerError = String(e?.message || e).slice(0, 200);
+      if (_srcErrLog('power-alerts', powerError)) console.warn(`[bmusage] 전력 · 온도 알림 판정 입력을 만들지 못했습니다(그 규칙만 이번 주기에 보류): ${powerError.slice(0, 160)}`);
+    }
+  }
+  // 반증 n2 F5 · 2차 M1: 보류 시한의 ‘폴러가 돌지 않은 시간’ 은 이 노드의 수집 주기와 **이 주기 시작 시각**(t0)으로 잰다 — 주기 소요는 시한에 들지 않는다.
+  const r = await (await import('./perfAlerts.js')).runPerfAlerts(items, { rules, now, intervalMs: settings?.intervalMs, cycleStartAt });
+  return { ...r, ...(powerError ? { powerError } : {}), ...(powerItems != null ? { powerItems } : {}) };
 }
 function collectNodeItem(agent) {
   if (!_health?.node?.cells) return null;
@@ -1162,18 +1201,23 @@ function collectNodeItem(agent) {
   return { key: '__node__', name: `수집 노드 ${agent || '(이 노드)'}`, vcenterId: '', collect: { cells: h.cells, cyclePct: h.cyclePct, successPct: h.successPct, dbPct: h.dbPct, th: h.th, error: h.error || null } };
 }
 /**
- * 실패 · 0대 주기(분류 실패 · 주기 예외 · 대상 없음)에도 ‘수집 건강’ 규칙만 돌린다(반증 F1 — 예전에는 이 경로가 알림 판정 전에 돌아가 규칙이 실패를 못 잡았다).
+ * 실패 · 0대 주기(분류 실패 · 주기 예외 · 대상 없음)에도 판정한다 — 항목은 ‘수집 건강’ 칸 하나뿐(반증 F1 — 예전에는 이 경로가 알림 판정 전에 돌아가 규칙이 실패를 못 잡았다 · 3차 P2 — 그 규칙이 꺼져도 빈 판정).
  *   서버 항목은 넣지 않는다(다른 규칙의 서버 상태는 evaluatePerfRules 가 CARRY_MS 동안 들고 간다 — 지우지 않는다). 실패해도 주기 결과를 바꾸지 않는다.
  */
-async function runNodeCollectAlert() {
+async function runNodeCollectAlert({ cycleStartAt = null } = {}) {
   try {
     const R = await import('./perfRules.js');
     if (R.perfRulesLoadError()) return { ok: false, skipped: 'settings-unreadable' };
     const rules = R.loadPerfRules();
-    if (!rules?.rules?.collect?.on) return { ok: true, skipped: 'off' };
-    const item = collectNodeItem(config.agent?.name || '');
-    if (!item) return { ok: true, skipped: 'no-health' };
-    return await (await import('./perfAlerts.js')).runPerfAlerts([item], { rules });
+    const collectOn = !!rules?.rules?.collect?.on;
+    const item = collectOn ? collectNodeItem(config.agent?.name || '') : null;
+    /*
+     * 2차 M1 · 3차 P2: 이 실패 주기도 **판정 주기**다 — 수집 건강 규칙이 꺼졌거나 그 칸이 없어도 빈 항목으로 판정한다(켠 규칙이 하나도 없으면 엔진이 건너뛴다).
+     *   전력 규칙 상태는 ‘못 읽은 주기’ 로 보류 주기 수 +1 · 판정 시각과 틱 끝을 남겨 이 주기의 소요가 ‘폴러가 돌지 않은 시간’ 에 들지 않게(주기 소요는 틈이 아니다).
+     *   예전에는 수집 건강 규칙이 꺼진 노드에서 판정이 없어 실패 주기의 소요 전체가 틈이 되어 지속을 1부터 다시 셌다(같은 주기가 판정되면 보류 1주기라 잇는데 결과가 달랐다).
+     */
+    const r = await (await import('./perfAlerts.js')).runPerfAlerts(item ? [item] : [], { rules, intervalMs: loadBmUsageSettings().intervalMs, cycleStartAt });
+    return item ? r : { ...r, collectSkipped: collectOn ? 'no-health' : 'off' };
   } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 160) }; }
 }
 /**

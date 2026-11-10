@@ -115,6 +115,7 @@ export function alertKeyOf(x) {
   if (!t(x?.scope)) return `|${t(x?.testId)}`;
   const tn = t(x?.target?.name); const sn = t(x?.test?.name);
   if (!tn || !sn) return x?.metaTimeout === true ? `${t(x.scope)}${SEP}#${t(x?.testId)}` : null;
+  if (x?.test?.dupPending === true) return null;   // v2.954: 이름 중복을 아직 확정할 수 없다(svcmonEdge alertInfoOf) — 보류(시한은 svcmonEdge)
   if (x?.test?.dupName) return `${t(x.scope)}${SEP}#${t(x?.testId)}`;
   return [t(x.scope), t(x?.target?.path), tn, sn].join(SEP);
 }

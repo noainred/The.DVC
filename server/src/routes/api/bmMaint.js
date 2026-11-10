@@ -22,7 +22,7 @@ import { logAudit } from '../../audit.js';
 import { isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
-import { resolvePerfTarget, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, perfVcOf, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
 import { isOwnerTier } from './bmOnboard.js';
 import { createYielder } from '../../util/timeSlice.js';
 
@@ -52,9 +52,11 @@ function deps0(deps = {}) {
 const memo = (D) => { let p = null; return { ...D, currentTargets: () => (p ||= D.currentTargets()) }; };
 function errOut(res, e) {
   const st = [400, 403, 404, 409, 503].includes(e?.status) ? e.status : 500;
-  return res.status(st).json({ ok: false, code: e?.code || 'error', ...(e?.field ? { field: e.field } : {}), reason: String(e?.message || e).slice(0, 300) });
+  return res.status(st).json({ ok: false, code: e?.code || 'error', ...(e?.field ? { field: e.field } : {}), ...(Array.isArray(e?.candidates) ? { candidates: e.candidates } : {}), reason: String(e?.message || e).slice(0, 300) });
 }
 const fail = (status, code, reason) => Object.assign(new Error(reason), { status, code });
+/** 대상 해석 실패(perfTargetFail — 404 · 400 ambiguous-key + 범위 안 후보 법인)를 던진다(한 모양). */
+const throwPerf = (bad) => { throw Object.assign(new Error(bad.reason), { status: bad.__status, code: bad.code, ...(bad.candidates ? { candidates: bad.candidates } : {}) }); };
 const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
 /** 창이 이 계정에 보이나(순수) — 법인이 조회 범위 안. */
 export const maintVisible = (w, allowed) => !allowed || (!!w?.vcenterId && allowed.has(w.vcenterId));
@@ -93,41 +95,16 @@ async function writeGate(req, snap, D, b) {
   if (want && allowed && !allowed.has(want)) throw fail(404, 'not-found', '대상 서버를 찾지 못했습니다.');
   const found = [];
   for (const key of keys) {
-    let f;
-    if (want) f = await resolvePerfTarget(req, corpOnly(D, want), { allowed, isAdmin, key });
-    else {
-      const corps = await corpsOfKey(req, D, { allowed, isAdmin, key });
-      if (corps.length > 1) throw fail(400, 'ambiguous-key', `같은 키의 서버가 ${corps.length}개 법인에 있습니다 — 법인을 고르세요.`);
-      f = await resolvePerfTarget(req, corps.length === 1 ? corpOnly(D, corps[0]) : D, { allowed, isAdmin, key });
-    }
-    if (!f || f.denied) throw fail(404, 'not-found', '대상 서버를 찾지 못했습니다.');
+    // 다음 점검 ①: 법인을 골랐으면 그 법인 안에서만 · 안 골랐고 같은 키가 범위 안 여러 법인이면 400 ambiguous-key(후보 법인 — 범위 안만) — resolvePerfTarget 하나.
+    const f = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId: want });
+    const bad = perfTargetFail(f);
+    if (bad) throwPerf(bad);
     found.push(f);
   }
   const vcs = [...new Set(found.map((f) => t(f.target.vcenterId)))];
   if (vcs.length !== 1 || !vcs[0]) throw fail(400, 'cross-corp', '한 창의 서버는 한 법인이어야 합니다(법인 간 대상 금지 · 귀속 없는 서버는 대상이 될 수 없습니다).');
   if (!inUserWriteScope(req.user, snap, vcs[0])) throw fail(403, 'forbidden', '대상 서버의 법인에 쓰기 권한이 없습니다(조회 전용).');
   return { vcenterId: vcs[0], target: { kind: 'server', keys: found.map((f) => f.realKey), names: found.map((f) => String(f.target.name || f.realKey)) } };
-}
-/** 대상 해석을 한 법인으로 좁힌 의존성(같은 resolvePerfTarget 을 쓴다 — 가림 토큰 · 엣지 보관분 규칙 그대로). */
-function corpOnly(D, vc) {
-  return {
-    ...D,
-    currentTargets: async () => { const tg = await D.currentTargets(); return { ...tg, targets: (tg?.targets || []).filter((x) => t(x?.vcenterId) === vc) }; },
-    listEdgeBmUsage: async () => (await D.listEdgeBmUsage()).map((rec) => (rec?.snap ? { ...rec, snap: { ...rec.snap, targets: (rec.snap.targets || []).filter((x) => t(x?.vcenterId) === vc) } } : rec)),
-  };
-}
-/** 이 계정에 보이는 법인 중 그 키(또는 가림 토큰)의 서버가 있는 법인들. */
-async function corpsOfKey(req, D, { allowed, isAdmin, key }) {
-  const corps = new Set();
-  for (const x of (await D.currentTargets().catch(() => ({ targets: [] }))).targets || []) if (t(x?.vcenterId)) corps.add(t(x.vcenterId));
-  for (const rec of await D.listEdgeBmUsage().catch(() => [])) for (const x of rec?.snap?.targets || []) if (t(x?.vcenterId)) corps.add(t(x.vcenterId));
-  const out = [];
-  for (const vc of [...corps].sort()) {
-    if (allowed && !allowed.has(vc)) continue;
-    const f = await resolvePerfTarget(req, corpOnly(D, vc), { allowed, isAdmin, key }).catch(() => null);
-    if (f && !f.denied) out.push(vc);
-  }
-  return out;
 }
 /**
  * 소유자 등급 게이트(순수 판정은 store.needsOwnerTier · store.coverNeedsOwner — 화면 문구도 같은 값). 소유자 등급이면 통과(합 계산을 하지 않는다).
@@ -242,8 +219,9 @@ export async function bmMaintOccurrences(req, snap, deps = {}) {
   const allowed = scopedVcenterIds(req.user, snap);
   const key = t(req.query?.key);
   if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
-  const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key });
-  if (!f || f.denied) return { __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' };
+  const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key, vcenterId: perfVcOf(req) });   // 다음 점검 ①: (법인, 키) 쌍
+  const bad = perfTargetFail(f);
+  if (bad) return bad;
   const now = D.now();
   let from = Number(req.query?.from); let to = Number(req.query?.to);
   if (!Number.isFinite(to)) to = now;

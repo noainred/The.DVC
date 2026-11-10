@@ -872,3 +872,13 @@
   - 랙 배치는 텍스트 상자(서버가 만든 `racksText` 를 보이고 고친 텍스트를 보낸다 — 웹이 형식을 해석하지 않는다).
   - 반증 F3 · F6 · F8: 이 시점 프로세스는 `reason: 'base-missing'` 이면 ‘상위 행이 없습니다’ 를 띄우지 않고 ‘**읽지 못했습니다** … ‘없다’ 는 뜻이 아닙니다’ · 바닥 줄은 ‘나머지 합계’ 대신 전 프로세스 합만 ·
     띠는 `baseMissing` 수를 적는다 · 랙 여유 칸은 `marginPartial` 이면 ‘일부만 측정(n/m)’(낮음 색 없음 — `low === true` 만 빨강) · 여유 최소 카드는 부분 랙 수를 적는다 · 엣지 버전 안내는 `kind === 'old-version'` 일 때만.
+- **v2.953 SAN 스토리지 성능 2차 화면(`SanStorageTool.jsx` CrossView · 기준선 표시 · `SanStorageCheck.jsx` NotifyModal · ReportModal)**
+  - 보기 전환 상태(`view`)는 ListTab 의 **조기 return 위**에 둔다(eslint rules-of-hooks 가 잡았다). 교차 보기 표는 STable · 사분면 라벨은 표시 규칙(각주) · 짝 없으면 '—' · 일수는 `daysText`(10년 이상은 문구).
+  - 기준선 표시는 서버 `baseline.applicable` 일 때만(범례 '평소와 다름 n/m칸' · 차트 고리 · 히트맵 테두리 `.sst-hm i.off`). 데모는 벗어난 칸이 없으니 표시 자체는 단위 시험으로 확인한다고 적는다.
+  - 알림 · 보고서 모달은 `putJson/postJson` 의 **반환값(`ok === false`)을 보고** 실패를 알린다 · 미리보기는 `downloadFile`(토큰 헤더 — `window.open` 금지) · 보내기 409 는 '보내지 않음' 문구.
+  - 상태 알약 `.sst-pill` 은 600px 이하에서 줄바꿈(`white-space: normal`) — 400px 에서 잘리던 것(PR ⓐ 때부터). 1440 은 한 줄 그대로.
+- **v2.955 SAN 스토리지 성능 3차 화면(이력 모달 · 임의 구간 · ⌘K 행 · Flow 인계 · PDF 저장)**
+  - 이력 모달은 서버 `available:false` 를 `sst-info` 로 그대로 보인다(빈 표 금지) · 표는 STable · 어레이 이름은 `.sst-link` 글자 단추로 상세 열기(새 표 틀 없음).
+  - 임의 구간 입력은 `datetime-local` 둘 + '구간 보기'(검증: 둘 다 · 시작<끝 · ≤366일 — 서버 상한과 같다) · 구간 중 ◀ ▶ 비활성 · 기간 세그를 누르면 구간 해제. 400px 은 `.sst-custom` 줄바꿈.
+  - 검색어 · WWN 은 해시에 싣지 않고 `handoffMany` 로 넘긴다(받는 쪽 `useSearchHandoff('san-storage' | 'san-flow:targets')`). 팔레트 추가 행은 `lockOf('san-storage')` 가 잠긴 계정에는 보이지 않는다.
+  - 'PDF 로 저장' 은 `reportExport.saveDocAsPdf` 동적 import — 평소 번들에 jsPDF 가 실리지 않는다 · 문서 모델은 `reportPdfDoc`(순수 · 시험) · 표시 글자는 `PDF_MARK`(KS X 1001 안).

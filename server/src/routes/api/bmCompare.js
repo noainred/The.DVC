@@ -29,7 +29,7 @@ import { freshMsFor } from '../../bmusage/useJudge.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { poolSettled } from '../../util/pool.js';
 import { config } from '../../config.js';
-import { resolvePerfTarget, bmAddressHosts, demoPerfRows, perfAddressMatcher } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, failParts, perfPairsOf, bmAddressHosts, demoPerfRows, perfAddressMatcher } from './bmUsage.js';
 import { depsOf as focusDepsOf, focusStartResolved } from './bmPerfOps.js';
 import * as M from '../../bmusage/multiCompare.js';
 
@@ -52,11 +52,13 @@ function deps0(deps = {}) {
     ...deps,
   };
 }
-/** 키 목록 파싱(순수) — 쉼표 · 중복 제거 · 길이 상한. */
-export function parseCompareKeys(v, max = 8) {
-  const raw = Array.isArray(v) ? v : String(typeof v === 'string' ? v : '').split(',');
-  const out = [...new Set(raw.map((k) => t(k)).filter(Boolean).map((k) => k.slice(0, 256)))];
-  return { keys: out.slice(0, max), over: out.length > max };
+/**
+ * 서버 목록 파싱(순수) — 다음 점검 ①: 서버 = (법인, 키) 쌍. keys 와 같은 순서의 vcenterIds(비면 법인 모름 — 해석이 정한다) · 같은 쌍은 한 번 · 길이 상한.
+ *   본체는 bmUsage.perfPairsOf 하나(운영 주석과 같은 함수). keys 는 예전 계약(키 목록)을 그대로 돌려준다.
+ */
+export function parseCompareKeys(v, max = 8, vcs = '') {
+  const { pairs, over } = perfPairsOf(v, vcs, max);
+  return { keys: pairs.map((p) => p.key), pairs, over };
 }
 async function maxServersOf(D) { try { return (await D.rules()).compare?.maxServers ?? 5; } catch { return 5; } }
 /** 요청 하나 동안 대상 해석을 한 번만(resolvePerfTarget 은 서버마다 부른다 — 등록부 · 분류를 다섯 번 읽지 않게). */
@@ -65,8 +67,8 @@ function memoTargets(D) {
   return { ...D, currentTargets: () => (p ||= D.currentTargets()) };
 }
 async function purposeGroupOf(D, target, realKey, facts) {
-  let manual = null;
-  for (const k of [target?.serviceTag, realKey]) { if (!k || manual) continue; manual = await D.purposeOf(String(k)).catch(() => null); }
+  const { purposeOfTarget } = await import('../../bmusage/purposeKey.js');   // 키 규칙 하나(반증 F2)
+  const manual = await purposeOfTarget((k) => D.purposeOf(String(k)), target, realKey);
   try {
     const pv = await D.profileView({ tuning: facts.tuning || null, detail: facts.detail || null, entry: facts.entry || null, row: facts.row || null, manual });
     const apps = [...(pv?.detection?.activeApps || [])].sort();
@@ -82,7 +84,7 @@ export async function bmCompareView(req, snap, deps = {}) {
   const isAdmin = isAdminReq(req);
   const q = req.query || {};
   const maxServers = await maxServersOf(D);
-  const { keys, over } = parseCompareKeys(q.keys, maxServers);
+  const { keys, pairs, over } = parseCompareKeys(q.keys, maxServers, q.vcenterIds);
   if (over) return { __status: 400, ok: false, code: 'too-many', reason: `서버는 ${maxServers}대까지 비교합니다.`, maxServers };
   if (!keys.length) return { __status: 400, ok: false, code: 'no-keys', reason: '비교할 서버를 고르세요.', maxServers };
   const cross = String(q.cross || '') === '1';
@@ -93,11 +95,12 @@ export async function bmCompareView(req, snap, deps = {}) {
   const metrics = M.parseCompareMetrics(q.metrics, { group: String(q.group || '') });
   const value = ['avgpeak', 'avg', 'peak'].includes(String(q.value || '')) ? String(q.value) : 'avgpeak';
 
-  // ① 해석 — 범위 밖 · 귀속 없음 · 없는 키는 그 열만 ‘없음’(같은 모양).
+  // ① 해석 — 범위 밖 · 귀속 없음 · 없는 키는 그 열만 ‘없음’(같은 모양) · 같은 키가 범위 안 여러 법인이고 법인을 안 줬으면 그 열만 ‘법인 고르기’(ambiguous — 범위 안 후보만).
   const resolved = [];
-  for (const key of keys) {
-    const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
-    resolved.push({ key, found: found && !found.denied ? found : null });
+  for (const { key, vcenterId } of pairs) {
+    const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId });
+    const bad = perfTargetFail(found);
+    resolved.push({ key, askedVc: vcenterId, found: bad ? null : found, ...(bad?.code === 'ambiguous-key' ? { candidates: bad.candidates } : {}) });
   }
   const first = resolved.find((r) => r.found);
   const corp = first ? t(first.found.target.vcenterId) : null;
@@ -118,11 +121,13 @@ export async function bmCompareView(req, snap, deps = {}) {
   };
 
   // ② 열마다(병렬 5) — 같은 법인만이면 다른 법인 열은 값을 당기지 않는다.
-  const settled = await poolSettled(resolved, 5, async ({ key, found }) => {
-    if (!found) return { key, state: 'none' };
+  const settled = await poolSettled(resolved, 5, async ({ key, askedVc, found, candidates }) => {
+    // 열 식별 cid = 요청한 (법인, 키) 쌍 — 같은 키 · 다른 법인 두 열이 표에서 섞이지 않게(표는 cid 로 만든다) · 요청한 법인은 자기 입력이라 그대로 돌려준다.
+    const cid = `${askedVc}|${key}`;
+    if (!found) return { key, cid, ...(askedVc ? { vcenterId: askedVc } : {}), state: candidates ? 'ambiguous' : 'none', ...(candidates ? { candidates } : {}) };
     const target = found.target;
     const vc = t(target.vcenterId);
-    const base = { key, name: nameOf(target), vcenterId: vc || '', via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}) };
+    const base = { key, cid, name: nameOf(target), vcenterId: vc || '', via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}) };
     if (!cross && vc !== corp) return { ...base, state: 'other-corp' };
     let entry = null; let hw = null; let facts = {}; let readAt = null; let snapAt = null;
     if (found.via === 'local') {
@@ -161,7 +166,7 @@ export async function bmCompareView(req, snap, deps = {}) {
       dev, devWorst: M.worstDeviation(dev),
     };
   });
-  const columns = settled.map((x, i) => (x.status === 'fulfilled' ? x.value : { key: resolved[i].key, state: 'none', reason: '처리 중 오류' }));
+  const columns = settled.map((x, i) => (x.status === 'fulfilled' ? x.value : { key: resolved[i].key, cid: `${resolved[i].askedVc}|${resolved[i].key}`, ...(resolved[i].askedVc ? { vcenterId: resolved[i].askedVc } : {}), state: 'none', reason: '처리 중 오류' }));
   // 법인별 읽은 시각(머리 — ‘법인 간’ 이면 법인마다 다르다).
   const corps = [];
   for (const c of columns) {
@@ -172,7 +177,8 @@ export async function bmCompareView(req, snap, deps = {}) {
     if (c.seriesAt != null) g.seriesAt = g.seriesAt == null ? c.seriesAt : Math.min(g.seriesAt, c.seriesAt);
     if (!g.states.includes(c.state)) g.states.push(c.state);
   }
-  const table = M.buildCompareTable(columns, { metrics, value });
+  // 표의 열 식별은 cid(쌍) — multiCompare 는 key 를 열 식별로 쓴다(셀 · 최고 · 스큐 · 판정 · 베이스라인이 같은 열을 가리키게).
+  const table = M.buildCompareTable(columns.map((c) => ({ ...c, key: c.cid })), { metrics, value });
   return {
     ok: true, at: Date.now(), corp, cross, crossAllowed: !allowed, maxServers, ...w, metrics, value,
     groups: M.COMPARE_GROUP_IDS, groupMetrics: M.COMPARE_GROUPS, metricMeta: Object.fromEntries(M.COMPARE_METRICS.map((m) => [m.col, { unit: m.unit, scaleMax: m.scaleMax, src: m.src }])),
@@ -188,14 +194,15 @@ export async function bmCompareFocus(req, deps = {}) {
   const reason = S.cleanReason(req.body?.reason);
   if (!reason) return { status: 400, body: { ok: false, code: 'bad-reason', reason: '사유를 2자 이상 적어야 합니다(감사 기록에 남습니다).' } };
   const maxServers = await maxServersOf(D);
-  const { keys, over } = parseCompareKeys(req.body?.keys, maxServers);
+  const { keys, pairs, over } = parseCompareKeys(req.body?.keys, maxServers, req.body?.vcenterIds);
   if (over || !keys.length) return { status: 400, body: { ok: false, code: 'bad-request', reason: `서버는 1~${maxServers}대여야 합니다.` } };
   const allowed = scopedVcenterIds(req.user, snap);
   const isAdmin = isAdminReq(req);
   const list = [];
-  for (const key of keys) {
-    const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
-    if (!found || found.denied) return { status: 404, body: { ok: false, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' } };
+  for (const { key, vcenterId } of pairs) {
+    const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId });   // 다음 점검 ①: (법인, 키) 쌍 — 하나라도 없음 404 · 법인 모호 400
+    const bad = perfTargetFail(found);
+    if (bad) return failParts(bad);
     list.push({ key, found });
   }
   // 쓰기 범위는 조건 없이(조회 무제한 + writeVcenters 계정 — server/CLAUDE.md v2.733). 하나라도 밖이면 아무것도 시작하지 않는다.
@@ -205,7 +212,7 @@ export async function bmCompareFocus(req, deps = {}) {
   const results = [];
   for (const { key, found } of list) {
     const r = await focusStartResolved(req, D, { found, key, isAdmin, reason, origin: 'compare' });
-    results.push({ key, httpStatus: r.status, ...r.body });
+    results.push({ key, vcenterId: t(found.target.vcenterId), httpStatus: r.status, ...r.body });
   }
   const started = results.filter((r) => r.ok).length;
   return { status: 200, body: { ok: started > 0, started, total: results.length, results } };
@@ -227,7 +234,7 @@ async function setsWrite(req, res) {
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     const allowed = scopedVcenterIds(req.user, store.get());
     if (b.cross === true && allowed) return res.status(400).json({ ok: false, code: 'bad-cross', reason: '법인 간 비교 세트는 전체 범위 계정만 저장할 수 있습니다.' });
-    const set = C.saveCompareSet({ user: req.user?.username || '', id: typeof b.id === 'string' ? b.id : '', name: b.name, keys: b.keys, cross: b.cross === true, maxServers: await maxServersOf(deps0()) });
+    const set = C.saveCompareSet({ user: req.user?.username || '', id: typeof b.id === 'string' ? b.id : '', name: b.name, keys: b.keys, vcenterIds: b.vcenterIds ?? [], cross: b.cross === true, maxServers: await maxServersOf(deps0()) });
     logAudit({ user: req.user?.username, action: 'bm-perf.compare-set', target: set.id, ip: req.ip || '', detail: JSON.stringify({ op: b.id ? 'update' : 'create', n: set.keys.length, cross: set.cross }).slice(0, 200) });
     res.json({ ok: true, set });
   } catch (e) {

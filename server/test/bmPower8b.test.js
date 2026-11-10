@@ -22,6 +22,14 @@ const NOW = Math.floor(Date.now() / HOUR) * HOUR - 20 * 60_000;
 const A = await import('../src/bmusage/powerAgg.js');
 
 const hours = (w, n = 24, base = NOW) => Array.from({ length: n }, (_, i) => ({ ts: base - (n - i) * HOUR, avg: w, max: w + 10 }));
+// 월 누적의 기대값(제품과 따로 센다 — 포탈 날 = util/dayKey.js 오프셋 · 기본 KST). 시험 ③ · ③-2 가 같이 쓴다.
+const { DAY_OFFSET_MIN, DAY_MS } = await import('../src/util/dayKey.js');
+const OFF = DAY_OFFSET_MIN * 60_000;
+const kstDayStart = (ts) => Math.floor((ts + OFF) / DAY_MS) * DAY_MS - OFF;
+const kstMonthStart = (ts) => { const d = new Date(ts + OFF); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - OFF; };
+const finishedDays = (ts) => Math.round((kstDayStart(ts) - kstMonthStart(ts)) / DAY_MS);
+const todayHours = (ts) => Math.min(24, Math.floor((ts - kstDayStart(ts)) / HOUR));   // 24시간 조회 행(정시 - k시간) 중 오늘 것
+const kwhOf = (w, ts) => { const h = finishedDays(ts) * 24 + todayHours(ts); return h ? Math.round(((h * w) / 1000) * 10) / 10 : null; };
 const srv = (key, vc, w, extra = {}) => ({ key, name: key, vcenterId: vc, node: '', via: 'local', w, unmeasured: w == null ? (extra.unmeasured || 'read-fail') : null, h24: w == null ? null : A.hourSummary(hours(w)), kwhMonth: w == null ? null : 100, capW: null, inletC: null, maxC: null, ...extra });
 
 test('① 집계 — 미측정 제외 · 랙 · 미매핑 · 여유 · 걸림 · 피크 · kWh', () => {
@@ -89,12 +97,9 @@ test('② 교차 검증 — 전력 대시보드(computePowerBreakdown)와 같은
   assert.equal(withVc[0].w, null); assert.equal(withVc[0].unmeasured, 'no-idrac');
 });
 
-test('③ 원천 모으기 — 매칭 · 사유 · 24h · 월 누적 캐시 · 온도 · 팬', async () => {
+test('③ 원천 모으기 — 매칭 · 사유 · 24h · 월 누적(값은 ③-2 와 같은 식) · 온도 · 팬', async () => {
   A._resetPowerAggForTest();
-  const monthCalls = {}; let late = false;
-  const idb = { hourlyStats: (key, from, to) => { if (to - from > 23 * HOUR && !(to === NOW || to >= NOW - 1)) monthCalls[key] = (monthCalls[key] || 0) + 1;
-    if (key === 'r9' && late) return hours(300, Math.min(24 * 40, Math.floor((to - from) / HOUR)), to);
-    return key === 'r1' ? hours(400, Math.min(24 * 40, Math.floor((to - from) / HOUR)), to) : key === 'rmt:bm-3' ? hours(250) : []; } };
+  const idb = { hourlyStats: (key, from, to) => (key === 'r1' ? hours(400, Math.min(24 * 40, Math.floor((to - from) / HOUR)), to) : key === 'rmt:bm-3' ? hours(250) : []) };
   const measured = [{ serverId: 'r1', watts: 400, vcenterId: 'vcA', serviceTag: 'T1', source: 'idrac' }, { serverId: 'r9', watts: 0, vcenterId: 'vcA', serviceTag: 'T9', source: 'idrac' },
     { serverId: 'remote:e:3', watts: 250, vcenterId: 'vcB', serviceTag: 'T3', source: 'remote', dbKey: 'rmt:bm-3' }];
   const analysis = [{ id: 'r1', serviceTag: 'T1' }, { id: 'edge:3', serviceTag: 'T3', remote: true, sensors: { t: NOW - 60_000, temps: { 'System Board Inlet Temp': 28.5, 'CPU1 Temp': 70, 'DIMM A1': 40 } } }, { id: 'r5', serviceTag: 'T5' }];
@@ -117,28 +122,93 @@ test('③ 원천 모으기 — 매칭 · 사유 · 24h · 월 누적 캐시 · �
   assert.equal(s.K3.w, 250, '엣지 서버 = 중앙 사본(서비스 태그)'); assert.equal(s.K3.h24.avgW, 250, '시간 롤업은 rmt: 계열'); assert.equal(s.K3.inletC, 28.5); assert.equal(s.K3.maxC, 70);
   assert.equal(s.K5.unmeasured, 'read-fail', 'iDRAC 등록(서버 분석)은 있는데 전력 표본이 없다 = 읽기 실패');
   assert.equal(s.K6.unmeasured, 'no-idrac');
-  assert.ok(s.K1.kwhMonth > 0);
-  // 끝난 날은 캐시 — 두 번째 모으기는 값이 있던 날(r1)을 다시 읽지 않는다 · 값이 없던 날(r9 — 0 W · rmt 사본 앞날)은 담지 않고 다시 읽는다(의심 S2)
-  const before = { ...monthCalls };
-  await A.gatherPower({ targets, deps, now: NOW });
-  if (new Date(NOW).getDate() > 2) {
-    assert.equal(monthCalls.r1 ?? 0, before.r1 ?? 0, '끝난 날 Wh 는 캐시(요청마다 한 달을 다시 읽지 않는다)');
-    assert.ok((monthCalls.r9 ?? 0) > (before.r9 ?? 0), '값이 없던 날은 캐시하지 않는다(늦게 채워지는 롤업을 놓치지 않게)');
-  }
-  // 늦게 채워진 날 — 처음엔 없던 r9 의 지난 날 시간 롤업이 나중에 생기면 다음 계산이 반영한다(예전: 40일 동안 null 고정)
-  late = true;
-  const s2 = Object.fromEntries((await A.gatherPower({ targets, deps, now: NOW + 1000 })).map((x) => [x.key, x]));
-  if (new Date(NOW).getDate() > 2) assert.ok(s2.K9.kwhMonth > 0, `늦게 온 롤업 반영(${s2.K9.kwhMonth})`);
-  // 값이 있던 날도 DAY_WH_TTL_MS 뒤에는 다시 읽는다
-  const b2 = monthCalls.r1 ?? 0;
-  await A.gatherPower({ targets, deps, now: NOW + A.DAY_WH_TTL_MS + 1 });
-  if (new Date(NOW).getDate() > 2) assert.ok((monthCalls.r1 ?? 0) > b2, '담은 값도 TTL 뒤 다시 읽는다');
+  assert.equal(s.K1.kwhMonth, kwhOf(400, NOW), '월 누적 = 이번 달 끝난 날 + 오늘 지난 시간(KST · 1일 00시대는 값 없음 = null)');
   // 함대 공유 — 같은 열쇠 60초 안에는 한 번만 계산
   let n = 0; const compute = async () => { n += 1; return []; };
   await Promise.all([A.sharedPowerFleet('k', compute, { now: NOW }), A.sharedPowerFleet('k', compute, { now: NOW + 1000 })]);
   assert.equal(n, 1, '동시 요청은 같은 프라미스');
   await A.sharedPowerFleet('k', compute, { now: NOW + 61_000 });
   assert.equal(n, 2);
+});
+
+/*
+ * ③-2 월 누적 캐시 — **시각과 무관하게**(2026-11-08 고침). 예전 시험은 실제 시각 NOW(정시 -20분) 하나로 돌며
+ *   ⓐ ‘월 조회’ 를 `to >= NOW - 1` 로 걸렀다 — NOW + TTL(6시간)이 KST 자정을 넘으면 그 조회의 끝(새 오늘 시작)이 NOW 뒤라 세지 않았다
+ *      → KST 18:40~23:40 NOW(실제 19:00~00:59)마다 ‘담은 값도 TTL 뒤 다시 읽는다’ 가 실패(제품은 다시 읽었다 — 시험 결함).
+ *   ⓑ 월말 같은 시각대는 새 달에 끝난 날이 없어 다시 읽을 것이 없는데도 ‘늘었다’ 를 요구했다.
+ *   ⓒ ‘끝난 날이 있나’ 를 프로세스 시간대의 getDate() 로 봤다 — UTC 프로세스에서 KST 1일 00:40~08:40 은 전달 마지막 날로 보여 단언이 돌고 실패.
+ *   ⓓ 1일 00:40 은 이번 달 지난 시간이 0 이라 kwhMonth 가 null 인데 ‘> 0’ 을 요구했다.
+ * 이제 이번 달(실제 시각의 KST 달)의 정해진 KST 벽시계 시각마다 같은 순서를 돌리고, 기대값(조회 구간 · kWh)을 KST 달력으로 따로 센다.
+ */
+async function monthCacheCase(T) {
+  A._resetPowerAggForTest();
+  const calls = []; let callNow = 0; let late = false;
+  const rowsOf = (w, from, to) => hours(w, Math.min(24 * 40, Math.floor((to - from) / HOUR)), to);
+  const idb = { hourlyStats: (key, from, to) => {
+    if (!(to === callNow && to - from === DAY_MS)) calls.push({ key, from, to });   // 24시간 조회(지금까지)는 빼고 월 누적 조회만 센다
+    if (key === 'r1') return rowsOf(400, from, to);
+    if (key === 'r9' && late) return rowsOf(300, from, to);
+    return [];
+  } };
+  const measured = [{ serverId: 'r1', watts: 400, vcenterId: 'vcA', serviceTag: 'T1', source: 'idrac' }, { serverId: 'r9', watts: 0, vcenterId: 'vcA', serviceTag: 'T9', source: 'idrac' }];
+  const deps = { measured: async () => measured, analysisServers: async () => [{ id: 'r1', serviceTag: 'T1' }], powerDb: async () => idb, fanFaults: async () => [],
+    inventoryOf: () => null, sensorLatest: () => null, temps: { classify: () => 'other', maxAgeOf: () => 15 * 60_000 }, yielder: async () => {} };
+  const targets = [{ key: 'K1', name: 'bm-1', vcenterId: 'vcA', serviceTag: 'T1', idrac: { regId: 'r1' }, paths: ['idrac'] },
+    { key: 'K9', name: 'bm-9', vcenterId: 'vcA', serviceTag: 'T9', idrac: { regId: 'r9' }, paths: ['idrac'] }];
+  const gather = async (now) => { callNow = now; return Object.fromEntries((await A.gatherPower({ targets, deps, now })).map((x) => [x.key, x])); };
+  const runsOf = (key, from = 0) => calls.filter((c) => c.key === key).slice(from).map((c) => [c.from, c.to]);
+  const allFinished = (ts) => (finishedDays(ts) ? [[kstMonthStart(ts), kstDayStart(ts)]] : []);
+  const L = `${new Date(T + OFF).toISOString().slice(0, 16)} KST`;
+  // 1) 처음 — 이번 달 끝난 날을 한 묶음으로 읽는다 · 값 = 끝난 날 + 오늘 지난 시간
+  let s = await gather(T);
+  assert.deepEqual(runsOf('r1'), allFinished(T), `${L}: 끝난 날 묶음 하나`);
+  assert.equal(s.K1.kwhMonth, kwhOf(400, T), `${L}: 월 누적`);
+  // 2) 같은 시각 다시 — 값이 있던 날(r1)은 캐시 · 값이 없던 날(r9)은 담지 않고 다시 읽는다
+  const n1 = runsOf('r1').length; const n9 = runsOf('r9').length;
+  await gather(T);
+  assert.equal(runsOf('r1').length, n1, `${L}: 끝난 날 Wh 는 캐시(요청마다 한 달을 다시 읽지 않는다)`);
+  assert.deepEqual(runsOf('r9', n9), allFinished(T), `${L}: 값이 없던 날은 캐시하지 않는다(늦게 채워지는 롤업을 놓치지 않게)`);
+  // 3) 늦게 채워진 날 — 처음엔 없던 r9 의 지난 날 롤업이 생기면 다음 계산이 반영한다
+  late = true;
+  s = await gather(T + 1000);
+  assert.equal(s.K9.kwhMonth, kwhOf(300, T + 1000), `${L}: 늦게 온 롤업 반영`);
+  // 4) TTL 뒤 — 담은 날도 다시 읽는다: 그 시각의 끝난 날 전부(날 · 달이 바뀌었으면 바뀐 기준 — 새 달 첫날이면 읽을 날이 없다)
+  const T2 = T + A.DAY_WH_TTL_MS + 1; const m1 = runsOf('r1').length;
+  s = await gather(T2);
+  assert.deepEqual(runsOf('r1', m1), allFinished(T2), `${L}: 담은 값도 TTL 뒤 다시 읽는다`);
+  assert.equal(s.K1.kwhMonth, kwhOf(400, T2), `${L}: TTL 뒤 월 누적`);
+  // 5) TTL 안에 KST 자정을 넘김(30분 뒤) — 담긴 날은 그대로 · 새로 끝난 날 하나만 읽는다(달이 바뀌었으면 읽을 날이 없다 · 지난 시간 0 이면 null)
+  A._resetPowerAggForTest(); calls.length = 0; late = false;
+  await gather(T);
+  const T3 = T + 30 * 60_000; const k1 = runsOf('r1').length;
+  s = await gather(T3);
+  const crossed = kstDayStart(T3) !== kstDayStart(T) && kstMonthStart(T3) === kstMonthStart(T);
+  assert.deepEqual(runsOf('r1', k1), crossed ? [[kstDayStart(T), kstDayStart(T3)]] : [], `${L}: 30분 뒤 — 새로 끝난 날만`);
+  assert.equal(s.K1.kwhMonth, kwhOf(400, T3), `${L}: 30분 뒤 월 누적`);
+  return { T2, T3 };
+}
+
+test('③-2 월 누적 캐시 — KST 자정 · UTC 자정 · 월말 · 1일 · 2일 · 실제 시각(시각과 무관하게 같은 결과)', async () => {
+  const M0 = kstMonthStart(NOW);                                   // 실제 시각의 KST 달(규약: 기준은 실제 시각에서 — 달 길이 · 연말도 그 달 그대로)
+  const lastDay = Math.round((kstMonthStart(M0 + 32 * DAY_MS) - M0) / DAY_MS);
+  const at = (day, hh, mm) => M0 + (day - 1) * DAY_MS + hh * HOUR + mm * 60_000;   // 이번 달 day 일 hh:mm(KST 벽시계)
+  const kd = (ts) => kstDayStart(ts); const ud = (ts) => new Date(ts).toISOString().slice(0, 10);
+  const cases = [
+    ['실제 시각(정시 -20분)', NOW, null],
+    ['15일 10:40 — TTL 이 같은 KST 날 안', at(15, 10, 40), ({ T, T2 }) => kd(T2) === kd(T)],
+    ['15일 19:40 — TTL 이 KST 자정을 넘는다(예전 시험 실패 시각대)', at(15, 19, 40), ({ T, T2 }) => kd(T2) !== kd(T)],
+    ['15일 08:40 — TTL 이 UTC 자정만 넘는다(KST 날은 그대로)', at(15, 8, 40), ({ T, T2 }) => ud(T2) !== ud(T) && kd(T2) === kd(T)],
+    ['15일 23:40 — 30분 뒤 KST 자정(담긴 날 + 새로 끝난 날 하나)', at(15, 23, 40), ({ T, T3 }) => kd(T3) !== kd(T)],
+    [`말일(${lastDay}일) 19:40 — TTL 이 달을 넘는다(새 달은 끝난 날 없음)`, at(lastDay, 19, 40), ({ T, T2 }) => kstMonthStart(T2) !== kstMonthStart(T)],
+    [`말일(${lastDay}일) 23:40 — 30분 뒤 새 달 00:10(값 없음 = null · 0 이 아니다)`, at(lastDay, 23, 40), ({ T, T3 }) => kstMonthStart(T3) !== kstMonthStart(T) && kwhOf(400, T3) === null],
+    ['1일 00:40 — 끝난 날도 지난 시간도 없다(null)', at(1, 0, 40), ({ T }) => finishedDays(T) === 0 && kwhOf(400, T) === null],
+    ['1일 08:40 — UTC 로는 전달 마지막 날(프로세스 시간대와 무관)', at(1, 8, 40), ({ T }) => finishedDays(T) === 0 && ud(T) !== new Date(T + OFF).toISOString().slice(0, 10)],
+    ['2일 10:40 — 끝난 날 하나', at(2, 10, 40), ({ T }) => finishedDays(T) === 1],
+  ];
+  for (const [name, T, shape] of cases) {
+    const r = await monthCacheCase(T);
+    if (shape) assert.ok(shape({ T, ...r }), `사례가 말한 경계를 실제로 지난다 — ${name}`);
+  }
 });
 
 test('④ 라우트 — 범위 먼저 · 랙 배치 범위 · ?rack', async () => {

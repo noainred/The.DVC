@@ -17,6 +17,7 @@
 | [SETTINGS.md](SETTINGS.md) | **설정 화면 탭별 안내** — 각 탭의 기능·저장 파일·환경변수·권한·주의사항(화면 목록의 진실의 원천은 `web/src/views/Settings.jsx` 의 `SUB`) |
 | [API.md](API.md) | **API 레퍼런스 — 전 엔드포인트**(자동 생성, 개수는 생성 문서 머리말 참조). 그룹·게이트·권한·소스 위치 |
 | [API-PUBLIC.md](API-PUBLIC.md) | **외부 포탈 연동 가이드** — 공개 조회 API(`/api/v1`) 인증·계약·필드·오류·예제 |
+| [OPS-SAN-STORAGE.md](OPS-SAN-STORAGE.md) | **SAN 스토리지 성능 운영 안내**(v2.955) — 준비(시리얼 · REST · 표본 토글) · 현황 · 상세 · 점검(확인 불가의 뜻 · 기준 · 이력 · 알림 · 월간 보고서) · 공개 API · 문제 해결 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | **코드 지도와 데이터 흐름** — 모듈 배치, 중앙↔엣지 6방향, 시계열 DB 20종, 폴러 규약 |
 | [ENV.md](ENV.md) | **환경변수 레퍼런스**(자동 생성, 개수는 생성 문서 머리말 참조) — 분류·기본값·정의 위치 |
 | [CONFIG-FILES.md](CONFIG-FILES.md) | **설정·데이터 파일 레퍼런스**(자동 생성, 개수는 생성 문서 머리말 참조) — 용도·원자적 쓰기·권한·지우면 생기는 일 |
@@ -231,6 +232,7 @@
 | [INSTALL.md](INSTALL.md) | 설치 가이드 (The Davinci Virtual Platform) |
 | [MAINTENANCE-PAGE.md](MAINTENANCE-PAGE.md) | 업데이트·재시작 안내 페이지 (다운타임 안내) |
 | [NETWORK-COMMS-FIREWALL.md](NETWORK-COMMS-FIREWALL.md) | 네트워크 통신 · 방화벽 오픈 가이드 (The DVC Portal) |
+| [OPS-SAN-STORAGE.md](OPS-SAN-STORAGE.md) | SAN 스토리지 성능 — 운영 안내 |
 | [PERF-AUDIT-2026-09-13.md](PERF-AUDIT-2026-09-13.md) | 성능·보안 전수조사 (2026-09-13, v2.503.0) |
 | [RELEASE-SIGNING.md](RELEASE-SIGNING.md) | 릴리스 서명(배포자 서명 검증) |
 | [RELEASES.md](RELEASES.md) | 릴리스/다운로드 — GitHub Releases 가이드 |
@@ -244,5 +246,5 @@
 | [WORKLOG-2026-07-31.md](WORKLOG-2026-07-31.md) | 작업 기록 — VMware Global Monitoring Portal (The.DVC) |
 | [WORKLOG-2026-08-01.md](WORKLOG-2026-08-01.md) | 작업 기록 — 권한 세분화 · 로그인 테마 · 계정 정책 · 보안 감사 (2026-08-01) |
 
-`docs/*.md` 103개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
+`docs/*.md` 104개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
 <!-- arch-doc:docs:end -->

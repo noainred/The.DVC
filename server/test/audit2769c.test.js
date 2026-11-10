@@ -21,6 +21,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import ssh2 from 'ssh2';
 import { stripComments } from './_stripComments.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2769c-'));
 process.env.CONFIG_DIR = DIR;
@@ -286,7 +287,7 @@ test('D4-02 실제 centralRouter pdu-config — 중앙 파일이 있을 때만 t
 test('D4-02 중앙은 엣지 스냅샷을 평가하지 않는다(이중 발송 방지 — 엣지 현장 알림이 설계) · 알림 채널 설정은 pdu-config 에 없다', () => {
   const poller = stripComments(read('pdu/poller.js'));
   assert.ok(!/edgePduSnapshots/.test(poller), '중앙 폴러가 엣지 스냅샷을 평가하지 않는다');
-  const central = stripComments(read('routes/central.js'));
+  const central = stripComments(centralSource());
   const seg = central.slice(central.indexOf("centralRouter.get('/pdu-config'"), central.indexOf("centralRouter.post('/pdu-data'"));
   assert.ok(seg.length > 100);
   assert.ok(!/loadAlertConfig|alerts\b/.test(seg), '알림 채널 설정을 배포하지 않는다');

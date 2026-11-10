@@ -16,6 +16,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2681b-'));
 process.env.CONFIG_DIR = DIR;
@@ -107,7 +108,7 @@ test('R2F-02 — 미검증 이름이 검증된 엣지 진단을 밀어내지 못
 });
 
 test('R2F-02 — 라우트가 검증 여부를 진단 저장에 넘긴다', () => {
-  const s = stripComments(read('routes/central.js'));
+  const s = stripComments(centralSource());
   assert.match(s, /setGpuGuestDiag\([^;]*\{\s*verified:\s*verifiedGpu\s*\}/);
 });
 
@@ -135,7 +136,7 @@ test('R2F-03 — 통신 점검 DB 를 못 쓰면 dbUnavailable(stored 0)이고 �
     fs.rmSync(path.join(DIR, 'link-check.db'), { recursive: true, force: true });
     dbm._resetForTest();
   }
-  const s = stripComments(read('routes/central.js'));
+  const s = stripComments(centralSource());
   assert.match(s, /if \(out\?\.dbUnavailable\) return res\.status\(503\)/);
   const w = stripComments(read('agent/linkCheckWorker.js'));
   assert.match(w, /dbUnavailable/);

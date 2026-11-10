@@ -16,7 +16,7 @@ import { config } from '../../config.js';
 import { isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
-import { resolvePerfTarget, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, perfVcOf, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -84,8 +84,9 @@ export async function bmCapacityDetail(req, snap, deps = {}) {
   const D = memo(deps0(deps));
   const allowed = scopedVcenterIds(req.user, snap);
   const key = t(req.params?.key);
-  const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key });
-  if (!f || f.denied) return { __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' };
+  const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key, vcenterId: perfVcOf(req) });   // 다음 점검 ①: (법인, 키) 쌍
+  const bad = perfTargetFail(f);
+  if (bad) return bad;
   const rules = await D.rules().catch(() => ({}));
   const cfg = { targetPct: rules.capacity?.targetPct, minDays: rules.capacity?.minDays };
   if (f.via === 'edge') {

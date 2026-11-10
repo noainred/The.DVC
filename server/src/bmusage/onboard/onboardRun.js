@@ -188,7 +188,12 @@ export function applyOnboard(rows = [], { D, by = '', now = Date.now(), isEdge =
         ...(p.enabled === null ? {} : { enabled: p.enabled }),
       });
     }
-    if (p.tag && (p.cls || p.apps.length || p.role)) tagItems.push({ key: p.tag, ...(p.cls ? { tag: p.cls } : {}), ...((p.apps.length || p.role) ? { purpose: { apps: p.apps, role: p.role } } : {}) });
+    // 2차 재확인 G1: 분류(class)는 서비스 태그 키 그대로(전 법인 설정 — 전체 범위만) · 용도 · 역할은 분석이 정한 저장 키(purposeKey — 상세 화면과 같은 규칙).
+    if (p.tag && p.cls) tagItems.push({ key: p.tag, tag: p.cls });
+    if (p.tag && (p.apps.length || p.role)) {
+      tagItems.push({ key: p.purposeKey || p.tag, purpose: { apps: p.apps, role: p.role } });
+      if (p.purposeClearPair) tagItems.push({ key: p.purposeClearPair, purposeClear: true });
+    }
   }
   const snapshot = snapshotRegistries({ by, now, fileSha });
   const applied = { os: 0, idrac: 0, tags: 0, edge: 0, removed: 0, blocked };

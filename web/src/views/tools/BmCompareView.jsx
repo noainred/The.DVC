@@ -22,6 +22,7 @@ import {
   colorPlan, sparkPath, corpsReadText, devText, COMPARE_TABLE_NOTE, COMPARE_HONEST, skewText, baselineCellText, focusStartSummary, compareCsv, compareCsvName,
 } from './bmCompareText.js';
 import { useAnnotations } from './BmAnnotations.jsx';
+import { parseRef, refOf, normCompareResp, corpLabel } from './bmPerfUrl.js'; // 다음 점검 ①: 비교 열 = (법인, 키) 쌍
 import BmShareButtons from './BmShareButtons.jsx'; // 6단계 공유 링크 · 캡처
 import './bmStage6.css';
 
@@ -35,6 +36,8 @@ export function createCompareLoader(fetcher = (q) => fetchJson('/tools/bm-usage/
       try { const d = await fetcher(q); if (g !== gen) return 'stale'; set({ resp: d, loading: false }); return 'ok'; }
       catch (e) { if (g !== gen) return 'stale'; set({ resp: null, err: e, loading: false }); return 'err'; }
     },
+    /** v2.954(점검 E-6): 진행 중 조회를 버린다(세대만 올린다) — 고른 서버를 모두 뺐을 때 앞서 띄운 조회가 끝나 빈 선택 위에 옛 비교를 그리지 않게. */
+    cancel() { gen++; },
   };
 }
 
@@ -223,30 +226,33 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
   const loader = useRef(null);
   const rootRef = useRef(null);
   if (!loader.current) loader.current = createCompareLoader();
+  // keys = ‘법인|키’ 쌍 글자(bmPerfUrl.refOf — 예전 판 목록은 키만 · 법인 모름). 요청은 키 · 법인을 같은 순서 두 목록으로.
   const keysSig = keys.join(',');
+  const pairs = keys.map(parseRef);
   const canWrite = hasRole('admin', 'operator');
   useEffect(() => {
-    if (!keys.length) { setSt({ resp: null, err: null, loading: false }); return; }
-    loader.current.load({ keys: keysSig, range, group, value, ...(cross ? { cross: '1' } : {}) }, (p) => setSt((x) => ({ ...x, ...p })));
+    if (!keys.length) { loader.current.cancel(); setSt({ resp: null, err: null, loading: false }); return; }
+    const vcs = pairs.map((p) => p.vc);
+    loader.current.load({ keys: pairs.map((p) => p.key).join(','), ...(vcs.some(Boolean) ? { vcenterIds: vcs.join(',') } : {}), range, group, value, ...(cross ? { cross: '1' } : {}) }, (p) => setSt((x) => ({ ...x, ...p })));
   }, [keysSig, range, group, value, cross]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { onState?.({ view, group, value, range, cross, metric, keys }); }, [view, group, value, range, cross, metric, keysSig]); // eslint-disable-line react-hooks/exhaustive-deps
   const loadSets = () => fetchJson('/tools/bm-usage/compare/sets').then((r) => setSets({ list: r.sets || [], err: '', max: r.max })).catch((e) => setSets({ list: null, err: e?.message || String(e) }));
   useEffect(() => { loadSets(); }, []);
-  const resp = st.resp;
+  const resp = useMemo(() => normCompareResp(st.resp), [st.resp]);
   const max = resp?.maxServers ?? sets.max ?? 5;
   const cols = useMemo(() => resp?.columns || [], [resp]);
   const colors = useMemo(() => colorPlan(cols.map((c) => c.key)), [cols]);
-  const nameOf = (k) => cols.find((c) => c.key === k)?.name || names[k] || k;
+  const nameOf = (k) => cols.find((c) => c.key === k)?.name || names[k] || parseRef(k).key;
   const live = cols.filter((c) => c.state === 'ok' || c.state === 'stale');
   // 6단계: 고른 서버들의 운영 주석(◆) — 겹쳐서 보기의 줄에 같이(비교 창이 바뀔 때 1회).
   const annWin = useMemo(() => (resp?.from != null ? { from: resp.from, to: resp.to } : null), [resp]);
-  const ann = useAnnotations(live.map((c) => c.key), annWin, 0);
+  const ann = useAnnotations(live.map((c) => c.realKey), annWin, 0, live.map((c) => c.vcenterId || ''));
   const crossCorps = new Set(live.map((c) => c.vcenterId)).size > 1;
 
   async function saveSet() {
     setMsg(null);
     try {
-      const r = await putJson('/tools/bm-usage/compare/sets', { name: setName, keys, cross });
+      const r = await putJson('/tools/bm-usage/compare/sets', { name: setName, keys: pairs.map((p) => p.key), vcenterIds: pairs.map((p) => p.vc), cross });
       if (r?.ok === false) { setMsg({ tone: 'bad', text: r.reason || '저장하지 못했습니다.' }); return; }
       setMsg({ tone: 'ok', text: `세트 ‘${r.set?.name}’ 를 저장했습니다(${r.set?.keys?.length}대).` }); setSetName(''); loadSets();
     } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
@@ -258,7 +264,7 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
   async function focusAll() {
     setFocusBusy(true); setMsg(null);
     try {
-      const r = await postJson('/tools/bm-usage/compare/focus', { keys: live.map((c) => c.key), reason }, { timeoutMs: 120_000 });
+      const r = await postJson('/tools/bm-usage/compare/focus', { keys: live.map((c) => c.realKey), vcenterIds: live.map((c) => c.vcenterId || ''), reason }, { timeoutMs: 120_000 });
       setMsg({ tone: r?.ok === false ? 'bad' : 'ok', text: focusStartSummary(r) });
       if (r?.ok !== false) setReason('');
     } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
@@ -314,7 +320,14 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
         {!keys.length && <span className="bmo-note" style={{ margin: 0 }}>보드 행의 비교 칸 · 상세 머리 ‘비교에 추가’ · 병목 Top 5 · 저장된 세트로 서버를 담습니다.</span>}
       </div>
       {cols.filter((c) => !['ok', 'stale'].includes(c.state)).map((c) => (
-        <p key={c.key} className="bmo-note">‘{nameOf(c.key)}’ — {columnStateView(c.state, { minEdgeVersion: resp?.minEdgeVersion }).note}{c.reason ? `(${c.reason})` : ''}</p>
+        <div key={c.key}>
+          <p className="bmo-note">‘{nameOf(c.key)}’ — {columnStateView(c.state, { minEdgeVersion: resp?.minEdgeVersion }).note}{c.reason ? `(${c.reason})` : ''}</p>
+          {c.state === 'ambiguous' && Array.isArray(c.candidates) && (
+            <div className="bmcmp-btns" role="group" aria-label="법인 고르기">
+              {c.candidates.map((x) => <button key={x.vcenterId} type="button" className="btn btn-sm bmp-touch" onClick={() => onKeys?.(keys.map((k) => (k === c.key ? refOf(c.realKey, x.vcenterId) : k)))}>{corpLabel(x)}</button>)}
+            </div>
+          )}
+        </div>
       ))}
       {keys.length === 1 && <p className="bmo-note">한 대를 더 고르면 비교합니다.</p>}
       {/* 저장된 세트 · 동시 집중 */}
@@ -324,7 +337,7 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
           {sets.err && <span className="bmo-note" style={{ margin: 0, color: toneVar('bad') }}>세트를 읽지 못했습니다: {sets.err}</span>}
           {(sets.list || []).map((s) => (
             <span key={s.id} className="bmcmp-set">
-              <button type="button" className="btn btn-sm bmp-touch" onClick={() => { setCross(s.cross === true && !!resp?.crossAllowed); onKeys?.(s.keys); }}>{s.name}({s.keys.length}대{s.cross ? ' · 법인 간' : ''})</button>
+              <button type="button" className="btn btn-sm bmp-touch" onClick={() => { setCross(s.cross === true && !!resp?.crossAllowed); onKeys?.(s.keys.map((k, i) => refOf(k, s.vcenterIds?.[i] || ''))); }}>{s.name}({s.keys.length}대{s.cross ? ' · 법인 간' : ''})</button>
               {canWrite && <button type="button" className="bmcmp-x" aria-label={`세트 ${s.name} 지우기`} onClick={() => deleteSet(s.id)}>✕</button>}
             </span>
           ))}

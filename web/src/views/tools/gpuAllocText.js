@@ -325,29 +325,32 @@ export function profileOptions(tree, vcSel = null) {
  * 그 프로파일 VM 을 하나 더 놓을 수 있는 GPU(순수). 판정은 서버가 계산한 슬롯(gpu.slots)과 용량만 쓴다:
  *   · 같은 프로파일이 올라간 vGPU GPU 의 남은 슬롯(slots.free > 0) — 먼저(빈 GPU 를 아껴 두는 쪽 · 남은 슬롯이 적은 것부터)
  *   · 비어 있는 vGPU GPU 중 모델이 프로파일 계열과 같고 용량 ≥ 프로파일 GB — 용량 ÷ 프로파일 GB 장
- *   뺀다: 끊긴 호스트 · 배치 정보 없는 GPU(모름) · 혼합 크기 · 다른 프로파일 GPU · 패스스루 · vSGA · 용량 모름.
+ *   뺀다: 끊긴 호스트 · 유지보수 모드 호스트(v2.951 — 수집기가 connectionState 'MAINTENANCE' 로 싣는다 · 그 호스트엔 VM 을 켤 수 없다) ·
+ *   배치 정보 없는 GPU(모름) · 혼합 크기 · 다른 프로파일 GPU · 패스스루 · vSGA · 용량 모름.
  *   MIG 프로파일은 빈 GPU 의 장 수가 MIG 구성에 달려 있어 '추정' 으로 표시한다.
  * @returns {{ per: number|null, mig: boolean, family: string|null, rows: object[], same: number, empty: number, skipped: object }}
  */
 export function placementCandidates(tree, profile, vcSel = null) {
   const per = profileGB(profile);
   const fam = profileFamily(profile);
-  const out = { per, mig: !!fam?.mig, family: fam?.family || null, rows: [], same: 0, empty: 0, skipped: { down: 0, noPlacement: 0, mixed: 0, otherProfile: 0, capUnknown: 0, small: 0 } };
+  const out = { per, mig: !!fam?.mig, family: fam?.family || null, rows: [], same: 0, empty: 0, skipped: { down: 0, maint: 0, noPlacement: 0, mixed: 0, otherProfile: 0, capUnknown: 0, small: 0 } };
   if (per == null || !fam) return out;
   for (const vc of pickVcenters(tree, vcSel)) for (const dc of vc.datacenters) for (const cl of dc.clusters) for (const h of cl.hosts) {
     const down = h.connectionState === 'DISCONNECTED' || h.connectionState === 'NOT_RESPONDING';
+    const maint = h.connectionState === 'MAINTENANCE';   // v2.951(점검): 예전에는 유지보수 모드 호스트의 GPU 도 '놓을 수 있음' 으로 보였다
+    const skipHost = () => { if (down) out.skipped.down += 1; else out.skipped.maint += 1; };
     for (const g of h.gpus) {
       if (g.mode !== 'vgpu') continue;
       const base = { id: `${h.id || h.name}|${g.idx}`, vc: vc.id, vcName: vc.name, cluster: cl.name, host: h.name, gpu: g.idx, model: g.model };
       if (g.vms.length && g.slots?.profile === profile) {
         if (!(g.slots.free > 0)) continue;
-        if (down) { out.skipped.down += 1; continue; }
+        if (down || maint) { skipHost(); continue; }
         out.rows.push({ ...base, kind: 'same', fit: g.slots.free, now: `${profile} · ${g.slots.used}/${g.slots.total} 슬롯`, note: '같은 프로파일 GPU 의 남은 슬롯' });
         out.same += g.slots.free;
         continue;
       }
       if (!modelHasFamily(g.model, fam.family)) continue;
-      if (down) { out.skipped.down += 1; continue; }
+      if (down || maint) { skipHost(); continue; }
       if (!g.placement) { out.skipped.noPlacement += 1; continue; }
       if (g.vms.length) { if (g.slots?.mixed) out.skipped.mixed += 1; else out.skipped.otherProfile += 1; continue; }
       if (g.capGB == null) { out.skipped.capUnknown += 1; continue; }
@@ -415,8 +418,15 @@ export function historyQuery({ days = 90, vcSel = null, scope = '' } = {}) {
 }
 const signed = (v, unit) => (v == null ? '—' : `${v > 0 ? '+' : ''}${numText(v)} ${unit}`);
 /** 추세 → 글자. 소진 예상이 없으면 '—' 와 그 이유(점 부족 · 늘지 않음 · 들쭉날쭉) — '소진 안 함' 으로 단정하지 않는다. */
-export function trendText(t, now = Date.now()) {
+export function trendText(t, now = Date.now(), { total = false } = {}) {
   if (!t) return { change: '—', perDay: '—', left: '—', why: '이력 없음' };
+  // v2.951(점검): 마지막 보고가 오래된 법인은 '오늘부터 N일 뒤' 를 내지 않는다(서버 allocTrend 가 stale 일수를 싣는다).
+  //   합계는 '보고 없음' 이 아니라 '합계 없음' — 법인 하나가 빠진 날은 합계를 내지 않으므로(부분 합 금지) 다른 법인은 보고 중이어도 합계 끝이 멈춘다.
+  if (t.stale) {
+    return total
+      ? { change: signed(t.change30, 'GB'), perDay: '—', left: `— (합계 없음 ${t.stale}일)`, why: `최근 ${t.stale}일은 보고가 빠진 법인이 있어 합계를 내지 않았습니다 — 아래 표에서 '보고 없음' 법인을 확인하세요` }
+      : { change: signed(t.change30, 'GB'), perDay: '—', left: `— (보고 없음 ${t.stale}일)`, why: `마지막 보고가 ${t.stale}일 전 — 지금 추세를 모릅니다` };
+  }
   if (t.over) return { change: signed(t.change30, 'GB'), perDay: t.gbPerDay == null ? '—' : `${signed(Math.round(t.gbPerDay * 10) / 10, 'GB')}/일`, left: '이미 넘음', why: '마지막 날 할당이 용량보다 큽니다 — 확인이 필요합니다' };
   const why = t.daysLeft != null ? '최근 30일 할당 증가 기울기로 낸 추정' : t.points < 7 ? `최근 30일 점이 ${t.points}개 — 7개 이상이어야 냅니다`
     : !(t.gbPerDay > 0) ? '최근 30일 할당이 늘지 않았습니다' : '증가가 들쭉날쭉해(결정계수 0.3 미만) 내지 않습니다';

@@ -20,6 +20,7 @@ import {
 } from './nodeLoadText.js';
 import NodeClientsDrawer from './NodeClientsDrawer.jsx'; // v2.932(2차 ③) 노드 드로어
 import ClientDistView from './ClientDistView.jsx';       // v2.932(2차 ③) 클라이언트 분포 · 재배치 보드
+import NodeGraphView from './NodeGraphView.jsx';         // v2.951 연결 그래프(현 그래프 · 노드 카드) — 설계 isilon-node-clients-viz ① ③
 import './nodeLoad.css';
 
 function Seg({ label, items, value, onPick }) {
@@ -269,15 +270,21 @@ function Overlay({ d, sel, picks, onToggle }) {
 }
 
 /**
- * @param {{deviceId:string, snap:object, isEdge:boolean}} props
+ * @param {{deviceId:string, snap:object, isEdge:boolean, openNode?:{id:number, at:number}|null}} props openNode — 바깥(노드 표 ID 열)이 열어 달라는 노드(v2.938)
  */
-export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
+export default function NodeLoadPanel({ deviceId, snap, isEdge, openNode = null }) {
   const list = useMemo(() => (Array.isArray(snap?.nodes?.list) ? snap.nodes.list : []), [snap]);
   const [d, setD] = useState(null);
   // v2.932: 표본 폴러가 켜진 장비(응답 sample.sampleEnabled)는 디스크 busy·IOPS · 프로토콜 묶음 · 클라이언트 분포 보기를 연다.
   const sampleEnabled = d?.sample?.sampleEnabled === true;
   const avail = useMemo(() => groupsAvailable(list, { sampleEnabled }), [list, sampleEnabled]);
   const [drawerNode, setDrawerNode] = useState(null); // v2.932(2차 ③) 노드 드로어 — 열린 노드 번호
+  const [drawerFocus, setDrawerFocus] = useState(null); // v2.951 연결 그래프에서 고른 것 — { client|null, range, at } (드로어가 그 줄로 스크롤 · 창을 맞춘다)
+  // v2.939: 노드 표(아래)에서 ID 를 누르면 드로어를 연다(같은 노드를 다시 눌러도 at 이 달라 다시 연다). 화면 올리기는 드로어가 자기를 올린다(scrollKey).
+  useEffect(() => {
+    if (!openNode || openNode.id == null) return;
+    setDrawerNode(openNode.id);
+  }, [openNode]);
   const [range, setRange] = useState('24h');
   const [sel, setSel] = useState('in');
   const [view, setView] = useState('heat');
@@ -339,6 +346,9 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
   });
   const addOverlay = (id) => { if (!picks.some((p) => p.id === id)) togglePick(id); setView('overlay'); };
   const openDrawer = (id) => setDrawerNode(id); // v2.932: 히트맵 노드 이름·순위·분포 막대 → 드로어
+  // v2.951: 연결 그래프의 노드(호 · 카드 머리) · 클라이언트(호 · 칩) — 드로어를 열고 그 줄로 스크롤 · 그래프 창(24h/7d·30d)을 드로어 창(24h/7d)에 맞춘다.
+  const openFromGraph = (id, client, range) => { setDrawerNode(id); setDrawerFocus({ client: client ?? null, range: range === '24h' ? '24h' : '7d', at: Date.now() }); };
+  const distLike = view === 'dist' || view === 'graph';   // 창 이동 줄 · 타일 · 추이를 쓰지 않는 보기(자기 창을 가진다)
 
   const groups = GROUP_ORDER.filter((g) => avail[g]);
   if (!groups.length) return null;
@@ -362,17 +372,19 @@ export default function NodeLoadPanel({ deviceId, snap, isEdge }) {
         {groups.map((g) => (
           <Seg key={g} label={GROUP_TEXT[g]} items={SELECTS.filter((x) => x.group === g)} value={group === g ? sel : null} onPick={setSel} />
         ))}
-        <Seg label="보기" items={[{ key: 'heat', label: '히트맵' }, { key: 'multi', label: '소형 다중' }, { key: 'overlay', label: '겹쳐 보기' }, ...(avail.proto ? [{ key: 'dist', label: '클라이언트 분포' }] : [])]} value={view} onPick={setView} />
+        <Seg label="보기" items={[{ key: 'heat', label: '히트맵' }, { key: 'multi', label: '소형 다중' }, { key: 'overlay', label: '겹쳐 보기' }, ...(avail.proto ? [{ key: 'dist', label: '클라이언트 분포' }, { key: 'graph', label: '연결 그래프' }] : [])]} value={view} onPick={setView} />
         {busy && <span className="nl-muted">불러오는 중…</span>}
       </div>
       {err && <div className="nl-banner amber">노드 부하 조회 오류: {String(err?.message || err)}</div>}
-      {ready && view !== 'dist' && <WindowRow d={d} back={back} dragBack={dragBack} anchor={anchor} onDrag={setDragBack} onGo={goScroll} onJumpEnd={jumpEnd} />}
+      {ready && !distLike && <WindowRow d={d} back={back} dragBack={dragBack} anchor={anchor} onDrag={setDragBack} onGo={goScroll} onJumpEnd={jumpEnd} />}
       {drawerNode != null && (
-        <NodeClientsDrawer deviceId={deviceId} node={drawerNode} end={end} offsetMin={d?.offsetMin ?? 540} onClose={() => setDrawerNode(null)} onOverlay={addOverlay} />
+        <NodeClientsDrawer deviceId={deviceId} node={drawerNode} end={end} offsetMin={d?.offsetMin ?? 540} onClose={() => { setDrawerNode(null); setDrawerFocus(null); }} onOverlay={addOverlay}
+          scrollKey={Math.max(openNode?.at ?? 0, drawerFocus?.at ?? 0) || null} focus={drawerFocus} />
       )}
       {view === 'dist' && <ClientDistView deviceId={deviceId} end={end} offsetMin={d?.offsetMin ?? 540} onPickNode={openDrawer} />}
-      {view !== 'dist' && notes.map((n) => <div key={n.text} className={`nl-banner ${n.tone}`}>{n.text}</div>)}
-      {ready && tiles && view !== 'dist' && (
+      {view === 'graph' && <NodeGraphView deviceId={deviceId} end={end} offsetMin={d?.offsetMin ?? 540} onPick={openFromGraph} />}
+      {!distLike && notes.map((n) => <div key={n.text} className={`nl-banner ${n.tone}`}>{n.text}</div>)}
+      {ready && tiles && !distLike && (
         <>
           <div className="nl-tiles">
             <div className="nl-tile"><span className="nl-tlabel">클러스터 {tiles.clusterKind} · {back > 0 ? '창 끝 칸' : '마지막 칸'}</span>

@@ -11,6 +11,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { createDetailLoader } from './BmPerfDetail.jsx';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import { detailErrorText } from './bmPerfText.js';
 import {
   TUNING_STATUS_TEXT, GRADE_TEXT, gradeView, byText, tuningSummaryParts, devicesText, tuningStatusView, sourceById, factsNotes,
@@ -29,12 +30,13 @@ export function OpsError({ err }) {
   return <p className="bmo-note" style={{ color: toneVar('bad') }}>{detailErrorText(err)}</p>;
 }
 
-export function useOpsLoad(url, key) {
+export function useOpsLoad(url, key, vc = '') {
   const [st, setSt] = useState({ resp: null, err: null, loading: false });
   const loader = useRef(null);
-  if (!loader.current) loader.current = createDetailLoader((k) => fetchJson(url(k), {}, undefined, { timeoutMs: 60_000 }));
+  // 다음 점검 ①: url(키, 법인) — 법인은 열쇠와 함께 넘긴다(클로저에 묶으면 첫 값으로 고정된다).
+  if (!loader.current) loader.current = createDetailLoader((k, v) => fetchJson(url(k, v), {}, undefined, { timeoutMs: 60_000 }));
   const set = useCallback((p) => setSt((s) => ({ ...s, ...p })), []);
-  const load = useCallback(() => loader.current.load(key, set), [key, set]);
+  const load = useCallback(() => loader.current.load(key, set, vc), [key, vc, set]);
   useEffect(() => { setSt({ resp: null, err: null, loading: false }); load(); }, [load]);
   return { ...st, reload: load };
 }
@@ -144,8 +146,8 @@ export function TuningView({ resp }) {
   );
 }
 
-export default function BmTuningTab({ itemKey }) {
-  const { resp, err, loading, reload } = useOpsLoad((k) => `/tools/bm-usage/perf/${encodeURIComponent(k)}/tuning`, itemKey);
+export default function BmTuningTab({ itemKey, vc = '' }) {
+  const { resp, err, loading, reload } = useOpsLoad((k, v) => perfPath(k, v, '/tuning'), itemKey, vc);
   return (
     <div style={{ minWidth: 0 }}>
       <div className="bmo-bar">

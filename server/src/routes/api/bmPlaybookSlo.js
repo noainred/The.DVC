@@ -24,12 +24,11 @@ import { freshMsFor } from '../../bmusage/useJudge.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { poolSettled } from '../../util/pool.js';
 import { config } from '../../config.js';
-import { resolvePerfTarget, bmAddressHosts, demoPerfRows } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, perfVcOf, bmAddressHosts, demoPerfRows } from './bmUsage.js';
 
 const toolsPerm = requirePerm('tools');
 const adminOnly = requireRole('admin');
 const t = (v) => strOf(v, 4096).trim();
-const NOT_FOUND = Object.freeze({ __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' });
 
 function deps0(deps = {}) {
   return {
@@ -44,8 +43,8 @@ function deps0(deps = {}) {
   };
 }
 async function manualOf(D, target, realKey) {
-  for (const k of [target?.serviceTag, realKey]) { const v = k ? await D.purposeOf(String(k)).catch(() => null) : null; if (v) return v; }
-  return null;
+  const { purposeOfTarget } = await import('../../bmusage/purposeKey.js');   // 키 규칙 하나(반증 F2)
+  return purposeOfTarget((k) => D.purposeOf(String(k)), target, realKey);
 }
 /** 서버 한 대의 사실(이 노드 최신값 + 하드웨어 · 또는 엣지 보관분 — 판정은 수집 노드가 이미 했다). */
 async function factsOf(found, D) {
@@ -76,8 +75,9 @@ export async function bmPlaybookView(req, snap, deps = {}) {
   const allowed = scopedVcenterIds(req.user, snap);
   const key = t(req.params.key);
   if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
-  const found = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key });
-  if (!found || found.denied) return NOT_FOUND;
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key, vcenterId: perfVcOf(req) });   // 다음 점검 ①: (법인, 키) 쌍
+  const bad = perfTargetFail(found);
+  if (bad) return bad;
   const P = await import('../../bmusage/playbooks.js');
   const O = await import('../../bmusage/opsView.js');
   const f = await factsOf(found, D);
@@ -107,8 +107,9 @@ export async function bmSloView(req, snap, deps = {}) {
   const allowed = scopedVcenterIds(req.user, snap);
   const key = t(req.params.key);
   if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
-  const found = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key });
-  if (!found || found.denied) return NOT_FOUND;
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key, vcenterId: perfVcOf(req) });   // 다음 점검 ①: (법인, 키) 쌍
+  const bad = perfTargetFail(found);
+  if (bad) return bad;
   const L = await import('../../bmusage/slo.js');
   const q = req.query || {};
   const now = Date.now();
@@ -157,14 +158,16 @@ export async function bmSloSettingsRead(req, snap, deps = {}) {
     // 반증 F9: 예전에는 키마다 resolvePerfTarget(대상 해석 · 엣지 보관분 · 주소 목록)을 다시 돌아 500건이면 0.7초 동안 루프를 막았다 —
     //   대상(이 노드) · 엣지 보관분을 **요청당 한 번** 읽어 키 → 법인 맵을 만들고 O(N) 으로 대 본다(저장 키는 실제 키 — 가림 토큰을 풀 일이 없다).
     const D = deps0(deps);
+    // 다음 점검 ①: 키 → 법인 **집합**(같은 키가 여러 법인에 있으면 첫 법인만 보던 것 — 범위 계정이 자기 법인 서버의 목표를 못 보던 ⓑ 와 같은 유형).
+    //   ⚠ 서버별 목표는 키 하나에 걸린다(저장 키가 (법인, 키) 쌍이 아니다 — 같은 키 두 법인 서버가 목표를 같이 쓴다 · 정직 기록: 키를 바꾸려면 저장 이전이 필요해 고치지 않았다).
     const vcOf = new Map();
-    for (const x of (await D.currentTargets().catch(() => ({ targets: [] })))?.targets || []) if (x?.key) vcOf.set(String(x.key), t(x.vcenterId));
-    for (const rec of await D.listEdgeBmUsage().catch(() => [])) for (const x of rec?.snap?.targets || []) { const k = t(x?.key); if (k && !vcOf.has(k)) vcOf.set(k, t(x.vcenterId)); }
+    const addVc = (k, vc) => { if (!k) return; if (!vcOf.has(k)) vcOf.set(k, new Set()); vcOf.get(k).add(vc); };
+    for (const x of (await D.currentTargets().catch(() => ({ targets: [] })))?.targets || []) if (x?.key) addVc(String(x.key), t(x.vcenterId));
+    for (const rec of await D.listEdgeBmUsage().catch(() => [])) for (const x of rec?.snap?.targets || []) addVc(t(x?.key), t(x?.vcenterId));
     const keep = {};
     for (const k of Object.keys(cfg.servers || {})) {
       if (!vcOf.has(k)) continue;   // 지금 대상에 없는 서버(사라짐) — 예전과 같이 싣지 않는다
-      const vc = vcOf.get(k);
-      if (allowed && (!vc || !allowed.has(vc))) continue;
+      if (allowed && ![...vcOf.get(k)].some((vc) => vc && allowed.has(vc))) continue;
       keep[k] = cfg.servers[k];
     }
     if (isAdmin) servers = keep;

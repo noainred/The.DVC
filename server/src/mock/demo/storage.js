@@ -17,6 +17,8 @@
 import { isMockMode, demoHash, demoRand, demoIp } from './flags.js';
 // v2.730(검토 I-03): 영역 요약 모양은 실제 수집기(storage/areasCollector.js)와 같은 순수 모듈 하나 — import 없는 잎 모듈이라 순환이 생기지 않는다.
 import { triedAreaEntry, notTriedAreaEntry, disabledAreaEntry, areaTotals } from '../../storage/onefsAreaSummary.js';
+import { sanDemoArraySerial } from './sanswitch.js';                       // v2.952 — SAN 데모 어레이와 같은 시리얼
+import { buildFeSample, isFePerfType } from '../../storage/collectors/arrayPerf.js'; // v2.952 — 어레이 프런트엔드 표본 모양(수집기와 같은 조립)
 
 export { isMockMode };
 
@@ -120,7 +122,10 @@ export function demoStorageSnapshot(dev, t = Date.now(), now = t) {
   const h = demoHash(spec.k);
   const hour = Math.floor(t / HOUR);
   const jig = (seed, amp = 0.15) => 1 + (demoRand(`${spec.k}:${seed}:${hour}`) * 2 - 1) * amp;
-  const snap = { ...base, ok: true, version: VERSION[spec.type] || '', serial: `DEMO${String(h).slice(0, 8)}` };
+  // v2.952: 어레이(PowerMax · VMAX · PowerStore · Unity)는 같은 법인의 SAN 데모 어레이 시리얼을 쓴다 — SAN 스토리지 성능 화면이 용량 · 알람 · 어레이 측 성능을 붙일 수 있게.
+  const feKind = { powermax: 'powermax', vmax: 'powermax', powerstore: 'powerstore', unity480: 'unity' }[spec.type] || null;
+  const sanSerial = feKind ? sanDemoArraySerial(spec.vc, feKind) : null;
+  const snap = { ...base, ok: true, version: VERSION[spec.type] || '', serial: sanSerial || `DEMO${String(h).slice(0, 8)}` };
   snap.extra = { ...base.extra };
   // ── 용량(VPLEX·Metro Node 는 자체 용량이 없는 가상화 계층 — capacity 섹션 skip) ──
   const virt = spec.type === 'vplex' || spec.type === 'metronode';
@@ -260,10 +265,68 @@ const BM_SPECS = [
   { k: 'old-01', name: 'legacy-nfs-01', groups: ['로그'], mounts: ['/', '/export'], tb: [0.2, 10], pct: [60, 91], grow: 0.02, enabled: false },
 ];
 const BM_BY_ID = new Map(BM_SPECS.map((s) => [`${DEMO_PREFIX}bm-${s.k}`, s]));
+// v2.915(설계 bm-san-compare §4.4): 데모 서버의 **법인**(메인 스냅샷의 vCenter id → DataCenter). 그룹 이름('서울')은 법인이 아니므로 따로 둔다.
+//   log-01 · old-01 은 일부러 비워 '(법인 미지정)' 칩이 보이게 한다.
+const BM_VC = { 'hpc-01': 'vc-ap-northeast', 'hpc-02': 'vc-ap-northeast', 'hpc-03': 'vc-ap-northeast', 'db-01': 'vc-ap-northeast', 'db-02': 'vc-eu-central',
+  'bk-01': 'vc-us-east', 'bk-02': 'vc-us-east', 'ai-01': 'vc-ap-northeast', 'ai-02': 'vc-ap-southeast' };
 
-export function demoBmServers() {
+export function demoBmServers(dcOf = (v) => v) {
   return BM_SPECS.map((s) => ({ id: `${DEMO_PREFIX}bm-${s.k}`, name: s.name, host: demoIp(`bm:${s.k}`, 172), username: 'root', password: 'mock',
-    groups: s.groups, mounts: s.mounts, enabled: s.enabled !== false }));
+    groups: s.groups, mounts: s.mounts, enabled: s.enabled !== false, datacenterId: BM_VC[s.k] ? (dcOf(BM_VC[s.k]) || BM_VC[s.k]) : '' }));
+}
+
+/* ── v2.915 데모 디스크 I/O(설계 §4.1 · §4.5) — 접속 없이 서버 해시로 결정적 속도를 만든다. hpc-03 은 '엣지 구버전 회신(I/O 없음)' 을 흉내 낸다. ── */
+const BM_IO_MUTE = new Set(['hpc-03']);
+const MB = 1e6;
+/** 서버의 기준 속도(B/s) — 해시로 결정. DB·백업은 쓰기가, AI·HPC 는 읽기가 많게. */
+function demoBmBase(spec) {
+  const h = demoHash(`bmio:${spec.k}`);
+  const isDb = spec.groups.includes('DB'); const isBk = spec.groups.includes('백업');
+  const read = (isDb ? 40 : isBk ? 3 : 20) * MB * (1 + (h % 7) / 10);
+  const write = (isDb ? 25 : isBk ? 50 : 8) * MB * (1 + ((h >> 3) % 7) / 10);
+  return { read, write, busy: isDb ? 55 : isBk ? 35 : 20 };
+}
+/** 그 시각의 평균 속도(느린 물결 — 하루 주기) · 피크 배율(빠른 물결). */
+function demoBmRateAt(spec, t) {
+  const b = demoBmBase(spec);
+  const h = demoHash(`bmio:${spec.k}`);
+  const slow = 1 + 0.35 * Math.sin((t / DAY) * 2 * Math.PI + (h % 13));
+  const fast = 1 + 0.25 * Math.sin((t / HOUR) * 2 * Math.PI * 3 + (h % 5));
+  return { readBps: Math.round(b.read * slow * fast), writeBps: Math.round(b.write * slow * fast), busyPct: Math.round(Math.min(100, b.busy * slow * fast) * 10) / 10, peakMul: 2.2 + 0.6 * Math.sin((t / HOUR) * 2 * Math.PI * 5 + h) };
+}
+/** poller latest 행의 io 모양(diskstats.ioRate) — 누적 카운터는 기준 속도 × 가동 시간(단조 증가 — 차분 평균이 평균과 맞는다). */
+export function demoBmIo(server, t = Date.now()) {
+  const s = BM_BY_ID.get(String(server?.id || ''));
+  if (!s) return { io: null, ioError: '데모 사양 없음' };
+  if (BM_IO_MUTE.has(s.k)) return { io: null, ioError: 'edge-legacy' };
+  const r = demoBmRateAt(s, t);
+  const b = demoBmBase(s);
+  const bootTs = t - (30 + (demoHash(`boot:${s.k}`) % 300)) * DAY;   // 가동 30~330일
+  const upSec = (t - bootTs) / 1000;
+  return {
+    io: {
+      readBps: r.readBps, writeBps: r.writeBps, totalBps: r.readBps + r.writeBps, busyPct: r.busyPct, busiestDev: s.groups.includes('DB') ? 'nvme0n1' : 'sdb',
+      disks: 2 + (demoHash(`disks:${s.k}`) % 10), skipped: 0, sampleMs: 2000,
+      counters: { rdSectors: Math.floor((b.read * upSec) / 512), wrSectors: Math.floor((b.write * upSec) / 512), ioMs: Math.floor(upSec * 1000 * (b.busy / 100)), uptimeSec: Math.round(upSec) },
+    },
+    ioError: null,
+  };
+}
+/**
+ * 차트용 시계열(적재하지 않고 계산 — SAN demoPerfSynth 와 같은 방식). 버킷마다 { avg, peak } — hpc-03 은 전부 null(측정 불가).
+ * metric: 'total' | 'read' | 'write'.
+ */
+export function demoBmIoSeries(serverId, { buckets = [], bucketMs = 60_000, metric = 'total' } = {}) {
+  const n = buckets.length;
+  const s = BM_BY_ID.get(String(serverId || ''));
+  const out = { avg: new Array(n).fill(null), peak: new Array(n).fill(null), busy: new Array(n).fill(null) };
+  if (!s || BM_IO_MUTE.has(s.k) || s.enabled === false) return out;
+  for (let i = 0; i < n; i++) {
+    const r = demoBmRateAt(s, buckets[i] + bucketMs / 2);
+    const v = metric === 'read' ? r.readBps : metric === 'write' ? r.writeBps : r.readBps + r.writeBps;
+    out.avg[i] = v; out.peak[i] = Math.round(v * r.peakMul); out.busy[i] = r.busyPct;
+  }
+  return out;
 }
 
 /** 한 서버의 df 결과(poller latest 행 모양 — collect.js parseDfOutput 의 행). */
@@ -278,7 +341,7 @@ export function demoBmResult(server, t = Date.now(), now = t) {
     const used = Math.round(total * pct / 100);
     return { mount: m, totalBytes: total, usedBytes: used, availBytes: total - used, usedPct: Math.round(pct) };
   });
-  return { id: server.id, ok: true, mounts, missing: [] };
+  return { id: server.id, ok: true, mounts, missing: [], ...demoBmIo(server, t) };   // v2.915: 디스크 I/O 표본도 함께
 }
 
 /** poller.bmCollectNow 의 mock 분기 — 접속하지 않고 결과를 만든다. */
@@ -415,7 +478,35 @@ async function backfillStorage(devices, now) {
  *  · 노드 2(두 번째) 가 쏠린다 — ops 약 2.6배 · 고정 클라이언트 여럿(재배치 보드가 후보를 내게). 노드 3 은 클라이언트 0(‘최근 작업한 클라이언트 없음’ 문구 확인용).
  *  · 모양은 실제 수집기(isilonNodeLoad.buildNodeLoadSample)와 같다 — 그대로 db.saveNodeLoadSample 에 넣는다. 실패 스냅샷(수집 실패 흉내)이면 null.
  */
+/** v2.952 — 어레이 FE 단위(디렉터 · 노드 · SP + Unity · PowerStore 포트) 5분 표본 합성 — 수집기와 같은 조립(buildFeSample). 첫 단위가 쏠린다(SAN 데모 편중과 같은 방향). */
+const FE_DEMO_UNITS = { powermax: ['FA-1D', 'FA-2D'], vmax: ['FA-1D', 'FA-2D'], powerstore: ['Node A', 'Node B'], unity480: ['SPA', 'SPB'] };
+export function demoArrayPerfSample(spec, t = Date.now()) {
+  const type = spec?.type; const names = FE_DEMO_UNITS[type];
+  if (!names) return null;
+  const slot = Math.floor(t / 300_000);
+  const hourOfDay = new Date(t + 9 * HOUR).getUTCHours();
+  const dayProf = 0.55 + 0.45 * Math.sin(((hourOfDay - 7) / 24) * Math.PI * 2);
+  const jig = (seed, amp = 0.15) => 1 + (demoRand(`${spec.k}:fe:${seed}:${slot}`) * 2 - 1) * amp;
+  const kind = type === 'powerstore' ? 'node' : type === 'unity480' ? 'sp' : 'fa';
+  const units = names.map((name, i) => {
+    const skew = i === 0 ? 1.35 : 0.85;
+    const load = Math.min(1, Math.max(0.05, dayProf * skew * jig(`l${i}`, 0.2)));
+    const u = { name, kind, iops: Math.round(4000 + 26000 * load), hbps: Math.round(110e6 + 760e6 * load), lat: type === 'unity480' ? null : Math.round((0.4 + 2.2 * load * load) * 10) / 10 };
+    if (kind === 'fa') { u.busy = Math.round(Math.min(98, 15 + 62 * load) * 10) / 10; u.queue = Math.round(Math.min(95, 8 + 55 * load * load) * 10) / 10; }
+    else u.cpu = Math.round(Math.min(97, 12 + 58 * load) * 10) / 10;
+    return u;
+  });
+  if (kind !== 'fa') {
+    for (const parent of names) {
+      const base = units.find((u) => u.name === parent);
+      for (let p = 0; p < 2; p++) units.push({ name: `${parent} FC${p}`, kind: 'port', parent, iops: Math.round(base.iops * (p === 0 ? 0.6 : 0.4)), hbps: Math.round(base.hbps * (p === 0 ? 0.6 : 0.4)), lat: base.lat });
+    }
+  }
+  return buildFeSample({ ts: t, type, source: 'demo', units, probe: { demo: true } });
+}
+
 export function demoNodeLoadSample(dev, t = Date.now(), now = t) {
+  if (isFePerfType(dev?.type)) return demoArrayPerfSample(SPEC_BY_ID.get(String(dev?.id || '')) || fallbackSpec(dev || {}), t);   // v2.952 어레이 FE 단위
   const snap = demoStorageSnapshot(dev, t, now);
   if (!snap.ok || !Array.isArray(snap.nodes?.list) || !snap.nodes.list.length) return null;
   const spec = SPEC_BY_ID.get(String(dev?.id || '')) || fallbackSpec(dev);
@@ -461,9 +552,28 @@ export function demoNodeLoadSample(dev, t = Date.now(), now = t) {
 async function backfillNodeLoad(devices, now) {
   const db = await import('../../storage/db.js');
   if (!(await db.dbAvailable())) return { devices: 0, points: 0, reason: 'db-unavailable' };
-  let nDev = 0; let points = 0; let samples = 0; let sDev = 0;
+  let nDev = 0; let points = 0; let samples = 0; let sDev = 0; let feDev = 0; let feSamples = 0;
   for (const d of devices) {
-    if (!isDemoId(d.id) || d.type !== 'isilon') continue;
+    if (!isDemoId(d.id)) continue;
+    // v2.952 — 어레이 FE 단위 표본(REST 수집 장비만 — 폴러의 대상 규칙과 같다): 기록이 하나도 없을 때만 30일(최근 48시간 5분 · 그 앞 1시간).
+    if (isFePerfType(d.type) && (d.collectMethod || 'api') === 'api') {
+      const o = await db.nodeLoadOldest(d.id);
+      if (o.sampleTs == null && o.day == null) {
+        feDev += 1;
+        const base5 = Math.floor(now / 300_000) * 300_000;
+        let first = true;
+        for (let back = 30 * 24 * 12; back >= 1; back -= (back > 48 * 12 ? 12 : 1)) {
+          const s = demoNodeLoadSample(d, base5 - back * 300_000, now);
+          if (!s) break;
+          if (first) { await db.saveNodeUnits(d.id, s.units, now); first = false; }
+          const r = await db.saveNodeLoadSample(d.id, s); if (r.saved) feSamples += 1;
+          if (feSamples % 24 === 0) await new Promise((res) => setImmediate(res));
+        }
+        await new Promise((res) => setImmediate(res));
+      }
+      continue;
+    }
+    if (d.type !== 'isilon') continue;
     const o = await db.nodeLoadOldest(d.id);
     if (o.sampleTs == null && o.day == null) {
       nDev += 1;
@@ -489,7 +599,7 @@ async function backfillNodeLoad(devices, now) {
       await new Promise((res) => setImmediate(res));
     }
   }
-  return { devices: nDev, points, sampleDevices: sDev, samples };
+  return { devices: nDev, points, sampleDevices: sDev, samples, feDevices: feDev, feSamples };
 }
 
 /** 베어메탈 12시간 이력 365일 — 그 슬롯에 합계가 없을 때만. */
@@ -574,7 +684,7 @@ export async function ensureStorageDemo({ now = Date.now() } = {}) {
     } catch (e) { out.storageError = e.message; }
     try {
       const bm = await import('../../bmstor/registry.js');
-      out.bmSeed = bm.seedBmServersIfEmpty(demoBmServers());
+      out.bmSeed = bm.seedBmServersIfEmpty(demoBmServers(dcOf));   // v2.915: 데모 법인도 함께
       out.bmBackfill = await backfillBm(now);
     } catch (e) { out.bmError = e.message; }
     try { out.vmtrackBackfill = await backfillVmtrack(now); } catch (e) { out.vmtrackError = e.message; }

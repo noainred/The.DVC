@@ -40,15 +40,14 @@ import { saveBaseline, getBaseline, clearBaseline, publicBaseline, listBaselines
 import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable, invalidatePerfQueries, perfQueryTtlMs } from '../../sanswitch/perfDb.js';
 import * as pu from '../../sanswitch/portUsage.js';   // v2.748 포트 사용량 화면(순수 조립)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
-import { listDevices as listStorageDevices } from '../../storage/registry.js';
-import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
-import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 import * as swBulk from '../../sanswitch/bulk.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { isDemoGuest, DEMO_ONLY_REASON } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03·B2-01·R1-06)
 import { isSanDemoId } from '../../mock/demo/sanswitch.js';
+import { NONE_DC, abandoned, capacityIndexFor } from '../../sanswitch/storagePerfCore.js';   // v2.953: 라우트 밖(알림 · 보고서 · 공개 API)도 쓰는 코어 — 재수출
+export { NONE_DC, abandoned, capacityIndexFor };
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -124,7 +123,6 @@ export function sanListKeyOf({ local = [], edge = [], devices = [], pending = []
 }
 
 /** `?ports=1,2,3` 파싱(순수). 빈 값/빈 토큰은 무시 — `''.split(',')` → [''] → Number('') → 0 함정 방지. */
-export const NONE_DC = '__none__';
 
 /**
  * 조회 기간 파라미터(v2.420, 사용자 요구 '조회 조건에 내가 원하는 기간의 값을 볼 수 있는 기능').
@@ -181,6 +179,13 @@ export function sanStorageDcSubtotals(series, dcNameOf = (id) => id || '(법인 
     return row;
   }).sort((a, b) => (b.avgTotal ?? -1) - (a.avgTotal ?? -1));
 }
+
+export function perfAbortSignal(res) {
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+  return ac.signal;
+}
+
 
 export function registerSanSwitch(api) {
 
@@ -738,13 +743,6 @@ async function withPerfDiag(deviceId, r, req = null) {
  * 같은 조회를 기다리는 다른 요청이 있으면 멈추지 않는다(perfDb.heavyQuery 가 요청자 수를 센다).
  * 응답을 다 보낸 뒤의 close 는 취소가 아니다(writableEnded).
  */
-function perfAbortSignal(res) {
-  const ac = new AbortController();
-  res.on('close', () => { if (!res.writableEnded) ac.abort(); });
-  return ac.signal;
-}
-/** 요청한 화면이 떠나 멈춘 조회 — 받을 사람이 없으니 응답하지 않는다(소켓은 이미 닫혔다). */
-const abandoned = (e) => e?.code === 'abandoned';
 
 api.get('/tools/sanswitch/devices/:id/perf', toolsPerm, fullScopeOnly, async (req, res) => {
   const { hours, from, to, issue } = rangeParams(req.query);
@@ -916,28 +914,8 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   const memoHit = memo?.get(memoKey);
   if (memoHit && Date.now() - memoHit.at <= memoTtl) return res.json(memoHit.body);
 
-  // 등록 스토리지의 최신 스냅샷(용량) 색인 — 시리얼 정규화 후 대조.
-  const norm = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
-  const stDevById = new Map(listStorageDevices().map((d) => [d.id, admin ? d : maskDeviceAddress(d)]));
-  // 법인별로 분리해 볼 때는 **그 법인의 스토리지 용량만** 붙여야 한다 — 그래서 키에 법인을 넣는다.
-  const capBySerial = new Map();   // `${dc}\u0000${serial}` 또는 split 아니면 serial
-  const capKey = (dcId, serial) => (split ? `${dcId}\u0000${serial}` : serial);
-  for (const snap of [...storageLocalSnaps(), ...edgeStorageSnapshots()]) {
-    if (!snap?.ok) continue;
-    const d = stDevById.get(snap.deviceId) || {};
-    if (dcSet && !dcSet.has(String(d.datacenterId || ''))) continue;  // 범위 밖 법인의 어레이는 붙이지 않는다
-    const info = {
-      deviceId: snap.deviceId, name: d.name || snap.name || '', type: d.type || '',
-      totalBytes: snap.capacity?.totalBytes ?? null, usedBytes: snap.capacity?.usedBytes ?? null,
-      pct: snap.capacity?.pct ?? null,
-    };
-    // v2.606(감사 CEN2606-04): appliances 가 배열이 아니거나 원소가 null 이면 이 요약 전체가 500 이었다 — 객체 원소의 글자만 읽는다.
-    const apps = Array.isArray(snap.extra?.appliances) ? snap.extra.appliances : [];
-    const keys = [snap.serial, ...apps.map((a) => (a && typeof a === 'object' ? a.serviceTag : null))];
-    for (const key of keys) {
-      if (key && (typeof key === 'string' || typeof key === 'number')) capBySerial.set(capKey(String(d.datacenterId || ''), norm(key)), info);
-    }
-  }
+  // 등록 스토리지의 최신 스냅샷(용량) 색인 — v2.948 부터 capacityIndexFor(SAN 스토리지 성능과 같은 코어).
+  const capIdx = capacityIndexFor({ dcSet, split, admin });
 
   const nameOf = new Map(devices.map((d) => [d.id, d.name || d.host || d.id]));
   const dcNameOf = (() => {
@@ -946,7 +924,7 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   })();
   const series = agg.series.map((s) => {
     const serial = arraySerialOf(s.key);
-    const capacity = serial ? (capBySerial.get(capKey(s.group ?? '', norm(serial))) || null) : null;
+    const capacity = capIdx.lookup(serial, s.group ?? '');
     return {
       ...s,
       datacenterId: s.group ?? null,

@@ -353,16 +353,25 @@ export function deleteWindow(id, { by = '', rev = null, now = Date.now() } = {})
 let _dep = null;   // { m, s, data }
 /** 배포본 저장(엣지 인출 워커) — 같은 정규화를 다시 거친다(엣지는 중앙 문자열을 그대로 믿지 않는다). 형식 밖은 버리고 센다. */
 export function saveDeployed(list, { sig = '', now = Date.now() } = {}) {
-  const items = []; let dropped = 0;
+  const items = []; let dropped = 0; let carried = 0;
+  // v2.954(점검 D-1 반증 재수정): 중앙이 그 엣지 대상을 몰라 태그 창에 keysUnknown 을 달아 보내면(중앙 재시작 직후) 직전 배포본의 같은 창(id · 태그) keys 를 이어 쓴다 —
+  //   빈 keys 로 억제가 꺼지지 않게. 직전 배포본이 없거나 시한이 지났거나 새 창이면 이어 쓸 것이 없다(0대 — 예전과 같다).
+  let prevById = null;
   for (const x of (Array.isArray(list) ? list : []).slice(0, WINDOWS_MAX)) {
     const w = normalizeWindow(x);
-    if (w) items.push({ ...w, origin: 'central' }); else dropped += 1;
+    if (!w) { dropped += 1; continue; }
+    if (x?.target?.keysUnknown === true && w.target?.kind === 'tag') {
+      if (!prevById) { prevById = new Map(); try { for (const p of loadDeployed(now)?.items || []) prevById.set(p.id, p); } catch { /* 직전 판을 못 읽으면 이어 쓸 것이 없다 */ } }
+      const p = prevById.get(w.id);
+      if (p?.target?.kind === 'tag' && p.target.tag === w.target.tag && Array.isArray(p.target.keys) && p.target.keys.length) { w.target = { ...w.target, keys: p.target.keys.slice(0, 5_000) }; carried += 1; }
+    }
+    items.push({ ...w, origin: 'central' });
   }
   dropped += Math.max(0, (Array.isArray(list) ? list.length : 0) - WINDOWS_MAX);
   const data = { v: 1, at: now, sig: String(sig).slice(0, 64), items, dropped };
   atomicWriteFileSync(DEPLOYED_FILE(), JSON.stringify(data), { mode: 0o600 });
   _dep = null;
-  return { ok: true, n: items.length, dropped };
+  return { ok: true, n: items.length, dropped, ...(carried ? { carried } : {}) };
 }
 /**
  * 배포본 읽기 — 없으면 null · 손상이면 보존하고 null(억제하지 않는 쪽) + unreadable.

@@ -17,7 +17,7 @@ import { isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets, bmUsageStatus } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { memoJson, scopeKey } from './shared.js';
-import { resolvePerfTarget, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, failParts, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
 import { IDLE_REVIEW } from '../../bmusage/idleConst.js';
 
 const toolsPerm = requirePerm('tools');
@@ -97,7 +97,11 @@ export async function bmIdleFleet(req, snap, deps = {}) {
   if (!isAdmin) ({ match } = await perfAddressMatcher(D, tg));
   const maskName = (nm) => (isAdmin ? nm : (match && match(nm) ? maskedIdToken(nm) : String(nm).replace(IPV4_RE, (ip) => maskedIdToken(ip))));
   const maskKey = (k) => (isAdmin ? k : (match && match(k) ? maskedIdToken(k) : k));
-  const maskBy = (r) => (r.review ? { ...r, review: { ...r.review, by: isAdmin ? r.review.by : (r.review.by ? maskedIdToken(r.review.by) : '') } } : r);
+  // v2.954 반증(A-2 후속): 검토 사유(review.reason)는 운영 주석 본문과 같은 값 — 주석 조회(bmAnnotations maskText)와 같은 가림(주소 낱말마다 · 본인 검토는 원문)
+  const me = String(req.user?.username || '');
+  const maskText = (v) => (isAdmin || typeof v !== 'string' ? v : v.replace(/[^\s,;()[\]<>'"]+/g, (w) => maskName(w)));
+  const maskBy = (r) => (r.review ? { ...r, review: { ...r.review, by: isAdmin ? r.review.by : (r.review.by ? maskedIdToken(r.review.by) : ''),
+    reason: isAdmin || (me && r.review.by === me) ? r.review.reason : maskText(r.review.reason) } } : r);
   const out = visible.map((r) => maskBy({ ...r, key: maskKey(r.key), name: maskName(r.name || r.key) }))
     .sort((a, b) => (SORT[a.status] ?? 9) - (SORT[b.status] ?? 9) || (b.score ?? -1) - (a.score ?? -1) || String(a.name).localeCompare(String(b.name)));
   const summary = I.summarizeIdle(visible);
@@ -135,7 +139,8 @@ export async function bmIdleReview(req, deps = {}) {
   if (!vcIn) return { status: 400, body: { ok: false, code: 'bad-vcenter', field: 'vcenterId', reason: '대상 서버의 법인(vcenterId)이 필요합니다.' } };
   const allowed = scopedVcenterIds(req.user, snap);
   const f = await resolvePerfTarget(req, D, { allowed, isAdmin: isAdminReq(req), key: t(b.key).slice(0, 256), vcenterId: vcIn });
-  if (!f || f.denied) return { status: 404, body: { ok: false, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' } };
+  const bad = perfTargetFail(f);
+  if (bad) return failParts(bad);
   const vc = t(f.target.vcenterId);
   if (!vc) return { status: 404, body: { ok: false, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' } };
   if (!inUserWriteScope(req.user, snap, vc)) return { status: 403, body: { ok: false, code: 'forbidden', reason: '이 법인에 쓰기 권한이 없습니다(조회 전용).' } };

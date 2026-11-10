@@ -62,7 +62,9 @@ export async function pullBmOnboardNow({ fetchImpl = resilientFetch, apply = nul
     const corps = (snap?.vcenters || []).filter((v) => v && v.id).map((v) => ({ id: String(v.id), name: String(v.name || v.id) }));
     let myCorps = [];
     try { myCorps = Object.keys((await import('../bmusage/settings.js')).loadBmUsageSettings().corps || {}); } catch { myCorps = []; }
-    const r = await (apply || EA.applyEdgeDeployment)(body.rows, { sig: body.sig, corps, myCorps });
+    // v2.954(점검 D-3): 중앙 제거 대기 이름(문자열만 · 상한) — 구 중앙은 없다(null — 적용 상태를 잃은 엣지는 서명을 보고하지 않는다)
+    const pending = Array.isArray(body.pending) ? body.pending.filter((x) => typeof x === 'string').slice(0, 5000).map((x) => x.slice(0, 128)) : null;
+    const r = await (apply || EA.applyEdgeDeployment)(body.rows, { sig: body.sig, corps, myCorps, pending });
     last = { at: Date.now(), ok: !!r.ok, rows: body.rows.length, sig: body.sig, skipped: !!r.skipped, applied: r.applied || 0, rejected: r.rejected || 0, removed: r.removed || 0, ...(r.reason ? { error: String(r.reason).slice(0, 300) } : {}) };
     if (!r.skipped || !r.ok) console.log(`[bm-onboard-pull] 배포 ${body.rows.length}행 — 적용 ${last.applied} · 거부 ${last.rejected} · 지움 ${last.removed}${r.ok ? '' : ` · 실패: ${last.error}`}`);
     return last;

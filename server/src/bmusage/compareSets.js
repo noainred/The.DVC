@@ -57,7 +57,13 @@ function loadAll() {
     throw fail(503, 'settingsUnreadable', _err.get()?.reason || '비교 세트 파일을 읽지 못했습니다.');
   }
 }
-const pubSet = (s) => ({ id: String(s.id), name: String(s.name), keys: (Array.isArray(s.keys) ? s.keys : []).map(String), cross: s.cross === true, at: Number(s.at) || 0 });
+const VC_RE = /^[A-Za-z0-9._:@-]{1,128}$/;
+/** 다음 점검 ①: 세트의 서버 = (법인, 키) 쌍 — vcenterIds 는 keys 와 같은 순서(빈 칸 = 법인 모름 · 이 필드가 없는 예전 세트는 키만 — 열 때 해석이 정한다). */
+const pubSet = (s) => {
+  const keys = (Array.isArray(s.keys) ? s.keys : []).map(String);
+  const vcs = Array.isArray(s.vcenterIds) ? s.vcenterIds.map((v) => (typeof v === 'string' && VC_RE.test(v) ? v : '')) : [];
+  return { id: String(s.id), name: String(s.name), keys, ...(vcs.some(Boolean) ? { vcenterIds: keys.map((_, i) => vcs[i] || '') } : {}), cross: s.cross === true, at: Number(s.at) || 0 };
+};
 
 /** 이 사용자의 세트(사본). */
 export function listCompareSets(user) {
@@ -71,14 +77,24 @@ export function listCompareSets(user) {
  *   (범위 밖 · 없는 키는 ‘없음’ 열). 범위 계정은 cross 세트를 저장하지 못한다(라우트 400).
  * @param {{user:string, id?:string, name:string, keys:string[], cross?:boolean, maxServers?:number}} p
  */
-export function saveCompareSet({ user, id = '', name, keys, cross = false, maxServers = 5, now = Date.now() } = {}) {
+export function saveCompareSet({ user, id = '', name, keys, vcenterIds = [], cross = false, maxServers = 5, now = Date.now() } = {}) {
   const u = String(user || '');
   if (!u) throw fail(400, 'bad-request', '사용자를 알 수 없습니다.');
   const nm = cleanSetName(name);
   if (!nm) throw fail(400, 'bad-name', '세트 이름이 필요합니다.');
   const cap = Math.max(2, Math.min(SET_KEYS_HARD_MAX, Math.floor(Number(maxServers)) || 5));
   if (!Array.isArray(keys)) throw fail(400, 'bad-keys', '서버 목록이 필요합니다.');
-  const ks = [...new Set(keys.map((k) => String(typeof k === 'string' ? k : '').trim()).filter(Boolean))];
+  if (vcenterIds != null && !Array.isArray(vcenterIds)) throw fail(400, 'bad-keys', '법인 목록 형식이 다릅니다.');
+  const vin = Array.isArray(vcenterIds) ? vcenterIds : [];
+  if (vin.some((v) => v != null && v !== '' && !(typeof v === 'string' && VC_RE.test(v.trim())))) throw fail(400, 'bad-keys', '법인(vCenter id) 형식이 다릅니다.');
+  // 같은 쌍은 한 번(같은 키 · 다른 법인은 다른 서버 — 다음 점검 ①)
+  const seen = new Set(); const ks = []; const vs = [];
+  keys.forEach((k0, i) => {
+    const k = String(typeof k0 === 'string' ? k0 : '').trim();
+    const v = typeof vin[i] === 'string' ? vin[i].trim() : '';
+    if (!k || seen.has(`${v}|${k}`)) return;
+    seen.add(`${v}|${k}`); ks.push(k); vs.push(v);
+  });
   if (ks.length < 2 || ks.length > cap) throw fail(400, 'bad-keys', `서버는 2~${cap}대여야 합니다.`);
   if (ks.some((k) => k.length > KEY_MAX_LEN || CTRL_ONE.test(k))) throw fail(400, 'bad-keys', '서버 키 형식이 다릅니다.');
   // ── 동기 구간 시작(load → 수정 → 쓰기 · await 없음) ──
@@ -94,6 +110,7 @@ export function saveCompareSet({ user, id = '', name, keys, cross = false, maxSe
     rec.sets.push(set);
   }
   Object.assign(set, { name: nm, keys: ks, cross: cross === true, at: now });
+  if (vs.some(Boolean)) set.vcenterIds = vs; else delete set.vcenterIds;
   writeAll(all);
   return pubSet(set);
 }

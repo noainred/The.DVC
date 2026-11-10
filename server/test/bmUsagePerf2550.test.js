@@ -118,23 +118,32 @@ test('대상에서 사라진 서버의 인메모리 항목을 버린다 (누수 
 });
 
 // ── B6 ───────────────────────────────────────────────────────────────────────
-test('키 충돌을 감지해 개수·목록으로 밝힌다 (대상에서 빼지는 않는다)', async () => {
-  const { resolveTargets } = await import('../src/bmusage/targets.js');
+test('키 충돌을 감지해 개수·목록으로 밝히고 — 다음 점검 ①: 같은 키의 모든 대상을 수집에서 뺀다(key-conflict · 섞인 값을 만들지 않는다)', async () => {
+  const { resolveTargets, NO_PATH_REASON } = await import('../src/bmusage/targets.js');
   const bm = [
     { serverId: 's1', fleetId: 'DUP1', name: 'bm-a', serviceTag: '', vcenterId: 'vc1' },
     { serverId: 's2', fleetId: 'x2', name: 'bm-b', serviceTag: 'DUP1', vcenterId: 'vc1' },
+    { serverId: 's3', fleetId: 'x3', name: 'bm-c', serviceTag: 'UNIQ3', vcenterId: 'vc1' },
   ];
   const reg = [
     { id: 's1', host: 'https://10.0.0.1', username: 'u', password: 'p' },
     { id: 's2', host: 'https://10.0.0.2', username: 'u', password: 'p', serviceTag: 'DUP1' },
+    { id: 's3', host: 'https://10.0.0.3', username: 'u', password: 'p', serviceTag: 'UNIQ3' },
   ];
   const r = resolveTargets({ bareMetal: bm, registry: reg, bmServers: [],
     settings: { corps: { vc1: true }, osSsh: true, idracTelemetry: true }, isEdge: false, agentName: 'C' });
-  assert.equal(r.targets.length, 2, '충돌해도 대상에서 빼지 않는다(어느 쪽을 버릴지 알 수 없다)');
-  assert.equal(r.counts.keyConflicts, 1);
-  assert.equal(r.keyConflicts[0].key, 'DUP1');
-  assert.deepEqual(r.keyConflicts[0].names.sort(), ['bm-a', 'bm-b']);
-  assert.equal(r.keyConflicts[0].vcenterId, 'vc1', 'scope 로 거를 수 있어야 한다(없으면 범위 계정에 전부 숨는다)');
+  assert.deepEqual(r.targets.map((x) => x.key), ['UNIQ3'], '같은 키 두 대는 둘 다 수집하지 않는다(어느 하나를 고르지 않는다) — 겹치지 않는 서버는 그대로');
+  assert.equal(r.counts.targets, 1);
+  assert.equal(r.counts.keyConflicts, 1, '겹친 키 수');
+  assert.equal(r.keyConflicts.length, 2, '서버마다 한 줄');
+  assert.deepEqual(r.keyConflicts.map((x) => x.key), ['DUP1', 'DUP1']);
+  assert.deepEqual(r.keyConflicts.map((x) => x.names[0]).sort(), ['bm-a', 'bm-b']);
+  assert.ok(r.keyConflicts.every((x) => x.names.length === 1 && x.vcenterId === 'vc1' && x.peers === 2), '한 줄 = 그 서버의 이름 · 법인만(범위로 거를 때 다른 법인 서버 이름이 따라오지 않게)');
+  const sk = r.skipped.filter((x) => x.reason === 'key-conflict');
+  assert.deepEqual(sk.map((x) => x.name).sort(), ['bm-a', 'bm-b'], '제외 목록에 사유와 함께 남는다(조용히 사라지지 않는다)');
+  assert.equal(r.counts.byReason['key-conflict'], 2);
+  assert.ok(sk.every((x) => !('idrac' in x) && !('password' in x)), '제외 행에 자격증명이 없다');
+  assert.ok(NO_PATH_REASON['key-conflict'].includes('서비스태그'), '조치를 말한다');
 });
 
 // ── B7 ───────────────────────────────────────────────────────────────────────

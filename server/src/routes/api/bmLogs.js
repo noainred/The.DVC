@@ -21,13 +21,12 @@ import { currentTargets, bmUsageStatus } from '../../bmusage/poller.js';
 import { memoJson, scopeKey } from './shared.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { config } from '../../config.js';
-import { resolvePerfTarget, bmAddressHosts, maskBmList, applyScope, perfAddressMatcher, noStoreFail } from './bmUsage.js';
+import { resolvePerfTarget, perfTargetFail, perfVcOf, bmAddressHosts, maskBmList, applyScope, perfAddressMatcher, noStoreFail } from './bmUsage.js';
 import { CLASS_LABEL, LOG_CLASSES } from '../../bmusage/logs/rules.js';
 
 const toolsPerm = requirePerm('tools');
 const t = (v) => strOf(v, 4096).trim();
 const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
-const NOT_FOUND = Object.freeze({ __status: 404, ok: false, reason: '대상 서버를 찾지 못했습니다.' });
 const RANGE_SET = new Set(['1h', '24h', '7d']);
 
 export function depsOf(deps = {}) {
@@ -79,8 +78,9 @@ export async function bmLogsRead(req, snap, deps = {}) {
   const isAdmin = isAdminReq(req);
   const key = t(req.params.key);
   if (!key) return { __status: 400, ok: false, reason: 'key 가 필요합니다.' };
-  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key });
-  if (!found || found.denied) return NOT_FOUND;
+  const found = await resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId: perfVcOf(req) });   // 다음 점검 ①: (법인, 키) 쌍
+  const bad = perfTargetFail(found);
+  if (bad) return bad;
   const range = RANGE_SET.has(String(req.query?.range)) ? String(req.query.range) : '24h';
   let res;
   if (found.via === 'local') res = await D.local({ key: found.realKey, range });

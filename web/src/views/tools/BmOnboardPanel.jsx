@@ -16,7 +16,7 @@ import { downloadBlob } from './bmCapture.js';
 import { missingView, facetOptions, clampPageSize, readPageSize, writePageSize, nodeOf, corpOf, PAGE_SIZE_MIN, PAGE_SIZE_MAX } from './bmMissingView.js';
 import {
   ACTION_TEXT, ACTION_TONE, BUCKET_TEXT, BUCKET_ORDER, MISS_REASON_TEXT, KEY_STATUS_TEXT, ACCOUNT_KIND_TEXT,
-  numOr, summaryChips, applicable, edgeSyncText, shortFp, ymd, bufToBase64, suggestCsv, rowNote, canManageKeys, HOSTKEY_OBSERVE_NOTE,
+  numOr, summaryChips, applicable, edgeSyncText, edgeCredText, shortFp, ymd, bufToBase64, suggestCsv, rowNote, canManageKeys, HOSTKEY_OBSERVE_NOTE,
 } from './bmOnboardText.js';
 import './bmOps.css';
 import './bmOnboard.css';
@@ -322,7 +322,7 @@ function EdgeRowsSection({ rev }) {
               <tbody>{a.rows.map((r) => (
                 <tr key={r.name}><td className="bmo-name" data-sort={r.name}>{r.name}</td><td data-sort={r.corp}>{r.corp || '—'}</td>
                   <td data-sort={`${r.idracHost}${r.osHost}`}>{[r.idracHost && 'iDRAC', r.osHost && 'OS'].filter(Boolean).join(' + ') || '—'}</td>
-                  <td data-sort={`${r.osCred}${r.osKey}`}>{[r.idracCred, r.osCred, r.osKey].filter(Boolean).join(' · ') || '—'}</td>
+                  <td data-sort={edgeCredText(r)}>{edgeCredText(r)}</td>
                   <td data-nosort><button type="button" className="btn btn-sm" onClick={() => remove(a.agent, r.name)}>빼기</button></td></tr>
               ))}</tbody>
             </STable>

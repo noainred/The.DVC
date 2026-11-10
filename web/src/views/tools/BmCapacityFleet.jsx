@@ -63,7 +63,7 @@ export function CapacityFleetView({ resp, onOpen, onReload, loading = false, can
           <tbody>
             {rows.map((r, i) => (
               <tr key={`${r.node}|${r.key}|${r.kind}|${r.res}|${i}`}>
-                <td data-sort={r.name} style={{ whiteSpace: 'nowrap' }}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key); }}>{r.name}</span></td>
+                <td data-sort={r.name} style={{ whiteSpace: 'nowrap' }}><span className="bmp-link" role="button" tabIndex={0} onClick={() => onOpen?.(r.key, r.vcenterId)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(r.key, r.vcenterId); }}>{r.name}</span></td>
                 <td data-sort={r.vcenterId || ''}>{r.vcenterId || '—'}</td>
                 <td data-sort={resText(r)} className="bmo-wrap">{resText(r)}<div className="bmo-sub">{KIND_TEXT[r.kind] || r.kind}</div></td>
                 <td className="right" data-sort={r.current ?? ''}>{currentText(r)}</td>
@@ -115,8 +115,9 @@ export function CapacityChart({ series = [], fit = null, today = null, targetPct
 }
 
 /** 서버 상세 요약 탭 카드 — 자원별 예측 · 첫 예측 자원의 그림. */
-export function BmCapacityCard({ itemKey }) {
-  const st = useOpsLoad((k) => `/tools/bm-usage/capacity/${encodeURIComponent(k)}`, itemKey);
+export function BmCapacityCard({ itemKey, vc = '' }) {
+  // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 법인을 질의로 함께(서버 resolvePerfTarget).
+  const st = useOpsLoad((k, v) => `/tools/bm-usage/capacity/${encodeURIComponent(k)}${v ? `?vcenterId=${encodeURIComponent(v)}` : ''}`, itemKey, vc);
   const [sel, setSel] = useState(null);
   const d = st.resp;
   const rows = d?.rows || [];

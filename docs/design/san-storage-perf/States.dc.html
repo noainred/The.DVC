@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>상태 8종 — 값이 없는 이유를 나눠 말한다</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.wrap{padding:28px 32px;display:flex;flex-direction:column;gap:16px;min-width:0}
+h2{margin:0;font-size:20px;font-weight:800}
+.grid{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:14px;min-width:0}
+.st{background:#141b2d;border:1px solid #243049;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:430px}
+.st .n{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;letter-spacing:.14em;color:#5d6b85}
+.st h4{margin:0;font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.past{border:1px solid #a16207;color:#fbbf24}
+.mock{background:#0f1626;border:1px solid #243049;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px;flex:1}
+.mock .big{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:24px;font-weight:700}
+.mock .row{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#8b9bb4;align-items:center}
+.mock .row b{color:#e6edf6;font-weight:600;font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;white-space:nowrap;width:max-content}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:110px;padding:12px;border-radius:8px;background:#141b2d;border:1px dashed #243049;text-align:center}
+.empty b{font-size:13px}
+.empty span{font-size:11.5px;color:#8b9bb4;line-height:1.5}
+.why{font-size:12px;color:#8b9bb4;line-height:1.6}
+.why b{color:#e6edf6}
+.act{font-size:12px;color:#5eead4}
+svg{display:block;width:100%;height:auto}
+.info{border:1px solid rgba(245,158,11,.4);background:rgba(245,158,11,.07);border-radius:10px;padding:10px 14px;font-size:12.5px;line-height:1.6}
+</style>
+</helmet>
+<div class="wrap" style="width: 1440px">
+  <div><h2>상태 8종 — 0 으로 그리지 않고, 행동이 다른 상황은 다른 문구로</h2>
+    <div class="why">판정은 기존 서버 순수 모듈(<span class="mono">perfDiag · trafficTotal · storageSeriesMulti</span>)의 코드 값을 그대로 쓰고, 문구는 웹 순수 모듈 하나(<span class="mono">sanStorageText.js</span>)가 소유합니다. '기다리면 되는 것' 과 '기다려도 안 되는 것' 을 한 문구로 덮지 않습니다.</div></div>
+
+  <div class="grid">
+    <div class="st">
+      <div class="n">01 · 수집 꺼짐</div>
+      <h4>포트 사용량 수집이 꺼져 있음 <span class="tag gray">perfEnabled=false</span></h4>
+      <div class="mock">
+        <div class="empty"><b>아직 사용량을 모으지 않습니다</b><span>설정 › 수집 › SAN 스위치 포트 사용량에서 켜면 5분(설정값)마다 portperfshow 로 쌓기 시작합니다. 기본은 꺼짐입니다.</span></div>
+        <a class="btn primary" href="#">설정 열기 →</a>
+        <div class="row"><span>관리자가 아니면</span><b>버튼 없이 안내만</b></div>
+      </div>
+      <div class="why"><b>켜면 된다.</b> 기존 트래픽 카드의 'off' 판정과 같은 코드.</div>
+    </div>
+
+    <div class="st">
+      <div class="n">02 · 첫 주기 대기</div>
+      <h4>켠 직후 — 아직 첫 표본 전 <span class="tag blue">waiting</span></h4>
+      <div class="mock">
+        <div class="empty"><b>첫 표본을 기다리는 중</b><span>수집을 17:18 에 켰습니다. 첫 값은 수집 주기(5분) 뒤, 엣지 위임 스위치는 설정 pull(최대 5분) + 주기 뒤에 옵니다.</span></div>
+        <div class="row"><span>예상</span><b>17:23 ~ 17:28</b></div>
+        <div class="row"><span>자동 갱신</span><b>60초마다</b></div>
+      </div>
+      <div class="why"><b>기다리면 된다.</b> 예상 시각은 켠 시각 + API 의 intervalMs 로 계산(숫자를 화면에 박지 않음).</div>
+    </div>
+
+    <div class="st">
+      <div class="n">03 · 엣지 미보고</div>
+      <h4>엣지 표본이 아직 중앙에 없음 <span class="tag crit">edge-de1</span></h4>
+      <div class="mock">
+        <div class="big muted">—</div>
+        <div class="empty" style="min-height:80px"><b>UNITY-DE1-01 — 모른다</b><span>엣지 edge-de1 의 스위치 SW-DE1-A1 표본이 한 번도 오지 않았습니다. 꺼짐으로 단정하지 않습니다.</span></div>
+        <div class="why">확인: ① 엣지 버전(v2.423 이상이 시계열을 중계) ② 그 엣지의 포트 사용량 설정 pull ③ 엣지 로그(통신 점검)</div>
+        <a class="btn" href="#">엣지 로그 보기 →</a>
+      </div>
+      <div class="why"><b>보고가 없는 엣지는 '꺼짐' 이 아니라 '모른다'</b>(edge 규칙). 합계·사용률에서 뺀 사실을 KPI 가 센다.</div>
+    </div>
+
+    <div class="st">
+      <div class="n">04 · 부분 합 구간</div>
+      <h4>한쪽 팹 표본이 빠진 칸 <span class="tag warn">partial 2칸</span></h4>
+      <div class="mock">
+        <svg viewBox="0 0 300 90" role="img" aria-label="부분 합 구간 예시">
+          <defs><pattern id="h2" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="#243049"/></pattern></defs>
+          <rect x="150" y="6" width="40" height="70" fill="url(#h2)"/>
+          <path fill="#3987e5" fill-opacity=".8" d="M10,60 L40,52 L70,54 L100,44 L130,40 L150,42 L150,76 L10,76 Z M190,36 L220,30 L250,34 L290,28 L290,76 L190,76 Z"/>
+          <text x="170" y="86" text-anchor="middle" fill="#8b9bb4" font-size="9" font-family="JetBrains Mono, monospace">09:00~09:30</text>
+        </svg>
+        <div class="row"><span>09:00~09:30</span><b>— (그리지 않음)</b></div>
+        <div class="why">SW-KR1-B1 표본이 수집 주기의 2배를 넘게 빠져 팹 A 만으로는 <b>절반 값</b>이 됩니다. 평균·최고·7일 대비에서도 뺍니다.</div>
+      </div>
+      <div class="why"><b>부분 합은 사용량이 아니다</b>(v2.621 DATA-03). 빗금 + 문구 + 개수.</div>
+    </div>
+
+    <div class="st">
+      <div class="n">05 · 보고 멈춤</div>
+      <h4>등록·사용 중인 스위치가 보고를 멈춤 <span class="tag crit">held</span></h4>
+      <div class="mock">
+        <div class="big muted">—</div>
+        <div class="row"><span>PSTORE-SG1-01</span><b>마지막 표본 42분 전</b></div>
+        <div class="row"><span>스위치 SW-SG1-A1</span><span class="tag crit">무응답</span></div>
+        <div class="why">스위치가 다른 포트로도 보고하지 않습니다 — 포트가 없어진 것이 아니라 <b>모르는 것</b>이므로 그 구간을 '—' 로 두고 합계에서 빼지 않습니다(없어진 것으로 처리하면 거짓 하락).</div>
+        <a class="btn" href="#">스위치 수집 로그 →</a>
+      </div>
+      <div class="why">trafficTotal ⑦(v2.682) 그대로. 재배선·정리로 <b>없어진 시리즈</b>(⑥)는 반대로 합계에서 빼고 개수를 말한다.</div>
+    </div>
+
+    <div class="st">
+      <div class="n">06 · 디렉터 구분 못 함</div>
+      <h4>평평한 이름 — 디렉터 · 컨트롤러를 못 읽음 <span class="tag gray">unparsed</span></h4>
+      <div class="mock">
+        <div class="row"><span>HUS-VM-PL1</span><b>3.7 Gb/s</b></div>
+        <div class="row"><span>심볼릭 이름</span><span class="mono" style="font-size:11px">HITACHI HUS VM 2109 CL1-A</span></div>
+        <div class="empty" style="min-height:70px"><b>디렉터별 보기 없음 — 포트별로 보여 줍니다</b><span>이름이 벤더::시리얼::디렉터 꼴이 아니라 묶지 않았습니다(추정 금지). 관리자가 포트 → 디렉터를 수동으로 지정할 수 있습니다.</span></div>
+        <a class="btn" href="#">포트 → 디렉터 수동 매핑</a>
+      </div>
+      <div class="why">같은 이유로 <b>어레이인데 '호스트' 로 분류된 것</b>은 '호스트(HBA) 보기' 에서 '어레이로 지정' 할 수 있게 한다(endpointKind 추정의 탈출구).</div>
+    </div>
+
+    <div class="st">
+      <div class="n">07 · 용량 미매칭</div>
+      <h4>등록 스토리지와 시리얼이 다름 <span class="tag gray">capacity=null</span></h4>
+      <div class="mock">
+        <div class="row"><span>VMAX-JP1-01 용량</span><b>—</b></div>
+        <div class="why">SAN 쪽 시리얼 <span class="mono">000296700789</span> 와 일치하는 등록 스토리지가 없습니다. 비슷한 이름으로 억지 매칭하지 않습니다. 스토리지 모니터링에 이 어레이를 등록하면 용량 열과 2단계 성능이 붙습니다.</div>
+        <a class="btn" href="#">스토리지 모니터링에서 등록 →</a>
+        <div class="row"><span>정렬</span><b>'—' 는 항상 뒤</b></div>
+      </div>
+      <div class="why">기존 '스토리지 사용량 분석' 의 용량 열 규칙 그대로.</div>
+    </div>
+
+    <div class="st">
+      <div class="n">08 · 과거 구간 · 데모 · DB 불가</div>
+      <h4>그 밖의 배지 <span class="tag past">과거 구간</span> <span class="tag blue">데모 데이터</span></h4>
+      <div class="mock">
+        <div class="row"><span>◀ 이전 24시간 × 3</span><span class="tag past">11-04 17:00 ~ 11-05 17:00 · 자동 갱신 없음</span></div>
+        <div class="row"><span>31일보다 과거</span><b>1시간 평균 · 24점</b></div>
+        <div class="row"><span>mock 모드</span><span class="tag blue">데모 데이터 — 수식으로 만든 값</span></div>
+        <div class="empty" style="min-height:64px"><b>시계열 DB 를 열 수 없습니다</b><span>이 서버는 node:sqlite 를 쓸 수 없어 이력이 저장되지 않습니다(수집은 계속). 값 전부 '—'.</span></div>
+      </div>
+      <div class="why">과거 구간은 롤업이 거칠어진 사실을 알약으로 말한다(15분 → 1시간). 데모는 배지로 밝힌다.</div>
+    </div>
+  </div>
+
+  <div class="info">⚠ 위 8종 중 1·2·3·5·7·8 은 <b>지금 코드에 있는 판정</b>(perfDiag · trafficTotal · storage-summary)을 그대로 쓰고, 4 는 표시 방식(빗금)만 새 것입니다. <b>6(디렉터 구분 못 함 · 수동 매핑 · 어레이로 지정)만 새 판정·새 저장소</b>이며, 구현 때 '관리자 전용 · 원자 쓰기 · 손상 보존 · 범위 참조 없음(SAN 은 vCenter 범위 밖 · fullScopeOnly)' 규칙을 따릅니다.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2630d-'));
 process.env.SVCMON_WORKERS = '0';
@@ -110,7 +111,7 @@ test('A4-02 — 큐 완료 판정에 원본 엣지 시각을 쓰면 옛 스냅�
 
 test('A4-02 — 세 수신 라우트가 stampEdgeCollectedAt 을 쓴다(옛 clamp 식 0건)', async () => {
   const { stripComments } = await import('./_stripComments.js');
-  const src = stripComments(fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8'));
+  const src = stripComments(centralSource());
   assert.equal((src.match(/stampEdgeCollectedAt\(/g) || []).length >= 4, true);
   assert.equal(/collectedAt:\s*Math\.min\(Number\([ds]\.collectedAt\)/.test(src), false);
 });

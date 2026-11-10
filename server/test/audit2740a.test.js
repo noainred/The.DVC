@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import ssh2 from 'ssh2';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2740a-'));
 process.env.CONFIG_DIR = DIR;
@@ -69,7 +70,7 @@ test('C-01 cleanEdgeTarget 은 링크로컬·메타데이터·우회 표기 주�
 });
 
 test('A-02 미래 시각 결과 뒤에도 시계가 돌아온 정상 결과로 다음 "지금 수집" 이 완료된다(실제 centralRouter)', async () => {
-  const src = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
+  const src = centralSource();
   const block = src.slice(src.indexOf("centralRouter.post('/isidu-data'"), src.indexOf('// GET /api/central/users-config'));
   // 기준선·완료 판정은 잘라 둔 시각이다 — 원본 엣지 시각(edgeTs)을 넣으면 기준선이 미래에 굳는다.
   assert.match(block, /noteIsiduScanTs\(sc\.targetId, sc\.ts\)/);

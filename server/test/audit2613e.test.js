@@ -15,6 +15,7 @@ import http from 'node:http';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const TOKEN = 'tok-2613e-shared';
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2613e-'));
@@ -82,8 +83,8 @@ async function withEdge(routes, fn) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 test('DEPS2613-09: central 라우트 51개 전부 requireCentral() 미들웨어를 쓰고 인라인 2줄 게이트·중복 agent 재대조는 0건이다(소스 열거)', () => {
-  const s = code('routes/central.js');
-  const decls = [...s.matchAll(/^centralRouter\.(get|post|put|delete)\('([^']+)',\s*([^\n]+)$/gm)];
+  const s = centralSource();
+  const decls = [...s.matchAll(/^\s*centralRouter\.(get|post|put|delete)\('([^']+)',\s*([^\n]+)$/gm)];
   assert.ok(decls.length >= 51, `라우트 선언 ${decls.length}개(51 이상이어야 한다)`);
   const bad = decls.filter((m) => !m[3].startsWith('requireCentral(')).map((m) => `${m[1]} ${m[2]}`);
   assert.deepEqual(bad, [], `requireCentral() 없이 선언된 라우트: ${bad.join(', ')}`);
@@ -280,7 +281,7 @@ test('EDGE2613-05: readDropSummary 사본은 0벌 — util/centralReply.dropSumm
 
 // ─────────────────────────────────────────────────────────────────────────────
 test('CONTRACT2613-03: /guest-disk 응답은 적재하지 않은 행을 dropped:{vms,parts} 로 싣고, guestDiskPush·vmSeriesPush 가 중앙 응답을 읽는다', async () => {
-  const c = code('routes/central.js');
+  const c = centralSource();
   // v2.767(점검 R2-B2-02): 네임스페이스 밖 VM 드롭 수(notOwned)가 같은 객체에 붙는다 — 앞 두 필드는 그대로.
   assert.ok(/dropped: \{ vms: Number\(commit\.skippedVms\) \|\| 0, parts: Number\(commit\.skippedParts\) \|\| 0[ ,}]/.test(c), '/guest-disk 응답에 dropped 가 없다');
   // 정상 push 에는 필드가 없다(구버전 엣지 호환 — 뺀 것이 없으면 필드 자체가 없다)

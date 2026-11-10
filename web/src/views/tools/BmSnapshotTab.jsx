@@ -11,6 +11,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { useOpsLoad, OpsError } from './BmTuningTab.jsx';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import { STATE_TEXT } from './bmPerfText.js';
 import { SNAP_CODE_TEXT, SNAP_STATE_TEXT, snapPermState, bpsText, kbText, snapResultNote, snapCodeShort, snapTrimNote, snapRunGate, SNAP_NOTE, SNAP_PS_NOTE, shortStamp } from './bmOpsText.js';
 import './bmOps.css';
@@ -125,8 +126,8 @@ export function SnapshotListTable({ snaps = [], selId = '', onOpen = () => {} })
   );
 }
 
-export default function BmSnapshotTab({ itemKey }) {
-  const list = useOpsLoad((k) => `/tools/bm-usage/perf/${encodeURIComponent(k)}/snapshots`, itemKey);
+export default function BmSnapshotTab({ itemKey, vc = '' }) {
+  const list = useOpsLoad((k, v) => perfPath(k, v, '/snapshots'), itemKey, vc);
   const [reason, setReason] = useState('');
   const [run, setRun] = useState({ busy: false, resp: null, err: null });
   const [sel, setSel] = useState({ id: '', resp: null, err: null });
@@ -140,7 +141,7 @@ export default function BmSnapshotTab({ itemKey }) {
     setSel({ id: '', resp: null, err: null });
     setRun({ busy: true, resp: null, err: null });
     try {
-      const r = await postJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/snapshot`, { reason }, { timeoutMs: 120_000 });
+      const r = await postJson(perfPath(itemKey, vc, '/snapshot'), { reason }, { timeoutMs: 120_000 });
       setRun({ busy: false, resp: r, err: null });
       list.reload();
     } catch (e) {
@@ -154,7 +155,7 @@ export default function BmSnapshotTab({ itemKey }) {
     const gen = ++selGen.current;
     setSel({ id, resp: null, err: null });
     try {
-      const resp = await fetchJson(`/tools/bm-usage/perf/${encodeURIComponent(itemKey)}/snapshots/${encodeURIComponent(id)}`, {}, undefined, { timeoutMs: 60_000 });
+      const resp = await fetchJson(perfPath(itemKey, vc, `/snapshots/${encodeURIComponent(id)}`), {}, undefined, { timeoutMs: 60_000 });
       if (gen === selGen.current) setSel({ id, resp, err: null });
     } catch (e) { if (gen === selGen.current) setSel({ id, resp: null, err: e }); }
   };

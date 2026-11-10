@@ -22,6 +22,9 @@ export const MISS_REASON_TEXT = Object.freeze({
   'no-idrac-cred': 'iDRAC 계정 없음',
   'no-os-cred': 'OS 계정 없음',
   'both-off': 'iDRAC · OS 수집이 모두 꺼짐',
+  'os-ambiguous': 'OS 등록을 하나로 못 정함(같은 이름 · 주소 등록이 여럿이거나 법인 미지정) — 등록에 법인을 지정하면 풀립니다',   // 2차 재확인 G3
+  'os-foreign': 'OS 등록이 다른 법인으로 지정돼 있어 쓰지 않음',
+  'key-conflict': '식별 키가 이 노드의 다른 서버와 겹쳐 수집하지 않음(값이 섞이지 않게) — 서비스태그를 채우면 풀립니다',   // 다음 점검 ①
 });
 export const KEY_STATUS_TEXT = Object.freeze({ active: '사용', retired: '퇴역(회전됨)' });
 export const ACCOUNT_KIND_TEXT = Object.freeze({ os: 'OS(SSH)', idrac: 'iDRAC' });
@@ -48,6 +51,15 @@ export function edgeSyncText(a = {}) {
   if (!a.pulledAt) return { tone: 'muted', text: '모름 — 이 엣지가 중앙 재시작 뒤 아직 받으러 오지 않았습니다' };
   if (a.inSync === true) return { tone: 'ok', text: '반영됨' };
   return { tone: 'warn', text: '대기 — 엣지가 다음 인출에서 반영합니다' };
+}
+
+/**
+ * 엣지 배포 행의 공통 계정 · 키 칸(v2.954 점검 A-4). 범위 계정에는 서버가 이름 대신 '있는지(true/false)' 만 준다 —
+ * 불리언을 그대로 이으면 'true · true' 가 된다. 이름이면 이름, true 면 '종류 지정됨', 없으면 뺀다.
+ */
+export function edgeCredText(r = {}) {
+  const part = (v, label) => (v === true ? `${label} 지정됨` : (typeof v === 'string' && v ? v : ''));
+  return [part(r.idracCred, 'iDRAC 계정'), part(r.osCred, 'OS 계정'), part(r.osKey, 'SSH 키')].filter(Boolean).join(' · ') || '—';
 }
 
 /** 지문 줄임(화면 폭) — 전체는 title. */

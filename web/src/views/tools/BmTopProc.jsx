@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../../api.js';
+import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { TOP_KINDS, STATE_TEXT, valText, rssText, cpuTimeText, hintText, sampleNotes, footText, whenText, bandLayout, bandNotes, BAND_COLORS, OTHER_COLOR, TOP_HONEST, rateText } from './bmTopText.js';
@@ -48,13 +49,13 @@ export function TopBand({ band, onPick, narrow = false }) {
 /**
  * @param {{itemKey:string, ts:number|null, win:{from:number,to:number}, narrow?:boolean}} p
  */
-export default function BmTopProc({ itemKey, ts = null, win = null, narrow = false }) {
+export default function BmTopProc({ itemKey, vc = '', ts = null, win = null, narrow = false }) {
   const [kind, setKind] = useState('cpu');
   const [at, setAt] = useState(ts);
   useEffect(() => { setAt(ts); }, [ts]);
-  const enc = encodeURIComponent(itemKey || '');
-  const point = useGenFetch(itemKey && at ? `/tools/bm-usage/perf/${enc}/top?ts=${Math.round(at)}` : '');
-  const band = useGenFetch(itemKey && win ? `/tools/bm-usage/perf/${enc}/top/band?from=${Math.round(win.from)}&to=${Math.round(win.to)}` : '');
+  // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 법인을 질의로 함께
+  const point = useGenFetch(itemKey && at ? perfPath(itemKey, vc, '/top', `ts=${Math.round(at)}`) : '');
+  const band = useGenFetch(itemKey && win ? perfPath(itemKey, vc, '/top/band', `from=${Math.round(win.from)}&to=${Math.round(win.to)}`) : '');
   if (!itemKey) return null;
   const r = point.resp;
   const rows = r?.rows?.[kind] || [];

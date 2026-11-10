@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **296개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **306개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-08)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-09)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -57,6 +57,7 @@
 | `bareos.json` | 설정 | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/settings.js |
 | `bm-capacity.json` | 설정 | 리눅스 성능 8a단계 **용량 소진 예측**(설계 PROFILES §20 ⑱ · 아트보드 Capacity). 판정이 아니라 ‘참고’ 다(ML 없음 · 선형만). | ✅ | ✅ | ✅ | bmusage/capacity.js |
 | `bm-idle.json` | 설정 | 리눅스 성능 8b단계 **저활용 서버 찾기**(설계 PROFILES §20 ㉑ · 아트보드 Idle). 판정이 아니라 **후보 표시**다(‘저활용 ≠ 불필요’ — 사람이 확인하고 남긴다). | ✅ | ✅ | ✅ | bmusage/idle.js |
+| `bm-key-decisions.json` | 설정 | 다음 점검 ①(2차 · 사용자 결정 2026-11-08) **식별 키가 겹치는 서버의 수집 여부 결정** 저장소(`bm-key-decisions.json`). | ✅ | ✅ | ✅ | bmusage/keyDecisions.js |
 | `bm-onboard-applied.json` | 설정 | 엣지가 중앙의 **배포 목록**을 자기 등록부에 적용한다(7b단계 · 엣지 쪽). | ✅ | ✅ | ✅ | bmusage/onboard/edgeApply.js |
 | `bm-onboard-edge.json` | 설정 | 수집 경로 ‘edge’ 로 등록한 서버의 **엣지 배포 목록**(중앙 · 7b단계 · 설계 PROFILES §18 '엣지 배포(법인 단위)'). | ✅ | ✅ | ✅ | bmusage/onboard/edgeDeploy.js |
 | `bm-perf-alert-state.json` | 설정 | 리눅스 성능 **알림 규칙**(v2.929 예정 · 5단계 · 설계 PROFILES §14 ① · 아트보드 Alerts). | ✅ | ✅ | ✅ | bmusage/perfAlerts.js |
@@ -68,6 +69,7 @@
 | `bm-usage.db` | DB | 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |  | ✅ | ✅ | bmusage/db.js, bmusage/poller.js |
 | `bmstor-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bmstor/poller.js |
 | `bmstor-history.db` | DB | 베어메탈 스토리지 디스크 사용량 이력 **전용 DB**(v2.635, 사용자 요청 "별도의 DB"). |  |  | ✅ | bmstor/historyDb.js |
+| `bmstor-io.db` | DB | 베어메탈 디스크 I/O **시계열 전용 DB**(v2.915 — 설계 docs/design/bm-san-compare §4.5). |  |  | ✅ | bmstor/ioDb.js |
 | `bmusage-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | bmusage/activityLog.js |
 | `bmusage-alert-state.json` | 설정 | 임계 초과 알림 발송 + **상태 영속**(v2.551). | ✅ |  | ✅ | bmusage/notify.js |
 | `bmusage-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bmusage/poller.js |
@@ -227,6 +229,12 @@
 | `runtime.json` | 설정 | Runtime-adjustable settings that can be changed from the portal UI (and | ✅ | ✅ | ✅ | runtime-settings.js |
 | `san-flows.json` | 설정 | Flow Vision 플로우 작업(v2.935 SAN·CVP 설계 C-②) — 실행 등록부 · 포탈 플로우 기록 · 카운터 주기. | ✅ | ✅ |  | sanswitch/flowJobs.js |
 | `san-health.db` | DB | SAN 점검 결과 이력 + **최근 N회 비교**(v2.522). |  |  | ✅ | sanswitch/healthHistory.js |
+| `san-storage-check.db` | DB | SAN 스토리지 성능 점검 **결과 이력 + 최근 N회 비교**(v2.955 · 설계 §8.1 '점검 이력'). |  |  | ✅ | sanswitch/storageCheckHistory.js |
+| `san-storage-map.json` | 설정 | SAN 스토리지 성능의 관리자 재정의 저장소(v2.948). | ✅ | ✅ |  | sanswitch/directorMap.js |
+| `san-storage-notify-state.json` | 설정 | SAN 스토리지 성능 **알림** 설정 · 상태 · 전이 판정(순수 부분 포함 · v2.950 · 설계 §12.2-6). | ✅ | ✅ | ✅ | sanswitch/storagePerfNotifyStore.js |
+| `san-storage-notify.json` | 설정 | SAN 스토리지 성능 **알림** 설정 · 상태 · 전이 판정(순수 부분 포함 · v2.950 · 설계 §12.2-6). | ✅ | ✅ | ✅ | sanswitch/storagePerfNotifyStore.js |
+| `san-storage-report-state.json` | 설정 | 월간 SAN 스토리지 성능 점검 보고서 **발송 러너**(v2.950 · 설계 §12.2-8). 보고서 자체는 storagePerfReport.js(순수). | ✅ | ✅ | ✅ | sanswitch/storagePerfReportMail.js |
+| `san-storage-report.json` | 설정 | 월간 SAN 스토리지 성능 점검 보고서 **발송 러너**(v2.950 · 설계 §12.2-8). 보고서 자체는 storagePerfReport.js(순수). | ✅ | ✅ | ✅ | sanswitch/storagePerfReportMail.js |
 | `sanswitch-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | sanswitch/activityLog.js |
 | `sanswitch-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | sanswitch/poller.js |
 | `sanswitch-devices.json` | 설정 | SAN 스위치 등록부(v2.410). | ✅ | ✅ | ✅ | sanswitch/registry.js |
@@ -254,6 +262,8 @@
 | `storage-history.db` | DB | 스토리지 장비(8종) 용량 이력 |  |  | ✅ | storage/db.js |
 | `storage-intervals.json` | 설정 | 스토리지 수집 주기(중앙에서 엣지 설정, v2.409). | ✅ | ✅ | ✅ | storage/intervals.js |
 | `storage-latest.json` | 설정 | 이 노드가 수집한 최신 스냅샷 보관(v2.302). | ✅ | ✅ | ✅ | storage/store.js |
+| `storage-nodeload-ring.json` | 설정 | 아이실론 노드 부하 **표본** 폴러(v2.932, 2차 ⑨ · 설계 `docs/design/isilon-node-clients/README.md` §4). | ✅ | ✅ | ✅ | storage/nodeLoadPoller.js |
+| `storage-perf-check.json` | 설정 | SAN 스토리지 성능 점검의 임계값 설정(v2.948). | ✅ | ✅ |  | sanswitch/storageCheckSettings.js |
 | `storage-usage-mail-state.json` | 설정 | 스토리지 사용량 예약 메일 회차·기록(상태, v2.789) | ✅ | ✅ | ✅ | storage/usageMail.js |
 | `storage-usage-mail.json` | 설정 | 스토리지 사용량 예약 메일 설정(v2.789 — 켜기·요일·시각·받는 사람·표 단위. 비밀 없음, 주소는 담는다) | ✅ | ✅ | ✅ | storage/usageMail.js |
 | `svcmon-alert.json` | 설정 | Monitoring **점검 실패 알림 설정**(v2.915) — `CONFIG_DIR/svcmon-alert.json`. | ✅ | ✅ |  | svcmon/alertSettings.js |

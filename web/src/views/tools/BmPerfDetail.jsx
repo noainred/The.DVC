@@ -28,6 +28,7 @@ import BmShareButtons from './BmShareButtons.jsx'; // 6단계 공유 링크 · �
 import { BmPlaybookTab, BmSloTab } from './BmRunbookTabs.jsx'; // 6단계 진단 플레이북 · 목표선
 import { SHARE_MISSING_TEXT } from './bmShare.js';
 import BmLogsTab from './BmLogsTab.jsx'; // 7a단계 로그 분석 탭(고를 때만 마운트 → 그때 조회)
+import { perfPath, ambiguousOf, corpLabel, AMBIGUOUS_TEXT } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍
 import {
   RES_ORDER, RES_LABEL, USE_KEYS, USE_LABEL, HW_USE_LABEL, cellView, cellFootnotes, verdictView, coverageView, rowStates, STATE_TEXT,
   mismatchText, readText, crossView, crossBandText, thresholdText, basisText, evidenceRows, DETAIL_TABS, detailNotes, pathAtText,
@@ -92,16 +93,17 @@ function Face({ res, entry, th, perfCols, children }) {
 
 /**
  * 상세 조회기 — 세대(gen)로 **늦게 온 이전 서버 응답을 버린다**(테스트가 가짜 fetcher 로 고정 — 반증 D8).
- * `load(key, set)` 은 'ok' | 'err' | 'stale'(버림) 을 돌려준다. set 은 부분 상태 {resp?, err?, loading?} 를 받는다.
+ * `load(key, set, vc)` 은 'ok' | 'err' | 'stale'(버림) 을 돌려준다. set 은 부분 상태 {resp?, err?, loading?} 를 받는다.
+ * 다음 점검 ①: vc(법인)를 함께 보낸다 — 같은 키가 여러 법인에 있으면 서버가 400 ambiguous-key(후보)로 답하고 화면이 법인 고르기를 보인다.
  */
-export function createDetailLoader(fetcher = (key) => fetchJson(`/tools/bm-usage/perf/${encodeURIComponent(key)}`)) {
+export function createDetailLoader(fetcher = (key, vc) => fetchJson(perfPath(key, vc))) {
   let gen = 0;
   return {
-    async load(key, set) {
+    async load(key, set, vc = '') {
       const g = ++gen;
       set({ loading: true, err: null });
       try {
-        const d = await fetcher(key);
+        const d = await fetcher(key, vc);
         if (g !== gen) return 'stale';
         set({ resp: d, err: null, loading: false });
         return 'ok';
@@ -114,7 +116,7 @@ export function createDetailLoader(fetcher = (key) => fetchJson(`/tools/bm-usage
   };
 }
 
-export default function BmPerfDetail({ itemKey, item = null, authStops = [], staleMs = null, onClose, off = false, keepDays = null, initialTab = '', inCompare = false, onCompareToggle = null, cmpMsg = '', shareInit = null }) {
+export default function BmPerfDetail({ itemKey, itemVc = '', onPickCorp = null, item = null, authStops = [], staleMs = null, onClose, off = false, keepDays = null, initialTab = '', inCompare = false, onCompareToggle = null, cmpMsg = '', shareInit = null }) {
   // ⚠ 훅은 전부 조기 return 위에.
   const [st, setSt] = useState({ resp: null, err: null, loading: false });
   const [tab, setTab] = useState('summary');
@@ -123,27 +125,27 @@ export default function BmPerfDetail({ itemKey, item = null, authStops = [], sta
   const rootRef = useRef(null);
   const trendState = useRef(null);   // 6단계 공유 링크 — 추이 탭이 알려 준 지금 상태(기간 · 창 끝 · 커서 · 구간 · 토글)
   const set = useCallback((patch) => setSt((p) => ({ ...p, ...patch })), []);
-  const load = useCallback((key) => loader.current.load(key, set), [set]);
+  const load = useCallback((key, vc) => loader.current.load(key, set, vc), [set]);
   useEffect(() => {
     if (!itemKey) return;
     setSt({ resp: null, err: null, loading: false }); setTab(DETAIL_TABS.some((x) => x.id === initialTab) ? initialTab : 'summary');
-    load(itemKey);
+    load(itemKey, itemVc);
     try { rootRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); } catch { /* 스크롤 실패는 무시 */ }
-  }, [itemKey, load, initialTab]);
+  }, [itemKey, itemVc, load, initialTab]);
   if (!itemKey) return null;
   return (
     <div ref={rootRef} style={{ minWidth: 0 }}>
-      <BmPerfDetailView itemKey={itemKey} item={item} resp={st.resp} err={st.err} loading={st.loading} tab={tab} onTab={setTab}
-        onReload={() => load(itemKey)} onClose={onClose} authStops={authStops} staleMs={staleMs} off={off} keepDays={keepDays}
+      <BmPerfDetailView itemKey={itemKey} itemVc={itemVc} onPickCorp={onPickCorp} item={item} resp={st.resp} err={st.err} loading={st.loading} tab={tab} onTab={setTab}
+        onReload={() => load(itemKey, itemVc)} onClose={onClose} authStops={authStops} staleMs={staleMs} off={off} keepDays={keepDays}
         inCompare={inCompare} onCompareToggle={onCompareToggle} cmpMsg={cmpMsg}
         shareInit={shareInit && shareInit.key === itemKey ? shareInit : null} onTrendState={(x) => { trendState.current = x; }}
-        share={{ node: () => rootRef.current, state: () => ({ view: 'detail', key: itemKey, tab, ...(tab === 'trend' && trendState.current ? trendState.current : {}) }) }} />
+        share={{ node: () => rootRef.current, state: () => ({ view: 'detail', key: itemKey, vc: itemVc || st.resp?.target?.vcenterId || '', tab, ...(tab === 'trend' && trendState.current ? trendState.current : {}) }) }} />
     </div>
   );
 }
 
 /** 상세 화면(상태 없음 — 응답 · 오류 · 탭을 받아 그린다). 테스트가 응답 뒤 화면을 SSR 로 본다(반증 D8). */
-export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null, loading = false, tab = 'summary', onTab, onReload, onClose, authStops = [], staleMs = null, off = false, now = Date.now(), keepDays = null, inCompare = false, onCompareToggle = null, cmpMsg = '', shareInit = null, onTrendState = null, share = null }) {
+export function BmPerfDetailView({ itemKey, itemVc = '', onPickCorp = null, item = null, resp = null, err = null, loading = false, tab = 'summary', onTab, onReload, onClose, authStops = [], staleMs = null, off = false, now = Date.now(), keepDays = null, inCompare = false, onCompareToggle = null, cmpMsg = '', shareInit = null, onTrendState = null, share = null }) {
   if (!itemKey) return null;
   const setTab = onTab || (() => {});
   const sameKey = resp && (resp.key === itemKey);
@@ -156,6 +158,9 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
   const cov = coverageView((entry || item?.entry)?.coverage);
   const e = entry || null;
   const errIs403 = !!err && err.status === 403;
+  // 다음 점검 ①: 같은 키 여러 법인 — 오류가 아니라 고를 일이다(후보는 서버가 범위 안만 준다). 탭이 쓰는 법인 = 고른 법인 또는 응답의 법인.
+  const amb = ambiguousOf(err);
+  const vc = itemVc || target.vcenterId || '';
   const notes = sameKey ? detailNotes(resp, { now }) : [];
   const mm = e ? mismatchText(e.mismatch, th) : '';
   const usedCodes = [];
@@ -176,9 +181,12 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
         <button className="btn btn-sm bmp-touch" onClick={onReload} disabled={loading || !onReload}>{loading ? '읽는 중…' : '다시 읽기'}</button>
         {onClose && <button className="btn btn-sm bmp-touch" onClick={onClose}>닫기</button>}
       </div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, marginTop: 4 }}>
-        {[target.serviceTag && `서비스 태그 ‘${target.serviceTag}’`, target.vcenterId || '귀속 없음', target.model, item?.agent && `엣지 ${item.agent}`].filter(Boolean).join(' · ')}
-      </div>
+      {/* 법인을 고르기 전에는 어느 서버의 머리도 그리지 않는다(한 법인 서버의 정보를 답처럼 보이지 않게 — 다음 점검 ①) */}
+      {!amb && (
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, marginTop: 4 }}>
+          {[target.serviceTag && `서비스 태그 ‘${target.serviceTag}’`, target.vcenterId || '귀속 없음', target.model, item?.agent && `엣지 ${item.agent}`].filter(Boolean).join(' · ')}
+        </div>
+      )}
       {e && (
         <div style={{ fontSize: 12, lineHeight: 1.6 }}>
           {pathAtText(e, target.paths || [])}{readText(e.read) ? ` · ${readText(e.read)}` : ''}
@@ -188,7 +196,15 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
       {cmpMsg && onCompareToggle && <p style={{ margin: '4px 0 0', fontSize: 12, color: toneVar('warn') }}>{cmpMsg}</p>}
 
       {errIs403 && <div style={{ marginTop: 8 }}><ErrorBox error={err} /></div>}
-      {err && !errIs403 && <p style={{ margin: '8px 0 0', fontSize: 12, color: toneVar('bad'), lineHeight: 1.6 }}>{detailErrorText(err)}</p>}
+      {amb && (
+        <div className="bmp-corp-pick" role="group" aria-label="법인 고르기" style={{ marginTop: 8 }}>
+          <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={AMBIGUOUS_TEXT} /></p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {amb.map((c) => <button key={c.vcenterId} type="button" className="btn btn-sm bmp-touch" onClick={() => onPickCorp?.(c.vcenterId)} disabled={!onPickCorp}>{corpLabel(c)}</button>)}
+          </div>
+        </div>
+      )}
+      {err && !errIs403 && !amb && <p style={{ margin: '8px 0 0', fontSize: 12, color: toneVar('bad'), lineHeight: 1.6 }}>{detailErrorText(err)}</p>}
       {err && err.status === 404 && shareInit && <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>{SHARE_MISSING_TEXT}</p>}
       {!resp && !err && <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' }}>성능 상세를 불러오는 중…</p>}
       {sameKey && !e && !err && <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>이 서버의 성능 판정 항목이 없습니다 — 위 안내가 이유를 말합니다.</p>}
@@ -242,7 +258,7 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
               {cellFootnotes(usedCodes).map((f, i) => <p key={i} style={{ margin: 0, fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={f} /></p>)}
               <HealthCard health={e.detail?.health || null} now={now} />
               {/* 8a단계 용량 소진 예측(참고) — 그 서버를 열 때 1회(이 노드 계산 · 엣지 서버는 대행) */}
-              {itemKey && <BmCapacityCard itemKey={itemKey} />}
+              {itemKey && <BmCapacityCard itemKey={itemKey} vc={vc} />}
               <div>
                 <h5 style={{ margin: '0 0 4px', fontSize: 14 }}>교차 판정 — 두 경로가 다 읽혀야 켜집니다 · 상관은 ‘후보’ 로만</h5>
                 <div className="bmp-cross">
@@ -316,18 +332,19 @@ export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null
             </div>
           )}
 
-          {tab === 'faults' && <BmFaultsTab key={itemKey} itemKey={itemKey} />}
-          {tab === 'tuning' && <BmTuningTab key={itemKey} itemKey={itemKey} />}
-          {tab === 'profile' && <BmProfileTab key={itemKey} itemKey={itemKey} />}
-          {tab === 'snap' && <BmSnapshotTab key={itemKey} itemKey={itemKey} />}
-          {tab === 'focus' && <BmFocusTab key={itemKey} itemKey={itemKey} name={name} />}
-          {tab === 'playbook' && <BmPlaybookTab key={itemKey} itemKey={itemKey} />}
-          {tab === 'slo' && <BmSloTab key={itemKey} itemKey={itemKey} />}
-          {tab === 'logs' && <BmLogsTab key={itemKey} itemKey={itemKey} onTab={setTab} />}
+          {/* 다음 점검 ①: 탭마다 법인(vc)을 함께 — 서버 = (법인, 키) 쌍. key 에 법인을 넣어 같은 키 다른 법인으로 바꾸면 탭 상태를 새로. */}
+          {tab === 'faults' && <BmFaultsTab key={`${vc}|${itemKey}`} itemKey={itemKey} vc={vc} />}
+          {tab === 'tuning' && <BmTuningTab key={`${vc}|${itemKey}`} itemKey={itemKey} vc={vc} />}
+          {tab === 'profile' && <BmProfileTab key={`${vc}|${itemKey}`} itemKey={itemKey} vc={vc} />}
+          {tab === 'snap' && <BmSnapshotTab key={`${vc}|${itemKey}`} itemKey={itemKey} vc={vc} />}
+          {tab === 'focus' && <BmFocusTab key={`${vc}|${itemKey}`} itemKey={itemKey} vc={vc} name={name} />}
+          {tab === 'playbook' && <BmPlaybookTab key={`${vc}|${itemKey}`} itemKey={itemKey} vc={vc} />}
+          {tab === 'slo' && <BmSloTab key={`${vc}|${itemKey}`} itemKey={itemKey} vc={vc} />}
+          {tab === 'logs' && <BmLogsTab key={`${vc}|${itemKey}`} itemKey={itemKey} vc={vc} onTab={setTab} />}
 
           {tab === 'trend' && (
             // v2.923(3b): 추이 탭 — 서버를 바꾸면 상태를 새로(key). 최근 5분 장치 값(detail)은 장치 표가 함께 쓴다. 보존(일)은 이 노드 대상만 안다.
-            <BmTrendTab key={itemKey} itemKey={itemKey} name={name} latest={e.detail || null} keepDays={item?.agent ? null : keepDays} vcenterId={target.vcenterId || ''}
+            <BmTrendTab key={`${vc}|${itemKey}`} itemKey={itemKey} name={name} latest={e.detail || null} keepDays={item?.agent ? null : keepDays} vcenterId={vc}
               initial={shareInit?.tab === 'trend' ? shareInit : null} onState={onTrendState} />
           )}
 
