@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **739개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **740개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-09)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-10)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -376,7 +376,7 @@
 | `USER_ADMIN_CAN_RESTART` | `기본 아님('1' 일 때만 적용)` |  | tools/user-admin.js |
 | `VCENTER_PASSWORD` |  |  | tools/bareos-probe.js |
 
-## 서비스 모니터 (9)
+## 서비스 모니터 (10)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -386,6 +386,7 @@
 | `SVCMON_MAX_PER_TICK` |  |  | svcmon/poller.js |
 | `SVCMON_PROC_CONCURRENCY` |  |  | svcmon/pool.js |
 | `SVCMON_TICK_MS` |  |  | svcmon/poller.js |
+| `SVCMON_TRIAL_EDGE_MS` |  |  | svcmon/trial.js |
 | `SVCMON_WARM_MAX_MS` |  |  | svcmon/poller.js |
 | `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
 | `SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES` | `64` |  | svcmon/formats.js |
@@ -928,4 +929,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 739
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 740
