@@ -10,7 +10,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, downloadFile, canCsv, hasRole, toolAllowed } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
-import { fmtNum, shortTs, loadOpts, saveOpts, scopeQuery, scopeNote, veeamStateOf } from './backupViewText.js';
+import { fmtNum, shortTs, loadOpts, saveOpts, scopeQuery, scopeNote, veeamStateOf, DETAIL_VC_KEY, openBackupDetail } from './backupViewText.js';
 import { summaryPolicyKpis, bundlesOf, okPct, hhmm, rpoLabel } from './backupSummaryText.js';
 import VeeamHeader, { visibleTabs } from './VeeamHeader.jsx';
 import BackupOptions from './BackupOptions.jsx';
@@ -20,7 +20,7 @@ import BackupSummaryTree from './BackupSummaryTree.jsx';
 import BackupSummaryCapSched from './BackupSummaryCapSched.jsx';
 import BackupSummaryErrors from './BackupSummaryErrors.jsx';
 
-export const DETAIL_VC_KEY = 'backup-detail-vc';   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만)
+export { DETAIL_VC_KEY };   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만) — v2.959: 값은 backupViewText.js(가상화 플랫폼 KPI 카드도 같은 키로 연다)
 
 const TONE = { ok: '#86efac', bad: '#fca5a5', warn: '#fcd34d', info: '#93c5fd', muted: 'var(--text-dim)' };
 const CHIP = { bad: { color: '#fca5a5', background: 'rgba(239,68,68,.14)' }, warn: { color: '#fcd34d', background: 'rgba(245,158,11,.14)' }, info: { color: '#93c5fd', background: 'rgba(59,130,246,.14)' }, muted: { color: 'var(--text-dim)', background: 'var(--panel-deep)' } };
@@ -45,10 +45,7 @@ function Stat({ label, value, extra, tone, title }) {
 const Chip = ({ tone = 'muted', children, title }) => <span title={title} style={{ ...CHIP[tone], padding: '2px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap' }}>{children}</span>;
 const pctText = (x) => (x == null ? '—' : `${x}%`);
 
-export function openDetail(vcId) {
-  try { localStorage.setItem(DETAIL_VC_KEY, vcId); } catch { /* 저장 못 해도 세부내용은 첫 vCenter 로 열린다 */ }
-  window.location.hash = '#/tools/backup-detail';
-}
+export function openDetail(vcId) { openBackupDetail(vcId); }
 
 export default function BackupSummaryTool() {
   const [data, setData] = useState(null);
