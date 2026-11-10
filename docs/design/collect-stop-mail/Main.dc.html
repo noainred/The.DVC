@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>수집 이상 일람 메일 — 본문</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#eef1f5;color:#111827;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#1d4ed8}a:hover{color:#1e3a8a}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#4b5563}
+.h2{margin:0;font-size:14px;font-weight:800;color:#111827;display:flex;align-items:center;gap:8px}
+.cnt{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 6px;border-radius:11px;font-size:12px;font-weight:800}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{text-align:left;font-size:11px;font-weight:700;color:#4b5563;padding:7px 8px;border-bottom:1px solid #d1d5db;background:#f3f4f6}
+td{padding:9px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-size:12px;line-height:1.5;word-break:break-word}
+.corp{font-weight:700}
+.tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px;font-weight:700;white-space:nowrap}
+.t-auth{background:#fee2e2;color:#991b1b}
+.t-stop{background:#ffedd5;color:#9a3412}
+.t-ok{background:#dbeafe;color:#1e40af}
+.t-unk{background:#e5e7eb;color:#374151}
+.why{color:#4b5563;font-size:11px}
+.act{color:#111827;font-size:11px;font-weight:600}
+</style>
+</helmet>
+<div style="width: 760px; min-height: 1700px; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+
+  <div style="background: #ffffff; border: 1px solid #d1d5db; border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 6px">
+    <div style="font-size: 16px; font-weight: 800; line-height: 1.4">[DVC] 수집 이상 일람 — 인증 정지 4 · 수집 멈춤 3 (새로 생긴 것 2)</div>
+    <div class="dim" style="font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 14px">
+      <span>보낸 사람 <b style="color:#111827">DVC 포탈</b> &lt;[보내는 주소]&gt;</span>
+      <span>받는 사람 [통합 관리자]</span>
+      <span>2026-11-10 10:20 (포탈 시각)</span>
+    </div>
+  </div>
+
+  <div style="background: #ffffff; border: 1px solid #d1d5db; border-radius: 8px; padding: 20px 22px; display: flex; flex-direction: column; gap: 20px">
+
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="font-size: 13px; line-height: 1.6">2026-11-10 10:20 기준으로 포탈이 <b>주기 수집을 멈췄거나</b>(인증 실패) <b>정해진 주기에 값을 받지 못한</b> 대상의 목록입니다. 직전 메일(11-10 08:30) 이후 <b>새로 생긴 것 2건</b>, <b>회복된 것 2건</b>입니다.</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+      <div style="border: 1px solid #fecaca; background: #fef2f2; border-radius: 6px; padding: 10px 12px">
+        <div style="font-size: 11px; font-weight: 700; color: #991b1b">인증 정지</div>
+        <div style="font-size: 24px; font-weight: 800; color: #991b1b; line-height: 1.2">4</div>
+        <div style="font-size: 11px; color: #7f1d1d">비밀번호 · 계정 확인 필요</div>
+      </div>
+      <div style="border: 1px solid #fed7aa; background: #fff7ed; border-radius: 6px; padding: 10px 12px">
+        <div style="font-size: 11px; font-weight: 700; color: #9a3412">수집 멈춤</div>
+        <div style="font-size: 24px; font-weight: 800; color: #9a3412; line-height: 1.2">3</div>
+        <div style="font-size: 11px; color: #7c2d12">주기의 3배 넘게 값 없음</div>
+      </div>
+      <div style="border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 6px; padding: 10px 12px">
+        <div style="font-size: 11px; font-weight: 700; color: #1e40af">회복</div>
+        <div style="font-size: 24px; font-weight: 800; color: #1e40af; line-height: 1.2">2</div>
+        <div style="font-size: 11px; color: #1e3a8a">직전 메일 이후</div>
+      </div>
+      <div style="border: 1px solid #d1d5db; background: #f9fafb; border-radius: 6px; padding: 10px 12px">
+        <div style="font-size: 11px; font-weight: 700; color: #374151">판정 못함</div>
+        <div style="font-size: 24px; font-weight: 800; color: #374151; line-height: 1.2">2</div>
+        <div style="font-size: 11px; color: #4b5563">기록 없음 — 멈춤으로 세지 않음</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <h2 class="h2"><span class="cnt" style="background:#991b1b;color:#ffffff">4</span>인증 정지 — 계정 잠금을 막으려고 포탈이 주기 수집을 멈춘 대상</h2>
+      <table>
+        <thead><tr><th style="width:92px">법인</th><th style="width:150px">수집 · 대상</th><th style="width:112px">정지 시각</th><th>사유(장비가 돌려준 글) · 조치</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="corp">PL 법인<br><span class="tag t-auth">새로 생김</span></td>
+            <td>스토리지<br><span class="mono">unity-pl-01</span></td>
+            <td>11-10 09:42<br><span class="why">38분째 · 시도 1회</span></td>
+            <td><span class="why mono">SSH 수집 실패: All configured authentication methods failed</span><br><span class="act">설정 › 수집 › 스토리지에서 이 장비의 비밀번호를 고치면 자동으로 다시 수집합니다.</span></td>
+          </tr>
+          <tr>
+            <td class="corp">PL 법인</td>
+            <td>iDRAC<br><span class="mono">12대</span> <span class="why">(같은 계정)</span></td>
+            <td>11-09 22:14<br><span class="why">12시간 6분째 · 대상마다 1회</span></td>
+            <td><span class="why mono">HTTP 401 Unauthorized</span><br><span class="why">idrac-pl-r01 … idrac-pl-r12 — 전체 목록은 포탈 화면에서</span><br><span class="act">같은 계정 12대가 한꺼번에 실패 — 계정 비밀번호 변경 · 만료를 먼저 확인하세요.</span></td>
+          </tr>
+          <tr>
+            <td class="corp">US-East 법인</td>
+            <td>vCenter<br><span class="mono">vc-use1</span></td>
+            <td>11-09 03:05<br><span class="why">1일 7시간째 · 시도 1회</span></td>
+            <td><span class="why mono">HTTP 401 Unauthorized</span><br><span class="act">이 vCenter 의 인벤토리 · 성능 · 이벤트 수집이 모두 멈춰 있습니다. 설정 › vCenter 에서 계정을 확인하세요.</span></td>
+          </tr>
+          <tr>
+            <td class="corp">KR 본사</td>
+            <td>Horizon 세션<br><span class="mono">hz-cs-01</span></td>
+            <td>11-08 14:30<br><span class="why">1일 19시간째 · 시도 1회</span></td>
+            <td><span class="why mono">인증 실패(401)</span><br><span class="act">AD 서비스 계정 비밀번호가 바뀌었는지 확인하세요. 수동 [지금 수집] 은 막혀 있지 않습니다.</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <h2 class="h2"><span class="cnt" style="background:#9a3412;color:#ffffff">3</span>수집 멈춤 — 인증 문제는 아니지만 주기의 3배 넘게 값을 받지 못한 대상</h2>
+      <table>
+        <thead><tr><th style="width:92px">법인</th><th style="width:150px">수집 · 대상</th><th style="width:112px">마지막 성공</th><th>마지막 오류 · 조치</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="corp">VN 법인<br><span class="tag t-stop">새로 생김</span></td>
+            <td>SAN 스위치<br><span class="mono">san-vn-02</span></td>
+            <td>11-10 03:10<br><span class="why">7시간 10분 전 · 주기 1시간</span></td>
+            <td><span class="why mono">connect ETIMEDOUT</span><br><span class="act">장비 또는 법인 엣지 → 장비 구간의 연결을 확인하세요.</span></td>
+          </tr>
+          <tr>
+            <td class="corp">US-East 법인</td>
+            <td>엣지 → 중앙 보고<br><span class="mono">edge-use1</span></td>
+            <td>11-10 09:02<br><span class="why">1시간 18분 전 · 주기 1분</span></td>
+            <td><span class="why">중앙이 이 엣지에서 아무 보고도 받지 못했습니다(오류 기록 없음).</span><br><span class="act">엣지 포탈이 떠 있는지, 중앙으로 가는 통신이 되는지 확인하세요. 이 엣지가 맡은 수집은 따로 세지 않았습니다(아래 안내).</span></td>
+          </tr>
+          <tr>
+            <td class="corp">KR 본사</td>
+            <td>Arista CVP<br><span class="mono">cvp-kr-01</span></td>
+            <td>11-09 18:40<br><span class="why">15시간 40분 전 · 주기 5분</span></td>
+            <td><span class="why mono">장비 인증서를 신뢰할 수 없어 연결을 끊었습니다</span><br><span class="act">비밀번호 문제가 아닙니다 — 장비 인증서가 바뀌었습니다. 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <h2 class="h2"><span class="cnt" style="background:#1e40af;color:#ffffff">2</span>회복 — 직전 메일 이후 다시 수집되기 시작한 대상</h2>
+      <table>
+        <thead><tr><th style="width:92px">법인</th><th style="width:150px">수집 · 대상</th><th style="width:112px">회복 시각</th><th>멈춰 있던 동안</th></tr></thead>
+        <tbody>
+          <tr><td class="corp">VN 법인</td><td>스토리지<br><span class="mono">pmax-vn-01</span></td><td>11-10 09:15</td><td><span class="why">인증 정지 2일 3시간(11-08 06:10 ~) — 자격증명이 바뀌어 자동 재개</span></td></tr>
+          <tr><td class="corp">KR 본사</td><td>PDU<br><span class="mono">pdu-kr-b2-07</span></td><td>11-10 08:52</td><td><span class="why">수집 멈춤 4시간 20분(11-10 04:32 ~)</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <h2 class="h2"><span class="cnt" style="background:#374151;color:#ffffff">2</span>판정 못함 — 멈춤 · 정상 어느 쪽에도 넣지 않았습니다</h2>
+      <table>
+        <thead><tr><th style="width:92px">법인</th><th style="width:150px">수집 · 대상</th><th>이유</th></tr></thead>
+        <tbody>
+          <tr><td class="corp">DE 법인</td><td>GPU<br><span class="mono">gpu-de-03</span></td><td><span class="why">등록한 뒤 한 번도 수집 기록이 없습니다(등록 11-10 09:50). 첫 수집이 끝나면 판정합니다.</span></td></tr>
+          <tr><td class="corp">US-East 법인</td><td>엣지가 맡은 수집 전체</td><td><span class="why">엣지 보고가 끊겨 엣지 안의 상태를 읽지 못했습니다 — 위 ‘엣지 → 중앙 보고’ 한 줄로만 셉니다.</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="border-top: 1px solid #e5e7eb; padding-top: 14px; display: flex; flex-direction: column; gap: 6px; font-size: 11px; line-height: 1.6; color: #4b5563">
+      <div><a href="#">포탈에서 수집 이상 현황 열기</a> · 같은 대상은 상태가 바뀔 때만 ‘새로 생김’ · ‘회복’ 으로 다시 알립니다. 남아 있는 것은 매일 08:30 일람에 계속 실립니다.</div>
+      <div>인증 정지 대상은 비밀번호를 고칠 때까지 포탈이 자동으로 다시 로그인하지 않습니다(계정 잠금 방지). 이 메일을 받지 않으려면 설정 › 메일 발송 › 수집 이상 일람에서 끄거나 받는 사람을 바꾸세요.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":1700}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
