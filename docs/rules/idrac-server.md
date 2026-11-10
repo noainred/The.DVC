@@ -223,6 +223,29 @@
     엣지는 자기 agent 것만 가져간다 — 이 경계를 지우면 같은 서버에 iDRAC 세션이 두 배로 열린다.
     `serverId` 가 `host:<vc>:<name>` 인 항목은 **수동 태그로 베어메탈이 된 ESXi 호스트**라
     (`fleetInventory.js:170`) iDRAC 등록이 없다 → `no-idrac` 으로 밝힌다.
+    ⚠⚠ **정정(v2.959 — 사용자 보고 재현)**: '중앙은 `remoteAgent` 없는 것만' 은 **원격 수집 서버(엣지)가 iDRAC 을 맡은 서버**를 빠뜨렸다.
+    엣지가 iDRAC 스캔으로 **자기 등록부**에 넣고 전력을 폴링하는 서버는 중앙에 원격 전력(수집 서버 pull — `collector/state.js setRemoteHost`)으로
+    올라오는데, 그 항목에는 엣지 이름이 없고 `collectorId` 만 있으며(`idrac/service.js` 원격 항목 source `remote`), 같은 서버의 엣지 fleet 보고
+    (`remoteAgent` 있음)는 `getFleetInventory` 가 이미 잡힌 원격 항목과 태그 · 호스트가 겹쳐 버린다 → 중앙이 자기 iDRAC 등록부에서 찾다가 없으니
+    **'iDRAC 등록 없음'**(사용자 화면 1,157대 · 엣지 수집 1대). 고친 판정(`bmusage/targets.js resolveTargets` 한 곳): **중앙 · 출처 `remote` ·
+    `collectorId` 있음 · 이 노드에 그 서버 등록이 하나도 없음**(iDRAC 등록 id · 서비스태그 · OS 계정 · 법인이 맞지 않거나 모호한 OS 등록까지 — 등록이 있으면
+    이 노드 설정의 문제라 예전 사유 그대로)이면 `edge-delegated` + `agent` = **수집 서버 등록부의 name**(`/tools/bm-usage/edges` 표의 agent 와 같은 값 ·
+    엣지가 보낸 문자열이 아니다) + `vcenterId`(범위 계정은 범위 안 행만) + `delegatedBy:'collector'`. 수집 서버를 등록부에서 못 찾거나(삭제 · 이름 없음)
+    등록부를 못 읽으면 **이름을 추측하지 않고** `remote-collector-unknown`(`collectorIssue` not-found · unread — 엣지 수집에도 no-idrac 에도 넣지 않는다 ·
+    누락 점검은 '모름' · 공통 태그 판정기는 complete 거짓). **사유 순서**: 엣지 보고 위임 → **원격 위임** → 귀속 없음 → 법인 꺼짐 → 경로 —
+    원격 위임을 법인 꺼짐 · 귀속 없음보다 먼저 둔 근거: 중앙에 등록이 없으면 중앙 설정(법인 켜기 · 귀속)을 바꿔도 중앙은 수집할 수 없고, 수집 여부는
+    그 엣지 설정이 정한다(엣지 보관분 표 '엣지에서 꺼짐' → '중앙에서 켜기'). **불변식: 기준판에서 중앙이 수집하던 대상은 하나도 잃지 않는다**
+    (대상에는 이 노드 등록이 필요하므로 대상 목록이 그대로다 — `server/test/bmRemoteDelegate2959.test.js` ② 가 설정 24조합 × 색인 4종(96)으로 고정 ·
+    기준판 동치는 0ca493bc `targets.js` 와 collectorId 를 지운 입력을 24조합 대조해 차이 0). `remoteAgent` 의 뜻(엣지 fleet 보고)은 바꾸지 않았다
+    (개요 · 전력 귀속 · 유령 키 · 법인 귀속이 그 뜻으로 읽는다) — bareMetal 행에 `collectorId` 를 **덧붙이고**(`/insights/fleet` 응답에서는 뺀다),
+    이름 색인은 `getFleetInventory` 가 유령 키 판정과 **같은 한 번의 등록부 읽기**로 만든 열거 안 되는 속성(`remoteCollectors`)이라 대상 해석이 등록부를 다시 읽지 않는다.
+    화면: '대상이 아닌 서버 — 사유별' 아래 **엣지별 대수 · 그 엣지의 보관분 상태**(엣지 표와 같은 판정) · '엣지 보관분 표로 이동'. 계정을 중앙으로 가져오지 않는다.
+    **남은 것(고치지 않음)**: ① 법인별 서버 사용량 · 서비스 인벤토리(`corpusage/build.js ownedRowOf` — `remoteAgent` 로만 엣지 행을 고른다)는 이 서버들을
+    여전히 중앙 행으로만 찾아 '못 읽음' 으로 본다(이번 변경 전과 같다 — 엣지 보관분 행을 collectorId 이름으로 고르는 것은 별건) ·
+    ② 엣지 fleet 보고로만 위임된 서버(`remoteAgent` 경로) 행에는 예전처럼 `vcenterId` 가 없어 범위 계정의 사유 목록 · 엣지별 대수에 보이지 않는다(전체 범위만 —
+    공통 태그 판정기의 법인 집계가 그 빈 법인을 한 법인으로 세는 기존 동작과 얽혀 있어 함께 손대지 않았다) ·
+    ③ 등록부에서 지운 수집 서버의 원격 항목은 puller 의 잔류 정리(`clearStaleRemote`, 주기마다)가 지우므로 'not-found' 는 그 사이에만 보인다 ·
+    ④ 식별 키 겹침 목록(bareMetalDupes)의 원격 출처 행에는 collectorId 를 싣지 않았다(겹침 판정은 예전 그대로).
   - **인증 실패(401/403)는 주기 수집을 멈춘다**(`util/authGuard.js` 재사용 — v2.535 규약). SSH 계정이
     틀리면 5분마다 로그인 실패가 쌓여 **계정이 잠긴다**. 멈추는 것은 자격증명 거부뿐이고(타임아웃·연결
     실패로 멈추면 일시 장애가 수집을 영구 정지시킨다), 자격증명이 바뀌면 자동 재개하며 **수동 실행은

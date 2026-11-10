@@ -61,7 +61,7 @@ export function commonTagJudge({ rows = [], overlapTags = [], complete = true } 
 
 /**
  * 지금 상태로 판정기를 만든다(순수 — 호출부가 currentTargets 결과와 엣지 보관분을 넘긴다).
- *   complete: 엣지 노드이거나, 중앙이 맡긴 엣지가 하나도 없을 때(대상이 아닌 서버의 edge-delegated 없음 · 보관분 없음)만 참.
+ *   complete: 엣지 노드이거나, 중앙이 맡긴 엣지가 하나도 없을 때(대상이 아닌 서버의 edge-delegated · remote-collector-unknown 없음 · 보관분 없음)만 참.
  */
 export function tagJudgeOf(tg = {}, edges = []) {
   const recs = (Array.isArray(edges) ? edges : []).filter((r) => r && r.snap && Array.isArray(r.snap.targets));

@@ -103,7 +103,7 @@ for (const corps of [{}, { vcA: true }, { vcA: true, vcB: true }]) {
 }
 const RCS = [RC, NAMES([], false), null, NAMES([['c1', 'edge-pl']])];
 
-test('② 불변식 — 기준판 대상 집합 ⊆ 새 대상 집합(중앙 등록 있음 · OS 계정만 · 모르는 수집 서버 · 등록부 손상 · 설정 48조합 × 색인 4종)', () => {
+test('② 불변식 — 기준판 대상 집합 ⊆ 새 대상 집합(중앙 등록 있음 · OS 계정만 · 모르는 수집 서버 · 등록부 손상 · 설정 24조합 × 색인 4종 = 96)', () => {
   let delegatedSeen = 0; let unknownSeen = 0; let combos = 0;
   for (const settings of SETTINGS) {
     for (const remoteCollectors of RCS) {
