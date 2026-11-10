@@ -273,7 +273,9 @@ export async function computeServer({ agent = '', target, now = Date.now(), cfg 
   const fits = {};
   for (const [k, list] of Object.entries(ser)) {
     const f = forecastSeries(list.map((d) => ({ day: d.day, v: d.v, excluded: d.ex })), { ...cfg, today });
-    if (f.fit) fits[k] = { slope: r3(f.fit.slope), intercept: r3(f.fit.intercept), fromDay: dayStr(f.fit.x0) };
+    // v2.954(점검 B-1): 반올림하지 않는다 — x 가 날짜 번호(≈20,400)라 기울기를 소수 3자리로 자르면 그 오차 × x 만큼(최대 ≈10%p) 맞춤선이 밀린다.
+    //   (웹 capChart · 중앙 정제 sanitizeCapacityDetail 은 intercept + slope × 날짜번호 를 그대로 쓴다 — 모양은 그대로라 옛 웹 · 옛 중앙도 맞게 그린다.)
+    if (f.fit) fits[k] = { slope: f.fit.slope, intercept: f.fit.intercept, fromDay: dayStr(f.fit.x0) };
   }
   return { ok: true, rows, series: ser, fits, excludedDays: [...excludedDays].sort().slice(-60), today };
 }

@@ -5,6 +5,7 @@
  */
 import React, { useState } from 'react';
 import { fetchJson } from '../../api.js';
+import { useLatest } from '../../hooks/useLatest.js';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
@@ -36,11 +37,14 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
   const [rs, setRs] = useState(null);
   const f = resp?.fleet || {};
   const cfg = resp?.cfg || {};
-  const openRack = async (r) => {
+  // v2.954(점검 E-5): 랙을 연달아 누르면 늦게 온 앞 랙 응답이 뒤 랙의 목록을 덮었다 — 세대 가드(useLatest)로 마지막 클릭만 그린다(언마운트 뒤 응답도 버린다).
+  const latest = useLatest();
+  const openRack = (r) => {
     const id = `${r.vcenterId}|${r.rack}`;
     setRack(id); setRs({ loading: true });
-    try { const x = await fetchJson('/tools/bm-usage/power', { rack: id }, undefined, { timeoutMs: 60_000 }); setRs({ rows: x?.rackServers?.rows || [], notTarget: x?.rackServers?.notTarget || 0 }); }
-    catch (e) { setRs({ err: e?.message || '읽지 못했습니다' }); }
+    return latest(fetchJson('/tools/bm-usage/power', { rack: id }, undefined, { timeoutMs: 60_000 }),
+      (x) => setRs({ rows: x?.rackServers?.rows || [], notTarget: x?.rackServers?.notTarget || 0 }),
+      (e) => setRs({ err: e?.message || '읽지 못했습니다' }));
   };
   const binMax = Math.max(1, ...(resp?.bins || []).map((b) => b.n));
   return (

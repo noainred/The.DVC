@@ -26,6 +26,7 @@ import path from 'node:path';
 import http from 'node:http';
 import url from 'node:url';
 import express from 'express';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nodeclients2935-'));
 Object.assign(process.env, { CONFIG_DIR: TMP, DATA_SOURCE: 'live', AUTH_ENABLED: 'false' });
@@ -227,7 +228,9 @@ test('⑤ 폴러 — 주기 항목 · 대상 · 장비 점유 공유 · 미전�
   const n = IV.normalizeIntervals({ nodeLoadMs: 3 * H, pollMs: 48 * H, areasMs: '' });
   assert.deepEqual(n.values, { nodeLoadMs: H, pollMs: 24 * H }, '항목별 상한(60분) · 공통 상한(24시간) · 빈 값은 미설정');
   assert.ok(n.issues.some((s) => /노드 부하 표본 주기: 상한 60분/.test(s)));
-  assert.deepEqual(NLP.sampleTargets([{ type: 'isilon', id: 'a' }, { type: 'isilon', id: 'b', nodeLoadEnabled: false }, { type: 'unity480', id: 'c' }, { type: 'isilon', id: 'd', enabled: false }, null]).map((d) => d.id), ['a']);
+  // v2.952: REST 어레이(unity480 · collectMethod 기본 api)도 표본 대상이다(디렉터 · 노드 · SP 성능 — arrayPerf.js). SSH 변형은 제외.
+  assert.deepEqual(NLP.sampleTargets([{ type: 'isilon', id: 'a' }, { type: 'isilon', id: 'b', nodeLoadEnabled: false }, { type: 'unity480', id: 'c' }, { type: 'isilon', id: 'd', enabled: false }, null,
+    { type: 'unity480', id: 'e', collectMethod: 'ssh' }, { type: 'powermax', id: 'f', collectMethod: 'api', nodeLoadEnabled: false }]).map((d) => d.id), ['a', 'c']);
   // 장비 점유 — 표본 둘은 겹치지 않고, 두 번째는 IN_FLIGHT_BUSY
   const dev = { id: 'ex-1' }; const order = [];
   const p1 = POL.runSampleExclusive(dev, async () => { order.push('s'); await new Promise((r) => setTimeout(r, 20)); order.push('e'); return 'done'; });
@@ -258,8 +261,11 @@ test('⑤ 폴러 — 주기 항목 · 대상 · 장비 점유 공유 · 미전�
   assert.equal(REG.listDevices().find((d) => d.id === a.id).nodeLoadEnabled, false);
   REG.saveDevice({ ...REG.getDeviceWithSecret(a.id), name: 'isi-t1b' });
   assert.equal(REG.listDevices().find((d) => d.id === a.id).nodeLoadEnabled, false, '다른 필드만 바꿔 저장해도 토글은 보존된다');
+  // v2.952: REST 어레이(Unity · PowerStore · PowerMax · VMAX)는 같은 토글을 갖는다(디렉터 · 노드 · SP 성능 표본 — 기본 켬). SSH 변형은 경로가 없어 필드를 만들지 않는다.
   const u = REG.saveDevice({ type: 'unity480', name: 'un-1', host: '10.9.9.2', username: 'u', password: 'p', nodeLoadEnabled: true });
-  assert.equal(REG.listDevices().find((d) => d.id === u.id).nodeLoadEnabled, undefined, '아이실론이 아니면 필드를 만들지 않는다');
+  assert.equal(REG.listDevices().find((d) => d.id === u.id).nodeLoadEnabled, true, 'REST 어레이는 토글을 갖는다(v2.952)');
+  const us = REG.saveDevice({ type: 'unity480', name: 'un-2', host: '10.9.9.3', username: 'u', password: 'p', collectMethod: 'ssh', nodeLoadEnabled: true });
+  assert.equal(REG.listDevices().find((d) => d.id === us.id).nodeLoadEnabled, undefined, 'SSH 변형은 필드를 만들지 않는다');
   // 서비스 점검·엣지 로그 표
   const { STATUS_SPEC } = await import('../src/edgelog/spec.js');
   const row = STATUS_SPEC.find((s) => s.key === 'collect.storageNodeLoad');
@@ -288,7 +294,7 @@ test('⑥ 중앙 수신 — 표본 고리 정제·중복·상한 · 응답 확�
   const push = src('storage/push.js');
   assert.ok(/nodeLoadSamples = pendingNodeLoadSamples\(\)/.test(push) && /markNodeLoadSamplesSent\(nodeLoadSamples\)/.test(push));
   assert.ok(/dropSummaryOf\(await readCentralReply\(res\)\)/.test(push), '공용 판독기 리터럴(EDGE2613-05)');
-  const route = src('routes/central.js');
+  const route = centralSource();
   const i = route.indexOf("centralRouter.post('/storage-data'"); const seg = route.slice(i, route.indexOf('\n});', i));
   assert.ok(/req\.body\?\.nodeLoadSamples/.test(seg) && /onlyDelegated\(list, \(d\) => d\.deviceId/.test(seg) && /ownedSet\.has\(String\(d\.deviceId\)\)/.test(seg), '표본 고리도 중앙 직접 장비 거절 + 개별 토큰 위임 필터');
   assert.ok(/nodeLoadSamples: sampleAck/.test(seg), '응답에 확인을 싣는다');
@@ -361,19 +367,19 @@ test('⑧ 이름 — VM IP · 호스트 관리 IP · 장비 보고 우선 · 같
 });
 
 /* ── ⑨ CSV · 자유텍스트 nodeLoad 칸(v2.938) ─────────────────────────────────── */
-test('⑨ CSV·텍스트 — nodeLoad 칸은 아이실론만 내보내고 · 빈 칸은 undefined(유지) · 위치형 끝 · 가져오기는 빈 칸으로 켜지 않는다', async () => {
+test('⑨ CSV·텍스트 — nodeLoad 칸은 표본을 낼 수 있는 장비(아이실론 · REST 어레이)만 내보내고(v2.955) · 빈 칸은 undefined(유지) · 위치형 끝 · 가져오기는 빈 칸으로 켜지 않는다', async () => {
   const CSV = await import('../src/storage/csv.js');
   assert.equal(CSV.CSV_COLUMNS[CSV.CSV_COLUMNS.length - 1], 'password', 'CSV 는 password 가 끝(가져오기 전용)');
   assert.ok(CSV.CSV_COLUMNS.includes('nodeLoad'));
   assert.equal(CSV.TEXT_FIELDS[CSV.TEXT_FIELDS.length - 1], 'nodeLoad', '위치형은 열 순서가 계약 — 새 열은 맨 끝(옛 파일의 note·password 가 밀리지 않게)');
-  const devs = [{ type: 'isilon', name: 'A', host: '10.0.0.1', username: 'u', nodeLoadEnabled: false }, { type: 'isilon', name: 'B', host: '10.0.0.2', username: 'u' }, { type: 'unity480', name: 'C', host: '10.0.0.3', username: 'u', nodeLoadEnabled: true }];
+  const devs = [{ type: 'isilon', name: 'A', host: '10.0.0.1', username: 'u', nodeLoadEnabled: false }, { type: 'isilon', name: 'B', host: '10.0.0.2', username: 'u' }, { type: 'unity480', name: 'C', host: '10.0.0.3', username: 'u', nodeLoadEnabled: true }, { type: 'unity480', name: 'D', host: '10.0.0.4', username: 'u', collectMethod: 'ssh' }];
   const csv = CSV.devicesToCsv(devs);
   const lines = csv.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
   const hi = lines[0].split(',').indexOf('nodeLoad');
   assert.ok(hi > 0);
-  assert.deepEqual(lines.slice(1).map((l) => l.split(',')[hi]), ['false', 'true', ''], '아이실론만 true|false · 다른 타입은 빈칸');
+  assert.deepEqual(lines.slice(1).map((l) => l.split(',')[hi]), ['false', 'true', 'true', ''], '아이실론 · REST 어레이는 true|false(v2.955) · SSH 변형은 빈칸');
   const back = CSV.parseDevicesCsv(csv);
-  assert.deepEqual(back.rows.map((r) => r.nodeLoadEnabled), [false, true, undefined], '왕복 — 빈칸은 undefined');
+  assert.deepEqual(back.rows.map((r) => r.nodeLoadEnabled), [false, true, true, undefined], '왕복 — 빈칸은 undefined');
   const old = CSV.parseDevicesCsv('type,name,host,username,enabled\nisilon,A,10.0.0.1,u,true\n');
   assert.equal(old.rows[0].nodeLoadEnabled, undefined, '열이 없는 옛 CSV 는 유지(켜지 않는다)');
   const alias = CSV.parseDevicesCsv('type,name,host,표본\nisilon,A,10.0.0.1,off\n');
@@ -381,7 +387,7 @@ test('⑨ CSV·텍스트 — nodeLoad 칸은 아이실론만 내보내고 · 빈
   const txt = CSV.devicesToText(devs);
   assert.match(txt, /nodeLoad/);
   const tb = CSV.parseDevicesText(txt);
-  assert.deepEqual(tb.rows.map((r) => r.nodeLoadEnabled), [false, true, undefined], '자유텍스트 왕복');
+  assert.deepEqual(tb.rows.map((r) => r.nodeLoadEnabled), [false, true, true, undefined], '자유텍스트 왕복');
   const pos = CSV.parseDevicesText('isilon  A  10.0.0.1  u  ssh  22  WA  -  true  "메모"  pw1\n');
   assert.deepEqual([pos.rows[0].note, pos.rows[0].password, pos.rows[0].nodeLoadEnabled], ['메모', 'pw1', undefined], '옛 위치형 11열 — 메모·비밀번호가 밀리지 않고 nodeLoad 는 유지');
   const pos2 = CSV.parseDevicesText('isilon  A  10.0.0.1  u  ssh  22  WA  -  true  "메모"  -  false\n');

@@ -9,6 +9,7 @@ import { VcStateBadge } from '../VCenters.jsx';
 import { storageBarInfo } from '../vcCardText.js';
 import { alarmsUnknown } from '../restFallbackText.js';
 import { fmtN } from './platformText.js';
+import { corpSiteStatus, countableTotals, partialNote, PARTIAL_TITLE } from '../corpSiteStatus.js';
 
 function Pct({ pct, title }) {
   if (pct == null) return <span className="muted">—</span>;
@@ -20,11 +21,15 @@ function Pct({ pct, title }) {
   );
 }
 
-export default function VcTable({ sites, byVc, backupText, onOpen, onGoHosts, onGoVms }) {
+export default function VcTable({ sites, byVc, backupText, onOpen, onGoHosts, onGoVms, now = Date.now() }) {
   const rows = Array.isArray(sites) ? sites : [];
   const sum = (f) => rows.reduce((a, s) => { const v = f(s); return v == null ? a : (a ?? 0) + v; }, null);
-  const totHosts = sum((s) => (Number.isFinite(s.metrics?.hosts) ? s.metrics.hosts : null));
-  const totVms = sum((s) => (Number.isFinite(s.metrics?.vms) ? s.metrics.vms : null));
+  // v2.954(점검 E-1): 롤업은 첫 수집 중·비활성·이월 값 없는 연결 실패 vCenter 에도 hosts:0·vms:0·alarms 0 을 준다 — 행은 corpSiteStatus().countable,
+  //   합계는 countableTotals(카드 보기 KPI 와 같은 판정 — 복제 금지)로 센다. 셀 수 없는 행의 호스트·VM·알람·사용률은 '—'(0대가 아니다).
+  const tot = countableTotals(rows, { now });
+  const totHosts = tot.hosts;
+  const totVms = tot.vms;
+  const totNote = partialNote(tot.missing);
   const totAtt = sum((s) => byVc.get(s.id)?.hosts?.attention ?? null);
   const totSig = sum((s) => byVc.get(s.id)?.vms?.attention ?? null);
   const stop = (e) => e.stopPropagation();
@@ -42,16 +47,17 @@ export default function VcTable({ sites, byVc, backupText, onOpen, onGoHosts, on
           </tr></thead>
           <tbody>
             {rows.map((s) => {
-              const m = s.metrics || {};
+              const cs = corpSiteStatus(s, now);
+              const m = cs.countable ? (s.metrics || {}) : {};
               const r = byVc.get(s.id) || null;
               const st = storageBarInfo(m);
-              const alarmsNa = alarmsUnknown(s);
+              const alarmsNa = !cs.countable || alarmsUnknown(s);
               const alarms = alarmsNa ? null : (m.alarmsCritical || 0) + (m.alarmsWarning || 0);
               const bk = backupText(s);
               return (
                 <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => onOpen(s.id)} title="클릭 — 이 vCenter 상세">
                   <td data-sort={s.name}><b>{s.name}</b><div className="muted" style={{ fontSize: 11 }}>{s.location?.region || '—'} · {s.location?.city || '—'}</div></td>
-                  <td data-sort={s.status || ''}><VcStateBadge s={s} /></td>
+                  <td data-sort={s.status || ''} title={cs.countable ? undefined : (cs.title || undefined)}><VcStateBadge s={s} /></td>
                   <td style={{ textAlign: 'right' }} data-sort={m.hosts ?? ''}>
                     {Number.isFinite(m.hosts) ? <button type="button" className="cell-link tabular" onClick={(e) => { stop(e); onGoHosts(s.id); }} title="호스트 탭을 이 법인 범위로">{fmtN(m.hosts)} →</button> : '—'}
                     {r?.hosts?.total != null && <div className="muted" style={{ fontSize: 11 }}>점검 {fmtN(r.hosts.maint)} · 끊김 {fmtN(r.hosts.down)}</div>}
@@ -65,7 +71,7 @@ export default function VcTable({ sites, byVc, backupText, onOpen, onGoHosts, on
                   <td data-sort={m.cpuUsagePct ?? ''}><Pct pct={m.cpuUsagePct ?? null} /></td>
                   <td data-sort={m.memUsagePct ?? ''}><Pct pct={m.memUsagePct ?? null} /></td>
                   <td data-sort={st.pct ?? ''}><Pct pct={st.pct} title={st.title} /></td>
-                  <td style={{ textAlign: 'right', color: m.alarmsCritical ? 'var(--red)' : undefined }} data-sort={alarms ?? ''} className="tabular" title={alarmsNa ? 'REST 폴백 — 경보를 조회하지 않았습니다(0건이 아닙니다)' : undefined}>{alarms == null ? '—' : fmtN(alarms)}</td>
+                  <td style={{ textAlign: 'right', color: m.alarmsCritical ? 'var(--red)' : undefined }} data-sort={alarms ?? ''} className="tabular" title={!cs.countable ? (cs.title || undefined) : alarmsNa ? 'REST 폴백 — 경보를 조회하지 않았습니다(0건이 아닙니다)' : undefined}>{alarms == null ? '—' : fmtN(alarms)}</td>
                   <td style={{ textAlign: 'right' }} data-sort={bk?.sort ?? ''} className="tabular" title={bk?.title || undefined}>{bk ? bk.text : '—'}</td>
                   <td data-sort={s.collectSource === 'site' ? 'site' : 'direct'}><span className={`badge ${s.collectSource === 'site' ? 'blue' : 'gray'}`}>{s.collectSource === 'site' ? '엣지' : '직접'}</span></td>
                   <td data-sort={s.version || ''} className="muted">{s.version ? `v${s.version}` : '—'}</td>
@@ -78,7 +84,7 @@ export default function VcTable({ sites, byVc, backupText, onOpen, onGoHosts, on
               <td style={{ textAlign: 'right' }} className="tabular">{fmtN(totAtt)}</td>
               <td style={{ textAlign: 'right' }} className="tabular">{fmtN(totVms)}</td>
               <td style={{ textAlign: 'right' }} className="tabular">{fmtN(totSig)}</td>
-              <td colSpan={7} className="muted" style={{ fontWeight: 400, fontSize: 11.5 }}>합계는 수를 아는 법인만 더한 값(모르는 법인은 '—' · 0 으로 더하지 않음)</td>
+              <td colSpan={7} className="muted" style={{ fontWeight: 400, fontSize: 11.5 }} title={totNote ? PARTIAL_TITLE : undefined}>합계는 수를 아는 법인만 더한 값(모르는 법인은 '—' · 0 으로 더하지 않음){totNote ? ` · ${totNote}` : ''}</td>
             </tr>
           </tbody>
         </STable>

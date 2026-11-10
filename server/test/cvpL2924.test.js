@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cvpl2924-'));
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true' });
@@ -169,7 +170,7 @@ test('⑤ 중앙 정제 · 중앙 답', async () => {
   assert.equal(c.dropped.notOwned, 1); assert.equal(c.dropped.badRow, 1, 'fdb·lldp 둘 다 없는 레코드'); assert.equal(c.dropped.notObject, 1);
   assert.equal(cleanL2({ key: '__proto__', ts: NOW, fdb: [] }), null);
   assert.equal(cleanL2({ key: 'a', ts: NOW + 10 * 86_400_000, fdb: [] }, NOW).ts, NOW, '미래 시각은 수신 시각으로');
-  const src = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
+  const src = centralSource();
   assert.match(src, /saved\.l2 = 0;\n\s+for \(const \[cvpId, list\] of clean\.l2ByCvp/, '중앙은 saved.l2 를 늘 수로 답한다(L2 가 없어도 0)');
 });
 

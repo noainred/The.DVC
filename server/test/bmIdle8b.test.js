@@ -21,7 +21,11 @@ delete process.env.CENTRAL_URL;
 test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
 let sqlite = true; try { await import('node:sqlite'); } catch { sqlite = false; }
 const HOUR = 3_600_000; const DAY = 86_400_000;
-const NOW = Math.floor(Date.now() / HOUR) * HOUR - 30 * 60_000;
+const { DAY_OFFSET_MIN } = await import('../src/util/dayKey.js');
+// v2.952(시험 결함 고침): 기준 시각은 **포탈 하루(DAY_OFFSET_MIN) 안쪽** — 어제 12:30(포탈 시각). 예전 '정시 − 30분(UTC)' 은 UTC 14~16시(KST 23~01시)에
+//   +2h 표본이 다음 날로 넘어가 NEW1 의 완결된 날 수가 10 → 9 가 됐다(main 에서도 같은 시각에 실패 · 제품은 맞다). bmPower8b 234be5df 와 같은 부류.
+const OFF_MS = DAY_OFFSET_MIN * 60_000;
+const NOW = Math.floor((Date.now() + OFF_MS) / DAY) * DAY - OFF_MS - 12 * HOUR + 30 * 60_000;
 const I = await import('../src/bmusage/idle.js');
 
 const LOW = { days: 30, cpuAvg: 1.2, cpuMax: 6, memAvg: 9, diskMax: 0.4, netMax: 0.1, highDays: 0, lowRest: true };
@@ -206,9 +210,12 @@ test('⑤ 라우트 — 이 노드 + 엣지 · 범위 · 검토 상태(대기 ·
   assert.ok(A.listAnnotations().filter((a) => a.auto?.startsWith('idle:')).length >= 2);
   // 비관리자 판본 — 검토한 사람은 가림 토큰
   const op = { user: { username: 'op', role: 'operator', scope: null }, query: {}, params: {}, body: {} };
-  await rv(adm.user, { key: 'IDLE1', vcenterId: 'vcI', status: 'review' });
+  await rv(adm.user, { key: 'IDLE1', vcenterId: 'vcI', status: 'review', reason: '10.20.30.40 백업 대상 확인' });
   const fo = await R.bmIdleFleet(op, { vcenters: [{ id: 'vcI' }, { id: 'vcJ' }] }, deps);
   assert.notEqual(fo.rows.find((x) => x.key === 'IDLE1').review.by, 'adm');
+  // v2.954 반증(A-2 후속): 검토 사유도 주석 본문과 같은 가림(주소) — 관리자는 원문
+  assert.ok(!String(fo.rows.find((x) => x.key === 'IDLE1').review.reason).includes('10.20.30.40'), fo.rows.find((x) => x.key === 'IDLE1').review.reason);
+  assert.ok(String((await R.bmIdleFleet(adm, { vcenters: [{ id: 'vcI' }, { id: 'vcJ' }] }, deps)).rows.find((x) => x.key === 'IDLE1').review.reason).includes('10.20.30.40'));
 });
 
 test('⑥ 봉투 — 엣지가 싣는 표지 · 저활용 행 → 중앙 정제(sanitizePerfFields) 왕복 · 봉투 상한에서 사용 중 행만 뺀다', async () => {

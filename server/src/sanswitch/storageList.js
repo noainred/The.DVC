@@ -190,13 +190,17 @@ export function buildStorageRows({ agg1h, agg7d, deviceMeta, deviceLastTs, kindO
   return { rows, counts };
 }
 
-/** 어레이 행들의 KPI 합 — 측정된 것만 더하고 뺀 개수를 밝힌다(지금 합계는 라우트가 trafficTotal 로 따로 낸다 — 카드와 같은 함수). */
+/** 어레이 행들의 KPI 합 — 측정된 것만 더하고 뺀 개수를 밝힌다(지금 합계는 라우트가 trafficTotal 로 따로 낸다 — 카드와 같은 함수).
+ *  speedSumBps · unknownSpeedPorts 는 '지금' 값이 있는 행만(회선 사용률 분모 — v2.954 점검 B-5). */
 export function rowTotals(rows = []) {
   let avg24 = null; let speedSum = 0; let unknownSpeed = 0; let imbalance = 0; let unmeasured = 0; let unparsed = 0;
   for (const r of rows) {
     if (r.avg24 == null) unmeasured++; else avg24 = (avg24 ?? 0) + r.avg24;
-    if (r.speedSumBps) speedSum += r.speedSumBps;
-    unknownSpeed += r.unknownSpeedPorts || 0;
+    // v2.954(점검 B-5): 회선 사용률 분모는 '지금' 값이 있는 행만 — 분자(지금 합계)에 들어가지 않는 어레이(stale · 표본 없음)의 포트 속도를 넣으면 사용률이 낮게 보인다.
+    if (numOrNull(r.now?.bps) != null) {
+      if (r.speedSumBps) speedSum += r.speedSumBps;
+      unknownSpeed += r.unknownSpeedPorts || 0;
+    }
     if (r.imbalance) imbalance++;
     if (r.unparsedPorts) unparsed++;
   }

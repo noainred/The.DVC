@@ -19,7 +19,8 @@ const D = 24 * H;
 describe('서버와 같은 소스', () => {
   it('묶음·계열 — 화면 선택의 parts 는 서버 묶음 안의 계열이다', () => {
     for (const s of SELECTS) for (const p of s.parts) expect(NODE_LOAD_GROUPS[s.group]).toContain(p);
-    for (const [g, keys] of Object.entries(NODE_LOAD_GROUPS)) for (const k of keys) expect(SELECTS.some((s) => s.group === g && s.parts.includes(k))).toBe(true);
+    // v2.952: 서버 묶음 'fe'(어레이 디렉터 · 노드 · SP 단위)는 SAN 스토리지 성능 화면(SanStorageTool ArraySidePanel)이 그린다 — 아이실론 노드 부하 화면의 선택지가 아니다(의도).
+    for (const [g, keys] of Object.entries(NODE_LOAD_GROUPS)) { if (g === 'fe') continue; for (const k of keys) expect(SELECTS.some((s) => s.group === g && s.parts.includes(k))).toBe(true); }
   });
   it('기간 — 같은 키·같은 일수', () => {
     expect(RANGES.map((r) => r.key)).toEqual(Object.keys(NODE_LOAD_RANGES));
@@ -179,7 +180,7 @@ import {
 
 describe('v2.932 — 묶음 4개 · 단위', () => {
   it('묶음 순서·첫 선택은 서버 묶음과 같다', () => {
-    expect(GROUP_ORDER).toEqual(Object.keys(NODE_LOAD_GROUPS));
+    expect(GROUP_ORDER).toEqual(Object.keys(NODE_LOAD_GROUPS).filter((g) => g !== 'fe'));   // v2.952: fe 는 SAN 스토리지 성능 화면 몫
     for (const g of GROUP_ORDER) expect(selectOf(GROUP_FIRST[g]).group).toBe(g);
   });
   it('차트 계열 — 처리량은 In·Out 둘, 그 밖은 고른 하나', () => {

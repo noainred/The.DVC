@@ -3,7 +3,6 @@
 //   숫자는 서버 /platform/summary 하나(30초 · 탭 배지를 위해 무거운 집계를 다시 부르지 않는다) — 응답 전 · 첫 수집 중은 '—'(0 금지). 화면은 글자만 만든다(platformText.js).
 //   탭 id · 해시는 그대로(#/vcenters · #/hosts · #/vms) — 탭을 누르면 App 의 setTab, 칩을 누르면 허브 범위(위 필터 바의 vCenter)가 그 법인으로 바뀐다.
 import React, { useState } from 'react';
-import { usePolling } from '../../api.js';
 import { vcQuickDot } from '../vcCardText.js';
 import { entityTabs, chipCount, chipLegend, loadChipsCollapsed, saveChipsCollapsed } from './platformText.js';
 import './platform.css';
@@ -21,13 +20,14 @@ const ICON = {
  * @param {'vcenters'|'hosts'|'vms'} p.tab  열린 탭
  * @param {string[]} p.tabs                 이 사용자가 볼 수 있는 허브 탭(권한 — App visibleTabs)
  * @param {(t:string)=>void} p.onTab
- * @param {{region?:string,vcenterId?:string}} p.scope  허브 범위(위 필터 바) — 요약도 같은 범위로 센다
+ * @param {object|null} p.summary          /platform/summary 응답 — App 이 허브 범위(위 필터 바의 리전 · vCenter)로 한 번 부른 것(응답 전 null → '—')
  * @param {object[]} p.vcenters             /vcenters 목록(App 폴링) — 칩 순서 · 상태 점
  * @param {string} p.vcenterId              고른 법인(없으면 '')
  * @param {(id:string)=>void} p.onPickVcenter  칩 클릭 — 같은 칩을 다시 누르면 전체
  */
-export default function PlatformHub({ tab, tabs, onTab, scope, vcenters, vcenterId, onPickVcenter }) {
-  const { data: summary } = usePolling('/platform/summary', scope || {}, 30_000);
+export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters, vcenterId, onPickVcenter }) {
+  // v2.954(점검 E-2): 요약은 App 이 범위(리전 · vCenter)를 실어 부른 summary prop 하나를 쓴다. 예전에는 여기서 scope 없이(App 이 넘기지 않음) 다시 폴링해
+  //   엔티티 탭 · 칩이 범위를 따르지 않고(전 법인 수) 같은 요약을 30초마다 두 번 불렀다. 범위 밖 법인의 칩은 숫자 없이 점만 남는다(요약에 그 법인 줄이 없다).
   const [folded, setFolded] = useState(() => loadChipsCollapsed(lsSafe()));
   const toggleFold = () => { const n = !folded; setFolded(n); saveChipsCollapsed(lsSafe(), n); };
   const items = entityTabs(summary).filter((t) => tabs.includes(t.k));

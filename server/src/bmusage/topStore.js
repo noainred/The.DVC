@@ -105,8 +105,10 @@ export function hourlyDelta(top, prev = null, { elapsedS = null } = {}) {
     let d = null;
     if (p != null && x.cpuS != null) { d = x.cpuS - p; if (d < 0 || (elapsedS != null && d > elapsedS * 4096)) d = null; }
     seenPid.add(x.pid);
-    if (d != null && d > 0) add(x.comm, d, x.rssKb);
-    else if (x.rssKb != null && (top?.mem || []).some((m) => m.pid === x.pid)) add(x.comm, null, x.rssKb);
+    // v2.954(점검 B-6): RSS 는 CPU 증분과 무관하게 후보 ∪ 메모리 상위의 PID 마다 한 번(머리말 정의) — 예전에는 증분 > 0 이거나 메모리 상위일 때만 더해
+    //   재시작 뒤 첫 주기 · 조용한 주기의 후보 RSS 가 빠져 rss_max 가 과소였다(그 PID 는 seenPid 라 아래 메모리 상위 루프에서도 빠졌다).
+    const cpuD = d != null && d > 0 ? d : null;
+    if (cpuD != null || x.rssKb != null) add(x.comm, cpuD, x.rssKb);
   }
   for (const m of top?.mem || []) if (!seenPid.has(m.pid)) add(m.comm, null, m.rssKb);
   return { byComm, next };

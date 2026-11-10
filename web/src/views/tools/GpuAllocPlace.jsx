@@ -8,7 +8,7 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { placementCandidates, profileOptions, profileGB, numText } from './gpuAllocText.js';
 
-const SKIP_TEXT = { down: '끊긴 호스트', noPlacement: '배치 정보 없음', mixed: '혼합 크기', otherProfile: '다른 프로파일이 올라감', capUnknown: '용량 모름', small: '용량이 작음' };
+const SKIP_TEXT = { down: '끊긴 호스트', maint: '유지보수 모드 호스트', noPlacement: '배치 정보 없음', mixed: '혼합 크기', otherProfile: '다른 프로파일이 올라감', capUnknown: '용량 모름', small: '용량이 작음' };
 
 export function GpuAllocPlace({ tree, vcSel }) {
   const opts = useMemo(() => profileOptions(tree, vcSel), [tree, vcSel]);
@@ -34,7 +34,7 @@ export function GpuAllocPlace({ tree, vcSel }) {
         </div>
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.6, marginTop: 6 }}>
           같은 GPU 에는 같은 vGPU 프로파일만 올라갑니다. 그래서 <b>같은 프로파일이 올라간 GPU 의 남은 슬롯</b>을 먼저(빈 GPU 를 아껴 두도록 남은 슬롯이 적은 것부터),
-          그다음 <b>모델이 맞는 빈 GPU</b>를 보여 줍니다. 끊긴 호스트 · 배치 정보 없는 GPU · 다른 프로파일 GPU 는 뺍니다. 켜진 VM 기준이라 꺼진 VM 이 다시 켜질 자리는 따로 세지 않습니다.
+          그다음 <b>모델이 맞는 빈 GPU</b>를 보여 줍니다. 끊긴 호스트 · 유지보수 모드 호스트 · 배치 정보 없는 GPU · 다른 프로파일 GPU 는 뺍니다. 켜진 VM 기준이라 꺼진 VM 이 다시 켜질 자리는 따로 세지 않습니다.
         </div>
       </div>
       {!profile ? null : r.per == null || !r.family ? (

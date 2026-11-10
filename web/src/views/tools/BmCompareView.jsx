@@ -36,6 +36,8 @@ export function createCompareLoader(fetcher = (q) => fetchJson('/tools/bm-usage/
       try { const d = await fetcher(q); if (g !== gen) return 'stale'; set({ resp: d, loading: false }); return 'ok'; }
       catch (e) { if (g !== gen) return 'stale'; set({ resp: null, err: e, loading: false }); return 'err'; }
     },
+    /** v2.954(점검 E-6): 진행 중 조회를 버린다(세대만 올린다) — 고른 서버를 모두 뺐을 때 앞서 띄운 조회가 끝나 빈 선택 위에 옛 비교를 그리지 않게. */
+    cancel() { gen++; },
   };
 }
 
@@ -229,7 +231,7 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
   const pairs = keys.map(parseRef);
   const canWrite = hasRole('admin', 'operator');
   useEffect(() => {
-    if (!keys.length) { setSt({ resp: null, err: null, loading: false }); return; }
+    if (!keys.length) { loader.current.cancel(); setSt({ resp: null, err: null, loading: false }); return; }
     const vcs = pairs.map((p) => p.vc);
     loader.current.load({ keys: pairs.map((p) => p.key).join(','), ...(vcs.some(Boolean) ? { vcenterIds: vcs.join(',') } : {}), range, group, value, ...(cross ? { cross: '1' } : {}) }, (p) => setSt((x) => ({ ...x, ...p })));
   }, [keysSig, range, group, value, cross]); // eslint-disable-line react-hooks/exhaustive-deps

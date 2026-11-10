@@ -812,7 +812,7 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
   const yielder = createYielder(15);
   const agg = await aggPorts(db, deviceIds.map(String), since, until, bucketMs, { yielder, ctx });
   const { qb0, nb } = agg;
-  const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name, speed, port_type FROM port_meta WHERE device_id IN (${ph})`)
+  const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name, attached_wwn, speed, port_type FROM port_meta WHERE device_id IN (${ph})`)   // v2.955 attached_wwn — portsDetail.wwn
     .all(...deviceIds.map(String));
   const storageOf = new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, storageKey(m.attached_name)]));
   const metaOf = withPorts ? new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, m])) : null;   // v2.948 포트별 출력용(이름 · 속도 · 종류)
@@ -899,7 +899,7 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
           const i = pos[j]; const cnt = p.x.a[i];
           if (cnt > 0) { avg[j] = Math.round(p.x.a[nb + i] / cnt); pk[j] = Math.round(p.x.a[2 * nb + i]); }
         }
-        return { deviceId: p.x.deviceId, port: p.x.port, name: m.attached_name || '', speed: m.speed || '', portType: m.port_type || '', avg, peak: pk };
+        return { deviceId: p.x.deviceId, port: p.x.port, name: m.attached_name || '', wwn: m.attached_wwn || '', speed: m.speed || '', portType: m.port_type || '', avg, peak: pk };   // v2.955 wwn — Flow Vision 타깃 필터 링크
       });
     }
     series.push({
