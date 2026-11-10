@@ -3,8 +3,9 @@ import { usePolling, fetchJson, toolAllowed, can } from '../api.js';
 // v2.915 가상화 플랫폼 허브(설계 docs/design/virt-platform-menu 시안 A ② · ⑨): 이 화면은 허브의 'vCenter 탭' 본문이다 — 제목 · 전체 vCenter/호스트/VM 카드 · 바로가기는
 //   허브(views/platform/PlatformHub.jsx)가 그리고, 여기는 카드 | 표 보기 ‖ vCenter 도구 줄 · 백업 KPI · 추이 · 카드/표만 남는다. 범위(리전 · vCenter · 검색)는 App 의 공용 바.
 import HubTabs, { toolsFor } from './platform/HubTabs.jsx';
-import { VC_TOOLS, VC_VIEWS, loadVcView, saveVcView, scopeLabel, bareosSumOf } from './platform/platformText.js';
+import { VC_TOOLS, VC_VIEWS, loadVcView, saveVcView, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter } from './platform/platformText.js';
 import { HUB_ENTRY_TAB } from './vcd/vcdTabs.js'; // v2.958: 허브에서 법인을 누르면 상세는 '요약' 부터
+import { openBackupDetail } from './tools/backupViewText.js'; // v2.959: 백업 KPI 카드 → 고른 법인의 Backup 세부내용(순수 모듈 — 도구 화면을 끌어오지 않는다)
 const VcTable = lazy(() => import('./platform/VcTable.jsx'));
 import { growth, hasDsData, gbTb } from './tools/storageTrack.js'; // 추이 KPI(v2.358) 계산 재사용
 import { Loading, ErrorBox, StateBadge, usageColor } from '../components/ui.jsx';
@@ -187,10 +188,12 @@ function TrendKpis({ vcenterId = '', region = '', scopeText = '' }) {
   const sumRemoved = pts.reduce((a, p) => a + (p.removed || 0), 0);
   const g = growth(pts); // 스토리지 순증감 — 구버전(ds 열 0) 행은 내부에서 기준 제외(v2.351 원칙)
   const dsLast = [...pts].reverse().find(hasDsData) || null;
-  const go = (h) => { window.location.hash = h; };
+  // v2.959: 법인을 고른 상태면 그 vCenter 를 도구 화면에 인계한다(메모리 · 마운트 때 1회) — 도구가 그 법인으로 열린다. 리전만 골랐으면 전체로.
+  const go = (h, target) => { handoffKpiVcenter(target, vcenterId); window.location.hash = h; };
+  const scopedTitle = vcenterId ? ` — ${scopeText} 로 열립니다` : '';
   return (
     <>
-      <div className="card kpi" onClick={() => go('#/tools/vm-track')} style={{ cursor: 'pointer' }} title="클릭 — VM 수량 추이 화면">
+      <div className="card kpi" onClick={() => go('#/tools/vm-track', KPI_HANDOFF.vmTrack)} style={{ cursor: 'pointer' }} title={`클릭 — VM 수량 추이 화면${scopedTitle}`}>
         <div className="label">VM 증가 추이(30일){scopeText && scopeText !== '전체' ? <span className="muted" style={{ fontWeight: 500 }}> · {scopeText}</span> : null}</div>
         <div className="value" style={{ color: vmNet > 0 ? 'var(--green)' : vmNet < 0 ? 'var(--red)' : undefined }}>
           {vmLast ? `${vmNet > 0 ? '+' : ''}${vmNet.toLocaleString()}` : '—'}
@@ -198,7 +201,7 @@ function TrendKpis({ vcenterId = '', region = '', scopeText = '' }) {
         <div className="meta">{vmLast ? `생성 +${sumAdded.toLocaleString()} · 삭제 −${sumRemoved.toLocaleString()}` : '스냅샷 없음(매일 00·12시 자동)'}</div>
         <Spark points={pts.map((p) => p.total)} color="#60a5fa" />
       </div>
-      <div className="card kpi" onClick={() => go('#/tools/storage-track')} style={{ cursor: 'pointer' }} title="클릭 — 스토리지 사용량 추이 화면">
+      <div className="card kpi" onClick={() => go('#/tools/storage-track', KPI_HANDOFF.storageTrack)} style={{ cursor: 'pointer' }} title={`클릭 — 스토리지 사용량 추이 화면${scopedTitle}`}>
         <div className="label">스토리지 증가 추이(30일){scopeText && scopeText !== '전체' ? <span className="muted" style={{ fontWeight: 500 }}> · {scopeText}</span> : null}</div>
         <div className="value" style={{ color: g.netGB > 0 ? 'var(--amber)' : g.netGB < 0 ? 'var(--green)' : undefined }}>
           {dsLast ? `${g.netGB > 0 ? '+' : ''}${gbTb(g.netGB)}` : '—'}
@@ -307,6 +310,11 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
   const bScoped = scoped ? bareosSumOf(bareosP.data?.rows, scopeIds) : null;
   const bareosSum = bScoped ? bScoped.jobs : (bTot && Number.isFinite(bTot.jobs) ? bTot.jobs : null);
   const bareosPartial = bScoped ? bScoped.partial : !!bTot?.partial?.jobs;
+  // v2.959(사용자 요청 2026-11-10): 백업 KPI 카드를 누르면 — 법인을 골랐으면 그 법인의 Backup 현황 · Detail(세부내용이 이어받는 같은 키), 아니면 Backup 현황 · Summary.
+  //   도구 권한이 없으면 누를 수 없다(커서 · 제목 없음). 리전만 골랐으면 Summary(전체)로 — Detail 은 법인 하나만 본다.
+  const backupGo = vcSel
+    ? (toolAllowed('backup-detail') ? () => openBackupDetail(vcSel) : null)
+    : (toolAllowed('backup-summary') ? () => { window.location.hash = '#/tools/backup-summary'; } : null);
   const backupTextOf = (s) => backupVbCell(backupBy?.[s.id], bareosBy.get(s.id) || null, Number.isFinite(s.metrics?.vms) ? s.metrics.vms : null, Date.now(), { refreshError: backupRefreshErr, bareosAllowed: bareosOk });
   // 허브 탭 줄: 카드 | 표 ‖ vCenter 성격의 특수 기능(권한 없는 도구는 숨김 — 도구 키 그대로)
   const vcTools = toolsFor(VC_TOOLS);
@@ -318,8 +326,8 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
       <HubTabs label="vCenter 보기 · 도구" active={vcView} tools={vcTools}
         views={VC_VIEWS.map(([k, label]) => ({ k, label: k === 'table' ? `${label} · 법인별 비교` : label, onClick: () => setVcView(k) }))} />
       <div className="kpis kpis-1row ph-kpis" style={{ margin: '12px 0 18px' }}>
-        <div className="card kpi" data-kpi-backup=""
-          title={`VM 백업 — veeam/bareos · 범위: ${kpiScope}\nVeeam: 연동된 Veeam 서버가 백업 대상으로 가진 VM 수(vCenter 카드의 앞 수 합)\nBareos: 각 법인 Bareos 에 잡이 등록된 VM 수(Bareos 백업 현황의 법인 줄 합 — 도구 권한이 있을 때만)\n못 읽은 vCenter 는 0 으로 더하지 않고 따로 셉니다` + (bt?.partial || bareosPartial ? '\n* 일부만 읽은 vCenter 가 있어 실제보다 적을 수 있습니다' : '')}>
+        <div className="card kpi" data-kpi-backup="" onClick={backupGo || undefined} style={backupGo ? { cursor: 'pointer' } : undefined}
+          title={`VM 백업 — veeam/bareos · 범위: ${kpiScope}${backupGo ? `\n클릭 — ${vcSel ? `${kpiScope} 의 Backup 현황 · Detail` : 'Backup 현황 · Summary'}` : ''}\nVeeam: 연동된 Veeam 서버가 백업 대상으로 가진 VM 수(vCenter 카드의 앞 수 합)\nBareos: 각 법인 Bareos 에 잡이 등록된 VM 수(Bareos 백업 현황의 법인 줄 합 — 도구 권한이 있을 때만)\n못 읽은 vCenter 는 0 으로 더하지 않고 따로 셉니다` + (bt?.partial || bareosPartial ? '\n* 일부만 읽은 vCenter 가 있어 실제보다 적을 수 있습니다' : '')}>
           <div className="label">VM 백업 (Veeam / Bareos){scoped ? <span className="muted" style={{ fontWeight: 500 }}> · {kpiScope}</span> : null}</div>
           {(() => {
             const t = `${bt ? `${num(bt.veeam)}${bt.partial ? '*' : ''}` : '—'}/${bareosSum == null ? '—' : `${num(bareosSum)}${bareosPartial ? '*' : ''}`}`;

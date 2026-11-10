@@ -8,6 +8,7 @@
  */
 import { numOrNull } from '../../numOrNull.js';
 import { HUB_TOOLS } from '../vms/vmHubText.js';
+import { handoffMany, takeSearch } from '../../hooks/searchHandoff.js'; // v2.959: KPI 카드 → 도구 화면에 고른 vCenter 인계(메모리)
 
 /** 허브 탭 — 순서 = 계층(법인 → 호스트 → VM). k 는 App 의 탭 id 그대로. */
 export const PLATFORM_TABS = Object.freeze([
@@ -79,6 +80,20 @@ export function bareosSumOf(rows, ids) {
   }
   return { jobs: known ? jobs : null, known, unknown, partial: known > 0 && unknown > 0 };
 }
+
+/**
+ * v2.959(사용자 요청 2026-11-10 "법인을 선택한 상태에서 백업 · VM 수량 · 스토리지 증가 버튼 누르면 해당 법인에 대한 정보 보여주기"):
+ * KPI 카드를 누르면 그 도구 화면으로 가면서 **고른 vCenter 를 메모리 인계**(hooks/searchHandoff — URL 에 싣지 않는다 · 30초 · 꺼내면 지운다)로 넘긴다.
+ * 받는 도구는 마운트 때 한 번 꺼내 vCenter 선택 칸의 초기값으로 쓴다(VmTrackTool · StorageTrackTool). 범위가 리전뿐이면(vCenter 없음) 넘길 것이 없어 전체로 연다.
+ */
+export const KPI_HANDOFF = Object.freeze({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter' });
+export function handoffKpiVcenter(target, vcenterId) {
+  const id = String(vcenterId || '').trim();
+  if (!id) return false;
+  handoffMany([[target, id]]);
+  return true;
+}
+export function takeKpiVcenter(target) { return takeSearch(target) || ''; }
 
 export const VC_VIEWS = Object.freeze([['cards', '카드'], ['table', '표']]);
 export function loadVcView(storage) {
