@@ -182,7 +182,10 @@ insightsRouter.get('/fleet', async (req, res) => {
     const { liveKeys, bareMetalDupes: _dupes, ...payload1 } = full;
     // 서비스 인벤토리 6차 반증 F2: untaggedServerId(엣지 '태그 없을 때 id' — 고정 승계 내부용)도 응답에서 뺀다.
     //   IP 스캔 등록 iDRAC 은 등록부 id 가 곧 IP 라 'edge:<agent>:10.x.x.x' 가 되어 비관리자 주소 가림(maskFleetPayload)을 비켜 갔다(재현).
-    const payload0 = { ...payload1, bareMetal: Array.isArray(payload1.bareMetal) ? payload1.bareMetal.map(({ untaggedServerId: _u, ...r }) => r) : payload1.bareMetal };
+    // v2.961: collectorId(원격 출처 행의 수집 서버 id — 베어메탈 사용률 위임 판정 내부용)도 응답에서 뺀다.
+    //   반증 F4: 가상화 호스트의 idracCollectorId(받침 원격 항목의 수집 서버 id)도 내부용이라 뺀다.
+    const payload0 = { ...payload1, bareMetal: Array.isArray(payload1.bareMetal) ? payload1.bareMetal.map(({ untaggedServerId: _u, collectorId: _c, ...r }) => r) : payload1.bareMetal,
+      virtualizationHosts: Array.isArray(payload1.virtualizationHosts) ? payload1.virtualizationHosts.map(({ idracCollectorId: _c, ...r }) => r) : payload1.virtualizationHosts };
     // v2.607(감사 LEFT2607-02): 엣지 부분 목록·상한 제외·귀속 비움 요약. 이 라우트는 범위 계정에 403 이라(위) 여기서는 늘 싣는다.
     //   부분 상태는 fleetRev 를 올리지 않을 수 있어(목록 내용이 같으면) ETag 키에 요약을 함께 넣는다.
     const fleetPartials = fleetPartialsSummary({ detail: isAdminReq(req) }); // v2.744(회귀 검토 GD-R1): 등록부 손상 사유의 위치는 관리자에게만(maskFleetPayload 는 이 요약을 건드리지 않는다)

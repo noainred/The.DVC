@@ -25,7 +25,13 @@ import { storageSeriesMulti, arraySerialOf, endpointKind, available as perfDbAva
 import { loadPerfSettings } from '../../sanswitch/perfSettings.js';
 import { sumArrayTraffic } from '../../sanswitch/trafficTotal.js';
 import { demoOn, isMockMode } from '../../mock/demo/flags.js';
-import { isDemoId, demoBmIoSeries } from '../../mock/demo/storage.js';
+import { isDemoId, demoBmIoSeries, demoBmIoMetrics } from '../../mock/demo/storage.js';
+// v2.962 비교 세트(SAN A ↔ SAN B · 법인 SAN ↔ 베어메탈 …) — 조립은 bmstor/compareSet.js(순수), 어레이 측 표본은 SAN 스토리지 성능과 같은 코어.
+import { parseSetIds, gridMs, bmMetricsFromRaw, bmMetricsFromRollup, combineBm, switchTput, feMetrics, finishMetric, METRIC_KEYS } from '../../bmstor/compareSet.js';
+import { capacityIndexFor } from '../../sanswitch/storagePerfCore.js';
+import { feEligibility, feWindowKind } from '../../sanswitch/arraySideLoad.js';
+import { unitsForArray } from '../../sanswitch/arraySide.js';
+import { nodeLoadQuery, nodeUnitsOf } from '../../storage/db.js';
 import { datacenterOfBmServer, parseDcQuery, NONE_DC } from '../../bmstor/corp.js';
 import { parseTypes, latestSnapshotMap, sanArrayRows, attachThroughput, compareSummary, datacenterChips, stripHost, norm as normSerial, BLOCK_ARRAY_TYPES } from '../../bmstor/compare.js';
 import { RANGES, rangeKeyOf, bucketsOf, sourceFor, seriesFromRaw, seriesFromRollup, sumSeries, summarize, parseSeriesIds, metricOf } from '../../bmstor/ioSeries.js';
@@ -41,14 +47,20 @@ function dcNameFn() {
   catch { return (id) => String(id || '') || '(법인 미지정)'; }
 }
 /** SAN 집계의 버킷(값이 있는 것만 · 희소) → 우리 격자. 같은 bucketMs 라 인덱스로 맞춘다. */
-function regrid(aggBuckets, values, buckets, bucketMs) {
+function regrid(aggBuckets, values, buckets, bucketMs, mode = 'avg') {
+  // v2.962: SAN 집계 칸이 우리 격자보다 촘촘하면(격자를 표본 간격으로 넓힌 경우) 한 칸에 여러 값이 들어온다 — **합하지 않고** 평균(avg) · 최댓값(max).
+  //   v2.956 은 두 격자가 같아서 합 = 한 값이었다. 격자가 달라진 지금 합으로 두면 값이 칸 수만큼 부풀었다.
   const out = new Array(buckets.length).fill(null);
   if (!Array.isArray(aggBuckets) || !Array.isArray(values) || !buckets.length) return out;
-  const b0 = buckets[0];
+  const b0 = buckets[0]; const cnt = new Array(buckets.length).fill(0);
   for (let i = 0; i < aggBuckets.length; i++) {
     const j = Math.floor((Number(aggBuckets[i]) - b0) / bucketMs);
-    if (j >= 0 && j < out.length && values[i] != null) out[j] = out[j] == null ? Number(values[i]) : out[j] + Number(values[i]);
+    if (j < 0 || j >= out.length || values[i] == null) continue;
+    const v = Number(values[i]);
+    if (mode === 'max') out[j] = out[j] == null ? v : Math.max(out[j], v);
+    else { out[j] = (out[j] ?? 0) + v; cnt[j] += 1; }
   }
+  if (mode !== 'max') for (let j = 0; j < out.length; j++) if (cnt[j] > 1) out[j] /= cnt[j];
   return out;
 }
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
@@ -173,12 +185,15 @@ export function registerBmStorage(api) {
     const toQ = numOrNull(req.query.to);
     const until = toQ != null && toQ > 0 && toQ <= now ? Math.round(toQ) : now;
     const since = until - RANGES[range].hours * 3600e3;
-    const { bucketMs } = sanRangeOf({ from: since, to: until, points: 120 });
+    const settings = getBmSettings();
+    const bmSampleMs = Math.max(60_000, settings.intervalMinutes * 60_000);
+    // v2.962(결함 수정): 격자가 수집 주기보다 촘촘하면 10칸 중 9칸이 비어 선이 끊긴 점들만 남았다(점 표시 없이 그려 아예 안 보였다 — 데모는 칸마다 값을
+    //   합성해 Chromium 검증에서 드러나지 않았다). 격자를 표본 간격(베어메탈 수집 주기 · SAN 포트 수집 주기 중 큰 것)으로 넓힌다 — compareSet.gridMs.
+    const sanIntervalMs = numOrNull(loadPerfSettings().intervalMs) ?? 300_000;
+    const bucketMs = gridMs(sanRangeOf({ from: since, to: until, points: 120 }).bucketMs, Math.max(bmSampleMs, sanIntervalMs));
     const buckets = bucketsOf(since, until, bucketMs);
     const n = buckets.length;
     const gran = sourceFor(bucketMs);
-    const settings = getBmSettings();
-    const bmSampleMs = Math.max(60_000, settings.intervalMinutes * 60_000);
     const mock = isMockMode();
     const dcName = dcNameFn();
     const serversAll = serversWithCorp().filter((s) => s.enabled !== false);
@@ -214,7 +229,7 @@ export function registerBmStorage(api) {
       if (perfEnabled && switches.length) {
         try { perfAvailable = await perfDbAvailable(); } catch { perfAvailable = false; }
         if (perfAvailable) {
-          try { agg = await storageSeriesMulti(switches.map((d) => d.id), { from: since, to: until, points: 120, groupOf: new Map(switches.map((d) => [String(d.id), String(d.datacenterId || '')])) }); }
+          try { agg = await storageSeriesMulti(switches.map((d) => d.id), { from: since, to: until, points: Math.max(10, Math.ceil((until - since) / bucketMs)), groupOf: new Map(switches.map((d) => [String(d.id), String(d.datacenterId || '')])) }); }
           catch { agg = null; }
         }
       }
@@ -254,7 +269,7 @@ export function registerBmStorage(api) {
       } else if (kind === 'san' && key === 'all') {
         if (!agg) { series.push({ id: 'san:all', kind: 'san', name: 'SAN 전체', avg: new Array(n).fill(null), peak: new Array(n).fill(null), reason: !perfEnabled ? 'perf-disabled' : !switches.length ? 'no-switches' : 'perf-unavailable', sampleMs: sanInterval, basis: sanBasis, ...summarize(null) }); continue; }
         const t = sumArrayTraffic(agg, { isArray: (s) => endpointKind(s.key, { matched: false }) === 'array', carryMs: agg.carryMs });
-        const avg = regrid(agg.buckets, t.total, buckets, bucketMs);
+        const avg = regrid(agg.buckets, t.total, buckets, bucketMs, 'avg');
         // 피크 합 — 평균 합이 있는 버킷에서 어레이 피크를 더한다(동시 피크의 상한).
         const peakRaw = new Array(agg.buckets.length).fill(null);
         for (let i = 0; i < agg.buckets.length; i++) {
@@ -262,14 +277,14 @@ export function registerBmStorage(api) {
           let p = 0; for (const s of agg.series) if (endpointKind(s.key, { matched: false }) === 'array' && s.peak?.[i] != null) p += s.peak[i];
           peakRaw[i] = p || null;
         }
-        const peak = regrid(agg.buckets, peakRaw, buckets, bucketMs);
+        const peak = regrid(agg.buckets, peakRaw, buckets, bucketMs, 'max');
         series.push({ id: 'san:all', kind: 'san', name: 'SAN 전체', avg, peak, arrays: t.arrays, partialBuckets: t.partialBuckets, sampleMs: sanInterval, basis: sanBasis, ...summarize({ avg, peak }) });
       } else if (kind === 'san') {
         const k = normSerial(key);
         const meta = serialName.get(k) || null;
         const s = sanSeriesBySerial.get(k) || null;
         if (!s) { series.push({ id: `san:${key}`, kind: 'san', name: meta?.name || key, type: meta?.type || '', datacenterId: meta?.datacenterId || '', avg: new Array(n).fill(null), peak: new Array(n).fill(null), reason: !agg ? (!perfEnabled ? 'perf-disabled' : !switches.length ? 'no-switches' : 'perf-unavailable') : 'serial-unmatched', sampleMs: sanInterval, basis: sanBasis, ...summarize(null) }); continue; }
-        const avg = regrid(agg.buckets, s.sum, buckets, bucketMs); const peak = regrid(agg.buckets, s.peak, buckets, bucketMs);
+        const avg = regrid(agg.buckets, s.sum, buckets, bucketMs, 'avg'); const peak = regrid(agg.buckets, s.peak, buckets, bucketMs, 'max');
         series.push({ id: `san:${key}`, kind: 'san', name: meta?.name || s.key, type: meta?.type || '', datacenterId: meta?.datacenterId || String(s.group ?? ''), avg, peak, ports: Array.isArray(s.ports) ? s.ports.length : 0, switches: Array.isArray(s.deviceIds) ? s.deviceIds.length : 0, sampleMs: sanInterval, basis: sanBasis, ...summarize({ avg, peak }) });
       }
     }
@@ -317,6 +332,175 @@ export function registerBmStorage(api) {
       series: seriesFromRows(r.rows, { servers: listBmServers() }),
       span: r.span, status: bmHistoryStatus(),
       dbError: r.available ? '' : (db.error || 'node:sqlite 를 쓸 수 없습니다'),
+    });
+  });
+
+  /*
+   * ── v2.962 비교 세트(사용자 요청 2026-11-10 — "SAN 스토리지 A / SAN 스토리지 B · 가 법인의 SAN 스토리지 A / 가 법인의 베어메탈 AA …") ──
+   * GET /tools/bm-storage/compare-set?ids=bm:<id>,bmg:<그룹>,bmc:<법인 id>,san:<시리얼>&range=1h|24h|7d|30d[&to=ms]
+   * 대상 2~4개(종류를 섞어서)를 **같은 격자**에 놓고 지표 넷(전송 속도 · IOPS · 응답 시간 · 바쁨)과 용량을 나란히 준다. 조립 규칙은 bmstor/compareSet.js 머리말.
+   * 게이트 · 주소 규칙은 compare 와 같다(전체 범위 관리자 · 관리 주소 없음). 장비 호출 0 — DB · 메모리만 읽는다. 화면은 마운트 · 대상 변경 · 버튼 때만 부르고
+   * 실시간 1시간(최근 구간)만 공용 usePolling 으로 다시 읽는다.
+   */
+  api.get('/tools/bm-storage/compare-set', adminOnly, fullScopeOnly, async (req, res) => {
+    const range = rangeKeyOf(req.query.range);
+    const targets = parseSetIds(req.query.ids);
+    const now = Date.now();
+    const toQ = numOrNull(req.query.to);
+    const until = toQ != null && toQ > 0 && toQ <= now ? Math.round(toQ) : now;
+    const since = until - RANGES[range].hours * 3600e3;
+    const settings = getBmSettings();
+    const bmSampleMs = Math.max(60_000, settings.intervalMinutes * 60_000);
+    const perfSt = loadPerfSettings();
+    const sanIntervalMs = numOrNull(perfSt.intervalMs) ?? 300_000;
+    const FE_SAMPLE_MS = 300_000;   // 어레이 측 5분 표본(storage intervals nodeLoadMs 기본) — 위임 엣지 현장 값은 중앙이 모른다(arraySideLoad.sampleMsOf 와 같은 한계)
+    const hasBm = targets.some((t) => t.kind !== 'san'); const hasSan = targets.some((t) => t.kind === 'san');
+    const bucketMs = gridMs(sanRangeOf({ from: since, to: until, points: 120 }).bucketMs,
+      Math.max(hasBm ? bmSampleMs : 0, hasSan ? Math.max(sanIntervalMs, FE_SAMPLE_MS) : 0));
+    const buckets = bucketsOf(since, until, bucketMs);
+    const n = buckets.length;
+    const gran = sourceFor(bucketMs);
+    const mock = isMockMode();
+    const dcName = dcNameFn();
+    const serversAll = serversWithCorp().filter((s) => s.enabled !== false);
+    const serverById = new Map(serversAll.map((s) => [String(s.id), s]));
+    const latest = getBmLatest();
+    const empty = () => ({ avg: new Array(n).fill(null), peak: new Array(n).fill(null) });
+    let dbDown = false;
+
+    const bmMetricsOf = async (id) => {
+      if (mock && isDemoId(id)) return demoBmIoMetrics(id, { buckets, bucketMs });
+      if (gran === 'raw') { const rows = await ioRawRows(id, since, until); if (!rows) { dbDown = true; return null; } return bmMetricsFromRaw(rows, buckets, bucketMs); }
+      const rows = await ioRollupRows(gran, id, since, until);
+      if (!rows) { dbDown = true; return null; }
+      return bmMetricsFromRollup(rows, buckets, bucketMs);
+    };
+    const bmTarget = async (t, members, meta) => {
+      const ms = [];
+      for (const s of members) { const m = await bmMetricsOf(String(s.id)); if (m) ms.push(m); }
+      const single = t.kind === 'bm';
+      const c = single ? null : combineBm(ms, n);
+      const metrics = single ? (ms[0] || { tput: empty(), iops: empty(), lat: empty(), busy: empty() }) : c.metrics;
+      const tot = aggregate(members, latest).total;
+      let at = null;
+      for (const s of members) { const r = latest.get(String(s.id)); if (r?.at && (at == null || r.at > at)) at = r.at; }
+      const lr = single ? latest.get(String(t.key)) : null;
+      // 사유 — 서버 한 대면 마지막 수집의 I/O 사유(엣지 구버전 · Linux 아님 …)가 가장 정확하다. 그 밖은 코드.
+      const ioReason = dbDown ? 'db-unavailable' : (lr?.ok && !lr.io && lr.ioError ? lr.ioError : null);
+      const base = ioReason || 'no-io-data';
+      return {
+        id: t.id, kind: t.kind, key: t.key, ...meta,
+        members: { total: members.length, ok: tot.ok, measured: c ? c.measured : null, partial: c ? c.partial : null },
+        capacity: tot.totalBytes > 0 ? { totalBytes: tot.totalBytes, usedBytes: tot.usedBytes, pct: tot.usedPct, basis: 'df', at } : null,
+        metrics: {
+          tput: finishMetric(metrics.tput, { source: 'diskstats', reason: base }),
+          iops: finishMetric(metrics.iops, { source: 'diskstats', reason: ioReason || 'no-iops-data' }),
+          lat: finishMetric({ avg: metrics.lat.avg, peak: metrics.lat.peak }, { source: 'diskstats', reason: ioReason || 'no-iops-data' }),
+          busy: finishMetric(metrics.busy, { source: 'diskstats-busy', reason: base }),
+        },
+      };
+    };
+
+    // SAN — 스위치 포트 합은 대상이 몇이든 한 번만(같은 격자 · 법인 분리 집계).
+    let sanCtx = null;
+    const sanContext = async () => {
+      if (sanCtx) return sanCtx;
+      const switches = (() => { try { return listSanSwitches().filter((d) => d.enabled !== false); } catch { return []; } })();
+      const perfEnabled = demoOn(perfSt.enabled);
+      let agg = null; let perfAvailable = false;
+      if (perfEnabled && switches.length) {
+        try { perfAvailable = await perfDbAvailable(); } catch { perfAvailable = false; }
+        if (perfAvailable) {
+          try {
+            agg = await storageSeriesMulti(switches.map((d) => d.id), { from: since, to: until, points: Math.max(10, Math.ceil((until - since) / bucketMs)),
+              groupOf: new Map(switches.map((d) => [String(d.id), String(d.datacenterId || '')])) });
+          } catch { agg = null; }
+        }
+      }
+      let devRows = [];
+      try {
+        const snapMap = latestSnapshotMap([storageLocalSnaps(), edgeStorageSnapshots()]);
+        devRows = sanArrayRows(listStorageDevices().filter((d) => d.enabled !== false && BLOCK_ARRAY_TYPES.includes(String(d.type || ''))), snapMap);
+      } catch { devRows = []; }
+      let capIdx = null;
+      try { capIdx = capacityIndexFor({ split: true, admin: true }); } catch { capIdx = null; }   // 내부 사용 — 응답에는 deviceId · 종류 · 수집 방식만 쓴다(주소 없음)
+      sanCtx = { switches, perfEnabled, perfAvailable, agg, devRows, capIdx };
+      return sanCtx;
+    };
+    const sanTarget = async (t) => {
+      const ctx = await sanContext();
+      const k = normSerial(t.key);
+      const row = ctx.devRows.find((r) => r.serialKeys.includes(k)) || null;
+      const dcId = row ? row.datacenterId : '';
+      const meta = { name: row?.name || t.key, type: row?.type || '', serial: row?.serial || t.key, datacenterId: dcId, datacenterName: dcId ? dcName(dcId) : '(법인 미지정)' };
+      if (!row) return { id: t.id, kind: 'san', key: t.key, ...meta, missing: true, reason: 'unknown-target', capacity: null,
+        metrics: Object.fromEntries(METRIC_KEYS.map((mk) => [mk, finishMetric(empty(), { reason: 'unknown-target' })])) };
+      // 전송 속도 — 스위치 포트(같은 법인 계열 우선)
+      let sw = null;
+      for (const s of ctx.agg?.series || []) {
+        if (normSerial(arraySerialOf(s.key)) !== k) continue;
+        if (row && (s.group ?? '') !== dcId && sw) continue;
+        if (!sw || ((s.group ?? '') === dcId && (sw.group ?? '') !== dcId) || (Number(s.avgTotal) || 0) > (Number(sw.avgTotal) || 0)) sw = s;
+      }
+      const swReason = !ctx.perfEnabled ? 'perf-disabled' : !ctx.switches.length ? 'no-switches' : !ctx.perfAvailable || !ctx.agg ? 'perf-unavailable' : 'serial-unmatched';
+      // 어레이 측 5분 표본(IOPS · 응답 시간 · 바쁨 · 호스트 처리량)
+      const cap = ctx.capIdx ? ctx.capIdx.lookup(row.serial || t.key, dcId) : null;
+      const el = feEligibility(cap);
+      let fe = null;
+      if (el.eligible) {
+        try {
+          const units = unitsForArray(await nodeUnitsOf(cap.deviceId), { serial: row.serial || t.key });
+          const wk = feWindowKind(since, until, { now });
+          const q = await nodeLoadQuery(cap.deviceId, { group: 'fe', kind: wk.kind, from: since, to: until, bucketMs: wk.bucketMs });
+          fe = feMetrics(q.rows, units, buckets, bucketMs);
+        } catch { fe = null; }
+      }
+      const feReason = el.eligible ? (fe && fe.samples ? null : 'fe-no-sample') : `fe-${el.reason || 'no-device'}`;
+      let tput = null; let tputSource = null;
+      if (sw) { tput = switchTput(ctx.agg.buckets, sw.sum, sw.peak, buckets, bucketMs); tputSource = 'switch-port'; }
+      else if (fe && (fe.hbps.avg || []).some((v) => v != null)) { tput = fe.hbps; tputSource = 'array-fe-hbps'; }
+      return {
+        id: t.id, kind: 'san', key: t.key, ...meta,
+        capacity: row.capacity ? { ...row.capacity, basis: row.capacity.basis || 'unisphere' } : null,
+        fe: { eligible: el.eligible, reason: feReason, units: fe?.units ?? 0, busyBasis: fe?.busyBasis ?? null },
+        switchPorts: sw ? (Array.isArray(sw.ports) ? sw.ports.length : 0) : 0,
+        metrics: {
+          tput: finishMetric(tput || empty(), { source: tputSource, reason: tput ? null : swReason }),
+          iops: finishMetric(fe?.iops || empty(), { source: 'array-fe', reason: feReason }),
+          lat: finishMetric(fe?.lat || empty(), { source: 'array-fe', reason: feReason }),
+          busy: finishMetric(fe?.busy || empty(), { source: fe?.busyBasis === 'cpu' ? 'array-fe-cpu' : 'array-fe-busy', reason: feReason }),
+        },
+      };
+    };
+
+    const out = [];
+    for (const t of targets) {
+      if (t.kind === 'san') { out.push(await sanTarget(t)); continue; }
+      let members = []; let meta = {};
+      if (t.kind === 'bm') {
+        const s = serverById.get(String(t.key));
+        if (s) members = [s];
+        meta = { name: s?.name || t.key, groups: s?.groups || [], datacenterId: s?.datacenterId || '', datacenterName: s?.datacenterId ? dcName(s.datacenterId) : '(법인 미지정)', datacenterSource: s?.datacenterSource || '' };
+      } else if (t.kind === 'bmg') {
+        members = serversAll.filter((s) => (s.groups || []).includes(t.key));
+        const dcs = [...new Set(members.map((s) => s.datacenterId || ''))];
+        meta = { name: t.key, datacenterId: dcs.length === 1 ? dcs[0] : null, datacenterName: dcs.length === 1 ? (dcs[0] ? dcName(dcs[0]) : '(법인 미지정)') : `법인 ${dcs.length}곳` };
+      } else {
+        const dc = t.key === NONE_DC ? '' : t.key;
+        members = serversAll.filter((s) => String(s.datacenterId || '') === dc);
+        meta = { name: dc ? dcName(dc) : '(법인 미지정)', datacenterId: dc, datacenterName: dc ? dcName(dc) : '(법인 미지정)' };
+      }
+      if (!members.length) {
+        out.push({ id: t.id, kind: t.kind, key: t.key, ...meta, missing: true, reason: 'unknown-target', capacity: null, members: { total: 0 },
+          metrics: Object.fromEntries(METRIC_KEYS.map((mk) => [mk, finishMetric(empty(), { reason: 'unknown-target' })])) });
+        continue;
+      }
+      out.push(await bmTarget(t, members, meta));
+    }
+    res.json({
+      ok: true, range, since, until, bucketMs, gran, buckets, targets: out,
+      sampleMs: { bm: bmSampleMs, san: sanIntervalMs, fe: FE_SAMPLE_MS }, retention: ioRetention(), db: await bmIoDbStatus(),
+      ...(mock ? { demo: true } : {}),
     });
   });
 

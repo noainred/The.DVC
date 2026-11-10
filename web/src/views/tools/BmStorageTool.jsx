@@ -22,6 +22,7 @@ import {
 import Select from '../../components/Select.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js'; // v2.915: 하위 탭(현황 · SAN 비교) — 주소 #/tools/bm-storage/compare
 import BmSanCompare from './BmSanCompare.jsx';          // v2.915: SAN 비교 탭(시안 docs/design/bm-san-compare)
+import BmCompareSet from './BmCompareSet.jsx';          // v2.962: 비교 세트 탭 — SAN · 베어메탈 서버 · 그룹 · 법인 합계를 2~4개 섞어 비교
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -41,7 +42,7 @@ const GROUP_FOLD = 12;
 const SORTS = [{ key: 'pct', label: '사용률 높은 순' }, { key: 'avail', label: '여유 적은 순' }, { key: 'name', label: '이름순' }];
 
 const EMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', agent: '', dispatch: 'poll', groups: '', datacenterId: '', mounts: '/', enabled: true };
-const VIEWS = [{ k: 'status', label: '현황' }, { k: 'compare', label: 'SAN 비교' }];
+const VIEWS = [{ k: 'status', label: '현황' }, { k: 'compare', label: 'SAN 비교' }, { k: 'set', label: '비교 세트' }];
 
 export default function BmStorageTool() {
   const [data, setData] = useState(null);
@@ -86,10 +87,11 @@ export default function BmStorageTool() {
       {VIEWS.map((v) => (
         <button key={v.k} type="button" role="tab" aria-selected={view === v.k} className={`bmc-subtab${view === v.k ? ' on' : ''}`} onClick={() => setView(v.k)}>{v.label}</button>
       ))}
-      <span className="muted" style={{ marginLeft: 'auto', fontSize: 11.5, paddingBottom: 8 }}>{view === 'compare' ? '서버 등록 · 주기 · CSV 는 현황 탭에 그대로 있습니다' : 'SAN 비교 — VMAX · PowerMax 용량 사용률 · 전송 속도와 숫자로 비교'}</span>
+      <span className="muted" style={{ marginLeft: 'auto', fontSize: 11.5, paddingBottom: 8 }}>{view === 'status' ? 'SAN 비교 · 비교 세트 — SAN 어레이 · 베어메탈을 숫자로 비교' : '서버 등록 · 주기 · CSV 는 현황 탭에 그대로 있습니다'}</span>
     </div>
   );
   if (view === 'compare') return <div className="bm2">{subTabs}<BmSanCompare /></div>;
+  if (view === 'set') return <div className="bm2">{subTabs}<BmCompareSet /></div>;
   const cfgOf = (id) => (cfgs || []).find((c) => c.id === id);
 
   const save = async () => {

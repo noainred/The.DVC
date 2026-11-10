@@ -41,11 +41,16 @@ export function missingCheck({ targets = [], skipped = [], entryByKey = new Map(
     const base = { key: t(s.key), name: t(s.name), serviceTag: t(s.serviceTag), vcenterId: t(s.vcenterId), paths: [], idracHost: '', missing: [] };
     if (s.reason === 'unassigned') { rows.push({ ...base, via: 'local', bucket: 'unassigned', reason: 'unassigned' }); continue; }
     if (s.reason === 'edge-delegated') {
-      const e = typeof edgeEntry === 'function' ? edgeEntry(t(s.agent), t(s.key)) : null;
+      // 재확인 R1: 엣지 이름이 다른 수집 서버의 id · 이름과 겹치면(agentClash) 그 이름으로 찾은 엣지 보관분이 다른 엣지 것일 수 있다 — 찾지 않고 '모름'.
+      if (s.agentClash) { rows.push({ ...base, via: 'edge', agent: t(s.agent), bucket: 'unknown', reason: 'edge-name-clash' }); continue; }
+      // 반증 의심 1: 원격 위임 행은 엣지 쪽 키(edgeKey — 서비스태그 없는 서버의 엣지 등록 id)로 찾는다. 없으면 중앙 키(서비스태그면 두 노드가 같다).
+      const e = typeof edgeEntry === 'function' ? edgeEntry(t(s.agent), t(s.edgeKey) || t(s.key)) : null;
       const cov = e && BUCKETS.includes(e.coverage) ? e.coverage : null;
       rows.push({ ...base, via: 'edge', agent: t(s.agent), bucket: cov || 'unknown', reason: cov ? '' : 'edge-no-record' });
       continue;
     }
+    // v2.961: 원격 수집 서버가 맡았는데 그 수집 서버를 모르는 서버 — 어느 엣지인지 모르므로 '없음' 이 아니라 '모름'(못 읽음 ≠ 없음).
+    if (s.reason === 'remote-collector-unknown') { rows.push({ ...base, via: 'edge', agent: '', bucket: 'unknown', reason: 'remote-collector-unknown' }); continue; }
     rows.push({ ...base, via: 'local', bucket: 'none', reason: t(s.reason) || 'unknown' });
   }
   for (const r of rows) {

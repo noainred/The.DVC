@@ -544,6 +544,38 @@ export function updateTest(targetId, testId, data) {
   return target.tests[i];
 }
 
+/**
+ * 사용/중지 일괄 전환(v2.960 쉬운 등록 A) — 대상 · 점검의 `enabled` **하나만** 바꾸고 저장은 한 번.
+ * 다른 칸은 건드리지 않는다(cleanTarget/cleanTest 재검증을 거치지 않는다 — 이름 · 주소 검증 실패로 켜기가 막히지 않게).
+ * @param {{targets?:string[], tests?:{targetId:string,testId:string}[], enabled:boolean}} input
+ * @returns {{changed:number, unchanged:number, missing:string[], agents:string[], targetIds:string[]}}
+ *   agents = 바뀐 대상의 담당 엣지(배정 동기화 대상) · targetIds = 실제로 바뀐 대상(점검만 바뀐 대상 포함)
+ */
+export function setEnabledMany({ targets = [], tests = [], enabled } = {}) {
+  const on = enabled === true;
+  const dbx = load();
+  const byId = new Map(dbx.targets.map((x) => [x.id, x]));
+  const out = { changed: 0, unchanged: 0, missing: [], agents: [], targetIds: [] };
+  const touched = new Set();
+  for (const id of new Set((Array.isArray(targets) ? targets : []).map((v) => String(v ?? '').trim()).filter(Boolean))) {
+    const tg = byId.get(id);
+    if (!tg) { out.missing.push(id); continue; }
+    if ((tg.enabled !== false) === on) { out.unchanged += 1; continue; }
+    tg.enabled = on; out.changed += 1; touched.add(tg);
+  }
+  for (const p of (Array.isArray(tests) ? tests : [])) {
+    const tg = byId.get(String(p?.targetId ?? '').trim());
+    const x = tg?.tests.find((y) => y.id === String(p?.testId ?? '').trim());
+    if (!x) { out.missing.push(`${p?.targetId}/${p?.testId}`); continue; }
+    if ((x.enabled !== false) === on) { out.unchanged += 1; continue; }
+    x.enabled = on; out.changed += 1; touched.add(tg);
+  }
+  for (const tg of touched) { out.targetIds.push(tg.id); if (String(tg.agent || '').trim()) out.agents.push(String(tg.agent).trim()); }
+  out.agents = [...new Set(out.agents)];
+  if (out.changed) save();
+  return out;
+}
+
 export function deleteTest(targetId, testId) {
   const dbx = load();
   const target = dbx.targets.find((t) => t.id === targetId);

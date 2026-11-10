@@ -15,13 +15,18 @@ import { listTargets, storeRevision, planBulkTargets } from '../../svcmon/store.
 import {
   readCatalog, planApply, previewOf, executePlan, detachTarget, getOptions, setOptions, kindMeta, driftRing, dailySummary, syncEvents,
   lastDetection, syncAvailableHere, ackDrift, MAX_ROWS, MAX_APPLY, GONE_ACTIONS, EXCLUDED_KINDS, SYNC_ROOT, detectTiming,
+  coverageSummary, requestDetect,
 } from '../../svcmon/settingsSync.js';
+import { isAdminDetailUser } from '../../auth/demoGuest.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
+import { store as _storeForScope } from '../../store.js';
 import { recordBatch } from '../../svcmon/batches.js';
 import { buildDashAsync } from '../../svcmon/dash.js';
 import { recentTransitions, hourlySeries, getAlertSettings, saveAlertSettings, alertStats, transitionsSince, alertBatchInfo, HOURS_KEEP } from '../../svcmon/transitions.js';
 import { getResults, executesHere, pollerRole } from '../../svcmon/poller.js';
 import { edgeSummary, edgeState, listAgentNames, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
-import { listAssignments, setAssignment, DEFAULT_EXCEPT_TYPES } from '../../central/svcmonAssign.js';
+import { listAssignments } from '../../central/svcmonAssign.js';
+import { syncByAgentAssignments } from '../../central/svcmonAssignSync.js';
 import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
 
 const t = (v) => String(v ?? '').trim();
@@ -47,26 +52,8 @@ function edgeRows(now = Date.now()) {
 
 const edgeOnly = (res) => res.status(409).json({ ok: false, reason: 'edge-node', error: '엣지 노드에서는 설정 연동을 쓰지 않습니다 — Monitoring 대상은 중앙에서 배정됩니다.' });
 
-/**
- * 담당 엣지 배정 동기화 — byAgent 배정이거나 배정이 없는 엣지만 다시 굳힌다. **경로 기준 배정을 byAgent 로 바꾸지 않는다**
- * (그 엣지가 맡던 경로 대상이 통째로 빠진다 — 파괴적). 그런 엣지는 '건너뜀' 으로 보고하고 엣지 배정 탭에서 사람이 고른다.
- */
-function syncAssignments(agents, user) {
-  const out = [];
-  let cur = [];
-  try { cur = listAssignments(); } catch (e) { return agents.map((agent) => ({ agent, ok: false, reason: `배정 파일을 읽지 못했습니다: ${t(e?.message).slice(0, 120)}` })); }
-  const byName = new Map(cur.map((a) => [a.agent, a]));
-  for (const agent of agents) {
-    const a = byName.get(agent);
-    if (a && a.scope?.byAgent !== true) { out.push({ agent, ok: false, skipped: true, reason: '이 엣지는 경로 기준 배정입니다 — 엣지 배정 탭에서 범위를 확인하세요(자동으로 바꾸지 않습니다).' }); continue; }
-    try {
-      const picked = listTargets().filter((x) => t(x.agent) === agent).map((x) => ({ ...x, tests: x.tests.map((y) => ({ ...y })) }));
-      const r = setAssignment(agent, { byAgent: true, exceptTypes: a?.exceptTypes || DEFAULT_EXCEPT_TYPES, note: '설정 연동 동기화' }, picked, { user });
-      out.push({ agent, ok: true, targets: r?.counts?.targets ?? picked.length });
-    } catch (e) { out.push({ agent, ok: false, reason: t(e?.message).slice(0, 200) }); }
-  }
-  return out;
-}
+/** 담당 엣지 배정 동기화 — 규칙 · 구현은 central/svcmonAssignSync.js 하나(v2.960 — 사용/중지 · 시험 점검과 공유). */
+const syncAssignments = (agents, user) => syncByAgentAssignments(agents, user);
 
 /* ── Monitoring 개요(기술 뷰) ── */
 let _dashMemo = null;       // { key, at, body }
@@ -99,6 +86,9 @@ async function computeDash(now) {
 /** 테스트 전용 — 개요 캐시·계산 횟수. */
 export function _dashStateForTest({ reset = false } = {}) { if (reset) { _dashMemo = null; _dashInflight = null; _dashBuilds = 0; } return { builds: _dashBuilds }; }
 
+/** 개요 '감시 범위' 를 실을 수 있는 요청 — adminOnly + fullScopeOnly 와 같은 기준(관리자 판본 · 범위 없음) · 엣지 노드 아님. */
+const coverageAllowed = (req) => syncAvailableHere() && isAdminDetailUser(req.user) && !scopedVcenterIds(req.user, _storeForScope.get());
+
 export function registerSettingsSync(svcmonRouter) {
 
 /** 카탈로그 × Monitoring 대상 — 행 · 집계 · 드리프트 이력 · 엣지 · 이벤트. */
@@ -110,7 +100,7 @@ svcmonRouter.get('/settings-sync/catalog', adminOnly, fullScopeOnly, async (req,
   for (const x of listTargets()) if (x.origin && t(x.agent)) assignedTargets.set(t(x.agent), (assignedTargets.get(t(x.agent)) || 0) + 1);
   res.json({
     ok: true, at: cat.at, readMs: cat.ms, rows, truncated: cat.rows.length > rows.length, total: cat.rows.length,
-    counts: cat.counts, sourceErrors: cat.sourceErrors, kinds: kindMeta(), excluded: EXCLUDED_KINDS,
+    counts: cat.counts, sourceErrors: cat.sourceErrors, kinds: kindMeta(), excluded: EXCLUDED_KINDS, corpEdges: cat.corpEdges || [],
     options: getOptions(), drift: { ring: driftRing(), daily: dailySummary(), last: lastDetection() },
     edges: edgeRows().map((e) => ({ ...e, syncTargets: assignedTargets.get(e.agent) || 0 })),
     events: syncEvents().slice(0, 50), limits: { maxApply: MAX_APPLY, goneActions: GONE_ACTIONS }, root: SYNC_ROOT,
@@ -130,7 +120,7 @@ async function planFrom(body = {}) {
   const builtByKey = new Map((built.targets || []).map((x) => [t(x.id), x]));
   const plan = planApply(cat.rows, keys, {
     enabled: body.enabled === true, goneAction: GONE_ACTIONS.includes(body.goneAction) ? body.goneAction : 'disable',
-    withChecks: body.withChecks !== false, builtByKey,
+    withChecks: body.withChecks !== false, builtByKey, corpEdge: body.corpEdge === true,
   });
   return { plan, keys };
 }
@@ -159,6 +149,7 @@ svcmonRouter.post('/settings-sync/apply', adminOnly, fullScopeOnly, async (req, 
     user, action: 'svcmon.settings-sync.apply', target: out.batch,
     detail: `추가 ${out.added}(점검 ${out.newTests}) · 주소 반영 ${out.changed.length} · 사라짐 ${out.gone.length} · 건너뜀 ${r.plan.skip.length} · 실패 ${out.errors.length}${out.committed ? '' : ' · 추가 취소'}${assign.length ? ` · 배정 ${assign.filter((x) => x.ok).length}/${assign.length}` : ''}`,
   });
+  requestDetect();   // v2.960(B): 개요 '감시 범위' 카드를 곧바로 맞춘다(2초 묶음 · 감지 타이머가 돌 때만)
   // 추가가 취소돼도(오류 1건이면 0건 — 대량 등록 규약) 200 + ok:false 로 결과 본문을 그대로 돌려준다 — 화면이 어떤 행이 왜 막혔는지 보여 준다.
   res.json({ ok: out.committed && !out.errors.length, result: { ...out, skip: r.plan.skip.slice(0, 200) }, assign });
 });
@@ -192,7 +183,9 @@ svcmonRouter.get('/overview', async (req, res) => {
   const now = Date.now();
   // 같은 저장소 세대·30초 안이면 재사용(화면 60초 갱신 — 무거운 API 15초 폴링 금지). 계산 중이면 그 계산을 함께 기다린다.
   const key = `${storeRevision()}|${Math.floor(now / 30_000)}`;
-  if (_dashMemo && _dashMemo.key === key) return res.json(_dashMemo.body);
+  // v2.960(B): '감시 범위' 는 관리자(전체 범위)에게만 — 캐시 본문(전 계정 공유)에 넣지 않고 응답마다 붙인다(카탈로그 게이트와 같은 기준 · 반증 H1).
+  const withCoverage = (body) => (coverageAllowed(req) ? { ...body, coverage: coverageSummary() } : body);
+  if (_dashMemo && _dashMemo.key === key) return res.json(withCoverage(_dashMemo.body));
   if (!_dashInflight || _dashInflight.key !== key) {
     const promise = computeDash(now)
       // 늦게 끝난 옛 계산이 더 새 캐시를 덮지 않게(반증 재검토 L1).
@@ -200,7 +193,7 @@ svcmonRouter.get('/overview', async (req, res) => {
       .finally(() => { if (_dashInflight?.promise === promise) _dashInflight = null; });
     _dashInflight = { key, promise };
   }
-  try { res.json(await _dashInflight.promise); }
+  try { res.json(withCoverage(await _dashInflight.promise)); }
   catch (e) { res.status(500).json({ ok: false, error: `개요 집계 실패: ${t(e?.message).slice(0, 200)}` }); }
 });
 
