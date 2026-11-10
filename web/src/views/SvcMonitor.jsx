@@ -334,7 +334,8 @@ export default function SvcMonitor() {
     return bad.length ? ` · 엣지 반영 안 됨: ${bad.map((a) => `${a.agent}(${a.skipped ? '경로 기준 배정 — 엣지 배정 탭에서 다시 배포' : a.reason})`).join(', ')}` : '';
   };
   const setEnabledFor = async ({ targets: ids = [], tests = [] }, on, label = '') => {
-    if (!on && ids.length > 1 && !window.confirm(`대상 ${ids.length}개를 중지할까요? 중지된 대상은 점검하지 않고 알림도 보내지 않습니다.`)) return false;
+    const onN = ids.filter((id) => byIdT.get(id)?.enabled !== false).length;   // 이미 중지된 대상은 세지 않는다(반증 L5)
+    if (!on && onN > 1 && !window.confirm(`사용 중인 대상 ${onN}개를 중지할까요? 중지된 대상은 점검하지 않고 알림도 보내지 않습니다.`)) return false;
     setBusy(true); setActMsg('');
     try {
       const r = requireChanged(await postJson('/svcmon/targets/enabled', { targets: ids, tests, enabled: on }));
@@ -351,6 +352,8 @@ export default function SvcMonitor() {
     catch (e) { window.alert(e.message); } finally { setBusy(false); }
   };
   const onPick = (ids) => setPicked((p) => toggleIds(p, ids));
+  // v2.960(반증 L5): 사용/중지 · 시험은 중앙 노드에서만(엣지 노드의 대상은 중앙 배정 사본 — 서버가 409). 편집 권한과 함께 본다.
+  const canToggle = canEdit && data?.centralNode !== false;
   const exitPick = () => { setPickMode(false); setPicked(new Set()); };
   const pickInfo = selectionInfo(picked, targets);
   const pickedIds = [...picked].filter((id) => byIdT.has(id));
@@ -647,7 +650,7 @@ export default function SvcMonitor() {
           <div className="pc-panel-head">
             <span>{mode === 'service' ? 'SERVICE TREE' : 'TEST TREE'}</span>
             <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-              {canEdit && (
+              {canToggle && (
                 <button type="button" className={`pc-chip${pickMode ? ' on' : ''}`} style={{ padding: '2px 9px', fontSize: 11 }} aria-pressed={pickMode}
                   title="폴더·대상을 체크해 한 번에 사용/중지하거나 시험 점검합니다" onClick={() => (pickMode ? exitPick() : setPickMode(true))}>
                   {pickMode ? `선택 모드 · ${pickInfo.targets}` : '선택'}
@@ -727,7 +730,7 @@ export default function SvcMonitor() {
                       <span>🗀 Root\{target.path}\{target.name}\{target.host}</span>
                       <span className="pc-group-meta" style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
                         <span>{tests.length} tests{alarms ? ` · ${alarms} alarm` : ''}{target.origin ? ` · 출처 설정 연동` : ''}{target.agent ? ` · 엣지 ${target.agent}` : ''}</span>
-                        {canEdit && (
+                        {canToggle && (
                           <button type="button" className={`tv-sw${target.enabled !== false ? ' on' : ''}`} role="switch" aria-checked={target.enabled !== false} disabled={busy}
                             aria-label={`${target.name} 감시 ${target.enabled !== false ? '사용' : '중지'}`} title={target.enabled !== false ? '누르면 중지' : '누르면 바로 사용(시험 없이) — 시험 점검은 우클릭 메뉴 · 선택 모드'}
                             onClick={() => setEnabledFor({ targets: [target.id] }, target.enabled === false, target.enabled === false ? `${target.name} 사용` : `${target.name} 중지`)}>
@@ -848,7 +851,7 @@ export default function SvcMonitor() {
         <div className="pc-ctx" style={{ left: Math.min(ctx.x, window.innerWidth - 260), top: Math.min(ctx.y, window.innerHeight - 320) }}
           onClick={(e) => e.stopPropagation()}>
           <div className="pc-ctx-head">{ctx.node === 'root' ? 'Root' : ctx.node}{ctx.targetId ? ' (대상)' : ''}</div>
-          {canEdit && (() => {
+          {canToggle && (() => {
             const ids = ctxIds(ctx);
             const off = offOf(ids).length;
             const on = ids.length - off;
@@ -978,7 +981,7 @@ export default function SvcMonitor() {
               <span>주기</span><span>{detail.test.intervalSec}초</span>
               <span>Path</span><span className="pc-modal-path">Root\{detail.target.path}\{detail.target.name}\{detail.target.host}</span>
             </div>
-            {canEdit && (() => {
+            {canToggle && (() => {
               const tOn = detail.target.enabled !== false; const xOn = detail.test.enabled !== false;
               const flipTest = async () => { if (await setEnabledFor({ tests: [{ targetId: detail.target.id, testId: detail.test.id }] }, !xOn, `${detail.test.name} ${xOn ? '중지' : '사용'}`)) setDetail((d) => ({ ...d, test: { ...d.test, enabled: !xOn } })); };
               const flipTarget = async () => { if (await setEnabledFor({ targets: [detail.target.id] }, !tOn, `${detail.target.name} ${tOn ? '중지' : '사용'}`)) setDetail((d) => ({ ...d, target: { ...d.target, enabled: !tOn } })); };

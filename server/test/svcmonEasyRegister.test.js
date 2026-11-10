@@ -179,7 +179,8 @@ test('엣지 시험 — 켜고 배정 동기화 · 알림 억제(시한) · 첫 
   assert.equal(tick1.judged, 1, '실패만 판정 — 통과는 기대 점검 2개가 다 와야 한다');
   assert.equal(S.getTarget(p2.id).enabled, false, '엣지 첫 보고 실패 → 중지로 되돌림');
   assert.deepEqual(syncCalls.at(-1).agents, ['edge-a'], '되돌린 대상의 엣지 배정을 다시 굳힌다');
-  assert.equal(TR.isMuted('E', 'edge-fail', t0 + 3000), false, '판정이 끝나면 억제를 푼다');
+  assert.equal(TR.isMuted('E', 'edge-fail', t0 + 3000), true, '실패로 되돌린 대상은 엣지가 다음 당기기까지 옛 스냅샷으로 재므로 억제를 이어 간다(반증 M1)');
+  assert.equal(TR.isMuted('E', 'edge-fail', t0 + 3000 + TRI.revertMuteMs(0) + 1), false, '그 억제에도 시한이 있다');
   rows['edge-a'].push({ path: 'E', target: 'edge-pass', test: 'TCP 443', status: 'warn', measuredAt: t0 + 4000 });
   TRI.trialTick(t0 + 5000, { edgeRows: (a) => rows[a], sync });
   assert.equal(S.getTarget(p1.id).enabled, true, '경고 포함 전부 보고 → 통과 · 사용 유지');
@@ -197,9 +198,9 @@ test('엣지 시험 — 켜고 배정 동기화 · 알림 억제(시한) · 첫 
   assert.match(TRI.trialOf(p3.id, dl).reason, /시한까지 엣지 보고가 없었습니다/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(TMP, 'svcmon-trial.json'), 'utf8')).pending.length, 0);
   // 시험이 끝난 뒤의 실패는 알린다
-  TR.noteResult({ scope: 'edge-b', testId: 'y1', status: 'bad', streak: 1, at: dl + 1000, target: { name: 'edge-silent', path: 'E' }, test: { name: 'TCP 22', type: 'tcp' } });
+  TR.noteResult({ scope: 'edge-b', testId: 'y1', status: 'bad', streak: 1, at: dl + TRI.revertMuteMs(0) + 1000, target: { name: 'edge-silent', path: 'E' }, test: { name: 'TCP 22', type: 'tcp' } });
   await TR.flushAlerts();
-  assert.equal(sent.length, 1, '억제는 시험 동안만');
+  assert.equal(sent.length, 1, '억제는 시험 · 되돌림 여유 동안만');
 });
 
 test('엣지 시험 — 배정을 굳히지 못한 엣지의 대상은 곧바로 되돌린다(켠 채로 남지 않는다)', () => {
@@ -293,6 +294,102 @@ test('설정 카탈로그 — iDRAC · SAN 스위치가 등록부의 소속 법�
   const blk = (name) => { const i = src.indexOf(`load('${name}'`); return src.slice(i, src.indexOf('}));', i)); };
   assert.match(blk('idrac'), /datacenterId: t\(s\.datacenterId\)/);
   assert.match(blk('sanswitch'), /datacenterId: t\(d\.datacenterId\)/);
+});
+
+/* ── 반증 1인(2026-11-10) 재현 → 회귀: H1 · M1 · M2 · M3 ── */
+const E = await import('../src/central/svcmonEdge.js');
+const A = await import('../src/central/svcmonAssign.js');
+const okSync = (agents) => agents.map((agent) => ({ agent, ok: true }));
+const edgeDeps = { executes: false, assignments: [], sync: okSync };
+
+test('반증 M1 — 엣지 시험 실패로 되돌린 뒤에도 엣지가 옛 스냅샷으로 재는 동안 실패 알림을 보내지 않는다(시한 있음)', async () => {
+  TRI._resetTrialForTest(); E._resetEdgeCache();
+  const sent = [];
+  TR._resetTransitionsForTest({ send: async (a) => { sent.push(a); } });
+  TR._setAlertSettingsForTest({ enabled: true, failCount: 3, scope: 'all' });
+  const [x] = seed([{ name: 'm1-x', path: 'M1', agent: 'edge-a', tests: [tcp('TCP 22', 22)] }]);
+  const t0 = Date.now();
+  TRI.startTrial([x.id], { now: t0, deps: edgeDeps });
+  const meta = [{ i: 'e1', p: 'M1', n: 'm1-x', h: '10.0.0.1', t: 'TCP 22', y: 'tcp', iv: 60 }];
+  E.ingestReport('edge-a', { snapId: 1, seq: 1, total: 1, rows: [{ i: 'e1', s: 'bad', r: 'refused', k: 1, a: 0 }], meta }, t0 + 60_000);
+  assert.equal(TRI.trialTick(t0 + 61_000, { sync: okSync }).failed, 1, '기본 edgeRows(getAgentRaw) 경로로 판정');
+  assert.equal(S.getTarget(x.id).enabled, false);
+  E.ingestReport('edge-a', { snapId: 2, seq: 1, total: 1, rows: [{ i: 'e1', s: 'bad', r: 'refused', k: 2, a: 0 }] }, t0 + 120_000);
+  E.ingestReport('edge-a', { snapId: 3, seq: 1, total: 1, rows: [{ i: 'e1', s: 'bad', r: 'refused', k: 3, a: 0 }] }, t0 + 180_000);
+  await TR.flushAlerts();
+  assert.equal(sent.length, 0, '되돌린 대상의 옛 스냅샷 측정은 알리지 않는다');
+  assert.equal(TR.isMuted('M1', 'm1-x', t0 + 61_000 + TRI.revertMuteMs(0) - 1), true);
+  assert.equal(TR.isMuted('M1', 'm1-x', t0 + 61_000 + TRI.revertMuteMs(0) + 1), false, '억제에는 시한이 있다');
+});
+
+test('반증 M2 — 사람이 대기 중 대상을 바꾸면 시험 대기를 멈춘다 · 같은 대상 대기는 둘이 되지 않는다', async () => {
+  TRI._resetTrialForTest();
+  const [y, z] = seed([
+    { name: 'm2-y', path: 'M2', agent: 'edge-a', tests: [tcp('TCP 22', 22)] },
+    { name: 'm2-z', path: 'M2', agent: 'edge-a', tests: [tcp('TCP 22', 22)] },
+  ]);
+  const t0 = Date.now();
+  TRI.startTrial([y.id, z.id], { now: t0, deps: edgeDeps });
+  assert.equal(TRI.pendingTrials().length, 2);
+  // 사람: 라우트가 하는 일 — cancelTrials 뒤 사용/중지
+  assert.equal(TRI.cancelTrials([y.id]), 1);
+  S.setEnabledMany({ targets: [y.id], enabled: false }); S.setEnabledMany({ targets: [y.id], enabled: true });
+  assert.equal(TR.isMuted('M2', 'm2-y'), false, '사람이 켠 대상의 실패는 알린다');
+  const dl = TRI.pendingTrials()[0].deadline;
+  TRI.trialTick(dl, { edgeRows: () => [], sync: okSync });
+  assert.equal(S.getTarget(y.id).enabled, true, '사람이 마지막으로 켠 대상을 system 이 끄지 않는다');
+  assert.equal(S.getTarget(z.id).enabled, false, '대기를 멈추지 않은 다른 대상은 시한대로 되돌린다');
+  // 다른 경로로 꺼진 뒤 다시 시험 — 낡은 대기를 지우고 하나만
+  const [w] = seed([{ name: 'm2-w', path: 'M2', agent: 'edge-a', tests: [tcp('TCP 22', 22)] }]);
+  TRI.startTrial([w.id], { now: t0, deps: edgeDeps });
+  S.setEnabledMany({ targets: [w.id], enabled: false });
+  const again = TRI.startTrial([w.id], { now: t0 + 60_000, deps: edgeDeps });
+  assert.equal(again.job.items[0].state, 'wait');
+  assert.equal(TRI.pendingTrials().filter((p) => p.targetId === w.id).length, 1, '같은 대상 대기는 하나');
+  assert.equal(TRI.startTrial([w.id], { now: t0 + 61_000, deps: edgeDeps }).job.items[0].reason, '이미 시험 중입니다(엣지 보고 대기).');
+  // 라우트 소스 — 사용/중지 · 대상 수정(주소 · 사용) · 삭제가 대기를 멈춘다
+  const route = stripComments(fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'routes', 'svcmon', 'trial.js'), 'utf8'));
+  assert.match(route, /const cancelled = cancelTrials\(touchedIds\);\s*const r = setEnabledMany/);
+  const tree = stripComments(fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'routes', 'svcmon', 'tree.js'), 'utf8'));
+  assert.equal((tree.match(/cancelTrials\(/g) || []).length, 2, 'PUT /targets/:id · DELETE /targets/:id');
+});
+
+test('반증 M3 — 엣지 판정은 이번 시험의 행만(지금 주소 · 기대 점검 이름 · 점검마다 최근 하나)', () => {
+  TRI._resetTrialForTest();
+  const [w] = seed([{ name: 'm3-w', path: 'M3', agent: 'edge-a', host: '10.0.0.2', tests: [tcp('TCP 22', 22), tcp('TCP 443', 443)] }]);
+  const t0 = Date.now();
+  TRI.startTrial([w.id], { now: t0, deps: edgeDeps });
+  const rows = [
+    { path: 'M3', target: 'm3-w', host: '10.0.0.1', test: 'TCP 22', status: 'bad', reply: '옛 주소', measuredAt: t0 + 1000 },   // 옛 스냅샷(옛 주소)
+    { path: 'M3', target: 'm3-w', host: '10.0.0.2', test: 'TCP 22', status: 'ok', measuredAt: t0 + 2000 },
+    { path: 'M3', target: 'm3-w', host: '10.0.0.2', test: 'TCP 22', status: 'ok', measuredAt: t0 + 3000 },   // 같은 점검 두 행 — 두 번 세지 않는다
+    { path: 'M3', target: 'm3-w', host: '10.0.0.2', test: 'Ping', status: 'ok', measuredAt: t0 + 3000 },     // 기대 밖 이름
+  ];
+  assert.equal(TRI.trialTick(t0 + 4000, { edgeRows: () => rows, sync: okSync }).judged, 0, 'TCP 443 이 오기 전에는 통과로 단정하지 않는다');
+  rows.push({ path: 'M3', target: 'm3-w', host: '10.0.0.2', test: 'TCP 443', status: 'ok', measuredAt: t0 + 5000 });
+  assert.equal(TRI.trialTick(t0 + 6000, { edgeRows: () => rows, sync: okSync }).judged, 1);
+  assert.equal(TRI.trialOf(w.id).state, 'pass', '옛 주소의 실패 행에 끌려가지 않는다');
+});
+
+test('반증 H1 — 배정 파일을 못 읽는 동안 배정을 다시 굳히지 않는다(다른 엣지 배포분을 지우지 않게) · 엣지 시험은 건너뛴다', () => {
+  TRI._resetTrialForTest();
+  const [q] = seed([{ name: 'h1-q', path: 'H1', agent: 'edge-a', tests: [tcp('TCP 22', 22)] }]);
+  A.setAssignment('edge-a', { byAgent: true }, S.listTargets().filter((x) => x.agent === 'edge-a'), { user: 'adm' });
+  A.setAssignment('edge-p', { kind: 'infra', path: 'Site', includeSub: true }, [], { user: 'adm' });
+  const FILE = path.join(TMP, 'central-svcmon-assign.json');
+  fs.writeFileSync(FILE, '{"agents": {"edge-a": {');
+  A._resetAssignCache();
+  assert.ok(A.svcmonAssignLoadError());
+  const out = AS.syncByAgentAssignments(['edge-a'], 'op');
+  assert.equal(out[0].ok, false); assert.match(out[0].reason, /엣지 배정 파일을 읽지 못했습니다/);
+  assert.ok(A.svcmonAssignLoadError(), '로드 오류가 그대로 남는다(엣지 pull 은 계속 503 — 배포분 유지)');
+  const r = TRI.startTrial([q.id], { deps: { executes: true } });
+  assert.equal(r.job.items[0].state, 'skip');
+  assert.match(r.job.items[0].reason, /엣지 배정 파일을 읽지 못했습니다/);
+  assert.equal(S.getTarget(q.id).enabled, false, '켜지 않는다');
+  fs.rmSync(FILE, { force: true });
+  for (const f of fs.readdirSync(TMP)) if (f.startsWith('central-svcmon-assign.json.corrupt')) fs.rmSync(path.join(TMP, f), { force: true });
+  A._resetAssignCache();
 });
 
 /* ── 라우트 ── */

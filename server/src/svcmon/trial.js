@@ -27,7 +27,7 @@ import { runBatch } from './pool.js';
 import { splitSvcmonDue, demoSvcmonResult } from '../mock/demo/svcmon.js';
 import { muteTarget, unmuteTarget } from './transitions.js';
 import { edgeOfTarget, syncByAgentAssignments } from '../central/svcmonAssignSync.js';
-import { listAssignments, DEFAULT_EXCEPT_TYPES } from '../central/svcmonAssign.js';
+import { listAssignments, svcmonAssignLoadError, DEFAULT_EXCEPT_TYPES } from '../central/svcmonAssign.js';
 import { getAgentRaw } from '../central/svcmonEdge.js';
 import { logAudit } from '../audit.js';
 
@@ -45,6 +45,15 @@ const TICK_MS = 15_000;
 const JOBS_KEEP = 20;
 const LAST_MAX = 20_000;
 const LAST_TTL_MS = 24 * 3600_000;
+
+/**
+ * v2.960(반증 M1 — 재현): 시험에 실패해 중지로 되돌린 뒤에도 엣지는 **다음 배정 당기기**(기본 5분)까지 옛 스냅샷으로 그 대상을 잰다 —
+ *   억제를 그 순간 풀면 연속 실패 알림이 나갔다. 되돌린 대상은 당기기 + push 주기를 덮는 동안 억제를 이어 간다(시한 있음). 통과면 곧바로 푼다.
+ */
+export function revertMuteMs(expectMs = 0) {
+  const e = Number(expectMs) > 0 ? Number(expectMs) : 60_000;
+  return Math.min(EDGE_DEADLINE_MAX_MS, Math.max(10 * 60_000, 5 * 60_000 + 3 * e));
+}
 
 /** 엣지 시험 시한(ms) — 그 엣지의 push 주기(expectMs)가 길면 늘린다. 순수. */
 export function edgeDeadlineMs(expectMs = 0) {
@@ -71,15 +80,18 @@ export function judgeTrial(results = [], expected = 0) {
  * @param {object[]} picked 대상(저장소 원본 모양)
  * @param {{executes:boolean, assignments:object[]}} o
  */
-export function planTrial(picked = [], { executes = false, assignments = [] } = {}) {
+export function planTrial(picked = [], { executes = false, assignments = [], assignUnreadable = false, pendingIds = new Set() } = {}) {
   const local = []; const edge = []; const skip = [];
   for (const tg of picked) {
     if (!tg) continue;
     const base = { targetId: tg.id, name: t(tg.name), path: t(tg.path), host: t(tg.host) };
+    if (pendingIds.has(tg.id)) { skip.push({ ...base, already: true, reason: '이미 시험 중입니다(엣지 보고 대기).' }); continue; }
     if (tg.enabled !== false) { skip.push({ ...base, already: true, reason: '이미 사용 중입니다.' }); continue; }
     const tests = (tg.tests || []).filter((x) => x.enabled !== false);
     if (!tests.length) { skip.push({ ...base, reason: '켜진 점검이 없습니다 — 점검을 먼저 켜거나 더하세요.' }); continue; }
-    const e = edgeOfTarget(tg, assignments);
+    // v2.960(반증 H1): 배정 파일을 못 읽었으면 어느 엣지가 맡는지 모른다(빈 목록을 '배정 없음' 으로 읽으면 경로 기준 엣지를 byAgent 로 오분류한다).
+    if (assignUnreadable && (t(tg.agent) || !executes)) { skip.push({ ...base, agent: t(tg.agent), reason: '엣지 배정 파일을 읽지 못했습니다 — 엣지 배정 탭에서 확인한 뒤 다시 시험하세요.' }); continue; }
+    const e = edgeOfTarget(tg, assignUnreadable ? [] : assignments);
     if (e.agent && e.mode === 'byAgent') {
       const a = assignments.find((x) => x.agent === e.agent);
       const except = new Set(a?.exceptTypes || DEFAULT_EXCEPT_TYPES);
@@ -117,8 +129,10 @@ function loadPending() {
   try {
     const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     _pending = (Array.isArray(j?.pending) ? j.pending : []).filter((p) => p && t(p.targetId) && t(p.agent) && Number(p.deadline) > 0)
-      .map((p) => ({ targetId: t(p.targetId), jobId: t(p.jobId), agent: t(p.agent), path: t(p.path), name: t(p.name),
-        startedAt: Number(p.startedAt) || 0, deadline: Number(p.deadline), expect: Array.isArray(p.expect) ? p.expect.map(t).slice(0, 200) : [] }));
+      // 시한은 지금 + 상한으로 자른다(반증 L4 — 파일을 손으로 고치거나 옛 번들을 복원해도 무기한 대기가 되지 않게).
+      .map((p) => ({ targetId: t(p.targetId), jobId: t(p.jobId), agent: t(p.agent), path: t(p.path), name: t(p.name), host: t(p.host),
+        startedAt: Number(p.startedAt) || 0, deadline: Math.min(Number(p.deadline), Date.now() + EDGE_DEADLINE_MAX_MS),
+        expect: Array.isArray(p.expect) ? p.expect.map(t).slice(0, 200) : [], expectMs: Number(p.expectMs) || 0 }));
   } catch (e) {
     if (e?.code !== 'ENOENT') preserveCorrupt(FILE(), e?.message);
     _pending = [];
@@ -186,8 +200,14 @@ export function startTrial(ids, { user = '', now = Date.now(), deps = {} } = {})
   const all = deps.targets || listTargets();
   const byId = new Map(all.map((x) => [x.id, x]));
   let assignments = deps.assignments;
-  if (!assignments) { try { assignments = listAssignments(); } catch { assignments = []; } }
-  const plan = planTrial(want.map((id) => byId.get(id) || null).filter(Boolean), { executes: deps.executes ?? executesHere(), assignments });
+  let assignUnreadable = false;
+  if (!assignments) { assignUnreadable = !!svcmonAssignLoadError(); try { assignments = listAssignments(); } catch { assignments = []; assignUnreadable = true; } }
+  // v2.960(반증 M2 — 재현): 중지된 대상에 남은 대기는 낡은 것이다(사람이 다른 경로로 껐다) — 같은 대상 대기가 둘이 되지 않게 먼저 지운다.
+  //   켜진 채 대기 중인 대상은 '이미 시험 중' 으로 건너뛴다(대기를 지우면 판정 없이 켜진 채 남는다).
+  const stale = want.filter((id) => byId.get(id)?.enabled === false && _pending.some((p) => p.targetId === id));
+  if (stale.length) cancelTrials(stale, '다시 시험해 앞선 대기를 멈췄습니다.');
+  const pendingIds = new Set(_pending.map((p) => p.targetId));
+  const plan = planTrial(want.map((id) => byId.get(id) || null).filter(Boolean), { executes: deps.executes ?? executesHere(), assignments, assignUnreadable, pendingIds });
   const missing = want.filter((id) => !byId.has(id));
   if (plan.local.length && _localRunning) return { ok: false, busy: true, error: '다른 시험 점검이 아직 돌고 있습니다 — 끝난 뒤 다시 시도하세요.' };
 
@@ -211,7 +231,7 @@ export function startTrial(ids, { user = '', now = Date.now(), deps = {} } = {})
       if (failed.has(e.agent)) { revert.push(e.targetId); job.items.push({ ...item, state: 'fail', reason: `엣지 배정 동기화 실패 — ${failed.get(e.agent)}` }); continue; }
       const deadline = now + edgeDeadlineMs(e.expectMs);
       muteTarget(e.path, e.name, deadline);
-      _pending.push({ targetId: e.targetId, jobId: job.id, agent: e.agent, path: e.path, name: e.name, startedAt: now, deadline, expect: e.expect });
+      _pending.push({ targetId: e.targetId, jobId: job.id, agent: e.agent, path: e.path, name: e.name, host: e.host, startedAt: now, deadline, expect: e.expect, expectMs: e.expectMs || 0 });
       job.items.push({ ...item, state: 'wait', deadline, reason: '배정을 내려보냈습니다 — 엣지 첫 보고를 기다리는 중' });
       setLast(e.targetId, { state: 'wait', reason: '엣지 첫 보고 대기', at: now, deadline, jobId: job.id });
     }
@@ -269,31 +289,56 @@ export function trialTick(now = Date.now(), deps = {}) {
   const finished = [];   // { p, state, reason, tests }
   for (const [agent, list] of byAgent) {
     const rows = (deps.edgeRows || edgeRowsOf)(agent) || [];
-    const want = new Map(list.map((p) => [`${p.path}\u0001${p.name.toLowerCase()}`, { p, got: [] }]));
-    for (const r of rows) {
-      const w = want.get(`${t(r.path)}\u0001${t(r.target).toLowerCase()}`);
-      if (!w || !(Number(r.measuredAt) >= w.p.startedAt)) continue;
-      w.got.push({ name: t(r.test), status: t(r.status), reply: t(r.reply).slice(0, 160), ms: Number.isFinite(r.ms) ? r.ms : null });
+    // (경로 · 대상 이름) → 대기 목록. 판정은 대기(=대상 id)마다 한다(반증 M2: 키가 같으면 앞 건을 덮었다).
+    const byKey = new Map();
+    for (const p of list) {
+      const k = `${p.path}\u0001${p.name.toLowerCase()}`;
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push({ p, got: new Map() });
     }
-    for (const { p, got } of want.values()) {
-      const j = judgeTrial(got, p.expect.length || 1);
-      if (j.verdict === 'wait') {
-        if (now >= p.deadline) finished.push({ p, state: 'fail', reason: got.length ? `시한까지 일부만 보고됨(${got.length}/${p.expect.length}) — 중지로 되돌렸습니다.` : '시한까지 엣지 보고가 없었습니다 — 중지로 되돌렸습니다.', tests: got });
-        continue;
+    for (const r of rows) {
+      const ws = byKey.get(`${t(r.path)}\u0001${t(r.target).toLowerCase()}`);
+      if (!ws) continue;
+      for (const w of ws) {
+        // v2.960(반증 M3 — 재현): 이번 시험의 행만 — 시작 뒤에 잰 것 · 지금 주소(옛 스냅샷의 옛 주소 행이 아님) · 기대 점검 이름. 같은 점검은 가장 최근 행 하나.
+        if (!(Number(r.measuredAt) >= w.p.startedAt)) continue;
+        if (w.p.host && t(r.host) && t(r.host).toLowerCase() !== w.p.host.toLowerCase()) continue;
+        const name = t(r.test);
+        if (w.p.expect.length && !w.p.expect.includes(name)) continue;
+        const prev = w.got.get(name);
+        if (prev && prev.measuredAt >= Number(r.measuredAt)) continue;
+        w.got.set(name, { name, status: t(r.status), reply: t(r.reply).slice(0, 160), ms: Number.isFinite(r.ms) ? r.ms : null, measuredAt: Number(r.measuredAt) });
       }
-      finished.push({ p, state: j.verdict, reason: j.verdict === 'fail' ? j.reason : '', tests: got });
+    }
+    for (const ws of byKey.values()) {
+      for (const { p, got: gotMap } of ws) {
+        const got = [...gotMap.values()].map(({ measuredAt, ...x }) => x);
+        const j = judgeTrial(got, p.expect.length || 1);
+        if (j.verdict === 'wait') {
+          if (now >= p.deadline) finished.push({ p, state: 'fail', reason: got.length ? `시한까지 일부만 보고됨(${got.length}/${p.expect.length}) — 중지로 되돌렸습니다.` : '시한까지 엣지 보고가 없었습니다 — 중지로 되돌렸습니다.', tests: got });
+          continue;
+        }
+        finished.push({ p, state: j.verdict, reason: j.verdict === 'fail' ? j.reason : '', tests: got });
+      }
     }
   }
   if (!finished.length) return { judged: 0 };
   const done = new Set(finished.map((f) => f.p));
   _pending = _pending.filter((p) => !done.has(p));
   const reverts = finished.filter((f) => f.state === 'fail');
+  let syncFail = [];
   if (reverts.length) {
-    (deps.setEnabled || setEnabledMany)({ targets: reverts.map((f) => f.p.targetId), enabled: false });
-    (deps.sync || syncByAgentAssignments)([...new Set(reverts.map((f) => f.p.agent))], 'system', { note: '시험 점검 — 실패 대상 중지' });
+    // 이미 꺼져 있으면(사람이 껐다) 그대로 — setEnabledMany 는 바뀐 것만 센다. 배정은 시작 때 엣지 + 지금 대상의 엣지를 다시 굳힌다.
+    const en = (deps.setEnabled || setEnabledMany)({ targets: reverts.map((f) => f.p.targetId), enabled: false });
+    const agents = [...new Set([...reverts.map((f) => f.p.agent), ...(en?.agents || [])])];
+    syncFail = ((deps.sync || syncByAgentAssignments)(agents, 'system', { note: '시험 점검 — 실패 대상 중지' }) || []).filter((x) => !x.ok);
   }
+  const failAgents = new Map(syncFail.map((x) => [x.agent, x.reason || '']));
   for (const f of finished) {
-    unmuteTarget(f.p.path, f.p.name);
+    if (f.state === 'fail') {
+      muteTarget(f.p.path, f.p.name, now + revertMuteMs(f.p.expectMs));   // 반증 M1: 엣지가 다음 당기기까지 옛 스냅샷으로 잰다
+      if (failAgents.has(f.p.agent)) f.reason = `${f.reason} 엣지 배정은 다시 굳히지 못했습니다 — ${failAgents.get(f.p.agent)}`.slice(0, 400);
+    } else unmuteTarget(f.p.path, f.p.name);
     setLast(f.p.targetId, { state: f.state, reason: f.reason, at: now, jobId: f.p.jobId });
     const job = _jobs.get(f.p.jobId);
     const item = job?.items.find((x) => x.targetId === f.p.targetId);
@@ -313,9 +358,33 @@ function edgeRowsOf(agent) {
   for (const [id, r] of a.rows) {
     const m = a.meta.get(id);
     if (!m) continue;
-    out.push({ path: m.p, target: m.n, test: m.t, status: r.s, reply: r.r, ms: r.m, measuredAt: r.measuredAt });
+    out.push({ path: m.p, target: m.n, host: m.h, test: m.t, status: r.s, reply: r.r, ms: r.m, measuredAt: r.measuredAt });
   }
   return out;
+}
+
+/**
+ * 대기 취소 — 사람이 그 대상을 켜거나 끄거나 지우면(라우트) 시험 판정이 사람의 마지막 조작을 뒤집지 않게 멈춘다(반증 M2 — 재현:
+ *   대기 중 사람이 껐다 다시 켰는데 시한이 지나자 system 이 껐다). 억제도 푼다(사람이 켠 대상의 실패는 알려야 한다).
+ * @returns {number} 취소한 수
+ */
+export function cancelTrials(targetIds = [], reason = '사람이 사용/중지를 바꿔 시험을 멈췄습니다.') {
+  loadPending();
+  const ids = new Set((targetIds || []).map(t).filter(Boolean));
+  if (!ids.size) return 0;
+  const gone = _pending.filter((p) => ids.has(p.targetId));
+  if (!gone.length) return 0;
+  _pending = _pending.filter((p) => !ids.has(p.targetId));
+  for (const p of gone) {
+    unmuteTarget(p.path, p.name);
+    _last.delete(p.targetId);
+    const job = _jobs.get(p.jobId);
+    const item = job?.items.find((x) => x.targetId === p.targetId);
+    if (item && item.state === 'wait') { item.state = 'skip'; item.reason = reason; recount(job); }
+  }
+  savePending();
+  if (!_pending.length) stopTimer();
+  return gone.length;
 }
 
 function ensureTimer() {

@@ -18,6 +18,7 @@ const MODES = [
 ];
 
 const GO_LABEL = { trial: '시험 점검 후 등록', stop: '중지로 등록', enable: '등록하고 바로 사용' };
+const TRIAL_MAX = 2000;   // 서버 svcmon/trial.js TRIAL_MAX_IDS 와 같다(넘으면 서버가 400 — 여기서는 등록 전에 먼저 막는다)
 
 export default function CoverageCard({ cov, onChanged }) {
   const [open, setOpen] = useState(false);
@@ -49,6 +50,8 @@ export default function CoverageCard({ cov, onChanged }) {
   const register = async () => {
     if (!goCount) return;
     if (maxApply && plan.newN > maxApply) { setErr(`한 번에 ${maxApply}건까지 등록할 수 있습니다(고른 미등록 ${plan.newN}건) — 법인을 나눠 고르세요.`); return; }
+    // 반증 L5: 시험은 한 번에 TRIAL_MAX 건 — 등록이 커밋된 뒤 시험이 400 을 받지 않게 먼저 막는다.
+    if (mode === 'trial' && goCount > TRIAL_MAX) { setErr(`시험 점검은 한 번에 ${TRIAL_MAX}건까지입니다(고른 ${goCount}건) — 법인을 나눠 고르세요.`); return; }
     setBusy(true); setErr(''); setMsg('');
     try {
       const ids = [...plan.offIds];
@@ -69,7 +72,9 @@ export default function CoverageCard({ cov, onChanged }) {
         const t = requireChanged(await postJson('/svcmon/trial', { ids }));
         setJob(t.job);
       } else if (mode === 'enable' && plan.offIds.length) {
-        requireChanged(await postJson('/svcmon/targets/enabled', { targets: plan.offIds, enabled: true }));
+        const en = requireChanged(await postJson('/svcmon/targets/enabled', { targets: plan.offIds, enabled: true }));
+        const bad = (en.assign || []).filter((a) => !a.ok);
+        if (bad.length) setMsg((m) => `${m ? `${m} · ` : ''}엣지 반영 안 됨: ${bad.map((a) => `${a.agent}(${a.reason})`).join(', ').slice(0, 300)}`);
       }
       if (mode !== 'trial') setMsg((m) => `${m ? `${m} · ` : ''}새로 등록 ${added}건${mode === 'enable' ? ` · 사용으로 켬 ${plan.offIds.length}건` : ' · 중지 상태로 두었습니다'}`);
       setPicked(new Set()); setExcluded(new Set());

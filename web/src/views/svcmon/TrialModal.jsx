@@ -20,16 +20,17 @@ export default function TrialModal({ job: initial, onClose }) {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const seq = useRef(0);
+  const [miss, setMiss] = useState(0);   // 읽기 실패 횟수 — 실패해도 다음 주기에 다시 읽는다(반증 L5: 한 번 실패하면 멈췄다)
   const state = job?.state;
   useEffect(() => {
-    if (!job?.id || state === 'done') return undefined;
+    if (!job?.id || state === 'done' || miss >= 20) return undefined;
     const id = setTimeout(async () => {
       const my = ++seq.current;
-      try { const r = await fetchJson(`/svcmon/trial/${encodeURIComponent(job.id)}`); if (my === seq.current && r?.job) setJob(r.job); }
-      catch (e) { if (my === seq.current) setErr(e.message || String(e)); }
+      try { const r = await fetchJson(`/svcmon/trial/${encodeURIComponent(job.id)}`); if (my === seq.current && r?.job) { setJob(r.job); setErr(''); } }
+      catch (e) { if (my === seq.current) { setErr(`진행을 읽지 못했습니다 — 다시 시도합니다(${e.message || String(e)})`); setMiss((n) => n + 1); } }
     }, state === 'running' ? 3000 : 10_000);
     return () => clearTimeout(id);
-  }, [job, state]);
+  }, [job, state, miss]);
 
   if (!job) return null;
   const items = [...(job.items || [])].sort((a, b) => ['fail', 'wait', 'running', 'skip', 'pass'].indexOf(a.state) - ['fail', 'wait', 'running', 'skip', 'pass'].indexOf(b.state));

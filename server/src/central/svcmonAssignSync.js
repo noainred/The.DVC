@@ -9,7 +9,8 @@
  *   배정은 대상 정의의 **스냅샷**이다(사용 여부 포함) — 중앙에서 대상을 켜고 꺼도 다시 굳히기 전에는 엣지가 모른다.
  */
 import { listTargets } from '../svcmon/store.js';
-import { listAssignments, setAssignment, DEFAULT_EXCEPT_TYPES } from './svcmonAssign.js';
+import { capStr } from '../util/capStr.js';
+import { listAssignments, setAssignment, svcmonAssignLoadError, DEFAULT_EXCEPT_TYPES } from './svcmonAssign.js';
 
 const t = (v) => String(v ?? '').trim();
 
@@ -21,8 +22,13 @@ const t = (v) => String(v ?? '').trim();
  */
 export function syncByAgentAssignments(agents, user = '', { note = '설정 연동 동기화' } = {}) {
   const out = [];
+  // v2.960(반증 H1 — 재현): 배정 파일이 손상돼 못 읽은 동안(load 는 원본을 보존하고 **빈 목록**을 준다 — 던지지 않는다) 굳히면
+  //   그 엣지 하나분으로 파일을 덮고(관리자 저장이 로드 오류를 해제) 다른 엣지는 assigned:false 를 받아 central:* 배포분을 전부 지운다(EDGE2632-01 사고).
+  //   못 읽었으면 아무것도 쓰지 않는다 — 사람이 엣지 배정 탭에서 확인한다(v2.915 설정 연동 적용 경로도 같이 막힌다).
+  const loadErr = svcmonAssignLoadError();
+  if (loadErr) return [...new Set((agents || []).map(t).filter(Boolean))].map((agent) => ({ agent, ok: false, reason: '엣지 배정 파일을 읽지 못했습니다(손상본을 보존했습니다) — 엣지 배정 탭에서 확인하기 전에는 배정을 다시 굳히지 않습니다.' }));
   let cur = [];
-  try { cur = listAssignments(); } catch (e) { return agents.map((agent) => ({ agent, ok: false, reason: `배정 파일을 읽지 못했습니다: ${t(e?.message).slice(0, 120)}` })); }
+  try { cur = listAssignments(); } catch (e) { return agents.map((agent) => ({ agent, ok: false, reason: `배정 파일을 읽지 못했습니다: ${capStr(t(e?.message), 120)}` })); }
   const byName = new Map(cur.map((a) => [a.agent, a]));
   for (const agent of [...new Set((agents || []).map(t).filter(Boolean))]) {
     const a = byName.get(agent);
@@ -31,7 +37,7 @@ export function syncByAgentAssignments(agents, user = '', { note = '설정 연�
       const picked = listTargets().filter((x) => t(x.agent) === agent).map((x) => ({ ...x, tests: x.tests.map((y) => ({ ...y })) }));
       const r = setAssignment(agent, { byAgent: true, exceptTypes: a?.exceptTypes || DEFAULT_EXCEPT_TYPES, note }, picked, { user });
       out.push({ agent, ok: true, targets: r?.counts?.targets ?? picked.length });
-    } catch (e) { out.push({ agent, ok: false, reason: t(e?.message).slice(0, 200) }); }
+    } catch (e) { out.push({ agent, ok: false, reason: capStr(t(e?.message), 200) }); }
   }
   return out;
 }

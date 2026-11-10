@@ -34,14 +34,15 @@ describe('v2.960 쉬운 등록 — 법인별 추천 등록', () => {
     { key: 'k4', state: 'linked', corpKey: 'dc-sel', corp: 'Seoul 법인', kind: 'set:cvp', kindLabel: 'Arista CVP', targetId: 'g2', targetEnabled: true },
     { key: 'k5', state: 'new', corpKey: '', corp: '전역', kind: 'set:bmstor', kindLabel: '베어메탈 스토리지(SSH)' },
     { key: 'k6', state: 'excluded', corpKey: 'dc-fra', kind: 'set:webhook' },
-    { key: 'k7', state: 'problem', corpKey: 'dc-sel', corp: 'Seoul 법인', kind: 'set:pdu', kindLabel: 'PDU' },
+    { key: 'k7', state: 'problem', corp: '전역', kind: 'set:pdu', kindLabel: 'PDU' },   // 서버의 설정 문제 행은 corpKey 가 없다(법인 미상으로 센다)
     { key: 'k8', state: 'gone', corpKey: 'dc-fra', kind: 'set:pdu', targetId: 'g9', targetEnabled: false },
   ];
   const g = corpPlan(rows);
   it('법인 묶음 — 미감시(미등록 + 등록됐지만 중지) 많은 순 · 법인 미상은 맨 뒤 · 제외 · 사라짐은 빼고 설정 문제는 따로 센다', () => {
     expect(g.map((x) => [x.key, x.label, x.unmonitored, x.total])).toEqual([['dc-fra', 'Frankfurt 법인', 3, 3], ['dc-sel', 'Seoul 법인', 0, 1], ['', '법인 미상', 1, 1]]);
     expect(g[0].agent).toBe('Edge-FRA');
-    expect(g[1].problem).toBe(1);
+    expect(g[1].problem).toBe(0);
+    expect(g[2].problem).toBe(1, '설정 문제 행은 법인 미상 묶음에서 센다');
     expect(g[0].kinds.find((k) => k.kind === 'set:idrac').checks).toBe('TCP 443');
   });
   it('고른 법인 · 뺀 종류 → 등록할 키 · 켤 대상(사용 중인 것은 건드리지 않는다)', () => {
