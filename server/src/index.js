@@ -96,6 +96,7 @@ import { startCapacitySampler } from './capacity/sampler.js';
 import { startCapacityPush } from './agent/capacityPush.js';
 import { startSvcmonPoller } from './svcmon/poller.js';
 import { startSettingsSyncDetector } from './svcmon/settingsSync.js';
+import { startSvcmonTrials } from './svcmon/trial.js';
 import { startSvcmonPush } from './agent/svcmonPush.js';
 import { startSvcmonConfigPull } from './agent/svcmonConfigPull.js';
 import { startSvcmonSilenceWatch } from './central/svcmonSilence.js';
@@ -609,6 +610,7 @@ const stagger = [
   // 엣지 위임(RMA): 엣지는 결과를 밀어 올리고(push), 중앙은 무보고를 감시한다.
   // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
   startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,
+  startSvcmonTrials, // v2.960 시험 점검 엣지 대기 이어 받기(파일에 남은 것만 · 시한이 지났으면 되돌린다) — 없으면 아무것도 하지 않는다
   startSettingsSyncDetector, // v2.915 Monitoring 설정 연동 — 5분마다 설정 카탈로그를 **읽기만** 해 새 항목·주소 변경·사라짐을 센다(네트워크 왕복 0) · 엣지는 기동하지 않는다
   startVmCloneScheduler, // VM 복제(백업식) — 60초 틱, 재진입 가드 + 전역 직렬 실행 큐(runner)
   startVmBackupMail,     // 〃 실패 메일(v2.794) — 1분 틱, 엣지는 기동하지 않는다

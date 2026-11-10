@@ -136,6 +136,30 @@ export function noteAlertOnly(r) {
   } catch { /* 알림은 부가 정보 */ }
 }
 
+/*
+ * v2.960(쉬운 등록 A — 시험 점검): 시험 중인 대상의 실패 · 경고 알림을 보내지 않는다. 키는 (경로 · 대상 이름 소문자) —
+ *   직접 실행(scope '')과 엣지 행이 같은 키를 쓴다(엣지 점검 id 는 재배정마다 바뀐다). **시한이 있다**(시험 시한 — 지나면 저절로 풀린다 ·
+ *   루트 CLAUDE.md '보류에는 반드시 시한'). 알린 상태(_alerted)를 만들지 않으므로 시험이 끝난 뒤 실패가 이어지면 그때 처음으로 알린다.
+ */
+const _muted = new Map();   // key -> until(ms)
+const MUTE_MAX = 20_000;
+const muteKey = (p, n) => `${t(p)}${SEP}${t(n).toLowerCase()}`;
+export function muteTarget(path, name, until) {
+  const k = muteKey(path, name);
+  if (!t(name) || !(Number(until) > 0)) return;
+  if (!_muted.has(k) && _muted.size >= MUTE_MAX) _muted.delete(_muted.keys().next().value);
+  _muted.set(k, Number(until));
+}
+export function unmuteTarget(path, name) { _muted.delete(muteKey(path, name)); }
+export function isMuted(path, name, now = Date.now()) {
+  const k = muteKey(path, name);
+  const until = _muted.get(k);
+  if (!until) return false;
+  if (until <= now) { _muted.delete(k); return false; }
+  return true;
+}
+export function mutedCount(now = Date.now()) { let n = 0; for (const u of _muted.values()) if (u > now) n += 1; return n; }
+
 function evalAlert(x) {
   const s = getAlertSettings();
   if (!s.enabled) return;
@@ -158,6 +182,7 @@ function evalAlert(x) {
     return;
   }
   if (!inScope(s, path)) return;
+  if (isMuted(path, x.target?.name, x.at)) return;   // v2.960: 시험 점검 중(시한 있음) — 복구 판정은 위에서 이미 했다
   if (x.status === 'bad') {
     if (x.streak >= s.failCount && !_alerted.has(key)) {
       if (_alerted.size >= ALERTED_MAX) _alerted.delete(_alerted.keys().next().value);
@@ -304,7 +329,7 @@ export function transitionsSince() { return _startedAt; }
 
 /** 테스트 전용. */
 export function _resetTransitionsForTest({ send = null } = {}) {
-  _ring = []; _hours.clear(); _alerted.clear(); _warned.clear(); _queue = []; _setAlertSettingsCache(null); _send = send; _held.clear();
+  _ring = []; _hours.clear(); _alerted.clear(); _warned.clear(); _queue = []; _setAlertSettingsCache(null); _send = send; _held.clear(); _muted.clear();
   if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; }
   _sentStats = { individual: 0, summaries: 0, lastAt: 0 };
 }

@@ -28,6 +28,7 @@ import { ROTATE_UNITS, ROTATE_LABEL } from '../../svcmon/logsettings.js';
 import { logStats } from '../../svcmon/csvlog.js';
 import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
 import { driftSummary, DETECT_INTERVAL_MS } from '../../svcmon/settingsSync.js';
+import { trialOf } from '../../svcmon/trial.js';
 import { redactEdgeSummary, redactPushStatus, ADMIN_ONLY_TEXT } from '../../auth/scopeStatus.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store as _storeForScope } from '../../store.js';
@@ -76,6 +77,8 @@ svcmonRouter.get('/state', (req, res) => {
     && (!scope || t.path === scope || t.path.startsWith(`${scope}\\`)));
   const targets = inScope.slice(0, limit).map((t) => ({
     ...t,
+    // v2.960(쉬운 등록 A): 최근 시험 점검 결과(24시간 · 엣지 대기 포함) — 트리 표지('시험 중' · '시험 실패' 사유). 메모리 값이라 재시작하면 대기만 남는다.
+    ...(() => { const tr = trialOf(t.id, now); return tr ? { trial: tr } : {}; })(),
     tests: t.tests.map((x) => {
       const r = results.get(x.id) || null;
       // 화면이 나이를 직접 계산하지 않게 서버가 실어 보낸다(클라이언트 시계는 틀릴 수 있다).
