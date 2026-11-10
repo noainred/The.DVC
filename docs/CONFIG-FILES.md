@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **306개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **307개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-09)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-10)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -271,6 +271,7 @@
 | `svcmon-log.json` | 설정 | 성능점검 로그 설정 — CSV 적재/분할/보관 정책. `CONFIG_DIR/svcmon-log.json`. | ✅ | ✅ |  | svcmon/logsettings.js |
 | `svcmon-settings-sync.json` | 설정 | **설정 연동**(v2.915): 포탈 설정에 등록된 시스템을 골라 Monitoring(성능점검) 대상으로 등록하고, | ✅ | ✅ |  | svcmon/settingsSync.js |
 | `svcmon-templates.json` | 설정 | 성능점검 '점검 템플릿' — 서비스 유형별 점검 묶음을 저장하고 대상에 적용한다. | ✅ | ✅ |  | svcmon/templates.js |
+| `svcmon-trial.json` | 설정 | **시험 점검 후 사용**(v2.960 쉬운 등록 A · 설계 docs/design/monitoring-autoreg/README.md §11.2). | ✅ | ✅ |  | svcmon/trial.js |
 | `svcmon.json` | 설정 | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). | ✅ | ✅ |  | svcmon/store.js |
 | `tag-policy.json` | 설정 | 태그 점검 정책(`tag-policy.json`, v2.703 — A15). 사람이 정하는 **설정** 파일이다(비밀 없음). | ✅ | ✅ | ✅ | tags/policy.js |
 | `tls-ca-bundle.pem` | 기타 | 장비 TLS 사설 CA 번들(PEM — 관리자가 직접 둔다, 검토 S-02) |  |  |  | (외부/설치 스크립트) |
