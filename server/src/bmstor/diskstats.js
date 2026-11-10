@@ -11,6 +11,8 @@
  *  · 카운터가 줄었으면(재부팅 · 장치 교체) 그 장치는 이번 표본에서 뺀다. 0 으로 세지 않는다.
  *  · 못 읽으면 io 는 null 이고 ioError 가 사유를 말한다 — df 가 성공했으면 서버를 오류로 만들지 않는다(용량은 살린다).
  *  · 바쁨(%) = Δio_ticks(ms) ÷ 경과(ms) 의 **장치별 최댓값**(가장 바쁜 디스크 — iostat %util 과 같은 뜻 · 평균이 아니다).
+ *  · v2.962(비교 세트): IOPS = Δ(읽기+쓰기 완료 횟수) ÷ 경과 · 응답 시간(ms) = Δ(읽기+쓰기 소요 ms) ÷ Δ(읽기+쓰기 횟수) — iostat await 와 같은 정의이고
+ *    디스크 전체의 **I/O 가중 평균**이다(디스크별 평균의 평균이 아니다). I/O 가 0 이면 응답 시간은 null(0 ms 가 아니다 — 모름).
  *
  * 입력 크기는 먼저 자른다(설계 규칙 — 외부 출력에 앵커 없는 반복 금지): 줄 4,000개 · 1MB 상한.
  */
@@ -44,7 +46,8 @@ export function ioSampleCommand(sec) {
 /**
  * 한 구간(uptime 한 줄 + diskstats 여러 줄) 파싱.
  * diskstats 열: major minor name rd_ios rd_merges rd_sectors rd_ticks wr_ios wr_merges wr_sectors wr_ticks in_flight io_ticks …
- * @returns {{ uptimeSec:number|null, devices: Map<string,{rdSectors:number, wrSectors:number, ioMs:number}> }}
+ *   (0      1     2    3      4         5          6        7      8         9          10       11        12)
+ * @returns {{ uptimeSec:number|null, devices: Map<string,{rdSectors:number, wrSectors:number, ioMs:number, rdIos:number|null, wrIos:number|null, rwTicks:number|null}> }}
  */
 export function parseDiskstats(text) {
   const t = String(text || '');
@@ -65,7 +68,11 @@ export function parseDiskstats(text) {
     if (!WHOLE_DISK_RE.test(name)) continue;
     const rdSectors = numOrNull(cols[5]); const wrSectors = numOrNull(cols[9]); const ioMs = numOrNull(cols[12]);
     if (rdSectors == null || wrSectors == null || ioMs == null) continue;
-    devices.set(name, { rdSectors, wrSectors, ioMs });
+    // v2.962: 완료 횟수 · 소요 ms — 셋 다 읽혀야 IOPS · 응답 시간을 낸다(하나라도 없으면 null — 용량 · 처리량은 그대로).
+    const rdIos = numOrNull(cols[3]); const wrIos = numOrNull(cols[7]);
+    const rdTicks = numOrNull(cols[6]); const wrTicks = numOrNull(cols[10]);
+    const okIo = rdIos != null && wrIos != null && rdTicks != null && wrTicks != null;
+    devices.set(name, { rdSectors, wrSectors, ioMs, rdIos: okIo ? rdIos : null, wrIos: okIo ? wrIos : null, rwTicks: okIo ? rdTicks + wrTicks : null });
   }
   return { uptimeSec, devices };
 }
@@ -90,6 +97,8 @@ export function ioRate(before, after) {
   if (!Number.isFinite(elapsed) || elapsed <= 0) return { ok: false, error: '표본 간격이 0 이하입니다(uptime 역행 — 재부팅?)' };
   let rd = 0; let wr = 0; let busyPct = 0; let busiestDev = ''; let disks = 0; let skipped = 0;
   let cRd = 0; let cWr = 0; let cIo = 0;
+  // v2.962: I/O 횟수 · 소요 ms — 통짜 디스크 **전부**가 그 열을 읽었을 때만 합한다(일부만이면 부분 합 — null).
+  let dRdIos = 0; let dWrIos = 0; let dTicks = 0; let cRdIos = 0; let cWrIos = 0; let cTicks = 0; let ioCols = true;
   for (const [name, a] of after.devices) {
     const b = before.devices.get(name);
     if (!b) { skipped += 1; continue; }
@@ -100,18 +109,29 @@ export function ioRate(before, after) {
     cRd += a.rdSectors; cWr += a.wrSectors; cIo += a.ioMs;
     const busy = Math.min(100, (dIo / (elapsed * 1000)) * 100);
     if (busy > busyPct || !busiestDev) { busyPct = busy; busiestDev = name; }
+    if (a.rdIos == null || b.rdIos == null || a.rwTicks == null || b.rwTicks == null) { ioCols = false; continue; }
+    const r1 = a.rdIos - b.rdIos; const w1 = a.wrIos - b.wrIos; const t1 = a.rwTicks - b.rwTicks;
+    if (r1 < 0 || w1 < 0 || t1 < 0) { ioCols = false; continue; }
+    dRdIos += r1; dWrIos += w1; dTicks += t1;
+    cRdIos += a.rdIos; cWrIos += a.wrIos; cTicks += a.rwTicks;
   }
   if (!disks) return { ok: false, error: after.devices.size ? '모든 디스크의 카운터가 역행했습니다(재부팅 직후?)' : '/proc/diskstats 에 통짜 디스크(sd · nvme · vd)가 없습니다' };
   const readBps = Math.round((rd * SECTOR_BYTES) / elapsed);
   const writeBps = Math.round((wr * SECTOR_BYTES) / elapsed);
+  const ios = dRdIos + dWrIos;
+  const r2 = (x) => Math.round(x * 100) / 100;
   return {
     ok: true,
     io: {
       readBps, writeBps, totalBps: readBps + writeBps,
       busyPct: Math.round(busyPct * 10) / 10, busiestDev, disks, skipped,
       sampleMs: Math.round(elapsed * 1000),
+      // v2.962: IOPS · 응답 시간(I/O 가중 평균 ms). 열을 못 읽었으면 null · I/O 가 0 이면 응답 시간 null(모름 — 0 ms 아님).
+      readIops: ioCols ? r2(dRdIos / elapsed) : null, writeIops: ioCols ? r2(dWrIos / elapsed) : null, iops: ioCols ? r2(ios / elapsed) : null,
+      latMs: ioCols && ios > 0 ? r2(dTicks / ios) : null,
       // 누적 카운터(통짜 디스크 합) — 중앙 I/O 시계열 DB 가 수집 사이의 **구간 평균**을 차분으로 낸다(설계 §4.5).
-      counters: { rdSectors: cRd, wrSectors: cWr, ioMs: cIo, uptimeSec: Number(after.uptimeSec) },
+      counters: { rdSectors: cRd, wrSectors: cWr, ioMs: cIo, uptimeSec: Number(after.uptimeSec),
+        ...(ioCols ? { rdIos: cRdIos, wrIos: cWrIos, rwTicks: cTicks } : {}) },
     },
   };
 }
@@ -130,9 +150,11 @@ export function ioResultFromExec(r) {
 }
 
 /**
- * 수집 사이의 **구간 평균**(순수 — 중앙 I/O 시계열 DB 가 쓴다). prev·cur 는 { ts, counters:{rdSectors,wrSectors,ioMs,uptimeSec} }.
+ * 수집 사이의 **구간 평균**(순수 — 중앙 I/O 시계열 DB 가 쓴다). prev·cur 는 { ts, counters:{rdSectors,wrSectors,ioMs,uptimeSec,rdIos?,wrIos?,rwTicks?} }.
  * 경과는 uptime 차(둘 다 있고 늘었을 때) 아니면 ts 차. 공백이 maxGapMs 를 넘거나 카운터·uptime 이 줄었으면 null(모름 — 0 아님).
- * @returns {{ avgReadBps:number, avgWriteBps:number, avgBusyPct:number }|null}
+ * v2.962: 두 쪽 모두 I/O 횟수 · 소요 ms 카운터가 있으면 avgIops · dIos · dTicks 도 낸다(응답 시간 = dTicks ÷ dIos 는 소비처가 합으로 계산 —
+ *   여러 칸 · 여러 서버를 묶을 때 평균의 평균이 아니라 I/O 가중이 되게). 없으면 그 셋은 null.
+ * @returns {{ avgReadBps:number, avgWriteBps:number, avgBusyPct:number, avgIops:number|null, dIos:number|null, dTicks:number|null }|null}
  */
 export function intervalAvg(prev, cur, { maxGapMs } = {}) {
   const pc = prev?.counters; const cc = cur?.counters;
@@ -148,9 +170,18 @@ export function intervalAvg(prev, cur, { maxGapMs } = {}) {
   if (![dRd, dWr, dIo].every(Number.isFinite) || dRd < 0 || dWr < 0 || dIo < 0) return null;
   const sec = pu != null && cu != null ? cu - pu : dTs / 1000;
   if (!(sec > 0)) return null;
+  // v2.962: I/O 횟수 · 소요 ms — 두 쪽 모두 있고 줄지 않았을 때만(없으면 null · 처리량 평균은 그대로 낸다).
+  let avgIops = null; let dIos = null; let dTicks = null;
+  const pIo = [numOrNull(pc.rdIos), numOrNull(pc.wrIos), numOrNull(pc.rwTicks)];
+  const cIo = [numOrNull(cc.rdIos), numOrNull(cc.wrIos), numOrNull(cc.rwTicks)];
+  if (pIo.every((v) => v != null) && cIo.every((v) => v != null)) {
+    const di = (cIo[0] - pIo[0]) + (cIo[1] - pIo[1]); const dt = cIo[2] - pIo[2];
+    if (di >= 0 && dt >= 0 && cIo[0] >= pIo[0] && cIo[1] >= pIo[1]) { dIos = di; dTicks = dt; avgIops = Math.round((di / sec) * 100) / 100; }
+  }
   return {
     avgReadBps: Math.round((dRd * SECTOR_BYTES) / sec),
     avgWriteBps: Math.round((dWr * SECTOR_BYTES) / sec),
     avgBusyPct: Math.round(Math.min(100, (dIo / (sec * 1000)) * 100) * 10) / 10,
+    avgIops, dIos, dTicks,
   };
 }

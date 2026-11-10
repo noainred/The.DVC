@@ -284,7 +284,10 @@ function demoBmBase(spec) {
   const isDb = spec.groups.includes('DB'); const isBk = spec.groups.includes('백업');
   const read = (isDb ? 40 : isBk ? 3 : 20) * MB * (1 + (h % 7) / 10);
   const write = (isDb ? 25 : isBk ? 50 : 8) * MB * (1 + ((h >> 3) % 7) / 10);
-  return { read, write, busy: isDb ? 55 : isBk ? 35 : 20 };
+  // v2.962(비교 세트): IOPS · 응답 시간 — DB 는 작은 I/O 가 많고 빠르게(NVMe), 백업은 큰 I/O 가 적고 느리게(HDD).
+  const ioSize = isDb ? 16384 : isBk ? 262144 : 65536;
+  const lat = (isDb ? 0.6 : isBk ? 9 : 2.5) * (1 + ((h >> 5) % 5) / 10);
+  return { read, write, busy: isDb ? 55 : isBk ? 35 : 20, ioSize, lat };
 }
 /** 그 시각의 평균 속도(느린 물결 — 하루 주기) · 피크 배율(빠른 물결). */
 function demoBmRateAt(spec, t) {
@@ -292,7 +295,10 @@ function demoBmRateAt(spec, t) {
   const h = demoHash(`bmio:${spec.k}`);
   const slow = 1 + 0.35 * Math.sin((t / DAY) * 2 * Math.PI + (h % 13));
   const fast = 1 + 0.25 * Math.sin((t / HOUR) * 2 * Math.PI * 3 + (h % 5));
-  return { readBps: Math.round(b.read * slow * fast), writeBps: Math.round(b.write * slow * fast), busyPct: Math.round(Math.min(100, b.busy * slow * fast) * 10) / 10, peakMul: 2.2 + 0.6 * Math.sin((t / HOUR) * 2 * Math.PI * 5 + h) };
+  const readBps = Math.round(b.read * slow * fast); const writeBps = Math.round(b.write * slow * fast);
+  const iops = Math.round(((readBps + writeBps) / b.ioSize) * 100) / 100;
+  return { readBps, writeBps, busyPct: Math.round(Math.min(100, b.busy * slow * fast) * 10) / 10, peakMul: 2.2 + 0.6 * Math.sin((t / HOUR) * 2 * Math.PI * 5 + h),
+    iops, latMs: Math.round(b.lat * (0.8 + 0.4 * slow * fast) * 100) / 100 };
 }
 /** poller latest 행의 io 모양(diskstats.ioRate) — 누적 카운터는 기준 속도 × 가동 시간(단조 증가 — 차분 평균이 평균과 맞는다). */
 export function demoBmIo(server, t = Date.now()) {
@@ -307,7 +313,9 @@ export function demoBmIo(server, t = Date.now()) {
     io: {
       readBps: r.readBps, writeBps: r.writeBps, totalBps: r.readBps + r.writeBps, busyPct: r.busyPct, busiestDev: s.groups.includes('DB') ? 'nvme0n1' : 'sdb',
       disks: 2 + (demoHash(`disks:${s.k}`) % 10), skipped: 0, sampleMs: 2000,
-      counters: { rdSectors: Math.floor((b.read * upSec) / 512), wrSectors: Math.floor((b.write * upSec) / 512), ioMs: Math.floor(upSec * 1000 * (b.busy / 100)), uptimeSec: Math.round(upSec) },
+      readIops: Math.round((r.readBps / b.ioSize) * 100) / 100, writeIops: Math.round((r.writeBps / b.ioSize) * 100) / 100, iops: r.iops, latMs: r.latMs,
+      counters: { rdSectors: Math.floor((b.read * upSec) / 512), wrSectors: Math.floor((b.write * upSec) / 512), ioMs: Math.floor(upSec * 1000 * (b.busy / 100)), uptimeSec: Math.round(upSec),
+        rdIos: Math.floor((b.read * upSec) / b.ioSize), wrIos: Math.floor((b.write * upSec) / b.ioSize), rwTicks: Math.floor(((b.read + b.write) * upSec / b.ioSize) * b.lat) },
     },
     ioError: null,
   };
@@ -325,6 +333,28 @@ export function demoBmIoSeries(serverId, { buckets = [], bucketMs = 60_000, metr
     const r = demoBmRateAt(s, buckets[i] + bucketMs / 2);
     const v = metric === 'read' ? r.readBps : metric === 'write' ? r.writeBps : r.readBps + r.writeBps;
     out.avg[i] = v; out.peak[i] = Math.round(v * r.peakMul); out.busy[i] = r.busyPct;
+  }
+  return out;
+}
+
+/**
+ * v2.962 비교 세트용 — 지표 넷(전송 속도 · IOPS · 응답 시간 · 바쁨)을 한 번에(적재하지 않고 계산). 응답 시간은 묶을 때 I/O 가중이 되도록 sDios · sDticks 도 준다.
+ * 모양은 bmstor/compareSet.js bmMetricsFromRaw 결과와 같다 — 측정 불가 서버(hpc-03)는 전부 null.
+ */
+export function demoBmIoMetrics(serverId, { buckets = [], bucketMs = 60_000 } = {}) {
+  const n = buckets.length;
+  const blank = () => ({ avg: new Array(n).fill(null), peak: new Array(n).fill(null) });
+  const out = { tput: blank(), iops: blank(), lat: { ...blank(), sDios: new Array(n).fill(null), sDticks: new Array(n).fill(null) }, busy: blank() };
+  const s = BM_BY_ID.get(String(serverId || ''));
+  if (!s || BM_IO_MUTE.has(s.k) || s.enabled === false) return out;
+  const sec = Math.max(1, bucketMs / 1000);
+  for (let i = 0; i < n; i++) {
+    const r = demoBmRateAt(s, buckets[i] + bucketMs / 2);
+    out.tput.avg[i] = r.readBps + r.writeBps; out.tput.peak[i] = Math.round((r.readBps + r.writeBps) * r.peakMul);
+    out.iops.avg[i] = r.iops; out.iops.peak[i] = Math.round(r.iops * r.peakMul * 100) / 100;
+    out.lat.avg[i] = r.latMs; out.lat.peak[i] = Math.round(r.latMs * (1.5 + r.peakMul / 2) * 100) / 100;
+    out.lat.sDios[i] = Math.round(r.iops * sec); out.lat.sDticks[i] = Math.round(r.iops * sec * r.latMs);
+    out.busy.avg[i] = r.busyPct; out.busy.peak[i] = Math.min(100, Math.round(r.busyPct * Math.min(1.8, r.peakMul) * 10) / 10);
   }
   return out;
 }

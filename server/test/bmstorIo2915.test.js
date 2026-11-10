@@ -47,7 +47,8 @@ test('diskstats: 통짜 디스크만 센다 — 파티션 · dm · loop 는 뺀�
   const p = parseDiskstats(DS(1000, [1, 2048, 1, 1024, 500], [1, 4096, 1, 2048, 900], 77777));
   assert.equal(p.uptimeSec, 1000);
   assert.deepEqual([...p.devices.keys()].sort(), ['nvme0n1', 'sda']);
-  assert.deepEqual(p.devices.get('sda'), { rdSectors: 2048, wrSectors: 1024, ioMs: 500 });
+  // v2.962: 완료 횟수 · 소요 ms(rd_ticks + wr_ticks)도 읽는다(비교 세트 IOPS · 응답 시간 — bmCompareSet2962)
+  assert.deepEqual(p.devices.get('sda'), { rdSectors: 2048, wrSectors: 1024, ioMs: 500, rdIos: 1, wrIos: 1, rwTicks: 0 });
   for (const bad of ['sda1', 'dm-0', 'md0', 'loop0', 'nvme0n1p1', 'ram0']) assert.ok(!WHOLE_DISK_RE.test(bad), bad);
   for (const ok of ['sda', 'sdab', 'vdb', 'xvda', 'nvme1n2', 'mmcblk0', 'hdc']) assert.ok(WHOLE_DISK_RE.test(ok), ok);
 });
@@ -66,7 +67,7 @@ test('diskstats: 2초 표본 → 속도(512B 섹터 · uptime 차) · 바쁨 = �
   assert.equal(r.io.busiestDev, 'nvme0n1');
   assert.equal(r.io.disks, 2);
   assert.equal(r.io.sampleMs, 2000);
-  assert.deepEqual(r.io.counters, { rdSectors: 2048 + 4096 + 4096 + 8192, wrSectors: 1024 + 2048 + 2048, ioMs: 900 + 2700, uptimeSec: 1002 });
+  assert.deepEqual(r.io.counters, { rdSectors: 2048 + 4096 + 4096 + 8192, wrSectors: 1024 + 2048 + 2048, ioMs: 900 + 2700, uptimeSec: 1002, rdIos: 4, wrIos: 4, rwTicks: 0 });
   // 역행: nvme 카운터가 줄면 그 장치만 뺀다(0 으로 세지 않는다)
   const back = parseIoSample(`${DS(1000, [1, 2048, 1, 1024, 500], [1, 4096, 1, 2048, 900], 1)}\n${IO_SEP}\n${DS(1002, [2, 4096, 2, 1024, 600], [0, 10, 0, 10, 10], 2)}`);
   const r2 = ioRate(back.before, back.after);
@@ -373,7 +374,8 @@ test('라우트: /tools/bm-storage/io/series — 격자 · 계열(bm:all · bm:<
   assert.equal((await call('sadm', 'GET', '/tools/bm-storage/io/series')).s, 403);
   const r = await call('full', 'GET', `/tools/bm-storage/io/series?range=1h&ids=bm:all,bm:${id},san:all,san:nope&rank=1`);
   assert.equal(r.s, 200, r.t.slice(0, 300));
-  assert.equal(r.j.range, '1h'); assert.equal(r.j.gran, 'raw'); assert.ok(r.j.buckets.length > 10);
+  // v2.962(결함 수정): 1시간 격자는 수집 주기(기본 10분) 이상 — 예전 1분 격자는 실데이터에서 선이 끊긴 점들만 남겼다(bmCompareSet2962 마지막 테스트).
+  assert.equal(r.j.range, '1h'); assert.equal(r.j.gran, 'raw'); assert.ok(r.j.bucketMs >= 600_000 && r.j.buckets.length >= 6, `격자 ${r.j.bucketMs} · 칸 ${r.j.buckets.length}`);
   const byId = Object.fromEntries(r.j.series.map((s) => [s.id, s]));
   assert.equal(byId[`bm:${id}`].avg.length, r.j.buckets.length);
   assert.deepEqual(byId[`bm:${id}`].basis, { avg: 'counter', peak: 'sample2s' });
