@@ -36,7 +36,8 @@ import {
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote, hostsUnreadNote,
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes, usageDetailNote,
-  unassignedNote, edgePullState, edgePullNote, edgeNoteRows, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote } from './bmUsageText.js';
+  unassignedNote, edgePullState, edgePullNote, edgeNoteRows, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote,
+  edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, remoteUnknownNote } from './bmUsageText.js';   // v2.961 엣지 수집 — 엣지별 · 수집 서버 모름 갈래
 import Select from '../../components/Select.jsx';
 // v2.920(리눅스 성능 2단계 화면): USE 매트릭스 보드 · 서버 성능 상세 — 문구·표시 규약은 bmPerfText.js, 판정은 서버 useJudge.js.
 import BmPerfBoard from './BmPerfBoard.jsx';
@@ -121,6 +122,14 @@ export function BmUsage() {
    */
   const [edges, setEdges] = useState(null);
   const [showEdges, setShowEdges] = useState(false);
+  // v2.961: '대상이 아닌 서버' 의 엣지 수집 묶음에서 엣지 보관분 표로 옮긴다(펼치고 그 카드로 화면 이동). 숫자가 바뀔 때마다 한 번.
+  const edgesRef = React.useRef(null);
+  const [edgeJump, setEdgeJump] = useState(0);
+  useEffect(() => {
+    if (!edgeJump) return;
+    const el = edgesRef.current;
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [edgeJump]);
   const [pulling, setPulling] = useState('');
   // v2.927 '중앙에서 켜기' — 확인 단계(표 아래 상자) · 저장 중인 엣지(잠금은 그 엣지만)
   const [edgeAsk, setEdgeAsk] = useState(null);   // { agent, on }
@@ -427,6 +436,15 @@ export function BmUsage() {
     const es = edgePullState(r, { minEdgeVersion: edges?.minEdgeVersion, staleMs: edges?.staleMs, canEnableCentral: ev.actions.includes('on'), offWhy: ev.offWhy });
     return { es, ev };
   };
+  /*
+   * v2.961: '엣지 수집' 서버를 엣지별로 — 응답의 제외 목록에서 센다(범위 계정은 서버가 범위 안 행만 준다). 상태는 엣지 보관분 표와 같은 판정(edgeRowView).
+   *   표에 그 엣지가 없으면 상태를 지어내지 않는다(edgeDelegatedChip 이 '엣지 보관분 표에 없음' 으로 말한다).
+   */
+  const edgeRows = Array.isArray(edges?.rows) ? edges.rows : [];
+  const rmUnknown = remoteUnknownNote(data?.skipped || []);
+  const edgeDel = edgeDelegatedByAgent(data?.skipped || [], {
+    stateOf: (agent) => { const r = edgeRows.find((x) => String(x?.agent || '').trim().toLowerCase() === String(agent).trim().toLowerCase()); return r ? edgeRowView(r).es : null; },
+  });
 
   return (
     <div className="stack" style={{ display: 'grid', gap: 12, minWidth: 0 }}>
@@ -745,12 +763,36 @@ export function BmUsage() {
           {showSkipped && skNotes.map((s, i) => (
             <p key={i} style={{ margin: '6px 0 0', fontSize: 12, lineHeight: 1.6 }}><BoldText text={s} /></p>
           ))}
+          {/* v2.961 반증 의심 2: 수집 서버 모름 — 갈래(등록부 못 읽음 · 등록부에 없음 · 이름이 빈 등록)별 대수 */}
+          {showSkipped && !!rmUnknown && (
+            <p style={{ margin: '6px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--muted)' }}><BoldText text={rmUnknown} /></p>
+          )}
+          {/* v2.961 엣지 수집 — 엣지별 대수 · 그 엣지의 보관분 상태 · 엣지 표로 이동 */}
+          {showSkipped && !!edgeDel.length && (
+            <div style={{ margin: '8px 0 0', minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>엣지 수집 — 엣지별</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4, minWidth: 0 }}>
+                {edgeDel.map((x) => (
+                  <span key={x.agent || '-'} className="badge" title={x.state?.why ? String(x.state.why).replace(/\*\*/g, '') : ''}
+                    style={{ fontSize: 12, padding: '2px 8px', borderRadius: 10, border: `1px solid ${toneVar(x.state?.tone || 'idle')}`, color: 'inherit', minWidth: 0, overflowWrap: 'anywhere' }}>
+                    {edgeDelegatedChip(x)}
+                  </span>
+                ))}
+              </div>
+              <p style={{ margin: '6px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--muted)' }}><BoldText text={edgeDelegatedGuide(edgeDel)} /></p>
+              {!!edgeRows.length && (
+                <button type="button" className="btn btn-sm bmp-touch" style={{ marginTop: 6 }} onClick={() => { setShowEdges(true); setEdgeJump((v) => v + 1); }}>
+                  엣지 보관분 표로 이동 ↓
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {/* ── 엣지 보관분(v2.554) — 상시 전송 없음. 누를 때만 가져온다 ─────────── */}
       {!!(edges?.rows || []).length && (
-        <div className="card" style={{ minWidth: 0 }}>
+        <div className="card" style={{ minWidth: 0 }} ref={edgesRef}>
           <button onClick={() => setShowEdges((v) => !v)} style={{ background: 'transparent', border: 0, padding: 0, color: 'inherit', cursor: 'pointer', fontSize: 13 }}>
             {showEdges ? '▾' : '▸'} 엣지 보관분 — {(edges.rows || []).filter((r) => r.snapAt).length}/{(edges.rows || []).length}곳
           </button>

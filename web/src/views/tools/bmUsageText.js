@@ -105,6 +105,7 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
     if (by['no-idrac-cred']) parts.push(`iDRAC 계정이 없는 서버 **${by['no-idrac-cred']}대**`);
     if (by['os-ambiguous']) parts.push(`OS 등록을 하나로 못 정한 서버 **${by['os-ambiguous']}대**`);   // 2차 재확인 G3
     if (by['os-foreign']) parts.push(`OS 등록이 다른 법인 것인 서버 **${by['os-foreign']}대**`);
+    if (by['remote-collector-unknown']) parts.push(`원격 수집 서버를 모르는 서버 **${by['remote-collector-unknown']}대**`);   // v2.961
     return {
       kind: 'no-target', waiting: false,
       text: parts.length
@@ -168,14 +169,89 @@ export function missingFootnotes(rows = []) {
   return out;
 }
 
+/** 대상이 아닌 서버 — 사유 code → 짧은 이름(모르는 code 는 그대로). */
+export const SKIP_LABEL = Object.freeze({
+  'edge-delegated': '엣지 수집', 'corp-off': '법인 미선택', unassigned: '법인 귀속 없음', 'no-idrac': 'iDRAC 등록 없음', 'no-idrac-cred': 'iDRAC 계정 없음',
+  'no-os-cred': 'OS 계정 없음', 'both-off': '두 경로 모두 꺼짐', 'key-conflict': '키 충돌', 'os-ambiguous': 'OS 등록 모호', 'os-foreign': 'OS 등록 다른 법인',
+  'remote-collector-unknown': '수집 서버 모름',   // v2.961 — 원격 수집 서버가 맡은 서버인데 그 수집 서버를 등록부에서 못 찾음(못 읽음 · 삭제)
+});
 /** 대상이 아닌 서버 — 사유마다 조치가 다르므로 **있는 사유만** 한 번씩 적는다. */
 export function skippedNotes(counts = {}, reasons = {}) {
   const out = [];
   for (const [kind, cnt] of Object.entries(counts)) {
     if (!cnt) continue;
-    out.push(`**${kind === 'edge-delegated' ? '엣지 수집' : kind === 'corp-off' ? '법인 미선택' : kind === 'unassigned' ? '법인 귀속 없음' : kind === 'no-idrac' ? 'iDRAC 등록 없음' : kind === 'no-idrac-cred' ? 'iDRAC 계정 없음' : kind === 'no-os-cred' ? 'OS 계정 없음' : kind === 'both-off' ? '두 경로 모두 꺼짐' : kind === 'key-conflict' ? '키 충돌' : kind === 'os-ambiguous' ? 'OS 등록 모호' : kind === 'os-foreign' ? 'OS 등록 다른 법인' : kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
+    out.push(`**${SKIP_LABEL[kind] || kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
   }
   return out;
+}
+
+/**
+ * v2.961 — '엣지 수집' 서버를 **엣지별로** 센다(순수). 사용자 보고: 엣지 iDRAC 스캔이 자동 등록한 서버가 중앙에서 'iDRAC 등록 없음' 으로 보였다 —
+ *   이제 서버가 그 서버를 '엣지 수집 — 그 엣지' 로 판정하므로, 화면은 어느 엣지가 몇 대를 맡는지와 그 엣지의 상태(엣지 보관분 표와 같은 판정)를 보여 준다.
+ *   센 것은 **응답에 실린 제외 목록**이다 — 범위 계정은 서버가 이미 범위 안 행만 준다(이 함수가 범위를 다시 판정하지 않는다).
+ *   이름이 빈 행은 '' 한 묶음(이름 모름). stateOf(agent) → 엣지 표의 상태({ state, label, tone }) 또는 null(표에 그 엣지가 없음).
+ * @returns {{ agent:string, count:number, state:object|null }[]}  대수 내림차순 · 같으면 이름순
+ */
+/** 재확인 R1 — 이름이 겹친 엣지 칸의 상태(엣지 표 줄을 이름으로 가릴 수 없다 — 지어내지 않는다). */
+export const EDGE_NAME_CLASH_STATE = Object.freeze({ state: 'name-clash', label: '이름이 다른 수집 서버와 겹침 — 엣지 표에서 직접 확인', tone: 'warn',
+  why: '이 엣지의 이름이 다른 수집 서버의 id · 이름과 같아, 엣지 표의 같은 이름 줄(그 줄의 가져오기 · 중앙에서 켜기 포함)이 다른 수집 서버로 갈 수 있습니다. 설정 › 엣지·원격 › 수집 서버(원격)에서 이름을 서로 다르게 바꾸세요.' });
+export function edgeDelegatedByAgent(skipped = [], { stateOf = null } = {}) {
+  const by = new Map();
+  for (const s of Array.isArray(skipped) ? skipped : []) {
+    if (!s || typeof s !== 'object' || s.reason !== 'edge-delegated') continue;
+    const a = t(s.agent);
+    const k = a.toLowerCase();
+    const cur = by.get(k);
+    if (cur) { cur.count += 1; if (s.agentClash) cur.clash = true; } else by.set(k, { agent: a, count: 1, clash: !!s.agentClash });
+  }
+  const out = [...by.values()].map((x) => {
+    // 재확인 R1: 서버가 '이 이름은 다른 수집 서버의 id · 이름과 겹친다(agentClash)' 고 하면 엣지 표의 같은 이름 줄이 다른 수집 서버일 수 있다 — 그 줄의 상태를 붙이지 않는다.
+    if (x.clash) return { ...x, state: { ...EDGE_NAME_CLASH_STATE } };
+    let state = null;
+    if (x.agent && typeof stateOf === 'function') { try { state = stateOf(x.agent) || null; } catch { state = null; } }
+    return { ...x, state };
+  });
+  return out.sort((a, b) => b.count - a.count || a.agent.localeCompare(b.agent));
+}
+
+/**
+ * 반증 의심 2(v2.961): '수집 서버 모름' 의 갈래(서버 collectorIssue)를 사실대로 — 등록부를 못 읽음 · 등록부에 없음(삭제) · 이름이 빈 등록.
+ *   응답 제외 목록에서 센다(범위 계정은 범위 안 행만). 해당 행이 없으면 ''. 모르는 갈래 값은 '사유 미상' 으로 센다(지어내지 않는다).
+ */
+export const COLLECTOR_ISSUE_TEXT = Object.freeze({ unread: '수집 서버 등록부를 읽지 못함', 'not-found': '등록부에 없는 수집 서버(삭제됨)', 'no-name': '이름이 빈 수집 서버 등록' });
+export function remoteUnknownNote(skipped = []) {
+  const by = new Map();
+  for (const s of Array.isArray(skipped) ? skipped : []) {
+    if (!s || typeof s !== 'object' || s.reason !== 'remote-collector-unknown') continue;
+    const k = COLLECTOR_ISSUE_TEXT[t(s.collectorIssue)] ? t(s.collectorIssue) : '';
+    by.set(k, (by.get(k) || 0) + 1);
+  }
+  if (!by.size) return '';
+  const parts = [...by].map(([k, cnt]) => `${k ? COLLECTOR_ISSUE_TEXT[k] : '사유 미상'} **${cnt}대**`);
+  const fix = by.has('no-name') ? ' — 이름이 빈 등록은 설정 › 엣지·원격 › 수집 서버(원격)에서 이름을 채우면 다음 조회부터 그 엣지로 보입니다.' : '';
+  return `수집 서버 모름 — ${parts.join(' · ')}${fix}`;
+}
+
+/** v2.961 — 엣지별 한 칸의 문구(엣지 이름 · 대수 · 상태). 이름이 비면 '이름 모름'. 상태를 모르면 그 사실을 말한다(지어내지 않는다). */
+export function edgeDelegatedChip(x = {}) {
+  const name = t(x.agent) ? `‘${t(x.agent)}’` : '이름 모름';
+  const st = x.state && t(x.state.label) ? t(x.state.label) : (t(x.agent) ? '엣지 보관분 표에 없음' : '');
+  return `${name} ${Number(x.count) || 0}대${st ? ` · ${st}` : ''}`;
+}
+
+/** v2.961 — 엣지별 묶음 아래 안내 한 줄(조치). 표에 없는 엣지가 있으면 그 이유 후보를 함께 말한다. */
+export function edgeDelegatedGuide(list = []) {
+  if (!Array.isArray(list) || !list.length) return '';
+  const clash = list.some((x) => x.clash);
+  const missing = list.some((x) => !t(x.agent) || !x.state);
+  const off = list.some((x) => x.state && x.state.state === 'off-edge');
+  return [
+    '이 서버들은 **그 엣지가 수집**합니다(계정이 엣지에만 있어 중앙은 접속하지 않습니다). 아래 ‘엣지 보관분’ 표에서 그 엣지의 상태를 확인하세요 — ',
+    off ? '**엣지에서 꺼짐**' : '‘엣지에서 꺼짐’',
+    ' 이면 그 줄의 ‘중앙에서 켜기’ 로 켭니다(버튼은 전체 범위 관리자에게만 보입니다).',
+    missing ? ' 표에 없는 엣지는 수집 서버 등록부에 그 이름이 없거나(엣지가 보고한 이름), 이 계정에 보이는 대상이 없는 엣지이거나, 엣지 표를 아직 불러오지 못한 경우입니다.' : '',
+    clash ? ' **이름이 겹친 엣지**는 엣지 표의 같은 이름 줄이 다른 수집 서버일 수 있어 상태를 붙이지 않았습니다 — 수집 서버 이름을 서로 다르게 바꾸세요.' : '',
+  ].join('');
 }
 
 /**

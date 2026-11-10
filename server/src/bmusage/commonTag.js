@@ -61,7 +61,7 @@ export function commonTagJudge({ rows = [], overlapTags = [], complete = true } 
 
 /**
  * 지금 상태로 판정기를 만든다(순수 — 호출부가 currentTargets 결과와 엣지 보관분을 넘긴다).
- *   complete: 엣지 노드이거나, 중앙이 맡긴 엣지가 하나도 없을 때(대상이 아닌 서버의 edge-delegated 없음 · 보관분 없음)만 참.
+ *   complete: 엣지 노드이거나, 중앙이 맡긴 엣지가 하나도 없을 때(대상이 아닌 서버의 edge-delegated · remote-collector-unknown 없음 · 보관분 없음)만 참.
  */
 export function tagJudgeOf(tg = {}, edges = []) {
   const recs = (Array.isArray(edges) ? edges : []).filter((r) => r && r.snap && Array.isArray(r.snap.targets));
@@ -70,6 +70,7 @@ export function tagJudgeOf(tg = {}, edges = []) {
   const rows = [];
   pushAll(rows, Array.isArray(tg?.targets) ? tg.targets : []); pushAll(rows, skipped); pushAll(rows, overlaps);
   for (const r of recs) pushAll(rows, r.snap.targets);   // 봉투 상한 2,000 — 펼침 push 는 인자 상한에 걸린다(audit2603a 스윕)
-  const delegates = skipped.some((s) => s && s.reason === 'edge-delegated') || recs.length > 0 || (Array.isArray(edges) && edges.length > 0);
+  // v2.961: 수집 서버를 모르는 원격 출처 서버(remote-collector-unknown)도 '다른 노드가 맡을 수 있는 서버' 다 — 다 안다고 하지 않는다(보수 쪽).
+  const delegates = skipped.some((s) => s && (s.reason === 'edge-delegated' || s.reason === 'remote-collector-unknown')) || recs.length > 0 || (Array.isArray(edges) && edges.length > 0);
   return commonTagJudge({ rows, overlapTags: overlaps.map((o) => o?.serviceTag), complete: !!tg?.isEdge || !delegates });
 }
