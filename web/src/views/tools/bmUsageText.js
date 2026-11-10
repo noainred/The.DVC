@@ -105,6 +105,7 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
     if (by['no-idrac-cred']) parts.push(`iDRAC 계정이 없는 서버 **${by['no-idrac-cred']}대**`);
     if (by['os-ambiguous']) parts.push(`OS 등록을 하나로 못 정한 서버 **${by['os-ambiguous']}대**`);   // 2차 재확인 G3
     if (by['os-foreign']) parts.push(`OS 등록이 다른 법인 것인 서버 **${by['os-foreign']}대**`);
+    if (by['remote-collector-unknown']) parts.push(`원격 수집 서버를 모르는 서버 **${by['remote-collector-unknown']}대**`);   // v2.959
     return {
       kind: 'no-target', waiting: false,
       text: parts.length
@@ -168,14 +169,64 @@ export function missingFootnotes(rows = []) {
   return out;
 }
 
+/** 대상이 아닌 서버 — 사유 code → 짧은 이름(모르는 code 는 그대로). */
+export const SKIP_LABEL = Object.freeze({
+  'edge-delegated': '엣지 수집', 'corp-off': '법인 미선택', unassigned: '법인 귀속 없음', 'no-idrac': 'iDRAC 등록 없음', 'no-idrac-cred': 'iDRAC 계정 없음',
+  'no-os-cred': 'OS 계정 없음', 'both-off': '두 경로 모두 꺼짐', 'key-conflict': '키 충돌', 'os-ambiguous': 'OS 등록 모호', 'os-foreign': 'OS 등록 다른 법인',
+  'remote-collector-unknown': '수집 서버 모름',   // v2.959 — 원격 수집 서버가 맡은 서버인데 그 수집 서버를 등록부에서 못 찾음(못 읽음 · 삭제)
+});
 /** 대상이 아닌 서버 — 사유마다 조치가 다르므로 **있는 사유만** 한 번씩 적는다. */
 export function skippedNotes(counts = {}, reasons = {}) {
   const out = [];
   for (const [kind, cnt] of Object.entries(counts)) {
     if (!cnt) continue;
-    out.push(`**${kind === 'edge-delegated' ? '엣지 수집' : kind === 'corp-off' ? '법인 미선택' : kind === 'unassigned' ? '법인 귀속 없음' : kind === 'no-idrac' ? 'iDRAC 등록 없음' : kind === 'no-idrac-cred' ? 'iDRAC 계정 없음' : kind === 'no-os-cred' ? 'OS 계정 없음' : kind === 'both-off' ? '두 경로 모두 꺼짐' : kind === 'key-conflict' ? '키 충돌' : kind === 'os-ambiguous' ? 'OS 등록 모호' : kind === 'os-foreign' ? 'OS 등록 다른 법인' : kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
+    out.push(`**${SKIP_LABEL[kind] || kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
   }
   return out;
+}
+
+/**
+ * v2.959 — '엣지 수집' 서버를 **엣지별로** 센다(순수). 사용자 보고: 엣지 iDRAC 스캔이 자동 등록한 서버가 중앙에서 'iDRAC 등록 없음' 으로 보였다 —
+ *   이제 서버가 그 서버를 '엣지 수집 — 그 엣지' 로 판정하므로, 화면은 어느 엣지가 몇 대를 맡는지와 그 엣지의 상태(엣지 보관분 표와 같은 판정)를 보여 준다.
+ *   센 것은 **응답에 실린 제외 목록**이다 — 범위 계정은 서버가 이미 범위 안 행만 준다(이 함수가 범위를 다시 판정하지 않는다).
+ *   이름이 빈 행은 '' 한 묶음(이름 모름). stateOf(agent) → 엣지 표의 상태({ state, label, tone }) 또는 null(표에 그 엣지가 없음).
+ * @returns {{ agent:string, count:number, state:object|null }[]}  대수 내림차순 · 같으면 이름순
+ */
+export function edgeDelegatedByAgent(skipped = [], { stateOf = null } = {}) {
+  const by = new Map();
+  for (const s of Array.isArray(skipped) ? skipped : []) {
+    if (!s || typeof s !== 'object' || s.reason !== 'edge-delegated') continue;
+    const a = t(s.agent);
+    const k = a.toLowerCase();
+    const cur = by.get(k);
+    if (cur) cur.count += 1; else by.set(k, { agent: a, count: 1 });
+  }
+  const out = [...by.values()].map((x) => {
+    let state = null;
+    if (x.agent && typeof stateOf === 'function') { try { state = stateOf(x.agent) || null; } catch { state = null; } }
+    return { ...x, state };
+  });
+  return out.sort((a, b) => b.count - a.count || a.agent.localeCompare(b.agent));
+}
+
+/** v2.959 — 엣지별 한 칸의 문구(엣지 이름 · 대수 · 상태). 이름이 비면 '이름 모름'. 상태를 모르면 그 사실을 말한다(지어내지 않는다). */
+export function edgeDelegatedChip(x = {}) {
+  const name = t(x.agent) ? `‘${t(x.agent)}’` : '이름 모름';
+  const st = x.state && t(x.state.label) ? t(x.state.label) : (t(x.agent) ? '엣지 보관분 표에 없음' : '');
+  return `${name} ${Number(x.count) || 0}대${st ? ` · ${st}` : ''}`;
+}
+
+/** v2.959 — 엣지별 묶음 아래 안내 한 줄(조치). 표에 없는 엣지가 있으면 그 이유 후보를 함께 말한다. */
+export function edgeDelegatedGuide(list = []) {
+  if (!Array.isArray(list) || !list.length) return '';
+  const missing = list.some((x) => !t(x.agent) || !x.state);
+  const off = list.some((x) => x.state && x.state.state === 'off-edge');
+  return [
+    '이 서버들은 **그 엣지가 수집**합니다(계정이 엣지에만 있어 중앙은 접속하지 않습니다). 아래 ‘엣지 보관분’ 표에서 그 엣지의 상태를 확인하세요 — ',
+    off ? '**엣지에서 꺼짐**' : '‘엣지에서 꺼짐’',
+    ' 이면 그 줄의 ‘중앙에서 켜기’ 로 켭니다(버튼은 전체 범위 관리자에게만 보입니다).',
+    missing ? ' 표에 없는 엣지는 수집 서버 등록부에 그 이름이 없거나(엣지가 보고한 이름), 이 계정에 보이는 대상이 없는 엣지이거나, 엣지 표를 아직 불러오지 못한 경우입니다.' : '',
+  ].join('');
 }
 
 /**

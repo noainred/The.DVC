@@ -54,7 +54,25 @@ export const NO_PATH_REASON = Object.freeze({
   'os-ambiguous': 'OS 계정 등록을 하나로 정할 수 없습니다 — 같은 이름 · 주소의 등록이 여럿(주소가 다름)이거나, 법인을 지정하지 않은 등록입니다(‘수집에 추가’ 한 서버는 법인이 맞는 등록만 씁니다). 설정 › 베어메탈 스토리지에서 그 등록에 법인을 지정하세요.',
   'os-foreign': 'OS 계정 등록이 다른 법인으로 지정돼 있어 쓰지 않습니다(다른 법인 서버의 주소 · 계정으로 접속하지 않게). 설정 › 베어메탈 스토리지에서 법인을 확인하세요.',
   'key-conflict': '식별 키가 이 노드의 다른 서버와 겹칩니다 — 두 서버의 값이 한 행에 섞이지 않게 수집하지 않습니다(설정 › iDRAC 등록에서 서비스태그를 채우면 키가 갈려 다음 주기부터 수집합니다).',
+  // v2.959: 원격 수집 서버(엣지)가 보낸 전력으로만 보이는데 이 노드에 iDRAC · OS 등록이 없고, 그 수집 서버를 등록부에서 찾지 못했다(못 읽음 · 삭제됨).
+  //   어느 엣지가 수집하는지 모르므로 ‘엣지 수집’ 으로도 ‘iDRAC 등록 없음’ 으로도 말하지 않는다(못 읽음 ≠ 없음).
+  'remote-collector-unknown': '원격 수집 서버(엣지)가 보낸 전력으로만 보이는 서버인데, 그 수집 서버를 등록부에서 찾지 못했습니다(수집 서버 등록부를 읽지 못했거나 삭제된 수집 서버) — 어느 엣지가 수집하는지 몰라 중앙에서 접속하지 않습니다. 설정 › 엣지·원격 › 수집 서버(원격)를 확인하세요.',
 });
+
+/**
+ * v2.959 — 원격 수집 서버 id → 이름 색인(순수). `remoteCollectors` = `{ readable, names: Map<id, name> }`(insights/fleetInventory.js getFleetInventory 가
+ *   유령 키 판정과 같은 한 번의 등록부 읽기로 만든다 — 대상 해석이 등록부를 다시 읽지 않는다). 이름은 **등록부의 name**(엣지 보관분 표 `/tools/bm-usage/edges` 의
+ *   agent 와 같은 값)이고 엣지가 보낸 문자열이 아니다. 못 읽었거나(readable 거짓 · 색인 없음) 없는 id · 이름 없는 항목은 ''(추측하지 않는다).
+ * @returns {{ name:string, issue:''|'unread'|'not-found' }}
+ */
+export function remoteCollectorNameOf(remoteCollectors, collectorId) {
+  const id = t(collectorId);
+  if (!remoteCollectors || typeof remoteCollectors !== 'object' || remoteCollectors.readable !== true || !(remoteCollectors.names instanceof Map)) return { name: '', issue: 'unread' };
+  if (!id) return { name: '', issue: 'not-found' };
+  const m = remoteCollectors.names;
+  const name = t(m.has(id) ? m.get(id) : m.get(id.toLowerCase()));
+  return name ? { name, issue: '' } : { name: '', issue: 'not-found' };
+}
 
 /**
  * OS 계정 색인 — `bmstor` 등록부를 host·name 으로 찾을 수 있게 만든다(순수).
@@ -119,9 +137,10 @@ export function pickOsEntry(os, { regHost = '', name = '', vc = '', strict = fal
  * @param {function} [p.inventoryOf] `(registryId) => inv` — **캐시된** iDRAC 인벤토리(장비 왕복 0).
  *   v2.554: 이것으로 라이선스 등급(Datacenter/Enterprise)을 판정해 화면이 '텔레메트리가 왜 비었나'
  *   를 추측이 아니라 **근거로** 말한다(`bmusage/license.js` 머리말).
+ * @param {object|null} [p.remoteCollectors] v2.959 — `{ readable, names: Map<collectorId, 이름> }`(remoteCollectorNameOf). 없으면 '못 읽음'.
  * @returns {{targets:Array, skipped:Array, counts:object}}
  */
-export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], registry = [], bmServers = [], settings = {}, agentName = '', isEdge = false, inventoryOf = null, now = Date.now(), dupes = [], decisions = null } = {}) {
+export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], registry = [], bmServers = [], settings = {}, agentName = '', isEdge = false, inventoryOf = null, now = Date.now(), dupes = [], decisions = null, remoteCollectors = null } = {}) {
   const regById = new Map(registry.map((r) => [t(r.id), r]));
   const regByTag = new Map(registry.filter((r) => t(r.serviceTag)).map((r) => [norm(r.serviceTag), r]));
   const os = indexOsHosts(bmServers);
@@ -173,16 +192,33 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     //   엣지의 분류에는 남의 엣지 서버가 들어오지 않으므로(fleetInventory 는 중앙에서만 엣지 보고를 합친다) 넓혀도 안전하다.
     const mine = isEdge ? (!owner || owner === me) : !owner;
     if (!mine) { skipped.push({ ...idOf(b), reason: 'edge-delegated', agent: b.remoteAgent || '' }); continue; }
-    if (!vc) {
-      if (!settings.includeUnassigned) { skipped.push({ ...idOf(b), reason: 'unassigned' }); continue; }
-    } else if (!corps[vc]) {
-      skipped.push({ ...idOf(b), reason: 'corp-off', vcenterId: vc }); continue;
-    }
 
     // 다음 점검 ①(2차): 별도 키로 수집하는 서버(keyOverride)는 서비스태그로 등록을 찾지 않는다 — 공통 태그면 다른 서버의 iDRAC 을 집는다.
     const reg = regById.get(t(b.serverId)) || (t(b.serviceTag) && !b.keyOverride ? regByTag.get(norm(b.serviceTag)) : null) || null;
     // 2차 재확인 G3: OS 등록은 법인으로 가른다(pickOsEntry) — 별도 키 서버(keyOverride)는 법인이 맞는 등록만(strict).
     const osPick = pickOsEntry(os, { regHost: reg?.host, name: b.name, vc, strict: !!b.keyOverride });
+    /*
+     * v2.959 — **원격 수집 서버(엣지)가 iDRAC 을 맡은 서버는 그 엣지가 수집한다**(사용자 보고: 엣지 iDRAC 스캔이 자동 등록한 서버가 중앙에서
+     *   ‘iDRAC 등록 없음’ 1,157대로 보였다). 그 서버의 bareMetal 행은 원격 전력(collector/state.js — 수집 서버 pull) 출처라 `remoteAgent` 가 없고
+     *   (엣지 이름은 fleet 보고에만 실리는데 같은 서버의 fleet 보고는 fleetInventory 가 겹침으로 버린다), 중앙은 자기 iDRAC 등록부에서 찾다가 없으니 no-idrac 이었다.
+     *   계정은 그 엣지에만 있고 중앙은 그 사설망에 닿지 못한다(법인 로컬 원칙) — 계정을 가져오지 않고 ‘엣지 수집 — 그 엣지’ 로 말한다.
+     *   조건(전부): 중앙(엣지 아님) · 출처 remote · collectorId 있음 · **이 노드에 이 서버의 등록이 하나도 없음**(iDRAC 등록 · OS 계정 · 법인이 맞지 않는 OS 등록까지 —
+     *   등록이 있으면 이 노드 설정의 문제이므로 예전 사유 그대로). 그래서 예전에 이 노드가 수집하던 대상은 하나도 빠지지 않는다(대상에는 등록이 필요하다 —
+     *   불변식 시험 bmRemoteDelegate2959). 사유 순서: 법인 꺼짐 · 귀속 없음보다 먼저 — 중앙 설정(법인 켜기 · 귀속 포함)을 바꿔도 중앙은 수집할 수 없고
+     *   수집 여부는 그 엣지 설정이 정한다(엣지 보관분 표의 ‘엣지에서 꺼짐’ → ‘중앙에서 켜기’). 법인 축(vcenterId)은 싣는다 — 범위 계정은 범위 안 행만 본다.
+     *   수집 서버를 등록부에서 못 찾거나 등록부를 못 읽으면 이름을 추측하지 않고 remote-collector-unknown(엣지 수집에도 no-idrac 에도 넣지 않는다).
+     */
+    if (!isEdge && t(b.source) === 'remote' && t(b.collectorId) && !reg && !osPick.entry && !osPick.reason) {
+      const who = remoteCollectorNameOf(remoteCollectors, b.collectorId);
+      if (who.name) skipped.push({ ...idOf(b), reason: 'edge-delegated', agent: who.name, vcenterId: vc, delegatedBy: 'collector' });
+      else skipped.push({ ...idOf(b), reason: 'remote-collector-unknown', vcenterId: vc, collectorIssue: who.issue });
+      continue;
+    }
+    if (!vc) {
+      if (!settings.includeUnassigned) { skipped.push({ ...idOf(b), reason: 'unassigned' }); continue; }
+    } else if (!corps[vc]) {
+      skipped.push({ ...idOf(b), reason: 'corp-off', vcenterId: vc }); continue;
+    }
     const osEntry = osPick.entry;
     const osReason = osPick.reason || 'no-os-cred';
 

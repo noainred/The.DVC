@@ -70,6 +70,7 @@ export function tagJudgeOf(tg = {}, edges = []) {
   const rows = [];
   pushAll(rows, Array.isArray(tg?.targets) ? tg.targets : []); pushAll(rows, skipped); pushAll(rows, overlaps);
   for (const r of recs) pushAll(rows, r.snap.targets);   // 봉투 상한 2,000 — 펼침 push 는 인자 상한에 걸린다(audit2603a 스윕)
-  const delegates = skipped.some((s) => s && s.reason === 'edge-delegated') || recs.length > 0 || (Array.isArray(edges) && edges.length > 0);
+  // v2.959: 수집 서버를 모르는 원격 출처 서버(remote-collector-unknown)도 '다른 노드가 맡을 수 있는 서버' 다 — 다 안다고 하지 않는다(보수 쪽).
+  const delegates = skipped.some((s) => s && (s.reason === 'edge-delegated' || s.reason === 'remote-collector-unknown')) || recs.length > 0 || (Array.isArray(edges) && edges.length > 0);
   return commonTagJudge({ rows, overlapTags: overlaps.map((o) => o?.serviceTag), complete: !!tg?.isEdge || !delegates });
 }

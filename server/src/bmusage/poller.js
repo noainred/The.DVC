@@ -395,6 +395,9 @@ export async function currentTargets() {
     // ⚠ **캐시된** 인벤토리만 읽는다(장비 왕복 0) — 라이선스 등급 판정용(v2.554).
     inventoryOf: (id) => getInventory(id),
     dupes, decisions: dec.map,   // 다음 점검 ①(2차) — 못 읽으면 readKeyDecisions 가 빈 맵(결정 미적용 · 사유는 위 sourceErrors)
+    // v2.959: 원격 수집 서버 id → 등록부 이름(getFleetInventory 가 유령 키 판정과 같은 한 번의 읽기로 만든 열거 안 되는 속성 — 여기서 등록부를 다시 읽지 않는다).
+    //   없으면(분류 실패 · 시험 이음매) null = '못 읽음' — 원격 출처 서버는 이름을 추측하지 않고 remote-collector-unknown.
+    remoteCollectors: fleet.remoteCollectors || null,
   };
   let resolved = resolveTargets({ ...resolveInput, settings: s });
   if (demoMod) {
