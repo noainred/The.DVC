@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  PLATFORM_TABS, PLATFORM_TAB_KEYS, isPlatformTab, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
+  PLATFORM_TABS, PLATFORM_TAB_KEYS, isPlatformTab, scopeLabel, bareosSumOf, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
   loadLastTab, saveLastTab, loadChipsCollapsed, saveChipsCollapsed, loadVcView, saveVcView, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
 } from './platformText.js';
 import { HUB_TOOL_KEYS } from '../vms/vmHubText.js';
@@ -102,5 +102,25 @@ describe('브라우저 기억 — try/catch · 모르는 값은 기본', () => {
     expect(loadLastTab(broken)).toBe(null); expect(() => saveLastTab(broken, 'vms')).not.toThrow();
     expect(loadChipsCollapsed(broken)).toBe(false); expect(loadVcView(broken)).toBe('cards');
     expect(loadLastTab(null)).toBe(null);
+  });
+});
+
+// v2.958(사용자 요청 2026-11-10) — vCenter 탭 KPI 줄은 허브 범위(리전 · vCenter) 안의 법인만 합한다.
+describe('KPI 범위 문구 · Bareos 범위 합(v2.958)', () => {
+  const sites = [{ id: 'vc-a', name: 'OC2Sandbox', location: { region: '아시아' } }, { id: 'vc-b', name: 'AZ', location: { region: '아시아' } }];
+  it('scopeLabel — 전체 / vCenter 이름(없으면 id) / 리전 · N법인', () => {
+    expect(scopeLabel({}, sites)).toBe('전체');
+    expect(scopeLabel({ vcenterId: 'vc-a' }, sites)).toBe('OC2Sandbox');
+    expect(scopeLabel({ vcenterId: 'vc-x' }, sites)).toBe('vc-x');
+    expect(scopeLabel({ region: '아시아' }, sites)).toBe('리전 아시아 · 2법인');
+    expect(scopeLabel(null, null)).toBe('전체');
+  });
+  it('bareosSumOf — 범위 안 법인의 counts.jobs 합 · 못 읽은 법인은 0 이 아니라 unknown · 전부 못 읽으면 null', () => {
+    const rows = [{ id: 'vc-a', counts: { jobs: 11 } }, { id: 'vc-b', counts: { jobs: '7' } }, { id: 'vc-c', counts: {} }, null];
+    expect(bareosSumOf(rows, ['vc-a', 'vc-b'])).toEqual({ jobs: 18, known: 2, unknown: 0, partial: false });
+    expect(bareosSumOf(rows, ['vc-a', 'vc-c'])).toEqual({ jobs: 11, known: 1, unknown: 1, partial: true });
+    expect(bareosSumOf(rows, ['vc-c', 'vc-zzz'])).toEqual({ jobs: null, known: 0, unknown: 2, partial: false });
+    expect(bareosSumOf(null, ['vc-a'])).toEqual({ jobs: null, known: 0, unknown: 1, partial: false });
+    expect(bareosSumOf(rows, [])).toEqual({ jobs: null, known: 0, unknown: 0, partial: false });
   });
 });

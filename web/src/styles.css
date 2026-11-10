@@ -898,6 +898,12 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* vCenter detail (vSphere-like inventory) */
 .vcd-views { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; margin-bottom: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--border); min-width: 0; }
+/* v2.958(사용자 요청 2026-11-10): vCenter 상세 탭 중 '호스트 및 클러스터' · 'VM' 을 눈에 띄게 — 열려 있지 않을 때만(vcdTabs.tabClass).
+   은은한 빛 번짐(2초 펄스) + 오른쪽 위 점. 모션 줄임(prefers-reduced-motion)이면 정지 강조(테두리 + 점)만. */
+.vcd-views .vcd-tab-hot { position: relative; color: var(--text); border-color: rgba(96, 165, 250, .55); animation: vcd-tab-hot 2s ease-in-out infinite; }
+.vcd-views .vcd-tab-hot::after { content: ''; position: absolute; top: 3px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: #60a5fa; }
+@keyframes vcd-tab-hot { 0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); } 50% { box-shadow: 0 0 0 3px rgba(96, 165, 250, .25), 0 0 14px rgba(96, 165, 250, .45); } }
+@media (prefers-reduced-motion: reduce) { .vcd-views .vcd-tab-hot { animation: none; box-shadow: 0 0 0 1px rgba(96, 165, 250, .5); } }
 /* v2.895 vCenter 탭 12개(시안 docs/design/vcenter-tabs) — 탭 줄은 한 줄 + 그 줄만 가로 스크롤(페이지는 밀지 않는다). 카드 · 하위 칸 · 키-값. */
 .vcd-card-h { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border-soft); min-width: 0; flex-wrap: wrap; }
 .vcd-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 14px; padding: 12px 14px; font-size: 12.5px; align-items: baseline; }

@@ -882,3 +882,7 @@
   - 임의 구간 입력은 `datetime-local` 둘 + '구간 보기'(검증: 둘 다 · 시작<끝 · ≤366일 — 서버 상한과 같다) · 구간 중 ◀ ▶ 비활성 · 기간 세그를 누르면 구간 해제. 400px 은 `.sst-custom` 줄바꿈.
   - 검색어 · WWN 은 해시에 싣지 않고 `handoffMany` 로 넘긴다(받는 쪽 `useSearchHandoff('san-storage' | 'san-flow:targets')`). 팔레트 추가 행은 `lockOf('san-storage')` 가 잠긴 계정에는 보이지 않는다.
   - 'PDF 로 저장' 은 `reportExport.saveDocAsPdf` 동적 import — 평소 번들에 jsPDF 가 실리지 않는다 · 문서 모델은 `reportPdfDoc`(순수 · 시험) · 표시 글자는 `PDF_MARK`(KS X 1001 안).
+- **v2.958 — 가상화 플랫폼 허브: 법인 클릭 → vCenter ‘요약’ 탭 · 상세 탭 ‘호스트 및 클러스터’ · ‘VM’ 강조 · KPI 줄은 허브 범위만 합산**(사용자 요청 2026-11-10):
+  ① 허브의 vCenter 카드 · 표 이름을 누르면 상세가 **‘요약’ 부터** 열린다(`vcd/vcdTabs.js HUB_ENTRY_TAB · entryTab` — 기억값으로도 남겨 새로고침이 같은 탭). 주소로 바로 · 뒤로 가기 · ‹ 이전 · 다음 › vCenter 는 마지막 본 탭 그대로(`VCenters.setOpenId(id, tab)` 의 tab 이 null). 바로가기 칩은 범위 전환 그대로.
+  ② 상세 탭 줄의 ‘호스트 및 클러스터’ · ‘VM’ 은 열려 있지 않을 때 `.vcd-tab-hot`(`tabClass`) — 2초 펄스 + 점. **모션 줄임이면 정지 강조만**(styles.css `@media (prefers-reduced-motion: reduce)`). 점멸(깜빡임)은 쓰지 않았다(피로 — 사용자가 원하면 keyframes 만 바꾼다).
+  ③ vCenter 탭 KPI 줄(VM 백업 · VM 증가 · 스토리지 증가)은 **허브 범위(리전 · vCenter) 안의 법인만** 합한다 — `countableTotals(inScope)` · `backupTotals(byVc, 범위 id)` · Bareos 는 범위면 `platformText.bareosSumOf`(법인 줄 합 · 못 읽은 법인은 따로) · 추이는 `/tools/vm-track?vcenterId=|region=`(서버 `vmtrack/scopeIds.js` — 사용자 범위와 교집합). 검색어는 범위가 아니라 KPI 에 걸지 않는다. 문구 머리는 `scopeLabel`(전체 / 이름 / ‘리전 X · N법인’).

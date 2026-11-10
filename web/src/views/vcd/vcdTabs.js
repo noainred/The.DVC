@@ -43,6 +43,24 @@ export function saveTab(storage, k) {
   try { storage?.setItem?.(TAB_STORE_KEY, normTab(k)); } catch { /* 기억 못 해도 화면은 동작한다 */ }
 }
 
+/**
+ * v2.958(사용자 요청 2026-11-10): 가상화 플랫폼 허브에서 법인(vCenter 카드 · 표의 이름)을 눌러 들어오면 **'요약' 부터** 연다.
+ * 그 밖의 진입(주소로 바로 · 새로고침 · ‹ 이전 · 다음 › vCenter)은 지금처럼 마지막으로 본 탭. 허브 진입은 그 탭을 기억값으로도 남겨
+ * 새로고침해도 같은 탭이 보이게 한다(진입 뒤 다른 탭을 누르면 그때부터 그 탭이 기억된다).
+ */
+export const HUB_ENTRY_TAB = 'summary';
+export function entryTab(initial, storage) {
+  if (typeof initial === 'string' && TAB_KEYS.has(initial)) { saveTab(storage, initial); return initial; }
+  return loadTab(storage);
+}
+
+/** v2.958(사용자 요청 2026-11-10): 눈에 띄게 할 탭 — 열려 있지 않을 때만 펄스 강조(`.vcd-tab-hot` · 모션 줄임이면 정지 강조). */
+export const HOT_TABS = Object.freeze(['hosts', 'vms']);
+export function tabClass(k, active) {
+  if (active) return 'login-btn';
+  return HOT_TABS.includes(k) ? 'tab vcd-tab-hot' : 'tab';
+}
+
 /** 모니터 하위 칸 — vSphere 순서(문제 및 알람 · 이벤트 · 작업 · 성능). 성능 = 예전 '추이' 탭 그대로. */
 export const MONITOR_SUBS = Object.freeze([
   { k: 'alarms', label: '문제 및 알람' },
