@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>수집 이상 일람 — 메일 설정</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.h3{margin:0;font-size:14px;font-weight:800}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.in{min-height:34px;box-sizing:border-box;background:#0f1626;color:#e6edf6;border:1px solid #243049;border-radius:8px;padding:0 10px;font:inherit;font-size:12px}
+.fld{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:700;min-width:0}
+.hint{font-size:11px;font-weight:400;color:#8b9bb4;line-height:1.6}
+.ck{display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:1.5}
+.ck input{width:16px;height:16px;margin:1px 0 0;accent-color:#3b82f6;flex-shrink:0}
+.kinds{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 12px}
+table{width:100%;border-collapse:collapse;min-width:520px}
+th{text-align:left;font-size:11px;font-weight:700;color:#8b9bb4;padding:8px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;font-size:12px;vertical-align:middle}
+</style>
+</helmet>
+<div style="min-height: 1420px; box-sizing: border-box; padding: 24px 28px; display: flex; flex-direction: column; gap: 16px; max-width: 1440px; margin: 0 auto">
+
+  <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between">
+    <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+      <div class="muted" style="font-size: 12px">설정 › 메일 발송 › 수집 이상 일람</div>
+      <h1 style="margin: 0; font-size: 22px; font-weight: 800">수집 이상 일람 메일</h1>
+      <div class="muted" style="font-size: 12px">수집이 멈추거나 비밀번호가 맞지 않게 된 대상을 한 통의 목록으로 보냅니다. SMTP · 보내는 주소 · 시간당 상한은 메일 발송 공통 설정을 그대로 씁니다.</div>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px">
+      <a class="btn" href="Screen.dc.html">수집 이상 현황 보기</a>
+      <button class="btn" type="button">지금 상태로 미리 보기</button>
+      <button class="btn" type="button">나에게 시험 발송</button>
+      <button class="btn pri" type="button">저장</button>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+
+    <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+
+      <div class="card">
+        <h2 class="h3">① 언제 보내나</h2>
+        <label class="ck"><input type="checkbox" checked><span><b>수집 이상 일람 메일 켜기</b><br><span class="hint">끄면 판정 · 현황 화면은 그대로 두고 메일만 보내지 않습니다.</span></span></label>
+        <label class="ck"><input type="checkbox" checked><span><b>새로 생기면 알림</b> — 새 인증 정지 · 새 수집 멈춤이 생기면, 그때의 전체 목록을 한 통으로<br><span class="hint">같은 확인 주기에 생긴 것은 한 통으로 묶습니다. 같은 대상은 상태가 바뀔 때만 다시 알립니다(계속 멈춰 있다고 반복해 보내지 않음).</span></span></label>
+        <label class="ck"><input type="checkbox" checked><span><b>회복되면 알림</b> — 다음 메일의 ‘회복’ 절에 실어 보냅니다<br><span class="hint">회복만 있을 때는 따로 한 통을 보내지 않고 다음 일람에 싣습니다.</span></span></label>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+          <label class="ck" style="flex: 1 1 280px"><input type="checkbox" checked><span><b>매일 일람</b> — 남아 있는 것을 하루 한 번<br><span class="hint">남은 것이 0건이면 보내지 않습니다.</span></span></label>
+          <label class="fld">보내는 시각(포탈 시각)<input class="in mono" type="text" value="08:30" style="width: 110px"></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="h3">② 무엇을 ‘이상’ 으로 보나</h2>
+        <label class="ck"><input type="checkbox" checked><span><b>인증 정지</b> — 장비가 인증 실패(401 · 403 · SSH 인증 실패)를 돌려줘 포탈이 주기 수집을 멈춘 대상<br><span class="hint">기준을 따로 정하지 않습니다 — 포탈이 수집을 멈춘 그 사실을 그대로 씁니다. 비밀번호가 바뀌었는지는 포탈이 직접 알 수 없고, 장비가 로그인을 거부했다는 것만 압니다.</span></span></label>
+        <label class="ck"><input type="checkbox" checked><span><b>수집 멈춤</b> — 마지막 성공이 아래 기준을 넘은 대상(시한 초과 · 연결 실패 · 인증서 변경 · 엣지 보고 끊김)</span></label>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; padding-left: 24px">
+          <label class="fld">주기의 몇 배<input class="in mono" type="text" value="3" style="width: 110px"></label>
+          <label class="fld">최소 시간(분)<input class="in mono" type="text" value="10" style="width: 110px"></label>
+          <div class="hint" style="flex: 1 1 260px; align-self: flex-end">예) 주기 1시간 → 3시간 넘게 성공이 없으면 멈춤 · 주기 1분 → 10분. 주기는 각 수집 설정의 값을 읽습니다.</div>
+        </div>
+        <div class="fld">감시할 수집 종류
+          <div class="kinds">
+            <label class="ck"><input type="checkbox" checked>vCenter</label>
+            <label class="ck"><input type="checkbox" checked>NSX</label>
+            <label class="ck"><input type="checkbox" checked>스토리지</label>
+            <label class="ck"><input type="checkbox" checked>베어메탈 스토리지</label>
+            <label class="ck"><input type="checkbox" checked>SAN 스위치</label>
+            <label class="ck"><input type="checkbox" checked>iDRAC</label>
+            <label class="ck"><input type="checkbox" checked>베어메탈 사용률</label>
+            <label class="ck"><input type="checkbox" checked>GPU</label>
+            <label class="ck"><input type="checkbox" checked>PDU</label>
+            <label class="ck"><input type="checkbox" checked>Arista CVP</label>
+            <label class="ck"><input type="checkbox" checked>네트워크 장비</label>
+            <label class="ck"><input type="checkbox" checked>Horizon 세션</label>
+            <label class="ck"><input type="checkbox" checked>아이실론</label>
+            <label class="ck"><input type="checkbox" checked>Veeam B&amp;R</label>
+            <label class="ck"><input type="checkbox" checked>Veeam EM</label>
+            <label class="ck"><input type="checkbox" checked>Bareos</label>
+            <label class="ck"><input type="checkbox" checked>게스트 점검</label>
+            <label class="ck"><input type="checkbox" checked>엣지 → 중앙 보고</label>
+          </div>
+          <div class="hint">메일 발송(SMTP) 자체의 인증 정지는 메일로 알릴 수 없습니다 — 현황 화면과 설정 › 메일 발송에만 표시합니다.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="h3">③ 누구에게 보내나</h2>
+        <label class="fld">통합 관리자 — 전 법인 일람을 받는 사람(쉼표로 구분)
+          <input class="in" type="text" value="" placeholder="비우면 메일 발송의 기본 받는 사람">
+          <span class="hint">비워 두면 설정 › 메일 발송의 기본 받는 사람에게 갑니다.</span>
+        </label>
+        <label class="ck"><input type="checkbox" checked><span><b>법인 담당자에게는 그 법인 것만</b> 따로 한 통<br><span class="hint">법인 · vCenter · Bareos 가 1:1:1 이므로 법인 한 단위로 묶습니다. 담당자를 적지 않은 법인은 통합 관리자 메일에만 실립니다.</span></span></label>
+        <div style="overflow-x: auto; border: 1px solid #243049; border-radius: 8px">
+          <table>
+            <thead><tr><th>법인</th><th>받는 사람</th><th>지금 이상</th></tr></thead>
+            <tbody>
+              <tr><td>KR 본사</td><td><input class="in" type="text" value="[담당자 주소]" style="width: 100%"></td><td>2</td></tr>
+              <tr><td>PL 법인</td><td><input class="in" type="text" value="[담당자 주소]" style="width: 100%"></td><td>2</td></tr>
+              <tr><td>US-East 법인</td><td><input class="in" type="text" value="" placeholder="없음 — 통합 관리자에게만" style="width: 100%"></td><td>2</td></tr>
+              <tr><td>VN 법인</td><td><input class="in" type="text" value="[담당자 주소]" style="width: 100%"></td><td>1</td></tr>
+              <tr><td class="muted" colspan="3">… 28개 법인(표는 제목을 눌러 정렬)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div style="flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+
+      <div class="card">
+        <h2 class="h3">지금 저장하면</h2>
+        <div style="font-size: 12px; line-height: 1.8">
+          <div>지금 이상 <b>인증 정지 4 · 수집 멈춤 3</b> · 판정 못함 2</div>
+          <div>다음 매일 일람 <b class="mono">11-11 08:30</b></div>
+          <div>통합 관리자 <b>[N]명</b> · 법인 담당자 <b>[N]곳</b></div>
+        </div>
+        <div class="hint">처음 켤 때는 이미 멈춰 있는 것을 ‘새로 생김’ 으로 한꺼번에 보내지 않습니다 — 첫 매일 일람에 ‘남아 있는 것’ 으로 실립니다.</div>
+      </div>
+
+      <div class="card">
+        <h2 class="h3">최근 발송</h2>
+        <div style="overflow-x: auto">
+          <table style="min-width: 300px">
+            <thead><tr><th>시각</th><th>계기</th><th>내용</th><th>결과</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">11-10 10:20</td><td>새로 생김</td><td>새 2 · 회복 2</td><td>7명 수신</td></tr>
+              <tr><td class="mono">11-10 08:30</td><td>매일 일람</td><td>남은 것 7</td><td>7명 수신</td></tr>
+              <tr><td class="mono">11-09 22:20</td><td>새로 생김</td><td>새 1</td><td>7명 수신</td></tr>
+              <tr><td class="mono">11-09 19:00</td><td>새로 생김</td><td>새 1</td><td style="color:#fbbf24">건너뜀 — 시간당 상한</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="hint">건너뛴 내용은 버리지 않고 다음 메일에 합쳐 보냅니다.</div>
+      </div>
+
+      <div class="card">
+        <h2 class="h3">이 메일이 알려 주지 못하는 것</h2>
+        <div class="hint" style="font-size: 12px">
+          · 중앙 포탈 자체가 내려가 있으면 메일도 나가지 않습니다.<br>
+          · 엣지 보고가 끊긴 법인은 엣지 안의 대상별 상태를 읽지 못해 ‘엣지 → 중앙 보고’ 한 줄로만 알립니다.<br>
+          · 수집은 되는데 값이 틀린 경우(부분 수집 · 0 으로 읽힌 값)는 이 메일의 대상이 아닙니다.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1420}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
