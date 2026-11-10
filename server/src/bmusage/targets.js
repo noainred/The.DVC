@@ -65,7 +65,7 @@ export const NO_PATH_REASON = Object.freeze({
  *   유령 키 판정과 같은 한 번의 등록부 읽기로 만든다 — 대상 해석이 등록부를 다시 읽지 않는다). 이름은 **등록부의 name**(엣지 보관분 표 `/tools/bm-usage/edges` 의
  *   agent 와 같은 값)이고 엣지가 보낸 문자열이 아니다. 못 읽었거나(readable 거짓 · 색인 없음) 없는 id · 이름 없는 항목은 ''(추측하지 않는다).
  *   반증 의심 2: 등록부에 있는데 이름이 빈 항목은 'not-found'(삭제됨) 가 아니라 'no-name' 이다(사유를 사실대로).
- * @returns {{ name:string, issue:''|'unread'|'not-found'|'no-name' }}
+ * @returns {{ name:string, id?:string, issue:''|'unread'|'not-found'|'no-name' }}
  */
 export function remoteCollectorNameOf(remoteCollectors, collectorId) {
   const id = t(collectorId);
@@ -74,19 +74,42 @@ export function remoteCollectorNameOf(remoteCollectors, collectorId) {
   const m = remoteCollectors.names;
   const has = m.has(id) || m.has(id.toLowerCase());
   const name = t(m.has(id) ? m.get(id) : m.get(id.toLowerCase()));
-  return name ? { name, issue: '' } : { name: '', issue: has ? 'no-name' : 'not-found' };
+  return name ? { name, id, issue: '' } : { name: '', issue: has ? 'no-name' : 'not-found' };   // id — 재확인 R1 이름 겹침 판정(agentNameClash 는 대소문자를 보지 않는다)
 }
 
 /**
- * 반증 F2 — 위임 행의 엣지 이름을 **수집 서버 등록부의 name 하나로** 맞춘다(순수). fleet 보고 경로의 이름은 엣지 인증 agent(등록부 id 인 경우가 많다)이고
+ * 반증 F2 · 재확인 R1 — 위임 행의 엣지 이름을 **수집 서버 등록부의 name 하나로** 맞춘다(순수). fleet 보고 경로의 이름은 엣지 인증 agent(등록 id 가 원칙)이고
  *   원격 전력 경로는 등록부 name 이라, 그대로 두면 같은 엣지가 ‘엣지 수집 — 엣지별’ 칩 두 개로 갈라지고 한쪽은 엣지 표(/tools/bm-usage/edges — agent = name)에서 못 찾았다.
- *   등록부 별칭(id 또는 name — 대소문자 · 앞뒤 공백 무시, 같은 글자면 id 가 먼저 — collector/registry.js findCollectorByName 과 같은 순서)이 맞고 그 항목의 name 이 있으면 name,
- *   등록부를 못 읽었거나 · 등록부에 없는 이름이거나 · name 이 빈 항목이면 받은 이름 그대로(지어내지 않는다).
+ *   찾는 순서: **전 항목에서 id 일치 먼저**(대소문자 · 앞뒤 공백 무시) → 없을 때만 name 일치(목록 앞 항목). R1: 예전에는 항목마다 id → name(목록 순서)이라 앞 항목의 name 이
+ *   뒤 항목의 id(그 엣지의 인증 이름)와 같으면 다른 엣지로 묶었다. id 로 찾은 항목의 name 이 비었거나 · 등록부를 못 읽었거나 · 등록부에 없는 이름이면 받은 이름 그대로(지어내지 않는다).
+ * @returns {{ name:string, id:string }}  id = 찾은 수집 서버 id('' = 못 찾음)
  */
-export function canonicalAgentOf(remoteCollectors, agent) {
+export function canonicalAgentRef(remoteCollectors, agent) {
   const a = t(agent);
-  if (!a || !remoteCollectors || remoteCollectors.readable !== true || !(remoteCollectors.aliases instanceof Map)) return a;
-  return t(remoteCollectors.aliases.get(a.toLowerCase())) || a;
+  const rc = remoteCollectors;
+  if (!a || !rc || rc.readable !== true || !(rc.byId instanceof Map) || !(rc.byName instanceof Map)) return { name: a, id: '' };
+  const k = a.toLowerCase();
+  const hit = rc.byId.get(k) || rc.byName.get(k) || null;
+  return hit && t(hit.name) ? { name: t(hit.name), id: t(hit.id) } : { name: a, id: '' };
+}
+/** 이름만(호환). */
+export function canonicalAgentOf(remoteCollectors, agent) { return canonicalAgentRef(remoteCollectors, agent).name; }
+/**
+ * 재확인 R1 — 보이는 이름(name)으로 당기기 · 중앙에서 켜기 · 엣지 표 · 누락 점검의 봉투 찾기를 하면 **다른 수집 서버로 가는가**(순수).
+ *   그 경로들은 이름을 collector/registry.js findCollectorByName(목록 앞 항목 · 항목마다 id 또는 name)으로 푼다 — 이 서버의 수집 서버(id)가 아닌 항목이 그 이름을 먼저 가지면 참.
+ *   모르면(색인 없음 · id 없음) 거짓(판정할 근거가 없다 — 이름은 그대로 보인다).
+ */
+export function agentNameClash(remoteCollectors, name, id) {
+  const rc = remoteCollectors;
+  const n = t(name).toLowerCase(); const i = t(id);
+  if (!n || !i || !rc || rc.readable !== true || !(rc.firstAlias instanceof Map)) return false;
+  const owner = rc.firstAlias.get(n);
+  return owner != null && t(owner).toLowerCase() !== i.toLowerCase();
+}
+/** 위임 행에 붙일 엣지 이름 필드(중앙 — 정규화 이름 + 겹침 표지). */
+function delegatedAgentFields(remoteCollectors, agent) {
+  const r = canonicalAgentRef(remoteCollectors, agent);
+  return { agent: r.name, ...(agentNameClash(remoteCollectors, r.name, r.id) ? { agentClash: true } : {}) };
 }
 
 /**
@@ -152,7 +175,7 @@ export function pickOsEntry(os, { regHost = '', name = '', vc = '', strict = fal
  * @param {function} [p.inventoryOf] `(registryId) => inv` — **캐시된** iDRAC 인벤토리(장비 왕복 0).
  *   v2.554: 이것으로 라이선스 등급(Datacenter/Enterprise)을 판정해 화면이 '텔레메트리가 왜 비었나'
  *   를 추측이 아니라 **근거로** 말한다(`bmusage/license.js` 머리말).
- * @param {object|null} [p.remoteCollectors] v2.959 — `{ readable, names: Map<collectorId, 이름>, aliases: Map<별칭 소문자, 이름> }`(remoteCollectorNameOf · canonicalAgentOf). 없으면 '못 읽음'.
+ * @param {object|null} [p.remoteCollectors] v2.959 — `{ readable, names, byId, byName, firstAlias }`(insights/fleetInventory.js remoteCollectorIndex — remoteCollectorNameOf · canonicalAgentRef · agentNameClash). 없으면 '못 읽음'.
  * @param {object|null} [p.registryUnread] 반증 F1 — `{ idrac:boolean, os:boolean }` 이 노드의 iDRAC · OS 등록부를 **읽지 못했는가**(poller sourceErrors 와 같은 판정).
  *   못 읽은 동안은 '이 노드에 등록이 없다' 를 알 수 없으므로 원격 위임 갈래를 타지 않는다(예전 사유 그대로 — sourceErrors 경고가 설명한다).
  * @returns {{targets:Array, skipped:Array, counts:object}}
@@ -212,7 +235,7 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     //   엣지의 분류에는 남의 엣지 서버가 들어오지 않으므로(fleetInventory 는 중앙에서만 엣지 보고를 합친다) 넓혀도 안전하다.
     const mine = isEdge ? (!owner || owner === me) : !owner;
     // 반증 F2: 이름은 수집 서버 등록부 name 으로 맞춘다(중앙만 — 엣지 노드에는 남의 엣지 서버가 들어오지 않는다). 등록부에 없는 이름은 그대로.
-    if (!mine) { skipped.push({ ...idOf(b), reason: 'edge-delegated', agent: isEdge ? (b.remoteAgent || '') : canonicalAgentOf(remoteCollectors, b.remoteAgent) }); continue; }
+    if (!mine) { skipped.push({ ...idOf(b), reason: 'edge-delegated', ...(isEdge ? { agent: b.remoteAgent || '' } : delegatedAgentFields(remoteCollectors, b.remoteAgent)) }); continue; }
 
     // 다음 점검 ①(2차): 별도 키로 수집하는 서버(keyOverride)는 서비스태그로 등록을 찾지 않는다 — 공통 태그면 다른 서버의 iDRAC 을 집는다.
     const reg = regById.get(t(b.serverId)) || (t(b.serviceTag) && !b.keyOverride ? regByTag.get(norm(b.serviceTag)) : null) || null;
@@ -233,7 +256,7 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
      */
     if (!isEdge && !bmRegUnread && t(b.source) === 'remote' && t(b.collectorId) && !reg && !osPick.entry && !osPick.reason) {
       const who = remoteCollectorNameOf(remoteCollectors, b.collectorId);
-      if (who.name) skipped.push({ ...idOf(b), reason: 'edge-delegated', agent: who.name, vcenterId: vc, delegatedBy: 'collector', ...edgeKeyOf(b) });
+      if (who.name) skipped.push({ ...idOf(b), reason: 'edge-delegated', agent: who.name, ...(agentNameClash(remoteCollectors, who.name, who.id) ? { agentClash: true } : {}), vcenterId: vc, delegatedBy: 'collector', ...edgeKeyOf(b) });
       else skipped.push({ ...idOf(b), reason: 'remote-collector-unknown', vcenterId: vc, collectorIssue: who.issue });
       continue;
     }
@@ -328,7 +351,7 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
       }
       const owner = norm(siteAgent.get(vc) || '');
       const mine = owner ? (isEdge && owner === me) : true;
-      if (!mine) { skipped.push({ ...idv, role: 'virt', reason: 'edge-delegated', agent: isEdge ? (siteAgent.get(vc) || '') : canonicalAgentOf(remoteCollectors, siteAgent.get(vc)), vcenterId: vc }); continue; }
+      if (!mine) { skipped.push({ ...idv, role: 'virt', reason: 'edge-delegated', ...(isEdge ? { agent: siteAgent.get(vc) || '' } : delegatedAgentFields(remoteCollectors, siteAgent.get(vc))), vcenterId: vc }); continue; }
       const reg = regById.get(t(h.idracServerId)) || (t(h.serviceTag) ? regByTag.get(norm(h.serviceTag)) : null) || null;
       /*
        * 반증 F4(가상화 호스트 — 같은 결함): 중앙이 직접 수집하는 vCenter 의 ESXi 호스트인데 그 호스트를 받치는 iDRAC 이 **엣지 원격 전력뿐**이면
@@ -338,7 +361,7 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
        */
       if (!isEdge && !idracUnread && t(h.idracCollectorId) && !reg) {
         const who = remoteCollectorNameOf(remoteCollectors, h.idracCollectorId);
-        if (who.name) skipped.push({ ...idv, role: 'virt', reason: 'edge-delegated', agent: who.name, vcenterId: vc, delegatedBy: 'collector', ...edgeKeyOf({ serviceTag: h.serviceTag, serverId: h.idracServerId, collectorId: h.idracCollectorId, keyOverride: vdec?.decision === 'add' ? vdec.key : '' }) });
+        if (who.name) skipped.push({ ...idv, role: 'virt', reason: 'edge-delegated', agent: who.name, ...(agentNameClash(remoteCollectors, who.name, who.id) ? { agentClash: true } : {}), vcenterId: vc, delegatedBy: 'collector', ...edgeKeyOf({ serviceTag: h.serviceTag, serverId: h.idracServerId, collectorId: h.idracCollectorId, keyOverride: vdec?.decision === 'add' ? vdec.key : '' }) });
         else skipped.push({ ...idv, role: 'virt', reason: 'remote-collector-unknown', vcenterId: vc, collectorIssue: who.issue });
         continue;
       }

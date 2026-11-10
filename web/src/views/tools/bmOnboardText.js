@@ -25,6 +25,7 @@ export const MISS_REASON_TEXT = Object.freeze({
   'os-ambiguous': 'OS 등록을 하나로 못 정함(같은 이름 · 주소 등록이 여럿이거나 법인 미지정) — 등록에 법인을 지정하면 풀립니다',   // 2차 재확인 G3
   'os-foreign': 'OS 등록이 다른 법인으로 지정돼 있어 쓰지 않음',
   'key-conflict': '식별 키가 이 노드의 다른 서버와 겹쳐 수집하지 않음(값이 섞이지 않게) — 서비스태그를 채우면 풀립니다',   // 다음 점검 ①
+  'edge-name-clash': '엣지 이름이 다른 수집 서버의 id · 이름과 겹쳐 그 엣지 보관분을 이름으로 가릴 수 없음 — 모름(수집 서버 이름을 서로 다르게 바꾸면 풀립니다)',   // 재확인 R1
   'remote-collector-unknown': '원격 수집 서버(엣지)가 맡은 서버인데 그 수집 서버의 이름을 등록부에서 확인하지 못함(등록부 못 읽음 · 등록부에 없음 · 이름이 빈 등록) — 어느 엣지인지 몰라 모름으로 둡니다',   // v2.959 · 반증 의심 2
 });
 export const KEY_STATUS_TEXT = Object.freeze({ active: '사용', retired: '퇴역(회전됨)' });

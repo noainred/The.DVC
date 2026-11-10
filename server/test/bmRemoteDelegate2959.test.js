@@ -63,7 +63,7 @@ test('① 원격 출처 · 이 노드 등록 없음 → 엣지 수집(등록부 
   // 엣지 노드 · 단독 엣지 판정은 바뀌지 않는다(엣지는 자기 등록부로 수집 — 이 규칙은 중앙만)
   const e = resolveTargets({ bareMetal: bm, settings: st, isEdge: true, agentName: 'edge-pl', remoteCollectors: RC });
   assert.ok(!e.skipped.some((s) => s.reason === 'remote-collector-unknown' || s.delegatedBy), '엣지 노드에는 원격 위임 판정이 없다');
-  assert.deepEqual(remoteCollectorNameOf(RC, ' c1 '), { name: 'edge-pl', issue: '' });
+  assert.deepEqual(remoteCollectorNameOf(RC, ' c1 '), { name: 'edge-pl', id: 'c1', issue: '' });
   assert.deepEqual(remoteCollectorNameOf(RC, ''), { name: '', issue: 'not-found' });
 });
 
@@ -227,7 +227,7 @@ async function scene({ collectors = 'ok', idrac = [], os = [], fleetAgent = 'edg
   (await import('../src/bmusage/settings.js'))._resetForTest();
   const { setEdgeFleet, resetEdgeFleet } = await import('../src/central/fleet.js');
   const { setRemoteHost, clearCollectorHosts } = await import('../src/collector/state.js');
-  resetEdgeFleet(); for (const c of ['c1', 'gm1', 'c2']) clearCollectorHosts(c);
+  resetEdgeFleet(); for (const c of ['c1', 'gm1', 'c2', 'x1']) clearCollectorHosts(c);
   // 사용자 환경 재현: 엣지 edge-pl 이 스캔해 자기 등록부에 넣은 두 서버를 fleet 보고로 올리고, 그중 RMT001 은 그 엣지가 iDRAC 전력을 폴링해 원격 전력으로도 올라온다.
   if (fleet) {
     setEdgeFleet(fleetAgent, [
@@ -477,4 +477,60 @@ test('반증 의심 1(재현 — 고침) — 서비스태그 없는 원격 서�
   assert.equal(JSON.stringify(o.body.skipped).includes('10.5.0.30'), false);
   const ad = await call('adm', '/tools/bm-usage');
   assert.ok(ad.body.skipped.some((s) => s.edgeKey === '10.5.0.30'), '관리자 판본은 원문');
+});
+
+// ── 재확인 R1 — 별칭이 겹치는 등록(앞 항목의 name = 뒤 항목의 id) ─────────────────
+test('재확인 R1 — 엣지 이름 정규화는 전 항목 id 일치 먼저 · 이름이 다른 수집 서버로 가면 겹침 표지(상태 · 누락 점검 단정 없음)', async () => {
+  const CT = await import('../src/bmusage/targets.js');
+  const { remoteCollectorIndex } = await import('../src/insights/fleetInventory.js');
+  const A = remoteCollectorIndex({ list: [{ id: 'x1', name: 'gm1' }, { id: 'gm1', name: 'Warsaw' }], error: null });
+  assert.deepEqual(CT.canonicalAgentRef(A, 'gm1'), { name: 'Warsaw', id: 'gm1' }, '인증 이름 = 등록 id — 앞 항목의 name 보다 id 일치가 먼저(예전: x1 의 name 으로 묶음)');
+  assert.deepEqual(CT.canonicalAgentRef(A, 'x1'), { name: 'gm1', id: 'x1' });
+  assert.equal(CT.agentNameClash(A, 'gm1', 'x1'), false, 'clashA: 이름 gm1 은 목록 앞 x1 로 간다(findCollectorByName 과 같은 항목)');
+  assert.equal(CT.agentNameClash(A, 'Warsaw', 'gm1'), false);
+  const B = remoteCollectorIndex({ list: [{ id: 'gm1', name: 'Warsaw' }, { id: 'x1', name: 'gm1' }], error: null });
+  assert.equal(CT.agentNameClash(B, 'gm1', 'x1'), true, 'clashB: 이름 gm1 은 다른 수집 서버(gm1)로 간다');
+  assert.equal(CT.agentNameClash(B, 'Warsaw', 'gm1'), false);
+  assert.equal(CT.agentNameClash(null, 'gm1', 'x1'), false, '모르면 단정하지 않는다');
+  // id 로 찾은 항목의 name 이 비면 받은 이름 그대로 — 다른 항목의 name 으로 넘어가지 않는다(그 엣지는 id 가 같은 항목이다)
+  const C = remoteCollectorIndex({ list: [{ id: 'c3', name: '' }, { id: 'zz', name: 'c3' }], error: null });
+  assert.deepEqual(CT.canonicalAgentRef(C, 'c3'), { name: 'c3', id: '' });
+  // 세 경로(fleet 보고 · 원격 전력 · 가상화 호스트 원격 받침 · 사이트 위임 vCenter) 모두 같은 표지(순수)
+  const st = { corps: { vcA: true, vcB: true }, idracTelemetry: true, osSsh: true, includeUnassigned: true, includeVirtualization: true };
+  const r = CT.resolveTargets({ isEdge: false, settings: st, remoteCollectors: B,
+    vcenters: [{ id: 'vcA', name: 'A' }, { id: 'vcS', name: 'S', collectSource: 'site', collectedBy: 'x1' }],
+    bareMetal: [
+      { serverId: 'edge:x1:F01', name: 'f01', serviceTag: 'F01', source: 'edge', remoteAgent: 'x1', vcenterId: 'vcA' },
+      { serverId: 'remote:x1:9', name: 'r09', serviceTag: 'R09', source: 'remote', collectorId: 'x1', vcenterId: 'vcA' },
+      { serverId: 'remote:gm1:10', name: 'r10', serviceTag: 'R10', source: 'remote', collectorId: 'gm1', vcenterId: 'vcA' },
+    ],
+    virtHosts: [
+      { name: 'esx-9', vcenterId: 'vcA', serviceTag: 'V09', idracServerId: 'remote:x1:19', idracCollectorId: 'x1', fleetId: 'v09' },
+      { name: 'esx-s', vcenterId: 'vcS', serviceTag: 'VS1', idracServerId: '', fleetId: 'vs1' },
+    ] });
+  const sk = Object.fromEntries(r.skipped.map((x) => [x.serviceTag, x]));
+  assert.deepEqual(['F01', 'R09', 'V09', 'VS1'].map((k) => [sk[k].agent, !!sk[k].agentClash]), [['gm1', true], ['gm1', true], ['gm1', true], ['gm1', true]], '이름 gm1 이 다른 수집 서버로 가는 행은 전부 표지');
+  assert.deepEqual([sk.R10.agent, !!sk.R10.agentClash], ['Warsaw', false]);
+  // 실제 경로(라우트 · 누락 점검) — 두 순서
+  const call = await app();
+  const REG = await import('../src/collector/registry.js');
+  for (const [label, cols, clashExpected] of [
+    ['clashA', [{ id: 'x1', name: 'gm1', url: 'https://10.9.0.7:3443', enabled: true }, { id: 'gm1', name: 'Warsaw', url: 'https://10.9.0.1:3443', enabled: true }], false],
+    ['clashB', [{ id: 'gm1', name: 'Warsaw', url: 'https://10.9.0.1:3443', enabled: true }, { id: 'x1', name: 'gm1', url: 'https://10.9.0.7:3443', enabled: true }], true],
+  ]) {
+    await scene({ collectors: cols, fleetAgent: 'gm1', collectorId: 'gm1', envelope: null, settings: { corps: { vcA: true, vcB: true } },
+      extraRemote: [{ host: '10.5.0.8', serverId: 8, serverName: 'bm-08', serviceTag: 'RMT008', collectorId: 'x1', vcenterId: 'vcB' }] });
+    const a = await call('adm', '/tools/bm-usage');
+    const del = a.body.skipped.filter((x) => x.reason === 'edge-delegated');
+    const by = Object.fromEntries(del.map((x) => [x.serviceTag, x]));
+    assert.deepEqual(['RMT001', 'RMT002', 'RMT008'].map((k) => by[k]?.agent), ['Warsaw', 'Warsaw', 'gm1'], `${label}: 엣지 gm1 의 서버(원격 · fleet)는 한 칸 'Warsaw' 2대 · x1 의 서버는 'gm1' 1대(예전 clashA: 'gm1' 2대 — 다른 엣지와 합침)`);
+    assert.equal(!!by.RMT008.agentClash, clashExpected, `${label}: 이름 gm1 이 다른 수집 서버로 가는가`);
+    assert.ok(!by.RMT001.agentClash && !by.RMT002.agentClash);
+    // 겹침 판정은 당기기 · 중앙에서 켜기가 쓰는 이름 풀이(findCollectorByName)와 같은 답이다
+    assert.equal(REG.findCollectorByName('gm1')?.id !== 'x1', clashExpected);
+    assert.equal(REG.findCollectorByName('Warsaw')?.id, 'gm1');
+    const m = await call('adm', '/tools/bm-usage/onboard/missing');
+    const r8 = m.body.rows.find((x) => x.serviceTag === 'RMT008');
+    assert.deepEqual([r8.via, r8.agent, r8.bucket, r8.reason], ['edge', 'gm1', 'unknown', clashExpected ? 'edge-name-clash' : 'edge-no-record'], `${label}: 겹치면 이름으로 찾은 보관분을 쓰지 않는다`);
+  }
 });

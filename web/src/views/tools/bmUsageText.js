@@ -192,6 +192,9 @@ export function skippedNotes(counts = {}, reasons = {}) {
  *   이름이 빈 행은 '' 한 묶음(이름 모름). stateOf(agent) → 엣지 표의 상태({ state, label, tone }) 또는 null(표에 그 엣지가 없음).
  * @returns {{ agent:string, count:number, state:object|null }[]}  대수 내림차순 · 같으면 이름순
  */
+/** 재확인 R1 — 이름이 겹친 엣지 칸의 상태(엣지 표 줄을 이름으로 가릴 수 없다 — 지어내지 않는다). */
+export const EDGE_NAME_CLASH_STATE = Object.freeze({ state: 'name-clash', label: '이름이 다른 수집 서버와 겹침 — 엣지 표에서 직접 확인', tone: 'warn',
+  why: '이 엣지의 이름이 다른 수집 서버의 id · 이름과 같아, 엣지 표의 같은 이름 줄(그 줄의 가져오기 · 중앙에서 켜기 포함)이 다른 수집 서버로 갈 수 있습니다. 설정 › 엣지·원격 › 수집 서버(원격)에서 이름을 서로 다르게 바꾸세요.' });
 export function edgeDelegatedByAgent(skipped = [], { stateOf = null } = {}) {
   const by = new Map();
   for (const s of Array.isArray(skipped) ? skipped : []) {
@@ -199,9 +202,11 @@ export function edgeDelegatedByAgent(skipped = [], { stateOf = null } = {}) {
     const a = t(s.agent);
     const k = a.toLowerCase();
     const cur = by.get(k);
-    if (cur) cur.count += 1; else by.set(k, { agent: a, count: 1 });
+    if (cur) { cur.count += 1; if (s.agentClash) cur.clash = true; } else by.set(k, { agent: a, count: 1, clash: !!s.agentClash });
   }
   const out = [...by.values()].map((x) => {
+    // 재확인 R1: 서버가 '이 이름은 다른 수집 서버의 id · 이름과 겹친다(agentClash)' 고 하면 엣지 표의 같은 이름 줄이 다른 수집 서버일 수 있다 — 그 줄의 상태를 붙이지 않는다.
+    if (x.clash) return { ...x, state: { ...EDGE_NAME_CLASH_STATE } };
     let state = null;
     if (x.agent && typeof stateOf === 'function') { try { state = stateOf(x.agent) || null; } catch { state = null; } }
     return { ...x, state };
@@ -237,6 +242,7 @@ export function edgeDelegatedChip(x = {}) {
 /** v2.959 — 엣지별 묶음 아래 안내 한 줄(조치). 표에 없는 엣지가 있으면 그 이유 후보를 함께 말한다. */
 export function edgeDelegatedGuide(list = []) {
   if (!Array.isArray(list) || !list.length) return '';
+  const clash = list.some((x) => x.clash);
   const missing = list.some((x) => !t(x.agent) || !x.state);
   const off = list.some((x) => x.state && x.state.state === 'off-edge');
   return [
@@ -244,6 +250,7 @@ export function edgeDelegatedGuide(list = []) {
     off ? '**엣지에서 꺼짐**' : '‘엣지에서 꺼짐’',
     ' 이면 그 줄의 ‘중앙에서 켜기’ 로 켭니다(버튼은 전체 범위 관리자에게만 보입니다).',
     missing ? ' 표에 없는 엣지는 수집 서버 등록부에 그 이름이 없거나(엣지가 보고한 이름), 이 계정에 보이는 대상이 없는 엣지이거나, 엣지 표를 아직 불러오지 못한 경우입니다.' : '',
+    clash ? ' **이름이 겹친 엣지**는 엣지 표의 같은 이름 줄이 다른 수집 서버일 수 있어 상태를 붙이지 않았습니다 — 수집 서버 이름을 서로 다르게 바꾸세요.' : '',
   ].join('');
 }
 

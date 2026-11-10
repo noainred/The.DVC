@@ -321,7 +321,9 @@ export function sourceErrorsView(list, { detail = false } = {}) {
 const IDRAC_REGISTRY_FILE = () => path.join(config.configDir, 'idrac.json');
 /** 반증 F1(v2.959): 등록부를 못 읽은 동안 원격 수집 서버(엣지)가 맡은 서버를 '엣지 수집' 으로 가르지 않는다는 사실(targets.js registryUnread) — 경고 문구에 붙인다. */
 const REMOTE_HELD_NOTE_TEXT = ' · 원격 수집 서버(엣지)가 맡은 서버도 이 동안은 ‘엣지 수집’ 으로 가르지 않습니다(이 노드에 등록이 있는지 모릅니다)';
-const remoteHeldNote = () => (config.agent?.centralUrl ? '' : REMOTE_HELD_NOTE_TEXT);   // 엣지 노드에는 원격 위임 판정이 없다
+// 재확인 R2: OS 등록부만 못 읽을 때는 베어메탈만 보류한다(가상화 호스트는 OS 경로가 없어 iDRAC 등록부만 본다 — targets.js) — 문구를 베어메탈로 한정.
+const REMOTE_HELD_NOTE_OS_TEXT = ' · 원격 수집 서버(엣지)가 맡은 베어메탈 서버도 이 동안은 ‘엣지 수집’ 으로 가르지 않습니다(이 노드에 OS 계정 등록이 있는지 모릅니다 — 가상화 호스트는 iDRAC 등록부만 봅니다)';
+const remoteHeldNote = (kind = 'idrac') => (config.agent?.centralUrl ? '' : (kind === 'os' ? REMOTE_HELD_NOTE_OS_TEXT : REMOTE_HELD_NOTE_TEXT));   // 엣지 노드에는 원격 위임 판정이 없다
 
 /** 대상 해석 — 스냅샷·등록부를 읽어 온다(장비에 접속하지 않는다). */
 export async function currentTargets() {
@@ -379,7 +381,7 @@ export async function currentTargets() {
       const list = withResolvedAuth(listBmServersRaw());
       const le = typeof bmRegistryLoadError === 'function' ? bmRegistryLoadError() : null;
       // v2.744(최종 검토 FB — RD-R1·RG2744-03): 원문(le.reason — JSON.parse 메시지의 파일 조각)이 아니라 요약(registrySourceError).
-      if (le) sourceErrors.push(registrySourceError('os-registry', (why) => `OS 계정 등록부를 읽지 못했습니다 — 대상 서버가 no-os-cred 로 보일 수 있습니다(${why})${remoteHeldNote()}`, le));
+      if (le) sourceErrors.push(registrySourceError('os-registry', (why) => `OS 계정 등록부를 읽지 못했습니다 — 대상 서버가 no-os-cred 로 보일 수 있습니다(${why})${remoteHeldNote('os')}`, le));
       return list;
     } catch (e) { sourceErrors.push({ source: 'os-registry', error: safeLoadText(e, 200) || 'unknown' }); return []; }
   })();

@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, skippedNotes, SKIP_LABEL, emptyDiag, edgePullState, remoteUnknownNote, COLLECTOR_ISSUE_TEXT } from './bmUsageText.js';
+import { edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, skippedNotes, SKIP_LABEL, emptyDiag, edgePullState, remoteUnknownNote, COLLECTOR_ISSUE_TEXT, EDGE_NAME_CLASH_STATE } from './bmUsageText.js';
 import { MISS_REASON_TEXT } from './bmOnboardText.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -93,5 +93,18 @@ describe('v2.959 엣지 수집 — 엣지별', () => {
     expect(remoteUnknownNote([])).toBe('');
     expect(remoteUnknownNote(undefined)).toBe('');
     expect(MISS_REASON_TEXT['remote-collector-unknown']).toMatch(/이름이 빈 등록/);
+  });
+  it('재확인 R1 — 서버가 이름 겹침(agentClash)을 말하면 엣지 표 줄의 상태를 붙이지 않고 그 사실을 말한다', () => {
+    const offRow = { agent: 'gm1', enabled: true, hasUrl: true, snapAt: Date.now(), enabledOnEdge: false, nodeRole: 'edge' };
+    const sk = [{ reason: 'edge-delegated', agent: 'gm1', agentClash: true }, { reason: 'edge-delegated', agent: 'Warsaw' }, { reason: 'edge-delegated', agent: 'Warsaw' }];
+    const l = edgeDelegatedByAgent(sk, { stateOf: (a) => (a === 'gm1' ? edgePullState(offRow) : null) });
+    const g = l.find((x) => x.agent === 'gm1');
+    expect(g.clash).toBe(true);
+    expect(g.state.state).toBe('name-clash');
+    expect(edgeDelegatedChip(g)).toBe(`‘gm1’ 1대 · ${EDGE_NAME_CLASH_STATE.label}`);
+    expect(l.find((x) => x.agent === 'Warsaw').clash).toBe(false);
+    expect(edgeDelegatedGuide(l)).toMatch(/\*\*이름이 겹친 엣지\*\*/);
+    expect(edgeDelegatedGuide([{ agent: 'Warsaw', count: 2, clash: false, state: edgePullState(offRow) }])).not.toMatch(/이름이 겹친/);
+    expect(MISS_REASON_TEXT['edge-name-clash']).toMatch(/겹쳐/);
   });
 });

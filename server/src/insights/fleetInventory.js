@@ -439,15 +439,19 @@ function readCollectorsOnce() {
 /**
  * v2.959: 원격 수집 서버 id → 등록부 이름(엣지 보관분 표의 agent 와 같은 값) 색인 — 베어메탈 사용률의 ‘엣지 수집 — 어느 엣지’ 판정 입력(bmusage/targets.js remoteCollectorNameOf).
  *   못 읽었으면 readable:false(이름을 추측하지 않는다). 토큰 · URL 은 싣지 않는다(이름만). 원 id 와 소문자 id 둘 다 넣는다(등록부는 id 대소문자 중복을 합친다).
- *   반증 F2: aliases = 별칭(id · name 소문자) → name — fleet 보고 경로의 엣지 이름(인증 agent — 등록부 id 인 경우가 많다)을 같은 name 으로 맞춘다(targets.js canonicalAgentOf).
- *   같은 글자가 두 항목에 걸리면 목록 앞 항목이 이긴다(collector/registry.js findCollectorByName 과 같은 순서 — 항목마다 id 또는 name).
- *   그 항목의 name 이 비면 별칭에 넣지 않는다(받은 이름 그대로 둔다 — 지어내지 않는다).
+ *   반증 F2 · 재확인 R1: 별칭 색인 — fleet 보고 경로의 엣지 이름(인증 agent — 등록 id 가 원칙)을 같은 name 으로 맞춘다(targets.js canonicalAgentRef).
+ *   byId(소문자 id → {id, name}) 를 **전 항목에서 먼저** 보고, 없을 때만 byName(소문자 name → 목록 앞 항목). 예전(항목마다 id → name, 목록 순서)은 앞 항목의 name 이
+ *   뒤 항목의 id(= 그 엣지의 인증 이름)와 같으면 그 엣지 서버를 앞 항목(다른 엣지)으로 묶었다(재현 clashA).
+ *   firstAlias(소문자 별칭 → 그 별칭이 가리키는 첫 항목 id — collector/registry.js findCollectorByName 과 같은 순서: 목록 앞 항목 · 항목마다 id 또는 name) —
+ *   보이는 이름으로 당기기 · 중앙에서 켜기를 하면 어느 수집 서버로 가는지. 위임 행의 이름이 다른 항목으로 가면 그 사실을 행에 싣는다(agentClash).
+ *   name 이 빈 항목은 이름 색인에 넣지 않는다(받은 이름 그대로 둔다 — 지어내지 않는다).
  */
 export function remoteCollectorIndex(col) {
   const names = new Map();
-  const aliases = new Map();
-  if (!col || col.error || !Array.isArray(col.list)) return { readable: false, names, aliases };
-  const taken = new Set();
+  const byId = new Map();
+  const byName = new Map();
+  const firstAlias = new Map();
+  if (!col || col.error || !Array.isArray(col.list)) return { readable: false, names, byId, byName, firstAlias };
   for (const c of col.list) {
     if (!c || typeof c !== 'object') continue;
     const id = String(c.id ?? '').trim();
@@ -455,13 +459,11 @@ export function remoteCollectorIndex(col) {
     const name = String(c.name ?? '').trim();
     names.set(id, name);
     if (!names.has(id.toLowerCase())) names.set(id.toLowerCase(), name);
-    for (const k of [id.toLowerCase(), name.toLowerCase()]) {
-      if (!k || taken.has(k)) continue;
-      taken.add(k);
-      if (name) aliases.set(k, name);
-    }
+    if (!byId.has(id.toLowerCase())) byId.set(id.toLowerCase(), { id, name });
+    if (name && !byName.has(name.toLowerCase())) byName.set(name.toLowerCase(), { id, name });
+    for (const k of [id.toLowerCase(), name.toLowerCase()]) if (k && !firstAlias.has(k)) firstAlias.set(k, id);
   }
-  return { readable: true, names, aliases };
+  return { readable: true, names, byId, byName, firstAlias };
 }
 
 /**

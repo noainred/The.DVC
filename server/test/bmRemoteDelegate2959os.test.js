@@ -39,7 +39,8 @@ test('반증 F1(OS) — OS 계정 등록부 손상: 원격 서버를 엣지 수�
   assert.ok(tg.sourceErrors.some((e) => e.source === 'os-registry'), '손상이 실제로 드러났다');
   const se = tg.sourceErrors.find((e) => e.source === 'os-registry');
   assert.match(se.error, /no-os-cred 로 보일 수 있습니다/);
-  assert.match(se.error, /‘엣지 수집’ 으로 가르지 않습니다/);
+  assert.match(se.error, /베어메탈 서버도 이 동안은 ‘엣지 수집’ 으로 가르지 않습니다/, '재확인 R2: OS 등록부만 못 읽으면 베어메탈만 보류한다(가상화 호스트는 iDRAC 등록부만 본다)');
+  assert.match(se.error, /가상화 호스트는 iDRAC 등록부만 봅니다/);
   const by = Object.fromEntries(tg.skipped.map((s) => [s.serviceTag, s]));
   assert.equal(by.RMT020.reason, 'no-idrac', '예전(기준판) 사유 — 1차 판: edge-delegated');
   assert.equal(by.RMT001.reason, 'no-idrac', '등록이 없는지 모른다 — 단정하지 않는다');

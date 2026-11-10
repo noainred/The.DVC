@@ -243,10 +243,15 @@
     **반증(2차) 반영**: **F1** — 이 노드의 iDRAC · OS 등록부를 **못 읽은 동안은** 원격 위임 갈래를 타지 않는다(`resolveTargets registryUnread` — poller 가 sourceErrors
     'idrac-registry' · 'os-registry' 와 같은 판정으로 넘긴다). 1차 판은 빈 목록을 '등록 없음' 으로 읽어 중앙이 iDRAC · OS 계정으로 수집하던 서버까지 '엣지 수집' 으로 단정했다
     (재현: idrac.json 손상 → RMT010 · 대소문자 · 공백 · 계정 없음 · 공통 태그 서버, bm-storage.json 손상 → OS 계정 · os-foreign · os-ambiguous 서버). 못 읽는 동안은 예전 사유
-    그대로이고 경고문이 '엣지 수집으로 가르지 않는다' 를 말한다(가상화 호스트는 iDRAC 등록부만 본다 — OS 경로가 없다). bmstor 등록부는 프로세스 첫 읽기를 캐시하므로 OS 손상
-    시험은 별도 파일(`bmRemoteDelegate2959os`). **F2** — 위임 행의 엣지 이름은 **수집 서버 등록부 name 하나로**(`targets.js canonicalAgentOf` — 별칭 id · name, 대소문자 무시,
-    목록 앞 항목 · findCollectorByName 과 같은 순서): fleet 보고 경로는 엣지 인증 이름(등록부 id 인 경우가 많다)이라 id≠name 등록에서 같은 엣지가 칩 두 개로 갈라지고 한쪽은
-    엣지 표에 없다고 나왔다. 등록부에 없는 이름 · 못 읽음 · 이름이 빈 항목은 받은 이름 그대로. 정규화한 이름 = `/edges` 표 agent = 중앙에서 켜기 · 당기기 · 누락 점검의 엣지 봉투 이름.
+    그대로이고 경고문이 '엣지 수집으로 가르지 않는다' 를 말한다(가상화 호스트는 iDRAC 등록부만 본다 — OS 경로가 없다 · 재확인 R2: OS 등록부만 못 읽을 때의 경고문은 '베어메탈' 로 한정). bmstor 등록부는 프로세스 첫 읽기를 캐시하므로 OS 손상
+    시험은 별도 파일(`bmRemoteDelegate2959os`). **F2** — 위임 행의 엣지 이름은 **수집 서버 등록부 name 하나로**(`targets.js canonicalAgentRef` — **전 항목에서 id 일치 먼저**, 없을 때만 name 일치(목록 앞 항목) ·
+    대소문자 무시): fleet 보고 경로는 엣지 인증 이름(등록 id 가 원칙)이라 id≠name 등록에서 같은 엣지가 칩 두 개로 갈라지고 한쪽은 엣지 표에 없다고 나왔다.
+    등록부에 없는 이름 · 못 읽음 · id 로 찾은 항목의 name 이 빈 경우는 받은 이름 그대로. ⚠ 정정(재확인 R1 — 재현): 첫 판은 '항목마다 id → name, 목록 순서' 라 앞 항목의
+    name 이 뒤 항목의 id(그 엣지의 인증 이름)와 같으면(등록 순서 {id:x1, name:gm1} → {id:gm1, name:Warsaw}) 엣지 gm1 의 fleet 서버를 x1 칸('gm1')으로 묶었다 → id 먼저로 고쳤다.
+    **별칭이 겹치지 않을 때** 정규화한 이름 = `/edges` 표 agent = 중앙에서 켜기 · 당기기 · 누락 점검의 엣지 봉투 이름이다. 겹칠 때(어떤 항목의 name 이 목록 앞의 다른 항목의
+    id · name 과 같다): 그 경로들은 이름을 `findCollectorByName`(목록 앞 항목 · 항목마다 id 또는 name)으로 풀어 **다른 수집 서버로 갈 수 있다**(엣지 표 · 당기기의 기존 동작 —
+    고치지 않음). 그런 위임 행에는 `agentClash: true` 를 싣고(판정 `agentNameClash` — firstAlias 가 그 수집 서버가 아니면 참), 화면 칩은 엣지 표 줄의 상태를 붙이지 않고
+    '이름이 다른 수집 서버와 겹침 — 엣지 표에서 직접 확인' 을, 누락 점검은 이름으로 찾은 보관분을 쓰지 않고 '모름'(edge-name-clash)을 보인다. 조치는 수집 서버 이름을 서로 다르게.
     **F3** — 판정기 complete 가 거짓인 중앙(엣지에 맡긴 서버 · 엣지 보관분이 있음)에서 예전 용도 태그(법인 구분 없는 열쇠)는 지우지 않는다(보이지 않는 다른 법인 서버의 값일 수 있다 —
     정리 경로를 새로 만들지 않았다). 안내문을 사실대로 고쳤다(`legacyWhy` scope · incomplete — 예전 '엣지 · 단일 노드에서 정리' 는 중앙 저장소라 사실과 달랐다).
     **F4** — 가상화 호스트(ESXi, 가상화 포함 켬)도 같은 규칙: 받침 iDRAC 이 엣지 원격 전력뿐(classifyFleet 가상화 행의 `idracCollectorId` — `/insights/fleet` 응답에서는 뺀다)이고
