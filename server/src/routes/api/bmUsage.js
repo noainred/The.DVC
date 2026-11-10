@@ -908,7 +908,7 @@ async function purposeWrite(req, res) {
     logAudit({ user: req.user?.username, action: 'bm-usage.purpose', target: found.realKey, ip: req.ip || '', detail: JSON.stringify({ vcenterId: t(found.target.vcenterId), keyScope: wk.source, legacySplit: split, legacyRemains, pairCleared, apps: value?.apps ?? null, role: value?.role ?? null, clear: b.clear === true, ok: r.ok }).slice(0, 300) });
     if (r.ok && legacyRemains) {
       /*
-       * 반증 F3(v2.959): 예전 안내는 '전체 범위 관리자가 엣지 · 단일 노드에서 정리' 였지만 예전 태그는 **이 노드의 저장소**에 있어 엣지에서 정리할 수 없다.
+       * 반증 F3(v2.961): 예전 안내는 '전체 범위 관리자가 엣지 · 단일 노드에서 정리' 였지만 예전 태그는 **이 노드의 저장소**에 있어 엣지에서 정리할 수 없다.
        *   정리는 이 노드에서 전체 범위 관리자가 저장할 때, 이 노드가 그 열쇠를 쓰는 서버를 다 알 때(판정기 complete — 엣지에 맡긴 서버 · 엣지 보관분이 없을 때)만 일어난다.
        *   무엇이 막았는지(legacyWhy: scope = 범위 계정 · incomplete = 다 알지 못함)를 싣고 문구가 사실대로 말한다. 지우는 경로는 만들지 않았다 — 다 알지 못하는 동안에는
        *   이 노드에 보이지 않는 서버(당겨 오지 않은 엣지 서버)가 같은 열쇠를 쓰는지 판정할 근거가 없다(다른 법인 값을 지울 수 있다).

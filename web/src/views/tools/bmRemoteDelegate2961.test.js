@@ -1,5 +1,5 @@
 /**
- * v2.959 — 엣지 iDRAC 스캔 서버가 중앙에서 ‘iDRAC 등록 없음’ 으로 보이던 결함의 화면 쪽(순수).
+ * v2.961 — 엣지 iDRAC 스캔 서버가 중앙에서 ‘iDRAC 등록 없음’ 으로 보이던 결함의 화면 쪽(순수).
  *  · ‘대상이 아닌 서버 — 사유별’ 의 엣지 수집 줄에 **엣지별 대수**(응답 제외 목록에서 센다 — 범위 계정은 서버가 범위 안 행만 준다) · 그 엣지의 상태(엣지 보관분 표와 같은 판정)
  *  · 표에 없는 엣지의 상태를 지어내지 않는다 · 새 사유 code(remote-collector-unknown) 라벨 · 빈 화면 진단 · 누락 점검 사유 문구
  *  · 문구 규약: 백틱 없음 · 숫자 박지 않음(대수는 입력에서) · 이름은 ‘ ’ 인용(BoldText 의 ** 와 섞이지 않게)
@@ -13,7 +13,7 @@ import { MISS_REASON_TEXT } from './bmOnboardText.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-describe('v2.959 엣지 수집 — 엣지별', () => {
+describe('v2.961 엣지 수집 — 엣지별', () => {
   const skipped = [
     { reason: 'edge-delegated', agent: 'edge-pl', serviceTag: 'A' },
     { reason: 'edge-delegated', agent: 'Edge-PL', serviceTag: 'B' },   // 대소문자만 다른 이름 — 한 묶음
@@ -68,7 +68,7 @@ describe('v2.959 엣지 수집 — 엣지별', () => {
     const strings = block.match(/'[^'\n]*'/g) || [];
     expect(strings.some((s) => s.includes('`'))).toBe(false);   // 문구 안에 백틱 없음
     const jsx = fs.readFileSync(path.join(HERE, 'BmUsage.jsx'), 'utf8');
-    const seg = jsx.slice(jsx.indexOf('v2.959 엣지 수집 — 엣지별 대수'), jsx.indexOf('엣지 보관분 표로 이동'));
+    const seg = jsx.slice(jsx.indexOf('v2.961 엣지 수집 — 엣지별 대수'), jsx.indexOf('엣지 보관분 표로 이동'));
     expect(seg.length).toBeGreaterThan(200);
     expect(seg).toMatch(/flexWrap: 'wrap'/);
     expect(seg).not.toMatch(/uppercase/);

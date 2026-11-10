@@ -182,7 +182,7 @@ insightsRouter.get('/fleet', async (req, res) => {
     const { liveKeys, bareMetalDupes: _dupes, ...payload1 } = full;
     // 서비스 인벤토리 6차 반증 F2: untaggedServerId(엣지 '태그 없을 때 id' — 고정 승계 내부용)도 응답에서 뺀다.
     //   IP 스캔 등록 iDRAC 은 등록부 id 가 곧 IP 라 'edge:<agent>:10.x.x.x' 가 되어 비관리자 주소 가림(maskFleetPayload)을 비켜 갔다(재현).
-    // v2.959: collectorId(원격 출처 행의 수집 서버 id — 베어메탈 사용률 위임 판정 내부용)도 응답에서 뺀다.
+    // v2.961: collectorId(원격 출처 행의 수집 서버 id — 베어메탈 사용률 위임 판정 내부용)도 응답에서 뺀다.
     //   반증 F4: 가상화 호스트의 idracCollectorId(받침 원격 항목의 수집 서버 id)도 내부용이라 뺀다.
     const payload0 = { ...payload1, bareMetal: Array.isArray(payload1.bareMetal) ? payload1.bareMetal.map(({ untaggedServerId: _u, collectorId: _c, ...r }) => r) : payload1.bareMetal,
       virtualizationHosts: Array.isArray(payload1.virtualizationHosts) ? payload1.virtualizationHosts.map(({ idracCollectorId: _c, ...r }) => r) : payload1.virtualizationHosts };

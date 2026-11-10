@@ -49,7 +49,7 @@ export function missingCheck({ targets = [], skipped = [], entryByKey = new Map(
       rows.push({ ...base, via: 'edge', agent: t(s.agent), bucket: cov || 'unknown', reason: cov ? '' : 'edge-no-record' });
       continue;
     }
-    // v2.959: 원격 수집 서버가 맡았는데 그 수집 서버를 모르는 서버 — 어느 엣지인지 모르므로 '없음' 이 아니라 '모름'(못 읽음 ≠ 없음).
+    // v2.961: 원격 수집 서버가 맡았는데 그 수집 서버를 모르는 서버 — 어느 엣지인지 모르므로 '없음' 이 아니라 '모름'(못 읽음 ≠ 없음).
     if (s.reason === 'remote-collector-unknown') { rows.push({ ...base, via: 'edge', agent: '', bucket: 'unknown', reason: 'remote-collector-unknown' }); continue; }
     rows.push({ ...base, via: 'local', bucket: 'none', reason: t(s.reason) || 'unknown' });
   }

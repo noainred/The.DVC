@@ -171,7 +171,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       remoteAgent: s.remoteAgent || '', // 엣지 보고 시 출처 DC/에이전트
       // 엣지 보고분만: 태그가 없었을 때의 serverId(서비스 인벤토리 고정 승계 — 6차 2). 그 밖의 행에는 싣지 않는다.
       ...(s.untaggedServerId ? { untaggedServerId: s.untaggedServerId } : {}),
-      // v2.959: 원격 전력(수집 서버 pull) 출처만 — 그 수집 서버 id(베어메탈 사용률이 ‘엣지 수집 — 어느 엣지’ 를 판정한다 · bmusage/targets.js).
+      // v2.961: 원격 전력(수집 서버 pull) 출처만 — 그 수집 서버 id(베어메탈 사용률이 ‘엣지 수집 — 어느 엣지’ 를 판정한다 · bmusage/targets.js).
       //   remoteAgent 의 뜻(엣지 fleet 보고)은 바꾸지 않는다(개요 · 전력 귀속 · 유령 키 · 법인 귀속이 그 뜻으로 읽는다). 내부용 — /insights/fleet 응답에서는 뺀다.
       ...(s.source === 'remote' && s.collectorId != null && String(s.collectorId).trim() ? { collectorId: String(s.collectorId).trim() } : {}),
       ...vcRow(vc.id, vc.src),
@@ -251,7 +251,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       // v2.625: 받치는 iDRAC 등록 id — 사용률 수집(bmusage)이 ESXi 호스트의 iDRAC 을 찾는 연결 고리.
       //   받침이 없거나 엣지 보고분(serverByTag 에서 제외)이면 빈 값이고, 그 호스트는 iDRAC 경로가 없다.
       idracServerId: backed ? (m.serverId || '') : '',
-      // 반증 F4(v2.959): 받침이 원격 전력(수집 서버 pull) 항목이면 그 수집 서버 id — 베어메탈 사용률이 이 호스트를 ‘엣지 수집 — 그 엣지’ 로 판정한다(내부용 · /insights/fleet 응답에서 뺀다).
+      // 반증 F4(v2.961): 받침이 원격 전력(수집 서버 pull) 항목이면 그 수집 서버 id — 베어메탈 사용률이 이 호스트를 ‘엣지 수집 — 그 엣지’ 로 판정한다(내부용 · /insights/fleet 응답에서 뺀다).
       ...(backed && m.source === 'remote' && m.collectorId != null && String(m.collectorId).trim() ? { idracCollectorId: String(m.collectorId).trim() } : {}),
       // v2.733(C2-02): vCenter 추정 전력을 지금 값으로 쓰지 않은 사유(getFleetInventory 가 비운 호스트만 — 없으면 싣지 않는다).
       ...(h.powerUnread ? { powerUnread: h.powerUnread } : {}),
@@ -425,7 +425,7 @@ function hostListUnknownVcenters(snap) {
 const addKey = (set, v) => { const k = norm(v); if (k) set.add(k); };
 
 /**
- * v2.959: 수집 서버 등록부 한 번 읽기 — { list, error }. 예전 fleetKeySources 와 같은 두 호출(못 읽음 표지 → 목록)이고,
+ * v2.961: 수집 서버 등록부 한 번 읽기 — { list, error }. 예전 fleetKeySources 와 같은 두 호출(못 읽음 표지 → 목록)이고,
  *   getFleetInventory 가 이 결과를 유령 키 판정과 원격 출처 이름 색인(remoteCollectorIndex)에 같이 쓴다(읽기 횟수는 예전과 같다).
  */
 function readCollectorsOnce() {
@@ -437,7 +437,7 @@ function readCollectorsOnce() {
 }
 
 /**
- * v2.959: 원격 수집 서버 id → 등록부 이름(엣지 보관분 표의 agent 와 같은 값) 색인 — 베어메탈 사용률의 ‘엣지 수집 — 어느 엣지’ 판정 입력(bmusage/targets.js remoteCollectorNameOf).
+ * v2.961: 원격 수집 서버 id → 등록부 이름(엣지 보관분 표의 agent 와 같은 값) 색인 — 베어메탈 사용률의 ‘엣지 수집 — 어느 엣지’ 판정 입력(bmusage/targets.js remoteCollectorNameOf).
  *   못 읽었으면 readable:false(이름을 추측하지 않는다). 토큰 · URL 은 싣지 않는다(이름만). 원 id 와 소문자 id 둘 다 넣는다(등록부는 id 대소문자 중복을 합친다).
  *   반증 F2 · 재확인 R1: 별칭 색인 — fleet 보고 경로의 엣지 이름(인증 agent — 등록 id 가 원칙)을 같은 name 으로 맞춘다(targets.js canonicalAgentRef).
  *   byId(소문자 id → {id, name}) 를 **전 항목에서 먼저** 보고, 없을 때만 byName(소문자 name → 목록 앞 항목). 예전(항목마다 id → name, 목록 순서)은 앞 항목의 name 이
@@ -511,7 +511,7 @@ export function fleetKeySources(snap, { now = Date.now(), collectors = null } = 
     addKey(live, s.serviceTag); addKey(live, s.inv?.system?.serviceTag); addKey(live, s.name); addKey(live, s.host); addKey(live, s.hostName);
     for (const n of (Array.isArray(s.hostNames) ? s.hostNames : [])) addKey(live, n);
   }
-  // v2.959: getFleetInventory 가 이미 읽은 등록부를 넘기면 그것을 쓴다(한 요청에 같은 파일을 다시 읽지 않는다 — readCollectorsOnce).
+  // v2.961: getFleetInventory 가 이미 읽은 등록부를 넘기면 그것을 쓴다(한 요청에 같은 파일을 다시 읽지 않는다 — readCollectorsOnce).
   const col = collectors && Array.isArray(collectors.list) ? collectors : readCollectorsOnce();
   if (col.error) unreadable.push({ source: 'collector-registry', registry: true, reason: '수집 서버 등록부(collectors.json)를 읽지 못했습니다' });
   for (const c of col.list) {
@@ -623,7 +623,7 @@ export async function getFleetInventory(snap) {
   result.summary.vcPowerSkipped = vcPowerSkippedOf(hostsIn, vcSkip); // v2.733(C2-02)
   // v2.783(점검 Q2 P-B3): 화면의 유령 키 수는 prune 미리보기와 **같은 판정**(fleetGhostReport)이다 — classifyFleet 의 ghostKeys 는
   //   순수 함수 입력(servers)만 보므로 여기서 덮는다. 못 읽은 출처가 있으면 그 종류만 싣는다(이름·사유는 관리자 미리보기에서).
-  // v2.959: 수집 서버 등록부는 여기서 한 번 읽어 유령 키 판정과 원격 출처 이름 색인에 같이 쓴다(예전과 같은 읽기 횟수).
+  // v2.961: 수집 서버 등록부는 여기서 한 번 읽어 유령 키 판정과 원격 출처 이름 색인에 같이 쓴다(예전과 같은 읽기 횟수).
   let col = null;
   try { col = readCollectorsOnce(); } catch { col = null; }
   try {
@@ -636,7 +636,7 @@ export async function getFleetInventory(snap) {
   result.summary.edgeAgents = edgeAgents.size;
   const out = { ...result, mode: instanceMode() };
   /*
-   * v2.959: 원격 수집 서버 id → 등록부 이름 색인 — **열거되지 않는 속성**(JSON 응답 · 펼침 복사에 실리지 않는다 — universeDupes 와 같은 내부용).
+   * v2.961: 원격 수집 서버 id → 등록부 이름 색인 — **열거되지 않는 속성**(JSON 응답 · 펼침 복사에 실리지 않는다 — universeDupes 와 같은 내부용).
    *   bmusage/poller.js currentTargets 가 resolveTargets 에 넘긴다(‘엣지 수집 — 어느 엣지’). 등록부를 못 읽었으면 readable:false.
    *   세대: 이 객체는 getFleetInventory 를 부를 때마다 새로 만든다(이름이 바뀌면 다음 호출에 반영 · /insights/fleet 의 snapMemo 는 등록부 저장이 fleetRev 를 올려 무효화한다).
    */

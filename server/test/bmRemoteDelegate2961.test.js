@@ -1,5 +1,5 @@
 /**
- * v2.959 — 엣지 iDRAC 스캔이 자동 등록한 서버가 중앙 베어메탈 사용률에서 ‘iDRAC 등록 없음’ 으로 보이던 결함(사용자 보고: 1,157대 · 엣지 수집 1대).
+ * v2.961 — 엣지 iDRAC 스캔이 자동 등록한 서버가 중앙 베어메탈 사용률에서 ‘iDRAC 등록 없음’ 으로 보이던 결함(사용자 보고: 1,157대 · 엣지 수집 1대).
  *   원인 3단: ① bmusage/targets.js — 중앙은 remoteAgent 가 없으면 자기 서버로 본다 ② idrac/service.js — 원격 전력(수집 서버 pull) 항목에는 엣지 이름이 없고 collectorId 만 있다
  *   ③ insights/fleetInventory.js — 같은 서버의 엣지 fleet 보고(remoteAgent 있음)는 이미 잡힌 원격 항목과 겹치면 버린다 → 중앙 등록부에서 찾다가 없으니 no-idrac.
  *   고친 판정: 중앙 · 출처 remote · collectorId 있음 · 이 노드에 그 서버 등록(iDRAC · OS · 법인이 맞지 않는 OS 등록) 0 → edge-delegated + 등록부 이름.
@@ -9,7 +9,7 @@
  * ④ 재현 2건(엣지 스캔 서버 · 중앙 직접 스캔 대조) ⑤ 소비처(공통 태그 판정기 · 누락 점검 · /insights/fleet 내부 필드)
  *
  * 불변식의 ‘기준판’ 은 **collectorId 를 지운 같은 입력**이다 — 새 판정은 collectorId 가 있을 때만 갈리므로(그 밖의 코드는 순서만 바뀐 순수 계산)
- *   지운 입력의 결과가 곧 기준판(0ca493bc) 결과다. 이 동치는 작업 때 기준판 targets.js 를 같은 입력으로 돌려 한 번 대조했다(기록 docs/rules/idrac-server.md v2.959).
+ *   지운 입력의 결과가 곧 기준판(0ca493bc) 결과다. 이 동치는 작업 때 기준판 targets.js 를 같은 입력으로 돌려 한 번 대조했다(기록 docs/rules/idrac-server.md v2.961).
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,12 +17,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'bmrmt2959-'));
+const DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'bmrmt2961-'));
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_DIR = DIR;
 process.env.AUTH_ENABLED = 'true';
 process.env.DATA_SOURCE = 'live';
-process.env.CENTRAL_TOKEN = 'test-central-token-2959';   // 중앙 역할 — 엣지 fleet 보고를 합친다
+process.env.CENTRAL_TOKEN = 'test-central-token-2961';   // 중앙 역할 — 엣지 fleet 보고를 합친다
 delete process.env.CENTRAL_URL;
 fs.writeFileSync(path.join(DIR, 'permissions.json'), JSON.stringify({ schemaVersion: 2, matrix: { operator: ['dashboard', 'tools'], viewer: ['dashboard', 'tools'], toolsDenied: { operator: [], viewer: [] } } }));
 test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
@@ -210,7 +210,7 @@ test.after(() => { _srv?.srv.close(); });
 let _gen = 0;
 const COL_OK = [{ id: 'c1', name: 'edge-pl', url: 'https://10.9.0.1:3443', enabled: true }];
 /**
- * 실제 경로 장면. collectors: 'ok' | 'corrupt' | 'none' | 배열 · idrac: 등록 배열 | 'corrupt'(손상 — 못 읽음) · os: 등록 배열(bmstor 등록부는 프로세스 첫 읽기를 캐시한다 — OS 손상은 별도 시험 파일 bmRemoteDelegate2959os) · fleetAgent/collectorId: 엣지 이름 · 수집 서버 id ·
+ * 실제 경로 장면. collectors: 'ok' | 'corrupt' | 'none' | 배열 · idrac: 등록 배열 | 'corrupt'(손상 — 못 읽음) · os: 등록 배열(bmstor 등록부는 프로세스 첫 읽기를 캐시한다 — OS 손상은 별도 시험 파일 bmRemoteDelegate2961os) · fleetAgent/collectorId: 엣지 이름 · 수집 서버 id ·
  * extraRemote: 원격 전력 항목 더 · hosts: 스냅샷 ESXi 호스트 · envelope: { agent, snap } | null(엣지 보관분 없음) · settings: bm-usage 설정 덮어쓰기.
  */
 async function scene({ collectors = 'ok', idrac = [], os = [], fleetAgent = 'edge-pl', collectorId = 'c1', extraRemote = [], hosts = [], envelope, settings = {}, fleet = true } = {}) {
@@ -348,7 +348,7 @@ test('⑤ 소비처 — 공통 태그 판정기(complete) · 누락 점검(수�
   assert.equal(m.counts.none, 0);
 });
 
-// ── 반증 2차(v2.959) — F1 · F2 · F3 · F4 · 의심 1 · 의심 2 ─────────────────────
+// ── 반증 2차(v2.961) — F1 · F2 · F3 · F4 · 의심 1 · 의심 2 ─────────────────────
 const REG_CEN = [{ id: 'r-cen', name: 'cen-10', host: 'https://10.1.0.11', username: 'root', password: 'pw', serviceTag: 'RMT010', vcenterId: 'vcA' }];
 const RMT010 = { host: '10.5.0.10', serverId: 10, serverName: 'rm-cenreg', serviceTag: 'RMT010' };
 

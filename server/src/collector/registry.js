@@ -215,15 +215,8 @@ export async function verifyDerivedCollectorUrl({ url, name, datacenter = '', to
 }
 
 /**
- * @param {object} body
- * @param {object|null} existing
- * @param {{source?:'admin'|'self-register'|'internal', actor?:string}|null} [ctx] 전송 정책 문맥(S-09).
- *   'admin' 만 본문의 평문 HTTP 예외(allowInsecureHttp + insecureHttpReason)를 쓸 수 있다. 없으면 'internal'.
- * @returns {[entry|null, string|null, string[]?, string?]} [항목, 오류, 버린 비밀, 오류 코드]
- */
-/**
  * 수집 서버 URL 정규화 하나(저장 normalize 와 같은 단계 — 앞뒤 공백 · 스킴 없으면 https:// · 스킴 소문자 · 끝 '/' 제거). 형식 · SSRF · 전송 검사는 하지 않는다.
- *   v2.959(2차 재확인): 베어메탈 사용률의 엣지 이름 겹침 판정이 '두 등록이 같은 엣지(같은 URL)인가' 를 이 규약 그대로 본다(insights/fleetInventory.js remoteCollectorIndex).
+ *   v2.961(엣지 스캔 서버 판정 · 2차 재확인): 베어메탈 사용률의 엣지 이름 겹침 판정이 '두 등록이 같은 엣지(같은 URL)인가' 를 이 규약 그대로 본다(insights/fleetInventory.js remoteCollectorIndex).
  *   길이 상한(COLLECTOR_URL_MAX)을 넘는 값은 ''(같은 엣지라고 단정하지 않는다 — 저장 경로는 그런 값을 거부한다).
  */
 export function normalizeCollectorUrl(url) {
@@ -232,6 +225,13 @@ export function normalizeCollectorUrl(url) {
   return trimTrailingSlashes(withDefaultScheme(s));
 }
 
+/**
+ * @param {object} body
+ * @param {object|null} existing
+ * @param {{source?:'admin'|'self-register'|'internal', actor?:string}|null} [ctx] 전송 정책 문맥(S-09).
+ *   'admin' 만 본문의 평문 HTTP 예외(allowInsecureHttp + insecureHttpReason)를 쓸 수 있다. 없으면 'internal'.
+ * @returns {[entry|null, string|null, string[]?, string?]} [항목, 오류, 버린 비밀, 오류 코드]
+ */
 function normalize(body, existing = null, ctx = null) {
   const e = existing ? { ...existing } : {};
   const id = String(body.id ?? e.id ?? '').trim();

@@ -319,7 +319,7 @@ export function sourceErrorsView(list, { detail = false } = {}) {
   });
 }
 const IDRAC_REGISTRY_FILE = () => path.join(config.configDir, 'idrac.json');
-/** 반증 F1(v2.959): 등록부를 못 읽은 동안 원격 수집 서버(엣지)가 맡은 서버를 '엣지 수집' 으로 가르지 않는다는 사실(targets.js registryUnread) — 경고 문구에 붙인다. */
+/** 반증 F1(v2.961): 등록부를 못 읽은 동안 원격 수집 서버(엣지)가 맡은 서버를 '엣지 수집' 으로 가르지 않는다는 사실(targets.js registryUnread) — 경고 문구에 붙인다. */
 const REMOTE_HELD_NOTE_TEXT = ' · 원격 수집 서버(엣지)가 맡은 서버도 이 동안은 ‘엣지 수집’ 으로 가르지 않습니다(이 노드에 등록이 있는지 모릅니다)';
 // 재확인 R2: OS 등록부만 못 읽을 때는 베어메탈만 보류한다(가상화 호스트는 OS 경로가 없어 iDRAC 등록부만 본다 — targets.js) — 문구를 베어메탈로 한정.
 const REMOTE_HELD_NOTE_OS_TEXT = ' · 원격 수집 서버(엣지)가 맡은 베어메탈 서버도 이 동안은 ‘엣지 수집’ 으로 가르지 않습니다(이 노드에 OS 계정 등록이 있는지 모릅니다 — 가상화 호스트는 iDRAC 등록부만 봅니다)';
@@ -400,7 +400,7 @@ export async function currentTargets() {
     // ⚠ **캐시된** 인벤토리만 읽는다(장비 왕복 0) — 라이선스 등급 판정용(v2.554).
     inventoryOf: (id) => getInventory(id),
     dupes, decisions: dec.map,   // 다음 점검 ①(2차) — 못 읽으면 readKeyDecisions 가 빈 맵(결정 미적용 · 사유는 위 sourceErrors)
-    // v2.959: 원격 수집 서버 id → 등록부 이름(getFleetInventory 가 유령 키 판정과 같은 한 번의 읽기로 만든 열거 안 되는 속성 — 여기서 등록부를 다시 읽지 않는다).
+    // v2.961: 원격 수집 서버 id → 등록부 이름(getFleetInventory 가 유령 키 판정과 같은 한 번의 읽기로 만든 열거 안 되는 속성 — 여기서 등록부를 다시 읽지 않는다).
     //   없으면(분류 실패 · 시험 이음매) null = '못 읽음' — 원격 출처 서버는 이름을 추측하지 않고 remote-collector-unknown.
     remoteCollectors: fleet.remoteCollectors || null,
     // 반증 F1: 이 노드의 iDRAC · OS 등록부를 못 읽은 동안은 '등록 없음' 을 알 수 없다 — 원격 위임('엣지 수집')을 단정하지 않는다(위 sourceErrors 와 같은 판정).

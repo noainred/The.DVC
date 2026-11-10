@@ -223,7 +223,7 @@
     엣지는 자기 agent 것만 가져간다 — 이 경계를 지우면 같은 서버에 iDRAC 세션이 두 배로 열린다.
     `serverId` 가 `host:<vc>:<name>` 인 항목은 **수동 태그로 베어메탈이 된 ESXi 호스트**라
     (`fleetInventory.js:170`) iDRAC 등록이 없다 → `no-idrac` 으로 밝힌다.
-    ⚠⚠ **정정(v2.959 — 사용자 보고 재현)**: '중앙은 `remoteAgent` 없는 것만' 은 **원격 수집 서버(엣지)가 iDRAC 을 맡은 서버**를 빠뜨렸다.
+    ⚠⚠ **정정(v2.961 — 사용자 보고 재현)**: '중앙은 `remoteAgent` 없는 것만' 은 **원격 수집 서버(엣지)가 iDRAC 을 맡은 서버**를 빠뜨렸다.
     엣지가 iDRAC 스캔으로 **자기 등록부**에 넣고 전력을 폴링하는 서버는 중앙에 원격 전력(수집 서버 pull — `collector/state.js setRemoteHost`)으로
     올라오는데, 그 항목에는 엣지 이름이 없고 `collectorId` 만 있으며(`idrac/service.js` 원격 항목 source `remote`), 같은 서버의 엣지 fleet 보고
     (`remoteAgent` 있음)는 `getFleetInventory` 가 이미 잡힌 원격 항목과 태그 · 호스트가 겹쳐 버린다 → 중앙이 자기 iDRAC 등록부에서 찾다가 없으니
@@ -235,7 +235,7 @@
     엣지 수집에도 no-idrac 에도 넣지 않는다 · 누락 점검은 '모름' · 공통 태그 판정기는 complete 거짓 · 화면은 갈래별 대수). **사유 순서**: 엣지 보고 위임 → **원격 위임** → 귀속 없음 → 법인 꺼짐 → 경로 —
     원격 위임을 법인 꺼짐 · 귀속 없음보다 먼저 둔 근거: 중앙에 등록이 없으면 중앙 설정(법인 켜기 · 귀속)을 바꿔도 중앙은 수집할 수 없고, 수집 여부는
     그 엣지 설정이 정한다(엣지 보관분 표 '엣지에서 꺼짐' → '중앙에서 켜기'). **불변식: 기준판에서 중앙이 수집하던 대상은 하나도 잃지 않는다**
-    (대상에는 이 노드 등록이 필요하므로 대상 목록이 그대로다 — `server/test/bmRemoteDelegate2959.test.js` ② 가 고정(아래 반증 2차에서 768조합으로 넓힘) ·
+    (대상에는 이 노드 등록이 필요하므로 대상 목록이 그대로다 — `server/test/bmRemoteDelegate2961.test.js` ② 가 고정(아래 반증 2차에서 768조합으로 넓힘) ·
     기준판 동치는 0ca493bc `targets.js` 와 collectorId 를 지운 입력을 24조합 대조해 차이 0). `remoteAgent` 의 뜻(엣지 fleet 보고)은 바꾸지 않았다
     (개요 · 전력 귀속 · 유령 키 · 법인 귀속이 그 뜻으로 읽는다) — bareMetal 행에 `collectorId` 를 **덧붙이고**(`/insights/fleet` 응답에서는 뺀다),
     이름 색인은 `getFleetInventory` 가 유령 키 판정과 **같은 한 번의 등록부 읽기**로 만든 열거 안 되는 속성(`remoteCollectors`)이라 대상 해석이 등록부를 다시 읽지 않는다.
@@ -244,7 +244,7 @@
     'idrac-registry' · 'os-registry' 와 같은 판정으로 넘긴다). 1차 판은 빈 목록을 '등록 없음' 으로 읽어 중앙이 iDRAC · OS 계정으로 수집하던 서버까지 '엣지 수집' 으로 단정했다
     (재현: idrac.json 손상 → RMT010 · 대소문자 · 공백 · 계정 없음 · 공통 태그 서버, bm-storage.json 손상 → OS 계정 · os-foreign · os-ambiguous 서버). 못 읽는 동안은 예전 사유
     그대로이고 경고문이 '엣지 수집으로 가르지 않는다' 를 말한다(가상화 호스트는 iDRAC 등록부만 본다 — OS 경로가 없다 · 재확인 R2: OS 등록부만 못 읽을 때의 경고문은 '베어메탈' 로 한정). bmstor 등록부는 프로세스 첫 읽기를 캐시하므로 OS 손상
-    시험은 별도 파일(`bmRemoteDelegate2959os`). **F2** — 위임 행의 엣지 이름은 **수집 서버 등록부 name 하나로**(`targets.js canonicalAgentRef` — **전 항목에서 id 일치 먼저**, 없을 때만 name 일치(목록 앞 항목) ·
+    시험은 별도 파일(`bmRemoteDelegate2961os`). **F2** — 위임 행의 엣지 이름은 **수집 서버 등록부 name 하나로**(`targets.js canonicalAgentRef` — **전 항목에서 id 일치 먼저**, 없을 때만 name 일치(목록 앞 항목) ·
     대소문자 무시): fleet 보고 경로는 엣지 인증 이름(등록 id 가 원칙)이라 id≠name 등록에서 같은 엣지가 칩 두 개로 갈라지고 한쪽은 엣지 표에 없다고 나왔다.
     등록부에 없는 이름 · 못 읽음 · id 로 찾은 항목의 name 이 빈 경우는 받은 이름 그대로. ⚠ 정정(재확인 R1 — 재현): 첫 판은 '항목마다 id → name, 목록 순서' 라 앞 항목의
     name 이 뒤 항목의 id(그 엣지의 인증 이름)와 같으면(등록 순서 {id:x1, name:gm1} → {id:gm1, name:Warsaw}) 엣지 gm1 의 fleet 서버를 x1 칸('gm1')으로 묶었다 → id 먼저로 고쳤다.

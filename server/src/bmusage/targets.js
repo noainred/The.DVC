@@ -15,7 +15,7 @@
  * ⚠ **엣지 위임 서버는 중앙이 접속할 수 없다**(`remoteAgent`). 중앙은 자기 것만 수집하고
  *   위임분은 그 엣지가 수집해 push 한다(스토리지·SAN·파트장애와 같은 구조).
  *   이 경계를 지우면 같은 서버를 두 곳에서 찔러 iDRAC 세션이 두 배가 된다.
- *   v2.959: 원격 수집 서버(엣지)가 iDRAC 을 맡은 서버(원격 전력 출처 · collectorId — remoteAgent 없음)도 이 노드에 등록이 없으면 그 엣지 위임이다(아래 루프 주석).
+ *   v2.961: 원격 수집 서버(엣지)가 iDRAC 을 맡은 서버(원격 전력 출처 · collectorId — remoteAgent 없음)도 이 노드에 등록이 없으면 그 엣지 위임이다(아래 루프 주석).
  * ⚠ `serverId` 가 `host:<vcenterId>:<name>` 인 항목은 **수동 태그로 베어메탈이 된 ESXi 호스트**로
  *   (`fleetInventory.js:170`) iDRAC 등록이 없다 — 그것을 '주소 없음' 이라 말해야 한다.
  */
@@ -55,13 +55,13 @@ export const NO_PATH_REASON = Object.freeze({
   'os-ambiguous': 'OS 계정 등록을 하나로 정할 수 없습니다 — 같은 이름 · 주소의 등록이 여럿(주소가 다름)이거나, 법인을 지정하지 않은 등록입니다(‘수집에 추가’ 한 서버는 법인이 맞는 등록만 씁니다). 설정 › 베어메탈 스토리지에서 그 등록에 법인을 지정하세요.',
   'os-foreign': 'OS 계정 등록이 다른 법인으로 지정돼 있어 쓰지 않습니다(다른 법인 서버의 주소 · 계정으로 접속하지 않게). 설정 › 베어메탈 스토리지에서 법인을 확인하세요.',
   'key-conflict': '식별 키가 이 노드의 다른 서버와 겹칩니다 — 두 서버의 값이 한 행에 섞이지 않게 수집하지 않습니다(설정 › iDRAC 등록에서 서비스태그를 채우면 키가 갈려 다음 주기부터 수집합니다).',
-  // v2.959: 원격 수집 서버(엣지)가 보낸 전력으로만 보이는데 이 노드에 iDRAC · OS 등록이 없고, 그 수집 서버의 이름을 등록부에서 확인하지 못했다.
+  // v2.961: 원격 수집 서버(엣지)가 보낸 전력으로만 보이는데 이 노드에 iDRAC · OS 등록이 없고, 그 수집 서버의 이름을 등록부에서 확인하지 못했다.
   //   어느 엣지가 수집하는지 모르므로 ‘엣지 수집’ 으로도 ‘iDRAC 등록 없음’ 으로도 말하지 않는다(못 읽음 ≠ 없음). 갈래는 행의 collectorIssue(unread · not-found · no-name).
   'remote-collector-unknown': '원격 수집 서버(엣지)가 보낸 전력으로만 보이는 서버인데, 그 수집 서버의 이름을 등록부에서 확인하지 못했습니다(수집 서버 등록부를 읽지 못함 · 등록부에 없는 수집 서버(삭제됨) · 이름이 빈 등록 중 하나) — 어느 엣지가 수집하는지 몰라 중앙에서 접속하지 않습니다. 설정 › 엣지·원격 › 수집 서버(원격)를 확인하세요.',
 });
 
 /**
- * v2.959 — 원격 수집 서버 id → 이름 색인(순수). `remoteCollectors` = `{ readable, names: Map<id, name> }`(insights/fleetInventory.js getFleetInventory 가
+ * v2.961 — 원격 수집 서버 id → 이름 색인(순수). `remoteCollectors` = `{ readable, names: Map<id, name> }`(insights/fleetInventory.js getFleetInventory 가
  *   유령 키 판정과 같은 한 번의 등록부 읽기로 만든다 — 대상 해석이 등록부를 다시 읽지 않는다). 이름은 **등록부의 name**(엣지 보관분 표 `/tools/bm-usage/edges` 의
  *   agent 와 같은 값)이고 엣지가 보낸 문자열이 아니다. 못 읽었거나(readable 거짓 · 색인 없음) 없는 id · 이름 없는 항목은 ''(추측하지 않는다).
  *   반증 의심 2: 등록부에 있는데 이름이 빈 항목은 'not-found'(삭제됨) 가 아니라 'no-name' 이다(사유를 사실대로).
@@ -180,7 +180,7 @@ export function pickOsEntry(os, { regHost = '', name = '', vc = '', strict = fal
  * @param {function} [p.inventoryOf] `(registryId) => inv` — **캐시된** iDRAC 인벤토리(장비 왕복 0).
  *   v2.554: 이것으로 라이선스 등급(Datacenter/Enterprise)을 판정해 화면이 '텔레메트리가 왜 비었나'
  *   를 추측이 아니라 **근거로** 말한다(`bmusage/license.js` 머리말).
- * @param {object|null} [p.remoteCollectors] v2.959 — `{ readable, names, byId, byName, firstAlias, urlById }`(insights/fleetInventory.js remoteCollectorIndex — remoteCollectorNameOf · canonicalAgentRef · agentNameClash). 없으면 '못 읽음'.
+ * @param {object|null} [p.remoteCollectors] v2.961 — `{ readable, names, byId, byName, firstAlias, urlById }`(insights/fleetInventory.js remoteCollectorIndex — remoteCollectorNameOf · canonicalAgentRef · agentNameClash). 없으면 '못 읽음'.
  * @param {object|null} [p.registryUnread] 반증 F1 — `{ idrac:boolean, os:boolean }` 이 노드의 iDRAC · OS 등록부를 **읽지 못했는가**(poller sourceErrors 와 같은 판정).
  *   못 읽은 동안은 '이 노드에 등록이 없다' 를 알 수 없으므로 원격 위임 갈래를 타지 않는다(예전 사유 그대로 — sourceErrors 경고가 설명한다).
  * @returns {{targets:Array, skipped:Array, counts:object}}
@@ -247,13 +247,13 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     // 2차 재확인 G3: OS 등록은 법인으로 가른다(pickOsEntry) — 별도 키 서버(keyOverride)는 법인이 맞는 등록만(strict).
     const osPick = pickOsEntry(os, { regHost: reg?.host, name: b.name, vc, strict: !!b.keyOverride });
     /*
-     * v2.959 — **원격 수집 서버(엣지)가 iDRAC 을 맡은 서버는 그 엣지가 수집한다**(사용자 보고: 엣지 iDRAC 스캔이 자동 등록한 서버가 중앙에서
+     * v2.961 — **원격 수집 서버(엣지)가 iDRAC 을 맡은 서버는 그 엣지가 수집한다**(사용자 보고: 엣지 iDRAC 스캔이 자동 등록한 서버가 중앙에서
      *   ‘iDRAC 등록 없음’ 1,157대로 보였다). 그 서버의 bareMetal 행은 원격 전력(collector/state.js — 수집 서버 pull) 출처라 `remoteAgent` 가 없고
      *   (엣지 이름은 fleet 보고에만 실리는데 같은 서버의 fleet 보고는 fleetInventory 가 겹침으로 버린다), 중앙은 자기 iDRAC 등록부에서 찾다가 없으니 no-idrac 이었다.
      *   계정은 그 엣지에만 있고 중앙은 그 사설망에 닿지 못한다(법인 로컬 원칙) — 계정을 가져오지 않고 ‘엣지 수집 — 그 엣지’ 로 말한다.
      *   조건(전부): 중앙(엣지 아님) · 출처 remote · collectorId 있음 · **이 노드에 이 서버의 등록이 하나도 없음**(iDRAC 등록 · OS 계정 · 법인이 맞지 않는 OS 등록까지 —
      *   등록이 있으면 이 노드 설정의 문제이므로 예전 사유 그대로). 그래서 예전에 이 노드가 수집하던 대상은 하나도 빠지지 않는다(대상에는 등록이 필요하다 —
-     *   불변식 시험 bmRemoteDelegate2959). 사유 순서: 법인 꺼짐 · 귀속 없음보다 먼저 — 중앙 설정(법인 켜기 · 귀속 포함)을 바꿔도 중앙은 수집할 수 없고
+     *   불변식 시험 bmRemoteDelegate2961). 사유 순서: 법인 꺼짐 · 귀속 없음보다 먼저 — 중앙 설정(법인 켜기 · 귀속 포함)을 바꿔도 중앙은 수집할 수 없고
      *   수집 여부는 그 엣지 설정이 정한다(엣지 보관분 표의 ‘엣지에서 꺼짐’ → ‘중앙에서 켜기’). 법인 축(vcenterId)은 싣는다 — 범위 계정은 범위 안 행만 본다.
      *   수집 서버를 등록부에서 못 찾거나 등록부를 못 읽으면 이름을 추측하지 않고 remote-collector-unknown(엣지 수집에도 no-idrac 에도 넣지 않는다).
      *   반증 F1: **이 노드의 iDRAC · OS 등록부를 못 읽은 동안은 이 갈래를 타지 않는다**(빈 목록은 '등록 없음' 이 아니라 '모름' — 중앙이 수집하던 서버를

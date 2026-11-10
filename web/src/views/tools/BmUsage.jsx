@@ -37,7 +37,7 @@ import {
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes, usageDetailNote,
   unassignedNote, edgePullState, edgePullNote, edgeNoteRows, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote,
-  edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, remoteUnknownNote } from './bmUsageText.js';   // v2.959 엣지 수집 — 엣지별 · 수집 서버 모름 갈래
+  edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, remoteUnknownNote } from './bmUsageText.js';   // v2.961 엣지 수집 — 엣지별 · 수집 서버 모름 갈래
 import Select from '../../components/Select.jsx';
 // v2.920(리눅스 성능 2단계 화면): USE 매트릭스 보드 · 서버 성능 상세 — 문구·표시 규약은 bmPerfText.js, 판정은 서버 useJudge.js.
 import BmPerfBoard from './BmPerfBoard.jsx';
@@ -122,7 +122,7 @@ export function BmUsage() {
    */
   const [edges, setEdges] = useState(null);
   const [showEdges, setShowEdges] = useState(false);
-  // v2.959: '대상이 아닌 서버' 의 엣지 수집 묶음에서 엣지 보관분 표로 옮긴다(펼치고 그 카드로 화면 이동). 숫자가 바뀔 때마다 한 번.
+  // v2.961: '대상이 아닌 서버' 의 엣지 수집 묶음에서 엣지 보관분 표로 옮긴다(펼치고 그 카드로 화면 이동). 숫자가 바뀔 때마다 한 번.
   const edgesRef = React.useRef(null);
   const [edgeJump, setEdgeJump] = useState(0);
   useEffect(() => {
@@ -437,7 +437,7 @@ export function BmUsage() {
     return { es, ev };
   };
   /*
-   * v2.959: '엣지 수집' 서버를 엣지별로 — 응답의 제외 목록에서 센다(범위 계정은 서버가 범위 안 행만 준다). 상태는 엣지 보관분 표와 같은 판정(edgeRowView).
+   * v2.961: '엣지 수집' 서버를 엣지별로 — 응답의 제외 목록에서 센다(범위 계정은 서버가 범위 안 행만 준다). 상태는 엣지 보관분 표와 같은 판정(edgeRowView).
    *   표에 그 엣지가 없으면 상태를 지어내지 않는다(edgeDelegatedChip 이 '엣지 보관분 표에 없음' 으로 말한다).
    */
   const edgeRows = Array.isArray(edges?.rows) ? edges.rows : [];
@@ -763,11 +763,11 @@ export function BmUsage() {
           {showSkipped && skNotes.map((s, i) => (
             <p key={i} style={{ margin: '6px 0 0', fontSize: 12, lineHeight: 1.6 }}><BoldText text={s} /></p>
           ))}
-          {/* v2.959 반증 의심 2: 수집 서버 모름 — 갈래(등록부 못 읽음 · 등록부에 없음 · 이름이 빈 등록)별 대수 */}
+          {/* v2.961 반증 의심 2: 수집 서버 모름 — 갈래(등록부 못 읽음 · 등록부에 없음 · 이름이 빈 등록)별 대수 */}
           {showSkipped && !!rmUnknown && (
             <p style={{ margin: '6px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--muted)' }}><BoldText text={rmUnknown} /></p>
           )}
-          {/* v2.959 엣지 수집 — 엣지별 대수 · 그 엣지의 보관분 상태 · 엣지 표로 이동 */}
+          {/* v2.961 엣지 수집 — 엣지별 대수 · 그 엣지의 보관분 상태 · 엣지 표로 이동 */}
           {showSkipped && !!edgeDel.length && (
             <div style={{ margin: '8px 0 0', minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 600 }}>엣지 수집 — 엣지별</div>
