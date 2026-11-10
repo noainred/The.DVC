@@ -221,6 +221,17 @@ export async function verifyDerivedCollectorUrl({ url, name, datacenter = '', to
  *   'admin' 만 본문의 평문 HTTP 예외(allowInsecureHttp + insecureHttpReason)를 쓸 수 있다. 없으면 'internal'.
  * @returns {[entry|null, string|null, string[]?, string?]} [항목, 오류, 버린 비밀, 오류 코드]
  */
+/**
+ * 수집 서버 URL 정규화 하나(저장 normalize 와 같은 단계 — 앞뒤 공백 · 스킴 없으면 https:// · 스킴 소문자 · 끝 '/' 제거). 형식 · SSRF · 전송 검사는 하지 않는다.
+ *   v2.959(2차 재확인): 베어메탈 사용률의 엣지 이름 겹침 판정이 '두 등록이 같은 엣지(같은 URL)인가' 를 이 규약 그대로 본다(insights/fleetInventory.js remoteCollectorIndex).
+ *   길이 상한(COLLECTOR_URL_MAX)을 넘는 값은 ''(같은 엣지라고 단정하지 않는다 — 저장 경로는 그런 값을 거부한다).
+ */
+export function normalizeCollectorUrl(url) {
+  const s = String(url ?? '').trim();
+  if (!s || s.length > COLLECTOR_URL_MAX) return '';
+  return trimTrailingSlashes(withDefaultScheme(s));
+}
+
 function normalize(body, existing = null, ctx = null) {
   const e = existing ? { ...existing } : {};
   const id = String(body.id ?? e.id ?? '').trim();
@@ -237,8 +248,7 @@ function normalize(body, existing = null, ctx = null) {
   // v2.611 LEFT2611-06: 길이 상한 + 선형 끝 '/' 제거 — 정규식 끝-슬래시 치환은 긴 입력에서 O(n²) 였다(4만 자 620ms).
   if (url.length > COLLECTOR_URL_MAX) return [null, `수집 서버 URL이 너무 깁니다(${COLLECTOR_URL_MAX}자 이하).`];
   // S-09: 스킴 없는 주소의 기본은 https:// 다(예전 http:// — 평문 기본값이 토큰을 노출했다).
-  url = withDefaultScheme(url);
-  url = trimTrailingSlashes(url);
+  url = normalizeCollectorUrl(url);
   // URL 형식 검증 — http/https + 유효 호스트만 허용(잘못된 스킴/입력 차단).
   try {
     const u = new URL(url);

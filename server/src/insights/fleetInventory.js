@@ -37,7 +37,7 @@ import { getEdgeFleetServers, listEdgeFleet, UNREADABLE_HOLD_MS } from '../centr
 // v2.783(점검 Q2 P-B3): 유령 키 판정이 보는 원격 수집(collector pull) 출처 — 인벤토리·전력·수집 서버 등록부·수신 상태.
 import { remotePowerEntries, getCollectorStatus } from '../collector/state.js';
 import { allRemoteServers } from '../collector/remoteInventory.js';
-import { loadCollectors, registryLoadError as collectorsLoadError } from '../collector/registry.js';
+import { loadCollectors, registryLoadError as collectorsLoadError, normalizeCollectorUrl } from '../collector/registry.js';
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js';
 
 const norm = (s) => String(s || '').trim().toLowerCase();
@@ -445,13 +445,16 @@ function readCollectorsOnce() {
  *   firstAlias(소문자 별칭 → 그 별칭이 가리키는 첫 항목 id — collector/registry.js findCollectorByName 과 같은 순서: 목록 앞 항목 · 항목마다 id 또는 name) —
  *   보이는 이름으로 당기기 · 중앙에서 켜기를 하면 어느 수집 서버로 가는지. 위임 행의 이름이 다른 항목으로 가면 그 사실을 행에 싣는다(agentClash).
  *   name 이 빈 항목은 이름 색인에 넣지 않는다(받은 이름 그대로 둔다 — 지어내지 않는다).
+ *   2차 재확인: urlById(소문자 id → 정규화 URL — collector/registry.js normalizeCollectorUrl 그대로) — 겹친 두 항목이 **같은 엣지(같은 URL)** 를 가리키면 겹침이 아니다
+ *   (같은 엣지의 옛 수동 등록 + 자기등록처럼 같은 name 이 둘이어도 당기기는 같은 엣지로 간다). URL 이 빈 항목은 같은 엣지라고 단정하지 않는다('' 는 비교하지 않는다).
  */
 export function remoteCollectorIndex(col) {
   const names = new Map();
   const byId = new Map();
   const byName = new Map();
   const firstAlias = new Map();
-  if (!col || col.error || !Array.isArray(col.list)) return { readable: false, names, byId, byName, firstAlias };
+  const urlById = new Map();
+  if (!col || col.error || !Array.isArray(col.list)) return { readable: false, names, byId, byName, firstAlias, urlById };
   for (const c of col.list) {
     if (!c || typeof c !== 'object') continue;
     const id = String(c.id ?? '').trim();
@@ -459,11 +462,11 @@ export function remoteCollectorIndex(col) {
     const name = String(c.name ?? '').trim();
     names.set(id, name);
     if (!names.has(id.toLowerCase())) names.set(id.toLowerCase(), name);
-    if (!byId.has(id.toLowerCase())) byId.set(id.toLowerCase(), { id, name });
+    if (!byId.has(id.toLowerCase())) { byId.set(id.toLowerCase(), { id, name }); urlById.set(id.toLowerCase(), normalizeCollectorUrl(c.url)); }
     if (name && !byName.has(name.toLowerCase())) byName.set(name.toLowerCase(), { id, name });
     for (const k of [id.toLowerCase(), name.toLowerCase()]) if (k && !firstAlias.has(k)) firstAlias.set(k, id);
   }
-  return { readable: true, names, byId, byName, firstAlias };
+  return { readable: true, names, byId, byName, firstAlias, urlById };
 }
 
 /**

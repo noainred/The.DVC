@@ -104,7 +104,12 @@ export function agentNameClash(remoteCollectors, name, id) {
   const n = t(name).toLowerCase(); const i = t(id);
   if (!n || !i || !rc || rc.readable !== true || !(rc.firstAlias instanceof Map)) return false;
   const owner = rc.firstAlias.get(n);
-  return owner != null && t(owner).toLowerCase() !== i.toLowerCase();
+  if (owner == null || t(owner).toLowerCase() === i.toLowerCase()) return false;
+  // 2차 재확인: 그 이름이 가는 항목이 **같은 엣지(정규화 URL 이 같다 — collector/registry.js normalizeCollectorUrl)** 를 가리키면 겹침이 아니다
+  //   (같은 엣지의 옛 수동 등록 + 자기등록 — 당기기 · 엣지 표는 같은 엣지로 간다). URL 이 빈 항목은 같은 엣지라고 단정하지 않는다(겹침 유지).
+  const u = rc.urlById instanceof Map ? rc.urlById : null;
+  const a = u ? t(u.get(t(owner).toLowerCase())) : ''; const b = u ? t(u.get(i.toLowerCase())) : '';
+  return !(a && b && a === b);
 }
 /** 위임 행에 붙일 엣지 이름 필드(중앙 — 정규화 이름 + 겹침 표지). */
 function delegatedAgentFields(remoteCollectors, agent) {
@@ -175,7 +180,7 @@ export function pickOsEntry(os, { regHost = '', name = '', vc = '', strict = fal
  * @param {function} [p.inventoryOf] `(registryId) => inv` — **캐시된** iDRAC 인벤토리(장비 왕복 0).
  *   v2.554: 이것으로 라이선스 등급(Datacenter/Enterprise)을 판정해 화면이 '텔레메트리가 왜 비었나'
  *   를 추측이 아니라 **근거로** 말한다(`bmusage/license.js` 머리말).
- * @param {object|null} [p.remoteCollectors] v2.959 — `{ readable, names, byId, byName, firstAlias }`(insights/fleetInventory.js remoteCollectorIndex — remoteCollectorNameOf · canonicalAgentRef · agentNameClash). 없으면 '못 읽음'.
+ * @param {object|null} [p.remoteCollectors] v2.959 — `{ readable, names, byId, byName, firstAlias, urlById }`(insights/fleetInventory.js remoteCollectorIndex — remoteCollectorNameOf · canonicalAgentRef · agentNameClash). 없으면 '못 읽음'.
  * @param {object|null} [p.registryUnread] 반증 F1 — `{ idrac:boolean, os:boolean }` 이 노드의 iDRAC · OS 등록부를 **읽지 못했는가**(poller sourceErrors 와 같은 판정).
  *   못 읽은 동안은 '이 노드에 등록이 없다' 를 알 수 없으므로 원격 위임 갈래를 타지 않는다(예전 사유 그대로 — sourceErrors 경고가 설명한다).
  * @returns {{targets:Array, skipped:Array, counts:object}}
