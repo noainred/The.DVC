@@ -11,9 +11,16 @@ import { opsText, latText, rateText, shareText, clientNameText, lateNote, drawer
 
 const RANGES = [{ key: '24h', label: '24시간' }, { key: '7d', label: '7일' }];
 
-export default function NodeClientsDrawer({ deviceId, node, end = null, offsetMin = 540, onClose, onOverlay, scrollKey = null }) {
+export default function NodeClientsDrawer({ deviceId, node, end = null, offsetMin = 540, onClose, onOverlay, scrollKey = null, focus = null }) {
   const [range, setRange] = useState('24h');
   const rootRef = useRef(null);
+  // v2.951: 연결 그래프에서 고른 것 — 창을 맞추고(24h/7d) 응답이 오면 그 클라이언트 줄로 스크롤 · 강조. 줄이 없으면(그 창에 없음) 문장으로 말한다.
+  const [hit, setHit] = useState(null);
+  useEffect(() => {
+    if (!focus || focus.at == null) return;
+    if (focus.range && RANGES.some((r) => r.key === focus.range)) setRange(focus.range);
+    setHit(focus.client ?? null);
+  }, [focus]);
   // v2.939: 바깥(노드 표 ID 열)이 열었으면 드로어 자체를 화면 위로 — 구역 머리를 올리면 400px 에서 드로어가 뷰 아래로 밀렸다(Chromium 판독).
   useEffect(() => {
     if (scrollKey == null) return;
@@ -33,6 +40,12 @@ export default function NodeClientsDrawer({ deviceId, node, end = null, offsetMi
   }, [deviceId, node, range, end]);
   // 다른 노드·장비의 늦은 응답을 이 노드 값처럼 그리지 않는다.
   const ready = d && d.ok !== false && d.deviceId === deviceId && d.node === node;
+  const hitMissing = !!(ready && hit && !d.clients.some((c) => c.client === hit));
+  useEffect(() => {
+    if (!ready || !hit || hitMissing) return;
+    const esc = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(hit) : String(hit).replace(/["\\]/g, '\\$&');
+    try { rootRef.current?.querySelector?.(`tr[data-client="${esc}"]`)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' }); } catch { /* 테스트 환경 */ }
+  }, [ready, hit, hitMissing, d]);
   const late = ready ? lateNote(d) : null;
   const notes = ready ? drawerNotes(d) : [];
   const nowMap = ready ? latestMapOf(d) : new Map();
@@ -63,6 +76,7 @@ export default function NodeClientsDrawer({ deviceId, node, end = null, offsetMi
               <span className="nl-muted">{protos.length ? `지연 ${protos.map((p) => `${p.proto} ${latText(p.lat)}`).join(' · ')}` : '프로토콜 표본 없음'}</span></div>
           </div>
           {notes.map((n) => <div key={n.text} className={`nl-banner ${n.tone}`}>{n.text}</div>)}
+          {hitMissing && <div className="nl-banner muted">고른 클라이언트 ‘{hit}’ 는 이 {d.range === '7d' ? '7일' : '24시간'} 창의 이 노드 표본에 없습니다 — 그래프 창이 더 길면(30일) 그 사이에만 요청을 보낸 클라이언트입니다.</div>}
           {d.clients.length > 0 && (
             <div className="table-wrap nl-tablewrap">
               <STable minWidth={820}>
@@ -80,7 +94,7 @@ export default function NodeClientsDrawer({ deviceId, node, end = null, offsetMi
                     const now = nowMap.get(`${c.client}|${c.proto || ''}`);
                     const nm = clientNameText(c);
                     return (
-                      <tr key={`${c.client}|${c.proto}`}>
+                      <tr key={`${c.client}|${c.proto}`} data-client={c.client} className={hit === c.client ? 'nl-rowhit' : undefined}>
                         <td className="nl-mono">{c.client}</td>
                         <td title={nm.hint}>{nm.text}{c.fixed ? <span className="nl-badge" title="창 ops 의 기준 비중 이상을 이 노드에 보냈습니다">고정</span> : null}</td>
                         <td>{c.proto || '—'}</td>

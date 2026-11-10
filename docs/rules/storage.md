@@ -834,3 +834,15 @@
   · Unity FC 바이트 · IOPS 는 **누적 카운터** — metricValue 최신 두 항목의 델타 ÷ 시각 차(하나면 null · 줄면 리셋 null). PowerStore 지연은 µs → ms(가정 · probe.latUnit). PowerMax HostMBs × 1e6.
   · 데모: 어레이 데모 장비의 시리얼은 같은 법인 SAN 데모 어레이 시리얼(`mock/demo/sanswitch.js sanDemoArraySerial`) · FE 표본 30일 백필(`backfillNodeLoad feDevices`) · `demoArrayPerfSample` 은 수집기와 같은 `buildFeSample`.
   · 화면 · 점검은 `docs/rules/sanswitch.md` v2.952.
+
+37. **v2.957 — 아이실론 노드 ↔ 클라이언트 ‘연결 그래프’ 보기(① 현 그래프 · ③ 노드 카드 — 사용자 선택)**(설계 `docs/design/isilon-node-clients-viz/README.md` · 회귀 `web/src/views/tools/storageNodeLoad/nodeLoadViz.test.js` · `nodeGraphView.test.jsx`):
+  · 데이터는 **`/client-dist` 응답 그대로**(새 서버 경로 없음 · 장비 호출 0 · 폴링 없음) — 클라이언트 × 노드 ops 는 서버 행렬 `clients[].nodes`(창 평균 ops/s) · 없으면 `share × total`.
+    쏠림 · 고정 · 노드 집합(ops 0 노드 포함)은 서버 값만 쓴다 — 웹이 다시 판정하지 않는다(`vizDataOf`).
+  · 좌표 · 순서 · 글자는 `nodeLoadViz.js`(순수) 하나 — 노드 호 110°~250°(id 순 · 길이 = 합 · 바닥값 2.5° 라 ops 0 노드도 보인다) · 클라이언트 호 70°~−70°(**주 노드 순 묶음** — 리본이 엇갈리지 않게 · 묶음 안 ops 내림차순) ·
+    리본 = 쌍(ops > 0) · 굵기 2~22px(가장 큰 쌍 대비) · **라벨은 ops 상위 24개만**(바닥 호 ≈ 13px — 전부 적으면 겹친다 · 나머지는 툴팁 · 드로어 — 숨긴 수를 범례가 말한다) · 압축(폭 560 미만)은 클라이언트 글자 없이.
+  · 색은 겹쳐 보기 4색 그대로(nfs 파랑 · smb 주황 · http 초록 · 쏠림 호박) · 배정 없는 프로토콜은 회색 ‘기타’(색을 지어내지 않는다) · 빈 노드는 ‘최근 작업 없음’(‘연결 없음’ 이 아님 — 카드 문장도 같다).
+  · 노드 카드: 부하 높은 순 · 빈 노드 맨 뒤 · 칩 크기 3단계는 **가장 큰 클라이언트 대비**(절대값 기준은 장비마다 규모가 달라 쓰지 않는다) · 칩 상한 12 + ‘외 n’(조용한 상한 금지) · 두 노드를 쓰는 클라이언트는 두 카드 + ‘2노드+’ ·
+    노드가 `CARDS_AUTO_NODES`(12) 를 넘으면 카드로 시작하고 그 사실을 문장으로.
+  · 드로어 연계: `NodeLoadPanel openFromGraph` → `NodeClientsDrawer focus={client, range, at}` — 그래프 창(24h → 24h · 7d/30d → 7d)에 맞추고 응답 뒤 `tr[data-client]` 로 스크롤 · `nl-rowhit` 강조 · 그 창에 없으면 문장(30일 창에서만 보인 클라이언트).
+    보기 ‘연결 그래프’ 는 분포 보기처럼 창 이동 줄 · 타일 · 추이를 쓰지 않는다(`distLike`).
+  · Chromium 1440/400(목 서버 데모 — 노드 6 · 클라이언트 22): 오류 0 · 가로 넘침 0 · 호 → 드로어 · 칩 → 줄 강조 확인. ② 생키 · ④ 매트릭스 · ⑤ 3D 는 시안만(미구현). 실장비 표본 모양은 여전히 미확인(v2.937 과 같다).
