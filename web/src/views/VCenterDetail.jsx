@@ -35,7 +35,7 @@ const BackupManageModal = React.lazy(() => import('./tools/BackupManageModal.jsx
 import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from './VeeamParts.jsx'; // v2.751: 배지(누르면 상세 창)·요약 카드 · v2.753 스냅샷 기준 요약
 import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, skipCell, skipSingleText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음 · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
 // v2.895(사용자 요청 — vSphere Client 의 vCenter 탭 12개 · 승인 시안 docs/design/vcenter-tabs ①~⑦ · 기본값 1~7): 탭 목록 · 옛 키 호환은 순수 모듈 하나.
-import { VCD_TABS, loadTab, saveTab, normTab } from './vcd/vcdTabs.js';
+import { VCD_TABS, entryTab, saveTab, normTab, tabClass } from './vcd/vcdTabs.js';
 import SummaryTab from './vcd/SummaryTab.jsx';
 import MonitorTab from './vcd/MonitorTab.jsx';
 import ConfigureTab from './vcd/ConfigureTab.jsx';
@@ -280,14 +280,15 @@ function TrendView({ vcenterId, clusters = [], hosts = [] }) {
 }
 
 // v2.915(가상화 플랫폼 · 시안 ⑤): '← 목록' 대신 브레드크럼(가상화 플랫폼 › vCenter › 이름) + ‹ 이전 · 다음 › vCenter(siblings — 목록 순서 · onOpen). 주소 · 탭 · 기억은 그대로.
-export default function VCenterDetail({ site, onBack, siblings = null, onOpen = null }) {
+export default function VCenterDetail({ site, onBack, siblings = null, onOpen = null, initialTab = null }) {
   const vcenterId = site.id;
   // 상단 KPI 미니 스파크라인용 24시간 추이(v2.377). ⚠ 훅은 컴포넌트 최상단에서 선언한다 —
   // 조기 return 뒤에 두면 렌더 간 훅 개수가 달라져 React #310 으로 화면이 크래시한다
   // (v2.375 에서 실제 발생 → v2.375.1 수정). 추이 탭은 자체적으로 다시 조회한다.
   const { d: miniHist } = useUsageHistory(vcenterId, '24h');
   // v2.895: 탭 12개 — 처음은 '호스트 및 클러스터'(예전 기본), 그 뒤로는 마지막으로 본 탭(브라우저 기억). 옛 기억값 'trend' 는 모니터 › 성능.
-  const [view, setViewRaw] = useState(() => loadTab(lsSafe()));
+  // v2.958: 허브(법인 카드 · 표)에서 들어오면 initialTab('요약') — entryTab 이 기억값으로도 남긴다. 다른 vCenter 로 바뀌면 key 로 다시 마운트된다.
+  const [view, setViewRaw] = useState(() => entryTab(initialTab, lsSafe()));
   const [monSub, setMonSub] = useState('alarms');      // 모니터 하위 칸(문제 및 알람 · 이벤트 · 작업 · 성능)
   const [cfgSub, setCfgSub] = useState('licenses');    // 구성 하위 칸
   const setView = (k, sub) => {
@@ -622,7 +623,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
       {/* v2.895: vSphere Client 의 vCenter 탭 12개(순서 그대로 · 이모지 없음). 한 줄 — 넘치면 탭 줄만 가로 스크롤(400px 에서 페이지를 밀지 않는다 — 기본값 4). */}
       <nav className="vcd-views" role="tablist" aria-label="vCenter 보기">
         {VCD_TABS.map((v) => (
-          <button key={v.k} type="button" role="tab" aria-selected={view === v.k} className={view === v.k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 10px', fontSize: 13 }} onClick={() => setView(v.k)}>
+          <button key={v.k} type="button" role="tab" aria-selected={view === v.k} className={tabClass(v.k, view === v.k)} style={{ flex: 'none', padding: '6px 10px', fontSize: 13 }} onClick={() => setView(v.k)}>
             {v.label}
           </button>
         ))}

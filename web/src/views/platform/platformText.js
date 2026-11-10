@@ -55,6 +55,31 @@ export function loadChipsCollapsed(storage) {
 export function saveChipsCollapsed(storage, collapsed) {
   try { storage?.setItem?.(LS_CHIPS, collapsed ? '1' : '0'); } catch { /* */ }
 }
+/**
+ * v2.958(사용자 요청 2026-11-10 "법인 선택하면 상태창의 백업/VM 수량 등을 법인에 맞게"): vCenter 탭 KPI 줄(VM 백업 · VM 증가 · 스토리지 증가)은
+ * 허브 범위(리전 · vCenter) 안의 법인만 합한다. 검색어는 범위가 아니라 찾기라 KPI 에 걸지 않는다.
+ *  - scopeLabel: KPI 문구의 머리 — 전체 / vCenter 이름 / '리전 X · N법인'.
+ *  - bareosSumOf: Bareos 백업 현황 rows[] 중 범위 안 법인의 counts.jobs 합 — 못 읽은 법인(counts 없음)은 0 으로 더하지 않고 unknown 으로 센다 · 하나도 못 읽었으면 jobs null.
+ */
+export function scopeLabel(scope, sitesInScope) {
+  const vc = String(scope?.vcenterId || ''); const region = String(scope?.region || '');
+  const list = Array.isArray(sitesInScope) ? sitesInScope : [];
+  if (vc) { const s = list.find((x) => x && x.id === vc); return s ? String(s.name || s.id) : vc; }
+  if (region) return `리전 ${region} · ${list.length}법인`;
+  return '전체';
+}
+export function bareosSumOf(rows, ids) {
+  const by = new Map((Array.isArray(rows) ? rows : []).filter((r) => r && typeof r === 'object').map((r) => [r.id, r]));
+  let jobs = 0; let known = 0; let unknown = 0;
+  for (const id of Array.isArray(ids) ? ids : []) {
+    const r = by.get(id);
+    const n = numOrNull(r?.counts?.jobs);
+    if (n == null) { unknown += 1; continue; }
+    jobs += n; known += 1;
+  }
+  return { jobs: known ? jobs : null, known, unknown, partial: known > 0 && unknown > 0 };
+}
+
 export const VC_VIEWS = Object.freeze([['cards', '카드'], ['table', '표']]);
 export function loadVcView(storage) {
   try { const v = storage?.getItem?.(LS_VC_VIEW); return VC_VIEWS.some(([k]) => k === v) ? v : 'cards'; } catch { return 'cards'; }
