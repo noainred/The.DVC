@@ -28,10 +28,13 @@ const yieldLoop = () => new Promise((r) => { setImmediate(r); });
  * taken 은 이미 쓴 이름(소문자) 집합 — 이 함수가 새 이름을 넣는다.
  */
 export function sheetNameOf(raw, taken) {
-  let base = String(raw ?? '').replace(/[\\/?*[\]:]/g, '_').replace(/^'+|'+$/g, '').trim() || '서버';
-  base = base.slice(0, 31);
+  // 반증 F1: 앞뒤 작은따옴표 · 공백 정리는 **자른 뒤에도** 한다(31번째 글자가 ' 면 exceljs 가 던져 파일 전체가 500).
+  //   'History' 는 exceljs · 엑셀이 쓰는 예약 이름이다 — 대소문자 무시로 피한다(엑셀이 대소문자를 가리는지는 확인하지 못해 넓게 막는다).
+  const trim = (x) => x.replace(/^['\s]+|['\s]+$/g, '');
+  const base = trim(trim(String(raw ?? '').replace(/[\\/?*[\]:]/g, '_')).slice(0, 31)) || '서버';
+  const busy = (n) => taken.has(n.toLowerCase()) || n.toLowerCase() === 'history';
   let name = base; let i = 2;
-  while (taken.has(name.toLowerCase())) { const suf = `~${i++}`; name = base.slice(0, 31 - suf.length) + suf; }
+  while (busy(name)) { const suf = `~${i++}`; name = (trim(base.slice(0, 31 - suf.length)) || '서버') + suf; }
   taken.add(name.toLowerCase());
   return name;
 }
@@ -52,6 +55,13 @@ function widthOf(label, kind) {
 }
 const NOTE_WIDTH = 46;
 
+/** 서버 사이의 합 — 값이 있는 서버만 더했으면 '(값 있는 M/N대)' 를 붙인다(반증 F5 — 부분 합을 전체 합처럼 보이지 않게). 하나도 없으면 '—'. */
+export function partialText(v, n, total, unit) {
+  if (v == null) return '—';
+  const s = `${v.toLocaleString('en-US')}${unit}`;
+  return n < total ? `${s} (값 있는 ${n}/${total}대)` : s;
+}
+
 /** 맨 위 4줄(제목 · 기준 · 포함된 법인 · 합계 칸) — 다음에 쓸 행 번호를 돌려준다. */
 function writeTop(ws, title, meta, totals, corpsLine, ncol) {
   ws.getCell('A1').value = title;
@@ -64,9 +74,9 @@ function writeTop(ws, title, meta, totals, corpsLine, ncol) {
   if (ncol > 1) ws.mergeCells(3, 1, 3, Math.min(ncol, 12));
   const kpis = [
     ['서버', `${totals.servers} 대`], ['물리서버', `${totals.bm} 대`], ['가상화 서버', `${totals.vh} 대`],
-    ['CPU 코어 합계', totals.cores == null ? '—' : totals.cores.toLocaleString('en-US')],
-    ['메모리 합계', totals.memGiB == null ? '—' : `${totals.memGiB.toLocaleString('en-US')} GiB`],
-    ['인벤토리 없음(합계 제외)', `${totals.noInventory} 대`],
+    ['CPU 코어 합계', partialText(totals.cores, totals.coresN, totals.servers, '')],
+    ['메모리 합계', partialText(totals.memGiB, totals.memN, totals.servers, ' GiB')],
+    ['인벤토리 없음', `${totals.noInventory} 대`],
   ];
   const r = ws.getRow(4);
   kpis.forEach(([k, v], i) => {
@@ -101,7 +111,7 @@ async function summarySheet(wb, name, model, meta, rows, { band, corpsLine, tota
       last = r.corpId; zebra = 0;
       const ci = corpInfo.get(r.corpId);
       const br = ws.getRow(at++);
-      br.getCell(1).value = `법인 ${r.corpName}  ·  서버 ${ci?.count ?? 0}대 (물리 ${ci?.bm ?? 0} · 가상화 ${ci?.vh ?? 0})  ·  코어 ${ci?.cores == null ? '—' : ci.cores.toLocaleString('en-US')}  ·  메모리 ${ci?.memGiB == null ? '—' : `${ci.memGiB.toLocaleString('en-US')} GiB`}`;
+      br.getCell(1).value = `법인 ${r.corpName}  ·  서버 ${ci?.count ?? 0}대 (물리 ${ci?.bm ?? 0} · 가상화 ${ci?.vh ?? 0})  ·  코어 ${partialText(ci?.cores ?? null, ci?.coresN ?? 0, ci?.count ?? 0, '')}  ·  메모리 ${partialText(ci?.memGiB ?? null, ci?.memN ?? 0, ci?.count ?? 0, ' GiB')}`;
       ws.mergeCells(br.number, 1, br.number, cols.length);
       br.getCell(1).font = { bold: true, color: { argb: PAL.title } };
       br.getCell(1).fill = fill(BAND);
@@ -149,11 +159,12 @@ function infoSheet(wb, meta, model) {
     ['Hostname(OS)', 'iDRAC 이 보고하는 OS 호스트 이름. 보고하지 않으면 빈 칸 + 비고 ‘Hostname 미보고’. ‘서버’ 열은 포탈에 등록된 이름입니다.'],
     ['코어 · 메모리', '코어는 물리 코어 합계(논리 스레드 아님). 메모리는 시스템 요약(없으면 DIMM 크기 합) — 단위 GiB.'],
     ['디스크', '물리 디스크 기준(장착 수 · 개별 용량의 합, GB = 10^9 바이트). RAID 뒤 가용 용량이나 OS 파일시스템 사용량이 아닙니다.'],
-    ['빈 칸', '읽지 못한 값입니다 — 0 이 아닙니다. 합계 · 띠 소계에 들어가지 않습니다.'],
+    ['빈 칸', '읽지 못한 값입니다 — 0 이 아닙니다. 부품 하나라도 못 읽었으면 그 서버의 합(디스크 합계 · PSU 용량)도 빈 칸입니다. 그 컬렉션을 읽지 못한 서버는 개수(DIMM · 디스크 · PSU · NIC 포트)도 빈 칸입니다.'],
+    ['합계 칸 · 띠 소계', '코어 · 메모리는 값이 있는 서버만 더합니다 — 빠진 서버가 있으면 ‘(값 있는 M/N대)’ 를 붙입니다. 가상화 호스트는 iDRAC 받침이 없어도 vCenter 의 코어 · 메모리가 들어갑니다.'],
     ['법인 띠', meta.band === 'band' ? '법인이 바뀔 때마다 띠 줄이 들어갑니다 — 띠 때문에 서버 요약에는 자동 필터를 걸지 않았습니다(필터 · 피벗은 ‘법인 열만’ 으로 내려받으세요).' : meta.band === 'sheet' ? '법인마다 서버 요약 시트를 나눴습니다. 상세 시트는 한 장에 법인 열로 있습니다.' : '띠 없이 한 표 — 자동 필터가 걸려 있습니다.'],
     ['상태 열', '수집 시점의 Redfish 상태 글자(OK · Warning · Critical) 그대로입니다. 포탈이 새로 판정하지 않습니다.'],
     ['넣지 않는 것', '시리얼 번호 · iDRAC 사용자 계정 · 이벤트 로그 · 접속 계정.' + (meta.admin ? '' : ' 관리자 계정이 아니라 iDRAC 주소 · MAC · UUID 와 주소로 등록된 서버 이름이 빠지거나 가려졌습니다.')],
-    ['인벤토리 없음', noInv.length ? `${noInv.length}대 — 서버 요약의 비고에 사유가 있습니다. 합계 칸에서 빠집니다.` : '없음'],
+    ['인벤토리 없음', noInv.length ? `${noInv.length}대 — 서버 요약의 비고에 사유가 있습니다. 하드웨어 칸은 빈 칸입니다(가상화 호스트의 코어 · 메모리는 vCenter 값).` : '없음'],
   ];
   if (meta.splitNote) lines.push(['파일 나눔', meta.splitNote]);
   lines.forEach(([k, v], i) => {
@@ -220,7 +231,7 @@ export async function buildHwWorkbook(model, meta) {
   if (meta.band === 'sheet') {
     for (const c of model.corps) {
       const rows = model.summary.rows.filter((r) => r.corpId === c.id);
-      const t = { servers: c.count, bm: c.bm, vh: c.vh, cores: c.cores, memGiB: c.memGiB, noInventory: rows.filter((r) => /^인벤토리 없음/.test(String(r.cells[r.cells.length - 1] || ''))).length };
+      const t = { servers: c.count, bm: c.bm, vh: c.vh, cores: c.cores, coresN: c.coresN, memGiB: c.memGiB, memN: c.memN, noInventory: rows.filter((r) => /^인벤토리 없음/.test(String(r.cells[r.cells.length - 1] || ''))).length };
       await summarySheet(wb, sheetNameOf(`요약 ${c.name}`, taken), model, meta, rows, { band: false, corpsLine: `법인 ${c.name}`, totals: t, title: `서버 하드웨어 정보 — ${c.name}` });
       await yieldLoop();
     }

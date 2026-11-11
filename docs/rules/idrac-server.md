@@ -1451,5 +1451,9 @@
   - 띠 판본은 서버 요약에 자동 필터를 걸지 않는다(띠 줄이 필터 · 정렬을 깬다) — 필터용은 ‘법인 열만’. CSV 에는 띠 · 사양서가 없다.
   - 엣지 서버는 축약 인벤토리(`collector/compactInv.js` · 중앙 `INV_SHAPE`)라 제조사 · 어댑터/PSU/PCIe 펌웨어 · BIOS 설정 · iDRAC 관리 · 라이선스가 빈다(사용자 기본안 3 — 이번에는 넓히지 않음).
     채우려면 두 곳을 **함께** 넓힌다(v2.728 규칙).
+  - **반증 1인(2026-11-11) 확정 → 수정**: F1 시트 이름은 **자른 뒤에도** 앞뒤 `'` 를 지우고 `History` 를 대소문자 무시로 피한다(exceljs 가 던져 파일 전체 500) ·
+    F2 ZIP 항목 이름은 `render.js uniqueNames`(`~2` — util/zip.js 는 중복이면 던진다) · F3 개수 · 합은 `collections.<키>==='failed'` 면 null(redfish.js 는 배열을 먼저 [] 로 만든다 —
+    NIC 은 표식이 없어 빈 배열도 null) · F4 맨 위 칸 이름에서 '합계 제외' 를 뺐다(받침 없는 가상화 호스트는 vCenter 값으로 더해진다) · F5 서버 안의 합은 부품 하나라도 못 읽으면 null,
+    서버 사이의 합(띠 · 맨 위 칸)은 '(값 있는 M/N대)' · F6 모델 · CSV 조립에 시간 기준 양보 · F7 게이트를 실제 호출로 고정(operator · viewer · 범위 계정 · 데모 403 · 409).
   - 회귀 `server/test/hwExport2966.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
 

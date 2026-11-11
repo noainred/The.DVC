@@ -25,7 +25,23 @@ const s = (v) => (v == null ? '' : String(v).trim());
 const n = (v) => { const x = numOrNull(v); return x == null ? null : x; };
 const pos = (v) => { const x = n(v); return x != null && x > 0 ? x : null; };
 const arr = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === 'object') : []);
-const sum = (xs) => { let t = 0; let any = false; for (const x of xs) { if (x != null) { t += x; any = true; } } return any ? t : null; };
+/*
+ * 합(반증 F5 — '부분 합은 따로 센다'): 원소 하나라도 못 읽었으면 null(빈 칸)이다 — 읽은 것만 더해 전체 합처럼 보이지 않게.
+ * 빈 목록은 0(읽었고 없음). 서버 사이의 합(띠 · 맨 위 칸)은 rows.js 가 '몇 대를 더했는가' 를 함께 싣는다.
+ */
+const strictSum = (xs) => { let t = 0; for (const x of xs) { if (x == null) return null; t += x; } return t; };
+/*
+ * 그 컬렉션을 읽었는가(반증 F3 — 못 읽은 값은 0 이 아니다): redfish.js 는 배열을 먼저 [] 로 만들고 실패하면 collections.<키>='failed' 만 남긴다
+ * — 배열 길이 0 을 그대로 세면 '읽지 못함' 이 '0개' 로 나간다. 배열이 없거나 'failed' 면 null.
+ * emptyUnknown: 표식이 없는 컬렉션(NIC)은 빈 배열도 못 읽음으로 본다(NIC 0개 서버는 없다 — 구분할 근거가 없으면 지어내지 않는다).
+ */
+function readArr(inv, key, { emptyUnknown = false } = {}) {
+  if (!inv || !Array.isArray(inv[key])) return null;
+  if (inv.collections && typeof inv.collections === 'object' && inv.collections[key] === 'failed') return null;
+  const a = arr(inv[key]);
+  return emptyUnknown && !a.length ? null : a;
+}
+const countOf = (inv, key, o) => { const a = readArr(inv, key, o); return a ? a.length : null; };
 
 /*
  * NIC 포트 목록. 같은 물리 포트 중복은 idrac/nicPorts.js dedupNics 로 묶는다.
@@ -34,13 +50,16 @@ const sum = (xs) => { let t = 0; let any = false; for (const x of xs) { if (x !=
  */
 const realNics = (inv) => dedupNics(arr(inv?.nics));
 const nicPorts = (inv) => realNics(inv).flatMap((a) => arr(a.ports).map((p) => ({ a, p })));
+/** 포트 목록 — NIC 컬렉션을 못 읽었으면(빈 배열 포함) null. */
+const portsRead = (inv) => (readArr(inv, 'nics', { emptyUnknown: true }) ? nicPorts(inv) : null);
 const cap = (ctx) => (ctx.inv ? capacityOfInventory(ctx.inv) : null);
 
 /** 메모리(GiB): 시스템 요약 → 없으면 DIMM 합. 둘 다 없으면 vCenter 값(가상화 호스트 · iDRAC 받침 없음). */
 function memGiB(ctx) {
   const c = cap(ctx);
   if (c?.memGiB != null) return Math.round(c.memGiB);
-  const d = sum(arr(ctx.inv?.memoryDimms).map((m) => pos(m.sizeGB)));
+  const dm = readArr(ctx.inv, 'memoryDimms');
+  const d = dm && dm.length ? strictSum(dm.map((m) => pos(m.sizeGB))) : null;
   if (d != null) return d;
   return pos(ctx.vc?.memGiB);
 }
@@ -51,19 +70,23 @@ function cores(ctx) {
 }
 const disks = (inv) => arr(inv?.disks);
 function diskMix(inv) {
+  const list = readArr(inv, 'disks');
+  if (!list) return '';
   const m = new Map();
-  for (const d of disks(inv)) {
+  for (const d of list) {
     const k = `${s(d.media) || '미상'}${s(d.protocol) ? `(${s(d.protocol)})` : ''}`;
     m.set(k, (m.get(k) || 0) + 1);
   }
   return [...m].map(([k, c]) => `${k} ${c}`).join(' · ');
 }
 function gpuSummary(inv) {
+  const list = readArr(inv, 'gpus');
+  if (!list) return '';
   const m = new Map();
-  for (const g of arr(inv?.gpus)) { const k = s(g.model || g.name) || 'GPU'; m.set(k, (m.get(k) || 0) + 1); }
+  for (const g of list) { const k = s(g.model || g.name) || 'GPU'; m.set(k, (m.get(k) || 0) + 1); }
   return [...m].map(([k, c]) => `${k} × ${c}`).join(' · ');
 }
-const maxPortMbps = (inv) => { const v = nicPorts(inv).map(({ p }) => pos(p.speedMbps)).filter((x) => x != null); return v.length ? Math.max(...v) : null; };
+const maxPortMbps = (inv) => { const v = (portsRead(inv) || []).map(({ p }) => pos(p.speedMbps)).filter((x) => x != null); return v.length ? Math.max(...v) : null; };
 const fwOf = (inv, type) => { const f = arr(inv?.firmware).find((x) => s(x.type) === type); return f ? s(f.version) : ''; };
 const licenseText = (inv) => arr(inv?.licenses).map((l) => s(l.name)).filter(Boolean).join(' · ');
 // 인벤토리 시각 — 포탈 오프셋(util/dayKey.js localStamp · 기본 KST). 못 읽으면 ''(시각을 지어내지 않는다).
@@ -110,7 +133,7 @@ export const HW_GROUPS = Object.freeze([
       { key: 'model', label: 'CPU 모델', kind: 'text', basic: true, get: (c) => s(c.inv?.cpu?.model) || s(arr(c.inv?.cpus)[0]?.model) },
       { key: 'sockets', label: '소켓 수', kind: 'num', basic: true, get: (c) => cap(c)?.sockets ?? null },
       { key: 'cores', label: '코어(합계)', kind: 'num', basic: true, get: cores },
-      { key: 'threads', label: '스레드(합계)', kind: 'num', get: (c) => cap(c)?.threads ?? sum(arr(c.inv?.cpus).map((x) => pos(x.threads))) },
+      { key: 'threads', label: '스레드(합계)', kind: 'num', get: (c) => { const t = cap(c)?.threads; if (t != null) return t; const cs = readArr(c.inv, 'cpus'); return cs && cs.length ? strictSum(cs.map((x) => pos(x.threads))) : null; } },
     ],
     det: {
       items: (inv) => arr(inv?.cpus),
@@ -128,7 +151,7 @@ export const HW_GROUPS = Object.freeze([
     key: 'mem', name: '메모리', sheet: '메모리', file: 'memory',
     sum: [
       { key: 'gib', label: '메모리 GiB', kind: 'num', basic: true, get: memGiB },
-      { key: 'dimms', label: 'DIMM 수', kind: 'num', basic: true, get: (c) => (c.inv && Array.isArray(c.inv.memoryDimms) ? arr(c.inv.memoryDimms).length : null) },
+      { key: 'dimms', label: 'DIMM 수', kind: 'num', basic: true, get: (c) => countOf(c.inv, 'memoryDimms') },
     ],
     det: {
       items: (inv) => arr(inv?.memoryDimms),
@@ -146,8 +169,8 @@ export const HW_GROUPS = Object.freeze([
   {
     key: 'disk', name: '디스크', hint: '물리 디스크 기준', sheet: '디스크', file: 'disk',
     sum: [
-      { key: 'count', label: '디스크 수', kind: 'num', basic: true, get: (c) => (c.inv && Array.isArray(c.inv.disks) ? disks(c.inv).length : null) },
-      { key: 'gb', label: '디스크 합계 GB', kind: 'num', basic: true, get: (c) => sum(disks(c.inv).map((d) => pos(d.capacityGB))) },
+      { key: 'count', label: '디스크 수', kind: 'num', basic: true, get: (c) => countOf(c.inv, 'disks') },
+      { key: 'gb', label: '디스크 합계 GB', kind: 'num', basic: true, get: (c) => { const d = readArr(c.inv, 'disks'); return d ? strictSum(d.map((x) => pos(x.capacityGB))) : null; } },
       { key: 'mix', label: '디스크 구성', kind: 'text', get: (c) => diskMix(c.inv) },
     ],
     det: {
@@ -179,7 +202,7 @@ export const HW_GROUPS = Object.freeze([
   {
     key: 'nic', name: '네트워크 인터페이스', hint: '모든 포트의 링크 속도', sheet: 'NIC', file: 'nic',
     sum: [
-      { key: 'ports', label: 'NIC 포트 수', kind: 'num', get: (c) => (c.inv && Array.isArray(c.inv.nics) ? nicPorts(c.inv).length : null) },
+      { key: 'ports', label: 'NIC 포트 수', kind: 'num', get: (c) => { const p = portsRead(c.inv); return p ? p.length : null; } },
       { key: 'maxGbps', label: '최고 링크 Gbps', kind: 'num', get: (c) => { const m = maxPortMbps(c.inv); return m == null ? null : m / 1000; } },
     ],
     det: {
@@ -226,8 +249,8 @@ export const HW_GROUPS = Object.freeze([
   {
     key: 'psu', name: '전원(PSU)', sheet: '전원', file: 'psu',
     sum: [
-      { key: 'count', label: 'PSU 수', kind: 'num', get: (c) => (c.inv && Array.isArray(c.inv.psus) ? arr(c.inv.psus).length : null) },
-      { key: 'capacityW', label: 'PSU 용량 합계 W', kind: 'num', get: (c) => sum(arr(c.inv?.psus).map((p) => pos(p.capacityWatts))) },
+      { key: 'count', label: 'PSU 수', kind: 'num', get: (c) => countOf(c.inv, 'psus') },
+      { key: 'capacityW', label: 'PSU 용량 합계 W', kind: 'num', get: (c) => { const ps = readArr(c.inv, 'psus'); return ps ? strictSum(ps.map((p) => pos(p.capacityWatts))) : null; } },
       { key: 'capW', label: '전력 상한 W', kind: 'num', get: (c) => pos(c.inv?.powerCap?.limitWatts) },
     ],
     det: {

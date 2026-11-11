@@ -291,7 +291,7 @@ insightsRouter.get('/fleet/hardware-export', hwCsvPerm, hwFullScopeOnly, async (
   try {
     const invOf = makeInvOf({ getInventory, registry: loadRegistry(), remoteServers: allRemoteServers() });
     const servers = selectServers(fleet, { kind: o.kind, corps: o.corps, invOf, match: admin ? null : insightsMatcher(snap) });
-    const model = buildHwModel(servers, o.fields, { admin, spec: o.spec });
+    const model = await buildHwModel(servers, o.fields, { admin, spec: o.spec });
     const now = Date.now();
     const kindText = o.kind === 'vh' ? '가상화 서버(ESXi 호스트)만' : o.kind === 'both' ? '물리서버 + 가상화 서버' : '물리서버(베어메탈)만';
     const scopeText = o.corps ? roster.filter((c) => o.corps.has(c.id)).map((c) => c.name).join(' · ') : '모든 법인';

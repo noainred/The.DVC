@@ -11,6 +11,7 @@
  */
 import { HW_FIELDS, HW_GROUPS, fieldAllowed } from './catalog.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { createYielder } from '../../util/timeSlice.js';
 
 const t = (v) => (v == null ? '' : String(v).trim());
 const low = (v) => t(v).toLowerCase();
@@ -110,49 +111,64 @@ export function selectServers(fleet, { kind = 'bm', corps = null, invOf, match =
  *             corps:{id:string,name:string,count:number,bm:number,vh:number,cores:number|null,memGiB:number|null}[],
  *             totals:object, specs:object[]|null }}
  */
-export function buildHwModel(servers, fields, { admin = false, spec = false } = {}) {
+export async function buildHwModel(servers, fields, { admin = false, spec = false } = {}) {
+  // 반증 F6: 서버 수천 대 · 사양서면 수백 ms 동기 — 시간 기준으로 양보한다(perf-db '요청 경로의 큰 집계는 조각 + 시간 기준 양보').
+  const maybeYield = createYielder();
   const keys = fields.filter((k) => HW_FIELDS.has(k));
   const sumDefs = keys.map((k) => HW_FIELDS.get(k)).filter((f) => f.part === 'sum');
   const noteCol = { key: 'note', label: '비고', kind: 'text' };
-  const summary = {
-    cols: [...sumDefs.map((f) => ({ key: `${f.group.key}.sum.${f.key}`, label: f.label, kind: f.kind })), noteCol],
-    rows: servers.map((c) => ({ corpId: c.corpId, corpName: c.corpName, kind: c.kind, cells: [...sumDefs.map((f) => clean(f.get(c))), c.note] })),
-  };
+  const summary = { cols: [...sumDefs.map((f) => ({ key: `${f.group.key}.sum.${f.key}`, label: f.label, kind: f.kind })), noteCol], rows: [] };
+  for (const c of servers) {
+    summary.rows.push({ corpId: c.corpId, corpName: c.corpName, kind: c.kind, cells: [...sumDefs.map((f) => clean(f.get(c))), c.note] });
+    await maybeYield();
+  }
   const details = [];
   for (const g of HW_GROUPS) {
     const cols = keys.map((k) => HW_FIELDS.get(k)).filter((f) => f.part === 'det' && f.group.key === g.key);
     if (!cols.length || !g.det) continue;
     const rows = [];
-    servers.forEach((c, si) => {
-      if (!c.inv) return;
+    for (let si = 0; si < servers.length; si++) {
+      const c = servers[si];
+      if (!c.inv) continue;
       for (const item of g.det.items(c.inv)) rows.push({ corpId: c.corpId, si, cells: [c.corpName, c.name, c.serviceTag, ...cols.map((f) => clean(f.get(item, c)))] });
-    });
+      await maybeYield();
+    }
     details.push({
       key: g.key, sheet: g.sheet, file: g.file,
       cols: [{ label: '법인(vCenter)', kind: 'text' }, { label: '서버', kind: 'text' }, { label: '서비스태그', kind: 'mono' }, ...cols.map((f) => ({ label: f.label, kind: f.kind }))],
       rows,
     });
   }
-  // 법인 소계(띠) — 코어 · 메모리는 인벤토리(또는 vCenter 값)가 있는 서버만 더한다. 하나도 없으면 null('—').
+  // 법인 소계(띠) — 코어 · 메모리는 값이 있는 서버(인벤토리 또는 가상화 호스트의 vCenter 값)만 더하고, **몇 대를 더했는지**(coresN · memN)를
+  //   함께 싣는다(반증 F5 — 부분 합을 전체 합처럼 보이지 않게). 하나도 없으면 null('—').
   const coreF = HW_FIELDS.get('cpu.sum.cores'); const memF = HW_FIELDS.get('mem.sum.gib');
   const byCorp = new Map();
   for (const c of servers) {
     const k = c.corpId || UNASSIGNED;
-    if (!byCorp.has(k)) byCorp.set(k, { id: c.corpId, name: c.corpName, count: 0, bm: 0, vh: 0, cores: null, memGiB: null });
+    if (!byCorp.has(k)) byCorp.set(k, { id: c.corpId, name: c.corpName, count: 0, bm: 0, vh: 0, cores: null, coresN: 0, memGiB: null, memN: 0 });
     const e = byCorp.get(k);
     e.count++; e[c.kind]++;
     const co = coreF.get(c); const me = memF.get(c);
-    if (co != null) e.cores = (e.cores || 0) + co;
-    if (me != null) e.memGiB = (e.memGiB || 0) + me;
+    if (co != null) { e.cores = (e.cores || 0) + co; e.coresN++; }
+    if (me != null) { e.memGiB = (e.memGiB || 0) + me; e.memN++; }
   }
   const corps = [...byCorp.values()];
-  const sumOf = (k) => corps.reduce((a, e) => (e[k] == null ? a : (a || 0) + e[k]), null);
-  const totals = {
-    servers: servers.length, bm: servers.filter((c) => c.kind === 'bm').length, vh: servers.filter((c) => c.kind === 'vh').length,
-    noInventory: servers.filter((c) => !c.inv).length, cores: sumOf('cores'), memGiB: sumOf('memGiB'),
-    disks: servers.reduce((a, c) => a + (Array.isArray(c.inv?.disks) ? c.inv.disks.length : 0), 0),
-  };
-  return { summary, details, corps, totals, specs: spec ? servers.map((c) => specOf(c, admin)) : null };
+  const totals = { servers: servers.length, bm: servers.filter((c) => c.kind === 'bm').length, vh: servers.filter((c) => c.kind === 'vh').length,
+    noInventory: servers.filter((c) => !c.inv).length, ...corpTotals(corps) };
+  let specs = null;
+  if (spec) { specs = []; for (const c of servers) { specs.push(specOf(c, admin)); await maybeYield(); } }
+  return { summary, details, corps, totals, specs };
+}
+
+/** 법인 소계들 → 코어 · 메모리 합과 더한 대수(render.js 가 부분집합에서도 같은 함수로 다시 센다). */
+export function corpTotals(corps) {
+  const out = { cores: null, coresN: 0, memGiB: null, memN: 0 };
+  for (const e of corps) {
+    if (e.cores != null) out.cores = (out.cores || 0) + e.cores;
+    if (e.memGiB != null) out.memGiB = (out.memGiB || 0) + e.memGiB;
+    out.coresN += e.coresN || 0; out.memN += e.memN || 0;
+  }
+  return out;
 }
 
 const clean = (v) => {
@@ -187,7 +203,10 @@ export function specOf(c, admin = false) {
       const cols = g.det.cols.filter((f) => fieldAllowed(f, admin));
       const items = g.det.items(c.inv);
       const failed = coll && COLL[g.key] && coll[COLL[g.key]] === 'failed';
-      if (cols.length) table = { cols: cols.map((f) => ({ label: f.label, kind: f.kind })), rows: items.map((x) => cols.map((f) => clean(f.get(x, c)))), empty: items.length ? '' : (failed ? '읽지 못함' : '없음') };
+      // 빈 표의 말: 'failed' 표식 → 읽지 못함 · 표식이 없는 컬렉션(NIC — 0개 서버는 없다)은 읽지 못함 · 펌웨어 · BIOS · iDRAC 관리는 수집기가 실패도 빈 값으로
+      //   남겨 구분할 수 없다 → '보고된 값 없음' · 나머지(읽었고 0개) → 없음.
+      const emptyWord = failed || g.key === 'nic' ? '읽지 못함' : ['fw', 'bios', 'mgmt'].includes(g.key) ? '보고된 값 없음' : '없음';
+      if (cols.length) table = { cols: cols.map((f) => ({ label: f.label, kind: f.kind })), rows: items.map((x) => cols.map((f) => clean(f.get(x, c)))), empty: items.length ? '' : emptyWord };
     }
     if (!sumRows.length && !table) continue;
     sections.push({ title: g.name, kind: 'mixed', rows: sumRows, table });

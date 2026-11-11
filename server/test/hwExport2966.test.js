@@ -7,8 +7,8 @@ import fs from 'node:fs';
 import ExcelJS from 'exceljs';
 import { HW_GROUPS, HW_FIELDS, LOCKED_KEYS, BASIC_KEYS, resolveFields, catalogForClient } from '../src/insights/hwExport/catalog.js';
 import { makeInvOf, selectServers, buildHwModel, UNASSIGNED } from '../src/insights/hwExport/rows.js';
-import { renderHwExport, csvTables, specSplitPlan, subsetModel, buildHwWorkbookPayload, hwExportLastRenderMode, _setHwExportWorkerUrlForTest } from '../src/insights/hwExport/render.js';
-import { sheetNameOf, SUMMARY_SHEET, TOC_SHEET } from '../src/insights/hwExport/xlsx.js';
+import { renderHwExport, uniqueNames, csvTables, specSplitPlan, subsetModel, buildHwWorkbookPayload, hwExportLastRenderMode, _setHwExportWorkerUrlForTest } from '../src/insights/hwExport/render.js';
+import { sheetNameOf, partialText, SUMMARY_SHEET, TOC_SHEET } from '../src/insights/hwExport/xlsx.js';
 import { hwExportOpts, hwCorpRoster, hwExportFileBase } from '../src/routes/insights.js';
 import { _resetExportBusy } from '../src/util/exportBusy.js';
 import { internalLinkState } from '../src/util/xlsxInternalLink.js';
@@ -115,15 +115,15 @@ test('비관리자 — 주소로 등록된 서버 이름 · Hostname 은 가린�
 });
 
 /* ── 모델 ───────────────────────────────────────────────────────────── */
-test('buildHwModel — 못 읽은 값은 null(0 아님) · 합계는 읽은 것만 · 상세는 부품 한 개 = 한 줄 · 법인 소계', () => {
+test('buildHwModel — 못 읽은 값은 null(0 아님) · 합계는 읽은 것만 · 상세는 부품 한 개 = 한 줄 · 법인 소계', async () => {
   const servers = selectServers(fleet, { kind: 'both', invOf });
-  const m = buildHwModel(servers, allKeys, { admin: true });
+  const m = await buildHwModel(servers, allKeys, { admin: true });
   const col = (k) => m.summary.cols.findIndex((c) => c.key === k);
   const nas = m.summary.rows.find((r) => r.cells[col('id.sum.name')] === 'bm-nas-01');
   assert.equal(nas.cells[col('cpu.sum.cores')], null);
   assert.equal(nas.cells[col('disk.sum.count')], null, '인벤토리가 없으면 디스크 수도 빈 칸(0 이 아니다)');
   const db = m.summary.rows.find((r) => r.cells[col('id.sum.name')] === 'bm-db-01');
-  assert.equal(db.cells[col('disk.sum.gb')], 960, '용량을 못 읽은 디스크는 합에서 빠진다');
+  assert.equal(db.cells[col('disk.sum.gb')], null, '반증 F5: 용량을 못 읽은 디스크가 하나라도 있으면 합은 빈 칸(부분 합을 전체 합처럼 보이지 않게)');
   assert.equal(db.cells[col('disk.sum.count')], 2);
   assert.equal(db.cells[col('nic.sum.maxGbps')], 25);
   const edge = m.summary.rows.find((r) => r.cells[col('id.sum.name')] === 'bm-edge-01');
@@ -133,12 +133,12 @@ test('buildHwModel — 못 읽은 값은 null(0 아님) · 합계는 읽은 것�
   const down = nic.rows.find((r) => r.cells.includes('Down'));
   assert.equal(down.cells[down.cells.length - 2], null, '속도 0 은 못 읽음(빈 칸)');
   const a = m.corps.find((c) => c.name === 'vcenter-a');
-  assert.deepEqual([a.count, a.bm, a.vh, a.cores, a.memGiB], [3, 2, 1, 32 + 64, 192 + 512]);
+  assert.deepEqual([a.count, a.bm, a.vh, a.cores, a.coresN, a.memGiB, a.memN], [3, 2, 1, 32 + 64, 2, 192 + 512, 2], '못 읽은 서버(bm-nas-01)는 빠지고 더한 대수를 싣는다');
   assert.equal(m.totals.noInventory, 2);
-  const noAdmin = buildHwModel(servers, resolveFields(allKeys, { admin: false }), { admin: false, spec: true });
+  const noAdmin = await buildHwModel(servers, resolveFields(allKeys, { admin: false }), { admin: false, spec: true });
   assert.ok(!JSON.stringify(noAdmin).includes('00:00:5E:00:53:10'), '비관리자 모델에 MAC 이 없다');
   assert.ok(!JSON.stringify(noAdmin).includes('192.0.2.21'), '비관리자 사양서에 iDRAC 주소가 없다');
-  assert.ok(!JSON.stringify(buildHwModel(servers, allKeys, { admin: true, spec: true })).match(/SECRET-SN|DIMM-SN|DSK-SN|secret event/), '시리얼 · 이벤트는 관리자에게도 없다');
+  assert.ok(!JSON.stringify(await buildHwModel(servers, allKeys, { admin: true, spec: true })).match(/SECRET-SN|DIMM-SN|DSK-SN|secret event/), '시리얼 · 이벤트는 관리자에게도 없다');
 });
 
 /* ── 엑셀 ───────────────────────────────────────────────────────────── */
@@ -146,7 +146,7 @@ async function load(buf) { const wb = new ExcelJS.Workbook(); await wb.xlsx.load
 const servers6 = () => selectServers(fleet, { kind: 'both', invOf });
 
 test('엑셀(띠) — 서버 요약 · 상세 · 안내, 띠 줄 있음 · 자동 필터 없음 · 빈 칸은 빈 칸', async () => {
-  const m = buildHwModel(servers6(), BASIC_KEYS.concat(['nic.det.port', 'nic.det.speedMbps', 'fw.det.version']), { admin: true });
+  const m = await buildHwModel(servers6(), BASIC_KEYS.concat(['nic.det.port', 'nic.det.speedMbps', 'fw.det.version']), { admin: true });
   const { buffer } = await buildHwWorkbookPayload({ model: m, meta: { basis: 'x', kindText: 'y', band: 'band', admin: true } });
   const wb = await load(buffer);
   assert.deepEqual(wb.worksheets.map((w) => w.name), [SUMMARY_SHEET, 'NIC', '펌웨어', '안내']);
@@ -160,7 +160,7 @@ test('엑셀(띠) — 서버 요약 · 상세 · 안내, 띠 줄 있음 · 자�
 });
 
 test('엑셀(법인 열만 · 법인마다 시트) — 필터 · 시트 나눔', async () => {
-  const m = buildHwModel(servers6(), BASIC_KEYS, { admin: true });
+  const m = await buildHwModel(servers6(), BASIC_KEYS, { admin: true });
   const col = await load((await buildHwWorkbookPayload({ model: m, meta: { basis: '', kindText: '', band: 'col', admin: true } })).buffer);
   assert.ok(col.getWorksheet(SUMMARY_SHEET).autoFilter);
   const per = await load((await buildHwWorkbookPayload({ model: m, meta: { basis: '', kindText: '', band: 'sheet', admin: true } })).buffer);
@@ -168,7 +168,7 @@ test('엑셀(법인 열만 · 법인마다 시트) — 필터 · 시트 나눔',
 });
 
 test('엑셀 사양서 — 서버마다 한 장 + 목차, 목차 링크가 가리키는 시트가 실제로 있다', async () => {
-  const m = buildHwModel(servers6(), BASIC_KEYS, { admin: true, spec: true });
+  const m = await buildHwModel(servers6(), BASIC_KEYS, { admin: true, spec: true });
   const buf = (await buildHwWorkbookPayload({ model: m, meta: { basis: '', kindText: '', band: 'band', admin: true } })).buffer;
   const wb = await load(buf);
   const names = new Set(wb.worksheets.map((w) => w.name));
@@ -200,7 +200,7 @@ test('시트 이름 — 금지 문자 · 31자 · 대소문자 무시 겹침 ~2'
 });
 
 test('워커 경로와 인라인 경로가 둘 다 파일을 만든다', async () => {
-  const m = buildHwModel(servers6(), BASIC_KEYS, { admin: true });
+  const m = await buildHwModel(servers6(), BASIC_KEYS, { admin: true });
   const meta = { basis: '', kindText: '', band: 'band', admin: true };
   const out = await renderHwExport(m, { format: 'xlsx', baseName: 'b', meta });
   assert.equal(out.ext, 'xlsx');
@@ -218,21 +218,21 @@ test('워커 경로와 인라인 경로가 둘 다 파일을 만든다', async (
 test('CSV — 표 하나면 csv, 둘 이상이면 zip · 수식 주입 가드 · 빈 칸', async () => {
   const s = servers6();
   s[0].name = '=HYPERLINK("x")';
-  const m1 = buildHwModel(s, BASIC_KEYS, { admin: true });
+  const m1 = await buildHwModel(s, BASIC_KEYS, { admin: true });
   const one = await renderHwExport(m1, { format: 'csv', baseName: 'b', meta: { band: 'band' } });
   assert.equal(one.ext, 'csv');
   const text = one.buffer.toString('utf8');
   assert.ok(text.startsWith('﻿'));
   assert.ok(text.includes(`"'=HYPERLINK(""x"")"`), '수식으로 시작하는 칸은 따옴표 + 작은따옴표');
   assert.ok(!/법인 vcenter/.test(text), 'CSV 에는 띠가 없다');
-  const m2 = buildHwModel(s, BASIC_KEYS.concat(['nic.det.port']), { admin: true });
+  const m2 = await buildHwModel(s, BASIC_KEYS.concat(['nic.det.port']), { admin: true });
   const z = await renderHwExport(m2, { format: 'csv', baseName: 'b', meta: { band: 'sheet' } });
   assert.equal(z.ext, 'zip');
-  assert.deepEqual(csvTables(m2, 'sheet').map((t) => t.name), ['servers_vcenter-a.csv', 'servers_vcenter-b.csv', 'servers_미지정.csv', 'nic.csv']);
+  assert.deepEqual((await csvTables(m2, 'sheet')).map((t) => t.name), ['servers_vcenter-a.csv', 'servers_vcenter-b.csv', 'servers_미지정.csv', 'nic.csv']);
 });
 
-test('사양서 파일 나눔 — 상한을 넘으면 법인마다(넘치는 법인은 쪼개서) · 빠지는 서버 없음 · 상세도 같이 자른다', () => {
-  const m = buildHwModel(servers6(), BASIC_KEYS.concat(['cpu.det.socket']), { admin: true, spec: true });
+test('사양서 파일 나눔 — 상한을 넘으면 법인마다(넘치는 법인은 쪼개서) · 빠지는 서버 없음 · 상세도 같이 자른다', async () => {
+  const m = await buildHwModel(servers6(), BASIC_KEYS.concat(['cpu.det.socket']), { admin: true, spec: true });
   assert.equal(specSplitPlan(m, 10), null);
   const plan = specSplitPlan(m, 2);
   assert.deepEqual(plan.map((p) => p.label), ['vcenter-a-1', 'vcenter-a-2', 'vcenter-b', '미지정']);
@@ -276,4 +276,88 @@ test('라우트 게이트 — 세 라우트 모두 data.csv + 전체 범위 · �
   assert.match(body, /finally \{[\s\S]*lock\.release\(\)/);
   assert.match(body, /match: admin \? null : insightsMatcher\(snap\)/, '비관리자는 주소 가림');
   assert.match(body, /hwExportOpts\(req\.query \|\| \{\}, \{ admin,/, '관리자 전용 값은 관리자 판본 판정으로');
+});
+
+/* ── 반증 F1~F7(2026-11-11) 회귀 ─────────────────────────────────────── */
+test('F1 — 시트 이름: 자른 뒤 끝 작은따옴표 · History(대소문자 무시) 를 피한다 → 그런 서버가 있어도 파일이 만들어진다', async () => {
+  const taken = new Set();
+  const q = sheetNameOf(`${'a'.repeat(30)}'b`, taken);
+  assert.ok(!/'$/.test(q) && q.length <= 31, q);
+  assert.equal(sheetNameOf('History', taken), 'History~2');
+  assert.equal(sheetNameOf('history', taken), 'history~3', '이미 쓴 이름(History~2)은 대소문자 무시로 겹친다');
+  assert.equal(sheetNameOf("'''", taken), '서버');
+  const s = selectServers(fleet, { kind: 'bm', invOf });
+  s[0].name = 'History'; s[1].name = `${'x'.repeat(30)}'y`;
+  const m = await buildHwModel(s, BASIC_KEYS, { admin: true, spec: true });
+  const wb = await load((await buildHwWorkbookPayload({ model: m, meta: { basis: '', kindText: '', band: 'band', admin: true } })).buffer);
+  assert.ok(wb.worksheets.some((w) => w.name === 'History~2'));
+});
+
+test('F2 — ZIP 항목 이름이 겹치면 ~2(같은 이름 법인 · 정리 뒤 같아지는 이름)', async () => {
+  assert.deepEqual(uniqueNames(['a.csv', 'A.csv', 'a.csv', 'b']), ['a.csv', 'A~2.csv', 'a~3.csv', 'b']);
+  const f2 = { bareMetal: [
+    { serverId: 'reg-1', name: 's1', serviceTag: 'TAG1', source: 'idrac', vcenterId: 'v1', vcenter: 'Seoul DC' },
+    { serverId: 'reg-2', name: 's2', serviceTag: 'TAG2', source: 'idrac', vcenterId: 'v2', vcenter: 'Seoul_DC' },
+  ], virtualizationHosts: [] };
+  const m = await buildHwModel(selectServers(f2, { kind: 'bm', invOf }), BASIC_KEYS, { admin: true });
+  const z = await renderHwExport(m, { format: 'csv', baseName: 'b', meta: { band: 'sheet' } });
+  assert.equal(z.ext, 'zip');
+  assert.deepEqual((await csvTables(m, 'sheet')).map((t) => t.name), ['servers_Seoul_DC.csv', 'servers_Seoul_DC~2.csv']);
+});
+
+test('F3 — 읽지 못한 컬렉션(collections=failed · NIC 빈 배열)은 개수 · 합이 빈 칸(0 아님)', async () => {
+  const inv = fullInv('F3', { disks: [], memoryDimms: [], psus: [], nics: [], collections: { disks: 'failed', memoryDimms: 'failed', psus: 'failed' } });
+  const c = { inv, corpName: 'x', name: 'f3', vc: null };
+  for (const k of ['disk.sum.count', 'disk.sum.gb', 'mem.sum.dimms', 'psu.sum.count', 'psu.sum.capacityW', 'nic.sum.ports', 'nic.sum.maxGbps']) {
+    assert.equal(HW_FIELDS.get(k).get(c), null, `${k} 는 못 읽음 → null`);
+  }
+  assert.equal(HW_FIELDS.get('disk.sum.mix').get(c), '');
+  assert.equal(HW_FIELDS.get('mem.sum.gib').get(c), 512, '시스템 요약 메모리는 따로 읽은 값');
+  const ok = { inv: fullInv('OK', { psus: [], collections: { psus: 'ok' } }), corpName: 'x', name: 'ok', vc: null };
+  assert.equal(HW_FIELDS.get('psu.sum.count').get(ok), 0, '읽었고 0개면 0');
+});
+
+test('F4 · F5 — 서버 사이의 합은 더한 대수를 밝히고, 맨 위 칸 이름에 ‘합계 제외’ 를 쓰지 않는다', async () => {
+  assert.equal(partialText(96, 2, 3, ''), '96 (값 있는 2/3대)');
+  assert.equal(partialText(96, 3, 3, ' GiB'), '96 GiB');
+  assert.equal(partialText(null, 0, 3, ''), '—');
+  const m = await buildHwModel(selectServers(fleet, { kind: 'both', invOf }), BASIC_KEYS, { admin: true });
+  assert.deepEqual([m.totals.coresN, m.totals.memN, m.totals.servers], [5, 5, 6], '인벤토리 없는 물리 1대만 빠진다(받침 없는 가상화는 vCenter 값)');
+  const wb = await load((await buildHwWorkbookPayload({ model: m, meta: { basis: '', kindText: '', band: 'band', admin: true } })).buffer);
+  const all = []; wb.getWorksheet(SUMMARY_SHEET).eachRow((r) => r.eachCell((x) => all.push(String(x.value ?? ''))));
+  assert.ok(all.some((t) => /값 있는 5\/6대/.test(t)), '맨 위 칸에 더한 대수');
+  assert.ok(!all.some((t) => /합계 제외/.test(t)));
+});
+
+test('F7 — 실제 호출: 범위 계정 · data.csv 없는 계정 · 데모 계정은 403, 동시 내보내기는 409', async (t) => {
+  const express = (await import('express')).default;
+  const { insightsRouter } = await import('../src/routes/insights.js');
+  const { acquireExport } = await import('../src/util/exportBusy.js');
+  const { store } = await import('../src/store.js');
+  const http = await import('node:http');
+  let who = null;
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { req.user = who; next(); });
+  app.use('/api/insights', insightsRouter);
+  const srv = http.createServer(app);
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  t.after(() => new Promise((r) => srv.close(r)));
+  const base = `http://127.0.0.1:${srv.address().port}/api/insights`;
+  const call = async (u, path, init) => { who = u; const r = await fetch(base + path, init); return r.status; };
+  const admin = { username: 'adm', role: 'admin' };
+  const snap0 = store.get?.();
+  const scoped = { username: 'sc', role: 'admin', scope: { vcenters: [(snap0?.vcenters || [])[0]?.id || 'vc-x'] } };
+  assert.equal(await call({ username: 'op', role: 'operator' }, '/fleet/hardware-meta'), 403, 'operator 는 data.csv 가 없다');
+  assert.equal(await call({ username: 'vw', role: 'viewer' }, '/fleet/hardware-export'), 403);
+  const sc = await call(scoped, '/fleet/hardware-meta');
+  assert.ok(sc === 403 || (snap0?.vcenters || []).length === 0, `범위 계정 → 403 (받은 ${sc})`);
+  assert.equal(await call({ username: 'demo', role: 'admin', demoGuest: true }, '/fleet/hardware-prefs', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"value":{"cols":[]}}' }), 403, '데모 계정 저장 거부');
+  _resetExportBusy();
+  const lock = acquireExport('fleet.hardware.export', { user: { username: 'other' } });
+  try { assert.equal(await call(admin, '/fleet/hardware-export'), 409, '진행 중이면 409'); }
+  finally { lock.release(); }
+  assert.equal(await call(admin, '/fleet/hardware-meta'), 200);
+  const st = await call(admin, '/fleet/hardware-export?format=csv');
+  assert.equal(st, 200, '빈 스냅샷에서도 머리줄만 있는 CSV');
 });

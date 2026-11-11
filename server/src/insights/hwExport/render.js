@@ -11,6 +11,8 @@ import { runXlsxWorker } from '../../util/xlsxWorkerRun.js';
 import { zipManyAsync } from '../../util/zip.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { buildHwWorkbook, XLSX_MIME } from './xlsx.js';
+import { corpTotals } from './rows.js';
+import { createYielder } from '../../util/timeSlice.js';
 
 export { XLSX_MIME };
 export const SPEC_MAX = Math.max(10, Math.min(2000, Number(process.env.HW_EXPORT_SPEC_MAX) || 300));
@@ -48,10 +50,9 @@ export function subsetModel(model, idxs) {
     const rs = rows.filter((r) => r.corpId === c.id);
     return { ...c, count: rs.length, bm: rs.filter((r) => r.kind === 'bm').length, vh: rs.filter((r) => r.kind === 'vh').length };
   });
-  const sumOf = (k) => corps.reduce((a, e) => (e[k] == null ? a : (a || 0) + e[k]), null);
   const specs = Array.isArray(model.specs) ? model.specs.filter((_, i) => set.has(i)) : null;
   const totals = { ...model.totals, servers: rows.length, bm: rows.filter((r) => r.kind === 'bm').length, vh: rows.filter((r) => r.kind === 'vh').length,
-    noInventory: rows.filter((r) => /^인벤토리 없음/.test(String(r.cells[r.cells.length - 1] || ''))).length, cores: sumOf('cores'), memGiB: sumOf('memGiB') };
+    noInventory: rows.filter((r) => /^인벤토리 없음/.test(String(r.cells[r.cells.length - 1] || ''))).length, ...corpTotals(corps) };
   return { ...model, summary: { ...model.summary, rows }, details, corps, totals, specs };
 }
 
@@ -69,18 +70,36 @@ export function specSplitPlan(model, max = SPEC_MAX) {
   return plan;
 }
 
+/** ZIP 항목 이름을 겹치지 않게(반증 F2 — util/zip.js 는 중복이면 던진다): 같은 이름(대소문자 무시)이면 확장자 앞에 ~2 · ~3. */
+export function uniqueNames(names) {
+  const seen = new Set();
+  return names.map((n) => {
+    const dot = n.lastIndexOf('.');
+    const stem = dot > 0 ? n.slice(0, dot) : n; const ext = dot > 0 ? n.slice(dot) : '';
+    let out = n; let i = 2;
+    while (seen.has(out.toLowerCase())) out = `${stem}~${i++}${ext}`;
+    seen.add(out.toLowerCase());
+    return out;
+  });
+}
 const safeFile = (s) => String(s || '').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/\s+/g, '_').slice(0, 80) || 'part';
 
-/** CSV 표 목록 — [{ name, text }]. band==='sheet' 이면 서버 요약을 법인마다 나눈다. */
-export function csvTables(model, band) {
-  const lines = (cols, rows) => CSV_BOM + [csvLine(cols.map((c) => c.label)), ...rows.map((r) => csvLine(r.cells.map((v) => (v == null ? '' : v))))].join('\r\n') + '\r\n';
+/** CSV 표 목록 — [{ name, text }]. band==='sheet' 이면 서버 요약을 법인마다 나눈다. 이름은 겹치지 않게(uniqueNames). 행이 많으면 시간 기준으로 양보한다(반증 F6). */
+export async function csvTables(model, band) {
+  const maybeYield = createYielder();
+  const lines = async (cols, rows) => {
+    const out = [csvLine(cols.map((c) => c.label))];
+    for (const r of rows) { out.push(csvLine(r.cells.map((v) => (v == null ? '' : v)))); await maybeYield(); }
+    return `${CSV_BOM}${out.join('\r\n')}\r\n`;
+  };
   const sumCols = model.summary.cols;
   const out = [];
   if (band === 'sheet') {
-    for (const c of model.corps) out.push({ name: `servers_${safeFile(c.name)}.csv`, text: lines(sumCols, model.summary.rows.filter((r) => r.corpId === c.id)) });
-  } else out.push({ name: 'servers.csv', text: lines(sumCols, model.summary.rows) });
-  for (const d of model.details) out.push({ name: `${d.file}.csv`, text: lines(d.cols, d.rows) });
-  return out;
+    for (const c of model.corps) out.push({ name: `servers_${safeFile(c.name)}.csv`, text: await lines(sumCols, model.summary.rows.filter((r) => r.corpId === c.id)) });
+  } else out.push({ name: 'servers.csv', text: await lines(sumCols, model.summary.rows) });
+  for (const d of model.details) out.push({ name: `${d.file}.csv`, text: await lines(d.cols, d.rows) });
+  const names = uniqueNames(out.map((t) => t.name));
+  return out.map((t, i) => ({ ...t, name: names[i] }));
 }
 
 /**
@@ -89,7 +108,7 @@ export function csvTables(model, band) {
  */
 export async function renderHwExport(model, { format, baseName, meta, signal = null }) {
   if (format === 'csv') {
-    const tables = csvTables(model, meta.band);
+    const tables = await csvTables(model, meta.band);
     if (tables.length === 1) return { buffer: Buffer.from(tables[0].text, 'utf8'), ext: 'csv', mime: 'text/csv; charset=utf-8', files: 1 };
     const zip = await zipManyAsync(tables.map((t) => ({ name: t.name, data: t.text })));
     return { buffer: zip, ext: 'zip', mime: 'application/zip', files: tables.length };
@@ -98,10 +117,11 @@ export async function renderHwExport(model, { format, baseName, meta, signal = n
   if (!plan) return { buffer: await renderXlsx(model, meta, signal), ext: 'xlsx', mime: XLSX_MIME, files: 1 };
   const note = `사양서가 ${model.summary.rows.length}장이라 파일 하나의 상한(${SPEC_MAX}장)을 넘어 법인마다 파일을 나눴습니다(${plan.length}개). 이 파일은 그 가운데 하나입니다.`;
   const entries = [];
-  for (const part of plan) {
+  const fileNames = uniqueNames(plan.map((part) => `${baseName}_${safeFile(part.label)}.xlsx`));
+  for (const [i, part] of plan.entries()) {
     if (signal?.aborted) throw Object.assign(new Error('요청이 끊겨 엑셀 생성을 멈췄습니다.'), { code: 'aborted' });
     const buf = await renderXlsx(subsetModel(model, part.idxs), { ...meta, splitNote: note }, signal);
-    entries.push({ name: `${baseName}_${safeFile(part.label)}.xlsx`, data: buf });
+    entries.push({ name: fileNames[i], data: buf });
   }
   return { buffer: await zipManyAsync(entries), ext: 'zip', mime: 'application/zip', files: entries.length };
 }
