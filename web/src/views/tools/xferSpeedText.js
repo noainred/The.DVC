@@ -563,7 +563,7 @@ export function pingMethodText(p) {
 export function pingHeadNote(p) {
   if (!p) return '';
   const parts = [pingMethodText(p)];
-  // v2.963: 연속 측정 — probeIntervalMs 마다 재고 intervalMs(요약 주기)마다 한 줄. 구버전 응답(probe 없음)은 예전 문구.
+  // v2.964: 연속 측정 — probeIntervalMs 마다 재고 intervalMs(요약 주기)마다 한 줄. 구버전 응답(probe 없음)은 예전 문구.
   const probe = numOrNull(p.probeIntervalMs); const iv = numOrNull(p.intervalMs);
   if (probe && iv) parts.push(`${spanText(probe)}마다 측정 · ${spanText(iv)} 요약`);
   else if (iv) parts.push(`${spanText(iv)} 간격`);

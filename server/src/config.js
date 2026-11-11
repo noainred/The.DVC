@@ -224,10 +224,10 @@ export const config = {
     // CONFIG_DIR에 두어 업그레이드에도 이력이 보존된다. 대상 정의는 CONFIG_DIR/ping-targets.json.
     enabled: process.env.PING_MON_ENABLED !== 'false',
     dbPath: process.env.PING_DB_PATH || dbFile('ping-monitor.db'),
-    // v2.963: 저장(요약) 주기의 기본값 — 화면 '측정 설정' 에서 저장한 값이 있으면 그것이 이긴다(ping/settings.js).
+    // v2.964: 저장(요약) 주기의 기본값 — 화면 '측정 설정' 에서 저장한 값이 있으면 그것이 이긴다(ping/settings.js).
     pollIntervalMs: clampIntervalMs(numEnv(process.env.PING_MON_INTERVAL_MS, 60_000), 60_000, 5_000), // 기본 1분
     intervalFromEnv: numEnv(process.env.PING_MON_INTERVAL_MS, null) != null,
-    // v2.963(사용자 요청 "ping 은 중단없이 계속 ping"): 대상마다 쉬지 않고 재는 간격의 기본값(1초) — 화면 값이 이긴다.
+    // v2.964(사용자 요청 "ping 은 중단없이 계속 ping"): 대상마다 쉬지 않고 재는 간격의 기본값(1초) — 화면 값이 이긴다.
     probeIntervalMs: clampIntervalMs(numEnv(process.env.PING_MON_PROBE_MS, 1_000), 1_000, 1_000),
     probeFromEnv: numEnv(process.env.PING_MON_PROBE_MS, null) != null,
     // v2.605(감사 TIM2605-04): numEnv 는 음수·2^31 초과를 그대로 넘겨 프로브 타이머가 1ms 가 됐다 — [100ms, 60초].

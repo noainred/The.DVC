@@ -6,7 +6,7 @@
  * `rtt`는 응답 지연(ms, 무응답이면 NULL), `ok`는 도달 여부(1/0). 장기 범위는 쿼리에서
  * 시간 버킷 집계(avg/min/max/loss)로 다운샘플한다.
  *
- * v2.963(사용자 요청 "ping 은 중단없이 계속 ping"): 모니터가 대상마다 쉬지 않고 재고(기본 1초) **요약 주기마다 한 줄**을 쓴다 —
+ * v2.964(사용자 요청 "ping 은 중단없이 계속 ping"): 모니터가 대상마다 쉬지 않고 재고(기본 1초) **요약 주기마다 한 줄**을 쓴다 —
  * 그 줄은 n(잰 횟수)·fail(실패 수)·rn(RTT 가 있는 성공 수)·rtt(그 평균)·mn·mx(최저·최고)를 싣는다. 예전 줄(측정 1회 = 1줄)은 이 열이
  * NULL 이고 n=1 · fail=ok?0:1 · rn=(ok∧rtt)?1:0 · mn=mx=rtt 로 읽는다(W_* 식 — 모든 집계가 같은 식을 쓴다). 그래서 손실률은
  * 'NULL 아닌 줄 수' 가 아니라 **SUM(fail)/SUM(n)** 이고, 평균은 **rn 가중**이다. 열 추가는 ALTER TABLE ADD COLUMN(파일을 다시 쓰지 않는다).
@@ -48,7 +48,7 @@ function initSqlite() {
       CREATE INDEX IF NOT EXISTS idx_ping_hourly_h ON samples_hourly (h); -- 롤업 prune(h<?)
       CREATE TABLE IF NOT EXISTS ping_meta (k TEXT PRIMARY KEY, v TEXT);
     `);
-    // v2.963: 요약 줄 열 — 없으면 추가(예전 DB). ADD COLUMN 은 기존 행을 다시 쓰지 않는다(NULL = 예전 줄).
+    // v2.964: 요약 줄 열 — 없으면 추가(예전 DB). ADD COLUMN 은 기존 행을 다시 쓰지 않는다(NULL = 예전 줄).
     const have = new Set(db.prepare('PRAGMA table_info(samples)').all().map((c) => String(c.name)));
     for (const [col, type] of [['n', 'INTEGER'], ['fail', 'INTEGER'], ['rn', 'INTEGER'], ['mn', 'REAL'], ['mx', 'REAL']]) {
       if (!have.has(col)) db.exec(`ALTER TABLE samples ADD COLUMN ${col} ${type}`);
@@ -129,7 +129,7 @@ function initSqlite() {
     // ⚠ node:sqlite 는 JS number 를 REAL 로 바인딩한다 — (ts/?)*? 는 실수 나눗셈이라 버킷이 묶이지 않고
     // 표본 1건 = 1버킷이 되어 LIMIT 이 최근 몇 시간만 남기고 손실률도 0/1 로 떨어졌다(v2.598 DB2598-01).
     // metrics/db.js 와 같은 CAST(… AS INTEGER) 형태로 정수 버킷을 만든다.
-    // v2.963: 요약 줄을 가중해 묶는다 — 평균은 rn 가중(s/rn), 손실은 SUM(fail)/SUM(n). 예전 줄은 W_* 가 측정 1회로 읽는다.
+    // v2.964: 요약 줄을 가중해 묶는다 — 평균은 rn 가중(s/rn), 손실은 SUM(fail)/SUM(n). 예전 줄은 W_* 가 측정 1회로 읽는다.
     const BUCKET_COLS = `CAST(ts/? AS INTEGER)*? AS b,
         SUM(CASE WHEN rtt IS NOT NULL THEN rtt * ${W_RN} ELSE 0 END) s, SUM(${W_RN}) rn,
         MIN(${W_MN}) min, MAX(${W_MX}) max, SUM(${W_F}) fail, SUM(${W_N}) n`;
@@ -294,7 +294,7 @@ const SEED_CHUNK_ROWS = 50_000;   // 청크당 GROUP BY 가 수십 ms 안에 끝
 const round2 = (x) => (x == null || !Number.isFinite(x) ? null : Number(x.toFixed(2)));
 
 /*
- * v2.963 요약 줄 가중 — SQL 과 JS 가 같은 규칙을 쓴다. 예전 줄(n 이 NULL)은 측정 1회:
+ * v2.964 요약 줄 가중 — SQL 과 JS 가 같은 규칙을 쓴다. 예전 줄(n 이 NULL)은 측정 1회:
  *   n=1 · fail=ok?0:1 · rn=(ok ∧ rtt 있음)?1:0 · mn=mx=(ok? rtt : NULL).
  */
 const W_N = 'COALESCE(n, 1)';

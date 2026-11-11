@@ -1,5 +1,5 @@
 /**
- * v2.963 Ping 측정 설정 문구·폼 검사(사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping").
+ * v2.964 Ping 측정 설정 문구·폼 검사(사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping").
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';

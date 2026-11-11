@@ -211,7 +211,7 @@
 | `perf-monitor.json` | 설정 | 서버 성능 측정 설정(`perf-monitor.json`, v2.498, 사용자 요청 "설정에 서버 성능 | ✅ | ✅ | ✅ | perf/settings.js |
 | `permissions.json` | 설정 | 역할별 권한 매트릭스 + 도구별 접근 거부 | ✅ | ✅ | ✅ | auth/permissions.js |
 | `ping-monitor.db` | DB | 핑 모니터 응답시간·손실 시계열 |  |  |  | config.js |
-| `ping-settings.json` | 설정 | Ping 모니터 측정 설정(v2.963 · 사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping"). | ✅ | ✅ | ✅ | ping/settings.js |
+| `ping-settings.json` | 설정 | Ping 모니터 측정 설정(v2.964 · 사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping"). | ✅ | ✅ | ✅ | ping/settings.js |
 | `ping-targets.json` | 설정 | Ping 모니터링 대상 레지스트리 — CONFIG_DIR/ping-targets.json. | ✅ | ✅ |  | ping/store.js |
 | `portal.env` | 기타 | 환경변수(설치본이 읽는 유일한 설정 파일) |  |  |  | security/secretScan.js, security/selfCheck.js |
 | `power-off-check.json` | 설정 | 전원 꺼짐 점검 설정(`power-off-check.json`, v2.484, 사용자 요청 "몇 시간마다 점검하는지 설정"). | ✅ | ✅ | ✅ | tools/powerOffSettings.js |

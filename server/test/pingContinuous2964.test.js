@@ -1,5 +1,5 @@
 /**
- * v2.963 — Ping 연속 측정 + 화면 측정 설정(사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping"
+ * v2.964 — Ping 연속 측정 + 화면 측정 설정(사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping"
  * — 선택: '1초 간격 연속 측정 + 주기 요약' · 표준 검증).
  *
  *  ① 엔진: 대상마다 쉬지 않고 잰다 · 요약 창마다 대상당 한 줄(n·fail·rn·평균·최저·최고)
@@ -152,7 +152,7 @@ test('⑦ 저장소 — 요약 줄과 예전 줄이 같은 식으로 묶인다(�
   assert.deepEqual(weightOf({ ok: false, rtt: null }), { n: 1, fail: 1, rn: 0, rtt: null, mn: null, mx: null });
   assert.deepEqual(weightOf({ ok: true, rtt: 20, n: 60, fail: 6, rn: 54, mn: 5, mx: 90 }), { n: 60, fail: 6, rn: 54, rtt: 20, mn: 5, mx: 90 });
   assert.deepEqual(weightOf({ ok: false, rtt: null, n: 3, fail: 3, rn: 0 }), { n: 3, fail: 3, rn: 0, rtt: null, mn: null, mx: null });
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pingcont2963db-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pingcont2964db-'));
   const script = `
     const HOUR = 3600000;
     const { getPingDb } = await import(${JSON.stringify(path.join(SRC, 'ping/db.js'))});
@@ -193,7 +193,7 @@ test('⑦ 저장소 — 요약 줄과 예전 줄이 같은 식으로 묶인다(�
 });
 
 function settingsRun(env, body) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pingcont2963set-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pingcont2964set-'));
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', body], { env: { ...process.env, CONFIG_DIR: dir, OUT: path.join(dir, 'o.json'), DATA_SOURCE: 'live', AUTH_ENABLED: 'true', ...env }, encoding: 'utf8', cwd: path.resolve(SRC, '..'), timeout: 60_000 });
   assert.equal(r.status, 0, r.stderr.slice(-1500));
   const o = JSON.parse(fs.readFileSync(path.join(dir, 'o.json'), 'utf8'));

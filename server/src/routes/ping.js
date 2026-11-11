@@ -6,7 +6,7 @@
  *  GET  /api/ping/series?id=&range=   단일 대상 시계열 — 인증
  *  GET  /api/ping/targets             대상 목록 — 인증
  *  POST/PUT/DELETE /api/ping/targets  대상 관리 — 관리자
- *  POST /api/ping/poll-now            지금 측정 — 관리자(v2.963: 연속 측정 중이면 지금 창을 바로 마감해 쓴다)
+ *  POST /api/ping/poll-now            지금 측정 — 관리자(v2.964: 연속 측정 중이면 지금 창을 바로 마감해 쓴다)
  *  GET  /api/ping/settings            측정 설정(측정 간격 · 요약 주기 · 시한 + 출처 · 범위 · 모니터 상태) — 인증
  *  PUT  /api/ping/settings            측정 설정 저장(재시작 없이 바로 적용) — 관리자 · 전체 범위
  *  POST /api/ping/seed-vcenters       vCenter 자동 등록 — 관리자
@@ -184,7 +184,7 @@ pingRouter.post('/poll-now', adminOnly, async (req, res) => {
 });
 
 /**
- * v2.963 측정 설정(사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping").
+ * v2.964 측정 설정(사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping").
  * 조회는 인증만(주기·시한·모니터 상태 — 주소 없음). 부하 산수(대상 수 × 측정 간격)는 전 대상 수가 들어가므로 전체 범위 계정에만 싣는다.
  * 저장은 관리자 · 전체 범위(전 대상의 측정 방식을 바꾼다 — poll-now 와 같은 기준). 범위·형식이 틀리면 400 field, 설정 파일을 못 읽은 상태면 503.
  */

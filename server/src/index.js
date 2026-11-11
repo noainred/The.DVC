@@ -799,7 +799,7 @@ const gracefulExit = (signal, { beforeExit } = {}) => {
     exiting = true;
     closeCsvLogAsync(2000).catch(() => {}).finally(() => {
       svcmonShutdown();
-      // v2.963: Ping 연속 측정 — 진행 중이던 요약 창을 버리지 않고 쓴다(DB 가 열려 있으면 동기 쓰기).
+      // v2.964: Ping 연속 측정 — 진행 중이던 요약 창을 버리지 않고 쓴다(DB 가 열려 있으면 동기 쓰기).
       try { stopPingMonitor(); } catch (e) { console.warn(`[shutdown] Ping 모니터 정지 실패: ${e?.message || e}`); }
       for (const h of exitHooks) { try { h(); } catch (e) { console.warn(`[shutdown] 종료 훅 실패: ${e?.message || e}`); } }
       process.exit(code);

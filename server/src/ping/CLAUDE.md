@@ -1,7 +1,7 @@
 # `server/src/ping/` — Ping 모니터 불변조건
 
-> v2.963 사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping"(선택: 1초 간격 연속 측정 + 주기 요약).
-> 회귀: `server/test/pingContinuous2963.test.js`(변이 7/7) · `web/src/views/pingSettingsText.test.js`.
+> v2.964 사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping"(선택: 1초 간격 연속 측정 + 주기 요약).
+> 회귀: `server/test/pingContinuous2964.test.js`(변이 7/7) · `web/src/views/pingSettingsText.test.js`.
 
 - **측정은 대상마다 독립 루프**(`monitor.js createPingEngine`) — '재기 → 측정 간격에서 걸린 시간을 뺀 만큼 쉼 → 다시'. 한 바퀴 `setInterval` +
   재진입 가드로 되돌리지 말 것: 한 바퀴가 주기보다 길면 다음 회차를 건너뛰어 기록이 비었고(예전), 느린 대상이 다른 대상을 막는다(테스트 ②).
