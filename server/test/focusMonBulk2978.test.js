@@ -357,3 +357,48 @@ test('⑦ 사용자 보고(2026-11-12) — 시험만 한 엣지 서버의 다시
   assert.equal(worker._runnerForTest.retry(t.id, t).code, 'too-soon');
   assert.ok(focusAuthGuard.peekAuthStop(authDevOf(t, fp)), '60초 안 두 번째는 정지를 풀지 않는다');
 });
+
+test('⑧ 반증 반영 — 엣지 시험 동시 상한 · 등록부에서 빠진 엣지의 서버 옮기기 · 머리글 별칭 · 중앙 몫은 시작할 때 문턱 · 시한', async () => {
+  // 1) 엣지가 보고한 진행 중 시험 수만큼 덜 배달(옛 판 = null → 예전처럼 20)
+  reset();
+  issueAgentToken('edge-cap');
+  const ids = [];
+  for (let i = 0; i < 30; i++) ids.push(registry.addTarget({ name: `c${i}`, host: `10.60.0.${i + 1}`, port: 22, username: 'u', agent: 'edge-cap' }, { agents: ['edge-cap'] }).target.id);
+  for (const id of ids) store.requestEdgeTest(id, 'edge-cap');
+  const now = Date.now();
+  assert.equal(edge.handleEdgeSync('edge-cap', { sentAt: now, diag: { testsBusy: store.EDGE_TEST_CONCURRENCY - 3 } }, now).tests.length, 3, '상한까지 남은 자리만');
+  assert.equal(edge.handleEdgeSync('edge-cap', { sentAt: now, diag: { testsBusy: 99 } }, now).tests.length, 0, '가득 차면 0');
+  assert.equal(edge.handleEdgeSync('edge-cap', { sentAt: now }, now).tests.length, 20, '옛 판(진단 없음)은 예전처럼 최대 20');
+  assert.ok(store.EDGE_TEST_TTL_MS >= 15 * 60_000 && bulk.BULK_TTL_MS > store.EDGE_TEST_TTL_MS, '일괄 시험 시한이 엣지 대기열 수명보다 길다');
+  // 엣지 워커가 동기화당 보내는 결과 수 = 중앙이 받는 상한(넘는 것은 다음 동기화에)
+  const wsrc = fs.readFileSync(new URL('../src/agent/focusMonWorker.js', import.meta.url), 'utf8');
+  const csrc = fs.readFileSync(new URL('../src/central/focusMonEdge.js', import.meta.url), 'utf8');
+  assert.equal(Number(/TEST_RESULTS_PER_SYNC = (\d+)/.exec(wsrc)?.[1]), Number(/arr\(b\.tests, (\d+)\)/.exec(csrc)?.[1]));
+  assert.match(wsrc, /testsInFlight\.size >= EDGE_TEST_CONCURRENCY/);
+  // 2) 등록부에서 빠진 엣지(from)의 서버도 옮긴다 — 받는 쪽만 검사
+  reset();
+  registry.addTarget({ name: 'gone-1', host: '10.61.0.1', port: 22, username: 'u', agent: 'old-edge' }, { agents: ['old-edge'] });
+  const mv = registry.moveTargets({ from: 'old-edge', to: '' }, { agents: [] });
+  assert.equal(mv.ok, true, JSON.stringify(mv)); assert.equal(mv.moved.length, 1);
+  assert.equal(registry.moveTargets({ from: '', to: 'old-edge' }, { agents: [] }).code, 'bad-agent', '받는 쪽은 등록된 이름만');
+  // 4) 머리글 별칭 · 못 찾은 선택 열 · 읽지 않은 열
+  const p = registry.planCsv('Server Name,IP Address,SSH Port,계정,담당 엣지,비고\na1,10.62.0.1,2222,u,EDGE-PL,메모', { agents: AG });
+  assert.equal(p.rows[0].value.port, 2222); assert.equal(p.rows[0].value.agent, 'edge-pl');
+  assert.deepEqual(p.ignored, ['비고']); assert.deepEqual(p.missing, []);
+  const q = registry.planCsv('이름,IP,계정\na2,10.62.0.2,u', { agents: AG });
+  assert.deepEqual(q.missing, ['port', 'agent'], '머리글에 없는 선택 열은 알린다(조용한 기본값 금지)');
+  // 6) 중앙 몫 — 문턱은 시작할 때 잡고, 시한이 지나면 새 대상을 시작하지 않는다
+  bulk._resetBulkForTest();
+  const taken = []; const tested = [];
+  const r = bulk.startBulk({
+    targets: [{ id: 'z1', agent: '' }, { id: 'z2', agent: '' }], by: 't', now: Date.now() - bulk.BULK_CENTRAL_MAX_MS - 1_000,
+    peek: () => true, gate: (id) => { taken.push(id); return true; }, release: () => {}, testLocal: async (t) => { tested.push(t.id); return { ok: true }; },
+    putResult: () => {}, queueEdge: () => {}, wake: () => {}, testOf: () => null,
+  });
+  assert.equal(r.ok, true); assert.deepEqual(taken, [], '접수할 때는 문턱을 잡지 않는다');
+  for (let i = 0; i < 20 && bulk.bulkJob().centralRunning; i++) await new Promise((x) => setTimeout(x, 5));
+  assert.deepEqual(tested, [], '시한이 지나 시작하지 않았다');
+  const pr = bulk.bulkProgress(bulk.bulkJob(), () => null, Date.now());
+  assert.equal(pr.skipped, 2); assert.equal(pr.finished, true);
+  bulk._resetBulkForTest();
+});

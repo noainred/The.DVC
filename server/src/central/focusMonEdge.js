@@ -177,10 +177,11 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
     const r = x.result;
     store.putTestResult(x.id, { ok: r.ok === true, kind: enumOr(r.kind, TEST_KINDS, 'unreachable'), error: r.error ? strOf(r.error, 240) : '', hello: cleanHello(r.hello), ms: n(r.ms), via: 'edge' }, now);
   }
-  store.noteEdgeSync(agent, { version: typeof b.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(b.version) ? b.version : '', key: cleanKey(b.key), diag: cleanDiag(b.diag, now) }, now);
+  const diag = cleanDiag(b.diag, now); // 노드 카드 진단 · 아래 시험 배달(진행 중 시험 수)이 같은 정제값을 쓴다
+  store.noteEdgeSync(agent, { version: typeof b.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(b.version) ? b.version : '', key: cleanKey(b.key), diag }, now);
 
   const desired = store.desiredFor(key, (id) => mine.get(id) || null, now);
-  const tests = store.pendingTestsFor(key, now).filter((id) => mine.has(id)).map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; });
+  const tests = store.pendingTestsFor(key, now, { busy: diag ? diag.testsBusy : null }).filter((id) => mine.has(id)).map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; });
   return {
     ok: true, now, validUntil: now + VALID_MS,
     targets: desired.map((d) => ({ id: d.id, host: d.host, port: d.port, username: d.username, interval: d.interval })),

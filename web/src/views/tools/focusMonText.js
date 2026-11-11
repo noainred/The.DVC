@@ -231,7 +231,19 @@ export const TX_COLOR = '#d95926';
 export const CSV_ACTION_TEXT = Object.freeze({
   add: { label: '새로', tone: 'ok' }, update: { label: '갱신', tone: 'warn' }, same: { label: '그대로', tone: 'off' }, error: { label: '오류', tone: 'crit' },
 });
-export const CSV_FIELD_TEXT = Object.freeze({ name: '이름', username: '계정', agent: '담당 노드' });
+export const CSV_FIELD_TEXT = Object.freeze({ name: '이름', username: '계정', agent: '담당 노드', port: '포트' });
+
+/** 미리보기의 머리글 안내 — 못 찾은 선택 열은 기본값이 들어간다는 것 · 읽지 않은 열(반증 4: 조용한 기본값 금지). */
+export function csvHeaderNotes(plan) {
+  if (!plan?.header) return [];
+  const out = [];
+  const miss = plan.missing || [];
+  if (miss.includes('port')) out.push('포트 열을 찾지 못해 모든 줄을 22 로 넣습니다.');
+  if (miss.includes('agent')) out.push('담당 노드 열을 찾지 못해 모든 줄을 중앙이 맡습니다.');
+  if (miss.includes('username')) out.push('계정 열을 찾지 못했습니다 — 모든 줄이 오류입니다.');
+  if (plan.ignored?.length) out.push(`읽지 않은 열: ${plan.ignored.join(', ')} — 이 열의 값은 쓰지 않습니다.`);
+  return out;
+}
 export const nodeText = (agent) => (agent ? `엣지 ${agent}` : '중앙');
 
 /** 갱신 줄의 바뀌는 칸 — ‘계정 root → dvcmon’ 처럼. */
@@ -247,10 +259,13 @@ export function csvChangeText(row) {
 /**
  * CSV 파일 바이트 → 글자. 한국어 엑셀의 ‘CSV(쉼표로 분리)’ 는 CP949(EUC-KR)로 저장한다 — UTF-8 로 읽어 깨지면 EUC-KR 로 다시 읽는다.
  * @param {ArrayBuffer|Uint8Array} buf
- * @returns {{text:string, encoding:'utf-8'|'euc-kr'}}
+ * @returns {{text:string, encoding:'utf-8'|'euc-kr'|'utf-16'}}
  */
 export function decodeCsvBytes(buf) {
   const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  // 엑셀 ‘유니코드 텍스트’ 저장본은 UTF-16(BOM FF FE · FE FF) — 탭 구분이다(서버 파서가 탭을 읽는다)
+  if (u8[0] === 0xff && u8[1] === 0xfe) return { text: new TextDecoder('utf-16le').decode(u8.subarray(2)), encoding: 'utf-16' };
+  if (u8[0] === 0xfe && u8[1] === 0xff) return { text: new TextDecoder('utf-16be').decode(u8.subarray(2)), encoding: 'utf-16' };
   try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(u8), encoding: 'utf-8' }; }
   catch { return { text: new TextDecoder('euc-kr').decode(u8), encoding: 'euc-kr' }; }
 }

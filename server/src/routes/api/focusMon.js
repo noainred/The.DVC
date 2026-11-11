@@ -243,8 +243,9 @@ api.post('/tools/focus-mon/targets/test-bulk', adminOnly, fullRwOnly, demoBlockW
   const nowT = Date.now();
   const r = startBulk({
     targets: ids.map((id) => vis.get(id)), by: req.user?.username || '', testOf: store.testOf, now: nowT,
-    gate: (id) => { const g = testGate.get(id); if (g && (g.busy || nowT - g.at < TEST_MIN_MS)) return false; testGate.set(id, { at: nowT, busy: true }); return true; },
-    release: (id) => { const g = testGate.get(id); testGate.set(id, { at: g?.at || nowT, busy: false }); },
+    peek: (id) => { const g = testGate.get(id); return !(g && (g.busy || Date.now() - g.at < TEST_MIN_MS)); },
+    gate: (id) => { const n = Date.now(); const g = testGate.get(id); if (g && (g.busy || n - g.at < TEST_MIN_MS)) return false; testGate.set(id, { at: n, busy: true }); return true; },
+    release: (id) => { const g = testGate.get(id); testGate.set(id, { at: g?.at || Date.now(), busy: false }); },
     testLocal: (t) => localRunner.test(t),
     putResult: (id, result) => store.putTestResult(id, { ...result, via: 'central' }),
     queueEdge: (t) => store.requestEdgeTest(t.id, t.agent, nowT),

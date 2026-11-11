@@ -364,15 +364,24 @@ export function edgeStateOf(agent) { loadKeys(); const v = EDGE.get(String(agent
 /* ── 연결 시험(엣지 대행 대기열) ────────────────────────────────────────────── */
 const TESTS = new Map(); // targetId → { agent, requestedAt, result, at }
 export function requestEdgeTest(id, agent, now = Date.now()) { TESTS.set(String(id), { agent: String(agent).toLowerCase(), requestedAt: now, result: null, at: 0 }); }
-export function pendingTestsFor(agent, now = Date.now()) {
+/** 엣지 한 곳이 동시에 돌리는 연결 시험 상한(v2.978 반증 1 — 일괄 시험이 동기화마다 20건씩 쌓아 동시 160건까지 갔다). 엣지 워커도 같은 값을 지킨다. */
+export const EDGE_TEST_CONCURRENCY = 8;
+/** 엣지 시험 대기열 수명 — 일괄 시험(최대 등록 상한 대수)이 동시 상한으로 차례를 기다리는 시간을 덮는다(예전 5분). */
+export const EDGE_TEST_TTL_MS = 15 * 60_000;
+/**
+ * 이 엣지에 지금 배달할 시험. busy = 엣지가 같은 동기화 본문에서 보고한 진행 중 시험 수(diag.testsBusy — 옛 판은 null → 예전처럼 최대 20).
+ */
+export function pendingTestsFor(agent, now = Date.now(), { busy = null } = {}) {
   const k = String(agent || '').toLowerCase();
   const out = [];
+  const room = busy == null ? 20 : Math.max(0, Math.min(20, EDGE_TEST_CONCURRENCY - busy));
+  if (!room) return out;
   // 한 번 내려보낸 시험은 60초 동안 다시 내려보내지 않는다 — 결과가 올 때까지 2초마다 같은 시험을 다시 줘 클릭 한 번에 로그인이 여러 번 일어났다(반증 5번).
   for (const [id, x] of TESTS) {
-    if (x.agent !== k || x.result || now - x.requestedAt >= 5 * 60_000) continue;
+    if (x.agent !== k || x.result || now - x.requestedAt >= EDGE_TEST_TTL_MS) continue;
     if (x.deliveredAt && now - x.deliveredAt < 60_000) continue;
     out.push(id);
-    if (out.length >= 20) break;
+    if (out.length >= room) break;
   }
   for (const id of out) TESTS.get(id).deliveredAt = now;
   return out;

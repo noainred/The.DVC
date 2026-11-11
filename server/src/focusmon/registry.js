@@ -171,20 +171,29 @@ export function saveSettings(body = {}) {
  */
 export const CSV_MAX_ROWS = MAX_TARGETS;
 export const CSV_MAX_BYTES = 200_000; // 500줄 × 줄당 최대 약 400자 — API 본문 상한(JSON) 안
-const HEAD = Object.freeze({
-  name: /^(이름|표시 ?이름|name|display ?name)$/i, host: /^(ip|ip ?주소|주소|host|address)$/i, port: /^(포트|ssh ?포트|port)$/i,
-  username: /^(계정|사용자|user|username|account)$/i, agent: /^(담당|담당 ?노드|노드|엣지|agent|node|edge)$/i,
+/** 머리글 이름 → 필드(공백 · _ · - · 점 · 괄호를 빼고 소문자로 비교 — 'SSH Port' · 'Port No' · '포트번호' · '담당 엣지' 모두 읽는다 · 반증 4). */
+const HEAD_ALIASES = Object.freeze({
+  name: ['이름', '표시이름', '서버이름', '서버명', '호스트이름', '호스트명', 'name', 'displayname', 'servername', 'hostname'],
+  host: ['ip', 'ip주소', '주소', '아이피', 'host', 'address', 'ipaddress', 'ipaddr', 'hostip', 'serverip'],
+  port: ['포트', 'ssh포트', '포트번호', 'port', 'sshport', 'portno', 'portnumber'],
+  username: ['계정', '계정명', '사용자', '사용자명', 'user', 'username', 'account', 'login', 'sshuser'],
+  agent: ['담당', '담당노드', '담당엣지', '노드', '엣지', '엣지이름', 'agent', 'node', 'edge', 'collector'],
 });
+const headKey = (c) => String(c || '').toLowerCase().replace(/[\s_\-·.()]/g, '');
 const DEFAULT_COLS = Object.freeze(['name', 'host', 'port', 'username', 'agent']);
 
 /** 머리글 행이면 열 → 필드 표, 아니면 null. 이름 · IP 두 열이 다 있어야 머리글로 본다. */
 export function csvHeaderMap(row) {
-  const map = {};
+  const map = {}; const ignored = [];
   (row || []).forEach((cell, i) => {
-    const c = String(cell || '').trim();
-    for (const [k, re] of Object.entries(HEAD)) if (re.test(c) && map[k] == null) map[k] = i;
+    const c = headKey(cell);
+    if (!c) return;
+    const hit = Object.entries(HEAD_ALIASES).find(([k, list]) => list.includes(c) && map[k] == null);
+    if (hit) map[hit[0]] = i; else ignored.push(String(cell).trim().slice(0, 40));
   });
-  return map.name != null && map.host != null ? map : null;
+  if (map.name == null || map.host == null) return null;
+  Object.defineProperty(map, 'ignored', { value: ignored.slice(0, 20), enumerable: false });
+  return map;
 }
 const keyOf = (host, port) => `${host}:${port}`;
 
@@ -233,7 +242,10 @@ export function planCsv(text, { agents = [] } = {}) {
   const counts = { add: 0, update: 0, same: 0, error: 0 };
   for (const r of rows) counts[r.action] += 1;
   const after = cur.targets.length + counts.add;
-  return { ok: true, header: !!head, rows, counts, total: rows.length, registered: cur.targets.length, max: MAX_TARGETS, overCap: after > MAX_TARGETS };
+  // 머리글이 있는데 선택 열(포트 · 계정 · 담당 노드)을 못 찾았으면 기본값이 들어간다는 것을 말한다(조용한 기본값 금지 — 반증 4).
+  const missing = head ? ['port', 'username', 'agent'].filter((k) => head[k] == null) : [];
+  return { ok: true, header: !!head, rows, counts, total: rows.length, registered: cur.targets.length, max: MAX_TARGETS, overCap: after > MAX_TARGETS,
+    ignored: head ? head.ignored : [], missing };
 }
 
 /**
@@ -293,8 +305,8 @@ export function csvTemplateRows() {
 export function moveTargets({ from = '', to = '', ids = null } = {}, { agents = [] } = {}) {
   const w = writeRefusal(); if (w) return w;
   const canon = (a) => (a ? agents.find((x) => String(x).toLowerCase() === String(a).toLowerCase()) : '');
-  const f = String(from || ''); const tt = String(to || '');
-  if (f && canon(f) == null) return { ok: false, code: 'bad-agent', reason: '옮길 노드가 등록된 엣지가 아닙니다.' };
+  const f = String(from || '').slice(0, 128); const tt = String(to || '');
+  // from 은 '어느 대상을 고를지' 만 정한다 — 등록부에서 빠진 엣지(노드 카드 '등록부에 없는 이름')의 서버도 옮길 수 있어야 한다(반증 2). 받는 쪽만 검사한다.
   if (tt && !canon(tt)) return { ok: false, code: 'bad-agent', reason: '받을 노드는 중앙 또는 등록된 엣지(수집 서버) 이름만 고를 수 있습니다.' };
   if (f.toLowerCase() === tt.toLowerCase()) return { ok: false, code: 'same-node', reason: '같은 노드로는 옮길 수 없습니다.' };
   const want = Array.isArray(ids) ? new Set(ids.map(String).slice(0, MAX_TARGETS)) : null;

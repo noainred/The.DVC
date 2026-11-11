@@ -6,13 +6,13 @@
  *  · 적용은 미리보기를 다시 보내지 않고 **본문을 서버가 다시 계획**한다. 글을 고치면 미리보기를 지워 옛 계획을 보고 누르지 않게 한다.
  *  · 숫자(최대 줄 수 · 글자 수 · 쉬는 주기 · 판 번호)는 응답에서 읽는다.
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import {
   DASH, CSV_ACTION_TEXT, csvChangeText, decodeCsvBytes, WAKE_TEXT, wakeFallbackText, upgradeText, diagItems, installGroups, installCommand, INSTALL_NOTE,
-  nodeText, agoShort, KEY_FILE_NOTE,
+  nodeText, agoShort, KEY_FILE_NOTE, csvHeaderNotes,
 } from './focusMonText.js';
 
 export function Seg({ value, options, onChange, label }) {
@@ -34,7 +34,10 @@ export function CsvPanel({ main, busy, run, onClose }) {
   const [update, setUpdate] = useState(true);
   const [autoTest, setAutoTest] = useState(true);
   const [fileNote, setFileNote] = useState('');
-  const edit = (v) => { setText(v.slice(0, lim.maxBytes)); setPlan(null); };
+  const textRef = useRef('');
+  // 자르지 않는다 — 잘라 보내면 마지막 줄이 다른 값(예 10.22.9.123 → 10.22.9.1)으로 등록됐다(반증 5). 너무 길면 미리보기를 막고 말한다.
+  const edit = (v) => { textRef.current = v; setText(v); setPlan(null); };
+  const tooLong = text.length > lim.maxBytes;
   const onFile = async (e) => {
     const f = e.target.files?.[0];
     e.target.value = '';
@@ -43,9 +46,10 @@ export function CsvPanel({ main, busy, run, onClose }) {
     const { text: t, encoding } = decodeCsvBytes(await f.arrayBuffer());
     if (t.length > lim.maxBytes) { setFileNote(`파일이 너무 큽니다 — 한 번에 ${lim.maxRows}줄까지 가져옵니다.`); return; }
     edit(t);
-    setFileNote(`${f.name} — ${encoding === 'euc-kr' ? 'EUC-KR(엑셀 기본 저장)로 읽었습니다' : 'UTF-8 로 읽었습니다'}. 미리보기를 누르세요.`);
+    setFileNote(`${f.name} — ${encoding === 'euc-kr' ? 'EUC-KR(엑셀 기본 저장)로 읽었습니다' : encoding === 'utf-16' ? 'UTF-16(엑셀 유니코드 텍스트)으로 읽었습니다' : 'UTF-8 로 읽었습니다'}. 미리보기를 누르세요.`);
   };
-  const preview = () => run('csv-plan', async () => { const r = await postJson('/tools/focus-mon/targets/import/preview', { text }); setPlan(r); return null; });
+  // 늦게 온 응답은 버린다 — 요청한 뒤 글을 고쳤으면 옛 계획을 그리지 않는다(반증 7).
+  const preview = () => run('csv-plan', async () => { const sent = text; const r = await postJson('/tools/focus-mon/targets/import/preview', { text: sent }); if (textRef.current === sent) setPlan(r); return null; });
   const apply = () => run('csv-apply', async () => {
     const r = await postJson('/tools/focus-mon/targets/import', { text, mode, update });
     const head = `새로 ${r.added}대 · 갱신 ${r.updated}대 · 그대로 ${r.same}대${r.skipped ? ` · 건너뜀 ${r.skipped}줄` : ''}${r.moved?.length ? ` · 접속처가 바뀐 ${r.moved.length}대는 새 공개키 · 시험이 필요합니다` : ''}.`;
@@ -70,9 +74,10 @@ export function CsvPanel({ main, busy, run, onClose }) {
         <span className="fm-dim">최대 {lim.maxRows}줄 · 쉼표 또는 탭 · 따옴표 칸 가능 · 머리글이 있으면 열 순서 무관</span>
       </div>
       {fileNote ? <span className="fm-dim">{fileNote}</span> : null}
+      {tooLong ? <div className="fm-ban w">글이 {Math.round(lim.maxBytes / 1000)}KB 를 넘습니다(지금 {Math.round(text.length / 1000)}KB) — 줄이나 열을 줄여 나눠 넣으세요. 잘라서 보내지 않습니다.</div> : null}
       <textarea className="fm-input fm-ta" value={text} onChange={(e) => edit(e.target.value)} placeholder={'이름,IP,포트,계정,담당 노드\nweb-01,10.10.22.31,22,dvcmon,중앙\nweb-02,10.10.22.32,22,dvcmon,엣지 이름'} aria-label="CSV 붙여 넣기" />
       <div className="fm-row">
-        <button type="button" className="fm-btn pri" disabled={!!busy || !text.trim()} onClick={preview}>미리보기</button>
+        <button type="button" className="fm-btn pri" disabled={!!busy || !text.trim() || tooLong} onClick={preview}>미리보기</button>
         <button type="button" className="fm-btn" onClick={onClose}>닫기</button>
         <span className="fm-dim">담당 노드 칸이 비었거나 ‘중앙’ 이면 중앙이 맡습니다. 같은 IP · 포트가 이미 있으면 그 대상을 고칩니다.</span>
       </div>
@@ -82,6 +87,7 @@ export function CsvPanel({ main, busy, run, onClose }) {
             {Object.entries(CSV_ACTION_TEXT).map(([k, b]) => <span key={k} className={`fm-badge ${b.tone}`}>{b.label} {c[k]}</span>)}
             <span className="fm-dim">{plan.header ? '머리글을 읽어 열을 찾았습니다' : '머리글이 없어 이름, IP, 포트, 계정, 담당 노드 순서로 읽었습니다'} · 지금 {plan.registered}대 등록 / 상한 {plan.max}대</span>
           </div>
+          {csvHeaderNotes(plan).map((t) => <div key={t} className="fm-ban w">{t}</div>)}
           {plan.overCap ? <div className="fm-ban w">새로 넣을 {c.add}대를 더하면 상한 {plan.max}대를 넘습니다 — 줄을 줄이세요.</div> : null}
           <div className="fm-scroll">
             <STable className="fm-table" minWidth={760}>

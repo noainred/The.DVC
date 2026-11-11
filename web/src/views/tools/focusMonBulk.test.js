@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import {
-  CSV_ACTION_TEXT, csvChangeText, needsRetry, decodeCsvBytes, WAKE_TEXT, WAKE_KEYS, wakeFallbackText, upgradeText, diagItems, bulkLine, installGroups, TEST_TEXT,
+  CSV_ACTION_TEXT, csvChangeText, needsRetry, csvHeaderNotes, decodeCsvBytes, WAKE_TEXT, WAKE_KEYS, wakeFallbackText, upgradeText, diagItems, bulkLine, installGroups, TEST_TEXT,
 } from './focusMonText.js';
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
@@ -90,5 +90,18 @@ describe('다시 연결 버튼(사용자 보고 2026-11-12 — 엣지 서버는 
     expect(needsRetry({ authStop: { since: 1 } })).toBe(true);
     expect(needsRetry({ agent: 'NJ', test: { result: { kind: 'unreachable' } } })).toBe(false);
     expect(needsRetry(null)).toBe(false);
+  });
+});
+
+describe('반증 반영(v2.978)', () => {
+  it('엑셀 유니코드 텍스트(UTF-16 · BOM)도 읽는다', () => {
+    const le = new Uint8Array([0xff, 0xfe, ...[...'이름\tIP'].flatMap((ch) => { const c = ch.charCodeAt(0); return [c & 255, c >> 8]; })]);
+    expect(decodeCsvBytes(le)).toEqual({ text: '이름\tIP', encoding: 'utf-16' });
+  });
+  it('머리글 안내 — 못 찾은 선택 열은 기본값이 들어간다고 말한다 · 읽지 않은 열', () => {
+    expect(csvHeaderNotes({ header: true, missing: ['port', 'agent'], ignored: ['비고'] })).toEqual([
+      '포트 열을 찾지 못해 모든 줄을 22 로 넣습니다.', '담당 노드 열을 찾지 못해 모든 줄을 중앙이 맡습니다.', '읽지 않은 열: 비고 — 이 열의 값은 쓰지 않습니다.',
+    ]);
+    expect(csvHeaderNotes({ header: false, missing: ['port'] })).toEqual([]);
   });
 });

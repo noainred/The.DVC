@@ -22,6 +22,8 @@ import { classifyCentral404 } from './central404.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js';
 import { createRunner } from '../focusmon/runner.js';
 import { focusKeys } from '../focusmon/service.js';
+import { EDGE_TEST_CONCURRENCY } from '../focusmon/store.js';
+const TEST_RESULTS_PER_SYNC = 50; // 중앙이 동기화당 받는 시험 결과 상한(central/focusMonEdge.js arr(b.tests, 50))과 같게 — 넘는 것은 다음 동기화에(반증 3)
 
 const gzipAsync = promisify(zlib.gzip);
 const ACTIVE_MS = 2_000;
@@ -101,7 +103,7 @@ export async function syncOnce(now = Date.now()) {
   }
   running = true;
   const t0 = Date.now();
-  const sendS = samples.slice(); const sendP = procs.slice(); const sendT = testResults.slice();
+  const sendS = samples.slice(); const sendP = procs.slice(); const sendT = testResults.slice(0, TEST_RESULTS_PER_SYNC);
   try {
     const keyView = focusKeys.publicKeyView();
     const body = JSON.stringify({ v: 1, version: currentVersion(), sentAt: Date.now(), key: keyView, samples: sendS, procs: sendP, status: statuses, tests: sendT, diag: diagBody() });
@@ -142,6 +144,7 @@ export async function syncOnce(now = Date.now()) {
     for (const t of Array.isArray(data.tests) ? data.tests.slice(0, 20) : []) {
       const id = String(t.id);
       if (testsInFlight.has(id)) continue;
+      if (testsInFlight.size >= EDGE_TEST_CONCURRENCY) break; // 동시 상한(반증 1) — 중앙은 diag.testsBusy 로 덜 보낸다. 넘친 것은 중앙이 60초 뒤 다시 배달
       testsInFlight.add(id);
       runner.test({ id, host: String(t.host), port: Number(t.port) || 22, username: String(t.username) })
         .then((result) => { testResults.push({ id, result }); schedule(0); })
