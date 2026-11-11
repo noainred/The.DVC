@@ -5250,4 +5250,107 @@ export const DB_GUIDE_DATA = {
       "server/src/issues/notify.js"
     ]
   },
+  "storage-inspect.json": {
+    "title": "PowerScale 장비 점검 설정",
+    "summary": "PowerScale(아이실론) 주간 점검을 언제 돌릴지, 보고서 메일을 누구에게 보낼지, 판정 기준값을 몇으로 둘지를 적어 두는 설정 파일입니다.",
+    "stores": [
+      "주간 점검 켜기 · 요일 · 시각(포탈 시간대)",
+      "보고서 메일 켜기 · 점검 뒤 몇 분에 보낼지 · 받는 사람(전 법인판 · 법인판)",
+      "판정 기준값(용량 · 풀 · 가상 핫 스페어 · 스냅샷 · 디스크 busy · 편중 배수)",
+      "바꾼 사람 · 시각"
+    ],
+    "writer": "특수 기능 › PowerScale 장비 점검 › ‘일정 · 메일 · 기준’ 에서 전체 범위 관리자가 저장할 때 씁니다.",
+    "usedBy": [
+      "중앙 포탈의 주간 점검 일정(storage/inspect/schedule.js)",
+      "점검 판정(storage/inspect/judge.js)의 기준값",
+      "주간 보고서 메일 받는 사람"
+    ],
+    "retention": "덮어써서 한 벌만 둡니다.",
+    "growth": "몇 KB 로 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "기본값(매주 월요일 09:00 · 메일 꺼짐 · Dell 문서 기준값)으로 돌아갑니다. 받는 사람 목록은 다시 넣어야 합니다.",
+    "cautions": [
+      "읽지 못하면 화면에 배너를 띄우고 기본값으로 돕니다 — 저장하면 손상된 원본을 .corrupt 로 남기고 새로 씁니다."
+    ],
+    "settings": [
+      "특수 기능 › PowerScale 장비 점검 › 일정 · 메일 · 기준"
+    ],
+    "sources": [
+      "server/src/storage/inspect/schedule.js",
+      "server/src/routes/api/psInspect.js"
+    ]
+  },
+  "storage-inspect-runs.json": {
+    "title": "PowerScale 장비 점검 결과 이력",
+    "summary": "PowerScale 장비마다 최근 점검 12회의 ‘읽은 값’(facts) · 못 읽은 사유 · 실패한 단계를 적어 두는 상태 파일입니다. 판정(정상 · 주의 · 이상 · 확인 불가)은 저장하지 않고 화면을 열 때마다 이 값으로 새로 냅니다.",
+    "stores": [
+      "장비 id → 점검 실행 목록(시각 · 걸린 시간 · 방식 · 읽은 값 · 사유 · 오류)",
+      "엣지가 올린 실행은 엣지 이름과 엣지 원본 시각"
+    ],
+    "writer": "이 포탈의 점검 실행(storage/inspect/runner.js)과, 엣지가 storage push 로 올린 점검 결과를 받는 중앙 수신(central/storageInspectEdge.js)이 씁니다.",
+    "usedBy": [
+      "PowerScale 장비 점검 화면(법인별 현황 · 점검 결과 · 최근 비교)",
+      "주간 보고서 · 보고서 메일 · CSV"
+    ],
+    "retention": "장비마다 최근 12회 · 장비 1,000대 상한(넘으면 가장 오래 점검하지 않은 장비부터 뺍니다).",
+    "growth": "장비 30대면 수백 KB 수준입니다(원본 명령 출력은 싣지 않습니다).",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "지난 점검 결과가 사라져 모든 장비가 ‘아직 점검하지 않음’(확인 불가)으로 보입니다. 다음 점검부터 다시 쌓입니다.",
+    "cautions": [
+      "자주 바뀌는 상태 파일이라 ‘설정 변경 시 자동 백업’ 을 깨우지 않습니다. 백업 묶음에는 들어갑니다.",
+      "손상되면 .corrupt 로 남기고 빈 이력으로 시작합니다."
+    ],
+    "settings": [],
+    "sources": [
+      "server/src/storage/inspect/store.js",
+      "server/src/central/storageInspectEdge.js"
+    ]
+  },
+  "storage-inspect-ring.json": {
+    "title": "PowerScale 점검 결과 중앙 미전송분(엣지)",
+    "summary": "엣지 포탈이 로컬에서 점검한 결과를 중앙에 아직 올리지 못한 것을 잠시 담아 두는 상태 파일입니다. 다음 storage push 에 실려 중앙이 받았다고 답하면 비웁니다.",
+    "stores": [
+      "장비 id → 아직 보내지 않은 점검 실행(장비당 최근 2회)"
+    ],
+    "writer": "엣지 포탈의 점검 실행(storage/inspect/runner.js)이 쓰고, storage push(storage/push.js)가 중앙 응답을 받은 뒤 비웁니다.",
+    "usedBy": [
+      "엣지 → 중앙 storage push 의 inspectRuns"
+    ],
+    "retention": "장비당 2회 · 보낸 뒤 비웁니다.",
+    "growth": "몇 KB 로 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "아직 보내지 않은 점검 결과가 중앙에 가지 않습니다. 다음 점검 결과부터 다시 올라갑니다.",
+    "cautions": [
+      "중앙 포탈에서는 쓰지 않습니다(엣지 전용)."
+    ],
+    "settings": [],
+    "sources": [
+      "server/src/storage/inspect/runner.js",
+      "server/src/storage/push.js"
+    ]
+  },
+  "storage-inspect-state.json": {
+    "title": "PowerScale 주간 점검 일정 기록",
+    "summary": "주간 점검 회차를 이미 돌렸는지, 보고서 메일을 이미 보냈는지를 적어 두는 상태 파일입니다. 재시작해도 같은 회차를 두 번 돌리거나 메일을 두 번 보내지 않게 합니다.",
+    "stores": [
+      "마지막으로 처리한 점검 회차 · 메일 회차",
+      "최근 20건의 회차 기록(시작 · 놓침 · 보냄 · 실패와 사유)"
+    ],
+    "writer": "중앙 포탈의 주간 점검 일정(storage/inspect/schedule.js)이 씁니다.",
+    "usedBy": [
+      "주간 점검 일정 판정(이번 회차를 돌릴지 · 놓쳤는지)",
+      "PowerScale 장비 점검 화면의 ‘마지막 정기 점검’"
+    ],
+    "retention": "회차 기록 20건만 둡니다.",
+    "growth": "몇 KB 로 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "처음 기동처럼 지난 회차를 기준으로만 잡습니다(지난 회차를 돌리거나 메일을 다시 보내지 않습니다).",
+    "cautions": [
+      "자주 바뀌는 상태 파일이라 ‘설정 변경 시 자동 백업’ 을 깨우지 않습니다. 백업 묶음에는 들어갑니다."
+    ],
+    "settings": [],
+    "sources": [
+      "server/src/storage/inspect/schedule.js"
+    ]
+  },
 };

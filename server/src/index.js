@@ -126,6 +126,7 @@ import { startStoragePoller } from './storage/poller.js';        // 스토리지
 import { startNodeLoadPoller } from './storage/nodeLoadPoller.js'; // 아이실론 노드 부하 5분 표본(v2.932 2차 ⑨)
 import { startStoragePerfNotify } from './sanswitch/storagePerfNotify.js'; // SAN 스토리지 성능 알림(v2.950) — 상태가 바뀐 순간만 · 법인 단위 · 중앙만
 import { startStoragePerfReport } from './sanswitch/storagePerfReportMail.js'; // SAN 스토리지 성능 월간 보고서 메일(v2.950) — 1분 틱 · 회차는 보내기 전에 기록 · 중앙만
+import { startInspectScheduler } from './storage/inspect/schedule.js'; // PowerScale 주간 점검 회차 · 보고서 메일(v2.965) — 1분 틱 · 중앙만 · 데모는 기동 뒤 한 번
 import { applyGrowthSettings } from './storage/growthSettings.js'; // 사용량 보존 기간(v2.531)
 import { runCapacityBasisMigration } from './storage/capacityBasisMigration.js'; // 용량 기준 변경 1회 정리(v2.534)
 import { runZeroCapacityPurge } from './storage/zeroCapacityPurge.js'; // 0 바이트 용량 행 1회 정리(v2.541)
@@ -628,6 +629,7 @@ const stagger = [
   startNodeLoadPoller, // 〃 아이실론 노드 부하 표본(v2.932) — 수집 주기와 따로(기본 5분·중앙 배포값) · 재진입 가드 · 수집 주기와 장비 점유 공유 · 켜진 아이실론만
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
   startStoragePerfNotify, // SAN 스토리지 성능 알림(v2.950) — 포트 사용량 수집 주기(하한 5분)마다 점검 → 전이만 알림(첫 틱은 기준) · 재진입 가드 · 엣지는 기동하지 않음
+  startInspectScheduler, // PowerScale 주간 점검(v2.965) — 매주 정한 요일 · 시각 · 중앙 직접은 바로 · 위임은 엣지 요청 큐 · 놓친 회차는 기록만 · 엣지는 기동하지 않음
   startStoragePerfReport, // SAN 스토리지 성능 월간 보고서(v2.950) — 1분 틱 · 매달 정한 날 · 시각 · 놓친 회차는 기록만 · 엣지는 기동하지 않음
   startPduPoller, startPduPush, startPduConfigPull, // PDU(v2.424) — 동일 규약(자동 센서 탐지 + 재진입 가드 + 적응형 타이머)
   startCvpPoller, startCvpPush, startCvpConfigPull, // CVP(v2.608) — 기본 꺼짐 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함

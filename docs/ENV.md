@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **741개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **742개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-11)
@@ -406,7 +406,7 @@
 | `POWER_CURRENT_STALE_MS` | `2` |  | collector/state.js, idrac/service.js |
 | `UPGRADE_PUSH_CONCURRENCY` | `4` |  | collector/upgradePush.js |
 
-## 스토리지 수집 (33)
+## 스토리지 수집 (34)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -421,6 +421,7 @@
 | `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/collectRequests.js, storage/collectors/isilonSsh.js 외 1 |
 | `STORAGE_HISTORY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_HTTP_TIMEOUT_MS` |  |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
+| `STORAGE_INSPECT_TIMEOUT_MS` |  |  | storage/inspect/runner.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
 | `STORAGE_ISILON_PORT` | `8080` |  | storage/collectors/isilon.js |
 | `STORAGE_NODECLIENT_DAILY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
@@ -930,4 +931,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 741
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 742

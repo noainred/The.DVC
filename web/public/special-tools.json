@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-08T14:26:34.800Z",
-  "count": 123,
+  "generatedAt": "2026-11-11T00:11:26.856Z",
+  "count": 124,
   "tools": [
     {
       "k": "service-hub",
@@ -84,6 +84,14 @@
     },
     {
       "k": "storage-mon",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "ps-inspect",
       "adminOnly": true,
       "perm": null,
       "external": null,
