@@ -503,6 +503,12 @@ api.get('/vms/lookup', invVms, (req, res) => {
     const n = String(name).toLowerCase();
     vm = vms.find((v) => (v.name || '').toLowerCase() === n) || vms.find((v) => (v.name || '').toLowerCase().includes(n));
   }
+  // v2.963: signals=1 — VM 상세 드로어가 목록 없이 열렸을 때(알람 · 탐색 · VmLink · 호스트 전체 페이지 …) 신호를 한 번에 받는다.
+  //   판정은 /vms 와 같은 vmSignalsOf + 같은 문맥(vm-hygiene 설정) — 새 기준 없음. 원본 스냅샷 객체는 바꾸지 않는다(사본에 싣는다).
+  if (vm && (req.query.signals === '1' || req.query.signals === 'true')) {
+    const sig = vmSignalCtx();
+    return res.json({ vm: { ...vm, signals: vmSignalsOf(vm, sig.ctx) }, snapAgeDays: sig.ctx?.hygiene?.snapAgeDays ?? null });
+  }
   res.json({ vm: vm || null });
 });
 
