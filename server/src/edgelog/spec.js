@@ -108,6 +108,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.sanswitchPerf', label: 'SAN 포트 사용량 수집', group: 'collect', mod: '../sanswitch/perfPoller.js', fn: 'sanSwitchPerfStatus' },
   { key: 'collect.cvp', label: 'CVP 수집', group: 'collect', mod: '../cvp/poller.js', fn: 'cvpPollerStatus' },
   { key: 'collect.isidu', label: '아이실론 디렉터리 사용량 조사', group: 'collect', mod: '../isidu/poller.js', fn: 'isiduPollerStatus' }, // v2.736 — 중앙·엣지 공용(자기 몫 대상만)
+  { key: 'collect.ping', label: 'Ping 연속 측정', group: 'collect', mod: '../ping/monitor.js', fn: 'pingMonitorStatus' }, // v2.964 — 대상마다 쉬지 않는 루프 · 요약 주기 · 마지막 저장(중앙·엣지 공용)
   { key: 'collect.veeam', label: 'Veeam 백업 상태 수집', group: 'collect', mod: '../veeam/poller.js', fn: 'veeamPollerStatus' }, // v2.751 — 중앙·엣지 공용(자기 몫 서버만)
   { key: 'collect.veeamSnap', label: 'Veeam 계정 이벤트 전용 수집', group: 'collect', mod: '../veeam/snapCollector.js', fn: 'veeamSnapCollectorStatus' }, // v2.765 — 직접 수집 vCenter 의 Veeam 계정 이벤트만(로그 폴러가 밀려도 백업 시도는 최신)
   { key: 'collect.pdu', label: 'PDU 수집', group: 'collect', mod: '../pdu/poller.js', fn: 'pduPollerStatus' },

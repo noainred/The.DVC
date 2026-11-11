@@ -59,6 +59,7 @@ import * as m_bmUsagePoller from '../bmusage/poller.js';
 import * as m_linkCheckPoller from '../linkcheck/poller.js';
 import * as m_xferSpeedPoller from '../xferspeed/poller.js';
 import * as m_isiduPoller from '../isidu/poller.js';   // v2.736 아이실론 디렉터리 사용량
+import * as m_pingMonitor from '../ping/monitor.js';   // v2.964 Ping 연속 측정
 import * as m_veeamPoller from '../veeam/poller.js';   // v2.751 Veeam 백업 상태
 import * as m_veeamSnapCollector from '../veeam/snapCollector.js';   // v2.765 Veeam 계정 이벤트 전용 수집
 import * as m_bareosPoller from '../bareos/poller.js';   // v2.820 Bareos 백업 상태 조회
@@ -110,6 +111,7 @@ const MODS = Object.freeze({
   '../linkcheck/poller.js': m_linkCheckPoller,
   '../xferspeed/poller.js': m_xferSpeedPoller,
   '../isidu/poller.js': m_isiduPoller,
+  '../ping/monitor.js': m_pingMonitor,
   '../veeam/poller.js': m_veeamPoller,
   '../veeam/snapCollector.js': m_veeamSnapCollector,
   '../bareos/poller.js': m_bareosPoller,

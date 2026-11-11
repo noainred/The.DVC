@@ -22,12 +22,12 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1454개** |
+| 엔드포인트 | **1456개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 149개 |
-| GET | 770개 |
+| GET | 771개 |
 | POST | 458개 |
-| PUT | 146개 |
+| PUT | 147개 |
 | PATCH | 3개 |
 | DELETE | 77개 |
 
@@ -42,7 +42,7 @@
 | [`/api/svcmon`](#apisvcmon) | 68 | 성능점검(서비스 모니터링). 마운트에서 `requirePerm('svcmon')` — v2.506 에 추가된 게이트다. |
 | [`/api/admin`](#apiadmin) | 369 | 설정·관리. `authMiddleware + requireEnrolled + auditMiddleware` 뒤에 있고 대부분 `adminOnly`, 비밀을 다루는 것은 `requireSettingsOwner` 가 추가된다. |
 | [`/api/auth`](#apiauth) | 11 | 로그인·OTP·`/me`. **로그인 전** 호출되므로 `requireEnrolled` 를 타지 않는다(내부 admin 라우트는 스스로 게이트한다). |
-| [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
+| [`/api/ping`](#apiping) | 16 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 12 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
 | [`/api`](#api) | 832 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
@@ -726,20 +726,22 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/edge/overview` | — | [server/src/routes/ping.js:223](../server/src/routes/ping.js#L223) |
-| POST | `/edge/sync` | 역할 `admin` | [server/src/routes/ping.js:233](../server/src/routes/ping.js#L233) |
-| POST | `/poll-now` | 역할 `admin` | [server/src/routes/ping.js:177](../server/src/routes/ping.js#L177) |
-| POST | `/seed-vcenters` | 역할 `admin` | [server/src/routes/ping.js:183](../server/src/routes/ping.js#L183) |
-| GET | `/series` | — | [server/src/routes/ping.js:97](../server/src/routes/ping.js#L97) |
-| GET | `/status` | — | [server/src/routes/ping.js:79](../server/src/routes/ping.js#L79) |
-| GET | `/targets` | — | [server/src/routes/ping.js:92](../server/src/routes/ping.js#L92) |
-| POST | `/targets` | 역할 `admin` | [server/src/routes/ping.js:150](../server/src/routes/ping.js#L150) |
-| DELETE | `/targets/:id` | 역할 `admin` | [server/src/routes/ping.js:158](../server/src/routes/ping.js#L158) |
-| PUT | `/targets/:id` | 역할 `admin` | [server/src/routes/ping.js:154](../server/src/routes/ping.js#L154) |
-| GET | `/vcport/overview` | — | [server/src/routes/ping.js:240](../server/src/routes/ping.js#L240) |
-| GET | `/vcport/ports` | — | [server/src/routes/ping.js:254](../server/src/routes/ping.js#L254) |
-| PUT | `/vcport/ports` | 역할 `admin` | [server/src/routes/ping.js:256](../server/src/routes/ping.js#L256) |
-| POST | `/vcport/sync` | 역할 `admin` | [server/src/routes/ping.js:262](../server/src/routes/ping.js#L262) |
+| GET | `/edge/overview` | — | [server/src/routes/ping.js:256](../server/src/routes/ping.js#L256) |
+| POST | `/edge/sync` | 역할 `admin` | [server/src/routes/ping.js:266](../server/src/routes/ping.js#L266) |
+| POST | `/poll-now` | 역할 `admin` | [server/src/routes/ping.js:180](../server/src/routes/ping.js#L180) |
+| POST | `/seed-vcenters` | 역할 `admin` | [server/src/routes/ping.js:216](../server/src/routes/ping.js#L216) |
+| GET | `/series` | — | [server/src/routes/ping.js:100](../server/src/routes/ping.js#L100) |
+| GET | `/settings` | — | [server/src/routes/ping.js:203](../server/src/routes/ping.js#L203) |
+| PUT | `/settings` | 역할 `admin` | [server/src/routes/ping.js:207](../server/src/routes/ping.js#L207) |
+| GET | `/status` | — | [server/src/routes/ping.js:82](../server/src/routes/ping.js#L82) |
+| GET | `/targets` | — | [server/src/routes/ping.js:95](../server/src/routes/ping.js#L95) |
+| POST | `/targets` | 역할 `admin` | [server/src/routes/ping.js:153](../server/src/routes/ping.js#L153) |
+| DELETE | `/targets/:id` | 역할 `admin` | [server/src/routes/ping.js:161](../server/src/routes/ping.js#L161) |
+| PUT | `/targets/:id` | 역할 `admin` | [server/src/routes/ping.js:157](../server/src/routes/ping.js#L157) |
+| GET | `/vcport/overview` | — | [server/src/routes/ping.js:273](../server/src/routes/ping.js#L273) |
+| GET | `/vcport/ports` | — | [server/src/routes/ping.js:287](../server/src/routes/ping.js#L287) |
+| PUT | `/vcport/ports` | 역할 `admin` | [server/src/routes/ping.js:289](../server/src/routes/ping.js#L289) |
+| POST | `/vcport/sync` | 역할 `admin` | [server/src/routes/ping.js:295](../server/src/routes/ping.js#L295) |
 
 ## `/metrics`
 
@@ -1531,14 +1533,14 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/waste/settings` | 역할 `admin` | [server/src/routes/api/toolsCapacity.js:975](../server/src/routes/api/toolsCapacity.js#L975) |
 | DELETE | `/tools/waste/settings/data` | 역할 `admin` | [server/src/routes/api/toolsCapacity.js:1037](../server/src/routes/api/toolsCapacity.js#L1037) |
 | POST | `/tools/waste/spark` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1074](../server/src/routes/api/toolsCapacity.js#L1074) |
-| GET | `/tools/xfer-speed` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:218](../server/src/routes/api/xferSpeed.js#L218) |
-| GET | `/tools/xfer-speed/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:438](../server/src/routes/api/xferSpeed.js#L438) |
-| GET | `/tools/xfer-speed/heat` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:244](../server/src/routes/api/xferSpeed.js#L244) |
-| GET | `/tools/xfer-speed/history` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:263](../server/src/routes/api/xferSpeed.js#L263) |
-| GET | `/tools/xfer-speed/log` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:363](../server/src/routes/api/xferSpeed.js#L363) |
-| GET | `/tools/xfer-speed/ping` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:318](../server/src/routes/api/xferSpeed.js#L318) |
-| POST | `/tools/xfer-speed/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:391](../server/src/routes/api/xferSpeed.js#L391) |
-| PUT | `/tools/xfer-speed/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:416](../server/src/routes/api/xferSpeed.js#L416) |
+| GET | `/tools/xfer-speed` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:219](../server/src/routes/api/xferSpeed.js#L219) |
+| GET | `/tools/xfer-speed/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:440](../server/src/routes/api/xferSpeed.js#L440) |
+| GET | `/tools/xfer-speed/heat` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:245](../server/src/routes/api/xferSpeed.js#L245) |
+| GET | `/tools/xfer-speed/history` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:264](../server/src/routes/api/xferSpeed.js#L264) |
+| GET | `/tools/xfer-speed/log` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:365](../server/src/routes/api/xferSpeed.js#L365) |
+| GET | `/tools/xfer-speed/ping` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:319](../server/src/routes/api/xferSpeed.js#L319) |
+| POST | `/tools/xfer-speed/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:393](../server/src/routes/api/xferSpeed.js#L393) |
+| PUT | `/tools/xfer-speed/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:418](../server/src/routes/api/xferSpeed.js#L418) |
 | GET | `/top` | — | [server/src/routes/api/inventory.js:583](../server/src/routes/api/inventory.js#L583) |
 | GET | `/ui-settings` | — | [server/src/routes/api/toolsInfo.js:349](../server/src/routes/api/toolsInfo.js#L349) |
 | PUT | `/ui-settings` | 역할 `admin/operator` | [server/src/routes/api/toolsInfo.js:351](../server/src/routes/api/toolsInfo.js#L351) |
