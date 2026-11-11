@@ -1509,7 +1509,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .gpu-alloc-export-corpbox { margin-top: 2px; padding: 10px 12px; border-radius: 8px; background: var(--panel-deep); border: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 1.6; min-width: 0; }
 .gpu-alloc-export-sheet { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-dim); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gpu-alloc-export-sheet.renamed { border-color: #b45309; color: #fbbf24; }
-/* v2.966 서버 하드웨어 정보 내보내기 창(FleetHwExportModal — 시안 docs/design/baremetal-hw-xlsx ②) */
+/* v2.967 서버 하드웨어 정보 내보내기 창(FleetHwExportModal — 시안 docs/design/baremetal-hw-xlsx ②) */
 .hwx { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .hwx-grid { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 12px; align-items: start; min-width: 0; }
 .hwx-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }

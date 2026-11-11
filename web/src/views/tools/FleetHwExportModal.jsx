@@ -1,5 +1,5 @@
 /**
- * FleetHwExportModal — 통합 서버 인벤토리 '서버 하드웨어 정보 내보내기' 창(v2.966 — 승인 시안 docs/design/baremetal-hw-xlsx ② ·
+ * FleetHwExportModal — 통합 서버 인벤토리 '서버 하드웨어 정보 내보내기' 창(v2.967 — 승인 시안 docs/design/baremetal-hw-xlsx ② ·
  *   사용자 요청 2026-11-11 "물리서버의 hostname/CPU/memory/disk 등 하드웨어 정보를 excel 로 export" + 값 선택 · CSV/엑셀 · 법인 표시 ·
  *   물리/가상화/둘 다 · iDRAC 수집 정보 전부 · 서버 1대 = 시트 1장. 기본안 7가지 그대로 승인).
  *

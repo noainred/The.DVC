@@ -10,7 +10,7 @@ import { dayStamp } from '../../dayStamp.js';
 import { fleetPartialsNote, fleetHeldNote, fleetHeldBadge } from '../fleetPartialText.js'; // v2.607 LEFT2607-02 · v2.744(감사 후속 FC): 등록부 손상으로 직전 목록 유지
 import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 실패 본문(400 · 200+ok:false)을 성공으로 읽지 않는다
 import { prunePlan, pruneDoneText } from './fleetPruneText.js'; // v2.783(점검 Q2 P-B3): 확인창은 미리보기 결과로
-import { FleetHwExportModal } from './FleetHwExportModal.jsx'; // v2.966: 서버 하드웨어 정보 내보내기(엑셀 · CSV · 사양서)
+import { FleetHwExportModal } from './FleetHwExportModal.jsx'; // v2.967: 서버 하드웨어 정보 내보내기(엑셀 · CSV · 사양서)
 
 /**
  * v2.732(점검 2회차 B5-03): 일괄 등록 응답 → 완료 문구. 실패 본문이면 사유를 던진다(requireChanged).
@@ -81,7 +81,7 @@ export function FleetInventory({ isAdmin }) {
   const [sel, setSel] = useState(() => new Set()); // 일괄 등록용 선택(fleetId)
   const [bulkVc, setBulkVc] = useState('');        // 일괄 등록 대상 법인('' = 미지정으로 해제)
   const seqRef = React.useRef(0);                  // load 응답 경합 가드(오래된 응답이 최신을 덮어쓰지 않게)
-  const [hwOpen, setHwOpen] = useState(false);     // v2.966 하드웨어 정보 내보내기 창
+  const [hwOpen, setHwOpen] = useState(false);     // v2.967 하드웨어 정보 내보내기 창
 
   const load = () => {
     const my = ++seqRef.current;

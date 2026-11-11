@@ -204,7 +204,7 @@ insightsRouter.get('/fleet', async (req, res) => {
     else sendCached(req, res, `${fpKey}|masked`, maskFleetPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-// --- 서버 하드웨어 정보 내보내기(v2.966 — 승인 시안 docs/design/baremetal-hw-xlsx · 사용자 기본안 7가지 2026-11-11) ---
+// --- 서버 하드웨어 정보 내보내기(v2.967 — 승인 시안 docs/design/baremetal-hw-xlsx · 사용자 기본안 7가지 2026-11-11) ---
 // 게이트는 GET /fleet 과 같다(전체 범위 계정만 — 미귀속 베어메탈 하드웨어가 들어간다) + 파일 내보내기 권한 data.csv(v2.643 규약).
 // 엑셀은 동시 1건(util/exportBusy — 없으면 포탈을 죽인다, security-api.md) · 워커 스레드에서 만든다(insights/hwExport/render.js).
 // 관리자가 아니면 adminOnly 값(iDRAC 주소 · MAC · UUID)은 카탈로그에서 빠지고, 주소로 등록된 서버 이름 · Hostname 은 가린다(maskFleetPayload 와 같은 matcher).

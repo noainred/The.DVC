@@ -1,5 +1,5 @@
 /**
- * insights/hwExport/catalog.js — '서버 하드웨어 정보 내보내기' 의 값 카탈로그(순수 · v2.966 — 승인 시안 docs/design/baremetal-hw-xlsx).
+ * insights/hwExport/catalog.js — '서버 하드웨어 정보 내보내기' 의 값 카탈로그(순수 · v2.967 — 승인 시안 docs/design/baremetal-hw-xlsx).
  *
  * 사용자 요청(2026-11-11): "서버의 모든 인터페이스의 속도, 펌웨어 등 idrac 에서 수집하는 모든 정보를 선택해서 export" ·
  *   "서버 1대의 사양을 최대한 자세하게 볼 수 있는 정보를 sheet 1장에 서버 1대".

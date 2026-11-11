@@ -1,5 +1,5 @@
 /**
- * insights/hwExport/rows.js — 통합 서버 인벤토리 행 + iDRAC 인벤토리 → 내보내기 모델(순수 · v2.966).
+ * insights/hwExport/rows.js — 통합 서버 인벤토리 행 + iDRAC 인벤토리 → 내보내기 모델(순수 · v2.967).
  *
  * 입력은 getFleetInventory 결과(bareMetal · virtualizationHosts — 물리/가상화 판정은 그 함수 하나다, 여기서 다시 하지 않는다)와
  * 인벤토리 찾기 함수(invOf)다. 출력 모델은 **함수 없는 평범한 값**이라 엑셀 워커로 그대로 보낼 수 있다.

@@ -105,8 +105,3 @@ export function flowSumParts(flow) {
   const t = `${rateText(flow.txBps)} / ${rateText(flow.rxBps)}`;   // 읽기(장비 송신) / 쓰기(장비 수신)
   return [t, [flow.measured < flow.n ? `${flow.measured}/${flow.n}개` : '', stale].filter(Boolean).join(' · ')];
 }
-export function flowSumText(flow) {
-  const [a, b] = flowSumParts(flow);
-  if (a === '—' || !b) return a;
-  return /속도 없음$/.test(a) ? `${a} · ${b}` : `${a}(${b})`;
-}

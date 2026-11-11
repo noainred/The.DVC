@@ -1,5 +1,5 @@
 /**
- * insights/hwExport/xlsx.js — 서버 하드웨어 정보 엑셀(v2.966 — 승인 시안 docs/design/baremetal-hw-xlsx ③④).
+ * insights/hwExport/xlsx.js — 서버 하드웨어 정보 엑셀(v2.967 — 승인 시안 docs/design/baremetal-hw-xlsx ③④).
  *
  * 입력은 rows.js buildHwModel 의 평범한 값 모델이다(함수 없음 — 워커로 그대로 보낸다). 시트:
  *   서버 요약(법인 표시: band = 법인마다 띠 · sheet = 법인마다 시트 · col = 법인 열만, 자동 필터) → 상세(고른 묶음마다 1장)

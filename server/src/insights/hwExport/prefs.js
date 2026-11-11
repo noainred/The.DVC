@@ -1,5 +1,5 @@
 /**
- * insights/hwExport/prefs.js — '서버 하드웨어 정보 내보내기' 창의 계정별 기억(v2.966 · 사용자 승인 기본안 6 '계정마다 기억').
+ * insights/hwExport/prefs.js — '서버 하드웨어 정보 내보내기' 창의 계정별 기억(v2.967 · 사용자 승인 기본안 6 '계정마다 기억').
  * 저장소 규칙은 util/exportPrefs.js(공장) 머리말 — 파일 CONFIG_DIR/hw-export-prefs.json · 비밀 없음(값 key · 선택값뿐).
  * 이 창은 '기본값'(default) 하나만 쓴다(1~5칸 UI 없음). 기억하는 것: 값(cols) · 형식(fmt) · 법인 표시(band) · 사양서(spec).
  * 대상(물리/가상화)은 창을 연 탭을, 법인은 '모두' 를 늘 기본으로 한다(기억하지 않는다 — 설계 §6-1).

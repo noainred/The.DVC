@@ -1,5 +1,5 @@
 /**
- * insights/hwExport/render.js — 모델 → 내려받을 파일(xlsx · csv · zip) (v2.966).
+ * insights/hwExport/render.js — 모델 → 내려받을 파일(xlsx · csv · zip) (v2.967).
  *
  *  · 엑셀은 워커 스레드에서 만든다(util/xlsxWorkerRun.js — exceljs writeBuffer 는 쪼갤 수 없는 동기 직렬화).
  *    끄는 길 env HW_EXPORT_XLSX_WORKER=0 · 시한 HW_EXPORT_XLSX_TIMEOUT_MS(기본 5분).

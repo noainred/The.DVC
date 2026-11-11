@@ -1,5 +1,5 @@
 /**
- * fleetHwExportText.js — '서버 하드웨어 정보 내보내기' 창의 순수 로직(v2.966 — 승인 시안 docs/design/baremetal-hw-xlsx ②).
+ * fleetHwExportText.js — '서버 하드웨어 정보 내보내기' 창의 순수 로직(v2.967 — 승인 시안 docs/design/baremetal-hw-xlsx ②).
  * 값 목록(카탈로그)·법인 대수·기본 묶음은 서버 /insights/fleet/hardware-meta 가 준다 — 여기서 값 이름을 지어내지 않는다.
  */
 

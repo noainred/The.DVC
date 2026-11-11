@@ -42,7 +42,7 @@
 - (8b단계 추가) 리눅스 성능 8b단계 프로세스 Top-N · 저활용 · 전력/온도 — ##TOP 은 comm 만 · 줄마다 접두 · 파일 읽기는 셸 · 변화 있을 때만 저장 · 점수는 후보 표시(분모 환산 · 제외 집계) · 전력은 대시보드와 한 소스(미측정 제외)
 - (다음 점검 ②③ 추가) 전력 알림 규칙 4종(랙 여유 · 흡기 지속 · 피크 급증 · PowerCap 걸림 — 같은 엔진 · 기본 꺼짐) · 엣지 서버별 PowerCap 봉투 — 보류는 잇지도 끊지도 않음 · 같은 표본은 한 번 · 판정은 원천이 있는 노드
 - (2026-11-09 추가) 사용자 결정 기록 — 7b 공통 계정 묶기 · 8a 운영자 정비 창 12h · 법인 미지정 OS 등록 공유 · 전력 알림 랙 창/판정 노드 — 네 가지 모두 현행 유지(다시 묻지 않는다)
-- (v2.966 추가) 서버 하드웨어 정보 내보내기 — 값 카탈로그 하나(insights/hwExport/catalog.js) · 대상은 통합 서버 인벤토리 판정 그대로 · 못 읽은 값은 빈 칸 · 관리자 전용 값 · 사양서 파일 나눔
+- (v2.967 추가) 서버 하드웨어 정보 내보내기 — 값 카탈로그 하나(insights/hwExport/catalog.js) · 대상은 통합 서버 인벤토리 판정 그대로 · 못 읽은 값은 빈 칸 · 관리자 전용 값 · 사양서 파일 나눔
 ## 본문
 
 - ⚠⚠ **물리 파트(부품) 장애 — v2.548 재설계. '확인 불가' 를 정상으로도 장애로도 세지 않고, 전이만 기록한다**
@@ -1435,7 +1435,7 @@
   - **전력 알림(v2.949)**: 랙 알림은 **배치 서버 전부가 같은 시각에 정비 창 안일 때만** 억제(일부만 창 안이면 보내고 본문에 정비 중 서버) · 엣지가 맡은 법인의 서버는 **그 엣지만** 판정(`powerJudge.judgeOf`).
     대가(사용자 확인): 정비 중 랙 알림이 조금 더 나가고, 엣지 법인인데 iDRAC 이 중앙에만 등록된 서버는 판정 노드가 없다(전력 보기 ‘알림 판정 없음’ 으로 표시).
 
-- **v2.966 서버 하드웨어 정보 내보내기**(통합 서버 인벤토리 › ‘하드웨어 정보 내보내기’ · 설계 `docs/design/baremetal-hw-xlsx/README.md` · 사용자 기본안 7가지 2026-11-11):
+- **v2.967 서버 하드웨어 정보 내보내기**(통합 서버 인벤토리 › ‘하드웨어 정보 내보내기’ · 설계 `docs/design/baremetal-hw-xlsx/README.md` · 사용자 기본안 7가지 2026-11-11):
   - **값은 카탈로그 하나**(`server/src/insights/hwExport/catalog.js` — 묶음 13 · 값 key `<묶음>.sum|det.<값>` 고정). 웹 창은 서버 `/insights/fleet/hardware-meta` 가 준 카탈로그로만 칩을 그린다(이름을 화면에서 지어내지 않는다).
     새 iDRAC 수집 필드를 내보내려면 카탈로그에 넣는다 — 라우트 · 엑셀 · CSV · 사양서가 같은 정의를 쓴다.
   - **대상 = `getFleetInventory` 의 bareMetal · virtualizationHosts 그대로**(물리/가상화 판정 복제 금지). 캐시는 GET /fleet 과 같은 `snapMemo('fleet', ...)` 키.
@@ -1455,5 +1455,5 @@
     F2 ZIP 항목 이름은 `render.js uniqueNames`(`~2` — util/zip.js 는 중복이면 던진다) · F3 개수 · 합은 `collections.<키>==='failed'` 면 null(redfish.js 는 배열을 먼저 [] 로 만든다 —
     NIC 은 표식이 없어 빈 배열도 null) · F4 맨 위 칸 이름에서 '합계 제외' 를 뺐다(받침 없는 가상화 호스트는 vCenter 값으로 더해진다) · F5 서버 안의 합은 부품 하나라도 못 읽으면 null,
     서버 사이의 합(띠 · 맨 위 칸)은 '(값 있는 M/N대)' · F6 모델 · CSV 조립에 시간 기준 양보 · F7 게이트를 실제 호출로 고정(operator · viewer · 범위 계정 · 데모 403 · 409).
-  - 회귀 `server/test/hwExport2966.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
+  - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
 
