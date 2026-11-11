@@ -28,13 +28,12 @@ const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React
 
 const SECTIONS = [
   ['basic', '기본', '#3b82f6'], ['sec', '구성·보안', '#ef4444'], ['perfc', '경합·지연', '#f59e0b'], ['cluster', '클러스터', '#22d3ee'],
-  ['net', '네트워크', '#60a5fa'], ['st', '스토리지', '#fb923c'], ['san', 'SAN 경로·트래픽', '#2dd4bf'], ['gpu', 'GPU', '#a78bfa'], ['idrac', '전력 · iDRAC', '#f59e0b'], ['boot', '재부팅', '#94a3b8'], ['vm', 'VM', '#22c55e'],
+  ['net', '네트워크', '#60a5fa'], ['st', '스토리지', '#fb923c'], ['gpu', 'GPU', '#a78bfa'], ['idrac', '전력 · iDRAC', '#f59e0b'], ['boot', '재부팅', '#94a3b8'], ['san', 'SAN 경로·트래픽', '#2dd4bf'], ['vm', 'VM', '#22c55e'],
 ];
 const timeText = (t) => (Number.isFinite(t) ? new Date(t).toLocaleString('ko-KR') : '—');
 const numText = (v) => (Number.isFinite(v) ? v.toLocaleString('en-US') : '—');
-// wide — 격자 한 줄 전체 폭(넓은 표가 든 카드 · v2.966: SAN 경로 표가 반쪽 폭에서 1440px 에도 가로로 밀렸다)
-const Card = ({ id, title, color, sub, children, flat = false, wide = false }) => (
-  <section id={`hd-${id}`} className="card hd-card" style={wide ? { gridColumn: '1 / -1' } : undefined}>
+const Card = ({ id, title, color, sub, children, flat = false }) => (
+  <section id={`hd-${id}`} className="card hd-card">
     {title && <div className="hd-card-h"><b><i className="ht-gdot" style={{ background: color }} aria-hidden="true" />{title}</b>{sub ? <span className="muted">{sub}</span> : null}</div>}
     <div className={flat ? 'hd-flat' : ''}>{children}</div>
   </section>
@@ -236,11 +235,6 @@ export default function HostDetail({ id }) {
               </div>
             )}
           </Card>
-          {toolAllowed('san-switch') && (
-            <Card id="san" wide title="SAN 경로 · 트래픽" color="#2dd4bf" sub={san ? sanSubText(san) : 'HBA WWN ↔ 스위치 포트 · zone ↔ 스토리지 귀속 · 확정분/추정분 분리'}>
-              <Lazy><HostSanSection hostId={h.id} onData={setSan} /></Lazy>
-            </Card>
-          )}
           {h.gpus?.length > 0 && (
             <Card id="gpu" title={`GPU — ${h.gpus.length}`} color="#a78bfa">
               <div className="flex gap wrap">
@@ -254,6 +248,14 @@ export default function HostDetail({ id }) {
           </Card>
         </div>
       </div>
+
+      {/* SAN 경로 · 트래픽은 두 열 격자 밖 — 표가 넓어(경로 · 스위치 · 타깃 WWN) 반쪽 열에서는 1440px 에서도 가로로 밀렸다(v2.966).
+          격자 안 카드는 세로 열(.hd-col) 자식이라 gridColumn 으로는 넓어지지 않는다 — 옮긴 이유. */}
+      {toolAllowed('san-switch') && (
+        <Card id="san" title="SAN 경로 · 트래픽" color="#2dd4bf" sub={san ? sanSubText(san) : 'HBA WWN ↔ 스위치 포트 · zone ↔ 스토리지 귀속 · 확정분/추정분 분리'}>
+          <Lazy><HostSanSection hostId={h.id} onData={setSan} /></Lazy>
+        </Card>
+      )}
 
       <Card id="vm" title={`이 호스트의 VM ${numText(h.vmCount)}대`} color="#22c55e" sub={vms && !vms.error ? `목록 ${numText(vmList.length)} · 켜짐 ${numText(vmOn)}${vmSum ? ` · 템플릿 ${numText(vmSum.templates)} · vCPU ${numText(vmSum.vcpu)} · 메모리 ${gbText(vmSum.memMB)}(할당)` : ''}${vcell ? ` · Veeam 최근 백업 ${vcell.text}` : ''}` : ''}>
         {!vms ? <div className="muted">VM 목록 읽는 중…</div> : vms.error ? <div className="muted">VM 목록을 읽지 못했습니다({vms.error}).</div> : (
