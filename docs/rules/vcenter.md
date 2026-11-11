@@ -188,6 +188,14 @@
   · **엣지 위임 vCenter 의 성능**: 409 skip(site) 본문에 담당 엣지 포탈 주소 `edge:{id,name,url}` — **관리자만**(`isAdminReq` · 관리 주소 가림 규칙) · 수집 서버 등록부 `remoteAgent` 일치(id/name · 대소문자 무시) ·
     url 없으면 싣지 않는다. 화면은 `edgePortalHref(edge, vcHash(...monitor))` 로 같은 화면 링크(새 창 · '따로 로그인' 안내). 판정 · 사유 문구 · 로그인 0 은 그대로(`respondIfVcAuthStopped` 의 `skipExtra` 훅).
   · **vCenter 상세 `key={site.id}`**: 같은 페이지에서 해시로 다른 vCenter 의 개체로 건너뛰면 옛 `obj` 가 남아 '이 VM 이 없습니다' 가 떴다(A/B 재현) — vCenter 가 바뀌면 새로 마운트.
+- **v2.963 — 목록 없이 연 VM 드로어의 신호 · 남은 경로 실검증(사용자 선택 '①② · 표준')**(서버 `routes/api/inventory.js /vms/lookup` · 웹 `views/vms/{vmSeries.jsx useVmSignals·signalsFromLookup, VmDrawer.jsx}`.
+  회귀 `server/test/vmDrawerSig2963.test.js`(3 — `/vms?signals=1` 과 같은 VM 에 같은 신호 대조 · 원본 스냅샷 불변 · 범위 밖 null) · 웹 `views/vms/vmDrawerSig2963.test.jsx`(6)):
+  · `/vms/lookup?signals=1` → `{ vm:{...vm, signals}, snapAgeDays }` — 판정은 `/vms` 와 같은 `vmSignalsOf` + 같은 문맥(`vmSignalCtx`) · **사본에** 싣는다 · signals 없으면 응답 모양 그대로 · 범위 밖은 예전처럼 `{vm:null}`.
+  · 드로어는 `vm.signals` 가 배열이 아닐 때만 **열 때 1회** 묻는다(폴링 없음 · AbortController · 늦은 응답 버림) — 첫 렌더부터 '신호 확인 중'(받지 않았다고 말하지 않는다) ·
+    실패는 '읽지 못했습니다' · 그 VM 이 응답에 없으면 '찾지 못해 계산하지 못했습니다'(신호 없음으로 말하지 않는다) · 기준 일수는 prop(목록 응답) 우선.
+  · ⚠ **`/alarms` 에는 VM 알람이 없다**: 포탈 알람 규칙은 호스트(끊김 · 유지보수 · CPU · 메모리) · 데이터스토어(사용률 · 접근 불가)뿐이고(`soapClient.js` mkAlarm · 목 생성기 같음) REST 폴백은 알람을 만들지 않는다 —
+    알람 화면의 VM 클릭(`ENDPOINT.vm`)은 지금 실데이터로 일어나지 않는다. Chromium 은 VM 알람 행을 **주입**해 경로만 확인했다(드로어 · 신호 정상). vCenter 자체 트리거 알람은 별도 카드(`vcinfo`)다.
+  · 엣지 포탈 링크(v2.927)는 실 엣지 환경에 이 컨테이너가 닿지 않아 **409 응답을 주입**해 Chromium 1440/400 으로 확인했다(안내 아래 · 새 창 · 주소 = 엣지 url + 같은 해시 · `window.opener === null`).
 - ⚠⚠ **v2.697 — VM 구성 속성(B10)은 30초 인벤토리 요청에 싣지 않는다 — 오래된 VM 부터 주기당 상한만큼 다시 읽는 캐시다**
   (`server/src/vmcfg/`{parse.js(순수 파서·판정·엣지 정제),cache.js,collect.js} + `soapClient.js` 배선 + 웹 `views/vmcfg/vmCfgText.js` + `EntityDetail.jsx VmCfgSection`.
   회귀 `server/test/vmCfg2697.test.js`(변이 5/5) + 웹 `vmCfgText.test.js`(서버·웹 판정 대조)):
