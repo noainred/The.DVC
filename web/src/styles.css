@@ -2269,6 +2269,10 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .ht-table th:first-child, .ht-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); box-shadow: 1px 0 0 var(--border-soft); }
 .ht-table thead th:first-child { z-index: 2; }
 .ht-link { text-decoration: none; }
+/* v2.975 호스트 표 이름 칸 — 이름(개체 보기) + '빠른 확인'(드로어). VM 표의 .vmd-quick 과 같은 모양. */
+.ht-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.ht-quick { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; font: inherit; font-size: 10.5px; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
+.ht-quick:hover { color: var(--text); border-color: var(--accent); }
 /* 호스트 상세 전체 페이지(#/hosts/<id>) */
 .hd { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .hd-top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px; }

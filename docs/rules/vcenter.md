@@ -196,6 +196,19 @@
   · ⚠ **`/alarms` 에는 VM 알람이 없다**: 포탈 알람 규칙은 호스트(끊김 · 유지보수 · CPU · 메모리) · 데이터스토어(사용률 · 접근 불가)뿐이고(`soapClient.js` mkAlarm · 목 생성기 같음) REST 폴백은 알람을 만들지 않는다 —
     알람 화면의 VM 클릭(`ENDPOINT.vm`)은 지금 실데이터로 일어나지 않는다. Chromium 은 VM 알람 행을 **주입**해 경로만 확인했다(드로어 · 신호 정상). vCenter 자체 트리거 알람은 별도 카드(`vcinfo`)다.
   · 엣지 포탈 링크(v2.927)는 실 엣지 환경에 이 컨테이너가 닿지 않아 **409 응답을 주입**해 Chromium 1440/400 으로 확인했다(안내 아래 · 새 창 · 주소 = 엣지 url + 같은 해시 · `window.opener === null`).
+- **v2.975 — ESXi 호스트 상세도 드로어 한 벌(사용자 요청 '가상화 호스트 정보도 vm 처럼 깔끔하게' · 시안 `docs/design/host-drawer` · 컨펌 '기본값대로')**
+  (웹 `views/hosts/{HostDrawer.jsx, hostDrawerText.js}` · `components/EntityDetail.jsx`(호스트 가지 위임 · `HostCfgSection foldValues`) · `views/{VCenterDetail,Hosts}.jsx` · `views/vcd/treeRows.js treeHostRows` ·
+  `views/vms/vmSeries.jsx useDaySeries(…, { entity, delayMs })`. 서버 변경 없음. 회귀 웹 `views/hosts/hostDrawerText.test.js`(18) · `views/hosts/hostDrawer2975.test.jsx`(12) · `views/vcd/treeRows.test.js`(+3)):
+  · **호스트 모달은 없다** — `EntityDetail type='host'` 는 `HostDrawer`(동적 import · `rows=[]`)로 위임한다. 알람 · 탐색 Top-N · IP 관리 소유 호스트 · 통합 성능 모니터링이 자동으로 드로어다.
+    남은 모달은 데이터스토어뿐. `HostBasicRows` 는 개체 보기 요약 · 전체 페이지가 쓰므로 지우지 않는다. 드로어 뼈대는 VM 과 같은 `.vmh-drawer`(새 틀을 만들지 않는다).
+  · **판정을 새로 하지 않는다**: 신호 줄 = `hostChecksText.reasonBadges`(호스트 표 사유와 같은 목록 · 같은 순서 — 테스트가 대조) · 사실 줄 = `hostCfgText.findingDetail` · 임계값 숫자는 `CPU_ATTENTION_PCT`.
+  · **점검 묶음(`/hosts/checks`)은 vCenter 마다 1회**(드로어가 열려 있는 동안 기억 · 폴링 없음) — 호스트 표에서 열면 표가 가진 `checks.byId` 를 넘겨 **다시 묻지 않는다**(Chromium 확인: 요청 0).
+    못 받은 묶음(권한으로 빠진 `hw`·`boot` 키 · 수집 안 된 `veeam` · 실패)은 '이상 없음' 으로 세지 않고 `checksGap` 이 따로 말한다. 읽는 중에는 '확인 중'.
+  · **24시간 추이는 잠깐 기다렸다 조회**(`delayMs` 400ms) — ‹ › 로 빠르게 넘길 때 지나친 호스트마다 vCenter 로그인이 생기지 않게(Chromium 확인: 5번 넘겨도 마지막 1건). VM 드로어 기본값(0)은 그대로다 — **같은 문제가 VM 에도 있다(남긴 것)**.
+  · 끊김 · 무응답 호스트는 사용률 · 추이 · 구성 판정을 그리지 않는다(`—` · 단위 없음). 타일은 좁다(640px 에서 안쪽 약 110px) — **한 줄에 한 가지만**(처음 판본은 '32코어 · 72.5 / 76.8 GHz' 가 잘렸다).
+  · ‹ › 순서는 연 곳을 따른다: 트리 = `treeHostRows`(검색 중이면 일치한 호스트) · 호스트 표 = `DataTable onVisible` 이 준 행 · 그 밖 = 잠김. 폴링으로 값이 바뀌면 같은 id 의 최신 행을 그린다.
+  · `.vmh-acts > .login-btn, .logout-btn { margin: 0 }` — 공용 단추의 바깥 여백(로그인 화면용 4px)이 드로어 단추 줄을 어긋나게 했다(VM 드로어도 같이 고쳐졌다 · Chromium 확인).
+  · 실 vCenter · 엣지에서는 확인하지 못했다(이 컨테이너) — 끊긴 호스트 · 점검 호스트 · 점검 묶음 실패는 **응답을 주입**해 확인했다. 모달 안에서 연 호스트 드로어(IP 관리)는 따로 보지 않았다(VM 드로어와 같은 CSS).
 - ⚠⚠ **v2.697 — VM 구성 속성(B10)은 30초 인벤토리 요청에 싣지 않는다 — 오래된 VM 부터 주기당 상한만큼 다시 읽는 캐시다**
   (`server/src/vmcfg/`{parse.js(순수 파서·판정·엣지 정제),cache.js,collect.js} + `soapClient.js` 배선 + 웹 `views/vmcfg/vmCfgText.js` + `EntityDetail.jsx VmCfgSection`.
   회귀 `server/test/vmCfg2697.test.js`(변이 5/5) + 웹 `vmCfgText.test.js`(서버·웹 판정 대조)):
