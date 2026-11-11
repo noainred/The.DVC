@@ -371,7 +371,7 @@ function IostatCompare({ main, ids, tb, onOpen }) {
       <tr key={key}>
         <td><button type="button" className="fm-pk" aria-label="차트에 올리기" style={pinIdx.has(key) ? { background: PIN_COLORS[pinIdx.get(key)], borderColor: PIN_COLORS[pinIdx.get(key)] } : undefined} onClick={() => togglePin(key)} /></td>
         <td className="fm-mono fm-ell">{merged ? `${tById.get(r.id)?.name} · ` : ''}{d.n}{d.dn ? ` (${d.dn})` : ''}{d.stuck ? <span className="fm-badge crit">응답 없음</span> : null}</td>
-        {d.v.map((v, i) => <td key={cols[i]} className="fm-r fm-num" data-sort={v ?? -1} style={{ background: cellShade(v, colMax[i]) || undefined }}>{iostatText(cols[i], v)}</td>)}
+        {d.v.map((v, i) => <td key={cols[i]} className="fm-r fm-num" data-sort={v ?? null} style={{ background: cellShade(v, colMax[i]) || undefined }}>{iostatText(cols[i], v)}</td>)}
       </tr>
     );
   };
@@ -539,10 +539,10 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                 <tr key={x.n}>
                   <td className="fm-mono" style={{ paddingLeft: 12 + lv * 20, fontWeight: lv ? 400 : 600 }}>{x.n}</td>
                   <td className="fm-dim fm-ell">{x.k === 'bond' ? `${x.md || '본딩'} · 구성원 ${x.mem?.length || 0}개${x.md === 'active-backup' && x.act ? ` · 지금 ${x.act} 사용` : ''}` : x.m ? `${x.m} 구성원${x.act === x.n ? ' · 사용 중' : ''} · 링크 ${x.st === 'up' ? '정상' : x.st || '?'}` : `${x.k === 'phys' ? '단독' : '가상'} · 링크 ${x.st === 'up' ? '정상' : x.st === 'down' ? '끊김(down)' : x.st || '?'}`}</td>
-                  <td className="fm-r fm-num" data-sort={x.sp ?? -1}>{x.sp == null ? DASH : x.sp >= 1000 ? `${x.sp / 1000} Gb` : `${x.sp} Mb`}</td>
-                  <td data-sort={x.u ?? -1}><span className="fm-meter"><span className="t"><span className={`f ${levelOf(x.u, settings)}`} style={{ width: `${Math.min(100, x.u ?? 0)}%` }} /></span><span className="fm-num">{pctText(x.u)}</span></span></td>
-                  <td className="fm-r fm-num" data-sort={x.rx ?? -1}>{bpsText(x.rx)}</td>
-                  <td className="fm-r fm-num" data-sort={x.tx ?? -1}>{bpsText(x.tx)}</td>
+                  <td className="fm-r fm-num" data-sort={x.sp ?? null}>{x.sp == null ? DASH : x.sp >= 1000 ? `${x.sp / 1000} Gb` : `${x.sp} Mb`}</td>
+                  <td data-sort={x.u ?? null}><span className="fm-meter"><span className="t"><span className={`f ${levelOf(x.u, settings)}`} style={{ width: `${Math.min(100, x.u ?? 0)}%` }} /></span><span className="fm-num">{pctText(x.u)}</span></span></td>
+                  <td className="fm-r fm-num" data-sort={x.rx ?? null}>{bpsText(x.rx)}</td>
+                  <td className="fm-r fm-num" data-sort={x.tx ?? null}>{bpsText(x.tx)}</td>
                   <td className="fm-r fm-num fm-dim">{x.er == null && x.dr == null ? DASH : `${numText(x.er, 0)} · ${numText(x.dr, 0)}`}</td>
                   <td><span className="fm-spark2"><Spark vals={netSpark.get(x.n)?.rx} color={RX_COLOR} max={niceMax(seriesMax([netSpark.get(x.n)?.rx, netSpark.get(x.n)?.tx]) ?? 1)} area={false} h={14} /><Spark vals={netSpark.get(x.n)?.tx} color={TX_COLOR} max={niceMax(seriesMax([netSpark.get(x.n)?.rx, netSpark.get(x.n)?.tx]) ?? 1)} area={false} h={14} /></span></td>
                 </tr>
@@ -566,7 +566,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                         <span className="fm-st"><span><button type="button" className="fm-linkbtn" onClick={() => setDev(x.n)}>{x.n}</button>{x.stuck ? <span className="fm-badge crit">응답 없음</span> : null}</span>{x.dn || x.sz ? <small>{[x.dn, x.sz ? sizeText(x.sz) : ''].filter(Boolean).join(' · ')}</small> : null}</span>
                       </td>
                       <td className="fm-mono fm-dim">{x.mp || ''}</td>
-                      {showCols.map((c) => <td key={c} className={`fm-r fm-num ${c === 'wAwait' || c === 'rAwait' || c === 'await' ? awaitLevel(x.v[colIdx(c)], settings) : ''}`} data-sort={x.v[colIdx(c)] ?? -1}>{iostatText(c, x.v[colIdx(c)])}</td>)}
+                      {showCols.map((c) => <td key={c} className={`fm-r fm-num ${c === 'wAwait' || c === 'rAwait' || c === 'await' ? awaitLevel(x.v[colIdx(c)], settings) : ''}`} data-sort={x.v[colIdx(c)] ?? null}>{iostatText(c, x.v[colIdx(c)])}</td>)}
                       {cols === 'summary' ? <td><Spark vals={dspark.get(x.n)} color={TX_COLOR} max={niceMax(seriesMax([dspark.get(x.n)]) ?? 1)} area={false} h={22} /></td> : null}
                     </tr>
                     {x.stuck ? <tr className="fm-stuck"><td colSpan={showCols.length + 3}>이 구간에 끝난 요청이 0건인데 {x.fl}건이 걸려 있고 사용률이 100% 입니다. iostat 은 이때 await 를 0.00 으로 찍습니다 — 여기서는 ‘—’ 로 두고 ‘응답 없음’ 으로 알립니다.</td></tr> : null}
@@ -588,7 +588,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
             <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">CPU 를 많이 쓰는 프로세스 — 상위 5</h3><a href={`#/${BASE.join('/')}/procs`}>상위 30개 전부 보기</a></div>
             <STable className="fm-table" minWidth={560}>
               <thead><tr><th>PID</th><th>사용자</th><th>CPU(1코어 = 100%)</th><th>명령</th></tr></thead>
-              <tbody>{procs.slice(0, 5).map((p) => <tr key={p.pid}><td className="fm-mono fm-num">{p.pid}</td><td className="fm-mono">{p.u || DASH}</td><td data-sort={p.cpu ?? -1}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, p.cpu ?? 0)}%` }} /></span><span className="fm-num">{pctText(p.cpu, 1)}</span></span></td><td className="fm-mono">{p.c}</td></tr>)}</tbody>
+              <tbody>{procs.slice(0, 5).map((p) => <tr key={p.pid}><td className="fm-mono fm-num">{p.pid}</td><td className="fm-mono">{p.u || DASH}</td><td data-sort={p.cpu ?? null}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, p.cpu ?? 0)}%` }} /></span><span className="fm-num">{pctText(p.cpu, 1)}</span></span></td><td className="fm-mono">{p.c}</td></tr>)}</tbody>
             </STable>
           </div>
         </>
@@ -619,10 +619,10 @@ function Procs({ main, ids, tb, onOpen }) {
       <td><button type="button" className="fm-linkbtn" onClick={() => onOpen(id)}>{tById.get(id)?.name}</button></td>
       <td className="fm-r fm-mono fm-num">{p.pid}</td>
       <td className="fm-mono">{p.u || DASH}</td>
-      <td data-sort={cpuOf(p) ?? -1}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, ((cpuOf(p) ?? 0) / topCpu) * 100)}%` }} /></span><span className="fm-num">{pctText(cpuOf(p), 1)}</span></span></td>
-      <td className="fm-r fm-num" data-sort={p.rss ?? -1}>{p.rss == null ? DASH : `${numText(p.rss >= 1024 ? p.rss / 1024 : p.rss, 1)} ${p.rss >= 1024 ? 'GB' : 'MB'}`}</td>
+      <td data-sort={cpuOf(p) ?? null}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, ((cpuOf(p) ?? 0) / topCpu) * 100)}%` }} /></span><span className="fm-num">{pctText(cpuOf(p), 1)}</span></span></td>
+      <td className="fm-r fm-num" data-sort={p.rss ?? null}>{p.rss == null ? DASH : `${numText(p.rss >= 1024 ? p.rss / 1024 : p.rss, 1)} ${p.rss >= 1024 ? 'GB' : 'MB'}`}</td>
       <td className="fm-r fm-num">{p.th ?? DASH}</td>
-      <td className="fm-r fm-num fm-dim" data-sort={p.et ?? -1}>{etText(p.et)}</td>
+      <td className="fm-r fm-num fm-dim" data-sort={p.et ?? null}>{etText(p.et)}</td>
       <td className="fm-mono">{p.c}</td>
     </tr>
   );

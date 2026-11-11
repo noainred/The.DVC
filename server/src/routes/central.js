@@ -591,7 +591,7 @@ centralRouter.post('/focus-mon/sync', requireCentral(), (req, res) => {
   }
   try {
     const out = handleEdgeSync(req.centralAuth.agent, req.body);
-    if (out.ok === false && out.code === 'registryUnreadable') return res.status(503).json(out);
+    if (out.ok === false && out.code === 'registryUnreadable') return persistent503(res).json(out); // 지속형 — Retry-After 60(EDGE-03)
     res.locals.ingestSummary = { rows: out.accepted?.samples ?? 0 };
     res.json(out);
   } catch (e) {
