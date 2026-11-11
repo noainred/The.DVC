@@ -21,12 +21,18 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
 .seg button{height:34px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
 .seg button:first-child{border-left:0}
 .seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.seg a{display:inline-flex;align-items:center;height:34px;padding:0 12px;border-left:1px solid #243049;color:#8b9bb4;font-size:12.5px;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.seg a:first-child{border-left:0}
+.seg a.on{background:#1a2236;color:#e6edf6;font-weight:600}
 .btn{height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
 .tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #1f2a40}
 .tabs a{display:inline-flex;align-items:center;height:40px;padding:0 14px;color:#8b9bb4;text-decoration:none;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs a.on{color:#e6edf6;font-weight:600;border-bottom-color:#3b82f6}
 .tbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px}
-.tbar input[type=range]{flex:1 1 220px;min-width:120px;height:20px;margin:0;accent-color:#3b82f6}
+.tbar input[type=range]{width:100%;height:20px;margin:0;accent-color:#3b82f6}
+.sl{flex:1 1 220px;min-width:140px;display:flex;flex-direction:column;gap:3px}
+.sl svg{display:block;width:100%;height:5px;border-radius:3px}
+.tbar input[type=date]{height:34px;box-sizing:border-box;padding:0 8px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;color-scheme:dark}
 .tbar .cap{flex:1 1 100%;font-size:12px;color:#8b9bb4}
 .btn[disabled]{opacity:.45;cursor:default}
 .btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
@@ -73,6 +79,10 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
   </nav>
 
   <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+    <div class="row"><span class="lbl">보기</span>
+      <div class="seg" role="group" aria-label="비교 보기"><a class="on" href="Compare.dc.html">지표 비교</a><a href="IostatCompare.dc.html">iostat 비교</a></div>
+      <span class="dim" style="font-size:12px">지표 하나를 20대에서 보거나, 고른 서버의 iostat 표를 나란히 봅니다</span>
+    </div>
     <div class="row"><span class="lbl">지표</span>
       <div class="seg" role="group" aria-label="지표"><button type="button">CPU</button><button type="button">메모리</button><button type="button">네트워크</button><button type="button" class="on">디스크</button></div>
       <span class="dim" style="font-size:12px">디스크 항목은 iostat -x -m 의 13개 열 그대로입니다</span>
@@ -94,10 +104,11 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
     <span class="dim" style="font-size:12px">구간</span>
     <div class="seg" role="group" aria-label="차트 구간"><button type="button">1분</button><button type="button" class="on">5분</button><button type="button">10분</button><button type="button">30분</button></div>
     <button type="button" class="btn">◀ 이전 5분</button>
-    <input type="range" min="0" max="11" value="11" aria-label="구간 이동 — 오른쪽 끝이 최신">
+    <span class="sl"><input type="range" min="0" max="287" value="287" aria-label="구간 이동 — 오른쪽 끝이 최신"><svg viewBox="0 0 1440 6" preserveAspectRatio="none" role="img" aria-label="최근 24시간 가운데 기록이 있는 시간"><rect x="0" y="0" width="1440" height="6" fill="#1b2a48"></rect><rect x="0" y="0" width="191" height="6" fill="#3987e5"></rect><rect x="232" y="0" width="673" height="6" fill="#3987e5"></rect><rect x="921" y="0" width="519" height="6" fill="#3987e5"></rect></svg></span>
     <button type="button" class="btn" disabled="disabled">다음 5분 ▶</button>
     <button type="button" class="btn on">최신</button>
-    <span class="cap num">최근 구간 · 21:44:38 ~ 21:49:38 · 뒤로 11칸까지 — 포탈 메모리에 60분 보관 · 이 띠 하나가 이 화면의 모든 차트를 함께 옮깁니다</span>
+    <label class="dim" style="font-size:12px" for="jump-cmp">날짜로 이동</label><input id="jump-cmp" type="date" value="2026-11-11" min="2026-10-12" max="2026-11-11">
+    <span class="cap num">최근 구간 · 11-11 21:44:38 ~ 21:49:38 · 슬라이더는 최근 24시간(날짜를 고르면 그 날 하루) · 뒤로 30일까지 — DB 에 보관 · 슬라이더 아래 띠는 기록이 있는 시간</span>
   </div>
 
   <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:stretch">
@@ -180,7 +191,7 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1693}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1739}}'>
 class Component extends DCLogic {
   renderVals() {
     const N = 150; const T = 1000;

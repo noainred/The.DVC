@@ -27,7 +27,10 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
 .tabs a{display:inline-flex;align-items:center;height:40px;padding:0 14px;color:#8b9bb4;text-decoration:none;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs a.on{color:#e6edf6;font-weight:600;border-bottom-color:#3b82f6}
 .tbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px}
-.tbar input[type=range]{flex:1 1 220px;min-width:120px;height:20px;margin:0;accent-color:#3b82f6}
+.tbar input[type=range]{width:100%;height:20px;margin:0;accent-color:#3b82f6}
+.sl{flex:1 1 220px;min-width:140px;display:flex;flex-direction:column;gap:3px}
+.sl svg{display:block;width:100%;height:5px;border-radius:3px}
+.tbar input[type=date]{height:34px;box-sizing:border-box;padding:0 8px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;color-scheme:dark}
 .tbar .cap{flex:1 1 100%;font-size:12px;color:#8b9bb4}
 .btn[disabled]{opacity:.45;cursor:default}
 .btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
@@ -47,14 +50,14 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
 .tr.sum{background:#0f1626;font-weight:600}
 .r{text-align:right}
 .net{grid-template-columns:minmax(150px,1.1fr) minmax(190px,1.5fr) 64px 150px 84px 84px 84px minmax(130px,1fr);min-width:1040px}
-.dsk{grid-template-columns:minmax(214px,1.5fr) 82px repeat(12,minmax(58px,.55fr)) 100px;min-width:1250px}
+.dsk{grid-template-columns:minmax(224px,1.7fr) 92px repeat(7,minmax(64px,.6fr)) 124px minmax(110px,1fr);min-width:1120px}
 .th.two{height:46px}
 .hh{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25}
 .hh b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:500;font-size:11.5px;color:#c3cede}
 .hh small{font-size:11px;color:#8b9bb4}
 .hh.l{align-items:flex-start}
 .dv{display:flex;align-items:center;gap:8px;min-width:0}
-.dnote{padding:6px 12px 8px 32px;font-size:12px;color:#c3cede;background:rgba(239,68,68,.07);border-bottom:1px solid #1a2236;min-width:1250px;box-sizing:border-box}
+.dnote{padding:6px 12px 8px 32px;font-size:12px;color:#c3cede;background:rgba(239,68,68,.07);border-bottom:1px solid #1a2236;min-width:1120px;box-sizing:border-box}
 .badge.warn{background:rgba(245,158,11,.16);color:#fbbf24}
 .meter{display:flex;align-items:center;gap:8px}
 .meter .t{flex:1;height:8px;border-radius:4px;background:#1b2a48;overflow:hidden}
@@ -94,10 +97,11 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
     <span class="dim" style="font-size:12px">구간</span>
     <div class="seg" role="group" aria-label="차트 구간"><button type="button">1분</button><button type="button" class="on">5분</button><button type="button">10분</button><button type="button">30분</button></div>
     <button type="button" class="btn">◀ 이전 5분</button>
-    <input type="range" min="0" max="11" value="11" aria-label="구간 이동 — 오른쪽 끝이 최신">
+    <span class="sl"><input type="range" min="0" max="287" value="287" aria-label="구간 이동 — 오른쪽 끝이 최신"><svg viewBox="0 0 1440 6" preserveAspectRatio="none" role="img" aria-label="최근 24시간 가운데 기록이 있는 시간"><rect x="0" y="0" width="1440" height="6" fill="#1b2a48"></rect><rect x="0" y="0" width="191" height="6" fill="#3987e5"></rect><rect x="232" y="0" width="673" height="6" fill="#3987e5"></rect><rect x="921" y="0" width="519" height="6" fill="#3987e5"></rect></svg></span>
     <button type="button" class="btn" disabled="disabled">다음 5분 ▶</button>
     <button type="button" class="btn on">최신</button>
-    <span class="cap num">최근 구간 · 21:44:38 ~ 21:49:38 · 뒤로 11칸까지 — 포탈 메모리에 60분 보관 · 이 띠 하나가 이 화면의 모든 차트를 함께 옮깁니다</span>
+    <label class="dim" style="font-size:12px" for="jump-srv">날짜로 이동</label><input id="jump-srv" type="date" value="2026-11-11" min="2026-10-12" max="2026-11-11">
+    <span class="cap num">최근 구간 · 11-11 21:44:38 ~ 21:49:38 · 슬라이더는 최근 24시간(날짜를 고르면 그 날 하루) · 뒤로 30일까지 — DB 에 보관 · 슬라이더 아래 띠는 기록이 있는 시간</span>
   </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:12px">
@@ -198,34 +202,28 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
       <div class="row">
         <span class="dim" style="font-size:12px">행을 누르면 아래 차트가 그 장치로 바뀝니다</span>
         <div class="seg" role="group" aria-label="디스크 범위"><button type="button" class="on">트리</button><button type="button">물리 디스크만</button><button type="button">파티션 · 볼륨만</button></div>
-        <div class="seg" role="group" aria-label="표의 열"><button type="button">요약 열</button><button type="button" class="on">iostat 전체 열</button></div>
+        <div class="seg" role="group" aria-label="표의 열"><button type="button" class="on">요약 열</button><button type="button">iostat 전체 열</button></div>
       </div>
     </div>
     <div class="tw">
       <div class="th dsk two"><span>장치</span><span>마운트</span>
-        <span class="hh"><b>rrqm/s</b><small>읽기 병합</small></span><span class="hh"><b>wrqm/s</b><small>쓰기 병합</small></span>
         <span class="hh"><b>r/s</b><small>읽기 횟수</small></span><span class="hh"><b>w/s</b><small>쓰기 횟수</small></span>
         <span class="hh"><b>rMB/s</b><small>읽기량</small></span><span class="hh"><b>wMB/s</b><small>쓰기량</small></span>
-        <span class="hh"><b>avgrq-sz</b><small>요청 크기</small></span><span class="hh"><b>avgqu-sz</b><small>대기열</small></span>
-        <span class="hh"><b>await</b><small>지연</small></span><span class="hh"><b>r_await</b><small>읽기 지연</small></span><span class="hh"><b>w_await</b><small>쓰기 지연</small></span>
-        <span class="hh"><b>svctm</b><small>서비스 시간</small></span><span class="hh l"><b>%util</b><small>사용률</small></span></div>
+        <span class="hh"><b>r_await</b><small>읽기 지연</small></span><span class="hh"><b>w_await</b><small>쓰기 지연</small></span>
+        <span class="hh"><b>avgqu-sz</b><small>대기열</small></span><span class="hh l"><b>%util</b><small>사용률</small></span><span class="hh l"><b>w_await</b><small>이 구간 추이</small></span></div>
       <sc-for list="{{ disks }}" as="d" hint-placeholder-count="17">
         <div class="{{ d.cls }}">
           <span class="dv" style="{{ d.pad }}"><span class="nm mono">{{ d.name }}</span><sc-if value="{{ d.flag }}" hint-placeholder-val="{{ false }}"><span class="{{ d.flagCls }}">{{ d.flagText }}</span></sc-if></span>
           <span class="nm mono dim">{{ d.mnt }}</span>
-          <span class="r num">{{ d.rrqm }}</span>
-          <span class="r num">{{ d.wrqm }}</span>
           <span class="r num">{{ d.ri }}</span>
           <span class="r num">{{ d.wi }}</span>
           <span class="r num">{{ d.rm }}</span>
           <span class="r num">{{ d.wm }}</span>
-          <span class="r num">{{ d.rq }}</span>
-          <span class="r num" style="{{ d.qInk }}">{{ d.q }}</span>
-          <span class="r num" style="{{ d.awInk }}">{{ d.aw }}</span>
           <span class="r num" style="{{ d.raInk }}">{{ d.ra }}</span>
           <span class="r num" style="{{ d.waInk }}">{{ d.wa }}</span>
-          <span class="r num">{{ d.sv }}</span>
+          <span class="r num" style="{{ d.qInk }}">{{ d.q }}</span>
           <span class="meter"><span class="t"><span class="f" style="{{ d.fill }}"></span></span><span class="p num">{{ d.util }}</span></span>
+          <svg class="sp" viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"><path d="{{ d.line }}" fill="none" stroke="#d95926" stroke-width="1.5" vector-effect="non-scaling-stroke"></path></svg>
         </div>
         <sc-if value="{{ d.hasNote }}" hint-placeholder-val="{{ false }}"><div class="dnote">{{ d.note }}</div></sc-if>
       </sc-for>
@@ -263,7 +261,7 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
       </div>
     </div>
     <div class="dim" style="font-size:12px;padding:0 16px;display:flex;flex-direction:column;gap:3px">
-      <span>열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 2초 차이). 터미널의 iostat 값과 나란히 대조할 수 있습니다. 단위: 지연 · 서비스 시간 ms, 요청 크기 섹터(512바이트).</span>
+      <span>요약 열은 iostat -x -m 의 13개 열 가운데 8개입니다(이름 · 계산식 같음). 나머지 병합 · 요청 크기 · 합친 지연 · 서비스 시간은 ‘iostat 전체 열’ 을 누르면 나옵니다. 단위: 지연 ms.</span>
       <span>iostat 과 다른 점 두 가지 — ① 그 2초에 끝난 요청이 없으면 지연을 0.00 이 아니라 ‘—’ 로 둡니다 ② 끝난 요청은 없는데 걸린 요청이 있으면 ‘응답 없음’ 으로 알립니다. svctm 은 sysstat 이 믿지 말라고 밝힌 값이라 참고용입니다.</span>
       <span>‘전체 디스크’ 는 물리 디스크(sd*)만 더합니다 — 파티션과 LVM 볼륨은 같은 입출력을 다시 보는 것이라 합계에 넣지 않습니다. 지연은 요청 수로 가중한 평균, 사용률은 가장 바쁜 디스크 값입니다. dm 장치의 병합은 항상 0 입니다(병합은 아래 물리 디스크에서 일어납니다).</span>
     </div>
@@ -387,6 +385,7 @@ class Component extends DCLogic {
         q: f2(q), qInk: q >= 100 ? 'color:#fca5a5;font-weight:600' : '',
         aw: f2(aw), awInk: ink(aw), ra: f2(ra), raInk: ink(ra), wa: f2(wa), waInk: ink(wa),
         sv: ios > 0 ? f2((d[11] * 10) / ios) : '—', util: d[11] + '%', fill: 'width:' + d[11] + '%',
+        line: wa == null ? '' : path(ser((t) => wob(Math.min(wa, 47), wa > 47 ? 0.04 : 0.3, 70 + d[0].charCodeAt(2), t)), 0, 100, 2, 21, 50),
         flag: k === 'slow' || k === 'stuck', flagCls: 'badge crit', flagText: k === 'stuck' ? '응답 없음' : '지연 위험',
         hasNote: !!d[14], note: d[14] || '',
       };

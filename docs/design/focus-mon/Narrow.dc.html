@@ -28,6 +28,8 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
 .tabs a.on{color:#e6edf6;font-weight:600;border-bottom-color:#3b82f6}
 .tbar{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .tbar input[type=range]{width:100%;height:28px;margin:0;accent-color:#3b82f6}
+.tbar svg{display:block;width:100%;height:5px;border-radius:3px;margin-top:-4px}
+.tbar input[type=date]{flex:1 1 auto;height:44px;box-sizing:border-box;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:13px;color-scheme:dark}
 .btn[disabled]{opacity:.45}
 .btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
 .badge{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:10px;font-size:11.5px;font-weight:600;white-space:nowrap}
@@ -79,9 +81,11 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
 
   <div class="card tbar">
     <div class="seg" role="group" aria-label="차트 구간"><button type="button">1분</button><button type="button" class="on">5분</button><button type="button">10분</button><button type="button">30분</button></div>
-    <input type="range" min="0" max="11" value="11" aria-label="구간 이동 — 오른쪽 끝이 최신">
+    <input type="range" min="0" max="287" value="287" aria-label="구간 이동 — 오른쪽 끝이 최신">
+    <svg viewBox="0 0 1440 6" preserveAspectRatio="none" role="img" aria-label="최근 24시간 가운데 기록이 있는 시간"><rect x="0" y="0" width="1440" height="6" fill="#1b2a48"></rect><rect x="0" y="0" width="191" height="6" fill="#3987e5"></rect><rect x="232" y="0" width="673" height="6" fill="#3987e5"></rect><rect x="921" y="0" width="519" height="6" fill="#3987e5"></rect></svg>
     <div class="row"><button type="button" class="btn">◀ 이전 5분</button><button type="button" class="btn" disabled="disabled">다음 5분 ▶</button><button type="button" class="btn on">최신</button></div>
-    <span class="dim num" style="font-size:12px">최근 구간 · 21:44:38 ~ 21:49:38 · 뒤로 11칸까지</span>
+    <div class="row"><label class="dim" style="font-size:12px" for="jump-nar">날짜로 이동</label><input id="jump-nar" type="date" value="2026-11-11" min="2026-10-12" max="2026-11-11"></div>
+    <span class="dim num" style="font-size:12px">최근 구간 · 11-11 21:44:38 ~ 21:49:38 · 뒤로 30일까지(DB 보관)</span>
   </div>
 
   <div style="display:flex;flex-direction:column;gap:6px">
@@ -127,7 +131,7 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":2124}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":2203}}'>
 class Component extends DCLogic {
   renderVals() {
     const N = 90; const T = 1000;

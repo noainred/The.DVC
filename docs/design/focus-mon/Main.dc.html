@@ -31,7 +31,10 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
 .badge.crit{background:rgba(239,68,68,.18);color:#fca5a5}
 .badge.off{background:rgba(139,155,180,.16);color:#b6c2d6}
 .tbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px}
-.tbar input[type=range]{flex:1 1 220px;min-width:120px;height:20px;margin:0;accent-color:#3b82f6}
+.tbar input[type=range]{width:100%;height:20px;margin:0;accent-color:#3b82f6}
+.sl{flex:1 1 220px;min-width:140px;display:flex;flex-direction:column;gap:3px}
+.sl svg{display:block;width:100%;height:5px;border-radius:3px}
+.tbar input[type=date]{height:34px;box-sizing:border-box;padding:0 8px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;color-scheme:dark}
 .tbar .cap{flex:1 1 100%;font-size:12px;color:#8b9bb4}
 .btn[disabled]{opacity:.45;cursor:default}
 .btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
@@ -61,7 +64,7 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
       <span class="row" style="gap:2px 6px;min-height:34px;box-sizing:border-box;padding:4px 12px;border:1px solid #243049;border-radius:8px;background:#0f1626">
         <span aria-hidden="true" style="{{ liveDot }}"></span>
         <span style="font-weight:600">{{ liveText }}</span>
-        <span class="dim">· 20 / 20대 · 주기 2초 · 남은 시간</span>
+        <span class="dim">· 20 / 20대 · 주기 2초 · DB 기록 중 · 남은 시간</span>
         <span class="mono num">{{ remain }}</span>
       </span>
       <button type="button" class="btn">15분 연장</button>
@@ -105,9 +108,10 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
       <sc-for list="{{ wins }}" as="o" hint-placeholder-count="4"><button type="button" class="{{ o.cls }}" onClick="{{ o.pick }}">{{ o.label }}</button></sc-for>
     </div>
     <button type="button" class="btn" disabled="{{ prevDis }}" onClick="{{ goPrev }}">{{ prevLabel }}</button>
-    <input type="range" min="0" max="{{ maxOff }}" value="{{ slideVal }}" onChange="{{ onSlide }}" aria-label="구간 이동 — 오른쪽 끝이 최신">
+    <span class="sl"><input type="range" min="0" max="{{ maxOff }}" value="{{ slideVal }}" onChange="{{ onSlide }}" aria-label="구간 이동 — 오른쪽 끝이 최신"><svg viewBox="0 0 1440 6" preserveAspectRatio="none" role="img" aria-label="최근 24시간 가운데 기록이 있는 시간"><rect x="0" y="0" width="1440" height="6" fill="#1b2a48"></rect><rect x="0" y="0" width="191" height="6" fill="#3987e5"></rect><rect x="232" y="0" width="673" height="6" fill="#3987e5"></rect><rect x="921" y="0" width="519" height="6" fill="#3987e5"></rect></svg></span>
     <button type="button" class="btn" disabled="{{ nextDis }}" onClick="{{ goNext }}">{{ nextLabel }}</button>
     <button type="button" class="{{ latestCls }}" onClick="{{ goLatest }}">최신</button>
+    <label class="dim" style="font-size:12px" for="jump-main">날짜로 이동</label><input id="jump-main" type="date" value="2026-11-11" min="2026-10-12" max="2026-11-11">
     <span class="cap num">{{ winCap }}</span>
   </div>
 
@@ -157,7 +161,7 @@ class Component extends DCLogic {
     // 구간(분) · 뒤로 간 칸 수. 표본은 2초마다라 1분 = 30점. 차트는 최대 150점으로 줄여 그린다.
     const W = S.win; const per = W * 30;
     const N = Math.min(150, per); const step = per / N;
-    const maxOff = Math.floor(60 / W) - 1;
+    const maxOff = 1440 / W - 1;   // 슬라이더 = 최근 24시간
     const off = Math.min(S.off, maxOff);
     const baseTick = off > 0 ? S.frozen : S.tick;
     const T = 1000 + baseTick - off * per;
@@ -247,9 +251,10 @@ class Component extends DCLogic {
       .map((o) => ({ label: o[1], cls: S.sort === o[0] ? 'on' : '', pick: () => this.setState({ sort: o[0] }) }));
     const nodes = [['all', '전체 ' + counts.all], ['중앙', '중앙 ' + counts['중앙']], ['PL-WRO', 'PL-WRO ' + counts['PL-WRO']], ['US-ATL', 'US-ATL ' + counts['US-ATL']]]
       .map((o) => ({ label: o[1], cls: S.node === o[0] ? 'on' : '', pick: () => this.setState({ node: o[0] }) }));
-    const hms = (sec) => { const h = Math.floor(sec / 3600) % 24; const mi = Math.floor(sec / 60) % 60; const s2 = sec % 60; return (h < 10 ? '0' : '') + h + ':' + (mi < 10 ? '0' : '') + mi + ':' + (s2 < 10 ? '0' : '') + s2; };
-    const endSec = 21 * 3600 + 49 * 60 + 38 + baseTick * 2 - off * W * 60;
-    const range = hms(endSec - W * 60) + ' ~ ' + hms(endSec);
+    const p2 = (n) => (n < 10 ? '0' : '') + n;
+    const stamp = (ms, withDate) => { const d = new Date(ms); return (withDate ? p2(d.getUTCMonth() + 1) + '-' + p2(d.getUTCDate()) + ' ' : '') + p2(d.getUTCHours()) + ':' + p2(d.getUTCMinutes()) + ':' + p2(d.getUTCSeconds()); };
+    const endMs = Date.UTC(2026, 10, 11, 21, 49, 38) + baseTick * 2000 - off * W * 60000;
+    const range = stamp(endMs - W * 60000, true) + ' ~ ' + stamp(endMs, false);
     const wins = [1, 5, 10, 30].map((w) => ({ label: w + '분', cls: S.win === w ? 'on' : '', pick: () => this.setState({ win: w, off: 0 }) }));
     const go = (n) => this.setState({ off: Math.max(0, Math.min(maxOff, n)), frozen: off === 0 ? S.tick : S.frozen });
     const left = Math.max(0, 760 - S.tick * 2);
@@ -261,8 +266,8 @@ class Component extends DCLogic {
       goPrev: () => go(off + 1), goNext: () => go(off - 1), goLatest: () => go(0),
       onSlide: (e) => go(maxOff - Number(e && e.target ? e.target.value : maxOff)),
       winCap: off === 0
-        ? '최근 구간 · ' + range + ' · 뒤로 ' + maxOff + '칸까지 — 포탈 메모리에 60분 보관 · 이 띠 하나가 이 화면의 모든 차트를 함께 옮깁니다'
-        : '과거 구간 · ' + range + ' · 뒤로 ' + off + '칸째(최대 ' + maxOff + '칸) · 이 구간은 갱신하지 않습니다 — 수집은 계속됩니다',
+        ? '최근 구간 · ' + range + ' · 슬라이더는 최근 24시간(날짜를 고르면 그 날 하루) · 뒤로 30일까지 — DB 에 보관 · 슬라이더 아래 띠는 기록이 있는 시간'
+        : '과거 구간 · ' + range + ' · 뒤로 ' + off + '칸째 · 이 구간은 갱신하지 않습니다 — 수집과 기록은 계속됩니다(이 시안은 최근 24시간까지만 움직입니다)',
       remain: (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss,
       liveText: S.paused ? '화면 멈춤' : '수집 중',
       liveDot: 'display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (S.paused ? '#8b9bb4' : '#22c55e'),

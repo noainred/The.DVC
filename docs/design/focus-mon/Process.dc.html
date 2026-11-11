@@ -25,6 +25,14 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
 .tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #1f2a40}
 .tabs a{display:inline-flex;align-items:center;height:40px;padding:0 14px;color:#8b9bb4;text-decoration:none;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs a.on{color:#e6edf6;font-weight:600;border-bottom-color:#3b82f6}
+.tbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px}
+.tbar input[type=range]{width:100%;height:20px;margin:0;accent-color:#3b82f6}
+.sl{flex:1 1 220px;min-width:140px;display:flex;flex-direction:column;gap:3px}
+.sl svg{display:block;width:100%;height:5px;border-radius:3px}
+.tbar input[type=date]{height:34px;box-sizing:border-box;padding:0 8px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;color-scheme:dark}
+.tbar .cap{flex:1 1 100%;font-size:12px;color:#8b9bb4}
+.btn[disabled]{opacity:.45;cursor:default}
+.btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
 .lbl{font-size:12px;color:#8b9bb4}
 .inp{height:34px;box-sizing:border-box;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;min-width:0}
 .h3{margin:0;font-size:14.5px;font-weight:600}
@@ -72,6 +80,8 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
       <button type="button" class="btn">전체 20대 ▾</button>
       <span class="lbl" style="margin-left:6px">CPU 기준</span>
       <div class="seg" role="group" aria-label="CPU 기준"><button type="button" class="on">1코어 = 100%</button><button type="button">서버 전체 대비</button></div>
+      <span class="lbl" style="margin-left:6px">시점</span>
+      <div class="seg" role="group" aria-label="시점"><button type="button" class="on">구간 끝 순간</button><button type="button">구간 평균</button></div>
     </div>
     <div class="row">
       <label class="lbl" for="q">찾기</label>
@@ -79,6 +89,17 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
       <button type="button" class="btn">화면 멈춤</button>
       <button type="button" class="btn">CSV</button>
     </div>
+  </div>
+
+  <div class="card tbar">
+    <span class="dim" style="font-size:12px">구간</span>
+    <div class="seg" role="group" aria-label="차트 구간"><button type="button">1분</button><button type="button" class="on">5분</button><button type="button">10분</button><button type="button">30분</button></div>
+    <button type="button" class="btn">◀ 이전 5분</button>
+    <span class="sl"><input type="range" min="0" max="287" value="287" aria-label="구간 이동 — 오른쪽 끝이 최신"><svg viewBox="0 0 1440 6" preserveAspectRatio="none" role="img" aria-label="최근 24시간 가운데 기록이 있는 시간"><rect x="0" y="0" width="1440" height="6" fill="#1b2a48"></rect><rect x="0" y="0" width="191" height="6" fill="#3987e5"></rect><rect x="232" y="0" width="673" height="6" fill="#3987e5"></rect><rect x="921" y="0" width="519" height="6" fill="#3987e5"></rect></svg></span>
+    <button type="button" class="btn" disabled="disabled">다음 5분 ▶</button>
+    <button type="button" class="btn on">최신</button>
+    <label class="dim" style="font-size:12px" for="jump-proc">날짜로 이동</label><input id="jump-proc" type="date" value="2026-11-11" min="2026-10-12" max="2026-11-11">
+    <span class="cap num">최근 구간 · 11-11 21:44:38 ~ 21:49:38 · 슬라이더는 최근 24시간(날짜를 고르면 그 날 하루) · 뒤로 30일까지 — DB 에 보관 · 슬라이더 아래 띠는 기록이 있는 시간</span>
   </div>
 
   <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
@@ -134,13 +155,14 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
         <span class="dim">CPU = /proc/&lt;pid&gt;/stat 의 누적 CPU 시간(사용자 + 시스템)이 5초 동안 늘어난 양입니다. top 과 같은 원리이고, 스레드가 여럿이면 100% 를 넘습니다.</span>
         <span class="dim">표본 사이(5초)에 생겼다가 사라진 프로세스는 보이지 않습니다. 처음 본 프로세스는 다음 표본부터 값이 나옵니다.</span>
         <span class="dim">명령줄은 관리자에게만 보이고, 비밀로 보이는 인자(password · token · secret · key 뒤 값)는 ‘[가림]’ 으로 바꿉니다. 자유 문자열이라 가림이 완전하지는 않습니다.</span>
+        <span class="dim">프로세스 목록도 DB 에 30일 남습니다(가림을 거친 명령줄만 저장). 시간 띠로 과거 구간을 고르면 그때의 상위 30개가 나옵니다.</span>
         <span class="dim">이 화면은 보기만 합니다 — 프로세스를 끝내거나 우선순위를 바꾸는 기능은 없습니다.</span>
       </div>
     </div>
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1355}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1501}}'>
 class Component extends DCLogic {
   renderVals() {
     const CORES = { 'kr-was-01': 16, 'kr-was-02': 16, 'pl-was-01': 16, 'pl-was-02': 16, 'us-was-01': 16, 'kr-bak-01': 16, 'pl-mes-01': 16, 'pl-db-01': 32, 'kr-db-01': 32, 'us-db-01': 32, 'kr-nfs-01': 16, 'us-file-01': 8, 'kr-web-01': 8 };
