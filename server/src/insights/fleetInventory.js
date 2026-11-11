@@ -300,8 +300,9 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     syntheticVirt: virtualizationHosts.filter((h) => h.synthetic).length,
     bareMetal: bareMetal.length,
     bareMetalMeasured: measured.length,
-    bareMetalWatts: round(bareMetalWatts) || 0,
-    bareMetalKw: Math.round(bareMetalWatts / 100) / 10,
+    // v2.977(전체 점검): 측정한 서버가 0대면 합은 '모름'(null) — 0 W 가 아니다. 일부만 측정이면 부분 합이므로 화면이 '측정 n / 전체 m' 을 함께 쓴다.
+    bareMetalWatts: measured.length ? round(bareMetalWatts) : null,
+    bareMetalKw: measured.length ? Math.round(bareMetalWatts / 100) / 10 : null,
     bareMetalAssigned: bareMetal.filter((b) => b.vcenterId).length,
     bareMetalUnassigned: bareMetal.filter((b) => !b.vcenterId).length,
     bareMetalInferred: bareMetal.filter((b) => b.vcSource === 'inferred').length,

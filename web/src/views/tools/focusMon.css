@@ -119,6 +119,19 @@
 .fm-wrap .fm-hm svg { display: block; width: 100%; height: 14px; }
 .fm-wrap .fm-hm .fm-num { text-align: right; }
 
+/* 차트 툴팁(v2.977) — 마우스 · 손가락을 올린 시각의 값. 글자는 본문색 토큰(시리즈 색은 네모에만). */
+.fm-wrap .fm-chart-box { position: relative; min-width: 0; }
+.fm-wrap .fm-sparkbox { position: relative; display: block; min-width: 0; }
+.fm-wrap .fm-tip { position: absolute; top: 6px; z-index: 5; pointer-events: none; min-width: 150px; max-width: 280px; padding: 8px 10px; border-radius: 8px;
+  background: var(--panel-2); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 12px; color: var(--text); display: flex; flex-direction: column; gap: 3px; }
+.fm-wrap .fm-tip.sm { top: auto; bottom: calc(100% + 4px); min-width: 0; padding: 4px 8px; font-size: 11.5px; white-space: nowrap; }
+.fm-wrap .fm-tip-t { color: var(--text-dim); font-family: var(--mono); font-size: 11px; }
+.fm-wrap .fm-tip-r { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.fm-wrap .fm-tip-r i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.fm-wrap .fm-tip-r b { font-weight: 600; text-align: right; }
+.fm-wrap .fm-tip.sm .fm-tip-r { grid-template-columns: auto auto; }
+.fm-wrap .fm-tip.sm .fm-tip-r .fm-ell { overflow: visible; text-overflow: clip; } /* 작은 상자는 이름이 짧다(CPU · 메모리) — 말줄임으로 ‘C…’ 가 됐다 */
+
 /* 표 */
 .fm-wrap .fm-table th { font-weight: 600; font-size: 12px; color: var(--text-dim); white-space: nowrap; }
 .fm-wrap .fm-table td { font-size: 12.5px; }

@@ -183,3 +183,17 @@ describe('shortTime', () => {
     expect(shortTime(NOW)).toMatch(/^\d{2}-\d{2} \d{2}:\d{2}$/);
   });
 });
+
+describe('v2.977 전체 점검 — vCPU 를 못 읽은 VM 이 있으면 할당 · 코어 대비는 부분 합이다', () => {
+  it('‘이상’ 과 못 읽은 VM 수를 붙인다(HostDetail · Hosts 표와 같은 뜻)', async () => {
+    const { hostTiles } = await import('./hostDrawerText.js');
+    const host = { id: 'vc-a:host-1', cpuCores: 4, vmCount: 3, connectionState: 'connected', powerState: 'poweredOn' };
+    const part = hostTiles(host, { vm: { n: 3, on: 2, templates: 0, vcpu: 8, memMB: 1024, vcpuUnknown: 2, memUnknown: 0 } }).vm.subs;
+    expect(part).toContain('vCPU 8 할당 이상');
+    expect(part.some((s) => /^코어 대비 .* 이상$/.test(s))).toBe(true);
+    expect(part).toContain('vCPU 못 읽은 VM 2');
+    const full = hostTiles(host, { vm: { n: 3, on: 2, templates: 0, vcpu: 12, memMB: 1024, vcpuUnknown: 0, memUnknown: 0 } }).vm.subs;
+    expect(full).toContain('vCPU 12 할당');
+    expect(full.some((s) => /이상|못 읽은/.test(s))).toBe(false);
+  });
+});

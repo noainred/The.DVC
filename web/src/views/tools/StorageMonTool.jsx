@@ -243,7 +243,9 @@ function TypedTable({ list, type, caption, ctx, typeLabel, empty, onClear }) {
       )}
       {/* ⚠ 표에 자체 세로 스크롤(max-height)을 다시 넣지 말 것 — 장비가 20대만 넘어도 페이지
           스크롤과 표 스크롤이 이중으로 겹쳐 목록을 훑기 불편하다(2026-09-02 사용자 지적). */}
-      <div className="table-wrap">
+      {/* v2.977(전체 점검 — 재현): 종류별 열이 많아(PowerStore 1,580px · Unity 1,404px …) 1440px 에서 '상태' · '작업' 열이 가로 스크롤 뒤로 갔다(v2.403 재발).
+          폭을 깎아서는 맞지 않아 두 열을 표 오른쪽에 고정한다(sm-pin-right — styles.css). 가운데 용량 열만 스크롤된다. */}
+      <div className="table-wrap sm-pin-right">
         <STable>
           <thead><tr>{cols.map((c) => <th key={c.key} className={c.align === 'right' ? 'right' : undefined} style={c.align === 'right' ? { textAlign: 'right' } : undefined}>{c.label}</th>)}</tr></thead>
           <tbody>

@@ -337,9 +337,10 @@ export default function SanSwitchTool() {
               return (
                 <tr key={r.id} {...(mark ? { 'data-mark': '1', style: { '--row-mark': mark } } : {})}>
                   <td>
-                    <button className="tab" style={{ padding: '2px 8px', fontWeight: 600 }} onClick={() => openDetail(r)} title="클릭하면 포트 상세를 봅니다">{r.name}</button>
+                    <button className="tab" style={{ padding: '2px 8px', fontWeight: 600, whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 200, textAlign: 'left' }} onClick={() => openDetail(r)} title="클릭하면 포트 상세를 봅니다">{r.name}</button>
                     {/* 스위치가 스스로 보고한 이름(switchshow 의 switchName)을 함께 — 등록 표시명과 다를 수 있다(사용자 요구). */}
-                    <div className="muted" style={{ fontSize: 11 }}>
+                    {/* v2.977(전체 점검): 보고 이름 · 주소 줄이 한 줄로 이어져 1440px 에서 '동작' 열이 24px 밀렸다 — 폭을 묶고 접는다 */}
+                    <div className="muted" style={{ fontSize: 11, whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 200 }}>
                       {s?.name && s.name !== r.name ? <><b style={{ fontWeight: 600 }}>{s.name}</b>{' · '}</> : null}
                       {hostText(r.host)}{r.vfId ? ` · VF ${r.vfId}` : ''}
                     </div>

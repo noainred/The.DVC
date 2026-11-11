@@ -420,7 +420,7 @@ test('차트 칸 — 칸 폭을 표본 간격의 1.5배 이상으로 넓혀 수�
     assert.ok(CODEC.appendToBlock(blocks.get(m), ts, new Map([['s.cpu', 10 + (i % 5)]]), null));
   }
   const pos = []; for (const b of blocks.values()) for (let i = 0; i < b.ts.length; i++) pos.push([b, i, b.ts[i]]);
-  assert.equal(Q.sampleSpacing(pos) >= 1700 && Q.sampleSpacing(pos) <= 2300, true);
+  assert.ok(Q.sampleSpacing(pos) >= 1700 && Q.sampleSpacing(pos) <= 2700, `간격 ${Q.sampleSpacing(pos)}(2초 ± 흔들림 — 90번째 백분위)`);
   for (const winMin of [1, 5]) {
     const from = t0; const to = t0 + winMin * 60_000;
     const { avg } = Q.bucketize(pos, 's.cpu', from, to, 150);
@@ -542,4 +542,22 @@ test('반증 5 — 엣지 연결 시험은 한 번 내려보내면 60초 동안 
   assert.deepEqual(store.pendingTestsFor('edge-pl', 4_000), [], '2초 뒤 동기화에 다시 주지 않는다');
   assert.deepEqual(store.pendingTestsFor('edge-pl', 63_000), ['fm-t0000001'], '60초가 지나도 결과가 없으면 한 번 더');
   store._resetForTest();
+});
+
+test('차트 칸 — 주기가 바뀐 구간(계속 수집 10초 → 보는 동안 2초)도 선이 끊기지 않는다 · 1분 넘는 공백은 비운다(v2.977)', async () => {
+  const Q = await import('../src/focusmon/query.js');
+  const t0 = 2_000 * 60_000;
+  const blocks = new Map();
+  const put = (ts) => { const m = Math.floor(ts / 60_000); if (!blocks.has(m)) blocks.set(m, CODEC.newBlock(m)); assert.ok(CODEC.appendToBlock(blocks.get(m), ts, new Map([['s.cpu', 30]]), null)); };
+  for (let t = t0; t < t0 + 180_000; t += 10_000) put(t + 137);          // 3분 — 10초(보는 화면 없음)
+  for (let t = t0 + 180_000; t < t0 + 300_000; t += 2_000) put(t + 211); // 2분 — 2초(보는 중)
+  const pos = []; for (const b of [...blocks.values()].sort((a, c) => a.minute - c.minute)) for (let i = 0; i < b.ts.length; i++) pos.push([b, i, b.ts[i]]);
+  assert.equal(Q.sampleSpacing(pos), 10_000, '큰 쪽 간격(예전 중앙값은 2초)');
+  const { avg } = Q.bucketize(pos, 's.cpu', t0, t0 + 300_000, 90);
+  const first = avg.findIndex((v) => v != null); const last = avg.length - 1 - [...avg].reverse().findIndex((v) => v != null);
+  assert.equal(avg.slice(first, last + 1).filter((v) => v == null).length, 0, `첫 표본과 끝 표본 사이 빈 칸 0(칸 ${avg.length})`);
+  // 2분 공백이 있으면 그 칸들은 비운다(수집하지 않은 시간)
+  const gapPos = pos.filter(([, , ts]) => ts < t0 + 60_000 || ts >= t0 + 180_000);
+  const g = Q.bucketize(gapPos, 's.cpu', t0, t0 + 300_000, 90).avg;
+  assert.ok(g.filter((v) => v == null).length >= 5, '1분 넘는 공백은 빈 칸으로 남는다');
 });

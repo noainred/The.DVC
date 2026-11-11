@@ -17,9 +17,14 @@ export default function NfsMounts() {
   const [form, setForm] = useState({ server: '', exportPath: '', options: '' });
   const [showTips, setShowTips] = useState(false);
 
-  const load = () => fetchJson('/admin/nfs-mounts').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
-  if (err && !d) return <ErrorBox message={err} />;
+  // v2.977(전체 점검): 403 · 404 는 다시 물어도 같다 — 폴링을 멈추고 오류 객체를 넘겨 ErrorBox 가 권한 안내로 그리게 한다(DirUsageSettings 와 같은 결).
+  const pollRef = React.useRef(null);
+  const load = () => fetchJson('/admin/nfs-mounts').then((r) => { setD(r); setErr(null); }).catch((e) => {
+    setErr(e);
+    if ((e?.status === 403 || e?.status === 404) && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  });
+  useEffect(() => { load(); pollRef.current = setInterval(load, 15_000); return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; }; }, []);
+  if (err && !d) return <ErrorBox error={err} />;
   if (!d) return <Loading />;
 
   const act = async (fn) => { setBusy(true); setMsg(null); try { await fn(); await load(); } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); } };

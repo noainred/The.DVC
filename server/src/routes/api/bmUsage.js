@@ -559,9 +559,12 @@ function opsDeps(deps = {}) {
   };
 }
 /** 수동 용도 태그 — 키 규칙은 bmusage/purposeKey.js 하나(서비스태그 키 · 아니면 (법인, 키) 쌍 → 예전 키 — 반증 F2). source 를 붙여 돌려준다. */
-async function purposeFor(D, target, realKey) {
+async function purposeFor(D, target, realKey, judge = undefined) {
   const { purposeOfTarget } = await import('../../bmusage/purposeKey.js');
-  return purposeOfTarget((k) => D.purposeOf(String(k)), target, realKey, (await tagJudgeFor(D)) || {});
+  // v2.977(전체 점검 · 성능 — 측정): 판정기는 요청당 한 번 만들어 넘긴다. 예전에는 대상마다 tagJudgeFor(D) → D.currentTargets()(함대 분류 ·
+  //   등록부 복제) · listEdgeBmUsage() 를 다시 돌아 함대 화면 한 번이 O(대상²) 였다(17대 18회 · 운영 300대 추정 CPU 5~6초).
+  const j = judge === undefined ? ((await tagJudgeFor(D)) || {}) : (judge || {});
+  return purposeOfTarget((k) => D.purposeOf(String(k)), target, realKey, j);
 }
 /**
  * 2차 재확인 G1: 서비스 태그를 전역 열쇠로 써도 되는가 — 판정기 하나(bmusage/commonTag.js tagJudgeOf · 겹침 판정과 같은 근거).
@@ -654,19 +657,23 @@ async function opsFleetItems(req, snap, D) {
   const entryByKey = new Map(pf.perf.map((p) => [t(p.key), p]));
   const O = await import('../../bmusage/opsView.js');
   const items = [];
+  const judge = await tagJudgeFor(D, tg); // 요청당 한 번(purposeFor 가 대상마다 만들던 것)
+  const edgeRecs = await D.listEdgeBmUsage();
   for (const x of local) {
     const row = byKey.get(t(x.key)) || null;
     items.push({ key: t(x.key), name: x.name || x.key, vcenterId: t(x.vcenterId), serviceTag: x.serviceTag || '', regId: x.idrac?.regId || '',
-      row, ...(row ? O.factsOfRow(row) : { tuning: null, detail: null }), entry: entryByKey.get(t(x.key)) || null, manual: await purposeFor(D, x, x.key) });
+      row, ...(row ? O.factsOfRow(row) : { tuning: null, detail: null }), entry: entryByKey.get(t(x.key)) || null, manual: await purposeFor(D, x, x.key, judge) });
   }
-  for (const rec of await D.listEdgeBmUsage()) {
+  for (const rec of edgeRecs || []) {
     const sn = rec?.snap;
     if (!sn) continue;
+    const perfBy = new Map(); for (const p of sn.perf || []) { const pk = t(p?.key); if (!perfBy.has(pk)) perfBy.set(pk, p); }
+    const rowBy = new Map(); for (const r of sn.rows || []) { const rk = t(r?.key); if (!rowBy.has(rk)) rowBy.set(rk, r); }
     for (const x of applyScope(sn.targets || [], allowed)) {
       const k = t(x.key);
-      const entry = (sn.perf || []).find((p) => t(p.key) === k) || null;
+      const entry = perfBy.get(k) || null;
       items.push({ key: k, name: x.name || k, vcenterId: t(x.vcenterId), agent: rec.agent, serviceTag: x.serviceTag || '', regId: '',
-        row: (sn.rows || []).find((r) => t(r.key) === k) || null, tuning: entry?.tuning || null, detail: entry?.detail || null, entry, manual: await purposeFor(D, x, k) });
+        row: rowBy.get(k) || null, tuning: entry?.tuning || null, detail: entry?.detail || null, entry, manual: await purposeFor(D, x, k, judge) });
     }
   }
   if (isAdmin) return { items, isAdmin, allowed };

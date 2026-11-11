@@ -279,6 +279,19 @@ export function resolveCentralAuth(req) {
   return { ok: false, reason: '토큰 불일치' };
 }
 
+/**
+ * agent 주장의 **형식** 검사(v2.977) — 쿼리 · 본문의 agent 가 있는데 글자가 아니면 사유를 돌려준다(없거나 null 이면 통과).
+ * Express 기본 쿼리 해석(extended)은 `agent[]=x` · `agent[0]=x` · `agent[k]=x` 를 배열 · 객체로 만든다. 헤더는 항상 글자다.
+ * @returns {string|null}
+ */
+export function agentClaimTypeIssue(req) {
+  const q = req?.query?.agent;
+  if (q !== undefined && typeof q !== 'string') return `쿼리 agent 가 ${Array.isArray(q) ? '배열' : typeof q}`;
+  const b = req?.body;
+  if (b && typeof b === 'object' && !Array.isArray(b) && Object.hasOwn(b, 'agent') && b.agent != null && typeof b.agent !== 'string') return `본문 agent 가 ${Array.isArray(b.agent) ? '배열' : typeof b.agent}`;
+  return null;
+}
+
 // 요청이 다루려는 agent 이름(쿼리·헤더·본문 순).
 const requestedAgent = (req) => strAgent(req.query?.agent) || strAgent(req.get('X-Agent-Name')) || strAgent(req.body?.agent);
 
@@ -325,6 +338,14 @@ centralRouter.use((req, res, next) => {
   const auth = resolveCentralAuth(req);
   req.centralAuth = auth;
   if (!auth.ok) return next(); // 각 라우트가 404/403을 구분해 응답(하위호환 유지)
+  // v2.977(전체 점검 — 재현): agent 는 **글자 하나만**. `?agent[]=edge-b` · `?agent[0]=edge-b` · 본문 agent:['edge-b'] 는 strAgent 가 '' 로 읽어
+  //   아래 토큰 ↔ agent 대조를 건너뛰는데, 핸들러의 `String(req.query.agent)` 는 ['edge-b'] → 'edge-b' 로 읽어 **남의 법인 자격증명**을 돌려줬다
+  //   (/assignment 의 iDRAC 계정 · 비밀번호 · /storage-config · /users-config · /bmstor-jobs — 재현). 글자가 아니면 어떤 모드든 400.
+  const typeIssue = agentClaimTypeIssue(req);
+  if (typeIssue) {
+    console.warn(`[central] agent 형식 거부 — ${typeIssue} (${req.method} ${req.path}, 토큰=${auth.mode === 'agent' ? auth.agent : 'shared'})`);
+    return res.status(400).json({ ok: false, reason: `agent 는 글자 하나여야 합니다(${typeIssue}).` });
+  }
   const want = requestedAgent(req);
   if (auth.mode === 'agent') {
     // 개별 토큰은 남의 이름으로 조회/보고/등록할 수 없다 — 자격증명 횡탈·데이터 위장 차단.

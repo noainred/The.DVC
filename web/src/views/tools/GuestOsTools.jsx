@@ -226,10 +226,11 @@ export function RealOs({ scope }) {
     { key: 'vmName', label: 'VM', render: (r) => <VmLink name={r.vmName} vcenterId={r.vcenterId} label={r.vmName} /> },
     { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
     { key: 'host', label: '호스트', render: (r) => <span className="muted" style={{ fontSize: 12, maxWidth: 160, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }} title={r.host}>{r.host || '—'}</span> },
-    { key: 'esxiGuestOS', label: 'ESXi 보고', render: (r) => <span style={{ fontSize: 12 }}>{r.esxiGuestOS || '—'}</span> },
+    // v2.977(전체 점검): 긴 OS 이름이 한 줄로 이어져 1440px 에서 '불일치' · '스캔' 열이 가로 스크롤 뒤로 갔다 — 두 칸을 접는다
+    { key: 'esxiGuestOS', label: 'ESXi 보고', render: (r) => <span style={{ fontSize: 12, display: 'inline-block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 150 }}>{r.esxiGuestOS || '—'}</span> },
     // v2.742 VC-04: 스캔이 실패해도 직전에 읽은 OS 는 남는다 — 그 값이 '마지막으로 읽은 값' 임을 같은 칸이 말한다(지금 읽은 척하지 않는다).
     { key: 'os', label: '실제 OS', render: (r) => (r.os
-      ? <span><b>{r.os}</b>{r.error ? <span className="badge amber" style={{ marginLeft: 6 }} title={`최근 스캔 실패: ${r.error}${r.okAt ? ` · 마지막 성공 ${new Date(r.okAt).toLocaleString('ko-KR')}` : ''}`}>최근 실패 · 이전 값</span> : null}</span>
+      ? <span style={{ display: 'inline-block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 210 }}><b>{r.os}</b>{r.error ? <span className="badge amber" style={{ marginLeft: 6 }} title={`최근 스캔 실패: ${r.error}${r.okAt ? ` · 마지막 성공 ${new Date(r.okAt).toLocaleString('ko-KR')}` : ''}`}>최근 실패 · 이전 값</span> : null}</span>
       : <span className="badge red" title={r.error}>실패</span>) },
     { key: 'osVersion', label: '버전', render: (r) => r.osVersion || '—' },
     { key: 'family', label: '계열', render: (r) => r.family ? <span className="badge gray">{r.family}</span> : '—' },

@@ -137,3 +137,37 @@ export function indexAt(px, { x0, x1, count }) {
   const i = Math.round(((px - x0) / (x1 - x0)) * (count - 1));
   return i < 0 || i >= count ? null : i;
 }
+
+/* ── 마우스 오버(툴팁) — v2.977 사용자 요청 ‘차트 툴팁’ ─────────────────────────── */
+
+/** 그림 영역 안 비율(0~1) → 그 시리즈의 가장 가까운 칸 번호. 시리즈마다 칸 수가 다를 수 있다(표본 간격에 따라 bucketize 가 줄인다). */
+export function indexAtFrac(f, len) {
+  if (f == null || !Number.isFinite(f) || !(len > 0)) return null;
+  return Math.round(Math.max(0, Math.min(1, f)) * (len - 1));
+}
+/** 비율 → 그 칸의 값(없으면 null — 0 아님). */
+export function valueAtFrac(vals, f) {
+  const i = indexAtFrac(f, Array.isArray(vals) ? vals.length : 0);
+  return i == null ? null : n(vals[i]);
+}
+/** 칸 i 의 가운데 시각 — 서버 bucketize 는 [from, to] 를 len 칸으로 고르게 나눈다. */
+export function timeAtIndex(i, len, from, to) {
+  if (i == null || !(len > 0) || !(to > from)) return null;
+  return from + ((i + 0.5) / len) * (to - from);
+}
+/** 칸 번호 → 그림 영역의 x(선 그리기와 같은 식 — linePath). */
+export function xAtIndex(i, len, x0, x1) {
+  if (i == null || !(len > 0)) return null;
+  return len > 1 ? x0 + (i / (len - 1)) * (x1 - x0) : x0;
+}
+/**
+ * 툴팁 줄 고르기 — 색을 준(고정한) 시리즈를 먼저 모두, 나머지는 그 시각 값이 큰 순으로 남은 자리만큼.
+ * 값이 없는 시리즈는 뒤로(‘—’). [{key, label, color, vals, pinned}] → [{key, label, color, v}]
+ */
+export function tipRows(series, f, { limit = 8 } = {}) {
+  const rows = series.map((s) => ({ key: s.key, label: s.label, color: s.color, pinned: !!s.pinned, v: valueAtFrac(s.vals, f) }));
+  const by = (a, b) => (a.v == null) - (b.v == null) || (b.v ?? 0) - (a.v ?? 0);
+  const pinned = rows.filter((r) => r.pinned).sort(by);
+  const rest = rows.filter((r) => !r.pinned).sort(by).slice(0, Math.max(0, limit - pinned.length));
+  return [...pinned, ...rest];
+}
