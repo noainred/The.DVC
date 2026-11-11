@@ -32,6 +32,7 @@
 - (원래 5602행) v2.693 — 운영 멈춤(2026-10-04 · 이벤트 루프 701초 정지 → 엣지 pull 정지) 대응. 요청 경로의 큰 집계 SQL 은 '장비 × 시간 조각 + 양보 + 한 
 - (8a단계 추가) 용량 소진 예측은 요청 경로에서 함대 90일을 읽지 않는다 — 수집 노드 하루 1회 · 서버마다 점 조회 + 시간 양보 · 진행 중 공유 · 결과 행만 저장
 - (8b단계 추가) 프로세스 Top-N 은 날 파일(보존 = 파일 삭제) · 변화 있을 때만 행 · 저활용은 하루 1회 미리 계산 · 전력 함대 원천 모으기는 60초 공유 + 양보 + 끝난 날 캐시
+- (v2.976) 집중 모니터링 기록 — 1분 묶음 코덱 · 트랜잭션 대기열 · rowid 조각 정리 · 용량 상한 · 차트 칸 ≥ 표본 간격 1.5배
 
 ## 본문
 
@@ -311,3 +312,9 @@
 - ⚠⚠ **(8b 반증 F1 — 8b 이전부터) SSH exec 하나 안 timeout 합 + 여유 ≤ 그 exec 시한**: 주 명령(`osSsh.linuxCommand`)은 exec 시한 30초 하나라 안 구획 timeout 합이 그보다 크면 시한에 걸려 sshExec 가 출력을 버리고 **그 주기 전 구획**을 잃는다
   (예전 34초 — needs-restarting 8 + dnf 8). 이제 needs-restarting ↔ dnf 한 주기 하나 · 각 6초 → 24초 + 여유 `CMD_INNER_MARGIN_MS` 6초 ≤ 30초 · Top-N 은 같은 세션 별도 exec(`topCommand` · `TOP_EXEC_TIMEOUT_MS` 20초 ≥ 안 합 15 + 5 · 남은 예산과 작은 쪽 · 실패 격리).
   새 구획 · 새 exec 를 더할 때 **`server/test/bmTop8bBudget.test.js` 의 기계 산수**(명령 문자열에서 `timeout N` · `sleep N` 을 뽑아 합)가 깨지지 않게 할 것. 셸 함수(7a 로그의 `rdf`) 안 timeout 은 **호출 수만큼** 센다(`worstOf`). 7a 로그 exec 도 같은 결함이었다(46초 · rdf 호출 4번까지 61초 > 30초 — 시한이면 그 주기 로그 구획 전체와 커서 전진을 잃었다) → journalctl 6 ×2 · dmesg 3 · systemctl 한 번 3 · find 1 × rdf 4 = 22초 + 여유 `LOG_INNER_MARGIN_MS` 8초 ≤ 30초(로그는 증분 — 덜 읽어도 커서가 본 데까지 넘어가 다음 주기가 이어 읽는다).
+
+- **(v2.976) 집중 모니터링 기록 · 조회**(`server/src/focusmon/{codec,db,recorder,query}.js`):
+  - 서버 하나의 1분을 한 행으로(열 단위 varint + deflateRaw · 실측 약 8KB/분/서버 · 20대 1분 쓰기 중앙값 0.37ms — `docs/design/focus-mon/bench`). 2초 표본을 행으로 쓰지 않는다.
+  - 정리는 `minute` 단독 인덱스 rowid 조각(`PRUNE_CHUNK` — 실행 계획 테스트) · 용량 상한이면 가장 오래된 분부터 · 디스크 여유가 모자라면 기록만 멈춘다.
+  - 최근 31분은 메모리 묶음, 그 앞은 DB + LRU · 요청 경로의 큰 조회는 `createYielder` 로 양보 · 큰 배열은 `pushAll`.
+  - 차트 칸 폭은 표본 간격의 1.5배 이상(`bucketize`) — 칸 폭이 주기 이하이면 빈 칸이 생겨 선이 끊긴다(1분 150칸은 2초 주기에서 대부분 비었다).

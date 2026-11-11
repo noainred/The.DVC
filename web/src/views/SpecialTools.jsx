@@ -47,6 +47,7 @@ const StorageUsageTool = React.lazy(() => import('./tools/StorageUsageTool.jsx')
 const PartFaults = React.lazy(() => import('./tools/PartFaults.jsx'));   // 파트 장애(v2.547)
 const EdgeLog = React.lazy(() => import('./tools/EdgeLog.jsx'));         // 엣지 로그·진행상태(v2.549)
 const BmUsage = React.lazy(() => import('./tools/BmUsage.jsx'));         // 베어메탈 사용률(v2.550)
+const FocusMonTool = React.lazy(() => import('./tools/FocusMonTool.jsx')); // 집중 모니터링 — 리눅스 서버 실시간 성능 · iostat 비교(v2.976)
 const CorpUsage = React.lazy(() => import('./tools/CorpUsage.jsx'));
 const SvcInventory = React.lazy(() => import('./tools/SvcInventory.jsx')); // v2.887 서비스 인벤토리
 const PowerTotal = React.lazy(() => import('./tools/PowerTotal.jsx')); // v2.664 전체 소비 전력
@@ -630,6 +631,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'part-faults' && <PartFaults />}
       {tool === 'edge-log' && <EdgeLog />}
       {tool === 'bm-usage' && <BmUsage />}
+      {tool === 'focus-mon' && <FocusMonTool />}
       {tool === 'corp-usage' && <CorpUsage scope={scope} />}
       {tool === 'svc-inventory' && <SvcInventory />}
       {tool === 'power-total' && <PowerTotal />}

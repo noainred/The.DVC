@@ -108,6 +108,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.sanswitch', label: 'SAN 스위치 수집', group: 'collect', mod: '../sanswitch/poller.js', fn: 'sanSwitchPollerStatus' },
   { key: 'collect.sanswitchPerf', label: 'SAN 포트 사용량 수집', group: 'collect', mod: '../sanswitch/perfPoller.js', fn: 'sanSwitchPerfStatus' },
   { key: 'collect.cvp', label: 'CVP 수집', group: 'collect', mod: '../cvp/poller.js', fn: 'cvpPollerStatus' },
+  { key: 'collect.focusMon', label: '집중 모니터링 SSH 수집(서버별 상태)', group: 'collect', mod: '../focusmon/service.js', fn: 'serviceStatus' }, // v2.976 — 중앙 · 엣지 공용(자기 몫 서버만)
   { key: 'collect.isidu', label: '아이실론 디렉터리 사용량 조사', group: 'collect', mod: '../isidu/poller.js', fn: 'isiduPollerStatus' }, // v2.736 — 중앙·엣지 공용(자기 몫 대상만)
   { key: 'collect.ping', label: 'Ping 연속 측정', group: 'collect', mod: '../ping/monitor.js', fn: 'pingMonitorStatus' }, // v2.964 — 대상마다 쉬지 않는 루프 · 요약 주기 · 마지막 저장(중앙·엣지 공용)
   { key: 'collect.veeam', label: 'Veeam 백업 상태 수집', group: 'collect', mod: '../veeam/poller.js', fn: 'veeamPollerStatus' }, // v2.751 — 중앙·엣지 공용(자기 몫 서버만)
@@ -135,6 +136,7 @@ export const STATUS_SPEC = Object.freeze([
    *   앞의 셋은 상태 export 자체가 없어 `catch { return null; }` 로 **무음 실패**하고 있었다.
    */
   { key: 'push.ping', label: 'Ping 위임', group: 'push', mod: '../agent/pingWorker.js', fn: 'pingWorkerStatus' },
+  { key: 'push.focusMon', label: '집중 모니터링 수집 · 동기화', group: 'push', mod: '../agent/focusMonWorker.js', fn: 'focusMonWorkerStatus' }, // v2.976
   { key: 'push.veeamRun', label: 'Veeam 백업 실행 대행', group: 'push', mod: '../agent/veeamRunWorker.js', fn: 'veeamRunWorkerStatus' }, // v2.818
   { key: 'push.bareosOp', label: 'Bareos 법인 Director 대행', group: 'push', mod: '../agent/bareosOpWorker.js', fn: 'bareosOpWorkerStatus' }, // v2.824
   { key: 'collect.bareos', label: 'Bareos 백업 상태 조회', group: 'collect', mod: '../bareos/poller.js', fn: 'pollerStatus' }, // v2.820 — Director 미설정이면 접속하지 않고 configured:false

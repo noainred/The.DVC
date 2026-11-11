@@ -24,6 +24,7 @@ import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { getCollectorDenyStats, _resetCollectorDenyStats, logCollectorDeny } from '../collector/denyLog.js'; // v2.579
 import { edgeIsiduNudge, edgeIsiduTest } from '../isidu/edgeOps.js'; // v2.736 — 정적 import(엣지 로그 표가 부팅 모듈만 읽는다)
+import { wakeFocusMon } from '../agent/focusMonWorker.js'; // v2.976 집중 모니터링 — 중앙이 수집 시작 때 한 번 깨운다
 
 export const collectorRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
@@ -258,6 +259,14 @@ collectorRouter.get('/bm-usage/snapshot', tokenFirst('bm-usage-snapshot-get'), a
  *  · 감사: 이 엣지 감사 로그에 ‘중앙 대행 집중 모니터링’ + 중앙이 보낸 실행자 · 사유(중앙도 자기 감사 로그에 남긴다).
  *  · 조회는 보관하지 않는 계산 응답이다(중앙은 복제 적재하지 않는다).
  */
+/**
+ * v2.976 집중 모니터링 깨우기 — 중앙이 수집을 시작 · 시험 · 다시 연결할 때 한 번 부른다. 본문은 읽지 않는다(빈 객체 · 4kb).
+ * 엣지는 곧바로 중앙에 동기화해 지금 수집할 목록을 받는다(목록은 중앙 동기화 응답이 진실 — 이 요청은 신호일 뿐).
+ */
+collectorRouter.post('/focus-mon/wake', tokenFirst('focus-mon-wake'), express.json({ limit: '4kb' }), (req, res) => {
+  res.json({ ok: wakeFocusMon() === true });
+});
+
 collectorRouter.post('/bm-usage/focus', tokenFirst('bm-usage-focus'), express.json({ limit: '4kb' }), async (req, res) => {
   try {
     const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
