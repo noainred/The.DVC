@@ -16,16 +16,18 @@ import { isMockMode, isDemoId } from '../../mock/demo/storage.js';
 import { judgeDevice, summarize, groupStatus, diffItems, thresholdsOf } from './judge.js';
 import { devicePerf, topNodes, PERF_METRICS } from './perf.js';
 import { runsOf } from './store.js';
+import { createYielder } from '../../util/timeSlice.js';
 import { inspectRequestState } from './requests.js';
 
 export const WEEK_MS = 7 * 86_400_000;
+export const STALE_MS = 8 * 86_400_000; // 반증 F4: 주간 회차 + 하루 — 넘은 실행은 확인 불가(값은 참고)
 const PERF_TTL_MS = 10 * 60_000;
 const _perf = new Map(); // `${id}|${to}` → { at, v }
-async function perfOf(id, to) {
+async function perfOf(id, to, yielder = null) {
   const k = `${id}|${to}`;
   const hit = _perf.get(k);
   if (hit && Date.now() - hit.at < PERF_TTL_MS) return hit.v;
-  const v = await devicePerf(id, { from: to - WEEK_MS, to });
+  const v = await devicePerf(id, { from: to - WEEK_MS, to, yielder });
   _perf.set(k, { at: Date.now(), v });
   while (_perf.size > 2_000) _perf.delete(_perf.keys().next().value);
   return v;
@@ -49,13 +51,18 @@ export async function buildInspectModel({ now = Date.now(), admin = false, thres
   const corps = corpMap();
   const hosts = devs.map((d) => d.host).filter(Boolean);
   const scrub = (s) => (admin || typeof s !== 'string' ? s : scrubHosts(s, hosts));
+  // 반증 E2: 오류 · 사유 문구에는 등록 주소가 아니라 **해석된 IP**(ECONNREFUSED 10.x.x.x:22 등)가 실린다 — 비관리자 판본은 IPv4 모양도 가린다(문구는 160자 상한이라 선형).
+  const scrubMsg = (s) => (admin || typeof s !== 'string' ? s : scrub(s).replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b/g, '(주소 가림)'));
   const out = [];
+  const y = createYielder(15);
   for (const d of devs) {
     const runs = runsOf(d.id, 2);
     const run = runs[0] || null; const prev = runs[1] || null;
-    const to = run?.at ?? now;
-    const perf = await perfOf(d.id, to);
-    const items = judgeDevice(run, perf, t).map((i) => (i.why ? { ...i, why: scrub(i.why) } : i));
+    // 반증 F6: 점검 전 장비는 창 끝을 정시로 내린다 — now 그대로면 기억(perfOf)이 요청마다 빗나가 매번 DB 를 다시 읽었다.
+    const to = run?.at ?? Math.floor(now / 3_600_000) * 3_600_000;
+    const perf = await perfOf(d.id, to, y);
+    const staleDays = run && now - run.at > STALE_MS ? Math.floor((now - run.at) / 86_400_000) : 0;
+    const items = judgeDevice(run, perf, t, { staleDays }).map((i) => (admin ? i : { ...i, value: scrub(i.value), ...(i.why ? { why: scrubMsg(i.why) } : {}) }));
     const prevItems = prev ? judgeDevice(prev, null, t).filter((i) => i.id !== 'disk-busy' && i.id !== 'node-skew') : null;
     const snap = snaps.get(d.id) || null;
     const name0 = String(snap?.name || d.name || d.id);
@@ -65,7 +72,7 @@ export async function buildInspectModel({ now = Date.now(), admin = false, thres
       id: d.id, name, corp: d.datacenterId || '', corpName: corps.get(String(d.datacenterId)) || (d.datacenterId ? String(d.datacenterId) : '법인 미지정'),
       agent: d.agent || '', method: d.collectMethod === 'ssh' ? 'ssh' : 'api', version: run?.facts?.version || snap?.version || '',
       nodeCount: run?.facts?.nodeCount ?? snap?.nodes?.count ?? null, capacityPct: run?.facts?.capacity?.pct ?? snap?.capacity?.pct ?? null,
-      run: run ? { at: run.at, ms: run.ms, method: run.method, partial: !!run.partial, errors: run.errors.map((e) => ({ ...e, error: scrub(e.error) })) } : null,
+      run: run ? { at: run.at, ms: run.ms, method: run.method, partial: !!run.partial, ...(staleDays ? { staleDays } : {}), errors: run.errors.map((e) => ({ ...e, error: scrubMsg(e.error) })) } : null,
       ...(withItems ? { items } : {}), summary: sum, groups: groupStatus(items),
       diff: prevItems ? diffItems(items.filter((i) => i.id !== 'disk-busy' && i.id !== 'node-skew'), prevItems) : { worse: [], better: [], base: false },
       prevAt: prev?.at ?? null, skew: perf?.skew || null, perfSamples: perf?.samples || 0,
@@ -77,7 +84,7 @@ export async function buildInspectModel({ now = Date.now(), admin = false, thres
   const byCorp = new Map();
   for (const d of out) { const k = d.corp || ''; if (!byCorp.has(k)) byCorp.set(k, { key: k, name: d.corpName, devices: [] }); byCorp.get(k).devices.push(d.id); }
   const totals = { ok: 0, warn: 0, bad: 0, unknown: 0, na: 0, total: 0, devices: out.length, inspected: out.filter((d) => d.run).length,
-    nodes: out.reduce((a, d) => a + (Number(d.nodeCount) || 0), 0), corps: byCorp.size };
+    nodes: out.reduce((a, d) => a + (Number(d.nodeCount) || 0), 0), nodesUnknown: out.filter((d) => !(Number(d.nodeCount) > 0)).length, corps: byCorp.size }; // 반증 F15: 노드 수를 모르는 장비는 0 으로 더하지 않고 따로 센다
   for (const d of out) for (const k of ['ok', 'warn', 'bad', 'unknown', 'na', 'total']) totals[k] += d.summary[k];
   return { generatedAt: now, thresholds: t, devices: out, corps: [...byCorp.values()], totals, registryError: !!registryLoadError() };
 }
@@ -108,7 +115,8 @@ export async function buildTopNodes({ range = '7d', metric = 'ops', limit = 10, 
   const corps = corpMap();
   const hourEnd = Math.floor(now / 3_600_000) * 3_600_000; // 정시 경계 — 같은 시간 안의 요청은 같은 창(기억 적중)
   const perfs = [];
-  for (const d of devs) perfs.push({ deviceId: d.id, perf: days === 7 ? await perfOf(d.id, hourEnd) : await devicePerf(d.id, { from: hourEnd - days * 86_400_000, to: hourEnd }) });
+  const y = createYielder(15);
+  for (const d of devs) perfs.push({ deviceId: d.id, perf: days === 7 ? await perfOf(d.id, hourEnd, y) : await devicePerf(d.id, { from: hourEnd - days * 86_400_000, to: hourEnd, yielder: y }) });
   const top = topNodes(perfs, { metric: m, limit, skewFactor: t.skewFactor });
   const meta = new Map(devs.map((d) => [d.id, d]));
   const snaps = latestMapByDevice([localSnapshots(), edgeStorageSnapshots()]);

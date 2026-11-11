@@ -24,7 +24,7 @@ import { withSsh, isSshAuthError } from '../../proxy/sshExec.js';
 import { poolRun } from '../../util/pool.js';
 import { pushAll } from '../../util/pushAll.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
-import { devicesForThisNode, getDeviceWithSecret, registryLoadError } from '../registry.js';
+import { devicesForThisNode, getDeviceWithSecret, registryLoadError, listDevices } from '../registry.js';
 import { authStopFor, markAuthStopped, clearAuthStop } from '../authGuard.js';
 import { runSampleExclusive, IN_FLIGHT_BUSY, useDemoSynth } from '../poller.js';
 import { localSnapshots } from '../store.js';
@@ -155,7 +155,15 @@ async function collectSsh(full, signal, base, errors, now) {
 // ── REST ─────────────────────────────────────────────────────────────────────
 async function collectRest(full, signal, base, errors, now) {
   const dev = { ...full, _signal: signal };
-  const soft = async (paths) => { try { return { ok: true, v: await isiGetAny(dev, paths) }; } catch (e) { if (isCredReject(e)) throw e; return { ok: false, err: e }; } };
+  // 반증 F10: 장비 시한이 끊었으면(signal.aborted) 남은 경로를 '조회 실패' 로 적고 넘어가지 않는다 — 던져서 실행이 partial(일부만)로 남게 한다.
+  const soft = async (paths) => {
+    if (signal?.aborted) throw new Error(`점검 시한(${Math.round(INSPECT_TIMEOUT_MS / 1000)}초) 초과 — 남은 경로를 읽지 않았습니다`);
+    try { return { ok: true, v: await isiGetAny(dev, paths) }; } catch (e) {
+      if (isCredReject(e)) throw e;
+      if (signal?.aborted) throw new Error(`점검 시한(${Math.round(INSPECT_TIMEOUT_MS / 1000)}초) 초과 — 이 경로와 남은 경로를 읽지 못했습니다`);
+      return { ok: false, err: e };
+    }
+  };
   const why404 = (r) => (/\b404\b|not found/i.test(capErr(r.err)) ? '이 OneFS 판에 REST 경로가 없습니다' : `조회 실패: ${capErr(r.err)}`);
   const take = (key, r, parse) => {
     const v = r.ok ? parse(r.v) : null;
@@ -278,6 +286,10 @@ export function inspectTargets(devs = null) {
  * 점검 한 묶음 — ids 가 없으면 이 노드 몫 전부. 이미 돌고 있으면 ids 를 대기열에 넣고 { queued } (끝나면 이어서 돈다).
  * @returns {Promise<object>} 요약(_last)
  */
+/* 반증 E1: 엣지는 점검이 끝나면 다음 주기를 기다리지 않고 storage push 를 한 번 당긴다 — push 주기가 요청 큐의 ack 시한(받아 간 뒤 15분 + 장비 시한)보다 길면
+ *   중앙이 '결과 없음' 으로 요청을 버리고 같은 장비를 다시 점검시켰다. push 모듈이 이 고리를 읽으므로(정적 import) 거꾸로 import 하지 않고 훅으로 받는다. */
+let _afterEdgeRun = null;
+export function setAfterEdgeInspectHook(fn) { _afterEdgeRun = typeof fn === 'function' ? fn : null; }
 export async function runInspectOnce({ ids = null, reason = 'manual' } = {}) {
   if (_busy) { for (const id of ids || inspectTargets().map((d) => d.id)) _queue.add(String(id)); return { queued: _queue.size, busy: true }; }
   _busy = true;
@@ -286,7 +298,8 @@ export async function runInspectOnce({ ids = null, reason = 'manual' } = {}) {
     const targets = inspectTargets();
     const want = ids ? new Set(ids.map(String)) : null;
     const devs = want ? targets.filter((d) => want.has(String(d.id))) : targets;
-    if (!want && !registryLoadError()) pruneRuns(new Set(targets.map((d) => String(d.id))));
+    // 정리 기준은 '등록부에 있는 아이실론 전부'(중앙) · '내 몫'(엣지) — 중앙에서 이 노드 몫(중앙 직접 장비)만 넘기면 엣지 위임 장비의 이력이 지워진다(반증 F9 검토 중 확인).
+    if (!registryLoadError()) pruneRuns(new Set((isEdge() ? targets : listDevices().filter((d) => d && d.type === 'isilon')).map((d) => String(d.id))));
     let ok = 0; let fail = 0; let authStopped = 0; let busySkipped = 0; let partial = 0; const errors = [];
     await poolRun(devs, 2, async (d) => {
       _current = String(d.id);
@@ -300,6 +313,7 @@ export async function runInspectOnce({ ids = null, reason = 'manual' } = {}) {
     _last = { at: Date.now(), startedAt, ms: Date.now() - startedAt, reason, targets: devs.length, ok, failed: fail, partial, authStopped, busySkipped, errors, ring: ringStatus() };
     if (fail) console.warn(`[storage-inspect] 점검 실패 ${fail}대/${devs.length}: ${errors.map((e) => `${e.id}: ${e.error}`).join(' · ')}`);
     else console.log(`[storage-inspect] 점검 ${ok}대 완료(${reason}${partial ? ` · 일부만 ${partial}` : ''}${busySkipped ? ` · 수집 중이라 건너뜀 ${busySkipped}` : ''}${authStopped ? ` · 인증 정지 ${authStopped}` : ''})`);
+    if (isEdge() && ok && _afterEdgeRun) { try { Promise.resolve(_afterEdgeRun()).catch((e) => console.warn(`[storage-inspect] 점검 뒤 push 실패: ${capErr(e)}`)); } catch (e) { console.warn(`[storage-inspect] 점검 뒤 push 실패: ${capErr(e)}`); } }
     return _last;
   } finally {
     _busy = false; _current = null;

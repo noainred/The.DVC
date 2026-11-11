@@ -274,13 +274,21 @@ export function parseIfaces(v) {
 export function parseHealthcheck(v) {
   const list = listOf(jsonOf(v), ['evaluations']);
   if (!list) return null;
-  const failed = []; let lastAt = null;
-  for (const e of list.slice(0, 2000)) {
+  // v2.963 반증 F12: 기준은 '최근 평가에 FAIL 없음' — 체크리스트마다 **가장 최근 평가 하나만** 본다(180일 전 FAIL + 어제 PASS 는 정상).
+  //   시각이 없는 평가는 목록 뒤쪽을 최근으로 본다(같은 체크리스트 안에서 — 시각 있는 평가가 있으면 그쪽이 이긴다).
+  const latest = new Map(); let lastAt = null;
+  list.slice(0, 2000).forEach((e, idx) => {
     const res = str(firstOf(e, ['overall_status', 'result', 'status', 'run_status']), 24).trim();
     const t = numOrNull(firstOf(e, ['start_time', 'started', 'time', 'end_time']));
-    if (t != null) { const ms = t < 1e12 ? t * 1000 : t; if (lastAt == null || ms > lastAt) lastAt = ms; }
-    if (/fail|critical|emergency/i.test(res)) failed.push({ id: str(firstOf(e, ['id', 'evaluation_id']), 40), checklist: str(firstOf(e, ['checklist_id', 'checklist', 'item']), 60), result: res });
-  }
+    const ms = t == null ? null : (t < 1e12 ? t * 1000 : t);
+    if (ms != null && (lastAt == null || ms > lastAt)) lastAt = ms;
+    const cl = str(firstOf(e, ['checklist_id', 'checklist', 'item']), 60);
+    const key = cl || `#${idx}`;
+    const cur = latest.get(key);
+    const newer = !cur || (ms != null && (cur.ms == null || ms >= cur.ms)) || (ms == null && cur.ms == null);
+    if (newer) latest.set(key, { ms, res, id: str(firstOf(e, ['id', 'evaluation_id']), 40), checklist: cl });
+  });
+  const failed = [...latest.values()].filter((x) => /fail|critical|emergency/i.test(x.res)).map((x) => ({ id: x.id, checklist: x.checklist, result: x.res }));
   return { evaluations: list.length, failed: failed.slice(0, 20), lastAt };
 }
 /** NTP 서버 목록 → { servers }. */
@@ -310,7 +318,8 @@ export function parseSnapshots(v) {
     sized += 1; used += b; if (largest == null || b > largest) largest = b;
   }
   if (list.length && !sized) return null;
-  return { count: list.length, usedBytes: used, largestBytes: largest, partial: !!(isObj(j) && j.resume) };
+  // 반증 F15: 크기를 못 읽은 행을 뺐으면 합계는 하한 — partial 로 밝힌다.
+  return { count: list.length, usedBytes: used, largestBytes: largest, partial: !!(isObj(j) && j.resume) || sized < Math.min(list.length, 200_000) || list.length > 200_000 };
 }
 /** SyncIQ 정책 수. */
 export function parseSyncPolicies(v) {
@@ -319,7 +328,8 @@ export function parseSyncPolicies(v) {
 }
 /** SyncIQ 보고서 → 지난 7일 { reports, failed, failedPolicies }. 시각은 초 또는 밀리초. */
 export function parseSyncReports(v, { now = Date.now(), days = 7 } = {}) {
-  const list = listOf(jsonOf(v), ['reports']);
+  const j = jsonOf(v);
+  const list = listOf(j, ['reports']);
   if (!list) return null;
   const from = now - days * 86_400_000;
   let reports = 0; let failed = 0; const fp = new Set();
@@ -331,11 +341,13 @@ export function parseSyncReports(v, { now = Date.now(), days = 7 } = {}) {
     reports += 1;
     if (/fail|error/i.test(str(firstOf(r, ['state', 'status', 'result']), 24))) { failed += 1; const p = str(firstOf(r, ['policy_name', 'policy', 'name']), 60); if (p) fp.add(p); }
   }
-  return { reports, failed, failedPolicies: [...fp].slice(0, 20) };
+  // 반증 F11: 쪽 넘김(resume)이 남았으면 읽은 쪽만 셌다 — partial(실패 0 을 정상으로 단정하지 않는다).
+  return { reports, failed, failedPolicies: [...fp].slice(0, 20), partial: !!(isObj(j) && j.resume) || list.length > 20_000 };
 }
 /** 미해결 이벤트 그룹 → { total, critical, warning, severityKnown }. emergency 는 critical 로 센다. */
 export function parseEventGroups(v) {
-  const list = listOf(jsonOf(v), ['eventgroups', 'events', 'groups']);
+  const j = jsonOf(v);
+  const list = listOf(j, ['eventgroups', 'events', 'groups']);
   if (!list) return null;
   let critical = 0; let warning = 0; let sev = 0;
   for (const e of list.slice(0, 20_000)) {
@@ -346,7 +358,7 @@ export function parseEventGroups(v) {
     if (/crit|emerg/.test(s)) critical += 1; else if (/warn/.test(s)) warning += 1;
   }
   const total = list.filter((e) => e?.resolved !== true).length;
-  return { total, critical: sev ? critical : null, warning: sev ? warning : null, severityKnown: sev > 0, source: 'event-groups' };
+  return { total, critical: sev ? critical : null, warning: sev ? warning : null, severityKnown: sev > 0, source: 'event-groups', partial: !!(isObj(j) && j.resume) || list.length > 20_000 };
 }
 /** 잡 엔진(REST job/jobs · isi job jobs list --format json) → { failed, running }. */
 export function parseJobs(v) {
@@ -366,28 +378,30 @@ export function parseJobs(v) {
 export const FACT_KEYS = Object.freeze(['version', 'nodeCount', 'health', 'group', 'events', 'nodeState', 'drives', 'bootMirror', 'psu', 'battery', 'ifaces',
   'healthcheck', 'ntp', 'capacity', 'pools', 'vhs', 'snapshots', 'jobs', 'synciq']);
 const arr = (v, n, f) => (Array.isArray(v) ? v.slice(0, n).map(f).filter((x) => x != null) : []);
+// 반증 F3: 판정에 쓰는 목록 · 개수가 빠졌거나 모양이 틀리면 그 사실 전체를 버린다(null → 확인 불가). 0 · [] 로 채우면 '정상' 이 된다.
+const isArr = Array.isArray;
 const lnnOrNull = (v) => int(v, 0, 4096);
 const numN = (v) => { const n = numOrNull(v); return n == null || !Number.isFinite(n) ? null : n; };
 const SAN = {
   version: (v) => str(v, 40) || null,
   nodeCount: (v) => int(v, 0, 4096),
   health: (v) => (isObj(v) ? { word: str(v.word, 24).toUpperCase(), derived: v.derived === true, ...(int(v.unknownNodes, 0, 4096) ? { unknownNodes: int(v.unknownNodes, 0, 4096) } : {}) } : null),
-  group: (v) => (isObj(v) && int(v.inGroup) != null && int(v.total) != null ? { inGroup: int(v.inGroup, 0, 4096), total: int(v.total, 0, 4096), down: arr(v.down, 64, lnnOrNull) } : null),
-  events: (v) => (isObj(v) && int(v.total) != null ? { total: int(v.total), critical: int(v.critical), warning: int(v.warning), severityKnown: v.severityKnown === true, source: str(v.source, 24) } : null),
-  nodeState: (v) => (isObj(v) ? { total: int(v.total, 0, 4096) ?? 0, bad: arr(v.bad, 64, (x) => (isObj(x) ? { lnn: lnnOrNull(x.lnn), state: str(x.state, 24) } : null)), unknown: int(v.unknown, 0, 4096) ?? 0 } : null),
-  drives: (v) => (isObj(v) && int(v.total) != null ? { total: int(v.total), notHealthy: arr(v.notHealthy, 64, (x) => (isObj(x) ? { lnn: lnnOrNull(x.lnn), bay: str(x.bay, 16), state: str(x.state, 24) } : null)) } : null),
-  bootMirror: (v) => (isObj(v) && int(v.total) != null ? { total: int(v.total, 0, 4096), bad: arr(v.bad, 64, lnnOrNull) } : null),
-  psu: (v) => (isObj(v) && int(v.total) != null ? { total: int(v.total), bad: arr(v.bad, 64, (x) => (isObj(x) ? { lnn: lnnOrNull(x.lnn), text: str(x.text, 80) } : null)) } : null),
-  battery: (v) => (isObj(v) && int(v.total) != null ? { total: int(v.total), bad: arr(v.bad, 64, (x) => (isObj(x) ? { lnn: lnnOrNull(x.lnn), text: str(x.text, 80) } : null)) } : null),
-  ifaces: (v) => (isObj(v) && int(v.configured) != null ? { configured: int(v.configured), down: arr(v.down, 64, (x) => (isObj(x) ? { lnn: lnnOrNull(x.lnn), name: str(x.name, 32), status: str(x.status, 24) } : null)) } : null),
-  healthcheck: (v) => (isObj(v) && int(v.evaluations) != null ? { evaluations: int(v.evaluations), failed: arr(v.failed, 20, (x) => (isObj(x) ? { id: str(x.id, 40), checklist: str(x.checklist, 60), result: str(x.result, 24) } : null)), lastAt: numN(v.lastAt) } : null),
+  group: (v) => (isObj(v) && int(v.inGroup) != null && int(v.total) != null && (v.down == null || isArr(v.down)) ? { inGroup: int(v.inGroup, 0, 4096), total: int(v.total, 0, 4096), down: arr(v.down, 64, lnnOrNull) } : null),
+  events: (v) => (isObj(v) && int(v.total) != null ? { total: int(v.total), critical: int(v.critical), warning: int(v.warning), severityKnown: v.severityKnown === true && int(v.critical) != null, source: str(v.source, 24), partial: v.partial === true } : null),
+  nodeState: (v) => (isObj(v) && int(v.total) > 0 && isArr(v.bad) && int(v.unknown) != null ? { total: int(v.total, 0, 4096), bad: arr(v.bad, 64, (x) => (isObj(x) ? { lnn: lnnOrNull(x.lnn), state: str(x.state, 24) } : null)), unknown: int(v.unknown, 0, 4096) } : null),
+  drives: (v) => (isObj(v) && int(v.total) > 0 && isArr(v.notHealthy) ? { total: int(v.total), notHealthy: arr(v.notHealthy, 64, (x) => (isObj(x) ? { lnn: lnnOrNull(x.lnn), bay: str(x.bay, 16), state: str(x.state, 24) } : null)) } : null),
+  bootMirror: (v) => (isObj(v) && int(v.total) > 0 && isArr(v.bad) ? { total: int(v.total, 0, 4096), bad: arr(v.bad, 64, lnnOrNull) } : null),
+  psu: (v) => (isObj(v) && int(v.total) > 0 && isArr(v.bad) ? { total: int(v.total), bad: arr(v.bad, 64, (x) => (isObj(x) ? { lnn: lnnOrNull(x.lnn), text: str(x.text, 80) } : null)) } : null),
+  battery: (v) => (isObj(v) && int(v.total) > 0 && isArr(v.bad) ? { total: int(v.total), bad: arr(v.bad, 64, (x) => (isObj(x) ? { lnn: lnnOrNull(x.lnn), text: str(x.text, 80) } : null)) } : null),
+  ifaces: (v) => (isObj(v) && int(v.configured) != null && isArr(v.down) ? { configured: int(v.configured), down: arr(v.down, 64, (x) => (isObj(x) ? { lnn: lnnOrNull(x.lnn), name: str(x.name, 32), status: str(x.status, 24) } : null)) } : null),
+  healthcheck: (v) => (isObj(v) && int(v.evaluations) != null && isArr(v.failed) ? { evaluations: int(v.evaluations), failed: arr(v.failed, 20, (x) => (isObj(x) ? { id: str(x.id, 40), checklist: str(x.checklist, 60), result: str(x.result, 24) } : null)), lastAt: numN(v.lastAt) } : null),
   ntp: (v) => (isObj(v) && int(v.servers) != null ? { servers: int(v.servers, 0, 1000) } : null),
   capacity: (v) => (isObj(v) && numN(v.pct) != null ? { pct: Math.max(0, Math.min(1000, numN(v.pct))), totalBytes: numN(v.totalBytes), usedBytes: numN(v.usedBytes) } : null),
   pools: (v) => (Array.isArray(v) ? arr(v, 32, (x) => (isObj(x) ? { name: str(x.name, 60), pct: numN(x.pct) } : null)) : null),
   vhs: (v) => (isObj(v) ? { enabled: typeof v.enabled === 'boolean' ? v.enabled : null, pct: numN(v.pct), bytes: numN(v.bytes), drives: numN(v.drives), source: str(v.source, 16) } : null),
-  snapshots: (v) => (isObj(v) && int(v.count) != null ? { count: int(v.count), usedBytes: numN(v.usedBytes) ?? 0, largestBytes: numN(v.largestBytes), partial: v.partial === true } : null),
-  jobs: (v) => (isObj(v) ? { failed: arr(v.failed, 20, (x) => (isObj(x) ? { name: str(x.name, 60), detail: str(x.detail, 80) } : null)), running: arr(v.running, 20, (x) => (isObj(x) ? { name: str(x.name, 60), phase: str(x.phase, 24), progress: str(x.progress, 24) } : null)) } : null),
-  synciq: (v) => (isObj(v) && int(v.policies) != null ? { policies: int(v.policies), reports: int(v.reports) ?? 0, failed: int(v.failed) ?? 0, failedPolicies: arr(v.failedPolicies, 20, (x) => str(x, 60) || null) } : null),
+  snapshots: (v) => (isObj(v) && int(v.count) != null && numN(v.usedBytes) != null ? { count: int(v.count), usedBytes: numN(v.usedBytes), largestBytes: numN(v.largestBytes), partial: v.partial === true } : null),
+  jobs: (v) => (isObj(v) && isArr(v.failed) && isArr(v.running) ? { failed: arr(v.failed, 20, (x) => (isObj(x) ? { name: str(x.name, 60), detail: str(x.detail, 80) } : null)), running: arr(v.running, 20, (x) => (isObj(x) ? { name: str(x.name, 60), phase: str(x.phase, 24), progress: str(x.progress, 24) } : null)) } : null),
+  synciq: (v) => (isObj(v) && int(v.policies) != null && (int(v.policies) === 0 || (int(v.reports) != null && int(v.failed) != null)) ? { policies: int(v.policies), reports: int(v.reports) ?? 0, failed: int(v.failed) ?? 0, failedPolicies: arr(v.failedPolicies, 20, (x) => str(x, 60) || null), partial: v.partial === true } : null),
 };
 /** facts · why 정제 — 아는 키만 · 객체만 · 상한. 모르는 키 · 객체가 아닌 값은 버린다. */
 export function sanitizeFacts(raw) {
@@ -399,6 +413,6 @@ export function sanitizeFacts(raw) {
     if (v != null) facts[k] = v;
   }
   const w = isObj(raw?.why) ? raw.why : {};
-  for (const k of FACT_KEYS) if (typeof w[k] === 'string' && w[k]) why[k] = w[k].slice(0, 160);
+  for (const k of FACT_KEYS) if (typeof w[k] === 'string' && w[k]) why[k] = capStr(w[k], 160);  // 반증 F2: 평탄화 — 잘린 조각이 엣지 본문 원문을 붙잡지 않게
   return { facts, why };
 }

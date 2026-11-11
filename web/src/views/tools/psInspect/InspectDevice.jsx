@@ -36,7 +36,7 @@ export default function InspectDevice({ devices, id, detail, busy, err, actions,
             <div className="psi-head" style={{ marginBottom: 6 }}>
               <span className="psi-title">{d.corpName} › {d.name}</span>
               <span className="psi-pill">{/^onefs/i.test(String(d.version || '')) ? d.version : `OneFS ${d.version || '—'}`} · 노드 {d.nodeCount ?? '—'} · {d.agent ? `엣지 ${d.agent}` : '중앙 직접'} · {METHOD_KO[d.method] || d.method}</span>
-              <span className="psi-pill">{d.run ? `점검 ${kstText(d.run.at)} · ${Math.round((d.run.ms || 0) / 1000)}초${d.run.partial ? ' · 일부만' : ''}` : '아직 점검하지 않음'}</span>
+              <span className="psi-pill">{d.run ? `점검 ${kstText(d.run.at)} · ${Math.round((d.run.ms || 0) / 1000)}초${d.run.partial ? ' · 일부만' : ''}${d.run.staleDays ? ` · ${d.run.staleDays}일 전 — 판정에 쓰지 않음` : ''}` : '아직 점검하지 않음'}</span>
             </div>
             <div className="psi-tablewrap">
               <STable minWidth={1020}>

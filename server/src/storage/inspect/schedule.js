@@ -23,7 +23,7 @@ import { runInspectOnce, inspectTargets } from './runner.js';
 import { requestInspect } from './requests.js';
 import { buildInspectModel, buildTopNodes, inspectDevices } from './view.js';
 import { REPORT_KIND, buildReportModel, renderReportHtml, reportMailParts } from './report.js';
-import { isMockMode } from '../../mock/demo/storage.js';
+import { isMockMode, ensureStorageDemo } from '../../mock/demo/storage.js';
 
 export const SETTINGS_DEFAULTS = Object.freeze({ enabled: true, weekday: 1, time: '09:00', mailEnabled: false, mailDelayMin: 30, to: [], corpTo: {}, thresholds: { ...THRESHOLD_DEFAULTS } });
 export const TICK_MS = 60_000;
@@ -80,12 +80,14 @@ export function weeklySlot({ weekday = 1, time = '09:00' } = {}, now = Date.now(
 export function planWeekly({ enabled, slot, last, now = Date.now(), bootAt = 0 }) {
   if (!enabled) return { action: 'none' };
   const l = numOrNull(last);
-  if (l != null && l > now + 60_000) return { action: 'rebase', last: now };
+  // 반증 F13: 시계를 조금(8일 이내) 되돌린 것이면 기록을 그대로 둔다 — now 로 낮추면 시계가 다시 회차를 지날 때 이미 돈 회차가 또 돈다.
+  //   크게 어긋난 미래 기록(시계가 한때 크게 앞섰던 것)만 지금으로 내린다(그 시각까지 영영 멈추지 않게).
+  if (l != null && l > now + 60_000) return l - now <= 8 * 86_400_000 ? { action: 'none' } : { action: 'rebase', last: now };
   if (l != null && slot <= l) return { action: 'none' };
   if (slot > now) return { action: 'none' };
   if (l == null && slot < bootAt - 60_000) return { action: 'init', last: slot }; // 처음 기동(상태 없음) — 지난 회차를 '놓침' 으로 적지 않고 기준만 잡는다
-  if (slot < bootAt - 60_000) return { action: 'missed', slot, reason: 'down' };
-  if (now - slot > LATE_MS) return { action: 'missed', slot, reason: 'late' };
+  // 반증 F14: 재시작이 회차 시각에 걸쳐도(자동 업그레이드 등) 유예(LATE_MS) 안이면 돌린다 — 꺼져 있던 회차를 버리는 것은 유예를 넘었을 때만.
+  if (now - slot > LATE_MS) return { action: 'missed', slot, reason: slot < bootAt - 60_000 ? 'down' : 'late' };
   return { action: 'go', slot };
 }
 
@@ -154,10 +156,17 @@ export function startInspection({ ids = null, reason = 'manual' } = {}) {
 
 /* ── 보고서 · 메일 ───────────────────────────────────────────────── */
 /** 보고서(모델 + HTML) — 메일은 관리자가 아닌 사람도 받는다(주소 가림 판본). 장비 호출 0. */
+/** 법인판 장비 거름(법인 키 = 등록부 datacenterId · 빈 값은 '법인 미지정' 판) — corp 가 없으면 받은 filter 그대로. */
+export function corpFilterOf(corp, filter = null, devices = null) {
+  if (corp == null) return filter;
+  const mine = new Set((devices || inspectDevices()).filter((d) => String(d?.datacenterId || '') === String(corp)).map((d) => String(d.id)));
+  return (id) => mine.has(String(id)) && (!filter || filter(id));
+}
 export async function buildReport({ now = Date.now(), corp = null, admin = false, filter = null } = {}) {
   const cfg = loadSettings();
   const model = await buildInspectModel({ now, admin, thresholds: cfg.thresholds, filter });
-  const top = await buildTopNodes({ range: '7d', metric: 'ops', limit: 10, admin, now, thresholds: cfg.thresholds, filter });
+  // 반증 F5: 법인판의 Top 10 은 **그 법인 노드만으로** 다시 줄 세운다 — 전 법인 Top 10 을 거르면 상위가 몰린 다른 법인에 밀려 '표본이 없습니다' 가 나왔다.
+  const top = await buildTopNodes({ range: '7d', metric: 'ops', limit: 10, admin, now, thresholds: cfg.thresholds, filter: corpFilterOf(corp, filter) });
   const rm = buildReportModel(model, top, { now, corp });
   return { model: rm, html: renderReportHtml(rm), parts: reportMailParts(rm) };
 }
@@ -229,7 +238,7 @@ export function startInspectScheduler() {
   //   데모 장비 시드(ensureStorageDemo — 스토리지 폴러 첫 주기가 부른다)보다 먼저 돌면 0대로 끝난다 — 시드를 먼저 기다린다(멱등).
   if (isMockMode()) {
     _bootRun = setTimeout(() => {
-      import('../../mock/demo/storage.js').then((m) => m.ensureStorageDemo()).catch(() => {})
+      Promise.resolve().then(() => ensureStorageDemo()).catch(() => {})
         .then(() => runInspectOnce({ reason: 'demo-boot' })).catch(() => {});
     }, 20_000);
     _bootRun.unref?.();

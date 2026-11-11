@@ -136,11 +136,11 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/bareos-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:174](../server/src/routes/central/opsRoutes.js#L174) |
 | POST | `/bareos-op-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:196](../server/src/routes/central/opsRoutes.js#L196) |
 | GET | `/bareos-ops` | `requireCentral` | [server/src/routes/central/opsRoutes.js:186](../server/src/routes/central/opsRoutes.js#L186) |
-| GET | `/bm-maint` | `requireCentral` | [server/src/routes/central/storageRoutes.js:231](../server/src/routes/central/storageRoutes.js#L231) |
-| GET | `/bm-onboard` | `requireCentral` | [server/src/routes/central/storageRoutes.js:212](../server/src/routes/central/storageRoutes.js#L212) |
+| GET | `/bm-maint` | `requireCentral` | [server/src/routes/central/storageRoutes.js:237](../server/src/routes/central/storageRoutes.js#L237) |
+| GET | `/bm-onboard` | `requireCentral` | [server/src/routes/central/storageRoutes.js:218](../server/src/routes/central/storageRoutes.js#L218) |
 | GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:344](../server/src/routes/central/opsRoutes.js#L344) |
 | POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:349](../server/src/routes/central/opsRoutes.js#L349) |
-| GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:189](../server/src/routes/central/storageRoutes.js#L189) |
+| GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:195](../server/src/routes/central/storageRoutes.js#L195) |
 | POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:582](../server/src/routes/central.js#L582) |
 | GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:295](../server/src/routes/central/opsRoutes.js#L295) |
 | POST | `/capture-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:300](../server/src/routes/central/opsRoutes.js#L300) |
@@ -148,8 +148,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1302](../server/src/routes/central.js#L1302) |
 | GET | `/cvp-config` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:22](../server/src/routes/central/cvpIsiduRoutes.js#L22) |
 | POST | `/cvp-data` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:51](../server/src/routes/central/cvpIsiduRoutes.js#L51) |
-| GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central/storageRoutes.js:141](../server/src/routes/central/storageRoutes.js#L141) |
-| POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central/storageRoutes.js:148](../server/src/routes/central/storageRoutes.js#L148) |
+| GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central/storageRoutes.js:147](../server/src/routes/central/storageRoutes.js#L147) |
+| POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central/storageRoutes.js:154](../server/src/routes/central/storageRoutes.js#L154) |
 | POST | `/fleet` | `requireCentral` | [server/src/routes/central.js:1341](../server/src/routes/central.js#L1341) |
 | GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1572](../server/src/routes/central.js#L1572) |
 | POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1492](../server/src/routes/central.js#L1492) |
@@ -167,8 +167,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/link-check-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:503](../server/src/routes/central/opsRoutes.js#L503) |
 | GET | `/log-queries` | `requireCentral` | [server/src/routes/central/opsRoutes.js:268](../server/src/routes/central/opsRoutes.js#L268) |
 | POST | `/log-query-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:276](../server/src/routes/central/opsRoutes.js#L276) |
-| POST | `/part-faults` | `requireCentral` | [server/src/routes/central/storageRoutes.js:110](../server/src/routes/central/storageRoutes.js#L110) |
-| GET | `/partfault-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:178](../server/src/routes/central/storageRoutes.js#L178) |
+| POST | `/part-faults` | `requireCentral` | [server/src/routes/central/storageRoutes.js:116](../server/src/routes/central/storageRoutes.js#L116) |
+| GET | `/partfault-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:184](../server/src/routes/central/storageRoutes.js#L184) |
 | GET | `/pdu-config` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:35](../server/src/routes/central/pduSanRoutes.js#L35) |
 | POST | `/pdu-data` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:66](../server/src/routes/central/pduSanRoutes.js#L66) |
 | GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:206](../server/src/routes/central/opsRoutes.js#L206) |
@@ -183,8 +183,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/sanswitch-flow-result` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:208](../server/src/routes/central/pduSanRoutes.js#L208) |
 | POST | `/sanswitch-perf` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:137](../server/src/routes/central/pduSanRoutes.js#L137) |
 | POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:196](../server/src/routes/central/pduSanRoutes.js#L196) |
-| GET | `/storage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:80](../server/src/routes/central/storageRoutes.js#L80) |
-| POST | `/storage-data` | `requireCentral` | [server/src/routes/central/storageRoutes.js:247](../server/src/routes/central/storageRoutes.js#L247) |
+| GET | `/storage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:86](../server/src/routes/central/storageRoutes.js#L86) |
+| POST | `/storage-data` | `requireCentral` | [server/src/routes/central/storageRoutes.js:253](../server/src/routes/central/storageRoutes.js#L253) |
 | GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:624](../server/src/routes/central.js#L624) |
 | POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:640](../server/src/routes/central.js#L640) |
 | POST | `/svcmon-report` | `requireCentral` | [server/src/routes/central.js:559](../server/src/routes/central.js#L559) |

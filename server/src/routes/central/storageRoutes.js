@@ -6,6 +6,7 @@
  *   (회귀 `test/centralSplit2954.test.js` 가 등록 순서 · 개수 · 순환 없음을 고정한다 — 분할 때 라우트 본문은 원문 비교로 0 차이). 공용 판정(requireCentral · 503 응답 등)은 central.js 의 것을 그대로 쓴다.
  */
 import { numOrNull } from '../../util/numOrNull.js';
+import { capTrim } from '../../util/capStr.js';
 // central.js 의 공용 판정 — 등록 때 인자로 받는다(import 하면 central.js ↔ 이 파일 순환이 생긴다 — archScan IMPORT_CYCLE_MAX)
 let edgeNameKnown, edgeNameRegistered, intervalsPartOrUnreadable, receiveRegistryUnreadable, registryUnreadable, requireCentral, settingsUnreadable, strAgent;
 
@@ -38,6 +39,11 @@ export function stampEdgeCollectedAt(d, now) {
   if (edgeTs != null && edgeTs - now > EDGE_CLOCK_AHEAD_TOLERANCE_MS) out.edgeClockAheadMs = edgeTs - now;
   else delete out.edgeClockAheadMs; // 엣지가 보낸 값을 믿지 않는다 — 중앙이 계산한 것만 싣는다
   return out;
+}
+
+/** v2.963 반증 F1: 엣지 원소의 deviceId 를 저장 키와 같은 모양(글자 · 앞뒤 공백 뗌 · 128자 — capTrim)으로 맞춘다. 객체가 아니면 그대로(저장 단계가 뺀다). */
+export function normDeviceIds(list) {
+  return (Array.isArray(list) ? list : []).map((e) => (e && typeof e === 'object' && !Array.isArray(e) ? { ...e, deviceId: capTrim(e.deviceId, 128) } : e));
 }
 
 export async function onlyDelegated(list, idOf, registryPath) {
@@ -280,7 +286,7 @@ export function registerStorageRoutes(centralRouter, deps) {
     //   (엣지가 그것으로 고리를 비우고 상태에 남긴다). 본문에 키가 없으면(구버전 엣지) 아무것도 하지 않고 응답에도 싣지 않는다.
     let sampleAck = null;
     if (Array.isArray(req.body?.nodeLoadSamples) && req.body.nodeLoadSamples.length) {
-      let list = req.body.nodeLoadSamples.slice(0, 500);
+      let list = normDeviceIds(req.body.nodeLoadSamples.slice(0, 500));  // v2.963 반증 F1: 저장이 쓰는 id(앞뒤 공백 뗌)로 먼저 맞춘 뒤 소유권을 본다
       let denied = 0;
       { const r = await onlyDelegated(list, (d) => d.deviceId, '../storage/registry.js'); list = r.list; denied += r.denied; }
       if (ownedSet) { const before = list.length; list = list.filter((d) => d && typeof d === 'object' && ownedSet.has(String(d.deviceId))); denied += before - list.length; }
@@ -292,12 +298,17 @@ export function registerStorageRoutes(centralRouter, deps) {
     //   중앙 이력에 적는다(central/storageInspectEdge.js — 아는 필드만 · facts 화이트리스트 · at 은 수신 시각 이하). 응답 `inspectRuns` 가 받은 · 기록 · 중복 · 뺀 수를 말한다.
     let inspectAck = null;
     if (Array.isArray(req.body?.inspectRuns) && req.body.inspectRuns.length) {
-      let list = req.body.inspectRuns.slice(0, 500);
+      // 반증 F1: id 를 저장 키와 같은 모양(앞뒤 공백 뗌 · 128자)으로 **먼저** 맞춘다 — 원문으로 소유권을 보고 저장에서 trim 하면 ' isi-direct ' 가 필터를 지나 중앙 직접 장비 이력을 쓴다.
+      let list = normDeviceIds(req.body.inspectRuns.slice(0, 500));
       let denied = 0;
       { const r = await onlyDelegated(list, (d) => d?.deviceId, '../storage/registry.js'); list = r.list; denied += r.denied; }
       if (ownedSet) { const before = list.length; list = list.filter((d) => d && typeof d === 'object' && ownedSet.has(String(d.deviceId))); denied += before - list.length; }
+      // 반증 F9: 등록된 아이실론 장비만 — 공유 토큰이 모르는 id 를 대량으로 보내 실제 장비 이력을 밀어내지 못하게.
+      let unknownDevice = 0;
+      { const { listDevices } = await import('../../storage/registry.js'); const known = new Set(listDevices().filter((d) => d && d.type === 'isilon').map((d) => String(d.id)));
+        const before = list.length; list = list.filter((d) => d && typeof d === 'object' && known.has(String(d.deviceId))); unknownDevice = before - list.length; }
       const { saveEdgeInspectRuns } = await import('../../central/storageInspectEdge.js');
-      inspectAck = { ...saveEdgeInspectRuns(agent, list, { now }), ...(denied ? { notOwned: denied } : {}) };
+      inspectAck = { ...saveEdgeInspectRuns(agent, list, { now }), ...(denied ? { notOwned: denied } : {}), ...(unknownDevice ? { unknownDevice } : {}) };
       if (denied) console.warn(`[central] storage-data: ${String(agent).slice(0, 64)} 미위임·중앙 직접 장비의 점검 결과 ${denied}건 드롭`);
     }
     // v2.599(CEN-2599-03·04·05): 모듈이 원소를 정리하고(객체 아님·식별자 아님·크기 초과를 빼고 표시 필드의 객체 값은 null)

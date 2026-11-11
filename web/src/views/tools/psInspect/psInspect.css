@@ -77,7 +77,7 @@
 .psi .psi-paper h2 { margin: 12px 0 4px; font-size: 13.5px; padding-bottom: 3px; border-bottom: 1.5px solid #1a2233; }
 .psi .psi-paper .sub { color: #4a5670; font-size: 12px; }
 .psi .psi-paper table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.psi .psi-paper th { text-align: left; color: #4a5670; font-weight: 600; padding: 4px 6px; border-bottom: 1px solid #9aa5b8; white-space: nowrap; }
+.psi .psi-paper th { text-align: left; color: #3a4558; background: #eef1f6; position: static; font-weight: 600; padding: 4px 6px; border-bottom: 1px solid #9aa5b8; white-space: nowrap; }  /* 앱 공통 표 머리(어두운 띠 · sticky)를 종이에서 푼다 — 흰 종이에 어두운 띠 + 회색 글자는 대비가 낮았다(Chromium 판독) */
 .psi .psi-paper td { padding: 4px 6px; border-bottom: 1px solid #dfe4ec; vertical-align: top; white-space: normal; overflow-wrap: anywhere; }  /* 앱 공통 표 규칙(nowrap)을 종이에서 푼다 — 인쇄에서 열이 잘리지 않게 */
 .psi .psi-paper a { color: #1d4ed8; }
 .psi .psi-paper td.n { text-align: right; font-family: var(--mono); white-space: nowrap; }

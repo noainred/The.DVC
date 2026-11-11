@@ -16,6 +16,7 @@ export function saveEdgeInspectRuns(agent, list, { now = Date.now() } = {}) {
   const out = { devices: 0, received: 0, saved: 0, duplicate: 0, dropped: 0 };
   if (!Array.isArray(list)) return out;
   const who = capStr(String(agent || ''), 64);
+  const perDevice = new Map(); // 반증 F8: 같은 deviceId 원소를 반복해도 장비당 상한은 push 하나에 INSPECT_RUNS_PER_DEVICE
   for (const ent of list.slice(0, INSPECT_MAX_DEVICES)) {
     if (!isObj(ent) || !Array.isArray(ent.runs)) { out.dropped += 1; continue; }
     const id = typeof ent.deviceId === 'string' || typeof ent.deviceId === 'number' ? capTrim(ent.deviceId, 128) : '';
@@ -23,6 +24,9 @@ export function saveEdgeInspectRuns(agent, list, { now = Date.now() } = {}) {
     out.devices += 1;
     for (const raw of ent.runs.slice(0, INSPECT_RUNS_PER_DEVICE)) {
       out.received += 1;
+      const n = perDevice.get(id) || 0;
+      if (n >= INSPECT_RUNS_PER_DEVICE) { out.dropped += 1; continue; }
+      perDevice.set(id, n + 1);
       if (!isObj(raw)) { out.dropped += 1; continue; }
       const r = recordRun(id, { ...raw, agent: who, edgeAt: raw.at }, { maxTs: now });
       if (r.saved) { out.saved += 1; ackInspect(id, r.run.at); }

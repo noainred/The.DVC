@@ -16,7 +16,7 @@ export default function InspectOverview({ data, onOpen }) {
   return (
     <>
       <div className="psi-tiles">
-        <div className="psi-tile"><span className="psi-lab">대상</span><b>{numText(t.devices)}</b><span className="psi-muted">{numText(t.corps)} 법인 · {numText(t.nodes)} 노드 · 점검한 장비 {numText(t.inspected)}</span></div>
+        <div className="psi-tile"><span className="psi-lab">대상</span><b>{numText(t.devices)}</b><span className="psi-muted">{numText(t.corps)} 법인 · {numText(t.nodes)} 노드{t.nodesUnknown ? `(노드 수 모름 ${t.nodesUnknown}대)` : ''} · 점검한 장비 {numText(t.inspected)}</span></div>
         <div className="psi-tile"><span className="psi-lab">점검 항목</span><b>{numText(t.total)}</b><span className="psi-muted">장비 {numText(t.devices)} × 20항목</span></div>
         <div className="psi-tile"><span className="psi-lab">정상</span><b style={{ color: '#4fd1a5' }}>{numText(t.ok)}</b><span className="psi-muted">확인했고 기준 안</span></div>
         <div className="psi-tile"><span className="psi-lab">주의</span><b style={{ color: '#fcd34d' }}>{numText(t.warn)}</b><span className="psi-muted">조치 검토</span></div>
@@ -49,7 +49,7 @@ export default function InspectOverview({ data, onOpen }) {
                       </td>
                       <td><span className={dt.tone === 'bad' ? 'psi-st bad' : dt.tone === 'ok' ? 'psi-st ok' : 'psi-muted'} style={dt.tone === 'muted' ? { fontSize: 11.5 } : undefined}>{dt.text}</span></td>
                       <td className="psi-num" data-sort={String(d.skew?.ratio ?? '')} style={{ color: d.skew?.ratio >= (th.skewFactor || 1.5) ? '#fcd34d' : undefined }}>{d.skew?.ratio != null ? `${d.skew.ratio}×` : '—'}</td>
-                      <td data-sort={String(d.run?.at ?? '')}>{d.run ? <><span className="psi-mono" style={{ fontSize: 11.5 }}>{kstText(d.run.at)}</span><div className="psi-muted" style={{ fontSize: 11 }}>{agoText(d.run.at)}{d.run.partial ? ' · 일부만' : ''}</div></> : <span className="psi-muted">{d.request?.state === 'pending' || d.request?.state === 'taken' ? '엣지 점검 대기' : '점검 안 함'}</span>}</td>
+                      <td data-sort={String(d.run?.at ?? '')}>{d.run ? <><span className="psi-mono" style={{ fontSize: 11.5 }}>{kstText(d.run.at)}</span><div className="psi-muted" style={{ fontSize: 11 }}>{agoText(d.run.at)}{d.run.partial ? ' · 일부만' : ''}{d.run.staleDays ? ' · 오래됨(판정 안 함)' : ''}</div></> : <span className="psi-muted">{d.request?.state === 'pending' || d.request?.state === 'taken' ? '엣지 점검 대기' : '점검 안 함'}</span>}</td>
                     </tr>
                   );
                 })}

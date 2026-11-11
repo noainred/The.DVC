@@ -62,11 +62,12 @@ export function buildReportModel(model, top, { now = Date.now(), corp = null, po
   for (const u of unknowns.slice(0, 3)) todo.push(`${u.corp} · ${u.device} — ${u.label} 확인 불가 해소: ${u.why}`);
   const usedRefs = [...new Set([...issues.flatMap((x) => x.refs || []), 1, 3, 10, 14])].sort((a, b) => a - b);
   return {
-    kind: REPORT_KIND, generatedAt: now, week: weekLabel(lastRun || now), lastRun, portal, corp, corpName: corp != null ? devices[0]?.corpName || String(corp) : null,
+    kind: REPORT_KIND, generatedAt: now, week: weekLabel(now), // 반증 F4: 주차는 보고서를 만든 주 — 오래된 실행의 주차를 이번 보고서 제목에 붙이지 않는다
+    lastRun, portal, corp, corpName: corp != null ? devices[0]?.corpName || String(corp) : null,
     counts, total: Object.values(counts).reduce((a, b) => a + b, 0), devices: devices.map((d) => ({ name: d.name, corpName: d.corpName, version: d.version, nodeCount: d.nodeCount,
-      capacityPct: d.capacityPct, summary: d.summary, runAt: d.run?.at ?? null, method: d.run?.method || null, worse: d.diff?.worse?.length || 0, better: d.diff?.better?.length || 0,
+      capacityPct: d.capacityPct, summary: d.summary, runAt: d.run?.at ?? null, staleDays: d.run?.staleDays || 0, method: d.run?.method || null, worse: d.diff?.worse?.length || 0, better: d.diff?.better?.length || 0,
       skewRatio: d.skew?.ratio ?? null })),
-    corps: [...new Set(devices.map((d) => d.corpName))].length, nodes: devices.reduce((a, d) => a + (Number(d.nodeCount) || 0), 0),
+    corps: [...new Set(devices.map((d) => d.corpName))].length, nodes: devices.reduce((a, d) => a + (Number(d.nodeCount) || 0), 0), nodesUnknown: devices.filter((d) => !(Number(d.nodeCount) > 0)).length,
     issues, unknowns, top: { rows: topRows, metricLabel: top?.metricLabel || 'ops/s', from: top?.from ?? null, to: top?.to ?? null, skewFactor: top?.skewFactor ?? 1.5, skewed: skewed.map((c) => ({ name: c.name, corpName: c.corpName, maxRatio: c.maxRatio, maxLnn: c.maxLnn })) },
     protection: prot, todo, refs: REFS.filter((r) => usedRefs.includes(r.n)), thresholds: model?.thresholds || null,
   };
@@ -81,12 +82,12 @@ const H2 = 'margin:16px 0 6px;font-size:14px;padding-bottom:3px;border-bottom:1.
 export function renderReportHtml(m) {
   const c = m.counts;
   const head = `<h1 style="margin:0;font-size:20px">PowerScale 주간 점검 보고서${m.corpName ? ` — ${esc(m.corpName)}` : ''}</h1>
-<div style="color:#4a5670;font-size:12px;margin-top:2px">${esc(m.week)} · 마지막 점검 ${esc(kstText(m.lastRun))} KST · 만든 시각 ${esc(kstText(m.generatedAt))} KST${m.portal ? ` · ${esc(m.portal)}` : ''} · 대상 ${m.corps} 법인 · ${m.devices.length} 클러스터 · ${m.nodes} 노드</div>`;
+<div style="color:#4a5670;font-size:12px;margin-top:2px">${esc(m.week)} · 마지막 점검 ${esc(kstText(m.lastRun))} KST · 만든 시각 ${esc(kstText(m.generatedAt))} KST${m.portal ? ` · ${esc(m.portal)}` : ''} · 대상 ${m.corps} 법인 · ${m.devices.length} 클러스터 · ${m.nodes} 노드${m.nodesUnknown ? `(노드 수 모름 ${m.nodesUnknown}대 제외)` : ''}</div>`;
   const summary = `<h2 style="${H2}">1. 요약</h2>
 <div style="font-size:13px">항목 ${m.total}개 — 정상 <b>${c.ok}</b> · 주의 <b style="color:${COLOR.warn}">${c.warn}</b> · 이상 <b style="color:${COLOR.bad}">${c.bad}</b> · 확인 불가 <b>${c.unknown}</b> · 해당 없음 ${c.na}. 확인하지 못한 항목은 정상에 넣지 않았습니다.</div>`;
   const corpRows = m.devices.map((d) => `<tr><td style="${TD}">${esc(d.corpName)}</td><td style="${TD}">${esc(d.name)}</td><td style="${TD}">${esc(d.version || '—')}</td><td style="${TDN}">${d.nodeCount ?? '—'}</td><td style="${TDN}">${pctText(d.capacityPct)}</td>`
     + `<td style="${TDN}">${d.summary.ok}</td><td style="${TDN}">${d.summary.warn}</td><td style="${TDN}">${d.summary.bad}</td><td style="${TDN}">${d.summary.unknown}</td><td style="${TDN}">${d.skewRatio != null ? `${d.skewRatio}×` : '—'}</td>`
-    + `<td style="${TD}">${d.runAt ? esc(kstText(d.runAt)) : '점검 안 함'}${d.worse ? ` · <b style="color:${COLOR.bad}">나빠짐 ${d.worse}</b>` : ''}${d.better ? ` · 풀림 ${d.better}` : ''}</td></tr>`).join('');
+    + `<td style="${TD}">${d.runAt ? esc(kstText(d.runAt)) : '점검 안 함'}${d.staleDays ? ` <b style="color:${COLOR.warn}">(${d.staleDays}일 전 — 판정 안 함)</b>` : ''}${d.worse ? ` · <b style="color:${COLOR.bad}">나빠짐 ${d.worse}</b>` : ''}${d.better ? ` · 풀림 ${d.better}` : ''}</td></tr>`).join('');
   const corp = `<h2 style="${H2}">2. 법인별 결과</h2><table style="width:100%;border-collapse:collapse;font-size:12px"><tr><th style="${TH}">법인</th><th style="${TH}">클러스터</th><th style="${TH}">OneFS</th><th style="${TH}">노드</th><th style="${TH}">용량</th><th style="${TH}">정상</th><th style="${TH}">주의</th><th style="${TH}">이상</th><th style="${TH}">불가</th><th style="${TH}">편중</th><th style="${TH}">점검 · 지난번 대비</th></tr>${corpRows || `<tr><td style="${TD}" colspan="11">대상 장비가 없습니다.</td></tr>`}</table>`;
   const issueRows = m.issues.map((x) => `<tr><td style="${TD}">${badge(x.status)}</td><td style="${TD}">${esc(x.corp)} · ${esc(x.device)} · <b>${esc(x.label)}</b></td><td style="${TD}">${esc(x.value)}</td><td style="${TD}">${esc(x.basis)}</td><td style="${TD}">${esc(x.action)}</td></tr>`).join('');
   const issues = `<h2 style="${H2}">3. 이상 · 주의 항목과 조치(${m.issues.length})</h2>${m.issues.length ? `<table style="width:100%;border-collapse:collapse;font-size:12px"><tr><th style="${TH}"></th><th style="${TH}">법인 · 장비 · 항목</th><th style="${TH}">본 값</th><th style="${TH}">기준</th><th style="${TH}">조치 · 근거</th></tr>${issueRows}</table>` : '<div style="font-size:12px">이상 · 주의 항목이 없습니다.</div>'}`;

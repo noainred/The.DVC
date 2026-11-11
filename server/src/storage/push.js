@@ -18,7 +18,7 @@ import { centralStatusOnlySupport, sendStatusOnly as sendStatusOnlyTo, STATUS_ON
 export { centralStatusOnlySupport, STATUS_ONLY_MIN_CENTRAL, _resetStatusOnlyCapForTest };
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 import { pendingNodeLoadSamples, markNodeLoadSamplesSent } from './nodeLoadPoller.js'; // v2.932(2차 ⑨): 미전송 5분 표본 고리
-import { pendingInspectRuns, markInspectRunsSent } from './inspect/runner.js'; // v2.963: 미전송 PowerScale 점검 결과(중앙 요청으로 이 엣지가 돌린 것)
+import { pendingInspectRuns, markInspectRunsSent, setAfterEdgeInspectHook } from './inspect/runner.js'; // v2.963: 미전송 PowerScale 점검 결과(중앙 요청으로 이 엣지가 돌린 것)
 
 // v2.409: 주기는 중앙 배포값(storage/intervals.js)을 매번 조회 — 모듈 로드 시 상수로 굳히지 않는다.
 const pushMs = () => runtimeIntervals().pushMs;
@@ -179,5 +179,6 @@ export function startStoragePush() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;
   // 첫 수집(15s+α) 뒤에 첫 push, 이후 현재 주기로 재무장.
   _timer = startAdaptiveTimer(pushMs, () => pushStorageNow(), { firstDelayMs: 45_000, name: '중앙 push' });
+  setAfterEdgeInspectHook(() => pushStorageNow()); // v2.963 반증 E1: 엣지 점검 결과를 다음 주기까지 묵히지 않는다
 }
 export function storagePushStatus() { return { ..._last, intervalMs: pushMs() }; }

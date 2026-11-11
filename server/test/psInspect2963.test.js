@@ -124,9 +124,9 @@ test('② 파서 — 모양을 알아보면 값, 모르면 null', () => {
   const sn = F.parseSnapshots({ snapshots: [{ size: 100 }, { size: 300 }], resume: 'abc' });
   assert.deepEqual(sn, { count: 2, usedBytes: 400, largestBytes: 300, partial: true });
   const sr = F.parseSyncReports({ reports: [{ start_time: (NOW - D) / 1000, state: 'finished', policy_name: 'p1' }, { start_time: (NOW - 2 * D) / 1000, state: 'failed', policy_name: 'p2' }, { start_time: (NOW - 9 * D) / 1000, state: 'failed', policy_name: 'old' }] }, { now: NOW });
-  assert.deepEqual(sr, { reports: 2, failed: 1, failedPolicies: ['p2'] });
+  assert.deepEqual(sr, { reports: 2, failed: 1, failedPolicies: ['p2'], partial: false });
   const ev = F.parseEventGroups({ eventgroups: [{ severity: 'critical' }, { severity: 'emergency' }, { severity: 'warning' }, { severity: 'critical', resolved: true }] });
-  assert.deepEqual(ev, { total: 3, critical: 2, warning: 1, severityKnown: true, source: 'event-groups' });
+  assert.deepEqual(ev, { total: 3, critical: 2, warning: 1, severityKnown: true, source: 'event-groups', partial: false });
   const jb = F.parseJobs({ jobs: [{ type: 'FlexProtect', state: 'running', progress: '40%' }, { type: 'MultiScan', state: 'failed' }] });
   assert.equal(jb.failed[0].name, 'MultiScan'); assert.equal(jb.running[0].name, 'FlexProtect');
   assert.deepEqual(F.jsonOf('Warning: something\n[{"a":1}]'), [{ a: 1 }]);
@@ -287,7 +287,12 @@ test('⑨ 회차 — 주간 회차 시각 · 계획 · 설정 정규화', () => 
   assert.deepEqual(SCH.planWeekly({ enabled: true, slot, last: null, now: slot + 60_000, bootAt: slot + 10 * 60_000 }), { action: 'init', last: slot });
   assert.deepEqual(SCH.planWeekly({ enabled: true, slot, last: slot - 7 * D, now: slot + 60_000, bootAt: 0 }), { action: 'go', slot });
   assert.deepEqual(SCH.planWeekly({ enabled: true, slot, last: slot - 7 * D, now: slot + 40 * 60_000, bootAt: 0 }), { action: 'missed', slot, reason: 'late' });
-  assert.deepEqual(SCH.planWeekly({ enabled: true, slot, last: slot - 7 * D, now: slot + 60_000, bootAt: slot + 30 * 60_000 }), { action: 'missed', slot, reason: 'down' });
+  assert.deepEqual(SCH.planWeekly({ enabled: true, slot, last: slot - 7 * D, now: slot + 36 * 60_000, bootAt: slot + 35 * 60_000 }), { action: 'missed', slot, reason: 'down' });
+  // 반증 F14: 회차 시각에 걸친 짧은 재시작(90초)은 유예 안 — 돌린다
+  assert.deepEqual(SCH.planWeekly({ enabled: true, slot, last: slot - 7 * D, now: slot + 2 * 60_000, bootAt: slot + 60_000 }), { action: 'go', slot });
+  // 반증 F13: 시계를 2분 되돌려도 이미 돈 회차를 다시 돌리지 않는다(기록 유지 → 시계가 회차를 다시 지나도 none)
+  assert.deepEqual(SCH.planWeekly({ enabled: true, slot: slot - 7 * D, last: slot, now: slot - 2 * 60_000, bootAt: 0 }), { action: 'none' });
+  assert.equal(SCH.planWeekly({ enabled: true, slot, last: slot, now: slot + 60_000 }).action, 'none');
   assert.equal(SCH.planWeekly({ enabled: true, slot, last: slot, now: slot + 60_000 }).action, 'none');
   assert.equal(SCH.planWeekly({ enabled: true, slot, last: slot + 10 * D, now: slot + 60_000 }).action, 'rebase');
   const N = SCH.normalizeSettings;

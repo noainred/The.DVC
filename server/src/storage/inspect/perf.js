@@ -7,6 +7,7 @@
  *  · 집계는 순수 함수(aggregateNodeRows · skewOf · topNodes)로 나누고 DB 읽기(devicePerf)는 얇게 — 테스트가 순수 쪽을 고정한다.
  */
 import { nodeLoadQuery } from '../db.js';
+import { createYielder } from '../../util/timeSlice.js';
 
 export const PERF_METRICS = Object.freeze({
   ops: { group: 'proto', keys: ['ops'], label: '프로토콜 ops/s', unit: 'ops/s' },
@@ -54,12 +55,25 @@ export function skewOf(nodes) {
  * 장비 하나의 창 통계 — { samples, nodes:[{lnn, ops, net, busyAvg, busyMax, cpuAvg, cpuMax}], skew:{…, metric, metricLabel}, why? }.
  * DB 가 없거나 표본이 0 이면 samples 0 + why(판정은 확인 불가).
  */
-export async function devicePerf(deviceId, { from, to }) {
+export const DAILY_FROM_MS = 8 * 86_400_000;
+export async function devicePerf(deviceId, { from, to, yielder = null }) {
+  // 반증 F6: ① 동기 SQLite 사이에 **실제로 양보**한다(await 만으로는 타이머 · I/O 에 양보하지 않는다 — 30대 × 24노드 × 7일 실측 1.2초 정지).
+  //   ② 8일 넘는 창(30일)은 일 요약(node_load_daily)으로 읽는다 — 시간 요약은 노드 24 × 720시간이 행 상한(12,800)에 걸려 최근 며칠이 잘렸다(포탈 날짜 단위 창).
+  //   ③ 그래도 잘렸으면(truncated) 평균이라고 내지 않고 확인 불가로 돌린다.
+  const y = typeof yielder === 'function' ? yielder : createYielder(15);
+  const daily = to - from > DAILY_FROM_MS;
   const q = async (m) => {
-    try { return await nodeLoadQuery(deviceId, { group: PERF_METRICS[m].group, kind: 'bucket', from, to, bucketMs: HUGE_BUCKET }); } catch { return { db: false, rows: [] }; }
+    let r;
+    try {
+      r = daily ? await nodeLoadQuery(deviceId, { group: PERF_METRICS[m].group, kind: 'day', from, to })
+        : await nodeLoadQuery(deviceId, { group: PERF_METRICS[m].group, kind: 'bucket', from, to, bucketMs: HUGE_BUCKET });
+    } catch { r = { db: false, rows: [] }; }
+    await y();
+    return r;
   };
-  const [ops, net, disk, cpu] = [await q('ops'), await q('net'), await q('busy'), await q('cpu')]; // 차례로(동기 SQLite 사이 양보)
+  const [ops, net, disk, cpu] = [await q('ops'), await q('net'), await q('busy'), await q('cpu')]; // 차례로 — 질의 사이 시간 기준 양보
   if (!ops.db && !net.db) return { samples: 0, nodes: [], skew: skewOf([]), why: '이 포탈 노드에서 저장소 DB(SQLite)를 열 수 없습니다' };
+  if ([ops, net, disk, cpu].some((r) => r.truncated)) return { samples: 0, nodes: [], skew: skewOf([]), truncated: true, why: '창 안 표본이 읽기 상한을 넘어 일부만 읽혔습니다 — 평균이라고 내지 않습니다' };
   const A = { ops: aggregateNodeRows(ops.rows, ['ops']), net: aggregateNodeRows(net.rows, ['in', 'out']), busy: aggregateNodeRows(disk.rows, ['busy']), cpu: aggregateNodeRows(cpu.rows, ['cpu']) };
   const lnns = [...new Set([...A.ops.keys(), ...A.net.keys(), ...A.busy.keys(), ...A.cpu.keys()])].sort((a, b) => a - b);
   const nodes = lnns.map((lnn) => ({
@@ -73,7 +87,7 @@ export async function devicePerf(deviceId, { from, to }) {
   const useOps = nodes.some((n) => n.ops != null);
   const metric = useOps ? 'ops' : 'net';
   const skew = { ...skewOf(nodes.map((n) => ({ lnn: n.lnn, value: n[metric] }))), metric, metricLabel: useOps ? 'ops/s' : '처리량' };
-  return { samples, nodes, skew, ...(samples ? {} : { why: '창 안에 노드 표본이 없습니다(표본 수집이 꺼졌거나 아직 쌓이지 않았습니다)' }) };
+  return { samples, nodes, skew, ...(daily ? { granularity: 'day' } : {}), ...(samples ? {} : { why: '창 안에 노드 표본이 없습니다(표본 수집이 꺼졌거나 아직 쌓이지 않았습니다)' }) };
 }
 
 /**

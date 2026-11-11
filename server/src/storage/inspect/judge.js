@@ -42,9 +42,13 @@ const JUDGE = {
   events: (f, w) => {
     const e = f.events; if (!isObj(e)) return U(w.events);
     if (!e.severityKnown) return e.total > 0 ? { status: 'unknown', value: `미해결 ${e.total}건(심각도 미확인)`, why: '이 경로는 심각도를 주지 않아 critical 여부를 모릅니다' } : { status: 'ok', value: '미해결 0건' };
-    const c = e.critical || 0;
+    const c = numOrNull(e.critical);
+    if (c == null) return U(w.events || 'critical 개수를 읽지 못했습니다', `미해결 ${e.total}건`);
     const v = `critical ${c}${e.warning != null ? ` · warning ${e.warning}` : ''}${e.source === 'isi-status' ? '(isi status 의 Critical Events)' : ''}`;
-    return { status: c > 0 ? 'warn' : 'ok', value: v };
+    if (c > 0) return { status: 'warn', value: v };
+    // 반증 F11: 쪽 넘김이 남은 목록에서 critical 0 은 '못 본 쪽에 있을 수 있다' — 정상으로 단정하지 않는다.
+    if (e.partial) return { status: 'unknown', value: `${v}(일부만 읽음)`, why: '미해결 이벤트 목록이 길어 첫 쪽만 읽었습니다 — 나머지 쪽의 critical 을 확인하지 못했습니다' };
+    return { status: 'ok', value: v };
   },
   'node-state': (f, w) => {
     const n = f.nodeState; if (!isObj(n)) return U(w.nodeState);
@@ -111,6 +115,7 @@ const JUDGE = {
     const s = f.snapshots; const tot = numOrNull(f.capacity?.totalBytes);
     if (!isObj(s)) return U(w.snapshots);
     if (!(tot > 0)) return U('클러스터 전체 용량을 몰라 비율을 내지 못했습니다', `${s.count}개`);
+    if (numOrNull(s.usedBytes) == null) return U(w.snapshots || '스냅샷 크기를 읽지 못했습니다', `${s.count}개`);
     const pct = (s.usedBytes / tot) * 100;
     const lg = s.largestBytes != null ? ` · 가장 큰 스냅샷 ${pctText((s.largestBytes / tot) * 100)}` : '';
     if (pct > t.snapMaxPct) return { status: 'warn', value: `${pctText(pct)}${s.partial ? ' 이상(일부만 셈)' : ''}${lg} · ${s.count}개` };
@@ -147,6 +152,9 @@ const JUDGE = {
     const s = f.synciq; if (!isObj(s)) return U(w.synciq);
     if (!s.policies) return { status: 'na', value: '정책 없음' };
     if (s.failed) return { status: 'warn', value: `지난 7일 보고서 ${s.reports}건 중 실패 ${s.failed}${s.failedPolicies?.length ? ` — ${s.failedPolicies.slice(0, 2).join(' · ')}` : ''}` };
+    // 반증 F3: 정책이 있는데 7일 보고서가 0건이면 '실패 0' 이 아니라 '돌았는지 모름' 이다.
+    if (!s.reports) return { status: 'unknown', value: `정책 ${s.policies} · 지난 7일 보고서 0건`, why: '정책은 있는데 지난 7일 보고서가 없습니다 — 정책 예약 주기(7일보다 긴 주기 · 수동)를 확인합니다' };
+    if (s.partial) return { status: 'unknown', value: `지난 7일 보고서 ${s.reports}건 · 실패 0(일부만 읽음)`, why: '보고서 목록이 길어 첫 쪽만 읽었습니다 — 나머지 쪽의 실패를 확인하지 못했습니다' };
     return { status: 'ok', value: `지난 7일 보고서 ${s.reports}건 · 실패 0` };
   },
 };
@@ -157,7 +165,7 @@ const JUDGE = {
  * @param {object|null} perf  perf.devicePerf 결과(7일 노드 통계)
  * @returns {Array<{id,no,group,label,status,value,basis,how,refs,why?,syntaxUnverified?}>}
  */
-export function judgeDevice(run, perf = null, thresholds = null) {
+export function judgeDevice(run, perf = null, thresholds = null, { staleDays = 0 } = {}) {
   const t = thresholdsOf(thresholds);
   const facts = isObj(run?.facts) ? run.facts : {};
   const why = isObj(run?.why) ? run.why : {};
@@ -166,6 +174,8 @@ export function judgeDevice(run, perf = null, thresholds = null) {
     let r;
     try { r = JUDGE[it.id](facts, why, t, perf); } catch (e) { r = U(`판정 중 오류: ${String(e?.message || e).slice(0, 80)}`); }
     if (noRun && it.source !== 'portal') r = U('이 장비는 아직 점검을 실행하지 않았습니다');
+    // 반증 F4: 오래된 실행(주간 + 하루를 넘김)은 이번 판정에 쓰지 않는다 — 값은 참고로 두고 확인 불가 + 사유(인증 정지 · 엣지 미응답 · 수집 중 건너뜀이 옛 '정상' 으로 매주 나가지 않게).
+    else if (staleDays > 0 && it.source !== 'portal') r = { status: 'unknown', value: r.value ?? '—', why: `마지막 점검이 ${staleDays}일 전입니다 — 8일 넘은 결과는 이번 판정에 쓰지 않습니다(값은 참고)` };
     const basis = it.id === 'node-skew' ? `가장 바쁜 노드 < 노드 평균 × ${t.skewFactor}(포탈 기준 — Dell 수치 아님)`
       : it.id === 'capacity' ? `${t.capBadPct}% 미만 유지 · ${t.capWarnPct}% 부터 증설 발주` : it.basis;
     return { id: it.id, no: it.no, group: it.group, label: it.label, status: r.status, value: r.value ?? '—', basis, how: it.how, refs: it.refs,

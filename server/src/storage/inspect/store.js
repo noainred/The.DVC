@@ -86,7 +86,8 @@ export function recordRun(deviceId, raw, { maxTs } = {}) {
   if (!id || !run) return { saved: false, dropped: true };
   const m = load();
   const arr = m.get(id) || [];
-  if (arr.some((r) => r.at === run.at)) return { saved: false, duplicate: true };
+  // 반증 F7: 시계가 빠른 엣지의 at 은 수신 시각으로 잘려 재전송마다 달라진다 — 엣지 원본 시각(edgeAt)이 있으면 그것으로 같은 실행을 알아본다.
+  if (arr.some((r) => r.at === run.at || (run.edgeAt != null && r.edgeAt === run.edgeAt))) return { saved: false, duplicate: true };
   arr.unshift(run);
   arr.sort((a, b) => b.at - a.at);
   m.set(id, arr.slice(0, RUNS_MAX));
