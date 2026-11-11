@@ -183,6 +183,18 @@ export function windowCaption({ past, from, to, win }) {
     : `최근 구간 · ${span} · ${win}분 · 슬라이더는 최근 24시간(날짜를 고르면 그 날 하루) · 기록은 DB 에 보관합니다`;
 }
 
+/**
+ * 표의 값 단추(v2.979 — 사용자 요청 '네트워크 · 디스크 시간별로 보기' 의 선택 ‘구간 평균 단추를 카드에’).
+ * ‘구간 평균’ 은 시간 띠에서 고른 구간(1 · 5 · 10 · 30분) 전체의 평균 — 단추 글에 그 길이를 적어 무엇의 평균인지 보이게 한다.
+ */
+export const AT_KEYS = Object.freeze(['end', 'avg']);
+export function atOptions(win) { return [['end', '구간 끝 순간'], ['avg', `${win}분 평균`]]; }
+/** 카드 제목 옆에 붙이는 지금 보는 값(구간이 과거면 ‘고른 구간’). */
+export function atCaption(at, { win, past }) {
+  if (at === 'avg') return `${past ? '고른' : '최근'} ${win}분 평균`;
+  return past ? '고른 구간 끝 순간' : '지금(가장 최근 표본)';
+}
+
 /** 수집 상태 알약 글. */
 export function sessionPill(s, now) {
   if (!s) return { live: false, text: '수집 안 함', sub: '대상 · 키 탭에서 서버를 고르고 시작하세요' };

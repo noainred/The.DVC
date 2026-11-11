@@ -19,6 +19,7 @@ import {
   DASH, STATE_TEXT, TEST_TEXT, MODE_TEXT, ENDED_TEXT, TABS, IOSTAT_LABEL, SUMMARY_COLS, METRICS,
   pctText, msText, numText, bpsText, bytesText, sizeText, metricValueText, metricUnitText, iostatText, remainText, clockText, agoShort, etText,
   levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR, bulkLine, needsRetry, AUTH_HINT, nameTitle,
+  AT_KEYS, atOptions, atCaption,
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
@@ -500,7 +501,10 @@ function IostatCompare({ main, ids, tb, onOpen }) {
 
 /* ── 서버 상세 ────────────────────────────────────────────────────────────── */
 function ServerDetail({ main, id, tb, now, onBack }) {
-  const [at, setAt] = useState('end');
+  // v2.979: 표의 값(구간 끝 순간 | 구간 평균)은 화면 맨 위 · 네트워크 카드 · 디스크 카드 세 곳의 단추가 같은 상태를 쓴다(하나를 바꾸면 셋이 같이 바뀐다) · 브라우저가 기억한다.
+  const [at, setAtRaw] = useState(() => { const v = lsGet('fm.srv.at', 'end'); return AT_KEYS.includes(v) ? v : 'end'; });
+  const setAt = (v) => { setAtRaw(v); lsSet('fm.srv.at', v); };
+  const atText = atCaption(at, { win: tb.win, past: tb.end != null });
   const [cols, setCols] = useState(() => lsGet('fm.dsk.cols', 'summary'));
   const [tree, setTree] = useState('tree');
   const [dev, setDev] = useState('');
@@ -551,7 +555,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
           <div className="fm-mono fm-dim fm-brk">{t.host} · {t.agent ? `엣지 ${t.agent}` : '중앙'}{hello ? ` · ${hello.release || hello.kernel}${hello.ncpu ? ` · ${hello.ncpu}코어` : ''}` : ''}{hello && hello.rhelMajor && !hello.rhelMajor.startsWith('7.') ? ' · RHEL 7 이 아님(검증 안 된 OS)' : ''}{mem?.total ? ` · ${bytesText(mem.total)}` : ''}</div>
         </div>
         <div className="fm-row">
-          <Seg label="표의 값" value={at} onChange={setAt} options={[['end', '구간 끝 순간'], ['avg', '구간 평균']]} />
+          <Seg label="표의 값" value={at} onChange={setAt} options={atOptions(tb.win)} />
           <button type="button" className="fm-btn" onClick={onBack}>개요로</button>
         </div>
       </div>
@@ -604,8 +608,9 @@ function ServerDetail({ main, id, tb, now, onBack }) {
             </div>
           </div>
           <div className="fm-card fm-flush">
-            <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">네트워크 — 본딩 {nets.filter((x) => x.k === 'bond').length}개 · 물리 인터페이스 {nets.filter((x) => x.k === 'phys').length}개</h3>
+            <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">네트워크 — 본딩 {nets.filter((x) => x.k === 'bond').length}개 · 물리 인터페이스 {nets.filter((x) => x.k === 'phys').length}개 <span className="fm-dim fm-at">· {atText}</span></h3>
               <div className="fm-row"><span className="fm-lg"><i style={{ background: RX_COLOR }} />수신</span><span className="fm-lg"><i style={{ background: TX_COLOR }} />송신</span>
+                <Seg label="네트워크 표의 값" value={at} onChange={setAt} options={atOptions(tb.win)} />
                 <Seg label="인터페이스 범위" value={netAll ? 'all' : 'bp'} onChange={(v) => setNetAll(v === 'all')} options={[['bp', '본딩 · 물리'], ['all', '전체(VLAN · 가상 포함)']]} /></div></div>
             <STable className="fm-table" minWidth={1040}>
               <thead><tr><th>인터페이스</th><th>구성</th><th className="fm-r">속도</th><th>사용률</th><th className="fm-r">수신</th><th className="fm-r">송신</th><th className="fm-r">오류 · 드롭</th><th data-nosort>최근 추이</th></tr></thead>
@@ -622,11 +627,12 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                 </tr>
               ))}</tbody>
             </STable>
-            <div className="fm-note fm-pad">사용률 = 수신 · 송신 중 큰 쪽 ÷ 링크 속도. 본딩 속도는 802.3ad · balance 계열은 올라온 구성원 합, active-backup 은 쓰는 구성원 하나입니다. 링크 속도를 못 읽은 인터페이스는 사용률을 ‘—’ 로 두고 수신 · 송신량만 보여 줍니다.</div>
+            <div className="fm-note fm-pad">사용률 = 수신 · 송신 중 큰 쪽 ÷ 링크 속도. 본딩 속도는 802.3ad · balance 계열은 올라온 구성원 합, active-backup 은 쓰는 구성원 하나입니다. 링크 속도를 못 읽은 인터페이스는 사용률을 ‘—’ 로 두고 수신 · 송신량만 보여 줍니다. ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간(1 · 5 · 10 · 30분) 전체의 평균입니다 — 수신 · 송신 · 사용률은 평균, 오류 · 드롭은 그 구간의 합입니다.</div>
           </div>
           <div className="fm-card fm-flush">
-            <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">디스크 — 물리 {dsks.filter((x) => x.k === 'disk').length}개 · 파티션 {dsks.filter((x) => x.k === 'part').length}개 · LVM 볼륨 {dsks.filter((x) => x.k === 'lvm').length}개</h3>
+            <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">디스크 — 물리 {dsks.filter((x) => x.k === 'disk').length}개 · 파티션 {dsks.filter((x) => x.k === 'part').length}개 · LVM 볼륨 {dsks.filter((x) => x.k === 'lvm').length}개 <span className="fm-dim fm-at">· {atText}</span></h3>
               <div className="fm-row"><span className="fm-dim">장치 이름을 누르면 아래 차트가 그 장치로 바뀝니다</span>
+                <Seg label="디스크 표의 값" value={at} onChange={setAt} options={atOptions(tb.win)} />
                 <Seg label="디스크 범위" value={tree} onChange={setTree} options={[['tree', '트리'], ['phys', '물리 디스크만'], ['parts', '파티션 · 볼륨만']]} />
                 <Seg label="표의 열" value={cols} onChange={(v) => { setCols(v); lsSet('fm.dsk.cols', v); }} options={[['summary', '요약 열'], ['iostat', 'iostat 전체 열']]} /></div></div>
             <STable className="fm-table fm-io" minWidth={cols === 'iostat' ? 1100 : 1000}>
@@ -660,7 +666,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                     <HoverTip f={hL} vbw={640} plot={devPlot} time={hoverTime(hL, [devC.rAwait, devC.wAwait], d.from, d.to)} rows={[{ key: 'r', label: '읽기 지연', color: RX_COLOR, value: msText(valueAtFrac(devC.rAwait, hL)) }, { key: 'w', label: '쓰기 지연', color: TX_COLOR, value: msText(valueAtFrac(devC.wAwait, hL)) }]} /></div></div>
               </div>
             ) : null}
-            <div className="fm-note fm-pad">열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 요약 열은 13개 가운데 8개이고 ‘iostat 전체 열’ 을 누르면 병합 · 요청 크기 · 합친 지연 · 서비스 시간이 나옵니다. ‘전체 디스크’ 는 물리 디스크만 더합니다(파티션 · LVM 은 같은 입출력을 다시 보는 것).</div>
+            <div className="fm-note fm-pad">열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 요약 열은 13개 가운데 8개이고 ‘iostat 전체 열’ 을 누르면 병합 · 요청 크기 · 합친 지연 · 서비스 시간이 나옵니다. ‘전체 디스크’ 는 물리 디스크만 더합니다(파티션 · LVM 은 같은 입출력을 다시 보는 것). ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간(1 · 5 · 10 · 30분) 전체를 다시 계산한 값입니다 — 횟수 · 처리량은 평균, 지연은 요청 수로 가중합니다(끝난 요청이 없으면 ‘—’).</div>
           </div>
           <div className="fm-card fm-flush">
             <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">CPU 를 많이 쓰는 프로세스 — 상위 5</h3><a href={`#/${BASE.join('/')}/procs`}>상위 30개 전부 보기</a></div>

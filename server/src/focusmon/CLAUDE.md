@@ -57,3 +57,7 @@
   일괄 시험 중앙 몫은 문턱을 **시작할 때** 잡고(`peek` → `gate`) 10분 시한(`BULK_CENTRAL_MAX_MS`) 뒤로는 시작하지 않는다 · 늦게 온 미리보기 응답은 버린다.
   ⚠ 포탈은 `~/.ssh` 키를 읽지 않는다(서비스 ProtectHome) — ssh-copy-id 로 넣은 셸 계정 키로는 접속되지 않는다. 화면 `AUTH_HINT` · `KEY_FILE_NOTE` 가 말한다.
   ⚠ 실제 중계 엣지에서 `idleMs` 10초의 시작 지연 단축은 측정하지 못했다(이 환경에 엣지가 없다 — 워커 · 중앙 실호출 테스트로만 확인).
+- **표의 값 단추(v2.979 — 사용자 '네트워크 · 디스크 시간별로 보기' → 선택 '구간 평균 단추만 카드에')**: 서버 상세의 화면 맨 위 · 네트워크 카드 · 디스크 카드 세 단추가
+  **상태 하나**(`at` · `localStorage fm.srv.at`)를 쓴다 — 요청이 하나(`view=server&at=`)라 카드마다 따로 두면 표가 섞인다. 평균 계산은 서버 그대로(`query.averageSample` ·
+  `rates.timeAverageIostat` — 횟수 · 처리량 · 사용률 평균 · 지연은 요청 수 가중 · 네트워크 오류 · 드롭은 구간 합). 회귀 `web/src/views/tools/focusMonAt.test.js`.
+  1시간 단위 표(시안 ⑧ · ⑨ · `docs/design/focus-mon/README.md` §15)는 만들지 않았다.
