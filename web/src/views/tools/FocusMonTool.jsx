@@ -384,7 +384,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
         </div>
       </div>
       <div className="fm-card">
-        <div className="fm-row fm-between"><h3 className="fm-h3">{rows.length}대 × 시간</h3><span className="fm-dim">어두움 낮음 → 밝음 높음(로그 비율) · 검은 칸 = 값 없음</span></div>
+        <div className="fm-row fm-between"><h3 className="fm-h3">{rows.length}대 × 시간</h3><span className="fm-dim">어두움 낮음 → 밝음 높음(로그 비율) · 검은 칸 = 값 없음 · 칸 폭은 모든 서버가 같습니다(고른 서버 가운데 표본이 가장 성긴 서버에 맞춤)</span></div>
         <div className="fm-heat">
           {ranked.map((r) => (
             <div key={r.id} className="fm-hm">

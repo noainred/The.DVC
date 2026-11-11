@@ -90,3 +90,28 @@ test('④ procs(at:avg) — 프로세스 CPU 도 시간 가중(10초 → 2초로
   const r = await Q.procs([id], { from: FROM, to: END, win: 30, past: true }, { at: 'avg' });
   near(r.per[0].top[0].cpu, (25 * 10 + 5 * 90) / 30, 0.8, '프로세스 CPU 시간 평균(스냅샷 평균이면 50)');
 });
+
+test('⑤ 비교 화면 — 서버마다 수집 주기가 달라도 칸 수는 하나(가장 성긴 서버에 맞춤) · CSV 시각 열(points)과 값 길이가 같다', async () => {
+  // 사용자 질문(2026-11-12) '같은 길이에 칸이 더 촘촘한 건 왜' — 2초 서버만 150칸, 10초 서버는 40칸이었다.
+  const fast = 'fm-a2979ddddd'; const slow = 'fm-a2979eeeee';
+  const to = END; const from = END - 10 * 60_000;
+  for (let t = from + 1; t <= to; t += 2_000) store.ingestSample(fast, t, mk(50, 500, 3, 100, 50, 0), null, t);
+  for (let t = from + 1; t <= to; t += 10_000) store.ingestSample(slow, t, mk(20, 200, 3, 100, 20, 0), null, t);
+  const w = { from, to, win: 10, past: true };
+  const alone = await Q.compare([fast], w, { metric: 'cpu', item: 'pct' });
+  assert.ok(alone.points > 100, `혼자면 촘촘하게(${alone.points}칸)`);
+  const both = await Q.compare([fast, slow], w, { metric: 'cpu', item: 'pct' });
+  const [a, b] = both.targets;
+  assert.equal(a.avg.length, b.avg.length, '두 줄의 칸 수가 같다');
+  assert.equal(both.points, a.avg.length, 'points = 값 배열 길이(CSV 시각 열이 맞는다)');
+  assert.equal(both.points, Math.floor(10 * 60_000 / (10_000 * 1.5)), '가장 성긴 서버(10초) 기준 40칸');
+  assert.equal(a.avg.filter((v) => v == null).length, 0, '촘촘한 서버는 넓은 칸 안에서 평균으로 묶인다(빈 칸 없음)');
+  assert.equal(b.avg.filter((v) => v == null).length, 0);
+  // iostat 비교의 고정 장치 선도 같은 칸
+  const io = await Q.iostatCompare([fast, slow], w, { col: 'wAwait', pins: [`${fast}/sda`, `${slow}/sda`] });
+  assert.equal(io.series.length, 2);
+  assert.equal(io.series[0].avg.length, io.series[1].avg.length);
+  assert.equal(io.points, io.series[0].avg.length);
+  // 표본이 하나뿐인 서버는 칸 수를 정하지 않는다(간격을 모름)
+  assert.equal(Q.commonPoints([[], [[null, null, 1]]], 0, 600_000, 150), 150);
+});

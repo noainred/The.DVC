@@ -104,9 +104,8 @@ export function sampleSpacing(pos) {
  * 빈 칸이 생겨 '수집하지 않은 시간' 처럼 선이 끊겼다(2026-11-11 화면 검증 — 1분 구간 150칸은 2초 주기에서 칸 대부분이 비었다).
  * 칸 수가 바뀌어도 [from, to] 전체를 고르게 덮으므로 화면은 배열 길이로 x 를 나눈다.
  */
-export function bucketize(pos, key, from, to, points) {
-  const sp = sampleSpacing(pos);
-  const n = Math.max(1, sp ? Math.min(points, Math.max(2, Math.floor((to - from) / (sp * 1.5)))) : points);
+export function bucketize(pos, key, from, to, points, { fixed = false } = {}) {
+  const n = fixed ? Math.max(1, points) : pointsFor(pos, from, to, points);
   const step = (to - from) / n;
   const sum = new Float64Array(n); const cnt = new Uint16Array(n); const mx = new Array(n).fill(null);
   for (const [b, i, t] of pos) {
@@ -118,6 +117,23 @@ export function bucketize(pos, key, from, to, points) {
   }
   const avg = new Array(n); for (let k = 0; k < n; k++) avg[k] = cnt[k] ? r2(sum[k] / cnt[k]) : null;
   return { avg, max: mx.map(r2) };
+}
+
+/** 한 서버의 칸 수 — 칸 폭이 표본 간격의 1.5배 이상이 되게(bucketize 규칙). 간격을 모르면 points. */
+export function pointsFor(pos, from, to, points) {
+  const sp = sampleSpacing(pos);
+  return Math.max(1, sp ? Math.min(points, Math.max(2, Math.floor((to - from) / (sp * 1.5)))) : points);
+}
+
+/**
+ * 여러 서버(장치)를 한 화면에서 비교할 때 쓰는 **공통 칸 수** — 가장 성긴 표본 간격에 맞춘다(v2.979 사용자 질문 '같은 길이에 칸이 더 촘촘한 건 왜' —
+ * 서버마다 칸 수를 따로 정해 2초로 수집한 서버만 150칸, 10초 서버는 40칸이라 서버 × 시간 칸이 위아래로 맞지 않았다).
+ * 촘촘한 서버는 넓은 칸 안에서 평균으로 묶인다. 표본이 없는 서버는 칸 수에 끼지 않는다.
+ */
+export function commonPoints(posList, from, to, points) {
+  let n = points;
+  for (const pos of posList) if (pos && pos.length >= 2) n = Math.min(n, pointsFor(pos, from, to, points));
+  return n;
 }
 
 /** 열에서 표본 하나를 되살린다(메타 + 열). 표 · 요약이 이 모양을 쓴다. */
@@ -231,21 +247,27 @@ export function seriesKeyFor(metric, item, scope, meta) {
 /** 지표 비교 — 서버마다 한 줄(칸 평균 · 최고) + 끝 값 · 순위. */
 export async function compare(ids, w, { metric = 'cpu', item = 'pct', scope = 'all' } = {}) {
   const y = createYielder(15);
-  const out = []; let partial = false;
+  const rows = []; let partial = false;
   for (const id of ids) {
     const { blocks, partial: p } = await blocksFor(id, w.from, w.to);
     partial = partial || p;
     const meta = blocks.length ? blocks[blocks.length - 1].meta : null;
     const key = seriesKeyFor(metric, item, scope, meta);
-    const pos = positions(blocks, w.from, w.to);
-    if (!key) { out.push({ id, key: null, avg: [], max: [], last: null, missing: 'no-series' }); await y(); continue; }
-    const { avg, max } = bucketize(pos, key, w.from, w.to, MAX_POINTS);
+    rows.push({ id, key, blocks, pos: key ? positions(blocks, w.from, w.to) : [] });
+    await y();
+  }
+  // 모든 서버가 같은 칸(시각)을 쓴다 — 서버 × 시간 칸이 위아래로 맞고, CSV 의 시각 열(points)과 값 배열 길이가 같다.
+  const points = commonPoints(rows.filter((r) => r.key).map((r) => r.pos), w.from, w.to, MAX_POINTS);
+  const out = [];
+  for (const { id, key, blocks, pos } of rows) {
+    if (!key) { out.push({ id, key: null, avg: [], max: [], last: null, missing: 'no-series' }); continue; }
+    const { avg, max } = bucketize(pos, key, w.from, w.to, points, { fixed: true });
     let last = null; let lastAt = null;
     for (let k = pos.length - 1; k >= 0; k--) { const v = val(pos[k][0], key, pos[k][1]); if (v != null) { last = r2(v); lastAt = pos[k][2]; break; } }
     out.push({ id, key, avg, max, last, lastAt, n: pos.length, ...(pos.length && !blocks.some((b) => b.cols.has(key)) ? { missing: 'no-series' } : {}) });
     await y();
   }
-  return { targets: out, partial, points: MAX_POINTS };
+  return { targets: out, partial, points };
 }
 
 /** 서버 상세 — 차트 · 표(끝 순간 또는 구간 평균) · 고른 장치의 처리량 · 지연. */
@@ -290,13 +312,18 @@ export async function iostatCompare(ids, w, { at = 'end', scope = 'phys', col = 
   }
   const c = IOSTAT_COLS.includes(col) ? col : 'wAwait';
   const series = [];
+  const picked = [];
   for (const pin of (Array.isArray(pins) ? pins : []).slice(0, 4)) {
     const m = /^([a-z0-9-]{1,40})\/([A-Za-z0-9_.!:+-]{1,64})$/.exec(String(pin));
-    if (!m || !posBy.has(m[1])) continue;
-    const { avg, max } = bucketize(posBy.get(m[1]), `d.${m[2]}.${c}`, w.from, w.to, MAX_POINTS);
+    if (m && posBy.has(m[1])) picked.push(m);
+  }
+  // 고정한 장치 선(최대 4)도 같은 칸 — 서버마다 수집 주기가 달라도 같은 시각끼리 비교한다(v2.979).
+  const points = commonPoints(picked.map((m) => posBy.get(m[1])), w.from, w.to, MAX_POINTS);
+  for (const m of picked) {
+    const { avg, max } = bucketize(posBy.get(m[1]), `d.${m[2]}.${c}`, w.from, w.to, points, { fixed: true });
     series.push({ pin: `${m[1]}/${m[2]}`, avg, max });
   }
-  return { rows, col: c, series, partial, points: MAX_POINTS };
+  return { rows, col: c, series, partial, points };
 }
 
 /* ── 프로세스 ─────────────────────────────────────────────────────────────── */
