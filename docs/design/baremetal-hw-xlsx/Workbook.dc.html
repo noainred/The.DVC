@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>베어메탈 하드웨어 정보 엑셀 — 시트 구성</title>
+<title>베어메탈 하드웨어 정보 엑셀 — 시트 5장 한눈에</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -12,182 +12,192 @@
 <style>
 body{margin:0;background:#0a0e17}
 a{color:#1d4ed8}a:hover{color:#1e3a8a}
-button{font-family:inherit}
+.g{display:grid}
+.h{padding:0 10px;height:38px;line-height:38px;font-size:14px;font-weight:600;color:#ffffff;background:#1e3a5f;border-right:1px solid #2c4a70;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;min-width:0}
+.c{padding:0 10px;height:34px;line-height:34px;font-size:14px;color:#0f172a;border-right:1px solid #d4d8de;border-bottom:1px solid #d4d8de;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;min-width:0}
+.n{text-align:right;font-family:'JetBrains Mono',monospace}
+.m{font-family:'JetBrains Mono',monospace}
+.b{font-weight:600}
+.f{color:#5b6779;font-style:italic}
 </style>
 </helmet>
-<div style="width: 1480px; height: 900px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: Inter, 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; font-size: 13px; padding: 28px 32px; display: flex; flex-direction: column; gap: 12px;">
+<div style="width: 2756px; height: 1700px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: Inter, 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; font-size: 14px; padding: 36px 40px; display: flex; flex-direction: column; gap: 20px;">
 
-  <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;">
-    <span style="font-size: 12px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace;">baremetal-hardware_all_20261111-1030.xlsx</span>
-    <span style="font-size: 12px; color: #8b9bb4;">— 아래 시트 탭을 누르면 그 시트의 모양이 보입니다. 값은 모두 가상입니다.</span>
+  <div style="display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;">
+    <span style="font-size: 22px; font-weight: 700;">엑셀 파일의 시트 5장</span>
+    <span style="font-size: 15px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace;">baremetal-hardware_all_20261111-1030.xlsx</span>
+    <span style="font-size: 15px; color: #8b9bb4;">— 시트를 모두 펼쳐 놓았습니다(누를 것 없음). 값은 모두 가상입니다.</span>
   </div>
 
-  <div style="flex: 1; min-height: 0; background: #ffffff; color: #0f172a; border: 1px solid #243049; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;">
-
-    <div style="padding: 14px 18px 12px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #d4d8de;">
-      <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;">
-        <span style="font-size: 16px; font-weight: 700; color: #0f172a;">{{sheetTitle}}</span>
-        <span style="font-size: 12px; color: #475569;">{{basis}}</span>
+  <!-- 시트 1 · 서버 요약 -->
+  <div style="background: #ffffff; color: #0f172a; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;">
+    <div style="padding: 16px 20px 14px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+        <span style="background: #166534; color: #ffffff; font-size: 14px; font-weight: 700; padding: 4px 12px; border-radius: 6px;">시트 1 · 서버 요약</span>
+        <span style="font-size: 18px; font-weight: 700;">서버 한 대 = 한 줄</span>
+        <span style="font-size: 14px; color: #475569;">모든 법인 · 베어메탈 10대 · 기준 2026-11-11 10:30 KST</span>
       </div>
-      <sc-if value="{{showKpi}}" hint-placeholder-val="{{true}}">
-      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
         <sc-for list="{{kpis}}" as="k" hint-placeholder-count="5">
-          <div style="min-width: 150px; padding: 8px 12px; border: 1px solid #d4d8de; border-radius: 4px; background: #f6f8fb; display: flex; flex-direction: column; gap: 2px;">
-            <span style="font-size: 11px; color: #475569;">{{k.label}}</span>
-            <span style="font-size: 16px; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace;">{{k.value}}</span>
+          <div style="min-width: 220px; padding: 10px 14px; border: 1px solid #d4d8de; border-radius: 4px; background: #f6f8fb; display: flex; flex-direction: column; gap: 2px;">
+            <span style="font-size: 13px; color: #475569;">{{k.label}}</span>
+            <span style="font-size: 20px; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{{k.value}}</span>
           </div>
         </sc-for>
       </div>
-      </sc-if>
     </div>
+    <div class="g" style="grid-template-columns: 210px 130px 190px 80px 180px 100px 300px 56px 90px 100px 80px 84px 130px 200px 180px 96px 116px 80px 150px minmax(0, 1fr); border-left: 1px solid #d4d8de;">
+      <div class="h">법인(vCenter)</div><div class="h">서버</div><div class="h">Hostname(OS)</div><div class="h">제조사</div><div class="h">모델</div><div class="h">서비스태그</div><div class="h">CPU 모델</div><div class="h n">소켓</div><div class="h n">코어(합계)</div><div class="h n">메모리 GB</div><div class="h n">DIMM 수</div><div class="h n">디스크 수</div><div class="h n">디스크 합계 GB</div><div class="h">디스크 구성</div><div class="h">GPU</div><div class="h">BIOS</div><div class="h">BMC 펌웨어</div><div class="h">수집원</div><div class="h">인벤토리 시각</div><div class="h">비고</div>
+    </div>
+    <sc-for list="{{sumRows}}" as="r" hint-placeholder-count="10">
+      <div class="g" style="{{r.row}}">
+        <div class="{{r.corpCls}}">{{r.corp}}</div><div class="c b">{{r.name}}</div><div class="c">{{r.host}}</div><div class="c">{{r.mf}}</div><div class="c">{{r.model}}</div><div class="c m">{{r.tag}}</div><div class="c">{{r.cpu}}</div><div class="c n">{{r.sock}}</div><div class="c n">{{r.cores}}</div><div class="c n">{{r.mem}}</div><div class="c n">{{r.dimms}}</div><div class="c n">{{r.dn}}</div><div class="c n">{{r.dgb}}</div><div class="c">{{r.mix}}</div><div class="c">{{r.gpu}}</div><div class="c m">{{r.bios}}</div><div class="c m">{{r.fw}}</div><div class="c">{{r.src}}</div><div class="c m">{{r.at}}</div><div class="c f">{{r.note}}</div>
+      </div>
+    </sc-for>
+  </div>
 
-    <div style="flex: 1; min-height: 0; overflow: auto;">
-      <sc-if value="{{isTable}}" hint-placeholder-val="{{true}}">
-      <div style="{{tableStyle}}">
-        <div style="{{headStyle}}">
-          <sc-for list="{{head}}" as="h" hint-placeholder-count="12">
-            <div style="{{h.style}}">{{h.text}}</div>
-          </sc-for>
+  <!-- 시트 2 · CPU  +  시트 5 · 안내 -->
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px;">
+    <div style="background: #ffffff; color: #0f172a; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;">
+      <div style="padding: 14px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+        <span style="background: #166534; color: #ffffff; font-size: 14px; font-weight: 700; padding: 4px 12px; border-radius: 6px;">시트 2 · CPU</span>
+        <span style="font-size: 18px; font-weight: 700;">소켓 한 개 = 한 줄</span>
+        <span style="font-size: 14px; color: #475569;">전체 15행 가운데 앞 8행</span>
+      </div>
+      <div class="g" style="grid-template-columns: 210px 130px 190px 100px 130px minmax(0, 1fr) 70px; border-left: 1px solid #d4d8de;">
+        <div class="h">법인(vCenter)</div><div class="h">서버</div><div class="h">Hostname(OS)</div><div class="h">서비스태그</div><div class="h">소켓</div><div class="h">모델</div><div class="h n">코어</div>
+      </div>
+      <sc-for list="{{cpuRows}}" as="r" hint-placeholder-count="8">
+        <div class="g" style="{{r.row}}">
+          <div class="c">{{r.corp}}</div><div class="c b">{{r.name}}</div><div class="c">{{r.host}}</div><div class="c m">{{r.tag}}</div><div class="c m">{{r.a}}</div><div class="c">{{r.b}}</div><div class="c n">{{r.c}}</div>
         </div>
-        <sc-for list="{{rows}}" as="r" hint-placeholder-count="10">
-          <div style="{{r.style}}">
-            <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="12">
-              <div style="{{c.style}}">{{c.text}}</div>
-            </sc-for>
-          </div>
-        </sc-for>
-        <sc-if value="{{cutNote}}" hint-placeholder-val="{{false}}">
-        <div style="padding: 8px 10px; font-size: 12px; color: #475569; font-style: italic;">{{cutNote}}</div>
-        </sc-if>
-      </div>
-      </sc-if>
-      <sc-if value="{{isInfo}}" hint-placeholder-val="{{false}}">
-      <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 0; max-width: 1100px;">
-        <sc-for list="{{info}}" as="i" hint-placeholder-count="10">
-          <div style="display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 0; border-bottom: 1px solid #d4d8de; font-size: 12px; line-height: 1.6;">
-            <div style="padding: 7px 10px; background: #f6f8fb; font-weight: 600; color: #0f172a;">{{i.k}}</div>
-            <div style="padding: 7px 10px; color: #0f172a;">{{i.v}}</div>
-          </div>
-        </sc-for>
-      </div>
-      </sc-if>
+      </sc-for>
+      <div style="padding: 10px 20px; font-size: 14px; color: #475569;">… 이하 7행 생략</div>
     </div>
 
-    <div style="display: flex; align-items: stretch; gap: 0; background: #eef1f5; border-top: 1px solid #d4d8de; padding: 0 10px; flex-wrap: wrap;">
-      <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
-        <button type="button" onClick="{{t.pick}}" aria-pressed="{{t.on}}" style="{{t.style}}">{{t.label}}<span style="{{t.cntStyle}}">{{t.count}}</span></button>
+    <div style="background: #ffffff; color: #0f172a; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;">
+      <div style="padding: 14px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+        <span style="background: #166534; color: #ffffff; font-size: 14px; font-weight: 700; padding: 4px 12px; border-radius: 6px;">시트 5 · 안내</span>
+        <span style="font-size: 18px; font-weight: 700;">열의 뜻 · 출처 · 빈 칸의 뜻</span>
+      </div>
+      <sc-for list="{{info}}" as="i" hint-placeholder-count="8">
+        <div style="display: grid; grid-template-columns: 170px minmax(0, 1fr); border-top: 1px solid #d4d8de; font-size: 14px; line-height: 1.55;">
+          <div style="padding: 8px 12px 8px 20px; background: #f6f8fb; font-weight: 600;">{{i.k}}</div>
+          <div style="padding: 8px 20px 8px 12px;">{{i.v}}</div>
+        </div>
       </sc-for>
     </div>
   </div>
 
-  <div style="font-size: 12px; color: #8b9bb4; line-height: 1.7; display: flex; flex-direction: column; gap: 2px;">
-    <div><b style="color: #e6edf6;">서버 요약</b> 은 서버 한 대가 한 줄입니다 — 화면 표의 대수와 같고(10대), 인벤토리가 없는 2대는 하드웨어 칸을 비우고 비고에 사유를 적습니다. 숫자 칸을 비워 두므로 합계가 틀어지지 않습니다.</div>
-    <div><b style="color: #e6edf6;">CPU · 메모리(DIMM) · 디스크</b> 는 부품 한 개가 한 줄입니다 — 법인 · 서버 · Hostname · 서비스태그 열을 줄마다 채워 필터 · 피벗에 바로 쓸 수 있습니다. NIC · GPU 시트는 창에서 켜면 같은 모양으로 붙습니다.</div>
+  <!-- 시트 3 · 메모리  +  시트 4 · 디스크 -->
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px;">
+    <div style="background: #ffffff; color: #0f172a; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;">
+      <div style="padding: 14px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+        <span style="background: #166534; color: #ffffff; font-size: 14px; font-weight: 700; padding: 4px 12px; border-radius: 6px;">시트 3 · 메모리(DIMM)</span>
+        <span style="font-size: 18px; font-weight: 700;">DIMM 한 개 = 한 줄</span>
+        <span style="font-size: 14px; color: #475569;">전체 96행 가운데 앞 8행</span>
+      </div>
+      <div class="g" style="grid-template-columns: 210px 120px 180px 96px 150px 84px 70px 96px 96px minmax(0, 1fr); border-left: 1px solid #d4d8de;">
+        <div class="h">법인(vCenter)</div><div class="h">서버</div><div class="h">Hostname(OS)</div><div class="h">서비스태그</div><div class="h">슬롯</div><div class="h n">크기 GB</div><div class="h">종류</div><div class="h n">속도 MHz</div><div class="h">제조사</div><div class="h">부품번호</div>
+      </div>
+      <sc-for list="{{dimmRows}}" as="r" hint-placeholder-count="8">
+        <div class="g" style="{{r.row}}">
+          <div class="c">{{r.corp}}</div><div class="c b">{{r.name}}</div><div class="c">{{r.host}}</div><div class="c m">{{r.tag}}</div><div class="c m">{{r.a}}</div><div class="c n">{{r.b}}</div><div class="c">{{r.c}}</div><div class="c n">{{r.d}}</div><div class="c">{{r.e}}</div><div class="c m">{{r.f}}</div>
+        </div>
+      </sc-for>
+      <div style="padding: 10px 20px; font-size: 14px; color: #475569;">… 이하 88행 생략</div>
+    </div>
+
+    <div style="background: #ffffff; color: #0f172a; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;">
+      <div style="padding: 14px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+        <span style="background: #166534; color: #ffffff; font-size: 14px; font-weight: 700; padding: 4px 12px; border-radius: 6px;">시트 4 · 디스크</span>
+        <span style="font-size: 18px; font-weight: 700;">물리 디스크 한 개 = 한 줄</span>
+        <span style="font-size: 14px; color: #475569;">전체 58행 가운데 앞 8행</span>
+      </div>
+      <div class="g" style="grid-template-columns: 210px 120px 180px 96px 190px minmax(0, 1fr) 96px 70px 100px; border-left: 1px solid #d4d8de;">
+        <div class="h">법인(vCenter)</div><div class="h">서버</div><div class="h">Hostname(OS)</div><div class="h">서비스태그</div><div class="h">디스크</div><div class="h">모델</div><div class="h n">용량 GB</div><div class="h">매체</div><div class="h">인터페이스</div>
+      </div>
+      <sc-for list="{{diskRows}}" as="r" hint-placeholder-count="8">
+        <div class="g" style="{{r.row}}">
+          <div class="c">{{r.corp}}</div><div class="c b">{{r.name}}</div><div class="c">{{r.host}}</div><div class="c m">{{r.tag}}</div><div class="c">{{r.a}}</div><div class="c">{{r.b}}</div><div class="c n">{{r.c}}</div><div class="c">{{r.d}}</div><div class="c">{{r.e}}</div>
+        </div>
+      </sc-for>
+      <div style="padding: 10px 20px; font-size: 14px; color: #475569;">… 이하 50행 생략</div>
+    </div>
+  </div>
+
+  <div style="font-size: 15px; color: #8b9bb4; line-height: 1.7; display: flex; flex-direction: column; gap: 2px;">
+    <div><b style="color: #e6edf6;">서버 요약</b> 의 대수는 화면 표와 같습니다(10대). 인벤토리가 없는 2대(bm-nas-01 · esx-legacy-07)는 하드웨어 칸을 비우고 비고에 사유를 적습니다 — 숫자 칸이 빈 칸이라 합계가 틀어지지 않습니다.</div>
+    <div><b style="color: #e6edf6;">CPU · 메모리 · 디스크</b> 시트는 법인 · 서버 · Hostname · 서비스태그를 줄마다 채워 필터 · 피벗에 바로 쓸 수 있습니다. NIC · GPU 시트는 창에서 켜면 같은 모양으로 붙습니다.</div>
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1480,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2756,"height":1700}}'>
 class Component extends DCLogic {
-  constructor(p) { super(p); this.state = { tab: 'sum' }; }
   renderVals() {
-    const tab = this.state.tab;
-    // 가상의 베어메탈 10대. inv 가 없으면 인벤토리 없음(why = 비고에 적을 사유).
     const xeon = (m) => 'Intel(R) Xeon(R) ' + m;
+    const AP = 'vcenter-ap-northeast-01', US = 'vcenter-us-east-01', EU = 'vcenter-eu-central-01', UW = 'vcenter-us-west-01';
+    // 가상의 베어메탈 10대. cpu 가 없으면 인벤토리 없음(why = 비고 사유).
     const SV = [
-      { corp: 'vcenter-ap-northeast-01', name: 'bm-db-01', host: 'bm-db-01.corp.example', mf: 'Dell Inc.', model: 'PowerEdge R750', tag: '7XK2M03', src: 'iDRAC', at: '2026-11-11 10:02',
-        cpu: [xeon('Gold 6338 CPU @ 2.00GHz'), 2, 32], dimm: [16, 32, 'DDR4', 3200, 'Hynix', 'HMA84GR7DJR4N-XN'], disks: [['SSDSC2KG960G8R', 960, 'SSD', 'SATA', 2], ['MZ7KH1T9HAJR0D3', 1920, 'SSD', 'SATA', 6]], bios: '1.12.1', fw: '7.00.00.171' },
-      { corp: 'vcenter-ap-northeast-01', name: 'bm-db-02', host: 'bm-db-02.corp.example', mf: 'Dell Inc.', model: 'PowerEdge R750', tag: '7XK2M04', src: 'iDRAC', at: '2026-11-11 10:02',
-        cpu: [xeon('Gold 6338 CPU @ 2.00GHz'), 2, 32], dimm: [16, 32, 'DDR4', 3200, 'Hynix', 'HMA84GR7DJR4N-XN'], disks: [['SSDSC2KG960G8R', 960, 'SSD', 'SATA', 2], ['MZ7KH1T9HAJR0D3', 1920, 'SSD', 'SATA', 6]], bios: '1.12.1', fw: '7.00.00.171' },
-      { corp: 'vcenter-ap-northeast-01', name: 'bm-backup-01', host: 'bm-backup-01', mf: 'Dell Inc.', model: 'PowerEdge R740xd', tag: '4HT9P13', src: 'iDRAC', at: '2026-11-11 10:03',
-        cpu: [xeon('Silver 4214R CPU @ 2.40GHz'), 2, 12], dimm: [8, 32, 'DDR4', 2933, 'Samsung', 'M393A4K40DB3-CWE'], disks: [['SSDSC2KB480G8R', 480, 'SSD', 'SATA', 2], ['ST16000NM002G', 16000, 'HDD', 'SAS', 12]], bios: '2.19.1', fw: '7.00.00.171' },
-      { corp: 'vcenter-us-east-01', name: 'bm-gpu-01', host: 'bm-gpu-01.us.example', mf: 'Dell Inc.', model: 'PowerEdge R750xa', tag: '9QW4Z23', src: 'iDRAC', at: '2026-11-11 10:04',
-        cpu: [xeon('Gold 6348 CPU @ 2.60GHz'), 2, 28], dimm: [16, 64, 'DDR4', 3200, 'Samsung', 'M393A8G40AB2-CWE'], disks: [['Dell Ent NVMe P5600 MU U.2 1.6TB', 1600, 'SSD', 'NVMe', 4]], gpu: 'NVIDIA A100 80GB × 4', bios: '1.12.1', fw: '7.00.00.171' },
-      { corp: 'vcenter-us-east-01', name: 'bm-ora-01', host: '', mf: 'Dell Inc.', model: 'PowerEdge R650', tag: '2MB7K33', src: 'iDRAC', at: '2026-11-11 10:04',
-        cpu: [xeon('Gold 6334 CPU @ 3.60GHz'), 2, 8], dimm: [12, 32, 'DDR4', 3200, 'Micron', '36ASF4G72PZ-3G2R1'], disks: [['MZ7KH960HAJR0D3', 960, 'SSD', 'SATA', 4]], bios: '1.11.2', fw: '6.10.80.00' },
-      { corp: 'vcenter-eu-central-01', name: 'bm-nas-01', host: '', mf: '', model: 'PowerEdge R740xd2', tag: '5LC8R43', src: 'OME', at: '', why: 'OME 로만 수집 — 부품 인벤토리를 읽은 적이 없습니다' },
-      { corp: 'vcenter-eu-central-01', name: 'bm-edge-pl-01', host: 'pl-app-01', mf: '', model: 'PowerEdge R640', tag: '8DF3T53', src: '엣지 PL', at: '2026-11-11 09:58',
-        cpu: [xeon('Gold 5218 CPU @ 2.30GHz'), 2, 16], dimm: [12, 16, 'DDR4', 2666, 'Hynix', 'HMA82GR7CJR8N-VK'], disks: [['MZ7LH480HAHQ0D3', 480, 'SSD', 'SATA', 2], ['AL15SEB120NY', 1200, 'HDD', 'SAS', 6]], bios: '2.19.1', fw: '7.00.00.171' },
-      { corp: 'vcenter-eu-central-01', name: 'bm-edge-pl-02', host: 'pl-app-02', mf: '', model: 'PowerEdge R640', tag: '8DF3T54', src: '엣지 PL', at: '2026-11-11 09:58',
-        cpu: [xeon('Gold 5218 CPU @ 2.30GHz'), 2, 16], dimm: [12, 16, 'DDR4', 2666, 'Hynix', 'HMA82GR7CJR8N-VK'], disks: [['MZ7LH480HAHQ0D3', 480, 'SSD', 'SATA', 2], ['AL15SEB120NY', 1200, 'HDD', 'SAS', 6]], bios: '2.19.1', fw: '7.00.00.171' },
-      { corp: 'vcenter-us-west-01', name: 'esx-legacy-07', host: '', mf: '', model: 'PowerEdge R630', tag: '3GH6N63', src: 'vCenter', at: '', why: '수동으로 베어메탈 분류한 ESXi 호스트 — iDRAC 등록이 없습니다' },
-      { corp: '', name: 'bm-lab-01', host: 'lab01', mf: 'HPE', model: 'ProLiant DL380 Gen10', tag: 'CZ2941A7X', src: 'iDRAC', at: '2026-11-11 10:05',
-        cpu: [xeon('Silver 4210 CPU @ 2.20GHz'), 1, 10], dimm: [4, 32, 'DDR4', 2933, 'HPE', 'P03052-091'], disks: [['MB004000JWKGU', 4000, 'HDD', 'SAS', 4]], bios: 'U30 v2.90', fw: '2.78' },
+      { corp: AP, name: 'bm-db-01', host: 'bm-db-01.corp.example', mf: 'Dell Inc.', model: 'PowerEdge R750', tag: '7XK2M03', src: 'iDRAC', at: '2026-11-11 10:02', cpu: [xeon('Gold 6338 CPU @ 2.00GHz'), 2, 32], dimm: [16, 32, 'DDR4', 3200, 'Hynix', 'HMA84GR7DJR4N-XN'], disks: [['SSDSC2KG960G8R', 960, 'SSD', 'SATA', 2], ['MZ7KH1T9HAJR0D3', 1920, 'SSD', 'SATA', 6]], bios: '1.12.1', fw: '7.00.00.171' },
+      { corp: AP, name: 'bm-db-02', host: 'bm-db-02.corp.example', mf: 'Dell Inc.', model: 'PowerEdge R750', tag: '7XK2M04', src: 'iDRAC', at: '2026-11-11 10:02', cpu: [xeon('Gold 6338 CPU @ 2.00GHz'), 2, 32], dimm: [16, 32, 'DDR4', 3200, 'Hynix', 'HMA84GR7DJR4N-XN'], disks: [['SSDSC2KG960G8R', 960, 'SSD', 'SATA', 2], ['MZ7KH1T9HAJR0D3', 1920, 'SSD', 'SATA', 6]], bios: '1.12.1', fw: '7.00.00.171' },
+      { corp: AP, name: 'bm-backup-01', host: 'bm-backup-01', mf: 'Dell Inc.', model: 'PowerEdge R740xd', tag: '4HT9P13', src: 'iDRAC', at: '2026-11-11 10:03', cpu: [xeon('Silver 4214R CPU @ 2.40GHz'), 2, 12], dimm: [8, 32, 'DDR4', 2933, 'Samsung', 'M393A4K40DB3-CWE'], disks: [['SSDSC2KB480G8R', 480, 'SSD', 'SATA', 2], ['ST16000NM002G', 16000, 'HDD', 'SAS', 12]], bios: '2.19.1', fw: '7.00.00.171' },
+      { corp: US, name: 'bm-gpu-01', host: 'bm-gpu-01.us.example', mf: 'Dell Inc.', model: 'PowerEdge R750xa', tag: '9QW4Z23', src: 'iDRAC', at: '2026-11-11 10:04', cpu: [xeon('Gold 6348 CPU @ 2.60GHz'), 2, 28], dimm: [16, 64, 'DDR4', 3200, 'Samsung', 'M393A8G40AB2-CWE'], disks: [['Dell Ent NVMe P5600 MU 1.6TB', 1600, 'SSD', 'NVMe', 4]], gpu: 'NVIDIA A100 80GB × 4', bios: '1.12.1', fw: '7.00.00.171' },
+      { corp: US, name: 'bm-ora-01', host: '', mf: 'Dell Inc.', model: 'PowerEdge R650', tag: '2MB7K33', src: 'iDRAC', at: '2026-11-11 10:04', cpu: [xeon('Gold 6334 CPU @ 3.60GHz'), 2, 8], dimm: [12, 32, 'DDR4', 3200, 'Micron', '36ASF4G72PZ-3G2R1'], disks: [['MZ7KH960HAJR0D3', 960, 'SSD', 'SATA', 4]], bios: '1.11.2', fw: '6.10.80.00' },
+      { corp: EU, name: 'bm-nas-01', host: '', mf: '', model: 'PowerEdge R740xd2', tag: '5LC8R43', src: 'OME', at: '', why: 'OME 로만 수집 — 부품 인벤토리를 읽은 적이 없습니다' },
+      { corp: EU, name: 'bm-edge-pl-01', host: 'pl-app-01', mf: '', model: 'PowerEdge R640', tag: '8DF3T53', src: '엣지 PL', at: '2026-11-11 09:58', cpu: [xeon('Gold 5218 CPU @ 2.30GHz'), 2, 16], dimm: [12, 16, 'DDR4', 2666, 'Hynix', 'HMA82GR7CJR8N-VK'], disks: [['MZ7LH480HAHQ0D3', 480, 'SSD', 'SATA', 2], ['AL15SEB120NY', 1200, 'HDD', 'SAS', 6]], bios: '2.19.1', fw: '7.00.00.171' },
+      { corp: EU, name: 'bm-edge-pl-02', host: 'pl-app-02', mf: '', model: 'PowerEdge R640', tag: '8DF3T54', src: '엣지 PL', at: '2026-11-11 09:58', cpu: [xeon('Gold 5218 CPU @ 2.30GHz'), 2, 16], dimm: [12, 16, 'DDR4', 2666, 'Hynix', 'HMA82GR7CJR8N-VK'], disks: [['MZ7LH480HAHQ0D3', 480, 'SSD', 'SATA', 2], ['AL15SEB120NY', 1200, 'HDD', 'SAS', 6]], bios: '2.19.1', fw: '7.00.00.171' },
+      { corp: UW, name: 'esx-legacy-07', host: '', mf: '', model: 'PowerEdge R630', tag: '3GH6N63', src: 'vCenter', at: '', why: '수동으로 베어메탈 분류한 ESXi 호스트 — iDRAC 등록이 없습니다' },
+      { corp: '', name: 'bm-lab-01', host: 'lab01', mf: 'HPE', model: 'ProLiant DL380 Gen10', tag: 'CZ2941A7X', src: 'iDRAC', at: '2026-11-11 10:05', cpu: [xeon('Silver 4210 CPU @ 2.20GHz'), 1, 10], dimm: [4, 32, 'DDR4', 2933, 'HPE', 'P03052-091'], disks: [['MB004000JWKGU', 4000, 'HDD', 'SAS', 4]], bios: 'U30 v2.90', fw: '2.78' },
     ];
-    const HEAD_BG = '#1e3a5f';
-    const cellBase = 'padding: 0 8px; height: 26px; line-height: 26px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid #d4d8de; border-bottom: 1px solid #d4d8de; box-sizing: border-box; min-width: 0;';
-    const T = (text, o) => { o = o || {}; return { text: text == null ? '' : String(text), style: cellBase + (o.num ? ' text-align: right; font-family: \'JetBrains Mono\', monospace;' : '') + (o.mono ? ' font-family: \'JetBrains Mono\', monospace;' : '') + (o.bold ? ' font-weight: 600;' : '') + (o.faint ? ' color: #5b6779; font-style: italic;' : ' color: #0f172a;') }; };
-    const N = (v) => T(v == null ? '' : v.toLocaleString('en-US'), { num: true });
-    const corpOf = (s) => (s.corp ? T(s.corp) : T('미지정', { faint: true }));
-    const idCells = (s) => [corpOf(s), T(s.name, { bold: true }), T(s.host), T(s.tag, { mono: true })];
+    const fmt = (v) => v.toLocaleString('en-US');
     const sum = (a) => a.reduce((x, y) => x + y, 0);
     const diskN = (s) => sum(s.disks.map((d) => d[4]));
     const diskGB = (s) => sum(s.disks.map((d) => d[1] * d[4]));
     const diskMix = (s) => { const m = {}; s.disks.forEach((d) => { const k = d[2] + '(' + d[3] + ')'; m[k] = (m[k] || 0) + d[4]; }); return Object.keys(m).map((k) => k + ' ' + m[k]).join(' · '); };
+    const rowStyle = (tpl, i) => 'grid-template-columns: ' + tpl + '; border-left: 1px solid #d4d8de; background: ' + (i % 2 ? '#f6f8fb' : '#ffffff') + ';';
     const inv = SV.filter((s) => s.cpu);
 
-    const SHEETS = {
-      sum: { label: '서버 요약', title: '베어메탈 하드웨어 정보 — 서버 요약',
-        cols: [['법인(vCenter)', 176], ['서버', 124], ['Hostname(OS)', 172], ['제조사', 76], ['모델', 150], ['서비스태그', 92], ['CPU 모델', 268], ['소켓', 48, 1], ['코어(합계)', 78, 1], ['메모리 GB', 82, 1], ['DIMM 수', 68, 1], ['디스크 수', 72, 1], ['디스크 합계 GB', 110, 1], ['디스크 구성', 168], ['GPU', 150], ['BIOS', 78], ['BMC 펌웨어', 96], ['수집원', 70], ['인벤토리 시각', 124], ['비고', 330]],
-        rows: SV.map((s) => (s.cpu
-          ? [corpOf(s), T(s.name, { bold: true }), T(s.host), T(s.mf), T(s.model), T(s.tag, { mono: true }), T(s.cpu[0]), N(s.cpu[1]), N(s.cpu[1] * s.cpu[2]), N(s.dimm[0] * s.dimm[1]), N(s.dimm[0]), N(diskN(s)), N(diskGB(s)), T(diskMix(s)), T(s.gpu || ''), T(s.bios, { mono: true }), T(s.fw, { mono: true }), T(s.src), T(s.at, { mono: true }), T(s.host ? '' : 'Hostname 미보고', { faint: true })]
-          : [corpOf(s), T(s.name, { bold: true }), T(''), T(''), T(s.model), T(s.tag, { mono: true }), T(''), T(''), T(''), T(''), T(''), T(''), T(''), T(''), T(''), T(''), T(''), T(s.src), T(''), T('인벤토리 없음 — ' + s.why, { faint: true })])) },
-      cpu: { label: 'CPU', title: 'CPU — 소켓 한 개 = 한 줄',
-        cols: [['법인(vCenter)', 190], ['서버', 140], ['Hostname(OS)', 190], ['서비스태그', 100], ['소켓', 110], ['모델', 330], ['코어', 70, 1]],
-        rows: [].concat.apply([], inv.map((s) => Array.from({ length: s.cpu[1] }, (_, i) => idCells(s).concat([T('CPU.Socket.' + (i + 1), { mono: true }), T(s.cpu[0]), N(s.cpu[2])])))) },
-      dimm: { label: '메모리(DIMM)', title: '메모리 — DIMM 한 개 = 한 줄',
-        cols: [['법인(vCenter)', 190], ['서버', 140], ['Hostname(OS)', 190], ['서비스태그', 100], ['슬롯', 130], ['크기 GB', 80, 1], ['종류', 70], ['속도 MHz', 90, 1], ['제조사', 100], ['부품번호', 200]],
-        rows: [].concat.apply([], inv.map((s) => Array.from({ length: s.dimm[0] }, (_, i) => idCells(s).concat([T('DIMM.Socket.' + (i < s.dimm[0] / 2 ? 'A' : 'B') + (i % Math.ceil(s.dimm[0] / 2) + 1), { mono: true }), N(s.dimm[1]), T(s.dimm[2]), N(s.dimm[3]), T(s.dimm[4]), T(s.dimm[5], { mono: true })])))) },
-      disk: { label: '디스크', title: '디스크 — 물리 디스크 한 개 = 한 줄',
-        cols: [['법인(vCenter)', 190], ['서버', 140], ['Hostname(OS)', 190], ['서비스태그', 100], ['디스크', 210], ['모델', 270], ['용량 GB', 90, 1], ['매체', 70], ['인터페이스', 90]],
-        rows: [].concat.apply([], inv.map((s) => { let bay = 0; return [].concat.apply([], s.disks.map((d) => Array.from({ length: d[4] }, () => idCells(s).concat([T((d[3] === 'NVMe' ? 'PCIe SSD in Slot ' : 'Physical Disk 0:1:') + (bay++), {}), T(d[0]), N(d[1]), T(d[2]), T(d[3])])))); })) },
-      info: { label: '안내', title: '안내 — 열의 뜻 · 출처 · 빈 칸의 뜻' },
-    };
-
-    const sh = SHEETS[tab];
-    const order = ['sum', 'cpu', 'dimm', 'disk', 'info'];
-    const tabs = order.map((k) => {
-      const on = k === tab; const s = SHEETS[k];
-      return { label: s.label, on, count: s.rows ? s.rows.length + '행' : '', pick: () => this.setState({ tab: k }),
-        style: 'height: 44px; padding: 0 16px; display: inline-flex; align-items: center; gap: 8px; border: 0; border-top: 3px solid ' + (on ? '#166534' : 'transparent') + '; background: ' + (on ? '#ffffff' : 'transparent') + '; color: ' + (on ? '#166534' : '#334155') + '; font-size: 13px; font-weight: ' + (on ? 700 : 500) + '; cursor: pointer;',
-        cntStyle: 'font-size: 11px; font-weight: 500; color: #475569; font-family: \'JetBrains Mono\', monospace;' };
+    const SUM_TPL = '210px 130px 190px 80px 180px 100px 300px 56px 90px 100px 80px 84px 130px 200px 180px 96px 116px 80px 150px minmax(0, 1fr)';
+    const sumRows = SV.map((s, i) => {
+      const base = { row: rowStyle(SUM_TPL, i), corp: s.corp || '미지정', corpCls: s.corp ? 'c' : 'c f', name: s.name, host: s.host, mf: s.mf, model: s.model, tag: s.tag, src: s.src, at: s.at };
+      if (!s.cpu) return Object.assign(base, { cpu: '', sock: '', cores: '', mem: '', dimms: '', dn: '', dgb: '', mix: '', gpu: '', bios: '', fw: '', note: '인벤토리 없음 — ' + s.why });
+      return Object.assign(base, { cpu: s.cpu[0], sock: s.cpu[1], cores: fmt(s.cpu[1] * s.cpu[2]), mem: fmt(s.dimm[0] * s.dimm[1]), dimms: s.dimm[0], dn: diskN(s), dgb: fmt(diskGB(s)), mix: diskMix(s), gpu: s.gpu || '', bios: s.bios, fw: s.fw, note: s.host ? '' : 'Hostname 미보고' });
     });
 
-    const CAP = 18;
-    let head = [], rows = [], tableStyle = '', headStyle = '', cutNote = '';
-    if (sh.rows) {
-      const tpl = sh.cols.map((c) => c[1] + 'px').join(' ');
-      const width = sum(sh.cols.map((c) => c[1]));
-      tableStyle = 'width: ' + width + 'px; border-left: 1px solid #d4d8de;';
-      headStyle = 'display: grid; grid-template-columns: ' + tpl + '; position: sticky; top: 0; background: ' + HEAD_BG + ';';
-      head = sh.cols.map((c) => ({ text: c[0], style: 'padding: 0 8px; height: 30px; line-height: 30px; font-size: 12px; font-weight: 600; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid #2c4a70; box-sizing: border-box;' + (c[2] ? ' text-align: right;' : '') }));
-      rows = sh.rows.slice(0, CAP).map((cells, i) => ({ cells, style: 'display: grid; grid-template-columns: ' + tpl + '; background: ' + (i % 2 ? '#f6f8fb' : '#ffffff') + ';' }));
-      if (sh.rows.length > CAP) cutNote = '시안은 앞 ' + CAP + '행만 보여 줍니다 — 실제 파일에는 ' + sh.rows.length + '행이 모두 들어갑니다.';
-    }
+    const id = (s) => ({ corp: s.corp || '미지정', name: s.name, host: s.host, tag: s.tag });
+    const CAP = 8;
+    const cpuAll = [], dimmAll = [], diskAll = [];
+    inv.forEach((s) => {
+      for (let i = 0; i < s.cpu[1]; i++) cpuAll.push(Object.assign(id(s), { a: 'CPU.Socket.' + (i + 1), b: s.cpu[0], c: s.cpu[2] }));
+      const half = Math.ceil(s.dimm[0] / 2);
+      for (let i = 0; i < s.dimm[0]; i++) dimmAll.push(Object.assign(id(s), { a: 'DIMM.Socket.' + (i < half ? 'A' : 'B') + (i % half + 1), b: s.dimm[1], c: s.dimm[2], d: fmt(s.dimm[3]), e: s.dimm[4], f: s.dimm[5] }));
+      let bay = 0;
+      s.disks.forEach((d) => { for (let i = 0; i < d[4]; i++) diskAll.push(Object.assign(id(s), { a: (d[3] === 'NVMe' ? 'PCIe SSD in Slot ' : 'Physical Disk 0:1:') + (bay++), b: d[0], c: fmt(d[1]), d: d[2], e: d[3] })); });
+    });
+    const cut = (all, tpl) => all.slice(0, CAP).map((r, i) => Object.assign(r, { row: rowStyle(tpl, i) }));
 
     const kpis = [
       { label: '서버', value: SV.length + ' 대' },
-      { label: 'CPU 코어 합계', value: sum(inv.map((s) => s.cpu[1] * s.cpu[2])).toLocaleString('en-US') },
-      { label: '메모리 합계', value: sum(inv.map((s) => s.dimm[0] * s.dimm[1])).toLocaleString('en-US') + ' GB' },
-      { label: '물리 디스크 합계', value: sum(inv.map(diskN)) + ' 개 · ' + sum(inv.map(diskGB)).toLocaleString('en-US') + ' GB' },
+      { label: 'CPU 코어 합계', value: fmt(sum(inv.map((s) => s.cpu[1] * s.cpu[2]))) },
+      { label: '메모리 합계', value: fmt(sum(inv.map((s) => s.dimm[0] * s.dimm[1]))) + ' GB' },
+      { label: '물리 디스크 합계', value: sum(inv.map(diskN)) + ' 개 · ' + fmt(sum(inv.map(diskGB))) + ' GB' },
       { label: '인벤토리 없음(합계 제외)', value: (SV.length - inv.length) + ' 대' },
     ];
     const info = [
-      { k: '대상', v: '통합 서버 인벤토리의 베어메탈 — iDRAC/OME 가 수집한 물리 서버 가운데 vCenter ESXi 호스트로 확인되지 않은 서버(수동 분류 포함, ‘제외’ 분류는 빠짐).' },
-      { k: '값의 출처', v: 'iDRAC(Redfish) 인벤토리 저장값. 엣지(법인 현장) 서버는 그 엣지가 올린 축약 인벤토리. 내려받을 때 장비에 다시 접속하지 않습니다 — ‘인벤토리 시각’ 열이 그 값을 읽은 때입니다.' },
-      { k: 'Hostname(OS)', v: 'iDRAC 이 보고하는 OS 호스트 이름. 보고하지 않는 서버는 빈 칸이고 비고에 ‘Hostname 미보고’ 로 적습니다. ‘서버’ 열은 포탈에 등록된 이름입니다.' },
-      { k: '코어(합계)', v: '소켓별 코어의 합(하이퍼스레딩 논리 코어가 아닌 물리 코어).' },
-      { k: '메모리 GB', v: '장착된 DIMM 크기의 합. 빈 슬롯은 세지 않습니다.' },
-      { k: '디스크', v: '물리 디스크 기준(장착 수 · 개별 용량의 합). RAID 구성 뒤 가용 용량이나 OS 파일시스템 사용량이 아닙니다.' },
-      { k: '빈 칸', v: '읽지 못한 값입니다 — 0 이 아닙니다. 숫자 칸은 비워 두므로 합계 · 평균에 들어가지 않습니다.' },
-      { k: '인벤토리 없음', v: '이 파일에는 2대: bm-nas-01(OME 로만 수집) · esx-legacy-07(iDRAC 등록 없음). 맨 위 합계 칸에는 들어가지 않습니다.' },
+      { k: '대상', v: '통합 서버 인벤토리의 베어메탈 — vCenter ESXi 호스트로 확인되지 않은 물리 서버(수동 분류 포함, ‘제외’ 분류는 빠짐).' },
+      { k: '값의 출처', v: 'iDRAC(Redfish) 인벤토리 저장값. 엣지 서버는 그 엣지가 올린 축약 인벤토리. 내려받을 때 장비에 다시 접속하지 않습니다 — ‘인벤토리 시각’ 이 그 값을 읽은 때입니다.' },
+      { k: 'Hostname(OS)', v: 'iDRAC 이 보고하는 OS 호스트 이름. 보고하지 않으면 빈 칸 + 비고 ‘Hostname 미보고’. ‘서버’ 열은 포탈에 등록된 이름입니다.' },
+      { k: '코어 · 메모리', v: '코어는 물리 코어 합계(논리 코어 아님). 메모리는 장착된 DIMM 크기의 합.' },
+      { k: '디스크', v: '물리 디스크 기준(장착 수 · 개별 용량의 합). RAID 뒤 가용 용량이나 OS 파일시스템 사용량이 아닙니다.' },
+      { k: '빈 칸', v: '읽지 못한 값입니다 — 0 이 아닙니다. 합계 · 평균에 들어가지 않습니다.' },
       { k: '넣지 않는 것', v: '시리얼 번호 · iDRAC 주소 · 계정 정보.' },
-      { k: '범위 · 기준 시각', v: '모든 법인 · 2026-11-11 10:30 KST · 내려받은 계정의 조회 범위 안의 서버만.' },
     ];
     return {
-      tabs, head, rows, tableStyle, headStyle, cutNote, kpis, info,
-      isTable: !!sh.rows, isInfo: tab === 'info', showKpi: tab === 'sum',
-      sheetTitle: sh.title,
-      basis: '모든 법인 · 베어메탈 ' + SV.length + '대 · 기준 2026-11-11 10:30 KST',
+      kpis, info, sumRows,
+      cpuRows: cut(cpuAll, '210px 130px 190px 100px 130px minmax(0, 1fr) 70px'),
+      dimmRows: cut(dimmAll, '210px 120px 180px 96px 150px 84px 70px 96px 96px minmax(0, 1fr)'),
+      diskRows: cut(diskAll, '210px 120px 180px 96px 190px minmax(0, 1fr) 96px 70px 100px'),
     };
   }
 }
