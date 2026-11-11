@@ -207,28 +207,107 @@ export function endedSessions() { return ended.slice(); }
 export function getSession(id) { loadSessions(); const x = S.get(String(id)); return x ? { ...x, targets: [...x.targets] } : null; }
 
 /**
+ * 중복 방지(v2.979 — 사용자 '중복 모니터링 방지' · '기존 모니터링 돌고 있는데 추가하면 잘 안 돼'): **서버 하나는 수집 하나에만** 있다.
+ *  · 이미 수집 중인 서버는 빼고(skipped) 나머지만 넣는다.
+ *  · 예외 — 계속 수집(record)으로 넣으면 잠깐 보기(watch)에 있던 서버를 넘겨받는다(moved · 잠깐 보기가 끝나면 그 서버도 같이 멈추던 것을 막는다).
+ *    넘겨줘 비게 된 잠깐 보기는 끝낸다(why 'moved').
+ * @returns {{add:string[], skipped:{id,session,mode}[], moved:string[]}}
+ */
+function planJoin(ids, mode, intoId = null) {
+  const add = []; const skipped = []; const moved = [];
+  for (const t of ids) {
+    let owner = null; for (const s of S.values()) if (s.targets.includes(t)) { owner = s; break; }
+    if (!owner) { add.push(t); continue; }
+    if (owner.id === intoId) { skipped.push({ id: t, session: owner.id, mode: owner.mode, same: true }); continue; }
+    if (mode === 'record' && owner.mode === 'watch') { add.push(t); moved.push(t); continue; }
+    skipped.push({ id: t, session: owner.id, mode: owner.mode });
+  }
+  return { add, skipped, moved };
+}
+/** 넘겨받은 서버를 원래 잠깐 보기에서 뺀다 — 비면 끝낸다. */
+function applyMoves(moved, now) {
+  if (!moved.length) return;
+  const set = new Set(moved);
+  for (const s of [...S.values()]) {
+    if (s.mode !== 'watch' || !s.targets.some((t) => set.has(t))) continue;
+    s.targets = s.targets.filter((t) => !set.has(t));
+    if (!s.targets.length) stopSession(s.id, 'moved', now);
+  }
+}
+/** 포탈 전체 한도(전체 · 계속 수집) — 이 대상들을 mode 로 더했을 때. */
+function totalsIssue(add, mode) {
+  const all = new Set(); const rec = new Set();
+  for (const x of S.values()) for (const t of x.targets) { all.add(t); if (x.mode === 'record') rec.add(t); }
+  for (const t of add) { all.add(t); if (mode === 'record') rec.add(t); }
+  if (all.size > MAX_TOTAL_TARGETS) return { ok: false, code: 'too-many-total', reason: `포탈 전체에서 동시에 ${MAX_TOTAL_TARGETS}대까지 수집합니다.` };
+  if (rec.size > MAX_RECORD_TARGETS) return { ok: false, code: 'too-many-record', reason: `계속 수집은 포탈 전체 ${MAX_RECORD_TARGETS}대까지입니다.` };
+  return null;
+}
+const alreadyReason = (n) => `고른 서버 ${n}대는 모두 이미 수집 중입니다 — 위 ‘진행 중인 수집’ 에서 보거나 끝낼 수 있습니다.`;
+
+/**
  * 수집 시작 — 검사는 여기 한 곳(라우트는 대상 존재 · 권한만 본다).
- * @returns {{ok:true, session}|{ok:false, code, reason}}
+ * @returns {{ok:true, session, skipped, moved}|{ok:false, code, reason, skipped?}}
  */
 export function startSession({ targets = [], interval, mode = 'watch', by = '' } = {}, now = Date.now()) {
   loadSessions();
-  const ids = [...new Set((Array.isArray(targets) ? targets : []).map(String))];
-  if (!ids.length) return { ok: false, code: 'no-targets', reason: '수집할 서버를 하나 이상 고르세요.' };
-  if (ids.length > MAX_PER_SESSION) return { ok: false, code: 'too-many', reason: `한 번에 ${MAX_PER_SESSION}대까지 고를 수 있습니다.` };
+  const ids0 = [...new Set((Array.isArray(targets) ? targets : []).map(String))];
+  if (!ids0.length) return { ok: false, code: 'no-targets', reason: '수집할 서버를 하나 이상 고르세요.' };
   if (mode !== 'watch' && mode !== 'record') return { ok: false, code: 'bad-mode', reason: '방식은 잠깐 보기 또는 계속 수집입니다.' };
-  if (S.size >= MAX_SESSIONS) return { ok: false, code: 'too-many-sessions', reason: `동시에 ${MAX_SESSIONS}건까지 수집합니다 — 진행 중인 수집을 끝내거나 그 수집에 붙어 보세요.` };
-  const all = new Set(); const rec = new Set();
-  for (const x of S.values()) for (const t of x.targets) { all.add(t); if (x.mode === 'record') rec.add(t); }
-  for (const t of ids) { all.add(t); if (mode === 'record') rec.add(t); }
-  if (all.size > MAX_TOTAL_TARGETS) return { ok: false, code: 'too-many-total', reason: `포탈 전체에서 동시에 ${MAX_TOTAL_TARGETS}대까지 수집합니다.` };
-  if (rec.size > MAX_RECORD_TARGETS) return { ok: false, code: 'too-many-record', reason: `계속 수집은 포탈 전체 ${MAX_RECORD_TARGETS}대까지입니다.` };
+  const { add: ids, skipped, moved } = planJoin(ids0, mode);
+  if (!ids.length) return { ok: false, code: 'already', reason: alreadyReason(skipped.length), skipped };
+  if (ids.length > MAX_PER_SESSION) return { ok: false, code: 'too-many', reason: `한 번에 ${MAX_PER_SESSION}대까지 고를 수 있습니다.` };
+  // 넘겨받아 비게 되는 잠깐 보기는 자리를 비운다
+  const movedSet = new Set(moved);
+  const freed = [...S.values()].filter((s) => s.mode === 'watch' && s.targets.length && s.targets.every((t) => movedSet.has(t))).length;
+  if (S.size - freed >= MAX_SESSIONS) return { ok: false, code: 'too-many-sessions', reason: `동시에 ${MAX_SESSIONS}건까지 수집합니다 — 진행 중인 수집에 추가하거나, 끝낸 뒤 시작하세요.` };
+  const lim = totalsIssue(ids, mode); if (lim) return lim;
   const s = { id: `fs-${crypto.randomBytes(5).toString('hex')}`, mode, by: String(by || '').slice(0, 64), targets: ids, interval: normInterval(interval), startedAt: now,
     until: mode === 'watch' ? now + WATCH_MIN * 60_000 : null, lastViewAt: now };
+  applyMoves(moved, now);
   S.set(s.id, s);
   for (const t of ids) lastView.set(t, now);
-  if (mode === 'record') persistSessions();
-  return { ok: true, session: { ...s, targets: [...ids] } };
+  if (mode === 'record' || moved.length) persistSessions();
+  return { ok: true, session: { ...s, targets: [...ids] }, skipped, moved };
 }
+
+/**
+ * 진행 중인 수집에 서버를 더한다(v2.979 — 4번째 수집을 만들지 않고 붙는다). 중복 규칙은 시작과 같다(planJoin).
+ * @returns {{ok:true, session, added, skipped, moved}|{ok:false, code, reason, skipped?}}
+ */
+export function addToSession(id, targets = [], now = Date.now()) {
+  loadSessions();
+  const s = S.get(String(id));
+  if (!s) return { ok: false, code: 'not-found', reason: '없는 수집입니다(이미 끝났을 수 있습니다).' };
+  const ids0 = [...new Set((Array.isArray(targets) ? targets : []).map(String))];
+  if (!ids0.length) return { ok: false, code: 'no-targets', reason: '더할 서버를 하나 이상 고르세요.' };
+  const { add, skipped, moved } = planJoin(ids0, s.mode, s.id);
+  if (!add.length) return { ok: false, code: 'already', reason: alreadyReason(skipped.length), skipped };
+  if (s.targets.length + add.length > MAX_PER_SESSION) return { ok: false, code: 'too-many', reason: `수집 하나는 ${MAX_PER_SESSION}대까지입니다 — 이 수집에는 ${Math.max(0, MAX_PER_SESSION - s.targets.length)}대를 더 넣을 수 있습니다.` };
+  const lim = totalsIssue(add, s.mode); if (lim) return lim;
+  applyMoves(moved, now);
+  s.targets = [...s.targets, ...add];
+  for (const t of add) lastView.set(t, now);
+  s.lastViewAt = now;
+  if (s.mode === 'record' || moved.length) persistSessions();
+  return { ok: true, session: { ...s, targets: [...s.targets] }, added: add, skipped, moved };
+}
+
+/** 수집에서 서버 하나를 뺀다(서버별 ‘수집 종료’) — 마지막 서버면 그 수집을 끝낸다. */
+export function removeFromSession(id, targetId, now = Date.now()) {
+  loadSessions();
+  const s = S.get(String(id));
+  if (!s) return { ok: false, code: 'not-found', reason: '없는 수집입니다(이미 끝났을 수 있습니다).' };
+  const t = String(targetId);
+  if (!s.targets.includes(t)) return { ok: false, code: 'not-in-session', reason: '그 수집에 없는 서버입니다.' };
+  if (s.targets.length === 1) { const r = stopSession(s.id, 'removed', now); return { ...r, ended: true }; }
+  s.targets = s.targets.filter((x) => x !== t);
+  if (s.mode === 'record') persistSessions();
+  return { ok: true, ended: false, session: { ...s, targets: [...s.targets] } };
+}
+
+/** 지금 이 서버를 수집하는 수집(없으면 null) — 서버는 한 수집에만 있다. */
+export function sessionOfTarget(targetId) { loadSessions(); for (const s of S.values()) if (s.targets.includes(String(targetId))) return { ...s, targets: [...s.targets] }; return null; }
 
 export function extendSession(id, now = Date.now()) {
   loadSessions();

@@ -3,7 +3,7 @@
  *
  *  · 최근 구간(끝 시각 없음)은 **메모리만** 읽는다(장비 · DB 왕복 0 — 2초 조회). 과거 구간은 메모리에 없는 분만 DB 에서 풀어 읽는다.
  *  · 구간 = 1 · 5 · 10 · 30분(사용자 요청 2026-11-11). 차트 점은 최대 150칸(개요 90칸)으로 줄이고, 칸마다 **평균과 최고**를 함께 낸다(순간 급등이 사라지지 않게).
- *  · 표의 값은 ‘구간 끝 순간’ 또는 ‘구간 평균’(요청 수 가중 — rates.timeAverageIostat). 못 읽은 값 · 요청 0건의 지연은 null.
+ *  · 표의 값은 ‘구간 끝 순간’ 또는 ‘구간 평균’(**시간 가중** — 표본이 덮는 시간 · 지연은 요청 수 × 시간 — rates.timeAverageIostat · v2.979). 못 읽은 값 · 요청 0건의 지연은 null.
  *  · 큰 조회(서버 20대 × 30분 과거 구간)는 대상마다 시간 기준 양보(createYielder)를 끼운다(docs/rules/perf-db.md v2.693).
  *  · 풀어 둔 DB 묶음은 작은 LRU(600)에 둔다 — 같은 과거 구간을 여러 화면이 볼 때 다시 풀지 않게.
  */
@@ -104,9 +104,8 @@ export function sampleSpacing(pos) {
  * 빈 칸이 생겨 '수집하지 않은 시간' 처럼 선이 끊겼다(2026-11-11 화면 검증 — 1분 구간 150칸은 2초 주기에서 칸 대부분이 비었다).
  * 칸 수가 바뀌어도 [from, to] 전체를 고르게 덮으므로 화면은 배열 길이로 x 를 나눈다.
  */
-export function bucketize(pos, key, from, to, points) {
-  const sp = sampleSpacing(pos);
-  const n = Math.max(1, sp ? Math.min(points, Math.max(2, Math.floor((to - from) / (sp * 1.5)))) : points);
+export function bucketize(pos, key, from, to, points, { fixed = false } = {}) {
+  const n = fixed ? Math.max(1, points) : pointsFor(pos, from, to, points);
   const step = (to - from) / n;
   const sum = new Float64Array(n); const cnt = new Uint16Array(n); const mx = new Array(n).fill(null);
   for (const [b, i, t] of pos) {
@@ -118,6 +117,23 @@ export function bucketize(pos, key, from, to, points) {
   }
   const avg = new Array(n); for (let k = 0; k < n; k++) avg[k] = cnt[k] ? r2(sum[k] / cnt[k]) : null;
   return { avg, max: mx.map(r2) };
+}
+
+/** 한 서버의 칸 수 — 칸 폭이 표본 간격의 1.5배 이상이 되게(bucketize 규칙). 간격을 모르면 points. */
+export function pointsFor(pos, from, to, points) {
+  const sp = sampleSpacing(pos);
+  return Math.max(1, sp ? Math.min(points, Math.max(2, Math.floor((to - from) / (sp * 1.5)))) : points);
+}
+
+/**
+ * 여러 서버(장치)를 한 화면에서 비교할 때 쓰는 **공통 칸 수** — 가장 성긴 표본 간격에 맞춘다(v2.979 사용자 질문 '같은 길이에 칸이 더 촘촘한 건 왜' —
+ * 서버마다 칸 수를 따로 정해 2초로 수집한 서버만 150칸, 10초 서버는 40칸이라 서버 × 시간 칸이 위아래로 맞지 않았다).
+ * 촘촘한 서버는 넓은 칸 안에서 평균으로 묶인다. 표본이 없는 서버는 칸 수에 끼지 않는다.
+ */
+export function commonPoints(posList, from, to, points) {
+  let n = points;
+  for (const pos of posList) if (pos && pos.length >= 2) n = Math.min(n, pointsFor(pos, from, to, points));
+  return n;
 }
 
 /** 열에서 표본 하나를 되살린다(메타 + 열). 표 · 요약이 이 모양을 쓴다. */
@@ -142,20 +158,38 @@ export function sampleAt(b, i) {
 
 function lastPos(pos) { return pos.length ? pos[pos.length - 1] : null; }
 
-/** 구간 평균 표본(표용). */
+/**
+ * 표본마다 덮는 시간(ms) — 표본 값은 '앞 표본부터 이 표본까지' 의 비율이므로 무게 = 앞 표본과의 간격(v2.979 반증 1).
+ * 수집 공백(GAP_MS 초과)이나 구간의 첫 표본은 앞 간격을 모르므로 표본 간격(sampleSpacing — 없으면 다음 간격 · 그것도 없으면 2초)으로 둔다.
+ */
+export function sampleWeights(pos) {
+  const n = pos.length;
+  if (!n) return [];
+  const fb = sampleSpacing(pos) ?? 2_000;
+  const ok = (g) => g > 0 && g <= GAP_MS;
+  const w = new Array(n);
+  for (let k = 0; k < n; k++) {
+    const g = k > 0 ? pos[k][2] - pos[k - 1][2] : (n > 1 ? pos[1][2] - pos[0][2] : 0);
+    w[k] = ok(g) ? g : fb;
+  }
+  return w;
+}
+
+/** 구간 평균 표본(표용) — 시간 가중(v2.979). coverMs = 평균이 덮는 시간(화면이 '30분 중 12분' 처럼 말하게). */
 function averageSample(pos) {
   if (!pos.length) return null;
   const last = sampleAt(pos[pos.length - 1][0], pos[pos.length - 1][1]);
-  const mean = (key) => { let s = 0; let n = 0; for (const [b, i] of pos) { const v = val(b, key, i); if (v != null) { s += v; n += 1; } } return n ? r2(s / n) : null; };
+  const ws = sampleWeights(pos);
+  const mean = (key) => { let s = 0; let n = 0; pos.forEach(([b, i], k) => { const v = val(b, key, i); if (v != null) { s += v * ws[k]; n += ws[k]; } }); return n ? r2(s / n) : null; };
   const sum = (key) => { let s = 0; let n = 0; for (const [b, i] of pos) { const v = val(b, key, i); if (v != null) { s += v; n += 1; } } return n ? s : null; };
-  const out = { ...last, avg: true };
+  const out = { ...last, avg: true, coverMs: ws.reduce((a, x) => a + x, 0) };
   if (last.cpu) for (const k of ['pct', 'usr', 'sys', 'iow', 'stl', 'irq']) out.cpu = { ...out.cpu, [k]: mean(`c.${k}`) };
   if (last.cpu) out.cpu.cores = last.cpu.cores.map((_, c) => mean(`c.k${c}`));
   if (last.mem) for (const k of ['pct', 'used', 'avail', 'bc', 'free', 'swU', 'dirty', 'slab']) out.mem = { ...out.mem, [k]: mean(`m.${k}`) };
   out.net = last.net.map((x) => ({ ...x, rx: mean(`n.${x.n}.rx`), tx: mean(`n.${x.n}.tx`), u: mean(`n.${x.n}.u`), er: sum(`n.${x.n}.er`), dr: sum(`n.${x.n}.dr`) }));
   out.dsk = last.dsk.map((d) => {
-    const rows = pos.map(([b, i]) => (b.cols.has(`d.${d.n}.util`) ? IOSTAT_COLS.map((c) => val(b, `d.${d.n}.${c}`, i)) : null)).filter(Boolean);
-    const v = timeAverageIostat(rows);
+    const rows = pos.map(([b, i]) => (b.cols.has(`d.${d.n}.util`) ? IOSTAT_COLS.map((c) => val(b, `d.${d.n}.${c}`, i)) : null));
+    const v = timeAverageIostat(rows, ws);
     return { ...d, v, stuck: undefined, fl: mean(`d.${d.n}.fl`) };
   });
   const phys = out.dsk.filter((d) => d.k === 'disk');
@@ -213,21 +247,27 @@ export function seriesKeyFor(metric, item, scope, meta) {
 /** 지표 비교 — 서버마다 한 줄(칸 평균 · 최고) + 끝 값 · 순위. */
 export async function compare(ids, w, { metric = 'cpu', item = 'pct', scope = 'all' } = {}) {
   const y = createYielder(15);
-  const out = []; let partial = false;
+  const rows = []; let partial = false;
   for (const id of ids) {
     const { blocks, partial: p } = await blocksFor(id, w.from, w.to);
     partial = partial || p;
     const meta = blocks.length ? blocks[blocks.length - 1].meta : null;
     const key = seriesKeyFor(metric, item, scope, meta);
-    const pos = positions(blocks, w.from, w.to);
-    if (!key) { out.push({ id, key: null, avg: [], max: [], last: null, missing: 'no-series' }); await y(); continue; }
-    const { avg, max } = bucketize(pos, key, w.from, w.to, MAX_POINTS);
+    rows.push({ id, key, blocks, pos: key ? positions(blocks, w.from, w.to) : [] });
+    await y();
+  }
+  // 모든 서버가 같은 칸(시각)을 쓴다 — 서버 × 시간 칸이 위아래로 맞고, CSV 의 시각 열(points)과 값 배열 길이가 같다.
+  const points = commonPoints(rows.filter((r) => r.key).map((r) => r.pos), w.from, w.to, MAX_POINTS);
+  const out = [];
+  for (const { id, key, blocks, pos } of rows) {
+    if (!key) { out.push({ id, key: null, avg: [], max: [], last: null, missing: 'no-series' }); continue; }
+    const { avg, max } = bucketize(pos, key, w.from, w.to, points, { fixed: true });
     let last = null; let lastAt = null;
     for (let k = pos.length - 1; k >= 0; k--) { const v = val(pos[k][0], key, pos[k][1]); if (v != null) { last = r2(v); lastAt = pos[k][2]; break; } }
     out.push({ id, key, avg, max, last, lastAt, n: pos.length, ...(pos.length && !blocks.some((b) => b.cols.has(key)) ? { missing: 'no-series' } : {}) });
     await y();
   }
-  return { targets: out, partial, points: MAX_POINTS };
+  return { targets: out, partial, points };
 }
 
 /** 서버 상세 — 차트 · 표(끝 순간 또는 구간 평균) · 고른 장치의 처리량 · 지연. */
@@ -251,7 +291,7 @@ export async function serverDetail(id, w, { at = 'end', dev = '' } = {}) {
     pick = best?.n || null;
   }
   const devChart = pick ? { n: pick, rMB: chart(`d.${pick}.rMB`), wMB: chart(`d.${pick}.wMB`), rAwait: chart(`d.${pick}.rAwait`), wAwait: chart(`d.${pick}.wAwait`) } : null;
-  return { id, n: pos.length, lastAt: lp ? lp[2] : null, at, table, summary: summarize(table), charts, dev: devChart, points: P, sparkPoints: SP, partial, hello: store.helloOf(id) };
+  return { id, n: pos.length, firstAt: pos.length ? pos[0][2] : null, lastAt: lp ? lp[2] : null, coverMs: table?.coverMs ?? null, at, table, summary: summarize(table), charts, dev: devChart, points: P, sparkPoints: SP, partial, hello: store.helloOf(id) };
 }
 
 /** iostat 비교 — 고른 서버들의 장치 줄(13칸) + 차트에 올린 줄(최대 4) 추이. */
@@ -272,13 +312,18 @@ export async function iostatCompare(ids, w, { at = 'end', scope = 'phys', col = 
   }
   const c = IOSTAT_COLS.includes(col) ? col : 'wAwait';
   const series = [];
+  const picked = [];
   for (const pin of (Array.isArray(pins) ? pins : []).slice(0, 4)) {
     const m = /^([a-z0-9-]{1,40})\/([A-Za-z0-9_.!:+-]{1,64})$/.exec(String(pin));
-    if (!m || !posBy.has(m[1])) continue;
-    const { avg, max } = bucketize(posBy.get(m[1]), `d.${m[2]}.${c}`, w.from, w.to, MAX_POINTS);
+    if (m && posBy.has(m[1])) picked.push(m);
+  }
+  // 고정한 장치 선(최대 4)도 같은 칸 — 서버마다 수집 주기가 달라도 같은 시각끼리 비교한다(v2.979).
+  const points = commonPoints(picked.map((m) => posBy.get(m[1])), w.from, w.to, MAX_POINTS);
+  for (const m of picked) {
+    const { avg, max } = bucketize(posBy.get(m[1]), `d.${m[2]}.${c}`, w.from, w.to, points, { fixed: true });
     series.push({ pin: `${m[1]}/${m[2]}`, avg, max });
   }
-  return { rows, col: c, series, partial, points: MAX_POINTS };
+  return { rows, col: c, series, partial, points };
 }
 
 /* ── 프로세스 ─────────────────────────────────────────────────────────────── */
@@ -313,14 +358,17 @@ export async function procs(ids, w, { at = 'end', maskUser = (u) => u } = {}) {
     let list = []; let total = null; let lastAt = null;
     if (snaps.length) {
       if (at === 'avg') {
+        // 시간 가중(v2.979 — 표 평균과 같은 규칙): 스냅샷마다 앞 스냅샷과의 간격으로 무게를 준다. 상위 목록에 없던 스냅샷은 0 으로 센다(예전과 같다).
+        const ws = sampleWeights(snaps.map((s) => [null, null, Number(s.t)]));
+        const W = ws.reduce((a, x) => a + x, 0) || 1;
         const acc = new Map();
-        for (const s of snaps) for (const p of s.top || []) {
-          const k = `${p.pid}|${p.c}`;
-          const a = acc.get(k) || { ...p, cpuSum: 0 };
-          a.cpuSum += p.cpu ?? 0; a.rss = p.rss; a.th = p.th; a.et = p.et; a.u = p.u;
-          acc.set(k, a);
-        }
-        list = [...acc.values()].map((a) => ({ ...a, cpu: r2(a.cpuSum / snaps.length), sh: null, cpuSum: undefined }));
+        snaps.forEach((s, k) => { for (const p of s.top || []) {
+          const key = `${p.pid}|${p.c}`;
+          const a = acc.get(key) || { ...p, cpuSum: 0 };
+          a.cpuSum += (p.cpu ?? 0) * ws[k]; a.rss = p.rss; a.th = p.th; a.et = p.et; a.u = p.u;
+          acc.set(key, a);
+        } });
+        list = [...acc.values()].map((a) => ({ ...a, cpu: r2(a.cpuSum / W), sh: null, cpuSum: undefined }));
         list.sort((a, b) => (b.cpu ?? 0) - (a.cpu ?? 0));
         list = list.slice(0, TOP_N);
       } else {

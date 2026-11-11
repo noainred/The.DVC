@@ -201,3 +201,11 @@
 .fm-wrap .fm-diag { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px dashed var(--border-soft); min-width: 0; overflow-wrap: anywhere; }
 .fm-wrap .fm-sel-sm { height: 28px; min-width: 140px; }
 .fm-wrap .fm-key > .fm-mono { overflow-wrap: anywhere; min-width: 0; }
+/* v2.979: 카드 제목 옆의 '지금 보는 값'(구간 끝 순간 · N분 평균) */
+.fm-wrap .fm-h3 .fm-at { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+/* v2.979 진행 중인 수집 줄 · 수집에 더하기 */
+.fm-wrap .fm-sessions { gap: 8px; }
+.fm-wrap .fm-sess { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border: 1px solid var(--border-soft); border-radius: 10px; min-width: 0; max-width: 100%; }
+.fm-wrap .fm-sess.on { border-color: var(--accent); }
+.fm-wrap .fm-join { border-top: 1px solid var(--border-soft); }
+.fm-wrap .fm-pad-x { margin: 0 16px; }
