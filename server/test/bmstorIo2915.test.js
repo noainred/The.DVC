@@ -69,7 +69,7 @@ test('diskstats: 2초 표본 → 속도(512B 섹터 · uptime 차) · 바쁨 = �
   assert.equal(r.io.sampleMs, 2000);
   const { disks: perDisk, ...totals } = r.io.counters;
   assert.deepEqual(totals, { rdSectors: 2048 + 4096 + 4096 + 8192, wrSectors: 1024 + 2048 + 2048, ioMs: 900 + 2700, uptimeSec: 1002, rdIos: 4, wrIos: 4, rwTicks: 0 });
-  // v2.970: 디스크별 누적 카운터(구간 평균은 디스크끼리 뺀다) — [rd_sectors, wr_sectors, io_ms, rd_ios, wr_ios, rw_ticks]
+  // v2.971: 디스크별 누적 카운터(구간 평균은 디스크끼리 뺀다) — [rd_sectors, wr_sectors, io_ms, rd_ios, wr_ios, rw_ticks]
   assert.deepEqual(Object.keys(perDisk).sort(), ['nvme0n1', 'sda']);
   assert.deepEqual(perDisk.nvme0n1, [4096 + 8192, 2048, 900 + 1800, 2, 2, 0]);
   // 역행: nvme 카운터가 줄면 그 장치만 뺀다(0 으로 세지 않는다)
@@ -101,7 +101,7 @@ test('diskstats.intervalAvg: 카운터 차분 ÷ uptime 차 = 구간 평균 · �
   const a = intervalAvg(prev, cur, { maxGapMs: 1_200_000 });
   assert.equal(a.avgReadBps, 10_000_000);     // 11,718,750 × 512 / 600s = 10 MB/s
   assert.equal(a.avgWriteBps, 2_000_000);
-  // v2.970: 디스크별 맵이 없는(합계만 있는 — 구버전 엣지) 구간은 바쁨 평균을 모른다 — 합계 io_ms ÷ 경과는 가장 바쁜 디스크가 아니다(디스크 수만큼 부푼다).
+  // v2.971: 디스크별 맵이 없는(합계만 있는 — 구버전 엣지) 구간은 바쁨 평균을 모른다 — 합계 io_ms ÷ 경과는 가장 바쁜 디스크가 아니다(디스크 수만큼 부푼다).
   assert.equal(a.avgBusyPct, null); assert.equal(a.basis, 'total');
   assert.equal(intervalAvg(prev, { ...cur, counters: { ...cur.counters, uptimeSec: 50 } }), null, '재부팅');
   assert.equal(intervalAvg(prev, { ...cur, ts: NOW + 3 * HOUR }, { maxGapMs: 1_200_000 }), null, '공백');
@@ -320,11 +320,11 @@ test('ioDb: 적재(트랜잭션) → 둘째 표본부터 카운터 차분 평균
   assert.equal(raw.length, 2);
   assert.equal(raw[0].avgTotal, null, '첫 행은 차분 없음');
   assert.equal(raw[1].avgRead, 10_000_000); assert.equal(raw[1].avgWrite, 2_000_000); assert.equal(raw[1].avgTotal, 12_000_000);
-  assert.equal(raw[1].instTotal, 4_500_000); assert.equal(raw[1].avgBusy, null, 'v2.970: 합계 카운터 구간은 바쁨 평균 모름');
+  assert.equal(raw[1].instTotal, 4_500_000); assert.equal(raw[1].avgBusy, null, 'v2.971: 합계 카운터 구간은 바쁨 평균 모름');
   const roll = await ioDb.ioRollupRows('r1h', id, t0, t0 + HOUR);
   assert.equal(roll.length, 1);
   assert.equal(roll[0].n, 2); assert.equal(roll[0].nAvg, 1); assert.equal(roll[0].sumAvg, 12_000_000); assert.equal(roll[0].sumRd, 10_000_000);
-  // v2.970: 피크 = max(2초 표본 4.5 MB/s, 구간 평균 12 MB/s) — 예전에는 4.5 MB/s 로 피크가 평균보다 작았다(이 테스트가 그 값을 고정하고 있었다).
+  // v2.971: 피크 = max(2초 표본 4.5 MB/s, 구간 평균 12 MB/s) — 예전에는 4.5 MB/s 로 피크가 평균보다 작았다(이 테스트가 그 값을 고정하고 있었다).
   assert.equal(roll[0].maxInst, 12_000_000);
   const r15 = await ioDb.ioRollupRows('r15', id, t0, t0 + HOUR);
   assert.equal(r15.length, 1, '0분 · 10분 표본은 같은 15분 칸'); assert.equal(r15[0].n, 2); assert.equal(r15[0].nAvg, 1);

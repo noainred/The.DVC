@@ -1,5 +1,5 @@
 /**
- * bmstor/diskMap.js — 디스크별 누적 카운터 맵 정제(순수, v2.970).
+ * bmstor/diskMap.js — 디스크별 누적 카운터 맵 정제(순수, v2.971).
  * 엣지 회신(poller.sanitizeBmIo — 엣지 export 새 필드 = 중앙 화이트리스트)과 io_last.disks_json 되살리기(ioDb)가 **같은 함수**를 쓴다.
  * 모양: { <통짜 디스크 이름>: [rd_sectors, wr_sectors, io_ms, rd_ios, wr_ios, rw_ticks] } — diskstats.ioRate 가 만든다.
  */
@@ -10,7 +10,7 @@ import { WHOLE_DISK_RE, DISK_MAP_MAX } from './diskstats.js';
 export const NAME_MAX = 32;
 
 /**
- * v2.970: 엣지가 보낸 디스크별 누적 카운터 맵 정제 — 이름은 32자 이하 · 통짜 디스크 정규식(WHOLE_DISK_RE)만 · 상한 DISK_MAP_MAX 개
+ * v2.971: 엣지가 보낸 디스크별 누적 카운터 맵 정제 — 이름은 32자 이하 · 통짜 디스크 정규식(WHOLE_DISK_RE)만 · 상한 DISK_MAP_MAX 개
  * (넘으면 맵 전체를 버린다 — 일부만 남기면 다음 구간과 비교할 디스크 집합이 흔들린다) · 값은 길이 6 배열:
  * 섹터 두 개 · io_ms 는 0 이상 유한 수(아니면 그 디스크를 뺀다) · I/O 횟수 둘 · 소요 ms 는 셋 다 0 이상 수거나 셋 다 null.
  * 문자열 수치는 수로(루트 규칙 — 엣지 정제). 결과는 프로토타입 없는 객체가 아니라 일반 객체지만 키가 정규식을 통과한 이름뿐이라 '__proto__' 류가 들어오지 않는다.

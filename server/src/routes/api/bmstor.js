@@ -171,7 +171,7 @@ export function registerBmStorage(api) {
   /*
    * ── v2.915 장비별 디스크 성능 시계열(설계 §4.6) ──
    * ids = bm:<id> · san:<시리얼> · bm:all · san:all (최대 10). 격자는 SAN 포트 사용량과 같다(sanRangeOf — 15분 · 1시간 정배수).
-   * 베어메탈: 1시간 = 원시 표(점 = 수집 주기) · 24시간 = 15분 표 · 7일 · 30일 = 1시간 표. 평균 = 디스크별 카운터 차분 평균, 피크 = 2초 표본과 구간 평균 중 큰 값(하한 — v2.970).
+   * 베어메탈: 1시간 = 원시 표(점 = 수집 주기) · 24시간 = 15분 표 · 7일 · 30일 = 1시간 표. 평균 = 디스크별 카운터 차분 평균, 피크 = 2초 표본과 구간 평균 중 큰 값(하한 — v2.971).
    * SAN: storageSeriesMulti 의 sum(평균) · peak(표본 최댓값) 을 어레이 시리얼로 고른다. rank=1 이면 막대 비교용 전 장비 순위도 싣는다.
    */
   api.get('/tools/bm-storage/io/series', adminOnly, fullScopeOnly, async (req, res) => {
@@ -275,7 +275,7 @@ export function registerBmStorage(api) {
         for (let i = 0; i < agg.buckets.length; i++) {
           if (t.total[i] == null) continue;
           let p = 0; for (const s of agg.series) if (endpointKind(s.key, { matched: false }) === 'array' && s.peak?.[i] != null) p += s.peak[i];
-          // v2.970(반증 F8): 평균 합에는 이월 값이 들어가는데 피크 합은 피크가 있는 어레이만 더한다(부분 합) — 최소한 평균 합 위로.
+          // v2.971(반증 F8): 평균 합에는 이월 값이 들어가는데 피크 합은 피크가 있는 어레이만 더한다(부분 합) — 최소한 평균 합 위로.
           peakRaw[i] = Math.max(p, t.total[i]);
         }
         const peak = regrid(agg.buckets, peakRaw, buckets, bucketMs, 'max');
@@ -397,7 +397,7 @@ export function registerBmStorage(api) {
           tput: finishMetric(metrics.tput, { source: 'diskstats', reason: base }),
           iops: finishMetric(metrics.iops, { source: 'diskstats', reason: ioReason || 'no-iops-data' }),
           lat: finishMetric({ avg: metrics.lat.avg, peak: metrics.lat.peak }, { source: 'diskstats', reason: ioReason || 'no-iops-data' }),
-          // v2.970(반증 F3): 처리량 평균은 있는데 바쁨 평균만 없으면 ‘표본 없음’ 이 아니다 — 디스크별 카운터가 없는 구간(구버전 엣지 · v2.970 이전 기록 · 업그레이드 첫 구간).
+          // v2.971(반증 F3): 처리량 평균은 있는데 바쁨 평균만 없으면 ‘표본 없음’ 이 아니다 — 디스크별 카운터가 없는 구간(구버전 엣지 · v2.971 이전 기록 · 업그레이드 첫 구간).
           busy: finishMetric(metrics.busy, { source: 'diskstats-busy', reason: ioReason || ((metrics.tput.avg || []).some((v) => v != null) ? 'busy-avg-unknown' : base) }),
         },
       };

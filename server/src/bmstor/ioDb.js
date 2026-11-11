@@ -19,7 +19,7 @@
  *   n_abusy · sum_abusy(구간 평균 바쁨). **v2.956 으로 만든 DB 는 열을 덧붙인다**(ensureColumns — ALTER TABLE ADD COLUMN · 이미 있으면 건너뜀 · 기본값 0/NULL).
  *   예전 행의 새 열은 비어 있고(n_* = 0) 화면은 그 칸을 '—' 로 둔다(0 이 아니다).
  *
- * v2.970(사용자 질문 2026-11-11 — 화면의 피크 < 평균에서 찾은 결함):
+ * v2.971(사용자 질문 2026-11-11 — 화면의 피크 < 평균에서 찾은 결함):
  *  · io_last.disks_json — **디스크별 누적 카운터**(diskstats.intervalAvg 가 두 수집 모두에 있는 디스크끼리만 뺀다 · 합계 하나로 빼면 디스크 구성이 바뀐 구간이 튀었다).
  *  · 구간 평균 바쁨은 이제 **가장 바쁜 디스크**(원시 avg_busy_disk · 집계 n_dbusy · sum_dbusy). 예전 avg_busy · n_abusy · sum_abusy 는 ‘모든 디스크 io_ms 합 ÷ 경과’
  *    (디스크 수만큼 부푼 값)라 **읽지 않는다** — 예전 행의 바쁨 평균은 '—'.
@@ -80,12 +80,12 @@ const rollupUpsert = (table) => `INSERT INTO ${table} (${ROLLUP_COLS}) VALUES (?
 /** v2.962 덧붙일 열(표 → [열, 정의]) — v2.956 DB 에 ALTER TABLE ADD COLUMN(이미 있으면 건너뜀). NOT NULL 열은 기본값이 있어야 한다(SQLite 규칙). */
 const ADD_ROLLUP = [['n_iops', 'INTEGER NOT NULL DEFAULT 0'], ['sum_iops', 'REAL NOT NULL DEFAULT 0'], ['max_iops', 'REAL'], ['sum_dios', 'REAL NOT NULL DEFAULT 0'],
   ['sum_dticks', 'REAL NOT NULL DEFAULT 0'], ['max_lat', 'REAL'], ['n_abusy', 'INTEGER NOT NULL DEFAULT 0'], ['sum_abusy', 'REAL NOT NULL DEFAULT 0'],
-  // v2.970 — 구간 평균 바쁨(가장 바쁜 디스크). n_abusy · sum_abusy(모든 디스크 합)는 더 쓰지 않는다.
+  // v2.971 — 구간 평균 바쁨(가장 바쁜 디스크). n_abusy · sum_abusy(모든 디스크 합)는 더 쓰지 않는다.
   ['n_dbusy', 'INTEGER NOT NULL DEFAULT 0'], ['sum_dbusy', 'REAL NOT NULL DEFAULT 0']];
 export const ADD_COLUMNS = Object.freeze({
   io_raw: [['avg_iops', 'REAL'], ['inst_iops', 'REAL'], ['inst_lat', 'REAL'], ['d_ios', 'INTEGER'], ['d_ticks', 'INTEGER'], ['rd_ios', 'INTEGER'], ['wr_ios', 'INTEGER'], ['rw_ticks', 'INTEGER'],
-    ['avg_busy_disk', 'REAL']],                       // v2.970 — 구간 평균 바쁨(가장 바쁜 디스크)
-  io_last: [['rd_ios', 'INTEGER'], ['wr_ios', 'INTEGER'], ['rw_ticks', 'INTEGER'], ['disks_json', 'TEXT'], ['disks_ts', 'INTEGER'], ['n_disks', 'INTEGER']],   // v2.970 — 디스크별 누적 카운터(JSON) · 그 맵을 쓴 수집 ts(낡은 맵 판정) · 합계가 더한 디스크 수
+    ['avg_busy_disk', 'REAL']],                       // v2.971 — 구간 평균 바쁨(가장 바쁜 디스크)
+  io_last: [['rd_ios', 'INTEGER'], ['wr_ios', 'INTEGER'], ['rw_ticks', 'INTEGER'], ['disks_json', 'TEXT'], ['disks_ts', 'INTEGER'], ['n_disks', 'INTEGER']],   // v2.971 — 디스크별 누적 카운터(JSON) · 그 맵을 쓴 수집 ts(낡은 맵 판정) · 합계가 더한 디스크 수
   io_r15: ADD_ROLLUP, io_r1h: ADD_ROLLUP,
 });
 /** 없는 열만 덧붙인다(PRAGMA table_info 로 확인 — 순수하게 이름만 본다). 되돌림: 덧붙인 열 수. */
@@ -156,7 +156,7 @@ function prepare(db) {
     rankRaw: {
       sum: db.prepare('SELECT server_id, SUM(avg_rd + avg_wr) AS v FROM io_raw WHERE ts >= ? AND ts <= ? AND avg_rd IS NOT NULL GROUP BY server_id'),
       n: db.prepare('SELECT server_id, COUNT(*) AS v FROM io_raw WHERE ts >= ? AND ts <= ? AND avg_rd IS NOT NULL GROUP BY server_id'),
-      // v2.970(반증 F7): 원시 순위의 피크도 행마다 max(2초 표본, 구간 평균) — 선 차트 피크와 같은 규칙(스칼라 MAX 는 NULL 이면 NULL — -1 로 채운다 · 집계 함수는 하나).
+      // v2.971(반증 F7): 원시 순위의 피크도 행마다 max(2초 표본, 구간 평균) — 선 차트 피크와 같은 규칙(스칼라 MAX 는 NULL 이면 NULL — -1 로 채운다 · 집계 함수는 하나).
       peak: db.prepare('SELECT server_id, MAX(MAX(COALESCE(inst_rd + inst_wr, -1), COALESCE(avg_rd + avg_wr, -1))) AS v FROM io_raw WHERE ts >= ? AND ts <= ? GROUP BY server_id'),
       sumRd: db.prepare('SELECT server_id, SUM(avg_rd) AS v FROM io_raw WHERE ts >= ? AND ts <= ? AND avg_rd IS NOT NULL GROUP BY server_id'),
       sumWr: db.prepare('SELECT server_id, SUM(avg_wr) AS v FROM io_raw WHERE ts >= ? AND ts <= ? AND avg_wr IS NOT NULL GROUP BY server_id'),
@@ -216,7 +216,7 @@ function lastOf(h, serverId) {
   const r = h.st.getLast.get(serverId);
   const v = r ? { ts: Number(r.ts), counters: { rdSectors: Number(r.rd_sectors), wrSectors: Number(r.wr_sectors), ioMs: Number(r.io_ms), uptimeSec: r.uptime == null ? null : Number(r.uptime),
     ...(r.rd_ios != null && r.wr_ios != null && r.rw_ticks != null ? { rdIos: Number(r.rd_ios), wrIos: Number(r.wr_ios), rwTicks: Number(r.rw_ticks) } : {}),
-    // v2.970(반증 F2): 맵은 그 맵을 쓴 수집(disks_ts)이 지금 행(ts)과 같을 때만 — 구판으로 내렸다 올리면 구판이 ts · 합계만 바꾸고 맵은 옛것으로 남는다.
+    // v2.971(반증 F2): 맵은 그 맵을 쓴 수집(disks_ts)이 지금 행(ts)과 같을 때만 — 구판으로 내렸다 올리면 구판이 ts · 합계만 바꾸고 맵은 옛것으로 남는다.
     ...(r.disks_ts != null && Number(r.disks_ts) === Number(r.ts) && diskMapOf(r.disks_json) ? { disks: diskMapOf(r.disks_json) } : {}),
     ...(r.n_disks != null ? { nDisks: Number(r.n_disks) } : {}) } } : null;
   _last.set(serverId, v);
@@ -248,9 +248,9 @@ export async function recordIoSamples(rows, { intervalMs = 600_000 } = {}) {
       const instIops = real(io.iops); const instLat = real(io.latMs);
       const c = io.counters;
       const dIos = avg && avg.dIos != null ? int(avg.dIos) : null; const dTicks = avg && avg.dTicks != null ? int(avg.dTicks) : null;
-      const busyDisk = avg ? real(avg.avgBusyPct) : null;   // v2.970 — 가장 바쁜 디스크의 구간 평균(합계 기준 구간이면 null)
+      const busyDisk = avg ? real(avg.avgBusyPct) : null;   // v2.971 — 가장 바쁜 디스크의 구간 평균(합계 기준 구간이면 null)
       const res = h.st.insRaw.run(id, ts, String(r.name || '').slice(0, 200),
-        avg ? avg.avgReadBps : null, avg ? avg.avgWriteBps : null, null,   // avg_busy(모든 디스크 합 — v2.969 까지)는 더 쓰지 않는다
+        avg ? avg.avgReadBps : null, avg ? avg.avgWriteBps : null, null,   // avg_busy(모든 디스크 합 — v2.970 까지)는 더 쓰지 않는다
         instRd, instWr, busy,
         int(c.rdSectors), int(c.wrSectors), int(c.ioMs), real(c.uptimeSec), int(io.disks),
         avg ? real(avg.avgIops) : null, instIops, instLat, dIos, dTicks, int(c.rdIos), int(c.wrIos), int(c.rwTicks), busyDisk);
@@ -261,7 +261,7 @@ export async function recordIoSamples(rows, { intervalMs = 600_000 } = {}) {
       const inst = instRd != null && instWr != null ? instRd + instWr : null;
       const hasIops = !!(avg && avg.avgIops != null);
       const hasLat = dIos != null && dTicks != null && dIos > 0;
-      // v2.970: 피크 = 2초 표본과 구간 평균 중 큰 값(구간의 실제 최고치는 구간 평균보다 작을 수 없다). 한쪽이 없으면 있는 쪽.
+      // v2.971: 피크 = 2초 표본과 구간 평균 중 큰 값(구간의 실제 최고치는 구간 평균보다 작을 수 없다). 한쪽이 없으면 있는 쪽.
       const up = (a, b) => (a == null ? (b == null ? null : b) : b == null ? a : Math.max(a, b));
       const pkInst = up(inst, avg ? avg.avgReadBps + avg.avgWriteBps : null);
       const pkRd = up(instRd, avg ? avg.avgReadBps : null); const pkWr = up(instWr, avg ? avg.avgWriteBps : null);
@@ -292,7 +292,7 @@ export async function ioRawRows(serverId, from, to) {
     ts: Number(r.ts),
     avgRead: clean(r.avg_rd), avgWrite: clean(r.avg_wr), avgTotal: r.avg_rd == null || r.avg_wr == null ? null : Number(r.avg_rd) + Number(r.avg_wr),
     instRead: clean(r.inst_rd), instWrite: clean(r.inst_wr), instTotal: r.inst_rd == null || r.inst_wr == null ? null : Number(r.inst_rd) + Number(r.inst_wr),
-    busy: clean(r.busy), avgBusy: clean(r.avg_busy_disk),   // v2.970 — 가장 바쁜 디스크(예전 avg_busy = 모든 디스크 합은 읽지 않는다)
+    busy: clean(r.busy), avgBusy: clean(r.avg_busy_disk),   // v2.971 — 가장 바쁜 디스크(예전 avg_busy = 모든 디스크 합은 읽지 않는다)
     avgIops: clean(r.avg_iops), instIops: clean(r.inst_iops), instLat: clean(r.inst_lat),
     dIos: r.d_ios == null ? null : Number(r.d_ios), dTicks: r.d_ticks == null ? null : Number(r.d_ticks),
   }));
@@ -308,7 +308,7 @@ export async function ioRollupRows(gran, serverId, from, to) {
     maxInst: clean(r.max_inst), maxRd: clean(r.max_rd), maxWr: clean(r.max_wr), maxBusy: clean(r.max_busy),
     nIops: Number(r.n_iops) || 0, sumIops: Number(r.sum_iops) || 0, maxIops: clean(r.max_iops),
     sumDios: Number(r.sum_dios) || 0, sumDticks: Number(r.sum_dticks) || 0, maxLat: clean(r.max_lat),
-    nAbusy: Number(r.n_dbusy) || 0, sumAbusy: Number(r.sum_dbusy) || 0,   // v2.970 — 가장 바쁜 디스크의 구간 평균(n_abusy · sum_abusy 는 읽지 않는다)
+    nAbusy: Number(r.n_dbusy) || 0, sumAbusy: Number(r.sum_dbusy) || 0,   // v2.971 — 가장 바쁜 디스크의 구간 평균(n_abusy · sum_abusy 는 읽지 않는다)
   }));
 }
 
@@ -337,7 +337,7 @@ export async function ioRank(gran, from, to, { metric = 'total' } = {}) {
   for (const r of set.n.all(...a)) touch(r.server_id).n = Number(r.v) || 0;
   for (const r of peakSt.all(...a)) { const p = clean(r.v); if (p != null) touch(r.server_id).peak = p; }
   const out = new Map();
-  // v2.970: 피크는 평균보다 작을 수 없다 — 예전 행(2초 표본만)의 피크가 평균 아래면 평균으로 올린다(하한끼리의 최댓값).
+  // v2.971: 피크는 평균보다 작을 수 없다 — 예전 행(2초 표본만)의 피크가 평균 아래면 평균으로 올린다(하한끼리의 최댓값).
   for (const [id, v] of m) {
     const avgBps = v.n > 0 ? Math.round(v.sum / v.n) : null;
     out.set(id, { avgBps, peakBps: v.peak == null ? avgBps : avgBps == null ? v.peak : Math.max(v.peak, avgBps), n: v.n });

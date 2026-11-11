@@ -36,7 +36,7 @@ describe('compareSetText', () => {
     expect(kindBadge('san', 'vmax')).toBe('purple'); expect(kindBadge('bmg')).toBe('teal');
     expect(sourceText('switch-port')).toMatch(/스위치 포트/); expect(sourceText('array-fe-cpu')).toMatch(/CPU/); expect(sourceText('zz')).toBe('');
     expect(reasonText('fe-ssh')).toMatch(/SSH/); expect(reasonText('no-iops-data')).toMatch(/v2\.962/); expect(reasonText('serial-unmatched')).toMatch(/시리얼/);
-    expect(reasonText('busy-avg-unknown')).toMatch(/v2\.970/);
+    expect(reasonText('busy-avg-unknown')).toMatch(/v2\.971/);
     expect(reasonText('')).toBe(''); expect(reasonText('알 수 없는 원문')).toBe('알 수 없는 원문');
   });
   it('기준(A) 대비 — 배율 · %p · 기준 0/없음은 빈 문자열', () => {

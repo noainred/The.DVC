@@ -13,9 +13,9 @@
  *  · 바쁨(%) = Δio_ticks(ms) ÷ 경과(ms) 의 **장치별 최댓값**(가장 바쁜 디스크 — iostat %util 과 같은 뜻 · 평균이 아니다).
  *  · v2.962(비교 세트): IOPS = Δ(읽기+쓰기 완료 횟수) ÷ 경과 · 응답 시간(ms) = Δ(읽기+쓰기 소요 ms) ÷ Δ(읽기+쓰기 횟수) — iostat await 와 같은 정의이고
  *    디스크 전체의 **I/O 가중 평균**이다(디스크별 평균의 평균이 아니다). I/O 가 0 이면 응답 시간은 null(0 ms 가 아니다 — 모름).
- *  · v2.970(사용자 질문 2026-11-11 "전송속도 피크/평균이 그룹 서버 IO 를 합친 거야?" — 화면에서 피크 < 평균을 보고 찾은 결함):
+ *  · v2.971(사용자 질문 2026-11-11 "전송속도 피크/평균이 그룹 서버 IO 를 합친 거야?" — 화면에서 피크 < 평균을 보고 찾은 결함):
  *    수집 사이 **구간 평균은 디스크별 누적 카운터로** 낸다(`counters.disks` — 이름 → [rd_sectors, wr_sectors, io_ms, rd_ios, wr_ios, rw_ticks]).
- *    v2.969 까지는 디스크 **합계** 카운터 하나만 기억해, 한 번 목록에서 빠졌다 돌아온 디스크의 평생 누적이 그 구간에 한꺼번에 일어난 것으로
+ *    v2.970 까지는 디스크 **합계** 카운터 하나만 기억해, 한 번 목록에서 빠졌다 돌아온 디스크의 평생 누적이 그 구간에 한꺼번에 일어난 것으로
  *    계산됐다(재현: 2초 표본 128 KB/s · 구간 평균 667 GB/s) · 구간 평균 바쁨은 **모든 디스크 io_ms 합** ÷ 경과(디스크 20개 × 3% → 60%)였다.
  *    이제 두 수집 모두에 있는 디스크만 비교하고(카운터가 준 디스크는 그 구간에서 뺀다) 바쁨은 디스크별 최댓값(2초 표본과 같은 뜻)이다.
  *
@@ -120,7 +120,7 @@ export function ioRate(before, after) {
     if (!b) { skipped += 1; continue; }
     const dRd = a.rdSectors - b.rdSectors; const dWr = a.wrSectors - b.wrSectors;
     if (dRd < 0 || dWr < 0) { skipped += 1; continue; }   // 섹터 역행 = 장치 교체 · 재연결 — 이 장치는 이번 표본에서 뺀다
-    // v2.970(반증 F4): io_ms 만 줄었으면 32비트 넘침 — 보정한다(예전에는 처리량까지 통째로 뺐다). 보정 값이 경과보다 크면 바쁨만 모름.
+    // v2.971(반증 F4): io_ms 만 줄었으면 32비트 넘침 — 보정한다(예전에는 처리량까지 통째로 뺐다). 보정 값이 경과보다 크면 바쁨만 모름.
     const dIoRaw = tickDelta(a.ioMs, b.ioMs);
     const dIo = dIoRaw != null && dIoRaw <= elapsed * 1000 * 1.05 + 1000 ? dIoRaw : null;
     disks += 1;
@@ -137,7 +137,7 @@ export function ioRate(before, after) {
     cRdIos += a.rdIos; cWrIos += a.wrIos; cTicks += a.rwTicks;
   }
   if (!disks) return { ok: false, error: after.devices.size ? '모든 디스크의 카운터가 역행했습니다(재부팅 직후?)' : '/proc/diskstats 에 통짜 디스크(sd · nvme · vd)가 없습니다' };
-  // v2.970: 디스크별 누적 카운터 — 2초 표본에서 뺀 디스크(앞 구간에 없던 · 2초 사이 역행)도 **'after' 시점의 누적 상태**로 싣는다.
+  // v2.971: 디스크별 누적 카운터 — 2초 표본에서 뺀 디스크(앞 구간에 없던 · 2초 사이 역행)도 **'after' 시점의 누적 상태**로 싣는다.
   //   수집 사이 구간 평균은 두 수집에 모두 있는 디스크끼리만 뺀다(intervalAvg) — 합계 하나로 빼면 디스크 구성이 바뀐 구간이 튄다.
   let diskMap = null;
   if (after.devices.size <= DISK_MAP_MAX) {
@@ -186,14 +186,14 @@ const fin = (v) => typeof v === 'number' && Number.isFinite(v);
  * 수집 사이의 **구간 평균**(순수 — 중앙 I/O 시계열 DB 가 쓴다). prev·cur 는 { ts, counters:{ rdSectors, wrSectors, ioMs, uptimeSec, rdIos?, wrIos?, rwTicks?, disks? } }.
  * 경과는 uptime 차(둘 다 있고 늘었을 때) 아니면 ts 차. 공백이 maxGapMs 를 넘거나 uptime 이 줄었으면 null(모름 — 0 아님).
  *
- * v2.970 — 기준은 **디스크별 카운터**(`counters.disks`, basis 'disk'):
+ * v2.971 — 기준은 **디스크별 카운터**(`counters.disks`, basis 'disk'):
  *  · 두 수집 **모두에 있는** 디스크끼리만 뺀다. 섹터 · io_ms 중 하나라도 준 디스크(교체 · 재연결 — 카운터가 0 부터)는 그 구간에서 뺀다.
  *  · 처리량 · IOPS = 그 디스크들의 합 ÷ 경과 · 바쁨 = **디스크별 Δio_ms ÷ 경과의 최댓값**(2초 표본 busyPct 와 같은 뜻 — 가장 바쁜 디스크).
  *  · IOPS · 응답 시간 재료(dIos · dTicks)는 비교한 디스크 **전부**에 그 열이 있고 줄지 않았을 때만(부분 합 금지 — 아니면 셋 다 null).
  *  · 비교할 디스크가 하나도 없으면 null.
  * 한쪽만 맵이 있으면(업그레이드 직후 첫 구간 · 맵 상한 초과 전환) **null** — 합계와 디스크별을 섞어 빼지 않는다(한 구간만 비운다).
  * 두 쪽 모두 맵이 없으면(구버전 엣지 회신) 예전처럼 합계로 빼되(basis 'total') **바쁨 평균은 null** — 합계 io_ms 로는 가장 바쁜 디스크를 알 수 없다
- *   (v2.969 까지 낸 ‘모든 디스크 합’ 은 디스크 수만큼 부풀었다). 합계 기준은 디스크 구성이 바뀐 구간이 튈 수 있다 — 엣지를 올리면 사라진다.
+ *   (v2.970 까지 낸 ‘모든 디스크 합’ 은 디스크 수만큼 부풀었다). 합계 기준은 디스크 구성이 바뀐 구간이 튈 수 있다 — 엣지를 올리면 사라진다.
  * @returns {{ avgReadBps:number, avgWriteBps:number, avgBusyPct:number|null, avgIops:number|null, dIos:number|null, dTicks:number|null, basis:'disk'|'total', disks:number|null }|null}
  */
 export function intervalAvg(prev, cur, { maxGapMs } = {}) {
@@ -204,7 +204,7 @@ export function intervalAvg(prev, cur, { maxGapMs } = {}) {
   if (Number.isFinite(Number(maxGapMs)) && Number(maxGapMs) > 0 && dTs > Number(maxGapMs)) return null;
   const pu = numOrNull(pc.uptimeSec); const cu = numOrNull(cc.uptimeSec);
   if (pu != null && cu != null && cu <= pu) return null;             // 재부팅
-  // v2.970(반증 F5): 연속 재부팅 — 앞 수집의 가동 시간이 짧았으면 재부팅 뒤에도 cu > pu 일 수 있다. 가동 시간은 벽시계와 같은 속도로 늘므로
+  // v2.971(반증 F5): 연속 재부팅 — 앞 수집의 가동 시간이 짧았으면 재부팅 뒤에도 cu > pu 일 수 있다. 가동 시간은 벽시계와 같은 속도로 늘므로
   //   uptime 차가 수집 시각 차보다 한참 작으면 그 사이에 재부팅이 있었다(여유 = 120초 또는 25% — 수집 시각은 중앙 수신 시각이라 엣지 지연이 낀다).
   if (pu != null && cu != null && (cu - pu) < dTs / 1000 - Math.max(120, dTs / 4000)) return null;
   const sec = pu != null && cu != null ? cu - pu : dTs / 1000;
@@ -248,7 +248,7 @@ function perDiskAvg(pd, cd, sec) {
 }
 
 function totalsAvg(pc, cc, sec) {
-  // v2.970(반증 F1): 합계 카운터는 그 수집의 2초 표본이 비교한 디스크만 더한 값이다 — 디스크 수가 다르면 두 합계는 다른 디스크 집합이라
+  // v2.971(반증 F1): 합계 카운터는 그 수집의 2초 표본이 비교한 디스크만 더한 값이다 — 디스크 수가 다르면 두 합계는 다른 디스크 집합이라
   //   빼면 튄다(한 번 빠졌다 돌아온 디스크의 평생 누적). 수를 알면 같을 때만 뺀다(같은 수로 바뀐 경우까지는 못 잡는다 — 엣지를 올리면 디스크별).
   const pn = numOrNull(pc.nDisks); const cn = numOrNull(cc.nDisks);
   if (pn != null && cn != null && pn !== cn) return null;
@@ -267,7 +267,7 @@ function totalsAvg(pc, cc, sec) {
   return {
     avgReadBps: Math.round((dRd * SECTOR_BYTES) / sec),
     avgWriteBps: Math.round((dWr * SECTOR_BYTES) / sec),
-    avgBusyPct: null,   // v2.970: 합계 io_ms ÷ 경과는 ‘가장 바쁜 디스크’ 가 아니다(디스크 수만큼 부푼다) — 모름
+    avgBusyPct: null,   // v2.971: 합계 io_ms ÷ 경과는 ‘가장 바쁜 디스크’ 가 아니다(디스크 수만큼 부푼다) — 모름
     avgIops, dIos, dTicks, basis: 'total', disks: null,
   };
 }

@@ -1,4 +1,4 @@
-// v2.970 — 베어메탈 디스크 I/O 구간 평균을 디스크별로 · 바쁨 평균 = 가장 바쁜 디스크 · 피크 ≥ 구간 평균 · 묶음 피크 부분 합 금지.
+// v2.971 — 베어메탈 디스크 I/O 구간 평균을 디스크별로 · 바쁨 평균 = 가장 바쁜 디스크 · 피크 ≥ 구간 평균 · 묶음 피크 부분 합 금지.
 // 사용자 질문(2026-11-11): "여기서 수집되는 전송속도 피크/평균이 그룹에 속한 모든 서버의 IO 를 합친거야?" — 화면은 피크 633 KB/s < 평균 1.18 GB/s,
 // IOPS 피크 72 < 평균 3,510, 응답 시간 피크 0.00 < 평균 0.20 ms 였다. 코드에서 찾은 원인 넷을 여기서 고정한다(수정 전 판본으로 되돌리면 깨진다).
 // src 모듈은 before() 에서 동적 import(정적 import 는 CONFIG_DIR 보다 먼저 config.js 를 평가한다 — bmstorIo2915 머리말).
@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bmio2969-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bmio2971-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';
@@ -229,7 +229,7 @@ test('적재 · 라우트: io_last 에 디스크별 카운터가 남아 재시�
   const rk2 = (await ioDb.ioRank('raw', now - HOURISH, now)).get(rk.server.id);
   assert.equal(rk2.avgBps, 2_000_000); assert.equal(rk2.peakBps, 3_000_000);
 
-  // 반증 F2: 구판(v2.969)으로 내렸다 올리면 구판이 io_last 의 ts · 합계만 바꾸고 디스크 맵은 옛것으로 남는다 — 그 맵으로 빼지 않는다(그 구간은 모름).
+  // 반증 F2: 구판(v2.970)으로 내렸다 올리면 구판이 io_last 의 ts · 합계만 바꾸고 디스크 맵은 옛것으로 남는다 — 그 맵으로 빼지 않는다(그 구간은 모름).
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(process.env.BMSTOR_IO_DB_PATH);
   try { db.prepare('UPDATE io_last SET ts = ?, uptime = ? WHERE server_id = ?').run(ts(3), 100_000 + 3 * 600, a.server.id); } finally { db.close(); }
