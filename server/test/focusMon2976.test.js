@@ -213,14 +213,15 @@ test('⑥ 수집 상한 · 잠깐 보기 시한 · 보는 화면 없음 · 계�
   const rec = store.startSession({ targets: ids(20, 'b'), mode: 'record', interval: 1 }, now);
   assert.equal(rec.ok, true);
   assert.equal(store.startSession({ targets: ids(1, 'c') }, now).code, 'too-many-total', '서로 다른 대상 40대');
-  assert.equal(store.startSession({ targets: ids(1, 'b'), mode: 'record' }, now).ok, true, '이미 수집 중인 대상은 합계를 늘리지 않는다');
-  assert.equal(store.startSession({ targets: ids(1, 'a') }, now).code, 'too-many-sessions');
+  // v2.979 중복 방지: 이미 수집 중인 서버만 고르면 새 수집을 만들지 않는다(예전에는 같은 서버로 두 번째 수집을 만들었다 — 동시 수집 상한은 focusMonSess2979 ②)
+  assert.equal(store.startSession({ targets: ids(1, 'b'), mode: 'record' }, now).code, 'already', '이미 수집 중인 서버만이면 already');
+  assert.equal(store.startSession({ targets: ids(1, 'a') }, now).code, 'already');
   // 계속 수집 정의는 파일로 — 재시작(메모리 초기화) 뒤 이어 받는다
   const file = path.join(DIR, 'focusmon-sessions.json');
   assert.ok(fs.existsSync(file));
   assert.ok(!fs.readFileSync(file, 'utf8').includes(ids(1, 'a')[0]), '잠깐 보기는 파일에 남기지 않는다');
   store._resetForTest();
-  assert.equal(store.listSessions().filter((s) => s.mode === 'record').length, 2);
+  assert.equal(store.listSessions().filter((s) => s.mode === 'record').length, 1, '계속 수집 1건(중복 수집은 만들어지지 않았다)');
   // 안 볼 때 10초 · 보면 원래 주기
   const resolve = (id) => ({ id, host: '10.0.0.1', port: 22, username: 'u', agent: '', enabled: true });
   let d = store.desiredFor('', resolve, now + 120_000);

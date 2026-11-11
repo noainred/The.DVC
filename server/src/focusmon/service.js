@@ -68,6 +68,26 @@ export function startCollection({ targets, interval, mode, by }) {
   return r;
 }
 
+/** 진행 중인 수집에 더하기 · 빼기(v2.979) — 실행 기록(fm_run)을 새 대상으로 고쳐 쓰고 바로 틱 · 엣지를 깨운다. */
+export function addToCollection(id, targets) {
+  const r = store.addToSession(id, targets);
+  if (!r.ok) return r;
+  const s = r.session;
+  db.writeRun({ id: s.id, started: s.startedAt, ended: null, by: s.by, mode: s.mode, interval: s.interval, targets: s.targets }).catch(() => {});
+  tick1();
+  const agents = new Set(r.added.map((x) => resolveForRun(x)?.agent || '').filter(Boolean));
+  for (const a of agents) wakeImpl?.(a);
+  return r;
+}
+export function removeFromCollection(id, targetId) {
+  const r = store.removeFromSession(id, targetId);
+  if (!r.ok) return r;
+  const s = r.session;
+  db.writeRun({ id: s.id, started: s.startedAt, ended: r.ended ? Date.now() : null, by: s.by, mode: s.mode, interval: s.interval, targets: s.targets }).catch(() => {});
+  tick1();
+  return r;
+}
+
 export function stopCollection(id, why = 'stopped') {
   const r = store.stopSession(id, why);
   if (r.ok) {

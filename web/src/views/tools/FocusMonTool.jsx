@@ -16,7 +16,7 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { hashSegments } from '../../hooks/hashTab.js';
 import {
-  DASH, STATE_TEXT, TEST_TEXT, MODE_TEXT, ENDED_TEXT, TABS, IOSTAT_LABEL, SUMMARY_COLS, METRICS,
+  DASH, STATE_TEXT, TEST_TEXT, MODE_TEXT, ENDED_TEXT, sessionIndex, sessionLabel, startNote, joinResultText, TABS, IOSTAT_LABEL, SUMMARY_COLS, METRICS,
   pctText, msText, numText, bpsText, bytesText, sizeText, metricValueText, metricUnitText, iostatText, remainText, clockText, agoShort, etText,
   levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR, bulkLine, needsRetry, AUTH_HINT, nameTitle,
   atOptions, atCaption, normAt,
@@ -759,6 +759,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   const [node, setNode] = useState('all');
   const [csv, setCsv] = useState(false);
   const [installFor, setInstallFor] = useState('');
+  const [joinTo, setJoinTo] = useState('');
   const [setForm2, setSettingsForm] = useState(null);
   const run = async (label, fn) => {
     setBusy(label); setMsg(null);
@@ -767,6 +768,14 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
     finally { setBusy(''); reload(); }
   };
   const targets = main.targets.filter((t) => node === 'all' || (t.agent || '') === node);
+  // v2.979 중복 방지: 서버는 수집 하나에만 — 표에 '수집 중' · 시작 전 안내 · 진행 중인 수집에 추가 · 서버별 수집 종료
+  const sIdx = sessionIndex(main.sessions);
+  const note = startNote({ picked, index: sIdx, mode });
+  const joinSel = main.sessions.find((s) => s.id === joinTo) || main.sessions[0] || null;
+  const stopOne = (t, s) => {
+    if (s.mode === 'record' && !window.confirm(`${t.name} 의 계속 수집을 끝낼까요? 수집한 기록은 보관 기간 동안 남습니다.`)) return;
+    run('stop1', async () => { const r = await delJson(`/tools/focus-mon/sessions/${encodeURIComponent(s.id)}/targets/${encodeURIComponent(t.id)}`); return { ok: true, reason: `${t.name} 수집을 끝냈습니다${r?.ended ? ' — 그 수집의 마지막 서버라 수집도 끝났습니다' : ''}.` }; });
+  };
   const toggle = (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length >= L.maxPerSession ? p : [...p, id]));
   const full = picked.length >= L.maxPerSession;
   const nodeCount = new Map();
@@ -799,9 +808,20 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
               <span className="fm-num" style={{ fontWeight: 600 }}>{picked.length} / {L.maxPerSession}대 선택</span>{full ? <span className="fm-dim">상한에 닿아 더 고를 수 없습니다</span> : null}
               <span className="fm-lbl">주기</span><Seg label="수집 주기" value={interval} onChange={setIv} options={L.intervals.map((v) => [v, `${v}초`])} />
               <span className="fm-lbl">방식</span><Seg label="수집 방식" value={mode} onChange={setMode} options={[['watch', `잠깐 보기 · ${L.watchMin}분`], ['record', '계속 수집']]} />
-              <button type="button" className="fm-btn pri" disabled={!picked.length || !!busy} onClick={() => run('start', async () => { const r = await postJson('/tools/focus-mon/sessions', { targets: picked, interval, mode }); if (r?.ok) onWatch(picked); return r; })}>모니터링 시작</button>
+              <button type="button" className="fm-btn pri" disabled={!picked.length || !!busy} onClick={() => run('start', async () => { const r = await postJson('/tools/focus-mon/sessions', { targets: picked, interval, mode }); if (r?.ok) onWatch(picked); return r?.ok ? { ok: true, reason: joinResultText(r) } : r; })}>모니터링 시작</button>
               <button type="button" className="fm-btn" disabled={!picked.length} onClick={() => onWatch(picked)} title="수집하지 않고 고른 서버의 기록만 봅니다">기록 보기</button>
             </div></div>
+          {main.sessions.length ? (
+            <div className="fm-row fm-pad fm-join">
+              <span className="fm-lbl">진행 중인 수집에 더하기</span>
+              <Select sort={false} className="fm-input fm-sel-sm" value={joinSel?.id || ''} onChange={(e) => setJoinTo(e.target.value)} aria-label="더할 수집">
+                {main.sessions.map((s) => <option key={s.id} value={s.id}>{sessionLabel(s, Date.now())}</option>)}
+              </Select>
+              <button type="button" className="fm-btn" disabled={!picked.length || !joinSel || !!busy} onClick={() => run('join', async () => { const r = await postJson(`/tools/focus-mon/sessions/${encodeURIComponent(joinSel.id)}/targets`, { targets: picked }); if (r?.ok) onWatch(r.session.targets); return r?.ok ? { ok: true, reason: joinResultText(r, { verb: '진행 중인 수집에 더했습니다' }) } : r; })}>고른 서버 더하기</button>
+              <span className="fm-dim">새 수집을 만들지 않고 그 수집의 주기 · 방식으로 함께 수집합니다(동시 수집은 {L.maxSessions}건까지).</span>
+            </div>
+          ) : null}
+          {note ? <div className="fm-ban fm-pad-x">{note}</div> : null}
           <div className="fm-pad fm-addbox">
             <div className="fm-row fm-between"><b>서버 추가</b><div className="fm-row"><span className="fm-dim">여러 대는 CSV(이름,IP,포트,계정,담당 노드)로</span><button type="button" className={`fm-btn ${csv ? 'pri' : ''}`} disabled={!canCsv()} title={canCsv() ? '' : CSV_DENIED_NOTE} onClick={() => setCsv(!csv)}>CSV 대량 등록</button></div></div>
             <div className="fm-form">
@@ -825,11 +845,12 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
               return (
                 <tr key={t.id}>
                   <td><input type="checkbox" checked={on} disabled={!on && full} aria-label={on ? '선택' : full ? '선택할 수 없음 — 상한' : '선택'} onChange={() => toggle(t.id)} /></td>
-                  <td style={{ fontWeight: 600 }}>{t.name}{t.demo ? <span className="fm-badge off">데모</span> : null}</td>
+                  <td style={{ fontWeight: 600 }}>{t.name}{t.demo ? <span className="fm-badge off">데모</span> : null}{sIdx.has(t.id) ? <span className="fm-badge ok" title={sessionLabel(sIdx.get(t.id), Date.now())}>수집 중 · {MODE_TEXT[sIdx.get(t.id).mode]}</span> : null}</td>
                   <td data-sort={t.host}><span className="fm-st"><span className="fm-mono fm-num">{t.host}:{t.port}</span><small className="fm-mono">{t.username}</small></span></td>
                   <td>{t.agent ? `엣지 ${t.agent}` : '중앙'}{t.agent && t.edgeOnline === false && !t.demo ? <span className="fm-badge warn">엣지 응답 없음</span> : null}</td>
                   <td><span className="fm-st"><span className={`fm-badge ${s.tone}`}>{s.label}</span>{s.note ? <small>{s.note}</small> : null}{needsRetry(t) && !t.demo ? <small className="fm-why">{AUTH_HINT}</small> : null}{(t.test?.result?.hello || t.status?.hello)?.rhelMajor ? <small>RHEL {(t.test?.result?.hello || t.status?.hello).rhelMajor}</small> : null}</span></td>
                   <td><span className="fm-row fm-nowrap">
+                    {sIdx.has(t.id) ? <button type="button" className="fm-btn sm danger" disabled={!!busy} onClick={() => stopOne(t, sIdx.get(t.id))}>수집 종료</button> : null}
                     <button type="button" className="fm-btn sm" disabled={!!busy || t.demo} onClick={() => run('t1', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/test`, {}).then((r) => (r?.queued ? { ok: true, reason: `${t.name} 연결 시험을 엣지에 보냈습니다.` } : { ok: !!r?.result?.ok, reason: `${t.name}: ${TEST_TEXT[r?.result?.kind] || r?.result?.kind}${r?.result?.error ? ` — ${r.result.error}` : ''}` })))}>시험</button>
                     {needsRetry(t) ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => run('retry', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/retry`, {}).then((r) => (r?.via === 'edge'
                       ? { ok: true, reason: `${t.name}: 엣지 ${t.agent} 에 다시 연결을 보냈습니다 — 정지를 풀고 한 번 시험합니다(결과는 키 로그인 칸 · 몇 초 걸립니다).` }
@@ -904,8 +925,23 @@ export default function FocusMonTool() {
 
   if (mainQ.error && !main) return <ErrorBox error={mainQ.error} />;
   if (!main) return <Loading />;
-  const pill = sessionPill(active, now);
-  const mineSession = active;
+  const pill = sessions.length > 1
+    ? { live: true, text: '수집 중', sub: `${sessions.length}건 · ${new Set(sessions.flatMap((s) => s.targets)).size}대` }
+    : sessionPill(active, now);
+  const mineSession = sessions.length === 1 ? active : null;
+  const stopSession = (s, ask) => {
+    if (ask && !window.confirm(`${sessionLabel(s, now)} 수집을 끝낼까요? 수집한 기록은 보관 기간 동안 남습니다.`)) return;
+    delJson(`/tools/focus-mon/sessions/${encodeURIComponent(s.id)}`).then(() => { setMsg({ tone: 'ok', text: `${MODE_TEXT[s.mode]} ${s.targets.length}대 수집을 끝냈습니다.` }); mainQ.reload(); })
+      .catch((e) => setMsg({ tone: 'bad', text: e?.body?.reason || e?.message }));
+  };
+  const stopAll = () => {
+    if (!window.confirm(`진행 중인 수집 ${sessions.length}건(${new Set(sessions.flatMap((s) => s.targets)).size}대)을 모두 끝낼까요? 수집한 기록은 보관 기간 동안 남습니다.`)) return;
+    Promise.allSettled(sessions.map((s) => delJson(`/tools/focus-mon/sessions/${encodeURIComponent(s.id)}`))).then((rs) => {
+      const bad = rs.filter((x) => x.status === 'rejected').length;
+      setMsg(bad ? { tone: 'bad', text: `${rs.length}건 가운데 ${bad}건을 끝내지 못했습니다 — 다시 누르세요.` } : { tone: 'ok', text: `수집 ${rs.length}건을 모두 끝냈습니다.` });
+      mainQ.reload();
+    });
+  };
   const onOpen = (id) => go('server', id);
   const onWatch = (list) => { setViewIds(list); go('overview'); };
   const lastEnded = main.ended?.[0];
@@ -916,14 +952,23 @@ export default function FocusMonTool() {
         <div className="fm-row">
           <span className="fm-pill"><i className={pill.live ? 'on' : ''} /><b>{pill.text}</b><span className="fm-dim">· {pill.sub}{main.mock ? ' · 데모 모드' : ''}</span>{pill.remain ? <span className="fm-dim">남은 시간 <b className="fm-mono">{pill.remain}</b></span> : null}</span>
           {mineSession && mineSession.mode === 'watch' ? <button type="button" className="fm-btn" onClick={() => postJson(`/tools/focus-mon/sessions/${mineSession.id}/extend`, {}).then(() => mainQ.reload()).catch((e) => setMsg({ tone: 'bad', text: e?.body?.reason || e?.message }))}>{main.limits.watchMin}분 연장</button> : null}
-          {mineSession ? <button type="button" className="fm-btn danger" onClick={() => delJson(`/tools/focus-mon/sessions/${mineSession.id}`).then(() => mainQ.reload()).catch((e) => setMsg({ tone: 'bad', text: e?.body?.reason || e?.message }))}>수집 종료</button> : null}
+          {mineSession ? <button type="button" className="fm-btn danger" onClick={() => stopSession(mineSession, mineSession.mode === 'record')}>수집 종료</button> : null}
+          {sessions.length > 1 ? <button type="button" className="fm-btn danger" onClick={stopAll}>모두 종료 · {sessions.length}건</button> : null}
         </div>
       </div>
       <nav className="fm-tabs" aria-label="서버 집중 모니터링 보기">
         {TABS.map((t) => <a key={t.key} href={t.key === 'overview' ? `#/${BASE.join('/')}` : `#/${BASE.join('/')}/${t.key}`} className={route.tab === t.key || (route.tab === 'server' && t.key === 'overview') ? 'on' : ''}>{t.label}</a>)}
       </nav>
       {sessions.length > 1 ? (
-        <div className="fm-row"><span className="fm-dim">진행 중인 수집</span>{sessions.map((s) => <button key={s.id} type="button" className={`fm-btn sm ${ids.join() === s.targets.join() ? 'on' : ''}`} onClick={() => setViewIds(s.targets)}>{MODE_TEXT[s.mode]} · {s.targets.length}대 · {s.by || '?'}</button>)}</div>
+        <div className="fm-row fm-sessions"><span className="fm-dim">진행 중인 수집 {sessions.length}건</span>
+          {sessions.map((s) => (
+            <span key={s.id} className={`fm-sess ${ids.join() === s.targets.join() ? 'on' : ''}`}>
+              <button type="button" className="fm-linkbtn" onClick={() => setViewIds(s.targets)} title="이 수집의 서버만 봅니다">{sessionLabel(s, now)}</button>
+              {s.mode === 'watch' ? <button type="button" className="fm-btn sm" onClick={() => postJson(`/tools/focus-mon/sessions/${encodeURIComponent(s.id)}/extend`, {}).then(() => mainQ.reload()).catch((e) => setMsg({ tone: 'bad', text: e?.body?.reason || e?.message }))}>{main.limits.watchMin}분 연장</button> : null}
+              <button type="button" className="fm-btn sm danger" onClick={() => stopSession(s, s.mode === 'record')}>종료</button>
+            </span>
+          ))}
+        </div>
       ) : null}
       {!active && lastEnded && route.tab !== 'targets' ? <div className="fm-ban">수집이 끝났습니다({ENDED_TEXT[lastEnded.why] || lastEnded.why}). 수집한 값은 DB 에 {main.settings.retentionDays}일 남아 시간 띠로 다시 볼 수 있습니다.</div> : null}
       {active?.mode === 'watch' && active.remainMs != null && active.remainMs < 2 * 60_000 ? <div className="fm-ban">남은 시간 {remainText(active.remainMs)} — 그 뒤 수집이 스스로 멈춥니다.</div> : null}

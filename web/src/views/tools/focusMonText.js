@@ -40,7 +40,48 @@ export const TEST_TEXT = Object.freeze({
 });
 
 export const MODE_TEXT = Object.freeze({ watch: '잠깐 보기', record: '계속 수집' });
-export const ENDED_TEXT = Object.freeze({ stopped: '사람이 끝냄', timeout: '시한이 지나 끝남', 'no-viewer': '보는 화면이 없어 끝남' });
+export const ENDED_TEXT = Object.freeze({ stopped: '사람이 끝냄', timeout: '시한이 지나 끝남', 'no-viewer': '보는 화면이 없어 끝남', moved: '서버를 계속 수집으로 넘겨 끝남', removed: '서버를 모두 빼 끝남' });
+
+/* ── v2.979 진행 중인 수집 · 중복 방지(사용자 '모니터링 종료 버튼' · '중복 모니터링 방지' · '기존 모니터링 돌고 있는데 추가하면 잘 안 돼') ── */
+
+/** 서버 → 그 서버를 수집하는 수집(서버는 수집 하나에만 있다 — 서버 store.planJoin). */
+export function sessionIndex(sessions) {
+  const m = new Map();
+  for (const s of sessions || []) for (const t of s.targets || []) if (!m.has(t)) m.set(t, s);
+  return m;
+}
+/** 진행 중인 수집 한 줄 글. */
+export function sessionLabel(s, now) {
+  if (!s) return '';
+  const remain = s.mode === 'watch' && s.until ? ` · 남은 ${remainText(s.until - now)}` : '';
+  return `${MODE_TEXT[s.mode] || s.mode} · ${(s.targets || []).length}대 · ${s.interval}초${s.by ? ` · ${s.by}` : ''}${remain}`;
+}
+/**
+ * 시작 전에 미리 알려 줄 글 — 고른 서버 중 이미 수집 중인 것(서버가 빼거나 넘겨받는다). 없으면 ''.
+ * @param {{picked:string[], index:Map, mode:'watch'|'record'}} o
+ */
+export function startNote({ picked, index, mode }) {
+  let skip = 0; let move = 0;
+  for (const id of picked || []) {
+    const s = index.get(id);
+    if (!s) continue;
+    if (mode === 'record' && s.mode === 'watch') move += 1; else skip += 1;
+  }
+  if (!skip && !move) return '';
+  const parts = [];
+  if (skip) parts.push(`${skip}대는 이미 수집 중이라 빼고 시작합니다`);
+  if (move) parts.push(`${move}대는 잠깐 보기에서 계속 수집으로 넘겨받습니다`);
+  return `고른 ${(picked || []).length}대 가운데 ${parts.join(' · ')}.`;
+}
+/** 시작 · 추가 응답 → 알림 글(뺀 수 · 넘겨받은 수를 숨기지 않는다). */
+export function joinResultText(r, { verb = '시작했습니다' } = {}) {
+  if (!r?.ok) return r?.reason || '';
+  const n = r.added ? r.added.length : (r.session?.targets || []).length;
+  const extra = [];
+  if (r.skipped?.length) extra.push(`이미 수집 중인 ${r.skipped.length}대는 뺐습니다`);
+  if (r.moved?.length) extra.push(`${r.moved.length}대는 잠깐 보기에서 넘겨받았습니다`);
+  return `${n}대 수집을 ${verb}${extra.length ? ` — ${extra.join(' · ')}` : ''}.`;
+}
 
 export const TABS = Object.freeze([
   { key: 'overview', label: '개요' },

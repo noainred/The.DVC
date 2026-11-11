@@ -31,7 +31,7 @@ import * as registry from '../../focusmon/registry.js';
 import * as store from '../../focusmon/store.js';
 import * as db from '../../focusmon/db.js';
 import * as Q from '../../focusmon/query.js';
-import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCollection, localRunner, serviceStatus } from '../../focusmon/service.js';
+import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCollection, addToCollection, removeFromCollection, localRunner, serviceStatus } from '../../focusmon/service.js';
 import { recorderStatus } from '../../focusmon/recorder.js';
 import { wakeEdge, focusEdgeMinVersion, focusDiagMinVersion } from '../../central/focusMonEdge.js';
 import { startBulk, bulkJob, bulkProgress } from '../../focusmon/bulkTest.js';
@@ -368,7 +368,36 @@ api.post('/tools/focus-mon/sessions', adminOnly, fullRwOnly, demoBlockWrite, (re
   const interval = INTERVALS.includes(Number(b.interval)) ? Number(b.interval) : DEFAULT_INTERVAL;
   const r = startCollection({ targets: ids, interval, mode, by: req.user?.username || '' });
   if (!r.ok) return res.status(409).json(r);
-  logAudit({ user: req.user?.username, action: 'focus-mon.start', target: r.session.id, detail: `${mode === 'record' ? '계속 수집' : '잠깐 보기'} · ${interval}초 · ${ids.length}대: ${ids.map((id) => vis.get(id).name).join(', ').slice(0, 600)}`, ip: req.ip });
+  const started = r.session.targets;
+  logAudit({ user: req.user?.username, action: 'focus-mon.start', target: r.session.id, detail: `${mode === 'record' ? '계속 수집' : '잠깐 보기'} · ${interval}초 · ${started.length}대: ${started.map((id) => vis.get(id)?.name || id).join(', ').slice(0, 600)}${r.skipped?.length ? ` · 이미 수집 중이라 뺌 ${r.skipped.length}대` : ''}${r.moved?.length ? ` · 잠깐 보기에서 넘겨받음 ${r.moved.length}대` : ''}`, ip: req.ip });
+  res.json(r);
+});
+
+/**
+ * 진행 중인 수집에 서버 더하기(v2.979 — 사용자 '기존 모니터링 돌고 있는데 추가하면 잘 안 돼' · 중복 방지). 이미 다른 수집에 있는 서버는 뺀다(store.planJoin).
+ * 수집 시작과 같은 문(관리자 · 조회 · 쓰기 전체 범위 · 데모 차단) · 보이는 대상만 · 꺼 둔 대상은 거절.
+ */
+api.post('/tools/focus-mon/sessions/:id/targets', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+  const vis = visibleById(req);
+  const ids = (Array.isArray(req.body?.targets) ? req.body.targets : []).map(String).slice(0, 200);
+  const unknown = ids.filter((id) => !vis.has(id));
+  if (unknown.length) return res.status(404).json({ ok: false, code: 'not-found', reason: `없는 대상이 ${unknown.length}대 있습니다.` });
+  const disabled = ids.filter((id) => vis.get(id).enabled === false);
+  if (disabled.length) return res.status(400).json({ ok: false, code: 'disabled', reason: `꺼 둔 대상이 ${disabled.length}대 있습니다.` });
+  const r = addToCollection(req.params.id, ids);
+  if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 409).json(r);
+  logAudit({ user: req.user?.username, action: 'focus-mon.add', target: r.session.id, detail: `${r.added.length}대 더함: ${r.added.map((id) => vis.get(id)?.name || id).join(', ').slice(0, 600)}${r.skipped.length ? ` · 이미 수집 중이라 뺌 ${r.skipped.length}대` : ''}`, ip: req.ip });
+  res.json(r);
+});
+
+/** 수집에서 서버 하나 빼기(서버별 ‘수집 종료’ · v2.979) — 마지막 서버면 그 수집이 끝난다. */
+api.delete('/tools/focus-mon/sessions/:id/targets/:tid', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+  const vis = visibleById(req);
+  const tid = String(req.params.tid);
+  if (!vis.has(tid)) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 대상입니다.' });
+  const r = removeFromCollection(req.params.id, tid);
+  if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 409).json(r);
+  logAudit({ user: req.user?.username, action: 'focus-mon.remove-target', target: r.session.id, detail: `${vis.get(tid).name}${r.ended ? ' · 마지막 서버라 수집이 끝남' : ''}`, ip: req.ip });
   res.json(r);
 });
 
