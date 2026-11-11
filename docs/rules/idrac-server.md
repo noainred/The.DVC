@@ -1459,7 +1459,15 @@
     v2.967 은 법인을 통합 서버 인벤토리 행의 **vCenter id** 로 나눴다 — 물리 전용 서버는 vCenter 가 없고(법인에 vCenter 가 둘이면 '법인의 vCenter 가 하나뿐' 규칙도 닿지 않는다)
     법인(DataCenter)으로만 귀속돼 있어 전부 '미지정' 이 됐다. 이제 `insights/hwExport/corp.js` 가 **서버 분석과 같은 목록**(`analysisServersWithRemote`)에서
     `datacenterId || assign[vCenter]` 색인을 만들어 행 → 법인을 정한다(판정 복제 금지). 가상화 호스트는 자기 vCenter 의 법인, 법인 할당이 없는 vCenter 는 `vc:<id>` 묶음, 없으면 미지정.
-    법인 칩 · 파일 순서는 설정의 법인 순서. vCenter 는 따로 고르는 값(`id.sum.vcenter`). ⚠ 통합 서버 인벤토리 화면의 표 · 법인 필터는 여전히 vCenter 기준이다(이번에 바꾸지 않음).
+    법인 칩 · 파일 순서는 설정의 법인 순서. vCenter 는 따로 고르는 값(`id.sum.vcenter`). (v2.969 에 통합 서버 인벤토리 화면도 법인(DataCenter) 기준이 됐다 — 아래.)
     새 '법인별' 화면 · 내보내기를 만들 때 **법인 축이 vCenter 인지 DataCenter 인지 먼저 정할 것** — 물리 서버가 끼면 DataCenter 다. 회귀 `server/test/hwExportCorp2968.test.js`.
+  - **v2.969 — 통합 서버 인벤토리 화면도 법인(DataCenter) 기준**(사용자 요청 2026-11-11 · 지정은 '둘 다 두기' 결정): GET /insights/fleet 이 행마다
+    `corpId · corpName · corpSource`(manual|scan|vcenter|agent|vcgroup) · `corps`(필터 목록 — 서버가 있는 법인만) · `datacenters`(지정용) · `summary.bareMetalNoCorp` 를 싣는다
+    (`enrichFleetCorp` — 판정은 내보내기와 같은 `hwCorpContext`). 캐시 키는 `generatedAt|fleetRev|dc:<법인 설정 서명>`. 화면의 필터 · 법인 열 · KPI '법인 미지정' · CSV 가 이 값을 쓴다.
+    **법인 수동 지정**은 `PUT /insights/fleet/dc-assign`(관리자 · 전체 범위 · 감사) → `insights/fleetDcAssign.js`(CONFIG_DIR/fleet-dc-assign.json)이고 판정에서 **가장 먼저**다(물리 서버만).
+    ⚠ **iDRAC 등록부의 datacenterId 를 고치지 않는다** — 그 값은 스캔 대역의 귀속이라 같은 법인 '교체' 스캔이 그 법인 항목을 지우고 다시 넣는다(registry.js replaceScanned).
+    손상 파일은 보존하고 **정상 파일을 다시 읽을 때까지 쓰기 거부(503)**. vCenter 지정(fleetAssign — 전력 · 사용률 귀속)은 'vCenter' 열에 그대로 있다.
+    ⚠ **서버 분석 화면(상태 보드 등)은 이 수동 지정을 보지 않는다**(서버 분석 목록 `analysisServersWithRemote` 는 등록부 · 스캔 대역만 본다) — 수동 지정한 서버는 두 화면의 법인이 다를 수 있다(다음 점검 후보).
+    수동 지정 키의 유령 정리(prune)는 아직 없다(없는 서버의 키는 판정에 쓰이지 않을 뿐 남는다). 회귀 `server/test/fleetCorp2969.test.js`(변이 11/11).
   - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
 

@@ -59,5 +59,6 @@ describe('fleetHwExportText', () => {
     expect(screenCorpIds('vc-x', vcCorp, corps)).toBe(null);
     expect(screenCorpIds('vc-unknown', vcCorp, corps)).toBe(null);
     expect(screenCorpIds('vc-az', null, corps)).toBe(null);
+    expect([...screenCorpIds('b', null, corps)]).toEqual(['b'], 'v2.969: 화면 필터가 법인 id 면 그대로');
   });
 });

@@ -22,12 +22,12 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1468개** |
+| 엔드포인트 | **1469개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 150개 |
 | GET | 779개 |
 | POST | 460개 |
-| PUT | 149개 |
+| PUT | 150개 |
 | PATCH | 3개 |
 | DELETE | 77개 |
 
@@ -35,7 +35,7 @@
 |---|---:|---|
 | [`/api/collector`](#apicollector) | 31 | 엣지(수집 서버)가 **자기 데이터를 내주는** 경로. 수집 토큰(`X-Collector-Token`) 게이트이고 사용자 세션을 타지 않는다. |
 | [`/api/capacity`](#apicapacity) | 3 | 리소스 적정성 진단. 라우터가 스스로 `adminOnly` 를 건다. |
-| [`/api/insights`](#apiinsights) | 19 | FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePerm('insights')`. |
+| [`/api/insights`](#apiinsights) | 20 | FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePerm('insights')`. |
 | [`/api/central`](#apicentral) | 66 | 엣지 → 중앙 **push·pull** 경로. 개별/공유 중앙 토큰 게이트이며 라우터 미들웨어가 토큰↔agent 일치를 강제한다. |
 | [`/api/upgrade`](#apiupgrade) | 10 | 자동 업그레이드 제어(번들 수신·적용). |
 | [`/api/remote`](#apiremote) | 19 | 원격 접속(HAProxy/SSH/RDP 중계). |
@@ -108,25 +108,26 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/anomalies` | — | [server/src/routes/insights.js:525](../server/src/routes/insights.js#L525) |
-| POST | `/chatops` | — | [server/src/routes/insights.js:593](../server/src/routes/insights.js#L593) |
-| GET | `/finops` | — | [server/src/routes/insights.js:117](../server/src/routes/insights.js#L117) |
-| GET | `/finops/config` | — | [server/src/routes/insights.js:141](../server/src/routes/insights.js#L141) |
-| PUT | `/finops/config` | 역할 `admin` · `fleetOnly` | [server/src/routes/insights.js:171](../server/src/routes/insights.js#L171) |
-| GET | `/fleet` | — | [server/src/routes/insights.js:179](../server/src/routes/insights.js#L179) |
-| PUT | `/fleet/assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:383](../server/src/routes/insights.js#L383) |
-| PUT | `/fleet/assign-bulk` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:399](../server/src/routes/insights.js#L399) |
-| GET | `/fleet/hardware-export` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:312](../server/src/routes/insights.js#L312) |
-| GET | `/fleet/hardware-meta` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:289](../server/src/routes/insights.js#L289) |
-| PUT | `/fleet/hardware-prefs` | 역할 `admin/operator` · 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:304](../server/src/routes/insights.js#L304) |
-| POST | `/fleet/prune` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:447](../server/src/routes/insights.js#L447) |
-| PUT | `/fleet/tag` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:355](../server/src/routes/insights.js#L355) |
-| GET | `/forecast` | — | [server/src/routes/insights.js:546](../server/src/routes/insights.js#L546) |
-| GET | `/graph` | — | [server/src/routes/insights.js:572](../server/src/routes/insights.js#L572) |
-| GET | `/incidents` | — | [server/src/routes/insights.js:587](../server/src/routes/insights.js#L587) |
-| GET | `/power-breakdown` | — | [server/src/routes/insights.js:144](../server/src/routes/insights.js#L144) |
-| GET | `/security` | — | [server/src/routes/insights.js:559](../server/src/routes/insights.js#L559) |
-| GET | `/topology` | — | [server/src/routes/insights.js:562](../server/src/routes/insights.js#L562) |
+| GET | `/anomalies` | — | [server/src/routes/insights.js:572](../server/src/routes/insights.js#L572) |
+| POST | `/chatops` | — | [server/src/routes/insights.js:640](../server/src/routes/insights.js#L640) |
+| GET | `/finops` | — | [server/src/routes/insights.js:119](../server/src/routes/insights.js#L119) |
+| GET | `/finops/config` | — | [server/src/routes/insights.js:143](../server/src/routes/insights.js#L143) |
+| PUT | `/finops/config` | 역할 `admin` · `fleetOnly` | [server/src/routes/insights.js:173](../server/src/routes/insights.js#L173) |
+| GET | `/fleet` | — | [server/src/routes/insights.js:181](../server/src/routes/insights.js#L181) |
+| PUT | `/fleet/assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:430](../server/src/routes/insights.js#L430) |
+| PUT | `/fleet/assign-bulk` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:446](../server/src/routes/insights.js#L446) |
+| PUT | `/fleet/dc-assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:219](../server/src/routes/insights.js#L219) |
+| GET | `/fleet/hardware-export` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:359](../server/src/routes/insights.js#L359) |
+| GET | `/fleet/hardware-meta` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:336](../server/src/routes/insights.js#L336) |
+| PUT | `/fleet/hardware-prefs` | 역할 `admin/operator` · 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:351](../server/src/routes/insights.js#L351) |
+| POST | `/fleet/prune` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:494](../server/src/routes/insights.js#L494) |
+| PUT | `/fleet/tag` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:402](../server/src/routes/insights.js#L402) |
+| GET | `/forecast` | — | [server/src/routes/insights.js:593](../server/src/routes/insights.js#L593) |
+| GET | `/graph` | — | [server/src/routes/insights.js:619](../server/src/routes/insights.js#L619) |
+| GET | `/incidents` | — | [server/src/routes/insights.js:634](../server/src/routes/insights.js#L634) |
+| GET | `/power-breakdown` | — | [server/src/routes/insights.js:146](../server/src/routes/insights.js#L146) |
+| GET | `/security` | — | [server/src/routes/insights.js:606](../server/src/routes/insights.js#L606) |
+| GET | `/topology` | — | [server/src/routes/insights.js:609](../server/src/routes/insights.js#L609) |
 
 ## `/api/central`
 
@@ -1659,11 +1660,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `express.json` | 9 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |
 | `commenters` | 8 | **admin·operator 또는 권한 키 `issues.request`**(v2.881 위키 — 댓글 · 지켜보기. 데모 계정 제외 · 문서의 스페이스가 쓰기 범위 안이어야 한다 — 저장소 `addComment`). |
 | `authMiddleware` | 8 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |
+| `fleetFullScopeOnly` | 5 | **전체 범위 계정만**(통합 서버 인벤토리 변경 — v2.606 AUTHZ2606-01). 베어메탈은 귀속 전에는 법인 축이 없어 범위로 나눌 수 없고, 귀속을 바꾸는 쓰기가 읽기 범위를 넓히므로 범위 제한 계정은 403. |
 | `noDemo` | 4 | **데모(손님) 계정 403**(7b 서버 등록 — `isDemoGuest`). 관리자 게이트 뒤에 붙는 쓰기 거절이고 권한을 넓히지 않는다. |
 | `prefsWrite` | 4 | VM 목록 내보내기 내 저장값 쓰기(v2.798) — **데모 손님 403** · 저장 키는 인증된 계정 이름(본문 값 무시) · 손상 파일이면 503 · 감사 로그. |
 | `templateFleetOnly` | 4 | **전체 범위 계정만**(v2.889 — 위키 관리자 템플릿: 모든 스페이스의 새 문서 화면에 보이는 전 법인 공용 설정). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
 | `requireEnrolled` | 4 | OTP **강제 등록 미완료 세션을 차단**한다(v2.206). 부트스트랩 admin 이 등록 전에 API 를 쓰지 못하게 하는 게이트로, 대부분의 `/api/*` 는 마운트에서 이미 걸린다 — 여기 보이는 것은 `/api/auth` 안의 admin 라우트처럼 **라우터가 따로 건** 경우다. |
-| `fleetFullScopeOnly` | 4 | **전체 범위 계정만**(통합 서버 인벤토리 변경 — v2.606 AUTHZ2606-01). 베어메탈은 귀속 전에는 법인 축이 없어 범위로 나눌 수 없고, 귀속을 바꾸는 쓰기가 읽기 범위를 넓히므로 범위 제한 계정은 403. |
 | `express.raw` | 3 | 원시 바디 버퍼(업그레이드 번들 등). ⚠ 게이트가 아니다 — 인증을 이 앞에 두어 미인증 요청이 대용량 바디를 적재하지 못하게 한다. |
 | `noticeFleetOnly` | 3 | **전체 범위 계정만**(v2.722 — 접속 공지 작성·수정·삭제. 공지는 전 법인 사용자에게 보인다). 범위 제한 계정은 403. |
 | `auditMiddleware` | 3 | 상태변경 감사 로그 기록. |
