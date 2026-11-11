@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 사양서 — 서버 한 대가 시트 한 장</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Noto+Sans+KR:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#1d4ed8}a:hover{color:#1e3a8a}
+.g{display:grid}
+.h{padding:0 10px;height:32px;line-height:32px;font-size:13px;font-weight:600;color:#ffffff;background:#1e3a5f;border-right:1px solid #2c4a70;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;min-width:0}
+.c{padding:0 10px;height:30px;line-height:30px;font-size:13px;color:#0f172a;border-right:1px solid #d4d8de;border-bottom:1px solid #d4d8de;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;min-width:0}
+.k{background:#eef2f7;font-weight:600}
+.n{text-align:right;font-family:'JetBrains Mono',monospace}
+.m{font-family:'JetBrains Mono',monospace}
+.f{color:#5b6779;font-style:italic}
+</style>
+</helmet>
+<div style="width: 1900px; height: 2150px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: Inter, 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; font-size: 14px; padding: 36px 40px; display: flex; flex-direction: column; gap: 18px;">
+
+  <div style="display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;">
+    <span style="font-size: 22px; font-weight: 700;">서버별 사양서 — 서버 한 대 = 시트 한 장</span>
+    <span style="font-size: 15px; color: #8b9bb4;">② 창의 ‘⑥ 서버별 사양서’ 를 켜면 서버마다 이 시트가 한 장씩 붙습니다. 값은 모두 가상입니다.</span>
+  </div>
+
+  <div style="background: #ffffff; color: #0f172a; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;">
+
+    <div style="padding: 18px 22px 14px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+      <span style="font-size: 26px; font-weight: 700;">bm-db-01</span>
+      <span style="font-size: 15px; color: #475569;">서버 사양서</span>
+      <a href="#toc" style="margin-left: auto; font-size: 14px;">← 목차</a>
+    </div>
+    <div style="display: grid; grid-template-columns: 1.3fr 1fr 1.4fr 1fr; gap: 0; background: #1e3a5f; color: #ffffff;">
+      <div style="padding: 10px 22px; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #2c4a70;"><span style="font-size: 12px; color: #c7d7ea;">법인(vCenter)</span><span style="font-size: 17px; font-weight: 700;">vcenter-ap-northeast-01</span></div>
+      <div style="padding: 10px 18px; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #2c4a70;"><span style="font-size: 12px; color: #c7d7ea;">구분</span><span style="font-size: 17px; font-weight: 700;">물리서버(베어메탈)</span></div>
+      <div style="padding: 10px 18px; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #2c4a70;"><span style="font-size: 12px; color: #c7d7ea;">모델 · 서비스태그</span><span style="font-size: 17px; font-weight: 700;">Dell PowerEdge R750 · 7XK2M03</span></div>
+      <div style="padding: 10px 18px; display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 12px; color: #c7d7ea;">인벤토리 시각</span><span style="font-size: 17px; font-weight: 700; font-family: 'JetBrains Mono', monospace;">2026-11-11 10:02</span></div>
+    </div>
+
+    <div style="padding: 18px 22px 22px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items: start;">
+      <div style="display: flex; flex-direction: column; gap: 18px; min-width: 0;">
+        <sc-for list="{{left}}" as="t" hint-placeholder-count="6">
+          <div style="display: flex; flex-direction: column; min-width: 0;">
+            <div style="display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px;"><b style="font-size: 15px;">{{t.title}}</b><span style="font-size: 13px; color: #475569;">{{t.sub}}</span></div>
+            <sc-if value="{{t.hasHead}}" hint-placeholder-val="{{true}}">
+            <div class="g" style="{{t.tpl}}">
+              <sc-for list="{{t.head}}" as="h" hint-placeholder-count="5"><div class="{{h.cls}}">{{h.text}}</div></sc-for>
+            </div>
+            </sc-if>
+            <sc-for list="{{t.rows}}" as="r" hint-placeholder-count="4">
+              <div class="g" style="{{r.row}}">
+                <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="5"><div class="{{c.cls}}">{{c.text}}</div></sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 18px; min-width: 0;">
+        <sc-for list="{{right}}" as="t" hint-placeholder-count="7">
+          <div style="display: flex; flex-direction: column; min-width: 0;">
+            <div style="display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px;"><b style="font-size: 15px;">{{t.title}}</b><span style="font-size: 13px; color: #475569;">{{t.sub}}</span></div>
+            <sc-if value="{{t.hasHead}}" hint-placeholder-val="{{true}}">
+            <div class="g" style="{{t.tpl}}">
+              <sc-for list="{{t.head}}" as="h" hint-placeholder-count="5"><div class="{{h.cls}}">{{h.text}}</div></sc-for>
+            </div>
+            </sc-if>
+            <sc-for list="{{t.rows}}" as="r" hint-placeholder-count="4">
+              <div class="g" style="{{r.row}}">
+                <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="5"><div class="{{c.cls}}">{{c.text}}</div></sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: stretch; gap: 0; background: #eef1f5; border-top: 1px solid #d4d8de; padding: 0 12px; flex-wrap: wrap; font-size: 14px;">
+      <span style="padding: 12px 16px; color: #334155;">목차</span>
+      <span style="padding: 12px 16px; color: #334155;">서버 요약</span>
+      <span style="padding: 12px 16px; color: #334155;">NIC</span>
+      <span style="padding: 12px 16px; color: #334155;">펌웨어</span>
+      <span style="padding: 12px 16px; color: #334155;">안내</span>
+      <span style="padding: 9px 16px 12px; color: #166534; font-weight: 700; background: #ffffff; border-top: 3px solid #166534;">bm-db-01</span>
+      <span style="padding: 12px 16px; color: #334155;">bm-db-02</span>
+      <span style="padding: 12px 16px; color: #334155;">bm-backup-01</span>
+      <span style="padding: 12px 16px; color: #334155;">bm-gpu-01</span>
+      <span style="padding: 12px 16px; color: #334155;">bm-ora-01</span>
+      <span style="padding: 12px 16px; color: #475569;">… 서버마다 한 장</span>
+    </div>
+  </div>
+
+  <div style="font-size: 15px; color: #8b9bb4; line-height: 1.7; display: flex; flex-direction: column; gap: 2px;">
+    <div><b style="color: #e6edf6;">맨 위 띠</b>에 그 서버의 법인 · 구분 · 모델 · 인벤토리 시각을 적습니다. 사양서는 ⑤ 에서 고른 값과 상관없이 <b style="color: #e6edf6;">수집된 사양 전부</b>를 담습니다(iDRAC 주소 · MAC 은 관리자 계정에만).</div>
+    <div><b style="color: #e6edf6;">값이 없을 때</b> — 장착되지 않은 것(예: GPU 0장)은 ‘없음’, 읽지 못한 것은 ‘읽지 못함’ 으로 갈라 적습니다. 인벤토리가 통째로 없는 서버는 식별 구역만 채우고 사유를 적습니다.</div>
+    <div><b style="color: #e6edf6;">시트 이름</b>은 서버 이름(엑셀 제한 31자 · 금지 문자 치환 · 겹치면 ~2)이고, ‘목차’ 시트의 서버 이름을 누르면 그 시트로 갑니다. 인쇄는 A4 세로 한 쪽 너비 맞춤입니다.</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1900,"height":2150}}'>
+class Component extends DCLogic {
+  renderVals() {
+    // cols: [머리글, 너비(px | 'fr'), 정렬('n' 숫자 · 'm' 고정폭 · '')]. rows: 문자열 배열. kv 표는 머리글 없이 [항목, 값].
+    const table = (title, sub, cols, rows) => {
+      const tpl = 'grid-template-columns: ' + cols.map((c) => (c[1] === 'fr' ? 'minmax(0, 1fr)' : c[1] + 'px')).join(' ') + '; border-left: 1px solid #d4d8de;';
+      const kv = !cols[0][0];
+      return { title, sub, hasHead: !kv, tpl, head: cols.map((c) => ({ text: c[0], cls: 'h' + (c[2] === 'n' ? ' n' : '') })),
+        rows: rows.map((r, i) => ({ row: tpl + (kv ? (i === 0 ? ' border-top: 1px solid #d4d8de;' : '') : ' background: ' + (i % 2 ? '#f6f8fb' : '#ffffff') + ';'),
+          cells: r.map((v, j) => ({ text: v, cls: 'c' + (kv && j === 0 ? ' k' : '') + (cols[j][2] ? ' ' + cols[j][2] : '') + (v === '없음' || v === '읽지 못함' ? ' f' : '') })) })) };
+    };
+    const KV = [['', 200, ''], ['', 'fr', '']];
+    const dimms = [];
+    for (let i = 0; i < 16; i++) dimms.push(['DIMM.Socket.' + (i < 8 ? 'A' : 'B') + (i % 8 + 1), '32', 'DDR4', '3,200', 'Hynix', 'HMA84GR7DJR4N-XN']);
+    const disks = [];
+    for (let i = 0; i < 8; i++) disks.push(['Physical Disk 0:1:' + i, i < 2 ? 'SSDSC2KG960G8R' : 'MZ7KH1T9HAJR0D3', i < 2 ? '960' : '1,920', 'SSD', 'SATA']);
+
+    const left = [
+      table('기본 식별', '', KV, [['서버(등록 이름)', 'bm-db-01'], ['Hostname(OS)', 'bm-db-01.corp.example'], ['제조사', 'Dell Inc.'], ['모델', 'PowerEdge R750'], ['서비스태그', '7XK2M03'], ['자산 태그', '읽지 못함'], ['UUID', '4c4c4544-0058-4b10-8032-b7c04f4d3033'], ['전원 상태', 'On'], ['수집원', 'iDRAC(중앙 직접 수집)'], ['인벤토리 시각', '2026-11-11 10:02 KST']]),
+      table('CPU', '소켓 2개 · 코어 64 · 스레드 128', [['소켓', 150, 'm'], ['모델', 'fr', ''], ['코어', 80, 'n']], [['CPU.Socket.1', 'Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz', '32'], ['CPU.Socket.2', 'Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz', '32']]),
+      table('메모리', '512 GB · DIMM 16개', [['슬롯', 160, 'm'], ['크기 GB', 90, 'n'], ['종류', 80, ''], ['속도 MHz', 100, 'n'], ['제조사', 110, ''], ['부품번호', 'fr', 'm']], dimms),
+      table('전원(PSU)', 'PSU 2개 · 전력 상한 없음', [['이름', 150, ''], ['모델', 'fr', ''], ['제조사', 110, ''], ['용량 W', 90, 'n'], ['펌웨어', 110, 'm']], [['PS1 Status', 'PWR SPLY,1400W,RDNT,LTON', 'DELL', '1,400', '00.1D.7D'], ['PS2 Status', 'PWR SPLY,1400W,RDNT,LTON', 'DELL', '1,400', '00.1D.7D']]),
+      table('BIOS · 부팅 설정', 'BIOS 1.12.1 · 수집되는 주요 항목', KV, [['부팅 모드', 'Uefi'], ['시스템 프로파일', 'PerfOptimized'], ['논리 프로세서', 'Enabled'], ['가상화 기술', 'Enabled']]),
+      table('상태', '수집 시점의 Redfish 상태 글자', KV, [['전체', 'OK'], ['CPU', 'OK'], ['메모리', 'OK'], ['스토리지', 'OK'], ['PSU', 'OK'], ['팬', 'OK']]),
+    ];
+    const right = [
+      table('요약', '', KV, [['CPU', '2 × Xeon Gold 6338 · 64 코어'], ['메모리', '512 GB (16 × 32 GB DDR4)'], ['디스크', '8개 · 13,440 GB (SSD 8)'], ['NIC', '포트 4개 · 최고 25 Gbps'], ['GPU', '없음'], ['전원', '2 × 1,400 W'], ['BIOS', '1.12.1'], ['BMC(iDRAC) 펌웨어', '7.00.00.171'], ['iDRAC 라이선스', 'Enterprise'], ['부팅 모드', 'Uefi']]),
+      table('스토리지 컨트롤러', '', [['이름', 190, ''], ['모델', 'fr', ''], ['펌웨어', 130, 'm'], ['프로토콜', 110, '']], [['RAID.SL.3-1', 'PERC H755 Front', '52.21.0-4606', 'SAS · SATA'], ['AHCI.SL.6-1', 'BOSS-S2', '2.5.13.4008', 'SATA']]),
+      table('디스크', '물리 디스크 8개 · 13,440 GB', [['디스크', 190, ''], ['모델', 'fr', ''], ['용량 GB', 100, 'n'], ['매체', 80, ''], ['인터페이스', 110, '']], disks),
+      table('네트워크 인터페이스', '어댑터 2개 · 포트 4개 — 포트마다 한 줄', [['어댑터', 150, 'm'], ['모델', 'fr', ''], ['펌웨어', 90, 'm'], ['포트', 56, 'n'], ['링크', 64, ''], ['속도 Mbps', 96, 'n'], ['MAC', 156, 'm']], [
+        ['NIC.Integrated.1', 'Broadcom Adv. Dual 25Gb Ethernet', '22.31.6', '1', 'Up', '25,000', '00:00:5E:00:53:10'],
+        ['NIC.Integrated.1', 'Broadcom Adv. Dual 25Gb Ethernet', '22.31.6', '2', 'Up', '25,000', '00:00:5E:00:53:11'],
+        ['NIC.Slot.3', 'Intel(R) Ethernet 10G 2P X710', '22.5.7', '1', 'Up', '10,000', '00:00:5E:00:53:20'],
+        ['NIC.Slot.3', 'Intel(R) Ethernet 10G 2P X710', '22.5.7', '2', 'Down', '', '00:00:5E:00:53:21']]),
+      table('펌웨어', '구성요소 9개', [['종류', 110, ''], ['구성요소', 'fr', ''], ['버전', 150, 'm']], [
+        ['BIOS', 'BIOS', '1.12.1'], ['iDRAC', 'Integrated Dell Remote Access Controller', '7.00.00.171'], ['iDRAC', 'Lifecycle Controller', '7.00.00.171'],
+        ['Storage', 'PERC H755 Front', '52.21.0-4606'], ['Storage', 'BOSS-S2', '2.5.13.4008'], ['NIC', 'Broadcom Adv. Dual 25Gb Ethernet', '22.31.6'],
+        ['NIC', 'Intel(R) Ethernet 10G 2P X710', '22.5.7'], ['기타', 'System CPLD', '1.0.7'], ['기타', 'Power Supply.Slot.1', '00.1D.7D']]),
+      table('PCIe 카드', '', [['이름', 190, ''], ['모델', 'fr', ''], ['제조사', 120, ''], ['종류', 120, ''], ['펌웨어', 136, 'm']], [['RAID.SL.3-1', 'PERC H755 Front', 'Broadcom', 'SingleFunction', '52.21.0-4606'], ['NIC.Slot.3', 'Ethernet 10G 2P X710', 'Intel', 'MultiFunction', '22.5.7'], ['AHCI.SL.6-1', 'BOSS-S2', 'Marvell', 'SingleFunction', '2.5.13.4008']]),
+      table('iDRAC 관리', '주소 · MAC 은 관리자 계정에만 나옵니다', KV, [['iDRAC 모델', '15G Monolithic'], ['iDRAC 펌웨어', '7.00.00.171'], ['iDRAC 호스트 이름', 'idrac-7xk2m03'], ['FQDN', 'idrac-7xk2m03.mgmt.example'], ['MAC', '00:00:5E:00:53:01'], ['IPv4', '192.0.2.21']]),
+    ];
+    return { left, right };
+  }
+}
+</script>
+</body>
+</html>
