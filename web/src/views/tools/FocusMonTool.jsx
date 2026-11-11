@@ -20,7 +20,7 @@ import {
   pctText, msText, numText, bpsText, bytesText, sizeText, metricValueText, metricUnitText, iostatText, remainText, clockText, agoShort, etText,
   levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, installCommand, INSTALL_NOTE, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR,
 } from './focusMonText.js';
-import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax } from './focusMonChart.js';
+import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import './focusMon.css';
 
 const BASE = ['tools', 'focus-mon'];
@@ -83,14 +83,69 @@ function Seg({ value, options, onChange, label }) {
   );
 }
 function Badge({ b }) { return b ? <span className={`fm-badge ${b.tone || 'off'}`}>{b.label}</span> : null; }
-function Spark({ vals, color = RX_COLOR, max = 100, h = 24, area = true }) {
+/* ── 차트 툴팁(v2.977 사용자 요청) — 마우스 · 손가락을 올린 시각의 값을 세로선 · 점 · 값 상자로 보인다 ──
+ *  좌표는 순수 함수(focusMonChart.js indexAtFrac · valueAtFrac · timeAtIndex · xAtIndex · tipRows — 테스트). 값이 없으면 ‘—’(0 아님). */
+function fracFromEvent(e) {
+  const r = e.currentTarget.getBoundingClientRect();
+  const cx = e.touches && e.touches.length ? e.touches[0].clientX : e.clientX;
+  return r.width > 0 ? Math.max(0, Math.min(1, (cx - r.left) / r.width)) : null;
+}
+/** SVG 안 맨 위에 두는 투명 판 — 그림 영역(plot)만 덮는다. */
+function HoverRect({ plot, onFrac }) {
+  const move = (e) => onFrac(fracFromEvent(e));
+  return (
+    <rect x={plot.x0} y={plot.y0} width={plot.x1 - plot.x0} height={plot.y1 - plot.y0} fill="transparent" style={{ cursor: 'crosshair' }}
+      onMouseMove={move} onTouchStart={move} onTouchMove={move} onMouseLeave={() => onFrac(null)} onTouchEnd={() => onFrac(null)} />
+  );
+}
+/** 세로선 + 시리즈마다 점(SVG 안). series: [{key, vals, color, y?}] — 가장 칸이 많은 시리즈에 선을 맞춘다. */
+function HoverMarks({ f, plot, y, series, dots = true }) {
+  if (f == null) return null;
+  const L = Math.max(0, ...series.map((s) => (Array.isArray(s.vals) ? s.vals.length : 0)));
+  const x = xAtIndex(indexAtFrac(f, L), L, plot.x0, plot.x1);
+  if (x == null) return null;
+  return (
+    <g pointerEvents="none">
+      <line x1={x} x2={x} y1={plot.y0} y2={plot.y1} stroke="var(--text-dim)" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+      {dots ? series.map((s) => { const v = valueAtFrac(s.vals, f); return v == null ? null : <circle key={s.key} cx={x} cy={(s.y || y)(v)} r="4" fill={s.color} stroke="var(--panel)" strokeWidth="2" />; }) : null}
+    </g>
+  );
+}
+/** 값 상자(HTML — 차트 상자 안 절대 위치). vbw = viewBox 너비. 오른쪽 40% 에서는 선 왼쪽으로 뒤집는다. */
+function HoverTip({ f, vbw, plot, time, rows, compact = false }) {
+  if (f == null) return null;
+  const xPct = ((plot.x0 + f * (plot.x1 - plot.x0)) / vbw) * 100;
+  const flip = xPct > 60;
+  return (
+    <div className={`fm-tip ${compact ? 'sm' : ''}`} role="status" style={{ left: `${xPct}%`, transform: flip ? 'translateX(calc(-100% - 10px))' : 'translateX(10px)' }}>
+      <div className="fm-tip-t">{time == null ? DASH : clockText(time)}</div>
+      {rows.map((r) => (
+        <div key={r.key} className="fm-tip-r">{r.color ? <i style={{ background: r.color }} /> : null}<span className="fm-ell">{r.label}</span><b className="fm-num">{r.value}</b></div>
+      ))}
+    </div>
+  );
+}
+/** 가장 칸이 많은 시리즈 기준으로 그 비율의 시각. */
+function hoverTime(f, seriesVals, from, to) {
+  const L = Math.max(0, ...seriesVals.map((v) => (Array.isArray(v) ? v.length : 0)));
+  return timeAtIndex(indexAtFrac(f, L), L, from, to);
+}
+
+function Spark({ vals, color = RX_COLOR, max = 100, h = 24, area = true, hover = null }) {
+  const [f, setF] = useState(null);
   const y = yScale({ max, top: 2, bottom: h - 1 });
   const d = linePath(vals, { x0: 0, x1: 100, y });
+  const plot = { x0: 0, x1: 100, y0: 0, y1: h };
   return (
-    <svg className="fm-spark" viewBox={`0 0 100 ${h}`} preserveAspectRatio="none" aria-hidden="true" style={{ height: h }}>
-      {area ? <path d={areaPath(vals, { x0: 0, x1: 100, y, base: h })} fill={color} opacity="0.14" /> : null}
-      <path d={d} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-    </svg>
+    <span className="fm-sparkbox">
+      <svg className="fm-spark" viewBox={`0 0 100 ${h}`} preserveAspectRatio="none" aria-hidden="true" style={{ height: h }}>
+        {area ? <path d={areaPath(vals, { x0: 0, x1: 100, y, base: h })} fill={color} opacity="0.14" /> : null}
+        <path d={d} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        {hover ? <HoverMarks f={f} plot={plot} y={y} series={[{ key: 'v', vals, color }]} dots={false} /> : null}
+        {hover ? <HoverRect plot={plot} onFrac={setF} /> : null}
+      </svg>
+      {hover ? <HoverTip f={f} vbw={100} plot={plot} compact time={hoverTime(f, [vals], hover.from, hover.to)} rows={[{ key: 'v', label: hover.label || '', value: hover.fmt(valueAtFrac(vals, f)) }]} /> : null}
+    </span>
   );
 }
 function copyText(t) { try { navigator.clipboard?.writeText(t); return true; } catch { return false; } }
@@ -215,7 +270,7 @@ function Overview({ main, ids, tb, now, onOpen }) {
               </div>
               <div className="fm-mono fm-dim fm-ell">{x.t.host} · {x.t.agent ? `엣지 ${x.t.agent}` : '중앙'}</div>
               {[['CPU', 'cpu', x.sum?.cpu, levelOf(x.sum?.cpu, settings)], ['메모리', 'mem', x.sum?.mem, levelOf(x.sum?.mem, settings)], ['네트워크', 'net', x.sum?.net, levelOf(x.sum?.net, settings)], ['디스크', 'disk', x.sum?.disk, levelOf(x.sum?.disk, settings)]].map(([lab, k, v, lv]) => (
-                <div key={k} className="fm-mrow"><span className="fm-dim">{lab}</span><span className={`fm-mv ${lv}`}>{v == null ? DASH : `${Math.round(v)}%`}</span><Spark vals={x.series?.[k]} /></div>
+                <div key={k} className="fm-mrow"><span className="fm-dim">{lab}</span><span className={`fm-mv ${lv}`}>{v == null ? DASH : `${Math.round(v)}%`}</span><Spark vals={x.series?.[k]} hover={{ from: q.data?.from, to: q.data?.to, label: lab, fmt: (u) => pctText(u) }} /></div>
               ))}
               <div className="fm-sub"><span>{x.sum ? `↓${bpsText(x.sum.netRx)} ↑${bpsText(x.sum.netTx)}` : DASH}</span><span>쓰기 지연 {msText(x.sum?.wAwait)}</span></div>
               {off ? <div className="fm-why">{x.t.status?.error || STATE_TEXT[x.t.status?.state]?.label}</div> : null}
@@ -237,6 +292,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
   const [scope, setScope] = useState('all');
   const [scopeText, setScopeText] = useState('');
   const [pins, setPins] = useState([]);
+  const [hf, setHf] = useState(null);
   const pinTouched = useRef(false);
   const [log, setLog] = useState(false);
   const scopeParam = metric === 'disk' ? (scope === 'all' ? 'all' : scope === 'mount' ? `mount:${scopeText}` : `dev:${scopeText}`) : metric === 'net' ? (scope === 'if' && scopeText ? `if:${scopeText}` : 'top') : 'all';
@@ -250,6 +306,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
   const pct = unit === '%';
   const max = pct ? 100 : niceMax(seriesMax(rows.map((r) => r.max)) ?? 1);
   const X0 = 46; const X1 = 776; const Y0 = 14; const Y1 = 330;
+  const cmpPlot = { x0: X0, x1: X1, y0: Y0, y1: Y1 };
   const y = yScale({ max, log: log && !pct, top: Y0, bottom: Y1 });
   const ticks = yTicks(max, log && !pct);
   const labels = spreadLabels(pinned.map((p) => { const r = rows.find((x) => x.id === p); return { key: p, y: r?.last != null ? y(r.last) : null }; }));
@@ -299,7 +356,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
               {canCsv() ? <button type="button" className="fm-btn" onClick={() => downloadFile(csvHref).catch(() => {})}>CSV</button> : <span className="fm-dim" title={CSV_DENIED_NOTE}>CSV 권한 없음</span>}
             </div>
           </div>
-          <div className="fm-chart-wrap">
+          <div className="fm-chart-wrap fm-chart-box">
             <svg viewBox="0 0 900 360" role="img" aria-label={`서버 ${rows.length}대의 ${mdef.label} 추이 — 고정한 서버는 색 선, 나머지는 회색 선`} className="fm-chart">
               {ticks.map((v) => <g key={v}><line x1={X0} x2={X1} y1={y(v)} y2={y(v)} stroke="var(--fm-grid)" /><text x={X0 - 6} y={y(v) + 4} className="fm-axis" textAnchor="end">{v >= 1000 ? `${Math.round(v / 1000)}K` : Math.round(v * 100) / 100}</text></g>)}
               <text x={X0} y={352} className="fm-axis">{clockText(q.data?.from)}</text>
@@ -312,7 +369,11 @@ function Compare({ main, ids, tb, now, onOpen }) {
                   {labels[r.id] != null ? <text x={X1 + 10} y={labels[r.id] + 4} className="fm-endl">{tById.get(r.id)?.name} {metricValueText(metric, it, r.last)}</text> : null}
                 </g>
               ))}
+              <HoverMarks f={hf} plot={cmpPlot} y={y} series={rows.map((r) => ({ key: r.id, vals: r.avg, color: pinColor.get(r.id) || REST_COLOR }))} />
+              <HoverRect plot={cmpPlot} onFrac={setHf} />
             </svg>
+            <HoverTip f={hf} vbw={900} plot={cmpPlot} time={hoverTime(hf, rows.map((r) => r.avg), q.data?.from, q.data?.to)}
+              rows={tipRows(rows.map((r) => ({ key: r.id, label: tById.get(r.id)?.name || r.id, color: pinColor.get(r.id) || REST_COLOR, vals: r.avg, pinned: pinColor.has(r.id) })), hf).map((r) => ({ ...r, value: r.v == null ? DASH : metricValueText(metric, it, r.v) }))} />
           </div>
           {rows.some((r) => r.missing === 'no-series') ? <div className="fm-note">{rows.filter((r) => r.missing).length}대는 이 범위의 값이 없습니다(그 장치 · 마운트 · 인터페이스가 없거나 아직 표본이 없음).</div> : null}
         </div>
@@ -335,7 +396,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
           {ranked.map((r) => (
             <div key={r.id} className="fm-hm">
               <button type="button" className="fm-linkbtn fm-ell" onClick={() => onOpen(r.id)}>{tById.get(r.id)?.name}</button>
-              <svg viewBox={`0 0 ${r.avg.length || 1} 10`} preserveAspectRatio="none" aria-hidden="true">{r.avg.map((v, k) => <rect key={k} x={k} y="0" width="0.94" height="10" fill={heatColor(v, heatMax)} />)}</svg>
+              <svg viewBox={`0 0 ${r.avg.length || 1} 10`} preserveAspectRatio="none" aria-hidden="true">{r.avg.map((v, k) => <rect key={k} x={k} y="0" width="0.94" height="10" fill={heatColor(v, heatMax)}><title>{`${tById.get(r.id)?.name || r.id} · ${clockText(timeAtIndex(k, r.avg.length, q.data?.from, q.data?.to))} · ${v == null ? '값 없음' : metricValueText(metric, it, v)}`}</title></rect>)}</svg>
               <span className="fm-num">{r.last == null ? DASH : metricValueText(metric, it, r.last)}</span>
             </div>
           ))}
@@ -354,6 +415,7 @@ function IostatCompare({ main, ids, tb, onOpen }) {
   const [find, setFind] = useState('');
   const [col, setCol] = useState('wAwait');
   const [pins, setPins] = useState([]);
+  const [hf, setHf] = useState(null);
   const cols = main.iostat?.cols || [];
   const params = useMemo(() => ({ view: 'iostat', targets: ids.join(','), win: tb.win, end: tb.end ?? '', at, scope, col, pins: pins.join(',') }), [ids, tb.win, tb.end, at, scope, col, pins]);
   const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? 2_000 : 0, ids.length > 0);
@@ -382,6 +444,7 @@ function IostatCompare({ main, ids, tb, onOpen }) {
   const max = niceMax(seriesMax(pinSeries.map((s) => s.max)) ?? 1);
   const X0 = 46; const X1 = 1120;
   const y = yScale({ max, top: 14, bottom: 270 });
+  const ioPlot = { x0: X0, x1: X1, y0: 14, y1: 270 };
   return (
     <>
       <div className="fm-card fm-ctl">
@@ -426,12 +489,16 @@ function IostatCompare({ main, ids, tb, onOpen }) {
         <div className="fm-row fm-between"><h3 className="fm-h3">차트에 올린 장치 {pinSeries.length}개 — {main.iostat.names[col]}({IOSTAT_LABEL[col]})</h3>
           <div className="fm-row">{pinSeries.map((s, i) => <span key={s.pin} className="fm-lg"><i style={{ background: PIN_COLORS[i] }} />{tById.get(s.pin.split('/')[0])?.name} · {s.pin.split('/')[1]}</span>)}</div></div>
         {pinSeries.length ? (
-          <div className="fm-chart-wrap">
+          <div className="fm-chart-wrap fm-chart-box">
             <svg viewBox="0 0 1180 300" role="img" aria-label="차트에 올린 장치의 추이" className="fm-chart">
               {yTicks(max).map((v) => <g key={v}><line x1={X0} x2={X1} y1={y(v)} y2={y(v)} stroke="var(--fm-grid)" /><text x={X0 - 6} y={y(v) + 4} className="fm-axis" textAnchor="end">{Math.round(v * 100) / 100}</text></g>)}
               {pinSeries.map((s, i) => <path key={s.pin} d={linePath(s.avg, { x0: X0, x1: X1, y })} fill="none" stroke={PIN_COLORS[i]} strokeWidth="2" />)}
               <text x={X0} y={292} className="fm-axis">{clockText(q.data?.from)}</text><text x={X1} y={292} className="fm-axis" textAnchor="end">{tb.end == null ? '지금' : clockText(q.data?.to)}</text>
+              <HoverMarks f={hf} plot={ioPlot} y={y} series={pinSeries.map((s, i) => ({ key: s.pin, vals: s.avg, color: PIN_COLORS[i] }))} />
+              <HoverRect plot={ioPlot} onFrac={setHf} />
             </svg>
+            <HoverTip f={hf} vbw={1180} plot={ioPlot} time={hoverTime(hf, pinSeries.map((s) => s.avg), q.data?.from, q.data?.to)}
+              rows={pinSeries.map((s, i) => { const v = valueAtFrac(s.avg, hf); return { key: s.pin, color: PIN_COLORS[i], label: `${tById.get(s.pin.split('/')[0])?.name || ''} · ${s.pin.split('/')[1]}`, value: iostatText(col, v) }; })} />
           </div>
         ) : <div className="fm-note">줄 앞 네모를 누르면 그 장치가 여기 올라옵니다. 열 제목을 누르면 차트도 그 열로 바뀝니다(지금 {main.iostat.names[col]}).</div>}
       </div>
@@ -446,6 +513,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
   const [tree, setTree] = useState('tree');
   const [dev, setDev] = useState('');
   const [netAll, setNetAll] = useState(false);
+  const [hCpu, setHCpu] = useState(null); const [hMem, setHMem] = useState(null); const [hT, setHT] = useState(null); const [hL, setHL] = useState(null);
   const t = main.targets.find((x) => x.id === id);
   const params = useMemo(() => ({ view: 'server', targets: id, win: tb.win, end: tb.end ?? '', at, dev }), [id, tb.win, tb.end, at, dev]);
   const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? 2_000 : 0, !!t);
@@ -460,6 +528,9 @@ function ServerDetail({ main, id, tb, now, onBack }) {
   const layers = d ? stackedAreas([d.charts.cpu.usr, d.charts.cpu.sys, d.charts.cpu.iow, d.charts.cpu.stl], { x0: X0, x1: X1, y: yc }) : [];
   const LC = [RX_COLOR, TX_COLOR, '#199e70', '#c98500'];
   const ym = yScale({ max: 100, top: 10, bottom: 126 });
+  const cpuPlot = { x0: X0, x1: X1, y0: 10, y1: 190 }; const memPlot = { x0: X0, x1: X1, y0: 10, y1: 126 }; const devPlot = { x0: X0, x1: X1, y0: 10, y1: 176 };
+  const cpuParts = d ? [d.charts.cpu.usr, d.charts.cpu.sys, d.charts.cpu.iow, d.charts.cpu.stl] : [];
+  const cpuTot = d ? (d.charts.cpu.usr || []).map((_, i) => { let sum = 0; for (const a of cpuParts) { const v = a?.[i]; if (v == null) return null; sum += v; } return Math.round(sum * 100) / 100; }) : [];
   const mem = tab?.mem;
   const nets = (tab?.net || []).filter((x) => netAll || x.k !== 'virt');
   const netTree = [];
@@ -500,11 +571,17 @@ function ServerDetail({ main, id, tb, now, onBack }) {
             <div className="fm-card">
               <div className="fm-row fm-between"><div className="fm-col"><h3 className="fm-h3">CPU{hello?.ncpu ? ` — ${hello.ncpu}코어` : ''}</h3><span className="fm-big">{tab?.cpu ? Math.round(tab.cpu.pct) : DASH}{tab?.cpu ? <small>%</small> : null}</span></div>
                 <div className="fm-row">{[['사용자', 'usr'], ['시스템', 'sys'], ['I/O 대기', 'iow'], ['steal', 'stl']].map(([l, k], i) => <span key={k} className="fm-lg"><i style={{ background: LC[i] }} />{l} <b>{pctText(tab?.cpu?.[k])}</b></span>)}</div></div>
+              <div className="fm-chart-box">
               <svg viewBox="0 0 640 214" role="img" aria-label="CPU 사용률 구성 추이 — 사용자 · 시스템 · I/O 대기 · steal 을 쌓은 면" className="fm-chart">
                 {[0, 25, 50, 75, 100].map((v) => <g key={v}><line x1={X0} x2={X1} y1={yc(v)} y2={yc(v)} stroke="var(--fm-grid)" /><text x={X0 - 6} y={yc(v) + 4} className="fm-axis" textAnchor="end">{v}</text></g>)}
                 {layers.map((p, i) => <path key={i} d={p} fill={LC[i]} fillOpacity="0.32" stroke={LC[i]} strokeWidth="1" />)}
                 <text x={X0} y={209} className="fm-axis">{clockText(d.from)}</text><text x={X1} y={209} className="fm-axis" textAnchor="end">{tb.end == null ? '지금' : clockText(d.to)}</text>
+                <HoverMarks f={hCpu} plot={cpuPlot} y={yc} series={[{ key: 'tot', vals: cpuTot, color: RX_COLOR }]} />
+                <HoverRect plot={cpuPlot} onFrac={setHCpu} />
               </svg>
+              <HoverTip f={hCpu} vbw={640} plot={cpuPlot} time={hoverTime(hCpu, [cpuTot], d.from, d.to)}
+                rows={[['사용자', d.charts.cpu.usr, LC[0]], ['시스템', d.charts.cpu.sys, LC[1]], ['I/O 대기', d.charts.cpu.iow, LC[2]], ['steal', d.charts.cpu.stl, LC[3]], ['합', cpuTot, null]].map(([l, v, c]) => ({ key: l, label: l, color: c, value: pctText(valueAtFrac(v, hCpu), 1) }))} />
+              </div>
               <div className="fm-row fm-between"><span className="fm-lg">부하 평균 <b>{(tab?.load || []).map((v) => numText(v, 1)).join(' · ')}</b> <span className="fm-dim">(1 · 5 · 15분)</span></span></div>
               {tab?.cpu?.cores?.length ? (
                 <div className="fm-col"><span className="fm-dim">코어별 사용률(cpu0 ~ cpu{tab.cpu.cores.length - 1}) · 어두움 0% → 밝음 100%</span>
@@ -521,11 +598,16 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                   <div style={{ flex: Math.max(0.001, mem.free || 0), background: '#33415c' }} />
                 </div>
               ) : null}
+              <div className="fm-chart-box">
               <svg viewBox="0 0 640 150" role="img" aria-label="메모리 사용률 추이" className="fm-chart">
                 {[0, 50, 100].map((v) => <g key={v}><line x1={X0} x2={X1} y1={ym(v)} y2={ym(v)} stroke="var(--fm-grid)" /><text x={X0 - 6} y={ym(v) + 4} className="fm-axis" textAnchor="end">{v}</text></g>)}
                 <path d={areaPath(d.charts.mem, { x0: X0, x1: X1, y: ym, base: 126 })} fill={RX_COLOR} fillOpacity="0.12" />
                 <path d={linePath(d.charts.mem, { x0: X0, x1: X1, y: ym })} fill="none" stroke={RX_COLOR} strokeWidth="2" />
+                <HoverMarks f={hMem} plot={memPlot} y={ym} series={[{ key: 'mem', vals: d.charts.mem, color: RX_COLOR }]} />
+                <HoverRect plot={memPlot} onFrac={setHMem} />
               </svg>
+              <HoverTip f={hMem} vbw={640} plot={memPlot} time={hoverTime(hMem, [d.charts.mem], d.from, d.to)} rows={[{ key: 'm', label: '메모리 사용률', color: RX_COLOR, value: pctText(valueAtFrac(d.charts.mem, hMem), 1) }]} />
+              </div>
               <div className="fm-row fm-between"><span className="fm-lg">스왑 <b>{bytesText(mem?.swU)}</b> / {bytesText(mem?.swT)}</span><span className="fm-lg">Dirty <b>{bytesText(mem?.dirty)}</b> · Slab <b>{bytesText(mem?.slab)}</b></span></div>
             </div>
           </div>
@@ -577,9 +659,13 @@ function ServerDetail({ main, id, tb, now, onBack }) {
             {devC ? (
               <div className="fm-two fm-pad">
                 <div className="fm-sub-card"><div className="fm-row fm-between"><b>{devC.n} — 읽기 · 쓰기 처리량 <span className="fm-dim">MB/s</span></b><span className="fm-row"><span className="fm-lg"><i style={{ background: RX_COLOR }} />읽기</span><span className="fm-lg"><i style={{ background: TX_COLOR }} />쓰기</span></span></div>
-                  <svg viewBox="0 0 640 200" role="img" aria-label={`${devC.n} 읽기 · 쓰기 처리량 추이`} className="fm-chart"><path d={linePath(devC.rMB, { x0: X0, x1: X1, y: yt })} fill="none" stroke={RX_COLOR} strokeWidth="2" /><path d={linePath(devC.wMB, { x0: X0, x1: X1, y: yt })} fill="none" stroke={TX_COLOR} strokeWidth="2" /><line x1={X0} x2={X1} y1={176} y2={176} stroke="var(--fm-grid)" /></svg></div>
+                  <div className="fm-chart-box"><svg viewBox="0 0 640 200" role="img" aria-label={`${devC.n} 읽기 · 쓰기 처리량 추이`} className="fm-chart"><path d={linePath(devC.rMB, { x0: X0, x1: X1, y: yt })} fill="none" stroke={RX_COLOR} strokeWidth="2" /><path d={linePath(devC.wMB, { x0: X0, x1: X1, y: yt })} fill="none" stroke={TX_COLOR} strokeWidth="2" /><line x1={X0} x2={X1} y1={176} y2={176} stroke="var(--fm-grid)" />
+                    <HoverMarks f={hT} plot={devPlot} y={yt} series={[{ key: 'r', vals: devC.rMB, color: RX_COLOR }, { key: 'w', vals: devC.wMB, color: TX_COLOR }]} /><HoverRect plot={devPlot} onFrac={setHT} /></svg>
+                    <HoverTip f={hT} vbw={640} plot={devPlot} time={hoverTime(hT, [devC.rMB, devC.wMB], d.from, d.to)} rows={[{ key: 'r', label: '읽기 MB/s', color: RX_COLOR, value: iostatText('rMB', valueAtFrac(devC.rMB, hT)) }, { key: 'w', label: '쓰기 MB/s', color: TX_COLOR, value: iostatText('wMB', valueAtFrac(devC.wMB, hT)) }]} /></div></div>
                 <div className="fm-sub-card"><div className="fm-row fm-between"><b>{devC.n} — 읽기 · 쓰기 지연 <span className="fm-dim">ms · 최고 눈금 {Math.round(ylMax)}</span></b><span className="fm-row"><span className="fm-lg"><i style={{ background: RX_COLOR }} />읽기</span><span className="fm-lg"><i style={{ background: TX_COLOR }} />쓰기</span></span></div>
-                  <svg viewBox="0 0 640 200" role="img" aria-label={`${devC.n} 읽기 · 쓰기 지연 추이`} className="fm-chart"><path d={linePath(devC.rAwait, { x0: X0, x1: X1, y: yl })} fill="none" stroke={RX_COLOR} strokeWidth="2" /><path d={linePath(devC.wAwait, { x0: X0, x1: X1, y: yl })} fill="none" stroke={TX_COLOR} strokeWidth="2" /><line x1={X0} x2={X1} y1={176} y2={176} stroke="var(--fm-grid)" /></svg></div>
+                  <div className="fm-chart-box"><svg viewBox="0 0 640 200" role="img" aria-label={`${devC.n} 읽기 · 쓰기 지연 추이`} className="fm-chart"><path d={linePath(devC.rAwait, { x0: X0, x1: X1, y: yl })} fill="none" stroke={RX_COLOR} strokeWidth="2" /><path d={linePath(devC.wAwait, { x0: X0, x1: X1, y: yl })} fill="none" stroke={TX_COLOR} strokeWidth="2" /><line x1={X0} x2={X1} y1={176} y2={176} stroke="var(--fm-grid)" />
+                    <HoverMarks f={hL} plot={devPlot} y={yl} series={[{ key: 'r', vals: devC.rAwait, color: RX_COLOR }, { key: 'w', vals: devC.wAwait, color: TX_COLOR }]} /><HoverRect plot={devPlot} onFrac={setHL} /></svg>
+                    <HoverTip f={hL} vbw={640} plot={devPlot} time={hoverTime(hL, [devC.rAwait, devC.wAwait], d.from, d.to)} rows={[{ key: 'r', label: '읽기 지연', color: RX_COLOR, value: msText(valueAtFrac(devC.rAwait, hL)) }, { key: 'w', label: '쓰기 지연', color: TX_COLOR, value: msText(valueAtFrac(devC.wAwait, hL)) }]} /></div></div>
               </div>
             ) : null}
             <div className="fm-note fm-pad">열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 요약 열은 13개 가운데 8개이고 ‘iostat 전체 열’ 을 누르면 병합 · 요청 크기 · 합친 지연 · 서비스 시간이 나옵니다. ‘전체 디스크’ 는 물리 디스크만 더합니다(파티션 · LVM 은 같은 입출력을 다시 보는 것).</div>
@@ -831,14 +917,14 @@ export default function FocusMonTool() {
   return (
     <div className="fm-wrap">
       <div className="fm-row fm-between fm-head">
-        <div className="fm-col"><span className="fm-dim">특수 기능 › 서버</span><h1 className="fm-h1">집중 모니터링</h1></div>
+        <div className="fm-col"><span className="fm-dim">특수 기능 › 서버</span><h1 className="fm-h1">서버 집중 모니터링</h1></div>
         <div className="fm-row">
           <span className="fm-pill"><i className={pill.live ? 'on' : ''} /><b>{pill.text}</b><span className="fm-dim">· {pill.sub}{main.mock ? ' · 데모 모드' : ''}</span>{pill.remain ? <span className="fm-dim">남은 시간 <b className="fm-mono">{pill.remain}</b></span> : null}</span>
           {mineSession && mineSession.mode === 'watch' ? <button type="button" className="fm-btn" onClick={() => postJson(`/tools/focus-mon/sessions/${mineSession.id}/extend`, {}).then(() => mainQ.reload()).catch((e) => setMsg({ tone: 'bad', text: e?.body?.reason || e?.message }))}>{main.limits.watchMin}분 연장</button> : null}
           {mineSession ? <button type="button" className="fm-btn danger" onClick={() => delJson(`/tools/focus-mon/sessions/${mineSession.id}`).then(() => mainQ.reload()).catch((e) => setMsg({ tone: 'bad', text: e?.body?.reason || e?.message }))}>수집 종료</button> : null}
         </div>
       </div>
-      <nav className="fm-tabs" aria-label="집중 모니터링 보기">
+      <nav className="fm-tabs" aria-label="서버 집중 모니터링 보기">
         {TABS.map((t) => <a key={t.key} href={t.key === 'overview' ? `#/${BASE.join('/')}` : `#/${BASE.join('/')}/${t.key}`} className={route.tab === t.key || (route.tab === 'server' && t.key === 'overview') ? 'on' : ''}>{t.label}</a>)}
       </nav>
       {sessions.length > 1 ? (

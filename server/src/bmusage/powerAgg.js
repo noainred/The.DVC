@@ -58,13 +58,13 @@ export function hourSummary(hours = [], { kwhFrom = null, kwhTo = null } = {}) {
 }
 
 /** 그룹 한 칸(누적용). */
-const emptyGroup = () => ({ servers: 0, measured: 0, unmeasured: { 'no-idrac': 0, 'read-fail': 0, zero: 0 }, nowW: 0, avg24W: 0, avg24N: 0, kwh24: 0, kwh24N: 0, kwhMonth: 0, monthN: 0,
+const emptyGroup = () => ({ servers: 0, measured: 0, unmeasured: { 'no-idrac': 0, 'read-fail': 0, zero: 0 }, nowW: 0, avg24W: 0, avg24N: 0, kwh24: 0, kwh24N: 0, kwhMonth: 0, monthN: 0, monthPartial: 0,
   hours: new Map(), inletSum: 0, inletN: 0, inletMax: null, maxC: null, fanWarn: 0, fanUnread: 0, capSet: 0, capHit: 0 });
 function addTo(g, s) {
   g.servers += 1;
   if (s.w != null) { g.measured += 1; g.nowW += s.w; } else { const k = UNMEASURED.includes(s.unmeasured) ? s.unmeasured : 'read-fail'; g.unmeasured[k] = (g.unmeasured[k] || 0) + 1; }
   if (s.h24) { g.avg24W += s.h24.avgW; g.avg24N += 1; if (s.h24.kwh != null) { g.kwh24 += s.h24.kwh; g.kwh24N += 1; } for (const h of s.h24.byHour) { const e = g.hours.get(h.t) || { w: 0, n: 0 }; e.w += h.w; e.n += 1; g.hours.set(h.t, e); } }
-  if (s.kwhMonth != null) { g.kwhMonth += s.kwhMonth; g.monthN += 1; }
+  if (s.kwhMonth != null) { g.kwhMonth += s.kwhMonth; g.monthN += 1; if (s.kwhMonthHours != null && s.kwhMonthSpanH != null && s.kwhMonthHours < s.kwhMonthSpanH) g.monthPartial += 1; }
   if (s.inletC != null) { g.inletSum += s.inletC; g.inletN += 1; g.inletMax = g.inletMax == null ? s.inletC : Math.max(g.inletMax, s.inletC); }
   if (s.maxC != null) g.maxC = g.maxC == null ? s.maxC : Math.max(g.maxC, s.maxC);
   if (s.fanWarn != null) g.fanWarn += s.fanWarn;
@@ -90,7 +90,7 @@ function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
   return {
     servers: g.servers, measured: g.measured, unmeasured: g.unmeasured, unmeasuredN: g.servers - g.measured,
     nowW: g.measured ? Math.round(g.nowW) : null, nowKw, avg24Kw: g.avg24N ? r2(g.avg24W / 1000) : null, avg24Servers: g.avg24N, peak24Kw: pk ? r2(pk.w / 1000) : null, peak24At: pk ? pk.t : null, peakServers: full,
-    partialHours: hrs.length - complete.length, kwh24: g.kwh24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN,
+    partialHours: hrs.length - complete.length, kwh24: g.kwh24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN, monthPartial: g.monthPartial,
     capKw, marginPct: margin, low: margin != null ? margin < rackLowPct : null, marginPartial: capKw != null && partial,
     inletAvg: g.inletN ? r1(g.inletSum / g.inletN) : null, inletMax: g.inletMax, maxC: g.maxC, inletServers: g.inletN,
     fanWarn: g.fanWarn, fanUnread: g.fanUnread, capSet: g.capSet, capHit: g.capHit, notTarget: g.notTarget || 0,
@@ -256,7 +256,7 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
     else unmeasured = a || regId || (tg.paths || []).includes('idrac') ? 'read-fail' : 'no-idrac';
     // 24시간 · 월 누적 — 시간 롤업(같은 계열 키 — 로컬 iDRAC = 등록부 id · OME = 장비 키 · 엣지 = rmt: 사본)
     const dbKey = m ? t(m.source === 'remote' ? (m.dbKey || '') : m.serverId) : (regId || '');
-    let h24 = null; let kwhMonth = null; let base7 = null;
+    let h24 = null; let kwhMonth = null; let base7 = null; let kwhMonthHours = null; let kwhMonthSpanH = null;
     if (withWeek && dbKey && idb?.hourlyStats) {
       const e = weekWindowEnd(now);
       const c = _week.get(dbKey);
@@ -272,22 +272,25 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
         const h0 = Math.floor(now / HOUR) * HOUR;   // v2.954(점검 B-4): kWh 는 끝난 정시 24칸만(부분 시간 둘을 더하면 25시간치)
         h24 = hourSummary(rows, { kwhFrom: h0 - DAY_MS, kwhTo: h0 });
         // 월 누적 = 끝난 날(캐시) + 오늘(24시간 행 중 오늘 것). 알림 판정(withMonth=false)은 쓰지 않아 읽지 않는다(첫 주기에 서버마다 한 달 행을 읽지 않게).
-        let wh = 0; let any = false;
+        let wh = 0; let any = false; let hrs = 0;
         if (withMonth) {
           const missDays = [];
-          for (let d = monthStart; d < todayStart; d += DAY_MS) { const k = `${dbKey}|${dayKey(d + HOUR)}`; const c = _dayWh.get(k); if (c && now - c.at < DAY_WH_TTL_MS) { wh += c.wh; any = true; } else missDays.push(d); }
+          for (let d = monthStart; d < todayStart; d += DAY_MS) { const k = `${dbKey}|${dayKey(d + HOUR)}`; const c = _dayWh.get(k); if (c && now - c.at < DAY_WH_TTL_MS) { wh += c.wh; hrs += c.hrs ?? 0; any = true; } else missDays.push(d); }
           if (missDays.length) {
             // 이어진 빈 날 묶음마다 한 번(값이 없는 날을 담지 않으므로 — 등록 전 날이 매번 다시 읽혀도 행이 없는 범위라 싸다 · 담긴 날은 다시 읽지 않는다)
             const runs = [];
             for (const d of missDays) { const last = runs.at(-1); if (last && d === last[1] + DAY_MS) last[1] = d; else runs.push([d, d]); }
-            const per = new Map();
+            const per = new Map(); const perH = new Map();
             for (const [a, b] of runs) {
-              for (const h of idb.hourlyStats(dbKey, a, Math.min(todayStart, b + DAY_MS)) || []) { if (n(h.avg) == null || Number(h.avg) <= 0) continue; const k = dayKey(Number(h.ts) + 1); per.set(k, (per.get(k) || 0) + Number(h.avg)); }
+              for (const h of idb.hourlyStats(dbKey, a, Math.min(todayStart, b + DAY_MS)) || []) { if (n(h.avg) == null || Number(h.avg) <= 0) continue; const k = dayKey(Number(h.ts) + 1); per.set(k, (per.get(k) || 0) + Number(h.avg)); perH.set(k, (perH.get(k) || 0) + 1); }
             }
-            for (const d of missDays) { const dk = dayKey(d + HOUR); const v = per.has(dk) ? per.get(dk) : null; if (v != null) { _dayWh.set(`${dbKey}|${dk}`, { wh: v, at: now }); wh += v; any = true; } else _dayWh.delete(`${dbKey}|${dk}`); }
+            for (const d of missDays) { const dk = dayKey(d + HOUR); const v = per.has(dk) ? per.get(dk) : null; if (v != null) { const hh = perH.get(dk) || 0; _dayWh.set(`${dbKey}|${dk}`, { wh: v, hrs: hh, at: now }); wh += v; hrs += hh; any = true; } else _dayWh.delete(`${dbKey}|${dk}`); }
           }
-          for (const h of rows || []) if (Number(h.ts) >= todayStart && n(h.avg) != null && Number(h.avg) > 0) { wh += Number(h.avg); any = true; }
+          // v2.977(전체 점검): 오늘 몫도 **끝난 정시 칸만**(h0 앞) — 진행 중인 칸의 평균 W 를 1시간치로 더하면 매시 정각 직후 최대 1시간치가 과대였다(24h kWh 의 B-4 규칙과 같게).
+          for (const h of rows || []) if (Number(h.ts) >= todayStart && Number(h.ts) < h0 && n(h.avg) != null && Number(h.avg) > 0) { wh += Number(h.avg); hrs += 1; any = true; }
           kwhMonth = any ? r1(wh / 1000) : null;
+          // 덮은 시간 · 기대 시간 — 측정이 빈 시간(iDRAC 을 못 읽은 날)은 합에서 빠진다. 화면이 '빈 시간 있음' 을 말하게 숫자를 싣는다(지어내지 않는다).
+          kwhMonthHours = any ? hrs : null; kwhMonthSpanH = Math.max(0, Math.round((h0 - Math.ceil(monthStart / HOUR) * HOUR) / HOUR)); // 반증 F3: 30분 단위 시간대(+05:30 등)는 달 시작이 정시가 아니다 — 경계에 걸친 칸은 이전 날에 붙어 세지 않으므로 기대 시간도 다음 정시부터
         }
       } catch { h24 = null; kwhMonth = null; }
     }
@@ -317,7 +320,7 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
     if (faults) { const ids = [t(a?.id), regId, tag].filter(Boolean); fanWarn = faults.filter((f) => ids.includes(t(f.deviceId)) || (tag && up(f.deviceKey) === tag)).length; }
     out.push({ key: t(tg.key), name: t(tg.name) || t(tg.key), vcenterId: vc, node: tg.node || '', via: tg.via || 'local', w, unmeasured: w == null ? unmeasured : null, at: m ? n(m.ts) : null,
       src: m ? (t(m.source) || null) : null,   // 반증 n2 F4: 전력 원천(idrac · ome · remote) — 판정 노드(powerJudge.js)가 쓴다
-      h24, kwhMonth, ...(withWeek ? { base7 } : {}), capW, capState, capAt, inletC: tp.inletC, maxC: tp.maxC, tempAt: tp.at, tempState: tp.state,
+      h24, kwhMonth, kwhMonthHours, kwhMonthSpanH, ...(withWeek ? { base7 } : {}), capW, capState, capAt, inletC: tp.inletC, maxC: tp.maxC, tempAt: tp.at, tempState: tp.state,
       fanWarn, fanRead: tp.state === 'ok' ? true : (a || regId ? false : null) });
     await y();
   }

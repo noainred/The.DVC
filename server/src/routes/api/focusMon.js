@@ -39,16 +39,16 @@ import { focusAuthGuard, authDevOf } from '../../focusmon/collector.js';
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
-const fullScopeOnly = fullScopeOnlyWith('집중 모니터링은 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다 — 전 법인 서버의 주소 · 프로세스가 들어갑니다.');
-const fullRwOnly = fullReadWriteScopeOnlyWith('집중 모니터링의 대상 · 수집 변경은 조회 · 쓰기 모두 전체 범위인 계정만 할 수 있습니다.');
+const fullScopeOnly = fullScopeOnlyWith('서버 집중 모니터링은 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다 — 전 법인 서버의 주소 · 프로세스가 들어갑니다.');
+const fullRwOnly = fullReadWriteScopeOnlyWith('서버 집중 모니터링의 대상 · 수집 변경은 조회 · 쓰기 모두 전체 범위인 계정만 할 수 있습니다.');
 const EDGE_ONLINE_MS = 60_000;
 
-const demoBlockWrite = (req, res, next) => (isDemoGuest(req.user) ? res.status(403).json({ ok: false, error: 'forbidden', reason: '데모 계정은 집중 모니터링을 바꿀 수 없습니다.' }) : next());
+const demoBlockWrite = (req, res, next) => (isDemoGuest(req.user) ? res.status(403).json({ ok: false, error: 'forbidden', reason: '데모 계정은 서버 집중 모니터링을 바꿀 수 없습니다.' }) : next());
 
 function registryUnreadable(res) {
   const e = registry.registryLoadError();
   if (!e) return false;
-  res.status(503).json({ ok: false, reason: 'registryUnreadable', detail: `집중 모니터링 등록부(focusmon-targets.json)를 읽지 못했습니다(${summarizeRegistryError(e)?.text || '손상'}) — 손상 보존본을 확인하세요.` });
+  res.status(503).json({ ok: false, reason: 'registryUnreadable', detail: `서버 집중 모니터링 등록부(focusmon-targets.json)를 읽지 못했습니다(${summarizeRegistryError(e)?.text || '손상'}) — 손상 보존본을 확인하세요.` });
   return true;
 }
 

@@ -3,6 +3,7 @@
  * 그룹별(사용자 요구 — 그룹 설정 시 합산 표시) → 전체 순으로 총/사용/가용을 더한다.
  * 오류 서버는 합계에서 제외하되 개수·사유를 정직하게 노출한다(축소 보고 금지).
  */
+import { numOrNull } from '../util/numOrNull.js';
 
 // v2.599(감사 C2599-09): 사용률은 df Capacity 와 같은 정의 — used / (used + avail). ext4 예약 블록은 total 에 들어가도
 //   사용자가 쓸 공간이 아니라 used/total 이면 가용 0 인 가득 찬 디스크가 95% 로 보였다. 분모 0 은 0% 가 아니라 null(모름).
@@ -17,10 +18,13 @@ const zero = () => ({ totalBytes: 0, usedBytes: 0, availBytes: 0 });
 const ioZero = () => ({ readBps: 0, writeBps: 0, totalBps: 0, busyMax: null, measured: 0, total: 0, partial: false });
 function ioAdd(acc, io) {
   acc.total += 1;
-  if (!io || !Number.isFinite(Number(io.totalBps))) return;
+  // v2.977(전체 점검 — 재현): `Number.isFinite(Number(null))` 은 참이다 — busyPct:null(v2.971 F4 경로)이 0 으로, totalBps:null 이 '측정 0' 으로 세였다. numOrNull 로 판정한다.
+  const total = numOrNull(io?.totalBps);
+  if (!io || total == null) return;
   acc.measured += 1;
-  acc.readBps += Number(io.readBps) || 0; acc.writeBps += Number(io.writeBps) || 0; acc.totalBps += Number(io.totalBps) || 0;
-  if (Number.isFinite(Number(io.busyPct)) && (acc.busyMax == null || Number(io.busyPct) > acc.busyMax)) acc.busyMax = Number(io.busyPct);
+  acc.readBps += numOrNull(io.readBps) ?? 0; acc.writeBps += numOrNull(io.writeBps) ?? 0; acc.totalBps += total;
+  const busy = numOrNull(io.busyPct);
+  if (busy != null && (acc.busyMax == null || busy > acc.busyMax)) acc.busyMax = busy;
 }
 function ioClose(acc) {
   if (!acc.measured) return { ...acc, readBps: null, writeBps: null, totalBps: null, partial: false };

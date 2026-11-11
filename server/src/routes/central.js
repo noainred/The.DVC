@@ -279,6 +279,27 @@ export function resolveCentralAuth(req) {
   return { ok: false, reason: '토큰 불일치' };
 }
 
+/**
+ * agent 주장의 **형식** 검사(v2.977) — 쿼리 · 본문의 agent 가 있는데 글자가 아니면 사유를 돌려준다(없거나 null 이면 통과).
+ * Express 기본 쿼리 해석(extended)은 `agent[]=x` · `agent[0]=x` · `agent[k]=x` 를 배열 · 객체로 만든다. 헤더는 항상 글자다.
+ * @returns {string|null}
+ */
+/** 쿼리 · 헤더 · 본문 agent 의 **잘리지 않은** 원문(글자인 것만 · 앞뒤 공백만 뗌 · 64자를 넘는 것만 — 짧으면 want 와 같다). */
+function rawAgentClaims(req) {
+  const out = [];
+  for (const v of [req?.query?.agent, req?.get?.('X-Agent-Name'), req?.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body.agent : undefined]) {
+    if (typeof v === 'string') { const t = v.trim(); if (t.length > 64) out.push(t); }
+  }
+  return out;
+}
+export function agentClaimTypeIssue(req) {
+  const q = req?.query?.agent;
+  if (q !== undefined && typeof q !== 'string') return `쿼리 agent 가 ${Array.isArray(q) ? '배열' : typeof q}`;
+  const b = req?.body;
+  if (b && typeof b === 'object' && !Array.isArray(b) && Object.hasOwn(b, 'agent') && b.agent != null && typeof b.agent !== 'string') return `본문 agent 가 ${Array.isArray(b.agent) ? '배열' : typeof b.agent}`;
+  return null;
+}
+
 // 요청이 다루려는 agent 이름(쿼리·헤더·본문 순).
 const requestedAgent = (req) => strAgent(req.query?.agent) || strAgent(req.get('X-Agent-Name')) || strAgent(req.body?.agent);
 
@@ -325,14 +346,25 @@ centralRouter.use((req, res, next) => {
   const auth = resolveCentralAuth(req);
   req.centralAuth = auth;
   if (!auth.ok) return next(); // 각 라우트가 404/403을 구분해 응답(하위호환 유지)
+  // v2.977(전체 점검 — 심층 방어): agent 는 **글자 하나만**. `?agent[]=edge-b` · 본문 agent:['edge-b'] 는 strAgent 가 '' 로 읽어 아래 대조를 건너뛰고,
+  //   핸들러의 `String(req.query.agent)` 는 'edge-b' 로 읽는다. ⚠ 정정(같은 날 반증): 운영 포탈에서는 index.js 의 queryNormalizer 가 이 라우터보다 먼저
+  //   쿼리 배열을 글자로 바꿔 대조가 403 을 낸다 — 다른 법인 자격증명 유출은 **맨 express 구성(정규화 없음)에서만** 재현됐다. 정규화 순서가 바뀌어도
+  //   이 대조가 무너지지 않게 여기서도 막는다. 글자가 아니면 어떤 모드든 400.
+  const typeIssue = agentClaimTypeIssue(req);
+  if (typeIssue) {
+    console.warn(`[central] agent 형식 거부 — ${typeIssue} (${req.method} ${req.path}, 토큰=${auth.mode === 'agent' ? auth.agent : 'shared'})`);
+    return res.status(400).json({ ok: false, reason: `agent 는 글자 하나여야 합니다(${typeIssue}).` });
+  }
   const want = requestedAgent(req);
   if (auth.mode === 'agent') {
     // 개별 토큰은 남의 이름으로 조회/보고/등록할 수 없다 — 자격증명 횡탈·데이터 위장 차단.
     // want(쿼리/헤더/본문 agent)와 register-collector 의 body.name 을 **둘 다** 대조한다.
-    for (const claim of [want, registerName(req)]) {
+    // v2.977(반증 F5): strAgent 는 64자로 잘라 비교하는데 핸들러는 원문을 쓴다 — 64자 이름의 엣지가 '그 이름으로 시작하는 더 긴 이름' 의 설정을 받을 수 있었다.
+    //   잘리지 않은 원문(앞뒤 공백만 뗌)도 함께 대조한다.
+    for (const claim of [want, registerName(req), ...rawAgentClaims(req)]) {
       if (claim && claim.toLowerCase() !== String(auth.agent).toLowerCase()) {
-        console.warn(`[central] agent 불일치 거부 — 토큰=${auth.agent} 요청=${claim} (${req.method} ${req.path})`);
-        return res.status(403).json({ ok: false, reason: `이 토큰은 '${auth.agent}' 전용입니다(요청: '${claim}').` });
+        console.warn(`[central] agent 불일치 거부 — 토큰=${auth.agent} 요청=${String(claim).slice(0, 80)} (${req.method} ${req.path})`);
+        return res.status(403).json({ ok: false, reason: `이 토큰은 '${auth.agent}' 전용입니다(요청: '${String(claim).slice(0, 80)}').` });
       }
     }
   }

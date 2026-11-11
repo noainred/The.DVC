@@ -82,14 +82,20 @@ function positions(blocks, from, to) {
   return out;
 }
 
-/** 표본 간격(ms)의 중앙값 — 표본이 2개 미만이면 null. */
+/** 수집 공백으로 보는 틈 — 이보다 긴 표본 간격은 칸 폭 계산에서 뺀다(그 구간은 비워 둔다). */
+export const GAP_MS = 60_000;
+/**
+ * 표본 간격(ms) — 60초 이하 간격들의 **90번째 백분위수**(큰 쪽). 표본이 2개 미만이면 null.
+ * v2.977: 중앙값이었을 때 '계속 수집' 이 보는 화면이 없어 10초로 낮췄다가 2초로 돌아오면 칸 폭이 2초 기준이 돼 10초 구간의 선이 점으로 끊겼다
+ * (시험 포탈에서 발견). 큰 쪽 간격으로 칸을 잡으면 촘촘한 구간은 평균으로 묶일 뿐 선이 끊기지 않는다.
+ */
 export function sampleSpacing(pos) {
   if (!pos || pos.length < 2) return null;
   const d = [];
-  for (let i = 1; i < pos.length; i++) { const x = pos[i][2] - pos[i - 1][2]; if (x > 0) d.push(x); }
+  for (let i = 1; i < pos.length; i++) { const x = pos[i][2] - pos[i - 1][2]; if (x > 0 && x <= GAP_MS) d.push(x); }
   if (!d.length) return null;
   d.sort((a, b) => a - b);
-  return d[d.length >> 1];
+  return d[Math.min(d.length - 1, Math.floor(d.length * 0.9))];
 }
 
 /**

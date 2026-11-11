@@ -196,18 +196,19 @@ function VmsList({ filters, onOpen, onVisible, onHub, selectedId, onGoHost = nul
         )}
       </>
     ) },
-    { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
-    { key: 'guestOS', label: 'Guest OS' },
+    { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted" style={{ display: 'inline-block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 110 }}>{v.vcenterId}</span> },
+    // v2.977(전체 점검): Guest OS 는 두 줄까지 접는다(192px 한 줄이 1440px 에서 메모리 · 디스크 · 호스트 열을 가로 스크롤 뒤로 밀었다)
+    { key: 'guestOS', label: 'Guest OS', render: (v) => <span style={{ display: 'inline-block', whiteSpace: 'normal', maxWidth: 150, lineHeight: 1.3 }}>{v.guestOS || '—'}</span> },
     { key: 'ipAddress', label: 'IP', render: (v) => ipList(v) },
     { key: 'spec', label: 'vCPU · RAM', align: 'right', sortValue: specSort, render: (v) => <span className="tabular">{specText(v)}</span> },
-    ...(showGpuCol ? [{ key: 'gpu', label: 'GPU', sortValue: (v) => v.gpu?.type || '', render: (v) => <GpuBadge gpu={v.gpu} /> }] : []),
+    ...(showGpuCol ? [{ key: 'gpu', label: 'GPU', sortValue: (v) => v.gpu?.type || '', render: (v) => <GpuBadge gpu={v.gpu} compact /> }] : []),
     { key: 'cpuUsagePct', label: 'CPU', render: (v) => <VmUsageBar pct={v.cpuUsagePct} /> },
     { key: 'memUsagePct', label: '메모리', render: (v) => <VmUsageBar pct={v.memUsagePct} /> },
     { key: 'storageGB', label: '디스크', align: 'right', render: (v) => (v.storageGB != null ? `${v.storageGB} GB` : '—') },
     // v2.915 교차 링크: 호스트 이름을 누르면 호스트 탭을 그 호스트로(이름 정확 일치 — 칩으로 해제)
     { key: 'host', label: '호스트', render: (v) => (onGoHost && v.host
-      ? <button type="button" className="cell-link" style={{ color: 'var(--text-dim)' }} onClick={() => onGoHost(v.host)} title="호스트 탭을 이 호스트로">{v.host}</button>
-      : <span className="muted">{v.host || '—'}</span>) },
+      ? <button type="button" className="cell-link" style={{ color: 'var(--text-dim)', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 140, textAlign: 'left' }} onClick={() => onGoHost(v.host)} title="호스트 탭을 이 호스트로">{v.host}</button>
+      : <span className="muted" style={{ display: 'inline-block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 140 }}>{v.host || '—'}</span>) },
   ];
 
   const t = view.totals;

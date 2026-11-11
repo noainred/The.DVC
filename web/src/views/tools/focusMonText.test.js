@@ -126,3 +126,26 @@ describe('차트 좌표', () => {
     expect(indexAt(50, { x0: 0, x1: 100, count: 3 })).toBe(1); expect(indexAt(-60, { x0: 0, x1: 100, count: 3 })).toBeNull();
   });
 });
+
+describe('차트 툴팁 좌표(v2.977)', () => {
+  it('비율 → 칸 · 값 · 시각 · x — 칸 수가 다른 시리즈도 같은 비율로 읽는다', async () => {
+    const C = await import('./focusMonChart.js');
+    expect(C.indexAtFrac(0, 5)).toBe(0); expect(C.indexAtFrac(1, 5)).toBe(4); expect(C.indexAtFrac(0.5, 5)).toBe(2);
+    expect(C.indexAtFrac(1.7, 5)).toBe(4); expect(C.indexAtFrac(null, 5)).toBeNull(); expect(C.indexAtFrac(0.5, 0)).toBeNull();
+    expect(C.valueAtFrac([1, null, 3], 0.5)).toBeNull();
+    expect(C.valueAtFrac([1, '', 3], 0.5)).toBeNull();
+    expect(C.valueAtFrac([1, 2, 3], 1)).toBe(3);
+    expect(C.timeAtIndex(0, 4, 0, 400)).toBe(50); expect(C.timeAtIndex(3, 4, 0, 400)).toBe(350);
+    expect(C.xAtIndex(2, 5, 0, 100)).toBe(50); expect(C.xAtIndex(0, 1, 10, 20)).toBe(10);
+  });
+  it('툴팁 줄 — 고정한 시리즈 먼저, 나머지는 그 시각 값이 큰 순 · 값 없음은 뒤', async () => {
+    const C = await import('./focusMonChart.js');
+    const s = [
+      { key: 'a', vals: [1, 1], pinned: false }, { key: 'b', vals: [9, 9], pinned: false },
+      { key: 'c', vals: [null, null], pinned: false }, { key: 'p', vals: [0, 0], pinned: true },
+    ];
+    expect(C.tipRows(s, 0).map((r) => r.key)).toEqual(['p', 'b', 'a', 'c']);
+    expect(C.tipRows(s, 0, { limit: 2 }).map((r) => r.key)).toEqual(['p', 'b']);
+    expect(C.tipRows(s, 0)[0].v).toBe(0);
+  });
+});

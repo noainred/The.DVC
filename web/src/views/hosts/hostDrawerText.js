@@ -109,6 +109,7 @@ export function checksGap(st, hostId) {
  * 타일 4칸의 글자 — 값(v)이 null 이면 '—' · 단위 없음. 끊긴 호스트는 사용률이 null(hostUsagePct).
  * @param c  /hosts/checks 의 byId[host.id] — 없으면 VM 타일의 켜짐 · 할당 줄(subs)을 비운다(지어내지 않는다).
  */
+const vcpuPartial = (vm) => (numOrNull(vm?.vcpuUnknown) ?? 0) > 0;
 export function hostTiles(host, c = null) {
   const cores = numOrNull(host?.cpuCores);
   const u = ghz(host?.cpuUsageMhz); const t = ghz(host?.cpuTotalMhz);
@@ -124,7 +125,11 @@ export function hostTiles(host, c = null) {
     mem: { pct: hostUsagePct(host, 'memUsagePct'), sub: !down && mu != null && mt != null ? `${mu} / ${mt} GB` : (mt != null ? `${mt} GB` : '용량 모름') },
     vm: {
       n: numOrNull(host?.vmCount),
-      subs: vm ? [`켜짐 ${fmt(vm.on)} · 꺼짐 ${fmt(Math.max(0, vm.n - vm.on))}`, vm.templates ? `템플릿 ${fmt(vm.templates)}` : null, `vCPU ${fmt(vm.vcpu)} 할당`, `코어 대비 ${ratioText(vm.vcpu, cores)}`].filter(Boolean) : [],
+      // v2.977(전체 점검 — 재현): vCPU 를 못 읽은 VM(vcpuUnknown)이 있으면 할당 합 · 코어 대비는 **부분 합**이다 — '이상' 과 못 읽은 수를 붙인다
+      //   (같은 값을 그리는 HostDetail '· 못 읽은 VM N' · Hosts 표 '+?' 와 맞춘다. 예전 드로어만 표지 없이 'vCPU 8 할당 · 코어 대비 2.0 : 1' 이었다).
+      subs: vm ? [`켜짐 ${fmt(vm.on)} · 꺼짐 ${fmt(Math.max(0, vm.n - vm.on))}`, vm.templates ? `템플릿 ${fmt(vm.templates)}` : null,
+        `vCPU ${fmt(vm.vcpu)} 할당${vcpuPartial(vm) ? ' 이상' : ''}`, `코어 대비 ${ratioText(vm.vcpu, cores)}${vcpuPartial(vm) && cores ? ' 이상' : ''}`,
+        vcpuPartial(vm) ? `vCPU 못 읽은 VM ${fmt(vm.vcpuUnknown)}` : null].filter(Boolean) : [],
     },
     power: {
       watts: hasW ? watts : null,

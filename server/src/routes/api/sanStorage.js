@@ -54,6 +54,12 @@ const KEY_MAX = 160;
  *   발송 기록의 결과 · 사유 문구 안 메일 주소(SMTP 거부 문구 등)도 가린다. 관리자 판정은 isAdminReq(= demoGuest.js isAdminDetailUser 하나).
  */
 const MAIL_RE = /[^\s<>@,;:"'()[\]]+@[^\s<>@,;:"'()[\]]+/g;
+/** 매핑 재정의 한 건의 비관리자 판본 — 바꾼 사람(by)을 뺀다. */
+export function byView(o, admin) {
+  if (admin || !o || typeof o !== 'object') return o;
+  const { by: _b, ...rest } = o; void _b;
+  return rest;
+}
 const scrubMail = (v) => (typeof v === 'string' ? v.slice(0, 400).replace(MAIL_RE, '(메일 가림)') : v);
 export function settingsView(s, admin) {
   if (admin || !s || typeof s !== 'object') return s;
@@ -292,7 +298,7 @@ export function registerSanStorage(api) {
       const dcId = s.group ?? '';
       const k = kindOf(s.key, dcId);
       const first = (s.portsDetail || [])[0]?.name || '';
-      const ov = b.map.kinds[s.key] || null;
+      const ov = byView(b.map.kinds[s.key] || null, b.ctx.admin);
       // 후보: 수동 재정의가 있거나 · 이름 규칙으로만 어레이가 된 것 · 평평한 이름(호스트) 중 `::` 없는 것은 수천 개라 'array' 와 재정의만.
       if (ov || k.basis === 'name' || k.kind === 'array') {
         targets.push({ key: s.key, datacenterId: dcId, datacenterName: b.ctx.dcNameOf(dcId), vendor: directorOf(first).vendor, autoKind: ov ? kindResolverNoOverride(capIdx)(s.key, dcId) : k, applied: k.kind, basis: k.basis, override: ov, firstName: first, ports: (s.ports || []).length });
@@ -301,7 +307,7 @@ export function registerSanStorage(api) {
       for (const p of s.portsDetail || []) {
         const auto = directorOf(p.name || '');
         const mk = directorMapKey(s.key, p.deviceId, p.port);
-        const ov2 = b.map.directors[mk] || null;
+        const ov2 = byView(b.map.directors[mk] || null, b.ctx.admin);
         if (auto.group != null && !ov2) continue;
         ports.push({ mapKey: mk, key: s.key, datacenterId: dcId, deviceId: String(p.deviceId), deviceName: (b.ctx.deviceMeta.get(String(p.deviceId)) || { name: String(p.deviceId) }).name,
           port: Number(p.port), name: p.name || '', auto: { group: auto.group, confidence: auto.confidence, vendor: auto.vendor }, override: ov2,
@@ -309,7 +315,10 @@ export function registerSanStorage(api) {
       }
     }
     targets.sort((a, b2) => (a.override ? -1 : b2.override ? 1 : 0) || a.key.localeCompare(b2.key));
-    res.json({ ok: true, ...commonMeta(b), counts: b.counts, map: { kinds: b.map.kinds, directors: b.map.directors, updatedAt: b.map.updatedAt, updatedBy: b.map.updatedBy }, limits: MAP_LIMITS,
+    // v2.977(전체 점검 — audits.md v2.954 '남긴 것'): 비관리자 판본은 설정한 관리자 계정명(updatedBy · 재정의의 by)을 싣지 않는다(A-3 과 같은 부류).
+    const admin = b.ctx.admin;
+    const mapView = (m) => (admin ? m : Object.fromEntries(Object.entries(m || {}).map(([k, v]) => [k, byView(v, false)])));
+    res.json({ ok: true, ...commonMeta(b), counts: b.counts, map: { kinds: mapView(b.map.kinds), directors: mapView(b.map.directors), updatedAt: b.map.updatedAt, ...(admin ? { updatedBy: b.map.updatedBy } : {}) }, limits: MAP_LIMITS,
       targets: targets.slice(0, 2000), targetsOmitted: Math.max(0, targets.length - 2000), ports: ports.slice(0, 4000), portsOmitted: Math.max(0, ports.length - 4000),
       unparsedGroup: UNPARSED_GROUP });
   });

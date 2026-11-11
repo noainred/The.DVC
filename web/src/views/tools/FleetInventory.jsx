@@ -200,7 +200,8 @@ export function FleetInventory({ isAdmin }) {
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="가상화 호스트" value={s.virtualizationHosts ?? 0} accent="var(--accent-2,#22d3ee)" meta={`iDRAC 받침 ${s.idracBackedHosts ?? 0}대`} onClick={() => setView('virt')} active={view === 'virt'} />
         <Card label="베어메탈 서버" value={s.bareMetal ?? 0} accent="var(--amber)" meta={`전력 측정 ${s.bareMetalMeasured ?? 0}대${s.forcedBareMetal ? ` · 수동 ${s.forcedBareMetal}` : ''}`} onClick={() => setView('baremetal')} active={view === 'baremetal'} />
-        <Card label="베어메탈 총전력" value={fmtWatts(s.bareMetalWatts || 0)} accent="#fbbf24" meta={`${s.bareMetalKw ?? 0} kW · 현재 측정 합계`} />
+        <Card label="베어메탈 총전력" value={s.bareMetalWatts == null ? '—' : fmtWatts(s.bareMetalWatts)} accent="#fbbf24"
+          meta={s.bareMetalWatts == null ? '측정한 서버 없음' : `${s.bareMetalKw} kW · ${(s.bareMetalMeasured ?? 0) < (s.bareMetal ?? 0) ? `부분 합(측정 ${s.bareMetalMeasured} / ${s.bareMetal}대)` : '현재 측정 합계'}`} />
         <Card label="법인 미지정" value={s.bareMetalNoCorp ?? s.bareMetalUnassigned ?? 0} accent={(s.bareMetalNoCorp ?? s.bareMetalUnassigned) ? 'var(--amber)' : 'var(--green)'} meta={s.excluded ? `제외(수동) ${s.excluded}대` : '베어메탈 중 법인(DataCenter)을 모르는 서버'} />
       </div>
 

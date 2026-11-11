@@ -116,6 +116,11 @@ export function directorResolver(map, aliasFor = null) {
  * v2.952(C): 포트 → 조닝 별칭. port_meta 의 연결 WWN 을 장비별 최신 스냅샷 zone 멤버 별칭(attribution.buildFabrics aliasOf)에서 찾는다.
  * 스냅샷 · DB 가 없으면 빈 조회(별칭 없음 = 폴백 없음 — 판정이 바뀌지 않는다). 요청마다 한 번 만든다.
  */
+const ALIAS_MEMO_MAX = 4;
+const _aliasMemo = new Map(); // memoKey → aliasOf(Map) — 넣은 순서가 오래된 순
+function aliasMemoGet(k) { const v = _aliasMemo.get(k); if (v) { _aliasMemo.delete(k); _aliasMemo.set(k, v); } return v || null; }
+function aliasMemoSet(k, v) { _aliasMemo.set(k, v); while (_aliasMemo.size > ALIAS_MEMO_MAX) _aliasMemo.delete(_aliasMemo.keys().next().value); }
+export function _resetAliasMemoForTest() { _aliasMemo.clear(); }
 export async function aliasLookupFor(ctx) {
   const snapOf = new Map();
   try {
@@ -125,12 +130,20 @@ export async function aliasLookupFor(ctx) {
       if (!cur || (s.collectedAt || 0) > (cur.collectedAt || 0)) snapOf.set(s.deviceId, s);
     }
   } catch { /* 스냅샷 저장소 불가 — 별칭 없음 */ }
-  const aliasOf = new Map();
-  try {
-    for (const f of buildFabrics([...snapOf.values()].map((s) => { const m = ctx.deviceMeta.get(String(s.deviceId)) || {}; return { ...s, name: m.name || s.name, datacenterId: m.datacenterId || '' }; }))) {
-      for (const [w, a] of f.aliasOf || []) { const k = normWwn(w); if (k && a && !aliasOf.has(k)) aliasOf.set(k, String(a).slice(0, 120)); }
-    }
-  } catch { /* 조닝 해석 실패 — 별칭 없음 */ }
+  // v2.977(전체 점검 · 성능 — 측정): 조닝 해석(buildFabrics — 스위치 86대 · zone 1만 5천 개에서 동기 50~60ms)을 요청마다 다시 했다(60초 폴링 경로).
+  //   고른 스냅샷(장비 · 수집 시각 · 이름 · 법인)이 같으면 직전 결과를 쓴다 — 스냅샷이 바뀌면 키가 바뀐다. 범위마다 고른 장비가 달라 키 4개까지 둔다.
+  const picked = [...snapOf.values()].map((s) => { const m = ctx.deviceMeta.get(String(s.deviceId)) || {}; return { s, name: m.name || s.name, datacenterId: m.datacenterId || '' }; });
+  const memoKey = picked.map((x) => `${x.s.deviceId}\u0001${x.s.collectedAt || 0}\u0001${x.name || ''}\u0001${x.datacenterId}`).sort().join('\u0002');
+  let aliasOf = aliasMemoGet(memoKey);
+  if (!aliasOf) {
+    aliasOf = new Map();
+    try {
+      for (const f of buildFabrics(picked.map((x) => ({ ...x.s, name: x.name, datacenterId: x.datacenterId })))) {
+        for (const [w, a] of f.aliasOf || []) { const k = normWwn(w); if (k && a && !aliasOf.has(k)) aliasOf.set(k, String(a).slice(0, 120)); }
+      }
+      aliasMemoSet(memoKey, aliasOf);
+    } catch { /* 조닝 해석 실패 — 별칭 없음(기억하지 않는다 — 다음 요청이 다시 해 본다) */ }
+  }
   let wwnOf = new Map();
   if (aliasOf.size) { try { wwnOf = new Map((await metaFor(ctx.ids)).map((r) => [`${r.d}|${Number(r.p)}`, normWwn(r.wwn || '')])); } catch { wwnOf = new Map(); } }
   const fn = (deviceId, port) => { const w = wwnOf.get(`${deviceId}|${Number(port)}`); return w ? (aliasOf.get(w) || '') : ''; };
