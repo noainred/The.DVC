@@ -236,7 +236,8 @@ test('BUG-16 pingEmptyReason — 기다려도 안 되는 경우를 기다리라�
 test('BUG-16 서버가 monitorEnabled·intervalMs·rangeMs 를 싣고 scope 응답도 보존한다', () => {
   const svc = code(path.join(SRC, 'ping/service.js'));
   assert.ok(/monitorEnabled: !!config\.ping\.enabled/.test(svc));
-  assert.ok(/intervalMs: config\.ping\.pollIntervalMs/.test(svc));
+  // v2.963: 주기는 화면 측정 설정(ping/settings.js — 화면 값 > env)에서 온다. 응답에 실리는 것은 그대로 intervalMs(줄 간격 = 요약 주기).
+  assert.ok(/intervalMs: pingSettingsNow\(\)\.summaryIntervalMs/.test(svc));
   assert.ok(/bucketMs, rangeMs, series/.test(svc), 'seriesOf 가 rangeMs 를 돌려준다');
   const rt = code(path.join(SRC, 'routes/ping.js'));
   assert.ok(/res\.json\(\{ \.\.\.r, targets, counts/.test(rt), '범위 계정 응답에서도 필드를 보존한다');

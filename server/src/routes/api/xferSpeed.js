@@ -39,6 +39,7 @@ import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5 — O-B
 import { config } from '../../config.js';
 import { getTarget, edgeTargetId } from '../../ping/store.js';
 import { windowOf, targetBoundsOf } from '../../ping/service.js';
+import { loadPingSettings } from '../../ping/settings.js';
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -324,7 +325,8 @@ api.get('/tools/xfer-speed/ping', adminOnly, fullScopeOnly, async (req, res) => 
   const points = pn == null ? PING_POINTS_DEFAULT : Math.max(60, Math.min(480, Math.floor(pn)));
   const base = {
     ok: true, agent: a.id, days, start: since, end, now, past, offsetMin: DAY_OFFSET_MIN,
-    monitorEnabled: !!config.ping.enabled, intervalMs: config.ping.pollIntervalMs, timeoutMs: config.ping.timeoutMs,
+    // v2.963: 주기는 Ping 측정 설정(화면 값 > env) — intervalMs = 요약(저장) 주기, probeIntervalMs = 연속 측정 간격.
+    monitorEnabled: !!config.ping.enabled, intervalMs: loadPingSettings().summaryIntervalMs, probeIntervalMs: loadPingSettings().probeIntervalMs, timeoutMs: loadPingSettings().timeoutMs,
     retentionDays: numOrNull(config.ping.retentionDays),
   };
   const tid = edgeTargetId(a.col || { id: a.id });

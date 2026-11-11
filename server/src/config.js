@@ -224,10 +224,16 @@ export const config = {
     // CONFIG_DIR에 두어 업그레이드에도 이력이 보존된다. 대상 정의는 CONFIG_DIR/ping-targets.json.
     enabled: process.env.PING_MON_ENABLED !== 'false',
     dbPath: process.env.PING_DB_PATH || dbFile('ping-monitor.db'),
+    // v2.963: 저장(요약) 주기의 기본값 — 화면 '측정 설정' 에서 저장한 값이 있으면 그것이 이긴다(ping/settings.js).
     pollIntervalMs: clampIntervalMs(numEnv(process.env.PING_MON_INTERVAL_MS, 60_000), 60_000, 5_000), // 기본 1분
+    intervalFromEnv: numEnv(process.env.PING_MON_INTERVAL_MS, null) != null,
+    // v2.963(사용자 요청 "ping 은 중단없이 계속 ping"): 대상마다 쉬지 않고 재는 간격의 기본값(1초) — 화면 값이 이긴다.
+    probeIntervalMs: clampIntervalMs(numEnv(process.env.PING_MON_PROBE_MS, 1_000), 1_000, 1_000),
+    probeFromEnv: numEnv(process.env.PING_MON_PROBE_MS, null) != null,
     // v2.605(감사 TIM2605-04): numEnv 는 음수·2^31 초과를 그대로 넘겨 프로브 타이머가 1ms 가 됐다 — [100ms, 60초].
     timeoutMs: reqTimeoutMs(process.env.PING_MON_TIMEOUT_MS, 2_500, { min: 100, max: 60_000 }),
-    // 동시에 프로브할 대상 수 상한(고RTT·다수 대상에서 이벤트 루프/소켓 폭주 방지).
+    timeoutFromEnv: numEnv(process.env.PING_MON_TIMEOUT_MS, null) != null,
+    // 동시에 띄우는 ICMP(ping 프로세스) 수 상한 — 연속 측정에서도 프로세스 폭주를 막는다(TCP 연결 측정은 대상마다 1개라 상한 밖).
     concurrency: Math.max(1, numEnv(process.env.PING_MON_CONCURRENCY, 8)),
     retentionDays: retentionEnv(process.env.PING_MON_RETENTION_DAYS, 365), // ~1년
   },

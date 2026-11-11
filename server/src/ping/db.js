@@ -2,9 +2,14 @@
  * Ping 모니터링 시계열 저장소 — 등록 대상별 RTT/도달성 샘플을 별도 SQLite에 보관한다.
  * iDRAC 전력/온도 DB와 동일하게 node:sqlite(--experimental-sqlite) 사용, 불가 시 NDJSON 폴백.
  *
- * 스키마: samples(target TEXT, ts INTEGER, rtt REAL, ok INTEGER). `target`은 대상 id,
+ * 스키마: samples(target TEXT, ts INTEGER, rtt REAL, ok INTEGER, n, fail, rn, mn, mx). `target`은 대상 id,
  * `rtt`는 응답 지연(ms, 무응답이면 NULL), `ok`는 도달 여부(1/0). 장기 범위는 쿼리에서
  * 시간 버킷 집계(avg/min/max/loss)로 다운샘플한다.
+ *
+ * v2.963(사용자 요청 "ping 은 중단없이 계속 ping"): 모니터가 대상마다 쉬지 않고 재고(기본 1초) **요약 주기마다 한 줄**을 쓴다 —
+ * 그 줄은 n(잰 횟수)·fail(실패 수)·rn(RTT 가 있는 성공 수)·rtt(그 평균)·mn·mx(최저·최고)를 싣는다. 예전 줄(측정 1회 = 1줄)은 이 열이
+ * NULL 이고 n=1 · fail=ok?0:1 · rn=(ok∧rtt)?1:0 · mn=mx=rtt 로 읽는다(W_* 식 — 모든 집계가 같은 식을 쓴다). 그래서 손실률은
+ * 'NULL 아닌 줄 수' 가 아니라 **SUM(fail)/SUM(n)** 이고, 평균은 **rn 가중**이다. 열 추가는 ALTER TABLE ADD COLUMN(파일을 다시 쓰지 않는다).
  *
  * 성능: WAL + synchronous=NORMAL + busy_timeout(단건 insert 가속), (target,ts)·(ts) 인덱스.
  * prune(ts<?)는 ts 단독 인덱스로 풀스캔을 피한다(복합 (target,ts)로는 못 탐).
@@ -43,18 +48,23 @@ function initSqlite() {
       CREATE INDEX IF NOT EXISTS idx_ping_hourly_h ON samples_hourly (h); -- 롤업 prune(h<?)
       CREATE TABLE IF NOT EXISTS ping_meta (k TEXT PRIMARY KEY, v TEXT);
     `);
+    // v2.963: 요약 줄 열 — 없으면 추가(예전 DB). ADD COLUMN 은 기존 행을 다시 쓰지 않는다(NULL = 예전 줄).
+    const have = new Set(db.prepare('PRAGMA table_info(samples)').all().map((c) => String(c.name)));
+    for (const [col, type] of [['n', 'INTEGER'], ['fail', 'INTEGER'], ['rn', 'INTEGER'], ['mn', 'REAL'], ['mx', 'REAL']]) {
+      if (!have.has(col)) db.exec(`ALTER TABLE samples ADD COLUMN ${col} ${type}`);
+    }
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
-    const ins = db.prepare('INSERT INTO samples (target, ts, rtt, ok) VALUES (?, ?, ?, ?)');
+    const ins = db.prepare('INSERT INTO samples (target, ts, rtt, ok, n, fail, rn, mn, mx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     // 롤업 upsert — 표본 1건을 그 시간 칸에 더한다. ⚠ SQL MIN/MAX 는 인자 하나가 NULL 이면 NULL 이므로 IFNULL 로 감싼다.
-    const hourUp = db.prepare(`INSERT INTO samples_hourly (target, h, n, fail, rtt_sum, rtt_n, mn, mx) VALUES (?, ?, 1, ?, ?, ?, ?, ?)
-      ON CONFLICT(target, h) DO UPDATE SET n = n + 1, fail = fail + excluded.fail,
+    const hourUp = db.prepare(`INSERT INTO samples_hourly (target, h, n, fail, rtt_sum, rtt_n, mn, mx) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(target, h) DO UPDATE SET n = n + excluded.n, fail = fail + excluded.fail,
         rtt_sum = rtt_sum + excluded.rtt_sum, rtt_n = rtt_n + excluded.rtt_n,
         mn = CASE WHEN excluded.mn IS NULL THEN mn WHEN mn IS NULL THEN excluded.mn ELSE MIN(mn, excluded.mn) END,
         mx = CASE WHEN excluded.mx IS NULL THEN mx WHEN mx IS NULL THEN excluded.mx ELSE MAX(mx, excluded.mx) END`);
-    const addHour = (target, ts, rtt, ok) => {
-      const good = ok && rtt != null && Number.isFinite(Number(rtt));
-      const v = good ? Number(rtt) : null;
-      hourUp.run(target, Math.floor(ts / HOUR_MS) * HOUR_MS, ok ? 0 : 1, good ? v : 0, good ? 1 : 0, v, v);
+    // 롤업에 한 줄을 더한다 — 요약 줄(n·fail·rn·mn·mx)은 그 값 그대로, 예전 줄(측정 1회)은 W_* 와 같은 규칙으로.
+    const addHour = (r) => {
+      const w = weightOf(r);
+      hourUp.run(r.target, Math.floor(r.ts / HOUR_MS) * HOUR_MS, w.n, w.fail, w.rn ? w.rtt * w.rn : 0, w.rn, w.mn, w.mx);
     };
     // 롤업에서 원시와 같은 모양의 버킷을 만든다(bucketMs 는 HOUR_MS 의 배수여야 한다 — 호출부가 맞춘다).
     const hourBucket = db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b,
@@ -70,10 +80,10 @@ function initSqlite() {
     // rowid 경계로 이중 계수를 막는다(시각 경계로는 못 막는다 — 목 시드처럼 옛 시각 표본이 나중에 들어올 수 있다).
     // 진행 위치를 같은 트랜잭션에 남겨 재시작하면 이어서 돈다. 끝나기 전에는 장기 범위도 원시를 읽는다(rollupReady=false).
     const seedChunk = db.prepare(`INSERT INTO samples_hourly (target, h, n, fail, rtt_sum, rtt_n, mn, mx)
-      SELECT target, CAST(ts/${HOUR_MS} AS INTEGER)*${HOUR_MS} AS hh, COUNT(*),
-        SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END),
-        IFNULL(SUM(CASE WHEN ok=1 AND rtt IS NOT NULL THEN rtt END), 0), SUM(CASE WHEN ok=1 AND rtt IS NOT NULL THEN 1 ELSE 0 END),
-        MIN(CASE WHEN ok=1 THEN rtt END), MAX(CASE WHEN ok=1 THEN rtt END)
+      SELECT target, CAST(ts/${HOUR_MS} AS INTEGER)*${HOUR_MS} AS hh, SUM(${W_N}),
+        SUM(${W_F}),
+        IFNULL(SUM(CASE WHEN rtt IS NOT NULL THEN rtt * ${W_RN} END), 0), SUM(${W_RN}),
+        MIN(${W_MN}), MAX(${W_MX})
       FROM samples WHERE rowid > ? AND rowid <= ? GROUP BY target, hh
       ON CONFLICT(target, h) DO UPDATE SET n = n + excluded.n, fail = fail + excluded.fail,
         rtt_sum = rtt_sum + excluded.rtt_sum, rtt_n = rtt_n + excluded.rtt_n,
@@ -119,14 +129,14 @@ function initSqlite() {
     // ⚠ node:sqlite 는 JS number 를 REAL 로 바인딩한다 — (ts/?)*? 는 실수 나눗셈이라 버킷이 묶이지 않고
     // 표본 1건 = 1버킷이 되어 LIMIT 이 최근 몇 시간만 남기고 손실률도 0/1 로 떨어졌다(v2.598 DB2598-01).
     // metrics/db.js 와 같은 CAST(… AS INTEGER) 형태로 정수 버킷을 만든다.
-    const bucket = db.prepare(`SELECT CAST(ts/? AS INTEGER)*? AS b,
-        AVG(CASE WHEN ok=1 THEN rtt END) avg, MIN(CASE WHEN ok=1 THEN rtt END) min, MAX(CASE WHEN ok=1 THEN rtt END) max,
-        SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END) fail, COUNT(*) n
+    // v2.963: 요약 줄을 가중해 묶는다 — 평균은 rn 가중(s/rn), 손실은 SUM(fail)/SUM(n). 예전 줄은 W_* 가 측정 1회로 읽는다.
+    const BUCKET_COLS = `CAST(ts/? AS INTEGER)*? AS b,
+        SUM(CASE WHEN rtt IS NOT NULL THEN rtt * ${W_RN} ELSE 0 END) s, SUM(${W_RN}) rn,
+        MIN(${W_MN}) min, MAX(${W_MX}) max, SUM(${W_F}) fail, SUM(${W_N}) n`;
+    const bucket = db.prepare(`SELECT ${BUCKET_COLS}
       FROM samples WHERE target=? AND ts>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
     // v2.890: 끝이 닫힌 창 [since, until) — (target, ts) 인덱스 범위 하나. 반개구간이라 이웃 창이 경계 표본을 두 번 세지 않는다.
-    const bucketUntil = db.prepare(`SELECT CAST(ts/? AS INTEGER)*? AS b,
-        AVG(CASE WHEN ok=1 THEN rtt END) avg, MIN(CASE WHEN ok=1 THEN rtt END) min, MAX(CASE WHEN ok=1 THEN rtt END) max,
-        SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END) fail, COUNT(*) n
+    const bucketUntil = db.prepare(`SELECT ${BUCKET_COLS}
       FROM samples WHERE target=? AND ts>=? AND ts<? GROUP BY b ORDER BY b DESC LIMIT ?`);
     // v2.890: 창 안 성공 RTT(중앙값용 — 호출부가 짧은 창(원시 칸)에서만 부른다: 7일 1분 주기 ≈ 1만 행).
     const okRttWindow = db.prepare('SELECT rtt FROM samples WHERE target=? AND ts>=? AND ts<? AND ok=1 AND rtt IS NOT NULL');
@@ -161,9 +171,9 @@ function initSqlite() {
     const dropHourBefore = db.prepare('DELETE FROM samples_hourly WHERE target=? AND h<?');
     const dropHourAt = db.prepare('DELETE FROM samples_hourly WHERE target=? AND h=?');
     const rebuildHour = db.prepare(`INSERT INTO samples_hourly (target, h, n, fail, rtt_sum, rtt_n, mn, mx)
-      SELECT target, ?, COUNT(*), SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END),
-        IFNULL(SUM(CASE WHEN ok=1 AND rtt IS NOT NULL THEN rtt END), 0), SUM(CASE WHEN ok=1 AND rtt IS NOT NULL THEN 1 ELSE 0 END),
-        MIN(CASE WHEN ok=1 THEN rtt END), MAX(CASE WHEN ok=1 THEN rtt END)
+      SELECT target, ?, SUM(${W_N}), SUM(${W_F}),
+        IFNULL(SUM(CASE WHEN rtt IS NOT NULL THEN rtt * ${W_RN} END), 0), SUM(${W_RN}),
+        MIN(${W_MN}), MAX(${W_MX})
       FROM samples WHERE target=? AND ts>=? AND ts<? GROUP BY target`);
     const dropHourAll = db.prepare('DELETE FROM samples_hourly WHERE target=?');
     // untilTs 를 주지 않으면 그 대상 전부(예전 동작). 라우트는 삭제 시각을 넘긴다.
@@ -193,8 +203,9 @@ function initSqlite() {
         db.exec('BEGIN');
         try {
           for (const r of rows) {
-            const info = ins.run(r.target, r.ts, r.rtt == null ? null : r.rtt, r.ok ? 1 : 0);
-            addHour(r.target, r.ts, r.rtt, r.ok);
+            const sum = summaryCols(r);
+            const info = ins.run(r.target, r.ts, r.rtt == null ? null : r.rtt, r.ok ? 1 : 0, sum.n, sum.fail, sum.rn, sum.mn, sum.mx);
+            addHour(r);
             // v2.612 DB2612-02: 재사용된 rowid 가 시드 경계 안이면 경계를 낮춘다(시드가 이 행을 다시 세지 않게).
             if (seedUpto != null) {
               const rid = Number(info?.lastInsertRowid);
@@ -210,7 +221,7 @@ function initSqlite() {
       history: (target, sinceTs, bucketMs, limit, untilTs = null) => (untilOf(untilTs) == null
         ? bucket.all(bucketMs, bucketMs, target, sinceTs, limit)
         : bucketUntil.all(bucketMs, bucketMs, target, sinceTs, untilOf(untilTs), limit)).reverse()
-        .map((r) => ({ ts: r.b, avg: round2(r.avg), min: round2(r.min), max: round2(r.max), loss: r.n ? Number((r.fail / r.n).toFixed(3)) : 0, n: Number(r.n), fail: Number(r.fail) })),
+        .map((r) => ({ ts: r.b, avg: r.rn ? round2(r.s / r.rn) : null, min: round2(r.min), max: round2(r.max), loss: r.n ? Number((r.fail / r.n).toFixed(3)) : 0, n: Number(r.n), fail: Number(r.fail) })),
       /** 롤업에서 읽는 버킷 — rollupReady 가 아니면 null(호출부가 원시로 떨어진다). bucketMs 는 HOUR_MS 의 배수. untilTs 는 시간 경계로 내린다. */
       historyHourly: (target, sinceTs, bucketMs, limit, untilTs = null) => {
         if (!rollupReady || bucketMs < HOUR_MS || bucketMs % HOUR_MS) return null;
@@ -241,19 +252,28 @@ function initJson() {
   const rewrite = () => { try { atomicWriteFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch (e) { console.warn(`[ping] NDJSON 폴백 재기록 실패(메모리는 정리됨 — 다음 정리 때 다시 씁니다): ${e.message}`); } };
   return {
     kind: 'json',
-    insertMany: (recs) => { const lines = recs.map((r) => ({ g: r.target, t: r.ts, v: r.rtt == null ? null : r.rtt, o: r.ok ? 1 : 0 })); rows.push(...lines); try { fs.appendFileSync(file, lines.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } },
+    insertMany: (recs) => {
+      const lines = recs.map((r) => { const c = summaryCols(r); const o = { g: r.target, t: r.ts, v: r.rtt == null ? null : r.rtt, o: r.ok ? 1 : 0 }; if (c.n != null) Object.assign(o, { n: c.n, f: c.fail, rn: c.rn, mn: c.mn, mx: c.mx }); return o; });
+      rows.push(...lines);
+      try { fs.appendFileSync(file, lines.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ }
+    },
     latest: (target) => { let best = null; for (const r of rows) if (r.g === target && (!best || r.t > best.t)) best = r; return best ? { rtt: best.v, ok: !!best.o, ts: best.t } : null; },
     recentOkRtt: (target, limit, sinceTs = 0) => rows.filter((r) => r.g === target && r.o && r.v != null && r.t >= (Number(sinceTs) || 0)).sort((a, b) => b.t - a.t).slice(0, limit).map((r) => r.v),
     history: (target, sinceTs, bucketMs, limit, untilTs = null) => {
       const buckets = new Map();
       const to = untilOf(untilTs);
       for (const r of rows) if (r.g === target && r.t >= sinceTs && (to == null || r.t < to)) {
-        const b = Math.floor(r.t / bucketMs) * bucketMs; const g = buckets.get(b) || { sum: 0, n: 0, ok: 0, min: Infinity, max: -Infinity };
-        g.n++; if (r.o && r.v != null) { g.ok++; g.sum += r.v; g.min = Math.min(g.min, r.v); g.max = Math.max(g.max, r.v); } buckets.set(b, g);
+        const b = Math.floor(r.t / bucketMs) * bucketMs; const g = buckets.get(b) || { sum: 0, n: 0, fail: 0, rn: 0, min: Infinity, max: -Infinity };
+        const w = weightOf({ rtt: r.v, ok: r.o, n: r.n, fail: r.f, rn: r.rn, mn: r.mn, mx: r.mx });
+        g.n += w.n; g.fail += w.fail;
+        if (w.rn) { g.rn += w.rn; g.sum += w.rtt * w.rn; }
+        if (w.mn != null) g.min = Math.min(g.min, w.mn);
+        if (w.mx != null) g.max = Math.max(g.max, w.mx);
+        buckets.set(b, g);
       }
       return [...buckets.entries()].sort((a, b) => a[0] - b[0]).slice(-limit).map(([b, g]) => ({
-        ts: b, avg: g.ok ? round2(g.sum / g.ok) : null, min: g.ok ? round2(g.min) : null, max: g.ok ? round2(g.max) : null,
-        loss: g.n ? Number(((g.n - g.ok) / g.n).toFixed(3)) : 0, n: g.n, fail: g.n - g.ok,
+        ts: b, avg: g.rn ? round2(g.sum / g.rn) : null, min: Number.isFinite(g.min) ? round2(g.min) : null, max: Number.isFinite(g.max) ? round2(g.max) : null,
+        loss: g.n ? Number((g.fail / g.n).toFixed(3)) : 0, n: g.n, fail: g.fail,
       }));
     },
     okRttIn: (target, sinceTs, untilTs) => rows.filter((r) => r.g === target && r.o && r.v != null && r.t >= sinceTs && r.t < untilTs).map((r) => Number(r.v)),
@@ -272,6 +292,34 @@ export const HOUR_MS = 3_600_000;
 const SEED_CHUNK_ROWS = 50_000;   // 청크당 GROUP BY 가 수십 ms 안에 끝나게
 
 const round2 = (x) => (x == null || !Number.isFinite(x) ? null : Number(x.toFixed(2)));
+
+/*
+ * v2.963 요약 줄 가중 — SQL 과 JS 가 같은 규칙을 쓴다. 예전 줄(n 이 NULL)은 측정 1회:
+ *   n=1 · fail=ok?0:1 · rn=(ok ∧ rtt 있음)?1:0 · mn=mx=(ok? rtt : NULL).
+ */
+const W_N = 'COALESCE(n, 1)';
+const W_F = 'COALESCE(fail, CASE WHEN ok=1 THEN 0 ELSE 1 END)';
+const W_RN = 'COALESCE(rn, CASE WHEN ok=1 AND rtt IS NOT NULL THEN 1 ELSE 0 END)';
+const W_MN = 'COALESCE(mn, CASE WHEN ok=1 THEN rtt END)';
+const W_MX = 'COALESCE(mx, CASE WHEN ok=1 THEN rtt END)';
+const fin = (v) => { if (v == null) return null; const x = Number(v); return Number.isFinite(x) ? x : null; };
+/** 적재할 요약 열 — 요약 줄이 아니면(n 없음) 전부 NULL(예전 줄로 쓴다). */
+function summaryCols(r) {
+  const n = fin(r?.n);
+  if (n == null || n < 1) return { n: null, fail: null, rn: null, mn: null, mx: null };
+  const fail = Math.max(0, Math.min(n, Math.floor(fin(r.fail) ?? 0)));
+  const rn = Math.max(0, Math.min(n - fail, Math.floor(fin(r.rn) ?? 0)));
+  return { n: Math.floor(n), fail, rn, mn: rn ? fin(r.mn) : null, mx: rn ? fin(r.mx) : null };
+}
+/** 한 줄의 가중값(SQL W_* 와 같은 규칙) — 롤업 적재·NDJSON 폴백이 쓴다. */
+export function weightOf(r) {
+  const c = summaryCols(r);
+  const rtt = fin(r?.rtt);
+  if (c.n != null) return { n: c.n, fail: c.fail, rn: rtt == null ? 0 : c.rn, rtt, mn: c.mn, mx: c.mx };
+  const ok = !!r?.ok && r?.ok !== 0;
+  const good = ok && rtt != null;
+  return { n: 1, fail: ok ? 0 : 1, rn: good ? 1 : 0, rtt, mn: good ? rtt : null, mx: good ? rtt : null };
+}
 /** 창 끝(ms) — 숫자가 아니면 null(끝이 열린 예전 동작). */
 const untilOf = (v) => { if (v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
 

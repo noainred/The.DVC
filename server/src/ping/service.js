@@ -15,6 +15,7 @@ import { getPingDb, HOUR_MS } from './db.js';
 import { snapMemo } from '../util/snapCache.js';
 import { listTargets, getTarget } from './store.js';
 import { config } from '../config.js';
+import { loadPingSettings as pingSettingsNow } from './settings.js';
 
 const WARN = 1.2;
 const CRIT = 1.5;
@@ -141,7 +142,8 @@ export async function statusAll(sources = null) {
   // 전역 스위치와 주기를 함께 싣는다(주기 숫자를 화면에 박지 말 것 — 루트 CLAUDE.md v2.493).
   return {
     targets: rows, counts, total: rows.length,
-    monitorEnabled: !!config.ping.enabled, intervalMs: config.ping.pollIntervalMs,
+    // v2.963: intervalMs = 저장(요약) 주기(줄 간격 — 화면 문구가 쓰는 값), probeIntervalMs = 대상마다 재는 간격. 화면 설정이 env 를 이긴다.
+    monitorEnabled: !!config.ping.enabled, intervalMs: pingSettingsNow().summaryIntervalMs, probeIntervalMs: pingSettingsNow().probeIntervalMs,
   };
 }
 
