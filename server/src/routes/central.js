@@ -107,6 +107,7 @@ import { registerStorageRoutes } from './central/storageRoutes.js';
 import { registerPduSanRoutes } from './central/pduSanRoutes.js';
 import { registerCvpIsiduRoutes } from './central/cvpIsiduRoutes.js';
 import { registerOpsRoutes } from './central/opsRoutes.js';
+import { handleEdgeSync } from '../central/focusMonEdge.js'; // v2.976 집중 모니터링 엣지 동기화
 export { EDGE_CLOCK_AHEAD_TOLERANCE_MS, stampEdgeCollectedAt } from './central/storageRoutes.js';
 export { AGENT_CONFIG_FILE_MAX } from './central/opsRoutes.js';
 export const centralRouter = Router();
@@ -579,6 +580,25 @@ centralRouter.post('/svcmon-report', requireCentral(), (req, res) => {
  * 밀어 올린다. **개별 토큰 전용**(svcmon-report 와 같은 3규약: agent 모드 필수 · 저장 키는
  * req.centralAuth.agent 만 · X-Agent-Name 이중 방어). 시각은 중앙 수신 시각이 진실이다.
  */
+/**
+ * v2.976 집중 모니터링 엣지 동기화 — 엣지가 자기 법인 서버에서 모은 표본 · 프로세스 · 상태 · 공개키를 올리고, 지금 수집할 대상 목록을 받는다.
+ * **개별 토큰 전용**(3규약: agent 모드 필수 · 저장 키는 req.centralAuth.agent 만 · X-Agent-Name 이중 방어). 정제 · 적재는 central/focusMonEdge.js —
+ * 그 엣지가 맡지 않은 대상 id 는 버린다. 본문은 gzip · BIG_JSON(index.js) — 회선이 끊겼던 동안의 표본이 한 번에 올 수 있다.
+ */
+centralRouter.post('/focus-mon/sync', requireCentral(), (req, res) => {
+  if (req.centralAuth.mode !== 'agent') {
+    return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(어느 엣지의 서버인지 신뢰할 수 없습니다).' });
+  }
+  try {
+    const out = handleEdgeSync(req.centralAuth.agent, req.body);
+    if (out.ok === false && out.code === 'registryUnreadable') return persistent503(res).json(out); // 지속형 — Retry-After 60(EDGE-03)
+    res.locals.ingestSummary = { rows: out.accepted?.samples ?? 0 };
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: `처리 실패: ${String(e?.message || e).slice(0, 200)}` });
+  }
+});
+
 centralRouter.post('/capacity-report', requireCentral(), async (req, res) => {
   if (req.centralAuth.mode !== 'agent') {
     return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(어느 엣지의 리소스인지 신뢰할 수 없습니다).' });

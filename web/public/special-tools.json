@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-11T00:11:26.856Z",
-  "count": 124,
+  "generatedAt": "2026-11-11T15:11:12.240Z",
+  "count": 125,
   "tools": [
     {
       "k": "service-hub",
@@ -117,6 +117,14 @@
     {
       "k": "bm-usage",
       "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "focus-mon",
+      "adminOnly": true,
       "perm": null,
       "external": null,
       "topTab": false,

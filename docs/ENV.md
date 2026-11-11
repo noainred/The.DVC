@@ -150,6 +150,7 @@
 | `DS_CFG_REFRESH_MS` |  |  | config.js |
 | `DS_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `EDGE_MODE` | `''` | ✅ | config.js |
+| `FOCUSMON_MAX_STREAMS` | `40` |  | focusmon/runner.js |
 | `GPU_ALLOC_DB_PATH` |  |  | config.js |
 | `GUESTDISK_CONCURRENCY` | `4` |  | guestdisk/poller.js |
 | `GUESTDISK_DB_PATH` |  |  | guestdisk/db.js |
@@ -169,7 +170,6 @@
 | `ISIDU_CONCURRENCY` | `2` |  | isidu/poller.js |
 | `ISIDU_PUSH_MS` | `600000` |  | isidu/push.js |
 | `ISIDU_PUSH_ROWS` | `60000` |  | isidu/push.js |
-| `ISIDU_SSH_KEY` | `''` |  | isidu/sshKey.js |
 | `ISSUES_MAX_BYTES` |  |  | issues/store.js |
 | `JSON_BODY_LIMIT` | `'16mb'` |  | index.js |
 | `LEDGER_FULL_CHECK_MS` |  |  | store.js |

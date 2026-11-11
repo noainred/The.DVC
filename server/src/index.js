@@ -183,7 +183,10 @@ import { startBareosConfigPull } from './agent/bareosConfigPull.js'; // v2.824 �
 import { startBareosOpWorker } from './agent/bareosOpWorker.js';     // v2.824 Bareos 법인 Director 대행 워커 — 엣지 전용
 import { startVeeamSnapWarmup } from './veeam/snapWarm.js';          // 〃 스냅샷 전용 DB(v2.759) — 엣지 요약 복원 + 로그에서 백필
 import { startVeeamSnapCollector } from './veeam/snapCollector.js';  // 〃 Veeam 계정 이벤트 전용 수집(v2.765) — 로그 폴러가 밀려도 백업 시도는 최신
-import { startXferSpeedPoller } from './xferspeed/poller.js';   // 법인 간 전송 속도(v2.735) — 중앙 전용 · 기본 꺼짐(opt-in)
+import { startXferSpeedPoller } from './xferspeed/poller.js';
+import { startFocusMon, stopFocusMon } from './focusmon/service.js';   // 집중 모니터링(v2.976) — 사람이 시작한 수집만 · 1초/10초 틱
+import { startFocusMonWorker, stopFocusMonWorker } from './agent/focusMonWorker.js'; // 〃 엣지 워커(CENTRAL_URL 없으면 자기기동 안 함)
+import './central/focusMonEdge.js'; // 〃 엣지 깨우기 구현 등록(service.setWakeImpl)   // 법인 간 전송 속도(v2.735) — 중앙 전용 · 기본 꺼짐(opt-in)
 import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
@@ -443,6 +446,7 @@ app.use('/api/central/idrac-scan-result', BIG_JSON);
 //   (등록 서버 수 비례 — 이 현장 1,135대). 엣지가 gzip 으로 보내도 express.json 의 limit 은 **해제 후 길이**라 함께 올린다.
 app.use('/api/central/gpu-guest-data', BIG_JSON);
 app.use('/api/central/fleet', BIG_JSON);
+app.use('/api/central/focus-mon/sync', BIG_JSON); // v2.976 집중 모니터링 — 끊겼던 동안 쌓인 표본(대상 20 × 최대 10분)이 해제 후 1MB 를 넘을 수 있다(413 = 조용한 소실)
 // v2.613 CONTRACT2613-08(반증): `/api/central/capacity-report`(rows ≤64 — 중앙이 잘라 받는다)·`/api/central/result`(스캔 found[] 뿐,
 //   unreachable·notIdrac 은 개수)는 **작아서 등록하지 않음** — 다음 감사가 같은 후보를 다시 세지 않게 적어 둔다.
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
@@ -672,6 +676,7 @@ const stagger = [
   startVeeamPoller, startVeeamPush, startVeeamConfigPull, startVeeamSnapWarmup, startVeeamSnapCollector, startEmPoller, startLicenseWatch, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함 · 전용 수집기(v2.765)는 로그 수집 주기로 Veeam 계정 이벤트만
   startBareosConfigPull, startBareosOpWorker, // Bareos 법인 Director 엣지 대행(v2.824) — CENTRAL_URL 미설정이면 자기기동 안 함
   startVeeamRunTracker, startVeeamRunWorker, // Backup 백업 실행(v2.818) — 중앙: 세션 추적(20초 · 재진입 가드) · 엣지: 대행 워커(CENTRAL_URL 미설정이면 자기기동 안 함)
+  startFocusMon, startFocusMonWorker, // 집중 모니터링(v2.976) — 수집이 없으면 틱만 돈다(SSH 0) · 엣지 워커는 30초마다 목록만 묻는다
   startXferSpeedPoller, // 법인 간 전송 속도(v2.735) — 적응형 타이머(기본 30분) + 재진입 가드 + 주기 예산. 중앙 전용·opt-in
   startStorageUsageMail, // 스토리지 사용량 예약 메일(v2.789) — 30초 틱 · 중앙 전용 · 기본 꺼짐(켜지 않으면 할 일 없음)
 ];
@@ -806,6 +811,8 @@ const gracefulExit = (signal, { beforeExit } = {}) => {
       svcmonShutdown();
       // v2.964: Ping 연속 측정 — 진행 중이던 요약 창을 버리지 않고 쓴다(DB 가 열려 있으면 동기 쓰기).
       try { stopPingMonitor(); } catch (e) { console.warn(`[shutdown] Ping 모니터 정지 실패: ${e?.message || e}`); }
+      // v2.976: 집중 모니터링 — 열린 분을 닫아 DB 에 쓴다(이미 열린 DB 일 때만 · 동기). 엣지 워커는 수집기를 닫는다.
+      try { stopFocusMonWorker(); stopFocusMon(); } catch (e) { console.warn(`[shutdown] 집중 모니터링 정지 실패: ${e?.message || e}`); }
       for (const h of exitHooks) { try { h(); } catch (e) { console.warn(`[shutdown] 종료 훅 실패: ${e?.message || e}`); } }
       process.exit(code);
     });

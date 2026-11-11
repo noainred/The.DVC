@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 디스크 표 iostat 전체 열</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:34px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap}
+.badge.crit{background:rgba(239,68,68,.18);color:#fca5a5}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.tw{overflow-x:auto}
+.th,.tr{display:grid;align-items:center;column-gap:12px;padding:0 12px}
+.th{font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.tr{min-height:34px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.tr.sel{background:rgba(59,130,246,.10)}
+.tr.sum{background:#0f1626;font-weight:600}
+.r{text-align:right}
+.dsk{grid-template-columns:minmax(214px,1.5fr) 82px repeat(12,minmax(58px,.55fr)) 100px;min-width:1250px}
+.th.two{height:46px}
+.hh{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25}
+.hh b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:500;font-size:11.5px;color:#c3cede}
+.hh small{font-size:11px;color:#8b9bb4}
+.hh.l{align-items:flex-start}
+.dv{display:flex;align-items:center;gap:8px;min-width:0}
+.dnote{padding:6px 12px 8px 32px;font-size:12px;color:#c3cede;background:rgba(239,68,68,.07);border-bottom:1px solid #1a2236;min-width:1250px;box-sizing:border-box}
+.meter{display:flex;align-items:center;gap:8px}
+.meter .t{flex:1;height:8px;border-radius:4px;background:#1b2a48;overflow:hidden}
+.meter .f{display:block;height:8px;border-radius:4px;background:#3987e5}
+.meter .p{width:38px;text-align:right}
+.nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">서버 상세 › pl-db-01 › 디스크 — ‘iostat 전체 열’ 을 골랐을 때</div>
+    <div class="dim" style="font-size:12px">처음 열 때는 요약 열입니다(서버 상세 화면). 이 보기는 단추로 바꾸고, 고른 값은 브라우저가 기억합니다.</div>
+  </div>
+
+  <div class="card" style="padding:14px 0 12px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <h2 class="h3">디스크 — 물리 5개 · 파티션 6개 · LVM 볼륨 5개</h2>
+      <div class="row">
+        <div class="seg" role="group" aria-label="디스크 범위"><button type="button" class="on">트리</button><button type="button">물리 디스크만</button><button type="button">파티션 · 볼륨만</button></div>
+        <div class="seg" role="group" aria-label="표의 열"><button type="button">요약 열</button><button type="button" class="on">iostat 전체 열</button></div>
+      </div>
+    </div>
+    <div class="tw">
+      <div class="th dsk two"><span>장치</span><span>마운트</span>
+        <span class="hh"><b>rrqm/s</b><small>읽기 병합</small></span><span class="hh"><b>wrqm/s</b><small>쓰기 병합</small></span>
+        <span class="hh"><b>r/s</b><small>읽기 횟수</small></span><span class="hh"><b>w/s</b><small>쓰기 횟수</small></span>
+        <span class="hh"><b>rMB/s</b><small>읽기량</small></span><span class="hh"><b>wMB/s</b><small>쓰기량</small></span>
+        <span class="hh"><b>avgrq-sz</b><small>요청 크기</small></span><span class="hh"><b>avgqu-sz</b><small>대기열</small></span>
+        <span class="hh"><b>await</b><small>지연</small></span><span class="hh"><b>r_await</b><small>읽기 지연</small></span><span class="hh"><b>w_await</b><small>쓰기 지연</small></span>
+        <span class="hh"><b>svctm</b><small>서비스 시간</small></span><span class="hh l"><b>%util</b><small>사용률</small></span></div>
+      <sc-for list="{{ disks }}" as="d" hint-placeholder-count="17">
+        <div class="{{ d.cls }}">
+          <span class="dv" style="{{ d.pad }}"><span class="nm mono">{{ d.name }}</span><sc-if value="{{ d.flag }}" hint-placeholder-val="{{ false }}"><span class="badge crit">{{ d.flagText }}</span></sc-if></span>
+          <span class="nm mono dim">{{ d.mnt }}</span>
+          <span class="r num">{{ d.rrqm }}</span>
+          <span class="r num">{{ d.wrqm }}</span>
+          <span class="r num">{{ d.ri }}</span>
+          <span class="r num">{{ d.wi }}</span>
+          <span class="r num">{{ d.rm }}</span>
+          <span class="r num">{{ d.wm }}</span>
+          <span class="r num">{{ d.rq }}</span>
+          <span class="r num" style="{{ d.qInk }}">{{ d.q }}</span>
+          <span class="r num" style="{{ d.awInk }}">{{ d.aw }}</span>
+          <span class="r num" style="{{ d.raInk }}">{{ d.ra }}</span>
+          <span class="r num" style="{{ d.waInk }}">{{ d.wa }}</span>
+          <span class="r num">{{ d.sv }}</span>
+          <span class="meter"><span class="t"><span class="f" style="{{ d.fill }}"></span></span><span class="p num">{{ d.util }}</span></span>
+        </div>
+        <sc-if value="{{ d.hasNote }}" hint-placeholder-val="{{ false }}"><div class="dnote">{{ d.note }}</div></sc-if>
+      </sc-for>
+    </div>
+    <div class="dim" style="font-size:12px;padding:0 16px;display:flex;flex-direction:column;gap:3px">
+      <span>열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 터미널의 iostat 값과 나란히 대조할 수 있습니다. 단위: 지연 · 서비스 시간 ms, 요청 크기 섹터(512바이트).</span>
+      <span>iostat 과 다른 점 두 가지 — ① 그 구간에 끝난 요청이 없으면 지연을 0.00 이 아니라 ‘—’ 로 둡니다 ② 끝난 요청은 없는데 걸린 요청이 있으면 ‘응답 없음’ 으로 알립니다. svctm 은 sysstat 이 믿지 말라고 밝힌 값이라 참고용입니다.</span>
+      <span>dm 장치의 병합은 항상 0 입니다(병합은 아래 물리 디스크에서 일어납니다). 시간 띠로 과거 구간을 고르면 이 표는 그 구간 끝의 값을 보여 줍니다.</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":957}}'>
+class Component extends DCLogic {
+  renderVals() {
+    // [이름, 깊이, 마운트, rrqm/s, wrqm/s, r/s, w/s, rMB/s, wMB/s, r_await, w_await, %util, 종류, 대기열(직접 지정), 안내]
+    const DSK = [
+      ['sda · 446 GB', 0, '', 0, 1, 4, 86, 0.1, 1.9, 0.9, 1.4, 3, 'disk'],
+      ['sda1', 1, '/boot', 0, 0, 0, 0, 0, 0, null, null, 0, ''],
+      ['sda2 · LVM(rhel)', 1, '', 0, 1, 4, 86, 0.1, 1.9, 0.9, 1.4, 3, ''],
+      ['rhel-root (dm-0)', 2, '/', 0, 0, 2, 31, 0.1, 0.6, 0.8, 1.2, 1, ''],
+      ['rhel-swap (dm-1)', 2, '[swap]', 0, 0, 0, 0, 0, 0, null, null, 0, ''],
+      ['rhel-var (dm-2)', 2, '/var', 0, 0, 2, 56, 0, 1.3, 1.0, 1.5, 2, ''],
+      ['sdb · 3.5 TB', 0, '', 0, 83, 1620, 3940, 71.2, 268.3, 6.8, 21.3, 79, 'sel'],
+      ['sdb1 · LVM(oradata)', 1, '', 0, 83, 1620, 3940, 71.2, 268.3, 6.8, 21.3, 79, ''],
+      ['oradata-data01 (dm-3)', 2, '/oradata', 0, 0, 1620, 4023, 71.2, 268.3, 6.9, 21.5, 79, ''],
+      ['sdc · 1.7 TB', 0, '', 0, 0, 0, 52, 0, 7.85, null, 3076.2, 100, 'slow', 148.1, '쓰기 한 건이 끝나는 데 평균 3초가 걸립니다(대기열 148 · 사용률 100%). 이런 값이 섞이면 지연 차트는 로그 눈금으로 바꿔 봅니다.'],
+      ['sdc1 · LVM(oraarch)', 1, '', 0, 0, 0, 52, 0, 7.85, null, 3076.2, 100, '', 148.1],
+      ['oraarch-arch01 (dm-4)', 2, '/oraarch', 0, 0, 0, 52, 0, 7.85, null, 3076.2, 100, '', 148.1],
+      ['sdd · 3.5 TB', 0, '', 0, 0, 674, 44, 24.7, 11.5, 4.4, 3.0, 9, 'disk'],
+      ['sdd1', 1, '/backup', 0, 0, 674, 44, 24.7, 11.5, 4.4, 3.0, 9, ''],
+      ['sde · 1.1 TB', 0, '', 0, 0, 0, 0, 0, 0, null, null, 100, 'stuck', 2.0, '이 구간에 끝난 요청이 0건인데 2건이 걸려 있고 사용률이 100% 입니다. iostat 은 이때 await 를 0.00 으로 찍습니다 — 여기서는 ‘—’ 로 두고 ‘응답 없음’ 으로 알립니다.'],
+      ['sde1', 1, '/data2', 0, 0, 0, 0, 0, 0, null, null, 100, '', 2.0],
+    ];
+    const f2 = (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    const ink = (v) => (v == null ? '' : v >= 1000 ? 'color:#fca5a5;font-weight:600' : v >= 20 ? 'color:#fbbf24;font-weight:600' : '');
+    const qOf = (d) => (d[13] != null ? d[13] : (d[5] * (d[9] || 0) + d[6] * (d[10] || 0)) / 1000);
+    const phys = DSK.filter((d) => d[1] === 0);
+    const sum = (k) => phys.reduce((a, d) => a + d[k], 0);
+    const wavg = (kv, kn) => { const n = phys.reduce((a, d) => a + (d[kv] == null ? 0 : d[kn]), 0); return n ? phys.reduce((a, d) => a + (d[kv] == null ? 0 : d[kv] * d[kn]), 0) / n : null; };
+    const total = ['전체 디스크(물리 5개 합)', 0, '', sum(3), sum(4), sum(5), sum(6), sum(7), sum(8), wavg(9, 5), wavg(10, 6), Math.max.apply(null, phys.map((d) => d[11])), 'sum', phys.reduce((a, d) => a + qOf(d), 0)];
+    const disks = [total].concat(DSK).map((d) => {
+      const k = d[12]; const ios = d[5] + d[6];
+      const ra = d[5] > 0 ? d[9] : null; const wa = d[6] > 0 ? d[10] : null;
+      const aw = ios > 0 ? (d[5] * (ra || 0) + d[6] * (wa || 0)) / ios : null;
+      const q = qOf(d);
+      return {
+        cls: 'tr dsk' + (k === 'sum' ? ' sum' : k === 'sel' ? ' sel' : ''), name: d[0], mnt: d[2] || '',
+        pad: 'padding-left:' + d[1] * 20 + 'px' + (d[1] === 0 ? ';font-weight:600' : ';color:#c3cede'),
+        rrqm: f2(d[3]), wrqm: f2(d[4]), ri: f2(d[5]), wi: f2(d[6]), rm: f2(d[7]), wm: f2(d[8]),
+        rq: ios > 0 ? f2(((d[7] + d[8]) * 2048) / ios) : '—',
+        q: f2(q), qInk: q >= 100 ? 'color:#fca5a5;font-weight:600' : '',
+        aw: f2(aw), awInk: ink(aw), ra: f2(ra), raInk: ink(ra), wa: f2(wa), waInk: ink(wa),
+        sv: ios > 0 ? f2((d[11] * 10) / ios) : '—', util: d[11] + '%', fill: 'width:' + d[11] + '%',
+        flag: k === 'slow' || k === 'stuck', flagText: k === 'stuck' ? '응답 없음' : '지연 위험',
+        hasNote: !!d[14], note: d[14] || '',
+      };
+    });
+    return { disks };
+  }
+}
+</script>
+</body>
+</html>

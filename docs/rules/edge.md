@@ -35,6 +35,8 @@
 - (8a단계 추가) 리눅스 성능 8a단계 정비 창 배포 · 봉투 maint/capacity · 용량 상세 대행 — 개별 토큰만 · 그 법인 창만 · 태그는 중앙이 키로 펼침 · 엣지 재정규화 · 24h 시한 · bodyOk 명시 · 최소 버전 8a 표지
 - (8b단계 추가) 리눅스 성능 8b단계 Top-N 대행 · 봉투 idle — bodyOk 명시 · comm · user 는 엣지 문자열(길이 → 제어문자) · hint 는 중앙이 다시 · 표지 topVer/idleVer · 최소 버전 8b 표지
 - (다음 점검 ②③ 추가) 봉투 powerCapVer/powerCaps(서버별 PowerCap) · 엣지 전력 알림 발송 기록(랙 키) — 정제 화이트리스트 · 랙 법인은 중앙이 · 버전 안내는 old-version 만
+- (v2.976) 집중 모니터링 엣지 대행 — 중앙이 깨우고(wake) 엣지가 2초마다 동기화 · 개별 토큰만 · 맡은 대상만 받음 · validUntil 30초 보류 시한
+
 ## 본문
 
 - ⚠⚠ **엣지 로그·진행상태는 '당겨서' 본다 — 상시 수집하지 않는다**(`edgelog/` + `central/edgeLog*.js` +
@@ -932,3 +934,10 @@
   - 경로 문자열을 받아 동적 import 하는 공용 함수(`onlyDelegated`)는 **routes/ 기준**으로 푼다 — 분할 직후 이것이 영역 파일 기준으로 풀려 미위임 필터가 500 이었다(기계 대조는 핸들러 본문만 봐서 못 잡았고 기존 수신 테스트가 잡았다).
   - 'central 라우트 소스에 X 가 있다' 스윕은 `test/_centralSource.js centralSource()`(central.js + 영역 파일, 등록 순서)로 읽는다 · 새 영역 파일은 `CENTRAL_PARTS` 에도 넣는다(`centralSplit2954` 가 대조).
   - 아이실론 엣지 상태 push 에 `poller.lastRuns`(대상별 마지막 실행 방식 — detached · attached-fallback · attached)가 더해졌다(v2.954 개선 검토 3번 — 법인별 실환경 확인 '아이실론 분리 실행' 근거). 중앙 정제 `sanitizeIsiduStatus` 가 아는 실행 방식만 · 20개 · 사유 200자.
+
+- **(v2.976) 집중 모니터링 엣지 대행**(`agent/focusMonWorker.js` · `central/focusMonEdge.js` · 모듈 규칙 `server/src/focusmon/CLAUDE.md`):
+  - 시작 · 대상 변경 때 중앙이 그 엣지 수집 URL 로 `POST /api/collector/focus-mon/wake` 1회(`X-Collector-Token`) — 닿지 않으면 엣지의 30초 폴백 조회로 시작한다.
+  - 엣지는 수집 중일 때 2초마다 `POST /api/central/focus-mon/sync`(gzip · `BIG_JSON` 등록) — 표본 묶음 · 서버별 상태 · 공개키 · 지문을 올리고, 응답으로 지금 수집할 대상 · 주기 · `validUntil` 을 받는다.
+  - 중앙 수신은 **개별 토큰만**(공유 토큰 403 — `focusMonApi2976` 테스트) · 그 엣지가 맡은 대상 id 만(`foreign` 으로 센다) · 아는 상태 이름만 · 엣지 시각은 수신 시각으로 자른다.
+  - 엣지는 `validUntil`(30초) 안에 다시 동기화하지 못하면 수집기를 모두 닫는다 — 중앙이 끈 수집이 엣지에서 계속 돌지 않게(보류에는 시한).
+  - 워커 상태는 0건이어도 올린다(`edgelog/spec.js` push.focusMon · collect.focusMon). 새 동기화 필드는 중앙 정제에도 넣는다.

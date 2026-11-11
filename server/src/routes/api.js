@@ -65,6 +65,7 @@ import { registerCorpUsage } from './api/corpUsage.js'; // 법인별 서버 사�
 import { registerSvcInventory } from './api/svcInventory.js'; // 서비스 인벤토리(VM + 베어메탈 · 법인 › 폴더 › 서비스 · 전역 카탈로그, v2.887)
 import { registerLinkCheck } from './api/linkCheck.js'; // 통신 점검(중앙↔엣지·vCenter·엣지↔엣지, v2.552)
 import { registerXferSpeed } from './api/xferSpeed.js'; // 법인 간 전송 속도(중앙↔엣지 10MB 왕복, v2.735)
+import { registerFocusMon } from './api/focusMon.js'; // 집중 모니터링(v2.976) — 리눅스 서버 최대 20대 실시간 · DB 30일
 import { registerIsilonDirUsage } from './api/isilonDirUsage.js'; // 아이실론 디렉터리 사용량(사용자 폴더 du Top N·추이, v2.736)
 import { registerStorageUsage } from './api/storageUsage.js'; // 스토리지 사용량 보고서(일간·주간·월간 표·비교·예약 메일, v2.789)
 import { registerPortalCheck } from './api/portalCheck.js'; // 포탈 점검 › 토큰 점검(v2.560)
@@ -197,6 +198,7 @@ registerSvcInventory(api);
 registerServerSensors(api);
 registerLinkCheck(api);
 registerXferSpeed(api);
+registerFocusMon(api);
 registerIsilonDirUsage(api);
 registerStorageUsage(api);
 registerPortalCheck(api);
