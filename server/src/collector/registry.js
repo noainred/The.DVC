@@ -44,7 +44,7 @@ function dedupeByIdCase(list) {
     const merged = { ...base };
     for (const c of g) {
       if (c === base) continue;
-      for (const f of ['vcenterId', 'datacenter', 'datacenterId', 'name', 'url', 'token']) {   // v2.971(반증 F3): 사용자 법인 매칭도 잃지 않게
+      for (const f of ['vcenterId', 'datacenter', 'datacenterId', 'name', 'url', 'token']) {   // v2.972(반증 F3): 사용자 법인 매칭도 잃지 않게
         if (!String(merged[f] || '').trim() && String(c[f] || '').trim()) merged[f] = c[f];
       }
     }
@@ -70,7 +70,7 @@ export function normDcId(v) {
 }
 
 /**
- * v2.971: 수집 서버 ↔ 법인(DataCenter) 매칭 저장 — 이 필드 하나만 바꾼다(URL · 토큰 · managed 그대로 · normalize 를 다시 돌리지 않는다 —
+ * v2.972: 수집 서버 ↔ 법인(DataCenter) 매칭 저장 — 이 필드 하나만 바꾼다(URL · 토큰 · managed 그대로 · normalize 를 다시 돌리지 않는다 —
  * 평문 HTTP 예외 · SSRF 판정이 이 쓰기로 바뀌지 않게). dcId '' = 매칭 해제(이름 맞춤으로 돌아간다).
  * 등록부를 읽지 못했으면 쓰지 않는다(빈 목록 위에 저장하면 전 수집 서버 · 토큰을 잃는다 — 형제 쓰기와 같은 태도).
  * @returns {{ok:true, collector:object, changed:boolean} | {ok:false, status:number, reason:string, code?:string}}
@@ -297,7 +297,7 @@ function normalize(body, existing = null, ctx = null) {
     token: body.token ? String(body.token) : e.token || '',
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
-  // v2.971(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭'): 사용자가 고른 법인(DataCenter id) — datacenter(엣지가 자기등록 때 보내는
+  // v2.972(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭'): 사용자가 고른 법인(DataCenter id) — datacenter(엣지가 자기등록 때 보내는
   //   자유 글자 라벨)와 따로 둔다. **본문 값은 보지 않고 늘 기존 값을 이어받는다**(반증 F1 — 관리자 편집 폼 · 토큰 강제 재설정 · 배포가 목록 행을
   //   통째로 다시 보내 다른 탭에서 바꾼 매칭을 되돌리고, 없는 법인 검사 · 감사를 건너뛰었다). 바꾸는 길은 setCollectorDatacenterId 하나
   //   (PUT /collectors/:id/datacenter — 법인 목록 검사 · 감사 · managed 불변). 없으면 필드를 만들지 않는다(예전 파일 모양 그대로).

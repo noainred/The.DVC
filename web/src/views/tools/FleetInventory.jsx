@@ -65,7 +65,7 @@ function CorpCell({ row, hideSrc = false, canFix = false }) {
       <div title={row.corpWhy || ''} style={{ whiteSpace: 'normal', wordBreak: 'keep-all', maxWidth: 200, lineHeight: 1.35 }}>
         <span className="badge purple">미지정</span>
         {row.corpWhy && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{row.corpWhy}</div>}
-        {/* v2.971: 수집 서버 ↔ 법인 매칭으로 고칠 수 있는 이유면 그 화면으로(설정 › 수집 서버는 관리자 · 전 법인 계정만 연다) */}
+        {/* v2.972: 수집 서버 ↔ 법인 매칭으로 고칠 수 있는 이유면 그 화면으로(설정 › 수집 서버는 관리자 · 전 법인 계정만 연다) */}
         {canFix && row.corpWhyCode === 'collector' && <a href={COLLECTOR_DC_HREF} style={{ fontSize: 11 }}>수집 서버 법인 매칭 →</a>}
       </div>
     );

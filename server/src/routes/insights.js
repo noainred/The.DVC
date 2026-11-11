@@ -149,7 +149,7 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
     const assign = getDatacenterAssign();
     const datacenters = listDatacenters();
     // DataCenter 할당/목록이 바뀌면 캐시 무효화되도록 키에 포함.
-    const dcKey = `${JSON.stringify(assign)}|${datacenters.map((d) => `${d.id}:${d.name}`).join(',')}|${collectorDcSig()}`;   // v2.971: 수집 서버 ↔ 법인 매칭이 바뀌면 키도
+    const dcKey = `${JSON.stringify(assign)}|${datacenters.map((d) => `${d.id}:${d.name}`).join(',')}|${collectorDcSig()}`;   // v2.972: 수집 서버 ↔ 법인 매칭이 바뀌면 키도
     const scoped = scopeSlice(snap, req.user, vc); // 범위 제한 계정은 자기 vCenter 전력만
     // ⚠ scope 강제(확정 버그 수정) — /finops 와 같은 이유. 이 라우트는 servers[] 로 서버 이름·
     // 서비스태그·모델·와트를 그대로 내려주므로 누수 영향이 더 크다.
@@ -161,7 +161,7 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
       let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), validIds)), scoped);
       if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
       let collectorDc = null; let collectorDcManual = null;
-      try { ({ map: collectorDc, manual: collectorDcManual } = collectorDcMaps()); } catch { collectorDc = null; collectorDcManual = null; }   // v2.971: 수집 서버 ↔ 법인 매칭(사용자 지정 → 이름 맞춤)
+      try { ({ map: collectorDc, manual: collectorDcManual } = collectorDcMaps()); } catch { collectorDc = null; collectorDcManual = null; }   // v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정 → 이름 맞춤)
       return { ...computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters, collectorDc, collectorDcManual }), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
     });
     if (isAdminReq(req)) sendCached(req, res, key, payload);
@@ -246,7 +246,7 @@ export function hwCorpContext(snap) {
   const corpOf = makeCorpOf({ index, dcOfVc, dcName: (id) => dcNames.get(id) || '', vcName: (id) => vcNames.get(id) || '', agentDc });
   return { corpOf, dcOrder: dcs.map((d) => String(d.id)), dcOfVc, datacenters: dcs.map((d) => ({ id: String(d.id), name: String(d.name || d.id) })) };
 }
-/** v2.971: 수집 서버 ↔ 법인 매칭(사용자 지정 · 이름 라벨) 서명 — 매칭을 바꾸면 법인 판정 캐시 키가 바뀌게. */
+/** v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정 · 이름 라벨) 서명 — 매칭을 바꾸면 법인 판정 캐시 키가 바뀌게. */
 export function collectorDcSig() {
   try { return loadCollectors().map((c) => `${c.id}:${c.datacenterId || ''}:${c.datacenter || ''}`).sort().join(','); } catch { return ''; }
 }

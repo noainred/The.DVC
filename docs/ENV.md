@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **742개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **745개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-11)
@@ -603,13 +603,16 @@
 | `SSH_PTY_ROWS` | `200` |  | proxy/sshExec.js |
 | `SSH_READY_TIMEOUT_MS` |  |  | proxy/sshExec.js, proxy/sshGateway.js |
 
-## 인사이트 (6)
+## 인사이트 (9)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `DB_HEALTH_COUNT_MAX_BYTES` | `512` |  | insights/dbHealth.js |
 | `DB_HEALTH_FULL_MAX_BYTES` | `256` |  | insights/dbHealth.js |
 | `DB_HEALTH_QUICK_MAX_BYTES` | `512` |  | insights/dbHealth.js |
+| `HW_EXPORT_SPEC_MAX` | `300` |  | insights/hwExport/render.js |
+| `HW_EXPORT_XLSX_TIMEOUT_MS` | `300000` |  | insights/hwExport/render.js |
+| `HW_EXPORT_XLSX_WORKER` | `'1'` |  | insights/hwExport/render.js |
 | `PORTAL_DB_MIN_FORECAST_MS` | `3600000` |  | insights/portalDb.js |
 | `PORTAL_DB_SAMPLE_MS` | `10` |  | insights/portalDb.js |
 | `SERIAL_INDEX_CACHE_MS` | `30000` |  | insights/serialLookup.js |
@@ -931,4 +934,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 742
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 745

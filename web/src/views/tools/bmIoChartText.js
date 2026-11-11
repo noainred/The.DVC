@@ -40,7 +40,7 @@ export function sampleText(ms) {
 export function basisText(kind, basis) {
   if (kind === 'bm') {
     const a = basis?.avg === 'counter' ? '카운터 차분 평균(수집 사이 구간 전체의 평균)' : '표본 평균';
-    const p = basis?.peak === 'sample2s' ? '2초 표본 중 최댓값(실제 순간 피크의 하한)' : '표본 최댓값';
+    const p = basis?.peak === 'sample2s' ? '2초 표본과 구간 평균 중 큰 값(실제 순간 피크의 하한 — 구간의 최고치는 그 구간 평균보다 작을 수 없다)' : '표본 최댓값';
     return `베어메탈 — 평균: ${a} · 피크: ${p}`;
   }
   return 'SAN — 평균 · 피크: 스위치 포트 사용량 표본(5분 주기 · 어레이 포트 합)의 평균 · 최댓값 — 어레이가 스스로 보고하는 프런트엔드 표본(SAN 스토리지 성능 화면)이 아니라 스위치 쪽 값입니다';

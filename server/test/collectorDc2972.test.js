@@ -1,4 +1,4 @@
-// v2.971 수집 서버(Agent) ↔ 법인(DataCenter) 사용자 매칭(사용자 요청 2026-11-11 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능').
+// v2.972 수집 서버(Agent) ↔ 법인(DataCenter) 사용자 매칭(사용자 요청 2026-11-11 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능').
 //   저장은 collector.datacenterId(엣지 자기등록 라벨 datacenter 와 따로) · 바꾸는 길은 setCollectorDatacenterId 하나 · 판정 순서는
 //   사용자 매칭(지금 있는 법인일 때만) → 이름 맞춤. 서버 분석 · 통합 서버 인벤토리 · 하드웨어 내보내기 · 전력 분석이 같은 지도(collectorToDatacenterMap)를 쓴다.
 import { test, before, after } from 'node:test';

@@ -10,7 +10,7 @@ import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { getVmHardware, reconfigVm } from '../../provision/reconfig.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.743(VC-03): 주문형 로그인 문이 막은 409 의 사유 필드
-import { setCollectorDatacenterId } from '../../collector/registry.js'; // v2.971: 수집 서버 ↔ 법인 매칭(사용자 지정)
+import { setCollectorDatacenterId } from '../../collector/registry.js'; // v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정)
 import { matchDatacenterId } from '../../collector/datacenterMatch.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, collectorInputIssue, identityIssue, registryLoadErrorSummary } from '../../collector/registry.js';
 // 2026-10-09 검토 S-09(그룹 J): 평문 HTTP 는 승인된 예외만 — 판정은 transportPolicy, 이 파일은 관리자 문맥·감사·상태만 싣는다.
@@ -133,7 +133,7 @@ function transportView(list) {
 }
 
 /**
- * v2.971: 수집 서버 → { id(법인 id · ''), via: 'manual'|'name'|'', stale?: true }(순수). 순서는 analysisServers.collectorToDatacenterMap 과 같다:
+ * v2.972: 수집 서버 → { id(법인 id · ''), via: 'manual'|'name'|'', stale?: true }(순수). 순서는 analysisServers.collectorToDatacenterMap 과 같다:
  * 사용자 매칭(datacenterId — 지금 목록에 있을 때만) → 이름 맞춤(datacenter 라벨 · id · 이름 ↔ DataCenter id · 이름).
  */
 export function collectorDcMatch(collectors, datacenters) {
@@ -156,7 +156,7 @@ export function registerCollectorsDc(adminRouter) {
 // List registered collectors (tokens redacted) + live pull status.
 adminRouter.get('/collectors', adminOnly, fleetOnly, (_req, res) => {
   const collectors = listCollectors();
-  // v2.971: 수집 서버마다 지금 쓰이는 법인(DataCenter)과 그 근거 — 사용자 매칭(manual) · 이름 맞춤(name) · 없음('') + 매칭한 법인이 지워졌는지(stale).
+  // v2.972: 수집 서버마다 지금 쓰이는 법인(DataCenter)과 그 근거 — 사용자 매칭(manual) · 이름 맞춤(name) · 없음('') + 매칭한 법인이 지워졌는지(stale).
   //   판정은 insights/analysisServers.js collectorToDatacenterMap 과 같은 순서다(테스트가 대조). 화면은 이 값으로만 '자동(→ X)' 을 그린다.
   let dcMatch = {};
   try { dcMatch = collectorDcMatch(collectors, listDatacenters() || []); } catch { dcMatch = {}; }
@@ -192,7 +192,7 @@ adminRouter.put('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
   res.status(result.ok ? 200 : 400).json(result);
 });
 
-// v2.971(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능'): 이 수집 서버(Agent)가 수집한 서버의 법인(DataCenter).
+// v2.972(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능'): 이 수집 서버(Agent)가 수집한 서버의 법인(DataCenter).
 // body: { datacenterId } — '' = 매칭 해제(이름 맞춤으로). 수동 고정(managed)을 바꾸지 않는다(엣지 자기등록의 URL · 토큰 갱신을 막지 않게) · 이 값을 쓰는 길은 여기 하나다 —
 // 엣지 자기등록 · 관리자 폼 · CSV 가져오기는 이 값을 덮지 않는다(registry.js normalize 가 이어받는다). 없는 법인은 400 · 등록부를 못 읽으면 503.
 // 반증 F4: 전 법인 판정을 바꾸는 쓰기라 조회 ∧ 쓰기 모두 전체 범위(fullReadWriteScopeOnlyWith — v2.904 규칙). F5: datacenterId 는 문자열만('' = 해제) — 없거나 다른 형이면 400.

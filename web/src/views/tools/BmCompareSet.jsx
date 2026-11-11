@@ -223,7 +223,7 @@ export default function BmCompareSet() {
       {targets.length > 0 && (
         <div className="card bm2-card">
           <div className="flex between wrap" style={{ alignItems: 'baseline', gap: '6px 12px', marginBottom: 10 }}>
-            <div className="bm2-label">▸ 비교 표 <span style={{ letterSpacing: 0 }}>· {(SET_RANGES.find((r) => r.k === range) || SET_RANGES[0]).label} · 평균 = 구간 평균의 평균 · 피크 = 표본 최댓값(하한)</span></div>
+            <div className="bm2-label">▸ 비교 표 <span style={{ letterSpacing: 0 }}>· {(SET_RANGES.find((r) => r.k === range) || SET_RANGES[0]).label} · 평균 = 구간 평균의 평균 · 피크 = 2초 표본 · 구간 평균 중 최댓값(하한)</span></div>
             <span className="muted" style={{ fontSize: 11.5 }}>셀 아래 = A 대비(용량은 %p · 지표는 배율) · ‘—’ 에 마우스를 올리면 사유</span>
           </div>
           <STable minWidth={Math.max(560, 180 + targets.length * 190)}>
@@ -299,7 +299,7 @@ export default function BmCompareSet() {
                     return (
                       <span key={t.id} title={mm?.reason ? reasonText(mm.reason) : sourceText(mm?.source)}>
                         <i style={{ borderColor: SLOT_COLORS[j] }} /><b style={{ color: SLOT_COLORS[j] }}>{SLOT_LABELS[j]}</b>
-                        <span className="muted">{mm?.avgTotal != null ? ` 평균 ${m.fmt(mm.avgTotal)} · 피크 ${m.fmt(mm.peakTotal)}` : ` — ${reasonText(mm?.reason) || '값 없음'}`}</span>
+                        <span className="muted">{mm?.avgTotal != null ? ` 평균 ${m.fmt(mm.avgTotal)} · 피크 ${m.fmt(mm.peakTotal)}` : mm?.peakTotal != null ? ` 평균 — · 피크 ${m.fmt(mm.peakTotal)}` : ` — ${reasonText(mm?.reason) || '값 없음'}`}</span>
                       </span>
                     );
                   })}
@@ -316,8 +316,9 @@ export default function BmCompareSet() {
           <ul className="bmc-note">
             <li><b>전송 속도</b> — 서버는 디스크 장치에서 잰 읽기+쓰기, SAN 어레이는 스위치 포트 트래픽입니다(포트에서 찾지 못하면 어레이가 보고한 호스트 처리량).</li>
             <li><b>IOPS · 응답 시간</b> — 서버는 /proc/diskstats 의 완료 횟수 · 소요 시간(응답 시간 = I/O 가중 평균), SAN 은 어레이가 보고한 5분 표본(REST 로 수집하는 PowerMax · VMAX · PowerStore · Unity 만 · 실장비 확인 전)입니다.</li>
-            <li><b>바쁨</b> — 서버는 가장 바쁜 디스크, 묶음은 가장 바쁜 서버, 어레이는 가장 바쁜 FA 디렉터(또는 노드 · SP CPU)입니다. 뜻이 달라 같은 % 라도 비교는 참고치입니다.</li>
-            <li><b>묶음(그룹 · 법인 합계)</b> — 측정된 서버 전부에 값이 있는 칸만 더합니다(부분 합 금지). 피크 합은 동시 피크의 상한입니다.</li>
+            <li><b>피크</b> — 서버는 수집할 때 잰 2초 표본과 수집 사이 구간 평균 중 큰 값입니다. 2초 표본은 1시간에 몇 번뿐이라 실제 순간 최고치는 이보다 클 수 있습니다(하한).</li>
+            <li><b>바쁨</b> — 서버는 가장 바쁜 디스크, 묶음은 가장 바쁜 서버, 어레이는 가장 바쁜 FA 디렉터(또는 노드 · SP CPU)입니다. 뜻이 달라 같은 % 라도 비교는 참고치입니다. 서버의 바쁨 평균은 v2.971 부터 쌓인 값만 보입니다(그 전 값은 모든 디스크를 더한 값이라 쓰지 않습니다).</li>
+            <li><b>묶음(그룹 · 법인 합계)</b> — 측정된 서버 전부에 값이 있는 칸만 더합니다(부분 합 금지). 피크 합은 서버별 피크를 더한 값이라 같은 시각에 일어났다는 보장은 없습니다.</li>
           </ul>
         </div>
       )}

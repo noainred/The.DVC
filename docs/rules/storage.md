@@ -41,6 +41,7 @@
 - (v2.789) 스토리지 사용량 보고서(일간·주간·월간 표 · LUN·파일시스템 · CSV · 법인/종류 비교 · 예약 메일)
 - (v2.915) 베어메탈 ↔ SAN 비교 — 디스크 I/O 표본(diskstats) · I/O 시계열 DB · 법인 축 · 비교/시계열 API · ‘SAN 비교’ 탭
 - (v2.962) 베어메탈 스토리지 ‘비교 세트’ — SAN 어레이 · 베어메탈 서버 · 그룹 · 법인 합계를 섞어 2~4개 · IOPS · 응답 시간 · 어레이 측 FE 표본 · 격자 하한
+- (v2.971) 베어메탈 I/O 구간 평균은 디스크별 카운터로 · 바쁨 평균 = 가장 바쁜 디스크 · 피크 ≥ 구간 평균 · 묶음 피크 부분 합 금지 · 위임 결과 BIG_JSON + gzip
 - v2.926 — 아이실론 노드 부하 시계열(네트워크·디스크·CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`, 수집 키는 `collectors/isilonNodeLoad.js`
 - (v2.965) PowerScale 장비 점검(독립 도구 ps-inspect) — 주간 20항목 · 사실 저장 · 읽을 때 판정 · 엣지 로컬 실행 · 주간 보고서 · Top 10 노드 편중
 
@@ -805,7 +806,7 @@
 - **v2.915 — 베어메탈 ↔ SAN(VMAX · PowerMax) 비교**(사용자 요청 2026-11-09 "베어메탈 스토리지의 실시간 디스크 사용율을 … SAN vmax, pmax 사용율/전송 속도와 숫자로 비교" + "법인별로 볼 수 있는 기능" + "각 장비별로 peak / average 디스크 access 성능을 비교하는 차트 … 실시간/트렌드" · 승인 시안 `docs/design/bm-san-compare` ①~⑥ · 컨펌 '진행해' 기본값 · 릴리스 번호는 main 이 앞서 v2.956.0 — 코드 · 테스트 표지는 v2.915). 화면 `views/tools/BmSanCompare.jsx` + `BmIoChart.jsx` · 문구 `bmSanCompareText.js` · `bmIoChartText.js` · 서버 `bmstor/{diskstats,ioDb,ioSeries,compare,corp}.js` · 회귀 `server/test/bmstorIo2915.test.js` + 웹 두 테스트):
   - **디스크 I/O 표본은 df 와 같은 SSH 세션의 상수 명령 하나**(`diskstats.ioSampleCommand` — `cat /proc/uptime; cat /proc/diskstats; sleep N; …` · 입력이 끼는 자리 없음 · N = `BMSTOR_IO_SAMPLE_SEC` 기본 2 · 0 = 끔). **통짜 디스크만**(`WHOLE_DISK_RE` — dm · md · 파티션은 같은 I/O 의 중복) · 섹터 512B 고정 · 카운터 역행 장치는 뺀다 · df 가 성공했으면 I/O 실패가 서버를 오류로 만들지 않는다(`io:null` + `ioError`).
   - **엣지 회신 두 경로(폴링 · PUSH)는 `poller.sanitizeBmResult` 하나**로 정제한다 — v2.914 까지 PUSH 회신은 정제 없이 latest 에 들어갔다(발견 · 정정). 엣지 워커 회신 화이트리스트에 `io · ioError` 를 더했다 — 새 엣지 export 필드 = 중앙 정제 필드(루트 규칙). 구버전 엣지(io 없음)는 `ioError:'edge-legacy'`(화면 문장은 웹).
-  - **I/O 시계열 DB `bmstor-io.db`(`bmstor/ioDb.js`)** — 12시간 용량 이력과 따로(보존 · 정리 주기가 다르다). 원시(서버 × 수집 1회) + `io_last`(차분용 — '키별 최신값' 을 GROUP BY+MAX 로 만들지 않는다) + 15분 · 1시간 집계(적재 때 upsert · 백필 없음). **평균 = 누적 카운터 차분 ÷ 경과**(uptime 차 — 수집 사이 구간 전체의 진짜 평균 · 첫 행 · 재부팅 · 공백 > 주기×2 는 null), **피크 = 2초 표본 최댓값(하한)** — 화면이 둘 다 말한다. 집계 함수는 **한 문장에 하나**(`ioRank` 는 세 문장). 보존 env 3 · 31 · 730일. 엣지 위임 서버 값도 **중앙이 적재**(엣지에 DB 없음). 상한 산수는 파일 머리말.
+  - **I/O 시계열 DB `bmstor-io.db`(`bmstor/ioDb.js`)** — 12시간 용량 이력과 따로(보존 · 정리 주기가 다르다). 원시(서버 × 수집 1회) + `io_last`(차분용 — '키별 최신값' 을 GROUP BY+MAX 로 만들지 않는다) + 15분 · 1시간 집계(적재 때 upsert · 백필 없음). **평균 = 누적 카운터 차분 ÷ 경과**(uptime 차 — 수집 사이 구간 전체의 진짜 평균 · 첫 행 · 재부팅 · 공백 > 주기×2 는 null), **피크 = 2초 표본 최댓값(하한)** — 화면이 둘 다 말한다. ⚠ v2.971 정정: 평균은 **디스크별** 카운터 차분(합계 하나로 빼면 디스크 구성이 바뀐 구간이 튄다) · 피크는 **2초 표본과 구간 평균 중 큰 값**(2초 표본만이면 피크 < 평균이 나온다) — 아래 v2.971 항목. 집계 함수는 **한 문장에 하나**(`ioRank` 는 세 문장). 보존 env 3 · 31 · 730일. 엣지 위임 서버 값도 **중앙이 적재**(엣지에 DB 없음). 상한 산수는 파일 머리말.
   - **법인 축**(`bmstor/corp.js datacenterOfBmServer`): 서버 폼 ‘법인’(`datacenterId` · CSV 열 `datacenter` — id 또는 이름 · 미등록은 가져오기 오류) → 비우면 **엣지의 법인**(수집 서버 `vcenterId` → `datacenterOfVcenter` · 조회는 `findCollectorByName` 하나 — EDGE2613-08) → `''`(미지정 · 센티널 `__none__`). 수집 서버의 자유 문자열 `datacenter` 로 이름 대조하지 않는다. 그룹 이름을 법인으로 간주하지 않는다.
   - **API** `GET /tools/bm-storage/compare?hours&types&datacenterId`(어레이 용량 = 최신 스냅샷 중앙 · 엣지 중 늦은 것 · 전송 속도 = `storageSeriesMulti` 를 시리얼로 대조 · 법인 분리 집계에서는 같은 법인 계열만 · 사유는 코드) · `GET /tools/bm-storage/io/series?range&metric&ids&rank=1`(격자 = SAN `rangeOf` 의 bucketMs — 15분 · 1시간 정배수 · 1h 원시 · 24h 15분 · 7d/30d 1시간 · `bm:all` 은 측정 서버 전부에 값이 있는 칸만 합). 둘 다 adminOnly + fullScopeOnly 이고 **응답에 관리 주소를 싣지 않는다**(`stripHost`). 데모는 `demoBmIoSeries`(수식 — 적재 없음)이고 PowerMax · VMAX 데모 시리얼은 SAN 데모 포트 이름과 맞춘다(`sanDemoArraysFor`).
   - **화면**: 하위 탭 `useHashTab`(`#/tools/bm-storage/compare`) · 법인 · SAN 종류 칩은 공용 `DeviceFacetBar`(이름 키 → id) · 실시간 1시간 재조회는 공용 `usePolling`(WEB2613-09) · 합계 행은 STable 규약대로 **맨 아래 고정**(시안은 맨 위 — 저장소 규약을 따랐다) · 피크는 전송 속도 칸의 둘째 줄(1440 에서 열이 넘쳐 열 하나를 합쳤다) · CSV 는 `canCsv()` 뒤.
@@ -818,6 +819,21 @@
   - **격자는 표본 간격보다 잘게 만들지 않는다**(`compareSet.gridMs` — v2.956 `/io/series` 1시간이 1분 격자였다) · 재격자는 평균/최대(합 금지).
   - ⚠ `ioSeries.summarize` 의 avgTotal 은 **정수 반올림**(B/s · IOPS 용) — ms · % 지표에 그대로 쓰면 평균이 피크보다 커 보인다(화면 확인에서 발견). `compareSet.finishMetric` 이 반올림 없이 다시 낸다.
   - 화면: 차트 세로축 선형/로그(로그는 0 이하 점을 빈칸으로 — 0 으로 그리지 않는다) · IOPS 축 눈금은 짧게(`axisIops`) · 같은 사유 문장은 한 열에서 바로 위와 같으면 생략.
+- **v2.971 — 베어메탈 디스크 I/O 의 평균 · 피크 · 바쁨 정의를 바로잡았다**(사용자 질문 2026-11-11 "여기서 수집되는 전송속도 피크/평균이 그룹에 속한 모든 서버의 IO 를 합친거야?" — 화면에서 피크 633 KB/s < 평균 1.18 GB/s · IOPS 72 < 3,510 · 응답 시간 0.00 < 0.20 ms. 코드에서 찾은 결함 넷 · 컨펌 '전부 고치기'. 회귀 `server/test/bmIoPerDisk2971.test.js`(변이 20/20) · `audit2622c.test.js`(413 재전송 · gzip) · 기록 `docs/design/bm-san-compare/README.md` §10):
+  - **구간 평균은 디스크별 누적 카운터로**(`counters.disks` — 이름 → [rd_sectors, wr_sectors, io_ms, rd_ios, wr_ios, rw_ticks] · `diskstats.intervalAvg`). 두 수집 **모두에 있는** 디스크만 · 카운터가 준 디스크(교체)는 그 구간에서 뺀다.
+    v2.970 까지는 합계 하나만 기억해 한 번 빠졌다 돌아온 디스크의 평생 누적이 그 구간에 몰렸다(재현: 2초 표본 128 KB/s · 구간 평균 667 GB/s). 2초 표본에서 뺀 디스크도 맵에는 'after' 누적으로 싣는다.
+    한쪽만 맵이 있으면(업그레이드 직후 첫 구간) **null** · 둘 다 없으면(구버전 엣지) 합계로 빼되 바쁨 평균은 null(basis 'total' — 튀는 위험은 엣지를 올리면 사라진다).
+  - **바쁨 평균 = 가장 바쁜 디스크**(2초 표본 busyPct 와 같은 뜻). v2.970 까지는 모든 디스크 io_ms 합 ÷ 경과(디스크 20개 × 3% → 60%) — 그 값이 든 옛 열(`avg_busy` · `n_abusy` · `sum_abusy`)은 **읽지 않는다**(새 열 `avg_busy_disk` · `n_dbusy` · `sum_dbusy` — 옛 기록의 바쁨 평균은 '—').
+  - **피크 = max(2초 표본, 구간 평균)** — 구간의 실제 최고치는 그 구간 평균보다 작을 수 없다. 적재 때 집계 max_* 를 올리고, 읽을 때(원시 행마다 · 칸 평균 · `ioRank`) 옛 행도 올린다. 비교 세트 · SAN 비교 탭 둘 다.
+  - **묶음 피크는 구성원 전부로**(`ioSeries.sumSeries` — 피크가 빈 구성원은 그 칸 평균). v2.970 까지는 피크 있는 구성원만 더한 부분 합이었다. ‘동시 피크의 상한’ 은 **틀린 설명**이었다(2초 표본은 서버마다 다른 시각의 하한 — 합은 상한도 하한도 아니다) — 화면 문구도 고쳤다.
+  - **엣지 새 export 필드**(`counters.disks`) = 중앙 화이트리스트 `bmstor/diskMap.js sanitizeDiskMap`(엣지 회신 · `io_last.disks_json` 되살리기가 같은 함수 — 이름 32자 이하 · `WHOLE_DISK_RE` · 값 6개 · 0 이상 · 상한 `DISK_MAP_MAX` 1024 넘으면 맵째 버림).
+    위임 결과(`/api/central/bmstor-result`)는 잡 하나에 그 엣지 서버 **전부**가 실린다 — `archScan.BIG_JSON_SMALL` 의 '서버 1대 단위' 는 틀린 기록이라 지우고 **BIG_JSON 등록** · 엣지는 gzip. 현황 응답(`agg.aggregate`)에는 counters 를 싣지 않는다.
+  - **반증 1인 지적 반영(확정 8건)**: ① 합계 기준(구버전 엣지)은 **디스크 수(`io_last.n_disks`)가 바뀐 구간을 모름**(튄 평균이 피크로 30일 남던 것) ② **낡은 디스크 맵** — 구판으로 내렸다 올리면 구판이 ts · 합계만 바꾼다 → 맵을 쓴 수집 `disks_ts` 가 `ts` 와 같을 때만
+    ③ 구버전 엣지 서버의 바쁨은 사유 `busy-avg-unknown`(‘표본 없음’ 이 아니다) · 묶음 바쁨 피크는 평균 없는 구성원의 2초 표본도(최댓값이라 일부여도 하한) ④ **시간 열(rd/wr/io_ticks)은 커널이 unsigned int 로 찍어 2^32 ms 에서 돈다** —
+    섹터가 늘었는데 ticks 만 줄면 넘침으로 보정(`diskstats.tickDelta` · rw_ticks 는 두 열 합이라 두 번까지) · 보정 값이 경과보다 크면 그 디스크는 바쁨에서만 뺀다(2초 표본도 같은 규칙 · 바쁨을 잰 디스크가 없으면 null)
+    ⑤ **연속 재부팅** — uptime 차가 수집 시각 차보다 max(120초, 25%) 넘게 작으면 모름 ⑥ 합이 모두 0 이면 피크도 0(`p || null` 금지) ⑦ 원시 순위 피크도 행마다 max(2초 표본, 구간 평균)
+    ⑧ `san:all` 피크 합은 평균 합 아래로 내려가지 않게. 그 밖: 구판 중앙(1MB 한도)이 413 이면 엣지가 **디스크별 맵만 빼고 한 번 더** 보낸다(`bmstorWorker.dropDiskMaps`) · 디스크 맵 값은 안전 정수 이하만.
+    테스트 가 객체 리터럴 `__proto__:` 로 정제를 검사하던 것은 **공허한 검사**였다(자기 키가 아니라 프로토타입) — JSON.parse 입력으로 바꿨다. 변이 20/20.
 - ⚠⚠ **v2.926(릴리스 2.931.0) — 아이실론 노드 부하 시계열(네트워크 In/Out · 디스크 쓰기/읽기 · CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`(`saveNodeLoadPoint`·`nodeLoadQuery`), 수집 키는 `collectors/isilonNodeLoad.js`, 화면은 `views/tools/storageNodeLoad/`**
   (사용자 요청 "노드별 io network 부하를 저장하고 차트로" · "기간별 시간별로 이전 기록" · "Disk io 추가" · 성능 추천 ①CPU ④잡 엔진 ⑤지난주 비교 — Claude Design 시안 v2 컨펌,
   `docs/design/isilon-node-load/`. 회귀 `server/test/storageNodeLoad2926.test.js` + 웹 `storageNodeLoad/nodeLoadText.test.js`(서버 묶음·기간·조립을 같은 소스로 대조)):

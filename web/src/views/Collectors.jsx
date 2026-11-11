@@ -19,7 +19,7 @@ const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx'))
 import TransportPanel from './collectors/TransportPanel.jsx';
 import { transportBadge, formHttpNote, importHttpNote } from './collectors/transportText.js';
 import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
-import { autoOptionText, matchNote, matchSortText, selectValue, saveText as dcSaveText } from './collectors/collectorDcText.js'; // v2.971: 수집 서버 ↔ 법인 매칭
+import { autoOptionText, matchNote, matchSortText, selectValue, saveText as dcSaveText } from './collectors/collectorDcText.js'; // v2.972: 수집 서버 ↔ 법인 매칭
 import { edgeSyncLine, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: 엣지 자동 업그레이드 한 줄 + '구버전 엣지 밀어 넣기'
 
 // S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
@@ -46,9 +46,9 @@ export default function Collectors() {
   const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — CSV 일괄 관리(v2.338)
   const csvOk = canCsv(); // v2.643: CSV 가져오기/내보내기는 관리자 이상 + data.csv 권한만
   const [diag, setDiag] = useState(null); // { collector, cards[] } — 경고 배지 상세(v2.437)
-  const [dcBusy, setDcBusy] = useState(() => new Set());  // v2.971: 법인 매칭 저장 중인 수집 서버 id들(그 행만 잠근다 — 두 행을 이어 저장해도 서로 풀지 않게)
-  const [dcsError, setDcsError] = useState(null);           // v2.971: 법인 목록을 못 읽으면 매칭 칸이 왜 잠겼는지 말한다
-  // v2.971: 수집 서버 ↔ 법인(DataCenter) 매칭 저장 — 수동 고정(🔒)을 바꾸지 않는 전용 경로. '' = 해제(이름 맞춤).
+  const [dcBusy, setDcBusy] = useState(() => new Set());  // v2.972: 법인 매칭 저장 중인 수집 서버 id들(그 행만 잠근다 — 두 행을 이어 저장해도 서로 풀지 않게)
+  const [dcsError, setDcsError] = useState(null);           // v2.972: 법인 목록을 못 읽으면 매칭 칸이 왜 잠겼는지 말한다
+  // v2.972: 수집 서버 ↔ 법인(DataCenter) 매칭 저장 — 수동 고정(🔒)을 바꾸지 않는 전용 경로. '' = 해제(이름 맞춤).
   const saveDc = async (c, dcId) => {
     setDcBusy((s) => new Set(s).add(c.id)); setBanner(null);
     try { const text = dcSaveText(await putJson(`/admin/collectors/${encodeURIComponent(c.id)}/datacenter`, { datacenterId: dcId }), c.id, dcs); await load(); setBanner({ ok: true, text }); }
@@ -97,7 +97,7 @@ export default function Collectors() {
   useEffect(() => {
     load(); loadIngest(); loadAgentTok();
     fetchJson('/health').then((h) => setCentral(h.version)).catch(() => {});
-    fetchJson('/admin/datacenters').then((d) => { setDcs(d.datacenters || []); setDcsError(null); }).catch((e) => setDcsError(e.message || '법인 목록을 읽지 못했습니다.')); // 데이터센터 콤보박스 옵션 · v2.971 법인 매칭
+    fetchJson('/admin/datacenters').then((d) => { setDcs(d.datacenters || []); setDcsError(null); }).catch((e) => setDcsError(e.message || '법인 목록을 읽지 못했습니다.')); // 데이터센터 콤보박스 옵션 · v2.972 법인 매칭
 
     const t = setInterval(() => { load(); loadIngest(); }, 15_000);
     return () => { clearInterval(t); if (reloadTimer.current) clearTimeout(reloadTimer.current); };
@@ -174,7 +174,7 @@ export default function Collectors() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const { _origUrl, datacenterId: _dcIgnored, ...payload } = form; // 화면 전용 필드는 보내지 않는다 · 법인 매칭(datacenterId)은 전용 경로로만(서버도 이 본문 값을 무시한다 — v2.971 반증 F1)
+      const { _origUrl, datacenterId: _dcIgnored, ...payload } = form; // 화면 전용 필드는 보내지 않는다 · 법인 매칭(datacenterId)은 전용 경로로만(서버도 이 본문 값을 무시한다 — v2.972 반증 F1)
       const r = editing ? await putJson(`/admin/collectors/${encodeURIComponent(form.id)}`, payload) : await postJson('/admin/collectors', payload);
       const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: URL 이 바뀌어 저장 토큰 폐기(서버가 싣는 경우)
       if (r.ok && dropNote) { await load(); setMsg({ ok: false, text: dropNote }); }

@@ -209,7 +209,6 @@ export const BIG_JSON_SMALL = Object.freeze({
   'central:/rma-credential': '자격증명 요청(대상 id 하나)',
   'central:/ping-result': 'ping 결과 — 대상당 수 필드 × 대상 수백(수십 KB)',
   'central:/capture-result': '캡처 결과 요약(파일은 별도 경로)',
-  'central:/bmstor-result': 'df 마운트 결과 — 서버 1대 단위',
   'collector:/set-password': '계정 비밀번호 한 건(라우트 파서 4KB 상한)',
   'collector:/idrac-scan': '스캔 요청 — 대역 문자열·스캔 계정(라우트 파서 1MB 상한)',
   'collector:/bmstor-collect': '수집 요청 — 서버 목록·SSH 자격증명·마운트(라우트 파서 1MB 상한 · v2.741 정정: 대상 id 만 싣는 것이 아니다)',

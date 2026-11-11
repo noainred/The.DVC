@@ -1,5 +1,5 @@
 /**
- * collectorDcText.js — 설정 › 수집 서버의 '법인 매칭' 칸(v2.971 · 사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능').
+ * collectorDcText.js — 설정 › 수집 서버의 '법인 매칭' 칸(v2.972 · 사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능').
  * 지금 쓰이는 법인과 근거는 서버(/admin/collectors 의 dcMatch — collectorDcMatch)가 정한다. 여기서는 글자만 만든다.
  */
 const nameOf = (id, dcs) => (Array.isArray(dcs) ? dcs : []).find((d) => String(d.id) === String(id))?.name || id;

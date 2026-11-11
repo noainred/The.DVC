@@ -70,7 +70,9 @@ export function aggregate(servers, latest) {
       sums.availBytes += m.availBytes || 0;
     }
     const groups = groupsOf(s);
-    const io = r?.ok && r.io && typeof r.io === 'object' ? r.io : null;   // v2.915: 디스크 I/O 표본(없으면 ioError 가 사유)
+    // v2.915: 디스크 I/O 표본(없으면 ioError 가 사유). v2.971: 누적 카운터(counters — 디스크별 맵 포함)는 시계열 DB 재료라 화면 응답에 싣지 않는다
+    //   (서버당 디스크 수 × 6 수 — 현황 응답이 그만큼 커진다 · 화면은 쓰지 않는다).
+    const io = r?.ok && r.io && typeof r.io === 'object' ? (({ counters, ...pub }) => pub)(r.io) : null;
     const row = {
       id: s.id, name: s.name || s.host, host: s.host,
       groups, group: groups.join(', '), // group(문자열)은 표시/하위호환용 — 진실은 groups 배열
