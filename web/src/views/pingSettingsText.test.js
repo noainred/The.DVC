@@ -46,7 +46,7 @@ describe('폼', () => {
   });
   it('부하 미리보기 — 서버와 같은 식', () => {
     expect(pingLoadOf({ probeIntervalMs: 1000, summaryIntervalMs: 60000 }, 30)).toEqual({ targets: 30, probesPerSec: 30, probesPerSummary: 60, rowsPerDay: 43200 });
-    expect(loadText(pingLoadOf({ probeIntervalMs: 2000, summaryIntervalMs: 60000 }, 30))).toBe('대상 30개 · 초당 약 15회 측정 · 한 줄에 30회 · 하루 43,200줄 저장');
+    expect(loadText(pingLoadOf({ probeIntervalMs: 2000, summaryIntervalMs: 60000 }, 30))).toBe('전체 대상 30개(엣지 노드 · vCenter 포트 포함) · 초당 약 15회 측정 · 한 줄에 30회 · 하루 43,200줄 저장');
     expect(PING_SETTING_RANGES.probeIntervalMs.min).toBe(1000);
   });
 });

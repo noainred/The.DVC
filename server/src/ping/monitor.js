@@ -258,6 +258,8 @@ export function createPingEngine({
         running: !stopped, mode: 'continuous', targets: [...loops.values()].filter((l) => !l.stop).length,
         probeIntervalMs: s.probeIntervalMs, summaryIntervalMs: s.summaryIntervalMs, timeoutMs: s.timeoutMs,
         windowStart: stopped ? null : windowStart, lastFlush, icmpBusy: slots.busy, icmpWaiting: slots.waiting,
+        // 서비스 점검·엣지 로그(health/services.js pollerCheck) 공통 이름 — 마지막 저장 시각 · 주기(요약 주기).
+        last: lastFlush ? { at: lastFlush.at } : null, intervalMs: s.summaryIntervalMs,
       };
     },
     /** 테스트·진단 — 대상별 지금 창 누적값. */
@@ -267,6 +269,7 @@ export function createPingEngine({
 
 /* ── 한 번 재기(엔진이 돌지 않을 때의 '지금 측정' — 모니터 꺼짐) ─────────────────── */
 let running = false;      // 재진입 가드(한 번 재기끼리)
+let lastOnceAt = null;    // 한 번 재기(데모·모니터 꺼짐의 '지금 측정')가 마지막으로 끝난 시각
 export async function pollOnce() {
   if (running) return null;
   running = true;
@@ -293,6 +296,7 @@ export async function pollOnce() {
     return { measured: results.length, up: results.filter((r) => r.ok).length };
   } finally {
     running = false;
+    lastOnceAt = Date.now();
   }
 }
 
@@ -316,7 +320,9 @@ export function pingMonitorStatus() {
   const s = loadPingSettings();
   return {
     running: !!mockTimer, mode: mockTimer ? 'mock' : (config.ping.enabled ? 'not-started' : 'off'),
+    enabled: !!config.ping.enabled,
     probeIntervalMs: s.probeIntervalMs, summaryIntervalMs: s.summaryIntervalMs, timeoutMs: s.timeoutMs,
+    last: lastOnceAt ? { at: lastOnceAt } : null, intervalMs: s.summaryIntervalMs,
   };
 }
 

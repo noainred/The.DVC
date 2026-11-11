@@ -101,5 +101,6 @@ export function pingLoadOf(s, targetCount) {
 }
 export function loadText(load) {
   if (!load) return '';
-  return `대상 ${load.targets}개 · 초당 약 ${load.probesPerSec.toLocaleString()}회 측정 · 한 줄에 ${load.probesPerSummary.toLocaleString()}회 · 하루 ${load.rowsPerDay.toLocaleString()}줄 저장`;
+  // 대상 수는 이 포탈이 재는 전체(엣지 노드 · vCenter 포트 포함) — 이 탭의 표(vCenter · 수동 대상)보다 많을 수 있다(화면 확인).
+  return `전체 대상 ${load.targets}개(엣지 노드 · vCenter 포트 포함) · 초당 약 ${load.probesPerSec.toLocaleString()}회 측정 · 한 줄에 ${load.probesPerSummary.toLocaleString()}회 · 하루 ${load.rowsPerDay.toLocaleString()}줄 저장`;
 }
