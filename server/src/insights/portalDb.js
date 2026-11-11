@@ -162,10 +162,10 @@ const PURPOSES = {
   'xfer-speed-settings.json': '법인 간 전송 속도 측정 설정(켜짐·간격 실행·예약 실행·크기·동시성·시한·느려짐 기준·제외 엣지·보존일, v2.735)',
   'partfault-settings.json': '물리 파트 장애 기능 스위치(중앙·엣지별) + 이력 보존일(v2.548 · v2.613)',
   'storage-intervals.json': '스토리지 수집 주기 중앙 배포값(엣지별 지정 키만, v2.409)',
-  'storage-inspect.json': 'PowerScale 장비 점검 설정(주간 요일 · 시각 · 보고서 메일 · 받는 사람 · 판정 기준, v2.963)',
-  'storage-inspect-runs.json': 'PowerScale 장비 점검 결과 이력(상태 — 장비마다 최근 12회의 읽은 값 · 오류, v2.963)',
-  'storage-inspect-ring.json': 'PowerScale 장비 점검 결과 중앙 미전송분(상태 — 엣지 · 다음 storage push 에 싣는다, v2.963)',
-  'storage-inspect-state.json': 'PowerScale 주간 점검 일정 기록(상태 — 마지막 회차 · 보고서 메일 발송, v2.963)',
+  'storage-inspect.json': 'PowerScale 장비 점검 설정(주간 요일 · 시각 · 보고서 메일 · 받는 사람 · 판정 기준, v2.964)',
+  'storage-inspect-runs.json': 'PowerScale 장비 점검 결과 이력(상태 — 장비마다 최근 12회의 읽은 값 · 오류, v2.964)',
+  'storage-inspect-ring.json': 'PowerScale 장비 점검 결과 중앙 미전송분(상태 — 엣지 · 다음 storage push 에 싣는다, v2.964)',
+  'storage-inspect-state.json': 'PowerScale 주간 점검 일정 기록(상태 — 마지막 회차 · 보고서 메일 발송, v2.964)',
   // ── v2.613 PERSIST2613-02: 백업이 '상태·캐시' 로 분류하는 파일(backup/service.js RUNTIME_STATE_NAMES) 전부에 용도를 적는다 —
   //    테스트가 그 목록 ⊆ PURPOSES 를 고정한다. 폴러·엣지 push 가 스스로 다시 쓰는 파일이라 편집 대상이 아니다.
   'central-agent-config.json': '엣지가 push 한 자기 설정 사본(중앙 백업 번들에 포함 — 비밀은 엣지가 REDACTED 로 보낸다)',

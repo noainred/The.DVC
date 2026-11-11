@@ -1,5 +1,5 @@
 /*
- * PowerScale 장비 점검(v2.963) — 전부 .psi 아래로만(전역 클래스를 바꾸지 않는다). text-transform 은 쓰지 않는다.
+ * PowerScale 장비 점검(v2.964) — 전부 .psi 아래로만(전역 클래스를 바꾸지 않는다). text-transform 은 쓰지 않는다.
  * 상태색: 정상 초록 · 주의 호박 · 이상 빨강 · 확인 불가 빗금 회색(색만으로 구분하지 않게 낱말 · 빗금을 함께) · 해당 없음 점선.
  */
 .psi { display: flex; flex-direction: column; gap: 12px; min-width: 0; word-break: keep-all; }

@@ -1,5 +1,5 @@
 /**
- * storage/inspect/schedule.js — PowerScale 점검 **설정 · 주간 회차 · 보고서 메일**(v2.963 · 중앙만 — 엣지는 회차를 돌리지 않는다).
+ * storage/inspect/schedule.js — PowerScale 점검 **설정 · 주간 회차 · 보고서 메일**(v2.964 · 중앙만 — 엣지는 회차를 돌리지 않는다).
  *
  *  · 설정 `storage-inspect.json`(enabled · weekday · time · mailEnabled · mailDelayMin · to · corpTo · thresholds) — 원자적 쓰기 + 손상 보존 · 못 읽으면 저장 거절.
  *  · 상태 `storage-inspect-state.json`(lastRunSlot · lastMailSlot · history 20) — 상태 파일(백업 변경 감시 대상 아님).

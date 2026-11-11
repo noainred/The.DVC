@@ -63,7 +63,7 @@ export function fileCapFor(name) {
  * 백업 **내용**은 바꾸지 않는다(복원 의미 유지) — 트리거와 중복 판정에서만 뺀다.
  */
 export const RUNTIME_STATE_NAMES = new Set([
-  'storage-inspect-runs.json', 'storage-inspect-ring.json', 'storage-inspect-state.json', // v2.963 PowerScale 점검 이력 · 엣지 미전송 고리 · 회차 기록(registerStateFile 과 이중 안전망)
+  'storage-inspect-runs.json', 'storage-inspect-ring.json', 'storage-inspect-state.json', // v2.964 PowerScale 점검 이력 · 엣지 미전송 고리 · 회차 기록(registerStateFile 과 이중 안전망)
   'issue-notify-state.json', // v2.871 이슈 기한 알림 기록(issues/notify.js — registerStateFile 과 이중 안전망)
   'issue-filter-mail-state.json', // v2.883 저장 필터 주간 메일 기록(issues/notify.js — 같은 이중 안전망)
   'issue-inbox.json', // v2.908 포탈 알림함(issues/inbox.js — 같은 이중 안전망)

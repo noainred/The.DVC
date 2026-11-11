@@ -1,5 +1,5 @@
 /**
- * psInspectReview2963.test.js — PowerScale 장비 점검(v2.963) 반증 검토 결과 반영분 회귀.
+ * psInspectReview2964.test.js — PowerScale 장비 점검(v2.964) 반증 검토 결과 반영분 회귀.
  *
  *  F1  공유 토큰이 ' isi-direct '(앞뒤 공백)로 중앙 직접 장비 이력을 쓰지 못한다 — id 를 저장 키 모양으로 맞춘 뒤 소유권을 본다(실제 central 라우터)
  *  F8  같은 deviceId 원소를 반복해도 push 하나에 장비당 4건
@@ -13,7 +13,7 @@
  *  F10 REST 점검이 장비 시한에 끊기면 남은 경로를 '조회 실패' 로 넘기지 않고 던진다(일부만)
  *  F11 이벤트 · SyncIQ 쪽 넘김이 남으면 실패 0 을 정상으로 단정하지 않는다
  *  F12 HealthCheck 는 체크리스트마다 가장 최근 평가만
- *  F13 · F14 회차 계획 — psInspect2963 ⑨ 에 있다
+ *  F13 · F14 회차 계획 — psInspect2964 ⑨ 에 있다
  *  F15 스냅샷 크기 못 읽은 행이 있으면 partial · 노드 수 모르는 장비는 따로 센다
  *  E1  엣지 점검 뒤 push 를 당긴다(훅) · E2 비관리자 판본의 사유 · 오류에서 IPv4 를 가린다
  */
@@ -26,7 +26,7 @@ import url from 'node:url';
 import express from 'express';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'psinspect-rev-'));
-Object.assign(process.env, { CONFIG_DIR: TMP, CENTRAL_TOKEN: 'shared-review-token-2963', DATA_SOURCE: 'live', AUTH_ENABLED: 'false' });
+Object.assign(process.env, { CONFIG_DIR: TMP, CENTRAL_TOKEN: 'shared-review-token-2964', DATA_SOURCE: 'live', AUTH_ENABLED: 'false' });
 delete process.env.CENTRAL_URL;
 fs.writeFileSync(path.join(TMP, 'storage-devices.json'), JSON.stringify({ version: 1, devices: [
   { id: 'isi-direct', type: 'isilon', name: 'direct-isi', host: '10.1.1.1', username: 'u', password: 'p', agent: '', enabled: true, datacenterId: 'A' },

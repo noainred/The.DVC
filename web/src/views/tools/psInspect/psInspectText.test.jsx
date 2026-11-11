@@ -1,4 +1,4 @@
-// v2.963 — PowerScale 장비 점검 화면: 글자 보조(psInspectText) · 서버 catalog 와 1:1 · 메뉴 · 도구 등록 · 보기 SSR(빈 · 값) · 소스 스윕(폴링 없음 · 백틱 없음).
+// v2.964 — PowerScale 장비 점검 화면: 글자 보조(psInspectText) · 서버 catalog 와 1:1 · 메뉴 · 도구 등록 · 보기 SSR(빈 · 값) · 소스 스윕(폴링 없음 · 백틱 없음).
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import React from 'react';

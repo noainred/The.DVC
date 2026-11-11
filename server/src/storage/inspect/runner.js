@@ -1,5 +1,5 @@
 /**
- * storage/inspect/runner.js — PowerScale 주간 점검 **실행기**(v2.963 · 설계 README §4).
+ * storage/inspect/runner.js — PowerScale 주간 점검 **실행기**(v2.964 · 설계 README §4).
  *
  * 무엇: 장비 하나에 **읽기 전용** 명령 · REST 조회를 한 묶음으로 보내 facts(facts.js)를 만들고 이력(store.js)에 적는다. 판정은 화면을 그릴 때 judge.js 가 한다.
  *  · 어디서: 그 장비를 수집하는 포탈(중앙 직접 장비는 중앙 · 위임 장비는 그 법인 엣지 — CLAUDE.md '백업은 법인 로컬' 과 같은 원칙: 명령 수만큼 WAN 왕복 금지).

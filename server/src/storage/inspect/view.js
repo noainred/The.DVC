@@ -1,5 +1,5 @@
 /**
- * storage/inspect/view.js — 점검 **화면 · 보고서 · 메일 공용 모델**(v2.963). 장비 호출 0(이력 + 수집 스냅샷 + 노드 부하 DB).
+ * storage/inspect/view.js — 점검 **화면 · 보고서 · 메일 공용 모델**(v2.964). 장비 호출 0(이력 + 수집 스냅샷 + 노드 부하 DB).
  *
  *  · 장비마다 최신 점검(store) → judge.judgeDevice(+ perf 7일 — 그 점검 시각에서 거꾸로 7일). 지난 점검과 비교(diffItems — 장비 명령 항목만).
  *  · 법인 = 장비의 datacenterId(법인 · vCenter · 엣지 1:1:1 — CLAUDE.md). 이름은 datacenter 등록부.

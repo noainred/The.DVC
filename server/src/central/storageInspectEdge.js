@@ -1,5 +1,5 @@
 /**
- * central/storageInspectEdge.js — 엣지가 storage push 본문에 실어 보낸 PowerScale 점검 결과(`inspectRuns: [{ deviceId, runs:[…] }]`)를 중앙 이력에 적는다(v2.963).
+ * central/storageInspectEdge.js — 엣지가 storage push 본문에 실어 보낸 PowerScale 점검 결과(`inspectRuns: [{ deviceId, runs:[…] }]`)를 중앙 이력에 적는다(v2.964).
  *  · 소유권(중앙 직접 장비 거절 · 개별 토큰은 위임분만)은 라우트가 장비 목록 · 노드 부하 표본과 **같은 함수로 먼저** 거른다 — 여기서는 모양 · 상한 · 정제만.
  *  · 실행마다 store.sanitizeRun(아는 필드만 · facts 화이트리스트 · 문자열 상한 · at 은 수신 시각 이하) — 엣지 이름은 인증된 agent 로 덮는다.
  *  · 같은 (장비, at) 은 한 번만(duplicate — 실패 아님). 뺀 것은 dropped 로 밝힌다(조용한 상한 금지). 받은 결과는 요청 큐를 ack 한다.

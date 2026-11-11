@@ -1,5 +1,5 @@
 /**
- * routes/api/psInspect.js — PowerScale 장비 점검(독립 도구 `ps-inspect` — 세그먼트 = 키 · v2.963 · 설계 docs/design/powerscale-inspection).
+ * routes/api/psInspect.js — PowerScale 장비 점검(독립 도구 `ps-inspect` — 세그먼트 = 키 · v2.964 · 설계 docs/design/powerscale-inspection).
  *
  * 게이트(사용자 결정 '전체 범위 계정만'):
  *  · 조회 = tools 권한 + 전체 범위(fullScopeOnly) — 스토리지 모니터링 · SAN 스토리지 성능과 같다. 비관리자 판본은 장비 이름이 주소이면 가리고(view.js) ·

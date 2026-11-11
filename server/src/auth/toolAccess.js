@@ -95,7 +95,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   sanswitch: 'san-switch',
   'san-flow': 'san-flow',            // v2.935(C-②) SAN 플로우 모니터(SanFlowTool.jsx 전용 — 세그먼트 = 키)
   'san-storage': 'san-storage',      // v2.948 SAN 스토리지 성능(SanStorageTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/san-storage-perf)
-  'ps-inspect': 'ps-inspect',        // v2.963 PowerScale 장비 점검(PsInspectTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/powerscale-inspection)
+  'ps-inspect': 'ps-inspect',        // v2.964 PowerScale 장비 점검(PsInspectTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/powerscale-inspection)
   'secret-scan': 'secret-scan',
   'serial-lookup': 'serial-lookup',
   snapshots: 'snapshots',

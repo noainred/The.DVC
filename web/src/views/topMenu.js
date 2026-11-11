@@ -39,7 +39,7 @@ export const MENU_GROUPS = Object.freeze([
   ] },
   { id: 'storage', label: '스토리지', children: [
     { id: 'mon', label: '스토리지 현황', tool: 'storage-mon' },
-    { id: 'ps-inspect', label: 'PowerScale 장비 점검', tool: 'ps-inspect' }, // v2.963 법인별 주간 점검 · 보고서 · Top 10 노드 편중
+    { id: 'ps-inspect', label: 'PowerScale 장비 점검', tool: 'ps-inspect' }, // v2.964 법인별 주간 점검 · 보고서 · Top 10 노드 편중
     { id: 'ds', label: '데이터스토어', tab: 'datastores' },
     { id: 'growth', label: '스토리지 증가량 보고서', tool: 'storage-growth' },
     { id: 'usage', label: '스토리지 사용량 보고서', tool: 'storage-usage' },

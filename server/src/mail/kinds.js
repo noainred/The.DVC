@@ -26,7 +26,7 @@ export const KINDS = Object.freeze([
   { id: 'backup-stale', label: '백업 안 된 VM(매일)', desc: 'Backup 현황 › Summary 의 ‘백업 안 된 VM 찾기’ 조건으로 하루 한 번(정한 포탈 시각) 전 법인에서 찾은 VM 목록(v2.838). 조건 · 시각은 그 화면의 ‘이 조건을 알림으로(메일)’ 에서 관리자가 정한다. 결과를 못 읽은 VM 은 목록에 넣지 않고 수만 적는다.' },
   { id: 'issues', label: '이슈 트래커 알림', desc: '이슈 할당 · 상태 변경 · 댓글(@멘션) · 기한 임박/초과를 그 사람에게(v2.871). 받는 사람은 이슈 › 설정의 ‘사람별 메일 주소’ 다(여기 수신자는 쓰지 않는다). 같은 사람에게 1분 안의 변경은 한 통으로 묶는다. 이 종류를 끄면 이슈 메일이 나가지 않는다.' },
   { id: 'san-storage-report', label: 'SAN 스토리지 성능 월간 보고서', desc: '월간 SAN 스토리지 성능 점검 보고서(판정표 · 상위 어레이 · 주의/이상 항목) — 자급형 HTML 첨부(브라우저에서 PDF 저장). 특수 기능 › SAN 스토리지 성능 › 성능 점검 › 월간 보고서에서 켜고 회차(매달 N일 HH:MM)를 정합니다(v2.950).' },
-  { id: 'storage-inspect-report', label: 'PowerScale 주간 점검 보고서', desc: '법인별 PowerScale(아이실론) 주간 점검 결과(20항목 · 이상/주의와 조치 · 확인 불가 · Top 10 노드 편중) — 자급형 HTML 첨부(브라우저에서 PDF 저장). 전체판 · 법인판. 특수 기능 › PowerScale 장비 점검 › 설정(v2.963).' },
+  { id: 'storage-inspect-report', label: 'PowerScale 주간 점검 보고서', desc: '법인별 PowerScale(아이실론) 주간 점검 결과(20항목 · 이상/주의와 조치 · 확인 불가 · Top 10 노드 편중) — 자급형 HTML 첨부(브라우저에서 PDF 저장). 전체판 · 법인판. 특수 기능 › PowerScale 장비 점검 › 설정(v2.964).' },
   { id: 'test', label: '테스트 발송', desc: '설정 화면의 메일 테스트 버튼.' },
 ]);
 

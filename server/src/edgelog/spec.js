@@ -104,7 +104,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.inventory', label: 'vCenter 인벤토리 수집', group: 'collect', mod: '../store.js', fn: 'storeStatus' },
   { key: 'collect.storage', label: '스토리지 수집', group: 'collect', mod: '../storage/poller.js', fn: 'storagePollerStatus' },
   { key: 'collect.storageNodeLoad', label: '아이실론 노드 부하 표본', group: 'collect', mod: '../storage/nodeLoadPoller.js', fn: 'nodeLoadPollerStatus' }, // v2.932(2차 ⑨) — 수집 주기와 따로 도는 가벼운 폴러(중앙·엣지 공용 · 자기 몫 아이실론만)
-  { key: 'collect.storageInspect', label: 'PowerScale 장비 점검', group: 'collect', mod: '../storage/inspect/runner.js', fn: 'inspectRunnerStatus' }, // v2.963 — 중앙 요청 · 주간 회차로만 돈다(엣지는 스스로 회차를 돌리지 않음) · 0건이어도 상태
+  { key: 'collect.storageInspect', label: 'PowerScale 장비 점검', group: 'collect', mod: '../storage/inspect/runner.js', fn: 'inspectRunnerStatus' }, // v2.964 — 중앙 요청 · 주간 회차로만 돈다(엣지는 스스로 회차를 돌리지 않음) · 0건이어도 상태
   { key: 'collect.sanswitch', label: 'SAN 스위치 수집', group: 'collect', mod: '../sanswitch/poller.js', fn: 'sanSwitchPollerStatus' },
   { key: 'collect.sanswitchPerf', label: 'SAN 포트 사용량 수집', group: 'collect', mod: '../sanswitch/perfPoller.js', fn: 'sanSwitchPerfStatus' },
   { key: 'collect.cvp', label: 'CVP 수집', group: 'collect', mod: '../cvp/poller.js', fn: 'cvpPollerStatus' },
@@ -180,7 +180,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'service.issueAutomation', label: '이슈 자동화 규칙', group: 'service', mod: '../issues/automation.js', fn: 'automationStatus' },
   { key: 'service.issueAlertAuto', label: '다른 알람 → 이슈 자동 등록', group: 'service', mod: '../issues/alertIssues.js', fn: 'alertIssuesStatus' },
   { key: 'service.sanStorageNotify', label: 'SAN 스토리지 성능 알림', group: 'service', mod: '../sanswitch/storagePerfNotify.js', fn: 'storagePerfNotifyStatus' }, // v2.953 — 중앙만(엣지는 보내지 않음 · 상태는 꺼짐으로 보고)
-  { key: 'service.storageInspectSchedule', label: 'PowerScale 주간 점검 회차 · 보고서', group: 'service', mod: '../storage/inspect/schedule.js', fn: 'inspectScheduleStatus' }, // v2.963 — 중앙만(엣지는 edge:true)
+  { key: 'service.storageInspectSchedule', label: 'PowerScale 주간 점검 회차 · 보고서', group: 'service', mod: '../storage/inspect/schedule.js', fn: 'inspectScheduleStatus' }, // v2.964 — 중앙만(엣지는 edge:true)
   { key: 'service.sanStorageReport', label: 'SAN 스토리지 성능 월간 보고서', group: 'service', mod: '../sanswitch/storagePerfReportMail.js', fn: 'storagePerfReportStatus' }, // v2.955 — 알림과 같은 짝(인자 없이 부르면 지금 시각)
 ]);
 

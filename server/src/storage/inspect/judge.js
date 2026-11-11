@@ -1,5 +1,5 @@
 /**
- * storage/inspect/judge.js — 점검 **판정 코어**(v2.963 · 순수 · 서버 하나 — 화면 · 보고서 · 메일 · CSV 가 이 결과만 그린다).
+ * storage/inspect/judge.js — 점검 **판정 코어**(v2.964 · 순수 · 서버 하나 — 화면 · 보고서 · 메일 · CSV 가 이 결과만 그린다).
  *
  *  · 입력: facts(facts.js · sanitizeFacts 를 지난 값) + why(못 읽은 사유) + perf(perf.js 의 장비 7일 노드 통계) + 기준값(thresholds).
  *  · 출력: 항목 20개 [{ id, no, group, label, status, value, basis, how, refs, why? }] — status 는 ok · warn · bad · unknown · na.

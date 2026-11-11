@@ -1,5 +1,5 @@
 /**
- * storage/inspect/store.js — 점검 실행 **이력**(v2.963) — `storage-inspect-runs.json`(상태 파일 · 백업 변경 감시 대상 아님).
+ * storage/inspect/store.js — 점검 실행 **이력**(v2.964) — `storage-inspect-runs.json`(상태 파일 · 백업 변경 감시 대상 아님).
  *
  *  · 장비마다 최근 RUNS_MAX 회(실행 = { at, ms, method, source, agent?, facts, why, errors }). facts · why 는 저장 · 되살릴 때 sanitizeFacts 로 다시 자른다.
  *  · 원본 출력은 저장하지 않는다(크기 · 장비 응답에 들 수 있는 이름 · 주소 — 중앙에 싣지 않는다). 실패한 단계의 사유(160자)만.

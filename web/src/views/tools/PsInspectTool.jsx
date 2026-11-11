@@ -1,4 +1,4 @@
-// v2.963 — 'PowerScale 장비 점검'(독립 도구 ps-inspect · 메뉴 '스토리지 › PowerScale 장비 점검' · 설계 docs/design/powerscale-inspection · 사용자 컨펌 2026-11-11 '1차 + 2차').
+// v2.964 — 'PowerScale 장비 점검'(독립 도구 ps-inspect · 메뉴 '스토리지 › PowerScale 장비 점검' · 설계 docs/design/powerscale-inspection · 사용자 컨펌 2026-11-11 '1차 + 2차').
 //   법인별 PowerScale(아이실론) 주간 점검 20항목 · 장비별 결과 · 주간 보고서(메일 · PDF 저장 · CSV) · Top 10 노드 편중 · 점검 주기와 근거.
 //   판정 · 조립은 서버(storage/inspect/*) — 화면은 그리기만(psInspect/psInspectText.js 순수). 조회는 마운트 1회 + 버튼(폴링 없음) · 늦게 온 이전 응답은 버린다.
 //   보기는 해시(useHashTab) — overview · device(/<장비 id>) · report · top · sources.

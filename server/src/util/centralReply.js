@@ -58,7 +58,7 @@ export function dropSummaryOf(j) {
     evicted: typeof j.evicted === 'string' && j.evicted ? j.evicted.slice(0, 64) : null,
     // v2.932(2차 ⑨): storage-data 가 받은 노드 부하 표본 확인(devices·received·saved·duplicate·dropped — 수만). 없으면 null(구버전 중앙).
     nodeLoadSamples: sampleAckOf(j.nodeLoadSamples),
-    // v2.963: storage-data 가 받은 PowerScale 점검 결과 확인(같은 모양 — 수만). 없으면 null(구버전 중앙).
+    // v2.964: storage-data 가 받은 PowerScale 점검 결과 확인(같은 모양 — 수만). 없으면 null(구버전 중앙).
     inspectRuns: sampleAckOf(j.inspectRuns),
   });
 }
