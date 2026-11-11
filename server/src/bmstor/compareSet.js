@@ -11,7 +11,7 @@
  * 규칙(설계 bm-san-compare §3 · 루트 '못 읽은 값은 0 이 아니다'):
  *  · 못 읽은 칸은 null · 사유는 **코드**(문장은 웹 compareSetText.js).
  *  · 합(전송 속도 · IOPS)은 **측정된 구성원 전부에 값이 있는 칸만**(부분 합 금지 — ioSeries.sumSeries 와 같은 규칙).
- *  · v2.969: **피크 = 2초 표본과 구간 평균 중 큰 값**(구간의 실제 최고치는 그 구간 평균보다 작을 수 없다 — 2초 표본만 쓰면 한가한 순간에 걸려
+ *  · v2.970: **피크 = 2초 표본과 구간 평균 중 큰 값**(구간의 실제 최고치는 그 구간 평균보다 작을 수 없다 — 2초 표본만 쓰면 한가한 순간에 걸려
  *    피크 < 평균이 나왔다. 사용자 화면 2026-11-11). 묶음의 피크 합 = 구성원 피크(하한)의 합 — 같은 시각에 일어났다는 보장은 없다
  *    (v2.962 의 ‘동시 피크의 상한’ 은 틀린 설명이었다 — 정정).
  *  · 응답 시간은 평균의 평균이 아니라 **I/O 가중**(Σ소요 ms ÷ ΣI/O 횟수) — 칸 · 서버를 묶을 때도 합으로 낸다.
@@ -83,7 +83,7 @@ export function bucketize(points, buckets, bucketMs) {
 /** 베어메탈 원시 행(ioDb.ioRawRows) → 지표 넷. 응답 시간 평균은 칸 안 Σd_ticks ÷ Σd_ios(I/O 가 0 이면 null). */
 export function bmMetricsFromRaw(rows, buckets, bucketMs) {
   const n = buckets.length;
-  // v2.969: 피크 후보 = max(2초 표본, 그 행의 구간 평균) — 행마다 올린 뒤 칸의 최댓값.
+  // v2.970: 피크 후보 = max(2초 표본, 그 행의 구간 평균) — 행마다 올린 뒤 칸의 최댓값.
   const tput = bucketize((rows || []).map((r) => ({ t: r.ts, v: r.avgTotal, p: up(r.instTotal, r.avgTotal) })), buckets, bucketMs);
   const iops = bucketize((rows || []).map((r) => ({ t: r.ts, v: r.avgIops, p: up(r.instIops, r.avgIops) })), buckets, bucketMs);
   const busy = bucketize((rows || []).map((r) => ({ t: r.ts, v: r.avgBusy, p: up(r.busy, r.avgBusy) })), buckets, bucketMs);
@@ -131,7 +131,7 @@ export function bmMetricsFromRollup(rows, buckets, bucketMs) {
     if (acc.seen[i] && acc.nIops[i]) { out.lat.sDios[i] = acc.sDios[i]; out.lat.sDticks[i] = acc.sDticks[i]; }
     out.lat.avg[i] = acc.sDios[i] > 0 ? Math.round((acc.sDticks[i] / acc.sDios[i]) * 100) / 100 : null;
   }
-  // v2.969: v2.969 이전 집계 행의 max_* 는 2초 표본뿐이다 — 읽을 때 칸 평균 위로 올린다(새 행은 적재 때 이미 올라가 있다).
+  // v2.970: v2.970 이전 집계 행의 max_* 는 2초 표본뿐이다 — 읽을 때 칸 평균 위로 올린다(새 행은 적재 때 이미 올라가 있다).
   liftPeak(out.tput); liftPeak(out.iops); liftPeak(out.lat); liftPeak(out.busy);
   return out;
 }
@@ -162,17 +162,20 @@ export function combineBm(members, n) {
   const busyMembers = list.filter((m) => (m.busy?.avg || []).some((v) => v != null));
   const busy = blank(n); let busyPartial = 0;
   for (let i = 0; i < n; i++) {
-    if (!busyMembers.length) break;
-    let a = null; let p = null; let broken = false;
+    // 피크는 **최댓값**이라 구성원 일부만 있어도 실제 최고치의 하한이다(합과 달리 부분이 아래로 끌어내리지 않는다) — 평균이 없는 구성원
+    //   (구버전 엣지 — 바쁨 평균을 모름)의 2초 표본도 넣는다(반증 F3: 예전에는 그 구성원이 빠져 묶음 피크 12 < 그 서버 2초 바쁨 35).
+    for (const m of list) { const q = numOrNull(m.busy?.peak?.[i]); if (q != null) busy.peak[i] = busy.peak[i] == null ? q : Math.max(busy.peak[i], q); }
+    if (!busyMembers.length) continue;
+    let a = null; let broken = false;
     for (const m of busyMembers) {
       const v = numOrNull(m.busy.avg[i]);
       if (v == null) { broken = true; break; }
       a = a == null ? v : Math.max(a, v);
-      const q = numOrNull(m.busy.peak?.[i]); if (q != null) p = p == null ? q : Math.max(p, q);
     }
     if (broken) { busyPartial += 1; continue; }
-    busy.avg[i] = a; busy.peak[i] = p;
+    busy.avg[i] = a;
   }
+  liftPeak(busy);
   return {
     metrics: { tput: { avg: tput.avg, peak: tput.peak }, iops: { avg: iops.avg, peak: iops.peak }, lat, busy },
     measured: { tput: tput.measured, iops: iops.measured, lat: latMembers.length, busy: busyMembers.length },

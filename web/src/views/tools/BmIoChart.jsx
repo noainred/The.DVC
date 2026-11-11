@@ -4,7 +4,7 @@
  * 데이터: GET /tools/bm-storage/io/series?range&metric&ids&rank=1[&datacenterId&types&to]
  *  · 실시간 1시간(최근 구간)만 30초마다 다시 읽는다(고른 ≤8 계열 — 가벼운 조회). 24시간 이상 · 과거 구간은 마운트 1회 + 버튼.
  *  · 늦게 온 이전 응답은 버린다(요청 키 대조). 숫자(격자 · 점 간격 · 보존)는 전부 응답 값으로 문장을 만든다.
- *  · 실선 = 평균(베어메탈은 카운터 차분 · SAN 은 5분 표본 평균) · 점선 = 피크(베어메탈은 2초 표본과 구간 평균 중 큰 값 · SAN 은 표본 최댓값 — 둘 다 하한 · v2.969). 결측은 끊긴 선(0 으로 그리지 않는다).
+ *  · 실선 = 평균(베어메탈은 카운터 차분 · SAN 은 5분 표본 평균) · 점선 = 피크(베어메탈은 2초 표본과 구간 평균 중 큰 값 · SAN 은 표본 최댓값 — 둘 다 하한 · v2.970). 결측은 끊긴 선(0 으로 그리지 않는다).
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';

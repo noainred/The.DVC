@@ -296,6 +296,22 @@ test('EDGE-03 — bmstorWorker 는 200 stale(미반영)을 실패로 상태·콘
   });
 });
 
+test('v2.970 — bmstorWorker 회신은 gzip(중앙이 풀어 읽는다)이고, 413(구판 중앙의 1MB 한도)이면 디스크별 카운터를 빼고 한 번 더 보낸다', async () => {
+  const w = await import('../src/agent/bmstorWorker.js');
+  await asEdge(async () => {
+    const before = reqsTo('/api/central/bmstor-result').length;
+    mock.replies['/api/central/bmstor-jobs'] = [{ ok: true, jobs: [{ reqId: 'bms_w_2970', servers: [] }] }];
+    mock.statuses['/api/central/bmstor-result'] = [413];
+    mock.replies['/api/central/bmstor-result'] = [{ ok: false, reason: 'too large' }, { ok: true }];
+    const out = await captureConsole(() => w.runBmstorWorkerOnce());
+    const posts = reqsTo('/api/central/bmstor-result').slice(before);
+    assert.equal(posts.length, 2, '413 뒤 한 번 더');
+    assert.equal(posts[0].body?.reqId, 'bms_w_2970', 'gzip 본문(Content-Encoding)을 받는 쪽이 풀어 JSON 으로 읽는다');
+    assert.match(out, /413/);
+    assert.equal(w.bmstorWorkerStatus().ok, true, '재전송이 성공하면 실패로 남기지 않는다');
+  });
+});
+
 // ── EDGE-04 ────────────────────────────────────────────────────────────────
 test('EDGE-04 — 엣지 로그 큐: 기한을 넘겨 대기로 되돌아간 요청에 늦게 온 회신은 그 요청의 결과로 ack 하고 대기에서 지운다', async () => {
   const q = await import('../src/central/edgeLogJobs.js');

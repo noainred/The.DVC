@@ -81,6 +81,7 @@ export function sourceText(code) { return SOURCES[String(code || '')] || ''; }
 const REASONS = {
   'no-io-data': '이 구간에 디스크 I/O 표본이 없습니다.',
   'no-iops-data': 'IOPS · 응답 시간 표본이 없습니다 — v2.962 이전 표본이거나 엣지가 구버전입니다(처리량은 별개).',
+  'busy-avg-unknown': '바쁨 평균을 낼 수 없는 구간입니다 — v2.970 이전 기록(모든 디스크를 더한 값이라 쓰지 않음)이거나 엣지가 디스크별 카운터를 보내지 않습니다(엣지를 올리면 쌓입니다). 피크는 2초 표본입니다.',
   'unknown-target': '등록부에서 이 대상을 찾지 못했습니다(지워졌거나 이름이 바뀌었습니다).',
   'fe-no-device': '등록 스토리지와 시리얼이 일치하지 않아 어레이 측 값이 없습니다.',
   'fe-type': '이 장비 종류는 어레이 측 성능 경로가 없습니다.',
