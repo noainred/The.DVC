@@ -48,7 +48,7 @@ export function statusBody(rd = runDropsForPush()) {
   const p = isiduPollerStatus();
   return {
     key: publicKeyView(),
-    poller: { lastTick: p.lastTick, concurrency: p.concurrency, running: p.running, lastError: p.lastError, interrupted: p.interrupted || [], resumes: p.resumes || [] }, // v2.737: 재개 대기·결과
+    poller: { lastTick: p.lastTick, concurrency: p.concurrency, running: p.running, lastError: p.lastError, interrupted: p.interrupted || [], resumes: p.resumes || [], lastRuns: p.lastRuns || [] }, // v2.954 lastRuns(실행 방식) · v2.737: 재개 대기·결과
     targets: edgeTargets().targets.length,
     version: config.currentVersion?.() || null,
     // v2.743(LEFT-08): 버린 중앙 요청 — 빈 배열도 싣는다(중앙이 '이 엣지는 알려 주는 판' 임을 안다). runHeld 는 버린 것이 있을 때만.

@@ -15,7 +15,7 @@ import { evaluateRows, alertOf } from './alertRules.js';
 import { isMockMode } from '../mock/demo/flags.js';
 
 const FILE = () => path.join(config.configDir, 'bmusage-alert-state.json');
-const MAX_SEND = Math.max(1, Number(process.env.BMUSAGE_ALERT_MAX) || 40);
+export const MAX_SEND = Math.max(1, Number(process.env.BMUSAGE_ALERT_MAX) || 40);   // v2.929: 성능 알림 규칙(perfAlerts)도 주기당 이 상한을 쓴다(반증 F6)
 
 let _state = null;
 function load() {
@@ -63,9 +63,28 @@ export async function runBmUsageAlerts(rows = [], settings = {}) {
     // v2.599(RECENT2599-01): 관측 간격 = 주기 + 수집 시간 — 지속 판정의 연속 한도에 쓴다.
     runMs: settings.runMs,
   };
-  const { next, fires, counts } = evaluateRows(rows, load(), cfg, Date.now());
+  const now = Date.now();
+  const prev = load();
+  const { next, fires: fires0, counts } = evaluateRows(rows, prev, cfg, now);
+  /*
+   * 8a단계 ① 정비 창(설계 §20 ⑲ — 판정 코어 maint/judge.js 하나): 창 안 발화는 보내지 않고 상태에 표지를 단다 → 창 뒤에도 초과면 그때 1회(‘창 안부터 초과’).
+   *   판정기를 못 만들면(파일 손상 등) 억제하지 않는다(알림이 나가는 쪽). 규약 · 상태 모양은 maint/alertHold.js 머리말.
+   */
+  let fires = fires0; let maintOut = null;
+  try {
+    const R = await import('./maint/runtime.js');
+    const J = settings.maintJudge || await R.maintJudge({ now });
+    const byKey = new Map((rows || []).map((r) => [String(r.key || '').trim(), r]));
+    const H = (await import('./maint/alertHold.js')).holdThresholdFires({ prev, next, fires: fires0, now,
+      stateOf: (key) => { const r = byKey.get(key) || {}; return J.stateFor(settings.targetOf?.(key) || { key, vcenterId: r.vcenterId || '' }, now); } });
+    fires = H.send;
+    for (const a of H.applied) R.noteApplied('alerts', a.key, a.until, a.ids, now, { since: a.since ?? null });
+    for (const ids of H.counted) R.countSuppression('alerts', ids, { now });
+    for (const f of H.send) if (f.afterMaint) R.countSuppression('after', f.maintIds || [], { now });
+    maintOut = { held: H.held, heldNew: H.heldNew, after: H.after };
+  } catch (e) { maintOut = { error: String(e?.message || e).slice(0, 120) }; }
   save(next);
-  if (!fires.length) return { ok: true, sent: 0, counts };
+  if (!fires.length) return { ok: true, sent: 0, counts, ...(maintOut ? { maint: maintOut } : {}) };
   // ⚠ 위험한 것(초과)을 먼저 — 상한에 걸려 잘릴 때 해제 알림이 초과를 밀어내면 안 된다.
   const ordered = [...fires].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'over' ? -1 : 1));
   const take = ordered.slice(0, MAX_SEND);
@@ -78,7 +97,7 @@ export async function runBmUsageAlerts(rows = [], settings = {}) {
     } catch (e) { errors.push(String(e?.message || e).slice(0, 120)); }
   }
   return {
-    ok: true, sent, suppressed, counts,
+    ok: true, sent, suppressed, counts, ...(maintOut ? { maint: maintOut } : {}),
     capped: Math.max(0, ordered.length - take.length),
     errors: errors.slice(0, 5),
     fires: take.map((f) => ({ kind: f.kind, key: f.key, metric: f.metric, value: f.value })),

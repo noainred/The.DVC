@@ -29,8 +29,8 @@
  *     upgrade.js pushBundleToEdge(번들 **파일**)로 — 그래서 번들은 패키지 폴더에 보관된 파일 경로가 있어야 한다(없으면 그 엣지만 사유와 함께 실패).
  *  C. '지금 동기화' — routes/upgrade.js `POST /api/upgrade/edge-sync` 가 run() 을 부른다(단일 진행 — 주기 실행과 겹치면 같은 약속).
  *  D. 같은 엣지가 같은 대상 버전으로 **백오프 상한(6시간)에 닿을 만큼 연속 실패**하면 알림 채널(alerts.js notify)로 한 번 알리고, 그 뒤
- *     성공하면 '해소' 를 한 번 알린다(key `edgesync:<id>|<버전>` · 억제는 alerts.js 의 key 단위 창이 한다). 알린 사실은 메모리에만 — 재시작하면
- *     연속 실패 수가 0 부터 다시 세므로 같은 장애를 한 번 더 알릴 수 있다(정직 기록).
+ *     성공하면 '해소' 를 한 번 알린다(key `edgesync:<id>|<버전>` · 억제는 alerts.js 의 key 단위 창이 한다). v2.938: 알린 사실·연속 실패 수는
+ *     upgrade-status.json 의 edgeSyncState 로 재시작을 넘긴다(persistState·restoreState) — 같은 장애를 재시작마다 다시 알리지 않는다.
  */
 import { loadCollectors, ssrfBlockReason } from '../collector/registry.js';
 import { getCollectorStatus } from '../collector/state.js';
@@ -272,6 +272,22 @@ export class EdgeSyncRunner {
   restore(prev) {
     if (!prev || typeof prev !== 'object' || this.lastRun) return false;
     this.lastRun = { ...prev, outcome: EDGE_SYNC_OUTCOMES.includes(prev.outcome) ? prev.outcome : 'error', restored: true };
+    return true;
+  }
+
+  /**
+   * v2.938(제안 3번): 연속 실패 수(attempts)·알린 사실(alerted)을 상태 파일에 남긴다 — 예전에는 메모리뿐이라 재시작하면 연속 실패 수가 0 부터 다시 세어
+   *   같은 장애를 한 번 더 알렸고, 백오프도 처음부터 다시 시작했다(6시간 상한에 닿은 엣지에 재시작 직후 10분마다 다시 밀었다).
+   */
+  persistState() {
+    const attempts = [...this.attempts.entries()].slice(-500).map(([id, a]) => [id, { at: a.at, ok: !!a.ok, target: a.target, attempts: a.attempts || 0, reason: a.reason || null }]);
+    return { attempts, alerted: [...this.alerted].slice(-500) };
+  }
+  /** 재시작 전 상태를 되살린다(이 프로세스가 이미 기록을 가졌으면 그 키는 덮지 않는다). */
+  restoreState(st) {
+    if (!st || typeof st !== 'object') return false;
+    for (const [id, a] of Array.isArray(st.attempts) ? st.attempts : []) if (!this.attempts.has(id)) this.attempts.set(id, { ...a });
+    for (const m of Array.isArray(st.alerted) ? st.alerted : []) this.alerted.add(m);
     return true;
   }
 

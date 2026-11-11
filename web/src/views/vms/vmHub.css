@@ -32,7 +32,7 @@
   font-size: 14px; font-weight: 600; color: var(--text-dim); border-bottom: 3px solid transparent; }
 .vmh-tab:hover { color: var(--text); }
 .vmh-tab.on { color: var(--text); font-weight: 800; border-bottom-color: var(--accent); }
-.vmh-tab.tool { font-weight: 500; font-size: 13px; color: var(--text-faint); }
+.vmh-tab.tool { font-weight: 500; font-size: 13px; color: var(--text-faint); padding: 0 10px; }   /* v2.915: 도구가 6개 + 오른쪽 조건까지 한 줄(1440)에 들어가게 좌우 여백을 줄였다 */
 .vmh-tab.tool:hover, .vmh-tab.tool.on { color: var(--text); }
 .vmh-tab-cnt { font-size: 11px; font-weight: 800; color: var(--vmh-crit-text); background: var(--vmh-crit-bg); border-radius: 999px; padding: 1px 7px; }
 .vmh-tab-sep { flex: 0 0 1px; align-self: stretch; margin: 9px 6px; background: var(--border); }

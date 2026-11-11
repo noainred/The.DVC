@@ -547,11 +547,11 @@ export function registerSvcInventory(api) {
         corps: inv.corps.map((c) => ({ ...c, writable: writableOf(req.user, s, c.vcenterId) })),
         services: inv.services, noCorp: inv.noCorp,
         global: inv.global,
-        queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: new Set(q.mismatch.map((x) => x.key)).size, redundant: q.redundant.length, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length, orphaned: q.orphaned.length, tagAmbiguous: q.tagAmbiguous.length, ruleOverlap: q.ruleOverlap.length, aliasPins: q.aliasPins.length },
+        queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: new Set(q.mismatch.map((x) => x.key)).size, redundant: q.redundant.length, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length, orphaned: q.orphaned.length, tagAmbiguous: q.tagAmbiguous.length, ruleOverlap: q.ruleOverlap.length, aliasPins: q.aliasPins.length, dangling: q.dangling.length },
         // 법인을 고른 화면의 탭 숫자가 KPI 와 같은 기준이 되도록 법인별로도 센다(전 법인 숫자를 법인 화면에 쓰지 않는다).
         queuesByCorp: (() => {
           const o = {};
-          const bump = (c, k, n = 1) => { const id = c || ''; (o[id] ||= { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0, redundant: 0, orphaned: 0, tagAmbiguous: 0, ruleOverlap: 0, aliasPins: 0 })[k] += n; };
+          const bump = (c, k, n = 1) => { const id = c || ''; (o[id] ||= { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0, redundant: 0, orphaned: 0, tagAmbiguous: 0, ruleOverlap: 0, aliasPins: 0, dangling: 0 })[k] += n; };
           for (const x of q.unassigned) bump(x.corp, 'unassigned', x.n);
           for (const x of q.unmapped) bump(x.corp, 'unmapped');
           for (const x of q.drift) bump(x.corp, 'drift');
@@ -563,6 +563,7 @@ export function registerSvcInventory(api) {
           for (const x of q.tagAmbiguous) bump(x.corp, 'tagAmbiguous');
           for (const x of q.ruleOverlap) bump(x.corp, 'ruleOverlap');
           for (const x of q.aliasPins) bump(x.corp, 'aliasPins');
+          for (const x of q.dangling) bump(x.corp, 'dangling');
           for (const x of q.orphaned) bump(x.corp, 'orphaned');
           return o;
         })(),
@@ -662,6 +663,8 @@ export function registerSvcInventory(api) {
           return { ghosts: maskKeyOnly(gl.slice(0, GHOST_SHOW)), ghostsN: gl.length, ghostsByCorp: byCorp, ghostsHeld: maskKeyOnly(hl.slice(0, GHOST_SHOW)), ghostsHeldN: hl.length };
         })(),
         orphaned: q.orphaned.filter(inCorp).length, bmBlocked: g.bmBlocked,
+        // 없는 서비스를 가리키는 고정(7차 반증 5) — 판정은 자동으로 돌아가 있다. 행의 '고정 지우기' 로 지운다
+        dangling: mask(q.dangling.filter(inCorp).slice(0, 200)).map((x) => ({ ...x, ...(x.aliasKey ? { aliasKey: pubKey(x.aliasKey, hide) } : {}) })),
         // 문구(장비·수집 서버 이름)는 **전체 범위** 관리자만 — 범위가 지정된 관리자에게 다른 법인 출처 이름을 싣지 않는다(3차 반증 2 · sourceErrors 와 같은 기준)
         bmBlockedSources: g.bmBlocked ? (g.bmBlockedSources || []).map((u) => (admin && !allowed ? u : { source: u.source })) : [],
       });
@@ -771,7 +774,9 @@ export function registerSvcInventory(api) {
         }
         const r = mutateMap((d) => FLEET_OPS[op](d, b));
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
-        audit(b.id || b.name || op, JSON.stringify({ name: b.name, tier: b.tier, owner: b.owner, value: b.value }).slice(0, 400));
+        // 되돌릴 근거를 남긴다(7차 반증 6): 수정은 바꾸기 전 값(before) · 삭제는 지운 이름과 연결이 풀린 법인 서비스 수
+        audit(b.id || b.name || op, JSON.stringify({ name: b.name, tier: b.tier, owner: b.owner, value: b.value,
+          ...(r.result?.before ? { before: r.result.before } : {}), ...(op === 'global.remove' ? { removedName: r.result?.name, unlinked: r.result?.unlinked } : {}) }).slice(0, 600));
         return done(r.result);
       }
 
@@ -790,7 +795,7 @@ export function registerSvcInventory(api) {
           const rp = mutatePins((d) => { for (const [k, p] of Object.entries(d.pins)) if (p.corp === corp && p.serviceId === r.result.removed) { delete d.pins[k]; pinsRemoved += 1; } return { result: {} }; });
           if (!rp.ok) return res.status(rp.status).json({ ok: false, reason: `서비스는 지웠지만 고정 정리에 실패했습니다 — ${rp.error}` });
         }
-        audit(corp, `${op} ${JSON.stringify({ id: b.id, name: b.name, path: b.path, prefix: b.prefix, kind: b.kind, match: b.match, value: b.value, serviceId: b.serviceId, globalId: b.globalId, enabled: b.enabled, moveUp: b.moveUp === true || undefined, keepAlias: Array.isArray(b.keepAlias) ? b.keepAlias.slice(0, 2) : undefined }).slice(0, 600)}${pinsRemoved ? ` · 고정 ${pinsRemoved}건 정리` : ''}`);
+        audit(corp, `${op} ${JSON.stringify({ id: b.id, name: b.name, path: b.path, prefix: b.prefix, kind: b.kind, match: b.match, value: b.value, serviceId: b.serviceId, globalId: b.globalId, enabled: b.enabled, moveUp: b.moveUp === true || undefined, keepAlias: Array.isArray(b.keepAlias) ? b.keepAlias.slice(0, 2) : undefined, from: r.result?.from }).slice(0, 600)}${pinsRemoved ? ` · 고정 ${pinsRemoved}건 정리` : ''}`);
         return done({ ...r.result, ...(pinsRemoved ? { pinsRemoved } : {}) });
       }
 
@@ -810,49 +815,68 @@ export function registerSvcInventory(api) {
         // '고정 유지' 는 지금의 자동 판정을 함께 적는다 — 자동 판정이 다른 서비스로 바뀌면 다시 드리프트로 묻는다(5차 반증 R8).
         // 화면이 본 자동 판정(expectAuto)과 지금 판정이 다르면 그 키는 검토하지 않는다 — 사람이 보지 못한 새 드리프트를 숨기지 않게(5차 1차 반증 3).
         // pins.clear + onlyIfRedundant: 지금도 '고정 = 자동 판정' 인 키만 지운다(반증 8 — 그 사이 바뀐 고정을 지우면 소속이 조용히 바뀐다).
-        const needNow = op === 'pins.review' || (op === 'pins.clear' && b.onlyIfRedundant === true);
-        const autoNow = needNow ? (await inventoryFor(req, snap)).inv.resolved : null;
+        // pins.clear + onlyIfUnused: 지금 판정에 쓰이는 고정이면 지우지 않는다 — 불일치·보류·없는 서비스 행의 '고정 지우기' 가 보낸다(7차 반증 1: 거짓 불일치 행의
+        //   지우기가 다른 구성원이 쓰는 고정을 지웠다. 화면 판정이 틀려도 서버가 마지막에 막는다).
+        const onlyIfUnused = op === 'pins.clear' && b.onlyIfUnused === true;
+        const needNow = op === 'pins.review' || (op === 'pins.clear' && (b.onlyIfRedundant === true || onlyIfUnused));
+        const invNow = needNow ? (await inventoryFor(req, snap)).inv : null;
+        const autoNow = invNow ? invNow.resolved : null;
+        const usedPinKeys = new Set();
+        if (onlyIfUnused) for (const m of g.members) { const rr = autoNow.get(m.key); if (rr?.src === 'pin') usedPinKeys.add(rr.pinKey || m.key); }
         const expectAuto = op === 'pins.review' && b.expectAuto && typeof b.expectAuto === 'object' && !Array.isArray(b.expectAuto)
           ? Object.fromEntries(Object.entries(b.expectAuto).slice(0, LIMITS.pinBatch).map(([k, v]) => [resolveKey(t(k)), v]).filter(([k]) => k)) : null;
-        let changed = 0; let skipped = unresolved; let stale = 0;
+        let changed = 0; let skipped = unresolved; let stale = 0; let aliasRemoved = 0;
         // 키 등급이 오른 구성원은 고정이 낮은 등급 키(별칭)에 있을 수 있다(5차 R15) — 쓰는 김에 새 키로 옮긴다(읽기 경로는 쓰지 않는다).
         const aliasOf = new Map(g.members.filter((m) => m.corp === corp && m.aliasKeys?.length).map((m) => [m.key, m.aliasKeys]));
-        const moveAlias = (d, k) => {
-          if (d.pins[k]) { for (const a of aliasOf.get(k) || []) if (d.pins[a]?.corp === corp) delete d.pins[a]; return; }
+        // 새 키에 고정이 없으면 옛 키 고정을 새 키로 옮긴다(소속 그대로). 새 키에 고정이 있을 때 옛 키 고정을 지우는 범위는 연산이 정한다(7차 반증 3):
+        //   'all' — 고정 지정·지우기(사람이 이 구성원의 소속을 새로 정했다 · 지우기는 옛 키가 되살아나지 않게) · 'dup' — 고정 유지(같은 서비스인 중복만 —
+        //   서비스가 다른 충돌은 '옛 키로 저장된 고정' 카드에서 사람이 고른다). 지운 개수는 결과·감사에 남긴다.
+        const moveAlias = (d, k, mode) => {
           for (const a of aliasOf.get(k) || []) {
-            if (d.pins[a]?.corp !== corp) continue;
-            if (!d.pins[k]) d.pins[k] = { ...d.pins[a] };
-            delete d.pins[a];
+            const pa = d.pins[a]; if (pa?.corp !== corp) continue;
+            if (!d.pins[k]) { d.pins[k] = { ...pa }; delete d.pins[a]; continue; }
+            if (mode === 'all' || pa.serviceId === d.pins[k].serviceId) { delete d.pins[a]; aliasRemoved += 1; }
           }
         };
+        const aliasPinOf = (d, k) => { for (const a of aliasOf.get(k) || []) if (d.pins[a]?.corp === corp) return d.pins[a]; return null; };
         const r = mutatePins((d) => {
+          // 서비스 존재는 쓰는 순간 다시 본다 — 위의 확인과 이 쓰기 사이(입력 수집 await)에 서비스가 지워지면 없는 서비스를 가리키는 고정이 남았다(7차 반증 5)
+          if (op === 'pins.set' && !(peekMap().corps[corp]?.services || []).some((x) => x.id === serviceId)) return { error: '대상 서비스가 그 사이 지워졌습니다 — 새로 고쳐 다시 고르십시오.', status: 409 };
           for (const k of keys) {
             if (op === 'pins.set') {
               // 살아 있는 구성원이고 그 법인 것이어야 한다(법인을 넘는 지정 금지 — 법인 귀속이 없는 서버는 통합 서버 인벤토리에서 먼저 정한다).
               if (corpOfKey.get(k) !== corp) { skipped += 1; continue; }
-              moveAlias(d, k);
+              moveAlias(d, k, 'all');
               d.pins[k] = { serviceId, corp, by: who, at: Date.now(), reviewed: false }; changed += 1;
             } else {
-              moveAlias(d, k);
-              const p = d.pins[k];
-              if (!p || p.corp !== corp) { skipped += 1; continue; }
+              // 고칠지 먼저 정하고(건너뛰는 키는 옛 키도 건드리지 않는다 — 7차 반증 3 둘째 절) 그다음 옮기거나 지운다
+              // onlyIfUnused 는 그 키의 고정만 본다(옛 키로 되짚어 가면 그 구성원이 지금 쓰는 옛 키 고정을 지울 수 있다)
+              const p0 = d.pins[k] || (onlyIfUnused ? null : aliasPinOf(d, k));
+              if (!p0 || p0.corp !== corp) { skipped += 1; continue; }
               const cur = autoNow?.get(k);
               if (op === 'pins.clear') {
                 if (b.onlyIfRedundant === true && !(cur?.src === 'pin' && cur.redundant)) { stale += 1; continue; }
+                if (onlyIfUnused && usedPinKeys.has(k)) { stale += 1; continue; }
+                moveAlias(d, k, 'all');
                 delete d.pins[k]; changed += 1;
               } else {
                 const now = cur?.auto?.serviceId ?? null;
                 if (expectAuto && Object.prototype.hasOwnProperty.call(expectAuto, k) && (expectAuto[k] ?? null) !== now) { stale += 1; continue; }
+                moveAlias(d, k, 'dup');
                 // 항목은 동결된 지금 값이다 — 고치지 않고 새 객체로 바꿔 넣는다(6차 8 — mutatePins 는 바뀐 키만 정리한다)
-                d.pins[k] = { ...p, reviewed: true, reviewedAuto: now }; changed += 1;
+                d.pins[k] = { ...d.pins[k], reviewed: true, reviewedAuto: now }; changed += 1;
               }
             }
           }
-          if (!changed && stale) return { error: op === 'pins.review' ? '자동 판정이 화면과 달라졌습니다 — 새로 고쳐 다시 확인하십시오.' : '지금은 불필요한 고정이 아닙니다(자동 판정이 바뀜) — 새로 고쳐 다시 확인하십시오.', status: 409 };
-          return { result: { changed, skipped, ...(stale ? { stale } : {}) } };
+          if (!changed && stale) {
+            return { error: op === 'pins.review' ? '자동 판정이 화면과 달라졌습니다 — 새로 고쳐 다시 확인하십시오.'
+              : onlyIfUnused ? '지금 판정에 쓰는 고정이라 지우지 않았습니다 — 다른 구성원의 소속입니다(새로 고쳐 다시 확인하십시오).'
+                : '지금은 불필요한 고정이 아닙니다(자동 판정이 바뀜) — 새로 고쳐 다시 확인하십시오.', status: 409 };
+          }
+          return { result: { changed, skipped, ...(stale ? { stale } : {}), ...(aliasRemoved ? { aliasRemoved } : {}) } };
         });
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
-        audit(corp, `${op} ${changed}건${serviceId ? ` → ${serviceId}` : ''}${skipped ? ` · 건너뜀 ${skipped}(다른 법인·없는 키)` : ''} · ${keys.slice(0, 20).join(',')}`);
+        audit(corp, `${op} ${changed}건${serviceId ? ` → ${serviceId}` : ''}${skipped ? ` · 건너뜀 ${skipped}(다른 법인·없는 키)` : ''}${stale ? ` · 그대로 둠 ${stale}` : ''}${aliasRemoved ? ` · 옛 키 고정 ${aliasRemoved}건 함께 지움` : ''} · ${keys.slice(0, 20).join(',')}`);
         return done(r.result);
       }
 

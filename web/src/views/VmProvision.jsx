@@ -107,7 +107,7 @@ export default function VmProvision() {
     } catch (e) { if (gen === previewGen.current) setMsg({ ok: false, text: e.message }); }
   };
   // Auto-refresh the preview as the user types the pattern/count/IP.
-  useEffect(() => { const t = setTimeout(doPreview, 350); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [form.namePattern, form.count, form.startIndex, form.pad, form.guest.ipMode, form.guest.ipStart, form.guest.ipAssign, form.guest.ipList, form.guest.hostnamePattern]);
+  useEffect(() => { const t = setTimeout(doPreview, 350); return () => clearTimeout(t); }, [form.namePattern, form.count, form.startIndex, form.pad, form.guest.ipMode, form.guest.ipStart, form.guest.ipAssign, form.guest.ipList, form.guest.hostnamePattern]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async () => {
     if (!form.sourceId) return setMsg({ ok: false, text: '원본 VM/템플릿을 선택하세요.' });
@@ -456,7 +456,7 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
         setLoadErr(e?.message || String(e));
       });
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [vc, limit, reloadKey]);
+  useEffect(() => { load(); }, [vc, limit, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!data) {
     return loadErr ? (
       <>

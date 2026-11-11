@@ -16,6 +16,7 @@ import {
   LIMITS,
 } from '../../svcmon/store.js';
 import { canEdit, fullScopeOnly } from './shared.js';
+import { cancelTrials } from '../../svcmon/trial.js';   // v2.960(반증 M2): 사람이 대상을 고치거나 지우면 시험 대기를 멈춘다
 
 export function registerTree(svcmonRouter) {
 
@@ -101,6 +102,7 @@ svcmonRouter.put('/targets/:id', canEdit, fullScopeOnly, (req, res) => {
   try {
     const t = updateTarget(req.params.id, req.body || {});
     if (!t) return res.status(404).json({ error: '대상을 찾을 수 없습니다.' });
+    if (req.body && (Object.prototype.hasOwnProperty.call(req.body, 'enabled') || Object.prototype.hasOwnProperty.call(req.body, 'host'))) cancelTrials([t.id]);
     logAudit({ user: req.user?.username, action: 'svcmon.target.update', target: t.name });
     res.json({ target: t });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -108,6 +110,7 @@ svcmonRouter.put('/targets/:id', canEdit, fullScopeOnly, (req, res) => {
 
 svcmonRouter.delete('/targets/:id', canEdit, fullScopeOnly, (req, res) => {
   if (!deleteTarget(req.params.id)) return res.status(404).json({ error: '대상을 찾을 수 없습니다.' });
+  cancelTrials([req.params.id], '대상을 지웠습니다.');
   logAudit({ user: req.user?.username, action: 'svcmon.target.delete', target: req.params.id });
   res.json({ ok: true });
 });

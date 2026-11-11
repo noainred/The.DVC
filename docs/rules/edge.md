@@ -26,7 +26,15 @@
 - (원래 4860행) 아키텍처 점검(v2.614) — 포탈 점검 3번째 서브메뉴. 운영 포탈이 자기 라우터 스택·카탈로그·표·파일을 스스로 판정한다
 - (v2.793) VM 백업 센터 법인 위임 — 엣지 위임 vCenter 의 백업은 담당 엣지가 실행한다. 중앙은 정의·화면·이력만
 - (v2.826) 엣지 개별 토큰 자동 적용 — 옛 판 엣지는 401 이고 아무것도 받지 않는다. 전달할 통로가 없으면 발급하지 않는다
+- (v2.927) 중앙 → 엣지 설정 배포에 엣지별 지시를 더할 때 — 엣지 코드를 바꾸지 않으려면 받는 쪽이 채우는 기본값까지 계산에 넣는다
+- (v2.929) 베어메탈 성능 5단계 엣지 대행 — 집중 · 변경 · 띠 · 비교는 볼 때 pull, 봉투에는 요약만 · 판정 · 발송은 엣지 · 이슈는 중앙이 당길 때 · 구버전은 경로 존재로 구분
+- (6단계) 리눅스 성능 6단계 엣지 대행 — 비교 계열 요청 1개 · 수집 건강 봉투(법인 대조) · 최소 버전 공용 함수(릴리스 노트 6단계 첫 번호)
+- (7a단계) 리눅스 성능 7a단계 로그 분석 — 봉투 logsVer · logSummary(정제 · 키는 같은 봉투 대상만) · 상세 대행(bodyOk 명시 · 왕복 테스트) · 최소 버전 7a 표지
 
+- (7b단계 추가) 리눅스 성능 7b단계 서버 등록 배포(중앙 → 엣지) — 비밀 없는 이름 목록 · 개별 토큰만 · 엣지가 같은 분석을 다시 · 자기가 만든 항목만 지움 · 끊겨도 central 로 넘기지 않음
+- (8a단계 추가) 리눅스 성능 8a단계 정비 창 배포 · 봉투 maint/capacity · 용량 상세 대행 — 개별 토큰만 · 그 법인 창만 · 태그는 중앙이 키로 펼침 · 엣지 재정규화 · 24h 시한 · bodyOk 명시 · 최소 버전 8a 표지
+- (8b단계 추가) 리눅스 성능 8b단계 Top-N 대행 · 봉투 idle — bodyOk 명시 · comm · user 는 엣지 문자열(길이 → 제어문자) · hint 는 중앙이 다시 · 표지 topVer/idleVer · 최소 버전 8b 표지
+- (다음 점검 ②③ 추가) 봉투 powerCapVer/powerCaps(서버별 PowerCap) · 엣지 전력 알림 발송 기록(랙 키) — 정제 화이트리스트 · 랙 법인은 중앙이 · 버전 안내는 old-version 만
 ## 본문
 
 - ⚠⚠ **엣지 로그·진행상태는 '당겨서' 본다 — 상시 수집하지 않는다**(`edgelog/` + `central/edgeLog*.js` +
@@ -677,9 +685,10 @@
   · **적용과 겹치지 않는다**: 확인·적용 중이면 동기화는 `skipped`, 적용은 진행 중인 동기화 `inflight` 를 기다린 뒤 자기 push 를 한다(같은 엣지에 두 번들을 동시에 올리지 않게).
     둘 다 `pushConcurrencyOf()`(기본 4)로 민다.
   · 상태 코드(`EDGE_SYNC_STATES`·`EDGE_SYNC_OUTCOMES`)는 서버, 문장은 웹(`EDGE_STATE_TEXT`·`SYNC_OUTCOME_TEXT`) — 웹 테스트가 서버 소스와 1:1 대조한다. 코드를 더하면 둘 다.
-    동기화 기록은 메모리뿐이다(재시작 전 기록은 지어내지 않는다 — 화면이 '기동 2분 뒤 첫 실행' 이라 말한다). 엣지별 push 결과는 수집 서버 상태 `upgrade` 에 남는다.
-  · ⚠ 정직 기록: `UPGRADE_EDGES`(upgrade.json edges — `/api/upgrade/bundle` 로 받는 옛 방식)는 버전을 보고하지 않아 동기화 대상이 아니다(적용 직후 1회 push 만 — 예전과 같다).
-    실제 WAN 엣지로는 확인하지 못했다(가짜 수집 서버 + 실제 서명 번들로 push 경로를 돌렸다).
+    ~~동기화 기록은 메모리뿐이다~~ → ✅ **v2.865 A 에 해결**(upgrade-status.json `lastEdgeSync` · 재시작 뒤 '재시작 전 기록'). 연속 실패 수·알린 사실도 ✅ **v2.938**(`edgeSyncState`). 엣지별 push 결과는 수집 서버 상태 `upgrade` 에 남는다.
+    (v2.938 정정 — 이 줄은 v2.865 에서 고친 뒤에도 정정하지 않은 채 남아 있었다.)
+  · ~~`UPGRADE_EDGES`(옛 방식)는 동기화 대상이 아니다~~ → ✅ **v2.865 B 에 해결**(`/api/health` 버전 질의 · `pushBundleToEdge` — 아래 v2.865 절). v2.938 정정(고친 뒤 정정하지 않았다).
+    실제 WAN 엣지로는 확인하지 못했다(가짜 수집 서버 + 실제 서명 번들로 push 경로를 돌렸다) → v2.938 부터 **포탈 점검 › 법인별 실환경 확인**의 '엣지 업그레이드 push' 칸이 법인마다 실제 수신 기록으로 확인한다.
   · **v2.865 후속(사용자 선택 A·B·C·D — '프로그램 개선', 회귀 `server/test/edgeAutoUpgrade2865.test.js`)**:
     A. 동기화 기록은 `upgrade-status.json` 의 `lastEdgeSync` 로 남는다(`autoState.sanitizeEdgeSync` 쓰기·읽기 공용 · runner `onRun` 훅 → manager `#save`) — 재시작 뒤
        `restored:true` 로 되살리고 모르는 결과 코드는 'error' 로 읽는다(화면 '재시작 전 기록'). 되살림 표지는 파일에 쓰지 않는다.
@@ -690,7 +699,7 @@
     C. `POST /api/upgrade/edge-sync`(관리자·전체 범위 · 꺼져 있으면 409 · 감사 로그)가 같은 `run()` 을 부른다(단일 진행 — 주기 실행과 겹치면 같은 약속). 업그레이드 화면 '지금 동기화' ·
        수집 서버 화면 '구버전 엣지 밀어 넣기'(한 줄 상태는 `GET /admin/collectors` 의 `edgeSync`). ⚠ 수집 서버 화면의 기존 '지금 동기화' 는 pull 이다 — 이름을 겹치지 않게 했다.
     D. 같은 엣지가 같은 대상 버전으로 **백오프 상한(6시간)에 닿을 만큼 연속 실패**(10분 주기면 7번째)하면 `alerts.js notify` 로 한 번 알리고(key `edgesync:<id>|<버전>`), 그 뒤
-       성공하면 `:close` 로 해소를 한 번 알린다(`edgeSyncAlert` 순수 — 백틱·별표 없음). 알린 사실은 메모리뿐 — 재시작하면 연속 실패 수가 0 부터라 같은 장애를 한 번 더 알릴 수 있다(정직 기록).
+       성공하면 `:close` 로 해소를 한 번 알린다(`edgeSyncAlert` 순수 — 백틱·별표 없음). ~~알린 사실은 메모리뿐~~ → ✅ **v2.938 해결**: 연속 실패 수·알린 사실을 upgrade-status.json `edgeSyncState` 로 재시작을 넘긴다(`persistState`·`restoreState` · 백오프도 이어진다 — 회귀 `edgeSyncPersist2938`).
        알림 발송이 던져도 동기화는 계속된다.
 - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
   (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
@@ -790,3 +799,136 @@
     같은 경로(`pushUpgradeToCollectors` — 서명 manifest 포함) · 새 판(최소 2.776.0 이고 번들 판을 알면 그 이상)을 **확인한 뒤에만** 발급한다.
     시한(`UPGRADE_WAIT_MS`) 안에 못 보면 발급하지 않고 멈춘다. 판을 모르면(pull 상태 없음) 업그레이드하지 않고 통로를 직접 시도한다.
   - 웹 `edgeTokenSyncText.js MIN_EDGE_API_VERSION` 과 `web/src/cmpVersion.js` 는 서버 값·규칙의 사본 — 서버 테스트가 대조한다. 판을 모르면 null(낮다고 보지 않는다).
+
+- **중앙 → 엣지 설정 배포에 엣지별 지시를 더할 때(v2.927 베어메탈 사용률 '중앙에서 켜기') — 엣지 코드를 바꾸지 않으려면 받는 쪽이 채우는 기본값까지 계산에 넣는다**
+  (`bmusage/settings.js` perEdge 절 · `bmusage/edgeCorps.js` · 회귀 `server/test/bmUsageEdgeOn2927.test.js` — 실제 centralRouter + 실제 엣지 인출 워커).
+  - 받는 쪽(2.627~ 엣지)이 본문을 `normalizeSettings` 로 정규화한 뒤 배포 키 **전부**를 덮는다 — 일부 키만 보내면 빠진 키가 엣지에서 **기본값**이 된다. 엣지별 판도 배포 키 전부를
+    보내고, 그 부작용(주기·보존·경로·알림이 중앙 값)을 화면이 값과 함께 말한다. 새 필드(`mode`)는 구버전 엣지가 읽지 않는 추가 필드로만 싣는다.
+  - 엣지별 판(그 엣지 법인이 실린 설정)은 **개별 토큰으로 인증된 이름에만** 내준다 — 공유 토큰 `?agent=` 는 이름을 증명하지 못한다(v2.589 규약). 거절 사유는 엣지 상태에 남는다.
+  - ⚠⚠ **엣지가 받을 값을 인출 때 다시 계산하지 말 것**(반증 F2 — 실측): 중앙 상태(법인 매핑 — 스냅샷 관측 · fleet 캐시)는 점검중 · push 전 · TTL 만료 · 중앙 재기동에 순간적으로
+    비고, '없음' 으로 답하면 엣지가 사본을 지워 수집이 꺼진다. 관리자가 확인한 값을 **저장 때 확정**하고 인출은 그것을 그대로 보낸다. 지금 계산이 저장 값과 다르면 화면이
+    '다시 확인' 을 받는다(조용히 바꾸지도, 끄지도 않는다). 계산이 필요하면 디스크 원천(등록부 · 위임 인벤토리 소유)을 먼저 본다.
+  - 엣지별 지시는 **그 노드가 배포를 받는 엣지일 때만** 준다(반증 F7) — 수집 서버 등록부에는 중앙·단독 노드도 올라온다. 노드가 보고한 역할(보관분 `node.role`)로 판정한다.
+  - 엣지별 지시의 **해제는 등록부와 무관하게** 된다(반증 F1) — 토큰 폐기로 이름이 등록부에서 빠지면 지시를 지울 길이 없고, 같은 이름으로 재발급하면 바로 다시 받는다.
+  - '적용됨/대기' 는 **그 엣지에 실제로 보낼 판의 서명**과 비교한다 — 엣지마다 판이 다르면 전역 서명 하나로는 영원히 '대기' 다.
+- ⚠⚠ **리눅스 성능 6단계 엣지 대행 — 비교 계열은 엣지마다 요청 1개, 수집 건강은 봉투로, 최소 버전 문구는 릴리스 노트의 6단계 첫 번호(공용 함수)**
+  (`routes/collector.js` `GET /bm-usage/compare-series`(tokenFirst · 자기 대상 목록 밖 키는 not-found) · `bmusage/perfOpsView.js` mode `compare-series` · `central/bmComparePull.js` ·
+  `bmusage/edgePull.js`(봉투 `collectHealth`) · `central/bmCollectHealthSanitize.js` · `central/featureMinEdgeVersion.js` · `dataflow/build.js` 분류. 회귀 `bmPerfStage6{Compare,Health,MinEdgeVersion}.test.js`):
+  - **비교 계열은 한 서버 = 한 요청**: 지표 여러 개 · 창 통계 · 스파크 · 베이스라인 이탈을 엣지가 한 번에 묶어 준다(지표마다 WAN 왕복하지 않는다 — 루트 CLAUDE.md ‘작업 하나를 법인 쪽에’). GET 재시도 1 · 보관 없음.
+    중앙 정제 `sanitizeCompareSeries`: **아는 지표만**(`SERIES_COLS` · 이탈은 `BASELINE_METRICS`) · 수는 numOrNull · 상한(지표 24 · 스파크 120점) · 시각 clamp(수신 시각) · 이탈 사유 열거 밖은 `no-history`.
+  - **수집 건강은 봉투**(`collectHealth` — 노드 값 · 법인별 · 7일 시간 추이 200점): 정제는 화이트리스트(사유 code 열거 · 칸 열거 · 법인 64 · 사유 32 · 시각 clamp · 크기 `unread`/`error` 표지).
+    ⚠ **엣지 봉투의 byCorp 법인 이름은 그 엣지의 설정 법인 · 대상 법인과 맞는 것만** 행이 된다(봉투 문자열만으로 법인 행을 만들지 않는다 — 버린 수 `corpsDropped`).
+    ‘엣지 버전 낮음’ 판정은 **봉투에 필드가 있는가**(버전 숫자 비교 아님) · 보관분이 오래됐으면 `edge-stale`(중앙 STALE_MS) · 마지막 당김은 사유 원문 없이.
+  - **엣지의 ‘수집 건강’ 알림 발송 기록**(규칙 `collect` · key `__node__`)은 대상 목록 대조 대신 **중앙이 아는 엣지 이름으로** 이름 · 제목을 다시 세우고 법인은 공용('') — 엣지가 보낸 이름 · 법인 · 제목 문자열은 쓰지 않는다.
+  - **최소 엣지 버전 공용 함수**(`featureMinEdgeVersion(titleRe)`): 5단계(`perfOpsMinEdgeVersion` — 이제 이 함수의 포장)와 6단계(`stage6MinEdgeVersion` — 제목 ‘리눅스 통합 성능 모니터링 6단계’)가
+    같은 규칙(노트의 가장 낮은 번호 · 없으면 지금 package.json · 표지별 메모 · 폴백 0.0.0 은 메모하지 않음)을 쓴다 — 숫자를 코드에 박지 않는다. 5단계 대조 테스트 2개(`bmPerfMinEdgeVersion2929` · `bmUsageMinEdgeVersion2933`)가 그대로 통과한다.
+  - ⚠⚠ **엣지 pull 의 본문 판정(bodyOk)은 경로마다 명시한다**(6단계 반증 F2 — **3a · 5단계 정정 포함**): `pullFromEdge` 의 기본 판정은 봉투(`/bm-usage`)의 `{ok, node}` 모양이다.
+    node 가 없는 3a 추이 · 장치 · NIC(`TREND_BODY_OK` — v2.922 게시분부터) · 5단계 변경 · 베이스라인 · 구간 비교(`PERF_OPS_BODY_OK` — v2.929) · 6단계 비교 계열(`compareSeriesBodyOk`)은
+    **성공 응답이 전부 bad-body** 로 버려져 엣지 위임 서버의 추이 탭 · 5단계 변경/띠/비교 · 6단계 비교 계열 · 목표선이 운영에서 동작하지 않았다(‘응답 형식이 다릅니다’).
+    기존 테스트가 놓친 이유: 3a 는 pullBmTrend 를 의존성 주입으로 바꿔 끼워(가짜가 곧바로 `{ok:true, body}`) 실제 함수를 부르지 않았고, 5단계 · 6단계는 구버전(401 · 404) 경로만 불렀으며,
+    collector 경로를 직접 fetch 한 테스트는 중앙 pullFromEdge 를 거치지 않았다. 데모(mock) 엣지는 이 경로에 합성 응답이 없어 화면 판독도 닿지 않았다.
+    → **새 엣지 pull 경로는 `server/test/bmEdgeRoundTrip.test.js` 에 성공 왕복을 더한다**(실제 collector 라우터 + 실제 등록부 + 실제 pull 함수 → ok · 정제된 값 대조). 봉투 · 스냅샷 · 집중도 같은 파일이 왕복한다.
+  - **수집 건강 ‘엣지 버전 낮음’ 판정(반증 F3)**: 6단계 엣지는 첫 주기 전에도 봉투에 표지 `collectHealthVer`(정수 · 중앙 정제 1~99)를 싣는다 — 값 없음 + 표지 = ‘아직 주기 없음’ ·
+    표지도 없으면 엣지가 알린 버전을 최소 버전(릴리스 노트)과 대 보고(같거나 높으면 단정하지 않는다) 그래도 낮거나 모를 때만 ‘엣지 버전 낮음’. 재시작 직후 모든 엣지가 ‘업그레이드 필요’ 로 보이던 것을 막는다.
+    주기 오류는 열거 code 만 싣는다(`classify-failed` · `cycle-error` · `health-failed` · `no-targets` — 엣지 원문은 그 노드에만).
+  - 목표선의 엣지 서버 계열은 **3a 추이 대행을 그대로** 쓴다(`pullBmTrend` — 지표마다 1회 · 동시 2 · 최소 버전은 `TREND_MIN_EDGE_VERSION` 그대로: 새 필드가 없다). 운영 주석은 중앙 한 곳에 저장한다(엣지로 보내지 않는다).
+- ⚠⚠ **리눅스 성능 7a단계 로그 분석의 엣지 계약 — 엣지가 분류 · 집계 · 가림까지 하고 중앙은 집계 · 가린 표본만 받는다(원문은 법인 밖으로 나가지 않는다)**
+  (`bmusage/edgePull.js envelopeLogs` · `routes/collector.js GET /bm-usage/logs` · `central/{bmLogsPull,bmPerfSanitize,featureMinEdgeVersion}.js` · `dataflow/build.js`(경로 분류). 회귀 `server/test/bmLogs7aRoundTrip.test.js`):
+  - **봉투**: `logsVer`(표지 — 첫 주기 전에도 싣는다: 값 없음 ≠ 구버전 · 6단계 반증 F3) + `logSummary`(서버별 24시간 — 분류별 패턴/줄 · 읽은 줄 · 잘림 · 분류 안 됨 · 보안 high · 상위 8 패턴 · 출처 상태 · 대상 목록 안 서버만).
+    중앙 정제(`sanitizeLogSummary`): 아는 필드만 · **키는 같은 봉투의 대상 목록 안만** · 규칙 id 는 카탈로그(`LOG_RULE_IDS`)만 · 서명 꼴(16진 16자 · `#over:<분류>`) · 분류 · 심각도 · 출처 상태 열거 ·
+    문자열 수치 → 수(못 읽으면 null) · 제어문자 제거 · 길이 상한 · 시각 clamp · 버린 수는 `logSummaryDropped`.
+    봉투 크기: 상위 5 · 표본 160자 · 서명 120자로 싣고, 봉투 상한(`fitEnvelope`)을 넘으면 성능 상세를 줄인 뒤 로그 요약의 표본 · 서명 글자 → 상위 패턴 순으로 뺀다(분류별 개수 · 출처 상태는 남김 · `logsTruncated`).
+  - **상세 대행**: `GET /api/collector/bm-usage/logs?key=&range=`(같은 url · 같은 토큰 · 대상 밖 키 404 · 보관 없음) — 중앙 `pullEdgeLogs` 는 **`bodyOk: logViewBodyOk` 명시**(`{ok:true, patterns[], hourly[]}` —
+    기본 판정은 봉투 모양이라 성공이 전부 bad-body 가 된다 · 6단계 반증 F2) + `sanitizeLogView`(연계 표지도 꼴 검사). 실제 collector 라우터 ↔ 실제 pull 함수 성공 왕복 테스트가 고정한다.
+    ⚠⚠ **정제본은 로컬 응답의 모양을 다 가져야 한다**(7a 반증 F9 — 규칙 카탈로그 · 수집 구획 · 출처 권한 범위 · 근거가 빠져 엣지 위임 서버의 ‘규칙’ 표가 비었다): 규칙 카탈로그 · 근거 · 분류 이름은
+    **중앙 자기 것**(정적 — 엣지가 보낸 정규식 글자를 싣지 않는다 · `rulesFrom: 'central'`) · `method`(구획은 `LOG_SECTIONS` 안만 · 출처 · 식별자 · 앱 경로는 꼴 검사 · 주기 `intervalMs`) ·
+    출처 상태의 화면 칸(scope · partial · first · older · undated · skew · dup · authSkipped · uid · groups · svc …) · `security.totalsWhy` · `read.authSrc` · `corrSource`. 회귀는 **로컬 응답의 키 경로 ⊆ 대행 응답의 키 경로**
+    (실제 왕복 + 풍부한 응답의 정제)를 대조하고 화면이 쓰는 칸을 값으로 단언한다. 서명은 정제에서 `maskStoredTmpl` 로 다시 가린다.
+    봉투 요약 · 상세의 분류별 개수에는 읽기 범위(`cover` all|partial|none · `missing` — 출처 열거만)가 함께 실린다(못 읽은 분류는 개수 null) — 정제가 버리면 중앙 화면이 ‘모름’ 을 0 으로 그린다(테스트).
+  - **최소 엣지 버전**: `stage7aMinEdgeVersion`(`STAGE7A_TITLE_RE = /리눅스 통합 성능 모니터링 7a단계/` — 릴리스 노트 첫 게시 번호 · 없으면 지금 판 · 숫자를 박지 않는다) · 구버전(경로 없음 → 401/404) = old-version.
+    함대 표는 노드마다 상태(ok · old-version · no-cycle · none)를 말한다.
+- ⚠⚠ **v2.929 — 베어메탈 성능 5단계의 엣지 대행: 판정 · 발송 · 보관은 수집 노드(엣지), 중앙은 요약을 봉투로 받고 상세는 볼 때 당긴다**
+  (`routes/collector.js` `POST /bm-usage/focus` · `POST /bm-usage/focus/stop` · `GET /bm-usage/focus` · `GET /bm-usage/changes|baseline|compare` — tokenFirst · 본문 4kb · 자기 대상 목록 밖 키는 not-found ·
+  `central/bmPerfOpsPull.js` · `bmusage/edgePull.js`(봉투) · `central/bmPerfSanitize.js` · `dataflow/build.js` 분류. 회귀 `bmPerf2929Focus.test.js ⑥ · 구버전`):
+  - **봉투에는 요약만**: `focusSummary`(세션 요약 — 상세 표본 없음) · `perfAlertSent`(최근 24시간 발송 기록) · 행의 `health`(소모품 칸 code · since). 집중 표본 · 변경 이벤트 · 띠 · 비교는 화면이 볼 때 엣지에서 당긴다.
+    ⚠ 새 필드는 중앙 정제 화이트리스트에도(`bmPerfSanitize healthOf` · `sanitizeFocusSummary` · `sanitizeAlertSent` · `sanitizeChangesBody|BaselineBody|CompareBody` — 아는 필드 · enum · 상한 · 시각은 수신 시각으로 clamp).
+  - **POST 는 재전송 0**(retries 0 — 시작이 두 번 가면 세션이 두 개) · GET 은 1회 재시도. 업무 결과는 200 + code(중앙이 HTTP 로 옮긴다).
+  - **구버전 엣지 구분은 경로 존재**: 옛 엣지의 collector 라우터에 없는 경로는 사용자 인증 미들웨어로 떨어져 401(`missing401` — v2.736 edgePull 규약) 또는 404 → `old-version`. 문구에 적는 최소 버전은 **손으로 맞추는 상수가 아니다**(반증 F15 — 예정 번호 2.929.0 이 다른 기능의 게시 번호와 겹쳐 2.929~2.933 엣지에 거짓 안내가 될 뻔했다):
+    `central/bmPerfOpsPull.js perfOpsMinEdgeVersion()` 이 `server/src/release-notes.json` 에서 제목에 ‘리눅스 통합 성능 모니터링 5단계’ 가 든 가장 낮은 게시 번호를 읽어 메모한다(없으면 = 지금 package.json 번호).
+    대조 테스트 `server/test/bmPerfMinEdgeVersion2929.test.js`(main 의 bmUsageMinEdgeVersion2933 과 같은 꼴 — 노트가 있으면 같음 · 없으면 package.json 과 같음). 다른 세션이 계속 릴리스해 번호가 밀려도 코드 수정이 필요 없다.
+  - **알림 판정 · 발송은 엣지**(그 엣지의 규칙 파일 — 중앙에서 엣지로 배포하지 않는다: 다음 판). 엣지의 발송 기록 중 이슈 대상은 **중앙이 사용률을 당길 때**(`pullBmUsage` → `ingestEdgeAlertIssues`) 중앙 문지기가 만든다 —
+    중앙이 그 엣지를 당기지 않으면 이슈도 생기지 않는다(정직 기록). 같은 발송 건은 id(`<agent>:<id>`)로 한 번만.
+  - ⚠⚠ **엣지 봉투의 법인 · 서버 키 · 제목을 그대로 쓰지 않는다**(반증 F9 — 대상이 `TAG-A1@vcA` 하나뿐인 엣지가 `vcB` · 남의 키 · URL 섞인 제목으로 vcB 의 p1 이슈를 만들 수 있었다):
+    `centralizeEdgeSent` 가 ① 서버 키는 **같은 봉투의 그 엣지 대상 목록(snap.targets)** 에 있는 것만(밖이면 버리고 dropped 로 센다) ② 법인은 **중앙이 정한다** — 파트 장애 자동 등록과 같은 함수
+    `issues/autoCreate.js resolveIssueVcenter`(서비스 태그 → ESXi 호스트 vCenter · 아니면 대상이 말한 법인이 **그 엣지가 담당하는 vCenter 일 때만** · 아니면 담당이 하나일 때만 · 아니면 공용) ·
+    ③ 제목 · 이름은 중앙이 code 로(규칙 이름 + 대상 이름 — URL 제거 · 상한). 규칙 화면의 ‘알림 이력’ 범위도 이 중앙 법인으로 가른다(엣지 vcenterId 로 가르지 않는다). 회귀 Alerts F9(실제 sanitizeBmUsageSnap → ingest → 이슈 저장소).
+  - **이슈 중복 원천은 받은 발송 건**(반증 F2 · F3 · F12): 엣지 봉투는 24시간 기록을 매번 다시 싣는다 — 같은 묶음 안 같은 열쇠는 이슈 하나 + 댓글 · 이슈 출처에 그 열쇠로 받은 가장 늦은 시각(`lastAt` · 같은 ms 의 id `lastIds`)을 두어
+    밀려난 partKeys(64개 상한) id 가 ‘새 건’ 이 되지 않게 · 중복 판정은 **닫힌 이슈 포함**(같은 건으로 되살리지 않는다 — 닫힌 뒤 **새** 발생은 새 이슈: 다른 알람 · 파트 장애와 같은 ‘열린 이슈면 댓글’ 규약) ·
+    하루 상한은 **법인별**(F7 — 예전에는 전 법인 합계).
+
+- ⚠⚠ **리눅스 성능 7b단계 수집 경로(edge/central/auto) · 서버 등록 배포 — 경계는 지금 코드 그대로, 키는 법인 밖으로 나가지 않는다**
+  (`bmusage/onboard/{edgeDeploy,edgeApply}.js` · `routes/central.js GET /bm-onboard` · `agent/bmOnboardPull.js` · `central/featureMinEdgeVersion.js STAGE7B_TITLE_RE` ·
+  회귀 `server/test/bmOnboard7bEdge.test.js` — **엣지는 자식 프로세스**(자기 CONFIG_DIR · 자기 키 저장소)라 실제 centralRouter ↔ 실제 `pullBmOnboardNow` 성공 왕복):
+  - 경계: 중앙은 agent 없는(자기 등록부) 서버만 · 엣지는 자기 등록부 · 자기 agent 서버만(`resolveTargets` 그대로). 중앙에서 edge 로 등록하면 **중앙 등록부에서 그 서버를 빼고**
+    배포 목록(`bm-onboard-edge.json` — 비밀 없음 · 공통 계정 · 키는 **이름**)으로 옮긴다 → 같은 서버를 두 곳이 열지 않는다. 엣지 → 중앙 이동은 거부(edge-to-central) —
+    배포 목록에서 먼저 빼고(엣지가 반영한 뒤) 다시 올린다(두 곳이 여는 구간을 만들지 않게).
+  - auto = 그 법인 엣지(`edgeCorps.edgeCorpsSource` — ‘중앙에서 켜기’ 와 같은 매핑)가 **지금 접속 중**(`agentLastContact` 15분 안)일 때만 edge · 엣지가 없으면 central ·
+    **엣지가 있는데 끊겼거나 접속 기록을 모르면(중앙 재시작 직후) 판정 보류(거부)** — 엣지가 사라졌다고 central 로 정하지 않는다(원문이 법인 밖으로 나가는 결정은 사람이).
+  - 인출 `GET /api/central/bm-onboard` 은 **개별 토큰으로 인증된 이름에만** 행을 준다(공유 토큰 `?agent=` 는 distribute:false) · 본문 판정은 `onboardBodyOk`
+    (배포 판정 칸 · 서명 꼴 — 봉투 `{ok, node}` 판정이 아니다) · 손상이면 지속형 503(`settingsUnreadable`) · 엣지는 결과(적용 · 거부 · 지운 수)와 적용 서명을 **다음 인출의 쿼리 숫자**로만 알린다.
+  - 엣지는 받은 행을 `edgeRowFromPlan` 으로 다시 자르고 **같은 분석(analyzeOnboardRows · isEdge)** 을 거친다(배포 경로 정규화 — v2.933 규약) — 자기 법인(로컬 corps)만 ·
+    공통 계정 · 키는 **엣지 자기 저장소의 같은 이름** · 없으면 그 행 거부. 배포에서 빠진 서버는 **이 배포가 만든 항목만** 지운다(`bm-onboard-applied.json` · 손으로 둔 항목은 남는다).
+  - 중앙의 bm-storage 항목 중 키 · 공통 계정 인증 서버는 **엣지 df 위임 잡 · 엣지 PUSH 에 싣지 않는다**(개인키를 중앙 → 엣지로 보내지 않는다 · 빈 비밀번호로 계정을 잠그지 않게).
+  - 최소 엣지 버전 문구는 `stage7bMinEdgeVersion()`(릴리스 노트의 ‘리눅스 통합 성능 모니터링 7b단계’ 첫 번호 — 숫자를 박지 않는다).
+  - (r2 · 반증 F6~F9 · F14 · F17 · 감사 M-3 · L-9) 이동(중앙 → 엣지)은 **배포 목록을 먼저** 쓴다(실패면 중앙 항목 그대로 — 어디에도 없는 서버를 만들지 않는다).
+    배포에서 뺀 행은 **제거 대기**(`edgeDeploy pending`)로 남아 엣지가 지금 판 서명을 알릴 때까지(`settlePending`) 같은 서버의 central 등록을 거부한다 · 행이 0 이어도 엣지 요약을 남긴다.
+    엣지 적용은 **이 배포가 만든 항목 또는 자기 법인 귀속 항목만** 갱신(손으로 둔 항목은 이름이 같아도 거부) · 만든 항목은 적용 **전후 비교**로 기록(중간 실패 포함) ·
+    수집 법인(로컬 corps)이 비면 적용하지 않고 서명도 남기지 않는다 · 배포 행의 법인도 범위 대조(쓰기 밖 403 · 조회 밖은 숨은 겹침). 회귀 `bmOnboard7bReview` ⑤ ⑥.
+  - (r3 · R-N1) 배포 행에 **중앙 승인 `bindOk`**(엄격한 true — 소유자 + OTP 를 통과한 중앙 적용이 묶음 행에만 싣는다 · 묶음 칸이 그대로인 갱신만 앞 승인을 잇는다).
+    엣지 적용 문맥은 그 행의 bindOk 로만 '소유자' 다 — 승인 없는 행이 엣지 쪽 기존 항목의 공통 계정 · 키를 새 주소로 잇거나 새로 묶으면 엣지 분석이 `bind-owner-only` 로 거부하고,
+    등록부 choke point(`bindApproved`)도 같은 판정. bindOk 는 내용 비교(`edgeRowDiffers`)에서 빼지만 서명(`sigOf`)에는 들어간다. 회귀 `bmOnboard7bReview` ⑪ (h).
+
+- ⚠⚠ **리눅스 성능 8a단계 — 정비 창 배포(중앙 → 엣지) · 봉투 `maint` · `capacity` · 용량 상세 대행**
+  (`bmusage/maint/deploy.js` · `routes/central.js GET /bm-maint` · `agent/bmMaintPull.js` · `central/bmMaintCapSanitize.js` · `central/bmCapacityPull.js` · `routes/collector.js /bm-usage/capacity` ·
+  `central/featureMinEdgeVersion.js STAGE8A_TITLE_RE` · 회귀 `bmMaint8aEdge`(엣지 = 자식 프로세스 · 실제 centralRouter ↔ 실제 `pullBmMaintNow`) · `bmCapacity8aRoute`(실제 collector ↔ 실제 `pullEdgeCapacity`)):
+  - 배포는 15차 · 7b 경로와 같은 꼴: 엣지 주기 인출(기본 10분 · `AGENT_BM_MAINT_PULL_MS`) · **개별 토큰으로 인증된 이름에만** · 결과(적용 서명)는 다음 인출의 쿼리 · 0건이어도 `_last` · edgelog spec 등재.
+  - 엣지는 **자기 법인 창만** 받는다 — 법인 = ‘중앙에서 켜기’ 매핑(`edgeCorpsSource`) ∪ 그 엣지 봉투 대상의 법인 · 진행 중 · 예정 창만 · 이력 없음. **태그 창은 중앙이 그 엣지 대상 중 그 태그(수동 용도 태그)를 가진 서버 키로 펼친다**
+    (엣지에는 중앙 태그가 없다 — 엣지 판정 = 중앙 판정을 테스트가 대조).
+  - 엣지는 받은 창을 **같은 `normalizeWindow`** 로 다시 자르고(형식 밖은 버리고 센다) `maintenance-windows-deployed.json` 에 둔다. distribute:false · 404 · 503 · 실패면 **바꾸지 않는다** —
+    대신 받은 지 24시간(`DEPLOY_TTL_MS`)이 지나면 판정에 넣지 않는다(중앙이 지운 창이 끊긴 엣지에서 계속 억제하지 않게 — 억제 시한).
+  - 봉투: `maintVer` · `capacityVer` 표지(계산 전에도 — 값 없음 ≠ 구버전) · `maint`(배포본 상태 · 창별 억제 계수 · 창 끝 뒤 억제 점검) · `capacity`(하루 계산 행 — 대상 키만 · 봉투 상한이면 예측 · 도달 행만 `truncated`).
+    중앙 정제(`bmMaintCapSanitize.js`): 아는 필드만 · 창 id 꼴 · 서명 16진 32 · 열거(종류 · 상태 · 사유 · 신뢰)는 서버 상수(`CAP_*`) · 문자열 수치는 수로 · **키는 같은 봉투 대상만** · 시각 clamp.
+    중앙은 엣지 계수로 억제를 판정하지 않는다(표시 · 합산만).
+  - 용량 상세 대행은 `pullFromEdge` 에 **`bodyOk: capacityBodyOk` 명시**(봉투 모양이 아니다 — 6단계 F2) · 구버전(401/404)은 old-version · 최소 버전 문구는 `stage8aMinEdgeVersion()`(숫자를 박지 않는다).
+  - ⚠⚠ **8a 반증 뒤**(회귀 `bmMaint8aFixEdge` — IP 키가 겹치는 두 법인 엣지 · 실제 central 라우트 + 실제 엣지 인출 · `bmMaint8aFix`):
+    서버 창도 **그 법인 엣지에만** 보낸다(F1 — 예전 ‘키가 그 엣지 대상에 있으면’ 분기가 다른 법인 엣지로 창을 보내 그 법인 서버의 알림 · 수집을 끊었다 · 엣지 판정도 법인을 본다) ·
+    엣지의 배포 태그 창은 **펼친 keys 만**으로 맞춘다(F10 — 엣지 로컬 수동 태그로 넓히지 않는다) · 배포본 받은 시각이 5분 넘게 미래면 **지금으로 자르고 파일에 남긴다**(F7 — 엣지 시계가 앞서 있다 바로잡히면
+    24h 시한이 92일 재확인 만료까지 늘던 일 · 원래 값은 `atClampedFrom`) · 배포 현황은 창 상태를 **요청마다 한 번** 세고 엣지마다 다시 쓴다(F6 — 엣지 28곳마다 전 창을 다시 세던 것).
+    봉투 `capacity` 는 행 상한 내역 `cap`(서버 수 · 계산 안 한 서버 · 마운트 일부만 서버 · 뺀 마운트 수 — 수만) · 행의 `lastDay · staleDays · stale` 을 싣고 중앙 정제 화이트리스트에도 넣었다.
+- ⚠⚠ **리눅스 성능 8b단계 — 프로세스 Top-N 엣지 대행(`/api/collector/bm-usage/top` · `/top/band`) · 봉투 `topVer` · `idleVer` · `idle`**
+  - 대행: 같은 url · 같은 토큰(`pullFromEdge`) · **bodyOk 명시**(`topPointBodyOk` · `topBandBodyOk` — 봉투 모양 `{ok,node}` 는 본문이 아니다) · 실제 collector 라우터 ↔ 실제 `pullEdgeTop` · `pullEdgeTopBand` 성공 왕복 시험(`bmTop8bRoute`) ·
+    대상 밖 키는 엣지가 404 · 보관 없음(프로세스 표는 법인 밖에 쌓지 않는다 — 볼 때 당긴다).
+  - 정제(`central/bmTopPull.js`): **comm · user 는 엣지(그리고 그 서버의 비특권 사용자)가 정한 문자열** — 길이를 먼저 자르고 제어 · 양방향 · 폭 없는 문자를 바꾼다(`cleanComm` · `cleanUser` — 선형) ·
+    상태는 한 글자 · 수는 numOrNull · 종류당 5행 · 띠 comm 은 목록 안 것만 · 엣지가 준 프로파일 단서(hint)는 버리고 중앙이 `procHint` 로 다시 붙인다 · 엣지 시각은 수신 시각으로 자른다.
+  - 봉투: `topVer` · `idleVer` 표지는 계산 전에도 싣는다(값 없음 ≠ 구버전) · `idle` 행은 같은 봉투의 대상 키만 · 상태 · 제외 사유 · 뺀 지표는 열거 밖이면 버린다 · 점수 0~100 정수 · 등급 0/0.5/1 ·
+    이름 · 법인은 행이 아니라 대상 목록에서(`central/bmIdleSanitize.js`) · 봉투 상한에서는 용량 예측 다음으로 ‘사용 중’ 행을 빼고 수만(`idle.truncated: 'non-active-only'`).
+  - 최소 엣지 버전: `featureMinEdgeVersion.stage8bMinEdgeVersion`(표지 `STAGE8B_TITLE_RE = /리눅스 통합 성능 모니터링 8b단계/` — 숫자를 박지 않는다 · 노트에 없으면 지금 판).
+  - 반증 F8: 대행 실패 응답의 `minEdgeVersion` 은 **kind === 'old-version' 일 때만**(시한 · 연결 실패 · 대상 아님 404 에 버전 요구를 붙여 원인을 단정하지 않는다 — 웹도 같은 조건) · 반증 F3: 점 본문 `reason: 'base-missing'` · 띠 `baseMissing` 은 정제를 통과한다(‘못 읽음’ 을 ‘없음’ 으로 바꾸지 않게).
+  - 변경 이벤트 kind 에 `idle`(저활용 후보 진입/이탈)을 더했다 — 중앙 대행 정제(`bmPerfOpsPull.js CHANGE_KINDS`)에도 같은 값(둘을 같이 고칠 것).
+- ⚠⚠ **다음 점검 ②③ — 봉투 `powerCapVer` · `powerCaps`(서버별 PowerCap) · 엣지 전력 알림 발송 기록(규칙 rack · inlet · surge · powerCap)**
+  (`bmusage/edgePull.js envelopePowerCaps` · `central/bmPowerCapSanitize.js` · `central/bmPerfOpsPull.js centralizeEdgeSent` · 회귀 `server/test/bmPowerAlerts.test.js` ⑥ ⑥-2 ⑦ — 실제 collector 라우터 ↔ 실제 `pullBmUsage` 성공 왕복):
+  - 봉투: 표지 `powerCapVer` 는 값이 없어도 싣는다(값 없음 ≠ 구버전) · `powerCaps` 는 같은 봉투 대상 키 · iDRAC 인벤토리 캐시만(**장비 왕복 0** — 새 Redfish 호출 없음) · PowerLimit 미보고 · 인벤토리 없음은 싣지 않는다.
+    새 당기기 경로는 없다(기존 `/api/collector/bm-usage` — bodyOk 그대로).
+  - 정제: 아는 필드 4개 · 대상 키만 · 중복 첫 것 · limitWatts 수(1~100,000 W 밖 null) · enabled 불리언만(값 없는 true 는 null) · at 은 수신 시각으로 자르고 원본 `atRaw` · 뺀 수 `powerCapsDropped`.
+    중앙 보기는 at 이 2시간 넘으면 ‘낡음’(값을 쓰지 않는다 — 로컬 인벤토리와 같은 기준). **‘엣지 버전 낮음’ 은 표지가 없을 때만**(응답 `capOldEdge` · `capMinEdgeVersion` — 표지 `POWER_ALERT_TITLE_RE`
+    = `/베어메탈 사용률 — 전력 알림 규칙 · 엣지 PowerCap/` 의 릴리스 노트 첫 번호 · 노트에 없으면 지금 판 — 게이트 아님).
+  - 발송 기록: 중앙 정제의 규칙 열거는 `perfRules.RULE_IDS` 하나(⚠ 정정 — 손 목록에 8a capacity 가 빠져 ‘use’ 로 바뀌었다) · 랙 기록(키 `rack:<법인>|<랙>`)은 대상 목록과 대지 않고
+    랙 이름 형식만 받으며 **법인은 중앙이 정해**(엣지 주장 ∩ 그 엣지 담당) 키 · 이름 · 제목을 다시 만든다 — 엣지가 다른 법인 이름을 키에 넣어 그 법인 이력에 끼워 넣지 못한다.
+  - 반증 n2 F4: 중앙 · 엣지 사이 판정 분담은 `bmusage/powerJudge.js judgeOf` 하나 — 대상 노드와 전력 원천 노드가 같을 때만 판정 · 중앙은 **법인을 엣지가 맡으면** 자기 대상이어도 판정하지 않는다
+    (`edgeCorps.corpOwnerSource` · 같은 서버가 두 iDRAC 등록부에 있을 때의 이중 알림 S1 방지) · 중앙 전력 보기가 같은 함수로 ‘알림 판정 없음 + 사유’ 를 보인다.
+- **`routes/central.js` 는 v2.954 에 영역별 파일로 나뉘었다(개선 검토 4번 · 사용자 선택 '동작 그대로 영역별 파일 이동')** — `routes/central/{storageRoutes,pduSanRoutes,cvpIsiduRoutes,opsRoutes}.js`.
+  - 등록은 central.js 의 **원래 자리**에서 `register*(centralRouter, { 공용 판정 })` 로 한다(라우트 순서 · 미들웨어 · 응답 불변 — 분할 때 centralRouter.stack 69칸을 경로 · 메서드 · 순서로, 라우트 본문 · 옮긴 선언은 acorn 원문 비교로 분할 전과 대조해 0 차이. ⚠ 정정: 처음에는 '핸들러 본문 해시' 로 대조했다고 적었으나 wrapAsyncRouter 래퍼 때문에 해시가 전부 같아 본문은 대조되지 않았다 — 반증이 잡았다).
+  - 영역 파일은 **central.js 를 import 하지 않는다**(순환 — archScan `IMPORT_CYCLE_MAX` 가 막는다). 공용 판정(requireCentral · 503 응답 · strAgent 등)은 인자로 받는다.
+  - 경로 문자열을 받아 동적 import 하는 공용 함수(`onlyDelegated`)는 **routes/ 기준**으로 푼다 — 분할 직후 이것이 영역 파일 기준으로 풀려 미위임 필터가 500 이었다(기계 대조는 핸들러 본문만 봐서 못 잡았고 기존 수신 테스트가 잡았다).
+  - 'central 라우트 소스에 X 가 있다' 스윕은 `test/_centralSource.js centralSource()`(central.js + 영역 파일, 등록 순서)로 읽는다 · 새 영역 파일은 `CENTRAL_PARTS` 에도 넣는다(`centralSplit2954` 가 대조).
+  - 아이실론 엣지 상태 push 에 `poller.lastRuns`(대상별 마지막 실행 방식 — detached · attached-fallback · attached)가 더해졌다(v2.954 개선 검토 3번 — 법인별 실환경 확인 '아이실론 분리 실행' 근거). 중앙 정제 `sanitizeIsiduStatus` 가 아는 실행 방식만 · 20개 · 사유 200자.

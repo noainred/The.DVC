@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -149,7 +150,7 @@ test('EDGE2-02 — 방금 보고한 엣지는 상한 퇴출에서 밀려나지 �
 
 /* ── EDGE2-03·04 ── */
 test('EDGE2-03 — ip-scan-result 는 병합한 개수만 보고한다 · EDGE2-04 진행 보고 실패를 남긴다', () => {
-  const c = read('routes/central.js');
+  const c = centralSource();
   assert.match(c, /merged: validAlive\.length/);
   assert.match(c, /alive: validAlive\.length/);
   const w = read('agent/idracScanWorker.js');

@@ -18,6 +18,21 @@ export async function memoJson(req, res, name, compute, { ttlMs = 12_000, extraK
     const snap = store.get();
     const key = `${snap.generatedAt}|${req.originalUrl}|${extraKey}`;
     const payload = await snapMemo(name, key, ttlMs, async () => compute(snap));
+    // v2.919: 계산 결과가 `__status`(정수, 200 이 아님)를 가지면 그 상태 코드로 본문만 보낸다(sendCached 의 캐시 헤더·304 경로를 타지 않는다) — 단건 404(존재 은닉)·400 을
+    //   캐시된 경로에서도 지키기 위해서다. 열쇠에 범위 서명이 들어가므로 범위가 다른 사용자끼리 404 를 공유하지 않는다.
+    if (payload && typeof payload === 'object' && Number.isInteger(payload.__status) && payload.__status !== 200) {
+      const { __status: code, ...body } = payload;
+      res.status(code).json(body);
+      return;
+    }
+    // v2.932(점검 E1-08): `__noStore` 가 붙은 결과(예: 엣지 대행 실패)는 ETag·304 없이 no-store 로 보낸다 — ETag 가 열쇠 해시라
+    //   실패 본문에 붙은 ETag 가 같은 열쇠의 다음 성공 응답을 304 로 가리지 않게. 서버 쪽 짧은 memo(ttl)는 그대로다(엣지를 두드리지 않게).
+    if (payload && typeof payload === 'object' && payload.__noStore === true) {
+      const { __noStore: _n, ...body } = payload;
+      res.set('Cache-Control', 'no-store');
+      res.json(body);
+      return;
+    }
     sendCached(req, res, key, payload);
   } catch (e) {
     // async 경로라 Express가 sync throw처럼 자동 처리하지 못한다 — 직접 500으로 응답(클라 hang 방지).

@@ -26,6 +26,7 @@ const DAY_OPTS = [7, 30, 90, 365];
 const SEARCH_DEBOUNCE_MS = 300;
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
+import { KPI_HANDOFF, takeKpiVcenter } from '../platform/platformText.js'; // v2.959: 가상화 플랫폼 KPI 카드가 넘긴 법인
 const slotLabel = (slot) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(00|12)$/.exec(String(slot || ''));
   return m ? `${Number(m[2])}/${Number(m[3])} ${m[4]}시` : String(slot || '');
@@ -34,7 +35,8 @@ const pctColor = (p) => (p >= 90 ? 'var(--red)' : p >= 75 ? 'var(--amber)' : 'va
 
 export default function StorageTrackTool() {
   const [days, setDays] = useState(30);
-  const [vcenterId, setVcenterId] = useState('');
+  // v2.959: 가상화 플랫폼 KPI 카드에서 왔으면 고른 법인(vCenter)을 초기 선택으로(메모리 인계 · 마운트 때 1회 · 없으면 전체).
+  const [vcenterId, setVcenterId] = useState(() => takeKpiVcenter(KPI_HANDOFF.storageTrack));
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);

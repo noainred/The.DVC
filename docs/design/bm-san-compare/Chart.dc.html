@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>SAN 비교 — 장비별 디스크 성능 차트(평균 · 피크 · 실시간 · 트렌드)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.num{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 11px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:rgba(59,130,246,.22);color:#93c5fd;font-weight:700}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.bm{background:rgba(52,224,180,.14);color:#5eead4}
+.tag.pmax{background:rgba(59,130,246,.16);color:#93c5fd}
+.tag.vmax{background:rgba(168,85,247,.16);color:#d8b4fe}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.shell{display:flex;min-height:1700px}
+.side{width:236px;flex:none;background:#0f1626;border-right:1px solid #1f2a40;opacity:.45;padding:18px 16px;display:flex;flex-direction:column;gap:14px;font-size:13px;color:#8b9bb4}
+.side .on{color:#e6edf6;font-weight:700}
+.top{height:44px;background:rgba(12,17,30,.9);border-bottom:1px solid #1f2a40;opacity:.45}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.content{padding:14px 24px 32px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.crumb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:#8b9bb4}
+.crumb b{color:#e6edf6}
+.subtabs{display:flex;align-items:flex-end;gap:4px;border-bottom:1px solid #243049}
+.subtab{height:36px;padding:0 14px;border:0;border-bottom:2px solid transparent;background:transparent;color:#8b9bb4;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.subtab.on{color:#e6edf6;border-bottom-color:#34e0b4}
+.lbl{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.16em;color:#8b9bb4}
+.lbl::first-letter{color:#34e0b4}
+.sech{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 14px;margin-bottom:10px}
+.sech .hint{font-size:11.5px;color:#8b9bb4}
+.ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
+.cname{font-size:12px;color:#8b9bb4;white-space:nowrap}
+/* 장비 선택 칩(범례 겸) */
+.pick{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pk{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:14px;border:1px solid #243049;background:#0f1626;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.pk.on{color:#e6edf6;border-color:#3b82f6;background:rgba(59,130,246,.12)}
+.pk .ln{width:16px;height:0;border-top:3px solid;border-radius:2px}
+.pk .ln.dash{border-top-style:dashed}
+/* 막대 비교 */
+.bars{display:grid;grid-template-columns:210px 92px minmax(200px,1fr) 150px;gap:8px 12px;align-items:center;font-size:12.5px}
+.bars .h{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;color:#8b9bb4;letter-spacing:.04em;padding-bottom:6px;border-bottom:1px solid #243049}
+.nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nm small{display:block;font-weight:400;color:#8b9bb4;font-size:11px}
+.track{position:relative;height:16px;border-radius:4px;background:#1f2a40}
+.track .avg{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+.track .peak{position:absolute;top:-3px;bottom:-3px;width:3px;border-radius:2px;background:#fbbf24}
+.track .peakline{position:absolute;top:50%;height:2px;margin-top:-1px;background:rgba(251,191,36,.35)}
+.val{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;text-align:right;white-space:nowrap}
+.val small{display:block;color:#fbbf24;font-size:11px}
+/* 추이 */
+.chartbox{position:relative;border:1px solid #1f2a40;border-radius:12px;background:#0f1626;padding:12px 14px 8px}
+.axis{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;fill:#8b9bb4}
+.gridl{stroke:#1f2a40;stroke-width:1}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:#8b9bb4;margin-top:8px;align-items:center}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:16px;border-top:3px solid;border-radius:2px}
+.legend i.dash{border-top-style:dashed}
+.foot{font-size:11.5px;color:#8b9bb4;margin-top:10px;line-height:1.6}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;min-width:0}
+.basis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;font-size:12.5px;line-height:1.6}
+.basis b{color:#e6edf6}
+.basis .k{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;color:#34e0b4;letter-spacing:.08em;display:block;margin-bottom:2px}
+.tip{position:absolute;right:14px;top:14px;border:1px solid #243049;border-radius:10px;background:#141b2d;padding:8px 10px;font-size:11.5px;line-height:1.5;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+.tip b{font-family:"JetBrains Mono",ui-monospace,monospace;color:#e6edf6}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#34e0b4}
+.live i{width:8px;height:8px;border-radius:50%;background:#34e0b4;box-shadow:0 0 0 4px rgba(52,224,180,.15)}
+</style>
+</helmet>
+<div class="shell">
+  <aside class="side" aria-hidden="true">
+    <div style="font-weight:800;color:#e6edf6">The Davinci</div>
+    <div>개요</div><div>vCenter</div><div>가상화 서버</div><div>스토리지</div><div class="on">특수 기능</div><div>설정</div>
+  </aside>
+  <div class="main">
+    <div class="top" aria-hidden="true"></div>
+    <div class="content">
+      <div class="crumb"><span>특수 기능</span><span>›</span><b>베어메탈 스토리지</b><span>›</span><span>SAN 비교</span><span class="mono muted" style="margin-left:auto">① 의 ‘한눈에’ 와 ‘서버별 디스크 I/O’ 사이에 들어가는 구역</span></div>
+      <div class="subtabs">
+        <button class="subtab" type="button">현황</button>
+        <button class="subtab on" type="button">SAN 비교</button>
+      </div>
+
+      <!-- 구역 1 — 장비별 평균 · 피크 막대 비교 -->
+      <div class="card" style="padding:18px 22px">
+        <div class="sech">
+          <div class="lbl">▸ 장비별 디스크 성능 <span style="letter-spacing:0;color:#8b9bb4">· 평균(막대) · 피크(노란 표지) · 평균 높은 순 · 11대</span></div>
+          <div class="ctl">
+            <span class="cname">범위</span>
+            <div class="seg"><button type="button">실시간 1시간</button><button class="on" type="button">24시간</button><button type="button">7일</button><button type="button">30일</button></div>
+            <span class="cname">지표</span>
+            <div class="seg"><button class="on" type="button">읽기+쓰기</button><button type="button">읽기</button><button type="button">쓰기</button></div>
+            <span class="cname">대상</span>
+            <div class="seg"><button class="on" type="button">서버 · 어레이</button><button type="button">그룹 · 어레이</button></div>
+            <button class="btn" type="button">CSV</button>
+          </div>
+        </div>
+        <div class="bars">
+          <div class="h">장비</div><div class="h">구분</div><div class="h">평균 ■ · 피크 ▌ (표 최댓값 2.40 GB/s = 100%)</div><div class="h" style="text-align:right">평균 · 피크</div>
+
+          <div class="nm">PMAX-2500-KR1<small>서울 · 포트 8 · 5분 표본 288개</small></div><span class="tag pmax">PowerMax</span>
+          <div class="track"><span class="peakline" style="left:0;width:100%"></span><span class="avg" style="width:42.9%;background:#3b82f6"></span><span class="peak" style="left:100%"></span></div>
+          <div class="val">1.03 GB/s<small>피크 2.40 GB/s</small></div>
+
+          <div class="nm">VMAX-250F-FRA1<small>프랑크푸르트 · 포트 4 · 5분 표본 288개</small></div><span class="tag vmax">VMAX</span>
+          <div class="track"><span class="peakline" style="left:0;width:50%"></span><span class="avg" style="width:25.5%;background:#3b82f6"></span><span class="peak" style="left:50%"></span></div>
+          <div class="val">612 MB/s<small>피크 1.20 GB/s</small></div>
+
+          <div class="nm">PMAX-8000-US1<small>미국 동부 · 포트 16 · 5분 표본 288개</small></div><span class="tag pmax">PowerMax</span>
+          <div class="track"><span class="peakline" style="left:0;width:26.7%"></span><span class="avg" style="width:8.3%;background:#3b82f6"></span><span class="peak" style="left:26.7%"></span></div>
+          <div class="val">198 MB/s<small>피크 640 MB/s</small></div>
+
+          <div class="nm">oradb-prod-01<small>DB · 서울 · 1분 표본 1,440개(카운터 평균)</small></div><span class="tag bm">베어메탈</span>
+          <div class="track"><span class="peakline" style="left:0;width:17.5%"></span><span class="avg" style="width:4.3%;background:#34e0b4"></span><span class="peak" style="left:17.5%"></span></div>
+          <div class="val">104 MB/s<small>피크 420 MB/s</small></div>
+
+          <div class="nm">backup-media-01<small>백업 · 1분 표본 1,440개</small></div><span class="tag bm">베어메탈</span>
+          <div class="track"><span class="peakline" style="left:0;width:13.3%"></span><span class="avg" style="width:3.5%;background:#34e0b4"></span><span class="peak" style="left:13.3%"></span></div>
+          <div class="val">84 MB/s<small>피크 320 MB/s</small></div>
+
+          <div class="nm">oradb-prod-02<small>DB · 프랑크푸르트 · 1분 표본 1,440개</small></div><span class="tag bm">베어메탈</span>
+          <div class="track"><span class="peakline" style="left:0;width:8.8%"></span><span class="avg" style="width:2.2%;background:#34e0b4"></span><span class="peak" style="left:8.8%"></span></div>
+          <div class="val">53 MB/s<small>피크 210 MB/s</small></div>
+
+          <div class="nm">ai-train-01<small>AI · 서울 · 1분 표본 1,440개</small></div><span class="tag bm">베어메탈</span>
+          <div class="track"><span class="peakline" style="left:0;width:11.3%"></span><span class="avg" style="width:2%;background:#34e0b4"></span><span class="peak" style="left:11.3%"></span></div>
+          <div class="val">48 MB/s<small>피크 270 MB/s</small></div>
+
+          <div class="nm">hpc-node-01<small>HPC · 서울 · 1분 표본 1,440개</small></div><span class="tag bm">베어메탈</span>
+          <div class="track"><span class="peakline" style="left:0;width:6.3%"></span><span class="avg" style="width:1.8%;background:#34e0b4"></span><span class="peak" style="left:6.3%"></span></div>
+          <div class="val">44 MB/s<small>피크 150 MB/s</small></div>
+
+          <div class="nm">hpc-node-02<small>HPC · 1분 표본 1,440개</small></div><span class="tag bm">베어메탈</span>
+          <div class="track"><span class="peakline" style="left:0;width:5.8%"></span><span class="avg" style="width:1.7%;background:#34e0b4"></span><span class="peak" style="left:5.8%"></span></div>
+          <div class="val">41 MB/s<small>피크 140 MB/s</small></div>
+
+          <div class="nm">VMAX-100K-PL1<small>폴란드 · 시리얼 미대조</small></div><span class="tag vmax">VMAX</span>
+          <div class="track"></div>
+          <div class="val muted">—<small style="color:#fbbf24">전송 측정 없음</small></div>
+
+          <div class="nm">hpc-node-03<small>HPC · 서울 · 엣지 구버전 — I/O 없음</small></div><span class="tag bm">베어메탈</span>
+          <div class="track"></div>
+          <div class="val muted">—<small style="color:#fbbf24">측정 불가</small></div>
+        </div>
+        <div class="foot">… backup-media-02 · log-archive-01 · ai-train-02 (3행 더 — 평균 낮은 순으로 접힘). <b style="color:#e6edf6">평균</b>의 뜻: 베어메탈은 <b style="color:#e6edf6">카운터 차분 평균</b>(수집 사이 전체 구간의 진짜 평균 — /proc/diskstats 누적값 차이 ÷ 시간), SAN 은 <b style="color:#e6edf6">5분 표본의 평균</b>(portperfshow 순간값). <b style="color:#e6edf6">피크</b>는 양쪽 다 <b style="color:#e6edf6">표본 중 최댓값</b>이라 실제 순간 피크의 하한입니다(베어메탈 2초 표본 · SAN 5분 표본).</div>
+      </div>
+
+      <!-- 구역 2 — 추이(실시간 · 트렌드) -->
+      <div class="card" style="padding:18px 22px">
+        <div class="sech">
+          <div class="lbl">▸ 추이 <span style="letter-spacing:0;color:#8b9bb4">· 실선 = 평균 · 점선 = 피크 · 고른 장비 4 (최대 8)</span></div>
+          <div class="ctl">
+            <span class="live"><i></i>실시간 1시간 · 30초마다 갱신 · 베어메탈 점 1분 · SAN 점 5분</span>
+            <div class="seg"><button class="on" type="button">실시간 1시간</button><button type="button">24시간</button><button type="button">7일</button><button type="button">30일</button></div>
+            <button class="btn" type="button">◀ 이전</button><button class="btn" type="button">최신</button>
+          </div>
+        </div>
+        <div class="pick" style="margin-bottom:10px">
+          <span class="cname">장비</span>
+          <button class="pk on" type="button" aria-pressed="true"><span class="ln" style="border-color:#34e0b4"></span>베어메탈 전체(9대 합)</button>
+          <button class="pk on" type="button" aria-pressed="true"><span class="ln" style="border-color:#3b82f6"></span>SAN 전체(3대 합)</button>
+          <button class="pk on" type="button" aria-pressed="true"><span class="ln" style="border-color:#5eead4"></span>oradb-prod-01</button>
+          <button class="pk on" type="button" aria-pressed="true"><span class="ln" style="border-color:#93c5fd"></span>PMAX-2500-KR1</button>
+          <button class="pk" type="button" aria-pressed="false"><span class="ln" style="border-color:#8b9bb4"></span>VMAX-250F-FRA1</button>
+          <button class="pk" type="button" aria-pressed="false"><span class="ln" style="border-color:#8b9bb4"></span>backup-media-01</button>
+          <button class="pk" type="button" aria-pressed="false"><span class="ln" style="border-color:#8b9bb4"></span>PMAX-8000-US1</button>
+          <button class="pk" type="button" aria-pressed="false">+ 7대 더…</button>
+          <span class="muted" style="font-size:11.5px;margin-left:auto">막대 비교의 장비 이름을 눌러도 추이에 더해집니다</span>
+        </div>
+        <div class="chartbox">
+          <svg viewBox="0 0 1100 300" width="100%" height="300" role="img" aria-label="최근 1시간 평균(실선)과 피크(점선) 추이 — 베어메탈 전체 · SAN 전체 · oradb-prod-01 · PMAX-2500-KR1">
+            <line class="gridl" x1="60" y1="20" x2="1080" y2="20"></line><text class="axis" x="54" y="24" text-anchor="end">3 GB/s</text>
+            <line class="gridl" x1="60" y1="85" x2="1080" y2="85"></line><text class="axis" x="54" y="89" text-anchor="end">2 GB/s</text>
+            <line class="gridl" x1="60" y1="150" x2="1080" y2="150"></line><text class="axis" x="54" y="154" text-anchor="end">1 GB/s</text>
+            <line class="gridl" x1="60" y1="215" x2="1080" y2="215"></line><text class="axis" x="54" y="219" text-anchor="end">500 MB</text>
+            <line class="gridl" x1="60" y1="260" x2="1080" y2="260"></line><text class="axis" x="54" y="264" text-anchor="end">0</text>
+            <text class="axis" x="60" y="284">15:35</text><text class="axis" x="315" y="284">15:50</text><text class="axis" x="570" y="284">16:05</text><text class="axis" x="825" y="284">16:20</text><text class="axis" x="1080" y="284" text-anchor="end">16:35</text>
+            <!-- SAN 전체 — 피크(점선) · 평균(실선) · 점 5분 -->
+            <polyline fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4 4" opacity=".8" points="60,70 145,62 230,78 315,55 400,66 485,48 570,72 655,60 740,44 825,58 910,50 995,64 1080,56"></polyline>
+            <polyline fill="none" stroke="#3b82f6" stroke-width="2.5" points="60,140 145,136 230,146 315,128 400,133 485,118 570,138 655,131 740,122 825,129 910,125 995,134 1080,130"></polyline>
+            <!-- PMAX-2500-KR1 — 피크 · 평균 -->
+            <polyline fill="none" stroke="#93c5fd" stroke-width="1.5" stroke-dasharray="4 4" opacity=".8" points="60,110 145,104 230,118 315,98 400,106 485,92 570,112 655,101 740,90 825,100 910,95 995,106 1080,99"></polyline>
+            <polyline fill="none" stroke="#93c5fd" stroke-width="2.5" points="60,176 145,172 230,180 315,166 400,170 485,160 570,178 655,171 740,164 825,169 910,166 995,173 1080,169"></polyline>
+            <!-- 베어메탈 전체 — 피크 · 평균 · 점 1분 -->
+            <polyline fill="none" stroke="#34e0b4" stroke-width="1.5" stroke-dasharray="4 4" opacity=".8" points="60,214 77,206 94,218 111,200 128,210 145,188 162,204 179,196 196,212 213,190 230,206 247,196 264,214 281,182 298,200 315,208 332,194 349,186 366,210 383,198 400,176 417,194 434,206 451,190 468,202 485,172 502,196 519,208 536,186 553,200 570,170 587,192 604,204 621,182 638,198 655,166 672,190 689,202 706,180 723,196 740,160 757,186 774,200 791,176 808,192 825,158 842,184 859,198 876,172 893,190 910,156 927,180 944,196 961,170 978,186 995,154 1012,178 1029,194 1046,168 1063,184 1080,150"></polyline>
+            <polyline fill="none" stroke="#34e0b4" stroke-width="2.5" points="60,232 77,230 94,233 111,229 128,231 145,226 162,229 179,228 196,231 213,226 230,229 247,227 264,231 281,224 298,228 315,229 332,226 349,224 366,229 383,227 400,222 417,226 434,229 451,225 468,227 485,220 502,225 519,228 536,223 553,226 570,218 587,224 604,227 621,221 638,225 655,216 672,223 689,226 706,219 723,224 740,214 757,221 774,225 791,218 808,223 825,212 842,220 859,224 876,216 893,222 910,210 927,219 944,223 961,214 978,221 995,208 1012,217 1029,222 1046,212 1063,219 1080,206"></polyline>
+            <!-- oradb-prod-01 — 피크 · 평균 -->
+            <polyline fill="none" stroke="#5eead4" stroke-width="1.5" stroke-dasharray="4 4" opacity=".8" points="60,246 94,240 128,248 162,236 196,244 230,228 264,242 298,238 332,246 366,224 400,240 434,236 468,246 502,218 536,238 570,244 604,232 638,226 672,244 706,236 740,212 774,234 808,242 842,228 876,238 910,208 944,232 978,242 1012,224 1046,236 1080,204"></polyline>
+            <polyline fill="none" stroke="#5eead4" stroke-width="2.5" points="60,252 94,251 128,253 162,250 196,252 230,248 264,251 298,250 332,252 366,247 400,250 434,249 468,252 502,245 536,250 570,251 604,248 638,247 672,251 706,249 740,244 774,249 808,251 842,247 876,250 910,243 944,248 978,251 1012,246 1046,249 1080,242"></polyline>
+            <!-- 커서 -->
+            <line x1="910" y1="20" x2="910" y2="260" stroke="#e6edf6" stroke-width="1" opacity=".35" stroke-dasharray="2 3"></line>
+          </svg>
+          <div class="tip">16:25 · 1분 점<br>SAN 전체 <b>1.98 GB/s</b> · 피크 3.12<br>PMAX-2500-KR1 <b>1.41 GB/s</b> · 피크 2.52<br>베어메탈 전체 <b>468 MB/s</b> · 피크 1.46 GB/s<br>oradb-prod-01 <b>126 MB/s</b> · 피크 760 MB/s</div>
+          <div class="legend">
+            <span><i style="border-color:#34e0b4"></i>베어메탈 전체 · 평균</span><span><i class="dash" style="border-color:#34e0b4"></i>피크</span>
+            <span><i style="border-color:#3b82f6"></i>SAN 전체 · 평균</span><span><i class="dash" style="border-color:#3b82f6"></i>피크</span>
+            <span><i style="border-color:#5eead4"></i>oradb-prod-01</span><span><i style="border-color:#93c5fd"></i>PMAX-2500-KR1</span>
+            <span style="margin-left:auto">y 축 로그 눈금 <span class="tag gray">끔</span> — 서버와 어레이가 10배 차이면 켜서 봅니다</span>
+          </div>
+        </div>
+        <div class="foot">실시간 1시간은 점이 수집 주기(베어메탈 1분 · SAN 5분)마다 하나이고 30초마다 다시 읽습니다(메모리 · 원시 표). 24시간은 15분 집계(평균 = 구간 평균의 평균 · 피크 = 구간 피크의 최댓값), 7일 · 30일은 1시간 집계 — 집계 단위는 API 가 돌려주는 값을 그대로 씁니다. ◀ 이전은 보존 기간 안에서만 움직입니다(원시 3일 · 15분 31일 · 1시간 2년 — 설정값).</div>
+      </div>
+
+      <!-- 기준 -->
+      <div class="card" style="padding:16px 22px">
+        <div class="lbl">▸ 두 값의 기준(차트 아래 각주 그대로)</div>
+        <div class="basis" style="margin-top:8px">
+          <div><span class="k">베어메탈 · 평균</span><b>카운터 차분 평균.</b> 수집할 때마다 /proc/diskstats 누적 섹터 수를 저장하고, 이전 수집과의 차이 ÷ 경과 시간으로 그 구간의 평균을 냅니다 — 2초 표본이 아니라 <b>구간 전체의 진짜 평균</b>입니다. 재부팅(카운터 감소) · 긴 공백(주기 ×2 초과)이면 그 구간은 null.</div>
+          <div><span class="k">베어메탈 · 피크</span><b>2초 표본 중 최댓값.</b> 수집 시점에 2초 간격 두 번 읽은 순간 속도를 표본으로 남기고 집계 구간에서 가장 큰 값을 피크로 둡니다 — 수집 사이의 순간 피크는 보지 못하므로 <b>하한</b>입니다. 주기를 1분으로 두면 가장 촘촘합니다.</div>
+          <div><span class="k">SAN · 평균 · 피크</span><b>portperfshow 5분 표본</b>(포트 사용량 DB — 이미 있는 값)의 평균 · 최댓값을 어레이 포트 합으로. 15분 · 1시간 집계 표(v2.728)를 그대로 씁니다. 어레이 자체 성능 API 는 수집하지 않습니다.</div>
+          <div><span class="k">실시간의 뜻</span>베어메탈은 <b>수집 주기 단위</b>(최소 1분)이고 ‘지금 측정’ 으로 한 번 더 잴 수 있습니다. 장비 1대를 2초 간격으로 몇 분간 흘려 보는 모드(iostat 처럼)는 <b>2단계 후보</b>(README §6-8)로 두었습니다 — SSH 세션을 열어 두는 설계라 범위를 따로 정합니다.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

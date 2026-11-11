@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { readApiSource } from './lib/apiSource.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
@@ -134,7 +135,7 @@ test('M-R2: RDP 클라이언트가 티켓 실패 시 중단(쿼리 자격증명 
 });
 
 test('M-R4: /register-collector 가 해석형 SSRF 가드로 저장 전 검증', () => {
-  const src = read('../src/routes/central.js');
+  const src = centralSource();
   assert.match(src, /ssrfBlockReasonResolved/);
   // v2.602 SEC2602-01 이 입력 길이·타입 검사를 앞에 더해 핸들러가 길어졌다 — 고정 길이 창 대신 다음 라우트 선언까지를 본다.
   const at = src.indexOf("centralRouter.post('/register-collector'");
@@ -144,7 +145,7 @@ test('M-R4: /register-collector 가 해석형 SSRF 가드로 저장 전 검증',
 });
 
 test('L-R4: central 위임잡 결과 라우트가 reqAgentDenied 로 소유권 검사', () => {
-  const src = read('../src/routes/central.js');
+  const src = centralSource();
   assert.match(src, /function reqAgentDenied\(req, assignedAgent\)/);
   for (const [anchor, fn] of [
     ["centralRouter.post('/idrac-scan-progress'", 'agentOfReq'],

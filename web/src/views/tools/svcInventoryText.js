@@ -186,7 +186,7 @@ export function groupActions(g) {
 
 /** '검토 필요' 수와 부제(5차 R17 — 수에 들어가는 것을 부제에 전부 적는다). */
 export function reviewSummary(q = {}) {
-  const parts = [['드리프트', q.drift], ['법인 불일치', q.mismatch], ['유령', q.ghosts], ['태그 모호', q.tagAmbiguous], ['규칙 겹침', q.ruleOverlap]].filter(([, n]) => n0(n) > 0);
+  const parts = [['드리프트', q.drift], ['법인 불일치', q.mismatch], ['유령', q.ghosts], ['태그 모호', q.tagAmbiguous], ['규칙 겹침', q.ruleOverlap], ['없는 서비스 고정', q.dangling]].filter(([, n]) => n0(n) > 0);
   const n = parts.reduce((a, [, x]) => a + n0(x), 0);
   const meta = `${parts.length ? parts.map(([l, x]) => `${l} ${n0(x)}`).join(' · ') : '드리프트·불일치·유령·모호 없음'}${n0(q.ghostsHeld) ? ` (판정 보류 ${n0(q.ghostsHeld)} — 수에 넣지 않음)` : ''}`;
   return { n, meta };

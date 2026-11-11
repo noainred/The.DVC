@@ -164,7 +164,7 @@ export function DataTable({
   const shown = limit > 0 ? sorted.slice(0, limit) : sorted;
   // 보이는 행을 호출부에 알린다(키 목록이 바뀔 때만 — 매 렌더 호출하면 부모가 무한 갱신된다).
   const shownKey = shown.map((r) => r.key ?? r.id ?? '').join(',');
-  useEffect(() => { if (onVisible) onVisible(shown); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [shownKey]);
+  useEffect(() => { if (onVisible) onVisible(shown); }, [shownKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={bare ? '' : 'table-wrap'} style={{ overflow: 'auto', maxHeight }}>

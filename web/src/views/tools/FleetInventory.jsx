@@ -10,6 +10,8 @@ import { dayStamp } from '../../dayStamp.js';
 import { fleetPartialsNote, fleetHeldNote, fleetHeldBadge } from '../fleetPartialText.js'; // v2.607 LEFT2607-02 · v2.744(감사 후속 FC): 등록부 손상으로 직전 목록 유지
 import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 실패 본문(400 · 200+ok:false)을 성공으로 읽지 않는다
 import { prunePlan, pruneDoneText } from './fleetPruneText.js'; // v2.783(점검 Q2 P-B3): 확인창은 미리보기 결과로
+import { FleetHwExportModal } from './FleetHwExportModal.jsx'; // v2.967: 서버 하드웨어 정보 내보내기(엑셀 · CSV · 사양서)
+import { CORP_SRC, inCorp, corpOptions, COLLECTOR_DC_HREF } from './fleetCorpText.js'; // v2.969: 법인(DataCenter) 기준(수집한 Agent 의 법인)
 
 /**
  * v2.732(점검 2회차 B5-03): 일괄 등록 응답 → 완료 문구. 실패 본문이면 사유를 던진다(requireChanged).
@@ -55,12 +57,29 @@ const VC_SRC = {
   edge: ['엣지', '엣지(현장) 포탈이 보고한 소속'],
 };
 
-// 베어메탈 서버의 소속 법인(vCenter) 등록 드롭다운. 목록에 없는 값(삭제된 vCenter 등)도 표시.
+/** 법인 칸 — 이름 + 판정 출처(짧게). 없으면 '미지정' 배지 + 왜 모르는지(서버가 준 corpWhy — 지어내지 않는다). */
+function CorpCell({ row, hideSrc = false, canFix = false }) {
+  // 이유 문장은 칸 안에서 줄바꿈한다(1440px 에서 '현재 전력' · '분류' 열이 가로 스크롤 밖으로 밀리지 않게 — v2.969 Chromium 판독).
+  if (!row.corpId) {
+    return (
+      <div title={row.corpWhy || ''} style={{ whiteSpace: 'normal', wordBreak: 'keep-all', maxWidth: 200, lineHeight: 1.35 }}>
+        <span className="badge purple">미지정</span>
+        {row.corpWhy && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{row.corpWhy}</div>}
+        {/* v2.972: 수집 서버 ↔ 법인 매칭으로 고칠 수 있는 이유면 그 화면으로(설정 › 수집 서버는 관리자 · 전 법인 계정만 연다) */}
+        {canFix && row.corpWhyCode === 'collector' && <a href={COLLECTOR_DC_HREF} style={{ fontSize: 11 }}>수집 서버 법인 매칭 →</a>}
+      </div>
+    );
+  }
+  const src = CORP_SRC[row.corpSource];
+  return <div style={{ whiteSpace: 'normal', wordBreak: 'keep-all', maxWidth: 200, lineHeight: 1.35 }}>{row.corpName}{src && !hideSrc && <div className="muted" style={{ fontSize: 11 }} title={src[1]}>{src[0]}</div>}</div>;
+}
+
+// 베어메탈 서버의 소속 vCenter 등록 드롭다운(전력 · 사용률의 vCenter 귀속). 목록에 없는 값(삭제된 vCenter 등)도 표시.
 function VcAssignSelect({ value, vcenters, onChange, disabled }) {
   const known = vcenters.some((v) => v.id === value);
   return (
     <Select className="select" value={value} disabled={disabled} style={{ padding: '3px 6px', fontSize: 12, maxWidth: 180 }}
-      onChange={(e) => onChange(e.target.value)} title="소속 법인(vCenter) 등록">
+      onChange={(e) => onChange(e.target.value)} title="소속 vCenter 지정(전력 · 사용률의 vCenter 귀속)">
       <option value="">미지정</option>
       {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
       {value && !known && <option value={value}>{value} (알 수 없음)</option>}
@@ -74,12 +93,13 @@ export function FleetInventory({ isAdmin }) {
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [view, setView] = useHashTab({ base: ['tools', 'fleet'], valid: ['baremetal', 'virt'], fallback: 'baremetal' });
   const [q, setQ] = useState('');
-  const [fvc, setFvc] = useState('');             // 법인(vCenter)/DC 필터: '' 전체, '__none__' 미지정
+  const [fvc, setFvc] = useState('');             // v2.969: 법인(DataCenter) 필터 — '' 전체, '__none__' 미지정, 그 밖은 서버가 준 법인 id
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');        // 성공 안내(에러와 분리 — 성공이 에러를 덮지 않게)
   const [sel, setSel] = useState(() => new Set()); // 일괄 등록용 선택(fleetId)
-  const [bulkVc, setBulkVc] = useState('');        // 일괄 등록 대상 법인('' = 미지정으로 해제)
+  const [bulkVc, setBulkVc] = useState('');        // 일괄 등록 대상 vCenter('' = 미지정으로 해제)
   const seqRef = React.useRef(0);                  // load 응답 경합 가드(오래된 응답이 최신을 덮어쓰지 않게)
+  const [hwOpen, setHwOpen] = useState(false);     // v2.967 하드웨어 정보 내보내기 창
 
   const load = () => {
     const my = ++seqRef.current;
@@ -133,9 +153,8 @@ export function FleetInventory({ isAdmin }) {
   const vcenters = d.vcenters || [];
   const term = q.trim().toLowerCase();
   const match = (...fields) => !term || fields.some((f) => (f || '').toLowerCase().includes(term));
-  const inVc = (vid) => !fvc || (fvc === '__none__' ? !vid : vid === fvc);
-  const bm = (d.bareMetal || []).filter((b) => inVc(b.vcenterId) && match(b.name, b.model, b.serviceTag, b.vcenter, b.remoteAgent));
-  const vh = (d.virtualizationHosts || []).filter((h) => inVc(h.vcenterId) && match(h.name, h.model, h.serviceTag, h.vcenter));
+  const bm = (d.bareMetal || []).filter((b) => inCorp(b, fvc) && match(b.name, b.model, b.serviceTag, b.vcenter, b.remoteAgent, b.corpName));
+  const vh = (d.virtualizationHosts || []).filter((h) => inCorp(h, fvc) && match(h.name, h.model, h.serviceTag, h.vcenter, h.corpName));
   const modeBadge = MODE_BADGE[d.mode];
   const selKey = (b) => b.fleetId || rowKey(b);
   // 선택은 '전체 베어메탈' 기준으로 유지 — 필터를 바꿔도 숨은 선택이 조용히 누락되지 않게.
@@ -151,7 +170,7 @@ export function FleetInventory({ isAdmin }) {
     const items = selectedItems.map((b) => ({ serverId: b.serverId, serviceTag: b.serviceTag, key: tagKeyOf(b) }));
     if (!items.length) return;
     const dest = bulkVc ? (vcenters.find((v) => v.id === bulkVc)?.name || bulkVc) : '미지정(해제)';
-    if (!window.confirm(`선택한 ${items.length}대를 '${dest}'(으)로 일괄 등록할까요?`)) return;
+    if (!window.confirm(`선택한 ${items.length}대의 vCenter 를 '${dest}'(으)로 일괄 등록할까요?`)) return;
     setBusy('__bulk__');
     setNotice('');
     try {
@@ -166,10 +185,10 @@ export function FleetInventory({ isAdmin }) {
 
   const csv = () => {
     const isBm = view === 'baremetal';
-    const head = isBm ? ['서버', '모델', '서비스태그', '법인(vCenter)', '법인출처', '수집원', 'W'] : ['호스트', 'vCenter', '지역', '모델', '서비스태그', 'iDRAC받침', 'W'];
+    const head = isBm ? ['서버', '모델', '서비스태그', '법인', '법인 판정', '법인 미지정 이유', 'vCenter', 'vCenter 출처', '수집원', 'W'] : ['호스트', '법인', 'vCenter', '지역', '모델', '서비스태그', 'iDRAC받침', 'W'];
     const rows = isBm
-      ? bm.map((b) => [b.name, b.model, b.serviceTag, b.vcenter || '미지정', b.vcSource || '', b.source, b.watts ?? ''])
-      : vh.map((h) => [h.name, h.vcenter, h.region, h.model, h.serviceTag, h.idracBacked ? 'O' : 'X', h.watts ?? '']);
+      ? bm.map((b) => [b.name, b.model, b.serviceTag, b.corpName || '미지정', CORP_SRC[b.corpSource]?.[0] || '', b.corpId ? '' : (b.corpWhy || ''), b.vcenter || '', b.vcSource || '', b.source, b.watts ?? ''])
+      : vh.map((h) => [h.name, h.corpName || '미지정', h.vcenter, h.region, h.model, h.serviceTag, h.idracBacked ? 'O' : 'X', h.watts ?? '']);
     const body = [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -182,7 +201,7 @@ export function FleetInventory({ isAdmin }) {
         <Card label="가상화 호스트" value={s.virtualizationHosts ?? 0} accent="var(--accent-2,#22d3ee)" meta={`iDRAC 받침 ${s.idracBackedHosts ?? 0}대`} onClick={() => setView('virt')} active={view === 'virt'} />
         <Card label="베어메탈 서버" value={s.bareMetal ?? 0} accent="var(--amber)" meta={`전력 측정 ${s.bareMetalMeasured ?? 0}대${s.forcedBareMetal ? ` · 수동 ${s.forcedBareMetal}` : ''}`} onClick={() => setView('baremetal')} active={view === 'baremetal'} />
         <Card label="베어메탈 총전력" value={fmtWatts(s.bareMetalWatts || 0)} accent="#fbbf24" meta={`${s.bareMetalKw ?? 0} kW · 현재 측정 합계`} />
-        <Card label="법인 미지정" value={s.bareMetalUnassigned ?? 0} accent={s.bareMetalUnassigned ? 'var(--amber)' : 'var(--green)'} meta={s.excluded ? `제외(수동) ${s.excluded}대` : '베어메탈 중 소속 법인 없음'} />
+        <Card label="법인 미지정" value={s.bareMetalNoCorp ?? s.bareMetalUnassigned ?? 0} accent={(s.bareMetalNoCorp ?? s.bareMetalUnassigned) ? 'var(--amber)' : 'var(--green)'} meta={s.excluded ? `제외(수동) ${s.excluded}대` : '베어메탈 중 법인(DataCenter)을 모르는 서버'} />
       </div>
 
       <div className="card" style={{ padding: '10px 14px', marginBottom: 12, borderLeft: '3px solid var(--accent-2,#22d3ee)' }}>
@@ -191,8 +210,8 @@ export function FleetInventory({ isAdmin }) {
           iDRAC/OME가 수집한 물리 서버를 <b>Dell 서비스태그</b>로 vCenter ESXi 호스트와 대조합니다. 호스트에 매칭되면 <b>가상화 호스트</b>, 매칭이 없으면 <b>베어메탈</b>입니다.
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          {d.mode === 'edge' ? '이 엣지 포탈은 자기 데이터센터에 등록된 서버만 보여줍니다(로컬 검색). 중앙으로 베어메탈을 보고합니다. ' : (d.mode === 'central' ? `중앙 포탈 — 법인(vCenter) 필터로 데이터센터별 검색이 가능합니다. ${s.edgeReported ? `🛰 엣지 ${s.edgeAgents}곳에서 ${s.edgeReported}대 집계. ` : ''}` : '')}
-          베어메탈 행에서 소속 <b>법인(vCenter)</b>을 바로 등록할 수 있고, 자동 분류가 틀리면 분류도 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.
+          {d.mode === 'edge' ? '이 엣지 포탈은 자기 데이터센터에 등록된 서버만 보여줍니다(로컬 검색). 중앙으로 베어메탈을 보고합니다. ' : (d.mode === 'central' ? `중앙 포탈 — 법인(DataCenter) 필터로 법인별 검색이 가능합니다. ${s.edgeReported ? `🛰 엣지 ${s.edgeAgents}곳에서 ${s.edgeReported}대 집계. ` : ''}` : '')}
+          법인은 서버 분석 화면과 같은 <b>법인(DataCenter)</b>입니다 — <b>수집한 Agent(수집 서버)의 법인</b> → 스캔 등록 법인 → vCenter 에 할당된 법인 순으로 정합니다. 법인을 모르는 서버는 이유를 함께 보입니다. 베어메탈 행에서 <b>vCenter</b>(전력 · 사용률 귀속)를 지정할 수 있고, 자동 분류가 틀리면 분류도 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.
         </div>
       </div>
 
@@ -202,16 +221,17 @@ export function FleetInventory({ isAdmin }) {
           <button className={view === 'virt' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('virt')}>가상화 호스트 ({(d.virtualizationHosts || []).length})</button>
         </div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <Select className="select" value={fvc} onChange={(e) => setFvc(e.target.value)} style={{ maxWidth: 220 }} title="법인(vCenter)/데이터센터 필터">
-            <option value="">전체 법인(vCenter)</option>
-            {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}{v.region ? ` · ${v.region}` : ''}</option>)}
-            <option value="__none__">(미지정)</option>
+          <Select sort={false} className="select" value={fvc} onChange={(e) => setFvc(e.target.value)} style={{ maxWidth: 260 }} title="법인(DataCenter) 필터 — 서버 분석 화면과 같은 법인">
+            <option value="">전체 법인</option>
+            {corpOptions(d.corps).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </Select>
           <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="서버/모델/서비스태그 검색" value={q} onChange={setQ} />
           {canCsv() && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={csv}>CSV</button>}
+          {canCsv() && <button className="login-btn" style={{ flex: 'none', padding: '9px 14px' }} onClick={() => setHwOpen(true)} title="Hostname · CPU · 메모리 · 디스크 · NIC · 펌웨어 등 iDRAC 이 수집한 하드웨어 정보를 엑셀 · CSV 로 내려받습니다.">하드웨어 정보 내보내기</button>}
         </div>
       </div>
 
+      {hwOpen && <FleetHwExportModal initialKind={view === 'virt' ? 'vh' : 'bm'} screenCorp={fvc} onClose={() => setHwOpen(false)} />}
       {err && d && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--red)', fontSize: 13, alignItems: 'center' }}><span>⚠ {err}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setErr(null)}>✕</button></div>}
       {/* v2.607 LEFT2607-02: 엣지 베어메탈 목록 부분 전송·상한 제외·귀속 비움 */}
       {d && fleetPartialsNote(d.fleetPartials) && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ {fleetPartialsNote(d.fleetPartials)}</div>}
@@ -229,7 +249,7 @@ export function FleetInventory({ isAdmin }) {
         <>
           {isAdmin && (
             <div className="flex wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
-              <span className="muted" style={{ fontSize: 12 }}>일괄 등록: <b>{selectedItems.length}</b>대 선택</span>
+              <span className="muted" style={{ fontSize: 12 }}>vCenter 일괄 등록: <b>{selectedItems.length}</b>대 선택</span>
               <Select className="select" value={bulkVc} onChange={(e) => setBulkVc(e.target.value)} style={{ maxWidth: 200, padding: '5px 8px', fontSize: 12 }}>
                 <option value="">미지정(해제)</option>
                 {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
@@ -241,7 +261,7 @@ export function FleetInventory({ isAdmin }) {
           <ResultCount total={(d.bareMetal || []).length} shown={bm.length} label="베어메탈" filtered={!!term || !!fvc} />
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
             <STable>
-              <thead><tr>{isAdmin && <th style={{ width: 28 }}><input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} title="현재 목록 전체 선택" /></th>}<th>서버</th><th>모델</th><th>서비스태그</th><th>법인(vCenter)</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
+              <thead><tr>{isAdmin && <th style={{ width: 28 }}><input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} title="현재 목록 전체 선택" /></th>}<th>서버</th><th>모델</th><th>서비스태그</th><th>법인</th><th>vCenter</th><th>수집</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
               <tbody>
                 {bm.map((b, i) => (
                   <tr key={b.serverId || b.fleetId || i}>
@@ -250,17 +270,20 @@ export function FleetInventory({ isAdmin }) {
                     <td className="muted" style={{ fontSize: 12 }}>{b.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.serviceTag || '—'}</td>
                     <td>
+                      <CorpCell row={b} canFix={isAdmin} />
+                    </td>
+                    <td>
                       {isAdmin
                         ? <VcAssignSelect value={b.vcenterId || ''} vcenters={vcenters} disabled={busy === rowKey(b)} onChange={(vid) => setVc(b, vid)} />
                         : (b.vcenter ? <span>{b.vcenter}</span> : <span className="badge purple">미지정</span>)}
-                      {b.vcenterId && VC_SRC[b.vcSource] && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }} title={VC_SRC[b.vcSource][1]}>· {VC_SRC[b.vcSource][0]}</span>}
+                      {b.vcenterId && VC_SRC[b.vcSource] && <div className="muted" style={{ fontSize: 11, marginTop: 2 }} title={VC_SRC[b.vcSource][1]}>{VC_SRC[b.vcSource][0]}</div>}
                     </td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.source}</td>
                     <td style={{ textAlign: 'right' }}>{b.watts != null ? <b>{fmtWatts(b.watts)}</b> : <span className="muted">미측정</span>}</td>
                     {isAdmin && <td><TagSelect value={b.tag || 'auto'} disabled={busy === rowKey(b)} onChange={(t) => setTag(b, t)} /></td>}
                   </tr>
                 ))}
-                {!bm.length && <tr><td colSpan={isAdmin ? 8 : 6} className="center muted" style={{ padding: 20 }}>베어메탈 서버가 없습니다.</td></tr>}
+                {!bm.length && <tr><td colSpan={isAdmin ? 9 : 7} className="center muted" style={{ padding: 20 }}>베어메탈 서버가 없습니다.</td></tr>}
               </tbody>
             </STable>
           </div>
@@ -272,12 +295,13 @@ export function FleetInventory({ isAdmin }) {
           <ResultCount total={(d.virtualizationHosts || []).length} shown={vh.length} label="호스트" filtered={!!term || !!fvc} />
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
             <STable>
-              <thead><tr><th>호스트</th><th>vCenter</th><th>지역</th><th>모델</th><th>서비스태그</th><th style={{ textAlign: 'right' }}>코어</th><th style={{ textAlign: 'right' }}>메모리</th><th>전력원</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
+              <thead><tr><th>호스트</th><th title="가상화 호스트의 법인은 자기 vCenter 의 법인입니다">법인 · vCenter</th><th>지역</th><th>모델</th><th>서비스태그</th><th style={{ textAlign: 'right' }}>코어</th><th style={{ textAlign: 'right' }}>메모리</th><th>전력원</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
               <tbody>
                 {vh.map((h, i) => (
                   <tr key={`${h.vcenterId}-${h.name}-${i}`}>
                     <td><b>{h.name}</b>{h.synthetic && <span className="badge teal" style={{ marginLeft: 6 }} title="ESXi 호스트와 자동 매칭되진 않았지만 관리자가 가상화로 지정">발견</span>}</td>
-                    <td>{h.vcenter}</td>
+                    {/* 법인 · vCenter 한 칸(1440px 에서 '분류' 열이 가로 스크롤 밖으로 밀리지 않게) — 가상화 호스트의 법인은 늘 자기 vCenter 쪽이라 출처 줄은 뺀다 */}
+                    <td><CorpCell row={h} hideSrc /><div className="muted" style={{ fontSize: 11 }}>{h.vcenter}</div></td>
                     <td className="muted" style={{ fontSize: 12 }}>{h.region || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{h.serviceTag || '—'}</td>

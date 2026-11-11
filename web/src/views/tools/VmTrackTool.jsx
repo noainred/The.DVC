@@ -14,6 +14,7 @@ import { hasDsData, dsUnknownNote } from './storageTrack.js';
 import { unitText } from '../unitText.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
+import { KPI_HANDOFF, takeKpiVcenter } from '../platform/platformText.js'; // v2.959: 가상화 플랫폼 KPI 카드가 넘긴 법인
 
 const DAY_OPTS = [7, 30, 90, 365];
 // 슬롯 라벨: '8/21 00시' — 하루 2점이라 날짜만으로는 구분이 안 된다.
@@ -79,7 +80,8 @@ export function createRetryGate() {
 
 export default function VmTrackTool() {
   const [days, setDays] = useState(30);
-  const [vcenterId, setVcenterId] = useState('');
+  // v2.959: 가상화 플랫폼 KPI 카드에서 왔으면 고른 법인(vCenter)을 초기 선택으로(메모리 인계 · 마운트 때 1회 · 없으면 전체).
+  const [vcenterId, setVcenterId] = useState(() => takeKpiVcenter(KPI_HANDOFF.vmTrack));
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
