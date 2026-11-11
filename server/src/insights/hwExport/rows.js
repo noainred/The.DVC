@@ -95,7 +95,7 @@ export function selectServers(fleet, { kind = 'bm', corps = null, invOf, match =
     const notes = [];
     if (!inv) notes.push(`인벤토리 없음 — ${noInvReason(row, k)}`);
     else if (!hn) notes.push('Hostname 미보고');
-    if (inv && via === 'remote') notes.push('엣지 축약 인벤토리(일부 값 없음)');
+    if (inv && via === 'remote') notes.push('엣지 축약 인벤토리(시리얼 없음 · 구버전 엣지는 일부 값 없음)');
     out.push({
       corpId: t(corp.id), corpName: t(corp.name) || t(corp.id) || '미지정', vcenterName: t(row.vcenter) || t(row.vcenterId),
       kind: k, name: mask(t(row.name)), hostName: mask(hn), serviceTag: t(row.serviceTag), model: t(row.model),
@@ -200,7 +200,8 @@ export function specOf(c, admin = false) {
   const COLL = { cpu: 'cpus', mem: 'memoryDimms', disk: 'disks', ctrl: 'storageControllers', gpu: 'gpus', psu: 'psus', pcie: 'pcie' };
   for (const g of HW_GROUPS) {
     if (g.key === 'id') {
-      sections.push({ title: '기본 식별', kind: 'kv', rows: sumKv(g, [['법인', c.corpName], ['vCenter', c.vcenterName || null], ['서버(등록 이름)', c.name], ['Hostname(OS)', c.hostName || null], ['서비스태그', c.serviceTag || null]]) });
+      // v2.973 C1: vCenter 는 카탈로그 값(id.sum.vcenter — v2.968)이 이미 한 줄 넣는다. 여기 고정 줄에도 넣어 사양서에 두 번 나왔다.
+      sections.push({ title: '기본 식별', kind: 'kv', rows: sumKv(g, [['법인', c.corpName], ['서버(등록 이름)', c.name], ['Hostname(OS)', c.hostName || null], ['서비스태그', c.serviceTag || null]]) });
       continue;
     }
     const sumRows = sumKv(g);

@@ -30,6 +30,7 @@ import { dedupNicPorts } from './nicPorts.js'; // v2.728: 같은 물리 포트(N
 import { partHealthRollup } from './invView.js'; // v2.731 A2-02: 하위 시스템 롤업 = 원소 partState(못 읽음을 OK 로, Critical 을 Warning 으로 접지 않는다)
 import { trustedRedirect } from '../util/resilientFetch.js'; // v2.612 SEC2612-03
 import { ssrfBlockReason } from '../util/ssrfBlock.js'; // v2.612 SEC2612-03
+import { BIOS_KEYS } from './biosKeys.js'; // v2.973: 엣지 축약 인벤토리 · 중앙 수신 정제와 같은 목록
 /** 라이선스 항목 문자열 상한(v2.607 SEC2607-03). */
 export const LICENSE_FIELD_MAX = 256;
 
@@ -433,12 +434,7 @@ export async function fetchPower(entry) {
 }
 
 // BIOS/CMOS attributes worth surfacing prominently (others are kept as a count).
-const BIOS_KEYS = [
-  'BootMode', 'SysProfile', 'SystemProfile', 'ProcVirtualization', 'LogicalProc',
-  'ProcCores', 'SriovGlobalEnable', 'MemFrequency', 'MemOpMode', 'NodeInterleave',
-  'IntegratedRaid', 'SecureBoot', 'TpmSecurity', 'ProcTurboMode', 'EmbSata',
-  'InternalUsb', 'PowerManagement', 'SerialComm', 'OsWatchdogTimer',
-];
+// v2.973: 목록(BIOS_KEYS)은 idrac/biosKeys.js 하나 — 엣지 축약 인벤토리 · 중앙 수신 정제가 같은 목록을 쓴다.
 
 const firstMember = (root) => (root?.Members || [])[0]?.['@odata.id'];
 

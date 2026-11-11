@@ -97,7 +97,8 @@ test('① compactInv → sanitizeRemoteInv 왕복: 부품 이름·상태·PSU �
   assert.equal(s.collections.psus, 'ok'); assert.equal(s.reachable, true);
   // 자산 정보는 싣지 않는다
   for (const k of ['psus', 'disks', 'memoryDimms']) for (const x of c[k]) assert.ok(!('serial' in x), `${k} serial`);
-  assert.ok(!('serialNumber' in c.system) && !('partNumber' in c.psus[0]) && !('firmware' in c.psus[0]));
+  assert.ok(!('serialNumber' in c.system) && !('partNumber' in c.psus[0]));
+  // v2.973(사용자 결정 — 하드웨어 내보내기 A7): PSU 펌웨어는 이제 싣는다(값이 있을 때만). 시리얼 · 부품번호는 여전히 싣지 않는다.
 });
 
 test('② 수신 정제: 모르는 키·객체 값·잘못된 컬렉션 값은 버린다', () => {
