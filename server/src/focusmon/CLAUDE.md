@@ -58,6 +58,10 @@
   ⚠ 포탈은 `~/.ssh` 키를 읽지 않는다(서비스 ProtectHome) — ssh-copy-id 로 넣은 셸 계정 키로는 접속되지 않는다. 화면 `AUTH_HINT` · `KEY_FILE_NOTE` 가 말한다.
   ⚠ 실제 중계 엣지에서 `idleMs` 10초의 시작 지연 단축은 측정하지 못했다(이 환경에 엣지가 없다 — 워커 · 중앙 실호출 테스트로만 확인).
 - **표의 값 단추(v2.979 — 사용자 '네트워크 · 디스크 시간별로 보기' → 선택 '구간 평균 단추만 카드에')**: 서버 상세의 화면 맨 위 · 네트워크 카드 · 디스크 카드 세 단추가
-  **상태 하나**(`at` · `localStorage fm.srv.at`)를 쓴다 — 요청이 하나(`view=server&at=`)라 카드마다 따로 두면 표가 섞인다. 평균 계산은 서버 그대로(`query.averageSample` ·
-  `rates.timeAverageIostat` — 횟수 · 처리량 · 사용률 평균 · 지연은 요청 수 가중 · 네트워크 오류 · 드롭은 구간 합). 회귀 `web/src/views/tools/focusMonAt.test.js`.
+  **상태 하나**(`at` · `localStorage fm.srv.at`)를 쓴다 — 요청이 하나(`view=server&at=`)라 카드마다 따로 두면 표가 섞인다. 평균 계산은 `query.averageSample` ·
+  `rates.timeAverageIostat`(아래 시간 가중). 회귀 `web/src/views/tools/focusMonAt.test.js`.
   1시간 단위 표(시안 ⑧ · ⑨ · `docs/design/focus-mon/README.md` §15)는 만들지 않았다.
+  ⚠ **구간 평균은 시간 가중**(v2.979 반증 1 — 재현): 표본 값은 '앞 표본부터 이 표본까지' 의 비율이라 무게 = 앞 표본과의 간격(`query.sampleWeights` · 공백 · 첫 표본은 표본 간격).
+  표본 평균이었을 때 '계속 수집' 이 10초 → 2초(화면을 엶)로 바뀐 구간에서 촘촘한 최근 몇 분 쪽으로 치우쳤다(실제 %util 23.3 → 화면 50).
+  `timeAverageIostat(rows, weights)` 지연은 요청 수 × 시간 · 네트워크 오류 · 드롭은 구간 합 · 프로세스 평균도 같은 무게. 표본 평균으로 되돌리지 말 것(`focusMonAvg2979`).
+  캡션(`atCaption`)은 응답의 `lastAt` · `coverMs`(평균이 덮는 시간)로 말한다 — 수집이 끝났으면 '마지막 표본 · N분 전', 일부만 있으면 '표본은 N분치'. 변이 12/12.

@@ -19,7 +19,7 @@ import {
   DASH, STATE_TEXT, TEST_TEXT, MODE_TEXT, ENDED_TEXT, TABS, IOSTAT_LABEL, SUMMARY_COLS, METRICS,
   pctText, msText, numText, bpsText, bytesText, sizeText, metricValueText, metricUnitText, iostatText, remainText, clockText, agoShort, etText,
   levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR, bulkLine, needsRetry, AUTH_HINT, nameTitle,
-  AT_KEYS, atOptions, atCaption,
+  atOptions, atCaption, normAt,
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
@@ -502,9 +502,8 @@ function IostatCompare({ main, ids, tb, onOpen }) {
 /* ── 서버 상세 ────────────────────────────────────────────────────────────── */
 function ServerDetail({ main, id, tb, now, onBack }) {
   // v2.979: 표의 값(구간 끝 순간 | 구간 평균)은 화면 맨 위 · 네트워크 카드 · 디스크 카드 세 곳의 단추가 같은 상태를 쓴다(하나를 바꾸면 셋이 같이 바뀐다) · 브라우저가 기억한다.
-  const [at, setAtRaw] = useState(() => { const v = lsGet('fm.srv.at', 'end'); return AT_KEYS.includes(v) ? v : 'end'; });
-  const setAt = (v) => { setAtRaw(v); lsSet('fm.srv.at', v); };
-  const atText = atCaption(at, { win: tb.win, past: tb.end != null });
+  const [at, setAtRaw] = useState(() => normAt(lsGet('fm.srv.at', 'end')));
+  const setAt = (v) => { const x = normAt(v); setAtRaw(x); lsSet('fm.srv.at', x); };
   const [cols, setCols] = useState(() => lsGet('fm.dsk.cols', 'summary'));
   const [tree, setTree] = useState('tree');
   const [dev, setDev] = useState('');
@@ -513,10 +512,14 @@ function ServerDetail({ main, id, tb, now, onBack }) {
   const t = main.targets.find((x) => x.id === id);
   const params = useMemo(() => ({ view: 'server', targets: id, win: tb.win, end: tb.end ?? '', at, dev }), [id, tb.win, tb.end, at, dev]);
   const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? 2_000 : 0, !!t);
-  const pq = usePoll('/tools/focus-mon/procs', useMemo(() => ({ targets: id, win: tb.win, end: tb.end ?? '' }), [id, tb.win, tb.end]), tb.end == null ? 5_000 : 0, !!t);
+  // 프로세스 상위 5 도 같은 값(구간 끝 순간 | N분 평균)을 따른다 — 예전에는 늘 끝 순간이라 평균을 고른 화면 안에서 이 카드만 달랐다(v2.979 반증 6).
+  const pq = usePoll('/tools/focus-mon/procs', useMemo(() => ({ targets: id, win: tb.win, end: tb.end ?? '', at }), [id, tb.win, tb.end, at]), tb.end == null ? 5_000 : 0, !!t);
   if (!t) return <div className="fm-card fm-empty">없는 서버입니다. <button type="button" className="fm-btn" onClick={onBack}>개요로</button></div>;
   const d = q.data;
   const tab = d?.table;
+  // 지금 보는 값 — 응답이 실제로 덮는 시간으로 말한다(수집이 끝났거나 구간 일부만 있으면 그대로 밝힌다 · v2.979 반증 2).
+  const ivSec = Number(t?.status?.interval) > 0 ? Number(t.status.interval) : (main.limits?.defaultInterval || 2);
+  const atText = atCaption(at, { win: tb.win, past: tb.end != null, lastAt: d?.lastAt ?? null, coverMs: d?.coverMs ?? null, now, staleMs: ivSec * 3_000 + 2_000 });
   const settings = main.settings;
   const hello = d?.hello || t.status?.hello;
   const X0 = 34; const X1 = 632;
@@ -565,7 +568,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
           {d.n === 0 ? <div className="fm-ban">이 구간에는 기록이 없습니다 — 수집하지 않은 시간입니다. 0 으로 그리지 않고 비워 둡니다.</div> : null}
           <div className="fm-two">
             <div className="fm-card">
-              <div className="fm-row fm-between"><div className="fm-col"><h3 className="fm-h3">CPU{hello?.ncpu ? ` — ${hello.ncpu}코어` : ''}</h3><span className="fm-big">{tab?.cpu ? Math.round(tab.cpu.pct) : DASH}{tab?.cpu ? <small>%</small> : null}</span></div>
+              <div className="fm-row fm-between"><div className="fm-col"><h3 className="fm-h3">CPU{hello?.ncpu ? ` — ${hello.ncpu}코어` : ''} <span className="fm-dim fm-at">· {atText}</span></h3><span className="fm-big">{tab?.cpu ? Math.round(tab.cpu.pct) : DASH}{tab?.cpu ? <small>%</small> : null}</span></div>
                 <div className="fm-row">{[['사용자', 'usr'], ['시스템', 'sys'], ['I/O 대기', 'iow'], ['steal', 'stl']].map(([l, k], i) => <span key={k} className="fm-lg"><i style={{ background: LC[i] }} />{l} <b>{pctText(tab?.cpu?.[k])}</b></span>)}</div></div>
               <div className="fm-chart-box">
               <svg viewBox="0 0 640 214" role="img" aria-label="CPU 사용률 구성 추이 — 사용자 · 시스템 · I/O 대기 · steal 을 쌓은 면" className="fm-chart">
@@ -585,7 +588,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
               ) : null}
             </div>
             <div className="fm-card">
-              <div className="fm-row fm-between"><div className="fm-col"><h3 className="fm-h3">메모리{mem?.total ? ` — ${bytesText(mem.total)}` : ''}</h3><span className="fm-big">{mem ? Math.round(mem.pct) : DASH}{mem ? <small>%</small> : null}</span></div>
+              <div className="fm-row fm-between"><div className="fm-col"><h3 className="fm-h3">메모리{mem?.total ? ` — ${bytesText(mem.total)}` : ''} <span className="fm-dim fm-at">· {atText}</span></h3><span className="fm-big">{mem ? Math.round(mem.pct) : DASH}{mem ? <small>%</small> : null}</span></div>
                 <span className="fm-dim fm-rt">사용률 = (전체 − MemAvailable) ÷ 전체<br />캐시로 쓰는 메모리는 ‘사용’ 에 넣지 않습니다</span></div>
               {mem?.total ? (
                 <div className="fm-membar" role="img" aria-label={`메모리 구성: 사용 ${bytesText(mem.used)}, 버퍼 · 캐시 ${bytesText(mem.bc)}, 여유 ${bytesText(mem.free)}`}>
@@ -627,7 +630,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                 </tr>
               ))}</tbody>
             </STable>
-            <div className="fm-note fm-pad">사용률 = 수신 · 송신 중 큰 쪽 ÷ 링크 속도. 본딩 속도는 802.3ad · balance 계열은 올라온 구성원 합, active-backup 은 쓰는 구성원 하나입니다. 링크 속도를 못 읽은 인터페이스는 사용률을 ‘—’ 로 두고 수신 · 송신량만 보여 줍니다. ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간(1 · 5 · 10 · 30분) 전체의 평균입니다 — 수신 · 송신 · 사용률은 평균, 오류 · 드롭은 그 구간의 합입니다.</div>
+            <div className="fm-note fm-pad">사용률 = 수신 · 송신 중 큰 쪽 ÷ 링크 속도. 본딩 속도는 802.3ad · balance 계열은 올라온 구성원 합, active-backup 은 쓰는 구성원 하나입니다. 링크 속도를 못 읽은 인터페이스는 사용률을 ‘—’ 로 두고 수신 · 송신량만 보여 줍니다. ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)의 시간 평균입니다(표본마다 덮는 시간으로 가중 — 수집 주기가 바뀐 구간도 치우치지 않습니다). 수신 · 송신은 평균, 사용률은 순간마다의 사용률(큰 쪽 ÷ 링크 속도)을 평균한 값이라 평균 수신 · 송신으로 다시 나눈 값과 다를 수 있고, 오류 · 드롭은 그 구간의 합입니다.</div>
           </div>
           <div className="fm-card fm-flush">
             <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">디스크 — 물리 {dsks.filter((x) => x.k === 'disk').length}개 · 파티션 {dsks.filter((x) => x.k === 'part').length}개 · LVM 볼륨 {dsks.filter((x) => x.k === 'lvm').length}개 <span className="fm-dim fm-at">· {atText}</span></h3>
@@ -666,10 +669,10 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                     <HoverTip f={hL} vbw={640} plot={devPlot} time={hoverTime(hL, [devC.rAwait, devC.wAwait], d.from, d.to)} rows={[{ key: 'r', label: '읽기 지연', color: RX_COLOR, value: msText(valueAtFrac(devC.rAwait, hL)) }, { key: 'w', label: '쓰기 지연', color: TX_COLOR, value: msText(valueAtFrac(devC.wAwait, hL)) }]} /></div></div>
               </div>
             ) : null}
-            <div className="fm-note fm-pad">열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 요약 열은 13개 가운데 8개이고 ‘iostat 전체 열’ 을 누르면 병합 · 요청 크기 · 합친 지연 · 서비스 시간이 나옵니다. ‘전체 디스크’ 는 물리 디스크만 더합니다(파티션 · LVM 은 같은 입출력을 다시 보는 것). ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간(1 · 5 · 10 · 30분) 전체를 다시 계산한 값입니다 — 횟수 · 처리량은 평균, 지연은 요청 수로 가중합니다(끝난 요청이 없으면 ‘—’).</div>
+            <div className="fm-note fm-pad">열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 요약 열은 13개 가운데 8개이고 ‘iostat 전체 열’ 을 누르면 병합 · 요청 크기 · 합친 지연 · 서비스 시간이 나옵니다. ‘전체 디스크’ 는 물리 디스크만 더합니다(파티션 · LVM 은 같은 입출력을 다시 보는 것). ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)을 다시 계산한 값입니다 — 표본마다 덮는 시간으로 가중해 횟수 · 처리량 · 대기열 · 사용률은 시간 평균, 지연은 요청 수(초당 횟수 × 시간)로 가중합니다(끝난 요청이 없으면 ‘—’).</div>
           </div>
           <div className="fm-card fm-flush">
-            <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">CPU 를 많이 쓰는 프로세스 — 상위 5</h3><a href={`#/${BASE.join('/')}/procs`}>상위 30개 전부 보기</a></div>
+            <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">CPU 를 많이 쓰는 프로세스 — 상위 5 <span className="fm-dim fm-at">· {atText}</span></h3><a href={`#/${BASE.join('/')}/procs`}>상위 30개 전부 보기</a></div>
             <STable className="fm-table" minWidth={560}>
               <thead><tr><th>PID</th><th>사용자</th><th>CPU(1코어 = 100%)</th><th>명령</th></tr></thead>
               <tbody>{procs.slice(0, 5).map((p) => <tr key={p.pid}><td className="fm-mono fm-num">{p.pid}</td><td className="fm-mono">{p.u || DASH}</td><td data-sort={p.cpu ?? null}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, p.cpu ?? 0)}%` }} /></span><span className="fm-num">{pctText(p.cpu, 1)}</span></span></td><td className="fm-mono">{p.c}</td></tr>)}</tbody>

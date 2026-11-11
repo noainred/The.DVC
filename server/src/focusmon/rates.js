@@ -256,12 +256,16 @@ export function summaryOf(s) {
  * 횟수 · 처리량 · 대기열 · 사용률은 평균, 지연은 그 방향 요청 수 가중, 요청 크기 · 서비스 시간은 전체 요청 수 가중.
  * 끝난 요청이 하나도 없으면 지연은 null(0 이 아니다).
  */
-export function timeAverageIostat(rows = []) {
-  const valid = rows.filter((v) => Array.isArray(v));
+export function timeAverageIostat(rows = [], weights = null) {
+  // v2.979(반증 1): 표본마다 1표가 아니라 **표본이 덮는 시간(ms)으로 가중**한다 — 보는 화면이 열리면 수집 주기가 10초 → 2초로 바뀌어
+  //   한 구간 안에 성긴 표본과 촘촘한 표본이 섞이고, 표본 평균은 촘촘한 최근 몇 분 쪽으로 치우쳤다(재현: 실제 %util 23.3 → 화면 50).
+  //   weights 가 없으면 모두 1(예전 동작). 지연 · 요청 크기 · 서비스 시간은 요청 수(= 초당 횟수 × 시간)로 가중한다.
+  const valid = [];
+  rows.forEach((v, i) => { if (Array.isArray(v)) { const w = weights ? Number(weights[i]) : 1; if (Number.isFinite(w) && w > 0) valid.push([v, w]); } });
   const out = new Array(IOSTAT_COLS.length).fill(null);
   if (!valid.length) return out;
-  const mean = (c) => { let s = 0; let n = 0; for (const v of valid) { const y = v[C[c]]; if (y != null) { s += y; n += 1; } } return n ? s / n : null; };
-  const wavg = (c, w) => { let s = 0; let n = 0; for (const v of valid) { const y = v[C[c]]; const ww = w(v); if (y != null && ww != null && ww > 0) { s += y * ww; n += ww; } } return n > 0 ? s / n : null; };
+  const mean = (c) => { let s = 0; let n = 0; for (const [v, w] of valid) { const y = v[C[c]]; if (y != null) { s += y * w; n += w; } } return n ? s / n : null; };
+  const wavg = (c, f) => { let s = 0; let n = 0; for (const [v, w] of valid) { const y = v[C[c]]; const ff = f(v); if (y != null && ff != null && ff > 0) { s += y * ff * w; n += ff * w; } } return n > 0 ? s / n : null; };
   for (const c of ['rrqm', 'wrqm', 'r', 'w', 'rMB', 'wMB', 'qu', 'util']) out[C[c]] = mean(c);
   const both = (v) => (v[C.r] != null && v[C.w] != null ? v[C.r] + v[C.w] : null);
   out[C.rAwait] = wavg('rAwait', (v) => v[C.r]);

@@ -189,10 +189,24 @@ export function windowCaption({ past, from, to, win }) {
  */
 export const AT_KEYS = Object.freeze(['end', 'avg']);
 export function atOptions(win) { return [['end', '구간 끝 순간'], ['avg', `${win}분 평균`]]; }
-/** 카드 제목 옆에 붙이는 지금 보는 값(구간이 과거면 ‘고른 구간’). */
-export function atCaption(at, { win, past }) {
-  if (at === 'avg') return `${past ? '고른' : '최근'} ${win}분 평균`;
-  return past ? '고른 구간 끝 순간' : '지금(가장 최근 표본)';
+/** 저장된 값 → 쓸 값(모르는 값 · 못 읽음은 ‘구간 끝 순간’). */
+export function normAt(v) { return AT_KEYS.includes(v) ? v : 'end'; }
+
+/**
+ * 카드 제목 옆에 붙이는 지금 보는 값 — 응답이 실제로 덮는 시간을 본다(v2.979 반증 2: 수집이 20분 전에 끝났는데 ‘지금’ · ‘최근 30분 평균’ 이라고 했다).
+ * @param {{win:number, past:boolean, lastAt?:number|null, coverMs?:number|null, now?:number, staleMs?:number}} o
+ *   lastAt = 구간 안 마지막 표본 시각 · coverMs = 평균이 덮는 시간(서버 시간 가중의 무게 합) · staleMs = 이보다 오래된 마지막 표본은 ‘지금’ 이 아니다
+ */
+export function atCaption(at, { win, past, lastAt = null, coverMs = null, now = Date.now(), staleMs = 10_000 } = {}) {
+  if (at === 'avg') {
+    const base = `${past ? '고른' : '최근'} ${win}분 평균`;
+    const c = Number(coverMs);
+    if (coverMs != null && Number.isFinite(c) && c < win * 60_000 * 0.9) return `${base} · 표본은 ${c < 60_000 ? '1분 미만' : `${Math.round(c / 60_000)}분치`}`;
+    return base;
+  }
+  if (past) return lastAt ? `고른 구간의 마지막 표본 · ${clockText(lastAt)}` : '고른 구간 끝 순간';
+  if (lastAt && now - lastAt > staleMs) return `마지막 표본 · ${agoShort(lastAt, now)}`;
+  return '지금(가장 최근 표본)';
 }
 
 /** 수집 상태 알약 글. */
