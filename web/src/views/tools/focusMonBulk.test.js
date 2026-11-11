@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import {
-  CSV_ACTION_TEXT, csvChangeText, needsRetry, csvHeaderNotes, decodeCsvBytes, WAKE_TEXT, WAKE_KEYS, wakeFallbackText, upgradeText, diagItems, bulkLine, installGroups, TEST_TEXT,
+  CSV_ACTION_TEXT, csvChangeText, needsRetry, csvHeaderNotes, nameTitle, decodeCsvBytes, WAKE_TEXT, WAKE_KEYS, wakeFallbackText, upgradeText, diagItems, bulkLine, installGroups, TEST_TEXT,
 } from './focusMonText.js';
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
@@ -103,5 +103,25 @@ describe('반증 반영(v2.978)', () => {
       '포트 열을 찾지 못해 모든 줄을 22 로 넣습니다.', '담당 노드 열을 찾지 못해 모든 줄을 중앙이 맡습니다.', '읽지 않은 열: 비고 — 이 열의 값은 쓰지 않습니다.',
     ]);
     expect(csvHeaderNotes({ header: false, missing: ['port'] })).toEqual([]);
+  });
+});
+
+describe('말줄임된 이름의 전체 이름(사용자 요청 — 마우스 오버)', () => {
+  it('이름 + IP(같은 이름의 서버를 구분) · 덧붙일 말', () => {
+    expect(nameTitle({ name: 'LESASBPDPNB27', host: '192.168.52.145' })).toBe('LESASBPDPNB27 (192.168.52.145)');
+    expect(nameTitle({ name: 'a', host: '10.0.0.1' }, '눌러서 차트에 고정')).toBe('a (10.0.0.1) — 눌러서 차트에 고정');
+    expect(nameTitle(undefined)).toBe('');
+  });
+  it('화면의 말줄임(fm-ell · fm-name) 요소는 모두 title 을 단다', () => {
+    const src = fs.readFileSync(new URL('./FocusMonTool.jsx', import.meta.url), 'utf8');
+    // 태그 끝은 '=>'(화살표 함수)가 아닌 첫 '>' — 속성 안의 화살표에서 끊기지 않게
+    const tags = [];
+    for (const m of src.matchAll(/<(?:a|span|div|td|button)\b[^<]*?className="[^"]*\bfm-(?:ell|name)\b[^"]*"/g)) {
+      let k = m.index + m[0].length;
+      while (k < src.length && !(src[k] === '>' && src[k - 1] !== '=')) k += 1;
+      tags.push(src.slice(m.index, k + 1));
+    }
+    expect(tags.length).toBeGreaterThan(5);
+    for (const t of tags) expect(t, t.slice(0, 80)).toMatch(/\btitle=/);
   });
 });

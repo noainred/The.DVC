@@ -18,7 +18,7 @@ import { hashSegments } from '../../hooks/hashTab.js';
 import {
   DASH, STATE_TEXT, TEST_TEXT, MODE_TEXT, ENDED_TEXT, TABS, IOSTAT_LABEL, SUMMARY_COLS, METRICS,
   pctText, msText, numText, bpsText, bytesText, sizeText, metricValueText, metricUnitText, iostatText, remainText, clockText, agoShort, etText,
-  levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR, bulkLine, needsRetry, AUTH_HINT,
+  levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR, bulkLine, needsRetry, AUTH_HINT, nameTitle,
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
@@ -113,7 +113,7 @@ function HoverTip({ f, vbw, plot, time, rows, compact = false }) {
     <div className={`fm-tip ${compact ? 'sm' : ''}`} role="status" style={{ left: `${xPct}%`, transform: flip ? 'translateX(calc(-100% - 10px))' : 'translateX(10px)' }}>
       <div className="fm-tip-t">{time == null ? DASH : clockText(time)}</div>
       {rows.map((r) => (
-        <div key={r.key} className="fm-tip-r">{r.color ? <i style={{ background: r.color }} /> : null}<span className="fm-ell">{r.label}</span><b className="fm-num">{r.value}</b></div>
+        <div key={r.key} className="fm-tip-r">{r.color ? <i style={{ background: r.color }} /> : null}<span className="fm-ell" title={String(r.label ?? '')}>{r.label}</span><b className="fm-num">{r.value}</b></div>
       ))}
     </div>
   );
@@ -257,10 +257,10 @@ function Overview({ main, ids, tb, now, onOpen }) {
           return (
             <div key={x.id} className={`fm-card fm-sv ${b?.tone === 'crit' ? 'crit' : ''} ${off ? 'off' : ''}`}>
               <div className="fm-sv-head">
-                <a className="fm-name" href={`#/${BASE.join('/')}/server/${encodeURIComponent(x.id)}`} onClick={(e) => { e.preventDefault(); onOpen(x.id); }}>{x.t.name}</a>
+                <a className="fm-name" title={nameTitle(x.t)} href={`#/${BASE.join('/')}/server/${encodeURIComponent(x.id)}`} onClick={(e) => { e.preventDefault(); onOpen(x.id); }}>{x.t.name}</a>
                 <Badge b={b} />
               </div>
-              <div className="fm-mono fm-dim fm-ell">{x.t.host} · {x.t.agent ? `엣지 ${x.t.agent}` : '중앙'}</div>
+              <div className="fm-mono fm-dim fm-ell" title={`${x.t.host} · ${x.t.agent ? `엣지 ${x.t.agent}` : '중앙'}`}>{x.t.host} · {x.t.agent ? `엣지 ${x.t.agent}` : '중앙'}</div>
               {[['CPU', 'cpu', x.sum?.cpu, levelOf(x.sum?.cpu, settings)], ['메모리', 'mem', x.sum?.mem, levelOf(x.sum?.mem, settings)], ['네트워크', 'net', x.sum?.net, levelOf(x.sum?.net, settings)], ['디스크', 'disk', x.sum?.disk, levelOf(x.sum?.disk, settings)]].map(([lab, k, v, lv]) => (
                 <div key={k} className="fm-mrow"><span className="fm-dim">{lab}</span><span className={`fm-mv ${lv}`}>{v == null ? DASH : `${Math.round(v)}%`}</span><Spark vals={x.series?.[k]} hover={{ from: q.data?.from, to: q.data?.to, label: lab, fmt: (u) => pctText(u) }} /></div>
               ))}
@@ -333,7 +333,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
           </div>
         ) : null}
         <div className="fm-row"><span className="fm-lbl">고정</span>
-          {pinned.map((p) => <span key={p} className="fm-pin"><i style={{ background: pinColor.get(p) }} />{tById.get(p)?.name}<button type="button" aria-label="고정 해제" onClick={() => togglePin(p)}>×</button></span>)}
+          {pinned.map((p) => <span key={p} className="fm-pin" title={nameTitle(tById.get(p))}><i style={{ background: pinColor.get(p) }} />{tById.get(p)?.name}<button type="button" aria-label="고정 해제" onClick={() => togglePin(p)}>×</button></span>)}
           <span className="fm-dim">색은 고정한 서버에만 줍니다(최대 4대 · 처음에는 높은 순 3대) · 나머지는 회색 선 · 순위의 서버 이름을 누르면 고정이 바뀝니다</span>
         </div>
       </div>
@@ -374,7 +374,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
           {ranked.map((r, i) => (
             <div key={r.id} className="fm-rk">
               <span className="fm-dim">{i + 1}</span>
-              <button type="button" className="fm-linkbtn fm-ell" onClick={() => togglePin(r.id)} title="눌러서 차트에 고정">{tById.get(r.id)?.name}</button>
+              <button type="button" className="fm-linkbtn fm-ell" onClick={() => togglePin(r.id)} title={nameTitle(tById.get(r.id), '눌러서 차트에 고정')}>{tById.get(r.id)?.name}</button>
               <span><span className="fm-bar" style={{ width: `${r.last == null ? 0 : Math.max(1.5, (r.last / top) * 100)}%`, background: pinColor.get(r.id) || '#4b5b7a' }} /></span>
               <span className="fm-num">{r.last == null ? DASH : metricValueText(metric, it, r.last)}</span>
             </div>
@@ -387,7 +387,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
         <div className="fm-heat">
           {ranked.map((r) => (
             <div key={r.id} className="fm-hm">
-              <button type="button" className="fm-linkbtn fm-ell" onClick={() => onOpen(r.id)}>{tById.get(r.id)?.name}</button>
+              <button type="button" className="fm-linkbtn fm-ell" onClick={() => onOpen(r.id)} title={nameTitle(tById.get(r.id), '눌러서 서버 상세')}>{tById.get(r.id)?.name}</button>
               <svg viewBox={`0 0 ${r.avg.length || 1} 10`} preserveAspectRatio="none" aria-hidden="true">{r.avg.map((v, k) => <rect key={k} x={k} y="0" width="0.94" height="10" fill={heatColor(v, heatMax)}><title>{`${tById.get(r.id)?.name || r.id} · ${clockText(timeAtIndex(k, r.avg.length, q.data?.from, q.data?.to))} · ${v == null ? '값 없음' : metricValueText(metric, it, v)}`}</title></rect>)}</svg>
               <span className="fm-num">{r.last == null ? DASH : metricValueText(metric, it, r.last)}</span>
             </div>
@@ -424,7 +424,7 @@ function IostatCompare({ main, ids, tb, onOpen }) {
     return (
       <tr key={key}>
         <td><button type="button" className="fm-pk" aria-label="차트에 올리기" style={pinIdx.has(key) ? { background: PIN_COLORS[pinIdx.get(key)], borderColor: PIN_COLORS[pinIdx.get(key)] } : undefined} onClick={() => togglePin(key)} /></td>
-        <td className="fm-mono fm-ell">{merged ? `${tById.get(r.id)?.name} · ` : ''}{d.n}{d.dn ? ` (${d.dn})` : ''}{d.stuck ? <span className="fm-badge crit">응답 없음</span> : null}</td>
+        <td className="fm-mono fm-ell" title={`${merged ? `${nameTitle(tById.get(r.id))} · ` : ''}${d.n}${d.dn ? ` (${d.dn})` : ''}${d.mp ? ` · ${d.mp}` : ''}`}>{merged ? `${tById.get(r.id)?.name} · ` : ''}{d.n}{d.dn ? ` (${d.dn})` : ''}{d.stuck ? <span className="fm-badge crit">응답 없음</span> : null}</td>
         {d.v.map((v, i) => <td key={cols[i]} className="fm-r fm-num" data-sort={v ?? null} style={{ background: cellShade(v, colMax[i]) || undefined }}>{iostatText(cols[i], v)}</td>)}
       </tr>
     );
@@ -479,7 +479,7 @@ function IostatCompare({ main, ids, tb, onOpen }) {
       </div>
       <div className="fm-card">
         <div className="fm-row fm-between"><h3 className="fm-h3">차트에 올린 장치 {pinSeries.length}개 — {main.iostat.names[col]}({IOSTAT_LABEL[col]})</h3>
-          <div className="fm-row">{pinSeries.map((s, i) => <span key={s.pin} className="fm-lg"><i style={{ background: PIN_COLORS[i] }} />{tById.get(s.pin.split('/')[0])?.name} · {s.pin.split('/')[1]}</span>)}</div></div>
+          <div className="fm-row">{pinSeries.map((s, i) => <span key={s.pin} className="fm-lg" title={`${nameTitle(tById.get(s.pin.split('/')[0]))} · ${s.pin.split('/')[1]}`}><i style={{ background: PIN_COLORS[i] }} />{tById.get(s.pin.split('/')[0])?.name} · {s.pin.split('/')[1]}</span>)}</div></div>
         {pinSeries.length ? (
           <div className="fm-chart-wrap fm-chart-box">
             <svg viewBox="0 0 1180 300" role="img" aria-label="차트에 올린 장치의 추이" className="fm-chart">
@@ -612,7 +612,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
               <tbody>{netTree.map(([x, lv]) => (
                 <tr key={x.n}>
                   <td className="fm-mono" style={{ paddingLeft: 12 + lv * 20, fontWeight: lv ? 400 : 600 }}>{x.n}</td>
-                  <td className="fm-dim fm-ell">{x.k === 'bond' ? `${x.md || '본딩'} · 구성원 ${x.mem?.length || 0}개${x.md === 'active-backup' && x.act ? ` · 지금 ${x.act} 사용` : ''}` : x.m ? `${x.m} 구성원${x.act === x.n ? ' · 사용 중' : ''} · 링크 ${x.st === 'up' ? '정상' : x.st || '?'}` : `${x.k === 'phys' ? '단독' : '가상'} · 링크 ${x.st === 'up' ? '정상' : x.st === 'down' ? '끊김(down)' : x.st || '?'}`}</td>
+                  <td className="fm-dim fm-ell" title={x.k === 'bond' ? `${x.md || '본딩'} · 구성원 ${x.mem?.length || 0}개${x.md === 'active-backup' && x.act ? ` · 지금 ${x.act} 사용` : ''}` : x.m ? `${x.m} 구성원${x.act === x.n ? ' · 사용 중' : ''} · 링크 ${x.st === 'up' ? '정상' : x.st || '?'}` : `${x.k === 'phys' ? '단독' : '가상'} · 링크 ${x.st === 'up' ? '정상' : x.st === 'down' ? '끊김(down)' : x.st || '?'}`}>{x.k === 'bond' ? `${x.md || '본딩'} · 구성원 ${x.mem?.length || 0}개${x.md === 'active-backup' && x.act ? ` · 지금 ${x.act} 사용` : ''}` : x.m ? `${x.m} 구성원${x.act === x.n ? ' · 사용 중' : ''} · 링크 ${x.st === 'up' ? '정상' : x.st || '?'}` : `${x.k === 'phys' ? '단독' : '가상'} · 링크 ${x.st === 'up' ? '정상' : x.st === 'down' ? '끊김(down)' : x.st || '?'}`}</td>
                   <td className="fm-r fm-num" data-sort={x.sp ?? null}>{x.sp == null ? DASH : x.sp >= 1000 ? `${x.sp / 1000} Gb` : `${x.sp} Mb`}</td>
                   <td data-sort={x.u ?? null}><span className="fm-meter"><span className="t"><span className={`f ${levelOf(x.u, settings)}`} style={{ width: `${Math.min(100, x.u ?? 0)}%` }} /></span><span className="fm-num">{pctText(x.u)}</span></span></td>
                   <td className="fm-r fm-num" data-sort={x.rx ?? null}>{bpsText(x.rx)}</td>
@@ -694,7 +694,7 @@ function Procs({ main, ids, tb, onOpen }) {
   const prow = (p, i, id) => (
     <tr key={`${id}-${p.pid}-${i}`}>
       <td className="fm-dim fm-num">{i + 1}</td>
-      <td><button type="button" className="fm-linkbtn" onClick={() => onOpen(id)}>{tById.get(id)?.name}</button></td>
+      <td><button type="button" className="fm-linkbtn" onClick={() => onOpen(id)} title={nameTitle(tById.get(id))}>{tById.get(id)?.name}</button></td>
       <td className="fm-r fm-mono fm-num">{p.pid}</td>
       <td className="fm-mono">{p.u || DASH}</td>
       <td data-sort={cpuOf(p) ?? null}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, ((cpuOf(p) ?? 0) / topCpu) * 100)}%` }} /></span><span className="fm-num">{pctText(cpuOf(p), 1)}</span></span></td>
@@ -720,7 +720,7 @@ function Procs({ main, ids, tb, onOpen }) {
           <div className="fm-pad fm-row fm-between"><h3 className="fm-h3">이름별 묶음 — {ids.length}대 합</h3><span className="fm-dim">이름 = comm · 숫자 덩어리는 * 로 묶음(ora_p001 · ora_p007 → ora_p*)</span></div>
           <STable className="fm-table" minWidth={620}>
             <thead><tr><th>이름</th><th>CPU 합(1코어 = 100%)</th><th className="fm-r">프로세스</th><th>서버</th></tr></thead>
-            <tbody>{d.groups.filter((g) => !f || g.name.toLowerCase().includes(f)).map((g) => <tr key={g.name}><td className="fm-mono">{g.name}</td><td data-sort={g.cpu}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, (g.cpu / (d.groups[0]?.cpu || 1)) * 100)}%` }} /></span><span className="fm-num">{pctText(g.cpu, 1)}</span></span></td><td className="fm-r fm-num">{g.procs}</td><td className="fm-ell">{g.servers.map((s) => tById.get(s)?.name).join(', ')}</td></tr>)}</tbody>
+            <tbody>{d.groups.filter((g) => !f || g.name.toLowerCase().includes(f)).map((g) => <tr key={g.name}><td className="fm-mono">{g.name}</td><td data-sort={g.cpu}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, (g.cpu / (d.groups[0]?.cpu || 1)) * 100)}%` }} /></span><span className="fm-num">{pctText(g.cpu, 1)}</span></span></td><td className="fm-r fm-num">{g.procs}</td><td className="fm-ell" title={g.servers.map((s) => nameTitle(tById.get(s))).join(', ')}>{g.servers.map((s) => tById.get(s)?.name).join(', ')}</td></tr>)}</tbody>
           </STable>
           <div className="fm-note fm-pad">서버마다 상위 30개만 받으므로 그 밖의 프로세스는 합에 들어가지 않습니다.</div>
         </div>

@@ -246,6 +246,15 @@ export function csvHeaderNotes(plan) {
 }
 export const nodeText = (agent) => (agent ? `엣지 ${agent}` : '중앙');
 
+/**
+ * 말줄임된 서버 이름에 마우스를 올렸을 때 보일 전체 이름(v2.978 사용자 요청 — '마우스 오버하면 생략된 이름 모두 보이게').
+ * 표시 이름이 같은 서버가 여럿일 수 있어(한 서버의 두 주소 등) IP 를 붙여 구분한다. 대상이 없으면 빈 글자(제목 없음).
+ */
+export function nameTitle(t, extra = '') {
+  if (!t) return '';
+  return `${t.name || ''}${t.host ? ` (${t.host})` : ''}${extra ? ` — ${extra}` : ''}`;
+}
+
 /** 갱신 줄의 바뀌는 칸 — ‘계정 root → dvcmon’ 처럼. */
 export function csvChangeText(row) {
   if (!row || row.action !== 'update') return '';
