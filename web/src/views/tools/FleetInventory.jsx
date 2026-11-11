@@ -131,16 +131,15 @@ export function FleetInventory({ isAdmin }) {
     finally { setBusy(''); }
   };
   // v2.969: 법인(DataCenter) 지정/해제('' = 자동 판정으로). 키는 vCenter 지정과 같은 tagKey.
+  //   반증 F9: 키가 없으면 던진다(호출부 catch 가 오류로 보인다 — null 을 돌려 오류를 지우지 않게). 다시 읽기는 호출부가 한 번만.
   const setDc = async (rows, dcId) => {
     const items = rows.map((row) => ({ key: tagKeyOf(row) })).filter((x) => x.key);
-    if (!items.length) { setErr('이 항목은 식별 키가 없어 법인을 지정할 수 없습니다(서비스태그/호스트명 필요).'); return null; }
-    const done = dcAssignDoneText(await putJson('/insights/fleet/dc-assign', { items, datacenterId: dcId }));
-    await load();
-    return done;
+    if (!items.length) throw new Error('고른 항목에 식별 키가 없어 법인을 지정할 수 없습니다(서비스태그/호스트명 필요).');
+    return dcAssignDoneText(await putJson('/insights/fleet/dc-assign', { items, datacenterId: dcId }));
   };
   const setDcOne = async (row, dcId) => {
     setBusy(rowKey(row)); setNotice('');
-    try { const t = await setDc([row], dcId); if (t) { setErr(null); setNotice(t); } }
+    try { const t = await setDc([row], dcId); await load(); setErr(null); setNotice(t); }
     catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
@@ -229,7 +228,7 @@ export function FleetInventory({ isAdmin }) {
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
           {d.mode === 'edge' ? '이 엣지 포탈은 자기 데이터센터에 등록된 서버만 보여줍니다(로컬 검색). 중앙으로 베어메탈을 보고합니다. ' : (d.mode === 'central' ? `중앙 포탈 — 법인(DataCenter) 필터로 법인별 검색이 가능합니다. ${s.edgeReported ? `🛰 엣지 ${s.edgeAgents}곳에서 ${s.edgeReported}대 집계. ` : ''}` : '')}
-          법인은 서버 분석 화면과 같은 <b>법인(DataCenter)</b>입니다(스캔 등록 법인 → vCenter 에 할당된 법인). 베어메탈 행에서 <b>법인</b>과 <b>vCenter</b>(전력 · 사용률 귀속)를 따로 지정할 수 있고, 자동 분류가 틀리면 분류도 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.
+          법인은 <b>법인(DataCenter)</b>입니다 — 자동 판정은 서버 분석 화면과 같은 규칙(스캔 등록 법인 → vCenter 에 할당된 법인)이고, 이 화면에서 <b>수동으로 지정한 법인</b>은 이 화면과 하드웨어 내보내기에만 쓰입니다(서버 분석 화면은 자동 판정 그대로). 베어메탈 행에서 <b>법인</b>과 <b>vCenter</b>(전력 · 사용률 귀속)를 따로 지정할 수 있고, 자동 분류가 틀리면 분류도 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.
         </div>
       </div>
 
@@ -255,6 +254,7 @@ export function FleetInventory({ isAdmin }) {
       {d && fleetPartialsNote(d.fleetPartials) && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ {fleetPartialsNote(d.fleetPartials)}</div>}
       {/* v2.744(감사 후속 FC — EDGE-01): 엣지가 iDRAC 등록부를 읽지 못해 중앙이 그 엣지의 직전 목록을 유지 중 — 행에는 짧은 표지, 설명은 여기 한 번. */}
       {d && fleetHeldNote(d.fleetPartials) && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ {fleetHeldNote(d.fleetPartials)}</div>}
+      {d.dcAssignUnreadable && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ 법인 수동 지정 파일(fleet-dc-assign.json)을 읽지 못했습니다 — 수동으로 지정한 서버가 지금은 자동 판정으로 보이고, 새 지정은 저장되지 않습니다. 설정 폴더의 손상 사본(.corrupt)을 확인하세요.</div>}
       {notice && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--green)', fontSize: 13, alignItems: 'center' }}><span>✓ {notice}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setNotice('')}>✕</button></div>}
       {isAdmin && s.ghostKeys > 0 && (
         <div className="card flex between wrap gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', alignItems: 'center' }}>

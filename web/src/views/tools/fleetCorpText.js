@@ -27,5 +27,8 @@ export function dcAssignDoneText(r) {
   if (!r || r.ok === false) throw new Error(r?.reason || '법인 지정에 실패했습니다.');
   const c = Number.isFinite(r.changed) ? r.changed : null; const t = Number.isFinite(r.total) ? r.total : null;
   if (c == null || t == null) return '법인 지정 요청을 서버가 받았습니다(처리 대수는 응답에 없습니다).';
-  return `${t}대 중 ${c}대의 법인 지정을 바꿨습니다${c < t ? '(나머지는 이미 같은 값)' : ''}.`;
+  const sk = Number.isFinite(r.skipped) ? r.skipped : 0;   // 반증 F6: 형식 밖으로 건너뛴 수는 '이미 같은 값' 과 따로 말한다
+  const same = t - c - sk;
+  const tail = [same > 0 ? `${same}대는 이미 같은 값` : null, sk > 0 ? `${sk}대는 키 형식이 맞지 않아 건너뜀` : null].filter(Boolean).join(' · ');
+  return `${t}대 중 ${c}대의 법인 지정을 바꿨습니다${tail ? `(${tail})` : ''}.`;
 }

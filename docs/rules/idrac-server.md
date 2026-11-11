@@ -1468,6 +1468,10 @@
     ⚠ **iDRAC 등록부의 datacenterId 를 고치지 않는다** — 그 값은 스캔 대역의 귀속이라 같은 법인 '교체' 스캔이 그 법인 항목을 지우고 다시 넣는다(registry.js replaceScanned).
     손상 파일은 보존하고 **정상 파일을 다시 읽을 때까지 쓰기 거부(503)**. vCenter 지정(fleetAssign — 전력 · 사용률 귀속)은 'vCenter' 열에 그대로 있다.
     ⚠ **서버 분석 화면(상태 보드 등)은 이 수동 지정을 보지 않는다**(서버 분석 목록 `analysisServersWithRemote` 는 등록부 · 스캔 대역만 본다) — 수동 지정한 서버는 두 화면의 법인이 다를 수 있다(다음 점검 후보).
-    수동 지정 키의 유령 정리(prune)는 아직 없다(없는 서버의 키는 판정에 쓰이지 않을 뿐 남는다). 회귀 `server/test/fleetCorp2969.test.js`(변이 11/11).
+    **반증 1인(2026-11-11) 확정 → 수정**: F1 수동 지정은 **저장 키(tagKey)로만** 찾는다(이름으로도 찾던 첫 판은 같은 사설 IP 이름의 다른 법인 서버가 지정을 가로챘다 — 재현) ·
+    F3 쓰기 게이트는 `fullReadWriteScopeOnlyWith`(writeVcenters 로 줄어든 관리자도 403) · F4 손상 사본(.corrupt)이 있으면 **재시작 뒤에도** 쓰기 거부 + 화면 경고(`dcAssignUnreadable`) ·
+    F5 유령 키 보고 · 정리에 법인 지정 키 포함 · F6 건너뛴 키 수(`skipped`) · F7 법인 목록이 비면 503(이유) · F8 /fleet 캐시 키에 1분 칸(ETag 304 가 옛 법인을 붙잡지 않게) ·
+    F9 일괄 지정 오류 처리. 회귀 `server/test/fleetCorp2969.test.js`(변이 18건 — 첫 판 11/11 · 반증 수정 7건 중 6건 + F1 은 수정 전 판으로 되돌린 변이로 확인).
+    ⚠ F2(수동 지정을 서버 분석 판정에도 넣을지)는 **사용자 결정 대기** — 지금은 이 화면 · 하드웨어 내보내기 전용이고 화면 안내문에 그렇게 적었다.
   - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
 

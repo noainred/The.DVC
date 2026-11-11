@@ -48,13 +48,15 @@ export function buildDcIndex(servers = [], dcOfVc = () => '') {
  */
 export function makeCorpOf({ index, dcOfVc, dcName, vcName, agentDc = () => '', manual = null, knownDc = null }) {
   const dc = (id, src) => ({ id, name: t(dcName(id)) || id, src });
+  // 반증 F1(2026-11-11 — 재현): 이름(name)으로는 찾지 않는다 — 태그 없는 iDRAC 은 IP 로 등록돼 이름이 사설 IP 이고 IP 는 법인끼리 겹친다
+  //   (server/CLAUDE.md 8a '서버 대상 = (법인, 키) 쌍'). 저장 키는 화면이 보내는 tagKey 하나(서비스태그 우선, 없으면 서버 id — 서버 id 는
+  //   등록부 id · 'remote:<수집>:<id>' 로 법인 사이에 겹치지 않는다). 객체 조회는 자기 키만(Object.hasOwn — 'constructor' 같은 키).
   const manualOf = (row) => {
     if (!manual) return '';
-    for (const k of [row?.tagKey, row?.serviceTag, row?.serverId, row?.name]) {
-      const v = t(manual[low(k)]);
-      if (low(k) && v && (!knownDc || knownDc.has(v))) return v;
-    }
-    return '';
+    const k = low(row?.tagKey);
+    if (!k || !Object.hasOwn(manual, k)) return '';
+    const v = t(manual[k]);
+    return v && (!knownDc || knownDc.has(v)) ? v : '';
   };
   return (row, kind) => {
     const vc = t(row?.vcenterId);

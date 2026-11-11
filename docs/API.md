@@ -108,26 +108,26 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/anomalies` | — | [server/src/routes/insights.js:572](../server/src/routes/insights.js#L572) |
-| POST | `/chatops` | — | [server/src/routes/insights.js:640](../server/src/routes/insights.js#L640) |
+| GET | `/anomalies` | — | [server/src/routes/insights.js:580](../server/src/routes/insights.js#L580) |
+| POST | `/chatops` | — | [server/src/routes/insights.js:648](../server/src/routes/insights.js#L648) |
 | GET | `/finops` | — | [server/src/routes/insights.js:119](../server/src/routes/insights.js#L119) |
 | GET | `/finops/config` | — | [server/src/routes/insights.js:143](../server/src/routes/insights.js#L143) |
 | PUT | `/finops/config` | 역할 `admin` · `fleetOnly` | [server/src/routes/insights.js:173](../server/src/routes/insights.js#L173) |
 | GET | `/fleet` | — | [server/src/routes/insights.js:181](../server/src/routes/insights.js#L181) |
-| PUT | `/fleet/assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:430](../server/src/routes/insights.js#L430) |
-| PUT | `/fleet/assign-bulk` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:446](../server/src/routes/insights.js#L446) |
-| PUT | `/fleet/dc-assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:219](../server/src/routes/insights.js#L219) |
-| GET | `/fleet/hardware-export` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:359](../server/src/routes/insights.js#L359) |
-| GET | `/fleet/hardware-meta` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:336](../server/src/routes/insights.js#L336) |
-| PUT | `/fleet/hardware-prefs` | 역할 `admin/operator` · 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:351](../server/src/routes/insights.js#L351) |
-| POST | `/fleet/prune` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:494](../server/src/routes/insights.js#L494) |
-| PUT | `/fleet/tag` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:402](../server/src/routes/insights.js#L402) |
-| GET | `/forecast` | — | [server/src/routes/insights.js:593](../server/src/routes/insights.js#L593) |
-| GET | `/graph` | — | [server/src/routes/insights.js:619](../server/src/routes/insights.js#L619) |
-| GET | `/incidents` | — | [server/src/routes/insights.js:634](../server/src/routes/insights.js#L634) |
+| PUT | `/fleet/assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:437](../server/src/routes/insights.js#L437) |
+| PUT | `/fleet/assign-bulk` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:453](../server/src/routes/insights.js#L453) |
+| PUT | `/fleet/dc-assign` | 역할 `admin` · `fleetFullRwOnly` | [server/src/routes/insights.js:222](../server/src/routes/insights.js#L222) |
+| GET | `/fleet/hardware-export` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:366](../server/src/routes/insights.js#L366) |
+| GET | `/fleet/hardware-meta` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:343](../server/src/routes/insights.js#L343) |
+| PUT | `/fleet/hardware-prefs` | 역할 `admin/operator` · 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:358](../server/src/routes/insights.js#L358) |
+| POST | `/fleet/prune` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:501](../server/src/routes/insights.js#L501) |
+| PUT | `/fleet/tag` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:409](../server/src/routes/insights.js#L409) |
+| GET | `/forecast` | — | [server/src/routes/insights.js:601](../server/src/routes/insights.js#L601) |
+| GET | `/graph` | — | [server/src/routes/insights.js:627](../server/src/routes/insights.js#L627) |
+| GET | `/incidents` | — | [server/src/routes/insights.js:642](../server/src/routes/insights.js#L642) |
 | GET | `/power-breakdown` | — | [server/src/routes/insights.js:146](../server/src/routes/insights.js#L146) |
-| GET | `/security` | — | [server/src/routes/insights.js:606](../server/src/routes/insights.js#L606) |
-| GET | `/topology` | — | [server/src/routes/insights.js:609](../server/src/routes/insights.js#L609) |
+| GET | `/security` | — | [server/src/routes/insights.js:614](../server/src/routes/insights.js#L614) |
+| GET | `/topology` | — | [server/src/routes/insights.js:617](../server/src/routes/insights.js#L617) |
 
 ## `/api/central`
 
@@ -1660,11 +1660,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `express.json` | 9 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |
 | `commenters` | 8 | **admin·operator 또는 권한 키 `issues.request`**(v2.881 위키 — 댓글 · 지켜보기. 데모 계정 제외 · 문서의 스페이스가 쓰기 범위 안이어야 한다 — 저장소 `addComment`). |
 | `authMiddleware` | 8 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |
-| `fleetFullScopeOnly` | 5 | **전체 범위 계정만**(통합 서버 인벤토리 변경 — v2.606 AUTHZ2606-01). 베어메탈은 귀속 전에는 법인 축이 없어 범위로 나눌 수 없고, 귀속을 바꾸는 쓰기가 읽기 범위를 넓히므로 범위 제한 계정은 403. |
 | `noDemo` | 4 | **데모(손님) 계정 403**(7b 서버 등록 — `isDemoGuest`). 관리자 게이트 뒤에 붙는 쓰기 거절이고 권한을 넓히지 않는다. |
 | `prefsWrite` | 4 | VM 목록 내보내기 내 저장값 쓰기(v2.798) — **데모 손님 403** · 저장 키는 인증된 계정 이름(본문 값 무시) · 손상 파일이면 503 · 감사 로그. |
 | `templateFleetOnly` | 4 | **전체 범위 계정만**(v2.889 — 위키 관리자 템플릿: 모든 스페이스의 새 문서 화면에 보이는 전 법인 공용 설정). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
 | `requireEnrolled` | 4 | OTP **강제 등록 미완료 세션을 차단**한다(v2.206). 부트스트랩 admin 이 등록 전에 API 를 쓰지 못하게 하는 게이트로, 대부분의 `/api/*` 는 마운트에서 이미 걸린다 — 여기 보이는 것은 `/api/auth` 안의 admin 라우트처럼 **라우터가 따로 건** 경우다. |
+| `fleetFullScopeOnly` | 4 | **전체 범위 계정만**(통합 서버 인벤토리 변경 — v2.606 AUTHZ2606-01). 베어메탈은 귀속 전에는 법인 축이 없어 범위로 나눌 수 없고, 귀속을 바꾸는 쓰기가 읽기 범위를 넓히므로 범위 제한 계정은 403. |
 | `express.raw` | 3 | 원시 바디 버퍼(업그레이드 번들 등). ⚠ 게이트가 아니다 — 인증을 이 앞에 두어 미인증 요청이 대용량 바디를 적재하지 못하게 한다. |
 | `noticeFleetOnly` | 3 | **전체 범위 계정만**(v2.722 — 접속 공지 작성·수정·삭제. 공지는 전 법인 사용자에게 보인다). 범위 제한 계정은 403. |
 | `auditMiddleware` | 3 | 상태변경 감사 로그 기록. |
@@ -1685,6 +1685,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `uploadPrecheck` | 1 | **첨부 올리기 사전 검사**(v2.904 — 본문을 받기 전에): 데모 계정 403 · 주인(문서 · 이슈)을 볼 수 없으면 404(존재 은닉) · 쓰기 범위 밖이거나 읽기 전용이면 403. 본문(최대 8MB)은 이 검사를 통과한 뒤에만 받는다. |
 | `settingsFleetOnly` | 1 | **전체 범위 계정만**(v2.633 — 손상 보존본만 남은 중앙 설정 파일을 기본값으로 확정. 그 기본값이 모든 엣지에 배포된다). 범위 제한 계정은 403. |
 | `csvPermIfDownload` | 1 | `csvPerm` 과 같되 **download=1(파일 내보내기)일 때만** 요구한다 — 화면 조회(JSON)는 통과(v2.741 AUTHZ-02 — VMware 구성 백업). |
+| `fleetFullRwOnly` | 1 | **조회 · 쓰기 모두 전체 범위 계정만**(통합 서버 인벤토리 법인(DataCenter) 지정 — v2.969). 쓰기 범위(writeVcenters)가 줄어든 관리자도 403(isFullReadWriteScope). |
 | `csvPermUnlessJson` | 1 | `csvPerm` 과 같되 **format=json(화면의 표·붙여넣기 등록)은 통과**(v2.643 — 성능점검 대상 등록 마법사). |
 
 ---

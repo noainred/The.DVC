@@ -33,6 +33,7 @@ import { allOmeDevices, dbKey, getOmeEntry } from '../idrac/omeCache.js';
 import { getInventory } from '../idrac/invCache.js';
 import { loadFleetTags } from './fleetTags.js';
 import { loadFleetAssign } from './fleetAssign.js';
+import { loadFleetDcAssign } from './fleetDcAssign.js';
 import { getEdgeFleetServers, listEdgeFleet, UNREADABLE_HOLD_MS } from '../central/fleet.js';
 // v2.783(점검 Q2 P-B3): 유령 키 판정이 보는 원격 수집(collector pull) 출처 — 인벤토리·전력·수집 서버 등록부·수신 상태.
 import { remotePowerEntries, getCollectorStatus } from '../collector/state.js';
@@ -571,12 +572,14 @@ export function fleetLiveKeys(snap) {
  * ghostKeys 는 tags ∪ assign 의 **고유 키 수**(화면 숫자와 미리보기 숫자가 같은 단위), tags·assign 은 저장소별 키 목록.
  * @returns {{ ghostKeys:number, keys:string[], tags:string[], assign:string[], unreadable:object[], blocked:boolean }}
  */
-export function fleetGhostReport(snap, { tags = loadFleetTags(), assign = loadFleetAssign(), now = Date.now(), collectors = null } = {}) {
+export function fleetGhostReport(snap, { tags = loadFleetTags(), assign = loadFleetAssign(), dcAssign = loadFleetDcAssign(), now = Date.now(), collectors = null } = {}) {
   const { live, unreadable } = fleetKeySources(snap, { now, collectors });
   const tagKeys = Object.keys(tags || {}).filter((k) => !live.has(k)).sort();
   const assignKeys = Object.keys(assign || {}).filter((k) => !live.has(k)).sort();
-  const keys = [...new Set([...tagKeys, ...assignKeys])].sort();
-  return { ghostKeys: keys.length, keys, tags: tagKeys, assign: assignKeys, unreadable, blocked: unreadable.length > 0 };
+  // v2.969(반증 F5): 법인(DataCenter) 수동 지정(fleetDcAssign)도 같은 판정으로 — 폐기된 서버의 지정이 IP 를 다시 쓰는 서버로 넘어가지 않게.
+  const dcKeys = Object.keys(dcAssign || {}).filter((k) => !live.has(k)).sort();
+  const keys = [...new Set([...tagKeys, ...assignKeys, ...dcKeys])].sort();
+  return { ghostKeys: keys.length, keys, tags: tagKeys, assign: assignKeys, dcAssign: dcKeys, unreadable, blocked: unreadable.length > 0 };
 }
 
 /** 이 인스턴스 역할: 중앙(central) / 엣지(edge=중앙에 push하는 에이전트) / 단독(standalone). */
