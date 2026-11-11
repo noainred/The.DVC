@@ -20,6 +20,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements } from '../util/registryCore.js';
 import { strictIpv4Num } from '../util/ipv4.js';
 import { ipBlockReason } from '../util/ssrfBlock.js';
+import { parseCsvRows, unguardCell } from '../util/csv.js';
 
 const FILE = () => path.join(config.configDir, 'focusmon-targets.json');
 export const MAX_TARGETS = 500;
@@ -29,6 +30,8 @@ const AGENT_RE = /^[^\s/\\]{1,128}$/;
 
 export const SETTING_RANGES = Object.freeze({
   retentionDays: [1, 90, 30], capGb: [1, 2000, 20], warnPct: [50, 99, 80], critPct: [51, 100, 90], wAwaitWarnMs: [1, 10000, 20],
+  // v2.978: 맡은 서버가 있는 엣지가 쉬는 동안 중앙을 조회하는 주기(초) — 깨우기가 닿지 않는 중계 엣지의 시작 지연(예전 30초 고정)
+  edgeIdleSec: [5, 60, 10],
 });
 export const DEFAULT_SETTINGS = Object.freeze(Object.fromEntries(Object.entries(SETTING_RANGES).map(([k, v]) => [k, v[2]])));
 
@@ -158,30 +161,168 @@ export function saveSettings(body = {}) {
   return { ok: true, settings: { ...next }, changed };
 }
 
-/**
- * CSV 가져오기(이름,IP,포트,계정,담당 노드) — 줄마다 검사하고 **전부 맞을 때만** 한 번에 넣는다(일부만 들어가 반쯤 바뀐 등록부를 만들지 않는다).
- * 첫 줄이 머리글이면 건너뛴다. 상한 200줄.
+/* ── CSV 대량 등록(v2.978 — 사용자 'Csv 대량 서버 등록') ─────────────────────────────────────────────
+ *  · 미리보기(planCsv)와 적용(applyCsv)을 나눈다 — 적용은 **본문을 다시 계획**한다(화면이 보낸 계획을 믿지 않는다).
+ *  · 줄마다 add(새로) · update(같은 IP · 포트가 이미 있음 → 이름 · 계정 · 담당 노드를 바꿈) · same(바뀐 것 없음) · error.
+ *    같은 IP · 포트의 대상이 둘 이상이면(계정 · 노드가 다른 등록) 어느 것을 바꿀지 모르므로 오류로 둔다. 같은 파일 안 같은 IP · 포트도 뒤 줄이 오류.
+ *  · 적용 방식: 'valid'(맞는 줄만) · 'all'(오류가 하나라도 있으면 아무것도 넣지 않는다). 한 번에 MAX_TARGETS 줄 · 등록 상한도 MAX_TARGETS.
+ *  · 파서는 util/csv.js parseCsvRows(따옴표 · 탭 · BOM · 스캔 중 상한) + unguardCell(내보내기의 수식 가드 '=' 앞 따옴표를 되돌린다).
+ *  · 머리글이 있으면 이름으로 열을 찾는다(순서 무관) — 없으면 이름, IP, 포트, 계정, 담당 노드 순서. 담당 노드 칸의 ‘중앙’ · central · 빈 칸 = 중앙.
  */
-export function importCsv(text, { agents = [], by = '' } = {}) {
-  const w = writeRefusal(); if (w) return w;
-  const lines = String(text || '').slice(0, 200_000).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (lines.length && /^(이름|name)\s*,/i.test(lines[0])) lines.shift();
-  if (!lines.length) return { ok: false, code: 'empty', reason: '가져올 줄이 없습니다.' };
-  if (lines.length > 200) return { ok: false, code: 'too-many', reason: '한 번에 200줄까지 가져옵니다.' };
-  const cur = load();
-  const adds = []; const errors = [];
-  lines.forEach((l, i) => {
-    const f = l.split(',').map((x) => x.trim().replace(/^"(.*)"$/, '$1'));
-    const agentRaw = f[4] || '';
-    const c = checkTargetInput({ name: f[0], host: f[1], port: f[2] || 22, username: f[3], agent: /^(중앙|central)$/i.test(agentRaw) ? '' : agentRaw }, { agents });
-    if (!c.ok) { errors.push({ line: i + 1, code: c.code, reason: c.reason }); return; }
-    if ([...cur.targets, ...adds].some((t) => sameEndpoint(t, c.value))) { errors.push({ line: i + 1, code: 'duplicate', reason: '이미 있는 대상입니다.' }); return; }
-    adds.push({ id: `fm-${crypto.randomBytes(5).toString('hex')}`, ...c.value, createdAt: Date.now(), createdBy: s(by, 64) });
+export const CSV_MAX_ROWS = MAX_TARGETS;
+export const CSV_MAX_BYTES = 200_000; // 500줄 × 줄당 최대 약 400자 — API 본문 상한(JSON) 안
+/** 머리글 이름 → 필드(공백 · _ · - · 점 · 괄호를 빼고 소문자로 비교 — 'SSH Port' · 'Port No' · '포트번호' · '담당 엣지' 모두 읽는다 · 반증 4). */
+const HEAD_ALIASES = Object.freeze({
+  name: ['이름', '표시이름', '서버이름', '서버명', '호스트이름', '호스트명', 'name', 'displayname', 'servername', 'hostname'],
+  host: ['ip', 'ip주소', '주소', '아이피', 'host', 'address', 'ipaddress', 'ipaddr', 'hostip', 'serverip'],
+  port: ['포트', 'ssh포트', '포트번호', 'port', 'sshport', 'portno', 'portnumber'],
+  username: ['계정', '계정명', '사용자', '사용자명', 'user', 'username', 'account', 'login', 'sshuser'],
+  agent: ['담당', '담당노드', '담당엣지', '노드', '엣지', '엣지이름', 'agent', 'node', 'edge', 'collector'],
+});
+const headKey = (c) => String(c || '').toLowerCase().replace(/[\s_\-·.()]/g, '');
+const DEFAULT_COLS = Object.freeze(['name', 'host', 'port', 'username', 'agent']);
+
+/** 머리글 행이면 열 → 필드 표, 아니면 null. 이름 · IP 두 열이 다 있어야 머리글로 본다. */
+export function csvHeaderMap(row) {
+  const map = {}; const ignored = [];
+  (row || []).forEach((cell, i) => {
+    const c = headKey(cell);
+    if (!c) return;
+    const hit = Object.entries(HEAD_ALIASES).find(([k, list]) => list.includes(c) && map[k] == null);
+    if (hit) map[hit[0]] = i; else ignored.push(String(cell).trim().slice(0, 40));
   });
-  if (errors.length) return { ok: false, code: 'invalid-rows', reason: `${errors.length}줄이 맞지 않아 아무것도 넣지 않았습니다.`, errors: errors.slice(0, 50) };
-  if (cur.targets.length + adds.length > MAX_TARGETS) return { ok: false, code: 'too-many', reason: `등록은 ${MAX_TARGETS}대까지입니다.` };
-  persist({ ...cur, targets: [...cur.targets, ...adds] });
-  return { ok: true, added: adds.length };
+  if (map.name == null || map.host == null) return null;
+  Object.defineProperty(map, 'ignored', { value: ignored.slice(0, 20), enumerable: false });
+  return map;
+}
+const keyOf = (host, port) => `${host}:${port}`;
+
+/**
+ * 계획 — 아무것도 쓰지 않는다.
+ * @returns {{ok:true, rows:object[], counts:object, header:boolean} | {ok:false, code, reason}}
+ */
+export function planCsv(text, { agents = [] } = {}) {
+  const raw = String(text ?? '');
+  if (raw.length > CSV_MAX_BYTES) return { ok: false, code: 'too-big', reason: `CSV 는 ${Math.round(CSV_MAX_BYTES / 1000)}KB 까지 받습니다.` };
+  let table;
+  try { table = parseCsvRows(raw, { maxRows: CSV_MAX_ROWS + 100, maxCell: 300, keepBlank: true }); } // 빈 줄 여유 100 — 서버 줄 수는 아래에서 센다
+  catch (e) { return { ok: false, code: 'bad-csv', reason: String(e?.message || e).slice(0, 200) }; }
+  // 줄 번호 = 엑셀 행 번호(레코드 순번 · 머리글 포함 · 빈 줄도 센다) — 빈 줄을 거르기 **전에** 붙인다.
+  table = table.map((r, i) => ({ r: Array.isArray(r) ? r : [], line: i + 1 })).filter((x) => x.r.some((c) => String(c || '').trim()));
+  if (!table.length) return { ok: false, code: 'empty', reason: '가져올 줄이 없습니다.' };
+  const head = csvHeaderMap(table[0].r);
+  const body = head ? table.slice(1) : table;
+  if (!body.length) return { ok: false, code: 'empty', reason: '머리글만 있고 서버 줄이 없습니다.' };
+  if (body.length > CSV_MAX_ROWS) return { ok: false, code: 'too-many', reason: `한 번에 ${CSV_MAX_ROWS}줄까지 가져옵니다.` };
+  const col = head || Object.fromEntries(DEFAULT_COLS.map((k, i) => [k, i]));
+  const cur = load();
+  const byKey = new Map();
+  for (const t of cur.targets) { const k = keyOf(t.host, t.port); byKey.set(k, [...(byKey.get(k) || []), t]); }
+  const seen = new Set();
+  const rows = [];
+  body.forEach(({ r, line }) => {
+    const cell = (k) => (col[k] == null ? '' : unguardCell(String(r[col[k]] ?? '')).trim());
+    const agentRaw = cell('agent');
+    const input = { name: cell('name'), host: cell('host'), port: cell('port') || 22, username: cell('username'), agent: /^(중앙|central)$/i.test(agentRaw) ? '' : agentRaw };
+    const c = checkTargetInput(input, { agents });
+    const shown = { name: input.name.slice(0, 64), host: input.host.slice(0, 64), port: String(input.port).slice(0, 8), username: input.username.slice(0, 32), agent: String(input.agent).slice(0, 128) };
+    if (!c.ok) { rows.push({ line, action: 'error', code: c.code, field: c.field || null, reason: c.reason, input: shown }); return; }
+    const v = c.value;
+    const k = keyOf(v.host, v.port);
+    if (seen.has(k)) { rows.push({ line, action: 'error', code: 'dup-in-file', reason: '같은 파일에 같은 IP · 포트가 앞에 있습니다.', input: shown }); return; }
+    seen.add(k);
+    const hits = byKey.get(k) || [];
+    if (hits.length > 1) { rows.push({ line, action: 'error', code: 'ambiguous', reason: `같은 IP · 포트의 대상이 ${hits.length}개 있어 어느 것을 바꿀지 모릅니다 — 화면에서 하나씩 고치세요.`, input: shown }); return; }
+    if (!hits.length) { rows.push({ line, action: 'add', value: v }); return; }
+    const t = hits[0];
+    // 계정은 대소문자가 다른 계정이다(리눅스) — 노드 이름만 대소문자를 무시한다(checkTargetInput 이 정식 이름으로 바꿔 둔다).
+    const changes = ['name', 'username', 'agent'].filter((f) => (f === 'agent' ? String(t[f] || '').toLowerCase() !== String(v[f] || '').toLowerCase() : String(t[f] || '') !== String(v[f] || '')));
+    rows.push({ line, action: changes.length ? 'update' : 'same', id: t.id, value: v, before: { name: t.name, username: t.username, agent: t.agent }, changes });
+  });
+  const counts = { add: 0, update: 0, same: 0, error: 0 };
+  for (const r of rows) counts[r.action] += 1;
+  const after = cur.targets.length + counts.add;
+  // 머리글이 있는데 선택 열(포트 · 계정 · 담당 노드)을 못 찾았으면 기본값이 들어간다는 것을 말한다(조용한 기본값 금지 — 반증 4).
+  const missing = head ? ['port', 'username', 'agent'].filter((k) => head[k] == null) : [];
+  return { ok: true, header: !!head, rows, counts, total: rows.length, registered: cur.targets.length, max: MAX_TARGETS, overCap: after > MAX_TARGETS,
+    ignored: head ? head.ignored : [], missing };
+}
+
+/**
+ * 적용 — 본문을 다시 계획하고 한 번에 쓴다(한 번의 원자적 쓰기).
+ * @param {{mode?:'valid'|'all', update?:boolean}} o  update=false 면 갱신 줄은 건너뛴다(추가만).
+ * @returns {{ok:true, added:number, updated:number, skipped:number, errors:number, ids:string[], moved:string[]} | {ok:false,...}}
+ */
+export function applyCsv(text, { agents = [], by = '', mode = 'valid', update = true } = {}) {
+  const w = writeRefusal(); if (w) return w;
+  const plan = planCsv(text, { agents });
+  if (!plan.ok) return plan;
+  if (mode === 'all' && plan.counts.error) {
+    const errors = plan.rows.filter((r) => r.action === 'error').slice(0, 50).map((r) => ({ line: r.line, code: r.code, reason: r.reason }));
+    return { ok: false, code: 'invalid-rows', reason: `${plan.counts.error}줄이 맞지 않아 아무것도 넣지 않았습니다(‘전부 아니면 넣지 않기’).`, counts: plan.counts, errors };
+  }
+  if (plan.overCap) return { ok: false, code: 'too-many', reason: `등록은 ${MAX_TARGETS}대까지입니다(지금 ${plan.registered}대 + 새로 ${plan.counts.add}대).`, counts: plan.counts };
+  const cur = load();
+  const targets = cur.targets.slice();
+  const ids = []; const moved = []; let added = 0; let updated = 0;
+  for (const r of plan.rows) {
+    if (r.action === 'add') {
+      const t = { id: `fm-${crypto.randomBytes(5).toString('hex')}`, ...r.value, createdAt: Date.now(), createdBy: s(by, 64) };
+      targets.push(t); ids.push(t.id); added += 1;
+    } else if (r.action === 'update' && update) {
+      const i = targets.findIndex((t) => t.id === r.id);
+      if (i < 0) continue;
+      const next = { ...targets[i], name: r.value.name, username: r.value.username, agent: r.value.agent };
+      if (targets.some((t, j) => j !== i && sameEndpoint(t, next))) continue; // 다른 등록과 같은 접속처가 되면 바꾸지 않는다
+      if (!sameEndpoint(targets[i], next)) moved.push(next.id);
+      targets[i] = next; ids.push(next.id); updated += 1;
+    }
+  }
+  if (added || updated) persist({ ...cur, targets });
+  return { ok: true, added, updated, same: plan.counts.same, errors: plan.counts.error, skipped: plan.counts.error + (update ? 0 : plan.counts.update), ids, moved };
+}
+
+/** 예전 이름(v2.976 라우트 · 테스트) — '전부 아니면 넣지 않기' + 추가만. */
+export function importCsv(text, { agents = [], by = '' } = {}) {
+  const r = applyCsv(text, { agents, by, mode: 'all', update: false });
+  return r.ok ? { ...r, ok: true } : r;
+}
+
+export const CSV_HEADER = Object.freeze(['이름', 'IP', '포트', '계정', '담당 노드']);
+/** 대상 목록(기본: 등록부) → CSV 줄 배열(머리글 포함 — 다시 가져올 수 있는 모양). */
+export function exportRows(list = null) {
+  return [[...CSV_HEADER], ...(list || load().targets).map((t) => [t.name, t.host, t.port, t.username, t.agent || '중앙'])];
+}
+/** 빈 양식 — 머리글 + 예시 한 줄(문서용 주소 192.0.2.0/24 · RFC 5737 — 실제 서버가 아니다. SSRF 가드는 이 대역을 막지 않으므로 지우지 않고 넣으면 등록된다). */
+export function csvTemplateRows() {
+  return [[...CSV_HEADER], ['web-01', '192.0.2.11', 22, 'dvcmon', '중앙']];
+}
+
+/**
+ * 노드 일괄 이동 — from 노드(빈 문자열 = 중앙)의 대상 전부(또는 ids 중 from 에 속한 것)를 to 노드로. 접속처(노드)가 바뀌므로 키도 바뀐다.
+ * 같은 접속처의 대상이 to 에 이미 있으면 그 대상은 건너뛴다(겹침 금지).
+ */
+export function moveTargets({ from = '', to = '', ids = null } = {}, { agents = [] } = {}) {
+  const w = writeRefusal(); if (w) return w;
+  const canon = (a) => (a ? agents.find((x) => String(x).toLowerCase() === String(a).toLowerCase()) : '');
+  const f = String(from || '').slice(0, 128); const tt = String(to || '');
+  // from 은 '어느 대상을 고를지' 만 정한다 — 등록부에서 빠진 엣지(노드 카드 '등록부에 없는 이름')의 서버도 옮길 수 있어야 한다(반증 2). 받는 쪽만 검사한다.
+  if (tt && !canon(tt)) return { ok: false, code: 'bad-agent', reason: '받을 노드는 중앙 또는 등록된 엣지(수집 서버) 이름만 고를 수 있습니다.' };
+  if (f.toLowerCase() === tt.toLowerCase()) return { ok: false, code: 'same-node', reason: '같은 노드로는 옮길 수 없습니다.' };
+  const want = Array.isArray(ids) ? new Set(ids.map(String).slice(0, MAX_TARGETS)) : null;
+  const cur = load();
+  const targets = cur.targets.slice();
+  const moved = []; let skipped = 0;
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    if (String(t.agent || '').toLowerCase() !== f.toLowerCase()) continue;
+    if (want && !want.has(t.id)) continue;
+    const next = { ...t, agent: canon(tt) || '' };
+    if (targets.some((x, j) => j !== i && sameEndpoint(x, next))) { skipped += 1; continue; }
+    targets[i] = next; moved.push(t.id);
+  }
+  if (moved.length) persist({ ...cur, targets });
+  return { ok: true, moved, skipped };
 }
 
 export function _resetForTest() { cache = null; loadErr.clear(); }

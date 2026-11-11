@@ -29,3 +29,27 @@ test('+05:30 — 빈 시간 없는 데이터면 덮은 시간 = 기대 시간 ·
   assert.equal(s.kwhMonthHours, s.kwhMonthSpanH, `덮은 ${s.kwhMonthHours} · 기대 ${s.kwhMonthSpanH}`);
   assert.equal(A.aggregatePower([s]).fleet.monthPartial, 0);
 });
+
+/**
+ * v2.978(CI 실패로 발견 — 이 파일의 위 테스트가 실제 시각에 따라 깨졌다): +05:30 에서 포탈 날이 바뀐 뒤 첫 30분(로컬 00:00~00:30)에는
+ * 날 경계에 걸친 시간 칸(UTC 18:00~19:00)이 아직 끝나지 않았는데, 지난 날 읽기(끝 = 오늘 시작 18:30)가 그 칸을 어제 몫으로 셌다 → 덮은 시간이 기대보다 1 많다.
+ * 고침: 지난 날 읽기도 끝난 정시 칸(h0 앞)만 · 마지막 칸이 아직 안 끝난 날은 캐시하지 않는다(캐시하면 칸이 끝난 뒤 그날이 1시간 모자라 '빈 시간' 으로 남는다).
+ * 기준 시각은 실제 시각에서 이번 달 10일로 떨어뜨려 고정한다(달의 첫날 · 실제 시각에 따라 갈리지 않게 — docs/rules/common.md).
+ */
+test('+05:30 — 날이 바뀐 직후 30분(경계 칸 진행 중) · 칸이 끝난 뒤 · 한낮 모두 덮은 시간 = 기대 시간', async () => {
+  const d = new Date();
+  const y = d.getUTCFullYear(); const m = d.getUTCMonth();
+  for (const [label, t] of [['로컬 00:10', Date.UTC(y, m, 9, 18, 40)], ['로컬 00:40', Date.UTC(y, m, 9, 19, 10)], ['로컬 12:10', Date.UTC(y, m, 10, 6, 40)]]) {
+    A._resetPowerAggForTest();
+    const [s] = await A.gatherPower({ targets: [{ key: 'K1', name: 'bm-1', vcenterId: 'vcA', serviceTag: 'T1', idrac: { regId: 'r1' }, paths: ['idrac'] }], deps, now: t, withMonth: true });
+    assert.ok(s.kwhMonthSpanH > 200, `${label}: 기대 시간 ${s.kwhMonthSpanH}`);
+    assert.equal(s.kwhMonthHours, s.kwhMonthSpanH, `${label}: 덮은 ${s.kwhMonthHours} · 기대 ${s.kwhMonthSpanH}`);
+    assert.equal(s.kwhMonth, s.kwhMonthSpanH * 1000 / 1000, `${label}: 1kW × 기대 시간 = kWh`);
+  }
+  // 캐시: 00:10 에 계산한 어제를 담아 두면 00:40(경계 칸이 끝난 뒤)에 1시간 모자라 '빈 시간' 이 된다 — 같은 모듈 상태로 이어서 부른다
+  A._resetPowerAggForTest();
+  const tg = [{ key: 'K1', name: 'bm-1', vcenterId: 'vcA', serviceTag: 'T1', idrac: { regId: 'r1' }, paths: ['idrac'] }];
+  await A.gatherPower({ targets: tg, deps, now: Date.UTC(y, m, 9, 18, 40), withMonth: true });
+  const [s2] = await A.gatherPower({ targets: tg, deps, now: Date.UTC(y, m, 9, 19, 10), withMonth: true });
+  assert.equal(s2.kwhMonthHours, s2.kwhMonthSpanH, `캐시 뒤: 덮은 ${s2.kwhMonthHours} · 기대 ${s2.kwhMonthSpanH}`);
+});

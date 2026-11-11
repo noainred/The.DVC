@@ -282,9 +282,11 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
             for (const d of missDays) { const last = runs.at(-1); if (last && d === last[1] + DAY_MS) last[1] = d; else runs.push([d, d]); }
             const per = new Map(); const perH = new Map();
             for (const [a, b] of runs) {
-              for (const h of idb.hourlyStats(dbKey, a, Math.min(todayStart, b + DAY_MS)) || []) { if (n(h.avg) == null || Number(h.avg) <= 0) continue; const k = dayKey(Number(h.ts) + 1); per.set(k, (per.get(k) || 0) + Number(h.avg)); perH.set(k, (perH.get(k) || 0) + 1); }
+              // v2.978: 끝난 정시 칸(h0 앞)만 — 30분 단위 시간대(+05:30)는 날이 바뀐 뒤 첫 30분 동안 경계 칸(진행 중)이 이 읽기(끝 = 오늘 시작)에 걸려 어제 몫으로 세였다.
+              for (const h of idb.hourlyStats(dbKey, a, Math.min(todayStart, b + DAY_MS)) || []) { if (n(h.avg) == null || Number(h.avg) <= 0 || Number(h.ts) >= h0) continue; const k = dayKey(Number(h.ts) + 1); per.set(k, (per.get(k) || 0) + Number(h.avg)); perH.set(k, (perH.get(k) || 0) + 1); }
             }
-            for (const d of missDays) { const dk = dayKey(d + HOUR); const v = per.has(dk) ? per.get(dk) : null; if (v != null) { const hh = perH.get(dk) || 0; _dayWh.set(`${dbKey}|${dk}`, { wh: v, hrs: hh, at: now }); wh += v; hrs += hh; any = true; } else _dayWh.delete(`${dbKey}|${dk}`); }
+            // 그날의 마지막 칸(날 끝에 걸친 칸 포함)이 아직 안 끝났으면 담지 않는다 — 담으면 칸이 끝난 뒤에도 그날이 1시간 모자란 채로 남는다(v2.978).
+            for (const d of missDays) { const dk = dayKey(d + HOUR); const v = per.has(dk) ? per.get(dk) : null; if (v != null) { const hh = perH.get(dk) || 0; if (Math.ceil((d + DAY_MS) / HOUR) * HOUR <= h0) _dayWh.set(`${dbKey}|${dk}`, { wh: v, hrs: hh, at: now }); else _dayWh.delete(`${dbKey}|${dk}`); wh += v; hrs += hh; any = true; } else _dayWh.delete(`${dbKey}|${dk}`); }
           }
           // v2.977(전체 점검): 오늘 몫도 **끝난 정시 칸만**(h0 앞) — 진행 중인 칸의 평균 W 를 1시간치로 더하면 매시 정각 직후 최대 1시간치가 과대였다(24h kWh 의 B-4 규칙과 같게).
           for (const h of rows || []) if (Number(h.ts) >= todayStart && Number(h.ts) < h0 && n(h.avg) != null && Number(h.avg) > 0) { wh += Number(h.avg); hrs += 1; any = true; }

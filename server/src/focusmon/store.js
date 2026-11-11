@@ -336,29 +336,52 @@ function persistKeys() {
   } catch { /* 화면 안내용 — 못 써도 다음 동기화가 다시 채운다 */ }
 }
 /** 엣지 동기화 기록(정제된 값만 들어온다). 공개키가 바뀌었을 때만 파일에 쓴다. */
-export function noteEdgeSync(agent, { version = '', key = null } = {}, now = Date.now()) {
+export function noteEdgeSync(agent, { version = '', key = null, diag = null } = {}, now = Date.now()) {
   loadKeys();
   const k = String(agent || '').toLowerCase();
   const prev = EDGE.get(k) || {};
   const keyChanged = key && JSON.stringify(key) !== JSON.stringify(prev.key || null);
-  EDGE.set(k, { agent: String(agent), at: now, version: String(version || '').slice(0, 32), key: key || prev.key || null, keySeenAt: key ? now : (prev.keySeenAt || 0) });
+  // diag(v2.978 — 엣지 연결 진단)는 메모리만: 재시작하면 다음 동기화(최대 쉬는 주기)에 다시 온다. 옛 판 엣지는 보내지 않는다(null).
+  EDGE.set(k, { agent: String(agent), at: now, version: String(version || '').slice(0, 32), key: key || prev.key || null, keySeenAt: key ? now : (prev.keySeenAt || 0),
+    diag: diag || null, syncs: (prev.syncs || 0) + 1, firstAt: prev.firstAt || now });
   if (keyChanged) persistKeys();
 }
+
+/* ── 깨우기 결과(v2.978 — 엣지 연결 진단) ─────────────────────────────────────
+ * 중앙 → 엣지 직접 호출(collector 라우트)이 닿았는지. 닿지 않아도 엣지의 쉬는 주기 조회가 받으므로 '못 닿음' 은 장애가 아니라 '시작이 느림' 이다.
+ * 메모리만(재시작하면 비어 '아직 깨운 적 없음'). 사유 글자는 pullFromEdge 문구(주소 · 토큰 값 없음)를 200자로 자른다. */
+const WAKES = new Map(); // agentLower → { at, ok, kind, ms, reason, by }
+export function noteEdgeWake(agent, { ok = false, kind = null, ms = null, reason = '', by = 'auto' } = {}, now = Date.now()) {
+  const k = String(agent || '').toLowerCase();
+  if (!k) return;
+  WAKES.set(k, { at: now, ok: ok === true, kind: kind ? String(kind).slice(0, 40) : null, ms: Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : null, reason: String(reason || '').slice(0, 200), by: by === 'manual' ? 'manual' : 'auto' });
+  if (WAKES.size > 500) WAKES.delete(WAKES.keys().next().value);
+}
+export function edgeWakeOf(agent) { const v = WAKES.get(String(agent || '').toLowerCase()); return v ? { ...v } : null; }
 export function edgeStates() { loadKeys(); return [...EDGE.values()].map((v) => ({ ...v })); }
 export function edgeStateOf(agent) { loadKeys(); const v = EDGE.get(String(agent || '').toLowerCase()); return v ? { ...v } : null; }
 
 /* ── 연결 시험(엣지 대행 대기열) ────────────────────────────────────────────── */
 const TESTS = new Map(); // targetId → { agent, requestedAt, result, at }
 export function requestEdgeTest(id, agent, now = Date.now()) { TESTS.set(String(id), { agent: String(agent).toLowerCase(), requestedAt: now, result: null, at: 0 }); }
-export function pendingTestsFor(agent, now = Date.now()) {
+/** 엣지 한 곳이 동시에 돌리는 연결 시험 상한(v2.978 반증 1 — 일괄 시험이 동기화마다 20건씩 쌓아 동시 160건까지 갔다). 엣지 워커도 같은 값을 지킨다. */
+export const EDGE_TEST_CONCURRENCY = 8;
+/** 엣지 시험 대기열 수명 — 일괄 시험(최대 등록 상한 대수)이 동시 상한으로 차례를 기다리는 시간을 덮는다(예전 5분). */
+export const EDGE_TEST_TTL_MS = 15 * 60_000;
+/**
+ * 이 엣지에 지금 배달할 시험. busy = 엣지가 같은 동기화 본문에서 보고한 진행 중 시험 수(diag.testsBusy — 옛 판은 null → 예전처럼 최대 20).
+ */
+export function pendingTestsFor(agent, now = Date.now(), { busy = null } = {}) {
   const k = String(agent || '').toLowerCase();
   const out = [];
+  const room = busy == null ? 20 : Math.max(0, Math.min(20, EDGE_TEST_CONCURRENCY - busy));
+  if (!room) return out;
   // 한 번 내려보낸 시험은 60초 동안 다시 내려보내지 않는다 — 결과가 올 때까지 2초마다 같은 시험을 다시 줘 클릭 한 번에 로그인이 여러 번 일어났다(반증 5번).
   for (const [id, x] of TESTS) {
-    if (x.agent !== k || x.result || now - x.requestedAt >= 5 * 60_000) continue;
+    if (x.agent !== k || x.result || now - x.requestedAt >= EDGE_TEST_TTL_MS) continue;
     if (x.deliveredAt && now - x.deliveredAt < 60_000) continue;
     out.push(id);
-    if (out.length >= 20) break;
+    if (out.length >= room) break;
   }
   for (const id of out) TESTS.get(id).deliveredAt = now;
   return out;
@@ -380,6 +403,6 @@ export function takeEdgeRetries(agent, now = Date.now()) {
 }
 
 export function _resetForTest() {
-  T.clear(); writeQ.length = 0; S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
+  T.clear(); writeQ.length = 0; S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); WAKES.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
   sessLoaded = false; keysLoaded = false; counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0;
 }

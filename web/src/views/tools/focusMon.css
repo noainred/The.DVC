@@ -192,3 +192,12 @@
   .fm-wrap .fm-h1 { font-size: 19px; }
   .fm-wrap .fm-chart-wrap .fm-chart { min-width: 620px; } /* 좁은 화면에서 축 글자가 5px 로 줄지 않게 — 차트 안에서만 가로로 민다 */
 }
+
+/* v2.978 CSV 대량 등록 · 엣지 노드 진단 */
+.fm-wrap .fm-csv { gap: 8px; margin-top: 10px; min-width: 0; }
+.fm-wrap .fm-scroll { max-height: 360px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 8px; min-width: 0; }
+.fm-wrap .fm-file { position: relative; overflow: hidden; cursor: pointer; }
+.fm-wrap .fm-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.fm-wrap .fm-diag { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px dashed var(--border-soft); min-width: 0; overflow-wrap: anywhere; }
+.fm-wrap .fm-sel-sm { height: 28px; min-width: 140px; }
+.fm-wrap .fm-key > .fm-mono { overflow-wrap: anywhere; min-width: 0; }
