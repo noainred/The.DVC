@@ -35,6 +35,7 @@ import { config } from '../config.js';
 import * as m_store from '../store.js';
 import * as m_storagePoller from '../storage/poller.js';
 import * as m_nodeLoadPoller from '../storage/nodeLoadPoller.js'; // v2.932 아이실론 노드 부하 표본
+import * as m_inspectRunner from '../storage/inspect/runner.js'; // v2.963 PowerScale 장비 점검 실행기
 import * as m_sanPoller from '../sanswitch/poller.js';
 import * as m_sanPerfPoller from '../sanswitch/perfPoller.js';
 import * as m_cvpPoller from '../cvp/poller.js';
@@ -86,6 +87,7 @@ const MODS = Object.freeze({
   '../store.js': m_store,
   '../storage/poller.js': m_storagePoller,
   '../storage/nodeLoadPoller.js': m_nodeLoadPoller,
+  '../storage/inspect/runner.js': m_inspectRunner,
   '../sanswitch/poller.js': m_sanPoller,
   '../sanswitch/perfPoller.js': m_sanPerfPoller,
   '../cvp/poller.js': m_cvpPoller,

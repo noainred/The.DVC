@@ -58,6 +58,8 @@ export function dropSummaryOf(j) {
     evicted: typeof j.evicted === 'string' && j.evicted ? j.evicted.slice(0, 64) : null,
     // v2.932(2차 ⑨): storage-data 가 받은 노드 부하 표본 확인(devices·received·saved·duplicate·dropped — 수만). 없으면 null(구버전 중앙).
     nodeLoadSamples: sampleAckOf(j.nodeLoadSamples),
+    // v2.963: storage-data 가 받은 PowerScale 점검 결과 확인(같은 모양 — 수만). 없으면 null(구버전 중앙).
+    inspectRuns: sampleAckOf(j.inspectRuns),
   });
 }
 const ACK_KEYS = Object.freeze(['devices', 'received', 'saved', 'duplicate', 'dropped', 'notOwned']);
@@ -90,7 +92,9 @@ function finalize(out) {
   // 표본 확인은 '뺀 것' 이 아니라 '받은 것' 이다 — 문장에는 뺀 수(dropped·notOwned)만 들어간다. 확인만 있고 뺀 것이 없으면 요약 객체는 돌려주되 text 는 비운다.
   const ack = out.nodeLoadSamples;
   if (ack && ((ack.dropped || 0) + (ack.notOwned || 0) > 0)) parts.push(`노드 부하 표본 ${(ack.dropped || 0) + (ack.notOwned || 0)}개 받지 않음`);
-  if (!parts.length) return ack ? { ...out, text: '' } : null;
+  const iack = out.inspectRuns;
+  if (iack && ((iack.dropped || 0) + (iack.notOwned || 0) > 0)) parts.push(`점검 결과 ${(iack.dropped || 0) + (iack.notOwned || 0)}건 받지 않음`);
+  if (!parts.length) return ack || iack ? { ...out, text: '' } : null;
   return { ...out, text: parts.join(' · ') };
 }
 
@@ -112,6 +116,7 @@ export function mergeDrop(a, b) {
     held: Boolean(a.held || b.held), rejectedFiles: n('rejectedFiles'), unverifiedAgent: Boolean(a.unverifiedAgent || b.unverifiedAgent),
     coerced: n('coerced'), zoningTrimmed: n('zoningTrimmed'), evicted: a.evicted || b.evicted || null,
     nodeLoadSamples: a.nodeLoadSamples || b.nodeLoadSamples || null,
+    inspectRuns: a.inspectRuns || b.inspectRuns || null,
   });
 }
 

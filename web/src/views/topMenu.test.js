@@ -35,8 +35,8 @@ describe('메뉴 구성', () => {
 
   it('메뉴가 가리키는 도구는 카탈로그에 실재하고 패널이 있는 도구다', () => {
     const keys = allItems().map(({ c }) => c?.tool).filter(Boolean);
-    expect(keys.length).toBe(18);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1 · v2.827 엣지 토큰 맞추기 1 · v2.948 SAN 스토리지 성능 1
-    expect(new Set(keys).size).toBe(17);
+    expect(keys.length).toBe(19);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1 · v2.827 엣지 토큰 맞추기 1 · v2.948 SAN 스토리지 성능 1 · v2.963 PowerScale 장비 점검 1
+    expect(new Set(keys).size).toBe(18);
     for (const k of keys) {
       const t = TOOLS.find((x) => x.k === k);
       expect(t, k).toBeTruthy();
@@ -54,7 +54,8 @@ describe('메뉴 구성', () => {
     expect(tabsOf({ tab: 'a', tabs: ['a', 'b', ''] })).toEqual(['a', 'b']);
     // v2.789: 사용자 요청 '스토리지 사용량을 일간/주간 별로 정리해서 보는 기능'(새 메뉴 선택)으로 증가량 보고서 다음에 한 줄을 더했다.
     // v2.948: 'SAN 스토리지 성능'(독립 도구 san-storage) 추가 · 기존 'san' 항목은 이름만 'SAN 스위치 모니터링'(id · 도구 키 그대로 — 사용자 결정 '기존 메뉴도 보존').
-    expect(labels('storage')).toEqual(['스토리지 현황', '데이터스토어', '스토리지 증가량 보고서', '스토리지 사용량 보고서', '스토리지 사용량 추이', '베어메탈 스토리지', 'SAN 스위치 모니터링', 'SAN 스토리지 성능']);
+    // v2.963: 사용자 요청 '법인별로 전체 power scale 장비의 장비 점검을 하는 기능'(독립 도구 ps-inspect)을 스토리지 현황 바로 아래에 더했다.
+    expect(labels('storage')).toEqual(['스토리지 현황', 'PowerScale 장비 점검', '데이터스토어', '스토리지 증가량 보고서', '스토리지 사용량 보고서', '스토리지 사용량 추이', '베어메탈 스토리지', 'SAN 스위치 모니터링', 'SAN 스토리지 성능']);
     expect(labels('network')).toEqual(['전체 네트워크 장비', '가상화 네트워크', '통신 지도', '글로벌 네트워크 점검', 'IP관리', 'Monitoring']);
     expect(labels('resource')).toEqual(['서버 분석', 'GPU 인벤토리', '전력 분석']);
     expect(labels('optimize')).toEqual(['Optimization', 'Infra Observability']);   // v2.878 이름 변경(id·도구 키 idrac-trend 그대로)

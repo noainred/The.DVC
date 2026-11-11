@@ -91,8 +91,12 @@ export function registerStorageRoutes(centralRouter, deps) {
     const { intervalsForAgent, storageIntervalsLoadError } = await import('../../storage/intervals.js');
     const ivPart = intervalsPartOrUnreadable(req, res, storageIntervalsLoadError, '스토리지 수집 주기', () => intervalsForAgent(agent));
     if (!ivPart) return;
+    // v2.963: PowerScale 점검 요청(주간 회차 · '지금 점검') — 수집 요청 큐와 따로(claim → ack). 엣지는 받아서 로컬로 점검하고 결과를 다음 push 에 싣는다.
+    const { takeInspectRequests } = await import('../../storage/inspect/requests.js');
+    const inspectNow = takeInspectRequests(agent);
     res.json({
       ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent),
+      ...(inspectNow.length ? { inspectNow } : {}),
       ...ivPart,
     });
   });
@@ -284,11 +288,23 @@ export function registerStorageRoutes(centralRouter, deps) {
       sampleAck = { ...(await saveEdgeNodeLoadSamples(agent, list, { now })), ...(denied ? { notOwned: denied } : {}) };
       if (denied) console.warn(`[central] storage-data: ${String(agent).slice(0, 64)} 미위임·중앙 직접 장비의 노드 부하 표본 ${denied}건 드롭`);
     }
+    // v2.963: PowerScale 점검 결과(`inspectRuns`) — 표본 고리와 **같은 소유권 필터**(중앙 직접 장비 거절 · 개별 토큰은 위임분만)를 지난 뒤
+    //   중앙 이력에 적는다(central/storageInspectEdge.js — 아는 필드만 · facts 화이트리스트 · at 은 수신 시각 이하). 응답 `inspectRuns` 가 받은 · 기록 · 중복 · 뺀 수를 말한다.
+    let inspectAck = null;
+    if (Array.isArray(req.body?.inspectRuns) && req.body.inspectRuns.length) {
+      let list = req.body.inspectRuns.slice(0, 500);
+      let denied = 0;
+      { const r = await onlyDelegated(list, (d) => d?.deviceId, '../storage/registry.js'); list = r.list; denied += r.denied; }
+      if (ownedSet) { const before = list.length; list = list.filter((d) => d && typeof d === 'object' && ownedSet.has(String(d.deviceId))); denied += before - list.length; }
+      const { saveEdgeInspectRuns } = await import('../../central/storageInspectEdge.js');
+      inspectAck = { ...saveEdgeInspectRuns(agent, list, { now }), ...(denied ? { notOwned: denied } : {}) };
+      if (denied) console.warn(`[central] storage-data: ${String(agent).slice(0, 64)} 미위임·중앙 직접 장비의 점검 결과 ${denied}건 드롭`);
+    }
     // v2.599(CEN-2599-03·04·05): 모듈이 원소를 정리하고(객체 아님·식별자 아님·크기 초과를 빼고 표시 필드의 객체 값은 null)
     //   뺀 개수를 info 에 싣는다 — 응답이 그 사실을 말한다(조용한 제외 금지).
     const info = {};
     const saved = saveEdgeStorage(agent, devices, info);
     if (info.refused) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
-    res.json({ ok: true, saved, ...(sampleAck ? { nodeLoadSamples: sampleAck } : {}), ...(edgeDropSummary(withNotOwned(info, notOwned))) });
+    res.json({ ok: true, saved, ...(sampleAck ? { nodeLoadSamples: sampleAck } : {}), ...(inspectAck ? { inspectRuns: inspectAck } : {}), ...(edgeDropSummary(withNotOwned(info, notOwned))) });
   });
 }

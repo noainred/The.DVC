@@ -42,8 +42,25 @@
 - (v2.915) 베어메탈 ↔ SAN 비교 — 디스크 I/O 표본(diskstats) · I/O 시계열 DB · 법인 축 · 비교/시계열 API · ‘SAN 비교’ 탭
 - (v2.962) 베어메탈 스토리지 ‘비교 세트’ — SAN 어레이 · 베어메탈 서버 · 그룹 · 법인 합계를 섞어 2~4개 · IOPS · 응답 시간 · 어레이 측 FE 표본 · 격자 하한
 - v2.926 — 아이실론 노드 부하 시계열(네트워크·디스크·CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`, 수집 키는 `collectors/isilonNodeLoad.js`
+- (v2.963) PowerScale 장비 점검(독립 도구 ps-inspect) — 주간 20항목 · 사실 저장 · 읽을 때 판정 · 엣지 로컬 실행 · 주간 보고서 · Top 10 노드 편중
 
 ## 본문
+38. **v2.963 — PowerScale 장비 점검(독립 도구 `ps-inspect` · 메뉴 '스토리지 › PowerScale 장비 점검' · 사용자 범위 '1차 + 2차')**(설계 `docs/design/powerscale-inspection/README.md` · 코드 `server/src/storage/inspect/*` · 회귀 `server/test/psInspect2963.test.js` · `web/src/views/tools/psInspect/psInspectText.test.jsx`):
+  · **사실과 판정을 나눈다** — 실행은 장비에서 읽은 값(facts)만 이력에 저장하고(`store.js` 장비당 12회 · 원본 출력은 싣지 않는다), 판정은 조회 때 `judge.js` 하나가 한다(기준을 바꾸면 지난 회차도 새 기준으로 다시 보인다 ·
+    화면 · 보고서 · 메일이 같은 판정). 항목 20개 · 출처 22건은 `catalog.js` 하나 — 웹 낱말(상태 다섯 · 구분 다섯)은 vitest 가 서버와 1:1 로 대조한다.
+  · **못 읽은 값은 확인 불가**(unknown) — 정상으로 세지 않는다(판정 전 `numOrNull`). 장비 항목은 '이 장비를 아직 점검하지 않았다' 도 확인 불가다. REST 로 수집하는 장비는 그룹(쿼럼) · 부트 미러 경로가 없어 확인 불가로 남는다(사유를 싣는다).
+    Dell 문서에 숫자가 없는 기준(노드 편중 1.5배)은 '포탈 기준' 이라고 화면 · 보고서에 적는다. 노드 CPU 는 기준이 없어 판정하지 않고 Top 10 에 값만 싣는다.
+  · **명령은 고정 화이트리스트 · 전부 조회**(`runner.js SSH_CMDS · REST_PATHS`) — 사용자 · 장비 출력 값을 명령에 끼우지 않는다. SSH 는 세션 하나에 차례로(장비 시한 `STORAGE_INSPECT_TIMEOUT_MS` 180초 · 세션 예산 = 시한 − 20초 · 명령 15초),
+    주기 수집과 같은 장비에 겹치지 않게 `runSampleExclusive`. 인증 실패는 `authGuard` 로 그 장비를 멈추고 자동 재시도하지 않는다. `isi_for_array -s 'gmirror status'` 는 문서 인용을 찾지 못해 화면에 '문법 미확인' 을 단다.
+  · **엣지 위임 장비는 엣지가 로컬에서 실행**(1:1:1 · 백업과 같은 원칙) — 중앙은 요청 큐(`requests.js` · TTL 60분 · 받아 간 뒤 15분 + 장비 시한 안에 결과가 없으면 버리고 `drops` 로 밝힌다)에 넣고 storage-config 응답 `inspectNow` 로 보낸다.
+    엣지는 결과를 고리 파일(`storage-inspect-ring.json` · 장비당 2)에 두었다 다음 storage push 의 `inspectRuns` 로 올린다. 중앙 수신(`central/storageInspectEdge.js`)은 장비 목록 · 노드 표본과 **같은 소유권 함수로 먼저** 거른 뒤
+    `sanitizeRun`(아는 필드만 · facts 화이트리스트 · 문자열 상한 · `capStr` 평탄화 · at 은 수신 시각 이하 · 엣지 이름은 인증된 agent) — 새 facts 필드는 `facts.js FACT_KEYS` 에도 넣는다.
+  · **주간 일정은 중앙에서만**(`schedule.js`) — 처음 기동은 지난 회차를 '기준' 으로만 잡고(돌리지 않는다 — 화면의 '마지막 정기 점검' 은 history 의 started 만), 꺼져 있던 회차 · 30분 넘게 늦은 회차는 몰아서 돌리지 않고 missed 로 적는다.
+    live 는 기동 때 점검하지 않는다(업그레이드 직후 전 법인 장비에 명령을 보내지 않게) · mock 은 데모 시드를 기다린 뒤 한 번. 보고서 메일은 회차 + N분(엣지 결과가 올라올 시간) 뒤 `sendPortalMail` · 전체판 + 법인판.
+  · 보고서 = 서버 모델 하나(`report.js`) → 화면(흰 종이 · 브라우저 인쇄로 PDF) · 메일 본문 · **자급형 HTML 첨부** · CSV. 서버 PDF 는 만들지 않는다(PDF 라이브러리 없음 — 설계 시안의 'PDF 첨부' 를 정정). 다운로드 이름은 ASCII + RFC5987 `filename*`(한글을 헤더에 그대로 넣으면 500).
+  · 권한: 조회 = `tools` + 전체 범위 · 지금 점검 · 설정 · 지금 발송 = admin + 전체 조회 · 쓰기 범위 · CSV = `data.csv`. 비관리자 판본은 장비 주소 가림(`maskDeviceAddress` · `scrubHosts`) · 메일 주소 숨김 · 데모 손님은 데모 장비만.
+  · 화면(Chromium 1440 실측): 본문 표(최소 폭 980 ~ 1020)를 옆 칸과 나란히 두면 오른쪽 열(편중 · 점검 · 기준 · 읽는 방법)이 표 안 스크롤로 숨었다 → 본문 `flex-basis 1040px` · 옆 칸은 내려가 격자. 앱 공통 표 규칙의 nowrap 을 긴 글자 칸 · 보고서 종이에서 푼다.
+  · 실장비 미확인: 명령 · REST 경로 · JSON 모양은 Dell 문서 검색 인용 수준으로 맞췄고 실장비 출력으로 확인하지 못했다(원문 전체 열람 0건 · Reddit 미접근). 첫 실점검 결과의 '확인 불가 사유' 가 다음 점검의 첫 후보다.
 
 - **스토리지 폴러 주기는 중앙 배포값**(`storage/intervals.js`, v2.409): 수집/push/설정 pull 주기를
   모듈 로드 시 `const INTERVAL_MS = ...env...` 로 굳히지 말 것 — 그러면 중앙(설정 › 엣지·원격 › 수집 서버(원격) ›
