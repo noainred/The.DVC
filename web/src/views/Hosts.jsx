@@ -23,6 +23,7 @@ import {
 
 const HostDetail = React.lazy(() => import('./HostDetail.jsx'));          // v2.805 전체 페이지 상세(#/hosts/<id>)
 const HostExportDialog = React.lazy(() => import('./HostExportDialog.jsx')); // v2.802 호스트 · 클러스터 엑셀(vCenter 단위)
+const HostDrawer = React.lazy(() => import('./hosts/HostDrawer.jsx'));     // v2.975 이름 옆 '빠른 확인' 드로어(시안 docs/design/host-drawer ⑤)
 const HostsCorp = React.lazy(() => import('./HostsCorp.jsx'));               // v2.811 '법인별' 보기(승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x)
 
 const TILE_LIMIT = 12; // 처음엔 '먼저 볼' 클러스터만 — 나머지는 '모두 보기'
@@ -44,6 +45,8 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
   const [checksErr, setChecksErr] = useState(null);
   const [checksBusy, setChecksBusy] = useState(false);
   const checksSeq = useRef(0);
+  const [drawer, setDrawer] = useState(null);   // v2.975 '빠른 확인' 으로 연 호스트(드로어) — ‹ › 는 지금 표에 그린 순서(shownRef)
+  const shownRef = useRef([]);
   const [exportVc, setExportVc] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const [exportPick, setExportPick] = useState(false);
@@ -134,7 +137,13 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
   const vmOf = (h) => byId?.[h.id]?.vm || null;
   const R = {
     // v2.915(상세 한 규칙): 이름 = 개체 보기(#/vcenters/<vc>/host/<id> — 브레드크럼). 전체 페이지 상세(#/hosts/<id>)는 그 안의 '전체 페이지 상세 →' 버튼(주소는 그대로 산다).
-    name: { render: (h) => <a className="cell-link ht-link" href={vcHash(h.vcenterId, { type: 'host', id: h.id })} title="개체 보기(요약 · 모니터 · 구성 …) — 전체 페이지 상세는 그 안에서">{h.name}</a> },
+    // v2.975: VM 표와 같은 규칙 — 드로어는 이름 옆 '빠른 확인'(‹ › 로 표 순서대로 넘긴다). 이름 링크는 그대로 개체 보기.
+    name: { render: (h) => (
+      <span className="ht-name">
+        <a className="cell-link ht-link" href={vcHash(h.vcenterId, { type: 'host', id: h.id })} title="개체 보기(요약 · 모니터 · 구성 …) — 전체 페이지 상세는 그 안에서">{h.name}</a>
+        <button type="button" className="ht-quick" onClick={() => setDrawer(h)} title="빠른 확인(드로어 — ‹ › 로 이동)">빠른 확인</button>
+      </span>
+    ) },
     vcenterId: { render: (h) => <span className="muted">{h.vcenterId}</span> },
     cluster: { render: (h) => h.cluster || '—' },
     connectionState: { render: (h) => <StateBadge state={h.connectionState} /> },
@@ -393,10 +402,17 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
           columns={columns}
           rows={shown}
           initialSort={{ key: 'cpuUsagePct', dir: 'desc' }}
+          onVisible={(r) => { shownRef.current = r; }}
           emptyText={curTab === 'attention' && !focus ? '확인할 호스트가 없습니다.' : '조건에 맞는 호스트가 없습니다.'}
         />
         <IpmsMatches filters={filters} />
         </>
+      )}
+      {drawer && (
+        <React.Suspense fallback={null}>
+          <HostDrawer host={rows.find((h) => h.id === drawer.id) || drawer} rows={shownRef.current} checks={byId}
+            onClose={() => setDrawer(null)} onMove={(h) => setDrawer(h)} />
+        </React.Suspense>
       )}
       {exportOpen && exportVc && (
         <React.Suspense fallback={null}><HostExportDialog vcenterId={exportVc} vcName={exportVc} onClose={() => setExportOpen(false)} /></React.Suspense>

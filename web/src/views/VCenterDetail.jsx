@@ -46,8 +46,9 @@ import { normObjTab, TUNING_TAB } from './vcd/objTabs.js';
 import { VmTuning, HostTuning } from './vcd/TuningTabs.jsx'; // v2.895 성능 튜닝 탭(승인 시안 ⑫⑬ · 기본값 11~13)
 import VmObject from './vcd/VmObject.jsx';
 import HostObject from './vcd/HostObject.jsx';
-import VmDrawer from './vms/VmDrawer.jsx'; // v2.911(시안 docs/design/vm-perf ①): 트리의 VM 클릭 = 가상화 서버와 같은 드로어(옛 VM 모달 대신)
-import { treeVmRows } from './vcd/treeRows.js';
+import VmDrawer from './vms/VmDrawer.jsx';
+import HostDrawer from './hosts/HostDrawer.jsx';   // v2.975 호스트도 드로어(시안 docs/design/host-drawer ①) // v2.911(시안 docs/design/vm-perf ①): 트리의 VM 클릭 = 가상화 서버와 같은 드로어(옛 VM 모달 대신)
+import { treeVmRows, treeHostRows } from './vcd/treeRows.js';
 
 /** 브라우저 저장소 — 사생활 모드 · 차단에서 접근만으로 throw 할 수 있다(규약: try/catch). 기억은 사람별 편의라 실패해도 화면은 동작한다. */
 function lsSafe() {
@@ -300,12 +301,13 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
   };
   // v2.895 개체 보기 — 주소가 진실의 원천이다(새로고침 · 공유 · 뒤로 가기). 다른 vCenter 의 주소는 무시한다.
   const [obj, setObj] = useState(() => { const r = parseVcRoute(currentHash()); return r.vcId === vcenterId ? r.obj : null; });
-  useEffect(() => onHashChange(() => { const r = parseVcRoute(currentHash()); if (r.vcId === vcenterId) { setObj(r.obj); if (r.obj) setVmDrawer(null); } }), [vcenterId]);   // v2.911 개체 보기로 가면 드로어는 닫는다(드로어의 📈 · 탭 링크)
-  const openObj = (type, id) => { setSel(null); setVmDrawer(null); setObj({ type, id, tab: '' }); goHash(vcHash(vcenterId, { type, id })); };
+  useEffect(() => onHashChange(() => { const r = parseVcRoute(currentHash()); if (r.vcId === vcenterId) { setObj(r.obj); if (r.obj) { setVmDrawer(null); setHostDrawer(null); } } }), [vcenterId]);   // v2.911 개체 보기로 가면 드로어는 닫는다(드로어의 📈 · 탭 링크)
+  const openObj = (type, id) => { setSel(null); setVmDrawer(null); setHostDrawer(null); setObj({ type, id, tab: '' }); goHash(vcHash(vcenterId, { type, id })); };
   const closeObj = () => { if (obj) setView(obj.type === 'host' ? 'hosts' : 'vms'); setObj(null); goHash(vcHash(vcenterId)); };
   const setObjTab = (t) => { if (!obj) return; const n = { ...obj, tab: t === 'summary' ? '' : t }; setObj(n); replaceHash(vcHash(vcenterId, n)); };
-  const [sel, setSel] = useState(null);     // { type, item } for the detail popup — v2.911 부터 host · datastore 만(VM 은 드로어)
+  const [sel, setSel] = useState(null);     // { type, item } for the detail popup — v2.975 부터 datastore 만(VM · 호스트는 드로어)
   const [vmDrawer, setVmDrawer] = useState(null);   // v2.911 열린 VM(드로어) — 트리 순서(treeRows)로 ‹ › · ↑↓
+  const [hostDrawer, setHostDrawer] = useState(null);   // v2.975 열린 호스트(드로어) — 트리에 보이는 호스트 순서(treeHosts)로 ‹ › · ↑↓
   const [open, setOpen] = useState({});      // expanded tree nodes
   const [q, setQ] = useState('');            // VM name search (hosts/vms views)
   const [inclNotes, setInclNotes] = useState(false); // 검색 시 VM 메모(vSphere annotation) 포함 여부(v2.293)
@@ -488,6 +490,9 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
   // vCenter 에서 분 단위가 걸린다 — 서버도 요청당 상한(기본 60)을 둔다.
   // v2.911: 드로어 ‹ › · ↑↓ 가 따르는 순서 — 지금 보이는 트리(검색 · 호스트 · 폴더) 순서(순수 treeVmRows · 펼침 여부 무관).
   const treeRows = useMemo(() => treeVmRows({ view, query, matches, cap: SEARCH_CAP, clusters, vmsByHost, folderTree }), [view, query, matches, clusters, vmsByHost, folderTree]);
+  // v2.975: 호스트 드로어의 ‹ › 순서 — 트리에 보이는 호스트(검색 중이면 일치한 호스트). 폴링으로 값이 바뀌면 같은 id 의 최신 행을 그린다.
+  const treeHosts = useMemo(() => treeHostRows({ view, query, hostMatches, cap: SEARCH_CAP, clusters }), [view, query, hostMatches, clusters]);
+  const hostDrawerCur = hostDrawer ? (hosts.find((h) => h.id === hostDrawer.id) || hostDrawer) : null;
   const wantIds = useMemo(() => {
     if (!usageOn) return [];                       // 체크 해제 = 요청 0건
     if (view !== 'vms' && view !== 'hosts') return [];
@@ -796,7 +801,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
             <Node label="🔍 검색 결과" defaultOpen sub={view === 'hosts' ? `${hm.length} 호스트 · ${matches.length} VM` : `${matches.length} VM`}>
               {empty && <div className="vcd-node vcd-leaf"><span className="vcd-caret" /><span className="muted">일치하는 항목이 없습니다</span></div>}
               {hm.slice(0, SEARCH_CAP).map((h) => (
-                <Leaf key={`h:${h.id}`} icon="🖥️" onClick={() => setSel({ type: 'host', item: h })} onObj={() => openObj('host', h.id)}
+                <Leaf key={`h:${h.id}`} icon="🖥️" onClick={() => setHostDrawer(h)} onObj={() => openObj('host', h.id)}
                   label={<Highlight text={h.name} tokens={tokens} />} badge={<StateBadge state={h.connectionState} />}
                   sub={`🧩 ${h.cluster || 'standalone'} · CPU ${unitText(hostUsagePct(h, 'cpuUsagePct'), '%')} · MEM ${unitText(hostUsagePct(h, 'memUsagePct'), '%')} · VM ${hostVmCount(h) ?? '-'}`} />
               ))}
@@ -833,7 +838,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
                   tail={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><VirtBadge alloc={cv.alloc} base={cv.cores} kind="cpu" /><VirtBadge alloc={cv.memAlloc} base={cv.memPhys} kind="mem" /></span>} />}>
                 {chosts.map((h) => (
                   <Tree key={h.id} k={`h:${h.id}`} open={open} toggle={toggle} icon="🖥️" action={<ObjBtn onClick={() => openObj('host', h.id)} />}
-                    label={<span className="vcd-link" onClick={(e) => { e.stopPropagation(); setSel({ type: 'host', item: h }); }}>{h.name}</span>}
+                    label={<span className="vcd-link" onClick={(e) => { e.stopPropagation(); setHostDrawer(h); }}>{h.name}</span>}
                     sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={hostUsagePct(h, 'cpuUsagePct')} mem={hostUsagePct(h, 'memUsagePct')} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setVmDrawer(vm)} onObj={() => openObj('vm', vm.id)}
@@ -889,6 +894,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
 
       </>}
       {sel && <EntityDetail type={sel.type} item={sel.item} onClose={() => setSel(null)} />}
+      {hostDrawerCur && <HostDrawer host={hostDrawerCur} rows={treeHosts} onClose={() => setHostDrawer(null)} onMove={(h) => setHostDrawer(h)} />}
       {vmDrawer && <VmDrawer vm={vmDrawer} rows={treeRows} onClose={() => setVmDrawer(null)} onMove={(vm) => setVmDrawer(vm)} days={numOrNull(vmsD?.signalCounts?.snapAgeDays)} />}
       {veeamVm && <VeeamDetailModal vcenterId={vcenterId} vm={veeamVm} onClose={() => setVeeamVm(null)} />}
       {portalVm && <React.Suspense fallback={null}><BackupManageModal vmId={portalVm} onClose={() => setPortalVm(null)} /></React.Suspense>}
