@@ -200,7 +200,8 @@ export function specOf(c, admin = false) {
   const COLL = { cpu: 'cpus', mem: 'memoryDimms', disk: 'disks', ctrl: 'storageControllers', gpu: 'gpus', psu: 'psus', pcie: 'pcie' };
   for (const g of HW_GROUPS) {
     if (g.key === 'id') {
-      sections.push({ title: '기본 식별', kind: 'kv', rows: sumKv(g, [['법인', c.corpName], ['vCenter', c.vcenterName || null], ['서버(등록 이름)', c.name], ['Hostname(OS)', c.hostName || null], ['서비스태그', c.serviceTag || null]]) });
+      // v2.973 C1: vCenter 는 카탈로그 값(id.sum.vcenter — v2.968)이 이미 한 줄 넣는다. 여기 고정 줄에도 넣어 사양서에 두 번 나왔다.
+      sections.push({ title: '기본 식별', kind: 'kv', rows: sumKv(g, [['법인', c.corpName], ['서버(등록 이름)', c.name], ['Hostname(OS)', c.hostName || null], ['서비스태그', c.serviceTag || null]]) });
       continue;
     }
     const sumRows = sumKv(g);

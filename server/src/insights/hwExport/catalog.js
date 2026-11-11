@@ -20,6 +20,7 @@ import { numOrNull } from '../../util/numOrNull.js';
 import { capacityOfInventory } from '../../idrac/physicalCapacity.js';
 import { dedupNics } from '../../idrac/nicPorts.js';
 import { localStamp } from '../../util/dayKey.js';
+import { partHealthRollup } from '../../idrac/invView.js'; // v2.973 B1: 하위 상태를 부품 원소 판정으로(화면 inventoryView 와 같은 판정)
 
 const s = (v) => (v == null ? '' : String(v).trim());
 const n = (v) => { const x = numOrNull(v); return x == null ? null : x; };
@@ -42,6 +43,18 @@ function readArr(inv, key, { emptyUnknown = false } = {}) {
   return emptyUnknown && !a.length ? null : a;
 }
 const countOf = (inv, key, o) => { const a = readArr(inv, key, o); return a ? a.length : null; };
+
+/*
+ * v2.973 B1: 하위 시스템 상태. 수집기(idrac/redfish.js)는 health.fan 을 채우지 않아 '팬 상태' 가 모든 서버에서 비었다 — 팬 목록(inv.fans)은 있다.
+ * 화면(idrac/invView.js inventoryView)처럼 **부품 원소 판정으로 다시 만든다**(psu · storage(디스크) · fan). 원소를 못 읽었으면(컬렉션 failed · 배열 없음)
+ * 저장된 롤업 글자를 쓴다. 판정은 partHealthRollup 하나(복제 금지) — 'OK' 는 읽은 원소가 있고 못 읽은 원소가 없을 때만.
+ */
+const PART_PICK = { fans: (x) => ({ health: x.health, state: x.state }) };
+function healthOf(inv, word, arrKey) {
+  const a = arrKey ? readArr(inv, arrKey) : null;
+  if (a && a.length) { const w = partHealthRollup(a, PART_PICK[arrKey]).word; if (w) return w; }
+  return s(inv?.health?.[word]);
+}
 
 /*
  * NIC 포트 목록. 같은 물리 포트 중복은 idrac/nicPorts.js dedupNics 로 묶는다.
@@ -315,9 +328,9 @@ export const HW_GROUPS = Object.freeze([
       { key: 'overall', label: '전체 상태', kind: 'text', get: (c) => s(c.inv?.health?.overall || c.inv?.system?.health) },
       { key: 'processor', label: 'CPU 상태', kind: 'text', get: (c) => s(c.inv?.health?.processor) },
       { key: 'memory', label: '메모리 상태', kind: 'text', get: (c) => s(c.inv?.health?.memory) },
-      { key: 'storage', label: '스토리지 상태', kind: 'text', get: (c) => s(c.inv?.health?.storage) },
-      { key: 'psu', label: 'PSU 상태', kind: 'text', get: (c) => s(c.inv?.health?.psu) },
-      { key: 'fan', label: '팬 상태', kind: 'text', get: (c) => s(c.inv?.health?.fan) },
+      { key: 'storage', label: '스토리지 상태', kind: 'text', get: (c) => healthOf(c.inv, 'storage', 'disks') },
+      { key: 'psu', label: 'PSU 상태', kind: 'text', get: (c) => healthOf(c.inv, 'psu', 'psus') },
+      { key: 'fan', label: '팬 상태', kind: 'text', get: (c) => healthOf(c.inv, 'fan', 'fans') },
     ],
   },
 ]);

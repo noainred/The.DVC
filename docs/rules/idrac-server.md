@@ -1486,4 +1486,14 @@
     통합 서버 인벤토리의 미지정 이유가 수집 서버 때문이면 `corpWhyCode: 'collector'` 를 싣고 화면이 '수집 서버 법인 매칭 →' 링크(#/settings/collectors)를 띄운다.
     회귀 `server/test/collectorDc2972.test.js` · `web/src/views/collectors/collectorDcText.test.js`.
   - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
+  - **v2.973 — 엣지 서버의 빈 칸 채우기**(사용자 요청 2026-11-11 — WA 법인 R640 엑셀에서 제조사 · 전원 · 스레드 · 펌웨어 · BIOS · iDRAC 칸이 비었다 · 결정 'A1~A14 · B1 · C1 · C2 모두'):
+    원인은 엣지 축약 인벤토리(`collector/compactInv.js`)가 iDRAC 이 수집한 값 일부를 중앙으로 보내지 않은 것이다(중앙 직접 수집 서버는 채워졌다).
+    추가(값이 있을 때만 키 — 구버전 엣지 모양과 같게): system 제조사 · 전원 상태 · 자산 태그 · UUID, cpu.threads, cpus[] 스레드 · 최대 클럭 · 제조사, DIMM 랭크, 디스크 RPM,
+    컨트롤러 속도, PSU · PCIe · NIC 어댑터 펌웨어, 전력 상한, BIOS 설정(`idrac/biosKeys.js` 목록만 — 수집기 · 엣지 · 중앙이 같은 목록), iDRAC 모델 · 라이선스(이름 · 종류 · 만료 —
+    주문 식별자 entitlement 는 싣지 않는다), iDRAC 관리 NIC(이름 · MAC · 호스트 이름 · FQDN · IPv4). ⚠ 자산 태그 · UUID · iDRAC 주소는 예전에 '자산 정보는 싣지 않는다' 로 뺐던 값이다 —
+    사용자 결정으로 넣었다. 시리얼 · 부품번호(PSU) · SKU 는 여전히 싣지 않는다. 중앙 `remoteInventory.js INV_SHAPE` 에 **같은 키**(짝 — 테스트가 엣지 출력 = 중앙 정제 결과로 대조).
+    엣지가 업그레이드되고 인벤토리를 다시 보내야 채워진다(그 전 수집분은 비어 있다 — 비고 '엣지 축약 인벤토리').
+    B1: 수집기는 `health.fan` 을 채우지 않는다(팬 목록은 poller 가 붙인다) — 내보내기의 팬 · PSU · 스토리지 상태는 화면(inventoryView)처럼 **부품 원소 판정**(partHealthRollup)으로 다시 만든다.
+    못 읽은 컬렉션은 저장된 롤업 글자로(OK 를 지어내지 않는다). C1: 사양서 '기본 식별' 의 vCenter 고정 줄 삭제(v2.968 카탈로그 값과 중복). C2: 열 너비 = max(머리글 기준, 값 길이 — 한글 2칸 · 상한 60 · 앞 3000행) ·
+    합계 칸 줄바꿈. 회귀 `server/test/hwExportFill2973.test.js`.
 

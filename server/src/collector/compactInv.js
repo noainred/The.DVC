@@ -6,6 +6,7 @@
  * agent.js 는 이것을 import 해 그대로 재수출한다(테스트·호출부 무변경).
  */
 import { dedupNics } from '../idrac/nicPorts.js'; // v2.728: 같은 물리 포트 중복 제거(의존 없는 순수 모듈)
+import { BIOS_KEYS } from '../idrac/biosKeys.js'; // v2.973: BIOS 설정은 화면 · 내보내기가 쓰는 항목만(중앙 정제와 같은 목록)
 // 서버 분석용 콤팩트 인벤토리(중앙 '서버 분석' 4개 탭이 쓰는 필드만; 자격증명·잡정보 제외).
 // 큰 항목은 firmware 배열뿐이라 O(구성요소 수)로 유지된다.
 //
@@ -18,6 +19,21 @@ const cs = (v, n = 64) => (typeof v === 'string' ? (v.length > n ? v.slice(0, n)
 const cn = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const cb = (v) => (typeof v === 'boolean' ? v : null);     // 예측 실패 — null(미확인)을 false 로 굳히지 않는다(v2.547)
 const st = (o) => ({ health: cs(o?.health, 32), state: cs(o?.state, 32) });
+// v2.973(사용자 요청 '안 나오는 정보 추가' — 하드웨어 내보내기에서 엣지 서버만 비던 값): 아래 '추가' 값은 **값이 있을 때만 키를 싣는다**
+//   (없으면 키를 만들지 않는다 — 구버전 엣지 보고와 모양이 같아 중앙 판정 statusFieldsMissing 등을 바꾸지 않는다). 글자는 길이 상한.
+const opt = (k, v) => (v === undefined || v === null || v === '' ? {} : { [k]: v });
+const optS = (k, v, n = 64) => opt(k, cs(v, n));
+const optN = (k, v) => opt(k, cn(v));
+function biosAttrs(a) {
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return null;
+  const o = {};
+  for (const k of BIOS_KEYS) {
+    if (!Object.hasOwn(a, k)) continue;
+    const v = a[k];
+    if (typeof v === 'string') o[k] = cs(v, 64); else if (typeof v === 'number' && Number.isFinite(v)) o[k] = v; else if (typeof v === 'boolean') o[k] = v;
+  }
+  return Object.keys(o).length ? o : null;
+}
 const COLL_KEYS = ['system', 'psus', 'disks', 'storageControllers', 'memoryDimms', 'cpus', 'gpus', 'pcie', 'fans'];
 const HEALTH_KEYS = ['overall', 'processor', 'memory', 'storage', 'psu', 'fan', 'battery', 'gpu'];
 export function compactInv(inv) {
@@ -27,18 +43,28 @@ export function compactInv(inv) {
   return {
     // hostName: 파트/분석 화면에서 IP와 나란히 표시(iDRAC 이 보고하는 OS 호스트네임) — 누락 시
     // 위임(엣지) 서버는 hostname 컬럼이 영구 공백이 된다.
-    system: inv.system ? { model: inv.system.model, serviceTag: inv.system.serviceTag, biosVersion: inv.system.biosVersion, hostName: inv.system.hostName, health: cs(inv.system.health, 32) } : undefined,
-    cpu: inv.cpu ? { model: inv.cpu.model, count: inv.cpu.count, cores: inv.cpu.cores, health: cs(inv.cpu.health, 32) } : undefined,
+    // v2.973: 제조사 · 전원 상태 · 자산 태그 · UUID(A1 · A2 · A13 — 사용자 결정 2026-11-11 '모두 진행'. 시리얼은 여전히 싣지 않는다).
+    system: inv.system ? {
+      model: inv.system.model, serviceTag: inv.system.serviceTag, biosVersion: inv.system.biosVersion, hostName: inv.system.hostName, health: cs(inv.system.health, 32),
+      ...optS('manufacturer', inv.system.manufacturer), ...optS('powerState', inv.system.powerState, 32), ...optS('assetTag', inv.system.assetTag), ...optS('uuid', inv.system.uuid),
+    } : undefined,
+    cpu: inv.cpu ? { model: inv.cpu.model, count: inv.cpu.count, cores: inv.cpu.cores, health: cs(inv.cpu.health, 32), ...optN('threads', inv.cpu.threads) } : undefined,
     memory: inv.memory ? { totalGiB: inv.memory.totalGiB, health: cs(inv.memory.health, 32) } : undefined,
     gpus: Array.isArray(inv.gpus) ? inv.gpus.map((g) => ({ model: g.model, name: g.name, memoryMiB: g.memoryMiB, ...st(g) })) : [],
-    idrac: inv.idrac ? { firmwareVersion: inv.idrac.firmwareVersion } : undefined,
-    bios: inv.bios ? { version: inv.bios.version } : undefined,
+    idrac: inv.idrac ? { firmwareVersion: inv.idrac.firmwareVersion, ...optS('model', inv.idrac.model) } : undefined,   // v2.973 A12: iDRAC 모델
+    // v2.973 A11: 부팅 모드 · BIOS 설정(idrac/biosKeys.js 목록만 — 중앙 정제와 같은 목록)
+    bios: inv.bios ? { version: inv.bios.version, ...(biosAttrs(inv.bios.attributes) ? { attributes: biosAttrs(inv.bios.attributes) } : {}) } : undefined,
+    // v2.973 A10: 전력 상한 · A12: iDRAC 라이선스(이름 · 종류 · 만료만 — 주문 식별자 entitlement 는 싣지 않는다)
+    ...(inv.powerCap && typeof inv.powerCap === 'object' ? { powerCap: { limitWatts: cn(inv.powerCap.limitWatts) } } : {}),
+    ...(Array.isArray(inv.licenses) ? { licenses: inv.licenses.slice(0, 12).map((l) => ({ name: cs(l?.name, 128), type: cs(l?.type, 64), expiry: cs(l?.expiry, 64) })) } : {}),
+    // v2.973 A14: iDRAC 관리 NIC(호스트 이름 · FQDN · MAC · IPv4 — 사용자 결정 2026-11-11). 중앙 화면 · 내보내기는 관리자 판본만 보인다.
+    ...(Array.isArray(inv.network) ? { network: inv.network.slice(0, 4).map((e) => ({ name: cs(e?.name), mac: cs(e?.mac), hostName: cs(e?.hostName, 255), fqdn: cs(e?.fqdn, 255), ipv4: cs(e?.ipv4, 255) })) } : {}),
     firmware: Array.isArray(inv.firmware) ? inv.firmware.map((f) => ({ type: f.type, version: f.version, name: f.name })) : [],
     // NIC 어댑터/포트 — 중앙 '서버 NIC 속도/모델 확인'용. 과거 이 필드가 누락돼 엣지 원격
     // 서버가 전부 '정보없음'(모델 0종)으로 나왔다. 포트는 id/link/speedMbps만(콤팩트 유지).
     // v2.728: 같은 물리 포트가 두 컬렉션(NetworkPorts·Ports)으로 두 번 실린 옛 캐시도 보내기 전에 한 번으로 묶는다(idrac/nicPorts.js).
     nics: Array.isArray(inv.nics) ? dedupNics(inv.nics).map((n) => ({
-      name: n.name, model: n.model,
+      name: n.name, model: n.model, ...optS('firmware', n.firmware),   // v2.973 A9: 어댑터 펌웨어
       // v2.682(R3E-01): 포트 MAC 도 싣는다 — 중앙 '통합 성능 모니터링' 의 MAC 규칙(ESXi NIC MAC ↔ iDRAC 포트 MAC)이 위임 서버에도 동작하게.
       //   중앙 remoteInventory INV_SHAPE 에도 'mac' 이 있어야 한다(한쪽만이면 버려진다). 없으면 키를 만들지 않는다.
       ports: Array.isArray(n.ports) ? n.ports.map((p) => ({ id: p.id, link: p.link, speedMbps: p.speedMbps, ...(typeof p.mac === 'string' && p.mac ? { mac: p.mac.slice(0, 64) } : {}) })) : [],
@@ -46,15 +72,17 @@ export function compactInv(inv) {
     // 파트 인벤토리 탭용 — 집계에 필요한 식별 필드만(시리얼 등 자산정보 제외, 페이로드 절약).
     // 이 필드들을 빼면 위임(엣지) 법인의 서버가 파트 탭에서 전부 공백이 된다(과거 nics 누락과
     // 동일한 회귀 패턴 — test/compactInv.test.js 가 고정).
-    cpus: Array.isArray(inv.cpus) ? inv.cpus.map((c) => ({ socket: c.socket, model: c.model, cores: c.cores, ...st(c) })) : [],
-    disks: Array.isArray(inv.disks) ? inv.disks.map((d) => ({ name: cs(d.name, 128), model: d.model, capacityGB: d.capacityGB, media: d.media, protocol: d.protocol, ...st(d), predictiveFailure: cb(d.predictiveFailure) })) : [],
+    // v2.973 A3 · A5: CPU 스레드 · 최대 클럭 · 제조사, 디스크 회전수
+    cpus: Array.isArray(inv.cpus) ? inv.cpus.map((c) => ({ socket: c.socket, model: c.model, cores: c.cores, ...st(c), ...optN('threads', c.threads), ...optN('maxSpeedMHz', c.maxSpeedMHz), ...optS('manufacturer', c.manufacturer) })) : [],
+    disks: Array.isArray(inv.disks) ? inv.disks.map((d) => ({ name: cs(d.name, 128), model: d.model, capacityGB: d.capacityGB, media: d.media, protocol: d.protocol, ...st(d), predictiveFailure: cb(d.predictiveFailure), ...optN('rpm', d.rpm) })) : [],
     psus: Array.isArray(inv.psus) ? inv.psus.map((p) => ({
       name: cs(p.name, 128), model: p.model, manufacturer: p.manufacturer, capacityWatts: p.capacityWatts,
       inputWatts: cn(p.inputWatts), outputWatts: cn(p.outputWatts), lineInputVoltage: cn(p.lineInputVoltage), ...st(p),
+      ...optS('firmware', p.firmware),   // v2.973 A7: PSU 펌웨어
     })) : [],
-    memoryDimms: Array.isArray(inv.memoryDimms) ? inv.memoryDimms.map((m) => ({ locator: cs(m.locator, 64), sizeGB: m.sizeGB, type: m.type, speedMHz: m.speedMHz, manufacturer: m.manufacturer, partNumber: m.partNumber, ...st(m) })) : [],
-    storageControllers: Array.isArray(inv.storageControllers) ? inv.storageControllers.map((c) => ({ name: cs(c.name, 128), model: c.model, firmware: c.firmware, protocols: c.protocols, health: cs(c.health, 32) })) : [],
-    pcie: Array.isArray(inv.pcie) ? inv.pcie.map((d) => ({ name: cs(d.name, 128), model: d.model, manufacturer: d.manufacturer, deviceType: d.deviceType, health: cs(d.health, 32) })) : [],
+    memoryDimms: Array.isArray(inv.memoryDimms) ? inv.memoryDimms.map((m) => ({ locator: cs(m.locator, 64), sizeGB: m.sizeGB, type: m.type, speedMHz: m.speedMHz, manufacturer: m.manufacturer, partNumber: m.partNumber, ...st(m), ...optN('rank', m.rank) })) : [],   // v2.973 A4: 랭크
+    storageControllers: Array.isArray(inv.storageControllers) ? inv.storageControllers.map((c) => ({ name: cs(c.name, 128), model: c.model, firmware: c.firmware, protocols: c.protocols, health: cs(c.health, 32), ...optN('speedGbps', c.speedGbps) })) : [],   // v2.973 A6: 속도
+    pcie: Array.isArray(inv.pcie) ? inv.pcie.map((d) => ({ name: cs(d.name, 128), model: d.model, manufacturer: d.manufacturer, deviceType: d.deviceType, health: cs(d.health, 32), ...optS('firmware', d.firmware) })) : [],   // v2.973 A8: 펌웨어
     // 팬: state 는 빈 슬롯일 때만 있다(v2.612 COL2612-08 — poller.js 가 그때만 싣는다). health 는 언제나 싣는다.
     fans: Array.isArray(inv.fans) ? inv.fans.map((f) => ({ name: f.name, model: f.model, partNumber: f.partNumber, health: cs(f.health, 32), ...(typeof f.state === 'string' && f.state ? { state: cs(f.state, 32) } : {}) })) : [],
     // 롤업·컬렉션 메타 — 아는 키만(값은 짧은 글자). 컬렉션은 'ok'|'failed' 만, reachable 은 불리언만.

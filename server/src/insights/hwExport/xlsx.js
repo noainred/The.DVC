@@ -55,6 +55,33 @@ function widthOf(label, kind) {
 }
 const NOTE_WIDTH = 46;
 
+/*
+ * v2.973 C2: 열 너비를 값 길이에 맞춘다(사용자 신고 — '서버' 열이 'LESASBPAPWA0' 에서 잘렸다). 머리글 기준 너비(widthOf)보다 넓은 값이 있으면
+ * 그 길이까지 넓히되 상한(FIT_MAX)을 둔다. 한글 · 한자는 2칸으로 센다. 행이 많아도 앞 FIT_SAMPLE 행만 본다(O(열 × 표본)).
+ */
+const FIT_MAX = 60;
+const FIT_SAMPLE = 3000;
+export function dispLen(v) {
+  if (v == null) return 0;
+  const t = typeof v === 'number' ? v.toLocaleString('en-US') : String(v);
+  let n = 0;
+  for (const ch of t.slice(0, 200)) n += ch.codePointAt(0) > 0x2e80 ? 2 : 1;
+  return n;
+}
+export function fitWidths(cols, rows, base = (c) => widthOf(c.label, c.kind)) {
+  const w = cols.map((c) => base(c));
+  const n = Math.min(rows.length, FIT_SAMPLE);
+  for (let r = 0; r < n; r++) {
+    const cells = rows[r]?.cells || [];
+    for (let i = 0; i < cols.length; i++) {
+      if (cols[i].key === 'note') continue;
+      const need = Math.min(FIT_MAX, dispLen(cells[i]) + 2);
+      if (need > w[i]) w[i] = need;
+    }
+  }
+  return w;
+}
+
 /** 서버 사이의 합 — 값이 있는 서버만 더했으면 '(값 있는 M/N대)' 를 붙인다(반증 F5 — 부분 합을 전체 합처럼 보이지 않게). 하나도 없으면 '—'. */
 export function partialText(v, n, total, unit) {
   if (v == null) return '—';
@@ -82,7 +109,8 @@ function writeTop(ws, title, meta, totals, corpsLine, ncol) {
   kpis.forEach(([k, v], i) => {
     const a = r.getCell(i * 2 + 1); const b = r.getCell(i * 2 + 2);
     a.value = k; a.font = { color: { argb: PAL.muted }, size: 9 }; a.fill = fill(PAL.zebra); a.border = BORDER; a.alignment = { vertical: 'middle', wrapText: true };
-    b.value = v; b.font = { bold: true }; b.fill = fill(PAL.zebra); b.border = BORDER; b.alignment = { vertical: 'middle' };
+    // v2.973 C2: 합계 칸 값('1,472 (값 있는 46/47대)')이 열 너비를 넘으면 잘렸다 — 줄바꿈해 두 줄(행 높이 30)에 넣는다.
+    b.value = v; b.font = { bold: true }; b.fill = fill(PAL.zebra); b.border = BORDER; b.alignment = { vertical: 'middle', wrapText: true };
   });
   r.height = 30;
   return 6;
@@ -99,7 +127,7 @@ function headRow(ws, at, cols) {
 async function summarySheet(wb, name, model, meta, rows, { band, corpsLine, totals, title }) {
   const cols = model.summary.cols;
   const ws = wb.addWorksheet(name, { pageSetup: { ...PRINT } });
-  ws.columns = cols.map((c) => ({ width: c.key === 'note' ? NOTE_WIDTH : widthOf(c.label, c.kind) }));
+  ws.columns = fitWidths(cols, rows, (c) => (c.key === 'note' ? NOTE_WIDTH : widthOf(c.label, c.kind))).map((width) => ({ width }));
   const head = writeTop(ws, title, meta, totals, corpsLine, cols.length);
   headRow(ws, head, cols);
   ws.views = [{ state: 'frozen', ySplit: head, xSplit: 0 }];
@@ -131,7 +159,7 @@ async function summarySheet(wb, name, model, meta, rows, { band, corpsLine, tota
 
 async function detailSheet(wb, name, d) {
   const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1, xSplit: 0 }], pageSetup: { ...PRINT, printTitlesRow: '1:1' } });
-  ws.columns = d.cols.map((c) => ({ width: widthOf(c.label, c.kind) }));
+  ws.columns = fitWidths(d.cols, d.rows).map((width) => ({ width }));
   headRow(ws, 1, d.cols);
   let at = 2;
   for (const r of d.rows) {
