@@ -95,7 +95,7 @@ export function selectServers(fleet, { kind = 'bm', corps = null, invOf, match =
     const notes = [];
     if (!inv) notes.push(`인벤토리 없음 — ${noInvReason(row, k)}`);
     else if (!hn) notes.push('Hostname 미보고');
-    if (inv && via === 'remote') notes.push('엣지 축약 인벤토리(일부 값 없음)');
+    if (inv && via === 'remote') notes.push('엣지 축약 인벤토리(시리얼 없음 · 구버전 엣지는 일부 값 없음)');
     out.push({
       corpId: t(corp.id), corpName: t(corp.name) || t(corp.id) || '미지정', vcenterName: t(row.vcenter) || t(row.vcenterId),
       kind: k, name: mask(t(row.name)), hostName: mask(hn), serviceTag: t(row.serviceTag), model: t(row.model),

@@ -51,8 +51,12 @@ const countOf = (inv, key, o) => { const a = readArr(inv, key, o); return a ? a.
  */
 const PART_PICK = { fans: (x) => ({ health: x.health, state: x.state }) };
 function healthOf(inv, word, arrKey) {
-  const a = arrKey ? readArr(inv, arrKey) : null;
-  if (a && a.length) { const w = partHealthRollup(a, PART_PICK[arrKey]).word; if (w) return w; }
+  // 반증 F2: 부품 배열이 있으면(컬렉션 failed 포함) **원소 판정만** 쓴다 — 화면 inventoryView 와 같다. 못 읽음 · 빈 슬롯만이면 '' (옛 롤업 'OK' 로 돌아가지 않는다).
+  //   저장된 롤업 글자는 배열 자체가 없을 때(구버전 엣지 · 이 하위 시스템을 부품으로 읽지 않는 수집)만 쓴다.
+  if (arrKey && Array.isArray(inv?.[arrKey])) {
+    const a = readArr(inv, arrKey);
+    return a ? partHealthRollup(a, PART_PICK[arrKey]).word : '';
+  }
   return s(inv?.health?.[word]);
 }
 

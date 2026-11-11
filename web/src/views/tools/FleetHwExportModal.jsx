@@ -175,7 +175,7 @@ export function FleetHwExportModal({ initialKind = 'bm', screenCorp = '', onClos
             </section>
           </div>
 
-          <div className="muted hwx-note">값의 출처는 iDRAC(Redfish) 인벤토리 저장값입니다 — 내려받을 때 장비에 다시 접속하지 않습니다. 디스크는 물리 디스크 기준이고, 읽지 못한 값은 빈 칸으로 둡니다. 엣지 서버는 축약 인벤토리라 일부 값이 비어 있습니다.</div>
+          <div className="muted hwx-note">값의 출처는 iDRAC(Redfish) 인벤토리 저장값입니다 — 내려받을 때 장비에 다시 접속하지 않습니다. 디스크는 물리 디스크 기준이고, 읽지 못한 값은 빈 칸으로 둡니다. 엣지 서버는 축약 인벤토리라 시리얼이 없고, 구버전 엣지(v2.973 미만)가 올린 인벤토리는 제조사 · 펌웨어 · BIOS · iDRAC 관리 값도 비어 있습니다.</div>
           {msg && <div className="error-box">{msg}</div>}
           <div className="flex gap wrap" style={{ alignItems: 'center' }}>
             <span style={{ flex: '1 1 260px', minWidth: 0, fontSize: 13 }} data-hwx-summary="">{summaryLine(s, format)}</span>

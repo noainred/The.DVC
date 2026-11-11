@@ -97,3 +97,48 @@ test('C2 — 열 너비는 값 길이까지 넓힌다(한글 2칸 · 상한 60 �
   assert.equal(w[0], 60, '상한'); assert.equal(w[1], 10, '비고 열은 그대로');
   assert.equal(fitWidths(cols, [{ cells: ['LESASBPAPWA01.wa.dvc.lgensol.com', ''] }], () => 10)[0], 34);
 });
+
+// ---- 반증 반영(F1~F4 · R1 · R2 · R4) ----
+import { inventoryView } from '../src/idrac/invView.js';
+import { maskInventoryForViewer } from '../src/routes/admin/idracScan.js';
+import fs from 'node:fs';
+
+test('반증 F2 — 팬 · PSU · 스토리지 상태는 화면(inventoryView)과 같은 판정: 못 읽음 · 빈 슬롯만 · 컬렉션 실패면 옛 롤업 OK 로 돌아가지 않는다', () => {
+  const cases = [
+    { psus: [{ health: 'OK' }, { health: '' }], health: { psu: 'OK' } },
+    { psus: [{ health: 'OK' }], collections: { psus: 'failed' }, health: { psu: 'OK' } },
+    { psus: [{ state: 'Absent' }], health: { psu: 'OK' } },
+    { psus: [{ health: 'OK' }, { health: 'Critical' }], health: { psu: 'OK' } },
+  ];
+  for (const inv of cases) {
+    const got = HW_FIELDS.get('health.sum.psu').get({ inv, kind: 'bm' });
+    const screen = inventoryView(inv).health?.psu ?? '';
+    assert.equal(got, inv.collections?.psus === 'failed' ? '' : screen, JSON.stringify(inv));
+  }
+  assert.equal(HW_FIELDS.get('health.sum.psu').get({ inv: { health: { psu: 'Warning' } }, kind: 'bm' }), 'Warning', '배열이 없으면 저장 글자');
+});
+
+test('반증 F4 — 관리자 판본이 아니면 상세 인벤토리의 관리 NIC 주소 · UUID · iDRAC 계정을 가린다(원본 불변)', () => {
+  const inv = { system: { model: 'R', uuid: 'U-1' }, network: [{ name: 'iDRAC', ipv4: '10.9.9.9', mac: 'AA', hostName: 'h', fqdn: 'h.x' }], idracUsers: [{ userName: 'root' }] };
+  const m = maskInventoryForViewer(inv);
+  assert.deepEqual(m.network, [{ name: 'iDRAC', ipv4: '', mac: '', hostName: '', fqdn: '' }]);
+  assert.equal(m.system.uuid, ''); assert.ok(!('idracUsers' in m));
+  assert.equal(inv.network[0].ipv4, '10.9.9.9', '원본 불변');
+  const src = fs.readFileSync(new URL('../src/routes/admin/idracScan.js', import.meta.url), 'utf8');
+  assert.match(src, /inventory: isAdminReq\(req\) \? inventoryView\(inv \|\| null\) : maskInventoryForViewer\(inventoryView\(inv \|\| null\)\)/);
+});
+
+test('반증 R1 · R2 · R4 — 빈 라이선스 · 관리 NIC · 상한 없는 전력은 키를 만들지 않는다 · GPU 제조사 · 중앙 개수 상한', () => {
+  const c = compactInv({ system: { model: 'R' }, licenses: [], network: [], powerCap: { limitWatts: null }, gpus: [{ model: 'A100', manufacturer: 'NVIDIA' }] });
+  for (const k of ['licenses', 'network', 'powerCap']) assert.ok(!(k in c), k);
+  assert.equal(sanitizeRemoteInv(JSON.parse(JSON.stringify(c))).gpus[0].manufacturer, 'NVIDIA');
+  const many = sanitizeRemoteInv({ network: Array.from({ length: 9 }, (_, i) => ({ name: `n${i}` })), licenses: Array.from({ length: 30 }, () => ({ name: 'L' })) });
+  assert.equal(many.network.length, 4); assert.equal(many.licenses.length, 12);
+});
+
+test('반증 F1 · F3 — 안내 문구가 이번 변경과 맞다 · 합계 칸 행 높이는 필요한 줄 수로', () => {
+  const src = fs.readFileSync(new URL('../src/insights/hwExport/xlsx.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /라이선스는 비어 있습니다/);
+  assert.doesNotMatch(src, /포탈이 새로 판정하지 않습니다/);
+  assert.match(src, /r\.height = Math\.min\(120, lines \* 15\)/);
+});

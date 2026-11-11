@@ -50,7 +50,7 @@ const INV_SHAPE = {
   system: ['o', ['model', 'serviceTag', 'biosVersion', 'hostName', 'health', 'manufacturer', 'powerState', 'assetTag', 'uuid']],
   cpu: ['o', ['model', 'count', 'cores', 'health', 'threads']],
   memory: ['o', ['totalGiB', 'health']],
-  gpus: ['a', ['model', 'name', 'memoryMiB', ...ST]],
+  gpus: ['a', ['model', 'name', 'memoryMiB', ...ST, 'manufacturer']],
   idrac: ['o', ['firmwareVersion', 'model']],
   bios: ['o', ['version']],
   powerCap: ['o', ['limitWatts']],
@@ -108,6 +108,9 @@ export function sanitizeRemoteInv(inv, { now = null } = {}) {
     if (kind === 'o') out[k] = isPlainObj(inv[k]) ? pickLeaves(inv[k], keys, sub, scal) : null;
     else out[k] = Array.isArray(inv[k]) ? inv[k].slice(0, ARR_MAX).filter(isPlainObj).map((x) => pickLeaves(x, keys, sub, scal)) : [];
   }
+  // v2.973(반증 R4): 엣지가 싣는 개수만 받는다(라이선스 12 · 관리 NIC 4 — 엣지 compactInv 와 같은 상한).
+  if (Array.isArray(out.licenses)) out.licenses = out.licenses.slice(0, 12);
+  if (Array.isArray(out.network)) out.network = out.network.slice(0, 4);
   // v2.973 A11: BIOS 설정 — idrac/biosKeys.js 목록 키 + 글자(64자) · 수 · 불리언만(그 밖은 버린다). 엣지 compactInv biosAttrs 와 같은 규칙.
   if (out.bios && isPlainObj(inv.bios) && isPlainObj(inv.bios.attributes)) {
     const a = {};

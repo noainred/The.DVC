@@ -50,15 +50,16 @@ export function compactInv(inv) {
     } : undefined,
     cpu: inv.cpu ? { model: inv.cpu.model, count: inv.cpu.count, cores: inv.cpu.cores, health: cs(inv.cpu.health, 32), ...optN('threads', inv.cpu.threads) } : undefined,
     memory: inv.memory ? { totalGiB: inv.memory.totalGiB, health: cs(inv.memory.health, 32) } : undefined,
-    gpus: Array.isArray(inv.gpus) ? inv.gpus.map((g) => ({ model: g.model, name: g.name, memoryMiB: g.memoryMiB, ...st(g) })) : [],
+    gpus: Array.isArray(inv.gpus) ? inv.gpus.map((g) => ({ model: g.model, name: g.name, memoryMiB: g.memoryMiB, ...st(g), ...optS('manufacturer', g.manufacturer) })) : [],   // v2.973(반증 R2): GPU 제조사
     idrac: inv.idrac ? { firmwareVersion: inv.idrac.firmwareVersion, ...optS('model', inv.idrac.model) } : undefined,   // v2.973 A12: iDRAC 모델
     // v2.973 A11: 부팅 모드 · BIOS 설정(idrac/biosKeys.js 목록만 — 중앙 정제와 같은 목록)
     bios: inv.bios ? { version: inv.bios.version, ...(biosAttrs(inv.bios.attributes) ? { attributes: biosAttrs(inv.bios.attributes) } : {}) } : undefined,
     // v2.973 A10: 전력 상한 · A12: iDRAC 라이선스(이름 · 종류 · 만료만 — 주문 식별자 entitlement 는 싣지 않는다)
-    ...(inv.powerCap && typeof inv.powerCap === 'object' ? { powerCap: { limitWatts: cn(inv.powerCap.limitWatts) } } : {}),
-    ...(Array.isArray(inv.licenses) ? { licenses: inv.licenses.slice(0, 12).map((l) => ({ name: cs(l?.name, 128), type: cs(l?.type, 64), expiry: cs(l?.expiry, 64) })) } : {}),
+    //   (반증 R1: 수집기는 licenses · network 를 늘 빈 배열로 만든다 — 비었거나 상한 값이 없으면 키를 만들지 않는다 · '값이 있을 때만 키' 를 지킨다)
+    ...(cn(inv.powerCap?.limitWatts) != null ? { powerCap: { limitWatts: cn(inv.powerCap.limitWatts) } } : {}),
+    ...(Array.isArray(inv.licenses) && inv.licenses.length ? { licenses: inv.licenses.slice(0, 12).map((l) => ({ name: cs(l?.name, 128), type: cs(l?.type, 64), expiry: cs(l?.expiry, 64) })) } : {}),
     // v2.973 A14: iDRAC 관리 NIC(호스트 이름 · FQDN · MAC · IPv4 — 사용자 결정 2026-11-11). 중앙 화면 · 내보내기는 관리자 판본만 보인다.
-    ...(Array.isArray(inv.network) ? { network: inv.network.slice(0, 4).map((e) => ({ name: cs(e?.name), mac: cs(e?.mac), hostName: cs(e?.hostName, 255), fqdn: cs(e?.fqdn, 255), ipv4: cs(e?.ipv4, 255) })) } : {}),
+    ...(Array.isArray(inv.network) && inv.network.length ? { network: inv.network.slice(0, 4).map((e) => ({ name: cs(e?.name), mac: cs(e?.mac), hostName: cs(e?.hostName, 255), fqdn: cs(e?.fqdn, 255), ipv4: cs(e?.ipv4, 255) })) } : {}),
     firmware: Array.isArray(inv.firmware) ? inv.firmware.map((f) => ({ type: f.type, version: f.version, name: f.name })) : [],
     // NIC 어댑터/포트 — 중앙 '서버 NIC 속도/모델 확인'용. 과거 이 필드가 누락돼 엣지 원격
     // 서버가 전부 '정보없음'(모델 0종)으로 나왔다. 포트는 id/link/speedMbps만(콤팩트 유지).

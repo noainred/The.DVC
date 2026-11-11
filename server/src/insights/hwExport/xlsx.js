@@ -106,13 +106,20 @@ function writeTop(ws, title, meta, totals, corpsLine, ncol) {
     ['인벤토리 없음', `${totals.noInventory} 대`],
   ];
   const r = ws.getRow(4);
+  let lines = 2;
   kpis.forEach(([k, v], i) => {
+    // 반증 F3: 값 칸 너비는 아래 표 열(fitWidths)이 정한다 — 좁은 열(예: '소켓 수')에 '23,040 GiB (값 있는 46/47대)' 가 오면 두 줄로도 모자랐다.
+    //   필요한 줄 수를 세어 행 높이를 정한다(줄당 15pt).
+    for (const [col, txt] of [[i * 2 + 1, k], [i * 2 + 2, v]]) {
+      const w = Number(ws.getColumn(col).width) || 10;
+      lines = Math.max(lines, Math.ceil(dispLen(txt) / Math.max(1, w - 1)));
+    }
     const a = r.getCell(i * 2 + 1); const b = r.getCell(i * 2 + 2);
     a.value = k; a.font = { color: { argb: PAL.muted }, size: 9 }; a.fill = fill(PAL.zebra); a.border = BORDER; a.alignment = { vertical: 'middle', wrapText: true };
     // v2.973 C2: 합계 칸 값('1,472 (값 있는 46/47대)')이 열 너비를 넘으면 잘렸다 — 줄바꿈해 두 줄(행 높이 30)에 넣는다.
     b.value = v; b.font = { bold: true }; b.fill = fill(PAL.zebra); b.border = BORDER; b.alignment = { vertical: 'middle', wrapText: true };
   });
-  r.height = 30;
+  r.height = Math.min(120, lines * 15);
   return 6;
 }
 
@@ -181,7 +188,7 @@ function infoSheet(wb, meta, model) {
   const lines = [
     ['범위 · 기준 시각', meta.basis],
     ['대상', meta.kindText],
-    ['값의 출처', 'iDRAC(Redfish) 인벤토리 저장값. 엣지(법인 현장) 서버는 그 엣지가 올린 축약 인벤토리 — 제조사 · 어댑터/PSU/PCIe 펌웨어 · BIOS 설정 · iDRAC 관리 · 라이선스는 비어 있습니다. 내려받을 때 장비에 다시 접속하지 않습니다 — ‘인벤토리 시각’ 이 그 값을 읽은 때입니다.'],
+    ['값의 출처', 'iDRAC(Redfish) 인벤토리 저장값. 엣지(법인 현장) 서버는 그 엣지가 올린 축약 인벤토리입니다 — v2.973 이상 엣지가 올린 인벤토리는 제조사 · 펌웨어 · BIOS 설정 · iDRAC 관리 · 라이선스까지 들어 있고, 그보다 오래된 엣지(또는 업그레이드 전에 올린 인벤토리)는 이 값들이 비어 있습니다. 시리얼 · 부품번호는 엣지가 보내지 않습니다. 내려받을 때 장비에 다시 접속하지 않습니다 — ‘인벤토리 시각’ 이 그 값을 읽은 때입니다.'],
     ['법인', '서버 분석 화면과 같은 법인(DataCenter)입니다 — 스캔 등록 서버는 등록된 법인, 그 밖은 그 서버의 vCenter 에 할당된 법인. 법인 할당이 없는 vCenter 의 서버는 vCenter 이름으로 따로 묶고, 둘 다 없으면 ‘미지정’ 입니다.'],
     ['구분', '통합 서버 인벤토리의 판정 그대로 — iDRAC/OME 물리 서버가 vCenter ESXi 호스트로 확인되면 가상화, 아니면 물리(베어메탈). 수동 분류 포함, ‘제외’ 분류는 빠집니다.'],
     ['가상화 서버', 'iDRAC 받침이 있는 호스트만 부품 값이 채워집니다. 없으면 vCenter 가 아는 모델 · 코어 · 메모리만 넣고 비고에 적습니다.'],
@@ -191,7 +198,7 @@ function infoSheet(wb, meta, model) {
     ['빈 칸', '읽지 못한 값입니다 — 0 이 아닙니다. 부품 하나라도 못 읽었으면 그 서버의 합(디스크 합계 · PSU 용량)도 빈 칸입니다. 그 컬렉션을 읽지 못한 서버는 개수(DIMM · 디스크 · PSU · NIC 포트)도 빈 칸입니다.'],
     ['합계 칸 · 띠 소계', '코어 · 메모리는 값이 있는 서버만 더합니다 — 빠진 서버가 있으면 ‘(값 있는 M/N대)’ 를 붙입니다. 가상화 호스트는 iDRAC 받침이 없어도 vCenter 의 코어 · 메모리가 들어갑니다.'],
     ['법인 띠', meta.band === 'band' ? '법인이 바뀔 때마다 띠 줄이 들어갑니다 — 띠 때문에 서버 요약에는 자동 필터를 걸지 않았습니다(필터 · 피벗은 ‘법인 열만’ 으로 내려받으세요).' : meta.band === 'sheet' ? '법인마다 서버 요약 시트를 나눴습니다. 상세 시트는 한 장에 법인 열로 있습니다.' : '띠 없이 한 표 — 자동 필터가 걸려 있습니다.'],
-    ['상태 열', '수집 시점의 Redfish 상태 글자(OK · Warning · Critical) 그대로입니다. 포탈이 새로 판정하지 않습니다.'],
+    ['상태 열', '전체 · CPU · 메모리 상태는 수집 시점의 Redfish 상태 글자(OK · Warning · Critical) 그대로입니다. 팬 · PSU · 스토리지(디스크) 상태는 서버 분석 화면처럼 부품마다의 상태를 모아 다시 판정합니다 — 하나라도 장애면 Critical, 주의면 Warning, 모두 읽혀 정상일 때만 OK, 못 읽은 부품이 있으면 빈 칸입니다.'],
     ['넣지 않는 것', '시리얼 번호 · iDRAC 사용자 계정 · 이벤트 로그 · 접속 계정.' + (meta.admin ? '' : ' 관리자 계정이 아니라 iDRAC 주소 · MAC · UUID 와 주소로 등록된 서버 이름이 빠지거나 가려졌습니다.')],
     ['인벤토리 없음', noInv.length ? `${noInv.length}대 — 서버 요약의 비고에 사유가 있습니다. 하드웨어 칸은 빈 칸입니다(가상화 호스트의 코어 · 메모리는 vCenter 값).` : '없음'],
   ];
