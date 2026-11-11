@@ -58,10 +58,11 @@ const VC_SRC = {
 };
 
 /** 법인 칸 — 이름 + 판정 출처(짧게). 없으면 '미지정' 배지 + 왜 모르는지(서버가 준 corpWhy — 지어내지 않는다). */
-function CorpCell({ row }) {
-  if (!row.corpId) return <span title={row.corpWhy || ''}><span className="badge purple">미지정</span>{row.corpWhy && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }}>{row.corpWhy}</span>}</span>;
+function CorpCell({ row, hideSrc = false }) {
+  // 이유 문장은 칸 안에서 줄바꿈한다(1440px 에서 '현재 전력' · '분류' 열이 가로 스크롤 밖으로 밀리지 않게 — v2.969 Chromium 판독).
+  if (!row.corpId) return <div title={row.corpWhy || ''} style={{ whiteSpace: 'normal', wordBreak: 'keep-all', maxWidth: 200, lineHeight: 1.35 }}><span className="badge purple">미지정</span>{row.corpWhy && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{row.corpWhy}</div>}</div>;
   const src = CORP_SRC[row.corpSource];
-  return <span>{row.corpName}{src && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }} title={src[1]}>· {src[0]}</span>}</span>;
+  return <div style={{ whiteSpace: 'normal', wordBreak: 'keep-all', maxWidth: 200, lineHeight: 1.35 }}>{row.corpName}{src && !hideSrc && <div className="muted" style={{ fontSize: 11 }} title={src[1]}>{src[0]}</div>}</div>;
 }
 
 // 베어메탈 서버의 소속 vCenter 등록 드롭다운(전력 · 사용률의 vCenter 귀속). 목록에 없는 값(삭제된 vCenter 등)도 표시.
@@ -266,7 +267,7 @@ export function FleetInventory({ isAdmin }) {
                       {isAdmin
                         ? <VcAssignSelect value={b.vcenterId || ''} vcenters={vcenters} disabled={busy === rowKey(b)} onChange={(vid) => setVc(b, vid)} />
                         : (b.vcenter ? <span>{b.vcenter}</span> : <span className="badge purple">미지정</span>)}
-                      {b.vcenterId && VC_SRC[b.vcSource] && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }} title={VC_SRC[b.vcSource][1]}>· {VC_SRC[b.vcSource][0]}</span>}
+                      {b.vcenterId && VC_SRC[b.vcSource] && <div className="muted" style={{ fontSize: 11, marginTop: 2 }} title={VC_SRC[b.vcSource][1]}>{VC_SRC[b.vcSource][0]}</div>}
                     </td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.source}</td>
                     <td style={{ textAlign: 'right' }}>{b.watts != null ? <b>{fmtWatts(b.watts)}</b> : <span className="muted">미측정</span>}</td>
@@ -285,13 +286,13 @@ export function FleetInventory({ isAdmin }) {
           <ResultCount total={(d.virtualizationHosts || []).length} shown={vh.length} label="호스트" filtered={!!term || !!fvc} />
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
             <STable>
-              <thead><tr><th>호스트</th><th>법인</th><th>vCenter</th><th>지역</th><th>모델</th><th>서비스태그</th><th style={{ textAlign: 'right' }}>코어</th><th style={{ textAlign: 'right' }}>메모리</th><th>전력원</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
+              <thead><tr><th>호스트</th><th title="가상화 호스트의 법인은 자기 vCenter 의 법인입니다">법인 · vCenter</th><th>지역</th><th>모델</th><th>서비스태그</th><th style={{ textAlign: 'right' }}>코어</th><th style={{ textAlign: 'right' }}>메모리</th><th>전력원</th><th style={{ textAlign: 'right' }}>현재 전력</th>{isAdmin && <th>분류</th>}</tr></thead>
               <tbody>
                 {vh.map((h, i) => (
                   <tr key={`${h.vcenterId}-${h.name}-${i}`}>
                     <td><b>{h.name}</b>{h.synthetic && <span className="badge teal" style={{ marginLeft: 6 }} title="ESXi 호스트와 자동 매칭되진 않았지만 관리자가 가상화로 지정">발견</span>}</td>
-                    <td><CorpCell row={h} /></td>
-                    <td>{h.vcenter}</td>
+                    {/* 법인 · vCenter 한 칸(1440px 에서 '분류' 열이 가로 스크롤 밖으로 밀리지 않게) — 가상화 호스트의 법인은 늘 자기 vCenter 쪽이라 출처 줄은 뺀다 */}
+                    <td><CorpCell row={h} hideSrc /><div className="muted" style={{ fontSize: 11 }}>{h.vcenter}</div></td>
                     <td className="muted" style={{ fontSize: 12 }}>{h.region || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{h.serviceTag || '—'}</td>
@@ -302,7 +303,7 @@ export function FleetInventory({ isAdmin }) {
                     {isAdmin && <td><TagSelect value={h.tag || 'auto'} disabled={busy === rowKey(h)} onChange={(t) => setTag(h, t)} /></td>}
                   </tr>
                 ))}
-                {!vh.length && <tr><td colSpan={isAdmin ? 11 : 10} className="center muted" style={{ padding: 20 }}>가상화 호스트가 없습니다.</td></tr>}
+                {!vh.length && <tr><td colSpan={isAdmin ? 10 : 9} className="center muted" style={{ padding: 20 }}>가상화 호스트가 없습니다.</td></tr>}
               </tbody>
             </STable>
           </div>
