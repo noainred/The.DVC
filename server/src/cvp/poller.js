@@ -51,6 +51,9 @@ const _prevCounters = new Map(); // `${cvpId}|${deviceKey}|${port}` → { at, c 
 const _prevCpu = new Map();      // v2.641: `${cvpId}|${deviceKey}` → { busy, total, at } (누적 CPU 카운터 — 첫 표본은 null · v2.731 A2-04: 표본 시각 at)
 const _prefer = new Map();       // cvpId → Map(kind → 경로 후보)
 const _partsAt = new Map();      // cvpId → 마지막 부품 조회 시각
+// v2.966: 위치(EndpointLocation) 조회 시각 — 부품 주기와 따로 센다. 예전에는 부품 주기에 묶여 기동 직후 첫 주기(vCenter 첫 수집 전 —
+//   인벤토리가 비어 묻는 MAC 0개)를 '했다' 로 쳐서 다음 부품 주기(기본 30분)까지 위치 칸이 비었다.
+const _epAt = new Map();
 // v2.649: 포트 설명은 부품 주기에만 읽는다 — 사이 주기에는 직전에 읽은 설명을 채워 push 해시가 30분마다 뒤집히지 않게 한다(재시작 직후는 DB 가 COALESCE 로 유지).
 const _descs = new Map();        // cvpId → Map(deviceKey → Map(port → 설명))
 const _zeroSince = new Map();    // cvpId → 인벤토리가 처음 0대로 온 시각(COL2611-05 prune 보류)
@@ -107,6 +110,8 @@ export function applyDeltas(cvpId, dev, intervalMs, prevMap = _prevCounters, sla
  * v2.935(C-③): 이번 부품 주기에 EndpointLocation 으로 물을 MAC — 이 CVP 법인(datacenterId)의 vCenter 호스트 NIC · 최근 이동 VM · 나머지 VM 순환.
  *   법인 미지정 CVP 는 이 노드 스냅샷 전체(엣지는 자기 법인 vCenter 만 가진다). 설정에서 끄면 null.
  */
+/** 인벤토리가 준비됐는가 — 호스트 · VM 이 하나라도 있으면(기동 직후 vCenter 첫 수집 전에는 둘 다 비어 있다). */
+export const inventoryReady = (snap) => (Array.isArray(snap?.hosts) && snap.hosts.length > 0) || (Array.isArray(snap?.vms) && snap.vms.length > 0);
 export async function endpointMacsFor(srv, settings, { now = Date.now(), snap = null } = {}) {
   if (settings?.endpointScan === false) return null;
   const s = snap || store.get?.() || {};
@@ -145,7 +150,11 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
   const timeout = settings.deviceTimeoutMs;
   try {
     let r;
-    const epMacs = partsDue ? await endpointMacsFor(full, settings).catch(() => null) : null;   // v2.935(C-③)
+    // v2.935(C-③) · v2.966: 위치 조회는 자기 시각으로 — 인벤토리가 아직 비었으면(기동 직후) 묻지도 소모하지도 않고 다음 폴링에 다시 본다.
+    const epDue = forceParts || !(_epAt.get(full.id) > t0 - PARTS_EVERY_MS);
+    const snap = store.get?.() || {};
+    const invReady = inventoryReady(snap);
+    const epMacs = epDue && invReady ? await endpointMacsFor(full, settings, { snap }).catch(() => null) : null;
     try {
       r = demo ? await demoCvpCollect(full, { now: Date.now(), optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm } })
         : await withDeadline(timeout, (signal) => collectCvp(full, { signal, budgetMs: Math.max(20_000, timeout - 10_000), partsDue, prefer, optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm }, epMacs }), 'CVP 수집 시한 초과');
@@ -190,6 +199,9 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
      */
     const partsAttemptedNow = partsDue && r.devices.some((d) => d.partsAttempted === true);
     if (partsReadNow || partsAttemptedNow) _partsAt.set(full.id, t0);
+    // v2.966: 위치 조회 시각 — 대상을 골랐을 때만(설정 꺼짐 · 고르기 실패는 null). 부품 단계가 예산을 다 써서 건너뛴 주기는 소모하지 않는다
+    //   (다음 폴링은 부품 주기가 아니라 예산이 남는다). 인증 · 연결 멈춤은 소모한다(매 폴링 재시도로 두드리지 않게).
+    if (Array.isArray(epMacs) && r.endpoints?.stopped !== 'budget') _epAt.set(full.id, t0);
     const partsNotTried = partsDue ? r.devices.filter((d) => d.partsAttempted !== true && d.streaming !== false
       && ['budget', 'budget-partial', 'aborted', 'pending', 'ok', 'failed'].includes(d.telemetry) && d.parts === undefined).length : 0;
     const readAt = Date.now();
@@ -312,7 +324,7 @@ export async function pollCvpOnce({ manual = false, only = null, demoOnly = fals
       keepOnly(live);
       for (const k of [..._prevCounters.keys()]) if (!live.has(k.split('|')[0])) _prevCounters.delete(k);
       for (const k of [..._prevCpu.keys()]) if (!live.has(k.split('|')[0])) _prevCpu.delete(k);
-      for (const m of [_prefer, _partsAt, _zeroSince, _descs]) for (const k of [...m.keys()]) if (!live.has(k)) m.delete(k);
+      for (const m of [_prefer, _partsAt, _epAt, _zeroSince, _descs]) for (const k of [...m.keys()]) if (!live.has(k)) m.delete(k);
       try { await db.pruneDevices(db.LOCAL_AGENT, {}, { cvpIds: [...live] }); } catch { /* DB 불가 — 다음 주기 */ }
     }
     const slackMs = Math.max(0, Number(_last.durationMs) || 0); // 직전 실행 소요(COL2611-08)
@@ -353,5 +365,5 @@ export function cvpPollerStatus() {
   };
 }
 
-export function _resetForTest() { _busy = false; _last = { at: 0 }; _inFlight.clear(); _prevCounters.clear(); _prevCpu.clear(); _prefer.clear(); _partsAt.clear(); _zeroSince.clear(); }
+export function _resetForTest() { _busy = false; _last = { at: 0 }; _inFlight.clear(); _prevCounters.clear(); _prevCpu.clear(); _prefer.clear(); _partsAt.clear(); _epAt.clear(); _zeroSince.clear(); }
 export const _prevCountersForTest = _prevCounters;

@@ -32,8 +32,9 @@ const SECTIONS = [
 ];
 const timeText = (t) => (Number.isFinite(t) ? new Date(t).toLocaleString('ko-KR') : '—');
 const numText = (v) => (Number.isFinite(v) ? v.toLocaleString('en-US') : '—');
-const Card = ({ id, title, color, sub, children, flat = false }) => (
-  <section id={`hd-${id}`} className="card hd-card">
+// wide — 격자 한 줄 전체 폭(넓은 표가 든 카드 · v2.966: SAN 경로 표가 반쪽 폭에서 1440px 에도 가로로 밀렸다)
+const Card = ({ id, title, color, sub, children, flat = false, wide = false }) => (
+  <section id={`hd-${id}`} className="card hd-card" style={wide ? { gridColumn: '1 / -1' } : undefined}>
     {title && <div className="hd-card-h"><b><i className="ht-gdot" style={{ background: color }} aria-hidden="true" />{title}</b>{sub ? <span className="muted">{sub}</span> : null}</div>}
     <div className={flat ? 'hd-flat' : ''}>{children}</div>
   </section>
@@ -236,7 +237,7 @@ export default function HostDetail({ id }) {
             )}
           </Card>
           {toolAllowed('san-switch') && (
-            <Card id="san" title="SAN 경로 · 트래픽" color="#2dd4bf" sub={san ? sanSubText(san) : 'HBA WWN ↔ 스위치 포트 · zone ↔ 스토리지 귀속 · 확정분/추정분 분리'}>
+            <Card id="san" wide title="SAN 경로 · 트래픽" color="#2dd4bf" sub={san ? sanSubText(san) : 'HBA WWN ↔ 스위치 포트 · zone ↔ 스토리지 귀속 · 확정분/추정분 분리'}>
               <Lazy><HostSanSection hostId={h.id} onData={setSan} /></Lazy>
             </Card>
           )}
