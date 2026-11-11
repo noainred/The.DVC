@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 하드웨어 정보 내보내기 창 — 형식 · 대상 · 법인 · 내보낼 값</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Noto+Sans+KR:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 1320px; height: 2130px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: Inter, 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; font-size: 14px; padding: 36px; display: flex; flex-direction: column; gap: 16px;">
+
+<div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column;">
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 22px; border-bottom: 1px solid #1f2a40;">
+    <h1 style="margin: 0; font-size: 18px; font-weight: 700;">서버 하드웨어 정보 내보내기</h1>
+    <button type="button" aria-label="닫기" style="width: 44px; height: 44px; margin: -8px -10px -8px 0; border: 0; background: transparent; color: #8b9bb4; font-size: 20px; cursor: pointer;">×</button>
+  </div>
+
+  <div style="padding: 18px 22px 22px; display: grid; grid-template-columns: 420px minmax(0, 1fr); gap: 18px; align-items: start;">
+
+    <!-- 왼쪽: 형식 · 대상 · 법인 · 법인 표시 -->
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+
+      <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-size: 13px; color: #8b9bb4;">① 파일 형식</div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;">
+          <sc-for list="{{fmtChips}}" as="c" hint-placeholder-count="2">
+            <button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}">{{c.label}}</button>
+          </sc-for>
+        </div>
+        <div style="font-size: 13px; color: #c7d2e3; line-height: 1.6;">{{fmtText}}</div>
+      </div>
+
+      <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-size: 13px; color: #8b9bb4;">② 대상 서버</div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <sc-for list="{{kindChips}}" as="c" hint-placeholder-count="3">
+            <button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}"><span>{{c.label}}</span><span style="{{c.cntStyle}}">{{c.count}}</span></button>
+          </sc-for>
+        </div>
+        <div style="font-size: 13px; color: #8b9bb4; line-height: 1.6;">{{kindText}}</div>
+      </div>
+
+      <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span style="font-size: 13px; color: #8b9bb4;">③ 법인(vCenter)</span>
+          <span style="margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap;">
+            <button type="button" onClick="{{selAll}}" style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 13px; cursor: pointer;">모두</button>
+            <button type="button" onClick="{{selNone}}" style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 13px; cursor: pointer;">모두 해제</button>
+            <button type="button" onClick="{{selScreen}}" style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 13px; cursor: pointer;">화면 필터대로</button>
+          </span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <sc-for list="{{corpChips}}" as="c" hint-placeholder-count="5">
+            <button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}"><span>{{c.label}}</span><span style="{{c.cntStyle}}">{{c.count}}</span></button>
+          </sc-for>
+        </div>
+        <div style="font-size: 13px; color: #c7d2e3; line-height: 1.6;">{{rangeText}}</div>
+        <sc-if value="{{noneSel}}" hint-placeholder-val="{{false}}">
+        <div style="font-size: 13px; color: #fbbf24;">법인을 하나 이상 고르세요.</div>
+        </sc-if>
+      </div>
+
+      <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-size: 13px; color: #8b9bb4;">④ 법인 표시</div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <sc-for list="{{bandChips}}" as="c" hint-placeholder-count="3">
+            <button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}"><span>{{c.label}}</span></button>
+          </sc-for>
+        </div>
+        <div style="font-size: 13px; color: #8b9bb4; line-height: 1.6;">{{bandText}}</div>
+      </div>
+
+      <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 13px; color: #8b9bb4;">⑥ 서버별 사양서</span></div>
+        <label style="display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.5; min-height: 44px;"><input type="checkbox" checked="{{spec}}" disabled="{{specOff}}" onChange="{{toggleSpec}}" style="width: 20px; height: 20px; margin-top: 1px; accent-color: #3b82f6; flex: none;"><span><b>서버 한 대 = 시트 한 장</b> <span style="color: #8b9bb4;">— 그 서버의 사양을 한 장에 최대한 자세히(식별 · CPU · 메모리 · 디스크 · 컨트롤러 · NIC 포트 · 펌웨어 · 전원 · PCIe · BIOS · iDRAC · 상태)</span></span></label>
+        <div style="font-size: 13px; color: #8b9bb4; line-height: 1.6;">{{specText}}</div>
+      </div>
+    </div>
+
+    <!-- 오른쪽: 내보낼 값 -->
+    <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0;">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <span style="font-size: 13px; color: #8b9bb4;">⑤ 내보낼 값</span>
+        <span style="font-size: 13px; color: #c7d2e3;">{{pickText}}</span>
+        <span style="margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap;">
+          <sc-for list="{{presets}}" as="p" hint-placeholder-count="5">
+            <button type="button" onClick="{{p.pick}}" style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 13px; cursor: pointer;">{{p.label}}</button>
+          </sc-for>
+        </span>
+      </div>
+      <div style="font-size: 13px; color: #8b9bb4; line-height: 1.6;">칩을 눌러 값을 넣고 뺍니다. <b style="color: #e6edf6;">요약 열</b>은 ‘서버 요약’(서버 한 대 = 한 줄)의 열이 되고, <b style="color: #e6edf6;">상세</b>는 부품 한 개 = 한 줄인 별도 시트(CSV 는 별도 파일)가 됩니다.</div>
+
+      <sc-for list="{{groups}}" as="g" hint-placeholder-count="12">
+        <div style="border-top: 1px solid #1f2a40; padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <b style="font-size: 14px;">{{g.name}}</b>
+            <span style="font-size: 12px; color: #8b9bb4;">{{g.hint}}</span>
+            <span style="margin-left: auto; display: flex; gap: 6px;">
+              <button type="button" onClick="{{g.all}}" style="height: 28px; padding: 0 8px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 12px; cursor: pointer;">전부</button>
+              <button type="button" onClick="{{g.none}}" style="height: 28px; padding: 0 8px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 12px; cursor: pointer;">빼기</button>
+            </span>
+          </div>
+          <sc-if value="{{g.hasSum}}" hint-placeholder-val="{{true}}">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span style="font-size: 12px; color: #8b9bb4; width: 64px; flex: none;">요약 열</span>
+            <sc-for list="{{g.sum}}" as="f" hint-placeholder-count="4">
+              <button type="button" onClick="{{f.pick}}" aria-pressed="{{f.on}}" disabled="{{f.locked}}" style="{{f.style}}">{{f.label}}</button>
+            </sc-for>
+          </div>
+          </sc-if>
+          <sc-if value="{{g.hasDet}}" hint-placeholder-val="{{true}}">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span style="font-size: 12px; color: #8b9bb4; width: 64px; flex: none;">상세</span>
+            <sc-for list="{{g.det}}" as="f" hint-placeholder-count="4">
+              <button type="button" onClick="{{f.pick}}" aria-pressed="{{f.on}}" style="{{f.style}}">{{f.label}}</button>
+            </sc-for>
+            <span style="font-size: 12px; color: #8b9bb4;">{{g.detNote}}</span>
+          </div>
+          </sc-if>
+        </div>
+      </sc-for>
+
+      <div style="border-top: 1px solid #1f2a40; padding-top: 10px; font-size: 13px; color: #8b9bb4; line-height: 1.6;">
+        <b style="color: #c7d2e3;">고를 수 없는 것</b> — iDRAC 사용자 계정 목록 · 이벤트 로그 · 시리얼 번호 · 접속 계정 정보는 내보내기 대상이 아닙니다. iDRAC 주소 · MAC 은 관리자 계정에만 칩이 보입니다.
+      </div>
+    </div>
+  </div>
+
+  <div style="padding: 14px 22px 20px; border-top: 1px solid #1f2a40; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 14px; color: #e6edf6;">{{sumText}}</span>
+      <span style="font-size: 12px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace; word-break: break-all;">{{fileName}}</span>
+    </div>
+    <button type="button" disabled="{{noneSel}}" style="{{dlStyle}}">{{dlLabel}}</button>
+  </div>
+</div>
+
+<div style="font-size: 13px; color: #8b9bb4; line-height: 1.7; display: flex; flex-direction: column; gap: 2px;">
+  <div><b style="color: #e6edf6;">이 창은 눌러 볼 수 있습니다</b>(▶ 재생) — 형식 · 대상 · 법인 · 값 칩을 바꾸면 아래 요약(서버 수 · 열 수 · 시트 수)과 파일 이름이 따라 바뀝니다. 대수는 가상값입니다.</div>
+  <div>값의 출처는 iDRAC(Redfish) 인벤토리 저장값입니다 — 내려받을 때 장비에 다시 접속하지 않습니다. 디스크는 물리 디스크 기준이고, 읽지 못한 값은 빈 칸으로 둡니다.</div>
+  <div>고른 값 조합은 계정마다 기억해 다음에 창을 열 때 그대로 둡니다(기본값은 ‘기본’ 묶음). 시안은 ‘네트워크 · 펌웨어’ 묶음과 사양서를 켠 상태로 시작합니다.</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1320,"height":2130}}'>
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.G = [
+      { key: 'id', name: '기본 식별', hint: '잠긴 칩은 항상 들어갑니다', sum: ['법인(vCenter)*', '구분(물리·가상화)*', '서버*', 'Hostname(OS)*', '서비스태그*', '제조사', '모델', '전원 상태', '자산 태그', 'UUID', '수집원', '인벤토리 시각'], det: [], sheet: '' },
+      { key: 'cpu', name: 'CPU', hint: '', sum: ['CPU 모델', '소켓 수', '코어(합계)', '스레드(합계)'], det: ['소켓', '모델', '코어'], sheet: 'CPU' },
+      { key: 'mem', name: '메모리', hint: '', sum: ['메모리 GB', 'DIMM 수'], det: ['슬롯', '크기 GB', '종류', '속도 MHz', '제조사', '부품번호'], sheet: '메모리' },
+      { key: 'disk', name: '디스크', hint: '물리 디스크 기준', sum: ['디스크 수', '디스크 합계 GB', '디스크 구성'], det: ['디스크 이름', '모델', '용량 GB', '매체', '인터페이스'], sheet: '디스크' },
+      { key: 'ctrl', name: '스토리지 컨트롤러', hint: '', sum: [], det: ['이름', '모델', '펌웨어', '프로토콜'], sheet: '컨트롤러' },
+      { key: 'nic', name: '네트워크 인터페이스', hint: '모든 포트의 링크 속도', sum: ['NIC 포트 수', '최고 링크 속도'], det: ['어댑터', '어댑터 모델', '어댑터 펌웨어', '포트', '링크 상태', '속도 Mbps', 'MAC'], sheet: 'NIC' },
+      { key: 'fw', name: '펌웨어', hint: '', sum: ['BIOS 버전', 'BMC(iDRAC) 펌웨어'], det: ['구성요소', '종류', '버전'], sheet: '펌웨어' },
+      { key: 'gpu', name: 'GPU', hint: '', sum: ['GPU(모델 × 수)'], det: ['이름', '모델', '제조사', '메모리 MiB'], sheet: 'GPU' },
+      { key: 'psu', name: '전원(PSU)', hint: '', sum: ['PSU 수', 'PSU 용량 W', '전력 상한 W'], det: ['이름', '모델', '제조사', '용량 W', '펌웨어'], sheet: '전원' },
+      { key: 'pcie', name: 'PCIe 카드', hint: '구세대 iDRAC 은 미지원', sum: [], det: ['이름', '모델', '제조사', '종류', '펌웨어'], sheet: 'PCIe' },
+      { key: 'bios', name: 'BIOS · 부팅 설정', hint: '주요 항목만 수집됩니다', sum: ['부팅 모드'], det: ['설정 항목', '값'], sheet: 'BIOS 설정' },
+      { key: 'mgmt', name: 'iDRAC 관리', hint: '주소 · MAC 은 관리자만', sum: ['iDRAC 모델', 'iDRAC 라이선스'], det: ['iDRAC 호스트 이름', 'FQDN', 'MAC', 'IPv4'], sheet: 'iDRAC 관리' },
+      { key: 'health', name: '상태', hint: '수집 시점의 Redfish 상태 글자', sum: ['전체 상태', 'CPU 상태', '메모리 상태', '스토리지 상태', 'PSU 상태', '팬 상태'], det: [], sheet: '' },
+    ];
+    this.state = { fmt: 'xlsx', kind: 'bm', corps: null, band: 'band', spec: true, sel: this.preset('view') };
+  }
+  ids(g, part) { return g[part].map((_, i) => g.key + '.' + part + '.' + i); }
+  locked(g, label) { return label.charAt(label.length - 1) === '*'; }
+  preset(name) {
+    const sel = {};
+    const add = (key, part, idx) => { const g = this.G.filter((x) => x.key === key)[0]; (idx || g[part].map((_, i) => i)).forEach((i) => { sel[key + '.' + part + '.' + i] = true; }); };
+    this.G[0].sum.forEach((l, i) => { if (this.locked(this.G[0], l)) sel['id.sum.' + i] = true; });
+    if (name === 'none') return sel;
+    if (name === 'all') { this.G.forEach((g) => { add(g.key, 'sum'); add(g.key, 'det'); }); return sel; }
+    add('id', 'sum', [5, 6, 11]); add('cpu', 'sum', [0, 1, 2]); add('mem', 'sum'); add('disk', 'sum', [0, 1]);
+    if (name === 'basic') return sel;
+    if (name === 'hw') { add('cpu', 'det'); add('mem', 'det'); add('disk', 'sum'); add('disk', 'det'); add('ctrl', 'det'); add('gpu', 'sum'); add('gpu', 'det'); add('psu', 'sum'); add('psu', 'det'); add('pcie', 'det'); return sel; }
+    // 'net' 과 창을 처음 열 때의 'view': 기본 + 네트워크 · 펌웨어
+    add('nic', 'sum'); add('nic', 'det'); add('fw', 'sum'); add('fw', 'det');
+    return sel;
+  }
+  renderVals() {
+    const S = this.state, G = this.G;
+    const chip = (on, extra) => 'min-height: 36px; padding: 6px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; border-radius: 8px; border: 1px solid ' + (on ? '#3b82f6' : '#243049') + '; background: ' + (on ? 'rgba(59, 130, 246, 0.18)' : '#141b2d') + '; color: ' + (on ? '#e6edf6' : '#c7d2e3') + '; font-size: 14px; font-weight: ' + (on ? 600 : 500) + '; cursor: pointer;' + (extra || '');
+    const cnt = (on) => 'font-size: 12px; font-weight: 500; padding: 1px 8px; border-radius: 10px; white-space: nowrap; background: ' + (on ? 'rgba(59, 130, 246, 0.35)' : '#1f2a40') + '; color: ' + (on ? '#e6edf6' : '#8b9bb4') + ';';
+
+    // 법인별 대수(가상): bm = 물리(베어메탈), vh = 가상화 호스트, vhBacked = 그 가운데 iDRAC 받침
+    const corps = [
+      { id: 'ap', name: 'vcenter-ap-northeast-01', bm: 3, vh: 12, vhBacked: 12 },
+      { id: 'us', name: 'vcenter-us-east-01', bm: 2, vh: 9, vhBacked: 9 },
+      { id: 'uw', name: 'vcenter-us-west-01', bm: 1, vh: 8, vhBacked: 6 },
+      { id: 'eu', name: 'vcenter-eu-central-01', bm: 3, vh: 10, vhBacked: 9 },
+      { id: 'none', name: '미지정', bm: 1, vh: 0, vhBacked: 0 },
+    ];
+    const csel = S.corps == null ? corps.map((c) => c.id) : S.corps;
+    const isOn = (id) => csel.indexOf(id) >= 0;
+    const nOf = (c) => (S.kind === 'bm' ? c.bm : S.kind === 'vh' ? c.vh : c.bm + c.vh);
+    const picked = corps.filter((c) => isOn(c.id));
+    const servers = picked.reduce((a, c) => a + nOf(c), 0);
+    const allOn = picked.length === corps.length;
+    const noneSel = picked.length === 0;
+
+    const fmtChips = [['xlsx', '엑셀 (.xlsx)'], ['csv', 'CSV (.csv)']].map((f) => ({ label: f[1], on: S.fmt === f[0], pick: () => this.setState({ fmt: f[0] }), style: chip(S.fmt === f[0], ' justify-content: center; min-height: 44px;') }));
+    const tot = (k) => corps.reduce((a, c) => a + c[k], 0);
+    const kindChips = [['bm', '물리서버만 (베어메탈)', tot('bm')], ['vh', '가상화 서버만 (ESXi 호스트)', tot('vh')], ['both', '둘 다', tot('bm') + tot('vh')]].map((k) => ({ label: k[1], count: k[2] + '대', on: S.kind === k[0], pick: () => this.setState({ kind: k[0] }), style: chip(S.kind === k[0], ' min-height: 44px;'), cntStyle: cnt(S.kind === k[0]) }));
+    const corpChips = corps.map((c) => { const on = isOn(c.id); return { label: c.name, count: nOf(c) + '대', on, pick: () => this.setState({ corps: on ? csel.filter((x) => x !== c.id) : csel.concat([c.id]) }), style: chip(on, ' font-family: \'JetBrains Mono\', monospace; font-size: 13px;'), cntStyle: cnt(on) + ' font-family: Inter, \'Noto Sans KR\', sans-serif;' }; });
+    const bands = [['band', '법인마다 띠로 묶기 — 맨 위와 묶음 머리에 법인 이름'], ['sheet', '법인마다 시트(파일)를 나누기'], ['col', '법인 열만 — 띠 없이 한 표(필터 · 피벗용)']];
+    const bandChips = bands.map((b) => ({ label: b[1], on: S.band === b[0], pick: () => this.setState({ band: b[0] }), style: chip(S.band === b[0]) }));
+
+    const groups = G.map((g) => {
+      const mk = (part) => g[part].map((raw, i) => {
+        const id = g.key + '.' + part + '.' + i; const locked = this.locked(g, raw); const on = !!S.sel[id];
+        return { label: locked ? raw.slice(0, -1) : raw, on, locked,
+          pick: () => { if (locked) return; const n = Object.assign({}, S.sel); if (on) delete n[id]; else n[id] = true; this.setState({ sel: n }); },
+          style: 'height: 32px; padding: 0 10px; border-radius: 16px; border: 1px solid ' + (on ? '#3b82f6' : '#243049') + '; background: ' + (on ? (locked ? 'rgba(59, 130, 246, 0.10)' : 'rgba(59, 130, 246, 0.22)') : '#141b2d') + '; color: ' + (on ? '#e6edf6' : '#8b9bb4') + '; font-size: 13px; font-weight: ' + (on ? 600 : 400) + '; cursor: ' + (locked ? 'default' : 'pointer') + ';' };
+      });
+      const setAll = (v) => () => { const n = Object.assign({}, S.sel); ['sum', 'det'].forEach((part) => g[part].forEach((raw, i) => { const id = g.key + '.' + part + '.' + i; if (this.locked(g, raw)) return; if (v) n[id] = true; else delete n[id]; })); this.setState({ sel: n }); };
+      const det = mk('det'); const detOn = det.filter((f) => f.on).length;
+      return { name: g.name, hint: g.hint, sum: mk('sum'), det, hasSum: g.sum.length > 0, hasDet: g.det.length > 0, all: setAll(true), none: setAll(false),
+        detNote: detOn ? '→ ‘' + g.sheet + '’ ' + (S.fmt === 'csv' ? '파일' : '시트') + ' 1' + (S.fmt === 'csv' ? '개' : '장') : '', detOn };
+    });
+    const cols = Object.keys(S.sel).filter((k) => k.indexOf('.sum.') > 0).length;
+    const detSheets = groups.filter((g) => g.detOn > 0).length;
+    const presets = [['basic', '기본'], ['hw', '하드웨어 전체'], ['net', '네트워크 · 펌웨어'], ['all', '모두'], ['none', '모두 빼기']].map((p) => ({ label: p[1], pick: () => this.setState({ sel: this.preset(p[0]) }) }));
+
+    const perCorp = S.band === 'sheet';
+    const kindWord = S.kind === 'bm' ? 'baremetal' : S.kind === 'vh' ? 'esxi-hosts' : 'all-servers';
+    const scopePart = allOn ? 'all' : picked.length === 1 ? (picked[0].id === 'none' ? 'unassigned' : picked[0].name) : picked.length + 'corps';
+    const xl = S.fmt === 'xlsx';
+    const tables = (perCorp ? Math.max(picked.length, 1) : 1) + detSheets;   // 서버 요약(법인마다 나누면 법인 수) + 상세
+    const zip = !xl && tables > 1;
+    const backed = picked.reduce((a, c) => a + c.vhBacked, 0), vhN = picked.reduce((a, c) => a + c.vh, 0);
+    const specOn = xl && S.spec && !noneSel;
+    return {
+      spec: xl && S.spec, specOff: !xl, toggleSpec: () => this.setState({ spec: !S.spec }),
+      specText: !xl ? 'CSV 로는 사양서를 만들 수 없습니다(한 장에 표 여러 개가 들어가는 서식입니다) — 엑셀을 고르세요.'
+        : S.spec ? '서버 ' + servers + '대 → 사양서 ' + servers + '장 + 목차 1장(서버 이름을 누르면 그 시트로). 사양서에는 ⑤ 에서 고른 값과 상관없이 수집된 사양이 모두 들어갑니다. 시트 수가 서버가 알려 주는 상한을 넘으면 법인마다 파일을 나눠 ZIP 으로 묶습니다.'
+        : '끄면 사양서 시트를 만들지 않습니다(서버 요약 · 상세 시트만).',
+      fmtChips, kindChips, corpChips, bandChips, groups, presets, noneSel,
+      fmtText: xl ? '한 파일에 시트 여러 장 — 서식(머리글 고정 · 필터 · 숫자 서식 · 법인 띠 색)이 들어갑니다.' : 'CSV 는 표 한 장만 담습니다 — 표가 여러 개면(상세를 골랐거나 법인마다 나누면) 표마다 파일 하나씩 ZIP 으로 묶어 내려받습니다. 서식은 없고 UTF-8(BOM)입니다.',
+      kindText: S.kind === 'bm' ? '통합 서버 인벤토리의 베어메탈과 같은 집합입니다.' : '가상화 호스트는 iDRAC 받침이 있는 호스트만 하드웨어 값이 채워집니다(고른 법인 ' + vhN + '대 가운데 ' + backed + '대). 나머지는 vCenter 가 아는 모델 · 코어 · 메모리만 채우고 비고에 적습니다.',
+      rangeText: noneSel ? '고른 법인 없음' : (allOn ? '모든 법인' : '법인 ' + picked.length + '곳') + ' · 서버 ' + servers + '대',
+      bandText: S.band === 'band' ? (xl ? '서버 요약 맨 위에 ‘포함된 법인’ 줄을 적고, 법인이 바뀔 때마다 법인 이름 · 대수 · 소계가 적힌 띠를 넣습니다. 법인 열도 그대로 둡니다.' : 'CSV 에는 띠를 넣지 않습니다(표가 깨집니다) — 법인 열 기준으로 정렬해 묶고, 법인을 하나만 고르면 파일 이름에 법인이 들어갑니다.')
+        : S.band === 'sheet' ? (xl ? '법인마다 서버 요약 시트를 한 장씩 만들고 시트 이름과 첫 줄에 법인을 적습니다. 상세 시트는 한 장에 법인 열로.' : '법인마다 서버 요약 CSV 를 하나씩 만들어 ZIP 으로 묶습니다(파일 이름에 법인).')
+        : '띠 없이 표 하나 — 첫 열이 법인입니다. 필터 · 정렬 · 피벗에 가장 편합니다.',
+      pickText: '요약 열 ' + cols + '개 · 상세 ' + detSheets + '종',
+      selAll: () => this.setState({ corps: null }), selNone: () => this.setState({ corps: [] }), selScreen: () => this.setState({ corps: ['ap'] }),
+      sumText: noneSel ? '법인을 고르면 내려받을 수 있습니다.' : '서버 ' + servers + '대 · 요약 열 ' + cols + '개 · ' + (xl ? '시트 ' + (tables + 1 + (specOn ? servers + 1 : 0)) + '장(서버 요약 ' + (tables - detSheets) + ' + 상세 ' + detSheets + ' + 안내 1' + (specOn ? ' + 목차 1 + 사양서 ' + servers : '') + ')' : 'CSV ' + tables + '개' + (zip ? ' → ZIP 한 개' : '')),
+      fileName: 'server-hardware_' + kindWord + '_' + scopePart + '_20261111-1030.' + (xl ? 'xlsx' : zip ? 'zip' : 'csv'),
+      dlLabel: xl ? '엑셀 내려받기' : zip ? 'CSV(ZIP) 내려받기' : 'CSV 내려받기',
+      dlStyle: 'height: 48px; padding: 0 28px; border-radius: 8px; border: 1px solid ' + (noneSel ? '#243049' : '#3b82f6') + '; background: ' + (noneSel ? '#1f2a40' : '#1d4ed8') + '; color: ' + (noneSel ? '#8b9bb4' : '#ffffff') + '; font-size: 15px; font-weight: 600; cursor: ' + (noneSel ? 'not-allowed' : 'pointer') + ';',
+    };
+  }
+}
+</script>
+</body>
+</html>

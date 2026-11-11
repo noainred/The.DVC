@@ -22,12 +22,12 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1465개** |
+| 엔드포인트 | **1468개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 150개 |
-| GET | 777개 |
+| GET | 779개 |
 | POST | 460개 |
-| PUT | 148개 |
+| PUT | 149개 |
 | PATCH | 3개 |
 | DELETE | 77개 |
 
@@ -35,7 +35,7 @@
 |---|---:|---|
 | [`/api/collector`](#apicollector) | 31 | 엣지(수집 서버)가 **자기 데이터를 내주는** 경로. 수집 토큰(`X-Collector-Token`) 게이트이고 사용자 세션을 타지 않는다. |
 | [`/api/capacity`](#apicapacity) | 3 | 리소스 적정성 진단. 라우터가 스스로 `adminOnly` 를 건다. |
-| [`/api/insights`](#apiinsights) | 16 | FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePerm('insights')`. |
+| [`/api/insights`](#apiinsights) | 19 | FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePerm('insights')`. |
 | [`/api/central`](#apicentral) | 66 | 엣지 → 중앙 **push·pull** 경로. 개별/공유 중앙 토큰 게이트이며 라우터 미들웨어가 토큰↔agent 일치를 강제한다. |
 | [`/api/upgrade`](#apiupgrade) | 10 | 자동 업그레이드 제어(번들 수신·적용). |
 | [`/api/remote`](#apiremote) | 19 | 원격 접속(HAProxy/SSH/RDP 중계). |
@@ -108,22 +108,25 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/anomalies` | — | [server/src/routes/insights.js:370](../server/src/routes/insights.js#L370) |
-| POST | `/chatops` | — | [server/src/routes/insights.js:438](../server/src/routes/insights.js#L438) |
-| GET | `/finops` | — | [server/src/routes/insights.js:105](../server/src/routes/insights.js#L105) |
-| GET | `/finops/config` | — | [server/src/routes/insights.js:129](../server/src/routes/insights.js#L129) |
-| PUT | `/finops/config` | 역할 `admin` · `fleetOnly` | [server/src/routes/insights.js:159](../server/src/routes/insights.js#L159) |
-| GET | `/fleet` | — | [server/src/routes/insights.js:167](../server/src/routes/insights.js#L167) |
-| PUT | `/fleet/assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:228](../server/src/routes/insights.js#L228) |
-| PUT | `/fleet/assign-bulk` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:244](../server/src/routes/insights.js#L244) |
-| POST | `/fleet/prune` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:292](../server/src/routes/insights.js#L292) |
-| PUT | `/fleet/tag` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:200](../server/src/routes/insights.js#L200) |
-| GET | `/forecast` | — | [server/src/routes/insights.js:391](../server/src/routes/insights.js#L391) |
-| GET | `/graph` | — | [server/src/routes/insights.js:417](../server/src/routes/insights.js#L417) |
-| GET | `/incidents` | — | [server/src/routes/insights.js:432](../server/src/routes/insights.js#L432) |
-| GET | `/power-breakdown` | — | [server/src/routes/insights.js:132](../server/src/routes/insights.js#L132) |
-| GET | `/security` | — | [server/src/routes/insights.js:404](../server/src/routes/insights.js#L404) |
-| GET | `/topology` | — | [server/src/routes/insights.js:407](../server/src/routes/insights.js#L407) |
+| GET | `/anomalies` | — | [server/src/routes/insights.js:489](../server/src/routes/insights.js#L489) |
+| POST | `/chatops` | — | [server/src/routes/insights.js:557](../server/src/routes/insights.js#L557) |
+| GET | `/finops` | — | [server/src/routes/insights.js:114](../server/src/routes/insights.js#L114) |
+| GET | `/finops/config` | — | [server/src/routes/insights.js:138](../server/src/routes/insights.js#L138) |
+| PUT | `/finops/config` | 역할 `admin` · `fleetOnly` | [server/src/routes/insights.js:168](../server/src/routes/insights.js#L168) |
+| GET | `/fleet` | — | [server/src/routes/insights.js:176](../server/src/routes/insights.js#L176) |
+| PUT | `/fleet/assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:347](../server/src/routes/insights.js#L347) |
+| PUT | `/fleet/assign-bulk` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:363](../server/src/routes/insights.js#L363) |
+| GET | `/fleet/hardware-export` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:278](../server/src/routes/insights.js#L278) |
+| GET | `/fleet/hardware-meta` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:258](../server/src/routes/insights.js#L258) |
+| PUT | `/fleet/hardware-prefs` | 역할 `admin/operator` · 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:270](../server/src/routes/insights.js#L270) |
+| POST | `/fleet/prune` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:411](../server/src/routes/insights.js#L411) |
+| PUT | `/fleet/tag` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:319](../server/src/routes/insights.js#L319) |
+| GET | `/forecast` | — | [server/src/routes/insights.js:510](../server/src/routes/insights.js#L510) |
+| GET | `/graph` | — | [server/src/routes/insights.js:536](../server/src/routes/insights.js#L536) |
+| GET | `/incidents` | — | [server/src/routes/insights.js:551](../server/src/routes/insights.js#L551) |
+| GET | `/power-breakdown` | — | [server/src/routes/insights.js:141](../server/src/routes/insights.js#L141) |
+| GET | `/security` | — | [server/src/routes/insights.js:523](../server/src/routes/insights.js#L523) |
+| GET | `/topology` | — | [server/src/routes/insights.js:526](../server/src/routes/insights.js#L526) |
 
 ## `/api/central`
 
@@ -1669,6 +1672,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `menuFleetOnly` | 3 | **전체 범위 계정만**(v2.726 — 좌측 메뉴 배포. 전 사용자 화면을 바꾼다). 범위 제한 계정은 403. |
 | `templateFullWrite` | 3 | **쓰기 범위도 무제한인 계정만**(v2.889 — 위키 관리자 템플릿 쓰기). 조회는 무제한이어도 수정 가능 vCenter(writeVcenters)가 지정된 계정은 403(fullWriteOnly 와 같은 판정). |
 | `adFleetOnly` | 3 | **전체 범위 계정만**(v2.628 SEC2628-04 — AD 설정 조회·저장·연결 테스트. AD 는 전 사용자 공통 인증 소스다). 범위 제한 계정은 403. |
+| `hwFullScopeOnly` | 3 | **전체 범위 계정만**(서버 하드웨어 정보 내보내기 — v2.967). GET /insights/fleet 과 같은 근거: 미귀속 베어메탈 하드웨어가 들어가 범위로 나눌 수 없다. |
 | `ownerIfAutoCentralToken` | 2 | 요청이 `autoCentralToken` 옵션을 쓸 때만 **설정 소유자**를 요구한다(평문 CENTRAL_TOKEN 을 원격 호스트에 기록하는 경로라 백업과 같은 등급). |
 | `requireOwnOtp` | 2 | **본인 OTP 재인증**(1회용·실패 잠금). 호스트 접근 제어 적용·확정처럼 되돌리기 어려운 동작에 붙는다. |
 | `togglePrecheck` | 2 | SAN 플로우 비활성화 · 다시 켜기의 **사전 확인**(v2.940 반증 L-4) — 스위치 · dvc_ 이름 · 포탈 기록 · 지금 상태 · 엣지 버전을 OTP 재인증 **전에** 본다(거부할 요청이 OTP 를 써 버리지 않게). 404 · 400 · 409. |

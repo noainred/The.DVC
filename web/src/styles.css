@@ -1509,6 +1509,29 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .gpu-alloc-export-corpbox { margin-top: 2px; padding: 10px 12px; border-radius: 8px; background: var(--panel-deep); border: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 1.6; min-width: 0; }
 .gpu-alloc-export-sheet { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-dim); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gpu-alloc-export-sheet.renamed { border-color: #b45309; color: #fbbf24; }
+/* v2.967 서버 하드웨어 정보 내보내기 창(FleetHwExportModal — 시안 docs/design/baremetal-hw-xlsx ②) */
+.hwx { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.hwx-grid { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 12px; align-items: start; min-width: 0; }
+.hwx-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+@media (max-width: 900px) { .hwx-grid { grid-template-columns: minmax(0, 1fr); } }
+.hwx-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.hwx-stack { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.hwx .qn-btn.hwx-big { justify-content: center; border-radius: 8px; min-height: 44px; }
+.hwx .qn-btn.hwx-row { justify-content: space-between; border-radius: 8px; min-height: 40px; text-align: left; min-width: 0; }
+.hwx .qn-btn.hwx-mono { font-family: var(--mono); font-size: 12px; }
+.hwx-ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hwx-cnt { flex: none; font-family: var(--font, inherit); font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 10px; background: var(--panel-deep); color: var(--text-dim); }
+.hwx .qn-btn.on .hwx-cnt { background: rgba(59,130,246,.35); color: var(--text); }
+.hwx-note { font-size: 12px; line-height: 1.6; }
+.hwx-fields { gap: 10px; }
+.hwx-group { border-top: 1px solid var(--border-soft); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.hwx-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.hwx-part { font-size: 12px; width: 56px; flex: none; }
+.hwx .qn-btn.hwx-chip { padding: 5px 11px; font-size: 12px; font-weight: 500; color: var(--text-dim); }
+.hwx .qn-btn.hwx-chip.on { color: var(--text); font-weight: 600; }
+.hwx .qn-btn.hwx-chip.locked { opacity: .75; cursor: default; }
+.hwx .qn-btn.hwx-sm { padding: 3px 10px; font-size: 12px; }
+
 .gpu-alloc-table td { vertical-align: middle; white-space: nowrap; }
 .gpu-alloc-table td.num, .gpu-alloc-table th.num { text-align: right; font-family: var(--mono); font-size: 12px; }
 .gpu-alloc-table td.alloc { color: #60a5fa; font-weight: 600; }
