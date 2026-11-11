@@ -12,8 +12,9 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { strOf } from '../util/coercionTrap.js';
 import { pullFromEdge } from './edgePull.js';
+import { featureMinEdgeVersion } from './featureMinEdgeVersion.js';
 import * as store from '../focusmon/store.js';
-import { listTargets, registryLoadError } from '../focusmon/registry.js';
+import { listTargets, registryLoadError, getSettings } from '../focusmon/registry.js';
 import { setWakeImpl } from '../focusmon/service.js';
 import { IOSTAT_COLS, TOP_N } from '../focusmon/rates.js';
 import { INTERVALS } from '../focusmon/script.js';
@@ -99,6 +100,23 @@ export function cleanKey(k) {
 }
 
 /**
+ * 엣지 연결 진단(v2.978) 정제 — 수치는 음수 · 비수치를 null 로, 상한으로 자른다. 시각은 **나이(ms)** 로만 받는다(엣지 시계를 믿지 않는다 —
+ * 중앙이 수신 시각에서 빼 시각을 만든다 · 최대 7일). 글자는 마지막 오류 한 줄(200자) — 엣지 콘솔 원문이 아니라 워커가 만든 사유다.
+ */
+const DIAG_AGE_MAX = 7 * 86_400_000;
+export function cleanDiag(d, now = Date.now()) {
+  if (!isObj(d)) return null;
+  const cnt = (v, max) => { const x = n(v); return x == null || x < 0 ? null : Math.min(max, Math.round(x)); };
+  const age = cnt(d.lastErrorAgoMs, DIAG_AGE_MAX);
+  const err = d.lastError ? strOf(d.lastError, 200).replace(/[\x00-\x1f\x7f]/g, ' ') : '';
+  return {
+    rttMs: cnt(d.rttMs, 600_000), fails: cnt(d.fails, 1_000_000), buffered: cnt(d.buffered, 100_000), dropped: cnt(d.dropped, 1e12),
+    collectors: cnt(d.collectors, 1000), testsBusy: cnt(d.testsBusy, 1000), idleMs: cnt(d.idleMs, 3_600_000),
+    lastError: err || null, lastErrorAt: err && age != null ? now - age : null,
+  };
+}
+
+/**
  * 엣지 시각 → 중앙 시각. 엣지 시계를 믿지 않는다 — '보낸 시각 − 표본 시각'(나이)만 쓰고 수신 시각에서 뺀다.
  * 미래(나이 < 0)는 수신 시각으로, 너무 오래된 것(BACKLOG_MS 초과)은 BACKLOG_MS 로 자른다. 값이 없으면 null.
  */
@@ -159,27 +177,46 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
     const r = x.result;
     store.putTestResult(x.id, { ok: r.ok === true, kind: enumOr(r.kind, TEST_KINDS, 'unreachable'), error: r.error ? strOf(r.error, 240) : '', hello: cleanHello(r.hello), ms: n(r.ms), via: 'edge' }, now);
   }
-  store.noteEdgeSync(agent, { version: typeof b.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(b.version) ? b.version : '', key: cleanKey(b.key) }, now);
+  store.noteEdgeSync(agent, { version: typeof b.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(b.version) ? b.version : '', key: cleanKey(b.key), diag: cleanDiag(b.diag, now) }, now);
 
   const desired = store.desiredFor(key, (id) => mine.get(id) || null, now);
   const tests = store.pendingTestsFor(key, now).filter((id) => mine.has(id)).map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; });
   return {
     ok: true, now, validUntil: now + VALID_MS,
     targets: desired.map((d) => ({ id: d.id, host: d.host, port: d.port, username: d.username, interval: d.interval })),
-    tests, retries: store.takeEdgeRetries(key, now).filter((id) => mine.has(id)),
+    // retries(id) 는 옛 판 엣지용 · retryTargets(v2.978)는 접속 정보까지 — 수집 중이 아닌 대상(시험만 한 서버)의 인증 정지도 엣지가 풀 수 있게.
+    //   예전에는 엣지가 수집 목록에서만 대상을 찾아, 시험만 한 서버의 '다시 연결' 이 아무것도 풀지 못했다(사용자 보고 2026-11-12 — 키를 넣어도 '거부로 멈춤').
+    ...(() => { const ids = store.takeEdgeRetries(key, now).filter((id) => mine.has(id)); return { retries: ids, retryTargets: ids.map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; }) }; })(),
+    tests,
     ensureKey: mine.size > 0,
+    // v2.978 시작 지연 줄이기: 맡은 서버가 있는 엣지는 쉬는 동안에도 이 주기로 조회한다(깨우기가 닿지 않는 중계 엣지 — 예전 30초 고정).
+    // 맡은 서버가 없으면 싣지 않는다(엣지 기본 30초). 옛 판 엣지는 이 칸을 모르고 30초를 쓴다.
+    ...(mine.size > 0 ? { idleMs: getSettings().edgeIdleSec * 1000 } : {}),
     accepted: got,
   };
 }
 
-/** 엣지 깨우기 — 수집 시작 · 시험 · 다시 연결 때 한 번(실패해도 엣지의 30초 조회가 받는다). */
-export async function wakeEdge(agent) {
+/** 엣지에 집중 모니터링이 처음 실린 판(안내 문구용 — 게이트가 아니다. featureMinEdgeVersion 규약). */
+export const FOCUS_EDGE_TITLE_RE = /특수 기능 › 서버 › 집중 모니터링/;
+/** 엣지 연결 진단 · 쉬는 주기 단축이 처음 실린 판(v2.978 표지 — 릴리스 노트 제목에 그대로 넣는다). */
+export const FOCUS_DIAG_TITLE_RE = /서버 집중 모니터링 — CSV 대량 등록/;
+export const focusEdgeMinVersion = (o) => featureMinEdgeVersion(FOCUS_EDGE_TITLE_RE, o);
+export const focusDiagMinVersion = (o) => featureMinEdgeVersion(FOCUS_DIAG_TITLE_RE, o);
+
+/**
+ * 엣지 깨우기 — 수집 시작 · 시험 · 다시 연결 때 한 번(실패해도 엣지의 쉬는 주기 조회가 받는다). 결과는 노드 카드 진단에 남긴다(v2.978).
+ * 옛 판(경로 없음 → 401/404)은 kind 'old-version'. 이름 검사는 pullFromEdge 의 등록부 조회가 한다(등록부에 없는 이름은 접속하지 않는다).
+ */
+export async function wakeEdge(agent, { by = 'auto', pull = pullFromEdge } = {}) {
+  let out;
   try {
-    const r = await pullFromEdge(agent, '/api/collector/focus-mon/wake', {
-      method: 'POST', jsonBody: {}, retries: 0, timeoutMs: 8_000, missing401: true,
-      what: '집중 모니터링을 깨울', label: '엣지 집중 모니터링 깨우기', bodyOk: (body) => isObj(body) && body.ok === true,
+    const r = await pull(agent, '/api/collector/focus-mon/wake', {
+      method: 'POST', jsonBody: {}, retries: 0, timeoutMs: 8_000, missing401: true, minVersion: focusEdgeMinVersion(),
+      what: '서버 집중 모니터링을 엣지에서 돌릴', label: '엣지 집중 모니터링 깨우기', bodyOk: (body) => isObj(body) && body.ok === true,
     });
-    return { ok: !!r.ok, kind: r.kind || null };
-  } catch (e) { return { ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 160) }; }
+    out = { ok: !!r.ok, kind: r.ok ? 'ok' : (r.kind || 'error'), ms: n(r.ms), reason: r.ok ? '' : strOf(r.reason, 200) };
+  } catch (e) { out = { ok: false, kind: 'error', ms: null, reason: String(e?.message || e).slice(0, 160) }; }
+  store.noteEdgeWake(agent, { ...out, by });
+  return out;
 }
 setWakeImpl((agent) => { wakeEdge(agent).catch(() => {}); });

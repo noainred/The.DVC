@@ -18,9 +18,10 @@ import { hashSegments } from '../../hooks/hashTab.js';
 import {
   DASH, STATE_TEXT, TEST_TEXT, MODE_TEXT, ENDED_TEXT, TABS, IOSTAT_LABEL, SUMMARY_COLS, METRICS,
   pctText, msText, numText, bpsText, bytesText, sizeText, metricValueText, metricUnitText, iostatText, remainText, clockText, agoShort, etText,
-  levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, installCommand, INSTALL_NOTE, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR,
+  levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR, bulkLine, needsRetry, AUTH_HINT,
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
+import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
 import './focusMon.css';
 
 const BASE = ['tools', 'focus-mon'];
@@ -75,14 +76,6 @@ function usePoll(path, params, intervalMs, enabled = true) {
 }
 
 /* ── 작은 부품 ────────────────────────────────────────────────────────────── */
-function Seg({ value, options, onChange, label }) {
-  return (
-    <div className="fm-seg" role="group" aria-label={label}>
-      {options.map(([k, t]) => <button key={k} type="button" className={value === k ? 'on' : ''} onClick={() => onChange(k)}>{t}</button>)}
-    </div>
-  );
-}
-function Badge({ b }) { return b ? <span className={`fm-badge ${b.tone || 'off'}`}>{b.label}</span> : null; }
 /* ── 차트 툴팁(v2.977 사용자 요청) — 마우스 · 손가락을 올린 시각의 값을 세로선 · 점 · 값 상자로 보인다 ──
  *  좌표는 순수 함수(focusMonChart.js indexAtFrac · valueAtFrac · timeAtIndex · xAtIndex · tipRows — 테스트). 값이 없으면 ‘—’(0 아님). */
 function fracFromEvent(e) {
@@ -148,7 +141,6 @@ function Spark({ vals, color = RX_COLOR, max = 100, h = 24, area = true, hover =
     </span>
   );
 }
-function copyText(t) { try { navigator.clipboard?.writeText(t); return true; } catch { return false; } }
 
 /* ── 시간 띠 ──────────────────────────────────────────────────────────────── */
 function useTimeBar(windows) {
@@ -756,7 +748,8 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   const [interval, setIv] = useState(L.defaultInterval);
   const [mode, setMode] = useState('watch');
   const [node, setNode] = useState('all');
-  const [csv, setCsv] = useState(null);
+  const [csv, setCsv] = useState(false);
+  const [installFor, setInstallFor] = useState('');
   const [setForm2, setSettingsForm] = useState(null);
   const run = async (label, fn) => {
     setBusy(label); setMsg(null);
@@ -773,8 +766,13 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   const nodeTargets = (x) => main.targets.filter((t) => !t.demo && String(t.agent || '').toLowerCase() === String(x.agent || '').toLowerCase()).length;
   const keyNodes = main.nodes.filter((x) => x.kind === 'central' || x.key?.publicKey || nodeTargets(x) > 0);
   const idleEdges = main.nodes.filter((x) => !keyNodes.includes(x));
-  const stOf = (t) => (t.test ? (t.test.result ? { label: TEST_TEXT[t.test.result.kind] || t.test.result.kind, tone: t.test.result.ok ? 'ok' : 'warn', note: agoShort(t.test.at, Date.now()) } : { label: '시험 중', tone: 'off' }) : t.status ? { label: STATE_TEXT[t.status.state]?.label || t.status.state, tone: STATE_TEXT[t.status.state]?.tone || 'off', note: t.status.error } : { label: '미확인', tone: 'off', note: '시험을 누르세요' });
-  const centralKey = main.nodes.find((x) => x.kind === 'central')?.key;
+  const stOf = (t) => (t.test ? (t.test.result ? { label: TEST_TEXT[t.test.result.kind] || t.test.result.kind, tone: t.test.result.ok ? 'ok' : 'warn', note: `${agoShort(t.test.at, Date.now())}${!t.test.result.ok && t.test.result.error && !['auth', 'auth-stopped'].includes(t.test.result.kind) ? ` · ${t.test.result.error}` : ''}` } : { label: '시험 중', tone: 'off' }) : t.status ? { label: STATE_TEXT[t.status.state]?.label || t.status.state, tone: STATE_TEXT[t.status.state]?.tone || 'off', note: t.status.error } : { label: '미확인', tone: 'off', note: '시험을 누르세요' });
+  const installNode = main.nodes.find((x) => (x.agent || '') === installFor && x.key?.publicKey) || main.nodes.find((x) => x.kind === 'central' && x.key?.publicKey);
+  const bulk = bulkLine(main.bulkTest, main.now || Date.now());
+  const bulkTest = (ids, what) => run('bulk', async () => {
+    const r = await postJson('/tools/focus-mon/targets/test-bulk', { ids });
+    return { ok: true, reason: `${what} ${r.job.total}대의 연결 시험을 시작했습니다${r.job.skipped ? `(10초 안에 시험한 ${r.job.skipped}대는 건너뜀)` : ''} — 진행은 위 띠 · 결과는 키 로그인 칸에 나옵니다.` };
+  });
   return (
     <>
       <div className="fm-card fm-steps">
@@ -784,6 +782,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
         <div><b>4</b><span>최대 <strong>{L.maxPerSession}대</strong>를 골라 시작합니다. 수집한 값은 DB 에 남아 시간 띠로 다시 볼 수 있습니다.</span></div>
       </div>
       {msg ? <div className={`fm-ban ${msg.tone === 'bad' ? 'w' : ''}`}>{msg.text}</div> : null}
+      {bulk ? <div className={`fm-ban ${bulk.tone === 'warn' ? 'w' : ''}`} role="status">{bulk.text}</div> : null}
       <div className="fm-two wide">
         <div className="fm-card fm-flush">
           <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">모니터링 대상 서버 — {main.targets.length}대 등록</h3>
@@ -795,7 +794,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
               <button type="button" className="fm-btn" disabled={!picked.length} onClick={() => onWatch(picked)} title="수집하지 않고 고른 서버의 기록만 봅니다">기록 보기</button>
             </div></div>
           <div className="fm-pad fm-addbox">
-            <div className="fm-row fm-between"><b>서버 추가</b><div className="fm-row"><span className="fm-dim">여러 대는 CSV(이름,IP,포트,계정,담당 노드)로</span><button type="button" className="fm-btn" disabled={!canCsv()} title={canCsv() ? '' : CSV_DENIED_NOTE} onClick={() => setCsv('')}>CSV 가져오기</button></div></div>
+            <div className="fm-row fm-between"><b>서버 추가</b><div className="fm-row"><span className="fm-dim">여러 대는 CSV(이름,IP,포트,계정,담당 노드)로</span><button type="button" className={`fm-btn ${csv ? 'pri' : ''}`} disabled={!canCsv()} title={canCsv() ? '' : CSV_DENIED_NOTE} onClick={() => setCsv(!csv)}>CSV 대량 등록</button></div></div>
             <div className="fm-form">
               {[['name', '표시 이름', 'pl-was-03'], ['host', 'IP 주소', '10.48.21.23'], ['port', 'SSH 포트', '22'], ['username', '계정', 'dvcmon']].map(([k, l, ph]) => (
                 <label key={k} className="fm-fld"><span>{l}</span><input className="fm-input" value={form[k]} placeholder={ph} onChange={(e) => setForm({ ...form, [k]: e.target.value.slice(0, 64) })} /></label>
@@ -803,15 +802,11 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
               <label className="fm-fld"><span>담당 노드</span><Select sort={false} className="fm-input" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}><option value="">중앙</option>{main.nodes.filter((x) => x.kind === 'edge').map((x) => <option key={x.agent} value={x.agent}>엣지 {x.agent}</option>)}</Select></label>
               <button type="button" className="fm-btn pri" disabled={!!busy || !form.host || !form.name} onClick={() => run('add', async () => { const r = await postJson('/tools/focus-mon/targets', { ...form, port: Number(form.port) || 22 }); if (r?.ok) setForm({ ...form, name: '', host: '' }); return r?.ok ? { ok: true, reason: `${r.target.name} 을(를) 등록했습니다.` } : r; })}>추가</button>
             </div>
-            {csv != null ? (
-              <div className="fm-col">
-                <textarea className="fm-input fm-ta" value={csv} onChange={(e) => setCsv(e.target.value.slice(0, 200_000))} placeholder={'이름,IP,포트,계정,담당 노드\nweb-01,10.10.22.31,22,dvcmon,중앙'} aria-label="CSV 붙여 넣기" />
-                <div className="fm-row"><button type="button" className="fm-btn pri" disabled={!!busy || !csv.trim()} onClick={() => run('csv', async () => { const r = await postJson('/tools/focus-mon/targets/import', { text: csv }); if (r?.ok) setCsv(null); return r?.ok ? { ok: true, reason: `${r.added}대를 넣었습니다.` } : { ok: false, reason: `${r?.reason || ''}${r?.errors ? ` ${r.errors.slice(0, 3).map((x) => `${x.line}줄: ${x.reason}`).join(' / ')}` : ''}` }; })}>넣기</button><button type="button" className="fm-btn" onClick={() => setCsv(null)}>닫기</button><span className="fm-dim">틀린 줄이 하나라도 있으면 아무것도 넣지 않습니다.</span></div>
-              </div>
-            ) : null}
+            {csv ? <CsvPanel main={main} busy={busy} run={run} onClose={() => setCsv(false)} /> : null}
           </div>
           <div className="fm-row fm-pad"><span className="fm-lbl">담당 노드</span><Seg label="담당 노드" value={node} onChange={setNode} options={nodes} />
-            <button type="button" className="fm-btn" disabled={!picked.length || !!busy} onClick={() => run('test', async () => { for (const id of picked.slice(0, 20)) { await postJson(`/tools/focus-mon/targets/${encodeURIComponent(id)}/test`, {}).catch(() => {}); } return { ok: true, reason: '고른 서버의 연결 시험을 보냈습니다 — 결과는 키 로그인 칸에 나옵니다(엣지 서버는 몇 초 걸립니다).' }; })}>고른 서버 연결 시험</button>
+            <button type="button" className="fm-btn" disabled={!picked.length || !!busy} onClick={() => bulkTest(picked, '고른 서버')}>고른 서버 연결 시험</button>
+            <button type="button" className="fm-btn" disabled={!targets.length || !!busy} onClick={() => bulkTest(targets.map((t) => t.id), node === 'all' ? '목록의 서버' : `${node ? `엣지 ${node}` : '중앙'} 서버`)}>이 목록 모두 시험 · {targets.length}대</button>
             {main.ended?.[0] ? <button type="button" className="fm-btn" onClick={() => setPicked(main.ended[0].targets.slice(0, L.maxPerSession))}>지난번 {main.ended[0].targets.length}대 다시 고르기</button> : null}</div>
           <STable className="fm-table" minWidth={640}>
             <thead><tr><th data-nosort /><th>이름</th><th>주소 · 계정</th><th>담당 노드</th><th>키 로그인 · OS</th><th data-nosort /></tr></thead>
@@ -824,10 +819,14 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
                   <td style={{ fontWeight: 600 }}>{t.name}{t.demo ? <span className="fm-badge off">데모</span> : null}</td>
                   <td data-sort={t.host}><span className="fm-st"><span className="fm-mono fm-num">{t.host}:{t.port}</span><small className="fm-mono">{t.username}</small></span></td>
                   <td>{t.agent ? `엣지 ${t.agent}` : '중앙'}{t.agent && t.edgeOnline === false && !t.demo ? <span className="fm-badge warn">엣지 응답 없음</span> : null}</td>
-                  <td><span className="fm-st"><span className={`fm-badge ${s.tone}`}>{s.label}</span>{s.note ? <small>{s.note}</small> : null}{(t.test?.result?.hello || t.status?.hello)?.rhelMajor ? <small>RHEL {(t.test?.result?.hello || t.status?.hello).rhelMajor}</small> : null}</span></td>
+                  <td><span className="fm-st"><span className={`fm-badge ${s.tone}`}>{s.label}</span>{s.note ? <small>{s.note}</small> : null}{needsRetry(t) && !t.demo ? <small className="fm-why">{AUTH_HINT}</small> : null}{(t.test?.result?.hello || t.status?.hello)?.rhelMajor ? <small>RHEL {(t.test?.result?.hello || t.status?.hello).rhelMajor}</small> : null}</span></td>
                   <td><span className="fm-row fm-nowrap">
                     <button type="button" className="fm-btn sm" disabled={!!busy || t.demo} onClick={() => run('t1', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/test`, {}).then((r) => (r?.queued ? { ok: true, reason: `${t.name} 연결 시험을 엣지에 보냈습니다.` } : { ok: !!r?.result?.ok, reason: `${t.name}: ${TEST_TEXT[r?.result?.kind] || r?.result?.kind}${r?.result?.error ? ` — ${r.result.error}` : ''}` })))}>시험</button>
-                    {(t.status?.state === 'auth' || t.authStop) ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => run('retry', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/retry`, {}).then(() => ({ ok: true, reason: `${t.name} 을(를) 다시 연결합니다(한 번 시도).` })))}>다시 연결</button> : null}
+                    {needsRetry(t) ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => run('retry', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/retry`, {}).then((r) => (r?.via === 'edge'
+                      ? { ok: true, reason: `${t.name}: 엣지 ${t.agent} 에 다시 연결을 보냈습니다 — 정지를 풀고 한 번 시험합니다(결과는 키 로그인 칸 · 몇 초 걸립니다).` }
+                      : r?.result ? { ok: !!r.result.ok, reason: `${t.name}: ${TEST_TEXT[r.result.kind] || r.result.kind}${r.result.error ? ` — ${r.result.error}` : ''}` }
+                        : r?.running ? { ok: true, reason: `${t.name} 을(를) 다시 연결합니다(수집기가 한 번 시도).` }
+                          : { ok: true, reason: `${t.name}: 정지를 풀었습니다 — 방금 시험해 10초 뒤에 ‘시험’ 을 누르면 한 번 접속합니다.` })))}>다시 연결</button> : null}
                     {!t.demo ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => { if (window.confirm(`${t.name} 을(를) 등록에서 지울까요? 기록은 보관 기간 동안 남습니다.`)) run('del', () => delJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`).then(() => ({ ok: true, reason: `${t.name} 을(를) 지웠습니다.` }))); }}>삭제</button> : null}
                   </span></td>
                 </tr>
@@ -838,7 +837,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
         </div>
         <div className="fm-col">
           <div className="fm-card">
-            <div className="fm-row fm-between"><h3 className="fm-h3">기록 — DB 보관</h3><button type="button" className="fm-btn sm" onClick={() => setSettingsForm(setForm2 ? null : { ...main.settings })}>보관 설정</button></div>
+            <div className="fm-row fm-between"><h3 className="fm-h3">기록 — DB 보관</h3><button type="button" className="fm-btn sm" onClick={() => setSettingsForm(setForm2 ? null : { ...main.settings })}>설정</button></div>
             <div className="fm-meter big"><span className="t"><span className="f" style={{ width: `${Math.min(100, ((main.recorder.dbBytes || 0) / (main.settings.capGb * 2 ** 30)) * 100)}%` }} /></span></div>
             <div className="fm-row fm-between"><span><b>{bytesText(main.recorder.dbBytes)}</b> <span className="fm-dim">/ 상한 {main.settings.capGb} GB</span></span><span className="fm-dim">보관 {main.settings.retentionDays}일{main.db.oldestMinute ? ` · 가장 오래된 기록 ${clockText(main.db.oldestMinute * 60_000, true)}` : ''}</span></div>
             {!main.db.available ? <div className="fm-ban w">기록 DB 를 열지 못했습니다 — 실시간 화면은 그대로지만 기록이 남지 않습니다{main.db.error ? `(${main.db.error})` : ''}.</div> : null}
@@ -846,36 +845,23 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
             <div className="fm-note">수집한 값과 프로세스 목록을 1분 단위로 묶어 DB 에 남깁니다. ‘잠깐 보기’ 는 켠 동안만, ‘계속 수집’ 은 끌 때까지 수집합니다(보는 화면이 없으면 {L.idleInterval}초 주기로 낮춰 기록). 상한에 닿으면 가장 오래된 기록부터 지웁니다.</div>
             {setForm2 ? (
               <div className="fm-form">
-                {Object.entries({ retentionDays: '보관 일수', capGb: '용량 상한(GB)', warnPct: '주의(%)', critPct: '위험(%)', wAwaitWarnMs: '쓰기 지연 주의(ms)' }).map(([k, l]) => (
+                {Object.entries({ retentionDays: '보관 일수', capGb: '용량 상한(GB)', warnPct: '주의(%)', critPct: '위험(%)', wAwaitWarnMs: '쓰기 지연 주의(ms)', edgeIdleSec: '엣지 쉬는 동안 조회(초)' }).filter(([k]) => main.settingRanges[k]).map(([k, l]) => (
                   <label key={k} className="fm-fld"><span>{l} <small className="fm-dim">{main.settingRanges[k][0]}~{main.settingRanges[k][1]}</small></span><input className="fm-input" value={setForm2[k]} onChange={(e) => setSettingsForm({ ...setForm2, [k]: e.target.value.replace(/[^0-9]/g, '').slice(0, 5) })} /></label>
                 ))}
-                <button type="button" className="fm-btn pri" disabled={!!busy} onClick={() => run('set', async () => { const r = await putJson('/tools/focus-mon/settings', Object.fromEntries(Object.entries(setForm2).map(([k, v]) => [k, Number(v)]))); setSettingsForm(null); return { ok: true, reason: r?.changed?.length ? '보관 설정을 저장했습니다.' : '바뀐 값이 없습니다 — 저장하지 않았습니다.' }; })}>저장</button>
+                <button type="button" className="fm-btn pri" disabled={!!busy} onClick={() => run('set', async () => { const r = await putJson('/tools/focus-mon/settings', Object.fromEntries(Object.entries(setForm2).map(([k, v]) => [k, Number(v)]))); if (r?.ok === false) return { ok: false, reason: r.reason || '설정을 저장하지 못했습니다.' }; setSettingsForm(null); return { ok: true, reason: r?.changed?.length ? '설정을 저장했습니다.' : '바뀐 값이 없습니다 — 저장하지 않았습니다.' }; })}>저장</button>
               </div>
             ) : null}
           </div>
           <div className="fm-card">
-            <h3 className="fm-h3">노드별 SSH 공개키</h3>
+            <h3 className="fm-h3">노드별 SSH 공개키 · 엣지 연결</h3>
             <span className="fm-dim">개인키는 각 노드의 설정 폴더에만 있고 화면 · API · 백업에 실리지 않습니다. 서버에는 그 서버를 맡은 노드의 공개키 하나만 넣으면 됩니다.</span>
             {keyNodes.map((x) => (
-              <div key={x.agent || 'central'} className={`fm-key ${x.key?.publicKey ? '' : 'dash'}`}>
-                <div className="fm-row fm-between"><span><b>{x.kind === 'central' ? '중앙' : `엣지 ${x.agent}`}</b> <span className="fm-dim">· 서버 {nodeTargets(x)}대{x.kind === 'edge' ? ` · ${x.online ? '연결됨' : x.at ? `마지막 ${agoShort(x.at, Date.now())}` : '동기화 기록 없음'}` : ''}</span></span>
-                  {x.key?.publicKey ? <button type="button" className="fm-btn sm" onClick={() => setMsg(copyText(x.key.publicKey) ? { tone: 'ok', text: '공개키를 복사했습니다.' } : { tone: 'bad', text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' })}>공개키 복사</button>
-                    : x.kind === 'central' ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => run('key', () => postJson('/tools/focus-mon/key', {}).then((r) => ({ ok: r?.ok !== false, reason: r?.created ? '중앙 키를 만들었습니다.' : r?.reason || '이미 키가 있습니다.' })))}>키 만들기</button>
-                      : <span className="fm-badge off">키 없음</span>}</div>
-                {x.key?.publicKey ? <><span className="fm-mono fm-key-pub">{x.key.publicKey}</span><span className="fm-mono fm-dim">지문 {x.key.fingerprint}</span></>
-                  : <span className="fm-dim">{x.kind === 'central' ? '중앙 키가 없습니다 — 키 만들기를 누르세요.' : '이 엣지에 서버를 처음 등록하면 엣지가 키를 만들어 공개키를 올립니다. 엣지가 옛 판이면 올리지 않습니다(업그레이드 필요).'}</span>}
-                {x.key?.error ? <span className="fm-ban w">{x.key.error}</span> : null}
-              </div>
+              <NodeCard key={x.agent || 'central'} x={x} main={main} busy={busy} run={run} setMsg={setMsg} count={nodeTargets(x)}
+                installOn={!!installNode && (installNode.agent || '') === (x.agent || '')} onInstall={() => setInstallFor(x.agent || '')} />
             ))}
             {idleEdges.length ? <span className="fm-dim">맡은 서버가 없는 엣지 {idleEdges.length}곳({idleEdges.slice(0, 6).map((x) => x.agent).join(', ')}{idleEdges.length > 6 ? ' …' : ''}) — 그 엣지에 서버를 등록하면 엣지가 키를 만들어 공개키를 올립니다.</span> : null}
           </div>
-          {centralKey?.publicKey ? (
-            <div className="fm-card">
-              <div className="fm-row fm-between"><h3 className="fm-h3">대상 서버에 넣는 방법 — 중앙 키</h3><button type="button" className="fm-btn sm" onClick={() => setMsg(copyText(installCommand(centralKey.publicKey, form.username)) ? { tone: 'ok', text: '명령을 복사했습니다.' } : { tone: 'bad', text: '복사하지 못했습니다.' })}>명령 복사</button></div>
-              <pre className="fm-code">{installCommand(centralKey.publicKey, form.username)}</pre>
-              <span className="fm-dim">{INSTALL_NOTE}</span>
-            </div>
-          ) : null}
+          <InstallCard node={installNode} main={main} setMsg={setMsg} defaultUser={form.username} />
         </div>
       </div>
     </>

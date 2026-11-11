@@ -206,6 +206,14 @@ export function installCommand(pub, user = 'dvcmon') {
     `restorecon -R ~${u}/.ssh 2>/dev/null || true`,
   ].join('\n');
 }
+/** 키 로그인 거부일 때 — 가장 흔한 원인(사용자 보고 2026-11-12: ssh-copy-id 로 넣었는데 거부). */
+export const AUTH_HINT = '포탈 전용 키(노드 카드의 공개키)를 넣어야 합니다 — ssh-copy-id 는 셸 계정의 키를 넣어 포탈 연결에는 쓰이지 않습니다. 넣은 뒤 다시 연결을 누르세요.';
+/** 노드 셸에서 포탈 키를 직접 확인하는 법(경로는 설치 기본값 — 설정 폴더가 다르면 그 아래 ssh). */
+export const KEY_FILE_NOTE = '노드 셸(root)에서 같은 공개키를 뽑으려면: ssh-keygen -y -f /etc/vmware-portal/ssh/focusmon_key (설정 폴더가 다르면 그 아래 ssh/focusmon_key) — 지문이 카드와 같은지 확인하세요. 포탈 서비스는 홈 디렉터리의 ~/.ssh 키를 읽지 않습니다.';
+/** 다시 연결 버튼을 보일 상태(중앙 정지 · 수집 상태 · 시험 결과 어느 쪽이든 — 엣지 서버는 시험 결과로만 안다). */
+export function needsRetry(t) {
+  return !!(t && (t.status?.state === 'auth' || t.authStop || ['auth', 'auth-stopped'].includes(t.test?.result?.kind)));
+}
 export const INSTALL_NOTE = 'restrict 는 포워딩 · 터미널 할당을 끕니다(OpenSSH 7.2 이상 — RHEL 7.8 은 7.4). 그 노드 주소에서만 쓰게 하려면 줄 앞에 from="노드 IP", 를 덧붙이세요. 수집은 /proc · /sys 를 읽기만 하므로 root · sudo 가 필요 없습니다.';
 
 /** 손으로 만든 폴링 루프의 다음 틱을 걸지 않을 오류(403 권한 · 404 경로 없음은 다시 물어도 같다). */
@@ -216,3 +224,106 @@ export const PIN_COLORS = Object.freeze(['#3987e5', '#d95926', '#199e70', '#c985
 export const REST_COLOR = '#3d4a66';
 export const RX_COLOR = '#3987e5';
 export const TX_COLOR = '#d95926';
+
+/* ── v2.978 CSV 대량 등록 · 일괄 시험 · 엣지 연결 진단 ──────────────────────────────────────────── */
+
+/** CSV 미리보기 줄 처리(서버 planCsv 의 action 과 1:1 — 테스트가 대조). */
+export const CSV_ACTION_TEXT = Object.freeze({
+  add: { label: '새로', tone: 'ok' }, update: { label: '갱신', tone: 'warn' }, same: { label: '그대로', tone: 'off' }, error: { label: '오류', tone: 'crit' },
+});
+export const CSV_FIELD_TEXT = Object.freeze({ name: '이름', username: '계정', agent: '담당 노드' });
+export const nodeText = (agent) => (agent ? `엣지 ${agent}` : '중앙');
+
+/** 갱신 줄의 바뀌는 칸 — ‘계정 root → dvcmon’ 처럼. */
+export function csvChangeText(row) {
+  if (!row || row.action !== 'update') return '';
+  return (row.changes || []).map((f) => {
+    const a = f === 'agent' ? nodeText(row.before?.[f]) : row.before?.[f] || DASH;
+    const b = f === 'agent' ? nodeText(row.value?.[f]) : row.value?.[f] || DASH;
+    return `${CSV_FIELD_TEXT[f] || f} ${a} → ${b}`;
+  }).join(' · ');
+}
+
+/**
+ * CSV 파일 바이트 → 글자. 한국어 엑셀의 ‘CSV(쉼표로 분리)’ 는 CP949(EUC-KR)로 저장한다 — UTF-8 로 읽어 깨지면 EUC-KR 로 다시 읽는다.
+ * @param {ArrayBuffer|Uint8Array} buf
+ * @returns {{text:string, encoding:'utf-8'|'euc-kr'}}
+ */
+export function decodeCsvBytes(buf) {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(u8), encoding: 'utf-8' }; }
+  catch { return { text: new TextDecoder('euc-kr').decode(u8), encoding: 'euc-kr' }; }
+}
+
+/** 깨우기 결과(서버 edgePull kind + 'ok' · 'error'). hint 는 못 닿았을 때 무엇을 볼지. */
+export const WAKE_TEXT = Object.freeze({
+  ok: { label: '바로 닿음', tone: 'ok' },
+  timeout: { label: '시간 초과', tone: 'warn', hint: '중앙 → 엣지 직접 연결이 느리거나 막혀 있습니다(중계 엣지 · 방화벽).' },
+  unreachable: { label: '못 닿음', tone: 'warn', hint: '중앙 → 엣지 직접 연결이 막혀 있습니다(중계 엣지 · 방화벽) — 수집 서버 URL 을 확인하세요.' },
+  'old-version': { label: '옛 판', tone: 'crit', hint: '엣지에 이 기능 경로가 없습니다 — 엣지를 업그레이드하세요.' },
+  auth: { label: '토큰 불일치', tone: 'crit', hint: '중앙에 등록한 수집 서버 토큰과 엣지의 COLLECTOR_TOKEN 이 다릅니다.' },
+  disabled: { label: '엣지에서 꺼짐', tone: 'warn', hint: '엣지가 이 기능을 끈 상태로 답했습니다.' },
+  'not-registered': { label: '수집 서버 미등록', tone: 'crit', hint: '설정 › 엣지 · 원격 › 수집 서버(원격)에 이 이름이 없습니다.' },
+  'disabled-central': { label: '중앙에서 꺼 둠', tone: 'warn', hint: '중앙의 수집 서버 등록에서 비활성입니다.' },
+  'no-url': { label: 'URL 없음', tone: 'crit', hint: '수집 서버 등록에 URL 이 없습니다.' },
+  http: { label: 'HTTP 오류', tone: 'warn' },
+  'bad-body': { label: '응답 형식 다름', tone: 'warn', hint: '엣지가 아닌 서버에 닿았을 수 있습니다.' },
+  error: { label: '오류', tone: 'warn' },
+});
+export const WAKE_KEYS = Object.freeze(Object.keys(WAKE_TEXT));
+
+/** 깨우기가 닿지 않을 때 시작이 얼마나 늦는지(쉬는 주기) — 값이 없으면 단정하지 않는다. */
+export function wakeFallbackText(node) {
+  if (!node || node.kind !== 'edge') return '';
+  const s = Number(node.idleMs) > 0 ? Math.round(Number(node.idleMs) / 1000) : null;
+  if (node.upgrade === 'diag' || s == null) return '깨우기가 닿지 않아도 엣지가 주기적으로 중앙을 조회해 받아 갑니다(옛 판 엣지는 30초).';
+  return `깨우기가 닿지 않아도 엣지가 쉬는 동안 ${s}초마다 중앙을 조회해 받아 갑니다 — 시작이 그만큼 늦을 뿐 수집은 됩니다.`;
+}
+
+/** 업그레이드 안내(서버 판정 node.upgrade 를 문장으로). */
+export function upgradeText(node, { edgeMin, diagMin } = {}) {
+  if (node?.upgrade === 'feature') return `이 엣지는 서버 집중 모니터링이 없는 옛 판입니다 — v${edgeMin || '?'} 이상으로 업그레이드해야 이 엣지가 맡은 서버를 수집합니다.`;
+  if (node?.upgrade === 'diag') return `연결 진단과 짧은 조회 주기는 v${diagMin || '?'} 이상 엣지에서 나옵니다(지금 v${node.version || '?'}) — 수집은 됩니다.`;
+  return '';
+}
+
+/** 엣지 진단 한 줄들(값이 없으면 그 칸을 뺀다 — 0 으로 쓰지 않는다). */
+export function diagItems(diag, now) {
+  if (!diag) return [];
+  const out = [];
+  const v = (x) => (x == null || !Number.isFinite(Number(x)) ? null : Number(x));
+  if (v(diag.rttMs) != null) out.push(['왕복', `${Math.round(v(diag.rttMs))} ms`]);
+  if (v(diag.idleMs) != null) out.push(['쉬는 동안 조회', `${Math.round(v(diag.idleMs) / 1000)}초마다`]);
+  if (v(diag.collectors) != null) out.push(['수집기', `${v(diag.collectors)}개`]);
+  if (v(diag.buffered) != null) out.push(['못 보낸 표본', `${v(diag.buffered)}개`]);
+  if (v(diag.dropped) != null && v(diag.dropped) > 0) out.push(['버린 표본', `${v(diag.dropped)}개`]);
+  if (v(diag.fails) != null && v(diag.fails) > 0) out.push(['연속 실패', `${v(diag.fails)}번`]);
+  if (diag.lastError) out.push(['마지막 오류', `${diag.lastError}${diag.lastErrorAt ? ` (${agoShort(diag.lastErrorAt, now)})` : ''}`]);
+  return out;
+}
+
+/** 일괄 시험 진행 — 서버 bulkProgress 를 한 줄로. 끝난 지 30분 지난 작업은 보이지 않는다. */
+export function bulkLine(p, now) {
+  if (!p || !(p.total > 0)) return null;
+  if (p.finished && now - p.startedAt > 30 * 60_000) return null;
+  const parts = [`성공 ${p.ok}`, `실패 ${p.fail}`];
+  if (p.skipped) parts.push(`건너뜀 ${p.skipped}(10초 안에 시험함)`);
+  if (p.noAnswer) parts.push(`답 없음 ${p.noAnswer}`);
+  const kinds = Object.entries(p.kinds || {}).filter(([k]) => k !== 'ok').sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .map(([k, c]) => `${TEST_TEXT[k] || k} ${c}`);
+  return {
+    tone: p.finished ? (p.fail || p.noAnswer ? 'warn' : 'ok') : 'run',
+    text: `${p.finished ? '일괄 시험 끝' : '일괄 시험 중'} — ${p.done} / ${p.total - p.skipped}대 · ${parts.join(' · ')}${kinds.length ? ` (${kinds.join(', ')})` : ''}`,
+  };
+}
+
+/** 그 노드가 맡은 서버를 계정별로 묶는다 — 설치 명령은 계정마다 한 벌(같은 공개키). */
+export function installGroups(targets, agent) {
+  const m = new Map();
+  for (const t of targets || []) {
+    if (t.demo || String(t.agent || '').toLowerCase() !== String(agent || '').toLowerCase()) continue;
+    if (!m.has(t.username)) m.set(t.username, []);
+    m.get(t.username).push(t.host);
+  }
+  return [...m.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0])).map(([user, hosts]) => ({ user, hosts: [...new Set(hosts)] }));
+}

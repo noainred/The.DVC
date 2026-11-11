@@ -88,7 +88,7 @@ test('⑨ 등록 검사 — IPv4 정규형 · 루프백 · 모르는 엣지 · �
   assert.equal((await add({ name: 'db-01b', host: '10.1.1.1', port: 2222, username: 'dvcmon' })).body.code, 'duplicate');
   const csv = await call('POST', '/api/tools/focus-mon/targets/import', { body: { text: '이름,IP,포트,계정,담당\nweb-1,10.2.2.2,22,dvcmon,중앙\nweb-2,10.2.2.300,22,dvcmon,' } });
   assert.equal(csv.status, 400);
-  assert.equal(csv.body.errors[0].line, 2, '틀린 줄이 있으면 하나도 넣지 않는다');
+  assert.equal(csv.body.errors[0].line, 3, '틀린 줄이 있으면 하나도 넣지 않는다(v2.978: 줄 번호 = 엑셀 행 번호 — 머리글 포함)');
   assert.equal(registry.listTargets().length, 1);
 });
 
