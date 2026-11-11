@@ -5,7 +5,7 @@
 
 import { pageArgs } from '../util/pageArgs.js';
 import { Router } from 'express';
-import { requireRole } from '../auth/auth.js';
+import { requireRole, requirePerm } from '../auth/auth.js';
 import { store, usageReadable } from '../store.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { userHasPermission } from '../auth/permissions.js';
@@ -36,6 +36,15 @@ import { buildGraph } from '../insights/graph.js';
 import { getIncidents } from '../insights/incidents.js';
 import { chatOps } from '../llm/chatops.js';
 import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
+import { isDemoGuest } from '../auth/demoGuest.js';
+import { acquireExport } from '../util/exportBusy.js';
+import { fileStamp, localStamp } from '../util/dayKey.js';
+import { getInventory } from '../idrac/invCache.js';
+import { allRemoteServers } from '../collector/remoteInventory.js';
+import { catalogForClient, resolveFields, BASIC_KEYS } from '../insights/hwExport/catalog.js';
+import { makeInvOf, selectServers, buildHwModel, KINDS, UNASSIGNED } from '../insights/hwExport/rows.js';
+import { renderHwExport, SPEC_MAX } from '../insights/hwExport/render.js';
+import { getPrefs as getHwPrefs, setPref as setHwPref, FMTS as HW_FMTS, BANDS as HW_BANDS } from '../insights/hwExport/prefs.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { fullScopeOnlyWith } from './admin/shared.js';
@@ -195,6 +204,116 @@ insightsRouter.get('/fleet', async (req, res) => {
     else sendCached(req, res, `${fpKey}|masked`, maskFleetPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
+// --- 서버 하드웨어 정보 내보내기(v2.966 — 승인 시안 docs/design/baremetal-hw-xlsx · 사용자 기본안 7가지 2026-11-11) ---
+// 게이트는 GET /fleet 과 같다(전체 범위 계정만 — 미귀속 베어메탈 하드웨어가 들어간다) + 파일 내보내기 권한 data.csv(v2.643 규약).
+// 엑셀은 동시 1건(util/exportBusy — 없으면 포탈을 죽인다, security-api.md) · 워커 스레드에서 만든다(insights/hwExport/render.js).
+// 관리자가 아니면 adminOnly 값(iDRAC 주소 · MAC · UUID)은 카탈로그에서 빠지고, 주소로 등록된 서버 이름 · Hostname 은 가린다(maskFleetPayload 와 같은 matcher).
+const hwCsvPerm = requirePerm('data.csv');
+const HW_FULL_SCOPE_REASON = '서버 하드웨어 정보 내보내기는 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다 — 통합 서버 인벤토리와 같은 기준입니다.';
+const hwFullScopeOnly = fullScopeOnlyWith(HW_FULL_SCOPE_REASON);
+async function hwFleetOf(snap) {
+  return snapMemo('fleet', `${snap.generatedAt}|${fleetRev()}`, 60_000, async () => getFleetInventory(snap));   // GET /fleet 과 같은 캐시(같은 키)
+}
+/** 법인 목록(창의 칩) — 스냅샷의 vCenter + 미지정. 대수는 분류 결과에서 센다(화면에서 더하지 않게). */
+export function hwCorpRoster(snap, fleet) {
+  const m = new Map((snap?.vcenters || []).map((v) => [String(v.id), { id: String(v.id), name: v.name || String(v.id), bm: 0, vh: 0 }]));
+  const bump = (vcId, k) => {
+    const id = String(vcId || '') || UNASSIGNED;
+    if (!m.has(id)) m.set(id, { id, name: id === UNASSIGNED ? '미지정' : id, bm: 0, vh: 0 });
+    m.get(id)[k]++;
+  };
+  for (const b of fleet?.bareMetal || []) bump(b.vcenterId, 'bm');
+  for (const h of fleet?.virtualizationHosts || []) bump(h.vcenterId, 'vh');
+  const list = [...m.values()].sort((a, b) => (a.id === UNASSIGNED) - (b.id === UNASSIGNED) || a.name.localeCompare(b.name));
+  return list.filter((c) => c.id !== UNASSIGNED || c.bm + c.vh > 0);
+}
+/** 쿼리 → 내보내기 선택(검증). 모르는 값은 기본값 · 모르는 법인 id 는 버린다. */
+export function hwExportOpts(q, { admin = false, corpIds = [] } = {}) {
+  const pick = (v, list, def) => (list.includes(String(v ?? '')) ? String(v) : def);
+  const format = pick(q.format, HW_FMTS, 'xlsx');
+  const kind = pick(q.kind, KINDS, 'bm');
+  const band = pick(q.band, HW_BANDS, 'band');
+  const spec = format === 'xlsx' && String(q.spec ?? '') === '1';
+  const fields = resolveFields(q.fields ? String(q.fields) : BASIC_KEYS, { admin });
+  let corps = null;
+  const raw = String(q.corps ?? '').trim();
+  if (raw && raw !== 'all') {
+    const known = new Set(corpIds.map(String));
+    corps = new Set(raw.split(',').map((x) => x.trim()).filter((x) => known.has(x)).slice(0, 500));
+    if (!corps.size) return { ok: false, reason: '고른 법인이 없습니다(알 수 없는 법인 id 는 버립니다).' };
+  }
+  return { ok: true, format, kind, band, spec, fields, corps };
+}
+const asciiName = (s) => String(s || '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').slice(0, 120);
+export function hwExportFileBase({ kind, corps, roster, stamp }) {
+  const kindWord = kind === 'vh' ? 'esxi-hosts' : kind === 'both' ? 'all-servers' : 'baremetal';
+  let scope = 'all';
+  if (corps) {
+    const picked = roster.filter((c) => corps.has(c.id));
+    scope = picked.length === 1 ? (picked[0].id === UNASSIGNED ? 'unassigned' : picked[0].name) : `${picked.length}corps`;
+  }
+  return `server-hardware_${kindWord}_${scope}_${stamp}`;
+}
+
+insightsRouter.get('/fleet/hardware-meta', hwCsvPerm, hwFullScopeOnly, async (req, res) => {
+  try {
+    const snap = store.get();
+    const fleet = await hwFleetOf(snap);
+    const admin = isAdminReq(req);
+    res.set('Cache-Control', 'no-store').json({
+      ok: true, admin, specMax: SPEC_MAX, catalog: catalogForClient({ admin }), basicKeys: BASIC_KEYS,
+      corps: hwCorpRoster(snap, fleet), prefs: getHwPrefs(req.user?.username)?.def || null,
+    });
+  } catch { res.status(500).json({ ok: false, reason: '내보내기 정보를 만들지 못했습니다.' }); }
+});
+
+insightsRouter.put('/fleet/hardware-prefs', requireRole('admin', 'operator'), hwCsvPerm, hwFullScopeOnly, (req, res) => {
+  if (isDemoGuest(req.user)) return res.status(403).json({ ok: false, reason: '데모 계정은 저장할 수 없습니다.' });
+  const v = req.body && typeof req.body === 'object' ? req.body.value : null;
+  const r = setHwPref(req.user?.username, 'default', v);
+  if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason, ...(r.code ? { [r.code]: true } : {}) });
+  res.json({ ok: true, prefs: r.prefs.def });
+});
+
+insightsRouter.get('/fleet/hardware-export', hwCsvPerm, hwFullScopeOnly, async (req, res) => {
+  const snap = store.get();
+  const admin = isAdminReq(req);
+  let fleet;
+  try { fleet = await hwFleetOf(snap); } catch { return res.status(500).json({ ok: false, reason: '통합 서버 인벤토리를 만들지 못했습니다.' }); }
+  const roster = hwCorpRoster(snap, fleet);
+  const o = hwExportOpts(req.query || {}, { admin, corpIds: roster.map((c) => c.id) });
+  if (!o.ok) return res.status(400).json({ ok: false, error: 'bad_request', reason: o.reason });
+  const lock = acquireExport('fleet.hardware.export', req);
+  if (!lock.ok) return res.status(lock.status).json(lock.body);
+  const ac = new AbortController();
+  const onClose = () => { if (!res.writableEnded) ac.abort(); };
+  req.on('close', onClose);
+  try {
+    const invOf = makeInvOf({ getInventory, registry: loadRegistry(), remoteServers: allRemoteServers() });
+    const servers = selectServers(fleet, { kind: o.kind, corps: o.corps, invOf, match: admin ? null : insightsMatcher(snap) });
+    const model = buildHwModel(servers, o.fields, { admin, spec: o.spec });
+    const now = Date.now();
+    const kindText = o.kind === 'vh' ? '가상화 서버(ESXi 호스트)만' : o.kind === 'both' ? '물리서버 + 가상화 서버' : '물리서버(베어메탈)만';
+    const scopeText = o.corps ? roster.filter((c) => o.corps.has(c.id)).map((c) => c.name).join(' · ') : '모든 법인';
+    const meta = { basis: `${scopeText} · ${kindText} · 서버 ${servers.length}대 · 기준 ${localStamp(now)}`, kindText, band: o.band, admin };
+    const base = hwExportFileBase({ kind: o.kind, corps: o.corps, roster, stamp: fileStamp(now) });
+    const out = await renderHwExport(model, { format: o.format, baseName: asciiName(base), meta, signal: ac.signal });
+    logAudit({ user: req.user?.username, action: 'fleet.hardware.export', target: o.kind, detail: `${o.format}${out.ext === 'zip' ? '(zip)' : ''} · 서버 ${servers.length} · 값 ${o.fields.length}${o.spec ? ' · 사양서' : ''}`, ip: req.ip || '' });
+    res.setHeader('Content-Type', out.mime);
+    res.setHeader('Content-Disposition', `attachment; filename="${asciiName(base)}.${out.ext}"; filename*=UTF-8''${encodeURIComponent(`${base}.${out.ext}`)}`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(out.buffer);
+  } catch (e) {
+    if (!res.headersSent) {
+      const aborted = e?.code === 'aborted';
+      res.status(aborted ? 499 : 500).json({ ok: false, error: 'export_failed', reason: aborted ? '요청이 끊겨 멈췄습니다.' : `파일을 만들지 못했습니다${e?.code === 'timeout' ? '(시간 초과)' : ''}.` });
+    }
+  } finally {
+    req.off('close', onClose);
+    lock.release();
+  }
+});
+
 // 수동 분류 예외 지정/해제(관리자). body: { key, tag: 'baremetal'|'virtualization'|'exclude'|'auto' }
 // 전체 vCenter 재폴링(store.refresh) 없이 fleetRev만 올려 다음 GET에서 즉시 재계산(고RTT·30개 환경 보호).
 insightsRouter.put('/fleet/tag', adminOnly, fleetFullScopeOnly, (req, res) => {

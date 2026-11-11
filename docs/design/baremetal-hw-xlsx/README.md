@@ -1,6 +1,6 @@
 # 설계: 서버 하드웨어 정보 내보내기(물리 · 가상화 · 값 선택 · 엑셀/CSV · 서버별 사양서)
 
-작성 2026-11-11 · 상태 **시안 2판 — 컨펌 대기**(구현 전) · 시안 캔버스: https://claude.ai/artifact/E51be5ibsoDscW6Zq9xt5p
+작성 2026-11-11 · 상태 **구현됨 v2.966.0**(컨펌 2026-11-11 '기본안대로 구현해' · 기본안 7가지 · 표준 검증) · 시안 캔버스: https://claude.ai/artifact/E51be5ibsoDscW6Zq9xt5p
 (아트보드 4장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 서버 이름·법인·수치·펌웨어 버전·MAC·IP 는 모두 가상이고
 색·글자는 `web/src/styles.css` 토큰과 `server/src/vcenter/vmXlsxStyle.js PAL`(머리글 `1E3A5F` · 줄무늬 `F6F8FB` · 테두리 `D4D8DE`) 그대로.
 계정에 등록된 ‘Design System’ 아티팩트는 내용이 비어 있어 쓰지 않았다.)
