@@ -158,22 +158,29 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
   const groups = new Map();
   const unmapped = new Map();
-  const drift = []; const mismatch = []; const redundant = []; const tagAmbiguous = []; const ruleOverlap = []; const aliasPins = [];
+  const drift = []; const mismatch = []; const redundant = []; const tagAmbiguous = []; const ruleOverlap = []; const aliasPins = []; const dangling = [];
   const NAME_CAP = 40;
   // 옛 키 → 그 옛 키를 가진 구성원들의 법인(범위와 무관한 전체 집합 — 고정이 범위 밖 법인 구성원의 것이어도 거짓 불일치가 되지 않게)
-  const aliasCorps = new Map();
-  for (const m of members) for (const a of m.aliasKeys || []) { if (!m.corp) continue; if (!aliasCorps.has(a)) aliasCorps.set(a, new Set()); aliasCorps.get(a).add(m.corp); }
+  // 키 → 그 키를 **지금 키나 옛 키로** 가진 구성원들의 법인(7차 반증 1: 태그 없는 ESXi 호스트의 지금 키 fl:sha1(이름)은 같은 이름의 태그 있는 호스트의
+  //   옛 키와 같은 값이다 — 옛 키로만 표를 만들면 지금 키로 쓰이는 고정이 다른 법인 쪽에 거짓 불일치로 떴다)
+  const keyCorps = new Map();
+  const addKeyCorp = (k, c) => { if (!k || !c) return; if (!keyCorps.has(k)) keyCorps.set(k, new Set()); keyCorps.get(k).add(c); };
+  for (const m of members) { if (!m.corp) continue; addKeyCorp(m.key, m.corp); for (const a of m.aliasKeys || []) addKeyCorp(a, m.corp); }
   for (const m of members) {
     if (!inScope(m.corp)) continue;
     const r = resolved.get(m.key);
-    if (r.pinMismatch) mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: r.pinMismatch.corp, serviceId: r.pinMismatch.serviceId });
+    // 법인 귀속을 모르는 구성원(corp '')은 '법인이 바뀌었다' 고 단정하지 않는다(7차 반증 4 — 귀속 판정 오류 동안 모든 베어메탈 고정이 지우기 버튼과 함께 떴다).
+    // 고정이 있는 법인에 그 키를 옛 키로 가진 구성원이 있으면 그 구성원이 쓰는 고정이다(7차 반증 1 변형 2).
+    if (r.pinMismatch && m.corp && !keyCorps.get(m.key)?.has(r.pinMismatch.corp)) mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: r.pinMismatch.corp, serviceId: r.pinMismatch.serviceId });
+    // 없는 서비스를 가리키는 고정 — 판정은 자동으로 돌아가 있다. 예전에는 어디에도 안 보였다(7차 반증 5)
+    if (r.pinDangling && m.corp) dangling.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: pins[r.pinKey || m.key]?.serviceId || '', ...(r.pinKey ? { aliasKey: r.pinKey } : {}) });
     // 다른 법인에 남은 옛 키(별칭) 고정(6차 4 — 예전에는 유령·불일치·옛 키 큐 어디에도 없었다). 법인 귀속을 모르는 구성원은 판단하지 않는다(F1).
     // ⚠ 고정이 있는 법인에 **같은 옛 키를 가진 다른 구성원**이 있으면 그 구성원이 승계한 고정이다 — 불일치가 아니다(남긴 것 ① 점검: 이름이 같은 ESXi 호스트가
     //   두 법인에서 베어메탈이면 태그를 읽기 전 옛 키가 같다. 예전에는 다른 법인 쪽에 거짓 불일치 행이 뜨고 그 '고정 지우기' 가 원래 서버의 고정을 지웠다).
     if (m.corp && Array.isArray(m.aliasKeys)) {
       for (const a of m.aliasKeys) {
         const pa = pins[a];
-        if (!pa || pa.corp === m.corp || aliasCorps.get(a)?.has(pa.corp)) continue;
+        if (!pa || pa.corp === m.corp || keyCorps.get(a)?.has(pa.corp)) continue;
         mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: pa.corp, serviceId: pa.serviceId, aliasKey: a });
       }
     }
@@ -237,6 +244,8 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
   for (const m of members) for (const a of m.aliasKeys || []) live.add(a);
   // VM 이 한 대도 없는 법인 — VM 고정(iu:·vm:)이 있으면 '그 VM 이 사라졌다' 가 아니라 '아직 못 받았다' 일 수 있다(6차 1: 기동 직후 첫 수집 전 pending 법인)
   const vmCorps = new Set(); for (const m of members) if (m.kind === 'vm' && m.corp) vmCorps.add(m.corp);
+  // instanceUuid 를 **일부** VM 만 못 읽는 법인(그 VM 은 moref 키로 내려왔다 — 접근 불가 VM·엣지가 보낸 형식 오류 등)의 iu: 고정은 그 VM 의 것일 수 있다(7차 반증 2)
+  const morefCorps = new Set(); for (const m of members) if (m.kind === 'vm' && m.corp && m.keyKind === 'moref') morefCorps.add(m.corp);
   const ghosts = []; const held = []; const orphaned = [];
   for (const [k, p] of Object.entries(pins || {})) {
     if (live.has(k) || !inScope(p.corp)) continue;
@@ -253,12 +262,13 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     //   **VM 이 한 대도 없는데 VM 고정이 있는** 법인은 판정 보류다(일괄 정리하지 않는다 — 보류 행의 '고정 지우기'(pins.clear)로 한 건씩 지울 수 있다).
     const why = snapInitial ? 'snapshot-initial'
       : unreadCorps.has(p.corp) ? 'corp-unread'
-        : corpHold.get(p.corp) || (isVm && !vmCorps.has(p.corp) ? 'corp-no-vms' : isBm && bmBlocked ? 'bm-source-unread' : uuidUnread ? 'uuid-unread' : '');
+        : corpHold.get(p.corp) || (isVm && !vmCorps.has(p.corp) ? 'corp-no-vms' : isBm && bmBlocked ? 'bm-source-unread' : uuidUnread ? 'uuid-unread'
+          : k.startsWith('iu:') && morefCorps.has(p.corp) ? 'uuid-partial' : '');
     (why ? held : ghosts).push({ key: k, serviceId: p.serviceId, serviceName: svcName, corp: p.corp, by: p.by, at: p.at, ...(why ? { held: why } : {}) });
   }
   return {
     unassigned: [...groups.values()].sort((a, b) => b.n - a.n || a.key.localeCompare(b.key)),
     unmapped: [...unmapped.values()].sort((a, b) => b.n - a.n),
-    drift, mismatch, redundant, ghosts, ghostsHeld: held, orphaned, tagAmbiguous, ruleOverlap, aliasPins,
+    drift, mismatch, redundant, ghosts, ghostsHeld: held, orphaned, tagAmbiguous, ruleOverlap, aliasPins, dangling,
   };
 }

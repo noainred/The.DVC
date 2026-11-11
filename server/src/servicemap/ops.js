@@ -161,8 +161,8 @@ export const CORP_OPS = {
     if (!svcIn(c, b.serviceId)) return err('대상 서비스를 찾지 못했습니다', 404);
     const r = c.folderRules.find((x) => x.prefix === p.value); if (!r) return err('그 규칙이 없습니다', 404);
     if (r.serviceId === b.serviceId) return { result: { prefix: p.value, same: true } };
-    r.serviceId = b.serviceId;
-    return { result: { prefix: p.value } };
+    const from = r.serviceId; r.serviceId = b.serviceId;
+    return { result: { prefix: p.value, from } };   // from = 바꾸기 전 대상(감사 — 되돌릴 근거, 7차 반증 6)
   },
   'rule.remove'(d, b) {
     const p = cleanFolderPrefix(b.prefix); if (p.error) return err(p.error);
@@ -196,8 +196,8 @@ export const CORP_OPS = {
     if (a.serviceId === b.serviceId) return { result: { same: true } };
     const byName = (c.services || []).find((s) => sameName(s.name, a.value));
     if (byName) return err(`'${a.value}' 은(는) 서비스 '${byName.name}' 의 이름이라 이 별칭은 쓰이지 않습니다 — 별칭을 지우십시오`, 409);
-    a.serviceId = b.serviceId;
-    return { result: { kind: a.kind, value: a.value } };
+    const from = a.serviceId; a.serviceId = b.serviceId;
+    return { result: { kind: a.kind, value: a.value, from } };
   },
   'alias.remove'(d, b) {
     const c = corpOf(d, b.corp);
@@ -221,8 +221,8 @@ export const CORP_OPS = {
     if (!svcIn(c, b.serviceId)) return err('대상 서비스를 찾지 못했습니다', 404);
     const r = c.nameRules.find((x) => x.match === b.match && lc(x.value) === lc(b.value)); if (!r) return err('그 이름 규칙이 없습니다', 404);
     if (r.serviceId === b.serviceId) return { result: { same: true } };
-    r.serviceId = b.serviceId;
-    return { result: {} };
+    const from = r.serviceId; r.serviceId = b.serviceId;
+    return { result: { from } };
   },
   'namerule.remove'(d, b) {
     const c = corpOf(d, b.corp);
@@ -258,6 +258,7 @@ export const FLEET_OPS = {
   },
   'global.update'(d, b) {
     const g = d.globals.find((x) => x.id === b.id); if (!g) return err('전역 서비스를 찾지 못했습니다', 404);
+    const before = { name: g.name, tier: g.tier, owner: g.owner };   // 감사 — 되돌릴 근거(7차 반증 6)
     if (b.name !== undefined) {
       const n = cleanText(b.name, LIMITS.name, { label: '전역 서비스명' }); if (n.error) return err(n.error);
       if (d.globals.some((x) => x.id !== g.id && sameName(x.name, n.value))) return err(`전역 '${n.value}' 이(가) 이미 있습니다`, 409);
@@ -267,7 +268,7 @@ export const FLEET_OPS = {
     for (const [k, max, label] of [['owner', LIMITS.owner, '담당자'], ['note', LIMITS.note, '메모']]) {
       const v = optText(b[k], max, label); if (v.error) return err(v.error); if (!v.skip) g[k] = v.value;
     }
-    return { result: { global: { ...g } } };
+    return { result: { global: { ...g }, before } };
   },
   /** 전역 삭제 — 법인 서비스는 남기고 연결(globalId)만 비운다. */
   'global.remove'(d, b) {
