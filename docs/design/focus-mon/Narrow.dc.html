@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 좁은 화면</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.seg{display:flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{flex:1 1 auto;height:44px;padding:0 10px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.btn{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;height:44px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn.danger{border-color:#7f1d1d;color:#fca5a5}
+.tabs{display:flex;overflow-x:auto;border-bottom:1px solid #1f2a40}
+.tabs a{flex:none;display:inline-flex;align-items:center;height:44px;padding:0 13px;color:#8b9bb4;text-decoration:none;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;font-weight:600;border-bottom-color:#3b82f6}
+.badge{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:10px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.badge.warn{background:rgba(245,158,11,.16);color:#fbbf24}
+.badge.crit{background:rgba(239,68,68,.18);color:#fca5a5}
+.kpi{padding:10px 12px;display:flex;flex-direction:column;gap:1px}
+.kpi .l{font-size:11.5px;color:#8b9bb4}
+.kpi .v{font-size:20px;font-weight:600;line-height:1.25}
+.kpi .v small{font-size:12px;font-weight:500;color:#8b9bb4;margin-left:2px}
+.kpi .s{font-size:11.5px;color:#8b9bb4;overflow-wrap:anywhere}
+.sv{padding:11px 12px 9px;display:flex;flex-direction:column;gap:5px}
+.sv .nm{display:inline-flex;align-items:center;min-height:28px;font-size:14px;font-weight:600;color:#e6edf6;text-decoration:none}
+.mrow{display:grid;grid-template-columns:52px 40px minmax(0,1fr);align-items:center;gap:8px;height:23px}
+.mrow .ml{font-size:12px;color:#8b9bb4}
+.mrow .mv{font-size:13px;font-weight:600;text-align:right}
+.mrow svg{display:block;width:100%;height:22px}
+.sub{font-size:11.5px;color:#8b9bb4;display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 8px;border-top:1px solid #1f2a40;padding-top:6px;margin-top:2px}
+.rk{display:grid;grid-template-columns:minmax(0,92px) minmax(0,1fr) 52px;align-items:center;gap:8px;height:26px;font-size:12.5px}
+.rk .bar{display:block;height:10px;border-radius:0 4px 4px 0;background:#3987e5}
+.tw{overflow-x:auto;border:1px solid #1f2a40;border-radius:10px}
+.tr{display:grid;grid-template-columns:150px 64px 64px 70px 70px 64px;align-items:center;column-gap:10px;padding:0 10px;min-width:560px;min-height:34px;border-bottom:1px solid #1a2236;font-size:12px}
+.tr.h{color:#8b9bb4;background:#0f1626}
+.r{text-align:right}
+</style>
+</helmet>
+<div style="max-width:440px;margin:0 auto;box-sizing:border-box;padding:16px 16px 28px;display:flex;flex-direction:column;gap:12px">
+
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">특수 기능 › 서버</div>
+    <h1 style="margin:0;font-size:20px;font-weight:700">집중 모니터링</h1>
+  </div>
+  <div class="card" style="padding:9px 12px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px">
+    <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:#22c55e"></span>
+    <span style="font-weight:600">수집 중</span><span class="dim">· 20 / 20대 · 주기 2초</span>
+    <span class="dim" style="margin-left:auto">남은 시간 <span class="mono num" style="color:#e6edf6">12:38</span></span>
+  </div>
+  <div class="row"><button type="button" class="btn">15분 연장</button><button type="button" class="btn">화면 멈춤</button><button type="button" class="btn danger">수집 종료</button></div>
+
+  <nav class="tabs" aria-label="집중 모니터링 보기">
+    <a class="on" href="Main.dc.html">개요</a><a href="Compare.dc.html">비교</a><a href="Process.dc.html">프로세스</a><a href="Targets.dc.html">대상 · 키</a>
+  </nav>
+
+  <div style="display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:8px">
+    <div class="card kpi"><span class="l">수집 상태</span><span class="v num">19<small>/ 20대</small></span><span class="s">지연 1대 · us-was-02</span></div>
+    <div class="card kpi"><span class="l">CPU 평균</span><span class="v num">36<small>%</small></span><span class="s">최고 pl-db-01 93%</span></div>
+    <div class="card kpi"><span class="l">네트워크 최고</span><span class="v num">77<small>%</small></span><span class="s">kr-bak-01 bond0</span></div>
+    <div class="card kpi"><span class="l">쓰기 지연 최고</span><span class="v num">30.7<small>ms</small></span><span class="s">kr-bak-01 sdb</span></div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <span class="dim" style="font-size:12px">정렬</span>
+    <div class="seg" role="group" aria-label="정렬 기준"><button type="button" class="on">CPU</button><button type="button">메모리</button><button type="button">네트워크</button><button type="button">디스크</button><button type="button">이름</button></div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <sc-for list="{{ servers }}" as="s" hint-placeholder-count="4">
+      <div class="card sv" style="{{ s.cardStyle }}">
+        <div class="row" style="justify-content:space-between;gap:8px"><a class="nm" href="Server.dc.html">{{ s.name }}</a>
+          <sc-if value="{{ s.hasBadge }}" hint-placeholder-val="{{ false }}"><span class="{{ s.badgeCls }}">{{ s.badgeText }}</span></sc-if></div>
+        <div class="mono dim" style="font-size:11.5px;margin-top:-4px">{{ s.ip }} · {{ s.node }}</div>
+        <div class="mrow"><span class="ml">CPU</span><span class="mv num" style="{{ s.cpuInk }}">{{ s.cpu }}%</span><svg viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"><path d="{{ s.cpuLine }}" fill="none" stroke="#3987e5" stroke-width="1.5" vector-effect="non-scaling-stroke"></path></svg></div>
+        <div class="mrow"><span class="ml">메모리</span><span class="mv num" style="{{ s.memInk }}">{{ s.mem }}%</span><svg viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"><path d="{{ s.memLine }}" fill="none" stroke="#3987e5" stroke-width="1.5" vector-effect="non-scaling-stroke"></path></svg></div>
+        <div class="mrow"><span class="ml">네트워크</span><span class="mv num" style="{{ s.netInk }}">{{ s.net }}%</span><svg viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"><path d="{{ s.netLine }}" fill="none" stroke="#3987e5" stroke-width="1.5" vector-effect="non-scaling-stroke"></path></svg></div>
+        <div class="mrow"><span class="ml">디스크</span><span class="mv num" style="{{ s.dskInk }}">{{ s.dsk }}%</span><svg viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"><path d="{{ s.dskLine }}" fill="none" stroke="#3987e5" stroke-width="1.5" vector-effect="non-scaling-stroke"></path></svg></div>
+        <div class="sub num"><span>{{ s.subNet }}</span><span>{{ s.subDisk }}</span></div>
+      </div>
+    </sc-for>
+    <button type="button" class="btn" style="flex:none">나머지 16대 더 보기</button>
+  </div>
+
+  <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:6px">
+    <div class="row" style="justify-content:space-between"><span style="font-weight:600">비교 — 디스크 쓰기 지연</span><span class="dim" style="font-size:12px">지금 · ms</span></div>
+    <div class="rk"><span>kr-bak-01</span><span><span class="bar" style="width:100%"></span></span><span class="num r">32.2</span></div>
+    <div class="rk"><span>pl-db-01</span><span><span class="bar" style="width:59%"></span></span><span class="num r">18.9</span></div>
+    <div class="rk"><span>kr-db-01</span><span><span class="bar" style="width:34%"></span></span><span class="num r">10.9</span></div>
+    <div class="rk"><span>kr-nfs-01</span><span><span class="bar" style="width:30%"></span></span><span class="num r">9.6</span></div>
+    <div class="rk"><span>us-db-01</span><span><span class="bar" style="width:29.5%"></span></span><span class="num r">9.5</span></div>
+    <span class="dim" style="font-size:12px">좁은 화면에서는 순위 막대가 먼저 오고, 추이 차트와 20대 × 시간 띠는 그 아래로 내려갑니다.</span>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <span style="font-weight:600">서버 상세 — 디스크 표</span>
+    <div class="tw">
+      <div class="tr h"><span>장치</span><span class="r">읽기 IOPS</span><span class="r">쓰기 IOPS</span><span class="r">읽기 지연</span><span class="r">쓰기 지연</span><span class="r">사용률</span></div>
+      <div class="tr" style="font-weight:600"><span class="mono">전체 디스크</span><span class="r num">2,310</span><span class="r num">5,480</span><span class="r num">6.1 ms</span><span class="r num">18.9 ms</span><span class="r num">79%</span></div>
+      <div class="tr"><span class="mono">sdb · 3.5 TB</span><span class="r num">1,620</span><span class="r num">3,940</span><span class="r num">6.8 ms</span><span class="r num">21.3 ms</span><span class="r num">79%</span></div>
+      <div class="tr"><span class="mono" style="padding-left:14px">oradata-data01</span><span class="r num">1,620</span><span class="r num">3,940</span><span class="r num">6.9 ms</span><span class="r num">21.5 ms</span><span class="r num">79%</span></div>
+    </div>
+    <span class="dim" style="font-size:12px">표는 상자 안에서 옆으로 밉니다. 화면 전체가 옆으로 밀리지 않습니다.</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1930}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const N = 90; const T = 1000;
+    const frac = (x) => x - Math.floor(x);
+    const hash = (a, b) => frac(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
+    const smooth = (a, t) => (hash(a, t) + hash(a, t - 1) + hash(a, t - 2)) / 3;
+    const clamp = (v) => Math.max(0, Math.min(100, v));
+    const val = (base, amp, seed, t) => clamp(base + amp * 0.8 * Math.sin((t + seed * 13) / 19) + amp * 0.35 * Math.sin((t + seed * 5) / 5) + amp * 2.2 * (smooth(seed, t) - 0.5));
+    const DEF = [
+      ['pl-db-01', '10.48.20.11', '엣지 PL-WRO', 92, 4, 84, 29, 8, 71, 14, 20, 9],
+      ['kr-db-01', '10.10.20.11', '중앙', 62, 14, 88, 34, 10, 48, 18, 20, 1],
+      ['us-db-01', '10.64.20.11', '엣지 US-ATL', 58, 12, 79, 23, 8, 44, 14, 20, 15],
+      ['pl-was-01', '10.48.21.21', '엣지 PL-WRO', 55, 14, 69, 19, 7, 5, 3, 20, 10],
+    ];
+    const line = (f) => { let d = ''; for (let i = 0; i < N; i++) d += (i ? ' L' : 'M') + ((i / (N - 1)) * 100).toFixed(1) + ' ' + (21 - (f(T - (N - 1) + i) / 100) * 19).toFixed(1); return d; };
+    const ink = (v) => (v >= 90 ? 'color:#fca5a5' : v >= 80 ? 'color:#fbbf24' : 'color:#e6edf6');
+    const one = (x) => (Math.round(x * 10) / 10).toFixed(1);
+    const servers = DEF.map((d) => {
+      const i = d[11];
+      const fc = (t) => val(d[3], d[4], i, t); const fm = (t) => val(d[5], 1.6, i + 30, t); const fn = (t) => val(d[6], d[7], i + 60, t); const fd = (t) => val(d[8], d[9], i + 90, t);
+      const cpu = Math.round(fc(T)); const mem = Math.round(fm(T)); const net = Math.round(fn(T)); const dsk = Math.round(fd(T));
+      const worst = Math.max(cpu, mem, net, dsk);
+      const wn = worst === cpu ? 'CPU' : worst === mem ? '메모리' : worst === net ? '네트워크' : '디스크';
+      const lv = worst >= 90 ? 'crit' : worst >= 80 ? 'warn' : '';
+      const rx = (net / 100) * d[10];
+      return { name: d[0], ip: d[1], node: d[2], cpu, mem, net, dsk, cpuInk: ink(cpu), memInk: ink(mem), netInk: ink(net), dskInk: ink(dsk),
+        cpuLine: line(fc), memLine: line(fm), netLine: line(fn), dskLine: line(fd),
+        subNet: '↓' + one(rx) + ' ↑' + one(rx * 0.62) + ' Gb/s', subDisk: '쓰기 지연 ' + one(0.4 + Math.pow(dsk / 100, 2) * 40) + ' ms',
+        hasBadge: !!lv, badgeCls: 'badge ' + lv, badgeText: (lv === 'crit' ? '위험 · ' : '주의 · ') + wn, cardStyle: lv === 'crit' ? 'border-color:#7f1d1d' : '' };
+    });
+    return { servers };
+  }
+}
+</script>
+</body>
+</html>
