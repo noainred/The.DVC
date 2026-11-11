@@ -113,11 +113,13 @@ export const HW_GROUPS = Object.freeze([
   {
     key: 'id', name: '기본 식별', hint: '잠긴 값은 항상 들어갑니다',
     sum: [
-      { key: 'corp', label: '법인(vCenter)', kind: 'text', locked: true, get: (c) => c.corpName },
+      { key: 'corp', label: '법인', kind: 'text', locked: true, get: (c) => c.corpName },
       { key: 'kind', label: '구분', kind: 'text', locked: true, get: (c) => (c.kind === 'vh' ? '가상화' : '물리') },
       { key: 'name', label: '서버', kind: 'text', locked: true, get: (c) => c.name },
       { key: 'hostName', label: 'Hostname(OS)', kind: 'text', locked: true, get: (c) => c.hostName },
       { key: 'serviceTag', label: '서비스태그', kind: 'mono', locked: true, get: (c) => c.serviceTag },
+      // v2.968: 법인은 법인(DataCenter)이다 — vCenter 는 따로(가상화 서버 · vCenter 가 지정된 물리 서버만 값이 있다. 기본 묶음에는 넣지 않는다).
+      { key: 'vcenter', label: 'vCenter', kind: 'text', get: (c) => s(c.vcenterName) },
       { key: 'manufacturer', label: '제조사', kind: 'text', basic: true, get: (c) => s(c.inv?.system?.manufacturer) },
       { key: 'model', label: '모델', kind: 'text', basic: true, get: (c) => s(c.inv?.system?.model) || s(c.model) },
       { key: 'powerState', label: '전원 상태', kind: 'text', get: (c) => s(c.inv?.system?.powerState || c.inv?.powerState) },

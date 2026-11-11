@@ -154,6 +154,7 @@ function infoSheet(wb, meta, model) {
     ['범위 · 기준 시각', meta.basis],
     ['대상', meta.kindText],
     ['값의 출처', 'iDRAC(Redfish) 인벤토리 저장값. 엣지(법인 현장) 서버는 그 엣지가 올린 축약 인벤토리 — 제조사 · 어댑터/PSU/PCIe 펌웨어 · BIOS 설정 · iDRAC 관리 · 라이선스는 비어 있습니다. 내려받을 때 장비에 다시 접속하지 않습니다 — ‘인벤토리 시각’ 이 그 값을 읽은 때입니다.'],
+    ['법인', '서버 분석 화면과 같은 법인(DataCenter)입니다 — 스캔 등록 서버는 등록된 법인, 그 밖은 그 서버의 vCenter 에 할당된 법인. 법인 할당이 없는 vCenter 의 서버는 vCenter 이름으로 따로 묶고, 둘 다 없으면 ‘미지정’ 입니다.'],
     ['구분', '통합 서버 인벤토리의 판정 그대로 — iDRAC/OME 물리 서버가 vCenter ESXi 호스트로 확인되면 가상화, 아니면 물리(베어메탈). 수동 분류 포함, ‘제외’ 분류는 빠집니다.'],
     ['가상화 서버', 'iDRAC 받침이 있는 호스트만 부품 값이 채워집니다. 없으면 vCenter 가 아는 모델 · 코어 · 메모리만 넣고 비고에 적습니다.'],
     ['Hostname(OS)', 'iDRAC 이 보고하는 OS 호스트 이름. 보고하지 않으면 빈 칸 + 비고 ‘Hostname 미보고’. ‘서버’ 열은 포탈에 등록된 이름입니다.'],
@@ -183,7 +184,7 @@ function specSheet(wb, name, sp) {
   ws.getCell('A1').font = { bold: true, size: 16, color: { argb: PAL.title } };
   ws.getCell('H1').value = { text: '← 목차', hyperlink: sheetLink(TOC_SHEET) };
   ws.getCell('H1').font = { color: { argb: 'FF1D4ED8' }, underline: true };
-  const band = [['법인(vCenter)', sp.head.corpName], ['구분', sp.head.kind], ['모델 · 서비스태그', [sp.head.model, sp.head.serviceTag].filter(Boolean).join(' · ')], ['인벤토리 시각', sp.head.at || '—']];
+  const band = [['법인', sp.head.corpName], ['구분', sp.head.kind], ['모델 · 서비스태그', [sp.head.model, sp.head.serviceTag].filter(Boolean).join(' · ')], ['인벤토리 시각', sp.head.at || '—']];
   const r2 = ws.getRow(2); const r3 = ws.getRow(3);
   band.forEach(([k, v], i) => {
     const c = i * 2 + 1;
@@ -242,7 +243,7 @@ export async function buildHwWorkbook(model, meta) {
   infoSheet(wb, meta, model);
   if (Array.isArray(model.specs) && model.specs.length) {
     const toc = wb.addWorksheet(TOC_SHEET, { views: [{ state: 'frozen', ySplit: 1, xSplit: 0 }], pageSetup: { ...PRINT_PORTRAIT, printTitlesRow: '1:1' } });
-    const tcols = [{ label: '법인(vCenter)', kind: 'text' }, { label: '구분', kind: 'text' }, { label: '서버(시트로 이동)', kind: 'text' }, { label: '서비스태그', kind: 'mono' }, { label: '모델', kind: 'text' }, { label: '비고', kind: 'text' }];
+    const tcols = [{ label: '법인', kind: 'text' }, { label: '구분', kind: 'text' }, { label: '서버(시트로 이동)', kind: 'text' }, { label: '서비스태그', kind: 'mono' }, { label: '모델', kind: 'text' }, { label: '비고', kind: 'text' }];
     toc.columns = [{ width: 28 }, { width: 18 }, { width: 30 }, { width: 16 }, { width: 30 }, { width: 50 }];
     headRow(toc, 1, tcols);
     let at = 2;

@@ -40,6 +40,16 @@ export const PRESETS = Object.freeze([
   { key: 'basic', label: '기본' }, { key: 'hw', label: '하드웨어 전체' }, { key: 'net', label: '네트워크 · 펌웨어' }, { key: 'all', label: '모두' }, { key: 'none', label: '모두 빼기' },
 ]);
 
+/**
+ * '화면 필터대로' — 화면의 vCenter 필터(vCenter id · '__none__' · '')를 법인 id 집합으로(v2.968: 창의 법인은 법인(DataCenter)이다).
+ * 서버가 준 대응(vcCorp)에 없거나 그 법인이 목록에 없으면 null(모든 법인) — 엉뚱한 법인을 고르지 않는다.
+ */
+export function screenCorpIds(screenVc, vcCorp, corps) {
+  if (!screenVc) return null;
+  const id = screenVc === UNASSIGNED ? UNASSIGNED : (vcCorp && typeof vcCorp === 'object' ? vcCorp[screenVc] : '');
+  return id && (corps || []).some((c) => c.id === id) ? new Set([id]) : null;
+}
+
 /** 법인 칩의 대수(대상에 따라). */
 export const corpCount = (c, kind) => (kind === 'bm' ? c.bm : kind === 'vh' ? c.vh : c.bm + c.vh) || 0;
 

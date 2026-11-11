@@ -1455,5 +1455,11 @@
     F2 ZIP 항목 이름은 `render.js uniqueNames`(`~2` — util/zip.js 는 중복이면 던진다) · F3 개수 · 합은 `collections.<키>==='failed'` 면 null(redfish.js 는 배열을 먼저 [] 로 만든다 —
     NIC 은 표식이 없어 빈 배열도 null) · F4 맨 위 칸 이름에서 '합계 제외' 를 뺐다(받침 없는 가상화 호스트는 vCenter 값으로 더해진다) · F5 서버 안의 합은 부품 하나라도 못 읽으면 null,
     서버 사이의 합(띠 · 맨 위 칸)은 '(값 있는 M/N대)' · F6 모델 · CSV 조립에 시간 기준 양보 · F7 게이트를 실제 호출로 고정(operator · viewer · 범위 계정 · 데모 403 · 409).
+  - **v2.968 — 법인 = 법인(DataCenter)**(사용자 신고 2026-11-11: 서버 분석 › 상태 보드는 베어메탈 503대가 법인으로 나뉘는데 내보내기 창의 법인 칩은 전부 0대):
+    v2.967 은 법인을 통합 서버 인벤토리 행의 **vCenter id** 로 나눴다 — 물리 전용 서버는 vCenter 가 없고(법인에 vCenter 가 둘이면 '법인의 vCenter 가 하나뿐' 규칙도 닿지 않는다)
+    법인(DataCenter)으로만 귀속돼 있어 전부 '미지정' 이 됐다. 이제 `insights/hwExport/corp.js` 가 **서버 분석과 같은 목록**(`analysisServersWithRemote`)에서
+    `datacenterId || assign[vCenter]` 색인을 만들어 행 → 법인을 정한다(판정 복제 금지). 가상화 호스트는 자기 vCenter 의 법인, 법인 할당이 없는 vCenter 는 `vc:<id>` 묶음, 없으면 미지정.
+    법인 칩 · 파일 순서는 설정의 법인 순서. vCenter 는 따로 고르는 값(`id.sum.vcenter`). ⚠ 통합 서버 인벤토리 화면의 표 · 법인 필터는 여전히 vCenter 기준이다(이번에 바꾸지 않음).
+    새 '법인별' 화면 · 내보내기를 만들 때 **법인 축이 vCenter 인지 DataCenter 인지 먼저 정할 것** — 물리 서버가 끼면 DataCenter 다. 회귀 `server/test/hwExportCorp2968.test.js`.
   - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
 

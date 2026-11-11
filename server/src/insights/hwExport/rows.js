@@ -65,25 +65,30 @@ function noInvReason(row, kind) {
   return '인벤토리를 아직 읽지 못했습니다';
 }
 
-/** 고른 법인 집합 → 판정 함수. 빈 집합·null 이면 전부. */
+/** 고른 법인 집합 → 판정 함수(법인 id — 미지정은 ''). null 이면 전부 · 빈 집합이면 없음. */
 function corpFilter(corps) {
   if (!corps) return () => true;
   const set = new Set([...corps].map((c) => t(c)));
   if (!set.size) return () => false;
-  return (vcId) => set.has(t(vcId) || UNASSIGNED);
+  return (corpId) => set.has(t(corpId) || UNASSIGNED);
 }
+/** 법인 판정을 주지 않았을 때(테스트 · 단독 사용)의 기본 — 행의 vCenter 를 법인으로 본다. 라우트는 corp.js makeCorpOf(법인 = DataCenter)를 준다. */
+const corpByVcenter = (row) => ({ id: t(row?.vcenterId), name: t(row?.vcenter) || t(row?.vcenterId) || '미지정' });
 
 /**
- * 대상 서버(ctx) 목록 — 법인 이름 → 구분(물리 먼저) → 서버 이름 순.
+ * 대상 서버(ctx) 목록 — 법인(corpRank 가 있으면 그 순서, 없으면 이름) → 구분(물리 먼저) → 서버 이름 순.
  * @param {{bareMetal:object[], virtualizationHosts:object[]}} fleet
- * @param {{kind:'bm'|'vh'|'both', corps?:Set<string>|string[]|null, invOf:Function, match?:(v:string)=>boolean}} o
+ * @param {{kind:'bm'|'vh'|'both', corps?:Set<string>|string[]|null, invOf:Function, match?:(v:string)=>boolean,
+ *          corpOf?:(row:object, kind:string)=>{id:string,name:string}, corpRank?:Map<string,number>}} o
  */
-export function selectServers(fleet, { kind = 'bm', corps = null, invOf, match = null } = {}) {
+export function selectServers(fleet, { kind = 'bm', corps = null, invOf, match = null, corpOf = corpByVcenter, corpRank = null } = {}) {
   const inCorp = corpFilter(corps);
   const mask = (v) => (match && v && match(v) ? '(주소 가림)' : v);
   const out = [];
   const add = (row, k) => {
-    if (!row || typeof row !== 'object' || !inCorp(row.vcenterId)) return;
+    if (!row || typeof row !== 'object') return;
+    const corp = corpOf(row, k) || { id: '', name: '미지정' };
+    if (!inCorp(corp.id)) return;
     const { inv, via } = k === 'vh' && !row.idracBacked ? { inv: null, via: '' } : invOf(row);
     const hn = t(inv?.system?.hostName);
     const vc = k === 'vh' ? { cores: numOrNull(row.cpuCores), memGiB: numOrNull(row.memGB) } : null;
@@ -92,7 +97,7 @@ export function selectServers(fleet, { kind = 'bm', corps = null, invOf, match =
     else if (!hn) notes.push('Hostname 미보고');
     if (inv && via === 'remote') notes.push('엣지 축약 인벤토리(일부 값 없음)');
     out.push({
-      corpId: t(row.vcenterId), corpName: t(row.vcenter) || (t(row.vcenterId) ? t(row.vcenterId) : '미지정'),
+      corpId: t(corp.id), corpName: t(corp.name) || t(corp.id) || '미지정', vcenterName: t(row.vcenter) || t(row.vcenterId),
       kind: k, name: mask(t(row.name)), hostName: mask(hn), serviceTag: t(row.serviceTag), model: t(row.model),
       inv, vc, via, sourceText: sourceTextOf(row, k, via), note: notes.join(' · '),
     });
@@ -100,7 +105,8 @@ export function selectServers(fleet, { kind = 'bm', corps = null, invOf, match =
   if (kind === 'bm' || kind === 'both') for (const b of fleet?.bareMetal || []) add(b, 'bm');
   if (kind === 'vh' || kind === 'both') for (const h of fleet?.virtualizationHosts || []) add(h, 'vh');
   const unassignedLast = (c) => (c.corpId ? 0 : 1);
-  out.sort((a, b) => unassignedLast(a) - unassignedLast(b) || a.corpName.localeCompare(b.corpName) || (a.kind === b.kind ? 0 : a.kind === 'bm' ? -1 : 1) || a.name.localeCompare(b.name));
+  const rank = (c) => (corpRank && corpRank.has(c.corpId) ? corpRank.get(c.corpId) : Number.MAX_SAFE_INTEGER);
+  out.sort((a, b) => unassignedLast(a) - unassignedLast(b) || rank(a) - rank(b) || a.corpName.localeCompare(b.corpName) || a.corpId.localeCompare(b.corpId) || (a.kind === b.kind ? 0 : a.kind === 'bm' ? -1 : 1) || a.name.localeCompare(b.name));
   return out;
 }
 
@@ -135,7 +141,7 @@ export async function buildHwModel(servers, fields, { admin = false, spec = fals
     }
     details.push({
       key: g.key, sheet: g.sheet, file: g.file,
-      cols: [{ label: '법인(vCenter)', kind: 'text' }, { label: '서버', kind: 'text' }, { label: '서비스태그', kind: 'mono' }, ...cols.map((f) => ({ label: f.label, kind: f.kind }))],
+      cols: [{ label: '법인', kind: 'text' }, { label: '서버', kind: 'text' }, { label: '서비스태그', kind: 'mono' }, ...cols.map((f) => ({ label: f.label, kind: f.kind }))],
       rows,
     });
   }
@@ -194,7 +200,7 @@ export function specOf(c, admin = false) {
   const COLL = { cpu: 'cpus', mem: 'memoryDimms', disk: 'disks', ctrl: 'storageControllers', gpu: 'gpus', psu: 'psus', pcie: 'pcie' };
   for (const g of HW_GROUPS) {
     if (g.key === 'id') {
-      sections.push({ title: '기본 식별', kind: 'kv', rows: sumKv(g, [['법인(vCenter)', c.corpName], ['서버(등록 이름)', c.name], ['Hostname(OS)', c.hostName || null], ['서비스태그', c.serviceTag || null]]) });
+      sections.push({ title: '기본 식별', kind: 'kv', rows: sumKv(g, [['법인', c.corpName], ['vCenter', c.vcenterName || null], ['서버(등록 이름)', c.name], ['Hostname(OS)', c.hostName || null], ['서비스태그', c.serviceTag || null]]) });
       continue;
     }
     const sumRows = sumKv(g);
