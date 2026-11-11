@@ -25,7 +25,14 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
 .tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #1f2a40}
 .tabs a{display:inline-flex;align-items:center;height:40px;padding:0 14px;color:#8b9bb4;text-decoration:none;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs a.on{color:#e6edf6;font-weight:600;border-bottom-color:#3b82f6}
+.tbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px}
+.tbar input[type=range]{flex:1 1 220px;min-width:120px;height:20px;margin:0;accent-color:#3b82f6}
+.tbar .cap{flex:1 1 100%;font-size:12px;color:#8b9bb4}
+.btn[disabled]{opacity:.45;cursor:default}
+.btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
 .lbl{font-size:12px;color:#8b9bb4;min-width:34px}
+.io{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;color:#8b9bb4;margin-left:5px}
+.seg button.on .io{color:#c3cede}
 .pin{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 6px 0 10px;border:1px solid #243049;border-radius:15px;background:#0f1626;font-size:12.5px}
 .pin i{display:inline-block;width:10px;height:10px;border-radius:50%}
 .pin button{width:22px;height:22px;border:0;border-radius:50%;background:transparent;color:#8b9bb4;font:inherit;font-size:14px;line-height:1;cursor:pointer}
@@ -68,8 +75,10 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
   <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
     <div class="row"><span class="lbl">지표</span>
       <div class="seg" role="group" aria-label="지표"><button type="button">CPU</button><button type="button">메모리</button><button type="button">네트워크</button><button type="button" class="on">디스크</button></div>
-      <span class="lbl" style="margin-left:10px">항목</span>
-      <div class="seg" role="group" aria-label="디스크 항목"><button type="button">읽기 MB/s</button><button type="button">쓰기 MB/s</button><button type="button">읽기 IOPS</button><button type="button">쓰기 IOPS</button><button type="button">읽기 지연</button><button type="button" class="on">쓰기 지연</button><button type="button">대기열</button><button type="button">사용률</button></div>
+      <span class="dim" style="font-size:12px">디스크 항목은 iostat -x -m 의 13개 열 그대로입니다</span>
+    </div>
+    <div class="row" style="align-items:flex-start"><span class="lbl" style="padding-top:8px">항목</span>
+      <div class="seg" role="group" aria-label="디스크 항목" style="flex:1 1 300px"><button type="button">읽기 횟수<span class="io">r/s</span></button><button type="button">쓰기 횟수<span class="io">w/s</span></button><button type="button">읽기량<span class="io">rMB/s</span></button><button type="button">쓰기량<span class="io">wMB/s</span></button><button type="button">읽기 지연<span class="io">r_await</span></button><button type="button" class="on">쓰기 지연<span class="io">w_await</span></button><button type="button">지연<span class="io">await</span></button><button type="button">대기열<span class="io">avgqu-sz</span></button><button type="button">요청 크기<span class="io">avgrq-sz</span></button><button type="button">서비스 시간<span class="io">svctm</span></button><button type="button">사용률<span class="io">%util</span></button><button type="button">읽기 병합<span class="io">rrqm/s</span></button><button type="button">쓰기 병합<span class="io">wrqm/s</span></button></div>
     </div>
     <div class="row"><span class="lbl">범위</span>
       <div class="seg" role="group" aria-label="디스크 범위"><button type="button" class="on">전체 디스크</button><button type="button">같은 마운트 지점</button><button type="button">장치 지정</button></div>
@@ -81,11 +90,21 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
     </div>
   </div>
 
+  <div class="card tbar">
+    <span class="dim" style="font-size:12px">구간</span>
+    <div class="seg" role="group" aria-label="차트 구간"><button type="button">1분</button><button type="button" class="on">5분</button><button type="button">10분</button><button type="button">30분</button></div>
+    <button type="button" class="btn">◀ 이전 5분</button>
+    <input type="range" min="0" max="11" value="11" aria-label="구간 이동 — 오른쪽 끝이 최신">
+    <button type="button" class="btn" disabled="disabled">다음 5분 ▶</button>
+    <button type="button" class="btn on">최신</button>
+    <span class="cap num">최근 구간 · 21:44:38 ~ 21:49:38 · 뒤로 11칸까지 — 포탈 메모리에 60분 보관 · 이 띠 하나가 이 화면의 모든 차트를 함께 옮깁니다</span>
+  </div>
+
   <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:stretch">
     <div class="card" style="flex:2.15 1 560px;padding:14px 16px 10px;display:flex;flex-direction:column;gap:8px">
       <div class="row" style="justify-content:space-between">
-        <h2 class="h3">디스크 쓰기 지연 — 전체 디스크 · 최근 5분</h2>
-        <div class="row"><span class="dim" style="font-size:12px">단위 ms · 요청 1건이 끝나기까지(대기 포함)</span><button type="button" class="btn">표로 보기</button><button type="button" class="btn">CSV</button></div>
+        <h2 class="h3">디스크 쓰기 지연(w_await) — 전체 디스크 · 최근 5분</h2>
+        <div class="row"><span class="dim" style="font-size:12px">단위 ms</span><span class="lbl" style="min-width:0">눈금</span><div class="seg" role="group" aria-label="세로축 눈금"><button type="button" class="on">선형</button><button type="button">로그</button></div><button type="button" class="btn">표로 보기</button><button type="button" class="btn">CSV</button></div>
       </div>
       <div style="position:relative">
         <svg viewBox="0 0 900 560" role="img" aria-label="서버 20대의 디스크 쓰기 지연 추이. 고정한 4대는 색 선, 나머지는 회색 선" style="display:block;width:100%;height:auto">
@@ -155,12 +174,13 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
   </div>
 
   <div class="dim" style="font-size:12px;display:flex;flex-direction:column;gap:3px">
-    <span>읽기·쓰기 지연 = 그 구간에 읽기(쓰기)에 걸린 시간(ms) ÷ 끝난 요청 수 — iostat 의 r_await · w_await 와 같은 계산입니다. 대기열 = avgqu-sz, 사용률 = %util.</span>
+    <span>디스크 항목 13개는 iostat -x -m 과 같은 이름 · 같은 식입니다. ‘표로 보기’ 는 서버마다 한 줄씩 13개 열을 iostat 화면처럼 보여 줍니다(범위가 ‘장치 지정’ 이면 그 장치의 줄).</span>
+    <span>세로축은 값에 맞춰 스스로 잡습니다. 지연이 수 ms 인 서버와 수천 ms 인 서버가 섞이면 ‘로그’ 눈금으로 바꿔 함께 봅니다. 20대 × 시간 띠의 색 눈금도 같은 범위를 따릅니다.</span>
     <span>CPU · 메모리 · 네트워크도 같은 화면에서 지표만 바꿔 봅니다. 네트워크는 항목(수신 · 송신 · 사용률)과 범위(본딩 인터페이스 · 물리 인터페이스 지정)를 고릅니다.</span>
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1491}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1693}}'>
 class Component extends DCLogic {
   renderVals() {
     const N = 150; const T = 1000;

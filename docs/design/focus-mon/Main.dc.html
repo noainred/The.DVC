@@ -30,6 +30,11 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
 .badge.warn{background:rgba(245,158,11,.16);color:#fbbf24}
 .badge.crit{background:rgba(239,68,68,.18);color:#fca5a5}
 .badge.off{background:rgba(139,155,180,.16);color:#b6c2d6}
+.tbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px}
+.tbar input[type=range]{flex:1 1 220px;min-width:120px;height:20px;margin:0;accent-color:#3b82f6}
+.tbar .cap{flex:1 1 100%;font-size:12px;color:#8b9bb4}
+.btn[disabled]{opacity:.45;cursor:default}
+.btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
 .kpi{padding:14px 16px;display:flex;flex-direction:column;gap:2px}
 .kpi .l{font-size:12px;color:#8b9bb4}
 .kpi .v{font-size:26px;font-weight:600;letter-spacing:-.01em;line-height:1.2}
@@ -91,11 +96,19 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
         <sc-for list="{{ nodes }}" as="o" hint-placeholder-count="4"><button type="button" class="{{ o.cls }}" onClick="{{ o.pick }}">{{ o.label }}</button></sc-for>
       </div>
     </div>
-    <div class="row">
-      <span class="dim" style="font-size:12px">구간</span>
-      <div class="seg" role="group" aria-label="차트 구간"><button type="button">1분</button><button type="button" class="on">5분</button><button type="button">15분</button><button type="button">60분</button></div>
-      <span class="dim" style="font-size:12px">세로축 0~100% 공통</span>
+    <span class="dim" style="font-size:12px">세로축 0~100% 공통 · 숫자는 구간 끝의 값</span>
+  </div>
+
+  <div class="card tbar">
+    <span class="dim" style="font-size:12px">구간</span>
+    <div class="seg" role="group" aria-label="차트 구간">
+      <sc-for list="{{ wins }}" as="o" hint-placeholder-count="4"><button type="button" class="{{ o.cls }}" onClick="{{ o.pick }}">{{ o.label }}</button></sc-for>
     </div>
+    <button type="button" class="btn" disabled="{{ prevDis }}" onClick="{{ goPrev }}">{{ prevLabel }}</button>
+    <input type="range" min="0" max="{{ maxOff }}" value="{{ slideVal }}" onChange="{{ onSlide }}" aria-label="구간 이동 — 오른쪽 끝이 최신">
+    <button type="button" class="btn" disabled="{{ nextDis }}" onClick="{{ goNext }}">{{ nextLabel }}</button>
+    <button type="button" class="{{ latestCls }}" onClick="{{ goLatest }}">최신</button>
+    <span class="cap num">{{ winCap }}</span>
   </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));gap:12px">
@@ -127,9 +140,9 @@ a{color:#7dd3fc}a:hover{color:#bae6fd}
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"live":{"editor":"boolean","default":true},"$preview":{"width":1440,"height":1304}}'>
+<script type="text/x-dc" data-dc-script data-props='{"live":{"editor":"boolean","default":true},"$preview":{"width":1440,"height":1404}}'>
 class Component extends DCLogic {
-  constructor(p) { super(p); this.state = { tick: 0, paused: false, sort: 'cpu', node: 'all' }; }
+  constructor(p) { super(p); this.state = { tick: 0, paused: false, sort: 'cpu', node: 'all', win: 5, off: 0, frozen: 0 }; }
   componentDidMount() {
     this._timer = setInterval(() => {
       try {
@@ -141,8 +154,13 @@ class Component extends DCLogic {
   componentWillUnmount() { clearInterval(this._timer); }
   renderVals() {
     const S = this.state;
-    const N = 150;
-    const T = 1000 + S.tick;
+    // 구간(분) · 뒤로 간 칸 수. 표본은 2초마다라 1분 = 30점. 차트는 최대 150점으로 줄여 그린다.
+    const W = S.win; const per = W * 30;
+    const N = Math.min(150, per); const step = per / N;
+    const maxOff = Math.floor(60 / W) - 1;
+    const off = Math.min(S.off, maxOff);
+    const baseTick = off > 0 ? S.frozen : S.tick;
+    const T = 1000 + baseTick - off * per;
     const frac = (x) => x - Math.floor(x);
     const hash = (a, b) => frac(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
     const smooth = (a, t) => (hash(a, t) + hash(a, t - 1) + hash(a, t - 2)) / 3;
@@ -175,7 +193,7 @@ class Component extends DCLogic {
       let d = '';
       for (let i = 0; i < N; i++) {
         const x = (i / (N - 1)) * 100;
-        const y = 23 - (f(T - (N - 1) + i) / 100) * 21;
+        const y = 23 - (f(T - (N - 1 - i) * step) / 100) * 21;
         d += (i ? ' L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1);
       }
       return d;
@@ -229,10 +247,22 @@ class Component extends DCLogic {
       .map((o) => ({ label: o[1], cls: S.sort === o[0] ? 'on' : '', pick: () => this.setState({ sort: o[0] }) }));
     const nodes = [['all', '전체 ' + counts.all], ['중앙', '중앙 ' + counts['중앙']], ['PL-WRO', 'PL-WRO ' + counts['PL-WRO']], ['US-ATL', 'US-ATL ' + counts['US-ATL']]]
       .map((o) => ({ label: o[1], cls: S.node === o[0] ? 'on' : '', pick: () => this.setState({ node: o[0] }) }));
+    const hms = (sec) => { const h = Math.floor(sec / 3600) % 24; const mi = Math.floor(sec / 60) % 60; const s2 = sec % 60; return (h < 10 ? '0' : '') + h + ':' + (mi < 10 ? '0' : '') + mi + ':' + (s2 < 10 ? '0' : '') + s2; };
+    const endSec = 21 * 3600 + 49 * 60 + 38 + baseTick * 2 - off * W * 60;
+    const range = hms(endSec - W * 60) + ' ~ ' + hms(endSec);
+    const wins = [1, 5, 10, 30].map((w) => ({ label: w + '분', cls: S.win === w ? 'on' : '', pick: () => this.setState({ win: w, off: 0 }) }));
+    const go = (n) => this.setState({ off: Math.max(0, Math.min(maxOff, n)), frozen: off === 0 ? S.tick : S.frozen });
     const left = Math.max(0, 760 - S.tick * 2);
     const mm = Math.floor(left / 60); const ss = left % 60;
     return {
-      servers: rows, k, sorts, nodes,
+      servers: rows, k, sorts, nodes, wins, maxOff, slideVal: maxOff - off,
+      prevLabel: '◀ 이전 ' + W + '분', nextLabel: '다음 ' + W + '분 ▶', prevDis: off >= maxOff, nextDis: off <= 0,
+      latestCls: off === 0 ? 'btn on' : 'btn',
+      goPrev: () => go(off + 1), goNext: () => go(off - 1), goLatest: () => go(0),
+      onSlide: (e) => go(maxOff - Number(e && e.target ? e.target.value : maxOff)),
+      winCap: off === 0
+        ? '최근 구간 · ' + range + ' · 뒤로 ' + maxOff + '칸까지 — 포탈 메모리에 60분 보관 · 이 띠 하나가 이 화면의 모든 차트를 함께 옮깁니다'
+        : '과거 구간 · ' + range + ' · 뒤로 ' + off + '칸째(최대 ' + maxOff + '칸) · 이 구간은 갱신하지 않습니다 — 수집은 계속됩니다',
       remain: (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss,
       liveText: S.paused ? '화면 멈춤' : '수집 중',
       liveDot: 'display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (S.paused ? '#8b9bb4' : '#22c55e'),

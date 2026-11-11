@@ -26,6 +26,11 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
 .tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #1f2a40}
 .tabs a{display:inline-flex;align-items:center;height:40px;padding:0 14px;color:#8b9bb4;text-decoration:none;font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs a.on{color:#e6edf6;font-weight:600;border-bottom-color:#3b82f6}
+.tbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px}
+.tbar input[type=range]{flex:1 1 220px;min-width:120px;height:20px;margin:0;accent-color:#3b82f6}
+.tbar .cap{flex:1 1 100%;font-size:12px;color:#8b9bb4}
+.btn[disabled]{opacity:.45;cursor:default}
+.btn.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
 .badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap}
 .badge.crit{background:rgba(239,68,68,.18);color:#fca5a5}
 .h3{margin:0;font-size:14.5px;font-weight:600}
@@ -42,7 +47,15 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
 .tr.sum{background:#0f1626;font-weight:600}
 .r{text-align:right}
 .net{grid-template-columns:minmax(150px,1.1fr) minmax(190px,1.5fr) 64px 150px 84px 84px 84px minmax(130px,1fr);min-width:1040px}
-.dsk{grid-template-columns:minmax(230px,1.7fr) 96px 72px 72px 72px 72px 76px 76px 60px 132px minmax(110px,1fr);min-width:1180px}
+.dsk{grid-template-columns:minmax(214px,1.5fr) 82px repeat(12,minmax(58px,.55fr)) 100px;min-width:1250px}
+.th.two{height:46px}
+.hh{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25}
+.hh b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:500;font-size:11.5px;color:#c3cede}
+.hh small{font-size:11px;color:#8b9bb4}
+.hh.l{align-items:flex-start}
+.dv{display:flex;align-items:center;gap:8px;min-width:0}
+.dnote{padding:6px 12px 8px 32px;font-size:12px;color:#c3cede;background:rgba(239,68,68,.07);border-bottom:1px solid #1a2236;min-width:1250px;box-sizing:border-box}
+.badge.warn{background:rgba(245,158,11,.16);color:#fbbf24}
 .meter{display:flex;align-items:center;gap:8px}
 .meter .t{flex:1;height:8px;border-radius:4px;background:#1b2a48;overflow:hidden}
 .meter .f{display:block;height:8px;border-radius:4px;background:#3987e5}
@@ -76,6 +89,16 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
     <a href="Process.dc.html">프로세스</a>
     <a href="Targets.dc.html">대상 · 키</a>
   </nav>
+
+  <div class="card tbar">
+    <span class="dim" style="font-size:12px">구간</span>
+    <div class="seg" role="group" aria-label="차트 구간"><button type="button">1분</button><button type="button" class="on">5분</button><button type="button">10분</button><button type="button">30분</button></div>
+    <button type="button" class="btn">◀ 이전 5분</button>
+    <input type="range" min="0" max="11" value="11" aria-label="구간 이동 — 오른쪽 끝이 최신">
+    <button type="button" class="btn" disabled="disabled">다음 5분 ▶</button>
+    <button type="button" class="btn on">최신</button>
+    <span class="cap num">최근 구간 · 21:44:38 ~ 21:49:38 · 뒤로 11칸까지 — 포탈 메모리에 60분 보관 · 이 띠 하나가 이 화면의 모든 차트를 함께 옮깁니다</span>
+  </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:12px">
     <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
@@ -171,28 +194,40 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
 
   <div class="card" style="padding:14px 0 14px;display:flex;flex-direction:column;gap:10px">
     <div class="row" style="justify-content:space-between;padding:0 16px">
-      <h2 class="h3">디스크 — 물리 4개 · 파티션 5개 · LVM 볼륨 5개</h2>
+      <h2 class="h3">디스크 — 물리 5개 · 파티션 6개 · LVM 볼륨 5개</h2>
       <div class="row">
         <span class="dim" style="font-size:12px">행을 누르면 아래 차트가 그 장치로 바뀝니다</span>
         <div class="seg" role="group" aria-label="디스크 범위"><button type="button" class="on">트리</button><button type="button">물리 디스크만</button><button type="button">파티션 · 볼륨만</button></div>
+        <div class="seg" role="group" aria-label="표의 열"><button type="button">요약 열</button><button type="button" class="on">iostat 전체 열</button></div>
       </div>
     </div>
     <div class="tw">
-      <div class="th dsk"><span>장치</span><span>마운트</span><span class="r">읽기 IOPS</span><span class="r">쓰기 IOPS</span><span class="r">읽기 MB/s</span><span class="r">쓰기 MB/s</span><span class="r">읽기 지연</span><span class="r">쓰기 지연</span><span class="r">대기열</span><span>사용률</span><span>쓰기 지연 5분</span></div>
-      <sc-for list="{{ disks }}" as="d" hint-placeholder-count="15">
+      <div class="th dsk two"><span>장치</span><span>마운트</span>
+        <span class="hh"><b>rrqm/s</b><small>읽기 병합</small></span><span class="hh"><b>wrqm/s</b><small>쓰기 병합</small></span>
+        <span class="hh"><b>r/s</b><small>읽기 횟수</small></span><span class="hh"><b>w/s</b><small>쓰기 횟수</small></span>
+        <span class="hh"><b>rMB/s</b><small>읽기량</small></span><span class="hh"><b>wMB/s</b><small>쓰기량</small></span>
+        <span class="hh"><b>avgrq-sz</b><small>요청 크기</small></span><span class="hh"><b>avgqu-sz</b><small>대기열</small></span>
+        <span class="hh"><b>await</b><small>지연</small></span><span class="hh"><b>r_await</b><small>읽기 지연</small></span><span class="hh"><b>w_await</b><small>쓰기 지연</small></span>
+        <span class="hh"><b>svctm</b><small>서비스 시간</small></span><span class="hh l"><b>%util</b><small>사용률</small></span></div>
+      <sc-for list="{{ disks }}" as="d" hint-placeholder-count="17">
         <div class="{{ d.cls }}">
-          <span class="nm mono" style="{{ d.pad }}">{{ d.name }}</span>
+          <span class="dv" style="{{ d.pad }}"><span class="nm mono">{{ d.name }}</span><sc-if value="{{ d.flag }}" hint-placeholder-val="{{ false }}"><span class="{{ d.flagCls }}">{{ d.flagText }}</span></sc-if></span>
           <span class="nm mono dim">{{ d.mnt }}</span>
+          <span class="r num">{{ d.rrqm }}</span>
+          <span class="r num">{{ d.wrqm }}</span>
           <span class="r num">{{ d.ri }}</span>
           <span class="r num">{{ d.wi }}</span>
           <span class="r num">{{ d.rm }}</span>
           <span class="r num">{{ d.wm }}</span>
-          <span class="r num">{{ d.ra }}</span>
+          <span class="r num">{{ d.rq }}</span>
+          <span class="r num" style="{{ d.qInk }}">{{ d.q }}</span>
+          <span class="r num" style="{{ d.awInk }}">{{ d.aw }}</span>
+          <span class="r num" style="{{ d.raInk }}">{{ d.ra }}</span>
           <span class="r num" style="{{ d.waInk }}">{{ d.wa }}</span>
-          <span class="r num">{{ d.q }}</span>
+          <span class="r num">{{ d.sv }}</span>
           <span class="meter"><span class="t"><span class="f" style="{{ d.fill }}"></span></span><span class="p num">{{ d.util }}</span></span>
-          <svg class="sp" viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"><path d="{{ d.line }}" fill="none" stroke="#d95926" stroke-width="1.5" vector-effect="non-scaling-stroke"></path></svg>
         </div>
+        <sc-if value="{{ d.hasNote }}" hint-placeholder-val="{{ false }}"><div class="dnote">{{ d.note }}</div></sc-if>
       </sc-for>
     </div>
 
@@ -228,8 +263,9 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
       </div>
     </div>
     <div class="dim" style="font-size:12px;padding:0 16px;display:flex;flex-direction:column;gap:3px">
-      <span>‘전체 디스크’ 는 물리 디스크(sd*)만 더합니다 — 파티션과 LVM 볼륨은 같은 입출력을 다시 보는 것이라 합계에 넣지 않습니다. 지연은 요청 수로 가중한 평균, 사용률은 가장 바쁜 디스크 값입니다.</span>
-      <span>값은 /proc/diskstats 누적값의 2초 차이로 계산합니다(iostat -x 와 같은 식). 그 2초에 요청이 없으면 지연은 ‘—’ 입니다.</span>
+      <span>열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 2초 차이). 터미널의 iostat 값과 나란히 대조할 수 있습니다. 단위: 지연 · 서비스 시간 ms, 요청 크기 섹터(512바이트).</span>
+      <span>iostat 과 다른 점 두 가지 — ① 그 2초에 끝난 요청이 없으면 지연을 0.00 이 아니라 ‘—’ 로 둡니다 ② 끝난 요청은 없는데 걸린 요청이 있으면 ‘응답 없음’ 으로 알립니다. svctm 은 sysstat 이 믿지 말라고 밝힌 값이라 참고용입니다.</span>
+      <span>‘전체 디스크’ 는 물리 디스크(sd*)만 더합니다 — 파티션과 LVM 볼륨은 같은 입출력을 다시 보는 것이라 합계에 넣지 않습니다. 지연은 요청 수로 가중한 평균, 사용률은 가장 바쁜 디스크 값입니다. dm 장치의 병합은 항상 0 입니다(병합은 아래 물리 디스크에서 일어납니다).</span>
     </div>
   </div>
 
@@ -249,7 +285,7 @@ a.btn:hover{color:#e6edf6;border-color:#3b82f6}
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2281}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2567}}'>
 class Component extends DCLogic {
   renderVals() {
     const N = 150; const T = 1000;
@@ -311,36 +347,48 @@ class Component extends DCLogic {
       };
     });
 
-    // 디스크 — [이름, 깊이, 마운트, 읽기 IOPS, 쓰기 IOPS, 읽기 MB/s, 쓰기 MB/s, 읽기 지연, 쓰기 지연, 대기열, 사용률, 종류]
+    // 디스크 — iostat -x -m 과 같은 열.
+    // [이름, 깊이, 마운트, rrqm/s, wrqm/s, r/s, w/s, rMB/s, wMB/s, r_await, w_await, %util, 종류, 대기열(직접 지정), 안내]
     const DSK = [
-      ['전체 디스크(물리 4개 합)', 0, '', 2310, 5480, 96.4, 412.7, 6.1, 18.9, 14.2, 79, 'sum'],
-      ['sda · 446 GB', 0, '', 4, 86, 0.1, 1.9, 0.9, 1.4, 0.1, 3, 'disk'],
-      ['sda1', 1, '/boot', 0, 0, 0, 0, null, null, 0, 0, ''],
-      ['sda2 · LVM(rhel)', 1, '', 4, 86, 0.1, 1.9, 0.9, 1.4, 0.1, 3, ''],
-      ['rhel-root (dm-0)', 2, '/', 2, 31, 0.1, 0.6, 0.8, 1.2, 0.0, 1, ''],
-      ['rhel-swap (dm-1)', 2, '[swap]', 0, 0, 0, 0, null, null, 0, 0, ''],
-      ['rhel-var (dm-2)', 2, '/var', 2, 55, 0.0, 1.3, 1.0, 1.5, 0.1, 2, ''],
-      ['sdb · 3.5 TB', 0, '', 1620, 3940, 71.2, 268.3, 6.8, 21.3, 11.6, 79, 'sel'],
-      ['sdb1 · LVM(oradata)', 1, '', 1620, 3940, 71.2, 268.3, 6.8, 21.3, 11.6, 79, ''],
-      ['oradata-data01 (dm-3)', 2, '/oradata', 1620, 3940, 71.2, 268.3, 6.9, 21.5, 11.6, 79, ''],
-      ['sdc · 1.7 TB', 0, '', 12, 1410, 0.4, 131.0, 2.1, 14.2, 2.4, 41, 'disk'],
-      ['sdc1 · LVM(oraarch)', 1, '', 12, 1410, 0.4, 131.0, 2.1, 14.2, 2.4, 41, ''],
-      ['oraarch-arch01 (dm-4)', 2, '/oraarch', 12, 1410, 0.4, 131.0, 2.1, 14.3, 2.4, 41, ''],
-      ['sdd · 3.5 TB', 0, '', 674, 44, 24.7, 11.5, 4.4, 3.0, 0.1, 9, 'disk'],
-      ['sdd1', 1, '/backup', 674, 44, 24.7, 11.5, 4.4, 3.0, 0.1, 9, ''],
+      ['sda · 446 GB', 0, '', 0, 1, 4, 86, 0.1, 1.9, 0.9, 1.4, 3, 'disk'],
+      ['sda1', 1, '/boot', 0, 0, 0, 0, 0, 0, null, null, 0, ''],
+      ['sda2 · LVM(rhel)', 1, '', 0, 1, 4, 86, 0.1, 1.9, 0.9, 1.4, 3, ''],
+      ['rhel-root (dm-0)', 2, '/', 0, 0, 2, 31, 0.1, 0.6, 0.8, 1.2, 1, ''],
+      ['rhel-swap (dm-1)', 2, '[swap]', 0, 0, 0, 0, 0, 0, null, null, 0, ''],
+      ['rhel-var (dm-2)', 2, '/var', 0, 0, 2, 56, 0, 1.3, 1.0, 1.5, 2, ''],
+      ['sdb · 3.5 TB', 0, '', 0, 83, 1620, 3940, 71.2, 268.3, 6.8, 21.3, 79, 'sel'],
+      ['sdb1 · LVM(oradata)', 1, '', 0, 83, 1620, 3940, 71.2, 268.3, 6.8, 21.3, 79, ''],
+      ['oradata-data01 (dm-3)', 2, '/oradata', 0, 0, 1620, 4023, 71.2, 268.3, 6.9, 21.5, 79, ''],
+      ['sdc · 1.7 TB', 0, '', 0, 0, 0, 52, 0, 7.85, null, 3076.2, 100, 'slow', 148.1, '쓰기 한 건이 끝나는 데 평균 3초가 걸립니다(대기열 148 · 사용률 100%). 이런 값이 섞이면 지연 차트는 로그 눈금으로 바꿔 봅니다.'],
+      ['sdc1 · LVM(oraarch)', 1, '', 0, 0, 0, 52, 0, 7.85, null, 3076.2, 100, '', 148.1],
+      ['oraarch-arch01 (dm-4)', 2, '/oraarch', 0, 0, 0, 52, 0, 7.85, null, 3076.2, 100, '', 148.1],
+      ['sdd · 3.5 TB', 0, '', 0, 0, 674, 44, 24.7, 11.5, 4.4, 3.0, 9, 'disk'],
+      ['sdd1', 1, '/backup', 0, 0, 674, 44, 24.7, 11.5, 4.4, 3.0, 9, ''],
+      ['sde · 1.1 TB', 0, '', 0, 0, 0, 0, 0, 0, null, null, 100, 'stuck', 2.0, '이 2초 동안 끝난 요청이 0건인데 2건이 걸려 있고 사용률이 100% 입니다. iostat 은 이때 await 를 0.00 으로 찍습니다 — 여기서는 ‘—’ 로 두고 ‘응답 없음’ 으로 알립니다.'],
+      ['sde1', 1, '/data2', 0, 0, 0, 0, 0, 0, null, null, 100, '', 2.0],
     ];
-    const disks = DSK.map((d, i) => {
-      const k = d[11];
-      const wa = d[8];
-      const seed = d[0].indexOf('sdb') === 0 || d[0].indexOf('oradata') === 0 ? 70 : d[0].indexOf('sdc') === 0 || d[0].indexOf('oraarch') === 0 ? 71 : 72 + i;
-      const vals = wa == null ? null : ser((t) => wob(wa, 0.3, seed, t));
+    const f2 = (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    const ink = (v) => (v == null ? '' : v >= 1000 ? 'color:#fca5a5;font-weight:600' : v >= 20 ? 'color:#fbbf24;font-weight:600' : '');
+    const qOf = (d) => (d[13] != null ? d[13] : (d[5] * (d[9] || 0) + d[6] * (d[10] || 0)) / 1000);
+    const phys = DSK.filter((d) => d[1] === 0);
+    const sum = (k) => phys.reduce((a, d) => a + d[k], 0);
+    const wavg = (kv, kn) => { const n = phys.reduce((a, d) => a + (d[kv] == null ? 0 : d[kn]), 0); return n ? phys.reduce((a, d) => a + (d[kv] == null ? 0 : d[kv] * d[kn]), 0) / n : null; };
+    const total = ['전체 디스크(물리 5개 합)', 0, '', sum(3), sum(4), sum(5), sum(6), sum(7), sum(8), wavg(9, 5), wavg(10, 6), Math.max.apply(null, phys.map((d) => d[11])), 'sum', phys.reduce((a, d) => a + qOf(d), 0)];
+    const disks = [total].concat(DSK).map((d) => {
+      const k = d[12]; const ios = d[5] + d[6];
+      const ra = d[5] > 0 ? d[9] : null; const wa = d[6] > 0 ? d[10] : null;
+      const aw = ios > 0 ? (d[5] * (ra || 0) + d[6] * (wa || 0)) / ios : null;
+      const q = qOf(d);
       return {
         cls: 'tr dsk' + (k === 'sum' ? ' sum' : k === 'sel' ? ' sel' : ''), name: d[0], mnt: d[2] || '',
         pad: 'padding-left:' + d[1] * 20 + 'px' + (d[1] === 0 ? ';font-weight:600' : ';color:#c3cede'),
-        ri: fmt(d[3], 0), wi: fmt(d[4], 0), rm: fmt(d[5], 1), wm: fmt(d[6], 1),
-        ra: d[7] == null ? '—' : fmt(d[7], 1) + ' ms', wa: wa == null ? '—' : fmt(wa, 1) + ' ms', waInk: wa != null && wa >= 20 ? 'color:#fbbf24;font-weight:600' : '',
-        q: fmt(d[9], 1), util: d[10] + '%', fill: 'width:' + d[10] + '%',
-        line: vals ? path(vals, 0, 100, 2, 21, 50) : '',
+        rrqm: f2(d[3]), wrqm: f2(d[4]), ri: f2(d[5]), wi: f2(d[6]), rm: f2(d[7]), wm: f2(d[8]),
+        rq: ios > 0 ? f2(((d[7] + d[8]) * 2048) / ios) : '—',
+        q: f2(q), qInk: q >= 100 ? 'color:#fca5a5;font-weight:600' : '',
+        aw: f2(aw), awInk: ink(aw), ra: f2(ra), raInk: ink(ra), wa: f2(wa), waInk: ink(wa),
+        sv: ios > 0 ? f2((d[11] * 10) / ios) : '—', util: d[11] + '%', fill: 'width:' + d[11] + '%',
+        flag: k === 'slow' || k === 'stuck', flagCls: 'badge crit', flagText: k === 'stuck' ? '응답 없음' : '지연 위험',
+        hasNote: !!d[14], note: d[14] || '',
       };
     });
     const thrR = path(ser((t) => wob(71, 0.3, 80, t)), 34, 632, 10, 176, 400);
