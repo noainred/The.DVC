@@ -127,7 +127,7 @@ export function FleetHwExportModal({ initialKind = 'bm', screenCorp = '', onClos
               </section>
 
               <section className="card gpu-alloc-export-sec">
-                <div className="muted lbl">⑥ 서버별 사양서</div>
+                <div className="muted lbl">⑤ 서버별 사양서</div>
                 <label className="gpu-alloc-export-chk">
                   <input type="checkbox" checked={xl && spec} disabled={!xl} onChange={() => setSpec((v) => !v)} />
                   <span><b>서버 한 대 = 시트 한 장</b> <span className="muted">— 그 서버의 수집된 사양 전부(식별 · CPU · 메모리 · 디스크 · 컨트롤러 · NIC 포트 · 펌웨어 · 전원 · PCIe · BIOS · iDRAC · 상태) + 목차</span></span>
@@ -138,7 +138,7 @@ export function FleetHwExportModal({ initialKind = 'bm', screenCorp = '', onClos
 
             <section className="card gpu-alloc-export-sec hwx-fields" data-hwx-fields="">
               <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-                <span className="muted lbl">⑤ 내보낼 값</span>
+                <span className="muted lbl">⑥ 내보낼 값</span>
                 <span className="hwx-note">요약 열 {s.cols}개 · 상세 {s.detGroups}종</span>
                 <span className="flex gap wrap" style={{ marginLeft: 'auto', gap: 6 }}>
                   {PRESETS.map((p) => <button key={p.key} type="button" className="qn-btn" onClick={() => setSel(presetKeys(p.key, catalog, meta.basicKeys))}>{p.label}</button>)}
