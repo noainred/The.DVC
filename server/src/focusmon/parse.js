@@ -16,6 +16,12 @@ const ORDER = Object.freeze(Object.fromEntries(SECTIONS.map((s, i) => [s, i])));
 /** 구획별 줄 수 상한(스크립트의 head -n 과 같거나 조금 크다). */
 export const SECTION_MAX_LINES = Object.freeze({ STAT: 1100, LOAD: 4, MEM: 128, NET: 258, DISK: 1024, NETTOPO: 256, BLK: 512, PS: 20000, PROC: 20000 });
 export const LINE_MAX = 4096;
+/** 프레임 하나가 붙잡을 수 있는 글자 수 상한(원래 줄 길이로 센다). 정상 프레임은 프로세스 2만 개여도 약 2MB —
+ *  줄 수 상한 합(약 4만 3천 줄) × 줄 길이 상한이면 대상 1대가 수백 MB 를 붙잡을 수 있었다(2026-11-11 반증 4번). 넘으면 그 프레임을 버린다. */
+export const FRAME_MAX_CHARS = 4 * 2 ** 20;
+/** 원격에서 온 이름을 객체 키로 쓰기 전에 — 프로토타입 이름은 받지 않는다(lsblk KNAME="__proto__" 로 Object.prototype 오염 — 반증 2번). */
+const RESERVED_KEY = /^(?:__proto__|constructor|prototype)$/;
+export const safeKey = (k) => typeof k === 'string' && k.length > 0 && !RESERVED_KEY.test(k);
 const HELLO_MAX_LINES = 32;
 
 const T_RE = /^##T (\d{1,12}(?:\.\d{1,3})?) (\d{1,12})$/;
@@ -34,16 +40,17 @@ const words = (line) => String(line).trim().split(/\s+/);
 export function createFrameParser({ onHello, onFrame } = {}) {
   let mode = 'idle'; // idle | hello | frame
   let hello = null;
-  let frame = null; let cur = null; let curOrder = -1; let broken = false;
-  const st = { frames: 0, dropped: 0, stray: 0, hellos: 0 };
+  let frame = null; let cur = null; let curOrder = -1; let broken = false; let chars = 0;
+  const st = { frames: 0, dropped: 0, stray: 0, hellos: 0, oversize: 0 };
 
   const startFrame = (up, epoch) => {
     if (mode === 'frame' && frame) st.dropped += 1; // END 없이 다음 프레임 — 앞 것은 버린다
-    frame = { up, epoch, sec: {}, truncated: [] }; cur = null; curOrder = -1; broken = false; mode = 'frame';
+    frame = { up, epoch, sec: Object.create(null), truncated: [] }; cur = null; curOrder = -1; broken = false; chars = 0; mode = 'frame';
   };
 
   function push(raw) {
-    const line = String(raw ?? '').slice(0, LINE_MAX);
+    const rawStr = String(raw ?? '');
+    const line = rawStr.slice(0, LINE_MAX);
     if (line === '##HELLO 1') { if (mode === 'frame') st.dropped += 1; mode = 'hello'; hello = []; frame = null; return; }
     const tm = line.startsWith('##T ') ? T_RE.exec(line) : null;
     if (tm) { startFrame(Number(tm[1]), Number(tm[2])); return; }
@@ -66,6 +73,9 @@ export function createFrameParser({ onHello, onFrame } = {}) {
     }
     if (mode === 'hello') { if (hello.length < HELLO_MAX_LINES) hello.push(line); return; }
     if (mode === 'frame' && frame && cur) {
+      if (broken) return;
+      chars += rawStr.length;
+      if (chars > FRAME_MAX_CHARS) { broken = true; st.oversize += 1; frame.sec = Object.create(null); cur = null; return; } // 붙잡은 줄을 바로 놓는다
       const arr = frame.sec[cur];
       if (arr.length < SECTION_MAX_LINES[cur]) arr.push(line);
       else if (!frame.truncated.includes(cur)) frame.truncated.push(cur);
@@ -78,7 +88,7 @@ export function createFrameParser({ onHello, onFrame } = {}) {
 
 /** HELLO 구획 → 서버 정보. */
 export function parseHello(lines = []) {
-  const kv = {};
+  const kv = Object.create(null);
   for (const l of lines) {
     const i = l.indexOf(' ');
     const k = i > 0 ? l.slice(0, i) : l;
@@ -125,7 +135,7 @@ export function parseLoad(lines = []) {
 
 /** ##MEM → 바이트. MemAvailable 이 없으면(커널 3.14 전 — RHEL 7 은 3.10 이지만 백포트로 있다) Free+Buffers+Cached 로 되돌리고 그 사실을 남긴다. */
 export function parseMem(lines = []) {
-  const kv = {};
+  const kv = Object.create(null);
   for (const l of lines) {
     const m = /^([A-Za-z_()0-9]{1,32}):\s+(\d{1,20})(?: kB)?$/.exec(String(l).trim());
     if (m) kv[m[1]] = Number(m[2]) * 1024;
@@ -143,12 +153,12 @@ export function parseMem(lines = []) {
 
 /** ##NET(/proc/net/dev) → 인터페이스별 누적(수신 바이트 · 오류 · 드롭, 송신 바이트 · 오류 · 드롭). lo 는 뺀다. */
 export function parseNetDev(lines = []) {
-  const out = {};
+  const out = Object.create(null);
   for (const l of lines) {
     const i = l.indexOf(':');
     if (i < 1) continue;
     const name = l.slice(0, i).trim();
-    if (!name || name === 'lo' || !/^[^\s:/]{1,32}$/.test(name)) continue;
+    if (!name || name === 'lo' || !/^[^\s:/]{1,32}$/.test(name) || !safeKey(name)) continue;
     const f = words(l.slice(i + 1)).map(intOrNull);
     if (f.length < 16 || f[0] == null || f[8] == null) continue;
     out[name] = { rxB: f[0], rxErr: f[2], rxDrop: f[3], txB: f[8], txErr: f[10], txDrop: f[11] };
@@ -162,12 +172,12 @@ export function parseNetDev(lines = []) {
  * 루프 · 램 · zram · 광학 장치는 뺀다(디스크 사용률이 아니다).
  */
 export function parseDiskstats(lines = []) {
-  const out = {};
+  const out = Object.create(null);
   for (const l of lines) {
     const f = words(l);
     if (f.length < 14) continue;
     const name = f[2];
-    if (!/^[A-Za-z0-9_.!:+-]{1,64}$/.test(name) || /^(loop|ram|zram|sr|fd)\d*$/.test(name)) continue;
+    if (!/^[A-Za-z0-9_.!:+-]{1,64}$/.test(name) || !safeKey(name) || /^(loop|ram|zram|sr|fd)\d*$/.test(name)) continue;
     const v = f.slice(3, 14).map(intOrNull);
     if (v.some((x) => x == null)) continue;
     out[name] = v;
@@ -177,13 +187,13 @@ export function parseDiskstats(lines = []) {
 
 /** ##NETTOPO `i <이름> <속도|-1> <상태> <물리 0/1> <master|-> <본딩모드|-> <구성원,…|-> <active|->` */
 export function parseNetTopo(lines = []) {
-  const out = {};
+  const out = Object.create(null);
   const dash = (s) => (s && s !== '-' ? s : null);
   for (const l of lines) {
     const f = words(l);
     if (f[0] !== 'i' || f.length < 9) continue;
     const name = f[1];
-    if (!/^[^\s:/]{1,32}$/.test(name)) continue;
+    if (!/^[^\s:/]{1,32}$/.test(name) || !safeKey(name)) continue;
     const sp = /^-?\d{1,7}$/.test(f[2]) ? Number(f[2]) : null;
     out[name] = {
       speed: sp != null && sp > 0 ? sp : null, // -1 · 0 · 빈 값 = 모름(사용률을 내지 않는다)
@@ -191,7 +201,7 @@ export function parseNetTopo(lines = []) {
       phys: f[4] === '1',
       master: dash(f[5]) && /^[^\s:/]{1,32}$/.test(f[5]) ? f[5] : null,
       bondMode: dash(f[6]) && /^[a-z0-9-]{2,20}$/.test(f[6]) ? f[6] : null,
-      slaves: dash(f[7]) ? f[7].split(',').filter((x) => /^[^\s:/]{1,32}$/.test(x)).slice(0, 16) : [],
+      slaves: dash(f[7]) ? f[7].split(',').filter((x) => /^[^\s:/]{1,32}$/.test(x) && safeKey(x)).slice(0, 16) : [],
       active: dash(f[8]) && /^[^\s:/]{1,32}$/.test(f[8]) ? f[8] : null,
     };
   }
@@ -204,7 +214,7 @@ export function parseNetTopo(lines = []) {
  */
 export function parseLsblkLine(line) {
   const s = String(line).slice(0, LINE_MAX);
-  const out = {};
+  const out = Object.create(null);
   let i = 0;
   while (i < s.length) {
     while (s[i] === ' ') i += 1;
@@ -221,18 +231,18 @@ export function parseLsblkLine(line) {
 
 /** ##BLK → kname → {name, kname, parent, type, size, mount}. */
 export function parseBlk(lines = []) {
-  const out = {};
+  const out = Object.create(null);
   for (const l of lines) {
     const r = parseLsblkLine(l);
     const k = r.KNAME;
-    if (!k || !/^[A-Za-z0-9_.!:+-]{1,64}$/.test(k)) continue;
+    if (!k || !/^[A-Za-z0-9_.!:+-]{1,64}$/.test(k) || !safeKey(k)) continue;
     if (out[k]) { // 같은 장치가 여러 부모 아래 나온다(멀티패스 등) — 첫 부모를 쓰고 마운트는 비어 있지 않은 것을 쓴다
       if (!out[k].mount && r.MOUNTPOINT) out[k].mount = r.MOUNTPOINT.slice(0, 200);
       continue;
     }
     out[k] = {
       name: String(r.NAME || k).slice(0, 128), kname: k,
-      parent: r.PKNAME && /^[A-Za-z0-9_.!:+-]{1,64}$/.test(r.PKNAME) ? r.PKNAME : null,
+      parent: r.PKNAME && /^[A-Za-z0-9_.!:+-]{1,64}$/.test(r.PKNAME) && safeKey(r.PKNAME) ? r.PKNAME : null,
       type: /^[a-z0-9_-]{1,16}$/.test(r.TYPE || '') ? r.TYPE : 'other',
       size: intOrNull(r.SIZE),
       mount: (r.MOUNTPOINT || '').slice(0, 200),

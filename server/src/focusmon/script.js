@@ -19,7 +19,7 @@
  *  · **awk getline 으로 /proc 을 읽지 않는다**(mawk 가 사라진 파일에서 멈춘다 — 8b 규약). `cat … 2>/dev/null | awk` 로 읽는다.
  *  · **데이터 줄은 `##` 로 시작하지 않는다** — 인터페이스 줄은 `i ` 접두, lsblk 는 `NAME=`, /proc 줄은 공백 · 글자 · 숫자로 시작한다.
  *    표지는 파서가 정확 일치로만 받는다(parse.js).
- *  · **출력 상한** — 구획마다 `head -n`(디스크 1024 · 인터페이스 256 · lsblk 512 · ps · proc 20000). 줄 상한은 sshExec.execStream(16KB).
+ *  · **출력 상한** — 구획마다 `head -n` = 파서 상한 + 1(넘친 한 줄로 파서가 ‘잘림’ 을 안다 — 같으면 잘려도 몰랐다). 줄 상한은 collector 가 execStream 에 LINE_MAX + 64 로 준다 · 프레임 글자 상한 parse.FRAME_MAX_CHARS.
  *  · **스스로 끝난다** — 6시간치 반복 뒤 exit(채널이 끊겼는데 남은 반복문이 오래 살지 않게). 수집기가 다시 연다.
  *    채널이 닫히면 다음 echo 가 SIGPIPE 로 죽으므로 보통은 다음 주기 안에 끝난다.
  */
@@ -57,11 +57,11 @@ function build(I) {
     'n=0',
     'while [ $n -lt $MAXN ]; do',
     '  echo "##T $(cut -d" " -f1 /proc/uptime) $(date +%s)"',
-    "  echo '##STAT'; grep -E '^(cpu[0-9]* |procs_running |procs_blocked )' /proc/stat 2>/dev/null | head -n 1100",
+    "  echo '##STAT'; grep -E '^(cpu[0-9]* |procs_running |procs_blocked )' /proc/stat 2>/dev/null | head -n 1101",
     "  echo '##LOAD'; cat /proc/loadavg 2>/dev/null",
-    "  echo '##MEM'; head -n 128 /proc/meminfo 2>/dev/null",
-    "  echo '##NET'; head -n 258 /proc/net/dev 2>/dev/null",
-    "  echo '##DISK'; head -n 1024 /proc/diskstats 2>/dev/null",
+    "  echo '##MEM'; head -n 129 /proc/meminfo 2>/dev/null",
+    "  echo '##NET'; head -n 259 /proc/net/dev 2>/dev/null",
+    "  echo '##DISK'; head -n 1025 /proc/diskstats 2>/dev/null",
     '  if [ $((n % TE)) -eq 0 ]; then',
     "    echo '##NETTOPO'",
     '    for d in /sys/class/net/*; do',
@@ -73,12 +73,12 @@ function build(I) {
     '      b=-; sl=-; a=-',
     '      if [ -d "$d/bonding" ]; then b=$(cut -d" " -f1 "$d/bonding/mode" 2>/dev/null); sl=$(tr " " "," < "$d/bonding/slaves" 2>/dev/null); a=$(cat "$d/bonding/active_slave" 2>/dev/null); fi',
     '      echo "i $x $s $o $p ${m:--} ${b:--} ${sl:--} ${a:--}"',
-    '    done 2>/dev/null | head -n 256',
-    "    echo '##BLK'; lsblk -P -b -o NAME,KNAME,PKNAME,TYPE,SIZE,MOUNTPOINT 2>/dev/null | head -n 512",
-    "    echo '##PS'; ps -e -o pid=,user:32= 2>/dev/null | head -n 20000",
+    '    done 2>/dev/null | head -n 257',
+    "    echo '##BLK'; lsblk -P -b -o NAME,KNAME,PKNAME,TYPE,SIZE,MOUNTPOINT 2>/dev/null | head -n 513",
+    "    echo '##PS'; ps -e -o pid=,user:32= 2>/dev/null | head -n 20001",
     '  fi',
     '  if [ $(( (n * I) % P )) -lt $I ]; then',
-    `    echo '##PROC'; cat /proc/[0-9]*/stat 2>/dev/null | ${PROC_AWK} | head -n 20000`,
+    `    echo '##PROC'; cat /proc/[0-9]*/stat 2>/dev/null | ${PROC_AWK} | head -n 20001`,
     '  fi',
     "  echo '##END'",
     '  n=$((n + 1))',

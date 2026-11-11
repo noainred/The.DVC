@@ -58,10 +58,21 @@ export function wakeFocusMon() { wakeAsked = true; schedule(0); return true; }
 
 function schedule(ms) { clearTimeout(timer); if (!config.agent.centralUrl) return; timer = setTimeout(() => { syncOnce().catch(() => {}); }, ms); timer.unref?.(); }
 
+/** 보류 시한(validUntil)이 지났으면 수집기를 모두 닫는다. */
+function expireIfStale() {
+  if (Date.now() > validUntil && runner.running().length) { runner.reconcile([]); statuses = {}; }
+}
+const testsInFlight = new Set(); // 진행 중인 연결 시험 — 같은 시험을 겹쳐 띄우지 않는다(반증 5번)
+
 export async function syncOnce(now = Date.now()) {
   if (!config.agent.centralUrl || !config.agent.centralToken) return null;
   if (running) return null;
-  if (now < unsupportedUntil) { schedule(IDLE_MS); return null; }
+  if (now < unsupportedUntil) {
+    // 중앙이 이 기능을 모른다(404) — 그래도 보류 시한은 지킨다. 예전에는 이 이른 return 이 아래 finally 의 정리를 건너뛰어
+    // 수집기가 중앙 연락 없이 최대 1시간 대상 SSH 를 붙잡았다(반증 7번).
+    expireIfStale();
+    schedule(IDLE_MS); return null;
+  }
   running = true;
   const t0 = Date.now();
   const sendS = samples.slice(); const sendP = procs.slice(); const sendT = testResults.slice();
@@ -94,11 +105,16 @@ export async function syncOnce(now = Date.now()) {
     lastTargets = targets.length;
     if (data.ensureKey === true) { try { focusKeys.ensureKey(); } catch (e) { if (_log('key', e.message)) console.warn(`[focusmon-edge] SSH 키를 만들지 못했습니다: ${e.message}`); } }
     runner.reconcile(targets.map((t) => ({ id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username), interval: Number(t.interval) || 2 })));
-    for (const id of Array.isArray(data.retries) ? data.retries.slice(0, 50) : []) runner.retry(String(id));
+    const byId = new Map(targets.map((t) => [String(t.id), { id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username) }]));
+    for (const id of Array.isArray(data.retries) ? data.retries.slice(0, 50) : []) runner.retry(String(id), byId.get(String(id)) || null);
     for (const t of Array.isArray(data.tests) ? data.tests.slice(0, 20) : []) {
-      runner.test({ id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username) })
-        .then((result) => { testResults.push({ id: String(t.id), result }); schedule(0); })
-        .catch(() => {});
+      const id = String(t.id);
+      if (testsInFlight.has(id)) continue;
+      testsInFlight.add(id);
+      runner.test({ id, host: String(t.host), port: Number(t.port) || 22, username: String(t.username) })
+        .then((result) => { testResults.push({ id, result }); schedule(0); })
+        .catch(() => {})
+        .finally(() => { testsInFlight.delete(id); });
     }
     _last = { at: Date.now(), ok: true, ms: Date.now() - t0, sent: sendS.length, targets: lastTargets, note: lastTargets ? '' : '수집할 대상이 없습니다.' };
     return _last;
@@ -108,7 +124,7 @@ export async function syncOnce(now = Date.now()) {
     return _last;
   } finally {
     running = false;
-    if (Date.now() > validUntil && runner.running().length) { runner.reconcile([]); statuses = {}; }
+    expireIfStale();
     const active = lastTargets > 0 || wakeAsked;
     wakeAsked = false;
     schedule(active ? ACTIVE_MS : IDLE_MS);
@@ -122,5 +138,5 @@ export function startFocusMonWorker() {
 }
 
 export function stopFocusMonWorker() { clearTimeout(timer); runner.stopAll(); }
-export function _resetForTest() { samples.length = 0; procs.length = 0; testResults = []; statuses = {}; validUntil = 0; unsupportedUntil = 0; lastTargets = 0; _last = null; dropped = 0; running = false; runner.stopAll(); }
+export function _resetForTest() { testsInFlight.clear(); samples.length = 0; procs.length = 0; testResults = []; statuses = {}; validUntil = 0; unsupportedUntil = 0; lastTargets = 0; _last = null; dropped = 0; running = false; runner.stopAll(); }
 export const _runnerForTest = runner;

@@ -7,7 +7,7 @@
  *  · ‘다시 연결’ 은 대상마다 60초에 한 번 — 연타가 로그인 시도를 늘리지 않게.
  *  · sink: { sample(id, ts, sample, hello), procs(id, ts, p), status(id, st) } — 중앙은 store 로, 엣지는 보낼 묶음으로 간다.
  */
-import { createCollector, testTarget } from './collector.js';
+import { createCollector, testTarget, focusAuthGuard, authIdOf } from './collector.js';
 import { normInterval } from './script.js';
 import { demoSample, demoProcs, demoHello, isDemoTarget } from './mock.js';
 import { PROC_EVERY_S } from './script.js';
@@ -93,14 +93,18 @@ export function createRunner({ keys, sink, connect } = {}) {
     },
     running: () => [...live.keys()],
     /** ‘다시 연결’ — 60초에 한 번. */
-    retry(id) {
+    retry(id, target = null) {
       const x = live.get(String(id));
       const now = Date.now();
+      // 60초 검사가 **먼저** — 예전 라우트는 정지를 먼저 지우고 429 를 돌려줘, '다시 연결 → 시험' 을 번갈아 누르면 로그인 시도가 무제한이었다(반증 6번).
       if ((lastRetry.get(id) || 0) + RETRY_MIN_MS > now) return { ok: false, code: 'too-soon', reason: '같은 대상은 60초에 한 번만 다시 연결합니다.' };
       lastRetry.set(id, now);
-      if (!x) return { ok: false, code: 'not-running', reason: '지금 수집 중인 대상이 아닙니다.' };
+      if (!x) {
+        if (target) { focusAuthGuard.clearAuthStop(authIdOf(target)); return { ok: true, running: false }; } // 수집 중이 아니면 정지만 푼다(다음 시험 · 시작이 한 번 시도)
+        return { ok: false, code: 'not-running', reason: '지금 수집 중인 대상이 아닙니다.' };
+      }
       x.col.retry();
-      return { ok: true };
+      return { ok: true, running: true };
     },
     async test(t) {
       if (t.demo || isDemoTarget(t.id)) return { ok: true, kind: 'ok', hello: demoHello(t.id), ms: 12 };

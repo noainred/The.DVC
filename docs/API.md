@@ -145,25 +145,25 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:344](../server/src/routes/central/opsRoutes.js#L344) |
 | POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:349](../server/src/routes/central/opsRoutes.js#L349) |
 | GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:195](../server/src/routes/central/storageRoutes.js#L195) |
-| POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:601](../server/src/routes/central.js#L601) |
+| POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:602](../server/src/routes/central.js#L602) |
 | GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:295](../server/src/routes/central/opsRoutes.js#L295) |
 | POST | `/capture-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:300](../server/src/routes/central/opsRoutes.js#L300) |
-| POST | `/curuser` | `requireCentral` | [server/src/routes/central.js:1223](../server/src/routes/central.js#L1223) |
-| GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1321](../server/src/routes/central.js#L1321) |
+| POST | `/curuser` | `requireCentral` | [server/src/routes/central.js:1224](../server/src/routes/central.js#L1224) |
+| GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1322](../server/src/routes/central.js#L1322) |
 | GET | `/cvp-config` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:22](../server/src/routes/central/cvpIsiduRoutes.js#L22) |
 | POST | `/cvp-data` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:51](../server/src/routes/central/cvpIsiduRoutes.js#L51) |
 | GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central/storageRoutes.js:147](../server/src/routes/central/storageRoutes.js#L147) |
 | POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central/storageRoutes.js:154](../server/src/routes/central/storageRoutes.js#L154) |
-| POST | `/fleet` | `requireCentral` | [server/src/routes/central.js:1360](../server/src/routes/central.js#L1360) |
+| POST | `/fleet` | `requireCentral` | [server/src/routes/central.js:1361](../server/src/routes/central.js#L1361) |
 | POST | `/focus-mon/sync` | `requireCentral` | [server/src/routes/central.js:588](../server/src/routes/central.js#L588) |
-| GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1591](../server/src/routes/central.js#L1591) |
-| POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1511](../server/src/routes/central.js#L1511) |
-| POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:1081](../server/src/routes/central.js#L1081) |
+| GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1592](../server/src/routes/central.js#L1592) |
+| POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1512](../server/src/routes/central.js#L1512) |
+| POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:1082](../server/src/routes/central.js#L1082) |
 | GET | `/health-probe` | `requireCentral` | [server/src/routes/central/opsRoutes.js:459](../server/src/routes/central/opsRoutes.js#L459) |
-| GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1433](../server/src/routes/central.js#L1433) |
-| POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1443](../server/src/routes/central.js#L1443) |
-| POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1455](../server/src/routes/central.js#L1455) |
-| POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:937](../server/src/routes/central.js#L937) |
+| GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1434](../server/src/routes/central.js#L1434) |
+| POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1444](../server/src/routes/central.js#L1444) |
+| POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1456](../server/src/routes/central.js#L1456) |
+| POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:938](../server/src/routes/central.js#L938) |
 | GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central/opsRoutes.js:373](../server/src/routes/central/opsRoutes.js#L373) |
 | POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:384](../server/src/routes/central/opsRoutes.js#L384) |
 | GET | `/isidu-config` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:157](../server/src/routes/central/cvpIsiduRoutes.js#L157) |
@@ -190,8 +190,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:196](../server/src/routes/central/pduSanRoutes.js#L196) |
 | GET | `/storage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:86](../server/src/routes/central/storageRoutes.js#L86) |
 | POST | `/storage-data` | `requireCentral` | [server/src/routes/central/storageRoutes.js:253](../server/src/routes/central/storageRoutes.js#L253) |
-| GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:643](../server/src/routes/central.js#L643) |
-| POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:659](../server/src/routes/central.js#L659) |
+| GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:644](../server/src/routes/central.js#L644) |
+| POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:660](../server/src/routes/central.js#L660) |
 | POST | `/svcmon-report` | `requireCentral` | [server/src/routes/central.js:560](../server/src/routes/central.js#L560) |
 | GET | `/users-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:141](../server/src/routes/central/opsRoutes.js#L141) |
 | GET | `/veeam-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:95](../server/src/routes/central/opsRoutes.js#L95) |
@@ -200,8 +200,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/veeam-run-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:164](../server/src/routes/central/opsRoutes.js#L164) |
 | POST | `/vm-clone-report` | `requireCentral` | [server/src/routes/central/opsRoutes.js:331](../server/src/routes/central/opsRoutes.js#L331) |
 | GET | `/vm-clone-sync` | `requireCentral` | [server/src/routes/central/opsRoutes.js:315](../server/src/routes/central/opsRoutes.js#L315) |
-| POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:1163](../server/src/routes/central.js#L1163) |
-| GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:1345](../server/src/routes/central.js#L1345) |
+| POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:1164](../server/src/routes/central.js#L1164) |
+| GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:1346](../server/src/routes/central.js#L1346) |
 
 ## `/api/upgrade`
 
@@ -1160,22 +1160,22 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/esxi-temp/sensors` | 권한 `tools` | [server/src/routes/api/serverSensors.js:138](../server/src/routes/api/serverSensors.js#L138) |
 | GET | `/tools/esxi-temp/sensors/:id` | 권한 `tools` | [server/src/routes/api/serverSensors.js:181](../server/src/routes/api/serverSensors.js#L181) |
 | POST | `/tools/esxi-temp/spark` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1589](../server/src/routes/api/toolsCapacity.js#L1589) |
-| GET | `/tools/focus-mon` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:92](../server/src/routes/api/focusMon.js#L92) |
-| GET | `/tools/focus-mon/coverage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:267](../server/src/routes/api/focusMon.js#L267) |
-| GET | `/tools/focus-mon/data` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:235](../server/src/routes/api/focusMon.js#L235) |
-| GET | `/tools/focus-mon/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:277](../server/src/routes/api/focusMon.js#L277) |
-| POST | `/tools/focus-mon/key` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:184](../server/src/routes/api/focusMon.js#L184) |
-| GET | `/tools/focus-mon/procs` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:256](../server/src/routes/api/focusMon.js#L256) |
-| POST | `/tools/focus-mon/sessions` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:202](../server/src/routes/api/focusMon.js#L202) |
-| DELETE | `/tools/focus-mon/sessions/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:225](../server/src/routes/api/focusMon.js#L225) |
-| POST | `/tools/focus-mon/sessions/:id/extend` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:218](../server/src/routes/api/focusMon.js#L218) |
-| PUT | `/tools/focus-mon/settings` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:192](../server/src/routes/api/focusMon.js#L192) |
-| POST | `/tools/focus-mon/targets` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:123](../server/src/routes/api/focusMon.js#L123) |
-| DELETE | `/tools/focus-mon/targets/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:139](../server/src/routes/api/focusMon.js#L139) |
-| PUT | `/tools/focus-mon/targets/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:131](../server/src/routes/api/focusMon.js#L131) |
-| POST | `/tools/focus-mon/targets/:id/retry` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:172](../server/src/routes/api/focusMon.js#L172) |
-| POST | `/tools/focus-mon/targets/:id/test` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:157](../server/src/routes/api/focusMon.js#L157) |
-| POST | `/tools/focus-mon/targets/import` | 역할 `admin` · 권한 `data.csv` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:148](../server/src/routes/api/focusMon.js#L148) |
+| GET | `/tools/focus-mon` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:109](../server/src/routes/api/focusMon.js#L109) |
+| GET | `/tools/focus-mon/coverage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:291](../server/src/routes/api/focusMon.js#L291) |
+| GET | `/tools/focus-mon/data` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:259](../server/src/routes/api/focusMon.js#L259) |
+| GET | `/tools/focus-mon/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:301](../server/src/routes/api/focusMon.js#L301) |
+| POST | `/tools/focus-mon/key` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:208](../server/src/routes/api/focusMon.js#L208) |
+| GET | `/tools/focus-mon/procs` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/focusMon.js:280](../server/src/routes/api/focusMon.js#L280) |
+| POST | `/tools/focus-mon/sessions` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:226](../server/src/routes/api/focusMon.js#L226) |
+| DELETE | `/tools/focus-mon/sessions/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:249](../server/src/routes/api/focusMon.js#L249) |
+| POST | `/tools/focus-mon/sessions/:id/extend` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:242](../server/src/routes/api/focusMon.js#L242) |
+| PUT | `/tools/focus-mon/settings` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:216](../server/src/routes/api/focusMon.js#L216) |
+| POST | `/tools/focus-mon/targets` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:139](../server/src/routes/api/focusMon.js#L139) |
+| DELETE | `/tools/focus-mon/targets/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:155](../server/src/routes/api/focusMon.js#L155) |
+| PUT | `/tools/focus-mon/targets/:id` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:147](../server/src/routes/api/focusMon.js#L147) |
+| POST | `/tools/focus-mon/targets/:id/retry` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:197](../server/src/routes/api/focusMon.js#L197) |
+| POST | `/tools/focus-mon/targets/:id/test` | 역할 `admin` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:175](../server/src/routes/api/focusMon.js#L175) |
+| POST | `/tools/focus-mon/targets/import` | 역할 `admin` · 권한 `data.csv` · `fullRwOnly` · `demoBlockWrite` | [server/src/routes/api/focusMon.js:164](../server/src/routes/api/focusMon.js#L164) |
 | GET | `/tools/gpu` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:477](../server/src/routes/api/hardwareGpu.js#L477) |
 | GET | `/tools/gpu-alloc` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:531](../server/src/routes/api/hardwareGpu.js#L531) |
 | GET | `/tools/gpu-alloc.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:552](../server/src/routes/api/hardwareGpu.js#L552) |

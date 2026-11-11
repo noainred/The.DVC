@@ -145,6 +145,11 @@ test('⑨ 등록부 손상 → 503(빈 목록을 200 으로 내지 않는다) ·
   assert.equal(r.status, 503);
   assert.equal(r.body.reason, 'registryUnreadable');
   assert.equal((await call('POST', '/api/tools/focus-mon/targets', { body: { name: 'x', host: '10.9.9.9', username: 'u' } })).status, 503);
+  // 엣지 동기화도 빈 목록(200) 대신 503 — 엣지가 '대상 없음' 으로 수집기를 다 닫지 않게(반증 10번)
+  const tok = issueAgentToken('edge-pl').token;
+  const sy = await call('POST', '/api/central/focus-mon/sync?agent=edge-pl', { headers: { 'X-Central-Token': tok, 'X-Agent-Name': 'edge-pl' }, body: { sentAt: Date.now(), samples: [] } });
+  assert.equal(sy.status, 503, sy.text);
+  assert.equal(sy.body.code, 'registryUnreadable');
   fs.rmSync(path.join(DIR, 'focusmon-targets.json'), { force: true });
   for (const f of fs.readdirSync(DIR)) if (f.startsWith('focusmon-targets.json.corrupt')) fs.rmSync(path.join(DIR, f));
   registry._resetForTest();
@@ -174,4 +179,23 @@ test('⑪ 노드 키 — 만든 뒤에도 응답에는 공개키 · 지문 칸�
     assert.deepEqual(extra, [], `공개키 보기에 모르는 칸: ${extra.join(', ')}`);
   }
   for (const text of [k.text, a.text]) assert.ok(!/BEGIN [A-Z ]*PRIVATE KEY|privateKey|"pem"/i.test(text), '개인키 흔적 없음');
+});
+
+test('반증 6 · 11 — 연결 시험은 대상마다 10초에 한 번(진행 중이면 거절) · 데모 계정 판본은 엣지 · 키 · 수집 시작자를 싣지 않는다', async () => {
+  const main = await call('GET', '/api/tools/focus-mon');
+  const id = main.body.targets.find((t) => t.demo).id;
+  const a = await call('POST', `/api/tools/focus-mon/targets/${id}/test`, { body: {} });
+  assert.equal(a.status, 200, a.text);
+  const b = await call('POST', `/api/tools/focus-mon/targets/${id}/test`, { body: {} });
+  assert.equal(b.status, 429, '곧바로 다시 시험하면 거절(병렬 · 연타로 로그인 시도를 늘리지 못하게)');
+  const st = await call('POST', '/api/tools/focus-mon/sessions', { body: { targets: [id], interval: 2, mode: 'watch' } });
+  assert.equal(st.status, 200, st.text);
+  const d = await call('GET', '/api/tools/focus-mon', { who: 'demo' });
+  assert.equal(d.status, 200);
+  assert.deepEqual(d.body.nodes.map((x) => x.kind), ['central'], '데모 판본에 엣지 노드 없음');
+  assert.equal(d.body.nodes[0].key?.publicKey ?? null, null, '데모 판본에 공개키 없음');
+  assert.ok(d.body.sessions.length >= 1 && d.body.sessions.every((x) => x.by === ''), '수집 시작자 가림');
+  const adminView = await call('GET', '/api/tools/focus-mon');
+  assert.ok(adminView.body.sessions.some((x) => x.by === 'a'), '관리자 판본은 그대로');
+  await call('DELETE', `/api/tools/focus-mon/sessions/${st.body.session.id}`);
 });

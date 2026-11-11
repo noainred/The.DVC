@@ -17,12 +17,16 @@
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../proxy/sshExec.js';
 import { createAuthGuard } from '../util/authGuard.js';
 import { scriptFor, normInterval } from './script.js';
-import { createFrameParser, frameToRaw } from './parse.js';
+import { createFrameParser, frameToRaw, LINE_MAX } from './parse.js';
 import { computeSample, topProcs } from './rates.js';
 
 export const focusAuthGuard = createAuthGuard({ file: 'focusmon-auth-stops.json' });
 export const READY_TIMEOUT_MS = 15_000;
 const BACKOFF_MS = Object.freeze([10_000, 30_000, 60_000]);
+/** 이보다 짧게 끝난 세션은(표본이 있어도) 정상 종료로 보지 않는다 — 반복문의 정상 수명은 6시간이다. */
+export const SHORT_SESSION_MS = 60_000;
+/** 무출력 감시 시한 — 주기의 5배와 30초 중 큰 값. */
+export const idleLimitMs = (iv) => Math.max(30_000, normInterval(iv) * 5_000);
 const HOSTKEY_RETRY_MS = 60_000;
 
 export const authIdOf = (t) => `fm|${t.id}`;
@@ -46,6 +50,7 @@ export function createCollector(target, { interval, keys, onSample, onProcs, onS
   let iv = normInterval(interval);
   let stopped = false; let ctl = null; let timer = null; let fails = 0; let busy = false;
   let status = { state: 'connecting', since: now(), lastSampleAt: null, error: '', hello: null, osVerified: null, interval: iv };
+  let sessionSamples = 0;
   let prevRaw = null; let prevAt = 0; let topo = {}; let blk = null; let users = new Map(); let prevProc = null; let prevProcUp = null; let hello = null;
 
   const setStatus = (patch) => {
@@ -67,6 +72,8 @@ export function createCollector(target, { interval, keys, onSample, onProcs, onS
       if (s.dt != null) {
         try { onSample?.(s, { ts, hello }); } catch { /* */ }
         status.lastSampleAt = ts;
+        sessionSamples += 1;
+        fails = 0; // 실패 횟수는 '표본을 받았을 때' 만 되돌린다 — 접속 성공만으로 되돌리면 곧바로 끝나는 세션이 1초마다 다시 로그인했다(반증 3번)
         if (status.state !== 'ok') setStatus({ state: 'ok', error: '' });
       }
     }
@@ -98,6 +105,9 @@ export function createCollector(target, { interval, keys, onSample, onProcs, onS
     ctl = new AbortController();
     const mine = ctl;
     let gotHelloOs = true;
+    let idleAbort = false;
+    sessionSamples = 0;
+    const startedAt = now();
     const parser = createFrameParser({
       onHello: (h) => {
         hello = h;
@@ -109,19 +119,37 @@ export function createCollector(target, { interval, keys, onSample, onProcs, onS
     try {
       await connect({ host: t.host, port: t.port, username: t.username, privateKey: pem, readyTimeout: READY_TIMEOUT_MS, signal: mine.signal },
         async (api) => {
-          fails = 0;
           focusAuthGuard.clearAuthStop(dev.id);
-          const r = await api.execStream(scriptFor(iv), { onLine: (l) => parser.push(l), signal: mine.signal });
-          return { stream: r };
+          // 무출력 감시 — 반복문은 주기마다 줄을 낸다. 출력 없이 열린 채널 · 중간에 멈춘 원격 명령이 세션을 무기한 붙잡지 않게 끊는다(반증 9번).
+          let lastLineAt = now();
+          const idleMs = idleLimitMs(iv);
+          const wd = setInterval(() => { if (now() - lastLineAt > idleMs && !mine.signal.aborted) { idleAbort = true; mine.abort(); } }, Math.min(5_000, idleMs));
+          wd.unref?.();
+          try {
+            const r = await api.execStream(scriptFor(iv), { onLine: (l) => { lastLineAt = now(); parser.push(l); }, signal: mine.signal, maxLine: LINE_MAX + 64 });
+            return { stream: r };
+          } finally { clearInterval(wd); }
         }, { signal: mine.signal });
-      if (stopped || mine.signal.aborted) { if (!gotHelloOs) return; if (!stopped) schedule(0); return; }
-      // 반복문이 스스로 끝났다(6시간) 또는 대상이 채널을 닫았다 — 곧바로 다시 연다.
-      setStatus({ state: 'connecting', error: '세션이 끝나 다시 엽니다.' });
-      schedule(1_000);
+      if (stopped) return;
+      if (mine.signal.aborted && !idleAbort) { if (!gotHelloOs) return; schedule(0); return; }
+      // 세션이 끝났다 — 반복문이 스스로 끝난 것(6시간)이면 곧바로 다시 연다. 표본 없이 곧바로 끝났으면(계정 셸 nologin · tcsh ·
+      // 키의 command= · ForceCommand · sftp 전용 · 출력 없음) 실패로 보고 물러난다 — 성공 로그인을 1초마다 되풀이하지 않는다(반증 3번).
+      const ranMs = now() - startedAt;
+      if (!idleAbort && sessionSamples > 0 && ranMs >= SHORT_SESSION_MS) {
+        setStatus({ state: 'connecting', error: '세션이 끝나 다시 엽니다.' });
+        schedule(1_000);
+        return;
+      }
+      const wait = BACKOFF_MS[Math.min(fails, BACKOFF_MS.length - 1)];
+      fails += 1;
+      setStatus({ state: 'error', error: idleAbort
+        ? `원격 명령이 ${Math.round(idleLimitMs(iv) / 1000)}초 동안 아무것도 내지 않아 세션을 끊었습니다 — ${Math.round(wait / 1000)}초 뒤 다시 시도합니다.`
+        : `로그인은 됐지만 세션이 곧바로 끝났습니다(표본 ${sessionSamples}개) — 계정 셸이 bash 인지, 키에 command= · ForceCommand 제한이 없는지 확인하세요. ${Math.round(wait / 1000)}초 뒤 다시 시도합니다.` });
+      schedule(wait);
     } catch (e) {
       if (stopped) return;
       if (mine.signal.aborted && !gotHelloOs) return;
-      if (mine.signal.aborted) { schedule(0); return; } // 주기 변경 — 바로 새 명령으로
+      if (mine.signal.aborted && !idleAbort) { schedule(0); return; } // 주기 변경 — 바로 새 명령으로
       if (isSshHostKeyError(e)) { setStatus({ state: 'hostkey', error: short(e) }); schedule(HOSTKEY_RETRY_MS); return; }
       if (isSshAuthError(e)) {
         focusAuthGuard.markAuthStopped(dev.id, dev, '키 로그인 거부');
@@ -130,7 +158,7 @@ export function createCollector(target, { interval, keys, onSample, onProcs, onS
       }
       const wait = BACKOFF_MS[Math.min(fails, BACKOFF_MS.length - 1)];
       fails += 1;
-      setStatus({ state: 'unreachable', error: short(e) });
+      setStatus({ state: idleAbort ? 'error' : 'unreachable', error: idleAbort ? `원격 명령이 출력 없이 멈춰 세션을 끊었습니다 — ${Math.round(wait / 1000)}초 뒤 다시 시도합니다.` : short(e) });
       schedule(wait);
     }
   }

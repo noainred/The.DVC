@@ -52,6 +52,23 @@ function registryUnreadable(res) {
   return true;
 }
 
+/**
+ * 데모 계정 판본 — 실제 엣지 이름 · 공개키 · 다른 사람이 시작한 수집(계정 이름 · 실제 대상 id)을 싣지 않는다(반증 11번).
+ * 데모 계정은 데모 대상만 보므로, 수집 목록도 데모 대상만으로 된 것만 남기고 시작한 사람은 가린다.
+ */
+function demoMask(req, out) {
+  if (!isDemoGuest(req.user)) return out;
+  const vis = new Set(out.targets.map((t) => t.id));
+  const onlyVisible = (s) => Array.isArray(s.targets) && s.targets.length > 0 && s.targets.every((id) => vis.has(id));
+  const central = out.nodes.find((x) => x.kind === 'central');
+  return {
+    ...out,
+    nodes: central ? [{ ...central, key: central.key ? { present: !!central.key.present, usable: !!central.key.usable, type: null, fingerprint: null, publicKey: null, source: null, file: null } : null }] : [],
+    sessions: out.sessions.filter(onlyVisible).map((s) => ({ ...s, by: '' })),
+    ended: out.ended.filter(onlyVisible).map((s) => ({ ...s, by: '' })),
+  };
+}
+
 /** 이 요청이 볼 수 있는 대상들(데모 계정은 데모 대상만). */
 function visibleTargets(req) {
   const all = allTargets();
@@ -111,8 +128,7 @@ api.get('/tools/focus-mon', adminOnly, fullScopeOnly, async (req, res) => {
       viewerTtlMs: store.VIEWER_TTL_MS, idleInterval: store.IDLE_INTERVAL, maxTargets: registry.MAX_TARGETS },
     settings: registry.getSettings(), settingRanges: registry.SETTING_RANGES,
     iostat: { cols: IOSTAT_COLS, names: IOSTAT_NAME },
-    nodes, targets,
-    sessions: store.listSessions(now), ended: store.endedSessions(),
+    ...demoMask(req, { nodes, targets, sessions: store.listSessions(now), ended: store.endedSessions() }),
     recorder: recorderStatus(), db: { available: dbOk, error: db.dbError() || null, oldestMinute: dbOk ? await db.oldestMinute() : null },
     mem: store.memStats(), local: serviceStatus().running,
   });
@@ -153,19 +169,28 @@ api.post('/tools/focus-mon/targets/import', adminOnly, fullRwOnly, csvPerm, demo
   res.json(r);
 });
 
-/** 연결 시험 — 중앙 대상은 바로(최대 25초), 엣지 대상은 그 엣지에 맡기고 결과는 메인 응답의 test 로 온다. */
+/** 연결 시험 — 대상마다 진행 중 1건 · TEST_MIN_MS 에 한 번(병렬로 보내 로그인 시도를 늘리지 못하게 — 반증 6번). */
+const TEST_MIN_MS = 10_000;
+const testGate = new Map(); // targetId → { at, busy }
 api.post('/tools/focus-mon/targets/:id/test', adminOnly, fullRwOnly, demoBlockWrite, async (req, res) => {
   const t = visibleById(req).get(String(req.params.id));
   if (!t) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 대상입니다.' });
+  const g = testGate.get(t.id);
+  const nowT = Date.now();
+  if (g && (g.busy || nowT - g.at < TEST_MIN_MS)) return res.status(429).json({ ok: false, code: 'too-soon', reason: `같은 대상은 ${TEST_MIN_MS / 1000}초에 한 번만 시험합니다${g.busy ? '(앞 시험이 아직 진행 중)' : ''}.` });
+  testGate.set(t.id, { at: nowT, busy: true });
+  if (testGate.size > 1000) for (const k of [...testGate.keys()].slice(0, 500)) if (!testGate.get(k).busy) testGate.delete(k);
   logAudit({ user: req.user?.username, action: 'focus-mon.target.test', target: t.name, detail: `${t.host}:${t.port} @ ${t.agent || '중앙'}`, ip: req.ip });
-  if (t.agent && !t.demo) {
-    store.requestEdgeTest(t.id, t.agent);
-    wakeEdge(t.agent).catch(() => {});
-    return res.json({ ok: true, queued: true, via: 'edge' });
-  }
-  const result = await localRunner.test(t);
-  store.putTestResult(t.id, { ...result, via: 'central' });
-  res.json({ ok: true, queued: false, result });
+  try {
+    if (t.agent && !t.demo) {
+      store.requestEdgeTest(t.id, t.agent);
+      wakeEdge(t.agent).catch(() => {});
+      return res.json({ ok: true, queued: true, via: 'edge' });
+    }
+    const result = await localRunner.test(t);
+    store.putTestResult(t.id, { ...result, via: 'central' });
+    res.json({ ok: true, queued: false, result });
+  } finally { testGate.set(t.id, { at: nowT, busy: false }); }
 });
 
 /** 다시 연결 — 인증 정지를 지우고 지금 한 번 시도한다(대상마다 60초에 한 번). */
@@ -174,10 +199,9 @@ api.post('/tools/focus-mon/targets/:id/retry', adminOnly, fullRwOnly, demoBlockW
   if (!t) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 대상입니다.' });
   logAudit({ user: req.user?.username, action: 'focus-mon.target.retry', target: t.name, ip: req.ip });
   if (t.agent && !t.demo) { store.requestEdgeRetry(t.id, t.agent); wakeEdge(t.agent).catch(() => {}); return res.json({ ok: true, via: 'edge' }); }
-  focusAuthGuard.clearAuthStop(`fm|${t.id}`);
-  const r = localRunner.retry(t.id);
+  const r = localRunner.retry(t.id, t);
   if (!r.ok && r.code === 'too-soon') return res.status(429).json(r);
-  res.json({ ok: true, via: 'central', running: r.ok });
+  res.json({ ok: true, via: 'central', running: !!r.running });
 });
 
 /** 이 노드(중앙)의 키 만들기 — 있으면 아무것도 하지 않는다. 엣지 키는 그 엣지에 대상이 생기면 엣지가 만든다. */

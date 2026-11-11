@@ -46,7 +46,7 @@ const counters = { lateDropped: 0, rewrites: 0, closed: 0 };
 
 function entry(id) {
   let e = T.get(id);
-  if (!e) { e = { cur: null, recent: [], procs: new Map(), latest: null, latestProcs: null, hello: null, lastAt: 0 }; T.set(id, e); }
+  if (!e) { e = { cur: null, recent: [], reopen: new Map(), procs: new Map(), latest: null, latestProcs: null, hello: null, lastAt: 0 }; T.set(id, e); }
   return e;
 }
 
@@ -91,16 +91,17 @@ export function ingestSample(id, ts, sample, hello, now = Date.now()) {
   if (e.cur && minute === e.cur.minute) {
     appendToBlock(e.cur, ts, row, meta);
   } else {
-    // 늦게 온 표본 — 닫힌 묶음을 다시 열어 붙이고 다시 쓴다(5분 안)
+    // 늦게 온 표본 — 닫힌 묶음을 **한 번만** 다시 열어(분마다) 모아 두고, flushReopened 가 분마다 한 번 얼려 다시 쓴다(5분 안).
+    // 예전에는 표본마다 묶음 전체를 풀고 다시 압축해 대기열에 넣었다 — 표본 N 개면 O(N²) 이라, 엣지 한 곳이 늦은 표본 300개로
+    // 중앙 요청 경로를 30초 막고 메모리를 수백 MB 붙잡았다(2026-11-11 반증 1번 — 재현).
     if (now - ts > LATE_MAX_MS) { counters.lateDropped += 1; return false; }
-    const i = e.recent.findIndex((b) => b.minute === minute);
-    let b = i >= 0 ? thaw(e.recent[i]) : newBlock(minute);
-    appendToBlock(b, ts, row, meta);
-    const fz = freeze(b);
-    if (i >= 0) e.recent[i] = fz; else { e.recent.push(fz); e.recent.sort((a, c) => a.minute - c.minute); }
-    enqueueBlock(id, b, e.procs.get(minute));
-    counters.rewrites += 1;
-    b = null;
+    let b = e.reopen.get(minute);
+    if (!b) {
+      const i = e.recent.findIndex((x) => x.minute === minute);
+      b = i >= 0 ? thaw(e.recent[i]) : newBlock(minute);
+      e.reopen.set(minute, b);
+    }
+    if (!appendToBlock(b, ts, row, meta)) { counters.lateDropped += 1; return false; }
   }
   if (!e.latest || ts >= e.latest.ts) e.latest = { ts, sample };
   e.lastAt = Math.max(e.lastAt, ts);
@@ -118,8 +119,28 @@ export function ingestProcs(id, ts, p) {
   return true;
 }
 
+/** 다시 연 늦은 묶음을 분마다 한 번 얼려 메모리 묶음을 바꾸고 다시 쓴다. id 를 주면 그 대상만. 바꾼 묶음 수. */
+export function flushReopened(id = null) {
+  let n = 0;
+  const one = (tid, e) => {
+    if (!e.reopen?.size) return;
+    for (const [minute, b] of e.reopen) {
+      if (!b.ts.length) continue;
+      const fz = freeze(b);
+      const i = e.recent.findIndex((x) => x.minute === minute);
+      if (i >= 0) e.recent[i] = fz; else { e.recent.push(fz); e.recent.sort((a, c) => a.minute - c.minute); }
+      enqueueBlock(tid, b, e.procs.get(minute));
+      counters.rewrites += 1; n += 1;
+    }
+    e.reopen.clear();
+  };
+  if (id != null) { const e = T.get(id); if (e) one(id, e); } else for (const [tid, e] of T) one(tid, e);
+  return n;
+}
+
 /** 분 닫기 · 메모리 정리(1초 틱). 수집 중인 대상 집합을 받아 그 밖의 오래된 대상은 뺀다. */
 export function closeMinutes(now = Date.now(), activeIds = new Set()) {
+  flushReopened();
   for (const [id, e] of T) {
     if (e.cur && now > (e.cur.minute + 1) * 60_000 + GRACE_MS) closeCur(id, e);
     if (!activeIds.has(id) && now - e.lastAt > RECENT_MIN * 60_000 && !e.cur) T.delete(id);
@@ -141,7 +162,7 @@ export function memOldestMinute(id) { const b = memBlocks(id); return b.length ?
 export function drainWrites(max = 400) { return writeQ.splice(0, max); }
 export function pendingWrites() { return writeQ.length; }
 /** 종료 직전 — 열린 묶음을 모두 닫아 대기열에 넣는다(recorder.flushSync 가 쓴다). */
-export function closeAll() { for (const [id, e] of T) closeCur(id, e); }
+export function closeAll() { flushReopened(); for (const [id, e] of T) closeCur(id, e); }
 export function memStats() {
   let blocks = 0; let values = 0;
   for (const e of T.values()) for (const b of [...e.recent, ...(e.cur ? [e.cur] : [])]) { blocks += 1; for (const a of b.cols.values()) values += a.length; }
@@ -251,6 +272,13 @@ export function expireSessions(now = Date.now()) {
   return out;
 }
 
+/** 엣지 표본을 받을 대상 — 지금 수집 중이거나, 끝난 지 LATE_MAX_MS 안인 수집의 대상(엣지가 끊긴 동안 모은 표본). */
+export function acceptingTargetIds(now = Date.now()) {
+  const out = activeTargetIds();
+  for (const x of ended) if (now - x.endedAt <= LATE_MAX_MS) for (const t of x.targets) out.add(t);
+  return out;
+}
+
 /** 지금 수집 중인 대상 id 전부. */
 export function activeTargetIds() {
   loadSessions();
@@ -325,8 +353,15 @@ export function requestEdgeTest(id, agent, now = Date.now()) { TESTS.set(String(
 export function pendingTestsFor(agent, now = Date.now()) {
   const k = String(agent || '').toLowerCase();
   const out = [];
-  for (const [id, x] of TESTS) { if (x.agent === k && !x.result && now - x.requestedAt < 5 * 60_000) out.push(id); }
-  return out.slice(0, 20);
+  // 한 번 내려보낸 시험은 60초 동안 다시 내려보내지 않는다 — 결과가 올 때까지 2초마다 같은 시험을 다시 줘 클릭 한 번에 로그인이 여러 번 일어났다(반증 5번).
+  for (const [id, x] of TESTS) {
+    if (x.agent !== k || x.result || now - x.requestedAt >= 5 * 60_000) continue;
+    if (x.deliveredAt && now - x.deliveredAt < 60_000) continue;
+    out.push(id);
+    if (out.length >= 20) break;
+  }
+  for (const id of out) TESTS.get(id).deliveredAt = now;
+  return out;
 }
 export function putTestResult(id, result, now = Date.now()) {
   const x = TESTS.get(String(id));

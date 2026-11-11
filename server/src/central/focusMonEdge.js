@@ -13,7 +13,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { strOf } from '../util/coercionTrap.js';
 import { pullFromEdge } from './edgePull.js';
 import * as store from '../focusmon/store.js';
-import { listTargets } from '../focusmon/registry.js';
+import { listTargets, registryLoadError } from '../focusmon/registry.js';
 import { setWakeImpl } from '../focusmon/service.js';
 import { IOSTAT_COLS, TOP_N } from '../focusmon/rates.js';
 import { INTERVALS } from '../focusmon/script.js';
@@ -119,23 +119,30 @@ export const EDGE_BACKLOG_MS = BACKLOG_MS;
 export function handleEdgeSync(agent, body, now = Date.now()) {
   const b = isObj(body) ? body : {};
   const key = String(agent || '').toLowerCase();
+  // 등록부를 못 읽으면 빈 목록(200)을 주지 않는다 — 엣지가 수집기를 다 닫고 '대상 없음' 으로 잘못 기록한다(반증 10번 · registryUnreadable 규약).
+  if (registryLoadError()) return { ok: false, code: 'registryUnreadable', reason: '중앙의 집중 모니터링 등록부를 읽지 못했습니다 — 중앙 관리자가 손상 보존본을 확인해야 합니다.' };
   const mine = new Map(listTargets().filter((t) => String(t.agent || '').toLowerCase() === key).map((t) => [t.id, t]));
   const sentAt = n(b.sentAt);
   const toCentral = (t) => edgeTimeToCentral(t, sentAt, now);
-  const got = { samples: 0, procs: 0, foreign: 0, bad: 0 };
+  const got = { samples: 0, procs: 0, foreign: 0, bad: 0, idle: 0 };
   const perTarget = new Map();
+  // 지금 수집 중이거나 막 끝난 수집의 대상만 받는다 — 아무도 시작하지 않은 대상의 값을 엣지가 밀어 넣어 메모리 · DB 를 채우지 못하게(반증 1번).
+  const accepting = store.acceptingTargetIds(now);
   for (const x of arr(b.samples, MAX_SAMPLES)) {
     if (!isObj(x) || typeof x.id !== 'string') { got.bad += 1; continue; }
     if (!mine.has(x.id)) { got.foreign += 1; continue; }
+    if (!accepting.has(x.id)) { got.idle += 1; continue; }
     const c = (perTarget.get(x.id) || 0) + 1; perTarget.set(x.id, c);
     if (c > MAX_PER_TARGET) { got.bad += 1; continue; }
     const ts = toCentral(x.t); const s = cleanSample(x.s);
     if (ts == null || !s) { got.bad += 1; continue; }
     if (store.ingestSample(x.id, ts, s, cleanHello(x.hello), now)) got.samples += 1;
   }
+  for (const id of perTarget.keys()) store.flushReopened(id); // 늦은 표본은 분마다 한 번만 다시 쓴다
   for (const x of arr(b.procs, 2000)) {
     if (!isObj(x) || typeof x.id !== 'string') { got.bad += 1; continue; }
     if (!mine.has(x.id)) { got.foreign += 1; continue; }
+    if (!accepting.has(x.id)) { got.idle += 1; continue; }
     const ts = toCentral(x.t); const p = cleanProcs(x.p);
     if (ts == null || !p) { got.bad += 1; continue; }
     if (store.ingestProcs(x.id, ts, p)) got.procs += 1;

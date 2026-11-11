@@ -411,10 +411,15 @@ test('차트 칸 — 칸 폭을 표본 간격의 1.5배 이상으로 넓혀 수�
   const Q = await import('../src/focusmon/query.js');
   // 2초 주기 · 표본마다 ±300ms 흔들림 — 5분 · 1분 구간 모두 칸 폭(150칸이면 2초 · 0.4초)이 주기 이하였다.
   const t0 = 1_000 * 60_000;
-  const b = CODEC.newBlock(1000);
   const jit = [0, 300, -250, 120, -300, 280, -100, 0];
-  for (let i = 0; i < 150; i++) CODEC.appendToBlock(b, t0 + i * 2000 + jit[i % jit.length] + 300, new Map([['s.cpu', 10 + (i % 5)]]), null);
-  const pos = []; for (let i = 0; i < b.ts.length; i++) pos.push([b, i, b.ts[i]]);
+  const blocks = new Map(); // 분마다 묶음 하나(분당 표본 상한 MAX_N)
+  for (let i = 0; i < 150; i++) {
+    const ts = t0 + i * 2000 + jit[i % jit.length] + 300;
+    const m = Math.floor(ts / 60_000);
+    if (!blocks.has(m)) blocks.set(m, CODEC.newBlock(m));
+    assert.ok(CODEC.appendToBlock(blocks.get(m), ts, new Map([['s.cpu', 10 + (i % 5)]]), null));
+  }
+  const pos = []; for (const b of blocks.values()) for (let i = 0; i < b.ts.length; i++) pos.push([b, i, b.ts[i]]);
   assert.equal(Q.sampleSpacing(pos) >= 1700 && Q.sampleSpacing(pos) <= 2300, true);
   for (const winMin of [1, 5]) {
     const from = t0; const to = t0 + winMin * 60_000;
@@ -449,4 +454,92 @@ test('엣지 워커 — 중앙 응답의 보류 시한(validUntil)이 지나면 
     worker.stopFocusMonWorker(); worker._resetForTest();
     config.agent.centralUrl = saved.url; config.agent.centralToken = saved.tok;
   }
+});
+
+test('반증 2 · 4 · 8 — 원격 이름으로 프로토타입을 오염시키지 못한다 · 프레임 글자 상한 · 원격 head 는 파서 상한 + 1 · 요약 열이 먼저', () => {
+  const blk = P.parseBlk(['NAME="x" KNAME="__proto__" PKNAME="" TYPE="disk" SIZE="1" MOUNTPOINT="/evil"', 'NAME="sda" KNAME="sda" PKNAME="constructor" TYPE="disk" SIZE="1" MOUNTPOINT=""']);
+  assert.equal(Object.prototype.mount, undefined, 'Object.prototype 오염 없음');
+  assert.deepEqual(Object.keys(blk), ['sda']);
+  assert.equal(blk.sda.parent, null, '부모 이름도 프로토타입 이름은 받지 않는다');
+  assert.deepEqual(Object.keys(P.parseNetDev(['__proto__: 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16'])), []);
+  // 열린 프레임이 줄 수 상한 × 줄 길이 상한만큼 붙잡지 못한다 — 글자 상한을 넘으면 그 프레임을 버린다
+  let frames = 0;
+  const fp = P.createFrameParser({ onFrame: () => { frames += 1; } });
+  fp.push('##T 1.00 1700000000'); fp.push('##PS');
+  const big = 'x'.repeat(16 * 1024);
+  for (let i = 0; i < Math.ceil(P.FRAME_MAX_CHARS / big.length) + 2; i++) fp.push(big);
+  fp.push('##END');
+  assert.equal(frames, 0, '넘친 프레임은 버린다');
+  assert.equal(fp.stats().oversize, 1);
+  fp.push('##T 2.00 1700000002'); fp.push('##LOAD'); fp.push('0.1 0.2 0.3 1/2 3'); fp.push('##END');
+  assert.equal(frames, 1, '다음 프레임은 정상');
+  // 원격 head -n 은 파서 상한 + 1 — 같으면 잘려도 파서가 몰랐다
+  const script = SCRIPT.SCRIPTS[2];
+  for (const [sec, re] of [['DISK', /head -n (\d+) \/proc\/diskstats/], ['NET', /head -n (\d+) \/proc\/net\/dev/], ['BLK', /MOUNTPOINT 2>\/dev\/null \| head -n (\d+)/], ['PS', /user:32= 2>\/dev\/null \| head -n (\d+)/]]) {
+    assert.equal(Number(re.exec(script)?.[1]), P.SECTION_MAX_LINES[sec] + 1, `${sec} head = 파서 상한 + 1`);
+  }
+  // 요약 열(s.*) · 전체 디스크(t.*)가 먼저 — 열 상한에 닿아도 버려지지 않는다
+  const { row } = CODEC.flattenSample({ dt: 2, cpu: { pct: 1, usr: 1, sys: 0, iow: 0, stl: 0, irq: 0, cores: [1, 2] }, mem: null, net: [], dsk: [{ n: 'sda', k: 'disk', v: Array(13).fill(1), fl: 0 }], dtot: Array(13).fill(1) });
+  const keys = [...row.keys()];
+  assert.equal(keys[0], 's.cpu');
+  assert.ok(keys.indexOf('t.util') < keys.indexOf('c.pct') && keys.indexOf('t.util') < keys.indexOf('d.sda.util'));
+});
+
+test('반증 1 — 늦은 표본은 분마다 한 번만 다시 쓰고, 수집 중이 아닌 대상의 표본은 받지 않는다 · 분당 표본 상한', () => {
+  store._resetForTest(); registry._resetForTest();
+  const a = registry.addTarget({ name: 'pl-late', host: '10.48.20.31', port: 22, username: 'dvcmon', agent: 'edge-pl' }, { agents: ['edge-pl'] });
+  const now = 1_800_000_200_000;
+  const s = { dt: 2, cpu: { pct: 5, usr: 5, sys: 0, iow: 0, stl: 0, irq: 0, cores: [] }, mem: null, net: [], dsk: [], dtot: null };
+  const lateBase = Math.floor((now - 150_000) / 60_000) * 60_000 + 1_000; // 2~3분 전 한 분 안(20초에 걸쳐 200개)
+  const late = (k) => ({ id: a.target.id, t: lateBase + k * 100, s });
+  const idle = edge.handleEdgeSync('edge-pl', { sentAt: now, samples: [late(0)] }, now);
+  assert.equal(idle.accepted.samples, 0); assert.equal(idle.accepted.idle, 1, '아무도 수집하지 않는 대상은 받지 않는다');
+  store.startSession({ targets: [a.target.id], mode: 'watch', interval: 2 }, now);
+  edge.handleEdgeSync('edge-pl', { sentAt: now, samples: [{ id: a.target.id, t: now, s }] }, now); // 지금 분 묶음
+  store.drainWrites(100_000);
+  const before = store.memStats().rewrites;
+  const r = edge.handleEdgeSync('edge-pl', { sentAt: now, samples: Array.from({ length: 200 }, (_, k) => late(k)) }, now);
+  assert.equal(r.accepted.samples, 120, '분당 표본 상한(120)');
+  assert.equal(store.memStats().rewrites - before, 1, '같은 분의 늦은 표본 200개 → 다시 쓰기 1번(예전: 표본마다)');
+  const q = store.drainWrites(100_000).filter((x) => x.kind === 'm');
+  assert.equal(q.length, 1);
+  assert.equal(q[0].n, 120);
+  store._resetForTest();
+});
+
+test('반증 3 · 9 — 로그인 뒤 세션이 곧바로 끝나면 물러난다(1초마다 다시 로그인하지 않는다) · 출력 없는 세션은 끊는다', async () => {
+  let logins = 0; const seen = [];
+  const quick = async (_c, fn) => { logins += 1; return fn({ execStream: async () => ({ code: 0 }) }); };
+  const c = collector.createCollector({ id: 'fm-q0000001', host: '10.0.0.9', port: 22, username: 'u' }, { interval: 1, keys: svc.focusKeys, connect: quick, onStatus: (st) => seen.push(st.state) });
+  svc.focusKeys.ensureKey();
+  c.start();
+  await wait(2_500);
+  c.stop();
+  assert.equal(logins, 1, `2.5초 동안 로그인 ${logins}번 — 곧바로 끝나는 세션은 물러난다(10초)`);
+  assert.ok(seen.includes('error'), '오류로 보인다(연결 중에 머물지 않는다)');
+  assert.ok(collector.idleLimitMs(2) >= 30_000 && collector.idleLimitMs(10) === 50_000);
+});
+
+test('반증 6 — 다시 연결은 60초 검사가 먼저(거절되면 정지를 풀지 않는다) · 수집 중이 아니어도 대상을 주면 정지만 푼다', () => {
+  const t = { id: 'fm-r0000001', host: '10.0.0.10', port: 22, username: 'u' };
+  const runner = svc.localRunner;
+  const dev = collector.authDevOf(t, svc.focusKeys.keyInfo().fingerprint);
+  collector.focusAuthGuard.markAuthStopped(dev.id, dev, '시험');
+  const r1 = runner.retry(t.id, t);
+  assert.equal(r1.ok, true); assert.equal(r1.running, false);
+  assert.equal(collector.focusAuthGuard.peekAuthStop(dev), null, '정지가 풀렸다');
+  collector.focusAuthGuard.markAuthStopped(dev.id, dev, '다시 거부');
+  const r2 = runner.retry(t.id, t);
+  assert.equal(r2.code, 'too-soon');
+  assert.ok(collector.focusAuthGuard.peekAuthStop(dev), '60초 안의 두 번째 다시 연결은 정지를 풀지 않는다');
+  collector.focusAuthGuard.clearAuthStop(dev.id);
+});
+
+test('반증 5 — 엣지 연결 시험은 한 번 내려보내면 60초 동안 다시 내려보내지 않는다', () => {
+  store._resetForTest();
+  store.requestEdgeTest('fm-t0000001', 'edge-pl', 1_000);
+  assert.deepEqual(store.pendingTestsFor('edge-pl', 2_000), ['fm-t0000001']);
+  assert.deepEqual(store.pendingTestsFor('edge-pl', 4_000), [], '2초 뒤 동기화에 다시 주지 않는다');
+  assert.deepEqual(store.pendingTestsFor('edge-pl', 63_000), ['fm-t0000001'], '60초가 지나도 결과가 없으면 한 번 더');
+  store._resetForTest();
 });

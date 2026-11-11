@@ -21,7 +21,7 @@ import { IOSTAT_COLS, summaryOf } from './rates.js';
 export const CODEC_VERSION = 1;
 const SCALE = 100;
 const MAX_KEYS = 4096;
-const MAX_N = 3600;
+const MAX_N = 120; // 분당 표본 상한 — 정상은 주기 1초여도 60개. 엣지가 같은 분에 표본을 수천 개 보내 메모리를 붙잡지 못하게(2026-11-11 반증 1번)
 
 /* ── 표본 → 시리즈 ───────────────────────────────────────────────────────────── */
 
@@ -29,25 +29,8 @@ const MAX_N = 3600;
 export function flattenSample(s) {
   const row = new Map();
   const put = (k, v) => { row.set(k, typeof v === 'number' && Number.isFinite(v) ? v : null); };
-  if (s?.cpu) {
-    for (const k of ['pct', 'usr', 'sys', 'iow', 'stl', 'irq']) put(`c.${k}`, s.cpu[k]);
-    (s.cpu.cores || []).forEach((v, i) => put(`c.k${i}`, v));
-  }
-  if (Array.isArray(s?.load)) { put('l.1', s.load[0]); put('l.5', s.load[1]); put('l.15', s.load[2]); }
-  put('l.run', s?.run); put('l.blk', s?.blk);
-  if (s?.mem) for (const k of ['pct', 'total', 'used', 'avail', 'bc', 'free', 'swT', 'swU', 'dirty', 'slab']) put(`m.${k}`, s.mem[k]);
-  const meta = { net: {}, dsk: {} };
-  for (const x of s?.net || []) {
-    for (const k of ['rx', 'tx', 'u', 'er', 'dr']) put(`n.${x.n}.${k}`, x[k]);
-    meta.net[x.n] = { k: x.k, sp: x.sp, st: x.st, m: x.m, md: x.md, mem: x.mem, act: x.act };
-  }
-  for (const d of s?.dsk || []) {
-    IOSTAT_COLS.forEach((c, i) => put(`d.${d.n}.${c}`, d.v[i]));
-    put(`d.${d.n}.fl`, d.fl);
-    meta.dsk[d.n] = { dn: d.dn, k: d.k, p: d.p, mp: d.mp, sz: d.sz };
-  }
-  if (Array.isArray(s?.dtot)) IOSTAT_COLS.forEach((c, i) => put(`t.${c}`, s.dtot[i]));
-  // 요약 열(개요 · 비교 · 정렬이 같은 값을 쓴다 — rates.summaryOf 하나). 수신 · 송신 합은 맨 위 인터페이스(본딩 · 본딩에 묶이지 않은 물리)만.
+  // 요약 열(s.*)과 전체 디스크(t.*)를 **먼저** 넣는다 — 열 상한(MAX_KEYS)에 닿으면 뒤에 넣은 장치별 열부터 버려진다.
+  //   예전에는 맨 뒤에 넣어 코어 64 · 디스크 300 서버에서 s.cpu 가 빠져 개요 · 비교가 그 서버만 '—' 였다(2026-11-11 반증 8번).
   const sum = summaryOf(s);
   if (sum) { put('s.cpu', sum.cpu); put('s.mem', sum.mem); put('s.net', sum.net); put('s.disk', sum.disk); put('s.wa', sum.wAwait); put('s.ra', sum.rAwait); }
   let rx = null; let tx = null;
@@ -57,6 +40,24 @@ export function flattenSample(s) {
     if (x.tx != null) tx = (tx ?? 0) + x.tx;
   }
   put('s.rx', rx); put('s.tx', tx);
+  if (Array.isArray(s?.dtot)) IOSTAT_COLS.forEach((c, i) => put(`t.${c}`, s.dtot[i]));
+  if (s?.cpu) {
+    for (const k of ['pct', 'usr', 'sys', 'iow', 'stl', 'irq']) put(`c.${k}`, s.cpu[k]);
+    (s.cpu.cores || []).forEach((v, i) => put(`c.k${i}`, v));
+  }
+  if (Array.isArray(s?.load)) { put('l.1', s.load[0]); put('l.5', s.load[1]); put('l.15', s.load[2]); }
+  put('l.run', s?.run); put('l.blk', s?.blk);
+  if (s?.mem) for (const k of ['pct', 'total', 'used', 'avail', 'bc', 'free', 'swT', 'swU', 'dirty', 'slab']) put(`m.${k}`, s.mem[k]);
+  const meta = { net: Object.create(null), dsk: Object.create(null) }; // 이름은 원격에서 온다 — 프로토타입 없는 객체
+  for (const x of s?.net || []) {
+    for (const k of ['rx', 'tx', 'u', 'er', 'dr']) put(`n.${x.n}.${k}`, x[k]);
+    meta.net[x.n] = { k: x.k, sp: x.sp, st: x.st, m: x.m, md: x.md, mem: x.mem, act: x.act };
+  }
+  for (const d of s?.dsk || []) {
+    IOSTAT_COLS.forEach((c, i) => put(`d.${d.n}.${c}`, d.v[i]));
+    put(`d.${d.n}.fl`, d.fl);
+    meta.dsk[d.n] = { dn: d.dn, k: d.k, p: d.p, mp: d.mp, sz: d.sz };
+  }
   return { row, meta };
 }
 
@@ -69,7 +70,14 @@ export function appendToBlock(block, ts, row, meta) {
   let idx = block.ts.length;
   if (idx && ts <= block.ts[idx - 1]) {
     idx = block.ts.findIndex((x) => x >= ts);
-    if (block.ts[idx] === ts) { for (const [k, v] of row) { if (!block.cols.has(k)) block.cols.set(k, new Array(block.ts.length).fill(null)); block.cols.get(k)[idx] = v; } return true; }
+    if (block.ts[idx] === ts) {
+      for (const [k, v] of row) {
+        if (!block.cols.has(k)) { if (block.cols.size >= MAX_KEYS) continue; block.cols.set(k, new Array(block.ts.length).fill(null)); }
+        block.cols.get(k)[idx] = v;
+      }
+      if (meta) block.meta = meta;
+      return true;
+    }
     block.ts.splice(idx, 0, ts);
     for (const arr of block.cols.values()) arr.splice(idx, 0, null);
   } else {
