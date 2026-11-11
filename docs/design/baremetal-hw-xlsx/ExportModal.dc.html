@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>하드웨어 정보 엑셀로 내보내기 창</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Noto+Sans+KR:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 640px; height: 1280px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: Inter, 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; font-size: 13px; padding: 40px; display: flex; flex-direction: column; align-items: center;">
+
+<div style="width: 560px; background: #141b2d; border: 1px solid #243049; border-radius: 12px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column;">
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #1f2a40;">
+    <h1 style="margin: 0; font-size: 16px; font-weight: 700;">베어메탈 하드웨어 정보 엑셀로 내보내기</h1>
+    <button type="button" aria-label="닫기" style="width: 44px; height: 44px; margin: -8px -10px -8px 0; border: 0; background: transparent; color: #8b9bb4; font-size: 18px; cursor: pointer;">×</button>
+  </div>
+
+  <div style="padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 14px;">
+
+    <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <span style="font-size: 12px; color: #8b9bb4;">법인(vCenter)</span>
+        <span style="margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap;">
+          <button type="button" onClick="{{selAll}}" style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 12px; cursor: pointer;">모두</button>
+          <button type="button" onClick="{{selNone}}" style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 12px; cursor: pointer;">모두 해제</button>
+          <button type="button" onClick="{{selScreen}}" style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 12px; cursor: pointer;">화면 필터대로</button>
+        </span>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <sc-for list="{{corpChips}}" as="c" hint-placeholder-count="5">
+          <button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}">{{c.label}}<span style="{{c.countStyle}}">{{c.count}}</span></button>
+        </sc-for>
+      </div>
+      <div style="font-size: 12px; color: #c7d2e3; line-height: 1.6;">{{rangeText}}</div>
+      <sc-if value="{{noneSel}}" hint-placeholder-val="{{false}}">
+      <div style="font-size: 12px; color: #fbbf24;">법인을 하나 이상 고르세요.</div>
+      </sc-if>
+      <sc-if value="{{hasMissing}}" hint-placeholder-val="{{true}}">
+      <div style="font-size: 12px; color: #8b9bb4; line-height: 1.6;">{{missingText}}</div>
+      </sc-if>
+    </div>
+
+    <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+      <div style="font-size: 12px; color: #8b9bb4;">시트</div>
+      <label style="display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; min-height: 24px;"><input type="checkbox" checked="checked" disabled="disabled" style="width: 18px; height: 18px; margin-top: 1px; accent-color: #3b82f6; flex: none;"><span><b>서버 요약</b> <span style="color: #8b9bb4;">— 서버 한 대 = 한 줄 · Hostname · 모델 · 서비스태그 · CPU · 메모리 · 디스크 합계 (항상 포함)</span></span></label>
+      <sc-for list="{{sheetChecks}}" as="s" hint-placeholder-count="5">
+        <label style="display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; min-height: 24px;"><input type="checkbox" checked="{{s.on}}" onChange="{{s.toggle}}" style="width: 18px; height: 18px; margin-top: 1px; accent-color: #3b82f6; flex: none;"><span><b>{{s.name}}</b> <span style="color: #8b9bb4;">— {{s.desc}}</span></span></label>
+      </sc-for>
+      <label style="display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; min-height: 24px;"><input type="checkbox" checked="checked" disabled="disabled" style="width: 18px; height: 18px; margin-top: 1px; accent-color: #3b82f6; flex: none;"><span><b>안내</b> <span style="color: #8b9bb4;">— 열의 뜻 · 값의 출처 · 빈 칸의 뜻 · 인벤토리가 없는 서버 목록 (항상 포함)</span></span></label>
+    </div>
+
+    <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #c7d2e3; line-height: 1.6;">
+      <div style="font-size: 12px; color: #8b9bb4;">값의 출처와 한계</div>
+      <div>· 하드웨어 값은 <b style="color: #e6edf6;">iDRAC(Redfish) 인벤토리</b>에서 옵니다 — 서버 상세 화면과 같은 저장값이고, 내려받을 때 장비에 다시 접속하지 않습니다.</div>
+      <div>· <b style="color: #e6edf6;">디스크는 물리 디스크 기준</b>입니다(장착 수 · 개별 용량). RAID 구성 뒤 가용 용량이나 OS 파일시스템 사용량이 아닙니다.</div>
+      <div>· Hostname 은 iDRAC 이 보고하는 OS 호스트 이름입니다. 보고하지 않는 서버는 빈 칸으로 둡니다(지어내지 않음).</div>
+      <div>· 엣지(법인 현장) 서버는 그 엣지가 올린 축약 인벤토리를 씁니다. 시리얼 번호는 넣지 않습니다.</div>
+    </div>
+
+    <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #c7d2e3; line-height: 1.6;">
+      <div style="font-size: 12px; color: #8b9bb4;">파일에 들어가는 서식</div>
+      <div>· 맨 위 요약 칸(서버 · CPU 코어 · 메모리 · 디스크 합계 · 인벤토리 없음)</div>
+      <div>· 머리글 고정 · 모든 시트 자동 필터 · 줄무늬</div>
+      <div>· 숫자는 숫자 서식(코어 · GB) — 합계 · 피벗을 바로 낼 수 있음</div>
+      <div>· 인쇄: A4 가로 한 쪽 너비 맞춤 · 머리글 반복</div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+      <span style="font-size: 11px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace; word-break: break-all; flex: 1; min-width: 0;">{{fileName}}</span>
+      <span style="font-size: 11px; color: #8b9bb4;">{{sheetCount}}</span>
+    </div>
+    <button type="button" disabled="{{noneSel}}" style="{{dlStyle}}">엑셀 내려받기</button>
+  </div>
+</div>
+
+<div style="width: 560px; margin-top: 18px; font-size: 12px; color: #8b9bb4; line-height: 1.6; display: flex; flex-direction: column; gap: 4px;">
+  <div><b style="color: #e6edf6;">창의 기본값</b> — 모든 법인 선택(GPU 할당율 엑셀 창과 같은 규칙) · 시트는 CPU · 메모리 · 디스크 켬, NIC · GPU 끔. ‘화면 필터대로’ 는 ① 화면의 법인 필터를 가져옵니다.</div>
+  <div>범위 계정은 자기 범위의 법인만 칩으로 보입니다. ‘미지정’ 칩(법인 귀속이 없는 서버)은 전체 범위 계정에만 보입니다.</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":640,"height":1280}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { sel: null, sheets: { cpu: true, dimm: true, disk: true, nic: false, gpu: false } }; }
+  renderVals() {
+    const S = this.state;
+    // count = 베어메탈 수, inv = 그 가운데 인벤토리가 있는 수 (③ 엑셀 시안의 10대와 같은 구성)
+    const corps = [
+      { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast-01', count: 3, inv: 3 },
+      { id: 'vc-us-east', name: 'vcenter-us-east-01', count: 2, inv: 2 },
+      { id: 'vc-us-west', name: 'vcenter-us-west-01', count: 1, inv: 0 },
+      { id: 'vc-eu-central', name: 'vcenter-eu-central-01', count: 3, inv: 2 },
+      { id: '__none__', name: '미지정', count: 1, inv: 1 },
+    ];
+    const screenSel = ['vc-ap-northeast'];
+    const sel = S.sel == null ? corps.map((c) => c.id) : S.sel;
+    const isOn = (id) => sel.indexOf(id) >= 0;
+    const corpChips = corps.map((c) => {
+      const on = isOn(c.id);
+      return { label: c.name, count: c.count + '대', on,
+        pick: () => this.setState({ sel: on ? sel.filter((x) => x !== c.id) : sel.concat([c.id]) }),
+        style: 'height: 30px; padding: 0 8px 0 10px; display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; border: 1px solid ' + (on ? '#3b82f6' : '#243049') + '; background: ' + (on ? 'rgba(59, 130, 246, 0.18)' : '#141b2d') + '; color: ' + (on ? '#e6edf6' : '#8b9bb4') + '; font-size: 12px; font-family: \'JetBrains Mono\', monospace; cursor: pointer;',
+        countStyle: 'font-family: Inter, \'Noto Sans KR\', sans-serif; font-size: 11px; padding: 1px 6px; border-radius: 10px; background: ' + (on ? 'rgba(59, 130, 246, 0.35)' : '#1f2a40') + '; color: ' + (on ? '#e6edf6' : '#8b9bb4') + ';' };
+    });
+    const picked = corps.filter((c) => isOn(c.id));
+    const total = picked.reduce((a, c) => a + c.count, 0);
+    const inv = picked.reduce((a, c) => a + c.inv, 0);
+    const allOn = picked.length === corps.length;
+    const rangeText = picked.length === 0 ? '고른 법인 없음'
+      : (allOn ? '모든 법인' : '법인 ' + picked.length + '곳') + ' · 베어메탈 ' + total + '대 (인벤토리 있음 ' + inv + '대 · 없음 ' + (total - inv) + '대)';
+    const defs = [
+      { key: 'cpu', name: 'CPU', desc: '소켓 한 개 = 한 줄 · 모델 · 코어' },
+      { key: 'dimm', name: '메모리(DIMM)', desc: 'DIMM 한 개 = 한 줄 · 슬롯 · 크기 · 종류 · 속도 · 제조사 · 부품번호' },
+      { key: 'disk', name: '디스크', desc: '물리 디스크 한 개 = 한 줄 · 모델 · 용량 · 매체(SSD/HDD) · 인터페이스' },
+      { key: 'nic', name: 'NIC', desc: '어댑터 한 개 = 한 줄 · 모델 · 포트 수 · 최고 링크 속도 (기본 끔)' },
+      { key: 'gpu', name: 'GPU', desc: 'GPU 한 장 = 한 줄 · 모델 · 메모리 (기본 끔)' },
+    ];
+    const sheetChecks = defs.map((d) => ({ name: d.name, desc: d.desc, on: !!S.sheets[d.key],
+      toggle: () => this.setState({ sheets: Object.assign({}, S.sheets, { [d.key]: !S.sheets[d.key] }) }) }));
+    const onCount = defs.filter((d) => S.sheets[d.key]).length;
+    const noneSel = picked.length === 0;
+    const scopePart = allOn ? 'all' : picked.length === 1 ? (picked[0].id === '__none__' ? 'unassigned' : picked[0].name) : picked.length + 'corps';
+    return {
+      corpChips, rangeText, noneSel, sheetChecks,
+      hasMissing: total - inv > 0,
+      missingText: '인벤토리가 없는 ' + (total - inv) + '대(iDRAC 등록이 없거나 아직 한 번도 읽지 못한 서버)도 서버 요약에 한 줄로 넣고, 하드웨어 칸은 비운 채 비고에 사유를 적습니다 — 대수가 화면과 달라지지 않게.',
+      selAll: () => this.setState({ sel: null }), selNone: () => this.setState({ sel: [] }), selScreen: () => this.setState({ sel: screenSel.slice() }),
+      fileName: 'baremetal-hardware_' + scopePart + '_20261111-1030.xlsx',
+      sheetCount: '시트 ' + (2 + onCount) + '장',
+      dlStyle: 'height: 44px; border-radius: 8px; border: 1px solid ' + (noneSel ? '#243049' : '#3b82f6') + '; background: ' + (noneSel ? '#1f2a40' : '#1d4ed8') + '; color: ' + (noneSel ? '#8b9bb4' : '#ffffff') + '; font-size: 14px; font-weight: 600; cursor: ' + (noneSel ? 'not-allowed' : 'pointer') + ';',
+    };
+  }
+}
+</script>
+</body>
+</html>
