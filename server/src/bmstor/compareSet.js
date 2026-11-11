@@ -10,7 +10,10 @@
  *
  * 규칙(설계 bm-san-compare §3 · 루트 '못 읽은 값은 0 이 아니다'):
  *  · 못 읽은 칸은 null · 사유는 **코드**(문장은 웹 compareSetText.js).
- *  · 합(전송 속도 · IOPS)은 **측정된 구성원 전부에 값이 있는 칸만**(부분 합 금지 — ioSeries.sumSeries 와 같은 규칙). 피크 합은 동시 피크의 상한.
+ *  · 합(전송 속도 · IOPS)은 **측정된 구성원 전부에 값이 있는 칸만**(부분 합 금지 — ioSeries.sumSeries 와 같은 규칙).
+ *  · v2.969: **피크 = 2초 표본과 구간 평균 중 큰 값**(구간의 실제 최고치는 그 구간 평균보다 작을 수 없다 — 2초 표본만 쓰면 한가한 순간에 걸려
+ *    피크 < 평균이 나왔다. 사용자 화면 2026-11-11). 묶음의 피크 합 = 구성원 피크(하한)의 합 — 같은 시각에 일어났다는 보장은 없다
+ *    (v2.962 의 ‘동시 피크의 상한’ 은 틀린 설명이었다 — 정정).
  *  · 응답 시간은 평균의 평균이 아니라 **I/O 가중**(Σ소요 ms ÷ ΣI/O 횟수) — 칸 · 서버를 묶을 때도 합으로 낸다.
  *  · 바쁨은 ‘가장 바쁜 것’ — 서버는 가장 바쁜 디스크, 묶음은 가장 바쁜 서버, 어레이는 가장 바쁜 디렉터(FA busy) 또는 노드 · SP CPU. 뜻이 달라 화면이 출처를 함께 쓴다.
  */
@@ -49,6 +52,13 @@ export function gridMs(baseMs, sampleFloorMs = 0) {
 }
 
 const blank = (n) => ({ avg: new Array(n).fill(null), peak: new Array(n).fill(null) });
+/** 둘 중 큰 값 — 한쪽이 없으면 있는 쪽(피크 하한 = max(2초 표본, 구간 평균)). */
+const up = (a, b) => { const x = numOrNull(a); const y = numOrNull(b); return x == null ? y : y == null ? x : Math.max(x, y); };
+/** 칸마다 피크를 평균 위로(평균만 있는 칸은 평균이 피크의 하한). 제자리 수정. */
+function liftPeak(m) {
+  for (let i = 0; i < m.avg.length; i++) m.peak[i] = up(m.peak[i], m.avg[i]);
+  return m;
+}
 const idxOf = (t, b0, bucketMs, n) => { const i = Math.floor((Number(t) - b0) / bucketMs); return i >= 0 && i < n ? i : -1; };
 
 /**
@@ -73,9 +83,10 @@ export function bucketize(points, buckets, bucketMs) {
 /** 베어메탈 원시 행(ioDb.ioRawRows) → 지표 넷. 응답 시간 평균은 칸 안 Σd_ticks ÷ Σd_ios(I/O 가 0 이면 null). */
 export function bmMetricsFromRaw(rows, buckets, bucketMs) {
   const n = buckets.length;
-  const tput = bucketize((rows || []).map((r) => ({ t: r.ts, v: r.avgTotal, p: r.instTotal })), buckets, bucketMs);
-  const iops = bucketize((rows || []).map((r) => ({ t: r.ts, v: r.avgIops, p: r.instIops })), buckets, bucketMs);
-  const busy = bucketize((rows || []).map((r) => ({ t: r.ts, v: r.avgBusy, p: r.busy })), buckets, bucketMs);
+  // v2.969: 피크 후보 = max(2초 표본, 그 행의 구간 평균) — 행마다 올린 뒤 칸의 최댓값.
+  const tput = bucketize((rows || []).map((r) => ({ t: r.ts, v: r.avgTotal, p: up(r.instTotal, r.avgTotal) })), buckets, bucketMs);
+  const iops = bucketize((rows || []).map((r) => ({ t: r.ts, v: r.avgIops, p: up(r.instIops, r.avgIops) })), buckets, bucketMs);
+  const busy = bucketize((rows || []).map((r) => ({ t: r.ts, v: r.avgBusy, p: up(r.busy, r.avgBusy) })), buckets, bucketMs);
   const lat = { ...blank(n), sDios: new Array(n).fill(null), sDticks: new Array(n).fill(null) };
   if (n) {
     const b0 = buckets[0];
@@ -84,11 +95,13 @@ export function bmMetricsFromRaw(rows, buckets, bucketMs) {
       if (i < 0) continue;
       const di = numOrNull(r.dIos); const dt = numOrNull(r.dTicks);
       if (di != null && dt != null && di >= 0 && dt >= 0) { lat.sDios[i] = (lat.sDios[i] ?? 0) + di; lat.sDticks[i] = (lat.sDticks[i] ?? 0) + dt; }
-      const p = numOrNull(r.instLat);
+      const rowLat = di != null && dt != null && di > 0 && dt >= 0 ? Math.round((dt / di) * 100) / 100 : null;
+      const p = up(r.instLat, rowLat);
       if (p != null) lat.peak[i] = lat.peak[i] == null ? p : Math.max(lat.peak[i], p);
     }
     for (let i = 0; i < n; i++) lat.avg[i] = lat.sDios[i] > 0 ? Math.round((lat.sDticks[i] / lat.sDios[i]) * 100) / 100 : null;
   }
+  liftPeak(tput); liftPeak(iops); liftPeak(lat); liftPeak(busy);
   return { tput, iops, lat, busy };
 }
 
@@ -118,12 +131,14 @@ export function bmMetricsFromRollup(rows, buckets, bucketMs) {
     if (acc.seen[i] && acc.nIops[i]) { out.lat.sDios[i] = acc.sDios[i]; out.lat.sDticks[i] = acc.sDticks[i]; }
     out.lat.avg[i] = acc.sDios[i] > 0 ? Math.round((acc.sDticks[i] / acc.sDios[i]) * 100) / 100 : null;
   }
+  // v2.969: v2.969 이전 집계 행의 max_* 는 2초 표본뿐이다 — 읽을 때 칸 평균 위로 올린다(새 행은 적재 때 이미 올라가 있다).
+  liftPeak(out.tput); liftPeak(out.iops); liftPeak(out.lat); liftPeak(out.busy);
   return out;
 }
 
 /**
  * 베어메탈 여러 대 → 묶음(그룹 · 법인). 측정된 구성원(그 지표에 값이 하나라도 있는 서버)만 보고, 칸마다 그 구성원 **전부**에 값이 있을 때만 낸다.
- *  · 전송 속도 · IOPS: 합(sumSeries) · 응답 시간: Σd_ticks ÷ Σd_ios · 바쁨: 최댓값(가장 바쁜 서버).
+ *  · 전송 속도 · IOPS: 합(sumSeries — 피크도 구성원 전부의 합 · 구성원 피크가 비면 그 구성원의 평균) · 응답 시간: Σd_ticks ÷ Σd_ios · 바쁨: 최댓값(가장 바쁜 서버).
  * @returns {{ metrics:{tput,iops,lat,busy}, measured:Object<string,number>, partial:Object<string,number> }}
  */
 export function combineBm(members, n) {

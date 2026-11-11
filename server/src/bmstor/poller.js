@@ -28,6 +28,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { isMockMode, demoBmResults, isDemoId } from '../mock/demo/storage.js';
 // v2.915(설계 bm-san-compare §4.1·§4.5): 디스크 I/O 표본 — 결과 묶음마다 중앙 I/O 시계열 DB 에 적재(엣지 위임 서버도 중앙이 적재한다).
 import { ioSampleSec } from './diskstats.js';
+import { sanitizeDiskMap } from './diskMap.js';   // v2.969 — 엣지가 보낸 디스크별 누적 카운터(중앙 화이트리스트)
 import { recordIoSamples, pruneBmIo } from './ioDb.js';
 
 /**
@@ -137,6 +138,9 @@ export function sanitizeBmIo(io) {
   if (countersOk) {
     const io3 = [numOrNull(c.rdIos), numOrNull(c.wrIos), numOrNull(c.rwTicks)];
     if (io3.every((v) => v != null && v >= 0)) { counters.rdIos = io3[0]; counters.wrIos = io3[1]; counters.rwTicks = io3[2]; }
+    // v2.969: 디스크별 누적 카운터(엣지 export 새 필드 = 중앙 화이트리스트) — 구간 평균 · 바쁨 평균을 디스크별로 낸다(diskstats.intervalAvg).
+    const disks = sanitizeDiskMap(c.disks);
+    if (disks) counters.disks = disks;
   }
   const nn = (v) => { const n = numOrNull(v); return n == null || n < 0 ? null : n; };
   return {

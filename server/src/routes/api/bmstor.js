@@ -205,7 +205,7 @@ export function registerBmStorage(api) {
       if (gran === 'raw') {
         const rows = await ioRawRows(id, since, until);
         if (!rows) return null;
-        return seriesFromRaw(rows.map((r) => ({ ts: r.ts, avgTotal: pick(r, 'avg'), instTotal: pick(r, 'inst'), busy: r.busy })), buckets, bucketMs);
+        return seriesFromRaw(rows.map((r) => ({ ts: r.ts, avgTotal: pick(r, 'avg'), instTotal: pick(r, 'inst'), busy: r.busy, avgBusy: r.avgBusy })), buckets, bucketMs);
       }
       const rows = await ioRollupRows(gran, id, since, until);
       if (!rows) return null;

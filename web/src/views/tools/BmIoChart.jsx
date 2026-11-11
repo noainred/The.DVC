@@ -4,7 +4,7 @@
  * 데이터: GET /tools/bm-storage/io/series?range&metric&ids&rank=1[&datacenterId&types&to]
  *  · 실시간 1시간(최근 구간)만 30초마다 다시 읽는다(고른 ≤8 계열 — 가벼운 조회). 24시간 이상 · 과거 구간은 마운트 1회 + 버튼.
  *  · 늦게 온 이전 응답은 버린다(요청 키 대조). 숫자(격자 · 점 간격 · 보존)는 전부 응답 값으로 문장을 만든다.
- *  · 실선 = 평균(베어메탈은 카운터 차분 · SAN 은 5분 표본 평균) · 점선 = 피크(표본 최댓값 — 하한). 결측은 끊긴 선(0 으로 그리지 않는다).
+ *  · 실선 = 평균(베어메탈은 카운터 차분 · SAN 은 5분 표본 평균) · 점선 = 피크(베어메탈은 2초 표본과 구간 평균 중 큰 값 · SAN 은 표본 최댓값 — 둘 다 하한 · v2.969). 결측은 끊긴 선(0 으로 그리지 않는다).
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
@@ -132,7 +132,7 @@ export default function BmIoChart({ dcParam = '', types = '', dcNames = [], refr
           </button>
         )}
         <div className="bm2-foot">
-          <b>평균</b>의 뜻 — 베어메탈은 <b>카운터 차분 평균</b>(수집 사이 구간 전체의 진짜 평균 — /proc/diskstats 누적값 차이 ÷ 시간), SAN 은 <b>포트 표본의 평균</b>(portperfshow 순간값). <b>피크</b>는 양쪽 다 <b>표본 중 최댓값</b>이라 실제 순간 피크의 하한입니다.
+          <b>평균</b>의 뜻 — 베어메탈은 <b>카운터 차분 평균</b>(수집 사이 구간 전체의 진짜 평균 — /proc/diskstats 누적값 차이 ÷ 시간), SAN 은 <b>포트 표본의 평균</b>(portperfshow 순간값). <b>피크</b>는 베어메탈은 <b>2초 표본과 구간 평균 중 큰 값</b>, SAN 은 <b>표본 중 최댓값</b>이라 양쪽 다 실제 순간 피크의 하한입니다.
         </div>
       </div>
 

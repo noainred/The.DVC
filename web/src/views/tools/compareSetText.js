@@ -67,7 +67,7 @@ export function kindBadge(kind, type = '') {
 
 /** 출처 코드 → 짧은 문장(셀 아래 · 각주). */
 const SOURCES = {
-  diskstats: '서버 /proc/diskstats(평균 = 카운터 차분 · 피크 = 2초 표본 최댓값)',
+  diskstats: '서버 /proc/diskstats(평균 = 디스크별 카운터 차분 · 피크 = 2초 표본과 구간 평균 중 큰 값)',
   'diskstats-busy': '가장 바쁜 디스크의 사용률(iostat %util 과 같은 뜻)',
   'switch-port': 'SAN 스위치 포트 트래픽(어레이 포트 합 · 5분 표본)',
   'array-fe-hbps': '어레이가 보고한 호스트 처리량(스위치 포트에서 이 어레이를 찾지 못해 대신 씀)',
