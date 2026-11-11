@@ -19,6 +19,7 @@ const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx'))
 import TransportPanel from './collectors/TransportPanel.jsx';
 import { transportBadge, formHttpNote, importHttpNote } from './collectors/transportText.js';
 import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
+import { autoOptionText, matchNote, saveText as dcSaveText } from './collectors/collectorDcText.js'; // v2.970: 수집 서버 ↔ 법인 매칭
 import { edgeSyncLine, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: 엣지 자동 업그레이드 한 줄 + '구버전 엣지 밀어 넣기'
 
 // S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
@@ -45,6 +46,14 @@ export default function Collectors() {
   const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — CSV 일괄 관리(v2.338)
   const csvOk = canCsv(); // v2.643: CSV 가져오기/내보내기는 관리자 이상 + data.csv 권한만
   const [diag, setDiag] = useState(null); // { collector, cards[] } — 경고 배지 상세(v2.437)
+  const [dcBusy, setDcBusy] = useState('');  // v2.970: 법인 매칭 저장 중인 수집 서버 id(그 행만 잠근다)
+  // v2.970: 수집 서버 ↔ 법인(DataCenter) 매칭 저장 — 수동 고정(🔒)을 바꾸지 않는 전용 경로. '' = 해제(이름 맞춤).
+  const saveDc = async (c, dcId) => {
+    setDcBusy(c.id); setBanner(null);
+    try { const text = dcSaveText(await putJson(`/admin/collectors/${encodeURIComponent(c.id)}/datacenter`, { datacenterId: dcId }), c.id, dcs); await load(); setBanner({ ok: true, text }); }
+    catch (e) { setBanner({ ok: false, text: e.message }); }
+    finally { setDcBusy(''); }
+  };
 
   const load = async () => {
     try { setData(await fetchJson('/admin/collectors')); setError(null); }
@@ -459,10 +468,10 @@ export default function Collectors() {
       <div className="table-wrap">
         <STable>
           <thead><tr>
-            {th('id', 'ID')}{th('name', '이름')}{th('datacenter', '데이터센터')}{th('url', 'URL')}{th('state', '상태')}{th('hosts', '호스트')}{th('version', '버전')}{th('sync', '최근 동기화')}{th('enabled', '수집')}<th className="right">작업</th>
+            {th('id', 'ID')}{th('name', '이름')}{th('datacenter', '데이터센터(엣지 라벨)')}<th title="이 수집 서버(Agent)가 수집한 서버를 어느 법인(DataCenter)으로 볼지 — 서버 분석 · 통합 서버 인벤토리 · 전력 분석이 씁니다">법인 매칭</th>{th('url', 'URL')}{th('state', '상태')}{th('hosts', '호스트')}{th('version', '버전')}{th('sync', '최근 동기화')}{th('enabled', '수집')}<th className="right">작업</th>
           </tr></thead>
           <tbody>
-            {sortedList.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 28 }}>등록된 수집 서버가 없습니다. “+ 수집 서버 추가”로 등록하세요.</td></tr>}
+            {sortedList.length === 0 && <tr><td colSpan={11} className="center muted" style={{ padding: 28 }}>등록된 수집 서버가 없습니다. “+ 수집 서버 추가”로 등록하세요.</td></tr>}
             {sortedList.map((c) => {
               const s = status[c.id];
               const cards = rowCards(c, s, ident);
@@ -471,6 +480,22 @@ export default function Collectors() {
                   <td><b>{c.id}</b></td>
                   <td>{c.name}</td>
                   <td>{c.datacenter ? <span className="badge blue">{c.datacenter}</span> : <span className="muted">—</span>}</td>
+                  <td style={{ minWidth: 180 }}>
+                    {(() => {
+                      const m = (data.dcMatch || {})[c.id] || null;
+                      const note = matchNote(m, dcs);
+                      return (
+                        <>
+                          <Select sort={false} className="select" value={m?.via === 'manual' ? m.id : ''} disabled={dcBusy === c.id || !dcs.length} onChange={(e) => saveDc(c, e.target.value)}
+                            style={{ padding: '3px 6px', fontSize: 12, maxWidth: 220 }} aria-label={`${c.id} 법인 매칭`}>
+                            <option value="">{autoOptionText(m, dcs)}</option>
+                            {dcs.map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}
+                          </Select>
+                          {note.text && <div style={{ fontSize: 11, marginTop: 2, color: note.tone === 'warn' ? 'var(--amber)' : note.tone === 'ok' ? 'var(--green)' : 'var(--text-dim)' }}>{note.text}</div>}
+                        </>
+                      );
+                    })()}
+                  </td>
                   <td className="muted">{c.url}
                     {c.managed && <span className="badge gray" style={{ marginLeft: 6 }} title="관리자가 수동 수정한 항목 — 엣지 자기등록이 URL/토큰을 덮어쓰지 않습니다">🔒 고정</span>}
                     {(() => { const b = transportBadge(c.transport); return b ? <span className={`badge ${b.tone}`} style={{ marginLeft: 6 }} title={b.title}>{b.label}</span> : null; })()}

@@ -43,8 +43,15 @@ export function computePowerBreakdown(snap, measuredList, opts = {}) {
   //  3) 그래도 없으면 원격 수집기 라벨/collectorId를 등록 DataCenter와 매칭(원격 베어메탈 귀속)
   const resolveDc = (m, hi) => {
     if (hi) return String(assign[hi.vcenterId] || '');
+    // v2.970: 사용자가 이 수집 서버를 법인에 매칭했으면 그것이 서버에 붙은 법인(엣지 태그)보다 먼저 — analysisServers.remoteServersResolved 와 같은 순서.
+    const cid = m.collectorId != null ? String(m.collectorId) : '';
+    const manual = cid && opts.collectorDcManual ? String(opts.collectorDcManual.get(cid) || '') : '';
+    if (manual) return manual;
     const explicit = String(m.datacenterId || '').trim();
     if (explicit) return explicit;
+    // 그다음 수집 서버 지도(사용자 매칭 → 이름 맞춤 — analysisServers.collectorDcMaps 하나)를 라우트가 주면 그것.
+    const viaCollector = cid && opts.collectorDc ? String(opts.collectorDc.get(cid) || '') : '';
+    if (viaCollector) return viaCollector;
     return matchDatacenterId([m.datacenterLabel, m.collectorId], datacenters);
   };
 

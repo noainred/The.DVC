@@ -64,6 +64,35 @@ function dedupeByIdCase(list) {
  */
 const loadErr = makeLoadError();
 /** @returns {null|{at:number, reason:string}} 못 읽었으면 사유(원문 — 밖으로 낼 때는 summarizeRegistryError). */
+/** DataCenter id 모양(datacenter/store.js ensureDatacenter 와 같은 규칙 — 소문자 · 64자) — 아니면 ''. */
+export function normDcId(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return /^[a-z0-9._-]{1,64}$/.test(s) ? s : '';
+}
+
+/**
+ * v2.970: 수집 서버 ↔ 법인(DataCenter) 매칭 저장 — 이 필드 하나만 바꾼다(URL · 토큰 · managed 그대로 · normalize 를 다시 돌리지 않는다 —
+ * 평문 HTTP 예외 · SSRF 판정이 이 쓰기로 바뀌지 않게). dcId '' = 매칭 해제(이름 맞춤으로 돌아간다).
+ * 등록부를 읽지 못했으면 쓰지 않는다(빈 목록 위에 저장하면 전 수집 서버 · 토큰을 잃는다 — 형제 쓰기와 같은 태도).
+ * @returns {{ok:true, collector:object, changed:boolean} | {ok:false, status:number, reason:string, code?:string}}
+ */
+export function setCollectorDatacenterId(id, dcId, validIds = null) {
+  if (registryLoadError()) return { ok: false, status: 503, code: 'registryUnreadable', reason: '수집 서버 등록부(collectors.json)를 읽지 못해 바꾸지 않습니다.' };
+  const want = String(dcId ?? '').trim() === '' ? '' : normDcId(dcId);
+  if (String(dcId ?? '').trim() !== '' && !want) return { ok: false, status: 400, reason: '법인(DataCenter) id 형식이 올바르지 않습니다.' };
+  if (want && validIds && !validIds.has(want)) return { ok: false, status: 400, reason: `없는 법인(DataCenter) id: ${want}` };
+  const list = loadCollectors();
+  const idx = list.findIndex((c) => c.id === id);
+  if (idx === -1) return { ok: false, status: 404, reason: `없는 수집 서버: ${id}` };
+  const cur = list[idx];
+  if ((cur.datacenterId || '') === want) return { ok: true, collector: redact(cur), changed: false };
+  const next = { ...cur };
+  if (want) next.datacenterId = want; else delete next.datacenterId;
+  list[idx] = next;
+  save(list);
+  return { ok: true, collector: redact(next), changed: true };
+}
+
 export function registryLoadError() {
   loadCollectors();
   let exists = false;
@@ -268,6 +297,11 @@ function normalize(body, existing = null, ctx = null) {
     token: body.token ? String(body.token) : e.token || '',
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
+  // v2.970(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭'): 사용자가 고른 법인(DataCenter id) — datacenter(엣지가 자기등록 때 보내는
+  //   자유 글자 라벨)와 따로 둔다. 자기등록 · 관리자 폼 · CSV 가져오기는 이 값을 보내지 않으므로 그대로 이어받는다(?? e.datacenterId).
+  //   바꾸는 길은 setCollectorDatacenterId 하나(수동 고정 managed 를 건드리지 않는다). 없으면 필드를 만들지 않는다(예전 파일 모양 그대로).
+  const dcId = normDcId(body.datacenterId !== undefined ? body.datacenterId : e.datacenterId);
+  if (dcId) entry.datacenterId = dcId;
   // 예외 기록: keep 이면 기존 것을 그대로(같은 URL), 아니면 새 판정값(https·루프백이면 지운다 — URL 이 바뀌면 승계하지 않는다).
   if (tp.keep) { if (e.insecureHttp) entry.insecureHttp = e.insecureHttp; }
   else if (tp.exception) entry.insecureHttp = tp.exception;

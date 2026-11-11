@@ -36,7 +36,7 @@ export function buildDcIndex(servers = [], dcOfVc = () => '') {
     if (!dc) {
       const why = s.dcSource === 'scan-ambiguous' ? '스캔 대역이 서로 다른 법인으로 겹칩니다'
         : s.remote ? `수집 서버 ‘${t(s.collectorId) || '?'}’ 의 법인 이름이 DataCenter 목록과 맞지 않습니다`
-          : 'Agent 로 스캔한 대역 밖이고 vCenter 할당도 없습니다';
+          : 'Agent 로 스캔한 대역 밖이고 vCenter 할당도 없습니다';   // ⚠ '수집 서버 ‘' 글자는 makeCorpOf 의 whyCode 판정이 읽는다
       if (key && !whyId.has(key)) whyId.set(key, why);
       const tg = low(s.serviceTag || s.inv?.system?.serviceTag);
       if (tg && !whyTag.has(tg)) whyTag.set(tg, why);
@@ -76,6 +76,8 @@ export function makeCorpOf({ index, dcOfVc, dcName, vcName, agentDc = () => '' }
       || (id.startsWith('host:') && '수동으로 물리 분류한 ESXi 호스트 — vCenter 의 법인 할당이 없습니다')
       || (t(row?.source) !== 'edge' && id && index?.whyId?.get(id)) || index?.whyTag?.get(tag)
       || '수집한 Agent 의 법인을 알 수 없습니다';
-    return { id: '', name: '미지정', src: '', why };
+    // v2.970: 수집 서버(Agent) ↔ 법인 매칭으로 고칠 수 있는 이유면 표지(화면이 설정 › 수집 서버 링크를 단다).
+    const whyCode = /수집 서버 ‘|보고한 에이전트 ‘/.test(why) ? 'collector' : '';
+    return { id: '', name: '미지정', src: '', why, ...(whyCode ? { whyCode } : {}) };
   };
 }
