@@ -23,6 +23,7 @@ const analysis = [
   { id: 'd1', serviceTag: 'DUP', datacenterId: 'AZ' }, { id: 'd2', serviceTag: 'dup', datacenterId: 'OC2' },
 ];
 const index = buildDcIndex(analysis, dcOfVc);
+const idName = (c) => ({ id: c.id, name: c.name });   // v2.969 부터 판정 출처(src)도 싣는다 — 여기서는 법인만 본다
 const corpOf = makeCorpOf({ index, dcOfVc, dcName: (id) => DC_NAME[id] || '', vcName: (id) => ({ 'vc-lab': 'vcenter-lab' }[id] || ''), agentDc: (a) => (a === 'edge-oc2' ? 'OC2' : '') });
 
 test('색인 — 서버 분석의 dcOf(datacenterId || assign[vCenter]) 와 같은 값 · 원격은 remote:<수집>:<id> · 겹치는 태그는 뺀다', () => {
@@ -41,16 +42,16 @@ test('색인 — 서버 분석의 dcOf(datacenterId || assign[vCenter]) 와 같�
 });
 
 test('행 → 법인 — 물리: 색인(id → 태그) → 행 vCenter 의 법인 → 엣지 에이전트의 법인 · 가상화: vCenter 의 법인 · 할당 없는 vCenter 는 따로 · 없으면 미지정', () => {
-  assert.deepEqual(corpOf({ serverId: 'r1', serviceTag: 'BM1', vcenterId: '' }, 'bm'), { id: 'OC2', name: 'OC2 본사' }, 'vCenter 가 없는 물리 전용 서버도 법인으로');
-  assert.deepEqual(corpOf({ serverId: 'zzz', serviceTag: 'bm3' }, 'bm'), { id: 'AZ', name: 'AZ' }, '태그는 대소문자 무시');
+  assert.deepEqual(idName(corpOf({ serverId: 'r1', serviceTag: 'BM1', vcenterId: '' }, 'bm')), { id: 'OC2', name: 'OC2 본사' }, 'vCenter 가 없는 물리 전용 서버도 법인으로');
+  assert.deepEqual(idName(corpOf({ serverId: 'zzz', serviceTag: 'bm3' }, 'bm')), { id: 'AZ', name: 'AZ' }, '태그는 대소문자 무시');
   assert.equal(corpOf({ serverId: 'remote:pl:e9', serviceTag: '' }, 'bm').id, 'AZ');
   assert.equal(corpOf({ serverId: 'x', serviceTag: 'NOPE', vcenterId: 'vc-oc2' }, 'bm').id, 'OC2', '색인에 없으면 행의 vCenter 로');
   assert.equal(corpOf({ serverId: 'edge:edge-oc2:Q', source: 'edge', serviceTag: 'Q', remoteAgent: 'edge-oc2' }, 'bm').id, 'OC2');
   assert.equal(corpOf({ serverId: 'edge:edge-oc2:r1', source: 'edge', serviceTag: '', remoteAgent: 'nope' }, 'bm').id, '', '엣지 보고 행의 id 는 색인 id 와 다른 것이다');
-  assert.deepEqual(corpOf({ name: 'esx1', vcenterId: 'vc-az' }, 'vh'), { id: 'AZ', name: 'AZ' });
-  assert.deepEqual(corpOf({ name: 'esx2', vcenterId: 'vc-az-irs' }, 'vh'), { id: 'AZ', name: 'AZ' }, '같은 법인의 두 vCenter 는 한 법인');
-  assert.deepEqual(corpOf({ name: 'esx3', vcenterId: 'vc-lab', vcenter: 'x' }, 'vh'), { id: `${VC_PREFIX}vc-lab`, name: 'vcenter-lab' }, '법인 할당이 없는 vCenter 는 vCenter 이름으로 따로');
-  assert.deepEqual(corpOf({ serverId: 'r2', serviceTag: 'BM2' }, 'bm'), { id: '', name: '미지정' });
+  assert.deepEqual(idName(corpOf({ name: 'esx1', vcenterId: 'vc-az' }, 'vh')), { id: 'AZ', name: 'AZ' });
+  assert.deepEqual(idName(corpOf({ name: 'esx2', vcenterId: 'vc-az-irs' }, 'vh')), { id: 'AZ', name: 'AZ' }, '같은 법인의 두 vCenter 는 한 법인');
+  assert.deepEqual(idName(corpOf({ name: 'esx3', vcenterId: 'vc-lab', vcenter: 'x' }, 'vh')), { id: `${VC_PREFIX}vc-lab`, name: 'vcenter-lab' }, '법인 할당이 없는 vCenter 는 vCenter 이름으로 따로');
+  assert.deepEqual(idName(corpOf({ serverId: 'r2', serviceTag: 'BM2' }, 'bm')), { id: '', name: '미지정' });
   assert.equal(corpOf({ name: 'esx', serviceTag: 'BM1', vcenterId: 'vc-az' }, 'vh').id, 'AZ', '가상화 호스트는 색인이 아니라 자기 vCenter 의 법인');
 });
 

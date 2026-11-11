@@ -46,6 +46,8 @@ export const PRESETS = Object.freeze([
  */
 export function screenCorpIds(screenVc, vcCorp, corps) {
   if (!screenVc) return null;
+  // v2.969: 화면 필터가 이미 법인(DataCenter) id 다 — 목록에 있으면 그대로. 예전(vCenter 필터) 값이면 대응(vcCorp)으로 옮긴다.
+  if ((corps || []).some((c) => c.id === screenVc)) return new Set([screenVc]);
   const id = screenVc === UNASSIGNED ? UNASSIGNED : (vcCorp && typeof vcCorp === 'object' ? vcCorp[screenVc] : '');
   return id && (corps || []).some((c) => c.id === id) ? new Set([id]) : null;
 }
