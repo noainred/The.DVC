@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **307개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **311개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-10)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-11)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -260,6 +260,10 @@
 | `storage-devices.json` | 설정 | 스토리지 장비 등록부(v2.302). | ✅ | ✅ | ✅ | storage/registry.js |
 | `storage-growth-settings.json` | 설정 | 스토리지 사용량 보존 설정(v2.531). | ✅ | ✅ | ✅ | storage/growthSettings.js |
 | `storage-history.db` | DB | 스토리지 장비(8종) 용량 이력 |  |  | ✅ | storage/db.js |
+| `storage-inspect-ring.json` | 설정 | PowerScale 주간 점검 **실행기**(v2.964 · 설계 README §4). | ✅ | ✅ | ✅ | storage/inspect/runner.js |
+| `storage-inspect-runs.json` | 설정 | 점검 실행 **이력**(v2.964) — `storage-inspect-runs.json`(상태 파일 · 백업 변경 감시 대상 아님). | ✅ | ✅ | ✅ | storage/inspect/store.js |
+| `storage-inspect-state.json` | 설정 | PowerScale 점검 **설정 · 주간 회차 · 보고서 메일**(v2.964 · 중앙만 — 엣지는 회차를 돌리지 않는다). | ✅ | ✅ | ✅ | storage/inspect/schedule.js |
+| `storage-inspect.json` | 설정 | PowerScale 점검 **설정 · 주간 회차 · 보고서 메일**(v2.964 · 중앙만 — 엣지는 회차를 돌리지 않는다). | ✅ | ✅ | ✅ | storage/inspect/schedule.js |
 | `storage-intervals.json` | 설정 | 스토리지 수집 주기(중앙에서 엣지 설정, v2.409). | ✅ | ✅ | ✅ | storage/intervals.js |
 | `storage-latest.json` | 설정 | 이 노드가 수집한 최신 스냅샷 보관(v2.302). | ✅ | ✅ | ✅ | storage/store.js |
 | `storage-nodeload-ring.json` | 설정 | 아이실론 노드 부하 **표본** 폴러(v2.932, 2차 ⑨ · 설계 `docs/design/isilon-node-clients/README.md` §4). | ✅ | ✅ | ✅ | storage/nodeLoadPoller.js |
