@@ -10,8 +10,8 @@ import { dayStamp } from '../../dayStamp.js';
 import { fleetPartialsNote, fleetHeldNote, fleetHeldBadge } from '../fleetPartialText.js'; // v2.607 LEFT2607-02 · v2.744(감사 후속 FC): 등록부 손상으로 직전 목록 유지
 import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 실패 본문(400 · 200+ok:false)을 성공으로 읽지 않는다
 import { prunePlan, pruneDoneText } from './fleetPruneText.js'; // v2.783(점검 Q2 P-B3): 확인창은 미리보기 결과로
-import { FleetHwExportModal } from './FleetHwExportModal.jsx';
-import { CORP_SRC, inCorp, corpOptions } from './fleetCorpText.js'; // v2.969: 법인(DataCenter) 기준(수집한 Agent 의 법인) // v2.967: 서버 하드웨어 정보 내보내기(엑셀 · CSV · 사양서)
+import { FleetHwExportModal } from './FleetHwExportModal.jsx'; // v2.967: 서버 하드웨어 정보 내보내기(엑셀 · CSV · 사양서)
+import { CORP_SRC, inCorp, corpOptions, COLLECTOR_DC_HREF } from './fleetCorpText.js'; // v2.969: 법인(DataCenter) 기준(수집한 Agent 의 법인)
 
 /**
  * v2.732(점검 2회차 B5-03): 일괄 등록 응답 → 완료 문구. 실패 본문이면 사유를 던진다(requireChanged).
@@ -58,9 +58,18 @@ const VC_SRC = {
 };
 
 /** 법인 칸 — 이름 + 판정 출처(짧게). 없으면 '미지정' 배지 + 왜 모르는지(서버가 준 corpWhy — 지어내지 않는다). */
-function CorpCell({ row, hideSrc = false }) {
+function CorpCell({ row, hideSrc = false, canFix = false }) {
   // 이유 문장은 칸 안에서 줄바꿈한다(1440px 에서 '현재 전력' · '분류' 열이 가로 스크롤 밖으로 밀리지 않게 — v2.969 Chromium 판독).
-  if (!row.corpId) return <div title={row.corpWhy || ''} style={{ whiteSpace: 'normal', wordBreak: 'keep-all', maxWidth: 200, lineHeight: 1.35 }}><span className="badge purple">미지정</span>{row.corpWhy && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{row.corpWhy}</div>}</div>;
+  if (!row.corpId) {
+    return (
+      <div title={row.corpWhy || ''} style={{ whiteSpace: 'normal', wordBreak: 'keep-all', maxWidth: 200, lineHeight: 1.35 }}>
+        <span className="badge purple">미지정</span>
+        {row.corpWhy && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{row.corpWhy}</div>}
+        {/* v2.972: 수집 서버 ↔ 법인 매칭으로 고칠 수 있는 이유면 그 화면으로(설정 › 수집 서버는 관리자 · 전 법인 계정만 연다) */}
+        {canFix && row.corpWhyCode === 'collector' && <a href={COLLECTOR_DC_HREF} style={{ fontSize: 11 }}>수집 서버 법인 매칭 →</a>}
+      </div>
+    );
+  }
   const src = CORP_SRC[row.corpSource];
   return <div style={{ whiteSpace: 'normal', wordBreak: 'keep-all', maxWidth: 200, lineHeight: 1.35 }}>{row.corpName}{src && !hideSrc && <div className="muted" style={{ fontSize: 11 }} title={src[1]}>{src[0]}</div>}</div>;
 }
@@ -261,7 +270,7 @@ export function FleetInventory({ isAdmin }) {
                     <td className="muted" style={{ fontSize: 12 }}>{b.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.serviceTag || '—'}</td>
                     <td>
-                      <CorpCell row={b} />
+                      <CorpCell row={b} canFix={isAdmin} />
                     </td>
                     <td>
                       {isAdmin

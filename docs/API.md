@@ -22,12 +22,12 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1468개** |
+| 엔드포인트 | **1469개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 150개 |
 | GET | 779개 |
 | POST | 460개 |
-| PUT | 149개 |
+| PUT | 150개 |
 | PATCH | 3개 |
 | DELETE | 77개 |
 
@@ -40,7 +40,7 @@
 | [`/api/upgrade`](#apiupgrade) | 10 | 자동 업그레이드 제어(번들 수신·적용). |
 | [`/api/remote`](#apiremote) | 19 | 원격 접속(HAProxy/SSH/RDP 중계). |
 | [`/api/svcmon`](#apisvcmon) | 68 | 성능점검(서비스 모니터링). 마운트에서 `requirePerm('svcmon')` — v2.506 에 추가된 게이트다. |
-| [`/api/admin`](#apiadmin) | 369 | 설정·관리. `authMiddleware + requireEnrolled + auditMiddleware` 뒤에 있고 대부분 `adminOnly`, 비밀을 다루는 것은 `requireSettingsOwner` 가 추가된다. |
+| [`/api/admin`](#apiadmin) | 370 | 설정·관리. `authMiddleware + requireEnrolled + auditMiddleware` 뒤에 있고 대부분 `adminOnly`, 비밀을 다루는 것은 `requireSettingsOwner` 가 추가된다. |
 | [`/api/auth`](#apiauth) | 11 | 로그인·OTP·`/me`. **로그인 전** 호출되므로 `requireEnrolled` 를 타지 않는다(내부 admin 라우트는 스스로 게이트한다). |
 | [`/api/ping`](#apiping) | 16 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
@@ -108,25 +108,25 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/anomalies` | — | [server/src/routes/insights.js:551](../server/src/routes/insights.js#L551) |
-| POST | `/chatops` | — | [server/src/routes/insights.js:619](../server/src/routes/insights.js#L619) |
+| GET | `/anomalies` | — | [server/src/routes/insights.js:557](../server/src/routes/insights.js#L557) |
+| POST | `/chatops` | — | [server/src/routes/insights.js:625](../server/src/routes/insights.js#L625) |
 | GET | `/finops` | — | [server/src/routes/insights.js:118](../server/src/routes/insights.js#L118) |
 | GET | `/finops/config` | — | [server/src/routes/insights.js:142](../server/src/routes/insights.js#L142) |
-| PUT | `/finops/config` | 역할 `admin` · `fleetOnly` | [server/src/routes/insights.js:172](../server/src/routes/insights.js#L172) |
-| GET | `/fleet` | — | [server/src/routes/insights.js:180](../server/src/routes/insights.js#L180) |
-| PUT | `/fleet/assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:409](../server/src/routes/insights.js#L409) |
-| PUT | `/fleet/assign-bulk` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:425](../server/src/routes/insights.js#L425) |
-| GET | `/fleet/hardware-export` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:338](../server/src/routes/insights.js#L338) |
-| GET | `/fleet/hardware-meta` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:315](../server/src/routes/insights.js#L315) |
-| PUT | `/fleet/hardware-prefs` | 역할 `admin/operator` · 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:330](../server/src/routes/insights.js#L330) |
-| POST | `/fleet/prune` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:473](../server/src/routes/insights.js#L473) |
-| PUT | `/fleet/tag` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:381](../server/src/routes/insights.js#L381) |
-| GET | `/forecast` | — | [server/src/routes/insights.js:572](../server/src/routes/insights.js#L572) |
-| GET | `/graph` | — | [server/src/routes/insights.js:598](../server/src/routes/insights.js#L598) |
-| GET | `/incidents` | — | [server/src/routes/insights.js:613](../server/src/routes/insights.js#L613) |
+| PUT | `/finops/config` | 역할 `admin` · `fleetOnly` | [server/src/routes/insights.js:174](../server/src/routes/insights.js#L174) |
+| GET | `/fleet` | — | [server/src/routes/insights.js:182](../server/src/routes/insights.js#L182) |
+| PUT | `/fleet/assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:415](../server/src/routes/insights.js#L415) |
+| PUT | `/fleet/assign-bulk` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:431](../server/src/routes/insights.js#L431) |
+| GET | `/fleet/hardware-export` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:344](../server/src/routes/insights.js#L344) |
+| GET | `/fleet/hardware-meta` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:321](../server/src/routes/insights.js#L321) |
+| PUT | `/fleet/hardware-prefs` | 역할 `admin/operator` · 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:336](../server/src/routes/insights.js#L336) |
+| POST | `/fleet/prune` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:479](../server/src/routes/insights.js#L479) |
+| PUT | `/fleet/tag` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:387](../server/src/routes/insights.js#L387) |
+| GET | `/forecast` | — | [server/src/routes/insights.js:578](../server/src/routes/insights.js#L578) |
+| GET | `/graph` | — | [server/src/routes/insights.js:604](../server/src/routes/insights.js#L604) |
+| GET | `/incidents` | — | [server/src/routes/insights.js:619](../server/src/routes/insights.js#L619) |
 | GET | `/power-breakdown` | — | [server/src/routes/insights.js:145](../server/src/routes/insights.js#L145) |
-| GET | `/security` | — | [server/src/routes/insights.js:585](../server/src/routes/insights.js#L585) |
-| GET | `/topology` | — | [server/src/routes/insights.js:588](../server/src/routes/insights.js#L588) |
+| GET | `/security` | — | [server/src/routes/insights.js:591](../server/src/routes/insights.js#L591) |
+| GET | `/topology` | — | [server/src/routes/insights.js:594](../server/src/routes/insights.js#L594) |
 
 ## `/api/central`
 
@@ -398,27 +398,28 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/codex-check` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:30](../server/src/routes/admin/statusTools.js#L30) |
 | GET | `/codex-check/file` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:33](../server/src/routes/admin/statusTools.js#L33) |
 | POST | `/codex-check/write` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:36](../server/src/routes/admin/statusTools.js#L36) |
-| GET | `/collectors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:138](../server/src/routes/admin/collectorsDc.js#L138) |
-| POST | `/collectors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:149](../server/src/routes/admin/collectorsDc.js#L149) |
-| DELETE | `/collectors/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:172](../server/src/routes/admin/collectorsDc.js#L172) |
-| PUT | `/collectors/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:157](../server/src/routes/admin/collectorsDc.js#L157) |
-| POST | `/collectors/:id/force-token` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:563](../server/src/routes/admin/collectorsDc.js#L563) |
-| GET | `/collectors/export.csv` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:191](../server/src/routes/admin/collectorsDc.js#L191) |
-| POST | `/collectors/import` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:220](../server/src/routes/admin/collectorsDc.js#L220) |
-| POST | `/collectors/pull` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:469](../server/src/routes/admin/collectorsDc.js#L469) |
-| GET | `/collectors/sample.csv` | 역할 `admin` · 권한 `data.csv` | [server/src/routes/admin/collectorsDc.js:206](../server/src/routes/admin/collectorsDc.js#L206) |
-| POST | `/collectors/set-password` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/collectorsDc.js:283](../server/src/routes/admin/collectorsDc.js#L283) |
-| POST | `/collectors/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:490](../server/src/routes/admin/collectorsDc.js#L490) |
-| POST | `/collectors/upgrade` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:476](../server/src/routes/admin/collectorsDc.js#L476) |
+| GET | `/collectors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:157](../server/src/routes/admin/collectorsDc.js#L157) |
+| POST | `/collectors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:172](../server/src/routes/admin/collectorsDc.js#L172) |
+| DELETE | `/collectors/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:217](../server/src/routes/admin/collectorsDc.js#L217) |
+| PUT | `/collectors/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:180](../server/src/routes/admin/collectorsDc.js#L180) |
+| PUT | `/collectors/:id/datacenter` | 역할 `admin` · `fullReadWriteScopeOnlyWith` | [server/src/routes/admin/collectorsDc.js:199](../server/src/routes/admin/collectorsDc.js#L199) |
+| POST | `/collectors/:id/force-token` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:608](../server/src/routes/admin/collectorsDc.js#L608) |
+| GET | `/collectors/export.csv` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:236](../server/src/routes/admin/collectorsDc.js#L236) |
+| POST | `/collectors/import` | 역할 `admin` · 권한 `data.csv` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:265](../server/src/routes/admin/collectorsDc.js#L265) |
+| POST | `/collectors/pull` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:514](../server/src/routes/admin/collectorsDc.js#L514) |
+| GET | `/collectors/sample.csv` | 역할 `admin` · 권한 `data.csv` | [server/src/routes/admin/collectorsDc.js:251](../server/src/routes/admin/collectorsDc.js#L251) |
+| POST | `/collectors/set-password` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/collectorsDc.js:328](../server/src/routes/admin/collectorsDc.js#L328) |
+| POST | `/collectors/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:535](../server/src/routes/admin/collectorsDc.js#L535) |
+| POST | `/collectors/upgrade` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:521](../server/src/routes/admin/collectorsDc.js#L521) |
 | GET | `/data-source` | 역할 `admin` | [server/src/routes/admin/vcenters.js:34](../server/src/routes/admin/vcenters.js#L34) |
 | PUT | `/data-source` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/vcenters.js:39](../server/src/routes/admin/vcenters.js#L39) |
-| GET | `/datacenter-order` | 역할 `admin` | [server/src/routes/admin/collectorsDc.js:377](../server/src/routes/admin/collectorsDc.js#L377) |
-| PUT | `/datacenter-order` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:387](../server/src/routes/admin/collectorsDc.js#L387) |
-| GET | `/datacenters` | 역할 `admin` | [server/src/routes/admin/collectorsDc.js:342](../server/src/routes/admin/collectorsDc.js#L342) |
-| POST | `/datacenters` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:351](../server/src/routes/admin/collectorsDc.js#L351) |
-| DELETE | `/datacenters/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:371](../server/src/routes/admin/collectorsDc.js#L371) |
-| PUT | `/datacenters/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:366](../server/src/routes/admin/collectorsDc.js#L366) |
-| PUT | `/datacenters/assign` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:357](../server/src/routes/admin/collectorsDc.js#L357) |
+| GET | `/datacenter-order` | 역할 `admin` | [server/src/routes/admin/collectorsDc.js:422](../server/src/routes/admin/collectorsDc.js#L422) |
+| PUT | `/datacenter-order` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:432](../server/src/routes/admin/collectorsDc.js#L432) |
+| GET | `/datacenters` | 역할 `admin` | [server/src/routes/admin/collectorsDc.js:387](../server/src/routes/admin/collectorsDc.js#L387) |
+| POST | `/datacenters` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:396](../server/src/routes/admin/collectorsDc.js#L396) |
+| DELETE | `/datacenters/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:416](../server/src/routes/admin/collectorsDc.js#L416) |
+| PUT | `/datacenters/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:411](../server/src/routes/admin/collectorsDc.js#L411) |
+| PUT | `/datacenters/assign` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:402](../server/src/routes/admin/collectorsDc.js#L402) |
 | POST | `/deep-search/probe` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:371](../server/src/routes/admin/backupNetSec.js#L371) |
 | GET | `/dir-usage` | 역할 `admin` · `fleetReadOnly` | [server/src/routes/admin/dirUsage.js:30](../server/src/routes/admin/dirUsage.js#L30) |
 | PUT | `/dir-usage` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/dirUsage.js:47](../server/src/routes/admin/dirUsage.js#L47) |
@@ -700,8 +701,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/veeam/servers/sample.txt` | 역할 `admin` · 권한 `data.csv` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:227](../server/src/routes/admin/veeam.js#L227) |
 | GET | `/veeam/vc-accounts` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:77](../server/src/routes/admin/veeam.js#L77) |
 | PUT | `/veeam/vc-accounts` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/veeam.js:78](../server/src/routes/admin/veeam.js#L78) |
-| GET | `/vm/:id/hardware` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:399](../server/src/routes/admin/collectorsDc.js#L399) |
-| POST | `/vm/:id/reconfig` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:427](../server/src/routes/admin/collectorsDc.js#L427) |
+| GET | `/vm/:id/hardware` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:444](../server/src/routes/admin/collectorsDc.js#L444) |
+| POST | `/vm/:id/reconfig` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:472](../server/src/routes/admin/collectorsDc.js#L472) |
 
 ## `/api/auth`
 
@@ -1650,8 +1651,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `reauth` | 22 | 통합 계정 관리의 재인증 — 로컬 OTP 계정은 OTP, OTP 없는 계정은 설정 소유자만. |
 | `fullRwOnly` | 22 | **조회 · 쓰기 모두 전체 범위인 계정만**(v2.935 — `fullReadWriteScopeOnlyWith` 의 산물 · SAN 스위치 등록 · 수집 · 설정 변경 라우트). 쓰기 범위만 줄인 관리자도 403. |
 | `tokenFirst` | 20 | **수집 토큰 확인을 본문 해석보다 먼저** 한다(v2.741 — 토큰 없는 요청이 본문 파서·큰 본문 한도에 닿지 않게). 토큰이 없거나 틀리면 403, 수집 토큰 미설정이면 404. |
+| `fullReadWriteScopeOnlyWith` | 13 | **조회 · 쓰기 모두 전체 범위인 계정만**(v2.935 — `routes/admin/shared.js` · `auth/scope.js isFullReadWriteScope`). 조회 범위 또는 쓰기 범위(writeVcenters)를 지정한 계정은 403 — 스위치 설정을 바꾸는 라우트(SAN 플로우 모니터)가 쓴다. |
 | `requireSuperAdmin` | 13 | **super_admin 전용**(v2.726 좌측 메뉴 배포·철회 · v2.740 아이실론 디렉터리 사용량 수집 대상 설정 — 조회·저장·일괄 변경·연결 시험·메일·SSH 키). 저장 역할이 super_admin 인 계정만(`req.user.superAdmin`). 역할 admin 은 403 `super-admin-only`(`requiredRole: ['super_admin']`). |
-| `fullReadWriteScopeOnlyWith` | 12 | **조회 · 쓰기 모두 전체 범위인 계정만**(v2.935 — `routes/admin/shared.js` · `auth/scope.js isFullReadWriteScope`). 조회 범위 또는 쓰기 범위(writeVcenters)를 지정한 계정은 403 — 스위치 설정을 바꾸는 라우트(SAN 플로우 모니터)가 쓴다. |
 | `fleetReadOnly` | 10 | **전체 범위 계정만**(v2.621 SEC-03 — 폴더 사용량 조회. 응답이 RMA 엣지 IP·호스트명·마운트 경로를 싣는다 · v2.622 SEC-03 — GPU 게스트 엣지 배포 설정·엣지 배포 사용자·수집 진단 조회). 범위 제한 계정은 403. |
 | `issueSettingsFleetOnly` | 10 | **전체 범위 계정만**(v2.871 — 이슈 설정: 자동 할당 규칙 · 알림 · 사람별 메일 주소. 전 법인 공용 설정이다). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
 | `guarded` | 10 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |

@@ -44,7 +44,7 @@ function dedupeByIdCase(list) {
     const merged = { ...base };
     for (const c of g) {
       if (c === base) continue;
-      for (const f of ['vcenterId', 'datacenter', 'name', 'url', 'token']) {
+      for (const f of ['vcenterId', 'datacenter', 'datacenterId', 'name', 'url', 'token']) {   // v2.972(반증 F3): 사용자 법인 매칭도 잃지 않게
         if (!String(merged[f] || '').trim() && String(c[f] || '').trim()) merged[f] = c[f];
       }
     }
@@ -63,6 +63,35 @@ function dedupeByIdCase(list) {
  *   ⚠ 파일이 없을 때의 보존본 판정(설정 폴더 목록)은 loadCollectors 에서 하지 않는다 — 요청·폴러마다 불리고 엣지 노드에는 파일이 없는 것이 정상이다.
  */
 const loadErr = makeLoadError();
+/** DataCenter id 모양(datacenter/store.js ensureDatacenter 와 같은 규칙 — 소문자 · 64자) — 아니면 ''. */
+export function normDcId(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return /^[a-z0-9._-]{1,64}$/.test(s) ? s : '';
+}
+
+/**
+ * v2.972: 수집 서버 ↔ 법인(DataCenter) 매칭 저장 — 이 필드 하나만 바꾼다(URL · 토큰 · managed 그대로 · normalize 를 다시 돌리지 않는다 —
+ * 평문 HTTP 예외 · SSRF 판정이 이 쓰기로 바뀌지 않게). dcId '' = 매칭 해제(이름 맞춤으로 돌아간다).
+ * 등록부를 읽지 못했으면 쓰지 않는다(빈 목록 위에 저장하면 전 수집 서버 · 토큰을 잃는다 — 형제 쓰기와 같은 태도).
+ * @returns {{ok:true, collector:object, changed:boolean} | {ok:false, status:number, reason:string, code?:string}}
+ */
+export function setCollectorDatacenterId(id, dcId, validIds = null) {
+  if (registryLoadError()) return { ok: false, status: 503, code: 'registryUnreadable', reason: '수집 서버 등록부(collectors.json)를 읽지 못해 바꾸지 않습니다.' };
+  const want = String(dcId ?? '').trim() === '' ? '' : normDcId(dcId);
+  if (String(dcId ?? '').trim() !== '' && !want) return { ok: false, status: 400, reason: '법인(DataCenter) id 형식이 올바르지 않습니다.' };
+  if (want && validIds && !validIds.has(want)) return { ok: false, status: 400, reason: `없는 법인(DataCenter) id: ${want}` };
+  const list = loadCollectors();
+  const idx = list.findIndex((c) => c.id === id);
+  if (idx === -1) return { ok: false, status: 404, reason: `없는 수집 서버: ${id}` };
+  const cur = list[idx];
+  if ((cur.datacenterId || '') === want) return { ok: true, collector: redact(cur), changed: false };
+  const next = { ...cur };
+  if (want) next.datacenterId = want; else delete next.datacenterId;
+  list[idx] = next;
+  save(list);
+  return { ok: true, collector: redact(next), changed: true };
+}
+
 /** @returns {null|{at:number, reason:string}} 못 읽었으면 사유(원문 — 밖으로 낼 때는 summarizeRegistryError). */
 export function registryLoadError() {
   loadCollectors();
@@ -268,6 +297,12 @@ function normalize(body, existing = null, ctx = null) {
     token: body.token ? String(body.token) : e.token || '',
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
+  // v2.972(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭'): 사용자가 고른 법인(DataCenter id) — datacenter(엣지가 자기등록 때 보내는
+  //   자유 글자 라벨)와 따로 둔다. **본문 값은 보지 않고 늘 기존 값을 이어받는다**(반증 F1 — 관리자 편집 폼 · 토큰 강제 재설정 · 배포가 목록 행을
+  //   통째로 다시 보내 다른 탭에서 바꾼 매칭을 되돌리고, 없는 법인 검사 · 감사를 건너뛰었다). 바꾸는 길은 setCollectorDatacenterId 하나
+  //   (PUT /collectors/:id/datacenter — 법인 목록 검사 · 감사 · managed 불변). 없으면 필드를 만들지 않는다(예전 파일 모양 그대로).
+  const dcId = normDcId(e.datacenterId);
+  if (dcId) entry.datacenterId = dcId;
   // 예외 기록: keep 이면 기존 것을 그대로(같은 URL), 아니면 새 판정값(https·루프백이면 지운다 — URL 이 바뀌면 승계하지 않는다).
   if (tp.keep) { if (e.insecureHttp) entry.insecureHttp = e.insecureHttp; }
   else if (tp.exception) entry.insecureHttp = tp.exception;

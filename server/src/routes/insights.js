@@ -45,7 +45,7 @@ import { allRemoteServers } from '../collector/remoteInventory.js';
 import { catalogForClient, resolveFields, BASIC_KEYS } from '../insights/hwExport/catalog.js';
 import { makeInvOf, selectServers, buildHwModel, KINDS, UNASSIGNED } from '../insights/hwExport/rows.js';
 import { buildDcIndex, makeCorpOf, VC_PREFIX } from '../insights/hwExport/corp.js';
-import { analysisServersWithRemote, collectorToDatacenterMap } from '../insights/analysisServers.js';
+import { analysisServersWithRemote, collectorToDatacenterMap, collectorDcMaps } from '../insights/analysisServers.js';
 import { loadCollectors } from '../collector/registry.js';
 import { renderHwExport, SPEC_MAX } from '../insights/hwExport/render.js';
 import { getPrefs as getHwPrefs, setPref as setHwPref, FMTS as HW_FMTS, BANDS as HW_BANDS } from '../insights/hwExport/prefs.js';
@@ -149,7 +149,7 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
     const assign = getDatacenterAssign();
     const datacenters = listDatacenters();
     // DataCenter 할당/목록이 바뀌면 캐시 무효화되도록 키에 포함.
-    const dcKey = `${JSON.stringify(assign)}|${datacenters.map((d) => `${d.id}:${d.name}`).join(',')}`;
+    const dcKey = `${JSON.stringify(assign)}|${datacenters.map((d) => `${d.id}:${d.name}`).join(',')}|${collectorDcSig()}`;   // v2.972: 수집 서버 ↔ 법인 매칭이 바뀌면 키도
     const scoped = scopeSlice(snap, req.user, vc); // 범위 제한 계정은 자기 vCenter 전력만
     // ⚠ scope 강제(확정 버그 수정) — /finops 와 같은 이유. 이 라우트는 servers[] 로 서버 이름·
     // 서비스태그·모델·와트를 그대로 내려주므로 누수 영향이 더 크다.
@@ -160,7 +160,9 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
       const vcSkip = vcPowerSkipOf(scoped); // v2.733(C2-02) — /finops 와 같은 판정
       let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), validIds)), scoped);
       if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
-      return { ...computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters }), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
+      let collectorDc = null; let collectorDcManual = null;
+      try { ({ map: collectorDc, manual: collectorDcManual } = collectorDcMaps()); } catch { collectorDc = null; collectorDcManual = null; }   // v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정 → 이름 맞춤)
+      return { ...computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters, collectorDc, collectorDcManual }), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
     });
     if (isAdminReq(req)) sendCached(req, res, key, payload);
     else sendCached(req, res, `${key}|masked`, maskPowerBreakdownPayload(payload, insightsMatcher(snap)));
@@ -244,12 +246,16 @@ export function hwCorpContext(snap) {
   const corpOf = makeCorpOf({ index, dcOfVc, dcName: (id) => dcNames.get(id) || '', vcName: (id) => vcNames.get(id) || '', agentDc });
   return { corpOf, dcOrder: dcs.map((d) => String(d.id)), dcOfVc, datacenters: dcs.map((d) => ({ id: String(d.id), name: String(d.name || d.id) })) };
 }
-/** 법인 설정 서명(목록 이름 · vCenter 할당) — /fleet 응답 캐시 키. 못 읽으면 ''(그 경우 fleetRev · 스냅샷으로만 바뀐다). */
+/** v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정 · 이름 라벨) 서명 — 매칭을 바꾸면 법인 판정 캐시 키가 바뀌게. */
+export function collectorDcSig() {
+  try { return loadCollectors().map((c) => `${c.id}:${c.datacenterId || ''}:${c.datacenter || ''}`).sort().join(','); } catch { return ''; }
+}
+/** 법인 설정 서명(목록 이름 · vCenter 할당 · 수집 서버 매칭) — /fleet 응답 캐시 키. 못 읽으면 ''(그 경우 fleetRev · 스냅샷으로만 바뀐다). */
 export function hwDcSignature() {
   try {
     const list = (listDatacenters() || []).map((d) => `${d.id}=${d.name || ''}`).join(',');
     const asg = Object.entries(getDatacenterAssign() || {}).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}>${v}`).join(',');
-    return crypto.createHash('sha1').update(`${list}|${asg}`).digest('base64').slice(0, 16);
+    return crypto.createHash('sha1').update(`${list}|${asg}|${collectorDcSig()}`).digest('base64').slice(0, 16);
   } catch { return ''; }
 }
 /**
@@ -258,7 +264,7 @@ export function hwDcSignature() {
  */
 export function enrichFleetCorp(full, cc) {
   if (!full || typeof full !== 'object') return full;
-  const tag = (rows, k) => (Array.isArray(rows) ? rows.map((r) => { const c = cc.corpOf(r, k) || { id: '', name: '미지정', src: '' }; return { ...r, corpId: c.id, corpName: c.id ? c.name : '', corpSource: c.src || '', ...(c.id ? {} : { corpWhy: c.why || '' }) }; }) : rows);
+  const tag = (rows, k) => (Array.isArray(rows) ? rows.map((r) => { const c = cc.corpOf(r, k) || { id: '', name: '미지정', src: '' }; return { ...r, corpId: c.id, corpName: c.id ? c.name : '', corpSource: c.src || '', ...(c.id ? {} : { corpWhy: c.why || '', ...(c.whyCode ? { corpWhyCode: c.whyCode } : {}) }) }; }) : rows);
   const bareMetal = tag(full.bareMetal, 'bm');
   const virtualizationHosts = tag(full.virtualizationHosts, 'vh');
   const out = { ...full, bareMetal, virtualizationHosts, corps: hwCorpRoster(full, cc), datacenters: cc.datacenters || [] };
