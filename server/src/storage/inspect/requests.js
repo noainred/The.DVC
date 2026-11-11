@@ -1,5 +1,5 @@
 /**
- * storage/inspect/requests.js — 엣지 위임 장비 '점검' 요청 큐(v2.964). 코어는 util/collectRequestQueue.js(claim → ack — 수집 요청 큐와 같은 규칙).
+ * storage/inspect/requests.js — 엣지 위임 장비 '점검' 요청 큐(v2.965). 코어는 util/collectRequestQueue.js(claim → ack — 수집 요청 큐와 같은 규칙).
  *
  *  · 중앙(주간 회차 · '지금 점검')이 위임 장비를 여기 넣는다 → 엣지가 다음 storage 설정 pull 때 `inspectNow` 로 받아 로컬에서 점검 →
  *    다음 storage push 의 `inspectRuns` 로 결과가 오면 ack(기준선 = 중앙이 받은 그 장비의 마지막 점검 at — 같은 엣지 시계의 두 값 비교).

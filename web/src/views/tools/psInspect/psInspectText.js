@@ -1,5 +1,5 @@
 /**
- * psInspectText.js — PowerScale 장비 점검 화면의 글자 · 색 · 정렬(v2.964 · 순수 — vitest).
+ * psInspectText.js — PowerScale 장비 점검 화면의 글자 · 색 · 정렬(v2.965 · 순수 — vitest).
  *  · 판정은 서버(storage/inspect/judge.js) 하나 — 여기서는 상태 code → 낱말 · 색, 숫자 → 글자만 만든다(기준값 비교 없음).
  *  · 상태 다섯은 서버 catalog.STATUS_KO 와 1:1(테스트가 대조). 확인 불가는 빗금 · 낱말로 정상과 구분한다(색만으로 구분하지 않는다).
  */

@@ -1,5 +1,5 @@
 /**
- * psInspect2964.test.js — PowerScale 법인별 장비 점검 · 주간 보고(v2.964 · 설계 docs/design/powerscale-inspection/README.md · 사용자 선택 1차 + 2차).
+ * psInspect2965.test.js — PowerScale 법인별 장비 점검 · 주간 보고(v2.965 · 설계 docs/design/powerscale-inspection/README.md · 사용자 선택 1차 + 2차).
  *
  * 고정하는 것:
  *  ① 항목표 — 20개 · 구분 5 · 근거 번호가 참고 자료 표에 있다 · 조치 문구가 전 항목에 있다 · 백틱 없음 · 판정하지 않는 CPU 는 항목이 아니다
@@ -26,7 +26,7 @@ import url from 'node:url';
 import express from 'express';
 import { centralSource } from './_centralSource.js';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'psinspect2964-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'psinspect2965-'));
 Object.assign(process.env, { CONFIG_DIR: TMP, DATA_SOURCE: 'live', AUTH_ENABLED: 'false' });
 delete process.env.CENTRAL_URL; delete process.env.CENTRAL_TOKEN;
 after(() => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* */ } });

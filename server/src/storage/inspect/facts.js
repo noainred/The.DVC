@@ -1,5 +1,5 @@
 /**
- * storage/inspect/facts.js — 점검 **사실(facts)** 만들기 · 정제(v2.964 · 순수).
+ * storage/inspect/facts.js — 점검 **사실(facts)** 만들기 · 정제(v2.965 · 순수).
  *
  * 흐름: 장비 출력(SSH 텍스트 · `--format json` · REST JSON) + 이미 있는 수집 스냅샷 → facts(아는 필드만) → judge.js 가 판정.
  *  · facts 의 값이 null 이면 '못 읽음' 이고 `why[키]` 에 사유를 적는다(판정은 확인 불가 — 0 · 정상으로 바꾸지 않는다).
@@ -274,7 +274,7 @@ export function parseIfaces(v) {
 export function parseHealthcheck(v) {
   const list = listOf(jsonOf(v), ['evaluations']);
   if (!list) return null;
-  // v2.964 반증 F12: 기준은 '최근 평가에 FAIL 없음' — 체크리스트마다 **가장 최근 평가 하나만** 본다(180일 전 FAIL + 어제 PASS 는 정상).
+  // v2.965 반증 F12: 기준은 '최근 평가에 FAIL 없음' — 체크리스트마다 **가장 최근 평가 하나만** 본다(180일 전 FAIL + 어제 PASS 는 정상).
   //   시각이 없는 평가는 목록 뒤쪽을 최근으로 본다(같은 체크리스트 안에서 — 시각 있는 평가가 있으면 그쪽이 이긴다).
   const latest = new Map(); let lastAt = null;
   list.slice(0, 2000).forEach((e, idx) => {

@@ -41,7 +41,7 @@ export function stampEdgeCollectedAt(d, now) {
   return out;
 }
 
-/** v2.964 반증 F1: 엣지 원소의 deviceId 를 저장 키와 같은 모양(글자 · 앞뒤 공백 뗌 · 128자 — capTrim)으로 맞춘다. 객체가 아니면 그대로(저장 단계가 뺀다). */
+/** v2.965 반증 F1: 엣지 원소의 deviceId 를 저장 키와 같은 모양(글자 · 앞뒤 공백 뗌 · 128자 — capTrim)으로 맞춘다. 객체가 아니면 그대로(저장 단계가 뺀다). */
 export function normDeviceIds(list) {
   return (Array.isArray(list) ? list : []).map((e) => (e && typeof e === 'object' && !Array.isArray(e) ? { ...e, deviceId: capTrim(e.deviceId, 128) } : e));
 }
@@ -97,7 +97,7 @@ export function registerStorageRoutes(centralRouter, deps) {
     const { intervalsForAgent, storageIntervalsLoadError } = await import('../../storage/intervals.js');
     const ivPart = intervalsPartOrUnreadable(req, res, storageIntervalsLoadError, '스토리지 수집 주기', () => intervalsForAgent(agent));
     if (!ivPart) return;
-    // v2.964: PowerScale 점검 요청(주간 회차 · '지금 점검') — 수집 요청 큐와 따로(claim → ack). 엣지는 받아서 로컬로 점검하고 결과를 다음 push 에 싣는다.
+    // v2.965: PowerScale 점검 요청(주간 회차 · '지금 점검') — 수집 요청 큐와 따로(claim → ack). 엣지는 받아서 로컬로 점검하고 결과를 다음 push 에 싣는다.
     const { takeInspectRequests } = await import('../../storage/inspect/requests.js');
     const inspectNow = takeInspectRequests(agent);
     res.json({
@@ -286,7 +286,7 @@ export function registerStorageRoutes(centralRouter, deps) {
     //   (엣지가 그것으로 고리를 비우고 상태에 남긴다). 본문에 키가 없으면(구버전 엣지) 아무것도 하지 않고 응답에도 싣지 않는다.
     let sampleAck = null;
     if (Array.isArray(req.body?.nodeLoadSamples) && req.body.nodeLoadSamples.length) {
-      let list = normDeviceIds(req.body.nodeLoadSamples.slice(0, 500));  // v2.964 반증 F1: 저장이 쓰는 id(앞뒤 공백 뗌)로 먼저 맞춘 뒤 소유권을 본다
+      let list = normDeviceIds(req.body.nodeLoadSamples.slice(0, 500));  // v2.965 반증 F1: 저장이 쓰는 id(앞뒤 공백 뗌)로 먼저 맞춘 뒤 소유권을 본다
       let denied = 0;
       { const r = await onlyDelegated(list, (d) => d.deviceId, '../storage/registry.js'); list = r.list; denied += r.denied; }
       if (ownedSet) { const before = list.length; list = list.filter((d) => d && typeof d === 'object' && ownedSet.has(String(d.deviceId))); denied += before - list.length; }
@@ -294,7 +294,7 @@ export function registerStorageRoutes(centralRouter, deps) {
       sampleAck = { ...(await saveEdgeNodeLoadSamples(agent, list, { now })), ...(denied ? { notOwned: denied } : {}) };
       if (denied) console.warn(`[central] storage-data: ${String(agent).slice(0, 64)} 미위임·중앙 직접 장비의 노드 부하 표본 ${denied}건 드롭`);
     }
-    // v2.964: PowerScale 점검 결과(`inspectRuns`) — 표본 고리와 **같은 소유권 필터**(중앙 직접 장비 거절 · 개별 토큰은 위임분만)를 지난 뒤
+    // v2.965: PowerScale 점검 결과(`inspectRuns`) — 표본 고리와 **같은 소유권 필터**(중앙 직접 장비 거절 · 개별 토큰은 위임분만)를 지난 뒤
     //   중앙 이력에 적는다(central/storageInspectEdge.js — 아는 필드만 · facts 화이트리스트 · at 은 수신 시각 이하). 응답 `inspectRuns` 가 받은 · 기록 · 중복 · 뺀 수를 말한다.
     let inspectAck = null;
     if (Array.isArray(req.body?.inspectRuns) && req.body.inspectRuns.length) {

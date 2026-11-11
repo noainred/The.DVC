@@ -42,10 +42,10 @@
 - (v2.915) 베어메탈 ↔ SAN 비교 — 디스크 I/O 표본(diskstats) · I/O 시계열 DB · 법인 축 · 비교/시계열 API · ‘SAN 비교’ 탭
 - (v2.962) 베어메탈 스토리지 ‘비교 세트’ — SAN 어레이 · 베어메탈 서버 · 그룹 · 법인 합계를 섞어 2~4개 · IOPS · 응답 시간 · 어레이 측 FE 표본 · 격자 하한
 - v2.926 — 아이실론 노드 부하 시계열(네트워크·디스크·CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`, 수집 키는 `collectors/isilonNodeLoad.js`
-- (v2.964) PowerScale 장비 점검(독립 도구 ps-inspect) — 주간 20항목 · 사실 저장 · 읽을 때 판정 · 엣지 로컬 실행 · 주간 보고서 · Top 10 노드 편중
+- (v2.965) PowerScale 장비 점검(독립 도구 ps-inspect) — 주간 20항목 · 사실 저장 · 읽을 때 판정 · 엣지 로컬 실행 · 주간 보고서 · Top 10 노드 편중
 
 ## 본문
-38. **v2.964 — PowerScale 장비 점검(독립 도구 `ps-inspect` · 메뉴 '스토리지 › PowerScale 장비 점검' · 사용자 범위 '1차 + 2차')**(설계 `docs/design/powerscale-inspection/README.md` · 코드 `server/src/storage/inspect/*` · 회귀 `server/test/psInspect2964.test.js` · `web/src/views/tools/psInspect/psInspectText.test.jsx`):
+38. **v2.965 — PowerScale 장비 점검(독립 도구 `ps-inspect` · 메뉴 '스토리지 › PowerScale 장비 점검' · 사용자 범위 '1차 + 2차')**(설계 `docs/design/powerscale-inspection/README.md` · 코드 `server/src/storage/inspect/*` · 회귀 `server/test/psInspect2965.test.js` · `web/src/views/tools/psInspect/psInspectText.test.jsx`):
   · **사실과 판정을 나눈다** — 실행은 장비에서 읽은 값(facts)만 이력에 저장하고(`store.js` 장비당 12회 · 원본 출력은 싣지 않는다), 판정은 조회 때 `judge.js` 하나가 한다(기준을 바꾸면 지난 회차도 새 기준으로 다시 보인다 ·
     화면 · 보고서 · 메일이 같은 판정). 항목 20개 · 출처 22건은 `catalog.js` 하나 — 웹 낱말(상태 다섯 · 구분 다섯)은 vitest 가 서버와 1:1 로 대조한다.
   · **못 읽은 값은 확인 불가**(unknown) — 정상으로 세지 않는다(판정 전 `numOrNull`). 장비 항목은 '이 장비를 아직 점검하지 않았다' 도 확인 불가다. REST 로 수집하는 장비는 그룹(쿼럼) · 부트 미러 경로가 없어 확인 불가로 남는다(사유를 싣는다).
@@ -61,7 +61,7 @@
   · 권한: 조회 = `tools` + 전체 범위 · 지금 점검 · 설정 · 지금 발송 = admin + 전체 조회 · 쓰기 범위 · CSV = `data.csv`. 비관리자 판본은 장비 주소 가림(`maskDeviceAddress` · `scrubHosts`) · 메일 주소 숨김 · 데모 손님은 데모 장비만.
   · 화면(Chromium 1440 실측): 본문 표(최소 폭 980 ~ 1020)를 옆 칸과 나란히 두면 오른쪽 열(편중 · 점검 · 기준 · 읽는 방법)이 표 안 스크롤로 숨었다 → 본문 `flex-basis 1040px` · 옆 칸은 내려가 격자. 앱 공통 표 규칙의 nowrap 을 긴 글자 칸 · 보고서 종이에서 푼다.
   · 실장비 미확인: 명령 · REST 경로 · JSON 모양은 Dell 문서 검색 인용 수준으로 맞췄고 실장비 출력으로 확인하지 못했다(원문 전체 열람 0건 · Reddit 미접근). 첫 실점검 결과의 '확인 불가 사유' 가 다음 점검의 첫 후보다.
-  · 반증 1인(회귀 `server/test/psInspectReview2964.test.js`) 반영 — 되돌리지 말 것: ① 엣지 원소 id 는 **저장 키 모양(capTrim)으로 먼저 맞춘 뒤** 소유권을 본다(`normDeviceIds` — 원문으로 보고 저장에서 trim 하면 공유 토큰이
+  · 반증 1인(회귀 `server/test/psInspectReview2965.test.js`) 반영 — 되돌리지 말 것: ① 엣지 원소 id 는 **저장 키 모양(capTrim)으로 먼저 맞춘 뒤** 소유권을 본다(`normDeviceIds` — 원문으로 보고 저장에서 trim 하면 공유 토큰이
     ' isi-direct ' 로 중앙 직접 장비 이력을 썼다 · 노드 표본 고리도 같다) ② 등록된 아이실론 id 만 받는다 · push 하나에 장비당 4건(원소 반복 포함) · 중복은 엣지 원본 시각(edgeAt)으로도 ③ 정제는 판정에 쓰는 목록 · 개수가 빠지면
     사실 전체를 버린다(0 · [] 로 채우면 '정상') ④ 8일 넘은 실행은 확인 불가(값은 참고 · 보고서에 'n일 전 — 판정 안 함') ⑤ 법인판 Top 10 은 그 법인 장비로 다시 줄 세운다(`corpFilterOf`)
     ⑥ 노드 통계는 질의 사이 `createYielder` · 8일 넘는 창은 일 요약 · 잘리면 확인 불가 ⑦ REST 는 장비 시한이 끊으면 던진다(일부만) ⑧ 이벤트 · SyncIQ 쪽 넘김이 남거나 정책이 있는데 7일 보고서 0건이면 확인 불가 ·

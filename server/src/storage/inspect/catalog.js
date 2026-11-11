@@ -1,5 +1,5 @@
 /**
- * storage/inspect/catalog.js — PowerScale(아이실론) 주간 점검 **항목 · 구분 · 상태 · 참고 자료 표**(v2.964 · 순수 · 설계 `docs/design/powerscale-inspection/README.md` §3 · §7).
+ * storage/inspect/catalog.js — PowerScale(아이실론) 주간 점검 **항목 · 구분 · 상태 · 참고 자료 표**(v2.965 · 순수 · 설계 `docs/design/powerscale-inspection/README.md` §3 · §7).
  *
  * 규칙(SAN 월간 점검 `sanswitch/healthCheck.js` 와 같다):
  *  · 상태는 다섯 — ok · warn · bad · **unknown(확인 불가 — 사유를 함께)** · na(해당 없음). unknown 을 ok 로 세지 않는다.

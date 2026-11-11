@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **311개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **312개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-11)
@@ -211,6 +211,7 @@
 | `perf-monitor.json` | 설정 | 서버 성능 측정 설정(`perf-monitor.json`, v2.498, 사용자 요청 "설정에 서버 성능 | ✅ | ✅ | ✅ | perf/settings.js |
 | `permissions.json` | 설정 | 역할별 권한 매트릭스 + 도구별 접근 거부 | ✅ | ✅ | ✅ | auth/permissions.js |
 | `ping-monitor.db` | DB | 핑 모니터 응답시간·손실 시계열 |  |  |  | config.js |
+| `ping-settings.json` | 설정 | Ping 모니터 측정 설정(v2.964 · 사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping"). | ✅ | ✅ | ✅ | ping/settings.js |
 | `ping-targets.json` | 설정 | Ping 모니터링 대상 레지스트리 — CONFIG_DIR/ping-targets.json. | ✅ | ✅ |  | ping/store.js |
 | `portal.env` | 기타 | 환경변수(설치본이 읽는 유일한 설정 파일) |  |  |  | security/secretScan.js, security/selfCheck.js |
 | `power-off-check.json` | 설정 | 전원 꺼짐 점검 설정(`power-off-check.json`, v2.484, 사용자 요청 "몇 시간마다 점검하는지 설정"). | ✅ | ✅ | ✅ | tools/powerOffSettings.js |
@@ -260,10 +261,10 @@
 | `storage-devices.json` | 설정 | 스토리지 장비 등록부(v2.302). | ✅ | ✅ | ✅ | storage/registry.js |
 | `storage-growth-settings.json` | 설정 | 스토리지 사용량 보존 설정(v2.531). | ✅ | ✅ | ✅ | storage/growthSettings.js |
 | `storage-history.db` | DB | 스토리지 장비(8종) 용량 이력 |  |  | ✅ | storage/db.js |
-| `storage-inspect-ring.json` | 설정 | PowerScale 주간 점검 **실행기**(v2.964 · 설계 README §4). | ✅ | ✅ | ✅ | storage/inspect/runner.js |
-| `storage-inspect-runs.json` | 설정 | 점검 실행 **이력**(v2.964) — `storage-inspect-runs.json`(상태 파일 · 백업 변경 감시 대상 아님). | ✅ | ✅ | ✅ | storage/inspect/store.js |
-| `storage-inspect-state.json` | 설정 | PowerScale 점검 **설정 · 주간 회차 · 보고서 메일**(v2.964 · 중앙만 — 엣지는 회차를 돌리지 않는다). | ✅ | ✅ | ✅ | storage/inspect/schedule.js |
-| `storage-inspect.json` | 설정 | PowerScale 점검 **설정 · 주간 회차 · 보고서 메일**(v2.964 · 중앙만 — 엣지는 회차를 돌리지 않는다). | ✅ | ✅ | ✅ | storage/inspect/schedule.js |
+| `storage-inspect-ring.json` | 설정 | PowerScale 주간 점검 **실행기**(v2.965 · 설계 README §4). | ✅ | ✅ | ✅ | storage/inspect/runner.js |
+| `storage-inspect-runs.json` | 설정 | 점검 실행 **이력**(v2.965) — `storage-inspect-runs.json`(상태 파일 · 백업 변경 감시 대상 아님). | ✅ | ✅ | ✅ | storage/inspect/store.js |
+| `storage-inspect-state.json` | 설정 | PowerScale 점검 **설정 · 주간 회차 · 보고서 메일**(v2.965 · 중앙만 — 엣지는 회차를 돌리지 않는다). | ✅ | ✅ | ✅ | storage/inspect/schedule.js |
+| `storage-inspect.json` | 설정 | PowerScale 점검 **설정 · 주간 회차 · 보고서 메일**(v2.965 · 중앙만 — 엣지는 회차를 돌리지 않는다). | ✅ | ✅ | ✅ | storage/inspect/schedule.js |
 | `storage-intervals.json` | 설정 | 스토리지 수집 주기(중앙에서 엣지 설정, v2.409). | ✅ | ✅ | ✅ | storage/intervals.js |
 | `storage-latest.json` | 설정 | 이 노드가 수집한 최신 스냅샷 보관(v2.302). | ✅ | ✅ | ✅ | storage/store.js |
 | `storage-nodeload-ring.json` | 설정 | 아이실론 노드 부하 **표본** 폴러(v2.932, 2차 ⑨ · 설계 `docs/design/isilon-node-clients/README.md` §4). | ✅ | ✅ | ✅ | storage/nodeLoadPoller.js |

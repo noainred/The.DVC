@@ -1,5 +1,5 @@
 /**
- * storage/inspect/report.js — PowerScale **주간 점검 보고서**(v2.964 · 순수 · 설계 README §3 ③).
+ * storage/inspect/report.js — PowerScale **주간 점검 보고서**(v2.965 · 순수 · 설계 README §3 ③).
  *
  * 무엇: 1쪽 결재용 요약(결과 · 법인별 · 이상/주의와 조치 · 확인 불가) + 2쪽 근거 수치(용량 · Top 10 노드 편중 · 데이터 보호 · 다음 주 확인) + 근거 자료.
  *  · 메일 본문과 첨부(자급형 HTML — 브라우저에서 인쇄 › PDF 로 저장)가 같은 HTML 이다. PDF 를 서버에서 만들지 않는다(이 저장소에 PDF 라이브러리가 없다 —
