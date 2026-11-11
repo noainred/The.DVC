@@ -127,7 +127,8 @@ test('ioDb: v2.956 DB 에 열을 덧붙인다(옛 행 보존 · 새 열은 빔) 
   assert.equal(raw[1].instIops, 900); assert.equal(raw[1].instLat, 7.5);
   const roll = await ioDb.ioRollupRows('r1h', 'srvA', t0, t0 + HOUR);
   assert.equal(roll[0].nIops, 1); assert.equal(roll[0].sumIops, 100); assert.equal(roll[0].sumDios, 60_000); assert.equal(roll[0].sumDticks, 120_000);
-  assert.equal(roll[0].maxIops, 900); assert.equal(roll[0].maxLat, 7.5); assert.equal(roll[0].nAbusy, 1);
+  assert.equal(roll[0].maxIops, 900); assert.equal(roll[0].maxLat, 7.5);
+  assert.equal(roll[0].nAbusy, 0, 'v2.971: 합계 카운터(디스크별 맵 없음 — 구버전 엣지) 구간은 바쁨 평균을 모른다(합계 io_ms 로는 가장 바쁜 디스크를 알 수 없다)');
   // 옛 행(v2.956 DB)은 그대로 읽히고 새 열은 비어 있다
   const old = await ioDb.ioRawRows('old-srv', NOW - 6 * HOUR, NOW);
   assert.equal(old.length, 1); assert.equal(old[0].avgTotal, 1500); assert.equal(old[0].avgIops, null); assert.equal(old[0].dIos, null);

@@ -395,6 +395,9 @@ app.use('/api/central/edge-log-result', BIG_JSON);  // 엣지 로그 폴백 회�
 // 중앙은 결과가 없으면 영원히 `{state:'pending'}` 을 돌려주므로 화면이 무한 대기가 된다.
 app.use('/api/central/log-query-result', BIG_JSON);
 app.use('/api/central/rma-result', BIG_JSON);   // v2.591 PR-9: RMA 명령 출력(RMA_MAX_OUTPUT·제어문자 이스케이프로 1MB 초과 가능) — 413 은 조용한 소실
+// v2.971: 베어메탈 스토리지 위임 결과 — 잡 하나에 그 엣지의 서버 **전부**가 실리고(서버 1대 단위가 아니었다 — archScan 허용 목록 정정),
+//   디스크별 누적 카운터(서버당 디스크 수 × 6 수)가 붙어 1mb 기본을 넘을 수 있다(413 = 조용한 소실). 엣지는 gzip 으로 보낸다.
+app.use('/api/central/bmstor-result', BIG_JSON);
 // v2.590 D2: svcmon 엣지 보고 — 행 2,000 + 메타(경로·호스트·점검명)가 한 청크에 실리면 1mb 기본을 넘는다(실측 5,000항목 1.09MB → 413).
 // 엣지가 메타를 청크마다 나누고 413 이면 청크를 줄여 다시 나누지만, 한도를 넉넉히 두는 것이 1차 방어다.
 app.use('/api/central/svcmon-report', BIG_JSON);

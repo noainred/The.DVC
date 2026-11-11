@@ -10,6 +10,10 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { collectMany } from '../bmstor/collect.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
+import zlib from 'node:zlib';
+import { promisify } from 'node:util';
+
+const gzipAsync = promisify(zlib.gzip);
 
 let busy = false;
 // v2.599 T2599-02: 주기 env 도 [하한, MAX_TIMER_MS] 로 가둔다 — 2^31 초과·음수는 setInterval 에서 1ms 루프가 된다.
@@ -24,13 +28,18 @@ const POLL_MS = clampIntervalMs(Number(process.env.AGENT_BMSTOR_POLL_MS) || 10_0
  * ⚠ 타이머 콜백의 `.catch(() => {})` 는 정당하다 — 안쪽이 이미 상태를 남기고, setInterval 의
  *   unhandled rejection 을 막는 관례다(v2.561 규약).
  */
+/** v2.971 — 결과 묶음에서 디스크별 누적 카운터(io.counters.disks)만 뺀 사본(413 재전송용 · 원본은 그대로). */
+export function dropDiskMaps(results) {
+  return (Array.isArray(results) ? results : []).map((x) => (x?.io?.counters?.disks ? { ...x, io: { ...x.io, counters: (({ disks, ...c }) => c)(x.io.counters) } } : x));
+}
+
 let _last = null;
 /** 마지막 실행 결과 — `edgelog/spec.js` 가 화면에 싣는다. 비밀은 담지 않는다. */
 export function bmstorWorkerStatus() { return { pollMs: POLL_MS, ..._last }; }
 
-function headers() {
+function headers(extra = {}) {
   // v2.591(3차 감사 PR-2 ④): X-Agent-Name — 공유 토큰 엣지의 인출·회신이 중앙 데이터 흐름 지도에서 '(unknown)' 한 칸으로 합쳐지지 않게.
-  return { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+  return { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}), ...extra };
 }
 
 // v2.591(3차 감사 PR-5): 인출·회신의 **HTTP 오류**도 상태와 콘솔에 남긴다. v2.574 IMP-07 은 catch 경로만 고쳐서
@@ -47,8 +56,12 @@ async function httpFail(stage, r) {
 }
 /** 결과 회신 — 응답 상태를 본다(예전엔 .catch(()=>{}) 로 413·403·5xx 가 '완료' 로 보였다). 실패 사유를 돌려준다(없으면 null). */
 async function postResult(url, body, timeoutMs) {
+  // v2.971: 결과에 디스크별 누적 카운터가 실려 커졌다 — gzip(중앙 express.json 이 Content-Encoding 을 자동 해제 · 중앙은 BIG_JSON 등록).
+  //   압축이 실패하면 원문(그래도 보낸다). 한도는 해제 후 길이라 gzip 만으로 413 이 풀리지 않는다 — BIG_JSON 등록이 1차 방어.
+  let payload = body; let hdrs = headers();
+  try { payload = await gzipAsync(Buffer.from(String(body))); hdrs = headers({ 'Content-Encoding': 'gzip' }); } catch { payload = body; hdrs = headers(); }
   let r;
-  try { r = await resilientFetch(withAgentQuery(url, config.agent.name), { method: 'POST', headers: headers(), body, timeoutMs, retries: 2 }); }
+  try { r = await resilientFetch(withAgentQuery(url, config.agent.name), { method: 'POST', headers: hdrs, body: payload, timeoutMs, retries: 2 }); }
   catch (e) { const msg = `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; if (_logChange('회신', msg)) console.warn(`[bmstor-agent] ${msg}`); return msg; }
   if (r.ok) {
     // v2.622(감사 EDGE-03): 200 이어도 stale 이면 중앙이 결과를 **반영하지 않았다** — 예전에는 r.ok 만 봐서 '수집 완료' 와 ok:true 가
@@ -87,7 +100,15 @@ export async function runBmstorWorkerOnce() {
       // v2.915: 디스크 I/O 표본(io · ioError)도 올린다 — 수치뿐이다. 중앙은 sanitizeBmResult 로 아는 필드만 받는다(엣지 export 필드 = 중앙 화이트리스트).
       const safe = results.map((x) => ({ id: x.id, ok: x.ok, mounts: x.mounts, missing: x.missing, error: x.error, io: x.io ?? null, ioError: x.ioError ?? null }));
       // 회신 실패 시 중앙 reap 이 재인출시킨다(claim→ack 설계 그대로) — 그래도 실패 사실은 상태·콘솔에 남긴다(v2.591 PR-5).
-      const jobErr = await postResult(`${config.agent.centralUrl}/api/central/bmstor-result`, JSON.stringify({ reqId: job.reqId, results: safe }), 30_000);
+      let jobErr = await postResult(`${config.agent.centralUrl}/api/central/bmstor-result`, JSON.stringify({ reqId: job.reqId, results: safe }), 30_000);
+      // v2.971(반증): 구판 중앙(v2.970 이하)은 이 경로가 기본 1MB 한도라 디스크별 누적 카운터가 실린 큰 묶음을 413 으로 거절한다(용량까지 잡 전체가 사라진다).
+      //   413 이면 디스크별 맵만 빼고 한 번 더 보낸다(구판 중앙은 그 필드를 읽지도 않는다 — 처리량 · 용량은 그대로 간다).
+      if (jobErr && /HTTP 413/.test(jobErr)) {
+        const slim = dropDiskMaps(safe);
+        const retryErr = await postResult(`${config.agent.centralUrl}/api/central/bmstor-result`, JSON.stringify({ reqId: job.reqId, results: slim }), 30_000);
+        console.warn(`[bmstor-agent] 결과가 중앙 한도(413)를 넘어 디스크별 카운터를 빼고 다시 보냈습니다 — ${retryErr ? `재전송도 실패: ${retryErr}` : '재전송 성공'}(중앙을 v2.971 이상으로 올리면 사라집니다)`);
+        jobErr = retryErr;
+      }
       postErr = jobErr || postErr;
       // v2.604(감사 EDGE2604-03): 회신이 실패한 잡을 '완료' 한 줄로만 남기지 않는다 — 같은 실패 경고는 10분에 1줄로 묶이므로
       //   이후 주기에는 이 줄만 보였다. 수집은 끝났지만 중앙에 닿지 않았다는 사실을 같은 줄에 적는다.
