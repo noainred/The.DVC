@@ -1497,6 +1497,7 @@
     부품 배열이 있으면(컬렉션 failed 포함) 원소 판정만 쓴다 — 못 읽음 · 빈 슬롯만이면 빈 칸(반증 F2: 옛 롤업 'OK' 로 돌아가지 않게). 저장 롤업 글자는 배열이 없을 때만. C1: 사양서 '기본 식별' 의 vCenter 고정 줄 삭제(v2.968 카탈로그 값과 중복). C2: 열 너비 = max(머리글 기준, 값 길이 — 한글 2칸 · 상한 60 · 앞 3000행) ·
     합계 칸 줄바꿈 + 행 높이를 필요한 줄 수로(반증 F3). 수집기의 licenses · network 는 늘 빈 배열이라 비었으면 키를 만들지 않는다(반증 R1) · 중앙은 라이선스 12 · 관리 NIC 4 개까지만(R4) · GPU 제조사(R2).
     ⚠ 반증 F4: `GET /admin/idrac/:id/inventory` 는 adminOnly 지만 데모 계정(관리자 판본 아님)도 지나간다 — `maskInventoryForViewer`(routes/admin/idracScan.js)가
-    관리 NIC 주소 · 이름 · 시스템 UUID · iDRAC 계정을 가린다(로컬 · 원격 모두 — 원격도 이제 이 값을 갖는다). 남긴 것(R3): 시리얼 조회의 UUID 행은 비관리자 전체 범위 계정에도 보인다(로컬에 원래 있던 동작).
+    관리 NIC 주소 · 이름 · 시스템 UUID · iDRAC 계정을 가린다(로컬 · 원격 모두 — 원격도 이제 이 값을 갖는다).
+    (정정 v2.974: 남겼던 R3 — 시리얼 조회의 UUID 행 — 도 관리자 판본만 보이게 했다. `routes/api/serialLookup.js serialRowsForViewer` 가 화면 · CSV · 개수에서 뺀다 · 응답 `uuidHidden` → 화면 한 줄. 회귀 `server/test/serialUuidAdmin2974.test.js`.)
     회귀 `server/test/hwExportFill2973.test.js`.
 
