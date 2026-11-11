@@ -290,7 +290,7 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
           for (const h of rows || []) if (Number(h.ts) >= todayStart && Number(h.ts) < h0 && n(h.avg) != null && Number(h.avg) > 0) { wh += Number(h.avg); hrs += 1; any = true; }
           kwhMonth = any ? r1(wh / 1000) : null;
           // 덮은 시간 · 기대 시간 — 측정이 빈 시간(iDRAC 을 못 읽은 날)은 합에서 빠진다. 화면이 '빈 시간 있음' 을 말하게 숫자를 싣는다(지어내지 않는다).
-          kwhMonthHours = any ? hrs : null; kwhMonthSpanH = Math.max(0, Math.round((h0 - monthStart) / HOUR));
+          kwhMonthHours = any ? hrs : null; kwhMonthSpanH = Math.max(0, Math.round((h0 - Math.ceil(monthStart / HOUR) * HOUR) / HOUR)); // 반증 F3: 30분 단위 시간대(+05:30 등)는 달 시작이 정시가 아니다 — 경계에 걸친 칸은 이전 날에 붙어 세지 않으므로 기대 시간도 다음 정시부터
         }
       } catch { h24 = null; kwhMonth = null; }
     }

@@ -41,7 +41,9 @@ export function reloadOnChunkError(err) {
 /** Vite 가 동적 import 의 미리 받기 실패를 알리는 이벤트 — 오류가 화면까지 오기 전에 새로 읽는다. 앱 시작 때 한 번 건다. */
 export function installChunkReload() {
   if (typeof window === 'undefined') return;
-  window.addEventListener('vite:preloadError', (event) => {
-    if (claimAutoReload(sess())) { event.preventDefault?.(); window.location.reload(); }
+  window.addEventListener('vite:preloadError', () => {
+    // preventDefault 하지 않는다(반증 F4) — 막으면 Vite 가 undefined 를 돌려줘 React.lazy 가 'Element type is invalid' 로 깨지고 일반 오류 상자가 떴다.
+    //   그대로 두면 오류가 청크 오류로 화면까지 가 ErrorBoundary 가 '새로고침' 안내를 보인다(새로고침이 취소된 경우에도).
+    if (claimAutoReload(sess())) window.location.reload();
   });
 }
