@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>통합 서버 인벤토리 — 베어메탈 탭의 엑셀 버튼</title>
+<title>통합 서버 인벤토리 — 하드웨어 정보 내보내기 버튼</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -57,7 +57,7 @@ button{font-family:inherit}
       <div style="position: relative; display: flex;">
         <button type="button" style="height: 36px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; border: 1px solid #3b82f6; background: rgba(59, 130, 246, 0.18); color: #e6edf6; font-size: 13px; font-weight: 600; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);">
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4.5 7 8 10.5 11.5 7M2.5 13.5h11"></path></svg>
-          하드웨어 정보 엑셀
+          하드웨어 정보 내보내기
         </button>
         <span style="position: absolute; top: -9px; right: -8px; background: #1d4ed8; color: #ffffff; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px;">새로 추가</span>
       </div>
@@ -83,8 +83,8 @@ button{font-family:inherit}
   </div>
 
   <div style="font-size: 12px; color: #8b9bb4; line-height: 1.7; display: flex; flex-direction: column; gap: 2px;">
-    <div><b style="color: #e6edf6;">바뀌는 것은 버튼 하나</b> — 지금 화면(KPI · 탭 · 법인 필터 · 검색 · CSV · 표)은 그대로이고, CSV 옆에 ‘하드웨어 정보 엑셀’ 버튼이 생깁니다. 누르면 ② 창이 열립니다.</div>
-    <div>대상은 이 표의 <b style="color: #e6edf6;">베어메탈(가상화 호스트로 확인되지 않은 물리 서버)</b>과 같은 집합입니다 — 분류를 새로 하지 않고 이 화면의 판정을 그대로 씁니다. CSV 는 지금처럼 화면에 보이는 7개 열만 내보냅니다.</div>
+    <div><b style="color: #e6edf6;">바뀌는 것은 버튼 하나</b> — 지금 화면(KPI · 탭 · 법인 필터 · 검색 · CSV · 표)은 그대로이고, CSV 옆에 ‘하드웨어 정보 내보내기’ 버튼이 생깁니다. 베어메탈 · 가상화 호스트 두 탭 어디서 눌러도 같은 ② 창이 열립니다.</div>
+    <div>창에서 <b style="color: #e6edf6;">물리서버만 · 가상화 서버만 · 둘 다</b>를 고릅니다(창을 연 탭이 기본값). 물리 · 가상화 구분은 이 화면의 판정을 그대로 씁니다 — 분류를 새로 하지 않습니다. 기존 CSV 버튼은 지금처럼 화면에 보이는 7개 열만 내보냅니다.</div>
     <div>서버 이름 · 법인 · 수치는 모두 가상입니다(시안용).</div>
   </div>
 </div>
