@@ -776,7 +776,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   const joinSel = main.sessions.find((s) => s.id === joinTo) || main.sessions[0] || null;
   const stopOne = (t, s) => {
     if (s.mode === 'record' && !window.confirm(`${t.name} 의 계속 수집을 끝낼까요? 수집한 기록은 보관 기간 동안 남습니다.`)) return;
-    run('stop1', async () => { const r = await delJson(`/tools/focus-mon/sessions/${encodeURIComponent(s.id)}/targets/${encodeURIComponent(t.id)}`); return { ok: true, reason: `${t.name} 수집을 끝냈습니다${r?.ended ? ' — 그 수집의 마지막 서버라 수집도 끝났습니다' : ''}.` }; });
+    run('stop1', async () => { const r = await delJson(`/tools/focus-mon/sessions/${encodeURIComponent(s.id)}/targets/${encodeURIComponent(t.id)}`); if (r?.ok === false) return r; return { ok: true, reason: `${t.name} 수집을 끝냈습니다${r?.ended ? ' — 그 수집의 마지막 서버라 수집도 끝났습니다' : ''}.` }; });
   };
   const toggle = (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length >= L.maxPerSession ? p : [...p, id]));
   const full = picked.length >= L.maxPerSession;
