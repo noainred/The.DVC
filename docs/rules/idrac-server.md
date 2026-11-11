@@ -1459,7 +1459,17 @@
     v2.967 은 법인을 통합 서버 인벤토리 행의 **vCenter id** 로 나눴다 — 물리 전용 서버는 vCenter 가 없고(법인에 vCenter 가 둘이면 '법인의 vCenter 가 하나뿐' 규칙도 닿지 않는다)
     법인(DataCenter)으로만 귀속돼 있어 전부 '미지정' 이 됐다. 이제 `insights/hwExport/corp.js` 가 **서버 분석과 같은 목록**(`analysisServersWithRemote`)에서
     `datacenterId || assign[vCenter]` 색인을 만들어 행 → 법인을 정한다(판정 복제 금지). 가상화 호스트는 자기 vCenter 의 법인, 법인 할당이 없는 vCenter 는 `vc:<id>` 묶음, 없으면 미지정.
-    법인 칩 · 파일 순서는 설정의 법인 순서. vCenter 는 따로 고르는 값(`id.sum.vcenter`). ⚠ 통합 서버 인벤토리 화면의 표 · 법인 필터는 여전히 vCenter 기준이다(이번에 바꾸지 않음).
+    법인 칩 · 파일 순서는 설정의 법인 순서. vCenter 는 따로 고르는 값(`id.sum.vcenter`). (v2.969 에 통합 서버 인벤토리 화면도 법인(DataCenter) 기준이 됐다 — 아래.)
     새 '법인별' 화면 · 내보내기를 만들 때 **법인 축이 vCenter 인지 DataCenter 인지 먼저 정할 것** — 물리 서버가 끼면 DataCenter 다. 회귀 `server/test/hwExportCorp2968.test.js`.
+  - **v2.969 — 통합 서버 인벤토리 화면도 법인(DataCenter) 기준 · 수집한 Agent 의 법인으로 자동 판정만**(사용자 요청 2026-11-11 + 결정 '서버 분석처럼 수집한 Agent 이름에 따라 분류 — Agent 자동 판정만'):
+    GET /insights/fleet 이 행마다 `corpId · corpName · corpSource`(scan = 수집한 Agent · 스캔 등록 법인 | vcenter | agent = 보고한 엣지 | vcgroup) · 미지정이면 `corpWhy` 를,
+    응답에 `corps`(필터 목록 — 서버가 있는 법인만) · `summary.bareMetalNoCorp` 를 싣는다(`enrichFleetCorp` — 판정은 내보내기와 같은 `hwCorpContext`). 캐시 키는 `generatedAt|fleetRev|dc:<법인 설정 서명>|t:<1분 칸>`
+    (스캔 대역 · 수집 서버 → 법인 · 원격 목록은 fleetRev 를 올리지 않는다 — 1분 칸이 없으면 ETag 304 가 옛 법인을 붙잡는다).
+    **수동 법인 지정은 두지 않는다** — 첫 판(PUT /fleet/dc-assign · fleetDcAssign.js)은 반증에서 이름 키 가로채기(재현) · 서버 분석과 판정이 갈림(F2)이 나와 사용자 결정으로 걷어냈다.
+    법인을 바꾸려면 원천을 고친다: 수집 서버의 법인 이름(collector.datacenter)을 DataCenter id/이름과 맞추거나(`collector/datacenterMatch.js` — 정확 일치 · 대소문자 무시), 스캔 대역의 Agent · 법인, vCenter → 법인 할당.
+    미지정 이유(`corpWhy`)는 그 원천 중 무엇이 비었는지 말한다(수집 서버 이름 불일치 · 대역 겹침 · 대역 밖 · OME · 수동 물리 분류).
+    **서버 분석 › 상태 보드 · 법인별 서버 정보(/admin/idrac)** 도 Agent 스캔 대역 법인(withScanDatacenter — v2.660)을 싣는다: 예전에는 온도 · 추이 · 검색 · 내보내기만 이 단계를 거쳐 탭마다 법인이 달랐다.
+    ⚠ 등록부 값 `datacenterId` 는 덮지 않고 `scanDatacenterId` 로 따로 싣는다(datacenterId 는 '교체' 스캔이 지울 범위 — registry.js replaceScanned). 웹 `dcOfServer` 가 datacenterId → vCenter 할당 → scanDatacenterId 순으로 읽는다.
+    범위 절단(scopeIdracServers)은 vCenter 기준이라 영향 없다. 회귀 `server/test/fleetCorp2969.test.js` · `web/src/views/tools/{fleetCorpText,baremetalBoardText}.test.js`.
   - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
 

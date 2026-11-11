@@ -181,4 +181,11 @@ describe('화면 규칙(소스)', () => {
     expect(hw).toMatch(/scopeMatchServer\(s, vc, assign\)/);
     expect(hw).not.toMatch(/const effVc = \(s\) => s\.vcenterId/);
   });
+
+  it('v2.969 — 법인: datacenterId → vCenter 할당 → Agent 스캔 대역 법인(scanDatacenterId) 순', () => {
+    expect(dcOfServer({ datacenterId: 'NJ', scanDatacenterId: 'AZ' }, {})).toBe('NJ');
+    expect(dcOfServer({ vcenterId: 'vc1', scanDatacenterId: 'AZ' }, { vc1: 'OC2' })).toBe('OC2');
+    expect(dcOfServer({ scanDatacenterId: 'AZ' }, {})).toBe('AZ');
+    expect(dcOfServer({}, {})).toBe('');
+  });
 });
