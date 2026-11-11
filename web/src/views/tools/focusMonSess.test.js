@@ -53,3 +53,16 @@ describe('단추 연결(소스 스윕)', () => {
     expect(src).toMatch(/\{note \? <div className="fm-ban fm-pad-x">\{note\}<\/div> : null\}/);
   });
 });
+
+describe('화면이 보는 서버 · 수집 상태 글(v2.979 화면 검증에서 발견)', () => {
+  const src = stripComments(fs.readFileSync(new URL('./FocusMonTool.jsx', import.meta.url), 'utf8'));
+  it('따로 고른 서버가 없으면 진행 중인 모든 수집의 서버를 본다(가장 최근 수집만이 아니라)', () => {
+    expect(src).toMatch(/const all = \[\.\.\.new Set\(sessions\.flatMap\(\(s\) => s\.targets\)\)\]\.filter\(\(x\) => known\.has\(x\)\);/);
+    expect(src).not.toMatch(/return active \? active\.targets\.filter/);
+  });
+  it('수집이 없거나 과거 구간이면 ‘수집 중’ 이 아니라 ‘값 있음’', () => {
+    expect(src).toMatch(/const liveNow = tb\.end == null && \(main\.sessions \|\| \[\]\)\.length > 0;/);
+    expect(src).toMatch(/\{liveNow \? '수집 중' : '값 있음'\}/);
+  });
+});
+

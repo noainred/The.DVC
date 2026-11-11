@@ -219,6 +219,8 @@ function Overview({ main, ids, tb, now, onOpen }) {
   const rows = (q.data?.targets || []).map((x) => ({ ...x, t: tById.get(x.id) })).filter((x) => x.t);
   const live = rows.filter((x) => x.sum && x.t.status?.state === 'ok');
   const settings = main.settings;
+  // '수집 중' 은 지금 수집하는 수집이 있고 최근 구간을 볼 때만 — 끝난 뒤 · 과거 구간에서는 '값 있음'(v2.979 — 모두 종료 직후에도 '3/4대 수집 중' 이라고 했다)
+  const liveNow = tb.end == null && (main.sessions || []).length > 0;
   const kpi = (() => {
     const best = (k) => live.reduce((a, x) => (x.sum?.[k] != null && (a == null || x.sum[k] > a.sum[k]) ? x : a), null);
     const cpuVals = live.map((x) => x.sum.cpu).filter((v) => v != null);
@@ -236,8 +238,8 @@ function Overview({ main, ids, tb, now, onOpen }) {
     <>
       {q.error && !q.data ? <ErrorBox error={q.error} /> : null}
       <div className="fm-kpis">
-        <div className="fm-card fm-kpi"><span className="l">수집 상태</span><span className="v">{kpi.ok}<small>/ {rows.length}대 수집 중</small></span><span className="s">{kpi.ok === rows.length ? '모두 정상' : [kpi.bad ? `정상이 아닌 서버 ${kpi.bad}대` : '', kpi.none ? `이 구간에 값이 없는 서버 ${kpi.none}대` : ''].filter(Boolean).join(' · ')}</span></div>
-        <div className="fm-card fm-kpi"><span className="l">CPU 사용률 — 평균</span><span className="v">{kpi.cpuAvg == null ? DASH : Math.round(kpi.cpuAvg)}{kpi.cpuAvg == null ? null : <small>%</small>}</span><span className="s">{kpi.cpuMax ? `수집 중 ${kpi.ok}대 평균 · 최고 ${kpi.cpuMax.t.name} ${pctText(kpi.cpuMax.sum.cpu)}` : DASH}</span></div>
+        <div className="fm-card fm-kpi"><span className="l">수집 상태</span><span className="v">{kpi.ok}<small>/ {rows.length}대 {liveNow ? '수집 중' : '값 있음'}</small></span><span className="s">{kpi.ok === rows.length ? '모두 정상' : [kpi.bad ? `정상이 아닌 서버 ${kpi.bad}대` : '', kpi.none ? `이 구간에 값이 없는 서버 ${kpi.none}대` : ''].filter(Boolean).join(' · ')}</span></div>
+        <div className="fm-card fm-kpi"><span className="l">CPU 사용률 — 평균</span><span className="v">{kpi.cpuAvg == null ? DASH : Math.round(kpi.cpuAvg)}{kpi.cpuAvg == null ? null : <small>%</small>}</span><span className="s">{kpi.cpuMax ? `${liveNow ? '수집 중' : '값이 있는'} ${kpi.ok}대 평균 · 최고 ${kpi.cpuMax.t.name} ${pctText(kpi.cpuMax.sum.cpu)}` : DASH}</span></div>
         <div className="fm-card fm-kpi"><span className="l">메모리 사용률 — 최고</span><span className="v">{kpi.mem ? Math.round(kpi.mem.sum.mem) : DASH}{kpi.mem ? <small>%</small> : null}</span><span className="s">{kpi.mem?.t.name || DASH}</span></div>
         <div className="fm-card fm-kpi"><span className="l">네트워크 사용률 — 최고</span><span className="v">{kpi.net ? Math.round(kpi.net.sum.net) : DASH}{kpi.net ? <small>%</small> : null}</span><span className="s">{kpi.net ? `${kpi.net.t.name} ${kpi.net.sum.netIf || ''} · 수신 ${bpsText(kpi.net.sum.netRx)}` : DASH}</span></div>
         <div className="fm-card fm-kpi"><span className="l">디스크 쓰기 지연 — 최고</span><span className="v">{kpi.wa ? numText(kpi.wa.sum.wAwait, 1) : DASH}{kpi.wa ? <small>ms</small> : null}</span><span className="s">{kpi.wa ? `${kpi.wa.t.name} · 가장 바쁜 디스크 ${kpi.wa.sum.diskDev || ''} ${pctText(kpi.wa.sum.disk)}` : DASH}</span></div>
@@ -912,13 +914,16 @@ export default function FocusMonTool() {
   const [cmpMode, setCmpMode] = useState(() => lsGet('fm.cmp.mode', 'metric'));
   const setViewIds = useCallback((ids) => { setViewIdsRaw(ids); lsSet('fm.view', ids); }, []);
   const known = useMemo(() => new Set((main?.targets || []).map((t) => t.id)), [main?.targets]);
-  const sessions = main?.sessions || [];
+  const sessions = useMemo(() => main?.sessions || [], [main?.sessions]);
   const active = sessions.slice().sort((a, b) => b.startedAt - a.startedAt)[0] || null;
+  // 따로 고른 서버가 없으면 **진행 중인 모든 수집의 서버**(v2.979 — 예전에는 가장 최근 수집만 보여 새 수집을 시작하면 먼저 돌던 서버가 화면에서 사라졌다:
+  //   사용자 '기존 모니터링 돌고 있는데 추가하면 잘 안 돼'). 서버는 수집 하나에만 있으므로 합쳐도 겹치지 않는다 · 상한은 포탈 전체 동시 수집 대수.
   const ids = useMemo(() => {
     const v = viewIds.filter((x) => known.has(x));
     if (v.length) return v.slice(0, main?.limits?.maxPerSession || 20);
-    return active ? active.targets.filter((x) => known.has(x)) : [];
-  }, [viewIds, known, active, main?.limits?.maxPerSession]);
+    const all = [...new Set(sessions.flatMap((s) => s.targets))].filter((x) => known.has(x));
+    return all.slice(0, main?.limits?.maxTotal || 40);
+  }, [viewIds, known, sessions, main?.limits?.maxPerSession, main?.limits?.maxTotal]);
   const covParams = useMemo(() => ({ targets: ids.join(','), to: tb.day ? dayRange(tb.day, Date.now()).to : '' }), [ids, tb.day]);
   const cov = usePoll('/tools/focus-mon/coverage', covParams, 60_000, ids.length > 0 && route.tab !== 'targets');
   useEffect(() => { if (!picked.length && main?.targets?.length) setPicked(ids.length ? ids.slice() : []); }, [main?.targets?.length]); // eslint-disable-line react-hooks/exhaustive-deps
