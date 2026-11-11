@@ -257,8 +257,10 @@ test('hwExportOpts — 기본값 · 사양서는 엑셀만 · 모르는 법인 i
 });
 
 test('법인 목록 · 파일 이름', () => {
-  const roster = hwCorpRoster({ vcenters: [{ id: 'vc-a', name: 'vcenter-a' }, { id: 'vc-b', name: 'vcenter-b' }, { id: 'vc-c', name: 'vcenter-c' }] }, fleet);
-  assert.deepEqual(roster.map((c) => [c.id, c.bm, c.vh]), [['vc-a', 2, 1], ['vc-b', 1, 1], ['vc-c', 0, 0], [UNASSIGNED, 1, 0]]);
+  // v2.968: 법인 목록은 corpOf(법인 = DataCenter) 를 적용해 센다 — 서버가 있는 법인만 · 설정의 법인 순서 · 미지정은 맨 뒤(상세는 hwExportCorp2968.test.js).
+  const byVc = (row) => ({ id: row.vcenterId || '', name: row.vcenter || row.vcenterId || '미지정' });
+  const roster = hwCorpRoster(fleet, { corpOf: byVc, dcOrder: ['vc-b', 'vc-a'] });
+  assert.deepEqual(roster.map((c) => [c.id, c.bm, c.vh]), [['vc-b', 1, 1], ['vc-a', 2, 1], [UNASSIGNED, 1, 0]]);
   assert.equal(hwExportFileBase({ kind: 'both', corps: null, roster, stamp: '20261111-1030' }), 'server-hardware_all-servers_all_20261111-1030');
   assert.equal(hwExportFileBase({ kind: 'bm', corps: new Set([UNASSIGNED]), roster, stamp: 's' }), 'server-hardware_baremetal_unassigned_s');
   assert.equal(hwExportFileBase({ kind: 'vh', corps: new Set(['vc-a', 'vc-b']), roster, stamp: 's' }), 'server-hardware_esxi-hosts_2corps_s');

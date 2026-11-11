@@ -20,7 +20,7 @@ import { keepMappedMeasured } from '../idrac/attribution.js';
 import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
-import { getDatacenterAssign, listDatacenters } from '../datacenter/store.js';
+import { getDatacenterAssign, listDatacenters, datacenterOfVcenter } from '../datacenter/store.js';
 import { getFleetInventory, fleetGhostReport } from '../insights/fleetInventory.js'; // v2.783(점검 Q2 P-B3): prune 은 화면과 같은 유령 판정
 import { setFleetTag, pruneFleetTags, loadFleetTags, applyFleetExclude } from '../insights/fleetTags.js';
 import { setFleetAssign, setFleetAssignMany, applyFleetAssign, pruneFleetAssign, loadFleetAssign } from '../insights/fleetAssign.js';
@@ -43,6 +43,9 @@ import { getInventory } from '../idrac/invCache.js';
 import { allRemoteServers } from '../collector/remoteInventory.js';
 import { catalogForClient, resolveFields, BASIC_KEYS } from '../insights/hwExport/catalog.js';
 import { makeInvOf, selectServers, buildHwModel, KINDS, UNASSIGNED } from '../insights/hwExport/rows.js';
+import { buildDcIndex, makeCorpOf, VC_PREFIX } from '../insights/hwExport/corp.js';
+import { analysisServersWithRemote, collectorToDatacenterMap } from '../insights/analysisServers.js';
+import { loadCollectors } from '../collector/registry.js';
 import { renderHwExport, SPEC_MAX } from '../insights/hwExport/render.js';
 import { getPrefs as getHwPrefs, setPref as setHwPref, FMTS as HW_FMTS, BANDS as HW_BANDS } from '../insights/hwExport/prefs.js';
 
@@ -214,18 +217,46 @@ const hwFullScopeOnly = fullScopeOnlyWith(HW_FULL_SCOPE_REASON);
 async function hwFleetOf(snap) {
   return snapMemo('fleet', `${snap.generatedAt}|${fleetRev()}`, 60_000, async () => getFleetInventory(snap));   // GET /fleet 과 같은 캐시(같은 키)
 }
-/** 법인 목록(창의 칩) — 스냅샷의 vCenter + 미지정. 대수는 분류 결과에서 센다(화면에서 더하지 않게). */
-export function hwCorpRoster(snap, fleet) {
-  const m = new Map((snap?.vcenters || []).map((v) => [String(v.id), { id: String(v.id), name: v.name || String(v.id), bm: 0, vh: 0 }]));
-  const bump = (vcId, k) => {
-    const id = String(vcId || '') || UNASSIGNED;
-    if (!m.has(id)) m.set(id, { id, name: id === UNASSIGNED ? '미지정' : id, bm: 0, vh: 0 });
+/**
+ * v2.968: 법인 = 법인(DataCenter) — 서버 분석 화면과 같은 판정(insights/hwExport/corp.js 머리말 · 사용자 신고 '법인별 서버 분리가 안 됨').
+ * 서버 분석 목록(스캔 대역 법인 · 서비스태그로 찾은 vCenter 까지 채운 것)으로 색인을 만들고, 행 → 법인 함수와 법인 표시 순서(설정의 법인 순서)를 준다.
+ */
+export function hwCorpContext(snap) {
+  const dcs = (() => { try { return listDatacenters() || []; } catch { return []; } })();
+  const dcNames = new Map(dcs.map((d) => [String(d.id), String(d.name || d.id)]));
+  const vcNames = new Map((snap?.vcenters || []).map((v) => [String(v.id), String(v.name || v.id)]));
+  const dcOfVc = (vc) => { try { return datacenterOfVcenter(vc) || ''; } catch { return ''; } };
+  let index = { byId: new Map(), byTag: new Map() };
+  try { index = buildDcIndex(analysisServersWithRemote(null), dcOfVc); } catch { /* 색인을 못 만들면 vCenter 할당만으로(더 많은 서버가 미지정 — 지어내지 않는다) */ }
+  // 엣지 보고 행의 에이전트 → 법인(수집 서버 id · 이름, 대소문자 무시 — analysisServers.scanSiteIndex 의 agentDc 와 같은 맞춤)
+  let agentDc = () => '';
+  try {
+    const byCollector = collectorToDatacenterMap();
+    const lower = new Map([...byCollector].map(([k, v]) => [String(k).toLowerCase(), v]));
+    for (const c of loadCollectors()) { const n = String(c?.name || '').toLowerCase(); if (n && !lower.has(n)) lower.set(n, byCollector.get(String(c.id)) || ''); }
+    agentDc = (a) => byCollector.get(a) || lower.get(String(a).toLowerCase()) || '';
+  } catch { /* 수집 서버 등록부를 못 읽으면 에이전트 귀속 없이 */ }
+  const corpOf = makeCorpOf({ index, dcOfVc, dcName: (id) => dcNames.get(id) || '', vcName: (id) => vcNames.get(id) || '', agentDc });
+  return { corpOf, dcOrder: dcs.map((d) => String(d.id)), dcOfVc };
+}
+/**
+ * 법인 목록(창의 칩) — 서버가 한 대라도 있는 법인만, 설정의 법인 순서 → (법인 할당 없는 vCenter 묶음) → 미지정 순.
+ * 대수는 분류 결과에 같은 corpOf 를 적용해 센다(화면에서 더하지 않게 · 파일과 같은 판정).
+ */
+export function hwCorpRoster(fleet, { corpOf, dcOrder = [] }) {
+  const m = new Map();
+  const bump = (row, k) => {
+    const c = corpOf(row, k) || { id: '', name: '미지정' };
+    const id = c.id || UNASSIGNED;
+    if (!m.has(id)) m.set(id, { id, name: c.id ? c.name : '미지정', bm: 0, vh: 0 });
     m.get(id)[k]++;
   };
-  for (const b of fleet?.bareMetal || []) bump(b.vcenterId, 'bm');
-  for (const h of fleet?.virtualizationHosts || []) bump(h.vcenterId, 'vh');
-  const list = [...m.values()].sort((a, b) => (a.id === UNASSIGNED) - (b.id === UNASSIGNED) || a.name.localeCompare(b.name));
-  return list.filter((c) => c.id !== UNASSIGNED || c.bm + c.vh > 0);
+  for (const b of fleet?.bareMetal || []) bump(b, 'bm');
+  for (const h of fleet?.virtualizationHosts || []) bump(h, 'vh');
+  const pos = new Map(dcOrder.map((id, i) => [id, i]));
+  const tier = (c) => (c.id === UNASSIGNED ? 2 : c.id.startsWith(VC_PREFIX) ? 1 : 0);
+  const rank = (c) => (pos.has(c.id) ? pos.get(c.id) : Number.MAX_SAFE_INTEGER);
+  return [...m.values()].sort((a, b) => tier(a) - tier(b) || rank(a) - rank(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 /** 쿼리 → 내보내기 선택(검증). 모르는 값은 기본값 · 모르는 법인 id 는 버린다. */
 export function hwExportOpts(q, { admin = false, corpIds = [] } = {}) {
@@ -260,9 +291,12 @@ insightsRouter.get('/fleet/hardware-meta', hwCsvPerm, hwFullScopeOnly, async (re
     const snap = store.get();
     const fleet = await hwFleetOf(snap);
     const admin = isAdminReq(req);
+    const cc = hwCorpContext(snap);
+    // 화면(통합 서버 인벤토리)의 vCenter 필터 → 법인 id('화면 필터대로' 가 쓴다). 법인 할당이 없는 vCenter 는 그 vCenter 묶음.
+    const vcCorp = Object.fromEntries((snap?.vcenters || []).map((v) => [String(v.id), cc.dcOfVc(String(v.id)) || `${VC_PREFIX}${v.id}`]));
     res.set('Cache-Control', 'no-store').json({
       ok: true, admin, specMax: SPEC_MAX, catalog: catalogForClient({ admin }), basicKeys: BASIC_KEYS,
-      corps: hwCorpRoster(snap, fleet), prefs: getHwPrefs(req.user?.username)?.def || null,
+      corps: hwCorpRoster(fleet, cc), vcCorp, prefs: getHwPrefs(req.user?.username)?.def || null,
     });
   } catch { res.status(500).json({ ok: false, reason: '내보내기 정보를 만들지 못했습니다.' }); }
 });
@@ -280,7 +314,8 @@ insightsRouter.get('/fleet/hardware-export', hwCsvPerm, hwFullScopeOnly, async (
   const admin = isAdminReq(req);
   let fleet;
   try { fleet = await hwFleetOf(snap); } catch { return res.status(500).json({ ok: false, reason: '통합 서버 인벤토리를 만들지 못했습니다.' }); }
-  const roster = hwCorpRoster(snap, fleet);
+  const cc = hwCorpContext(snap);
+  const roster = hwCorpRoster(fleet, cc);
   const o = hwExportOpts(req.query || {}, { admin, corpIds: roster.map((c) => c.id) });
   if (!o.ok) return res.status(400).json({ ok: false, error: 'bad_request', reason: o.reason });
   const lock = acquireExport('fleet.hardware.export', req);
@@ -290,7 +325,8 @@ insightsRouter.get('/fleet/hardware-export', hwCsvPerm, hwFullScopeOnly, async (
   req.on('close', onClose);
   try {
     const invOf = makeInvOf({ getInventory, registry: loadRegistry(), remoteServers: allRemoteServers() });
-    const servers = selectServers(fleet, { kind: o.kind, corps: o.corps, invOf, match: admin ? null : insightsMatcher(snap) });
+    const corpRank = new Map(roster.map((c, i) => [c.id === UNASSIGNED ? '' : c.id, i]));
+    const servers = selectServers(fleet, { kind: o.kind, corps: o.corps, invOf, match: admin ? null : insightsMatcher(snap), corpOf: cc.corpOf, corpRank });
     const model = await buildHwModel(servers, o.fields, { admin, spec: o.spec });
     const now = Date.now();
     const kindText = o.kind === 'vh' ? '가상화 서버(ESXi 호스트)만' : o.kind === 'both' ? '물리서버 + 가상화 서버' : '물리서버(베어메탈)만';

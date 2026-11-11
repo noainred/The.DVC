@@ -13,7 +13,7 @@ import { useLatest } from '../../hooks/useLatest.js';
 import { fetchJson, downloadFile, putJson, canCsv } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { Modal, ErrorBox, Loading } from '../../components/ui.jsx';
-import { FORMATS, KINDS, BANDS, PRESETS, presetKeys, corpCount, selectionSummary, hwExportQuery, summaryLine, stateFromPrefs } from './fleetHwExportText.js';
+import { FORMATS, KINDS, BANDS, PRESETS, presetKeys, corpCount, selectionSummary, hwExportQuery, summaryLine, stateFromPrefs, screenCorpIds } from './fleetHwExportText.js';
 
 export function FleetHwExportModal({ initialKind = 'bm', screenCorp = '', onClose }) {
   const run = useLatest();
@@ -46,7 +46,8 @@ export function FleetHwExportModal({ initialKind = 'bm', screenCorp = '', onClos
     if (n.has(id)) n.delete(id); else n.add(id);
     return n;
   });
-  const fromScreen = () => setCorpSel(screenCorp ? new Set([screenCorp]) : null);
+  // 화면(통합 서버 인벤토리)의 필터는 vCenter 다 — 서버가 준 vCenter → 법인 대응(vcCorp)으로 옮긴다. 대응을 모르면 모든 법인으로 둔다.
+  const fromScreen = () => setCorpSel(screenCorpIds(screenCorp, meta?.vcCorp, corps));
   const toggleKey = (k, locked) => { if (locked) return; setSel((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; }); };
   const setGroup = (g, on) => setSel((prev) => {
     const n = new Set(prev);
@@ -97,11 +98,11 @@ export function FleetHwExportModal({ initialKind = 'bm', screenCorp = '', onClos
 
               <section className="card gpu-alloc-export-sec" data-hwx-corps="">
                 <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-                  <span className="muted lbl">③ 법인(vCenter)</span>
+                  <span className="muted lbl">③ 법인(DataCenter)</span>
                   <span className="flex gap wrap" style={{ marginLeft: 'auto', gap: 6 }}>
                     <button type="button" className="qn-btn" onClick={() => setCorpSel(null)}>모두</button>
                     <button type="button" className="qn-btn" onClick={() => setCorpSel(new Set())}>모두 해제</button>
-                    <button type="button" className="qn-btn" onClick={fromScreen} title={screenCorp ? '화면의 법인 필터를 가져옵니다.' : '화면에서 고른 법인이 없어 모든 법인으로 둡니다.'}>화면 필터대로</button>
+                    <button type="button" className="qn-btn" onClick={fromScreen} title={screenCorp ? '화면에서 고른 vCenter 가 속한 법인을 고릅니다.' : '화면에서 고른 것이 없어 모든 법인으로 둡니다.'}>화면 필터대로</button>
                   </span>
                 </div>
                 <div className="hwx-stack" role="group" aria-label="넣을 법인">
@@ -114,7 +115,7 @@ export function FleetHwExportModal({ initialKind = 'bm', screenCorp = '', onClos
                     );
                   })}
                 </div>
-                <div className="muted hwx-note">{noneSel ? '' : `${corpSel == null ? '모든 법인' : `법인 ${s.picked}곳`} · 서버 ${s.servers}대`}</div>
+                <div className="muted hwx-note">{noneSel ? '' : `${corpSel == null ? '모든 법인' : `법인 ${s.picked}곳`} · 서버 ${s.servers}대`} — 서버 분석 화면과 같은 법인 구분입니다.</div>
                 {noneSel && <div className="gpu-alloc-export-warn">법인을 하나 이상 고르세요.</div>}
               </section>
 

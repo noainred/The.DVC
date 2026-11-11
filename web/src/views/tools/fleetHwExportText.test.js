@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { presetKeys, selectionSummary, hwExportQuery, summaryLine, stateFromPrefs, corpCount } from './fleetHwExportText.js';
+import { presetKeys, selectionSummary, hwExportQuery, summaryLine, stateFromPrefs, corpCount, screenCorpIds } from './fleetHwExportText.js';
 
 // 서버 catalogForClient 모양(값 이름은 서버가 준다).
 const catalog = [
@@ -49,5 +49,15 @@ describe('fleetHwExportText', () => {
     const p = stateFromPrefs({ fmt: 'csv', band: 'sheet', spec: true, cols: ['fw.det.version', 'gone.key'] }, catalog, basicKeys);
     expect([p.format, p.band, p.spec]).toEqual(['csv', 'sheet', true]);
     expect([...p.sel].sort()).toEqual(['fw.det.version', 'id.sum.corp', 'id.sum.name']);
+  });
+
+  it('화면 필터대로 — vCenter 필터를 법인으로 옮기고, 대응을 모르면 모든 법인(null)', () => {
+    const vcCorp = { 'vc-az': 'a', 'vc-az-irs': 'a', 'vc-x': 'gone' };
+    expect([...screenCorpIds('vc-az-irs', vcCorp, corps)]).toEqual(['a']);
+    expect([...screenCorpIds('__none__', vcCorp, corps)]).toEqual(['__none__']);
+    expect(screenCorpIds('', vcCorp, corps)).toBe(null);
+    expect(screenCorpIds('vc-x', vcCorp, corps)).toBe(null);
+    expect(screenCorpIds('vc-unknown', vcCorp, corps)).toBe(null);
+    expect(screenCorpIds('vc-az', null, corps)).toBe(null);
   });
 });
