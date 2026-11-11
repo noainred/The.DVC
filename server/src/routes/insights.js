@@ -45,14 +45,13 @@ import { allRemoteServers } from '../collector/remoteInventory.js';
 import { catalogForClient, resolveFields, BASIC_KEYS } from '../insights/hwExport/catalog.js';
 import { makeInvOf, selectServers, buildHwModel, KINDS, UNASSIGNED } from '../insights/hwExport/rows.js';
 import { buildDcIndex, makeCorpOf, VC_PREFIX } from '../insights/hwExport/corp.js';
-import { loadFleetDcAssign, setFleetDcAssignMany, pruneFleetDcAssign, fleetDcAssignUnreadable } from '../insights/fleetDcAssign.js';
 import { analysisServersWithRemote, collectorToDatacenterMap } from '../insights/analysisServers.js';
 import { loadCollectors } from '../collector/registry.js';
 import { renderHwExport, SPEC_MAX } from '../insights/hwExport/render.js';
 import { getPrefs as getHwPrefs, setPref as setHwPref, FMTS as HW_FMTS, BANDS as HW_BANDS } from '../insights/hwExport/prefs.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
-import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from './admin/shared.js';
+import { fullScopeOnlyWith } from './admin/shared.js';
 export const insightsRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
@@ -192,9 +191,8 @@ insightsRouter.get('/fleet', async (req, res) => {
     // 캐시 키: 스냅샷 생성시각 + 플릿 리비전(태그/소속/레지스트리 변경 시 즉시 +1). 매 요청 파일 읽기 없음.
     const key0 = `${snap.generatedAt}|${fleetRev()}`;
     const raw = await snapMemo('fleet', key0, 60_000, async () => getFleetInventory(snap));
-    // v2.969: 행마다 법인(DataCenter) — 서버 분석 · 하드웨어 내보내기와 같은 판정(hwCorpContext). 법인 설정(목록 · vCenter 할당)이 바뀌면 키가 바뀐다.
-    //   수동 법인 지정(fleet-dc-assign)은 fleetRev 를 올린다. 원격(엣지) 목록의 법인 변화는 60초 TTL 안에서 따라온다.
-    // 반증 F8: 스캔 대역 법인 · 수집 서버 → 법인 · 원격 목록은 fleetRev 를 올리지 않는다 — 1분 단위 칸을 키에 넣어 ETag 도 바뀌게 한다(304 로 옛 본문을 붙잡지 않게).
+    // v2.969: 행마다 법인(DataCenter) — 서버 분석 · 하드웨어 내보내기와 같은 판정(hwCorpContext — 수집한 Agent 의 법인 기준). 법인 설정(목록 · vCenter 할당)이 바뀌면 키가 바뀐다.
+    // 스캔 대역 법인 · 수집 서버 → 법인 · 원격 목록은 fleetRev 를 올리지 않는다 — 1분 단위 칸을 키에 넣어 ETag 도 바뀌게 한다(304 로 옛 본문을 붙잡지 않게 — 반증 2969 F8).
     const key = `${key0}|dc:${hwDcSignature()}|t:${Math.floor(Date.now() / 60_000)}`;
     const full = await snapMemo('fleet-corp', key, 60_000, async () => enrichFleetCorp(raw, hwCorpContext(snap)));
     // liveKeys는 prune 내부용 — 응답에서 제외. bareMetalDupes(다음 점검 ① 2차)도 내부용 — 베어메탈 사용률 라우트가 범위 · 가림을 걸어 따로 내준다.
@@ -214,28 +212,6 @@ insightsRouter.get('/fleet', async (req, res) => {
     else sendCached(req, res, `${fpKey}|masked`, maskFleetPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-// --- v2.969 베어메탈의 법인(DataCenter) 수동 지정(관리자 · 전체 범위) — 사용자 결정 'vCenter 지정 · 법인 지정 둘 다 두기' ---
-// 저장은 insights/fleetDcAssign.js(등록부 datacenterId 를 고치지 않는다 — 교체 스캔이 지우거나 되돌리는 경로라서. 그 파일 머리말).
-// body: { items:[{key}], datacenterId } · datacenterId '' = 지정 해제(자동 판정으로). 없는 법인 id 는 400 · 파일 손상이면 503.
-// 반증 F3: 쓰기 범위(writeVcenters)가 줄어든 관리자도 막는다 — 전 법인 서버의 지정을 바꾸는 쓰기다(v2.904 isFullReadWriteScope 규칙).
-const fleetFullRwOnly = fullReadWriteScopeOnlyWith('법인(DataCenter) 지정은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다 — 전 법인 서버의 법인 판정을 바꿉니다.');
-insightsRouter.put('/fleet/dc-assign', adminOnly, fleetFullRwOnly, (req, res) => {
-  const b = req.body && typeof req.body === 'object' ? req.body : {};
-  const items = Array.isArray(b.items) ? b.items.slice(0, 5000) : [];
-  const dc = typeof b.datacenterId === 'string' ? b.datacenterId.trim() : '';
-  if (!items.length) return res.status(400).json({ ok: false, reason: 'items 가 비었습니다.' });
-  let valid = null;
-  try { valid = new Set((listDatacenters() || []).map((d) => String(d.id))); } catch { valid = new Set(); }
-  // 반증 F7: DataCenter 저장소는 손상을 빈 목록으로 돌려준다 — 빈 목록이면 '없는 법인' 400 대신 이유를 말한다(해제는 그대로 받는다).
-  if (dc && !valid.size) return res.status(503).json({ ok: false, reason: '법인(DataCenter) 목록이 비어 있거나 읽지 못했습니다 — 설정 › DataCenter(법인)를 먼저 확인하세요.' });
-  const keys = items.map((it) => String((it && typeof it === 'object' ? it.key : it) ?? '').trim()).filter(Boolean);
-  if (!keys.length) return res.status(400).json({ ok: false, reason: '지정할 서버 키가 없습니다.' });
-  const r = setFleetDcAssignMany(keys.map((k) => [k, dc]), valid);
-  if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason, ...(r.code ? { [r.code]: true } : {}) });
-  logAudit({ user: req.user?.username, action: '플릿 법인(DataCenter) 지정', target: keys.length === 1 ? keys[0].slice(0, 128) : `${keys.length}대`, detail: dc ? `→ ${dc} (변경 ${r.changed})` : `해제 (변경 ${r.changed})`, ip: req.ip || '' });
-  res.json({ ok: true, changed: r.changed, skipped: r.skipped || 0, total: keys.length, datacenterId: dc });
-});
-
 // --- 서버 하드웨어 정보 내보내기(v2.967 — 승인 시안 docs/design/baremetal-hw-xlsx · 사용자 기본안 7가지 2026-11-11) ---
 // 게이트는 GET /fleet 과 같다(전체 범위 계정만 — 미귀속 베어메탈 하드웨어가 들어간다) + 파일 내보내기 권한 data.csv(v2.643 규약).
 // 엑셀은 동시 1건(util/exportBusy — 없으면 포탈을 죽인다, security-api.md) · 워커 스레드에서 만든다(insights/hwExport/render.js).
@@ -265,9 +241,7 @@ export function hwCorpContext(snap) {
     for (const c of loadCollectors()) { const n = String(c?.name || '').toLowerCase(); if (n && !lower.has(n)) lower.set(n, byCollector.get(String(c.id)) || ''); }
     agentDc = (a) => byCollector.get(a) || lower.get(String(a).toLowerCase()) || '';
   } catch { /* 수집 서버 등록부를 못 읽으면 에이전트 귀속 없이 */ }
-  let manual = {};
-  try { manual = loadFleetDcAssign(); } catch { manual = {}; }
-  const corpOf = makeCorpOf({ index, dcOfVc, dcName: (id) => dcNames.get(id) || '', vcName: (id) => vcNames.get(id) || '', agentDc, manual, knownDc: new Set(dcNames.keys()) });
+  const corpOf = makeCorpOf({ index, dcOfVc, dcName: (id) => dcNames.get(id) || '', vcName: (id) => vcNames.get(id) || '', agentDc });
   return { corpOf, dcOrder: dcs.map((d) => String(d.id)), dcOfVc, datacenters: dcs.map((d) => ({ id: String(d.id), name: String(d.name || d.id) })) };
 }
 /** 법인 설정 서명(목록 이름 · vCenter 할당) — /fleet 응답 캐시 키. 못 읽으면 ''(그 경우 fleetRev · 스냅샷으로만 바뀐다). */
@@ -279,18 +253,16 @@ export function hwDcSignature() {
   } catch { return ''; }
 }
 /**
- * v2.969(사용자 요청 '통합 서버 인벤토리 화면도 법인(DataCenter) 기준으로'): 분류 결과의 행마다 corpId · corpName · corpSource 를 싣고,
+ * v2.969(사용자 요청 '통합 서버 인벤토리 화면도 법인(DataCenter) 기준으로' · 'Agent 자동 판정만'): 분류 결과의 행마다 corpId · corpName · corpSource(· 미지정이면 corpWhy)를 싣고,
  * 법인 목록(corps — 화면 필터 · 칩)과 지정에 쓸 법인(DataCenter) 목록(datacenters), '법인 미지정' 수를 덧붙인다. 원본은 바꾸지 않는다(캐시 공유).
  */
 export function enrichFleetCorp(full, cc) {
   if (!full || typeof full !== 'object') return full;
-  const tag = (rows, k) => (Array.isArray(rows) ? rows.map((r) => { const c = cc.corpOf(r, k) || { id: '', name: '미지정', src: '' }; return { ...r, corpId: c.id, corpName: c.id ? c.name : '', corpSource: c.src || '' }; }) : rows);
+  const tag = (rows, k) => (Array.isArray(rows) ? rows.map((r) => { const c = cc.corpOf(r, k) || { id: '', name: '미지정', src: '' }; return { ...r, corpId: c.id, corpName: c.id ? c.name : '', corpSource: c.src || '', ...(c.id ? {} : { corpWhy: c.why || '' }) }; }) : rows);
   const bareMetal = tag(full.bareMetal, 'bm');
   const virtualizationHosts = tag(full.virtualizationHosts, 'vh');
   const out = { ...full, bareMetal, virtualizationHosts, corps: hwCorpRoster(full, cc), datacenters: cc.datacenters || [] };
   if (full.summary && Array.isArray(bareMetal)) out.summary = { ...full.summary, bareMetalNoCorp: bareMetal.filter((b) => !b.corpId).length };
-  // 반증 F4: 수동 지정 파일을 못 읽으면 화면이 그 사실을 말한다(수동 지정분이 자동 판정으로 보이는 동안).
-  try { if (fleetDcAssignUnreadable()) out.dcAssignUnreadable = true; } catch { /* 표시만 */ }
   return out;
 }
 /**
@@ -507,7 +479,7 @@ insightsRouter.post('/fleet/prune', adminOnly, fleetFullScopeOnly, (req, res) =>
       ? `읽지 못한 출처가 있어 유령 키를 정리하지 않습니다(살아 있는 서버의 키를 지울 수 있습니다) — ${rep.unreadable.slice(0, 5).map((u) => u.reason).join(' · ')}${rep.unreadable.length > 5 ? ` 외 ${rep.unreadable.length - 5}건` : ''}`
       : '';
     const view = {
-      ghostKeys: rep.ghostKeys, wouldRemoveTags: rep.tags.length, wouldRemoveAssign: rep.assign.length, wouldRemoveDcAssign: (rep.dcAssign || []).length,
+      ghostKeys: rep.ghostKeys, wouldRemoveTags: rep.tags.length, wouldRemoveAssign: rep.assign.length,
       keys: rep.keys.slice(0, PRUNE_KEYS_MAX), keysTotal: rep.keys.length, blocked,
       unreadable: rep.unreadable.map(({ source, id, reason: r }) => ({ source, ...(id ? { id } : {}), reason: r })),
     };
@@ -523,10 +495,9 @@ insightsRouter.post('/fleet/prune', adminOnly, fleetFullScopeOnly, (req, res) =>
     const keepOf = (obj) => new Set(Object.keys(obj || {}).filter((k) => !del.has(k)));
     const tags = del.size ? pruneFleetTags(keepOf(loadFleetTags())) : 0;
     const assign = del.size ? pruneFleetAssign(keepOf(loadFleetAssign())) : 0;
-    const dcAssign = del.size ? pruneFleetDcAssign(keepOf(loadFleetDcAssign())) : 0;   // v2.969(반증 F5)
     const skipped = Math.max(0, want.length - del.size); // 미리 본 뒤 유령이 아니게 된 키(또는 잘못된 값) — 지우지 않았다
     logAudit({ user: req.user?.username, action: '플릿 유령 키 정리', target: `키 ${del.size} (태그 ${tags} · 소속 ${assign})`, detail: `${[...del].slice(0, 20).join(', ')}${del.size > 20 ? ` 외 ${del.size - 20}` : ''}${skipped ? ` · 건너뜀 ${skipped}` : ''}`, ip: req.ip || '' });
-    res.json({ ok: true, removedKeys: del.size, removedTags: tags, removedAssign: assign, removedDcAssign: dcAssign, skipped });
+    res.json({ ok: true, removedKeys: del.size, removedTags: tags, removedAssign: assign, skipped });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

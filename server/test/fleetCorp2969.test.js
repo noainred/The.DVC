@@ -1,137 +1,75 @@
-// v2.969 통합 서버 인벤토리 — 법인(DataCenter) 기준(사용자 요청 2026-11-11) + 법인 수동 지정(vCenter 지정과 둘 다 — 사용자 결정).
-//   판정은 insights/hwExport/corp.js 하나(서버 분석 · 하드웨어 내보내기 · 이 화면이 같은 판정) · 수동 지정 저장은 insights/fleetDcAssign.js.
-import { test, before, after } from 'node:test';
+// v2.969 통합 서버 인벤토리 — 법인(DataCenter) 기준(사용자 요청 2026-11-11). 사용자 결정 '서버 분석처럼 수집한 Agent 이름에 따라 분류 — Agent 자동 판정만':
+//   수동 법인 지정은 두지 않는다(첫 판의 /fleet/dc-assign · fleetDcAssign.js 는 걷어냈다). 판정은 insights/hwExport/corp.js 하나(서버 분석 색인 재사용).
+//   서버 분석의 상태 보드 · 법인별 서버 정보(/admin/idrac)도 Agent 스캔 대역 법인(scanDatacenterId)을 싣는다.
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { config } from '../src/config.js';
-import { loadFleetDcAssign, setFleetDcAssignMany, fleetDcAssignUnreadable, pruneFleetDcAssign, _resetFleetDcAssignForTest } from '../src/insights/fleetDcAssign.js';
-import { fleetGhostReport } from '../src/insights/fleetInventory.js';
 import { makeCorpOf, buildDcIndex } from '../src/insights/hwExport/corp.js';
 import { enrichFleetCorp, hwCorpRoster } from '../src/routes/insights.js';
-import { fleetRev } from '../src/insights/fleetRev.js';
 import { stripComments } from './_stripComments.js';
-
-let dir; let prevDir;
-before(() => { prevDir = config.configDir; dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fdc2969-')); config.configDir = dir; _resetFleetDcAssignForTest(); });
-after(() => { config.configDir = prevDir; _resetFleetDcAssignForTest(); fs.rmSync(dir, { recursive: true, force: true }); });
-
-test('저장소 — 소문자 키 · 없는 법인 거부 · 해제 · 손상이면 보존하고 쓰기 거부(503) · 쓰면 fleetRev 가 오른다', () => {
-  const valid = new Set(['AZ', 'NJ']);
-  const r0 = fleetRev();
-  assert.deepEqual(setFleetDcAssignMany([['TAG1', 'AZ'], ['srv-2', 'NJ']], valid), { ok: true, changed: 2, skipped: 0 });
-  assert.ok(fleetRev() > r0, '화면 캐시가 바로 바뀌게');
-  assert.deepEqual(loadFleetDcAssign(), { tag1: 'AZ', 'srv-2': 'NJ' });
-  assert.equal(setFleetDcAssignMany([['tag1', 'GHOST']], valid).status, 400, '없는 법인');
-  assert.deepEqual(setFleetDcAssignMany([['tag1', 'AZ'], ['x'.repeat(129), 'AZ']], valid), { ok: true, changed: 0, skipped: 1 }, '같은 값은 쓰지 않고, 형식 밖 키는 건너뛴 수로 따로(반증 F6)');
-  assert.deepEqual(setFleetDcAssignMany([['TAG1', '']], valid), { ok: true, changed: 1, skipped: 0 });
-  assert.deepEqual(loadFleetDcAssign(), { 'srv-2': 'NJ' });
-  fs.writeFileSync(path.join(dir, 'fleet-dc-assign.json'), '{ broken');
-  _resetFleetDcAssignForTest();
-  assert.deepEqual(loadFleetDcAssign(), {});
-  assert.equal(fleetDcAssignUnreadable(), true);
-  _resetFleetDcAssignForTest();   // 재시작 — 원본은 옮겨졌고 손상 사본만 있다
-  assert.equal(fleetDcAssignUnreadable(), true, '반증 F4: 재시작 뒤에도 손상 사본이 있으면 계속 거부');
-  assert.throws(() => pruneFleetDcAssign(new Set()), /읽지 못해/, '정리도 거부');
-  const w = setFleetDcAssignMany([['x', 'AZ']], valid);
-  assert.equal(w.status, 503, '손상 파일 위에 덮어 다른 지정을 잃지 않게');
-  assert.ok(fs.readdirSync(dir).some((f) => f.startsWith('fleet-dc-assign.json.corrupt')), '손상 사본 보존');
-  assert.equal(setFleetDcAssignMany([['y', 'AZ']], valid).status, 503, '보존 뒤(파일이 옮겨진 뒤)에도 계속 거부');
-  // 관리자가 사본을 되돌리면(정상 파일) — 재시작 없이 다시 쓸 수 있다(그 지정들도 살아 있다)
-  fs.writeFileSync(path.join(dir, 'fleet-dc-assign.json'), JSON.stringify({ v: 1, assign: { 'srv-2': 'NJ' } }));
-  assert.deepEqual(loadFleetDcAssign(), { 'srv-2': 'NJ' });
-  assert.equal(fleetDcAssignUnreadable(), false);
-  assert.deepEqual(setFleetDcAssignMany([['y', 'AZ']], valid), { ok: true, changed: 1, skipped: 0 });
-  assert.deepEqual(loadFleetDcAssign(), { 'srv-2': 'NJ', y: 'AZ' });
-  // 유령 키 정리(반증 F5) — 남길 키 밖을 지운다 · 유령 보고에 dcAssign 이 들어간다
-  assert.equal(pruneFleetDcAssign(new Set(['y'])), 1);
-  assert.deepEqual(loadFleetDcAssign(), { y: 'AZ' });
-  const rep = fleetGhostReport({ hosts: [], vcenters: [] }, { tags: {}, assign: {}, dcAssign: { y: 'AZ', ghost1: 'NJ' }, collectors: [] });
-  assert.ok(rep.dcAssign.includes('ghost1') && rep.keys.includes('ghost1'), '법인 지정 키도 유령 판정');
-  fs.rmSync(path.join(dir, 'fleet-dc-assign.json'), { force: true });
-  for (const f of fs.readdirSync(dir)) if (f.includes('.corrupt.')) fs.rmSync(path.join(dir, f));
-  _resetFleetDcAssignForTest();
-  assert.equal(fleetDcAssignUnreadable(), false, '손상 사본을 지우면(포기) 풀린다');
-});
 
 const ASSIGN = { 'vc-az': 'AZ', 'vc-nj': 'NJ' };
 const dcOfVc = (vc) => ASSIGN[vc] || '';
-const index = buildDcIndex([{ id: 'r1', serviceTag: 'T1', datacenterId: 'NJ' }], dcOfVc);
-const mk = (manual) => makeCorpOf({ index, dcOfVc, dcName: (id) => ({ AZ: 'AZ', NJ: 'NJ' }[id] || ''), vcName: () => '', manual, knownDc: new Set(['AZ', 'NJ']) });
+// 서버 분석 목록 모양: 엣지 서버는 수집 서버의 법인이 datacenterId 로 채워져 있다(remoteServersResolved) · 스캔 대역 Agent 법인도(withScanDatacenter)
+const analysis = [
+  { id: 'r1', serviceTag: 'T1', datacenterId: 'NJ', dcSource: 'scan-agent' },
+  { id: 'e1', remote: true, collectorId: 'pl', serviceTag: 'E1', datacenterId: 'AZ' },
+  { id: 'e2', remote: true, collectorId: 'zz-edge', serviceTag: 'E2', datacenterId: '' },   // 수집 서버 라벨이 DataCenter 와 맞지 않음
+  { id: 'amb', serviceTag: 'AMB', dcSource: 'scan-ambiguous' },
+  { id: 'out', serviceTag: 'OUT' },
+];
+const index = buildDcIndex(analysis, dcOfVc);
+const corpOf = makeCorpOf({ index, dcOfVc, dcName: (id) => ({ AZ: 'AZ', NJ: 'NJ' }[id] || ''), vcName: () => '', agentDc: (a) => (a === 'edge-nj' ? 'NJ' : '') });
 
-test('판정 — 수동 지정이 가장 먼저(tagKey · 서비스태그 · 서버 id) · 없는 법인을 가리키는 지정은 무시 · 출처(src)를 싣는다', () => {
-  const row = { serverId: 'r1', serviceTag: 'T1', tagKey: 't1', vcenterId: 'vc-az' };
-  assert.deepEqual(mk(null)(row, 'bm'), { id: 'NJ', name: 'NJ', src: 'scan' }, '자동: 스캔 법인이 vCenter 할당보다 먼저');
-  assert.deepEqual(mk({ t1: 'AZ' })(row, 'bm'), { id: 'AZ', name: 'AZ', src: 'manual' });
-  assert.deepEqual(mk({ r1: 'AZ' })(row, 'bm').src, 'scan', '반증 F1: 저장 키(tagKey)로만 찾는다 — 서버 id · 이름은 보지 않는다');
-  // 반증 F1 재현: 다른 법인의 태그 없는 서버가 IP 키로 지정돼 있어도, 이름이 같은 IP 인 이 서버는 가로채이지 않는다
-  assert.deepEqual(mk({ '10.1.2.3': 'AZ' })({ serverId: 'r1', serviceTag: 'T1', tagKey: 't1', name: '10.1.2.3' }, 'bm'), { id: 'NJ', name: 'NJ', src: 'scan' });
-  assert.equal(mk({ constructor: 'AZ' })({ serverId: 'q', tagKey: 'constructor2' }, 'bm').src, '', '객체 내장 키를 법인으로 읽지 않는다');
-  assert.equal(makeCorpOf({ index, dcOfVc, dcName: () => '', vcName: () => '', manual: {} })({ serverId: 'q', tagKey: 'constructor' }, 'bm').src, '', 'knownDc 없이도 Object.hasOwn');
-  assert.deepEqual(mk({ t1: 'DELETED' })(row, 'bm'), { id: 'NJ', name: 'NJ', src: 'scan' }, '지워진 법인 지정은 자동으로');
-  assert.deepEqual(mk({ t1: 'AZ' })({ name: 'esx', serviceTag: 'T1', tagKey: 't1', vcenterId: 'vc-nj' }, 'vh'), { id: 'NJ', name: 'NJ', src: 'vcenter' }, '가상화 호스트는 수동 지정 대상이 아니다(vCenter 의 법인)');
-  assert.equal(mk(null)({ serverId: 'x', serviceTag: 'Q', vcenterId: 'vc-az' }, 'bm').src, 'vcenter');
+test('판정 — 수집한 Agent 의 법인(서버 분석 색인) → vCenter 할당 → 보고한 에이전트, 출처(src)를 싣는다 · 수동 지정은 없다', () => {
+  assert.deepEqual(corpOf({ serverId: 'r1', serviceTag: 'T1', vcenterId: 'vc-az' }, 'bm'), { id: 'NJ', name: 'NJ', src: 'scan' }, 'Agent 스캔 법인이 vCenter 할당보다 먼저');
+  assert.deepEqual(corpOf({ serverId: 'remote:pl:e1', serviceTag: 'E1' }, 'bm'), { id: 'AZ', name: 'AZ', src: 'scan' }, '엣지 서버는 그 수집 서버의 법인');
+  assert.equal(corpOf({ serverId: 'x', serviceTag: 'Q', vcenterId: 'vc-az' }, 'bm').src, 'vcenter');
+  assert.deepEqual(corpOf({ serverId: 'edge:edge-nj:Q', source: 'edge', serviceTag: 'Q', remoteAgent: 'edge-nj' }, 'bm'), { id: 'NJ', name: 'NJ', src: 'agent' });
+  assert.equal(corpOf({ name: 'esx', vcenterId: 'vc-nj', tagKey: 't1', serviceTag: 'T1' }, 'vh').id, 'NJ', '가상화 호스트는 자기 vCenter 의 법인');
+  const src = stripComments(fs.readFileSync(new URL('../src/insights/hwExport/corp.js', import.meta.url), 'utf8'));
+  assert.doesNotMatch(src, /manual/, '수동 지정 판정이 남아 있지 않다');
+  assert.equal(fs.existsSync(new URL('../src/insights/fleetDcAssign.js', import.meta.url)), false);
 });
 
-test('화면 응답 — 행마다 corpId · corpName · corpSource, 법인 목록 · 지정용 법인 목록 · 법인 미지정 수 · 원본 불변', () => {
+test('미지정 — 왜 모르는지(why)를 아는 사실로만: 수집 서버 법인 이름 불일치 · 대역 겹침 · 대역 밖 · 엣지 에이전트 · OME · 수동 물리 분류', () => {
+  const why = (row, k = 'bm') => { const c = corpOf(row, k); assert.equal(c.id, ''); return c.why; };
+  assert.match(why({ serverId: 'remote:zz-edge:e2', serviceTag: 'E2' }), /수집 서버 ‘zz-edge’ 의 법인 이름이 DataCenter 목록과 맞지 않습니다/);
+  assert.match(why({ serverId: 'amb', serviceTag: 'AMB' }), /스캔 대역이 서로 다른 법인으로 겹칩니다/);
+  assert.match(why({ serverId: 'out', serviceTag: 'OUT' }), /Agent 로 스캔한 대역 밖이고 vCenter 할당도 없습니다/);
+  assert.match(why({ serverId: 'edge:x:Q', source: 'edge', serviceTag: 'Q', remoteAgent: 'edge-xx' }), /보고한 에이전트 ‘edge-xx’ 의 법인 이름/);
+  assert.match(why({ serverId: 'ome:1', source: 'ome', serviceTag: 'NOPE' }), /OME 로만 수집/);
+  assert.match(why({ serverId: 'host:vc-x:esx9', serviceTag: '' }), /수동으로 물리 분류한 ESXi 호스트/);
+  assert.match(why({ serverId: 'unknown-id', serviceTag: 'none' }), /수집한 Agent 의 법인을 알 수 없습니다/);
+});
+
+test('화면 응답 — 행마다 corpId · corpName · corpSource(미지정이면 corpWhy), 법인 목록 · 법인 미지정 수 · 원본 불변', () => {
   const full = {
-    bareMetal: [{ serverId: 'r1', name: 'bm1', serviceTag: 'T1', tagKey: 't1' }, { serverId: 'z', name: 'bm2', serviceTag: 'Z', tagKey: 'z' }],
+    bareMetal: [{ serverId: 'r1', name: 'bm1', serviceTag: 'T1' }, { serverId: 'out', name: 'bm2', serviceTag: 'OUT' }],
     virtualizationHosts: [{ name: 'esx', vcenterId: 'vc-az' }],
     summary: { bareMetal: 2, bareMetalUnassigned: 2 },
   };
   const before = JSON.stringify(full);
-  const out = enrichFleetCorp(full, { corpOf: mk(null), dcOrder: ['NJ', 'AZ'], datacenters: [{ id: 'NJ', name: 'NJ' }, { id: 'AZ', name: 'AZ' }] });
+  const out = enrichFleetCorp(full, { corpOf, dcOrder: ['NJ', 'AZ'], datacenters: [{ id: 'NJ', name: 'NJ' }, { id: 'AZ', name: 'AZ' }] });
   assert.equal(JSON.stringify(full), before, '캐시에 있는 원본은 바꾸지 않는다');
-  assert.deepEqual(out.bareMetal.map((b) => [b.corpId, b.corpName, b.corpSource]), [['NJ', 'NJ', 'scan'], ['', '', '']]);
-  assert.deepEqual(out.virtualizationHosts.map((h) => h.corpId), ['AZ']);
+  assert.deepEqual(out.bareMetal.map((b) => [b.corpId, b.corpName, b.corpSource, b.corpWhy]), [['NJ', 'NJ', 'scan', undefined], ['', '', '', 'Agent 로 스캔한 대역 밖이고 vCenter 할당도 없습니다']]);
   assert.deepEqual(out.corps.map((c) => [c.id, c.bm, c.vh]), [['NJ', 1, 0], ['AZ', 0, 1], ['__none__', 1, 0]]);
   assert.equal(out.summary.bareMetalNoCorp, 1);
   assert.equal(out.summary.bareMetalUnassigned, 2, 'vCenter 미지정 수는 그대로(다른 화면이 읽는다)');
-  assert.deepEqual(out.datacenters.map((d) => d.id), ['NJ', 'AZ']);
-  assert.deepEqual(hwCorpRoster(full, { corpOf: mk(null), dcOrder: ['NJ', 'AZ'] }), out.corps, '내보내기 창과 같은 목록');
+  assert.deepEqual(hwCorpRoster(full, { corpOf, dcOrder: ['NJ', 'AZ'] }), out.corps, '하드웨어 내보내기 창과 같은 목록');
 });
 
-test('라우트 — /fleet 은 법인 판정을 덧붙이고(법인 설정 서명이 캐시 키) · 법인 지정은 관리자 + 전체 범위 + 감사 · 등록부를 고치지 않는다', () => {
+test('라우트 — /fleet 은 법인 판정을 덧붙이고(법인 설정 서명 · 1분 칸이 캐시 키) · 수동 지정 라우트는 없다 · /admin/idrac 은 scanDatacenterId 를 따로 싣는다', () => {
   const src = stripComments(fs.readFileSync(new URL('../src/routes/insights.js', import.meta.url), 'utf8'));
   const fleet = src.slice(src.indexOf("insightsRouter.get('/fleet',"), src.indexOf("insightsRouter.put('/fleet/tag'"));
-  assert.match(fleet, /const key = `\$\{key0\}\|dc:\$\{hwDcSignature\(\)\}\|t:/);
+  assert.match(fleet, /const key = `\$\{key0\}\|dc:\$\{hwDcSignature\(\)\}\|t:\$\{Math\.floor\(Date\.now\(\) \/ 60_000\)\}`/);
   assert.match(fleet, /enrichFleetCorp\(raw, hwCorpContext\(snap\)\)/);
   assert.match(fleet, /if \(scopedVcenterIds\(req\.user, snap\)\)/, '전체 범위 전용은 그대로');
-  assert.match(src, /insightsRouter\.put\('\/fleet\/dc-assign', adminOnly, fleetFullRwOnly,/, '반증 F3: 쓰기 범위까지 전체');
-  assert.match(src, /const fleetFullRwOnly = fullReadWriteScopeOnlyWith\(/);
-  assert.match(fleet, /\|t:\$\{Math\.floor\(Date\.now\(\) \/ 60_000\)\}`/, '반증 F8: 1분 칸');
-  const dc = src.slice(src.indexOf("'/fleet/dc-assign'"), src.indexOf("'/fleet/dc-assign'") + 2500);
-  assert.match(dc, /setFleetDcAssignMany\(/);
-  assert.match(dc, /logAudit\(/);
-  assert.doesNotMatch(dc, /updateServer\(|assignVcenter\(/, '등록부 datacenterId 를 고치지 않는다(교체 스캔이 지우거나 되돌린다)');
-});
-
-test('실제 호출 — 법인 지정: operator 403 · 범위 계정 403 · 없는 법인 400 · 관리자 200', async (t) => {
-  const express = (await import('express')).default;
-  const { insightsRouter } = await import('../src/routes/insights.js');
-  const { addDatacenter, removeDatacenter } = await import('../src/datacenter/store.js');
-  const { store } = await import('../src/store.js');
-  const http = await import('node:http');
-  addDatacenter({ id: 'dc-t2969', name: 'T2969' });   // DataCenter id 는 소문자로 저장된다
-  t.after(() => { try { removeDatacenter('dc-t2969'); } catch { /* */ } });
-  let who = null;
-  const app = express(); app.use(express.json()); app.use((req, _r, next) => { req.user = who; next(); }); app.use('/api/insights', insightsRouter);
-  const srv = http.createServer(app);
-  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-  t.after(() => new Promise((r) => srv.close(r)));
-  const put = async (u, body) => { who = u; const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/insights/fleet/dc-assign`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json() }; };
-  const admin = { username: 'adm', role: 'admin' };
-  assert.equal((await put({ username: 'op', role: 'operator' }, { items: [{ key: 'k1' }], datacenterId: 'dc-t2969' })).status, 403);
-  const vcs = store.get?.()?.vcenters || [];
-  if (vcs.length) {
-    assert.equal((await put({ username: 'sc', role: 'admin', scope: { vcenters: [vcs[0].id] } }, { items: [{ key: 'k1' }], datacenterId: 'dc-t2969' })).status, 403);
-    assert.equal((await put({ username: 'wr', role: 'admin', scope: { writeVcenters: [vcs[0].id] } }, { items: [{ key: 'k1' }], datacenterId: 'dc-t2969' })).status, 403, '반증 F3: 쓰기 범위가 줄어든 관리자');
-  }
-  assert.equal((await put(admin, { items: [{ key: 'k1' }], datacenterId: 'GHOST' })).status, 400);
-  assert.equal((await put(admin, { items: [], datacenterId: 'dc-t2969' })).status, 400);
-  const ok = await put(admin, { items: [{ key: 'K1' }], datacenterId: 'dc-t2969' });
-  assert.deepEqual([ok.status, ok.body.changed, ok.body.total], [200, 1, 1]);
-  assert.equal(loadFleetDcAssign().k1, 'dc-t2969');
-  assert.equal((await put(admin, { items: [{ key: 'k1' }], datacenterId: '' })).body.changed, 1, '해제');
+  assert.doesNotMatch(src, /dc-assign|fleetDcAssign/);
+  const idrac = stripComments(fs.readFileSync(new URL('../src/routes/admin/idracCore.js', import.meta.url), 'utf8'));
+  const list = idrac.slice(idrac.indexOf("adminRouter.get('/idrac',"), idrac.indexOf("adminRouter.post('/idrac',"));
+  assert.match(list, /withScanDatacenter\(s, idx, asg\)/);
+  assert.match(list, /scanDatacenterId: r\.datacenterId/, '등록부 값(datacenterId)은 덮지 않는다 — 교체 스캔의 지울 범위');
+  assert.match(list, /String\(s\.datacenterId \|\| ''\)\.trim\(\)\) return s;/);
+  assert.match(list, /scopeIdracServers\(req, local\.map\(withDc\)\.concat\(remote\.map\(withDc\)\)\)/);
 });

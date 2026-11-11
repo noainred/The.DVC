@@ -11,7 +11,7 @@ import { fleetPartialsNote, fleetHeldNote, fleetHeldBadge } from '../fleetPartia
 import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 실패 본문(400 · 200+ok:false)을 성공으로 읽지 않는다
 import { prunePlan, pruneDoneText } from './fleetPruneText.js'; // v2.783(점검 Q2 P-B3): 확인창은 미리보기 결과로
 import { FleetHwExportModal } from './FleetHwExportModal.jsx';
-import { CORP_SRC, inCorp, corpOptions, bulkConfirmText, dcAssignDoneText } from './fleetCorpText.js'; // v2.969: 법인(DataCenter) 기준 // v2.967: 서버 하드웨어 정보 내보내기(엑셀 · CSV · 사양서)
+import { CORP_SRC, inCorp, corpOptions } from './fleetCorpText.js'; // v2.969: 법인(DataCenter) 기준(수집한 Agent 의 법인) // v2.967: 서버 하드웨어 정보 내보내기(엑셀 · CSV · 사양서)
 
 /**
  * v2.732(점검 2회차 B5-03): 일괄 등록 응답 → 완료 문구. 실패 본문이면 사유를 던진다(requireChanged).
@@ -57,20 +57,9 @@ const VC_SRC = {
   edge: ['엣지', '엣지(현장) 포탈이 보고한 소속'],
 };
 
-// v2.969: 베어메탈의 법인(DataCenter) 지정 드롭다운 — '' = 자동 판정(서버 분석과 같은 규칙). 지금 값이 수동 지정이면 그 법인이 선택돼 있다.
-function DcAssignSelect({ row, datacenters, onChange, disabled }) {
-  const manual = row.corpSource === 'manual' ? row.corpId : '';
-  return (
-    <Select className="select" value={manual} disabled={disabled} style={{ padding: '3px 6px', fontSize: 12, maxWidth: 170 }}
-      onChange={(e) => onChange(e.target.value)} title="법인(DataCenter) 지정 — 자동이면 스캔 · vCenter 할당으로 정합니다">
-      <option value="">자동</option>
-      {datacenters.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-    </Select>
-  );
-}
-/** 법인 칸 — 이름 + 판정 출처(짧게). 없으면 '미지정' 배지. */
+/** 법인 칸 — 이름 + 판정 출처(짧게). 없으면 '미지정' 배지 + 왜 모르는지(서버가 준 corpWhy — 지어내지 않는다). */
 function CorpCell({ row }) {
-  if (!row.corpId) return <span className="badge purple">미지정</span>;
+  if (!row.corpId) return <span title={row.corpWhy || ''}><span className="badge purple">미지정</span>{row.corpWhy && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }}>{row.corpWhy}</span>}</span>;
   const src = CORP_SRC[row.corpSource];
   return <span>{row.corpName}{src && <span className="muted" style={{ fontSize: 11, marginLeft: 4 }} title={src[1]}>· {src[0]}</span>}</span>;
 }
@@ -98,8 +87,7 @@ export function FleetInventory({ isAdmin }) {
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');        // 성공 안내(에러와 분리 — 성공이 에러를 덮지 않게)
   const [sel, setSel] = useState(() => new Set()); // 일괄 등록용 선택(fleetId)
-  const [bulkVc, setBulkVc] = useState('');        // 일괄 지정 대상('' = 해제)
-  const [bulkMode, setBulkMode] = useState('dc');  // v2.969: 일괄 지정 종류 — 'dc' 법인(DataCenter) · 'vc' vCenter
+  const [bulkVc, setBulkVc] = useState('');        // 일괄 등록 대상 vCenter('' = 미지정으로 해제)
   const seqRef = React.useRef(0);                  // load 응답 경합 가드(오래된 응답이 최신을 덮어쓰지 않게)
   const [hwOpen, setHwOpen] = useState(false);     // v2.967 하드웨어 정보 내보내기 창
 
@@ -130,19 +118,6 @@ export function FleetInventory({ isAdmin }) {
     catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
-  // v2.969: 법인(DataCenter) 지정/해제('' = 자동 판정으로). 키는 vCenter 지정과 같은 tagKey.
-  //   반증 F9: 키가 없으면 던진다(호출부 catch 가 오류로 보인다 — null 을 돌려 오류를 지우지 않게). 다시 읽기는 호출부가 한 번만.
-  const setDc = async (rows, dcId) => {
-    const items = rows.map((row) => ({ key: tagKeyOf(row) })).filter((x) => x.key);
-    if (!items.length) throw new Error('고른 항목에 식별 키가 없어 법인을 지정할 수 없습니다(서비스태그/호스트명 필요).');
-    return dcAssignDoneText(await putJson('/insights/fleet/dc-assign', { items, datacenterId: dcId }));
-  };
-  const setDcOne = async (row, dcId) => {
-    setBusy(rowKey(row)); setNotice('');
-    try { const t = await setDc([row], dcId); await load(); setErr(null); setNotice(t); }
-    catch (e) { setErr(e.message); }
-    finally { setBusy(''); }
-  };
   const toggleSel = (id) => setSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   // 유령(교체·삭제된 서버의 잔재) 분류/소속 키 정리.
   // v2.783(점검 Q2 P-B3 — 데이터 손실): 화면 요약 숫자로 묻지 않는다 — 미리보기(dryRun)를 먼저 받아 **실제로 지울 키·수**로 묻고,
@@ -168,7 +143,6 @@ export function FleetInventory({ isAdmin }) {
   const vcenters = d.vcenters || [];
   const term = q.trim().toLowerCase();
   const match = (...fields) => !term || fields.some((f) => (f || '').toLowerCase().includes(term));
-  const datacenters = d.datacenters || [];
   const bm = (d.bareMetal || []).filter((b) => inCorp(b, fvc) && match(b.name, b.model, b.serviceTag, b.vcenter, b.remoteAgent, b.corpName));
   const vh = (d.virtualizationHosts || []).filter((h) => inCorp(h, fvc) && match(h.name, h.model, h.serviceTag, h.vcenter, h.corpName));
   const modeBadge = MODE_BADGE[d.mode];
@@ -185,13 +159,12 @@ export function FleetInventory({ isAdmin }) {
   const bulkAssign = async () => {
     const items = selectedItems.map((b) => ({ serverId: b.serverId, serviceTag: b.serviceTag, key: tagKeyOf(b) }));
     if (!items.length) return;
-    const list = bulkMode === 'dc' ? datacenters : vcenters;
-    const dest = bulkVc ? (list.find((v) => v.id === bulkVc)?.name || bulkVc) : '';
-    if (!window.confirm(bulkConfirmText(items.length, bulkMode, dest))) return;
+    const dest = bulkVc ? (vcenters.find((v) => v.id === bulkVc)?.name || bulkVc) : '미지정(해제)';
+    if (!window.confirm(`선택한 ${items.length}대의 vCenter 를 '${dest}'(으)로 일괄 등록할까요?`)) return;
     setBusy('__bulk__');
     setNotice('');
     try {
-      const done = bulkMode === 'dc' ? await setDc(selectedItems, bulkVc) : bulkAssignDoneText(await putJson('/insights/fleet/assign-bulk', { items, vcenterId: bulkVc }));
+      const done = bulkAssignDoneText(await putJson('/insights/fleet/assign-bulk', { items, vcenterId: bulkVc }));
       setSel(new Set());
       await load();
       setErr(null);
@@ -202,9 +175,9 @@ export function FleetInventory({ isAdmin }) {
 
   const csv = () => {
     const isBm = view === 'baremetal';
-    const head = isBm ? ['서버', '모델', '서비스태그', '법인', '법인 판정', 'vCenter', 'vCenter 출처', '수집원', 'W'] : ['호스트', '법인', 'vCenter', '지역', '모델', '서비스태그', 'iDRAC받침', 'W'];
+    const head = isBm ? ['서버', '모델', '서비스태그', '법인', '법인 판정', '법인 미지정 이유', 'vCenter', 'vCenter 출처', '수집원', 'W'] : ['호스트', '법인', 'vCenter', '지역', '모델', '서비스태그', 'iDRAC받침', 'W'];
     const rows = isBm
-      ? bm.map((b) => [b.name, b.model, b.serviceTag, b.corpName || '미지정', CORP_SRC[b.corpSource]?.[0] || '', b.vcenter || '', b.vcSource || '', b.source, b.watts ?? ''])
+      ? bm.map((b) => [b.name, b.model, b.serviceTag, b.corpName || '미지정', CORP_SRC[b.corpSource]?.[0] || '', b.corpId ? '' : (b.corpWhy || ''), b.vcenter || '', b.vcSource || '', b.source, b.watts ?? ''])
       : vh.map((h) => [h.name, h.corpName || '미지정', h.vcenter, h.region, h.model, h.serviceTag, h.idracBacked ? 'O' : 'X', h.watts ?? '']);
     const body = [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
@@ -228,7 +201,7 @@ export function FleetInventory({ isAdmin }) {
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
           {d.mode === 'edge' ? '이 엣지 포탈은 자기 데이터센터에 등록된 서버만 보여줍니다(로컬 검색). 중앙으로 베어메탈을 보고합니다. ' : (d.mode === 'central' ? `중앙 포탈 — 법인(DataCenter) 필터로 법인별 검색이 가능합니다. ${s.edgeReported ? `🛰 엣지 ${s.edgeAgents}곳에서 ${s.edgeReported}대 집계. ` : ''}` : '')}
-          법인은 <b>법인(DataCenter)</b>입니다 — 자동 판정은 서버 분석 화면과 같은 규칙(스캔 등록 법인 → vCenter 에 할당된 법인)이고, 이 화면에서 <b>수동으로 지정한 법인</b>은 이 화면과 하드웨어 내보내기에만 쓰입니다(서버 분석 화면은 자동 판정 그대로). 베어메탈 행에서 <b>법인</b>과 <b>vCenter</b>(전력 · 사용률 귀속)를 따로 지정할 수 있고, 자동 분류가 틀리면 분류도 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.
+          법인은 서버 분석 화면과 같은 <b>법인(DataCenter)</b>입니다 — <b>수집한 Agent(수집 서버)의 법인</b> → 스캔 등록 법인 → vCenter 에 할당된 법인 순으로 정합니다. 법인을 모르는 서버는 이유를 함께 보입니다. 베어메탈 행에서 <b>vCenter</b>(전력 · 사용률 귀속)를 지정할 수 있고, 자동 분류가 틀리면 분류도 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.
         </div>
       </div>
 
@@ -254,7 +227,6 @@ export function FleetInventory({ isAdmin }) {
       {d && fleetPartialsNote(d.fleetPartials) && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ {fleetPartialsNote(d.fleetPartials)}</div>}
       {/* v2.744(감사 후속 FC — EDGE-01): 엣지가 iDRAC 등록부를 읽지 못해 중앙이 그 엣지의 직전 목록을 유지 중 — 행에는 짧은 표지, 설명은 여기 한 번. */}
       {d && fleetHeldNote(d.fleetPartials) && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ {fleetHeldNote(d.fleetPartials)}</div>}
-      {d.dcAssignUnreadable && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ 법인 수동 지정 파일(fleet-dc-assign.json)을 읽지 못했습니다 — 수동으로 지정한 서버가 지금은 자동 판정으로 보이고, 새 지정은 저장되지 않습니다. 설정 폴더의 손상 사본(.corrupt)을 확인하세요.</div>}
       {notice && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--green)', fontSize: 13, alignItems: 'center' }}><span>✓ {notice}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setNotice('')}>✕</button></div>}
       {isAdmin && s.ghostKeys > 0 && (
         <div className="card flex between wrap gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', alignItems: 'center' }}>
@@ -267,16 +239,12 @@ export function FleetInventory({ isAdmin }) {
         <>
           {isAdmin && (
             <div className="flex wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
-              <span className="muted" style={{ fontSize: 12 }}>일괄 지정: <b>{selectedItems.length}</b>대 선택</span>
-              <Select sort={false} className="select" value={bulkMode} onChange={(e) => { setBulkMode(e.target.value); setBulkVc(''); }} style={{ maxWidth: 160, padding: '5px 8px', fontSize: 12 }} title="무엇을 지정할지">
-                <option value="dc">법인(DataCenter)</option>
-                <option value="vc">vCenter</option>
-              </Select>
+              <span className="muted" style={{ fontSize: 12 }}>vCenter 일괄 등록: <b>{selectedItems.length}</b>대 선택</span>
               <Select className="select" value={bulkVc} onChange={(e) => setBulkVc(e.target.value)} style={{ maxWidth: 200, padding: '5px 8px', fontSize: 12 }}>
-                <option value="">{bulkMode === 'dc' ? '자동(지정 해제)' : '미지정(해제)'}</option>
-                {(bulkMode === 'dc' ? datacenters : vcenters).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                <option value="">미지정(해제)</option>
+                {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </Select>
-              <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={!selectedItems.length || busy === '__bulk__'} onClick={bulkAssign}>{busy === '__bulk__' ? '지정 중…' : '선택 일괄 지정'}</button>
+              <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={!selectedItems.length || busy === '__bulk__'} onClick={bulkAssign}>{busy === '__bulk__' ? '등록 중…' : '선택 일괄 등록'}</button>
               {sel.size > 0 && <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => setSel(new Set())}>선택 해제</button>}
             </div>
           )}
@@ -292,10 +260,7 @@ export function FleetInventory({ isAdmin }) {
                     <td className="muted" style={{ fontSize: 12 }}>{b.model || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{b.serviceTag || '—'}</td>
                     <td>
-                      <div className="flex gap wrap" style={{ alignItems: 'center', gap: 6 }}>
-                        <CorpCell row={b} />
-                        {isAdmin && <DcAssignSelect row={b} datacenters={datacenters} disabled={busy === rowKey(b)} onChange={(dc) => setDcOne(b, dc)} />}
-                      </div>
+                      <CorpCell row={b} />
                     </td>
                     <td>
                       {isAdmin

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { inCorp, corpOptions, bulkConfirmText, dcAssignDoneText, CORP_SRC, UNASSIGNED } from './fleetCorpText.js';
+import { inCorp, corpOptions, CORP_SRC, UNASSIGNED } from './fleetCorpText.js';
 
 describe('fleetCorpText', () => {
   it('필터 — 법인 id · 미지정 · 전체', () => {
@@ -16,16 +16,6 @@ describe('fleetCorpText', () => {
     expect(corpOptions(null)).toEqual([]);
   });
   it('출처 이름은 서버 corp.js 의 src 와 같다', () => {
-    expect(Object.keys(CORP_SRC).sort()).toEqual(['agent', 'manual', 'scan', 'vcenter', 'vcgroup']);
-  });
-  it('일괄 문구 · 완료 문구(실패 본문은 던진다)', () => {
-    expect(bulkConfirmText(3, 'dc', 'NJ')).toBe("선택한 3대의 법인(DataCenter)을(를) 'NJ'(으)로 지정할까요?");
-    expect(bulkConfirmText(2, 'dc', '')).toMatch(/자동 판정/);
-    expect(bulkConfirmText(2, 'vc', '')).not.toMatch(/자동 판정/);
-    expect(dcAssignDoneText({ ok: true, changed: 1, total: 3 })).toBe('3대 중 1대의 법인 지정을 바꿨습니다(2대는 이미 같은 값).');
-    expect(dcAssignDoneText({ ok: true, changed: 1, skipped: 1, total: 2 })).toBe('2대 중 1대의 법인 지정을 바꿨습니다(1대는 키 형식이 맞지 않아 건너뜀).');
-    expect(dcAssignDoneText({ ok: true, changed: 2, skipped: 0, total: 2 })).toBe('2대 중 2대의 법인 지정을 바꿨습니다.');
-    expect(() => dcAssignDoneText({ ok: false, reason: '없는 법인' })).toThrow('없는 법인');
-    expect(dcAssignDoneText({ ok: true })).toMatch(/응답에 없습니다/);
+    expect(Object.keys(CORP_SRC).sort()).toEqual(['agent', 'scan', 'vcenter', 'vcgroup']);
   });
 });

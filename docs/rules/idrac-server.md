@@ -1461,17 +1461,15 @@
     `datacenterId || assign[vCenter]` 색인을 만들어 행 → 법인을 정한다(판정 복제 금지). 가상화 호스트는 자기 vCenter 의 법인, 법인 할당이 없는 vCenter 는 `vc:<id>` 묶음, 없으면 미지정.
     법인 칩 · 파일 순서는 설정의 법인 순서. vCenter 는 따로 고르는 값(`id.sum.vcenter`). (v2.969 에 통합 서버 인벤토리 화면도 법인(DataCenter) 기준이 됐다 — 아래.)
     새 '법인별' 화면 · 내보내기를 만들 때 **법인 축이 vCenter 인지 DataCenter 인지 먼저 정할 것** — 물리 서버가 끼면 DataCenter 다. 회귀 `server/test/hwExportCorp2968.test.js`.
-  - **v2.969 — 통합 서버 인벤토리 화면도 법인(DataCenter) 기준**(사용자 요청 2026-11-11 · 지정은 '둘 다 두기' 결정): GET /insights/fleet 이 행마다
-    `corpId · corpName · corpSource`(manual|scan|vcenter|agent|vcgroup) · `corps`(필터 목록 — 서버가 있는 법인만) · `datacenters`(지정용) · `summary.bareMetalNoCorp` 를 싣는다
-    (`enrichFleetCorp` — 판정은 내보내기와 같은 `hwCorpContext`). 캐시 키는 `generatedAt|fleetRev|dc:<법인 설정 서명>`. 화면의 필터 · 법인 열 · KPI '법인 미지정' · CSV 가 이 값을 쓴다.
-    **법인 수동 지정**은 `PUT /insights/fleet/dc-assign`(관리자 · 전체 범위 · 감사) → `insights/fleetDcAssign.js`(CONFIG_DIR/fleet-dc-assign.json)이고 판정에서 **가장 먼저**다(물리 서버만).
-    ⚠ **iDRAC 등록부의 datacenterId 를 고치지 않는다** — 그 값은 스캔 대역의 귀속이라 같은 법인 '교체' 스캔이 그 법인 항목을 지우고 다시 넣는다(registry.js replaceScanned).
-    손상 파일은 보존하고 **정상 파일을 다시 읽을 때까지 쓰기 거부(503)**. vCenter 지정(fleetAssign — 전력 · 사용률 귀속)은 'vCenter' 열에 그대로 있다.
-    ⚠ **서버 분석 화면(상태 보드 등)은 이 수동 지정을 보지 않는다**(서버 분석 목록 `analysisServersWithRemote` 는 등록부 · 스캔 대역만 본다) — 수동 지정한 서버는 두 화면의 법인이 다를 수 있다(다음 점검 후보).
-    **반증 1인(2026-11-11) 확정 → 수정**: F1 수동 지정은 **저장 키(tagKey)로만** 찾는다(이름으로도 찾던 첫 판은 같은 사설 IP 이름의 다른 법인 서버가 지정을 가로챘다 — 재현) ·
-    F3 쓰기 게이트는 `fullReadWriteScopeOnlyWith`(writeVcenters 로 줄어든 관리자도 403) · F4 손상 사본(.corrupt)이 있으면 **재시작 뒤에도** 쓰기 거부 + 화면 경고(`dcAssignUnreadable`) ·
-    F5 유령 키 보고 · 정리에 법인 지정 키 포함 · F6 건너뛴 키 수(`skipped`) · F7 법인 목록이 비면 503(이유) · F8 /fleet 캐시 키에 1분 칸(ETag 304 가 옛 법인을 붙잡지 않게) ·
-    F9 일괄 지정 오류 처리. 회귀 `server/test/fleetCorp2969.test.js`(변이 18건 — 첫 판 11/11 · 반증 수정 7건 중 6건 + F1 은 수정 전 판으로 되돌린 변이로 확인).
-    ⚠ F2(수동 지정을 서버 분석 판정에도 넣을지)는 **사용자 결정 대기** — 지금은 이 화면 · 하드웨어 내보내기 전용이고 화면 안내문에 그렇게 적었다.
+  - **v2.969 — 통합 서버 인벤토리 화면도 법인(DataCenter) 기준 · 수집한 Agent 의 법인으로 자동 판정만**(사용자 요청 2026-11-11 + 결정 '서버 분석처럼 수집한 Agent 이름에 따라 분류 — Agent 자동 판정만'):
+    GET /insights/fleet 이 행마다 `corpId · corpName · corpSource`(scan = 수집한 Agent · 스캔 등록 법인 | vcenter | agent = 보고한 엣지 | vcgroup) · 미지정이면 `corpWhy` 를,
+    응답에 `corps`(필터 목록 — 서버가 있는 법인만) · `summary.bareMetalNoCorp` 를 싣는다(`enrichFleetCorp` — 판정은 내보내기와 같은 `hwCorpContext`). 캐시 키는 `generatedAt|fleetRev|dc:<법인 설정 서명>|t:<1분 칸>`
+    (스캔 대역 · 수집 서버 → 법인 · 원격 목록은 fleetRev 를 올리지 않는다 — 1분 칸이 없으면 ETag 304 가 옛 법인을 붙잡는다).
+    **수동 법인 지정은 두지 않는다** — 첫 판(PUT /fleet/dc-assign · fleetDcAssign.js)은 반증에서 이름 키 가로채기(재현) · 서버 분석과 판정이 갈림(F2)이 나와 사용자 결정으로 걷어냈다.
+    법인을 바꾸려면 원천을 고친다: 수집 서버의 법인 이름(collector.datacenter)을 DataCenter id/이름과 맞추거나(`collector/datacenterMatch.js` — 정확 일치 · 대소문자 무시), 스캔 대역의 Agent · 법인, vCenter → 법인 할당.
+    미지정 이유(`corpWhy`)는 그 원천 중 무엇이 비었는지 말한다(수집 서버 이름 불일치 · 대역 겹침 · 대역 밖 · OME · 수동 물리 분류).
+    **서버 분석 › 상태 보드 · 법인별 서버 정보(/admin/idrac)** 도 Agent 스캔 대역 법인(withScanDatacenter — v2.660)을 싣는다: 예전에는 온도 · 추이 · 검색 · 내보내기만 이 단계를 거쳐 탭마다 법인이 달랐다.
+    ⚠ 등록부 값 `datacenterId` 는 덮지 않고 `scanDatacenterId` 로 따로 싣는다(datacenterId 는 '교체' 스캔이 지울 범위 — registry.js replaceScanned). 웹 `dcOfServer` 가 datacenterId → vCenter 할당 → scanDatacenterId 순으로 읽는다.
+    범위 절단(scopeIdracServers)은 vCenter 기준이라 영향 없다. 회귀 `server/test/fleetCorp2969.test.js` · `web/src/views/tools/{fleetCorpText,baremetalBoardText}.test.js`.
   - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
 

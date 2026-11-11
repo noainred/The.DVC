@@ -27,8 +27,8 @@ export function prunePlan(dry) {
   }
   const keys = (Array.isArray(dry.keys) ? dry.keys : []).filter((k) => typeof k === 'string' && k);
   if (!keys.length) return { kind: 'none', message: '지울 유령 키가 없습니다(그 사이 정리됐거나 서버와 다시 맞춰졌습니다).' };
-  const t = num(dry.wouldRemoveTags); const a = num(dry.wouldRemoveAssign); const dc = num(dry.wouldRemoveDcAssign); const total = num(dry.keysTotal);
-  const parts = [t != null ? `분류 태그 ${t}건` : null, a != null ? `소속 vCenter ${a}건` : null, dc ? `법인 지정 ${dc}건` : null].filter(Boolean).join(' · ');
+  const t = num(dry.wouldRemoveTags); const a = num(dry.wouldRemoveAssign); const total = num(dry.keysTotal);
+  const parts = [t != null ? `분류 태그 ${t}건` : null, a != null ? `소속 vCenter ${a}건` : null].filter(Boolean).join(' · ');
   const more = total != null && total > keys.length ? `\n(전체 ${total}개 중 이번에는 ${keys.length}개만 정리합니다 — 나머지는 다시 누르세요.)` : '';
   const shown = keys.slice(0, SHOW_KEYS).join(', ') + (keys.length > SHOW_KEYS ? ` 외 ${keys.length - SHOW_KEYS}개` : '');
   return {
@@ -40,9 +40,9 @@ export function prunePlan(dry) {
 
 /** 실제 정리 응답(성공 본문) → 완료 문구. */
 export function pruneDoneText(r) {
-  const k = num(r?.removedKeys); const t = num(r?.removedTags); const a = num(r?.removedAssign); const dc = num(r?.removedDcAssign); const s = num(r?.skipped);
+  const k = num(r?.removedKeys); const t = num(r?.removedTags); const a = num(r?.removedAssign); const s = num(r?.skipped);
   if (k == null && t == null && a == null) return '유령 키 정리 요청을 서버가 받았습니다(제거 수는 응답에 없습니다).';
   const head = k != null ? `유령 키 ${k}개 정리 완료` : '유령 키 정리 완료';
-  const detail = [t != null ? `태그 ${t}건` : null, a != null ? `소속 ${a}건` : null, dc ? `법인 지정 ${dc}건` : null].filter(Boolean).join(' · ');
+  const detail = [t != null ? `태그 ${t}건` : null, a != null ? `소속 ${a}건` : null].filter(Boolean).join(' · ');
   return `${head}${detail ? ` — ${detail} 제거` : ''}${s ? ` · 미리 본 뒤 유령이 아니게 된 ${s}개는 지우지 않았습니다` : ''}`;
 }
