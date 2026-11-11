@@ -6,8 +6,12 @@ import { fetchJson } from '../../api.js';
 import { sparkPath, peakOf, pctText } from './vmHubText.js';
 import { numOrNull } from '../../numOrNull.js';
 
-/** 24시간 추이(열 때 1회) — { cpu, mem } 각각 { points, error, loading }. vmId 가 바뀌면 이전 요청을 끊고 늦은 응답을 버린다. */
-export function useDaySeries(vmId, enabled) {
+/**
+ * 24시간 추이(열 때 1회) — { cpu, mem } 각각 { points, error, loading }. id 가 바뀌면 이전 요청을 끊고 늦은 응답을 버린다.
+ *   v2.975: entity='host' 면 /hosts/:id/metrics(같은 응답 모양) · delayMs>0 이면 그만큼 기다렸다 조회한다 — 드로어에서 ‹ › 로 빠르게 넘길 때
+ *   지나친 개체마다 vCenter 로그인이 생기지 않게(기다리는 동안 id 가 바뀌면 그 요청은 나가지 않는다). 기본값(vm · 0)은 예전 그대로.
+ */
+export function useDaySeries(vmId, enabled, { entity = 'vm', delayMs = 0 } = {}) {
   const [s, setS] = useState({ id: null, cpu: null, mem: null });
   useEffect(() => {
     if (!vmId || !enabled) { setS({ id: vmId, cpu: null, mem: null }); return undefined; }
@@ -16,11 +20,13 @@ export function useDaySeries(vmId, enabled) {
     setS({ id: vmId, cpu: { loading: true }, mem: { loading: true } });
     // v2.911: 두 지표를 한 번에(types=cpu,mem — 서버 로그인 1회 · QueryPerf 1회). 예전에는 지표마다 호출해 로그인이 2회였다.
     const pick = (d, k) => { const s = d?.series?.[k]; return s?.error ? { error: s.error } : { points: Array.isArray(s?.points) ? s.points : [], mock: d?.mock === true }; };
-    fetchJson(`/vms/${encodeURIComponent(vmId)}/metrics`, { types: 'cpu,mem', interval: 'day' }, ac.signal, { retries: 0, timeoutMs: 30_000 })
+    const run = () => fetchJson(`/${entity === 'host' ? 'hosts' : 'vms'}/${encodeURIComponent(vmId)}/metrics`, { types: 'cpu,mem', interval: 'day' }, ac.signal, { retries: 0, timeoutMs: 30_000 })
       .then((d) => { if (alive) setS((p) => (p.id === vmId ? { ...p, cpu: pick(d, 'cpu'), mem: pick(d, 'mem') } : p)); })
       .catch((e) => { if (alive && e?.name !== 'AbortError') { const err = { error: e?.message || String(e) }; setS((p) => (p.id === vmId ? { ...p, cpu: err, mem: err } : p)); } });
-    return () => { alive = false; ac.abort(); };
-  }, [vmId, enabled]);
+    const timer = delayMs > 0 ? setTimeout(run, delayMs) : null;
+    if (!timer) run();
+    return () => { alive = false; if (timer) clearTimeout(timer); ac.abort(); };
+  }, [vmId, enabled, entity, delayMs]);
   return s.id === vmId ? s : { id: vmId, cpu: null, mem: null };
 }
 
