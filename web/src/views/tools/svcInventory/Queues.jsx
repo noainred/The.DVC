@@ -158,6 +158,7 @@ export function ReviewView({ corp, nocorp = false, reloadKey, svcName, writableO
         )}
       </div>
       {q.mismatch?.length ? <MismatchCard q={q} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} /> : null}
+      {q.dangling?.length ? <DanglingCard q={q} writableOf={writableOf} op={op} busy={busy} corpName={corpName} /> : null}
       <div className="card" style={{ minWidth: 0 }}>
         <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
           <b>유령 키(고정이 가리키는 서버가 없음)</b>
@@ -176,7 +177,7 @@ export function ReviewView({ corp, nocorp = false, reloadKey, svcName, writableO
                       {/* 사유 · 시작 시각은 줄바꿈한다 — svcinv-sub 기본(한 줄 말줄임 260px)이면 '… 부터' 가 잘렸다(Chromium 1440 실측) */}
                       <div className="svcinv-sub" style={{ whiteSpace: 'normal', overflow: 'visible' }}>{HELD_SHORT[g.held] || g.held}{g.heldSince ? ` · ${new Date(g.heldSince).toLocaleString()} 부터` : ''}</div>
                       {/* 보류는 일괄 정리에서 빠진다 — 필요 없는 고정은 한 건씩 직접 지운다(6차 반증 F5: 예전에는 문구만 있고 버튼이 없었다) */}
-                      {writableOf(g.corp) ? <button type="button" className="logout-btn" style={{ ...btn, marginTop: 4 }} disabled={busy} title="이 고정 한 건만 지웁니다(보류 사유와 무관하게 — 서버가 정말 없어진 것을 알 때)" onClick={() => op({ op: 'pins.clear', corp: g.corp, keys: [g.key] }, '보류 중이던 고정 한 건을 지웠습니다.')}>고정 지우기</button> : null}</td>
+                      {writableOf(g.corp) ? <button type="button" className="logout-btn" style={{ ...btn, marginTop: 4 }} disabled={busy} title="이 고정 한 건만 지웁니다(보류 사유와 무관하게 — 서버가 정말 없어진 것을 알 때)" onClick={() => op({ op: 'pins.clear', corp: g.corp, keys: [g.key], onlyIfUnused: true }, '보류 중이던 고정 한 건을 지웠습니다.')}>고정 지우기</button> : null}</td>
                   </tr>))}
               </tbody>
             </STable>
@@ -225,7 +226,7 @@ function MismatchCard({ q, svcName, writableOf, op, busy, corpName }) {
             <td data-sort={x.name}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)}{x.aliasKey ? ' · 옛 키 고정' : ''}</div></td>
             <td>{x.pinCorpHidden ? <span className="muted" title="이 계정의 조회 범위 밖 법인입니다">범위 밖 법인</span> : <>{corpName(x.pinCorp)}<div className="svcinv-sub">{svcName(x.serviceId)}</div></>}</td>
             <td>{!x.pinCorpHidden && x.pinCorp && writableOf(x.pinCorp)
-              ? <button type="button" className="logout-btn" style={btn} disabled={busy} title="그 법인에 남은 이 고정만 지웁니다(구성원의 지금 소속은 바뀌지 않습니다)" onClick={() => op({ op: 'pins.clear', corp: x.pinCorp, keys: [x.aliasKey || x.key] }, `${x.name}: ${corpName(x.pinCorp)} 에 남은 고정을 지웠습니다.`)}>고정 지우기</button>
+              ? <button type="button" className="logout-btn" style={btn} disabled={busy} title="그 법인에 남은 이 고정만 지웁니다(구성원의 지금 소속은 바뀌지 않습니다)" onClick={() => op({ op: 'pins.clear', corp: x.pinCorp, keys: [x.aliasKey || x.key], onlyIfUnused: true }, `${x.name}: ${corpName(x.pinCorp)} 에 남은 고정을 지웠습니다.`)}>고정 지우기</button>
               : <span className="muted" style={{ fontSize: 12 }}>{x.pinCorpHidden ? '—' : '조회 전용'}</span>}</td>
           </tr>
         ))}</tbody>
@@ -234,12 +235,39 @@ function MismatchCard({ q, svcName, writableOf, op, busy, corpName }) {
   );
 }
 
+/**
+ * 없는 서비스를 가리키는 고정(7차 반증 5) — 서비스를 지우는 동안 끼어든 고정 지정 등. 판정은 이미 자동으로 돌아가 있으므로 지워도 소속은 바뀌지 않는다
+ * (서버가 onlyIfUnused 로 한 번 더 막는다).
+ */
+function DanglingCard({ q, writableOf, op, busy, corpName }) {
+  const rows = q.dangling || [];
+  return (
+    <div className="card" style={{ minWidth: 0, borderLeft: '3px solid var(--amber)' }}>
+      <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+        <b>없는 서비스를 가리키는 고정</b><span className="muted" style={{ fontSize: 12 }}>{rows.length}건 — 그 서비스가 지워져 고정이 쓰이지 않습니다(자동 판정을 씁니다). 필요 없으면 지웁니다</span>
+      </div>
+      <STable className="table svcinv-t" minWidth={480} limit={50}>
+        <thead><tr><th>구성원 · 법인</th><th>가리키던 서비스 id</th><th data-nosort>조치</th></tr></thead>
+        <tbody>{rows.map((x) => (
+          <tr key={`${x.key}|${x.aliasKey || ''}`}>
+            <td data-sort={x.name}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)}{x.aliasKey ? ' · 옛 키 고정' : ''}</div></td>
+            <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all' }}>{x.serviceId || '—'}</td>
+            <td>{writableOf(x.corp) ? <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.clear', corp: x.corp, keys: [x.aliasKey || x.key], onlyIfUnused: true }, `${x.name}: 없는 서비스를 가리키던 고정을 지웠습니다.`)}>고정 지우기</button> : <span className="muted" style={{ fontSize: 12 }}>조회 전용</span>}</td>
+          </tr>
+        ))}</tbody>
+      </STable>
+    </div>
+  );
+}
+
 const HELD_SHORT = { 'corp-unread': '법인 vCenter 를 지금 못 읽음', 'bm-source-unread': '베어메탈 출처를 못 읽음', 'uuid-unread': 'VM 식별 키(instanceUuid)를 못 읽음',
-  'snapshot-initial': '포탈 기동 직후 — 첫 수집 전', 'corp-pending': '법인 vCenter 첫 수집 대기', 'corp-disabled': '법인 vCenter 수집 꺼짐', 'corp-no-vms': '법인 VM 이 한 대도 없음' };
+  'snapshot-initial': '포탈 기동 직후 — 첫 수집 전', 'corp-pending': '법인 vCenter 첫 수집 대기', 'corp-disabled': '법인 vCenter 수집 꺼짐', 'corp-no-vms': '법인 VM 이 한 대도 없음',
+  'uuid-partial': '일부 VM 의 식별 키(instanceUuid)를 못 읽음' };
 const HELD_TEXT = {
   'snapshot-initial': '포탈이 막 기동해 아직 어느 vCenter 도 수집하지 않았습니다 — 첫 수집이 끝나면 판정합니다',
   'corp-pending': '이 법인 vCenter 를 아직 한 번도 수집하지 않았습니다(기동 직후·사이트 에이전트 수집 대기) — 수집되면 판정합니다',
   'corp-disabled': '이 법인 vCenter 수집이 꺼져 있어 이 키의 서버가 정말 없는지 모릅니다 — 수집을 켜면 판정합니다(필요 없는 고정이면 행의 ‘고정 지우기’ 로 한 건씩 지웁니다)',
+  'uuid-partial': '이 법인에서 instanceUuid 를 못 읽은 VM 이 있습니다(접근 불가 VM 등) — 이 고정이 그 VM 의 것일 수 있어 지우지 않습니다. 다시 읽히면 판정합니다(필요 없는 고정이면 한 건씩 지웁니다)',
   'corp-no-vms': '이 법인에서 VM 을 한 대도 받지 못했습니다 — VM 이 정말 모두 없어졌는지, 아직 못 받았는지 구분할 수 없어 VM 고정을 지우지 않습니다',
   'corp-unread': '그 법인 vCenter 를 지금 읽지 못해 이 키의 VM 이 정말 없는지 모릅니다 — 다시 읽히면 판정합니다',
   'bm-source-unread': 'iDRAC 등록부·OME·수집 서버·엣지 중 읽지 못한 출처가 있어 이 베어메탈이 정말 없는지 모릅니다 — 어느 출처에 있는지 알 수 없어 법인을 가리지 않고 보류합니다',

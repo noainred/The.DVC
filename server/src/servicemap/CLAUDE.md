@@ -38,10 +38,11 @@
 - **키**: VM = `iu:<vcenterId>:<instanceUuid>`(없으면 `vm:<moref id>`) · 베어메탈 = `st:<서비스태그>`(없으면 `fl:<fleetId sha1 16자>` — 주소 원문을 키에 싣지 않는다).
   키 등급이 오르면 낮은 등급 키를 `aliasKeys` 로 싣고 그 고정을 승계한다(같은 법인 · 유령 아님 · `pins.rekey`·고정 쓰기 때 새 키로 옮김 — 읽기 경로는 쓰지 않는다 · 5차 R15).
   별칭 고정은 늘 live — 다른 법인 것은 **법인 불일치**(`mismatch` + `aliasKey` — 6차 4)이지 유령이 아니다(반증 F1: 귀속이 잠시 빈 서버의 고정이 정리됐다).
-  단 **고정 법인에 같은 옛 키를 가진 구성원이 있으면** 그 구성원의 승계라 불일치가 아니다(이름이 같은 ESXi 호스트가 두 법인에서 베어메탈 — 거짓 행의 '고정 지우기' 가 원래 서버 고정을 지웠다). 새 키·옛 키 고정이 함께 있으면 `aliasPins` 에 `dup`·`conflict` 로 드러내고, `pins.rekey` 는 충돌을 건너뛴다
+  단 **고정 법인에 그 키를 지금 키·옛 키로 가진 구성원이 있으면** 불일치가 아니다(`keyCorps` — 직접 키 행도 · 7차 1: 태그 없는 호스트 지금 키 = 같은 이름 호스트 옛 키). 법인 '' 구성원은 불일치로 싣지 않는다.
+  화면의 불일치·보류·없는 서비스 행 지우기는 `pins.clear onlyIfUnused`(지금 판정에 쓰는 고정이면 409 — 화면 판정이 틀려도 서버가 막는다). '고정 유지' 는 옛 키 중복만 지운다(충돌은 사람이 고른다). 새 키·옛 키 고정이 함께 있으면 `aliasPins` 에 `dup`·`conflict` 로 드러내고, `pins.rekey` 는 충돌을 건너뛴다
   (`keys`+`keepNew` 일 때만 옛 키를 지운다 · 옛 키 서비스로는 `pins.set` — 6차 3·9). 엣지 베어메탈은 `untaggedId`(엣지 `fleetUntaggedId` → 중앙 정제 → `untaggedServerId`)로 별칭을 만든다(6차 2 — 구버전 엣지는 승계 없음 · `/insights/fleet` 응답에는 싣지 않는다 — id 가 IP 일 수 있다, 반증 F2).
   베어메탈 별칭은 **태그가 없을 때의 fleetId**(일반 행 serverId · ESXi 호스트 행 name — 함대 분류와 같은 규칙)다 — lc(fleetId) 로 만들면 태그가 읽힌 뒤 절대 맞지 않는다(4차 반증 1, 시험은 실제 라우트로).
-  `st:` 고정을 '함대 키 집합에 태그가 있다' 로 보류하지 말 것 — 그 집합에 ESXi 호스트 태그가 있어 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다(4차 반증 2 — 되돌림). VM instanceUuid 를 하나도 못 읽는 법인의 `iu:` 고정은 보류 `uuid-unread`.
+  `st:` 고정을 '함대 키 집합에 태그가 있다' 로 보류하지 말 것 — 그 집합에 ESXi 호스트 태그가 있어 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다(4차 반증 2 — 되돌림). VM instanceUuid 를 하나도 못 읽는 법인의 `iu:` 고정은 보류 `uuid-unread` · 일부만 못 읽으면 `uuid-partial`(7차 2).
 - **의존 방향**: 도메인 모듈(`servicemap/*`)은 `routes/` 를 import 하지 않는다(arch 테스트) — 스냅샷·fleet·장애·백업 입력 수집은 라우트 층에서 한다.
 - **판정 결과 memo(`inventoryFor`)**: 키 = 스냅샷 세대 · 저장소 rev · 입력 세대(gather 시각 · inputRev) · 알려진 법인 · 범위 · 관리자 판본(12초 · 4개). 판정에 새 입력을 더하면
   **그 입력이 바뀔 때 키도 바뀌는지** 먼저 답할 것(5차 2차 M10/R5). 읽기 경로는 깊게 동결한 참조(`peekMap`·`peekPins`)만 쓰고 고치지 않는다 — 고치면 던진다.
@@ -59,4 +60,4 @@
   `rule/alias/namerule.update`(대상 서비스만 — 지우고 다시 넣는 사이 소속이 비지 않게) · 전역 `global.update/remove`(화면은 전체 범위 관리자만). 쓰기 결과가 0건이면 화면이 성공 문구 대신 경고(`writeResultNote`).
 - **구성원 조회 `members?global=<id>`** 는 corp 없이도 범위 안 전 법인을 준다(화면 '전 법인 구성원 모두 보기'). 영향 호스트의 '함께 떠받치는 서비스' 에서는 **그 전역 서비스의 법인 서비스 id 를 모두** 뺀다(`svc` 만 빼면 자기 자신이 뜬다 — v2.887~v2.890 결함).
 - **라우트(`routes/api/svcInventory.js`)·이 폴더를 고치면 커밋 전에 `node scripts/api-doc.mjs` · `node scripts/arch-doc.mjs`** — 줄 번호가 바뀌어 `apiDoc2563`·`audit2613h` 가 깨진다(v2.887·v2.890 두 번 전량 verify 에서 처음 잡혔다).
-- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · `svcInventoryReview5b.test.js`(2차) · `svcInventoryReview5c.test.js`(3차 — 판정 순서 변이 13종) · `svcInventoryReview5d.test.js`(4차 — 범위 가림·키 승계 · 반증 대상에서 3건 실패 확인) · `svcInventoryReview6.test.js`·`6b`(6차 + 예약 수정 + 반증 F1~F6 — 수정 전 10/10 실패 · 변이 32/32) · 웹 `web/src/views/tools/svcInventoryText.test.js`.
+- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · `svcInventoryReview5b.test.js`(2차) · `svcInventoryReview5c.test.js`(3차 — 판정 순서 변이 13종) · `svcInventoryReview5d.test.js`(4차 — 범위 가림·키 승계 · 반증 대상에서 3건 실패 확인) · `svcInventoryReview6.test.js`·`6b`(6차 + 예약 수정 + 반증 F1~F6 — 수정 전 10/10 실패 · 변이 32/32) · `svcInventoryReview7.test.js`(7차 — 변이 13/13) · 웹 `web/src/views/tools/svcInventoryText.test.js`.

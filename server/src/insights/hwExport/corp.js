@@ -10,7 +10,7 @@
  *   `datacenterId || assign[vcenterId || mappedVcenterId]`(= analysisScope.js serverInScope 의 dcOf)로 서버 id · 서비스태그 색인을 만든다.
  *
  * 행 → 법인 순서(makeCorpOf — 순수) — **수집한 Agent(수집 서버)의 법인이 기준**(사용자 결정 2026-11-11 'Agent 자동 판정만' — 서버마다 법인을 손으로 지정하는 길은 두지 않는다.
- *   v2.970 부터 수집 서버(Agent) ↔ 법인은 설정 › 수집 서버에서 사용자가 매칭할 수 있고, 그 결과가 아래 '수집한 Agent 의 법인' 에 이미 들어 있다):
+ *   v2.971 부터 수집 서버(Agent) ↔ 법인은 설정 › 수집 서버에서 사용자가 매칭할 수 있고, 그 결과가 아래 '수집한 Agent 의 법인' 에 이미 들어 있다):
  *   물리 서버   : 서버 분석 색인(엣지 서버 = 그 엣지(수집 서버)의 법인 · Agent 로 스캔한 대역의 서버 = 그 Agent 의 법인 · 스캔 등록 법인)
  *                 → 행의 vCenter 에 할당된 법인 → 엣지 보고분은 보고한 에이전트의 법인.
  *   가상화 호스트: 그 vCenter 에 할당된 법인.
@@ -77,7 +77,7 @@ export function makeCorpOf({ index, dcOfVc, dcName, vcName, agentDc = () => '' }
       || (id.startsWith('host:') && '수동으로 물리 분류한 ESXi 호스트 — vCenter 의 법인 할당이 없습니다')
       || (t(row?.source) !== 'edge' && id && index?.whyId?.get(id)) || index?.whyTag?.get(tag)
       || '수집한 Agent 의 법인을 알 수 없습니다';
-    // v2.970: 수집 서버(Agent) ↔ 법인 매칭으로 고칠 수 있는 이유면 표지(화면이 설정 › 수집 서버 링크를 단다).
+    // v2.971: 수집 서버(Agent) ↔ 법인 매칭으로 고칠 수 있는 이유면 표지(화면이 설정 › 수집 서버 링크를 단다).
     const whyCode = /수집 서버 ‘|보고한 에이전트 ‘/.test(why) ? 'collector' : '';
     return { id: '', name: '미지정', src: '', why, ...(whyCode ? { whyCode } : {}) };
   };

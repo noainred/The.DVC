@@ -85,7 +85,7 @@ export function withMappedVc(s, tagMap) {
 export function collectorToDatacenterMap() { return collectorDcMaps().map; }
 
 /**
- * v2.970: { map: 수집 서버 id → 법인 id(사용자 매칭 → 이름 맞춤), manual: 사용자 매칭만(지금 목록에 있는 법인) }.
+ * v2.971: { map: 수집 서버 id → 법인 id(사용자 매칭 → 이름 맞춤), manual: 사용자 매칭만(지금 목록에 있는 법인) }.
  * 사용자 매칭(collector.datacenterId — 설정 › 수집 서버)은 그 법인이 지금 목록에 있을 때만 쓴다(지워진 법인이면 이름 맞춤으로).
  */
 export function collectorDcMaps() {
@@ -104,7 +104,7 @@ export function collectorDcMaps() {
 // 그 서버를 보고한 수집기(에이전트)의 소속 DataCenter로 자동 귀속시킨다.
 export function remoteServersResolved() {
   const { map: m, manual } = collectorDcMaps();
-  // v2.970: 사용자가 이 수집 서버를 법인에 매칭했으면 그 수집 서버가 보고한 서버는 모두 그 법인이다(법인 · vCenter · 수집 서버 1:1:1) —
+  // v2.971: 사용자가 이 수집 서버를 법인에 매칭했으면 그 수집 서버가 보고한 서버는 모두 그 법인이다(법인 · vCenter · 수집 서버 1:1:1) —
   //   엣지가 자기 목록으로 붙인 법인 id(중앙 목록에 없을 수 있다)보다 먼저. 매칭이 없으면 예전대로 엣지 태그 → 이름 맞춤.
   const resolved = allRemoteServers().map((s) => ({ ...s, datacenterId: manual.get(String(s.collectorId)) || s.datacenterId || m.get(String(s.collectorId)) || '' }));
   // 같은 엣지를 둘 이상의 수집서버(대소문자만 다른 'nj'·'NJ' 등)가 pull하면 동일 물리 서버가

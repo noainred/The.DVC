@@ -321,7 +321,7 @@ test('예약 1-d: rule/alias/namerule.update 는 대상 서비스만 바꾼다 �
   assert.equal(d.corps.A.aliases[0].serviceId, 's2');
   assert.equal(CORP_OPS['alias.update'](d, { corp: 'A', kind: 'scan', value: 'MES', serviceId: 's2' }).status, 409, '서비스 이름과 같은 별칭은 쓰이지 않는다');
   assert.equal(CORP_OPS['alias.update'](d, { corp: 'A', kind: 'scan', value: 'erp-t', serviceId: 's2' }).status, 404, '종류가 다르면 다른 별칭');
-  assert.deepEqual(CORP_OPS['namerule.update'](d, { corp: 'A', match: 'prefix', value: 'ERP-', serviceId: 's2' }), { result: {} });
+  assert.deepEqual(CORP_OPS['namerule.update'](d, { corp: 'A', match: 'prefix', value: 'ERP-', serviceId: 's2' }), { result: { from: 's1' } }, '바꾸기 전 대상을 결과에 싣는다(7차 반증 6 — 감사)');
   assert.equal(d.corps.A.nameRules[0].serviceId, 's2');
   assert.equal(CORP_OPS['namerule.update'](d, { corp: 'A', match: 'suffix', value: 'erp-', serviceId: 's2' }).status, 404);
 });

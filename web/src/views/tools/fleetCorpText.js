@@ -4,7 +4,7 @@
  * 판정은 서버(/insights/fleet 의 corpId · corpName · corpSource — insights/hwExport/corp.js)가 한다. 여기서는 고르기 · 글자만.
  */
 export const UNASSIGNED = '__none__';
-/** v2.970: 수집 서버 ↔ 법인 매칭 화면(설정 › 수집 서버). */
+/** v2.971: 수집 서버 ↔ 법인 매칭 화면(설정 › 수집 서버). */
 export const COLLECTOR_DC_HREF = '#/settings/collectors';
 /** 법인 판정 출처 → [짧은 표시, 설명]. 서버 makeCorpOf 의 src 값과 같은 이름. */
 export const CORP_SRC = Object.freeze({
