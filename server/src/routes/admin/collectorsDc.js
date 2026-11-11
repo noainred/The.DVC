@@ -35,7 +35,7 @@ import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../../util/readCapped.js'
 const EDGE_SMALL_MAX_BYTES = 256 * 1024;
 import { resolveBundleBytes, lastBundleReject } from '../../upgrade/bundleSource.js';
 import { upgradeManager } from '../../upgrade/manager.js';
-import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner, fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from './shared.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
@@ -144,7 +144,7 @@ export function collectorDcMatch(collectors, datacenters) {
     const picked = String(c.datacenterId || '').trim().toLowerCase();
     if (picked && ids.has(picked)) { out[c.id] = { id: picked, via: 'manual' }; continue; }
     const m = matchDatacenterId([c.datacenter, c.id, c.name], datacenters || []);
-    out[c.id] = { id: m || '', via: m ? 'name' : '', ...(picked ? { stale: true } : {}) };
+    out[c.id] = { id: m || '', via: m ? 'name' : '', ...(picked ? { stale: true, picked } : {}) };   // picked: 지워진 법인 id — 화면이 그 값을 선택지로 보여 줘야 '자동' 으로 해제할 수 있다(반증 F6)
   }
   return out;
 }
@@ -193,11 +193,13 @@ adminRouter.put('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
 });
 
 // v2.970(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능'): 이 수집 서버(Agent)가 수집한 서버의 법인(DataCenter).
-// body: { datacenterId } — '' = 매칭 해제(이름 맞춤으로). 수동 고정(managed)을 바꾸지 않는다(엣지 자기등록의 URL · 토큰 갱신을 막지 않게) ·
+// body: { datacenterId } — '' = 매칭 해제(이름 맞춤으로). 수동 고정(managed)을 바꾸지 않는다(엣지 자기등록의 URL · 토큰 갱신을 막지 않게) · 이 값을 쓰는 길은 여기 하나다 —
 // 엣지 자기등록 · 관리자 폼 · CSV 가져오기는 이 값을 덮지 않는다(registry.js normalize 가 이어받는다). 없는 법인은 400 · 등록부를 못 읽으면 503.
-adminRouter.put('/collectors/:id/datacenter', adminOnly, fleetOnly, (req, res) => {
-  const b = req.body && typeof req.body === 'object' ? req.body : {};
-  const dc = typeof b.datacenterId === 'string' ? b.datacenterId : '';
+// 반증 F4: 전 법인 판정을 바꾸는 쓰기라 조회 ∧ 쓰기 모두 전체 범위(fullReadWriteScopeOnlyWith — v2.904 규칙). F5: datacenterId 는 문자열만('' = 해제) — 없거나 다른 형이면 400.
+adminRouter.put('/collectors/:id/datacenter', adminOnly, fullReadWriteScopeOnlyWith('수집 서버의 법인 매칭은 전 법인 판정을 바꾸므로 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다.'), (req, res) => {
+  const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : null;
+  if (!b || typeof b.datacenterId !== 'string') return res.status(400).json({ ok: false, reason: 'datacenterId(문자열 — 해제는 빈 문자열)가 필요합니다.' });
+  const dc = b.datacenterId;
   let valid = new Set();
   try { valid = new Set((listDatacenters() || []).map((d) => String(d.id))); } catch { valid = new Set(); }
   if (dc.trim() && !valid.size) return res.status(503).json({ ok: false, reason: '법인(DataCenter) 목록이 비어 있거나 읽지 못했습니다 — 설정 › DataCenter(법인)를 먼저 확인하세요.' });

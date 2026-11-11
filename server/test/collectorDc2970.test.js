@@ -41,9 +41,31 @@ test('보존 — 엣지 자기등록 · 관리자 폼 수정은 사용자 매칭
   assert.equal(self.ok, true);
   let c = reg.loadCollectors().find((x) => x.id === 'warsaw-edge');
   assert.deepEqual([c.url, c.datacenter, c.datacenterId], ['http://10.9.1.6:4000', 'Warsaw-B', 'pl'], '자기등록이 URL · 라벨을 갱신해도 매칭은 남는다');
-  assert.equal(reg.updateCollector('warsaw-edge', { name: 'Warsaw 엣지', url: 'http://10.9.1.6:4000' }, { managed: true }).ok, true);
+  // 반증 F1: 화면 편집 폼은 목록 행을 통째로(datacenterId 포함) 다시 보낸다 — 다른 탭에서 바꾼 매칭을 되돌리거나 없는 법인을 넣지 못한다.
+  const staleRow = { ...reg.listCollectors().find((x) => x.id === 'warsaw-edge'), datacenterId: 'nj', name: 'Warsaw 엣지' };
+  assert.equal(reg.updateCollector('warsaw-edge', staleRow, { managed: true }).ok, true);
   c = reg.loadCollectors().find((x) => x.id === 'warsaw-edge');
-  assert.equal(c.datacenterId, 'pl', '관리자 폼(datacenterId 를 보내지 않음)도 이어받는다');
+  assert.equal(c.datacenterId, 'pl', '폼 본문의 datacenterId 는 무시 — 기존 매칭 유지');
+  assert.equal(reg.updateCollector('warsaw-edge', { ...staleRow, datacenterId: 'ghost' }, { managed: true }).ok, true);
+  assert.equal(reg.loadCollectors().find((x) => x.id === 'warsaw-edge').datacenterId, 'pl', '없는 법인도 이 경로로는 들어가지 않는다');
+  assert.equal(reg.addCollector({ id: 'new-one', name: 'new-one', url: 'http://10.9.9.9:4000', token: 't', datacenterId: 'pl' }, { managed: true }).ok, true);
+  assert.equal(reg.loadCollectors().find((x) => x.id === 'new-one').datacenterId, undefined, '추가도 매칭을 만들지 않는다 — 전용 경로 하나');
+  assert.equal(reg.removeCollector('new-one').ok, true);
+});
+
+test('대소문자만 다른 중복 병합에서 매칭을 잃지 않는다(반증 F3)', () => {
+  const src = stripComments(fs.readFileSync(new URL('../src/collector/registry.js', import.meta.url), 'utf8'));
+  assert.match(src, /for \(const f of \['vcenterId', 'datacenter', 'datacenterId', 'name', 'url', 'token'\]\)/);
+});
+
+test('IP 관리 스캔 에이전트 → 법인도 사용자 매칭을 먼저(반증 F2) · IP 관리 자체 수동 설정은 그대로 이긴다', async () => {
+  const { resolveAgentDatacenters } = await import('../src/ipam/scanDatacenter.js');
+  const dcs = [{ id: 'pl', name: 'Poland' }, { id: 'nj', name: 'New Jersey' }];
+  const base = { agents: ['warsaw-edge'], vcenters: [], snapVcenters: [], datacenters: dcs, assign: {} };
+  const col = [{ id: 'warsaw-edge', name: 'warsaw-edge', datacenter: 'Warsaw', datacenterId: 'pl' }];
+  assert.equal(resolveAgentDatacenters({ ...base, settings: {}, collectors: col }).get('warsaw-edge').datacenterId, 'pl');
+  assert.equal(resolveAgentDatacenters({ ...base, settings: {}, collectors: [{ ...col[0], datacenterId: 'gone' }] }).get('warsaw-edge').datacenterId, null, '지워진 법인 매칭은 쓰지 않는다');
+  assert.equal(resolveAgentDatacenters({ ...base, settings: { 'warsaw-edge': { datacenterId: 'nj' } }, collectors: col }).get('warsaw-edge').datacenterId, 'nj');
 });
 
 test('판정 순서 — 사용자 매칭(지금 있는 법인) → 이름 맞춤, 지워진 법인은 이름 맞춤으로 + stale · 화면 판정(collectorDcMatch)과 같은 결과', () => {
@@ -60,8 +82,8 @@ test('판정 순서 — 사용자 매칭(지금 있는 법인) → 이름 맞춤
   assert.equal(dcStore.removeDatacenter('pl').ok !== false, true);
   map = analysis.collectorToDatacenterMap();
   m = colDc.collectorDcMatch(reg.loadCollectors(), dcStore.listDatacenters());
-  assert.equal(map.get('nj'), 'nj'); assert.deepEqual(m.nj, { id: 'nj', via: 'name', stale: true });
-  assert.equal(map.get('warsaw-edge'), ''); assert.deepEqual(m['warsaw-edge'], { id: '', via: '', stale: true });
+  assert.equal(map.get('nj'), 'nj'); assert.deepEqual(m.nj, { id: 'nj', via: 'name', stale: true, picked: 'pl' });
+  assert.equal(map.get('warsaw-edge'), ''); assert.deepEqual(m['warsaw-edge'], { id: '', via: '', stale: true, picked: 'pl' });
   for (const c of reg.loadCollectors()) assert.equal(map.get(c.id), m[c.id].id, `${c.id}: 서버 판정과 화면 판정이 같다`);
 });
 
@@ -84,7 +106,8 @@ test('전력 분석 — 사용자 매칭 > 서버에 붙은 법인(엣지 태그
 
 test('라우트 · 연결 — PUT 은 관리자 ∧ 전 법인 · 감사 · 캐시 키에 매칭 서명 · 미지정 이유 코드(collector)', async () => {
   const src = stripComments(fs.readFileSync(new URL('../src/routes/admin/collectorsDc.js', import.meta.url), 'utf8'));
-  assert.match(src, /adminRouter\.put\('\/collectors\/:id\/datacenter', adminOnly, fleetOnly,/);
+  assert.match(src, /adminRouter\.put\('\/collectors\/:id\/datacenter', adminOnly, fullReadWriteScopeOnlyWith\(/, '조회 ∧ 쓰기 전체 범위(반증 F4)');
+  assert.match(src, /typeof b\.datacenterId !== 'string'\) return res\.status\(400\)/, '문자열이 아닌 본문은 해제가 아니라 400(반증 F5)');
   assert.match(src, /logAudit\(\{[^}]*'수집 서버 법인 매칭'/);
   assert.match(src, /res\.json\(\{ collectors, dcMatch,/);
   const ins = stripComments(fs.readFileSync(new URL('../src/routes/insights.js', import.meta.url), 'utf8'));

@@ -9,7 +9,8 @@
  * 규칙: **판정을 복제하지 않는다** — 서버 분석과 같은 목록(`analysisServersWithRemote` — mappedVcenterId · 스캔 대역 법인까지 채운 것)에서
  *   `datacenterId || assign[vcenterId || mappedVcenterId]`(= analysisScope.js serverInScope 의 dcOf)로 서버 id · 서비스태그 색인을 만든다.
  *
- * 행 → 법인 순서(makeCorpOf — 순수) — **수집한 Agent(수집 서버)의 법인이 기준**(사용자 결정 2026-11-11 'Agent 자동 판정만' — 수동 법인 지정은 두지 않는다):
+ * 행 → 법인 순서(makeCorpOf — 순수) — **수집한 Agent(수집 서버)의 법인이 기준**(사용자 결정 2026-11-11 'Agent 자동 판정만' — 서버마다 법인을 손으로 지정하는 길은 두지 않는다.
+ *   v2.970 부터 수집 서버(Agent) ↔ 법인은 설정 › 수집 서버에서 사용자가 매칭할 수 있고, 그 결과가 아래 '수집한 Agent 의 법인' 에 이미 들어 있다):
  *   물리 서버   : 서버 분석 색인(엣지 서버 = 그 엣지(수집 서버)의 법인 · Agent 로 스캔한 대역의 서버 = 그 Agent 의 법인 · 스캔 등록 법인)
  *                 → 행의 vCenter 에 할당된 법인 → 엣지 보고분은 보고한 에이전트의 법인.
  *   가상화 호스트: 그 vCenter 에 할당된 법인.

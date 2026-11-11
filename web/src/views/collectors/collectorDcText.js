@@ -19,6 +19,18 @@ export function matchNote(match, dcs) {
   return { tone: 'warn', text: '법인을 모릅니다 — 이 수집 서버가 수집한 서버는 법인 미지정이 됩니다' };
 }
 
+/** Select 값 — 사용자 매칭이면 그 법인, 매칭한 법인이 지워졌으면 그 id(선택지로 보여 줘야 '자동' 을 골라 해제할 수 있다 — 반증 F6), 아니면 ''(자동). */
+export function selectValue(match) {
+  if (match?.via === 'manual' && match.id) return match.id;
+  if (match?.stale && match.picked) return match.picked;
+  return '';
+}
+
+/** 정렬 값 — 지금 쓰이는 법인 이름(없으면 빈 값 — 뒤로). */
+export function matchSortText(match, dcs) {
+  return match?.id ? nameOf(match.id, dcs) : '';
+}
+
 /** 저장 응답 → 알림 글자. 실패 본문은 던진다. */
 export function saveText(r, collectorId, dcs) {
   if (!r || r.ok === false) throw new Error(r?.reason || '법인 매칭을 저장하지 못했습니다.');

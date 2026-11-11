@@ -1473,9 +1473,12 @@
     ⚠ 등록부 값 `datacenterId` 는 덮지 않고 `scanDatacenterId` 로 따로 싣는다(datacenterId 는 '교체' 스캔이 지울 범위 — registry.js replaceScanned). 웹 `dcOfServer` 가 datacenterId → vCenter 할당 → scanDatacenterId 순으로 읽는다.
     범위 절단(scopeIdracServers)은 vCenter 기준이라 영향 없다. 회귀 `server/test/fleetCorp2969.test.js` · `web/src/views/tools/{fleetCorpText,baremetalBoardText}.test.js`.
   - **v2.970 — 수집 서버(Agent) ↔ 법인(DataCenter) 사용자 매칭**(사용자 요청 2026-11-11 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능' · 위치 결정 '설정 › 수집 서버 표'):
-    저장은 `collector.datacenterId`(엣지 자기등록이 보내는 자유 글자 라벨 `datacenter` 와 **따로**). 바꾸는 길은 `PUT /api/admin/collectors/:id/datacenter`(adminOnly · fleetOnly · 감사 '수집 서버 법인 매칭') →
-    `registry.setCollectorDatacenterId` 하나 — 이 필드만 바꾸고 **managed(수동 고정)를 세우지 않는다**(세우면 엣지 자기등록의 URL · 토큰 갱신이 멈춘다) · normalize 를 다시 돌리지 않는다 ·
-    등록부를 못 읽으면 503 · 없는 법인 400(목록이 비면 503). 자기등록 · 관리자 폼 · CSV 는 이 값을 보내지 않으므로 normalize 가 이어받는다(`?? e.datacenterId`).
+    저장은 `collector.datacenterId`(엣지 자기등록이 보내는 자유 글자 라벨 `datacenter` 와 **따로**). 바꾸는 길은 `PUT /api/admin/collectors/:id/datacenter`(adminOnly · **fullReadWriteScopeOnlyWith**(조회 ∧ 쓰기 전체 범위 — 반증 F4) ·
+    감사 '수집 서버 법인 매칭') → `registry.setCollectorDatacenterId` **하나** — 이 필드만 바꾸고 **managed(수동 고정)를 세우지 않는다**(세우면 엣지 자기등록의 URL · 토큰 갱신이 멈춘다) · normalize 를 다시 돌리지 않는다 ·
+    등록부를 못 읽으면 503 · 없는 법인 400(목록이 비면 503) · 본문 datacenterId 가 문자열이 아니면 400('' 만 해제 — 반증 F5).
+    ⚠ **normalize 는 본문의 datacenterId 를 보지 않고 늘 기존 값을 이어받는다**(반증 F1 — 재현: 관리자 편집 폼 · 토큰 강제 재설정 · 배포가 목록 행을 통째로 다시 보내
+    다른 탭에서 바꾼 매칭을 되돌리고 없는 법인 검사 · 감사를 건너뛰었다). 대소문자 중복 병합(dedupeByIdCase)도 datacenterId 를 잇는다(반증 F3).
+    IP 관리의 스캔 에이전트 → 법인(`ipam/scanDatacenter.js`)도 이 매칭을 라벨보다 먼저 쓴다(반증 F2 — IP 관리 자체 수동 설정 agents[].datacenterId 는 그대로 이긴다).
     판정 순서(`analysisServers.collectorDcMaps` 하나 — 화면 `collectorDcMatch` 가 같은 순서, 테스트가 대조): **사용자 매칭(지금 목록에 있는 법인일 때만) → 이름 맞춤**. 법인을 지우면 이름 맞춤으로 돌아가고 화면이 stale 로 알린다.
     ⚠ 원격 서버(remoteServersResolved)와 전력 분석은 **사용자 매칭 > 엣지가 붙인 법인 태그 > 이름 맞춤** — 법인 · vCenter · 수집 서버 1:1:1 이라 그 수집 서버가 보고한 서버는 모두 그 법인이다
     (엣지 태그는 엣지 자기 목록의 id 라 중앙 목록에 없을 수 있다). 매칭이 없으면 예전 순서 그대로.

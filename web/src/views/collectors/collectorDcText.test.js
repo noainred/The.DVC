@@ -22,3 +22,17 @@ describe('collectorDcText', () => {
     expect(() => saveText({ ok: false, reason: '없는 법인' }, 'x', dcs)).toThrow('없는 법인');
   });
 });
+
+import { selectValue, matchSortText } from './collectorDcText.js';
+describe('collectorDcText — 선택 값 · 정렬(v2.970 반증 F6)', () => {
+  it('지워진 법인 매칭은 그 id 를 값으로 — 자동을 고르면 change 가 나서 해제된다', () => {
+    expect(selectValue({ id: 'nj', via: 'manual' })).toBe('nj');
+    expect(selectValue({ id: 'nj', via: 'name', stale: true, picked: 'pl' })).toBe('pl');
+    expect(selectValue({ id: 'nj', via: 'name' })).toBe('');
+    expect(selectValue(null)).toBe('');
+  });
+  it('정렬은 지금 쓰이는 법인 이름', () => {
+    expect(matchSortText({ id: 'oc2', via: 'name' }, dcs)).toBe('OC2 본사');
+    expect(matchSortText({ id: '', via: '' }, dcs)).toBe('');
+  });
+});

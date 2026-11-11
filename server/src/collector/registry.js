@@ -44,7 +44,7 @@ function dedupeByIdCase(list) {
     const merged = { ...base };
     for (const c of g) {
       if (c === base) continue;
-      for (const f of ['vcenterId', 'datacenter', 'name', 'url', 'token']) {
+      for (const f of ['vcenterId', 'datacenter', 'datacenterId', 'name', 'url', 'token']) {   // v2.970(반증 F3): 사용자 법인 매칭도 잃지 않게
         if (!String(merged[f] || '').trim() && String(c[f] || '').trim()) merged[f] = c[f];
       }
     }
@@ -63,7 +63,6 @@ function dedupeByIdCase(list) {
  *   ⚠ 파일이 없을 때의 보존본 판정(설정 폴더 목록)은 loadCollectors 에서 하지 않는다 — 요청·폴러마다 불리고 엣지 노드에는 파일이 없는 것이 정상이다.
  */
 const loadErr = makeLoadError();
-/** @returns {null|{at:number, reason:string}} 못 읽었으면 사유(원문 — 밖으로 낼 때는 summarizeRegistryError). */
 /** DataCenter id 모양(datacenter/store.js ensureDatacenter 와 같은 규칙 — 소문자 · 64자) — 아니면 ''. */
 export function normDcId(v) {
   const s = String(v ?? '').trim().toLowerCase();
@@ -93,6 +92,7 @@ export function setCollectorDatacenterId(id, dcId, validIds = null) {
   return { ok: true, collector: redact(next), changed: true };
 }
 
+/** @returns {null|{at:number, reason:string}} 못 읽었으면 사유(원문 — 밖으로 낼 때는 summarizeRegistryError). */
 export function registryLoadError() {
   loadCollectors();
   let exists = false;
@@ -298,9 +298,10 @@ function normalize(body, existing = null, ctx = null) {
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
   // v2.970(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭'): 사용자가 고른 법인(DataCenter id) — datacenter(엣지가 자기등록 때 보내는
-  //   자유 글자 라벨)와 따로 둔다. 자기등록 · 관리자 폼 · CSV 가져오기는 이 값을 보내지 않으므로 그대로 이어받는다(?? e.datacenterId).
-  //   바꾸는 길은 setCollectorDatacenterId 하나(수동 고정 managed 를 건드리지 않는다). 없으면 필드를 만들지 않는다(예전 파일 모양 그대로).
-  const dcId = normDcId(body.datacenterId !== undefined ? body.datacenterId : e.datacenterId);
+  //   자유 글자 라벨)와 따로 둔다. **본문 값은 보지 않고 늘 기존 값을 이어받는다**(반증 F1 — 관리자 편집 폼 · 토큰 강제 재설정 · 배포가 목록 행을
+  //   통째로 다시 보내 다른 탭에서 바꾼 매칭을 되돌리고, 없는 법인 검사 · 감사를 건너뛰었다). 바꾸는 길은 setCollectorDatacenterId 하나
+  //   (PUT /collectors/:id/datacenter — 법인 목록 검사 · 감사 · managed 불변). 없으면 필드를 만들지 않는다(예전 파일 모양 그대로).
+  const dcId = normDcId(e.datacenterId);
   if (dcId) entry.datacenterId = dcId;
   // 예외 기록: keep 이면 기존 것을 그대로(같은 URL), 아니면 새 판정값(https·루프백이면 지운다 — URL 이 바뀌면 승계하지 않는다).
   if (tp.keep) { if (e.insecureHttp) entry.insecureHttp = e.insecureHttp; }
