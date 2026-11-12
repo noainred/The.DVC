@@ -160,6 +160,7 @@ import { startPartFaultConfigPull } from './agent/partFaultConfigPull.js'; // �
 import { startBmUsageConfigPull } from './agent/bmUsageConfigPull.js'; // v2.627 베어메탈 사용률 설정 중앙→엣지 배포
 import { startBmOnboardPull } from './agent/bmOnboardPull.js'; // 7b단계 서버 등록 배포(중앙 → 엣지 — 수집 경로 edge)
 import { startBmMaintPull } from './agent/bmMaintPull.js'; // 8a단계 정비 창 배포(중앙 → 엣지 — 그 법인 창)
+import { startBmFoldersPull } from './agent/bmFoldersPull.js'; // v2.994 물리서버 폴더 사본(중앙 → 엣지 — 그 법인 것만 · 묶음 D)
 import { startEdgeLogWorker } from './agent/edgeLogWorker.js';  // 엣지 로그 폴백 워커(v2.549) — 중앙이 못 닿는 법인에서만 쓰인다
 import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 사용률 수집(v2.550) — 기본 꺼짐, 법인 단위 opt-in
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
@@ -667,6 +668,7 @@ const stagger = [
   startPartFaultPoller, startPartFaultPush, startPartFaultConfigPull, startBmUsageConfigPull,
   startBmOnboardPull, // 7b 서버 등록 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
   startBmMaintPull, // 8a 정비 창 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
+  startBmFoldersPull, // v2.994 물리서버 폴더 사본(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
   startEdgeLogWorker,
   startBmUsagePoller,
   startLinkCheckPoller,

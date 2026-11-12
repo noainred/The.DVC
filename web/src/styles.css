@@ -3560,3 +3560,9 @@ table.bmu-util tbody td { padding: 9px 10px; }
   .sm-pin-right table > tbody > tr > td:last-child:not([colspan]), .sm-pin-right table > tbody > tr > td:nth-last-child(2):not([colspan]) { background: var(--panel); }
   .sm-pin-right table > thead > tr > th:last-child, .sm-pin-right table > thead > tr > th:nth-last-child(2) { z-index: 3; }
 }
+/* v2.994 엣지 포탈 물리서버 폴더(설계 bm-folders §11) — 트리 버튼 · 400px 에서 한 줄로 */
+.bmf-tn { display: flex; align-items: center; gap: 6px; width: 100%; background: none; border: 0; border-radius: 6px; padding: 5px 10px; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; min-width: 0; }
+.bmf-tn:hover { background: var(--bg-soft); }
+.bmf-tn.on { background: rgba(59,130,246,.16); }
+@media (max-width: 720px) { .bmf-edge-grid { grid-template-columns: minmax(0, 1fr) !important; } }
+

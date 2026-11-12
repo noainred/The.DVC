@@ -57,4 +57,7 @@
   ② OS 주소 제안(`osSuggest.js` · `routes/admin/bmOsSuggest.js` 관리자 + 전체 범위) — 같은 법인만 · 등록은 **주소만**(`addrOnly` · 비활성) · `addrOnly` 는 사용률 수집 색인에서 빠진다(계정 없는 root SSH · 위임 이탈 방지).
   ③ 정방향 DNS 이름은 개별 토큰 배정에만 · 단계 예산 · 무응답 차단기. ④ 값 없음 사유는 서버 코드(`usageWhy.js` — 응답은 코드만 · 문구는 웹 `whyText.js` 하나).
   ⑤ 등록 저장 키 자동 변경(별칭 fl: → st: — `applyKeyMigration` 이 지금 상태에서 다시 확인 · 손상이면 안 씀 · 감사 system). 회귀 `bmOsSuggest2991` · `bmFolders2992` · `bmFolders2993`.
+  ⑥ **엣지 포탈(v2.994)**: 저장소는 중앙 하나 — 엣지는 `GET /api/central/bm-folders`(**개별 토큰만** · 그 엣지 법인만 · **엣지 키** `edgeKeyOfRow` · 규칙 값 · 등록자 · 주소 없음 — `edgeBundle.js`)를
+  `agent/bmFoldersPull.js`(10분 · 지난 사본 유지 · edgelog 등재)로 받아 `bm-folders-central.json`(`edgeCopy.js` — 다시 정제 · 경로는 글자만 · 손상 보존)에 두고 **읽기 전용**(`/op` 409).
+  사본 배치는 같은 법인일 때만 놓는다 · '이 엣지 밖 등록' 이름 · 받기 오류 원문은 전체 범위 관리자만. 회귀 `bmFolders2994`(변이 9/9).
 - 회귀: `server/test/bmFolders2984.test.js` · `bmFolders2987.test.js`(v2.987 · 2차 반증 반영 — 변이 12/12) · 웹 `web/src/views/tools/bmFoldersText.test.js`.

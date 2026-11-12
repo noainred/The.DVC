@@ -72,6 +72,17 @@ export function bmKeyOf(b) {
  * **낮은 등급 키를 별칭으로** 싣는다. 판정은 별칭 고정을 그 구성원의 고정으로 쓰고(resolveMember), 유령으로 보지 않는다(buildQueues live).
  * 별칭 고정은 다음 고정 쓰기 때 새 키로 옮기거나 검토 탭 '새 키로 옮기기'(`pins.rekey`)로 옮긴다 — 읽기 경로에서는 쓰지 않는다.
  */
+/**
+ * v2.994(묶음 D — 엣지 포탈 화면): 엣지가 올린 베어메탈의 **엣지 쪽 키** — 엣지는 자기 함대 행으로 bmKeyOf 를 부른다(태그 → st: · 없으면 그 엣지 fleetId 의 fl:).
+ *   중앙 serverId 는 `edge:<agent>:<fleetId>`(central/fleet.js) — 태그가 없으면 그 꼬리가 엣지 fleetId 다. 엣지 출처가 아니거나 모르면 ''.
+ */
+export function edgeKeyOfRow(b) {
+  if (t(b?.source) !== 'edge') return '';
+  if (lc(b?.serviceTag)) return bmKeyOf({ serviceTag: b.serviceTag }).key;
+  const sid = t(b?.serverId); const pre = `edge:${t(b?.remoteAgent)}:`;
+  if (!t(b?.remoteAgent) || !sid.startsWith(pre) || sid.length === pre.length) return '';
+  return bmKeyOf({ fleetId: sid.slice(pre.length) }).key;
+}
 export function vmAliasKeys(vm, keyKind) { return keyKind === 'instanceUuid' && t(vm?.id) ? [`vm:${t(vm.id)}`] : []; }
 export function bmAliasKeys(b, keyKind) {
   if (keyKind !== 'serviceTag') return [];
@@ -393,6 +404,7 @@ async function gatherNowInner(snap, tagCategory) {
     try { const inv = b.source === 'edge' ? null : getInventory(sid); const ps = lc(inv?.powerState); powered = ps === 'on' ? true : ps === 'off' ? false : null; } catch { powered = null; }
     members.push({
       key, keyKind, aliasKeys: bmAliasKeys(b, keyKind), kind: 'bm', corp: vc, name: t(b.name), nameIsAddr: isAddr(t(b.name)), serviceTag: t(b.serviceTag), source: t(b.source), remoteAgent: t(b.remoteAgent),
+      ...(t(b.source) === 'edge' ? { edgeKey: edgeKeyOfRow(b) } : {}),   // v2.994(묶음 D): 엣지 쪽 키 — 물리서버 폴더 엣지 묶음만 쓴다(서비스 인벤토리 응답 memberRow 에는 싣지 않는다)
       scan, ...(scanWhy ? { scanWhy } : {}), ...(corpWhy ? { corpWhy } : {}), powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
       usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src, ...(x.srcBy ? { srcBy: x.srcBy } : {}), ...(x.at ? { at: x.at } : {}) } : { state: 'unread' },
       faults: faultsOf(b.serviceTag, sid), corpRule: b.vcSource === 'corp-rule',
