@@ -43,7 +43,7 @@ export default function BmFolders() {
   const [picked, setPicked] = useState(() => new Set());
   const [panel, setPanel] = useState('');
   const [bulk, setBulk] = useState(null);
-  // v2.986 맵 보기 · 저장한 보기(브라우저 저장 — 이 사람의 편의만. 못 읽으면 빈 목록) · 입력 다시 읽기 진행 중
+  // v2.987 맵 보기 · 저장한 보기(브라우저 저장 — 이 사람의 편의만. 못 읽으면 빈 목록) · 입력 다시 읽기 진행 중
   const [view, setView] = useState('list');
   const [groupBy, setGroupBy] = useState('folder');
   const [colorBy, setColorBy] = useState('cpu');

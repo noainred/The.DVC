@@ -445,7 +445,7 @@ function RedundantCard({ q, svcName, writableOf, op, busy, corpName }) {
 }
 
 /**
- * v2.986 물리서버 폴더 규칙 추가 — 폴더 · 서비스를 고르면 **먼저 미리보기**(그 폴더 베어메탈이 지금 어느 서비스에 있는지 · 고정 여부)를 보이고 사람이 확인해 만든다.
+ * v2.987 물리서버 폴더 규칙 추가 — 폴더 · 서비스를 고르면 **먼저 미리보기**(그 폴더 베어메탈이 지금 어느 서비스에 있는지 · 고정 여부)를 보이고 사람이 확인해 만든다.
  * 늦게 온 미리보기 응답은 버린다(그 사이 다른 폴더를 골랐으면).
  */
 function BmRuleAdd({ corp, folders, svcs, nameOf, op, busy, onDone }) {

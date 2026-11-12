@@ -185,7 +185,7 @@ export function downsample(rows = [], n = 240) {
   return out;
 }
 
-// ───────── 서비스 인벤토리 연결(v2.986) ─────────
+// ───────── 서비스 인벤토리 연결(v2.987) ─────────
 /** 법인별 물리서버 폴더 규칙 → [{ prefix, serviceId, service }]. 서비스 인벤토리 저장소를 못 읽으면 빈 값(연결을 지어내지 않는다). */
 function svcLinksFor(corps = []) {
   const out = {};
@@ -288,7 +288,7 @@ export function registerBmFolders(api) {
         // 범위 계정에는 함대 전체 개수를 싣지 않는다(반증 8) — 못 읽은 출처가 '있다' 만
         blocked: hide ? { any: !!(g.bmBlockedSources || []).length } : { n: (g.bmBlockedSources || []).length, sources: full ? (g.bmBlockedSources || []) : undefined },
         faultsMeta: g.faultsMeta || null,
-        // 서비스 인벤토리 연결(v2.986) — 법인별 물리서버 폴더 규칙(경로 → 서비스 이름). 화면은 고른 폴더에 걸리는 가장 긴 규칙을 보인다.
+        // 서비스 인벤토리 연결(v2.987) — 법인별 물리서버 폴더 규칙(경로 → 서비스 이름). 화면은 고른 폴더에 걸리는 가장 긴 규칙을 보인다.
         // 서비스 인벤토리 도구 접근이 없는 계정에는 서비스 이름을 싣지 않는다(2차 반증 3)
         svcLinks: svcOk ? svcLinksFor(b.corps.map((c) => c.vcenterId)) : {},
         dupKeys: hide ? undefined : (dupKeys || 0),
@@ -327,7 +327,7 @@ export function registerBmFolders(api) {
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 
-  // ── 옆 패널 24시간 CPU · 메모리 추이(v2.986) — 서버 비교(6단계)와 **같은 대상 해석 · 같은 경로**를 쓴다(판정 하나):
+  // ── 옆 패널 24시간 CPU · 메모리 추이(v2.987) — 서버 비교(6단계)와 **같은 대상 해석 · 같은 경로**를 쓴다(판정 하나):
   //   이 노드가 수집한 서버 = 로컬 비교 계열 · 엣지가 수집한 서버 = 그 엣지에서 서버당 요청 1개(central/bmComparePull — 지표마다 WAN 왕복하지 않는다).
   //   숫자 · 시각만 싣는다(주소 · 계정 단서 없음) · 못 읽은 칸은 null(0 으로 채우지 않는다) · 범위 계정에는 엣지 실패 사유(엣지 이름이 들어 있다)를 싣지 않는다.
   api.get('/tools/bm-folders/trend', toolsPerm, async (req, res) => {
@@ -621,7 +621,7 @@ export function registerBmFolders(api) {
             const r2 = mutateAssign((d) => { for (const k of underKeys) d.assign[k] = { ...d.assign[k], path: swap(d.assign[k].path) }; return { result: {} }; });
             if (!r2.ok) return fail(r2);
           }
-          // v2.986: 서비스 인벤토리의 물리서버 폴더 규칙도 새 경로로 옮긴다(이름만 바꿨는데 서비스 소속이 풀리지 않게). 그 저장소를 못 읽으면 밝힌다.
+          // v2.987: 서비스 인벤토리의 물리서버 폴더 규칙도 새 경로로 옮긴다(이름만 바꿨는데 서비스 소속이 풀리지 않게). 그 저장소를 못 읽으면 밝힌다.
           const svc = svcRuleRename(corp, p.value, swap);
           audit(`${corp}:${p.value}`, `→ ${to} · 등록 ${underKeys.length} · 규칙 ${corpRules.length} · 서비스 인벤토리 규칙 ${svc.n}${svc.error ? `(못 옮김: ${svc.error})` : ''}`);
           return done({ path: to, moved: underKeys.length, rules: corpRules.length, starRules, svcRules: svc.n, ...(svc.error ? { svcRulesNotMoved: svc.error } : {}) });

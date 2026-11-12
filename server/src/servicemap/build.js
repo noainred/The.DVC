@@ -79,7 +79,7 @@ function finishStat(st, hostByKey) {
  */
 export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null, bmFolderOf = null } = {}) {
   const idx = buildIndex(map);
-  // bmFolderOf(v2.986): 베어메탈 키 → 물리서버 폴더 경로(미분류 '' · 모름 undefined). 없으면(null) 물리서버 폴더 규칙을 건너뛴다.
+  // bmFolderOf(v2.987): 베어메탈 키 → 물리서버 폴더 경로(미분류 '' · 모름 undefined). 없으면(null) 물리서버 폴더 규칙을 건너뛴다.
   const ctx = { tagCategory: map?.settings?.tagCategory || '', bmFolderOf };
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
   const resolved = new Map();          // key → r (전 구성원 — 유령 판정은 범위와 무관한 전체 집합으로)
@@ -204,7 +204,7 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
       }
     }
     // 이름 규칙 둘 이상(다른 서비스)이 걸림 — 결과가 적용 순서에 달렸다(3차 반증 1: 순서를 바꾼 업그레이드에서 조용히 옮겨 간 구성원).
-    // v2.986: 물리서버 폴더 규칙으로 정해졌는데 스캔 라벨 · 이름 규칙이 다른 서비스를 가리키는 베어메탈도 같은 큐(src 'bmfolder' · others 'scan:…' · 'name:…')
+    // v2.987: 물리서버 폴더 규칙으로 정해졌는데 스캔 라벨 · 이름 규칙이 다른 서비스를 가리키는 베어메탈도 같은 큐(src 'bmfolder' · others 'scan:…' · 'name:…')
     if ((r.src === 'rule' || r.src === 'bmfolder') && r.ruleOverlap) ruleOverlap.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.via, src: r.src, others: r.ruleOverlap });
     if (r.serviceId) continue;
     let gk; let kind; let value = '';

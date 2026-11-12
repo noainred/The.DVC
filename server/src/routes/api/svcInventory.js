@@ -42,7 +42,7 @@ import { bmFolderMatches } from '../../servicemap/resolve.js';
 import { CORP_OPS, FLEET_OPS } from '../../servicemap/ops.js';
 import { getMap, getPins, peekMap, peekPins, storeRev, storeLoadError, mutateMap, mutatePins, flushStore, resetCorrupt, LIMITS, cleanFolderPath } from '../../servicemap/store.js';
 import { mergeLatestRows, rowsByAgentKeyOf, makeCapOf, clampEdgeTs } from './corpUsage.js';
-// v2.986 물리서버 폴더 규칙 — 배치 판정은 물리서버 폴더의 것 하나를 부른다(도메인 모듈 — routes 를 import 하지 않는다)
+// v2.987 물리서버 폴더 규칙 — 배치 판정은 물리서버 폴더의 것 하나를 부른다(도메인 모듈 — routes 를 import 하지 않는다)
 import { peekMain as bmfPeekMain, peekAssign as bmfPeekAssign, storeRev as bmfStoreRev, storeLoadError as bmfStoreError } from '../../bmfolders/store.js';
 import { placeMember as bmfPlaceMember, sortRules as bmfSortRules } from '../../bmfolders/build.js';
 
@@ -351,7 +351,7 @@ async function gatherNowInner(snap, tagCategory) {
       faults: faultsOf(b.serviceTag, sid), corpRule: b.vcSource === 'corp-rule',
       // v2.984 물리서버 폴더(bmfolders)가 함께 쓰는 입력 — 서비스 인벤토리 응답에는 싣지 않는다(memberRow 가 고른다)
       model: t(b.model), watts: numOrNull(b.watts), collectorId: t(b.collectorId),
-      // v2.986 물리서버 폴더: 사용률 이력 키(bm-usage 적재 키 — idOf) · 관리 주소(등록부 iDRAC 주소 — 관리자 판본만 싣는다)
+      // v2.987 물리서버 폴더: 사용률 이력 키(bm-usage 적재 키 — idOf) · 관리 주소(등록부 iDRAC 주소 — 관리자 판본만 싣는다)
       usageKey: id.key, mgmtHost: b.source === 'idrac' ? hostOnly(regById.get(sid)?.host) : '',
     });
   }
@@ -425,7 +425,7 @@ const fleetAdmin = (user, snap) => {
 function loadState() {
   return { map: peekMap(), pins: peekPins(), rev: storeRev(), err: storeLoadError(), bmRev: bmfRevSafe() };
 }
-/** 물리서버 폴더 저장소 세대(v2.986 — 물리서버 폴더 규칙이 그 배치를 읽는다. 판정 memo · 응답 캐시 열쇠에 넣는다). 손상이면 'x'. */
+/** 물리서버 폴더 저장소 세대(v2.987 — 물리서버 폴더 규칙이 그 배치를 읽는다. 판정 memo · 응답 캐시 열쇠에 넣는다). 손상이면 'x'. */
 function bmfRevSafe() { try { return bmfStoreError() ? 'x' : bmfStoreRev(); } catch { return 'x'; } }
 /** 법인 → 물리서버 폴더 경로 목록(명시 폴더 ∪ 배치 경로 · 조상). 저장소를 못 읽으면 빈 Map. */
 function bmFolderPathsOf(members = []) {
@@ -610,7 +610,7 @@ export function registerSvcInventory(api) {
         settings: { tagCategory: st.map.settings.tagCategory || '' },
         canFleet: fleetAdmin(req.user, s), canWrite: writerOk(req.user),
         corps: (() => {
-          // v2.986: 법인마다 물리서버 폴더 경로(명시 폴더 ∪ 서버가 놓인 경로 · 조상 포함) — 소속 규칙 탭의 '물리서버 폴더 규칙' 고르기 목록
+          // v2.987: 법인마다 물리서버 폴더 경로(명시 폴더 ∪ 서버가 놓인 경로 · 조상 포함) — 소속 규칙 탭의 '물리서버 폴더 규칙' 고르기 목록
           const bmf = bmFolderPathsOf(g.members);
           return inv.corps.map((c) => ({ ...c, writable: writableOf(req.user, s, c.vcenterId), bmFolders: bmf.get(c.vcenterId) || [] }));
         })(),
@@ -855,7 +855,7 @@ export function registerSvcInventory(api) {
       const corp = t(b.corp);
       if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '저장소를 읽지 못해 쓰기를 막았습니다.' });
 
-      // v2.986 물리서버 폴더 규칙 미리보기 — 만들기 전에 그 폴더(하위 포함) 베어메탈이 지금 어느 서비스에 있는지 센다(만들면 옮겨 갈 구성원을 사람이 보고 누르게).
+      // v2.987 물리서버 폴더 규칙 미리보기 — 만들기 전에 그 폴더(하위 포함) 베어메탈이 지금 어느 서비스에 있는지 센다(만들면 옮겨 갈 구성원을 사람이 보고 누르게).
       if (op === 'bmrule.add' && b.dry === true) {
         // 저장과 같은 정리(cleanFolderPath)를 거친 경로로 센다 — 끝의 '\\' · 공백이 다른 미리보기를 만들지 않게(2차 반증 4)
         const cp = cleanFolderPath(b.prefix);

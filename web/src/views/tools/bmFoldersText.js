@@ -208,7 +208,7 @@ export function opErrorText(e) {
   return String(r || '요청을 처리하지 못했습니다.').slice(0, 300);
 }
 
-// ───────── v2.986 맵 보기 · 저장한 보기 ─────────
+// ───────── v2.987 맵 보기 · 저장한 보기 ─────────
 /** 맵 묶기 — 'folder'(폴더 경로마다 · 미분류는 맨 뒤) · 'corp' · 'model'. 그룹 = { key, label, rows, un? }. */
 export function mapGroups(rows = [], groupBy = 'folder', corpName = (x) => x) {
   const m = new Map();

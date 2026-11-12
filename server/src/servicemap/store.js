@@ -5,7 +5,7 @@
  *   CONFIG_DIR/service-map.json       — 트리·규칙·전역 카탈로그·설정. 사람이 가끔 바꾼다.
  *     { rev, corps: { [vcenterId]: { folders:[path], services:[{id,name,path,tier,owner,note,globalId}],
  *                                     folderRules:[{prefix,serviceId}], aliases:[{kind:'scan'|'tag',value,serviceId}],
- *                                     bmFolderRules:[{prefix,serviceId}](v2.986 — 물리서버 폴더 경로 'DB\\Oracle' → 서비스, 베어메탈만),
+ *                                     bmFolderRules:[{prefix,serviceId}](v2.987 — 물리서버 폴더 경로 'DB\\Oracle' → 서비스, 베어메탈만),
  *                                     nameRules:[{match:'prefix'|'suffix'|'contains',value,serviceId}], tagEnabled } },
  *       globals:[{id,name,tier,owner,note}], settings:{ tagCategory } }
  *   CONFIG_DIR/service-map-pins.json  — 한 대씩 고정(수동 지정). 자주 바뀐다 — 변경 감시 백업에서 빼려고 나눴다(4차 반증 18).
@@ -121,7 +121,7 @@ export function normalizeMap(raw) {
       const p = isObj(r) ? cleanFolderPrefix(r.prefix) : { error: 1 };
       if (!p.error && ids.has(r.serviceId)) corp.folderRules.push({ prefix: p.value, serviceId: r.serviceId });
     }
-    // v2.986 물리서버 폴더 규칙 — 경로는 물리서버 폴더와 같은 규약(cleanFolderPath · '\\' 구분 · 빈 경로 = 루트는 받지 않는다). 같은 경로는 하나만.
+    // v2.987 물리서버 폴더 규칙 — 경로는 물리서버 폴더와 같은 규약(cleanFolderPath · '\\' 구분 · 빈 경로 = 루트는 받지 않는다). 같은 경로는 하나만.
     for (const r of Array.isArray(c.bmFolderRules) ? c.bmFolderRules.slice(0, LIMITS.bmFolderRulesPerCorp) : []) {
       if (!isObj(r) || typeof r.prefix !== 'string') continue;
       const p = cleanFolderPath(r.prefix);

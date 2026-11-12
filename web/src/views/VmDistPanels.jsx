@@ -20,7 +20,7 @@ const fmt = (n) => (Number.isFinite(n) ? n.toLocaleString('en-US') : '—');
 const POWER_COLOR = { on: 'var(--green)', off: 'var(--vmd-off)', suspended: 'var(--amber)', other: 'var(--text-faint)' };
 const GPU_COLOR = { vgpu: 'var(--purple)', passthrough: 'var(--accent-2)', mixed: 'var(--amber)' };
 
-/** 좁은 화면 여부 — 본체는 components/useNarrowScreen.js(v2.986 물리서버 폴더와 함께 쓴다). 이 화면 기본 기준은 NARROW_QUERY. */
+/** 좁은 화면 여부 — 본체는 components/useNarrowScreen.js(v2.987 물리서버 폴더와 함께 쓴다). 이 화면 기본 기준은 NARROW_QUERY. */
 export function useNarrowScreen(query = NARROW_QUERY) { return useNarrowBase(query); }
 
 /** CPU·메모리 사용률 분포 패널 — 5% 칸 20개. */

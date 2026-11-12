@@ -72,7 +72,7 @@ describe('bmFoldersText', () => {
 
 import { mapGroups, cellTone, parseViews, upsertView, cleanView, VIEWS_MAX } from './bmFoldersText.js';
 
-describe('bmFoldersText v2.986 — 맵 · 저장한 보기', () => {
+describe('bmFoldersText v2.987 — 맵 · 저장한 보기', () => {
   const rows = [
     { key: 'a', corp: 'A', path: 'DB', place: 'manual', model: 'R650', cpu: 10 },
     { key: 'b', corp: 'A', path: '', place: null, model: '', cpu: null },
@@ -112,7 +112,7 @@ describe('bmFoldersText v2.986 — 맵 · 저장한 보기', () => {
 
 import { renameNote, removeNote } from './bmFoldersText.js';
 
-describe('bmFoldersText v2.986 — 이름 바꾸기 · 지우기 알림은 응답 값으로', () => {
+describe('bmFoldersText v2.987 — 이름 바꾸기 · 지우기 알림은 응답 값으로', () => {
   it('빈 폴더를 바꾸거나 지워도 경고가 아니다 · 옮긴 규칙 수는 응답 값 · 못 옮겼으면 경고', () => {
     expect(renameNote({ path: 'X', moved: 0 })).toEqual({ ok: true, text: '폴더 이름을 바꿨습니다.' });
     expect(renameNote({ moved: 3, svcRules: 2 }).text).toBe('폴더 이름을 바꿨습니다 — 서비스 인벤토리의 물리서버 폴더 규칙 2개도 새 경로로 옮겼습니다.');

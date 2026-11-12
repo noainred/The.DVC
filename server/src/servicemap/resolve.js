@@ -6,7 +6,7 @@
  *                              '고정 유지'(reviewed)는 **그때의 자동 판정(reviewedAuto)과 같은 드리프트만** 다시 묻지 않는다 — 자동 판정이 다른 서비스로
  *                              바뀌면 다시 드리프트(5차 반증 R8). reviewedAuto 가 없는 옛 검토 표지는 한 번 다시 묻는다(모르는 것을 '같다' 로 보지 않는다).
  *   2. vCenter 폴더 규칙(VM)  — vmPlacement.folderPath('/ERP/prod') 의 '/' 경계 접두, 가장 긴 접두. folderPath null(vApp 등)은 'placement-unknown'.
- *   2b. 물리서버 폴더 규칙(베어메탈, v2.986) — 물리서버 폴더(bm-folders) 경로의 '\\' 경계 접두, 가장 긴 접두. VM 의 2번과 같은 자리.
+ *   2b. 물리서버 폴더 규칙(베어메탈, v2.987) — 물리서버 폴더(bm-folders) 경로의 '\\' 경계 접두, 가장 긴 접두. VM 의 2번과 같은 자리.
  *                              구성원의 폴더는 ctx.bmFolderOf(키 → 경로 — 미분류 '' · 모름 undefined)로 받는다. 모르면(물리서버 폴더 저장소 손상) 이 규칙을 건너뛴다.
  *                              이 규칙으로 정해졌는데 스캔 라벨 · 이름 규칙이 다른 서비스를 가리키면 `ruleOverlap` 으로 검토 큐에 올린다(규칙을 만든 순간 옮겨 간 구성원이 드러나게).
  *   3. 스캔 엔트리 라벨(베어메탈) — 등록부 scanRangeId → idrac-scan-ranges.json 엔트리 service 라벨. 라벨 = 서비스명 또는 별칭.

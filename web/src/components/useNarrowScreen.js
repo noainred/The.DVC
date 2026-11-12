@@ -1,5 +1,5 @@
 /**
- * 좁은 화면 여부 훅(v2.986 — VmDistPanels.jsx 에서 옮김 · 물리서버 폴더와 함께 쓴다). matchMedia 가 없거나 던지면 넓은 화면으로 본다(SSR · 구형 브라우저).
+ * 좁은 화면 여부 훅(v2.987 — VmDistPanels.jsx 에서 옮김 · 물리서버 폴더와 함께 쓴다). matchMedia 가 없거나 던지면 넓은 화면으로 본다(SSR · 구형 브라우저).
  */
 import { useEffect, useState } from 'react';
 
