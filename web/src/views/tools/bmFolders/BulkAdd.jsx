@@ -11,6 +11,7 @@ import Select from '../../../components/Select.jsx';
 import DataList from '../../../components/DataList.jsx';
 import { SrcBadge, StatusDot } from './parts.jsx';
 import { SRC_LABEL, parseQuery, highlight, previewAssign, pathText, opErrorText, trimPath } from '../bmFoldersText.js';
+import { pickAll, pickNotInFolder, pickNote } from './whyText.js'; // v2.992: 고르기 버튼
 
 const btn = { padding: '6px 12px', flex: 'none' };
 const ON_LABEL = { name: '이름', tag: '서비스 태그', model: '모델', addr: '관리 주소' };
@@ -27,6 +28,7 @@ export default function BulkAdd({ init, d, corpName, op, busy, onClose }) {
   const [err, setErr] = useState('');
   const [off, setOff] = useState({ corp: new Set(), src: new Set(), state: new Set(), model: new Set() });
   const [checked, setChecked] = useState(() => new Set());
+  const [pickMsg, setPickMsg] = useState('');   // v2.992: 고르기 버튼 결과 문장
   const [path, setPath] = useState(init.path || '');
   const [moveExisting, setMoveExisting] = useState(false);
   const [saveRule, setSaveRule] = useState(false);
@@ -50,6 +52,7 @@ export default function BulkAdd({ init, d, corpName, op, busy, onClose }) {
         setOff({ corp: new Set(), src: new Set(), state: new Set(), model: new Set() });
         // 기본 선택 — 이미 손 등록된 서버(다른 폴더)는 고르지 않는다(옮기기는 아래 체크로 명시)
         setChecked(new Set((r.rows || []).filter((x) => x.place !== 'manual').map((x) => x.key)));
+        setPickMsg('');
       } catch (e) { if (my === seq.current) { setErr(opErrorText(e)); setRes(null); } }
       finally { if (my === seq.current) setLoading(false); }
     }, 400);
@@ -135,6 +138,15 @@ export default function BulkAdd({ init, d, corpName, op, busy, onClose }) {
                 {loading ? <span className="muted">다시 찾는 중…</span> : null}
                 {res.shown < res.total ? <span className="muted">앞 {res.shown}대만 받았습니다 — 글자를 더 넣어 좁히십시오</span> : null}
               </div>
+              {rows.length ? (
+                // v2.992(설계 §12 ⑤): 고르기 버튼 셋 — 찾은 서버 전부(표에 보이지 않는 줄 포함 · 왼쪽 조건으로 뺀 줄은 제외)에 적용하고 결과를 문장으로 말한다
+                <div className="flex wrap gap" role="group" aria-label="고르기" style={{ alignItems: 'center' }}>
+                  <button type="button" className="bmf-chip" onClick={() => { const n = pickAll(rows); setChecked(n); setPickMsg(pickNote('all', rows, n)); }}>전체 선택 {rows.length}</button>
+                  <button type="button" className="bmf-chip" onClick={() => { const n = pickNotInFolder(rows); setChecked(n); setPickMsg(pickNote('notin', rows, n)); }}>폴더에 없는 서버만 선택 {rows.filter((x) => x.place !== 'manual').length}</button>
+                  <button type="button" className="bmf-chip" disabled={!checked.size} onClick={() => { setChecked(new Set()); setPickMsg(pickNote('none')); }}>선택 해제</button>
+                  {pickMsg ? <span className="muted" role="status" style={{ fontSize: 12 }}>{pickMsg}</span> : null}
+                </div>
+              ) : null}
               {!rows.length ? <div className="muted" style={{ padding: 12 }}>‘{tokens.include.join(', ')}’ 이(가) 들어간 서버가 없습니다{onlyUn ? '(미분류만)' : ''}. 찾는 곳을 넓히거나(모델{d.scoped ? '' : ' · 서비스 태그'}) ESXi 호스트를 포함해 보십시오.</div> : (
                 <STable className="table bmf-t" minWidth={760} limit={300}>
                   <thead>

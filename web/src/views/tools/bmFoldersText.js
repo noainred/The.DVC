@@ -101,6 +101,8 @@ export function filterRows(rows = [], q = '', quick = '') {
     if (quick === 'fault' && !(numOrNull(r.faults) > 0)) return false;
     if (quick === 'unread' && !(numOrNull(r.cpu) == null && numOrNull(r.mem) == null)) return false;
     if (quick === 'off' && r.powered !== false) return false;
+    // v2.992: 값 없음 사유 묶음 띠를 누르면 그 사유의 서버만(값이 없는 행만 — 사유는 값이 없을 때만 실린다)
+    if (typeof quick === 'string' && quick.startsWith('why:') && !(r.why?.code === quick.slice(4) && numOrNull(r.cpu) == null && numOrNull(r.mem) == null)) return false;
     if (!toks.length) return true;
     const hay = `${r.name || ''} ${r.model || ''} ${r.serviceTag || ''} ${r.agent || ''}`.toLowerCase();
     return toks.every((t) => hay.includes(t));

@@ -4,6 +4,7 @@
 import React from 'react';
 import { SRC_LABEL, SRC_BADGE, pctText } from '../bmFoldersText.js';
 import { SRC_COLOR, SRC_LABEL as USRC_LABEL, SRC_LONG, rowSrcClass, srcTitle } from './usageSrc.js'; // v2.993: 사용률 출처 색
+import { whyOf, whyShort, WHY_DOT } from './whyText.js'; // v2.992: 값 없음 사유
 
 /** 사용률 막대 + 숫자. 값이 없으면 막대 없이 '—'(0 으로 그리지 않는다). */
 export function UsageBar({ v, w = 54, src = null }) {
@@ -27,7 +28,9 @@ export function SrcChip({ src }) {
 }
 
 /** CPU · 메모리 두 줄(열을 줄이려고 합쳤다 — 1440px 실측: 따로 두면 뒤쪽 열이 가로 스크롤 뒤로 숨었다). v2.993: 막대 색 · 오른쪽 표지 = 출처. */
-export function UsagePair({ cpu, mem, usrc = null }) {
+export function UsagePair({ cpu, mem, usrc = null, why = null }) {
+  // v2.992(설계 §12): 둘 다 없으면 '—' 아래 짧은 사유 + 누르면 자세한 사유(서버 판정)
+  if (cpu == null && mem == null && why?.code) return <WhyTip why={why} what="CPU · 메모리 사용률" />;
   const r = { cpu, mem, usrc };
   const cls = rowSrcClass(r);
   const chips = usrc && !usrc.mixed ? [...new Set([cpu != null ? usrc.cpu : null, mem != null ? usrc.mem : null].filter(Boolean))] : [];
@@ -63,3 +66,38 @@ export function StackBar({ parts = [], w, h = 8, label }) {
     </span>
   );
 }
+
+/**
+ * v2.992(값 없음 사유 — 설계 §12): '—' 아래 짧은 사유 + 색 점(글자 병기 — 색만으로 가르지 않는다). 실제 버튼 — 누르면(또는 Enter) 자세한 사유가 열리고 Esc · 바깥 누름으로 닫힌다.
+ * 문구는 서버가 정한 사유 코드의 글자(whyText.js) — 화면이 원인을 추측하지 않는다.
+ */
+export function WhyTip({ why, what }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const key = (e) => { if (e.key === 'Escape') setOpen(false); };
+    const click = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('keydown', key); document.addEventListener('mousedown', click);
+    return () => { document.removeEventListener('keydown', key); document.removeEventListener('mousedown', click); };
+  }, [open]);
+  const w = whyOf(why.code);
+  const short = whyShort(why);
+  return (
+    <span className="bmf-why" ref={ref}>
+      <span className="muted">—</span>
+      <button type="button" className="bmf-why-b" aria-expanded={open} onClick={() => setOpen((v) => !v)} title={`${w.l} ${w.a}`.trim()}>
+        <span className={`bmf-wd ${w.cls}`} style={{ background: WHY_DOT[w.cls] }} aria-hidden="true" />{short}
+      </button>
+      {open ? (
+        <span className="bmf-why-pop" role="dialog" aria-label={`${what} — 값이 없는 이유`}>
+          <b>{what} 값이 없습니다</b>
+          <span>{w.l}</span>
+          {why.at ? <span className="muted">마지막 값 {new Date(why.at).toLocaleString('ko-KR', { hour12: false })}</span> : null}
+          {w.a ? <span className="bmf-why-a">{w.a}</span> : null}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+

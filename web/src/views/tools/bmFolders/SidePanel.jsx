@@ -6,7 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../../../api.js';
 import Select from '../../../components/Select.jsx';
 import EscClose from '../../../components/EscClose.jsx';
-import { UsageBar, StatusDot, SrcBadge } from './parts.jsx';
+import { UsageBar, StatusDot, SrcBadge, WhyTip } from './parts.jsx';
 import { PLACE_LABEL, pathText, wattsText, opErrorText } from '../bmFoldersText.js';
 import { unitText } from '../../unitText.js';
 
@@ -35,8 +35,10 @@ export default function SidePanel({ r, corps, corpName, scoped, op, busy, onClos
       {r.faults > 0 ? <div className="bmf-band red">부품 장애 {r.faults}건 — 특수 기능 › 물리 부품 장애에서 내용을 봅니다.</div> : null}
       <div className="bmf-kv">
         <span className="k">전원</span><span>{r.powered === true ? '켜짐' : r.powered === false ? '꺼짐' : '모름'}</span>
-        <span className="k">CPU</span><UsageBar v={r.cpu} w={150} />
-        <span className="k">메모리</span><UsageBar v={r.mem} w={150} />
+        {r.cpu == null && r.mem == null && r.why?.code ? (<><span className="k">사용률</span><WhyTip why={r.why} what="CPU · 메모리 사용률" /></>) : (<>
+          <span className="k">CPU</span><UsageBar v={r.cpu} w={150} />
+          <span className="k">메모리</span><UsageBar v={r.mem} w={150} />
+        </>)}
         <span className="k">전력</span><span>{wattsText(r.watts)}</span>
         <span className="k">용량</span><span>{r.cores != null ? `${r.cores}코어` : '—'} · {r.memGB != null ? `${r.memGB} GB` : '—'}</span>
         <span className="k">받는 길</span><span><SrcBadge src={r.src} />{r.agent ? <span className="muted mono" style={{ fontSize: 11, marginLeft: 4 }}>{r.agent}</span> : null}</span>
