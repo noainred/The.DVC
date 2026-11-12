@@ -175,14 +175,14 @@ test('엣지 시험 — 켜고 배정 동기화 · 알림 억제(시한) · 첫 
     ],
     'edge-b': null,
   };
-  const tick1 = TRI.trialTick(t0 + 3000, { edgeRows: (a) => rows[a], sync });
+  const tick1 = TRI.trialTick(t0 + 3000, { ackAt: () => t0, edgeRows: (a) => rows[a], sync });
   assert.equal(tick1.judged, 1, '실패만 판정 — 통과는 기대 점검 2개가 다 와야 한다');
   assert.equal(S.getTarget(p2.id).enabled, false, '엣지 첫 보고 실패 → 중지로 되돌림');
   assert.deepEqual(syncCalls.at(-1).agents, ['edge-a'], '되돌린 대상의 엣지 배정을 다시 굳힌다');
   assert.equal(TR.isMuted('E', 'edge-fail', t0 + 3000), true, '실패로 되돌린 대상은 엣지가 다음 당기기까지 옛 스냅샷으로 재므로 억제를 이어 간다(반증 M1)');
   assert.equal(TR.isMuted('E', 'edge-fail', t0 + 3000 + TRI.revertMuteMs(0) + 1), false, '그 억제에도 시한이 있다');
   rows['edge-a'].push({ path: 'E', target: 'edge-pass', test: 'TCP 443', status: 'warn', measuredAt: t0 + 4000 });
-  TRI.trialTick(t0 + 5000, { edgeRows: (a) => rows[a], sync });
+  TRI.trialTick(t0 + 5000, { ackAt: () => t0, edgeRows: (a) => rows[a], sync });
   assert.equal(S.getTarget(p1.id).enabled, true, '경고 포함 전부 보고 → 통과 · 사용 유지');
   assert.equal(TRI.getTrial(r.job.id).items.find((x) => x.targetId === p1.id).state, 'pass');
 
@@ -191,8 +191,8 @@ test('엣지 시험 — 켜고 배정 동기화 · 알림 억제(시한) · 첫 
   assert.equal(TRI.pendingTrials().length, 1);
   const dl = TRI.pendingTrials()[0].deadline;
   assert.ok(dl - t0 >= TRI.EDGE_DEADLINE_BASE_MS, '시한은 기본값 이상');
-  assert.equal(TRI.trialTick(dl - 1, { edgeRows: () => null, sync }).judged, 0);
-  const tEnd = TRI.trialTick(dl, { edgeRows: () => null, sync });
+  assert.equal(TRI.trialTick(dl - 1, { ackAt: () => t0, edgeRows: () => null, sync }).judged, 0);
+  const tEnd = TRI.trialTick(dl, { ackAt: () => t0, edgeRows: () => null, sync });
   assert.equal(tEnd.failed, 1);
   assert.equal(S.getTarget(p3.id).enabled, false, '시한까지 보고가 없으면 중지로 되돌린다(켠 채로 남지 않게)');
   assert.match(TRI.trialOf(p3.id, dl).reason, /시한까지 엣지 보고가 없었습니다/);
@@ -312,7 +312,7 @@ test('반증 M1 — 엣지 시험 실패로 되돌린 뒤에도 엣지가 옛 �
   TRI.startTrial([x.id], { now: t0, deps: edgeDeps });
   const meta = [{ i: 'e1', p: 'M1', n: 'm1-x', h: '10.0.0.1', t: 'TCP 22', y: 'tcp', iv: 60 }];
   E.ingestReport('edge-a', { snapId: 1, seq: 1, total: 1, rows: [{ i: 'e1', s: 'bad', r: 'refused', k: 1, a: 0 }], meta }, t0 + 60_000);
-  assert.equal(TRI.trialTick(t0 + 61_000, { sync: okSync }).failed, 1, '기본 edgeRows(getAgentRaw) 경로로 판정');
+  assert.equal(TRI.trialTick(t0 + 61_000, { ackAt: () => t0, sync: okSync }).failed, 1, '기본 edgeRows(getAgentRaw) 경로로 판정');
   assert.equal(S.getTarget(x.id).enabled, false);
   E.ingestReport('edge-a', { snapId: 2, seq: 1, total: 1, rows: [{ i: 'e1', s: 'bad', r: 'refused', k: 2, a: 0 }] }, t0 + 120_000);
   E.ingestReport('edge-a', { snapId: 3, seq: 1, total: 1, rows: [{ i: 'e1', s: 'bad', r: 'refused', k: 3, a: 0 }] }, t0 + 180_000);
@@ -336,7 +336,7 @@ test('반증 M2 — 사람이 대기 중 대상을 바꾸면 시험 대기를 �
   S.setEnabledMany({ targets: [y.id], enabled: false }); S.setEnabledMany({ targets: [y.id], enabled: true });
   assert.equal(TR.isMuted('M2', 'm2-y'), false, '사람이 켠 대상의 실패는 알린다');
   const dl = TRI.pendingTrials()[0].deadline;
-  TRI.trialTick(dl, { edgeRows: () => [], sync: okSync });
+  TRI.trialTick(dl, { ackAt: () => t0, edgeRows: () => [], sync: okSync });
   assert.equal(S.getTarget(y.id).enabled, true, '사람이 마지막으로 켠 대상을 system 이 끄지 않는다');
   assert.equal(S.getTarget(z.id).enabled, false, '대기를 멈추지 않은 다른 대상은 시한대로 되돌린다');
   // 다른 경로로 꺼진 뒤 다시 시험 — 낡은 대기를 지우고 하나만
@@ -365,9 +365,9 @@ test('반증 M3 — 엣지 판정은 이번 시험의 행만(지금 주소 · �
     { path: 'M3', target: 'm3-w', host: '10.0.0.2', test: 'TCP 22', status: 'ok', measuredAt: t0 + 3000 },   // 같은 점검 두 행 — 두 번 세지 않는다
     { path: 'M3', target: 'm3-w', host: '10.0.0.2', test: 'Ping', status: 'ok', measuredAt: t0 + 3000 },     // 기대 밖 이름
   ];
-  assert.equal(TRI.trialTick(t0 + 4000, { edgeRows: () => rows, sync: okSync }).judged, 0, 'TCP 443 이 오기 전에는 통과로 단정하지 않는다');
+  assert.equal(TRI.trialTick(t0 + 4000, { ackAt: () => t0, edgeRows: () => rows, sync: okSync }).judged, 0, 'TCP 443 이 오기 전에는 통과로 단정하지 않는다');
   rows.push({ path: 'M3', target: 'm3-w', host: '10.0.0.2', test: 'TCP 443', status: 'ok', measuredAt: t0 + 5000 });
-  assert.equal(TRI.trialTick(t0 + 6000, { edgeRows: () => rows, sync: okSync }).judged, 1);
+  assert.equal(TRI.trialTick(t0 + 6000, { ackAt: () => t0, edgeRows: () => rows, sync: okSync }).judged, 1);
   assert.equal(TRI.trialOf(w.id).state, 'pass', '옛 주소의 실패 행에 끌려가지 않는다');
 });
 

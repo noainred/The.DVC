@@ -16,7 +16,7 @@ import { blankOr } from './blankOr.js';
 import { edgeCardKind, edgeCardWarn, edgeCardMeta, edgeNoReportTotal } from './svcmon/edgeCardText.js';
 import Select from '../components/Select.jsx';
 import OverviewDash from './svcmon/OverviewDash.jsx';   // v2.915 개요(기술 뷰 — Datadog 대시보드 참고)
-import { isFullScopeAdmin } from './svcmon/svcmonAccess.js';
+import { isFullScopeAdmin, isFullScopeEditor } from './svcmon/svcmonAccess.js';
 import { periodText } from './svcmon/syncLogic.js';
 import { idsByFolder, folderCheck, toggleIds, selectionInfo } from './svcmon/easyRegister.js';   // v2.960 쉬운 등록 A(선택 모드 · 사용/중지)
 import TrialModal from './svcmon/TrialModal.jsx';
@@ -147,6 +147,7 @@ export default function SvcMonitor() {
   const [filter, setFilter] = useState('ALL');
   const [sort, setSort] = useState('none');            // none | name | status
   const [detail, setDetail] = useState(null);
+  const [runOnce, setRunOnce] = useState(null);   // v2.988 '지금 한 번 점검' — { key, busy, result, error } · key 가 지금 상세와 같을 때만 보인다(늦게 온 응답은 버린다)
   const [leftW, setLeftW] = useState(() => { try { return Number(localStorage.getItem(LEFT_W_KEY)) || DEFAULT_LEFT_W; } catch { return DEFAULT_LEFT_W; } }); // v2.681(R2C-05)
   const [dragging, setDragging] = useState(false);
   const [modal, setModal] = useState(null);
@@ -353,7 +354,8 @@ export default function SvcMonitor() {
   };
   const onPick = (ids) => setPicked((p) => toggleIds(p, ids));
   // v2.960(반증 L5): 사용/중지 · 시험은 중앙 노드에서만(엣지 노드의 대상은 중앙 배정 사본 — 서버가 409). 편집 권한과 함께 본다.
-  const canToggle = canEdit && data?.centralNode !== false;
+  // v2.988: 서버 게이트가 canEdit + fullScopeOnly — 범위 계정에는 스위치를 열지 않는다(누르면 403 이었다).
+  const canToggle = canEdit && isFullScopeEditor(me) && data?.centralNode !== false;
   const exitPick = () => { setPickMode(false); setPicked(new Set()); };
   const pickInfo = selectionInfo(picked, targets);
   const pickedIds = [...picked].filter((id) => byIdT.has(id));
@@ -996,6 +998,29 @@ export default function SvcMonitor() {
                     </span></div>
                   <div className="who" style={{ padding: '0 0 8px', fontFamily: 'inherit' }}>중지된 점검은 실행하지 않고 실패 알림도 보내지 않습니다. 대상이 중지면 그 아래 점검은 모두 쉽니다.
                     {detail.target.trial?.reason ? ` 최근 시험: ${detail.target.trial.reason}` : ''}</div>
+                </div>
+              );
+            })()}
+            {canToggle && data?.executes !== false && (() => {
+              const key = `${detail.target.id}|${detail.test.id}`;
+              const cur = runOnce?.key === key ? runOnce : null;
+              const go = async () => {
+                setRunOnce({ key, busy: true });
+                try {
+                  const r = await postJson(`/svcmon/targets/${detail.target.id}/tests/${detail.test.id}/run`, {});
+                  if (r?.ok === false) throw new Error(r.error || '점검하지 못했습니다.');   // postJson 은 409 를 던지지 않고 본문을 돌려준다
+                  setRunOnce((p) => (p?.key === key ? { key, result: r.result } : p));
+                } catch (e) { setRunOnce((p) => (p?.key === key ? { key, error: e.message } : p)); }
+              };
+              const res = cur?.result;
+              return (
+                <div className="tv-swbox">
+                  <div className="ln"><span>지금 한 번 점검</span>
+                    <span className="who">{res ? `${STATUS[res.status]?.label || res.status}${res.ms != null ? ` · ${res.ms}ms` : ''}` : cur?.error ? '' : '주기를 기다리지 않고 이 점검만 바로 잽니다'}</span>
+                    <span className="end"><button type="button" className="pc-btn" disabled={!!cur?.busy} onClick={go}>{cur?.busy ? '점검 중…' : res || cur?.error ? '다시 점검' : '지금 점검'}</button></span></div>
+                  {res && <div className={`tv-runres ${STATUS[res.status]?.cls || ''}`}>{res.reply || '—'}</div>}
+                  {cur?.error && <div className="tv-runres pc-bad">{cur.error}</div>}
+                  <div className="who" style={{ padding: '0 0 8px', fontFamily: 'inherit' }}>결과는 이 창에만 보입니다 — 상태 · 연속 횟수 · 알림 · 기록에는 넣지 않습니다(중지된 점검도 잴 수 있습니다).</div>
                 </div>
               );
             })()}

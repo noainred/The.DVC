@@ -118,12 +118,14 @@ export function snapshotResults({ withMeta = false, replyMax = 120 } = {}) {
     }
     if (meta) {
       // 내부 구성 정보(url·keyword·send·body·payload·soapAction)는 **절대 싣지 않는다.**
-      meta.push({ i: test.id, p: target.path, n: target.name, h: target.host, t: test.name, y: test.type, iv: test.intervalSec });
+      // v2.988: k = 대상 구분(infra|service) — 중앙이 같은 경로 · 이름의 다른 구분 대상을 가른다(시험 판정 · 알림 억제 · 개요 조인).
+      meta.push({ i: test.id, p: target.path, n: target.name, h: target.host, t: test.name, y: test.type, iv: test.intervalSec, k: target.kind || 'infra' });
     }
   }
   if (!covered && index.length && rows.length >= index.length) covered = true; // 한 번 전 항목을 덮으면 이후로는 예열이 아니다
   const warmingUp = warmingUpOf({ covered, items: index.length, reported: rows.length, startedAt: pollerStartedAt, now: at });
-  return { rows, items: index.length, reported: rows.length, metaSig: `r${indexRev}-${index.length}`, meta, warmingUp };
+  // metaSig 접두사 m2 = 메타 모양 판(v2.988 k 추가) — 업그레이드한 엣지가 예전 서명과 겹쳐 중앙이 새 메타(구분)를 요청하지 않는 일이 없게.
+  return { rows, items: index.length, reported: rows.length, metaSig: `m2:r${indexRev}-${index.length}`, meta, warmingUp };
 }
 export function getLastSweep() { return lastSweepTs; }
 export function pollerStats() {
@@ -241,7 +243,7 @@ async function sweep(force = false) {
         appendResult({ ts, target, test, result: rec, changed });
         // v2.915: 전이 이력 · 시간별 집계 · 실패 알림(svcmon/transitions.js — 판정은 그 파일 하나, O(1)).
         noteResult({ at: ts, scope: '', testId: test.id, prev: prev?.status || null, status: rec.status, reply: rec.reply, ms: rec.ms, streak: rec.streak,
-          target: { name: target.name, path: target.path, host: target.host }, test: { name: test.name, type: test.type } });
+          target: { name: target.name, path: target.path, host: target.host, kind: target.kind || 'infra' }, test: { name: test.name, type: test.type } });
       }
       if (i + APPLY_CHUNK < due.length) await new Promise((r) => setImmediate(r));
     }

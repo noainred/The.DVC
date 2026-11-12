@@ -22,11 +22,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1505개** |
+| 엔드포인트 | **1507개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 152개 |
 | GET | 791개 |
-| POST | 477개 |
+| POST | 479개 |
 | PUT | 153개 |
 | PATCH | 3개 |
 | DELETE | 81개 |
@@ -39,7 +39,7 @@
 | [`/api/central`](#apicentral) | 67 | 엣지 → 중앙 **push·pull** 경로. 개별/공유 중앙 토큰 게이트이며 라우터 미들웨어가 토큰↔agent 일치를 강제한다. |
 | [`/api/upgrade`](#apiupgrade) | 10 | 자동 업그레이드 제어(번들 수신·적용). |
 | [`/api/remote`](#apiremote) | 19 | 원격 접속(HAProxy/SSH/RDP 중계). |
-| [`/api/svcmon`](#apisvcmon) | 68 | 성능점검(서비스 모니터링). 마운트에서 `requirePerm('svcmon')` — v2.506 에 추가된 게이트다. |
+| [`/api/svcmon`](#apisvcmon) | 70 | 성능점검(서비스 모니터링). 마운트에서 `requirePerm('svcmon')` — v2.506 에 추가된 게이트다. |
 | [`/api/admin`](#apiadmin) | 370 | 설정·관리. `authMiddleware + requireEnrolled + auditMiddleware` 뒤에 있고 대부분 `adminOnly`, 비밀을 다루는 것은 `requireSettingsOwner` 가 추가된다. |
 | [`/api/auth`](#apiauth) | 11 | 로그인·OTP·`/me`. **로그인 전** 호출되므로 `requireEnrolled` 를 타지 않는다(내부 admin 라우트는 스스로 게이트한다). |
 | [`/api/ping`](#apiping) | 16 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
@@ -148,22 +148,22 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:634](../server/src/routes/central.js#L634) |
 | GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:295](../server/src/routes/central/opsRoutes.js#L295) |
 | POST | `/capture-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:300](../server/src/routes/central/opsRoutes.js#L300) |
-| POST | `/curuser` | `requireCentral` | [server/src/routes/central.js:1256](../server/src/routes/central.js#L1256) |
-| GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1354](../server/src/routes/central.js#L1354) |
+| POST | `/curuser` | `requireCentral` | [server/src/routes/central.js:1257](../server/src/routes/central.js#L1257) |
+| GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1355](../server/src/routes/central.js#L1355) |
 | GET | `/cvp-config` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:22](../server/src/routes/central/cvpIsiduRoutes.js#L22) |
 | POST | `/cvp-data` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:51](../server/src/routes/central/cvpIsiduRoutes.js#L51) |
 | GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central/storageRoutes.js:147](../server/src/routes/central/storageRoutes.js#L147) |
 | POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central/storageRoutes.js:154](../server/src/routes/central/storageRoutes.js#L154) |
-| POST | `/fleet` | `requireCentral` | [server/src/routes/central.js:1393](../server/src/routes/central.js#L1393) |
+| POST | `/fleet` | `requireCentral` | [server/src/routes/central.js:1394](../server/src/routes/central.js#L1394) |
 | POST | `/focus-mon/sync` | `requireCentral` | [server/src/routes/central.js:620](../server/src/routes/central.js#L620) |
-| GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1624](../server/src/routes/central.js#L1624) |
-| POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1544](../server/src/routes/central.js#L1544) |
-| POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:1114](../server/src/routes/central.js#L1114) |
+| GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1625](../server/src/routes/central.js#L1625) |
+| POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1545](../server/src/routes/central.js#L1545) |
+| POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:1115](../server/src/routes/central.js#L1115) |
 | GET | `/health-probe` | `requireCentral` | [server/src/routes/central/opsRoutes.js:459](../server/src/routes/central/opsRoutes.js#L459) |
-| GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1466](../server/src/routes/central.js#L1466) |
-| POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1476](../server/src/routes/central.js#L1476) |
-| POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1488](../server/src/routes/central.js#L1488) |
-| POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:970](../server/src/routes/central.js#L970) |
+| GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1467](../server/src/routes/central.js#L1467) |
+| POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1477](../server/src/routes/central.js#L1477) |
+| POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1489](../server/src/routes/central.js#L1489) |
+| POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:971](../server/src/routes/central.js#L971) |
 | GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central/opsRoutes.js:373](../server/src/routes/central/opsRoutes.js#L373) |
 | POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:384](../server/src/routes/central/opsRoutes.js#L384) |
 | GET | `/isidu-config` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:157](../server/src/routes/central/cvpIsiduRoutes.js#L157) |
@@ -191,7 +191,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/storage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:86](../server/src/routes/central/storageRoutes.js#L86) |
 | POST | `/storage-data` | `requireCentral` | [server/src/routes/central/storageRoutes.js:253](../server/src/routes/central/storageRoutes.js#L253) |
 | GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:676](../server/src/routes/central.js#L676) |
-| POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:692](../server/src/routes/central.js#L692) |
+| POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:693](../server/src/routes/central.js#L693) |
 | POST | `/svcmon-report` | `requireCentral` | [server/src/routes/central.js:592](../server/src/routes/central.js#L592) |
 | GET | `/users-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:141](../server/src/routes/central/opsRoutes.js#L141) |
 | GET | `/veeam-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:95](../server/src/routes/central/opsRoutes.js#L95) |
@@ -200,8 +200,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/veeam-run-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:164](../server/src/routes/central/opsRoutes.js#L164) |
 | POST | `/vm-clone-report` | `requireCentral` | [server/src/routes/central/opsRoutes.js:331](../server/src/routes/central/opsRoutes.js#L331) |
 | GET | `/vm-clone-sync` | `requireCentral` | [server/src/routes/central/opsRoutes.js:315](../server/src/routes/central/opsRoutes.js#L315) |
-| POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:1196](../server/src/routes/central.js#L1196) |
-| GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:1378](../server/src/routes/central.js#L1378) |
+| POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:1197](../server/src/routes/central.js#L1197) |
+| GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:1379](../server/src/routes/central.js#L1379) |
 
 ## `/api/upgrade`
 
@@ -258,8 +258,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/alert-settings` | 역할 `admin/operator` | [server/src/routes/svcmon/settingsSync.js:201](../server/src/routes/svcmon/settingsSync.js#L201) |
-| PUT | `/alert-settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:205](../server/src/routes/svcmon/settingsSync.js#L205) |
+| GET | `/alert-settings` | 역할 `admin/operator` | [server/src/routes/svcmon/settingsSync.js:227](../server/src/routes/svcmon/settingsSync.js#L227) |
+| PUT | `/alert-settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:231](../server/src/routes/svcmon/settingsSync.js#L231) |
 | GET | `/assign` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:32](../server/src/routes/svcmon/edge.js#L32) |
 | DELETE | `/assign/:agent` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:109](../server/src/routes/svcmon/edge.js#L109) |
 | PUT | `/assign/:agent` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:67](../server/src/routes/svcmon/edge.js#L67) |
@@ -283,17 +283,18 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/log/files/:name` | 역할 `admin/operator` | [server/src/routes/svcmon/logs.js:68](../server/src/routes/svcmon/logs.js#L68) |
 | POST | `/log/prune` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/logs.js:121](../server/src/routes/svcmon/logs.js#L121) |
 | GET | `/log/windows` | — | [server/src/routes/svcmon/logs.js:81](../server/src/routes/svcmon/logs.js#L81) |
-| GET | `/overview` | — | [server/src/routes/svcmon/settingsSync.js:182](../server/src/routes/svcmon/settingsSync.js#L182) |
+| GET | `/overview` | — | [server/src/routes/svcmon/settingsSync.js:208](../server/src/routes/svcmon/settingsSync.js#L208) |
 | POST | `/push-now` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:178](../server/src/routes/svcmon/edge.js#L178) |
 | POST | `/refresh` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/overview.js:127](../server/src/routes/svcmon/overview.js#L127) |
 | PUT | `/reorder/folders` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:53](../server/src/routes/svcmon/tree.js#L53) |
 | PUT | `/reorder/targets` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:48](../server/src/routes/svcmon/tree.js#L48) |
-| POST | `/settings-sync/ack` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:167](../server/src/routes/svcmon/settingsSync.js#L167) |
-| POST | `/settings-sync/apply` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:138](../server/src/routes/svcmon/settingsSync.js#L138) |
-| GET | `/settings-sync/catalog` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:95](../server/src/routes/svcmon/settingsSync.js#L95) |
-| POST | `/settings-sync/detach/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:174](../server/src/routes/svcmon/settingsSync.js#L174) |
-| PUT | `/settings-sync/options` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:158](../server/src/routes/svcmon/settingsSync.js#L158) |
-| POST | `/settings-sync/preview` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:129](../server/src/routes/svcmon/settingsSync.js#L129) |
+| POST | `/settings-sync/ack` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:193](../server/src/routes/svcmon/settingsSync.js#L193) |
+| POST | `/settings-sync/apply` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:141](../server/src/routes/svcmon/settingsSync.js#L141) |
+| GET | `/settings-sync/catalog` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:98](../server/src/routes/svcmon/settingsSync.js#L98) |
+| POST | `/settings-sync/detach/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:200](../server/src/routes/svcmon/settingsSync.js#L200) |
+| PUT | `/settings-sync/options` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:184](../server/src/routes/svcmon/settingsSync.js#L184) |
+| POST | `/settings-sync/preview` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:132](../server/src/routes/svcmon/settingsSync.js#L132) |
+| POST | `/settings-sync/repath` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:164](../server/src/routes/svcmon/settingsSync.js#L164) |
 | POST | `/silence-check` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:185](../server/src/routes/svcmon/edge.js#L185) |
 | PUT | `/sort` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:68](../server/src/routes/svcmon/tree.js#L68) |
 | GET | `/state` | — | [server/src/routes/svcmon/overview.js:52](../server/src/routes/svcmon/overview.js#L52) |
@@ -303,9 +304,10 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/targets/:id/tests` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:118](../server/src/routes/svcmon/tree.js#L118) |
 | DELETE | `/targets/:id/tests/:testId` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:136](../server/src/routes/svcmon/tree.js#L136) |
 | PUT | `/targets/:id/tests/:testId` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:127](../server/src/routes/svcmon/tree.js#L127) |
+| POST | `/targets/:id/tests/:testId/run` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/trial.js:73](../server/src/routes/svcmon/trial.js#L73) |
 | POST | `/targets/bulk` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:82](../server/src/routes/svcmon/tree.js#L82) |
 | GET | `/targets/csv-schema` | 역할 `admin/operator` | [server/src/routes/svcmon/transfer.js:141](../server/src/routes/svcmon/transfer.js#L141) |
-| POST | `/targets/enabled` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/trial.js:23](../server/src/routes/svcmon/trial.js#L23) |
+| POST | `/targets/enabled` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/trial.js:24](../server/src/routes/svcmon/trial.js#L24) |
 | GET | `/targets/export.:format` | 역할 `admin/operator` · `csvPerm` | [server/src/routes/svcmon/transfer.js:72](../server/src/routes/svcmon/transfer.js#L72) |
 | GET | `/targets/export.csv` | 역할 `admin/operator` · `csvPerm` | [server/src/routes/svcmon/transfer.js:37](../server/src/routes/svcmon/transfer.js#L37) |
 | POST | `/targets/generate` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/generate.js:90](../server/src/routes/svcmon/generate.js#L90) |
@@ -324,8 +326,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/templates/export.csv` | 역할 `admin/operator` · `csvPerm` | [server/src/routes/svcmon/templates.js:81](../server/src/routes/svcmon/templates.js#L81) |
 | POST | `/templates/import` | 역할 `admin/operator` · `csvPerm` · `fullScopeOnly` | [server/src/routes/svcmon/templates.js:100](../server/src/routes/svcmon/templates.js#L100) |
 | GET | `/templates/sample.csv` | 역할 `admin/operator` · `csvPerm` | [server/src/routes/svcmon/templates.js:89](../server/src/routes/svcmon/templates.js#L89) |
-| POST | `/trial` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/trial.js:57](../server/src/routes/svcmon/trial.js#L57) |
-| GET | `/trial/:id` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/trial.js:68](../server/src/routes/svcmon/trial.js#L68) |
+| POST | `/trial` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/trial.js:58](../server/src/routes/svcmon/trial.js#L58) |
+| GET | `/trial/:id` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/trial.js:86](../server/src/routes/svcmon/trial.js#L86) |
 
 ## `/api/admin`
 
@@ -1677,7 +1679,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
-| `fullScopeOnly` | 321 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
+| `fullScopeOnly` | 323 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `fleetOnly` | 204 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
 | `requireCentral` | 67 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
 | `requireSettingsOwner` | 58 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
