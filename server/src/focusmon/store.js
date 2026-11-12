@@ -418,6 +418,34 @@ export function desiredFor(agentKey, resolve, now = Date.now()) {
   });
 }
 
+/* ── 수집 부하(v2.983) — 대상별 최신 창 · 노드별 최신 표본. DB 에는 분마다 한 줄(같은 분은 뒤 창이 덮는다 · 보관은 수집 기록과 같은 기간) ── */
+const LOAD = new Map(); // targetId → { ...load, at }
+const NODE_LOAD = new Map(); // 노드 열쇠('' = 이 중앙 · 엣지 이름 소문자) → { ...sample, at }
+const LOAD_MAX_JSON = 4096;
+function queueJson(kind, key, now, obj) {
+  try {
+    const data = JSON.stringify(obj);
+    if (data.length <= LOAD_MAX_JSON) writeQ.push({ kind, target: key, minute: Math.floor(now / 60_000), data });
+  } catch { /* 한 줄이 대기열을 깨지 않게 */ }
+  if (writeQ.length > 20_000) writeQ.splice(0, writeQ.length - 20_000);
+}
+export function setLoad(id, load, now = Date.now()) {
+  if (!load || typeof load !== 'object') return;
+  const v = { ...load, at: now };
+  LOAD.set(String(id), v);
+  queueJson('l', String(id), now, v);
+}
+export function loadOf(id) { const v = LOAD.get(String(id)); return v ? { ...v } : null; }
+export function setNodeLoad(node, sample, now = Date.now()) {
+  if (!sample || typeof sample !== 'object') return;
+  const key = String(node || '').toLowerCase();
+  const v = { ...sample, at: now };
+  NODE_LOAD.set(key, v);
+  queueJson('n', key, now, v);
+}
+export function nodeLoads() { return [...NODE_LOAD.entries()].map(([node, v]) => ({ node, ...v })); }
+export function _resetLoadForTest() { LOAD.clear(); NODE_LOAD.clear(); }
+
 /* ── 대상 상태 · 엣지 상태 ─────────────────────────────────────────────────── */
 const ST = new Map(); // targetId → { ...status, at }
 const EDGE = new Map(); // agentLower → { agent, at, version, key, ok, error, statusCount }

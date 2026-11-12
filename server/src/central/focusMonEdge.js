@@ -17,7 +17,7 @@ import * as store from '../focusmon/store.js';
 import { listTargets, registryLoadError, getSettings } from '../focusmon/registry.js';
 import { setWakeImpl } from '../focusmon/service.js';
 import { IOSTAT_COLS, TOP_N } from '../focusmon/rates.js';
-import { INTERVALS } from '../focusmon/script.js';
+import { INTERVALS, PROC_EVERY_CHOICES } from '../focusmon/script.js';
 
 export const VALID_MS = 30_000;
 export const MAX_SAMPLES = 6000;
@@ -140,6 +140,42 @@ export function cleanDiag(d, now = Date.now()) {
 }
 
 /**
+ * v2.983 수집 부하 창 정제(엣지가 보낸 것) — 아는 칸만 · 수는 0 이상 상한 · 정수 칸은 정수 · 주기는 허용 목록. 모르는 칸 · 글자 · at · demo 는 버린다.
+ * 필수 칸(windowS · cpuPct 중 하나라도 수가 아님)이 없으면 null.
+ */
+const numIn = (v, max) => { const x = n(v); return x == null || x < 0 ? null : Math.min(max, x); };
+const intIn = (v, max) => { const x = n(v); return x == null || x < 0 || !Number.isInteger(x) ? null : Math.min(max, x); };
+export function cleanLoad(l) {
+  if (!isObj(l)) return null;
+  const windowS = numIn(l.windowS, 600); const cpuPct = numIn(l.cpuPct, 100_000);
+  if (windowS == null || cpuPct == null) return null;
+  const groups = {};
+  for (const g of ['base', 'topo', 'proc']) {
+    const x = isObj(l.groups) && isObj(l.groups[g]) ? l.groups[g] : {};
+    groups[g] = { pct: numIn(x.pct, 100_000), runs: intIn(x.runs, 100_000), msPerRun: numIn(x.msPerRun, 600_000) };
+  }
+  const by = isObj(l.bpsBy) ? l.bpsBy : {}; const per = isObj(l.bytesPerRun) ? l.bytesPerRun : {};
+  return {
+    windowS, cpuPct, serverPct: numIn(l.serverPct, 100), sshdPct: numIn(l.sshdPct, 100_000), groups,
+    bps: numIn(l.bps, 1e10),
+    bpsBy: { base: numIn(by.base, 1e10), topo: numIn(by.topo, 1e10), proc: numIn(by.proc, 1e10), self: numIn(by.self, 1e10) },
+    bytesPerRun: { base: intIn(per.base, 1e9), topo: intIn(per.topo, 1e9), proc: intIn(per.proc, 1e9) },
+    rssBytes: intIn(l.rssBytes, 1e12), sshdRssBytes: intIn(l.sshdRssBytes, 1e12), ncpu: intIn(l.ncpu, 4096),
+    interval: INTERVALS.includes(n(l.interval)) ? n(l.interval) : null, procEvery: PROC_EVERY_CHOICES.includes(n(l.procEvery)) ? n(l.procEvery) : null,
+    procs: intIn(l.procs, 1_000_000),
+  };
+}
+/** v2.983 엣지 노드 표본 정제(diag.node) — 아는 칸만. 모두 수가 아니면 null. */
+export function cleanNodeLoad(x) {
+  if (!isObj(x)) return null;
+  const out = {
+    windowS: numIn(x.windowS, 3600), cpuPct: numIn(x.cpuPct, 100_000), fmPct: numIn(x.fmPct, 100_000), rssBytes: intIn(x.rssBytes, 1e13),
+    elP99Ms: numIn(x.elP99Ms, 600_000), rxBps: numIn(x.rxBps, 1e10), sessions: intIn(x.sessions, 10_000), txBps: numIn(x.txBps, 1e10),
+  };
+  return Object.values(out).some((v) => v != null) ? out : null;
+}
+
+/**
  * 엣지 시각 → 중앙 시각. 엣지 시계를 믿지 않는다 — '보낸 시각 − 표본 시각'(나이)만 쓰고 수신 시각에서 뺀다.
  * 미래(나이 < 0)는 수신 시각으로, 너무 오래된 것(BACKLOG_MS 초과)은 BACKLOG_MS 로 자른다. 값이 없으면 null.
  */
@@ -200,14 +236,25 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
     const r = x.result;
     store.putTestResult(x.id, { ok: r.ok === true, kind: enumOr(r.kind, TEST_KINDS, 'unreachable'), error: r.error ? strOf(r.error, 240) : '', hello: cleanHello(r.hello), ms: n(r.ms), via: 'edge' }, now);
   }
+  // v2.983 수집 부하 — 이 엣지가 맡고 지금 받는 대상만 · 정제(cleanLoad 화이트리스트) · 시각은 수신 시각
+  if (isObj(b.load)) {
+    for (const [id, l] of Object.entries(b.load).slice(0, 200)) {
+      if (!mine.has(id)) { got.foreign += 1; continue; }
+      if (!accepting.has(id)) { got.idle += 1; continue; }
+      const c = cleanLoad(l);
+      if (c) store.setLoad(id, { ...c, via: 'edge' }, now); else got.bad += 1;
+    }
+  }
   const diag = cleanDiag(b.diag, now); // 노드 카드 진단 · 아래 시험 배달(진행 중 시험 수)이 같은 정제값을 쓴다
+  const node = isObj(b.diag) ? cleanNodeLoad(b.diag.node) : null;
+  if (node) store.setNodeLoad(key, node, now);
   store.noteEdgeSync(agent, { version: typeof b.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(b.version) ? b.version : '', key: cleanKey(b.key), diag }, now);
 
   const desired = store.desiredFor(key, (id) => mine.get(id) || null, now);
   const tests = store.pendingTestsFor(key, now, { busy: diag ? diag.testsBusy : null }).filter((id) => mine.has(id)).map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; });
   return {
     ok: true, now, validUntil: now + VALID_MS,
-    targets: desired.map((d) => ({ id: d.id, host: d.host, port: d.port, username: d.username, interval: d.interval })),
+    targets: desired.map((d) => ({ id: d.id, host: d.host, port: d.port, username: d.username, interval: d.interval, procEvery: getSettings().procEvery })), // v2.983 procEvery — 프로세스 표본 주기(중앙 설정)
     // retries(id) 는 옛 판 엣지용 · retryTargets(v2.978)는 접속 정보까지 — 수집 중이 아닌 대상(시험만 한 서버)의 인증 정지도 엣지가 풀 수 있게.
     //   예전에는 엣지가 수집 목록에서만 대상을 찾아, 시험만 한 서버의 '다시 연결' 이 아무것도 풀지 못했다(사용자 보고 2026-11-12 — 키를 넣어도 '거부로 멈춤').
     ...(() => { const ids = store.takeEdgeRetries(key, now).filter((id) => mine.has(id)); return { retries: ids, retryTargets: ids.map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; }) }; })(),

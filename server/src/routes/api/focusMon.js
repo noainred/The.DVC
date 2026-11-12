@@ -35,7 +35,9 @@ import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCol
 import { recorderStatus } from '../../focusmon/recorder.js';
 import { wakeEdge, focusEdgeMinVersion, focusDiagMinVersion } from '../../central/focusMonEdge.js';
 import { startBulk, bulkJob, bulkProgress } from '../../focusmon/bulkTest.js';
-import { INTERVALS, DEFAULT_INTERVAL } from '../../focusmon/script.js';
+import { INTERVALS, DEFAULT_INTERVAL, PROC_EVERY_CHOICES } from '../../focusmon/script.js';
+import { judgeLoad, estimateLoad, averageLoads, averageNodes, loadTotals } from '../../focusmon/load.js';
+import { demoNodeLoad } from '../../focusmon/mock.js';
 import { IOSTAT_COLS, IOSTAT_NAME } from '../../focusmon/rates.js';
 import { focusAuthGuard, authDevOf } from '../../focusmon/collector.js';
 
@@ -488,6 +490,77 @@ api.get('/tools/focus-mon/data', adminOnly, fullScopeOnly, async (req, res) => {
     return res.json({ ...base, ...(await Q.iostatCompare(ids, w, { at: req.query.at === 'avg' ? 'avg' : 'end', scope: req.query.scope === 'all' ? 'all' : 'phys', col: String(req.query.col || 'wAwait'), pins })) });
   }
   return res.status(400).json({ ok: false, code: 'bad-view', reason: '모르는 보기입니다.' });
+});
+
+/**
+ * v2.983 수집 부하 — 대상 서버마다 수집 CPU(원격 셸 + 끝난 자식) · sshd · 세 묶음 · 보내는 양 · 메모리, 노드마다 포탈 프로세스 CPU · 그중 집중 모니터링 해석 ·
+ * 메모리 · 이벤트 루프 지연 p99 · 받은 양 · 중앙으로 · DB 쓰기. 최근 구간이면 대상마다 최신 30초 창(2분 넘으면 '오래됨' — 값을 싣지 않고 ageS 만), 과거 구간이면 DB(분당 한 줄) 평균.
+ * 조회와 같은 문(admin + 전체 범위) · 보이는 대상만 · 데모 계정에는 엣지 노드를 싣지 않는다.
+ */
+const LOAD_LIVE_MAX_MS = 120_000;
+api.get('/tools/focus-mon/load', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;
+  const w = Q.normWindow({ win: req.query.win, end: req.query.end });
+  const now = Date.now();
+  const settings = registry.getSettings();
+  const demoUser = isDemoGuest(req.user);
+  const vis = visibleTargets(req);
+  const sessOf = new Map(); for (const s of store.listSessions(now)) for (const id of s.targets) if (!sessOf.has(id)) sessOf.set(id, s);
+  const loads = new Map(); const nodeVals = new Map(); const stale = new Map();
+  let dbOk = true;
+  if (w.past) {
+    const fm = Math.floor(w.from / 60_000); const tm = Math.floor(w.to / 60_000);
+    const [lr, nr] = await Promise.all([db.readLoads(fm, tm), db.readNodeLoads(fm, tm)]);
+    if (lr == null || nr == null) dbOk = false;
+    const byT = new Map(); for (const r of lr || []) { const a = byT.get(r.target) || []; a.push(r.v); byT.set(r.target, a); }
+    for (const [id, list] of byT) loads.set(id, averageLoads(list));
+    const byN = new Map(); for (const r of nr || []) { const a = byN.get(r.node) || []; a.push(r.v); byN.set(r.node, a); }
+    for (const [k, list] of byN) nodeVals.set(k, averageNodes(list));
+  } else {
+    for (const t of vis) {
+      const l = store.loadOf(t.id);
+      if (!l) continue;
+      if (now - l.at <= LOAD_LIVE_MAX_MS) loads.set(t.id, l); else stale.set(t.id, Math.round((now - l.at) / 1000));
+    }
+    for (const x of store.nodeLoads()) if (now - x.at <= LOAD_LIVE_MAX_MS) nodeVals.set(x.node, x);
+  }
+  const est = (l) => (l ? {
+    byInterval: Object.fromEntries(INTERVALS.map((i) => [i, estimateLoad(l, { interval: i, procEvery: l.procEvery ?? settings.procEvery })])),
+    byProcEvery: Object.fromEntries(PROC_EVERY_CHOICES.map((p) => [p, estimateLoad(l, { interval: l.interval, procEvery: p })])),
+  } : null);
+  const rows = vis.filter((t) => sessOf.has(t.id) || loads.has(t.id) || stale.has(t.id)).map((t) => {
+    const l = loads.get(t.id) || null; const s = sessOf.get(t.id);
+    // agent = 담당 노드 표시(데모 서버는 표시용 엣지 이름 — 목 모드에서 실제로는 이 노드가 만든다 · 노드 표가 '데모' 라고 밝힌다)
+    return { id: t.id, name: t.name, host: t.host, agent: t.agent || '', group: t.group || '', demo: !!t.demo,
+      collecting: !!s, mode: s?.mode || null, interval: l?.interval ?? s?.interval ?? null, procEvery: l?.procEvery ?? settings.procEvery,
+      load: l, staleS: stale.get(t.id) ?? null, judge: judgeLoad(l?.cpuPct, settings), est: est(l) };
+  });
+  // 보는 화면 심박 — **잠깐 보기 서버만**(이 탭만 열어 두어도 잠깐 보기가 '보는 화면 없음' 으로 끝나지 않게 · 2026-11-12 화면 확인).
+  //   계속 수집은 남기지 않는다 — 남기면 쉬는 10초 주기가 2초로 올라가 재려는 부하 자체가 바뀐다(관찰이 값을 바꾼다).
+  if (!w.past) store.touchView(rows.filter((r) => r.mode === 'watch').map((r) => r.id), now);
+  // 노드 — 중앙 1 + 엣지(보이는 대상을 맡았거나 표본이 있는 엣지). 데모 계정에는 엣지를 싣지 않는다.
+  const nodes = [{ node: '', kind: 'central', label: '중앙', servers: rows.filter((r) => !r.agent && r.collecting).length, load: nodeVals.get('') || null }];
+  if (!demoUser) {
+    const names = new Map();
+    for (const a of knownAgentNames()) names.set(String(a).toLowerCase(), String(a));
+    for (const r of rows) if (r.agent) names.set(r.agent.toLowerCase(), r.agent);
+    for (const [k, name] of names) {
+      const servers = rows.filter((r) => r.agent.toLowerCase() === k && r.collecting).length;
+      let l = nodeVals.get(k) || null;
+      const demoOnly = servers > 0 && rows.filter((r) => r.agent.toLowerCase() === k).every((r) => r.demo);
+      if (!l && isMockMode() && demoOnly && !w.past) l = demoNodeLoad(name, servers, now); // 목 모드 표시용(실제 엣지 아님)
+      if (!servers && !l) continue;
+      nodes.push({ node: k, kind: 'edge', label: name, servers, demo: demoOnly, load: l });
+    }
+  }
+  res.json({
+    ok: true, live: !w.past, win: w.win, from: w.from, to: w.to, now, dbOk, mock: isMockMode(),
+    settings: { loadWarnPct: settings.loadWarnPct, loadCritPct: settings.loadCritPct, procEvery: settings.procEvery, retentionDays: settings.retentionDays },
+    ranges: { loadWarnPct: registry.SETTING_RANGES.loadWarnPct, loadCritPct: registry.SETTING_RANGES.loadCritPct },
+    choices: { intervals: INTERVALS, procEvery: PROC_EVERY_CHOICES },
+    targets: rows,
+    nodes, totals: loadTotals(rows, nodes, settings), liveMaxS: LOAD_LIVE_MAX_MS / 1000,
+  });
 });
 
 /** 프로세스 상위 30 — 서버별 · 통합 · 이름별 묶음. 사용자 이름은 관리자 판본만 원문. */

@@ -87,6 +87,7 @@ export const TABS = Object.freeze([
   { key: 'overview', label: '개요' },
   { key: 'compare', label: '비교' },
   { key: 'procs', label: '프로세스' },
+  { key: 'load', label: '수집 부하' },
   { key: 'targets', label: '대상 · 키' },
 ]);
 
@@ -494,6 +495,80 @@ export function groupSuggestions(targets = [], existing = []) {
 export function suggestionText(sg, existing = []) {
   const have = new Set((existing || []).map((g) => String(g.name || g)));
   return sg.moves.slice(0, 6).map((m) => `${m.group}${have.has(m.group) ? '' : '(새 그룹)'} ${m.ids.length}대(${m.names.slice(0, 3).join(' · ')}${m.names.length > 3 ? ' …' : ''})`).join(' · ') + (sg.moves.length > 6 ? ` 외 ${sg.moves.length - 6}묶음` : '');
+}
+
+/* ── 수집 부하(v2.983 — 시안 ⑪ · '늘 잼 · 세 묶음') ─────────────────────────────────────────────────── */
+/** 판정(서버 load.judgeLoad 와 같은 이름) — 문턱은 응답 settings(코어 1개 기준 %). */
+export const LOAD_JUDGE = Object.freeze({ light: { label: '가벼움', tone: 'ok' }, mid: { label: '보통', tone: 'warn' }, heavy: { label: '큼', tone: 'crit' } });
+export function loadJudgeNote(s) {
+  const w = s?.loadWarnPct ?? 1; const c = s?.loadCritPct ?? 3;
+  return [['light', `${w}% 미만`], ['mid', `${w}~${c}%`], ['heavy', `${c}% 이상`]];
+}
+/** 바이트/초 → B/s · KB/s · MB/s(보내는 양 — 네트워크 bpsText 는 비트). */
+export function byteRateText(v) { const x = n(v); return x == null ? DASH : `${bytesText(x)}/s`; }
+/** 세 묶음 이름(원격 스크립트의 CB · CC · CP). 프로세스 묶음은 지금 표본 주기를 붙인다. */
+export function loadGroupLabel(g, procEvery) {
+  if (g === 'base') return '기본 지표(매 주기)';
+  if (g === 'topo') return '구성(30초)';
+  if (g === 'proc') return `프로세스(${procEvery ?? 5}초 · 주기가 더 길면 그 주기)`;
+  return g;
+}
+export const LOAD_GROUPS = Object.freeze(['base', 'topo', 'proc']);
+/** 묶음마다 무엇이 들었나(줄 아래 패널). */
+export const LOAD_GROUP_WHAT = Object.freeze({
+  base: '/proc/stat · loadavg · meminfo · net/dev · diskstats 와 반복 자체(시각 · sleep)',
+  topo: '인터페이스 · 본딩 · lsblk · ps(pid → 사용자) · systemd 서비스',
+  proc: '모든 프로세스의 /proc/<pid>/stat · 읽을 수 있는 /proc/<pid>/io',
+});
+/**
+ * 줄이는 방법(이 서버 · 추정) — 응답 est(서버 load.estimateLoad)로만 말한다. 값이 없으면 빈 목록.
+ * @returns {string[]}
+ */
+export function loadReduceTips(row) {
+  const l = row?.load; const e = row?.est;
+  if (!l || !e) return [];
+  const out = [];
+  const cur = n(l.cpuPct);
+  const pe = row.procEvery;
+  const g = l.groups || {};
+  const big = LOAD_GROUPS.map((k) => [k, n(g[k]?.pct)]).filter(([, v]) => v != null).sort((a, b) => b[1] - a[1])[0];
+  if (big && cur != null && cur > 0) out.push(`가장 큰 묶음은 ${loadGroupLabel(big[0], pe)} — 수집 CPU 의 ${Math.round((big[1] / cur) * 100)}%${big[0] === 'proc' && l.procs != null ? `(프로세스 ${l.procs}개)` : ''}.`);
+  for (const p of [15, 30]) {
+    const x = e.byProcEvery?.[p];
+    if (p > (pe ?? 5) && x?.cpuPct != null) out.push(`프로세스 표본 주기 ${p}초: 약 ${pctText(x.cpuPct, 2)} · 보내는 양 약 ${byteRateText(x.bps)}(지금 ${pctText(cur, 2)} · ${byteRateText(l.bps)}).`);
+  }
+  for (const i of [5, 10]) {
+    const x = e.byInterval?.[i];
+    if (i > (l.interval ?? 2) && x?.cpuPct != null) out.push(`주기 ${i}초: 약 ${pctText(x.cpuPct, 2)}(값이 ${i}초마다 갱신됩니다).`);
+  }
+  if (!row.agent && !row.demo && n(l.bps) != null) out.push('중앙이 직접 수집하는 서버입니다 — 그 법인 엣지가 맡으면 원문은 법인 안에 머물고 중앙에는 계산된 값만 갑니다.');
+  return out;
+}
+export const LOAD_HOW = Object.freeze([
+  '수집 CPU: 원격 반복문 셸이 30초마다 자기 /proc/<pid>/stat 의 utime · stime · cutime · cstime(끝난 자식 grep · awk · cut · sleep 포함)을 보냅니다 — 앞 값과의 차이 ÷ 경과 = 코어 1개 기준 %.',
+  'sshd: 부모(sshd 세션)의 utime + stime — 암호 처리 몫입니다. 같은 계정의 다른 SSH 세션은 섞이지 않습니다(이 세션의 pid).',
+  '묶음 비용: 묶음 뒤마다 셸 내장 명령(read · set · 산술 — 새 프로세스 없음)으로 같은 tick 을 읽어 더합니다. 이 개발 환경 실측에서 이 측정 자체는 tick 오차(10ms) 안이었습니다.',
+  '보내는 양: 노드가 받은 글자 수를 묶음별로 셉니다(SSH 암호 · 압축 전 원문 기준).',
+  "'주기를 바꾸면' 은 잰 1회 비용 × 횟수의 추정입니다 — 실제는 캐시 · 다른 부하에 따라 다릅니다.",
+]);
+export const NODE_LOAD_NOTE = '포탈 CPU 는 다른 기능을 포함한 프로세스 전체입니다 · 그중 집중 모니터링은 줄을 받아 해석한 시간만입니다(SSH 복호 · 기록은 빠져 실제보다 작습니다) · 지연 p99 = Node 이벤트 루프 지연(다른 요청이 기다린 시간) · 받는 양 = 대상 서버에서 SSH 로 받은 원문 · 중앙으로 = 엣지가 동기화로 보낸 양(압축 뒤) · DB 쓰기 = 기록 DB 에 쓴 묶음 본문.';
+/** 노드 열 묶음 합(표 아래 '모든 서버를 이 주기로' 추정의 합) — 값이 하나라도 없으면 그 묶음 합은 null. */
+export function sumEstimates(rows = [], pick) {
+  const by = { base: 0, topo: 0, proc: 0 }; const ok = { base: true, topo: true, proc: true };
+  let bps = 0; let bok = true; let k = 0;
+  for (const r of rows) {
+    const x = pick(r);
+    if (!x) continue;
+    k += 1;
+    for (const g of LOAD_GROUPS) { const v = n(x.by?.[g]); if (v == null) ok[g] = false; else by[g] += v; }
+    const b = n(x.bps); if (b == null) bok = false; else bps += b;
+  }
+  if (!k) return null;
+  const out = { n: k, by: {}, cpuPct: null, bps: bok ? Math.round(bps) : null };
+  let all = true; let sum = 0;
+  for (const g of LOAD_GROUPS) { out.by[g] = ok[g] ? Math.round(by[g] * 100) / 100 : null; if (out.by[g] == null) all = false; else sum += out.by[g]; }
+  out.cpuPct = all ? Math.round(sum * 100) / 100 : null;
+  return out;
 }
 
 export const INSTALL_NOTE = 'restrict 는 포워딩 · 터미널 할당을 끕니다(OpenSSH 7.2 이상 — RHEL 7.8 은 7.4). 그 노드 주소에서만 쓰게 하려면 줄 앞에 from="노드 IP", 를 덧붙이세요. 수집은 /proc · /sys 를 읽기만 하므로 root · sudo 가 필요 없습니다.';

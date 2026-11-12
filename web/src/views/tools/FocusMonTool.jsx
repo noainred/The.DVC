@@ -25,6 +25,8 @@ import {
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
+import { usePoll } from './focusMonPoll.js';
+import { LoadTab } from './FocusMonLoad.jsx';
 import './focusMon.css';
 
 const BASE = ['tools', 'focus-mon'];
@@ -50,34 +52,6 @@ function useRoute() {
 
 /* ── 조회 훅 ──────────────────────────────────────────────────────────────── */
 /** 주기 조회 — 세대 번호로 늦게 온 이전 응답을 버리고, 가려지면 멈추고, 403 · 404 면 다음 틱을 걸지 않는다. intervalMs 0 = 한 번. */
-function usePoll(path, params, intervalMs, enabled = true) {
-  const [state, setState] = useState({ data: null, error: null, key: '' });
-  const key = useMemo(() => `${path}?${new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null && v !== '')).toString()}`, [path, params]);
-  const gen = useRef(0);
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    if (!enabled || !path) return undefined;
-    const my = ++gen.current; let timer = null; let alive = true;
-    const loop = async () => {
-      if (!alive || my !== gen.current) return;
-      let stop = false;
-      if (typeof document === 'undefined' || !document.hidden) {
-        try {
-          const d = await fetchJson(path, Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v != null && v !== '')));
-          if (alive && my === gen.current) setState({ data: d, error: null, key });
-        } catch (e) {
-          if (alive && my === gen.current) setState((s) => ({ ...s, error: e }));
-          stop = shouldStopPolling(e);
-        }
-      }
-      if (alive && my === gen.current && intervalMs > 0 && !stop) timer = setTimeout(loop, intervalMs);
-    };
-    loop();
-    return () => { alive = false; if (timer) clearTimeout(timer); };
-  }, [key, intervalMs, enabled, tick]); // eslint-disable-line react-hooks/exhaustive-deps
-  return { ...state, fresh: state.key === key, reload: () => setTick((x) => x + 1) };
-}
-
 /* ── 작은 부품 ────────────────────────────────────────────────────────────── */
 /* ── 차트 툴팁(v2.977 사용자 요청) — 마우스 · 손가락을 올린 시각의 값을 세로선 · 점 · 값 상자로 보인다 ──
  *  좌표는 순수 함수(focusMonChart.js indexAtFrac · valueAtFrac · timeAtIndex · xAtIndex · tipRows — 테스트). 값이 없으면 ‘—’(0 아님). */
@@ -1376,7 +1350,8 @@ export default function FocusMonTool() {
           <span className="fm-dim">보고 있는 서버 {ids.length}대 가운데 · 그룹은 ‘대상 · 키’ 탭에서 정합니다</span>
         </div>
       ) : null}
-      {route.tab !== 'targets' && ids.length ? <TimeBar tb={tb} now={now} coverage={cov.data} oldestMinute={main.db.oldestMinute} /> : null}
+      {route.tab === 'load' || (route.tab !== 'targets' && ids.length) ? <TimeBar tb={tb} now={now} coverage={route.tab === 'load' ? null : cov.data} oldestMinute={main.db.oldestMinute} /> : null}
+      {route.tab === 'load' ? <LoadTab main={main} tb={tb} /> : null}
       {route.tab === 'overview' ? <Overview main={main} ids={shownIds} tb={tb} now={now} onOpen={onOpen} /> : null}
       {route.tab === 'compare' ? (
         <>

@@ -47,6 +47,10 @@ async function openDb() {
       CREATE INDEX IF NOT EXISTS idx_fm_proc_minute ON fm_proc(minute);
       CREATE TABLE IF NOT EXISTS fm_run (id TEXT PRIMARY KEY, started INTEGER NOT NULL, ended INTEGER, by TEXT, mode TEXT, interval INTEGER, targets TEXT);
       CREATE INDEX IF NOT EXISTS idx_fm_run_started ON fm_run(started);
+      CREATE TABLE IF NOT EXISTS fm_load (target TEXT NOT NULL, minute INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (target, minute));
+      CREATE INDEX IF NOT EXISTS idx_fm_load_minute ON fm_load(minute);
+      CREATE TABLE IF NOT EXISTS fm_node (node TEXT NOT NULL, minute INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (node, minute));
+      CREATE INDEX IF NOT EXISTS idx_fm_node_minute ON fm_node(minute);
     `);
     _db = conn; _err = '';
     lockRetry.ok();
@@ -83,10 +87,14 @@ export async function writeBlocks(rows = []) {
   const t0 = performance.now();
   const m = db.prepare('INSERT OR REPLACE INTO fm_metric (target, minute, n, data) VALUES (?, ?, ?, ?)');
   const p = db.prepare('INSERT OR REPLACE INTO fm_proc (target, minute, data) VALUES (?, ?, ?)');
+  const ld = db.prepare('INSERT OR REPLACE INTO fm_load (target, minute, data) VALUES (?, ?, ?)');
+  const nd = db.prepare('INSERT OR REPLACE INTO fm_node (node, minute, data) VALUES (?, ?, ?)');
   try {
     db.exec('BEGIN');
     for (const r of rows) {
       if (r.kind === 'p') p.run(String(r.target), r.minute, r.data);
+      else if (r.kind === 'l') ld.run(String(r.target), r.minute, String(r.data));
+      else if (r.kind === 'n') nd.run(String(r.target), r.minute, String(r.data));
       else m.run(String(r.target), r.minute, r.n | 0, r.data);
     }
     db.exec('COMMIT');
@@ -109,6 +117,23 @@ export async function readProc(target, fromMinute, toMinute, limit = 120) {
   if (!db) return null;
   return db.prepare('SELECT minute, data FROM fm_proc WHERE target = ? AND minute >= ? AND minute <= ? ORDER BY minute LIMIT ?')
     .all(String(target), fromMinute, toMinute, limit);
+}
+
+/**
+ * v2.983 수집 부하 기록 — [fromMinute, toMinute] 의 모든 대상(분 순 · minute 인덱스). 화면의 시간 띠 구간(최대 30분 × 대상 40)이 쓴다.
+ * data 는 이 노드가 정제해 쓴 JSON(대상 · 노드 표본) — 읽을 때도 깨진 줄은 버린다.
+ */
+export async function readLoads(fromMinute, toMinute, limit = 5000) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare('SELECT target, minute, data FROM fm_load WHERE minute >= ? AND minute <= ? ORDER BY minute LIMIT ?').all(fromMinute, toMinute, limit)
+    .map((r) => { try { return { target: r.target, minute: r.minute, v: JSON.parse(r.data) }; } catch { return null; } }).filter(Boolean);
+}
+export async function readNodeLoads(fromMinute, toMinute, limit = 2000) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare('SELECT node, minute, data FROM fm_node WHERE minute >= ? AND minute <= ? ORDER BY minute LIMIT ?').all(fromMinute, toMinute, limit)
+    .map((r) => { try { return { node: r.node, minute: r.minute, v: JSON.parse(r.data) }; } catch { return null; } }).filter(Boolean);
 }
 
 /** 기록이 있는 분 목록(그 날 · 그 대상) — ‘기록이 있는 시간’ 띠. 기본 키 앞부분(target)으로 범위를 탄다. */
@@ -153,6 +178,8 @@ export async function pruneChunk(cutMinute) {
   n += db.prepare('DELETE FROM fm_metric WHERE rowid IN (SELECT rowid FROM fm_metric WHERE minute < ? LIMIT ?)').run(cutMinute, PRUNE_CHUNK).changes;
   n += db.prepare('DELETE FROM fm_proc WHERE rowid IN (SELECT rowid FROM fm_proc WHERE minute < ? LIMIT ?)').run(cutMinute, PRUNE_CHUNK).changes;
   db.prepare('DELETE FROM fm_run WHERE rowid IN (SELECT rowid FROM fm_run WHERE started < ? LIMIT ?)').run(cutMinute * 60_000, PRUNE_CHUNK);
+  n += db.prepare('DELETE FROM fm_load WHERE rowid IN (SELECT rowid FROM fm_load WHERE minute < ? LIMIT ?)').run(cutMinute, PRUNE_CHUNK).changes;
+  n += db.prepare('DELETE FROM fm_node WHERE rowid IN (SELECT rowid FROM fm_node WHERE minute < ? LIMIT ?)').run(cutMinute, PRUNE_CHUNK).changes;
   return n;
 }
 
@@ -171,9 +198,16 @@ export function writeBlocksSync(rows = []) {
   if (!_db || !rows.length) return 0;
   const m = _db.prepare('INSERT OR REPLACE INTO fm_metric (target, minute, n, data) VALUES (?, ?, ?, ?)');
   const p = _db.prepare('INSERT OR REPLACE INTO fm_proc (target, minute, data) VALUES (?, ?, ?)');
+  const ld = _db.prepare('INSERT OR REPLACE INTO fm_load (target, minute, data) VALUES (?, ?, ?)');
+  const nd = _db.prepare('INSERT OR REPLACE INTO fm_node (node, minute, data) VALUES (?, ?, ?)');
   try {
     _db.exec('BEGIN');
-    for (const r of rows) { if (r.kind === 'p') p.run(String(r.target), r.minute, r.data); else m.run(String(r.target), r.minute, r.n | 0, r.data); }
+    for (const r of rows) {
+      if (r.kind === 'p') p.run(String(r.target), r.minute, r.data);
+      else if (r.kind === 'l') ld.run(String(r.target), r.minute, String(r.data));
+      else if (r.kind === 'n') nd.run(String(r.target), r.minute, String(r.data));
+      else m.run(String(r.target), r.minute, r.n | 0, r.data);
+    }
     _db.exec('COMMIT');
     return rows.length;
   } catch { try { _db.exec('ROLLBACK'); } catch { /* */ } return 0; }

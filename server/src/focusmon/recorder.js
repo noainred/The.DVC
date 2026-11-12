@@ -18,7 +18,9 @@ const MIN_FREE_BYTES = 2 * 2 ** 30;
 const MIN_FREE_RATIO = 0.05;
 let tick = 0;
 let busy = false;
-const st = { lastWriteAt: 0, lastWriteRows: 0, lastWriteMs: null, maxWriteMs: 0, writes: 0, errors: 0, lastError: '', paused: false, pauseReason: '', freeBytes: null, lastPruneAt: 0, pruned: 0, capped: 0 };
+const st = { lastWriteAt: 0, lastWriteRows: 0, lastWriteMs: null, maxWriteMs: 0, writes: 0, errors: 0, lastError: '', paused: false, pauseReason: '', freeBytes: null, lastPruneAt: 0, pruned: 0, capped: 0, bytesWritten: 0 };
+/** 한 줄의 기록 바이트(본문 — 색인 · 쪽 머리는 빠진다: 아래쪽 추정). v2.983 수집 부하의 'DB 쓰기'. */
+const rowBytes = (r) => (r?.data == null ? 0 : typeof r.data === 'string' ? r.data.length : (r.data.byteLength ?? r.data.length ?? 0)) + String(r?.target ?? '').length + 16;
 
 function freeSpace() {
   try {
@@ -47,7 +49,7 @@ export async function recordTick(now = Date.now()) {
       const rows = store.drainWrites(400);
       if (rows.length) {
         const r = await db.writeBlocks(rows);
-        if (r.ok) { st.lastWriteAt = now; st.lastWriteRows = rows.length; st.lastWriteMs = Math.round(r.ms * 100) / 100; st.maxWriteMs = Math.max(st.maxWriteMs, r.ms); st.writes += 1; st.lastError = ''; }
+        if (r.ok) { st.bytesWritten += rows.reduce((a, x) => a + rowBytes(x), 0); st.lastWriteAt = now; st.lastWriteRows = rows.length; st.lastWriteMs = Math.round(r.ms * 100) / 100; st.maxWriteMs = Math.max(st.maxWriteMs, r.ms); st.writes += 1; st.lastError = ''; }
         else { st.errors += 1; st.lastError = r.error || ''; }
       }
     }
@@ -76,4 +78,4 @@ export function flushOnExit() {
   try { store.closeAll(); return db.writeBlocksSync(store.drainWrites(100_000)); } catch { return 0; }
 }
 
-export function _resetForTest() { tick = 0; busy = false; Object.assign(st, { lastWriteAt: 0, lastWriteRows: 0, lastWriteMs: null, maxWriteMs: 0, writes: 0, errors: 0, lastError: '', paused: false, pauseReason: '', pruned: 0, capped: 0 }); }
+export function _resetForTest() { tick = 0; busy = false; Object.assign(st, { lastWriteAt: 0, lastWriteRows: 0, lastWriteMs: null, maxWriteMs: 0, writes: 0, errors: 0, lastError: '', paused: false, pauseReason: '', pruned: 0, capped: 0, bytesWritten: 0 }); }

@@ -21,6 +21,7 @@ import { makeLoadError, filterObjectElements } from '../util/registryCore.js';
 import { strictIpv4Num } from '../util/ipv4.js';
 import { ipBlockReason } from '../util/ssrfBlock.js';
 import { parseCsvRows, unguardCell } from '../util/csv.js';
+import { normProcEvery } from './script.js';
 
 const FILE = () => path.join(config.configDir, 'focusmon-targets.json');
 export const MAX_TARGETS = 500;
@@ -37,6 +38,8 @@ export const SETTING_RANGES = Object.freeze({
   retentionDays: [1, 90, 30], capGb: [1, 2000, 20], warnPct: [50, 99, 80], critPct: [51, 100, 90], wAwaitWarnMs: [1, 10000, 20],
   // v2.978: 맡은 서버가 있는 엣지가 쉬는 동안 중앙을 조회하는 주기(초) — 깨우기가 닿지 않는 중계 엣지의 시작 지연(예전 30초 고정)
   edgeIdleSec: [5, 60, 10],
+  // v2.983 수집 부하(시안 ⑪ 컨펌 ③ ④): 판정 문턱(코어 1개 기준 % — 가벼움 < 주의 ≤ 보통 < 큼) · 프로세스 표본 주기(초 — 5 · 15 · 30 중 하나, script.PROC_EVERY_CHOICES)
+  loadWarnPct: [1, 50, 1], loadCritPct: [2, 100, 3], procEvery: [5, 30, 5],
 });
 export const DEFAULT_SETTINGS = Object.freeze(Object.fromEntries(Object.entries(SETTING_RANGES).map(([k, v]) => [k, v[2]])));
 
@@ -64,6 +67,8 @@ function normSettings(x = {}) {
     out[k] = Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : def;
   }
   if (out.critPct <= out.warnPct) out.critPct = Math.min(100, out.warnPct + 1);
+  if (out.loadCritPct <= out.loadWarnPct) out.loadCritPct = Math.min(100, out.loadWarnPct + 1);
+  out.procEvery = normProcEvery(out.procEvery); // 5 · 15 · 30 밖(예 10)은 기본 5초 — 원격 명령은 미리 만든 상수 표에서만 고른다
   return out;
 }
 

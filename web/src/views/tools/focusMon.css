@@ -264,3 +264,13 @@
 .fm-wrap .fm-gtable td { overflow-wrap: anywhere; }
 .fm-wrap .fm-fld-g { flex: 0 1 220px; }
 .fm-wrap .fm-push { margin-left: auto; }
+/* v2.983 수집 부하 탭 */
+.fm-wrap .fm-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.fm-wrap .fm-kpi .v.fm-v-sm { font-size: 20px; overflow-wrap: anywhere; }
+.fm-wrap .fm-lcol { width: 30%; }
+.fm-wrap .fm-lbar { display: block; height: 8px; border-radius: 4px; background: var(--fm-track); overflow: hidden; min-width: 60px; }
+.fm-wrap .fm-lbar i { display: block; height: 100%; border-radius: 4px; background: var(--viz-1, #3987e5); }
+.fm-wrap .fm-two > .fm-card { min-width: 0; }
+.fm-wrap .fm-lgroups { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fm-wrap .fm-lgroup { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--border-soft); min-width: 0; overflow-wrap: anywhere; font-size: 12.5px; }
+.fm-wrap .fm-lgroup:last-child { border-bottom: 0; }
