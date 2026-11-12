@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 서버 그룹</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0;box-sizing:border-box}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn.pri{background:#2563eb;border-color:#2563eb;color:#fff}
+.btn.danger{border-color:rgba(239,68,68,.45);color:#fca5a5}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap;background:rgba(139,155,180,.16);color:#c3cede}
+.badge.ok{background:rgba(34,197,94,.14);color:#86efac}
+.badge.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.badge.live{background:rgba(59,130,246,.18);color:#93c5fd}
+.chip{height:32px;padding:0 12px;border-radius:16px;border:1px solid #243049;background:#0f1626;color:#c3cede;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.chip.on{background:#1e3a8a;border-color:#2563eb;color:#fff}
+.chip b{font-weight:600;margin-left:4px}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1e3a8a;color:#fff}
+.lay{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:14px;align-items:start}
+.tw{overflow-x:auto}
+.tg{display:grid;grid-template-columns:34px 170px 190px 120px minmax(150px,1fr) 150px;column-gap:12px;align-items:center;padding:0 16px;min-width:880px;box-sizing:border-box}
+.th{height:34px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.gh{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 16px;background:#111a2c;border-bottom:1px solid #1f2a40;min-width:880px;box-sizing:border-box}
+.gh button.tog{border:0;background:transparent;color:#e6edf6;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;padding:0;display:inline-flex;align-items:center;gap:6px}
+.tr{height:40px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.tr.pk{background:rgba(59,130,246,.10)}
+.chk{width:16px;height:16px;border-radius:4px;border:1.5px solid #5b6b86;display:inline-flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;background:transparent;color:#fff;padding:0}
+.chk.on{background:#2563eb;border-color:#2563eb}
+.sel{height:30px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 8px}
+.side{display:flex;flex-direction:column;gap:14px;min-width:0}
+.pc{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.gl{display:grid;grid-template-columns:minmax(0,1fr) 54px auto;column-gap:10px;align-items:center;min-height:34px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.sug{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626}
+.cap{font-size:12px;color:#8b9bb4;overflow-wrap:anywhere}
+.code{font-family:"JetBrains Mono",monospace;font-size:12px;background:#0b111d;border:1px solid #1f2a40;border-radius:8px;padding:10px 12px;line-height:1.6;white-space:pre;overflow-x:auto;color:#c3cede}
+.ov{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.mini{background:#0f1626;border:1px solid #1f2a40;border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;font-size:12px;min-width:0}
+.mini .bar{height:5px;border-radius:3px;background:#1b2a48;overflow:hidden}
+.mini .bar span{display:block;height:5px;border-radius:3px;background:#3987e5}
+.cf{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:10px;row-gap:8px;font-size:12.5px}
+.cf b{color:#7dd3fc}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">특수 기능 › 서버 집중 모니터링 › 대상 · 키 — 등록한 서버를 그룹으로 묶어 보고 · 고르고 · 시작합니다(개요 · 비교 · 프로세스 화면에서도 같은 그룹으로 고릅니다)</div>
+    <div class="dim" style="font-size:12px">가상의 서버입니다. 그룹 머리의 ▾ 를 눌러 접어 보고, 위쪽 그룹 단추 · 체크 · ‘옮기기’ 를 눌러 보세요.</div>
+  </div>
+
+  <div class="lay">
+    <div class="card" style="padding:14px 0 10px;display:flex;flex-direction:column;gap:10px">
+      <div class="row" style="justify-content:space-between;padding:0 16px">
+        <h3 class="h3">모니터링 대상 서버 — {{ total }}대 등록 · 그룹 {{ groupCount }}개</h3>
+        <div class="row"><span class="dim" style="font-size:12.5px">보기</span><div class="seg"><sc-for list="{{ viewBtns }}" as="b" hint-placeholder-count="2"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div></div>
+      </div>
+      <div class="row" style="padding:0 16px"><sc-for list="{{ chips }}" as="c" hint-placeholder-count="6"><button type="button" class="{{ c.cls }}" onClick="{{ c.pick }}">{{ c.label }}<b>{{ c.n }}</b></button></sc-for></div>
+      <div class="row" style="padding:0 16px;justify-content:space-between">
+        <div class="row"><span style="font-weight:600">{{ pickedText }}</span><span class="dim">→ 그룹</span>
+          <select class="sel" aria-label="옮길 그룹"><sc-for list="{{ groupOpts }}" as="o" hint-placeholder-count="6"><option>{{ o.label }}</option></sc-for></select>
+          <button type="button" class="btn" onClick="{{ moveDb }}">옮기기</button><button type="button" class="btn">고른 서버 연결 시험</button></div>
+        <div class="row"><button type="button" class="btn pri">모니터링 시작</button></div>
+      </div>
+      <div class="tw">
+        <div class="tg th"><span></span><span>이름</span><span>주소 · 계정</span><span>담당 노드</span><span>키 로그인 · OS</span><span>그룹</span></div>
+        <sc-for list="{{ groups }}" as="g" hint-placeholder-count="5">
+          <div class="gh">
+            <button type="button" class="tog" onClick="{{ g.toggle }}" aria-expanded="{{ g.exp }}">{{ g.arrow }} {{ g.name }}</button>
+            <span class="badge">{{ g.n }}대</span>
+            <sc-if value="{{ g.hasLive }}" hint-placeholder-val="{{ true }}"><span class="badge live">수집 중 {{ g.live }}</span></sc-if>
+            <sc-if value="{{ g.hasBad }}" hint-placeholder-val="{{ false }}"><span class="badge warn">키 로그인 실패 {{ g.bad }}</span></sc-if>
+            <span class="dim" style="font-size:12px">{{ g.nodes }}</span>
+            <span style="flex:1"></span>
+            <button type="button" class="btn sm" onClick="{{ g.pickAll }}">{{ g.pickLabel }}</button>
+            <button type="button" class="btn sm">이 그룹 연결 시험</button>
+            <button type="button" class="btn sm pri">이 그룹 모니터링 시작 · {{ g.n }}대</button>
+          </div>
+          <sc-if value="{{ g.exp }}" hint-placeholder-val="{{ true }}">
+            <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="4">
+              <div class="{{ r.cls }}">
+                <span><button type="button" class="{{ r.chk }}" onClick="{{ r.pick }}" aria-label="고르기">{{ r.mark }}</button></span>
+                <span class="row" style="gap:6px"><span style="font-weight:600">{{ r.name }}</span><sc-if value="{{ r.live }}" hint-placeholder-val="{{ false }}"><span class="badge live">수집 중</span></sc-if></span>
+                <span style="display:flex;flex-direction:column"><span class="mono num">{{ r.addr }}</span><small class="mono dim">{{ r.user }}</small></span>
+                <span class="dim">{{ r.node }}</span>
+                <span class="row" style="gap:6px"><span class="{{ r.stCls }}">{{ r.st }}</span><small class="dim">{{ r.os }}</small></span>
+                <span class="dim">{{ r.group }}</span>
+              </div>
+            </sc-for>
+          </sc-if>
+        </sc-for>
+      </div>
+      <div class="cap" style="padding:0 16px">그룹은 서버마다 하나입니다(폴더처럼). 그룹을 지우면 그 서버들은 ‘그룹 없음’ 으로 갑니다 — 서버 · 기록은 지우지 않습니다. 한 수집은 {{ maxPer }}대까지라 그보다 큰 그룹은 앞 {{ maxPer }}대로 시작하고 나머지를 알려 줍니다.</div>
+    </div>
+
+    <div class="side">
+      <div class="card pc">
+        <div class="row" style="justify-content:space-between"><h3 class="h3">그룹 관리</h3><button type="button" class="btn sm">새 그룹</button></div>
+        <sc-for list="{{ manage }}" as="m" hint-placeholder-count="5">
+          <div class="gl"><span style="font-weight:600">{{ m.name }}</span><span class="dim num" style="text-align:right">{{ m.n }}대</span><span class="row" style="gap:6px"><button type="button" class="btn sm">이름 바꾸기</button><button type="button" class="btn sm danger">지우기</button></span></div>
+        </sc-for>
+        <div class="cap">그룹 이름: 글자 · 숫자 · 공백 · . _ - 로 1~32자 · 최대 50개. 관리자(전체 쓰기 범위)만 만들고 고칩니다 — 수집 시작과 같은 권한입니다.</div>
+      </div>
+
+      <div class="card pc">
+        <h3 class="h3">자동 묶기 제안</h3>
+        <span class="cap">그룹 없음 서버가 {{ ungrouped }}대 있습니다. 적용하기 전에 어느 서버가 어디로 가는지 미리 보여 줍니다(이미 그룹이 있는 서버는 건드리지 않습니다).</span>
+        <sc-for list="{{ suggestions }}" as="s" hint-placeholder-count="3">
+          <div class="sug"><div class="row" style="justify-content:space-between"><b>{{ s.title }}</b><button type="button" class="btn sm">미리 보기</button></div><span class="cap">{{ s.text }}</span></div>
+        </sc-for>
+      </div>
+
+      <div class="card pc">
+        <h3 class="h3">CSV 대량 등록 — ‘그룹’ 열</h3>
+        <div class="code">{{ csv }}</div>
+        <span class="cap">‘그룹’ 열이 없으면 그룹을 바꾸지 않습니다(예전 CSV 그대로) · 빈 칸이면 그룹 없음 · 없는 그룹 이름이면 미리보기에서 ‘새 그룹’ 으로 알려 준 뒤 만듭니다. 내보내기에도 그룹 열이 붙습니다.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card pc">
+    <div class="row" style="justify-content:space-between">
+      <h3 class="h3">개요 — 그룹별로 나눠 보기(비교 · 프로세스 화면의 서버 고르기도 같은 그룹 단추)</h3>
+      <div class="row"><sc-for list="{{ ovChips }}" as="c" hint-placeholder-count="6"><button type="button" class="{{ c.cls }}" onClick="{{ c.pick }}">{{ c.label }}<b>{{ c.n }}</b></button></sc-for></div>
+    </div>
+    <sc-for list="{{ ovGroups }}" as="g" hint-placeholder-count="3">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="row"><b>{{ g.name }}</b><span class="dim" style="font-size:12px">{{ g.n }}대 · 평균 CPU {{ g.cpu }} · 가장 바쁜 {{ g.top }}</span></div>
+        <div class="ov"><sc-for list="{{ g.cards }}" as="k" hint-placeholder-count="4"><div class="mini"><div class="row" style="justify-content:space-between;gap:6px"><span class="mono" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ k.name }}">{{ k.name }}</span><span class="num">{{ k.cpu }}</span></div><div class="bar"><span style="{{ k.fill }}"></span></div></div></sc-for></div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div class="card pc">
+    <h3 class="h3">컨펌 받을 것(답이 없으면 괄호 값으로 구현)</h3>
+    <div class="cf">
+      <b>①</b><span>그룹은 서버마다 <b>하나</b>(폴더) / 여러 개(태그) — (하나: 개수 · 시작 · 개요 묶음이 겹치지 않습니다. 태그가 필요하면 다음에 덧붙일 수 있습니다)</span>
+      <b>②</b><span>그룹 단위 시작이 {{ maxPer }}대를 넘으면 — (앞 {{ maxPer }}대로 시작하고 나머지 수를 알림 · 나머지는 ‘진행 중인 수집에 더하기’ 로)</span>
+      <b>③</b><span>자동 묶기 제안(이름 앞부분 · 담당 노드 · IP 대역 /24)을 넣을지 — (넣는다 · 미리 보기 뒤 적용 · 그룹 없음 서버만)</span>
+      <b>④</b><span>그룹 색 — (넣지 않는다: 비교 차트의 서버 색과 겹쳐 헷갈립니다)</span>
+      <b>⑤</b><span>개요 · 비교 · 프로세스 화면의 그룹 단추 — (넣는다 · 고른 그룹은 브라우저가 기억)</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { filter: 'all', closed: { '백업': true }, picked: ['kr-db-01', 'pl-db-02'], view: 'group', ov: 'all', moved: {} }; }
+  renderVals() {
+    const S = this.state;
+    const MAX_PER = 20;
+    // [이름, IP, 계정, 노드, 그룹, 상태(ok|auth|none), 수집 중, CPU%]
+    const SV = [
+      ['kr-was-01', '10.10.21.21', 'dvcmon', '중앙', 'WAS', 'ok', true, 38], ['kr-was-02', '10.10.21.22', 'dvcmon', '중앙', 'WAS', 'ok', true, 41], ['kr-was-03', '10.10.21.23', 'dvcmon', '중앙', 'WAS', 'ok', false, 12],
+      ['pl-was-01', '10.48.20.11', 'dvcmon', '엣지 PL', 'WAS', 'ok', true, 55], ['pl-was-02', '10.48.20.12', 'dvcmon', '엣지 PL', 'WAS', 'ok', true, 61], ['pl-was-03', '10.48.20.13', 'dvcmon', '엣지 PL', 'WAS', 'auth', false, null],
+      ['pl-was-04', '10.48.20.14', 'dvcmon', '엣지 PL', 'WAS', 'ok', true, 47], ['pl-was-05', '10.48.20.15', 'dvcmon', '엣지 PL', 'WAS', 'ok', false, 9],
+      ['kr-db-01', '10.10.20.11', 'dvcmon', '중앙', 'DB', 'ok', true, 72], ['kr-db-02', '10.10.20.12', 'dvcmon', '중앙', 'DB', 'ok', false, 18],
+      ['pl-db-01', '10.48.30.11', 'dvcmon', '엣지 PL', 'DB', 'ok', true, 83], ['pl-db-02', '10.48.30.12', 'dvcmon', '엣지 PL', 'DB', 'ok', false, 21],
+      ['us-db-01', '10.60.30.11', 'sbpadmin', '엣지 NJ', 'DB', 'ok', true, 34], ['us-db-02', '10.60.30.12', 'sbpadmin', '엣지 NJ', 'DB', 'auth', false, null],
+      ['kr-bak-01', '10.10.40.5', 'dvcmon', '중앙', '백업', 'ok', false, 7], ['pl-bak-01', '10.48.40.5', 'dvcmon', '엣지 PL', '백업', 'ok', true, 29],
+      ['us-bak-01', '10.60.40.5', 'sbpadmin', '엣지 NJ', '백업', 'ok', false, 5], ['us-nfs-01', '10.60.40.9', 'sbpadmin', '엣지 NJ', '백업', 'ok', true, 22],
+      ['us-web-01', '10.60.10.21', 'sbpadmin', '엣지 NJ', '웹', 'ok', true, 26], ['us-web-02', '10.60.10.22', 'sbpadmin', '엣지 NJ', '웹', 'ok', true, 24], ['us-web-03', '10.60.10.23', 'sbpadmin', '엣지 NJ', '웹', 'none', false, null],
+      ['lab-test-01', '10.10.99.31', 'dvcmon', '중앙', '', 'none', false, null], ['lab-test-02', '10.10.99.32', 'dvcmon', '중앙', '', 'ok', false, 3], ['tmp-host', '10.48.99.7', 'dvcmon', '엣지 PL', '', 'none', false, null],
+    ].map((s) => (S.moved[s[0]] != null ? [s[0], s[1], s[2], s[3], S.moved[s[0]], s[5], s[6], s[7]] : s));
+    const ORDER = ['WAS', 'DB', '백업', '웹', ''];
+    const gname = (g) => (g ? g : '그룹 없음');
+    const count = (g) => SV.filter((s) => s[4] === g).length;
+    const chips = [{ key: 'all', label: '전체', n: SV.length }].concat(ORDER.map((g) => ({ key: g || '-', label: gname(g), n: count(g) })))
+      .map((c) => ({ cls: 'chip' + (S.filter === c.key ? ' on' : ''), label: c.label, n: c.n, pick: () => this.setState({ filter: c.key }) }));
+    const ST = { ok: ['badge ok', '키 로그인 됨'], auth: ['badge warn', '키 로그인 거부'], none: ['badge', '미확인'] };
+    const pickedSet = new Set(S.picked);
+    const togglePick = (n) => this.setState({ picked: pickedSet.has(n) ? S.picked.filter((x) => x !== n) : S.picked.concat([n]) });
+    const rowOf = (s) => ({
+      cls: 'tg tr' + (pickedSet.has(s[0]) ? ' pk' : ''), chk: 'chk' + (pickedSet.has(s[0]) ? ' on' : ''), mark: pickedSet.has(s[0]) ? '✓' : '', pick: () => togglePick(s[0]),
+      name: s[0], live: s[6], addr: s[1] + ':22', user: s[2], node: s[3], stCls: ST[s[5]][0], st: ST[s[5]][1], os: s[5] === 'ok' ? 'RHEL 7.8' : '', group: gname(s[4]),
+    });
+    const visible = ORDER.filter((g) => S.filter === 'all' || (S.filter === '-' ? g === '' : g === S.filter));
+    const groups = S.view === 'group'
+      ? visible.map((g) => {
+        const list = SV.filter((s) => s[4] === g);
+        const nodes = {}; list.forEach((s) => { nodes[s[3]] = (nodes[s[3]] || 0) + 1; });
+        const all = list.every((s) => pickedSet.has(s[0]));
+        const open = !S.closed[gname(g)];
+        return {
+          name: gname(g), n: list.length, exp: open, arrow: open ? '▾' : '▸', toggle: () => this.setState({ closed: Object.assign({}, S.closed, { [gname(g)]: open }) }),
+          hasLive: list.some((s) => s[6]), live: list.filter((s) => s[6]).length, hasBad: list.some((s) => s[5] === 'auth'), bad: list.filter((s) => s[5] === 'auth').length,
+          nodes: Object.entries(nodes).map(([k, v]) => k + ' ' + v).join(' · '),
+          pickLabel: all ? '그룹 고르기 풀기' : '그룹 전체 고르기',
+          pickAll: () => this.setState({ picked: all ? S.picked.filter((x) => !list.some((s) => s[0] === x)) : Array.from(new Set(S.picked.concat(list.map((s) => s[0])))) }),
+          rows: list.map(rowOf),
+        };
+      })
+      : (() => { const list = SV.filter((s) => visible.includes(s[4])); return [{ name: '목록(그룹 열로 정렬 · 걸러 보기)', n: list.length, exp: true, arrow: '', toggle: () => {}, hasLive: list.some((s) => s[6]), live: list.filter((s) => s[6]).length, hasBad: list.some((s) => s[5] === 'auth'), bad: list.filter((s) => s[5] === 'auth').length, nodes: '', pickLabel: '전체 고르기', pickAll: () => {}, rows: list.map(rowOf) }]; })();
+    const viewBtns = [['group', '그룹별로 묶기'], ['list', '목록']].map(([k, l]) => ({ label: l, cls: S.view === k ? 'on' : '', pick: () => this.setState({ view: k }) }));
+    const groupOpts = ['DB', 'WAS', '백업', '웹', '그룹 없음', '새 그룹…'].map((x) => ({ label: x }));
+    const moveDb = () => { const m = Object.assign({}, S.moved); S.picked.forEach((n) => { m[n] = 'DB'; }); this.setState({ moved: m, picked: [] }); };
+    const manage = ORDER.filter(Boolean).map((g) => ({ name: g, n: count(g) }));
+    const ungrouped = count('');
+    const suggestions = [
+      { title: '이름 앞부분으로', text: 'lab-test-01 · lab-test-02 → ‘lab-test’(새 그룹 · 2대) · tmp-host 는 짝이 없어 그대로' },
+      { title: '담당 노드로', text: '중앙 2대 → ‘중앙’ · 엣지 PL 1대 → ‘엣지 PL’(새 그룹)' },
+      { title: 'IP 대역(/24)으로', text: '10.10.99.0/24 2대 → ‘10.10.99’ · 10.48.99.0/24 1대 → ‘10.48.99’(새 그룹)' },
+    ];
+    const csv = '이름,IP,포트,계정,담당 노드,그룹\nkr-db-03,10.10.20.13,22,dvcmon,중앙,DB\npl-was-06,10.48.20.16,22,dvcmon,edge-pl,WAS\nlab-test-03,10.10.99.33,22,dvcmon,중앙,';
+    const ovChips = [{ key: 'all', label: '전체', n: SV.length }].concat(ORDER.filter(Boolean).map((g) => ({ key: g, label: g, n: count(g) })))
+      .map((c) => ({ cls: 'chip' + (S.ov === c.key ? ' on' : ''), label: c.label, n: c.n, pick: () => this.setState({ ov: c.key }) }));
+    const ovGroups = ORDER.filter(Boolean).filter((g) => S.ov === 'all' || S.ov === g).map((g) => {
+      const list = SV.filter((s) => s[4] === g && s[6]);
+      const cpus = list.map((s) => s[7]).filter((v) => v != null);
+      const top = list.slice().sort((a, b) => (b[7] ?? -1) - (a[7] ?? -1))[0];
+      return { name: g, n: list.length, cpu: cpus.length ? Math.round(cpus.reduce((a, b) => a + b, 0) / cpus.length) + '%' : '—', top: top ? top[0] + ' ' + top[7] + '%' : '—',
+        cards: list.map((s) => ({ name: s[0], cpu: s[7] == null ? '—' : s[7] + '%', fill: 'width:' + (s[7] || 0) + '%' })) };
+    }).filter((g) => g.n > 0);
+    return {
+      total: SV.length, groupCount: ORDER.filter(Boolean).length, chips, viewBtns, groups, groupOpts, moveDb,
+      pickedText: '고른 서버 ' + S.picked.length + '대', manage, ungrouped, suggestions, csv, ovChips, ovGroups, maxPer: MAX_PER,
+    };
+  }
+}
+</script>
+</body>
+</html>
