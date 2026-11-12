@@ -19,7 +19,7 @@ import {
   DASH, STATE_TEXT, TEST_TEXT, MODE_TEXT, ENDED_TEXT, sessionIndex, sessionLabel, startNote, joinResultText, TABS, IOSTAT_LABEL, SUMMARY_COLS, METRICS,
   pctText, msText, numText, bpsText, bytesText, sizeText, metricValueText, metricUnitText, iostatText, remainText, clockText, agoShort, etText,
   levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR, bulkLine, needsRetry, AUTH_HINT, nameTitle,
-  atOptions, atCaption, normAt,
+  atOptions, atCaption, normAt, editFormOf, editChanges, editNotes, editResultText,
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
@@ -762,6 +762,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   const [csv, setCsv] = useState(false);
   const [installFor, setInstallFor] = useState('');
   const [joinTo, setJoinTo] = useState('');
+  const [edit, setEdit] = useState(null); // v2.980 등록된 서버 수정 — { id, form } (한 번에 한 줄)
   const [setForm2, setSettingsForm] = useState(null);
   const run = async (label, fn) => {
     setBusy(label); setMsg(null);
@@ -789,6 +790,17 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   const stOf = (t) => (t.test ? (t.test.result ? { label: TEST_TEXT[t.test.result.kind] || t.test.result.kind, tone: t.test.result.ok ? 'ok' : 'warn', note: `${agoShort(t.test.at, Date.now())}${!t.test.result.ok && t.test.result.error && !['auth', 'auth-stopped'].includes(t.test.result.kind) ? ` · ${t.test.result.error}` : ''}` } : { label: '시험 중', tone: 'off' }) : t.status ? { label: STATE_TEXT[t.status.state]?.label || t.status.state, tone: STATE_TEXT[t.status.state]?.tone || 'off', note: t.status.error } : { label: '미확인', tone: 'off', note: '시험을 누르세요' });
   const installNode = main.nodes.find((x) => (x.agent || '') === installFor && x.key?.publicKey) || main.nodes.find((x) => x.kind === 'central' && x.key?.publicKey);
   const bulk = bulkLine(main.bulkTest, main.now || Date.now());
+  const edgeNodes = main.nodes.filter((x) => x.kind === 'edge');
+  const saveEdit = (t) => {
+    const f = edit?.form; if (!f) return;
+    // 포트는 글자 그대로 보낸다 — 화면에서 22 로 바꾸면 틀린 값이 조용히 22 가 된다(서버가 1~65535 를 검사해 알린다)
+    run('edit', async () => {
+      const r = await putJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`, { name: f.name.trim(), host: f.host.trim(), port: String(f.port).trim(), username: f.username.trim(), agent: f.agent });
+      if (r?.ok === false) return r;
+      setEdit(null);
+      return { ok: true, reason: editResultText(r, t.name) };
+    });
+  };
   const bulkTest = (ids, what) => run('bulk', async () => {
     const r = await postJson('/tools/focus-mon/targets/test-bulk', { ids });
     return { ok: true, reason: `${what} ${r.job.total}대의 연결 시험을 시작했습니다${r.job.skipped ? `(10초 안에 시험한 ${r.job.skipped}대는 건너뜀)` : ''} — 진행은 위 띠 · 결과는 키 로그인 칸에 나옵니다.` };
@@ -839,19 +851,59 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
             <button type="button" className="fm-btn" disabled={!picked.length || !!busy} onClick={() => bulkTest(picked, '고른 서버')}>고른 서버 연결 시험</button>
             <button type="button" className="fm-btn" disabled={!targets.length || !!busy} onClick={() => bulkTest(targets.map((t) => t.id), node === 'all' ? '목록의 서버' : `${node ? `엣지 ${node}` : '중앙'} 서버`)}>이 목록 모두 시험 · {targets.length}대</button>
             {main.ended?.[0] ? <button type="button" className="fm-btn" onClick={() => setPicked(main.ended[0].targets.slice(0, L.maxPerSession))}>지난번 {main.ended[0].targets.length}대 다시 고르기</button> : null}</div>
+          <div className="fm-tblbox">
           <STable className="fm-table" minWidth={640}>
             <thead><tr><th data-nosort /><th>이름</th><th>주소 · 계정</th><th>담당 노드</th><th>키 로그인 · OS</th><th data-nosort /></tr></thead>
             <tbody>{targets.map((t) => {
               const s = stOf(t);
               const on = picked.includes(t.id);
+              const ed = edit?.id === t.id ? edit : null;
+              // v2.980 등록된 서버 수정 — 그 줄 바로 아래에 수정 상자(한 줄짜리 colSpan). 두 줄을 Fragment 로 묶어 정렬해도 함께 움직인다
+              // (sortableText 는 첫 tr 의 칸으로 정렬한다). 표 칸 안에 입력을 넣었더니 1440px 에서도 표가 카드보다 넓어져 저장 단추가 밖으로 나갔다.
+              let edRow = null;
+              if (ed) {
+                const f = ed.form;
+                const set = (k) => (e) => setEdit({ ...ed, form: { ...f, [k]: e.target.value.slice(0, 64) } });
+                const ch = editChanges(t, f);
+                const notes = editNotes(t, f, { inSession: sIdx.has(t.id) });
+                const canSave = !busy && ch.changes.length > 0 && !!f.name.trim() && !!f.host.trim();
+                const key = (e) => { if (e.key === 'Escape') setEdit(null); else if (e.key === 'Enter' && canSave) saveEdit(t); };
+                const unknownNode = f.agent && !edgeNodes.some((x) => x.agent.toLowerCase() === f.agent.toLowerCase());
+                edRow = (
+                  <tr className="fm-editrow">
+                    <td colSpan={6}><div className="fm-edbox">
+                      <div className="fm-form">
+                        <label className="fm-fld"><span>표시 이름</span><input className="fm-input" value={f.name} onChange={set('name')} onKeyDown={key} autoFocus /></label>
+                        <label className="fm-fld"><span>IP 주소</span><input className="fm-input fm-mono" value={f.host} onChange={set('host')} onKeyDown={key} /></label>
+                        <label className="fm-fld"><span>SSH 포트</span><input className="fm-input fm-mono" value={f.port} inputMode="numeric" onChange={set('port')} onKeyDown={key} /></label>
+                        <label className="fm-fld"><span>계정</span><input className="fm-input fm-mono" value={f.username} onChange={set('username')} onKeyDown={key} /></label>
+                        <label className="fm-fld"><span>담당 노드</span><Select sort={false} className="fm-input" value={f.agent} onChange={(e) => setEdit({ ...ed, form: { ...f, agent: e.target.value } })}>
+                          <option value="">중앙</option>
+                          {edgeNodes.map((x) => <option key={x.agent} value={x.agent}>엣지 {x.agent}</option>)}
+                          {unknownNode ? <option value={f.agent}>엣지 {f.agent}(등록부에 없음 — 다른 노드를 고르세요)</option> : null}
+                        </Select></label>
+                        <span className="fm-row fm-nowrap">
+                          <button type="button" className="fm-btn pri" disabled={!canSave} onClick={() => saveEdit(t)}>저장</button>
+                          <button type="button" className="fm-btn" disabled={busy === 'edit'} onClick={() => setEdit(null)}>취소</button>
+                        </span>
+                      </div>
+                      <div className="fm-ednotes">
+                        <span className="fm-dim">{ch.changes.length ? `바뀜: ${ch.changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join(' · ')}` : '바꾼 칸이 없습니다 — 고칠 칸을 바꾸면 저장을 누를 수 있습니다.'}</span>
+                        {notes.map((n) => <span key={n} className="fm-why">{n}</span>)}
+                      </div>
+                    </div></td>
+                  </tr>
+                );
+              }
               return (
-                <tr key={t.id}>
+                <React.Fragment key={t.id}>
+                <tr className={ed ? 'fm-editing' : undefined}>
                   <td><input type="checkbox" checked={on} disabled={!on && full} aria-label={on ? '선택' : full ? '선택할 수 없음 — 상한' : '선택'} onChange={() => toggle(t.id)} /></td>
-                  <td style={{ fontWeight: 600 }}>{t.name}{t.demo ? <span className="fm-badge off">데모</span> : null}{sIdx.has(t.id) ? <span className="fm-badge ok" title={sessionLabel(sIdx.get(t.id), Date.now())}>수집 중 · {MODE_TEXT[sIdx.get(t.id).mode]}</span> : null}</td>
+                  <td data-sort={t.name} style={{ fontWeight: 600 }}>{t.name}{t.demo ? <span className="fm-badge off">데모</span> : null}{sIdx.has(t.id) ? <span className="fm-badge ok" title={sessionLabel(sIdx.get(t.id), Date.now())}>수집 중 · {MODE_TEXT[sIdx.get(t.id).mode]}</span> : null}</td>
                   <td data-sort={t.host}><span className="fm-st"><span className="fm-mono fm-num">{t.host}:{t.port}</span><small className="fm-mono">{t.username}</small></span></td>
-                  <td>{t.agent ? `엣지 ${t.agent}` : '중앙'}{t.agent && t.edgeOnline === false && !t.demo ? <span className="fm-badge warn">엣지 응답 없음</span> : null}</td>
+                  <td data-sort={t.agent || ''}>{t.agent ? `엣지 ${t.agent}` : '중앙'}{t.agent && t.edgeOnline === false && !t.demo ? <span className="fm-badge warn">엣지 응답 없음</span> : null}</td>
                   <td><span className="fm-st"><span className={`fm-badge ${s.tone}`}>{s.label}</span>{s.note ? <small>{s.note}</small> : null}{needsRetry(t) && !t.demo ? <small className="fm-why">{AUTH_HINT}</small> : null}{(t.test?.result?.hello || t.status?.hello)?.rhelMajor ? <small>RHEL {(t.test?.result?.hello || t.status?.hello).rhelMajor}</small> : null}</span></td>
-                  <td><span className="fm-row fm-nowrap">
+                  <td><span className="fm-row fm-acts">
                     {sIdx.has(t.id) ? <button type="button" className="fm-btn sm danger" disabled={!!busy} onClick={() => stopOne(t, sIdx.get(t.id))}>수집 종료</button> : null}
                     <button type="button" className="fm-btn sm" disabled={!!busy || t.demo} onClick={() => run('t1', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/test`, {}).then((r) => (r?.queued ? { ok: true, reason: `${t.name} 연결 시험을 엣지에 보냈습니다.` } : { ok: !!r?.result?.ok, reason: `${t.name}: ${TEST_TEXT[r?.result?.kind] || r?.result?.kind}${r?.result?.error ? ` — ${r.result.error}` : ''}` })))}>시험</button>
                     {needsRetry(t) ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => run('retry', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/retry`, {}).then((r) => (r?.via === 'edge'
@@ -859,12 +911,16 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
                       : r?.result ? { ok: !!r.result.ok, reason: `${t.name}: ${TEST_TEXT[r.result.kind] || r.result.kind}${r.result.error ? ` — ${r.result.error}` : ''}` }
                         : r?.running ? { ok: true, reason: `${t.name} 을(를) 다시 연결합니다(수집기가 한 번 시도).` }
                           : { ok: true, reason: `${t.name}: 정지를 풀었습니다 — 방금 시험해 10초 뒤에 ‘시험’ 을 누르면 한 번 접속합니다.` })))}>다시 연결</button> : null}
+                    {!t.demo ? <button type="button" className={`fm-btn sm ${ed ? 'pri' : ''}`} disabled={!!busy} aria-expanded={!!ed} title="이름 · IP · 포트 · 계정 · 담당 노드를 고칩니다(이 줄 아래에 수정 칸)" onClick={() => setEdit(ed ? null : { id: t.id, form: editFormOf(t) })}>{ed ? '수정 닫기' : '수정'}</button> : null}
                     {!t.demo ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => { if (window.confirm(`${t.name} 을(를) 등록에서 지울까요? 기록은 보관 기간 동안 남습니다.`)) run('del', () => delJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`).then(() => ({ ok: true, reason: `${t.name} 을(를) 지웠습니다.` }))); }}>삭제</button> : null}
                   </span></td>
                 </tr>
+                {edRow}
+                </React.Fragment>
               );
             })}</tbody>
           </STable>
+          </div>
           <div className="fm-note fm-pad">등록부에는 IP · 포트 · 계정 · 담당 노드만 저장합니다(비밀번호 · 개인키 없음). 키 로그인이 거부되면 자동으로 다시 시도하지 않습니다 — 공개키를 넣은 뒤 ‘다시 연결’ 을 누르세요(60초에 한 번).</div>
         </div>
         <div className="fm-col">

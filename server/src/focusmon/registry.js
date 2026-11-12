@@ -130,6 +130,27 @@ export function addTarget(body, { agents = [], by = '' } = {}) {
   return { ok: true, target: { ...t } };
 }
 
+/** 등록 수정(v2.980)이 비교하는 칸 — 화면(web focusMonText.js EDIT_FIELDS)과 같은 목록 · 순서(테스트가 대조). */
+export const EDIT_FIELDS = Object.freeze(['name', 'host', 'port', 'username', 'agent']);
+/**
+ * 바뀐 칸 — 감사 기록 · 응답용(순수). 담당 노드는 대소문자를 무시한다(sameEndpoint 와 같게 — 입력 검사가 아는 이름으로 맞춘다).
+ * @returns {{k:string, from:string|number, to:string|number}[]}
+ */
+export function targetChanges(before = {}, after = {}) {
+  const out = [];
+  for (const k of EDIT_FIELDS) {
+    const a = before?.[k] ?? ''; const b = after?.[k] ?? '';
+    const same = k === 'agent' ? String(a).toLowerCase() === String(b).toLowerCase() : String(a) === String(b);
+    if (!same) out.push({ k, from: a, to: b });
+  }
+  return out;
+}
+
+/**
+ * 등록 수정 — 같은 id 를 고친다(기록은 id 로 이어진다). 바뀐 것이 없으면 쓰지 않는다.
+ * moved = 접속처(주소 · 포트 · 계정 · 담당 노드)가 바뀜 → 라우트가 예전 접속처의 상태 · 시험 결과를 지우고 다시 맞춘다(service.targetEndpointChanged).
+ * 인증 정지는 지우지 않는다 — 정지 기록이 접속처 + 키 지문 해시라 접속처가 바뀌면 저절로 맞지 않는다(v2.978 ④ 와 같은 규칙).
+ */
 export function updateTarget(id, body, { agents = [] } = {}) {
   const w = writeRefusal(); if (w) return w;
   const cur = load();
@@ -138,10 +159,13 @@ export function updateTarget(id, body, { agents = [] } = {}) {
   const c = checkTargetInput({ ...cur.targets[i], ...body }, { agents });
   if (!c.ok) return c;
   if (cur.targets.some((t, j) => j !== i && sameEndpoint(t, c.value))) return { ok: false, code: 'duplicate', reason: '같은 노드 · 주소 · 포트 · 계정의 대상이 이미 있습니다.' };
-  const next = { ...cur.targets[i], ...c.value };
+  const before = cur.targets[i];
+  const next = { ...before, ...c.value };
+  const changes = targetChanges(before, next);
+  if (!changes.length && next.enabled === before.enabled) return { ok: true, target: { ...before }, moved: false, changes: [] };
   const targets = cur.targets.slice(); targets[i] = next;
   persist({ ...cur, targets });
-  return { ok: true, target: { ...next }, moved: !sameEndpoint(cur.targets[i], next) };
+  return { ok: true, target: { ...next }, before: { ...before }, moved: !sameEndpoint(before, next), changes };
 }
 
 export function removeTarget(id) {

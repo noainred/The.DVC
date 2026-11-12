@@ -51,6 +51,8 @@ export function setWakeImpl(fn) { wakeImpl = typeof fn === 'function' ? fn : nul
 let lastTickAt = null;
 export function tick1(now = Date.now()) {
   lastTickAt = now;
+  // v2.980: 읽을 때 겹침을 정리한 계속 수집(v2.979 전에 만든 것) — 실행 기록의 대상 · 끝을 고쳐 쓴다
+  for (const s of store.drainLoadFixes()) db.writeRun({ id: s.id, started: s.startedAt, ended: s.ended, by: s.by, mode: s.mode, interval: s.interval, targets: s.targets }).catch(() => {});
   for (const s of store.expireSessions(now)) db.writeRun({ id: s.id, started: s.startedAt, ended: now, by: s.by, mode: s.mode, interval: s.interval, targets: s.targets }).catch(() => {});
   runner.reconcile(store.desiredFor('', resolveForRun, now));
   store.closeMinutes(now, store.activeTargetIds());
@@ -86,6 +88,20 @@ export function removeFromCollection(id, targetId) {
   db.writeRun({ id: s.id, started: s.startedAt, ended: r.ended ? Date.now() : null, by: s.by, mode: s.mode, interval: s.interval, targets: s.targets }).catch(() => {});
   tick1();
   return r;
+}
+
+/**
+ * 등록 수정으로 접속처가 바뀐 대상(v2.980): 바로 틱(수집 중이면 러너가 끊고 새 접속처로 다시 연다) → 예전 접속처의 상태 · 시험 결과를 지운다
+ * (틱 뒤에 지워야 옛 수집기가 끝나며 남긴 '멈춤' 상태도 지워진다) → 예전 · 새 담당 엣지를 깨운다(새 엣지는 키를 만들고 · 수집 중이면 바로 시작,
+ * 예전 엣지는 다음 동기화에서 손을 뗀다 — 깨우지 않으면 쉬는 주기만큼 늦다).
+ */
+export function targetEndpointChanged(before, after) {
+  if (!after?.id) return;
+  tick1();
+  store.forgetTargetState(after.id);
+  const agents = new Set([before?.agent, after.agent].map((a) => String(a || '')).filter(Boolean).map((a) => a.toLowerCase()));
+  const names = [...agents].map((k) => [before?.agent, after.agent].find((a) => String(a || '').toLowerCase() === k));
+  for (const a of names) wakeImpl?.(a);
 }
 
 export function stopCollection(id, why = 'stopped') {

@@ -281,6 +281,52 @@ export const KEY_FILE_NOTE = '노드 셸(root)에서 같은 공개키를 뽑으�
 export function needsRetry(t) {
   return !!(t && (t.status?.state === 'auth' || t.authStop || ['auth', 'auth-stopped'].includes(t.test?.result?.kind)));
 }
+/* ── 등록된 서버 수정(v2.980 — 사용자 '등록된 서버 수정하는 기능 추가') ─────────────────────────────
+ * 서버 registry.EDIT_FIELDS · targetChanges 와 같은 칸 · 같은 규칙(담당 노드 대소문자 무시) — 서버 테스트가 칸 목록을 대조한다.
+ * 판정은 서버가 한다(응답 moved · cleared). 여기는 저장 전 미리보기(저장 단추 · 안내 글)다. */
+export const EDIT_FIELDS = Object.freeze(['name', 'host', 'port', 'username', 'agent']);
+export const EDIT_FIELD_TEXT = Object.freeze({ name: '이름', host: 'IP', port: '포트', username: '계정', agent: '담당 노드' });
+const ENDPOINT_FIELDS = new Set(['host', 'port', 'username', 'agent']);
+/** 수정 칸의 처음 값(등록부 값 그대로 — 포트는 글자). */
+export function editFormOf(t) {
+  return { name: t?.name ?? '', host: t?.host ?? '', port: t?.port == null || t?.port === '' ? '22' : String(t.port), username: t?.username ?? '', agent: t?.agent ?? '' };
+}
+const editKey = (k, v) => {
+  const x = String(v ?? '').trim();
+  if (k === 'port') return x === '' ? '22' : /^\d{1,5}$/.test(x) ? String(Number(x)) : x; // 서버: 빈 칸 = 22 · 수로 읽는다
+  if (k === 'agent') return x.toLowerCase();
+  return x;
+};
+/** 고친 칸 — { changes:[{k,label,from,to}], endpoint } (endpoint = 주소 · 포트 · 계정 · 담당 노드 중 하나라도 바뀜). */
+export function editChanges(t, form) {
+  const changes = [];
+  for (const k of EDIT_FIELDS) {
+    const was = k === 'port' ? (t?.port ?? 22) : t?.[k];
+    if (editKey(k, was) === editKey(k, form?.[k])) continue;
+    const now = String(form?.[k] ?? '').trim();
+    changes.push({ k, label: EDIT_FIELD_TEXT[k], from: k === 'agent' ? nodeText(was) : String(was ?? '') || DASH, to: k === 'agent' ? nodeText(now) : now || (k === 'port' ? '22' : DASH) });
+  }
+  return { changes, endpoint: changes.some((c) => ENDPOINT_FIELDS.has(c.k)) };
+}
+/** 저장 전에 알릴 글 — 접속처가 바뀌면 생기는 일(다시 연결 · 시험 결과 지움 · 키 · 기록이 이어짐)을 숨기지 않는다. 이름만이면 없음. */
+export function editNotes(t, form, { inSession = false } = {}) {
+  const { changes, endpoint } = editChanges(t, form);
+  if (!endpoint) return [];
+  const has = (k) => changes.some((c) => c.k === k);
+  const out = [];
+  if (inSession) out.push('수집 중인 서버입니다 — 저장하면 새 접속처로 다시 연결합니다.');
+  out.push('예전 접속처의 연결 시험 결과 · 상태를 지웁니다 — 저장한 뒤 ‘시험’ 으로 확인하세요.');
+  if (has('agent')) out.push(`담당 노드가 바뀝니다 — 그 서버 계정의 authorized_keys 에 ${nodeText(String(form?.agent ?? '').trim())}의 공개키가 있어야 합니다.`);
+  if (has('host')) out.push('기록은 이 서버 줄로 이어집니다 — 다른 서버로 바꾸는 것이면 수정 대신 새로 등록하세요(기록이 섞입니다).');
+  return out;
+}
+/** 저장 응답 → 알림 글. */
+export function editResultText(r, name = '') {
+  if (!r?.ok) return r?.reason || '';
+  if (!r.changes?.length) return '바뀐 값이 없습니다 — 저장하지 않았습니다.';
+  const what = r.changes.map((c) => EDIT_FIELD_TEXT[c.k] || c.k).join(' · ');
+  return `${r.target?.name || name} 을(를) 고쳤습니다(${what})${r.cleared ? ' — 접속처가 바뀌어 예전 연결 시험 결과를 지웠습니다. ‘시험’ 으로 확인하세요' : ''}.`;
+}
 export const INSTALL_NOTE = 'restrict 는 포워딩 · 터미널 할당을 끕니다(OpenSSH 7.2 이상 — RHEL 7.8 은 7.4). 그 노드 주소에서만 쓰게 하려면 줄 앞에 from="노드 IP", 를 덧붙이세요. 수집은 /proc · /sys 를 읽기만 하므로 root · sudo 가 필요 없습니다.';
 
 /** 손으로 만든 폴링 루프의 다음 틱을 걸지 않을 오류(403 권한 · 404 경로 없음은 다시 물어도 같다). */

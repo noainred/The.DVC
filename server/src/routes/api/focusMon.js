@@ -31,7 +31,7 @@ import * as registry from '../../focusmon/registry.js';
 import * as store from '../../focusmon/store.js';
 import * as db from '../../focusmon/db.js';
 import * as Q from '../../focusmon/query.js';
-import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCollection, addToCollection, removeFromCollection, localRunner, serviceStatus } from '../../focusmon/service.js';
+import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCollection, addToCollection, removeFromCollection, targetEndpointChanged, localRunner, serviceStatus } from '../../focusmon/service.js';
 import { recorderStatus } from '../../focusmon/recorder.js';
 import { wakeEdge, focusEdgeMinVersion, focusDiagMinVersion } from '../../central/focusMonEdge.js';
 import { startBulk, bulkJob, bulkProgress } from '../../focusmon/bulkTest.js';
@@ -44,6 +44,9 @@ const csvPerm = requirePerm('data.csv');
 const fullScopeOnly = fullScopeOnlyWith('서버 집중 모니터링은 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다 — 전 법인 서버의 주소 · 프로세스가 들어갑니다.');
 const fullRwOnly = fullReadWriteScopeOnlyWith('서버 집중 모니터링의 대상 · 수집 변경은 조회 · 쓰기 모두 전체 범위인 계정만 할 수 있습니다.');
 const EDGE_ONLINE_MS = 60_000;
+/** 감사 기록용 바뀐 칸 글(v2.980) — 'IP 10.0.0.1 → 10.0.0.2 · 담당 노드 중앙 → 엣지 NJ'. 값은 입력 검사를 지난 짧은 글자뿐이다(비밀 칸 없음). */
+const CHANGE_LABEL = { name: '이름', host: 'IP', port: '포트', username: '계정', agent: '담당 노드' };
+const changesText = (changes = []) => changes.map((c) => `${CHANGE_LABEL[c.k] || c.k} ${c.k === 'agent' ? (c.from ? `엣지 ${c.from}` : '중앙') : c.from} → ${c.k === 'agent' ? (c.to ? `엣지 ${c.to}` : '중앙') : c.to}`).join(' · ');
 const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 
 /**
@@ -171,8 +174,11 @@ api.put('/tools/focus-mon/targets/:id', adminOnly, fullRwOnly, demoBlockWrite, (
   if (registryUnreadable(res)) return;
   const r = registry.updateTarget(req.params.id, req.body || {}, { agents: knownAgentNames() });
   if (!r.ok) return res.status(r.code === 'not-found' ? 404 : r.code === 'registry-unreadable' ? 503 : 400).json(r);
-  logAudit({ user: req.user?.username, action: 'focus-mon.target.update', target: r.target.name, detail: `${r.target.host}:${r.target.port} ${r.target.username} @ ${r.target.agent || '중앙'}${r.moved ? ' (접속처 바뀜)' : ''}`, ip: req.ip });
-  res.json(r);
+  if (!r.changes.length) return res.json({ ...r, cleared: false });
+  // v2.980(사용자 '등록된 서버 수정하는 기능 추가'): 접속처가 바뀌면 바로 다시 맞추고 예전 접속처의 상태 · 시험 결과를 지운다.
+  if (r.moved) targetEndpointChanged(r.before, r.target);
+  logAudit({ user: req.user?.username, action: 'focus-mon.target.update', target: r.target.name, detail: `${changesText(r.changes)}${r.moved ? ' (접속처 바뀜)' : ''}`, ip: req.ip });
+  res.json({ ok: true, target: r.target, moved: r.moved, changes: r.changes, cleared: r.moved });
 });
 
 api.delete('/tools/focus-mon/targets/:id', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
