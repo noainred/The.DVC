@@ -107,7 +107,7 @@ export default function BulkAdd({ init, d, corpName, op, busy, onClose }) {
           <label className="bmf-lbl"><input type="checkbox" checked={fields.name} onChange={(e) => setFields({ ...fields, name: e.target.checked })} />이름</label>
           <label className="bmf-lbl"><input type="checkbox" checked={fields.model} onChange={(e) => setFields({ ...fields, model: e.target.checked })} />모델</label>
           {!d.scoped ? <label className="bmf-lbl"><input type="checkbox" checked={fields.tag} onChange={(e) => setFields({ ...fields, tag: e.target.checked })} />서비스 태그</label> : null}
-          {d.admin ? <label className="bmf-lbl" title="관리 주소(iDRAC) — 관리자만"><input type="checkbox" checked={!!fields.addr} onChange={(e) => setFields({ ...fields, addr: e.target.checked })} />관리 주소</label> : null}
+          {d.admin && !d.scoped ? <label className="bmf-lbl" title="관리 주소(iDRAC) — 전체 범위 관리자만"><input type="checkbox" checked={!!fields.addr} onChange={(e) => setFields({ ...fields, addr: e.target.checked })} />관리 주소</label> : null}
           <label className="bmf-lbl"><input type="checkbox" checked={onlyUn} onChange={(e) => setOnlyUn(e.target.checked)} />미분류만</label>
           {scope === 'corp' ? (
             <Select className="select" value={corp} onChange={(e) => setCorp(e.target.value)} aria-label="법인" style={{ maxWidth: 220 }}>

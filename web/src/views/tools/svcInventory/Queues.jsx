@@ -474,7 +474,7 @@ function BmRuleAdd({ corp, folders, svcs, nameOf, op, busy, onDone }) {
       {pvErr ? <div style={{ fontSize: 12, color: 'var(--red)' }}>{pvErr}</div> : null}
       {pv ? (
         <div className="muted" style={{ fontSize: 12 }}>
-          이 폴더(하위 포함) 베어메탈 <b>{pv.members}</b>대{pv.members ? ` — 지금: ${pv.from.map((x) => `${x.serviceId ? nameOf(x.serviceId) : '(미지정)'}${x.pinned ? '(고정)' : ''} ${x.n}`).join(' · ')}` : ''}.
+          이 폴더(하위 포함) 베어메탈 <b>{pv.members}</b>대{pv.from.length ? ` — 지금: ${pv.from.map((x) => `${x.serviceId ? nameOf(x.serviceId) : '(미지정)'}${x.pinned ? '(고정)' : ''} ${x.n}`).join(' · ')}` : ''}{pv.kept ? ` · 하위 폴더 규칙이 잡고 있어 그대로 ${pv.kept}` : ''}.
           {v.svc && moving ? <> 만들면 <b>{moving}</b>대가 ‘{nameOf(v.svc)}’ 로 옮겨 갑니다(고정한 서버는 그대로 · 고정과 달라지면 드리프트).</> : null}
         </div>
       ) : v.prefix && !pvErr ? <div className="muted" style={{ fontSize: 12 }}>미리보기를 받는 중…</div> : null}

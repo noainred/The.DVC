@@ -40,7 +40,7 @@ import { vmRefOf, vmTagsOf, tagsPartialOf } from '../../tags/analyze.js';
 import { buildInventory, hostKeyOf } from '../../servicemap/build.js';
 import { bmFolderMatches } from '../../servicemap/resolve.js';
 import { CORP_OPS, FLEET_OPS } from '../../servicemap/ops.js';
-import { getMap, getPins, peekMap, peekPins, storeRev, storeLoadError, mutateMap, mutatePins, flushStore, resetCorrupt, LIMITS } from '../../servicemap/store.js';
+import { getMap, getPins, peekMap, peekPins, storeRev, storeLoadError, mutateMap, mutatePins, flushStore, resetCorrupt, LIMITS, cleanFolderPath } from '../../servicemap/store.js';
 import { mergeLatestRows, rowsByAgentKeyOf, makeCapOf, clampEdgeTs } from './corpUsage.js';
 // v2.986 물리서버 폴더 규칙 — 배치 판정은 물리서버 폴더의 것 하나를 부른다(도메인 모듈 — routes 를 import 하지 않는다)
 import { peekMain as bmfPeekMain, peekAssign as bmfPeekAssign, storeRev as bmfStoreRev, storeLoadError as bmfStoreError } from '../../bmfolders/store.js';
@@ -562,11 +562,14 @@ export const maskName = (m, admin, hide = false) => {
   return m.name;
 };
 
+/** 글자마다 소문자로 — 길이가 바뀌는 글자는 그대로 둔다(색인 보존). */
+function lowSameLen(s) { let o = ''; for (const ch of s) { const l = ch.toLowerCase(); o += l.length === ch.length ? l : ch; } return o; }
 /** 이름에서 태그(대소문자 무시)를 '•••' 로 바꾼다 — 길이를 먼저 자르고 indexOf 로(외부 입력에 정규식 금지). */
 export function stripTag(name, tag) {
-  const n = String(name ?? '').slice(0, 256); const tg = lc(tag);
+  const n = String(name ?? '').slice(0, 256); const tg = lowSameLen(String(tag ?? '').trim());
   if (!tg) return n;
-  const low = n.toLowerCase(); let out = ''; let i = 0;
+  // 길이가 바뀌는 소문자화('İ' → 'i̇' 2글자)로 색인이 어긋나면 태그 대신 엉뚱한 글자를 가리고 태그가 드러났다(2차 반증 5) — 글자별로 길이를 지킨다
+  const low = lowSameLen(n); let out = ''; let i = 0;
   for (let j = low.indexOf(tg); j >= 0; j = low.indexOf(tg, i)) { out += `${n.slice(i, j)}•••`; i = j + tg.length; }
   return out + n.slice(i);
 }
@@ -854,18 +857,23 @@ export function registerSvcInventory(api) {
 
       // v2.986 물리서버 폴더 규칙 미리보기 — 만들기 전에 그 폴더(하위 포함) 베어메탈이 지금 어느 서비스에 있는지 센다(만들면 옮겨 갈 구성원을 사람이 보고 누르게).
       if (op === 'bmrule.add' && b.dry === true) {
-        const p = String(b.prefix ?? '').trim();
-        if (!p) return res.status(400).json({ ok: false, reason: '물리서버 폴더를 지정하십시오.' });
+        // 저장과 같은 정리(cleanFolderPath)를 거친 경로로 센다 — 끝의 '\\' · 공백이 다른 미리보기를 만들지 않게(2차 반증 4)
+        const cp = cleanFolderPath(b.prefix);
+        if (cp.error || !cp.value) return res.status(400).json({ ok: false, reason: cp.error || '물리서버 폴더를 지정하십시오.' });
+        const p = cp.value;
         const { g, inv } = await inventoryFor(req, snap);
         const placed = bmFolderMapOf(g.members);
         if (!placed) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 폴더 저장소를 읽지 못해 배치를 모릅니다.' });
-        const from = new Map(); let n = 0;
+        const from = new Map(); let n = 0; let kept = 0;
         for (const m of g.members) {
           if (m.kind !== 'bm' || m.corp !== corp || !bmFolderMatches(p, placed.get(m.key))) continue;
-          n += 1; const r = inv.resolved.get(m.key); const k = r?.src === 'pin' ? `pin:${r.serviceId}` : (r?.serviceId || '');
+          n += 1; const r = inv.resolved.get(m.key);
+          // 더 긴(같은) 기존 물리서버 폴더 규칙이 잡고 있는 서버는 새 규칙이 와도 그대로다(긴 경로 우선) — 옮겨 갈 대수에 넣지 않는다(2차 반증 4)
+          if (r?.src === 'bmfolder' && String(r.via || '').length >= p.length) { kept += 1; continue; }
+          const k = r?.src === 'pin' ? `pin:${r.serviceId}` : (r?.serviceId || '');
           from.set(k, (from.get(k) || 0) + 1);
         }
-        return res.json({ ok: true, result: { prefix: p, members: n, from: [...from].map(([k, c]) => (k.startsWith('pin:') ? { serviceId: k.slice(4), pinned: true, n: c } : { serviceId: k || null, n: c })) } });
+        return res.json({ ok: true, result: { prefix: p, members: n, kept, from: [...from].map(([k, c]) => (k.startsWith('pin:') ? { serviceId: k.slice(4), pinned: true, n: c } : { serviceId: k || null, n: c })) } });
       }
       if (CORP_OPS[op]) {
         const r = mutateMap((d) => CORP_OPS[op](d, { ...b, corp }));

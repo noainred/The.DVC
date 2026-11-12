@@ -175,6 +175,20 @@ export function resultNote(okText, result) {
   return { ok: true, text: `${okText}${skipped ? ` (건너뜀: ${skipped})` : ''}` };
 }
 
+/**
+ * 이름 바꾸기 · 지우기 결과 알림 — **응답 값으로**(미리 센 값이 아니라 서버가 실제로 한 것 — 2차 반증 2).
+ * 빈 폴더를 바꾸거나 지운 것을 '바뀐 서버가 없습니다' 경고로 보이지 않게 resultNote 의 0건 판정을 타지 않는다.
+ */
+export function renameNote(r = {}) {
+  const n = Number(r?.svcRules) || 0;
+  if (r?.svcRulesNotMoved) return { ok: false, warn: true, text: `폴더 이름은 바꿨지만 서비스 인벤토리의 물리서버 폴더 규칙을 옮기지 못했습니다(${String(r.svcRulesNotMoved).slice(0, 120)}) — 서비스 인벤토리 › 소속 규칙에서 경로를 고치십시오.` };
+  return { ok: true, text: `폴더 이름을 바꿨습니다${n ? ` — 서비스 인벤토리의 물리서버 폴더 규칙 ${n}개도 새 경로로 옮겼습니다` : ''}.` };
+}
+export function removeNote(label, r = {}) {
+  const k = Number(r?.removed) || 0; const s = Number(r?.svcRules) || 0;
+  return { ok: true, text: `폴더 ‘${label}’ 을(를) 지웠습니다${k ? ` — ${k}대가 (미분류)로 돌아갔습니다` : ''}.${s ? ` 서비스 인벤토리의 물리서버 폴더 규칙 ${s}개가 아직 이 경로를 가리킵니다 — 서비스 인벤토리 › 소속 규칙에서 정리하십시오.` : ''}` };
+}
+
 /** 폴더 이름별(전 법인) 묶음 — 같은 경로의 폴더를 법인을 넘어 합친다(읽기 전용 보기). */
 export function foldersByName(corps = []) {
   const m = new Map();

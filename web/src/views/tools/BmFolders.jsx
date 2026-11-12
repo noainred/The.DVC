@@ -20,6 +20,7 @@ import {
   INTRO, PLACE_LABEL, MISSING_WHY, pctText, wattsText, pathText, lastSeg, parentOf, ageText,
   rowsOf, aggregate, filterRows, resultNote, foldersByName, opErrorText, csvNameOf, trimPath,
   VIEWS_KEY, parseViews, upsertView, cleanView, underPath,
+  renameNote, removeNote,
 } from './bmFoldersText.js';
 
 const btn = { padding: '6px 12px', flex: 'none' };
@@ -72,7 +73,8 @@ export default function BmFolders() {
     try {
       const r = await postJson('/tools/bm-folders/op', body);
       if (!r || r.ok === false) throw new Error(r?.reason || '요청을 처리하지 못했습니다.');
-      setNote(resultNote(okText, r.result));
+      // okText 가 함수면 응답으로 알림을 만든다(이름 바꾸기 · 지우기 — 서버가 실제로 한 것)
+      setNote(typeof okText === 'function' ? okText(r.result || {}) : resultNote(okText, r.result));
       await load();
       return r;
     } catch (e) { setNote({ ok: false, text: opErrorText(e) }); return null; }
@@ -425,7 +427,7 @@ function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName,
         <span className="muted" style={{ fontSize: 12 }}>‘{pathText(sel.path)}’ 새 이름(하위 폴더 · 등록 · 이 법인 규칙의 경로도 함께)</span>
         <input className="input" autoFocus value={fv.name || ''} onChange={(e) => setFv({ ...fv, name: e.target.value })} aria-label="새 폴더 이름" style={{ maxWidth: 220 }} />
         <button type="button" className="login-btn" style={btn} disabled={busy || !String(fv.name || '').trim()} onClick={async () => {
-          const r = await op({ op: 'folder.rename', corp: sel.corp, path: sel.path, name: fv.name }, `폴더 이름을 바꿨습니다${svcRuleN ? ' — 서비스 인벤토리의 물리서버 폴더 규칙도 새 경로로 옮겼습니다' : ''}.`);
+          const r = await op({ op: 'folder.rename', corp: sel.corp, path: sel.path, name: fv.name }, renameNote);
           if (r) { setForm(''); onRenamed(r.result?.path || sel.path); }
         }}>바꾸기</button>
         <button type="button" className="logout-btn" style={btn} onClick={() => setForm('')}>취소</button>
@@ -441,7 +443,7 @@ function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName,
           {svcRuleN ? ` 서비스 인벤토리의 물리서버 폴더 규칙 ${svcRuleN}개가 이 경로를 가리킵니다 — 그 규칙은 지우지 않으니 서비스 인벤토리 › 소속 규칙에서 정리하십시오.` : ''}
         </span>
         <button type="button" className="logout-btn" style={{ ...btn, color: 'var(--red)' }} disabled={busy} onClick={async () => {
-          const r = await op({ op: 'folder.remove', corp: sel.corp, path: sel.path, expect: folderN }, `폴더 ‘${pathText(sel.path)}’ 을(를) 지웠습니다 — ${folderN}대가 (미분류)로 돌아갔습니다.`);
+          const r = await op({ op: 'folder.remove', corp: sel.corp, path: sel.path, expect: folderN }, (x) => removeNote(pathText(sel.path), x));
           if (r) { setForm(''); onRemoved(); }
         }}>{folderN}대를 미분류로 돌리고 삭제</button>
         <button type="button" className="logout-btn" style={btn} onClick={() => setForm('')}>취소</button>

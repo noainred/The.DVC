@@ -109,3 +109,17 @@ describe('bmFoldersText v2.986 — 맵 · 저장한 보기', () => {
     expect(l.length).toBe(VIEWS_MAX); expect(l[0].name).toBe('v29');
   });
 });
+
+import { renameNote, removeNote } from './bmFoldersText.js';
+
+describe('bmFoldersText v2.986 — 이름 바꾸기 · 지우기 알림은 응답 값으로', () => {
+  it('빈 폴더를 바꾸거나 지워도 경고가 아니다 · 옮긴 규칙 수는 응답 값 · 못 옮겼으면 경고', () => {
+    expect(renameNote({ path: 'X', moved: 0 })).toEqual({ ok: true, text: '폴더 이름을 바꿨습니다.' });
+    expect(renameNote({ moved: 3, svcRules: 2 }).text).toBe('폴더 이름을 바꿨습니다 — 서비스 인벤토리의 물리서버 폴더 규칙 2개도 새 경로로 옮겼습니다.');
+    const bad = renameNote({ moved: 1, svcRules: 0, svcRulesNotMoved: '서비스 인벤토리 저장 실패(디스크 쓰기)' });
+    expect([bad.ok, bad.warn, bad.text.includes('옮기지 못했습니다')]).toEqual([false, true, true]);
+    expect(removeNote('DB', { removed: 0, svcRules: 0 })).toEqual({ ok: true, text: '폴더 ‘DB’ 을(를) 지웠습니다.' });
+    expect(removeNote('DB', { removed: 2, svcRules: 1 }).text).toBe('폴더 ‘DB’ 을(를) 지웠습니다 — 2대가 (미분류)로 돌아갔습니다. 서비스 인벤토리의 물리서버 폴더 규칙 1개가 아직 이 경로를 가리킵니다 — 서비스 인벤토리 › 소속 규칙에서 정리하십시오.');
+    expect([renameNote({}).text, removeNote('x', {}).text].some((s) => s.includes('`'))).toBe(false);
+  });
+});

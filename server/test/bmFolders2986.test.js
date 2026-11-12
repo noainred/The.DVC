@@ -19,7 +19,7 @@ const { buildIndex, autoResolve, bmFolderMatches } = await import('../src/servic
 const { buildInventory } = await import('../src/servicemap/build.js');
 const registry = await import('../src/idrac/registry.js');
 const { store } = await import('../src/store.js');
-const { registerBmFolders, downsample } = await import('../src/routes/api/bmFolders.js');
+const { registerBmFolders, downsample, _svcRuleRenameForTest } = await import('../src/routes/api/bmFolders.js');
 const svcinv = await import('../src/routes/api/svcInventory.js');
 
 const routes = new Map();
@@ -29,11 +29,11 @@ const ADMIN = { username: 'admin', role: 'admin', scope: { vcenters: [], regions
 const OPER = { username: 'op', role: 'operator', scope: { vcenters: [], regions: [], writeVcenters: [] } };
 const VIEWER = { username: 'v', role: 'viewer', scope: { vcenters: [], regions: [], writeVcenters: [] } };
 const SCOPED = { username: 'op-a', role: 'operator', scope: { vcenters: ['vc-a'], regions: [], writeVcenters: [] } };
-async function call(key, { user = ADMIN, query = {}, body = {} } = {}) {
+async function call(key, { user = ADMIN, query = {}, body = {}, shared = false } = {}) {
   const res = { statusCode: 200, headers: {}, body: undefined, headersSent: false,
     status(c) { this.statusCode = c; return this; }, json(o) { this.body = o; this.headersSent = true; return this; },
     setHeader(k, v) { this.headers[k] = v; }, set(k, v) { this.headers[k] = v; return this; }, end() { this.headersSent = true; return this; }, send(x) { this.body = x; this.headersSent = true; return this; } };
-  await routes.get(key)({ user, query, body, ip: '127.0.0.1', headers: {}, originalUrl: `${key.replace(/^\w+ /, '/api')}?${new URLSearchParams(query)}&u=${user.username}` }, res);
+  await routes.get(key)({ user, query, body, ip: '127.0.0.1', headers: {}, originalUrl: `${key.replace(/^\w+ /, '/api')}?${new URLSearchParams(query)}${shared ? '' : `&u=${user.username}`}` }, res);   // shared: 운영처럼 같은 URL(응답 캐시 열쇠만으로 갈려야 한다)
   return res;
 }
 let gen = 0;
@@ -218,6 +218,114 @@ test('③ 추이 경로: 서버 비교와 같은 해석 — 이 노드 수집은
       const e = await call('GET /tools/bm-folders/trend', { query: { key: 'st:tag3' } });
       assert.deepEqual([e.body.via, e.body.why, e.body.rows], ['edge', 'none', [{ ts: 5, cpu: null, mem: null }]], '값이 하나도 없으면 none(0 으로 그리지 않는다)');
       assert.ok(calls.some((c) => c[0] === 'edge' && c[1] === 'pl-edge' && c[2] === 'cpu_pct,mem_pct'));
+    });
+  } finally { _setTrendDepsForTest(null); }
+});
+
+// ───────── 2차 반증 반영(v2.986 — 전체 검증) ─────────
+const SCOPED_ADMIN = { username: 'adm-a', role: 'admin', scope: { vcenters: ['vc-a'], regions: [], writeVcenters: [] } };
+
+test('반증2-1 범위 지정 관리자 판본: 관리 주소 속 태그(idrac-<태그>)를 가린다 · 주소로 찾기는 전체 범위 관리자만 · 응답 어디에도 태그가 없다', async () => {
+  reset();
+  registry.importServers([SRV('s1', 'kr-db-01', 'TAG1', 'vc-a', 'https://idrac-TAG1.corp.local/redfish'), SRV('s2', 'kr-db-02', 'TAG2', 'vc-a')], 'replace');
+  await withSnap(async () => {
+    const full = await call('GET /tools/bm-folders');
+    assert.equal(full.body.servers.find((x) => x.name === 'kr-db-01').addr, 'idrac-TAG1.corp.local', '전체 범위 관리자는 원문');
+    const sa = await call('GET /tools/bm-folders', { user: SCOPED_ADMIN });
+    assert.equal(sa.body.servers.find((x) => x.name === 'kr-db-01').addr, 'idrac-•••.corp.local');
+    assert.equal(/tag1/i.test(JSON.stringify(sa.body)), false, '범위 판본 응답 어디에도 태그가 없다');
+    assert.equal((await call('GET /tools/bm-folders/search', { query: { inc: 'idrac-tag1', fields: 'addr' } })).body.total, 1);
+    const ss = await call('GET /tools/bm-folders/search', { user: SCOPED_ADMIN, query: { inc: 'idrac-tag1', fields: 'addr' } });
+    assert.equal(ss.body.total, 0, '범위 판본은 주소로 찾지 않는다(가린 태그를 맞혀 보는 길)');
+    assert.equal((await call('GET /tools/bm-folders/search', { user: SCOPED_ADMIN, query: { inc: 'idrac', fields: 'addr' } })).body.total, 0);
+  });
+});
+
+test('반증2-2 이름 바꾸기: 바뀐 경로에 다른 서비스 인벤토리 규칙이 있으면 409 — 폴더 · 등록 · 규칙 어느 것도 바뀌지 않는다', async () => {
+  reset({ svc: { 'vc-a': corpOf({ services: [S('s1', 'ERP'), S('s2', 'DB')], bmFolderRules: [{ prefix: 'DB', serviceId: 's2' }, { prefix: 'DB\\Oracle', serviceId: 's2' }, { prefix: 'X\\Oracle', serviceId: 's1' }] }) } });
+  await withSnap(async () => {
+    await call('POST /tools/bm-folders/op', { body: { op: 'assign', path: 'DB\\Oracle', keys: ['st:tag1'] } });
+    const before = JSON.stringify([bs.peekMain(), bs.peekAssign(), sm.peekMap().corps['vc-a'].bmFolderRules]);
+    const rn = await call('POST /tools/bm-folders/op', { body: { op: 'folder.rename', corp: 'vc-a', path: 'DB', name: 'X' } });
+    assert.equal(rn.statusCode, 409, JSON.stringify(rn.body)); assert.match(rn.body.reason, /X\\Oracle/);
+    assert.equal(JSON.stringify([bs.peekMain(), bs.peekAssign(), sm.peekMap().corps['vc-a'].bmFolderRules]), before, '아무것도 쓰지 않았다');
+    // 겹침이 없으면 규칙이 모두 옮겨 가고 응답이 옮긴 수를 밝힌다(화면 알림은 이 값으로 — 미리 센 값 아님)
+    const ok = await call('POST /tools/bm-folders/op', { body: { op: 'folder.rename', corp: 'vc-a', path: 'DB', name: 'Y' } });
+    assert.equal(ok.statusCode, 200); assert.equal(ok.body.result.svcRules, 2);
+    assert.deepEqual(sm.peekMap().corps['vc-a'].bmFolderRules.map((r) => r.prefix).sort(), ['X\\Oracle', 'Y', 'Y\\Oracle']);
+  });
+});
+
+test('반증2-3 서비스 인벤토리 도구가 막힌 계정: 규칙이 걸린 폴더 이름 바꾸기 403(아무것도 안 바뀜) · 규칙 없는 폴더는 된다 · 서비스 연결(svcLinks)을 싣지 않는다', async () => {
+  const perm = await import('../src/auth/permissions.js');
+  reset({ svc: { 'vc-a': corpOf({ services: [S('s2', 'DB')], bmFolderRules: [{ prefix: 'DB', serviceId: 's2' }] }) } });
+  assert.equal(perm.setUserTools('op', { mode: 'deny', tools: ['svc-inventory'] }).ok, true);
+  try {
+    await withSnap(async () => {
+      await call('POST /tools/bm-folders/op', { body: { op: 'assign', path: 'DB', keys: ['st:tag1'] } });
+      await call('POST /tools/bm-folders/op', { body: { op: 'folder.add', corp: 'vc-a', path: 'WEB' } });
+      const g = await call('GET /tools/bm-folders', { user: OPER, shared: true });
+      assert.deepEqual(g.body.svcLinks, {}, '도구 접근이 없으면 서비스 이름을 싣지 않는다');
+      const g2 = await call('GET /tools/bm-folders', { user: { ...OPER, username: 'op2' }, shared: true });
+      assert.deepEqual(g2.body.svcLinks['vc-a'].map((x) => x.service), ['DB'], '같은 역할 · 범위라도 도구 접근이 다르면 캐시가 갈린다');
+      assert.deepEqual((await call('GET /tools/bm-folders')).body.svcLinks['vc-a'].map((x) => x.service), ['DB'], '관리자는 그대로(캐시 열쇠가 갈린다)');
+      const rn = await call('POST /tools/bm-folders/op', { user: OPER, body: { op: 'folder.rename', corp: 'vc-a', path: 'DB', name: 'DB2' } });
+      assert.equal(rn.statusCode, 403, JSON.stringify(rn.body));
+      assert.deepEqual(sm.peekMap().corps['vc-a'].bmFolderRules.map((r) => r.prefix), ['DB']);
+      assert.ok(bs.peekMain().corps['vc-a'].folders.includes('DB'));
+      assert.equal((await call('POST /tools/bm-folders/op', { user: OPER, body: { op: 'folder.rename', corp: 'vc-a', path: 'WEB', name: 'WEB2' } })).statusCode, 200, '규칙이 없으면 된다');
+    });
+  } finally { perm.setUserTools('op', { mode: 'off' }); }
+});
+
+test('반증2-2b 이름 바꾸기 저장 단계(심층 방어): 사전 검사 뒤 겹침이 생겼으면 버리지 않고 409 · 규칙은 그대로', () => {
+  reset({ svc: { 'vc-a': corpOf({ services: [S('s1', 'ERP'), S('s2', 'DB')], bmFolderRules: [{ prefix: 'DB', serviceId: 's2' }, { prefix: 'X', serviceId: 's1' }] }) } });
+  const r = _svcRuleRenameForTest('vc-a', 'DB', (x) => (x === 'DB' || x.startsWith('DB\\') ? `X${x.slice(2)}` : x));
+  assert.equal(r.n, 0); assert.ok(r.error);
+  assert.deepEqual(sm.peekMap().corps['vc-a'].bmFolderRules.map((x) => x.prefix), ['DB', 'X'], '옮기던 규칙을 버리지 않았다');
+});
+
+test('반증2-4 규칙 미리보기: 더 긴 기존 규칙이 잡은 서버는 옮겨 갈 대수에 넣지 않는다(kept) · 경로는 저장과 같은 정리를 거친다', async () => {
+  reset({ svc: { 'vc-a': corpOf({ services: [S('s2', 'DB'), S('s3', 'ORA')], bmFolderRules: [{ prefix: 'DB\\Oracle', serviceId: 's3' }] }) } });
+  await withSnap(async () => {
+    await call('POST /tools/bm-folders/op', { body: { op: 'assign', path: 'DB\\Oracle', keys: ['st:tag1'] } });
+    await call('POST /tools/bm-folders/op', { body: { op: 'assign', path: 'DB', keys: ['st:tag2'] } });
+    const dry = await call('POST /tools/svc-inventory/op', { body: { op: 'bmrule.add', corp: 'vc-a', prefix: ' DB ', dry: true } });
+    assert.equal(dry.statusCode, 200, JSON.stringify(dry.body));
+    assert.deepEqual([dry.body.result.prefix, dry.body.result.members, dry.body.result.kept, dry.body.result.from], ['DB', 2, 1, [{ serviceId: null, n: 1 }]]);
+    assert.equal((await call('POST /tools/svc-inventory/op', { body: { op: 'bmrule.add', corp: 'vc-a', prefix: 'DB\\\\', dry: true } })).statusCode, 400, '빈 단계는 저장처럼 거부');
+  });
+});
+
+test('반증2-5 stripTag: 길이가 바뀌는 소문자화(İ)가 앞에 있어도 태그 자리를 정확히 가린다', () => {
+  assert.equal(svcinv.stripTag('İİ-ABC123', 'abc123'), 'İİ-•••');
+  assert.equal(svcinv.stripTag('İdrac-ABC123.corp', 'ABC123'), 'İdrac-•••.corp');
+  assert.equal(svcinv.stripTag('x-abc123-ABC123', 'Abc123'), 'x-•••-•••');
+  assert.equal(svcinv.stripTag('no-tag', ''), 'no-tag');
+});
+
+test('반증2-추이: 같은 (엣지, 서버, 구간)은 합쳐 한 번만 당긴다(진행 중 공유 · 성공 기억) · 실패 사유는 전체 범위 관리자에게만', async () => {
+  const { _setTrendDepsForTest } = await import('../src/routes/api/bmFolders.js');
+  reset();
+  let n = 0; let release; const gate = new Promise((r) => { release = r; });
+  const deps = (edge) => ({ resolve: async (req, o) => ({ via: 'edge', agent: 'pl-edge', realKey: o.key, target: { vcenterId: o.vcenterId } }), fail: () => null,
+    localSeries: async () => ({ ok: false }), edgeSeries: async () => { n += 1; await gate; return edge; } });
+  try {
+    await withSnap(async () => {
+      _setTrendDepsForTest(deps({ ok: true, body: { metrics: { cpu_pct: { spark: [[5, 10, 10]] }, mem_pct: { spark: [[5, 20, 20]] } } } }));
+      const p = [call('GET /tools/bm-folders/trend', { query: { key: 'st:tag3' } }), call('GET /tools/bm-folders/trend', { query: { key: 'st:tag3' } })];
+      await new Promise((r) => setImmediate(r)); release();
+      const [a, b] = await Promise.all(p);
+      assert.deepEqual([a.body.rows, b.body.rows], [[{ ts: 5, cpu: 10, mem: 20 }], [{ ts: 5, cpu: 10, mem: 20 }]]);
+      await call('GET /tools/bm-folders/trend', { query: { key: 'st:tag3' } });
+      assert.equal(n, 1, '진행 중 · 60초 안 같은 요청은 WAN 1회');
+      await call('GET /tools/bm-folders/trend', { query: { key: 'st:tag3', hours: '48' } });
+      assert.equal(n, 2, '구간이 다르면 따로');
+      _setTrendDepsForTest(deps({ ok: false, kind: 'error', reason: 'fetch failed https://10.9.9.9:8443' }));
+      const op = await call('GET /tools/bm-folders/trend', { user: OPER, query: { key: 'st:tag3' } });
+      assert.deepEqual([op.body.why, op.body.reason], ['edge-fail', undefined], '운영자(관리자 아님)에게는 엣지 주소가 든 사유를 싣지 않는다');
+      const ad = await call('GET /tools/bm-folders/trend', { query: { key: 'st:tag3' } });
+      assert.match(ad.body.reason, /10\.9\.9\.9/, '전체 범위 관리자는 진단용으로 받는다(실패도 잠깐 합친다)');
     });
   } finally { _setTrendDepsForTest(null); }
 });
