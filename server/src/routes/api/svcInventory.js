@@ -533,13 +533,16 @@ async function inventoryFor(req, snap) {
   const key = [snap?.generatedAt || 0, st.rev, st.bmRev, g.at, _inputRev, known ? [...known].sort().join(',') : '-', allowed ? [...allowed].sort().join(',') : '*', admin ? 'a' : 'u'].join('|');
   const now = Date.now();
   const hit = _invMemo.get(key);
-  if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, allowed, admin }; }
+  if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, members: hit.members, allowed, admin }; }
   _invStats.misses += 1;
-  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, bmFolderOf: bmFolderMapOf(g.members), hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, bmHeldKeys: g.bmHeldKeys, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
+  // v2.990: 목록 · 큐에 싣는 순서 — 가린 판본은 보이는 이름 → 보이는 키(`visibleOrder`), 전체 범위 관리자는 수집 순서 그대로.
+  // 판정(resolved · 집계)은 **수집 순서 그대로** 돌린다(판본마다 판정이 달라지지 않게) — 큐를 채우는 순회만 이 순서를 쓴다(`queueMembers`).
+  const members = visibleOrder(g.members, admin, !!allowed);
+  const inv = buildInventory({ members: g.members, queueMembers: members, map: st.map, pins: st.pins, bmFolderOf: bmFolderMapOf(g.members), hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, bmHeldKeys: g.bmHeldKeys, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
   for (const [k, v] of _invMemo) if (now - v.at >= INV_MEMO_MS) _invMemo.delete(k);
   while (_invMemo.size >= INV_MEMO_MAX) _invMemo.delete(_invMemo.keys().next().value);
-  _invMemo.set(key, { at: now, inv });
-  return { st, g, inv, allowed, admin };
+  _invMemo.set(key, { at: now, inv, members });
+  return { st, g, inv, members, allowed, admin };
 }
 
 /**
@@ -627,6 +630,26 @@ export function stripTag(name, tag) {
   return out + n.slice(i);
 }
 
+/**
+ * v2.990(v2.989 반증 B-6) — **가린 판본의 목록 순서는 보이는 이름 → 보이는 키**.
+ * 입력 수집 순서는 함대 정렬(전력 내림차순 → **원문** 이름 — `insights/fleetInventory.js`)이다. 그대로 실으면 이름이 전부 'idrac-•••' 로 보이는 서버들이
+ * 원문 태그 순으로 나와 가린 서비스 태그(범위 계정) · 가린 주소(비관리자)의 상대 순서가 드러났다. 순서는 **그 계정이 응답에서 보는 값만으로** 정한다.
+ *  · 가린 판본 = 범위 계정(`hide`) 또는 비관리자(`!admin`) — 판정은 `isMaskedView` 하나. 전체 범위 관리자 판본(가리는 것이 없다)은 받은 순서 그대로 돌려준다.
+ *  · 자르기(CAP · slice) **앞에** 부른다 — 자른 뒤 정렬하면 '어느 것이 잘렸는가' 로 원문 순서가 남는다.
+ *  · 이름이 같으면 키(토큰) 순 — 토큰은 프로세스 HMAC 이라 원문 순서와 무관하다. 찾기(`bmFolders.js /search` — 반증 6)와 같은 비교 하나를 쓴다.
+ * 원본 배열은 고치지 않는다(입력 수집 결과는 여러 요청이 함께 쓴다).
+ */
+const VISIBLE_COLLATOR = new Intl.Collator('ko');   // localeCompare(…, 'ko') 와 같은 비교 — 요청마다 만들지 않는다(실측: 6,500건 15ms → 5.5ms)
+export const isMaskedView = (admin, hide) => !!hide || !admin;
+export function visibleOrder(list, admin, hide, { nameOf = (x) => maskName(x, admin, hide), keyOf = (x) => pubKey(x.key, hide), always = false } = {}) {
+  if (!always && !isMaskedView(admin, hide)) return list;
+  const deco = list.map((x) => ({ x, n: String(nameOf(x) ?? ''), k: String(keyOf(x) ?? '') }));
+  deco.sort((a, b) => VISIBLE_COLLATOR.compare(a.n, b.n) || (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+  return deco.map((d) => d.x);
+}
+/** 이름이 실리지 않는 키 목록(유령 · 정리 미리보기 · 불일치) — 보이는 키 순. */
+export const visibleKeyOrder = (keys, admin, hide, keyOf = (k) => pubKey(k, hide)) => visibleOrder(keys, admin, hide, { nameOf: () => '', keyOf });
+
 function memberRow(m, r, admin, hide = false) {
   return {
     key: pubKey(m.key, hide), keyKind: m.keyKind, kind: m.kind, corp: m.corp, name: maskName(m, admin, hide), serviceId: r.serviceId, src: r.src, via: r.src === 'folder' || r.src === 'bmfolder' || r.src === 'scan' || r.src === 'tag' || r.src === 'rule' ? r.via : '',
@@ -699,7 +722,7 @@ export function registerSvcInventory(api) {
     try {
       const snap = store.get();
       if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable' });
-      const { g, inv, allowed, admin, st } = await inventoryFor(req, snap);
+      const { g, inv, members, allowed, admin, st } = await inventoryFor(req, snap);
       const corp = t(req.query.corp); const svc = t(req.query.service); const gid = t(req.query.global); const unassigned = req.query.unassigned === '1';
       // 법인 귀속이 없는 미지정 구성원만(6차 6 — 예전에는 corp='' 가 '조건 없음' 으로 읽혀 전 법인 미지정이 나왔다). 범위 계정에는 싣지 않는다.
       const nocorp = req.query.nocorp === '1';
@@ -717,7 +740,7 @@ export function registerSvcInventory(api) {
         if (unassigned) return !r.serviceId;
         return !!corp;   // 법인만 주면 그 법인 전부 — 아무 조건도 없으면 빈 목록(전 함대를 한 번에 내리지 않는다)
       };
-      const list = g.members.filter(pick);
+      const list = members.filter(pick);   // 가린 판본은 보이는 순서(v2.990) — 자르기(CAP)보다 먼저
       const CAP = 5000;
       const rows = list.slice(0, CAP).map((m) => memberRow(m, inv.resolved.get(m.key), admin, !!allowed));
       // 영향 호스트 — 호스트별 VM 을 한 번만 묶는다(전 법인 보기에서 호스트 수 × 구성원 수로 돌지 않게).
@@ -780,7 +803,9 @@ export function registerSvcInventory(api) {
         // 판정 보류(5차 R10): 언제부터(이 포탈 프로세스가 처음 본 시각 — 재시작하면 다시 센다) · 무엇이 막혔는지. 출처 문구는 관리자 판본만(장비·수집 서버 이름).
         // 유령·보류는 앞 GHOST_SHOW 건만 싣고 전체 개수·법인별 개수를 따로 준다(6차 8 — 실측: 상한 없이 고정 5만 건이면 응답 4.8MB). 정리 버튼은 법인별 개수로 연다.
         ...(() => {
-          const gl = q.ghosts.filter(inCorp); const hl = heldWithSince(q.ghostsHeld, !allowed).filter(inCorp);
+          // 유령 · 보류는 고정 저장 순서(= 누군가 고정을 건 순서 — 관리자가 함대 순서 목록에서 한꺼번에 걸었으면 원문 순서)다 — 가린 판본은 보이는 키 순(v2.990), 자르기보다 먼저
+          const byKeyOrder = (l) => visibleKeyOrder(l, admin, hide, (x) => pubKey(x.key, hide));
+          const gl = byKeyOrder(q.ghosts.filter(inCorp)); const hl = byKeyOrder(heldWithSince(q.ghostsHeld, !allowed).filter(inCorp));
           const byCorp = {}; for (const x of gl) byCorp[x.corp] = (byCorp[x.corp] || 0) + 1;
           return { ghosts: maskKeyOnly(gl.slice(0, GHOST_SHOW)), ghostsN: gl.length, ghostsByCorp: byCorp, ghostsHeld: maskKeyOnly(hl.slice(0, GHOST_SHOW)), ghostsHeldN: hl.length };
         })(),
@@ -799,12 +824,13 @@ export function registerSvcInventory(api) {
       const snap = store.get();
       // 손상 저장소면 빈 트리 기준(전부 '미소속')으로 답하지 않는다(5차 검토 M6 — members·queues 와 같은 규칙).
       if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '서비스 인벤토리 저장소를 읽지 못했습니다.' });
-      const { g, inv, allowed, admin } = await inventoryFor(req, snap);
+      const { inv, members, allowed, admin } = await inventoryFor(req, snap);
       const kind = req.query.kind === 'vm' ? 'vm' : 'bm';
       const corp = t(req.query.corp); const qq = lc(req.query.q).slice(0, 64); const onlyUn = req.query.unassignedOnly !== '0';
       const hide = !!allowed;   // R7 — 범위 계정은 서비스태그로 찾지 않는다(찾기가 태그를 맞혀 보는 길이 되지 않게)
       if (corp && allowed && !allowed.has(corp)) return res.status(404).json({ ok: false, reason: '법인(vCenter)을 찾지 못했습니다.' });
-      const list = g.members.filter((m) => m.kind === kind && m.corp && (!allowed || allowed.has(m.corp)) && (!corp || m.corp === corp)
+      // 가린 판본은 보이는 순서(v2.990 — `inventoryFor` 의 members) · 자르기(CAP)보다 먼저
+      const list = members.filter((m) => m.kind === kind && m.corp && (!allowed || allowed.has(m.corp)) && (!corp || m.corp === corp)
         && (!onlyUn || !inv.resolved.get(m.key)?.serviceId)
         && (!qq || lc(maskName(m, admin, hide)).includes(qq) || (!hide && lc(m.serviceTag).includes(qq)) || lc(m.folderPath).includes(qq) || lc(m.ip).includes(qq)));
       const CAP = 2000;
@@ -819,7 +845,7 @@ export function registerSvcInventory(api) {
     if (!lock.ok) return res.status(lock.status).json(lock.body);
     try {
       const snap = store.get();
-      const { g, inv, allowed, admin } = await inventoryFor(req, snap);
+      const { g, inv, members, allowed, admin } = await inventoryFor(req, snap);
       const svcById = new Map(inv.services.map((s) => [s.id, s]));
       const SRC = { pin: '고정', folder: 'vCenter 폴더 규칙', bmfolder: '물리서버 폴더 규칙', scan: '스캔 엔트리', tag: '태그', rule: '이름 규칙', none: '미지정' };
       // 5차 M11·R19: 전역 서비스·등급·담당자 · 드리프트 · 키 종류 · 백업은 화면과 같은 말(영문 코드 금지)
@@ -827,7 +853,7 @@ export function registerSvcInventory(api) {
       const KEY_KIND = { instanceUuid: 'instanceUuid', moref: 'moref(임시)', serviceTag: '서비스태그', fleetId: 'fleetId(임시)' };
       const globalById = new Map((inv.global?.globals || []).map((x) => [x.id, x]));
       const lines = [CSV_BOM + csvLine(['법인', '폴더', '서비스', '전역 서비스', '등급', '담당자', '종류', '이름', '키', '키 종류', '소속 근거', '근거 값', '드리프트', '전원', 'CPU%', '메모리%', 'vCPU/코어', '메모리GB', '스토리지GB', '부품 장애', '백업 24h', '호스트', 'IP'])];
-      for (const m of g.members) {
+      for (const m of members) {   // 가린 판본은 보이는 순서(v2.990)
         if (allowed && !allowed.has(m.corp)) continue;
         if (!m.corp && allowed) continue;
         const r = inv.resolved.get(m.key); const s = r.serviceId ? svcById.get(r.serviceId) : null;
@@ -1064,7 +1090,8 @@ export function registerSvcInventory(api) {
         const ghostKeys = new Set(inv.queues.ghosts.filter((x) => x.corp === corp).map((x) => x.key));
         const hideKeys = !!scopedVcenterIds(user, snap);   // R7 — 범위 계정에는 토큰으로 보이고 토큰으로 받는다
         // dry 는 앞 GHOST_PRUNE_MAX 건의 키만 준다(6차 8 — 받는 쪽 상한과 같다). 그보다 많으면 total 로 알리고 화면이 '다시 누르면 다음' 을 안내한다.
-        if (b.dry === true) return res.json({ ok: true, result: { keys: [...ghostKeys].slice(0, GHOST_PRUNE_MAX).map((k) => pubKey(k, hideKeys)), total: ghostKeys.size, max: GHOST_PRUNE_MAX, held: inv.queues.ghostsHeld.filter((x) => x.corp === corp).length } });
+        // 가린 판본은 보이는 키 순으로 자른다(v2.990 — 고정 저장 순서를 싣지 않는다)
+        if (b.dry === true) return res.json({ ok: true, result: { keys: visibleKeyOrder([...ghostKeys], isAdminDetailUser(user), hideKeys).slice(0, GHOST_PRUNE_MAX).map((k) => pubKey(k, hideKeys)), total: ghostKeys.size, max: GHOST_PRUNE_MAX, held: inv.queues.ghostsHeld.filter((x) => x.corp === corp).length } });
         const resolveGhost = keyResolverFor(hideKeys, [...ghostKeys]);
         // 화면이 미리 본 **키**와 지금 유령의 교집합만 지운다(5차 R11 · 3차 반증 3 — 개수만 비교하면 확인창에 없던 키가 끼어 지워졌다. insights fleet/prune 과 같은 방식).
         // 옛 화면(키 없이 개수만 · 아무것도 없이)도 받는다: expect 는 정수만, 다르면 409.
