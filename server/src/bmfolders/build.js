@@ -145,11 +145,16 @@ export function buildFolders({ members = [], main, assign = {}, allowed = null, 
 
   const aliasOk = aliasGuardOf(members);
   const aliasUsed = new Set();   // 배치에 실제로 쓴 별칭 등록 — 이것만 '지금 있는 서버의 것'(없어짐에서 뺀다)
+  const migrate = [];            // v2.993: 저장 키를 별칭 → 지금 키(st:)로 옮길 후보(applyKeyMigration 이 다시 확인하고 쓴다)
   for (const m of members) {
     if (!m || !m.key) continue;
     byKey.set(m.key, m);
     const p = placeMember(m, assign, sorted, autoRules, aliasOk);
     if (p.aliasKey) aliasUsed.add(p.aliasKey);
+    // v2.993(묶음 C — 폴더 등록 키 정리): 태그를 읽어 키가 st: 로 오른 서버의 등록이 아직 별칭(fl:)에 있으면 저장 키를 옮길 후보 — 판정은 **키 접두어**
+    //   (keyKind 값은 'serviceTag' · 'fleetId' 다 — 'st' 로 비교하면 한 번도 맞지 않는다: 첫 판본의 결함)
+    //   같은 법인 · 쓸 수 있는 별칭(aliasOk)만(assignOf 가 이미 그 조건으로 골랐다) · 지금 키에 등록이 없을 때만(별칭이 쓰였다는 것이 곧 그 뜻).
+    if (p.aliasKey && String(m.key).startsWith('st:') && m.corp) migrate.push({ from: p.aliasKey, to: m.key, corp: m.corp, drop: aliasRegsOf(m, assign, aliasOk).filter((k) => k !== p.aliasKey) });
     placeOf.set(m.key, p);
     if (!m.corp) {
       if (!allowed && m.kind === 'bm') noCorp += 1;
@@ -236,7 +241,7 @@ export function buildFolders({ members = [], main, assign = {}, allowed = null, 
     .sort((a, b) => (b.n - a.n) || a.prefix.localeCompare(b.prefix))
     .slice(0, 8).map((g) => ({ prefix: g.prefix, n: g.n, corps: [...g.corps].sort() }));
 
-  return { placeOf, byKey, corps, noCorp, missing, mismatch, prefixGroups, autoRules, aliasOk };
+  return { placeOf, byKey, corps, noCorp, missing, mismatch, prefixGroups, autoRules, aliasOk, migrate };
 }
 
 /** 찾기 글자 목록 — 소문자 · 앞뒤 공백 제거 · 제어 문자 제거 · 64자 · 중복 제거 · 최대 10개. */
@@ -298,4 +303,27 @@ export function searchMembers(members, placeOf, o = {}) {
   }
   rows.sort((a, b) => a.m.name.localeCompare(b.m.name, 'ko'));
   return { rows, total: rows.length, facets };
+}
+
+/**
+ * v2.993(묶음 C — 설계 §14 결정 1-(가)): 등록 저장 키 자동 변경(별칭 fl: → 태그 키 st:). 순수 — draft.assign 을 고친다.
+ * 후보(buildFolders migrate)를 **지금 저장 상태에서 다시 확인**한다: 별칭 등록이 그대로 있고 · 같은 법인이고 · 지금 키에 등록이 없을 때만 옮긴다(그사이 누가 바꿨으면 건드리지 않는다).
+ * 같은 법인의 다른 별칭 등록(같은 서버의 예전 키)은 함께 지운다(assign 의 plan.drop 과 같은 규칙). 경로 · 이름 · 등록자 · 시각은 그대로 옮긴다(위치는 바뀌지 않는다).
+ * @returns {number} 옮긴 건수
+ */
+export function applyKeyMigration(assign, list) {
+  let moved = 0;
+  for (const x of Array.isArray(list) ? list : []) {
+    const a = assign?.[x?.from];
+    if (!a || !x.to || x.to === x.from || a.corp !== x.corp || assign[x.to]) continue;
+    assign[x.to] = { ...a };
+    delete assign[x.from];
+    for (const d of Array.isArray(x.drop) ? x.drop : []) if (d !== x.to && assign[d]?.corp === x.corp) delete assign[d];
+    moved += 1;
+  }
+  return moved;
+}
+/** 옮길 것이 실제로 있는가(쓰기 전에 — 바뀐 것 없는 쓰기로 세대를 올리지 않게). */
+export function keyMigrationPending(assign, list) {
+  return (Array.isArray(list) ? list : []).some((x) => { const a = assign?.[x?.from]; return !!(a && x.to && x.to !== x.from && a.corp === x.corp && !assign[x.to]); });
 }
