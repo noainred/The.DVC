@@ -163,6 +163,18 @@ async function gather(snap, tagCategory) {
   return p;
 }
 
+/**
+ * v2.984 물리서버 폴더(`routes/api/bmFolders.js`)가 같은 입력(함대 분류 · 법인 귀속 · 사용률 · 부품 장애)을 **같은 단일 비행으로** 쓴다 —
+ * 베어메탈 목록 판정을 두 벌 만들지 않는다(판정 코어는 하나). 태그 카테고리는 서비스 인벤토리 설정 그대로(같은 키 = 같은 수집 공유).
+ */
+export function sharedGather(snap) {
+  let cat = '';
+  try { cat = peekMap()?.settings?.tagCategory || ''; } catch { cat = ''; }
+  return gather(snap, cat);
+}
+/** 입력 세대(입력 다시 읽기 · 스캔 라벨 변경 때 오른다) — 물리서버 폴더 응답 캐시 열쇠에 넣는다. */
+export const sharedInputRev = () => _inputRev;
+
 const _gatherStats = { runs: 0, inFlight: 0, maxInFlight: 0 };
 /** 시험용 — 입력 수집이 몇 번 돌았고 동시에 몇 벌까지 겹쳤는가(2차 반증 4 회귀). */
 export function _gatherStatsForTest() { return { ..._gatherStats }; }
@@ -324,6 +336,8 @@ async function gatherNowInner(snap, tagCategory) {
       scan, ...(scanWhy ? { scanWhy } : {}), ...(corpWhy ? { corpWhy } : {}), powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
       usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src } : { state: 'unread' },
       faults: faultsOf(b.serviceTag, sid), corpRule: b.vcSource === 'corp-rule',
+      // v2.984 물리서버 폴더(bmfolders)가 함께 쓰는 입력 — 서비스 인벤토리 응답에는 싣지 않는다(memberRow 가 고른다)
+      model: t(b.model), watts: numOrNull(b.watts), collectorId: t(b.collectorId),
     });
   }
   // ── 파생 호스트(구성원이 아니다): 가상화 호스트의 사용률·장애 ──
@@ -331,7 +345,7 @@ async function gatherNowInner(snap, tagCategory) {
   for (const h of fleet.virtualizationHosts || []) {
     const vc = t(h.vcenterId); if (!vc) continue;
     const x = judged.get(`${vc}|virt|${lc(h.name)}`) || null;
-    hostByKey.set(hostKeyOf(vc, h.name), { name: t(h.name), corp: vc, serviceTag: t(h.serviceTag), usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct } : null, faults: faultsOf(h.serviceTag), connectionState: t(h.connectionState) });
+    hostByKey.set(hostKeyOf(vc, h.name), { name: t(h.name), corp: vc, serviceTag: t(h.serviceTag), usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct } : null, faults: faultsOf(h.serviceTag), connectionState: t(h.connectionState), model: t(h.model), watts: numOrNull(h.watts) });
   }
   let bmBlocked = false; let bmBlockedSources = [];
   try {
@@ -491,7 +505,7 @@ export function keyResolverFor(hide, candidates = []) {
     return isBmKey(k) ? '' : k;
   };
 }
-const maskName = (m, admin, hide = false) => {
+export const maskName = (m, admin, hide = false) => {
   if (!admin && m.kind === 'bm' && m.nameIsAddr) return maskedAddressName(m.name);
   // 이름이 곧 서비스태그인 베어메탈(호스트 이름 없이 등록) — 범위 계정 판본에서는 이름도 가린다(R7)
   if (hide && m.kind === 'bm' && m.serviceTag && lc(m.name) === lc(m.serviceTag)) return `서버 ${pubKey(m.key, true).slice(-6)}`;

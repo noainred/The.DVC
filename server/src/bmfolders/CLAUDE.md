@@ -1,0 +1,28 @@
+# 물리서버 폴더(`bmfolders/` · 라우트 `routes/api/bmFolders.js` · 도구 키 `bm-folders`) 불변조건 — v2.984
+
+> 설계 · 시안 · 결정 기록은 `docs/design/bm-folders/README.md`. 사용자 선택: 기본값대로(법인 › 폴더 · 한 서버 한 폴더 · 베어메탈 기본 + ESXi 선택 ·
+> 자동 규칙 꺼진 채 포함 · 서비스 인벤토리 연결 · 맵 · 저장한 보기 · 엣지 화면은 2단계).
+
+- **입력은 서비스 인벤토리 입력 수집 하나**(`svcInventory.js sharedGather` — 같은 단일 비행 · 같은 키): 함대 분류 · 법인 귀속 · 사용률 · 부품 장애를 두 벌 만들지 않는다.
+  베어메탈 키는 `bmKeyOf`(`st:<태그>` · 없으면 `fl:<sha1 16자>`) · ESXi 호스트는 `bmKeyOf({ serviceTag, fleetId: name })` — 분류가 바뀌어도 같은 박스는 같은 키다.
+  태그 없는 같은 이름 ESXi 호스트가 두 법인에 있으면 키가 겹친다 — 뒤의 것을 버리지 않고 `dupKeys` 로 센다(응답에 싣는다).
+  입력에 새 필드가 필요하면 `gatherNowInner` 의 구성원에 **덧붙이고** 서비스 인벤토리 응답(`memberRow`)에는 싣지 않는다.
+- **판정 코어는 `build.js` 하나**(순수): 손 등록(법인이 지금 법인과 같을 때만) → 자동 규칙(`settings.autoRules` 켜짐 · 베어메탈만 · 법인 규칙 먼저 · 긴 값 먼저 · 포함 — 정규식 아님) → (미분류).
+  손 등록의 법인과 지금 법인이 다르면 **놓지 않고** `mismatch` 로 센다(다른 법인 폴더에 조용히 남기지 않는다). 법인이 없는 서버는 폴더에 넣을 수 없다.
+  화면 합계(용량 가중 CPU · 메모리 · 전력 · 장애)는 웹 `bmFoldersText.js aggregate` 하나 — 못 읽은 값 · 용량 모름은 빼고 따로 센다.
+- **목록에 없는 등록**: 출처를 다 읽었을 때만 `ghost`. 베어메탈 출처 중 못 읽은 것(`g.bmBlocked`) · 수집 전/꺼진 법인(`g.corpHold`) · 골격 스냅샷이면 `held` — 보류는 지우지 않는다.
+  정리(`ghost.prune`)는 dry 의 **키**를 받아 키 ∩ 지금 없어짐 ∩ 쓰기 범위만 지운다.
+- **저장소(`store.js`)**: 파일 둘 — `bm-folders.json`(폴더 · 규칙 · 설정, 설정 변경 감시 대상) · `bm-folders-assign.json`(등록, **`backup/service.js CHANGE_WATCH_EXCLUDE`** — 등록 한 번이
+  '설정 변경' 백업을 만들지 않게. 번들에는 들어간다). 메모리가 진실 · 200ms 디바운스 원자 쓰기 · 손상이면 빈 트리로 시작하지 않고 503 · 쓰기 차단(두 파일 중 하나라도 손상이면 전부) ·
+  초기화는 전체 범위 관리자 + 손상본 보존. 폴더 경로 검증은 `servicemap/store.js cleanFolderPath` 하나(구분자 '\\' · 60자 · 10단계) · 경로는 글자만 받는다.
+  넘침(법인당 폴더 · 규칙 · 등록 수)은 조용히 자르지 않고 400.
+- **범위 · 가림**: 조회는 `scopedVcenterIds` 교집합이 요청 필터보다 먼저 · 법인 미지정 서버 · 엣지 이름은 범위 계정에 싣지 않는다 ·
+  **범위 계정 판본은 서비스 태그를 싣지 않는다**(키 `pubKey` 토큰 · 이름 `maskName` · 쓰기는 `keyResolverFor` — 원문 st:/fl: 키 거부 · 서비스 태그 찾기 끔 ·
+  찾기 · 이름 앞부분 묶음은 **가린 이름으로만** 맞춘다 · 목록에서 사라진 등록의 이름은 키의 태그로 가리고 등록 순간 주소였으면(`addr`) 비관리자 판본에서 가린다).
+  새 응답 필드를 만들면 이 셋(키 · 이름 · 태그)을 지나는지 먼저 볼 것.
+- **쓰기**: admin/operator · 데모 아님 · 법인 쓰기는 `corpWriteAccess`('조회 밖 404 → 쓰기 밖 403'). 여러 법인을 한 번에 등록하면 쓰기 밖 법인 서버는 건너뛰고 `skipped.readOnly` 로 센다
+  (전부 쓰기 밖이면 403). 전 법인('*') 규칙 · 자동 규칙 켜기 · 초기화는 **조회 ∧ 쓰기 무제한 관리자**(`fleetAdmin`). 폴더 삭제는 미리 본 등록 수(`expect`)가 다르면 409 —
+  서버는 지우지 않고 (미분류)로 돌린다. 두 파일을 함께 바꾸는 연산(이름 바꾸기 · 삭제 · 등록)은 시작 전에 두 파일이 정상인지 본다.
+- **엣지**: 엣지 push 계약은 바꾸지 않았다 — 엣지가 올린 베어메탈 목록(`central/fleet.js`)의 키로 중앙이 등록한다. 엣지 보고가 만료되면 그 서버들은 목록에서 빠지고 등록은 보류로 남는다.
+- **라우트 · 이 폴더를 고치면 커밋 전에 `node scripts/api-doc.mjs` · `node scripts/arch-doc.mjs`**(줄 번호 — `apiDoc2563` · `audit2613h`), 도구 목록을 고치면 `node scripts/tools-catalog.mjs`(`toolCatalog2614`).
+- 회귀: `server/test/bmFolders2984.test.js` · 웹 `web/src/views/tools/bmFoldersText.test.js`.

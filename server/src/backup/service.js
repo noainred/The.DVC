@@ -215,7 +215,9 @@ export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json', 'back
   // v2.915 Monitoring 설정 연동 상태 — 5분 감지가 일별 요약·연동 키(known)를 쓴다(설정 변경 아님). 번들에는 들어간다.
   'svcmon-settings-sync.json',
   // v2.960 시험 점검 엣지 대기(시작 · 판정 때마다 바뀌는 판정 상태 — 설정 변경 아님). 번들에는 들어간다.
-  'svcmon-trial.json']); // v2.889 첨부 목록(올릴 때마다 바뀐다 — 본체는 백업에 넣지 않는다)
+  'svcmon-trial.json',
+  // v2.984 물리서버 폴더 등록(서버를 폴더에 넣고 옮길 때마다 바뀐다 — service-map-pins.json 과 같은 이유. 폴더 구조 bm-folders.json 은 설정이라 감시 대상). 번들에는 들어간다.
+  'bm-folders-assign.json']); // v2.889 첨부 목록(올릴 때마다 바뀐다 — 본체는 백업에 넣지 않는다)
 // 서비스 인벤토리 고정(한 대씩 고정·검토·유령 정리 때마다 바뀐다 — 5차 검토 R1: 고정 한 번이 '설정 변경' 백업 939KB 를 만들었다. 서비스·규칙(service-map.json)은 설정이라 감시 대상 그대로)
 // v2.888 위키 즐겨찾기 · 조회 수(문서를 열 때마다 바뀐다) · v2.864: 이슈 트래커 · v2.881 위키 · v2.882 스프린트 · 저장 필터도 같은 성질(사용자 데이터)
 export function isChangeWatchExcluded(name) { return CHANGE_WATCH_EXCLUDE.has(path.basename(String(name || ''))); }

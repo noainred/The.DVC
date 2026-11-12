@@ -63,6 +63,7 @@ import { registerBmLogs } from './api/bmLogs.js'; // 7a단계 리눅스 성능 �
 import { registerServerSensors } from './api/serverSensors.js'; // 서버 온도 › 센서 상세(v2.659)
 import { registerCorpUsage } from './api/corpUsage.js'; // 법인별 서버 사용량(전체·물리·가상화, v2.625)
 import { registerSvcInventory } from './api/svcInventory.js'; // 서비스 인벤토리(VM + 베어메탈 · 법인 › 폴더 › 서비스 · 전역 카탈로그, v2.887)
+import { registerBmFolders } from './api/bmFolders.js'; // 물리서버 폴더(베어메탈을 법인 › 폴더로 등록 · 찾아 일괄 등록, v2.984)
 import { registerLinkCheck } from './api/linkCheck.js'; // 통신 점검(중앙↔엣지·vCenter·엣지↔엣지, v2.552)
 import { registerXferSpeed } from './api/xferSpeed.js'; // 법인 간 전송 속도(중앙↔엣지 10MB 왕복, v2.735)
 import { registerFocusMon } from './api/focusMon.js'; // 집중 모니터링(v2.976) — 리눅스 서버 최대 20대 실시간 · DB 30일
@@ -195,6 +196,7 @@ registerBmPlaybookSlo(api);
 registerBmLogs(api);
 registerCorpUsage(api);
 registerSvcInventory(api);
+registerBmFolders(api);
 registerServerSensors(api);
 registerLinkCheck(api);
 registerXferSpeed(api);
