@@ -77,7 +77,6 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
       const w = ldPrev ? loadWindow(ldPrev, snap, { tck: hello?.tck, page: hello?.page, ncpu: hello?.ncpu, ...ld }) : null;
       if (w) {
         const load = { ...w, at: now(), interval: iv, procEvery: pe, procs: raw.proc ? raw.proc.length : (prevProc ? prevProc.length : null) };
-        status.load = load;
         try { onLoad?.(load); } catch { /* */ }
       }
       ldPrev = snap; ldReset();
@@ -148,7 +147,12 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
           wd.unref?.();
           try {
             // v2.983: 받은 바이트 · 해석 시간을 노드 카운터에(수집 부하의 '노드 몫' — 줄 받기 · 프레임 계산만, SSH 복호는 빠진다)
-            const r = await api.execStream(scriptFor(iv, pe), { onLine: (l) => { lastLineAt = now(); const t0 = performance.now(); nodeCounters.rxBytes += String(l ?? '').length + 1; parser.push(l); nodeCounters.parseMs += performance.now() - t0; }, signal: mine.signal, maxLine: LINE_MAX + 64 });
+            //   해석 시간은 16줄에 한 줄만 재고 16배 한다(반증 F11 — 줄마다 performance.now 두 번이면 큰 서버 40대에서 코어의 몇 % · 추정치).
+            let lineN = 0;
+            const r = await api.execStream(scriptFor(iv, pe), { onLine: (l) => {
+              lastLineAt = now(); nodeCounters.rxBytes += String(l ?? '').length + 1;
+              if ((++lineN & 15) === 0) { const t0 = performance.now(); parser.push(l); nodeCounters.parseMs += (performance.now() - t0) * 16; } else parser.push(l);
+            }, signal: mine.signal, maxLine: LINE_MAX + 64 });
             return { stream: r };
           } finally { clearInterval(wd); }
         }, { signal: mine.signal });
@@ -203,7 +207,9 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
       const n = normProcEvery(next);
       if (n === pe) return false;
       pe = n;
-      if (busy && ctl && !ctl.signal.aborted) ctl.abort(); else schedule(0);
+      // 반증 F10: 지금 수집 중인 세션만 끊고 새 상수로 다시 연다. 물러나 있거나(실패 대기 · 호스트키 대기) 멈춘(리눅스 아님 · 인증 정지) 수집기는
+      //   다음 접속 때 새 상수를 쓴다 — 예전에는 schedule(0) 으로 그 대기를 건너뛰어, 전역 설정 하나가 모든 대상에 곧바로 다시 로그인했다.
+      if (busy && ctl && !ctl.signal.aborted) ctl.abort();
       return true;
     },
     procEvery: () => pe,

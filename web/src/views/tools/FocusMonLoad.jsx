@@ -22,16 +22,18 @@ const BASE = '#/tools/focus-mon';
 function JudgeBadge({ j }) { return j ? <Badge b={LOAD_JUDGE[j]} /> : <span className="fm-dim">{DASH}</span>; }
 
 /** 줄 아래 패널 — 묶음별 CPU · 1회 비용 · 보내는 양 · 줄이는 방법 · 어떻게 쟀나. */
-function LoadDetail({ r, onClose }) {
+function LoadDetail({ r, onClose, d }) {
   const l = r.load;
-  const tips = loadReduceTips(r);
+  const topoSec = d.cadence?.topoSec;
+  const tips = loadReduceTips(r, d.choices, topoSec);
   return (
     <div className="fm-pd">
       <div className="fm-row fm-between fm-pd-head">
-        <span className="fm-row"><b>{r.name}</b><span className="fm-dim">{r.host} · {r.agent ? `엣지 ${r.agent}` : '중앙'}{l?.windowS ? ` · ${l.windows ? `창 ${l.windows}개 평균` : `최근 ${Math.round(l.windowS)}초 창`}` : ''}</span></span>
+        <span className="fm-row"><b>{r.name}</b><span className="fm-dim">{r.host} · {r.agent ? `엣지 ${r.agent}` : '중앙'}{l?.windowS ? ` · ${l.windows ? `분당 기록 ${l.windows}개 평균` : `최근 ${Math.round(l.windowS)}초 창`}` : ''}</span></span>
         <button type="button" className="fm-btn sm" onClick={onClose}>닫기</button>
       </div>
-      {!l ? <span className="fm-dim">{r.staleS != null ? `마지막 창이 ${r.staleS}초 전이라(오래됨) 싣지 않았습니다 — 수집이 이어지면 30초 안에 새 창이 옵니다.` : '아직 창이 없습니다 — 수집을 시작하고 약 1분(창 둘) 뒤에 나옵니다.'}</span> : (
+      {/* 반증 F6: 값이 없는 까닭을 단정하지 않는다 — 가능한 까닭을 늘어놓는다 */}
+      {!l ? <span className="fm-dim">{r.staleS != null ? `마지막 창이 ${r.staleS}초 전이라(오래됨) 싣지 않았습니다.` : '이 서버의 수집 부하 창이 아직 없습니다.'} 가능한 까닭: 수집을 시작한 지 {d.cadence?.windowSec ?? DASH}초가 안 됨 · 이 서버를 맡은 엣지가 v2.983 전 판 · 원격 셸이 측정 줄을 내지 못함 · 연결이 끊김.</span> : (
         <div className="fm-pd-grid">
           <div className="fm-card">
             <h4 className="fm-h3">묶음별 — 이 서버에서 쓴 CPU</h4>
@@ -41,7 +43,7 @@ function LoadDetail({ r, onClose }) {
                 const x = l.groups?.[g] || {};
                 return (
                   <div key={g} className="fm-lgroup" title={LOAD_GROUP_WHAT[g]}>
-                    <div className="fm-row fm-between"><span>{loadGroupLabel(g, r.procEvery)}</span><b className="fm-num">{pctText(x.pct, 2)}</b></div>
+                    <div className="fm-row fm-between"><span>{loadGroupLabel(g, r.procEvery, topoSec)}</span><b className="fm-num">{pctText(x.pct, 2)}</b></div>
                     <span className="fm-dim fm-num">1회 {msText(x.msPerRun)} × {x.runs ?? DASH}회 · 보내는 양 {byteRateText(l.bpsBy?.[g])}</span>
                   </div>
                 );
@@ -132,9 +134,9 @@ export function LoadTab({ main, tb }) {
       {!d.dbOk ? <div className="fm-ban w">기록 DB 를 읽지 못해 지난 구간 값을 보여 드릴 수 없습니다.</div> : null}
       <div className="fm-kpis">
         <div className="fm-card fm-kpi"><span className="l">대상 서버 — 수집 CPU 평균</span><span className="v">{tt.cpuAvg == null ? DASH : numText(tt.cpuAvg, 2)}{tt.cpuAvg == null ? null : <small>%</small>}</span><span className="s">{tt.cpuMax ? `코어 1개 기준 · 최고 ${tt.cpuMax.name} ${pctText(tt.cpuMax.pct, 2)}` : '값이 있는 서버가 없습니다'}{tt.missing ? ` · 값 없음 ${tt.missing}대` : ''}</span></div>
-        <div className="fm-card fm-kpi"><span className="l">노드 — 중앙 포탈 CPU</span><span className="v">{central?.load?.cpuPct == null ? DASH : numText(central.load.cpuPct, 1)}{central?.load?.cpuPct == null ? null : <small>%</small>}</span><span className="s">{central?.load ? `그중 집중 모니터링 해석 ${pctText(central.load.fmPct, 2)} · 지연 p99 ${msText(central.load.elP99Ms)}` : DASH}</span></div>
+        <div className="fm-card fm-kpi"><span className="l">노드 — 중앙 포탈 CPU</span><span className="v">{central?.load?.cpuPct == null ? DASH : numText(central.load.cpuPct, 1)}{central?.load?.cpuPct == null ? null : <small>%</small>}</span><span className="s">{central?.load ? `그중 집중 모니터링 해석 ${pctText(central.load.fmPct, 2)} · 루프 사용률 ${pctText(central.load.eluPct, 1)} · 가장 긴 멈춤 ${msText(central.load.elMaxMs)}` : '이 노드에 수집기가 없어 재지 않습니다'}</span></div>
         <div className="fm-card fm-kpi"><span className="l">보내는 양 — 대상 → 노드</span><span className="v fm-v-sm">{byteRateText(tt.bps)}</span><span className="s">중앙 직접 {byteRateText(tt.centralDirectBps)} · 엣지 법인 안 {byteRateText(tt.edgeLocalBps)} · 엣지 → 중앙 {byteRateText(tt.edgeToCentralBps)}</span></div>
-        <div className="fm-card fm-kpi"><span className="l">기록 DB 쓰기(중앙)</span><span className="v fm-v-sm">{byteRateText(tt.dbWriteBps)}</span><span className="s">{tt.dbRetentionBytes == null ? '아직 모릅니다(쓰기 기록 30초 이상 필요)' : `최근 ${Math.max(1, Math.round((central?.load?.dbWindowS ?? 60) / 60))}분 평균 · 이 속도로 ${d.settings.retentionDays}일이면 약 ${bytesText(tt.dbRetentionBytes)}(추정 — 오래된 기록 정리 · 용량 상한은 빠짐)`}</span></div>
+        <div className="fm-card fm-kpi"><span className="l">기록 DB 쓰기(중앙)</span><span className="v fm-v-sm">{byteRateText(tt.dbWriteBps)}</span><span className="s">{tt.dbRetentionBytes == null ? '아직 모릅니다(쓰기 기록이 더 필요합니다)' : `${d.live ? `최근 ${(central?.load?.dbWindowS ?? 0) >= 60 ? `${Math.round(central.load.dbWindowS / 60)}분` : `${central?.load?.dbWindowS ?? DASH}초`} 평균` : '구간 평균'} · 이 속도로 ${d.settings.retentionDays}일이면 약 ${bytesText(tt.dbRetentionBytes)}(줄 본문 기준 추정 — 색인 · 쪽 여유만큼 실제 파일은 더 크고, 오래된 기록 정리 · 용량 상한은 빠짐)`}</span></div>
       </div>
 
       <div className="fm-card fm-flush">
@@ -143,7 +145,7 @@ export function LoadTab({ main, tb }) {
             <h3 className="fm-h3">대상 서버 — 수집이 그 서버에서 쓴 것</h3>
             <span className="fm-row">{loadJudgeNote(d.settings).map(([k, t]) => <span key={k} className="fm-row fm-nowrap"><Badge b={LOAD_JUDGE[k]} /><span className="fm-dim">{t}</span></span>)}<span className="fm-dim">(코어 1개 기준)</span></span>
           </div>
-          <span className="fm-dim">{d.live ? `대상마다 최근 30초 창 · ${d.liveMaxS}초 넘게 새 창이 없으면 ‘오래됨’` : `${clockText(d.from, true)} ~ ${clockText(d.to)} 구간의 분당 기록 평균`} · 줄을 누르면 묶음별 비용 · 줄이는 방법이 그 줄 아래에 열립니다.</span>
+          <span className="fm-dim">{d.live ? `수집 중인 서버마다 최근 ${d.cadence?.windowSec ?? DASH}초 창 · ${d.liveMaxS}초 넘게 새 창이 없으면 ‘오래됨’` : `${clockText(d.from, true)} ~ ${clockText(d.to)} 구간의 분당 기록 평균(그 구간에 기록이 있는 서버만)`} · 줄을 누르면 묶음별 비용 · 줄이는 방법이 그 줄 아래에 열립니다.</span>
         </div>
         {rows.length ? (
           <div className="fm-tblbox">
@@ -158,7 +160,7 @@ export function LoadTab({ main, tb }) {
                       <td data-sort={r.name}><span className="fm-name" title={t ? nameTitle(t) : r.name}>{r.name}</span>{r.demo ? <span className="fm-badge off">데모</span> : null}</td>
                       <td>{r.agent ? `엣지 ${r.agent}` : '중앙'}</td>
                       <td className="fm-r fm-num" data-sort={r.interval ?? null}>{r.interval ? `${r.interval}초` : DASH}</td>
-                      <td>{r.mode ? MODE_TEXT[r.mode] || r.mode : <span className="fm-dim">끝남</span>}</td>
+                      <td>{r.mode ? MODE_TEXT[r.mode] || r.mode : <span className="fm-dim">{d.live ? '끝남' : DASH}</span>}</td>
                       <td className="fm-r fm-num" data-sort={l?.procs ?? null}>{l?.procs ?? DASH}</td>
                       <td className="fm-r fm-num" data-sort={l?.cpuPct ?? null}>{l ? pctText(l.cpuPct, 2) : r.staleS != null ? <span className="fm-dim" title={`마지막 창 ${r.staleS}초 전`}>오래됨</span> : DASH}</td>
                       <td className="fm-r fm-num" data-sort={l?.sshdPct ?? null}>{pctText(l?.sshdPct, 2)}</td>
@@ -167,31 +169,31 @@ export function LoadTab({ main, tb }) {
                       <td className="fm-r fm-num" data-sort={l?.rssBytes ?? null}>{bytesText(l?.rssBytes)}</td>
                       <td data-sort={r.judge ? ['light', 'mid', 'heavy'].indexOf(r.judge) : null}><JudgeBadge j={r.judge} /></td>
                     </tr>
-                    {on ? <tr className="fm-editrow"><td colSpan={11}><div className="fm-edbox"><LoadDetail r={r} onClose={() => setOpen(null)} /></div></td></tr> : null}
+                    {on ? <tr className="fm-editrow"><td colSpan={11}><div className="fm-edbox"><LoadDetail r={r} d={d} onClose={() => setOpen(null)} /></div></td></tr> : null}
                   </React.Fragment>
                 );
               })}</tbody>
             </STable>
           </div>
-        ) : <div className="fm-pad fm-dim">{d.live ? '지금 수집 중인 서버가 없습니다 — 수집을 시작하면 약 1분 뒤 첫 값이 나옵니다(30초 창 둘).' : '이 구간에 남은 수집 부하 기록이 없습니다.'}</div>}
+        ) : <div className="fm-pad fm-dim">{d.live ? `지금 수집 중인 서버가 없습니다 — 수집을 시작하면 약 ${d.cadence?.windowSec ?? DASH}초 뒤 첫 창이 나옵니다.` : '이 구간에 남은 수집 부하 기록이 없습니다.'}</div>}
       </div>
 
       <div className="fm-card fm-flush">
         <div className="fm-pad fm-col"><h3 className="fm-h3">노드 — 수집을 맡은 포탈(중앙 · 엣지)</h3><span className="fm-dim">{NODE_LOAD_NOTE}</span></div>
         <div className="fm-tblbox">
-          <STable className="fm-table" minWidth={900}>
-            <thead><tr><th>노드</th><th className="fm-r">맡은 서버</th><th className="fm-r">SSH 세션</th><th className="fm-r">포탈 CPU</th><th className="fm-r">그중 집중 모니터링</th><th className="fm-r">메모리(포탈)</th><th className="fm-r">지연 p99</th><th className="fm-r">받는 양</th><th className="fm-r">중앙으로</th><th className="fm-r">DB 쓰기</th></tr></thead>
+          <STable className="fm-table" minWidth={980}>
+            <thead><tr><th>노드</th><th className="fm-r">맡은 서버</th><th className="fm-r">SSH 세션</th><th className="fm-r">포탈 CPU</th><th className="fm-r">그중 집중 모니터링</th><th className="fm-r">메모리</th><th className="fm-r" title="이벤트 루프가 바빴던 시간 비율 · 창 안에서 가장 긴 멈춤(±20ms)">루프 사용률 · 가장 긴 멈춤</th><th className="fm-r">받는 양</th><th className="fm-r">중앙으로</th><th className="fm-r">DB 쓰기</th></tr></thead>
             <tbody>{d.nodes.map((x) => {
               const l = x.load;
               return (
                 <tr key={`${x.kind}-${x.node}`}>
-                  <td data-sort={x.label}>{x.kind === 'central' ? '중앙' : `엣지 ${x.label}`}{x.demo ? <span className="fm-badge off">데모</span> : null}{!l ? <small className="fm-dim"> 표본 없음</small> : null}</td>
+                  <td data-sort={x.label}>{x.kind === 'central' ? '중앙' : `엣지 ${x.label}`}{x.demo ? <span className="fm-badge off">데모</span> : null}{!l ? <small className="fm-dim"> 표본 없음(수집기가 없거나 v2.983 전 판)</small> : null}</td>
                   <td className="fm-r fm-num">{x.servers}</td>
                   <td className="fm-r fm-num" data-sort={l?.sessions ?? null}>{l?.sessions ?? DASH}</td>
                   <td className="fm-r fm-num" data-sort={l?.cpuPct ?? null}>{pctText(l?.cpuPct, 1)}</td>
                   <td className="fm-r fm-num" data-sort={l?.fmPct ?? null}>{pctText(l?.fmPct, 2)}</td>
                   <td className="fm-r fm-num" data-sort={l?.rssBytes ?? null}>{bytesText(l?.rssBytes)}</td>
-                  <td className="fm-r fm-num" data-sort={l?.elP99Ms ?? null}>{msText(l?.elP99Ms)}</td>
+                  <td className="fm-r fm-num" data-sort={l?.eluPct ?? null}>{pctText(l?.eluPct, 1)} <small className="fm-dim">{msText(l?.elMaxMs)}</small></td>
                   <td className="fm-r fm-num" data-sort={l?.rxBps ?? null}>{byteRateText(l?.rxBps)}</td>
                   <td className="fm-r fm-num" data-sort={l?.txBps ?? null}>{x.kind === 'central' ? <span className="fm-dim">{DASH}</span> : byteRateText(l?.txBps)}</td>
                   <td className="fm-r fm-num" data-sort={l?.dbWriteBps ?? null}>{x.kind === 'central' ? byteRateText(l?.dbWriteBps) : <span className="fm-dim" title="엣지는 기록하지 않습니다 — 중앙이 기록합니다">{DASH}</span>}</td>
@@ -218,7 +220,7 @@ export function LoadTab({ main, tb }) {
                   </tbody>
                 </STable>
               </div>
-              <span className="fm-dim">값이 있는 {measured.length}대의 합(코어 1개 = 100% · 서버마다 따로 쓰는 CPU 의 합입니다). 프로세스 묶음은 표본 주기({d.settings.procEvery}초)마다라 주기를 늘려도 그 주기까지는 그대로입니다.</span>
+              <span className="fm-dim">값이 있는 {measured.length}대의 합(코어 1개 = 100% · 서버마다 따로 쓰는 CPU 의 합입니다). 프로세스 묶음은 표본 주기({d.settings.procEvery}초)마다라 주기를 늘려도 그 주기까지는 그대로입니다. 묶음 비용을 모르는 서버가 있으면 그 칸은 —(0 으로 치지 않습니다).</span>
             </>
           ) : <span className="fm-dim">값이 있는 서버가 없어 추정하지 않습니다.</span>}
         </div>
@@ -237,7 +239,7 @@ export function LoadTab({ main, tb }) {
           <LoadSettings d={d} onSaved={q.reload} />
         </div>
       </div>
-      <div className="fm-note">수집 CPU 는 코어 1개 기준입니다(서버 전체 대비는 코어 수로 나눈 값). sshd 몫(암호 처리)은 보내는 양 · 암호 방식에 따라 다릅니다. 측정 자체도 비용입니다 — 30초마다 /proc 파일 두 개를 더 읽고, 묶음마다 셸 내장 명령으로 한 번 더 읽습니다. 실제 RHEL 7.8 서버에서는 아직 재 보지 않았습니다(이 개발 환경에서만 쟀습니다). <a href={`${BASE}/targets`}>대상 · 키</a></div>
+      <div className="fm-note">수집 CPU 는 코어 1개 기준입니다(서버 전체 대비는 코어 수로 나눈 값). sshd 몫(암호 처리)은 보내는 양 · 암호 방식에 따라 다릅니다. 측정 자체도 비용입니다 — {d.cadence?.windowSec ?? DASH}초마다 /proc 파일 두 개를 더 읽고, 묶음마다 셸 내장 명령으로 한 번 더 읽습니다. 실제 RHEL 7.8 서버에서는 아직 재 보지 않았습니다(이 개발 환경에서만 쟀습니다). <a href={`${BASE}/targets`}>대상 · 키</a></div>
     </>
   );
 }

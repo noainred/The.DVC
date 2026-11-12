@@ -7,13 +7,14 @@
  *    tick 은 원격 셸의 utime + stime + cutime + cstime(끝난 자식 포함 — grep · awk · cut · sleep …). 반복문이 새로 열리면(tick 감소) 창을 버린다(null).
  *  · judgeLoad: 문턱(설정 loadWarnPct · loadCritPct — 코어 1개 기준 %) → 'light' | 'mid' | 'heavy' · 값이 없으면 null(가벼움이 아니다).
  *  · estimateLoad: 묶음별 1회 비용(ms) × 횟수로 '주기를 바꾸면' 추정 — 화면이 추정이라고 밝힌다.
- *  · createNodeSampler: 이 포탈 프로세스(중앙 또는 엣지)의 CPU · 메모리 · 이벤트 루프 지연 p99 · 받은 양 · 해석 시간.
+ *  · createNodeSampler: 이 포탈 프로세스(중앙 또는 엣지)의 CPU · 메모리 · 이벤트 루프 사용률 · 가장 긴 멈춤 · 받은 양 · 해석 시간.
+ *    (반증 F3: 예전 '지연 p99' 는 해상도 20ms 가 그대로 값에 들어가 쉴 때도 약 20ms 였고, 400ms 멈춤 두 번도 p99 에 보이지 않았다.)
  *
  * ── 지키는 것 ────────────────────────────────────────────────────────────────────────────────────────
  *  · 못 읽은 값은 null(0 아님) — 창이 짧거나(5초 미만) 길거나(10분 초과) tick 이 줄면 창 전체를 버린다.
  *  · 원격 값은 정수만(parse.parseSelf) · 여기서는 음수 차이를 받지 않는다.
  */
-import { monitorEventLoopDelay } from 'node:perf_hooks';
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 
 export const LOAD_WINDOW_MIN_S = 5;
 export const LOAD_WINDOW_MAX_S = 600;
@@ -48,8 +49,12 @@ export function loadWindow(prev, cur, ctx = {}) {
   const page = fin(ctx.page) && ctx.page > 0 ? ctx.page : 4096;
   const runs = { base: Math.max(0, ctx.frames | 0), topo: Math.max(0, ctx.topoRuns | 0), proc: Math.max(0, ctx.procRuns | 0) };
   const groups = {};
+  const dg = Object.fromEntries(LOAD_GROUPS.map((g) => [g, diff(prev.groups?.[g], cur.groups?.[g])]));
+  // 반증 F5 두 번째 문: 셸은 tick 을 썼는데 묶음 합이 0 이면 묶음 측정이 안 된 것(옛 스크립트 · 측정이 깨진 셸) — 0% 로 보이지 않게 모름으로
+  const gSum = LOAD_GROUPS.reduce((a, g) => a + (dg[g] ?? 0), 0);
+  const groupsBroken = dSelf >= 5 && gSum === 0;
   for (const g of LOAD_GROUPS) {
-    const d = diff(prev.groups?.[g], cur.groups?.[g]);
+    const d = groupsBroken ? null : dg[g];
     groups[g] = { pct: pctOf(d), runs: runs[g], msPerRun: d == null || !runs[g] ? null : r2((d / runs[g]) * (1000 / tck)) };
   }
   const b = ctx.bytes || {};
@@ -107,10 +112,12 @@ export const nodeCounters = { rxBytes: 0, parseMs: 0 };
  * 노드 표본기 — 부를 때마다 앞 부름과의 차이로 한 창을 만든다(보통 30초). 이벤트 루프 지연은 창마다 새로 잰다(p99 · ms).
  * @param {{now?:()=>number, sessions?:()=>number}} o
  */
+const EL_RES_MS = 20;
 export function createNodeSampler({ now = () => Date.now(), sessions = () => 0 } = {}) {
   let h = null;
-  try { h = monitorEventLoopDelay({ resolution: 20 }); h.enable(); } catch { h = null; }
-  let prev = { at: now(), cpu: process.cpuUsage(), rx: nodeCounters.rxBytes, parse: nodeCounters.parseMs };
+  try { h = monitorEventLoopDelay({ resolution: EL_RES_MS }); h.enable(); } catch { h = null; }
+  const elu0 = () => { try { return performance.eventLoopUtilization(); } catch { return null; } };
+  let prev = { at: now(), cpu: process.cpuUsage(), rx: nodeCounters.rxBytes, parse: nodeCounters.parseMs, elu: elu0() };
   let last = null;
   return {
     sample() {
@@ -118,18 +125,22 @@ export function createNodeSampler({ now = () => Date.now(), sessions = () => 0 }
       const ms = at - prev.at;
       if (ms >= 1000) {
         const used = (cpu.user - prev.cpu.user + cpu.system - prev.cpu.system) / 1000; // ms
-        const p99 = h ? h.percentile(99) / 1e6 : null;
+        const maxMs = h ? h.max / 1e6 : null; // 표본 간격(해상도)이 들어 있다 — 뺀 값이 '가장 긴 멈춤'
+        const eluNow = elu0();
+        let elu = null;
+        try { if (eluNow && prev.elu) elu = performance.eventLoopUtilization(eluNow, prev.elu).utilization; } catch { elu = null; }
         last = {
           at, windowS: r2(ms / 1000),
           cpuPct: r2((used / ms) * 100), // 이 포탈 프로세스 전체(코어 1개 = 100%)
           fmPct: r2(((parse - prev.parse) / ms) * 100), // 그중 집중 모니터링 해석(줄 받기 · 프레임 계산) — SSH 복호 · 기록은 빠진다(추정의 아래쪽)
           rssBytes: process.memoryUsage().rss,
-          elP99Ms: p99 == null || !Number.isFinite(p99) ? null : r2(p99),
+          elMaxMs: maxMs == null || !Number.isFinite(maxMs) ? null : r2(Math.max(0, maxMs - EL_RES_MS)), // 창 안에서 가장 길게 다른 일을 기다리게 한 시간(추정 · ±20ms)
+          eluPct: elu == null || !Number.isFinite(elu) ? null : r2(elu * 100), // 이벤트 루프가 바빴던 시간 비율
           rxBps: r2((rx - prev.rx) / (ms / 1000)),
           sessions: sessions(),
         };
         if (h) h.reset();
-        prev = { at, cpu, rx, parse };
+        prev = { at, cpu, rx, parse, elu: eluNow };
       }
       return last;
     },
@@ -166,7 +177,8 @@ export function averageNodes(list = []) {
   if (!xs.length) return null;
   const avg = (k) => { let s = 0; let n = 0; for (const x of xs) { const v = fin(x[k]); if (v != null) { s += v; n += 1; } } return n ? r2(s / n) : null; };
   const last = xs[xs.length - 1];
-  return { windowS: r2(xs.reduce((a, x) => a + (fin(x.windowS) ?? 0), 0)), windows: xs.length, cpuPct: avg('cpuPct'), fmPct: avg('fmPct'), rssBytes: fin(last.rssBytes), elP99Ms: avg('elP99Ms'),
+  return { windowS: r2(xs.reduce((a, x) => a + (fin(x.windowS) ?? 0), 0)), windows: xs.length, cpuPct: avg('cpuPct'), fmPct: avg('fmPct'), rssBytes: fin(last.rssBytes),
+    elMaxMs: xs.reduce((a, x) => { const v = fin(x.elMaxMs); return v == null ? a : Math.max(a ?? 0, v); }, null), eluPct: avg('eluPct'),
     rxBps: avg('rxBps'), txBps: avg('txBps'), dbWriteBps: avg('dbWriteBps'), dbBytes: fin(last.dbBytes), sessions: fin(last.sessions), at: fin(last.at) };
 }
 

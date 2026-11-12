@@ -159,7 +159,7 @@ export function latestProcsOf(id) { return T.get(id)?.latestProcs || null; }
 export function helloOf(id) { return T.get(id)?.hello || null; }
 export function memOldestMinute(id) { const b = memBlocks(id); return b.length ? b[0].minute : null; }
 
-export function drainWrites(max = 400) { return writeQ.splice(0, max); }
+export function drainWrites(max = 400) { const rows = writeQ.splice(0, max); for (const r of rows) r.written = true; return rows; }
 export function pendingWrites() { return writeQ.length; }
 /** 종료 직전 — 열린 묶음을 모두 닫아 대기열에 넣는다(recorder.flushSync 가 쓴다). */
 export function closeAll() { flushReopened(); for (const [id, e] of T) closeCur(id, e); }
@@ -422,11 +422,25 @@ export function desiredFor(agentKey, resolve, now = Date.now()) {
 const LOAD = new Map(); // targetId → { ...load, at }
 const NODE_LOAD = new Map(); // 노드 열쇠('' = 이 중앙 · 엣지 이름 소문자) → { ...sample, at }
 const LOAD_MAX_JSON = 4096;
+/**
+ * 분당 한 줄(반증 F1): 같은 (종류, 열쇠, 분)은 **처음 한 번만** 대기열에 넣고, 아직 쓰기 전이면 그 줄을 새 값으로 바꾼다(이미 썼으면 그 분은 건너뛴다).
+ * 예전에는 30초 창마다(그리고 엣지 노드 표본은 동기화마다 — 2초) 줄을 넣어, 같은 분을 덮어쓰는 줄이 쓰기 양 · 대기열 상한을 차지했다.
+ */
+const lastQueued = new Map(); // `${kind}|${key}` → { minute, row }
 function queueJson(kind, key, now, obj) {
-  try {
-    const data = JSON.stringify(obj);
-    if (data.length <= LOAD_MAX_JSON) writeQ.push({ kind, target: key, minute: Math.floor(now / 60_000), data });
-  } catch { /* 한 줄이 대기열을 깨지 않게 */ }
+  const minute = Math.floor(now / 60_000);
+  const k = `${kind}|${key}`;
+  let data;
+  try { data = JSON.stringify(obj); } catch { return; }
+  if (data.length > LOAD_MAX_JSON) return;
+  const prev = lastQueued.get(k);
+  if (prev && prev.minute === minute) {
+    if (!prev.row.written) prev.row.data = data; // 아직 대기열에 있으면 새 값으로
+    return;
+  }
+  const row = { kind, target: key, minute, data };
+  lastQueued.set(k, { minute, row });
+  writeQ.push(row);
   if (writeQ.length > 20_000) writeQ.splice(0, writeQ.length - 20_000);
 }
 export function setLoad(id, load, now = Date.now()) {
@@ -439,12 +453,15 @@ export function loadOf(id) { const v = LOAD.get(String(id)); return v ? { ...v }
 export function setNodeLoad(node, sample, now = Date.now()) {
   if (!sample || typeof sample !== 'object') return;
   const key = String(node || '').toLowerCase();
+  const old = NODE_LOAD.get(key);
+  // 같은 표본을 다시 받았으면(엣지는 30초 표본을 동기화마다 — 2초 — 다시 싣는다) 시각만 새로 · 기록하지 않는다(반증 F1)
+  if (old) { const { at: _a, ...rest } = old; if (JSON.stringify(rest) === JSON.stringify(sample)) { old.at = now; return; } }
   const v = { ...sample, at: now };
   NODE_LOAD.set(key, v);
   queueJson('n', key, now, v);
 }
 export function nodeLoads() { return [...NODE_LOAD.entries()].map(([node, v]) => ({ node, ...v })); }
-export function _resetLoadForTest() { LOAD.clear(); NODE_LOAD.clear(); }
+export function _resetLoadForTest() { LOAD.clear(); NODE_LOAD.clear(); lastQueued.clear(); }
 
 /* ── 대상 상태 · 엣지 상태 ─────────────────────────────────────────────────── */
 const ST = new Map(); // targetId → { ...status, at }
@@ -545,6 +562,7 @@ export function takeEdgeRetries(agent, now = Date.now()) {
 export function forgetTargetState(id) {
   const k = String(id);
   ST.delete(k); TESTS.delete(k); RETRIES.delete(k);
+  LOAD.delete(k); // v2.983 반증 F13 — 예전 주소의 수집 부하 창을 새 주소의 것처럼 보이지 않게
 }
 
 export function _resetForTest() {

@@ -506,11 +506,11 @@ export function loadJudgeNote(s) {
 }
 /** 바이트/초 → B/s · KB/s · MB/s(보내는 양 — 네트워크 bpsText 는 비트). */
 export function byteRateText(v) { const x = n(v); return x == null ? DASH : `${bytesText(x)}/s`; }
-/** 세 묶음 이름(원격 스크립트의 CB · CC · CP). 프로세스 묶음은 지금 표본 주기를 붙인다. */
-export function loadGroupLabel(g, procEvery) {
+/** 세 묶음 이름(원격 스크립트의 CB · CC · CP). 구성 · 프로세스 묶음의 주기는 응답 값(cadence.topoSec · procEvery)으로 — 숫자를 박지 않는다(반증 F12). */
+export function loadGroupLabel(g, procEvery, topoSec) {
   if (g === 'base') return '기본 지표(매 주기)';
-  if (g === 'topo') return '구성(30초)';
-  if (g === 'proc') return `프로세스(${procEvery ?? 5}초 · 주기가 더 길면 그 주기)`;
+  if (g === 'topo') return topoSec ? `구성(${topoSec}초)` : '구성';
+  if (g === 'proc') return procEvery ? `프로세스(${procEvery}초 · 주기가 더 길면 그 주기)` : '프로세스';
   return g;
 }
 export const LOAD_GROUPS = Object.freeze(['base', 'topo', 'proc']);
@@ -524,34 +524,36 @@ export const LOAD_GROUP_WHAT = Object.freeze({
  * 줄이는 방법(이 서버 · 추정) — 응답 est(서버 load.estimateLoad)로만 말한다. 값이 없으면 빈 목록.
  * @returns {string[]}
  */
-export function loadReduceTips(row) {
+export function loadReduceTips(row, choices = null, topoSec = null) {
   const l = row?.load; const e = row?.est;
   if (!l || !e) return [];
+  const peList = choices?.procEvery || Object.keys(e.byProcEvery || {}).map(Number);
+  const ivList = choices?.intervals || Object.keys(e.byInterval || {}).map(Number);
   const out = [];
   const cur = n(l.cpuPct);
   const pe = row.procEvery;
   const g = l.groups || {};
   const big = LOAD_GROUPS.map((k) => [k, n(g[k]?.pct)]).filter(([, v]) => v != null).sort((a, b) => b[1] - a[1])[0];
-  if (big && cur != null && cur > 0) out.push(`가장 큰 묶음은 ${loadGroupLabel(big[0], pe)} — 수집 CPU 의 ${Math.round((big[1] / cur) * 100)}%${big[0] === 'proc' && l.procs != null ? `(프로세스 ${l.procs}개)` : ''}.`);
-  for (const p of [15, 30]) {
+  if (big && cur != null && cur > 0) out.push(`가장 큰 묶음은 ${loadGroupLabel(big[0], pe, topoSec)} — 수집 CPU 의 ${Math.round((big[1] / cur) * 100)}%${big[0] === 'proc' && l.procs != null ? `(프로세스 ${l.procs}개)` : ''}.`);
+  for (const p of peList) {
     const x = e.byProcEvery?.[p];
-    if (p > (pe ?? 5) && x?.cpuPct != null) out.push(`프로세스 표본 주기 ${p}초: 약 ${pctText(x.cpuPct, 2)} · 보내는 양 약 ${byteRateText(x.bps)}(지금 ${pctText(cur, 2)} · ${byteRateText(l.bps)}).`);
+    if (pe != null && p > pe && x?.cpuPct != null) out.push(`프로세스 표본 주기 ${p}초: 약 ${pctText(x.cpuPct, 2)} · 보내는 양 약 ${byteRateText(x.bps)}(지금 ${pctText(cur, 2)} · ${byteRateText(l.bps)}).`);
   }
-  for (const i of [5, 10]) {
+  for (const i of ivList) {
     const x = e.byInterval?.[i];
-    if (i > (l.interval ?? 2) && x?.cpuPct != null) out.push(`주기 ${i}초: 약 ${pctText(x.cpuPct, 2)}(값이 ${i}초마다 갱신됩니다).`);
+    if (l.interval != null && i > l.interval && x?.cpuPct != null) out.push(`주기 ${i}초: 약 ${pctText(x.cpuPct, 2)}(값이 ${i}초마다 갱신됩니다).`);
   }
   if (!row.agent && !row.demo && n(l.bps) != null) out.push('중앙이 직접 수집하는 서버입니다 — 그 법인 엣지가 맡으면 원문은 법인 안에 머물고 중앙에는 계산된 값만 갑니다.');
   return out;
 }
 export const LOAD_HOW = Object.freeze([
-  '수집 CPU: 원격 반복문 셸이 30초마다 자기 /proc/<pid>/stat 의 utime · stime · cutime · cstime(끝난 자식 grep · awk · cut · sleep 포함)을 보냅니다 — 앞 값과의 차이 ÷ 경과 = 코어 1개 기준 %.',
+  '수집 CPU: 원격 반복문 셸이 구성 묶음 주기마다 자기 /proc/<pid>/stat 의 utime · stime · cutime · cstime(끝난 자식 grep · awk · cut · sleep 포함)을 보냅니다 — 앞 값과의 차이 ÷ 경과 = 코어 1개 기준 %.',
   'sshd: 부모(sshd 세션)의 utime + stime — 암호 처리 몫입니다. 같은 계정의 다른 SSH 세션은 섞이지 않습니다(이 세션의 pid).',
   '묶음 비용: 묶음 뒤마다 셸 내장 명령(read · set · 산술 — 새 프로세스 없음)으로 같은 tick 을 읽어 더합니다. 이 개발 환경 실측에서 이 측정 자체는 tick 오차(10ms) 안이었습니다.',
   '보내는 양: 노드가 받은 글자 수를 묶음별로 셉니다(SSH 암호 · 압축 전 원문 기준).',
   "'주기를 바꾸면' 은 잰 1회 비용 × 횟수의 추정입니다 — 실제는 캐시 · 다른 부하에 따라 다릅니다.",
 ]);
-export const NODE_LOAD_NOTE = '포탈 CPU 는 다른 기능을 포함한 프로세스 전체입니다 · 그중 집중 모니터링은 줄을 받아 해석한 시간만입니다(SSH 복호 · 기록은 빠져 실제보다 작습니다) · 지연 p99 = Node 이벤트 루프 지연(다른 요청이 기다린 시간) · 받는 양 = 대상 서버에서 SSH 로 받은 원문 · 중앙으로 = 엣지가 동기화로 보낸 양(압축 뒤) · DB 쓰기 = 기록 DB 에 쓴 묶음 본문.';
+export const NODE_LOAD_NOTE = '포탈 CPU 는 다른 기능을 포함한 프로세스 전체입니다 · 그중 집중 모니터링은 줄을 받아 해석한 시간만입니다(16줄에 한 줄을 재서 늘린 추정 · SSH 복호 · 기록은 빠져 실제보다 작습니다) · 루프 사용률 = Node 이벤트 루프가 바빴던 시간 비율 · 가장 긴 멈춤 = 창 안에서 다른 요청을 가장 오래 기다리게 한 시간(±20ms) · 받는 양 = 대상 서버에서 SSH 로 받은 원문 · 중앙으로 = 엣지가 동기화로 보낸 양(압축 뒤) · DB 쓰기 = 기록 DB 에 쓴 줄 본문(분당 한 줄 · 최근 10분 평균). 수집기가 없는 노드는 재지 않습니다.';
 /** 노드 열 묶음 합(표 아래 '모든 서버를 이 주기로' 추정의 합) — 값이 하나라도 없으면 그 묶음 합은 null. */
 export function sumEstimates(rows = [], pick) {
   const by = { base: 0, topo: 0, proc: 0 }; const ok = { base: true, topo: true, proc: true };

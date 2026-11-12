@@ -68,9 +68,10 @@ const IO_AWK = 'awk \'{split($1,a,"/");p=a[3];if(p!~/^[0-9]+$/)next;if(index($1,
 
 /**
  * v2.983 묶음 tick — 셸 내장 명령만(포크 없음): /proc/$$/stat 의 ')' 뒤 칸에서 utime · stime · cutime · cstime(셸 자신 + 끝난 자식) 합.
- * 함수 안의 set -- 는 그 함수의 위치 인자만 바꾼다(bash · dash). 못 읽으면 CK 는 앞 값 그대로(0 으로 떨어지지 않게 — 묶음 차이가 음수가 되지 않는다).
+ * 함수 안의 set -- 는 그 함수의 위치 인자만 바꾼다(bash · dash). 못 읽거나 칸이 모자라면(예: 낱말 나누기를 하지 않는 zsh) CKBAD 를 세우고 — 그 뒤로는
+ * 묶음 줄(c)을 내지 않는다(반증 F5: 예전에는 'c 0 0 0' 을 정상 줄로 내 묶음이 0% 로 보였다 — 못 읽은 값은 0 이 아니다).
  */
-const CK_FN = 'ck() { read -r x 2>/dev/null </proc/$$/stat || return 0; set -- ${x##*) }; [ $# -ge 15 ] && CK=$(( ${12} + ${13} + ${14} + ${15} )); }';
+const CK_FN = 'ck() { read -r x 2>/dev/null </proc/$$/stat || { CKBAD=1; return 0; }; set -- ${x##*) }; if [ $# -ge 15 ]; then CK=$(( ${12} + ${13} + ${14} + ${15} )); else CKBAD=1; fi; }';
 /** 묶음 뒤에 붙이는 한 줄 — 앞 표시(L)부터의 tick 을 그 묶음 누적(CB · CC · CP)에 더한다. */
 const ckAdd = (v, ind) => `${ind}ck; ${v}=$((${v} + CK - L)); L=$CK`;
 
@@ -93,7 +94,7 @@ function build(I, PE = PROC_EVERY_S) {
     'echo "host $(hostname 2>/dev/null)"',
     "echo '##END'",
     CK_FN,
-    'CK=0; ck; L=$CK; CB=0; CC=0; CP=0',
+    'CK=0; CKBAD=; ck; L=$CK; CB=0; CC=0; CP=0',
     'n=0',
     'while [ $n -lt $MAXN ]; do',
     '  echo "##T $(cut -d" " -f1 /proc/uptime) $(date +%s)"',
@@ -133,7 +134,7 @@ function build(I, PE = PROC_EVERY_S) {
     "    echo '##SELF'",
     '    read -r x 2>/dev/null </proc/$$/stat && echo "s ${x##*) }"',
     '    read -r x 2>/dev/null </proc/$PPID/stat && echo "p ${x##*) }"',
-    '    echo "c $CB $CC $CP"',
+    '    [ -z "$CKBAD" ] && echo "c $CB $CC $CP"',
     '  fi',
     "  echo '##END'",
     '  n=$((n + 1))',

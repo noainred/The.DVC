@@ -53,8 +53,12 @@ let testResults = []; // { id, result }
 let statuses = {};
 let loads = {}; // v2.983 대상별 최신 수집 부하 창(보내면 비운다)
 let txBytes = 0; let nodeLast = null; let nodePrevTx = null; let nodeSampler = null;
-/** v2.983 이 엣지의 노드 표본(30초마다 · 동기화 본문 diag.node 에 싣는다). 중앙으로 보낸 양(압축 뒤 본문 바이트)도 같은 창으로. */
+/**
+ * v2.983 이 엣지의 노드 표본(30초마다 · 동기화 본문 diag.node 에 싣는다). 중앙으로 보낸 양(압축 뒤 본문 바이트)도 같은 창으로.
+ * 반증 F2: **수집기가 돌 때만** 표본기를 만든다(쉬는 엣지에 이벤트 루프 측정기를 늘 켜 두지 않는다) · 0 이 되면 끄고 표본을 비운다.
+ */
 export function nodeSampleTick(now = Date.now()) {
+  if (!runner.running().length) { try { nodeSampler?.stop(); } catch { /* */ } nodeSampler = null; nodeLast = null; nodePrevTx = null; return null; }
   if (!nodeSampler) nodeSampler = createNodeSampler({ sessions: () => runner.running().length });
   const x = nodeSampler.sample();
   if (!x) return nodeLast;
@@ -94,7 +98,7 @@ export function diagBody(now = Date.now()) {
   return {
     rttMs: lastRttMs, fails, buffered: samples.length, dropped, collectors: runner.running().length, testsBusy: testsInFlight.size,
     idleMs: nextDelayMs({ active: false, idleHintMs }), lastError: lastError || null, lastErrorAgoMs: lastError ? Math.max(0, now - lastErrorAt) : null,
-    ...(nodeLast ? { node: { windowS: nodeLast.windowS, cpuPct: nodeLast.cpuPct, fmPct: nodeLast.fmPct, rssBytes: nodeLast.rssBytes, elP99Ms: nodeLast.elP99Ms, rxBps: nodeLast.rxBps, sessions: nodeLast.sessions, txBps: nodeLast.txBps } } : {}),
+    ...(nodeLast ? { node: { windowS: nodeLast.windowS, cpuPct: nodeLast.cpuPct, fmPct: nodeLast.fmPct, rssBytes: nodeLast.rssBytes, elMaxMs: nodeLast.elMaxMs, eluPct: nodeLast.eluPct, rxBps: nodeLast.rxBps, sessions: nodeLast.sessions, txBps: nodeLast.txBps } } : {}),
   };
 }
 

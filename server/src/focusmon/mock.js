@@ -210,6 +210,6 @@ export function demoNodeLoad(agent, servers = 0, now = Date.now()) {
   const a = String(agent || '');
   let h = 0; for (const c of a) h = (h * 31 + c.charCodeAt(0)) % 997;
   const j = 0.85 + 0.3 * hash(h, Math.floor(now / 30_000));
-  return { windowS: 30, cpuPct: r2((1.2 + servers * 0.45) * j), fmPct: r2((0.3 + servers * 0.18) * j), rssBytes: Math.round((180 + servers * 6) * 2 ** 20), elP99Ms: r2(21 + 8 * j),
+  return { windowS: 30, cpuPct: r2((1.2 + servers * 0.45) * j), fmPct: r2((0.3 + servers * 0.18) * j), rssBytes: Math.round((180 + servers * 6) * 2 ** 20), elMaxMs: r2(4 + 30 * j), eluPct: r2((2 + servers * 0.6) * j),
     rxBps: Math.round(servers * 15_500 * j), sessions: servers, txBps: Math.round((900 + servers * 1_400) * j), at: now, demo: true };
 }

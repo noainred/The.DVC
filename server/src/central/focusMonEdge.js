@@ -170,7 +170,7 @@ export function cleanNodeLoad(x) {
   if (!isObj(x)) return null;
   const out = {
     windowS: numIn(x.windowS, 3600), cpuPct: numIn(x.cpuPct, 100_000), fmPct: numIn(x.fmPct, 100_000), rssBytes: intIn(x.rssBytes, 1e13),
-    elP99Ms: numIn(x.elP99Ms, 600_000), rxBps: numIn(x.rxBps, 1e10), sessions: intIn(x.sessions, 10_000), txBps: numIn(x.txBps, 1e10),
+    elMaxMs: numIn(x.elMaxMs, 600_000), eluPct: numIn(x.eluPct, 100), rxBps: numIn(x.rxBps, 1e10), sessions: intIn(x.sessions, 10_000), txBps: numIn(x.txBps, 1e10),
   };
   return Object.values(out).some((v) => v != null) ? out : null;
 }
@@ -247,7 +247,8 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   }
   const diag = cleanDiag(b.diag, now); // 노드 카드 진단 · 아래 시험 배달(진행 중 시험 수)이 같은 정제값을 쓴다
   const node = isObj(b.diag) ? cleanNodeLoad(b.diag.node) : null;
-  if (node) store.setNodeLoad(key, node, now);
+  // 반증 F1: 맡은 서버가 없거나 수집기가 0 인 엣지의 표본은 받지 않는다(집중 모니터링을 쓰지 않아도 엣지마다 분당 한 줄이 쌓였다) · 같은 표본의 재전송은 store 가 거른다
+  if (node && mine.size > 0 && node.sessions > 0) store.setNodeLoad(key, node, now);
   store.noteEdgeSync(agent, { version: typeof b.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(b.version) ? b.version : '', key: cleanKey(b.key), diag }, now);
 
   const desired = store.desiredFor(key, (id) => mine.get(id) || null, now);

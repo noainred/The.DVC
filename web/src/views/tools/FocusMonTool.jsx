@@ -30,6 +30,9 @@ import { LoadTab } from './FocusMonLoad.jsx';
 import './focusMon.css';
 
 const BASE = ['tools', 'focus-mon'];
+/** 'DB 보관' 설정 폼의 칸 — **보이는 칸만 보낸다**(v2.983 반증 F9: 예전에는 응답 settings 전체를 보내 화면에 없는 procEvery · 문턱을 연 순간 값으로 되돌렸다). */
+const DB_SETTING_TEXT = Object.freeze({ retentionDays: '보관 일수', capGb: '용량 상한(GB)', warnPct: '주의(%)', critPct: '위험(%)', wAwaitWarnMs: '쓰기 지연 주의(ms)', edgeIdleSec: '엣지 쉬는 동안 조회(초)' });
+const DB_SETTING_KEYS = Object.keys(DB_SETTING_TEXT);
 const ls = () => { try { return typeof window === 'undefined' ? null : window.localStorage; } catch { return null; } };
 const lsGet = (k, d) => { try { const v = ls()?.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { ls()?.setItem(k, JSON.stringify(v)); } catch { /* 사생활 모드 등 */ } };
@@ -1230,7 +1233,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
             ) : null}
           </div>
           <div className="fm-card">
-            <div className="fm-row fm-between"><h3 className="fm-h3">기록 — DB 보관</h3><button type="button" className="fm-btn sm" onClick={() => setSettingsForm(setForm2 ? null : { ...main.settings })}>설정</button></div>
+            <div className="fm-row fm-between"><h3 className="fm-h3">기록 — DB 보관</h3><button type="button" className="fm-btn sm" onClick={() => setSettingsForm(setForm2 ? null : Object.fromEntries(DB_SETTING_KEYS.filter((k) => k in main.settings).map((k) => [k, main.settings[k]])))}>설정</button></div>
             <div className="fm-meter big"><span className="t"><span className="f" style={{ width: `${Math.min(100, ((main.recorder.dbBytes || 0) / (main.settings.capGb * 2 ** 30)) * 100)}%` }} /></span></div>
             <div className="fm-row fm-between"><span><b>{bytesText(main.recorder.dbBytes)}</b> <span className="fm-dim">/ 상한 {main.settings.capGb} GB</span></span><span className="fm-dim">보관 {main.settings.retentionDays}일{main.db.oldestMinute ? ` · 가장 오래된 기록 ${clockText(main.db.oldestMinute * 60_000, true)}` : ''}</span></div>
             {!main.db.available ? <div className="fm-ban w">기록 DB 를 열지 못했습니다 — 실시간 화면은 그대로지만 기록이 남지 않습니다{main.db.error ? `(${main.db.error})` : ''}.</div> : null}
@@ -1238,7 +1241,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
             <div className="fm-note">수집한 값과 프로세스 목록을 1분 단위로 묶어 DB 에 남깁니다. ‘잠깐 보기’ 는 켠 동안만, ‘계속 수집’ 은 끌 때까지 수집합니다(보는 화면이 없으면 {L.idleInterval}초 주기로 낮춰 기록). 상한에 닿으면 가장 오래된 기록부터 지웁니다.</div>
             {setForm2 ? (
               <div className="fm-form">
-                {Object.entries({ retentionDays: '보관 일수', capGb: '용량 상한(GB)', warnPct: '주의(%)', critPct: '위험(%)', wAwaitWarnMs: '쓰기 지연 주의(ms)', edgeIdleSec: '엣지 쉬는 동안 조회(초)' }).filter(([k]) => main.settingRanges[k]).map(([k, l]) => (
+                {Object.entries(DB_SETTING_TEXT).filter(([k]) => main.settingRanges[k]).map(([k, l]) => (
                   <label key={k} className="fm-fld"><span>{l} <small className="fm-dim">{main.settingRanges[k][0]}~{main.settingRanges[k][1]}</small></span><input className="fm-input" value={setForm2[k]} onChange={(e) => setSettingsForm({ ...setForm2, [k]: e.target.value.replace(/[^0-9]/g, '').slice(0, 5) })} /></label>
                 ))}
                 <button type="button" className="fm-btn pri" disabled={!!busy} onClick={() => run('set', async () => { const r = await putJson('/tools/focus-mon/settings', Object.fromEntries(Object.entries(setForm2).map(([k, v]) => [k, Number(v)]))); if (r?.ok === false) return { ok: false, reason: r.reason || '설정을 저장하지 못했습니다.' }; setSettingsForm(null); return { ok: true, reason: r?.changed?.length ? '설정을 저장했습니다.' : '바뀐 값이 없습니다 — 저장하지 않았습니다.' }; })}>저장</button>

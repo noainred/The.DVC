@@ -35,7 +35,7 @@ import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCol
 import { recorderStatus } from '../../focusmon/recorder.js';
 import { wakeEdge, focusEdgeMinVersion, focusDiagMinVersion } from '../../central/focusMonEdge.js';
 import { startBulk, bulkJob, bulkProgress } from '../../focusmon/bulkTest.js';
-import { INTERVALS, DEFAULT_INTERVAL, PROC_EVERY_CHOICES } from '../../focusmon/script.js';
+import { INTERVALS, DEFAULT_INTERVAL, PROC_EVERY_CHOICES, TOPO_EVERY_S } from '../../focusmon/script.js';
 import { judgeLoad, estimateLoad, averageLoads, averageNodes, loadTotals } from '../../focusmon/load.js';
 import { demoNodeLoad } from '../../focusmon/mock.js';
 import { IOSTAT_COLS, IOSTAT_NAME } from '../../focusmon/rates.js';
@@ -517,10 +517,12 @@ api.get('/tools/focus-mon/load', adminOnly, fullScopeOnly, async (req, res) => {
     const byN = new Map(); for (const r of nr || []) { const a = byN.get(r.node) || []; a.push(r.v); byN.set(r.node, a); }
     for (const [k, list] of byN) nodeVals.set(k, averageNodes(list));
   } else {
+    // 반증 F4: 최근 구간에는 **수집 중이거나 2분 안에 창이 온** 서버만 — 끝난 수집의 묵은 창은 싣지 않는다('오래됨 · 값 없음' 으로 쌓이지 않게).
+    //   '오래됨' 은 수집 중인데 새 창이 2분 넘게 없는 서버만(그 서버는 값 없음으로 따로 센다).
     for (const t of vis) {
       const l = store.loadOf(t.id);
-      if (!l) continue;
-      if (now - l.at <= LOAD_LIVE_MAX_MS) loads.set(t.id, l); else stale.set(t.id, Math.round((now - l.at) / 1000));
+      if (l && now - l.at <= LOAD_LIVE_MAX_MS) loads.set(t.id, l);
+      else if (l && sessOf.has(t.id)) stale.set(t.id, Math.round((now - l.at) / 1000));
     }
     for (const x of store.nodeLoads()) if (now - x.at <= LOAD_LIVE_MAX_MS) nodeVals.set(x.node, x);
   }
@@ -528,8 +530,9 @@ api.get('/tools/focus-mon/load', adminOnly, fullScopeOnly, async (req, res) => {
     byInterval: Object.fromEntries(INTERVALS.map((i) => [i, estimateLoad(l, { interval: i, procEvery: l.procEvery ?? settings.procEvery })])),
     byProcEvery: Object.fromEntries(PROC_EVERY_CHOICES.map((p) => [p, estimateLoad(l, { interval: l.interval, procEvery: p })])),
   } : null);
-  const rows = vis.filter((t) => sessOf.has(t.id) || loads.has(t.id) || stale.has(t.id)).map((t) => {
-    const l = loads.get(t.id) || null; const s = sessOf.get(t.id);
+  // 반증 F7: 지난 구간은 그 구간에 기록이 있는 서버만 · 지금 수집 상태(방식)를 섞지 않는다
+  const rows = vis.filter((t) => (w.past ? loads.has(t.id) : (sessOf.has(t.id) || loads.has(t.id)))).map((t) => {
+    const l = loads.get(t.id) || null; const s = w.past ? null : sessOf.get(t.id);
     // agent = 담당 노드 표시(데모 서버는 표시용 엣지 이름 — 목 모드에서 실제로는 이 노드가 만든다 · 노드 표가 '데모' 라고 밝힌다)
     return { id: t.id, name: t.name, host: t.host, agent: t.agent || '', group: t.group || '', demo: !!t.demo,
       collecting: !!s, mode: s?.mode || null, interval: l?.interval ?? s?.interval ?? null, procEvery: l?.procEvery ?? settings.procEvery,
@@ -560,6 +563,7 @@ api.get('/tools/focus-mon/load', adminOnly, fullScopeOnly, async (req, res) => {
     choices: { intervals: INTERVALS, procEvery: PROC_EVERY_CHOICES },
     targets: rows,
     nodes, totals: loadTotals(rows, nodes, settings), liveMaxS: LOAD_LIVE_MAX_MS / 1000,
+    cadence: { windowSec: TOPO_EVERY_S, topoSec: TOPO_EVERY_S }, // 반증 F12 — 화면이 창 · 구성 주기 숫자를 박지 않게
   });
 });
 

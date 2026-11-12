@@ -124,6 +124,8 @@ export function stopCollection(id, why = 'stopped') {
 const DB_RATE_WINDOW_MS = 10 * 60_000;
 let nodeSampler = null; let dbHist = [];
 export function nodeTick(now = Date.now()) {
+  // 반증 F2: 이 노드에서 수집기가 돌 때만 — 수집이 없으면 틱만 돈다(표본기 · DB 쓰기 0). 엣지는 이 runner 가 비어 있다(엣지 수집은 워커 몫 — 워커가 따로 잰다).
+  if (!runner.running().length) { try { nodeSampler?.stop(); } catch { /* */ } nodeSampler = null; dbHist = []; return null; }
   if (!nodeSampler) nodeSampler = createNodeSampler({ sessions: () => runner.running().length });
   const x = nodeSampler.sample();
   if (!x) return null;

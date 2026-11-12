@@ -100,8 +100,17 @@ test('① 원격 명령 — 12개 상수 · 목록 밖 값은 기본 · ##SELF �
   assert.match(selfBlock, /\$\{x##\*\) \}/, "')' 뒤만 — comm(이름)을 싣지 않는다");
   assert.match(selfBlock, /\/proc\/\$PPID\/stat/, 'sshd 세션 = 부모');
   assert.ok(!/cmdline|environ|\/fd\b|\/exe\b/.test(selfBlock), '인자 · 환경 · 열린 파일 없음');
+  assert.match(selfBlock, /\[ -z "\$CKBAD" \] && echo "c \$CB \$CC \$CP"/, '반증 F5: 묶음 tick 을 한 번이라도 못 읽었으면 c 줄을 내지 않는다');
   assert.deepEqual(P.SECTIONS.slice(-1), ['SELF'], 'SELF 는 마지막 구획(순서 규칙)');
   for (const sec of P.SECTIONS) assert.ok(P.SECTION_GROUP[sec], `${sec} 의 묶음`);
+});
+
+test('① 반증 F5 — 낱말 나누기를 하지 않는 셸(zsh 기본과 같은 IFS 빈 값)에서는 ck 가 실패를 표시한다', () => {
+  const fn = SCRIPT.SCRIPTS[2].split('\n').find((l) => l.startsWith('ck() {'));
+  const ok = spawnSync('bash', ['-c', `${fn}; CK=0; CKBAD=; ck; echo "bad=[$CKBAD] ck=$CK"`], { encoding: 'utf8' }).stdout.trim();
+  assert.match(ok, /^bad=\[\] ck=\d+$/, ok);
+  const bad = spawnSync('bash', ['-c', `IFS=''; ${fn}; CK=0; CKBAD=; ck; echo "bad=[$CKBAD] ck=$CK"`], { encoding: 'utf8' }).stdout.trim();
+  assert.equal(bad, 'bad=[1] ck=0', '칸 수가 모자라면 CKBAD — c 줄을 내지 않는다(0 % 로 보이지 않게)');
 });
 
 test('① 실제로 돌린다 — bash · dash 둘 다 ##SELF(s · p · c)를 내고 파서가 읽는다', () => {
@@ -165,6 +174,9 @@ test('③ loadWindow · judgeLoad · estimateLoad · averageLoads · loadTotals'
   const ns = L.loadWindow(snap(100, 1000, null, null), snap(130, 1060, null, null), ctx);
   assert.equal(ns.sshdPct, null, 'sshd 를 못 읽으면 null(0 아님)');
   assert.equal(ns.groups.base.pct, null); assert.equal(ns.groups.base.msPerRun, null);
+  const gb = L.loadWindow(snap(100, 1000, 50, { base: 0, topo: 0, proc: 0 }), snap(130, 1060, 53, { base: 0, topo: 0, proc: 0 }), ctx);
+  assert.equal(gb.cpuPct, 2); assert.equal(gb.groups.base.pct, null, '반증 F5 두 번째 문: 셸은 썼는데 묶음 합이 0 이면 묶음은 모름(0 % 아님)');
+  assert.equal(L.estimateLoad(gb, { interval: 2, procEvery: 5 }).cpuPct, null);
   const z = L.loadWindow(snap(100, 1000, 50, { base: 1, topo: 1, proc: 1 }), snap(130, 1000, 50, { base: 1, topo: 1, proc: 1 }), { ...ctx, procRuns: 0 });
   assert.equal(z.cpuPct, 0, '변화 없음은 0(잰 값)'); assert.equal(z.groups.proc.msPerRun, null, '횟수 0 이면 1회 비용은 모름');
   // 판정
@@ -200,15 +212,16 @@ test('④ 수집기 — ##SELF 두 번이면 onLoad 창 · 새 세션은 앞 창
   const run1 = [...hello, ...frame(100, selfLines(100, 50, 0, 0, 10, [0, 0, 0])), ...frame(101), ...frame(130, selfLines(130, 70, 20, 10, 13, [40, 30, 20]))];
   // 다시 접속(새 셸) — 앞 세션의 마지막 ##SELF 보다 tick 이 커도 앞 창과 잇지 않는다(창 길이 30초 · tick 증가라 잇는다면 거짓 창이 생긴다)
   const run2 = [...hello, ...frame(160, selfLines(400, 200, 0, 0, 30, [100, 100, 100]))];
-  const loads = []; const commands = []; let k = 0;
+  const loads = []; const commands = []; let k = 0; const statuses = [];
   const col = createCollector({ id: 'fm-ld29830', host: '10.9.9.8', port: 22, username: 'dvcmon' }, {
     interval: 1, procEvery: 5, keys: { keyInfo: () => ({ fingerprint: 'fp-ld2983' }), privateKeyForConnect: () => 'PEM' },
-    onSample: () => {}, onProcs: () => {}, onStatus: () => {}, onLoad: (l) => loads.push(l),
-    connect: async (_o, fn) => fn({ execStream: async (cmd, { onLine }) => { commands.push(cmd); const ls = k++ === 0 ? run1 : run2; for (const l of ls) onLine(l); return { code: 0 }; } }),
+    onSample: () => {}, onProcs: () => {}, onStatus: (st) => statuses.push(st), onLoad: (l) => loads.push(l),
+    // 첫 세션은 줄을 낸 뒤 끊길 때까지 붙어 있다(수집 중) · 둘째 세션은 줄을 내고 끝난다
+    connect: async (_o, fn) => fn({ execStream: async (cmd, { onLine, signal }) => { commands.push(cmd); const first = k++ === 0; for (const l of first ? run1 : run2) onLine(l); if (first) await new Promise((r) => (signal.aborted ? r() : signal.addEventListener('abort', r))); return { code: 0 }; } }),
   });
   col.start();
   const end = Date.now() + 3_000; while (!loads.length && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
-  col.setProcEvery(30); // 세션이 끝나 물러나 있어도 바로 새 상수로 다시 연다
+  col.setProcEvery(30); // 수집 중 — 끊고 새 상수로 다시 연다
   const end2 = Date.now() + 4_000; while (!commands.includes(SCRIPT.scriptFor(1, 30)) && Date.now() < end2) await new Promise((r) => setTimeout(r, 20));
   col.stop();
   assert.equal(loads.length, 1, `창 하나(두 번째 세션의 ##SELF 는 앞 세션과 잇지 않는다): ${loads.length}`);
@@ -224,6 +237,25 @@ test('④ 수집기 — ##SELF 두 번이면 onLoad 창 · 새 세션은 앞 창
   assert.equal(commands[0], SCRIPT.scriptFor(1, 5), '처음 명령은 1초 · 5초 상수');
   assert.ok(commands.includes(SCRIPT.scriptFor(1, 30)), '바꾼 뒤 1초 · 30초 상수로 다시 열었다');
   assert.equal(col.procEvery(), 30);
+  assert.ok(statuses.every((s) => !('load' in s)), '반증 F8: 부하 창은 상태 객체에 섞지 않는다(onLoad 로만)');
+});
+
+test('④ 반증 F10 — 물러나 있는(세션이 끝난) 수집기는 표본 주기를 바꿔도 곧바로 다시 로그인하지 않는다', async () => {
+  const { createCollector } = await import('../src/focusmon/collector.js');
+  const commands = [];
+  const col = createCollector({ id: 'fm-ld29831', host: '10.9.9.7', port: 22, username: 'dvcmon' }, {
+    interval: 1, procEvery: 5, keys: { keyInfo: () => ({ fingerprint: 'fp-ld2983b' }), privateKeyForConnect: () => 'PEM' },
+    onSample: () => {}, onProcs: () => {}, onStatus: () => {},
+    connect: async (_o, fn) => fn({ execStream: async (cmd) => { commands.push(cmd); return { code: 0 }; } }), // 줄 없이 곧바로 끝남 → 물러남(10초)
+  });
+  col.start();
+  const end = Date.now() + 2_000; while (!commands.length && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(col.setProcEvery(15), true);
+  await new Promise((r) => setTimeout(r, 400));
+  col.stop();
+  assert.equal(commands.length, 1, '물러남 대기를 건너뛰지 않는다(다음 접속 때 새 상수)');
+  assert.equal(col.procEvery(), 15);
 });
 
 /* ── ⑤ 엣지 ── */
@@ -237,8 +269,9 @@ test('⑤ 엣지 정제 — 아는 칸만 · 음수 · 글자 · 소수 횟수 �
   assert.equal(c.interval, null); assert.equal(c.procEvery, null); assert.equal(c.bps, 1e10, '상한');
   assert.equal(edge.cleanLoad({ ...W, cpuPct: 'x' }), null); assert.equal(edge.cleanLoad({ ...W, windowS: -1 }), null); assert.equal(edge.cleanLoad([W]), null); assert.equal(edge.cleanLoad(null), null);
   assert.equal(edge.cleanLoad({ ...W, serverPct: 500 }).serverPct, 100, '서버 전체 대비는 100% 상한');
-  const nd = edge.cleanNodeLoad({ windowS: 30, cpuPct: 5, fmPct: 1, rssBytes: 2e8, elP99Ms: 20, rxBps: 1e5, sessions: 3, txBps: 900, host: '10.0.0.1', token: 'x', sessionsList: [1] });
-  assert.deepEqual(Object.keys(nd).sort(), ['cpuPct', 'elP99Ms', 'fmPct', 'rssBytes', 'rxBps', 'sessions', 'txBps', 'windowS']);
+  const nd = edge.cleanNodeLoad({ windowS: 30, cpuPct: 5, fmPct: 1, rssBytes: 2e8, elMaxMs: 20, eluPct: 150, rxBps: 1e5, sessions: 3, txBps: 900, host: '10.0.0.1', token: 'x', sessionsList: [1], elP99Ms: 1 });
+  assert.deepEqual(Object.keys(nd).sort(), ['cpuPct', 'elMaxMs', 'eluPct', 'fmPct', 'rssBytes', 'rxBps', 'sessions', 'txBps', 'windowS']);
+  assert.equal(nd.eluPct, 100, '루프 사용률 상한 100');
   assert.equal(edge.cleanNodeLoad({ evil: 1 }), null); assert.equal(edge.cleanNodeLoad('x'), null);
   assert.equal(edge.cleanNodeLoad({ sessions: 2.5 }), null, '정수 칸에 소수 → null · 남는 수가 없으면 통째로 null');
 });
@@ -250,6 +283,7 @@ test('⑤ 엣지 동기화 — 맡고 지금 받는 대상의 부하만 · 노�
   const other = registry.addTarget({ name: 'e3', host: '10.31.0.3', port: 22, username: 'u', agent: 'edge-us' }, { agents: ['edge-us'] }).target;
   assert.equal(store.startSession({ targets: [mine.id, other.id], interval: 2, mode: 'watch', by: 't' }).ok, true);
   registry.saveSettings({ procEvery: 15 });
+  store.drainWrites(100_000);
   const r = edge.handleEdgeSync('edge-pl', { sentAt: Date.now(), load: { [mine.id]: W, [idle.id]: W, [other.id]: W, 'fm-nope0000': W }, diag: { node: { cpuPct: 4, sessions: 1, txBps: 800, host: 'x' } } });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.ok(store.loadOf(mine.id), '맡고 받는 대상');
@@ -261,6 +295,26 @@ test('⑤ 엣지 동기화 — 맡고 지금 받는 대상의 부하만 · 노�
   const n = store.nodeLoads().find((x) => x.node === 'edge-pl');
   assert.ok(n && n.cpuPct === 4 && n.txBps === 800 && !('host' in n), JSON.stringify(n));
   assert.ok(r.targets.length && r.targets.every((t) => t.procEvery === 15), '응답의 프로세스 표본 주기 = 중앙 설정');
+  // 반증 F1: 같은 표본을 다시 받으면(엣지는 동기화마다 싣는다) 기록하지 않는다 · 같은 분은 한 줄 · 맡은 서버 없는 엣지 · 수집기 0 인 엣지는 받지 않는다
+  const t0 = (Math.floor(Date.now() / 60_000) + 1) * 60_000 + 5_000; // 다음 분 5초 — 분 경계를 타지 않게 기준 시각을 고정(앞 동기화의 분과도 다르다)
+  store.drainWrites(100_000);
+  edge.handleEdgeSync('edge-pl', { sentAt: t0, diag: { node: { cpuPct: 4.5, sessions: 1, txBps: 800 } } }, t0);
+  edge.handleEdgeSync('edge-pl', { sentAt: t0, diag: { node: { cpuPct: 4.5, sessions: 1, txBps: 800 } } }, t0 + 2_000);
+  edge.handleEdgeSync('edge-pl', { sentAt: t0, diag: { node: { cpuPct: 5, sessions: 1, txBps: 800 } } }, t0 + 4_000); // 같은 분의 새 표본 — 대기열의 그 줄을 바꾼다
+  const q = store.drainWrites(100_000).filter((x) => x.kind === 'n' && x.target === 'edge-pl');
+  assert.equal(q.length, 1, `같은 분은 한 줄: ${q.length}`);
+  assert.equal(JSON.parse(q[0].data).cpuPct, 5, '아직 쓰기 전이면 새 값으로');
+  edge.handleEdgeSync('edge-pl', { sentAt: t0, diag: { node: { cpuPct: 6, sessions: 1, txBps: 800 } } }, t0 + 6_000);
+  assert.equal(store.drainWrites(100_000).filter((x) => x.kind === 'n').length, 0, '이미 쓴 분은 건너뛴다(다음 분에 한 줄)');
+  edge.handleEdgeSync('edge-pl', { sentAt: t0, diag: { node: { cpuPct: 7, sessions: 1, txBps: 800 } } }, t0 + 60_000);
+  assert.equal(store.drainWrites(100_000).filter((x) => x.kind === 'n').length, 1, '다음 분에는 다시 한 줄');
+  edge.handleEdgeSync('edge-pl', { sentAt: t0, diag: { node: { cpuPct: 7, sessions: 1, txBps: 800 } } }, t0 + 125_000); // 그다음 분 · 같은 표본의 재전송
+  assert.equal(store.drainWrites(100_000).filter((x) => x.kind === 'n').length, 0, '같은 표본의 재전송은 분이 바뀌어도 기록하지 않는다');
+  assert.equal(store.nodeLoads().find((x) => x.node === 'edge-pl').at, t0 + 125_000, '시각만 새로(받고 있다는 표시)');
+  edge.handleEdgeSync('edge-us', { sentAt: Date.now(), diag: { node: { cpuPct: 9, sessions: 0, txBps: 1 } } });
+  assert.ok(!store.nodeLoads().some((x) => x.node === 'edge-us'), '수집기 0 인 엣지의 표본은 받지 않는다');
+  edge.handleEdgeSync('edge-idle', { sentAt: Date.now(), diag: { node: { cpuPct: 9, sessions: 2, txBps: 1 } } });
+  assert.ok(!store.nodeLoads().some((x) => x.node === 'edge-idle'), '맡은 서버가 없는 엣지의 표본은 받지 않는다');
   registry.saveSettings({ procEvery: 5 });
 });
 
@@ -273,9 +327,15 @@ test('⑤ 워커 — 본문에 load · diag.node(비밀 없음)를 싣고 · 보
   config.agent.centralUrl = base; config.agent.centralToken = tok; config.agent.name = 'edge-pl';
   try {
     worker._resetForTest();
+    worker.nodeSampleTick(); await new Promise((r) => setTimeout(r, 1100)); // 표본 창(1초 이상)이 생길 만큼 기다린다
+    assert.equal(worker.nodeSampleTick(), null, '반증 F2: 수집기가 없으면 재지 않는다(표본기도 만들지 않는다)');
+    assert.equal(worker.diagBody().node, undefined);
+    const demoId = mock.DEMO_TARGETS[0].id;
+    worker._runnerForTest.reconcile([{ id: demoId, host: '10.10.20.11', port: 22, username: 'dvcmon', interval: 2, demo: true }]);
     worker.nodeSampleTick(); await new Promise((r) => setTimeout(r, 1100)); worker.nodeSampleTick();
     const dg = worker.diagBody();
-    assert.ok(dg.node && typeof dg.node.cpuPct === 'number', JSON.stringify(dg.node));
+    assert.ok(dg.node && typeof dg.node.cpuPct === 'number' && dg.node.sessions === 1, JSON.stringify(dg.node));
+    assert.ok(typeof dg.node.eluPct === 'number' && typeof dg.node.elMaxMs === 'number', '루프 사용률 · 가장 긴 멈춤');
     assert.ok(!/token|password|privateKey|10\.32/i.test(JSON.stringify(dg)), '진단에 비밀 · 주소 없음');
     worker._putLoadForTest(t.id, W);
     const ok = await worker.syncOnce();
@@ -304,6 +364,8 @@ test('⑥ GET /tools/focus-mon/load — 문 · 보이는 대상 · 데모 계정
   store.setLoad(b.id, W, Date.now() - 5 * 60_000); // 5분 전 — 오래됨
   store.setNodeLoad('', { cpuPct: 7, fmPct: 0.5, dbWriteBps: 100 });
   store.setNodeLoad('edge-pl', { cpuPct: 3, txBps: 50 });
+  const gone = registry.addTarget({ name: 'rt-gone', host: '10.33.0.9', port: 22, username: 'u', agent: '' }, { agents: [] }).target;
+  store.setLoad(gone.id, W, Date.now() - 86_400_000); // 하루 전에 끝난 수집의 묵은 창 — 세션 없음
   for (const who of ['operator', 'rscoped']) assert.equal((await call('GET', '/api/tools/focus-mon/load', { who })).status, 403, who);
   const r = await call('GET', '/api/tools/focus-mon/load');
   assert.equal(r.status, 200, r.text);
@@ -312,6 +374,8 @@ test('⑥ GET /tools/focus-mon/load — 문 · 보이는 대상 · 데모 계정
   assert.equal(ra.est.byInterval[10].by.base, 0.2, '추정 — 20ms ÷ 10초');
   assert.equal(rb.load, null, '오래된 창은 값을 싣지 않는다'); assert.ok(rb.staleS >= 299, '대신 몇 초 전인지'); assert.equal(rb.judge, null);
   assert.equal(r.body.totals.measured, 1); assert.equal(r.body.totals.missing, 1, '값 없는 대상은 따로 센다');
+  assert.ok(!r.body.targets.some((x) => x.id === gone.id), '반증 F4: 끝난 수집의 묵은 창은 최근 구간에 싣지 않는다');
+  assert.deepEqual(r.body.cadence, { windowSec: SCRIPT.TOPO_EVERY_S, topoSec: SCRIPT.TOPO_EVERY_S }, '반증 F12: 창 · 구성 주기는 응답 값');
   assert.equal(r.body.totals.centralDirectBps, 3000);
   assert.equal(r.body.nodes.find((x) => x.kind === 'central').load.cpuPct, 7);
   assert.equal(r.body.nodes.find((x) => x.node === 'edge-pl').load.cpuPct, 3);
@@ -349,6 +413,11 @@ test('⑥ 과거 구간 — DB 분당 기록 평균(fm_load · fm_node) · 정�
   assert.equal(r.body.live, false);
   const ra = r.body.targets.find((x) => x.id === a.id);
   assert.equal(ra.load.cpuPct, 2, '구간 안 두 분의 평균(1 · 3) — 200분 전 값은 빠진다');
+  assert.equal(ra.mode, null, '반증 F7: 지난 구간에 지금 수집 상태를 섞지 않는다');
+  const other = registry.addTarget({ name: 'db-b', host: '10.34.0.2', port: 22, username: 'u', agent: '' }, { agents: [] }).target;
+  store.startSession({ targets: [other.id], interval: 2, mode: 'record', by: 't' });
+  const r2 = await call('GET', `/api/tools/focus-mon/load?win=5&end=${end}`);
+  assert.ok(!r2.body.targets.some((x) => x.id === other.id), '지난 구간에는 그 구간에 기록이 있는 서버만');
   assert.equal(ra.load.windows, 2);
   assert.equal(r.body.nodes.find((x) => x.kind === 'central').load.cpuPct, 6);
   assert.match(db._planForTest('SELECT target, minute, data FROM fm_load WHERE minute >= ? AND minute <= ?'), /idx_fm_load_minute/);
@@ -371,6 +440,20 @@ test('⑦ 설정 — procEvery 는 5 · 15 · 30 만 · 문턱 큼 > 보통 · P
   assert.equal(registry.getSettings().procEvery, 15);
   assert.equal((await call('PUT', '/api/tools/focus-mon/settings', { who: 'demo', body: { procEvery: 30 } })).status, 403, '데모 계정은 바꾸지 못한다');
   registry.saveSettings({ procEvery: 5 });
+  // 반증 F2: 이 노드에 수집기가 없으면 노드 표본을 만들지도 · 기록하지도 않는다(수집이 없으면 틱만)
+  svc.tick1(); store.drainWrites(100_000);
+  assert.equal(svc.localRunner.running().length, 0);
+  assert.equal(svc.nodeTick(), null); await new Promise((r) => setTimeout(r, 1100)); assert.equal(svc.nodeTick(), null);
+  assert.equal(store.drainWrites(100_000).filter((x) => x.kind === 'n').length, 0);
+  // 반증 F13: 접속처가 바뀌면 부하 창도 지운다
+  store.setLoad('fm-f13aaaaaaa', W); store.forgetTargetState('fm-f13aaaaaaa');
+  assert.equal(store.loadOf('fm-f13aaaaaaa'), null);
+  // 반증 F1: 대상 창도 분당 한 줄
+  store.drainWrites(100_000);
+  const m0 = Math.floor(Date.now() / 60_000) * 60_000 + 10_000; // 기준 시각 고정(분 경계를 타지 않게)
+  store.setLoad('fm-q1aaaaaaaa', { ...W, cpuPct: 1 }, m0); store.setLoad('fm-q1aaaaaaaa', { ...W, cpuPct: 2 }, m0 + 30_000);
+  const lq = store.drainWrites(100_000).filter((x) => x.kind === 'l');
+  assert.equal(lq.length, 1); assert.equal(JSON.parse(lq[0].data).cpuPct, 2);
   const dl = mock.demoLoad(mock.DEMO_TARGETS[0].id, 2, 5, Date.now());
   assert.ok(dl && dl.demo === true && dl.cpuPct > 0 && dl.groups.proc.runs === 6, JSON.stringify(dl?.groups));
   assert.ok(Math.abs(dl.cpuPct - (dl.groups.base.pct + dl.groups.topo.pct + dl.groups.proc.pct)) <= 0.03, '묶음 합 ≈ 수집 CPU(반올림 차이만)');
