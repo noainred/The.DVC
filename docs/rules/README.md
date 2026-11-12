@@ -22,7 +22,7 @@
 | [horizon-curuser.md](horizon-curuser.md) | 6 | Horizon 세션·앱 사용·현재 사용자(Windows) | server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | [demo.md](demo.md) | 6 | 데모(mock) 모드·데모 계정 | server/src/mock/ · auth/demoGuest.js |
 | [audits.md](audits.md) | 82 | 회차별 점검(감사) 기록 v2.583~v2.785 | 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
-| [focusmon.md](focusmon.md) | 3 | 서버 집중 모니터링 — v2.976 반증 · v2.978 CSV 대량 등록 · 일괄 시험 · 다시 연결 · v2.979 구간 평균 원문 | server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js · web/src/views/tools/FocusMon* |
+| [focusmon.md](focusmon.md) | 5 | 서버 집중 모니터링 — v2.976 반증 · v2.978 CSV 대량 등록 · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 원문 | server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js · web/src/views/tools/FocusMon* |
 | [server-security-history.md](server-security-history.md) | 20절 | 서버 보안 감사 조치 기록 | 서버 인증·권한·SSRF·비밀·엣지 수신 코드를 고칠 때 |
 
 ## 남기는 방법

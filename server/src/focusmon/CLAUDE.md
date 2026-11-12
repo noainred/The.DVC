@@ -48,16 +48,12 @@
 - **저장된 계속 수집의 겹침 정리(v2.980 — 사용자 질문 '동시에 2번 수집하는 거야?')**: v2.979 전에 만든 계속 수집은 같은 서버가 두 수집에 있을 수 있고 업그레이드해도 남았다.
   수집기는 서버마다 하나(`desiredFor` 가 id 로 합친다 — 두 번 접속하지 않는다)지만 한 수집 · 서버별 '수집 종료' 가 그 서버를 멈추지 못했다. `loadSessions` 가 먼저 시작한 수집에만 남기고
   비게 된 수집은 뺀다(파일 다시 쓰기 · 콘솔 한 줄 · fm_run 은 `drainLoadFixes` 로 service 가 고쳐 쓴다 · '지난번 다시 고르기' 에 넣지 않는다). 회귀 `focusMonSessMerge2980` · 변이 7/7.
-- **프로세스 세부 정보(v2.981 — 사용자 '프로세스를 클릭하면 어떤 프로세스인지 · 네트워크 · 디스크 · CPU' · 시안 ⑩ `docs/design/focus-mon/README.md` §16 · 컨펌 '구현해줘' = 기본값)** —
-  회귀 `server/test/focusMonProc2981.test.js`(실제 스크립트를 이 컨테이너에서 돌린 원문 `fixtures/focusmon/container-linux-6.18-proc2981.txt` 포함) · `web/src/views/tools/focusMonProc.test.js`:
-  ① 원격 명령은 여전히 상수 · PROC 줄에 같은 stat 줄의 8칸(부모 · utime · stime · nice · vsize · majflt · 42번째 칸 디스크 대기 tick · 상태)을 더했다(파서는 **정확히 14칸**일 때만 새 줄 — 옛 6칸 줄도 읽는다).
-  `##UNIT`(30초 · /proc/<pid>/cgroup 의 systemd 줄 → .service/.scope 마지막 칸 · 원격 awk 가 안전한 글자로) · `##IO`(프로세스 주기 · /proc/<pid>/io — **그 계정 · root 만 읽는다**, 못 읽으면 줄 없음 = null).
-  구획 순서는 `parse.SECTIONS`(UNIT 은 PROC 앞 — 어기면 프레임을 버린다). HELLO `dacct`(sysctl task_delayacct · 없으면 `grep -c nodelayacct /proc/cmdline` — 커널 부트 줄에서 **개수만**. 옛 테스트의 cmdline 금지는 이 한 줄만 글자 그대로 예외).
-  ② 못 읽은 값은 null: 읽기/쓰기(io 를 못 읽음) · 디스크 대기(지연 집계 꺼짐 · 모름) · 상위 30 밖 구간(차트가 끊긴다 — 0 아님). ③ 엣지 정제 `cleanProcs` 화이트리스트(음수 · 형식 · nice -20~19 · 서비스 이름 규칙 parse 와 같음).
-  ④ `query.procDetail` — pid + 시작 tick(sk)으로 같은 프로세스(pid 재사용을 가른다) · 서버 전체 네트워크(s.rx · s.tx)는 **참고**(프로세스별 네트워크는 /proc 에 없다) · 라우트 `GET /tools/focus-mon/proc`
-  (admin + 전체 범위 · 보이는 대상만 404 · pid 1~4194304 · 사용자 이름은 관리자 판본만). 화면은 줄 아래 colSpan 한 줄(Fragment) · 표에서 빠져도 펼친 패널은 유지 · 떨어진 칸은 점으로 그린다.
-  ⚠ 실제 RHEL 7.8 에서 cgroup v1 systemd 줄 · delayacct 기본 켜짐은 확인하지 못했다(컨테이너는 systemd 가 없어 서비스 칸이 비고 task_delayacct=0).
-  **반증 1인(v2.981 · 11건 중 10건 반영 · 변이 38/38)**: F1 io · cgroup 읽기를 `timeout -s KILL`(옛 커널 io 는 cred_guard_mutex 에서 기다린다 — root · 앱 계정 수집일 때) ·
-  F3 상태 · 디스크 대기 tick 은 **주 스레드 하나의 값**(CPU · fault 는 합) — 스레드가 여럿이면 화면이 밝힌다 · F4 빈 comm '_' · 6/14칸만 · F5 서비스는 경로의 **첫** .service/.scope(사용자 유닛 위조) ·
-  F6 사용자 · 서비스 맵은 읽은 uptime 뒤에 시작한 프로세스에 붙이지 않는다 · F7 404 뒤 멈춘 값을 밝힌다 · F8 평균 열쇠에 sk · F9 엣지 정수 · 범위 · F10 null 칸을 싣지 않는다(실측 1분 묶음 1.39배).
-  남긴 것: 관리자 판본이 아니어도 `user@1000.service` 의 UID 가 보인다(라우트가 관리자 전용 · 데모 계정은 데모 서버만).
+- **프로세스 세부 정보(v2.981)** — 원문은 `docs/rules/focusmon.md`(v2.982 에 상한 때문에 옮김). 요지: PROC 줄 14칸(옛 6칸도 읽는다) · `##UNIT`(30초 · 경로의 **첫** .service/.scope) ·
+  `##IO`(그 계정 · root 만 · 못 읽으면 null) · io · cgroup 읽기는 `timeout -s KILL` · pid 는 `grep -H` 파일 경로에서 · 부트 줄은 `grep -c nodelayacct` 개수만 ·
+  `query.procDetail` 은 pid + 시작 tick · 상위 30 밖 · 못 읽음은 null(0 아님) · 서버 전체 네트워크는 참고 · 라우트 admin + 전체 범위 · 사용자 이름은 관리자 판본만.
+- **서버 그룹(v2.982 — 사용자 '등록된 서버를 그룹별로 분류해서 보는 기능' · 시안 ⑫ 컨펌 '구현해줘' = 기본값)** — 회귀 `server/test/focusMonGroup2982.test.js` ·
+  `web/src/views/tools/focusMonGroup.test.js` · 변이 23/23 · 상세 `docs/rules/focusmon.md`. 서버마다 그룹 **하나**(`target.group` · '' = 그룹 없음) · 목록 `groups`(만든 순서 · 빈 그룹 유지) ·
+  이름 `GROUP_RE`(1~32자 — 웹과 같은 글자 · 테스트가 대조) · **대소문자 무시로 하나**(`canonGroup` — 있는 표기로) · 상한 `MAX_GROUPS` 50 · 불러올 때도 같은 규칙(넘거나 틀리면 버린다 · 자르지 않는다).
+  쓰기 라우트 넷(만들기 · 이름 바꾸기 · 지우기 · 옮기기)은 수집 시작과 같은 문 + 라우트 `registryUnreadable` 503 + 감사 `focus-mon.group.*`. 지우면 서버는 그룹 없음(서버 · 기록은 그대로).
+  **CSV 그룹 열이 없으면 그룹을 바꾸지 않는다**(예전 CSV 로 갱신해도 지워지지 않게) · 새 이름은 미리보기 `newGroups` · 상한을 넘으면 적용 거절. **데모 계정 판본에는 등록부 그룹 이름을 싣지 않는다**.
+  그룹 색은 쓰지 않는다(비교 차트의 서버 색과 겹친다) · 그룹 시작이 수집 상한을 넘으면 앞 N대로 시작하고 나머지를 알린다(`groupStartPlan`).

@@ -8,6 +8,8 @@
 - v2.976 반증 1회(2026-11-11 · 11건 확정 · 변이 12/12)
 - v2.978 CSV 대량 등록 · 일괄 시험 · 노드 옮기기 · 다시 연결 · 반증 1회(7건 확정 · 변이 13/13)
 - v2.979 표의 값 단추 · 구간 평균은 시간 가중(반증 1 — 재현)
+- v2.981 프로세스 세부 정보(반증 1인 11건 중 10건 · 변이 38/38) — v2.982 에 CLAUDE.md 상한 때문에 옮김
+- v2.982 서버 그룹(변이 23/23)
 
 - **반증 1회(2026-11-11 · 11건 확정 · 변이 12/12)** — 되돌리지 말 것:
   ① 늦은 표본은 분마다 한 번만 다시 쓴다(`store.flushReopened` — 표본마다 풀고 다시 압축하면 O(N²) · 재현 30초 블로킹) · 분당 표본 상한 `codec.MAX_N` 120 ·
@@ -46,3 +48,32 @@
   표본 평균이었을 때 '계속 수집' 이 10초 → 2초(화면을 엶)로 바뀐 구간에서 촘촘한 최근 몇 분 쪽으로 치우쳤다(실제 %util 23.3 → 화면 50).
   `timeAverageIostat(rows, weights)` 지연은 요청 수 × 시간 · 네트워크 오류 · 드롭은 구간 합 · 프로세스 평균도 같은 무게. 표본 평균으로 되돌리지 말 것(`focusMonAvg2979`).
   캡션(`atCaption`)은 응답의 `lastAt` · `coverMs`(평균이 덮는 시간)로 말한다 — 수집이 끝났으면 '마지막 표본 · N분 전', 일부만 있으면 '표본은 N분치'. 변이 12/12.
+- **프로세스 세부 정보(v2.981 — 사용자 '프로세스를 클릭하면 어떤 프로세스인지 · 네트워크 · 디스크 · CPU' · 시안 ⑩ `docs/design/focus-mon/README.md` §16 · 컨펌 '구현해줘' = 기본값)** —
+  회귀 `server/test/focusMonProc2981.test.js`(실제 스크립트를 이 컨테이너에서 돌린 원문 `fixtures/focusmon/container-linux-6.18-proc2981.txt` 포함) · `web/src/views/tools/focusMonProc.test.js`:
+  ① 원격 명령은 여전히 상수 · PROC 줄에 같은 stat 줄의 8칸(부모 · utime · stime · nice · vsize · majflt · 42번째 칸 디스크 대기 tick · 상태)을 더했다(파서는 **정확히 14칸**일 때만 새 줄 — 옛 6칸 줄도 읽는다).
+  `##UNIT`(30초 · /proc/<pid>/cgroup 의 systemd 줄 → .service/.scope 마지막 칸 · 원격 awk 가 안전한 글자로) · `##IO`(프로세스 주기 · /proc/<pid>/io — **그 계정 · root 만 읽는다**, 못 읽으면 줄 없음 = null).
+  구획 순서는 `parse.SECTIONS`(UNIT 은 PROC 앞 — 어기면 프레임을 버린다). HELLO `dacct`(sysctl task_delayacct · 없으면 `grep -c nodelayacct /proc/cmdline` — 커널 부트 줄에서 **개수만**. 옛 테스트의 cmdline 금지는 이 한 줄만 글자 그대로 예외).
+  ② 못 읽은 값은 null: 읽기/쓰기(io 를 못 읽음) · 디스크 대기(지연 집계 꺼짐 · 모름) · 상위 30 밖 구간(차트가 끊긴다 — 0 아님). ③ 엣지 정제 `cleanProcs` 화이트리스트(음수 · 형식 · nice -20~19 · 서비스 이름 규칙 parse 와 같음).
+  ④ `query.procDetail` — pid + 시작 tick(sk)으로 같은 프로세스(pid 재사용을 가른다) · 서버 전체 네트워크(s.rx · s.tx)는 **참고**(프로세스별 네트워크는 /proc 에 없다) · 라우트 `GET /tools/focus-mon/proc`
+  (admin + 전체 범위 · 보이는 대상만 404 · pid 1~4194304 · 사용자 이름은 관리자 판본만). 화면은 줄 아래 colSpan 한 줄(Fragment) · 표에서 빠져도 펼친 패널은 유지 · 떨어진 칸은 점으로 그린다.
+  ⚠ 실제 RHEL 7.8 에서 cgroup v1 systemd 줄 · delayacct 기본 켜짐은 확인하지 못했다(컨테이너는 systemd 가 없어 서비스 칸이 비고 task_delayacct=0).
+  **반증 1인(v2.981 · 11건 중 10건 반영 · 변이 38/38)**: F1 io · cgroup 읽기를 `timeout -s KILL`(옛 커널 io 는 cred_guard_mutex 에서 기다린다 — root · 앱 계정 수집일 때) ·
+  F3 상태 · 디스크 대기 tick 은 **주 스레드 하나의 값**(CPU · fault 는 합) — 스레드가 여럿이면 화면이 밝힌다 · F4 빈 comm '_' · 6/14칸만 · F5 서비스는 경로의 **첫** .service/.scope(사용자 유닛 위조) ·
+  F6 사용자 · 서비스 맵은 읽은 uptime 뒤에 시작한 프로세스에 붙이지 않는다 · F7 404 뒤 멈춘 값을 밝힌다 · F8 평균 열쇠에 sk · F9 엣지 정수 · 범위 · F10 null 칸을 싣지 않는다(실측 1분 묶음 1.39배).
+  남긴 것: 관리자 판본이 아니어도 `user@1000.service` 의 UID 가 보인다(라우트가 관리자 전용 · 데모 계정은 데모 서버만).
+- **서버 그룹(v2.982 — 2026-11-12 사용자 "그리고 등록된 서버를 그룹별로 분류해서 보는 기능 추가" → 시안 ⑫ `docs/design/focus-mon/README.md` §18 · 컨펌 '구현해줘' = 기본값)** —
+  회귀 `server/test/focusMonGroup2982.test.js`(5) · `web/src/views/tools/focusMonGroup.test.js`(18) · 변이 23/23(처음 판에서 4건 생존 — PUT 문 · DELETE 문 · 불러올 때 글자 검사 · 라우트 503 — 테스트 ④ 로 보강):
+  ① 모델: 서버마다 그룹 하나(폴더 — 태그 아님) · 등록부 `groups` 는 만든 순서이고 빈 그룹도 남는다(`withUsedGroups` 가 서버가 쓰는데 목록에 없는 이름을 뒤에 더한다) ·
+  이름은 `GROUP_RE`(글자 · 숫자 · 공백 · . _ - · 1~32자 — 가운뎃점 불가라 데모 그룹도 '백업 파일') · 대소문자만 다른 이름은 같은 그룹(`canonGroup` 이 있는 표기로 · 만들기 409) ·
+  상한 50(`groupRefusal` — 추가 · 수정 · CSV 적용 공통). 불러올 때 32자를 넘는 이름은 **자르지 않고 버린다**(잘라 쓰면 앞 32자가 같은 두 이름이 한 그룹이 된다 — 화면 확인 중 테스트가 잡음).
+  ② 쓰기: `POST /tools/focus-mon/groups` · `PUT …/groups/:name`(서버도 함께 · 다른 그룹과 같은 이름이면 409 — 합치기는 옮기기로) · `DELETE …/groups/:name`(서버는 그룹 없음) ·
+  `POST /tools/focus-mon/targets/group`(있는 그룹만 · '' = 그룹 없음 · 없는 id 는 missing). 문은 admin + 조회 · 쓰기 전체 범위 + 데모 차단 · 라우트가 먼저 `registryUnreadable` 503 ·
+  감사 `focus-mon.group.add|rename|remove|move` · 수정 라우트(`PUT targets/:id`)로 그룹만 바꾸면 접속처는 그대로(moved false · 감사에 '그룹 A → B').
+  ③ CSV: 머리글 별칭 '그룹 · 그룹명 · 분류 · group' · **그룹 열이 없으면 그대로**(빈 칸은 그룹 없음) · 미리보기 `groupColumn` · `newGroups` · `groupsOver` · `groupsMax` · 화면은 상한을 넘으면 적용 단추를 잠근다 ·
+  내보내기 · 빈 양식에 그룹 열(다시 가져오면 모두 '그대로').
+  ④ 보기: 응답 `groups`(list · none · max · own — 데모 계정은 등록부 이름 없이 보이는 서버의 그룹만) · 대상 탭 '그룹별로 묶기 | 목록' · 그룹 단추(`groupChips` · `filterByGroup` · `groupChipOn` —
+  고른 그룹이 없으면 '전체' 로, 단추와 거르기가 같은 판정) · 그룹 머리(접기 · 대수 · 수집 중 · 키 로그인 실패 · 노드 · 그룹 고르기 · 연결 시험 · 시작) · 그룹 표는 열 너비 고정(`fm-gtable` —
+  표마다 열이 어긋났다) · 개요 · 비교 · 프로세스의 그룹 단추(`fm.view.group` · 보고 있는 서버를 거른다) · 개요 '그룹별로'(그룹 평균 CPU 는 값 있는 서버만 — `groupSummary`).
+  ⑤ 자동 묶기 제안(`groupSuggestions`): **그룹 없음 · 데모가 아닌 서버만** · 이름 앞부분(끝의 -숫자 앞) · 담당 노드 · IPv4 /24 · 둘 이상 묶이는 것만 · 있는 그룹 이름은 그 표기로 ·
+  적용은 없는 그룹을 먼저 만들고 옮긴다(응답 ok:false 를 성공으로 읽지 않는다 — 소스 테스트).
+  ⚠ 남긴 것: 그룹별 권한(그룹 단위 쓰기 범위)은 없다 — 화면 전체가 admin + 전체 범위 전용이라 필요하지 않았다.

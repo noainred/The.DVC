@@ -14,9 +14,9 @@ const T = { id: 'fm-1', name: 'web-01', host: '10.2.0.1', port: 22, username: 'd
 
 describe('editFormOf · editChanges', () => {
   it('등록 값 그대로 · 포트는 글자', () => {
-    expect(editFormOf(T)).toEqual({ name: 'web-01', host: '10.2.0.1', port: '22', username: 'dvcmon', agent: 'Edge-PL' });
+    expect(editFormOf(T)).toEqual({ name: 'web-01', host: '10.2.0.1', port: '22', username: 'dvcmon', agent: 'Edge-PL', group: '' }); // v2.982 그룹 칸
     expect(editFormOf({ name: 'x', host: '10.0.0.1' }).port).toBe('22');
-    expect(EDIT_FIELDS).toEqual(['name', 'host', 'port', 'username', 'agent']);
+    expect(EDIT_FIELDS).toEqual(['name', 'host', 'port', 'username', 'agent', 'group']);
   });
   it('그대로면 바뀐 칸 없음 — 노드 대소문자 · 포트 022 · 앞뒤 공백은 같다', () => {
     expect(editChanges(T, editFormOf(T))).toEqual({ changes: [], endpoint: false });

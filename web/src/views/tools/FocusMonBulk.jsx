@@ -11,7 +11,7 @@ import { postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import {
-  DASH, CSV_ACTION_TEXT, csvChangeText, decodeCsvBytes, WAKE_TEXT, wakeFallbackText, upgradeText, diagItems, installGroups, installCommand, INSTALL_NOTE,
+  DASH, CSV_ACTION_TEXT, csvChangeText, csvGroupNote, groupLabel, decodeCsvBytes, WAKE_TEXT, wakeFallbackText, upgradeText, diagItems, installGroups, installCommand, INSTALL_NOTE,
   nodeText, agoShort, KEY_FILE_NOTE, csvHeaderNotes,
 } from './focusMonText.js';
 
@@ -75,7 +75,7 @@ export function CsvPanel({ main, busy, run, onClose }) {
       </div>
       {fileNote ? <span className="fm-dim">{fileNote}</span> : null}
       {tooLong ? <div className="fm-ban w">글이 {Math.round(lim.maxBytes / 1000)}KB 를 넘습니다(지금 {Math.round(text.length / 1000)}KB) — 줄이나 열을 줄여 나눠 넣으세요. 잘라서 보내지 않습니다.</div> : null}
-      <textarea className="fm-input fm-ta" value={text} onChange={(e) => edit(e.target.value)} placeholder={'이름,IP,포트,계정,담당 노드\nweb-01,10.10.22.31,22,dvcmon,중앙\nweb-02,10.10.22.32,22,dvcmon,엣지 이름'} aria-label="CSV 붙여 넣기" />
+      <textarea className="fm-input fm-ta" value={text} onChange={(e) => edit(e.target.value)} placeholder={'이름,IP,포트,계정,담당 노드,그룹\nweb-01,10.10.22.31,22,dvcmon,중앙,WEB\nweb-02,10.10.22.32,22,dvcmon,엣지 이름,WEB'} aria-label="CSV 붙여 넣기" />
       <div className="fm-row">
         <button type="button" className="fm-btn pri" disabled={!!busy || !text.trim() || tooLong} onClick={preview}>미리보기</button>
         <button type="button" className="fm-btn" onClick={onClose}>닫기</button>
@@ -88,6 +88,7 @@ export function CsvPanel({ main, busy, run, onClose }) {
             <span className="fm-dim">{plan.header ? '머리글을 읽어 열을 찾았습니다' : '머리글이 없어 이름, IP, 포트, 계정, 담당 노드 순서로 읽었습니다'} · 지금 {plan.registered}대 등록 / 상한 {plan.max}대</span>
           </div>
           {csvHeaderNotes(plan).map((t) => <div key={t} className="fm-ban w">{t}</div>)}
+          <span className="fm-dim">{csvGroupNote(plan)}</span>
           {plan.overCap ? <div className="fm-ban w">새로 넣을 {c.add}대를 더하면 상한 {plan.max}대를 넘습니다 — 줄을 줄이세요.</div> : null}
           <div className="fm-scroll">
             <STable className="fm-table" minWidth={760}>
@@ -102,7 +103,7 @@ export function CsvPanel({ main, busy, run, onClose }) {
                     <td style={{ fontWeight: 600 }}>{v.name || DASH}</td>
                     <td data-sort={v.host || null}><span className="fm-mono fm-num">{v.host || DASH}{v.port ? `:${v.port}` : ''}</span> <small className="fm-mono">{v.username || ''}</small></td>
                     <td>{r.action === 'error' ? (v.agent || '중앙') : nodeText(v.agent)}</td>
-                    <td className={r.action === 'error' ? 'fm-why' : 'fm-dim'}>{r.action === 'error' ? r.reason : r.action === 'update' ? csvChangeText(r) : r.action === 'same' ? '바뀐 것 없음' : '새로 등록'}</td>
+                    <td className={r.action === 'error' ? 'fm-why' : 'fm-dim'}>{r.action === 'error' ? r.reason : r.action === 'update' ? csvChangeText(r) : r.action === 'same' ? '바뀐 것 없음' : `새로 등록${plan.groupColumn ? ` · ${groupLabel(v.group)}` : ''}`}</td>
                   </tr>
                 );
               })}</tbody>
@@ -113,7 +114,7 @@ export function CsvPanel({ main, busy, run, onClose }) {
             <Seg label="적용 방식" value={mode} onChange={setMode} options={[['valid', '맞는 줄만 넣기'], ['all', '모두 맞을 때만 넣기']]} />
             <label className="fm-chk"><input type="checkbox" checked={update} onChange={(e) => setUpdate(e.target.checked)} /> 같은 IP · 포트는 고치기</label>
             <label className="fm-chk"><input type="checkbox" checked={autoTest} onChange={(e) => setAutoTest(e.target.checked)} /> 넣은 서버 바로 연결 시험</label>
-            <button type="button" className="fm-btn pri" disabled={!!busy || plan.overCap || (willAdd + willUpd === 0)} onClick={apply}>적용 — 새로 {willAdd} · 고침 {willUpd}</button>
+            <button type="button" className="fm-btn pri" disabled={!!busy || plan.overCap || plan.groupsOver || (willAdd + willUpd === 0)} onClick={apply}>적용 — 새로 {willAdd} · 고침 {willUpd}</button>
           </div>
           {mode === 'all' && c.error ? <span className="fm-dim">오류 줄이 {c.error}개라 ‘모두 맞을 때만’ 으로는 아무것도 넣지 않습니다.</span> : null}
         </>

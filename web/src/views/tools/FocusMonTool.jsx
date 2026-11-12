@@ -21,6 +21,7 @@ import {
   levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR, bulkLine, needsRetry, AUTH_HINT, nameTitle,
   atOptions, atCaption, normAt, editFormOf, editChanges, editNotes, editResultText,
   procDescOf, PROC_STATE_TEXT, procKey, procCoverText, procIoNote, procWaitNote, procThreadNote, PROC_NET_NOTE, PROC_ARGS_NOTE, mbsText, mbText,
+  GROUP_NONE, groupLabel, groupSections, groupChips, filterByGroup, groupChipOn, groupSummary, groupStartPlan, groupStartText, groupSuggestions, suggestionText,
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
@@ -213,6 +214,7 @@ function TimeBar({ tb, now, coverage, oldestMinute }) {
 function Overview({ main, ids, tb, now, onOpen }) {
   const [sort, setSort] = useState(() => lsGet('fm.sort', 'cpu'));
   const [node, setNode] = useState('all');
+  const [split, setSplit] = useState(() => lsGet('fm.ov.split', 'flat'));
   const params = useMemo(() => ({ view: 'overview', targets: ids.join(','), win: tb.win, end: tb.end ?? '' }), [ids, tb.win, tb.end]);
   const ivMs = Math.max(1, Math.min(...(main.sessions.map((s) => s.interval)), 10) || 2) * 1000;
   const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? ivMs : 0, ids.length > 0);
@@ -234,6 +236,25 @@ function Overview({ main, ids, tb, now, onOpen }) {
   }, [rows]);
   const shown = rows.filter((x) => node === 'all' || (x.t.agent || '중앙') === node)
     .sort((a, b) => (sort === 'name' ? String(a.t.name).localeCompare(String(b.t.name)) : (b.sum?.[sort === 'disk' ? 'disk' : sort] ?? -1) - (a.sum?.[sort === 'disk' ? 'disk' : sort] ?? -1)));
+  const hasGroups = rows.some((x) => x.t.group);
+  const cardOf = (x) => {
+    const b = cardBadge(x.t, x.sum, settings);
+    const off = x.t.status && x.t.status.state !== 'ok';
+    return (
+      <div key={x.id} className={`fm-card fm-sv ${b?.tone === 'crit' ? 'crit' : ''} ${off ? 'off' : ''}`}>
+        <div className="fm-sv-head">
+          <a className="fm-name" title={nameTitle(x.t)} href={`#/${BASE.join('/')}/server/${encodeURIComponent(x.id)}`} onClick={(e) => { e.preventDefault(); onOpen(x.id); }}>{x.t.name}</a>
+          <Badge b={b} />
+        </div>
+        <div className="fm-mono fm-dim fm-ell" title={`${x.t.host} · ${x.t.agent ? `엣지 ${x.t.agent}` : '중앙'}`}>{x.t.host} · {x.t.agent ? `엣지 ${x.t.agent}` : '중앙'}</div>
+        {[['CPU', 'cpu', x.sum?.cpu, levelOf(x.sum?.cpu, settings)], ['메모리', 'mem', x.sum?.mem, levelOf(x.sum?.mem, settings)], ['네트워크', 'net', x.sum?.net, levelOf(x.sum?.net, settings)], ['디스크', 'disk', x.sum?.disk, levelOf(x.sum?.disk, settings)]].map(([lab, k, v, lv]) => (
+          <div key={k} className="fm-mrow"><span className="fm-dim">{lab}</span><span className={`fm-mv ${lv}`}>{v == null ? DASH : `${Math.round(v)}%`}</span><Spark vals={x.series?.[k]} hover={{ from: q.data?.from, to: q.data?.to, label: lab, fmt: (u) => pctText(u) }} /></div>
+        ))}
+        <div className="fm-sub"><span>{x.sum ? `↓${bpsText(x.sum.netRx)} ↑${bpsText(x.sum.netTx)}` : DASH}</span><span>쓰기 지연 {msText(x.sum?.wAwait)}</span></div>
+        {off ? <div className="fm-why">{x.t.status?.error || STATE_TEXT[x.t.status?.state]?.label}</div> : null}
+      </div>
+    );
+  };
   if (!ids.length) return <div className="fm-card fm-empty">볼 서버가 없습니다 — ‘대상 · 키’ 탭에서 서버를 고르고 모니터링을 시작하세요.</div>;
   return (
     <>
@@ -251,28 +272,20 @@ function Overview({ main, ids, tb, now, onOpen }) {
           <Seg label="정렬 기준" value={sort} onChange={(v) => { setSort(v); lsSet('fm.sort', v); }} options={[['cpu', 'CPU 높은 순'], ['mem', '메모리'], ['net', '네트워크'], ['disk', '디스크'], ['name', '이름']]} />
           <span className="fm-dim">담당 노드</span>
           <Seg label="담당 노드" value={node} onChange={setNode} options={nodes} />
+          {hasGroups ? <><span className="fm-dim">나눠 보기</span><Seg label="나눠 보기" value={split} onChange={(v) => { setSplit(v); lsSet('fm.ov.split', v); }} options={[['flat', '한 판'], ['group', '그룹별로']]} /></> : null}
         </div>
         <span className="fm-dim">세로축 0~100% 공통 · 숫자는 구간 끝의 값</span>
       </div>
       <div className="fm-grid">
-        {shown.map((x) => {
-          const b = cardBadge(x.t, x.sum, settings);
-          const off = x.t.status && x.t.status.state !== 'ok';
-          return (
-            <div key={x.id} className={`fm-card fm-sv ${b?.tone === 'crit' ? 'crit' : ''} ${off ? 'off' : ''}`}>
-              <div className="fm-sv-head">
-                <a className="fm-name" title={nameTitle(x.t)} href={`#/${BASE.join('/')}/server/${encodeURIComponent(x.id)}`} onClick={(e) => { e.preventDefault(); onOpen(x.id); }}>{x.t.name}</a>
-                <Badge b={b} />
-              </div>
-              <div className="fm-mono fm-dim fm-ell" title={`${x.t.host} · ${x.t.agent ? `엣지 ${x.t.agent}` : '중앙'}`}>{x.t.host} · {x.t.agent ? `엣지 ${x.t.agent}` : '중앙'}</div>
-              {[['CPU', 'cpu', x.sum?.cpu, levelOf(x.sum?.cpu, settings)], ['메모리', 'mem', x.sum?.mem, levelOf(x.sum?.mem, settings)], ['네트워크', 'net', x.sum?.net, levelOf(x.sum?.net, settings)], ['디스크', 'disk', x.sum?.disk, levelOf(x.sum?.disk, settings)]].map(([lab, k, v, lv]) => (
-                <div key={k} className="fm-mrow"><span className="fm-dim">{lab}</span><span className={`fm-mv ${lv}`}>{v == null ? DASH : `${Math.round(v)}%`}</span><Spark vals={x.series?.[k]} hover={{ from: q.data?.from, to: q.data?.to, label: lab, fmt: (u) => pctText(u) }} /></div>
-              ))}
-              <div className="fm-sub"><span>{x.sum ? `↓${bpsText(x.sum.netRx)} ↑${bpsText(x.sum.netTx)}` : DASH}</span><span>쓰기 지연 {msText(x.sum?.wAwait)}</span></div>
-              {off ? <div className="fm-why">{x.t.status?.error || STATE_TEXT[x.t.status?.state]?.label}</div> : null}
-            </div>
-          );
-        })}
+        {split === 'group' && hasGroups ? groupSections(shown.map((x) => ({ ...x.t, _row: x })), main.groups?.list).flatMap((sec) => {
+          // v2.982 그룹별로 나눠 보기 — 그룹 머리(대수 · 평균 CPU · 가장 바쁜 서버) 뒤에 그 그룹 카드(정렬 · 노드 거르기는 그대로)
+          const rs = sec.targets.map((t) => t._row);
+          const g = groupSummary(rs);
+          return [
+            <div key={`gh-${sec.key}`} className="fm-gview"><h4>{sec.label}</h4><span className="fm-dim">{g.n}대 · 평균 CPU {g.avg == null ? DASH : pctText(g.avg)}{g.valued < g.n && g.avg != null ? `(값 있는 ${g.valued}대)` : ''} · 가장 바쁜 {g.top ? `${g.top.name} ${pctText(g.top.cpu)}` : DASH}</span></div>,
+            ...rs.map(cardOf),
+          ];
+        }) : shown.map(cardOf)}
       </div>
       <div className="fm-note">네트워크 = 본딩 인터페이스(없으면 올라온 물리 인터페이스)의 수신 · 송신 중 큰 쪽 ÷ 링크 속도 · 디스크 = 물리 디스크 사용률(%util) 중 최고. 엣지에 연결된 서버는 엣지가 모아 보내므로 몇 초 늦게 보입니다.</div>
     </>
@@ -947,13 +960,26 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   const [joinTo, setJoinTo] = useState('');
   const [edit, setEdit] = useState(null); // v2.980 등록된 서버 수정 — { id, form } (한 번에 한 줄)
   const [setForm2, setSettingsForm] = useState(null);
+  // v2.982 서버 그룹 — 그룹 단추 · 보기(그룹별로 묶기 | 목록)는 브라우저가 기억 · 접은 그룹 · 옮길 그룹 · 새 그룹 · 이름 바꾸기
+  const [gsel, setGselRaw] = useState(() => lsGet('fm.tg.group', 'all'));
+  const setGsel = (v) => { setGselRaw(v); lsSet('fm.tg.group', v); };
+  const [gview, setGviewRaw] = useState(() => (lsGet('fm.tg.view', 'group') === 'list' ? 'list' : 'group'));
+  const setGview = (v) => { setGviewRaw(v); lsSet('fm.tg.view', v); };
+  const [closed, setClosed] = useState(() => new Set());
+  const [moveTo, setMoveTo] = useState('');
+  const [newGroup, setNewGroup] = useState('');
+  const [rename, setRename] = useState(null); // { from, to }
   const run = async (label, fn) => {
     setBusy(label); setMsg(null);
     try { const r = await fn(); if (r?.reason) setMsg({ tone: r.ok === false ? 'bad' : 'ok', text: r.reason }); return r; }
     catch (e) { setMsg({ tone: 'bad', text: e?.body?.reason || e?.message || String(e) }); return null; }
     finally { setBusy(''); reload(); }
   };
-  const targets = main.targets.filter((t) => node === 'all' || (t.agent || '') === node);
+  const byNode = main.targets.filter((t) => node === 'all' || (t.agent || '') === node);
+  const groupList = main.groups?.list || [];
+  const ownGroups = groupList.filter((g) => g.own);
+  const targets = filterByGroup(byNode, gsel);
+  const chips = groupChips(byNode, groupList);
   // v2.979 중복 방지: 서버는 수집 하나에만 — 표에 '수집 중' · 시작 전 안내 · 진행 중인 수집에 추가 · 서버별 수집 종료
   const sIdx = sessionIndex(main.sessions);
   const note = startNote({ picked, index: sIdx, mode });
@@ -978,7 +1004,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
     const f = edit?.form; if (!f) return;
     // 포트는 글자 그대로 보낸다 — 화면에서 22 로 바꾸면 틀린 값이 조용히 22 가 된다(서버가 1~65535 를 검사해 알린다)
     run('edit', async () => {
-      const r = await putJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`, { name: f.name.trim(), host: f.host.trim(), port: String(f.port).trim(), username: f.username.trim(), agent: f.agent });
+      const r = await putJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`, { name: f.name.trim(), host: f.host.trim(), port: String(f.port).trim(), username: f.username.trim(), agent: f.agent, group: f.group || '' });
       if (r?.ok === false) return r;
       setEdit(null);
       return { ok: true, reason: editResultText(r, t.name) };
@@ -988,6 +1014,114 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
     const r = await postJson('/tools/focus-mon/targets/test-bulk', { ids });
     return { ok: true, reason: `${what} ${r.job.total}대의 연결 시험을 시작했습니다${r.job.skipped ? `(10초 안에 시험한 ${r.job.skipped}대는 건너뜀)` : ''} — 진행은 위 띠 · 결과는 키 로그인 칸에 나옵니다.` };
   });
+  // v2.982 서버 그룹 — 옮기기 · 만들기 · 이름 바꾸기 · 지우기 · 자동 묶기 제안 적용(모두 응답의 ok 를 본다)
+  const moveGroup = () => run('group', async () => {
+    const r = await postJson('/tools/focus-mon/targets/group', { ids: picked, group: moveTo });
+    if (r?.ok === false) return r;
+    return { ok: true, reason: `고른 서버 ${r.moved}대를 ${groupLabel(r.group)}(으)로 옮겼습니다${r.same ? ` · 이미 그 그룹 ${r.same}대` : ''}${r.missing ? ` · 데모 · 없는 서버 ${r.missing}대는 옮기지 않음` : ''}.` };
+  });
+  const createGroup = () => run('group', async () => {
+    const r = await postJson('/tools/focus-mon/groups', { name: newGroup.trim() });
+    if (r?.ok === false) return r;
+    setNewGroup(''); setMoveTo(r.group);
+    return { ok: true, reason: `그룹 ${r.group} 을(를) 만들었습니다 — 서버를 고르고 ‘옮기기’ 로 넣으세요.` };
+  });
+  const renameGroup = () => run('group', async () => {
+    const r = await putJson(`/tools/focus-mon/groups/${encodeURIComponent(rename.from)}`, { name: rename.to.trim() });
+    if (r?.ok === false) return r;
+    setRename(null);
+    return { ok: true, reason: `그룹 이름을 ${r.group}(으)로 바꿨습니다(서버 ${r.moved}대).` };
+  });
+  const deleteGroup = (g) => {
+    if (!window.confirm(`그룹 ${g.name} 을(를) 지울까요? 이 그룹의 서버 ${g.n}대는 ‘${GROUP_NONE}’ 으로 갑니다(서버 · 기록은 그대로).`)) return;
+    run('group', async () => { const r = await delJson(`/tools/focus-mon/groups/${encodeURIComponent(g.name)}`); if (r?.ok === false) return r; return { ok: true, reason: `그룹 ${g.name} 을(를) 지웠습니다 — 서버 ${r.freed}대는 ${GROUP_NONE}.` }; });
+  };
+  const applySuggestion = (sg) => {
+    if (!window.confirm(`${sg.title} 묶습니다 — ${suggestionText(sg, ownGroups)}. 그룹 없음 서버만 옮깁니다.`)) return;
+    run('group', async () => {
+      let moved = 0;
+      for (const m of sg.moves) {
+        if (!ownGroups.some((g) => g.name === m.group)) { const c = await postJson('/tools/focus-mon/groups', { name: m.group }); if (c?.ok === false && c.code !== 'duplicate') return c; }
+        const r = await postJson('/tools/focus-mon/targets/group', { ids: m.ids, group: m.group });
+        if (r?.ok === false) return r;
+        moved += r.moved || 0;
+      }
+      return { ok: true, reason: `${sg.title} 서버 ${moved}대를 ${sg.moves.length}개 그룹으로 묶었습니다.` };
+    });
+  };
+  const suggestions = groupSuggestions(main.targets, ownGroups);
+  const ungrouped = main.targets.filter((t) => !t.group && !t.demo).length;
+  // 대상 줄 하나(+ 수정 줄) — 목록 · 그룹별 묶기 둘 다 이것으로(v2.982)
+  const rowOf = (t) => {
+    const s = stOf(t);
+    const on = picked.includes(t.id);
+    const ed = edit?.id === t.id ? edit : null;
+    // v2.980 등록된 서버 수정 — 그 줄 바로 아래에 수정 상자(한 줄짜리 colSpan). 두 줄을 Fragment 로 묶어 정렬해도 함께 움직인다
+    // (sortableText 는 첫 tr 의 칸으로 정렬한다). 표 칸 안에 입력을 넣었더니 1440px 에서도 표가 카드보다 넓어져 저장 단추가 밖으로 나갔다.
+    let edRow = null;
+    if (ed) {
+      const f = ed.form;
+      const set = (k) => (e) => setEdit({ ...ed, form: { ...f, [k]: e.target.value.slice(0, 64) } });
+      const ch = editChanges(t, f);
+      const notes = editNotes(t, f, { inSession: sIdx.has(t.id) });
+      const canSave = !busy && ch.changes.length > 0 && !!f.name.trim() && !!f.host.trim();
+      const key = (e) => { if (e.key === 'Escape') setEdit(null); else if (e.key === 'Enter' && canSave) saveEdit(t); };
+      const unknownNode = f.agent && !edgeNodes.some((x) => x.agent.toLowerCase() === f.agent.toLowerCase());
+      edRow = (
+        <tr className="fm-editrow">
+          <td colSpan={6}><div className="fm-edbox">
+            <div className="fm-form">
+              <label className="fm-fld"><span>표시 이름</span><input className="fm-input" value={f.name} onChange={set('name')} onKeyDown={key} autoFocus /></label>
+              <label className="fm-fld"><span>IP 주소</span><input className="fm-input fm-mono" value={f.host} onChange={set('host')} onKeyDown={key} /></label>
+              <label className="fm-fld"><span>SSH 포트</span><input className="fm-input fm-mono" value={f.port} inputMode="numeric" onChange={set('port')} onKeyDown={key} /></label>
+              <label className="fm-fld"><span>계정</span><input className="fm-input fm-mono" value={f.username} onChange={set('username')} onKeyDown={key} /></label>
+              <label className="fm-fld"><span>담당 노드</span><Select sort={false} className="fm-input" value={f.agent} onChange={(e) => setEdit({ ...ed, form: { ...f, agent: e.target.value } })}>
+                <option value="">중앙</option>
+                {edgeNodes.map((x) => <option key={x.agent} value={x.agent}>엣지 {x.agent}</option>)}
+                {unknownNode ? <option value={f.agent}>엣지 {f.agent}(등록부에 없음 — 다른 노드를 고르세요)</option> : null}
+              </Select></label>
+              <label className="fm-fld"><span>그룹</span><Select sort={false} className="fm-input" value={f.group || ''} onChange={(e) => setEdit({ ...ed, form: { ...f, group: e.target.value } })}>
+                <option value="">{GROUP_NONE}</option>
+                {ownGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
+                {f.group && !ownGroups.some((g) => g.name === f.group) ? <option value={f.group}>{f.group}</option> : null}
+              </Select></label>
+              <span className="fm-row fm-nowrap">
+                <button type="button" className="fm-btn pri" disabled={!canSave} onClick={() => saveEdit(t)}>저장</button>
+                <button type="button" className="fm-btn" disabled={busy === 'edit'} onClick={() => setEdit(null)}>취소</button>
+              </span>
+            </div>
+            <div className="fm-ednotes">
+              <span className="fm-dim">{ch.changes.length ? `바뀜: ${ch.changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join(' · ')}` : '바꾼 칸이 없습니다 — 고칠 칸을 바꾸면 저장을 누를 수 있습니다.'}</span>
+              {notes.map((n) => <span key={n} className="fm-why">{n}</span>)}
+            </div>
+          </div></td>
+        </tr>
+      );
+    }
+    return (
+      <React.Fragment key={t.id}>
+      <tr className={ed ? 'fm-editing' : undefined}>
+        <td><input type="checkbox" checked={on} disabled={!on && full} aria-label={on ? '선택' : full ? '선택할 수 없음 — 상한' : '선택'} onChange={() => toggle(t.id)} /></td>
+        <td data-sort={t.name} style={{ fontWeight: 600 }}>{t.name}{gview === 'list' && t.group ? <span className="fm-badge off" title="그룹">{t.group}</span> : null}{t.demo ? <span className="fm-badge off">데모</span> : null}{sIdx.has(t.id) ? <span className="fm-badge ok" title={sessionLabel(sIdx.get(t.id), Date.now())}>수집 중 · {MODE_TEXT[sIdx.get(t.id).mode]}</span> : null}</td>
+        <td data-sort={t.host}><span className="fm-st"><span className="fm-mono fm-num">{t.host}:{t.port}</span><small className="fm-mono">{t.username}</small></span></td>
+        <td data-sort={t.agent || ''}>{t.agent ? `엣지 ${t.agent}` : '중앙'}{t.agent && t.edgeOnline === false && !t.demo ? <span className="fm-badge warn">엣지 응답 없음</span> : null}</td>
+        <td><span className="fm-st"><span className={`fm-badge ${s.tone}`}>{s.label}</span>{s.note ? <small>{s.note}</small> : null}{needsRetry(t) && !t.demo ? <small className="fm-why">{AUTH_HINT}</small> : null}{(t.test?.result?.hello || t.status?.hello)?.rhelMajor ? <small>RHEL {(t.test?.result?.hello || t.status?.hello).rhelMajor}</small> : null}</span></td>
+        <td><span className="fm-row fm-acts">
+          {sIdx.has(t.id) ? <button type="button" className="fm-btn sm danger" disabled={!!busy} onClick={() => stopOne(t, sIdx.get(t.id))}>수집 종료</button> : null}
+          <button type="button" className="fm-btn sm" disabled={!!busy || t.demo} onClick={() => run('t1', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/test`, {}).then((r) => (r?.queued ? { ok: true, reason: `${t.name} 연결 시험을 엣지에 보냈습니다.` } : { ok: !!r?.result?.ok, reason: `${t.name}: ${TEST_TEXT[r?.result?.kind] || r?.result?.kind}${r?.result?.error ? ` — ${r.result.error}` : ''}` })))}>시험</button>
+          {needsRetry(t) ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => run('retry', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/retry`, {}).then((r) => (r?.via === 'edge'
+            ? { ok: true, reason: `${t.name}: 엣지 ${t.agent} 에 다시 연결을 보냈습니다 — 정지를 풀고 한 번 시험합니다(결과는 키 로그인 칸 · 몇 초 걸립니다).` }
+            : r?.result ? { ok: !!r.result.ok, reason: `${t.name}: ${TEST_TEXT[r.result.kind] || r.result.kind}${r.result.error ? ` — ${r.result.error}` : ''}` }
+              : r?.running ? { ok: true, reason: `${t.name} 을(를) 다시 연결합니다(수집기가 한 번 시도).` }
+                : { ok: true, reason: `${t.name}: 정지를 풀었습니다 — 방금 시험해 10초 뒤에 ‘시험’ 을 누르면 한 번 접속합니다.` })))}>다시 연결</button> : null}
+          {!t.demo ? <button type="button" className={`fm-btn sm ${ed ? 'pri' : ''}`} disabled={!!busy} aria-expanded={!!ed} title="이름 · IP · 포트 · 계정 · 담당 노드 · 그룹을 고칩니다(이 줄 아래에 수정 칸)" onClick={() => setEdit(ed ? null : { id: t.id, form: editFormOf(t) })}>{ed ? '수정 닫기' : '수정'}</button> : null}
+          {!t.demo ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => { if (window.confirm(`${t.name} 을(를) 등록에서 지울까요? 기록은 보관 기간 동안 남습니다.`)) run('del', () => delJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`).then(() => ({ ok: true, reason: `${t.name} 을(를) 지웠습니다.` }))); }}>삭제</button> : null}
+        </span></td>
+      </tr>
+      {edRow}
+      </React.Fragment>
+    );
+  };
   return (
     <>
       <div className="fm-card fm-steps">
@@ -1026,87 +1160,101 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
                 <label key={k} className="fm-fld"><span>{l}</span><input className="fm-input" value={form[k]} placeholder={ph} onChange={(e) => setForm({ ...form, [k]: e.target.value.slice(0, 64) })} /></label>
               ))}
               <label className="fm-fld"><span>담당 노드</span><Select sort={false} className="fm-input" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}><option value="">중앙</option>{main.nodes.filter((x) => x.kind === 'edge').map((x) => <option key={x.agent} value={x.agent}>엣지 {x.agent}</option>)}</Select></label>
+              <label className="fm-fld fm-fld-g"><span>그룹</span><Select sort={false} className="fm-input" value={form.group || ''} onChange={(e) => setForm({ ...form, group: e.target.value })}><option value="">{GROUP_NONE}</option>{ownGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}</Select></label>
               <button type="button" className="fm-btn pri" disabled={!!busy || !form.host || !form.name} onClick={() => run('add', async () => { const r = await postJson('/tools/focus-mon/targets', { ...form, port: Number(form.port) || 22 }); if (r?.ok) setForm({ ...form, name: '', host: '' }); return r?.ok ? { ok: true, reason: `${r.target.name} 을(를) 등록했습니다.` } : r; })}>추가</button>
             </div>
             {csv ? <CsvPanel main={main} busy={busy} run={run} onClose={() => setCsv(false)} /> : null}
+          </div>
+          <div className="fm-row fm-pad">
+            <span className="fm-lbl">그룹</span>
+            {chips.map((c) => <button key={`c-${c.key}`} type="button" className={`fm-chip ${groupChipOn(chips, gsel, c.key) ? 'on' : ''}`} aria-pressed={groupChipOn(chips, gsel, c.key)} onClick={() => setGsel(c.key)}>{c.label}<b>{c.n}</b></button>)}
+            <span className="fm-row fm-push"><span className="fm-lbl">보기</span><Seg label="대상 보기" value={gview} onChange={setGview} options={[['group', '그룹별로 묶기'], ['list', '목록']]} /></span>
+          </div>
+          <div className="fm-row fm-pad">
+            <span className="fm-lbl">고른 서버 {picked.length}대 → 그룹</span>
+            <Select sort={false} className="fm-input fm-sel-sm" value={moveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label="옮길 그룹"><option value="">{GROUP_NONE}</option>{ownGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}</Select>
+            <button type="button" className="fm-btn" disabled={!picked.length || !!busy} onClick={moveGroup}>옮기기</button>
+            <span className="fm-dim">새 그룹은 오른쪽 ‘그룹’ 카드에서 만듭니다</span>
           </div>
           <div className="fm-row fm-pad"><span className="fm-lbl">담당 노드</span><Seg label="담당 노드" value={node} onChange={setNode} options={nodes} />
             <button type="button" className="fm-btn" disabled={!picked.length || !!busy} onClick={() => bulkTest(picked, '고른 서버')}>고른 서버 연결 시험</button>
             <button type="button" className="fm-btn" disabled={!targets.length || !!busy} onClick={() => bulkTest(targets.map((t) => t.id), node === 'all' ? '목록의 서버' : `${node ? `엣지 ${node}` : '중앙'} 서버`)}>이 목록 모두 시험 · {targets.length}대</button>
             {main.ended?.[0] ? <button type="button" className="fm-btn" onClick={() => setPicked(main.ended[0].targets.slice(0, L.maxPerSession))}>지난번 {main.ended[0].targets.length}대 다시 고르기</button> : null}</div>
+          {gview === 'group' ? groupSections(targets, groupList).map((sec) => {
+            // v2.982 그룹별로 묶기 — 그룹마다 머리(접기 · 대수 · 수집 중 · 키 로그인 실패 · 노드 · 그룹 고르기 · 연결 시험 · 시작) + 표(그 안에서 정렬)
+            const ids = sec.targets.map((t) => t.id);
+            const open = !closed.has(sec.key);
+            const allOn = ids.length > 0 && ids.every((id) => picked.includes(id));
+            const live = sec.targets.filter((t) => sIdx.has(t.id)).length;
+            const bad = sec.targets.filter((t) => needsRetry(t)).length;
+            const nodeCnt = new Map(); for (const t of sec.targets) { const k = t.agent ? `엣지 ${t.agent}` : '중앙'; nodeCnt.set(k, (nodeCnt.get(k) || 0) + 1); }
+            const plan = groupStartPlan(ids, L.maxPerSession);
+            return (
+              <div key={`g-${sec.key}`} className="fm-gsec">
+                <div className="fm-ghead">
+                  <button type="button" className="fm-gtog" aria-expanded={open} onClick={() => setClosed((c) => { const n = new Set(c); if (open) n.add(sec.key); else n.delete(sec.key); return n; })}>{open ? '▾' : '▸'} {sec.label}</button>
+                  <span className="fm-badge off">{ids.length}대</span>
+                  {live ? <span className="fm-badge ok">수집 중 {live}</span> : null}
+                  {bad ? <span className="fm-badge warn">키 로그인 실패 {bad}</span> : null}
+                  <span className="fm-dim fm-ell" title={[...nodeCnt.entries()].map(([k, v]) => `${k} ${v}`).join(' · ')}>{[...nodeCnt.entries()].map(([k, v]) => `${k} ${v}`).join(' · ')}</span>
+                  <span className="fm-row fm-gacts">
+                    <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => setPicked((p) => (allOn ? p.filter((x) => !ids.includes(x)) : [...new Set([...p, ...ids])].slice(0, L.maxPerSession)))}>{allOn ? '그룹 고르기 풀기' : '그룹 전체 고르기'}</button>
+                    <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => bulkTest(ids, `${sec.label} 그룹`)}>이 그룹 연결 시험</button>
+                    <button type="button" className="fm-btn sm pri" disabled={!!busy} title={plan.rest.length ? groupStartText(sec.key, plan, L.maxPerSession) : ''} onClick={() => run('start', async () => { const r = await postJson('/tools/focus-mon/sessions', { targets: plan.start, interval, mode }); if (r?.ok === false) return r; if (r?.ok) onWatch(plan.start); return r?.ok ? { ok: true, reason: `${joinResultText(r)}${plan.rest.length ? ` ${groupStartText(sec.key, plan, L.maxPerSession)}` : ''}` } : r; })}>이 그룹 모니터링 시작 · {plan.start.length}대</button>
+                  </span>
+                </div>
+                {open ? (
+                  <div className="fm-tblbox">
+                  <STable className="fm-table fm-gtable" minWidth={640}>
+            <thead><tr><th data-nosort /><th>이름</th><th>주소 · 계정</th><th>담당 노드</th><th>키 로그인 · OS</th><th data-nosort /></tr></thead>
+            <tbody>{sec.targets.map(rowOf)}</tbody>
+                  </STable>
+                  </div>
+                ) : null}
+              </div>
+            );
+          }) : (
           <div className="fm-tblbox">
           <STable className="fm-table" minWidth={640}>
             <thead><tr><th data-nosort /><th>이름</th><th>주소 · 계정</th><th>담당 노드</th><th>키 로그인 · OS</th><th data-nosort /></tr></thead>
-            <tbody>{targets.map((t) => {
-              const s = stOf(t);
-              const on = picked.includes(t.id);
-              const ed = edit?.id === t.id ? edit : null;
-              // v2.980 등록된 서버 수정 — 그 줄 바로 아래에 수정 상자(한 줄짜리 colSpan). 두 줄을 Fragment 로 묶어 정렬해도 함께 움직인다
-              // (sortableText 는 첫 tr 의 칸으로 정렬한다). 표 칸 안에 입력을 넣었더니 1440px 에서도 표가 카드보다 넓어져 저장 단추가 밖으로 나갔다.
-              let edRow = null;
-              if (ed) {
-                const f = ed.form;
-                const set = (k) => (e) => setEdit({ ...ed, form: { ...f, [k]: e.target.value.slice(0, 64) } });
-                const ch = editChanges(t, f);
-                const notes = editNotes(t, f, { inSession: sIdx.has(t.id) });
-                const canSave = !busy && ch.changes.length > 0 && !!f.name.trim() && !!f.host.trim();
-                const key = (e) => { if (e.key === 'Escape') setEdit(null); else if (e.key === 'Enter' && canSave) saveEdit(t); };
-                const unknownNode = f.agent && !edgeNodes.some((x) => x.agent.toLowerCase() === f.agent.toLowerCase());
-                edRow = (
-                  <tr className="fm-editrow">
-                    <td colSpan={6}><div className="fm-edbox">
-                      <div className="fm-form">
-                        <label className="fm-fld"><span>표시 이름</span><input className="fm-input" value={f.name} onChange={set('name')} onKeyDown={key} autoFocus /></label>
-                        <label className="fm-fld"><span>IP 주소</span><input className="fm-input fm-mono" value={f.host} onChange={set('host')} onKeyDown={key} /></label>
-                        <label className="fm-fld"><span>SSH 포트</span><input className="fm-input fm-mono" value={f.port} inputMode="numeric" onChange={set('port')} onKeyDown={key} /></label>
-                        <label className="fm-fld"><span>계정</span><input className="fm-input fm-mono" value={f.username} onChange={set('username')} onKeyDown={key} /></label>
-                        <label className="fm-fld"><span>담당 노드</span><Select sort={false} className="fm-input" value={f.agent} onChange={(e) => setEdit({ ...ed, form: { ...f, agent: e.target.value } })}>
-                          <option value="">중앙</option>
-                          {edgeNodes.map((x) => <option key={x.agent} value={x.agent}>엣지 {x.agent}</option>)}
-                          {unknownNode ? <option value={f.agent}>엣지 {f.agent}(등록부에 없음 — 다른 노드를 고르세요)</option> : null}
-                        </Select></label>
-                        <span className="fm-row fm-nowrap">
-                          <button type="button" className="fm-btn pri" disabled={!canSave} onClick={() => saveEdit(t)}>저장</button>
-                          <button type="button" className="fm-btn" disabled={busy === 'edit'} onClick={() => setEdit(null)}>취소</button>
-                        </span>
-                      </div>
-                      <div className="fm-ednotes">
-                        <span className="fm-dim">{ch.changes.length ? `바뀜: ${ch.changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join(' · ')}` : '바꾼 칸이 없습니다 — 고칠 칸을 바꾸면 저장을 누를 수 있습니다.'}</span>
-                        {notes.map((n) => <span key={n} className="fm-why">{n}</span>)}
-                      </div>
-                    </div></td>
-                  </tr>
-                );
-              }
-              return (
-                <React.Fragment key={t.id}>
-                <tr className={ed ? 'fm-editing' : undefined}>
-                  <td><input type="checkbox" checked={on} disabled={!on && full} aria-label={on ? '선택' : full ? '선택할 수 없음 — 상한' : '선택'} onChange={() => toggle(t.id)} /></td>
-                  <td data-sort={t.name} style={{ fontWeight: 600 }}>{t.name}{t.demo ? <span className="fm-badge off">데모</span> : null}{sIdx.has(t.id) ? <span className="fm-badge ok" title={sessionLabel(sIdx.get(t.id), Date.now())}>수집 중 · {MODE_TEXT[sIdx.get(t.id).mode]}</span> : null}</td>
-                  <td data-sort={t.host}><span className="fm-st"><span className="fm-mono fm-num">{t.host}:{t.port}</span><small className="fm-mono">{t.username}</small></span></td>
-                  <td data-sort={t.agent || ''}>{t.agent ? `엣지 ${t.agent}` : '중앙'}{t.agent && t.edgeOnline === false && !t.demo ? <span className="fm-badge warn">엣지 응답 없음</span> : null}</td>
-                  <td><span className="fm-st"><span className={`fm-badge ${s.tone}`}>{s.label}</span>{s.note ? <small>{s.note}</small> : null}{needsRetry(t) && !t.demo ? <small className="fm-why">{AUTH_HINT}</small> : null}{(t.test?.result?.hello || t.status?.hello)?.rhelMajor ? <small>RHEL {(t.test?.result?.hello || t.status?.hello).rhelMajor}</small> : null}</span></td>
-                  <td><span className="fm-row fm-acts">
-                    {sIdx.has(t.id) ? <button type="button" className="fm-btn sm danger" disabled={!!busy} onClick={() => stopOne(t, sIdx.get(t.id))}>수집 종료</button> : null}
-                    <button type="button" className="fm-btn sm" disabled={!!busy || t.demo} onClick={() => run('t1', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/test`, {}).then((r) => (r?.queued ? { ok: true, reason: `${t.name} 연결 시험을 엣지에 보냈습니다.` } : { ok: !!r?.result?.ok, reason: `${t.name}: ${TEST_TEXT[r?.result?.kind] || r?.result?.kind}${r?.result?.error ? ` — ${r.result.error}` : ''}` })))}>시험</button>
-                    {needsRetry(t) ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => run('retry', () => postJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}/retry`, {}).then((r) => (r?.via === 'edge'
-                      ? { ok: true, reason: `${t.name}: 엣지 ${t.agent} 에 다시 연결을 보냈습니다 — 정지를 풀고 한 번 시험합니다(결과는 키 로그인 칸 · 몇 초 걸립니다).` }
-                      : r?.result ? { ok: !!r.result.ok, reason: `${t.name}: ${TEST_TEXT[r.result.kind] || r.result.kind}${r.result.error ? ` — ${r.result.error}` : ''}` }
-                        : r?.running ? { ok: true, reason: `${t.name} 을(를) 다시 연결합니다(수집기가 한 번 시도).` }
-                          : { ok: true, reason: `${t.name}: 정지를 풀었습니다 — 방금 시험해 10초 뒤에 ‘시험’ 을 누르면 한 번 접속합니다.` })))}>다시 연결</button> : null}
-                    {!t.demo ? <button type="button" className={`fm-btn sm ${ed ? 'pri' : ''}`} disabled={!!busy} aria-expanded={!!ed} title="이름 · IP · 포트 · 계정 · 담당 노드를 고칩니다(이 줄 아래에 수정 칸)" onClick={() => setEdit(ed ? null : { id: t.id, form: editFormOf(t) })}>{ed ? '수정 닫기' : '수정'}</button> : null}
-                    {!t.demo ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => { if (window.confirm(`${t.name} 을(를) 등록에서 지울까요? 기록은 보관 기간 동안 남습니다.`)) run('del', () => delJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`).then(() => ({ ok: true, reason: `${t.name} 을(를) 지웠습니다.` }))); }}>삭제</button> : null}
-                  </span></td>
-                </tr>
-                {edRow}
-                </React.Fragment>
-              );
-            })}</tbody>
+            <tbody>{targets.map(rowOf)}</tbody>
           </STable>
           </div>
+          )}
           <div className="fm-note fm-pad">등록부에는 IP · 포트 · 계정 · 담당 노드만 저장합니다(비밀번호 · 개인키 없음). 키 로그인이 거부되면 자동으로 다시 시도하지 않습니다 — 공개키를 넣은 뒤 ‘다시 연결’ 을 누르세요(60초에 한 번).</div>
         </div>
         <div className="fm-col">
+          <div className="fm-card">
+            <div className="fm-row fm-between"><h3 className="fm-h3">그룹 — {ownGroups.length} / {main.groups?.max ?? DASH}</h3><span className="fm-dim">서버마다 그룹 하나</span></div>
+            {ownGroups.length ? (
+              <div className="fm-glist">{ownGroups.map((g) => (
+                <div key={g.name} className="fm-gitem">
+                  {rename?.from === g.name ? (
+                    <span className="fm-row"><input className="fm-input fm-sel-sm" aria-label="새 그룹 이름" value={rename.to} onChange={(e) => setRename({ ...rename, to: e.target.value.slice(0, 32) })} onKeyDown={(e) => { if (e.key === 'Escape') setRename(null); else if (e.key === 'Enter' && rename.to.trim()) renameGroup(); }} />
+                      <button type="button" className="fm-btn sm pri" disabled={!!busy || !rename.to.trim()} onClick={renameGroup}>저장</button><button type="button" className="fm-btn sm" onClick={() => setRename(null)}>취소</button></span>
+                  ) : (
+                    <>
+                      <span className="fm-ell" title={g.name} style={{ fontWeight: 600 }}>{g.name}</span><span className="fm-dim fm-num">{g.n}대</span>
+                      <span className="fm-row fm-acts"><button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => setRename({ from: g.name, to: g.name })}>이름 바꾸기</button><button type="button" className="fm-btn sm danger" disabled={!!busy} onClick={() => deleteGroup(g)}>지우기</button></span>
+                    </>
+                  )}
+                </div>
+              ))}</div>
+            ) : <span className="fm-dim">아직 그룹이 없습니다 — 만들거나 아래 자동 묶기 제안을 쓰세요.</span>}
+            <div className="fm-row"><input className="fm-input" aria-label="새 그룹 이름" placeholder="새 그룹 이름(예 WAS · DB · 백업)" value={newGroup} onChange={(e) => setNewGroup(e.target.value.slice(0, 32))} onKeyDown={(e) => { if (e.key === 'Enter' && newGroup.trim()) createGroup(); }} />
+              <button type="button" className="fm-btn" disabled={!!busy || !newGroup.trim()} onClick={createGroup}>새 그룹</button></div>
+            <span className="fm-dim">이름은 글자 · 숫자 · 공백 · . _ - 로 1~32자. 지우면 그 그룹의 서버는 ‘{GROUP_NONE}’ 으로 갑니다(서버 · 기록은 그대로). CSV 에 ‘그룹’ 열을 넣으면 한 번에 정합니다.</span>
+            {ungrouped && suggestions.length ? (
+              <div className="fm-col">
+                <b>자동 묶기 제안 — 그룹 없음 서버 {ungrouped}대</b>
+                {suggestions.map((sg) => (
+                  <div key={sg.kind} className="fm-sug"><div className="fm-row fm-between"><span style={{ fontWeight: 600 }}>{sg.title}</span><button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => applySuggestion(sg)}>이대로 묶기</button></div>
+                    <span className="fm-dim">{suggestionText(sg, ownGroups)}</span></div>
+                ))}
+                <span className="fm-dim">이미 그룹이 있는 서버는 건드리지 않습니다 · 둘 이상 묶이는 것만 제안합니다.</span>
+              </div>
+            ) : null}
+          </div>
           <div className="fm-card">
             <div className="fm-row fm-between"><h3 className="fm-h3">기록 — DB 보관</h3><button type="button" className="fm-btn sm" onClick={() => setSettingsForm(setForm2 ? null : { ...main.settings })}>설정</button></div>
             <div className="fm-meter big"><span className="t"><span className="f" style={{ width: `${Math.min(100, ((main.recorder.dbBytes || 0) / (main.settings.capGb * 2 ** 30)) * 100)}%` }} /></span></div>
@@ -1163,8 +1311,14 @@ export default function FocusMonTool() {
     const all = [...new Set(sessions.flatMap((s) => s.targets))].filter((x) => known.has(x));
     return all.slice(0, main?.limits?.maxTotal || 40);
   }, [viewIds, known, sessions, main?.limits?.maxPerSession, main?.limits?.maxTotal]);
-  const covParams = useMemo(() => ({ targets: ids.join(','), to: tb.day ? dayRange(tb.day, Date.now()).to : '' }), [ids, tb.day]);
-  const cov = usePoll('/tools/focus-mon/coverage', covParams, 60_000, ids.length > 0 && route.tab !== 'targets');
+  // v2.982 그룹 단추(개요 · 비교 · 프로세스) — 보고 있는 서버(ids)를 그룹으로 거른다. 고른 그룹은 브라우저가 기억한다(시안 ⑫ 컨펌 ⑤).
+  const [vgroup, setVgroupRaw] = useState(() => lsGet('fm.view.group', 'all'));
+  const setVgroup = useCallback((g) => { setVgroupRaw(g); lsSet('fm.view.group', g); }, []);
+  const viewTargets = useMemo(() => { const m = new Map((main?.targets || []).map((t) => [t.id, t])); return ids.map((id) => m.get(id)).filter(Boolean); }, [ids, main?.targets]);
+  const viewChips = useMemo(() => groupChips(viewTargets, main?.groups?.list), [viewTargets, main?.groups?.list]);
+  const shownIds = useMemo(() => filterByGroup(viewTargets, vgroup).map((t) => t.id), [viewTargets, vgroup]);
+  const covParams = useMemo(() => ({ targets: shownIds.join(','), to: tb.day ? dayRange(tb.day, Date.now()).to : '' }), [shownIds, tb.day]);
+  const cov = usePoll('/tools/focus-mon/coverage', covParams, 60_000, shownIds.length > 0 && route.tab !== 'targets');
   useEffect(() => { if (!picked.length && main?.targets?.length) setPicked(ids.length ? ids.slice() : []); }, [main?.targets?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (mainQ.error && !main) return <ErrorBox error={mainQ.error} />;
@@ -1216,16 +1370,22 @@ export default function FocusMonTool() {
       ) : null}
       {!active && lastEnded && route.tab !== 'targets' ? <div className="fm-ban">수집이 끝났습니다({ENDED_TEXT[lastEnded.why] || lastEnded.why}). 수집한 값은 DB 에 {main.settings.retentionDays}일 남아 시간 띠로 다시 볼 수 있습니다.</div> : null}
       {active?.mode === 'watch' && active.remainMs != null && active.remainMs < 2 * 60_000 ? <div className="fm-ban">남은 시간 {remainText(active.remainMs)} — 그 뒤 수집이 스스로 멈춥니다.</div> : null}
+      {['overview', 'compare', 'procs'].includes(route.tab) && viewChips.length > 2 ? (
+        <div className="fm-row" role="group" aria-label="그룹으로 거르기"><span className="fm-lbl">그룹</span>
+          {viewChips.map((c) => { const on = groupChipOn(viewChips, vgroup, c.key); return <button key={`v-${c.key}`} type="button" className={`fm-chip ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => setVgroup(c.key)}>{c.label}<b>{c.n}</b></button>; })}
+          <span className="fm-dim">보고 있는 서버 {ids.length}대 가운데 · 그룹은 ‘대상 · 키’ 탭에서 정합니다</span>
+        </div>
+      ) : null}
       {route.tab !== 'targets' && ids.length ? <TimeBar tb={tb} now={now} coverage={cov.data} oldestMinute={main.db.oldestMinute} /> : null}
-      {route.tab === 'overview' ? <Overview main={main} ids={ids} tb={tb} now={now} onOpen={onOpen} /> : null}
+      {route.tab === 'overview' ? <Overview main={main} ids={shownIds} tb={tb} now={now} onOpen={onOpen} /> : null}
       {route.tab === 'compare' ? (
         <>
           <div className="fm-row"><span className="fm-lbl">보기</span><Seg label="비교 보기" value={cmpMode} onChange={(v) => { setCmpMode(v); lsSet('fm.cmp.mode', v); }} options={[['metric', '지표 비교'], ['iostat', 'iostat 비교']]} /><span className="fm-dim">{cmpMode === 'metric' ? '지표 하나를 고른 서버 전부에서 봅니다' : '고른 서버의 iostat -x -m 을 같은 시각 · 같은 열로 맞춰 한 표에 놓습니다'}</span></div>
-          {!ids.length ? <div className="fm-card fm-empty">볼 서버가 없습니다 — ‘대상 · 키’ 탭에서 고르세요.</div> : cmpMode === 'metric' ? <Compare main={main} ids={ids} tb={tb} now={now} onOpen={onOpen} /> : <IostatCompare main={main} ids={ids} tb={tb} onOpen={onOpen} />}
+          {!shownIds.length ? <div className="fm-card fm-empty">볼 서버가 없습니다 — ‘대상 · 키’ 탭에서 고르세요.</div> : cmpMode === 'metric' ? <Compare main={main} ids={shownIds} tb={tb} now={now} onOpen={onOpen} /> : <IostatCompare main={main} ids={shownIds} tb={tb} onOpen={onOpen} />}
         </>
       ) : null}
       {route.tab === 'server' ? <ServerDetail main={main} id={route.server} tb={tb} now={now} onBack={() => go('overview')} /> : null}
-      {route.tab === 'procs' ? (ids.length ? <Procs main={main} ids={ids} tb={tb} onOpen={onOpen} /> : <div className="fm-card fm-empty">볼 서버가 없습니다 — ‘대상 · 키’ 탭에서 고르세요.</div>) : null}
+      {route.tab === 'procs' ? (shownIds.length ? <Procs main={main} ids={shownIds} tb={tb} onOpen={onOpen} /> : <div className="fm-card fm-empty">볼 서버가 없습니다 — ‘대상 · 키’ 탭에서 고르세요.</div>) : null}
       {route.tab === 'targets' ? <Targets main={main} reload={mainQ.reload} picked={picked} setPicked={setPicked} onWatch={onWatch} msg={msg} setMsg={setMsg} /> : null}
       {msg && route.tab !== 'targets' ? <div className={`fm-ban ${msg.tone === 'bad' ? 'w' : ''}`}>{msg.text}</div> : null}
     </div>

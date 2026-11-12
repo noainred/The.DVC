@@ -40,8 +40,11 @@ const DEF = [
 ];
 
 /** 데모 대상(등록부 모양). agent 는 표시용 데모 엣지 이름 — 실제로는 이 노드가 만든다. */
+/** 데모 그룹(v2.982) — 이름 가운데 칸으로(db · was · web · bak/nfs/file · mon · mes). */
+const DEMO_GROUP = { db: 'DB', was: 'WAS', web: 'WEB', bak: '백업 파일', nfs: '백업 파일', file: '백업 파일', mon: '모니터링', mes: 'MES' };
 export const DEMO_TARGETS = Object.freeze(DEF.map((d, i) => Object.freeze({
   id: `fm-d0${String(i).padStart(6, '0')}`, name: d[0], host: d[1], port: 22, username: 'dvcmon', agent: d[2], enabled: true, demo: true, createdAt: 0, createdBy: 'demo',
+  group: DEMO_GROUP[String(d[0]).split('-')[1]] || '',
 })));
 const BY_ID = new Map(DEMO_TARGETS.map((t, i) => [t.id, i]));
 export const isDemoTarget = (id) => BY_ID.has(String(id));

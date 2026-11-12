@@ -232,3 +232,35 @@
 .fm-wrap .fm-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: 12.5px; }
 .fm-wrap .fm-kv dt { color: var(--text-dim); }
 .fm-wrap .fm-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* v2.982 서버 그룹 — 그룹 칩(대상 탭 · 개요 · 비교 · 프로세스) · 그룹별 표 머리 · 그룹 관리 카드 · 자동 묶기 제안. 그룹 색은 쓰지 않는다(이름 · 대수로 구분). */
+.fm-wrap .fm-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; max-width: 100%; min-width: 0; }
+.fm-wrap .fm-chip b { font-weight: 600; font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.fm-wrap .fm-chip.on { border-color: var(--accent, #3987e5); background: rgba(57,135,229,.14); }
+.fm-wrap .fm-chip.on b { color: var(--text); }
+.fm-wrap .fm-chip:focus-visible { outline: 2px solid var(--accent, #3987e5); outline-offset: 1px; }
+.fm-wrap .fm-gsec { border-top: 1px solid var(--border-soft); min-width: 0; }
+.fm-wrap .fm-ghead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 10px 16px; background: var(--panel-deep); min-width: 0; }
+.fm-wrap .fm-ghead .fm-badge { margin-left: 0; }
+.fm-wrap .fm-ghead > .fm-dim { flex: 1 1 120px; }
+.fm-wrap .fm-gtog { border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 700; font-size: 13.5px; padding: 2px 4px; cursor: pointer; min-width: 0; overflow-wrap: anywhere; text-align: left; }
+.fm-wrap .fm-gtog:focus-visible { outline: 2px solid var(--accent, #3987e5); border-radius: 4px; }
+.fm-wrap .fm-gacts { gap: 4px; margin-left: auto; justify-content: flex-end; }
+.fm-wrap .fm-glist { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fm-wrap .fm-gitem { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'n c' 'a a'; align-items: center; gap: 2px 8px; padding: 6px 0; border-bottom: 1px solid var(--border-soft); min-width: 0; }
+.fm-wrap .fm-gitem > .fm-ell { grid-area: n; }
+.fm-wrap .fm-gitem > .fm-num { grid-area: c; }
+.fm-wrap .fm-gitem > .fm-acts { grid-area: a; justify-content: flex-start; }
+.fm-wrap .fm-gitem > .fm-row:only-child { grid-column: 1 / -1; }
+.fm-wrap .fm-sug { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; min-width: 0; overflow-wrap: anywhere; }
+.fm-wrap .fm-gview { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 4px 2px 0; min-width: 0; }
+.fm-wrap .fm-gview h4 { margin: 0; font-size: 13.5px; font-weight: 700; overflow-wrap: anywhere; min-width: 0; }
+/* 그룹별 표는 열 너비를 같게(표마다 내용에 맞춰 열이 달라 그룹 사이에서 열이 어긋났다 — 2026-11-12 1440px 화면 확인) */
+.fm-wrap .fm-gtable { table-layout: fixed; }
+.fm-wrap .fm-gtable th:nth-child(1) { width: 40px; }
+.fm-wrap .fm-gtable th:nth-child(2) { width: 25%; }
+.fm-wrap .fm-gtable th:nth-child(3) { width: 18%; }
+.fm-wrap .fm-gtable th:nth-child(4) { width: 13%; }
+.fm-wrap .fm-gtable th:nth-child(5) { width: 22%; }
+.fm-wrap .fm-gtable td { overflow-wrap: anywhere; }
+.fm-wrap .fm-fld-g { flex: 0 1 220px; }
+.fm-wrap .fm-push { margin-left: auto; }
