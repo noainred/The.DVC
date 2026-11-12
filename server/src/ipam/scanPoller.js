@@ -11,6 +11,7 @@ import { recordScanLog } from './scanLog.js';
 import { scheduleVcRangeMigration } from './vcRangeMigrate.js';
 import { scanStarted, scanFinished, registerScanResumer, journalFor, isResumePending } from '../util/scanJournal.js'; // v2.737: 재시작으로 중단된 스캔 기록·재개 // v2.691: vCenter 별 대역 → 수집 에이전트로 1회 이전 // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
 import { numOrNull } from '../util/numOrNull.js';
+import { fwdNamesFor } from './scanNames.js'; // v2.991: 정방향 DNS 이름(물리서버 — 라우트 층이 공급)
 
 // 로컬 폴러가 실제로 스캔할 대역 = __local__ 설정 대역 ∪ enabled인 모든 vCenter 대역(유니크).
 // v2.691: vCenter 별 대역은 수집 에이전트로 옮겨지고(vcRangeMigrate) 옮기지 못한 것만 남는다 — 남은 것은 예전처럼 중앙이 스캔한다.
@@ -58,7 +59,7 @@ async function runScanOnce({ manual = false, resumeOf = null } = {}) {
   try {
     // 스캔은 별도 프로세스에서(v2.363) — TCP/ping/역DNS 부하·FD 를 포탈에서 격리.
     // v2.991(설계 bm-folders §13 ③): 정방향 DNS 이름 — 이 포탈이 직접 수집하는 법인의 물리서버 이름(실패하면 없이 — 역방향만).
-    const names = await import('../routes/admin/bmOsSuggest.js').then((m) => m.fwdNamesForAgent(LOCAL)).catch(() => []);
+    const names = await fwdNamesFor(LOCAL);   // 공급자는 라우트 층이 등록한다(ipam/scanNames.js — 도메인이 routes/ 를 import 하지 않게)
     const { scanned, alive } = await runScan(
       { ranges, ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, ping: s.ping, ...(names.length ? { names } : {}) },
       { onProgress: (done, total, aliveCount) => { progress = { total, done, alive: aliveCount, startedAt: started }; } },

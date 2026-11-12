@@ -337,7 +337,8 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
         ip: sc.ip, ipNum: n, vcenterId: '', vcenterName: '(네트워크 스캔)',
         ownerType: 'scanned', serverType: 'Scanned', ownerName: nm.name || sc.ip,
         powerState: released ? 'POWERED_OFF' : 'POWERED_ON', guestOS: '', osName: '', osVersion: '',
-        hostName: nm.name, ...(nm.via ? { nameVia: nm.via } : {}), ...(nm.via === 'differ' ? { fwdName: nm.fwd } : {}), cluster: '', multiHomed: false, scope: scopeAt(sc.ip, n),
+        // 역방향만으로 찾은 이름(예전부터의 기본)에는 칸을 더하지 않는다 — 원장 행 · ipam.db 를 정방향 이름이 없을 때 예전과 같게(PERF2611-01)
+        hostName: nm.name, ...(nm.via && nm.via !== 'ptr' ? { nameVia: nm.via } : {}), ...(nm.via === 'differ' ? { fwdName: nm.fwd } : {}), cluster: '', multiHomed: false, scope: scopeAt(sc.ip, n),
         openPorts: sc.openPorts || [], services: sc.services || [], lastSeen: sc.lastSeen || null,
         firstSeen: hist?.firstSeen || null, usageStatus: hist?.status || null, released,
         source: 'scan', discovery: 'scan', owner: null,

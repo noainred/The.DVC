@@ -144,7 +144,8 @@ test('③ 배정 · 중앙 스캔이 이름을 넘긴다(소스 — 개별 토�
   assert.match(rd('agent/ipScanWorker.js'), /names: Array\.isArray\(a\.names\) \? a\.names : undefined/);
   assert.match(rd('ipam/scanWorker.js'), /names: j\.names/);
   assert.match(rd('ipam/scanRunner.js'), /names: job\.names/);
-  assert.match(rd('ipam/scanPoller.js'), /fwdNamesForAgent\(LOCAL\)/);
+  assert.match(rd('ipam/scanPoller.js'), /await fwdNamesFor\(LOCAL\)/);
+  assert.match(rd('routes/admin/bmOsSuggest.js'), /setFwdNamesProvider\(fwdNamesForAgent\)/);
 });
 
 // ── ② OS 주소 제안 ───────────────────────────────────────────────────────────

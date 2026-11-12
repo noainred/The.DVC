@@ -6,6 +6,7 @@
  */
 import { store } from '../../store.js';
 import { getScanResults } from '../../ipam/scanStore.js';
+import { setFwdNamesProvider } from '../../ipam/scanNames.js';
 import { agentVcenterIds } from '../../ipam/scanDatacenter.js';
 import { currentScanDatacenters } from '../../ipam/scanDatacenterSource.js';
 import { buildOsSuggest, applyPlan, fwdNamesFor, agentKey } from '../../bmfolders/osSuggest.js';
@@ -30,7 +31,7 @@ export function corpsOfFactory(snap) {
   return (ag) => new Set(agentVcenterIds(ag || '', { vcenters: inputs.vcenters, snapVcenters: snap?.vcenters, collectors: inputs.collectors }));
 }
 
-/** 물리서버 폴더와 같은 입력(서비스 인벤토리 입력 수집 하나)에서 베어메탈 구성원. 라우트 모듈을 늦게 읽는다(순환 · 기동 비용). */
+/** 물리서버 폴더와 같은 입력(서비스 인벤토리 입력 수집 하나)에서 베어메탈 구성원. 무거운 라우트 모듈은 쓸 때 읽는다(기동 비용). */
 async function bmMembers(snap) {
   const [{ sharedGather }, { membersOf }] = await Promise.all([import('../api/svcInventory.js'), import('../api/bmFolders.js')]);
   const g = await sharedGather(snap);
@@ -61,6 +62,9 @@ export async function fwdNamesForAgent(agent, D = {}) {
     return fwdNamesFor(members, agentKey(agent), corpsOf ? corpsOf(agent) : null);
   } catch { return []; }
 }
+
+// 중앙 · 엣지 자기 스캔(ipam/scanPoller — LOCAL)이 정방향 DNS 이름을 받는 공급자. 이 모듈이 읽힐 때(관리 라우트 mount) 등록한다.
+setFwdNamesProvider(fwdNamesForAgent);
 
 export function registerBmOsSuggest(adminRouter, { D = {} } = {}) {   // D: 시험 주입(입력 · 등록부 쓰기)
   adminRouter.get('/ipam/scan/bm-os-suggest', adminOnly, fleetOnly, async (_req, res) => {
