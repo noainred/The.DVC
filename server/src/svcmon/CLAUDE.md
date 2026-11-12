@@ -38,8 +38,12 @@
 - **쉬운 등록(v2.960 · 설계 README §11 · 회귀 `svcmonEasyRegister`)**: 사용/중지는 `store.setEnabledMany` 하나(enabled 만 · 저장 한 번 · 재검증 없음) → 바뀐 대상의 엣지는
   `central/svcmonAssignSync.js syncByAgentAssignments`(설정 연동 · 사용/중지 · 시험이 공유 — 사본 금지 · 경로 기준 배정은 건너뜀 보고). **엣지는 배정 스냅샷의 켜진 대상만 돈다** — 중앙에서 켜고 끄면 배정을 다시 굳혀야 반영된다.
   시험 점검(`trial.js`): 중지된 대상만(이미 켠 대상은 실패해도 끄지 않게 건너뜀) · 직접 시험은 폴러 워커 풀 · 결과를 폴러 결과 · 전이 · CSV 에 넣지 않는다 · 동시에 하나(409) ·
-  엣지 시험은 켜고 배정 → 첫 보고(measuredAt ≥ 시작)로 판정 · 기대 점검 = 켜진 점검 − 배정 제외 유형 · **시한**(`edgeDeadlineMs` — 넘기면 중지로 되돌림) · 대기는 `svcmon-trial.json`(재시작 이어 판정 · CHANGE_WATCH_EXCLUDE) ·
+  엣지 시험은 켜고 배정 → 첫 보고(measuredAt ≥ 시작 — v2.986 부터 배정 ack 뒤)로 판정 · 기대 점검 = 켜진 점검 − 배정 제외 유형 · **시한**(`edgeDeadlineMs` — 넘기면 중지로 되돌림) · 대기는 `svcmon-trial.json`(재시작 이어 판정 · CHANGE_WATCH_EXCLUDE) ·
   알림 억제는 `transitions.muteTarget`(경로 · 대상 이름 소문자 · 시한 — 복구 판정 뒤 · 범위 검사 뒤). 개요 `coverage` 는 관리자 판본 ∧ 전체 범위 ∧ 중앙 노드에만 — **캐시 본문(전 계정 공유)에 넣지 않고 응답마다** 붙인다.
   반증(§11.7.1): 배정 파일 로드 오류면 배정을 **다시 굳히지 않는다**(빈 목록으로 덮으면 다른 엣지 배포분이 지워진다) · 되돌린 대상은 `revertMuteMs` 동안 억제를 잇는다(엣지가 옛 스냅샷으로 잰다) ·
   사람의 사용/중지 · 주소 수정 · 삭제는 `cancelTrials`(사람이 마지막) · 엣지 판정은 지금 주소 · 기대 이름 · 점검마다 최근 행 하나.
   법인 판정(`corpOf`)은 `key`(DataCenter id — 묶음) · `id`(예전 뜻) · `label`. 법인 담당 엣지(`corpEdgesOf`)는 근거(수집 vCenter 의 collectedBy · 수집 서버 등록부의 법인)가 있고 배정 후보인 것만 · 둘 이상이면 고르지 않는다 · 엣지 포탈 자신은 제외.
+- **잔여 작업(v2.986 · README §11.8 · 회귀 `svcmonEasyRegisterFollowup`)**: 엣지 시험은 **배정 ack(시작 이후) 뒤 측정분만**(ack − 10초 여유) — ack 없으면 시한까지 기다린다.
+  엣지 메타 `k`(infra|service)는 **아는 값만**(그 밖 = 빈 값 · `metaSig` 판 `m2:`) · 빈 값(옛 엣지)은 v2.960 과 같게 — 억제는 어느 구분이든 · 시험은 거르지 않음 · 개요는 경로 · 이름 조인. 수신 계약은 넓히기만 할 것.
+  '법인 폴더로 정리'(`planRepath` · `executeRepath`)는 **설정 연동이 놓은 자리에 그대로 있는 대상만**(`row.repath`) · 경로 기준 배정 엣지가 옮기기 전/뒤를 덮으면 건너뜀 · 배정 파일 못 읽으면 건너뜀 · id 승계.
+  '지금 한 번 점검'(`runOnceTest`)은 실행 역할일 때만 · 결과는 응답으로만(폴러 결과 · 전이 · 알림 금지) · 동시 상한. 데모 엣지 배정 후보는 mock 에서만.

@@ -36,7 +36,7 @@ export function syncByAgentAssignments(agents, user = '', { note = '설정 연�
     try {
       const picked = listTargets().filter((x) => t(x.agent) === agent).map((x) => ({ ...x, tests: x.tests.map((y) => ({ ...y })) }));
       const r = setAssignment(agent, { byAgent: true, exceptTypes: a?.exceptTypes || DEFAULT_EXCEPT_TYPES, note }, picked, { user });
-      out.push({ agent, ok: true, targets: r?.counts?.targets ?? picked.length });
+      out.push({ agent, ok: true, targets: r?.counts?.targets ?? picked.length, sig: r?.sig || '' });
     } catch (e) { out.push({ agent, ok: false, reason: capStr(t(e?.message), 200) }); }
   }
   return out;

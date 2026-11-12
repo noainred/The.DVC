@@ -64,6 +64,8 @@ const RECV_SEQS_MAX = 1000;
  */
 export const META_ALERT_HOLD_MS = envNum('SVCMON_EDGE_META_ALERT_HOLD_MS', 3 * 60_000);
 const META_ALERT_HOLD_MAX_MS = 15 * 60_000;
+/** v2.986: 엣지 메타의 대상 구분 — 아는 값만(store KINDS 와 같다). */
+const KIND_OK = new Set(['infra', 'service']);
 export function metaAlertHoldMs(a) { return Math.min(META_ALERT_HOLD_MAX_MS, Math.max(META_ALERT_HOLD_MS, 2 * (Number(a?.expectMs) || 60_000))); }
 /** 시계 오차 경고 임계 — 넘어도 결과를 버리지 않는다(경고만). */
 export const SKEW_WARN_MS = envNum('SVCMON_EDGE_SKEW_WARN_MS', 60_000);
@@ -165,7 +167,7 @@ function alertInfoOf(a, id, win, narrowSnap = 0) {
     else if (a.metaSnapId === narrowSnap) dupPending = true;                            // ③ 메타가 이번 스냅샷에 오는 중
   }
   return {
-    target: { name: mm?.n, path: mm?.p, host: mm?.h },
+    target: { name: mm?.n, path: mm?.p, host: mm?.h, kind: mm?.k || '' },
     test: { name: mm?.t, type: mm?.y, dupName, ...(dupPending ? { dupPending: true } : {}) },
   };
 }
@@ -328,6 +330,8 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
       metaSet(a, id, {
         p: text(m?.p, 620), n: text(m?.n, 120), h: text(m?.h, 253),
         t: text(m?.t, 80), y: text(m?.y, 16), iv: num(m?.iv) || 60,
+        // v2.986(쉬운 등록 후속 — 구분): 대상 구분(infra|service). 아는 값만 받는다(정제 화이트리스트) — 옛 엣지는 싣지 않는다(빈 값 = 모름).
+        k: KIND_OK.has(m?.k) ? m.k : '',
       });
     }
     a.metaSig = text(body?.metaSig, 64);
@@ -573,6 +577,7 @@ export function edgeState(agent, { path: scope = '', limit = 500, only = '', sor
       host: m?.h || '',
       test: m?.t || '',
       type: m?.y || '',
+      kind: m?.k || '',   // v2.986: 대상 구분(옛 엣지는 '' — 모름)
       intervalSec: m?.iv || null,
     });
   }

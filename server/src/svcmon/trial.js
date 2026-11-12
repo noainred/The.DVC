@@ -26,6 +26,7 @@ import { executesHere } from './poller.js';
 import { runBatch } from './pool.js';
 import { splitSvcmonDue, demoSvcmonResult } from '../mock/demo/svcmon.js';
 import { muteTarget, unmuteTarget } from './transitions.js';
+import { listAssignments as listAssignmentsForAck } from '../central/svcmonAssign.js';
 import { edgeOfTarget, syncByAgentAssignments } from '../central/svcmonAssignSync.js';
 import { listAssignments, svcmonAssignLoadError, DEFAULT_EXCEPT_TYPES } from '../central/svcmonAssign.js';
 import { getAgentRaw } from '../central/svcmonEdge.js';
@@ -84,7 +85,7 @@ export function planTrial(picked = [], { executes = false, assignments = [], ass
   const local = []; const edge = []; const skip = [];
   for (const tg of picked) {
     if (!tg) continue;
-    const base = { targetId: tg.id, name: t(tg.name), path: t(tg.path), host: t(tg.host) };
+    const base = { targetId: tg.id, name: t(tg.name), path: t(tg.path), host: t(tg.host), kind: tg.kind === 'service' ? 'service' : 'infra' };
     if (pendingIds.has(tg.id)) { skip.push({ ...base, already: true, reason: '이미 시험 중입니다(엣지 보고 대기).' }); continue; }
     if (tg.enabled !== false) { skip.push({ ...base, already: true, reason: '이미 사용 중입니다.' }); continue; }
     const tests = (tg.tests || []).filter((x) => x.enabled !== false);
@@ -131,6 +132,7 @@ function loadPending() {
     _pending = (Array.isArray(j?.pending) ? j.pending : []).filter((p) => p && t(p.targetId) && t(p.agent) && Number(p.deadline) > 0)
       // 시한은 지금 + 상한으로 자른다(반증 L4 — 파일을 손으로 고치거나 옛 번들을 복원해도 무기한 대기가 되지 않게).
       .map((p) => ({ targetId: t(p.targetId), jobId: t(p.jobId), agent: t(p.agent), path: t(p.path), name: t(p.name), host: t(p.host),
+        kind: p.kind === 'service' ? 'service' : 'infra',
         startedAt: Number(p.startedAt) || 0, deadline: Math.min(Number(p.deadline), Date.now() + EDGE_DEADLINE_MAX_MS),
         expect: Array.isArray(p.expect) ? p.expect.map(t).slice(0, 200) : [], expectMs: Number(p.expectMs) || 0 }));
   } catch (e) {
@@ -187,6 +189,26 @@ async function runLocal(items, deps) {
 }
 
 /**
+ * v2.986 '지금 한 번 점검' — 점검 하나를 이 포탈에서 한 번 실행해 결과만 돌려준다(사용 여부와 무관 · 폴러 결과 · 전이 · CSV · 알림에 넣지 않는다 — 시험과 같은 규칙).
+ *   동시에 같은 점검은 하나 · 전체 동시 상한 RUN_ONCE_MAX(넘으면 busy). 데모 대상은 합성 결과(폴러 규칙).
+ */
+const RUN_ONCE_MAX = 8;
+const _runOnce = new Set();
+export async function runOnceTest(target, test, deps = {}) {
+  const key = t(test?.id);
+  if (!key) return { ok: false, error: '점검을 찾을 수 없습니다.' };
+  if (_runOnce.has(key)) return { ok: false, busy: true, error: '이 점검을 이미 실행하고 있습니다.' };
+  if (_runOnce.size >= RUN_ONCE_MAX) return { ok: false, busy: true, error: `동시에 ${RUN_ONCE_MAX}개까지 실행합니다 — 잠시 뒤 다시 시도하세요.` };
+  _runOnce.add(key);
+  try {
+    const res = await runLocal([{ host: t(target?.host), target, tests: [test] }], deps);
+    const r = res.get(test.id) || {};
+    return { ok: true, result: { status: t(r.status) || 'none', reply: t(r.reply).slice(0, 300), ms: Number.isFinite(r.ms) ? r.ms : null, at: Date.now() } };
+  } catch (e) { return { ok: false, error: `실행 실패 — ${t(e?.message).slice(0, 160)}` }; }
+  finally { _runOnce.delete(key); }
+}
+
+/**
  * 시험 시작. 직접 시험은 뒤에서 돌고(작업 id 로 진행을 본다), 엣지 시험은 대상을 켜고 배정을 다시 굳힌 뒤 대기로 둔다.
  * @param {string[]} ids 대상 id
  * @param {{user?:string, now?:number, deps?:object}} o deps(테스트 주입): targets · executes · assignments · run · sync · edgeRows
@@ -230,8 +252,8 @@ export function startTrial(ids, { user = '', now = Date.now(), deps = {} } = {})
       const item = { targetId: e.targetId, name: e.name, path: e.path, host: e.host, where: 'edge', agent: e.agent, tests: [] };
       if (failed.has(e.agent)) { revert.push(e.targetId); job.items.push({ ...item, state: 'fail', reason: `엣지 배정 동기화 실패 — ${failed.get(e.agent)}` }); continue; }
       const deadline = now + edgeDeadlineMs(e.expectMs);
-      muteTarget(e.path, e.name, deadline);
-      _pending.push({ targetId: e.targetId, jobId: job.id, agent: e.agent, path: e.path, name: e.name, host: e.host, startedAt: now, deadline, expect: e.expect, expectMs: e.expectMs || 0 });
+      muteTarget(e.path, e.name, deadline, e.kind);
+      _pending.push({ targetId: e.targetId, jobId: job.id, agent: e.agent, path: e.path, name: e.name, host: e.host, kind: e.kind, startedAt: now, deadline, expect: e.expect, expectMs: e.expectMs || 0 });
       job.items.push({ ...item, state: 'wait', deadline, reason: '배정을 내려보냈습니다 — 엣지 첫 보고를 기다리는 중' });
       setLast(e.targetId, { state: 'wait', reason: '엣지 첫 보고 대기', at: now, deadline, jobId: job.id });
     }
@@ -287,8 +309,13 @@ export function trialTick(now = Date.now(), deps = {}) {
   const byAgent = new Map();
   for (const p of _pending) { if (!byAgent.has(p.agent)) byAgent.set(p.agent, []); byAgent.get(p.agent).push(p); }
   const finished = [];   // { p, state, reason, tests }
+  const ackAtOf = deps.ackAt || defaultAckAt();
   for (const [agent, list] of byAgent) {
     const rows = (deps.edgeRows || edgeRowsOf)(agent) || [];
+    // v2.986(쉬운 등록 후속): 엣지가 **이번 시험 뒤의 배정을 적용(ack)한 뒤** 잰 결과만 받는다 — ack 전 행은 옛 스냅샷의 측정이다.
+    //   ack 는 배정 sig 가 그때의 현재 sig 일 때만 기록되므로(svcmonAssign.ackAssignment) ack 시각 ≥ 시작이면 시작 뒤에 굳힌 배정(켜진 대상)을 적용했다.
+    //   측정은 적용 직후 틱(5초)에 돌고 ack 는 WAN 을 건너 오므로 ack 수신 시각보다 조금 앞설 수 있다 — 여유 ACK_SLACK_MS.
+    const ackAt = Number(ackAtOf(agent)) || 0;
     // (경로 · 대상 이름) → 대기 목록. 판정은 대기(=대상 id)마다 한다(반증 M2: 키가 같으면 앞 건을 덮었다).
     const byKey = new Map();
     for (const p of list) {
@@ -302,6 +329,8 @@ export function trialTick(now = Date.now(), deps = {}) {
       for (const w of ws) {
         // v2.960(반증 M3 — 재현): 이번 시험의 행만 — 시작 뒤에 잰 것 · 지금 주소(옛 스냅샷의 옛 주소 행이 아님) · 기대 점검 이름. 같은 점검은 가장 최근 행 하나.
         if (!(Number(r.measuredAt) >= w.p.startedAt)) continue;
+        if (!(ackAt >= w.p.startedAt) || !(Number(r.measuredAt) >= ackAt - ACK_SLACK_MS)) continue;
+        if (t(r.kind) && t(r.kind) !== w.p.kind) continue;   // v2.986: 같은 경로 · 이름의 다른 구분 대상 행(옛 엣지는 구분을 싣지 않는다 — 그때는 거르지 않는다)
         if (w.p.host && t(r.host) && t(r.host).toLowerCase() !== w.p.host.toLowerCase()) continue;
         const name = t(r.test);
         if (w.p.expect.length && !w.p.expect.includes(name)) continue;
@@ -336,9 +365,9 @@ export function trialTick(now = Date.now(), deps = {}) {
   const failAgents = new Map(syncFail.map((x) => [x.agent, x.reason || '']));
   for (const f of finished) {
     if (f.state === 'fail') {
-      muteTarget(f.p.path, f.p.name, now + revertMuteMs(f.p.expectMs));   // 반증 M1: 엣지가 다음 당기기까지 옛 스냅샷으로 잰다
+      muteTarget(f.p.path, f.p.name, now + revertMuteMs(f.p.expectMs), f.p.kind);   // 반증 M1: 엣지가 다음 당기기까지 옛 스냅샷으로 잰다
       if (failAgents.has(f.p.agent)) f.reason = `${f.reason} 엣지 배정은 다시 굳히지 못했습니다 — ${failAgents.get(f.p.agent)}`.slice(0, 400);
-    } else unmuteTarget(f.p.path, f.p.name);
+    } else unmuteTarget(f.p.path, f.p.name, f.p.kind);
     setLast(f.p.targetId, { state: f.state, reason: f.reason, at: now, jobId: f.p.jobId });
     const job = _jobs.get(f.p.jobId);
     const item = job?.items.find((x) => x.targetId === f.p.targetId);
@@ -358,7 +387,7 @@ function edgeRowsOf(agent) {
   for (const [id, r] of a.rows) {
     const m = a.meta.get(id);
     if (!m) continue;
-    out.push({ path: m.p, target: m.n, host: m.h, test: m.t, status: r.s, reply: r.r, ms: r.m, measuredAt: r.measuredAt });
+    out.push({ path: m.p, target: m.n, host: m.h, kind: m.k || '', test: m.t, status: r.s, reply: r.r, ms: r.m, measuredAt: r.measuredAt });
   }
   return out;
 }
@@ -376,7 +405,7 @@ export function cancelTrials(targetIds = [], reason = '사람이 사용/중지�
   if (!gone.length) return 0;
   _pending = _pending.filter((p) => !ids.has(p.targetId));
   for (const p of gone) {
-    unmuteTarget(p.path, p.name);
+    unmuteTarget(p.path, p.name, p.kind);
     _last.delete(p.targetId);
     const job = _jobs.get(p.jobId);
     const item = job?.items.find((x) => x.targetId === p.targetId);
@@ -385,6 +414,16 @@ export function cancelTrials(targetIds = [], reason = '사람이 사용/중지�
   savePending();
   if (!_pending.length) stopTimer();
   return gone.length;
+}
+
+/** 엣지별 배정 ack 시각(배정 파일 — 한 판정에 한 번 읽는다). 못 읽으면 0(= 아직 적용 확인 안 됨 — 시한까지 기다린다). */
+const ACK_SLACK_MS = 10_000;
+function defaultAckAt() {
+  let m = null;
+  return (agent) => {
+    if (!m) { m = new Map(); try { for (const a of listAssignmentsForAck()) m.set(a.agent, Number(a.ack?.at) || 0); } catch { /* 0 */ } }
+    return m.get(agent) || 0;
+  };
 }
 
 function ensureTimer() {
@@ -398,7 +437,7 @@ function stopTimer() { if (_timer) { clearInterval(_timer); _timer = null; } }
 export function startSvcmonTrials() {
   loadPending();
   if (!_pending.length) return;
-  for (const p of _pending) muteTarget(p.path, p.name, p.deadline);
+  for (const p of _pending) muteTarget(p.path, p.name, p.deadline, p.kind);
   console.log(`[svcmon] 시험 점검 엣지 대기 ${_pending.length}건을 이어서 판정합니다.`);
   ensureTimer();
   setTimeout(() => { try { trialTick(); } catch { /* 다음 주기 */ } }, 5_000).unref?.();

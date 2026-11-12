@@ -13,3 +13,13 @@ export function isFullScopeAdmin(me) {
   const sc = me.scope || {};
   return !(Array.isArray(sc.vcenters) && sc.vcenters.length) && !(Array.isArray(sc.regions) && sc.regions.length);
 }
+
+/**
+ * v2.986: '전체 범위 편집자' — 서버 게이트 `canEdit + fullScopeOnly`(사용/중지 일괄 · 시험 점검 · 지금 한 번 점검)와 같은 기준.
+ *   v2.960 은 사용/중지 스위치를 역할만 보고 열어 범위가 지정된 operator 가 누르면 403 이었다.
+ */
+export function isFullScopeEditor(me) {
+  if (!me || !(me.role === 'admin' || me.role === 'operator') || me.demoGuest === true) return false;
+  const sc = me.scope || {};
+  return !(Array.isArray(sc.vcenters) && sc.vcenters.length) && !(Array.isArray(sc.regions) && sc.regions.length);
+}

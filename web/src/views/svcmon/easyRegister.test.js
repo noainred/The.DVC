@@ -55,3 +55,22 @@ describe('v2.960 쉬운 등록 — 법인별 추천 등록', () => {
     expect(trialHeadline(null)).toBe('대상 없음');
   });
 });
+
+describe('v2.986 isFullScopeEditor — 서버 canEdit + fullScopeOnly 와 같은 기준(사용/중지 · 시험 · 지금 한 번 점검)', async () => {
+  const { isFullScopeEditor } = await import('./svcmonAccess.js');
+  it('판정', () => {
+    expect(isFullScopeEditor({ role: 'admin' })).toBe(true);
+    expect(isFullScopeEditor({ role: 'operator' })).toBe(true);
+    expect(isFullScopeEditor({ role: 'operator', scope: { vcenters: ['vc-pl'] } })).toBe(false);   // v2.960 은 스위치를 열고 403 을 받았다
+    expect(isFullScopeEditor({ role: 'operator', scope: { regions: ['EU'] } })).toBe(false);
+    expect(isFullScopeEditor({ role: 'viewer' })).toBe(false);
+    expect(isFullScopeEditor({ role: 'admin', demoGuest: true })).toBe(false);
+    expect(isFullScopeEditor(null)).toBe(false);
+  });
+  it('트리 스위치 · 상세 창 버튼이 이 판정을 쓰고, 지금 한 번 점검은 실행 역할일 때만', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('../SvcMonitor.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/const canToggle = canEdit && isFullScopeEditor\(me\) && data\?\.centralNode !== false/);
+    expect(src).toMatch(/\{canToggle && data\?\.executes !== false && \(\(\) => \{/);
+  });
+});

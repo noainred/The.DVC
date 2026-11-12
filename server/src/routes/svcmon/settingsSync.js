@@ -15,8 +15,11 @@ import { listTargets, storeRevision, planBulkTargets } from '../../svcmon/store.
 import {
   readCatalog, planApply, previewOf, executePlan, detachTarget, getOptions, setOptions, kindMeta, driftRing, dailySummary, syncEvents,
   lastDetection, syncAvailableHere, ackDrift, MAX_ROWS, MAX_APPLY, GONE_ACTIONS, EXCLUDED_KINDS, SYNC_ROOT, detectTiming,
-  coverageSummary, requestDetect,
+  coverageSummary, requestDetect, planRepath, executeRepath,
 } from '../../svcmon/settingsSync.js';
+import { edgeOfTarget } from '../../central/svcmonAssignSync.js';
+import { svcmonAssignLoadError } from '../../central/svcmonAssign.js';
+import { cancelTrials } from '../../svcmon/trial.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store as _storeForScope } from '../../store.js';
@@ -152,6 +155,29 @@ svcmonRouter.post('/settings-sync/apply', adminOnly, fullScopeOnly, async (req, 
   requestDetect();   // v2.960(B): 개요 '감시 범위' 카드를 곧바로 맞춘다(2초 묶음 · 감지 타이머가 돌 때만)
   // 추가가 취소돼도(오류 1건이면 0건 — 대량 등록 규약) 200 + ok:false 로 결과 본문을 그대로 돌려준다 — 화면이 어떤 행이 왜 막혔는지 보여 준다.
   res.json({ ok: out.committed && !out.errors.length, result: { ...out, skip: r.plan.skip.slice(0, 200) }, assign });
+});
+
+/**
+ * v2.986 '법인 폴더로 정리' — 설정 연동이 놓은 자리에 그대로 있는 연동 대상을 지금 법인 폴더로 옮긴다. mode 'preview' 는 저장하지 않는다.
+ *   서버가 **지금** 다시 분류한 행으로만 판정한다(화면이 본 상태를 믿지 않는다 — 적용과 같은 규약). 경로 기준 엣지 배정이 맡는 대상은 건너뜀.
+ */
+svcmonRouter.post('/settings-sync/repath', adminOnly, fullScopeOnly, async (req, res) => {
+  if (!syncAvailableHere()) return edgeOnly(res);
+  const keys = Array.isArray(req.body?.keys) ? req.body.keys.map(t).filter(Boolean) : [];
+  if (!keys.length) return res.status(400).json({ ok: false, error: '옮길 항목을 고르세요.' });
+  if (keys.length > MAX_APPLY) return res.status(400).json({ ok: false, error: `한 번에 ${MAX_APPLY}건까지 옮길 수 있습니다(요청 ${keys.length}건).` });
+  const cat = await readCatalog();
+  const assignUnreadable = !!svcmonAssignLoadError();
+  let list = []; try { list = listAssignments(); } catch { list = []; }
+  const plan = planRepath(cat.rows, keys, { edgeOf: (x) => edgeOfTarget(x, list), assignUnreadable });
+  if (req.body?.mode !== 'apply') return res.json({ ok: true, preview: { move: plan.move.map(({ agent, ...m }) => m), skip: plan.skip.slice(0, 500) } });
+  const user = req.user?.username || '';
+  cancelTrials(plan.move.map((m) => m.targetId), '대상을 법인 폴더로 옮겨 시험 대기를 멈췄습니다.');   // 경로가 바뀌면 대기 판정 키(경로 · 이름)가 맞지 않는다
+  const out = executeRepath(plan);
+  const assign = out.agents.length ? syncAssignments(out.agents, user) : [];
+  logAudit({ user, action: 'svcmon.settings-sync.repath', detail: `옮김 ${out.moved.length} · 건너뜀 ${plan.skip.length} · 실패 ${out.errors.length}${assign.length ? ` · 배정 ${assign.filter((x) => x.ok).length}/${assign.length}` : ''}` });
+  if (out.moved.length) requestDetect();
+  res.json({ ok: !out.errors.length, result: { moved: out.moved, errors: out.errors, skip: plan.skip.slice(0, 500) }, assign });
 });
 
 /** 자동 등록 종류(기본 없음 = 끔). */

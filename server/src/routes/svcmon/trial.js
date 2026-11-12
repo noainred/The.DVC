@@ -7,8 +7,9 @@
  * 바뀐 대상의 담당 엣지는 byAgent 배정을 다시 굳힌다(central/svcmonAssignSync.js — 경로 기준 배정은 건너뜀으로 보고).
  */
 import { logAudit } from '../../audit.js';
-import { setEnabledMany, listTargets, LIMITS } from '../../svcmon/store.js';
-import { startTrial, getTrial, cancelTrials, TRIAL_MAX_IDS } from '../../svcmon/trial.js';
+import { setEnabledMany, listTargets, getTarget, LIMITS } from '../../svcmon/store.js';
+import { executesHere } from '../../svcmon/poller.js';
+import { startTrial, getTrial, cancelTrials, runOnceTest, TRIAL_MAX_IDS } from '../../svcmon/trial.js';
 import { syncAvailableHere, requestDetect } from '../../svcmon/settingsSync.js';
 import { syncByAgentAssignments, edgeOfTarget } from '../../central/svcmonAssignSync.js';
 import { listAssignments, svcmonAssignLoadError } from '../../central/svcmonAssign.js';
@@ -63,6 +64,22 @@ svcmonRouter.post('/trial', canEdit, fullScopeOnly, (req, res) => {
   logAudit({ user, action: 'svcmon.trial.start', target: r.job.id, detail: `직접 ${r.job.items.filter((x) => x.where === 'local').length} · 엣지 대기 ${c.wait || 0} · 건너뜀 ${c.skip || 0} · 실패 ${c.fail || 0}` });
   r.done.then(() => requestDetect()).catch(() => {});
   res.status(202).json({ ok: true, job: r.job });
+});
+
+/**
+ * v2.986 '지금 한 번 점검' — 이 포탈이 점검을 직접 실행하는 역할일 때만(중앙은 409 — 원격 대상을 중앙에서 찌르지 않는다 · poller EXECUTES 머리말).
+ *   결과는 응답으로만(폴러 결과 · 알림에 넣지 않는다). 네트워크로 나가는 동작이라 감사 로그를 남긴다.
+ */
+svcmonRouter.post('/targets/:id/tests/:testId/run', canEdit, fullScopeOnly, async (req, res) => {
+  if (!syncAvailableHere()) return edgeNode(res);
+  if (!executesHere()) return res.status(409).json({ ok: false, reason: 'not-executing', error: '이 포탈은 점검을 직접 실행하지 않습니다 — 결과는 배정된 엣지가 보고합니다.' });
+  const tg = getTarget(String(req.params.id || ''));
+  const x = tg?.tests.find((y) => y.id === String(req.params.testId || ''));
+  if (!x) return res.status(404).json({ ok: false, error: '점검을 찾을 수 없습니다.' });
+  const r = await runOnceTest(tg, x);
+  if (!r.ok) return res.status(r.busy ? 409 : 500).json({ ok: false, error: r.error });
+  logAudit({ user: req.user?.username, action: 'svcmon.test.run', target: `${tg.name} › ${x.name}`, detail: `${r.result.status}${r.result.ms != null ? ` · ${r.result.ms}ms` : ''}` });
+  res.json({ ok: true, result: r.result });
 });
 
 svcmonRouter.get('/trial/:id', canEdit, fullScopeOnly, (req, res) => {   // 반증 L3: 시작 계정명이 실린다 — 시작할 수 있는 계정만

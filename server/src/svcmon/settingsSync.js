@@ -276,8 +276,12 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
       //   '변경(다시 나타남)' 으로 올려 적용이 표지를 지우고, 설정 연동이 중지한 것이었으면 다시 켠다(goneOff).
       const reappeared = !!o.gone;
       const changed = hostChanged || portChanged || reappeared;
+      // v2.986(쉬운 등록 후속 — '법인 폴더로 정리'): 대상이 **설정 연동이 놓은 자리**(등록 때 법인의 기본 경로)에 그대로 있는데 지금 법인 판정으로는
+      //   다른 폴더여야 하면(법인 판정 보강 전에 '전역' 으로 등록된 것 · DataCenter 이름이 바뀐 것) 옮길 경로를 싣는다. 사람이 옮긴 대상은 건드리지 않는다.
+      const placedAt = syncPathOf({ group: SETTING_KINDS[t(x.kind)]?.group }, { label: t(o.corp) || '전역' });
+      const repath = !changed && t(st.path) === placedAt && row.path && row.path !== t(st.path) ? row.path : '';
       rows.push({
-        ...row, state: changed ? 'changed' : 'linked', ...(reappeared ? { reappeared: true, reason: '설정에 다시 나타났습니다 — 적용하면 사라짐 표지를 지웁니다(설정 연동이 중지했다면 다시 켭니다).' } : {}),
+        ...row, state: changed ? 'changed' : 'linked', ...(repath ? { repath } : {}), ...(reappeared ? { reappeared: true, reason: '설정에 다시 나타났습니다 — 적용하면 사라짐 표지를 지웁니다(설정 연동이 중지했다면 다시 켭니다).' } : {}),
         targetId: st.id, targetPath: st.path, targetName: st.name, targetEnabled: st.enabled !== false, targetAgent: t(st.agent),
         tests: Array.isArray(st.tests) ? st.tests.length : 0, syncedAt: o.syncedAt || null, ...(o.gone ? { wasGone: o.gone } : {}),
         ...(changed ? { prevHost: t(st.host), prevPort: o.port || null } : {}),
@@ -347,6 +351,7 @@ export function countsOf(rows = []) {
   }
   // v2.960(B): 연동됐지만 중지된 대상 — 개요 '감시 범위' 카드가 '감시 중' 과 '등록됐지만 중지' 를 가른다.
   c.linkedOff = rows.filter((r) => (r.state === 'linked' || r.state === 'changed') && r.targetEnabled === false).length;
+  c.repath = rows.filter((r) => r.repath).length;   // v2.986: 법인 폴더로 옮길 수 있는 연동 대상
   // 아직 처리하지 않은 사라짐(표지 없음) — 배너는 이것만 센다(중지 처리한 뒤에도 계속 뜨지 않게 — 반증 낮음).
   c.goneOpen = rows.filter((r) => r.state === 'gone' && !r.goneAt).length;
   const denom = rows.filter((r) => r.state !== 'gone' && r.state !== 'held' && r.state !== 'excluded').length;
@@ -555,6 +560,11 @@ export async function loadCandidates() {
   const m = new Map();
   try { for (const x of (await import('../central/agentTokens.js')).listAgentTokens()) if (t(x.agent)) m.set(t(x.agent).toLowerCase(), t(x.agent)); } catch { /* 없음 */ }
   try { for (const e of (await import('../central/svcmonEdge.js')).edgeSummary()) if (t(e.agent)) m.set(t(e.agent).toLowerCase(), t(e.agent)); } catch { /* 없음 */ }
+  // v2.986: 데모(mock)에서는 데모 엣지(mock-Edge-*)도 배정 후보로 본다 — 개별 토큰도 보고도 없어 '법인 엣지에 배정' 이 늘 '엣지 없음' 이었다(데모 전용 · live 무관).
+  try {
+    const { isMockMode } = await import('../mock/demo/flags.js');
+    if (isMockMode()) for (const e of (await import('../mock/demo/edge.js')).demoEdgeList()) if (t(e.name)) m.set(t(e.name).toLowerCase(), t(e.name));
+  } catch { /* 데모 없이 */ }
   return m;
 }
 
@@ -718,6 +728,49 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
     _lastAutoSummary = nothing ? summaryText : '';
   }
   pushEvent({ kind: auto ? 'auto' : 'apply', text: `배치 ${batch} — ${summaryText}` });
+  return out;
+}
+
+/**
+ * v2.986 '법인 폴더로 정리' — 순수 계획. 경로 기준 엣지 배정이 맡는 대상(옮기기 전 · 뒤 어느 쪽이든)은 **건너뛴다**(사용자 결정 —
+ *   옮기면 엣지 배포본과 경로가 달라지고, 배정 범위 밖으로 나가면 그 엣지가 대상을 잃는다). byAgent 엣지 대상은 옮긴 뒤 배정을 다시 굳힌다.
+ * @param {object[]} rows 지금 분류한 카탈로그 행 · @param {string[]} keys · @param {(target)=>{agent,mode}} edgeOf 배정 판정(central/svcmonAssignSync edgeOfTarget)
+ */
+export function planRepath(rows, keys, { svcTargets = null, edgeOf = () => ({ agent: '', mode: '' }), assignUnreadable = false } = {}) {
+  const want = new Set((Array.isArray(keys) ? keys : []).map(t).filter(Boolean));
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  const byId = new Map((svcTargets || listTargets()).map((x) => [x.id, x]));
+  const move = []; const skip = [];
+  for (const k of want) {
+    const r = byKey.get(k);
+    if (!r || !r.repath) { skip.push({ key: k, name: r?.name || '', reason: '옮길 경로가 없습니다(지금 분류로는 이미 제자리이거나 사람이 옮긴 대상입니다).' }); continue; }
+    const st = byId.get(r.targetId);
+    if (!st) { skip.push({ key: k, name: r.name, reason: '대상이 이미 지워졌습니다.' }); continue; }
+    if (assignUnreadable) { skip.push({ key: k, name: r.name, reason: '엣지 배정 파일을 읽지 못했습니다 — 엣지 배정 탭에서 확인한 뒤 다시 하세요.' }); continue; }
+    const before = edgeOf(st); const after = edgeOf({ ...st, path: r.repath });
+    if (before.mode === 'path' || after.mode === 'path') {
+      skip.push({ key: k, name: r.name, reason: `경로 기준 배정 엣지(${before.mode === 'path' ? before.agent : after.agent})가 맡는 대상입니다 — 옮기면 엣지 배포본과 경로가 달라집니다(엣지 배정 탭에서 범위를 확인한 뒤 옮기세요).` });
+      continue;
+    }
+    move.push({ key: k, name: r.name, targetId: st.id, from: t(st.path), to: r.repath, corp: r.corp, agent: t(st.agent) });
+  }
+  return { move, skip };
+}
+
+/** 계획 실행 — 경로와 출처의 법인 이름만 고친다(대상 id · 점검 id 는 그대로 — 연속 횟수 · 만기 유지). */
+export function executeRepath(plan, { now = Date.now() } = {}) {
+  const out = { moved: [], errors: [], agents: [] };
+  for (const m of plan.move) {
+    try {
+      const cur = getTarget(m.targetId);
+      if (!cur) { out.errors.push({ key: m.key, name: m.name, reason: '대상이 이미 지워졌습니다.' }); continue; }
+      updateTarget(m.targetId, { path: m.to }, { origin: { ...(cur.origin || {}), corp: m.corp, syncedAt: now } });
+      out.moved.push({ key: m.key, name: m.name, targetId: m.targetId, from: m.from, to: m.to });
+      if (m.agent) out.agents.push(m.agent);
+    } catch (e) { out.errors.push({ key: m.key, name: m.name, reason: String(e?.message || e).slice(0, 200) }); }
+  }
+  out.agents = [...new Set(out.agents)];
+  if (out.moved.length) pushEvent({ kind: 'apply', text: `법인 폴더로 정리 — ${out.moved.length}건 옮김${out.errors.length ? ` · 실패 ${out.errors.length}` : ''}` });
   return out;
 }
 
