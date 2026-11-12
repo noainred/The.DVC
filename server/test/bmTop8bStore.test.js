@@ -23,10 +23,13 @@ delete process.env.CENTRAL_URL;
 test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
 let sqlite = true; try { await import('node:sqlite'); } catch { sqlite = false; }
 const STEP = 300_000; const HOUR = 3_600_000; const DAY = 86_400_000;
-const NOW = Math.floor(Date.now() / STEP) * STEP - 2 * STEP;
 
 const T = await import('../src/bmusage/topStore.js');
 const M = await import('../src/bmusage/monthStore.js');
+// 시험 창(가장 긴 것 — 70분)이 포탈 날 경계(기본 KST 자정)를 걸치면 경계 앞으로 당긴다 — 제품은 같은 날 파일 안에서만 '같음' 기준을 쓴다
+//   (topStore b.day === day). v2.987 CI 가 KST 00:23 에 돌아 전체 행이 하나 더 생겼다(4 !== 3 — 재현: 시계를 자정 + 20분으로 옮기면 실패, + 40분이면 통과).
+let NOW = Math.floor(Date.now() / STEP) * STEP - 2 * STEP;
+while (M.periodKeyOf('top', NOW - 14 * STEP) !== M.periodKeyOf('top', NOW)) NOW -= STEP;
 
 const proc = (pid, start, cpu, { comm = 'postgres', user = 'gpadmin', rss = 3_000_000, cpuS = 1000, rd = 1e6, wr = 1e5, ioPerm = false } = {}) => ({ pid, start, cpu, comm, user, rssKb: rss, state: 'R', cpuS, rd, wr, ioPerm });
 const topOf = (cpu, { mem = null, upS = 100_000 } = {}) => ({ src: 'top', dtS: 1.1, clk: 100, pageKb: 4, uptimeS: upS, nproc: 400, nrun: 3, nd: 1, cpuTotal: cpu.reduce((a, x) => a + x.cpu, 0) + 2,
