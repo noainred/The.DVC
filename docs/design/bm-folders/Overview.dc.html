@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 전체 · 법인별 현황과 미분류</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:960px">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span><span>VMware Global Monitoring Portal</span></span>
+    <span class="ver">v2.914.0</span>
+    <span class="cmdk"><span>기능 · 탭 · 장비 찾기</span><span class="kbd" style="margin-left:auto">⌘K</span></span>
+    <span class="pill" style="margin-left:auto"><span class="dot" style="background:#22c55e"></span><span>vCenter 28/28</span></span>
+    <span class="pill"><span>admin · 전체 범위</span></span>
+  </div>
+  <div class="body">
+    <nav class="sb" aria-label="주 메뉴">
+      <span class="h">모니터링</span>
+      <a href="#">Overview</a>
+      <a href="#">Platform</a>
+      <a href="#">호스트</a>
+      <a href="#">가상머신</a>
+      <span class="h">도구</span>
+      <a href="#" class="on">특수 기능</a>
+      <a href="#">설정</a>
+    </nav>
+    <div class="main">
+      <div class="crumb">특수 기능 › 서버 · 하드웨어 › 물리서버 폴더</div>
+      <h1 class="h1"><span>물리서버 폴더</span><span class="sp row"><button class="btn" type="button">CSV</button><button class="btn" type="button">새로고침</button></span></h1>
+
+      <div class="pane">
+        <div class="card tree">
+          <div class="th">
+            <div class="row">
+              <div class="seg" role="group" aria-label="트리 보기"><button type="button" class="on">법인별</button><button type="button">폴더 이름별(전 법인)</button></div>
+              <button class="btn sm sp" type="button">+ 폴더</button>
+            </div>
+            <input class="inp" type="text" placeholder="폴더 · 법인 이름 찾기" aria-label="폴더 찾기" style="width:100%">
+          </div>
+          <div class="rows">
+            <button type="button" class="tr on"><span class="tw">▾</span><span class="nm">전체 물리서버</span><span class="ct">503</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="co"></span><span class="nm">KR-HQ 본사</span><span class="bdg c">중앙</span><span class="ct">124</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="co"></span><span class="nm">PL 폴란드</span><span class="bdg e">엣지</span><span class="ct">41</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="co"></span><span class="nm">US-E 미국 동부</span><span class="bdg e">엣지</span><span class="ct">38</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="co"></span><span class="nm">VN 베트남</span><span class="bdg w">보고 만료</span><span class="ct">27</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="co"></span><span class="nm">IN 인도</span><span class="bdg e">엣지</span><span class="ct">22</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="co"></span><span class="nm">DE 독일</span><span class="bdg e">수집 서버</span><span class="ct">19</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="nm dim">… 외 22개 법인</span><span class="ct">220</span></button>
+            <button type="button" class="tr d1"><span class="tw"></span><span class="fo un"></span><span class="nm">(법인 미지정)</span><span class="ct">12</span></button>
+          </div>
+        </div>
+
+        <div class="card cnt">
+          <div class="fh">
+            <div class="path">
+              <span>전체 물리서버</span>
+              <span class="bdg n">503대 · 법인 28곳</span>
+              <span class="sp row">
+                <button class="btn pri" type="button">서버 찾아 등록</button>
+                <button class="btn" type="button">폴더 구조 복사(법인 → 법인)</button>
+                <button class="btn" type="button">자동 규칙 3개</button>
+              </span>
+            </div>
+            <div class="band w">
+              <span><b>VN 베트남</b> — 엣지 ‘vn-edge’ 의 서버 보고가 26시간 전에 멈췄습니다. 마지막 목록을 그대로 두고 등록 · 이동은 계속할 수 있습니다. 사용률 · 전원 · 장애는 ‘—’ 로 보입니다.</span>
+            </div>
+          </div>
+          <div class="tw2">
+            <table class="t">
+              <thead>
+                <tr><th>법인</th><th>서버 목록을 받는 길</th><th>마지막 보고</th><th class="r">물리서버</th><th class="r">폴더 등록</th><th class="r">미분류 ▼</th><th class="r">폴더</th><th>동작</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><span class="nm"><span class="co"></span>KR-HQ 본사</span></td><td><span class="bdg c">중앙</span> <span class="dim">iDRAC 스캔 · OME</span></td><td>2분 전</td><td class="r num">124</td><td class="r num">73</td><td class="r num" style="color:#fbbf24">51</td><td class="r num">6</td><td><button class="btn sm" type="button">미분류 보기</button></td></tr>
+                <tr><td><span class="nm"><span class="co"></span>US-E 미국 동부</span></td><td><span class="bdg e">엣지</span> <span class="dim mono">use-edge</span></td><td>6분 전</td><td class="r num">38</td><td class="r num">0</td><td class="r num" style="color:#fbbf24">38</td><td class="r num">0</td><td><button class="btn sm" type="button">미분류 보기</button></td></tr>
+                <tr><td><span class="nm"><span class="co"></span>PL 폴란드</span></td><td><span class="bdg e">엣지</span> <span class="dim mono">pl-edge</span></td><td>4분 전</td><td class="r num">41</td><td class="r num">29</td><td class="r num" style="color:#fbbf24">12</td><td class="r num">2</td><td><button class="btn sm" type="button">미분류 보기</button></td></tr>
+                <tr class="stale"><td><span class="nm"><span class="co"></span>VN 베트남</span></td><td><span class="bdg w">엣지 · 보고 만료</span> <span class="dim mono">vn-edge</span></td><td style="color:#fbbf24">26시간 전</td><td class="r num">27</td><td class="r num">15</td><td class="r num">12</td><td class="r num">2</td><td><button class="btn sm" type="button">미분류 보기</button></td></tr>
+                <tr><td><span class="nm"><span class="co"></span>DE 독일</span></td><td><span class="bdg e">수집 서버</span> <span class="dim mono">de-col</span></td><td>9분 전</td><td class="r num">19</td><td class="r num">11</td><td class="r num" style="color:#fbbf24">8</td><td class="r num">2</td><td><button class="btn sm" type="button">미분류 보기</button></td></tr>
+                <tr><td><span class="nm"><span class="co"></span>IN 인도</span></td><td><span class="bdg e">엣지</span> <span class="dim mono">in-edge</span></td><td>3분 전</td><td class="r num">22</td><td class="r num">22</td><td class="r num">0</td><td class="r num">3</td><td class="dim">모두 등록됨</td></tr>
+                <tr><td class="dim">… 외 22개 법인</td><td class="dim">엣지 17 · 수집 서버 2 · 중앙 3</td><td class="dim">모두 15분 이내</td><td class="r num">220</td><td class="r num">168</td><td class="r num" style="color:#fbbf24">52</td><td class="r num">32</td><td><button class="btn sm" type="button">펼치기</button></td></tr>
+                <tr><td><span class="nm"><span class="fo un"></span>(법인 미지정)</span></td><td class="dim">어느 법인 것인지 모르는 서버</td><td class="dim">—</td><td class="r num">12</td><td class="r dim">—</td><td class="r dim">—</td><td class="r dim">—</td><td><a href="#">법인 지정하러 가기</a></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+            <div class="row"><span style="font-weight:700">이름 앞부분이 같은 미분류 서버</span><span class="note">— 누르면 ‘서버 찾아 등록’ 이 그 글자로 열립니다(자동으로 등록하지 않습니다)</span></div>
+            <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
+              <div class="mini"><span class="ln"><span class="mono" style="font-weight:600">use-web-*</span><span class="bdg n sp">14대</span></span><span class="ln dim">US-E 미국 동부</span><button class="btn sm" type="button">찾아 등록…</button></div>
+              <div class="mini"><span class="ln"><span class="mono" style="font-weight:600">kr-gpu-*</span><span class="bdg n sp">11대</span></span><span class="ln dim">KR-HQ 본사</span><button class="btn sm" type="button">찾아 등록…</button></div>
+              <div class="mini"><span class="ln"><span class="mono" style="font-weight:600">pl-mes-*</span><span class="bdg n sp">9대</span></span><span class="ln dim">PL 폴란드</span><button class="btn sm" type="button">찾아 등록…</button></div>
+              <div class="mini"><span class="ln"><span class="mono" style="font-weight:600">*-db-*</span><span class="bdg n sp">33대</span></span><span class="ln dim">법인 4곳</span><button class="btn sm" type="button">찾아 등록…</button></div>
+            </div>
+          </div>
+
+          <div class="foot">
+            <span>합계 503 = 폴더 등록 318 + 미분류 173 + 법인 미지정 12</span>
+            <span class="sp">엣지 · 수집 서버가 보고한 서버도 중앙에서 폴더에 넣습니다 — 등록 정보는 중앙에만 저장됩니다</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

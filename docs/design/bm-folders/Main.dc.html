@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 폴더 트리와 폴더 안 서버</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:960px">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span><span>VMware Global Monitoring Portal</span></span>
+    <span class="ver">v2.914.0</span>
+    <span class="cmdk"><span>기능 · 탭 · 장비 찾기</span><span class="kbd" style="margin-left:auto">⌘K</span></span>
+    <span class="pill" style="margin-left:auto"><span class="dot" style="background:#22c55e"></span><span>vCenter 28/28</span></span>
+    <span class="pill"><span>admin · 전체 범위</span></span>
+  </div>
+  <div class="body">
+    <nav class="sb" aria-label="주 메뉴">
+      <span class="h">모니터링</span>
+      <a href="#">Overview</a>
+      <a href="#">Platform</a>
+      <a href="#">호스트</a>
+      <a href="#">가상머신</a>
+      <a href="#">데이터스토어</a>
+      <a href="#">네트워크</a>
+      <a href="#">IP 관리</a>
+      <a href="#">알람</a>
+      <span class="h">도구</span>
+      <a href="#" class="on">특수 기능</a>
+      <a href="#">게시판</a>
+      <a href="#">위키</a>
+      <a href="#">설정</a>
+    </nav>
+    <div class="main">
+      <div class="crumb">특수 기능 › 서버 · 하드웨어 › 물리서버 폴더</div>
+      <h1 class="h1"><span>물리서버 폴더</span><span class="bdg n">새 도구 · 시안</span><span class="sp row"><button class="btn" type="button">CSV</button><button class="btn" type="button">새로고침</button></span></h1>
+      <p class="intro">가상화 서버는 vCenter 가 클러스터로 나눠 주지만 물리서버(베어메탈)에는 그런 구조가 없습니다. iDRAC 으로 인식된 물리서버를 <b>법인 › 폴더</b> 에 등록해 서비스별로 묶어 봅니다. 한 서버는 한 폴더에만 들어갑니다(vCenter 의 호스트 ↔ 클러스터와 같은 규칙).</p>
+
+      <div class="kpis">
+        <div class="card kpi"><span class="k">물리서버(베어메탈)</span><span class="v num">503</span><span class="s">iDRAC · OME · 엣지 합(ESXi 제외)</span></div>
+        <div class="card kpi"><span class="k">폴더에 등록</span><span class="v num">318</span><span class="s">63% · 폴더 47개</span></div>
+        <div class="card kpi"><span class="k">미분류</span><span class="v num" style="color:#fbbf24">173</span><span class="s">법인은 있고 폴더가 없는 서버</span></div>
+        <div class="card kpi"><span class="k">법인 미지정</span><span class="v num">12</span><span class="s">법인을 먼저 정해야 등록됩니다</span></div>
+        <div class="card kpi"><span class="k">엣지 보고</span><span class="v num">21<span class="dim" style="font-size:13px;font-weight:600"> / 22 정상</span></span><span class="s" style="color:#fbbf24">만료 1곳 — VN(26시간 전)</span></div>
+      </div>
+
+      <div class="pane">
+        <div class="card tree">
+          <div class="th">
+            <div class="row">
+              <div class="seg" role="group" aria-label="트리 보기"><button type="button" class="on">법인별</button><button type="button">폴더 이름별(전 법인)</button></div>
+              <button class="btn sm sp" type="button">+ 폴더</button>
+            </div>
+            <input class="inp" type="text" placeholder="폴더 · 법인 이름 찾기" aria-label="폴더 찾기" style="width:100%">
+          </div>
+          <div class="rows">
+            <button type="button" class="tr"><span class="tw">▾</span><span class="nm">전체 물리서버</span><span class="ct">503</span></button>
+            <button type="button" class="tr d1"><span class="tw">▾</span><span class="co"></span><span class="nm">KR-HQ 본사</span><span class="bdg c">중앙</span><span class="ct">124</span></button>
+            <button type="button" class="tr d2"><span class="tw">▾</span><span class="fo"></span><span class="nm">DB</span><span class="ct">32</span></button>
+            <button type="button" class="tr d3 on"><span class="tw"></span><span class="fo"></span><span class="nm">Oracle RAC</span><span class="ct">12</span></button>
+            <button type="button" class="tr d3"><span class="tw"></span><span class="fo"></span><span class="nm">MySQL</span><span class="ct">20</span></button>
+            <button type="button" class="tr d2"><span class="tw">▸</span><span class="fo"></span><span class="nm">AI · GPU</span><span class="ct">18</span></button>
+            <button type="button" class="tr d2"><span class="tw">▸</span><span class="fo"></span><span class="nm">백업 · 미디어 서버</span><span class="ct">9</span></button>
+            <button type="button" class="tr d2"><span class="tw"></span><span class="fo"></span><span class="nm">계측 · 시험</span><span class="ct">14</span></button>
+            <button type="button" class="tr d2 un"><span class="tw"></span><span class="fo un"></span><span class="nm">(미분류)</span><span class="ct">51</span></button>
+            <button type="button" class="tr d1"><span class="tw">▾</span><span class="co"></span><span class="nm">PL 폴란드</span><span class="bdg e">엣지</span><span class="ct">41</span></button>
+            <button type="button" class="tr d2"><span class="tw"></span><span class="fo"></span><span class="nm">DB</span><span class="ct">8</span></button>
+            <button type="button" class="tr d2"><span class="tw"></span><span class="fo"></span><span class="nm">MES</span><span class="ct">21</span></button>
+            <button type="button" class="tr d2 un"><span class="tw"></span><span class="fo un"></span><span class="nm">(미분류)</span><span class="ct">12</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="co"></span><span class="nm">US-E 미국 동부</span><span class="bdg e">엣지</span><span class="ct">38</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="co"></span><span class="nm">VN 베트남</span><span class="bdg w">보고 만료</span><span class="ct">27</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="nm dim">… 외 24개 법인</span><span class="ct">261</span></button>
+            <button type="button" class="tr d1"><span class="tw"></span><span class="fo un"></span><span class="nm">(법인 미지정)</span><span class="ct">12</span></button>
+          </div>
+        </div>
+
+        <div class="card cnt">
+          <div class="fh">
+            <div class="path">
+              <span class="co"></span><span>KR-HQ 본사</span><span class="sep">›</span><span>DB</span><span class="sep">›</span><span class="fo"></span><span>Oracle RAC</span>
+              <span class="sp row">
+                <button class="btn pri" type="button">서버 찾아 등록</button>
+                <button class="btn" type="button">이름 바꾸기</button>
+                <button class="btn" type="button">폴더 옮기기</button>
+                <button class="btn danger" type="button">폴더 삭제</button>
+              </span>
+            </div>
+            <div class="row">
+              <span class="bdg n">서버 12대</span>
+              <span class="bdg g">전원 켜짐 12</span>
+              <span class="bdg r">부품 장애 1대</span>
+              <span class="bdg n">CPU 31% · 메모리 54% (11대 기준 · 못 읽음 1)</span>
+              <span class="bdg n">전력 4,221 W (11대)</span>
+              <span class="note sp">서비스 인벤토리 연결: <a href="#">‘Oracle RAC’ 서비스</a> — 이 폴더의 서버가 자동으로 구성원이 됩니다</span>
+            </div>
+          </div>
+          <div class="bar">
+            <input class="inp" type="text" placeholder="이 폴더 안에서 찾기(이름 · 서비스 태그 · 모델)" aria-label="폴더 안 찾기" style="width:290px">
+            <label class="lbl"><input class="chk" type="checkbox" aria-label="하위 폴더 포함"><span>하위 폴더 포함</span></label>
+            <span class="selbar sp"><span>3대 선택</span><button class="btn sm" type="button">다른 폴더로 옮기기</button><button class="btn sm" type="button">폴더에서 빼기(미분류로)</button></span>
+          </div>
+          <div class="tw2">
+            <table class="t">
+              <thead>
+                <tr>
+                  <th style="width:30px"><input class="chk" type="checkbox" aria-label="전체 선택"></th>
+                  <th>이름 ▲</th><th>서비스 태그</th><th>모델</th><th>출처</th><th>iDRAC 주소</th><th>전원</th><th>부품 장애</th><th class="r">CPU</th><th class="r">메모리</th><th class="r">전력</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="kr-ora-rac01 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-rac01</span></td><td class="mono">7HX2K93</td><td>PowerEdge R940</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.11</td><td>켜짐</td><td class="dim">없음</td><td class="r num">44%</td><td class="r num">71%</td><td class="r num">612 W</td></tr>
+                <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="kr-ora-rac02 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-rac02</span></td><td class="mono">7HX2K94</td><td>PowerEdge R940</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.12</td><td>켜짐</td><td class="dim">없음</td><td class="r num">47%</td><td class="r num">73%</td><td class="r num">630 W</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="kr-ora-rac03 선택"></td><td><span class="nm"><span class="sv bad"></span>kr-ora-rac03</span></td><td class="mono">9JM4P21</td><td>PowerEdge R940</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.13</td><td>켜짐</td><td><span class="bdg r">PSU 1</span></td><td class="r num">39%</td><td class="r num">69%</td><td class="r num">588 W</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="kr-ora-rac04 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-rac04</span></td><td class="mono">9JM4P22</td><td>PowerEdge R940</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.14</td><td>켜짐</td><td class="dim">없음</td><td class="r num">41%</td><td class="r num">70%</td><td class="r num">601 W</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="kr-ora-dg01 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-dg01</span></td><td class="mono">3QT8W50</td><td>PowerEdge R760</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.21</td><td>켜짐</td><td class="dim">없음</td><td class="r num">18%</td><td class="r num">52%</td><td class="r num">344 W</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="kr-ora-dg02 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-dg02</span></td><td class="mono">3QT8W51</td><td>PowerEdge R760</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.22</td><td>켜짐</td><td class="dim">없음</td><td class="r num">16%</td><td class="r num">50%</td><td class="r num">339 W</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="kr-ora-arch01 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-arch01</span></td><td class="mono">B2N6R07</td><td>PowerEdge R750xs</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.31</td><td>켜짐</td><td class="dim">없음</td><td class="r num">9%</td><td class="r num">31%</td><td class="r num">212 W</td></tr>
+                <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="kr-ora-bkp01 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-bkp01</span></td><td class="mono">B2N6R08</td><td>PowerEdge R750xs</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.32</td><td>켜짐</td><td class="dim">없음</td><td class="r num">22%</td><td class="r num">38%</td><td class="r num">240 W</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="kr-ora-dev01 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-dev01</span></td><td class="mono">F5C1L66</td><td>PowerEdge R650</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.41</td><td>켜짐</td><td class="dim">없음</td><td class="r num">12%</td><td class="r num">44%</td><td class="r num">198 W</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="kr-ora-dev02 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-dev02</span></td><td class="mono">F5C1L67</td><td>PowerEdge R650</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.42</td><td>켜짐</td><td class="dim">없음</td><td class="r dim">—</td><td class="r dim">—</td><td class="r dim">—</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="kr-ora-stg01 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-stg01</span></td><td class="mono">H8D3V12</td><td>PowerEdge R650</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.43</td><td>켜짐</td><td class="dim">없음</td><td class="r num">27%</td><td class="r num">49%</td><td class="r num">231 W</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="kr-ora-stg02 선택"></td><td><span class="nm"><span class="sv"></span>kr-ora-stg02</span></td><td class="mono">H8D3V13</td><td>PowerEdge R650</td><td><span class="bdg c">중앙</span></td><td class="mono dim">10.20.31.44</td><td>켜짐</td><td class="dim">없음</td><td class="r num">25%</td><td class="r num">47%</td><td class="r num">226 W</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="foot">
+            <span>12대 · 사용률 · 전력을 못 읽은 서버(‘—’)는 평균 · 합계에 넣지 않고 따로 셉니다</span>
+            <span class="sp">행을 누르면 서버 상세 · 머리글을 누르면 정렬</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
