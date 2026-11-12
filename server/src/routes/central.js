@@ -57,7 +57,7 @@ import { recordPull, PULL_UNAUTH_KEY } from '../central/pullStats.js';
 import { recordReject, REJECT_KIND } from '../central/ingestReject.js';
 import { notify } from '../alerts.js';
 import { ingestReport } from '../central/svcmonEdge.js';
-import { getAssignmentForAgent, markPulled, ackAssignment, svcmonAssignLoadError } from '../central/svcmonAssign.js';
+import { getAssignmentForAgent, markPulled, noteUnchangedPull, ackAssignment, svcmonAssignLoadError } from '../central/svcmonAssign.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { getAssignedGpuGuest, gpuGuestConfigLoadError } from '../central/agentGpuGuestConfig.js'; // v2.727(D-01): 손상 판정
 import { getEffectiveUsers, registryLoadError as agentUsersLoadError } from '../central/agentUsers.js';
@@ -682,6 +682,7 @@ centralRouter.get('/svcmon-config', requireCentral(), (req, res) => {
   if (settingsUnreadable(res, svcmonAssignLoadError, '성능점검 배정')) return;
   const r = getAssignmentForAgent(agent, String(req.query.sig || ''));
   if (r.assigned && !r.unchanged) markPulled(agent, r.sig);
+  else if (r.assigned && r.unchanged) noteUnchangedPull(agent, r.sig);   // v2.987(반증 R1): 시험 판정의 '적용 확인' — 메모리만
   res.json({ ok: true, ...r });
 });
 

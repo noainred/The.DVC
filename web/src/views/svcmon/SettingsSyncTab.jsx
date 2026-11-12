@@ -83,6 +83,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
   const [autoKinds, setAutoKinds] = useState(null);
   const [rp, setRp] = useState(null);   // v2.987 '법인 폴더로 정리' — { preview, result, busy, msg } · null = 닫힘
   const seq = useRef(0);
+  const rpSeq = useRef(0);   // v2.987(반증 R10): 닫은 뒤 늦게 온 미리보기 응답이 창을 다시 열지 않게
   const firstLoad = useRef(true);
 
   const load = useCallback(async () => {
@@ -159,20 +160,26 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
   // v2.987 '법인 폴더로 정리' — 설정 연동이 놓은 자리에 그대로 있고 지금은 법인을 알 수 있는 연동 대상(행의 repath)만. 미리보기 → 옮기기.
   const repathKeys = rows.filter((r) => r.repath).map((r) => r.key).slice(0, maxApply);
   const openRepath = async () => {
+    const my = ++rpSeq.current;
     setRp({ busy: true });
-    try { const r = await postJson('/svcmon/settings-sync/repath', { keys: repathKeys }); if (r?.ok === false) throw new Error(r.error || '미리보기를 받지 못했습니다.'); setRp({ preview: r.preview }); }
-    catch (e) { setRp({ msg: e.message }); }
+    try {
+      const r = await postJson('/svcmon/settings-sync/repath', { keys: repathKeys });
+      if (r?.ok === false) throw new Error(r.error || '미리보기를 받지 못했습니다.');
+      if (my === rpSeq.current) setRp({ preview: r.preview });
+    } catch (e) { if (my === rpSeq.current) setRp({ msg: e.message }); }
   };
+  const closeRepath = () => { rpSeq.current += 1; setRp(null); };
   const doRepath = async () => {
     const keys = (rp?.preview?.move || []).map((m) => m.key);
+    const my = ++rpSeq.current;
     setRp((p) => ({ ...p, busy: true, msg: '' }));
     try {
       const r = await postJson('/svcmon/settings-sync/repath', { keys, mode: 'apply' });
       if (r?.ok === false && !r.result) throw new Error(r.error || '옮기지 못했습니다.');
-      setRp({ result: r });
       onApplied?.(r);
       load();
-    } catch (e) { setRp((p) => ({ ...p, busy: false, msg: e.message })); }
+      if (my === rpSeq.current) setRp({ result: r });   // 창을 닫았어도 적용은 끝났다 — 목록은 다시 읽는다
+    } catch (e) { if (my === rpSeq.current) setRp((p) => ({ ...p, busy: false, msg: e.message })); }
   };
   const saveAuto = async () => {
     setBusy(true); setMsg('');
@@ -200,9 +207,9 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
       </div>
 
       {err && <ErrorBox error={err} />}
-      {canEdit && (c.repath || 0) > 0 && (
+      {canEdit && repathKeys.length > 0 && (
         <div className="tv-bulkbar" style={{ marginTop: 0 }}>
-          <b>{`법인 폴더로 옮길 수 있는 연동 대상 ${c.repath}건`}</b>
+          <b>{`법인 폴더로 옮길 수 있는 연동 대상 ${repathKeys.length}건`}{(c.repath || 0) > repathKeys.length ? ` (전체 ${c.repath}건 — 목록에 보이는 행만)` : ''}</b>
           <span className="sub">설정 연동이 놓은 자리에 그대로 있고 지금은 법인을 알 수 있는 대상입니다 — 사람이 옮긴 대상 · 경로 기준 엣지 배정 대상은 건드리지 않습니다.</span>
           <span className="btns"><button type="button" className="btn" disabled={busy || !!rp?.busy} onClick={openRepath}>법인 폴더로 정리…</button></span>
         </div>
@@ -449,11 +456,12 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
       )}
 
       {rp && (
-        <Modal title="법인 폴더로 정리" onClose={() => setRp(null)} width={1000}>
+        <Modal title="법인 폴더로 정리" onClose={closeRepath} width={1000}>
           <div className="tv-opts">
             <div className="muted" style={{ fontSize: 12 }}>
-              등록할 때 법인을 몰라 ‘전역’ 같은 폴더에 들어간 연동 대상을 지금 아는 법인 폴더로 옮깁니다. 대상 · 점검 id 는 그대로라 연속 횟수 · 만기 · 기록이 이어집니다.
-              담당 엣지가 있는 대상은 그 엣지 배정을 다시 굳힙니다. 경로 기준 배정 엣지가 맡는(옮기기 전이든 뒤든) 대상은 건너뜁니다 — 엣지 배포본과 경로가 달라지기 때문입니다.
+              등록할 때 법인을 몰라 ‘전역’ 같은 폴더에 들어간 연동 대상을 지금 아는 법인 폴더로 옮깁니다. 대상 · 점검 id 는 그대로라 이 포탈이 직접 재는 점검은 연속 횟수 · 만기 · 기록이 이어집니다.
+              담당 엣지가 있는 대상은 그 엣지 배정을 다시 굳힙니다 — 엣지는 점검을 다시 등록하므로 <b>엣지 쪽 연속 횟수는 새로 시작</b>하고, 실패 중인 점검은 경로가 바뀌어 다시 알릴 수 있습니다.
+              건너뜀: 경로 기준 배정 엣지가 맡는(옮기기 전이든 뒤든) 대상 · 옮길 폴더에 같은 이름의 대상이 있는 것 · 그사이 사람이 옮긴 것.
               {rows.length < (data.total || 0) ? ` 목록이 잘려(${rows.length}/${data.total}) 보이는 행만 대상입니다.` : ''}
             </div>
             {rp.busy && !rp.preview && <Loading label="미리보기" />}
@@ -492,7 +500,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
                 {(rp.result.assign || []).map((a) => (
                   <div key={a.agent} className="tv-note">{`엣지 ${a.agent}: ${a.ok ? `배정 동기화 ${a.targets}대상` : a.reason}`}</div>
                 ))}
-                <div style={{ padding: '0 12px 10px' }}><button type="button" className="btn" onClick={() => setRp(null)}>닫기</button></div>
+                <div style={{ padding: '0 12px 10px' }}><button type="button" className="btn" onClick={closeRepath}>닫기</button></div>
               </div>
             )}
           </div>

@@ -279,7 +279,8 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
       // v2.987(쉬운 등록 후속 — '법인 폴더로 정리'): 대상이 **설정 연동이 놓은 자리**(등록 때 법인의 기본 경로)에 그대로 있는데 지금 법인 판정으로는
       //   다른 폴더여야 하면(법인 판정 보강 전에 '전역' 으로 등록된 것 · DataCenter 이름이 바뀐 것) 옮길 경로를 싣는다. 사람이 옮긴 대상은 건드리지 않는다.
       const placedAt = syncPathOf({ group: SETTING_KINDS[t(x.kind)]?.group }, { label: t(o.corp) || '전역' });
-      const repath = !changed && t(st.path) === placedAt && row.path && row.path !== t(st.path) ? row.path : '';
+      //   v2.987(반증 R3): 지금 법인을 **알 때만**(corpKey — '전역' 이 아님) · 법인 등록부를 읽었을 때만 — 모르는 판정으로 거꾸로 옮기지 않는다.
+      const repath = !changed && !ctx?.corpUnreadable && row.corpKey && t(st.path) === placedAt && row.path && row.path !== t(st.path) ? row.path : '';
       rows.push({
         ...row, state: changed ? 'changed' : 'linked', ...(repath ? { repath } : {}), ...(reappeared ? { reappeared: true, reason: '설정에 다시 나타났습니다 — 적용하면 사라짐 표지를 지웁니다(설정 연동이 중지했다면 다시 켭니다).' } : {}),
         targetId: st.id, targetPath: st.path, targetName: st.name, targetEnabled: st.enabled !== false, targetAgent: t(st.agent),
@@ -552,7 +553,11 @@ async function loadCorpContext() {
     try { vcs = (await import('../mock/demo/edge.js')).demoDecorateVcenters(vcs) || vcs; } catch { /* 데모 표지 없이 */ }
     for (const v of vcs) if (t(v?.id) && t(v?.collectedBy)) vcEdge.set(t(v.id), t(v.collectedBy));
   } catch { /* 스냅샷 없이 진행 */ }
-  return { vcNames, dcNames, dcOfVc, vcAssign, dcByName, vcEdge };
+  // v2.987(반증 R3 — 재현): DataCenter · vCenter 등록부가 손상돼 못 읽으면 법인 판정이 '전역' · vCenter 이름으로 내려앉는다 — 그 판정으로 '법인 폴더로 정리' 를 제안하면
+  //   이미 정리된 대상을 거꾸로 옮긴다. 손상 판정은 settingsStatus/sources.js damaged 하나(복제 금지).
+  let corpUnreadable = false;
+  try { const { damaged } = await import('../settingsStatus/sources.js'); corpUnreadable = damaged('datacenters.json') || damaged('vcenters.json'); } catch { corpUnreadable = false; }
+  return { vcNames, dcNames, dcOfVc, vcAssign, dcByName, vcEdge, corpUnreadable };
 }
 
 /** 배정 후보 엣지 — 개별 토큰이 발급됐거나 보고 중인 엣지(routes/svcmon/edge.js candidates 와 같은 합집합). */
@@ -672,7 +677,9 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
     try {
       const cur = getTarget(c.targetId);
       if (!cur) { out.errors.push({ key: c.key, name: c.name, reason: '대상이 이미 지워졌습니다.' }); continue; }
-      const origin = { ...(cur.origin || {}), ...originOf(c.x, { label: c.corp }, now) };
+      // v2.987(반증 R7 — 재현): 출처의 법인은 '놓인 자리' 다 — 주소만 고치는 적용이 법인을 지금 판정으로 덮으면 경로는 …\전역 인 채 법인만 바뀌어
+      //   '법인 폴더로 정리' 후보에서 영구히 빠졌다. 경로를 옮기는 정리(executeRepath)만 법인을 바꾼다.
+      const origin = { ...(cur.origin || {}), ...originOf(c.x, { label: c.corp }, now), ...(cur.origin ? { corp: t(cur.origin.corp) } : {}) };
       const reEnable = !!(cur.origin?.gone && cur.origin?.goneOff);
       delete origin.gone; delete origin.goneOff;
       updateTarget(c.targetId, { host: c.host, ...(reEnable ? { enabled: true } : {}) }, { origin });
@@ -739,19 +746,30 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
 export function planRepath(rows, keys, { svcTargets = null, edgeOf = () => ({ agent: '', mode: '' }), assignUnreadable = false } = {}) {
   const want = new Set((Array.isArray(keys) ? keys : []).map(t).filter(Boolean));
   const byKey = new Map(rows.map((r) => [r.key, r]));
-  const byId = new Map((svcTargets || listTargets()).map((x) => [x.id, x]));
+  const all = svcTargets || listTargets();
+  const byId = new Map(all.map((x) => [x.id, x]));
+  // v2.987(반증 R4 — 재현): 옮길 폴더에 같은 구분 · 이름의 대상이 있으면(또는 이번에 옮길 다른 대상과 겹치면) 경로 · 이름 식별이 갈린다 —
+  //   엣지 bulkAddTargets(dedup) 가 한쪽을 건너뛰어 감시가 빠지고 ack 가 mismatch 였다. 설정 연동 적용의 nameKeyOf 와 같은 키(구분 포함).
+  const keyOf = (kind, p, name) => `${t(kind || 'infra')}\u0001${nameKeyOf(p, name)}`;
+  const taken = new Map(all.map((x) => [keyOf(x.kind, x.path, x.name), x.id]));
   const move = []; const skip = [];
   for (const k of want) {
     const r = byKey.get(k);
     if (!r || !r.repath) { skip.push({ key: k, name: r?.name || '', reason: '옮길 경로가 없습니다(지금 분류로는 이미 제자리이거나 사람이 옮긴 대상입니다).' }); continue; }
     const st = byId.get(r.targetId);
     if (!st) { skip.push({ key: k, name: r.name, reason: '대상이 이미 지워졌습니다.' }); continue; }
+    // v2.987(반증 R5 — 재현): 분류(카탈로그 읽기) 뒤 사람이 옮겼으면 그 자리를 존중한다 — 지금 경로가 분류 때 경로 · 설정 연동이 놓은 자리와 같을 때만.
+    const placedAt = syncPathOf({ group: SETTING_KINDS[t(st.origin?.kind || r.kind)]?.group }, { label: t(st.origin?.corp) || '전역' });
+    if (t(st.path) !== t(r.targetPath) || t(st.path) !== placedAt) { skip.push({ key: k, name: r.name, reason: '대상이 그사이 다른 폴더로 옮겨졌습니다 — 사람이 옮긴 자리는 건드리지 않습니다(카탈로그를 다시 읽으세요).' }); continue; }
     if (assignUnreadable) { skip.push({ key: k, name: r.name, reason: '엣지 배정 파일을 읽지 못했습니다 — 엣지 배정 탭에서 확인한 뒤 다시 하세요.' }); continue; }
+    const dest = keyOf(st.kind, r.repath, st.name);
+    if (taken.has(dest) && taken.get(dest) !== st.id) { skip.push({ key: k, name: r.name, reason: `옮길 폴더(${r.repath})에 같은 이름의 대상이 이미 있습니다 — 겹치면 엣지가 한쪽을 건너뜁니다(이름을 바꾸거나 한쪽을 정리한 뒤 옮기세요).` }); continue; }
     const before = edgeOf(st); const after = edgeOf({ ...st, path: r.repath });
     if (before.mode === 'path' || after.mode === 'path') {
       skip.push({ key: k, name: r.name, reason: `경로 기준 배정 엣지(${before.mode === 'path' ? before.agent : after.agent})가 맡는 대상입니다 — 옮기면 엣지 배포본과 경로가 달라집니다(엣지 배정 탭에서 범위를 확인한 뒤 옮기세요).` });
       continue;
     }
+    taken.delete(keyOf(st.kind, st.path, st.name)); taken.set(dest, st.id);
     move.push({ key: k, name: r.name, targetId: st.id, from: t(st.path), to: r.repath, corp: r.corp, agent: t(st.agent) });
   }
   return { move, skip };

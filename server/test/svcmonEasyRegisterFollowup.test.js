@@ -18,6 +18,7 @@ const E = await import('../src/central/svcmonEdge.js');
 const D = await import('../src/svcmon/dash.js');
 const AS = await import('../src/central/svcmonAssignSync.js');
 const P = await import('../src/svcmon/poller.js');
+const A = await import('../src/central/svcmonAssign.js');
 after(() => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* */ } });
 
 const tcp = (name, port) => ({ name, type: 'tcp', port, intervalSec: 60 });
@@ -98,6 +99,92 @@ test('배정 동기화 결과가 새 sig 를 싣는다(ack 대조 근거)', () =
   assert.ok(y);
 });
 
+/* ── 반증(v2.987) R1 · R2 · R8 — 실제 배정 · ack 경로(ackAt 주입 없이) ── */
+// 엣지 pull 흉내 — agent/svcmonConfigPull 과 같은 규칙(적용에 성공한 sig 로 묻고 unchanged 면 ack 하지 않는다) + 라우트(routes/central.js)의 확인 기록.
+function edgeSim(agent) {
+  let applied = '';
+  return (now, { errors = [] } = {}) => {
+    const d = A.getAssignmentForAgent(agent, applied);
+    if (d.unchanged) { A.noteUnchangedPull(agent, d.sig, now); return 'unchanged'; }
+    A.ackAssignment(agent, { sig: d.sig, applied: { added: d.counts.targets, newTests: d.counts.tests }, removed: 0, errors });
+    if (!errors.length) applied = d.sig;
+    return 'applied';
+  };
+}
+const realTick = (now, rows) => TRI.trialTick(now, { edgeRows: () => rows });
+
+test('반증 R1-a(재현) — 배정이 엣지가 이미 적용한 sig 로 되돌아와도(A→B→A) 변경 없음 pull 확인 뒤 판정한다(시한 거짓 실패 아님)', () => {
+  TRI._resetTrialForTest(); A._resetAssignCache();
+  const AG = 'edge-r1a';
+  const [x] = seed([{ name: 'r1a-x', path: 'R1A', agent: AG, tests: [tcp('TCP 22', 22)] }]);
+  const pull = edgeSim(AG);
+  AS.syncByAgentAssignments([AG], 'adm'); pull(Date.now());
+  const t1 = Date.now();
+  TRI.startTrial([x.id], { now: t1, deps: { executes: false } });
+  pull(t1 + 1000);   // S1 적용 · ack
+  const ack1 = A.listAssignments().find((a) => a.agent === AG).ack.at;
+  realTick(Math.max(ack1, t1) + 5000, [{ path: 'R1A', target: 'r1a-x', host: '10.0.0.1', kind: 'infra', test: 'TCP 22', status: 'bad', reply: 'refused', measuredAt: Math.max(ack1, t1) + 2000 }]);
+  assert.equal(TRI.trialOf(x.id).state, 'fail', '1차 실패 → 되돌림(S0)');
+  const t2 = Math.max(ack1, t1) + 60_000;
+  TRI.startTrial([x.id], { now: t2, deps: { executes: false } });   // 엣지는 아직 S0 을 당기지 않았다 → 배정이 다시 S1
+  assert.equal(pull(t2 + 10_000), 'unchanged', '엣지는 S1 을 그대로 갖고 있다 — ack 하지 않는다');
+  const ok = [{ path: 'R1A', target: 'r1a-x', host: '10.0.0.1', kind: 'infra', test: 'TCP 22', status: 'ok', measuredAt: t2 + 30_000 }];
+  assert.equal(realTick(t2 + 40_000, ok).judged, 1, '확인 뒤 잰 행으로 판정');
+  assert.equal(TRI.trialOf(x.id).state, 'pass');
+  assert.equal(S.getTarget(x.id).enabled, true);
+});
+
+test('반증 R1-a — 오류 ack 만 있던 sig 의 변경 없음 pull 은 확인이 아니다(검증 거부 sig 로도 묻는다)', () => {
+  A._resetAssignCache();
+  const AG = 'edge-r1err';
+  seed([{ name: 'r1e-x', path: 'R1E', agent: AG, tests: [tcp('TCP 22', 22)] }]);
+  const sig = AS.syncByAgentAssignments([AG], 'adm')[0].sig;
+  A.ackAssignment(AG, { sig, applied: { added: 0, newTests: 0 }, errors: ['검증 거부'] });
+  assert.equal(A.noteUnchangedPull(AG, sig, Date.now()), false);
+  assert.equal(A.assignReadiness(AG).confirmAt, 0);
+});
+
+test('반증 R1-b(재현) — 배정에 이미 켜진 채 실린 대상(sig 가 그대로 · ack 가 시작 전)은 시작 이후 행으로 곧바로 판정한다', () => {
+  TRI._resetTrialForTest(); A._resetAssignCache();
+  const AG = 'edge-r1b';
+  const [x] = seed([{ name: 'r1b-x', path: 'R1B', agent: AG, enabled: true, tests: [tcp('TCP 22', 22)] }]);
+  const pull = edgeSim(AG);
+  AS.syncByAgentAssignments([AG], 'adm'); pull(Date.now());
+  S.updateTarget(x.id, { enabled: false });   // PUT /targets/:id 처럼 배정을 다시 굳히지 않고 끔 — 엣지 스냅샷에는 켜져 있다
+  S.flushStore();
+  const t0 = Date.now() + 1000;
+  TRI.startTrial([x.id], { now: t0, deps: { executes: false } });
+  assert.ok(TRI.pendingTrials()[0].sig, '대기에 이번 시험이 굳힌 sig 를 남긴다');
+  const rows = [{ path: 'R1B', target: 'r1b-x', host: '10.0.0.1', kind: 'infra', test: 'TCP 22', status: 'ok', measuredAt: t0 + 20_000 }];
+  assert.equal(realTick(t0 + 30_000, rows).judged, 1);
+  assert.equal(TRI.trialOf(x.id).state, 'pass');
+});
+
+test('반증 R6 — ack 보다 앞선 측정(옛 스냅샷)은 여유 없이 거른다', () => {
+  const p = { sig: 'S2', startedAt: 1000 };
+  assert.equal(TRI.readyAtFor(p, { sig: 'S2', ackAt: 5000, confirmAt: 0 }), 5000);
+  assert.equal(TRI.readyAtFor(p, { sig: 'S2', ackAt: 500, confirmAt: 0 }), 1000, '같은 sig · 시작 전 ack = 이미 이 정의로 재는 중');
+  assert.equal(TRI.readyAtFor(p, { sig: 'S3', ackAt: 500, confirmAt: 0 }), 0, '다른 sig 의 옛 ack 는 기다린다');
+  assert.equal(TRI.readyAtFor(p, { sig: 'S3', ackAt: 0, confirmAt: 7000 }), 7000);
+  assert.equal(TRI.readyAtFor(p, null), 0);
+});
+
+test('반증 R2(재현) — v2.960 대기 파일(구분 없음)은 대상의 구분으로 채운다', () => {
+  const [x] = seed([{ name: 'r2-svc', kind: 'service', path: 'R2', agent: 'edge-r2', tests: [tcp('TCP 80', 80)] }]);
+  fs.writeFileSync(path.join(TMP, 'svcmon-trial.json'), JSON.stringify({ v: 1, pending: [{ targetId: x.id, jobId: 'j', agent: 'edge-r2', path: 'R2', name: 'r2-svc', host: '10.0.0.1', startedAt: Date.now(), deadline: Date.now() + 600_000, expect: ['TCP 80'] }] }));
+  TRI._resetTrialForTest({ reload: true });
+  assert.equal(TRI.pendingTrials()[0].kind, 'service');
+  TRI._resetTrialForTest();
+  fs.rmSync(path.join(TMP, 'svcmon-trial.json'), { force: true });
+});
+
+test('반증 R8 — 데모 엣지(보고하지 않는 엣지)는 실행 역할이면 이 포탈이 대신 시험한다', () => {
+  const tg = { id: 'd1', name: 'd1', path: 'D', host: 'h', kind: 'infra', enabled: false, agent: 'mock-Edge-Seoul', tests: [{ id: 'x', name: 'TCP', type: 'tcp', enabled: true }] };
+  const p1 = TRI.planTrial([tg], { executes: true, assignments: [], localAgents: new Set(['mock-Edge-Seoul']) });
+  assert.equal(p1.local.length, 1); assert.equal(p1.edge.length, 0);
+  assert.equal(TRI.planTrial([tg], { executes: true, assignments: [] }).edge.length, 1, '실환경 엣지는 그대로 엣지 시험');
+});
+
 /* ── 개요 조인 ── */
 test('개요 조인 — 엣지가 구분을 실으면 같은 구분의 대상에만 붙는다(옛 엣지는 경로 · 이름)', () => {
   const targets = [
@@ -139,6 +226,48 @@ test('법인 폴더로 정리 — 설정 연동이 놓은 자리(등록 때 법�
   assert.match(plan.skip.find((s) => s.key === 'set:sanswitch-ssh|s3').reason, /경로 기준 배정 엣지\(edge-fra\)/, '옮긴 뒤 경로 기준 배정에 들어가는 대상도 건너뜀');
   assert.match(plan.skip.find((s) => s.key === 'set:sanswitch-ssh|s2').reason, /옮길 경로가 없습니다/);
   assert.match(SS.planRepath(res.rows, ['set:sanswitch-ssh|s1'], { svcTargets: svc, edgeOf, assignUnreadable: true }).skip[0].reason, /엣지 배정 파일을 읽지 못했습니다/);
+});
+
+test('반증 R3 · R4 · R5(재현) — 법인을 모르거나 등록부를 못 읽으면 제안하지 않는다 · 옮길 폴더 이름 충돌 · 그사이 사람이 옮긴 대상은 건너뜀', () => {
+  const old = '설정 연동\\네트워크\\전역';
+  const fra = '설정 연동\\네트워크\\Frankfurt 법인';
+  const built = { targets: [
+    { id: 'set:sanswitch-ssh|a', kind: 'set:sanswitch-ssh', ref: 'a', name: 'SW-A', host: '10.2.1.1', port: 22, facts: { datacenterId: 'dc-fra' } },
+    { id: 'set:sanswitch-ssh|b', kind: 'set:sanswitch-ssh', ref: 'b', name: 'SW-B', host: '10.2.1.2', port: 22, facts: { datacenterId: 'dc-fra' } },
+    { id: 'set:sanswitch-ssh|c', kind: 'set:sanswitch-ssh', ref: 'c', name: 'SW-C', host: '10.2.1.3', port: 22, facts: { datacenterId: 'dc-fra' } },
+  ] };
+  const o = (k, corp) => ({ key: `set:sanswitch-ssh|${k}`, kind: 'set:sanswitch-ssh', corp, port: 22 });
+  const svc = [
+    { id: 'a1', kind: 'infra', path: old, name: 'SW-A', host: '10.2.1.1', enabled: true, tests: [], origin: o('a', '전역') },
+    { id: 'b1', kind: 'infra', path: old, name: 'SW-B', host: '10.2.1.2', enabled: true, tests: [], origin: o('b', '전역') },
+    { id: 'b2', kind: 'infra', path: fra, name: 'sw-b', host: '10.9.9.9', enabled: true, tests: [] },   // 목적 폴더에 같은 이름(대소문자만 다름)
+    { id: 'c1', kind: 'infra', path: fra, name: 'SW-C', host: '10.2.1.3', enabled: true, tests: [], origin: o('c', 'Frankfurt 법인') },
+  ];
+  // R3: 등록부 손상 · 법인 미상이면 이미 정리된 대상(c1)을 '전역' 으로 되돌리자고 하지 않는다
+  assert.equal(SS.classifyCatalog(built, svc, { ctx: { ...ctx, corpUnreadable: true } }).counts.repath, 0);
+  assert.equal(SS.classifyCatalog(built, svc, { ctx: {} }).counts.repath, 0, '법인을 모르면(corpKey 없음) 제안하지 않는다');
+  const res = SS.classifyCatalog(built, svc, { ctx });
+  assert.equal(res.counts.repath, 2);
+  const plan = SS.planRepath(res.rows, ['set:sanswitch-ssh|a', 'set:sanswitch-ssh|b'], { svcTargets: svc, edgeOf: () => ({ agent: '', mode: '' }) });
+  assert.deepEqual(plan.move.map((m) => m.targetId), ['a1']);
+  assert.match(plan.skip[0].reason, /같은 이름의 대상이 이미 있습니다/, 'R4: 겹치면 엣지가 한쪽을 건너뛴다');
+  // R5: 분류 뒤 사람이 옮겼다
+  const moved = svc.map((x) => (x.id === 'a1' ? { ...x, path: '사람이 고른 폴더' } : x));
+  assert.match(SS.planRepath(res.rows, ['set:sanswitch-ssh|a'], { svcTargets: moved, edgeOf: () => ({ agent: '', mode: '' }) }).skip[0].reason, /그사이 다른 폴더로 옮겨졌습니다/);
+});
+
+test('반증 R7(재현) — 주소 변경 적용은 출처 법인(놓인 자리)을 덮지 않는다 → 다음 분류에서 정리 후보로 남는다', () => {
+  const old = '설정 연동\\네트워크\\전역';
+  const r0 = S.bulkAddTargets([{ kind: 'infra', path: old, name: 'sw-r7', host: '10.3.1.1', enabled: true, tests: [], origin: { key: 'set:sanswitch-ssh|r7', kind: 'set:sanswitch-ssh', corp: '전역', port: 22 } }], { dedup: false, trustedOrigin: true });
+  assert.equal(r0.committed, true);
+  S.flushStore();
+  const builtNew = { targets: [{ id: 'set:sanswitch-ssh|r7', kind: 'set:sanswitch-ssh', ref: 'r7', name: 'sw-r7', host: '10.3.1.2', port: 22, facts: { datacenterId: 'dc-fra' } }] };
+  const mine = () => S.listTargets().filter((x) => x.origin?.key === 'set:sanswitch-ssh|r7');
+  const c1 = SS.classifyCatalog(builtNew, mine(), { ctx });
+  assert.equal(c1.rows[0].state, 'changed');
+  SS.executePlan(SS.planApply(c1.rows, ['set:sanswitch-ssh|r7'], { builtByKey: new Map([['set:sanswitch-ssh|r7', builtNew.targets[0]]]) }), { user: 'adm' });
+  assert.equal(mine()[0].origin.corp, '전역');
+  assert.equal(SS.classifyCatalog(builtNew, mine(), { ctx }).rows[0].repath, '설정 연동\\네트워크\\Frankfurt 법인');
 });
 
 test('법인 폴더로 정리 실행 — 경로 · 출처 법인만 바꾸고 대상 · 점검 id 는 그대로', () => {

@@ -77,8 +77,9 @@ svcmonRouter.post('/targets/:id/tests/:testId/run', canEdit, fullScopeOnly, asyn
   const x = tg?.tests.find((y) => y.id === String(req.params.testId || ''));
   if (!x) return res.status(404).json({ ok: false, error: '점검을 찾을 수 없습니다.' });
   const r = await runOnceTest(tg, x);
+  // v2.987(반증 R11): 실패(500)도 남긴다 — 점검이 일부 나갔을 수 있다. 바쁨(409)은 아무것도 실행하지 않았다.
+  if (!r.busy) logAudit({ user: req.user?.username, action: 'svcmon.test.run', target: `${tg.name} › ${x.name}`, detail: r.ok ? `${r.result.status}${r.result.ms != null ? ` · ${r.result.ms}ms` : ''}` : `실패 — ${String(r.error || '').slice(0, 120)}` });
   if (!r.ok) return res.status(r.busy ? 409 : 500).json({ ok: false, error: r.error });
-  logAudit({ user: req.user?.username, action: 'svcmon.test.run', target: `${tg.name} › ${x.name}`, detail: `${r.result.status}${r.result.ms != null ? ` · ${r.result.ms}ms` : ''}` });
   res.json({ ok: true, result: r.result });
 });
 

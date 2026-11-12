@@ -21,12 +21,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { listTargets, setEnabledMany } from './store.js';
+import { listTargets, setEnabledMany, getTarget } from './store.js';
 import { executesHere } from './poller.js';
 import { runBatch } from './pool.js';
 import { splitSvcmonDue, demoSvcmonResult } from '../mock/demo/svcmon.js';
 import { muteTarget, unmuteTarget } from './transitions.js';
-import { listAssignments as listAssignmentsForAck } from '../central/svcmonAssign.js';
+import { assignReadiness } from '../central/svcmonAssign.js';
+import { isMockMode } from '../mock/demo/flags.js';
+import { demoEdgeList } from '../mock/demo/edge.js';
 import { edgeOfTarget, syncByAgentAssignments } from '../central/svcmonAssignSync.js';
 import { listAssignments, svcmonAssignLoadError, DEFAULT_EXCEPT_TYPES } from '../central/svcmonAssign.js';
 import { getAgentRaw } from '../central/svcmonEdge.js';
@@ -81,7 +83,7 @@ export function judgeTrial(results = [], expected = 0) {
  * @param {object[]} picked 대상(저장소 원본 모양)
  * @param {{executes:boolean, assignments:object[]}} o
  */
-export function planTrial(picked = [], { executes = false, assignments = [], assignUnreadable = false, pendingIds = new Set() } = {}) {
+export function planTrial(picked = [], { executes = false, assignments = [], assignUnreadable = false, pendingIds = new Set(), localAgents = new Set() } = {}) {
   const local = []; const edge = []; const skip = [];
   for (const tg of picked) {
     if (!tg) continue;
@@ -93,6 +95,8 @@ export function planTrial(picked = [], { executes = false, assignments = [], ass
     // v2.960(반증 H1): 배정 파일을 못 읽었으면 어느 엣지가 맡는지 모른다(빈 목록을 '배정 없음' 으로 읽으면 경로 기준 엣지를 byAgent 로 오분류한다).
     if (assignUnreadable && (t(tg.agent) || !executes)) { skip.push({ ...base, agent: t(tg.agent), reason: '엣지 배정 파일을 읽지 못했습니다 — 엣지 배정 탭에서 확인한 뒤 다시 시험하세요.' }); continue; }
     const e = edgeOfTarget(tg, assignUnreadable ? [] : assignments);
+    // v2.987(반증 R8): 데모(mock)의 데모 엣지는 배정을 당기지도 보고하지도 않는다 — 엣지 시험으로 보내면 시한까지 기다린 뒤 전부 실패했다. 이 포탈이 대신 잰다.
+    if (e.agent && e.mode === 'byAgent' && executes && localAgents.has(e.agent)) { local.push({ ...base, tests, note: `데모 엣지(${e.agent})는 보고하지 않아 이 포탈이 대신 잽니다(데모 전용).` }); continue; }
     if (e.agent && e.mode === 'byAgent') {
       const a = assignments.find((x) => x.agent === e.agent);
       const except = new Set(a?.exceptTypes || DEFAULT_EXCEPT_TYPES);
@@ -132,7 +136,9 @@ function loadPending() {
     _pending = (Array.isArray(j?.pending) ? j.pending : []).filter((p) => p && t(p.targetId) && t(p.agent) && Number(p.deadline) > 0)
       // 시한은 지금 + 상한으로 자른다(반증 L4 — 파일을 손으로 고치거나 옛 번들을 복원해도 무기한 대기가 되지 않게).
       .map((p) => ({ targetId: t(p.targetId), jobId: t(p.jobId), agent: t(p.agent), path: t(p.path), name: t(p.name), host: t(p.host),
-        kind: p.kind === 'service' ? 'service' : 'infra',
+        // v2.987(반증 R2): v2.960 파일에는 구분이 없다 — 'infra' 로 가정하면 서비스 대상의 억제가 새고 판정이 0건이었다. 대상에서 채운다.
+        kind: p.kind === 'service' || p.kind === 'infra' ? p.kind : (getTarget(t(p.targetId))?.kind === 'service' ? 'service' : 'infra'),
+        sig: t(p.sig).slice(0, 64),
         startedAt: Number(p.startedAt) || 0, deadline: Math.min(Number(p.deadline), Date.now() + EDGE_DEADLINE_MAX_MS),
         expect: Array.isArray(p.expect) ? p.expect.map(t).slice(0, 200) : [], expectMs: Number(p.expectMs) || 0 }));
   } catch (e) {
@@ -229,7 +235,8 @@ export function startTrial(ids, { user = '', now = Date.now(), deps = {} } = {})
   const stale = want.filter((id) => byId.get(id)?.enabled === false && _pending.some((p) => p.targetId === id));
   if (stale.length) cancelTrials(stale, '다시 시험해 앞선 대기를 멈췄습니다.');
   const pendingIds = new Set(_pending.map((p) => p.targetId));
-  const plan = planTrial(want.map((id) => byId.get(id) || null).filter(Boolean), { executes: deps.executes ?? executesHere(), assignments, assignUnreadable, pendingIds });
+  const localAgents = deps.localAgents || (isMockMode() ? new Set(demoEdgeList().map((e) => e.name)) : new Set());
+  const plan = planTrial(want.map((id) => byId.get(id) || null).filter(Boolean), { executes: deps.executes ?? executesHere(), assignments, assignUnreadable, pendingIds, localAgents });
   const missing = want.filter((id) => !byId.has(id));
   if (plan.local.length && _localRunning) return { ok: false, busy: true, error: '다른 시험 점검이 아직 돌고 있습니다 — 끝난 뒤 다시 시도하세요.' };
 
@@ -247,13 +254,14 @@ export function startTrial(ids, { user = '', now = Date.now(), deps = {} } = {})
     const en = (deps.setEnabled || setEnabledMany)({ targets: plan.edge.map((e) => e.targetId), enabled: true });
     const sync = (deps.sync || syncByAgentAssignments)([...new Set(plan.edge.map((e) => e.agent))], user, { note: '시험 점검' });
     const failed = new Map(sync.filter((s) => !s.ok).map((s) => [s.agent, s.reason || '배정을 다시 굳히지 못했습니다.']));
+    const sigOf = new Map(sync.filter((s) => s.ok).map((s) => [s.agent, t(s.sig)]));   // v2.987(반증 R1): 이번 시험이 굳힌 sig
     const revert = [];
     for (const e of plan.edge) {
       const item = { targetId: e.targetId, name: e.name, path: e.path, host: e.host, where: 'edge', agent: e.agent, tests: [] };
       if (failed.has(e.agent)) { revert.push(e.targetId); job.items.push({ ...item, state: 'fail', reason: `엣지 배정 동기화 실패 — ${failed.get(e.agent)}` }); continue; }
       const deadline = now + edgeDeadlineMs(e.expectMs);
       muteTarget(e.path, e.name, deadline, e.kind);
-      _pending.push({ targetId: e.targetId, jobId: job.id, agent: e.agent, path: e.path, name: e.name, host: e.host, kind: e.kind, startedAt: now, deadline, expect: e.expect, expectMs: e.expectMs || 0 });
+      _pending.push({ targetId: e.targetId, jobId: job.id, agent: e.agent, path: e.path, name: e.name, host: e.host, kind: e.kind, sig: sigOf.get(e.agent) || '', startedAt: now, deadline, expect: e.expect, expectMs: e.expectMs || 0 });
       job.items.push({ ...item, state: 'wait', deadline, reason: '배정을 내려보냈습니다 — 엣지 첫 보고를 기다리는 중' });
       setLast(e.targetId, { state: 'wait', reason: '엣지 첫 보고 대기', at: now, deadline, jobId: job.id });
     }
@@ -309,13 +317,11 @@ export function trialTick(now = Date.now(), deps = {}) {
   const byAgent = new Map();
   for (const p of _pending) { if (!byAgent.has(p.agent)) byAgent.set(p.agent, []); byAgent.get(p.agent).push(p); }
   const finished = [];   // { p, state, reason, tests }
-  const ackAtOf = deps.ackAt || defaultAckAt();
+  const readyOf = deps.ready || (deps.ackAt ? (a) => ({ sig: '', ackAt: Number(deps.ackAt(a)) || 0, confirmAt: 0 }) : defaultReady());
   for (const [agent, list] of byAgent) {
     const rows = (deps.edgeRows || edgeRowsOf)(agent) || [];
-    // v2.987(쉬운 등록 후속): 엣지가 **이번 시험 뒤의 배정을 적용(ack)한 뒤** 잰 결과만 받는다 — ack 전 행은 옛 스냅샷의 측정이다.
-    //   ack 는 배정 sig 가 그때의 현재 sig 일 때만 기록되므로(svcmonAssign.ackAssignment) ack 시각 ≥ 시작이면 시작 뒤에 굳힌 배정(켜진 대상)을 적용했다.
-    //   측정은 적용 직후 틱(5초)에 돌고 ack 는 WAN 을 건너 오므로 ack 수신 시각보다 조금 앞설 수 있다 — 여유 ACK_SLACK_MS.
-    const ackAt = Number(ackAtOf(agent)) || 0;
+    // v2.987(쉬운 등록 후속): 엣지가 **이번 시험 뒤의 배정을 적용한 것이 확인된 뒤** 잰 결과만 받는다 — 그 전 행은 옛 스냅샷의 측정이다(readyAtFor).
+    const info = readyOf(agent);
     // (경로 · 대상 이름) → 대기 목록. 판정은 대기(=대상 id)마다 한다(반증 M2: 키가 같으면 앞 건을 덮었다).
     const byKey = new Map();
     for (const p of list) {
@@ -329,7 +335,8 @@ export function trialTick(now = Date.now(), deps = {}) {
       for (const w of ws) {
         // v2.960(반증 M3 — 재현): 이번 시험의 행만 — 시작 뒤에 잰 것 · 지금 주소(옛 스냅샷의 옛 주소 행이 아님) · 기대 점검 이름. 같은 점검은 가장 최근 행 하나.
         if (!(Number(r.measuredAt) >= w.p.startedAt)) continue;
-        if (!(ackAt >= w.p.startedAt) || !(Number(r.measuredAt) >= ackAt - ACK_SLACK_MS)) continue;
+        const readyAt = readyAtFor(w.p, info);
+        if (!readyAt || !(Number(r.measuredAt) >= readyAt)) continue;
         if (t(r.kind) && t(r.kind) !== w.p.kind) continue;   // v2.987: 같은 경로 · 이름의 다른 구분 대상 행(옛 엣지는 구분을 싣지 않는다 — 그때는 거르지 않는다)
         if (w.p.host && t(r.host) && t(r.host).toLowerCase() !== w.p.host.toLowerCase()) continue;
         const name = t(r.test);
@@ -417,12 +424,25 @@ export function cancelTrials(targetIds = [], reason = '사람이 사용/중지�
 }
 
 /** 엣지별 배정 ack 시각(배정 파일 — 한 판정에 한 번 읽는다). 못 읽으면 0(= 아직 적용 확인 안 됨 — 시한까지 기다린다). */
-const ACK_SLACK_MS = 10_000;
-function defaultAckAt() {
-  let m = null;
+/**
+ * v2.987(반증 R1 · R6): 이 대기 건의 행을 언제부터 받을까 — 0 이면 아직 기다린다.
+ *   ① 시험이 굳힌 sig 가 지금 sig 이고 그 sig 의 ack 가 **시작 전**이다 = 대상이 이미 켜진 채 배정에 실려 있었다(sig 가 바뀌지 않아 ack 가 남았다 —
+ *      PUT 으로 끈 대상 · 동기화 없이 처리된 대상) → 엣지는 이 정의로 계속 재고 있다: 시작 이후 행.
+ *   ② ack(지금 sig) 또는 '변경 없음' pull 확인(지금 sig 가 오류 없이 적용된 적이 있을 때만 — svcmonAssign.noteUnchangedPull)이 시작 이후 → 그 시각 이후 행.
+ *      배정이 엣지가 이미 적용한 sig 로 되돌아오면(A→B→A) 엣지는 unchanged 를 받고 다시 ack 하지 않는다 — ack 만 보면 시한까지 기다려 거짓 실패였다(R1 재현).
+ *   여유를 두지 않는다(R6: ack − 10초 여유가 옛 스냅샷 행을 받았다). measuredAt 은 중앙 수신 시각 − 경과라 엣지 시계와 무관하다 — 적용 직후 잰 행을 놓쳐도 다음 주기에 받는다.
+ */
+export function readyAtFor(p, info) {
+  if (!info) return 0;
+  if (p.sig && info.sig === p.sig && info.ackAt && info.ackAt < p.startedAt) return p.startedAt;
+  const at = Math.max(Number(info.ackAt) || 0, Number(info.confirmAt) || 0);
+  return at >= p.startedAt ? at : 0;
+}
+function defaultReady() {
+  const m = new Map();   // 틱 하나에 엣지마다 한 번
   return (agent) => {
-    if (!m) { m = new Map(); try { for (const a of listAssignmentsForAck()) m.set(a.agent, Number(a.ack?.at) || 0); } catch { /* 0 */ } }
-    return m.get(agent) || 0;
+    if (!m.has(agent)) { let v = null; try { v = assignReadiness(agent); } catch { v = null; } m.set(agent, v); }
+    return m.get(agent);
   };
 }
 
