@@ -363,7 +363,7 @@ export async function procs(ids, w, { at = 'end', maskUser = (u) => u } = {}) {
         const W = ws.reduce((a, x) => a + x, 0) || 1;
         const acc = new Map();
         snaps.forEach((s, k) => { for (const p of s.top || []) {
-          const key = `${p.pid}|${p.c}`;
+          const key = `${p.pid}|${p.sk ?? ''}|${p.c}`; // v2.981 반증 F8: 시작 tick 까지 — pid 를 다시 쓴 같은 이름 작업자를 한 줄로 섞지 않는다(세부 정보와 같은 열쇠)
           const a = acc.get(key) || { ...p, cpuSum: 0 };
           a.cpuSum += (p.cpu ?? 0) * ws[k]; a.rss = p.rss; a.th = p.th; a.et = p.et; a.u = p.u;
           acc.set(key, a);
@@ -376,7 +376,7 @@ export async function procs(ids, w, { at = 'end', maskUser = (u) => u } = {}) {
       }
       total = snaps[snaps.length - 1].n ?? null; lastAt = snaps[snaps.length - 1].t;
     }
-    const rows = list.map((p) => ({ pid: p.pid, c: p.c, u: p.u ? maskUser(p.u) : null, cpu: p.cpu ?? null, sh: p.sh ?? null, rss: p.rss ?? null, th: p.th ?? null, et: p.et ?? null }));
+    const rows = list.map((p) => ({ pid: p.pid, c: p.c, u: p.u ? maskUser(p.u) : null, cpu: p.cpu ?? null, sh: p.sh ?? null, rss: p.rss ?? null, th: p.th ?? null, et: p.et ?? null, sk: p.sk ?? null }));
     per.push({ id, total, lastAt, snaps: snaps.length, top: rows });
     for (const r of rows) all.push({ id, ...r });
     await y();
@@ -391,6 +391,67 @@ export async function procs(ids, w, { at = 'end', maskUser = (u) => u } = {}) {
   }
   const grp = [...groups.values()].map((x) => ({ name: x.name, cpu: r2(x.cpu), procs: x.procs, servers: [...x.servers] })).sort((a, b) => b.cpu - a.cpu).slice(0, 30);
   return { at, per, top: all.slice(0, TOP_N), groups: grp };
+}
+
+/**
+ * 프로세스 세부 정보(v2.981 — 사용자 '프로세스를 클릭하면 어떤 프로세스인지 · 네트워크 · 디스크 · CPU' · 시안 ⑩).
+ * 한 서버의 한 프로세스(pid + 시작 tick sk — pid 재사용을 가른다. sk 가 없는 옛 표본은 pid 만)를 구간 안의 상위 30 스냅샷에서 찾는다.
+ *  · 상위 30 밖이었던 스냅샷은 **비운다**(그 프로세스 값을 모른다 — 0 이 아니다) · 덮은 시간(cover)으로 그 사실을 말한다.
+ *  · 서버 전체 네트워크(s.rx · s.tx)는 같은 칸으로 **참고** — 리눅스는 프로세스별 네트워크 바이트를 /proc 에 남기지 않는다.
+ *  · 같은 이름: 마지막 스냅샷 안의 같은 comm(상위 30 안의 것만) + 전체 수(ns).
+ * 없으면 null(라우트 404).
+ */
+export async function procDetail(id, w, { pid, sk = null, maskUser = (u) => u } = {}) {
+  const snaps = await procSnaps(id, w.from, w.to);
+  const match = (p) => p && p.pid === pid && (sk == null || p.sk == null || p.sk === sk);
+  const hits = snaps.map((s) => ({ t: Number(s.t), p: (s.top || []).find(match) || null, s }));
+  let last = null; for (const h of hits) if (h.p) last = h;
+  if (!last) return null;
+  const pos = hits.map((h) => [null, null, h.t]);
+  const points = pointsFor(pos, w.from, w.to, 60);
+  const step = (w.to - w.from) / points;
+  const KEYS = ['cpu', 'us', 'sy', 'rss', 'io', 'rb', 'wb', 'mf'];
+  const sum = Object.fromEntries(KEYS.map((k) => [k, new Float64Array(points)]));
+  const cnt = Object.fromEntries(KEYS.map((k) => [k, new Uint16Array(points)]));
+  for (const h of hits) {
+    if (!h.p) continue;
+    const b = Math.min(points - 1, Math.max(0, Math.floor((h.t - w.from) / step)));
+    for (const k of KEYS) { const v = h.p[k]; if (isNum(v)) { sum[k][b] += v; cnt[k][b] += 1; } }
+  }
+  const series = Object.fromEntries(KEYS.map((k) => [k, Array.from(sum[k], (v, i) => (cnt[k][i] ? r2(v / cnt[k][i]) : null))]));
+  // 구간 값 — 시간 가중(v2.979 와 같은 무게). 상위 30 에 든 시간만 평균에 넣고, 든 시간 · 전체 시간을 따로 준다.
+  const ws = sampleWeights(pos);
+  let inTop = 0; let total = 0;
+  const acc = Object.fromEntries(KEYS.map((k) => [k, [0, 0]]));
+  let maxCpu = null;
+  hits.forEach((h, i) => {
+    total += ws[i];
+    if (!h.p) return;
+    inTop += ws[i];
+    for (const k of KEYS) { const v = h.p[k]; if (isNum(v)) { acc[k][0] += v * ws[i]; acc[k][1] += ws[i]; } }
+    if (isNum(h.p.cpu) && (maxCpu == null || h.p.cpu > maxCpu)) maxCpu = h.p.cpu;
+  });
+  const avg = Object.fromEntries(KEYS.map((k) => [k, acc[k][1] ? r2(acc[k][0] / acc[k][1]) : null]));
+  const p = last.p;
+  const info = {
+    pid: p.pid, c: p.c, u: p.u ? maskUser(p.u) : null, sk: p.sk ?? null, pp: p.pp ?? null, pc: p.pc ?? null, sv: p.sv ?? null,
+    ni: p.ni ?? null, st: p.st ?? null, th: p.th ?? null, et: p.et ?? null, rss: p.rss ?? null, vsz: p.vsz ?? null, ns: p.ns ?? null,
+    cpu: p.cpu ?? null, sh: p.sh ?? null, us: p.us ?? null, sy: p.sy ?? null, io: p.io ?? null, rb: p.rb ?? null, wb: p.wb ?? null, mf: p.mf ?? null,
+  };
+  const top = (last.s.top || []);
+  const rank = top.indexOf(p) + 1;
+  const sameList = top.filter((x) => x.c === p.c).slice(0, 10).map((x) => ({ pid: x.pid, u: x.u ? maskUser(x.u) : null, cpu: x.cpu ?? null, rss: x.rss ?? null, sk: x.sk ?? null, self: x === p }));
+  // 서버 전체 네트워크(참고) — 같은 칸 수로
+  const { blocks, partial } = await blocksFor(id, w.from, w.to);
+  const npos = positions(blocks, w.from, w.to);
+  const net = { rx: bucketize(npos, 's.rx', w.from, w.to, points, { fixed: true }).avg, tx: bucketize(npos, 's.tx', w.from, w.to, points, { fixed: true }).avg };
+  // 디스크 대기를 아는지: 그 스냅샷의 da(엣지 · 수집기가 실은 값) → 없으면 HELLO
+  const da = typeof last.s.da === 'boolean' ? last.s.da : (store.helloOf(id)?.dacct ?? null);
+  return {
+    id, pid: p.pid, sk: p.sk ?? null, lastAt: last.t, rank: rank > 0 ? rank : null, total: last.s.n ?? null,
+    info, points, series, avg, max: { cpu: maxCpu }, cover: { inTopMs: Math.round(inTop), totalMs: Math.round(total), snaps: hits.length, hits: hits.filter((h) => h.p).length },
+    same: { total: p.ns ?? sameList.length, list: sameList }, net, netPartial: partial, da,
+  };
 }
 
 /* ── 기록이 있는 시간 ──────────────────────────────────────────────────────── */

@@ -20,6 +20,7 @@ import {
   pctText, msText, numText, bpsText, bytesText, sizeText, metricValueText, metricUnitText, iostatText, remainText, clockText, agoShort, etText,
   levelOf, awaitLevel, cardBadge, windowCaption, sessionPill, shouldStopPolling, PIN_COLORS, REST_COLOR, RX_COLOR, TX_COLOR, bulkLine, needsRetry, AUTH_HINT, nameTitle,
   atOptions, atCaption, normAt, editFormOf, editChanges, editNotes, editResultText,
+  procDescOf, PROC_STATE_TEXT, procKey, procCoverText, procIoNote, procWaitNote, procThreadNote, PROC_NET_NOTE, PROC_ARGS_NOTE, mbsText, mbText,
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
@@ -511,6 +512,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
   const [dev, setDev] = useState('');
   const [netAll, setNetAll] = useState(false);
   const [hCpu, setHCpu] = useState(null); const [hMem, setHMem] = useState(null); const [hT, setHT] = useState(null); const [hL, setHL] = useState(null);
+  const [openProc, setOpenProc] = useState(null); // v2.981 펼친 프로세스 { k(procKey), p } — 표에서 빠져도 세부 정보는 계속 본다
   const t = main.targets.find((x) => x.id === id);
   const params = useMemo(() => ({ view: 'server', targets: id, win: tb.win, end: tb.end ?? '', at, dev }), [id, tb.win, tb.end, at, dev]);
   const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? 2_000 : 0, !!t);
@@ -552,6 +554,9 @@ function ServerDetail({ main, id, tb, now, onBack }) {
   const ylMax = niceMax(seriesMax([devC?.rAwait, devC?.wAwait]) ?? 1);
   const yl = yScale({ max: ylMax, top: 10, bottom: 176 });
   const procs = pq.data?.per?.[0]?.top || [];
+  // 카드 제목이 'CPU 상위 5' — CPU 순 5개를 먼저 고른 뒤 그 안에서 정렬한다(v2.976 부터 같은 동작). STable limit(정렬 뒤 자르기)이면
+  // 메모리 · PID 로 정렬할 때 CPU 상위 5 가 아닌 프로세스가 보여 제목과 어긋난다. 30개 전부는 '상위 30개 전부 보기'(프로세스 탭 · 정렬 뒤 자르기 없음).
+  const top5 = procs.slice(0, 5);
   return (
     <>
       <div className="fm-row fm-between">
@@ -675,14 +680,179 @@ function ServerDetail({ main, id, tb, now, onBack }) {
           </div>
           <div className="fm-card fm-flush">
             <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">CPU 를 많이 쓰는 프로세스 — 상위 5 <span className="fm-dim fm-at">· {atText}</span></h3><a href={`#/${BASE.join('/')}/procs`}>상위 30개 전부 보기</a></div>
+            <div className="fm-tblbox">
             <STable className="fm-table" minWidth={560}>
               <thead><tr><th>PID</th><th>사용자</th><th>CPU(1코어 = 100%)</th><th>명령</th></tr></thead>
-              <tbody>{procs.slice(0, 5).map((p) => <tr key={p.pid}><td className="fm-mono fm-num">{p.pid}</td><td className="fm-mono">{p.u || DASH}</td><td data-sort={p.cpu ?? null}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, p.cpu ?? 0)}%` }} /></span><span className="fm-num">{pctText(p.cpu, 1)}</span></span></td><td className="fm-mono">{p.c}</td></tr>)}</tbody>
+              <tbody>{top5.map((p) => {
+                // v2.981 줄을 누르면 그 줄 아래에 세부 정보(두 줄을 Fragment 로 묶어 정렬해도 함께 — 대상 표의 수정 칸과 같은 방식)
+                const k = procKey(id, p); const on = openProc?.k === k;
+                const toggle = () => setOpenProc(on ? null : { k, id, p });
+                return (
+                  <React.Fragment key={k}>
+                    <tr className={`fm-click ${on ? 'fm-editing' : ''}`} onClick={toggle} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } }} tabIndex={0} aria-expanded={on} title="누르면 이 프로세스의 세부 정보">
+                      <td className="fm-mono fm-num">{p.pid}</td><td className="fm-mono">{p.u || DASH}</td><td data-sort={p.cpu ?? null}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, p.cpu ?? 0)}%` }} /></span><span className="fm-num">{pctText(p.cpu, 1)}</span></span></td><td className="fm-mono">{p.c}<span className="fm-dim fm-more">{on ? ' ▴' : ' ▾'}</span></td>
+                    </tr>
+                    {on ? <tr className="fm-editrow"><td colSpan={4}><div className="fm-edbox"><ProcDetail id={id} p={p} tb={tb} onClose={() => setOpenProc(null)} /></div></td></tr> : null}
+                  </React.Fragment>
+                );
+              })}</tbody>
             </STable>
+            </div>
+            {openProc && openProc.id === id && !top5.some((p) => procKey(id, p) === openProc.k) ? (
+              <div className="fm-pad"><div className="fm-note">펼친 프로세스(PID {openProc.p.pid} · {openProc.p.c})는 지금 상위 5 에 없습니다 — 세부 정보는 계속 보여 줍니다.</div>
+                <ProcDetail id={id} p={openProc.p} tb={tb} onClose={() => setOpenProc(null)} /></div>
+            ) : null}
           </div>
         </>
       )}
     </>
+  );
+}
+
+/* ── 프로세스 세부 정보(v2.981 — 사용자 '프로세스를 클릭하면 어떤 프로세스인지 · 네트워크 · 디스크 · CPU' · 시안 ⑩) ───────────── */
+const PD_W = 360; // 카드 폭(약 330~380px)에 맞춘 viewBox — 640 이면 축 글자가 반으로 줄어 읽히지 않았다(Chromium 1440 판독)
+/** 작은 추이 차트 — series [{key, label, vals, color}] · stacked 면 쌓은 면 · 칸이 null 이면 끊는다(상위 30 밖 = 모름). */
+function PdChart({ label, series, from, to, fmt, axis, stacked = false, max = null, h = 132, nullText = '상위 30 밖 · 모름' }) {
+  const [f, setF] = useState(null);
+  const plot = { x0: 40, x1: PD_W - 6, y0: 8, y1: h - 20 };
+  const L = Math.max(0, ...series.map((s) => (s.vals || []).length));
+  let peak = 0;
+  for (let i = 0; i < L; i++) {
+    if (stacked) { let sum = 0; for (const s of series) sum += s.vals?.[i] ?? 0; peak = Math.max(peak, sum); }
+    else for (const s of series) peak = Math.max(peak, s.vals?.[i] ?? 0);
+  }
+  const top = max ?? niceMax(peak);
+  const y = yScale({ max: top, top: plot.y0, bottom: plot.y1 });
+  const layers = stacked ? stackedAreas(series.map((s) => s.vals), { x0: plot.x0, x1: plot.x1, y }) : null;
+  // 떨어진 칸(앞뒤가 비어 선이 그려지지 않는 값)은 점으로 — 상위 30 에 띄엄띄엄 든 프로세스는 선이 하나도 안 그려져 '값 없음' 처럼 보였다(Chromium 판독).
+  const xAt = (k) => (L > 1 ? plot.x0 + (k * (plot.x1 - plot.x0)) / (L - 1) : plot.x0);
+  const lone = (vals) => { const out = []; for (let k = 0; k < L; k++) if (vals?.[k] != null && vals?.[k - 1] == null && vals?.[k + 1] == null) out.push(k); return out; };
+  const dots = stacked
+    ? lone(Array.from({ length: L }, (_, k) => (series.every((s) => s.vals?.[k] != null) ? series.reduce((a, s) => a + s.vals[k], 0) : null))).map((k) => ({ key: `t${k}`, k, v: series.reduce((a, s) => a + s.vals[k], 0), color: series[series.length - 1].color }))
+    : series.flatMap((s) => lone(s.vals).map((k) => ({ key: `${s.key}${k}`, k, v: s.vals[k], color: s.color })));
+  return (
+    <div className="fm-chart-box">
+      <svg viewBox={`0 0 ${PD_W} ${h}`} role="img" aria-label={label} className="fm-chart">
+        {dots.map((o) => <circle key={o.key} cx={xAt(o.k)} cy={y(o.v)} r="2.5" fill={o.color} />)}
+        {yTicks(top).filter((_, i) => i % 2 === 0).map((v) => <g key={v}><line x1={plot.x0} x2={plot.x1} y1={y(v)} y2={y(v)} stroke="var(--fm-grid)" /><text x={plot.x0 - 6} y={y(v) + 4} className="fm-axis" textAnchor="end">{axis(v)}</text></g>)}
+        {stacked ? layers.map((d, i) => <path key={series[i].key} d={d} fill={series[i].color} fillOpacity="0.32" stroke={series[i].color} strokeWidth="1" />)
+          : series.map((s) => <path key={s.key} d={linePath(s.vals, { x0: plot.x0, x1: plot.x1, y })} fill="none" stroke={s.color} strokeWidth="2" />)}
+        <text x={plot.x0} y={h - 4} className="fm-axis">{clockText(from)}</text><text x={plot.x1} y={h - 4} className="fm-axis" textAnchor="end">{clockText(to)}</text>
+        <HoverMarks f={f} plot={plot} y={y} series={series.map((s) => ({ key: s.key, vals: s.vals, color: s.color }))} />
+        <HoverRect plot={plot} onFrac={setF} />
+      </svg>
+      <HoverTip f={f} vbw={PD_W} plot={plot} time={hoverTime(f, series.map((s) => s.vals), from, to)}
+        rows={series.map((s) => ({ key: s.key, label: s.label, color: s.color, value: valueAtFrac(s.vals, f) == null ? nullText : fmt(valueAtFrac(s.vals, f)) }))} />
+    </div>
+  );
+}
+
+/** 줄을 누르면 그 줄 아래에 펼치는 세부 정보(한 서버 · 한 프로세스). 시간 범위는 위쪽 시간 띠를 따른다. */
+function ProcDetail({ id, p, tb, server, onClose }) {
+  const live = tb.end == null;
+  const params = useMemo(() => ({ target: id, pid: p.pid, sk: p.sk ?? '', win: tb.win, end: tb.end ?? '' }), [id, p.pid, p.sk, tb.win, tb.end]);
+  const q = usePoll('/tools/focus-mon/proc', params, live ? 5_000 : 0, true);
+  const d = q.fresh ? q.data : null;
+  const head = (
+    <div className="fm-row fm-between fm-pd-head">
+      <div className="fm-row"><b className="fm-mono">{p.c}</b><span className="fm-dim fm-num">PID {p.pid}</span>{d?.info?.sv ? <span className="fm-badge ok" title="systemd 서비스(cgroup)">{d.info.sv}</span> : null}
+        {d?.rank ? <span className="fm-dim">CPU {d.rank}위{d.total ? ` / 프로세스 ${d.total}개` : ''}</span> : null}{server ? <span className="fm-dim">· {server}</span> : null}</div>
+      <div className="fm-row">{d?.lastAt ? <span className="fm-dim">마지막 표본 {agoShort(d.lastAt, Date.now())}</span> : null}<button type="button" className="fm-btn sm" onClick={onClose}>닫기</button></div>
+    </div>
+  );
+  const nf = Number(q.error?.status) === 404;
+  if (q.error && !d) {
+    return <div className="fm-pd">{head}{nf ? <div className="fm-ban">{q.error?.body?.reason || '이 구간의 CPU 상위 30 에 이 프로세스가 없습니다.'} <button type="button" className="fm-btn sm" onClick={q.reload}>다시 묻기</button></div> : <ErrorBox error={q.error} />}</div>;
+  }
+  if (!d) return <div className="fm-pd">{head}<Loading /></div>;
+  const i = d.info; const S = d.series;
+  const desc = procDescOf(i.c);
+  const cover = procCoverText(d.cover);
+  const ioNote = procIoNote(i);
+  const waitNote = procWaitNote(d.da);
+  const hasIo = (S.rb || []).some((v) => v != null) || (S.wb || []).some((v) => v != null);
+  // 반증 F11: 옛 엣지(사용자/커널 칸 없음)는 CPU 합 한 줄로 — 쌓은 면만 그리면 차트가 비었다
+  const splitCpu = (S.us || []).some((v) => v != null) && (S.sy || []).some((v) => v != null);
+  // 반증 F7: 404(상위 30 에서 빠짐)를 받으면 폴링이 멈춘다 — 앞서 받은 값이 남아 있으면 멈춘 값이라고 밝힌다
+  const staleBan = q.error && d ? <div className="fm-ban w">{nf ? '이 프로세스가 지금 구간의 CPU 상위 30 에 없어 자동으로 다시 묻지 않습니다 — 아래는 마지막으로 받은 값입니다.' : '새 값을 받지 못했습니다 — 아래는 마지막으로 받은 값입니다.'} <button type="button" className="fm-btn sm" onClick={q.reload}>다시 묻기</button></div> : null;
+  const thNote = procThreadNote(i.th);
+  const kv = [
+    ['이름', <><span className="fm-mono">{i.c}</span>{desc ? <small className="fm-dim"> — 이름으로 본 설명: {desc}</small> : <small className="fm-dim"> — 이름으로 아는 설명이 없습니다</small>}</>],
+    ['서비스', i.sv ? <span className="fm-mono">{i.sv}</span> : <span className="fm-dim">{DASH} (서비스로 띄운 프로세스가 아니거나 커널 스레드)</span>],
+    ['부모', i.pp ? <><span className="fm-num">PID {i.pp}</span>{i.pc ? <span className="fm-mono"> · {i.pc}</span> : null}</> : DASH],
+    ['사용자', i.u ? <span className="fm-mono">{i.u}</span> : DASH],
+    ['상태', i.st ? `${PROC_STATE_TEXT[i.st] || i.st} (${i.st})${thNote ? ' · 주 스레드' : ''}` : DASH],
+    ['실행 시간', etText(i.et)],
+    ['스레드', i.th ?? DASH],
+    ['nice', i.ni ?? DASH],
+    ['같은 이름', i.ns != null ? `${i.ns}개` : DASH],
+  ];
+  const same = d.same?.list || [];
+  return (
+    <div className="fm-pd">
+      {head}
+      {staleBan}
+      {cover ? <div className="fm-note">{cover}</div> : null}
+      <div className="fm-pd-grid">
+        <div className="fm-card">
+          <h3 className="fm-h3">어떤 프로세스인가</h3>
+          <dl className="fm-kv">{kv.map(([k, v]) => <React.Fragment key={k}><dt>{k}</dt><dd>{v}</dd></React.Fragment>)}</dl>
+          <div className="fm-note">{PROC_ARGS_NOTE}</div>
+        </div>
+        <div className="fm-card">
+          <div className="fm-row fm-between"><h3 className="fm-h3">CPU</h3><span className="fm-big fm-num">{pctText(i.cpu, 1)}</span></div>
+          <div className="fm-row"><span className="fm-lg"><i style={{ background: RX_COLOR }} />사용자 <b>{pctText(i.us, 1)}</b></span><span className="fm-lg"><i style={{ background: TX_COLOR }} />커널 <b>{pctText(i.sy, 1)}</b></span>
+            <span className="fm-dim">서버 전체 대비 {pctText(i.sh, 2)} · 1코어 = 100%</span></div>
+          {splitCpu ? (
+            <PdChart label="이 프로세스의 CPU 추이 — 사용자 · 커널을 쌓은 면" stacked from={d.from} to={d.to} fmt={(v) => pctText(v, 1)} axis={(v) => `${Math.round(v)}`}
+              series={[{ key: 'us', label: '사용자', vals: S.us, color: RX_COLOR }, { key: 'sy', label: '커널', vals: S.sy, color: TX_COLOR }]} />
+          ) : (
+            <PdChart label="이 프로세스의 CPU 추이" from={d.from} to={d.to} fmt={(v) => pctText(v, 1)} axis={(v) => `${Math.round(v)}`}
+              series={[{ key: 'cpu', label: 'CPU', vals: S.cpu, color: RX_COLOR }]} />
+          )}
+          <div className="fm-row"><span className="fm-lg">구간 평균 <b>{pctText(d.avg.cpu, 1)}</b></span><span className="fm-lg">최고 <b>{pctText(d.max.cpu, 1)}</b></span><span className="fm-dim">상위 30 에 든 시간만</span></div>
+        </div>
+        <div className="fm-card">
+          <div className="fm-row fm-between"><h3 className="fm-h3">메모리</h3><span className="fm-big fm-num">{mbText(i.rss)}</span></div>
+          <PdChart label="이 프로세스의 실제 메모리(RSS) 추이" from={d.from} to={d.to} fmt={mbText} axis={(v) => (v >= 1024 ? `${+(v / 1024).toFixed(1)}G` : `${Math.round(v)}M`)}
+            series={[{ key: 'rss', label: 'RSS', vals: S.rss, color: RX_COLOR }]} />
+          <div className="fm-row"><span className="fm-lg">가상 메모리 <b>{mbText(i.vsz)}</b></span><span className="fm-lg">major fault <b>{i.mf == null ? DASH : `${numText(i.mf, 1)}/초`}</b></span></div>
+        </div>
+        <div className="fm-card">
+          <h3 className="fm-h3">디스크</h3>
+          {hasIo ? (
+            <>
+              <div className="fm-row"><span className="fm-lg"><i style={{ background: RX_COLOR }} />읽기 <b>{mbsText(i.rb)}</b></span><span className="fm-lg"><i style={{ background: TX_COLOR }} />쓰기 <b>{mbsText(i.wb)}</b></span></div>
+              <PdChart label="이 프로세스의 디스크 읽기 · 쓰기 추이" from={d.from} to={d.to} fmt={mbsText} axis={(v) => numText(v, v >= 10 ? 0 : 1)}
+                series={[{ key: 'rb', label: '읽기', vals: S.rb, color: RX_COLOR }, { key: 'wb', label: '쓰기', vals: S.wb, color: TX_COLOR }]} />
+            </>
+          ) : <div className="fm-ban">{ioNote}</div>}
+          {d.da === true ? (
+            <>
+              <div className="fm-row"><span className="fm-lg"><i style={{ background: '#c98500' }} />디스크를 기다린 시간 <b>{pctText(i.io, 1)}</b></span><span className="fm-dim">이 프로세스가 블록 입출력을 기다린 시간의 비율</span></div>
+              {thNote ? <div className="fm-note">{thNote}</div> : null}
+              <PdChart label="이 프로세스가 디스크를 기다린 시간 비율 추이" from={d.from} to={d.to} fmt={(v) => pctText(v, 1)} axis={(v) => `${Math.round(v)}`}
+                series={[{ key: 'io', label: '디스크 대기', vals: S.io, color: '#c98500' }]} h={110} />
+            </>
+          ) : <div className="fm-note">{waitNote}</div>}
+        </div>
+        <div className="fm-card">
+          <h3 className="fm-h3">네트워크</h3>
+          <div className="fm-ban">{PROC_NET_NOTE}</div>
+          <div className="fm-row"><span className="fm-lg"><i style={{ background: RX_COLOR }} />서버 수신</span><span className="fm-lg"><i style={{ background: TX_COLOR }} />서버 송신</span></div>
+          <PdChart label="같은 시간의 서버 전체 네트워크(참고)" from={d.from} to={d.to} fmt={bpsText} axis={(v) => (v >= 1e9 ? `${+(v / 1e9).toFixed(1)}G` : v >= 1e6 ? `${Math.round(v / 1e6)}M` : v >= 1e3 ? `${Math.round(v / 1e3)}K` : `${Math.round(v)}`)}
+            series={[{ key: 'rx', label: '서버 수신', vals: d.net.rx, color: RX_COLOR }, { key: 'tx', label: '서버 송신', vals: d.net.tx, color: TX_COLOR }]} h={110} nullText="수집 없음" />
+        </div>
+        <div className="fm-card fm-flush">
+          <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">같은 이름의 프로세스</h3><span className="fm-dim">{i.ns != null ? `전체 ${i.ns}개 가운데 ` : ''}상위 30 안의 {same.length}개</span></div>
+          <STable className="fm-table" minWidth={360}>
+            <thead><tr><th className="fm-r">PID</th><th>사용자</th><th>CPU</th><th className="fm-r">메모리</th></tr></thead>
+            <tbody>{same.map((x) => <tr key={x.pid} className={x.self ? 'fm-editing' : undefined}><td className="fm-r fm-mono fm-num">{x.pid}{x.self ? <span className="fm-badge off">이 프로세스</span> : null}</td><td className="fm-mono">{x.u || DASH}</td><td data-sort={x.cpu ?? null} className="fm-num">{pctText(x.cpu, 1)}</td><td className="fm-r fm-num" data-sort={x.rss ?? null}>{mbText(x.rss)}</td></tr>)}</tbody>
+          </STable>
+        </div>
+      </div>
+      {d.usersMasked ? <div className="fm-note">사용자 이름은 관리자에게만 보입니다.</div> : null}
+    </div>
   );
 }
 
@@ -692,6 +862,7 @@ function Procs({ main, ids, tb, onOpen }) {
   const [at, setAt] = useState('end');
   const [basis, setBasis] = useState('core');
   const [find, setFind] = useState('');
+  const [open, setOpen] = useState(null); // v2.981 펼친 프로세스 { k(procKey), id, p } — 목록에서 빠져도(찾기 · 상위 밖) 세부 정보는 계속 본다
   const params = useMemo(() => ({ targets: ids.join(','), win: tb.win, end: tb.end ?? '', at }), [ids, tb.win, tb.end, at]);
   const q = usePoll('/tools/focus-mon/procs', params, tb.end == null ? 5_000 : 0, ids.length > 0);
   const tById = useMemo(() => new Map(main.targets.map((t) => [t.id, t])), [main.targets]);
@@ -702,19 +873,27 @@ function Procs({ main, ids, tb, onOpen }) {
   const topCpu = Math.max(1, ...((d?.top || []).map((p) => cpuOf(p) ?? 0)));
   const rowsAll = (d?.top || []).filter(ok);
   const head = <thead><tr><th>#</th><th>서버</th><th className="fm-r">PID</th><th>사용자</th><th>CPU{basis === 'core' ? '(1코어 = 100%)' : '(서버 전체 대비)'}</th><th className="fm-r">메모리</th><th className="fm-r">스레드</th><th className="fm-r">실행 시간</th><th>명령(comm)</th></tr></thead>;
-  const prow = (p, i, id) => (
-    <tr key={`${id}-${p.pid}-${i}`}>
+  const prow = (p, i, id) => {
+    // v2.981 줄을 누르면 그 줄 아래에 세부 정보(서버 이름 단추는 서버 상세로 — 줄 펼침과 겹치지 않게 전파를 막는다)
+    const k = procKey(id, p); const on = open?.k === k;
+    const toggle = () => setOpen(on ? null : { k, id, p });
+    return (
+    <React.Fragment key={`${k}-${i}`}>
+    <tr className={`fm-click ${on ? 'fm-editing' : ''}`} onClick={toggle} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(); } }} tabIndex={0} aria-expanded={on} title="누르면 이 프로세스의 세부 정보">
       <td className="fm-dim fm-num">{i + 1}</td>
-      <td><button type="button" className="fm-linkbtn" onClick={() => onOpen(id)} title={nameTitle(tById.get(id))}>{tById.get(id)?.name}</button></td>
+      <td><button type="button" className="fm-linkbtn" onClick={(e) => { e.stopPropagation(); onOpen(id); }} title={nameTitle(tById.get(id))}>{tById.get(id)?.name}</button></td>
       <td className="fm-r fm-mono fm-num">{p.pid}</td>
       <td className="fm-mono">{p.u || DASH}</td>
       <td data-sort={cpuOf(p) ?? null}><span className="fm-meter"><span className="t"><span className="f" style={{ width: `${Math.min(100, ((cpuOf(p) ?? 0) / topCpu) * 100)}%` }} /></span><span className="fm-num">{pctText(cpuOf(p), 1)}</span></span></td>
       <td className="fm-r fm-num" data-sort={p.rss ?? null}>{p.rss == null ? DASH : `${numText(p.rss >= 1024 ? p.rss / 1024 : p.rss, 1)} ${p.rss >= 1024 ? 'GB' : 'MB'}`}</td>
       <td className="fm-r fm-num">{p.th ?? DASH}</td>
       <td className="fm-r fm-num fm-dim" data-sort={p.et ?? null}>{etText(p.et)}</td>
-      <td className="fm-mono">{p.c}</td>
+      <td className="fm-mono">{p.c}<span className="fm-dim fm-more">{on ? ' ▴' : ' ▾'}</span></td>
     </tr>
-  );
+    {on ? <tr className="fm-editrow"><td colSpan={9}><div className="fm-edbox"><ProcDetail id={id} p={p} tb={tb} server={tById.get(id)?.name} onClose={() => setOpen(null)} /></div></td></tr> : null}
+    </React.Fragment>
+    );
+  };
   return (
     <>
       <div className="fm-row fm-between">
@@ -738,15 +917,19 @@ function Procs({ main, ids, tb, onOpen }) {
       ) : mode === 'per' ? d.per.map((s) => (
         <div key={s.id} className="fm-card fm-flush">
           <div className="fm-pad fm-row fm-between"><h3 className="fm-h3">{tById.get(s.id)?.name}</h3><span className="fm-dim">프로세스 {s.total ?? DASH}개 · 표본 {agoShort(s.lastAt, Date.now())}</span></div>
-          <STable className="fm-table" minWidth={900}>{head}<tbody>{s.top.filter(ok).map((p, i) => prow(p, i, s.id))}</tbody></STable>
+          <div className="fm-tblbox"><STable className="fm-table" minWidth={900}>{head}<tbody>{s.top.filter(ok).map((p, i) => prow(p, i, s.id))}</tbody></STable></div>
         </div>
       )) : (
         <div className="fm-card fm-flush">
           <div className="fm-pad fm-row fm-between"><h3 className="fm-h3">CPU 를 많이 쓰는 프로세스 — {ids.length}대 통합 상위 30</h3><span className="fm-dim">서버마다 상위 30개를 받아 합친 뒤 다시 30개 · 제목을 누르면 정렬</span></div>
-          <STable className="fm-table" minWidth={900}>{head}<tbody>{rowsAll.map((p, i) => prow(p, i, p.id))}</tbody></STable>
+          <div className="fm-tblbox"><STable className="fm-table" minWidth={900}>{head}<tbody>{rowsAll.map((p, i) => prow(p, i, p.id))}</tbody></STable></div>
         </div>
       )}
-      <div className="fm-note">CPU = /proc/&lt;pid&gt;/stat 의 누적 CPU 시간이 약 5초 동안 늘어난 양입니다(top 과 같은 원리 — 스레드가 여럿이면 100% 를 넘습니다). 표본 사이에 생겼다 사라진 프로세스는 보이지 않습니다. 명령은 프로세스 이름(comm)만 모읍니다 — 인자 · 환경은 읽지 않습니다(인자에 비밀번호가 흔합니다).{d?.usersMasked ? ' 사용자 이름은 관리자에게만 보입니다.' : ''} 이 화면은 보기만 합니다.</div>
+      {open && d && mode !== 'group' && !(mode === 'per' ? d.per.some((x) => x.top.filter(ok).some((p) => procKey(x.id, p) === open.k)) : rowsAll.some((p) => procKey(p.id, p) === open.k)) ? (
+        <div className="fm-card"><div className="fm-note">펼친 프로세스({tById.get(open.id)?.name} · PID {open.p.pid} · {open.p.c})는 지금 표에 없습니다(찾기 · 상위 30 밖) — 세부 정보는 계속 보여 줍니다.</div>
+          <ProcDetail id={open.id} p={open.p} tb={tb} server={tById.get(open.id)?.name} onClose={() => setOpen(null)} /></div>
+      ) : null}
+      <div className="fm-note">줄을 누르면 그 프로세스의 세부 정보(어떤 프로세스인지 · CPU · 메모리 · 디스크 · 네트워크)가 그 줄 아래에 펼쳐집니다. CPU = /proc/&lt;pid&gt;/stat 의 누적 CPU 시간이 약 5초 동안 늘어난 양입니다(top 과 같은 원리 — 스레드가 여럿이면 100% 를 넘습니다). 표본 사이에 생겼다 사라진 프로세스는 보이지 않습니다. 명령은 프로세스 이름(comm)만 모읍니다 — 인자 · 환경은 읽지 않습니다(인자에 비밀번호가 흔합니다).{d?.usersMasked ? ' 사용자 이름은 관리자에게만 보입니다.' : ''} 이 화면은 보기만 합니다.</div>
     </>
   );
 }

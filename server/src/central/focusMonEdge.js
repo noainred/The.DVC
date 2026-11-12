@@ -39,6 +39,7 @@ export function cleanHello(h) {
     kernel: strOf(h.kernel, 120), isLinux: h.isLinux === true, release: strOf(h.release, 120),
     rhelMajor: typeof h.rhelMajor === 'string' && /^\d{1,2}\.\d{1,2}$/.test(h.rhelMajor) ? h.rhelMajor : null,
     tck: n(h.tck), page: n(h.page), ncpu: n(h.ncpu), hidepid: h.hidepid === true ? true : h.hidepid === false ? false : null,
+    dacct: h.dacct === true ? true : h.dacct === false ? false : null, // v2.981 지연 집계(디스크 대기)
     hostname: strOf(h.hostname, 64).replace(/[^A-Za-z0-9._-]/g, ''),
   };
 }
@@ -65,15 +66,37 @@ export function cleanSample(s) {
   };
 }
 
+/** comm(프로세스 이름) — 원격 awk 가 바꾼 안전한 글자만. */
+const COMM_RE = /^[A-Za-z0-9._:@+*-]{1,64}$/;
+/** 서비스 이름(v2.981) — parse.js UNIT_RE 와 같은 규칙(.service · .scope · 점 둘 없음). */
+const UNIT_OK = (v) => typeof v === 'string' && /^(?!.*\.\.)[A-Za-z0-9@_:-][A-Za-z0-9@._:-]{0,95}$/.test(v) && /\.(service|scope)$/.test(v);
+/** 0 이상 · 상한 이하 수(음수 · 글자 · 무한 → null). */
+const nn = (v, max = 1e12) => { const x = n(v); return x == null || x < 0 || x > max ? null : x; };
+/** 0 이상 정수 · 상한(반증 F9: sk 1.5 · 1e21 이 그대로 통과해 화면이 400 을 5초마다 되풀이했다). */
+const ii = (v, max) => { const x = n(v); return x != null && Number.isInteger(x) && x >= 0 && x <= max ? x : null; };
+/** 엣지가 실은 새 칸(v2.981) — 값이 있는 것만(null 칸은 싣지 않는다 · 반증 F10 DB 크기). */
+function procExtra(x) {
+  const o = {
+    us: nn(x.us, 1e6), sy: nn(x.sy, 1e6), pp: ii(x.pp, 4_194_304), pc: typeof x.pc === 'string' && COMM_RE.test(x.pc) ? x.pc : null,
+    sv: UNIT_OK(x.sv) ? x.sv : null, ns: ii(x.ns, 1e6),
+    ni: (() => { const v = n(x.ni); return v != null && Number.isInteger(v) && v >= -20 && v <= 19 ? v : null; })(),
+    st: typeof x.st === 'string' && /^[A-Za-z]$/.test(x.st) ? x.st : null,
+    vsz: nn(x.vsz, 1e9), mf: nn(x.mf, 1e9), io: nn(x.io, 1e4), rb: nn(x.rb, 1e7), wb: nn(x.wb, 1e7), sk: ii(x.sk, Number.MAX_SAFE_INTEGER),
+  };
+  for (const k of Object.keys(o)) if (o[k] == null) delete o[k];
+  return o;
+}
 export function cleanProcs(p) {
   if (!isObj(p)) return null;
   return {
     n: n(p.n),
     top: arr(p.top, TOP_N).filter(isObj).map((x) => ({
-      pid: n(x.pid), c: typeof x.c === 'string' && /^[A-Za-z0-9._:@+*-]{1,64}$/.test(x.c) ? x.c : '?',
+      pid: n(x.pid), c: typeof x.c === 'string' && COMM_RE.test(x.c) ? x.c : '?',
       u: typeof x.u === 'string' && /^[A-Za-z0-9._@+-]{1,32}$/.test(x.u) ? x.u : null,
       cpu: n(x.cpu), sh: n(x.sh), rss: n(x.rss), th: n(x.th), et: n(x.et),
+      ...procExtra(x), // v2.981 프로세스 세부 정보 — 아는 칸만 · 형식 · 범위 · 옛 엣지는 없음(읽는 쪽 null)
     })).filter((x) => x.pid != null),
+    da: p.da === true ? true : p.da === false ? false : null,
   };
 }
 
