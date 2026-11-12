@@ -45,8 +45,9 @@ const fullScopeOnly = fullScopeOnlyWith('서버 집중 모니터링은 전체 �
 const fullRwOnly = fullReadWriteScopeOnlyWith('서버 집중 모니터링의 대상 · 수집 변경은 조회 · 쓰기 모두 전체 범위인 계정만 할 수 있습니다.');
 const EDGE_ONLINE_MS = 60_000;
 /** 감사 기록용 바뀐 칸 글(v2.980) — 'IP 10.0.0.1 → 10.0.0.2 · 담당 노드 중앙 → 엣지 NJ'. 값은 입력 검사를 지난 짧은 글자뿐이다(비밀 칸 없음). */
-const CHANGE_LABEL = { name: '이름', host: 'IP', port: '포트', username: '계정', agent: '담당 노드' };
-const changesText = (changes = []) => changes.map((c) => `${CHANGE_LABEL[c.k] || c.k} ${c.k === 'agent' ? (c.from ? `엣지 ${c.from}` : '중앙') : c.from} → ${c.k === 'agent' ? (c.to ? `엣지 ${c.to}` : '중앙') : c.to}`).join(' · ');
+const CHANGE_LABEL = { name: '이름', host: 'IP', port: '포트', username: '계정', agent: '담당 노드', group: '그룹' };
+const changeVal = (k, v) => (k === 'agent' ? (v ? `엣지 ${v}` : '중앙') : k === 'group' ? (v || '그룹 없음') : v);
+const changesText = (changes = []) => changes.map((c) => `${CHANGE_LABEL[c.k] || c.k} ${changeVal(c.k, c.from)} → ${changeVal(c.k, c.to)}`).join(' · ');
 const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 
 /**
@@ -93,6 +94,16 @@ function visibleTargets(req) {
   return isDemoGuest(req.user) ? all.filter((t) => t.demo) : all;
 }
 function visibleById(req) { return new Map(visibleTargets(req).map((t) => [t.id, t])); }
+/**
+ * 그룹 보기(v2.982 — 사용자 '등록된 서버를 그룹별로 분류해서 보는 기능'): 목록 순서(만든 순서 · 빈 그룹 포함) + 보이는 서버 수.
+ * own = 등록부의 그룹(이름 바꾸기 · 지우기 가능) · 데모 서버만 쓰는 그룹은 own false. 데모 계정에는 등록부 그룹 이름을 싣지 않는다(보이는 서버의 그룹만).
+ */
+function groupsView(req, targets) {
+  const own = isDemoGuest(req.user) ? [] : registry.listGroups().map((g) => g.name);
+  const names = [...own];
+  for (const t of targets) if (t.group && !names.includes(t.group)) names.push(t.group);
+  return { list: names.map((name) => ({ name, n: targets.filter((t) => t.group === name).length, own: own.includes(name) })), none: targets.filter((t) => !t.group).length, max: registry.MAX_GROUPS };
+}
 
 /** 쿼리 targets(쉼표) → 보이는 대상 id(최대 40 · 중복 제거). 없는 id 는 조용히 빼지 않고 missing 으로 센다. */
 function pickIds(req, max = 40) {
@@ -155,6 +166,7 @@ api.get('/tools/focus-mon', adminOnly, fullScopeOnly, async (req, res) => {
     ...(isDemoGuest(req.user) ? {} : { bulkTest: bulkProgress(bulkJob(), store.testOf, now) }),
     iostat: { cols: IOSTAT_COLS, names: IOSTAT_NAME },
     ...demoMask(req, { nodes, targets, sessions: store.listSessions(now), ended: store.endedSessions() }),
+    groups: groupsView(req, targets),
     recorder: recorderStatus(), db: { available: dbOk, error: db.dbError() || null, oldestMinute: dbOk ? await db.oldestMinute() : null },
     mem: store.memStats(), local: serviceStatus().running,
   });
@@ -187,6 +199,40 @@ api.delete('/tools/focus-mon/targets/:id', adminOnly, fullRwOnly, demoBlockWrite
   const r = registry.removeTarget(req.params.id);
   if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 503).json(r);
   logAudit({ user: req.user?.username, action: 'focus-mon.target.remove', target: t?.name || req.params.id, ip: req.ip });
+  res.json(r);
+});
+
+/* ── 그룹(v2.982) — 수집 시작과 같은 문(admin · 조회 · 쓰기 전체 범위 · 데모 차단) · 감사 ─────────────── */
+const groupStatus = (r) => (r.code === 'not-found' ? 404 : r.code === 'registry-unreadable' ? 503 : r.code === 'duplicate' ? 409 : 400);
+api.post('/tools/focus-mon/groups', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+  if (registryUnreadable(res)) return;
+  const r = registry.createGroup(req.body?.name);
+  if (!r.ok) return res.status(groupStatus(r)).json(r);
+  logAudit({ user: req.user?.username, action: 'focus-mon.group.add', target: r.group, ip: req.ip });
+  res.json(r);
+});
+api.put('/tools/focus-mon/groups/:name', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+  if (registryUnreadable(res)) return;
+  const r = registry.renameGroup(req.params.name, req.body?.name);
+  if (!r.ok) return res.status(groupStatus(r)).json(r);
+  logAudit({ user: req.user?.username, action: 'focus-mon.group.rename', target: r.group, detail: `${String(req.params.name).slice(0, 32)} → ${r.group} · 서버 ${r.moved}대`, ip: req.ip });
+  res.json(r);
+});
+api.delete('/tools/focus-mon/groups/:name', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+  if (registryUnreadable(res)) return;
+  const r = registry.deleteGroup(req.params.name);
+  if (!r.ok) return res.status(groupStatus(r)).json(r);
+  logAudit({ user: req.user?.username, action: 'focus-mon.group.remove', target: String(req.params.name).slice(0, 32), detail: `서버 ${r.freed}대는 그룹 없음으로`, ip: req.ip });
+  res.json(r);
+});
+/** 서버 옮기기 — ids 를 group 으로('' = 그룹 없음). 보이는(등록부) 서버만 — 데모 서버 · 없는 id 는 missing 으로 센다. */
+api.post('/tools/focus-mon/targets/group', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+  if (registryUnreadable(res)) return;
+  const raw = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, registry.MAX_TARGETS) : [];
+  if (!raw.length) return res.status(400).json({ ok: false, code: 'no-targets', reason: '옮길 서버가 없습니다.' });
+  const r = registry.setTargetsGroup(raw, typeof req.body?.group === 'string' ? req.body.group : '');
+  if (!r.ok) return res.status(groupStatus(r)).json(r);
+  if (r.moved) logAudit({ user: req.user?.username, action: 'focus-mon.group.move', target: r.group || '그룹 없음', detail: `서버 ${r.moved}대`, ip: req.ip });
   res.json(r);
 });
 

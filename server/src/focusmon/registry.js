@@ -26,6 +26,11 @@ const FILE = () => path.join(config.configDir, 'focusmon-targets.json');
 export const MAX_TARGETS = 500;
 export const NAME_RE = /^[A-Za-z0-9가-힣][A-Za-z0-9가-힣._ -]{0,63}$/;
 export const USER_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/;
+/** 서버 그룹(v2.982 — 사용자 '등록된 서버를 그룹별로 분류해서 보는 기능'): 서버마다 하나(폴더) · '' = 그룹 없음 · 이름은 서버 이름과 같은 글자 1~32자 · 최대 50개. */
+export const GROUP_RE = /^[A-Za-z0-9가-힣][A-Za-z0-9가-힣._ -]{0,31}$/;
+export const MAX_GROUPS = 50;
+// 32자를 넘는 이름은 자르지 않고 버린다(만들기 · 수정의 거절과 같은 규칙 — 잘라 쓰면 앞 32자가 같은 두 이름이 한 그룹이 된다)
+const normGroup = (v) => { const g = typeof v === 'string' ? v.trim().slice(0, 64) : ''; return GROUP_RE.test(g) ? g : ''; };
 const AGENT_RE = /^[^\s/\\]{1,128}$/;
 
 export const SETTING_RANGES = Object.freeze({
@@ -47,7 +52,7 @@ function normTarget(t) {
   const port = Number(t.port);
   return {
     id, name: s(t.name, 64), host: s(t.host, 15), port: Number.isInteger(port) && port > 0 && port < 65536 ? port : 22,
-    username: s(t.username, 32), agent: s(t.agent, 128), enabled: t.enabled !== false,
+    username: s(t.username, 32), agent: s(t.agent, 128), enabled: t.enabled !== false, group: normGroup(t.group),
     createdAt: Number(t.createdAt) > 0 ? Number(t.createdAt) : 0, createdBy: s(t.createdBy, 64),
   };
 }
@@ -68,14 +73,23 @@ function load() {
     if (fs.existsSync(FILE())) {
       const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
       const list = filterObjectElements(Array.isArray(j?.targets) ? j.targets : []).list.map(normTarget).filter(Boolean);
-      cache = { targets: list, settings: normSettings(j?.settings) };
+      cache = { targets: list, settings: normSettings(j?.settings), groups: withUsedGroups(Array.isArray(j?.groups) ? j.groups : [], list) };
     }
   } catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); cache = null; }
-  if (!cache) { loadErr.checkCorruptOnly(FILE()); cache = { targets: [], settings: normSettings() }; }
+  if (!cache) { loadErr.checkCorruptOnly(FILE()); cache = { targets: [], settings: normSettings(), groups: [] }; }
   return cache;
 }
 
+/** 그룹 목록 = 저장된 순서(빈 그룹 포함) + 서버가 쓰는데 목록에 없는 이름(뒤에) — 대소문자를 무시해 겹치지 않게. */
+function withUsedGroups(list, targets) {
+  const out = []; const seen = new Set();
+  const add = (g) => { const n = normGroup(g); const k = n.toLowerCase(); if (n && !seen.has(k)) { seen.add(k); out.push(n); } };
+  for (const g of list) add(g);
+  for (const t of targets) add(t.group);
+  return out;
+}
 function persist(next) {
+  next = { ...next, groups: withUsedGroups(next.groups || [], next.targets || []) };
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
@@ -113,10 +127,81 @@ export function checkTargetInput(body = {}, { agents = [] } = {}) {
     return { ok: false, code: 'bad-agent', field: 'agent', reason: '담당 노드는 중앙 또는 등록된 엣지(수집 서버) 이름만 고를 수 있습니다.' };
   }
   const canonAgent = agent ? agents.find((a) => String(a).toLowerCase() === agent.toLowerCase()) : '';
-  return { ok: true, value: { name, host, port, username, agent: canonAgent || '', enabled: body.enabled !== false } };
+  // 그룹(v2.982): 없으면 '' · 글자 규칙만 본다(없는 이름이면 저장할 때 목록에 더한다 — 상한은 쓰는 쪽이 groupRefusal 로)
+  const group = s(body.group, 64);
+  if (group && !GROUP_RE.test(group)) return { ok: false, code: 'bad-group', field: 'group', reason: '그룹 이름은 글자 · 숫자 · 공백 · . _ - 로 1~32자입니다.' };
+  return { ok: true, value: { name, host, port, username, agent: canonAgent || '', enabled: body.enabled !== false, group } };
 }
 
 const sameEndpoint = (a, b) => a.host === b.host && a.port === b.port && a.username === b.username && String(a.agent).toLowerCase() === String(b.agent).toLowerCase();
+
+/** 새 그룹 이름을 더하면 상한을 넘는지(대소문자 무시) — 넘으면 거절 사유. */
+function groupRefusal(cur, names) {
+  const have = new Set((cur.groups || []).map((g) => g.toLowerCase()));
+  const fresh = new Set(names.filter(Boolean).map((g) => g.toLowerCase()).filter((g) => !have.has(g)));
+  return have.size + fresh.size > MAX_GROUPS ? { ok: false, code: 'too-many-groups', field: 'group', reason: `그룹은 ${MAX_GROUPS}개까지입니다.` } : null;
+}
+/** 이미 있는 그룹이면 그 표기(대소문자)로 맞춘다 — 'db' 와 'DB' 가 두 그룹이 되지 않게. */
+function canonGroup(cur, g) {
+  if (!g) return '';
+  return (cur.groups || []).find((x) => x.toLowerCase() === g.toLowerCase()) || g;
+}
+
+/** 그룹 목록 + 서버 수(등록부 기준 · 순서 = 만든 순서). */
+export function listGroups() {
+  const cur = load();
+  return (cur.groups || []).map((name) => ({ name, n: cur.targets.filter((t) => t.group === name).length }));
+}
+export function createGroup(name) {
+  const w = writeRefusal(); if (w) return w;
+  const g = s(name, 64);
+  if (!GROUP_RE.test(g)) return { ok: false, code: 'bad-group', reason: '그룹 이름은 글자 · 숫자 · 공백 · . _ - 로 1~32자입니다.' };
+  const cur = load();
+  if ((cur.groups || []).some((x) => x.toLowerCase() === g.toLowerCase())) return { ok: false, code: 'duplicate', reason: '같은 이름의 그룹이 이미 있습니다.' };
+  const r = groupRefusal(cur, [g]); if (r) return r;
+  persist({ ...cur, groups: [...(cur.groups || []), g] });
+  return { ok: true, group: g };
+}
+/** 이름 바꾸기 — 그 그룹의 서버도 함께. 다른 그룹과 같은 이름이면 거절(합치기는 '옮기기' 로). */
+export function renameGroup(from, to) {
+  const w = writeRefusal(); if (w) return w;
+  const cur = load();
+  const old = (cur.groups || []).find((x) => x === s(from, 64));
+  if (!old) return { ok: false, code: 'not-found', reason: '없는 그룹입니다.' };
+  const g = s(to, 64);
+  if (!GROUP_RE.test(g)) return { ok: false, code: 'bad-group', reason: '그룹 이름은 글자 · 숫자 · 공백 · . _ - 로 1~32자입니다.' };
+  if (g === old) return { ok: true, group: g, moved: 0 };
+  if ((cur.groups || []).some((x) => x !== old && x.toLowerCase() === g.toLowerCase())) return { ok: false, code: 'duplicate', reason: '같은 이름의 그룹이 이미 있습니다 — 서버를 그 그룹으로 옮기려면 ‘옮기기’ 를 쓰세요.' };
+  let moved = 0;
+  const targets = cur.targets.map((t) => { if (t.group !== old) return t; moved += 1; return { ...t, group: g }; });
+  persist({ ...cur, targets, groups: (cur.groups || []).map((x) => (x === old ? g : x)) });
+  return { ok: true, group: g, moved };
+}
+/** 지우기 — 그 그룹의 서버는 '그룹 없음' 으로(서버 · 기록은 그대로). */
+export function deleteGroup(name) {
+  const w = writeRefusal(); if (w) return w;
+  const cur = load();
+  const old = (cur.groups || []).find((x) => x === s(name, 64));
+  if (!old) return { ok: false, code: 'not-found', reason: '없는 그룹입니다.' };
+  let freed = 0;
+  const targets = cur.targets.map((t) => { if (t.group !== old) return t; freed += 1; return { ...t, group: '' }; });
+  persist({ ...cur, targets, groups: (cur.groups || []).filter((x) => x !== old) });
+  return { ok: true, freed };
+}
+/** 서버 옮기기 — ids(등록부에 있는 것만)를 group 으로('' = 그룹 없음). 그룹은 있어야 한다(새 그룹은 먼저 만든다). 접속처는 바뀌지 않는다. */
+export function setTargetsGroup(ids = [], group = '') {
+  const w = writeRefusal(); if (w) return w;
+  const cur = load();
+  const g = s(group, 64);
+  const name = g ? (cur.groups || []).find((x) => x === g) : '';
+  if (g && !name) return { ok: false, code: 'not-found', reason: '없는 그룹입니다 — 먼저 만드세요.' };
+  const want = new Set((Array.isArray(ids) ? ids : []).map(String).slice(0, MAX_TARGETS));
+  let moved = 0; let same = 0;
+  const targets = cur.targets.map((t) => { if (!want.has(t.id)) return t; if (t.group === name) { same += 1; return t; } moved += 1; return { ...t, group: name }; });
+  const missing = want.size - moved - same;
+  if (moved) persist({ ...cur, targets });
+  return { ok: true, moved, same, missing, group: name };
+}
 
 export function addTarget(body, { agents = [], by = '' } = {}) {
   const w = writeRefusal(); if (w) return w;
@@ -125,13 +210,14 @@ export function addTarget(body, { agents = [], by = '' } = {}) {
   const cur = load();
   if (cur.targets.length >= MAX_TARGETS) return { ok: false, code: 'too-many', reason: `등록은 ${MAX_TARGETS}대까지입니다.` };
   if (cur.targets.some((t) => sameEndpoint(t, c.value))) return { ok: false, code: 'duplicate', reason: '같은 노드 · 주소 · 포트 · 계정의 대상이 이미 있습니다.' };
-  const t = { id: `fm-${crypto.randomBytes(5).toString('hex')}`, ...c.value, createdAt: Date.now(), createdBy: s(by, 64) };
+  const gr = groupRefusal(cur, [c.value.group]); if (gr) return gr;
+  const t = { id: `fm-${crypto.randomBytes(5).toString('hex')}`, ...c.value, group: canonGroup(cur, c.value.group), createdAt: Date.now(), createdBy: s(by, 64) };
   persist({ ...cur, targets: [...cur.targets, t] });
   return { ok: true, target: { ...t } };
 }
 
 /** 등록 수정(v2.980)이 비교하는 칸 — 화면(web focusMonText.js EDIT_FIELDS)과 같은 목록 · 순서(테스트가 대조). */
-export const EDIT_FIELDS = Object.freeze(['name', 'host', 'port', 'username', 'agent']);
+export const EDIT_FIELDS = Object.freeze(['name', 'host', 'port', 'username', 'agent', 'group']);
 /**
  * 바뀐 칸 — 감사 기록 · 응답용(순수). 담당 노드는 대소문자를 무시한다(sameEndpoint 와 같게 — 입력 검사가 아는 이름으로 맞춘다).
  * @returns {{k:string, from:string|number, to:string|number}[]}
@@ -159,8 +245,9 @@ export function updateTarget(id, body, { agents = [] } = {}) {
   const c = checkTargetInput({ ...cur.targets[i], ...body }, { agents });
   if (!c.ok) return c;
   if (cur.targets.some((t, j) => j !== i && sameEndpoint(t, c.value))) return { ok: false, code: 'duplicate', reason: '같은 노드 · 주소 · 포트 · 계정의 대상이 이미 있습니다.' };
+  const gr = groupRefusal(cur, [c.value.group]); if (gr) return gr;
   const before = cur.targets[i];
-  const next = { ...before, ...c.value };
+  const next = { ...before, ...c.value, group: canonGroup(cur, c.value.group) };
   const changes = targetChanges(before, next);
   if (!changes.length && next.enabled === before.enabled) return { ok: true, target: { ...before }, moved: false, changes: [] };
   const targets = cur.targets.slice(); targets[i] = next;
@@ -202,6 +289,7 @@ const HEAD_ALIASES = Object.freeze({
   port: ['포트', 'ssh포트', '포트번호', 'port', 'sshport', 'portno', 'portnumber'],
   username: ['계정', '계정명', '사용자', '사용자명', 'user', 'username', 'account', 'login', 'sshuser'],
   agent: ['담당', '담당노드', '담당엣지', '노드', '엣지', '엣지이름', 'agent', 'node', 'edge', 'collector'],
+  group: ['그룹', '그룹명', '그룹이름', '분류', 'group', 'groupname'], // v2.982 — 머리글에 있을 때만 그룹을 바꾼다(없으면 그대로)
 });
 const headKey = (c) => String(c || '').toLowerCase().replace(/[\s_\-·.()]/g, '');
 const DEFAULT_COLS = Object.freeze(['name', 'host', 'port', 'username', 'agent']);
@@ -247,11 +335,12 @@ export function planCsv(text, { agents = [] } = {}) {
   body.forEach(({ r, line }) => {
     const cell = (k) => (col[k] == null ? '' : unguardCell(String(r[col[k]] ?? '')).trim());
     const agentRaw = cell('agent');
-    const input = { name: cell('name'), host: cell('host'), port: cell('port') || 22, username: cell('username'), agent: /^(중앙|central)$/i.test(agentRaw) ? '' : agentRaw };
+    const hasGroup = col.group != null;
+    const input = { name: cell('name'), host: cell('host'), port: cell('port') || 22, username: cell('username'), agent: /^(중앙|central)$/i.test(agentRaw) ? '' : agentRaw, group: hasGroup ? cell('group') : '' };
     const c = checkTargetInput(input, { agents });
-    const shown = { name: input.name.slice(0, 64), host: input.host.slice(0, 64), port: String(input.port).slice(0, 8), username: input.username.slice(0, 32), agent: String(input.agent).slice(0, 128) };
+    const shown = { name: input.name.slice(0, 64), host: input.host.slice(0, 64), port: String(input.port).slice(0, 8), username: input.username.slice(0, 32), agent: String(input.agent).slice(0, 128), group: String(input.group).slice(0, 64) };
     if (!c.ok) { rows.push({ line, action: 'error', code: c.code, field: c.field || null, reason: c.reason, input: shown }); return; }
-    const v = c.value;
+    const v = { ...c.value, group: canonGroup(cur, c.value.group) };
     const k = keyOf(v.host, v.port);
     if (seen.has(k)) { rows.push({ line, action: 'error', code: 'dup-in-file', reason: '같은 파일에 같은 IP · 포트가 앞에 있습니다.', input: shown }); return; }
     seen.add(k);
@@ -259,17 +348,21 @@ export function planCsv(text, { agents = [] } = {}) {
     if (hits.length > 1) { rows.push({ line, action: 'error', code: 'ambiguous', reason: `같은 IP · 포트의 대상이 ${hits.length}개 있어 어느 것을 바꿀지 모릅니다 — 화면에서 하나씩 고치세요.`, input: shown }); return; }
     if (!hits.length) { rows.push({ line, action: 'add', value: v }); return; }
     const t = hits[0];
+    if (!hasGroup) v.group = t.group || ''; // 그룹 열이 없으면 그대로(v2.982 — 예전 CSV 로 갱신해도 그룹이 지워지지 않게)
     // 계정은 대소문자가 다른 계정이다(리눅스) — 노드 이름만 대소문자를 무시한다(checkTargetInput 이 정식 이름으로 바꿔 둔다).
-    const changes = ['name', 'username', 'agent'].filter((f) => (f === 'agent' ? String(t[f] || '').toLowerCase() !== String(v[f] || '').toLowerCase() : String(t[f] || '') !== String(v[f] || '')));
-    rows.push({ line, action: changes.length ? 'update' : 'same', id: t.id, value: v, before: { name: t.name, username: t.username, agent: t.agent }, changes });
+    const changes = ['name', 'username', 'agent', 'group'].filter((f) => (f === 'agent' ? String(t[f] || '').toLowerCase() !== String(v[f] || '').toLowerCase() : String(t[f] || '') !== String(v[f] || '')));
+    rows.push({ line, action: changes.length ? 'update' : 'same', id: t.id, value: v, before: { name: t.name, username: t.username, agent: t.agent, group: t.group || '' }, changes });
   });
   const counts = { add: 0, update: 0, same: 0, error: 0 };
   for (const r of rows) counts[r.action] += 1;
+  // 새 그룹(목록에 없는 이름) — 미리보기가 알리고, 상한(MAX_GROUPS)을 넘으면 적용이 거절한다
+  const have = new Set((cur.groups || []).map((g) => g.toLowerCase()));
+  const newGroups = [...new Map(rows.filter((r) => r.action !== 'error' && r.value?.group && !have.has(r.value.group.toLowerCase())).map((r) => [r.value.group.toLowerCase(), r.value.group])).values()];
   const after = cur.targets.length + counts.add;
   // 머리글이 있는데 선택 열(포트 · 계정 · 담당 노드)을 못 찾았으면 기본값이 들어간다는 것을 말한다(조용한 기본값 금지 — 반증 4).
   const missing = head ? ['port', 'username', 'agent'].filter((k) => head[k] == null) : [];
   return { ok: true, header: !!head, rows, counts, total: rows.length, registered: cur.targets.length, max: MAX_TARGETS, overCap: after > MAX_TARGETS,
-    ignored: head ? head.ignored : [], missing };
+    ignored: head ? head.ignored : [], missing, groupColumn: !!(head && head.group != null), newGroups, groupsOver: have.size + newGroups.length > MAX_GROUPS, groupsMax: MAX_GROUPS };
 }
 
 /**
@@ -286,6 +379,7 @@ export function applyCsv(text, { agents = [], by = '', mode = 'valid', update = 
     return { ok: false, code: 'invalid-rows', reason: `${plan.counts.error}줄이 맞지 않아 아무것도 넣지 않았습니다(‘전부 아니면 넣지 않기’).`, counts: plan.counts, errors };
   }
   if (plan.overCap) return { ok: false, code: 'too-many', reason: `등록은 ${MAX_TARGETS}대까지입니다(지금 ${plan.registered}대 + 새로 ${plan.counts.add}대).`, counts: plan.counts };
+  if (plan.groupsOver) return { ok: false, code: 'too-many-groups', reason: `그룹은 ${MAX_GROUPS}개까지입니다(새 그룹 ${plan.newGroups.length}개).`, counts: plan.counts };
   const cur = load();
   const targets = cur.targets.slice();
   const ids = []; const moved = []; let added = 0; let updated = 0;
@@ -296,7 +390,7 @@ export function applyCsv(text, { agents = [], by = '', mode = 'valid', update = 
     } else if (r.action === 'update' && update) {
       const i = targets.findIndex((t) => t.id === r.id);
       if (i < 0) continue;
-      const next = { ...targets[i], name: r.value.name, username: r.value.username, agent: r.value.agent };
+      const next = { ...targets[i], name: r.value.name, username: r.value.username, agent: r.value.agent, group: r.value.group || '' };
       if (targets.some((t, j) => j !== i && sameEndpoint(t, next))) continue; // 다른 등록과 같은 접속처가 되면 바꾸지 않는다
       if (!sameEndpoint(targets[i], next)) moved.push(next.id);
       targets[i] = next; ids.push(next.id); updated += 1;
@@ -312,14 +406,14 @@ export function importCsv(text, { agents = [], by = '' } = {}) {
   return r.ok ? { ...r, ok: true } : r;
 }
 
-export const CSV_HEADER = Object.freeze(['이름', 'IP', '포트', '계정', '담당 노드']);
-/** 대상 목록(기본: 등록부) → CSV 줄 배열(머리글 포함 — 다시 가져올 수 있는 모양). */
+export const CSV_HEADER = Object.freeze(['이름', 'IP', '포트', '계정', '담당 노드', '그룹']);
+/** 대상 목록(기본: 등록부) → CSV 줄 배열(머리글 포함 — 다시 가져올 수 있는 모양 · v2.982 그룹 열). */
 export function exportRows(list = null) {
-  return [[...CSV_HEADER], ...(list || load().targets).map((t) => [t.name, t.host, t.port, t.username, t.agent || '중앙'])];
+  return [[...CSV_HEADER], ...(list || load().targets).map((t) => [t.name, t.host, t.port, t.username, t.agent || '중앙', t.group || ''])];
 }
 /** 빈 양식 — 머리글 + 예시 한 줄(문서용 주소 192.0.2.0/24 · RFC 5737 — 실제 서버가 아니다. SSRF 가드는 이 대역을 막지 않으므로 지우지 않고 넣으면 등록된다). */
 export function csvTemplateRows() {
-  return [[...CSV_HEADER], ['web-01', '192.0.2.11', 22, 'dvcmon', '중앙']];
+  return [[...CSV_HEADER], ['web-01', '192.0.2.11', 22, 'dvcmon', '중앙', 'WEB']];
 }
 
 /**

@@ -284,12 +284,12 @@ export function needsRetry(t) {
 /* ── 등록된 서버 수정(v2.980 — 사용자 '등록된 서버 수정하는 기능 추가') ─────────────────────────────
  * 서버 registry.EDIT_FIELDS · targetChanges 와 같은 칸 · 같은 규칙(담당 노드 대소문자 무시) — 서버 테스트가 칸 목록을 대조한다.
  * 판정은 서버가 한다(응답 moved · cleared). 여기는 저장 전 미리보기(저장 단추 · 안내 글)다. */
-export const EDIT_FIELDS = Object.freeze(['name', 'host', 'port', 'username', 'agent']);
-export const EDIT_FIELD_TEXT = Object.freeze({ name: '이름', host: 'IP', port: '포트', username: '계정', agent: '담당 노드' });
+export const EDIT_FIELDS = Object.freeze(['name', 'host', 'port', 'username', 'agent', 'group']);
+export const EDIT_FIELD_TEXT = Object.freeze({ name: '이름', host: 'IP', port: '포트', username: '계정', agent: '담당 노드', group: '그룹' });
 const ENDPOINT_FIELDS = new Set(['host', 'port', 'username', 'agent']);
 /** 수정 칸의 처음 값(등록부 값 그대로 — 포트는 글자). */
 export function editFormOf(t) {
-  return { name: t?.name ?? '', host: t?.host ?? '', port: t?.port == null || t?.port === '' ? '22' : String(t.port), username: t?.username ?? '', agent: t?.agent ?? '' };
+  return { name: t?.name ?? '', host: t?.host ?? '', port: t?.port == null || t?.port === '' ? '22' : String(t.port), username: t?.username ?? '', agent: t?.agent ?? '', group: t?.group ?? '' };
 }
 const editKey = (k, v) => {
   const x = String(v ?? '').trim();
@@ -304,7 +304,7 @@ export function editChanges(t, form) {
     const was = k === 'port' ? (t?.port ?? 22) : t?.[k];
     if (editKey(k, was) === editKey(k, form?.[k])) continue;
     const now = String(form?.[k] ?? '').trim();
-    changes.push({ k, label: EDIT_FIELD_TEXT[k], from: k === 'agent' ? nodeText(was) : String(was ?? '') || DASH, to: k === 'agent' ? nodeText(now) : now || (k === 'port' ? '22' : DASH) });
+    changes.push({ k, label: EDIT_FIELD_TEXT[k], from: k === 'agent' ? nodeText(was) : k === 'group' ? groupLabel(was) : String(was ?? '') || DASH, to: k === 'agent' ? nodeText(now) : k === 'group' ? groupLabel(now) : now || (k === 'port' ? '22' : DASH) });
   }
   return { changes, endpoint: changes.some((c) => ENDPOINT_FIELDS.has(c.k)) };
 }
@@ -419,6 +419,83 @@ export function mbText(v) {
   return x >= 1024 ? `${(x / 1024).toFixed(1)} GB` : `${Math.round(x)} MB`;
 }
 
+/* ── 서버 그룹(v2.982 — 사용자 '등록된 서버를 그룹별로 분류해서 보는 기능' · 시안 ⑫ · 컨펌 '구현해줘' = 기본값) ───────────────
+ * 서버마다 그룹 하나('' = 그룹 없음) · 순서는 응답 groups.list(만든 순서) · 그룹 이름 규칙은 서버 registry.GROUP_RE 와 같다(테스트가 대조). */
+export const GROUP_NONE = '그룹 없음';
+export const GROUP_RE = /^[A-Za-z0-9가-힣][A-Za-z0-9가-힣._ -]{0,31}$/;
+export function groupLabel(g) { return g ? String(g) : GROUP_NONE; }
+/**
+ * 대상 → 그룹 묶음(순서: 응답 그룹 순서 → 그 밖에 쓰인 이름 → 그룹 없음). 빈 그룹은 keepEmpty 일 때만.
+ * @returns {{key:string, label:string, targets:object[]}[]}  key '' = 그룹 없음
+ */
+export function groupSections(targets = [], list = [], { keepEmpty = false } = {}) {
+  const order = (list || []).map((g) => g.name);
+  for (const t of targets) if (t.group && !order.includes(t.group)) order.push(t.group);
+  const out = order.map((name) => ({ key: name, label: name, targets: targets.filter((t) => t.group === name) }));
+  const none = targets.filter((t) => !t.group);
+  const all = [...out, { key: '', label: GROUP_NONE, targets: none }];
+  return keepEmpty ? all : all.filter((x) => x.targets.length);
+}
+/** 그룹 단추(전체 + 그룹마다 + 그룹 없음) — 대수가 0 인 그룹은 뺀다. key 'all' · '' · 이름. */
+export function groupChips(targets = [], list = []) {
+  return [{ key: 'all', label: '전체', n: targets.length }, ...groupSections(targets, list).map((x) => ({ key: x.key, label: x.label, n: x.targets.length }))];
+}
+/**
+ * 그룹 단추로 거르기 — sel 이 'all' 이거나 **지금 목록에 그 그룹이 없으면 그대로**(그룹 없음 포함). 단추 쪽도 같은 경우 '전체' 를 켠다
+ * (groupChipOn) — 고른 그룹이 지워지거나 서버가 다 옮겨져도 화면이 빈 목록에 머물지 않게.
+ */
+export function filterByGroup(targets = [], sel = 'all') {
+  if (sel === 'all' || sel == null) return targets;
+  const hit = targets.filter((t) => (t.group || '') === sel);
+  return hit.length ? hit : targets;
+}
+/** 단추가 켜져 있는가 — filterByGroup 과 같은 판정(고른 그룹이 단추 목록에 없으면 '전체'). */
+export function groupChipOn(chips = [], sel, key) {
+  return sel === key || (key === 'all' && !chips.some((c) => c.key === sel && c.key !== 'all'));
+}
+/** 그룹 묶음 한 줄 요약(개요 · 그룹별로 나눠 보기): 'N대 · 평균 CPU x% · 가장 바쁜 이름 y%'. 값이 없는 서버는 평균에 넣지 않는다. */
+export function groupSummary(rows = []) {
+  const vals = rows.filter((x) => x?.sum?.cpu != null && Number.isFinite(x.sum.cpu));
+  const avg = vals.length ? vals.reduce((a, x) => a + x.sum.cpu, 0) / vals.length : null;
+  const top = vals.reduce((a, x) => (a == null || x.sum.cpu > a.sum.cpu ? x : a), null);
+  return { n: rows.length, valued: vals.length, avg, top: top ? { name: top.t?.name ?? top.id, cpu: top.sum.cpu } : null };
+}
+/** 그룹 단위 시작 — 수집 하나의 상한(max)을 넘으면 앞 max 대로 시작하고 나머지를 알린다(시안 ⑫ 컨펌 ② 기본값). */
+export function groupStartPlan(ids = [], max = 20) {
+  const list = [...new Set(ids)];
+  return { start: list.slice(0, max), rest: list.slice(max) };
+}
+export function groupStartText(name, plan, max) {
+  if (!plan.rest.length) return '';
+  return `${groupLabel(name)} ${plan.start.length + plan.rest.length}대 가운데 앞 ${max}대로 시작합니다(수집 하나는 ${max}대까지) — 나머지 ${plan.rest.length}대는 ‘진행 중인 수집에 더하기’ 나 새 수집으로 넣으세요.`;
+}
+/**
+ * 자동 묶기 제안(시안 ⑫ 컨펌 ③) — **그룹 없음** 서버만 · 이미 그룹이 있는 서버는 건드리지 않는다. 둘 이상 묶이는 것만 제안한다.
+ *  · prefix: 이름의 마지막 '-숫자' 앞(lab-test-01 → lab-test) · node: 담당 노드(중앙 · 엣지 이름) · subnet: IPv4 /24
+ * @returns {{kind:string, title:string, moves:{group:string, ids:string[], names:string[]}[]}[]}
+ */
+export function groupSuggestions(targets = [], existing = []) {
+  const free = targets.filter((t) => !t.group && !t.demo);
+  const exist = new Map((existing || []).map((g) => [String(g.name || g).toLowerCase(), String(g.name || g)]));
+  const clean = (x) => String(x || '').replace(/[^A-Za-z0-9가-힣._ -]/g, '-').replace(/^[^A-Za-z0-9가-힣]+/, '').slice(0, 32);
+  const build = (kind, title, keyOf) => {
+    const m = new Map();
+    for (const t of free) { const k = clean(keyOf(t)); if (!k || !GROUP_RE.test(k)) continue; const name = exist.get(k.toLowerCase()) || k; const x = m.get(name) || { group: name, ids: [], names: [] }; x.ids.push(t.id); x.names.push(t.name); m.set(name, x); }
+    const moves = [...m.values()].filter((x) => x.ids.length >= 2).sort((a, b) => b.ids.length - a.ids.length);
+    return moves.length ? { kind, title, moves } : null;
+  };
+  return [
+    build('prefix', '이름 앞부분으로', (t) => { const m = /^(.*?)[-_ .]?\d+$/.exec(String(t.name || '')); return m && m[1] ? m[1] : ''; }),
+    build('node', '담당 노드로', (t) => (t.agent ? t.agent : '중앙')),
+    build('subnet', 'IP 대역(/24)으로', (t) => { const m = /^(\d+)\.(\d+)\.(\d+)\.\d+$/.exec(String(t.host || '')); return m ? `${m[1]}.${m[2]}.${m[3]}` : ''; }),
+  ].filter(Boolean);
+}
+/** 제안 한 줄 글 — 'lab-test 2대(lab-test-01 · lab-test-02) · …'. */
+export function suggestionText(sg, existing = []) {
+  const have = new Set((existing || []).map((g) => String(g.name || g)));
+  return sg.moves.slice(0, 6).map((m) => `${m.group}${have.has(m.group) ? '' : '(새 그룹)'} ${m.ids.length}대(${m.names.slice(0, 3).join(' · ')}${m.names.length > 3 ? ' …' : ''})`).join(' · ') + (sg.moves.length > 6 ? ` 외 ${sg.moves.length - 6}묶음` : '');
+}
+
 export const INSTALL_NOTE = 'restrict 는 포워딩 · 터미널 할당을 끕니다(OpenSSH 7.2 이상 — RHEL 7.8 은 7.4). 그 노드 주소에서만 쓰게 하려면 줄 앞에 from="노드 IP", 를 덧붙이세요. 수집은 /proc · /sys 를 읽기만 하므로 root · sudo 가 필요 없습니다.';
 
 /** 손으로 만든 폴링 루프의 다음 틱을 걸지 않을 오류(403 권한 · 404 경로 없음은 다시 물어도 같다). */
@@ -436,7 +513,7 @@ export const TX_COLOR = '#d95926';
 export const CSV_ACTION_TEXT = Object.freeze({
   add: { label: '새로', tone: 'ok' }, update: { label: '갱신', tone: 'warn' }, same: { label: '그대로', tone: 'off' }, error: { label: '오류', tone: 'crit' },
 });
-export const CSV_FIELD_TEXT = Object.freeze({ name: '이름', username: '계정', agent: '담당 노드', port: '포트' });
+export const CSV_FIELD_TEXT = Object.freeze({ name: '이름', username: '계정', agent: '담당 노드', port: '포트', group: '그룹' });
 
 /** 미리보기의 머리글 안내 — 못 찾은 선택 열은 기본값이 들어간다는 것 · 읽지 않은 열(반증 4: 조용한 기본값 금지). */
 export function csvHeaderNotes(plan) {
@@ -447,7 +524,15 @@ export function csvHeaderNotes(plan) {
   if (miss.includes('agent')) out.push('담당 노드 열을 찾지 못해 모든 줄을 중앙이 맡습니다.');
   if (miss.includes('username')) out.push('계정 열을 찾지 못했습니다 — 모든 줄이 오류입니다.');
   if (plan.ignored?.length) out.push(`읽지 않은 열: ${plan.ignored.join(', ')} — 이 열의 값은 쓰지 않습니다.`);
+  if (plan.groupsOver) out.push(`새 그룹 ${plan.newGroups?.length ?? 0}개를 더하면 그룹이 ${plan.groupsMax ?? 50}개를 넘습니다 — 적용할 수 없습니다. 그룹 이름을 기존 그룹으로 맞추세요.`);
   return out;
+}
+/** CSV 미리보기 그룹 안내 한 줄(v2.982) — 그룹 열이 없으면 기존 그룹을 그대로 둔다는 것, 있으면 새로 만들 그룹. */
+export function csvGroupNote(plan) {
+  if (!plan) return '';
+  if (!plan.groupColumn) return '그룹 열이 없어 기존 서버의 그룹은 그대로 둡니다(새 서버는 그룹 없음).';
+  const fresh = plan.newGroups || [];
+  return `그룹 열을 읽어 그룹도 정합니다 — 빈 칸은 그룹 없음${fresh.length ? ` · 새로 만들 그룹 ${fresh.length}개: ${fresh.slice(0, 8).join(', ')}${fresh.length > 8 ? ' …' : ''}` : ''}.`;
 }
 export const nodeText = (agent) => (agent ? `엣지 ${agent}` : '중앙');
 
@@ -464,8 +549,8 @@ export function nameTitle(t, extra = '') {
 export function csvChangeText(row) {
   if (!row || row.action !== 'update') return '';
   return (row.changes || []).map((f) => {
-    const a = f === 'agent' ? nodeText(row.before?.[f]) : row.before?.[f] || DASH;
-    const b = f === 'agent' ? nodeText(row.value?.[f]) : row.value?.[f] || DASH;
+    const a = f === 'agent' ? nodeText(row.before?.[f]) : f === 'group' ? groupLabel(row.before?.[f]) : row.before?.[f] || DASH;
+    const b = f === 'agent' ? nodeText(row.value?.[f]) : f === 'group' ? groupLabel(row.value?.[f]) : row.value?.[f] || DASH;
     return `${CSV_FIELD_TEXT[f] || f} ${a} → ${b}`;
   }).join(' · ');
 }
