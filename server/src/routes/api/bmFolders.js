@@ -29,7 +29,7 @@ import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { pushAll } from '../../util/pushAll.js';   // 큰 배열 스프레드 push 금지(스윕 audit2603a)
 import { numOrNull } from '../../util/numOrNull.js';
 import { cleanFolderPath, cleanText, peekMap as smPeekMap, mutateMap as smMutateMap, flushStore as smFlushStore, storeLoadError as smLoadError, storeRev as smStoreRev } from '../../servicemap/store.js';
-import { sharedGather, sharedInputRev, sharedFresh, bmKeyOf, pubKey, keyResolverFor, maskName, corpWriteAccess, stripTag } from './svcInventory.js';
+import { sharedGather, sharedInputRev, sharedFresh, bmKeyOf, pubKey, keyResolverFor, maskName, corpWriteAccess, stripTag, visibleOrder, visibleKeyOrder } from './svcInventory.js';
 import { userToolAllowed } from '../../auth/permissions.js';
 import { buildFolders, searchMembers, parseTokens, srcClassOf, assignOf, aliasRegsOf } from '../../bmfolders/build.js';
 import {
@@ -93,9 +93,13 @@ export function membersOf(g) {
 
 async function stateFor(req, snap) {
   const g = await sharedGather(snap);
-  const { members, dupKeys } = membersOf(g);
+  const { members: gathered, dupKeys } = membersOf(g);
   const allowed = scopedVcenterIds(req.user, snap);
   const admin = isAdminDetailUser(req.user);
+  // v2.990(v2.989 반증 B-6): 가린 판본(범위 계정 · 비관리자)은 **보이는 이름 → 보이는 키** 순 — 수집 순서는 함대 정렬(전력 → 원문 이름)이라
+  //   그대로 실으면 가린 태그 · 주소의 상대 순서가 드러난다. 서버 목록 · CSV · 불일치가 이 순서를 쓴다. 전체 범위 관리자는 수집 순서 그대로.
+  //   판정(buildFolders)은 구성원마다 독립이고 키가 겹치지 않아(membersOf) 순서에 달리지 않는다.
+  const members = visibleOrder(gathered, admin, !!allowed, { nameOf: (m) => nameOf(m, admin, !!allowed) });
   const holdCorps = new Set(g.corpHold instanceof Map ? [...g.corpHold.keys()] : []);
   const b = buildFolders({ members, main: peekMain(), assign: peekAssign(), allowed, bmBlocked: !!g.bmBlocked, holdCorps, snapInitial: !!g.snapInitial,
     heldKeys: g.bmHeldKeys instanceof Set ? g.bmHeldKeys : null, nameFn: (m) => nameOf(m, admin, !!allowed) });
@@ -281,8 +285,9 @@ export function registerBmFolders(api) {
           agents: hide ? [] : c.agents.map((a) => ({ agent: a, at: a.startsWith('collector:') ? null : (edgeAt.get(a) ?? null), expired: !a.startsWith('collector:') && !edgeAt.has(a) })),
         })).sort((a, b2) => a.name.localeCompare(b2.name, 'ko')),
         servers,
-        missing: b.missing.map((x) => ({ key: pubKey(x.key, hide), corp: x.corp, path: x.path, name: missingName(x, admin, hide), state: x.state, why: x.why })),
-        mismatch: b.mismatch.map((x) => ({ key: pubKey(x.key, hide), corp: x.corp, was: x.was, path: x.path })),
+        // 목록에 없는 등록은 등록 저장 순서(= 누군가 등록한 순서)다 — 가린 판본은 보이는 이름 → 보이는 키 순(v2.990). 불일치는 이름을 싣지 않으므로 보이는 키 순
+        missing: visibleOrder(b.missing, admin, hide, { nameOf: (x) => missingName(x, admin, hide) }).map((x) => ({ key: pubKey(x.key, hide), corp: x.corp, path: x.path, name: missingName(x, admin, hide), state: x.state, why: x.why })),
+        mismatch: visibleKeyOrder(b.mismatch, admin, hide, (x) => pubKey(x.key, hide)).map((x) => ({ key: pubKey(x.key, hide), corp: x.corp, was: x.was, path: x.path })),
         noCorp: hide ? undefined : b.noCorp,
         prefixGroups: b.prefixGroups,
         rules: visibleRules(main, allowed).map((r) => ({ id: r.id, corp: r.corp, value: r.value, path: r.path, by: r.by, at: r.at, writable: r.corp === '*' ? full : writableOf(req.user, s, r.corp) })),
@@ -318,13 +323,12 @@ export function registerBmFolders(api) {
         // 이름은 화면에 보이는 이름(가린 이름)으로만 맞춘다 — 가린 부분(주소 · 태그)으로 맞혀 보는 길을 막는다
         nameFn: (m) => nameOf(m, admin, hide),
       });
-      // 보이는 이름 → 키 토큰 순(반증 6: 원문 이름 순이면 가린 태그의 상대 순서가 드러났다)
-      const vis = new Map(r.rows.map((x) => [x.m.key, nameOf(x.m, admin, hide)]));
-      r.rows.sort((a, b) => vis.get(a.m.key).localeCompare(vis.get(b.m.key), 'ko') || (pubKey(a.m.key, hide) < pubKey(b.m.key, hide) ? -1 : 1));
+      // 보이는 이름 → 키 토큰 순(반증 6: 원문 이름 순이면 가린 태그의 상대 순서가 드러났다). 찾기는 모든 판본에서 이 순서다(always) — 목록과 같은 비교 `visibleOrder` 하나
+      const rows = visibleOrder(r.rows, admin, hide, { nameOf: (x) => nameOf(x.m, admin, hide), keyOf: (x) => pubKey(x.m.key, hide), always: true });
       res.json({
         ok: true, total: r.total, shown: Math.min(r.total, LIMITS.searchRows), facets: r.facets, hideTag: hide,
         tokens: { include: parseTokens(String(req.query.inc ?? '').slice(0, 1024)), exclude: parseTokens(String(req.query.exc ?? '').slice(0, 1024)) },
-        rows: r.rows.slice(0, LIMITS.searchRows).map((x) => ({ ...serverRow(x.m, x.place, admin, hide), on: x.on })),
+        rows: rows.slice(0, LIMITS.searchRows).map((x) => ({ ...serverRow(x.m, x.place, admin, hide), on: x.on })),
       });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
@@ -464,6 +468,7 @@ export function registerBmFolders(api) {
       // 이하 등록 · 폴더 연산 — 지금 목록(판정 포함)이 필요하다
       const { members, allowed, b } = await stateFor(req, snap);
       const hide = !!allowed;
+      const admin = isAdminDetailUser(user);
 
       if (op === 'assign' || op === 'unassign' || op === 'ghost.prune') {
         const rawKeys = Array.isArray(body.keys) ? body.keys : [];
@@ -478,7 +483,8 @@ export function registerBmFolders(api) {
         if (op === 'ghost.prune') {
           // 없어짐(출처를 다 읽었는데 목록에 없음)만 · 쓰기 범위 안만. 보류는 지우지 않는다. 실행은 미리 본 키 ∩ 지금 없어짐(그 사이 끼어든 키를 지우지 않게)
           const ghosts = b.missing.filter((x) => x.state === 'ghost' && inUserWriteScope(user, snap, x.corp)).map((x) => x.key);
-          if (body.dry === true) return res.json({ ok: true, result: { keys: ghosts.slice(0, 5000).map((k) => pubKey(k, hide)), n: ghosts.length, held: b.missing.filter((x) => x.state === 'held').length } });
+          // 미리보기 키도 가린 판본은 보이는 키 순으로 자른다(v2.990 — 등록 저장 순서를 싣지 않는다)
+          if (body.dry === true) return res.json({ ok: true, result: { keys: visibleKeyOrder(ghosts, admin, hide).slice(0, 5000).map((k) => pubKey(k, hide)), n: ghosts.length, held: b.missing.filter((x) => x.state === 'held').length } });
           const want = new Set(keys.filter(Boolean));
           const del = ghosts.filter((k) => want.has(k));
           if (!del.length) return done({ removed: 0 });

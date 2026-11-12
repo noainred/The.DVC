@@ -75,9 +75,10 @@ function finishStat(st, hostByKey) {
 /**
  * 전부 한 번에 — 판정은 구성원당 1회(결과 Map 을 표·큐·전역이 공유 — 4차 반증 9).
  * @param {{members:object[], map:object, pins:object, hostByKey:Map, allowed:Set|null, unreadCorps:Set, bmBlocked:boolean,
- *          corpNames:Map, scanEntries?:Map, adminView?:boolean}} input
+ *          corpNames:Map, scanEntries?:Map, adminView?:boolean, queueMembers?:object[]|null}} input
+ *   queueMembers — members 와 같은 구성원을 큐에 실을 순서로 준 것(없으면 members 순서). 판정 · 집계에는 쓰지 않는다.
  */
-export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, bmHeldKeys = null, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null, bmFolderOf = null } = {}) {
+export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, bmHeldKeys = null, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null, bmFolderOf = null, queueMembers = null } = {}) {
   const idx = buildIndex(map);
   // bmFolderOf(v2.987): 베어메탈 키 → 물리서버 폴더 경로(미분류 '' · 모름 undefined). 없으면(null) 물리서버 폴더 규칙을 건너뛴다.
   const ctx = { tagCategory: map?.settings?.tagCategory || '', bmFolderOf };
@@ -148,7 +149,9 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
   const unlinked = services.filter((s) => !s.globalId || !globalById.has(s.globalId))
     .map((s) => ({ id: s.id, corp: s.corp, name: s.name, suggest: globalNames.get(lc(s.name)) || null, n: s.stat.n.total }));
 
-  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members, resolved, pins, allowed, unreadCorps, bmBlocked, bmHeldKeys, uuidUnreadCorps, corpHold, snapInitial, idx, scanEntries, adminView, knownCorps }) };
+  // queueMembers(v2.990): **같은 구성원**을 큐에 실을 순서로(가린 판본 — 보이는 이름 → 보이는 키). 큐 순회는 구성원마다 독립이라 순서 · 표본(앞 N건)만 달라진다.
+  //   판정(resolved) · 집계는 위에서 members 순서 그대로 끝냈다 — 판본마다 판정이 달라지지 않는다.
+  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members: queueMembers || members, resolved, pins, allowed, unreadCorps, bmBlocked, bmHeldKeys, uuidUnreadCorps, corpHold, snapInitial, idx, scanEntries, adminView, knownCorps }) };
 }
 
 /**
