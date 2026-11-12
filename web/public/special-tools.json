@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-11T15:11:12.240Z",
-  "count": 125,
+  "generatedAt": "2026-11-12T12:31:06.823Z",
+  "count": 126,
   "tools": [
     {
       "k": "service-hub",
@@ -140,6 +140,14 @@
     },
     {
       "k": "corp-usage",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "bm-folders",
       "adminOnly": false,
       "perm": null,
       "external": null,

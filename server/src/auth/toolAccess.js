@@ -77,6 +77,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'bm-usage': 'bm-usage',            // BmUsage.jsx 전용(v2.550) — 베어메탈 사용률
   'corp-usage': 'corp-usage',
   'svc-inventory': 'svc-inventory', // SvcInventory.jsx 전용(v2.887) — 서비스 인벤토리(조회·쓰기 연산·CSV)
+  'bm-folders': 'bm-folders',        // BmFolders.jsx 전용(v2.984) — 물리서버 폴더(조회·찾기·쓰기 연산·CSV)
   'power-total': 'power-total',      // PowerTotal.jsx 전용(v2.664) — 전체 소비 전력(서버·네트워크·스토리지)        // CorpUsage.jsx 전용(v2.625) — 법인별 서버 사용량(전체·물리·가상화)
   'link-check': 'link-check',        // LinkCheck.jsx 전용(v2.552) — 중앙↔엣지·vCenter 통신 점검(adminOnly)
   'portal-check': 'portal-check',    // PortalCheck.jsx 전용(v2.560) — 토큰 점검(adminOnly+fullScope)
