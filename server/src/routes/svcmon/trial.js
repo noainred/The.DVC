@@ -67,7 +67,7 @@ svcmonRouter.post('/trial', canEdit, fullScopeOnly, (req, res) => {
 });
 
 /**
- * v2.987 '지금 한 번 점검' — 이 포탈이 점검을 직접 실행하는 역할일 때만(중앙은 409 — 원격 대상을 중앙에서 찌르지 않는다 · poller EXECUTES 머리말).
+ * v2.988 '지금 한 번 점검' — 이 포탈이 점검을 직접 실행하는 역할일 때만(중앙은 409 — 원격 대상을 중앙에서 찌르지 않는다 · poller EXECUTES 머리말).
  *   결과는 응답으로만(폴러 결과 · 알림에 넣지 않는다). 네트워크로 나가는 동작이라 감사 로그를 남긴다.
  */
 svcmonRouter.post('/targets/:id/tests/:testId/run', canEdit, fullScopeOnly, async (req, res) => {
@@ -77,7 +77,7 @@ svcmonRouter.post('/targets/:id/tests/:testId/run', canEdit, fullScopeOnly, asyn
   const x = tg?.tests.find((y) => y.id === String(req.params.testId || ''));
   if (!x) return res.status(404).json({ ok: false, error: '점검을 찾을 수 없습니다.' });
   const r = await runOnceTest(tg, x);
-  // v2.987(반증 R11): 실패(500)도 남긴다 — 점검이 일부 나갔을 수 있다. 바쁨(409)은 아무것도 실행하지 않았다.
+  // v2.988(반증 R11): 실패(500)도 남긴다 — 점검이 일부 나갔을 수 있다. 바쁨(409)은 아무것도 실행하지 않았다.
   if (!r.busy) logAudit({ user: req.user?.username, action: 'svcmon.test.run', target: `${tg.name} › ${x.name}`, detail: r.ok ? `${r.result.status}${r.result.ms != null ? ` · ${r.result.ms}ms` : ''}` : `실패 — ${String(r.error || '').slice(0, 120)}` });
   if (!r.ok) return res.status(r.busy ? 409 : 500).json({ ok: false, error: r.error });
   res.json({ ok: true, result: r.result });

@@ -3170,6 +3170,34 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmf-kv .k { color: var(--text-dim); }
 .bmf-band { padding: 7px 10px; border-radius: 8px; font-size: 12.5px; }
 .bmf-links a { color: #93c5fd; }
+/* v2.987 맵 보기(시안 ②) — 칸 하나 = 서버 한 대 · 색은 한 색상 밝기 5단 · 못 읽음 점선 · 꺼짐 회색 · 장애 빨간 테(색과 따로) */
+.bmf-map { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; min-width: 0; }
+.bmf-grp { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-deep); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.bmf-grp.un { border-style: dashed; border-color: rgba(245, 158, 11, .55); }
+.bmf-gh { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; min-width: 0; }
+.bmf-gh .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmf-hxs { display: flex; flex-wrap: wrap; gap: 5px; }
+.bmf-hx { width: 24px; height: 24px; border-radius: 5px; display: inline-block; flex: none; border: 0; padding: 0; cursor: pointer; }
+i.bmf-hx { width: 10px; height: 10px; border-radius: 2px; cursor: default; }
+.bmf-hx.u1 { background: #1e3a5f; } .bmf-hx.u2 { background: #2563a8; } .bmf-hx.u3 { background: #4c8df6; } .bmf-hx.u4 { background: #93c2ff; } .bmf-hx.u5 { background: #e0edff; }
+.bmf-hx.na { background: transparent; border: 1.5px dashed var(--text-dim); }
+.bmf-hx.off { background: #2a3449; }
+.bmf-hx.bad { box-shadow: 0 0 0 2px var(--red); }
+.bmf-hx.pick { box-shadow: 0 0 0 2px var(--panel-deep), 0 0 0 4px #fff; }
+.bmf-hx.bad.pick { box-shadow: 0 0 0 2px var(--red), 0 0 0 4px #fff; }
+button.bmf-hx:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+/* v2.987 좁은 화면(640px 이하) 목록 카드 */
+.bmf-cards { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+.bmf-card { display: flex; align-items: stretch; gap: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); min-width: 0; }
+.bmf-card.picked { border-color: rgba(59, 130, 246, .5); background: rgba(59, 130, 246, .10); }
+.bmf-card-chk { display: flex; align-items: center; justify-content: center; width: 44px; flex: none; }
+.bmf-card-chk input { width: 20px; height: 20px; }
+.bmf-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 9px 12px; background: transparent; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; min-height: 44px; }
+.bmf-card-body .l1 { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; }
+.bmf-card-body .l1 b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 배지는 줄지 않고 한 줄로 — 400px 에서 '1건' · '중앙' 이 글자마다 세로로 꺾였다(v2.987 Chromium 판독) */
+.bmf-card-body .l1 > .badge, .bmf-card-body .l1 > span:last-child { flex: none; white-space: nowrap; }
+.bmf-card-body .l2 { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bmf-links a:hover { color: #bfdbfe; }
 .bmf-band.red { background: rgba(239, 68, 68, .10); border: 1px solid rgba(239, 68, 68, .4); color: #fecaca; }
 table.bmf-t mark { background: rgba(250, 204, 21, .28); color: #fef08a; border-radius: 3px; padding: 0 1px; }

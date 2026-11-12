@@ -682,7 +682,7 @@ centralRouter.get('/svcmon-config', requireCentral(), (req, res) => {
   if (settingsUnreadable(res, svcmonAssignLoadError, '성능점검 배정')) return;
   const r = getAssignmentForAgent(agent, String(req.query.sig || ''));
   if (r.assigned && !r.unchanged) markPulled(agent, r.sig);
-  else if (r.assigned && r.unchanged) noteUnchangedPull(agent, r.sig);   // v2.987(반증 R1): 시험 판정의 '적용 확인' — 메모리만
+  else if (r.assigned && r.unchanged) noteUnchangedPull(agent, r.sig);   // v2.988(반증 R1): 시험 판정의 '적용 확인' — 메모리만
   res.json({ ok: true, ...r });
 });
 

@@ -145,7 +145,7 @@ const _muted = new Map();   // key -> until(ms)
 const MUTE_MAX = 20_000;
 const KINDS_MUTE = ['infra', 'service'];
 /*
- * v2.987(쉬운 등록 후속 — 반증 L1): 키에 대상 구분(infra|service)을 넣는다 — 같은 경로 · 이름의 다른 구분 대상 알림이 시험 동안 막혔다.
+ * v2.988(쉬운 등록 후속 — 반증 L1): 키에 대상 구분(infra|service)을 넣는다 — 같은 경로 · 이름의 다른 구분 대상 알림이 시험 동안 막혔다.
  *   구분을 모르는 결과(구분을 싣지 않는 옛 엣지)는 그 경로 · 이름의 어느 구분이든 억제 중이면 억제로 본다(예전 동작 — 시험 대상의 알림을 놓치지 않게).
  */
 const muteKey = (p, n, k) => `${t(p)}${SEP}${t(n).toLowerCase()}${SEP}${KINDS_MUTE.includes(k) ? k : 'infra'}`;
@@ -190,7 +190,7 @@ function evalAlert(x) {
     return;
   }
   if (!inScope(s, path)) return;
-  if (isMuted(path, x.target?.name, x.at, t(x.target?.kind))) return;   // v2.960: 시험 점검 중(시한 있음) — 복구 판정은 위에서 이미 했다 · v2.987 구분
+  if (isMuted(path, x.target?.name, x.at, t(x.target?.kind))) return;   // v2.960: 시험 점검 중(시한 있음) — 복구 판정은 위에서 이미 했다 · v2.988 구분
   if (x.status === 'bad') {
     if (x.streak >= s.failCount && !_alerted.has(key)) {
       if (_alerted.size >= ALERTED_MAX) _alerted.delete(_alerted.keys().next().value);

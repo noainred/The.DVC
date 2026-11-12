@@ -145,7 +145,7 @@ export function setAssignment(agent, scope = {}, targets = [], { user = '' } = {
     state: prev && prev.sig === sig ? (prev.state || 'pending') : 'pending',
     pulledAt: prev && prev.sig === sig ? (prev.pulledAt || 0) : 0,
     ack: prev && prev.sig === sig ? (prev.ack || null) : null,
-    // v2.987(반증 R1): 오류 없이 적용된 sig 이력(sig → 시각, 최근 OK_SIGS_MAX 개) — 배정이 엣지가 이미 적용한 sig 로 되돌아오면(A→B→A)
+    // v2.988(반증 R1): 오류 없이 적용된 sig 이력(sig → 시각, 최근 OK_SIGS_MAX 개) — 배정이 엣지가 이미 적용한 sig 로 되돌아오면(A→B→A)
     //   엣지는 unchanged 를 받고 다시 ack 하지 않는다. 그때 '변경 없음' pull 을 적용 확인으로 쓰려면 그 sig 가 오류 없이 적용된 적이 있어야 한다.
     ...(prev?.okSigs ? { okSigs: prev.okSigs } : {}),
     // v2.630(감사 R2630-06): 엣지 push 주기는 배정 내용과 무관하다 — 재배정해도 유지한다.
@@ -249,7 +249,7 @@ function okSigsWith(cur, sig, at) {
   return Object.fromEntries(ent.slice(0, OK_SIGS_MAX).map(([k, v]) => [k, Number(v)]));
 }
 
-// v2.987(반증 R1): '변경 없음' pull 로 확인한 시각 — 엣지가 지금 sig 를 적용해 두고 있다는 확인(메모리 · 파일에 쓰지 않는다 — pull 마다 저장하면 EDGE2629-01).
+// v2.988(반증 R1): '변경 없음' pull 로 확인한 시각 — 엣지가 지금 sig 를 적용해 두고 있다는 확인(메모리 · 파일에 쓰지 않는다 — pull 마다 저장하면 EDGE2629-01).
 //   재시작하면 비고 다음 pull(기본 5분)에 다시 생긴다. sig 가 바뀌면 그 값은 맞지 않아 쓰이지 않는다.
 const _confirmed = new Map();   // agent -> { sig, at }
 

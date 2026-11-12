@@ -30,9 +30,24 @@ export function sortRules(rules = []) {
     .sort((a, b) => ((a.r.corp === '*') - (b.r.corp === '*')) || (b.r.value.length - a.r.value.length) || (a.i - b.i))
     .map((x) => x.r);
 }
-/** 이름(소문자 · 256자로 자른 뒤)에 값이 들어간 첫 규칙 — 그 법인 규칙 또는 '*' 규칙만. */
+/**
+ * 규칙이 보는 이름 — **어느 계정 판본에서도 보이는 부분만**(v2.987 · 1차 반증 5 잔여 위험 완화):
+ *   관리 주소처럼 보이는 이름(nameIsAddr)은 규칙 대상이 아니다('' — 비관리자 판본에서 가린다) · 이름 속 서비스 태그는 걷어 낸다(범위 계정 판본에서 가린다).
+ *   예전에는 원문 이름으로 맞춰서, 자동 규칙이 켜져 있으면 쓰기 계정이 규칙 값을 바꿔 가며 소속 변화로 가린 태그 · 주소를 한 글자씩 맞혀 볼 수 있었다(재현 204회).
+ *   판정은 판본마다 바꾸지 않는다 — 모든 계정에 같은 '가린 뒤 이름' 으로 판정한다. 정규식 없이 선형(외부 입력).
+ */
+export function ruleNameOf(m) {
+  if (!m || m.nameIsAddr) return '';
+  const n = lc(m.name).slice(0, 256);
+  const tg = lc(m.serviceTag);
+  if (!tg || tg.length < 2) return n;
+  let out = ''; let i = 0;
+  for (let j = n.indexOf(tg); j >= 0; j = n.indexOf(tg, i)) { out += `${n.slice(i, j)}\u0000`; i = j + tg.length; }
+  return out + n.slice(i);   // 걷어 낸 자리는 NUL(규칙 값에는 제어 문자가 들어갈 수 없다 — 걷어 낸 자리를 건너 맞지 않는다)
+}
+/** 규칙이 보는 이름(ruleNameOf)에 값이 들어간 첫 규칙 — 그 법인 규칙 또는 '*' 규칙만. */
 export function ruleFor(m, sorted) {
-  const n = lc(m?.name).slice(0, 256);
+  const n = ruleNameOf(m);
   if (!n || !m?.corp) return null;
   for (const r of sorted) {
     if (r.corp !== '*' && r.corp !== m.corp) continue;
@@ -207,15 +222,16 @@ export function parseTokens(v) {
 /**
  * 서버 찾기(일괄 등록) — 포함 글자 중 **하나라도** 찾는 곳 중 하나에 들어가면 일치 · 제외 글자가 하나라도 들어가면 뺀다.
  * 포함 글자가 없으면 아무것도 맞지 않는다(전체를 돌려주지 않는다).
- * @param {object} o  { include[], exclude[], fields:{name,tag,model}, kinds:{bm,esxi}, corp, allowed, unassignedOnly, hideTag, nameFn }
+ * @param {object} o  { include[], exclude[], fields:{name,tag,model,addr}, kinds:{bm,esxi}, corp, allowed, unassignedOnly, hideTag, showAddr, nameFn }
+ *   addr(관리 주소)는 showAddr(관리자 판본)일 때만 찾는다 — 비관리자가 주소를 맞혀 보는 길이 되지 않게.
  *   nameFn = 화면에 보이는 이름(가린 이름) — 주어지면 그 이름으로만 맞춘다(가린 주소 · 태그로 맞혀 보는 길을 막는다).
  * @returns {{ rows:{m,place,on}[], total:number, facets:object }}
  */
 export function searchMembers(members, placeOf, o = {}) {
   const inc = parseTokens(o.include); const exc = parseTokens(o.exclude);
-  const fields = { name: o.fields?.name !== false, tag: !o.hideTag && o.fields?.tag === true, model: o.fields?.model === true };
+  const fields = { name: o.fields?.name !== false, tag: !o.hideTag && o.fields?.tag === true, model: o.fields?.model === true, addr: o.showAddr === true && o.fields?.addr === true };
   const kinds = { bm: o.kinds?.bm !== false, esxi: o.kinds?.esxi === true };
-  const facets = { corp: {}, src: {}, state: { unassigned: 0, foldered: 0 }, model: {}, on: { name: 0, tag: 0, model: 0 } };
+  const facets = { corp: {}, src: {}, state: { unassigned: 0, foldered: 0 }, model: {}, on: { name: 0, tag: 0, model: 0, addr: 0 } };
   const rows = [];
   if (!inc.length) return { rows, total: 0, facets };
   const bump = (o2, k) => { o2[k] = (o2[k] || 0) + 1; };
@@ -227,11 +243,13 @@ export function searchMembers(members, placeOf, o = {}) {
     const place = placeOf.get(m.key) || { path: '', src: null };
     if (o.unassignedOnly && place.src) continue;
     const name = lc(o.nameFn ? o.nameFn(m) : m.name).slice(0, 256); const tag = fields.tag ? lc(m.serviceTag) : ''; const model = fields.model ? lc(m.model).slice(0, 128) : '';
+    const addr = fields.addr ? lc(m.mgmtHost).slice(0, 300) : '';
     let on = '';
     for (const v of inc) {
       if (fields.name && name.includes(v)) { on = 'name'; break; }
       if (fields.tag && tag && tag.includes(v)) { on = 'tag'; break; }
       if (fields.model && model.includes(v)) { on = 'model'; break; }
+      if (fields.addr && addr && addr.includes(v)) { on = 'addr'; break; }
     }
     if (!on) continue;
     if (exc.some((v) => name.includes(v) || (fields.model && model.includes(v)) || (fields.tag && tag && tag.includes(v)))) continue;

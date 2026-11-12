@@ -1,4 +1,4 @@
-// v2.987 — Monitoring 쉬운 등록 후속(잔여 작업): 엣지 시험은 배정 적용(ack) 뒤 결과만 · 엣지 메타의 구분(infra|service) — 수신 화이트리스트 ·
+// v2.988 — Monitoring 쉬운 등록 후속(잔여 작업): 엣지 시험은 배정 적용(ack) 뒤 결과만 · 엣지 메타의 구분(infra|service) — 수신 화이트리스트 ·
 //   알림 억제 · 시험 판정 · 개요 조인 · '법인 폴더로 정리' · '지금 한 번 점검' · 데모 엣지 배정 후보. 설계 docs/design/monitoring-autoreg/README.md §11.8.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -99,7 +99,7 @@ test('배정 동기화 결과가 새 sig 를 싣는다(ack 대조 근거)', () =
   assert.ok(y);
 });
 
-/* ── 반증(v2.987) R1 · R2 · R8 — 실제 배정 · ack 경로(ackAt 주입 없이) ── */
+/* ── 반증(v2.988) R1 · R2 · R8 — 실제 배정 · ack 경로(ackAt 주입 없이) ── */
 // 엣지 pull 흉내 — agent/svcmonConfigPull 과 같은 규칙(적용에 성공한 sig 로 묻고 unchanged 면 ack 하지 않는다) + 라우트(routes/central.js)의 확인 기록.
 function edgeSim(agent) {
   let applied = '';

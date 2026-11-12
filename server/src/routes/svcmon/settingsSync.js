@@ -158,7 +158,7 @@ svcmonRouter.post('/settings-sync/apply', adminOnly, fullScopeOnly, async (req, 
 });
 
 /**
- * v2.987 '법인 폴더로 정리' — 설정 연동이 놓은 자리에 그대로 있는 연동 대상을 지금 법인 폴더로 옮긴다. mode 'preview' 는 저장하지 않는다.
+ * v2.988 '법인 폴더로 정리' — 설정 연동이 놓은 자리에 그대로 있는 연동 대상을 지금 법인 폴더로 옮긴다. mode 'preview' 는 저장하지 않는다.
  *   서버가 **지금** 다시 분류한 행으로만 판정한다(화면이 본 상태를 믿지 않는다 — 적용과 같은 규약). 경로 기준 엣지 배정이 맡는 대상은 건너뜀.
  */
 svcmonRouter.post('/settings-sync/repath', adminOnly, fullScopeOnly, async (req, res) => {

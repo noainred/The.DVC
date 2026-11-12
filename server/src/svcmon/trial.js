@@ -95,7 +95,7 @@ export function planTrial(picked = [], { executes = false, assignments = [], ass
     // v2.960(반증 H1): 배정 파일을 못 읽었으면 어느 엣지가 맡는지 모른다(빈 목록을 '배정 없음' 으로 읽으면 경로 기준 엣지를 byAgent 로 오분류한다).
     if (assignUnreadable && (t(tg.agent) || !executes)) { skip.push({ ...base, agent: t(tg.agent), reason: '엣지 배정 파일을 읽지 못했습니다 — 엣지 배정 탭에서 확인한 뒤 다시 시험하세요.' }); continue; }
     const e = edgeOfTarget(tg, assignUnreadable ? [] : assignments);
-    // v2.987(반증 R8): 데모(mock)의 데모 엣지는 배정을 당기지도 보고하지도 않는다 — 엣지 시험으로 보내면 시한까지 기다린 뒤 전부 실패했다. 이 포탈이 대신 잰다.
+    // v2.988(반증 R8): 데모(mock)의 데모 엣지는 배정을 당기지도 보고하지도 않는다 — 엣지 시험으로 보내면 시한까지 기다린 뒤 전부 실패했다. 이 포탈이 대신 잰다.
     if (e.agent && e.mode === 'byAgent' && executes && localAgents.has(e.agent)) { local.push({ ...base, tests, note: `데모 엣지(${e.agent})는 보고하지 않아 이 포탈이 대신 잽니다(데모 전용).` }); continue; }
     if (e.agent && e.mode === 'byAgent') {
       const a = assignments.find((x) => x.agent === e.agent);
@@ -136,7 +136,7 @@ function loadPending() {
     _pending = (Array.isArray(j?.pending) ? j.pending : []).filter((p) => p && t(p.targetId) && t(p.agent) && Number(p.deadline) > 0)
       // 시한은 지금 + 상한으로 자른다(반증 L4 — 파일을 손으로 고치거나 옛 번들을 복원해도 무기한 대기가 되지 않게).
       .map((p) => ({ targetId: t(p.targetId), jobId: t(p.jobId), agent: t(p.agent), path: t(p.path), name: t(p.name), host: t(p.host),
-        // v2.987(반증 R2): v2.960 파일에는 구분이 없다 — 'infra' 로 가정하면 서비스 대상의 억제가 새고 판정이 0건이었다. 대상에서 채운다.
+        // v2.988(반증 R2): v2.960 파일에는 구분이 없다 — 'infra' 로 가정하면 서비스 대상의 억제가 새고 판정이 0건이었다. 대상에서 채운다.
         kind: p.kind === 'service' || p.kind === 'infra' ? p.kind : (getTarget(t(p.targetId))?.kind === 'service' ? 'service' : 'infra'),
         sig: t(p.sig).slice(0, 64),
         startedAt: Number(p.startedAt) || 0, deadline: Math.min(Number(p.deadline), Date.now() + EDGE_DEADLINE_MAX_MS),
@@ -195,7 +195,7 @@ async function runLocal(items, deps) {
 }
 
 /**
- * v2.987 '지금 한 번 점검' — 점검 하나를 이 포탈에서 한 번 실행해 결과만 돌려준다(사용 여부와 무관 · 폴러 결과 · 전이 · CSV · 알림에 넣지 않는다 — 시험과 같은 규칙).
+ * v2.988 '지금 한 번 점검' — 점검 하나를 이 포탈에서 한 번 실행해 결과만 돌려준다(사용 여부와 무관 · 폴러 결과 · 전이 · CSV · 알림에 넣지 않는다 — 시험과 같은 규칙).
  *   동시에 같은 점검은 하나 · 전체 동시 상한 RUN_ONCE_MAX(넘으면 busy). 데모 대상은 합성 결과(폴러 규칙).
  */
 const RUN_ONCE_MAX = 8;
@@ -254,7 +254,7 @@ export function startTrial(ids, { user = '', now = Date.now(), deps = {} } = {})
     const en = (deps.setEnabled || setEnabledMany)({ targets: plan.edge.map((e) => e.targetId), enabled: true });
     const sync = (deps.sync || syncByAgentAssignments)([...new Set(plan.edge.map((e) => e.agent))], user, { note: '시험 점검' });
     const failed = new Map(sync.filter((s) => !s.ok).map((s) => [s.agent, s.reason || '배정을 다시 굳히지 못했습니다.']));
-    const sigOf = new Map(sync.filter((s) => s.ok).map((s) => [s.agent, t(s.sig)]));   // v2.987(반증 R1): 이번 시험이 굳힌 sig
+    const sigOf = new Map(sync.filter((s) => s.ok).map((s) => [s.agent, t(s.sig)]));   // v2.988(반증 R1): 이번 시험이 굳힌 sig
     const revert = [];
     for (const e of plan.edge) {
       const item = { targetId: e.targetId, name: e.name, path: e.path, host: e.host, where: 'edge', agent: e.agent, tests: [] };
@@ -320,7 +320,7 @@ export function trialTick(now = Date.now(), deps = {}) {
   const readyOf = deps.ready || (deps.ackAt ? (a) => ({ sig: '', ackAt: Number(deps.ackAt(a)) || 0, confirmAt: 0 }) : defaultReady());
   for (const [agent, list] of byAgent) {
     const rows = (deps.edgeRows || edgeRowsOf)(agent) || [];
-    // v2.987(쉬운 등록 후속): 엣지가 **이번 시험 뒤의 배정을 적용한 것이 확인된 뒤** 잰 결과만 받는다 — 그 전 행은 옛 스냅샷의 측정이다(readyAtFor).
+    // v2.988(쉬운 등록 후속): 엣지가 **이번 시험 뒤의 배정을 적용한 것이 확인된 뒤** 잰 결과만 받는다 — 그 전 행은 옛 스냅샷의 측정이다(readyAtFor).
     const info = readyOf(agent);
     // (경로 · 대상 이름) → 대기 목록. 판정은 대기(=대상 id)마다 한다(반증 M2: 키가 같으면 앞 건을 덮었다).
     const byKey = new Map();
@@ -337,7 +337,7 @@ export function trialTick(now = Date.now(), deps = {}) {
         if (!(Number(r.measuredAt) >= w.p.startedAt)) continue;
         const readyAt = readyAtFor(w.p, info);
         if (!readyAt || !(Number(r.measuredAt) >= readyAt)) continue;
-        if (t(r.kind) && t(r.kind) !== w.p.kind) continue;   // v2.987: 같은 경로 · 이름의 다른 구분 대상 행(옛 엣지는 구분을 싣지 않는다 — 그때는 거르지 않는다)
+        if (t(r.kind) && t(r.kind) !== w.p.kind) continue;   // v2.988: 같은 경로 · 이름의 다른 구분 대상 행(옛 엣지는 구분을 싣지 않는다 — 그때는 거르지 않는다)
         if (w.p.host && t(r.host) && t(r.host).toLowerCase() !== w.p.host.toLowerCase()) continue;
         const name = t(r.test);
         if (w.p.expect.length && !w.p.expect.includes(name)) continue;
@@ -425,7 +425,7 @@ export function cancelTrials(targetIds = [], reason = '사람이 사용/중지�
 
 /** 엣지별 배정 ack 시각(배정 파일 — 한 판정에 한 번 읽는다). 못 읽으면 0(= 아직 적용 확인 안 됨 — 시한까지 기다린다). */
 /**
- * v2.987(반증 R1 · R6): 이 대기 건의 행을 언제부터 받을까 — 0 이면 아직 기다린다.
+ * v2.988(반증 R1 · R6): 이 대기 건의 행을 언제부터 받을까 — 0 이면 아직 기다린다.
  *   ① 시험이 굳힌 sig 가 지금 sig 이고 그 sig 의 ack 가 **시작 전**이다 = 대상이 이미 켜진 채 배정에 실려 있었다(sig 가 바뀌지 않아 ack 가 남았다 —
  *      PUT 으로 끈 대상 · 동기화 없이 처리된 대상) → 엣지는 이 정의로 계속 재고 있다: 시작 이후 행.
  *   ② ack(지금 sig) 또는 '변경 없음' pull 확인(지금 sig 가 오류 없이 적용된 적이 있을 때만 — svcmonAssign.noteUnchangedPull)이 시작 이후 → 그 시각 이후 행.

@@ -147,7 +147,7 @@ export default function SvcMonitor() {
   const [filter, setFilter] = useState('ALL');
   const [sort, setSort] = useState('none');            // none | name | status
   const [detail, setDetail] = useState(null);
-  const [runOnce, setRunOnce] = useState(null);   // v2.987 '지금 한 번 점검' — { key, busy, result, error } · key 가 지금 상세와 같을 때만 보인다(늦게 온 응답은 버린다)
+  const [runOnce, setRunOnce] = useState(null);   // v2.988 '지금 한 번 점검' — { key, busy, result, error } · key 가 지금 상세와 같을 때만 보인다(늦게 온 응답은 버린다)
   const [leftW, setLeftW] = useState(() => { try { return Number(localStorage.getItem(LEFT_W_KEY)) || DEFAULT_LEFT_W; } catch { return DEFAULT_LEFT_W; } }); // v2.681(R2C-05)
   const [dragging, setDragging] = useState(false);
   const [modal, setModal] = useState(null);
@@ -354,7 +354,7 @@ export default function SvcMonitor() {
   };
   const onPick = (ids) => setPicked((p) => toggleIds(p, ids));
   // v2.960(반증 L5): 사용/중지 · 시험은 중앙 노드에서만(엣지 노드의 대상은 중앙 배정 사본 — 서버가 409). 편집 권한과 함께 본다.
-  // v2.987: 서버 게이트가 canEdit + fullScopeOnly — 범위 계정에는 스위치를 열지 않는다(누르면 403 이었다).
+  // v2.988: 서버 게이트가 canEdit + fullScopeOnly — 범위 계정에는 스위치를 열지 않는다(누르면 403 이었다).
   const canToggle = canEdit && isFullScopeEditor(me) && data?.centralNode !== false;
   const exitPick = () => { setPickMode(false); setPicked(new Set()); };
   const pickInfo = selectionInfo(picked, targets);

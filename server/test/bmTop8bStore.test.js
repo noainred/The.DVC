@@ -23,13 +23,16 @@ delete process.env.CENTRAL_URL;
 test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
 let sqlite = true; try { await import('node:sqlite'); } catch { sqlite = false; }
 const STEP = 300_000; const HOUR = 3_600_000; const DAY = 86_400_000;
+const { dayKey } = await import('../src/util/dayKey.js');
+let NOW = Math.floor(Date.now() / STEP) * STEP - 2 * STEP;
+// ②③ 의 6주기(NOW - 5 STEP ~ NOW)가 포탈 날 경계(기본 KST 자정 — `util/dayKey.js` 오프셋)를 넘으면 새 날 파일의 첫 표본은 기준(앞 날 파일)을 못 써
+// 전체 행으로 적혀 full 이 하나 는다(제품 동작 — 날 파일마다 기준이 따로). 새 날 첫 표본이 ‘같음’ 주기(k1 · k3)일 때만이라 실제 KST 00:20~00:24 · 00:30~00:34
+// (하루 10분 — 분석)에 실패한다. v2.987 릴리스 실행이 그 시각에 걸렸고, Date.now 를 옮기는 preload 로 00:20 · 00:30 실패 · 00:00 · 00:10 · 00:45 통과를 재현했다.
+// 창 전체가 한 날에 들도록 경계 앞으로 당긴다(common.md '날 · 달 경계를 넘는 시간 이동은 따로 고정').
+while (dayKey(NOW - 5 * STEP) !== dayKey(NOW)) NOW -= STEP;
 
 const T = await import('../src/bmusage/topStore.js');
 const M = await import('../src/bmusage/monthStore.js');
-// 시험 창(가장 긴 것 — 70분)이 포탈 날 경계(기본 KST 자정)를 걸치면 경계 앞으로 당긴다 — 제품은 같은 날 파일 안에서만 '같음' 기준을 쓴다
-//   (topStore b.day === day). v2.987 CI 가 KST 00:23 에 돌아 전체 행이 하나 더 생겼다(4 !== 3 — 재현: 시계를 자정 + 20분으로 옮기면 실패, + 40분이면 통과).
-let NOW = Math.floor(Date.now() / STEP) * STEP - 2 * STEP;
-while (M.periodKeyOf('top', NOW - 14 * STEP) !== M.periodKeyOf('top', NOW)) NOW -= STEP;
 
 const proc = (pid, start, cpu, { comm = 'postgres', user = 'gpadmin', rss = 3_000_000, cpuS = 1000, rd = 1e6, wr = 1e5, ioPerm = false } = {}) => ({ pid, start, cpu, comm, user, rssKb: rss, state: 'R', cpuS, rd, wr, ioPerm });
 const topOf = (cpu, { mem = null, upS = 100_000 } = {}) => ({ src: 'top', dtS: 1.1, clk: 100, pageKb: 4, uptimeS: upS, nproc: 400, nrun: 3, nd: 1, cpuTotal: cpu.reduce((a, x) => a + x.cpu, 0) + 2,
