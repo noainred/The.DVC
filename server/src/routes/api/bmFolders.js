@@ -31,7 +31,7 @@ import { numOrNull } from '../../util/numOrNull.js';
 import { cleanFolderPath, cleanText, peekMap as smPeekMap, mutateMap as smMutateMap, flushStore as smFlushStore, storeLoadError as smLoadError, storeRev as smStoreRev } from '../../servicemap/store.js';
 import { sharedGather, sharedInputRev, sharedFresh, bmKeyOf, pubKey, keyResolverFor, maskName, corpWriteAccess, stripTag } from './svcInventory.js';
 import { userToolAllowed } from '../../auth/permissions.js';
-import { buildFolders, searchMembers, parseTokens, srcClassOf } from '../../bmfolders/build.js';
+import { buildFolders, searchMembers, parseTokens, srcClassOf, assignOf } from '../../bmfolders/build.js';
 import {
   storeLoadError, storeRev, peekMain, peekAssign, mutateMain, mutateAssign, flushStore, resetCorrupt,
   LIMITS, newRuleId, underPath, ancestorsOf, isMemberKey,
@@ -72,6 +72,8 @@ export function membersOf(g) {
       key: m.key, keyKind: m.keyKind, kind: 'bm', corp: t(m.corp), name: t(m.name), nameIsAddr: !!m.nameIsAddr, serviceTag: t(m.serviceTag), model: t(m.model),
       source: t(m.source), remoteAgent: t(m.remoteAgent), collectorId: t(m.collectorId), powered: m.powered ?? null, usage: m.usage || { state: 'unread' },
       faults: m.faults ?? null, watts: m.watts ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null, usageKey: t(m.usageKey), mgmtHost: t(m.mgmtHost),
+      // v2.989(③-가): 키 등급이 오르기 전 키(태그를 읽기 전 fl:) — 그 키로 한 등록을 승계한다(서비스 인벤토리 고정과 같은 별칭 규칙 `bmAliasKeys`)
+      aliasKeys: Array.isArray(m.aliasKeys) ? m.aliasKeys.filter((a) => typeof a === 'string' && a && a !== m.key).slice(0, 4) : [],
     });
   }
   for (const h of g?.hostByKey?.values?.() || []) {
@@ -96,7 +98,7 @@ async function stateFor(req, snap) {
   const admin = isAdminDetailUser(req.user);
   const holdCorps = new Set(g.corpHold instanceof Map ? [...g.corpHold.keys()] : []);
   const b = buildFolders({ members, main: peekMain(), assign: peekAssign(), allowed, bmBlocked: !!g.bmBlocked, holdCorps, snapInitial: !!g.snapInitial,
-    nameFn: (m) => nameOf(m, admin, !!allowed) });
+    heldKeys: g.bmHeldKeys instanceof Set ? g.bmHeldKeys : null, nameFn: (m) => nameOf(m, admin, !!allowed) });
   return { g, members, dupKeys, allowed, b };
 }
 
@@ -490,11 +492,15 @@ export function registerBmFolders(api) {
         if (op === 'unassign') {
           const del = [];
           for (const k of keys) {
-            const a = k ? assign[k] : null;
+            // 지금 서버면 별칭 키(키 등급이 오르기 전 키)로 한 등록도 그 서버의 등록이다(v2.989 ③-가) — 둘 다 지운다
+            const m = k ? b.byKey.get(k) : null;
+            const hitA = m ? assignOf(m, assign) : (k && assign[k] ? { a: assign[k], k } : null);
+            const a = hitA?.a;
             if (!a) { skipped.notAssigned += 1; continue; }
             if (!inUserScope(user, snap, a.corp)) { skipped.notFound += 1; continue; }
             if (!writableOf(user, snap, a.corp)) { skipped.readOnly += 1; continue; }
-            del.push(k);
+            del.push(hitA.k);
+            if (m) for (const x of [m.key, ...(m.aliasKeys || [])]) if (x !== hitA.k && assign[x] && assign[x].corp === a.corp) del.push(x);
           }
           if (!del.length && skipped.readOnly) return res.status(403).json({ ok: false, error: 'forbidden', reason: '고른 서버의 법인이 전부 조회 전용입니다(쓰기 범위 밖).' });
           if (!del.length) return done({ removed: 0, skipped });
@@ -525,7 +531,8 @@ export function registerBmFolders(api) {
           if (onlyCorp && m.corp !== onlyCorp) { skipped.otherCorp += 1; continue; }
           if (!writableOf(user, snap, m.corp)) { skipped.readOnly += 1; continue; }
           if (!isMemberKey(k)) { skipped.badKey += 1; continue; }   // 저장할 수 없는 키(반증 3 — 예전에는 added 로 세고 조용히 버렸다)
-          const cur = assign[k];
+          const hitA = assignOf(m, assign);   // 별칭 키 등록도 이 서버의 지금 등록이다(v2.989 ③-가)
+          const cur = hitA?.a;
           // 다른 법인에 남은 예전 등록(서버 귀속이 바뀜)은 그 법인에 쓸 수 있을 때만 덮어쓴다(반증 2 — unassign 은 막는데 assign 이 덮어썼다)
           if (cur && cur.corp !== m.corp && !writableOf(user, snap, cur.corp)) { skipped.otherCorpReg += 1; continue; }
           if (cur && cur.corp === m.corp && cur.path === p.value) { skipped.same += 1; continue; }
@@ -536,7 +543,7 @@ export function registerBmFolders(api) {
             if (!newFolders.has(m.corp)) newFolders.set(m.corp, new Set());
             newFolders.get(m.corp).add(p.value);
           }
-          plan.push({ k, corp: m.corp, name: m.name, addr: !!m.nameIsAddr });
+          plan.push({ k, corp: m.corp, name: m.name, addr: !!m.nameIsAddr, drop: hitA && hitA.k !== k ? [hitA.k] : [] });
         }
         if (!plan.length && skipped.readOnly && !onlyCorp) return res.status(403).json({ ok: false, error: 'forbidden', reason: '고른 서버의 법인이 전부 조회 전용입니다(쓰기 범위 밖).' });
         if (!plan.length) return done({ added: 0, skipped, newFolders: 0 });
@@ -551,7 +558,8 @@ export function registerBmFolders(api) {
         });
         if (!r1.ok) return fail(r1);
         const now = Date.now();
-        const r2 = mutateAssign((d) => { for (const x of plan) d.assign[x.k] = { corp: x.corp, path: p.value, name: x.name, ...(x.addr ? { addr: true } : {}), by: who, at: now }; return { result: {} }; });
+        // 별칭 키로 남은 옛 등록은 새 키로 옮기고 지운다(한 서버에 등록 둘이 남지 않게 — v2.989 ③-가)
+        const r2 = mutateAssign((d) => { for (const x of plan) { d.assign[x.k] = { corp: x.corp, path: p.value, name: x.name, ...(x.addr ? { addr: true } : {}), by: who, at: now }; for (const o of x.drop) delete d.assign[o]; } return { result: {} }; });
         if (!r2.ok) return fail(r2);
         const nf = [...newFolders.values()].reduce((s, x) => s + x.size, 0);
         audit(`${p.value} ← ${plan.length}대`, JSON.stringify({ corps: corpsTouched, moveExisting, newFolders: nf, skipped, keys: plan.slice(0, 20).map((x) => x.k) }));

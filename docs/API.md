@@ -996,11 +996,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/bareos-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/bareosViews.js:206](../server/src/routes/api/bareosViews.js#L206) |
 | GET | `/tools/bareos-summary/policy` | 권한 `tools` | [server/src/routes/api/bareosPolicy.js:44](../server/src/routes/api/bareosPolicy.js#L44) |
 | GET | `/tools/bareos-summary/pools` | 권한 `tools` | [server/src/routes/api/bareosPolicy.js:70](../server/src/routes/api/bareosPolicy.js#L70) |
-| GET | `/tools/bm-folders` | 권한 `tools` | [server/src/routes/api/bmFolders.js:241](../server/src/routes/api/bmFolders.js#L241) |
-| GET | `/tools/bm-folders.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/bmFolders.js:368](../server/src/routes/api/bmFolders.js#L368) |
-| POST | `/tools/bm-folders/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:394](../server/src/routes/api/bmFolders.js#L394) |
-| GET | `/tools/bm-folders/search` | 권한 `tools` | [server/src/routes/api/bmFolders.js:301](../server/src/routes/api/bmFolders.js#L301) |
-| GET | `/tools/bm-folders/trend` | 권한 `tools` | [server/src/routes/api/bmFolders.js:333](../server/src/routes/api/bmFolders.js#L333) |
+| GET | `/tools/bm-folders` | 권한 `tools` | [server/src/routes/api/bmFolders.js:243](../server/src/routes/api/bmFolders.js#L243) |
+| GET | `/tools/bm-folders.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/bmFolders.js:370](../server/src/routes/api/bmFolders.js#L370) |
+| POST | `/tools/bm-folders/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmFolders.js:396](../server/src/routes/api/bmFolders.js#L396) |
+| GET | `/tools/bm-folders/search` | 권한 `tools` | [server/src/routes/api/bmFolders.js:303](../server/src/routes/api/bmFolders.js#L303) |
+| GET | `/tools/bm-folders/trend` | 권한 `tools` | [server/src/routes/api/bmFolders.js:335](../server/src/routes/api/bmFolders.js#L335) |
 | GET | `/tools/bm-storage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:94](../server/src/routes/api/bmstor.js#L94) |
 | POST | `/tools/bm-storage/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:613](../server/src/routes/api/bmstor.js#L613) |
 | GET | `/tools/bm-storage/compare` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:118](../server/src/routes/api/bmstor.js#L118) |
@@ -1493,12 +1493,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:300](../server/src/routes/api/storageMon.js#L300) |
 | PUT | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:318](../server/src/routes/api/storageMon.js#L318) |
 | POST | `/tools/storage/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:154](../server/src/routes/api/storageMon.js#L154) |
-| GET | `/tools/svc-inventory` | 권한 `tools` | [server/src/routes/api/svcInventory.js:594](../server/src/routes/api/svcInventory.js#L594) |
-| GET | `/tools/svc-inventory.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/svcInventory.js:763](../server/src/routes/api/svcInventory.js#L763) |
-| GET | `/tools/svc-inventory/candidates` | 권한 `tools` | [server/src/routes/api/svcInventory.js:744](../server/src/routes/api/svcInventory.js#L744) |
-| GET | `/tools/svc-inventory/members` | 권한 `tools` | [server/src/routes/api/svcInventory.js:645](../server/src/routes/api/svcInventory.js#L645) |
-| POST | `/tools/svc-inventory/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/svcInventory.js:798](../server/src/routes/api/svcInventory.js#L798) |
-| GET | `/tools/svc-inventory/queues` | 권한 `tools` | [server/src/routes/api/svcInventory.js:697](../server/src/routes/api/svcInventory.js#L697) |
+| GET | `/tools/svc-inventory` | 권한 `tools` | [server/src/routes/api/svcInventory.js:627](../server/src/routes/api/svcInventory.js#L627) |
+| GET | `/tools/svc-inventory.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/svcInventory.js:796](../server/src/routes/api/svcInventory.js#L796) |
+| GET | `/tools/svc-inventory/candidates` | 권한 `tools` | [server/src/routes/api/svcInventory.js:777](../server/src/routes/api/svcInventory.js#L777) |
+| GET | `/tools/svc-inventory/members` | 권한 `tools` | [server/src/routes/api/svcInventory.js:678](../server/src/routes/api/svcInventory.js#L678) |
+| POST | `/tools/svc-inventory/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/svcInventory.js:831](../server/src/routes/api/svcInventory.js#L831) |
+| GET | `/tools/svc-inventory/queues` | 권한 `tools` | [server/src/routes/api/svcInventory.js:730](../server/src/routes/api/svcInventory.js#L730) |
 | GET | `/tools/thin-vms` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1236](../server/src/routes/api/toolsCapacity.js#L1236) |
 | GET | `/tools/threats` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:102](../server/src/routes/api/toolsAnalytics.js#L102) |
 | GET | `/tools/vclogs` | 권한 `tools` | [server/src/routes/api/checksLogs.js:379](../server/src/routes/api/checksLogs.js#L379) |

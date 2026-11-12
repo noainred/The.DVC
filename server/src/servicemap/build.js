@@ -77,7 +77,7 @@ function finishStat(st, hostByKey) {
  * @param {{members:object[], map:object, pins:object, hostByKey:Map, allowed:Set|null, unreadCorps:Set, bmBlocked:boolean,
  *          corpNames:Map, scanEntries?:Map, adminView?:boolean}} input
  */
-export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null, bmFolderOf = null } = {}) {
+export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, bmHeldKeys = null, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null, bmFolderOf = null } = {}) {
   const idx = buildIndex(map);
   // bmFolderOf(v2.987): 베어메탈 키 → 물리서버 폴더 경로(미분류 '' · 모름 undefined). 없으면(null) 물리서버 폴더 규칙을 건너뛴다.
   const ctx = { tagCategory: map?.settings?.tagCategory || '', bmFolderOf };
@@ -148,7 +148,7 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
   const unlinked = services.filter((s) => !s.globalId || !globalById.has(s.globalId))
     .map((s) => ({ id: s.id, corp: s.corp, name: s.name, suggest: globalNames.get(lc(s.name)) || null, n: s.stat.n.total }));
 
-  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members, resolved, pins, allowed, unreadCorps, bmBlocked, uuidUnreadCorps, corpHold, snapInitial, idx, scanEntries, adminView, knownCorps }) };
+  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members, resolved, pins, allowed, unreadCorps, bmBlocked, bmHeldKeys, uuidUnreadCorps, corpHold, snapInitial, idx, scanEntries, adminView, knownCorps }) };
 }
 
 /**
@@ -156,7 +156,7 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
  * ⚠ 유령 판정은 **읽지 못한 출처를 막는다**(4차 반증 5): 그 법인 vCenter 를 지금 못 읽거나(unreadCorps) 베어메탈 출처를 못 읽으면
  *   (bmBlocked — 등록부 손상·엣지 만료 등) 그 고정은 유령이 아니라 '판정 보류' 다. v2.783 P-B3 와 같은 사고 유형.
  */
-export function buildQueues({ members = [], resolved, pins = {}, allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, idx, scanEntries = new Map(), adminView = true, knownCorps = null }) {
+export function buildQueues({ members = [], resolved, pins = {}, allowed = null, unreadCorps = new Set(), bmBlocked = false, bmHeldKeys = null, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, idx, scanEntries = new Map(), adminView = true, knownCorps = null }) {
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
   const groups = new Map();
   const unmapped = new Map();
@@ -265,7 +265,7 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     //   **VM 이 한 대도 없는데 VM 고정이 있는** 법인은 판정 보류다(일괄 정리하지 않는다 — 보류 행의 '고정 지우기'(pins.clear)로 한 건씩 지울 수 있다).
     const why = snapInitial ? 'snapshot-initial'
       : unreadCorps.has(p.corp) ? 'corp-unread'
-        : corpHold.get(p.corp) || (isVm && !vmCorps.has(p.corp) ? 'corp-no-vms' : isBm && bmBlocked ? 'bm-source-unread' : uuidUnread ? 'uuid-unread'
+        : corpHold.get(p.corp) || (isVm && !vmCorps.has(p.corp) ? 'corp-no-vms' : isBm && bmBlocked ? 'bm-source-unread' : isBm && bmHeldKeys?.has?.(k) ? 'bm-collector-listed' : uuidUnread ? 'uuid-unread'
           : k.startsWith('iu:') && morefCorps.has(p.corp) ? 'uuid-partial' : '');
     (why ? held : ghosts).push({ key: k, serviceId: p.serviceId, serviceName: svcName, corp: p.corp, by: p.by, at: p.at, ...(why ? { held: why } : {}) });
   }

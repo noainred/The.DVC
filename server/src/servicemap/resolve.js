@@ -25,6 +25,7 @@
  *   scanWhy(5차 R18): scan 이 없는 이유 — 보고된 엔트리 id 가 중앙 등록부에 없음 · 보고한 엣지·수집 서버가 엔트리 id 를 보내지 않는 구버전.
  *   tags: undefined = 태그 규칙 꺼짐 · null = 그 vCenter 태그를 못 읽음(unchecked) · [] = 읽었고 카테고리 태그 없음.
  */
+import { ruleNameOf } from '../util/ruleName.js';
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 const NAME_INPUT_MAX = 128;   // 이름 규칙 입력 상한(선형 비교라 길이만 자른다)
 const FOLDER_INPUT_MAX = 256;
@@ -88,7 +89,9 @@ function bmLowerResolve(m, c) {
     const a = c.aliasScan.get(lc(scan.label));
     if (a) return hit(a, 'scan', scan.label);
   }
-  const nr = c ? nameRuleOf(c, m.name) : null;
+  // v2.989(잔여 위험 — servicemap 4차 반증 4): 베어메탈 이름 규칙은 **가린 뒤 이름**으로만(태그 걷어 냄 · 주소 이름은 규칙 밖).
+  //   원문 이름으로 맞추면 쓰기 계정이 규칙 값을 바꿔 가며 소속 변화로 가린 태그 · 주소를 맞혀 볼 수 있었다. 물리서버 폴더 자동 규칙과 같은 함수(`util/ruleName.js`).
+  const nr = c ? nameRuleOf(c, ruleNameOf(m)) : null;
   if (nr) return { ...hit(nr.r.serviceId, 'rule', `${nr.r.match}:${nr.r.value}`), ...(nr.others.length ? { ruleOverlap: nr.others } : {}) };
   return null;
 }

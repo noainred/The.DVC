@@ -82,6 +82,33 @@ export function bmAliasKeys(b, keyKind) {
   const f = !b?.untaggedServerId && sid.startsWith('host:') ? lc(b?.name) : lc(sid);
   return f ? [`fl:${crypto.createHash('sha1').update(f).digest('hex').slice(0, 16)}`] : [];
 }
+/**
+ * v2.989(③-나 — 설계 §6 '수집 서버(pull) 경로 키 대조' 의 결과): 함대 서버 목록(universe)은 iDRAC 등록부 서버를 전력이 없어도 넣지만
+ * 수집 서버 서버는 **전력 항목으로만** 넣는다 — pull 이 전력 값 없는 서버를 전력 항목에서 빼고(collector/puller.js) 실패가 길면 항목이 오래돼 빠진다(2시간).
+ * 그래서 수집 서버가 지금도 보고하는(인벤토리에 있는) 서버의 고정 · 물리서버 폴더 등록이 '없어짐 — 정리 대상' 이 됐다(엣지 push 경로는 그렇지 않다).
+ * 이 함수는 그 키(st:<태그> · 태그 없을 때의 fl: — 함대 fleetId `remote:<수집기>:<서버>` 와 같은 해시)를 돌려준다. 순수.
+ *   · 시한: 그 수집 서버가 **마지막으로 성공한 지** holdMs(기본 UNREADABLE_HOLD_MS 24시간) 안일 때만(상태 `at` — 실패 기록은 직전 성공 시각을 그대로 둔다)
+ *   · 꺼진 · 지워진 수집 서버는 빼고(그쪽은 fleetKeySources 가 '못 읽음' 으로 이미 전부 보류한다) · **지금 ESXi 호스트인 서버(태그 · 이름)는 뺀다**
+ *     (4차 반증 2 — '함대가 아직 안다' 로 보류하면 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다)
+ */
+export function collectorHeldKeys({ remoteServers = [], statusOf = () => null, collectors = [], hosts = [], now = Date.now(), holdMs = 86_400_000 } = {}) {
+  const out = new Set();
+  const enabled = new Set((collectors || []).filter((c) => c && t(c.id) && c.enabled !== false).map((c) => t(c.id)));
+  const hostTags = new Set(); const hostNames = new Set();
+  for (const h of hosts || []) { if (t(h?.serviceTag)) hostTags.add(lc(h.serviceTag)); if (t(h?.name)) hostNames.add(lc(h.name)); }
+  for (const s of remoteServers || []) {
+    const cid = t(s?.collectorId);
+    if (!cid || !enabled.has(cid)) continue;
+    const at = numOrNull(statusOf(cid)?.at);
+    if (at == null || now - at > holdMs) continue;
+    const tag = lc(s.serviceTag || s.inv?.system?.serviceTag);
+    if ((tag && hostTags.has(tag)) || (t(s.name) && hostNames.has(lc(s.name)))) continue;
+    if (tag) out.add(`st:${tag}`);
+    const sid = t(s.id);
+    if (sid) out.add(`fl:${crypto.createHash('sha1').update(lc(`remote:${cid}:${sid}`)).digest('hex').slice(0, 16)}`);
+  }
+  return out;
+}
 /** Bareos 원장 → VM 백업 칸(순수). undefined = Bareos 미사용 · null = 원장 못 읽음 · 'ok' 24h 내 성공 · 'fail' 실패/지연 · 'none' 잡 없음. */
 export function backupOf(view, now) {
   if (view === null) return null;
@@ -199,12 +226,12 @@ async function gatherNowInner(snap, tagCategory) {
   const sourceErrors = [];
   const now = Date.now();
   const [{ getFleetInventory, fleetKeySources }, { loadRegistry }, { getInventory }, { allRemoteServers }, edgeUsage, { attributeBareMetalFromSnap },
-    { unreadVcenterReasons }, { getEdgeFleetServers }, { listScanRanges }, pf, bareosReg, { bareosVmView }, { datacenterOfVcenter }] = await Promise.all([
+    { unreadVcenterReasons }, { getEdgeFleetServers, UNREADABLE_HOLD_MS }, { listScanRanges }, pf, bareosReg, { bareosVmView }, { datacenterOfVcenter }, { getCollectorStatus }, { loadCollectors }] = await Promise.all([
     import('../../insights/fleetInventory.js'), import('../../idrac/registry.js'), import('../../idrac/invCache.js'),
     import('../../collector/remoteInventory.js'), import('../../central/bmUsageEdgePull.js'), import('../../idrac/corpAttribution.js'),
     import('../../metrics/unreadVcenters.js'), import('../../central/fleet.js'), import('../../idrac/scanRanges.js'),
     Promise.all([import('../../partfault/db.js'), import('../../partfault/settings.js')]), import('../../bareos/registry.js'), import('../../bareos/vmView.js'),
-    import('../../datacenter/store.js'),
+    import('../../datacenter/store.js'), import('../../collector/state.js'), import('../../collector/registry.js'),
   ]);
   const bareosSet = await import('../../bareos/settings.js');
   const vcenters = snap?.vcenters || [];
@@ -368,6 +395,12 @@ async function gatherNowInner(snap, tagCategory) {
     bmBlockedSources = (fk.unreadable || []).filter((u) => u.source !== 'vcenter').slice(0, 20).map((u) => ({ source: t(u.source), reason: t(u.reason).slice(0, 200) }));
     bmBlocked = bmBlockedSources.length > 0;
   } catch (e) { bmBlocked = true; bmBlockedSources = [{ source: 'fleet-keys', reason: `베어메탈 출처 목록을 만들지 못했습니다(${String(e?.message || e).slice(0, 120)})` }]; }
+  // v2.989(③-나): 수집 서버(pull)가 지금 보고하는데 분류 목록에서 빠진 베어메탈 키 — 그 키의 고정 · 물리서버 폴더 등록은 '없어짐' 이 아니라 보류.
+  const bmHeldKeys = (() => {
+    try {
+      return collectorHeldKeys({ remoteServers, statusOf: getCollectorStatus, collectors: loadCollectors(), hosts: snap?.hosts, now, holdMs: UNREADABLE_HOLD_MS });
+    } catch (e) { sourceErrors.push(`수집 서버 보류 키: ${String(e?.message || e).slice(0, 160)}`); return new Set(); }
+  })();
   // VM 식별 키(instanceUuid)를 못 읽는 법인 — VM 이 있는데 instanceUuid 가 하나도 없다(REST 폴백 수집 등). 그 법인의 iu: 고정은 유령이 아니라 판정 보류(4차 반증 5).
   const vmTotal = new Map(); const vmUuid = new Map();
   for (const vm of snap?.vms || []) { if (!vm || vm.template) continue; const vc = t(vm.vcenterId); vmTotal.set(vc, (vmTotal.get(vc) || 0) + 1); if (t(vm.instanceUuid)) vmUuid.set(vc, (vmUuid.get(vc) || 0) + 1); }
@@ -377,7 +410,7 @@ async function gatherNowInner(snap, tagCategory) {
   const corpHold = new Map();
   for (const v of vcenters) { const id = t(v?.id); if (!id) continue; if (v.status === 'pending') corpHold.set(id, 'corp-pending'); else if (v.status === 'disabled') corpHold.set(id, 'corp-disabled'); }
   const snapInitial = !snap || snap.initial === true;
-  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, uuidUnreadCorps, corpHold, snapInitial, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
+  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, bmHeldKeys, uuidUnreadCorps, corpHold, snapInitial, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
 }
 
 // ───────── 권한 ─────────
@@ -480,7 +513,7 @@ async function inventoryFor(req, snap) {
   const hit = _invMemo.get(key);
   if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, allowed, admin }; }
   _invStats.misses += 1;
-  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, bmFolderOf: bmFolderMapOf(g.members), hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
+  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, bmFolderOf: bmFolderMapOf(g.members), hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, bmHeldKeys: g.bmHeldKeys, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
   for (const [k, v] of _invMemo) if (now - v.at >= INV_MEMO_MS) _invMemo.delete(k);
   while (_invMemo.size >= INV_MEMO_MAX) _invMemo.delete(_invMemo.keys().next().value);
   _invMemo.set(key, { at: now, inv });

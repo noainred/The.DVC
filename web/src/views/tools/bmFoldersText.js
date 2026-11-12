@@ -15,6 +15,7 @@ export const MISSING_WHY = {
   'snapshot-initial': '인벤토리 첫 수집 전이라 판정을 미룹니다',
   'corp-hold': '그 법인이 수집 전이거나 꺼져 있어 판정을 미룹니다',
   'source-unread': '서버 목록 출처 중 못 읽은 것이 있어 판정을 미룹니다',
+  'collector-listed': '수집 서버가 지금도 보고하는 서버지만 전력을 못 읽었거나 보고가 오래돼 서버 목록에서 빠졌습니다 — 지우지 않습니다(수집 서버가 하루 넘게 실패하면 보류도 끝남)',
 };
 export const SKIP_TEXT = {
   notFound: '찾지 못함', noCorp: '법인 미지정', readOnly: '조회 전용 법인', otherCorp: '다른 법인', inOther: '이미 다른 폴더', same: '이미 그 폴더', noFolder: '폴더 없음', notAssigned: '등록 없음',
