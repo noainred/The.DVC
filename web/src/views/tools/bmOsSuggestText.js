@@ -29,3 +29,11 @@ export function applyResultText(r) {
   const refused = Array.isArray(r?.refused) ? r.refused.length : 0;
   return `${added}대의 OS 주소를 등록했습니다(주소만 · 비활성)${refused ? ` · ${refused}건은 등록하지 않았습니다(그사이 상태가 바뀜)` : ''}.`;
 }
+
+/** 처음 고를 거르기 — 제안이 있으면 제안 · 없고 고르기 필요가 있으면 그것 · 둘 다 없으면 전체(빈 화면으로 시작하지 않게). */
+export function initialFilter(c = {}) {
+  if (Number(c?.suggest) > 0) return 'suggest';
+  if (Number(c?.pick) > 0) return 'pick';
+  return 'all';
+}
+

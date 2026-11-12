@@ -9,7 +9,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { STATE_TEXT, VIA_TEXT, suggestRowsOf, applyResultText, pickableOf } from './bmOsSuggestText.js';
+import { STATE_TEXT, VIA_TEXT, suggestRowsOf, applyResultText, pickableOf, initialFilter } from './bmOsSuggestText.js';
 
 const FILTERS = [['suggest', '제안 있음'], ['pick', '고르기 필요'], ['none', '못 찾음'], ['differs', '등록된 주소와 다름'], ['all', '전체']];
 const STACK = [['registered', '#22c55e'], ['suggest', '#3b82f6'], ['pick', '#f59e0b'], ['none', '#8b9bb4']];
@@ -22,10 +22,17 @@ export function BmOsSuggest() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const seq = useRef(0);
+  const first = useRef(true);
   const load = () => {
     const my = ++seq.current;
     setErr(null);
-    fetchJson('/admin/ipam/scan/bm-os-suggest').then((r) => { if (my === seq.current) setD(r); }).catch((e) => { if (my === seq.current) setErr(e); });
+    fetchJson('/admin/ipam/scan/bm-os-suggest').then((r) => {
+      if (my !== seq.current) return;
+      // 처음 열 때만 — 제안이 0건이면 빈 화면 대신 개수가 있는 거르기(고르기 필요 → 전체)
+      setFilter((f) => (first.current ? initialFilter(r?.counts) : f));
+      first.current = false;
+      setD(r);
+    }).catch((e) => { if (my === seq.current) setErr(e); });
   };
   useEffect(load, []);
   const rows = useMemo(() => suggestRowsOf(d?.rows || [], filter), [d, filter]);

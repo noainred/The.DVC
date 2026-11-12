@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { rowSrcClass, srcCounts, metricSrcText, srcTitle } from './usageSrc.js';
-import { suggestRowsOf, pickableOf, applyResultText } from '../bmOsSuggestText.js';
+import { suggestRowsOf, pickableOf, applyResultText, initialFilter } from '../bmOsSuggestText.js';
 
 describe('v2.991 사용률 출처(설계 bm-folders §13 ①)', () => {
   it('행 분류 — 같은 출처 · 다르면 mixed · 서버가 구분 모름이면 mixed · 값 없으면 none', () => {
@@ -26,5 +26,6 @@ describe('v2.991 OS 주소 제안 문구(설계 bm-folders §13 ②)', () => {
     expect(suggestRowsOf(rows, 'all')).toHaveLength(6);
     expect(rows.filter(pickableOf).map((r) => r.state)).toEqual(['suggest', 'pick']);
     expect(applyResultText({ added: 2, refused: [{}] })).toContain('1건은 등록하지 않았습니다');
+    expect([initialFilter({ suggest: 2 }), initialFilter({ suggest: 0, pick: 1 }), initialFilter({ none: 17 })]).toEqual(['suggest', 'pick', 'all']);
   });
 });

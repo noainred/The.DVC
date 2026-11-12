@@ -5,6 +5,8 @@
 export const SRC_COLOR = Object.freeze({ os: '#3b82f6', idrac: '#5eead4', vcenter: '#94a3b8' });
 export const SRC_LABEL = Object.freeze({ os: 'OS', idrac: 'iDRAC', vcenter: 'vCenter' });
 export const SRC_LONG = Object.freeze({ os: 'OS(SSH)', idrac: 'iDRAC', vcenter: 'vCenter', mixed: '지표마다 다름', none: '없음' });
+/** 좁은 화면 카드 줄 끝 — 전력 값을 밀어내지 않게 짧게(줄이 넘치면 이것이 먼저 잘린다). */
+export const SRC_SHORT = Object.freeze({ os: 'OS', idrac: 'iDRAC', vcenter: 'vCenter', mixed: '혼합' });
 
 /** 행 하나의 출처 분류 — 값이 있는 지표의 출처가 모두 같으면 그 출처, 다르면(또는 서버가 '구분 모름' 이라 하면) 'mixed', 값이 없으면 'none'. */
 export function rowSrcClass(r) {
