@@ -1,6 +1,6 @@
 /**
  * 물리서버 폴더 — 서버 옆 패널(v2.984). 화면을 떠나지 않고 서버 한 대의 상태 · 폴더를 보고 옮기거나 뺀다.
- * v2.986: 24시간 CPU · 메모리 추이(이 포탈이 적재한 원시 이력 — 엣지가 수집한 서버는 그 엣지에만 있다고 밝힌다) · 관리 주소(관리자 판본만).
+ * v2.986: 24시간 CPU · 메모리 추이(서버 비교와 같은 경로 — 이 노드 수집은 로컬, 엣지 수집은 그 엣지에서 서버당 요청 1개) · 관리 주소(관리자 판본만).
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../../../api.js';
@@ -76,7 +76,14 @@ export default function SidePanel({ r, corps, corpName, scoped, op, busy, onClos
   );
 }
 
-const WHY = { edge: '이 서버는 엣지 · 수집 서버가 사용률을 수집합니다 — 원시 이력은 그 엣지 포탈의 베어메탈 사용률 화면에 있습니다.', esxi: 'ESXi 호스트의 추이는 호스트 화면에서 봅니다.', none: '이 포탈에 쌓인 사용률 이력이 없습니다(베어메탈 사용률 수집이 꺼져 있거나 아직 수집 전일 수 있습니다).', 'no-key': '사용률 대상 키가 없습니다.' };
+const WHY = {
+  esxi: 'ESXi 호스트의 추이는 호스트 화면에서 봅니다.',
+  none: '이 기간에 쌓인 사용률 값이 없습니다(수집이 꺼져 있었거나 못 읽었을 수 있습니다).',
+  'no-key': '사용률 대상 키가 없습니다.',
+  'no-target': '베어메탈 사용률 수집 대상이 아닙니다(특수 기능 › 베어메탈 사용률에서 그 법인 수집을 켜야 추이가 쌓입니다).',
+  'old-version': '이 서버를 수집하는 엣지가 구버전이라 추이를 받지 못했습니다(엣지 업그레이드 뒤 보입니다).',
+  'edge-fail': '이 서버를 수집하는 엣지에서 추이를 받지 못했습니다(잠시 뒤 다시 열어 보십시오).',
+};
 /** 24시간 CPU · 메모리 추이 — 서버를 바꾸면 늦게 온 이전 응답은 버린다. 못 읽은 점은 선을 끊는다(0 으로 그리지 않는다). */
 function Trend({ k, kind }) {
   const [d, setD] = useState(null);
@@ -91,7 +98,8 @@ function Trend({ k, kind }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>CPU · 메모리 — 지난 24시간</span>
       {err ? <span style={{ fontSize: 12, color: 'var(--red)' }}>{err}</span> : !d ? <span className="muted" style={{ fontSize: 12 }}>읽는 중…</span>
-        : !d.rows?.length ? <span className="muted" style={{ fontSize: 12 }}>{WHY[d.why] || WHY.none}</span> : <Spark rows={d.rows} />}
+        : !d.rows?.length || d.why === 'none' ? <span className="muted" style={{ fontSize: 12 }}>{WHY[d.why] || WHY.none}{d.reason ? ` — ${d.reason}` : ''}</span> : <Spark rows={d.rows} />}
+      {d?.via === 'edge' && d.rows?.length ? <span className="muted" style={{ fontSize: 11 }}>이 서버를 수집하는 엣지에서 받았습니다(구간 평균)</span> : null}
     </div>
   );
 }

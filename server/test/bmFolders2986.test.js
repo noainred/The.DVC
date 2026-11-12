@@ -78,6 +78,9 @@ test('② 판정: 물리서버 폴더 규칙은 고정 다음 · 스캔 라벨 �
   // 규칙이 하나도 없으면 예전 판정과 같다(업그레이드 뒤 소속이 옮겨 가지 않는다)
   const old = buildIndex({ corps: { A: corpOf({ services: [S('s1', 'ERP')], nameRules: [{ match: 'prefix', value: 'kr-', serviceId: 's1' }] }) } });
   for (const p of ['DB', '', undefined]) assert.deepEqual(autoResolve(m, old, { bmFolderOf: new Map([['st:x', p]]) }), autoResolve(m, old, {}));
+  // 아래 순위 자체도 그대로다 — 스캔 라벨이 없으면 이름 규칙(변이 M11: 이름 규칙 결과를 버리면 잡힌다)
+  assert.deepEqual([autoResolve({ ...m, scan: null }, old, {}).src, autoResolve({ ...m, scan: null }, old, {}).serviceId], ['rule', 's1']);
+  assert.equal(autoResolve({ ...m, scan: null }, idx, { bmFolderOf: new Map([['st:x', '']]) }).src, 'rule');
   assert.equal(bmFolderMatches('DB', 'DB\\X'), true); assert.equal(bmFolderMatches('DB', 'DBX'), false); assert.equal(bmFolderMatches('db', 'DB'), false, '대소문자 구분');
   // 집계 · 검토 큐
   const inv = buildInventory({ members: [m], map, pins: {}, bmFolderOf: new Map([['st:x', 'DB']]) });
@@ -154,6 +157,9 @@ test('③ 24시간 추이: 범위 밖 · 모르는 키 404 · 범위 계정은 �
     assert.equal((await call('GET /tools/bm-folders/trend', { query: { key: 'st:tag1' }, user: SCOPED })).statusCode, 404, '범위 계정은 원문 키를 받지 않는다');
     const g = await call('GET /tools/bm-folders', { user: SCOPED });
     const tok = g.body.servers.find((x) => x.name === 'kr-db-01').key;
+    // 범위 밖 서버의 토큰을 손에 넣어도(같은 프로세스 HMAC) 범위 안 후보에서만 되돌린다 — 404(변이 M10: 범위 필터를 빼면 잡힌다)
+    const { maskedIdToken } = await import('../src/auth/addressMask.js');
+    assert.equal((await call('GET /tools/bm-folders/trend', { query: { key: maskedIdToken('st:tag3') }, user: SCOPED })).statusCode, 404);
     const r = await call('GET /tools/bm-folders/trend', { query: { key: tok }, user: SCOPED });
     assert.equal(r.statusCode, 200, JSON.stringify(r.body)); assert.ok(Array.isArray(r.body.rows));
     const e = await call('GET /tools/bm-folders/search', { query: { inc: 'esx', kinds: 'esxi' } });
@@ -182,4 +188,36 @@ test('③ 입력 다시 읽기: 조회 계정 403 · 쓰기 계정은 상한 안
     assert.equal((await call('GET /tools/bm-folders/search', { query: { inc: '10.20', fields: 'addr' } })).body.total, 1);
     assert.equal((await call('GET /tools/bm-folders/search', { user: OPER, query: { inc: '10.20', fields: 'addr' } })).body.total, 0, '비관리자는 주소로 찾지 않는다');
   });
+});
+
+test('③ 추이 경로: 서버 비교와 같은 해석 — 이 노드 수집은 로컬 계열 · 엣지 수집은 그 엣지에서 서버당 1요청 · 구버전/실패 이유 · 범위 계정은 엣지 사유를 싣지 않음 · 못 읽은 칸은 null', async () => {
+  const { _setTrendDepsForTest, sparkRows } = await import('../src/routes/api/bmFolders.js');
+  assert.deepEqual(sparkRows({ metrics: { cpu_pct: { spark: [[2, 10, 20], [1, null, null]] }, mem_pct: { spark: [[1, 30, 40], ['x', 1, 1]] } } }),
+    [{ ts: 1, cpu: null, mem: 30 }, { ts: 2, cpu: 10, mem: null }]);
+  reset();
+  const calls = [];
+  const deps = (via, edge) => ({
+    resolve: async (req, o) => { calls.push(['resolve', o.key, o.vcenterId]); return { via, agent: 'pl-edge', realKey: o.key, target: { vcenterId: o.vcenterId } }; },
+    fail: () => null,
+    localSeries: async (o) => { calls.push(['local', o.key, o.q.metrics]); return { ok: true, metrics: { cpu_pct: { spark: [[1000, 12, 20]] }, mem_pct: { spark: [[1000, 40, 41]] } } }; },
+    edgeSeries: async (agent, o) => { calls.push(['edge', agent, o.metrics.join(',')]); return edge; },
+  });
+  try {
+    await withSnap(async () => {
+      _setTrendDepsForTest(deps('local'));
+      const a = await call('GET /tools/bm-folders/trend', { query: { key: 'st:tag1' } });
+      assert.deepEqual([a.body.via, a.body.rows], ['local', [{ ts: 1000, cpu: 12, mem: 40 }]]);
+      assert.deepEqual(calls.slice(0, 2), [['resolve', 'TAG1', 'vc-a'], ['local', 'TAG1', 'cpu_pct,mem_pct']], '대상 키 = 베어메탈 사용률 키(idOf) · 법인 쌍');
+      _setTrendDepsForTest(deps('edge', { ok: false, kind: 'old-version', reason: "엣지 'pl-edge' 가 구버전입니다" }));
+      const o = await call('GET /tools/bm-folders/trend', { query: { key: 'st:tag3' } });
+      assert.deepEqual([o.body.why, /pl-edge/.test(o.body.reason)], ['old-version', true]);
+      const tok = (await call('GET /tools/bm-folders', { user: { ...SCOPED, scope: { vcenters: ['vc-b'], regions: [], writeVcenters: [] } } })).body.servers[0].key;
+      const so = await call('GET /tools/bm-folders/trend', { query: { key: tok }, user: { ...SCOPED, scope: { vcenters: ['vc-b'], regions: [], writeVcenters: [] } } });
+      assert.equal(so.body.reason, undefined, '범위 계정에는 엣지 사유(엣지 이름)를 싣지 않는다');
+      _setTrendDepsForTest(deps('edge', { ok: true, body: { metrics: { cpu_pct: { spark: [[5, null, null]] }, mem_pct: { spark: [[5, null, null]] } } } }));
+      const e = await call('GET /tools/bm-folders/trend', { query: { key: 'st:tag3' } });
+      assert.deepEqual([e.body.via, e.body.why, e.body.rows], ['edge', 'none', [{ ts: 5, cpu: null, mem: null }]], '값이 하나도 없으면 none(0 으로 그리지 않는다)');
+      assert.ok(calls.some((c) => c[0] === 'edge' && c[1] === 'pl-edge' && c[2] === 'cpu_pct,mem_pct'));
+    });
+  } finally { _setTrendDepsForTest(null); }
 });

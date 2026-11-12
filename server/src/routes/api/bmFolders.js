@@ -26,9 +26,8 @@ import { store } from '../../store.js';
 import { memoJson, scopeKey } from './shared.js';
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
-import { pushAll } from '../../util/pushAll.js';
+import { pushAll } from '../../util/pushAll.js';   // 큰 배열 스프레드 push 금지(스윕 audit2603a)
 import { numOrNull } from '../../util/numOrNull.js';
-import { config } from '../../config.js';   // 큰 배열 스프레드 push 금지(스윕 audit2603a)
 import { cleanFolderPath, cleanText, peekMap as smPeekMap, mutateMap as smMutateMap, flushStore as smFlushStore, storeLoadError as smLoadError, storeRev as smStoreRev } from '../../servicemap/store.js';
 import { sharedGather, sharedInputRev, sharedFresh, bmKeyOf, pubKey, keyResolverFor, maskName, corpWriteAccess } from './svcInventory.js';
 import { buildFolders, searchMembers, parseTokens, srcClassOf } from '../../bmfolders/build.js';
@@ -119,6 +118,37 @@ function serverRow(m, p, admin, hide) {
     // 관리 주소 — 관리자 판본만(비관리자 · 데모에게 장비 주소를 싣지 않는다 — isAdminDetailUser 하나로 판정)
     addr: admin && m.mgmtHost ? m.mgmtHost : undefined,
   };
+}
+
+const TREND_METRICS = Object.freeze(['cpu_pct', 'mem_pct']);
+/** 추이 의존(서버 비교와 같은 함수들 — 시험에서 갈아 끼운다). */
+let _trendDeps = null;
+export function _setTrendDepsForTest(d) { _trendDeps = d; }
+async function trendDeps() {
+  if (_trendDeps) return _trendDeps;
+  const bu = await import('./bmUsage.js');
+  return {
+    resolve: (req, o) => bu.resolvePerfTarget(req, {
+      currentTargets: async () => (await import('../../bmusage/poller.js')).currentTargets(),
+      listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
+    }, o),
+    fail: (f) => bu.perfTargetFail(f),
+    localSeries: async (o) => (await import('../../bmusage/perfOpsView.js')).localPerfOps('compare-series', o),
+    edgeSeries: async (agent, o) => (await import('../../central/bmComparePull.js')).pullEdgeCompareSeries(agent, o),
+  };
+}
+/** 비교 계열 응답(metrics.<col>.spark = [[t, 평균, 최고]…]) → 시각순 [{ ts, cpu, mem }]. 못 읽은 칸은 null 그대로. */
+export function sparkRows(body) {
+  const by = new Map();
+  for (const [col, k] of [['cpu_pct', 'cpu'], ['mem_pct', 'mem']]) {
+    for (const p of Array.isArray(body?.metrics?.[col]?.spark) ? body.metrics[col].spark : []) {
+      const ts = numOrNull(Array.isArray(p) ? p[0] : null); if (ts == null) continue;
+      const row = by.get(ts) || { ts, cpu: null, mem: null };
+      row[k] = numOrNull(p[1]);
+      by.set(ts, row);
+    }
+  }
+  return [...by.values()].sort((a, b) => a.ts - b.ts);
 }
 
 /**
@@ -265,13 +295,15 @@ export function registerBmFolders(api) {
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 
-  // ── 옆 패널 24시간 CPU · 메모리 추이(v2.986) — 이 포탈이 적재한 베어메탈 사용률 원시 이력만. 숫자 · 시각만 싣는다(주소 · 계정 단서 없음). ──
-  //   엣지가 수집한 서버는 원시 이력이 그 엣지에만 있다(중앙은 최신값만 받는다) — 비어 있으면 이유(edge)를 밝히고 지어내지 않는다.
+  // ── 옆 패널 24시간 CPU · 메모리 추이(v2.986) — 서버 비교(6단계)와 **같은 대상 해석 · 같은 경로**를 쓴다(판정 하나):
+  //   이 노드가 수집한 서버 = 로컬 비교 계열 · 엣지가 수집한 서버 = 그 엣지에서 서버당 요청 1개(central/bmComparePull — 지표마다 WAN 왕복하지 않는다).
+  //   숫자 · 시각만 싣는다(주소 · 계정 단서 없음) · 못 읽은 칸은 null(0 으로 채우지 않는다) · 범위 계정에는 엣지 실패 사유(엣지 이름이 들어 있다)를 싣지 않는다.
   api.get('/tools/bm-folders/trend', toolsPerm, async (req, res) => {
     try {
       const snap = store.get();
       const { members, allowed } = await stateFor(req, snap);
       const hide = !!allowed;
+      const admin = isAdminDetailUser(req.user);
       const inScope = members.filter((m) => m.corp && (!allowed || allowed.has(m.corp)));
       const k = keyResolverFor(hide, inScope.map((m) => m.key))(typeof req.query.key === 'string' ? req.query.key.slice(0, 200) : '');
       const m = k ? inScope.find((x) => x.key === k) : null;
@@ -279,12 +311,21 @@ export function registerBmFolders(api) {
       if (m.kind !== 'bm' || !m.usageKey) return res.json({ ok: true, rows: [], why: m.kind !== 'bm' ? 'esxi' : 'no-key' });
       const hours = Math.min(168, Math.max(1, Math.floor(Number(req.query.hours) || 24)));
       const to = Date.now(); const from = to - hours * 3_600_000;
-      const { rawRangeMerged } = await import('../../bmusage/db.js');
-      // 적재 키와 조회 키가 같아야 한다 — poller 는 insertUsage(rows, config.agent?.name || '') 로 적재한다(bm-usage 상세와 같은 식 · v2.550 결함)
-      const agent = config.agent?.name || '';
-      const r = await rawRangeMerged({ key: m.usageKey, agent, from, to, limit: 3_000, newestFirst: true, cols: ['cpu_pct', 'mem_pct'] });
-      const raw = (r.rows || []).map((x) => ({ ts: numOrNull(x.ts), cpu: numOrNull(x.cpu_pct), mem: numOrNull(x.mem_pct) })).filter((x) => x.ts != null);
-      res.json({ ok: true, hours, rows: downsample(raw, 240), truncated: !!r.truncated, why: raw.length ? '' : (m.source === 'edge' || m.source === 'remote' ? 'edge' : 'none') });
+      const D = await trendDeps();
+      const found = await D.resolve(req, { allowed, isAdmin: admin, key: m.usageKey, vcenterId: m.corp });
+      if (!found || D.fail(found)) return res.json({ ok: true, rows: [], why: 'no-target' });   // 베어메탈 사용률 수집 대상이 아님(또는 아직)
+      let body = null;
+      if (found.via === 'local') {
+        const r = await D.localSeries({ key: found.realKey, q: { metrics: TREND_METRICS.join(','), from, to } }).catch((e) => ({ ok: false, reason: String(e?.message || e).slice(0, 160) }));
+        if (!r?.ok) return res.json({ ok: true, rows: [], why: 'none', ...(hide ? {} : { reason: String(r?.reason || '').slice(0, 200) }) });
+        body = r;
+      } else {
+        const r = await D.edgeSeries(found.agent, { key: found.realKey, metrics: TREND_METRICS, from, to });
+        if (!r?.ok) return res.json({ ok: true, rows: [], why: r?.kind === 'old-version' ? 'old-version' : 'edge-fail', ...(hide ? {} : { reason: String(r?.reason || '').slice(0, 200) }) });
+        body = r.body;
+      }
+      const rows = downsample(sparkRows(body), 240);
+      res.json({ ok: true, hours, via: found.via, rows, why: rows.some((x) => x.cpu != null || x.mem != null) ? '' : 'none' });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 

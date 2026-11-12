@@ -121,7 +121,7 @@
 | 맵 보기(시안 ②) | 칸 = 서버 · 묶기(폴더 · 법인 · 모델) · 색(CPU · 메모리 · 전력 · 장애) · 못 읽음 점선 · 꺼짐 회색 · 장애 빨간 테 · 묶음 요약 표(용량 가중) | `bmFolders/MapView.jsx` · `bmFoldersText.js mapGroups · cellTone` |
 | 저장한 보기 | 노드 · 보기 방식 · 거르기 · 묶기 · 색을 이름으로(이 브라우저 localStorage — 다른 사람 · 기기와 나누지 않음 · 망가진 값은 버림 · 20개) | `BmFolders.jsx ViewsMenu` · `parseViews · upsertView` |
 | 400px 카드 | 640px 이하에서 표 대신 카드(두 줄 · 고르기 44px) | `NarrowList` · `components/useNarrowScreen.js`(VmDistPanels 에서 옮김) |
-| 옆 패널 추이 | 24시간 CPU · 메모리(이 포탈 적재 원시 이력 · 240점 구간 평균 · 못 읽은 점은 선을 끊음 · 엣지 수집 서버는 이유를 밝힘) | `GET /tools/bm-folders/trend` · `SidePanel Trend` |
+| 옆 패널 추이 | 24시간 CPU · 메모리 — 서버 비교(6단계)와 같은 대상 해석 · 경로(이 노드 수집 = 로컬 비교 계열 · 엣지 수집 = 그 엣지에서 서버당 요청 1개) · 못 읽은 점은 선을 끊음 · 수집 대상 아님 · 구버전 엣지는 이유를 밝힘. 처음엔 중앙 원시 이력만 읽게 짰다가 '엣지가 수집하는 대부분 서버에서 비어 보인다' 를 스스로 찾아 바꿨다 | `GET /tools/bm-folders/trend` · `SidePanel Trend` |
 | 입력 다시 읽기 | 쓰기 계정 · 서비스 인벤토리와 같은 상한 하나 · 429 + 대기 초 | `?fresh=1` · `svcInventory.sharedFresh` |
 | 관리 주소 | 등록부 iDRAC 호스트 — 관리자 판본만 · 주소로 찾기도 관리자만 | `serverRow addr` · `searchMembers showAddr` |
 | 서비스 인벤토리 연결 | `bmFolderRules`(폴더 경로 → 서비스) · 베어메탈 판정 2b 순위(고정 다음 · 스캔 라벨 · 이름 규칙 앞) · 만들기 전 미리보기 · 겹침 검토 큐 · 이름 바꾸기 동기화 · 폴더 머리에 연결 표시 | `servicemap/{resolve,ops,store,build}.js` · `svcInventory/Queues.jsx BmRuleAdd` |
