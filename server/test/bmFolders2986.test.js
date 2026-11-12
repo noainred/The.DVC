@@ -197,8 +197,8 @@ test('③ 추이 경로: 서버 비교와 같은 해석 — 이 노드 수집은
   reset();
   const calls = [];
   const deps = (via, edge) => ({
-    resolve: async (req, o) => { calls.push(['resolve', o.key, o.vcenterId]); return { via, agent: 'pl-edge', realKey: o.key, target: { vcenterId: o.vcenterId } }; },
-    fail: () => null,
+    resolvePerfTarget: async (req, tg, o) => { calls.push(['resolve', o.key, o.vcenterId]); return { via, agent: 'pl-edge', realKey: o.key, target: { vcenterId: o.vcenterId } }; },
+    perfTargetFail: () => null, targets: {},
     localSeries: async (o) => { calls.push(['local', o.key, o.q.metrics]); return { ok: true, metrics: { cpu_pct: { spark: [[1000, 12, 20]] }, mem_pct: { spark: [[1000, 40, 41]] } } }; },
     edgeSeries: async (agent, o) => { calls.push(['edge', agent, o.metrics.join(',')]); return edge; },
   });
@@ -308,7 +308,7 @@ test('반증2-추이: 같은 (엣지, 서버, 구간)은 합쳐 한 번만 당�
   const { _setTrendDepsForTest } = await import('../src/routes/api/bmFolders.js');
   reset();
   let n = 0; let release; const gate = new Promise((r) => { release = r; });
-  const deps = (edge) => ({ resolve: async (req, o) => ({ via: 'edge', agent: 'pl-edge', realKey: o.key, target: { vcenterId: o.vcenterId } }), fail: () => null,
+  const deps = (edge) => ({ resolvePerfTarget: async (req, tg, o) => ({ via: 'edge', agent: 'pl-edge', realKey: o.key, target: { vcenterId: o.vcenterId } }), perfTargetFail: () => null, targets: {},
     localSeries: async () => ({ ok: false }), edgeSeries: async () => { n += 1; await gate; return edge; } });
   try {
     await withSnap(async () => {

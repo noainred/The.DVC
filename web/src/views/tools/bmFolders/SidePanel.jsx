@@ -8,6 +8,7 @@ import Select from '../../../components/Select.jsx';
 import EscClose from '../../../components/EscClose.jsx';
 import { UsageBar, StatusDot, SrcBadge } from './parts.jsx';
 import { PLACE_LABEL, pathText, wattsText, opErrorText } from '../bmFoldersText.js';
+import { unitText } from '../../unitText.js';
 
 export default function SidePanel({ r, corps, corpName, scoped, op, busy, onClose }) {
   const [to, setTo] = useState('');
@@ -115,7 +116,7 @@ function Spark({ rows }) {
   const last = (k) => { for (let i = rows.length - 1; i >= 0; i -= 1) if (rows[i][k] != null) return rows[i][k]; return null; };
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={`지난 24시간 CPU 마지막 ${last('cpu') ?? '—'}% · 메모리 마지막 ${last('mem') ?? '—'}%`}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={`지난 24시간 CPU 마지막 ${unitText(last('cpu'), '%')} · 메모리 마지막 ${unitText(last('mem'), '%')}`}>
         {[0, 50, 100].map((v) => <g key={v}><line x1="0" x2={W - 30} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeWidth="1" /><text x={W - 26} y={y(v) + 3} fontSize="10" fill="var(--text-dim)">{v}%</text></g>)}
         <path d={path('mem')} fill="none" stroke="var(--accent-2)" strokeWidth="1.5" />
         <path d={path('cpu')} fill="none" stroke="var(--accent)" strokeWidth="2" />

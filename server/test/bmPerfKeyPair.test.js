@@ -309,7 +309,8 @@ const SWEEP_ALLOW = Object.freeze({
   // 해석이 끝난 대상의 행 · 판정 항목 찾기(resolvePerfTarget 뒤 — 같은 대상의 최신값 행 · 엣지 봉투의 그 서버 항목)
   'bmUsage.js:bmPerfView': ['(r) => t(r.key) === target.key && t(r.agent) === agent', '(p) => t(p.key) === t(tgt.key)'],
 });
-const VC_EXPR_OK = /^\s*(?:perfVcOf\(req\)|want|vcIn|t\(b\.vcenterId\)\.slice\(0, 128\))\s*(?:,|\}|$)/;   // 요청에서 온 식만(축약형 `vcenterId` 는 쌍 변수 — 콜론 없음)
+// 요청에서 온 식만(축약형 `vcenterId` 는 쌍 변수 — 콜론 없음). `m.corp` 는 물리서버 폴더 추이(bmFolders.js v2.986) — 키를 받은 뒤 **범위로 거른 구성원**의 법인(서버가 정한 쌍 · 요청보다 강함)
+const VC_EXPR_OK = /^\s*(?:perfVcOf\(req\)|want|vcIn|t\(b\.vcenterId\)\.slice\(0, 128\)|m\.corp)\s*(?:,|\}|$)/;
 function sweepIssues(files) {
   const issues = [];
   let calls = 0;

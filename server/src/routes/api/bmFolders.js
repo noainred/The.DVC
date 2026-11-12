@@ -144,11 +144,12 @@ async function trendDeps() {
   if (_trendDeps) return _trendDeps;
   const bu = await import('./bmUsage.js');
   return {
-    resolve: (req, o) => bu.resolvePerfTarget(req, {
+    // 서버 비교(bmUsage.js)와 같은 해석 함수를 그대로 — 호출은 라우트에서(소스 스윕 bmPerfKeyPair ⑤ 가 vcenterId · perfTargetFail 을 본다)
+    resolvePerfTarget: bu.resolvePerfTarget, perfTargetFail: bu.perfTargetFail,
+    targets: {
       currentTargets: async () => (await import('../../bmusage/poller.js')).currentTargets(),
       listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
-    }, o),
-    fail: (f) => bu.perfTargetFail(f),
+    },
     localSeries: async (o) => (await import('../../bmusage/perfOpsView.js')).localPerfOps('compare-series', o),
     edgeSeries: async (agent, o) => (await import('../../central/bmComparePull.js')).pullEdgeCompareSeries(agent, o),
   };
@@ -343,8 +344,9 @@ export function registerBmFolders(api) {
       const hours = Math.min(168, Math.max(1, Math.floor(Number(req.query.hours) || 24)));
       const to = Date.now(); const from = to - hours * 3_600_000;
       const D = await trendDeps();
-      const found = await D.resolve(req, { allowed, isAdmin: admin, key: m.usageKey, vcenterId: m.corp });
-      if (!found || D.fail(found)) return res.json({ ok: true, rows: [], why: 'no-target' });   // 베어메탈 사용률 수집 대상이 아님(또는 아직)
+      // 쌍(법인, 키) — 법인은 요청이 아니라 범위로 거른 구성원의 법인(서버가 정한 값)
+      const found = await D.resolvePerfTarget(req, D.targets, { allowed, isAdmin: admin, key: m.usageKey, vcenterId: m.corp });
+      if (!found || D.perfTargetFail(found)) return res.json({ ok: true, rows: [], why: 'no-target' });   // 베어메탈 사용률 수집 대상이 아님(또는 아직)
       let body = null;
       if (found.via === 'local') {
         const r = await D.localSeries({ key: found.realKey, q: { metrics: TREND_METRICS.join(','), from, to } }).catch((e) => ({ ok: false, reason: String(e?.message || e).slice(0, 160) }));
