@@ -33,7 +33,9 @@ const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 const t = (v) => (typeof v === 'string' ? v.trim() : '');
 export const newRuleId = () => `r_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 /** 구성원 키 — 서비스 인벤토리와 같은 두 꼴만 받는다(그 밖의 문자열은 저장하지 않는다). */
-export const isMemberKey = (k) => typeof k === 'string' && k.length <= 160 && (/^st:[^\s]{1,140}$/.test(k) || /^fl:[0-9a-f]{16}$/.test(k));
+// 서비스 태그에는 공백이 들어갈 수 있다('To Be Filled By O.E.M.' 같은 자리표시 — 반증 3: 예전 [^\s] 규칙이 그 키를 조용히 버렸다). 제어 문자만 막는다.
+// eslint-disable-next-line no-control-regex
+export const isMemberKey = (k) => typeof k === 'string' && k.length <= 160 && (/^st:[^\u0000-\u001f\u007f]{1,140}$/.test(k) || /^fl:[0-9a-f]{16}$/.test(k));
 
 /** 폴더 경로의 조상(자기 자신 제외) — 'A\\B\\C' → ['A', 'A\\B']. */
 export function ancestorsOf(p) {
@@ -170,9 +172,11 @@ function flush() {
     try { atomicWriteFileSync(ASSIGN_FILE(), JSON.stringify(S.assign)); S.dirtyAssign = false; S.assignMtime = mtimeOf(ASSIGN_FILE()); }
     catch (e) { ok = false; console.error('[bmfolders] bm-folders-assign.json 저장 실패:', e?.message); }
   }
+  // 디스크 쓰기가 실패하면 메모리 변경은 남아 있다 — 다음 쓰기를 기다리지 않고 다시 시도한다(반증 10: 재시도가 '이미 그 폴더' 로 성공 응답만 하고 디스크에는 끝내 쓰지 않았다)
+  if (!ok && !S.timer) { S.timer = setTimeout(flush, 5000); S.timer.unref?.(); }
   return ok;
 }
-/** 쓰기 응답 직전에 부른다 — 실패를 200 으로 감추지 않는다(svcmon · servicemap 규약). */
+/** 쓰기 응답 직전에 부른다 — 실패를 200 으로 감추지 않는다(svcmon · servicemap 규약). 바뀐 것이 없는 응답도 이것을 거친다(앞선 실패가 남아 있으면 여기서 드러난다). */
 export function flushStore() { return flush(); }
 function schedule() {
   if (S.timer) return;

@@ -31,7 +31,7 @@ import { sharedGather, sharedInputRev, bmKeyOf, pubKey, keyResolverFor, maskName
 import { buildFolders, searchMembers, parseTokens, srcClassOf } from '../../bmfolders/build.js';
 import {
   storeLoadError, storeRev, peekMain, peekAssign, mutateMain, mutateAssign, flushStore, resetCorrupt,
-  LIMITS, newRuleId, underPath, ancestorsOf,
+  LIMITS, newRuleId, underPath, ancestorsOf, isMemberKey,
 } from '../../bmfolders/store.js';
 
 const toolsPerm = requirePerm('tools');
@@ -72,8 +72,9 @@ export function membersOf(g) {
     });
   }
   for (const h of g?.hostByKey?.values?.() || []) {
-    // 키는 서비스 인벤토리 bmKeyOf 와 같은 규칙(태그 → st:, 없으면 이름 해시 fl:) — 같은 박스가 베어메탈로 분류가 바뀌어도 같은 키다.
-    const { key, keyKind } = bmKeyOf({ serviceTag: h.serviceTag, fleetId: h.name });
+    // 키는 서비스 인벤토리 bmKeyOf 와 같은 규칙(태그 → st:) — 같은 박스가 베어메탈로 분류가 바뀌어도 같은 키다.
+    // 태그가 없으면 **법인을 붙인 이름**의 해시(반증 4: 이름만이면 두 법인의 같은 이름(사설 IP 재사용) 호스트가 한 키로 겹쳐 한쪽이 사라졌다).
+    const { key, keyKind } = bmKeyOf({ serviceTag: h.serviceTag, fleetId: `host:${t(h.corp)}:${t(h.name)}` });
     if (seen.has(key)) { dupKeys += 1; continue; }
     seen.add(key);
     out.push({
@@ -101,7 +102,8 @@ const nameOf = (m, admin, hide) => maskName({ ...m, kind: 'bm' }, admin, hide);
 /** 목록에서 사라진 등록의 이름 — 등록 순간 이름(태그는 키에서 꺼내 가린다). */
 const missingName = (x, admin, hide) => {
   const tag = x.key.startsWith('st:') ? x.key.slice(3) : '';
-  return nameOf({ name: x.name || '(이름 모름)', serviceTag: tag, nameIsAddr: x.addr === true }, admin, hide);
+  // key 를 꼭 넘긴다 — 이름이 곧 태그면 maskName 이 키 토큰으로 이름을 만든다(반증 1: key 없이 불러 범위 계정 메인 조회가 500 이었다)
+  return nameOf({ key: x.key, name: x.name || '(이름 모름)', serviceTag: tag, nameIsAddr: x.addr === true }, admin, hide);
 };
 
 function serverRow(m, p, admin, hide) {
@@ -157,9 +159,10 @@ export function registerBmFolders(api) {
         prefixGroups: b.prefixGroups,
         rules: visibleRules(main, allowed).map((r) => ({ id: r.id, corp: r.corp, value: r.value, path: r.path, by: r.by, at: r.at, writable: r.corp === '*' ? full : writableOf(req.user, s, r.corp) })),
         // 베어메탈 출처 중 못 읽은 것 — 없어짐 판정을 미룬 이유. 사유 문구는 전체 범위 관리자만(서비스 인벤토리 3차 반증 2 와 같은 기준)
-        blocked: { n: (g.bmBlockedSources || []).length, sources: full ? (g.bmBlockedSources || []) : undefined },
+        // 범위 계정에는 함대 전체 개수를 싣지 않는다(반증 8) — 못 읽은 출처가 '있다' 만
+        blocked: hide ? { any: !!(g.bmBlockedSources || []).length } : { n: (g.bmBlockedSources || []).length, sources: full ? (g.bmBlockedSources || []) : undefined },
         faultsMeta: g.faultsMeta || null,
-        dupKeys: dupKeys || 0,
+        dupKeys: hide ? undefined : (dupKeys || 0),
         limits: { batch: LIMITS.batch, searchRows: LIMITS.searchRows, foldersPerCorp: LIMITS.foldersPerCorp, rules: LIMITS.rules, includeTokens: LIMITS.includeTokens },
       };
     }, { extraKey });
@@ -184,6 +187,9 @@ export function registerBmFolders(api) {
         // 이름은 화면에 보이는 이름(가린 이름)으로만 맞춘다 — 가린 부분(주소 · 태그)으로 맞혀 보는 길을 막는다
         nameFn: (m) => nameOf(m, admin, hide),
       });
+      // 보이는 이름 → 키 토큰 순(반증 6: 원문 이름 순이면 가린 태그의 상대 순서가 드러났다)
+      const vis = new Map(r.rows.map((x) => [x.m.key, nameOf(x.m, admin, hide)]));
+      r.rows.sort((a, b) => vis.get(a.m.key).localeCompare(vis.get(b.m.key), 'ko') || (pubKey(a.m.key, hide) < pubKey(b.m.key, hide) ? -1 : 1));
       res.json({
         ok: true, total: r.total, shown: Math.min(r.total, LIMITS.searchRows), facets: r.facets, hideTag: hide,
         tokens: { include: parseTokens(String(req.query.inc ?? '').slice(0, 1024)), exclude: parseTokens(String(req.query.exc ?? '').slice(0, 1024)) },
@@ -307,14 +313,14 @@ export function registerBmFolders(api) {
           if (body.dry === true) return res.json({ ok: true, result: { keys: ghosts.slice(0, 5000).map((k) => pubKey(k, hide)), n: ghosts.length, held: b.missing.filter((x) => x.state === 'held').length } });
           const want = new Set(keys.filter(Boolean));
           const del = ghosts.filter((k) => want.has(k));
-          if (!del.length) return res.json({ ok: true, rev: storeRev(), result: { removed: 0 } });
+          if (!del.length) return done({ removed: 0 });
           const r = mutateAssign((d) => { for (const k of del) delete d.assign[k]; return { result: { removed: del.length } }; });
           if (!r.ok) return fail(r);
           audit(`${del.length}건`, del.slice(0, 20).join(', '));
           return done(r.result);
         }
 
-        const skipped = { notFound: 0, noCorp: 0, readOnly: 0, otherCorp: 0, inOther: 0, same: 0, noFolder: 0, notAssigned: 0 };
+        const skipped = { notFound: 0, noCorp: 0, readOnly: 0, otherCorp: 0, inOther: 0, same: 0, noFolder: 0, notAssigned: 0, otherCorpReg: 0, badKey: 0 };
         if (op === 'unassign') {
           const del = [];
           for (const k of keys) {
@@ -325,7 +331,7 @@ export function registerBmFolders(api) {
             del.push(k);
           }
           if (!del.length && skipped.readOnly) return res.status(403).json({ ok: false, error: 'forbidden', reason: '고른 서버의 법인이 전부 조회 전용입니다(쓰기 범위 밖).' });
-          if (!del.length) return res.json({ ok: true, rev: storeRev(), result: { removed: 0, skipped } });
+          if (!del.length) return done({ removed: 0, skipped });
           const r = mutateAssign((d) => { for (const k of del) delete d.assign[k]; return { result: { removed: del.length, skipped } }; });
           if (!r.ok) return fail(r);
           audit(`${del.length}대`, del.slice(0, 20).join(', '));
@@ -352,7 +358,10 @@ export function registerBmFolders(api) {
           if (!m.corp) { skipped.noCorp += 1; continue; }
           if (onlyCorp && m.corp !== onlyCorp) { skipped.otherCorp += 1; continue; }
           if (!writableOf(user, snap, m.corp)) { skipped.readOnly += 1; continue; }
+          if (!isMemberKey(k)) { skipped.badKey += 1; continue; }   // 저장할 수 없는 키(반증 3 — 예전에는 added 로 세고 조용히 버렸다)
           const cur = assign[k];
+          // 다른 법인에 남은 예전 등록(서버 귀속이 바뀜)은 그 법인에 쓸 수 있을 때만 덮어쓴다(반증 2 — unassign 은 막는데 assign 이 덮어썼다)
+          if (cur && cur.corp !== m.corp && !writableOf(user, snap, cur.corp)) { skipped.otherCorpReg += 1; continue; }
           if (cur && cur.corp === m.corp && cur.path === p.value) { skipped.same += 1; continue; }
           if (cur && cur.corp === m.corp && !moveExisting) { skipped.inOther += 1; continue; }
           const has = known.get(m.corp)?.has(p.value) || (main.corps[m.corp]?.folders || []).includes(p.value) || newFolders.get(m.corp)?.has(p.value);
@@ -364,7 +373,7 @@ export function registerBmFolders(api) {
           plan.push({ k, corp: m.corp, name: m.name, addr: !!m.nameIsAddr });
         }
         if (!plan.length && skipped.readOnly && !onlyCorp) return res.status(403).json({ ok: false, error: 'forbidden', reason: '고른 서버의 법인이 전부 조회 전용입니다(쓰기 범위 밖).' });
-        if (!plan.length) return res.json({ ok: true, rev: storeRev(), result: { added: 0, skipped, newFolders: 0 } });
+        if (!plan.length) return done({ added: 0, skipped, newFolders: 0 });
         // 폴더(명시)를 먼저 — 등록과 같은 경로가 트리에 남도록. 넘치면 등록도 하지 않는다.
         const corpsTouched = [...new Set(plan.map((x) => x.corp))];
         const r1 = mutateMain((d) => {
@@ -396,7 +405,7 @@ export function registerBmFolders(api) {
           if (!from || from === corp || !inUserScope(user, snap, from)) return res.status(404).json({ ok: false, error: 'not_found', reason: '복사할 법인을 찾지 못했습니다.' });
           const src = (b.corps.find((c) => c.vcenterId === from)?.folders || []).map((f) => f.path);
           const add = src.filter((x) => !existing.has(x));
-          if (!add.length) return res.json({ ok: true, rev: storeRev(), result: { added: 0 } });
+          if (!add.length) return done({ added: 0 });
           const r = mutateMain((d) => { if (!d.corps[corp]) d.corps[corp] = { folders: [] }; d.corps[corp].folders.push(...add); return { result: { added: add.length } }; });
           if (!r.ok) return fail(r);
           audit(`${from} → ${corp}`, `폴더 ${add.length}개 복사`);
@@ -426,7 +435,7 @@ export function registerBmFolders(api) {
           if (nm.value.includes('\\')) return res.status(400).json({ ok: false, reason: '폴더 이름에 \\ 를 쓸 수 없습니다.' });
           const segs = p.value.split('\\');
           const to = [...segs.slice(0, -1), nm.value].join('\\');
-          if (to === p.value) return res.json({ ok: true, rev: storeRev(), result: { path: to } });
+          if (to === p.value) return done({ path: to });
           if (existing.has(to)) return res.status(409).json({ ok: false, reason: '같은 이름의 폴더가 이미 있습니다.' });
           const swap = (x) => (underPath(x, p.value) ? to + x.slice(p.value.length) : x);
           const r1 = mutateMain((d) => {

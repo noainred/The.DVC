@@ -112,7 +112,8 @@ export function buildFolders({ members = [], main, assign = {}, allowed = null, 
     placeOf.set(m.key, p);
     if (!m.corp) {
       if (!allowed && m.kind === 'bm') noCorp += 1;
-      if (p.moved && inScope(p.moved)) mismatch.push({ key: m.key, corp: '', was: p.moved, path: assign[m.key]?.path || '' });
+      // 법인 귀속이 빠진 서버의 예전 등록은 전체 범위에만 싣는다(법인 미지정 데이터는 범위 계정에 없다 — 반증 7)
+      if (p.moved && !allowed) mismatch.push({ key: m.key, corp: '', was: p.moved, path: assign[m.key]?.path || '' });
       continue;
     }
     if (p.moved && (inScope(p.moved) || inScope(m.corp))) mismatch.push({ key: m.key, corp: inScope(m.corp) ? m.corp : '', was: inScope(p.moved) ? p.moved : '', path: inScope(p.moved) ? (assign[m.key]?.path || '') : '' });

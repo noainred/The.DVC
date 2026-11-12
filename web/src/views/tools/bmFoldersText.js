@@ -18,6 +18,7 @@ export const MISSING_WHY = {
 };
 export const SKIP_TEXT = {
   notFound: '찾지 못함', noCorp: '법인 미지정', readOnly: '조회 전용 법인', otherCorp: '다른 법인', inOther: '이미 다른 폴더', same: '이미 그 폴더', noFolder: '폴더 없음', notAssigned: '등록 없음',
+  otherCorpReg: '다른 법인에 남은 예전 등록(그 법인에 쓸 수 없음)', badKey: '저장할 수 없는 키',
 };
 
 export const pctText = (v) => { const n = numOrNull(v); return n == null ? '—' : `${Math.round(n)}%`; };

@@ -285,3 +285,68 @@ test('라우트: 엣지가 보고한 베어메탈도 중앙에서 찾아 등록 
     });
   } finally { config.central = prevCfg.central; config.agent = prevCfg.agent; central.resetEdgeFleet(); }
 });
+
+// ───────── 반증 1인(v2.984 표준 검증) 반영 — 수정 전 코드에서 재현된 것 ─────────
+const SCOPED_B = { username: 'op-b', role: 'operator', scope: { vcenters: ['vc-b'], regions: [], writeVcenters: [] } };
+
+test('반증 1: 이름 = 서비스 태그인 서버가 목록에서 사라져도 범위 계정 메인 조회는 200 · 이름은 토큰으로 가린다', async () => {
+  reset();
+  registry.importServers([SRV('s1', 'kr-db-01', 'TAG1', 'vc-a'), SRV('s8', 'TAG8', 'TAG8', 'vc-a')], 'replace');
+  await withSnap(async () => { await call('POST /tools/bm-folders/op', { body: { op: 'assign', path: 'DB', keys: ['st:tag8'] } }); });
+  registry.importServers([SRV('s1', 'kr-db-01', 'TAG1', 'vc-a')], 'replace');
+  await withSnap(async () => {
+    const g = await call('GET /tools/bm-folders', { user: SCOPED });
+    assert.equal(g.statusCode, 200, JSON.stringify(g.body).slice(0, 300));
+    assert.equal(g.body.missing.length, 1);
+    assert.equal(/tag8/i.test(JSON.stringify(g.body)), false);
+    assert.equal(g.body.dupKeys, undefined, '범위 계정에는 함대 개수를 싣지 않는다(반증 8)');
+    assert.equal(g.body.blocked.n, undefined);
+  });
+});
+
+test('반증 2: 서버 귀속이 바뀌어도 옛 법인 등록은 그 법인에 쓸 수 있는 계정만 덮어쓴다(unassign 과 같은 기준)', async () => {
+  reset();
+  await withSnap(async () => { await call('POST /tools/bm-folders/op', { body: { op: 'assign', path: 'DB', keys: ['st:tag4'] } }); });
+  // vc-b 서버(pl-db-01)를 vc-a 로 등록해 둔 것처럼 만든다 — 귀속이 바뀐 상황
+  bs.mutateAssign((d) => { d.assign['st:tag4'] = { corp: 'vc-a', path: 'DB', name: 'pl-db-01' }; return {}; });
+  await withSnap(async () => {
+    const tok = (await call('GET /tools/bm-folders', { user: SCOPED_B })).body.servers.find((x) => x.name === 'pl-db-01').key;
+    const a = await call('POST /tools/bm-folders/op', { user: SCOPED_B, body: { op: 'assign', path: 'MES', keys: [tok] } });
+    assert.equal(a.body.result.added, 0); assert.equal(a.body.result.skipped.otherCorpReg, 1);
+    assert.equal(bs.peekAssign()['st:tag4'].corp, 'vc-a', '옛 법인 등록이 그대로');
+    const ok = await call('POST /tools/bm-folders/op', { body: { op: 'assign', path: 'MES', keys: ['st:tag4'] } });
+    assert.equal(ok.body.result.added, 1, '두 법인에 쓸 수 있는 계정은 옮길 수 있다');
+    assert.equal(bs.peekAssign()['st:tag4'].corp, 'vc-b');
+  });
+});
+
+test('반증 3 · 4: 공백이 든 서비스 태그도 등록된다 · 태그 없는 같은 이름 ESXi 호스트가 두 법인에 있어도 둘 다 찾는다', async () => {
+  reset();
+  registry.importServers([SRV('s1', 'wb-node-01', 'To Be Filled By O.E.M.', 'vc-a')], 'replace');
+  const hosts = [{ id: 'h1', name: '192.168.10.11', vcenterId: 'vc-a', serviceTag: '' }, { id: 'h2', name: '192.168.10.11', vcenterId: 'vc-b', serviceTag: '' }];
+  await withSnap(async () => {
+    const s = await call('GET /tools/bm-folders/search', { query: { inc: 'wb' } });
+    const a = await call('POST /tools/bm-folders/op', { body: { op: 'assign', path: 'WB', keys: s.body.rows.map((x) => x.key) } });
+    assert.equal(a.body.result.added, 1);
+    assert.equal(Object.keys(bs.peekAssign()).length, 1, '응답이 센 만큼 실제로 저장된다');
+    const e = await call('GET /tools/bm-folders/search', { query: { inc: '192.168', kinds: 'esxi' } });
+    assert.deepEqual(e.body.rows.map((x) => x.corp).sort(), ['vc-a', 'vc-b']);
+    const g = await call('GET /tools/bm-folders');
+    assert.equal(g.body.dupKeys, 0);
+  }, hosts);
+});
+
+test('반증 6 · 7: 찾기 결과는 보이는 이름 순(가린 태그 순서가 드러나지 않음) · 법인 귀속이 빠진 서버의 예전 등록은 범위 계정에 싣지 않는다', async () => {
+  const B = (key, corp, name) => ({ key, kind: 'bm', corp, name, serviceTag: key.slice(3) });
+  const b = buildFolders({ members: [B('st:q1', '', 'q1')], main: bs.emptyMain(), assign: { 'st:q1': { corp: 'A', path: 'P' } }, allowed: new Set(['A']) });
+  assert.equal(b.mismatch.length, 0);
+  assert.equal(buildFolders({ members: [B('st:q1', '', 'q1')], main: bs.emptyMain(), assign: { 'st:q1': { corp: 'A', path: 'P' } } }).mismatch.length, 1);
+  reset();
+  registry.importServers([SRV('s1', 'idrac-ZZZ1', 'ZZZ1', 'vc-a'), SRV('s2', 'idrac-AAA1', 'AAA1', 'vc-a'), SRV('s3', 'idrac-MMM1', 'MMM1', 'vc-a')], 'replace');
+  await withSnap(async () => {
+    const s = await call('GET /tools/bm-folders/search', { user: SCOPED, query: { inc: 'idrac' } });
+    assert.ok(s.body.rows.every((x) => x.name === 'idrac-•••'));
+    const tokens = s.body.rows.map((x) => x.key);
+    assert.deepEqual(tokens, [...tokens].sort(), '같은 이름이면 토큰 순 — 원문 태그 순이 아니다');
+  });
+});

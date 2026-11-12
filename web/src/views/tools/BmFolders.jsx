@@ -129,9 +129,9 @@ export default function BmFolders() {
         </div>
       </div>
       {note ? <div className="card" style={{ padding: '8px 12px', borderLeft: `3px solid ${note.warn ? 'var(--amber)' : note.ok ? 'var(--green)' : 'var(--red)'}`, fontSize: 13 }}>{note.ok && !note.warn ? '✓ ' : '⚠ '}{note.text}</div> : null}
-      {d.blocked?.n ? (
+      {d.blocked?.n || d.blocked?.any ? (
         <div className="card" style={{ padding: '8px 12px', borderLeft: '3px solid var(--amber)', fontSize: 13 }}>
-          ⚠ 서버 목록 출처 {d.blocked.n}곳을 읽지 못했습니다 — 등록은 남았는데 목록에 없는 서버를 ‘없어짐’ 으로 판정하지 않고 보류합니다(지우지 않습니다).
+          ⚠ 서버 목록 출처 {d.blocked.n ? `${d.blocked.n}곳` : '일부'}를 읽지 못했습니다 — 등록은 남았는데 목록에 없는 서버를 ‘없어짐’ 으로 판정하지 않고 보류합니다(지우지 않습니다).
           {d.blocked.sources?.length ? <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{d.blocked.sources.slice(0, 5).map((x) => x.reason).join(' · ')}</div> : null}
         </div>
       ) : null}
@@ -476,7 +476,7 @@ function Overview({ d, corps, corpName, setSel, pick, op, busy, openBulk }) {
                   <td data-sort={c.bm}>{c.bm}{c.esxiPlaced ? <span className="muted" style={{ fontSize: 11 }}> + ESXi {c.esxiPlaced}</span> : null}</td>
                   <td data-sort={c.unassigned}><span className="flex" style={{ gap: 8, alignItems: 'center' }}><StackBar parts={[{ n: c.registered, c: 'var(--accent)' }, { n: c.unassigned, c: 'var(--amber)' }]} w={92} h={7} label={`등록 ${c.registered}, 미분류 ${c.unassigned}`} /><span style={{ whiteSpace: 'nowrap' }}>{c.registered} / <span style={{ color: c.unassigned ? '#fbbf24' : undefined }}>{c.unassigned}</span></span></span></td>
                   <td data-sort={c.folders.length}>{c.folders.length}</td>
-                  <td data-sort={c.faults}>{c.faults ? <span className="badge red">{c.faults}</span> : c.faultsUnknown === c.total && c.total ? <span className="muted">—</span> : 0}</td>
+                  <td data-sort={c.faults}>{c.faults ? <span className="badge red">{c.faults}</span> : null}{c.faultsUnknown ? <span className="muted" style={{ marginLeft: c.faults ? 4 : 0 }} title="부품 장애를 못 읽은 서버 — 장애에도 정상에도 넣지 않습니다">{c.faults ? '' : '— '}(모름 {c.faultsUnknown})</span> : c.faults ? null : 0}</td>
                   <td data-sort={c.held + c.ghosts}>{c.held || c.ghosts ? <span>{c.held ? <span className="badge amber">보류 {c.held}</span> : null} {c.ghosts ? <span className="badge red">없어짐 {c.ghosts}</span> : null}</span> : <span className="muted">—</span>}</td>
                   <td data-nosort>{c.unassigned ? <button type="button" className="logout-btn" style={{ padding: '3px 8px', fontSize: 12 }} onClick={() => { setSel({ type: 'un', corp: c.vcenterId }); pick(c.vcenterId); }}>미분류 보기</button> : <span className="muted" style={{ fontSize: 12 }}>모두 등록됨</span>}</td>
                 </tr>
