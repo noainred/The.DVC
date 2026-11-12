@@ -13,7 +13,7 @@ import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import BulkAdd from './bmFolders/BulkAdd.jsx';
 import SidePanel from './bmFolders/SidePanel.jsx';
-import { UsageBar, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
+import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
 import {
   INTRO, PLACE_LABEL, MISSING_WHY, pctText, wattsText, pathText, lastSeg, parentOf, ageText,
   rowsOf, aggregate, filterRows, resultNote, foldersByName, opErrorText, csvNameOf, trimPath,
@@ -21,6 +21,8 @@ import {
 
 const btn = { padding: '6px 12px', flex: 'none' };
 const ROW_LIMIT = 500;
+/** 법인 이름의 앞 'vcenter-' 를 뗀다(서비스 인벤토리 표와 같은 관례 — 트리 · 표 폭 확보. 전체 이름은 title). */
+const shortCorp = (n) => String(n || '').replace(/^vcenter-/, '');
 
 export default function BmFolders() {
   const [d, setD] = useState(null);
@@ -224,7 +226,7 @@ export default function BmFolders() {
                   <div className="bmf-tile"><span className="k">전력</span><span className="v">{wattsText(agg.watts)}</span><span className="s">{agg.wattsN}대 합{agg.n - agg.wattsN ? ` · 못 읽음 ${agg.n - agg.wattsN}` : ''}</span></div>
                   <div className="bmf-tile" style={agg.faults ? { borderColor: 'rgba(239,68,68,.45)' } : undefined}>
                     <span className="k">부품 장애</span><span className="v" style={agg.faults ? { color: '#f87171' } : undefined}>{agg.faults}대</span>
-                    <span className="s">{agg.faultsUnknown ? `모름 ${agg.faultsUnknown}` : '알 수 있는 서버 전부 기준'}</span>
+                    <span className="s">모름 {agg.faultsUnknown}</span>
                   </div>
                 </div>
               </div>
@@ -241,14 +243,13 @@ export default function BmFolders() {
                   <SelBar picked={pickedRows} folders={folderPaths} sel={sel} op={op} busy={busy} onDone={() => setPicked(new Set())} />
                 ) : null}
                 {!rows.length ? <div className="muted" style={{ padding: 16 }}>{baseRows.length ? '거르기 조건에 맞는 서버가 없습니다.' : sel.type === 'folder' ? '이 폴더에 등록된 서버가 없습니다 — ‘서버 찾아 등록’ 으로 넣습니다.' : '서버가 없습니다.'}</div> : (
-                  <STable className="table bmf-t" minWidth={d.scoped ? 860 : 960} limit={ROW_LIMIT}>
+                  <STable className="table bmf-t" minWidth={720} limit={ROW_LIMIT}>
                     <thead>
                       <tr>
                         {writable ? <th data-nosort style={{ width: 30 }}><input type="checkbox" aria-label="보이는 서버 전체 선택" checked={rows.length > 0 && rows.every((r) => picked.has(r.key))} onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.key)) : new Set())} /></th> : null}
                         <th>이름</th>
                         {sel.type !== 'folder' || sub ? <th>폴더</th> : null}
-                        {!d.scoped ? <th>서비스 태그</th> : null}
-                        <th>모델</th><th>받는 길</th><th>부품 장애</th><th>CPU</th><th>메모리</th><th>전력</th>
+                        <th>{d.scoped ? '모델' : '모델 · 서비스 태그'}</th><th>받는 길</th><th>부품 장애</th><th title="CPU · 메모리 사용률">사용률</th><th>전력</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -257,12 +258,10 @@ export default function BmFolders() {
                           {writable ? <td data-nosort onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`${r.name} 선택`} checked={picked.has(r.key)} onChange={(e) => setPicked((s) => { const n = new Set(s); if (e.target.checked) n.add(r.key); else n.delete(r.key); return n; })} /></td> : null}
                           <td data-sort={r.name}><span className="bmf-nm"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} />{r.name}{r.kind === 'esxi' ? <span className="badge gray" style={{ marginLeft: 4 }}>ESXi</span> : null}</span></td>
                           {sel.type !== 'folder' || sub ? <td data-sort={r.place ? r.path : '￿'}>{r.place ? <span title={PLACE_LABEL[r.place]}>{pathText(r.path)}{r.place === 'rule' ? <span className="badge gray" style={{ marginLeft: 4 }}>규칙</span> : null}</span> : <span className="muted">(미분류)</span>}</td> : null}
-                          {!d.scoped ? <td className="mono" style={{ fontSize: 12 }}>{r.serviceTag || '—'}</td> : null}
-                          <td>{r.model || '—'}</td>
-                          <td><SrcBadge src={r.src} />{r.agent ? <span className="muted mono" style={{ fontSize: 11, marginLeft: 4 }}>{r.agent}</span> : null}</td>
+                          <td data-sort={r.model || ''}>{r.model || '—'}{!d.scoped && r.serviceTag ? <div className="mono muted" style={{ fontSize: 11 }}>{r.serviceTag}</div> : null}</td>
+                          <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}</td>
                           <td data-sort={r.faults ?? ''}>{r.faults == null ? <span className="muted">—</span> : r.faults > 0 ? <span className="badge red">{r.faults}건</span> : <span className="muted">없음</span>}</td>
-                          <td data-sort={r.cpu ?? ''}><UsageBar v={r.cpu} /></td>
-                          <td data-sort={r.mem ?? ''}><UsageBar v={r.mem} /></td>
+                          <td data-sort={r.cpu ?? ''}><UsagePair cpu={r.cpu} mem={r.mem} /></td>
                           <td data-sort={r.watts ?? ''} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{wattsText(r.watts)}</td>
                         </tr>
                       ))}
@@ -296,9 +295,9 @@ export default function BmFolders() {
   );
 }
 
-function TreeNode({ on, depth, name, count, un, onClick, toggle, opened, children }) {
+function TreeNode({ on, depth, name, title, count, un, onClick, toggle, opened, children }) {
   return (
-    <div className={`svcinv-tn${on ? ' on' : ''}`} style={{ paddingLeft: 8 + depth * 14 }} role="button" tabIndex={0} aria-current={on ? 'true' : undefined}
+    <div className={`svcinv-tn${on ? ' on' : ''}`} style={{ paddingLeft: 8 + depth * 14 }} role="button" tabIndex={0} aria-current={on ? 'true' : undefined} title={title || name}
       onClick={onClick} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}>
       {toggle ? <span className="bmf-tw" role="button" tabIndex={-1} aria-label={opened ? '접기' : '펼치기'} onClick={(e) => { e.stopPropagation(); toggle(); }}>{opened ? '▾' : '▸'}</span> : <span className="bmf-tw" />}
       {un ? <span className="bmf-fo un" aria-hidden="true" /> : depth >= 2 ? <span className="bmf-fo" aria-hidden="true" /> : null}
@@ -320,7 +319,7 @@ function CorpTree({ corps, sel, setSel, open, setOpen, q, pick }) {
     const expired = (c.agents || []).some((a) => a.expired);
     return (
       <React.Fragment key={c.vcenterId}>
-        <TreeNode on={sel.type === 'corp' && sel.corp === c.vcenterId} depth={1} name={c.name} count={c.total} opened={opened} toggle={() => toggle(c.vcenterId)}
+        <TreeNode on={sel.type === 'corp' && sel.corp === c.vcenterId} depth={1} name={shortCorp(c.name)} title={c.name} count={c.total} opened={opened} toggle={() => toggle(c.vcenterId)}
           onClick={() => { setSel({ type: 'corp', corp: c.vcenterId }); pick(c.vcenterId); }}>
           {expired ? <span className="badge amber" title="이 법인 서버를 보고하던 엣지의 보고가 만료됐습니다">만료</span> : <SrcBadge src={mainSrc} small />}
           {c.faults ? <StatusDot tone="red" title={`부품 장애 ${c.faults}대`} /> : null}
@@ -459,12 +458,13 @@ function Overview({ d, corps, corpName, setSel, pick, op, busy, openBulk }) {
           <b>법인별 현황</b><span className="muted" style={{ fontSize: 12 }}>엣지 · 수집 서버가 보고한 서버도 중앙에서 폴더에 넣습니다(등록 정보는 중앙에만 저장)</span>
         </div>
         {!corps.length ? <div className="muted" style={{ padding: 16 }}>범위 안에 물리서버가 있는 법인이 없습니다.</div> : (
-          <STable className="table bmf-t" minWidth={860}>
-            <thead><tr><th>법인</th><th>서버 목록을 받는 길</th><th>물리서버</th><th>폴더 등록 / 미분류</th><th>폴더</th><th>부품 장애</th><th>보류 · 없어짐</th><th data-nosort>동작</th></tr></thead>
+          <STable className="table bmf-t" minWidth={700}>
+            <thead><tr><th>법인</th><th>받는 길</th><th>물리서버</th><th>폴더 등록 / 미분류</th><th>폴더</th><th>부품 장애</th><th>보류 · 없어짐</th></tr></thead>
             <tbody>
               {corps.map((c) => (
-                <tr key={c.vcenterId}>
-                  <td data-sort={c.name}><b>{c.name}</b></td>
+                <tr key={c.vcenterId} style={{ cursor: 'pointer' }} title={c.unassigned ? '누르면 이 법인의 미분류 서버' : '누르면 이 법인'}
+                  onClick={() => { setSel(c.unassigned ? { type: 'un', corp: c.vcenterId } : { type: 'corp', corp: c.vcenterId }); pick(c.vcenterId); }}>
+                  <td data-sort={c.name}><b>{shortCorp(c.name)}</b></td>
                   <td>
                     <span className="flex wrap" style={{ gap: 4, alignItems: 'center' }}>
                       {['central', 'edge', 'collector'].filter((k) => c.sources[k]).map((k) => <span key={k} style={{ whiteSpace: 'nowrap' }}><SrcBadge src={k} /> <span className="muted" style={{ fontSize: 11 }}>{c.sources[k]}</span></span>)}
@@ -478,7 +478,6 @@ function Overview({ d, corps, corpName, setSel, pick, op, busy, openBulk }) {
                   <td data-sort={c.folders.length}>{c.folders.length}</td>
                   <td data-sort={c.faults}>{c.faults ? <span className="badge red">{c.faults}</span> : null}{c.faultsUnknown ? <span className="muted" style={{ marginLeft: c.faults ? 4 : 0 }} title="부품 장애를 못 읽은 서버 — 장애에도 정상에도 넣지 않습니다">{c.faults ? '' : '— '}(모름 {c.faultsUnknown})</span> : c.faults ? null : 0}</td>
                   <td data-sort={c.held + c.ghosts}>{c.held || c.ghosts ? <span>{c.held ? <span className="badge amber">보류 {c.held}</span> : null} {c.ghosts ? <span className="badge red">없어짐 {c.ghosts}</span> : null}</span> : <span className="muted">—</span>}</td>
-                  <td data-nosort>{c.unassigned ? <button type="button" className="logout-btn" style={{ padding: '3px 8px', fontSize: 12 }} onClick={() => { setSel({ type: 'un', corp: c.vcenterId }); pick(c.vcenterId); }}>미분류 보기</button> : <span className="muted" style={{ fontSize: 12 }}>모두 등록됨</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -486,7 +485,7 @@ function Overview({ d, corps, corpName, setSel, pick, op, busy, openBulk }) {
         )}
         <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>
           {!d.scoped && d.noCorp ? `법인 미지정 ${d.noCorp}대는 폴더에 넣을 수 없습니다 — 통합 서버 인벤토리에서 법인을 먼저 정하십시오. ` : ''}
-          보류 = 서버 목록 출처를 못 읽어 판정을 미룬 등록(지우지 않음) · 없어짐 = 출처를 다 읽었는데 목록에 없는 등록.
+          행을 누르면 그 법인의 미분류 서버 · 보류 = 서버 목록 출처를 못 읽어 판정을 미룬 등록(지우지 않음) · 없어짐 = 출처를 다 읽었는데 목록에 없는 등록.
         </div>
       </div>
 

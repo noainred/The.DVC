@@ -16,6 +16,16 @@ export function UsageBar({ v, w = 54 }) {
   );
 }
 
+/** CPU · 메모리 두 줄(열을 줄이려고 합쳤다 — 1440px 실측: 따로 두면 뒤쪽 열이 가로 스크롤 뒤로 숨었다). */
+export function UsagePair({ cpu, mem }) {
+  return (
+    <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, fontSize: 12 }}>
+      <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}><span className="muted" style={{ width: 28 }}>CPU</span><UsageBar v={cpu} w={44} /></span>
+      <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}><span className="muted" style={{ width: 28 }}>MEM</span><UsageBar v={mem} w={44} /></span>
+    </span>
+  );
+}
+
 const DOT = { green: 'var(--green)', red: 'var(--red)', amber: 'var(--amber)', gray: 'var(--text-faint)' };
 /** 상태 점 — tone 'none' 은 테두리만(못 읽음). 색만으로 뜻을 전하지 않게 title 을 단다. */
 export function StatusDot({ tone = 'green', title }) {

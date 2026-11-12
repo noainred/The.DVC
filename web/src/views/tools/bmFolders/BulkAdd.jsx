@@ -146,7 +146,7 @@ export default function BulkAdd({ init, d, corpName, op, busy, onClose }) {
                     {rows.map((x) => (
                       <tr key={x.key} className={checked.has(x.key) ? 'bmf-picked' : undefined}>
                         <td data-nosort><input type="checkbox" aria-label={`${x.name} 선택`} checked={checked.has(x.key)} onChange={(e) => setChecked((s) => { const n = new Set(s); if (e.target.checked) n.add(x.key); else n.delete(x.key); return n; })} /></td>
-                        <td data-sort={x.name}><span className="bmf-nm"><StatusDot tone={x.faults > 0 ? 'red' : x.cpu == null && x.mem == null ? 'none' : 'green'} />{highlight(x.name, x.on === 'name' ? tokens.include : []).map((p, i) => (p.hit ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}{x.kind === 'esxi' ? <span className="badge gray" style={{ marginLeft: 4 }}>ESXi</span> : null}</span></td>
+                        <td data-sort={x.name}><span className="bmf-nm"><StatusDot tone={x.faults > 0 ? 'red' : x.cpu == null && x.mem == null ? 'none' : 'green'} /><span>{highlight(x.name, x.on === 'name' ? tokens.include : []).map((p, i) => (p.hit ? <mark key={i}>{p.text}</mark> : <React.Fragment key={i}>{p.text}</React.Fragment>))}</span>{x.kind === 'esxi' ? <span className="badge gray" style={{ marginLeft: 4 }}>ESXi</span> : null}</span></td>
                         <td>{corpName(x.corp)}</td>
                         <td><SrcBadge src={x.src} />{x.agent ? <span className="muted mono" style={{ fontSize: 11, marginLeft: 4 }}>{x.agent}</span> : null}</td>
                         {!d.scoped ? <td className="mono" style={{ fontSize: 12 }}>{x.serviceTag || '—'}</td> : null}

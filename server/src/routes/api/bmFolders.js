@@ -26,6 +26,7 @@ import { store } from '../../store.js';
 import { memoJson, scopeKey } from './shared.js';
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
+import { pushAll } from '../../util/pushAll.js';   // 큰 배열 스프레드 push 금지(스윕 audit2603a)
 import { cleanFolderPath, cleanText } from '../../servicemap/store.js';
 import { sharedGather, sharedInputRev, bmKeyOf, pubKey, keyResolverFor, maskName, corpWriteAccess } from './svcInventory.js';
 import { buildFolders, searchMembers, parseTokens, srcClassOf } from '../../bmfolders/build.js';
@@ -379,7 +380,7 @@ export function registerBmFolders(api) {
         const r1 = mutateMain((d) => {
           for (const vc of corpsTouched) {
             if (!d.corps[vc]) d.corps[vc] = { folders: [] };
-            if (!d.corps[vc].folders.includes(p.value)) d.corps[vc].folders.push(p.value, ...ancestorsOf(p.value));
+            if (!d.corps[vc].folders.includes(p.value)) { d.corps[vc].folders.push(p.value); pushAll(d.corps[vc].folders, ancestorsOf(p.value)); }
           }
           return { result: {} };
         });
@@ -406,7 +407,7 @@ export function registerBmFolders(api) {
           const src = (b.corps.find((c) => c.vcenterId === from)?.folders || []).map((f) => f.path);
           const add = src.filter((x) => !existing.has(x));
           if (!add.length) return done({ added: 0 });
-          const r = mutateMain((d) => { if (!d.corps[corp]) d.corps[corp] = { folders: [] }; d.corps[corp].folders.push(...add); return { result: { added: add.length } }; });
+          const r = mutateMain((d) => { if (!d.corps[corp]) d.corps[corp] = { folders: [] }; pushAll(d.corps[corp].folders, add); return { result: { added: add.length } }; });
           if (!r.ok) return fail(r);
           audit(`${from} → ${corp}`, `폴더 ${add.length}개 복사`);
           return done(r.result);

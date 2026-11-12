@@ -3138,7 +3138,7 @@ table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background
 .bmf-stk > i { display: block; height: 100%; }
 .bmf-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
 .bmf-dot.none { background: transparent; border: 1.5px solid var(--text-dim); }
-.bmf-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; padding: 10px 14px; min-width: 0; }
+.bmf-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 8px; padding: 10px 14px; min-width: 0; }
 .bmf-tile { padding: 7px 10px; border-radius: 9px; background: var(--panel-deep); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .bmf-tile .k { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bmf-tile .v { font-size: 17px; font-weight: 700; line-height: 1.25; white-space: nowrap; }
@@ -3169,6 +3169,8 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmf-kv { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 6px 10px; font-size: 13px; align-items: center; }
 .bmf-kv .k { color: var(--text-dim); }
 .bmf-band { padding: 7px 10px; border-radius: 8px; font-size: 12.5px; }
+.bmf-links a { color: #93c5fd; }
+.bmf-links a:hover { color: #bfdbfe; }
 .bmf-band.red { background: rgba(239, 68, 68, .10); border: 1px solid rgba(239, 68, 68, .4); color: #fecaca; }
 table.bmf-t mark { background: rgba(250, 204, 21, .28); color: #fef08a; border-radius: 3px; padding: 0 1px; }
 /* v2.895 개체 보기(VM · ESXi 호스트 — 시안 docs/design/vcenter-tabs ⑧~⑪) — 경로 줄 · 개체 머리. 탭 줄은 .vcd-views 그대로. */

@@ -62,7 +62,7 @@ export default function SidePanel({ r, corps, corpName, scoped, op, busy, onClos
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
         <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>바로가기</span>
-        <span className="flex wrap" style={{ gap: '4px 10px' }}>
+        <span className="flex wrap bmf-links" style={{ gap: '4px 10px' }}>
           <a href="#/tools/bm-usage">베어메탈 사용률(추이)</a>
           <a href="#/tools/part-faults">물리 부품 장애</a>
           <a href="#/tools/fleet">통합 서버 인벤토리</a>
