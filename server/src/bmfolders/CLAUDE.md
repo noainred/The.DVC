@@ -43,7 +43,10 @@
   물리서버 폴더 이름 바꾸기는 이 규칙 경로를 함께 옮기고(`routes/api/bmFolders.js svcRuleRename` — 겹침 · 도구 접근 · 손상은 쓰기 전에 `svcRulePlan` 이 409/403/503), 폴더 삭제는 규칙을 지우지 않고 개수를 밝힌다.
   미리보기는 저장과 같은 `cleanFolderPath` 를 거치고, 더 긴 기존 물리서버 폴더 규칙이 잡은 서버는 `kept` 로 따로 센다(옮겨 가지 않는다 — 2차 반증 4).
 - **v2.989 키 등급 · 수집 서버 경로(설계 §6 대조 결과)**: ① 등록은 **별칭 키**(`aliasKeys` — 태그를 읽기 전 fl:, 서비스 인벤토리 `bmAliasKeys` 와 같은 규칙)도 본다(`build.js assignOf` —
-  배치 · 없어짐 판정 · 해제). 같은 서버를 다시 쓰면 새 키로 적고 옛 키를 지운다(`plan.drop`). ② 수집 서버(pull) 서버는 함대 목록에 **전력 항목으로만** 들어가
+  배치 · 없어짐 판정 · 해제). **별칭은 같은 법인 등록만 · 다른 구성원의 지금 키이거나 둘 이상이 주장하는 별칭은 쓰지 않는다**(`aliasGuardOf` — 반증 3a A1 재현: 법인 없는 이름 해시 별칭이
+  다른 법인 서버의 지금 키와 겹쳐 그 등록을 지웠다. 서비스 인벤토리 keyCorps 가드와 같은 뜻 · 서비스 인벤토리 배치 `bmFolderMapOf` 도 같은 가드). 같은 서버를 다시 쓰면 새 키로 적고
+  같은 법인 별칭 등록을 모두 지운다(`plan.drop`). 쓰지 않은 별칭 등록은 목록에 없는 등록으로 보이고 한 건씩 지울 수 있다. 폴더 노드 `regs` = 삭제 확인(expect)과 같은 셈. ② 수집 서버(pull) 서버는 함대 목록에 **전력 항목으로만** 들어가
   전력 미보고 · 오래됨이면 목록에서 빠진다 — 그 수집 서버가 지금 보고하는(인벤토리) 키는 `svcInventory.collectorHeldKeys` 로 보류('collector-listed' · 서비스 인벤토리 'bm-collector-listed').
-  시한 = 그 수집 서버의 마지막 성공(상태 `at`)이 `UNREADABLE_HOLD_MS`(24시간) 안 · 지금 ESXi 호스트인 서버는 빼기(4차 반증 2 — 함대 키로 보류하다 되돌린 이력). 회귀 `bmFolders2989.test.js`.
+  시한 = 그 수집 서버의 마지막 성공(상태 `at`)이 `UNREADABLE_HOLD_MS`(24시간) 안 · 지금 ESXi 호스트(태그 · 이름 전부)인 서버 · 신선한 전력 항목이 있는 서버(분류 예외로 빠진 것) ·
+  분류 exclude/virtualization 은 빼기(4차 반증 2 — 함대 키로 보류하다 되돌린 이력 · 반증 3a B1 · B2). 화면 문구에 시한 숫자를 박지 않는다(설정값). 회귀 `bmFolders2989.test.js`(변이 26/26).
 - 회귀: `server/test/bmFolders2984.test.js` · `bmFolders2987.test.js`(v2.987 · 2차 반증 반영 — 변이 12/12) · 웹 `web/src/views/tools/bmFoldersText.test.js`.

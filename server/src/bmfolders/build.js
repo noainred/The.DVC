@@ -50,17 +50,40 @@ export function ruleFor(m, sorted) {
  * moved = 손 등록의 법인(지금 법인과 다르다 — 놓지 않는다).
  */
 /**
- * 이 구성원의 손 등록 — 지금 키 먼저, 없으면 별칭 키(키 등급이 오르기 전 fl: — v2.989 ③-가). { a, k } 또는 null.
+ * 별칭으로 쓸 수 있는 키 — **다른 구성원의 지금 키가 아니고 한 구성원만 주장하는** 별칭(반증 3a A1 — 재현: ESXi 를 베어메탈로 강제한 행의 별칭은
+ * 법인 없는 이름 해시라 두 법인의 같은 이름 호스트에서 A 의 지금 키 = B 의 별칭이었고, B 를 고치는 조작이 A 의 등록을 지웠다).
+ * 서비스 인벤토리의 keyCorps 가드와 같은 뜻. members 전체로 만든다(범위와 무관).
+ */
+export function aliasGuardOf(members = []) {
+  const own = new Set(); const claims = new Map();
+  for (const m of members) {
+    if (!m?.key) continue;
+    own.add(m.key);
+    for (const k of new Set(m.aliasKeys || [])) if (k !== m.key) claims.set(k, (claims.get(k) || 0) + 1);
+  }
+  const ok = new Set();
+  for (const [k, n] of claims) if (n === 1 && !own.has(k)) ok.add(k);
+  return ok;
+}
+/** 이 구성원의 별칭 등록 키 — 쓸 수 있는 별칭(aliasOk) · **같은 법인 등록만**(다른 법인 것은 이 서버의 것이라 단정하지 않는다 — 없어짐 · 보류로 남겨 그 법인이 정리). */
+export function aliasRegsOf(m, assign, aliasOk) {
+  const out = [];
+  if (!m?.corp) return out;
+  for (const k of m.aliasKeys || []) { const a = assign?.[k]; if (a && a.corp === m.corp && aliasOk?.has?.(k)) out.push(k); }
+  return out;
+}
+/**
+ * 이 구성원의 손 등록 — 지금 키 먼저, 없으면 같은 법인 별칭 등록(키 등급이 오르기 전 fl: — v2.989 ③-가). { a, k } 또는 null.
  * 예전에는 지금 키만 봐서 태그를 나중에 읽은 서버의 등록이 '없어짐' 이 되고 서버는 (미분류)로 돌아갔다.
  */
-export function assignOf(m, assign) {
+export function assignOf(m, assign, aliasOk = null) {
   const own = assign?.[m?.key];
   if (own) return { a: own, k: m.key };
-  for (const k of m?.aliasKeys || []) { const a = assign?.[k]; if (a) return { a, k }; }
-  return null;
+  const al = aliasRegsOf(m, assign, aliasOk);
+  return al.length ? { a: assign[al[0]], k: al[0] } : null;
 }
-export function placeMember(m, assign, sortedRules, autoRules) {
-  const hitA = assignOf(m, assign);
+export function placeMember(m, assign, sortedRules, autoRules, aliasOk = null) {
+  const hitA = assignOf(m, assign, aliasOk);
   const a = hitA?.a;
   if (a && a.corp === m.corp && m.corp) return { path: a.path, src: 'manual', ...(hitA.k !== m.key ? { aliasKey: hitA.k } : {}) };
   if (a && a.corp !== m.corp) return { path: '', src: null, moved: a.corp };
@@ -120,10 +143,13 @@ export function buildFolders({ members = [], main, assign = {}, allowed = null, 
   const mismatch = [];
   const unassignedBm = [];
 
+  const aliasOk = aliasGuardOf(members);
+  const aliasUsed = new Set();   // 배치에 실제로 쓴 별칭 등록 — 이것만 '지금 있는 서버의 것'(없어짐에서 뺀다)
   for (const m of members) {
     if (!m || !m.key) continue;
     byKey.set(m.key, m);
-    const p = placeMember(m, assign, sorted, autoRules);
+    const p = placeMember(m, assign, sorted, autoRules, aliasOk);
+    if (p.aliasKey) aliasUsed.add(p.aliasKey);
     placeOf.set(m.key, p);
     if (!m.corp) {
       if (!allowed && m.kind === 'bm') noCorp += 1;
@@ -157,10 +183,10 @@ export function buildFolders({ members = [], main, assign = {}, allowed = null, 
 
   // 목록에 없는 등록(보류 · 없어짐)
   const missing = [];
-  // 별칭 키(키 등급이 오르기 전 키)는 지금 있는 서버의 것이다 — 없어짐으로 세지 않는다(v2.989 ③-가)
-  const aliasLive = new Set(); for (const m of members) for (const k of m.aliasKeys || []) aliasLive.add(k);
+  // 배치에 쓴 별칭 등록(키 등급이 오르기 전 키)은 지금 있는 서버의 것이다 — 없어짐으로 세지 않는다(v2.989 ③-가).
+  //   쓰지 않은 별칭 등록(다른 법인 · 같은 서버의 지금 키 등록이 따로 있음 · 겹친 별칭)은 예전처럼 없어짐 · 보류로 보인다(반증 3a A2 · A3 — 정리할 수 있게)
   for (const [k, a] of Object.entries(assign || {})) {
-    if (byKey.has(k) || aliasLive.has(k) || !inScope(a.corp)) continue;
+    if (byKey.has(k) || aliasUsed.has(k) || !inScope(a.corp)) continue;
     // 수집 서버가 지금 보고하는 서버인데 분류 목록에서만 빠졌다(전력 미보고 · 오래됨 — v2.989 ③-나) → 보류(시한은 만드는 쪽 `bmHeldKeys` 가 진다)
     const listed = !!heldKeys?.has?.(k);
     const held = snapInitial || bmBlocked || holdCorps.has(a.corp) || listed;
@@ -181,11 +207,14 @@ export function buildFolders({ members = [], main, assign = {}, allowed = null, 
     for (const x of missing) if (x.corp === vc) { set.add(x.path); for (const y of ancestorsOf(x.path)) set.add(y); }
     const paths = [...set].sort((x, y) => x.localeCompare(y, 'ko'));
     const ex = new Set(explicit[vc]?.folders || []);
+    // 폴더 삭제 확인(expect)은 서버가 세는 것(그 법인 등록 중 경로 아래 — 목록에 없는 등록 · 별칭 등록 포함)과 같은 셈이어야 한다(반증 3a 별건 — 화면이 손 등록 서버 행만 세서 늘 409)
+    const regPaths = Object.values(assign || {}).filter((x) => x && x.corp === vc).map((x) => x.path);
     const folders = paths.map((p) => {
       let total = 0; let faults = 0;
       for (const [q, s] of a.paths) if (underPath(q, p)) { total += s.direct; faults += s.faults; }
       const segs = p.split('\\');
-      return { path: p, name: segs[segs.length - 1], depth: segs.length, direct: a.paths.get(p)?.direct || 0, total, faults, explicit: ex.has(p) };
+      let regs = 0; for (const q of regPaths) if (underPath(q, p)) regs += 1;
+      return { path: p, name: segs[segs.length - 1], depth: segs.length, direct: a.paths.get(p)?.direct || 0, total, faults, regs, explicit: ex.has(p) };
     });
     corps.push({
       vcenterId: vc, total: a.total, bm: a.bm, esxiPlaced: a.esxiPlaced, registered: a.registered, unassigned: a.unassigned, byRule: a.byRule,
@@ -207,7 +236,7 @@ export function buildFolders({ members = [], main, assign = {}, allowed = null, 
     .sort((a, b) => (b.n - a.n) || a.prefix.localeCompare(b.prefix))
     .slice(0, 8).map((g) => ({ prefix: g.prefix, n: g.n, corps: [...g.corps].sort() }));
 
-  return { placeOf, byKey, corps, noCorp, missing, mismatch, prefixGroups, autoRules };
+  return { placeOf, byKey, corps, noCorp, missing, mismatch, prefixGroups, autoRules, aliasOk };
 }
 
 /** 찾기 글자 목록 — 소문자 · 앞뒤 공백 제거 · 제어 문자 제거 · 64자 · 중복 제거 · 최대 10개. */
