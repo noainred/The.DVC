@@ -685,8 +685,8 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
     const mn = mergeNames(prev?.names || null, h, ts);
     const next = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: mn.names ? displayName(mn.names).name : '', lastSeen: ts, agent };
     if (mn.names) next.names = mn.names;
-    const tried = h.tried ?? (prev?.tried || null);
-    if (tried) next.tried = tried;
+    // 옛 엣지(tried 없음)의 보고는 물어본 방식을 '모름' 으로 둔다 — 이전 보고의 tried 를 남기면 IP 상세 창이 묻지 않은 방식을 '응답 없음' 으로 보인다.
+    if (h.tried) next.tried = h.tried;
     const nbGroup = mn.nbAnswered ? h.nbGroup : (mn.nbDropped ? '' : (prev?.nbGroup || ''));
     const mac = mn.nbAnswered ? h.mac : (mn.nbDropped ? '' : (prev?.mac || ''));
     if (nbGroup && next.names?.netbios) next.nbGroup = nbGroup;

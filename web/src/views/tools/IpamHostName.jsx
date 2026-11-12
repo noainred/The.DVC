@@ -1,7 +1,6 @@
 // IpamHostName.jsx — IP 대장 '호스트명' 칸과 IP 상세 창의 '호스트명' 묶음(v2.991, 시안 docs/design/ip-scan-hostname ① ②).
 // 문구 · 요약은 ipamHostText.js(순수), 판정(우선순위 · 이름 다름 · 지난 스캔 무응답)은 서버가 행 · 상세에 실어 보낸다.
 import React from 'react';
-import { STable } from '../../components/STable.jsx';
 import { fmtDt } from './ipamShared.jsx';
 import { NAME_SRC, methodRows, methodStateText, mismatchTitle } from './ipamHostText.js';
 
@@ -73,23 +72,19 @@ export function HostNameBlock({ row, scan, canManage = false, onEditName }) {
       ) : scan === null ? (
         <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>이 IP 의 스캔 결과가 없습니다(스캔 대역 밖이거나, 스캔에 응답하지 않았거나, 보존 기간이 지났습니다) — 방식별 결과를 보일 수 없습니다.</div>
       ) : (
-        <div className="table-wrap" style={{ marginTop: 10 }}>
-          <STable minWidth={420} wrap={false}>
-            <thead><tr><th>확인 방식</th><th>결과</th><th>확인 시각</th></tr></thead>
-            <tbody>
-              {rows.map((m) => (
-                <tr key={m.key}>
-                  <td data-sort={m.key}><NameSrcBadge src={m.key} /> <span className="muted" style={{ fontSize: 11 }}>{m.desc}</span></td>
-                  <td data-sort={m.value || ''} style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
-                    {m.value ? <b>{m.value}</b> : <span className="muted">{methodStateText(m)}</span>}
-                    {m.key === 'netbios' && m.value && scan.nbGroup ? <span className="muted" style={{ fontSize: 12 }}> · 그룹 {scan.nbGroup}</span> : null}
-                    {m.state === 'stale' && <div className="muted" style={{ fontSize: 11 }}>{methodStateText(m, scan.nameMissMax)}</div>}
-                  </td>
-                  <td className="muted" style={{ fontSize: 12 }} data-sort={m.at ?? ''}>{m.at ? fmtDt(m.at) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </STable>
+        // 방식 3줄 — 표가 아니라 줄바꿈되는 행(400px 에서 3열 표는 이름이 글자 단위로 끊기고 시각 열이 잘렸다 — Chromium 판독).
+        <div role="list" aria-label="확인 방식별 결과" style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+          {rows.map((m, i) => (
+            <div role="listitem" key={m.key} className="flex" style={{ flexWrap: 'wrap', alignItems: 'baseline', columnGap: 12, rowGap: 2, padding: '8px 12px', borderTop: i ? '1px solid rgba(36,48,73,.5)' : 'none' }}>
+              <span style={{ flex: '0 0 150px', whiteSpace: 'nowrap' }}><NameSrcBadge src={m.key} /> <span className="muted" style={{ fontSize: 11 }}>{m.desc}</span></span>
+              <span style={{ flex: '1 1 180px', minWidth: 0, overflowWrap: 'break-word' }}>
+                {m.value ? <b>{m.value}</b> : <span className="muted">{methodStateText(m)}</span>}
+                {m.key === 'netbios' && m.value && scan.nbGroup ? <span className="muted" style={{ fontSize: 12 }}> · 그룹 {scan.nbGroup}</span> : null}
+                {m.state === 'stale' && <span className="muted" style={{ display: 'block', fontSize: 11 }}>{methodStateText(m, scan.nameMissMax)}</span>}
+              </span>
+              <span className="muted" style={{ flex: '0 0 auto', fontSize: 12 }}>{m.at ? fmtDt(m.at) : ''}</span>
+            </div>
+          ))}
         </div>
       )}
       {alt && (

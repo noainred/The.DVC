@@ -326,6 +326,11 @@ test('⑦ 옛 엣지(tried 없음)는 역DNS 만 물은 것 · 부분 결과(see
   assert.equal(ss.getScanResults()[ip].names.dns.miss, 0, '부분 결과는 이름 단계에 닿지 못했다');
   ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], hostname: '' }], 1_800_000_420_000, 'e-old');
   assert.equal(ss.getScanResults()[ip].names.dns.miss, 1, '옛 엣지의 빈 hostname = 역DNS 무응답');
+  // 새 엣지 보고(tried 있음) 뒤에 옛 엣지 보고가 오면 물어본 방식은 '모름'(이전 tried 를 남기면 묻지 않은 방식이 '응답 없음' 으로 보인다)
+  ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], names: { dns: 'old.corp' }, tried: ['dns', 'netbios'] }], 1_800_000_480_000, 'e-old');
+  assert.deepEqual(ss.getScanResults()[ip].tried, ['dns', 'netbios']);
+  ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], hostname: 'old.corp' }], 1_800_000_540_000, 'e-old');
+  assert.equal(ss.getScanResults()[ip].tried, undefined);
 });
 
 test('⑦ 보고 요약 nameStats — 수치만 · 못 읽은 칸 null · 미완료 기록이 지우지 않는다 · 실행 이력에도', () => {

@@ -378,7 +378,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
               </div>
             </div>
           )}
-          <STable className="v3-table" minWidth={1060}>
+          <STable className="v3-table" minWidth={1140}>
             <thead><tr><th>에이전트</th><th>데이터센터</th><th>주기 스캔</th><th style={{ textAlign: 'right' }}>대역 / IP 수</th><th>마지막 보고</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th style={{ textAlign: 'right' }} title="마지막 완료 스캔에서 호스트명을 찾은 IP 수 / 응답한 IP 수">이름 확인</th><th>상태</th><th data-nosort>작업</th></tr></thead>
             <tbody>
               {reportList.map((x) => (
@@ -413,7 +413,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
 
           <div ref={editorRef} className="card" style={{ padding: 14, minWidth: 0 }}>
             <div style={{ fontWeight: 700, marginBottom: 10 }}>설정 편집 — {agentName(agent)}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}> {/* v2.636: 페이지(400px)에서 1fr 의 최소폭이 내용 폭이라 입력칸이 카드 밖으로 밀렸다 */}
+      <div className="ipscan-form"> {/* v2.636: 페이지(400px)에서 1fr 의 최소폭이 내용 폭이라 입력칸이 카드 밖으로 밀렸다 · v2.991: 격자는 styles.css .ipscan-form(640px 이하 1열) */}
         <label style={{ fontWeight: 600, paddingTop: 9 }}>할당 에이전트</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <Select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: '100%', width: 260 }} aria-label="할당 에이전트">
