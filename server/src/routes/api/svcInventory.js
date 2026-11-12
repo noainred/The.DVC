@@ -44,7 +44,8 @@ import { getMap, getPins, peekMap, peekPins, storeRev, storeLoadError, mutateMap
 import { mergeLatestRows, rowsByAgentKeyOf, makeCapOf, clampEdgeTs } from './corpUsage.js';
 // v2.987 물리서버 폴더 규칙 — 배치 판정은 물리서버 폴더의 것 하나를 부른다(도메인 모듈 — routes 를 import 하지 않는다)
 import { peekMain as bmfPeekMain, peekAssign as bmfPeekAssign, storeRev as bmfStoreRev, storeLoadError as bmfStoreError } from '../../bmfolders/store.js';
-import { placeMember as bmfPlaceMember, sortRules as bmfSortRules } from '../../bmfolders/build.js';
+import { placeMember as bmfPlaceMember, sortRules as bmfSortRules, aliasGuardOf as bmfAliasGuardOf } from '../../bmfolders/build.js';
+import { lowSameLen, TAG_MASK_MIN } from '../../util/ruleName.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -81,6 +82,52 @@ export function bmAliasKeys(b, keyKind) {
   const sid = t(b?.untaggedServerId) || t(b?.serverId);
   const f = !b?.untaggedServerId && sid.startsWith('host:') ? lc(b?.name) : lc(sid);
   return f ? [`fl:${crypto.createHash('sha1').update(f).digest('hex').slice(0, 16)}`] : [];
+}
+/**
+ * v2.989(③-나 — 설계 §6 '수집 서버(pull) 경로 키 대조' 의 결과): 함대 서버 목록(universe)은 iDRAC 등록부 서버를 전력이 없어도 넣지만
+ * 수집 서버 서버는 **전력 항목으로만** 넣는다 — pull 이 전력 값 없는 서버를 전력 항목에서 빼고(collector/puller.js) 실패가 길면 항목이 오래돼 빠진다(2시간).
+ * 그래서 수집 서버가 지금도 보고하는(인벤토리에 있는) 서버의 고정 · 물리서버 폴더 등록이 '없어짐 — 정리 대상' 이 됐다(엣지 push 경로는 그렇지 않다).
+ * 이 함수는 그 키(st:<태그> · 태그 없을 때의 fl: — 함대 fleetId `remote:<수집기>:<서버>` 와 같은 해시)를 돌려준다. 순수.
+ *   · 시한: 그 수집 서버가 **마지막으로 성공한 지** holdMs(기본 UNREADABLE_HOLD_MS 24시간) 안일 때만(상태 `at` — 실패 기록은 직전 성공 시각을 그대로 둔다)
+ *   · 꺼진 · 지워진 수집 서버는 빼고(그쪽은 fleetKeySources 가 '못 읽음' 으로 이미 전부 보류한다) · **지금 ESXi 호스트인 서버(태그 · 이름)는 뺀다**
+ *     (4차 반증 2 — '함대가 아직 안다' 로 보류하면 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다)
+ */
+export function collectorHeldKeys({ remoteServers = [], statusOf = () => null, collectors = [], hosts = [], now = Date.now(), holdMs = 86_400_000,
+  powerEntries = [], powerFreshMs = 2 * 3_600_000, fleetTags = {} } = {}) {
+  const out = new Set();
+  const enabled = new Set((collectors || []).filter((c) => c && t(c.id) && c.enabled !== false).map((c) => t(c.id)));
+  // ESXi 호스트 대조는 이름 전부(짧은 이름 포함 — 함대가 원격 서버를 호스트 이름으로도 ESXi 에 맞춘다, 반증 3a B2). 넓게 빼면 예전처럼 '없어짐' 이 될 뿐이다(안전한 쪽).
+  const short = (x) => { const d = x.indexOf('.'); return d > 0 ? x.slice(0, d) : x; };
+  const hostTags = new Set(); const hostNames = new Set();
+  for (const h of hosts || []) { if (t(h?.serviceTag)) hostTags.add(lc(h.serviceTag)); const n = lc(h?.name); if (n) { hostNames.add(n); hostNames.add(short(n)); } }
+  // 신선한 전력 항목이 있는 서버는 함대 목록에 들어간다 — 그런데도 빠졌다면 다른 이유(분류 예외 등)이므로 보류하지 않는다(반증 3a B1)
+  const fresh = new Set();
+  for (const r of powerEntries || []) {
+    if (!r || !Number.isFinite(Number(r.watts)) || r.watts == null) continue;
+    const ts = numOrNull(r.ts); if (ts == null || now - ts > powerFreshMs) continue;
+    if (r.serverId != null && t(r.serverId)) fresh.add(`${t(r.collectorId)}\u0000${lc(r.serverId)}`);
+    if (t(r.host)) fresh.add(`${t(r.collectorId)}\u0000h:${lc(r.host)}`);
+  }
+  const fl = (s) => `fl:${crypto.createHash('sha1').update(s).digest('hex').slice(0, 16)}`;
+  for (const s of remoteServers || []) {
+    const cid = t(s?.collectorId);
+    if (!cid || !enabled.has(cid)) continue;
+    const at = numOrNull(statusOf(cid)?.at);
+    if (at == null || now - at > holdMs) continue;
+    const tag = lc(s.serviceTag || s.inv?.system?.serviceTag);
+    const sid = lc(s.id);
+    const names = [s.name, s.host, s.hostName, ...(Array.isArray(s.hostNames) ? s.hostNames.slice(0, 8) : [])].map(lc).filter(Boolean);
+    if ((tag && hostTags.has(tag)) || names.some((n) => hostNames.has(n) || hostNames.has(short(n)))) continue;   // 지금 ESXi 호스트(4차 반증 2)
+    if ((sid && fresh.has(`${cid}\u0000${sid}`)) || names.some((n) => fresh.has(`${cid}\u0000h:${n}`))) continue;
+    // 사람이 분류에서 뺀(exclude) · 가상화로 정한 서버는 보류 대상이 아니다(반증 3b 2 — 분류 키는 함대와 같은 태그 → serverId 순)
+    const ft = (tag && fleetTags?.[tag]) || fleetTags?.[lc(`remote:${cid}:${s.id}`)] || '';
+    if (ft === 'exclude' || ft === 'virtualization') continue;
+    if (tag) out.add(`st:${tag}`);
+    if (sid) out.add(fl(lc(`remote:${cid}:${s.id}`)));
+    // 구버전 엣지(전력 항목에 serverId 없음)의 함대 id 는 remote:<수집기>:<호스트> — 그 키도(반증 3a B 의 빈틈)
+    for (const h of [s.host, s.hostName].map(lc).filter(Boolean)) out.add(fl(`remote:${lc(cid)}:${h}`));
+  }
+  return out;
 }
 /** Bareos 원장 → VM 백업 칸(순수). undefined = Bareos 미사용 · null = 원장 못 읽음 · 'ok' 24h 내 성공 · 'fail' 실패/지연 · 'none' 잡 없음. */
 export function backupOf(view, now) {
@@ -199,12 +246,12 @@ async function gatherNowInner(snap, tagCategory) {
   const sourceErrors = [];
   const now = Date.now();
   const [{ getFleetInventory, fleetKeySources }, { loadRegistry }, { getInventory }, { allRemoteServers }, edgeUsage, { attributeBareMetalFromSnap },
-    { unreadVcenterReasons }, { getEdgeFleetServers }, { listScanRanges }, pf, bareosReg, { bareosVmView }, { datacenterOfVcenter }] = await Promise.all([
+    { unreadVcenterReasons }, { getEdgeFleetServers, UNREADABLE_HOLD_MS }, { listScanRanges }, pf, bareosReg, { bareosVmView }, { datacenterOfVcenter }, { getCollectorStatus, remotePowerEntries, REMOTE_FRESH_MS }, { loadCollectors }, { loadFleetTags }] = await Promise.all([
     import('../../insights/fleetInventory.js'), import('../../idrac/registry.js'), import('../../idrac/invCache.js'),
     import('../../collector/remoteInventory.js'), import('../../central/bmUsageEdgePull.js'), import('../../idrac/corpAttribution.js'),
     import('../../metrics/unreadVcenters.js'), import('../../central/fleet.js'), import('../../idrac/scanRanges.js'),
     Promise.all([import('../../partfault/db.js'), import('../../partfault/settings.js')]), import('../../bareos/registry.js'), import('../../bareos/vmView.js'),
-    import('../../datacenter/store.js'),
+    import('../../datacenter/store.js'), import('../../collector/state.js'), import('../../collector/registry.js'), import('../../insights/fleetTags.js'),
   ]);
   const bareosSet = await import('../../bareos/settings.js');
   const vcenters = snap?.vcenters || [];
@@ -368,6 +415,13 @@ async function gatherNowInner(snap, tagCategory) {
     bmBlockedSources = (fk.unreadable || []).filter((u) => u.source !== 'vcenter').slice(0, 20).map((u) => ({ source: t(u.source), reason: t(u.reason).slice(0, 200) }));
     bmBlocked = bmBlockedSources.length > 0;
   } catch (e) { bmBlocked = true; bmBlockedSources = [{ source: 'fleet-keys', reason: `베어메탈 출처 목록을 만들지 못했습니다(${String(e?.message || e).slice(0, 120)})` }]; }
+  // v2.989(③-나): 수집 서버(pull)가 지금 보고하는데 분류 목록에서 빠진 베어메탈 키 — 그 키의 고정 · 물리서버 폴더 등록은 '없어짐' 이 아니라 보류.
+  const bmHeldKeys = (() => {
+    try {
+      return collectorHeldKeys({ remoteServers, statusOf: getCollectorStatus, collectors: loadCollectors(), hosts: snap?.hosts, now, holdMs: UNREADABLE_HOLD_MS,
+        powerEntries: remotePowerEntries(), powerFreshMs: REMOTE_FRESH_MS, fleetTags: (() => { try { return loadFleetTags() || {}; } catch { return {}; } })() });
+    } catch (e) { sourceErrors.push(`수집 서버 보류 키: ${String(e?.message || e).slice(0, 160)}`); return new Set(); }
+  })();
   // VM 식별 키(instanceUuid)를 못 읽는 법인 — VM 이 있는데 instanceUuid 가 하나도 없다(REST 폴백 수집 등). 그 법인의 iu: 고정은 유령이 아니라 판정 보류(4차 반증 5).
   const vmTotal = new Map(); const vmUuid = new Map();
   for (const vm of snap?.vms || []) { if (!vm || vm.template) continue; const vc = t(vm.vcenterId); vmTotal.set(vc, (vmTotal.get(vc) || 0) + 1); if (t(vm.instanceUuid)) vmUuid.set(vc, (vmUuid.get(vc) || 0) + 1); }
@@ -377,7 +431,7 @@ async function gatherNowInner(snap, tagCategory) {
   const corpHold = new Map();
   for (const v of vcenters) { const id = t(v?.id); if (!id) continue; if (v.status === 'pending') corpHold.set(id, 'corp-pending'); else if (v.status === 'disabled') corpHold.set(id, 'corp-disabled'); }
   const snapInitial = !snap || snap.initial === true;
-  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, uuidUnreadCorps, corpHold, snapInitial, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
+  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, bmHeldKeys, uuidUnreadCorps, corpHold, snapInitial, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
 }
 
 // ───────── 권한 ─────────
@@ -454,7 +508,8 @@ export function bmFolderMapOf(members = []) {
     const main = bmfPeekMain(); const assign = bmfPeekAssign();
     const sorted = bmfSortRules(main.rules || []); const auto = main.settings?.autoRules === true;
     const out = new Map();
-    for (const m of members) if (m?.kind === 'bm') out.set(m.key, bmfPlaceMember(m, assign, sorted, auto).path || '');
+    const aliasOk = bmfAliasGuardOf(members);   // 별칭 가드도 물리서버 폴더 화면과 같게(반증 3a A1)
+    for (const m of members) if (m?.kind === 'bm') out.set(m.key, bmfPlaceMember(m, assign, sorted, auto, aliasOk).path || '');
     return out;
   } catch { return null; }
 }
@@ -480,7 +535,7 @@ async function inventoryFor(req, snap) {
   const hit = _invMemo.get(key);
   if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, allowed, admin }; }
   _invStats.misses += 1;
-  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, bmFolderOf: bmFolderMapOf(g.members), hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
+  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, bmFolderOf: bmFolderMapOf(g.members), hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, bmHeldKeys: g.bmHeldKeys, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
   for (const [k, v] of _invMemo) if (now - v.at >= INV_MEMO_MS) _invMemo.delete(k);
   while (_invMemo.size >= INV_MEMO_MAX) _invMemo.delete(_invMemo.keys().next().value);
   _invMemo.set(key, { at: now, inv });
@@ -558,12 +613,10 @@ export const maskName = (m, admin, hide = false) => {
   // 이름이 곧 서비스태그인 베어메탈(호스트 이름 없이 등록) — 범위 계정 판본에서는 이름도 가린다(R7)
   if (hide && m.kind === 'bm' && m.serviceTag && lc(m.name) === lc(m.serviceTag)) return `서버 ${pubKey(m.key, true).slice(-6)}`;
   // 이름에 태그가 들어 있으면(iDRAC 기본 이름 'idrac-<태그>' 등) 그 부분만 가린다(4차 반증 3). 정규식 없이 선형으로(외부 입력).
-  if (hide && m.kind === 'bm' && t(m.serviceTag).length >= 4) return stripTag(m.name, m.serviceTag);
+  if (hide && m.kind === 'bm' && t(m.serviceTag).length >= TAG_MASK_MIN) return stripTag(m.name, m.serviceTag);
   return m.name;
 };
 
-/** 글자마다 소문자로 — 길이가 바뀌는 글자는 그대로 둔다(색인 보존). */
-function lowSameLen(s) { let o = ''; for (const ch of s) { const l = ch.toLowerCase(); o += l.length === ch.length ? l : ch; } return o; }
 /** 이름에서 태그(대소문자 무시)를 '•••' 로 바꾼다 — 길이를 먼저 자르고 indexOf 로(외부 입력에 정규식 금지). */
 export function stripTag(name, tag) {
   const n = String(name ?? '').slice(0, 256); const tg = lowSameLen(String(tag ?? '').trim());

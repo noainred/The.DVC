@@ -260,7 +260,7 @@ function DanglingCard({ q, writableOf, op, busy, corpName }) {
   );
 }
 
-const HELD_SHORT = { 'corp-unread': '법인 vCenter 를 지금 못 읽음', 'bm-source-unread': '베어메탈 출처를 못 읽음', 'uuid-unread': 'VM 식별 키(instanceUuid)를 못 읽음',
+const HELD_SHORT = { 'corp-unread': '법인 vCenter 를 지금 못 읽음', 'bm-source-unread': '베어메탈 출처를 못 읽음', 'bm-collector-listed': '수집 서버가 보고 중 — 분류 목록에서만 빠짐', 'uuid-unread': 'VM 식별 키(instanceUuid)를 못 읽음',
   'snapshot-initial': '포탈 기동 직후 — 첫 수집 전', 'corp-pending': '법인 vCenter 첫 수집 대기', 'corp-disabled': '법인 vCenter 수집 꺼짐', 'corp-no-vms': '법인 VM 이 한 대도 없음',
   'uuid-partial': '일부 VM 의 식별 키(instanceUuid)를 못 읽음' };
 const HELD_TEXT = {
@@ -272,6 +272,7 @@ const HELD_TEXT = {
   'corp-unread': '그 법인 vCenter 를 지금 읽지 못해 이 키의 VM 이 정말 없는지 모릅니다 — 다시 읽히면 판정합니다',
   'bm-source-unread': 'iDRAC 등록부·OME·수집 서버·엣지 중 읽지 못한 출처가 있어 이 베어메탈이 정말 없는지 모릅니다 — 어느 출처에 있는지 알 수 없어 법인을 가리지 않고 보류합니다',
   'uuid-unread': '이 법인 vCenter 에서 VM 의 instanceUuid 를 하나도 읽지 못했습니다(REST 폴백 수집 등) — 이 키의 VM 이 정말 없는지 모릅니다. 다시 읽히면 판정합니다',
+  'bm-collector-listed': '수집 서버가 지금도 이 서버를 보고하지만 전력을 못 읽었거나 보고가 오래돼 서버 목록(분류)에서 빠졌습니다 — 없어진 것이 아니라 일괄 정리하지 않습니다. 수집 서버가 마지막으로 성공한 뒤 보류 시한(설정값)이 지나면 이 보류도 끝납니다(필요 없는 고정이면 행의 ‘고정 지우기’ 로 한 건씩 지웁니다)',
 };
 const SOURCE_TEXT = { 'idrac-registry': 'iDRAC 등록부를 읽지 못함', ome: 'OME 장비 목록을 아직 받지 못함', 'collector-registry': '수집 서버 등록부를 읽지 못함', collector: '수집 서버 목록을 아직 받지 못함', edge: '엣지 보고를 받지 못함', snapshot: '인벤토리 스냅샷 없음', 'fleet-keys': '베어메탈 출처 목록을 만들지 못함' };
 

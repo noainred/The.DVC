@@ -251,6 +251,7 @@ export default function BmFolders() {
                 </div>
                 <FolderForms form={form} setForm={setForm} fv={fv} setFv={setFv} sel={sel} op={op} busy={busy} corps={corps} corpName={corpName}
                   folderN={baseRows.filter((r) => r.place === 'manual').length} ruleN={baseRows.filter((r) => r.place === 'rule').length} svcRuleN={svcRuleN}
+                  folderRegs={sel.type === 'folder' ? corps.find((c) => c.vcenterId === sel.corp)?.folders?.find((f) => f.path === sel.path)?.regs : undefined}
                   onRemoved={() => setSel(parentOf(sel.path) ? { type: 'folder', corp: sel.corp, path: parentOf(sel.path) } : { type: 'corp', corp: sel.corp })}
                   onRenamed={(to) => setSel({ type: 'folder', corp: sel.corp, path: to })} />
                 {sel.type === 'name' ? <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>같은 경로의 폴더를 법인을 넘어 합쳐 본 것입니다(읽기 전용 — 저장은 법인별 그대로). 바꾸려면 법인별 트리에서 고르십시오.</div> : null}
@@ -324,6 +325,10 @@ export default function BmFolders() {
                       {missingHere.slice(0, 30).map((x) => (
                         <span key={x.key} className="muted" title={x.state === 'held' ? (MISSING_WHY[x.why] || '판정 보류') : '출처를 다 읽었는데 목록에 없습니다'}>
                           <span className={`badge ${x.state === 'held' ? 'amber' : 'red'}`} style={{ marginRight: 4 }}>{x.state === 'held' ? '보류' : '없어짐'}</span>{x.name} · {pathText(x.path)}
+                          {d.canWrite && corps.find((c) => c.vcenterId === x.corp)?.writable ? (
+                            <button type="button" className="logout-btn" style={{ padding: '0 6px', fontSize: 11, marginLeft: 4 }} disabled={busy} title="이 등록만 지웁니다(서버는 그대로)"
+                              onClick={() => op({ op: 'unassign', keys: [x.key] }, '목록에 없는 등록 하나를 지웠습니다.')}>지우기</button>
+                          ) : null}
                         </span>
                       ))}
                     </div>
@@ -405,7 +410,10 @@ function Crumb({ sel, corpName }) {
 }
 
 /** 폴더 만들기 · 이름 바꾸기 · 삭제 · 구조 복사 입력 줄. */
-function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName, folderN, ruleN, svcRuleN = 0, onRemoved, onRenamed }) {
+function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName, folderN, ruleN, svcRuleN = 0, folderRegs, onRemoved, onRenamed }) {
+  // 삭제 확인 수는 서버가 세는 것(그 폴더 아래 등록 — 목록에 없는 등록 · 하위 폴더 포함)과 같아야 한다(반증 3a 별건 — 손 등록 서버 행만 세서 늘 409). 서버가 주지 않으면 예전 셈
+  const regs = Number.isFinite(folderRegs) ? folderRegs : folderN;
+  const extra = Math.max(0, regs - folderN);
   if (!form) return null;
   const bar = { padding: '8px 14px', background: 'var(--panel-2)', alignItems: 'center' };
   if (form === 'folder') {
@@ -439,11 +447,12 @@ function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName,
       <div className="flex wrap gap" style={{ ...bar, borderLeft: '3px solid var(--amber)' }}>
         <span style={{ fontSize: 12, flex: '1 1 300px', minWidth: 0 }}>
           폴더 ‘{pathText(sel.path)}’ 와(과) 하위 폴더를 지웁니다. 손 등록한 서버 <b>{folderN}</b>대는 지워지지 않고 <b>(미분류)</b>로 돌아갑니다
+          {extra ? ` · 목록에 없는 등록(보류 · 없어짐 · 옛 키) ${extra}개는 함께 지워집니다` : ''}
           {ruleN ? ` · 자동 규칙으로 들어온 ${ruleN}대는 그 규칙(이 법인 규칙)과 함께 빠집니다 — 전 법인 규칙이 이 경로를 가리키면 폴더가 다시 생길 수 있습니다` : ''}.
           {svcRuleN ? ` 서비스 인벤토리의 물리서버 폴더 규칙 ${svcRuleN}개가 이 경로를 가리킵니다 — 그 규칙은 지우지 않으니 서비스 인벤토리 › 소속 규칙에서 정리하십시오.` : ''}
         </span>
         <button type="button" className="logout-btn" style={{ ...btn, color: 'var(--red)' }} disabled={busy} onClick={async () => {
-          const r = await op({ op: 'folder.remove', corp: sel.corp, path: sel.path, expect: folderN }, (x) => removeNote(pathText(sel.path), x));
+          const r = await op({ op: 'folder.remove', corp: sel.corp, path: sel.path, expect: regs }, (x) => removeNote(pathText(sel.path), x));
           if (r) { setForm(''); onRemoved(); }
         }}>{folderN}대를 미분류로 돌리고 삭제</button>
         <button type="button" className="logout-btn" style={btn} onClick={() => setForm('')}>취소</button>
