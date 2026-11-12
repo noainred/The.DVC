@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-04T13:26:00.150Z",
-  "count": 121,
+  "generatedAt": "2026-11-11T15:11:12.240Z",
+  "count": 125,
   "tools": [
     {
       "k": "service-hub",
@@ -91,6 +91,14 @@
       "comingSoon": false
     },
     {
+      "k": "ps-inspect",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
       "k": "storage-growth",
       "adminOnly": true,
       "perm": null,
@@ -109,6 +117,14 @@
     {
       "k": "bm-usage",
       "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "focus-mon",
+      "adminOnly": true,
       "perm": null,
       "external": null,
       "topTab": false,
@@ -228,6 +244,22 @@
     },
     {
       "k": "san-switch",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "san-storage",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "san-flow",
       "adminOnly": true,
       "perm": null,
       "external": null,

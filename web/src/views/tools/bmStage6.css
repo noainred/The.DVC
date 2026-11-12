@@ -1,0 +1,54 @@
+/* 리눅스 성능 6단계 — 서버 비교 · 수집 건강 · 운영 주석 · 공유/캡처 · 진단 플레이북 · 목표선. 색은 :root 토큰만(새 hex 없음). */
+.bmcmp-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.bmcmp-btns, .bmcmp-scope, .bmcmp-ctl, .bmcmp-chips, .bmcmp-sets, .bmcmp-focus, .bmcmp-legend { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.bmcmp-scope, .bmcmp-ctl { margin-top: 8px; }
+.bmcmp-chips { margin: 8px 0 4px; }
+.bmcmp-chip { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 32px; padding: 3px 4px 3px 10px; border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; background: var(--panel-2); font-size: 12.5px; min-width: 0; max-width: 100%; }
+.bmcmp-chip.bmcmp-off { opacity: 0.6; border-style: dashed; }
+.bmcmp-cs { font-size: 11px; color: var(--muted); }
+.bmcmp-x { border: 0; background: transparent; color: var(--muted); cursor: pointer; min-width: 28px; min-height: 28px; font-size: 13px; }
+.bmcmp-x:hover { color: var(--text); }
+.bmcmp-badge { padding: 2px 8px; border-radius: 10px; border: 1px solid var(--amber); color: var(--amber); font-size: 11.5px; }
+.bmcmp-ops { display: grid; gap: 6px; margin-top: 6px; min-width: 0; }
+.bmcmp-set { display: inline-flex; align-items: center; }
+.bmcmp-save { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.bmcmp-save input.input { width: 160px; max-width: 100%; }
+.bmcmp-focus input.input { flex: 1 1 220px; min-width: 0; }
+.bmcmp-body { margin-top: 8px; min-width: 0; }
+/* 나란히 — 넓은 화면: 열 = 서버 · 행 = 지표 */
+.bmcmp-side { display: grid; gap: 4px; min-width: 0; }
+.bmcmp-h { min-width: 0; padding: 4px 6px; border-top: 3px solid transparent; }
+.bmcmp-hn { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; min-width: 0; }
+.bmcmp-hs { font-size: 11px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.bmcmp-rl { font-size: 12px; padding: 6px 4px; border-top: 1px solid var(--border-soft); min-width: 0; }
+.bmcmp-rl.bmcmp-hi, tr.bmcmp-hi td { background: rgba(255, 196, 0, 0.06); }
+.bmcmp-rs { font-size: 10.5px; color: var(--muted); }
+.bmcmp-cell { min-width: 0; padding: 4px 6px; border-top: 1px solid var(--border-soft); display: grid; gap: 2px; align-content: start; }
+.bmcmp-cv { font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bmcmp-spark { width: 100%; height: 26px; display: block; }
+.bmcmp-nospark { font-size: 10.5px; color: var(--text-faint); }
+.bmcmp-clip { font-size: 10.5px; color: var(--amber); }
+.bmcmp-miss { font-size: 10.5px; color: var(--muted); }
+.bmcmp-stack { display: none; }
+.bmcmp-block { border-left: 4px solid var(--border); padding: 6px 8px; margin-bottom: 8px; background: var(--panel-2); border-radius: 6px; min-width: 0; }
+.bmcmp-brow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; border-top: 1px solid var(--border-soft); padding-top: 2px; }
+.bmcmp-rl2 { font-size: 11.5px; color: var(--muted); padding-top: 2px; }
+/* 겹쳐서 */
+.bmcmp-ov { min-width: 0; }
+.bmcmp-ovsvg { width: 100%; height: 220px; display: block; background: var(--panel-2); border-radius: 6px; margin-top: 6px; }
+.bmcmp-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.bmcmp-legend { margin-top: 6px; }
+.bmcmp-skew { font-size: 11px; color: var(--amber); }
+@media (max-width: 640px) {
+  .bmcmp-side { display: none; }
+  .bmcmp-stack { display: block; }
+}
+/* 보드 · 상세 ‘비교에 추가’ */
+.bmcmp-pick { margin-right: 6px; vertical-align: middle; width: 16px; height: 16px; }
+.bmcmp-tray { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+/* 진단 플레이북 · 목표선 */
+.bmrb-step { display: grid; gap: 6px; }
+.bmrb-cmd { display: flex; gap: 6px; align-items: flex-start; min-width: 0; }
+.bmrb-cmd pre { flex: 1 1 auto; min-width: 0; margin: 0; padding: 6px 8px; background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 6px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bmrb-items { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.6; }
+.bmrb-spark { font-family: ui-monospace, monospace; letter-spacing: -1px; white-space: nowrap; color: var(--accent-2); }

@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MENU_GROUPS, BAREMETAL_SEG, hashOf, locate, visibleMenu, entryOf } from './topMenu.js';
+import { MENU_GROUPS, BAREMETAL_SEG, hashOf, locate, visibleMenu, entryOf, tabsOf } from './topMenu.js';
 import { TOOLS } from './specialToolsList.js';
 import { stripComments } from '../test/_stripComments.js';
 
@@ -11,7 +11,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => fs.readFileSync(path.resolve(HERE, rel), 'utf8');
 
 const allItems = () => MENU_GROUPS.flatMap((g) => (g.children ? g.children.map((c) => ({ g, c })) : [{ g, c: null }]));
-const tabsInMenu = () => new Set(allItems().map(({ g, c }) => (c ? c.tab : g.tab)).filter(Boolean));
+// v2.915: 한 항목이 여러 탭을 맡는다(가상화 플랫폼 — tab + tabs) — 메뉴의 탭 집합은 tabsOf 로 센다
+const tabsInMenu = () => new Set(allItems().flatMap(({ g, c }) => tabsOf(c || g)));
 
 describe('메뉴 구성', () => {
   it('대메뉴는 사용자가 정한 순서다(업그레이드는 설정 아래 · v2.787 백업 대메뉴는 서버 › Veeam 으로 옮김 · v2.864 이슈 · v2.881 위키 추가)', () => {
@@ -34,8 +35,8 @@ describe('메뉴 구성', () => {
 
   it('메뉴가 가리키는 도구는 카탈로그에 실재하고 패널이 있는 도구다', () => {
     const keys = allItems().map(({ c }) => c?.tool).filter(Boolean);
-    expect(keys.length).toBe(17);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1 · v2.827 엣지 토큰 맞추기 1
-    expect(new Set(keys).size).toBe(16);
+    expect(keys.length).toBe(19);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1 · v2.827 엣지 토큰 맞추기 1 · v2.948 SAN 스토리지 성능 1 · v2.965 PowerScale 장비 점검 1
+    expect(new Set(keys).size).toBe(18);
     for (const k of keys) {
       const t = TOOLS.find((x) => x.k === k);
       expect(t, k).toBeTruthy();
@@ -45,9 +46,16 @@ describe('메뉴 구성', () => {
 
   it('하위 메뉴 이름은 사용자가 정한 것이다', () => {
     const labels = (id) => MENU_GROUPS.find((g) => g.id === id).children.map((c) => c.label);
-    expect(labels('server')).toEqual(['가상화 서버', 'ESXi 호스트', 'vCenter', '물리 서버', 'Backup', '알람']);
+    // v2.915(사용자 요청 '세 메뉴를 하나로' · 이름 '가상화 플랫폼'): 가상화 서버 · ESXi 호스트 · vCenter → 항목 하나(탭은 vcenters + hosts · vms)
+    expect(labels('server')).toEqual(['가상화 플랫폼', '물리 서버', 'Backup', '알람']);
+    const virt = MENU_GROUPS.find((g) => g.id === 'server').children.find((c) => c.id === 'virt');
+    expect(tabsOf(virt)).toEqual(['vcenters', 'hosts', 'vms']);
+    expect(tabsOf({ tool: 'x' })).toEqual([]);
+    expect(tabsOf({ tab: 'a', tabs: ['a', 'b', ''] })).toEqual(['a', 'b']);
     // v2.789: 사용자 요청 '스토리지 사용량을 일간/주간 별로 정리해서 보는 기능'(새 메뉴 선택)으로 증가량 보고서 다음에 한 줄을 더했다.
-    expect(labels('storage')).toEqual(['스토리지 현황', '데이터스토어', '스토리지 증가량 보고서', '스토리지 사용량 보고서', '스토리지 사용량 추이', '베어메탈 스토리지', 'SAN 스토리지 성능 측정']);
+    // v2.948: 'SAN 스토리지 성능'(독립 도구 san-storage) 추가 · 기존 'san' 항목은 이름만 'SAN 스위치 모니터링'(id · 도구 키 그대로 — 사용자 결정 '기존 메뉴도 보존').
+    // v2.965: 사용자 요청 '법인별로 전체 power scale 장비의 장비 점검을 하는 기능'(독립 도구 ps-inspect)을 스토리지 현황 바로 아래에 더했다.
+    expect(labels('storage')).toEqual(['스토리지 현황', 'PowerScale 장비 점검', '데이터스토어', '스토리지 증가량 보고서', '스토리지 사용량 보고서', '스토리지 사용량 추이', '베어메탈 스토리지', 'SAN 스위치 모니터링', 'SAN 스토리지 성능']);
     expect(labels('network')).toEqual(['전체 네트워크 장비', '가상화 네트워크', '통신 지도', '글로벌 네트워크 점검', 'IP관리', 'Monitoring']);
     expect(labels('resource')).toEqual(['서버 분석', 'GPU 인벤토리', '전력 분석']);
     expect(labels('optimize')).toEqual(['Optimization', 'Infra Observability']);   // v2.878 이름 변경(id·도구 키 idrac-trend 그대로)
@@ -89,9 +97,11 @@ describe('locate — 지금 화면이 어느 메뉴인가', () => {
     expect(body).not.toMatch(/group:\s*'tools'/);
   });
   it('옛 탭 주소는 새 메뉴 자리로 간다(#/hosts → 서버 › ESXi 호스트, #/upgrade → 설정 › 업그레이드)', () => {
-    expect(locate('hosts', '#/hosts')).toEqual({ group: 'server', child: 'esxi' });
-    expect(locate('vms', '#/vms')).toEqual({ group: 'server', child: 'vm' });
-    expect(locate('vcenters', '#/vcenters')).toEqual({ group: 'server', child: 'vc' });
+    // v2.915: 세 탭 모두 '서버 › 가상화 플랫폼' 한 항목(옛 주소 · 탭 id 는 그대로)
+    expect(locate('hosts', '#/hosts')).toEqual({ group: 'server', child: 'virt' });
+    expect(locate('vms', '#/vms')).toEqual({ group: 'server', child: 'virt' });
+    expect(locate('vcenters', '#/vcenters')).toEqual({ group: 'server', child: 'virt' });
+    expect(locate('vcenters', '#/vcenters/vc-a/host/h1')).toEqual({ group: 'server', child: 'virt' });
     expect(locate('datastores', '#/datastores')).toEqual({ group: 'storage', child: 'ds' });
     expect(locate('upgrade', '#/upgrade')).toEqual({ group: 'settings', child: 'upgrade' });
     expect(locate('settings', '#/settings/collectors')).toEqual({ group: 'settings', child: 'settings' });
@@ -102,7 +112,15 @@ describe('visibleMenu · entryOf', () => {
   it('하위 메뉴가 모두 가려진 대메뉴는 빠지고, 특수 기능은 항상 보인다', () => {
     const m = visibleMenu({ tabOk: (t) => ['overview', 'vms'].includes(t), toolOk: () => false });
     expect(m.map((g) => g.id)).toEqual(['overview', 'server', 'tools']);
-    expect(m.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['vm']);
+    expect(m.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['virt']);
+    // v2.915: 하나라도 허용이면 보이고 처음 여는 탭은 허용된 것 중 첫째(entryTab) — hashOf 가 그리로
+    expect(hashOf(m.find((g) => g.id === 'server').children[0])).toBe('#/vms');
+    const m2 = visibleMenu({ tabOk: (t) => ['overview', 'hosts', 'vcenters'].includes(t), toolOk: () => false });
+    const it2 = m2.find((g) => g.id === 'server').children[0];
+    expect(hashOf(it2)).toBe('#/vcenters');
+    expect(it2.entryTab).toBe(undefined);
+    const m3 = visibleMenu({ tabOk: (t) => ['overview', 'alarms'].includes(t), toolOk: () => false });
+    expect(m3.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['alarm']);
   });
   it('설정 소유자가 아니어도 업그레이드를 볼 수 있으면 설정 메뉴는 업그레이드 하나로 남는다', () => {
     const m = visibleMenu({ tabOk: (t) => t === 'upgrade', toolOk: () => false });

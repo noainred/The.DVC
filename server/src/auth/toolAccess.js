@@ -82,6 +82,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'portal-check': 'portal-check',    // PortalCheck.jsx 전용(v2.560) — 토큰 점검(adminOnly+fullScope)
   'comm-map': 'comm-map',            // CommMap.jsx 전용(v2.584) — 통신 지도(중앙↔엣지 시각화, adminOnly+fullScope)
   'xfer-speed': 'xfer-speed',        // XferSpeedTool.jsx 전용(v2.735) — 법인 간 전송 속도(adminOnly+fullScope)
+  'focus-mon': 'focus-mon',          // FocusMonTool.jsx 전용(v2.976) — 집중 모니터링(adminOnly+fullScope · 쓰기는 조회·쓰기 전체 범위)
   'isilon-dirusage': 'isilon-dirusage', // IsilonDirUsageTool.jsx 전용(v2.736) — 아이실론 디렉터리 사용량(adminOnly+fullScope)
   'data-flow': 'data-flow',          // DataFlow.jsx 전용(v2.587) — 데이터 흐름 지도(포탈 사이 전 경로, adminOnly+fullScope)
   'device-flow': 'device-flow',      // DeviceFlow.jsx 전용(v2.588) — 3단 지도(장비 → 엣지 → 메인, adminOnly+fullScope)
@@ -93,6 +94,9 @@ export const TOOL_PATH_KEYS = Object.freeze({
   rightsize: 'rightsizing',
   rma: 'rma',
   sanswitch: 'san-switch',
+  'san-flow': 'san-flow',            // v2.935(C-②) SAN 플로우 모니터(SanFlowTool.jsx 전용 — 세그먼트 = 키)
+  'san-storage': 'san-storage',      // v2.948 SAN 스토리지 성능(SanStorageTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/san-storage-perf)
+  'ps-inspect': 'ps-inspect',        // v2.965 PowerScale 장비 점검(PsInspectTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/powerscale-inspection)
   'secret-scan': 'secret-scan',
   'serial-lookup': 'serial-lookup',
   snapshots: 'snapshots',

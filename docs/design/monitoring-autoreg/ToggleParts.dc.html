@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>우클릭 메뉴 · 점검 상세 — 사용/중지</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a111c;color:#c8d6e8;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#9fcaff}a:hover{color:#cfe4ff}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.cap{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.1em;color:#8ea4bd}
+.menu{background:#0f1a2b;border:1px solid #24405f;border-radius:8px;box-shadow:0 18px 44px rgba(0,0,0,.5);padding:6px 0;display:flex;flex-direction:column}
+.menu .mh{padding:6px 14px 8px;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8ea4bd;border-bottom:1px solid #1c2c42;margin-bottom:4px}
+.menu .sh{padding:8px 14px 2px;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8ea4bd}
+.menu button{display:flex;align-items:center;gap:9px;height:30px;padding:0 14px;border:0;background:transparent;color:#dbe7f5;font:inherit;font-size:13px;text-align:left}
+.menu button svg{flex:none;color:#8ea4bd}
+.menu button .k{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8ea4bd}
+.menu button.hot{background:#153357;color:#fff}
+.menu button.hot svg{color:#9fcaff}
+.menu button.hot .k{color:#9fcaff}
+.menu button.dim{color:#8ea4bd}
+.menu hr{border:0;border-top:1px solid #1c2c42;margin:5px 0;width:100%}
+.modal{background:#0f1a2b;border:1px solid #24405f;border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.55);overflow:hidden}
+.modal-head{display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid #1c2c42}
+.modal-head b{color:#e8f1fb;font-size:14px}
+.grid{display:grid;grid-template-columns:104px 1fr;row-gap:8px;column-gap:12px;padding:14px 16px 12px;font-size:12.5px}
+.grid > span:nth-child(odd){color:#8ea4bd}
+.dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block;background:#7b8fa8}
+.box{margin:0 16px 12px;border:1px solid #2b4a6f;background:#0b1727;border-radius:8px;padding:4px 12px}
+.box .ln{display:flex;align-items:center;gap:10px;height:38px;font-size:12.5px;color:#dbe7f5}
+.box .ln + .ln{border-top:1px solid #1c2c42}
+.box .ln .who{color:#8ea4bd;font-family:"JetBrains Mono",monospace;font-size:11.5px}
+.obox{margin:0 16px 12px;border:1px solid #1d4ed8;background:#0e1a33;border-radius:8px;padding:9px 12px;font-size:12px;color:#c8d6e8;line-height:1.55}
+.actions{display:flex;gap:8px;justify-content:flex-end;padding:0 16px 14px;flex-wrap:wrap}
+.pc-btn{padding:6px 12px;border:1px solid #1e3350;border-radius:6px;background:#0f1a2b;color:#c8d6e8;font:inherit;font-size:12.5px;white-space:nowrap}
+.pc-btn.accent{border-color:#2b6fc0;background:#153357;color:#9fcaff}
+.lnk{border:0;background:transparent;color:#9fcaff;font:inherit;font-size:12px;padding:0;text-decoration:underline;white-space:nowrap}
+.sw{display:inline-flex;align-items:center;gap:7px;height:22px;padding:0 5px 0 9px;border-radius:11px;border:1px solid #3a4c63;background:#0b1727;color:#b8c7d9;font:inherit;font-family:"JetBrains Mono",monospace;font-size:11px;white-space:nowrap}
+.sw i{width:26px;height:14px;border-radius:7px;background:#3a4c63;position:relative;display:inline-block;flex:none}
+.sw i::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:#dbe7f5}
+</style>
+</helmet>
+<div style="width:880px;height:600px;box-sizing:border-box;padding:28px 32px;display:grid;grid-template-columns:300px minmax(0,1fr);gap:40px;align-items:start;background:#0a111c">
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <span class="cap">폴더 우클릭 메뉴</span>
+    <div class="menu" role="menu" aria-label="폴더 메뉴">
+      <div class="mh">설정 연동\서버 (폴더) · 대상 11 · 모두 중지</div>
+      <button type="button" class="hot" role="menuitem">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/></svg>
+        시험 점검 후 사용…<span class="k">대상 11</span>
+      </button>
+      <button type="button" role="menuitem">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>
+        바로 사용
+      </button>
+      <button type="button" class="dim" role="menuitem" aria-disabled="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>
+        중지<span class="k">이미 모두 중지</span>
+      </button>
+      <hr>
+      <button type="button" role="menuitem">하위 폴더 만들기</button>
+      <button type="button" role="menuitem">이 폴더에 등록…(대상·점검)</button>
+      <button type="button" role="menuitem">이 폴더 CSV 내보내기</button>
+      <button type="button" role="menuitem">이 폴더에 템플릿 적용…</button>
+      <div class="sh">하위 폴더 정렬</div>
+      <button type="button" role="menuitem">이름순</button>
+      <button type="button" role="menuitem">등록순</button>
+      <hr>
+      <button type="button" role="menuitem">폴더 이름 변경</button>
+      <button type="button" role="menuitem">폴더 삭제</button>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px;min-width:0">
+    <span class="cap">점검 상세 (중지된 점검을 눌렀을 때)</span>
+    <div class="modal" role="dialog" aria-labelledby="tp-title">
+      <div class="modal-head"><span class="dot"></span><b id="tp-title">TCP 443</b><span class="mono" style="font-size:11.5px;color:#8ea4bd">CVP-ASH-01</span><button type="button" aria-label="닫기" style="margin-left:auto;border:0;background:none;font-size:16px;color:#8ea4bd">✕</button></div>
+      <div class="grid">
+        <span>Status</span><span>Disabled</span>
+        <span>Test method</span><span>TCP port 443</span>
+        <span>주기</span><span>120초</span>
+        <span>Path</span><span class="mono" style="font-size:11.5px;color:#9fb4cc">Root\설정 연동\네트워크\Ashburn 법인\CVP-ASH-01\10.80.206.45</span>
+      </div>
+      <div class="box">
+        <div class="ln"><span>이 점검</span><span class="who">TCP 443</span><span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center"><button type="button" class="lnk">지금 한 번 점검</button><button class="sw" type="button" role="switch" aria-checked="false" aria-label="이 점검 사용">중지<i aria-hidden="true"></i></button></span></div>
+        <div class="ln"><span>대상 전체</span><span class="who">CVP-ASH-01 · 점검 2</span><span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center"><button type="button" class="lnk">시험 점검 후 사용</button><button class="sw" type="button" role="switch" aria-checked="false" aria-label="대상 CVP-ASH-01 사용">중지<i aria-hidden="true"></i></button></span></div>
+      </div>
+      <div style="margin:-4px 16px 12px;font-size:11.5px;color:#8ea4bd">중지된 점검은 실행하지 않고 실패 알림도 보내지 않습니다. 대상이 중지면 그 아래 점검은 모두 쉽니다.</div>
+      <div class="obox">
+        이 대상은 <b>설정 연동</b>으로 만들어졌습니다(출처 Arista CVP · 법인 Ashburn). 주소·이름은 포탈 설정을 따릅니다.<br>
+        <a href="Main.dc.html">설정 연동에서 보기</a>
+      </div>
+      <div class="actions"><button class="pc-btn" type="button">연동 해제(수동 대상으로)</button><button class="pc-btn" type="button">수정</button><button class="pc-btn" type="button">삭제</button></div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":880,"height":600}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

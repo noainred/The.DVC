@@ -150,19 +150,20 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ---
 
-## 6. 허용 분류 3종
+## 6. 허용 분류 4종
 
 | 키 | 라벨 | 민감도 | 무엇이 들어가나 |
 |---|---|---|---|
 | `inventory` | 인벤토리 지표 | low | vCenter·호스트·VM·데이터스토어·알람의 **개수와 합계**, 수집 상태. 개별 VM 이름·IP 는 주지 않습니다 |
 | `capacity` | 용량 · 사용량 추이 | medium | 데이터스토어 사용률, 스토리지 장비 용량·증가량. **장비명·법인**이 들어갑니다 |
 | `faults` | 장애 · 알람 현황 | medium | vCenter 알람, 물리 부품 장애. **장비·엔티티 이름**이 들어갑니다 |
+| `san` | SAN 스토리지 성능 | medium | SAN 스위치가 본 **스토리지 어레이별** 처리량 · 회선 사용률 · 편중 · 성능 점검 판정(v2.953). **어레이 이름 · 시리얼 · 법인**이 들어갑니다. vCenter 범위로 나눌 수 없어 범위 지정 키는 403 `needs-full-scope` |
 
 > 포탈 자신의 상태(엣지 주소·내부 IP·버전)는 **공개하지 않습니다.**
 
 ---
 
-## 7. 엔드포인트 8개
+## 7. 엔드포인트 10개
 
 아래 예시는 **목 데이터로 실제 호출해 받은 응답**입니다(형식은 실제와 같고 값은 데모입니다).
 
@@ -423,6 +424,51 @@ ISO 문자열이 섞여 나오지 않습니다.
 > ⚠⚠ **`unknown`(확인 불가)과 `absent`(빈 슬롯)를 장애로 세지 마세요.** 실제로 겪은 사례가
 > 있습니다 — 정상 장비의 빈 DIMM 슬롯 12칸을 고장으로 세면 **정상 장비에 장애 12건**이 찍힙니다.
 > 정상으로도 세지 않습니다. `state` 를 그대로 보고 세 갈래로 나누세요.
+
+---
+
+### 7-9. `GET /san-storage/arrays` — SAN 스토리지 어레이별 성능(v2.953)
+
+분류 `san` · 범위 적용 안 함(범위 지정 키는 403 `needs-full-scope`) · 배열 · `?datacenterId=<법인 id>`(쉼표로 여러 개)로 법인을 고를 수 있습니다
+
+필드: `key` `name` `vendor` `serial` `datacenterId` `datacenterName` `state` `nowBps` `nowAt` `utilPct` `avg24Bps` `peak24Bps` `delta7dPct` `imbalanceGroup` `imbalanceRatio` `directors` `ports` `switches` `storageDeviceId` `capacityPct` `alertsUnresolved` `growth30dBytes` `daysToFull`
+
+| 필드 | 뜻 |
+|---|---|
+| `key` `name` `vendor` `serial` | 어레이 식별자(스위치 네임서버 심볼릭 이름 기준 · 예 `SYMMETRIX::000197952952`) · 표시 이름(등록 스토리지가 있으면 그 이름) · 벤더(`powermax` / `powerstore` / `unity` / `other`) · 시리얼(없으면 null) |
+| `datacenterId` `datacenterName` | 어레이가 물린 스위치의 법인 |
+| `state` | 수집 상태 — `ok` / `late`(표본 지연) / `edge-missing`(엣지 미보고) / `none`(표본 없음) / `partial`(부분 합). **`none` · `partial` 은 0 이 아닙니다** |
+| `nowBps` `nowAt` | 지금 처리량(B/s) 과 그 칸의 시각 — 수집 주기 안에서 팹 A/B 표본이 다 모인 마지막 칸. 없으면 **null**(0 이 아닙니다) |
+| `utilPct` | 회선 사용률 % = 송수신 합 ÷ 연결 포트 속도 합(FC 는 전이중이라 이론상 200% 까지) |
+| `avg24Bps` `peak24Bps` `delta7dPct` | 24시간 평균 · 피크(B/s) · 지난 7일 하루 평균 대비 % |
+| `imbalanceGroup` `imbalanceRatio` | 디렉터 · 컨트롤러 편중 — 가장 치우친 디렉터 이름과 어레이 평균 대비 배수(없으면 null) |
+| `directors` `ports` `switches` | 디렉터 묶음 수(구분 못 한 포트는 빼고) · 포트 수 · 스위치 수 |
+| `storageDeviceId` `capacityPct` `alertsUnresolved` | 시리얼로 짝 지은 등록 스토리지 장비의 id · 사용률 % · 미해결 알람 수 — 짝이 없으면 전부 null |
+| `growth30dBytes` `daysToFull` | 짝 지은 장비의 30일 증가량(바이트) · 소진 예상 일수(증가 추세일 때만 · 아니면 null) — 스토리지 증가량 화면과 같은 계산 |
+
+`meta`: `intervalMs`(수집 주기) · `computedAt` · `hostsExcluded`(호스트 HBA 로 분류돼 뺀 연결 수) · `unit: "bytesPerSec"` · 상한 `count` `truncated`.
+
+> ⚠ `nowBps` 가 null 인 행을 0 으로 그리지 마세요 — 그 칸에 표본이 없다는 뜻입니다. `state` 를 함께 보세요.
+
+---
+
+### 7-10. `GET /san-storage/check` — SAN 스토리지 성능 점검 판정(v2.953)
+
+분류 `san` · 범위 적용 안 함(범위 지정 키는 403 `needs-full-scope`) · 배열 · `?datacenterId=` 로 법인을 고를 수 있습니다
+
+필드: `key` `name` `datacenterId` `datacenterName` `overall` `uncheckedCount` `items` `arraySideKeys` `arraySideLastSampleAt` `judgedAt`
+
+| 필드 | 뜻 |
+|---|---|
+| `overall` | 종합 — `ok` / `warn` / `bad` / `unknown`. **`unknown`(확인 불가)은 정상이 아닙니다**(기준 없음 · 표본 없음 · 짝 없음) |
+| `uncheckedCount` | 확인 불가 항목 수(정상 판정이어도 0 이 아닐 수 있습니다 — '정상(일부 미확인)') |
+| `items` | 항목별 상태 객체 — 스위치 측 `imbalance`(디렉터 편중) `fabric`(팹 비대칭) `portSat`(회선 포화) `collect`(수집 상태) + 어레이 측 `dirBusy` `resp` `queue` `cpu` `compare`. 값은 `ok` / `warn` / `bad` / `unknown` / `na`(해당 없음) |
+| `arraySideKeys` `arraySideLastSampleAt` | 어레이가 스스로 보고한 값이 붙은 항목 키 목록과 그 마지막 표본 시각(없으면 빈 배열 · null) |
+| `judgedAt` | 판정 시각(epoch ms) |
+
+`meta`: `summary`(정상 · 주의 · 이상 · 확인 불가 수) · `itemLabels`(항목 키 → 한글 라벨) · 상한.
+
+> 기준값은 포탈 관리자가 '성능 점검 › 기준 설정' 에서 정한 것(벤더 문서 기본값 · 비우면 판정 안 함)이고, 응답에는 넣지 않습니다. 판정 함수는 포탈 화면 · 알림 · 월간 보고서와 **같은 하나**입니다.
 
 ---
 

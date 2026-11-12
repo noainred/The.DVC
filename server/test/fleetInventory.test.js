@@ -104,7 +104,9 @@ test('전력 미보고 베어메탈(watts=null)도 목록에는 포함, 합산�
   assert.equal(bareMetal.length, 1);
   assert.equal(bareMetal[0].watts, null);
   assert.equal(summary.bareMetalMeasured, 0);
-  assert.equal(summary.bareMetalWatts, 0);
+  // v2.977(전체 점검): 측정 0대의 합은 '모름'(null) — 예전 0 은 화면에 '0 W · 0 kW' 로 보였다(못 읽은 값은 0 이 아니다)
+  assert.equal(summary.bareMetalWatts, null);
+  assert.equal(summary.bareMetalKw, null);
 });
 
 test('법인 등록(assign): 베어메탈에 소속 법인이 붙고 법인별로 집계', () => {

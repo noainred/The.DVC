@@ -40,7 +40,7 @@ export function MailDiag() {
       setErr(null);
     } catch (e) { setErr(e.message); }
   };
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, []);
 
   const save = async () => {
     setBusy(true); setMsg(null);

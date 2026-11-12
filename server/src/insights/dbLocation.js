@@ -35,6 +35,7 @@ export const MIGRATABLE = [
   { file: 'capacity.db', label: '용량 샘플' },
   { file: 'veeam-snap.db', label: 'Veeam 스냅샷 이벤트(최근 31일 · 카드 백업 수량)' },
   { file: 'veeam-history.db', label: 'Veeam 일 단위 이력(라이선스·저장소 용량 · 400일)' },
+  { file: 'gpu-alloc.db', label: 'GPU 할당율 일 단위 이력(법인별 용량 · 할당 · 800일 — v2.939)' },
   { file: 'vm-track.db', label: 'VM 수량·스토리지 추이' },
   { file: 'storage-history.db', label: '스토리지 장비 이력' },
   // ▼ v2.379 이후 추가된 DB — 등재가 누락돼 있었다(v2.451 수정).
@@ -50,15 +51,18 @@ export const MIGRATABLE = [
   { file: 'guest-disk.db', label: '게스트 디스크 회수 리포트 추이(v2.459)' },
   { file: 'curuser.db', label: "'현재 사용자' 로그인 사용자 수 추이(v2.520)" },
   { file: 'san-health.db', label: 'SAN 스위치 점검 이력(최근 N회 비교, v2.522)' },
+  { file: 'san-storage-check.db', label: 'SAN 스토리지 성능 점검 결과 이력(바뀌었거나 1시간마다 · 최근 N회 비교, v2.955)' },
   { file: 'horizon-sessions.db', label: 'Horizon 실시간 사용자(세션) 추이(v2.525)' },
   { file: 'part-faults.db', label: '물리 파트(부품) 장애 이력 — 열림/변화/해소 전이(v2.547)' },
   { file: 'bm-usage.db', label: '베어메탈 사용률(CPU·메모리·디스크·네트워크·HBA, v2.550)' },
   { file: 'link-check.db', label: '통신 점검 이력(중앙↔엣지·vCenter 링크, v2.552)' },
   { file: 'bmstor-history.db', label: '베어메탈 스토리지 디스크 사용량 12시간 이력(서버·그룹·합계, v2.635)' },
+  { file: 'bmstor-io.db', label: '베어메탈 스토리지 디스크 I/O 시계열(원시·15분·1시간 집계, v2.915)' },
   { file: 'cvp.db', label: 'Arista CloudVision(CVP) 네트워크 스위치 — 장비·포트 최신값·포트 사용량 이력(v2.608)' },
   { file: 'vm-dns.db', label: 'VM DNS 서버 설정 변경 이력(바뀐 것만 — v2.696)' },
   { file: 'xfer-speed.db', label: '법인 간 전송 속도 측정 이력(중앙↔엣지 10MB 왕복 — 원시 + 일 요약, v2.735)' },
   { file: 'usage.db', label: '기능 사용 현황 — 사용자 × 화면 × 날 열람 수 · 머문 시간 일 집계(v2.913)' },
+  { file: 'focusmon.db', label: '서버 집중 모니터링 기록(서버별 1분 묶음 · 프로세스 상위 30 — 30일, v2.976)' },
   { file: 'isidu.db', label: '아이실론 디렉터리 사용량 이력(사용자 폴더 크기 — 조사마다 전체, v2.736)' },
   // vcenter-logs.db 는 **이미 자체 경로 설정**(설정 › 로그 수집의 storagePath)이 있어 제외한다 —
   // 두 곳에서 경로를 제어하면 어느 쪽이 이겼는지 알 수 없다(그 화면에서 옮기세요).

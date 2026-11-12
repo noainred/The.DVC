@@ -14,7 +14,8 @@ import { promisify } from 'node:util';
 import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { createYielder } from '../util/timeSlice.js';
-import { redactEnvSecrets, mergeRedactedEnv, pinHostSecurityEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
+import { redactEnvSecrets, mergeRedactedEnv, pinHostSecurityEnv } from '../util/envRedact.js';
+import { KEY_FILE_NAME, redactKeyStoreText, mergeRedactedKeyStore } from '../bmusage/onboard/keyBundle.js'; // 7b: 번들의 SSH 키 저장소 가림 · 복원 병합 // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { isRegisteredStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01·08: 헬퍼가 만든 상태 파일은 스스로 등록한다
 import { DATA_FILE_NAMES, RESTORE_EXCLUDE, stageRestore, stagedNameIssue, reconcileAgentTokensText } from './stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원은 예약 → 기동 시 적용
@@ -62,6 +63,8 @@ export function fileCapFor(name) {
  * 백업 **내용**은 바꾸지 않는다(복원 의미 유지) — 트리거와 중복 판정에서만 뺀다.
  */
 export const RUNTIME_STATE_NAMES = new Set([
+  'focusmon-sessions.json', 'focusmon-keys.json', 'focusmon-auth-stops.json', // v2.976 집중 모니터링 계속 수집 정의 · 엣지 공개키 기록 · 인증 정지(registerStateFile 과 이중 안전망)
+  'storage-inspect-runs.json', 'storage-inspect-ring.json', 'storage-inspect-state.json', // v2.965 PowerScale 점검 이력 · 엣지 미전송 고리 · 회차 기록(registerStateFile 과 이중 안전망)
   'issue-notify-state.json', // v2.871 이슈 기한 알림 기록(issues/notify.js — registerStateFile 과 이중 안전망)
   'issue-filter-mail-state.json', // v2.883 저장 필터 주간 메일 기록(issues/notify.js — 같은 이중 안전망)
   'issue-inbox.json', // v2.908 포탈 알림함(issues/inbox.js — 같은 이중 안전망)
@@ -129,7 +132,9 @@ export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json
   //   필드 이름이 last* 가 아니라 아래 MIXED_EXTRA_RUN_FIELDS 로 따로 지정한다(이름을 바꾸면 화면·엣지 계약이 바뀐다).
   'central-svcmon-assign.json',
   // 2026-10-09 검토 S-01·S-02: 장비 지문 신뢰(peer-trust.json)는 승인·정책(설정)과 연결마다 바뀌는 lastSeen·lastSeenCount(실행)를 한 파일에 둔다.
-  'peer-trust.json']);
+  'peer-trust.json',
+  // v2.935(C-②): SAN 플로우 모니터 기록 — 플로우 정의(설정)와 15분마다 바뀌는 카운터 · 권한 점검 결과(실행)를 한 파일에 둔다.
+  'san-flows.json']);
 // 실행 필드 — last* 와 사용 횟수(useCount). 설정이 아니다.
 const RUN_FIELD_RE = /^(last[A-Z]|useCount$)/;
 /**
@@ -158,6 +163,12 @@ export const MIXED_EXTRA_RUN_FIELDS = new Map([
   }],
   // v2.830: 백업 그룹의 실행 상태 — 보내는 중 표지(sending)·놓친 회차(missed). lastKey·lastFire 는 last* 규칙이 뺀다.
   //   그룹 정의(이름·VM·스케줄·스토리지·anchorAt·고친 사람)만 남긴다 — 예약 회차마다 change 백업이 생기지 않게.
+  // v2.935(C-②): 플로우 카운터 · 직전 카운터 · 활성 여부 · 권한 점검 결과는 실행 — 15분 카운터 주기마다 change 백업이 생기지 않게.
+  ['san-flows.json', (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const FLOW_RUN = new Set(['counters', 'prevCounters', 'prevAt', 'active', 'rawSample']);   // v2.940 rawSample(못 읽은 출력 원문)도 실행 값
+    return { flows: Array.isArray(obj.flows) ? obj.flows.map((f) => (f && typeof f === 'object' ? Object.fromEntries(Object.entries(f).filter(([k]) => !FLOW_RUN.has(k))) : f)) : obj.flows };
+  }],
   ['bareos-groups.json', (obj) => {
     if (!obj || typeof obj !== 'object' || !Array.isArray(obj.groups)) return obj;
     const GROUP_RUN = new Set(['sending', 'missed', 'fires']);   // v2.831 fires = 실행 이력(실행 상태) · lastPrune 은 last* 로 빠진다
@@ -200,7 +211,11 @@ function fingerprintContent(name, content) {
  */
 // v2.785(검토 R-B1): v2.784 의 백업 표시(`backup-marks.json` — VM 별 업무 중요도·백업 필요·메모, 사용자가 누를 때마다 쓴다)도 같은 성격이다 —
 //   빠져 있어 표시를 바꿀 때마다 change 백업이 생겨 자동 보관 슬롯(10)의 실제 설정 변경 백업을 밀어냈다(재현: 표시만 바꿔도 지문이 달라짐).
-export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json', 'backup-marks.json', 'issues.json', 'wiki.json', 'issue-sprints.json', 'issue-filters.json', 'wiki-user.json', 'attachments.json', 'service-map-pins.json']); // v2.889 첨부 목록(올릴 때마다 바뀐다 — 본체는 백업에 넣지 않는다)
+export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json', 'backup-marks.json', 'issues.json', 'wiki.json', 'issue-sprints.json', 'issue-filters.json', 'wiki-user.json', 'attachments.json', 'service-map-pins.json',
+  // v2.915 Monitoring 설정 연동 상태 — 5분 감지가 일별 요약·연동 키(known)를 쓴다(설정 변경 아님). 번들에는 들어간다.
+  'svcmon-settings-sync.json',
+  // v2.960 시험 점검 엣지 대기(시작 · 판정 때마다 바뀌는 판정 상태 — 설정 변경 아님). 번들에는 들어간다.
+  'svcmon-trial.json']); // v2.889 첨부 목록(올릴 때마다 바뀐다 — 본체는 백업에 넣지 않는다)
 // 서비스 인벤토리 고정(한 대씩 고정·검토·유령 정리 때마다 바뀐다 — 5차 검토 R1: 고정 한 번이 '설정 변경' 백업 939KB 를 만들었다. 서비스·규칙(service-map.json)은 설정이라 감시 대상 그대로)
 // v2.888 위키 즐겨찾기 · 조회 수(문서를 열 때마다 바뀐다) · v2.864: 이슈 트래커 · v2.881 위키 · v2.882 스프린트 · 저장 필터도 같은 성질(사용자 데이터)
 export function isChangeWatchExcluded(name) { return CHANGE_WATCH_EXCLUDE.has(path.basename(String(name || ''))); }
@@ -243,6 +258,13 @@ function putCollected(out, name, content) {
     const r = redactEnvSecrets(content);
     content = r.text;
     if (r.redacted) (out[REDACTED_META] ||= {})[name] = r.keys;
+  }
+  // 7b: SSH 키 저장소는 번들(백업 · 엣지 설정 push)에 **지문 · 공개키 · 이름만** — 개인키 · passphrase · 공통 계정 비밀번호는 가린다
+  //   (봉인돼 있어도 싣지 않는다: 엣지 push 는 법인 밖으로 나가고, 백업은 다른 곳에 보관된다). 복원은 지금 파일의 같은 키로 되살린다.
+  if (name === KEY_FILE_NAME) {
+    const r = redactKeyStoreText(content);
+    content = r.text;
+    if (r.redacted) (out[REDACTED_META] ||= {})[name] = ['privateKey', 'passphrase', 'password'];
   }
   out[name] = content;
 }
@@ -454,7 +476,7 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
   const excluded = []; // [{file, reason}] — 복원하지 않는 파일(v2.768)
   const toStage = {};
   const envWrites = [];
-  let envRestored = 0; const envDropped = []; const envPinned = [];
+  let envRestored = 0; const envDropped = []; const envPinned = []; const keysKept = [];
   let dirIssue = null;
   try { fs.accessSync(CONFIG_DIR, fs.constants.W_OK); } catch (e) { dirIssue = String(e?.code || e?.message || e).slice(0, 200); }
   for (const [name, content0] of Object.entries(archive.central.files)) {
@@ -474,6 +496,14 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
       content = p.text; envPinned.push(...p.pinned.map((k) => `${base}:${k}`));
       envWrites.push([base, String(content)]);
       continue;
+    }
+    // 7b: 번들의 SSH 키 저장소는 개인키 · 비밀번호가 가려져 있다 — 지금 파일의 같은 키(지문) · 같은 계정(id)으로 되살리고, 못 살리는 키는 뺀다.
+    if (base === KEY_FILE_NAME) {
+      let cur = ''; try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch { /* 없음 */ }
+      const m = mergeRedactedKeyStore(String(content0), cur);   // 저장된 값(봉인 그대로)을 옮겨 붙인다 — 복호 · 재봉인 없음
+      content = m.text;
+      envDropped.push(...m.dropped.slice(0, 64).map((d) => `${base}:${d}`));   // 되살리지 못한 키 · 계정 비밀(.env 키를 못 살렸을 때와 같은 칸)
+      keysKept.push(...(m.kept || []).slice(0, 64));   // 7b 반증 F13: 백업 뒤 등록한 키 · 계정은 지우지 않고 남겼다(번들에 개인키가 없어 되살릴 수 없으므로)
     }
     // v2.769(점검 R4-D1-3): 예약 복원이 받지 않는 이름(공백·'+'·'@'·선행 '.' 등 — 백업 수집은 확장자만 본다)은 예약에서 조용히 빠졌다.
     //   지금 failed 에 사유와 함께 싣는다(v2.689 G2 B4 '실패를 삼키지 않는다').
@@ -515,7 +545,7 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
     restored, failed, excluded, warnings,
     staged: stage ? stage.files : [], stagedReplaced: !!stage?.replaced, pendingRestart: !!stage,
     envWritten: envWrites.length,
-    edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped, envKeysPinned: envPinned,
+    edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped, envKeysPinned: envPinned, sshKeysKept: keysKept,
   };
 }
 

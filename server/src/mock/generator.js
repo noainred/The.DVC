@@ -122,13 +122,32 @@ const HBA_FC = [
   { model: 'QLogic QLE2692 16Gb FC', speeds: [16, 8] },
 ];
 const HBA_ISCSI = { model: 'Broadcom 57414 25GbE iSCSI', speeds: [25, 25] };
-function wwn(idx, p) { const h = (idx * 131 + p * 17).toString(16).padStart(2, '0'); return `20:00:00:24:ff:${h}:${(p).toString(16).padStart(2, '0')}:${(idx % 256).toString(16).padStart(2, '0')}`; }
-function mkHbas(idx) {
+// v2.935(C-①): 데모 WWN 은 사이트 · 호스트 이름으로 만든다 — 예전 식(idx 만)은 사이트마다 같은 WWN 이 반복되고(호스트 0번이 28개 사이트에 같은 WWN)
+//   idx 가 크면 한 바이트가 3자리 16진이 되어 WWN 형식이 깨졌다(데모 SAN 이 그 호스트를 합성 WWN 으로 바꿔 인벤토리 HBA 와 어긋났다).
+function wwn(idx, p, salt = '') {
+  let x = 2166136261 >>> 0;
+  for (const ch of `${salt}|${idx}|${p}`) x = Math.imul(x ^ ch.charCodeAt(0), 16777619) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 2246822507) >>> 0; x = Math.imul(x ^ (x >>> 13), 3266489909) >>> 0; x = (x ^ (x >>> 16)) >>> 0;   // 섞기(비슷한 입력의 충돌을 줄인다)
+  const b = [(x >>> 24) & 255, (x >>> 16) & 255, (x >>> 8) & 255, (x & 0xfe) | (p & 1)].map((v) => v.toString(16).padStart(2, '0'));
+  return `20:00:00:24:${b.join(':')}`;
+}
+/** v2.935(C-③): 데모 호스트 물리 NIC(soapClient parsePnics 와 같은 모양) — 업링크 매칭 · CVP 위치 · vmnic 카운터 데모가 NIC 이름 · MAC 을 쓴다.
+ *   예전 데모 호스트에는 NIC 목록이 없어 네트워크 카드가 '인벤토리에 없음' 이었다. MAC 은 사이트 · 호스트 이름으로 만든 결정적 값(가상값). */
+function mkPnics(idx, salt = '') {
+  return [0, 1, 2, 3].map((p) => {
+    let x = 2166136261 >>> 0;
+    for (const ch of `${salt}|nic|${p}`) x = Math.imul(x ^ ch.charCodeAt(0), 16777619) >>> 0;
+    const b = [(x >>> 16) & 255, (x >>> 8) & 255, x & 255].map((v) => v.toString(16).padStart(2, '0'));
+    return { device: `vmnic${p}`, mac: `b8:59:9f:${b.join(':')}`, speedMb: p < 2 ? 25000 : 10000, maxSpeedMb: p < 2 ? 25000 : 10000,
+      link: !(p === 3 && idx % 11 === 3), driver: p < 2 ? 'nmlx5_core' : 'ixgben', vendor: p < 2 ? 'Mellanox Technologies' : 'Intel Corporation', model: p < 2 ? 'ConnectX-4 Lx' : 'X710' };
+  });
+}
+function mkHbas(idx, salt = '') {
   const fc = HBA_FC[idx % HBA_FC.length];
   const hbas = fc.speeds.map((sp, p) => ({
     name: `vmhba${p + 1}`, type: 'FibreChannel', model: fc.model,
     speedGbps: idx % 23 === 0 && p === 1 ? Math.max(8, sp / 2) : sp, // a few links degraded
-    wwn: wwn(idx, p), status: 'online',
+    wwn: wwn(idx, p, salt), status: 'online',
   }));
   if (idx % 4 === 0) hbas.push({ name: 'vmhba64', type: 'iSCSI', model: HBA_ISCSI.model, speedGbps: HBA_ISCSI.speeds[0], wwn: '', status: 'online' });
   return hbas;
@@ -334,14 +353,15 @@ function mkSnapTree(i, n) {
   return out;
 }
 
-function mkVmDev(vm, dsNames = [], nets = []) {
+function mkVmDev(vm, dsNames = [], nets = [], siteNo = 0) {
   const i = vm.idx;
   const netAt = (k) => (nets.length ? nets[(i + k) % nets.length] : null);
   const nic = (k, label) => {
     const n = netAt(k);
     const dvs = n?.type === 'DISTRIBUTED_PORTGROUP';
     return { label, adapter: i % 29 === 0 ? 'E1000E' : 'VMXNET 3', backing: n ? (dvs ? 'dvs' : 'std') : 'other', net: n && !dvs ? n.name : null, netRef: n ? n.name : null,
-      mac: `00:50:56:${((i >> 8) & 0xff).toString(16).padStart(2, '0')}:${(i & 0xff).toString(16).padStart(2, '0')}:${(10 + k).toString(16).padStart(2, '0')}`,
+      // v2.935(C-③): 넷째 바이트에 사이트 번호 — 예전에는 사이트 안 순번만 써서 법인마다 같은 MAC 이 나왔고, 데모 CVP 위치가 다른 법인 것으로 덮였다(VM 위치 카드가 거의 '불일치').
+      mac: `00:50:56:${(siteNo & 0xff).toString(16).padStart(2, '0')}:${((i >> 7) & 0xff).toString(16).padStart(2, '0')}:${((((i & 0x7f) << 1) | (k & 1)) & 0xff).toString(16).padStart(2, '0')}`,
       connected: !(i % 31 === 0 && k === 0), startConnected: true };
   };
   const dsAt = (k, fb) => (dsNames.length ? dsNames[(i + k) % dsNames.length] : fb);
@@ -618,7 +638,8 @@ export function generateSnapshot() {
         // v2.716: 서비스태그 — 예전엔 없어서 시리얼 조회 'ESXi 호스트' 가 0건이었다. iDRAC 데모 시드(seed.js)와 같은 규칙이라
         //   Dell 호스트는 자기 iDRAC 서버와 태그가 같다(다르면 hostMatch 가 '다른 장비' 로 본다 — v2.682 R3D-04).
         serviceTag: mockServiceTag(`${site.id}|${h.name}`),
-        hbas: mkHbas(h.idx),
+        hbas: mkHbas(h.idx, `${site.id}|${h.name}`),
+        nics: mkPnics(h.idx, `${site.id}|${h.name}`),   // v2.935(C-③)
         gpus: mkGpus(h.idx, site),
         // v2.852: vSphere 데이터센터 이름(실수집 soapClient 와 같은 키) — VM 의 vcDcPath 와 같은 값. GPU 할당 계층의 '데이터센터' 단계.
         vcDatacenter: `DC-${site.id}`,
@@ -727,7 +748,7 @@ export function generateSnapshot() {
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
         // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.
         // v2.906: 로컬 데이터스토어에는 그 호스트(마운트 목록의 한 대)의 VM 디스크만 — 예전에는 모든 호스트 VM 이 로컬 DS 에 놓여 마운트 카드가 '공유 호스트 24대' 였다(화면 판독)
-        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.filter((d) => d.storageType !== 'local' || !env.hosts.length || env.hosts[d.idx % env.hosts.length]?.name === vm.host.name).map((d) => d.name), env.networks) }),
+        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.filter((d) => d.storageType !== 'local' || !env.hosts.length || env.hosts[d.idx % env.hosts.length]?.name === vm.host.name).map((d) => d.name), env.networks, SITES.indexOf(site)) }),
         ...((() => { const pc = powered ? mkVmPerfc(vm.idx) : null; return pc ? { perfc: pc } : {}; })()),
       });
     }

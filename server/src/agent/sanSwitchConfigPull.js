@@ -13,6 +13,8 @@ import { pullRecoveryNote } from '../util/registryCore.js'; // v2.744(감사 EDG
 import { dropSnapshot, flushSnapshotsNow } from '../sanswitch/store.js';
 import { collectDeviceNow, testDeviceConnection } from '../sanswitch/poller.js';
 import { applyCentralPerfSettings } from '../sanswitch/perfSettings.js';
+import { buildFlowCommands } from '../sanswitch/flowCmd.js';
+import { runFlowCommands } from '../sanswitch/flowJobs.js';
 import { pushSanSwitchNow } from '../sanswitch/push.js';
 import { pollPerfOnce } from '../sanswitch/perfPoller.js';
 import { pushPerfNow } from '../sanswitch/perfPush.js';
@@ -27,6 +29,7 @@ let _last = null;
 let _registryRecovered = null; // v2.744(감사 EDGE-03): 손상 등록부를 중앙 배포분으로 다시 쓴 마지막 기록
 let _perfCollectPush = null; // v2.603 EDGE2603-03: 포트 사용량 '지금 수집' 대행 뒤 push 의 결과
 let _collectPush = null; // v2.601 EDGE2601-06: '지금 수집' 직후 push 의 결과(상태 화면·엣지 로그용)
+let _flowLast = null; // v2.935(C-②): 마지막 Flow Vision 플로우 작업 대행 · 회신 결과(상태 화면 · 엣지 로그용)
 
 /**
  * v2.601(감사 EDGE2601-06): '지금 수집' 직후 push — 진행 중이던 주기 push 는 재수집 **전** 스냅샷을 보냈으므로 끝난 뒤 한 번 더 보낸다.
@@ -181,6 +184,9 @@ async function _pull() {
     //   같은 장비(호스트)에 세션이 겹치지 않게 테스트·재수집은 호스트 잠금(withHostLock)을 공유한다 — 먼저 등록된 쪽이 먼저 돈다.
     const tests = Array.isArray(body?.testNow) ? body.testNow.slice(0, 5) : [];
     for (const t of tests) runDelegatedTest(t).catch((e) => console.warn(`[sanswitch-config] 테스트 대행 실패 ${t?.id}: ${e.message}`));
+    // v2.935(C-②) Flow Vision 플로우 작업 대행 — 테스트와 같이 수집보다 먼저 호스트 잠금을 등록한다(같은 동기 구간).
+    const flowJobs = Array.isArray(body?.flowNow) ? body.flowNow.slice(0, 5) : [];
+    for (const j of flowJobs) runDelegatedFlow(j).catch((e) => console.warn(`[sanswitch-config] 플로우 작업 대행 실패 ${String(j?.id || '').slice(0, 20)}: ${e.message}`));
     // '지금 수집' 요청 — 구성이 안 바뀌어도 **매 pull 마다** 처리한다(재수집은 흔한 요청).
     // v2.733(C4-02): pull 이 기다리지 않는다 — 별도 단일비행 작업(runCollectJob)이 한 대씩 순서대로 수집하고 끝나면 push 한다
     //   (CVP 형제와 같다). 예전에는 루프 동안 재진입 가드가 다음 설정 pull(장비 추가·삭제·포트 사용량 설정·다음 테스트 인출)까지 막았다.
@@ -213,7 +219,7 @@ async function _pull() {
     // v2.733(C4-02): 수집 결과(collected)는 이 pull 이 끝난 뒤에 나온다 — 상태의 collectRun(마지막으로 끝난 작업)이 말한다.
     const collectQueued = enq ? enq.queued : 0;
     const collectAlready = enq ? enq.already : 0;
-    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collectQueued, ...(collectAlready ? { collectAlready } : {}), ...(enq?.dropped ? { collectDropped: enq.dropped } : {}), testRequested: tests.length, perfApplied, perfCollect, ...(perfUnreadable ? { perfSettingsUnreadable: perfUnreadable } : {}) };
+    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collectQueued, ...(collectAlready ? { collectAlready } : {}), ...(enq?.dropped ? { collectDropped: enq.dropped } : {}), testRequested: tests.length, ...(flowJobs.length ? { flowRequested: flowJobs.length } : {}), perfApplied, perfCollect, ...(perfUnreadable ? { perfSettingsUnreadable: perfUnreadable } : {}) };
     return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collectQueued, testRequested: tests.length, perfApplied, perfCollect };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };
@@ -235,6 +241,41 @@ async function runDelegatedTest(t) {
   if (!res.ok) throw new Error(`sanswitch-test-result <- ${res.status}`);
 }
 
+/**
+ * v2.935(C-②) 중앙이 큐에 둔 플로우 작업을 현지에서 실행한다.
+ *   · 중앙이 보낸 명령 글자는 없다 — 동작 · 플로우 정의만 받아 buildFlowCommands 로 **다시 검사하고 직접 만든다**(형식 밖이면 실행하지 않고 그 사유를 회신).
+ *   · 장치는 **이 엣지 등록부**에서 찾는다(중앙이 위임한 것만 있다) — 없으면 실행하지 않는다. 자격증명은 등록부의 것.
+ *   · 같은 호스트의 '지금 수집' · 연결 테스트와 세션을 겹치지 않는다(withHostLock — 이 줄 앞에 await 를 두지 말 것).
+ */
+async function runDelegatedFlow(j) {
+  const id = typeof j?.id === 'string' && /^[0-9a-f]{16}$/.test(j.id) ? j.id : '';
+  if (!id) return;
+  // v2.935 반증 M-2: 남은 시한(ttlMs — 중앙 시계가 아니라 받은 순간부터의 상대값)이 지나면 실행하지 않는다 — 중앙은 이미 '결과 모름' 으로 닫았다.
+  const ttl = Math.max(0, Math.min(60 * 60_000, Number(j.ttlMs) || 0));
+  const deadline = Date.now() + ttl;
+  const device = getDeviceWithSecret(String(j.deviceId || ''));
+  const built = device ? buildFlowCommands(String(j.action || ''), Array.isArray(j.flows) ? j.flows : []) : null;
+  const result = !device ? Promise.resolve({ ok: false, outputs: [], notRun: true, reason: '이 엣지 등록부에 그 스위치가 없습니다(중앙 위임 목록을 다시 받은 뒤 시도하세요)' })
+    : built.issue ? Promise.resolve({ ok: false, outputs: [], notRun: true, reason: `엣지가 플로우 정의를 거부했습니다: ${built.issue}` })
+      : !ttl ? Promise.resolve({ ok: false, outputs: [], notRun: true, reason: '중앙이 시한을 주지 않아 실행하지 않았습니다(구버전 중앙)' })
+        : withHostLock(device.host, () => (Date.now() > deadline
+          ? { ok: false, outputs: [], notRun: true, reason: '호스트 잠금을 기다리는 동안 시한이 지나 실행하지 않았습니다' }
+          : runFlowCommands(device, built.cmds)));
+  const r = await result;
+  try {
+    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-flow-result`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken },
+      body: JSON.stringify({ agent: config.agent.name || '', id, result: r }), timeoutMs: 20_000, retries: 2,
+    });
+    if (!res.ok) throw new Error(`sanswitch-flow-result <- ${res.status}`);
+    _flowLast = { at: Date.now(), ok: true, id, action: String(j.action || '').slice(0, 10), ran: !r.notRun };
+  } catch (e) {
+    // v2.935 반증 L-10: 회신 실패도 상태에 남긴다(콘솔만이면 엣지 로그 화면에서 보이지 않는다).
+    _flowLast = { at: Date.now(), ok: false, id, action: String(j.action || '').slice(0, 10), ran: !r.notRun, reason: String(e?.message || e).slice(0, 200) };
+    throw e;
+  }
+}
+
 export function startSanSwitchConfigPull() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;
   _timer = startAdaptiveTimer(configPullMs, () => pullSanSwitchConfigNow(), { firstDelayMs: 20_000, name: 'SAN 스위치 설정 pull' });
@@ -245,5 +286,6 @@ export function sanSwitchConfigPullStatus() {
     // v2.733(C4-02): '지금 수집' 작업 — 진행 중 여부·대기·지금 장비 · 마지막으로 끝난 작업 요약(무음 금지).
     collectJob: { running: _collectRunning, queued: _collectQueue.length, current: _collectCurrent },
     ...(_collectRun ? { collectRun: _collectRun } : {}),
+    ...(_flowLast ? { flowLast: _flowLast } : {}),
   };
 }

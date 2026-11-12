@@ -14,7 +14,8 @@ export function DupIp({ scope }) {
     { key: 'ip', label: 'IP 주소', render: (d) => <b style={{ color: 'var(--amber)' }}>{d.ip}</b> },
     { key: 'count', label: '중복', align: 'right', render: (d) => <span className="badge red">{d.count}</span> },
     { key: 'crossVcenter', label: '유형', sortValue: (d) => (d.crossVcenter ? 1 : 0), render: (d) => (d.crossVcenter ? <span className="badge amber">vCenter 간</span> : <span className="badge gray">동일</span>) },
-    { key: 'vms', label: '사용 중인 VM', sortValue: (d) => d.count, render: (d) => d.vms.map((v, i) => <span key={v.id}>{i > 0 && ', '}<span className="vcd-link" onClick={() => setDetail(v)}>{v.name}</span></span>) },
+    // v2.977(전체 점검): VM 이름이 한 줄로 이어져(1,058px) 1440px 에서 표가 넘쳤다 — 줄바꿈한다
+    { key: 'vms', label: '사용 중인 VM', sortValue: (d) => d.count, render: (d) => <span style={{ display: 'inline-block', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 640 }}>{d.vms.map((v, i) => <span key={v.id}>{i > 0 && ', '}<span className="vcd-link" onClick={() => setDetail(v)}>{v.name}</span></span>)}</span> },
   ];
   return (
     <>

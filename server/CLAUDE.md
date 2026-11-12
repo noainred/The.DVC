@@ -71,7 +71,23 @@
     회귀 `test/audit2744fd.test.js`.
 - **토큰 검증은 `resolveTokenUser` 하나로**: `verifyToken`을 직접 호출해 `payload.role`을 신뢰하지 말 것 — tokenVersion 폐기·최신 역할 반영이 우회된다(WS 게이트웨이에서 실제로 뚫렸던 경로).
 - **central 엔드포인트의 agent 바인딩**: `routes/central.js` 미들웨어가 '개별 토큰 ↔ agent' 일치를 강제한다. 새 엔드포인트가 `?agent=`/`body.agent`로 데이터를 고르면 그 미들웨어를 우회하지 않게 할 것(자격증명 횡탈 차단).
+  ⚠ v2.977(심층 방어): agent 는 **글자만**(`agentClaimTypeIssue` 400) · 64자 넘는 주장은 원문으로도 대조. 운영은 index.js `queryNormalizer` 가 central 보다 먼저 배열을 글자로 바꿔 이미 403 이었다
+  (처음 '재현' 은 정규화 없는 맨 express 구성 — 정정). 정규화 순서를 central 뒤로 옮기지 말 것(회귀 `centralAgentType2977` 두 구성).
 - **자격증명 파일은 원자적 쓰기 + 로드 손상 보존**: `util/atomicWrite.js`의 `atomicWriteFileSync`로 쓰고(직접 `fs.writeFileSync` 금지), **로드 catch에서 파싱 실패 시 `preserveCorrupt(FILE)`로 `<file>.corrupt.<ts>` 보존** 후 빈 값 반환. 쓰기만 원자적이고 로드가 손상을 조용히 `[]`로 넘기면, 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 전 자격증명이 영구 유실된다(3차 감사 지적 — vcenters/nsx/collectors/users 4종이 이 비대칭이었음). portal.env(CENTRAL_TOKEN)도 원자적으로 쓴다.
+- **7b SSH 키 저장소(`bmusage/onboard/keyStore.js` · `ssh-keys.json`)**: 관리 = 소유자 등급 + 본인 OTP(`reauth` 는 마지막 게이트) · 응답 · 감사 · 백업 · 엣지 push 에는 지문 · 공개키만
+  (번들 가림 `keyBundle.js` — 봉인본도 싣지 않음) · 손상이면 쓰기 거절(로드 먼저) · 주소가 바뀌면 `keyRef` · `credRef` 승계 없음 · 키가 없으면 비밀번호로 넘어가지 않음 ·
+  키 서버는 엣지 위임 잡에 싣지 않음 · **저장 비밀을 주소에 묶는 쓰기(CSV · bm-storage keyRef/credRef · iDRAC 사본 · 엣지 배포)도 소유자 등급 + OTP**(r2) ·
+  복호 실패 중 쓰기 거절 · 퇴역 키 접속 거부. **묶음 판정은 `bmusage/onboard/bindRule.js` 하나 · 등록부 `applyServerInput` 이 choke point** — `bindApproved === true` 는
+  게이트를 통과한 호출만 세운다(bm-storage 라우트 OTP 뒤 · 온보딩 `plan.binds` · 엣지는 행의 중앙 승인 `bindOk`) · 새 쓰기 경로도 이 함수를 지나게(r3 R-N1). 상세 `docs/rules/security-api.md` 7b 항목 ⑨ ⑩ ⑪.
+- **8a 정비 창(`bmusage/maint/*` · `routes/api/bmMaint.js`)**: 억제를 **늘리는** 쓰기(법인 · 태그 · 12h 초과 창 만들기 · 고치기 전/후 · 재확인)는 소유자 등급(`isOwnerTier`), 줄이는 쓰기(지금 끝내기 · 지우기)는 쓰기 범위 ·
+  판정은 `maint/judge.js` 하나(서버 · 엣지 · 화면) · **억제에는 시한**(발생 끝 · 길이 상한을 계산에서도 · 반복 92일 재확인 · 엣지 배포본 24h) · 못 읽은 창 파일은 억제가 아니다 ·
+  인증 거부(authGuard)는 창과 무관 · 배포 인출은 개별 토큰만 · 엣지는 같은 `normalizeWindow` 로 다시 자른다. **서버 대상 = (법인, 키) 쌍**(판정 · 배포 · 쓰기 — IP 키는 법인끼리 겹친다) ·
+  12h 소유자 규칙은 **같은 서버를 덮는 창 전부(소유자 · 법인 · 태그 창 포함)의 합**(`store.coverNeedsOwner` · 재확인 포함 · approvedBy 는 기록만) · rev 없는 쓰기 409 · 해제 알림은 억제하지 않는다. 상세 `docs/rules/{idrac-server,security-api,edge}.md` 8a 항목.
+- **SSH exec 안 timeout 합 + 여유 ≤ 그 exec 시한**(8b 반증 F1 — 4 · 5단계부터의 결함): 주 명령은 exec 하나라 넘치면 그 주기 전 구획을 잃는다 — 새 구획 · exec 는 `test/bmTop8bBudget.test.js` 기계 산수를 지킨다(needs-restarting ↔ dnf 한 주기 하나).
+- **8b Top-N · 저활용 · 전력(`bmusage/{parse/linuxTop,topStore,idle,powerAgg}.js` · `routes/api/{bmTop,bmIdle,bmPower}.js`)**: Top-N 은 **같은 세션 별도 exec**(주 명령 밖 · 실패 격리) · **comm 만**(인자 · 환경 · 열린 파일 · kill 없음 —
+  top COMMAND 열은 셸 밖으로 내지 않는다) · 줄마다 고정 접두 · awk getline 으로 /proc 을 읽지 않는다(mawk 중단) · 권한 없는 I/O = null · 프로세스 사용자 이름은 관리자 판본만 원문 ·
+  전력 · 저활용은 **범위로 서버를 먼저 거른 뒤** 합한다 · 집계 cfg 에 설정 원본(전 법인 랙)을 넘기지 않는다 · 검토 쓰기 = (법인, 키) 쌍 · 404 → 403 · 비관리자는 계정 단서(gpdb)도 숨김 ·
+  저활용 활동은 포탈 수집 로그인 제외 · 랙 여유는 다 측정된 랙만 · 상세 `docs/rules/{idrac-server,security-api,edge,perf-db}.md` 8b 항목.
 - **소유자 경계는 서버측 강제**: `settingsOwners`(설정 소유 계정)처럼 UI가 숨기는 권한 경계는 서버에서도 검사한다(`routes/admin.js requireSettingsOwner`). 클라이언트 전용 게이트는 admin이 API를 직접 호출해 우회·소유자 목록 탈취가 가능하다.
   - ⚠ **소유자 등급 = 소유자 ∧ 전체 범위**(v2.744 AUTHZ-02, `routes/admin/shared.js requireSettingsOwner`): 소유자 목록에 있어도
     범위가 지정된 계정(scope.vcenters)은 403(`SETTINGS_OWNER_FULL_SCOPE_REASON`)이다. `/auth/me` 의 **`isSettingsOwner`(설정 메뉴 노출 —

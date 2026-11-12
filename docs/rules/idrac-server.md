@@ -17,6 +17,12 @@
 - (원래 517행) '전체 조회' 분기에서 파티션 키를 빠뜨리지 말 것
 - (원래 520행) 식별 키 충돌을 조용히 두지 말 것
 - (원래 526행) 인메모리 상태 맵은 대상 목록을 기준으로 정리한다
+- (v2.919) 리눅스 베어메탈 통합 성능 모니터링 1단계 — 같은 SSH 1회에 구획 추가 · USE 판정 코어 하나 · 하드웨어 축은 이미 가진 데이터만
+- (v2.922) 리눅스 성능 3a — 시간 단위 파일(5분·1시간·1일·장치) · 예전 표 마이그레이션(대조 뒤 삭제) · 피크 A 안 · 추이 API · CVP 포트 대조
+- (v2.923) 리눅스 성능 4단계 — 튜닝 탭(항목 26 · 근거 등급 · 출처 · 자동 적용 없음) · 용도 프로파일(rocky9-base · airflow · gpdb) · 장애 기록(partfault 재사용) · 진단 스냅샷(원격 명령 — 규약은 security-api.md v2.923)
+- (v2.929) 리눅스 성능 5단계 — 집중 모니터링(별도 타이머 · 법인 상한 · 전역 슬롯 · 인증 즉시 중단) · 알림 규칙(엣지 판정 · 상태 파일 · 하루 상한) · 베이스라인 띠 · 점검 소모품 8칸 · 변경 이벤트(전이 · 해시만) · 구간 비교
+- (6단계) 리눅스 성능 6단계 — 서버 비교(같은 법인 기본 · 법인 간은 전체 범위만) · 수집 건강(폴러 계측 · 노드 한 칸 규칙) · 운영 주석 · 진단 플레이북(읽기 전용 · 실행 없음) · 목표선(결측 분모 제외)
+- (7a단계) 리눅스 성능 7a단계 로그 분석 — 같은 SSH 세션의 별도 exec · 증분(커서 · boot_id+초 · offset+inode) · 규칙 카탈로그(포탈 엔진 재사용) · 원문 미보관 · 못 읽음은 상태
 - (원래 746행) iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
 - (원래 844행) 서버 온도 — 히트맵 보드(시안 B). '못 읽은 값' 을 정상으로도 이상으로도 세지 않는다
 - (원래 1030행) v2.728 — 엣지 축약 인벤토리는 부품 이름·health·state 를 싣고, 중앙 `INV_SHAPE` 와 한 쌍으로 넓힌다
@@ -31,6 +37,12 @@
 - (원래 5022행) 법인별 서버 사용량(v2.625) — 퍼센트를 더하지 않는다. 사용률 × 용량으로 사용량을 만들어 더한다
 - (원래 5129행) v2.634 — 폴러의 표본 시각은 '그 서버를 실제로 읽은 시각' 이고, 신선도 경계는 폴 주기 소요에 맞춰 넓힌다
 
+- (7b단계 추가) 리눅스 성능 7b단계 서버 등록 — 새 등록부 없음(iDRAC · OS · 분류 태그로 나눔) · 저장 규칙 재사용 · 한 번 쓰기 · 직전 스냅샷 · 직렬 큐 · 누락 점검은 보드 커버리지 값
+- (8a단계 추가) 리눅스 성능 8a단계 정비 창 · 용량 소진 예측 — 판정 코어 하나(maint/judge.js) · 억제에는 시한 · 못 읽은 창은 억제가 아니다 · 예측은 참고(못 읽음 ≠ 0일 · 안전)
+- (8b단계 추가) 리눅스 성능 8b단계 프로세스 Top-N · 저활용 · 전력/온도 — ##TOP 은 comm 만 · 줄마다 접두 · 파일 읽기는 셸 · 변화 있을 때만 저장 · 점수는 후보 표시(분모 환산 · 제외 집계) · 전력은 대시보드와 한 소스(미측정 제외)
+- (다음 점검 ②③ 추가) 전력 알림 규칙 4종(랙 여유 · 흡기 지속 · 피크 급증 · PowerCap 걸림 — 같은 엔진 · 기본 꺼짐) · 엣지 서버별 PowerCap 봉투 — 보류는 잇지도 끊지도 않음 · 같은 표본은 한 번 · 판정은 원천이 있는 노드
+- (2026-11-09 추가) 사용자 결정 기록 — 7b 공통 계정 묶기 · 8a 운영자 정비 창 12h · 법인 미지정 OS 등록 공유 · 전력 알림 랙 창/판정 노드 — 네 가지 모두 현행 유지(다시 묻지 않는다)
+- (v2.967 추가) 서버 하드웨어 정보 내보내기 — 값 카탈로그 하나(insights/hwExport/catalog.js) · 대상은 통합 서버 인벤토리 판정 그대로 · 못 읽은 값은 빈 칸 · 관리자 전용 값 · 사양서 파일 나눔
 ## 본문
 
 - ⚠⚠ **물리 파트(부품) 장애 — v2.548 재설계. '확인 불가' 를 정상으로도 장애로도 세지 않고, 전이만 기록한다**
@@ -212,12 +224,59 @@
     엣지는 자기 agent 것만 가져간다 — 이 경계를 지우면 같은 서버에 iDRAC 세션이 두 배로 열린다.
     `serverId` 가 `host:<vc>:<name>` 인 항목은 **수동 태그로 베어메탈이 된 ESXi 호스트**라
     (`fleetInventory.js:170`) iDRAC 등록이 없다 → `no-idrac` 으로 밝힌다.
+    ⚠⚠ **정정(v2.961 — 사용자 보고 재현)**: '중앙은 `remoteAgent` 없는 것만' 은 **원격 수집 서버(엣지)가 iDRAC 을 맡은 서버**를 빠뜨렸다.
+    엣지가 iDRAC 스캔으로 **자기 등록부**에 넣고 전력을 폴링하는 서버는 중앙에 원격 전력(수집 서버 pull — `collector/state.js setRemoteHost`)으로
+    올라오는데, 그 항목에는 엣지 이름이 없고 `collectorId` 만 있으며(`idrac/service.js` 원격 항목 source `remote`), 같은 서버의 엣지 fleet 보고
+    (`remoteAgent` 있음)는 `getFleetInventory` 가 이미 잡힌 원격 항목과 태그 · 호스트가 겹쳐 버린다 → 중앙이 자기 iDRAC 등록부에서 찾다가 없으니
+    **'iDRAC 등록 없음'**(사용자 화면 1,157대 · 엣지 수집 1대). 고친 판정(`bmusage/targets.js resolveTargets` 한 곳): **중앙 · 출처 `remote` ·
+    `collectorId` 있음 · 이 노드에 그 서버 등록이 하나도 없음**(iDRAC 등록 id · 서비스태그 · OS 계정 · 법인이 맞지 않거나 모호한 OS 등록까지 — 등록이 있으면
+    이 노드 설정의 문제라 예전 사유 그대로)이면 `edge-delegated` + `agent` = **수집 서버 등록부의 name**(`/tools/bm-usage/edges` 표의 agent 와 같은 값 ·
+    엣지가 보낸 문자열이 아니다) + `vcenterId`(범위 계정은 범위 안 행만) + `delegatedBy:'collector'`. 수집 서버를 등록부에서 못 찾거나(삭제 · 이름 없음)
+    등록부를 못 읽으면 **이름을 추측하지 않고** `remote-collector-unknown`(`collectorIssue` unread · not-found · no-name(등록부에 있는데 이름이 빔 — 반증 의심 2) —
+    엣지 수집에도 no-idrac 에도 넣지 않는다 · 누락 점검은 '모름' · 공통 태그 판정기는 complete 거짓 · 화면은 갈래별 대수). **사유 순서**: 엣지 보고 위임 → **원격 위임** → 귀속 없음 → 법인 꺼짐 → 경로 —
+    원격 위임을 법인 꺼짐 · 귀속 없음보다 먼저 둔 근거: 중앙에 등록이 없으면 중앙 설정(법인 켜기 · 귀속)을 바꿔도 중앙은 수집할 수 없고, 수집 여부는
+    그 엣지 설정이 정한다(엣지 보관분 표 '엣지에서 꺼짐' → '중앙에서 켜기'). **불변식: 기준판에서 중앙이 수집하던 대상은 하나도 잃지 않는다**
+    (대상에는 이 노드 등록이 필요하므로 대상 목록이 그대로다 — `server/test/bmRemoteDelegate2961.test.js` ② 가 고정(아래 반증 2차에서 768조합으로 넓힘) ·
+    기준판 동치는 0ca493bc `targets.js` 와 collectorId 를 지운 입력을 24조합 대조해 차이 0). `remoteAgent` 의 뜻(엣지 fleet 보고)은 바꾸지 않았다
+    (개요 · 전력 귀속 · 유령 키 · 법인 귀속이 그 뜻으로 읽는다) — bareMetal 행에 `collectorId` 를 **덧붙이고**(`/insights/fleet` 응답에서는 뺀다),
+    이름 색인은 `getFleetInventory` 가 유령 키 판정과 **같은 한 번의 등록부 읽기**로 만든 열거 안 되는 속성(`remoteCollectors`)이라 대상 해석이 등록부를 다시 읽지 않는다.
+    화면: '대상이 아닌 서버 — 사유별' 아래 **엣지별 대수 · 그 엣지의 보관분 상태**(엣지 표와 같은 판정) · '엣지 보관분 표로 이동'. 계정을 중앙으로 가져오지 않는다.
+    **반증(2차) 반영**: **F1** — 이 노드의 iDRAC · OS 등록부를 **못 읽은 동안은** 원격 위임 갈래를 타지 않는다(`resolveTargets registryUnread` — poller 가 sourceErrors
+    'idrac-registry' · 'os-registry' 와 같은 판정으로 넘긴다). 1차 판은 빈 목록을 '등록 없음' 으로 읽어 중앙이 iDRAC · OS 계정으로 수집하던 서버까지 '엣지 수집' 으로 단정했다
+    (재현: idrac.json 손상 → RMT010 · 대소문자 · 공백 · 계정 없음 · 공통 태그 서버, bm-storage.json 손상 → OS 계정 · os-foreign · os-ambiguous 서버). 못 읽는 동안은 예전 사유
+    그대로이고 경고문이 '엣지 수집으로 가르지 않는다' 를 말한다(가상화 호스트는 iDRAC 등록부만 본다 — OS 경로가 없다 · 재확인 R2: OS 등록부만 못 읽을 때의 경고문은 '베어메탈' 로 한정). bmstor 등록부는 프로세스 첫 읽기를 캐시하므로 OS 손상
+    시험은 별도 파일(`bmRemoteDelegate2961os`). **F2** — 위임 행의 엣지 이름은 **수집 서버 등록부 name 하나로**(`targets.js canonicalAgentRef` — **전 항목에서 id 일치 먼저**, 없을 때만 name 일치(목록 앞 항목) ·
+    대소문자 무시): fleet 보고 경로는 엣지 인증 이름(등록 id 가 원칙)이라 id≠name 등록에서 같은 엣지가 칩 두 개로 갈라지고 한쪽은 엣지 표에 없다고 나왔다.
+    등록부에 없는 이름 · 못 읽음 · id 로 찾은 항목의 name 이 빈 경우는 받은 이름 그대로. ⚠ 정정(재확인 R1 — 재현): 첫 판은 '항목마다 id → name, 목록 순서' 라 앞 항목의
+    name 이 뒤 항목의 id(그 엣지의 인증 이름)와 같으면(등록 순서 {id:x1, name:gm1} → {id:gm1, name:Warsaw}) 엣지 gm1 의 fleet 서버를 x1 칸('gm1')으로 묶었다 → id 먼저로 고쳤다.
+    **별칭이 겹치지 않을 때** 정규화한 이름 = `/edges` 표 agent = 중앙에서 켜기 · 당기기 · 누락 점검의 엣지 봉투 이름이다. 겹칠 때(어떤 항목의 name 이 목록 앞의 다른 항목의
+    id · name 과 같다): 그 경로들은 이름을 `findCollectorByName`(목록 앞 항목 · 항목마다 id 또는 name)으로 풀어 **다른 수집 서버로 갈 수 있다**(엣지 표 · 당기기의 기존 동작 —
+    고치지 않음). 그런 위임 행에는 `agentClash: true` 를 싣고(판정 `agentNameClash` — firstAlias 가 그 수집 서버가 아니면 참 · ⚠ 정정(2차 재확인): 단 그 항목과 이 수집 서버의
+    정규화 URL(`collector/registry.js normalizeCollectorUrl` — 저장 normalize 와 같은 단계)이 같으면 **같은 엣지**라 겹침이 아니다 — 같은 엣지의 옛 수동 등록 + 자기등록처럼 같은 name 이
+    둘이어도 당기기는 같은 엣지로 간다. 첫 판(e4248dd4)은 이 경우에도 표지를 켜 그 엣지 서버의 칩 상태 · 누락 점검 커버리지를 '모름' 으로 바꿨다(회귀 — 0b15e446 은 맞는 값).
+    URL 이 빈 항목은 같은 엣지라고 단정하지 않는다(겹침 유지)), 화면 칩은 엣지 표 줄의 상태를 붙이지 않고
+    '이름이 다른 수집 서버와 겹침 — 엣지 표에서 직접 확인' 을, 누락 점검은 이름으로 찾은 보관분을 쓰지 않고 '모름'(edge-name-clash)을 보인다. 조치는 수집 서버 이름을 서로 다르게.
+    **F3** — 판정기 complete 가 거짓인 중앙(엣지에 맡긴 서버 · 엣지 보관분이 있음)에서 예전 용도 태그(법인 구분 없는 열쇠)는 지우지 않는다(보이지 않는 다른 법인 서버의 값일 수 있다 —
+    정리 경로를 새로 만들지 않았다). 안내문을 사실대로 고쳤다(`legacyWhy` scope · incomplete — 예전 '엣지 · 단일 노드에서 정리' 는 중앙 저장소라 사실과 달랐다).
+    **F4** — 가상화 호스트(ESXi, 가상화 포함 켬)도 같은 규칙: 받침 iDRAC 이 엣지 원격 전력뿐(classifyFleet 가상화 행의 `idracCollectorId` — `/insights/fleet` 응답에서는 뺀다)이고
+    이 노드 iDRAC 등록이 없으면 엣지 수집(1차 판까지는 virt no-idrac). **의심 1(재현 — 고침)** — 서비스태그 없는 원격 서버는 중앙 키(`remote:<c>:<id>`)와 엣지 키(엣지 등록 id 소문자)가
+    달라 누락 점검이 늘 '엣지 기록 없음' 이었다 → 위임 행에 `edgeKey`(원격 항목 serverId 가 엣지 등록 id 라는 근거 — collector/agent.js buildExport)를 싣고 그 키로 찾는다
+    (주소일 수 있어 `BM_ID_FIELDS` 로 비관리자에게 가린다 · 꼴이 다르면 싣지 않아 '모름'). 불변식 시험은 베어메탈 · 가상화 호스트 · 등록부 4상태(정상 · iDRAC/OS/둘 다 못 읽음) ×
+    설정 48 × 색인 4 = 768조합으로 넓혔다.
+    **남은 것(고치지 않음)**: ① 법인별 서버 사용량 · 서비스 인벤토리(`corpusage/build.js ownedRowOf` — `remoteAgent` 로만 엣지 행을 고른다)는 이 서버들을
+    여전히 중앙 행으로만 찾아 '못 읽음' 으로 본다(이번 변경 전과 같다 — 엣지 보관분 행을 collectorId 이름으로 고르는 것은 별건) ·
+    ② 엣지 fleet 보고로만 위임된 서버(`remoteAgent` 경로) 행에는 예전처럼 `vcenterId` 가 없어 범위 계정의 사유 목록 · 엣지별 대수에 보이지 않는다(전체 범위만 —
+    공통 태그 판정기의 법인 집계가 그 빈 법인을 한 법인으로 세는 기존 동작과 얽혀 있어 함께 손대지 않았다) ·
+    ③ 등록부에서 지운 수집 서버의 원격 항목은 puller 의 잔류 정리(`clearStaleRemote`, 주기마다)가 지우므로 'not-found' 는 그 사이에만 보인다 ·
+    ④ 식별 키 겹침 목록(bareMetalDupes)의 원격 출처 행에는 collectorId 를 싣지 않았다(겹침 판정은 예전 그대로) ·
+    ⑤ 중앙 등록이 서비스태그 · id · 이름이 아니라 **주소로만** 같은 서버(예: 태그 없이 원격 항목과 같은 iDRAC 주소로 등록)는 같은 서버로 묶지 못해 원격 행은 '엣지 수집',
+    중앙 행은 따로 중앙 대상이다(기준판도 그 원격 행은 대상이 아니었다 — 대상 집합 불변 · 반증 1차 normal 시나리오 RMT016).
   - **인증 실패(401/403)는 주기 수집을 멈춘다**(`util/authGuard.js` 재사용 — v2.535 규약). SSH 계정이
     틀리면 5분마다 로그인 실패가 쌓여 **계정이 잠긴다**. 멈추는 것은 자격증명 거부뿐이고(타임아웃·연결
     실패로 멈추면 일시 장애가 수집을 영구 정지시킨다), 자격증명이 바뀌면 자동 재개하며 **수동 실행은
     막지 않는다**. 정지 id 는 `<agent>|os|<key>` 다 — 키만 쓰면 한 법인의 정지가 다른 법인의 같은
     태그 서버를 멈춘다(v2.548 `(agent, part_key)` 와 같은 판단).
-  - **폴러 규약 전부**: 재진입 가드(수동 실행과 **공유**) · 동시성 제한(`BMUSAGE_CONCURRENCY` 기본 4) ·
+  - **폴러 규약 전부**: 재진입 가드(수동 실행과 **공유**) · 동시성 제한(`BMUSAGE_CONCURRENCY` 기본 32 — v2.918 사용자 결정, 이전 4: 1,000대 법인에서 동시 4 면 한 주기 약 21분) ·
     **서버당 시한이 세션을 실제로 끊는다**(`withDeadline` + `signal` — v2.417) · `startAdaptiveTimer`
     (`(getMs, fn, opts)` 순서) · prune 스로틀 `(++tick % N) === 0`(v2.453) · `ts` 단독 인덱스.
   - **대표값은 최대다**(`usage.js`) — 디스크 6개·NIC 4개인 서버의 '사용률' 은 하나가 아니고, 평균을
@@ -337,6 +396,281 @@
   들고 있으면 등록부에서 서버가 빠져도 프로세스 수명 내내 남는다(누수). 더 나쁜 것 — 서버가
   **되돌아오면** 몇 시간 전 카운터와 비교해 `MAX_SPAN_MS` 상한에 걸려 그 주기가 통째로 `null` 이
   되고 '첫 수집' 이라고 말하지도 않는다. 매 주기 `live` 집합으로 걸러낼 것.
+- ⚠⚠ **리눅스 베어메탈 통합 성능 모니터링 1단계(v2.919 예정 — 서버만) — 같은 SSH 1회에 구획을 더하고, 판정은 엣지 한 곳·USE 칸마다 code 로**
+  (`bmusage/{collectors/osSsh.js,parse/linuxProc.js,rates.js,usage.js,perfCols.js,useJudge.js,hwFacts.js,perfView.js,db.js,edgePull.js}` ·
+  `central/{bmUsageEdgePull.js,bmPerfSanitize.js}` · `routes/api/bmUsage.js`. 설계 `docs/design/linux-bm-perf/README.md` §3.2·§4 · 사용자 결정 2026-11-07 '8단계 전부 순차 구현'.
+  회귀 `server/test/bmPerf2919.test.js`(30건 · 줄 변이 24건 중 23건 검출 — 1건(PSI 전부 absent → none)은 지금 칸 구성에서 도달하지 않는 등가 변이 · 기준판 f794b98 파일 되돌림 10/10 검출):
+  - **구획**: `##STAT` 은 `/proc/stat` 전체(cpu 합계·cpuN·ctxt·intr·procs_*; cpuN 줄 수 = 코어 수) · `##LOAD` · `##PSI`(`/proc/pressure/*` — 없으면 **0줄 = absent**) ·
+    `##VMSTAT`(pswpin·pswpout·pgmajfault·oom_kill) · `##SNMP`(Tcp 두 줄) · `##BLKQ` · `##SYSCTL`(화이트리스트 경로 `parse/linuxProc.js SYSCTL_PATHS`) · `##IRQ`(awk 요약 + irqbalance) ·
+    `##DFI`(`df -P -i` 등록 마운트) · `##END`. 기존 `##DISK`·`##NET` 명령은 그대로이고 파서가 14열·16열을 다 쓴다. 왕복 1회·세션 예산 산수는 바뀌지 않았다.
+    새 구획은 기존 구획 **뒤**에 두고 명령 전체를 `head -c OUTPUT_MAX_BYTES`(1MiB)로 감싼다 — `##END` 가 오지 않으면 `truncated`(그 뒤 구획은 missing). sshExec 4MB 상한에서 결과가 통째로 버려지기 전에 우리가 먼저 자른다.
+  - ⚠⚠ **sysctl 파일을 셸 `read` 로 읽지 말 것**(이 컨테이너 dash 실측): dash 는 1바이트씩 읽고 sysctl 정수 파일은 오프셋 0 이 아니면 EOF 라 `swappiness 60` 이 `6` 으로 읽혔다(오류 없이 틀린 값). `grep -H ''` 한 번으로 읽는다.
+  - ⚠ **원시 idle 은 `idleRaw`** — `idle` 이름은 기존 규약(idle+iowait)이 쓴다. 분해 필드로 덮으면 cpu_pct 와 분해가 서로 다른 idle 을 쓴다(자체 실측에서 잡았다).
+  - **absent vs missing**: 구획 표지 미도착 = missing · 표지는 왔는데 빈 줄만 = absent · 줄은 있는데 파싱 실패 = missing(`readSection`). 판정 칸 code 는 `ok|warn|bad|none(absent)|missing|nopath(경로 없음)` 이고
+    none·missing·nopath 는 병목·포화·오류 판정에 넣지 않고 **따로 센다**.
+  - **열**: 새 지표 열 28개는 `perfCols.js PERF_COLS` 하나가 계약이다(자원·USE 칸·judged). 이력·최신값은 열 그대로, 일 롤업은 `<열>_max` 만(포화·오류는 피크가 뜻이다).
+    최신값 전용: `os_at`·`idrac_at`(그 경로의 **마지막 성공** — 이번에 못 읽었으면 COALESCE 로 지킨다) · `detail_json`(장치별 — 디스크·NIC 각 32 상한) · `tuning_json`(sysctl·THP·governor·hugepages·blkq·irq).
+    JSON 열은 64KB 를 넘으면 잘린 JSON 대신 `{truncated:true}`. 열 추가는 `migratePerfColumns`(ALTER ADD COLUMN · 멱등) — 기존 DB 와 새 DB 가 같은 경로다.
+  - **rates**: 첫 표본·리셋(음수)·간격 비정상은 null(기존 규약). I/O 0건 간격의 await·보낸 세그먼트 0 의 재전송률은 null(지어내지 않는다). 대표값은 장치 중 최대(maxOrNull) ·
+    드롭·오류는 **물리 NIC 만**(veth·bridge 드롭은 회선 드롭이 아니다). 오류·드롭·OOM 은 ‘연속 증가 주기 수’(streak)를 `_prev` 에 들고 간다(null 은 판정 보류 — 끊지 않는다).
+  - **판정 코어는 `useJudge.js` 하나**(웹이 복제하지 않는다): 기준값은 `settings.perf`(이 노드 설정 · `PERF_DEFAULTS` — ‘추정’ 값은 주석에 그렇게 적었다)이고 API 가 내려준다.
+    ‘병목’ = 한 자원의 세 칸 중 둘 이상 bad · ‘포화’ = S bad · ‘오류’ = E bad · 증가분 > 0 → warn, `errRepeatBad` 주기 연속 → bad. 판정 한 줄(`line`)도 이 노드가 만들고 중앙은 그대로 전한다.
+    ⚠ `perf` 는 중앙 배포 키(`DISTRIBUTED_KEYS`)에 넣지 않았다 — 넣으면 배포 서명이 바뀌어 구버전 엣지가 영원히 ‘적용 대기’ 다(전 엣지가 이 판 이상일 때 넣는다).
+  - ⚠⚠ **하드웨어 축·교차 판정은 이미 가진 데이터만**(`hwFacts.js` — Redfish 호출 0): 전력 W(idrac/db latest) · cap(인벤토리 powerCap) · 흡기·CPU(sensorStore) · DIMM·SMART 예측·SEL(인벤토리) ·
+    부품 장애(partfault openFaults — DB 가 없는 노드에 파일을 만들지 않는다). **받지 않는 값**(스로틀 · ECC 정정 수 · SMART 재할당 · NIC CRC)은 null → missing 이고 교차 ④ 는 단정하지 않는다.
+    교차 판정은 커버리지 `both` 일 때만, ‘후보’ 로만 말한다. 커버리지는 두 경로 마지막 성공이 신선도 한계(주기 × 3, 최소 15분) 안인가로 정한다.
+  - **엣지 봉투·정제**: 봉투에 `perf`(판정 항목 — 근거·장치별·튜닝·하드웨어 사실 포함) · `perfThresholds` · `perfCols` 를 싣고 행에서 JSON 문자열 열을 뗀다. 중앙은 `central/bmPerfSanitize.js`
+    화이트리스트(아는 필드만 · enum 밖 code 는 missing · 장치 32 · 문자열 상한)로 담고 새 수치 열은 수로 좁힌다(기존 9개 열은 예전 계약 그대로 원시값).
+  - **API**: `GET /tools/bm-usage` 에 `perf`(code 표)·`perfThresholds`·`perfDefaults`·`perfCols` 추가(기존 필드 불변 — 행의 JSON 열만 뗐다). 서버 1대 상세는
+    ⚠ **`GET /tools/bm-usage/perf/:key`**(설계 지시는 `/tools/bm-perf/:key` 였다 — 새 첫 세그먼트는 `auth/toolAccess.js` 도구 매핑 밖이라 ‘베어메탈 사용률’ 을 거부당한 사용자도 읽게 된다. 같은 도구의 하위 경로로 두었다).
+    scope 교집합 · 범위 밖·귀속 없음·없는 키 404 · 엣지 위임 서버는 보관분(엣지 판정) 그대로 · `memoJson` + 범위 서명 + 역할 + 마지막 수집 시각. `memoJson` 은 계산 결과의 `__status`(≠200)를 그 상태로 보낸다(캐시 경로 404).
+  - ⚠⚠ **반증(review-s1) 반영 — 되돌리지 말 것**(회귀 `server/test/bmPerf2919Review.test.js`):
+    · **D1** 출력이 잘리면(##END 미도착) **마지막 구획을 통째로 버린다**(cutSections — 숫자 중간에서 잘린 io_ticks 를 카운터로 쓰면 다음 주기 가짜 100% 가 원시·일 롤업에 남는다) ·
+      기존 구획(MEM·DISK·NET·NETINFO·FC·DF)에도 `head -n (상한+1)`(DISK 10,000줄) — 넘으면 linesCapped · 전체 `head -c` 는 `EXEC_MAX_OUTPUT − 256KB` 이고
+      구획 상한 × 줄 최대 바이트(가정)의 합(`SECTION_BYTES_SUM`)보다 크다(테스트 고정). 1단계 초판의 1MiB 상한은 예전 다섯 지표를 퇴행시켰다.
+    · **D2** 엣지 봉투는 `ENVELOPE_MAX_BYTES`(기본 8MB · 중앙 16MB 의 절반) 안으로 — 넘치면 성능 상세 → code 표 → 전부 제거 순으로 빼고 `perfTruncated` 로 밝힌다. 다섯 지표 행·대상은 언제나 남는다.
+    · **D3** 중앙 정제가 엣지 시각(ts·osAt·idracAt·detail.at·tuning.at·hw 시각)을 수신 시각으로 자르고 원본은 `edgeTsRaw`(`util/clampEdgeTs.js` — corpUsage 와 같은 함수).
+    · **D4** 행이 신선도 한계(API `freshMs`)를 넘으면 cpu·mem·disk·net 칸은 `stale`(판정에 넣지 않고 따로 센다 · 판정 ‘오래됨’). 인벤토리 캐시는 `inventoryFreshMsFor`(주 폴러 인벤토리 주기 30분 × 4 와 freshMs 중 큰 값) 안일 때만 iDRAC ‘읽음’.
+    · **D5** 경로가 있는 칸 중 판정한 칸이 `minJudgedPct`(기본 50 — 추정) 미만이면 ‘정상’ 대신 ‘대부분 못 읽음’(partial). 판정 한 줄은 ‘읽은 칸 j/a’ 를 늘 붙인다.
+    · **D6** `migratePerfColumns` 는 실패를 콘솔 오류로 남기고 `migrateError` 를 insertUsage 결과·dbStatus·폴러 `_last.dbMigrateError` 로 올린다. 적재는 **실제로 있는 열만** 쓴다 —
+      기존 db 모듈은 열기 실패를 ‘DB 없이 동작’ 으로 두는 관행인데, 열 하나 때문에 DB 전체를 끄면 다섯 지표까지 멈추므로 그 열만 빼고 계속한다.
+    · **D8** 명령 앞 `export LC_ALL=C;`(한국어 로캘의 번역된 df 머리글).
+    · 미룬 것(D7·D9~D15)은 설계 README §6 의 11번.
+- ⚠⚠ **리눅스 성능 3a(v2.922 예정 — 서버만) — 저장은 시간 단위 파일 · 보존은 파일 삭제 · 예전 표는 ‘옮기기 → 행 수 대조 → 삭제’ · 피크는 같은 세션 1초 창**
+  (`bmusage/{monthStore,monthMigrate,peakWindow,samplerSpec,deviceRows,trendWindow,trendQuery,portCompare,portMap}.js` · `db.js`(메인 = 최신값·장치 목록·bm_meta) ·
+  `routes/api/bmUsage.js`(`/tools/bm-usage/perf/:key/history|devices|ports` · `PUT /tools/bm-usage/port-map`) · `routes/collector.js`(`/bm-usage/trend|devices|nics`) ·
+  `central/bmUsageEdgePull.js pullBmTrend`. 설계 README §4.4 · PROFILES §6·§8~§12. 회귀 `server/test/bmPerf2921{,Migrate,Cvp,Size}.test.js`):
+  - **파일**: 5분 원시 `bm-usage-YYYY-MM.db`(30일 — 실효는 min(store.rawDays, rawRetentionDays)) · 1시간 `bm-usage-1h-YYYY-MM.db`(365일) · 1일 `bm-usage-1d-YYYY.db`(**연 파일** — 5년 창이 6개) ·
+    장치 5분 `bm-usage-dev-YYYY-MM.db`(14일) · 장치 1시간 `bm-usage-dev1h-YYYY-MM.db`(90일). 달·해 경계는 포탈 시각(util/dayKey). **보존이 같은 것끼리 파일을 나눈다** —
+    한 파일에 단계를 섞으면 5년 뒤에야 지울 수 있고 그 사이 수천만 행을 DELETE 해야 한다(설계 문장과 다른 결정 — 이유는 monthStore 머리말).
+    보존: 기간 끝 ≤ 기준이면 **파일 삭제**(-wal/-shm 포함 · 쓰는 중 pin 이면 다음으로) · 경계 기간만 청크 DELETE. ⚠ 디스크는 최대 한 기간 더 남는다(정직 기록).
+  - **조회**: ATTACH 대신 파일별 핸들(진행 중인 open 공유 `opening` Map · LRU `BMUSAGE_MONTH_MAX_OPEN` 24 · pin) · **조회당 파일 10개 상한**(ATTACH 상한과 같은 값 — 넘으면 최근 10 + `filesCapped`) ·
+    없는/못 연 기간은 `missingPeriods`(그 기간 없음)로 밝히고 나머지로 계속. 조회는 파일을 만들지 않는다.
+  - **적재**: 원시 INSERT OR IGNORE + 새로 들어간 행만 1시간·1일 upsert(합·개수·최대 · null 은 개수 제외 · 피크는 더 클 때만 값과 시각을 같이) · 파일마다 트랜잭션 1회(안에 await 없음).
+    1일 표는 예전 모양 + 모든 지표의 합·개수 + 피크. **1초 샘플은 DB 에 없다**(1초 해상도 표가 없다 — 창 표본은 집계 뒤 버린다).
+  - ⚠⚠ **마이그레이션(위험한 수정 — 순서를 테스트가 고정)**: 메인 파일을 여는 순간 상태(bm_meta `migrate.v2922`)를 정한다(예전 표에 행이 있으면 copy-raw) —
+    copy-raw(rowid 순 청크 → 월 파일 IGNORE + 1시간 롤업은 **파일별 `_mig` 커서를 같은 트랜잭션에서** 올려 재개해도 한 번만) → copy-daily(사본 표 usage_daily_mig — IGNORE) →
+    verify(달·해마다 예전 행 수 ≤ 사본 행 수 — 지우기 전) → delete(시작 시 최대 rowid 이하만 청크) → done. 청크마다 시간 기준 양보 · 폴러 틱이 기다리지 않고 잇는다.
+    실패면 failed(1시간 뒤 재시도 · 최대 3회 · 대조 실패면 커서 0 부터). **그동안 읽기는 예전 표가 그 구간의 원본**(readRule) — historyRollup 의 ‘원본 폴백 금지’ 는 롤업 대신 원시를
+    읽는 것이라 이것과 다르다. 1시간 롤업이 아직 없는 구간은 원시로 메우지 않고 결측 사유 `migrating`. 옮기는 동안 원시·롤업 파일 보존은 멈춘다(대조 전에 사본을 지우지 않게).
+    ⚠ 메인 파일 크기는 VACUUM 전에는 줄지 않는다(지운 자리는 메인 파일 안 빈 페이지 — 운영 VACUUM 은 docs/SETTINGS.md 부록 A-2).
+  - **장치별**: 물리 디스크·dm/md·물리 NIC·bond(가상 NIC·loop·ram·zram·sr 제외) · 파티션 I/O 는 `store.partitionIo` 옵트인(part 표시 · 대표값에서 뺀다) · 상한 `store.deviceMax`(32 — 물리 → md → dm → 파티션 순,
+    한 종류가 상한을 다 차지하지 않게) · 넘은 수는 최신값 `dev_over` + 노트. 장치 목록(usage_devices)은 처음 본 순서 `ord` 가 색 순서(바뀌지 않는다). 마운트는 일 롤업만.
+  - **피크 A 안**: 본 명령 뒤 **같은 세션**에서 `/proc/stat`·`/proc/diskstats`·`/proc/net/dev` 를 1초 간격 N+1 번(`store.peakWindowS` 10 · 0 이면 끔) — 세션 예산(50초)에서 남은 시간으로
+    줄이고(2초 미만이면 0) 행에 `peak_window_s` · 노트. 시각은 원격 /proc/uptime 간격 + 이 노드 시계. `peak_src`: window10 | sampler | psi | none.
+    ⚠⚠ **주기 예산 자동 맞춤(v2.922 메인 지시 — `bmusage/peakPlan.js`)**: 창은 서버마다 수집 시간을 늘려 1,000대 · 동시 32 에서 한 번 도는 데 주기보다 오래 걸렸다.
+      ⚠ 정정(반증 D2): 타이머는 **실행이 끝난 뒤 재무장**한다(util/adaptiveTimer) — 틱을 건너뛰는 것이 아니라 **실제 간격 = 실행 소요 + 주기**로 늘어난다
+      (예: 실행 6.9분 + 5분 ≈ 12분). 추이(trendWindow.gapsOf)는 기대 간격 × 2(5분 주기면 10분)를 넘는 빈틈을 결측으로 끊으므로 **다섯 지표의 5분 추이까지 전부 결측**이 된다.
+      매 주기 예상 실행 소요 = max(1, 대상 ÷ 동시성) × (서버당 기본 소요 + OS 비율 × 창) 가 주기 × `store.peakCycleRatio`(0.7) 를 넘으면 창을 10 → 5 → 3 → 0초로 줄인다
+      — 그러면 예상 간격(실행 + 주기, `expectedPeriodMs`) ≤ 주기 × 1.7 < 결측 경계(주기 × 2). 비율 상한은 0.95(1 이상이면 이 보장이 깨진다) —
+      `peakWindowS` 는 상한(줄이기만) · 기본 소요는 직전 주기 실측(서버별 소요 − 실제 창, 평균), 없으면 보수적 8초(추정) · 결정은 `_last.peakPlan`·`bmUsageStatus().peakPlan`(수집 건강 ⑫) · 행 노트와 `peak_window_s` 에 실제 값.
+      **이 맞춤을 지우거나 상한 대신 결정값을 그대로 쓰지 말 것**(회귀 `server/test/bmPerf2921Plan.test.js` — 변이 11/11).
+    B 샘플러: `store.peakSampler` 옵트인일 때만 `##SAMPLER`(고정 경로 · 없으면 absent) · 형식 v1 · 기대 sha256(`store.peakSamplerSha256`)이 없거나 다르면 unverified(값을 쓰지 않는다) — **배포 기능 없음(7단계)**.
+  - **D7**: `##BLKQ` = `grep -H ''` 한 번(+ 가상 장치 거르는 grep) · 물리 → md → dm 순 · 상한 `store.blkqMax`(64) · 자르기 전 수는 tuning `blkqTotal`.
+  - **D13**: `latestUsage()` 기본은 JSON 열 없는 판본 · 판정 소비처(주 조회·상세·엣지 봉투)만 `{ json:true }`.
+  - **추이 API**: 해상도 auto(2일 5분 · 60일 1시간 · 그 위 1일 · 보존 밖이면 한 단계 위 · 장치는 1일 없음 · 마운트는 1일만) · 평균/최대/피크/피크 시각 · 결측 구간(기대 간격 2배) · 기준선(settings.perf) ·
+    점 상한 6,000(넘으면 truncated) · 지표·종류·장치 이름은 화이트리스트. 엣지 위임 서버는 엣지 대행(보관 안 함 · 정제 · 최소 엣지 2.922.0). scope 교집합 404 · memoJson + scopeKey + 역할 + 마지막 수집 시각.
+  - **CVP 대조(서버 쪽)**: 후보는 `cvp/hostMatch.js matchUplinks` **하나**(v2.920 업링크 매칭 — 별칭·리눅스 NIC 이름을 받게 넓혔다 · 구분자 있는 이름 매칭 결함 수정) · 수동 매핑 `bmusage-portmap.json`
+    (admin · 원자 쓰기 · 손상 보존 후 저장 거부 · 감사 로그 · 범위 계정은 자기 법인 CVP 로만 — 안 보이면 404, 보이는데 다른 법인이면 403) · 상태 no-cvp · no-mapping · candidate · no-counters · stale · mapped ·
+    대조 ⑤ 는 창(끝 시각·길이)이 20% 안일 때만, 기준 `store.portTolPct` 5%. LLDP·MAC 은 만들지 않았다.
+  - **행 크기 실측**(설계 §4.4 정정): 원시 655B · 1시간 1,110B · 1일 1,147B · 장치 5분 213B · 장치 1시간 296B → 1,000대 약 25GB(보존 정확) · 최악 42.7GB(표 — 설계 README §4.4 · 선택지별 크기).
+  - ⚠⚠ **반증(review-s3a) 반영 — 되돌리지 말 것**(회귀 `server/test/bmPerf2921Review.test.js` · `bmPerf2921CvpRecv.test.js`):
+    · **D1** port-map 쓰기는 `inUserWriteScope` 를 **조건 없이**(조회 밖 404 → 쓰기 밖 403) · 법인 CVP 검사는 `!isFullReadWriteScope` 일 때 · PUT/DELETE 한 함수(`portMapWrite`) · 실제 라우터 테스트(조회 무제한 + writeVcenters).
+    · **D3** 중앙 CVP 정제는 12칸 표본을 12칸으로(구 엣지 10칸은 10칸) · 10칸 표본은 port_latest 드롭을 덮지 않는다 — 실제 수신 라우트로 시험.
+    · **D4·D5** 원시와 롤업은 다른 파일이라 원시 트랜잭션에 ‘보정 대기’(`_pend` — agent·key·시간 버킷)를 남기고 롤업이 모두 성공하면 지운다 · 남은 대기는 매 틱
+      `repairRollups` 가 **원시에서 그 버킷을 다시 집계해 교체**(1일은 legacyMaxTs 뒤 행만 — 예전 일은 사본 표) · 마이그레이션은 보존 안 행의 버킷을 전부 대기로(라이브 선행 이중 계수 없음 m3)
+      · 보존 밖 행은 **agent 별 커서**(m1) · 경계(rawCopyFrom·hourlyFrom)는 정시로 맞춰 고정 · 대조에 1시간 표본 수(예전 행만 있는 시간 = 같음 · 경계 시간 ≥).
+    · **D6** 마이그레이션 시도 횟수는 재시작하면 0 부터 · 다 쓴 뒤 6시간이면 다시 · 옮기는 중·실패 대기 중에는 예전 표 정리와 원시·롤업 파일 보존을 멈춘다 · 상태(다음 재시도)는 `_last.migration`.
+    · **D2** 타이머는 실행 뒤 재무장 — 간격 = 실행 + 주기(`peakPlan.expectedPeriodMs`) · 자동 맞춤이면 간격 ≤ 주기 × 1.7 < 결측 경계.
+    · **D7** hostMatch 경계 보강(cvp.md v2.922) · **D8** 1일 추이도 missingPeriods·filesCapped · **D9** 롤업 peak_src = 피크를 낸 행의 출처(섞이면 mixed) ·
+      **D11** 5분 추이는 필요한 열만 · 파일 행 수 상태는 10분 캐시(낡으면 지난 값 + stale, 뒤에서 다시 센다) · 마이그레이션 청크 500 · **D12** 피크 노트는 원인을 단정하지 않는다 ·
+      **D13** 샘플러 머리 줄 sha256 은 자기 신고 값(설정값과 같아도 위조 방지 아님 · 미래 시각은 형식 오류) · **D14** iDRAC 통합 추이가 원시 보존 밖 구간을 `cpuHistoryNote` 로 밝힌다 ·
+      **D15** 포트 대조는 CVP 도구 접근이 있어야 포트 값을 준다(없으면 ‘권한 없음’) · 비관리자에게 포트 설명 주소 가림 · **D10** 은 기록만(README §6-14).
+  - ⚠ **정직 기록**: 표본은 커널 문서 형식 + 이 개발 컨테이너(커널 6.18 · dash) 실행 출력이다 — 이 현장 Rocky 9 / RHEL 8 베어메탈 출력은 보지 못했다. `/proc/interrupts` 의 NIC 큐 이름 패턴 ·
+    PSI 유무 · `/etc/tuned/active_profile` 존재는 첫 실수집에서 `detail.sections`·`tuning.sections` 를 보고 좁힌다. 화면(2단계)·월 파일/3단 보존/장치별 이력(3단계)·진단 스냅샷(4단계)은 아직이다.
+- ⚠⚠ **리눅스 성능 4단계(v2.923 예정 — 서버 + 화면) — 튜닝 · 용도는 ‘사실은 엣지 · 판정은 응답 노드’, 장애 기록은 새 수집 없이 partfault 재사용, 스냅샷은 상수 명령 1회**
+  (`bmusage/{parse/linuxFacts.js,tuning/{sources,catalog,judge,overrides}.js,profiles/{rocky9-base,airflow,gpdb,index,match}.js,opsView.js,snapshot/{command,run}.js}` ·
+  `routes/api/bmUsage.js`(`/perf/:key/tuning|profile|faults|snapshot|snapshots[/:id]` · `/profiles` · `/faults` · `PUT /purpose` · `PUT /tuning/overrides`) · `routes/collector.js`(`/bm-usage/snapshot(s)`) ·
+  `central/bmUsageEdgePull.js runEdgeSnapshot · pullEdgeSnapshots` · `insights/fleetTags.js purposes`. 설계 README §4.1·§4.3 · TUNING-SOURCES · PROFILES §1~§5·§7.
+  회귀 `server/test/bmPerf2923{Tuning,Profiles,Facts,Snapshot,Ops}.test.js` · 웹 `bmOpsText.test.jsx`):
+  - **수집 구획(같은 SSH 1회 · 읽기 전용 · 상수 조각 `linuxFacts.js FACT_SHELL`)**: `##OSREL`(os-release ID · VERSION_ID · PRETTY_NAME + PAGE_SIZE + getenforce + logind RemoveIPC **명시 설정만**) ·
+    `##UNITS`(running 서비스 + 실패 수 — `systemctl` 이 없으면 아무것도 내지 않는다(absent). ⚠⚠ **정정(반증 R7)**: 초판 문서는 ‘wc -l 이 0 을 지어내던 것을 막았다(이 컨테이너 실측)’ 고 적었지만
+    그것은 systemctl 이 **없는** 경우만 막았다 — 이 컨테이너는 systemctl 이 **있고 실패**(rc=1 · ‘Failed to connect to bus’)해 여전히 `failed=0` · 빈 목록을 지어냈다(반증 재현 · 거짓 정상 · 거짓 적합 · 거짓 권고로 샜다).
+    이제 두 호출의 **종료 코드**를 보고 성공했을 때만 `running=ok` · `failed=<grep -c>` 를 내고, 실패면 `running=rc<n>` · `failed=rc<n>` → 파서가 그 칸을 null(확인 불가). 가짜 systemctl(실패 · 성공 · 3초 시한)로 실제 셸에서 고정(Facts 테스트)) ·
+    `##PORTS`(ss -ltn 로컬 포트 — `-p` 없음) · `##PROCS`(**comm 만** · 커널 스레드(‘/’ 든 이름) 제외 — 인자 · 환경 금지) · `##ACCT`(고정 이름 `DETECT_ACCOUNTS` 의 존재만) ·
+    `##KARGS`(/proc/cmdline 화이트리스트 키만 — root= · rd.* 는 싣지 않는다) · `##SOFTNET`(앞 세 열만 — 원문 13열이면 1,024코어에서 D1 바이트 산수를 넘겼다) · `##NETQ`(물리 NIC 의 tx_queue_len · 큐 수 —
+    셸 글롭으로 세어 프로세스를 띄우지 않는다) · `##XFS` · SYSCTL 14키(G1 요구값 · netdev_budget) · BLKQ `read_ahead_kb`. 바이트 산수(SECTION_BYTES_SUM < OUTPUT_MAX_BYTES < EXEC_MAX_OUTPUT)는 그대로 테스트가 고정.
+  - **튜닝 열 상한**: 감지 목록이 커서 64KB 를 넘으면 예전 규약은 `{truncated}` 로 **sysctl 까지 잃었다** — `usage.js tuningCol` 이 목록(procs → units → ports …)부터 null + `trimmed` 로 빼고 다시 잰다.
+  - **엣지 봉투는 감지 목록을 관찰 대상만**(`profiles/index.js ENVELOPE_WATCH · compactTuningForEnvelope`): 1,000대 × 프로세스 512 · 유닛 256 원목록이면 봉투 8MB 상한을 넘겨 **전 서버의 USE 근거까지 빠진다**(fitEnvelope).
+    ⚠ 프로파일이 새 이름 · 포트를 보게 되면 ENVELOPE_WATCH 에도 더할 것 — 테스트가 ‘원목록 감지 = 줄인 목록 감지’(튜닝 26 · 프로파일 점검 · 요구값까지)를 대조한다. 중앙 정제 `tuningFactsOf` 화이트리스트에도 새 필드를 넣는다.
+  - **튜닝 판정(`tuning/judge.js`)**: 상태 `advise · ok · info · unknown` + 사유 code(웹 문구 1:1). ⚠⚠ **확인 불가 ≠ 불일치** — 값이 없으면(구획 missing → notRead · 구획은 왔는데 값 없음 → notPresent) 권고로 세지 않는다.
+    장치 · NIC 항목은 장치마다 판정하고 가장 나쁜 것(권고 > 확인 불가 > 적합 > 참고). **역할 권장값의 근거는 DB 열뿐** — 다른 역할에 DB 전제 값(TuneD · governor · swappiness 10 · THP madvise · HugeTLB)을 두지 않았다(권장 없음 · 참고).
+    우선순위 **기능 프로파일 > 역할(관리자 덮어쓰기 법인 > 전체 > 기본) > OS** — 화면이 누가 정했나(by)를 적는다. 덮어쓰기는 `overridable`(같다/다르다 판정) 항목만 · 파일 `bmusage-tuning.json`(원자 쓰기 · 손상 보존 ·
+    util/settingsLoadError 등록 — 손상 · 보존본만 남음이면 판정도 저장도 503 settingsUnreadable: 덮어쓰기를 무시한 판정을 정상처럼 보이지 않게).
+  - ⚠ **판정 위치**: 튜닝 · 용도는 엣지가 판정해 보내지 않는다(현재값 사실만) — 응답 노드가 그 노드의 덮어쓰기 · 용도 태그로 판정한다. v2.548 ‘중앙이 엣지 판정을 다시 하지 않는다’ 와 충돌하지 않는다(다시 하는 판정이 아니다).
+    그 대가로 엣지 자신의 화면에는 중앙의 용도 태그 · 덮어쓰기가 없다(정직 기록).
+  - **용도 프로파일**: 파일 1개 = 프로파일 1개(rocky9-base · airflow · gpdb) + 등록부 · 카탈로그 테스트(출처 id · 등급 · 출처 없으면 ○ · catalogId). Ubuntu · Windows · Hadoop 은 **만들지 않았다**(감지 규칙도 없음 — 매트릭스 ‘프로파일 없음’).
+    감지: Airflow 는 유닛 `airflow*` · comm `airflow` 가 강한 단서(계정 · 8080/8974/8793 포트만으로는 아님) · GPDB 는 gpadmin + (postgres 또는 5432/6000대). **수동 태그가 덮는다**(fleet-tags.json `purposes` — 기존 tags 를 보존 · 비면 예전 모양).
+    점검 결과 `ok · warn · bad · unknown · notCollected · info` — CLI · HTTP · SQL · airflow.cfg 가 필요한 점검은 **미수집**(정상으로 세지 않는다 — 이 단계는 앱 명령을 실행하지 않는다). gpdb 의 NIC/RAID 점검은 USE code 그대로.
+  - **장애 기록(새 수집 없음)**: 라우트 `computeIncidents`(partFaults.js — 같은 30초 메모) → `opsView.incidentsForServer`(scope idrac · agent 축(hwFacts 와 같은 규칙) · 서비스 태그 또는 등록부 id) → 요약 5칸은 code 를 세기만.
+    part-faults 도구 접근이 없으면 내용 없이 ‘권한 없음’(v2.922 D15 와 같은 판단) · 비관리자는 `maskIncident` · SEL/LC 는 이 노드 인벤토리가 있는 서버만(엣지 위임 서버는 중앙에 목록이 없다).
+  - **진단 스냅샷** — 규약 · 테스트는 `security-api.md` v2.923. 보관은 메인 bm-usage.db `bm_snapshots`(7일 · 실행 때 정리 · 보존 DELETE 허용 목록에 유계 사유) · 설정 `snapshot.{dailyCorpMax 20 · topN 10 · dmesgLines 50}`(추정 시작값 · 배포 키 아님).
+  - ⚠⚠ **표지 위조(반증 R1 — 4단계가 연 새 경로)**: `##PROCS` 는 프로세스 이름(comm — 아무 사용자나 정한다)을 줄 머리에 내보낸다. 비특권 사용자가 ‘##MEM’ · ‘MemTotal: 9 kB’ 이름의 프로세스를 띄우면
+    예전 `splitSections`(trim 뒤 아무 표지 · 이미 본 구획 재개방)가 MEM 구획을 그 이름들로 덮어 **가짜 메모리 100%** 를 만들고 PROCS 를 비웠으며, ‘##END’ 이름이면 잘림 보호(1단계 D1)까지 꺼졌다(이 컨테이너 재현).
+    이제 ① `splitSections(text, { order: LINUX_SECTIONS })` — 줄 머리 그대로 정확 일치 · 명령의 표지 순서에서 **지금보다 뒤의 표지만** · 이미 본 표지는 다시 열지 않는다(스냅샷 파서도 같은 규칙 — R6)
+    ② 비특권 입력이 줄 머리에 오는 구획에 고정 접두(`PROCS` `p:` · `UNITS` `u:` · 스냅샷 `DMESG` `d:`) — 파서가 벗기고 접두 없는 줄은 버린다. 전수 점검 결과는 `linuxFacts.js FACT_PREFIX` 주석
+    (PORTS · ACCT · KARGS · SOFTNET · OSREL · NETQ · XFS · 기존 NETINFO · FC · DF · HOST 는 줄 머리를 root · 커널 · 고정 형식이 정한다). ⚠ 새 구획을 더하면 `LINUX_SECTIONS` 순서에 넣고, 줄 머리를 누가 정하는지 먼저 본다.
+    회귀: 실제 셸 + 실제 shapeLinux 에 ‘##MEM’ · ‘##END’ 이름 프로세스를 띄워 MEM 실제값 · PROCS · 잘림 판정을 대조(Facts 테스트).
+  - **주기 명령의 시한(반증 R8 · 추정 근거)**: 주기 수집 명령 전체가 exec 시한 하나라 한 칸이 멈추면 **전 구획(USE 포함)** 을 잃는다 — `systemctl` 3곳은 `timeout 3`(D-Bus 기본 25초) · `getent` 는 `-s files`(SSSD/LDAP 왕복 없음 —
+    디렉터리 계정의 gpadmin 은 ‘없음’ 으로 보인다: 정직 기록). SSSD · 바쁜 systemd 실측은 없다(추정).
+  - **묶음 값(반증 R9)**: ‘a / b’ 한 칸 사실(`catalog.js pairText` — gpdb SYS2 · mem.dirty · net.rmemMax)은 한쪽이라도 못 읽으면 표시만 ‘—’ 이고 판정은 확인 불가(`hasMissingPart`). 업그레이드 기간(엣지 v2.922 는 새 sysctl 14키를 보내지 않는다)에 GPDB 서버가 늘 권고로 보이던 것을 막는다.
+  - **장애 기록 탭의 범위(반증 P1 — 판단 기록)**: 파트 장애 도구 자체는 `fullScopeOnly`(‘부품 장애에는 법인 축이 없다’)지만, 이 탭은 **bm-usage 대상의 법인 귀속**(서버 → vCenter)을 축으로 범위 계정에도 **자기 법인 서버 것만** 보인다
+    (2단계 하드웨어 탭 · hwFacts 와 같은 판단 · part-faults 도구 접근은 따로 재검사). 함대 ‘장애 기록’ 보기도 같은 축으로 자른다. 모순이 아니라 축이 다르다 — 회귀 Ops 테스트 ①.
+  - ⚠ **정직 기록**: 수집 구획 · 스냅샷 명령은 이 개발 컨테이너(dash · 커널 6.18 · systemd 없음 · ss 없음)에서만 실행해 봤다 — Rocky 9 실장비 출력 미확인(getenforce · logind.conf.d · softnet 열 수 · NIC 큐 디렉터리).
+    Airflow 프로세스 comm 이 ‘airflow’ 인지 ‘python3’ 인지는 설치 방식에 따라 다를 수 있다(미확인). GPDB coordinator/segment 는 기본 포트로 **추정**한다. 설계 README §6-11 D12(selCritical 시간 창 · IRQ virtio)는 이번에도 미처리.
+- ⚠⚠ **리눅스 성능 5단계(v2.929 예정 — 서버 + 화면) — 집중 모니터링은 ‘별도 타이머 · 같은 수집 함수 · 같은 인증 가드 · 같은 슬롯’, 판정 · 발송은 수집 노드, 설정 파일 내용 · dmesg 원문은 저장하지 않는다**
+  (`bmusage/{parse/linuxHealth.js,health.js,changes.js,cycleOps.js,opsDb.js,perfRules.js,perfAlerts.js,baseline.js,compare.js,slots.js,perfOpsView.js,focus/{run,summary}.js,snapshot/reason.js}` ·
+  `routes/api/bmPerfOps.js` · `routes/collector.js`(`/bm-usage/focus[/stop] · /changes · /baseline · /compare`) · `central/bmPerfOpsPull.js` · `issues/alertIssues.js applyBmPerfFires`(출처 `bmperf`).
+  설계 PROFILES §13 · §14 · README §8. 회귀 `server/test/bmPerf2929{Health,Changes,Focus,Alerts,Baseline}.test.js` · 웹 `bmPerfOpsText.test.jsx`):
+  - **수집 구획(같은 SSH 1회 · 1단계 R1 규약 그대로)**: `##CHRONY`(`chronyc -c tracking` 한 줄 · `c:`) · `##DMESG`(awk 가 err · warn · 최근 24시간 **개수만** · `k:` — 원문은 awk 밖으로 나오지 않는다) ·
+    `##CHANGES`(`x:` — uptime · boot_id · 커널 · needs-restarting -r · dnf history 최근 6줄(**명령줄 열은 셸에서 버린다**) · `sysctl -a` 휘발성 키를 뺀 **CRC 하나** · /etc/sysctl.d · cron.d · crontab · /var/spool/cron 은
+    **cksum(CRC)만**(내용 · 크기는 셸 밖으로 나오지 않는다 — 비밀 혼입) · tuned-adm active · systemctl --failed 개수 · file-nr · conntrack). 멈출 수 있는 명령은 `timeout`(chronyc · dmesg · systemctl 3 · needs-restarting · dnf 8) ·
+    rc ≠ 0 이면 그 칸 null(missing) · 명령이 없으면 absent. 줄 머리를 사용자가 정할 수 있는 칸(파일 이름 · dnf 행)은 고정 접두 + 이름 화이트리스트(`../` · 공백 이름은 버린다).
+    `LINUX_SECTIONS` 순서(사실 구획 뒤 · 샘플러 앞) · 바이트 산수(SECTION_BYTES_SUM < OUTPUT_MAX_BYTES < EXEC_MAX_OUTPUT)는 Health 테스트가 **실제 dash · bash** 로 고정(가짜 chronyc · dmesg · dnf).
+    이 컨테이너 실측: 주 명령 전체 158ms(dash) · 239ms(bash) — 새 구획 포함(chronyc · needs-restarting · dnf 는 이 컨테이너에 없어 absent 경로만 실행됐다).
+  - **점검 소모품 8칸(`health.js judgeHealth` — 판정은 수집 노드 · 중앙은 code 를 그대로)**: chrony 오프셋(기본 100ms) · 실패 유닛(4단계 UNITS 사실 — R7 실패=missing) · OOM(vmstat oom_kill 증가) ·
+    커널 오류(24시간 err 개수 기준 0) · 가동 시간 · 재부팅 필요 · FD · conntrack(80%) · 인증서(**svcmon cert 점검 재사용** — 서버 주소 · 이름 정확 일치 · 가장 짧은 남은 일수 · 30일) · TuneD · SELinux · firewalld(참고).
+    code `ok · warn · bad · missing · absent · perm · na · info` — **주의(attention)는 warn + bad 만**(못 읽음 · 없음 · 해당 없음은 주의에도 정상에도 넣지 않는다). 칸은 `cycleOps.prepareCycleOps` 가 적재 **전에** 행 detail_json 에 싣는다
+    (`since` = 그 code 가 된 시각 — change_latest 전이 기록 · 화면 ‘며칠째’).
+  - **변경 이벤트(`changes.js diffChangeFacts` — 전이만)**: 첫 관찰은 기준만(이벤트 0) · 이전과 다를 때만 `change_event` · **null(못 읽음)은 비교하지 않고 직전 값을 들고 간다** · 펌웨어(이미 가진 iDRAC 인벤토리 — BIOS 중복 제거) ·
+    CVP 매핑(수동 매핑) · 소모품 칸 code 전이. sysctl 전체 CRC 가 **연속 3주기** 바뀌면 휘발성(noisy)으로 보고 그 이벤트를 멈춘다(실장비 휘발성 키 미확인 대비) · 한 주기 24건 상한(넘으면 ‘그 밖 n건’ 한 줄).
+    최신 사실은 `change_latest`(서버별 — 재시작 뒤 같은 변화를 다시 적지 않는다) · 쓰기는 한 트랜잭션(`changeWriteBatch`) · 보관 30일(설정 `changes.keepDays` — 설계의 ‘1년’ 은 쓰지 않았다: 메인 DB 행 수) ·
+    대상에서 사라진 서버의 최신값은 **마지막 성공 주기의 키**(`_lastLiveKeys`)로 정리한다 — 정리 틱에서 대상 해석(`currentTargets`)을 다시 부르면 bmstor 등록부 캐시를 오염시켰다(bmPerf2923Snapshot 404 — 이번 회차에 잡음).
+  - **집중 모니터링(`focus/run.js`)**: 별도 타이머 · 별도 표(`focus_session` · `focus_sample` — 메인 bm-usage.db · 30일 · 폴러 정리 틱이 청크로) · 기본 10분 × 1분(간격 하한 30초 · 길이 상한 60분) ·
+    1분 = **주기 수집과 같은 함수**(`collectOsUsage` + `extraCommands` 로 같은 SSH 세션에서 경량 스냅샷 `FOCUS_SNAPSHOT_COMMAND` — 상수 · ps 상위 5 · /proc/pid/io 2초 차이 · ss -s) + Redfish 1회(`idracTelemetryJob` 재사용) →
+    `buildUsage` · `buildPerfEntry`(판정 코어 하나). 세션 시한 `withDeadline` 50초 > 예산 45초(시한이 세션을 끊는다).
+    ⚠⚠ **법인당 동시 상한(기본 5)은 실행 중 + 시작 중(예약)을 동기적으로 세고 예약**한다(검사와 예약 사이 await 없음 — 4단계 스냅샷 R2 와 같은 판단) · 넘치면 법인별 대기열(순번) · 서버당 1세션.
+    ⚠⚠ **인증 거부는 그 분에서 즉시 중단**(다음 분을 예약하지 않는다) — OS · iDRAC 결과를 **주기 수집과 같은 가드 · 같은 식별자**에 기록(실패는 주기 수집도 멈추고 성공은 푼다 — Focus 테스트 ③가 실제 poller 가드로 확인).
+    자동 · 수동 모두 정지 계정이면 시작하지 않는다(반증 F11 — 아래). 결측 분은 **비우고** OS · iDRAC 를 따로 센다(경로가 없는 쪽은 요약 null — 화면 ‘경로 없음’).
+    ⚠ **전역 슬롯(`slots.js`)**: 주기 수집 풀과 집중이 같은 용량(단일 원천 = poller `CONCURRENCY` → `configureSlots`)을 나눠 쓰고 집중은 **앞자리 대기** · 대기 상한(간격 × 0.75 · 5~45초)을 넘기면 그 분 결측 `pool-busy`.
+    피크 창 주기 예산(peakPlan)에는 **활성 집중 수를 뺀 동시성**을 준다. 재시작이면 남은 진행 중 · 대기 세션은 `interrupted` 로 닫는다(타이머가 없다).
+    ⚠ **순환 금지(arch2579 SCC 상한 4)**: focus/run 은 poller 를 import 하지 않는다 — 폴러가 로드될 때 `registerFocusPollerHooks` 로 넘긴다(미등록이면 인증 정지 조회는 ‘정지’ 로 답한다 — 계정 잠금 쪽으로 틀리지 않게).
+    요약은 `focus/summary.js`(데모 시드가 import) · 사유 정제는 `snapshot/reason.js`(focus 가 snapshot/run 을 import 하면 snapshot/run → poller → focus 순환).
+    원인 후보는 **상관**(스냅샷이 있는 분 중 I/O · CPU 1위 횟수 — 문제 자원이 디스크 · 네트워크면 I/O 먼저) · 조치는 code(웹이 문장).
+  - **알림 규칙(`perfRules.js` 파일 `bm-perf-rules.json` · `perfAlerts.js`)**: 규칙 6종(USE 판정 변화 · 교차 판정 · 집중 결론 · 베이스라인 이탈 · 점검 소모품 · 용도 점검 실패) — **조건은 수집 노드가 판정한 code 의 변화만**(null 은 보류) ·
+    지속 n주기 · 한 사건에 한 번 · 재발 억제(분) · **켠 규칙만 저장** · 하루 상한(법인당 알림 50 · 이슈 20 · 자동 집중 10). 채널은 **기존 알림 채널 설정의 사본**(메일 · 웹훅 · Slack · Teams — 새 채널 설정 없음) ·
+    이슈는 **기존 문지기**(`alertIssues` — 출처 `bmperf` · 같은 발송 건 두 번 안 만듦 · 열린 이슈면 댓글). 엣지의 발송 기록은 봉투(`perfAlertSent` 24시간)로 올라가고 이슈는 **중앙이 끌어올 때** 만든다.
+    상태 파일 `bm-perf-alert-state.json`(원자 쓰기 · 재시작 뒤 재발송 없음) — **손상이면 보존본을 남기고 warmup**(그 주기는 기준만 · 보내지 않음). 규칙 파일 손상은 기본값(전부 꺼짐)으로 돌되
+    주기 상태에 `skipped: 'settings-unreadable'` 로 남기고 규칙 화면 · 서비스 점검(audit2633 20개)이 밝힌다. 유지보수 창 억제는 **원천이 없다**(`maintenanceFor` 는 늘 suppressed:false · source 'none' — 베어메탈 서버의 백업 창을 읽는 스케줄이 없다).
+  - **베이스라인(`baseline.js`)**: 지난 4주 같은 요일 · 같은 시각(정확히 7일 배수)의 1시간 롤업 평균 ±40% · 표본 4주 미만 · 결측 25% 초과면 띠 없음(reason) · ML 없음.
+    주기 판정용 슬롯 평균은 시간당 한 번(`slotBands` — h IN 질의 1회) · 화면용 띠 계열은 시간 기준 양보(`createYielder`) · 10분 메모 · 최대 14일 · 지표 화이트리스트 5개.
+  - **구간 비교(`compare.js`)**: 같은 길이(짧은 쪽) · 같은(거친) 해상도 · **결측은 양쪽에서 뺀다** · 차이 %(A=0 이면 null) · ±20% 표시 · 프로세스 상위 차이는 스냅샷이 있는 구간만 · 튜닝 값 차이는 그 사이 변경 이벤트.
+  - ⚠ **정직 기록**: 1분 간격 SSH 의 실장비 부하는 측정하지 못했다 — 이 컨테이너(sshd 없음)에서 명령 실행분만 쟀다: 주 명령 158~239ms + 경량 스냅샷 2.03초(/proc/pid/io 2초 간격) + 피크 창(설정 상한 10초 — 같은 세션) ≈ 분당 약 12초 +
+    SSH 연결 · Redfish 1회(미측정 — 800ms RTT 법인은 연결만 수 초 추정). chronyc -c · needs-restarting -r · dnf history 의 Rocky 9 실출력 형식은 미확인(파서는 형식 밖 줄을 버린다 — 칸이 비면 ‘확인 불가’).
+    데모 백필(30분 간격 · 14일)에는 디스크 지표 · 4주 이력이 없어 화면 판독의 띠는 서버 `bandOf` 결과를 응답에 끼워 확인했다.
+  - ⚠⚠ **반증(review-s5) 반영 — 되돌리지 말 것**(회귀 `bmPerf2929{Alerts,Focus,Changes,Health,Poller,Gates}` · `bmPerfMinEdgeVersion2929` · 웹 `bmPerfOpsText.test.jsx` · 변이 검증):
+    · **F1 알림 상태는 한 직렬 큐**(`perfAlerts.withState` — 읽기-수정-쓰기 한 단위 · 같은 _state 를 고친다): 주기 판정과 집중 결론이 각자 `load → await → save` 하면 늦게 끝난 쪽이 덮어 같은 사건을 다시 보내거나 발송 기록을 잃었다.
+    · **F6 발송은 주기 밖**: 주기는 판정 · 큐잉만(`alerts.enqueueNotify` — 채널별 레인 · 상한) · 주기당 상한 = 기존 `MAX_SEND`(bmusage/notify.js — 넘친 건은 상태를 되돌려 다음 주기 · deferred) ·
+      결과는 `deliveryOutcome` 으로(전 채널 실패 = `failed` — ‘보냄’ 아님) · 실패면 기존 `retryDelayMs`(5분 · 15분 두 번)로 규칙 상태에 retryAt — 사건이 이어지는 동안 그때 다시 보낸다.
+    · **F5 못 읽음은 보류**: 규칙 상태에 ‘참이던 칸(on)’ 을 두고 그 칸을 이번에 못 읽으면 조건 null(사건 유지 — 해소 · 재발송 없음) · `healthSince` 는 missing · perm 을 통과(직전 읽은 code = hold · since 유지) ·
+      변경 이벤트는 읽은 code 끼리만(missing 전이 없음).
+    · **F4 법인 상한 경쟁**: finish 가 `_active` 해제와 **같은 동기 구간에서** 대기열(전 법인 공통 들어온 순서 · 법인 상한 · 노드 상한)을 꺼내 예약 · 그 법인 대기열이 비어 있지 않으면 새 시작도 대기열 뒤로(앞지르기 금지) ·
+      끝 구독자(결론 알림)는 기다리지 않는다(L4 — 엣지 대행 중지가 메일 시한만큼 늦게 답하던 것).
+    · **F11** 수동도 인증 정지 계정이면 거부 + 법인당 하루 수동 상한(`daily.manualFocus` 20) · **L11** 노드 전체 동시 상한(`focus.nodeMax` 10) · **L8** 길이 상한은 벽시계로도(`summary.wallCapped`).
+    · **F13** 기동 때 `initFocus()`(폴러 시작) + 봉투 요약도 초기화 먼저 — 재시작 직후 죽은 세션을 ‘진행 중’ 으로 싣지 않는다. **F14** OS 경로가 없는 세션의 표본 missOs 는 null(‘경로 없음’ 은 결측이 아니다).
+    · **L1 needs-restarting**: 종료 코드 대신 출력 표지(LC_ALL=C ‘Reboot is required’ / ‘should not be necessary’ · 못 가르면 `nr=x` = 확인 불가) · 방금 부팅 · rpmdb 최근 변경 · 하루 네 번 10분 창(03 · 09 · 15 · 21시)에만 실행 ·
+      그 밖은 `nr=skip` → cycleOps 가 직전 읽은 값을 이어 쓴다(없으면 확인 불가). ⚠ 주기가 10분보다 길면 창을 놓칠 수 있다 — 그때는 부팅 · 패키지 변화 때만 읽는다(정직 기록).
+    · **L5** 대상이 일부만 해석된 주기(sourceErrors)의 목록으로는 change_latest 를 지우지 않는다 · **L6** 인벤토리에서 빠진 펌웨어 부품은 못 읽음(직전 버전 유지 — ‘없음’ 이벤트 없음) · **L3** 띠 밖 판정은 서버(`baseline.outsideOf` → 응답 `outside`).
+    · 기록만(고치지 않음): **L2** 베이스라인 ‘같은 요일 · 시각’ 은 UTC 7일 배수 — 서머타임 법인(폴란드 · 미국 동부)은 전환 뒤 4주 동안 업무 시각이 1시간 어긋난 띠와 비교된다(법인 시간대 원천 없음) · 띠에 절대 하한이 없어 평균 2% 서버는 3% 에서도 ‘이탈’ ·
+      **L7** FD 칸은 시스템 전체 file-nr 대비 — fs.file-max 가 매우 큰 배포판에서는 늘 0%(실제 한계는 프로세스 nofile · 실장비 미확인) · **L9** 엣지 위임 서버의 집중 탭 머리 ‘10분 × 1분(설정)’ 은 중앙 규칙으로 보인다(실제 세션은 그 엣지 규칙 — 세션 칸의 간격 · 횟수가 진실) ·
+      **L10** 구간 비교 5분 해상도에서 수집 주기가 1분이면 한 칸에 5표본이 떨어져 마지막 1개만 남는다(Map.set).
+- ⚠⚠ **리눅스 성능 6단계(서버 + 화면 — 버전 미정) — 비교 · 수집 건강 · 주석 · 공유 · 플레이북 · 목표선. 새 수집 · 새 SSH 구획 없음(이미 가진 값의 묶음 · 대조), 판정은 서버 코어 하나 · 결측은 개수로**
+  (`bmusage/{multiCompare,compareSets,collectHealth,missReason,annotations,playbooks,slo}.js` · `slots.js`(슬롯 최대) · `poller.js`(주기 계측 · `collect_cycle` 표) · `perfRules.js`(규칙 `collect`) ·
+  `routes/api/{bmCompare,bmCollectHealth,bmAnnotations,bmPlaybookSlo}.js` · `routes/collector.js`(`/bm-usage/compare-series`) · `central/{bmComparePull,bmCollectHealthSanitize,featureMinEdgeVersion}.js`.
+  설계 PROFILES §16 · README §8. 회귀 `server/test/bmPerfStage6{Compare,Health,Annot,PlaybookSlo,MinEdgeVersion}.test.js` · 웹 `bmStage6Text.test.jsx`):
+  - **서버 비교(`multiCompare.js` · `GET /tools/bm-usage/compare`)**: 2~5대(설정 `compare.maxServers` 2~8 — 화면은 API 값) · 지표 묶음 4(6대 사용률 · USE · 큐 · 하드웨어) · 창 1시간/24시간/7일(상한 14일).
+    **기본은 같은 법인만** — 첫 서버의 법인이 기준이고 다른 법인 서버는 `other-corp` 열(값을 당기지 않는다) · ‘법인 간 허용’(`cross=1`)은 **전체 범위 계정만**(범위 계정이 보내면 404 — 기능 은닉).
+    범위 밖 · 없는 서버는 둘 다 `none`(존재 은닉 — 어느 쪽인지 말하지 않는다). 열마다 읽은 시각(`readAt` · 엣지는 보관 시각 `snapAt`)과 상태(ok · stale · old-version · no-sample)를 따로 밝힌다.
+    통계(`seriesStats`)는 평균 · 피크 · 마지막 · **n · expected · missing**(결측을 0 으로 채우지 않는다) · 스파크(칸 = min(96, 기대 칸, 점 수)) — 칸이 점보다 많으면 점이 흩어진다(r1 판독 결함 · 고침).
+    편차 표(`buildCompareTable`)는 묶음 평균 대비 ×2 이상을 `devHigh`, 3대 이상에서 한 대만 ×2 넘게 벗어나면 `skew` · 축 상한은 `niceCeil`(지표별 scaleMax 를 넘는 값은 `clipped`).
+    판정(USE 칸 · 교차)은 **상세와 같은 코어**(`buildPerfEntry` · 데모면 `demoPerfRows` 겹침 공용 — 비교와 상세가 갈리지 않게).
+  - **5대 동시 집중(`POST /compare/focus`)**: 키를 **전부 먼저 해석**(하나라도 없거나 범위 밖이면 404 — 아무것도 시작하지 않는다) → 쓰기 범위 하나라도 밖이면 403(전부 거부) → 그 뒤 서버마다 5단계 `focusStartResolved`
+    (같은 법인 상한 · 서버당 1세션 · 사유 필수 · 감사 `bm-perf.focus` origin `compare` · 자동 주석). 결과는 서버별(상한 · 중복은 그 서버만 실패).
+  - **저장된 세트(`compareSets.js` 파일 `bm-perf-compare-sets.json`)**: 사용자별 20개 · 이름 · 키 목록 · 법인 간 여부 — 원자 쓰기 · 손상 보존 · 손상이면 503(빈 목록으로 덮지 않는다) · 쓰기는 **동기 RMW**(await 없음 — 동시 10건 테스트) · 쓰기 운영자 이상.
+  - **수집 건강(`collectHealth.js` · 폴러 계측)**: 매 주기 노드 값(주기 소요 / 예산 · 성공률 · 실패 사유 9종(`missReason.js` — 집중과 같은 코어 · 인증 정지는 `auth-stopped`) · 동시성 최대(`slots.js` `_peak`) ·
+    SSH 소요 p50/p95(SSH 를 연 서버만) · 집중 진행/대기 · DB 크기 **파일 실측**(`dbFilesNow` — 폴더를 못 읽으면 null · 크기를 못 읽은 파일이 있으면 합을 내지 않고 `unread` 를 센다)).
+    ‘리포트 없음(라이선스) · 첫 주기 · PSI 없음’ 은 **실패가 아니다**(info 로 따로) · 대상 0대 주기는 성공률 null(0% · 100% 아님) · ‘며칠째’ 는 이어지는 동안 유지(프로세스 재시작이면 다시 센다).
+    주기 기록은 메인 DB `collect_cycle`(노드 · 시각 PK · 30일 · 정리 틱 청크) — 분류 실패 · 대상 0 · 예외 주기도 기록(무음 실패 금지). 기준 대조 `collectCells` 하나(값 없으면 `unread` 보류)를 보드와 알림 규칙이 같이 쓴다.
+  - **알림 규칙 ‘수집 건강’(`collect` — 기본 꺼짐 · 자동 집중 없음)**: 서버가 아니라 **노드 한 칸**(`key:'__node__'` · 이름 ‘수집 노드 <agent>’ · 법인 없음) — 조건 any · cycle · success · db · auth.
+  - **운영 주석(`annotations.js` 파일 `bm-perf-annotations.json`)**: 종류 5(작업 · 변경 · 외부 · 장애 · 메모) · 본문 500자 · 연결(ISS-n · 위키 · 집중 id · 백업) · 시각(지난 400일 ~ 앞 7일 · 구간 31일) · 전체 5,000(넘치면 지운 것부터 재사용 · 없으면 409).
+    중앙 한 곳 저장(엣지 서버도 중앙에 — 법인 귀속은 대상 해석의 vcenterId) · 원자 쓰기 · 손상 503 · 동기 RMW(동시 20건 테스트) · 고침 이력 20 · **삭제는 흔적**(본문 · 연결을 비우고 누가 · 언제를 남긴다).
+    집중 세션 시작은 자동 주석(`by:'system'` · auto `focus` — 사람이 고치거나 지울 수 없다). 엣지 자동 집중(알림 규칙)은 자동 주석을 만들지 않는다(중앙이 시작을 모른다).
+  - **진단 플레이북(`playbooks.js` 한 파일)**: 12편 · 판정 id 46개 전부가 적어도 한 편에 걸린다(테스트가 `allJudgmentIds()` 와 대조) · 단계 종류 5(포탈 · 명령 · 설정 · 하드웨어 · 조치) · 방법론 출처 태그(NF · USE · SRE · DELL).
+    ⚠⚠ **명령은 복사용 글자이고 포탈은 실행하지 않는다**(`executes:false` · 실행 경로 없음) — 그래도 **검토된 읽기 전용 목록(`READONLY_COMMANDS` · 정확 일치)** 에 있는 줄만 싣는다(반증 F6 정정:
+    예전의 ‘도구 화이트리스트 + 금지 인자’ 판정은 `dnf history undo` · `ss -K` · `sort -o` · `awk system()` · 이스케이프 따옴표 주석 우회 등 16+1건을 통과시켰다).
+    목록에 더하는 줄은 `lintCommand`(도구별 **허용 인자** · 원문 전체에 셸 금지 문자 · 백슬래시 금지 · 따옴표를 아는 주석 자르기)를 통과해야 한다 — 검토 보조. 카탈로그는 런타임에도 거른다. 자리표시 채우기(`fillOf` — 장치 · 인터페이스 · 마운트)는 **서버가 값 화이트리스트로 거른 것만**(셸 의미 문자 · `..` 금지).
+  - **목표선(`slo.js` 파일 `bm-perf-slo.json`)**: 지표 12 · 기준 3(5분 평균 · 5분 피크 · 기간 p95) · 연산 4 · 우선순위 **개별 서버 > 용도(airflow · gpdb — 4단계 감지) > 역할(기본)** · 범위당 12 · 서버 500.
+    달성률 = 목표 안 주기 ÷ **값이 있는 주기**(결측 주기는 분모에서 빼고 `missing` 으로 센다 · 값이 하나도 없으면 `no-data` — 0% 아님 · 위반 수 · 위반 시간도 null) · 연속 위반은 결측 칸에서 끊는다 · 최장 위반 · 일별 · 위반 띠.
+    해상도는 창 20일 이하 5분 · 그 위 1시간 · 이번 달 = 법인 하루 경계(`DAY_OFFSET_MIN`) 기준. 계열은 3a 추이(이 노드 `trendFor` · 엣지 `pullBmTrend` — 지표마다 1회 · 동시 2).
+    정비 창은 원천이 없어 분모에서 빼지 못한다(`maintenance:{source:'none', excluded:0}` · 화면이 말한다 — 8단계). 저장은 관리자 + 설정 소유자 + 감사 `bm-perf.slo` · 손상이면 보존하고 기본 목표로 계산(그 사실을 응답이 말한다).
+  - ⚠⚠ **반증 review-s6 반영 — 되돌리지 말 것**(회귀 `bmPerfStage6{Health,PlaybookSlo,Compare,Annot}` · `bmEdgeRoundTrip` · 웹 `bmStage6Text` · 변이 검증):
+    · **F1 주기 실패는 ‘정상 · 대상 0’ 이 아니다**: 분류 실패 · 주기 예외 · 계산 실패(`CYCLE_ERRORS`)면 노드 대상 · 성공 수는 null · 상태 `cycle-failed` · 법인 행 대상 null(모름 — KPI 모름 개수) ·
+      기준 칸 `error`(‘수집 건강’ 규칙 조건 ‘주기 실패’) · 실패 · 0대 경로에서도 ‘수집 건강’ 규칙만 돈다(`runNodeCollectAlert` — 다른 규칙의 서버 상태는 CARRY_MS 동안 그대로). ‘대상 없음’ 은 사실 0.
+    · **F4 · F5 결측**: 법인 행 성공률은 성공 수를 모르면 null(0% 아님) · DB 폴더를 못 읽으면 가족별 값도 null(화면 ‘—’), 일부 파일을 못 읽으면 `partial`(화면 ‘부분’).
+    · **F7 피크는 피크 표본만**: 목표선 ‘피크’ 기준과 비교의 피크 칸 · 스파크 피크 · 마지막 피크는 `p.peak` 만(없는 주기를 평균 · 칸 최대로 메우지 않는다 — 목표는 결측 + `peakMissing`) ·
+      피크 열이 없는 지표(`SLO_PEAK_METRICS` 밖)에 피크 기준 저장은 400 · 비교 ‘평균+피크’ 는 값 있는 서버가 **모두** 피크를 가질 때만 피크로, 아니면 모두 평균으로 대 본다(`row.basis` — 다른 양을 섞지 않는다).
+    · **F8 범위 계정의 노드 상태**: 노드 값을 숨기면(nodeHidden) 노드 상태도 노드 값으로 정하지 않는다(`hidden` — 노드 값과 무관한 사실 off · 주기 없음 · 버전 · 오래됨 · 주기 실패만 그대로) ·
+      법인 행 상태 · 칸은 **그 법인 값으로** 같은 판정 코어(`collectCells`)에 대 본다(성공률 · 인증 사유 · 주기 실패 — 주기 소요 · DB 는 노드 전체 값이라 대지 않음).
+    · **F12 주기 길이**: 위반 시간 · 기대 주기 수 · 비교 결측은 추이 칸(≥5분)이 아니라 수집 간격으로 센다(이 노드 = 설정 간격 · 엣지 위임 = 점 간격 중앙값 · 롤업 = 칸).
+    · **F13 · F9 요청 경로**: 운영 주석 저장소는 mtime · 크기 캐시(읽기는 공유 배열 — 사본 없음 · 쓰기 도중 실패면 캐시를 버린다 · 이력 이전 내용 120자 · 파일 32MB 상한 409) ·
+      목표 설정 조회는 대상 · 엣지 보관분을 요청당 한 번 읽어 O(N) 으로 대 본다(서버 목표 500건에 대상 해석 500번 → 1번).
+  - ⚠ **정직 기록**: 샘플러(옵션 B)의 서버 부담은 계측하지 않는다 · 수집 건강 ‘며칠째’ 는 프로세스 시작 뒤부터 · 비교 · 목표선 계열은 3a 파일 그대로라 데모 백필(30분 간격)에서는 5분 칸 대부분이 결측으로 보인다(그대로 센다) ·
+    월간 목표 리포트(메일)는 만들지 않았다.
+- ⚠⚠ **리눅스 성능 7a단계(서버 + 화면 — 버전 미정) — 로그 분석(성능 · 보안 · 이슈 · 장애). 엣지가 읽고 분류 · 집계 · 가림까지 하고, 원문 전체는 저장 · 전송하지 않는다. 못 읽음 · 권한 없음 · 잘림은 0 이 아니라 출처 상태다**
+  (`bmusage/logs/{rules,command,parse,classify,store,run,view}.js` · `poller.js`(주기 배선) · `perfRules.js`(설정 `logs` · 규칙 `logs`) · `perfAlerts.js`(조건) · `edgelog/redact.js`(`redactSystemLogLine`) ·
+  `mock/demo/bmLogs.js`. 설계 PROFILES §17 · README §8. 회귀 `server/test/bmLogs7a{Command,Parse,Rules,Store,Route,RoundTrip}.test.js` · 웹 `bmLogsText.test.jsx`):
+  - **읽기 = 같은 SSH 세션(로그인 1회)의 별도 exec**(`osSsh extraCommands` 이름 `logs` — 주 명령 · 피크 창 뒤 남은 예산 안에서만 · 모자라면 `skipped`). 주 명령에 섞지 않은 이유: 주 명령의 전체 바이트 상한과
+    ‘##END 미도착 = 마지막 구획 버림’(1단계 D1)이 로그 수천 줄 때문에 다섯 지표 구획을 밀어내면 안 된다(설계와 다른 결정 — 이름은 그대로 `##JOURNAL · ##DMESG · ##SECURE` + `##JSEC · ##AUDIT · ##APPLOG`).
+  - **증분**: journald 는 `-o json`(한 줄 = 한 항목) · `-p warning` · `_TRANSPORT=journal|syslog|stdout`(커널 메시지는 dmesg 가 읽는다 — 두 번 세지 않게) · **항목마다 커서**(awk 가 본 마지막 항목의 `__CURSOR` —
+    상한 · 바이트 상한 · `timeout 6`(8b 반증 후속 — 예전 15 · 이 exec 안 timeout 합 산수 · rc 124 = ‘부분’)에서도 본 데까지 넘어가 같은 줄을 다시 세지 않는다 · 7a 반증 F5) · 커서가 없으면 최근 60분. **`-q` 를 쓰지 않는다**(systemd v239 · v252
+    `journal_access_check_and_warn` 원문 — `-q` 면 ‘Hint: … not seeing messages from other users and the system’ 이 꺼진다 · 반증 F2): 힌트 = `perm/own`(자기 저널만 — 세지 않고 위치만) ·
+    ‘No journal files were opened due to insufficient permissions’ = `perm/none` · ‘No journal files were found’ = `absent/nofiles` · 수집 계정 uid · 소속(systemd-journal · adm · wheel)을 메타로(화면 권한 안내).
+    dmesg `-x` 는 **boot_id + 마지막 [초]**(`--time-format` 에 기대지 않는다 · 재부팅이면 링 버퍼 처음부터) · **첫 읽기는 가동 마지막 60분만**(그 앞은 `older` 로 세기만 — 옛 부팅 줄을 ‘지금’ 사건으로 세지 않는다 · 반증 F6 ·
+    uptime 을 모르면 위치만). 파일(secure · audit · 용도 로그)은 **offset + inode**(첫 읽기 = 끝 256KB 안의 마지막 200줄 — 큰 파일을 처음부터 두 번 읽지 않는다: 1GB 실측 1,712 → 60ms ·
+    inode 가 바뀌면 같은 폴더에서 옛 inode 의 꼬리부터 — 못 찾으면 `lost` · 크기가 줄면 copytruncate 로 처음부터 · 증분이 64MB 를 넘으면 앞을 건너뛰고 `skippedBytes` · **끝 줄이 미완성(개행 없음)이면
+    그 조각은 다음 주기로**(`partial` 바이트 — 반증 F14)). 출처마다 주기당 줄 상한(`logs.lineCap` 기본 5,000 · **100~9,000** — 앱 둘이 한 구획이라 2 × 상한 + 메타 < 구획 줄 상한 20,000)과
+    **출처 바이트 상한**(`SRC_BYTES` = (전체 상한 − 메타 여유) / 출처 수 — 한 출처가 다른 구획을 밀어내 영구히 ‘못 받음’ 이 되던 결함 · 반증 F4 · 산수를 테스트가 고정) — 넘친 줄은 ‘잘림’ 으로 세고 **위치는 본 데까지 넘긴다**.
+    시각은 지어내지 않는다(`parse.js dateOf`): 30일보다 오래됨 · 시각 없음 = `ts null`(분류 · 시간 칸 · 알림에서 빼고 `#undated:<출처>` 로만) · 하루 안쪽 미래(서버 시계가 빠름) = 받은 시각 + `skew`.
+  - **권한 없음의 범위**(반증 F3): 파일이 ‘없어 보이는데’ 상위 폴더가 있고 들어갈 수 없으면 `perm/dir`(0700 `/var/log/audit` — 예전엔 ‘없음’) · 파일만 못 읽으면 `perm/file` · 용도 로그는 후보 경로에서
+    **앱 뿌리(anchor)까지만** 올라가 본다(`/root` · `/home` 같은 공용 상위가 막힌 것은 그 앱의 권한 문제가 아니라 ‘없음’). 포탈은 권한을 바꾸지 않는다 — 화면이 필요한 권한을 안내한다.
+  - **보안 출처 하나**(반증 F1): sshd 성공 · 실패는 journald 우선순위 info 라 주 읽기(warning)에 안 들어온다 → 별도 구획 `##JSEC`(`-p info SYSLOG_IDENTIFIER=sshd|sshd-session|sudo|su|login|계정 도구` · 자기 커서 ·
+    자기 상한 · 원문 보관 없음). 한 주기에 보안 줄은 **한 출처만** 센다(`pickAuthSource`): `/var/log/secure`(읽음 · rsyslog 가 돌거나 모름 — 설계 §17 이 이름을 댄 출처 · authpriv 전체) → JSEC(읽음 —
+    자기 저널만은 읽음이 아님) → auditd(인증 실패 · 계정 변경). 고르지 않은 JSEC 줄은 `dup` 으로 세고 빼며, auditd 의 같은 사건은 패턴만 남기고 보안 상위에 넣지 않는다 · 주 저널의 같은 식별자 줄은 `authSkipped`.
+    보안 합계는 **그 종류를 담는 출처를 그 기간에 읽었을 때만 0**(`view.js SEC_CARRIERS` — 실패 · 계정 변경 = secure|jsec|audit · 성공 · root · sudo = secure|jsec · AVC = audit) — 아니면 null + 이유(`totalsWhy`).
+  - **분류별 담는 출처**(7a 반증 뒤 추가 수정 — ‘못 읽은 값은 0 이 아니다’): `rules.js CLASS_CARRIERS` 는 규칙 카탈로그에서 **기계적으로** 뽑는다(태그 규칙 = 태그 · 태그 없는 규칙 = `srcs` —
+    매칭에는 쓰지 않는다 · 테스트가 합집합을 대조). 판정 코어 `classCover(분류, 읽은 출처, 마지막 상태)` 하나: 담는 출처를 하나도 못 읽음 = `none`(값 null · 이유 = 못 읽은 출처) ·
+    일부 = `partial`(값은 내고 ‘일부 출처만’) · 전부 = `all`. 서버에 없는 출처(absent · nofile)는 못 읽음이 아니고, secure 와 journald 보안은 서로 대신한다.
+    쓰는 곳 전부: 상세 KPI 4 · 시간 칸(그 시간 읽은 출처로 분류마다 null) · 함대 요약 · 봉투 · 함대 표 칸 · 함대 KPI(`kpi.unknown` · `kpi.partial` 서버 수) · 알림 입력(`cover` — none 이면 보류, 해소로 보지 않는다).
+  - **구획 위조 방지**: 모든 내용 줄에 고정 접두(`J| Q| K| S| A| G| F|`) · 메타 `X#k=v` · journalctl 자기 줄은 글자 없이 표지(`J#err`) — 로그 줄 ‘##END’ · ‘J#cur=…’ 가 구획 · 커서를 바꾸지 못한다(실제 셸 테스트).
+    **명령 조립 값**(커서 · boot_id · 초 · inode · offset)은 화이트리스트 정규식(`CURSOR_RE` 등)을 지난 것만 — 아니면 첫 읽기 꼴. 용도 로그 경로는 **상수 카탈로그만**(`APP_LOGS` — `_paths` 는 테스트 전용, 소스 스윕).
+  - **분류**: 규칙 = 파일 하나(`rules.js` — 정규식 · 분류 4 · 심각도(엔진 SEVERITY_RANK) · 출처 태그 · 표본 1줄 · 근거 번호 · 등급 · 연계 표지). 엔진은 `loganalysis` 의 `normalizeRules` · `indexRules`(태그 규칙 → 태그 없는 규칙,
+    처음 맞는 하나) · `templateOf` · `safeKey` 재사용. **모든 규칙은 표본으로 자기 시험**(엔진에 넣어 그 규칙이 잡는지). SEC-LOGIN-FAIL 은 `logs/loginFailPattern.js MSG_RE` **같은 객체**.
+    SSH 실패 집중(`SEC-SSH-FAIL-BURST` high)은 파생 규칙 — 같은 IP 가 창(분) 안 임계 이상이면 그 줄을 옮긴다(두 번 세지 않음) · 주기 경계는 IP 별 최근 실패 시각 carry(IP 64 · IP 당 임계 개수).
+    분류 못 한 줄은 **세기만**(출처 · 시간별 `#none:<출처>` — 템플릿 · 원문 없음). 서명 = 출처 · 규칙 · (보안 꼴 치환 → 같은 줄 계정 · 주소 값 치환 → **표본과 같은 가림** `redactSystemLogLine` → 경로 → `templateOf`)의
+    SHA-1 16자(반증 F7 — 서명이 가림을 건너뛰어 계정 · 메일 · 토큰이 나갔다 · 보관된 서명도 읽을 때 `maskStoredTmpl` 로 다시).
+    OpenSSH 실제 꼴(반증 F8 — 고정 표본 테스트): 연결 식별 꼴 ‘(invalid|authenticating) user 계정 주소 port N’ 에서 계정 · 주소를 뽑고 주소 꼴이 아니면 버린다(예전 ‘invalid’ 가 IP) ·
+    같은 시도의 뒤 줄(`SEC-SSH-PREAUTH` 연결 종료 · `SEC-SSH-MAXAUTH` 최대 시도 · PAM 요약 · `SEC-PAM-DUP` sshd/su/sudo 의 pam_unix · `SEC-AUDIT-LOGIN-FAIL`)은 실패로 다시 세지 않는다 ·
+    GPDB 로그인 실패(28P01 · pg_hba 거부 · 없는 role)는 `APP-GP-AUTH-FAIL`(보안 — 반증 F11).
+  - **보관(메인 `bm-usage.db`)**: `log_cursor`(읽기 위치 + carry + 마지막 상태 — **rev 비교 후 쓰기**: 같은 rev 를 읽은 늦은 주기는 그 서버를 통째로 건너뛴다 · 손상 상태는 `bad_json` 에 보존하고 처음 읽기) ·
+    `log_pattern`(서명별 누적 · 가린 표본 최대 5 · 서버당 500 — 넘으면 분류별 `#over:<분류>` 한 행 · **심각도 높은 것부터 쓰고 high · critical 은 여유 100 까지 접지 않는다** · 묶음 행 심각도는 묶인 것 중 최고 — 반증 F8) · `log_hour`(시간 × 서명 — `#read:` · `#trunc:` · `#none:` 포함) · `log_sec`(시간 × 종류 × 항목 — 상위 20 + ‘(기타)’).
+    ~~한 주기 서버 전부를 한 트랜잭션~~ → **v2.954(점검 C-1 — 실측 1,000대 × 50서명 × 4칸 정지 약 1.4초)**: **서버 하나가 원자 단위**(커서 비교 후 쓰기 · 패턴 · 시간 · 보안이 한 서버 안에서 한 트랜잭션)이고, 묶음이 15ms 를 넘으면 서버 경계에서 COMMIT → `createYielder` 양보 → 다음 묶음(양보 중 트랜잭션을 열어 두지 않는다 · 같은 측정 약 40ms) · **한 직렬 큐**는 그대로 · 실패하면 그 묶음만 되돌리고 앞 묶음의 `writtenKeys` 는 보고한다 ·
+    정리는 `pruneTick` 같은 틱 `chunkedDelete`(v2.954 C-2 — 양보 · 10만 행 476 → 27ms · 보관 `logs.keepDays` 기본 30 · 대상에서 사라진 서버의 위치도) · 쓰기가 실패하면 그 서버의 위치가 넘어가지 않는다(회귀 `bmLogsBatch2954`).
+  - **요약**: 주기 끝에 서버별 24시간 요약을 **메모리**에(`refreshLogSummary` — 봉투 · 함대 표가 요청마다 SQL 을 돌리지 않는다). 질의는 **서버 키마다 PK 앞부분 (agent, key, hour ≥ 창)** 범위만 읽고
+    합 · 마지막 시각은 JS 에서 · 서버 · 행 사이 시간 기준 양보(예전 한 문장 `GROUP BY` 는 보관 전체를 훑었다 — 실측 최장 정지 200대 30일 426 → 21ms · 1,000대 7일 756 → 25ms, 총 소요는 1,000대 약 0.7초로 비슷). 공통 원인 후보(`commonCauseCandidates`)는 같은 규칙(medium 이상)이
+    여러 서버에서 마지막 발생이 서로 1시간(`COMMON_WINDOW_MS`) 안 — ‘후보’ 일 뿐(화면이 말한다).
+  - **알림 규칙 ‘로그 — 장애/보안 high’(`logs` — 기본 꺼짐)**: 입력은 **이번 주기에 로그를 읽고 쓴 서버만**(못 읽음 = 보류 null · 비교 후 쓰기에서 진 서버는 뺀다) · **최근 60분 안의 줄만**(첫 읽기의 지난 줄 · 시각 모름은 기록만) · 조건 fault-sec · fault · sec(장애 분류 줄 · 보안 high 이상 줄 — 집중 포함) · 자동 집중 허용.
+    포탈은 차단 · 계정 잠금을 하지 않는다. 설정 `logs.on`(기본 켬 — 끄면 exec 를 붙이지 않는다) · 노드 전용 파일(`bm-perf-rules.json` — 배포 서명과 무관).
+  - **데모**: 데모 대상은 SSH 를 열지 않고 명령 출력 꼴의 합성 텍스트(`demoLogStdout`)를 **같은 파서 · 분류 · 쓰기**에 넣는다(첫 주기 24시간 · 그 뒤 직전 읽기부터 · 값 · IP 는 가상 — RFC 5737 대역).
 - ⚠⚠ **iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에
   관리자가 동의해야 켜진다**(`bmusage/license.js`·`collectors/idracEnterprise.js`·`parse/racadm.js`
   + `idrac/redfish.js fetchUsageSensors`, v2.554 — 사용자 신고 "idarc 텔레메트리는 data center
@@ -834,6 +1168,45 @@
     · ⚠ 정직 기록: 목 스택 2대(중앙+엣지 `Edge-Seoul`)로 꺼짐 → 켬(적용·폴러 주기 600초로 재무장) → 제외(로컬 복귀)를 실제로 돌렸다.
       실엣지 28곳 규모·구버전 엣지 혼재·인증 켠 상태의 viewer 화면은 보지 못했다(배포 절은 서버가 admin 이 아니면 null 로 준다).
     viewer 는 기본 권한에 `tools` 가 없어 막히는 것이 정상이고, tools 를 준 범위 viewer 로 허용 법인 1곳만 보이는 것을 확인했다.
+  - ⚠⚠ **v2.927 — '중앙에서 켜기'(한 엣지만)**(사용자 요청 "중앙에서 엣지를 켜는 기능 추가" · 선택: 엣지별 버튼 · 전체 검증 · 반증 1회 반영.
+    `bmusage/settings.js` perEdge 절 + `bmusage/edgeCorps.js` + `targets.js siteOwnerByVcenter/edgeCorpIndex` + `PUT /tools/bm-usage/distribute/edge` +
+    `central/bmUsageEdgePull.js edgeRoleOf` + 웹 `bmUsageDistText.js edgeOnView·edgeOnConfirmLines`. 회귀 `server/test/bmUsageEdgeOn2927.test.js`(실제 토큰 인증 경로) ·
+    `web/.../bmUsageEdgeOn2927.test.js`):
+    · **엣지 코드는 바꾸지 않았다** — 2.627 이상 엣지가 그대로 받는다. 그래서 중앙은 그 엣지에 **배포 키 전부**(중앙 로컬 값)를 보내되 켜기 = true · 법인 = 저장한 그 엣지 법인.
+      ⚠ 일부 키만 보내지 말 것: 엣지 `applyCentralBmUsage` 가 `normalizeSettings` 로 빠진 키를 **기본값**으로 채워 주기·보존을 조용히 바꾼다(테스트가 키 집합을 고정).
+      부작용(주기·보존·OS SSH·iDRAC·알림이 중앙 값으로 바뀜 · 해제하면 엣지 로컬로 복귀 · **보존이 짧아지면 넘친 이력은 정리되고 해제해도 돌아오지 않음**)은
+      확인 상자가 **값과 함께**(서버 `perEdgeBase`) 말한다.
+    · ⚠⚠ **법인은 저장 때 확정한다**(반증 F2·F3): 관리자가 확인 상자에서 본 목록을 `perEdge[agent].corps` 로 저장하고(화면이 그 목록을 PUT 에 싣는다 — 지금 매핑과 다르면
+      409 `corps-changed`), 엣지 인출은 **저장 목록을 그대로** 보낸다. 예전(인출마다 매핑 재계산)에는 점검중·비활성 site vCenter · 인벤토리 push 전 · fleet TTL 만료 ·
+      중앙 재기동 같은 순간 상태에서 법인이 빠지고, 0 이면 `no-corps` 로 엣지가 사본을 지워 **수집이 꺼졌다**(반증 실측). 지금 매핑이 저장 목록과 다르면 행·배포 패널이
+      '법인 매핑이 바뀜 — 다시 확인 필요' 를 보이고, '다시 확인'(같은 PUT)이 갱신한다. 저장 때 매핑 0 이면 400 `no-corps` — 이미 켜진 엣지에 0 을 보내 끄는 경로는 없다.
+      그래서 v1 의 첫 병합 전 503 `mappingNotReady` 보류도 없앴다(인출이 매핑을 보지 않는다). 법인 없는 항목(손으로 고친 파일)은 버리고 `perEdgeOmitted` 로 센다.
+    · 저장 시점 매핑(`edgeCorpIndex`): 담당 엣지 = **등록부 `remoteAgent` → 위임 인벤토리 소유(`listInventory().agent`) → 스냅샷 관측 collectedBy**(선례 vmclone/dispatch.js
+      execTargetOf · ipam/scanDatacenter.js — 디스크 원천이 먼저라 점검중·골격에도 흔들리지 않는다) + 엣지 보고 베어메탈 vcenterId(중앙이 아는 id 만 · 다른 엣지 담당 사이트
+      vCenter 제외). 관측 규칙은 resolveTargets 와 같은 `siteAgentByVcenter`(소스 스윕이 한 곳을 고정).
+      ⚠ 정직 기록(반증 F3 정정): fleet 수신은 **모르는 이름**의 공유 토큰 push 귀속만 비운다 — 아는 이름(토큰·인벤토리 등)을 댄 공유 토큰 push 는 그 엣지의 베어메탈 귀속을
+      바꿀 수 있고(직접 수집 vCenter 는 TOFU), 그래서 **저장 시점 매핑은 공유 토큰 push 영향을 받을 수 있다** — 확인 상자가 법인 이름을 보여 주고 관리자가 확인한 목록만 저장한다.
+    · 우선순위: ① 전체 배포 켬 + 제외 아님 → 전체 배포(v2.627 그대로 — 기존 구성 동작 불변) ② 중앙 켜기 ③ 제외·꺼짐. 조용한 우선순위 금지:
+      이미 전체 배포를 받는 엣지에 새 켜기 저장 = 409 `all` · 제외 ↔ 중앙 켜기는 **양방향 409**(반대 지시 — 하나를 먼저 푼다) · 전체 배포를 켜서 가려진
+      중앙 켜기는 응답 `perEdgeSuperseded` · 행 · 요약 문구가 밝힌다(가려진 행의 해제 문구는 '전체 배포가 계속 적용됩니다' — 반증 F4). 손으로 둘 다 만든 파일은
+      **제외가 이긴다**(장비 부하를 더하지 않는 쪽 · 행 `conflict`).
+    · 중앙 켜기 판은 **개별 토큰으로 검증된 인출에만** 준다(공유 토큰 `?agent=` 는 남의 이름을 댈 수 있다 → `per-edge-unverified` · 엣지는 사본을 지운다 · 화면 '받지 못함(공유 토큰)').
+      저장 화면은 개별 토큰이 발급되지 않은 엣지를 미리 경고한다(`tokenIssued`).
+    · **엣지 노드에만**(반증 F7): 보관분 `node.role`(엣지 export — CENTRAL_URL 이 있으면 'edge')을 `edgeRoleOf` 하나로 판정해 `/edges` 행 `nodeRole` 로 싣는다. 'edge' 가
+      아니면 버튼 대신 '이 노드는 엣지가 아닙니다 — 그 포탈의 베어메탈 사용률 설정에서 직접 켜세요'(모르면 '역할을 확인할 수 없어 중앙 켜기를 제공하지 않습니다') · PUT 도 409 `not-edge`.
+      중앙·단독 노드는 배포 인출 워커가 없어 저장해도 영원히 '켜기 지시됨' 이었다.
+    · 배포 현황은 **행마다 그 엣지에 보낼 판(저장 법인)의 서명**과 비교한다(전역 서명 하나와 비교하면 중앙 켜기 행은 영원히 '대기' — 매핑이 바뀌어도 서명은 그대로).
+      해제·배포 끔 직후 아직 사본을 쥔 엣지는 `releasing`(해제 대기).
+    · 라우트 게이트는 전체 배포와 같다(adminOnly + fleetOnly) · 켜기 이름은 등록부(`knownAgentNames`)에 있는 것만(404) · **해제는 저장된 지시가 있으면 등록부와 무관하게**
+      (반증 F1 — 토큰 폐기로 등록부에서 빠진 엣지의 지시가 지워지지 않고 재발급하면 바로 켜졌다) · 엣지 노드 409 `edge-node` · 상한 넘는 저장 400 `too-many`(엣지 256 · 엣지당 법인 64 —
+      조용히 버리지 않는다) · 감사 `bm-usage.distribute.edge`(target = 엣지 · 법인 수).
+    · 화면: '엣지에서 꺼짐' 행에만 '중앙에서 켜기'(배포 현황을 받은 전체 범위 관리자 · 중앙 · 엣지 노드) → 표 아래 확인 상자 → 저장 뒤 지시 상태 '켜기 지시됨 — 다음 인출 대기'
+      → 전달됨 → 적용됨을 **보관분 상태와 함께**(대체하지 않는다 — 반증 F8, 보관분 오래됨·실패가 보이게). 전체 배포가 끈 엣지는 '중앙의 전체 배포 설정이 끄고 있습니다'(반증 F5).
+      예전 문구 '중앙에서는 켤 수 없습니다' 는 v2.627 부터 사실이 아니었다 — 정정했다.
+    · 손상된 배포 파일의 '기본값으로 확정'(설정 파일 점검)은 전체 배포 · 제외 · 중앙 켜기를 **모두 비운다** — 라벨이 그 사실을 말한다.
+    · ⚠ 정직 기록: 중앙+엣지 목 스택 2대(개별 토큰 · 엣지 `AGENT_BMUSAGE_CONFIG_PULL_MS=60000`)로 꺼짐 → 켜기(적용 · 엣지 유효 설정 켜짐 · 그 법인 · 주기 10분) → 해제(로컬 복귀)를
+      실제로 돌렸다. 실엣지 28곳 · 구버전(2.627~2.924) 엣지 실물 · 엣지 보고 베어메탈만으로 매핑되는 법인(vCenter 직접 수집 + iDRAC 위임)은 실물로 보지 못했다(순수·라우터 테스트만).
+      사용자 화면의 'OC2' 가 엣지인지 중앙·단독 노드인지는 확인하지 못했다 — 이제 화면이 보관분의 노드 역할로 판정해 버튼을 주거나 막는다.
 - ⚠⚠ **v2.634 — 폴러의 표본 시각은 '그 서버를 실제로 읽은 시각' 이고, 신선도 경계는 폴 주기 소요에 맞춰 넓힌다**
   (`idrac/poller.js` sensorAt·powerAt · `idrac/sensorStore.js sensorPollCycle` · `idrac/roomTemp.js effectiveMaxAgeMs`·
   `sampleMaxAgeMs` · 엣지 `compactSensors` 의 `cycleMs`·`intervalMs` · 웹 `roomTempView.staleCardMeta`·`staleBannerText` ·
@@ -850,3 +1223,281 @@
 
   · v2.770(점검 R5-E4): replace 스캔의 부분 판정(`scanPartialReasons`)에 **인증서 미신뢰(tlsUntrusted)** 를 넣는다 — 실재가 확인된 장비라 authFailed 와 같은 근거로 merge 강등(일반 무응답은 강등하지 않는다 — 폐기 서버를 지울 수 있어야 한다).
     교체로 지운 등록은 `removedIds` 로 결과·감사 로그(`idrac.scan.replace.removed`)·중앙 정제까지 남긴다. 등록부 accessMoved 는 **정규화한 host** 로 비교(스킴 없는 같은 주소를 이동으로 보지 않는다), CSV 에 없는 열은 키를 만들지 않는다.
+
+- ⚠⚠ **리눅스 성능 7b단계 서버 등록(온보딩) · 누락 점검 — 새 등록부를 만들지 않고, 판정을 복제하지 않는다**
+  (`bmusage/onboard/{importParse,importAnalyze,onboardRun,missing}.js` · `bmstor/registry.js applyBmServerBatch` · `idrac/registry.js idracInputIssue` · `insights/fleetTags.js setFleetTagsBatch`):
+  - 템플릿 17열(설계 §18 의 ‘14열’ 표기와 다르다 — 열 목록이 16개 + `os_key` 라 목록을 따랐다): name* · corp* · idrac_host · idrac_cred · service_tag · os_host · os_port · os_cred · os_key ·
+    collect_via · class · purposes · role · mounts · switch_port · enabled · note. 머리글 별칭(한/영) · 비밀 칸 이름은 값을 읽지 않는다.
+  - 검증은 **저장 함수 그대로**: OS = `bmServerInputIssue`(SSRF · 셸 글자 · `sanitizeMounts`) · iDRAC = `idracInputIssue`(= normalize — SSRF 포함) · 용도/역할 = `APP_IDS` · `ROLES`.
+  - **못 읽은 칸은 빈 값이 아니다**: .xlsx 수식에 저장된 결과가 없으면 · 오류 값 · 병합 셀이 걸친 행 · 글자 상한 초과 → 그 행 거부(병합 머리글은 파일 거부).
+    병합 셀을 ‘첫 칸 값’ 으로 받지 않은 이유: exceljs 는 병합 범위의 모든 칸에 첫 칸 값을 돌려줘 이름 · 주소가 옆 행으로 복제된다(어느 행 값인지 모호).
+  - 적용 = 파일마다 **한 번** 원자적 쓰기(OS 일괄 · iDRAC merge 가져오기 · 분류 태그 일괄 · 엣지 배포 목록) · 직전 스냅샷 `CONFIG_DIR/onboard-prev/`(0700/0600 · 원본 바이트) ·
+    직렬 큐(`serialOnboard`) · 등록부 못 읽음 · 정책 잠금이면 **아무것도 쓰지 않는다** · 파일 사이 원자성은 없고 중간 실패면 `partial` + 단계 + 스냅샷을 돌려준다.
+  - 새 iDRAC 행은 `idrac_cred`(iDRAC 공통 계정)가 필요하다(iDRAC 등록부는 계정명이 필수) · 공통 계정의 계정 · 비밀번호는 **적용 때 그 항목에 복사**된다(참조 칸이 없다 —
+    공통 계정 비밀번호를 바꾸면 다시 적용해야 한다: 정직 기록). OS 항목은 `keyRef` · `credRef` 참조라 회전이 그대로 따라간다.
+  - mounts 가 비면 ‘/’ 하나(설계 ‘비면 전체 마운트’ 와 다르다 — 등록부가 마운트 1개 이상을 요구한다) · switch_port 는 형식만 확인(매핑은 수집 뒤 상세에서) ·
+    class · purposes · role 은 service_tag 가 있을 때만 적용(fleet-tags 키).
+  - **누락 점검**의 칸은 보드 커버리지 값(`perfForRows → buildPerfEntry → useJudge.coverageOf`의 entry.coverage — 엣지 서버는 그 엣지 봉투 perf 의 coverage)을 그대로 쓴다.
+    수집 기록이 없으면 none 이 아니라 **unknown** · 수집 DB 를 못 읽으면 503 · ‘제안’ 은 CSV 줄을 채워 줄 뿐 등록하지 않는다(FQDN 이름만 OS 주소로 제안 — DNS 조회 없음).
+  - 수집 대상 집합은 여전히 `classifyFleet().bareMetal` 이다 — OS 만 등록한 서버(iDRAC · vCenter 에 없는)는 등록부에는 들어가도 대상이 되지 않는다(정직 기록 · 다음 단계 후보).
+  - (r2 · 반증 F2 · F3 · F4 · F12 · F15 · F16 · 감사 M-1 · M-4 · M-5 · L-4 · L-6) bmstor 인증 정지 판정은 해석 뒤 자격(`refs.authCredOf` — bmusage authDev 와 같은 하나) ·
+    os_key 만 바꾼 행도 실제로 반영(keepCred 는 os_cred · os_key 둘 다 빌 때만) · OS 만 행이 함대에 없으면 경고(`os-only-untracked`) + 누락 점검 'OS 만 — 성능 수집 안 됨'(대상 집합은 그대로) ·
+    파일 해석을 먼저 하고 문맥 → 분석 → 적용은 await 없이 · 서명에 등록부 세대(mtime · 크기) · iDRAC 사본을 공통 계정 사용처로(`copies`) · 새 iDRAC id 가 기존 id 와 겹치면 기존 항목으로 대조(적용은 `onb_` 새 id) ·
+    xlsx 는 로드 전에 병합 개수 · 넓이 상한(`svcmon/formats.js assertXlsxMergesOk` — 두 파서 공통) · 암호화 키 파싱 캐시(실측 bcrypt 16라운드 175ms/회 → 키당 1회) ·
+    스냅샷 원자적 쓰기 + SECRET_FILES(`onboard-prev/bm-storage.json` · `idrac.json`) · iDRAC 제거는 한 번 쓰기(`removeServersBatch`).
+
+- ⚠⚠ **리눅스 성능 8a단계 정비 창(⑲) · 용량 소진 예측(⑱) — 판정 코어 하나 · 억제에는 시한 · 못 읽은 창은 억제가 아니다 · 예측은 참고**
+  (`bmusage/maint/{schedule,judge,store,runtime,alertHold,partfaultHold,deploy}.js` · `bmusage/capacity.js` · 라우트 `routes/api/{bmMaint,bmCapacity}.js` · 설계 PROFILES §20 ⑱ ⑲ · 아트보드 Maint · Capacity ·
+  회귀 `server/test/{bmMaint8aSchedule,bmMaint8aWiring,bmMaint8aRoute,bmMaint8aEdge,bmCapacity8a,bmCapacity8aRoute}.test.js` · 웹 `bmMaint8a.test.jsx`):
+  - **판정 코어 하나** `judge.maintStateFor(windows, target, now, {tagsOf})` — 중앙(수동 용도 태그 role:/app:) · 엣지(중앙이 그 엣지 대상 키로 펼친 태그 창 + 같은 `normalizeWindow`) · 화면(API 결과)이 같은 결과(테스트가 같은 입력으로 대조).
+    겹치는 창은 범위별 합집합(범위마다 가장 늦은 끝). 구간이 필요한 곳(⑤ 제외 · 추이 음영 · 변경 이벤트 묶음)은 같은 모듈의 `coverIntervals`.
+  - **일정은 두 꼴만**(RRULE 아님): 일회(벽시계 시작 · 끝) · 매주 요일 · 매월 n째(5=마지막) 요일 + 시각 + 길이. 시간대는 **창마다 IANA 이름**(포탈에 법인 시간대 원천이 없다 — 기본 Asia/Seoul).
+    DST: 없는 벽시계는 간격만큼 뒤로(Warsaw 02:30 → 03:30) · 두 번 있는 벽시계는 앞의 것 · 길이는 실제 경과 분. 오프셋은 `issues/sla.js tzOffsetMin`(Intl) 하나. 미리보기(다음 5회 · DST 표지)는 서버 API.
+  - ⚠⚠ **억제에는 시한**: 판정은 그 발생의 끝까지 · 길이 상한(일회 24h · 반복 12h)은 저장 검사뿐 아니라 **계산에서도 다시 자른다**(손으로 고친 파일 · 배포본) ·
+    반복 창은 확인(confirmedAt) 뒤 `RECUR_CONFIRM_DAYS`(92) 지나면 **억제하지 않는다**(설계 ‘분기마다 재확인 알림’ 을 시한으로 강화 — 재확인 버튼) · ‘지금 끝내기’ 는 진행 중 발생만 끊는다 ·
+    엣지 배포본은 받은 지 `DEPLOY_TTL_MS`(24h) 지나면 판정에 넣지 않는다 · 형식 밖 일정 · 시간대 = 억제 없음(알림이 나가는 쪽).
+  - **못 읽음은 억제가 아니다**: 창 파일 손상이면 보존 + 읽기 503 · 쓰기 거부 + 이 노드 창으로 억제하지 않음(표지 localUnreadable — 수집 건강) · 배포본 손상도 같다.
+  - **억제 5종 배선**(켠 것만 저장): ① `perfAlerts.dispatch`(성능 알림 규칙) + `notify.js`/`maint/alertHold.js`(v2.551 임계 알림) — 창 안 발화는 기록만(sent 'maintenance' · 창마다 한 번) · 이슈 · 자동 집중도 하지 않음 ·
+    상태를 ‘보내지 않음’ 으로 되돌리고 `maint` 표지 → **창 뒤 첫 주기에도 참이면 그때 1회**(제목 ‘정비 창 안부터 초과’) · 창 안에 풀리면 창 뒤 발송 없음.
+    ② `partfault/transition.js scan.maintHold`(HOLD_REASON `maintenance`) — 그 장비의 열린 장애는 닫지도 바꾸지도 않고(관측 상태는 `maintObserved`) 새 장애는 열지 않고 센다(`maintDeferred`) · 창 끝 뒤 첫 점검에 평소 규칙.
+    장비 ↔ 서버는 서비스 태그(deviceKey) · 중앙 로컬은 iDRAC 등록 id(4단계 hwFacts 와 같은 키) · **중앙 창만**(파트 장애 판정이 중앙 — 엣지 로컬 창은 모른다).
+    ③ `focus/run.js startFocusLocal`(trigger auto · choke point) — code 'maintenance' · 수동 허용 · 인증 정지가 먼저.
+    ④ `poller.js pollBmUsageOnce` — 접속하지 않음(‘정비 중’ · 수동 실행도) · 상세에 maintSkip 표지(지난 기록 유지).
+    ⑤ `slo.evaluateGoal(exclude)` · `baseline.bandOf/bandSeries/slotBands(exclOf · exclSig)` · `capacity`(창 걸친 날) — 분모에서 빼고 뺀 수를 적는다.
+  - **인증 거부는 창과 무관**: authGuard 경로는 손대지 않았다 · 창 안 실패 표시(`markInMaint`)는 인증 실패(문구 · authStopped · iDRAC auth)에 달지 않는다.
+  - **수집 건강**: ④ 건너뜀 · 창 안 실패는 성공률 분모 · 실패 사유에서 빼고 `node.maint` · `byCorp.maintSkipped/maintFail` 로 따로 센다(분모 0 = 성공률 null).
+    **‘창 끝 뒤 억제 0’ 점검**(`runtime.auditCycle` · 8a 반증 F8 로 다시 짰다): 적용한 억제마다 근거(창 id · 발생 시작 since · 끝 until)를 남기고 **판정과 독립된 단순 기준**만 본다 —
+    적용 시각이 끝 뒤 · 발생 길이가 꼴 상한 초과 · **캐시 없이 다시 읽은 파일**(`store.windowFactsNoCache`)에서 적용 전에 지움 · 끝냄 · 재확인 만료 · 배포본 24h 넘음. 대상을 다시 판정하지 않는다
+    (예전: 대상을 키만으로 다시 판정해 엣지 서버의 법인 창 보류를 leak 로 셌다). ⚠ 잡는 것은 창 변경 · 시한이고 **판정 규칙 자체의 결함은 못 잡는다**(시험이 고정). 빈 주기는 지난 결과를 덮지 않는다 ·
+    계수 · 점검은 **파트 장애 폴러 주기에서도 저장**(중앙 — 로컬 bmusage 대상 0대여도: `flushMaintStats` 호출처 0 이던 의심 항목).
+  - ⚠ 순환 금지(arch2579 ②-b): 파트 장애 · 대행 라우트 · 용량 계산이 `bmusage/poller.js` 를 import 하면 bmusage ↔ idrac ↔ partfault SCC 가 생긴다 — 폴러가 `runtime.setLocalTargetsProvider` 로 대상 공급자를 등록하고 그쪽은 `localTargets()` 를 쓴다.
+  - **용량 예측**: 입력은 마운트 일 롤업 `usage_mount_daily`(설계 ‘마운트별 1시간 90일’ 과 다르다 — 3a 부터 마운트는 일 롤업만) · `usage_daily.mem_max`(참고 등급) · `##DFI`(1단계부터 있음 — 새 구획 없음).
+    14일 최소제곱 · R² < 0.5 · 14/30일 기울기 ±30% → 불안정 · 하루 −10%p = 리셋(그 뒤부터) · **30일 안 리셋 2회 이상 = 주기 정리형 불안정**(‘데이터 부족’ 으로 숨기지 않는다) · 평탄 · 감소 = no-growth(안전이 아니다) ·
+    xfs(튜닝 사실 xfs 마운트) · inode 값 없음 = ‘상한 없음’. **계산 위치 결정**: 수집 노드가 하루 1회(포탈 날 01:10 뒤 첫 틱 · 진행 중 공유 · 서버마다 점 조회 + createYielder) `bm-capacity.json` →
+    봉투 `capacity`(대상 키만 · 넘치면 예측 행만) → 중앙 함대 표. 서버 상세(계열 · 맞춤선)는 볼 때 그 서버만(엣지 서버는 `/api/collector/bm-usage/capacity` 대행).
+    알림 규칙 `capacity`(소진 ≤ N일 · 기본 꺼짐 · 자동 집중 없음 · 데이터 부족 · 불안정은 보류). 데모(mock)는 마운트 일 롤업 꼴 5종을 백필한다(같은 쓰기 경로).
+  - 정직 기록: 실장비 · 실엣지 · 실 DST 시간대 운영으로 보지 못했다(테스트 · 목 서버) · 승인은 ‘소유자 등급만 저장’ 이다(설계 그림의 ‘hong 등록 · park 승인’ 2인 흐름 아님) ·
+    반복 서버 창(12h 이하)은 운영자가 바로 만들 수 있다(아트보드 ‘4h 이하 operator’ 와 다르다 — 지시문 기준 12h) · 엣지 로컬 창은 중앙 화면 · 파트 장애 보류에 보이지 않는다.
+  - ⚠⚠ **8a 반증(F1~F11) 뒤 규칙**(회귀 `bmMaint8aFix` · `bmMaint8aFixRoute` · `bmMaint8aFixEdge` · `bmCapacity8aFix` — 변이 31건):
+    · **서버 대상은 (법인, 키) 쌍**(F1 — IP 로 등록한 iDRAC 은 키 = IP 라 사설 대역을 겹쳐 쓰는 법인끼리 키가 같다): `judge.matchTarget` 은 모든 대상 종류가 법인부터 보고 ·
+      배포는 그 법인을 맡은 엣지에만(키 겹침으로 보내지 않는다) · 대상 식별은 `judge.targetIdOf` 하나(함대 용량 요약 · 음영) · 쓰기는 법인을 고르면 그 법인 안에서 키를 찾고 모호하면 400.
+    · **해제는 억제하지 않는다**(F9 — 창 밖에서 보낸 초과의 짝 · 창 안에서 막은 초과는 notifiedAt 을 되돌려 해제 발화가 생기지 않는다 · 억제 계수에도 넣지 않는다).
+    · **엣지 배포 태그 창은 펼친 keys 만**(F10 — origin 'central' 은 tagsOf 폴백 금지: 엣지 판정 = 중앙 판정).
+    · **지운 창은 묘비**: 지금 판정에서 빠지고 지난 구간(⑤ 분모 제외 · 음영 · 변경 묶음 · 용량 날 제외)에는 지운 시각까지 남는다(소급 소거 금지 — 그때 정비였던 사실은 지운 뒤에도 그때의 일) · 보관 90일.
+    · **용량**: 지금 ≥ 목표면 ‘도달’ 이 관문(부족 · 불안정 · 증가 없음)보다 먼저(F2) · 날 제외는 창 **합집합**의 날별 덮임 — 기간 절반 넘게 덮이면 날마다 같은 몫(중앙값)은 일상, 그보다 1시간 넘게 더 덮인 날만 뺀다
+      (F3 — 창을 나눠도 같은 결과 · `dailyWin` = 일상 몫 분) · 행 상한은 서버마다 공정 몫(급한 마운트부터 · `cap` 내역 — F4) · 도달일은 **마지막 관측일**부터(F11 · 2일 넘게 오래되면 `stale`) ·
+      xfs 판별은 최신값 표의 key · tuning_json 두 열만 조각(200행) + 양보(SELECT * 동기 읽기 금지).
+- ⚠⚠ **리눅스 성능 8b단계 프로세스 Top-N(⑳) · 저활용(㉑) · 전력/온도(㉒) — comm 만 · 접두 · 못 읽음 ≠ 0 · 점수는 후보 표시 · 전력은 한 소스**
+  (`bmusage/parse/linuxTop.js` · `bmusage/topStore.js` · `bmusage/idle.js` · `bmusage/powerAgg.js` · 라우트 `routes/api/{bmTop,bmIdle,bmPower}.js` · 설계 PROFILES §20 ⑳ ㉑ ㉒ · 아트보드 TopProc · Idle · Power ·
+  회귀 `server/test/{bmTop8b,bmTop8bStore,bmTop8bRoute,bmIdle8b,bmPower8b}.test.js` · 웹 `bmPerf8b.test.jsx`):
+  - **Top-N exec**(⚠ 반증 F1: 처음 판의 주 명령 구획 `##TOP` 을 **같은 세션의 별도 exec** 로 옮겼다 — `parse/linuxTop.js topCommand` · 주 명령 · 피크 · 7a 로그 뒤 남은 예산 안 · 실패 · 시한이어도 본 표본 유지 · 수집기 기본값 끔(폴러가 설정 top.on 을 넘긴다 · 집중 경로는 top:false 명시 — F10)):
+    `top -b -n 2 -d 1 -w 512 -o %CPU` **둘째 프레임**(첫 프레임 = 부팅 이후 평균 — 버린다) · 머리글이 없거나 top 이 없으면 대안 `/proc/[0-9]*/stat` 1초 간격 2회 차이.
+    ⚠ top 의 COMMAND 열은 **셸 밖으로 내지 않는다**(awk 가 머리글로 PID · S · %CPU 열만 고른다 · `HOME`/`XDG_CONFIG_HOME` 을 없는 곳으로 — 개인 toprc 의 명령줄 모드가 인자를 싣지 않게) — 이름은 `/proc/<pid>/stat` comm 만.
+    I/O = `/proc/<pid>/io` 를 CPU 측정 앞(전 프로세스 · grep 1회 · 내보내지 않음) · 뒤(CPU 상위 후보 20 만) 두 번 읽은 차이 · 못 읽으면 `p`(권한) → 값 null(‘—’ · 0 아님).
+    메모리 상위 5 = `ps … --sort=-rss`(RSS — 공유 페이지 중복 · PSS 아님). 출력 = 줄마다 `tS:`/`tC:`/`tM:` 접두 · `cut -c1-200 | head -n 40`(≤ 8KB — 시험이 산수 고정) · `timeout 3 top`.
+    ⚠ 반증 S1: 전 프로세스 · 후보 /proc 읽기(grep -H)와 ps 는 전부 `timeout`(/proc/<pid>/io 는 대상의 exec 잠금을 기다릴 수 있다 — D 상태 대기는 timeout 으로도 못 끊어 그때는 이 exec 만 시한) · 후보 stat · status 는 파일마다 프로세스를 띄우지 않고 grep 한 번씩.
+    ⚠ 반증 S3: top 머리글에서 공백이 들어갈 수 있는 열(COMMAND · ENVIRON · CGROUPS · SUPGRPS · CGNAME · LXC)이 PID · S · %CPU **앞**이면 받지 않는다(시스템 /etc/topdefaultrc 가 열을 옮긴 procps-ng 4 — 공백 든 comm 이 %CPU 자리를 민다) → /proc 대안.
+  - ⚠⚠ **awk 의 getline 으로 /proc 파일을 읽지 말 것**: mawk 는 `/proc/<pid>/io` 의 읽기 오류(EACCES — 열기는 되고 읽을 때 거부)를 **프로그램 전체 중단**으로 다룬다(이 컨테이너 재현 — 첫 후보 뒤 전부 사라졌다).
+    파일 읽기는 셸(grep · tr — 오류를 넘긴다)이 하고 awk 는 입력 줄만 받는다. awk 에서 `A[p]=(p in A)?…` 는 좌변이 먼저 원소를 만든다(mawk) — `if (p in A)` 로 나눌 것.
+  - ⚠ **comm 위조**: comm 은 아무 사용자나 정한다(`/proc/self/comm` 쓰기 · 개행 포함 가능). 줄 머리는 늘 고정 접두라 ‘##END’ · ‘##MEM’ 이 표지가 되지 못한다(재개방 금지 규약과 함께) ·
+    대안 경로의 stat 읽기는 `grep -H ''`(파일 이름이 줄마다 붙는다)로 개행 섞인 comm 을 **파일 이름으로 다시 잇는다** — 예전 판 `cat` 은 그 프로세스를 통째로 놓쳐 목록에서 숨을 수 있었다(실제 프로세스 시험).
+  - **저장**(monthStore 가족 `top` = **날 파일**(보존 기본 7일 — 파일 삭제) · `toph` = 월 파일(90일)): 머리(top_sample)는 매 주기 · 종류 × 순위 행(top_proc)은 ‘바뀐 표본’ 만 —
+    기준 = 직전 전체 표본과 상위 5 (PID, 시작) 집합이 같고 CPU ±5%p · RSS · I/O ±5%(I/O 둘 다 1MB/s 미만이면 같음) · 기준이 60분 넘거나 날이 바뀌거나 재시작 뒤 첫 표본이면 전체.
+    ##TOP 이 missing · 꺼짐이면 머리도 적지 않는다(‘표본 없음’ 과 ‘변화 없음’ 을 가른다). 같음 판정의 시작 시각은 ±2초(`sameProcStart` — 메모리 상위는 uptime − etimes 라 흔들린다 · 반증 F2) ·
+    ‘같음’ 머리의 기준 머리 · 행을 못 읽으면 조회는 `reason: 'base-missing'`(화면 ‘못 읽음’ · 띠는 빼고 `baseMissing` 으로 센다 — ‘상위 행 없음’ 으로 말하지 않는다 · 반증 F3). comm 별 시간 집계 = 직전에도 후보였던 같은 (PID, 시작)의 누적 CPU 초 차이(**하한** — 1초 % × 주기로 늘려 추정하지 않는다).
+  - **저활용 점수**는 판정이 아니라 후보 표시(‘저활용 ≠ 불필요’): 수집 노드가 하루 1회(01:20 뒤 첫 틱 · `bm-idle.json`) · 지표가 없으면 **분모에서 빼고 100 으로 환산**(뺀 지표를 행에) ·
+    데이터 부족(<21일) · 지금 정비 창 안은 제외(수를 센다) · 주기 사용(높은 날 2 ~ 주 수+1 · 나머지 낮음)은 후보에서 뺀다 · ‘대기 · DR’ 은 용도 태그가 없어 **검토 상태**(중앙 주석 auto `idle:dr`)로 라우트가 뺀다 ·
+    전력 ‘유휴’ = 그 서버 창 안 최소 시간 평균 기준(상대값) · 0 W 시간은 미측정 · 활동 흔적은 SSH 신호를 모르면 칸 전체 ‘—’(집중 · 스냅샷만으로 ‘흔적 없음’ 이라 하지 않는다) · 후보 진입/이탈 = 변경 이벤트 kind `idle`.
+    ⚠ 반증 F5: SSH 활동은 **포탈 수집 계정(+ 대상이 본 출발 주소 — 주 명령 CHANGES `sc`)의 로그인을 뺀 것**(`idle.humanLogins` · `selfLoginOf` — 폴러가 주기마다 `noteSelfLogin`) · 계정을 모르면 · 접힌 항목만 남으면 모름(null — 분모 제외).
+  - **전력 · 온도**: 지금 W 는 `idrac/service.js allMeasuredPower`(전력 대시보드와 **같은 함수** · vCenter 추정 제외) — 교차 검증 시험이 같은 입력의 법인 합을 `computePowerBreakdown` 과 대조(W 합 — kW 반올림이 아니라).
+    **미측정(iDRAC 없음 · 읽기 실패 · 0 W)은 합계에서 빼고 사유별로 센다** · 법인 · 랙 24h 피크 = 측정 서버가 다 모인 시간의 합(부분 시간 제외) · kWh = 시간 평균 W × 1h · 월 누적은 끝난 날 Wh 캐시(값 있는 날만 · 6시간 TTL — S2).
+    ⚠ 반증 F6: **랙 상한 여유도 다 측정된 랙만** — 미측정이 1대라도 있으면 `marginPct`/`low` = null · `marginPartial`(화면 ‘일부만 측정(n/m)’) · 여유 최소 카드는 다 측정된 랙만 + `partialRacks` 따로.
+    온도는 **지금 값만**(흡기 시계열은 `IDRAC_TEMP_SERIES_DETAIL` 옵트인일 때만 metrics DB 에 있다) · 랙은 설정 랙 배치가 유일한 원천(등록 CSV 에 ‘랙/위치’ 열 없음 · iDRAC 위치는 Redfish 왕복을 늘리므로 읽지 않음) ·
+    ~~엣지 위임 서버의 PowerCap 은 엣지 인벤토리 축약에 없어 ‘—’(중앙 필드를 늘리지 않았다).~~ → **정정(다음 점검 ③)**: 엣지 봉투 `powerCaps`(서버별) 로 싣는다 — 아래 다음 점검 ②③ 항목.
+- ⚠⚠ **다음 점검 ①(2026-11-08 · 8b 반증 F9 의 남은 것) — 베어메탈 서버 = (법인, 키) 쌍: 조회 · 쓰기 · 화면 · 저장 단계 전부**
+  (`routes/api/bmUsage.js resolvePerfTarget · perfTargetFail · perfVcOf · perfPairsOf` · `bmusage/targets.js` 키 충돌 · 웹 `views/tools/bmPerfUrl.js` · 회귀 `server/test/bmPerfKeyPair.test.js` · 웹 `bmPerfKeyPair.test.jsx`):
+  - **왜**: 키 = 서비스 태그 || fleetId || serverId(`targets.js idOf`) — IP 로 등록한 iDRAC 은 키가 IP 라 사설 대역을 겹쳐 쓰는 법인끼리 같다. 조회가 키만 보던 판은 같은 키의 **첫 대상**을 골랐다
+    (기준판 재현 — 관리자는 늘 이 노드 서버 · 범위 계정은 자기 서버 404 · 엣지끼리 겹치면 첫 엣지에서 멈춤 · 보드(`bmPerfText.boardItems`)도 키로 합쳐 엣지 쪽 서버가 빠졌다).
+  - **해석 규칙(하나)**: 후보 = 이 노드 + 엣지 보관분 전부 → 법인(요청) → **범위 · 귀속 먼저** → 같은 쌍 하나 → 0 = 404 · 1 = 그 서버 · 2+ = 400 `ambiguous-key`(범위 안 후보 법인만). 새 라우트는
+    `resolvePerfTarget(req, D, { …, vcenterId: perfVcOf(req) })` 뒤 `perfTargetFail(found)` 로 답한다(시험 ⑤ 소스 스윕이 `routes/api/bm*.js` 의 모든 호출과 사본 금지를 고정).
+  - **화면**: 서버를 여는 곳(보드 행 · 병목 Top · 함대 보기 6종 · 비교 칩 · 공유 링크)은 행이 가진 `vcenterId` 를 함께 보낸다 · 서버 하나 경로는 `perfPath(키, 법인, 접미, 질의)` 하나(웹 시험 ⑥ 스윕) ·
+    비교에 담는 목록 · 비교 링크 = ‘법인|키’ 쌍 글자(`refOf` — 서버 `targetIdOf` · 비교 열 `cid` 와 같은 꼴 · 예전 판 목록(키만)은 법인 모름으로 읽는다) · 법인 없이 열었고 모호하면 상세가 **법인 고르기**
+    (후보 버튼 — 고르기 전에는 어느 서버의 머리도 그리지 않는다: Chromium 판독에서 목록 첫 항목의 머리가 답처럼 뜬 것을 잡았다) · 상세 공유 링크는 `vc` 를 싣는다.
+  - **저장 단계** — ⚠ **정정(2차 반증 F1)**: 첫 판은 ‘섞임은 사실(시험 ④ 실제 DB) → 같은 노드 같은 키 서버는 둘 다 수집하지 않고 key-conflict 로 밝힌다’ 고 적었다.
+    실제 파이프라인은 같은 키 둘째 서버를 **세 곳에서 조용히 버려** key-conflict 에 닿지 않는다 — ① `insights/fleetInventory.js classifyFleet`(같은 dk = 서비스태그 소문자 || serverId ·
+    강제 베어메탈 호스트의 hk) ② 같은 파일 `buildServerUniverse`(전력 미보고 등록부 서버가 이미 잡힌 다른 서버와 서비스태그 · 호스트명이 같음 — 공통 태그 ‘To Be Filled By O.E.M.’ 가 대표)
+    ③ `bmusage/targets.js` 가상화 호스트 루프(같은 키 대상이 있으면 건너뜀). 시험 ④ 의 첫 판은 분류가 만들 수 없는 입력을 직접 넣었고, DB 섞임은 기본키가 **허용하는 상태**였지 파이프라인 사실이 아니었다.
+    key-conflict(둘 다 빼고 밝힘 · 서버마다 한 줄)는 **방어 코드**로 남는다.
+  - **식별 키가 겹치는 서버(2차 · 사용자 결정 2026-11-08 "겹치는 노드의 IP · hostname · service tag 등을 수집해서 사용자가 추가할지 여부를 결정")**:
+    ①②는 `bareMetalDupes`(분류 결과의 내부 필드 — 서버 분석 /fleet 응답에서는 뺀다 · bareMetal · 전력 합은 그대로) · ③은 `keyOverlaps` 로 모은다 → `currentTargets` 가 못 읽은 vCenter 거르기 ·
+    귀속 채우기를 거쳐 `resolveTargets({ dupes, decisions })` 에 넘긴다 → 이 노드가 맡는 · 켠 법인의 서버만 `keyOverlaps`(법인 · 이름 · 원문 서비스태그 · serverId/fleetId · 출처 · iDRAC/OS 주소 ·
+    겹친 상대 · 결정 · 별도 키). 주소는 **serverId 로 찾은 등록만**(서비스태그로 찾지 않는다 — 공통 태그면 남의 iDRAC · 계정을 집는다 · ‘추가’ 뒤 수집 경로도 같은 규칙) ·
+    전력 보고분과 같은 등록 id 는 같은 장비라 겹침이 아니다. 결정(`bmusage/keyDecisions.js` · `bm-key-decisions.json`): ‘수집에 추가’ = 별도 키 `<법인>:<serverId>`
+    (가상화 호스트 `<법인>:host:<이름>` · keyKind 'decided' — 그 서버가 더는 겹치지 않아도 키를 지킨다) · ‘제외 유지’ = 수집하지 않음(확인 기록) · 되돌리기 = 결정 지움(이미 쌓인 값은 그대로).
+    **저장 이전이 필요 없는 이유(코드로 확인)**: 결정 대상은 분류 · 대상 해석에서 빠져 그 키로 수집된 적이 없고(①②③ 모두 대상 목록 앞에서 버린다), 별도 키는 법인 id 와 ‘:’ 로 시작하는
+    새 이름이라 주석 · 정비 창 · 포트 매핑 · 용도 태그 · DB 행이 가리킬 수 없다(지금 대상 키와 겹치면 409). ⚠ 추정(확인 못 함): 분류 입력 순서가 바뀌면 예전에 이 서버가 ‘먼저 잡힌 쪽’ 이었던
+    때가 있었을 수 있다 — 그 값은 옛 키(남은 서버의 키)에 섞여 있고 옮기지 않는다. 못 읽은 결정 파일은 결정을 하나도 적용하지 않는다(별도 키 수집도 멈춤 · sourceErrors).
+    엣지가 맡는 법인 서버는 그 엣지의 같은 화면에서 정한다(결정 파일은 노드마다) — 중앙에서 정해 엣지에 배포(v2.933 배포 경로)하는 것은 **다음 점검 후보**(엣지 봉투에 겹침 목록 추가 ·
+    중앙 정제 화이트리스트 · 개별 토큰 인출 · 받는 쪽 시한이 필요해 이번 범위를 넘었다).
+  - **용도 태그 키(2차 반증 F2 · 2차 재확인 G1 · G2)**: `bmusage/purposeKey.js` 하나 — 읽기는 늘 `<법인>|<키>` 쌍 → 기본 열쇠 · 쓰기는 쌍 키(서비스태그는 `bmusage/commonTag.js` 판정기가
+    전역 열쇠로 써도 된다고 할 때만 — 공통 기본값 · 둘 이상 법인 · 겹침 목록 · 중앙이 엣지에 맡김(모름)이면 쌍). 예전(키 단독) 행은 범위 계정이 지우지 않고(엣지 보관분은 조회할 때만 당기는 메모리라
+    ‘보이는 대상’ 으로는 다른 법인 서버를 다 세지 못한다) · 전체 범위는 판정기가 complete(엣지 · 단일 노드)일 때만 대상 · 대상이 아닌 서버마다 나눠 옮긴다(security-api.md).
+    폴러 알림 프로파일 · 정비 태그 창 · 비교 그룹 · 플레이북 · 튜닝 · 용도 판정 · 7b 일괄 등록이 같은 함수를 쓴다.
+  - **OS 계정 등록 고르기(2차 재확인 G3)**: `targets.js pickOsEntry` — 다른 법인 지정 등록은 쓰지 않음(`os-foreign`) · ‘수집에 추가’ 한 서버는 법인이 맞는 등록만(미지정 · 여럿이면 `os-ambiguous`) ·
+    일반 대상도 같은 이름 · 다른 주소면 `os-ambiguous`(예전: 첫 등록 — 다른 장비로 접속할 수 있었다). 법인 미지정 · 주소 하나 등록은 예전과 같다(A/B 시험). 사유는 `missing` · 대상이 아닌 서버 · 겹침 행에.
+    iDRAC 도 없어 대상이 아닌 서버면 사유 자체가 OS 쪽(`os-foreign` · `os-ambiguous` + `idracIssue`) — 보드 ‘대상이 아닌 서버’ · 누락 점검 · 각주가 같은 사유를 보인다(3차 재확인 H2).
+  - **남은 것(고치지 않음)**: 서버별 목표(`bm-perf-slo.json` `servers`)는 키 단독(쓰기는 설정 소유자 등급만 — 범위 위반 없음 · 읽기 범위만 ‘법인 집합 중 하나라도’ 로 고쳤다) ·
+    운영 주석의 여러 법인 · 여러 서버 주석은 키 ↔ 법인 짝을 저장하지 않아 읽기가 근사(키 ∧ 법인 ∈ 집합) · 예전 판 비교 세트(법인 없이 저장 — 새로 저장하면 `vcenterIds` 를 함께 둔다) ·
+    법인별 서버 사용량(corpUsage)은 결정 키를 모른다(겹침에서 추가한 서버는 그 화면에 없다 — 분류 bareMetal 밖이다) · 엣지 결정 배포(위).
+- ⚠⚠ **다음 점검 ②③(2026-11-08 · 8b 남은 것 · 반증 n2 반영) — 전력 알림 규칙 4종 · 엣지 서버 PowerCap: 보류(null)는 시한 안에서만 잇는다 · 같은 표본은 한 번 · 판정 노드 함수 하나 · 랙은 배치 서버 전부로**
+  (`bmusage/powerAlerts.js`(조건 · 관측 표지 · 문구 · 항목) · `bmusage/powerSources.js`(원천 묶음 하나 — 라우트에서 옮김) · `bmusage/perfAlerts.js`(ruleApplies · stateKeyOf · groupMaintState) ·
+  `bmusage/powerAgg.js`(capState · edgeCap · 앞 7일 피크 · 배치 서버 수) · `bmusage/powerJudge.js`(판정 노드) · `bmusage/edgePull.js envelopePowerCaps` · `central/bmPowerCapSanitize.js` ·
+  회귀 `server/test/{bmPowerAlerts,bmPowerAlertsN2}.test.js` · 웹 `bmPowerAlerts.test.jsx`):
+  - **엔진은 5단계 그대로**(직렬 큐 · 지속 · 한 사건 한 번 · 재발 억제 · 법인 하루 상한 · 채널 · 이슈(중앙 생성 · 엣지 pending-central) · 8a 정비 창 · 해제는 억제하지 않음). 전력 규칙 항목은 `power` 칸을 가진
+    **별도 항목**이고 규칙 ↔ 항목 종류가 맞을 때만 대 본다(`ruleApplies` — 같은 서버가 성능 항목 · 전력 항목 둘로 들어와 서로의 상태를 덮지 않게). 상태 열쇠 · 알림 열쇠 · 이슈 열쇠는 (법인, 키) 쌍
+    (`stateKeyOf` · `perfAlertOf` · `planBmPerfIssues` — 예전 규칙은 예전 열쇠 그대로: 바꾸면 진행 중 사건 · 열린 이슈와 열쇠가 어긋나 같은 사건이 새로 나간다). 기준값은 전력 보기와 같은 `power` 절(흡기 · 걸림 % · 랙 여유 % · 새 `surgePct` 20).
+  - **조건**: 랙 = aggregatePower 의 `low`(상한을 정한 · 매핑된 랙만 항목 · **미측정이 있으면 null** — F6 · ⚠ 정정(반증 n2 F1): 랙 서버 수는 **배치에 있는 서버 수** —
+    서버 목록에 없는 배치 서버(엣지 위임 · 키 충돌 제외 · 법인 끔 · 등록 삭제)도 미측정 `not-target` 으로 센다. 첫 판은 목록에 있는 서버만 세어 부분 합을 ‘다 측정’ 으로 판정해
+    초과 중인 랙의 사건을 해소했고 화면(−10%)과 알림(20% 정상)이 갈렸다 · 목록 밖 서버는 수만(`notTarget` — 키 · 이름을 응답에 싣지 않는다)) · 흡기 = `inletC ≥ inletWarnC`(화면과 같은 ≥ · 낡은 · 없는 센서는 null) ·
+    PowerCap = `capHit`(미측정 · 상한 없음 · 낡음은 null) · 피크 급증 = **서버** 24시간 피크 ≥ **그 앞 7일 피크** × (1 + %)(앞 7일 시간 < 96 이면 null). 평균 대비가 아닌 이유(낮 · 밤 차이로 매일 걸림) ·
+    전날 대비가 아닌 이유(월요일마다 걸림) · 법인 합이 아닌 이유(합의 피크는 ‘다 모인 시간만’ 이어야 해 대수가 많으면 7일 창에 남는 시간이 거의 없다 — 서버 시간 행은 부분 합이 없다)는 powerAlerts.js 머리말.
+    앞 7일 창 끝 E = floor((now−24h)/1h)·1h — `hourlyStats` 가 hb ∈ [floor(from), ceil(to)) 라 24시간 요약과 **겹치지도 비지도 않는다**(시험이 E 행으로 고정). 같은 E 안에서는 다시 읽지 않는다(값 있는 계열만 담음).
+  - ⚠⚠ **관측 표지(obs)**: 흡기 = 센서 표본 시각 · PowerCap = 전력 표본 시각 · 랙 = 서버 표본 시각 합 + 대수 · 피크 = 마지막 시간 · 피크 · 기준. 아직 사건이 아닌데 표지가 직전과 같으면 그 주기는 **보류** —
+    iDRAC 폴러가 멈춰 2시간 신선도 안의 같은 값이 되풀이되면 ‘지속’ 이 아니다(지속 = 서로 다른 표본 수). 낡은 센서(roomTemp 신선도 밖)도 보류 — 사용자 결정 ‘지속을 이어 가지도 끊지도 않음’
+    (근거: 낡음은 ‘초과 아님’ 의 증거가 아니라 끊으면 결측 한 번이 사건을 해소해 다음 표본에 같은 사건을 새로 보낸다(5단계 반증 F5 와 같은 결함) · 이어 세면 읽지 못한 시간을 초과로 센다).
+    ⚠ 정정(반증 n2 F5 · 재확인 N1 · 2차 M1 — 메인 결정): 보류에도 **시한**이 있고, 시한은 **주기 소요 시간에 따라 늘거나 줄지 않는다** — 두 가지를 따로 잰다(`holdCutOf`):
+    ① 진짜 보류(조건 null — 낡음 · 미측정 · 못 읽음 · 그 주기에 항목이 없음(전력 입력 실패 · 실패 주기))는 **연속 보류 주기 수**(상태 `holdN`) — 지속 주기 수를 넘긴 뒤 온 새 표본은 1부터
+    (`holdMaxCycles` — 지속 3 이면 보류 3주기까지 잇는다). ② 주기가 아예 없던 틈(재시작 · 건너뜀 · 판정 없는 실패 주기)은 **폴러가 돌지 않은 시간** = 이번 주기 시작(폴러 `t0` → `cycleStartAt`) −
+    직전 판정 주기 끝 − 설정 주기 > 지속 × 설정 주기(`gapMaxMs`)면 1부터 — 틈 뒤 첫 주기가 보류 · 항목 없음이어도 그 주기에 끊는다(틈을 잊지 않게). 직전 끝 = 폴러가 알린 **틱의 실제 끝**
+    (`notePerfCycleEnd` — 판정 뒤 롤업 보정 · 정리 꼬리 포함 · 그 틱이 시작된 뒤 판정이 있었을 때만 · **늦은 쪽 유지**(3차 의심: 자동 틱 꼬리 도중 수동 수집이 먼저 끝을 알려도
+    자동 틱의 실제 끝이 남는다) · 메모리)과 상태 파일 `cycle.at`(판정 시각) · `cycle.endAt`(꼬리가 60초(`TAIL_PERSIST_MS`)를 넘는 틱의 실제 끝 — 같은 직렬 큐 · 짧은 꼬리는 쓰지 않아
+    주기마다 상태 파일 전체를 다시 쓰지 않는다 · 3차 P1: 둘째 판은 재시작 뒤 메모리 끝이 사라져 꼬리 14분이 틈이 되어 지속을 다시 셌다) 중 늦은 것 · 설정 주기 = 직전 · 이번 중 큰 것
+    (주기를 줄이면 adaptiveTimer 가 ‘마지막 종료 기준 남은 시간’ 으로 재무장해 바로 돈다 — 거짓 틈이 아니다) · 폴러 밖 호출(시작을 모름)은 판정 시각을 시작으로 본다(틈을 놓치지 않는 쪽).
+    실패 주기(분류 실패 · 대상 없음 · 주기 예외)도 **판정 주기**다 — 수집 건강 규칙이 꺼져도 빈 항목으로 판정해 전력 상태는 보류 1주기 · 끝 시각을 남긴다(3차 P2: 둘째 판은 판정이 없어
+    그 주기 소요 전체가 틈이 되어 지속을 다시 셌다 — 같은 주기가 판정되면 보류 1주기라 잇는데 결과가 달랐다 · `poller.js runNodeCollectAlert`).
+    상태 파일 손상 뒤 ‘첫 주기는 기준만’(warmup)은 **종류별**이다(수집 노드 칸 `__node__` · 서버 · 랙 항목 — `_warmKinds`): 둘 다 기준만으로 시작하고, 한 주기에서 그 종류의 항목이
+    처음 판정되면 그 종류의 보호만 풀며(넘김 항목 `release` 는 기준을 잡지 않으므로 풀지 않는다 — 5차 S5: 손상 직후 첫 주기가 넘김뿐이면 보호가 풀려 판정 노드 복귀 때
+    진행 중 걸림을 새 사건으로 보냈다 · 시험 bmPowerAlertsN2d ⑥), 발송은 주기 시작 때 보호가 이미 풀려 있던 종류의 발화만(나머지는 기준만 · 응답 `warmup` · `warmupHeld` 는 걸러진 발화가 있을 때만).
+    4차 Q1: 빈 판정 · 노드 칸만 있는 판정이 보호를 통째로 써 버려 다음 정상 주기에 진행 중이던 걸림을 새 사건으로 보냈다(정상 주기 먼저 0 · 빈 판정 먼저 1) →
+    ⚠ 정정(R1 — 메인 확인): 첫 고침(e50dac58)은 보호 하나를 서버 · 랙 항목이 와야만 풀어, 손상 뒤 분류 실패가 이어지면 수집 건강 알림이 정상 주기까지 나가지 않았다
+    (재현: 실패 3주기 · 수집 건강 지속 2 → 2225415f 수집 건강 1 · PowerCap 1 / e50dac58 0 · 0 / 종류별 1 · 0 — 시험 bmPowerAlertsN2d ④ ⑤).
+    ‘처음 성립’ 도 다시 센 첫 표본부터. 같은 표본 보류(표지가 직전과 같음)는 조건이 살아 있는 관측이라 보류 주기로 세지 않는다. 진행 중 사건 · 묘비는 끊지 않는다.
+    이력: 첫 판(F5 · bdc88e73)은 같은 표본 보류에도 보류 시각을 달아 표본 간격이 지속 × 주기를 넘으면(피크 급증 지속 2~11 · 수집 1분 + 센서 5분) **영영 발화하지 않았고**(N1 — 시험 bmPowerAlertsN2b ①),
+    둘째 판(5139423c)은 조건을 읽은 마지막 주기부터의 벽시계 간격을 (지속 + 1) × 주기 와 대 봐 **주기 소요가 지속 × 주기를 넘는 노드**(주기 1분 · 소요 3.5분 / 주기 5분 · 소요 16분 —
+    poller.js 머리말의 ‘실제 주기 20분 이상’ 사례)에서 매 주기 1로 돌아가 다시 영영 발화하지 않았다(2차 M1 — 재현 holdReset 78 · 시험 bmPowerAlertsN2c ①~③ · ⑥ 폴러 배선) ·
+    셋째 판(f4f86837)은 재시작 직후 긴 꼬리 · 수집 건강이 꺼진 노드의 실패 주기 · 수동 끼움에서 한 번씩 1부터 다시 셌다(3차 P1 · P2 · 의심 — 한 주기 지연 · 시험 bmPowerAlertsN2d).
+    예전 규칙(5단계)은 같은 stepRule 이지만 바꾸지 않았다(범위 밖).
+  - **판정 주체 = 판정 노드 함수 하나**(`powerJudge.judgeOf` — 알림 판정 입력과 중앙 전력 보기가 같은 함수 · 서버 하나에 최대 1개 · ⚠ 정정(반증 n2 F4): 첫 판은 ‘localOnly 원천’ 거르기라
+    판정 노드 없는 경우를 한 방향만 적었고 화면에 표시가 없었다). 판정 노드 = 대상 노드(via local → 이 노드 · edge → 그 엣지)이고 원천이 같은 노드일 때 — 원천이 다르면 없음
+    (`source-edge` 이 노드 대상 · 엣지 사본 원천 / `source-central` 엣지 대상 · 중앙 OME 등 원천). 중앙은 **법인을 엣지가 맡으면**(`edgeCorps.corpOwnerSource` — 사이트 vCenter 담당 ·
+    위임 인벤토리 · 스냅샷 · 엣지 보고 베어메탈) 자기 대상이어도 판정하지 않는다(그 엣지 봉투에 같은 쌍이 있으면 판정 노드 = 그 엣지 · 없으면 `corp-edge-owned`) — 반증 의심 S1
+    (같은 물리 서버가 중앙 · 엣지 iDRAC 등록부 둘 다 → 중앙 분류가 로컬 등록을 먼저 잡아 중앙 대상 · 엣지도 자기 대상 → 두 번 알림)을 이 규칙으로 막았다(시험 ⑤ 재현 2 → 1). 법인 담당 매핑은
+    순간 상태라 비는 동안은 중앙도 판정할 수 있다(정직 기록 — 아래 남은 것 N3). 이 노드가 판정 노드가 아닌 서버 · 랙은 판정 항목이 아니라 **넘김 항목**(`release`)이고 엔진이 그 전력 규칙 상태를
+    **비운다**(해소 알림 없이) — ⚠ 정정(재확인 N2): 첫 판은 값을 지운 항목(보류 null)으로 넣어 묵은 진행 중 상태가
+    무기한 남았고, 판정 노드가 돌아왔을 때(엣지 보고 만료) 새 사건을 ‘진행 중’ 으로 삼켰다(발화 0). 비울 때 **재발 억제 묘비**(`tombOf` — `{ firedAt, tomb }` 만 · 재발 억제 기간까지 ·
+    넘김이 이어지거나 항목이 빠져도 그 기간 뒤 지운다 · 발송 실패로 재시도를 기다리던 사건은 남기지 않는다)를 남겨, 다시 판정 노드가 되면 첫 발화에 같은 재발 억제가 걸린다 — ⚠ 정정(2차 M2):
+    둘째 판은 firedAt 까지 버려 판정 노드가 깜빡일 때마다(fleet 보고 30분 만료 ↔ 복귀 · 원천 뒤바뀜) 같은 진행 중 사건을 다시 보냈다(재현 깜빡임 3번 → 6건 · PowerCap 재발 억제 720분 우회 →
+    고친 판 0 · day0 → day3 새 사건 발화는 그대로). 넘어감은 **발송 기록(sent)에 쓰지 않는다** — 개수 · 사유만 콘솔 한 줄(주기당 · 이름 없음) · 폴러 `_last.perfAlerts.released`(규칙 화면 지난 주기 줄) —
+    ⚠ 정정(2차 M3): 둘째 판은 서버 × 규칙마다 result `judge-moved` 한 줄을 최근 200 발송 기록에 써 법인 하나가 넘어가면 실제 발송 기록을 밀어냈다(120대 × 2규칙 → judge-moved 200 · sent 0) —
+    그 결과값 · 화면 문구 · 중앙 정제 열거는 뺐다(릴리스 전이라 남은 기록 없음). 목록에 없는 배치 서버가 있는 랙(member-unknown)은 넘김이 아니라 보류다(못 읽음 — F1).
+    랙 판정은 값을 지운 서버(미측정 `not-judge`)로 부분 합이 된다. 중앙 보기에서 법인을 맡은 엣지의 **봉투가 없으면** `judge-unknown`(판정 여부 모름 — `noJudge.unknown` · ‘없음’ 합계에서 뺀다 · 재확인 N4) ·
+    엣지 봉투에 이 판 표지(powerCapVer)가 없으면 그 엣지 서버는 `edge-old`(엣지 판에 전력 알림 규칙이 없다 — 판정 없음 · 재확인 N5). 랙 판정 노드 = 배치 서버 전부가 같은 판정 노드일 때
+    (`rackJudgeOf` — `member-unknown` · `member-no-judge` · `members-split`). 화면: 서버 · 랙 칸 아래 ‘알림 판정 없음’(이유는 마우스 설명) · 요약 줄(`fleet.noJudge` — 보이는 것만).
+    OS 수집 성패와 무관(전력 · 온도는 iDRAC 원천). 시험 실행(dry-run)도 같은 `powerAlertItems` · 원천 실패(`powerError`) · 판정 보류 수(`counts.unknown`) · 전력 항목 수를 화면이 0건과 갈라 그린다
+    (`DryRunResult` · 반증 n2 F3) · 폴러 `_last.perfAlerts` 에 `held` · `powerError` · `powerItems` · `released`(규칙 화면 `LastCycleLine`).
+  - **랙 항목**: 키 `rack:<법인>|<랙>`(법인 id 에 ‘|’ 없음 — 첫 ‘|’ 로 가른다) · ⚠ 정정(반증 n2 F2 · F7 — 메인 결정): 정비 창은 **배치 서버 전부가 같은 시각에 창 안일 때만** 억제하고
+    억제 구간은 창들의 교집합(since = 서버별 시작 중 가장 늦은 것 · until = 가장 이른 끝 — `groupMaintState`) · 일부만 창 안이면 억제하지 않고 보내며 본문에 정비 중 서버(이름 · 창 끝)를 적는다 ·
+    창을 읽을 수 없는 배치 서버(대상 목록 밖)가 있으면 억제하지 않는다 · 해제는 억제하지 않는다. 첫 판은 ‘하나라도 창 안이면 랙 전체 억제’ 라 서버 한 대의 창이 랙 상한 초과(critical)를 창 끝까지 숨겼고
+    서로 다른 창의 시작 · 끝을 섞어 ‘창 끝 뒤 억제’ 점검에 거짓 over-cap 을 남겼다(랙 여유는 같은 랙 다른 서버까지 포함한 물리 안전 알림 — 창 대상 종류에 랙이 없다). 중앙 이력 · 이슈: 엣지 랙 기록은 대상 목록과 대지 않고 랙 이름 형식만 받고 **법인은 중앙이 정해 키를 다시 만든다**(`centralizeEdgeSent`).
+  - 자동 집중은 전력 4종 모두 꺼짐(`perfRules.AUTOFOCUS_OFF` — 화면 ‘해당 없음’ 도 이 목록 · 응답 `autoFocusOff`). ⚠ 정정: 화면은 capacity 에도 ‘켜기’ 칸을 보였다(서버는 false 로 저장).
+  - ⚠ **정정 2건(같이 고침)**: ① 중앙 발송 기록 정제의 규칙 열거(`bmPerfOpsPull RULES`)가 손 목록이라 8a `capacity` 가 빠져 엣지 용량 예측 알림이 중앙 이력 · 이슈에서 ‘USE 판정 변화’ 로 보였다 →
+    `perfRules.RULE_IDS` 하나에서 · 이슈 라벨(`BMPERF_RULE_LABEL`)에도 capacity · 전력 4종. ② 랙 여유를 0.01 kW 로 반올림한 합으로 계산해 작은 랙에서 1%p 흔들렸다(0.5 kW · 445 W → 10% · 실제 11%) → 반올림 전 W 합.
+  - **엣지 PowerCap(③)**: 엣지 봉투 `powerCapVer: 1` + `powerCaps: [{ key, limitWatts, enabled, at }]`(대상 목록 안 · iDRAC 폴러 인벤토리 캐시 — **장비 왕복 0** · PowerLimit 미보고 · 인벤토리 없음은 싣지 않음).
+    중앙 정제(`sanitizePowerCaps`): 아는 필드 · 대상 목록 안 키 · 중복은 첫 것 · 수치(문자열 → 수 · 1~100,000 W 밖은 null) · enabled 불리언만(값 없는 true 는 null) · at 은 수신 시각으로 자르고 원본 atRaw.
+    중앙 전력 보기 · 걸림은 그 값을 쓴다(`edgeCapIndex` → 대상 edgeCap → `capState`: set · unset · unread · stale(엣지가 읽은 지 2시간 넘음 — 로컬과 같은 기준) · old-version).
+    **‘엣지 버전 낮음’ 은 old-version(봉투에 표지 없음)일 때만**(응답 `capOldEdge` · `capMinEdgeVersion` = 릴리스 노트 표지 `베어메탈 사용률 — 전력 알림 규칙 · 엣지 PowerCap` 첫 번호 — 게이트 아님) ·
+    새 당기기 경로는 없다(기존 `/api/collector/bm-usage` 봉투 — 시험이 실제 collector 라우터 · 실제 pullBmUsage 로 왕복).
+  - **남은 것(고치지 않음)**: 정비 창 ⑤(분모 제외) 구간을 피크 급증의 앞 7일 · 24시간 창에서 빼지 않는다(설계 ‘연계: 정비 창 구간 제외’ — 알림 억제 창 ① 은 적용) ·
+    판정 노드가 없는 서버(엣지 iDRAC 원천 + 중앙 대상 · 중앙 OME 원천 + 엣지 대상 · 법인을 엣지가 맡았는데 그 엣지 대상이 아닌 서버 · 구버전 엣지 서버)는 어느 쪽도 판정하지 않는다(두 번 알리지 않는 쪽 —
+    전력 보기가 ‘알림 판정 없음 + 사유’ 로 밝힌다) · 규칙 설정은 노드 전용(엣지 배포는 5단계와 같이 다음 판) ·
+    **이중 판정 창(재확인 N3 — 고치지 않음)**: 엣지 담당을 엣지 보고 베어메탈(fleet push)로만 아는 법인(vCenter 는 중앙 직접 · iDRAC 만 엣지)은 그 보고가 만료(30분 무보고)되면 중앙도 판정한다 —
+    엣지가 꺼졌으면 대체 판정이라 이롭고, 엣지는 살아 있는데 push 만 끊긴 동안만 같은 서버를 두 노드가 판정한다(등록부 사이트 vCenter 로 아는 법인은 디스크 원천이라 이 창이 없다 · powerJudge.js 머리말) ·
+    **다음 점검 후보**(반증 n2 의심 — 재현 안 함): S2 서버 교체 때 등록 id 를 그대로 두면 앞 7일 기준이 옛 장비 피크라 한 번 거짓 급증(또는 가림) · S3 주기 상한(MAX_SEND)으로 이월된 전력 발화는
+    같은 표본이면 새 표본까지 다시 판정되지 않는다(피크 급증 최대 약 1시간 지연 — 누락은 아님) · 5단계 성능 규칙의 S1 이중 경로(같은 서버가 두 등록부)는 이번 판정 노드 함수 밖(전력 규칙만 막음).
+
+- **사용자 결정 기록(2026-11-09 — 결정 대기 목록을 닫음 · 다시 묻지 않는다)**: 아래 넷은 모두 **현행 유지**로 정했다(코드 변경 없음). 바꾸려면 사용자 결정이 다시 필요하다.
+  - **7b 공통 계정 · 키를 서버 주소에 묶는 쓰기**(CSV 일괄 등록 · 서버 폼 · iDRAC 계정 복사 · 엣지 배포)는 **설정 소유자 등급 + 본인 OTP 만**(`bmusage/onboard/bindRule.js` — 규칙은 `server/CLAUDE.md` · `docs/rules/security-api.md` ⑪).
+    법인 관리자에게 열지 않는다 — 열면 서버 주소를 자기 장비로 바꿔 그 법인 공통 비밀번호를 받아내는 경로가 생긴다. 법인 관리자는 개별 계정으로 등록한다.
+  - **8a 정비 창**: 같은 서버를 덮는 창의 합이 하루 12시간 이하면 운영자가 소유자 승인 없이 만든다(아트보드의 ‘4h 이하 operator’ 가 아니라 12h) · **2인 승인 대기열은 두지 않는다**(소유자 등급이 직접 저장).
+    근거: 모든 억제에 시한(일회 24h · 반복 12h)과 감사가 있고, 긴 야간 작업 창을 운영자가 바로 만들 수 있어야 한다(위 8a 정직 기록 줄은 이 결정으로 확정).
+  - **법인 미지정 OS 계정 등록 공유**(`targets.js pickOsEntry`): 같은 법인 지정 등록이 우선이고, 없으면 법인 미지정 등록이 주소 하나로 맞을 때만 쓴다(여럿이면 `os-ambiguous` · 다른 법인 지정은 `os-foreign`).
+    이 공유를 유지한다 — 법인 칸이 생기기 전에 만든 기존 등록이 계속 동작한다(반증 n1 도 같은 의견).
+  - **전력 알림(v2.949)**: 랙 알림은 **배치 서버 전부가 같은 시각에 정비 창 안일 때만** 억제(일부만 창 안이면 보내고 본문에 정비 중 서버) · 엣지가 맡은 법인의 서버는 **그 엣지만** 판정(`powerJudge.judgeOf`).
+    대가(사용자 확인): 정비 중 랙 알림이 조금 더 나가고, 엣지 법인인데 iDRAC 이 중앙에만 등록된 서버는 판정 노드가 없다(전력 보기 ‘알림 판정 없음’ 으로 표시).
+
+- **v2.967 서버 하드웨어 정보 내보내기**(통합 서버 인벤토리 › ‘하드웨어 정보 내보내기’ · 설계 `docs/design/baremetal-hw-xlsx/README.md` · 사용자 기본안 7가지 2026-11-11):
+  - **값은 카탈로그 하나**(`server/src/insights/hwExport/catalog.js` — 묶음 13 · 값 key `<묶음>.sum|det.<값>` 고정). 웹 창은 서버 `/insights/fleet/hardware-meta` 가 준 카탈로그로만 칩을 그린다(이름을 화면에서 지어내지 않는다).
+    새 iDRAC 수집 필드를 내보내려면 카탈로그에 넣는다 — 라우트 · 엑셀 · CSV · 사양서가 같은 정의를 쓴다.
+  - **대상 = `getFleetInventory` 의 bareMetal · virtualizationHosts 그대로**(물리/가상화 판정 복제 금지). 캐시는 GET /fleet 과 같은 `snapMemo('fleet', ...)` 키.
+    가상화 호스트는 `idracBacked` 일 때만 iDRAC 인벤토리를 붙인다(받침이 없으면 vCenter 의 코어 · 메모리만 — 태그로 다시 찾지 않는다).
+  - **행 → 인벤토리**는 `rows.js makeInvOf` 하나(로컬 id → `remote:<수집>:<id>` → 등록부 태그 → 원격 태그 · OME 등록 항목 제외 — `corpUsage.js makeCapOf` 와 같은 순서).
+  - **못 읽은 값은 null(빈 칸)** — 인벤토리가 없는 서버도 한 줄로 남기고(대수가 화면과 같게) 비고에 사유. 속도 0 · 용량 null 은 빈 칸. 합계 · 띠 소계는 읽은 것만.
+    빈 배열(읽었고 없음)과 키 없음(못 읽음)을 가른다 — 사양서는 `inv.collections` 의 'failed' 를 ‘읽지 못함’, 0개를 ‘없음’ 으로.
+  - **넣지 않는 것**: 시리얼 · iDRAC 사용자 계정 · 이벤트 로그 · 접속 계정(카탈로그에 key 자체가 없다 — 테스트가 소스를 본다). **관리자 전용**(`adminOnly`): iDRAC 관리 네트워크 · MAC · UUID —
+    판정은 `isAdminReq`(= `isAdminDetailUser`). 비관리자는 주소로 등록된 서버 이름 · Hostname 을 `insightsMatcher` 로 가린다(GET /fleet 과 같은 matcher).
+  - **게이트**: 세 라우트 모두 `requirePerm('data.csv')` + 전체 범위 전용(GET /fleet 과 같은 근거) · 저장(PUT prefs)은 역할 게이트가 먼저 · 내려받기는 `acquireExport('fleet.hardware.export')` 동시 1건.
+  - **엑셀은 워커**(`render.js` → `hwExportWorker.js` · 끄는 길 `HW_EXPORT_XLSX_WORKER=0`). 사양서는 파일 하나에 `HW_EXPORT_SPEC_MAX`(기본 300)장까지 — 넘으면 **법인마다(넘치는 법인은 쪼개서) 파일을 나눠 ZIP**.
+    잘라 버리지 않는다. ⚠ 운영 규모(호스트 약 658 + 베어메탈)에서 사양서 파일 크기 · 생성 시간은 아직 측정하지 않았다(다음 점검 후보).
+  - 띠 판본은 서버 요약에 자동 필터를 걸지 않는다(띠 줄이 필터 · 정렬을 깬다) — 필터용은 ‘법인 열만’. CSV 에는 띠 · 사양서가 없다.
+  - 엣지 서버는 축약 인벤토리(`collector/compactInv.js` · 중앙 `INV_SHAPE`)라 제조사 · 어댑터/PSU/PCIe 펌웨어 · BIOS 설정 · iDRAC 관리 · 라이선스가 빈다(사용자 기본안 3 — 이번에는 넓히지 않음).
+    채우려면 두 곳을 **함께** 넓힌다(v2.728 규칙).
+  - **반증 1인(2026-11-11) 확정 → 수정**: F1 시트 이름은 **자른 뒤에도** 앞뒤 `'` 를 지우고 `History` 를 대소문자 무시로 피한다(exceljs 가 던져 파일 전체 500) ·
+    F2 ZIP 항목 이름은 `render.js uniqueNames`(`~2` — util/zip.js 는 중복이면 던진다) · F3 개수 · 합은 `collections.<키>==='failed'` 면 null(redfish.js 는 배열을 먼저 [] 로 만든다 —
+    NIC 은 표식이 없어 빈 배열도 null) · F4 맨 위 칸 이름에서 '합계 제외' 를 뺐다(받침 없는 가상화 호스트는 vCenter 값으로 더해진다) · F5 서버 안의 합은 부품 하나라도 못 읽으면 null,
+    서버 사이의 합(띠 · 맨 위 칸)은 '(값 있는 M/N대)' · F6 모델 · CSV 조립에 시간 기준 양보 · F7 게이트를 실제 호출로 고정(operator · viewer · 범위 계정 · 데모 403 · 409).
+  - **v2.968 — 법인 = 법인(DataCenter)**(사용자 신고 2026-11-11: 서버 분석 › 상태 보드는 베어메탈 503대가 법인으로 나뉘는데 내보내기 창의 법인 칩은 전부 0대):
+    v2.967 은 법인을 통합 서버 인벤토리 행의 **vCenter id** 로 나눴다 — 물리 전용 서버는 vCenter 가 없고(법인에 vCenter 가 둘이면 '법인의 vCenter 가 하나뿐' 규칙도 닿지 않는다)
+    법인(DataCenter)으로만 귀속돼 있어 전부 '미지정' 이 됐다. 이제 `insights/hwExport/corp.js` 가 **서버 분석과 같은 목록**(`analysisServersWithRemote`)에서
+    `datacenterId || assign[vCenter]` 색인을 만들어 행 → 법인을 정한다(판정 복제 금지). 가상화 호스트는 자기 vCenter 의 법인, 법인 할당이 없는 vCenter 는 `vc:<id>` 묶음, 없으면 미지정.
+    법인 칩 · 파일 순서는 설정의 법인 순서. vCenter 는 따로 고르는 값(`id.sum.vcenter`). (v2.969 에 통합 서버 인벤토리 화면도 법인(DataCenter) 기준이 됐다 — 아래.)
+    새 '법인별' 화면 · 내보내기를 만들 때 **법인 축이 vCenter 인지 DataCenter 인지 먼저 정할 것** — 물리 서버가 끼면 DataCenter 다. 회귀 `server/test/hwExportCorp2968.test.js`.
+  - **v2.969 — 통합 서버 인벤토리 화면도 법인(DataCenter) 기준 · 수집한 Agent 의 법인으로 자동 판정만**(사용자 요청 2026-11-11 + 결정 '서버 분석처럼 수집한 Agent 이름에 따라 분류 — Agent 자동 판정만'):
+    GET /insights/fleet 이 행마다 `corpId · corpName · corpSource`(scan = 수집한 Agent · 스캔 등록 법인 | vcenter | agent = 보고한 엣지 | vcgroup) · 미지정이면 `corpWhy` 를,
+    응답에 `corps`(필터 목록 — 서버가 있는 법인만) · `summary.bareMetalNoCorp` 를 싣는다(`enrichFleetCorp` — 판정은 내보내기와 같은 `hwCorpContext`). 캐시 키는 `generatedAt|fleetRev|dc:<법인 설정 서명>|t:<1분 칸>`
+    (스캔 대역 · 수집 서버 → 법인 · 원격 목록은 fleetRev 를 올리지 않는다 — 1분 칸이 없으면 ETag 304 가 옛 법인을 붙잡는다).
+    **수동 법인 지정은 두지 않는다** — 첫 판(PUT /fleet/dc-assign · fleetDcAssign.js)은 반증에서 이름 키 가로채기(재현) · 서버 분석과 판정이 갈림(F2)이 나와 사용자 결정으로 걷어냈다.
+    법인을 바꾸려면 원천을 고친다: 수집 서버의 법인 이름(collector.datacenter)을 DataCenter id/이름과 맞추거나(`collector/datacenterMatch.js` — 정확 일치 · 대소문자 무시), 스캔 대역의 Agent · 법인, vCenter → 법인 할당.
+    (정정 v2.972: 이름을 맞추지 않아도 **설정 › 수집 서버의 '법인 매칭' 칸에서 수집 서버 ↔ 법인을 직접 고를 수 있다** — 아래 항목.)
+    미지정 이유(`corpWhy`)는 그 원천 중 무엇이 비었는지 말한다(수집 서버 이름 불일치 · 대역 겹침 · 대역 밖 · OME · 수동 물리 분류).
+    **서버 분석 › 상태 보드 · 법인별 서버 정보(/admin/idrac)** 도 Agent 스캔 대역 법인(withScanDatacenter — v2.660)을 싣는다: 예전에는 온도 · 추이 · 검색 · 내보내기만 이 단계를 거쳐 탭마다 법인이 달랐다.
+    ⚠ 등록부 값 `datacenterId` 는 덮지 않고 `scanDatacenterId` 로 따로 싣는다(datacenterId 는 '교체' 스캔이 지울 범위 — registry.js replaceScanned). 웹 `dcOfServer` 가 datacenterId → vCenter 할당 → scanDatacenterId 순으로 읽는다.
+    범위 절단(scopeIdracServers)은 vCenter 기준이라 영향 없다. 회귀 `server/test/fleetCorp2969.test.js` · `web/src/views/tools/{fleetCorpText,baremetalBoardText}.test.js`.
+  - **v2.972 — 수집 서버(Agent) ↔ 법인(DataCenter) 사용자 매칭**(사용자 요청 2026-11-11 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능' · 위치 결정 '설정 › 수집 서버 표'):
+    저장은 `collector.datacenterId`(엣지 자기등록이 보내는 자유 글자 라벨 `datacenter` 와 **따로**). 바꾸는 길은 `PUT /api/admin/collectors/:id/datacenter`(adminOnly · **fullReadWriteScopeOnlyWith**(조회 ∧ 쓰기 전체 범위 — 반증 F4) ·
+    감사 '수집 서버 법인 매칭') → `registry.setCollectorDatacenterId` **하나** — 이 필드만 바꾸고 **managed(수동 고정)를 세우지 않는다**(세우면 엣지 자기등록의 URL · 토큰 갱신이 멈춘다) · normalize 를 다시 돌리지 않는다 ·
+    등록부를 못 읽으면 503 · 없는 법인 400(목록이 비면 503) · 본문 datacenterId 가 문자열이 아니면 400('' 만 해제 — 반증 F5).
+    ⚠ **normalize 는 본문의 datacenterId 를 보지 않고 늘 기존 값을 이어받는다**(반증 F1 — 재현: 관리자 편집 폼 · 토큰 강제 재설정 · 배포가 목록 행을 통째로 다시 보내
+    다른 탭에서 바꾼 매칭을 되돌리고 없는 법인 검사 · 감사를 건너뛰었다). 대소문자 중복 병합(dedupeByIdCase)도 datacenterId 를 잇는다(반증 F3).
+    IP 관리의 스캔 에이전트 → 법인(`ipam/scanDatacenter.js`)도 이 매칭을 라벨보다 먼저 쓴다(반증 F2 — IP 관리 자체 수동 설정 agents[].datacenterId 는 그대로 이긴다).
+    판정 순서(`analysisServers.collectorDcMaps` 하나 — 화면 `collectorDcMatch` 가 같은 순서, 테스트가 대조): **사용자 매칭(지금 목록에 있는 법인일 때만) → 이름 맞춤**. 법인을 지우면 이름 맞춤으로 돌아가고 화면이 stale 로 알린다.
+    ⚠ 원격 서버(remoteServersResolved)와 전력 분석은 **사용자 매칭 > 엣지가 붙인 법인 태그 > 이름 맞춤** — 법인 · vCenter · 수집 서버 1:1:1 이라 그 수집 서버가 보고한 서버는 모두 그 법인이다
+    (엣지 태그는 엣지 자기 목록의 id 라 중앙 목록에 없을 수 있다). 매칭이 없으면 예전 순서 그대로.
+    캐시: /insights/fleet · 전력 분석 키에 `collectorDcSig()`(수집 서버 id · 라벨 · 매칭 서명)를 넣었다 — 매칭을 바꾸면 1분 칸을 기다리지 않는다.
+    통합 서버 인벤토리의 미지정 이유가 수집 서버 때문이면 `corpWhyCode: 'collector'` 를 싣고 화면이 '수집 서버 법인 매칭 →' 링크(#/settings/collectors)를 띄운다.
+    회귀 `server/test/collectorDc2972.test.js` · `web/src/views/collectors/collectorDcText.test.js`.
+  - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
+  - **v2.973 — 엣지 서버의 빈 칸 채우기**(사용자 요청 2026-11-11 — WA 법인 R640 엑셀에서 제조사 · 전원 · 스레드 · 펌웨어 · BIOS · iDRAC 칸이 비었다 · 결정 'A1~A14 · B1 · C1 · C2 모두'):
+    원인은 엣지 축약 인벤토리(`collector/compactInv.js`)가 iDRAC 이 수집한 값 일부를 중앙으로 보내지 않은 것이다(중앙 직접 수집 서버는 채워졌다).
+    추가(값이 있을 때만 키 — 구버전 엣지 모양과 같게): system 제조사 · 전원 상태 · 자산 태그 · UUID, cpu.threads, cpus[] 스레드 · 최대 클럭 · 제조사, DIMM 랭크, 디스크 RPM,
+    컨트롤러 속도, PSU · PCIe · NIC 어댑터 펌웨어, 전력 상한, BIOS 설정(`idrac/biosKeys.js` 목록만 — 수집기 · 엣지 · 중앙이 같은 목록), iDRAC 모델 · 라이선스(이름 · 종류 · 만료 —
+    주문 식별자 entitlement 는 싣지 않는다), iDRAC 관리 NIC(이름 · MAC · 호스트 이름 · FQDN · IPv4). ⚠ 자산 태그 · UUID · iDRAC 주소는 예전에 '자산 정보는 싣지 않는다' 로 뺐던 값이다 —
+    사용자 결정으로 넣었다. 시리얼 · 부품번호(PSU) · SKU 는 여전히 싣지 않는다. 중앙 `remoteInventory.js INV_SHAPE` 에 **같은 키**(짝 — 테스트가 엣지 출력 = 중앙 정제 결과로 대조).
+    엣지가 업그레이드되고 인벤토리를 다시 보내야 채워진다(그 전 수집분은 비어 있다 — 비고 '엣지 축약 인벤토리').
+    B1: 수집기는 `health.fan` 을 채우지 않는다(팬 목록은 poller 가 붙인다) — 내보내기의 팬 · PSU · 스토리지 상태는 화면(inventoryView)처럼 **부품 원소 판정**(partHealthRollup)으로 다시 만든다.
+    부품 배열이 있으면(컬렉션 failed 포함) 원소 판정만 쓴다 — 못 읽음 · 빈 슬롯만이면 빈 칸(반증 F2: 옛 롤업 'OK' 로 돌아가지 않게). 저장 롤업 글자는 배열이 없을 때만. C1: 사양서 '기본 식별' 의 vCenter 고정 줄 삭제(v2.968 카탈로그 값과 중복). C2: 열 너비 = max(머리글 기준, 값 길이 — 한글 2칸 · 상한 60 · 앞 3000행) ·
+    합계 칸 줄바꿈 + 행 높이를 필요한 줄 수로(반증 F3). 수집기의 licenses · network 는 늘 빈 배열이라 비었으면 키를 만들지 않는다(반증 R1) · 중앙은 라이선스 12 · 관리 NIC 4 개까지만(R4) · GPU 제조사(R2).
+    ⚠ 반증 F4: `GET /admin/idrac/:id/inventory` 는 adminOnly 지만 데모 계정(관리자 판본 아님)도 지나간다 — `maskInventoryForViewer`(routes/admin/idracScan.js)가
+    관리 NIC 주소 · 이름 · 시스템 UUID · iDRAC 계정을 가린다(로컬 · 원격 모두 — 원격도 이제 이 값을 갖는다).
+    (정정 v2.974: 남겼던 R3 — 시리얼 조회의 UUID 행 — 도 관리자 판본만 보이게 했다. `routes/api/serialLookup.js serialRowsForViewer` 가 화면 · CSV · 개수에서 뺀다 · 응답 `uuidHidden` → 화면 한 줄. 회귀 `server/test/serialUuidAdmin2974.test.js`.)
+    회귀 `server/test/hwExportFill2973.test.js`.
+

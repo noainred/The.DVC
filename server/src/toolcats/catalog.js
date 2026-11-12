@@ -46,7 +46,7 @@ export const PRESET = Object.freeze([
     id: 'server', label: '서버', icon: '🖥️',
     tools: ['fleet', 'hardware', 'serveranalysis', 'idrac-trend', 'serial-lookup', 'esxi', 'host-hygiene', 'esxitemp', 'roomtemp',
       'powermap', 'pdu', 'gpu', 'gpu-alloc', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults',
-      'bm-usage', 'corp-usage', 'power-total', 'svc-inventory'],
+      'bm-usage', 'focus-mon', 'corp-usage', 'power-total', 'svc-inventory'],
   },
   {
     id: 'network', label: '네트워크', icon: '🌐',
@@ -55,7 +55,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'storage', label: '스토리지', icon: '💾',
-    tools: ['storage-mon', 'storage-growth', 'storage-usage', 'storage-track', 'bm-storage', 'san-switch', 'dsusage', 'thinvms',
+    tools: ['storage-mon', 'ps-inspect', 'storage-growth', 'storage-usage', 'storage-track', 'bm-storage', 'san-switch', 'san-storage', 'dsusage', 'thinvms',
       'dir-usage', 'isilon-dirusage', 'portaldb', 'snapshots', 'snapshot-age', 'vm-hygiene', 'storage-paths', 'orphanvmdk', 'guest-disk', 'guest-partition'],
   },
   {
@@ -86,7 +86,7 @@ export const PRESET = Object.freeze([
   {
     id: 'ops', label: '운영 작업', icon: '🛠️',
     tools: ['rma', 'vmprovision', 'vm-clone', 'backup-run', 'bareos-backup', 'agent-scans', 'shutdown', 'credentials',
-      'diskadd', 'backup', 'massdeploy', 'service-hub', 'mail-diag', 'edge-log', 'edge-tokens'],
+      'diskadd', 'backup', 'massdeploy', 'service-hub', 'mail-diag', 'edge-log', 'edge-tokens', 'san-flow'],
   },
 ]);
 

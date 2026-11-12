@@ -6,7 +6,9 @@
  *  GET  /api/ping/series?id=&range=   단일 대상 시계열 — 인증
  *  GET  /api/ping/targets             대상 목록 — 인증
  *  POST/PUT/DELETE /api/ping/targets  대상 관리 — 관리자
- *  POST /api/ping/poll-now            즉시 1회 측정 — 관리자
+ *  POST /api/ping/poll-now            지금 측정 — 관리자(v2.964: 연속 측정 중이면 지금 창을 바로 마감해 쓴다)
+ *  GET  /api/ping/settings            측정 설정(측정 간격 · 요약 주기 · 시한 + 출처 · 범위 · 모니터 상태) — 인증
+ *  PUT  /api/ping/settings            측정 설정 저장(재시작 없이 바로 적용) — 관리자 · 전체 범위
  *  POST /api/ping/seed-vcenters       vCenter 자동 등록 — 관리자
  *
  * 네트워크 체크(서버 Ping, source=edge — 엣지 노드 TCP, DataCenter 그룹):
@@ -32,7 +34,8 @@ import {
 } from '../ping/store.js';
 import { statusAll, seriesOf, overviewGrouped } from '../ping/service.js';
 import { getPingDb } from '../ping/db.js';
-import { pollOnce } from '../ping/monitor.js';
+import { pingNow, pingMonitorStatus } from '../ping/monitor.js';
+import { loadPingSettings, savePingSettings, pingLoadOf } from '../ping/settings.js';
 import { listCollectors } from '../collector/registry.js';
 import { listDatacenters, getDatacenterOrder } from '../datacenter/store.js';
 
@@ -176,8 +179,38 @@ pingRouter.delete('/targets/:id', adminOnly, async (req, res) => {
 
 pingRouter.post('/poll-now', adminOnly, async (req, res) => {
   if (denyScopedBulk(req, res, '즉시 전체 측정')) return;
-  try { const r = await pollOnce(); res.json({ ok: true, ...(r || {}) }); }
+  try { const r = await pingNow(); res.json({ ok: true, ...(r || {}) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+/**
+ * v2.964 측정 설정(사용자 요청 "화면에서 주기 설정할 수 있게 · ping 은 중단없이 계속 ping").
+ * 조회는 인증만(주기·시한·모니터 상태 — 주소 없음). 부하 산수(대상 수 × 측정 간격)는 전 대상 수가 들어가므로 전체 범위 계정에만 싣는다.
+ * 저장은 관리자 · 전체 범위(전 대상의 측정 방식을 바꾼다 — poll-now 와 같은 기준). 범위·형식이 틀리면 400 field, 설정 파일을 못 읽은 상태면 503.
+ */
+function settingsBody(req, s = loadPingSettings()) {
+  const full = vcScope(req).all;
+  const live = full ? listTargets().filter((t) => t.enabled !== false && !String(t.id).startsWith('mock-')).length : null;
+  return {
+    ok: true,
+    probeIntervalMs: s.probeIntervalMs, summaryIntervalMs: s.summaryIntervalMs, timeoutMs: s.timeoutMs,
+    source: s.source, defaults: s.defaults, ranges: s.ranges, updatedAt: s.updatedAt, updatedBy: full ? s.updatedBy : null,
+    loadError: s.loadError ? { reason: s.loadError.reason } : null,
+    monitor: pingMonitorStatus(),
+    load: full ? pingLoadOf(s, live) : null,
+  };
+}
+pingRouter.get('/settings', (req, res) => {
+  try { res.json(settingsBody(req)); }
+  catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+pingRouter.put('/settings', adminOnly, (req, res) => {
+  if (denyScopedBulk(req, res, 'Ping 측정 설정')) return;
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const patch = b.reset === true ? { reset: true } : Object.fromEntries(['probeIntervalMs', 'summaryIntervalMs', 'timeoutMs'].filter((k) => k in b).map((k) => [k, b[k]]));
+  const r = savePingSettings(patch, { actor: req.user?.username || '' });
+  if (!r.ok) return res.status(r.field ? 400 : (loadPingSettings().loadError ? 503 : 500)).json({ ok: false, field: r.field, reason: r.reason });
+  res.json(settingsBody(req, r.settings));
 });
 
 pingRouter.post('/seed-vcenters', adminOnly, (req, res) => {

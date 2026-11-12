@@ -34,6 +34,8 @@ import { config } from '../config.js';
  */
 import * as m_store from '../store.js';
 import * as m_storagePoller from '../storage/poller.js';
+import * as m_nodeLoadPoller from '../storage/nodeLoadPoller.js'; // v2.932 아이실론 노드 부하 표본
+import * as m_inspectRunner from '../storage/inspect/runner.js'; // v2.965 PowerScale 장비 점검 실행기
 import * as m_sanPoller from '../sanswitch/poller.js';
 import * as m_sanPerfPoller from '../sanswitch/perfPoller.js';
 import * as m_cvpPoller from '../cvp/poller.js';
@@ -58,6 +60,8 @@ import * as m_bmUsagePoller from '../bmusage/poller.js';
 import * as m_linkCheckPoller from '../linkcheck/poller.js';
 import * as m_xferSpeedPoller from '../xferspeed/poller.js';
 import * as m_isiduPoller from '../isidu/poller.js';   // v2.736 아이실론 디렉터리 사용량
+import * as m_focusMonService from '../focusmon/service.js'; // v2.976 집중 모니터링(사람이 시작한 SSH 수집 — 1초 틱)
+import * as m_pingMonitor from '../ping/monitor.js';   // v2.964 Ping 연속 측정
 import * as m_veeamPoller from '../veeam/poller.js';   // v2.751 Veeam 백업 상태
 import * as m_veeamSnapCollector from '../veeam/snapCollector.js';   // v2.765 Veeam 계정 이벤트 전용 수집
 import * as m_bareosPoller from '../bareos/poller.js';   // v2.820 Bareos 백업 상태 조회
@@ -84,6 +88,8 @@ import { runtimeServiceRow } from '../util/runtimeCheck.js'; // 2026-10-09 검�
 const MODS = Object.freeze({
   '../store.js': m_store,
   '../storage/poller.js': m_storagePoller,
+  '../storage/nodeLoadPoller.js': m_nodeLoadPoller,
+  '../storage/inspect/runner.js': m_inspectRunner,
   '../sanswitch/poller.js': m_sanPoller,
   '../sanswitch/perfPoller.js': m_sanPerfPoller,
   '../cvp/poller.js': m_cvpPoller,
@@ -108,6 +114,8 @@ const MODS = Object.freeze({
   '../linkcheck/poller.js': m_linkCheckPoller,
   '../xferspeed/poller.js': m_xferSpeedPoller,
   '../isidu/poller.js': m_isiduPoller,
+  '../focusmon/service.js': m_focusMonService,
+  '../ping/monitor.js': m_pingMonitor,
   '../veeam/poller.js': m_veeamPoller,
   '../veeam/snapCollector.js': m_veeamSnapCollector,
   '../bareos/poller.js': m_bareosPoller,
