@@ -54,25 +54,49 @@ export function buildDcIndex(servers = [], dcOfVc = () => '') {
 }
 
 /**
- * @param {{ index:{byId:Map,byTag:Map,whyId?:Map,whyTag?:Map}, dcOfVc:(vcId:string)=>string, dcName:(id:string)=>string, vcName:(id:string)=>string, agentDc?:(agent:string)=>string }} o
- * @returns {(row:object, kind:'bm'|'vh') => {id:string, name:string, src:string, why?:string}}  id '' = 미지정 · src = scan|vcenter|agent|vcgroup|''
+ * 행을 수집한(보고한) 에이전트(P2 · v2.985). 순서: 엣지 보고 행의 remoteAgent → 행의 collectorId → serverId 'remote:<수집 서버>:<서버>' 를
+ * **등록된 수집 서버 id 의 최장 일치**로(반증 D4 — id 에 ':' 가 들어갈 수 있다 · 'site:a' 를 'site' 로 자르지 않게). 모르면 ''.
  */
-export function makeCorpOf({ index, dcOfVc, dcName, vcName, agentDc = () => '' }) {
+export function agentOfRow(row, collectorIds = []) {
+  const a = t(row?.remoteAgent);
+  if (a) return a;
+  const c = t(row?.collectorId);
+  if (c) return c;
+  const id = t(row?.serverId);
+  if (!id.startsWith('remote:')) return '';
+  let best = '';
+  for (const k of collectorIds || []) { const s = t(k); if (s && s.length > best.length && id.startsWith(`remote:${s}:`)) best = s; }
+  return best;
+}
+
+/**
+ * @param {{ index:{byId:Map,byTag:Map,whyId?:Map,whyTag?:Map}, dcOfVc:(vcId:string)=>string, dcName:(id:string)=>string, vcName:(id:string)=>string,
+ *           agentDc?:(agent:string)=>string, collectorIds?:string[] }} o
+ * @returns {(row:object, kind:'bm'|'vh') => {id:string, name:string, src:string, why?:string}}  id '' = 미지정 · src = scan|vcenter|agent|vcgroup|''
+ *
+ * 순서: 서버 분석 색인 → vCenter 할당 → 수집한 에이전트의 법인(사용자 매칭 → 이름 맞춤). vCenter 할당이 먼저인 것은 전력 분석(powerBreakdown —
+ * ESXi · 수집 서버 vcenterId 로 매핑된 측정값은 vCenter 할당 법인)과 같게 두려는 것이다. ⚠ v2.985 반증 D3: 처음 판은 사용자 매칭을 vCenter 보다 먼저
+ * 두었다가(P3) 전력 분석과 새로 갈렸다 — 되돌렸다. 매칭과 vCenter 할당 중 무엇을 먼저 볼지는 사용자 결정(P4)으로 남긴다.
+ * P2: 원격 수집 행(remote:<수집 서버>:…)도 수집 서버의 법인을 본다(예전: 색인에 없으면 '미지정' — 구버전 엣지가 serverId 대신 host 를 보낸 전력 행).
+ */
+export function makeCorpOf({ index, dcOfVc, dcName, vcName, agentDc = () => '', collectorIds = [] }) {
   const dc = (id, src) => ({ id, name: t(dcName(id)) || id, src });
   return (row, kind) => {
     const vc = t(row?.vcenterId);
     const id = t(row?.serverId);
     const tag = low(row?.serviceTag);
+    const agent = kind !== 'vh' ? agentOfRow(row, collectorIds) : '';
     if (kind !== 'vh') {
       const hit = (t(row?.source) !== 'edge' && id && index?.byId?.get(id)) || index?.byTag?.get(tag) || '';
       if (hit) return dc(hit, 'scan');
     }
     const viaVc = vc ? t(dcOfVc(vc)) : '';
     if (viaVc) return dc(viaVc, 'vcenter');
-    if (kind !== 'vh' && t(row?.remoteAgent)) { const a = t(agentDc(t(row.remoteAgent))); if (a) return dc(a, 'agent'); }
+    if (agent) { const a = t(agentDc(agent)); if (a) return dc(a, 'agent'); }
     if (vc) return { id: `${VC_PREFIX}${vc}`, name: t(vcName(vc)) || t(row?.vcenter) || vc, src: 'vcgroup' };
     if (kind === 'vh') return { id: '', name: '미지정', src: '', why: 'vCenter 를 모릅니다' };
     const why = (t(row?.remoteAgent) && `보고한 에이전트 ‘${t(row.remoteAgent)}’ 의 법인 이름이 DataCenter 목록과 맞지 않습니다`)
+      || (id.startsWith('remote:') && agent && `수집 서버 ‘${agent}’ 의 법인 이름이 DataCenter 목록과 맞지 않습니다`)
       || (t(row?.source) === 'ome' && 'OME 로만 수집 — 수집한 Agent 의 법인을 알 수 없습니다')
       || (id.startsWith('host:') && '수동으로 물리 분류한 ESXi 호스트 — vCenter 의 법인 할당이 없습니다')
       || (t(row?.source) !== 'edge' && id && index?.whyId?.get(id)) || index?.whyTag?.get(tag)

@@ -109,25 +109,25 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/anomalies` | — | [server/src/routes/insights.js:557](../server/src/routes/insights.js#L557) |
-| POST | `/chatops` | — | [server/src/routes/insights.js:625](../server/src/routes/insights.js#L625) |
+| GET | `/anomalies` | — | [server/src/routes/insights.js:559](../server/src/routes/insights.js#L559) |
+| POST | `/chatops` | — | [server/src/routes/insights.js:627](../server/src/routes/insights.js#L627) |
 | GET | `/finops` | — | [server/src/routes/insights.js:118](../server/src/routes/insights.js#L118) |
 | GET | `/finops/config` | — | [server/src/routes/insights.js:142](../server/src/routes/insights.js#L142) |
 | PUT | `/finops/config` | 역할 `admin` · `fleetOnly` | [server/src/routes/insights.js:174](../server/src/routes/insights.js#L174) |
 | GET | `/fleet` | — | [server/src/routes/insights.js:182](../server/src/routes/insights.js#L182) |
-| PUT | `/fleet/assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:415](../server/src/routes/insights.js#L415) |
-| PUT | `/fleet/assign-bulk` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:431](../server/src/routes/insights.js#L431) |
-| GET | `/fleet/hardware-export` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:344](../server/src/routes/insights.js#L344) |
-| GET | `/fleet/hardware-meta` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:321](../server/src/routes/insights.js#L321) |
-| PUT | `/fleet/hardware-prefs` | 역할 `admin/operator` · 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:336](../server/src/routes/insights.js#L336) |
-| POST | `/fleet/prune` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:479](../server/src/routes/insights.js#L479) |
-| PUT | `/fleet/tag` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:387](../server/src/routes/insights.js#L387) |
-| GET | `/forecast` | — | [server/src/routes/insights.js:578](../server/src/routes/insights.js#L578) |
-| GET | `/graph` | — | [server/src/routes/insights.js:604](../server/src/routes/insights.js#L604) |
-| GET | `/incidents` | — | [server/src/routes/insights.js:619](../server/src/routes/insights.js#L619) |
+| PUT | `/fleet/assign` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:417](../server/src/routes/insights.js#L417) |
+| PUT | `/fleet/assign-bulk` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:433](../server/src/routes/insights.js#L433) |
+| GET | `/fleet/hardware-export` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:346](../server/src/routes/insights.js#L346) |
+| GET | `/fleet/hardware-meta` | 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:323](../server/src/routes/insights.js#L323) |
+| PUT | `/fleet/hardware-prefs` | 역할 `admin/operator` · 권한 `data.csv` · `hwFullScopeOnly` | [server/src/routes/insights.js:338](../server/src/routes/insights.js#L338) |
+| POST | `/fleet/prune` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:481](../server/src/routes/insights.js#L481) |
+| PUT | `/fleet/tag` | 역할 `admin` · `fleetFullScopeOnly` | [server/src/routes/insights.js:389](../server/src/routes/insights.js#L389) |
+| GET | `/forecast` | — | [server/src/routes/insights.js:580](../server/src/routes/insights.js#L580) |
+| GET | `/graph` | — | [server/src/routes/insights.js:606](../server/src/routes/insights.js#L606) |
+| GET | `/incidents` | — | [server/src/routes/insights.js:621](../server/src/routes/insights.js#L621) |
 | GET | `/power-breakdown` | — | [server/src/routes/insights.js:145](../server/src/routes/insights.js#L145) |
-| GET | `/security` | — | [server/src/routes/insights.js:591](../server/src/routes/insights.js#L591) |
-| GET | `/topology` | — | [server/src/routes/insights.js:594](../server/src/routes/insights.js#L594) |
+| GET | `/security` | — | [server/src/routes/insights.js:593](../server/src/routes/insights.js#L593) |
+| GET | `/topology` | — | [server/src/routes/insights.js:596](../server/src/routes/insights.js#L596) |
 
 ## `/api/central`
 

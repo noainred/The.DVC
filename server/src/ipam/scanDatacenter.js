@@ -25,6 +25,7 @@
  *   주지 않으면 예전 규칙(이름이 IP 일 때만)이고 응답 hostIpRule 이 그 사실을 말한다('name-only' / 'name-or-mgmt').
  */
 import { ipToNum } from '../util/ipv4.js';
+import { resolvePickedDc } from '../collector/datacenterMatch.js'; // v2.985 반증 D2: 사용자 매칭 법인 id 고르기 규칙 하나
 
 // ⚠ scanStore.js `LOCAL` 과 같은 값이어야 한다 — 이 모듈은 순수(scanStore 를 import 하지 않는다)라 상수를 따로 둔다.
 //   `test/ipamStore2639.test.js` 가 두 값이 같음을 고정한다(모듈 경계가 두 벌을 두는 이유 — 억지 통합 금지).
@@ -121,8 +122,8 @@ export function resolveAgentDatacenters(p = {}) {
         if (!aliases.has(low(c?.id)) && !aliases.has(low(c?.name))) continue;
         // v2.972(반증 F2): 설정 › 수집 서버에서 사용자가 매칭한 법인(c.datacenterId — 지금 목록에 있을 때만)이 라벨 이름 맞춤보다 먼저 —
         //   서버 분석 · 통합 서버 인벤토리 · 전력 분석(analysisServers.collectorDcMaps)과 같은 순서. IP 관리 자체 수동 설정(agents[].datacenterId)은 그대로 이긴다.
-        const pickedDc = t(c?.datacenterId).toLowerCase();
-        bump(pickedDc && dcName.has(pickedDc) ? pickedDc : dcIdOf(c?.datacenter, datacenters), 'collectors', t(c?.id) || t(c?.name));
+        const pickedDc = resolvePickedDc(c?.datacenterId, datacenters);   // P5 · 반증 D2: 서버 분석과 같은 규칙(정확 일치 → 대소문자 무시)
+        bump(pickedDc || dcIdOf(c?.datacenter, datacenters), 'collectors', t(c?.id) || t(c?.name));
       }
     }
     const candidates = [...cand.entries()].map(([id, v]) => ({ id, name: dcName.get(id) || id, vcenters: v.vcenters, collectors: v.collectors }));
