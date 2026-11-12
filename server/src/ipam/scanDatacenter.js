@@ -121,8 +121,9 @@ export function resolveAgentDatacenters(p = {}) {
         if (!aliases.has(low(c?.id)) && !aliases.has(low(c?.name))) continue;
         // v2.972(반증 F2): 설정 › 수집 서버에서 사용자가 매칭한 법인(c.datacenterId — 지금 목록에 있을 때만)이 라벨 이름 맞춤보다 먼저 —
         //   서버 분석 · 통합 서버 인벤토리 · 전력 분석(analysisServers.collectorDcMaps)과 같은 순서. IP 관리 자체 수동 설정(agents[].datacenterId)은 그대로 이긴다.
-        const pickedDc = t(c?.datacenterId).toLowerCase();
-        bump(pickedDc && dcName.has(pickedDc) ? pickedDc : dcIdOf(c?.datacenter, datacenters), 'collectors', t(c?.id) || t(c?.name));
+        const pickedLow = t(c?.datacenterId).toLowerCase();
+        const pickedDc = pickedLow ? [...dcName.keys()].find((k) => k.toLowerCase() === pickedLow) || '' : '';   // P5(v2.985): 대소문자 무시 → 실제 id
+        bump(pickedDc || dcIdOf(c?.datacenter, datacenters), 'collectors', t(c?.id) || t(c?.name));
       }
     }
     const candidates = [...cand.entries()].map(([id, v]) => ({ id, name: dcName.get(id) || id, vcenters: v.vcenters, collectors: v.collectors }));

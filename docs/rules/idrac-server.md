@@ -1485,6 +1485,19 @@
     캐시: /insights/fleet · 전력 분석 키에 `collectorDcSig()`(수집 서버 id · 라벨 · 매칭 서명)를 넣었다 — 매칭을 바꾸면 1분 칸을 기다리지 않는다.
     통합 서버 인벤토리의 미지정 이유가 수집 서버 때문이면 `corpWhyCode: 'collector'` 를 싣고 화면이 '수집 서버 법인 매칭 →' 링크(#/settings/collectors)를 띄운다.
     회귀 `server/test/collectorDc2972.test.js` · `web/src/views/collectors/collectorDcText.test.js`.
+  - **v2.985 — 법인 매칭 후속 P1~P7**(사용자 요청 2026-11-11 'P1~P7 진행' — v2.972 반증 추정 E1~E4 · Chromium 발견):
+    P2 · P3(재현): 통합 인벤토리 · 하드웨어 내보내기(`hwExport/corp.js makeCorpOf`)에서 **서버 분석 색인에 없는 물리 행은 사용자 매칭 > vCenter 할당 > 이름 맞춤**.
+    원격 수집 행(serverId 'remote:<수집 서버>:…' — `agentOfRow`)도 수집 서버를 본다(예전: 색인 미스면 '미지정'). 엣지 보고 행은 사용자 매칭이 vCenter 보다 먼저(예전 반대 —
+    서버 분석 remoteServersResolved 와 같은 순서). 이름 맞춤(사용자가 고르지 않은 것)은 예전처럼 vCenter 뒤. 라우트는 `collectorDcMaps().manual` 을 `agentManualDc` 로 따로 넘긴다.
+    P4(조사만 — 코드 그대로): 전력 분석(`powerBreakdown.resolveDc`)은 ESXi 호스트로 매핑된 측정값을 **vCenter 할당 법인**으로 센다(가상화 호스트 — 통합 인벤토리 vh 와 같다).
+    같은 서버의 iDRAC 을 서버 분석은 수집 서버 매칭 법인으로 보므로, **vCenter 할당 법인 ≠ 수집 서버 매칭 법인**이면 두 화면이 갈린다(1:1:1 에서는 설정 불일치일 때만).
+    바꿀지(매칭 우선 · 불일치 경고만)는 사용자 결정 대기.
+    P5: 손으로 고친 datacenters.json 의 대문자 id 도 매칭(저장은 소문자, 판정 · 화면은 대소문자 무시로 **실제 id**). id 에 [a-z0-9._-] 밖 글자가 있으면 여전히 400.
+    P6(재현 — 목 데이터 'Seoul 법인' · 'Seoul' 중복): `ensureCollectorDatacenter` 는 수집 서버의 법인이 이미 정해졌으면(사용자 매칭 · 라벨/id/이름이 기존 법인 id 또는 **이름**과 맞음)
+    법인을 새로 만들지 않는다(운영도 라벨이 기존 법인 id 와 다르고 이름만 같으면 중복이 생겼다). 목 데이터는 엣지 라벨 = 도시면 법인 id 를 라벨 id 로(`mock/demo/pdu.js demoCorpId`).
+    P1: 설정 › 수집 서버 표 — ID · 이름 한 칸, 엣지 라벨은 법인 매칭 칸 안, 동기화는 버전 아래, 수집 켜짐은 상태 칸, 작업 버튼 세로(1440px scrollWidth 1600 → 894 = clientWidth).
+    법인 목록을 받은 뒤 수집 서버 목록을 한 번 다시 읽는다(목록 조회의 법인 백필 뒤 매칭이 15초간 '맞는 법인 없음' 이던 것). P7: verify 문서 — worktree 는 /home/user 아래.
+    회귀 `server/test/collectorDcFollow2985.test.js`.
   - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
   - **v2.973 — 엣지 서버의 빈 칸 채우기**(사용자 요청 2026-11-11 — WA 법인 R640 엑셀에서 제조사 · 전원 · 스레드 · 펌웨어 · BIOS · iDRAC 칸이 비었다 · 결정 'A1~A14 · B1 · C1 · C2 모두'):
     원인은 엣지 축약 인벤토리(`collector/compactInv.js`)가 iDRAC 이 수집한 값 일부를 중앙으로 보내지 않은 것이다(중앙 직접 수집 서버는 채워졌다).

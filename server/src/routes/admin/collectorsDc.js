@@ -137,12 +137,13 @@ function transportView(list) {
  * 사용자 매칭(datacenterId — 지금 목록에 있을 때만) → 이름 맞춤(datacenter 라벨 · id · 이름 ↔ DataCenter id · 이름).
  */
 export function collectorDcMatch(collectors, datacenters) {
-  const ids = new Set((datacenters || []).map((d) => String(d.id)));
+  const byLower = new Map((datacenters || []).map((d) => [String(d.id).toLowerCase(), String(d.id)]));   // P5(v2.985): 대소문자 무시 → 실제 id
   const out = {};
   for (const c of collectors || []) {
     if (!c || c.id == null) continue;
     const picked = String(c.datacenterId || '').trim().toLowerCase();
-    if (picked && ids.has(picked)) { out[c.id] = { id: picked, via: 'manual' }; continue; }
+    const hit = picked ? byLower.get(picked) : '';
+    if (hit) { out[c.id] = { id: hit, via: 'manual' }; continue; }
     const m = matchDatacenterId([c.datacenter, c.id, c.name], datacenters || []);
     out[c.id] = { id: m || '', via: m ? 'name' : '', ...(picked ? { stale: true, picked } : {}) };   // picked: 지워진 법인 id — 화면이 그 값을 선택지로 보여 줘야 '자동' 으로 해제할 수 있다(반증 F6)
   }

@@ -36,9 +36,10 @@ export async function demoCorps(snapshot) {
   if (!list.length) {
     const vcs = Array.isArray(snapshot?.vcenters) ? snapshot.vcenters : [];
     if (!vcs.length) return [];
+    const { demoEdgeOfVcenter } = await import('./edge.js');
     for (const vc of vcs) {
       const city = vc.location?.city || vc.name || vc.id;
-      const id = `dc-${slug(city) || slug(vc.id)}`;
+      const id = demoCorpId(vc, city, demoEdgeOfVcenter(vc.id));
       dcs.ensureDatacenter({ id, name: `${city} 법인`, region: vc.location?.region || vc.region || '', note: '데모(mock) 법인' });
     }
     list = dcs.listDatacenters();
@@ -54,6 +55,16 @@ export async function demoCorps(snapshot) {
  * 데모 엣지 등록이 'Seoul' 같은 DataCenter 를 자동으로 만든다) ② 없으면 도시 이름의 데모 법인 `dc-<도시>`(없으면 만든다 · note '데모(mock) 법인').
  * 사람이 등록한 vCenter(목 vCenter 가 아님)와 이미 할당된 vCenter 는 건드리지 않는다.
  */
+/**
+ * P6(v2.985 — 목 데이터 재현): 데모 법인 id. 그 vCenter 를 수집하는 데모 엣지의 라벨이 도시와 같으면 **라벨 id**(예 'seoul')를 쓴다 —
+ * 예전 'dc-seoul' 이면 엣지 자동 등록(analysisServers.ensureCollectorDatacenter · 라벨 'Seoul')이 id 가 다르다며 'Seoul' 법인을 하나 더 만들어
+ * 법인 목록에 'Seoul 법인' 과 'Seoul' 이 나란히 보였다. 라벨이 다른 도시(더블린 ← 프랑크푸르트 엣지)는 예전대로 'dc-<도시>'.
+ */
+export function demoCorpId(vc, city, edge) {
+  const c = slug(city) || slug(vc?.id);
+  return edge && slug(edge.datacenter) === c ? c : `dc-${c}`;
+}
+
 async function assignDemoCorps(dcs, snapshot) {
   const vcs = Array.isArray(snapshot?.vcenters) ? snapshot.vcenters : [];
   if (!vcs.length) return;
@@ -63,11 +74,14 @@ async function assignDemoCorps(dcs, snapshot) {
   const fresh = [];
   for (const vc of vcs) {
     if (!vc?.id || assigned[vc.id] || !isMockVcenter(vc)) continue;
-    const edgeDc = String(demoEdgeOfVcenter(vc.id)?.datacenter || '').toLowerCase();
-    let dc = edgeDc ? byName.get(edgeDc) : null;
+    const edge = demoEdgeOfVcenter(vc.id);
+    const edgeDc = String(edge?.datacenter || '').toLowerCase();
+    const city = vc.location?.city || vc.name || vc.id;
+    const cityId = demoCorpId(vc, city, edge);
+    // P6(v2.985): 그 도시의 데모 법인이 있으면 그것 먼저(예전 배치 그대로 — 더블린은 프랑크푸르트 엣지가 수집해도 더블린 법인), 없으면 엣지 법인.
+    let dc = byName.get(cityId) || (edgeDc ? byName.get(edgeDc) : null);
     if (!dc) {
-      const city = vc.location?.city || vc.name || vc.id;
-      dc = `dc-${slug(city) || slug(vc.id)}`;
+      dc = cityId;
       if (!byName.has(dc)) { dcs.ensureDatacenter({ id: dc, name: `${city} 법인`, region: vc.location?.region || vc.region || '', note: '데모(mock) 법인' }); byName.set(dc, dc); }
     }
     fresh.push({ vcenterId: String(vc.id), datacenterId: dc });

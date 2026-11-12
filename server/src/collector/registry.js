@@ -79,7 +79,8 @@ export function setCollectorDatacenterId(id, dcId, validIds = null) {
   if (registryLoadError()) return { ok: false, status: 503, code: 'registryUnreadable', reason: '수집 서버 등록부(collectors.json)를 읽지 못해 바꾸지 않습니다.' };
   const want = String(dcId ?? '').trim() === '' ? '' : normDcId(dcId);
   if (String(dcId ?? '').trim() !== '' && !want) return { ok: false, status: 400, reason: '법인(DataCenter) id 형식이 올바르지 않습니다.' };
-  if (want && validIds && !validIds.has(want)) return { ok: false, status: 400, reason: `없는 법인(DataCenter) id: ${want}` };
+  // P5(v2.985): 손으로 고친 datacenters.json 의 대문자 id 도 같은 법인으로 본다(대소문자 무시 — 저장은 소문자, 판정은 collectorDcMaps 가 실제 id 로 되돌린다).
+  if (want && validIds && ![...validIds].some((x) => String(x).toLowerCase() === want)) return { ok: false, status: 400, reason: `없는 법인(DataCenter) id: ${want}` };
   const list = loadCollectors();
   const idx = list.findIndex((c) => c.id === id);
   if (idx === -1) return { ok: false, status: 404, reason: `없는 수집 서버: ${id}` };
