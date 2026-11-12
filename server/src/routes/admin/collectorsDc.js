@@ -19,7 +19,7 @@ import { tlsListenerStatus } from '../../util/httpsServer.js';
 import { wanTlsStatus } from '../../util/resilientFetch.js';
 import { precheckTarget } from '../../sanswitch/precheck.js';
 import { collectorsToCsv, sampleCsv as collectorsSampleCsv, parseCollectorsCsv, analyzeCollectorsImport } from '../../collector/csv.js';
-import { clearCollectorServers, allRemoteServers } from '../../collector/remoteInventory.js';
+import { clearCollectorServers } from '../../collector/remoteInventory.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder } from '../../datacenter/store.js';
 import { allCollectorStatus, clearCollectorHosts, clearCollectorStatus } from '../../collector/state.js';
 import { agentIdentitySummary } from '../../central/agentIdentity.js';
@@ -35,7 +35,7 @@ import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../../util/readCapped.js'
 const EDGE_SMALL_MAX_BYTES = 256 * 1024;
 import { resolveBundleBytes, lastBundleReject } from '../../upgrade/bundleSource.js';
 import { upgradeManager } from '../../upgrade/manager.js';
-import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner, fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from './shared.js';
+import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner, fullScopeOnlyWith, fullReadWriteScopeOnlyWith, remoteServersResolved, hostVcByTag } from './shared.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
@@ -136,7 +136,7 @@ function transportView(list) {
  * v2.972: 수집 서버 → { id(법인 id · ''), via: 'manual'|'name'|'', stale?: true }(순수). 순서는 analysisServers.collectorToDatacenterMap 과 같다:
  * 사용자 매칭(datacenterId — 지금 목록에 있을 때만) → 이름 맞춤(datacenter 라벨 · id · 이름 ↔ DataCenter id · 이름).
  */
-export function collectorDcMatch(collectors, datacenters, { assign = null, vcOfCollector = null, vcName = null } = {}) {
+export function collectorDcMatch(collectors, datacenters, { assign = null, serversOf = null, tagVc = null, vcName = null } = {}) {
   const out = {};
   for (const c of collectors || []) {
     if (!c || c.id == null) continue;
@@ -148,52 +148,56 @@ export function collectorDcMatch(collectors, datacenters, { assign = null, vcOfC
       const m = matchDatacenterId([c.datacenter, c.id, c.name], datacenters || []);
       r = { id: m || '', via: m ? 'name' : '', ...(picked ? { stale: true, picked } : {}) };   // picked: 지워진 법인 id — 화면이 그 값을 선택지로 보여 줘야 '자동' 으로 해제할 수 있다(반증 F6)
     }
-    const conflicts = dcConflictsOf(c, r.id, { assign, vcOfCollector, vcName, datacenters });
+    const conflicts = dcConflictsOf(c, { assign, serversOf, tagVc, vcName, datacenters });
     out[c.id] = conflicts.length ? { ...r, conflicts } : r;
   }
   return out;
 }
 
 /**
- * v2.986(사용자 결정 2026-11-12 '불일치가 생기면 사용자가 매칭을 선택' · 방식 '버튼으로 한쪽에 맞추기'): 수집 서버의 법인(A)과 그 수집 서버가 맡은
- * vCenter 의 할당 법인(B)이 다르면 불일치다. 판정 경로마다 먼저 보는 것이 달라(서버 분석 = 수집 서버 법인 · 전력 분석 / 통합 인벤토리 = vCenter 할당)
- * 같은 서버가 화면마다 다른 법인이 된다(v2.985 P4). 규칙을 늘리지 않고 **설정 원천을 하나로 맞추게** 화면에 알린다 — 판정은 바꾸지 않는다.
- * '맡은 vCenter' = 등록부 collector.vcenterId(전력 샘플이 쓰는 값 — collector/puller.js) ∪ 그 수집 서버가 보고한 원격 서버의 vcenterId(vcOfCollector).
- * A 가 없거나(미지정) B 가 없는(할당 없음) vCenter 는 불일치가 아니다. 법인 id 비교는 대소문자 무시(resolvePickedDc 와 같은 관대함).
- * @returns {Array<{vcenterId:string, vcenterName:string, datacenterId:string, datacenterName:string}>}
+ * v2.986(사용자 결정 2026-11-12 '불일치가 생기면 사용자가 매칭을 선택' · 방식 '버튼으로 한쪽에 맞추기'): **서버 한 대 단위**로 판정한다(반증 D1 · D2 — 처음 판은
+ * 수집 서버 수준 매칭과 비교해 거짓 경보를 냈고, 그 버튼이 오히려 화면을 갈랐다).
+ *   A = 서버 분석이 그 서버에 쓰는 법인(analysisServers.remoteServersResolved 의 datacenterId — 사용자 매칭 > 엣지 태그 > 이름 맞춤).
+ *   B = 전력 분석 · 통합 인벤토리가 쓰는 vCenter 할당 법인 — 그 서버의 vCenter 는 전력 분석과 같은 순서: 수집 서버 등록부 vcenterId(전력 샘플 · collector/puller.js) →
+ *       서버의 vcenterId → 서비스태그로 찾은 ESXi 호스트의 vCenter(mappedVcenterId · hostVcByTag — 반증 D2).
+ *   A · B 가 모두 있고 다르면 불일치. (vCenter, A, B) 로 묶어 대수를 센다(8묶음 상한). 판정 규칙은 바꾸지 않는다 — 원천을 사용자가 한쪽으로 맞춘다:
+ *   '수집 서버를 B 로 매칭' 이면 사용자 매칭이 엣지 태그 · 이름 맞춤보다 먼저라 모든 서버가 B, 'vCenter 를 A 에 할당' 이면 B 가 A 가 된다.
+ * @returns {Array<{vcenterId:string, vcenterName:string, datacenterId:string, datacenterName:string, serverDatacenterId:string, serverDatacenterName:string, servers:number}>}
  */
-export function dcConflictsOf(c, dcId, { assign, vcOfCollector, vcName, datacenters } = {}) {
-  if (!dcId || !assign || typeof assign !== 'object') return [];
-  const vcs = new Set();
-  const own = String(c?.vcenterId || '').trim(); if (own) vcs.add(own);
-  if (typeof vcOfCollector === 'function') for (const v of vcOfCollector(String(c.id)) || []) { const s = String(v || '').trim(); if (s) vcs.add(s); }
+export function dcConflictsOf(c, { assign, serversOf, tagVc, vcName, datacenters } = {}) {
+  if (!c || !assign || typeof assign !== 'object' || typeof serversOf !== 'function') return [];
+  const lowAssign = new Map(Object.entries(assign).map(([k, v]) => [String(k), String(v || '')]));
   const nameOf = (id) => String((datacenters || []).find((d) => String(d.id) === String(id))?.name || id);
-  const out = [];
-  for (const vc of [...vcs].sort()) {
-    const b = String(assign[vc] || '').trim();
-    if (!b || b.toLowerCase() === String(dcId).toLowerCase()) continue;
-    out.push({ vcenterId: vc, vcenterName: (typeof vcName === 'function' && vcName(vc)) || vc, datacenterId: b, datacenterName: nameOf(b) });
+  const own = String(c.vcenterId || '').trim();
+  const groups = new Map();
+  for (const s of serversOf(String(c.id)) || []) {
+    const a = String(s?.datacenterId || '').trim();
+    if (!a) continue;
+    const tag = String(s?.serviceTag || s?.inv?.system?.serviceTag || '').trim().toLowerCase();
+    const vc = own || String(s?.vcenterId || '').trim() || (tag && typeof tagVc === 'function' ? String(tagVc(tag) || '') : '');
+    if (!vc) continue;
+    const b = lowAssign.get(vc) || '';
+    if (!b || b.toLowerCase() === a.toLowerCase()) continue;
+    const k = `${vc}\u0000${a}\u0000${b}`;
+    const g = groups.get(k) || { vcenterId: vc, vcenterName: (typeof vcName === 'function' && vcName(vc)) || vc, datacenterId: b, datacenterName: nameOf(b), serverDatacenterId: a, serverDatacenterName: nameOf(a), servers: 0 };
+    g.servers += 1; groups.set(k, g);
   }
-  return out.slice(0, 8);
+  return [...groups.values()].sort((x, y) => y.servers - x.servers || x.vcenterId.localeCompare(y.vcenterId)).slice(0, 8);
 }
 
-/** 수집 서버 id → 그 수집 서버가 보고한 원격 서버의 vCenter id 들(불일치 판정용 — 한 번 훑는다). 못 읽으면 빈 지도. */
-function remoteVcsByCollector() {
-  const m = new Map();
-  try {
-    for (const s of allRemoteServers()) {
-      const cid = String(s?.collectorId || ''); const vc = String(s?.vcenterId || '').trim();
-      if (!cid || !vc) continue;
-      if (!m.has(cid)) m.set(cid, new Set());
-      m.get(cid).add(vc);
-    }
-  } catch { /* 원격 목록을 못 읽으면 등록부 vcenterId 만으로 */ }
-  return (cid) => [...(m.get(cid) || [])];
-}
-function dcMatchContext() {
+export function dcMatchContext() {
   let assign = {}; try { assign = getDatacenterAssign() || {}; } catch { assign = {}; }
   const vcNames = new Map(((store.get()?.vcenters) || []).map((v) => [String(v.id), String(v.name || v.id)]));
-  return { assign, vcOfCollector: remoteVcsByCollector(), vcName: (id) => vcNames.get(String(id)) || '' };
+  const byCollector = new Map();
+  try {
+    for (const s of remoteServersResolved()) {
+      const cid = String(s?.collectorId || ''); if (!cid) continue;
+      if (!byCollector.has(cid)) byCollector.set(cid, []);
+      byCollector.get(cid).push(s);
+    }
+  } catch { /* 원격 목록을 못 읽으면 불일치를 말하지 않는다(지어내지 않는다) */ }
+  let tags = new Map(); try { tags = hostVcByTag(); } catch { tags = new Map(); }
+  return { assign, serversOf: (cid) => byCollector.get(cid) || [], tagVc: (t) => tags.get(t) || '', vcName: (id) => vcNames.get(String(id)) || '' };
 }
 
 export function registerCollectorsDc(adminRouter) {
@@ -446,7 +450,9 @@ adminRouter.post('/datacenters', adminOnly, fleetOnly, (req, res) => {
   res.status(r.ok ? 201 : 400).json(r);
 });
 // '/datacenters/assign'을 '/:id'보다 먼저 둬야 라우트 충돌이 없다.
-adminRouter.put('/datacenters/assign', adminOnly, fleetOnly, (req, res) => {
+// v2.986(반증 D4): vCenter → 법인 할당은 전 법인 판정을 바꾸는 쓰기 — 조회 ∧ 쓰기 모두 전체 범위(수집 서버 매칭 PUT 과 같은 게이트 · v2.904 규칙).
+//   예전 fleetOnly 는 조회 범위만 봐서 writeVcenters 로 쓰기만 줄인 관리자가 쓰기 범위 밖 vCenter 의 법인을 바꿀 수 있었다.
+adminRouter.put('/datacenters/assign', adminOnly, fullReadWriteScopeOnlyWith('vCenter 의 법인 할당은 전 법인 판정을 바꾸므로 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다.'), (req, res) => {
   const entries = Array.isArray(req.body?.entries) ? req.body.entries.slice(0, 5000) : [];
   if (!entries.length) return res.status(400).json({ ok: false, reason: 'entries가 비었습니다.' });
   const r = setVcenterDatacenterMany(entries);
