@@ -220,3 +220,15 @@
 .fm-wrap .fm-ednotes { display: flex; flex-direction: column; gap: 3px; font-size: 12px; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
 /* 대상 표의 작은 설명 글은 줄바꿈(표 칸이 줄어들면 옆 칸 단추 아래로 넘쳐 겹쳤다 — 위 단추 줄바꿈과 짝) */
 .fm-wrap .fm-tblbox .fm-st small { white-space: normal; }
+/* v2.981 프로세스 세부 정보 — 줄을 누르면 그 줄 아래에(대상 표 수정 칸과 같은 colSpan 한 줄 · 보이는 폭 안 sticky 상자 .fm-edbox) */
+.fm-wrap .fm-click { cursor: pointer; }
+.fm-wrap .fm-click:hover td, .fm-wrap .fm-click:focus-visible td { background: var(--panel-deep); }
+.fm-wrap .fm-click:focus-visible { outline: 2px solid var(--accent, #3987e5); outline-offset: -2px; }
+.fm-wrap .fm-more { font-size: 11px; }
+.fm-wrap .fm-pd { display: flex; flex-direction: column; gap: 10px; min-width: 0; white-space: normal; padding: 4px 0 8px; }
+.fm-wrap .fm-pd-head { flex-wrap: wrap; gap: 6px 10px; }
+.fm-wrap .fm-pd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; min-width: 0; }
+.fm-wrap .fm-pd-grid > .fm-card { min-width: 0; }
+.fm-wrap .fm-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: 12.5px; }
+.fm-wrap .fm-kv dt { color: var(--text-dim); }
+.fm-wrap .fm-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }

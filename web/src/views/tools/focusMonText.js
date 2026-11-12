@@ -327,6 +327,98 @@ export function editResultText(r, name = '') {
   const what = r.changes.map((c) => EDIT_FIELD_TEXT[c.k] || c.k).join(' · ');
   return `${r.target?.name || name} 을(를) 고쳤습니다(${what})${r.cleared ? ' — 접속처가 바뀌어 예전 연결 시험 결과를 지웠습니다. ‘시험’ 으로 확인하세요' : ''}.`;
 }
+/* ── 프로세스 세부 정보(v2.981 — 사용자 '프로세스를 클릭하면 어떤 프로세스인지 · 네트워크 · 디스크 · CPU' · 시안 ⑩ 컨펌 '구현해줘') ─────────
+ * '이름으로 본 설명' — comm(프로세스 이름 · 최대 15자)만 보고 붙이는 사전 문구다. 이름을 바꾼 프로그램이면 틀릴 수 있어 화면이 '이름으로 본 설명' 이라고 적는다.
+ * 사전에 없으면 null(화면 '아는 설명이 없습니다'). 같은 java 라도 무슨 프로그램인지는 서비스 이름(cgroup)으로 본다. */
+const PROC_DESC_EXACT = Object.freeze({
+  java: 'Java 프로그램(JVM) — 무슨 프로그램인지는 서비스 이름으로 봅니다',
+  postgres: 'PostgreSQL 데이터베이스', postmaster: 'PostgreSQL 데이터베이스',
+  mysqld: 'MySQL 데이터베이스', mariadbd: 'MariaDB 데이터베이스',
+  oracle: 'Oracle 데이터베이스 서버 프로세스', tnslsnr: 'Oracle 리스너',
+  mongod: 'MongoDB 데이터베이스', 'redis-server': 'Redis',
+  nginx: 'nginx 웹 서버', httpd: 'Apache 웹 서버', 'php-fpm': 'PHP-FPM',
+  node: 'Node.js 프로그램', perl: 'Perl 프로그램',
+  sshd: 'SSH 서버(접속 세션마다 하나씩)', systemd: 'systemd(서비스 관리자)',
+  'systemd-journal': '시스템 로그 수집(journald)', 'systemd-journald': '시스템 로그 수집(journald)', 'systemd-logind': '로그인 관리(logind)', 'systemd-udevd': '장치 관리(udev)',
+  rsyslogd: '시스템 로그(rsyslog)', crond: '예약 작업(cron)', auditd: '감사 로그(auditd)', chronyd: '시간 동기화(chrony)', ntpd: '시간 동기화(ntp)',
+  NetworkManager: '네트워크 관리', firewalld: '방화벽(firewalld)', tuned: '성능 프로필(tuned)', irqbalance: '인터럽트 분산',
+  dockerd: '컨테이너 런타임(Docker)', containerd: '컨테이너 런타임(containerd)', kubelet: 'Kubernetes 노드 에이전트',
+  kthreadd: '커널 스레드 관리', kswapd0: '커널 메모리 회수(스왑)', khugepaged: '커널 큰 페이지 정리',
+  bash: '셸', sh: '셸', ksh: '셸', zsh: '셸', csh: '셸',
+  rsync: '파일 동기화(rsync)', scp: '파일 복사(scp)', tar: '파일 묶기 · 풀기', gzip: '압축', pigz: '압축', bzip2: '압축', xz: '압축', zstd: '압축',
+  cp: '파일 복사', dd: '블록 복사(dd)', find: '파일 찾기', updatedb: '파일 색인(locate)',
+  awk: '명령줄 도구 — 이 포탈의 수집도 awk · cat 을 씁니다', cat: '명령줄 도구 — 이 포탈의 수집도 awk · cat 을 씁니다', grep: '명령줄 도구', sleep: '명령줄 도구',
+  vmtoolsd: 'VMware Tools', snmpd: 'SNMP 에이전트', zabbix_agentd: '모니터링 에이전트(Zabbix)', node_exporter: '모니터링 에이전트(Prometheus)',
+  telegraf: '모니터링 에이전트(Telegraf)', collectd: '모니터링 에이전트(collectd)', splunkd: '로그 전송(Splunk)', filebeat: '로그 전송(Filebeat)', fluentd: '로그 전송(fluentd)',
+  haproxy: '부하 분산(HAProxy)', keepalived: '고가용성(keepalived)', named: 'DNS 서버(BIND)', smbd: '파일 공유(Samba)', nfsd: 'NFS 서버',
+  'bareos-fd': 'Bareos 백업 — 파일 데몬', 'bareos-dir': 'Bareos 백업 — 디렉터', 'bareos-sd': 'Bareos 백업 — 저장 데몬', dsmc: 'TSM 백업 클라이언트', dsmcad: 'TSM 백업 클라이언트',
+  multipathd: '다중 경로(multipath) 관리', iscsid: 'iSCSI', lvmetad: 'LVM', dmeventd: 'LVM 이벤트', polkitd: '권한 관리(polkit)', 'dbus-daemon': '시스템 메시지 버스',
+  sssd: '인증(SSSD)', sssd_be: '인증(SSSD)', gssproxy: '인증(GSS)',
+});
+const PROC_DESC_RULES = Object.freeze([
+  [/^ora_[a-z0-9]+_/, 'Oracle 데이터베이스 백그라운드 프로세스'],
+  [/^python[0-9.]*$/, 'Python 프로그램'],
+  [/^containerd-shim/, '컨테이너 1개를 맡은 shim'],
+  [/^kworker[_/]/, '커널 작업 스레드'], [/^ksoftirqd[_/]/, '커널 소프트 인터럽트 처리'], [/^migration[_/]/, '커널 CPU 간 작업 이동'],
+  [/^rcu_/, '커널 RCU'], [/^jbd2[_/]/, 'ext4 저널 기록(커널)'], [/^xfs/, 'XFS 파일시스템(커널)'], [/^kblockd/, '커널 블록 입출력'],
+  [/^watchdog[_/]/, '커널 감시'], [/^cpuhp[_/]/, '커널 CPU 핫플러그'], [/^scsi_/, '커널 SCSI'],
+]);
+/** '이름으로 본 설명'(없으면 null). comm 은 원격이 안전한 글자로 바꾼 값('/' → '_')이다. */
+export function procDescOf(comm) {
+  const c = String(comm || '');
+  if (!c) return null;
+  if (Object.hasOwn(PROC_DESC_EXACT, c)) return PROC_DESC_EXACT[c];
+  for (const [re, d] of PROC_DESC_RULES) if (re.test(c)) return d;
+  return null;
+}
+/** 프로세스 상태(/proc/<pid>/stat 3번째 칸). */
+export const PROC_STATE_TEXT = Object.freeze({ R: '실행 중', S: '잠듦(기다림)', D: '디스크 대기(끊을 수 없음)', Z: '좀비(끝났지만 부모가 거두지 않음)', T: '멈춤', t: '추적 중', I: '유휴(커널 스레드)', X: '끝남' });
+/** 펼친 줄 열쇠 — 서버 · pid · 시작 tick(같은 pid 재사용을 가른다). */
+export const procKey = (id, p) => `${id}|${p?.pid}|${p?.sk ?? ''}`;
+/** 상위 30 에 든 시간 — '이 구간의 82% 동안 상위 30 에 있었습니다'. 덮은 시간을 모르면 ''. */
+export function procCoverText(cover) {
+  const tot = Number(cover?.totalMs); const inn = Number(cover?.inTopMs);
+  if (!(tot > 0) || !Number.isFinite(inn)) return '';
+  const pct = Math.round((inn / tot) * 100);
+  // 반증 F11: 덮은 시간은 '수집한 시간' 기준이다(수집하지 않은 시간은 분모에 없다)
+  if (pct >= 100) return '이 구간에 수집한 시간 내내 CPU 상위 30 에 있었습니다.';
+  return `이 구간에 수집한 시간의 ${pct}% 동안 CPU 상위 30 에 있었습니다 — 그 밖의 시간은 값을 모릅니다(차트가 끊긴 곳 · 0 이 아닙니다).`;
+}
+/**
+ * 스레드가 여럿인 프로세스의 안내(반증 F3): /proc/<pid>/stat 의 상태 · 디스크 대기 tick 은 **주 스레드 하나**의 값이다
+ * (CPU 시간 · major fault 는 스레드 합). 스레드가 하나면 ''.
+ */
+export function procThreadNote(th) {
+  const n = Number(th);
+  if (!Number.isFinite(n) || n <= 1) return '';
+  return `스레드 ${n}개 — 상태와 디스크를 기다린 시간은 주 스레드 하나의 값입니다(다른 스레드가 기다린 시간은 들어가지 않아 실제보다 작게 나올 수 있습니다). CPU 와 major fault 는 모든 스레드의 합입니다.`;
+}
+/** 디스크 읽기 · 쓰기를 못 읽은 까닭(값이 있으면 ''). */
+export function procIoNote(info) {
+  if (info && (info.rb != null || info.wb != null)) return '';
+  return '이 프로세스의 읽기 · 쓰기 양은 읽을 수 없습니다 — /proc/<pid>/io 는 그 프로세스의 계정이나 root 만 읽습니다(수집 계정에 sudo 를 주지 않습니다). 수집 계정이 띄운 프로세스만 값이 나옵니다.';
+}
+/** 디스크 대기를 아는지(da: 지연 집계) → 안내('' = 앎). */
+export function procWaitNote(da) {
+  if (da === true) return '';
+  if (da === false) return '이 서버는 지연 집계(task_delayacct)가 꺼져 있어 디스크를 기다린 시간을 알 수 없습니다(리눅스 5.14 이후 기본 꺼짐).';
+  return '이 서버가 지연 집계를 쓰는지 모릅니다(새 판 수집으로 다시 시작하면 나옵니다).';
+}
+export const PROC_NET_NOTE = '리눅스는 프로세스별 네트워크 바이트를 /proc 에 남기지 않습니다(root 권한 도구 nethogs · eBPF 가 필요하고 RHEL 7.8 기본 설치에 없습니다). 아래는 같은 시간의 서버 전체 수신 · 송신 — 이 프로세스의 몫이 아닌 참고입니다.';
+export const PROC_ARGS_NOTE = '명령 인자 · 환경은 수집하지 않습니다(인자에 비밀번호가 흔합니다) — 같은 이름이라도 무슨 프로그램인지는 서비스 이름으로 봅니다.';
+/** MB/s 글(값이 없으면 —). */
+export function mbsText(v) {
+  const x = Number(v);
+  if (v == null || v === '' || !Number.isFinite(x)) return DASH;
+  return x >= 100 ? `${Math.round(x)} MB/s` : x >= 10 ? `${x.toFixed(1)} MB/s` : `${x.toFixed(2)} MB/s`;
+}
+/** 메모리 MB → 'N MB' · 'N.N GB'(값이 없으면 —). */
+export function mbText(v) {
+  const x = Number(v);
+  if (v == null || v === '' || !Number.isFinite(x)) return DASH;
+  return x >= 1024 ? `${(x / 1024).toFixed(1)} GB` : `${Math.round(x)} MB`;
+}
+
 export const INSTALL_NOTE = 'restrict 는 포워딩 · 터미널 할당을 끕니다(OpenSSH 7.2 이상 — RHEL 7.8 은 7.4). 그 노드 주소에서만 쓰게 하려면 줄 앞에 from="노드 IP", 를 덧붙이세요. 수집은 /proc · /sys 를 읽기만 하므로 root · sudo 가 필요 없습니다.';
 
 /** 손으로 만든 폴링 루프의 다음 틱을 걸지 않을 오류(403 권한 · 404 경로 없음은 다시 물어도 같다). */

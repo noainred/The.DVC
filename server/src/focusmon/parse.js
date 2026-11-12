@@ -11,10 +11,10 @@
  *  · 정규식은 전부 앵커가 있고 길이가 한정된 꼴이다(외부 입력 — ReDoS 규약).
  */
 
-export const SECTIONS = Object.freeze(['STAT', 'LOAD', 'MEM', 'NET', 'DISK', 'NETTOPO', 'BLK', 'PS', 'PROC']);
+export const SECTIONS = Object.freeze(['STAT', 'LOAD', 'MEM', 'NET', 'DISK', 'NETTOPO', 'BLK', 'PS', 'UNIT', 'PROC', 'IO']);
 const ORDER = Object.freeze(Object.fromEntries(SECTIONS.map((s, i) => [s, i])));
 /** 구획별 줄 수 상한(스크립트의 head -n 과 같거나 조금 크다). */
-export const SECTION_MAX_LINES = Object.freeze({ STAT: 1100, LOAD: 4, MEM: 128, NET: 258, DISK: 1024, NETTOPO: 256, BLK: 512, PS: 20000, PROC: 20000 });
+export const SECTION_MAX_LINES = Object.freeze({ STAT: 1100, LOAD: 4, MEM: 128, NET: 258, DISK: 1024, NETTOPO: 256, BLK: 512, PS: 20000, PROC: 20000, UNIT: 20000, IO: 20000 });
 export const LINE_MAX = 4096;
 /** 프레임 하나가 붙잡을 수 있는 글자 수 상한(원래 줄 길이로 센다). 정상 프레임은 프로세스 2만 개여도 약 2MB —
  *  줄 수 상한 합(약 4만 3천 줄) × 줄 길이 상한이면 대상 1대가 수백 MB 를 붙잡을 수 있었다(2026-11-11 반증 4번). 넘으면 그 프레임을 버린다. */
@@ -105,6 +105,7 @@ export function parseHello(lines = []) {
     page: intOrNull(kv.page),
     ncpu: intOrNull(kv.ncpu),
     hidepid: intOrNull(kv.hidepid) != null ? intOrNull(kv.hidepid) > 0 : null,
+    dacct: delayAcctOf(kv.dacct),
     hostname: (kv.host || '').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 64),
   };
 }
@@ -263,18 +264,70 @@ export function parsePs(lines = []) {
   return out;
 }
 
-/** ##PROC `pid ticks threads starttime rssPages comm` → 배열. */
+/**
+ * ##PROC `pid ticks threads starttime rssPages comm [ppid utime stime nice vsizeBytes majflt blkioTicks state]` → 배열.
+ * v2.981 이 comm 뒤에 8칸을 더했다 — 14칸이면 새 줄(comm 은 원격 awk 가 공백 없는 안전한 글자로 바꾼다), 6칸이면 옛 줄(새 칸 null), 그 밖은 버린다.
+ */
 export function parseProc(lines = []) {
   const out = [];
   for (const l of lines) {
     const f = words(l);
-    if (f.length < 6) continue;
+    // v2.981 반증 F4: 정확히 6칸(옛 줄) · 14칸(새 줄)만 — 빈 comm 이면 13칸이 돼 옛 경로로 '1_300_…' 같은 이름이 만들어졌다(원격도 빈 comm 을 '_' 로 바꾼다).
+    if (f.length !== 6 && f.length !== 14) continue;
     const pid = intOrNull(f[0]); const ticks = intOrNull(f[1]); const thr = intOrNull(f[2]); const start = intOrNull(f[3]); const rss = intOrNull(f[4]);
-    const comm = f.slice(5).join('_').slice(0, 64);
+    const ext = f.length === 14;
+    const comm = f[5].slice(0, 64);
     if (pid == null || ticks == null || start == null || !/^[A-Za-z0-9._:@+-]{1,64}$/.test(comm)) continue;
-    out.push({ pid, ticks, thr, start, rss, comm });
+    const row = { pid, ticks, thr, start, rss, comm, ppid: null, ut: null, st: null, ni: null, vsz: null, mf: null, bio: null, state: null };
+    if (ext) {
+      row.ppid = intOrNull(f[6]); row.ut = intOrNull(f[7]); row.st = intOrNull(f[8]);
+      row.ni = /^-?\d{1,3}$/.test(f[9]) ? Number(f[9]) : null;
+      row.vsz = intOrNull(f[10]); row.mf = intOrNull(f[11]); row.bio = intOrNull(f[12]);
+      row.state = /^[A-Za-z]$/.test(f[13]) ? f[13] : null;
+    }
+    out.push(row);
   }
   return out;
+}
+
+/** 서비스 이름(v2.981) — `.service` · `.scope` 로 끝나는 안전한 글자만(점 둘 · 경로 글자 · 공백 없음). */
+const UNIT_RE = /^(?!.*\.\.)[A-Za-z0-9@_:-][A-Za-z0-9@._:-]{0,95}$/;
+/** ##UNIT `pid unit` → Map(pid → 서비스 이름). */
+export function parseUnit(lines = []) {
+  const out = new Map();
+  for (const l of lines) {
+    const f = words(l);
+    if (f.length !== 2) continue;
+    const pid = intOrNull(f[0]); const u = f[1];
+    if (pid == null || !UNIT_RE.test(u) || !/\.(service|scope)$/.test(u)) continue;
+    out.set(pid, u);
+  }
+  return out;
+}
+
+/** ##IO `pid readBytes writeBytes` → Map(pid → { r, w }) — 읽을 수 있었던 프로세스만(그 밖은 맵에 없다 = 모름). */
+export function parseIo(lines = []) {
+  const out = new Map();
+  for (const l of lines) {
+    const f = words(l);
+    if (f.length !== 3) continue;
+    const pid = intOrNull(f[0]); const r = intOrNull(f[1]); const w = intOrNull(f[2]);
+    if (pid == null || r == null || w == null) continue;
+    out.set(pid, { r, w });
+  }
+  return out;
+}
+
+/**
+ * 지연 집계(디스크 대기 tick)가 켜져 있나(v2.981) — HELLO `dacct <sysctl|-> <nodelayacct 개수>`.
+ * sysctl 1/0 이 있으면 그 값(5.14 이후 · 기본 꺼짐) · 없으면(옛 커널 · RHEL 7) 부트 옵션 nodelayacct 가 없을 때 켜짐 · 줄이 없으면(옛 수집) 모름.
+ */
+export function delayAcctOf(v) {
+  const m = /^(-|0|1)\s+(\d{1,4})$/.exec(String(v ?? '').trim());
+  if (!m) return null;
+  if (m[1] === '1') return true;
+  if (m[1] === '0') return false;
+  return Number(m[2]) === 0;
 }
 
 /** 프레임 → 원시 카운터 묶음(구획이 없으면 그 칸 null — 30초 구획은 보통 없다). */
@@ -291,6 +344,8 @@ export function frameToRaw(frame) {
     blk: s.BLK ? parseBlk(s.BLK) : null,
     ps: s.PS ? parsePs(s.PS) : null,
     proc: s.PROC ? parseProc(s.PROC) : null,
+    unit: s.UNIT ? parseUnit(s.UNIT) : null,
+    io: s.IO ? parseIo(s.IO) : (s.PROC ? new Map() : null),
     truncated: Array.isArray(frame?.truncated) ? frame.truncated.slice() : [],
   };
 }

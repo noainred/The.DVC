@@ -206,11 +206,21 @@ export function computeSample(prev, cur, ctx = {}) {
 
 /**
  * 프로세스 상위 N(CPU) — 두 PROC 구획의 누적 CPU 시간 차이. 같은 pid 라도 시작 시각이 다르면 다른 프로세스(재사용)라 버린다.
+ * v2.981(프로세스 세부 정보): 사용자/커널 몫 · 부모(pid · 이름) · 서비스 · nice · 상태 · 가상 메모리 · major fault/s · 디스크 대기 % · 읽기/쓰기 MB/s ·
+ *   같은 이름 수 · 시작 tick(sk — 같은 프로세스 판정)을 함께 싣는다. **못 읽은 값은 null**(0 아님):
+ *   · 읽기/쓰기 — /proc/<pid>/io 를 못 읽은 프로세스(그 계정 · root 가 아님)
+ *   · 디스크 대기 — 지연 집계가 꺼진 서버(dacct false) · 모름(null) · 칸 없는 커널
+ *   · 옛 줄(새 칸 없음)의 새 값 전부
  * @param {Array} prevList  앞 PROC(parseProc)
  * @param {Array} curList   이번 PROC
- * @param {object} o        { dt(uptime 차이 초), tck, page, ncpu, up(이번 uptime), users: Map(pid → 사용자) }
+ * @param {object} o        { dt(uptime 차이 초), tck, page, ncpu, up(이번 uptime), users: Map(pid → 사용자), units: Map(pid → 서비스),
+ *                            io: Map(pid → {r,w}) 이번 · prevIo 앞, dacct: 지연 집계 켜짐(true|false|null),
+ *                            usersUp · unitsUp: 사용자 · 서비스 맵을 읽은 프레임의 uptime(초) — 그 뒤에 시작한 프로세스에는 붙이지 않는다(반증 F6:
+ *                            30초 묵은 맵이라 그 사이 pid 를 다시 쓴 새 프로세스에 예전 계정 · 서비스가 붙었다 → '모름') }
+ * 반증 F10: 새 칸 가운데 null 은 싣지 않는다(DB 묶음 크기 — 읽는 쪽은 모두 `?? null`).
  */
-export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users } = {}) {
+const NEW_KEYS = Object.freeze(['us', 'sy', 'pp', 'pc', 'sv', 'ns', 'ni', 'st', 'vsz', 'mf', 'io', 'rb', 'wb', 'sk']);
+export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users, units, io, prevIo, dacct = null, usersUp = null, unitsUp = null } = {}) {
   if (!Array.isArray(prevList) || !Array.isArray(curList) || !(dt > 0) || !(tck > 0)) return null;
   const before = new Map(prevList.map((p) => [p.pid, p]));
   const rows = [];
@@ -219,17 +229,44 @@ export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users } =
     if (!q || q.start !== p.start) continue;
     const d = delta(q.ticks, p.ticks);
     if (d == null) continue;
-    rows.push({ p, cpu: (d / tck / dt) * 100 });
+    rows.push({ p, q, cpu: (d / tck / dt) * 100 });
   }
   rows.sort((a, b) => b.cpu - a.cpu || a.p.pid - b.p.pid);
   const pg = page > 0 ? page : 4096;
-  const top = rows.slice(0, TOP_N).map(({ p, cpu }) => ({
-    pid: p.pid, c: p.comm, u: users?.get?.(p.pid) || null, cpu: r1(cpu),
-    sh: ncpu > 0 ? r2(cpu / ncpu) : null,
-    rss: p.rss == null ? null : r1((p.rss * pg) / 1048576), th: p.thr ?? null,
-    et: up != null && p.start != null ? Math.max(0, Math.round(up - p.start / tck)) : null,
-  }));
-  return { n: curList.length, top };
+  const top = rows.slice(0, TOP_N);
+  // 부모 이름 · 같은 이름 수는 상위에 든 것만 본다(전체 목록을 한 번 훑는다)
+  const commOf = new Map(); const sameCount = new Map();
+  if (top.length) {
+    const want = new Set(top.map((x) => x.p.ppid).filter((v) => v != null && v > 0));
+    const names = new Set(top.map((x) => x.p.comm));
+    for (const p of curList) {
+      if (want.has(p.pid)) commOf.set(p.pid, p.comm);
+      if (names.has(p.comm)) sameCount.set(p.comm, (sameCount.get(p.comm) || 0) + 1);
+    }
+  }
+  const pct = (a, b) => { const x = delta(a, b); return x == null ? null : r1((x / tck / dt) * 100); };
+  const startedAfter = (mapUp, p) => mapUp != null && p.start != null && p.start / tck > mapUp;
+  const out = top.map(({ p, q, cpu }) => {
+    const i1 = io?.get?.(p.pid); const i0 = prevIo?.get?.(p.pid);
+    const rd = i1 && i0 ? delta(i0.r, i1.r) : null; const wr = i1 && i0 ? delta(i0.w, i1.w) : null;
+    const row = {
+      pid: p.pid, c: p.comm, u: startedAfter(usersUp, p) ? null : (users?.get?.(p.pid) || null), cpu: r1(cpu),
+      sh: ncpu > 0 ? r2(cpu / ncpu) : null,
+      rss: p.rss == null ? null : r1((p.rss * pg) / 1048576), th: p.thr ?? null,
+      et: up != null && p.start != null ? Math.max(0, Math.round(up - p.start / tck)) : null,
+      us: pct(q.ut, p.ut), sy: pct(q.st, p.st),
+      pp: p.ppid ?? null, pc: p.ppid > 0 ? (commOf.get(p.ppid) ?? null) : null,
+      sv: startedAfter(unitsUp, p) ? null : (units?.get?.(p.pid) || null), ns: sameCount.get(p.comm) ?? null,
+      ni: p.ni ?? null, st: p.state ?? null, vsz: p.vsz == null ? null : r1(p.vsz / 1048576),
+      mf: (() => { const x = delta(q.mf, p.mf); return x == null ? null : r1(x / dt); })(),
+      io: dacct === true ? pct(q.bio, p.bio) : null,
+      rb: rd == null ? null : r2(rd / dt / 1048576), wb: wr == null ? null : r2(wr / dt / 1048576),
+      sk: p.start ?? null,
+    };
+    for (const k of NEW_KEYS) if (row[k] == null) delete row[k];
+    return row;
+  });
+  return { n: curList.length, top: out, da: dacct === true ? true : dacct === false ? false : null };
 }
 
 /** 개요 카드 요약(서버 1대 · 표본 1개) — 화면 · 비교 · 정렬이 같은 값을 쓴다. */

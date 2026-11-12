@@ -61,7 +61,9 @@ test('① 원격 명령은 주기별 상수 넷 — 주기 숫자만 다르고 �
   assert.equal(SCRIPT.scriptFor(3), SCRIPT.SCRIPTS[2], '목록 밖 주기는 기본(2초) 상수');
   assert.equal(SCRIPT.scriptFor("2; rm -rf /"), SCRIPT.SCRIPTS[2], '주기 자리에 글자가 와도 상수만');
   const s = SCRIPT.SCRIPTS[2];
-  assert.ok(!/cmdline|environ/.test(s), '프로세스 인자 · 환경을 읽지 않는다');
+  // v2.981: 커널 부트 줄(/proc/cmdline)에서 nodelayacct 개수만 세는 한 줄은 글자 그대로만 예외(내용을 내보내지 않는다 — 프로세스 인자와 다른 파일).
+  assert.equal(s.split('grep -c nodelayacct /proc/cmdline 2>/dev/null').length - 1, 1, '예외 줄은 정확히 한 번');
+  assert.ok(!/cmdline|environ/.test(s.replace('grep -c nodelayacct /proc/cmdline 2>/dev/null', '')), '프로세스 인자 · 환경을 읽지 않는다');
   assert.ok(!/\bsudo\b|\bsu\b|pkexec|doas/.test(s), 'sudo 류 0');
   assert.ok(!/\brm\b|\btee\b|\bkill\b|\bmkdir\b|\btouch\b/.test(s), '쓰기 · 종료 명령 0');
   const shell = s.replace(/awk '[^']*'/g, 'awk PROG'); // awk 프로그램 안의 비교(>0)는 리다이렉트가 아니다
@@ -69,7 +71,7 @@ test('① 원격 명령은 주기별 상수 넷 — 주기 숫자만 다르고 �
   assert.ok(redirects.length > 0 && redirects.every((r) => r === '2>/dev/null'), `리다이렉트는 /dev/null 만: ${redirects.join(' | ')}`);
   assert.match(s, /ps -e -o pid=,user:32=/, 'ps 는 pid · 사용자만');
   assert.ok(!/getline/.test(s), 'awk getline 으로 /proc 을 읽지 않는다(mawk 중단)');
-  assert.match(s, /cat \/proc\/\[0-9\]\*\/stat 2>\/dev\/null \| awk/);
+  assert.match(s, /grep -H '' \/proc\/\[0-9\]\*\/stat 2>\/dev\/null \| awk/, 'v2.981: pid 는 파일 경로에서(줄바꿈 comm 위조 — 반증 F2)');
   assert.ok(!/[^\n]*\$\{?(name|host|user|target)/i.test(s), '대상 정보 변수 없음');
 });
 

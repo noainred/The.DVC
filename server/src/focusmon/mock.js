@@ -50,7 +50,7 @@ export function demoHello(id) {
   const i = BY_ID.get(String(id)) ?? 0;
   const d = DEF[i];
   return { kernel: 'Linux 3.10.0-1127.el7.x86_64 x86_64', isLinux: true, release: 'Red Hat Enterprise Linux Server release 7.8 (Maipo)', rhelMajor: '7.8',
-    tck: 100, page: 4096, ncpu: d[11], hidepid: false, hostname: d[0] };
+    tck: 100, page: 4096, ncpu: d[11], hidepid: false, dacct: true, hostname: d[0] };
 }
 
 function diskRow(n, k, p, mp, sz, util, wAwait, rRatio, seed, t, extra = {}) {
@@ -140,13 +140,15 @@ export function demoSample(id, ts, interval = 2) {
   };
 }
 
+// [이름, 사용자, CPU 기준, 스레드, 서비스(v2.981 — 데모 세부 정보), 디스크 대기 기준 %]
 const PROC_NAMES = [
-  ['java', 'wasadm', 380, 12], ['oracleORCL', 'oracle', 99, 1], ['ora_p001_ORCL', 'oracle', 96, 1], ['ora_p003_ORCL', 'oracle', 95, 1], ['ora_dbw0_ORCL', 'oracle', 61, 1],
-  ['ora_lgwr_ORCL', 'oracle', 38, 1], ['bareos-sd', 'bareos', 160, 37], ['python3', 'mes', 140, 24], ['nfsd', 'root', 47, 1], ['smbd', 'root', 33, 1],
-  ['nginx', 'nginx', 31, 1], ['kworker_3:1', 'root', 8, 1], ['sshd', 'root', 2, 1], ['systemd', 'root', 1, 1], ['rsyslogd', 'root', 1, 3],
+  ['java', 'wasadm', 380, 12, 'tomcat.service', 2], ['oracleORCL', 'oracle', 99, 1, 'dbora.service', 6], ['ora_p001_ORCL', 'oracle', 96, 1, 'dbora.service', 4], ['ora_p003_ORCL', 'oracle', 95, 1, 'dbora.service', 4], ['ora_dbw0_ORCL', 'oracle', 61, 1, 'dbora.service', 18],
+  ['ora_lgwr_ORCL', 'oracle', 38, 1, 'dbora.service', 22], ['bareos-sd', 'bareos', 160, 37, 'bareos-sd.service', 9], ['python3', 'mes', 140, 24, 'mes-worker.service', 1], ['nfsd', 'root', 47, 1, null, 3], ['smbd', 'root', 33, 1, 'smb.service', 2],
+  ['nginx', 'nginx', 31, 1, 'nginx.service', 0], ['kworker_3:1', 'root', 8, 1, null, 0], ['sshd', 'root', 2, 1, 'sshd.service', 0], ['systemd', 'root', 1, 1, 'init.scope', 0], ['rsyslogd', 'root', 1, 3, 'rsyslog.service', 0],
+  ['rsync', 'dvcmon', 20, 1, 'session-12.scope', 12],
 ];
 
-/** 데모 프로세스 상위 30. */
+/** 데모 프로세스 상위 30. v2.981: 세부 정보 칸(사용자/커널 · 부모 · 서비스 · 디스크 대기 · 읽기/쓰기는 수집 계정 dvcmon 의 프로세스만). */
 export function demoProcs(id, ts) {
   const i = BY_ID.get(String(id));
   if (i == null) return null;
@@ -157,8 +159,19 @@ export function demoProcs(id, ts) {
   for (let k = 0; k < 40; k++) {
     const pn = PROC_NAMES[(k + i) % PROC_NAMES.length];
     const cpu = r2(Math.max(0, pn[2] * load * (0.6 + 0.8 * hash(i * 50 + k, t)) * (k < 6 ? 1 : 0.4)));
-    rows.push({ pid: 1000 + ((i * 977 + k * 131) % 60000), c: pn[0], u: pn[1], cpu, sh: r2(cpu / d[11]), rss: r2(200 + 1800 * hash(i, k)), th: pn[3], et: 3600 * (1 + ((i + k) % 200)) });
+    const pid = 1000 + ((i * 977 + k * 131) % 60000);
+    const rss = r2(200 + 1800 * hash(i, k));
+    const io = r2(pn[5] * (0.5 + hash(i * 7 + k, t)));
+    const own = pn[1] === 'dvcmon'; // 수집 계정 소유 — /proc/<pid>/io 를 읽을 수 있다
+    rows.push({
+      pid, c: pn[0], u: pn[1], cpu, sh: r2(cpu / d[11]), rss, th: pn[3], et: 3600 * (1 + ((i + k) % 200)),
+      us: r2(cpu * 0.82), sy: r2(cpu * 0.18), pp: pn[0] === 'systemd' ? 0 : pn[0].startsWith('kworker') ? 2 : 1, pc: pn[0] === 'systemd' ? null : pn[0].startsWith('kworker') ? 'kthreadd' : 'systemd',
+      sv: pn[4], ns: null, ni: 0, st: cpu > 50 ? 'R' : 'S', vsz: r2(rss * 3.2), mf: r2(hash(i + k, t) * 2), io,
+      rb: own ? r2(40 + 30 * hash(i * 3 + k, t)) : null, wb: own ? r2(5 + 4 * hash(i * 5 + k, t)) : null, sk: 50_000 + pid,
+    });
   }
+  const same = new Map(); for (const r of rows) same.set(r.c, (same.get(r.c) || 0) + 1);
+  for (const r of rows) r.ns = same.get(r.c) + (r.c.startsWith('ora_') ? 30 : 0); // 데모: 오라클 백그라운드 프로세스는 상위 밖에도 더 있다
   rows.sort((a, b) => b.cpu - a.cpu || a.pid - b.pid);
-  return { n: 420 + i * 13, top: rows.slice(0, TOP_N) };
+  return { n: 420 + i * 13, top: rows.slice(0, TOP_N), da: true };
 }

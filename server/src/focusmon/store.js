@@ -113,7 +113,7 @@ export function ingestProcs(id, ts, p) {
   const e = entry(id);
   const minute = Math.floor(ts / 60_000);
   const list = e.procs.get(minute) || [];
-  if (list.length < 60) list.push({ t: ts, n: p.n ?? null, top: p.top || [] });
+  if (list.length < 60) list.push({ t: ts, n: p.n ?? null, top: p.top || [], ...(p.da === true || p.da === false ? { da: p.da } : {}) }); // da: 지연 집계(v2.981 — 디스크 대기를 아는지)
   e.procs.set(minute, list);
   if (!e.latestProcs || ts >= e.latestProcs.ts) e.latestProcs = { ts, ...p };
   return true;

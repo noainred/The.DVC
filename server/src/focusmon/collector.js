@@ -52,6 +52,7 @@ export function createCollector(target, { interval, keys, onSample, onProcs, onS
   let status = { state: 'connecting', since: now(), lastSampleAt: null, error: '', hello: null, osVerified: null, interval: iv };
   let sessionSamples = 0;
   let prevRaw = null; let prevAt = 0; let topo = {}; let blk = null; let users = new Map(); let prevProc = null; let prevProcUp = null; let hello = null;
+  let units = new Map(); let prevIo = null; let usersUp = null; let unitsUp = null; // v2.981 서비스(30초) · 앞 입출력(프로세스 주기) · 맵을 읽은 uptime(반증 F6)
 
   const setStatus = (patch) => {
     status = { ...status, ...patch, interval: iv };
@@ -65,7 +66,8 @@ export function createCollector(target, { interval, keys, onSample, onProcs, onS
     const raw = frameToRaw(frame);
     if (raw.netTopo) topo = raw.netTopo;
     if (raw.blk) blk = raw.blk;
-    if (raw.ps) users = raw.ps;
+    if (raw.ps) { users = raw.ps; usersUp = raw.up; }
+    if (raw.unit) { units = raw.unit; unitsUp = raw.up; }
     const ts = now();
     if (prevRaw && ts - prevAt < 120_000) {
       const s = computeSample(prevRaw, raw, { topo, blk });
@@ -79,10 +81,10 @@ export function createCollector(target, { interval, keys, onSample, onProcs, onS
     }
     if (raw.proc) {
       if (prevProc && raw.up != null && prevProcUp != null) {
-        const tp = topProcs(prevProc, raw.proc, { dt: raw.up - prevProcUp, tck: hello?.tck, page: hello?.page, ncpu: hello?.ncpu, up: raw.up, users });
+        const tp = topProcs(prevProc, raw.proc, { dt: raw.up - prevProcUp, tck: hello?.tck, page: hello?.page, ncpu: hello?.ncpu, up: raw.up, users, units, io: raw.io, prevIo, dacct: hello?.dacct ?? null, usersUp, unitsUp });
         if (tp) { try { onProcs?.(tp, { ts }); } catch { /* */ } }
       }
-      prevProc = raw.proc; prevProcUp = raw.up;
+      prevProc = raw.proc; prevProcUp = raw.up; prevIo = raw.io || null;
     }
     prevRaw = raw; prevAt = ts;
   }

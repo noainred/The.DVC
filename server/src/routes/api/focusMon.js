@@ -455,6 +455,27 @@ api.get('/tools/focus-mon/procs', adminOnly, fullScopeOnly, async (req, res) => 
   res.json({ ok: true, win: w.win, from: w.from, to: w.to, past: w.past, missing, usersMasked: !admin, ...r });
 });
 
+/**
+ * 프로세스 세부 정보(v2.981 — 사용자 '프로세스를 클릭하면 어떤 프로세스인지 · 네트워크 · 디스크 · CPU'). 대상 하나 · pid 하나(+ 시작 tick sk).
+ * 같은 문(admin · 전체 범위 — 전 법인 서버의 프로세스) · 사용자 이름은 관리자 판본만 원문 · 그 구간의 상위 30 에 없었으면 404.
+ */
+api.get('/tools/focus-mon/proc', adminOnly, fullScopeOnly, async (req, res) => {
+  const vis = visibleById(req);
+  const id = String(req.query.target || '');
+  if (!vis.has(id)) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다.' });
+  const pid = /^\d{1,7}$/.test(String(req.query.pid ?? '')) ? Number(req.query.pid) : null;
+  if (!pid || pid > 4_194_304) return res.status(400).json({ ok: false, code: 'bad-pid', reason: 'PID 는 1 ~ 4194304 의 정수입니다.' });
+  const skRaw = req.query.sk;
+  const sk = skRaw == null || skRaw === '' ? null : /^\d{1,15}$/.test(String(skRaw)) ? Number(skRaw) : NaN;
+  if (Number.isNaN(sk)) return res.status(400).json({ ok: false, code: 'bad-sk', reason: '시작 시각(sk)은 0 이상의 정수입니다.' });
+  const w = Q.normWindow({ win: req.query.win, end: req.query.end });
+  if (!w.past) store.touchView([id]);
+  const admin = isAdminDetailUser(req.user);
+  const r = await Q.procDetail(id, w, { pid, sk, maskUser: admin ? (u) => u : (u) => maskedIdToken(u) });
+  if (!r) return res.status(404).json({ ok: false, code: 'not-in-window', reason: '이 구간의 CPU 상위 30 에 이 프로세스가 없습니다 — 끝났거나 상위 밖으로 내려갔습니다.' });
+  res.json({ ok: true, win: w.win, from: w.from, to: w.to, past: w.past, usersMasked: !admin, ...r });
+});
+
 /** 기록이 있는 시간 — 그 날(포탈 기준 날짜) 또는 최근 24시간. */
 api.get('/tools/focus-mon/coverage', adminOnly, fullScopeOnly, async (req, res) => {
   const { ids } = pickIds(req, 40);
