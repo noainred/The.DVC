@@ -19,7 +19,7 @@ const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx'))
 import TransportPanel from './collectors/TransportPanel.jsx';
 import { transportBadge, formHttpNote, importHttpNote } from './collectors/transportText.js';
 import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
-import { autoOptionText, matchNote, matchSortText, selectValue, saveText as dcSaveText } from './collectors/collectorDcText.js'; // v2.972: 수집 서버 ↔ 법인 매칭
+import { autoOptionText, matchNote, matchSortText, selectValue, conflictChoices, saveText as dcSaveText } from './collectors/collectorDcText.js'; // v2.972: 수집 서버 ↔ 법인 매칭
 import { edgeSyncLine, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: 엣지 자동 업그레이드 한 줄 + '구버전 엣지 밀어 넣기'
 
 // S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
@@ -53,6 +53,17 @@ export default function Collectors() {
     setDcBusy((s) => new Set(s).add(c.id)); setBanner(null);
     try { const text = dcSaveText(await putJson(`/admin/collectors/${encodeURIComponent(c.id)}/datacenter`, { datacenterId: dcId }), c.id, dcs); await load(); setBanner({ ok: true, text }); }
     catch (e) { setBanner({ ok: false, text: e.message }); }
+    finally { setDcBusy((s) => { const n = new Set(s); n.delete(c.id); return n; }); }
+  };
+  // v2.986: 불일치 해소 — vCenter 의 법인 할당을 이 수집 서버의 법인으로(PUT /admin/datacenters/assign — 기존 경로 · 감사). 그 vCenter 의 모든 서버 법인이 바뀌므로 묻는다.
+  const assignVcToDc = async (c, ch) => {
+    if (!window.confirm(`${ch.label}\n\n그 vCenter 의 호스트 · VM · 서버가 모두 이 법인으로 집계됩니다(서버 분석 · 통합 서버 인벤토리 · 전력 분석 · 법인별 화면).`)) return;
+    setDcBusy((s) => new Set(s).add(c.id)); setBanner(null);
+    try {
+      const r = await putJson('/admin/datacenters/assign', { entries: [{ vcenterId: ch.vcenterId, datacenterId: ch.datacenterId }] });
+      if (!r || r.ok === false) throw new Error(r?.reason || 'vCenter 법인 할당을 저장하지 못했습니다.');
+      await load(); setBanner({ ok: true, text: `vCenter ‘${ch.vcenterId}’ 를 이 수집 서버의 법인에 할당했습니다.` });
+    } catch (e) { setBanner({ ok: false, text: e.message }); }
     finally { setDcBusy((s) => { const n = new Set(s); n.delete(c.id); return n; }); }
   };
 
@@ -497,6 +508,15 @@ export default function Collectors() {
                             {dcs.map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}
                           </Select>
                           {note.text && <div style={{ fontSize: 11, marginTop: 2, maxWidth: 200, color: note.tone === 'warn' ? 'var(--amber)' : note.tone === 'ok' ? 'var(--green)' : 'var(--text-dim)' }}>{note.text}</div>}
+                          {conflictChoices(m, dcs).map((ch) => (
+                            <div key={ch.key} style={{ fontSize: 11, marginTop: 4, maxWidth: 220, color: 'var(--amber)', whiteSpace: 'normal' }}>
+                              ⚠ {ch.text}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>
+                                <button type="button" className="tab" style={{ fontSize: 11, padding: '2px 6px' }} disabled={dcBusy.has(c.id)} onClick={() => saveDc(c, ch.toCollector.datacenterId)}>{ch.toCollector.label}</button>
+                                <button type="button" className="tab" style={{ fontSize: 11, padding: '2px 6px' }} disabled={dcBusy.has(c.id)} onClick={() => assignVcToDc(c, ch.toVcenter)}>{ch.toVcenter.label}</button>
+                              </div>
+                            </div>
+                          ))}
                           <div className="muted" style={{ fontSize: 11, marginTop: 2 }} title="엣지가 자기등록 때 보낸 데이터센터 라벨(자유 글자)">엣지 라벨 {c.datacenter ? <span className="badge blue" style={{ fontSize: 10 }}>{c.datacenter}</span> : '—'}</div>
                         </>
                       );

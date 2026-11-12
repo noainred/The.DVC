@@ -1500,6 +1500,12 @@
     P1: 설정 › 수집 서버 표 — ID · 이름 한 칸, 엣지 라벨은 법인 매칭 칸 안, 동기화는 버전 아래, 수집 켜짐은 상태 칸, 작업 버튼 세로(1440px scrollWidth 1600 → 894 = clientWidth).
     법인 목록을 받은 뒤 수집 서버 목록을 한 번 다시 읽는다(목록 조회의 법인 백필 뒤 매칭이 15초간 '맞는 법인 없음' 이던 것). P7: verify 문서 — worktree 는 /home/user 아래.
     회귀 `server/test/collectorDcFollow2985.test.js`.
+  - **v2.986 — 수집 서버 법인 ↔ vCenter 할당 법인 불일치는 사용자가 고른다**(사용자 결정 2026-11-12 '불일치가 생기면 사용자가 매칭을 선택' · 방식 '버튼으로 한쪽에 맞추기' — v2.985 P4):
+    판정 규칙은 그대로다(서버 분석 = 수집 서버 법인 먼저 · 전력 분석 / 통합 인벤토리 = vCenter 할당 먼저). 대신 `GET /admin/collectors` 의 `dcMatch[id].conflicts` 가
+    수집 서버 법인(A) ≠ 그 수집 서버가 맡은 vCenter(등록부 vcenterId ∪ 그 수집 서버가 보고한 원격 서버의 vcenterId)의 할당 법인(B)을 알리고(`collectorsDc.js dcConflictsOf` · 8개 상한 ·
+    A 미지정 · B 할당 없음은 불일치 아님 · 대소문자 무시), 설정 › 수집 서버 '법인 매칭' 칸이 경고 + 두 버튼을 낸다: '수집 서버를 B 로 매칭'(PUT /collectors/:id/datacenter) ·
+    'vCenter 를 A 에 할당'(기존 PUT /datacenters/assign — 감사 'vCenter→DataCenter 할당' · 확인 창). 어느 쪽이든 원천이 하나로 맞아 모든 화면이 같은 법인을 본다.
+    회귀 `server/test/collectorDcConflict2986.test.js` · `web/src/views/collectors/collectorDcText.test.js`.
   - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
   - **v2.973 — 엣지 서버의 빈 칸 채우기**(사용자 요청 2026-11-11 — WA 법인 R640 엑셀에서 제조사 · 전원 · 스레드 · 펌웨어 · BIOS · iDRAC 칸이 비었다 · 결정 'A1~A14 · B1 · C1 · C2 모두'):
     원인은 엣지 축약 인벤토리(`collector/compactInv.js`)가 iDRAC 이 수집한 값 일부를 중앙으로 보내지 않은 것이다(중앙 직접 수집 서버는 채워졌다).

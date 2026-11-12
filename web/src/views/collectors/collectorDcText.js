@@ -31,6 +31,26 @@ export function matchSortText(match, dcs) {
   return match?.id ? nameOf(match.id, dcs) : '';
 }
 
+/**
+ * v2.986(사용자 결정 '불일치가 생기면 사용자가 매칭을 선택' · '버튼으로 한쪽에 맞추기'): 수집 서버 법인(A) ≠ 그 수집 서버 vCenter 의 할당 법인(B).
+ * 서버(collectorsDc.js dcConflictsOf)가 준 conflicts 를 문구 · 두 선택지로. 법인 이름은 서버가 준 이름을 쓰고, 없으면 id.
+ * @returns {Array<{key:string, text:string, toCollector:{label:string, datacenterId:string}, toVcenter:{label:string, vcenterId:string, datacenterId:string}}>}
+ */
+export function conflictChoices(match, dcs) {
+  const list = Array.isArray(match?.conflicts) ? match.conflicts : [];
+  const a = match?.id ? nameOf(match.id, dcs) : '';
+  return list.map((x) => {
+    const b = x.datacenterName || nameOf(x.datacenterId, dcs);
+    const vc = x.vcenterName || x.vcenterId;
+    return {
+      key: `${x.vcenterId}`,
+      text: `불일치 — vCenter ‘${vc}’ 는 법인 ‘${b}’ 에 할당돼 있고, 이 수집 서버는 ‘${a}’ 입니다. 화면마다 다른 법인으로 보일 수 있습니다 — 한쪽으로 맞추세요.`,
+      toCollector: { label: `수집 서버를 ‘${b}’ 로 매칭`, datacenterId: x.datacenterId },
+      toVcenter: { label: `vCenter 를 ‘${a}’ 에 할당`, vcenterId: x.vcenterId, datacenterId: match.id },
+    };
+  });
+}
+
 /** 저장 응답 → 알림 글자. 실패 본문은 던진다. */
 export function saveText(r, collectorId, dcs) {
   if (!r || r.ok === false) throw new Error(r?.reason || '법인 매칭을 저장하지 못했습니다.');

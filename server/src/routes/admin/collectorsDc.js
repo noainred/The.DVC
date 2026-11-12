@@ -19,7 +19,7 @@ import { tlsListenerStatus } from '../../util/httpsServer.js';
 import { wanTlsStatus } from '../../util/resilientFetch.js';
 import { precheckTarget } from '../../sanswitch/precheck.js';
 import { collectorsToCsv, sampleCsv as collectorsSampleCsv, parseCollectorsCsv, analyzeCollectorsImport } from '../../collector/csv.js';
-import { clearCollectorServers } from '../../collector/remoteInventory.js';
+import { clearCollectorServers, allRemoteServers } from '../../collector/remoteInventory.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder } from '../../datacenter/store.js';
 import { allCollectorStatus, clearCollectorHosts, clearCollectorStatus } from '../../collector/state.js';
 import { agentIdentitySummary } from '../../central/agentIdentity.js';
@@ -136,17 +136,64 @@ function transportView(list) {
  * v2.972: 수집 서버 → { id(법인 id · ''), via: 'manual'|'name'|'', stale?: true }(순수). 순서는 analysisServers.collectorToDatacenterMap 과 같다:
  * 사용자 매칭(datacenterId — 지금 목록에 있을 때만) → 이름 맞춤(datacenter 라벨 · id · 이름 ↔ DataCenter id · 이름).
  */
-export function collectorDcMatch(collectors, datacenters) {
+export function collectorDcMatch(collectors, datacenters, { assign = null, vcOfCollector = null, vcName = null } = {}) {
   const out = {};
   for (const c of collectors || []) {
     if (!c || c.id == null) continue;
     const picked = String(c.datacenterId || '').trim();
     const hit = resolvePickedDc(picked, datacenters || []);   // P5 · 반증 D2: 정확 일치 → 대소문자 무시(하나의 규칙)
-    if (hit) { out[c.id] = { id: hit, via: 'manual' }; continue; }
-    const m = matchDatacenterId([c.datacenter, c.id, c.name], datacenters || []);
-    out[c.id] = { id: m || '', via: m ? 'name' : '', ...(picked ? { stale: true, picked } : {}) };   // picked: 지워진 법인 id — 화면이 그 값을 선택지로 보여 줘야 '자동' 으로 해제할 수 있다(반증 F6)
+    let r;
+    if (hit) r = { id: hit, via: 'manual' };
+    else {
+      const m = matchDatacenterId([c.datacenter, c.id, c.name], datacenters || []);
+      r = { id: m || '', via: m ? 'name' : '', ...(picked ? { stale: true, picked } : {}) };   // picked: 지워진 법인 id — 화면이 그 값을 선택지로 보여 줘야 '자동' 으로 해제할 수 있다(반증 F6)
+    }
+    const conflicts = dcConflictsOf(c, r.id, { assign, vcOfCollector, vcName, datacenters });
+    out[c.id] = conflicts.length ? { ...r, conflicts } : r;
   }
   return out;
+}
+
+/**
+ * v2.986(사용자 결정 2026-11-12 '불일치가 생기면 사용자가 매칭을 선택' · 방식 '버튼으로 한쪽에 맞추기'): 수집 서버의 법인(A)과 그 수집 서버가 맡은
+ * vCenter 의 할당 법인(B)이 다르면 불일치다. 판정 경로마다 먼저 보는 것이 달라(서버 분석 = 수집 서버 법인 · 전력 분석 / 통합 인벤토리 = vCenter 할당)
+ * 같은 서버가 화면마다 다른 법인이 된다(v2.985 P4). 규칙을 늘리지 않고 **설정 원천을 하나로 맞추게** 화면에 알린다 — 판정은 바꾸지 않는다.
+ * '맡은 vCenter' = 등록부 collector.vcenterId(전력 샘플이 쓰는 값 — collector/puller.js) ∪ 그 수집 서버가 보고한 원격 서버의 vcenterId(vcOfCollector).
+ * A 가 없거나(미지정) B 가 없는(할당 없음) vCenter 는 불일치가 아니다. 법인 id 비교는 대소문자 무시(resolvePickedDc 와 같은 관대함).
+ * @returns {Array<{vcenterId:string, vcenterName:string, datacenterId:string, datacenterName:string}>}
+ */
+export function dcConflictsOf(c, dcId, { assign, vcOfCollector, vcName, datacenters } = {}) {
+  if (!dcId || !assign || typeof assign !== 'object') return [];
+  const vcs = new Set();
+  const own = String(c?.vcenterId || '').trim(); if (own) vcs.add(own);
+  if (typeof vcOfCollector === 'function') for (const v of vcOfCollector(String(c.id)) || []) { const s = String(v || '').trim(); if (s) vcs.add(s); }
+  const nameOf = (id) => String((datacenters || []).find((d) => String(d.id) === String(id))?.name || id);
+  const out = [];
+  for (const vc of [...vcs].sort()) {
+    const b = String(assign[vc] || '').trim();
+    if (!b || b.toLowerCase() === String(dcId).toLowerCase()) continue;
+    out.push({ vcenterId: vc, vcenterName: (typeof vcName === 'function' && vcName(vc)) || vc, datacenterId: b, datacenterName: nameOf(b) });
+  }
+  return out.slice(0, 8);
+}
+
+/** 수집 서버 id → 그 수집 서버가 보고한 원격 서버의 vCenter id 들(불일치 판정용 — 한 번 훑는다). 못 읽으면 빈 지도. */
+function remoteVcsByCollector() {
+  const m = new Map();
+  try {
+    for (const s of allRemoteServers()) {
+      const cid = String(s?.collectorId || ''); const vc = String(s?.vcenterId || '').trim();
+      if (!cid || !vc) continue;
+      if (!m.has(cid)) m.set(cid, new Set());
+      m.get(cid).add(vc);
+    }
+  } catch { /* 원격 목록을 못 읽으면 등록부 vcenterId 만으로 */ }
+  return (cid) => [...(m.get(cid) || [])];
+}
+function dcMatchContext() {
+  let assign = {}; try { assign = getDatacenterAssign() || {}; } catch { assign = {}; }
+  const vcNames = new Map(((store.get()?.vcenters) || []).map((v) => [String(v.id), String(v.name || v.id)]));
+  return { assign, vcOfCollector: remoteVcsByCollector(), vcName: (id) => vcNames.get(String(id)) || '' };
 }
 
 export function registerCollectorsDc(adminRouter) {
@@ -159,7 +206,7 @@ adminRouter.get('/collectors', adminOnly, fleetOnly, (_req, res) => {
   // v2.972: 수집 서버마다 지금 쓰이는 법인(DataCenter)과 그 근거 — 사용자 매칭(manual) · 이름 맞춤(name) · 없음('') + 매칭한 법인이 지워졌는지(stale).
   //   판정은 insights/analysisServers.js collectorToDatacenterMap 과 같은 순서다(테스트가 대조). 화면은 이 값으로만 '자동(→ X)' 을 그린다.
   let dcMatch = {};
-  try { dcMatch = collectorDcMatch(collectors, listDatacenters() || []); } catch { dcMatch = {}; }
+  try { dcMatch = collectorDcMatch(collectors, listDatacenters() || [], dcMatchContext()); } catch { dcMatch = {}; }   // v2.986: + 불일치(conflicts)
   // v2.771(점검 R6-F4-2): 등록부를 읽지 못했으면 빈 목록이 '등록 없음' 으로 보이지 않게 사유 요약(원문 없음)을 함께 싣는다.
   // v2.775: 마지막 자동 적용의 수집 서버 push 결과(재시작 전에 파일로 남긴 것)를 상태에 합치고, 요약(autoPush)을 함께 싣는다 — 화면이 '왜 자동 업그레이드가 안 됐는지' 를 말한다.
   const lr = upgradeManager.lastResult;
@@ -210,7 +257,7 @@ adminRouter.put('/collectors/:id/datacenter', adminOnly, fullReadWriteScopeOnlyW
     pullNow().catch(() => {});   // 다음 화면에서 원격 서버 법인이 바로 바뀌게(원격 목록의 datacenterId 해석은 읽을 때 하지만, 상태를 새로 받아 둔다)
   }
   let dcMatch = {};
-  try { dcMatch = collectorDcMatch([r.collector], listDatacenters() || []); } catch { dcMatch = {}; }
+  try { dcMatch = collectorDcMatch([r.collector], listDatacenters() || [], dcMatchContext()); } catch { dcMatch = {}; }
   res.json({ ok: true, changed: r.changed, collector: r.collector, match: dcMatch[r.collector.id] || null });
 });
 
