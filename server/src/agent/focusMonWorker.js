@@ -12,6 +12,8 @@
  *  · **보류에는 시한**: 마지막 성공 응답의 `validUntil`(30초)이 지나면 모든 수집기를 닫는다(중앙이 끊긴 채 대상 서버에 SSH 를 계속 열어 두지 않게).
  *  · 0건이어도 상태를 남긴다(무음 실패 금지 — `focusMonWorkerStatus` 를 edgelog/spec.js 에 등재).
  *  · 404 는 두 뜻 — 엔드포인트 없음(구버전 중앙 → 1시간 물러남) · central 꺼짐(곧 다시).
+ *  · v2.983 수집 부하: 본문 `load` = 대상별 최신 30초 창(보낸 뒤 비운다) · `diag.node` = 이 엣지 포탈 프로세스의 CPU · 메모리 · 이벤트 루프 지연 · 받은 양 · 중앙으로 보낸 양.
+ *    중앙 응답의 `procEvery`(프로세스 표본 주기 — 중앙 설정)를 수집기에 넘긴다(옛 중앙이면 칸이 없어 기본 5초).
  */
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
@@ -23,6 +25,7 @@ import { agentHeaders, withAgentQuery } from './agentNameCarry.js';
 import { createRunner } from '../focusmon/runner.js';
 import { focusKeys } from '../focusmon/service.js';
 import { EDGE_TEST_CONCURRENCY } from '../focusmon/store.js';
+import { createNodeSampler } from '../focusmon/load.js';
 const TEST_RESULTS_PER_SYNC = 50; // 중앙이 동기화당 받는 시험 결과 상한(central/focusMonEdge.js arr(b.tests, 50))과 같게 — 넘는 것은 다음 동기화에(반증 3)
 
 const gzipAsync = promisify(zlib.gzip);
@@ -48,6 +51,22 @@ const samples = []; // { id, t, s, hello }
 const procs = [];   // { id, t, p }
 let testResults = []; // { id, result }
 let statuses = {};
+let loads = {}; // v2.983 대상별 최신 수집 부하 창(보내면 비운다)
+let txBytes = 0; let nodeLast = null; let nodePrevTx = null; let nodeSampler = null;
+/**
+ * v2.983 이 엣지의 노드 표본(30초마다 · 동기화 본문 diag.node 에 싣는다). 중앙으로 보낸 양(압축 뒤 본문 바이트)도 같은 창으로.
+ * 반증 F2: **수집기가 돌 때만** 표본기를 만든다(쉬는 엣지에 이벤트 루프 측정기를 늘 켜 두지 않는다) · 0 이 되면 끄고 표본을 비운다.
+ */
+export function nodeSampleTick(now = Date.now()) {
+  if (!runner.running().length) { try { nodeSampler?.stop(); } catch { /* */ } nodeSampler = null; nodeLast = null; nodePrevTx = null; return null; }
+  if (!nodeSampler) nodeSampler = createNodeSampler({ sessions: () => runner.running().length });
+  const x = nodeSampler.sample();
+  if (!x) return nodeLast;
+  const txBps = nodePrevTx && now > nodePrevTx.at ? Math.round(((txBytes - nodePrevTx.bytes) / ((now - nodePrevTx.at) / 1000)) * 100) / 100 : null;
+  nodePrevTx = { at: now, bytes: txBytes };
+  nodeLast = { ...x, txBps };
+  return nodeLast;
+}
 let timer = null; let running = false; let validUntil = 0; let unsupportedUntil = 0; let lastTargets = 0; let wakeAsked = false;
 let _last = null; let dropped = 0;
 let idleHintMs = null; let fails = 0; let lastRttMs = null; let lastError = ''; let lastErrorAt = 0;
@@ -60,6 +79,7 @@ const runner = createRunner({
     sample: (id, t, s, hello) => { samples.push({ id, t, s, hello }); trim(samples); },
     procs: (id, t, p) => { procs.push({ id, t, p }); trim(procs); },
     status: (id, st) => { statuses[id] = st; },
+    load: (id, l) => { loads[id] = l; },
   },
 });
 
@@ -78,17 +98,22 @@ export function diagBody(now = Date.now()) {
   return {
     rttMs: lastRttMs, fails, buffered: samples.length, dropped, collectors: runner.running().length, testsBusy: testsInFlight.size,
     idleMs: nextDelayMs({ active: false, idleHintMs }), lastError: lastError || null, lastErrorAgoMs: lastError ? Math.max(0, now - lastErrorAt) : null,
+    ...(nodeLast ? { node: { windowS: nodeLast.windowS, cpuPct: nodeLast.cpuPct, fmPct: nodeLast.fmPct, rssBytes: nodeLast.rssBytes, elMaxMs: nodeLast.elMaxMs, eluPct: nodeLast.eluPct, rxBps: nodeLast.rxBps, sessions: nodeLast.sessions, txBps: nodeLast.txBps } } : {}),
   };
 }
 
 /** 중앙이 깨웠다(collector 라우트). */
 export function wakeFocusMon() { wakeAsked = true; schedule(0); return true; }
 
-function schedule(ms) { clearTimeout(timer); if (!config.agent.centralUrl) return; timer = setTimeout(() => { syncOnce().catch(() => {}); }, ms); timer.unref?.(); }
+let nodeTimer = null;
+function schedule(ms) {
+  clearTimeout(timer); if (!config.agent.centralUrl) return; timer = setTimeout(() => { syncOnce().catch(() => {}); }, ms); timer.unref?.();
+  if (!nodeTimer) { nodeSampleTick(); nodeTimer = setInterval(() => { try { nodeSampleTick(); } catch { /* */ } }, 30_000); nodeTimer.unref?.(); }
+}
 
 /** 보류 시한(validUntil)이 지났으면 수집기를 모두 닫는다. */
 function expireIfStale() {
-  if (Date.now() > validUntil && runner.running().length) { runner.reconcile([]); statuses = {}; }
+  if (Date.now() > validUntil && runner.running().length) { runner.reconcile([]); statuses = {}; loads = {}; }
 }
 const testsInFlight = new Set(); // 진행 중인 연결 시험 — 같은 시험을 겹쳐 띄우지 않는다(반증 5번)
 
@@ -104,11 +129,13 @@ export async function syncOnce(now = Date.now()) {
   running = true;
   const t0 = Date.now();
   const sendS = samples.slice(); const sendP = procs.slice(); const sendT = testResults.slice(0, TEST_RESULTS_PER_SYNC);
+  const sendL = loads; loads = {}; let sentOk = false; // v2.983 — 실패하면 finally 에서 되돌린다(그사이 새 창이 왔으면 새 것이 이긴다)
   try {
     const keyView = focusKeys.publicKeyView();
-    const body = JSON.stringify({ v: 1, version: currentVersion(), sentAt: Date.now(), key: keyView, samples: sendS, procs: sendP, status: statuses, tests: sendT, diag: diagBody() });
+    const body = JSON.stringify({ v: 1, version: currentVersion(), sentAt: Date.now(), key: keyView, samples: sendS, procs: sendP, status: statuses, tests: sendT, load: sendL, diag: diagBody() });
     let payload = body; let hdrs = { 'Content-Type': 'application/json' };
     try { payload = await gzipAsync(Buffer.from(body)); hdrs = { ...hdrs, 'Content-Encoding': 'gzip' }; } catch { /* 원문 */ }
+    txBytes += payload.length;
     const r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/focus-mon/sync`, config.agent.name), {
       method: 'POST', headers: { ...hdrs, ...agentHeaders(config.agent.name), 'X-Central-Token': config.agent.centralToken },
       body: payload, timeoutMs: 20_000, retries: 0,
@@ -128,13 +155,14 @@ export async function syncOnce(now = Date.now()) {
     }
     // 보낸 만큼만 지운다(보내는 동안 새로 쌓인 것은 남긴다)
     samples.splice(0, sendS.length); procs.splice(0, sendP.length); testResults = testResults.slice(sendT.length);
+    sentOk = true;
     validUntil = Date.now() + Math.min(60_000, Math.max(5_000, Number(data.validUntil) - Number(data.now) || 30_000));
     const targets = Array.isArray(data.targets) ? data.targets.slice(0, 200) : [];
     lastTargets = targets.length;
     lastRttMs = Date.now() - t0; fails = 0;
     idleHintMs = Number.isFinite(Number(data.idleMs)) && Number(data.idleMs) > 0 ? Number(data.idleMs) : null;
     if (data.ensureKey === true) { try { focusKeys.ensureKey(); } catch (e) { if (_log('key', e.message)) console.warn(`[focusmon-edge] SSH 키를 만들지 못했습니다: ${e.message}`); } }
-    runner.reconcile(targets.map((t) => ({ id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username), interval: Number(t.interval) || 2 })));
+    runner.reconcile(targets.map((t) => ({ id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username), interval: Number(t.interval) || 2, procEvery: Number(t.procEvery) || 5 })));
     const byId = new Map(targets.map((t) => [String(t.id), { id: String(t.id), host: String(t.host), port: Number(t.port) || 22, username: String(t.username) }]));
     // v2.978: 중앙이 retryTargets(접속 정보)를 주면 수집 중이 아닌 대상도 정지를 푼다 — 이어 오는 시험(tests)이 한 번 접속한다(retries 를 tests 보다 먼저 처리).
     for (const t of Array.isArray(data.retryTargets) ? data.retryTargets.slice(0, 50) : []) {
@@ -158,6 +186,7 @@ export async function syncOnce(now = Date.now()) {
     if (_log('sync', _last.reason)) console.warn(`[focusmon-edge] 중앙 동기화 실패: ${_last.reason}`);
     return _last;
   } finally {
+    if (!sentOk) loads = { ...sendL, ...loads };
     running = false;
     expireIfStale();
     const active = lastTargets > 0 || wakeAsked;
@@ -172,6 +201,9 @@ export function startFocusMonWorker() {
   console.log(`[focusmon-edge] started (central=${config.agent.centralUrl})`);
 }
 
-export function stopFocusMonWorker() { clearTimeout(timer); runner.stopAll(); }
-export function _resetForTest() { testsInFlight.clear(); samples.length = 0; procs.length = 0; testResults = []; statuses = {}; validUntil = 0; unsupportedUntil = 0; lastTargets = 0; _last = null; dropped = 0; running = false; idleHintMs = null; fails = 0; lastRttMs = null; lastError = ''; lastErrorAt = 0; runner.stopAll(); }
+export function stopFocusMonWorker() { clearTimeout(timer); clearInterval(nodeTimer); nodeTimer = null; try { nodeSampler?.stop(); } catch { /* */ } nodeSampler = null; runner.stopAll(); }
+/** v2.983 시험용 — 수집 부하 창을 넣는다(실수집 없이 동기화 본문을 시험). */
+export function _putLoadForTest(id, l) { loads[id] = l; }
+export function _loadsForTest() { return { ...loads }; }
+export function _resetForTest() { loads = {}; txBytes = 0; nodeLast = null; nodePrevTx = null; testsInFlight.clear(); samples.length = 0; procs.length = 0; testResults = []; statuses = {}; validUntil = 0; unsupportedUntil = 0; lastTargets = 0; _last = null; dropped = 0; running = false; idleHintMs = null; fails = 0; lastRttMs = null; lastError = ''; lastErrorAt = 0; runner.stopAll(); }
 export const _runnerForTest = runner;

@@ -275,7 +275,7 @@ test('⑦ 엣지 동기화 — 남의 대상은 버림 · 시각은 수신 시�
   assert.equal(store.statusOf(b.target.id), null, '남의 대상 상태도 버린다');
   assert.ok(!JSON.stringify(store.edgeStateOf('edge-pl')).includes('LEAK'), '모르는 키 칸(개인키 흉내)은 남기지 않는다');
   assert.deepEqual(r.targets.map((x) => x.id), [a.target.id], '그 엣지 대상만 받는다');
-  assert.deepEqual(Object.keys(r.targets[0]).sort(), ['host', 'id', 'interval', 'port', 'username']);
+  assert.deepEqual(Object.keys(r.targets[0]).sort(), ['host', 'id', 'interval', 'port', 'procEvery', 'username']); // v2.983 procEvery(프로세스 표본 주기 — 중앙 설정 · 비밀 아님)
   assert.ok(r.validUntil - now <= 30_000, '보류 시한 30초');
   // 엣지 시각은 나이(보낸 시각 − 표본 시각)만 쓰고, 미래는 수신 시각 · 너무 오래된 것은 보존 한도로 자른다(변이 M8).
   assert.equal(edge.edgeTimeToCentral(4_990_000, 5_000_000, now), now - 10_000);

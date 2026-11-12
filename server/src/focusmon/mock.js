@@ -7,6 +7,7 @@
  * isDemoTarget 은 목록 소속으로 판정한다).
  */
 import { IOSTAT_COLS, aggregateIostat, TOP_N } from './rates.js';
+import { loadWindow as _loadWindow } from './load.js';
 
 const frac = (x) => x - Math.floor(x);
 const hash = (a, b) => frac(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
@@ -177,4 +178,38 @@ export function demoProcs(id, ts) {
   for (const r of rows) r.ns = same.get(r.c) + (r.c.startsWith('ora_') ? 30 : 0); // 데모: 오라클 백그라운드 프로세스는 상위 밖에도 더 있다
   rows.sort((a, b) => b.cpu - a.cpu || a.pid - b.pid);
   return { n: 420 + i * 13, top: rows.slice(0, TOP_N), da: true };
+}
+
+/**
+ * v2.983 데모 수집 부하 — 30초 창 하나(load.loadWindow 와 같은 모양 · 같은 함수로 만든다).
+ * 1회 비용 모형은 이 개발 환경 실측(2026-11-12 · 프로세스 84 · 1초 주기: 기본 약 11ms · 구성 약 16ms · 프로세스 약 12ms)을 서버 크기(프로세스 · 디스크 수)로 늘린 것이다 — 실측이 아니다.
+ */
+const DEMO_PROCS = (d) => (d[11] >= 32 ? 620 : d[11] >= 16 ? 340 : 190);
+export function demoLoad(id, interval = 2, procEvery = 5, now = Date.now()) {
+  const i = BY_ID.get(String(id));
+  if (i == null) return null;
+  const d = DEF[i];
+  const procs = DEMO_PROCS(d); const disks = d[11] >= 32 ? 24 : 8;
+  const I = Math.max(1, interval); const P = Math.max(procEvery, I); const W = 30;
+  const jit = 0.9 + 0.2 * hash(i, Math.floor(now / 30_000));
+  const ms = { base: (6 + disks * 0.2) * jit, topo: (10 + procs * 0.03) * jit, proc: (2 + procs * 0.11) * jit };
+  const runs = { frames: Math.round(W / I), topoRuns: 1, procRuns: Math.max(1, Math.round(W / P)) };
+  const tck = 100;
+  const g = { base: (ms.base * runs.frames * tck) / 1000, topo: (ms.topo * runs.topoRuns * tck) / 1000, proc: (ms.proc * runs.procRuns * tck) / 1000 };
+  const selfTicks = g.base + g.topo + g.proc;
+  const bytes = { base: (900 + disks * 130) * runs.frames, topo: (2600 + procs * 34) * runs.topoRuns, proc: (procs * 118) * runs.procRuns, self: 620 };
+  const totalB = bytes.base + bytes.topo + bytes.proc + bytes.self;
+  const sshdTicks = ((totalB / 1e6) * 6 * tck) / 1000 + 0.3; // 보낸 1MB 당 약 6ms 암호 처리(모형 · tick)
+  const w = _loadWindow({ up: 0, self: { ticks: 0, rssPages: 820 }, sshd: { ticks: 0, rssPages: 410 }, groups: { base: 0, topo: 0, proc: 0 } },
+    { up: W, self: { ticks: selfTicks, rssPages: 820 }, sshd: { ticks: sshdTicks, rssPages: 410 }, groups: g },
+    { tck, page: 4096, ncpu: d[11], bytes, ...runs });
+  return w ? { ...w, at: now, interval: I, procEvery, procs, demo: true } : null;
+}
+/** v2.983 데모 엣지 노드 표본(목 모드에서 데모 서버의 표시용 엣지 이름 — 실제 엣지가 아니다). 모형 값. */
+export function demoNodeLoad(agent, servers = 0, now = Date.now()) {
+  const a = String(agent || '');
+  let h = 0; for (const c of a) h = (h * 31 + c.charCodeAt(0)) % 997;
+  const j = 0.85 + 0.3 * hash(h, Math.floor(now / 30_000));
+  return { windowS: 30, cpuPct: r2((1.2 + servers * 0.45) * j), fmPct: r2((0.3 + servers * 0.18) * j), rssBytes: Math.round((180 + servers * 6) * 2 ** 20), elMaxMs: r2(4 + 30 * j), eluPct: r2((2 + servers * 0.6) * j),
+    rxBps: Math.round(servers * 15_500 * j), sessions: servers, txBps: Math.round((900 + servers * 1_400) * j), at: now, demo: true };
 }

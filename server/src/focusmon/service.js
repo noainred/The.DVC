@@ -11,9 +11,10 @@ import { getDataSource } from '../runtime-settings.js';
 import * as store from './store.js';
 import * as db from './db.js';
 import { createRunner } from './runner.js';
-import { listTargets, getTarget } from './registry.js';
+import { listTargets, getTarget, getSettings } from './registry.js';
+import { createNodeSampler } from './load.js';
 import { DEMO_TARGETS, isDemoTarget } from './mock.js';
-import { recordTick, flushOnExit } from './recorder.js';
+import { recordTick, flushOnExit, recorderStatus } from './recorder.js';
 import { every } from '../util/longTimer.js';
 
 export const focusKeys = createSshKeyStore({
@@ -39,6 +40,7 @@ const runner = createRunner({
     sample: (id, ts, s, hello) => store.ingestSample(id, ts, s, hello),
     procs: (id, ts, p) => store.ingestProcs(id, ts, p),
     status: (id, st) => store.setStatus(id, st),
+    load: (id, l) => store.setLoad(id, l), // v2.983 수집 부하 창(30초)
   },
 });
 export const localRunner = runner;
@@ -54,7 +56,8 @@ export function tick1(now = Date.now()) {
   // v2.980: 읽을 때 겹침을 정리한 계속 수집(v2.979 전에 만든 것) — 실행 기록의 대상 · 끝을 고쳐 쓴다
   for (const s of store.drainLoadFixes()) db.writeRun({ id: s.id, started: s.startedAt, ended: s.ended, by: s.by, mode: s.mode, interval: s.interval, targets: s.targets }).catch(() => {});
   for (const s of store.expireSessions(now)) db.writeRun({ id: s.id, started: s.startedAt, ended: now, by: s.by, mode: s.mode, interval: s.interval, targets: s.targets }).catch(() => {});
-  runner.reconcile(store.desiredFor('', resolveForRun, now));
+  const procEvery = getSettings().procEvery; // v2.983 프로세스 표본 주기(설정 — 모든 대상 공통)
+  runner.reconcile(store.desiredFor('', resolveForRun, now).map((d) => ({ ...d, procEvery })));
   store.closeMinutes(now, store.activeTargetIds());
 }
 
@@ -114,12 +117,37 @@ export function stopCollection(id, why = 'stopped') {
   return r;
 }
 
+/**
+ * v2.983 이 노드(중앙)의 수집 부하 — 30초마다 포탈 프로세스 CPU · 메모리 · 이벤트 루프 지연 · 받은 양 · 해석 시간 · DB 쓰기.
+ * DB 쓰기는 **최근 10분 평균**(dbWindowS) — 묶음은 분마다 닫혀 30초 창 하나는 0 과 두 배 사이를 오갔다(2026-11-12 화면 확인 — '30일이면 13.6GB' 가 튀었다).
+ */
+const DB_RATE_WINDOW_MS = 10 * 60_000;
+let nodeSampler = null; let dbHist = [];
+export function nodeTick(now = Date.now()) {
+  // 반증 F2: 이 노드에서 수집기가 돌 때만 — 수집이 없으면 틱만 돈다(표본기 · DB 쓰기 0). 엣지는 이 runner 가 비어 있다(엣지 수집은 워커 몫 — 워커가 따로 잰다).
+  if (!runner.running().length) { try { nodeSampler?.stop(); } catch { /* */ } nodeSampler = null; dbHist = []; return null; }
+  if (!nodeSampler) nodeSampler = createNodeSampler({ sessions: () => runner.running().length });
+  const x = nodeSampler.sample();
+  if (!x) return null;
+  const rec = recorderStatus();
+  dbHist.push({ at: now, bytes: rec.bytesWritten });
+  dbHist = dbHist.filter((h) => now - h.at <= DB_RATE_WINDOW_MS);
+  const h0 = dbHist[0];
+  const span = now - h0.at;
+  const dbBps = span >= 25_000 ? Math.max(0, (rec.bytesWritten - h0.bytes) / (span / 1000)) : null; // 창 하나(30초) 미만이면 모름
+  const v = { ...x, dbWriteBps: dbBps == null ? null : Math.round(dbBps * 100) / 100, dbWindowS: dbBps == null ? null : Math.round(span / 1000), dbBytes: rec.dbBytes ?? null };
+  store.setNodeLoad('', v, now);
+  return v;
+}
+
 export function startFocusMon() {
   if (timers.length) return;
   timers = [
     every(() => { try { tick1(); } catch (e) { console.warn(`[focusmon] 틱 실패: ${String(e?.message || e).slice(0, 160)}`); } }, 1_000),
     every(() => { recordTick().catch((e) => console.warn(`[focusmon] 기록 실패: ${String(e?.message || e).slice(0, 160)}`)); }, 10_000),
+    every(() => { try { nodeTick(); } catch (e) { console.warn(`[focusmon] 노드 부하 표본 실패: ${String(e?.message || e).slice(0, 160)}`); } }, 30_000),
   ];
+  try { nodeTick(); } catch { /* 첫 창의 기준점 */ }
   // 계속 수집 정의가 남아 있으면(재시작) 곧바로 이어 받는다 — 첫 틱이 desiredFor 로 읽는다.
   const resumed = store.listSessions().filter((x) => x.resumed).length;
   if (resumed) console.log(`[focusmon] 계속 수집 ${resumed}건을 이어 받습니다.`);
@@ -128,6 +156,8 @@ export function startFocusMon() {
 export function stopFocusMon() {
   for (const t of timers) { try { t.clear(); } catch { /* */ } }
   timers = [];
+  try { nodeSampler?.stop(); } catch { /* */ }
+  nodeSampler = null; dbHist = [];
   runner.stopAll();
   return flushOnExit();
 }

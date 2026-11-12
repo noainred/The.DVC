@@ -79,7 +79,7 @@ describe('판정 · 배지', () => {
     expect(shouldStopPolling({ status: 500 })).toBe(false); expect(shouldStopPolling(null)).toBe(false);
   });
   it('탭 키는 주소 조각 — 바꾸지 않는다', () => {
-    expect(TABS.map((t) => t.key)).toEqual(['overview', 'compare', 'procs', 'targets']);
+    expect(TABS.map((t) => t.key)).toEqual(['overview', 'compare', 'procs', 'load', 'targets']);
   });
 });
 

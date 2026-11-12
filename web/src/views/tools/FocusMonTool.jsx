@@ -25,9 +25,14 @@ import {
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
+import { usePoll } from './focusMonPoll.js';
+import { LoadTab } from './FocusMonLoad.jsx';
 import './focusMon.css';
 
 const BASE = ['tools', 'focus-mon'];
+/** 'DB 보관' 설정 폼의 칸 — **보이는 칸만 보낸다**(v2.983 반증 F9: 예전에는 응답 settings 전체를 보내 화면에 없는 procEvery · 문턱을 연 순간 값으로 되돌렸다). */
+const DB_SETTING_TEXT = Object.freeze({ retentionDays: '보관 일수', capGb: '용량 상한(GB)', warnPct: '주의(%)', critPct: '위험(%)', wAwaitWarnMs: '쓰기 지연 주의(ms)', edgeIdleSec: '엣지 쉬는 동안 조회(초)' });
+const DB_SETTING_KEYS = Object.keys(DB_SETTING_TEXT);
 const ls = () => { try { return typeof window === 'undefined' ? null : window.localStorage; } catch { return null; } };
 const lsGet = (k, d) => { try { const v = ls()?.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const lsSet = (k, v) => { try { ls()?.setItem(k, JSON.stringify(v)); } catch { /* 사생활 모드 등 */ } };
@@ -50,34 +55,6 @@ function useRoute() {
 
 /* ── 조회 훅 ──────────────────────────────────────────────────────────────── */
 /** 주기 조회 — 세대 번호로 늦게 온 이전 응답을 버리고, 가려지면 멈추고, 403 · 404 면 다음 틱을 걸지 않는다. intervalMs 0 = 한 번. */
-function usePoll(path, params, intervalMs, enabled = true) {
-  const [state, setState] = useState({ data: null, error: null, key: '' });
-  const key = useMemo(() => `${path}?${new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null && v !== '')).toString()}`, [path, params]);
-  const gen = useRef(0);
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    if (!enabled || !path) return undefined;
-    const my = ++gen.current; let timer = null; let alive = true;
-    const loop = async () => {
-      if (!alive || my !== gen.current) return;
-      let stop = false;
-      if (typeof document === 'undefined' || !document.hidden) {
-        try {
-          const d = await fetchJson(path, Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v != null && v !== '')));
-          if (alive && my === gen.current) setState({ data: d, error: null, key });
-        } catch (e) {
-          if (alive && my === gen.current) setState((s) => ({ ...s, error: e }));
-          stop = shouldStopPolling(e);
-        }
-      }
-      if (alive && my === gen.current && intervalMs > 0 && !stop) timer = setTimeout(loop, intervalMs);
-    };
-    loop();
-    return () => { alive = false; if (timer) clearTimeout(timer); };
-  }, [key, intervalMs, enabled, tick]); // eslint-disable-line react-hooks/exhaustive-deps
-  return { ...state, fresh: state.key === key, reload: () => setTick((x) => x + 1) };
-}
-
 /* ── 작은 부품 ────────────────────────────────────────────────────────────── */
 /* ── 차트 툴팁(v2.977 사용자 요청) — 마우스 · 손가락을 올린 시각의 값을 세로선 · 점 · 값 상자로 보인다 ──
  *  좌표는 순수 함수(focusMonChart.js indexAtFrac · valueAtFrac · timeAtIndex · xAtIndex · tipRows — 테스트). 값이 없으면 ‘—’(0 아님). */
@@ -1256,7 +1233,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
             ) : null}
           </div>
           <div className="fm-card">
-            <div className="fm-row fm-between"><h3 className="fm-h3">기록 — DB 보관</h3><button type="button" className="fm-btn sm" onClick={() => setSettingsForm(setForm2 ? null : { ...main.settings })}>설정</button></div>
+            <div className="fm-row fm-between"><h3 className="fm-h3">기록 — DB 보관</h3><button type="button" className="fm-btn sm" onClick={() => setSettingsForm(setForm2 ? null : Object.fromEntries(DB_SETTING_KEYS.filter((k) => k in main.settings).map((k) => [k, main.settings[k]])))}>설정</button></div>
             <div className="fm-meter big"><span className="t"><span className="f" style={{ width: `${Math.min(100, ((main.recorder.dbBytes || 0) / (main.settings.capGb * 2 ** 30)) * 100)}%` }} /></span></div>
             <div className="fm-row fm-between"><span><b>{bytesText(main.recorder.dbBytes)}</b> <span className="fm-dim">/ 상한 {main.settings.capGb} GB</span></span><span className="fm-dim">보관 {main.settings.retentionDays}일{main.db.oldestMinute ? ` · 가장 오래된 기록 ${clockText(main.db.oldestMinute * 60_000, true)}` : ''}</span></div>
             {!main.db.available ? <div className="fm-ban w">기록 DB 를 열지 못했습니다 — 실시간 화면은 그대로지만 기록이 남지 않습니다{main.db.error ? `(${main.db.error})` : ''}.</div> : null}
@@ -1264,7 +1241,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
             <div className="fm-note">수집한 값과 프로세스 목록을 1분 단위로 묶어 DB 에 남깁니다. ‘잠깐 보기’ 는 켠 동안만, ‘계속 수집’ 은 끌 때까지 수집합니다(보는 화면이 없으면 {L.idleInterval}초 주기로 낮춰 기록). 상한에 닿으면 가장 오래된 기록부터 지웁니다.</div>
             {setForm2 ? (
               <div className="fm-form">
-                {Object.entries({ retentionDays: '보관 일수', capGb: '용량 상한(GB)', warnPct: '주의(%)', critPct: '위험(%)', wAwaitWarnMs: '쓰기 지연 주의(ms)', edgeIdleSec: '엣지 쉬는 동안 조회(초)' }).filter(([k]) => main.settingRanges[k]).map(([k, l]) => (
+                {Object.entries(DB_SETTING_TEXT).filter(([k]) => main.settingRanges[k]).map(([k, l]) => (
                   <label key={k} className="fm-fld"><span>{l} <small className="fm-dim">{main.settingRanges[k][0]}~{main.settingRanges[k][1]}</small></span><input className="fm-input" value={setForm2[k]} onChange={(e) => setSettingsForm({ ...setForm2, [k]: e.target.value.replace(/[^0-9]/g, '').slice(0, 5) })} /></label>
                 ))}
                 <button type="button" className="fm-btn pri" disabled={!!busy} onClick={() => run('set', async () => { const r = await putJson('/tools/focus-mon/settings', Object.fromEntries(Object.entries(setForm2).map(([k, v]) => [k, Number(v)]))); if (r?.ok === false) return { ok: false, reason: r.reason || '설정을 저장하지 못했습니다.' }; setSettingsForm(null); return { ok: true, reason: r?.changed?.length ? '설정을 저장했습니다.' : '바뀐 값이 없습니다 — 저장하지 않았습니다.' }; })}>저장</button>
@@ -1376,7 +1353,8 @@ export default function FocusMonTool() {
           <span className="fm-dim">보고 있는 서버 {ids.length}대 가운데 · 그룹은 ‘대상 · 키’ 탭에서 정합니다</span>
         </div>
       ) : null}
-      {route.tab !== 'targets' && ids.length ? <TimeBar tb={tb} now={now} coverage={cov.data} oldestMinute={main.db.oldestMinute} /> : null}
+      {route.tab === 'load' || (route.tab !== 'targets' && ids.length) ? <TimeBar tb={tb} now={now} coverage={route.tab === 'load' ? null : cov.data} oldestMinute={main.db.oldestMinute} /> : null}
+      {route.tab === 'load' ? <LoadTab main={main} tb={tb} /> : null}
       {route.tab === 'overview' ? <Overview main={main} ids={shownIds} tb={tb} now={now} onOpen={onOpen} /> : null}
       {route.tab === 'compare' ? (
         <>

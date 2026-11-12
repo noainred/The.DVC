@@ -11,10 +11,12 @@
  *  · 정규식은 전부 앵커가 있고 길이가 한정된 꼴이다(외부 입력 — ReDoS 규약).
  */
 
-export const SECTIONS = Object.freeze(['STAT', 'LOAD', 'MEM', 'NET', 'DISK', 'NETTOPO', 'BLK', 'PS', 'UNIT', 'PROC', 'IO']);
+export const SECTIONS = Object.freeze(['STAT', 'LOAD', 'MEM', 'NET', 'DISK', 'NETTOPO', 'BLK', 'PS', 'UNIT', 'PROC', 'IO', 'SELF']);
+/** v2.983 수집 부하 — 구획 → 세 묶음(기본 지표 · 구성 · 프로세스 · 자기 측정). 원격 스크립트의 ck 위치와 같다(테스트가 대조). */
+export const SECTION_GROUP = Object.freeze({ STAT: 'base', LOAD: 'base', MEM: 'base', NET: 'base', DISK: 'base', NETTOPO: 'topo', BLK: 'topo', PS: 'topo', UNIT: 'topo', PROC: 'proc', IO: 'proc', SELF: 'self' });
 const ORDER = Object.freeze(Object.fromEntries(SECTIONS.map((s, i) => [s, i])));
 /** 구획별 줄 수 상한(스크립트의 head -n 과 같거나 조금 크다). */
-export const SECTION_MAX_LINES = Object.freeze({ STAT: 1100, LOAD: 4, MEM: 128, NET: 258, DISK: 1024, NETTOPO: 256, BLK: 512, PS: 20000, PROC: 20000, UNIT: 20000, IO: 20000 });
+export const SECTION_MAX_LINES = Object.freeze({ STAT: 1100, LOAD: 4, MEM: 128, NET: 258, DISK: 1024, NETTOPO: 256, BLK: 512, PS: 20000, PROC: 20000, UNIT: 20000, IO: 20000, SELF: 4 });
 export const LINE_MAX = 4096;
 /** 프레임 하나가 붙잡을 수 있는 글자 수 상한(원래 줄 길이로 센다). 정상 프레임은 프로세스 2만 개여도 약 2MB —
  *  줄 수 상한 합(약 4만 3천 줄) × 줄 길이 상한이면 대상 1대가 수백 MB 를 붙잡을 수 있었다(2026-11-11 반증 4번). 넘으면 그 프레임을 버린다. */
@@ -40,21 +42,24 @@ const words = (line) => String(line).trim().split(/\s+/);
 export function createFrameParser({ onHello, onFrame } = {}) {
   let mode = 'idle'; // idle | hello | frame
   let hello = null;
-  let frame = null; let cur = null; let curOrder = -1; let broken = false; let chars = 0;
+  let frame = null; let cur = null; let curOrder = -1; let broken = false; let chars = 0; let rawLen = 0;
   const st = { frames: 0, dropped: 0, stray: 0, hellos: 0, oversize: 0 };
 
   const startFrame = (up, epoch) => {
     if (mode === 'frame' && frame) st.dropped += 1; // END 없이 다음 프레임 — 앞 것은 버린다
-    frame = { up, epoch, sec: Object.create(null), truncated: [] }; cur = null; curOrder = -1; broken = false; chars = 0; mode = 'frame';
+    // v2.983 bytes: 받은 글자 수(줄바꿈 1 포함) — 묶음별(base 에는 ##T · 표지 · ##END 도) · 수집 부하의 '보내는 양'
+    frame = { up, epoch, sec: Object.create(null), truncated: [], bytes: { base: rawLen + 1, topo: 0, proc: 0, self: 0 } }; cur = null; curOrder = -1; broken = false; chars = 0; mode = 'frame';
   };
 
   function push(raw) {
     const rawStr = String(raw ?? '');
     const line = rawStr.slice(0, LINE_MAX);
     if (line === '##HELLO 1') { if (mode === 'frame') st.dropped += 1; mode = 'hello'; hello = []; frame = null; return; }
+    rawLen = rawStr.length;
     const tm = line.startsWith('##T ') ? T_RE.exec(line) : null;
     if (tm) { startFrame(Number(tm[1]), Number(tm[2])); return; }
     if (line === '##END') {
+      if (mode === 'frame' && frame) frame.bytes.base += rawLen + 1;
       if (mode === 'hello') { st.hellos += 1; try { onHello?.(parseHello(hello)); } catch { /* */ } }
       else if (mode === 'frame' && frame) {
         if (broken) st.dropped += 1;
@@ -69,11 +74,13 @@ export function createFrameParser({ onHello, onFrame } = {}) {
       const o = ORDER[mm[1]];
       if (o <= curOrder || Object.hasOwn(frame.sec, mm[1])) { broken = true; return; } // 재개방 · 역순 → 이 프레임은 믿지 않는다
       curOrder = o; cur = mm[1]; frame.sec[cur] = [];
+      frame.bytes[SECTION_GROUP[cur]] += rawLen + 1; // 표지 줄은 그 구획의 묶음에
       return;
     }
     if (mode === 'hello') { if (hello.length < HELLO_MAX_LINES) hello.push(line); return; }
     if (mode === 'frame' && frame && cur) {
       if (broken) return;
+      frame.bytes[SECTION_GROUP[cur]] += rawLen + 1;
       chars += rawStr.length;
       if (chars > FRAME_MAX_CHARS) { broken = true; st.oversize += 1; frame.sec = Object.create(null); cur = null; return; } // 붙잡은 줄을 바로 놓는다
       const arr = frame.sec[cur];
@@ -319,6 +326,34 @@ export function parseIo(lines = []) {
 }
 
 /**
+ * ##SELF(v2.983 수집 부하) → { self, sshd, groups } — 원격 반복문 셸(s) · sshd 세션(p)의 /proc/<pid>/stat ')' 뒤 칸과 세 묶음 누적 tick(c).
+ *  · s/p: 칸 0 = 상태 글자, 11 utime · 12 stime · 13 cutime · 14 cstime · 21 rss(페이지) — 셸은 넷 합(끝난 자식 포함), sshd 는 utime + stime.
+ *  · c: CB CC CP — 반복문이 시작된 뒤 묶음마다 더한 tick(정수 · 음수 없음).
+ *  못 읽은 줄 · 칸이 모자란 줄은 null(0 아님). 같은 이름 줄이 둘이면 앞 것.
+ */
+export function parseSelf(lines = []) {
+  const out = { self: null, sshd: null, groups: null };
+  for (const l of lines) {
+    const f = words(l);
+    const k = f[0];
+    if ((k === 's' || k === 'p') && out[k === 's' ? 'self' : 'sshd'] == null) {
+      if (f.length < 23 || !/^[A-Za-z]$/.test(f[1])) continue;
+      const v = f.slice(1).map(intOrNull); // v[0] 은 상태 글자(null)
+      const ut = v[11]; const st = v[12]; const cu = v[13]; const cs = v[14]; const rss = v[21];
+      if ([ut, st, cu, cs].some((x) => x == null)) continue;
+      const rec = { ticks: k === 's' ? ut + st + cu + cs : ut + st, rssPages: rss };
+      if (k === 's') out.self = rec; else out.sshd = rec;
+    } else if (k === 'c' && out.groups == null) {
+      if (f.length !== 4) continue;
+      const g = f.slice(1).map(intOrNull);
+      if (g.some((x) => x == null)) continue;
+      out.groups = { base: g[0], topo: g[1], proc: g[2] };
+    }
+  }
+  return out;
+}
+
+/**
  * 지연 집계(디스크 대기 tick)가 켜져 있나(v2.981) — HELLO `dacct <sysctl|-> <nodelayacct 개수>`.
  * sysctl 1/0 이 있으면 그 값(5.14 이후 · 기본 꺼짐) · 없으면(옛 커널 · RHEL 7) 부트 옵션 nodelayacct 가 없을 때 켜짐 · 줄이 없으면(옛 수집) 모름.
  */
@@ -346,6 +381,8 @@ export function frameToRaw(frame) {
     proc: s.PROC ? parseProc(s.PROC) : null,
     unit: s.UNIT ? parseUnit(s.UNIT) : null,
     io: s.IO ? parseIo(s.IO) : (s.PROC ? new Map() : null),
+    self: s.SELF ? parseSelf(s.SELF) : null,
+    bytes: frame?.bytes ? { ...frame.bytes } : null,
     truncated: Array.isArray(frame?.truncated) ? frame.truncated.slice() : [],
   };
 }
