@@ -1,7 +1,7 @@
 /**
  * IP 능동 스캔 엔진 — TCP 커넥트 스캔(루트 불필요). 지정한 대역의 각 IP에 공통
- * 포트로 접속을 시도해 "생존" 여부와 열린 포트(서비스 추정)를 파악한다. 역DNS로
- * 호스트명을 보강한다. 동시성 제한 + per-host 타임아웃으로 비차단 동작.
+ * 포트로 접속을 시도해 "생존" 여부와 열린 포트(서비스 추정)를 파악한다. 응답한 IP 는
+ * 역DNS · mDNS · NetBIOS 로 호스트명을 확인한다(v2.991 — nameProbe.js). 동시성 제한 + per-host 타임아웃으로 비차단 동작.
  *
  * ⚠️ 포트 스캔은 침투성 행위입니다. 사내 승인된 대역에만, 레이트리밋을 두고 사용.
  */
@@ -12,6 +12,8 @@ import { execFile } from 'node:child_process';
 import { numToIp, isIpv4 } from '../util/ipv4.js';
 import { checkRangeSpec } from './rangeSyntax.js'; // v2.639: 대역 문법 판정 코어 하나
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
+import { probeNetbios, probeMdns, localSubnets, onLink } from './nameProbe.js'; // v2.991: 호스트명 확인(NetBIOS · mDNS)
+import { NAME_METHODS, displayName } from './hostNames.js';
 
 export const DEFAULT_PORTS = [22, 80, 443, 445, 3389, 623, 8006, 902, 5985, 5986];
 const SERVICE = {
@@ -208,14 +210,48 @@ async function reverseMany(ips, limit = 16) {
 }
 
 /**
+ * v2.991: 응답한 IP 의 호스트명 확인 — 켜 둔 방식을 **모두** 묻는다(방식마다 이름이 다르면 화면이 '이름 다름' 을 말하게 —
+ *   Angry IP Scanner 는 앞 방식이 실패했을 때만 다음을 묻는다). 세 방식은 동시에 돈다. mDNS 는 이 장비와 같은 서브넷 IP 만.
+ * @returns {Promise<{ byIp: Map<string, {names:object, nb:object|null, tried:string[]}>, stats: object }>}
+ */
+export async function resolveNames(ips, { reverseDns = true, mdns = true, netbios = true, timeoutMs = 700, subnets = null, probes = {} } = {}) {
+  const list = [...new Set(ips || [])];
+  const nets = mdns ? (subnets || localSubnets()) : [];
+  const mdnsTargets = mdns ? list.filter((ip) => onLink(ip, nets)) : [];
+  const mdnsSet = new Set(mdnsTargets);
+  const [dnsMap, nbMap, mdMap] = await Promise.all([
+    reverseDns ? (probes.reverse || reverseMany)(list) : new Map(),
+    netbios && list.length ? (probes.netbios || probeNetbios)(list, { timeoutMs }) : new Map(),
+    mdnsTargets.length ? (probes.mdns || probeMdns)(mdnsTargets, { timeoutMs }) : new Map(),
+  ]);
+  const stats = { tried: { dns: 0, mdns: 0, netbios: 0 }, found: { dns: 0, mdns: 0, netbios: 0 }, named: 0 };
+  const byIp = new Map();
+  for (const ip of list) {
+    const tried = [];
+    const names = {};
+    if (reverseDns) { tried.push('dns'); const v = dnsMap.get(ip); if (v) names.dns = v; }
+    if (mdnsSet.has(ip)) { tried.push('mdns'); const v = mdMap.get(ip); if (v) names.mdns = v; }
+    let nb = null;
+    if (netbios) { tried.push('netbios'); nb = nbMap.get(ip) || null; if (nb?.name) names.netbios = nb.name; }
+    for (const k of tried) { stats.tried[k]++; if (names[k]) stats.found[k]++; }
+    if (displayName(names).name) stats.named++;
+    byIp.set(ip, { names, nb, tried: NAME_METHODS.filter((k) => tried.includes(k)) });
+  }
+  return { byIp, stats };
+}
+
+/**
  * 대역(여러 spec) 스캔 — 2단계(v2.363):
  *   1) 전 IP TCP 프로브(동시성 제한) → 열린 포트로 생존 판정.
  *   2) 포트가 전부 닫힌 IP만 ping(fping 배치 우선 / 폴백 capped per-IP) — 방화벽 서버 갭 보강.
  * 마지막에 생존 IP만 역DNS. onProgress(done,total,alive) 는 1단계(TCP) 기준으로 보고.
  * onTcpAlive(row) 는 1단계에서 열린 포트를 찾을 때마다 부른다(v2.733 — 시한 초과 시 부분 결과. hostname 은 빈 값).
- * 반환·항목 형태는 이전과 동일: { scanned, alive:[{ip,openPorts,services,hostname}] }.
+ * 반환: { scanned, alive:[{ip,openPorts,services,hostname, names?, nbGroup?, mac?, tried}], nameStats }.
+ * v2.991: 마지막 단계가 역DNS 하나에서 '호스트명 확인'(역DNS · mDNS · NetBIOS — resolveNames)이 됐다. hostname 은 표시 이름
+ *   (역DNS > mDNS > NetBIOS 중 먼저 있는 것 — 옛 중앙도 이 칸은 받는다), names 는 방식별 이름(있는 것만), tried 는 이 IP 에 실제로
+ *   물어본 방식(mDNS 는 같은 서브넷일 때만 들어간다 — 중앙이 '응답 없음' 과 '묻지 않음' 을 가른다).
  */
-export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, ping = true, onAlive, onTcpAlive, onProgress } = {}) {
+export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, mdns = true, netbios = true, ping = true, onAlive, onTcpAlive, onProgress, nameOpts = {} } = {}) {
   const seen = new Set();
   const ips = [];
   for (const spec of (Array.isArray(specs) ? specs : [specs])) for (const ip of expandRange(spec)) if (!seen.has(ip)) { seen.add(ip); ips.push(ip); }
@@ -242,15 +278,19 @@ export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 1
   const dead = ips.filter((ip) => !tcp.has(ip));
   const pinged = await pingAliveSet(dead, timeoutMs, ping);
 
-  // 생존 IP = TCP 생존 ∪ ping 생존. 역DNS 일괄.
+  // 생존 IP = TCP 생존 ∪ ping 생존. 호스트명 확인(v2.991 — 역DNS · mDNS · NetBIOS 동시).
   const aliveIps = [...tcp.keys(), ...[...pinged]];
-  const hostByIp = reverseDns ? await reverseMany(aliveIps) : new Map();
+  const { byIp, stats } = await resolveNames(aliveIps, { reverseDns, mdns, netbios, timeoutMs, ...nameOpts });
   const alive = aliveIps.map((ip) => {
     const open = tcp.get(ip);
-    const row = { ip, openPorts: open || [], services: open ? open.map(portService) : ['ICMP(ping)'], hostname: hostByIp.get(ip) || '' };
+    const nm = byIp.get(ip) || { names: {}, nb: null, tried: [] };
+    const row = { ip, openPorts: open || [], services: open ? open.map(portService) : ['ICMP(ping)'], hostname: displayName(nm.names).name, tried: nm.tried };
+    if (Object.keys(nm.names).length) row.names = nm.names;
+    if (nm.nb?.group) row.nbGroup = nm.nb.group;
+    if (nm.nb?.mac) row.mac = nm.nb.mac;
     onAlive?.(row);
     return row;
   });
   onProgress?.(total, total, alive.length);
-  return { scanned: ips.length, alive };
+  return { scanned: ips.length, alive, nameStats: { ...stats, alive: alive.length } };
 }

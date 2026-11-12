@@ -1,6 +1,6 @@
 # 설계: IP 스캔 — 사용 중 IP 의 호스트명 확인(역DNS → mDNS → NetBIOS) + 대장 목록 ‘호스트명’ 열
 
-작성 2026-11-13 (main v2.989.0 기준 · 브랜치 `claude/eloquent-lovelace-mcs6my`) · 상태 **컨펌 대기**(구현 전) ·
+작성 2026-11-13 (main v2.989.0 기준 · 브랜치 `claude/eloquent-lovelace-mcs6my`) · 상태 **구현됨 v2.991.0**(컨펌 2026-11-13 08:06 KST — §6 답: ① 3가지(기본) ② **기본 켜짐**(시안 기본값 '꺼짐'에서 바꿈) ③④⑤ 기본 ⑥ **MAC 수집** ⑦ 표준 + 변이 1회 · 구현 §8) ·
 ⚠ 정정(2026-11-13 07:22 KST): 조사와 ⓪ 캡처는 이 세션의 처음 체크아웃(**v2.914.0** — main 보다 75개 버전 뒤)에서 했다. 푸시 직전에 알고 main(v2.989.0) 위로 다시 올린 뒤
 `git diff` 로 대조했다 — `scan.js` · `scanStore.js` · `ledger.js` · `scanWorker.js` · `agent/ipScanWorker.js` · `IpamCore.jsx` · `IpamEditors.jsx` · `IpamScanStatus.jsx` 는 **차이 0줄**,
 `ipam/scanDatacenter.js` 는 데이터센터 귀속 순서 6줄, `IpScanSettings.jsx` · `IpamNet.jsx` 는 eslint 주석뿐, 배정 라우트는 `routes/central.js` 에서 `routes/central/opsRoutes.js` 로 옮겨졌다(본문 같음).
@@ -130,3 +130,25 @@
 - 테스트: `server/test/ipScanHostname29xx.test.js` — NBSTAT/mDNS 파서(정상 · 잘린 패킷 · 압축 포인터 순환 · 제어문자 · 15자/255자 상한 · 물어보지 않은 주소의 응답 버림) · 가짜 UDP 응답기로 `scanRanges` 3단계 실제 호출 · `cleanAliveHost` 가 모르는 칸을 버림 · miss 3회 삭제 · rename 이벤트 · 부분 결과가 이름을 지우지 않음 · 범위 계정 응답에 스캔 이름 없음 · 옛 엣지 본문(`hostname` 만) 호환. 웹 `ipamHostText.test.js`.
 - 문서: `docs/rules/ipam.md` 에 항목 추가 · 이 README §8 에 ‘시안과 달리 한 것’.
 - 릴리스: 포탈 동작이 바뀌므로 버전업 + GitHub 릴리스 게시(`versions.json` latest 확인).
+
+## 8. 구현(v2.991.0 · 2026-11-13 · Opus) — 시안과 달리 한 것 · 남긴 것
+
+- 파일: 서버 `ipam/hostNames.js`(새 — 표시 순서 · 이름 다름 · 대장 칸) · `ipam/nameProbe.js`(새 — NBSTAT · PTR 패킷 · UDP 묶음 질의 · 같은 서브넷) · `ipam/scan.js`(`resolveNames` · 3단계) ·
+  `scanWorker.js` · `scanRunner.js` · `scanPoller.js` · `agent/ipScanWorker.js`(설정 · 요약 전달) · `scanStore.js`(설정 2칸 · 정제 · `mergeNames` · `renames` · `cleanNameStats` · `scanDetailOf`) ·
+  `ledger.js`(호스트명 칸) · `routes/central/opsRoutes.js`(요약 저장) · `routes/api/ipamExport.js`(이력 `scan` · CSV 열) ·
+  웹 `IpamHostName.jsx`(새) · `ipamHostText.js`(새) · `IpamCore.jsx` · `IpScanSettings.jsx` · `IpamScanStatus.jsx` · `scanRangeImportText.js`.
+- 테스트: `server/test/ipScanHostname2991.test.js` 21건(파서 무작위 4,000회 · 루프백 실제 UDP 왕복 · 위조 응답 · 실제 엣지 워커 + 목 중앙 · 대장/이력/CSV 라우트) ·
+  `audit2611e` 의 기준 판본 대조에 새 칸을 '추가된 칸' 목록으로 더함 · 웹 `ipamHostText.test.js` 7건. 변이 15종 — 13종 검출, 2종(M7 names 아는 키 · M8 표시 이름 재선택)은
+  바깥 층(`mergeNames` 가 아는 키만 읽고 표시 이름을 다시 고른다)이 같은 일을 해 관찰 결과가 같은 동등 변이. M2(응답 주소 확인)는 첫 실행에서 살아남아 테스트를 보강했다.
+- 시안과 달리 한 것:
+  1. **mDNS 는 대상 IP 로 직접**(UDP 5353 유니캐스트) 보낸다 — 시안 · Angry IP 는 224.0.0.251 멀티캐스트. 그 구간의 다른 장비에 질의를 뿌리지 않고, 응답 발신 주소가 곧 대상이라
+     위조 확인이 단순하다(RFC 6762 5.5 — 응답자는 같은 링크의 직접 질의에 답한다). 실제 장비에서 멀티캐스트보다 덜 답하는지는 **확인하지 못했다**.
+  2. **묻지 않은 방식의 이름은 지운다**(시안 §4.3 은 '그대로') — 방식을 끈 에이전트의 이름을 지금 이름처럼 두지 않게(v2.990 까지 역DNS 를 끄면 hostname 이 바로 비었다).
+  3. 상태 ⑨ 의 '스캔 대역 밖' 문구는 넣지 않았다 — 스캔 결과가 없는 이유(대역 밖 · 무응답 · 보존 기간 지남)를 대장이 가를 수 없어 '—' 만 둔다(IP 상세 창은 세 가능성을 함께 말한다).
+  4. 칩 이름은 '호스트명 없음(스캔 IP)' — VM 행은 대부분 스캔 이름이 없어 세면 뜻이 흐려진다. '+ 이름' 도 스캔 행에만.
+  5. 보드 ③ 의 '스캔 한 번의 순서 4단계' 그림은 화면에 넣지 않았다(설정 묶음 아래 한 줄 설명으로).
+  6. 기본값 켜짐(컨펌) — 업그레이드 뒤 중앙과 엣지(업그레이드 후)가 응답한 IP 마다 UDP 137 질의를 보낸다. 옛 중앙 + 새 엣지는 엣지가 켜진 채로 돌고, 옛 중앙은 표시 이름(hostname)만 받는다.
+  7. 스캔 실행 이력(스캔 상태 페이지) 표에도 '이름 확인' 열을 더했다(시안에 없음).
+- 남긴 것: SMB(445) · TLS 인증서 이름(질문 ①의 대안) · VMware Tools 게스트 호스트명 · 포탈 등록 장비 대조(§5). NetBIOS 사용자 이름은 읽지 않는다.
+- 확인 못 한 것: NetBIOS · mDNS 의 **실제 장비 응답**(이 환경에 Windows · mDNS 장비 없음 — 루프백 응답자 · 규격 · Angry IP Scanner 소스로 확인).
+

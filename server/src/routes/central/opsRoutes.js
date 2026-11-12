@@ -380,7 +380,9 @@ export function registerOpsRoutes(centralRouter, deps) {
     res.json({ ok: true, assigned: true, ...cfg });
   });
 
-  // Agent posts its IP-scan result. Body: { agent, alive:[{ip,openPorts,services,hostname}] }
+  // Agent posts its IP-scan result. Body: { agent, alive:[{ip,openPorts,services,hostname, names?, tried?, nbGroup?, mac?}], scanned, nameStats? }
+  //   v2.991: names·tried·nbGroup·mac(호스트명 확인)과 nameStats(방식별 요약)는 scanStore 가 아는 키 · 아는 모양만 받는다(cleanAliveHost · cleanNameStats).
+  //   본문 상한은 index.js 의 BIG_JSON(이미 등록 — 행마다 방식별 이름이 실려도 8,000행이 1mb 기본을 넘지 않게 걱정할 필요가 없다).
   centralRouter.post('/ip-scan-result', requireCentral({ notFound: { ok: false } }), (req, res) => {
     const b = req.body || {};
     const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
@@ -420,7 +422,7 @@ export function registerOpsRoutes(centralRouter, deps) {
     if (inc) {
       recordAgentIncomplete(agent, { code: typeof inc.code === 'string' ? inc.code : 'error', reason: typeof inc.reason === 'string' ? inc.reason : '',
         durationMs: b.durationMs, partial: validAlive.length - capped, done: b.scanned, total: inc.total });
-    } else recordAgentReport(agent, { scanned: b.scanned || 0, alive: validAlive.length, durationMs: b.durationMs || null });
+    } else recordAgentReport(agent, { scanned: b.scanned || 0, alive: validAlive.length, durationMs: b.durationMs || null, nameStats: b.nameStats });
     {
       // v2.636: 엣지 보고를 실행 로그에 — 받지 않은 개수(범위 밖·형식 오류·상한)를 사유와 함께 남긴다(조용한 드롭 금지).
       const outOfRange = Array.isArray(b.alive) ? Math.max(0, Math.min(b.alive.length, 8000) - alive.length) : 0;
