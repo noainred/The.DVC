@@ -1,6 +1,10 @@
 # 설계: IP 스캔 — 사용 중 IP 의 호스트명 확인(역DNS → mDNS → NetBIOS) + 대장 목록 ‘호스트명’ 열
 
-작성 2026-11-13 (main v2.914.0 기준 · 브랜치 `claude/eloquent-lovelace-mcs6my`) · 상태 **컨펌 대기**(구현 전) ·
+작성 2026-11-13 (main v2.989.0 기준 · 브랜치 `claude/eloquent-lovelace-mcs6my`) · 상태 **컨펌 대기**(구현 전) ·
+⚠ 정정(2026-11-13 07:22 KST): 조사와 ⓪ 캡처는 이 세션의 처음 체크아웃(**v2.914.0** — main 보다 75개 버전 뒤)에서 했다. 푸시 직전에 알고 main(v2.989.0) 위로 다시 올린 뒤
+`git diff` 로 대조했다 — `scan.js` · `scanStore.js` · `ledger.js` · `scanWorker.js` · `agent/ipScanWorker.js` · `IpamCore.jsx` · `IpamEditors.jsx` · `IpamScanStatus.jsx` 는 **차이 0줄**,
+`ipam/scanDatacenter.js` 는 데이터센터 귀속 순서 6줄, `IpScanSettings.jsx` · `IpamNet.jsx` 는 eslint 주석뿐, 배정 라우트는 `routes/central.js` 에서 `routes/central/opsRoutes.js` 로 옮겨졌다(본문 같음).
+아래 위치는 v2.989.0 에서 다시 확인한 것이다. `styles.css` 는 기능별 규칙만 늘었고 `:root` 토큰 · `.badge` · `.tab` · 표 규칙은 같다. ⓪ 캡처는 v2.914.0 빌드 그대로다(v2.989.0 으로 다시 찍지 않았다).
 시안 캔버스: https://claude.ai/artifact/Pf48uY3zo4bzgYny5CGqeE (아트보드 6장 — ⓪ 지금 · ① 대장 목록 1440 · ② 스캔 IP 상세 · ③ 스캔 설정 · ④ 상태 9종 · ⑤ 400px).
 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스(HTML 프로토타입 — 복사 대상이 아님). **주소 · 호스트명 · 에이전트 이름 · 수치는 전부 가상**이고, ⓪ 의 캡처는 목 서버에 스캔 결과 12건을 심어 찍은 것이다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰과 `.badge` · `.tab` · `.card` · 표 규칙 그대로(새 hex 없음 — 청록 점선은 ‘새로 생기는 것’ 을 가리키는 시안 표시일 뿐 화면에 넣지 않는다).
@@ -21,7 +25,7 @@
 | 사실 | 위치 |
 |---|---|
 | 스캔은 2단계(전 IP TCP 프로브 → 포트가 모두 닫힌 IP 만 ping) 뒤 **응답한 IP 에 대해 `dns.reverse()` 만** 부른다(동시 16). 다른 이름 확인 방법은 없다 | `server/src/ipam/scan.js` `reverseMany` · `scanRanges` |
-| 설정은 에이전트별 `reverseDns`(기본 켬) · `ping`(기본 **끔** — v2.359 장애 뒤 opt-in). 엣지는 `/api/central/ip-scan-assignment` 가 내려준 설정(`...cfg`)을 그대로 `runScan` 에 넘긴다 | `ipam/scanStore.js normalizeCfg` · `routes/central.js:2709` · `agent/ipScanWorker.js:181` |
+| 설정은 에이전트별 `reverseDns`(기본 켬) · `ping`(기본 **끔** — v2.359 장애 뒤 opt-in). 엣지는 `/api/central/ip-scan-assignment` 가 내려준 설정(`...cfg`)을 그대로 `runScan` 에 넘긴다 | `ipam/scanStore.js normalizeCfg` · `routes/central/opsRoutes.js:380` · `agent/ipScanWorker.js:181` |
 | 스캔은 별도 자식 프로세스에서 돈다(포탈 이벤트 루프 · FD 와 분리). 시한을 넘기면 부모가 죽이고 1단계 부분 결과만 남는다(이름 없음) | `ipam/scanWorker.js` · `scanRunner.js` |
 | 엣지가 보낸 결과에서 중앙이 받는 칸은 **`ip` · `openPorts` · `services` · `hostname` 넷뿐**(아는 칸만 · 길이 상한 · 제어문자 제거) | `ipam/scanStore.js cleanAliveHost` |
 | 결과 저장 `ipam-scan-results.json` = `{ ip → {ip, openPorts, services, hostname, lastSeen, agent} }` · 이력 이벤트는 up/down 전이만(`hostname` 은 그때 값) | `scanStore.js mergeScanResults` · `recordSeen` |
