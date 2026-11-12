@@ -69,3 +69,43 @@ describe('bmFoldersText', () => {
     expect(INTRO.includes('`')).toBe(false);
   });
 });
+
+import { mapGroups, cellTone, parseViews, upsertView, cleanView, VIEWS_MAX } from './bmFoldersText.js';
+
+describe('bmFoldersText v2.986 — 맵 · 저장한 보기', () => {
+  const rows = [
+    { key: 'a', corp: 'A', path: 'DB', place: 'manual', model: 'R650', cpu: 10 },
+    { key: 'b', corp: 'A', path: '', place: null, model: '', cpu: null },
+    { key: 'c', corp: 'B', path: 'DB', place: 'rule', model: 'R650', cpu: 95, faults: 2 },
+  ];
+  it('묶기 — 폴더는 법인마다 따로 · 미분류는 맨 뒤 · 법인 · 모델', () => {
+    const f = mapGroups(rows, 'folder');
+    expect(f.map((g) => [g.label, g.rows.length, g.un, g.corp])).toEqual([['DB', 1, false, 'A'], ['DB', 1, false, 'B'], ['(미분류)', 1, true, 'A']]);
+    expect(mapGroups(rows, 'corp', (x) => `법인${x}`).map((g) => g.label)).toEqual(['법인A', '법인B']);
+    expect(mapGroups(rows, 'model').map((g) => [g.label, g.un])).toEqual([['R650', false], ['(모델 모름)', true]]);
+  });
+  it('칸 색 — 20% 단위 5단 · 못 읽음은 na(0 으로 칠하지 않음) · 꺼짐 · 장애는 색과 따로 테두리 · 전력은 최대 대비', () => {
+    expect(cellTone({ cpu: 10 }, 'cpu').tone).toBe('u1');
+    expect(cellTone({ cpu: 0 }, 'cpu').tone).toBe('u1');
+    expect(cellTone({ cpu: 95, faults: 2 }, 'cpu')).toEqual({ tone: 'u5', bad: true, label: '95%' });
+    expect(cellTone({ cpu: null }, 'cpu').tone).toBe('na');
+    expect(cellTone({ cpu: '' }, 'cpu').tone).toBe('na');
+    expect(cellTone({ cpu: 50, powered: false }, 'cpu').tone).toBe('off');
+    expect(cellTone({ faults: null }, 'fault').tone).toBe('na');
+    expect(cellTone({ faults: 0 }, 'fault').tone).toBe('u1');
+    expect(cellTone({ watts: 300 }, 'watts', 600).tone).toBe('u3');
+    expect(cellTone({ watts: 0 }, 'watts', 600).tone).toBe('na');
+  });
+  it('저장한 보기 — 망가진 글자는 빈 목록 · 아는 필드만 · 같은 이름은 바꿈 · 상한', () => {
+    expect(parseViews('{oops')).toEqual([]);
+    expect(parseViews(JSON.stringify([{ name: 'x', state: { sel: { type: 'evil' }, view: 'map', quick: 'rm -rf', extra: 1 } }]))).toEqual([
+      { name: 'x', state: { sel: { type: 'all' }, view: 'map', treeMode: 'corp', q: '', quick: '', sub: true, groupBy: 'folder', colorBy: 'cpu' } }]);
+    expect(cleanView({ name: '', state: {} })).toBe(null);
+    let l = [];
+    l = upsertView(l, 'DB', { sel: { type: 'folder', corp: 'A', path: 'DB' }, view: 'map', colorBy: 'mem' });
+    l = upsertView(l, 'DB', { sel: { type: 'corp', corp: 'A' } });
+    expect(l.length).toBe(1); expect(l[0].state.sel).toEqual({ type: 'corp', corp: 'A' });
+    for (let i = 0; i < 30; i += 1) l = upsertView(l, `v${i}`, {});
+    expect(l.length).toBe(VIEWS_MAX); expect(l[0].name).toBe('v29');
+  });
+});

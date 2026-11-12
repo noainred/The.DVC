@@ -26,7 +26,7 @@ const btn = { padding: '6px 12px', flex: 'none' };
 const readAxis = () => { try { return localStorage.getItem(AXIS_KEY) === 'corp' ? 'corp' : 'svc'; } catch { return 'svc'; } };
 
 const INTRO = 'VM(vCenter)과 베어메탈(iDRAC)을 **서비스 단위**로 묶어 봅니다. ESXi 호스트는 구성원이 아니라 **그 서비스 VM 이 올라간 호스트로 파생**됩니다. '
-  + '소속은 **고정 → vCenter 폴더 규칙 → 스캔 엔트리 라벨 → 태그(선택) → 이름 규칙(선택)** 순이고, 어디에도 안 걸리면 **(미지정)** 으로 따로 셉니다. 서비스는 사람이 만들고 자동 규칙은 기존 서비스에만 붙습니다.';
+  + '소속은 **고정 → vCenter 폴더 규칙(VM) · 물리서버 폴더 규칙(베어메탈) → 스캔 엔트리 라벨 → 태그(선택) → 이름 규칙(선택)** 순이고, 어디에도 안 걸리면 **(미지정)** 으로 따로 셉니다. 서비스는 사람이 만들고 자동 규칙은 기존 서비스에만 붙습니다.';
 
 export default function SvcInventory() {
   const [d, setD] = useState(null);

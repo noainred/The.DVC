@@ -138,11 +138,13 @@ export const CORP_OPS = {
     const c = corpOf(d, b.corp);
     const s = svcIn(c, b.id); if (!s) return err('서비스를 찾지 못했습니다', 404);
     c.services = c.services.filter((x) => x.id !== s.id);
-    const before = c.folderRules.length + c.aliases.length + c.nameRules.length;
+    const cnt = () => c.folderRules.length + c.aliases.length + c.nameRules.length + (c.bmFolderRules || []).length;
+    const before = cnt();
     c.folderRules = c.folderRules.filter((r) => r.serviceId !== s.id);
     c.aliases = c.aliases.filter((r) => r.serviceId !== s.id);
     c.nameRules = c.nameRules.filter((r) => r.serviceId !== s.id);
-    return { result: { removed: s.id, name: s.name, rulesRemoved: before - (c.folderRules.length + c.aliases.length + c.nameRules.length) } };
+    c.bmFolderRules = (c.bmFolderRules || []).filter((r) => r.serviceId !== s.id);
+    return { result: { removed: s.id, name: s.name, rulesRemoved: before - cnt() } };
   },
   'rule.add'(d, b) {
     const p = cleanFolderPrefix(b.prefix); if (p.error) return err(p.error);
@@ -169,6 +171,38 @@ export const CORP_OPS = {
     const c = corpOf(d, b.corp);
     const n = c.folderRules.length; c.folderRules = c.folderRules.filter((r) => r.prefix !== p.value);
     if (n === c.folderRules.length) return err('그 규칙이 없습니다', 404);
+    return { result: { prefix: p.value } };
+  },
+  /**
+   * v2.986 물리서버 폴더 규칙(베어메탈) — 물리서버 폴더 경로(그 아래 하위 폴더 포함, '\\' 경계 · 가장 긴 경로가 이긴다) → 서비스.
+   * 판정 순서는 고정 다음 · 스캔 라벨 · 이름 규칙보다 먼저(VM 의 vCenter 폴더 규칙과 같은 자리). 규칙이 하나도 없으면 예전 판정 그대로다.
+   */
+  'bmrule.add'(d, b) {
+    const p = cleanFolderPath(b.prefix); if (p.error || !p.value) return err(p.error || '물리서버 폴더를 지정하십시오');
+    const c = corpOf(d, b.corp);
+    if (!svcIn(c, b.serviceId)) return err('대상 서비스를 찾지 못했습니다', 404);
+    if (!c.bmFolderRules) c.bmFolderRules = [];
+    if (c.bmFolderRules.length >= LIMITS.bmFolderRulesPerCorp) return err(`물리서버 폴더 규칙은 법인당 ${LIMITS.bmFolderRulesPerCorp}개까지입니다`);
+    const ex = c.bmFolderRules.find((r) => r.prefix === p.value);
+    if (ex) { if (ex.serviceId === b.serviceId) return { result: { prefix: p.value, same: true } }; return err(`'${p.value}' 규칙이 이미 다른 서비스에 있습니다 — 대상 바꾸기를 쓰십시오`, 409); }
+    c.bmFolderRules.push({ prefix: p.value, serviceId: b.serviceId });
+    return { result: { prefix: p.value } };
+  },
+  'bmrule.update'(d, b) {
+    const p = cleanFolderPath(b.prefix); if (p.error || !p.value) return err(p.error || '물리서버 폴더를 지정하십시오');
+    const c = corpOf(d, b.corp);
+    if (!svcIn(c, b.serviceId)) return err('대상 서비스를 찾지 못했습니다', 404);
+    const r = (c.bmFolderRules || []).find((x) => x.prefix === p.value); if (!r) return err('그 규칙이 없습니다', 404);
+    if (r.serviceId === b.serviceId) return { result: { prefix: p.value, same: true } };
+    const from = r.serviceId; r.serviceId = b.serviceId;
+    return { result: { prefix: p.value, from } };
+  },
+  'bmrule.remove'(d, b) {
+    const p = cleanFolderPath(b.prefix); if (p.error || !p.value) return err(p.error || '물리서버 폴더를 지정하십시오');
+    const c = corpOf(d, b.corp);
+    const list = c.bmFolderRules || [];
+    const n = list.length; c.bmFolderRules = list.filter((r) => r.prefix !== p.value);
+    if (n === c.bmFolderRules.length) return err('그 규칙이 없습니다', 404);
     return { result: { prefix: p.value } };
   },
   'alias.add'(d, b) {

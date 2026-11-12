@@ -1,12 +1,13 @@
 /**
  * 물리서버 폴더 — 서버 옆 패널(v2.984). 화면을 떠나지 않고 서버 한 대의 상태 · 폴더를 보고 옮기거나 뺀다.
- * 24시간 추이는 1단계에 없다 — 베어메탈 사용률 화면으로 넘긴다(그 화면이 대상 해석 · 범위 · 엣지 원시 이력 규약을 이미 갖고 있다).
+ * v2.986: 24시간 CPU · 메모리 추이(이 포탈이 적재한 원시 이력 — 엣지가 수집한 서버는 그 엣지에만 있다고 밝힌다) · 관리 주소(관리자 판본만).
  */
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { fetchJson } from '../../../api.js';
 import Select from '../../../components/Select.jsx';
 import EscClose from '../../../components/EscClose.jsx';
 import { UsageBar, StatusDot, SrcBadge } from './parts.jsx';
-import { PLACE_LABEL, pathText, wattsText } from '../bmFoldersText.js';
+import { PLACE_LABEL, pathText, wattsText, opErrorText } from '../bmFoldersText.js';
 
 export default function SidePanel({ r, corps, corpName, scoped, op, busy, onClose }) {
   const [to, setTo] = useState('');
@@ -39,7 +40,9 @@ export default function SidePanel({ r, corps, corpName, scoped, op, busy, onClos
         <span className="k">용량</span><span>{r.cores != null ? `${r.cores}코어` : '—'} · {r.memGB != null ? `${r.memGB} GB` : '—'}</span>
         <span className="k">받는 길</span><span><SrcBadge src={r.src} />{r.agent ? <span className="muted mono" style={{ fontSize: 11, marginLeft: 4 }}>{r.agent}</span> : null}</span>
         <span className="k">부품 장애</span><span>{r.faults == null ? '—(못 읽음)' : r.faults > 0 ? `${r.faults}건` : '없음'}</span>
+        {r.addr ? <><span className="k">관리 주소</span><span className="mono" style={{ fontSize: 12 }}>{r.addr}</span></> : null}
       </div>
+      <Trend k={r.key} kind={r.kind} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>폴더</span>
         <div className="bmf-mini">
@@ -70,5 +73,50 @@ export default function SidePanel({ r, corps, corpName, scoped, op, busy, onClos
         </span>
       </div>
     </aside>
+  );
+}
+
+const WHY = { edge: '이 서버는 엣지 · 수집 서버가 사용률을 수집합니다 — 원시 이력은 그 엣지 포탈의 베어메탈 사용률 화면에 있습니다.', esxi: 'ESXi 호스트의 추이는 호스트 화면에서 봅니다.', none: '이 포탈에 쌓인 사용률 이력이 없습니다(베어메탈 사용률 수집이 꺼져 있거나 아직 수집 전일 수 있습니다).', 'no-key': '사용률 대상 키가 없습니다.' };
+/** 24시간 CPU · 메모리 추이 — 서버를 바꾸면 늦게 온 이전 응답은 버린다. 못 읽은 점은 선을 끊는다(0 으로 그리지 않는다). */
+function Trend({ k, kind }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState('');
+  const cur = useRef('');
+  useEffect(() => {
+    cur.current = k; setD(null); setErr('');
+    if (kind !== 'bm') { setD({ rows: [], why: 'esxi' }); return; }
+    fetchJson('/tools/bm-folders/trend', { key: k, hours: 24 }).then((r) => { if (cur.current === k) setD(r); }).catch((e) => { if (cur.current === k) setErr(opErrorText(e)); });
+  }, [k, kind]);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>CPU · 메모리 — 지난 24시간</span>
+      {err ? <span style={{ fontSize: 12, color: 'var(--red)' }}>{err}</span> : !d ? <span className="muted" style={{ fontSize: 12 }}>읽는 중…</span>
+        : !d.rows?.length ? <span className="muted" style={{ fontSize: 12 }}>{WHY[d.why] || WHY.none}</span> : <Spark rows={d.rows} />}
+    </div>
+  );
+}
+function Spark({ rows }) {
+  const W = 356; const H = 96; const t0 = rows[0].ts; const t1 = rows[rows.length - 1].ts || t0 + 1;
+  const x = (ts) => ((ts - t0) / Math.max(1, t1 - t0)) * (W - 30);
+  const y = (v) => H - 14 - (Math.max(0, Math.min(100, v)) / 100) * (H - 24);
+  const path = (k) => {
+    let s = ''; let pen = false;
+    for (const p of rows) { if (p[k] == null) { pen = false; continue; } s += `${pen ? 'L' : 'M'}${x(p.ts).toFixed(1)},${y(p[k]).toFixed(1)} `; pen = true; }
+    return s.trim();
+  };
+  const last = (k) => { for (let i = rows.length - 1; i >= 0; i -= 1) if (rows[i][k] != null) return rows[i][k]; return null; };
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={`지난 24시간 CPU 마지막 ${last('cpu') ?? '—'}% · 메모리 마지막 ${last('mem') ?? '—'}%`}>
+        {[0, 50, 100].map((v) => <g key={v}><line x1="0" x2={W - 30} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeWidth="1" /><text x={W - 26} y={y(v) + 3} fontSize="10" fill="var(--text-dim)">{v}%</text></g>)}
+        <path d={path('mem')} fill="none" stroke="var(--accent-2)" strokeWidth="1.5" />
+        <path d={path('cpu')} fill="none" stroke="var(--accent)" strokeWidth="2" />
+      </svg>
+      <div className="flex wrap" style={{ gap: '4px 12px', fontSize: 11.5 }}>
+        <span className="bmf-lg"><i style={{ background: 'var(--accent)' }} />CPU {last('cpu') ?? '—'}{last('cpu') != null ? '%' : ''}</span>
+        <span className="bmf-lg"><i style={{ background: 'var(--accent-2)' }} />메모리 {last('mem') ?? '—'}{last('mem') != null ? '%' : ''}</span>
+        <span className="muted">점 {rows.length}개(구간 평균)</span>
+      </div>
+    </div>
   );
 }

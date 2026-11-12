@@ -13,10 +13,13 @@ import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import BulkAdd from './bmFolders/BulkAdd.jsx';
 import SidePanel from './bmFolders/SidePanel.jsx';
+import MapView from './bmFolders/MapView.jsx';
+import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
 import {
   INTRO, PLACE_LABEL, MISSING_WHY, pctText, wattsText, pathText, lastSeg, parentOf, ageText,
   rowsOf, aggregate, filterRows, resultNote, foldersByName, opErrorText, csvNameOf, trimPath,
+  VIEWS_KEY, parseViews, upsertView, cleanView, underPath,
 } from './bmFoldersText.js';
 
 const btn = { padding: '6px 12px', flex: 'none' };
@@ -39,18 +42,29 @@ export default function BmFolders() {
   const [picked, setPicked] = useState(() => new Set());
   const [panel, setPanel] = useState('');
   const [bulk, setBulk] = useState(null);
+  // v2.986 맵 보기 · 저장한 보기(브라우저 저장 — 이 사람의 편의만. 못 읽으면 빈 목록) · 입력 다시 읽기 진행 중
+  const [view, setView] = useState('list');
+  const [groupBy, setGroupBy] = useState('folder');
+  const [colorBy, setColorBy] = useState('cpu');
+  const [views, setViews] = useState(() => { try { return parseViews(localStorage.getItem(VIEWS_KEY)); } catch { return []; } });
+  const [viewName, setViewName] = useState('');
+  const [freshBusy, setFreshBusy] = useState(false);
+  const narrow = useNarrowScreen('(max-width: 640px)');
   const [form, setForm] = useState('');
   const [fv, setFv] = useState({});
   const seq = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (fresh = false) => {
     const my = ++seq.current;
     try {
-      const r = await fetchJson('/tools/bm-folders');
+      // fresh: 입력 다시 읽기 — 재시도하지 않는다(429 를 일시 오류로 다시 물으면 늦게 와 문구를 덮는다 — 서비스 인벤토리 규약)
+      const r = await fetchJson('/tools/bm-folders', fresh ? { fresh: '1' } : {}, undefined, fresh ? { retries: 0 } : {});
       if (my !== seq.current) return;   // 늦게 온 이전 응답은 버린다
       setD(r); setErr(null);
-    } catch (e) { if (my === seq.current) setErr(e); }
+    } catch (e) { if (my === seq.current) { if (fresh) setNote({ ok: false, warn: e?.status === 429, text: opErrorText(e) }); else setErr(e); } }
   }, []);
+  const readFresh = useCallback(async () => { setFreshBusy(true); try { await load(true); } finally { setFreshBusy(false); } }, [load]);
+  const saveViews = useCallback((list) => { setViews(list); try { localStorage.setItem(VIEWS_KEY, JSON.stringify(list)); } catch { /* 저장 못 해도 화면은 그대로 — 이 사람의 편의일 뿐 */ } }, []);
   useEffect(() => { load(); }, [load]);
 
   const op = useCallback(async (body, okText) => {
@@ -73,7 +87,9 @@ export default function BmFolders() {
   const agg = useMemo(() => aggregate(baseRows), [baseRows]);
   const byName = useMemo(() => foldersByName(corps), [corps]);
   const selKey = `${sel.type}|${sel.corp || ''}|${sel.path || ''}`;
-  useEffect(() => { setPicked(new Set()); setForm(''); setFv({}); setQ(''); setQuick(''); }, [selKey]);
+  // 저장한 보기를 고르면 노드가 바뀌어 거르기가 비워진다 — 그 보기의 거르기는 이 효과가 넣는다(같은 틀에서 순서를 보장)
+  const pendingFilter = useRef(null);
+  useEffect(() => { const p = pendingFilter.current; pendingFilter.current = null; setPicked(new Set()); setForm(''); setFv({}); setQ(p?.q || ''); setQuick(p?.quick || ''); }, [selKey]);
   const pick = useCallback((corp) => setOpen((s) => { const n = new Set(s); n.add(corp); return n; }), []);
 
   if (err && !d) {
@@ -110,16 +126,35 @@ export default function BmFolders() {
   const panelRow = panel ? servers.find((s) => s.key === panel) || null : null;
   const pickedRows = rows.filter((r) => picked.has(r.key));
   const openBulk = (o = {}) => setBulk({ corp: '', path: '', text: '', ...o });
+  // 서비스 인벤토리 연결 — 고른 폴더에 걸리는 가장 긴 물리서버 폴더 규칙(판정은 서비스 인벤토리가 한다 — 여기는 그 규칙을 보여 줄 뿐)
+  const svcLinks = (sel.corp && d.svcLinks?.[sel.corp]) || [];
+  const svcLink = sel.type === 'folder' ? svcLinks.filter((x) => underPath(sel.path, x.prefix)).sort((a, b) => b.prefix.length - a.prefix.length)[0] || null : null;
+  const svcRuleN = sel.type === 'folder' ? svcLinks.filter((x) => underPath(x.prefix, sel.path)).length : 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       <div className="card" style={{ padding: '10px 14px', borderLeft: '3px solid var(--accent-2)' }}>
         <div className="flex wrap gap" style={{ alignItems: 'center', marginBottom: 6 }}>
           <b style={{ fontSize: 15 }}>물리서버 폴더</b>
+          <div className="tabs" style={{ marginLeft: 0 }} role="group" aria-label="보기 방식">
+            <button type="button" className={`tab${view === 'list' ? ' active' : ''}`} onClick={() => setView('list')}>목록</button>
+            <button type="button" className={`tab${view === 'map' ? ' active' : ''}`} onClick={() => setView('map')}>맵</button>
+          </div>
+          <ViewsMenu views={views} viewName={viewName} onPick={(name) => {
+            const v = views.find((x) => x.name === name); setViewName(name);
+            if (!v) return;
+            const s = v.state;
+            setSel(s.sel); setTreeMode(s.treeMode); setView(s.view); setGroupBy(s.groupBy); setColorBy(s.colorBy); setSub(s.sub);
+            if (s.sel.corp) pick(s.sel.corp);
+            // 노드가 같으면 효과가 돌지 않으므로 바로 넣고, 바뀌면 효과가 넣는다
+            if (`${s.sel.type}|${s.sel.corp || ''}|${s.sel.path || ''}` === selKey) { setQ(s.q); setQuick(s.quick); } else pendingFilter.current = { q: s.q, quick: s.quick };
+          }} onSave={(name) => { const list = upsertView(views, name, { sel, view, treeMode, q, quick, sub, groupBy, colorBy }); saveViews(list); setViewName(cleanView({ name, state: {} })?.name || ''); }}
+            onRemove={(name) => { saveViews(views.filter((x) => x.name !== name)); setViewName(''); }} />
           <span style={{ flex: 1 }} />
           {d.canWrite ? <button type="button" className="login-btn" style={btn} disabled={busy} onClick={() => openBulk({ corp: sel.corp || '', path: sel.type === 'folder' ? sel.path : '' })}>서버 찾아 등록</button> : null}
           {canCsv() ? <button type="button" className="logout-btn" style={btn} onClick={() => downloadFile('/tools/bm-folders.csv', csvNameOf()).catch((e) => setNote({ ok: false, text: opErrorText(e) }))}>CSV</button> : null}
-          <button type="button" className="logout-btn" style={btn} onClick={load}>새로고침</button>
+          {d.canWrite ? <button type="button" className="logout-btn" style={btn} disabled={freshBusy} title="새로 넣은 iDRAC 서버 · 법인 귀속 변경을 다음 인벤토리 주기 전에 지금 다시 읽습니다(포탈 전체에 상한 하나 — 서비스 인벤토리와 함께 씁니다)" onClick={readFresh}>{freshBusy ? '다시 읽는 중…' : '입력 다시 읽기'}</button> : null}
+          <button type="button" className="logout-btn" style={btn} onClick={() => load()}>새로고침</button>
         </div>
         <div style={{ fontSize: 13 }}><BoldText text={INTRO} /></div>
         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
@@ -184,13 +219,16 @@ export default function BmFolders() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-          {sel.type === 'all' ? (
+          {sel.type === 'all' && view === 'map' ? (
+            <MapView rows={filterRows(servers, q, quick)} groupBy={groupBy} setGroupBy={setGroupBy} colorBy={colorBy} setColorBy={setColorBy} corpName={corpName} onPick={setPanel} picked={panel} />
+          ) : sel.type === 'all' ? (
             <Overview d={d} corps={corps} corpName={corpName} setSel={setSel} pick={pick} op={op} busy={busy} openBulk={openBulk} />
           ) : (
             <>
               <div className="card" style={{ minWidth: 0 }}>
                 <div className="flex wrap gap" style={{ padding: '10px 14px', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
                   <Crumb sel={sel} corpName={corpName} />
+                  {svcLink ? <a className="badge blue" href="#/tools/svc-inventory" title={`서비스 인벤토리의 물리서버 폴더 규칙 ‘${pathText(svcLink.prefix)}’ → 이 폴더 서버는 그 서비스의 구성원입니다(고정 · 판정 순서에 따라 다를 수 있음)`} style={{ textDecoration: 'none' }}>서비스: {svcLink.service}</a> : null}
                   <span style={{ flex: 1 }} />
                   {writable && sel.type === 'folder' ? (
                     <>
@@ -210,7 +248,7 @@ export default function BmFolders() {
                   {sel.corp && !writable && sel.type !== 'name' ? <span className="badge gray">조회 전용</span> : null}
                 </div>
                 <FolderForms form={form} setForm={setForm} fv={fv} setFv={setFv} sel={sel} op={op} busy={busy} corps={corps} corpName={corpName}
-                  folderN={baseRows.filter((r) => r.place === 'manual').length} ruleN={baseRows.filter((r) => r.place === 'rule').length}
+                  folderN={baseRows.filter((r) => r.place === 'manual').length} ruleN={baseRows.filter((r) => r.place === 'rule').length} svcRuleN={svcRuleN}
                   onRemoved={() => setSel(parentOf(sel.path) ? { type: 'folder', corp: sel.corp, path: parentOf(sel.path) } : { type: 'corp', corp: sel.corp })}
                   onRenamed={(to) => setSel({ type: 'folder', corp: sel.corp, path: to })} />
                 {sel.type === 'name' ? <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>같은 경로의 폴더를 법인을 넘어 합쳐 본 것입니다(읽기 전용 — 저장은 법인별 그대로). 바꾸려면 법인별 트리에서 고르십시오.</div> : null}
@@ -231,6 +269,9 @@ export default function BmFolders() {
                 </div>
               </div>
 
+              {view === 'map' ? (
+                <MapView rows={rows} groupBy={groupBy} setGroupBy={setGroupBy} colorBy={colorBy} setColorBy={setColorBy} corpName={corpName} onPick={setPanel} picked={panel} />
+              ) : (
               <div className="card" style={{ minWidth: 0 }}>
                 <div className="flex wrap gap" style={{ padding: '8px 14px', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
                   <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="이 목록에서 거르기(이름 · 모델 · 서비스 태그)" aria-label="목록 거르기" style={{ flex: '1 1 220px', minWidth: 0, maxWidth: 360 }} />
@@ -242,7 +283,9 @@ export default function BmFolders() {
                 {writable && picked.size ? (
                   <SelBar picked={pickedRows} folders={folderPaths} sel={sel} op={op} busy={busy} onDone={() => setPicked(new Set())} />
                 ) : null}
-                {!rows.length ? <div className="muted" style={{ padding: 16 }}>{baseRows.length ? '거르기 조건에 맞는 서버가 없습니다.' : sel.type === 'folder' ? '이 폴더에 등록된 서버가 없습니다 — ‘서버 찾아 등록’ 으로 넣습니다.' : '서버가 없습니다.'}</div> : (
+                {!rows.length ? <div className="muted" style={{ padding: 16 }}>{baseRows.length ? '거르기 조건에 맞는 서버가 없습니다.' : sel.type === 'folder' ? '이 폴더에 등록된 서버가 없습니다 — ‘서버 찾아 등록’ 으로 넣습니다.' : '서버가 없습니다.'}</div> : narrow ? (
+                  <NarrowList rows={rows.slice(0, ROW_LIMIT)} writable={writable} picked={picked} setPicked={setPicked} onOpen={setPanel} scoped={!!d.scoped} />
+                ) : (
                   <STable className="table bmf-t" minWidth={720} limit={ROW_LIMIT}>
                     <thead>
                       <tr>
@@ -259,7 +302,7 @@ export default function BmFolders() {
                           <td data-sort={r.name}><span className="bmf-nm"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} />{r.name}{r.kind === 'esxi' ? <span className="badge gray" style={{ marginLeft: 4 }}>ESXi</span> : null}</span></td>
                           {sel.type !== 'folder' || sub ? <td data-sort={r.place ? r.path : '￿'}>{r.place ? <span title={PLACE_LABEL[r.place]}>{pathText(r.path)}{r.place === 'rule' ? <span className="badge gray" style={{ marginLeft: 4 }}>규칙</span> : null}</span> : <span className="muted">(미분류)</span>}</td> : null}
                           <td data-sort={r.model || ''}>{r.model || '—'}{!d.scoped && r.serviceTag ? <div className="mono muted" style={{ fontSize: 11 }}>{r.serviceTag}</div> : null}</td>
-                          <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}</td>
+                          <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}{r.addr ? <div className="muted mono" style={{ fontSize: 11 }} title="관리 주소(iDRAC) — 관리자 판본">{r.addr}</div> : null}</td>
                           <td data-sort={r.faults ?? ''}>{r.faults == null ? <span className="muted">—</span> : r.faults > 0 ? <span className="badge red">{r.faults}건</span> : <span className="muted">없음</span>}</td>
                           <td data-sort={r.cpu ?? ''}><UsagePair cpu={r.cpu} mem={r.mem} /></td>
                           <td data-sort={r.watts ?? ''} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{wattsText(r.watts)}</td>
@@ -285,6 +328,7 @@ export default function BmFolders() {
                   </div>
                 ) : null}
               </div>
+              )}
             </>
           )}
         </div>
@@ -359,7 +403,7 @@ function Crumb({ sel, corpName }) {
 }
 
 /** 폴더 만들기 · 이름 바꾸기 · 삭제 · 구조 복사 입력 줄. */
-function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName, folderN, ruleN, onRemoved, onRenamed }) {
+function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName, folderN, ruleN, svcRuleN = 0, onRemoved, onRenamed }) {
   if (!form) return null;
   const bar = { padding: '8px 14px', background: 'var(--panel-2)', alignItems: 'center' };
   if (form === 'folder') {
@@ -381,7 +425,7 @@ function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName,
         <span className="muted" style={{ fontSize: 12 }}>‘{pathText(sel.path)}’ 새 이름(하위 폴더 · 등록 · 이 법인 규칙의 경로도 함께)</span>
         <input className="input" autoFocus value={fv.name || ''} onChange={(e) => setFv({ ...fv, name: e.target.value })} aria-label="새 폴더 이름" style={{ maxWidth: 220 }} />
         <button type="button" className="login-btn" style={btn} disabled={busy || !String(fv.name || '').trim()} onClick={async () => {
-          const r = await op({ op: 'folder.rename', corp: sel.corp, path: sel.path, name: fv.name }, '폴더 이름을 바꿨습니다.');
+          const r = await op({ op: 'folder.rename', corp: sel.corp, path: sel.path, name: fv.name }, `폴더 이름을 바꿨습니다${svcRuleN ? ' — 서비스 인벤토리의 물리서버 폴더 규칙도 새 경로로 옮겼습니다' : ''}.`);
           if (r) { setForm(''); onRenamed(r.result?.path || sel.path); }
         }}>바꾸기</button>
         <button type="button" className="logout-btn" style={btn} onClick={() => setForm('')}>취소</button>
@@ -394,6 +438,7 @@ function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName,
         <span style={{ fontSize: 12, flex: '1 1 300px', minWidth: 0 }}>
           폴더 ‘{pathText(sel.path)}’ 와(과) 하위 폴더를 지웁니다. 손 등록한 서버 <b>{folderN}</b>대는 지워지지 않고 <b>(미분류)</b>로 돌아갑니다
           {ruleN ? ` · 자동 규칙으로 들어온 ${ruleN}대는 그 규칙(이 법인 규칙)과 함께 빠집니다 — 전 법인 규칙이 이 경로를 가리키면 폴더가 다시 생길 수 있습니다` : ''}.
+          {svcRuleN ? ` 서비스 인벤토리의 물리서버 폴더 규칙 ${svcRuleN}개가 이 경로를 가리킵니다 — 그 규칙은 지우지 않으니 서비스 인벤토리 › 소속 규칙에서 정리하십시오.` : ''}
         </span>
         <button type="button" className="logout-btn" style={{ ...btn, color: 'var(--red)' }} disabled={busy} onClick={async () => {
           const r = await op({ op: 'folder.remove', corp: sel.corp, path: sel.path, expect: folderN }, `폴더 ‘${pathText(sel.path)}’ 을(를) 지웠습니다 — ${folderN}대가 (미분류)로 돌아갔습니다.`);
@@ -587,6 +632,56 @@ function RulesCard({ d, corps, corpName, op, busy }) {
           }}>규칙 만들기</button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** 저장한 보기 — 고르기 · 지금 보기 저장(이름) · 지우기. 이 브라우저에만 저장된다(다른 사람 · 다른 기기와 나누지 않는다). */
+function ViewsMenu({ views, viewName, onPick, onSave, onRemove }) {
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState('');
+  return (
+    <span className="flex wrap" style={{ gap: 6, alignItems: 'center', minWidth: 0 }}>
+      <Select className="select" value={viewName} onChange={(e) => onPick(e.target.value)} aria-label="저장한 보기" style={{ maxWidth: 180 }} title="저장한 보기 — 이 브라우저에만 저장됩니다">
+        <option value="">보기 고르기…</option>
+        {views.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
+      </Select>
+      {naming ? (
+        <>
+          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="보기 이름" aria-label="보기 이름" maxLength={40} style={{ maxWidth: 150 }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) { onSave(name.trim()); setNaming(false); setName(''); } if (e.key === 'Escape') setNaming(false); }} />
+          <button type="button" className="login-btn" style={{ padding: '5px 10px' }} disabled={!name.trim()} onClick={() => { onSave(name.trim()); setNaming(false); setName(''); }}>저장</button>
+          <button type="button" className="logout-btn" style={{ padding: '5px 10px' }} onClick={() => setNaming(false)}>취소</button>
+        </>
+      ) : (
+        <>
+          <button type="button" className="logout-btn" style={{ padding: '5px 10px' }} onClick={() => { setNaming(true); setName(viewName || ''); }} title="지금 고른 노드 · 보기 방식 · 거르기 · 묶기 · 색을 이름으로 저장">보기 저장</button>
+          {viewName ? <button type="button" className="logout-btn" style={{ padding: '5px 10px' }} onClick={() => onRemove(viewName)}>지우기</button> : null}
+        </>
+      )}
+    </span>
+  );
+}
+
+/** 좁은 화면(640px 이하) 목록 — 서버 한 대 = 카드 두 줄(이름 · 받는 길 / 모델 · 사용률 · 전력). 고르기는 44px 칸. */
+function NarrowList({ rows, writable, picked, setPicked, onOpen, scoped }) {
+  return (
+    <div className="bmf-cards">
+      {rows.map((r) => (
+        <div key={r.key} className={`bmf-card${picked.has(r.key) ? ' picked' : ''}`}>
+          {writable ? (
+            <label className="bmf-card-chk" onClick={(e) => e.stopPropagation()}>
+              <input type="checkbox" aria-label={`${r.name} 선택`} checked={picked.has(r.key)} onChange={(e) => setPicked((s) => { const n = new Set(s); if (e.target.checked) n.add(r.key); else n.delete(r.key); return n; })} />
+            </label>
+          ) : null}
+          <button type="button" className="bmf-card-body" onClick={() => onOpen(r.key)}>
+            <span className="l1"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} /><b>{r.name}</b>
+              {r.faults > 0 ? <span className="badge red">{r.faults}건</span> : null}<span style={{ marginLeft: 'auto' }}><SrcBadge src={r.src} small /></span></span>
+            <span className="l2">{[r.place ? pathText(r.path) : '(미분류)', r.model, !scoped ? r.serviceTag : ''].filter(Boolean).join(' · ')}</span>
+            <span className="l2">CPU {pctText(r.cpu)} · 메모리 {pctText(r.mem)} · {wattsText(r.watts)}</span>
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

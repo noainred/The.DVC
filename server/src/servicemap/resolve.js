@@ -6,6 +6,9 @@
  *                              '고정 유지'(reviewed)는 **그때의 자동 판정(reviewedAuto)과 같은 드리프트만** 다시 묻지 않는다 — 자동 판정이 다른 서비스로
  *                              바뀌면 다시 드리프트(5차 반증 R8). reviewedAuto 가 없는 옛 검토 표지는 한 번 다시 묻는다(모르는 것을 '같다' 로 보지 않는다).
  *   2. vCenter 폴더 규칙(VM)  — vmPlacement.folderPath('/ERP/prod') 의 '/' 경계 접두, 가장 긴 접두. folderPath null(vApp 등)은 'placement-unknown'.
+ *   2b. 물리서버 폴더 규칙(베어메탈, v2.986) — 물리서버 폴더(bm-folders) 경로의 '\\' 경계 접두, 가장 긴 접두. VM 의 2번과 같은 자리.
+ *                              구성원의 폴더는 ctx.bmFolderOf(키 → 경로 — 미분류 '' · 모름 undefined)로 받는다. 모르면(물리서버 폴더 저장소 손상) 이 규칙을 건너뛴다.
+ *                              이 규칙으로 정해졌는데 스캔 라벨 · 이름 규칙이 다른 서비스를 가리키면 `ruleOverlap` 으로 검토 큐에 올린다(규칙을 만든 순간 옮겨 간 구성원이 드러나게).
  *   3. 스캔 엔트리 라벨(베어메탈) — 등록부 scanRangeId → idrac-scan-ranges.json 엔트리 service 라벨. 라벨 = 서비스명 또는 별칭.
  *   4. vSphere 태그(선택, VM) — 전역 카테고리가 정해지고 그 법인이 켰을 때만. 태그를 못 읽었으면 'unchecked'(미지정과 다르다).
  *                              태그가 여럿이면 **서비스(이름·별칭)에 걸리는 값**을 고른다(5차 M5·R14 — 예전에는 첫 값만 봤다). 값은 소문자 정렬 순으로 본다
@@ -18,6 +21,7 @@
  *
  * 구성원 입력 모양:
  *   { key, kind:'vm'|'bm', corp, name, folderPath?:string|null, tags?:string[]|null, scan?:{entryId,label}|null, scanWhy?:'unknown-entry'|'old-source'|'not-reported', corpWhy? }
+ *   베어메탈의 물리서버 폴더는 구성원이 아니라 ctx.bmFolderOf(키 → 경로)로 받는다 — 입력 수집(스냅샷 세대)과 물리서버 폴더 저장소(rev)의 세대가 달라서다.
  *   scanWhy(5차 R18): scan 이 없는 이유 — 보고된 엔트리 id 가 중앙 등록부에 없음 · 보고한 엣지·수집 서버가 엔트리 id 를 보내지 않는 구버전.
  *   tags: undefined = 태그 규칙 꺼짐 · null = 그 vCenter 태그를 못 읽음(unchecked) · [] = 읽었고 카테고리 태그 없음.
  */
@@ -35,7 +39,8 @@ export function buildIndex(map) {
     const aliasScan = new Map(); const aliasTag = new Map();
     for (const a of c.aliases || []) { if (!svcById.has(a.serviceId)) continue; (a.kind === 'scan' ? aliasScan : aliasTag).set(lc(a.value), a.serviceId); }
     const nameRules = sortNameRules((c.nameRules || []).filter((r) => svcById.has(r.serviceId))).map((r) => ({ ...r, v: lc(r.value) }));
-    idx.set(vc, { svcById, svcByName, rules, aliasScan, aliasTag, nameRules, tagEnabled: c.tagEnabled === true });
+    const bmRules = (c.bmFolderRules || []).filter((r) => svcById.has(r.serviceId)).slice().sort((a, b) => b.prefix.length - a.prefix.length);
+    idx.set(vc, { svcById, svcByName, rules, aliasScan, aliasTag, nameRules, bmRules, tagEnabled: c.tagEnabled === true });
   }
   return idx;
 }
@@ -69,9 +74,27 @@ function nameRuleOf(c, name) {
   return first ? { r: first, others } : null;
 }
 const hit = (serviceId, src, via) => ({ serviceId, src, via: String(via ?? '') });
+/** 물리서버 폴더 경로 접두 일치 — '\\' 경계(‘DB’ 는 ‘DB2’ 의 접두가 아니다). 대소문자를 구분한다(폴더는 포탈이 만든 이름 그대로). */
+export function bmFolderMatches(prefix, path) {
+  if (typeof path !== 'string' || !path || !prefix) return false;
+  return path === prefix || path.startsWith(`${prefix}\\`);
+}
+/** 베어메탈의 스캔 라벨 · 이름 규칙 판정(물리서버 폴더 규칙 아래 순위) — 겹침 판정과 본 판정이 같은 함수를 쓴다. */
+function bmLowerResolve(m, c) {
+  const scan = m.scan || null;
+  if (scan && scan.label && c) {
+    const s = c.svcByName.get(lc(scan.label)) || null;
+    if (s) return hit(s.id, 'scan', scan.label);
+    const a = c.aliasScan.get(lc(scan.label));
+    if (a) return hit(a, 'scan', scan.label);
+  }
+  const nr = c ? nameRuleOf(c, m.name) : null;
+  if (nr) return { ...hit(nr.r.serviceId, 'rule', `${nr.r.match}:${nr.r.value}`), ...(nr.others.length ? { ruleOverlap: nr.others } : {}) };
+  return null;
+}
 
 /** 자동 판정(고정 제외). 순수. */
-export function autoResolve(m, idx, { tagCategory = '' } = {}) {
+export function autoResolve(m, idx, { tagCategory = '', bmFolderOf = null } = {}) {
   if (!m || !m.corp) return { serviceId: null, src: 'none', reason: m?.corpWhy === 'attr-error' ? 'no-corp-error' : m?.corpWhy === 'tag-conflict' ? 'no-corp-conflict' : 'no-corp' };
   const c = idx.get(m.corp);
   if (m.kind === 'vm') {
@@ -103,16 +126,19 @@ export function autoResolve(m, idx, { tagCategory = '' } = {}) {
     if (f == null) return { serviceId: null, src: 'none', reason: 'placement-unknown', ...(unchecked ? { unchecked } : {}) };
     return { serviceId: null, src: 'none', reason: unchecked ? 'tags-unchecked' : 'no-folder-rule', unmapped: { kind: 'folder', value: f }, ...(unchecked ? { unchecked } : {}) };
   }
-  // 베어메탈
-  const scan = m.scan || null;
-  if (scan && scan.label && c) {
-    const s = c.svcByName.get(lc(scan.label)) || null;
-    if (s) return hit(s.id, 'scan', scan.label);
-    const a = c.aliasScan.get(lc(scan.label));
-    if (a) return hit(a, 'scan', scan.label);
+  // 베어메탈 — 2b. 물리서버 폴더 규칙(가장 긴 접두)
+  const lower = bmLowerResolve(m, c);
+  const folder = bmFolderOf && typeof bmFolderOf.get === 'function' ? bmFolderOf.get(m.key) : undefined;
+  if (c && c.bmRules.length && typeof folder === 'string' && folder) {
+    for (const r of c.bmRules) {
+      if (!bmFolderMatches(r.prefix, folder)) continue;
+      // 아래 순위(스캔 라벨 · 이름 규칙)가 다른 서비스를 가리키면 겹침으로 밝힌다 — 규칙을 만든 순간 옮겨 간 구성원을 검토 큐에서 보이게
+      const shadow = lower && lower.serviceId !== r.serviceId ? [`${lower.src === 'scan' ? 'scan' : 'name'}:${lower.via}`] : null;
+      return { ...hit(r.serviceId, 'bmfolder', r.prefix), ...(shadow ? { ruleOverlap: shadow } : {}) };
+    }
   }
-  const nr = c ? nameRuleOf(c, m.name) : null;
-  if (nr) return { ...hit(nr.r.serviceId, 'rule', `${nr.r.match}:${nr.r.value}`), ...(nr.others.length ? { ruleOverlap: nr.others } : {}) };
+  const scan = m.scan || null;
+  if (lower) return lower;
   if (!scan) return { serviceId: null, src: 'none', reason: m.scanWhy === 'unknown-entry' ? 'scan-entry-unknown' : m.scanWhy === 'old-source' ? 'source-old' : m.scanWhy === 'not-reported' ? 'source-unreported' : 'no-scan-entry' };
   if (!scan.label) return { serviceId: null, src: 'none', reason: 'scan-label-empty', unmapped: { kind: 'entry', value: String(scan.entryId || '') } };
   return { serviceId: null, src: 'none', reason: 'scan-label-unmapped', unmapped: { kind: 'scan', value: scan.label } };

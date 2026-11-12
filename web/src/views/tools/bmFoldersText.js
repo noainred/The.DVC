@@ -193,3 +193,70 @@ export function opErrorText(e) {
   const r = e?.serverReason || e?.body?.reason || e?.message || '';
   return String(r || '요청을 처리하지 못했습니다.').slice(0, 300);
 }
+
+// ───────── v2.986 맵 보기 · 저장한 보기 ─────────
+/** 맵 묶기 — 'folder'(폴더 경로마다 · 미분류는 맨 뒤) · 'corp' · 'model'. 그룹 = { key, label, rows, un? }. */
+export function mapGroups(rows = [], groupBy = 'folder', corpName = (x) => x) {
+  const m = new Map();
+  for (const r of rows) {
+    let key; let label; let un = false;
+    if (groupBy === 'corp') { key = r.corp || ''; label = r.corp ? corpName(r.corp) : '(법인 미지정)'; un = !r.corp; }
+    else if (groupBy === 'model') { key = r.model || ''; label = r.model || '(모델 모름)'; un = !r.model; }
+    else { key = r.place ? `${r.corp}|${r.path}` : `${r.corp}|`; label = r.place ? pathText(r.path) : '(미분류)'; un = !r.place; }
+    if (!m.has(key)) m.set(key, { key, label, rows: [], un, ...(groupBy === 'folder' ? { corp: r.corp || '' } : {}) });
+    m.get(key).rows.push(r);
+  }
+  return [...m.values()].sort((a, b) => (a.un - b.un) || a.label.localeCompare(b.label, 'ko'));
+}
+
+/**
+ * 맵 칸 색 — 'cpu' · 'mem'(밝기 5단 · 20% 단위) · 'watts'(보이는 서버 중 최대 대비 5단) · 'fault'(장애 · 정상 · 모름).
+ * 못 읽은 값은 'na'(점선 빈 칸 — 0 으로 칠하지 않는다) · 꺼짐은 'off'. 장애가 있으면 bad = true(테두리 — 색과 따로).
+ */
+export function cellTone(r, colorBy = 'cpu', maxWatts = null) {
+  const bad = numOrNull(r?.faults) > 0;
+  if (r?.powered === false) return { tone: 'off', bad, label: '꺼짐' };
+  if (colorBy === 'fault') {
+    const f = numOrNull(r?.faults);
+    return f == null ? { tone: 'na', bad, label: '장애 모름' } : { tone: f > 0 ? 'u5' : 'u1', bad, label: f > 0 ? `부품 장애 ${f}건` : '장애 없음' };
+  }
+  const v = colorBy === 'mem' ? numOrNull(r?.mem) : colorBy === 'watts' ? numOrNull(r?.watts) : numOrNull(r?.cpu);
+  if (v == null || (colorBy === 'watts' && !(v > 0))) return { tone: 'na', bad, label: '못 읽음' };
+  const pct = colorBy === 'watts' ? (maxWatts > 0 ? (v / maxWatts) * 100 : null) : v;
+  if (pct == null) return { tone: 'na', bad, label: '못 읽음' };
+  const lv = Math.min(5, Math.max(1, Math.ceil(Math.max(pct, 0.0001) / 20)));
+  return { tone: `u${lv}`, bad, label: colorBy === 'watts' ? `${Math.round(v)} W` : `${Math.round(v)}%` };
+}
+
+export const VIEWS_KEY = 'bmf.views';
+export const VIEWS_MAX = 20;
+const SEL_TYPES = new Set(['all', 'corp', 'folder', 'un', 'nocorp', 'name']);
+/** 저장한 보기 한 건 정리 — 아는 필드만 · 글자 상한(브라우저 저장소는 사람이 고칠 수 있다). 모르는 모양이면 null. */
+export function cleanView(v) {
+  if (!v || typeof v !== 'object') return null;
+  const name = String(v.name ?? '').trim().slice(0, 40);
+  const s = v.state && typeof v.state === 'object' ? v.state : null;
+  if (!name || !s) return null;
+  const sel = s.sel && typeof s.sel === 'object' && SEL_TYPES.has(s.sel.type)
+    ? { type: s.sel.type, ...(typeof s.sel.corp === 'string' ? { corp: s.sel.corp.slice(0, 128) } : {}), ...(typeof s.sel.path === 'string' ? { path: s.sel.path.slice(0, 700) } : {}) }
+    : { type: 'all' };
+  const pick = (x, list, d) => (list.includes(x) ? x : d);
+  return {
+    name,
+    state: {
+      sel, view: pick(s.view, ['list', 'map'], 'list'), treeMode: pick(s.treeMode, ['corp', 'name'], 'corp'),
+      q: String(s.q ?? '').slice(0, 200), quick: pick(s.quick, ['', 'fault', 'unread', 'off'], ''), sub: s.sub !== false,
+      groupBy: pick(s.groupBy, ['folder', 'corp', 'model'], 'folder'), colorBy: pick(s.colorBy, ['cpu', 'mem', 'watts', 'fault'], 'cpu'),
+    },
+  };
+}
+/** 저장된 글자 → 보기 목록(망가졌으면 빈 목록 — 던지지 않는다). */
+export function parseViews(raw) {
+  try { const a = JSON.parse(raw || '[]'); return Array.isArray(a) ? a.map(cleanView).filter(Boolean).slice(0, VIEWS_MAX) : []; } catch { return []; }
+}
+/** 같은 이름이면 바꾸고 없으면 앞에 더한다(최대 VIEWS_MAX — 넘치면 가장 오래된 것을 버린다). */
+export function upsertView(list = [], name = '', state = {}) {
+  const v = cleanView({ name, state });
+  if (!v) return list;
+  return [v, ...list.filter((x) => x.name !== v.name)].slice(0, VIEWS_MAX);
+}

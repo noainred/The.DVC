@@ -26,9 +26,11 @@ import { store } from '../../store.js';
 import { memoJson, scopeKey } from './shared.js';
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
-import { pushAll } from '../../util/pushAll.js';   // 큰 배열 스프레드 push 금지(스윕 audit2603a)
-import { cleanFolderPath, cleanText } from '../../servicemap/store.js';
-import { sharedGather, sharedInputRev, bmKeyOf, pubKey, keyResolverFor, maskName, corpWriteAccess } from './svcInventory.js';
+import { pushAll } from '../../util/pushAll.js';
+import { numOrNull } from '../../util/numOrNull.js';
+import { config } from '../../config.js';   // 큰 배열 스프레드 push 금지(스윕 audit2603a)
+import { cleanFolderPath, cleanText, peekMap as smPeekMap, mutateMap as smMutateMap, flushStore as smFlushStore, storeLoadError as smLoadError, storeRev as smStoreRev } from '../../servicemap/store.js';
+import { sharedGather, sharedInputRev, sharedFresh, bmKeyOf, pubKey, keyResolverFor, maskName, corpWriteAccess } from './svcInventory.js';
 import { buildFolders, searchMembers, parseTokens, srcClassOf } from '../../bmfolders/build.js';
 import {
   storeLoadError, storeRev, peekMain, peekAssign, mutateMain, mutateAssign, flushStore, resetCorrupt,
@@ -69,7 +71,7 @@ export function membersOf(g) {
     out.push({
       key: m.key, keyKind: m.keyKind, kind: 'bm', corp: t(m.corp), name: t(m.name), nameIsAddr: !!m.nameIsAddr, serviceTag: t(m.serviceTag), model: t(m.model),
       source: t(m.source), remoteAgent: t(m.remoteAgent), collectorId: t(m.collectorId), powered: m.powered ?? null, usage: m.usage || { state: 'unread' },
-      faults: m.faults ?? null, watts: m.watts ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null,
+      faults: m.faults ?? null, watts: m.watts ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null, usageKey: t(m.usageKey), mgmtHost: t(m.mgmtHost),
     });
   }
   for (const h of g?.hostByKey?.values?.() || []) {
@@ -114,8 +116,63 @@ function serverRow(m, p, admin, hide) {
     path: p?.path || '', place: p?.src || null, moved: p?.moved ? true : undefined,
     powered: m.powered, usage: m.usage?.state || 'unread', cpu: m.usage?.cpuPct ?? null, mem: m.usage?.memPct ?? null,
     watts: m.watts ?? null, faults: m.faults ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null,
+    // 관리 주소 — 관리자 판본만(비관리자 · 데모에게 장비 주소를 싣지 않는다 — isAdminDetailUser 하나로 판정)
+    addr: admin && m.mgmtHost ? m.mgmtHost : undefined,
   };
 }
+
+/**
+ * 추이 점 줄이기 — 시각순 rows 를 최대 n 구간으로 나눠 구간 평균(못 읽은 값은 평균에 넣지 않는다 — 구간에 값이 하나도 없으면 null).
+ * 0 으로 채우지 않는다('못 읽은 값은 0 이 아니다').
+ */
+export function downsample(rows = [], n = 240) {
+  const list = [...rows].sort((a, b) => a.ts - b.ts);
+  if (list.length <= n) return list;
+  const out = []; const step = list.length / n;
+  for (let i = 0; i < n; i += 1) {
+    const part = list.slice(Math.floor(i * step), Math.floor((i + 1) * step));
+    if (!part.length) continue;
+    const avg = (k) => { const v = part.map((x) => x[k]).filter((x) => x != null); return v.length ? Math.round((v.reduce((s, x) => s + x, 0) / v.length) * 10) / 10 : null; };
+    out.push({ ts: part[part.length - 1].ts, cpu: avg('cpu'), mem: avg('mem') });
+  }
+  return out;
+}
+
+// ───────── 서비스 인벤토리 연결(v2.986) ─────────
+/** 법인별 물리서버 폴더 규칙 → [{ prefix, serviceId, service }]. 서비스 인벤토리 저장소를 못 읽으면 빈 값(연결을 지어내지 않는다). */
+function svcLinksFor(corps = []) {
+  const out = {};
+  try {
+    if (smLoadError()) return out;
+    const map = smPeekMap();
+    for (const vc of corps) {
+      const c = map.corps?.[vc];
+      if (!c?.bmFolderRules?.length) continue;
+      const name = new Map((c.services || []).map((s) => [s.id, s.name]));
+      out[vc] = c.bmFolderRules.filter((r) => name.has(r.serviceId)).map((r) => ({ prefix: r.prefix, serviceId: r.serviceId, service: name.get(r.serviceId) }));
+    }
+  } catch { return {}; }
+  return out;
+}
+/** 폴더 이름 바꾸기 → 그 법인의 물리서버 폴더 규칙 경로도 함께(같은 swap). */
+function svcRuleRename(corp, from, swap) {
+  try {
+    if (smLoadError()) return { n: 0, error: '서비스 인벤토리 저장소를 읽지 못했습니다' };
+    const hit = (smPeekMap().corps?.[corp]?.bmFolderRules || []).filter((r) => underPath(r.prefix, from)).length;
+    if (!hit) return { n: 0 };
+    const r = smMutateMap((d) => {
+      const c = d.corps?.[corp]; if (!c) return { result: {} };
+      const taken = new Set((c.bmFolderRules || []).filter((x) => !underPath(x.prefix, from)).map((x) => x.prefix));
+      // 바뀐 경로가 이미 다른 규칙에 있으면(드묾) 그 규칙을 남기고 옮기는 쪽을 버린다 — 같은 경로 규칙 둘을 만들지 않는다
+      c.bmFolderRules = (c.bmFolderRules || []).flatMap((x) => (underPath(x.prefix, from) ? (taken.has(swap(x.prefix)) ? [] : [{ ...x, prefix: swap(x.prefix) }]) : [x]));
+      return { result: {} };
+    });
+    if (!r.ok) return { n: 0, error: r.error };
+    if (!smFlushStore()) return { n: 0, error: '서비스 인벤토리 저장 실패(디스크 쓰기)' };
+    return { n: hit };
+  } catch (e) { return { n: 0, error: String(e?.message || e).slice(0, 120) }; }
+}
+const svcRulesUnder = (corp, base) => { try { return smLoadError() ? 0 : (smPeekMap().corps?.[corp]?.bmFolderRules || []).filter((r) => underPath(r.prefix, base)).length; } catch { return 0; } };
 
 /** 범위 안에서 보이는 규칙 — 그 법인 규칙 + 전 법인('*') 규칙(범위 계정은 읽기만). */
 const visibleRules = (main, allowed) => (main.rules || []).filter((r) => r.corp === '*' || !allowed || allowed.has(r.corp));
@@ -128,8 +185,15 @@ export function registerBmFolders(api) {
       return res.status(503).json({ ok: false, error: 'registryUnreadable', canReset: fleetAdmin(req.user, snap),
         reason: '물리서버 폴더 저장소를 읽지 못했습니다 — 빈 트리로 시작하지 않고 쓰기를 막았습니다(백업에서 복원하거나 전체 범위 관리자가 초기화).' });
     }
+    // 입력 다시 읽기(?fresh=1) — 새로 넣은 iDRAC 서버 · 귀속 변경을 다음 인벤토리 주기 전에. 쓰기 계정 · 서비스 인벤토리와 같은 상한 하나(429 + 대기 초).
+    if (req.query.fresh === '1') {
+      if (!writerOk(req.user)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '입력 다시 읽기는 쓰기 계정(관리자 · 운영자)만 쓸 수 있습니다.' });
+      const f = sharedFresh();
+      if (!f.ok) return res.status(429).json({ ok: false, error: 'tooSoon', waitSec: f.waitSec, agoSec: f.agoSec, reason: `입력은 ${f.agoSec}초 전에 이미 다시 읽었습니다(다른 사용자 · 서비스 인벤토리일 수 있습니다) — 새로고침하면 그 입력이 보입니다. ${f.waitSec}초 뒤에 다시 읽을 수 있습니다.` });
+    }
     const admin = isAdminDetailUser(req.user);
-    const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${admin ? 'a' : 'u'}|r${storeRev()}|i${sharedInputRev()}`;
+    // 서비스 인벤토리 저장소 세대도 넣는다(svcLinks — 그쪽 규칙을 바꾸면 이 응답도 새로)
+    const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${admin ? 'a' : 'u'}|r${storeRev()}|s${(() => { try { return smStoreRev(); } catch { return 'x'; } })()}|i${sharedInputRev()}`;
     await memoJson(req, res, 'bm-folders', async (s) => {
       const { g, members, dupKeys, allowed, b } = await stateFor(req, s);
       const hide = !!allowed;
@@ -163,6 +227,8 @@ export function registerBmFolders(api) {
         // 범위 계정에는 함대 전체 개수를 싣지 않는다(반증 8) — 못 읽은 출처가 '있다' 만
         blocked: hide ? { any: !!(g.bmBlockedSources || []).length } : { n: (g.bmBlockedSources || []).length, sources: full ? (g.bmBlockedSources || []) : undefined },
         faultsMeta: g.faultsMeta || null,
+        // 서비스 인벤토리 연결(v2.986) — 법인별 물리서버 폴더 규칙(경로 → 서비스 이름). 화면은 고른 폴더에 걸리는 가장 긴 규칙을 보인다.
+        svcLinks: svcLinksFor(b.corps.map((c) => c.vcenterId)),
         dupKeys: hide ? undefined : (dupKeys || 0),
         limits: { batch: LIMITS.batch, searchRows: LIMITS.searchRows, foldersPerCorp: LIMITS.foldersPerCorp, rules: LIMITS.rules, includeTokens: LIMITS.includeTokens },
       };
@@ -183,7 +249,7 @@ export function registerBmFolders(api) {
       const kd = new Set(String(req.query.kinds ?? 'bm').split(',').map((x) => x.trim()));
       const r = searchMembers(members, b.placeOf, {
         include: String(req.query.inc ?? '').slice(0, 1024), exclude: String(req.query.exc ?? '').slice(0, 1024),
-        fields: { name: fl.has('name'), tag: fl.has('tag'), model: fl.has('model') }, kinds: { bm: kd.has('bm'), esxi: kd.has('esxi') },
+        fields: { name: fl.has('name'), tag: fl.has('tag'), model: fl.has('model'), addr: fl.has('addr') }, kinds: { bm: kd.has('bm'), esxi: kd.has('esxi') }, showAddr: admin,
         corp, allowed, unassignedOnly: req.query.unassigned === '1', hideTag: hide,
         // 이름은 화면에 보이는 이름(가린 이름)으로만 맞춘다 — 가린 부분(주소 · 태그)으로 맞혀 보는 길을 막는다
         nameFn: (m) => nameOf(m, admin, hide),
@@ -196,6 +262,29 @@ export function registerBmFolders(api) {
         tokens: { include: parseTokens(String(req.query.inc ?? '').slice(0, 1024)), exclude: parseTokens(String(req.query.exc ?? '').slice(0, 1024)) },
         rows: r.rows.slice(0, LIMITS.searchRows).map((x) => ({ ...serverRow(x.m, x.place, admin, hide), on: x.on })),
       });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+
+  // ── 옆 패널 24시간 CPU · 메모리 추이(v2.986) — 이 포탈이 적재한 베어메탈 사용률 원시 이력만. 숫자 · 시각만 싣는다(주소 · 계정 단서 없음). ──
+  //   엣지가 수집한 서버는 원시 이력이 그 엣지에만 있다(중앙은 최신값만 받는다) — 비어 있으면 이유(edge)를 밝히고 지어내지 않는다.
+  api.get('/tools/bm-folders/trend', toolsPerm, async (req, res) => {
+    try {
+      const snap = store.get();
+      const { members, allowed } = await stateFor(req, snap);
+      const hide = !!allowed;
+      const inScope = members.filter((m) => m.corp && (!allowed || allowed.has(m.corp)));
+      const k = keyResolverFor(hide, inScope.map((m) => m.key))(typeof req.query.key === 'string' ? req.query.key.slice(0, 200) : '');
+      const m = k ? inScope.find((x) => x.key === k) : null;
+      if (!m) return res.status(404).json({ ok: false, error: 'not_found', reason: '서버를 찾지 못했습니다.' });
+      if (m.kind !== 'bm' || !m.usageKey) return res.json({ ok: true, rows: [], why: m.kind !== 'bm' ? 'esxi' : 'no-key' });
+      const hours = Math.min(168, Math.max(1, Math.floor(Number(req.query.hours) || 24)));
+      const to = Date.now(); const from = to - hours * 3_600_000;
+      const { rawRangeMerged } = await import('../../bmusage/db.js');
+      // 적재 키와 조회 키가 같아야 한다 — poller 는 insertUsage(rows, config.agent?.name || '') 로 적재한다(bm-usage 상세와 같은 식 · v2.550 결함)
+      const agent = config.agent?.name || '';
+      const r = await rawRangeMerged({ key: m.usageKey, agent, from, to, limit: 3_000, newestFirst: true, cols: ['cpu_pct', 'mem_pct'] });
+      const raw = (r.rows || []).map((x) => ({ ts: numOrNull(x.ts), cpu: numOrNull(x.cpu_pct), mem: numOrNull(x.mem_pct) })).filter((x) => x.ts != null);
+      res.json({ ok: true, hours, rows: downsample(raw, 240), truncated: !!r.truncated, why: raw.length ? '' : (m.source === 'edge' || m.source === 'remote' ? 'edge' : 'none') });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 
@@ -451,8 +540,10 @@ export function registerBmFolders(api) {
             const r2 = mutateAssign((d) => { for (const k of underKeys) d.assign[k] = { ...d.assign[k], path: swap(d.assign[k].path) }; return { result: {} }; });
             if (!r2.ok) return fail(r2);
           }
-          audit(`${corp}:${p.value}`, `→ ${to} · 등록 ${underKeys.length} · 규칙 ${corpRules.length}`);
-          return done({ path: to, moved: underKeys.length, rules: corpRules.length, starRules });
+          // v2.986: 서비스 인벤토리의 물리서버 폴더 규칙도 새 경로로 옮긴다(이름만 바꿨는데 서비스 소속이 풀리지 않게). 그 저장소를 못 읽으면 밝힌다.
+          const svc = svcRuleRename(corp, p.value, swap);
+          audit(`${corp}:${p.value}`, `→ ${to} · 등록 ${underKeys.length} · 규칙 ${corpRules.length} · 서비스 인벤토리 규칙 ${svc.n}${svc.error ? `(못 옮김: ${svc.error})` : ''}`);
+          return done({ path: to, moved: underKeys.length, rules: corpRules.length, starRules, svcRules: svc.n, ...(svc.error ? { svcRulesNotMoved: svc.error } : {}) });
         }
 
         // folder.remove — 서버는 지우지 않고 (미분류)로 돌린다. 미리 본 대수와 다르면 지우지 않는다.
@@ -469,8 +560,10 @@ export function registerBmFolders(api) {
           const r2 = mutateAssign((d) => { for (const k of underKeys) delete d.assign[k]; return { result: {} }; });
           if (!r2.ok) return fail(r2);
         }
-        audit(`${corp}:${p.value}`, `폴더 삭제 · 미분류로 ${underKeys.length}대 · 법인 규칙 ${corpRules.length}개 삭제`);
-        return done({ removed: underKeys.length, rules: corpRules.length, starRules });
+        // 서비스 인벤토리의 물리서버 폴더 규칙은 지우지 않는다(서비스 쪽 설정 — 그쪽 화면에서 지운다). 몇 개가 이 경로를 가리키는지 밝힌다.
+        const svcLeft = svcRulesUnder(corp, p.value);
+        audit(`${corp}:${p.value}`, `폴더 삭제 · 미분류로 ${underKeys.length}대 · 법인 규칙 ${corpRules.length}개 삭제 · 남은 서비스 인벤토리 규칙 ${svcLeft}`);
+        return done({ removed: underKeys.length, rules: corpRules.length, starRules, svcRules: svcLeft });
       }
 
       return res.status(400).json({ ok: false, reason: `알 수 없는 연산입니다: ${op.slice(0, 40)}` });

@@ -38,9 +38,13 @@ import { loadBmUsageSettings } from '../../bmusage/settings.js';
 import { latestUsage } from '../../bmusage/db.js';
 import { vmRefOf, vmTagsOf, tagsPartialOf } from '../../tags/analyze.js';
 import { buildInventory, hostKeyOf } from '../../servicemap/build.js';
+import { bmFolderMatches } from '../../servicemap/resolve.js';
 import { CORP_OPS, FLEET_OPS } from '../../servicemap/ops.js';
 import { getMap, getPins, peekMap, peekPins, storeRev, storeLoadError, mutateMap, mutatePins, flushStore, resetCorrupt, LIMITS } from '../../servicemap/store.js';
 import { mergeLatestRows, rowsByAgentKeyOf, makeCapOf, clampEdgeTs } from './corpUsage.js';
+// v2.986 물리서버 폴더 규칙 — 배치 판정은 물리서버 폴더의 것 하나를 부른다(도메인 모듈 — routes 를 import 하지 않는다)
+import { peekMain as bmfPeekMain, peekAssign as bmfPeekAssign, storeRev as bmfStoreRev, storeLoadError as bmfStoreError } from '../../bmfolders/store.js';
+import { placeMember as bmfPlaceMember, sortRules as bmfSortRules } from '../../bmfolders/build.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -174,6 +178,15 @@ export function sharedGather(snap) {
 }
 /** 입력 세대(입력 다시 읽기 · 스캔 라벨 변경 때 오른다) — 물리서버 폴더 응답 캐시 열쇠에 넣는다. */
 export const sharedInputRev = () => _inputRev;
+/** 입력 다시 읽기(물리서버 폴더 화면) — 서비스 인벤토리와 **같은 상한 하나**(포탈 전체 FRESH_MIN_MS 에 한 번)를 쓴다. 함수 선언은 아래(호이스팅). */
+export const sharedFresh = (now = Date.now()) => forceFresh(now);
+/** 관리 주소에서 스킴 · 경로를 뗀 호스트(‘https://10.0.0.5:443/x’ → ‘10.0.0.5:443’). 정규식 없이. */
+function hostOnly(v) {
+  let s = typeof v === 'string' ? v.trim().slice(0, 300) : '';
+  const i = s.indexOf('://'); if (i >= 0) s = s.slice(i + 3);
+  const j = s.indexOf('/'); if (j >= 0) s = s.slice(0, j);
+  return s;
+}
 
 const _gatherStats = { runs: 0, inFlight: 0, maxInFlight: 0 };
 /** 시험용 — 입력 수집이 몇 번 돌았고 동시에 몇 벌까지 겹쳤는가(2차 반증 4 회귀). */
@@ -338,6 +351,8 @@ async function gatherNowInner(snap, tagCategory) {
       faults: faultsOf(b.serviceTag, sid), corpRule: b.vcSource === 'corp-rule',
       // v2.984 물리서버 폴더(bmfolders)가 함께 쓰는 입력 — 서비스 인벤토리 응답에는 싣지 않는다(memberRow 가 고른다)
       model: t(b.model), watts: numOrNull(b.watts), collectorId: t(b.collectorId),
+      // v2.986 물리서버 폴더: 사용률 이력 키(bm-usage 적재 키 — idOf) · 관리 주소(등록부 iDRAC 주소 — 관리자 판본만 싣는다)
+      usageKey: id.key, mgmtHost: b.source === 'idrac' ? hostOnly(regById.get(sid)?.host) : '',
     });
   }
   // ── 파생 호스트(구성원이 아니다): 가상화 호스트의 사용률·장애 ──
@@ -408,7 +423,40 @@ const fleetAdmin = (user, snap) => {
 // ───────── 응답 조립 ─────────
 // 읽기 경로는 동결 참조(복사 없음 — 5차 검토 R5: 요청마다 고정 5만 건 깊은 복사 114ms). 쓰기는 mutate* 만.
 function loadState() {
-  return { map: peekMap(), pins: peekPins(), rev: storeRev(), err: storeLoadError() };
+  return { map: peekMap(), pins: peekPins(), rev: storeRev(), err: storeLoadError(), bmRev: bmfRevSafe() };
+}
+/** 물리서버 폴더 저장소 세대(v2.986 — 물리서버 폴더 규칙이 그 배치를 읽는다. 판정 memo · 응답 캐시 열쇠에 넣는다). 손상이면 'x'. */
+function bmfRevSafe() { try { return bmfStoreError() ? 'x' : bmfStoreRev(); } catch { return 'x'; } }
+/** 법인 → 물리서버 폴더 경로 목록(명시 폴더 ∪ 배치 경로 · 조상). 저장소를 못 읽으면 빈 Map. */
+function bmFolderPathsOf(members = []) {
+  const out = new Map();
+  try {
+    if (bmfStoreError()) return out;
+    const add = (vc, p) => {
+      if (!vc || !p) return;
+      if (!out.has(vc)) out.set(vc, new Set());
+      const segs = String(p).split('\\');
+      for (let i = 1; i <= segs.length; i += 1) out.get(vc).add(segs.slice(0, i).join('\\'));
+    };
+    for (const [vc, c] of Object.entries(bmfPeekMain().corps || {})) for (const p of c.folders || []) add(vc, p);
+    const placed = bmFolderMapOf(members);
+    if (placed) for (const m of members) if (m?.kind === 'bm' && m.corp) add(m.corp, placed.get(m.key));
+  } catch { return new Map(); }
+  return new Map([...out].map(([vc, set]) => [vc, [...set].sort((a, b) => a.localeCompare(b, 'ko')).slice(0, 500)]));
+}
+/**
+ * 베어메탈 키 → 물리서버 폴더 경로(미분류 '') — 물리서버 폴더 화면과 **같은 판정**(bmfolders/build.js placeMember)을 부른다(복제 금지).
+ * 물리서버 폴더 저장소를 못 읽으면 null — 물리서버 폴더 규칙을 건너뛴다(모르는 배치로 판정하지 않는다).
+ */
+export function bmFolderMapOf(members = []) {
+  try {
+    if (bmfStoreError()) return null;
+    const main = bmfPeekMain(); const assign = bmfPeekAssign();
+    const sorted = bmfSortRules(main.rules || []); const auto = main.settings?.autoRules === true;
+    const out = new Map();
+    for (const m of members) if (m?.kind === 'bm') out.set(m.key, bmfPlaceMember(m, assign, sorted, auto).path || '');
+    return out;
+  } catch { return null; }
 }
 /**
  * 판정·집계 결과 memo(5차 검토 M10/R5 — 실측: 6,500 구성원 buildInventory 중앙값 77ms 를 구성원·큐·후보·CSV 요청마다 되풀이했고,
@@ -427,12 +475,12 @@ async function inventoryFor(req, snap) {
   const allowed = scopedVcenterIds(req.user, snap);
   const admin = isAdminDetailUser(req.user);
   const known = knownCorpsOf(snap);
-  const key = [snap?.generatedAt || 0, st.rev, g.at, _inputRev, known ? [...known].sort().join(',') : '-', allowed ? [...allowed].sort().join(',') : '*', admin ? 'a' : 'u'].join('|');
+  const key = [snap?.generatedAt || 0, st.rev, st.bmRev, g.at, _inputRev, known ? [...known].sort().join(',') : '-', allowed ? [...allowed].sort().join(',') : '*', admin ? 'a' : 'u'].join('|');
   const now = Date.now();
   const hit = _invMemo.get(key);
   if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, allowed, admin }; }
   _invStats.misses += 1;
-  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
+  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, bmFolderOf: bmFolderMapOf(g.members), hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
   for (const [k, v] of _invMemo) if (now - v.at >= INV_MEMO_MS) _invMemo.delete(k);
   while (_invMemo.size >= INV_MEMO_MAX) _invMemo.delete(_invMemo.keys().next().value);
   _invMemo.set(key, { at: now, inv });
@@ -525,7 +573,7 @@ export function stripTag(name, tag) {
 
 function memberRow(m, r, admin, hide = false) {
   return {
-    key: pubKey(m.key, hide), keyKind: m.keyKind, kind: m.kind, corp: m.corp, name: maskName(m, admin, hide), serviceId: r.serviceId, src: r.src, via: r.src === 'folder' || r.src === 'scan' || r.src === 'tag' || r.src === 'rule' ? r.via : '',
+    key: pubKey(m.key, hide), keyKind: m.keyKind, kind: m.kind, corp: m.corp, name: maskName(m, admin, hide), serviceId: r.serviceId, src: r.src, via: r.src === 'folder' || r.src === 'bmfolder' || r.src === 'scan' || r.src === 'tag' || r.src === 'rule' ? r.via : '',
     reason: r.reason || '', drift: !!r.drift, unchecked: !!r.unchecked, pinMismatch: r.pinMismatch ? true : undefined,
     autoServiceId: r.src === 'pin' ? (r.auto?.serviceId || null) : undefined,
     powered: m.powered, cores: m.cores, memGB: m.memGB, storageGB: m.kind === 'vm' ? m.storageGB : undefined,
@@ -534,7 +582,7 @@ function memberRow(m, r, admin, hide = false) {
     serviceTag: m.kind === 'bm' && !hide ? m.serviceTag : undefined, source: m.kind === 'bm' ? m.source : undefined, scanEntry: m.scan ? m.scan.entryId : undefined,
     // 태그 여럿(5차 M5·R14) — 태그로 정해진 구성원만. 값은 소문자 정렬 순 최대 8개 · 둘 이상의 서비스에 걸리면 tagAmbiguous
     tagValues: r.src === 'tag' && r.multi ? r.tagValues : undefined, tagAmbiguous: r.src === 'tag' && r.tagAmbiguous ? true : undefined,
-    ruleOverlap: r.src === 'rule' && r.ruleOverlap ? r.ruleOverlap : undefined,
+    ruleOverlap: (r.src === 'rule' || r.src === 'bmfolder') && r.ruleOverlap ? r.ruleOverlap : undefined,
   };
 }
 
@@ -550,7 +598,7 @@ export function registerSvcInventory(api) {
     }
     const err = storeLoadError();
     if (err) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: `서비스 인벤토리 저장소를 읽지 못했습니다 — ${err.map || err.pins}. 빈 트리로 시작하지 않습니다(백업 복원 또는 전체 범위 관리자의 초기화).`, corrupt: err, canReset: fleetAdmin(req.user, snap) });
-    const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${isAdminDetailUser(req.user) ? 'a' : 'u'}|r${storeRev()}|i${_inputRev}`;
+    const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${isAdminDetailUser(req.user) ? 'a' : 'u'}|r${storeRev()}|b${bmfRevSafe()}|i${_inputRev}`;
     await memoJson(req, res, 'svc-inventory', async (s) => {
       const { st, g, inv, allowed } = await inventoryFor(req, s);
       const q = inv.queues;
@@ -558,7 +606,11 @@ export function registerSvcInventory(api) {
         ok: true, at: g.at, rev: st.rev, scoped: !!allowed,
         settings: { tagCategory: st.map.settings.tagCategory || '' },
         canFleet: fleetAdmin(req.user, s), canWrite: writerOk(req.user),
-        corps: inv.corps.map((c) => ({ ...c, writable: writableOf(req.user, s, c.vcenterId) })),
+        corps: (() => {
+          // v2.986: 법인마다 물리서버 폴더 경로(명시 폴더 ∪ 서버가 놓인 경로 · 조상 포함) — 소속 규칙 탭의 '물리서버 폴더 규칙' 고르기 목록
+          const bmf = bmFolderPathsOf(g.members);
+          return inv.corps.map((c) => ({ ...c, writable: writableOf(req.user, s, c.vcenterId), bmFolders: bmf.get(c.vcenterId) || [] }));
+        })(),
         services: inv.services, noCorp: inv.noCorp,
         global: inv.global,
         queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: new Set(q.mismatch.map((x) => x.key)).size, redundant: q.redundant.length, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length, orphaned: q.orphaned.length, tagAmbiguous: q.tagAmbiguous.length, ruleOverlap: q.ruleOverlap.length, aliasPins: q.aliasPins.length, dangling: q.dangling.length },
@@ -713,7 +765,7 @@ export function registerSvcInventory(api) {
       const snap = store.get();
       const { g, inv, allowed, admin } = await inventoryFor(req, snap);
       const svcById = new Map(inv.services.map((s) => [s.id, s]));
-      const SRC = { pin: '고정', folder: 'vCenter 폴더 규칙', scan: '스캔 엔트리', tag: '태그', rule: '이름 규칙', none: '미지정' };
+      const SRC = { pin: '고정', folder: 'vCenter 폴더 규칙', bmfolder: '물리서버 폴더 규칙', scan: '스캔 엔트리', tag: '태그', rule: '이름 규칙', none: '미지정' };
       // 5차 M11·R19: 전역 서비스·등급·담당자 · 드리프트 · 키 종류 · 백업은 화면과 같은 말(영문 코드 금지)
       const BACKUP = { ok: '성공', fail: '실패·지연', none: '잡 없음' };
       const KEY_KIND = { instanceUuid: 'instanceUuid', moref: 'moref(임시)', serviceTag: '서비스태그', fleetId: 'fleetId(임시)' };
@@ -800,6 +852,21 @@ export function registerSvcInventory(api) {
       const corp = t(b.corp);
       if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '저장소를 읽지 못해 쓰기를 막았습니다.' });
 
+      // v2.986 물리서버 폴더 규칙 미리보기 — 만들기 전에 그 폴더(하위 포함) 베어메탈이 지금 어느 서비스에 있는지 센다(만들면 옮겨 갈 구성원을 사람이 보고 누르게).
+      if (op === 'bmrule.add' && b.dry === true) {
+        const p = String(b.prefix ?? '').trim();
+        if (!p) return res.status(400).json({ ok: false, reason: '물리서버 폴더를 지정하십시오.' });
+        const { g, inv } = await inventoryFor(req, snap);
+        const placed = bmFolderMapOf(g.members);
+        if (!placed) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 폴더 저장소를 읽지 못해 배치를 모릅니다.' });
+        const from = new Map(); let n = 0;
+        for (const m of g.members) {
+          if (m.kind !== 'bm' || m.corp !== corp || !bmFolderMatches(p, placed.get(m.key))) continue;
+          n += 1; const r = inv.resolved.get(m.key); const k = r?.src === 'pin' ? `pin:${r.serviceId}` : (r?.serviceId || '');
+          from.set(k, (from.get(k) || 0) + 1);
+        }
+        return res.json({ ok: true, result: { prefix: p, members: n, from: [...from].map(([k, c]) => (k.startsWith('pin:') ? { serviceId: k.slice(4), pinned: true, n: c } : { serviceId: k || null, n: c })) } });
+      }
       if (CORP_OPS[op]) {
         const r = mutateMap((d) => CORP_OPS[op](d, { ...b, corp }));
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });

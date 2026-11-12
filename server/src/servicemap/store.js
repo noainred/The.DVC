@@ -5,6 +5,7 @@
  *   CONFIG_DIR/service-map.json       — 트리·규칙·전역 카탈로그·설정. 사람이 가끔 바꾼다.
  *     { rev, corps: { [vcenterId]: { folders:[path], services:[{id,name,path,tier,owner,note,globalId}],
  *                                     folderRules:[{prefix,serviceId}], aliases:[{kind:'scan'|'tag',value,serviceId}],
+ *                                     bmFolderRules:[{prefix,serviceId}](v2.986 — 물리서버 폴더 경로 'DB\\Oracle' → 서비스, 베어메탈만),
  *                                     nameRules:[{match:'prefix'|'suffix'|'contains',value,serviceId}], tagEnabled } },
  *       globals:[{id,name,tier,owner,note}], settings:{ tagCategory } }
  *   CONFIG_DIR/service-map-pins.json  — 한 대씩 고정(수동 지정). 자주 바뀐다 — 변경 감시 백업에서 빼려고 나눴다(4차 반증 18).
@@ -29,7 +30,7 @@ const MAP_FILE = () => path.join(config.configDir, 'service-map.json');
 const PIN_FILE = () => path.join(config.configDir, 'service-map-pins.json');
 
 export const LIMITS = Object.freeze({
-  servicesPerCorp: 500, foldersPerCorp: 500, folderRulesPerCorp: 500, aliasesPerCorp: 500, nameRulesPerCorp: 200,
+  servicesPerCorp: 500, foldersPerCorp: 500, folderRulesPerCorp: 500, aliasesPerCorp: 500, nameRulesPerCorp: 200, bmFolderRulesPerCorp: 500,
   globals: 500, pins: 50_000, pinBatch: 500,
   name: 64, owner: 128, note: 256, prefix: 256, alias: 128, nameRule: 64, folderSeg: 60, folderDepth: 10,
 });
@@ -84,7 +85,7 @@ const lc = (s) => String(s ?? '').toLowerCase();
 export const newId = (p) => `${p}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 
 function emptyCorp() {
-  return { folders: [], services: [], folderRules: [], aliases: [], nameRules: [], tagEnabled: false };
+  return { folders: [], services: [], folderRules: [], aliases: [], nameRules: [], bmFolderRules: [], tagEnabled: false };
 }
 function emptyMap() { return { rev: 0, corps: {}, globals: [], settings: { tagCategory: '' } }; }
 function emptyPins() { return { rev: 0, pins: {} }; }
@@ -119,6 +120,12 @@ export function normalizeMap(raw) {
     for (const r of Array.isArray(c.folderRules) ? c.folderRules.slice(0, LIMITS.folderRulesPerCorp) : []) {
       const p = isObj(r) ? cleanFolderPrefix(r.prefix) : { error: 1 };
       if (!p.error && ids.has(r.serviceId)) corp.folderRules.push({ prefix: p.value, serviceId: r.serviceId });
+    }
+    // v2.986 물리서버 폴더 규칙 — 경로는 물리서버 폴더와 같은 규약(cleanFolderPath · '\\' 구분 · 빈 경로 = 루트는 받지 않는다). 같은 경로는 하나만.
+    for (const r of Array.isArray(c.bmFolderRules) ? c.bmFolderRules.slice(0, LIMITS.bmFolderRulesPerCorp) : []) {
+      if (!isObj(r) || typeof r.prefix !== 'string') continue;
+      const p = cleanFolderPath(r.prefix);
+      if (!p.error && p.value && ids.has(r.serviceId) && !corp.bmFolderRules.some((x) => x.prefix === p.value)) corp.bmFolderRules.push({ prefix: p.value, serviceId: r.serviceId });
     }
     for (const a of Array.isArray(c.aliases) ? c.aliases.slice(0, LIMITS.aliasesPerCorp) : []) {
       const v = isObj(a) ? cleanText(a.value, LIMITS.alias) : { error: 1 };
