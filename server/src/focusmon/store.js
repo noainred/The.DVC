@@ -190,7 +190,35 @@ function loadSessions() {
     // 없음은 조용히 · 손상은 옆으로 보존한 뒤 새로 시작한다(다음 저장이 온전했던 원본을 빈 목록으로 덮어쓰지 않게 — ARCH-1).
     if (e?.code !== 'ENOENT') preserveCorrupt(sessFile(), String(e?.message || e));
   }
+  dedupeLoadedSessions(Date.now());
 }
+
+/**
+ * 읽은 계속 수집의 겹침 정리(v2.980 — 사용자 질문 '이렇게 보이면 동시에 2번 수집하는 거야? 버그야?').
+ * v2.979 전에는 이미 수집 중인 서버로 새 계속 수집을 만들 수 있어 같은 서버가 두 수집에 저장돼 있을 수 있다(업그레이드해도 그대로 남았다).
+ * 수집기는 서버마다 하나(desiredFor 가 id 로 합친다)라 두 번 접속하지는 않지만, 한 수집 · 서버별 '수집 종료' 를 눌러도 다른 수집에 남은 그 서버는 계속 수집됐다.
+ * 먼저 시작한 수집에만 남기고(planJoin '서버는 수집 하나에만' 과 같은 결과) 비게 된 수집은 정의에서 뺀다. 고친 수집은 service 가 fm_run 에 다시 쓴다(drainLoadFixes).
+ * '지난번 다시 고르기'(ended) 에는 넣지 않는다 — 사람이 끝낸 수집이 아니다.
+ */
+const loadFixes = [];
+function dedupeLoadedSessions(now) {
+  const seen = new Set(); let removed = 0; let dropped = 0;
+  const list = [...S.values()].sort((a, b) => (a.startedAt - b.startedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const s of list) {
+    const keep = s.targets.filter((t) => !seen.has(t));
+    for (const t of keep) seen.add(t);
+    if (keep.length === s.targets.length) continue;
+    removed += s.targets.length - keep.length;
+    if (!keep.length) { S.delete(s.id); dropped += 1; loadFixes.push({ ...s, targets: [...s.targets], ended: now }); continue; }
+    s.targets = keep;
+    loadFixes.push({ ...s, targets: [...keep], ended: null });
+  }
+  if (!removed) return;
+  persistSessions();
+  console.warn(`[focusmon] 겹친 계속 수집을 정리했습니다 — 두 수집에 함께 있던 서버 ${removed}건을 먼저 시작한 수집에만 남겼습니다${dropped ? `(비게 된 수집 ${dropped}건은 뺌)` : ''}. v2.979 전에 만든 수집입니다 — 수집기는 서버마다 하나라 두 번 접속하지는 않았습니다.`);
+}
+/** 읽을 때 겹침을 정리한 수집(한 번만 돌려준다) — service.tick1 이 fm_run 을 고쳐 쓴다. */
+export function drainLoadFixes() { loadSessions(); return loadFixes.splice(0); }
 function persistSessions() {
   try {
     const list = [...S.values()].filter((x) => x.mode === 'record').map(({ id, mode, by, targets, interval, startedAt }) => ({ id, mode, by, targets, interval, startedAt }));
@@ -481,7 +509,17 @@ export function takeEdgeRetries(agent, now = Date.now()) {
   return out;
 }
 
+/**
+ * 접속처가 바뀐 대상(v2.980 — 등록된 서버 수정): 예전 접속처의 수집 상태 · 연결 시험 결과 · 다시 연결 요청을 지운다.
+ * 남겨 두면 IP 를 고친 뒤에도 예전 주소의 '연결됨' · 'RHEL 7.x' 가 새 주소의 결과처럼 보인다. 수집한 값(T)은 그대로 — 기록은 같은 id 로 이어진다.
+ * 인증 정지는 여기서 다루지 않는다(접속처 + 키 지문 해시라 저절로 맞지 않는다 — 지우면 자동 재시도가 된다).
+ */
+export function forgetTargetState(id) {
+  const k = String(id);
+  ST.delete(k); TESTS.delete(k); RETRIES.delete(k);
+}
+
 export function _resetForTest() {
   T.clear(); writeQ.length = 0; S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); WAKES.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
-  sessLoaded = false; keysLoaded = false; counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0;
+  sessLoaded = false; keysLoaded = false; counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; loadFixes.length = 0;
 }

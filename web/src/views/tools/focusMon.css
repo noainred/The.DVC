@@ -209,3 +209,14 @@
 .fm-wrap .fm-sess.on { border-color: var(--accent); }
 .fm-wrap .fm-join { border-top: 1px solid var(--border-soft); }
 .fm-wrap .fm-pad-x { margin: 0 16px; }
+/* v2.980 등록된 서버 수정 — 줄 바로 아래 수정 상자(colSpan 한 줄). 표가 가로로 스크롤돼도 상자는 보이는 폭 안에 붙어 있다(sticky). */
+.fm-wrap .fm-editing td { background: var(--panel-deep); }
+.fm-wrap .fm-editrow td { background: var(--panel-deep); padding-top: 4px; }
+/* 수정 상자의 폭 = 표가 보이는 폭(컨테이너 단위 — 표가 가로로 스크롤되는 좁은 화면에서도 상자는 화면 안). 옛 브라우저는 앞의 값. */
+.fm-wrap .fm-tblbox { container-type: inline-size; min-width: 0; }
+.fm-wrap .fm-edbox { position: sticky; left: 0; max-width: min(100%, calc(100vw - 64px)); max-width: calc(100cqw - 20px); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* 줄의 단추(수집 종료 · 시험 · 다시 연결 · 수정 · 삭제)는 줄바꿈 — v2.979 '수집 종료' 뒤 1440px 에서도 표가 카드보다 넓어 오른쪽 단추가 가려졌다(실측 913/802px). */
+.fm-wrap .fm-acts { flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.fm-wrap .fm-ednotes { display: flex; flex-direction: column; gap: 3px; font-size: 12px; min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+/* 대상 표의 작은 설명 글은 줄바꿈(표 칸이 줄어들면 옆 칸 단추 아래로 넘쳐 겹쳤다 — 위 단추 줄바꿈과 짝) */
+.fm-wrap .fm-tblbox .fm-st small { white-space: normal; }
