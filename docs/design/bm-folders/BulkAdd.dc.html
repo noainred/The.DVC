@@ -5,6 +5,7 @@
 <title>물리서버 폴더 — 서버 찾아 한 번에 등록</title>
 <script src="./support.js"></script>
 <link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
 </head>
 <body>
 <x-dc>
@@ -33,84 +34,106 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
   </div>
 
   <div class="scrim"></div>
-  <div class="dlg" role="dialog" aria-label="서버 찾아 등록">
+  <div class="dlg" role="dialog" aria-label="서버 찾아 등록" style="width:1140px;top:34px">
     <div class="dh">
       <h2>서버 찾아 등록</h2>
-      <span class="note">iDRAC 으로 인식된 서버에서 글자가 들어간 것을 찾아 한 번에 폴더에 넣습니다 — 정규식이 아니라 ‘포함’ 입니다(대소문자 무시).</span>
+      <span class="note">글자를 넣으면 바로 좁혀집니다 — 정규식이 아니라 ‘포함’(대소문자 무시)</span>
       <button class="btn sm sp" type="button" aria-label="닫기">닫기</button>
     </div>
-    <div class="db">
-      <div class="row" style="align-items:flex-end;gap:12px">
-        <label class="fld" style="width:270px"><span>포함 문자(쉼표로 여러 개 — 하나라도)</span><input class="inp focus" type="text" value="db, ora" aria-label="포함 문자"></label>
-        <label class="fld" style="width:170px"><span>제외 문자(선택)</span><input class="inp" type="text" placeholder="예: test" aria-label="제외 문자"></label>
-        <div class="fld"><span>찾는 범위</span><div class="seg" role="group" aria-label="찾는 범위"><button type="button">이 법인(KR-HQ)</button><button type="button" class="on">전 법인(엣지 포함)</button></div></div>
-        <div class="fld"><span>대상</span><div class="seg" role="group" aria-label="대상"><button type="button" class="on">베어메탈만</button><button type="button">ESXi 호스트 포함</button></div></div>
-        <div class="fld"><span>폴더 상태</span><div class="seg" role="group" aria-label="폴더 상태"><button type="button">미분류만</button><button type="button" class="on">전체</button></div></div>
-      </div>
-      <div class="row" style="gap:14px">
-        <span class="note">찾는 곳</span>
-        <label class="lbl"><input class="chk" type="checkbox" checked="checked" aria-label="이름에서 찾기"><span>이름</span></label>
-        <label class="lbl"><input class="chk" type="checkbox" checked="checked" aria-label="호스트명에서 찾기"><span>호스트명(OS 가 보고한 이름)</span></label>
-        <label class="lbl"><input class="chk" type="checkbox" checked="checked" aria-label="서비스 태그에서 찾기"><span>서비스 태그</span></label>
-        <label class="lbl"><input class="chk" type="checkbox" aria-label="모델에서 찾기"><span>모델</span></label>
-        <label class="lbl"><input class="chk" type="checkbox" aria-label="iDRAC 주소에서 찾기"><span>iDRAC 주소(관리자)</span></label>
-      </div>
-
-      <div class="box row" style="padding:9px 12px;gap:10px">
-        <span style="font-weight:600">넣을 폴더</span>
-        <span class="note">각 서버의 법인 아래</span>
-        <button class="sel" type="button" style="width:220px"><span style="display:inline-flex;align-items:center;gap:7px"><span class="fo"></span>DB</span><span class="dim">▾</span></button>
-        <span class="note">— 서버는 자기 법인의 같은 이름 폴더로 들어갑니다. 그 폴더가 없는 법인 2곳(US-E · VN)에는 새로 만듭니다.</span>
-      </div>
-
-      <div class="row">
-        <span><b>일치 37대</b> · 법인 4곳</span>
-        <span class="bdg c">선택 33대</span>
-        <span class="bdg w">이미 다른 폴더 4대 — 선택 안 됨</span>
-        <span class="note sp">찾은 시각 19:52 · 서버 목록 출처 5/5 읽음 · VN 엣지는 26시간 전 목록</span>
-      </div>
-
-      <div class="box tw2">
-        <table class="t">
-          <thead>
-            <tr>
-              <th style="width:30px"><input class="chk" type="checkbox" checked="checked" aria-label="일치한 서버 전체 선택"></th>
-              <th>이름 ▲</th><th>법인</th><th>출처</th><th>서비스 태그</th><th>모델</th><th>지금 폴더</th><th>일치한 곳</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="kr-db-mysql07 선택"></td><td><span class="nm"><span class="sv"></span><span>kr-<mark>db</mark>-mysql07</span></span></td><td>KR-HQ 본사</td><td><span class="bdg c">중앙</span></td><td class="mono">4KP9T31</td><td>PowerEdge R650</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
-            <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="kr-db-mysql08 선택"></td><td><span class="nm"><span class="sv"></span><span>kr-<mark>db</mark>-mysql08</span></span></td><td>KR-HQ 본사</td><td><span class="bdg c">중앙</span></td><td class="mono">4KP9T32</td><td>PowerEdge R650</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
-            <tr><td><input class="chk" type="checkbox" aria-label="kr-db-qa01 선택"></td><td><span class="nm"><span class="sv"></span><span>kr-<mark>db</mark>-qa01</span></span></td><td>KR-HQ 본사</td><td><span class="bdg c">중앙</span></td><td class="mono">2RV7N18</td><td>PowerEdge R650</td><td><span class="bdg w">계측 · 시험</span></td><td class="dim">이름</td></tr>
-            <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="kr-pgdb01 선택"></td><td><span class="nm"><span class="sv"></span><span>kr-pg<mark>db</mark>01</span></span></td><td>KR-HQ 본사</td><td><span class="bdg c">중앙</span></td><td class="mono">6WD2M80</td><td>PowerEdge R750</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
-            <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="pl-db01 선택"></td><td><span class="nm"><span class="sv"></span><span>pl-<mark>db</mark>01</span></span></td><td>PL 폴란드</td><td><span class="bdg e">엣지 pl-edge</span></td><td class="mono">C9F4H55</td><td>PowerEdge R750</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
-            <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="pl-db02 선택"></td><td><span class="nm"><span class="sv"></span><span>pl-<mark>db</mark>02</span></span></td><td>PL 폴란드</td><td><span class="bdg e">엣지 pl-edge</span></td><td class="mono">C9F4H56</td><td>PowerEdge R750</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
-            <tr><td><input class="chk" type="checkbox" aria-label="pl-mesdb01 선택"></td><td><span class="nm"><span class="sv"></span><span>pl-mes<mark>db</mark>01</span></span></td><td>PL 폴란드</td><td><span class="bdg e">엣지 pl-edge</span></td><td class="mono">D1L8S03</td><td>PowerEdge R740</td><td><span class="bdg w">MES</span></td><td class="dim">이름</td></tr>
-            <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="use-ora-db01 선택"></td><td><span class="nm"><span class="sv"></span><span>use-<mark>ora</mark>-<mark>db</mark>01</span></span></td><td>US-E 미국 동부</td><td><span class="bdg e">엣지 use-edge</span></td><td class="mono">G4T2B71</td><td>PowerEdge R760</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
-            <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="use-sql03 선택"></td><td><span class="nm"><span class="sv"></span><span>use-sql03</span></span></td><td>US-E 미국 동부</td><td><span class="bdg e">엣지 use-edge</span></td><td class="mono">G4T2B74</td><td>PowerEdge R740</td><td class="dim">(미분류)</td><td class="dim">호스트명 <span class="mono">sql03-<mark>db</mark>.use.corp.local</span></td></tr>
-            <tr class="picked stale"><td><input class="chk" type="checkbox" checked="checked" aria-label="vn-db01 선택"></td><td><span class="nm"><span class="sv off"></span><span>vn-<mark>db</mark>01</span></span></td><td>VN 베트남</td><td><span class="bdg w">엣지 vn-edge · 보고 만료</span></td><td class="mono">K7M5Q20</td><td>PowerEdge R650</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
-          </tbody>
-        </table>
-        <div class="row" style="padding:7px 12px;font-size:12px;color:#aebbd0">
-          <span>10 / 37대 표시 — 아래로 스크롤 · 선택은 화면에 안 보이는 행에도 적용됩니다</span>
-          <button class="btn sm sp" type="button">선택 뒤집기</button>
-          <button class="btn sm" type="button">모두 해제</button>
+    <div class="db" style="gap:10px">
+      <div class="row" style="gap:10px;flex-wrap:nowrap">
+        <div class="qbar focus" style="flex:1">
+          <span class="tok"><span class="tk">포함</span><span class="tv">db</span></span>
+          <span class="tok"><span class="tk">포함</span><span class="tv">ora</span></span>
+          <span class="tok neg"><span class="tk">제외</span><span class="tv">bak</span></span>
+          <span class="caret"></span>
+          <span class="ph">글자 입력 뒤 Enter — 앞에 - 를 붙이면 제외 · 포함은 하나라도 들어가면 일치</span>
         </div>
+        <div class="seg" role="group" aria-label="찾는 범위"><button type="button">이 법인</button><button type="button" class="on">전 법인(엣지 포함)</button></div>
+        <div class="seg" role="group" aria-label="대상"><button type="button" class="on">베어메탈</button><button type="button">+ ESXi 호스트</button></div>
       </div>
 
-      <div class="band i">
-        <span style="font-weight:700">등록하면</span>
-        <span>KR-HQ › DB <b>+14</b></span><span class="dim">·</span>
-        <span>PL › DB <b>+8</b></span><span class="dim">·</span>
-        <span>US-E › DB <span class="bdg n">새 폴더</span> <b>+6</b></span><span class="dim">·</span>
-        <span>VN › DB <span class="bdg n">새 폴더</span> <b>+5</b></span>
-        <span class="sp">합 33대 · 폴더 2개 생성</span>
+      <div style="display:flex;gap:12px;min-height:0">
+        <div class="box fcs" role="group" aria-label="조건별 개수">
+          <span class="ft" style="padding-top:0">법인</span>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="KR-HQ 본사"><span>KR-HQ 본사</span><span class="fn">15</span></label>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="PL 폴란드"><span>PL 폴란드</span><span class="fn">9</span></label>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="VN 베트남"><span>VN 베트남</span><span class="sd warn" aria-label="보고 만료"></span><span class="fn">7</span></label>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="US-E 미국 동부"><span>US-E 미국 동부</span><span class="fn">6</span></label>
+          <span class="ft">서버 목록을 받는 길</span>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="중앙"><span>중앙</span><span class="fn">15</span></label>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="엣지"><span>엣지</span><span class="fn">22</span></label>
+          <span class="ft">지금 폴더</span>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="미분류"><span>(미분류)</span><span class="fn">33</span></label>
+          <label><input class="chk" type="checkbox" aria-label="다른 폴더에 있음"><span>다른 폴더에 있음</span><span class="fn">4</span></label>
+          <span class="ft">일치한 곳</span>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="이름"><span>이름</span><span class="fn">35</span></label>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="호스트명"><span>호스트명</span><span class="fn">2</span></label>
+          <label><input class="chk" type="checkbox" aria-label="서비스 태그"><span>서비스 태그</span><span class="fn">0</span></label>
+          <span class="ft">모델</span>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="R650"><span>PowerEdge R650</span><span class="fn">14</span></label>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="R750"><span>PowerEdge R750</span><span class="fn">11</span></label>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="R760"><span>PowerEdge R760</span><span class="fn">7</span></label>
+          <label><input class="chk" type="checkbox" checked="checked" aria-label="R740"><span>PowerEdge R740</span><span class="fn">5</span></label>
+        </div>
+
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px">
+          <div class="row">
+            <span><b>일치 37대</b></span>
+            <span class="bdg c">선택 33대</span>
+            <span class="bdg w">다른 폴더에 있는 4대는 선택 안 됨</span>
+            <span class="note sp">서버 목록 출처 5/5 읽음 · VN 엣지는 26시간 전 목록</span>
+          </div>
+          <div class="box tw2">
+            <table class="t">
+              <thead>
+                <tr>
+                  <th style="width:30px"><input class="chk" type="checkbox" checked="checked" aria-label="일치한 서버 전체 선택"></th>
+                  <th>이름 ▲</th><th>법인</th><th>받는 길</th><th>서비스 태그</th><th>모델</th><th>지금 폴더</th><th>일치한 곳</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="kr-db-mysql07 선택"></td><td><span class="nm"><span class="sd ok"></span><span>kr-<mark>db</mark>-mysql07</span></span></td><td>KR-HQ 본사</td><td><span class="bdg c">중앙</span></td><td class="mono">4KP9T31</td><td>R650</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
+                <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="kr-db-mysql08 선택"></td><td><span class="nm"><span class="sd ok"></span><span>kr-<mark>db</mark>-mysql08</span></span></td><td>KR-HQ 본사</td><td><span class="bdg c">중앙</span></td><td class="mono">4KP9T32</td><td>R650</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="kr-db-qa01 선택"></td><td><span class="nm"><span class="sd ok"></span><span>kr-<mark>db</mark>-qa01</span></span></td><td>KR-HQ 본사</td><td><span class="bdg c">중앙</span></td><td class="mono">2RV7N18</td><td>R650</td><td><span class="bdg w">계측 · 시험</span></td><td class="dim">이름</td></tr>
+                <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="kr-pgdb01 선택"></td><td><span class="nm"><span class="sd ok"></span><span>kr-pg<mark>db</mark>01</span></span></td><td>KR-HQ 본사</td><td><span class="bdg c">중앙</span></td><td class="mono">6WD2M80</td><td>R750</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
+                <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="pl-db01 선택"></td><td><span class="nm"><span class="sd ok"></span><span>pl-<mark>db</mark>01</span></span></td><td>PL 폴란드</td><td><span class="bdg e">엣지 pl-edge</span></td><td class="mono">C9F4H55</td><td>R750</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
+                <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="pl-db02 선택"></td><td><span class="nm"><span class="sd ok"></span><span>pl-<mark>db</mark>02</span></span></td><td>PL 폴란드</td><td><span class="bdg e">엣지 pl-edge</span></td><td class="mono">C9F4H56</td><td>R750</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
+                <tr><td><input class="chk" type="checkbox" aria-label="pl-mesdb01 선택"></td><td><span class="nm"><span class="sd ok"></span><span>pl-mes<mark>db</mark>01</span></span></td><td>PL 폴란드</td><td><span class="bdg e">엣지 pl-edge</span></td><td class="mono">D1L8S03</td><td>R740</td><td><span class="bdg w">MES</span></td><td class="dim">이름</td></tr>
+                <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="use-ora-db01 선택"></td><td><span class="nm"><span class="sd ok"></span><span>use-<mark>ora</mark>-<mark>db</mark>01</span></span></td><td>US-E 미국 동부</td><td><span class="bdg e">엣지 use-edge</span></td><td class="mono">G4T2B71</td><td>R760</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
+                <tr class="picked"><td><input class="chk" type="checkbox" checked="checked" aria-label="use-sql03 선택"></td><td><span class="nm"><span class="sd ok"></span><span>use-sql03</span></span></td><td>US-E 미국 동부</td><td><span class="bdg e">엣지 use-edge</span></td><td class="mono">G4T2B74</td><td>R740</td><td class="dim">(미분류)</td><td class="dim">호스트명 <span class="mono">sql03-<mark>db</mark></span></td></tr>
+                <tr class="picked stale"><td><input class="chk" type="checkbox" checked="checked" aria-label="vn-db01 선택"></td><td><span class="nm"><span class="sd na"></span><span>vn-<mark>db</mark>01</span></span></td><td>VN 베트남</td><td><span class="bdg w">엣지 vn-edge · 만료</span></td><td class="mono">K7M5Q20</td><td>R650</td><td class="dim">(미분류)</td><td class="dim">이름</td></tr>
+              </tbody>
+            </table>
+            <div class="row" style="padding:7px 12px;font-size:12px;color:#aebbd0">
+              <span>10 / 37대 표시 — 아래로 스크롤 · 선택은 안 보이는 행에도 적용됩니다</span>
+              <button class="btn sm sp" type="button">선택 뒤집기</button>
+              <button class="btn sm" type="button">모두 해제</button>
+            </div>
+          </div>
+
+          <div class="box" style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+            <div class="row">
+              <span style="font-weight:700">넣을 폴더</span>
+              <span class="note">각 서버의 법인 아래</span>
+              <button class="sel" type="button" style="width:200px"><span style="display:inline-flex;align-items:center;gap:7px"><span class="fo"></span>DB</span><span class="dim">▾</span></button>
+              <span class="note">— 없는 법인에는 같은 이름으로 새로 만듭니다</span>
+            </div>
+            <div class="row" style="gap:14px">
+              <span class="lg"><span class="tag">KR-HQ/DB</span> 32 → <b style="color:#e6edf6">46</b></span>
+              <span class="lg"><span class="tag">PL/DB</span> 8 → <b style="color:#e6edf6">16</b></span>
+              <span class="lg"><span class="tag">US-E/DB</span> <span class="bdg n">새 폴더</span> 0 → <b style="color:#e6edf6">6</b></span>
+              <span class="lg"><span class="tag">VN/DB</span> <span class="bdg n">새 폴더</span> 0 → <b style="color:#e6edf6">5</b></span>
+              <span class="note sp">합 +33대 · 폴더 2개 생성</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <div class="df">
       <div style="display:flex;flex-direction:column;gap:6px">
-        <label class="lbl"><input class="chk" type="checkbox" aria-label="다른 폴더에 있는 서버도 옮기기"><span>이미 다른 폴더에 있는 4대도 이 폴더로 옮기기 <span class="dim">(끄면 그대로 둡니다)</span></span></label>
-        <label class="lbl"><input class="chk" type="checkbox" aria-label="자동 등록 규칙으로 저장"><span>앞으로 새로 인식되는 서버도 자동으로 넣기 <span class="dim">— 이름에 ‘db’ · ‘ora’ 가 들어가면 그 법인의 DB 폴더로(자동 규칙 저장)</span></span></label>
+        <label class="lbl"><input class="chk" type="checkbox" aria-label="다른 폴더에 있는 서버도 옮기기"><span>다른 폴더에 있는 4대도 이 폴더로 옮기기 <span class="dim">(끄면 그대로 둡니다)</span></span></label>
+        <label class="lbl"><input class="chk" type="checkbox" aria-label="자동 등록 규칙으로 저장"><span>이 조건을 자동 규칙으로 저장 <span class="dim">— 새로 인식되는 서버도 이름에 ‘db’ · ‘ora’ 가 있으면 그 법인의 DB 폴더로</span></span></label>
       </div>
       <span class="sp row">
         <button class="btn" type="button">취소</button>
