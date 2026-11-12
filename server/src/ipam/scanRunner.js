@@ -69,7 +69,7 @@ export async function runScan(job, { onProgress, deadlineMs = DEADLINE_MS } = {}
     }
   }
   const r = await scanRanges(job.ranges || [], {
-    ports: job.ports, concurrency: job.concurrency, timeoutMs: job.timeoutMs, reverseDns: job.reverseDns, ping: job.ping,
+    ports: job.ports, concurrency: job.concurrency, timeoutMs: job.timeoutMs, reverseDns: job.reverseDns, ping: job.ping, names: job.names, // v2.991
     onProgress,
   });
   return { ...r, viaWorker: false };
@@ -113,7 +113,7 @@ function runInWorker(job, onProgress, deadlineMs) {
         }
         return;
       }
-      if (m.type === 'done') return finish(resolve, { scanned: m.scanned, alive: m.alive || [], viaWorker: true });
+      if (m.type === 'done') return finish(resolve, { scanned: m.scanned, alive: m.alive || [], ...(m.fwd && typeof m.fwd === 'object' ? { fwd: m.fwd } : {}), viaWorker: true });
       if (m.type === 'error') return finish(reject, new Error(m.message || '워커 오류'));
     });
     child.on('error', (e) => finish(reject, e));      // spawn 실패 등

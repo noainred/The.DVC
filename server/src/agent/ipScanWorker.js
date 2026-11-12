@@ -179,6 +179,7 @@ export async function runIpScanAgentOnce(...args) {
     try {
       scanOut = await runScan({
         ranges: a.ranges, ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
+        names: Array.isArray(a.names) ? a.names : undefined, // v2.991: 정방향 DNS 로 물을 물리서버 이름(중앙 배정 — 이 엣지 법인 것만 · 구버전 중앙이면 없음)
         ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 OFF(v2.360)
       });
     } catch (se) { scanErr = se; } finally { _lastScanAt = Date.now(); saveLastScanAt(_lastScanAt); journalScanFinished('ipscan-agent', 'scan'); }

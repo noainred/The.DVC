@@ -57,8 +57,10 @@ async function runScanOnce({ manual = false, resumeOf = null } = {}) {
     message: `대역 ${ranges.length}개 · 포트 ${(s.ports || []).length}개 · 동시 ${s.concurrency} · 시한 ${s.timeoutMs}ms${s.ping ? ' · ICMP 병행' : ''}` });
   try {
     // 스캔은 별도 프로세스에서(v2.363) — TCP/ping/역DNS 부하·FD 를 포탈에서 격리.
+    // v2.991(설계 bm-folders §13 ③): 정방향 DNS 이름 — 이 포탈이 직접 수집하는 법인의 물리서버 이름(실패하면 없이 — 역방향만).
+    const names = await import('../routes/admin/bmOsSuggest.js').then((m) => m.fwdNamesForAgent(LOCAL)).catch(() => []);
     const { scanned, alive } = await runScan(
-      { ranges, ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, ping: s.ping },
+      { ranges, ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, ping: s.ping, ...(names.length ? { names } : {}) },
       { onProgress: (done, total, aliveCount) => { progress = { total, done, alive: aliveCount, startedAt: started }; } },
     );
     mergeScanResults(alive, Date.now(), LOCAL);

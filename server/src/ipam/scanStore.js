@@ -430,7 +430,9 @@ function cleanHostname(v) {
 }
 /** alive 원소 하나를 아는 필드로 좁힌다(순수). ip 는 호출부가 isIpv4 로 검사한다. v2.639: 바깥 호출부 0건(테스트도 mergeScanResults 로 검사한다) — 내부 함수. */
 function cleanAliveHost(h) {
-  return { ip: h.ip, openPorts: cleanPorts(h.openPorts), services: cleanServices(h.services), hostname: cleanHostname(h.hostname) };
+  // v2.991(③ 정방향 DNS): fwdName — 물리서버 이름을 DNS 에 물어 이 IP 가 나왔을 때 그 이름(엣지가 올린다 → 같은 정제). 없으면 칸을 두지 않는다.
+  const fwdName = cleanHostname(h.fwdName);
+  return { ip: h.ip, openPorts: cleanPorts(h.openPorts), services: cleanServices(h.services), hostname: cleanHostname(h.hostname), ...(fwdName ? { fwdName } : {}) };
 }
 // v2.639(감사 I2): 결과에 나오는 에이전트 이름 → IP 수. 데이터센터 귀속 판정(scanDatacenterSource)이 '결과에 나오는 에이전트
 //   집합' 을 매번 26만 개를 훑어 모으던 것을(실측 약 150ms) 적재·정리 시점에 유지한다. 갱신 지점은 셋뿐이다 — 로드 정제·
@@ -566,9 +568,9 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
     if (prev && (prev.lastSeen || 0) > ts) { recordSeen(h, ts, agent); continue; }
     // 실제 내용(포트/서비스/호스트명/에이전트) 변화가 있을 때만 리비전을 올린다(불필요한 대장 재계산 방지).
     if (!prev || !sameList(prev.openPorts, h.openPorts) || !sameList(prev.services, h.services)
-      || (prev.hostname || '') !== (h.hostname || '') || prev.agent !== agent) { changed = true; resContent = true; }
+      || (prev.hostname || '') !== (h.hostname || '') || (prev.fwdName || '') !== (h.fwdName || '') || prev.agent !== agent) { changed = true; resContent = true; }
     if (!prev) bumpAgent(agent, 1); else if (prev.agent !== agent) { bumpAgent(prev.agent, -1); bumpAgent(agent, 1); } // v2.639 I2
-    results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', lastSeen: ts, agent };
+    results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', ...(h.fwdName ? { fwdName: h.fwdName } : {}), lastSeen: ts, agent };
     noteSeen(ts); // v2.733 C6-02
     resWritten = true;
     recordSeen(h, ts, agent); // IP 사용 이력(온라인 전환) 갱신

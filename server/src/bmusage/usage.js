@@ -339,6 +339,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
 
   const srcs = [...new Set(Object.values(srcOf))].sort();
   out.src = srcs.join('+');
+  out.src_cm = srcCmOf(srcOf);   // v2.991: CPU · 메모리 지표별 출처(화면 출처 색) — 행 출처는 I/O 까지 합쳐 지표를 가르지 못한다
   return {
     row: out, srcOf, notes, devices: deviceRows, mounts: mountRows,
     // v2.929(5단계): 변경 이벤트 사실(해시 · 개수 · 짧은 값만 — 행에는 넣지 않는다: 폴러의 changes.js 가 이전 사실과 비교해 전이만 change_event 에 쓴다).
@@ -593,3 +594,15 @@ export function buildPerf({ os, pc = null, pAt = null, now, lim, prevStreak = nu
   } : null;
   return { cols, detail, tuning, streak, notes, allDisks, nicDeltas: nics, changeFacts };
 }
+
+/**
+ * v2.991(출처 색 — 설계 bm-folders §13): CPU · 메모리 **지표별** 출처를 두 글자로(최신값 `src_cm` 칸).
+ *   o = OS(SSH) · i = iDRAC 텔레메트리 · e = iDRAC 대체 수집(Enterprise) · - = 그 지표 값 없음. 순서는 CPU, 메모리.
+ *   글자 하나로 둔 이유: 최신값 글자 칸은 16자에서 자른다(db.js TEXT_EXTRA) · 엣지 → 중앙 정제가 꼴(`SRC_CM_RE`)만 보고 받는다.
+ */
+const SRC_CODE = Object.freeze({ os: 'o', idrac: 'i', 'idrac-ent': 'e' });
+export function srcCmOf(srcOf = {}) {
+  const c = (v) => SRC_CODE[v] || '-';
+  return `${c(srcOf?.cpu)}${c(srcOf?.mem)}`;
+}
+

@@ -97,3 +97,6 @@ export const DEVICE_PEAK_COLS = Object.freeze(DEVICE_COLS.filter((c) => c.peak).
 export const DEVICE_KINDS = Object.freeze(['disk', 'nic', 'mount']);
 /** 마운트 일 롤업 열(평균+최대 — 공간·inode 사용률) · 크기·사용은 마지막 값. */
 export const MOUNT_DAILY_COLS = Object.freeze(['used_pct', 'inode_pct']);
+
+/** v2.991(출처 색): 최신값 `src_cm` 칸의 꼴 — CPU · 메모리 지표별 출처 두 글자(o = OS · i = iDRAC · e = iDRAC 대체 수집 · - = 없음). 만드는 곳 `usage.js srcCmOf` · 받는 곳 중앙 엣지 정제. */
+export const SRC_CM_RE = /^[oie-]{2}$/;

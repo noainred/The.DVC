@@ -19,6 +19,7 @@
  * ⚠ 폴링하지 않는다(화면은 마운트 1회 + 새로고침 + 쓰기 뒤 재조회).
  */
 import { requirePerm, requireRole } from '../../auth/auth.js';
+import { usageSrcOf } from '../../bmfolders/usageSrc.js'; // v2.991: 사용률 지표별 출처(출처 색)
 import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { todayStamp } from '../../util/dayKey.js';
@@ -84,7 +85,7 @@ export function membersOf(g) {
     seen.add(key);
     out.push({
       key, keyKind, kind: 'esxi', corp: t(h.corp), name: t(h.name), nameIsAddr: false, serviceTag: t(h.serviceTag), model: t(h.model), source: 'vcenter',
-      remoteAgent: '', collectorId: '', powered: null, usage: h.usage ? { state: h.usage.state, cpuPct: h.usage.cpuPct, memPct: h.usage.memPct } : { state: 'unread' },
+      remoteAgent: '', collectorId: '', powered: null, usage: h.usage ? { state: h.usage.state, cpuPct: h.usage.cpuPct, memPct: h.usage.memPct, src: h.usage.src, ...(h.usage.srcBy ? { srcBy: h.usage.srcBy } : {}) } : { state: 'unread' },
       faults: h.faults ?? null, watts: h.watts ?? null, cores: null, memGB: null,
     });
   }
@@ -121,6 +122,8 @@ function serverRow(m, p, admin, hide) {
     src: srcClassOf(m), agent: hide ? undefined : (m.remoteAgent || (m.collectorId ? `수집 서버 ${m.collectorId}` : '')),
     path: p?.path || '', place: p?.src || null, moved: p?.moved ? true : undefined,
     powered: m.powered, usage: m.usage?.state || 'unread', cpu: m.usage?.cpuPct ?? null, mem: m.usage?.memPct ?? null,
+    // v2.991(출처 색): 지표별 출처 { cpu, mem } — 'os' · 'idrac' · 'vcenter' · null. 장비 단서가 아니라 판본 구분 없이 싣는다.
+    usrc: usageSrcOf(m.usage) || undefined,
     watts: m.watts ?? null, faults: m.faults ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null,
     // 관리 주소 — 관리자 판본만(비관리자 · 데모에게 장비 주소를 싣지 않는다 — isAdminDetailUser 하나로 판정)
     // 범위 계정 판본(범위 지정 관리자 포함)에서는 주소 속 태그도 가린다(2차 반증 1: Dell 기본 이름 'idrac-<태그>' 주소로 가린 태그가 드러났다)

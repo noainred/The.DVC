@@ -401,7 +401,7 @@ function Ipam({ scope, onScope }) {
                         <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
                           <td><button className="cell-link" title="클릭: 확인 시점·호스트명·사용/미사용 기간 + VM 정보/원격 접속" onClick={() => setHistIp(r)}><b>{r.ip}</b></button></td>
                           <td>{r.purpose}</td>
-                          <td>{r.hostname ? <VmLink ip={r.ip} vcenterId={scope} label={r.hostname} /> : ''}</td>
+                          <td>{r.hostname ? <VmLink ip={r.ip} vcenterId={scope} label={r.hostname} /> : ''}<NameVia r={r} /></td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.serverType || ''}</td>
                           <td style={{ fontSize: 12 }}><DiscoveryBadge d={r.discovery} /></td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.os || ''}</td>
@@ -723,3 +723,14 @@ function IpamInsights({ scope }) {
     </>
   );
 }
+
+/** v2.991(설계 bm-folders §13 ③): 스캔 이름을 어떻게 찾았나 — 역방향 DNS · 정방향 DNS(물리서버 이름으로 물어 이 IP) · 둘 다 · 서로 다름(둘 다 보인다). */
+// 역방향 DNS 만으로 찾은 이름(예전부터의 기본)은 표지를 달지 않는다 — 스캔 행마다 같은 표지가 붙어 표가 시끄러워진다.
+const NAME_VIA = { fwd: ['정방향 DNS', 'blue'], both: ['역방향 · 정방향 일치', 'gray'], differ: ['이름이 서로 다름', 'amber'] };
+function NameVia({ r }) {
+  const v = NAME_VIA[r?.nameVia];
+  if (!v) return null;
+  const title = r.nameVia === 'differ' ? `역방향 DNS 이름 ${r.hostname} · 정방향 DNS 로 찾은 물리서버 이름 ${r.fwdName || ''} — 하나로 정하지 않습니다` : r.nameVia === 'fwd' ? '물리서버 이름(iDRAC 이 읽은 호스트 이름)을 DNS 에 물어 이 IP 가 나왔습니다' : undefined;
+  return <span className={`badge ${v[1]}`} style={{ marginLeft: 6, fontSize: 10.5 }} title={title}>{v[0]}{r.nameVia === 'differ' && r.fwdName ? ` · ${r.fwdName}` : ''}</span>;
+}
+
