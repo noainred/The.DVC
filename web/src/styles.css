@@ -3195,6 +3195,8 @@ button.bmf-hx:focus-visible { outline: 2px solid var(--accent-2); outline-offset
 .bmf-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 9px 12px; background: transparent; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; min-height: 44px; }
 .bmf-card-body .l1 { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; }
 .bmf-card-body .l1 b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 배지는 줄지 않고 한 줄로 — 400px 에서 '1건' · '중앙' 이 글자마다 세로로 꺾였다(v2.986 Chromium 판독) */
+.bmf-card-body .l1 > .badge, .bmf-card-body .l1 > span:last-child { flex: none; white-space: nowrap; }
 .bmf-card-body .l2 { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bmf-links a:hover { color: #bfdbfe; }
 .bmf-band.red { background: rgba(239, 68, 68, .10); border: 1px solid rgba(239, 68, 68, .4); color: #fecaca; }
