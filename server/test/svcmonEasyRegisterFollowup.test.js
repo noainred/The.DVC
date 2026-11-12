@@ -1,4 +1,4 @@
-// v2.986 — Monitoring 쉬운 등록 후속(잔여 작업): 엣지 시험은 배정 적용(ack) 뒤 결과만 · 엣지 메타의 구분(infra|service) — 수신 화이트리스트 ·
+// v2.987 — Monitoring 쉬운 등록 후속(잔여 작업): 엣지 시험은 배정 적용(ack) 뒤 결과만 · 엣지 메타의 구분(infra|service) — 수신 화이트리스트 ·
 //   알림 억제 · 시험 판정 · 개요 조인 · '법인 폴더로 정리' · '지금 한 번 점검' · 데모 엣지 배정 후보. 설계 docs/design/monitoring-autoreg/README.md §11.8.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';

@@ -189,7 +189,7 @@ async function runLocal(items, deps) {
 }
 
 /**
- * v2.986 '지금 한 번 점검' — 점검 하나를 이 포탈에서 한 번 실행해 결과만 돌려준다(사용 여부와 무관 · 폴러 결과 · 전이 · CSV · 알림에 넣지 않는다 — 시험과 같은 규칙).
+ * v2.987 '지금 한 번 점검' — 점검 하나를 이 포탈에서 한 번 실행해 결과만 돌려준다(사용 여부와 무관 · 폴러 결과 · 전이 · CSV · 알림에 넣지 않는다 — 시험과 같은 규칙).
  *   동시에 같은 점검은 하나 · 전체 동시 상한 RUN_ONCE_MAX(넘으면 busy). 데모 대상은 합성 결과(폴러 규칙).
  */
 const RUN_ONCE_MAX = 8;
@@ -312,7 +312,7 @@ export function trialTick(now = Date.now(), deps = {}) {
   const ackAtOf = deps.ackAt || defaultAckAt();
   for (const [agent, list] of byAgent) {
     const rows = (deps.edgeRows || edgeRowsOf)(agent) || [];
-    // v2.986(쉬운 등록 후속): 엣지가 **이번 시험 뒤의 배정을 적용(ack)한 뒤** 잰 결과만 받는다 — ack 전 행은 옛 스냅샷의 측정이다.
+    // v2.987(쉬운 등록 후속): 엣지가 **이번 시험 뒤의 배정을 적용(ack)한 뒤** 잰 결과만 받는다 — ack 전 행은 옛 스냅샷의 측정이다.
     //   ack 는 배정 sig 가 그때의 현재 sig 일 때만 기록되므로(svcmonAssign.ackAssignment) ack 시각 ≥ 시작이면 시작 뒤에 굳힌 배정(켜진 대상)을 적용했다.
     //   측정은 적용 직후 틱(5초)에 돌고 ack 는 WAN 을 건너 오므로 ack 수신 시각보다 조금 앞설 수 있다 — 여유 ACK_SLACK_MS.
     const ackAt = Number(ackAtOf(agent)) || 0;
@@ -330,7 +330,7 @@ export function trialTick(now = Date.now(), deps = {}) {
         // v2.960(반증 M3 — 재현): 이번 시험의 행만 — 시작 뒤에 잰 것 · 지금 주소(옛 스냅샷의 옛 주소 행이 아님) · 기대 점검 이름. 같은 점검은 가장 최근 행 하나.
         if (!(Number(r.measuredAt) >= w.p.startedAt)) continue;
         if (!(ackAt >= w.p.startedAt) || !(Number(r.measuredAt) >= ackAt - ACK_SLACK_MS)) continue;
-        if (t(r.kind) && t(r.kind) !== w.p.kind) continue;   // v2.986: 같은 경로 · 이름의 다른 구분 대상 행(옛 엣지는 구분을 싣지 않는다 — 그때는 거르지 않는다)
+        if (t(r.kind) && t(r.kind) !== w.p.kind) continue;   // v2.987: 같은 경로 · 이름의 다른 구분 대상 행(옛 엣지는 구분을 싣지 않는다 — 그때는 거르지 않는다)
         if (w.p.host && t(r.host) && t(r.host).toLowerCase() !== w.p.host.toLowerCase()) continue;
         const name = t(r.test);
         if (w.p.expect.length && !w.p.expect.includes(name)) continue;

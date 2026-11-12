@@ -81,7 +81,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
   const [msg, setMsg] = useState('');
   const [result, setResult] = useState(null);
   const [autoKinds, setAutoKinds] = useState(null);
-  const [rp, setRp] = useState(null);   // v2.986 '법인 폴더로 정리' — { preview, result, busy, msg } · null = 닫힘
+  const [rp, setRp] = useState(null);   // v2.987 '법인 폴더로 정리' — { preview, result, busy, msg } · null = 닫힘
   const seq = useRef(0);
   const firstLoad = useRef(true);
 
@@ -156,7 +156,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
       setMsg(e.message);
     } finally { setBusy(false); }
   };
-  // v2.986 '법인 폴더로 정리' — 설정 연동이 놓은 자리에 그대로 있고 지금은 법인을 알 수 있는 연동 대상(행의 repath)만. 미리보기 → 옮기기.
+  // v2.987 '법인 폴더로 정리' — 설정 연동이 놓은 자리에 그대로 있고 지금은 법인을 알 수 있는 연동 대상(행의 repath)만. 미리보기 → 옮기기.
   const repathKeys = rows.filter((r) => r.repath).map((r) => r.key).slice(0, maxApply);
   const openRepath = async () => {
     setRp({ busy: true });

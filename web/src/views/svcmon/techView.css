@@ -196,7 +196,7 @@
   .tv-corp-kind { grid-template-columns: 20px minmax(0, 1fr) 36px; } .tv-corp-kind .ck, .tv-corp-kind .st { grid-column: 2 / -1; text-align: left; }
   .tv-corp-go { margin-left: 0; width: 100%; } .tv-corp-go .pc-btn { width: 100%; min-height: 44px; }
 }
-/* v2.986 '지금 한 번 점검' 결과 — 응답 문구는 길 수 있다(HTTP 본문 요약) */
+/* v2.987 '지금 한 번 점검' 결과 — 응답 문구는 길 수 있다(HTTP 본문 요약) */
 .pc-modal .tv-swbox .tv-runres { font-family: var(--mono); font-size: 11.5px; padding: 6px 8px; margin: 0 0 6px; border-radius: 6px; background: var(--panel, #0f1d31); overflow-wrap: anywhere; white-space: pre-wrap; max-height: 140px; overflow-y: auto; }
 .pc-modal .tv-swbox .tv-runres.pc-ok { border-left: 3px solid var(--pc-ok); } .pc-modal .tv-swbox .tv-runres.pc-warn { border-left: 3px solid var(--pc-warn); }
 .pc-modal .tv-swbox .tv-runres.pc-bad { border-left: 3px solid var(--pc-bad); color: #ffb4b4; }

@@ -67,7 +67,7 @@ export function createDashAcc({ targets = [] } = {}) {
 
   // 엣지 행 → 중앙 대상(출처) 조인 키 — 엣지 사본은 경로·이름이 같다(배정 스냅샷).
   const byPathName = new Map();
-  // v2.986: 구분(infra|service)까지 맞춘 조인 — 같은 경로 · 이름의 다른 구분 대상이 섞이지 않게(엣지가 구분을 실을 때만 · 옛 엣지는 위 키로).
+  // v2.987: 구분(infra|service)까지 맞춘 조인 — 같은 경로 · 이름의 다른 구분 대상이 섞이지 않게(엣지가 구분을 실을 때만 · 옛 엣지는 위 키로).
   const byPathNameKind = new Map();
   for (const tg of targets) {
     byPathName.set(`${t(tg.path)}\u0001${t(tg.name).toLowerCase()}`, tg);

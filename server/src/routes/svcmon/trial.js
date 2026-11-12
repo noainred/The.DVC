@@ -67,7 +67,7 @@ svcmonRouter.post('/trial', canEdit, fullScopeOnly, (req, res) => {
 });
 
 /**
- * v2.986 '지금 한 번 점검' — 이 포탈이 점검을 직접 실행하는 역할일 때만(중앙은 409 — 원격 대상을 중앙에서 찌르지 않는다 · poller EXECUTES 머리말).
+ * v2.987 '지금 한 번 점검' — 이 포탈이 점검을 직접 실행하는 역할일 때만(중앙은 409 — 원격 대상을 중앙에서 찌르지 않는다 · poller EXECUTES 머리말).
  *   결과는 응답으로만(폴러 결과 · 알림에 넣지 않는다). 네트워크로 나가는 동작이라 감사 로그를 남긴다.
  */
 svcmonRouter.post('/targets/:id/tests/:testId/run', canEdit, fullScopeOnly, async (req, res) => {

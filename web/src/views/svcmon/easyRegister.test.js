@@ -56,7 +56,7 @@ describe('v2.960 쉬운 등록 — 법인별 추천 등록', () => {
   });
 });
 
-describe('v2.986 isFullScopeEditor — 서버 canEdit + fullScopeOnly 와 같은 기준(사용/중지 · 시험 · 지금 한 번 점검)', async () => {
+describe('v2.987 isFullScopeEditor — 서버 canEdit + fullScopeOnly 와 같은 기준(사용/중지 · 시험 · 지금 한 번 점검)', async () => {
   const { isFullScopeEditor } = await import('./svcmonAccess.js');
   it('판정', () => {
     expect(isFullScopeEditor({ role: 'admin' })).toBe(true);
