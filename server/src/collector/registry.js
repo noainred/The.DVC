@@ -18,6 +18,7 @@ import { resilientFetch } from '../util/resilientFetch.js'; // v2.613 DEPS2613-0
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: url 변경 시 저장 토큰 폐기
 // 2026-10-09 검토 S-09(그룹 J): 원격 URL 은 HTTPS 가 기본 — 평문 HTTP 는 승인된 예외만(판정은 transportPolicy.js 하나).
 import { withDefaultScheme, evaluateCollectorUrl, transportOf, recordRejectedHttpRegistration, clearRejectedHttpRegistration, INSECURE_HTTP_CODE } from './transportPolicy.js';
+import { resolvePickedDc } from './datacenterMatch.js'; // v2.985 반증 D2: 사용자 매칭 법인 id 고르기 규칙 하나(순수 · 의존 없음)
 
 const FILE = path.join(config.configDir, 'collectors.json');
 
@@ -77,10 +78,15 @@ export function normDcId(v) {
  */
 export function setCollectorDatacenterId(id, dcId, validIds = null) {
   if (registryLoadError()) return { ok: false, status: 503, code: 'registryUnreadable', reason: '수집 서버 등록부(collectors.json)를 읽지 못해 바꾸지 않습니다.' };
-  const want = String(dcId ?? '').trim() === '' ? '' : normDcId(dcId);
-  if (String(dcId ?? '').trim() !== '' && !want) return { ok: false, status: 400, reason: '법인(DataCenter) id 형식이 올바르지 않습니다.' };
-  // P5(v2.985): 손으로 고친 datacenters.json 의 대문자 id 도 같은 법인으로 본다(대소문자 무시 — 저장은 소문자, 판정은 collectorDcMaps 가 실제 id 로 되돌린다).
-  if (want && validIds && ![...validIds].some((x) => String(x).toLowerCase() === want)) return { ok: false, status: 400, reason: `없는 법인(DataCenter) id: ${want}` };
+  const raw = String(dcId ?? '').trim();
+  if (raw !== '' && !normDcId(raw)) return { ok: false, status: 400, reason: '법인(DataCenter) id 형식이 올바르지 않습니다.' };
+  // P5(v2.985) · 반증 D2: 손으로 고친 datacenters.json 의 대문자 id 도 같은 법인 — 고르는 규칙은 resolvePickedDc 하나(정확 일치 → 대소문자 무시),
+  //   **실제 id 그대로 저장**한다(예전: 소문자로 바꿔 저장 → 대소문자만 다른 두 법인이 있으면 사용자가 고른 쪽을 고를 수 없었다).
+  let want = raw;
+  if (raw && validIds) {
+    want = resolvePickedDc(raw, [...validIds].map((id) => ({ id })));
+    if (!want) return { ok: false, status: 400, reason: `없는 법인(DataCenter) id: ${raw}` };
+  }
   const list = loadCollectors();
   const idx = list.findIndex((c) => c.id === id);
   if (idx === -1) return { ok: false, status: 404, reason: `없는 수집 서버: ${id}` };
@@ -302,8 +308,8 @@ function normalize(body, existing = null, ctx = null) {
   //   자유 글자 라벨)와 따로 둔다. **본문 값은 보지 않고 늘 기존 값을 이어받는다**(반증 F1 — 관리자 편집 폼 · 토큰 강제 재설정 · 배포가 목록 행을
   //   통째로 다시 보내 다른 탭에서 바꾼 매칭을 되돌리고, 없는 법인 검사 · 감사를 건너뛰었다). 바꾸는 길은 setCollectorDatacenterId 하나
   //   (PUT /collectors/:id/datacenter — 법인 목록 검사 · 감사 · managed 불변). 없으면 필드를 만들지 않는다(예전 파일 모양 그대로).
-  const dcId = normDcId(e.datacenterId);
-  if (dcId) entry.datacenterId = dcId;
+  const dcId = String(e.datacenterId ?? '').trim();   // 반증 D2: 실제 id 그대로(형식만 확인 — 대소문자 보존)
+  if (dcId && normDcId(dcId)) entry.datacenterId = dcId;
   // 예외 기록: keep 이면 기존 것을 그대로(같은 URL), 아니면 새 판정값(https·루프백이면 지운다 — URL 이 바뀌면 승계하지 않는다).
   if (tp.keep) { if (e.insecureHttp) entry.insecureHttp = e.insecureHttp; }
   else if (tp.exception) entry.insecureHttp = tp.exception;

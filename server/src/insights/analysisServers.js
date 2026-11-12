@@ -15,7 +15,7 @@ import { loadRegistry as loadIdracRegistry } from '../idrac/registry.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { loadCollectors } from '../collector/registry.js';
 import { allRemoteServers, dedupRemoteServers } from '../collector/remoteInventory.js';
-import { matchDatacenterId } from '../collector/datacenterMatch.js';
+import { matchDatacenterId, resolvePickedDc } from '../collector/datacenterMatch.js';
 import { serverInScope } from './analysisScope.js';
 import { listDatacenters, getDatacenterAssign, ensureDatacenter } from '../datacenter/store.js';
 import { listScanRanges } from '../idrac/scanRanges.js';
@@ -90,11 +90,10 @@ export function collectorToDatacenterMap() { return collectorDcMaps().map; }
  */
 export function collectorDcMaps() {
   const dcs = listDatacenters();
-  // P5(v2.985): 대소문자 무시로 찾아 **실제 법인 id** 를 쓴다(손으로 고친 대문자 id — 저장된 매칭은 소문자).
-  const byLower = new Map(dcs.map((d) => [String(d.id).toLowerCase(), String(d.id)]));
+  // P5(v2.985): 실제 법인 id 로(정확 일치 → 대소문자 무시 — collector/datacenterMatch.js resolvePickedDc 하나, 반증 D2).
   const map = new Map(); const manual = new Map();
   for (const c of loadCollectors()) {
-    const picked = byLower.get(String(c.datacenterId || '').trim().toLowerCase()) || '';
+    const picked = resolvePickedDc(c.datacenterId, dcs);
     if (picked) { map.set(String(c.id), picked); manual.set(String(c.id), picked); continue; }
     map.set(String(c.id), matchDatacenterId([c.datacenter, c.id, c.name], dcs));
   }
@@ -172,8 +171,9 @@ export function ensureCollectorDatacenter(c) {
   const dcs = listDatacenters();
   const picked = String(c.datacenterId || '').trim().toLowerCase();
   if (picked && dcs.some((d) => String(d.id).toLowerCase() === picked)) return;
-  if (matchDatacenterId([c.datacenter, c.id, c.name], dcs)) return;
+  // 반증 D1: 라벨이 있으면 **라벨만** 본다 — id · 이름이 우연히 다른 법인과 같아 라벨이 밝힌 새 법인을 막지 않게(IP 관리 dcIdOf 도 라벨만 본다).
   const label = String(c.datacenter || '').trim();
+  if (matchDatacenterId(label ? [label] : [c.id, c.name], dcs)) return;
   const id = (label || c.id || '').toString();
   if (id) ensureDatacenter({ id, name: label || c.name || c.id });
 }

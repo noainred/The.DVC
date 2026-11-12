@@ -11,7 +11,7 @@ import { loadVcenterConfig } from '../../config.js';
 import { getVmHardware, reconfigVm } from '../../provision/reconfig.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.743(VC-03): 주문형 로그인 문이 막은 409 의 사유 필드
 import { setCollectorDatacenterId } from '../../collector/registry.js'; // v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정)
-import { matchDatacenterId } from '../../collector/datacenterMatch.js';
+import { matchDatacenterId, resolvePickedDc } from '../../collector/datacenterMatch.js';
 import { listCollectors, addCollector, updateCollector, removeCollector, loadCollectors, ssrfBlockReason, collectorInputIssue, identityIssue, registryLoadErrorSummary } from '../../collector/registry.js';
 // 2026-10-09 검토 S-09(그룹 J): 평문 HTTP 는 승인된 예외만 — 판정은 transportPolicy, 이 파일은 관리자 문맥·감사·상태만 싣는다.
 import { withDefaultScheme, urlTransport, transportSummary, allowlistSummary, rejectedHttpRegistrations, centralUrlTransport } from '../../collector/transportPolicy.js';
@@ -137,12 +137,11 @@ function transportView(list) {
  * 사용자 매칭(datacenterId — 지금 목록에 있을 때만) → 이름 맞춤(datacenter 라벨 · id · 이름 ↔ DataCenter id · 이름).
  */
 export function collectorDcMatch(collectors, datacenters) {
-  const byLower = new Map((datacenters || []).map((d) => [String(d.id).toLowerCase(), String(d.id)]));   // P5(v2.985): 대소문자 무시 → 실제 id
   const out = {};
   for (const c of collectors || []) {
     if (!c || c.id == null) continue;
-    const picked = String(c.datacenterId || '').trim().toLowerCase();
-    const hit = picked ? byLower.get(picked) : '';
+    const picked = String(c.datacenterId || '').trim();
+    const hit = resolvePickedDc(picked, datacenters || []);   // P5 · 반증 D2: 정확 일치 → 대소문자 무시(하나의 규칙)
     if (hit) { out[c.id] = { id: hit, via: 'manual' }; continue; }
     const m = matchDatacenterId([c.datacenter, c.id, c.name], datacenters || []);
     out[c.id] = { id: m || '', via: m ? 'name' : '', ...(picked ? { stale: true, picked } : {}) };   // picked: 지워진 법인 id — 화면이 그 값을 선택지로 보여 줘야 '자동' 으로 해제할 수 있다(반증 F6)

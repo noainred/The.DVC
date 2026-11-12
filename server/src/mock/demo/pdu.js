@@ -10,7 +10,7 @@
  *  · 일부러 넣은 이상: 뱅크 전류 경고(12A 초과)·온도 경고(27℃ 초과) 장비 몇 대, 수집 실패 장비 1대(값을 지어내지 않는다 —
  *    실패 스냅샷은 수치가 비어 있다).
  *
- * 법인 목록(`demoCorps`)은 CVP 데모도 쓴다 — DataCenter 가 등록돼 있으면 그것을, 없으면 mock vCenter 마다 `dc-<도시>` 를 만든다.
+ * 법인 목록(`demoCorps`)은 CVP 데모도 쓴다 — DataCenter 가 등록돼 있으면 그것을, 없으면 mock vCenter 마다 `dc-<도시>`(그 vCenter 의 데모 엣지 라벨이 도시와 같으면 라벨 id — v2.985 demoCorpId)를 만든다.
  */
 import { isMockMode, demoHash, demoRand, demoIp } from './flags.js';
 
@@ -26,7 +26,7 @@ export const isDemoId = (id) => String(id || '').startsWith('mock-');
 export const pduDemoActive = (devices) => isMockMode() && (Array.isArray(devices) ? devices : []).some((x) => isDemoId(x?.id));
 
 /**
- * 데모 법인 목록 [{id, name, code}] — DataCenter 가 있으면 그것(앞 12곳), 없으면 mock vCenter 의 도시로 `dc-<도시>` 를 만든다.
+ * 데모 법인 목록 [{id, name, code}] — DataCenter 가 있으면 그것(앞 12곳), 없으면 mock vCenter 의 도시로 `dc-<도시>`(엣지 라벨 = 도시면 라벨 id — demoCorpId)를 만든다.
  * ⚠ DataCenter 를 만드는 것은 mock 모드·목록이 비어 있을 때뿐이다. vCenter 할당은 할당이 없는 vCenter 만 데모 법인으로 채운다(v2.709 assignDemoCorps).
  */
 export async function demoCorps(snapshot) {

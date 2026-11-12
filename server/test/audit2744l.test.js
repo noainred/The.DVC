@@ -139,7 +139,10 @@ test('FB-2 ② 판정을 주지 않으면 예전 규칙(이름이 IP 일 때만)
   assert.equal(r2.skipped.hostsNoIp, 1);
   assert.equal(r2.totals.hostIps, 1);
   const imps = [...stripComments(fs.readFileSync(path.join(SRC, 'ipam/scanDatacenter.js'), 'utf8')).matchAll(/\bfrom\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
-  assert.deepEqual(imps, ['../util/ipv4.js'], `scanDatacenter.js 는 순수 모듈로 남는다(ledger.js import 금지 — 순환): ${imps.join(', ')}`);
+  // v2.985(반증 D2): 사용자 매칭 법인 id 고르기 규칙(resolvePickedDc)을 서버 분석과 같이 쓰려고 collector/datacenterMatch.js 를 더했다 — 그 모듈도 import 가 없는 순수 모듈이라 순환이 없다(아래에서 고정).
+  assert.deepEqual(imps, ['../util/ipv4.js', '../collector/datacenterMatch.js'], `scanDatacenter.js 는 순수 모듈로 남는다(ledger.js import 금지 — 순환): ${imps.join(', ')}`);
+  const dm = [...stripComments(fs.readFileSync(path.join(SRC, 'collector/datacenterMatch.js'), 'utf8')).matchAll(/\bfrom\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  assert.deepEqual(dm, [], 'collector/datacenterMatch.js 는 import 없는 순수 모듈');
 });
 
 test('FB-2 ③ 화면 문구 — 관리 IP 로 센 호스트와 뺀 호스트를 나눠 말한다 · 구버전 응답(규칙 없음)은 예전 문구', async () => {
