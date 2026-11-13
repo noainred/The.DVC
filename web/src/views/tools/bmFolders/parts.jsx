@@ -78,12 +78,13 @@ export function WhyTip({ why, what }) {
   const open = !!pos;
   React.useEffect(() => {
     if (!open) return undefined;
-    const key = (e) => { if (e.key === 'Escape') { setPos(null); btn.current?.focus?.(); } };
+    // Esc 는 가장 안쪽(이 상자)만 닫는다 — 캡처 단계에서 받고 전파를 멈춰, 바깥 옆 패널의 Esc 처리기(EscClose · window)가 같은 키로 패널까지 닫지 않게(400px 재확인 판독)
+    const key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); setPos(null); btn.current?.focus?.(); } };
     const click = (e) => { if (ref.current && !ref.current.contains(e.target)) setPos(null); };
     const away = () => setPos(null);   // fixed 상자라 스크롤 · 크기 변경이면 버튼과 어긋난다 — 닫는다
-    document.addEventListener('keydown', key); document.addEventListener('mousedown', click);
+    document.addEventListener('keydown', key, true); document.addEventListener('mousedown', click);
     window.addEventListener('scroll', away, true); window.addEventListener('resize', away);
-    return () => { document.removeEventListener('keydown', key); document.removeEventListener('mousedown', click); window.removeEventListener('scroll', away, true); window.removeEventListener('resize', away); };
+    return () => { document.removeEventListener('keydown', key, true); document.removeEventListener('mousedown', click); window.removeEventListener('scroll', away, true); window.removeEventListener('resize', away); };
   }, [open]);
   // 상자는 화면 좌표(fixed)로 연다 — 표 스크롤 래퍼 안의 absolute 는 래퍼에 잘렸다(Chromium 판독). 오른쪽 끝을 버튼에 맞추고 화면 안으로 자른다 · 아래가 모자라면 위로.
   const toggle = () => {
