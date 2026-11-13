@@ -8,6 +8,7 @@ export const CHANGE_TYPE = Object.freeze({
   'new-ip': { label: '새 미등록 IP', tone: 'blue' },
   'reserved-up': { label: '예약 · 폐기 IP 사용 시작', tone: 'amber' },
   rename: { label: '호스트명 변경', tone: 'purple' },
+  'dns-mismatch': { label: 'DNS 불일치', tone: 'amber' },   // v3.2.0 — 기록만(알림 규칙 없음)
   'conflict-resolved': { label: '충돌 의심 해소', tone: 'green' },
   baseline: { label: '기준선', tone: 'gray' },
 });
@@ -30,6 +31,7 @@ export function notifyBadge(state) { return NOTIFY_TEXT[state] || NOTIFY_TEXT.no
 
 const SRC = Object.freeze({ dns: '역DNS', mdns: 'mDNS', netbios: 'NetBIOS' });
 const STATUS = Object.freeze({ reserved: '예약', deprecated: '폐기' });
+const DNS_V = Object.freeze({ match: '일치', other: '다른 IP', none: '정방향 없음' });
 const withVendor = (mac, v) => (mac ? `${mac}${v ? `(${v})` : ''}` : '—');
 
 /** 기록 한 줄의 '내용' 칸(순수). */
@@ -43,6 +45,7 @@ export function changeDetail(e) {
     case 'rename': return `${SRC[e.src] || e.src || ''} ${e.from || '—'} → ${e.to || '—'}`.trim();
     case 'conflict': return `${e.vm ? `VM ${e.vm} · ` : ''}${e.note || ''}`;
     case 'conflict-resolved': return 'VM 의 MAC 이 다시 응답했거나 VM 의 IP 가 바뀌었습니다';
+    case 'dns-mismatch': return `역DNS ${e.name || '—'} → ${e.status === 'none' ? '정방향 없음' : (Array.isArray(e.addrs) && e.addrs.length ? e.addrs.join(', ') : '다른 IP')} · 이전 ${DNS_V[e.from] || e.from || '—'}`;
     case 'baseline': return `대역 ${e.spec || '—'} 첫 완료 스캔 — 이 줄의 새 IP 는 다음 스캔부터 '새 미등록 IP' 로 셉니다`;
     default: return '';
   }

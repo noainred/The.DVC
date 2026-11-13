@@ -81,7 +81,7 @@ async function runScanOnce({ manual = false, resumeOf = null } = {}) {
     // v2.993(설계 bm-folders §13 ③): 정방향 DNS 이름 — 이 포탈이 직접 수집하는 법인의 물리서버 이름(실패하면 없이 — 역방향만).
     const fwdNames = await fwdNamesFor(LOCAL);   // 공급자는 라우트 층이 등록한다(ipam/scanNames.js — 도메인이 routes/ 를 import 하지 않게)
     const { scanned, alive, nameStats } = await runScan(
-      { ranges, ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, mdns: s.mdns, netbios: s.netbios, ping: s.ping, ...(fwdNames.length ? { fwdNames } : {}) },
+      { ranges, ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, mdns: s.mdns, netbios: s.netbios, ping: s.ping, dnsConfirm: s.dnsConfirm, dnsConfirmHours: s.dnsConfirmHours, ...(fwdNames.length ? { fwdNames } : {}) },
       { onProgress: (done, total, aliveCount) => { progress = { total, done, alive: aliveCount, startedAt: started }; } },
     );
     mergeScanResults(alive, Date.now(), LOCAL);

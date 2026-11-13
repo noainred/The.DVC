@@ -16,7 +16,7 @@ import { registerStateFile } from '../util/stateFiles.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { numOrNull } from '../util/numOrNull.js';
 
-export const CHANGE_TYPES = Object.freeze(['conflict', 'conflict-resolved', 'mac-change', 'new-ip', 'reserved-up', 'rename', 'baseline']);
+export const CHANGE_TYPES = Object.freeze(['conflict', 'conflict-resolved', 'mac-change', 'new-ip', 'reserved-up', 'rename', 'baseline', 'dns-mismatch']);   // v3.2.0 dns-mismatch(기록만 — 알림 규칙 없음)
 /** 알림 결과: sent(보냄) · failed(보내지 못함) · off(규칙 꺼짐) · quiet(알리지 않을 에이전트) · excluded(그 IP 는 MAC 변경 알림 제외) ·
  *  flap(두 MAC 사이 오감 — 처음 한 번만) · summary(묶음 상한 초과 — 요약 한 건으로) · engine(상태형 — 알림 엔진이 보낸다) · none(알림 대상 아님) */
 export const NOTIFY_STATES = Object.freeze(['sent', 'failed', 'off', 'quiet', 'excluded', 'flap', 'summary', 'engine', 'none', 'skipped']);
@@ -67,8 +67,9 @@ const strList = (v, n = 6) => (Array.isArray(v) ? v.map((x) => str(x, 32)).filte
 export function cleanChange(c, ts) {
   if (!c || typeof c !== 'object' || !CHANGE_TYPES.includes(c.type)) return null;
   const out = { ts: numOrNull(c.ts) ?? ts ?? Date.now(), type: c.type, ip: str(c.ip, 45), agent: str(c.agent, 64) };
-  for (const k of ['from', 'to', 'src', 'mac', 'status', 'spec', 'vendor', 'fromVendor', 'vm', 'vcenterId', 'note']) if (c[k] != null && c[k] !== '') out[k] = str(c[k]);
+  for (const k of ['from', 'to', 'src', 'mac', 'status', 'spec', 'vendor', 'fromVendor', 'vm', 'vcenterId', 'note', 'name']) if (c[k] != null && c[k] !== '') out[k] = str(c[k], k === 'name' ? 253 : 200);
   if (Array.isArray(c.services) && c.services.length) out.services = strList(c.services);
+  if (Array.isArray(c.addrs) && c.addrs.length) out.addrs = strList(c.addrs, 4);   // v3.2.0: DNS 불일치 — 이름의 정방향 주소
   if (c.flap === true) out.flap = true;
   out.notify = NOTIFY_STATES.includes(c.notify) ? c.notify : 'none';
   return out;
