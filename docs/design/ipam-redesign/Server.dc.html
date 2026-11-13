@@ -188,8 +188,8 @@ class Component extends DCLogic {
       vms: [
         mk('api-kr1-009', '10.20.30.20', 'old-api-03', '불일치', 'API 서버', 'api-team', 'net-admin', { off: true }),
         mk('batch-kr1-007', '10.20.30.131', 'batch-kr1-070', '불일치', '배치', 'data-team', 'ops-kr', { flag: '중복' }),
-        mk('db-kr1-002', '10.20.50.14', '', 'DNS 기록 없음', '백업망', 'dba-team', 'net-admin', { flag: 'IP 2개' }),
-        mk('db-kr1-002', '10.20.31.14', 'db-kr1-002', '일치', 'DB', 'dba-team', 'net-admin', { flag: 'IP 2개' }),
+        mk('db-kr1-002', '10.20.50.14', '', 'DNS 기록 없음', '백업망', 'dba-team', 'net-admin', { flag: '복수IP' }),
+        mk('db-kr1-002', '10.20.31.14', 'db-kr1-002', '일치', 'DB', 'dba-team', 'net-admin', { flag: '복수IP' }),
         mk('web-kr1-023', '10.20.30.47', 'web-kr1-023', '일치', '웹 프런트', 'web-team', 'ops-kr'),
         mk('api-kr1-003', '10.20.30.14', 'api-kr1-003', '일치', 'API 서버', 'api-team', 'ops-kr'),
         mk('infra-kr1-dns01', '10.20.30.10', 'infra-kr1-dns01', '일치', 'DNS', 'infra-kr', 'net-admin'),
