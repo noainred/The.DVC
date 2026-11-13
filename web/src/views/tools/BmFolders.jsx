@@ -14,7 +14,7 @@ import BoldText from '../../components/boldText.jsx';
 import BulkAdd from './bmFolders/BulkAdd.jsx';
 import SidePanel from './bmFolders/SidePanel.jsx';
 import MapView from './bmFolders/MapView.jsx';
-import EdgeView from './bmFolders/EdgeView.jsx'; // v2.994: 엣지 포탈 화면
+import EdgeView from './bmFolders/EdgeView.jsx'; // v2.996: 엣지 포탈 화면
 import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
 import { SRC_COLOR, SRC_SHORT, rowSrcClass, srcCounts, metricSrcText } from './bmFolders/usageSrc.js'; // v2.993: 사용률 출처 색
@@ -84,7 +84,7 @@ export default function BmFolders() {
     finally { setBusy(false); }
   }, [load]);
 
-  // v2.994(묶음 D): 엣지 포탈 응답(d.edge)은 모양이 다르다(폴더가 경로 글자) — 중앙 화면 계산에 넣지 않는다
+  // v2.996(묶음 D): 엣지 포탈 응답(d.edge)은 모양이 다르다(폴더가 경로 글자) — 중앙 화면 계산에 넣지 않는다
   const corps = useMemo(() => (d?.edge ? [] : d?.corps || []), [d]);
   const servers = useMemo(() => (d?.edge ? [] : d?.servers || []), [d]);
   const corpName = useCallback((id) => corps.find((c) => c.vcenterId === id)?.name || id || '(법인 미지정)', [corps]);
@@ -122,7 +122,7 @@ export default function BmFolders() {
     );
   }
   if (!d) return <Loading />;
-  if (d.edge) return <EdgeView d={d} reload={() => load()} />;   // v2.994(묶음 D): 엣지 포탈 — 중앙 사본 읽기 전용
+  if (d.edge) return <EdgeView d={d} reload={() => load()} />;   // v2.996(묶음 D): 엣지 포탈 — 중앙 사본 읽기 전용
 
   const bmAll = servers.filter((s) => s.kind === 'bm');
   const sum = { total: bmAll.length, reg: bmAll.filter((s) => s.place).length, un: bmAll.filter((s) => s.corp && !s.place).length, nocorp: bmAll.filter((s) => !s.corp).length, esxi: servers.filter((s) => s.kind === 'esxi').length };

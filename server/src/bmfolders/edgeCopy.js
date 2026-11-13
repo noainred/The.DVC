@@ -1,5 +1,5 @@
 /**
- * bmfolders/edgeCopy.js — 엣지의 **중앙 폴더 사본**(v2.994 · 설계 docs/design/bm-folders §11 — 묶음 D). 파일 `bm-folders-central.json`(설정 변경 감시 밖 — backup/service.js).
+ * bmfolders/edgeCopy.js — 엣지의 **중앙 폴더 사본**(v2.996 · 설계 docs/design/bm-folders §11 — 묶음 D). 파일 `bm-folders-central.json`(설정 변경 감시 밖 — backup/service.js).
  *
  * · 엣지는 중앙 문자열을 그대로 믿지 않는다 — 받은 묶음을 같은 규칙으로 다시 자른다(`sanitizeBundle`: 아는 필드만 · 글자만 · 상한 · 경로 검증 `cleanFolderPath` · 키 `isMemberKey`).
  * · 원자 쓰기 · 읽기 손상이면 보존본(.corrupt.<ts>)을 남기고 '못 읽음'(빈 사본으로 덮지 않는다 — 다음 받기가 새로 쓴다).

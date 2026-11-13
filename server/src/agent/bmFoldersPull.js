@@ -1,5 +1,5 @@
 /**
- * agent/bmFoldersPull.js — 중앙 → 엣지 **물리서버 폴더 사본**(v2.994 · 설계 docs/design/bm-folders §11 — 묶음 D · 그 엣지 법인 것만).
+ * agent/bmFoldersPull.js — 중앙 → 엣지 **물리서버 폴더 사본**(v2.996 · 설계 docs/design/bm-folders §11 — 묶음 D · 그 엣지 법인 것만).
  *
  * 규약(bmMaintPull · bmUsageConfigPull 과 같은 꼴):
  *  · 주기 인출(기본 10분 — 결정 3) + 화면 '지금 받기'. 실패는 로그 1줄 후 다음 주기(자동 재시도 없음 — resilientFetch GET 재시도 1 만).

@@ -26,7 +26,7 @@ import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds 
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { todayStamp } from '../../util/dayKey.js';
 import { store } from '../../store.js';
-import { config } from '../../config.js'; // v2.994: 엣지 포탈 판정(CENTRAL_URL)
+import { config } from '../../config.js'; // v2.996: 엣지 포탈 판정(CENTRAL_URL)
 import { memoJson, scopeKey } from './shared.js';
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -78,7 +78,7 @@ export function membersOf(g) {
       faults: m.faults ?? null, watts: m.watts ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null, usageKey: t(m.usageKey), mgmtHost: t(m.mgmtHost),
       // v2.989(③-가): 키 등급이 오르기 전 키(태그를 읽기 전 fl:) — 그 키로 한 등록을 승계한다(서비스 인벤토리 고정과 같은 별칭 규칙 `bmAliasKeys`)
       aliasKeys: Array.isArray(m.aliasKeys) ? m.aliasKeys.filter((a) => typeof a === 'string' && a && a !== m.key).slice(0, 4) : [],
-      ...(typeof m.edgeKey === 'string' && m.edgeKey ? { edgeKey: m.edgeKey } : {}),   // v2.994(묶음 D): 엣지 쪽 키(엣지 묶음 전용 — 화면 응답에 싣지 않는다)
+      ...(typeof m.edgeKey === 'string' && m.edgeKey ? { edgeKey: m.edgeKey } : {}),   // v2.996(묶음 D): 엣지 쪽 키(엣지 묶음 전용 — 화면 응답에 싣지 않는다)
     });
   }
   for (const h of g?.hostByKey?.values?.() || []) {
@@ -112,7 +112,7 @@ async function stateFor(req, snap) {
 }
 
 /**
- * v2.994(묶음 D — 설계 §11): 그 엣지에 내려보낼 묶음. 사람 요청이 아니라 **인증된 엣지**의 받기 — 전체 범위로 판정하고(범위 계정 없음)
+ * v2.996(묶음 D — 설계 §11): 그 엣지에 내려보낼 묶음. 사람 요청이 아니라 **인증된 엣지**의 받기 — 전체 범위로 판정하고(범위 계정 없음)
  *   그 엣지가 수집하는 법인만 싣는다(edgeBundle.js — 다른 법인 · 법인 미지정 · 등록자 · 규칙 값 · 주소 없음). 저장소를 못 읽으면 { unreadable }.
  */
 export async function edgeBundleFor(agent, D = {}) {
@@ -301,7 +301,7 @@ const svcRulesUnder = (corp, base) => { try { return smLoadError() ? 0 : (smPeek
 const visibleRules = (main, allowed) => (main.rules || []).filter((r) => r.corp === '*' || !allowed || allowed.has(r.corp));
 
 /*
- * v2.994(묶음 D — 설계 §11): **엣지 포탈**의 물리서버 폴더 — 중앙 사본(bm-folders-central.json — 그 엣지 법인 것만 · 엣지 키) 위에 이 엣지의 지금 값을 얹는다.
+ * v2.996(묶음 D — 설계 §11): **엣지 포탈**의 물리서버 폴더 — 중앙 사본(bm-folders-central.json — 그 엣지 법인 것만 · 엣지 키) 위에 이 엣지의 지금 값을 얹는다.
  *   읽기 전용(결정 1-(가)) · 이 엣지에서 예전에 만든 폴더는 지우지 않고 쓰지도 않는다 — 개수와 CSV(기존 /tools/bm-folders.csv)만(결정 2-(가)).
  *   범위 · 가림은 중앙 판본과 같다(scopedVcenterIds · serverRow · nameOf). '이 엣지 밖 등록' 이름은 관리자 판본(전체 범위)만 — 그 밖은 개수만.
  */
@@ -348,7 +348,7 @@ export async function edgeViewFor(req, snap, D = {}) {
 }
 
 export function registerBmFolders(api) {
-  // v2.994(묶음 D): 엣지 포탈 — '지금 받기'(중앙 사본). 쓰기 계정만(사본만 바꾼다 · 중앙 저장소는 바꾸지 않는다).
+  // v2.996(묶음 D): 엣지 포탈 — '지금 받기'(중앙 사본). 쓰기 계정만(사본만 바꾼다 · 중앙 저장소는 바꾸지 않는다).
   api.post('/tools/bm-folders/edge/pull', writeRole, toolsPerm, async (req, res) => {
     if (!isEdgeNode()) return res.status(409).json({ ok: false, reason: '엣지 포탈에서만 씁니다(이 포탈은 중앙입니다).' });
     if (isDemoGuest(req.user)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '데모 계정은 쓸 수 없습니다.' });
@@ -361,7 +361,7 @@ export function registerBmFolders(api) {
   // ── 메인: 트리 · 법인별 현황 · 서버 · 보류/없어짐 · 미분류 묶음 ──
   api.get('/tools/bm-folders', toolsPerm, async (req, res) => {
     const snap = store.get();
-    if (isEdgeNode()) {   // v2.994(묶음 D): 엣지 포탈은 중앙 사본 읽기 전용 화면
+    if (isEdgeNode()) {   // v2.996(묶음 D): 엣지 포탈은 중앙 사본 읽기 전용 화면
       try { res.set('Cache-Control', 'no-store'); return res.json(await edgeViewFor(req, snap)); }
       catch (e) { return res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 200) }); }
     }
@@ -405,7 +405,7 @@ export function registerBmFolders(api) {
         corps: b.corps.map((c) => ({
           ...c, name: g.corpNames?.get(c.vcenterId) || c.vcenterId, writable: writableOf(req.user, s, c.vcenterId),
           agents: hide ? [] : c.agents.map((a) => ({ agent: a, at: a.startsWith('collector:') ? null : (edgeAt.get(a) ?? null), expired: !a.startsWith('collector:') && !edgeAt.has(a),
-            // v2.994(묶음 D '엣지 전달'): 그 엣지가 폴더 사본을 받아 갔는가 — { at, current } · 받은 적 없으면 null(재시작 뒤 다음 받기까지도 null)
+            // v2.996(묶음 D '엣지 전달'): 그 엣지가 폴더 사본을 받아 갔는가 — { at, current } · 받은 적 없으면 null(재시작 뒤 다음 받기까지도 null)
             ...(a.startsWith('collector:') ? {} : { sync: edgeSyncOf(a, storeRev()) }) })),
         })).sort((a, b2) => a.name.localeCompare(b2.name, 'ko')),
         servers,
@@ -522,7 +522,7 @@ export function registerBmFolders(api) {
 
   // ── 쓰기 연산 하나로 ──
   api.post('/tools/bm-folders/op', writeRole, toolsPerm, async (req, res) => {
-    // v2.994(묶음 D 결정 1-(가)): 엣지 포탈은 읽기 전용 — 저장소는 중앙 하나(엣지에서 바꾸면 중앙 판정과 갈라진다)
+    // v2.996(묶음 D 결정 1-(가)): 엣지 포탈은 읽기 전용 — 저장소는 중앙 하나(엣지에서 바꾸면 중앙 판정과 갈라진다)
     if (isEdgeNode()) return res.status(409).json({ ok: false, error: 'edge-readonly', reason: '엣지 포탈에서는 폴더를 바꾸지 않습니다 — 중앙 포탈의 물리서버 폴더에서 편집하면 10분 안에 이 엣지로 옵니다.' });
     try {
       const snap = store.get();

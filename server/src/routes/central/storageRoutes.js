@@ -248,7 +248,7 @@ export function registerStorageRoutes(centralRouter, deps) {
     } catch (e) { res.status(e?.status === 503 ? 503 : 500).json({ ok: false, reason: String(e?.message || e).slice(0, 200) }); }
   });
 
-  // v2.994(물리서버 폴더 묶음 D — 설계 bm-folders §11): 엣지가 자기 법인의 폴더 사본을 주기적으로 GET. **개별 토큰으로 인증된 이름에만** 준다
+  // v2.996(물리서버 폴더 묶음 D — 설계 bm-folders §11): 엣지가 자기 법인의 폴더 사본을 주기적으로 GET. **개별 토큰으로 인증된 이름에만** 준다
   //   (공유 토큰의 ?agent= 는 남의 법인 폴더 · 서버 이름을 받아 갈 수 있다 → distribute:false). 저장소를 못 읽으면 503(엣지는 지난 사본을 그대로 둔다).
   //   `?have=<세대>` 는 엣지가 지금 가진 판(중앙 법인 표의 '엣지 전달').
   centralRouter.get('/bm-folders', requireCentral(), async (req, res) => {

@@ -1,5 +1,5 @@
 /**
- * v2.994 묶음 D(설계 docs/design/bm-folders §11) — 엣지 포탈 화면: 중앙 묶음(엣지 키 · 그 법인만) · 엣지 사본 · 받기 워커 · 엣지 읽기 화면 · 엣지 전달.
+ * v2.996 묶음 D(설계 docs/design/bm-folders §11) — 엣지 포탈 화면: 중앙 묶음(엣지 키 · 그 법인만) · 엣지 사본 · 받기 워커 · 엣지 읽기 화면 · 엣지 전달.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';

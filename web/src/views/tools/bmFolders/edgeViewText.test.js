@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { edgeFolderRows, edgeRowsOf, edgeCopyNote } from './edgeViewText.js';
 
-describe('v2.994 엣지 포탈 물리서버 폴더(설계 bm-folders §11)', () => {
+describe('v2.996 엣지 포탈 물리서버 폴더(설계 bm-folders §11)', () => {
   const corps = [{ vcenterId: 'kr', name: 'KR', folders: ['DB', 'DB\\Oracle', 'WEB'], services: [{ prefix: 'DB', service: 'DB 서비스' }, { prefix: 'DB\\Oracle', service: 'Oracle' }] }];
   const servers = [{ key: 'a', corp: 'kr', path: 'DB\\Oracle', name: 'ora1' }, { key: 'b', corp: 'kr', path: 'DB', name: 'db1' }, { key: 'c', corp: 'kr', path: '', name: 'x' }];
   it('트리 — 하위 포함 대수 · 가장 긴 접두의 서비스 · 미분류', () => {
