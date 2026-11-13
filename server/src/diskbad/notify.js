@@ -84,4 +84,4 @@ export async function notifyNewRecords(records, { corpOf = () => null, job = nul
   return _last;
 }
 
-export function diskBadMailStatus() { return _last; }
+export function diskBadMailInfo() { return _last; }

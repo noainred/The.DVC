@@ -8,7 +8,7 @@
  *  · 무거운 조회라 탭을 열 때 점검을 돌리지 않는다(버튼). 점검 중이면 그 서버 버튼만 잠근다.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson } from '../../api.js';
+import { fetchJson, postJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { fmtDate, fmtDateTime, serverBand, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode } from './diskBadText.js';
@@ -36,13 +36,9 @@ export function DiskBadServerPanel({ serverId }) {
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setData(null); load(); }, [serverId]);
-  // 점검 중이면 10초마다 이 서버만 다시 읽는다(무거운 집계가 아니다).
-  useEffect(() => {
-    if (!data?.running) return undefined;
-    const t = setInterval(load, 10_000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line
-  }, [data?.running, serverId]);
+  // 점검 중이면 10초마다 이 서버만 다시 읽는다(무거운 집계가 아니다 — 공용 usePolling, 끝나면 멈춘다).
+  const poll = usePolling(data?.running ? `/tools/disk-bad/server/${encodeURIComponent(serverId)}` : null, {}, 10_000);
+  useEffect(() => { if (poll.data) setData(poll.data); }, [poll.data]);
 
   const scan = (mode) => {
     setBusy(true); setMsg('');

@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 
 export const CURSOR_FILE = 'diskbad-cursors.json';
@@ -19,7 +19,11 @@ let _mem = null;
 function load() {
   if (_mem) return _mem;
   try { const j = JSON.parse(fs.readFileSync(FILE(), 'utf8')); _mem = j && typeof j === 'object' && !Array.isArray(j) ? j : {}; }
-  catch { _mem = {}; }
+  catch (e) {
+    // 파일이 없으면 처음 — 손상이면 보존하고(다음 저장이 덮기 전에) 처음부터 다시 읽는다(전량 — 중앙이 중복을 거른다).
+    if (e?.code !== 'ENOENT') { try { preserveCorrupt(FILE(), String(e?.message || e)); } catch { /* best effort */ } }
+    _mem = {};
+  }
   return _mem;
 }
 

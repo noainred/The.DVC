@@ -95,7 +95,7 @@ async function runLocal(job, u) {
         const t = now();
         const r = await ingestServers('', batch.map((x) => cleanServer(x, t)).filter(Boolean), { now: t });
         if (!r.ok) throw new Error(r.reason || 'DB 저장 실패');
-        u.newRecords += r.newRecords.length; u._new.push(...r.newRecords.slice(0, 2_000));
+        u.newRecords += r.newRecords.length; for (const x of r.newRecords) { if (u._new.length >= 2_000) break; u._new.push(x); }
       },
     });
     u.total = stat.total; u.done = stat.done; u.failed = stat.failed; u.excluded = stat.excluded;
@@ -142,7 +142,7 @@ export async function acceptPush(agent, push) {
   const t = now();
   const r = await ingestServers(a, push.servers, { now: t });
   if (!r.ok) return { ok: false, stored: false, reason: r.reason || 'DB 저장 실패' };
-  u.newRecords += r.newRecords.length; u._new.push(...r.newRecords.slice(0, 2_000));
+  u.newRecords += r.newRecords.length; for (const x of r.newRecords) { if (u._new.length >= 2_000) break; u._new.push(x); }
   if (push.total != null) u.total = push.total;
   if (push.done != null) u.done = push.done; else u.done += push.servers.length;
   if (push.failed != null) u.failed = push.failed;
@@ -230,7 +230,7 @@ export async function autoTick(t = now()) {
   return job;
 }
 
-export function autoStatus() {
+export function autoInfo() {
   const st = loadDiskBadSettings();
   return { enabled: st.autoEnabled, intervalHours: st.intervalHours, lastAt: _autoLast, nextAt: st.autoEnabled ? (_autoLast ? _autoLast + st.intervalHours * 3_600_000 : null) : null };
 }

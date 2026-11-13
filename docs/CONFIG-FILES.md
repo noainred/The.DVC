@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **323개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **325개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-13)
@@ -114,6 +114,8 @@
 | `db-location.json` | 설정 | 시계열 DB 저장 경로(dbDir) |  |  |  | insights/dbLocation.js |
 | `dirusage.db` | DB | 폴더 사용량 스캔 이력 DB (`dirusage.db`, v2.454). |  |  | ✅ | dirusage/db.js |
 | `dirusage.json` | 설정 | 폴더 사용량 리포트 설정 (`dirusage.json`, v2.454). | ✅ | ✅ | ✅ | dirusage/settings.js |
+| `disk-bad-settings.json` | 설정 | 디스크 배드 섹터 이력 설정(v3.8.0). **중앙에만** 있다(엣지는 중앙이 보낸 작업만 돈다). | ✅ | ✅ |  | diskbad/settings.js |
+| `diskbad-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | diskbad/scan.js |
 | `download` | 디렉터리 | iDRAC-scan collector agent auto-deploy. The central portal pushes its offline |  |  | ✅ | agent/deploy.js |
 | `emergency-stop.json` | 설정 | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. | ✅ | ✅ | ✅ | security/emergencyStop.js |
 | `finops.json` | 설정 | FinOps — 전력 수집(iDRAC/OME/원격) 데이터를 kWh·전기요금·CO2로 환산해 vCenter/지역별로 | ✅ | ✅ |  | insights/finops.js |

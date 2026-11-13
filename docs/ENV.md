@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **746개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **750개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-13)
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (230)
+## 공통 (234)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -146,6 +146,10 @@
 | `DIRUSAGE_DB_PATH` |  |  | dirusage/db.js |
 | `DIRUSAGE_JOB_TIMEOUT_MS` | `900000` |  | dirusage/scheduler.js |
 | `DIRUSAGE_TICK_MS` | `60000` |  | dirusage/scheduler.js |
+| `DISKBAD_CONCURRENCY` | `4` |  | diskbad/scan.js |
+| `DISKBAD_DB_PATH` |  |  | diskbad/db.js |
+| `DISKBAD_MAX_ENTRIES` | `50000` |  | diskbad/scan.js |
+| `DISKBAD_SERVER_TIMEOUT_MS` |  |  | diskbad/scan.js |
 | `DS_CFG_PER_CYCLE` |  |  | config.js |
 | `DS_CFG_REFRESH_MS` |  |  | config.js |
 | `DS_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
@@ -935,4 +939,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 746
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 750

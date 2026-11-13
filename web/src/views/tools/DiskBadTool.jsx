@@ -12,7 +12,7 @@
  *  · 훅은 전부 조기 return 위.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, hasRole } from '../../api.js';
+import { fetchJson, postJson, putJson, hasRole, usePolling } from '../../api.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -48,19 +48,15 @@ export function DiskBadTool() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(corp); }, [corp]);
   const running = (jobs || []).some((j) => j.running);
-  const lastGen = useRef(null);
+  // 점검이 도는 동안만 가벼운 작업 조회를 10초마다(무거운 집계는 다시 부르지 않는다 — 끝나면 한 번 다시 읽는다).
+  const jobsPoll = usePolling(running ? '/tools/disk-bad/jobs' : null, {}, 10_000);
   useEffect(() => {
-    if (!running) return undefined;
-    const t = setInterval(() => {
-      fetchJson('/tools/disk-bad/jobs').then((d) => {
-        setJobs(d.jobs);
-        if (lastGen.current != null && d.generation !== lastGen.current && !d.jobs.some((j) => j.running)) load();
-        lastGen.current = d.generation;
-      }).catch(() => {});
-    }, 10_000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line
-  }, [running]);
+    const d = jobsPoll.data;
+    if (!d) return;
+    setJobs(d.jobs);
+    if (!d.jobs.some((j) => j.running)) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobsPoll.data]);
   const fleet = data?.fleet || null;
   const labels = data?.labels || null;
   const canScan = hasRole('admin', 'operator');
@@ -202,7 +198,7 @@ function CorpTable({ rows, setCorp, canScan = false, scanCorp = null, busy = '' 
           <td data-sort={c.read} style={{ fontFamily: 'var(--mono)' }}>{num(c.read)} / {num(c.servers)}</td>
           <td data-sort={c.disks} style={{ fontFamily: 'var(--mono)' }}>{num(c.disks)}</td>
           <td data-sort={c.recordSlots} style={{ fontFamily: 'var(--mono)' }}>{num(c.recordSlots)}</td>
-          <td data-sort={c.ratePer1000 ?? -1}><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{bar(((c.ratePer1000 || 0) / max) * 100)}<span style={{ fontFamily: 'var(--mono)' }}>{rateText(c.ratePer1000)}</span></div></td>
+          <td data-sort={c.ratePer1000 ?? undefined}><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{bar(((c.ratePer1000 || 0) / max) * 100)}<span style={{ fontFamily: 'var(--mono)' }}>{rateText(c.ratePer1000)}</span></div></td>
           <td data-sort={c.inUse} style={{ fontFamily: 'var(--mono)' }}><b>{num(c.inUse)}</b></td>
           {canScan && <td>{c.id ? <button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} disabled={!!busy} onClick={() => scanCorp(c)}>{busy === c.id ? '보내는 중…' : '점검'}</button> : '—'}</td>}
         </tr>
@@ -241,7 +237,7 @@ function ModelTable({ fleet, limit = 0 }) {
             <td>{m.model}{m.small && <span className="badge gray" style={{ marginLeft: 6 }}>표본 적음</span>}</td>
             <td data-sort={m.mounted} style={{ fontFamily: 'var(--mono)' }}>{num(m.mounted)}</td>
             <td data-sort={m.recordDisks} style={{ fontFamily: 'var(--mono)' }}>{num(m.recordDisks)}</td>
-            <td data-sort={m.ratePct ?? -1}><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{bar(((m.ratePct || 0) / max) * 100, m.small ? 'var(--text-faint)' : 'var(--accent)')}<span style={{ fontFamily: 'var(--mono)' }}>{pctText(m.ratePct)}</span></div></td>
+            <td data-sort={m.ratePct ?? undefined}><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{bar(((m.ratePct || 0) / max) * 100, m.small ? 'var(--text-faint)' : 'var(--accent)')}<span style={{ fontFamily: 'var(--mono)' }}>{pctText(m.ratePct)}</span></div></td>
             <td data-sort={m.unrecoverable} style={{ fontFamily: 'var(--mono)' }}>{num(m.unrecoverable)}</td>
           </tr>
         ))}</tbody>
@@ -313,7 +309,7 @@ function Servers({ fleet, labels, openServer }) {
             <td data-sort={s.counts.slots} style={{ fontFamily: 'var(--mono)' }}>{num(s.counts.slots)}</td>
             <td data-sort={s.counts.inUse} style={{ fontFamily: 'var(--mono)' }}><b>{num(s.counts.inUse)}</b></td>
             <td data-sort={s.counts.unrecoverable} style={{ fontFamily: 'var(--mono)' }}>{num(s.counts.unrecoverable)}</td>
-            <td data-sort={s.lastScanAt ?? 0} style={{ whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>{fmtDateTime(s.lastScanAt)}</td>
+            <td data-sort={s.lastScanAt ?? undefined} style={{ whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>{fmtDateTime(s.lastScanAt)}</td>
           </tr>
         ))}</tbody>
       </STable>

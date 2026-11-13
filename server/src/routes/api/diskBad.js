@@ -22,9 +22,9 @@ import { allPhysicalServers } from '../../idrac/corpAttribution.js';
 import { corpIdentityOf } from '../../vcenter/hostCorp.js';
 import { loadAll, loadServer, diskBadDbStatus, diskBadGeneration } from '../../diskbad/db.js';
 import { buildFleet, serverView, labelsPayload } from '../../diskbad/summary.js';
-import { createJob, listJobs, stopJob, retryUnit, unitsForAll, autoStatus, setCorpResolver, getJob } from '../../diskbad/jobs.js';
+import { createJob, listJobs, stopJob, retryUnit, unitsForAll, autoInfo, setCorpResolver, getJob } from '../../diskbad/jobs.js';
 import { loadDiskBadSettings, saveDiskBadSettings, diskBadSettingsLoadError } from '../../diskbad/settings.js';
-import { diskBadMailStatus } from '../../diskbad/notify.js';
+import { diskBadMailInfo } from '../../diskbad/notify.js';
 import { diskBadEdgeStatus } from '../../diskbad/edge.js';
 import { config } from '../../config.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
@@ -122,9 +122,9 @@ export function registerDiskBad(api) {
     res.json({
       ok: true, scoped, corp: corpId || null, corps: corpOptions(servers), fleet, labels: labelsPayload(),
       db: { available: status.available, error: status.available ? '' : status.error, records: status.records },
-      jobs: jobsFor(req, servers, scoped).slice(0, 10), auto: autoStatus(),
+      jobs: jobsFor(req, servers, scoped).slice(0, 10), auto: autoInfo(),
       canScanAll: isFullReadWriteScope(req.user, store.get()) && ['admin', 'operator'].includes(req.user?.role),
-      ...(isAdmin ? { settings: loadDiskBadSettings(), settingsLoadError: diskBadSettingsLoadError(), mail: diskBadMailStatus() } : {}),
+      ...(isAdmin ? { settings: loadDiskBadSettings(), settingsLoadError: diskBadSettingsLoadError(), mail: diskBadMailInfo() } : {}),
       node: config.agent.centralUrl ? { role: 'edge', edge: diskBadEdgeStatus() } : { role: 'central' },
     });
   });
@@ -132,7 +132,7 @@ export function registerDiskBad(api) {
   // 진행 표시용 가벼운 조회 — 집계를 다시 하지 않는다(화면이 점검 중일 때만 10초마다 부른다).
   api.get('/tools/disk-bad/jobs', toolsPerm, (req, res) => {
     const { servers, scoped } = physicalServersFor(req);
-    res.json({ ok: true, jobs: jobsFor(req, servers, scoped).slice(0, 10), auto: autoStatus(), generation: diskBadGeneration() });
+    res.json({ ok: true, jobs: jobsFor(req, servers, scoped).slice(0, 10), auto: autoInfo(), generation: diskBadGeneration() });
   });
 
   api.get('/tools/disk-bad/server/:id', toolsPerm, async (req, res) => {
@@ -222,6 +222,6 @@ export function registerDiskBad(api) {
     let next;
     try { next = saveDiskBadSettings(patch); } catch (e) { return res.status(500).json({ ok: false, reason: `저장 실패: ${String(e?.message || e).slice(0, 200)}` }); }
     logAudit(req, 'diskbad.settings', { autoEnabled: next.autoEnabled, intervalHours: next.intervalHours, mailEnabled: next.mailEnabled, corps: Object.keys(next.corpTo).length });
-    res.json({ ok: true, settings: next, auto: autoStatus() });
+    res.json({ ok: true, settings: next, auto: autoInfo() });
   });
 }
