@@ -1,5 +1,5 @@
 /**
- * diskbad/db.js — 중앙의 디스크 배드 섹터 이력 저장소(SQLite, v2.915).
+ * diskbad/db.js — 중앙의 디스크 배드 섹터 이력 저장소(SQLite, v3.8.0).
  *
  * 무엇을 쌓나(README §8.3):
  *  · `dbr_server`  서버마다 마지막 점검 결과 · 로그가 남은 구간 · **끊김 없이 본 구간(continuous_since)** · 지금 디스크 목록.

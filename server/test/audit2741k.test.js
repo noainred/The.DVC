@@ -240,7 +240,7 @@ test('LEFT-01 ⑤ 실제 라우트 — /tools/ipam.xlsx 는 워커로 만들고 
   assert.equal(res.headers.get('x-ipam-xlsx-mode'), 'worker');
   assert.equal(buf.subarray(0, 2).toString('latin1'), 'PK');
   const names = Object.keys((await JSZip.loadAsync(buf)).files).filter((k) => /^xl\/worksheets\/sheet\d+\.xml$/.test(k));
-  assert.equal(names.length, N, '시트 수 = /24 수');
+  assert.equal(names.length, N + 4, '시트 수 = /24 수 + 덧붙임 4장(v3.5.0 요약 · 대역 목록 · 조치 필요 · 안내 — ?sheets= 없으면 전부)');
   assert.equal(second.status, 409, '진행 중 두 번째 요청은 409(동시 1건 가드)');
   assert.equal(secondBody.error, 'export_busy');
   assert.ok(stall < 1000, `내보내기 동안 최장 정지 ${stall}ms(예전: 시트 조립 + 직렬화가 수 초)`);
@@ -272,5 +272,5 @@ test('LEFT-01 ⑤ 실제 라우트 — /tools/ipam.xlsx 는 워커로 만들고 
   t.diagnostic(`끊은 뒤 가드가 풀리기까지 약 ${Math.round(performance.now() - tAbort)}ms`);
   assert.equal(next.status, 200, '끊긴 요청이 2초 안에 가드를 풀지 않았다(워커를 끝내지 않고 끝까지 만들었다)');
   const small = Buffer.from(await next.arrayBuffer());
-  assert.equal(Object.keys((await JSZip.loadAsync(small)).files).filter((k) => /^xl\/worksheets\/sheet\d+\.xml$/.test(k)).length, 3);
+  assert.equal(Object.keys((await JSZip.loadAsync(small)).files).filter((k) => /^xl\/worksheets\/sheet\d+\.xml$/.test(k)).length, 3 + 4); // v3.5.0: /24 3장 + 덧붙임 4장
 });

@@ -22,6 +22,11 @@ npm run verify
 처리: `/sandbox` 로 `localhost`/`127.0.0.1` 을 허용하거나, **이 검증 명령에 한해 샌드박스를 해제**해
 실행한다. 해제로 통과하면 실패는 환경 아티팩트이지 코드 결함이 아니다.
 
+**git worktree 는 `/tmp` 아래에 만들지 말 것 — `/home/user/<이름>` 아래에 만든다**(2026-11-11 v2.969 verify 실측).
+`/tmp/claude-0/…`(스크래치패드)는 root 전용 700 이라, 비 root 계정으로 스크립트를 읽는 테스트
+(`server/test/audit2744vb.test.js` VERIFY-04 ⑧ — `release-verify-lib.sh: Permission denied` · rc=127)가 그 경로에서만 실패한다.
+저장소 폴더에서는 통과한다(코드 결함 아님). worktree 의 node_modules 는 원본을 symlink 로 잇고, 끝나면 symlink · worktree 를 지운다.
+
 ## 진단 요령
 verify 가 오래 걸리면 단계를 분리해 어디서 멈추는지 본다(파일로 스트리밍 — `| tail` 은 버퍼링돼
 타임아웃 시 아무것도 안 보인다):

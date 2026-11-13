@@ -102,6 +102,41 @@ const maskValue = (pre, v) => {
   const q = v[0] === '"' || v[0] === "'" ? v[0] : '';
   return q ? `${pre}${q}${MASK}${q}` : `${pre}${MASK}`;
 };
+/*
+ * 리눅스 성능 7a단계(서버 로그 분석 — bmusage/logs): **서버 시스템 로그 줄**(journald · dmesg · /var/log/secure · audit · GPDB · Airflow)의 표본 가림.
+ *   redactLogLine(포탈 자체 로그 규칙)을 먼저 거친 뒤 로그용 규칙을 더한다(설계 §19 ‘로그 샘플’ 행 — password= · Authorization: · 키 블록 · 개인정보 꼴):
+ *    · `pass=` · `pwd=` · `pw=` · `passwd=` 값(포탈 로그에서는 ‘점검 통과(pass=)’ 식별자라 안 가렸지만 서버 로그에서는 비밀 쪽이 흔하다)
+ *    · `Authorization:` 뒤 줄 끝까지(Basic · Digest · Bearer 외 스킴 — Negotiate · 사용자 지정 스킴 — 넘치게 가리는 쪽을 택했다)
+ *    · PEM 머리 줄(`-----BEGIN … PRIVATE KEY-----`)과 **줄 전체가 긴 base64** 인 줄(키 본문 — 줄 단위라 블록을 이어 볼 수 없어 꼴로 가린다)
+ *    · 개인정보 꼴: 전자우편 · 주민등록번호 · 휴대전화 · 카드번호(4자리 넷) · sudo COMMAND 의 **인자**(명령 경로만 남긴다 — `mysql -p비밀` 같은 인자에 비밀이 실린다)
+ *   ⚠ 줄 길이를 먼저 자른다(MAX_SYSLOG_LINE) — 모든 정규식은 길이 한정 반복(ReDoS 비율 테스트: test/bmLogs7aRedact.test.js).
+ *   ⚠ 완전할 수 없다(자유 문자열) — 화면이 ‘가림은 꼴 기반이라 빠질 수 있다’ 를 말한다. 원문 전체를 저장 · 전송하지 않는 것이 1차 방어다(이 함수는 표본 5줄용).
+ */
+export const MAX_SYSLOG_LINE = 1_000;
+const SYS_PASS_RE = /((?:^|[\s,;?&"'(])(?:pass|pwd|pw|passwd|passphrase)\s{0,2}=\s{0,2})("[^"\n]{0,512}"|'[^'\n]{0,512}'|[^\s,;&"')]{1,512})/gi;
+const SYS_AUTHZ_RE = /\b((?:Proxy-)?Authorization\s{0,2}[=:]\s{0,2}).{1,1024}$/i;
+const PEM_RE = /-----(?:BEGIN|END) [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----/;
+const B64_LINE_RE = /^\s{0,8}[A-Za-z0-9+/]{40,1024}={0,2}\s{0,8}$/;
+const EMAIL_RE = /\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,8}\b/g;
+const RRN_RE = /\b\d{6}-?[1-8]\d{6}\b/g;
+const PHONE_RE = /\b01[016789]-?\d{3,4}-?\d{4}\b/g;
+const CARD_RE = /\b\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,4}\b/g;
+const SUDO_CMD_RE = /(; COMMAND=)(\S{1,256})[ \t].{0,1024}$/;
+export function redactSystemLogLine(line) {
+  let s = String(line == null ? '' : line);
+  if (s.length > MAX_SYSLOG_LINE) s = s.slice(0, MAX_SYSLOG_LINE);
+  if (PEM_RE.test(s)) return `${MASK} — 키 블록 머리 줄`;
+  if (B64_LINE_RE.test(s)) return `${MASK} — 긴 base64 줄(키 본문일 수 있음)`;
+  return redactLogLine(s)
+    // ⚠ 대문자 PWD= 는 작업 폴더(sudo 로그 · 환경 변수 PWD)다 — 비밀이 아니다(Chromium 판독: sudo 표본의 PWD=/home/… 가 가려졌다).
+    .replace(SYS_PASS_RE, (m, pre, v) => (/(?:^|[^A-Za-z])PWD\s{0,2}=\s{0,2}$/.test(pre) ? m : (v === MASK || v === `"${MASK}"` || v === `'${MASK}'` ? pre + v : `${pre}${MASK}`)))
+    .replace(SYS_AUTHZ_RE, (_m, pre) => `${pre}${MASK}`)
+    .replace(SUDO_CMD_RE, (_m, pre, cmd) => `${pre}${cmd} ${MASK}(인자)`)
+    .replace(EMAIL_RE, `${MASK}(메일)`)
+    .replace(RRN_RE, `${MASK}(주민번호)`)
+    .replace(PHONE_RE, `${MASK}(전화)`)
+    .replace(CARD_RE, `${MASK}(카드)`);
+}
 export function redactLogLine(line) {
   return String(line == null ? '' : line)
     .replace(JSON_SECRET_RE, (_m, pre, v) => maskValue(pre, v))

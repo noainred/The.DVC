@@ -17,6 +17,7 @@ import { edgeId, isPlainObj } from '../central/edgeRecord.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { expandCompact, compactSensor } from '../idrac/sensorDetail.js'; // v2.659 센서 상세
 import { dedupNics } from '../idrac/nicPorts.js'; // v2.728 NIC 포트 중복 제거
+import { BIOS_KEYS } from '../idrac/biosKeys.js'; // v2.973 BIOS 설정 — 엣지 compactInv 와 같은 목록
 
 const byCollector = new Map(); // collectorId -> { at, datacenter, servers: [...] }
 
@@ -45,20 +46,24 @@ const scalar = (v) => (typeof v === 'boolean' ? v : (typeof v === 'number' ? (Nu
 //   v2.611 CEN2611-01). 상태가 없던 구버전 엣지 보고는 키 자체가 없고, 화면은 그것을 idrac/invView.js statusFieldsMissing 으로 가른다.
 const ST = ['health', 'state'];
 const INV_SHAPE = {
-  system: ['o', ['model', 'serviceTag', 'biosVersion', 'hostName', 'health']],
-  cpu: ['o', ['model', 'count', 'cores', 'health']],
+  // v2.973(A1~A14): 엣지 compactInv 가 새로 싣는 값 — **짝**(한쪽만 넓히면 버려진다). bios.attributes 는 아래 sanitizeRemoteInv 가 따로(목록 키만).
+  system: ['o', ['model', 'serviceTag', 'biosVersion', 'hostName', 'health', 'manufacturer', 'powerState', 'assetTag', 'uuid', 'osName', 'osVersion']],   // v3.3.0: osName · osVersion(엣지 compactInv 와 짝)
+  cpu: ['o', ['model', 'count', 'cores', 'health', 'threads']],
   memory: ['o', ['totalGiB', 'health']],
-  gpus: ['a', ['model', 'name', 'memoryMiB', ...ST]],
-  idrac: ['o', ['firmwareVersion']],
+  gpus: ['a', ['model', 'name', 'memoryMiB', ...ST, 'manufacturer']],
+  idrac: ['o', ['firmwareVersion', 'model']],
   bios: ['o', ['version']],
+  powerCap: ['o', ['limitWatts']],
+  licenses: ['a', ['name', 'type', 'expiry']],
+  network: ['a', ['name', 'mac', 'hostName', 'fqdn', 'ipv4']],
   firmware: ['a', ['type', 'version', 'name']],
-  nics: ['a', ['name', 'model'], { ports: ['id', 'link', 'speedMbps', 'mac'] }], // v2.682(R3E-01): mac — 엣지 compactInv 와 짝
-  cpus: ['a', ['socket', 'model', 'cores', ...ST]],
-  disks: ['a', ['name', 'model', 'capacityGB', 'media', 'protocol', ...ST, 'predictiveFailure']],
-  psus: ['a', ['name', 'model', 'manufacturer', 'capacityWatts', 'inputWatts', 'outputWatts', 'lineInputVoltage', ...ST]],
-  memoryDimms: ['a', ['locator', 'sizeGB', 'type', 'speedMHz', 'manufacturer', 'partNumber', ...ST]],
-  storageControllers: ['a', ['name', 'model', 'firmware', 'health'], null, ['protocols']],
-  pcie: ['a', ['name', 'model', 'manufacturer', 'deviceType', 'health']],
+  nics: ['a', ['name', 'model', 'firmware'], { ports: ['id', 'link', 'speedMbps', 'mac'] }], // v2.682(R3E-01): mac — 엣지 compactInv 와 짝
+  cpus: ['a', ['socket', 'model', 'cores', ...ST, 'threads', 'maxSpeedMHz', 'manufacturer']],
+  disks: ['a', ['name', 'model', 'capacityGB', 'media', 'protocol', ...ST, 'predictiveFailure', 'rpm']],
+  psus: ['a', ['name', 'model', 'manufacturer', 'capacityWatts', 'inputWatts', 'outputWatts', 'lineInputVoltage', ...ST, 'firmware']],
+  memoryDimms: ['a', ['locator', 'sizeGB', 'type', 'speedMHz', 'manufacturer', 'partNumber', ...ST, 'rank']],
+  storageControllers: ['a', ['name', 'model', 'firmware', 'health', 'speedGbps'], null, ['protocols']],
+  pcie: ['a', ['name', 'model', 'manufacturer', 'deviceType', 'health', 'firmware']],
   fans: ['a', ['name', 'model', 'partNumber', ...ST]],
   health: ['o', ['overall', 'processor', 'memory', 'storage', 'psu', 'fan', 'battery', 'gpu']],
 };
@@ -102,6 +107,19 @@ export function sanitizeRemoteInv(inv, { now = null } = {}) {
     if (!Object.hasOwn(inv, k) || inv[k] == null) continue;
     if (kind === 'o') out[k] = isPlainObj(inv[k]) ? pickLeaves(inv[k], keys, sub, scal) : null;
     else out[k] = Array.isArray(inv[k]) ? inv[k].slice(0, ARR_MAX).filter(isPlainObj).map((x) => pickLeaves(x, keys, sub, scal)) : [];
+  }
+  // v2.973(반증 R4): 엣지가 싣는 개수만 받는다(라이선스 12 · 관리 NIC 4 — 엣지 compactInv 와 같은 상한).
+  if (Array.isArray(out.licenses)) out.licenses = out.licenses.slice(0, 12);
+  if (Array.isArray(out.network)) out.network = out.network.slice(0, 4);
+  // v2.973 A11: BIOS 설정 — idrac/biosKeys.js 목록 키 + 글자(64자) · 수 · 불리언만(그 밖은 버린다). 엣지 compactInv biosAttrs 와 같은 규칙.
+  if (out.bios && isPlainObj(inv.bios) && isPlainObj(inv.bios.attributes)) {
+    const a = {};
+    for (const k of BIOS_KEYS) {
+      if (!Object.hasOwn(inv.bios.attributes, k)) continue;
+      const v = inv.bios.attributes[k];
+      if (typeof v === 'string') a[k] = v.slice(0, 64); else if (typeof v === 'number' && Number.isFinite(v)) a[k] = v; else if (typeof v === 'boolean') a[k] = v;
+    }
+    if (Object.keys(a).length) out.bios.attributes = a;
   }
   // v2.728: 컬렉션 메타 — 아는 키 + 'ok'|'failed' 만(그 밖은 버린다). reachable 은 불리언만.
   if (isPlainObj(inv.collections)) {

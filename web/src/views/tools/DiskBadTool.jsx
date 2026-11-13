@@ -1,5 +1,5 @@
 /**
- * 디스크 배드 섹터 분석(v2.915) — 전 법인 서버의 iDRAC Lifecycle 로그에서 찾은 배드 섹터 기록.
+ * 디스크 배드 섹터 분석(v3.8.0) — 전 법인 서버의 iDRAC Lifecycle 로그에서 찾은 배드 섹터 기록.
  *
  * 설계: docs/design/idrac-disk-badsector/README.md(시안 Fleet · FleetCorp · Scan · Refs · Basis).
  * 구현 범위 A(사용자 선택 2026-11-14): 수집 · 분류 · 판정(근거 포함) · 전 법인 / 법인별 분석 · 점검(전체 · 법인 · 서버) · 6시간 자동 · 메일 · 근거.

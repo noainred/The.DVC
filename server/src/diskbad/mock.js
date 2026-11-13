@@ -1,5 +1,5 @@
 /**
- * diskbad/mock.js — 데모(DATA_SOURCE=mock) 모드에서 Lifecycle 로그를 **지어낸다**(v2.915).
+ * diskbad/mock.js — 데모(DATA_SOURCE=mock) 모드에서 Lifecycle 로그를 **지어낸다**(v3.8.0).
  *
  * 실장비에 닿지 않는 데모 · 화면 검증용이다. 결과에 `synthesized:true` 를 달아 중앙이 그 사실을 화면에 밝힌다(합성값을 숨기지 않는다).
  * 결정적이다(서버 id 해시) — 다시 돌려도 같은 서버가 같은 기록을 낸다.

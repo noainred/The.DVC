@@ -36,7 +36,7 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
   }), []);
   useEffect(() => () => { attemptRef.current += 1; stopTimer(); releaseConsole({ ws: wsRef.current, term: termRef.current, ro: roRef.current }); }, []);
   // Auto-connect when duplicated (credentials carried over).
-  useEffect(() => { if (initialCreds && initialCreds.username) connect(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { if (initialCreds && initialCreds.username) connect(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refit = () => {
     try {
@@ -199,7 +199,7 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
     // 핸들러를 끊어 콘솔을 여닫을 때마다 죽은 리스너가 쌓이는 것을 방지.
     if (kbdRef.current) { kbdRef.current.onkeydown = null; kbdRef.current.onkeyup = null; kbdRef.current = null; }
   }, []);
-  useEffect(() => { if (initialCreds && initialCreds.username) connect(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { if (initialCreds && initialCreds.username) connect(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const connect = async () => {
     onCreds?.(creds);

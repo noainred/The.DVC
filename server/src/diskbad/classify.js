@@ -1,5 +1,5 @@
 /**
- * diskbad/classify.js — iDRAC Lifecycle 로그 항목을 **배드 섹터 계열로 분류**하고 디스크 위치를 읽는다(순수, v2.915).
+ * diskbad/classify.js — iDRAC Lifecycle 로그 항목을 **배드 섹터 계열로 분류**하고 디스크 위치를 읽는다(순수, v3.8.0).
  *
  * 설계: `docs/design/idrac-disk-badsector/README.md` §4 · §12(근거) · §14(결정).
  *

@@ -242,8 +242,10 @@ const ENV_MS_OK = {
   'bmusage/collectors/idracEnterprise.js:BMUSAGE_ENT_SSH_READY_MS': LB,
   'bmusage/collectors/idracEnterprise.js:BMUSAGE_ENT_CMD_MS': LB,
   'bmusage/db.js:BMUSAGE_COUNT_CACHE_MS': LB,
+  'bmusage/monthStore.js:BMUSAGE_MONTH_COUNT_CACHE_MS': LB,   // v2.922(반증 D11): 시간 단위 파일 행 수 캐시 10분(하한 Math.max(0, …))
   'bmusage/poller.js:BMUSAGE_DEVICE_TIMEOUT_MS': LB,
   'central/bmUsageEdgePull.js:BMUSAGE_PULL_TIMEOUT_MS': LB,
+  'central/bmPerfOpsPull.js:BMUSAGE_PULL_TIMEOUT_MS': LB,   // v2.929(5단계): 같은 env · 같은 하한 — bmUsageEdgePull 에서 import 하면 순환(그쪽이 ingestEdgeAlertIssues 를 import)
   'central/bmUsageEdgePull.js:BMUSAGE_PULL_STALE_MS': LB,
   'central/captureJobs.js:CAPTURE_ACK_GRACE_MS': RAW,
   'central/edgeLogJobs.js:EDGELOG_ACK_TIMEOUT_MS': LB,

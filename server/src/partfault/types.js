@@ -152,6 +152,7 @@ export const HOLD_REASON = Object.freeze({
   edgeStale: 'edge-stale',                  // 그 엣지의 마지막 보고가 오래됨(기본 3시간) — 장비가 아니라 엣지 문제(v2.548 리뷰 H7)
   edgeLegacy: 'edge-legacy',                // 구 프로토콜 엣지(v2.547) — 해소를 판정할 수 없어 업그레이드 전까지 열려 있다
   registryUnreadable: 'registry-unreadable', // v2.744(EDGE-01): 그 장비군 등록부를 읽지 못함 — 목록에서 빠진 것이 재배정·삭제가 아니다(닫지 않음)
+  maintenance: 'maintenance',               // 8a단계 ②: 정비 창(전이 보류를 켠 창) 안 — 열린 장애를 닫지도 바꾸지도 않고 새 장애를 열지 않는다(창 끝 뒤 주기에 재판정)
 });
 
 /**

@@ -1,4 +1,4 @@
-// v2.915 디스크 배드 섹터 이력 — 분류 · 위치 · 로그 읽기 · 판정 · 정제 · DB 적재 · 작업 · 메일 · 집계 · 배선을 고정한다.
+// v3.8.0 디스크 배드 섹터 이력 — 분류 · 위치 · 로그 읽기 · 판정 · 정제 · DB 적재 · 작업 · 메일 · 집계 · 배선을 고정한다.
 //   설계: docs/design/idrac-disk-badsector/README.md. 스윕은 test/_stripComments.js 로 주석을 먼저 지운다(주석이 통과 근거가 되지 않게).
 //   기준 시각은 실제 시각을 정시 경계로 떨어뜨려 고정한다(docs/rules/common.md — Date.now() 직접 · 고정 epoch 금지).
 import { test, after } from 'node:test';
@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'diskbad2915-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'diskbad380-'));
 process.env.CONFIG_DIR = TMP;
 process.env.DISKBAD_DB_PATH = path.join(TMP, 'disk-bad.db');
 process.env.AUTH_ENABLED = 'false';
@@ -301,7 +301,7 @@ test('설정: 기본은 자동 점검 꺼짐 · 6시간 · 메일 켬 · 잘못�
 
 // ── 배선 · 규약 스윕 ──────────────────────────────────────────────────────────
 test('배선: 중앙 수신 2개 · BIG_JSON · 엣지 상태 표 · DB 이전 목록 · 기동 · 메일 종류 · 라우트 등록', async () => {
-  const central = code('routes/central.js');
+  const central = code('routes/central/storageRoutes.js');
   assert.match(central, /centralRouter\.get\('\/disk-bad-job', requireCentral\(\)/);
   assert.match(central, /centralRouter\.post\('\/disk-bad', requireCentral\(\)/);
   assert.match(code('index.js'), /app\.use\('\/api\/central\/disk-bad', BIG_JSON\)/);

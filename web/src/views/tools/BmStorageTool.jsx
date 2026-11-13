@@ -3,7 +3,8 @@
 // 서버는 표(컬럼) 형식 폼으로 등록하고, 그룹을 지정하면 그룹 합산 카드가 생긴다.
 // 수집 주체: 중앙 직접(기본) 또는 글로벌 엣지 위임(중앙→엣지 PUSH — 수집 서버(원격) URL 필요).
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson, canCsv } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, canCsv, getCurrentUser } from '../../api.js';
+import { canManageKeys, authChoiceOf, authBodyOf, HOSTKEY_OBSERVE_NOTE } from './bmOnboardText.js'; // 7b: 인증(키 · 공통 계정) 드롭다운 — 설정 소유자 등급만
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx'; // CSV 일괄 관리(v2.341)
@@ -19,6 +20,9 @@ import {
   groupColors, groupKeyOf, NO_GROUP, WARN_PCT,
 } from './bmStorHistoryText.js';
 import Select from '../../components/Select.jsx';
+import { useHashTab } from '../../hooks/useHashTab.js'; // v2.915: 하위 탭(현황 · SAN 비교) — 주소 #/tools/bm-storage/compare
+import BmSanCompare from './BmSanCompare.jsx';          // v2.915: SAN 비교 탭(시안 docs/design/bm-san-compare)
+import BmCompareSet from './BmCompareSet.jsx';          // v2.962: 비교 세트 탭 — SAN · 베어메탈 서버 · 그룹 · 법인 합계를 2~4개 섞어 비교
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -37,12 +41,23 @@ const Dot = ({ c }) => <span style={{ display: 'inline-block', width: 8, height:
 const GROUP_FOLD = 12;
 const SORTS = [{ key: 'pct', label: '사용률 높은 순' }, { key: 'avail', label: '여유 적은 순' }, { key: 'name', label: '이름순' }];
 
-const EMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', agent: '', dispatch: 'poll', groups: '', mounts: '/', enabled: true };
+const EMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', agent: '', dispatch: 'poll', groups: '', datacenterId: '', mounts: '/', enabled: true };
+const VIEWS = [{ k: 'status', label: '현황' }, { k: 'compare', label: 'SAN 비교' }, { k: 'set', label: '비교 세트' }];
 
 export default function BmStorageTool() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null); // 서버 추가/수정 폼 | null
+  const owner = canManageKeys(getCurrentUser(), true);
+  const [authOpts, setAuthOpts] = useState({ keys: [], accounts: [] });
+  useEffect(() => {
+    if (!owner || !form) return;
+    let alive = true;
+    Promise.all([fetchJson('/tools/bm-usage/ssh-keys').catch(() => null), fetchJson('/tools/bm-usage/accounts').catch(() => null)]).then(([k, a]) => {
+      if (alive) setAuthOpts({ keys: (k?.keys || []).filter((x) => x.status === 'active'), accounts: (a?.accounts || []).filter((x) => x.kind === 'os') });
+    });
+    return () => { alive = false; };
+  }, [owner, !!form]);   // eslint-disable-line react-hooks/exhaustive-deps -- 폼을 열 때 한 번
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [ivEdit, setIvEdit] = useState(null); // 주기 편집값(분) | null
@@ -54,6 +69,8 @@ export default function BmStorageTool() {
   const [sortBy, setSortBy] = useState('pct');
   const [q, setQ] = useState('');
   const [groupsOpen, setGroupsOpen] = useState(false);
+  // v2.915: 하위 탭 — 훅이므로 조기 return 위에서 부른다(React #310).
+  const [view, setView] = useHashTab({ base: ['tools', 'bm-storage'], valid: VIEWS.map((v) => v.k), fallback: 'status' });
 
   // 수동 로드 + 15초 재조회(저장/수집 직후 즉시 refresh 가 필요해 usePolling 대신 직접 관리).
   // v2.629 WEB2629-03: 403(전체 범위 관리자 전용)은 다시 물어도 같다 — 15초 폴링을 멈추고, 오류는 객체째 들어 ErrorBox 가 권한 안내로 바꾸게 한다.
@@ -64,18 +81,31 @@ export default function BmStorageTool() {
 
   if (error && !data) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
-  const { total, groups, servers, config: cfgs, settings, status, agents } = data;
+  const { total, groups, servers, config: cfgs, settings, status, agents, datacenters = [] } = data;
+  const subTabs = (
+    <div className="bmc-subtabs" role="tablist">
+      {VIEWS.map((v) => (
+        <button key={v.k} type="button" role="tab" aria-selected={view === v.k} className={`bmc-subtab${view === v.k ? ' on' : ''}`} onClick={() => setView(v.k)}>{v.label}</button>
+      ))}
+      <span className="muted" style={{ marginLeft: 'auto', fontSize: 11.5, paddingBottom: 8 }}>{view === 'status' ? 'SAN 비교 · 비교 세트 — SAN 어레이 · 베어메탈을 숫자로 비교' : '서버 등록 · 주기 · CSV 는 현황 탭에 그대로 있습니다'}</span>
+    </div>
+  );
+  if (view === 'compare') return <div className="bm2">{subTabs}<BmSanCompare /></div>;
+  if (view === 'set') return <div className="bm2">{subTabs}<BmCompareSet /></div>;
   const cfgOf = (id) => (cfgs || []).find((c) => c.id === id);
 
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await postJson('/tools/bm-storage/servers', { ...form, port: Number(form.port) || 22 });
+      // 7b: 인증 참조(키 · 공통 계정)는 설정 소유자 등급만 보내고(서버가 다시 막는다), 묶음이 바뀌면 본인 OTP 를 함께 보낸다.
+      const { auth, otp, ...base } = form;
+      const extra = owner ? { ...authBodyOf(auth, cfgOf(form.id)), ...(otp ? { otp } : {}) } : {};
+      const r = await postJson('/tools/bm-storage/servers', { ...base, ...extra, port: Number(form.port) || 22 });
       const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: 주소·포트·계정 변경으로 저장 비밀번호 폐기 — 폼 유지
       if (r.ok && dropNote) { setForm((f) => ({ ...f, password: '' })); refresh(); setMsg(dropNote); }
       else if (r.ok) { setForm(null); refresh(); }
       else setMsg(r.reason);
-    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
+    } catch (e) { setMsg(e?.body?.reason || e.message); setForm((f) => (f ? { ...f, otp: '' } : f)); } finally { setBusy(false); }
   };
   const del = async (s) => {
     if (!window.confirm(`'${s.name}' (${s.host}) 서버를 목록에서 삭제할까요?`)) return;
@@ -99,7 +129,7 @@ export default function BmStorageTool() {
   };
   const edit = (s) => {
     const c = cfgOf(s.id);
-    setForm({ ...EMPTY, ...c, password: '', mounts: (c?.mounts || []).join('\n'), groups: (c?.groups || []).join(', ') });
+    setForm({ ...EMPTY, ...c, password: '', mounts: (c?.mounts || []).join('\n'), groups: (c?.groups || []).join(', '), auth: authChoiceOf(c), otp: '', datacenterId: c?.datacenterId || '' });
   };
   // v2.599(C2599-09): 사용률은 서버가 df 와 같은 정의로 주고, 분모 0(마운트 미수집)이면 null 이다 — 'null%'·0% 로 그리지 않는다.
   const pctCell = (p) => (p == null ? <span className="muted">—</span> : <span style={{ whiteSpace: 'nowrap' }}>{bar(p)} <b style={{ fontSize: 12, color: pctColor(p) }}>{p}%</b></span>);
@@ -133,6 +163,7 @@ export default function BmStorageTool() {
 
   return (
     <div className="bm2">
+      {subTabs}
       <div className="flex between wrap" style={{ alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
         <div style={{ minWidth: 0, flex: '1 1 420px' }}>
           <div className="muted" style={{ fontSize: 13.5, lineHeight: 1.6 }}>
@@ -370,11 +401,32 @@ export default function BmStorageTool() {
               <label>SSH 포트<input className="input" type="number" min={1} max={65535} value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} /></label>
               <label>계정<input className="input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
               <label>비밀번호<input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={form.id ? '비우면 기존 유지' : ''} autoComplete="new-password" /></label>
+              {owner && (
+                <label>인증(SSH 키 · 공통 계정) <span className="muted" style={{ fontSize: 11 }}>(설정 소유자 — 묶음을 바꾸면 본인 OTP)</span>
+                  <Select sort={false} className="input" value={form.auth || ''} onChange={(e) => setForm({ ...form, auth: e.target.value })}>
+                    <option value="">개별 비밀번호(위 칸)</option>
+                    {authOpts.keys.map((k) => <option key={k.id} value={`key:${k.id}`}>키 · {k.name} ({k.algo})</option>)}
+                    {authOpts.accounts.map((a) => <option key={a.id} value={`acc:${a.id}`}>공통 계정 · {a.name} ({a.username})</option>)}
+                  </Select>
+                </label>
+              )}
+              {owner && (form.auth || '') !== authChoiceOf(cfgOf(form.id)) && (form.auth || '') && (
+                <label>본인 OTP<input className="input" inputMode="numeric" maxLength={8} value={form.otp || ''} onChange={(e) => setForm({ ...form, otp: e.target.value })} autoComplete="one-time-code" /></label>
+              )}
+              {owner && <p className="muted" style={{ fontSize: 11, margin: 0, gridColumn: '1 / -1' }}>{HOSTKEY_OBSERVE_NOTE}</p>}
               <label>수집 주체 <span className="muted" style={{ fontSize: 11 }}>(등록된 수집 서버(원격)에서 선택)</span>
                 <Select className="input" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
                   <option value="">중앙 직접(SSH)</option>
                   {(() => { const m = missingChoice(agents || [], form.agent); return m ? <option value={m.value}>엣지 위임 — {m.label}</option> : null; })()}
                   {(agents || []).map((a) => <option key={a} value={a}>엣지 위임 — {a}</option>)}
+                </Select>
+              </label>
+              <label>법인 <span className="muted" style={{ fontSize: 11 }}>(선택 · 비우면 엣지의 법인)</span>
+                <Select className="input" value={form.datacenterId || ''} onChange={(e) => setForm({ ...form, datacenterId: e.target.value })}
+                  title="SAN 비교 탭의 법인별 보기에 쓰입니다. 비우면 수집 주체(엣지)에 귀속된 vCenter 의 법인으로 추정하고, 그마저 없으면 '(법인 미지정)' 으로 셉니다.">
+                  <option value="">선택 안 함</option>
+                  {(() => { const m = missingChoice(datacenters.map((d) => d.id), form.datacenterId); return m ? <option value={m.value}>{m.label}</option> : null; })()}
+                  {datacenters.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </Select>
               </label>
               {form.agent

@@ -25,6 +25,8 @@ import { registryLoadError, loadRegistry } from '../idrac/registry.js'; // v2.74
 import { centralStatusOnlySupport, sendStatusOnly, FLEET_STATUS_ONLY_MIN_CENTRAL } from './centralStatusOnly.js'; // v2.744(감사 EDGE-01)
 import { createChangeLogger } from '../util/logThrottle.js';
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
+import { getInventory } from '../idrac/invCache.js';
+import { hwSummaryOf, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 물리서버 폴더 하드웨어 요약 · iDRAC 주소(중앙 central/fleet.js 정제와 짝)
 
 /**
  * v2.604(감사 EDGE2604-01 — 재현): 이 엣지가 **직접 수집하는** vCenter 중 호스트를 아직 읽지 못한 것(순수 판정).
@@ -220,14 +222,21 @@ export async function pushFleetNow() {
     // 중앙에 반영하므로 watts는 보내지 않는다(이중계상 방지). 중앙은 서비스태그로 dedup해 병합한다.
     // v2.887(서비스 인벤토리 — 4차 검토 반증 3): 그 서버를 등록한 **중앙 스캔 엔트리 id**(등록부 scanRangeId) 를 함께 싣는다.
     //   라벨(서비스명)은 중앙에만 있으므로 조인은 중앙이 한다(엣지가 라벨을 지어내지 않는다). 등록부를 못 읽으면 빈 값.
-    const scanIdOf = (() => {
-      try { const m = new Map(loadRegistry().map((r) => [String(r.id), String(r.scanRangeId || '')])); return (b) => m.get(String(b.serverId || '')) || ''; }
-      catch { return () => ''; }
-    })();
-    let baremetal = (inv.bareMetal || []).map((b) => ({
-      fleetId: b.fleetId, name: b.name, model: b.model, serviceTag: b.serviceTag,
-      vcenterId: b.vcenterId, source: b.source, scanRangeId: scanIdOf(b), untaggedId: fleetUntaggedId(b),
-    }));
+    const regById = (() => { try { return new Map(loadRegistry().map((r) => [String(r.id), r])); } catch { return null; } })();
+    const scanIdOf = (b) => (regById ? String(regById.get(String(b.serverId || ''))?.scanRangeId || '') : '');
+    // v3.3.0(물리서버 폴더 하드웨어 — 사용자 요청 'iDRAC 에서 수집한 데이터 보여줘'): 엣지 iDRAC 등록부 서버의 하드웨어 요약 · 관리 주소.
+    //   중앙은 엣지가 올린 서버의 인벤토리를 갖지 않는다(수집 서버 pull 과 다르다) — 요약만 싣는다(부품별 목록은 그 엣지 포탈에서).
+    //   인벤토리를 아직 못 읽었거나 등록부 밖(OME 등)이면 키를 만들지 않는다(구버전 중앙은 모르는 키를 버린다).
+    const hwOf = (b) => { if (b.source !== 'idrac') return null; try { return hwSummaryOf(getInventory(String(b.serverId || ''))); } catch { return null; } };
+    const mgmtOf = (b) => (b.source === 'idrac' && regById ? mgmtHostOf(regById.get(String(b.serverId || ''))?.host) : '');
+    let baremetal = (inv.bareMetal || []).map((b) => {
+      const hw = hwOf(b); const mgmtHost = mgmtOf(b);
+      return {
+        fleetId: b.fleetId, name: b.name, model: b.model, serviceTag: b.serviceTag,
+        vcenterId: b.vcenterId, source: b.source, scanRangeId: scanIdOf(b), untaggedId: fleetUntaggedId(b),
+        ...(hw ? { hw } : {}), ...(mgmtHost ? { mgmtHost } : {}),
+      };
+    });
     let partialInfo = null;
     if (dec.mode === 'partial') {
       const { keep, dropped } = partialBareMetal(baremetal, unread);

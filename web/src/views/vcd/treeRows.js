@@ -25,3 +25,15 @@ export function treeVmRows({ view, query = '', matches = [], cap = Infinity, clu
   }
   return [];
 }
+
+/**
+ * v2.975 — 트리에 **보이는 순서대로** 호스트 행(호스트 드로어의 ‹ › · ↑↓ · 시안 docs/design/host-drawer ①).
+ *   호스트 및 클러스터 보기에서만 호스트가 보인다(VM 및 폴더 보기는 []). 검색 중이면 일치한 호스트(cap 까지) · 아니면 클러스터 → 그 클러스터의 호스트.
+ */
+export function treeHostRows({ view, query = '', hostMatches = [], cap = Infinity, clusters = [] } = {}) {
+  if (view !== 'hosts') return [];
+  if (query) return (Array.isArray(hostMatches) ? hostMatches : []).slice(0, cap).filter(Boolean);
+  const out = [];
+  for (const entry of Array.isArray(clusters) ? clusters : []) for (const h of Array.isArray(entry?.[1]) ? entry[1] : []) if (h) out.push(h);
+  return out;
+}

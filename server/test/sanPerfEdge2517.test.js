@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sanperf2517-'));
 process.env.CONFIG_DIR = dir;
@@ -238,7 +239,7 @@ test('표본이 0건이어도 엣지는 상태를 올린다(push 조기 반환 �
 });
 
 test('중앙 config 응답이 perfCollectNow 를 내려주고, 엣지가 그것으로 수집한다', () => {
-  assert.match(read('../src/routes/central.js'), /perfCollectNow: takePerfRequestForAgent\(agent\)/);
+  assert.match(centralSource(), /perfCollectNow: takePerfRequestForAgent\(agent\)/);
   const pull = read('../src/agent/sanSwitchConfigPull.js');
   assert.match(pull, /body\?\.perfCollectNow === true/);
   assert.match(pull, /pollPerfOnce\(\{ force: true \}\)/);

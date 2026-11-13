@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 중앙에서 엣지로 내려가는 흐름 · 키 대응 · 엣지 전달 칸</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./bmfe.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:620px;padding:18px 20px;gap:12px">
+  <p class="intro" style="max-width:none">저장소는 지금처럼 <b style="color:#e6edf6">중앙 하나</b>. 엣지는 자기 법인 것만 주기적으로 받아 사본으로 두고, 그 사본에 이 엣지의 지금 값을 얹어 그린다. 판정(어느 서버가 어느 폴더인가)은 중앙이 한 결과를 그대로 쓴다 — 엣지가 다시 판정하지 않는다.</p>
+
+  <div class="fl">
+    <div class="fb c">
+      <h3><span class="bdg c">중앙</span>중앙 포탈</h3>
+      <p>폴더 · 등록 저장소는 지금 그대로.</p>
+      <span class="fn2">bm-folders.json · bm-folders-assign.json</span>
+      <p>엣지마다 묶음을 만든다 — <b>그 엣지의 법인만</b> · 서버 키를 <b>엣지 키로</b> 바꿔서.</p>
+    </div>
+    <div class="arw"><span class="al">엣지가 당김<br>기본 10분 · 엣지별 토큰</span><span class="ar"></span><span class="al">판본이 같으면<br>‘같음’ 한 줄</span></div>
+    <div class="fb e">
+      <h3><span class="bdg e">엣지</span>받기 워커</h3>
+      <p>받은 것을 아는 필드만 · 상한으로 다시 확인한다.</p>
+      <p>실패하면 <b>사본은 그대로</b> 두고 상태와 콘솔 한 줄을 남긴다.</p>
+      <p>사본을 지우는 것은 중앙이 ‘이 엣지에는 보내지 않는다’ 고 답할 때뿐.</p>
+    </div>
+    <div class="arw"><span class="al">원자 쓰기</span><span class="ar"></span></div>
+    <div class="fb e">
+      <h3><span class="bdg e">엣지</span>사본 파일</h3>
+      <span class="fn2">bm-folders-central.json</span>
+      <p>판본 · 받은 시각 · 법인별 폴더 경로 · <b>서버 → 폴더</b>(손 등록 / 자동 규칙) · 폴더 → 서비스 이름.</p>
+      <p>설정 변경 백업의 감시 대상이 아니다(받을 때마다 바뀐다).</p>
+    </div>
+    <div class="arw"><span class="al">화면이 읽음</span><span class="ar"></span></div>
+    <div class="fb e">
+      <h3><span class="bdg e">엣지</span>물리서버 폴더 화면</h3>
+      <p>사본(폴더 · 배치) + <b>이 엣지의</b> 서버 목록 · 사용률 · 전력 · 부품 장애 · 24시간 추이.</p>
+      <p>서버 값은 중앙을 왕복하지 않는다.</p>
+    </div>
+  </div>
+
+  <div class="row" style="gap:10px;flex-wrap:nowrap">
+    <span class="note" style="white-space:nowrap"><b style="color:#e6edf6">중앙</b> — 법인 표 ‘엣지 전달’ 칸에 기록</span>
+    <span class="ar b" style="flex:1"></span>
+    <span class="note" style="white-space:nowrap"><b style="color:#e6edf6">엣지</b> — 받아 간 판본 · 시각을 다음 받기 요청에 실어 보냄</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1.25fr .9fr 1.15fr;gap:12px;min-height:0">
+    <div class="card" style="display:flex;flex-direction:column;min-width:0">
+      <div class="fh" style="padding:10px 14px 8px"><b>서버 키 대응</b><span class="note">⟨ ⟩ = 그 글자를 해시한 16자</span></div>
+      <table class="t wrap">
+        <thead><tr><th style="width:24%">서버</th><th style="width:28%">중앙 키</th><th style="width:20%">이 엣지 키</th><th style="width:28%">내려보내는 것</th></tr></thead>
+        <tbody>
+          <tr><td>서비스 태그 있음</td><td class="code">st:7xk2m03</td><td class="code">st:7xk2m03</td><td>그대로</td></tr>
+          <tr><td>태그 없음 · 이 엣지가 보고</td><td class="code">fl:⟨edge:pl-waw-edge:srv-12⟩</td><td class="code">fl:⟨srv-12⟩</td><td>중앙이 엣지 보고에 든 서버 id 로 <b>엣지 키를 만들어</b> 보낸다</td></tr>
+          <tr><td>중앙이 직접 수집 · 수집 서버 경로</td><td class="code">st:… / fl:…</td><td class="dim">목록에 없음</td><td>그대로 — 엣지에서는 ‘이 엣지 밖 등록’</td></tr>
+        </tbody>
+      </table>
+      <div class="foot">태그 없는 서버의 키가 중앙과 엣지에서 다른 것이 지금 코드의 사실 — 바꿔 보내지 않으면 그 서버들은 엣지에서 전부 (미분류)로 보인다.</div>
+    </div>
+
+    <div class="card st">
+      <h3>내려가는 것</h3>
+      <ul class="ul">
+        <li><i></i><span>그 엣지 법인의 폴더 경로</span></li>
+        <li><i></i><span>서버마다 놓인 폴더와 방식(손 등록 / 자동 규칙) — 판정 결과</span></li>
+        <li><i></i><span>폴더에 연결된 서비스 이름</span></li>
+        <li><i></i><span>판본 번호</span></li>
+      </ul>
+      <h3 style="margin-top:6px">내려가지 않는 것</h3>
+      <ul class="ul">
+        <li><i class="x"></i><span>다른 법인의 폴더 · 서버</span></li>
+        <li><i class="x"></i><span>자동 규칙의 값 · 등록한 사람 · 감사 기록</span></li>
+        <li><i class="x"></i><span>법인 미지정 서버 · 다른 엣지 이름</span></li>
+      </ul>
+    </div>
+
+    <div class="card" style="display:flex;flex-direction:column;min-width:0">
+      <div class="fh" style="padding:10px 14px 8px"><b>중앙 화면 — 법인 표에 ‘엣지 전달’ 칸</b></div>
+      <table class="t wrap">
+        <thead><tr><th style="width:34%">법인</th><th style="width:14%">받는 길</th><th style="width:52%">엣지 전달</th></tr></thead>
+        <tbody>
+          <tr><td><b>vcenter-pl-waw-01</b></td><td><span class="bdg e">엣지</span></td><td><span class="sd ok"></span> <span class="mono">r128</span> · 3분 전 받아 감</td></tr>
+          <tr><td><b>vcenter-us-east-01</b></td><td><span class="bdg e">엣지</span></td><td><span class="sd warn"></span> <span class="mono">r126</span> · 26시간 전 — 그 뒤 바뀐 2건이 아직 안 감</td></tr>
+          <tr><td><b>vcenter-de-fra-01</b></td><td><span class="bdg e">엣지</span></td><td><span class="sd na"></span> 받아 간 적 없음(이전 판본 엣지)</td></tr>
+          <tr><td><b>vcenter-kr-hq-01</b></td><td><span class="bdg c">중앙</span></td><td class="dim">— 엣지 없음</td></tr>
+        </tbody>
+      </table>
+      <div class="foot">중앙에서 폴더를 바꾼 사람이 ‘그 법인 엣지에 갔는가’ 를 여기서 본다. 전체 범위 관리자 판본에만 엣지 이름을 싣는다.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":620}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

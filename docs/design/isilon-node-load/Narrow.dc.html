@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>노드 부하 추이 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: #0a0e17; color: #e6edf6; font-family: Inter, -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+a { color: #8b9bb4; } a:hover { color: #e6edf6; }
+.seg { display: inline-flex; border: 1px solid #243049; border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
+.seg button, .seg a { display: inline-flex; align-items: center; height: 32px; padding: 0 11px; border: 0; border-left: 1px solid #243049; background: transparent; color: #8b9bb4; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; text-decoration: none; }
+.seg button:first-child, .seg a:first-child { border-left: 0; }
+.seg .on { background: #1b2540; color: #e6edf6; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+th { text-align: left; font-weight: 600; color: #8b9bb4; font-size: 11.5px; padding: 8px 10px; border-bottom: 1px solid #243049; white-space: nowrap; background: #0f1626; }
+td { padding: 7px 10px; border-bottom: 1px solid #1f2a40; white-space: nowrap; }
+</style>
+</helmet>
+<div style="padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; min-width: 0">
+  <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; letter-spacing: .04em; color: #8b9bb4; overflow-wrap: anywhere">장비 상세 · <span style="color: #e6edf6">PS-FRA-01</span> · 8 노드</div>
+
+  <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; display: flex; flex-direction: column; gap: 12px; padding: 14px 14px 16px; min-width: 0">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <h3 style="margin: 0; font-size: 15px; font-weight: 700">노드 부하 추이 <span style="font-weight: 500; color: #8b9bb4; font-size: 12.5px">— 네트워크 In / Out · 디스크 쓰기 / 읽기</span></h3>
+      <div style="font-size: 12px; color: #8b9bb4; overflow-wrap: anywhere">출처 REST node.net.ext.bytes.*.rate · node.disk.bytes.*.rate.sum · 수집 주기(1시간 — 설정값)마다 1회 · 순간값. 세그먼트 세 줄(네트워크 · 디스크 · 보기)은 줄바꿈.</div>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 8px">
+      <div class="seg"><button class="on">24시간</button><button>7일</button><button>30일</button><button>90일</button></div>
+      <div class="seg"><button class="on">In</button><button>Out</button><button>In + Out</button></div>
+      <div class="seg"><button>쓰기(In)</button><button>읽기(Out)</button><button>합계</button></div>
+      <div class="seg"><button class="on">히트맵</button><a href="Multiples.dc.html">소형 다중</a><a href="Multiples.dc.html">겹쳐 보기</a></div>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #1f2a40; border-radius: 10px; background: #0f1626; min-width: 0">
+      <button type="button" style="height: 30px; padding: 0 10px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap">◀ 이전 24시간</button>
+      <button type="button" disabled="{{ true }}" style="height: 30px; padding: 0 10px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #8b9bb4; font: inherit; font-size: 12px; white-space: nowrap">다음 24시간 ▶</button>
+      <button type="button" disabled="{{ true }}" style="height: 30px; padding: 0 10px; border: 1px solid #1d4ed8; border-radius: 8px; background: #2563eb; color: #e6edf6; font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap">최신</button>
+      <input type="range" min="0" max="29" step="1" value="29" aria-label="조회 구간 스크롤(오른쪽 끝 = 최근)" style="flex: 1 1 100%; min-width: 0; accent-color: #3987e5; margin: 2px 0">
+      <label style="display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: #8b9bb4; min-width: 0">날짜·시각으로 이동 <input type="datetime-local" value="2026-11-07T07:00" step="3600" aria-label="창 끝 날짜와 시각" style="height: 28px; padding: 0 8px; border: 1px solid #243049; border-radius: 8px; background: #141b2d; color: #e6edf6; font: inherit; font-size: 12px; max-width: 100%"></label>
+      <span style="flex-basis: 100%; font-size: 11.5px; color: #8b9bb4; overflow-wrap: anywhere">최근 구간 · 11.06 07:00 ~ 11.07 07:00 · 수집 주기마다 갱신 · 갈 수 있는 범위 30칸 = 원시 표 보존 30일(설정값)</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 8px">
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0">
+        <div style="font-size: 11.5px; color: #8b9bb4">합계 · 마지막 표본</div>
+        <div style="font-size: 18px; font-weight: 600; line-height: 1.2">{{nowIn}} <span style="font-size: 11px; color: #8b9bb4">In</span></div>
+        <div style="font-size: 18px; font-weight: 600; line-height: 1.2">{{nowOut}} <span style="font-size: 11px; color: #8b9bb4">Out</span></div>
+      </div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0">
+        <div style="font-size: 11.5px; color: #8b9bb4">가장 바쁜 노드 · In 평균</div>
+        <div style="font-size: 18px; font-weight: 600; line-height: 1.2">노드 {{busyId}}</div>
+        <div style="font-size: 11.5px; color: #8b9bb4">{{busyAvg}} · 평균의 {{busyRatio}}배</div>
+      </div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0">
+        <div style="font-size: 11.5px; color: #8b9bb4">가장 한가한 노드</div>
+        <div style="font-size: 18px; font-weight: 600; line-height: 1.2">노드 {{idleId}}</div>
+        <div style="font-size: 11.5px; color: #8b9bb4">{{idleAvg}}</div>
+      </div>
+      <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0">
+        <div style="font-size: 11.5px; color: #8b9bb4">표본</div>
+        <div style="font-size: 18px; font-weight: 600; line-height: 1.2">24 / 24</div>
+        <div style="font-size: 11.5px; color: #8b9bb4">읽지 못한 값 {{missing}} (빈칸)</div>
+      </div>
+    </div>
+
+    <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0">
+      <div style="font-size: 13px; font-weight: 600">노드 × 시간 히트맵 <span style="font-weight: 400; color: #8b9bb4">· In</span></div>
+      <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #8b9bb4; flex-wrap: wrap">
+        <span>0</span>
+        <span style="display: inline-flex; gap: 2px" aria-hidden="true"><i style="width: 14px; height: 10px; border-radius: 2px; background: #184f95; display: inline-block"></i><i style="width: 14px; height: 10px; border-radius: 2px; background: #2a78d6; display: inline-block"></i><i style="width: 14px; height: 10px; border-radius: 2px; background: #5598e7; display: inline-block"></i><i style="width: 14px; height: 10px; border-radius: 2px; background: #86b6ef; display: inline-block"></i><i style="width: 14px; height: 10px; border-radius: 2px; background: #b7d3f6; display: inline-block"></i></span>
+        <span>{{maxLabel}}</span>
+        <span style="display: inline-flex; align-items: center; gap: 5px"><i style="width: 14px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid #243049; background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.14) 3px 4px)" aria-hidden="true"></i>값 없음</span>
+      </div>
+      <div style="overflow-x: auto; -webkit-overflow-scrolling: touch">
+        <div style="min-width: 640px">
+          <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 0 8px; align-items: center; height: 16px; font-size: 10.5px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace">
+            <div></div>
+            <div style="display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px"><sc-for list="{{colLabels}}" as="c" hint-placeholder-count="24"><div style="white-space: nowrap">{{c}}</div></sc-for></div>
+          </div>
+          <sc-for list="{{rows}}" as="row" hint-placeholder-count="8">
+            <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 0 8px; align-items: center; margin-top: 2px">
+              <div style="font-size: 12px; font-weight: 600">노드 {{row.id}}</div>
+              <div style="display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px"><sc-for list="{{row.cells}}" as="c" hint-placeholder-count="24"><div title="{{c.tip}}" style="height: 22px; border-radius: 3px; background: {{c.bg}}; border: {{c.border}}"></div></sc-for></div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="font-size: 11.5px; color: #8b9bb4">좌우로 밀어 보세요 — 칸 24개(주기마다 1개)가 400px 에 다 들어가지 않습니다.</div>
+    </div>
+
+    <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0">
+      <div style="font-size: 13px; font-weight: 600">노드 순위 <span style="font-weight: 400; color: #8b9bb4">· In 평균</span></div>
+      <sc-for list="{{ranked}}" as="n" hint-placeholder-count="8">
+        <div style="display: grid; grid-template-columns: 50px minmax(0, 1fr) 70px; gap: 8px; align-items: center; font-size: 12px">
+          <div>노드 {{n.id}}</div>
+          <div style="height: 12px; border-radius: 0 4px 4px 0; background: #3987e5; width: {{n.w}}%; min-width: 2px"></div>
+          <div style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 11.5px">{{n.avg}}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="background: #0f1626; border: 1px solid #1f2a40; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0">
+      <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px">
+        <div style="font-size: 13px; font-weight: 600">클러스터 합계</div>
+        <div style="display: flex; gap: 12px; font-size: 11.5px; color: #8b9bb4"><span style="display: inline-flex; align-items: center; gap: 5px"><i style="width: 12px; height: 2px; background: #3987e5; display: inline-block" aria-hidden="true"></i>In</span><span style="display: inline-flex; align-items: center; gap: 5px"><i style="width: 12px; height: 2px; background: #d95926; display: inline-block" aria-hidden="true"></i>Out</span></div>
+      </div>
+      <div style="display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 6px">
+        <div style="position: relative; height: 150px; font-size: 10.5px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace"><sc-for list="{{ticks}}" as="t" hint-placeholder-count="4"><div style="position: absolute; right: 0; top: {{t.y}}px; transform: translateY(-50%)">{{t.label}}</div></sc-for></div>
+        <svg width="100%" height="150" viewBox="0 0 1000 150" preserveAspectRatio="none" style="display: block; overflow: visible" role="img" aria-label="클러스터 합계 In Out">
+          <sc-for list="{{ticks}}" as="t" hint-placeholder-count="4"><line x1="0" x2="1000" y1="{{t.y}}" y2="{{t.y}}" stroke="#1f2a40" stroke-width="1" vector-effect="non-scaling-stroke"></line></sc-for>
+          <path d="{{pathIn}}" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+          <path d="{{pathOut}}" fill="none" stroke="#d95926" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+        </svg>
+      </div>
+      <div style="display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 6px; font-size: 10.5px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace"><div></div><div style="display: flex; justify-content: space-between"><span>00:00</span><span>12:00</span><span>23:00</span></div></div>
+      <div style="font-size: 11.5px; color: #8b9bb4">09~11시는 노드 7 값을 읽지 못해 합계를 비웠습니다. 마지막: In {{nowIn}} · Out {{nowOut}} — 값은 툴팁과 아래 표에서도 읽습니다.</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+      <div style="font-size: 13px; font-weight: 600">노드 8 <span style="font-weight: 400; color: #8b9bb4">· 선택 2 / 4</span></div>
+      <div style="overflow-x: auto; border: 1px solid #1f2a40; border-radius: 10px">
+        <table>
+          <thead><tr><th style="width: 30px"></th><th style="text-align: right">ID</th><th>IP</th><th>상태</th><th style="text-align: right">In</th><th style="text-align: right">Out</th><th>추이 24h</th></tr></thead>
+          <tbody>
+            <sc-for list="{{tableRows}}" as="n" hint-placeholder-count="8">
+              <tr>
+                <td><input type="checkbox" aria-label="노드 {{n.id}} 선택" checked="{{n.sel}}" style="width: 16px; height: 16px; accent-color: #3987e5; margin: 0; display: block"></td>
+                <td style="text-align: right">{{n.id}}</td>
+                <td style="font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.ip}}</td>
+                <td><span style="display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; background: rgba(34,197,94,.14); color: #86efac; border: 1px solid rgba(34,197,94,.3)">OK</span></td>
+                <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.inNow}}</td>
+                <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 12px">{{n.outNow}}</td>
+                <td><svg width="96" height="24" viewBox="0 0 96 24" style="display: block" role="img" aria-label="노드 {{n.id}} 추이"><path d="{{n.sparkIn}}" fill="none" stroke="#3987e5" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path><path d="{{n.sparkOut}}" fill="none" stroke="#d95926" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path></svg></td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const R = (s) => { const x = Math.sin(s * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+    const cols = 24; const N = 8;
+    const baseIn = [0, 1.1, 0.8, 1.4, 2.3, 1.2, 0.9, 0.7, 1.0];
+    const baseOut = [0, 1.6, 1.3, 2.0, 3.3, 1.9, 1.4, 1.1, 1.5];
+    const prof = (i) => 0.62 + 0.38 * Math.sin((i - 7) / 24 * Math.PI * 2);
+    const nullAt = (n, i) => n === 7 && i >= 9 && i <= 11;
+    const val = (n, i, d) => { if (nullAt(n, i)) return null; const b = (d === 'in' ? baseIn : baseOut)[n]; return Math.round(b * prof(i) * (0.8 + 0.4 * R(n * 131 + i * 7 + (d === 'in' ? 1 : 2))) * 100) / 100; };
+    const fmt = (x) => (x == null ? '—' : (x >= 10 ? x.toFixed(1) : x.toFixed(2)) + ' Gbps');
+    const ramp = ['#184f95', '#2a78d6', '#5598e7', '#86b6ef', '#b7d3f6'];
+    let max = 0; const grid = [];
+    for (let n = 1; n <= N; n++) { const r = []; for (let i = 0; i < cols; i++) { const x = val(n, i, 'in'); r.push(x); if (x != null && x > max) max = x; } grid.push(r); }
+    const colLabels = []; for (let i = 0; i < cols; i++) colLabels.push(i % 3 === 0 ? String(i).padStart(2, '0') : '');
+    const rows = []; let missing = 0;
+    for (let n = 1; n <= N; n++) {
+      const cells = grid[n - 1].map((x, i) => {
+        if (x == null) { missing += 1; return { bg: 'repeating-linear-gradient(45deg, transparent 0 3px, rgba(255,255,255,.14) 3px 4px)', border: '1px solid #243049', tip: '노드 ' + n + ' · ' + String(i).padStart(2, '0') + ':00 · 값 없음' }; }
+        return { bg: ramp[Math.min(4, Math.floor(x / max * 5))], border: '0', tip: '노드 ' + n + ' · ' + String(i).padStart(2, '0') + ':00 · In ' + fmt(x) };
+      });
+      rows.push({ id: n, cells });
+    }
+    const avgOf = (n) => { const xs = grid[n - 1].filter((x) => x != null); return xs.reduce((a, b) => a + b, 0) / xs.length; };
+    const avgs = []; for (let n = 1; n <= N; n++) avgs.push({ id: n, avg: avgOf(n) });
+    const sorted = avgs.slice().sort((a, b) => b.avg - a.avg);
+    const topAvg = sorted[0].avg; const mean = avgs.reduce((a, b) => a + b.avg, 0) / N;
+    const ranked = sorted.map((a) => ({ id: a.id, avg: fmt(a.avg), w: Math.round(a.avg / topAvg * 100) }));
+    const sumAt = (i, d) => { let s = 0; for (let n = 1; n <= N; n++) { const x = val(n, i, d); if (x == null) return null; s += x; } return Math.round(s * 100) / 100; };
+    const sIn = []; const sOut = []; let maxS = 0;
+    for (let i = 0; i < cols; i++) { const a = sumAt(i, 'in'); const b = sumAt(i, 'out'); sIn.push(a); sOut.push(b); if (a != null && a > maxS) maxS = a; if (b != null && b > maxS) maxS = b; }
+    const step = maxS > 16 ? 5 : maxS > 8 ? 2.5 : 2; const top = Math.ceil(maxS / step) * step;
+    const yOf = (x) => 142 - x / top * 134;
+    const path = (arr) => { let d = ''; let pen = false; arr.forEach((x, i) => { if (x == null) { pen = false; return; } d += (pen ? ' L ' : ' M ') + (i / (cols - 1) * 1000).toFixed(1) + ' ' + yOf(x).toFixed(1); pen = true; }); return d.trim(); };
+    const ticks = []; for (let t = 0; t <= top; t += step) ticks.push({ label: t + ' G', y: Math.round(yOf(t)) });
+    const tableRows = [];
+    for (let n = 1; n <= N; n++) {
+      const sp = (d) => { let s = ''; let pen = false; for (let i = 0; i < cols; i++) { const x = val(n, i, d); if (x == null) { pen = false; continue; } s += (pen ? ' L ' : ' M ') + (2 + i / (cols - 1) * 92).toFixed(1) + ' ' + (22 - x / 3.6 * 18).toFixed(1); pen = true; } return s.trim(); };
+      const bpsTxt = (g) => (g == null ? '—' : (g >= 1 ? g.toFixed(1) + 'G' : (g * 1e3).toFixed(0) + 'M'));
+      tableRows.push({ id: n, ip: '10.94.42.' + (180 + n), sel: n === 4 || n === 5, inNow: bpsTxt(val(n, 23, 'in')), outNow: bpsTxt(val(n, 23, 'out')), sparkIn: sp('in'), sparkOut: sp('out') });
+    }
+    return { colLabels, rows, ranked, ticks, tableRows, maxLabel: fmt(max), nowIn: fmt(sIn[23]), nowOut: fmt(sOut[23]),
+      busyId: sorted[0].id, busyAvg: fmt(topAvg), busyRatio: (topAvg / mean).toFixed(1), idleId: sorted[N - 1].id, idleAvg: fmt(sorted[N - 1].avg), missing,
+      pathIn: path(sIn), pathOut: path(sOut) };
+  }
+}
+</script>
+</body>
+</html>

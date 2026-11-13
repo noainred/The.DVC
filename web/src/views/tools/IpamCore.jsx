@@ -5,19 +5,33 @@ import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js'; // v
 import { fetchJson, usePolling, hasRole, canCsv } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
-import { agentLabel, DEVTYPE_LABEL, DiscoveryBadge, fmtDt, fmtDur, MGMT, MgmtBadge } from './ipamShared.jsx';
+import { agentLabel, DEVTYPE_LABEL, DiscoveryBadge, fmtDt, MGMT, MgmtBadge, periodText } from './ipamShared.jsx';
 import { IpamNetMap, RangePolicies } from './IpamNet.jsx';
 import { MemoEditor, OverrideEditor } from './IpamEditors.jsx';
 import { IpmsSettings } from './IpmsSettings.jsx';
 import { IpScanSettings } from './IpScanSettings.jsx';
 import { ScanStatusModal } from './IpamScanStatus.jsx';
-import { IPAM_HASH_KEYS, IPAM_PAGE_ALIASES, ipamPage, menuGroups, pageDeniedNote } from './ipamPages.js'; // v2.636 IP관리 서브메뉴
+import { IPAM_DEFAULT_PAGE, IPAM_HASH_KEYS, IPAM_PAGE_ALIASES, ipamPage, pageDeniedNote, tabGroups, tabOfPage } from './ipamPages.js'; // v2.636 IP관리 서브메뉴
 import { dirtyKeys, dirtyPages, onDraftChange } from './ipamDraft.js';
 import { IpamScanLog } from './IpamScanLog.jsx';
+import { IpamHome } from './IpamHome.jsx'; // v3.4.0 재설계 묶음 가 — 현황 탭
+import { SubnetList, SubnetMap, SubnetPurposeEdit } from './IpamSubnets.jsx'; // v3.4.0 — 대역 목록 · 주소 맵 · v3.5.0 대역 용도
+import { IpamExportModal } from './IpamExportModal.jsx'; // v3.5.0 — 엑셀 내보내기 창
+import { IpamServerModal } from './IpamServerModal.jsx'; // v3.6.0 — 서버 보기(서비스 태그)
+import { IpamHostNames } from './IpamHostNames.jsx'; // v3.6.0 — 호스트명 대조
+import { IpamScanSchedule } from './IpamScanSchedule.jsx'; // v3.7.0 — 주기 스캔 일정
+import { IpamReport } from './IpamReport.jsx'; // v3.7.0 — 정기 보고
+import { RECON_OPTIONS, ROW_OPTIONS, reconLabel } from './ipamFilterText.js'; // v3.4.0 — 필터 한 줄
+import { IpamChanges } from './IpamChanges.jsx'; // v3.1.0 IP 변화
 import { IpamCsv } from './IpamCsv.jsx';
 import { reservedUntilText } from './ipamReserveText.js';
-import { dbCountText, dbMetaText } from './ipamDbInfoText.js'; // v2.732: count:null(범위 계정·못 읽음)에서 죽지 않게
 import { Card, useTool } from './shared.jsx';
+import { HostNameCell, HostNameBlock, NameSrcBadge } from './IpamHostName.jsx'; // v2.991 호스트명 칸 · IP 상세 창 호스트명 묶음
+import { scanNameSummary, scanNameSummaryParts } from './ipamHostText.js';
+import { MacCell, MacBlock } from './IpamMac.jsx'; // v2.999 제조사 · MAC 칸 · IP 상세 창 MAC 묶음
+import { scanMacSummary, scanMacSummaryParts, isUnregisteredVirtual, macSortValue } from './ipamMacText.js';
+import { hasMacAlert } from './ipamChangeText.js'; // v3.1.0 '충돌 · MAC 변경' 칩
+import { dnsSummary, dnsSummaryParts, hasDnsMismatch, DNS_FWD } from './ipamDnsText.js'; // v3.2.0 DNS 정합성 — 요약 · 칩 'DNS 불일치'
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 
@@ -51,6 +65,14 @@ export function sheetScopeArg(vc, scope) {
  *   owner 를 그대로 넘기면 '수집된 IP가 없습니다' 로 막혔다 — VC-01 로 FQDN 호스트의 관리 IP 가 스캔 행(owner 없음 → IP 로 접속)에서
  *   호스트 행이 되면서 생긴 회귀다. 접속 권한·대상 범위는 서버(/remote/probe·quick-connect)가 예전 그대로 판정한다.
  */
+/** v3.4.0: 대역 탭을 열 때 고를 대역 — 원하는 대역이 목록에 있으면 그것, 아니면 대장 주소가 가장 많은 대역(대역 목록의 기본 정렬과 같다). */
+export function firstBase(subnets, want) {
+  const list = Array.isArray(subnets) ? subnets : [];
+  if (want && list.some((x) => x?.base === want)) return want;
+  let best = null;
+  for (const x of list) if (x?.base && (!best || (Number(x.used) || 0) > (Number(best.used) || 0))) best = x;
+  return best ? best.base : '';
+}
 export const hasOwnerRow = (r) => !!(r && (r.owner || (r.hasOwner && (r.ownerType === 'vm' || r.ownerType === 'host'))));
 export function ipRemoteItem(row, owner, scope = '') {
   const ip = row?.ip || '';
@@ -117,11 +139,13 @@ function Ipam({ scope, onScope }) {
   const [histIp, setHistIp] = useState(null); // IP 사용 이력 모달 대상
   // 서브메뉴 페이지를 URL(#/ipam/<키>)에 싣는다(v2.438 · v2.636 에 전 페이지로 — 예전에는 list·sheet 만 유효해서
   //   '추천 기능 30선' 등을 누르면 해시가 바뀌는 순간 hashchange 가 목록으로 되돌렸다).
-  const [hashView, setView] = useHashTab({ base: ['ipam'], valid: IPAM_HASH_KEYS, fallback: 'list' });
+  const [hashView, setView] = useHashTab({ base: ['ipam'], valid: IPAM_HASH_KEYS, fallback: IPAM_DEFAULT_PAGE }); // v3.4.0: 첫 화면은 '현황'
   // v2.691: 옛 주소(#/ipam/ranges — '대역·스캔')는 합쳐진 페이지로 옮긴다. 옮기기 전 한 번의 렌더도 새 페이지로 그린다
   //   (옛 키로 그리면 아래 분기가 대장 목록으로 떨어져 대장을 읽기 전에 data.rows 를 읽는다 — Chromium 에서 실제로 화면이 죽었다).
   const view = IPAM_PAGE_ALIASES[hashView] || hashView;
   useEffect(() => { if (IPAM_PAGE_ALIASES[hashView]) setView(IPAM_PAGE_ALIASES[hashView]); }, [hashView]); // eslint-disable-line react-hooks/exhaustive-deps
+  // v3.4.0: 첫 화면이 '현황' 이 됐다 — 통합 검색이 검색어를 넘기며 #/ipam 으로 열었으면(주소에 페이지 없음) 결과가 보이게 IP 주소 탭으로.
+  useEffect(() => { if (q && hashView === IPAM_DEFAULT_PAGE) setView('list'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // v2.617: 이미 열린 화면이면 주소가 같아 다시 마운트되지 않는다 — 구독으로 즉시 받는다(목록 보기로 옮겨 결과가 보이게).
   useEffect(() => onSearchHandoff((t) => {
     if (t !== 'ipam') return;
@@ -136,7 +160,8 @@ function Ipam({ scope, onScope }) {
   const [sheetErr, setSheetErr] = useState('');
   const [stFilter, setStFilter] = useState(''); // '' = 전체 | used | multihomed | duplicate | empty
   const [reconFilter, setReconFilter] = useState(''); // '' | vcenter | scan | both | manual | managed
-  const [editOv, setEditOv] = useState(null); // IP 관리상태(override) 편집 대상 row
+  const [editOv, setEditOv] = useState(null);
+  const [exportOpen, setExportOpen] = useState(false); // v3.5.0: 엑셀 내보내기 창 // IP 관리상태(override) 편집 대상 row
   const canManage = hasRole('admin', 'operator'); // operator/admin → 관리상태 편집 가능. // v2.613 WEB2613-01: 역할은 App 이 채운 현재 사용자 객체에서 읽는다(화면이 /auth/me 를 다시 부르지 않는다).
   useEffect(() => { fetchJson('/admin/ipam/db-info').then(setDb).catch(() => setDb(null)); }, []);
 
@@ -153,7 +178,7 @@ function Ipam({ scope, onScope }) {
   //   `?vcenterId=[object Object]` → 대장이 통째로 비었다. 호출부를 고치고, 객체(이벤트)가 와도 현재 범위로 좁힌다
   //   (null 은 '전체' 라는 뜻이므로 그대로 둔다 — 스캔 칩이 그렇게 부른다).
   const subnetGen = useRef(0); // 늦게 온 이전 범위의 서브넷 목록이 새 목록을 덮지 않게(고RTT)
-  const openSheets = async (vcArg) => {
+  const openSheets = async (vcArg, wantBase) => { // v3.4.0: wantBase — 현황의 대역을 눌렀을 때 그 대역으로
     const vc = sheetScopeArg(vcArg, scope);
     const gen = ++subnetGen.current;
     setView('sheet');
@@ -163,7 +188,9 @@ function Ipam({ scope, onScope }) {
     catch (e) { if (gen === subnetGen.current) setSubnetsErr(e?.message || String(e)); return; }
     if (gen !== subnetGen.current) return;
     setSubnetsErr('');
-    setSubnets(r.subnets || []); if (r.subnets?.[0]) pickBase(r.subnets[0].base, vc);
+    setSubnets(r.subnets || []);
+    const pick = firstBase(r.subnets, wantBase);
+    if (pick) pickBase(pick, vc);
   };
   // v2.636: 대장 CSV·엑셀 내보내기는 'CSV 가져오기·내보내기' 페이지(IpamCsv.jsx)로 옮겼다(downloadFile 은 res.ok 를 본다 — v2.602).
 
@@ -189,26 +216,34 @@ function Ipam({ scope, onScope }) {
     let active = true;   // v2.596(감사 WS-3): 늦게 온 이전 범위 응답이 pickBase 로 새 시트를 덮지 않게
     const gen = ++subnetGen.current; // v2.603: openSheets 와 같은 세대 — 둘 중 나중 요청만 목록을 쓴다
     const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
-    fetchJson(`/tools/ipam/subnets${q}`).then((r) => { if (!active || gen !== subnetGen.current) return; setSubnetsErr(''); setSubnets(r.subnets || []); if (view === 'sheet' && r.subnets?.[0]) pickBase(r.subnets[0].base, scope); }).catch((e) => { if (active && gen === subnetGen.current) setSubnetsErr(e?.message || String(e)); });
+    fetchJson(`/tools/ipam/subnets${q}`).then((r) => { if (!active || gen !== subnetGen.current) return; setSubnetsErr(''); setSubnets(r.subnets || []); if (view === 'sheet' && r.subnets?.[0]) pickBase(firstBase(r.subnets), scope); }).catch((e) => { if (active && gen === subnetGen.current) setSubnetsErr(e?.message || String(e)); });
     return () => { active = false; };
     // eslint-disable-next-line
   }, [scope]);
+  // v3.4.0(TDZ — subnets · base · pickBase 선언 뒤에 둔다): 대역 탭을 주소(#/ipam/sheet)로 바로 열면 아무 대역도 고르지 않은 채 '불러오는 중' 에 머물렀다(Chromium 에서 확인) —
+  //   대역 목록이 오면 대장 주소가 가장 많은 대역을 고른다(고른 대역이 있으면 그대로).
+  useEffect(() => { if (view === 'sheet' && !base && subnets.length) pickBase(firstBase(subnets)); }, [view, subnets]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const c10 = subnets.filter((s) => s.base.startsWith('10.')).length;
-  const c192 = subnets.filter((s) => s.base.startsWith('192.')).length;
-  const c172 = subnets.filter((s) => s.base.startsWith('172.')).length;
 
   // reconcile/관리 집계 + 행 필터를 메모이즈 — 수천 행에서 무관한 리렌더 시 재계산을 피한다(렌더 성능).
   const term = q.trim().toLowerCase();
   const recon = useMemo(() => {
-    const c = { vcenter: 0, scan: 0, both: 0, manual: 0, conflict: 0, managed: 0, unmanaged: 0, reserved: 0 };
+    const c = { vcenter: 0, scan: 0, both: 0, manual: 0, conflict: 0, managed: 0, unmanaged: 0, reserved: 0, noname: 0 };
     for (const r of (data?.rows || [])) {
       if (c[r.reconcile] !== undefined) c[r.reconcile]++;
       if (r.managed) c.managed++; else c.unmanaged++;
       if (r.reservedExpired || r.reservedExpiringSoon) c.reserved++;
+      if (r.ownerType === 'scanned' && !r.netName) c.noname++; // v2.991: 이름을 찾지 못한 스캔 IP(직접 넣을 대상)
     }
+    c.names = scanNameSummary(data?.rows || []); // v2.991: 스캔 IP 호스트명 요약(목록 위 한 줄)
+    c.macs = scanMacSummary(data?.rows || []); // v2.999: 스캔 IP MAC 요약(같은 줄) · '미등록 가상 NIC' 칩 수
+    c.vnic = c.macs.virtualUnreg;
+    c.macAlert = (data?.rows || []).filter(hasMacAlert).length; // v3.1.0: 충돌 의심 · 최근 MAC 변경
+    c.dns = dnsSummary(data?.rows || []); // v3.2.0: 역DNS 이름의 정방향 확인(일치 · 불일치 · 확인 못 함)
+    c.dnsBad = c.dns.other + c.dns.none;
     return c;
   }, [data]);
+  const subnetNote = subnets.find((x) => x.base === base) || null; // v3.5.0: 고른 대역의 용도 · 설명(대역 목록 응답에 실린다)
   const rows = useMemo(() => (data?.rows || []).filter((r) => {
     if (rowFilter === 'duplicate' && !r.duplicate) return false;
     if (rowFilter === 'multihomed' && !r.multiHomed) return false;
@@ -217,30 +252,42 @@ function Ipam({ scope, onScope }) {
     if (reconFilter === 'managed' && !r.managed) return false;
     if (reconFilter === 'unmanaged' && r.managed) return false;
     if (reconFilter === 'reserved' && !(r.reservedExpired || r.reservedExpiringSoon)) return false;
-    if (reconFilter && !['managed', 'unmanaged', 'reserved'].includes(reconFilter) && r.reconcile !== reconFilter) return false;
-    if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term) || (r.label || '').toLowerCase().includes(term) || (r.owner_ || '').toLowerCase().includes(term) || (r.note || '').toLowerCase().includes(term))) return false;
+    if (reconFilter === 'noname' && !(r.ownerType === 'scanned' && !r.netName)) return false;
+    if (reconFilter === 'vnic' && !isUnregisteredVirtual(r)) return false; // v2.999
+    if (reconFilter === 'macalert' && !hasMacAlert(r)) return false; // v3.1.0
+    if (reconFilter === 'dnsbad' && !hasDnsMismatch(r)) return false; // v3.2.0
+    if (reconFilter && !['managed', 'unmanaged', 'reserved', 'noname', 'vnic', 'macalert', 'dnsbad'].includes(reconFilter) && r.reconcile !== reconFilter) return false;
+    if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term) || (r.netName || '').toLowerCase().includes(term) || (r.ipPurpose || '').toLowerCase().includes(term) || (r.requester || '').toLowerCase().includes(term) || (r.assigner || '').toLowerCase().includes(term) || (r.label || '').toLowerCase().includes(term) || (r.owner_ || '').toLowerCase().includes(term) || (r.note || '').toLowerCase().includes(term))) return false;
     return true;
   }), [data, term, rowFilter, reconFilter]);
 
   const ROWBG = { used: 'rgba(34,197,94,.12)', multihomed: 'rgba(59,130,246,.14)', duplicate: 'rgba(239,68,68,.14)', network: 'rgba(148,163,184,.14)', released: 'rgba(245,158,11,.13)', scanned: 'rgba(20,184,166,.14)', empty: 'transparent' };
-  const STLAB = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', released: '해제(이력)', scanned: '스캔 확인', empty: '' };
+  const STLAB = { used: '사용', multihomed: '복수IP', duplicate: '중복', network: 'Network ID', released: '해제(이력)', scanned: '스캔 확인', empty: '' };
 
-  const toggleRowFilter = (k) => { setRowFilter((cur) => (cur === k ? '' : k)); setView('list'); };
-  const toggleRecon = (k) => { setReconFilter((cur) => (cur === k ? '' : k)); setView('list'); };
+  // v3.4.0: '현황' 탭의 숫자 → IP 주소 탭을 그 조건으로(예전 KPI 카드 클릭 · 출처 대조 버튼과 같은 키).
+  const goFiltered = ({ recon: rk = '', row = '' } = {}) => { setReconFilter(rk); setRowFilter(row); setQ(''); setView('list'); };
 
 
   const link = { background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', padding: 0, font: 'inherit' };
   const cols = [
+    // v2.991: 소유 자원(VM·호스트)이 없는 행(스캔·수동)은 IP 를 누르면 IP 상세 창(사용 이력 + 호스트명 방식별 결과) — 예전 안내 창은
+    //   '자원 상세를 열 수 없습니다' 만 말했다(시안 ⓪ 5).
     { key: 'ip', label: 'IP 주소', sortValue: (r) => r.ipNum ?? Infinity, render: (r) => (
-      <button style={link} onClick={() => setSel(r)}>
+      <button style={link} title="IP 상세 — 사용 이력 · 관리 정보 · 소유 자원 · 원격 접속" onClick={() => setHistIp(r)}>{/* v3.5.0: 모달 여러 개 대신 상세 창 하나 */}
         <b>{r.ip}</b>
         {r.reconcile === 'conflict' && <span className="badge red" style={{ marginLeft: 6 }} title={`교차 vCenter 충돌 — 같은 IP를 주장: ${(r.conflictVcenters || []).join(', ')}`}>⚠ 충돌</span>}
         {r.duplicate && <span className="badge red" style={{ marginLeft: 6 }}>중복</span>}
-        {r.multiHomed && <span className="badge amber" style={{ marginLeft: 4 }}>멀티홈</span>}
+        {r.multiHomed && <span className="badge amber" style={{ marginLeft: 4 }} title="이 VM 은 주소를 둘 이상 갖고 있습니다(장애 아님 — 예전 표기 '멀티홈')">복수IP</span>}
         {r.reservedExpired && <span className="badge amber" style={{ marginLeft: 4 }} title="예약 만료일이 지났습니다">⏳ 예약만료</span>}
         {!r.reservedExpired && r.reservedExpiringSoon && <span className="badge amber" style={{ marginLeft: 4 }} title={`예약 만료 임박: ${reservedUntilText(r.reservedUntil, data.tzOffsetMin)}`}>⏳ 임박</span>}
       </button>
     ) },
+    // v2.991: 호스트명 — 관리상태 이름 > 역DNS > mDNS > NetBIOS(서버 netName). IP 옆에 둔다(표가 가로로 넘겨도 IP 와 함께 보이게).
+    { key: 'netName', label: '호스트명', sortValue: (r) => r.netName || null, render: (r) => <HostNameCell r={r} canManage={canManage} onAdd={() => setEditOv(r)} /> },
+    // v3.5.0(재설계 묶음 나): 사람이 넣은 용도(관리상태 편집 · CSV) — 요청자 · 할당자는 상세 창 · 서브넷 대장 · 엑셀에.
+    { key: 'ipPurpose', label: '용도', sortValue: (r) => r.ipPurpose || null, render: (r) => (r.ipPurpose ? <span title={[r.requester && `요청자 ${r.requester}`, r.assigner && `할당자 ${r.assigner}`].filter(Boolean).join(' · ') || undefined}>{r.ipPurpose}</span> : <span className="muted">—</span>) },
+    // v2.999: 제조사 · MAC — 스캔이 본 MAC(스캐너 이웃 표 ARP > NetBIOS) · 제조사(서버 macVendor). VM · 호스트 행에도(스캔 대역 안일 때).
+    { key: 'mac', label: '제조사 · MAC', sortValue: macSortValue, render: (r) => <MacCell r={r} /> },
     { key: 'scope', label: '분류', sortValue: (r) => r.scope || '', render: (r) => (
       <span className={`badge ${r.scope === 'public' ? 'amber' : 'green'}`}>{r.scope === 'public' ? '공인' : '사설'}</span>
     ) },
@@ -266,11 +313,12 @@ function Ipam({ scope, onScope }) {
     ) },
     // 소유 자원 — v2.253 응답 다이어트로 VM 행은 owner 본문 대신 hasOwner 플래그만 온다.
     // owner 가 있거나(hasOwner VM 행이면 IpOwnerDetail 이 지연 조회) 클릭 가능하게 한다(v2.277).
-    { key: 'ownerName', label: '소유 자원', sortValue: (r) => r.displayName || r.ownerName || '', render: (r) => (hasOwnerRow(r) ? <button className="cell-link" onClick={() => setSel(r)}>{r.label || r.ownerName}</button> : <span>{r.label || r.ownerName}{r.owner_ ? <span className="muted" style={{ fontSize: 11 }}> · 👤{r.owner_}</span> : ''}{(r.services || []).length ? <span className="muted" style={{ fontSize: 11 }}> · {(r.services || []).join(',')}</span> : ''}</span>) },
+    { key: 'ownerName', label: '소유 자원', sortValue: (r) => r.displayName || r.ownerName || '', render: (r) => (hasOwnerRow(r) ? <button className="cell-link" onClick={() => setSel(r)}>{r.label || r.ownerName}</button> : <OwnerText r={r} />) },
     { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
     { key: 'osName', label: 'OS 종류', sortValue: (r) => r.osName || '', render: (r) => r.osName || <span className="muted">—</span> },
     { key: 'osVersion', label: 'OS 버전', sortValue: (r) => r.osVersion || '', render: (r) => r.osVersion || <span className="muted">—</span> },
-    { key: 'hostName', label: 'ESXi 호스트' },
+    // v2.991: 스캔·수동 행의 hostName 은 ESXi 호스트가 아니라 호스트명이다(대장 · ipam.db 열의 뜻은 그대로) — 이 칸에는 VM·호스트 행만.
+    { key: 'hostName', label: 'ESXi 호스트', sortValue: (r) => ((r.ownerType === 'vm' || r.ownerType === 'host') && r.hostName) || null, render: (r) => ((r.ownerType === 'vm' || r.ownerType === 'host') && r.hostName ? r.hostName : <span className="muted">—</span>) },
   ];
 
   const denied = pageDeniedNote(view, access);
@@ -280,54 +328,51 @@ function Ipam({ scope, onScope }) {
   const ledgerWait = data || !ipamPage(view)?.needsLedger ? null : (error ? <ErrorBox message={error} /> : <Loading />);
   return (
     <>
-      {data ? (
-        <div className="kpis" style={{ marginBottom: 14 }}>
-          <Card label="총 IP" value={data.total.toLocaleString()} meta={`센터 ${data.byVcenter.length} · 서브넷 ${subnetsErr ? '—' : subnets.length}`} />
-          <Card label="서브넷(/24) 대역" value={subnetsErr ? '—' : subnets.length} meta={subnetsErr ? '목록을 읽지 못함' : `10.x ${c10} · 172.x ${c172} · 192.x ${c192}`} />
-          <Card label="공인 / 사설 IP" value={`${(data.publicIps ?? 0).toLocaleString()} / ${(data.privateIps ?? 0).toLocaleString()}`}
-            meta={rowFilter === 'public' ? '공인만 보기 ✓' : rowFilter === 'private' ? '사설만 보기 ✓' : '클릭: 공인/사설 필터'}
-            active={rowFilter === 'public' || rowFilter === 'private'}
-            onClick={() => toggleRowFilter(rowFilter === 'public' ? 'private' : rowFilter === 'private' ? '' : 'public')} />
-          <Card label="중복 IP" value={(data.duplicateIps ?? 0).toLocaleString()} accent={data.duplicateIps ? 'var(--red)' : undefined}
-            meta={rowFilter === 'duplicate' ? '중복만 보기 ✓' : '클릭하여 중복만'} active={rowFilter === 'duplicate'} onClick={() => toggleRowFilter('duplicate')} />
-          <Card label="멀티홈 IP" value={(data.multiHomed ?? 0).toLocaleString()}
-            meta={rowFilter === 'multihomed' ? '멀티홈만 보기 ✓' : '클릭하여 멀티홈만'} active={rowFilter === 'multihomed'} onClick={() => toggleRowFilter('multihomed')} />
-          <Card label="교차 vCenter 충돌" value={recon.conflict} accent={recon.conflict ? 'var(--red)' : undefined}
-            meta={reconFilter === 'conflict' ? '충돌만 보기 ✓' : (recon.conflict ? '클릭: 충돌 IP만' : '둘 이상 vCenter가 같은 IP 주장')}
-            active={reconFilter === 'conflict'} onClick={() => toggleRecon('conflict')} />
-          <Card label="관리상태 지정" value={recon.managed} meta={reconFilter === 'managed' ? '관리 IP만 보기 ✓' : '운영자 수동 관리 IP'}
-            active={reconFilter === 'managed'} onClick={() => toggleRecon('managed')} />
-          <Card label="예약 만료/임박" value={recon.reserved} accent={recon.reserved ? 'var(--amber,#f59e0b)' : undefined}
-            meta={reconFilter === 'reserved' ? '예약 만료/임박만 ✓' : (recon.reserved ? '클릭: 예약 정리 대상' : '14일 내 만료 예약 없음')}
-            active={reconFilter === 'reserved'} onClick={() => toggleRecon('reserved')} />
-          {db && <Card label="공유 DB 레코드" value={dbCountText(db)} meta={dbMetaText(db)} />}
-        </div>
-      ) : (
-        <div className="card muted" style={{ padding: 12, marginBottom: 14, fontSize: 13 }}>
-          {error ? `IP 관리대장을 읽지 못했습니다(KPI 를 계산할 수 없습니다): ${error}` : '📒 IP 관리대장을 불러오는 중… — 아래 서브메뉴의 설정·로그·CSV 페이지는 기다리지 않고 바로 쓸 수 있습니다.'}
-        </div>
-      )}
       {refreshing && <div className="muted" style={{ fontSize: 12, margin: '-6px 0 8px' }}>대장을 다시 읽는 중입니다 — 아래 값은 직전에 받은 것입니다.</div>}
       {error && data && <div className="banner warn" style={{ marginBottom: 8 }}>대장을 다시 읽지 못했습니다 — 아래 값은 직전에 받은 것입니다: {error}</div>}
-      {/* v2.636: IP관리 서브메뉴(사용자 요청 — KPI 아래). 설정 페이지는 대장 로딩과 무관하게 그린다(예전 모달은 대장을 다시 읽는
-          순간 함께 사라져 입력이 날아갔다). ● = 저장하지 않은 입력이 있는 페이지(편집 초안 — 다른 페이지로 옮겨도 남는다). */}
-      <nav className="card ipam-subnav" aria-label="IP관리 메뉴">
-        {menuGroups(access, { csvOk: canCsv() }).map((g) => (
-          <div key={g.g} className="ipam-subnav-group">
-            <span className="ipam-subnav-label">{g.label}</span>
-            {g.pages.map((pg) => (
-              <button key={pg.k} className={`tab${view === pg.k ? ' active' : ''}`} title={pg.title} aria-current={view === pg.k ? 'page' : undefined} onClick={() => go(pg.k)}>
-                {pg.icon} {pg.label}{dirty.has(pg.k) && <span className="ipam-dirty-dot" title="저장하지 않은 입력이 있습니다"> ●</span>}
-              </button>
-            ))}
-          </div>
-        ))}
-      </nav>
+      {/* v3.4.0(재설계 묶음 가): 위 탭 5개 + 그 탭의 보기 줄. 페이지 키 · 주소(#/ipam/<키>)는 그대로이고 탭은 묶음일 뿐이다(ipamPages.tabGroups).
+          설정 페이지는 대장 로딩과 무관하게 그린다(v2.636 — 예전 모달은 대장을 다시 읽는 순간 사라져 입력이 날아갔다).
+          ● = 저장하지 않은 입력이 있는 페이지(편집 초안 — 다른 탭으로 옮겨도 남는다). 예전 KPI 카드 9장은 '현황' 탭으로 옮겼다. */}
+      {(() => {
+        const groups = tabGroups(access, { csvOk: canCsv() });
+        const curTab = tabOfPage(view);
+        const cur = groups.find((g) => g.t === curTab);
+        return (
+          <>
+            <nav className="ipam-tabs" aria-label="IP 관리 탭">
+              {groups.map((g) => (
+                <button key={g.t} type="button" className={`ipam-tab${g.t === curTab ? ' on' : ''}`} aria-current={g.t === curTab ? 'page' : undefined} onClick={() => go(g.first)}>
+                  {g.label}
+                  {g.t === 'addr' && data ? <span className="ipam-tab-n">{data.total.toLocaleString()}</span> : null}
+                  {g.t === 'range' && !subnetsErr && subnets.length ? <span className="ipam-tab-n">{subnets.length.toLocaleString()}</span> : null}
+                  {g.admin && <span className="ipam-tab-adm">관리자</span>}
+                  {g.pages.some((p) => dirty.has(p.k)) && <span className="ipam-dirty-dot" title="저장하지 않은 입력이 있습니다"> ●</span>}
+                </button>
+              ))}
+            </nav>
+            {cur && cur.pages.length > 1 && (
+              <div className="ipam-subtabs" role="group" aria-label={`${cur.label} 보기`}>
+                {cur.pages.map((pg) => (
+                  <button key={pg.k} type="button" className={`tab${view === pg.k ? ' active' : ''}`} title={pg.title} aria-current={view === pg.k ? 'page' : undefined} onClick={() => go(pg.k)}>
+                    {pg.label}{dirty.has(pg.k) && <span className="ipam-dirty-dot" title="저장하지 않은 입력이 있습니다"> ●</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        );
+      })()}
       {denied ? <div className="banner warn" role="status" style={{ marginBottom: 8 }}>{denied}</div>
+      : view === 'home' ? <IpamHome data={data} error={error} recon={recon} subnets={subnetsErr ? null : subnets} subnetsErr={subnetsErr} db={db} access={access}
+          onGo={go} onFilter={goFiltered} onPickSubnet={(b) => openSheets(undefined, b)} onPickVcenter={(id) => { onScope?.(id); openSheets(id); }} />
       : view === 'scan' ? <IpScanSettings asPage onSaved={() => setReload((n) => n + 1)} />
+      : view === 'schedule' ? <IpamScanSchedule />
       : view === 'status' ? <ScanStatusModal asPage />
       : view === 'log' ? <IpamScanLog />
+      : view === 'changes' ? <IpamChanges />
+      : view === 'names' ? <IpamHostNames />
       : view === 'ipms' ? <IpmsSettings asPage access={access} />
+      : view === 'report' ? <IpamReport />
       : view === 'csv' ? <IpamCsv scope={scope} access={access} canManage={canManage} onGoto={go} onApplied={() => setReload((n) => n + 1)} />
       : view === 'netmap' ? (
         <IpamNetMap />
@@ -336,27 +381,12 @@ function Ipam({ scope, onScope }) {
       ) : view === 'insights' ? (
         <IpamInsights scope={scope} />
       ) : view === 'sheet' ? (
-        <>
-          {data && <VcenterChips byVcenter={data.byVcenter} scope={scope} onPick={(id) => { onScope?.(id); openSheets(id); }} />}
-          {subnetsErr && (
-            <div className="banner warn" style={{ marginBottom: 8 }}>서브넷 목록을 읽지 못했습니다(0개라는 뜻이 아닙니다){subnets.length ? ' — 아래는 직전에 받은 목록입니다' : ''}: {subnetsErr}</div>
-          )}
+        <div className="ipam-range">
+          <SubnetList subnets={subnets} base={base} err={subnetsErr} onPick={(b) => pickBase(b)} />
+          <div className="ipam-range-main">
           {sheetErr && (
             <div className="banner warn" style={{ marginBottom: 8 }}>서브넷 대장({base})을 읽지 못했습니다: {sheetErr}</div>
           )}
-          <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
-            {subnets.map((s) => (
-              <span key={s.base} className="badge gray" title="이 서브넷 보기"
-                style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', border: base === s.base ? '1px solid var(--accent,#2563eb)' : undefined }}
-                onClick={() => pickBase(s.base)}>{s.subnet} · {s.used}</span>
-            ))}
-          </div>
-          <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
-            <span className="muted" style={{ fontSize: 12 }}>서브넷</span>
-            <Select className="select" style={{ maxWidth: 280 }} value={base} onChange={(e) => pickBase(e.target.value)}>
-              {subnets.map((s) => <option key={s.base} value={s.base}>{s.subnet} · 사용 {s.used}</option>)}
-            </Select>
-          </div>
           {sheet && (() => {
             // '사용중'에는 스캔으로 확인된 IP(scanned)도 포함(실제 사용 중인 IP이므로).
             const USED = ['used', 'multihomed', 'duplicate', 'scanned'];
@@ -364,7 +394,7 @@ function Ipam({ scope, onScope }) {
             const FILTERS = [
               ['', `전체 (${sheet.rows.length})`, 'gray'],
               ['used', `사용중 (${cnt('used')})`, 'green'],
-              ['multihomed', `멀티홈 (${cnt('multihomed')})`, 'blue'],
+              ['multihomed', `복수IP (${cnt('multihomed')})`, 'blue'],
               ['duplicate', `중복 (${cnt('duplicate')})`, 'red'],
               ['scanned', `스캔 확인 (${cnt('scanned')})`, 'teal'],
               ['released', `해제(이력) (${cnt('released')})`, 'amber'],
@@ -378,12 +408,20 @@ function Ipam({ scope, onScope }) {
             });
             return (
               <>
+                <div className="ipam-range-head">
+                  {subnetNote?.purpose ? <span style={{ fontSize: 20, fontWeight: 800 }}>{subnetNote.purpose}</span> : null}
+                  <span className="mono" style={{ fontSize: subnetNote?.purpose ? 14 : 19, fontWeight: 700 }}>{sheet.subnet || `${base}.0/24`}</span>
+                  <span className="muted" style={{ fontSize: 12 }}>사용 중 {cnt('used').toLocaleString()} · 해제(이력) {cnt('released').toLocaleString()} · 빈 주소 {cnt('empty').toLocaleString()}{cnt('duplicate') ? ` · 중복 ${cnt('duplicate')}` : ''}</span>
+                  {canCsv() && <button type="button" className="logout-btn" style={{ marginLeft: 'auto', padding: '5px 11px', fontSize: 12 }} onClick={() => setExportOpen(true)}>엑셀</button>}
+                </div>
+                {subnetNote?.desc ? <div className="muted" style={{ fontSize: 12.5, margin: '-4px 0 10px', overflowWrap: 'anywhere' }}>{subnetNote.desc}</div> : null}
+                {canManage && <SubnetPurposeEdit base={base} note={subnetNote} onSaved={(b, n) => setSubnets((list) => list.map((x) => (x.base === b ? { ...x, purpose: n?.purpose || '', desc: n?.desc || '', noteAt: n?.updatedAt || null, noteBy: n?.updatedBy || '' } : x)))} />}
+                <SubnetMap rows={sheet.rows} base={base} onPickRow={(r) => setHistIp(r)} />
                 <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
                   {FILTERS.map(([k, label]) => (
                     <button key={k} className={stFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setStFilter(k)}>{label}</button>
                   ))}
-                  <span className="muted" style={{ fontSize: 12, marginLeft: 4 }}>🟩 사용 · 🟦 멀티홈 · 🟥 중복 · 🟦 스캔 확인 · 🟧 해제(이력) · ⬜ 미사용</span>
-                </div>
+                                  </div>
                 {(sheet.policies || []).length > 0 && (
                   <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
                     <span className="muted" style={{ fontSize: 12 }}>🧩 이 대역 적용 정책:</span>
@@ -394,14 +432,16 @@ function Ipam({ scope, onScope }) {
                 )}
                 <div className="table-wrap" style={{ maxHeight: '62vh' }}>
                   <STable minWidth={1100} wrap={false}>
-                    <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>서버종류</th><th>확인 방식</th><th>OS</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>사용이력</th><th>메모 · 태그</th></tr></thead>
+                    <thead><tr><th>{base}.X</th><th>용도</th><th>요청자</th><th>할당자</th><th>Hostname</th><th>서버종류</th><th>확인 방식</th><th>OS</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>사용이력</th><th>메모 · 태그</th></tr></thead>
                     <tbody>
-                      {shown.length === 0 && <tr><td colSpan={12} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
+                      {shown.length === 0 && <tr><td colSpan={14} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
                       {shown.map((r) => (
                         <tr key={r.ip} style={{ background: ROWBG[r.status] }}>
                           <td><button className="cell-link" title="클릭: 확인 시점·호스트명·사용/미사용 기간 + VM 정보/원격 접속" onClick={() => setHistIp(r)}><b>{r.ip}</b></button></td>
-                          <td>{r.purpose}</td>
-                          <td>{r.hostname ? <VmLink ip={r.ip} vcenterId={scope} label={r.hostname} /> : ''}</td>
+                          <td title={r.ipPurpose && r.purpose ? `포탈이 채운 값: ${r.purpose}` : undefined}>{r.ipPurpose ? <b>{r.ipPurpose}</b> : <span className="muted" style={{ fontSize: 12 }}>{r.purpose}</span>}</td>
+                          <td style={{ fontSize: 12 }}>{r.requester || ''}</td>
+                          <td style={{ fontSize: 12 }}>{r.assigner || ''}</td>
+                          <td>{r.hostname ? <VmLink ip={r.ip} vcenterId={scope} label={r.hostname} /> : ''}<NameVia r={r} /></td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.serverType || ''}</td>
                           <td style={{ fontSize: 12 }}><DiscoveryBadge d={r.discovery} /></td>
                           <td className="muted" style={{ fontSize: 12 }}>{r.os || ''}</td>
@@ -441,53 +481,70 @@ function Ipam({ scope, onScope }) {
               </>
             );
           })()}
-        </>
+          {!sheet && !sheetErr && (subnets.length > 0 ? <Loading /> : <div className="muted" style={{ padding: 16, fontSize: 13 }}>{subnetsErr ? '' : '대역이 없습니다.'}</div>)}
+          </div>
+        </div>
       ) : ledgerWait || (
         <>
-          {rowFilter && view === 'list' && (
-            <div className="flex gap" style={{ marginBottom: 8, alignItems: 'center' }}>
-              <span className="badge blue" style={{ fontSize: 12 }}>
-                {rowFilter === 'duplicate' ? '중복 IP만' : rowFilter === 'multihomed' ? '멀티홈 IP만' : rowFilter === 'public' ? '공인 IP만' : '사설 IP만'} 표시 중
-              </span>
-              <button className="tab" style={{ padding: '4px 10px' }} onClick={() => setRowFilter('')}>필터 해제</button>
-            </div>
-          )}
-          {data && <VcenterChips byVcenter={data.byVcenter} scope={scope} onPick={(id) => { onScope?.(id); openSheets(id); }} />}
           {(data?.scanByDatacenter || []).length > 0 && (
             <div className="muted" style={{ fontSize: 12, marginBottom: 8 }} title="스캔으로만 확인된 IP 를, 스캔한 에이전트의 데이터센터로 나눈 개수입니다(IP 스캔 설정의 데이터센터 — 직접 지정 또는 자동).">
               🛰 스캔 IP 데이터센터별: {data.scanByDatacenter.map((x) => `${x.datacenterId ? x.datacenterName : '미정'} ${x.count}`).join(' · ')}
             </div>
           )}
-          <div className="flex between wrap gap" style={{ marginBottom: 8, alignItems: 'center' }}>
-            {/* 검색창 강조 — 사용자 요청: 대장에서 가장 많이 쓰는 입력인데 다른 버튼들 사이에 묻혀
-                눈에 안 띔. 빨간 테두리 + 은은한 글로우로 시선 유도(값 입력과 무관한 정적 스타일). */}
-            <SearchBox className="input" style={{ maxWidth: 260, border: '2px solid #ef4444', boxShadow: '0 0 6px rgba(239,68,68,.45)', borderRadius: 8 }} placeholder="🔍 IP / VM / 호스트 검색" value={q} onChange={setQ} />
-            <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={() => setView('csv')} title="대장 CSV·엑셀 내보내기, IP 관리상태 CSV 가져오기">⇅ CSV·엑셀</button>
+          {/* v3.4.0(재설계 묶음 가): 필터 한 줄 — 예전 '출처 대조' 버튼(최대 13개) · KPI 카드 클릭 · 빨간 검색창을 대신한다.
+              조건은 예전과 같은 recon/row 필터 키(ipamFilterText.RECON_OPTIONS · ROW_OPTIONS)이고 '현황' 탭의 숫자도 같은 키로 이 화면을 연다. */}
+          <div className="ipam-filterbar" role="group" aria-label="IP 주소 필터">
+            <SearchBox className="input" style={{ flex: '1 1 220px', maxWidth: 320 }} placeholder="IP · 호스트명 · VM · 담당 · 메모" value={q} onChange={setQ} />
+            <label className="ipam-fsel"><span className="muted">상태 · 출처</span>
+              <Select className="select" value={reconFilter} onChange={(e) => setReconFilter(e.target.value)}>
+                {RECON_OPTIONS.filter((o) => !o.conditional || (recon[o.count] || 0) > 0 || reconFilter === o.k).map((o) => (
+                  <option key={o.k} value={o.k}>{reconLabel(o, o.k ? recon[o.count] : data.rows.length)}</option>
+                ))}
+              </Select>
+            </label>
+            <label className="ipam-fsel"><span className="muted">분류</span>
+              <Select className="select" value={rowFilter} onChange={(e) => setRowFilter(e.target.value)}>
+                {ROW_OPTIONS.map((o) => <option key={o.k} value={o.k}>{reconLabel(o, o.count ? data[o.count] : null)}</option>)}
+              </Select>
+            </label>
+            {(reconFilter || rowFilter || term) && <button type="button" className="tab" style={{ padding: '5px 10px' }} onClick={() => { setReconFilter(''); setRowFilter(''); setQ(''); }}>필터 지우기</button>}
+            <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {canManage && <button className="logout-btn" style={{ padding: '6px 12px' }} title="수동으로 IP를 등록하거나 한 대역을 일괄 관리(예약 등)" onClick={() => setEditOv({ ip: '', __new: true })}>＋ IP 등록 · 예약</button>}
+              {canCsv() && <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => setExportOpen(true)} title="요약 · 대역 목록 · 대장 · 조치 필요 · 안내 시트를 골라 엑셀로">엑셀</button>}
+              <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => setView('csv')} title="대장 CSV 내보내기 · IP 관리상태 CSV 가져오기">CSV</button>
+            </span>
           </div>
-          {/* 출처 대조(reconcile) 필터 — vCenter 수집 IP와 스캔/수동 IP를 분리해 본다 */}
-          <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
-            <span className="muted" style={{ fontSize: 12 }}>출처 대조</span>
-            {[['', `전체 (${data.rows.length})`, 'gray'],
-              ['vcenter', `vCenter만 (${recon.vcenter})`, 'blue'],
-              ['both', `vCenter+스캔 (${recon.both})`, 'green'],
-              ['scan', `스캔만(수동확인) (${recon.scan})`, 'teal'],
-              ['manual', `수동등록 (${recon.manual})`, 'purple'],
-              ['conflict', `⚠ 충돌 (${recon.conflict})`, 'red'],
-              ['managed', `관리상태 지정됨 (${recon.managed})`, 'amber'],
-              ['unmanaged', `미관리 (${recon.unmanaged})`, 'gray'],
-              ['reserved', `⏳ 예약 만료/임박 (${recon.reserved})`, 'amber']].map(([k, label]) => (
-              <button key={k} className={reconFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => k ? toggleRecon(k) : setReconFilter('')}>{label}</button>
-            ))}
-            {canManage && <button className="logout-btn" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} title="수동으로 IP를 등록하거나 한 대역을 일괄 관리(예약 등)" onClick={() => setEditOv({ ip: '', __new: true })}>＋ IP 수동 등록 / 일괄 관리</button>}
+          <div className="flex gap wrap" style={{ alignItems: 'center', columnGap: 12 }}>
+            <ResultCount total={data.rows.length} shown={rows.length} label="IP" filtered={!!term || !!reconFilter || !!rowFilter} />
+            {recon.names.total > 0 && (
+              <span className="flex gap wrap" style={{ alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}
+                title="스캔으로만 확인한 IP 의 호스트명 — 직접 넣은 이름 · 역DNS · mDNS · NetBIOS 중 표시한 것의 출처별 개수입니다">
+                <span className="muted">스캔 IP 호스트명</span> <b>{recon.names.named.toLocaleString()}</b><span className="muted">/ {recon.names.total.toLocaleString()}</span>
+                {scanNameSummaryParts(recon.names).map((p) => <span key={p.key} className={`badge ${p.tone}`} style={{ fontSize: 10 }}>{p.label}</span>)}
+              </span>
+            )}
+            {recon.dns.total > 0 && (
+              <span className="flex gap wrap" style={{ alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}
+                title="역DNS 가 답한 이름을 정방향으로 다시 물어 그 IP 를 가리키는 수 / 확인한 수 — 확인 못 함(시한 · 예산)은 일치에도 불일치에도 넣지 않습니다. 묻는 곳은 스캔을 돌린 쪽의 DNS 입니다">
+                <span className="muted">정방향 확인</span> <b>{recon.dns.match.toLocaleString()}</b><span className="muted">/ {(recon.dns.total - recon.dns.unknown).toLocaleString()}</span>
+                {dnsSummaryParts(recon.dns).map((p) => <span key={p.key} className={`badge ${p.tone}`} style={{ fontSize: 10 }}>{p.label}</span>)}
+              </span>
+            )}
+            {recon.macs.withMac > 0 && (
+              <span className="flex gap wrap" style={{ alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}
+                title="스캔으로만 확인한 IP 중 MAC 을 아는 수 — 같은 서브넷은 스캐너 이웃 표(ARP), 다른 서브넷은 NetBIOS 가 답했을 때만 압니다">
+                <span className="muted">MAC</span> <b>{recon.macs.withMac.toLocaleString()}</b><span className="muted">/ {recon.macs.total.toLocaleString()}</span>
+                {scanMacSummaryParts(recon.macs).map((p) => <span key={p.key} className={`badge ${p.tone}`} style={{ fontSize: 10 }}>{p.label}</span>)}
+              </span>
+            )}
           </div>
-          <ResultCount total={data.rows.length} shown={rows.length} label="IP" filtered={!!term || !!reconFilter} />
           {/* v2.596(감사 PERFWEB-01 — 실측): 8,028행 전량을 DOM 에 그려 첫 로드에 메인 스레드가 12.5초 멈췄다. 정렬 뒤 상위 N행만
               그리고(DataTable limit — 정렬 뒤 자른다, v2.556 규약) 뺀 개수를 밝힌다. 검색·필터로 좁히면 전부 보인다. */}
           <DataTable columns={cols} rows={rows} initialSort={{ key: 'ip', dir: 'asc' }} limit={IPAM_ROW_LIMIT}
             footer={rows.length > IPAM_ROW_LIMIT ? `${rows.length.toLocaleString()}행 중 ${IPAM_ROW_LIMIT.toLocaleString()}행만 표시합니다 — 검색·필터로 좁히면 나머지도 보입니다(정렬은 전체 기준).` : null} />
         </>
       )}
-      {db && (view === 'list' || view === 'sheet') && (
+      {db && (view === 'list' || view === 'sheet' || view === 'home') && (
         <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7, overflowWrap: 'anywhere' }}>
           타 프로그램 공유용 DB: <code>{db.path}</code> ({db.kind === 'sqlite' ? 'SQLite · 테이블 ip_records' : 'NDJSON'})
           {' · '}갱신 {fmtDt(db.updatedAt)} · 수집 주기마다 자동 갱신됩니다.
@@ -496,27 +553,28 @@ function Ipam({ scope, onScope }) {
       {sel && <IpOwnerDetail row={sel} onClose={() => setSel(null)} />}
       {editMemo && <MemoEditor init={editMemo} onClose={() => setEditMemo(null)} onSaved={() => { setEditMemo(null); pickBase(base); }} />}
       {editOv && data && <OverrideEditor row={editOv} vcenters={data.byVcenter} tzOffsetMin={data.tzOffsetMin} onClose={() => setEditOv(null)} onSaved={() => { setEditOv(null); setReload((n) => n + 1); }} />}
-      {histIp && <IpHistoryModal row={histIp} scope={scope} onClose={() => setHistIp(null)} />}
+      {exportOpen && <IpamExportModal scope={scope} scopeName={(data?.byVcenter || []).find((v) => v.vcenterId === scope)?.vcenterName || ''} subnetCount={subnetsErr ? NaN : subnets.length} onClose={() => setExportOpen(false)} />}
+      {histIp && <IpHistoryModal row={histIp} scope={scope} onClose={() => setHistIp(null)}
+        canManage={canManage} onEditName={data ? () => { const r = histIp; setHistIp(null); setEditOv(r); } : null}
+        onEditMemo={() => { const r = histIp; setHistIp(null); setEditMemo({ ip: r.ip, memo: r.memo || '', tags: (r.tags || []).join(', ') }); }} />}
     </>
   );
 }
 
 /**
- * v2.639(U5): vCenter별 개수 칩 — 목록·서브넷 대장 두 보기가 같은 블록을 복사해 갖고 있었다. 칩을 누르면 그 vCenter 의 서브넷 대장으로.
- * `scanned` 행은 어떤 vCenter 에도 속하지 않고 스캔으로만 확인된 IP 묶음이다.
+ * v2.991: 소유 자원(VM·호스트)이 없는 행의 '소유 자원' 칸. 스캔 행의 ownerName 은 호스트명(없으면 IP)이라 호스트명 칸과 겹친다 —
+ *   스캔 행은 직접 넣은 라벨이 있을 때만 이름을 쓰고, 나머지는 담당자 · 열린 서비스만.
  */
-function VcenterChips({ byVcenter, scope, onPick }) {
-  return (
-    <div className="flex gap wrap" style={{ marginBottom: 10 }}>
-      {(byVcenter || []).map((v) => (
-        <span key={v.vcenterId || '__scan__'} className={`badge ${v.scanned ? 'teal' : 'gray'}`}
-          title={v.scanned ? '어떤 vCenter에도 속하지 않고 IP 능동 스캔으로만 확인된 IP입니다. 서브넷 대장의 “스캔 확인” 필터로 볼 수 있습니다.' : '이 vCenter의 서브넷 대장 보기'}
-          style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', border: scope === v.vcenterId ? '1px solid var(--accent,#2563eb)' : undefined }}
-          onClick={() => onPick(v.vcenterId)}>{v.scanned ? '🛰 네트워크 스캔' : v.vcenterName} · {v.count}</span>
-      ))}
-    </div>
-  );
+function OwnerText({ r }) {
+  const name = r.ownerType === 'scanned' ? (r.label || '') : (r.label || r.ownerName);
+  const bits = [];
+  if (r.owner_) bits.push(`👤${r.owner_}`);
+  if ((r.services || []).length) bits.push((r.services || []).join(','));
+  if (!name && !bits.length) return <span className="muted">—</span>;
+  return <span>{name}{bits.length ? <span className="muted" style={{ fontSize: 11 }}>{name ? ' · ' : ''}{bits.join(' · ')}</span> : ''}</span>;
 }
+
+// v3.4.0: vCenter별 칩 줄(VcenterChips — 목록 · 서브넷 대장 위)은 지웠다 — 범위는 화면 위 고르기 하나, vCenter별 수는 '현황' 탭의 표.
 
 /** IP 사용 이력 — 스캔으로 관측된 사용 시작(up)/해제(down) 전이 + 사용/미사용 구간. */
 /**
@@ -558,11 +616,45 @@ function IpOwnerDetail({ row, onClose }) {
   );
 }
 
-function IpHistoryModal({ row, scope, onClose }) {
+/**
+ * v3.5.0(재설계 묶음 나 — 시안 ④ 상세 창): IP 상세 창의 '관리 정보' 묶음. 예전에는 관리상태 · 메모를 따로 여는 창이었다 — 여기서 값을 보고
+ * 같은 창에서 편집으로 넘어간다(편집기 자체는 예전 것 — 저장 규칙 · 범위 판정은 서버가 그대로 한다).
+ */
+function MgmtBlock({ row, canManage, onEdit, onEditMemo }) {
+  const kv = [
+    ['관리상태', row.mgmtStatus ? <MgmtBadge s={row.mgmtStatus} /> : null],
+    ['용도', row.ipPurpose], ['요청자', row.requester], ['할당자', row.assigner], ['담당', row.owner_],
+    ['예약 만료', row.reservedUntil ? fmtDt(row.reservedUntil) : null], ['비고', row.note || row.notes],
+    ['메모', row.memo], ['태그', (row.tags || []).length ? (row.tags || []).join(', ') : null],
+  ].filter(([, v]) => v != null && v !== '');
+  return (
+    <div className="card" style={{ padding: 12, marginTop: 12, minWidth: 0 }}>
+      <div className="flex between" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: kv.length ? 8 : 0 }}>
+        <b style={{ fontSize: 13 }}>관리 정보</b>
+        {canManage && (
+          <span className="flex gap" style={{ flexWrap: 'wrap' }}>
+            {onEdit && <button className="logout-btn" style={{ padding: '5px 11px', fontSize: 12 }} onClick={onEdit}>관리 편집(용도 · 요청자 · 할당자 · 상태)</button>}
+            {onEditMemo && <button className="logout-btn" style={{ padding: '5px 11px', fontSize: 12 }} onClick={onEditMemo}>메모 · 태그</button>}
+          </span>
+        )}
+      </div>
+      {kv.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>넣은 관리 정보가 없습니다{canManage ? ' — 관리 편집에서 용도 · 요청자 · 할당자를 넣을 수 있습니다' : ''}.</div> : (
+        <div style={{ display: 'grid', gridTemplateColumns: '84px minmax(0, 1fr)', gap: '6px 10px', fontSize: 13 }}>
+          {kv.map(([k, v]) => (
+            <React.Fragment key={k}><span className="muted">{k}</span><span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{v}</span></React.Fragment>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IpHistoryModal({ row, scope, onClose, canManage = false, onEditName = null, onEditMemo = null }) {
   const ip = row.ip;
-  const hostname = row.hostname;
   const [h, setH] = useState(undefined);
+  const [scan, setScan] = useState(undefined); // v2.991: 그 IP 의 스캔 결과(방식별 호스트명) — undefined 조회 중 · null 없음
   const [showDetail, setShowDetail] = useState(false);
+  const [serverOpen, setServerOpen] = useState(false); // v3.6.0 서버 보기
   // 목록(/tools/ipam) 응답 다이어트로 VM 행의 owner 는 목록에 실리지 않는다(hasOwner 플래그만).
   // 모달을 연 시점에 /vms/lookup 으로 1건만 지연 조회 — 목록이 수십 MB로 커지던 것의 짝 수정.
   const [owner, setOwner] = useState(row.owner || null);
@@ -582,31 +674,34 @@ function IpHistoryModal({ row, scope, onClose }) {
   const [hErr, setHErr] = useState('');
   useEffect(() => {
     let active = true;
-    setH(undefined); setHErr('');
+    setH(undefined); setHErr(''); setScan(undefined);
     fetchJson(`/tools/ipam/history?ip=${encodeURIComponent(ip)}`)
-      .then((r) => { if (active) setH(r.history || null); })
-      .catch((e) => { if (active) { setHErr(e?.message || '조회 실패'); setH(null); } });
+      .then((r) => { if (active) { setH(r.history || null); setScan(r.scan || null); } })
+      .catch((e) => { if (active) { setHErr(e?.message || '조회 실패'); setH(null); setScan(null); } });
     return () => { active = false; };
   }, [ip]);
   const fmt = fmtDt; // v2.639(U7): 시각·소요는 ipamShared 한 벌(예전 이 모달만 브라우저 로케일 toLocaleString() · '분' 단위 소요)
-  const dur = (ms) => fmtDur(Math.max(0, ms));
+  // v2.998.1: 기간은 periodText(ipamShared) — fmtDur 로 그리면 해제된 적 없는 IP 의 '총 미사용 기간' 이 '0ms' 였다(그런 구간이 없으면 '없음').
+  const dur = (ms, count = 1) => periodText(Math.max(0, ms), count);
   // 이벤트(오래된→최신)로 사용(up)/미사용(down) 구간을 만든다. 마지막 구간은 현재까지.
-  const evs = (h?.events) || [];
+  //   v2.991: 이름 변경(renames)은 events 와 따로 온다 — 구간 계산에는 넣지 않고 전이 기록 표에만 끼워 보인다.
+  const evs = ((h?.events) || []).filter((e) => e && (e.type === 'up' || e.type === 'down'));
+  const trans = [...evs, ...((h?.renames) || []).filter((x) => x && x.ts).map((x) => ({ ts: x.ts, type: 'rename', src: x.src, from: x.from, to: x.to }))]
+    .sort((a, b) => (a.ts || 0) - (b.ts || 0));
   const now = Date.now();
   const segs = evs.map((e, i) => ({ type: e.type, start: e.ts, end: i + 1 < evs.length ? evs[i + 1].ts : now, hostname: e.hostname }))
     .map((s) => ({ ...s, ms: Math.max(0, s.end - s.start) }));
   const usedMs = segs.filter((s) => s.type === 'up').reduce((a, s) => a + s.ms, 0);
   const idleMs = segs.filter((s) => s.type === 'down').reduce((a, s) => a + s.ms, 0);
-  // 확인된 호스트명: 가장 최근 'up' 이벤트의 호스트명(없으면 전달받은 값).
-  const lastUpHost = [...evs].reverse().find((e) => e.type === 'up' && e.hostname)?.hostname;
-  const confirmedHost = lastUpHost || hostname || '—';
+  const upCount = segs.filter((s) => s.type === 'up').length;
+  const downCount = segs.filter((s) => s.type === 'down').length;
+  // v2.991: 호스트명은 위 '호스트명' 묶음(HostNameBlock — 방식별 결과)이 말한다(예전 '확인된 호스트명' 칸은 마지막 up 이벤트의 이름 하나였다).
   return (
-    <Modal title={`IP 사용 이력 — ${ip}`} onClose={onClose} width={640} resizable minWidth={440} minHeight={380}>
+    <Modal title={`IP 상세 — ${ip}`} onClose={onClose} width={640} resizable minWidth={440} minHeight={380}>
+      {h !== undefined && !hErr && <HostNameBlock row={row} scan={scan} canManage={canManage} onEditName={onEditName} />}
+      {h !== undefined && !hErr && <MacBlock scan={scan} />}
       {h === undefined ? <Loading /> : hErr ? <ErrorBox message={`IP 사용 이력을 읽지 못했습니다 — ${hErr}`} /> : !h ? (
         <div style={{ padding: 8 }}>
-          <div className="flex gap wrap" style={{ marginBottom: 10 }}>
-            <div style={{ minWidth: 160 }}><div className="muted" style={{ fontSize: 12 }}>확인된 호스트명</div><div style={{ fontSize: 13, marginTop: 2 }}>{hostname || '—'}</div></div>
-          </div>
           <div className="muted" style={{ fontSize: 13 }}>이 IP의 스캔 이력이 아직 없습니다. IP 능동 스캔이 이 대역을 한 번 이상 관측하면, 확인 시점·호스트명·사용/미사용 기간이 여기에 쌓입니다.</div>
         </div>
       ) : (
@@ -614,9 +709,8 @@ function IpHistoryModal({ row, scope, onClose }) {
           <div className="flex gap wrap" style={{ marginBottom: 12 }}>
             {[['현재 상태', h.status === 'up' ? <span className="badge green">사용 중</span> : <span className="badge amber">미사용(해제)</span>],
               ['확인 방식', <DiscoveryBadge d={row.discovery} />],
-              ['확인된 호스트명', confirmedHost],
               ['최초 확인', fmt(h.firstSeen)], ['마지막 확인', fmt(h.lastSeen)],
-              ['총 사용 기간', dur(usedMs)], ['총 미사용 기간', dur(idleMs)]].map(([k, v], i) => (
+              ['총 사용 기간', dur(usedMs, upCount)], ['총 미사용 기간', dur(idleMs, downCount)]].map(([k, v], i) => (
               <div key={i} style={{ minWidth: 150 }}><div className="muted" style={{ fontSize: 12 }}>{k}</div><div style={{ fontSize: 13, marginTop: 2 }}>{v}</div></div>
             ))}
           </div>
@@ -644,15 +738,17 @@ function IpHistoryModal({ row, scope, onClose }) {
             <STable minWidth={480} wrap={false}>
               <thead><tr><th>시각</th><th>전이</th><th>호스트명</th><th>포트</th></tr></thead>
               <tbody>
-                {[...(h.events || [])].reverse().map((e, i) => (
+                {[...trans].reverse().map((e, i) => (
                   <tr key={i}>
-                    <td style={{ whiteSpace: 'nowrap' }}>{fmt(e.ts)}</td>
-                    <td>{e.type === 'up' ? <span className="badge green">사용 시작</span> : <span className="badge amber">해제</span>}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>{e.hostname || '—'}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>{(e.ports || []).join(', ') || '—'}</td>
+                    <td style={{ whiteSpace: 'nowrap' }} data-sort={e.ts ?? ''}>{fmt(e.ts)}</td>
+                    <td>{e.type === 'up' ? <span className="badge green">사용 시작</span> : e.type === 'rename' ? <span className="badge amber" title="같은 방식이 전과 다른 이름을 답했습니다">이름 변경</span> : <span className="badge amber">해제</span>}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{e.type === 'rename'
+                      ? <span><NameSrcBadge src={e.src} /> {e.from} → <b style={{ color: 'var(--text)' }}>{e.to}</b></span>
+                      : (e.hostname || '—')}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{e.type === 'rename' ? '—' : ((e.ports || []).join(', ') || '—')}</td>
                   </tr>
                 ))}
-                {!(h.events || []).length && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>기록된 전이가 없습니다.</td></tr>}
+                {!trans.length && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>기록된 전이가 없습니다.</td></tr>}
               </tbody>
             </STable>
           </div>
@@ -660,12 +756,15 @@ function IpHistoryModal({ row, scope, onClose }) {
         </>
       )}
       {/* 하단: VM 정보 보기(소유 자원이 있을 때) + 원격 접속(SSH/RDP) — 기존 기능 재사용 */}
-      <div className="flex gap" style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 12, alignItems: 'center' }}>
+      <MgmtBlock row={row} canManage={canManage} onEdit={onEditName} onEditMemo={onEditMemo} />
+      <div className="flex gap" style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         {owner && <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => setShowDetail(true)}>{row.ownerType === 'host' ? '🖥 호스트 정보 보기' : '🖥 VM 정보 보기'}</button>}
+        <button className="logout-btn" style={{ padding: '8px 14px' }} title="이 IP 를 쓰는 서버(서비스 태그)와 그 서버의 모든 IP · 그 위 VM 의 IP" onClick={() => setServerOpen(true)}>🗄 서버 보기</button>
         <VmRemoteButton item={remoteItem} />
         {!owner && !row.hasOwner && <span className="muted" style={{ fontSize: 12 }}>스캔으로 확인된 IP — 원격 접속은 IP로 직접 연결합니다.</span>}
       </div>
       {showDetail && owner && <EntityDetail type={row.ownerType} item={owner} onClose={() => setShowDetail(false)} />}
+      {serverOpen && <IpamServerModal ip={ip} onClose={() => setServerOpen(false)} />}
     </Modal>
   );
 }
@@ -699,14 +798,15 @@ function IpamInsights({ scope }) {
       </div>
       <div className="vc-grid">
         {feats.map((f) => (
-          <div key={f.key} className="card" style={{ cursor: f.items?.length ? 'pointer' : 'default', borderColor: f.severity === 'warn' ? 'var(--amber)' : undefined }}
-            onClick={() => f.items?.length && setOpen((o) => (o === f.key ? null : f.key))}>
+          <div key={f.key} className="card" style={{ cursor: (f.items?.length || f.dnsCheck?.rows?.length) ? 'pointer' : 'default', borderColor: f.severity === 'warn' ? 'var(--amber)' : undefined, minWidth: 0 }}
+            onClick={() => (f.items?.length || f.dnsCheck?.rows?.length) && setOpen((o) => (o === f.key ? null : f.key))}>
             <div className="flex between" style={{ alignItems: 'baseline' }}>
               <b style={{ fontSize: 14 }}><span className="muted" style={{ fontSize: 12 }}>{String(f.n).padStart(2, '0')}.</span> {f.title}</b>
               <span style={{ fontSize: 15, fontWeight: 700, color: sevColor[f.severity] || 'var(--text)' }}>{f.value}</span>
             </div>
             <div className="muted" style={{ fontSize: 12, marginTop: 5, lineHeight: 1.5 }}>{f.detail}</div>
-            <div className="vc-foot"><span className="muted" style={{ fontSize: 11 }}>📚 {f.tool}</span>{f.items?.length ? <span className="muted" style={{ fontSize: 11 }}>{open === f.key ? '▲ 닫기' : `▼ 상세 ${f.items.length}`}</span> : <span />}</div>
+            <div className="vc-foot"><span className="muted" style={{ fontSize: 11 }}>📚 {f.tool}</span>{(f.items?.length || f.dnsCheck?.rows?.length) ? <span className="muted" style={{ fontSize: 11 }}>{open === f.key ? '▲ 닫기' : `▼ 상세 ${(f.dnsCheck?.total || 0) + (f.items?.length || 0)}`}</span> : <span />}</div>
+            {open === f.key && f.dnsCheck && <DnsCheckTable c={f.dnsCheck} />}
             {open === f.key && f.items?.length > 0 && (
               <div style={{ marginTop: 8, borderTop: '1px solid rgba(36,48,73,.5)', paddingTop: 8, maxHeight: 220, overflowY: 'auto' }}>
                 {f.items.map((it, i) => (
@@ -723,3 +823,51 @@ function IpamInsights({ scope }) {
     </>
   );
 }
+
+/**
+ * v3.2.0: 추천 › DNS 정합성 — 어긋난 IP(다른 IP · 정방향 없음)의 표. 카드 안에서 펼친다(클릭이 카드 접힘으로 새지 않게 막는다).
+ *   대장이 아는 이름 = VM · 호스트 이름 또는 스캔 행이면 역DNS 가 아닌 방식(NetBIOS · mDNS · 수동)이 답한 이름.
+ */
+const KNOWN_SRC = { vm: 'VM', host: '호스트', netbios: 'NetBIOS', mdns: 'mDNS', manual: '수동' };
+function DnsCheckTable({ c }) {
+  const rows = Array.isArray(c?.rows) ? c.rows : [];
+  return (
+    <div style={{ marginTop: 8, borderTop: '1px solid rgba(36,48,73,.5)', paddingTop: 8, cursor: 'default' }} onClick={(e) => e.stopPropagation()}>
+      <div className="flex gap wrap" style={{ gap: 6, marginBottom: 6 }}>
+        {['match', 'other', 'none', 'unknown'].map((k) => <span key={k} className={`badge ${DNS_FWD[k].tone}`} style={{ fontSize: 10 }}>{DNS_FWD[k].label} {Number(c.counts?.[k] || 0).toLocaleString()}</span>)}
+      </div>
+      {rows.length > 0 && (
+        // 표가 아니라 줄바꿈되는 행 — 카드는 격자 한 칸(1440px 에서도 약 370px)이라 6열 표는 정방향 주소 · 대장 이름이 가로 스크롤 밖으로 숨었다(Chromium 판독).
+        <div role="list" aria-label="정방향 확인이 어긋난 IP" style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+          {rows.map((x, i) => (
+            <div role="listitem" key={x.ip} style={{ padding: '7px 10px', borderTop: i ? '1px solid rgba(36,48,73,.5)' : 'none', fontSize: 12, lineHeight: 1.55, minWidth: 0 }}>
+              <div className="flex" style={{ flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 2 }}>
+                <span className={`badge ${DNS_FWD[x.v]?.tone || 'gray'}`} style={{ fontSize: 10, flex: 'none' }}>{DNS_FWD[x.v]?.label || x.v}</span>
+                <b style={{ fontFamily: 'var(--mono)', flex: 'none' }}>{x.ip}</b>
+                {x.known ? <span className="muted" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{x.known} ({KNOWN_SRC[x.knownSrc] || x.knownSrc})</span> : null}
+              </div>
+              <div style={{ overflowWrap: 'anywhere' }}>
+                <span className="muted">역DNS</span> {x.ptr || '—'} <span className="muted">→ 정방향</span>{' '}
+                {x.addrs?.length ? <span style={{ fontFamily: 'var(--mono)', color: 'var(--amber)' }}>{x.addrs.join(', ')}</span> : <span style={{ color: 'var(--amber)' }}>그런 이름 없음</span>}
+                {x.at ? <span className="muted"> · {fmtDt(x.at)} 확인</span> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {c.total > rows.length && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>어긋난 IP {Number(c.total).toLocaleString()}개 중 {rows.length.toLocaleString()}개 — 전부는 스캔 결과 CSV 의 dns_forward 열에 있습니다.</div>}
+      <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>스캐너가 쓰는 DNS 의 답입니다 — 안팎이 다른 DNS(분할 DNS)에서는 다른 곳의 답과 다를 수 있고, 운영체제 이름 풀이를 쓰므로 hosts 파일 항목도 섞입니다. 아래는 대장 이름으로 만든 레코드 초안입니다.</div>
+    </div>
+  );
+}
+
+/** v2.993(설계 bm-folders §13 ③): 스캔 이름을 어떻게 찾았나 — 역방향 DNS · 정방향 DNS(물리서버 이름으로 물어 이 IP) · 둘 다 · 서로 다름(둘 다 보인다). */
+// 역방향 DNS 만으로 찾은 이름(예전부터의 기본)은 표지를 달지 않는다 — 스캔 행마다 같은 표지가 붙어 표가 시끄러워진다.
+const NAME_VIA = { fwd: ['정방향 DNS', 'blue'], both: ['정방향 DNS 일치', 'gray'], differ: ['이름이 서로 다름', 'amber'] };
+function NameVia({ r }) {
+  const v = NAME_VIA[r?.nameVia];
+  if (!v) return null;
+  const title = r.nameVia === 'differ' ? `스캔이 찾은 이름 ${r.hostname} · 정방향 DNS 로 찾은 물리서버 이름 ${r.fwdName || ''} — 하나로 정하지 않습니다` : r.nameVia === 'fwd' ? '물리서버 이름(iDRAC 이 읽은 호스트 이름)을 DNS 에 물어 이 IP 가 나왔습니다' : r.nameVia === 'both' ? '스캔이 찾은 이름과 정방향 DNS 로 찾은 물리서버 이름이 같습니다' : undefined;
+  return <span className={`badge ${v[1]}`} style={{ marginLeft: 6, fontSize: 10.5 }} title={title}>{v[0]}{r.nameVia === 'differ' && r.fwdName ? ` · ${r.fwdName}` : ''}</span>;
+}
+

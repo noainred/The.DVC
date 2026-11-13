@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>값 없음 사유 툴팁 — 칸 · 원인별 12가지</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./bmf.css">
+<link rel="stylesheet" href="./bmf2.css">
+<link rel="stylesheet" href="./why.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:720px;padding:18px 20px;gap:10px">
+  <p class="intro" style="max-width:none">툴팁은 넷을 말한다 — <b style="color:#e6edf6">무엇이 없는가</b> · <b style="color:#e6edf6">왜 없는가</b> · <b style="color:#e6edf6">확인된 사실</b>(마지막 값 · 범위 · 시각) · <b style="color:#e6edf6">어떻게 하면 보이는가</b>. 사유는 서버가 판정한 것만 쓰고, 모르면 모른다고 쓴다.</p>
+
+  <span class="cap2">사용률(CPU · 메모리)</span>
+  <div class="grid4">
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>사용률 수집이 꺼져 있습니다</span><span class="tn g sp">수집 꺼짐</span></div>
+      <div class="rs"><span class="nd"></span><span>이 포탈의 베어메탈 사용률 수집이 꺼져 있어 어느 서버도 값이 없습니다.</span></div>
+      <div class="fx"><span class="k">범위</span><span class="v">이 포탈의 물리서버 전부</span></div>
+      <div class="ac"><b>이렇게 하면 보입니다</b> — 설정 › 베어메탈 사용률에서 수집을 켭니다(관리자).</div>
+    </div>
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>이 법인은 수집을 켜지 않았습니다</span><span class="tn g sp">수집 대상 아님</span></div>
+      <div class="rs"><span class="nd"></span><span>수집은 켜져 있지만 이 법인이 대상에 들어 있지 않습니다.</span></div>
+      <div class="fx"><span class="k">같은 이유</span><span class="v">이 법인 118대</span></div>
+      <div class="ac"><b>이렇게 하면 보입니다</b> — 베어메탈 사용률 설정의 법인 목록에서 이 법인을 고릅니다.</div>
+    </div>
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>읽을 계정이 없습니다</span><span class="tn g sp">수집 대상 아님</span></div>
+      <div class="rs"><span class="nd"></span><span>OS 계정이 등록되지 않았고, iDRAC 으로는 CPU · 메모리를 읽지 못했습니다.</span></div>
+      <div class="fx"><span class="k">읽고 있는 것</span><span class="v">전력 · 부품 장애(iDRAC)</span></div>
+      <div class="ac"><b>이렇게 하면 보입니다</b> — OS 계정을 등록하면 다음 주기부터 나옵니다.</div>
+    </div>
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>엣지에 이 서버 기록이 없습니다</span><span class="tn g sp">엣지 기록 없음</span></div>
+      <div class="rs"><span class="nd"></span><span>엣지가 수집하는 서버인데, 그 엣지가 보낸 사용률 묶음에 이 서버가 없습니다.</span></div>
+      <div class="fx"><span class="k">엣지 보고</span><span class="v">12분 전에 받음</span></div>
+      <div class="ac"><b>확인할 곳</b> — 그 엣지 포탈의 베어메탈 사용률에서 이 서버가 수집 대상인지 봅니다.</div>
+    </div>
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>마지막 값이 오래됐습니다</span><span class="tn w sp">오래됨</span></div>
+      <div class="rs"><span class="nd w"></span><span>값이 있지만 2시간 14분 전 것이라 지금 값으로 치지 않습니다.</span></div>
+      <div class="fx"><span class="k">마지막 값</span><span class="v">CPU 41% · 메모리 66% · 04:24</span><span class="k">기준</span><span class="v">수집 주기의 3배(최소 30분)</span></div>
+      <div class="ac"><b>확인할 곳</b> — 베어메탈 사용률의 수집 상태(수집이 멈췄는지).</div>
+    </div>
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>식별 키가 다른 서버와 겹칩니다</span><span class="tn g sp">수집 대상 아님</span></div>
+      <div class="rs"><span class="nd"></span><span>두 서버의 값이 섞이지 않게 이 서버는 수집하지 않습니다.</span></div>
+      <div class="fx"><span class="k">겹친 키</span><span class="v">서비스 태그 없음 · 이름 기준</span></div>
+      <div class="ac"><b>이렇게 하면 보입니다</b> — 서비스 태그를 채우면 풀립니다.</div>
+    </div>
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>아직 수집 기록이 없습니다</span><span class="tn g sp">기록 없음</span></div>
+      <div class="rs"><span class="nd"></span><span>수집 대상이지만 등록 직후이거나 주기가 아직 돌지 않았습니다.</span></div>
+      <div class="fx"><span class="k">다음 수집</span><span class="v">약 4분 뒤</span></div>
+      <div class="ac"><b>기다리면 됩니다</b> — 한 주기가 지난 뒤에도 비면 누락 점검을 봅니다.</div>
+    </div>
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>이유를 확인하지 못했습니다</span><span class="tn u sp">확인 못 함</span></div>
+      <div class="rs"><span class="nd u"></span><span>수집 대상이고 값이 있어야 하는데 없습니다. 걸리는 사유가 없어 원인을 단정하지 않습니다.</span></div>
+      <div class="ac"><b>확인할 곳</b> — 베어메탈 사용률 › 누락 점검 · 이 서버의 수집 기록.</div>
+    </div>
+  </div>
+
+  <span class="cap2">그 밖의 칸</span>
+  <div class="grid4">
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>전력 값이 없습니다</span><span class="tn g sp">iDRAC 전력 미보고</span></div>
+      <div class="rs"><span class="nd"></span><span>iDRAC 이 전력 값을 주지 않았거나 마지막 값이 2시간을 넘었습니다.</span></div>
+      <div class="fx"><span class="k">합계</span><span class="v">이 서버는 전력 합에 넣지 않습니다</span></div>
+      <div class="ac"><b>확인할 곳</b> — 전력 화면의 이 서버 · iDRAC 연결.</div>
+    </div>
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>부품 장애를 확인하지 못했습니다</span><span class="tn u sp">확인 못 함</span></div>
+      <div class="rs"><span class="nd u"></span><span>부품 장애 기록을 읽지 못했습니다. 0건이라는 뜻이 아닙니다.</span></div>
+      <div class="fx"><span class="k">합계</span><span class="v">장애에도 정상에도 넣지 않고 ‘모름’ 으로 셉니다</span></div>
+      <div class="ac"><b>확인할 곳</b> — 물리 부품 장애 화면의 수집 상태.</div>
+    </div>
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>전원 상태를 모릅니다</span><span class="tn g sp">엣지 보고에 없음</span></div>
+      <div class="rs"><span class="nd"></span><span>엣지가 올리는 서버 목록에는 전원 상태가 들어 있지 않습니다.</span></div>
+      <div class="ac"><b>확인할 곳</b> — 그 엣지 포탈에서 이 서버를 봅니다.</div>
+    </div>
+    <div class="tip s" role="tooltip">
+      <div class="tt"><span>24시간 추이가 없습니다</span><span class="tn g sp">엣지 이전 판본</span></div>
+      <div class="rs"><span class="nd"></span><span>담당 엣지가 추이를 내주지 않는 판본입니다.</span></div>
+      <div class="ac"><b>이렇게 하면 보입니다</b> — 그 엣지를 올리면 나옵니다.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":720}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

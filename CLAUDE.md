@@ -20,8 +20,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 ## 운영 환경 (성능 설계 시 반드시 고려)
 
 - vCenter: **현재 28개 vCenter(~658 호스트·~5,850 VM), 향후 30+까지 확장 예정**. 글로벌 분산.
-- **법인 · vCenter · Bareos 는 1:1:1**(2026-10-30 사용자 '기억해줘'): 법인 28곳마다 vCenter 1개 · Bareos 1대 — A 법인의 Bareos 는
-  A 법인의 vCenter 만 백업한다. 백업 화면·알림·스케줄은 '법인(= 그 vCenter = 그 Bareos)' 한 단위로 묶고, 다른 법인 Bareos 로 섞어 보내지 않는다.
+- **법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1**(2026-11-13 사용자 정정 '기억해' — 10-30 의 '법인 · vCenter · Bareos 1:1:1' 을 대체): 한 법인(DataCenter)에
+  서비스가 둘 이상일 수 있고 서비스마다 vCenter 1개 · Bareos 1대 → **법인 하나에 vCenter · Bareos 가 여럿**. A 서비스의 Bareos 는 A 서비스의 vCenter 만 백업한다(다른 서비스 · 법인 Bareos 로 섞지 않는다).
+  코드 · 주석의 '1:1:1' · '법인 = vCenter' 는 옛 가정이다 — 법인 묶음 = DataCenter, 백업 실행 단위 = 서비스(vCenter↔Director). 코드 정리 범위는 사용자 결정을 따른다.
 - **백업은 법인 로컬, 통합 로그·현황은 중앙**(2026-11-01 사용자 '기억해줘'): A 법인 안에 vCenter·Veeam B&R·Bareos 가 함께 있다 — 백업 실행·조회·복원·
   설정(SSH)·보관 정리는 **그 법인 쪽(법인 엣지 → 로컬 Director·B&R)** 에서 돌고, 중앙은 결과·로그를 모아 통합해 보여 준다. 설계할 때 Director·B&R 호출이
   VM 수만큼 WAN(800ms+)을 왕복하게 만들지 말 것 — 작업 하나를 법인 쪽에 보내 로컬에서 묶어 돌리고 요약만 올린다(Bareos `ops.js` 작업 표·엣지 대행 v2.824 ·
@@ -63,26 +64,27 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 ## 영역별 규칙 문서 — 그 영역을 고치기 전에 해당 파일을 읽을 것
 
 목록·목차는 `docs/rules/README.md`. 서버 모듈별 불변조건은 그 폴더의 CLAUDE.md 에도 있다(자동 로드):
-`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run,bareos,bareos/install,bareos/manage,servicemap}/CLAUDE.md`.
+`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run,bareos,bareos/install,bareos/manage,servicemap,svcmon,ping,focusmon,bmfolders}/CLAUDE.md`.
 
 | 파일 | 다루는 것 · 언제 읽나 |
 |---|---|
 | `docs/rules/perf-db.md` (24항목) | 성능·DB·폴러 규약 — 폴러·DB 모듈·캐시·대량 쓰기·응답 캐시를 새로 만들거나 고칠 때 |
 | `docs/rules/common.md` (12항목) | 공통 코드·테스트·문서 규약(numOrNull·주석 제거·TDZ·생성기·의존 방향·릴리스 워크플로) — 테스트·스윕·문서 생성기·릴리스 워크플로를 만질 때 |
 | `docs/rules/security-api.md` (19항목) | 보안·라우트·외부 API·감사 로그·라이선스 — server/src/routes/ · publicapi · auth · 압축 해제 · CSP |
-| `docs/rules/web.md` (47항목) | 웹 화면·메뉴·표·문구 규약 — web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
-| `docs/rules/edge.md` (18항목) | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개·VM 백업 법인 위임 — server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed,vmclone}/ |
-| `docs/rules/storage.md` (34항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
-| `docs/rules/sanswitch.md` (16항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
-| `docs/rules/idrac-server.md` (24항목) | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 — server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
-| `docs/rules/vcenter.md` (30항목) | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) — server/src/{vcenter,vcinfo,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
+| `docs/rules/web.md` (53항목) | 웹 화면·메뉴·표·문구 규약 — web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
+| `docs/rules/edge.md` (19항목) | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개·VM 백업 법인 위임 — server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed,vmclone}/ |
+| `docs/rules/storage.md` (38항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
+| `docs/rules/sanswitch.md` (22항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
+| `docs/rules/idrac-server.md` (28항목) | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 — server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
+| `docs/rules/vcenter.md` (31항목) | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) — server/src/{vcenter,vcinfo,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
 | `docs/rules/gpu.md` (8항목) | GPU 모니터링(할당·메모리·온도·수집 점검) — server/src/gpu/ · web/src/views/tools/Gpu* |
-| `docs/rules/cvp.md` (11항목) | Arista CVP 수집·장애·GBIC·Overview — server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
+| `docs/rules/cvp.md` (16항목) | Arista CVP 수집·장애·GBIC·Overview — server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
 | `docs/rules/isilon.md` (7항목) | 아이실론 디렉터리 사용량·메일 — server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
-| `docs/rules/ipam.md` (11항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
+| `docs/rules/ipam.md` (19항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | `docs/rules/horizon-curuser.md` (6항목) | Horizon 세션·앱 사용·현재 사용자(Windows) — server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | `docs/rules/demo.md` (6항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
 | `docs/rules/audits.md` (82항목) | 회차별 점검(감사) 기록 v2.583~v2.785 — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
+| `docs/rules/focusmon.md` (7항목) | 서버 집중 모니터링 상세 기록(v2.976 반증 · v2.978 CSV · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 · v2.983 수집 부하 · v2.992 카드 아래 줄) — server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js |
 | `docs/rules/server-security-history.md` | 서버 보안 감사 조치 기록(2026-09-12 ~ 10-16 — SSRF lookup·큰 본문 게이트·비밀 가림·인증 정지·암호문 재사용·세션·장비 신뢰·관리자 판본) |
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
@@ -158,6 +160,9 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
   현재 진행 중인 작업 + 추가로 해야 할 작업(미릴리스 포함)을 모두 한 표에 정리한다.
 - **`.` 입력 시 작업 현황 표 응답**: 사용자가 `.` 하나만 입력하면 진행 중·대기 작업을 같은 형식의 표로 보여준다. 릴리스 폴링 등
   백그라운드 확인도 포함하고, 없으면 "모두 완료" 와 최근 완료 릴리스 버전을 알린다.
+- **`....` 입력 시 전체 세션 현황 표**(2026-11-13 사용자 지시): 이 세션만이 아니라 **Claude Code 에서 돌아가는 모든 작업**을 표로 정리한다 —
+  `list_sessions`(mine)·`get_session`(상태 문구)·`list_triggers`·열린 PR 을 조회해 ① 실행 중 ② CI·머지·예약 대기 ③ 사용자 응답 대기 ④ 예약 루틴 순으로,
+  열은 `세션(링크) | 최근 갱신(KST) | 상태 | 하는 일·필요한 조치 | 브랜치·PR`. 오늘 끝난 세션은 한 줄 요약. 상태 문구가 오래됐으면 추정임을 밝힌다.
 - **진행 메시지에 시각 표시**(2026-11-05 사용자 '기억해줘'): 작업 중 사용자에게 보내는 진행 메시지(지금 무엇을 하는지 · 중간 결과 · 기다리는 것)는
   맨 앞에 **KST 시각**을 붙인다 — 예 `[13:34] 반증 결과 반영 중입니다`. 시각은 그때 `TZ=Asia/Seoul date '+%H:%M'` 으로 뽑는다(지어내지 않는다).
 - **30분 이상 걸릴 것 같으면 착수 전에 방식을 물어볼 것**(2026-09-15 지시): 표의 `시간` 열에 예상 소요를 적고, 합이 30분을 넘길 것 같으면

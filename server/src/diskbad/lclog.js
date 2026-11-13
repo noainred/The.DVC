@@ -1,5 +1,5 @@
 /**
- * diskbad/lclog.js — iDRAC Lifecycle 로그를 **읽기만** 한다(v2.915).
+ * diskbad/lclog.js — iDRAC Lifecycle 로그를 **읽기만** 한다(v3.8.0).
  *
  * 사용자 선택(2026-11-14): 실장비 확인 전이라 **보수적으로** — 확인하지 못한 기능에 기대지 않는다.
  *  · `$filter`(ID · 시각으로 걸러 받기)는 iDRAC 가 지원하는지 모른다(README §5 · §14.1 ③④) → 쓰지 않는다.

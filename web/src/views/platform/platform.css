@@ -1,0 +1,71 @@
+/*
+ * platform.css — 가상화 허브(v2.994 메뉴 'Virtual Machine(VM)' · 'Hypervisor' — 옛 이름 '가상화 플랫폼')(v2.915 · 설계 docs/design/virt-platform-menu 시안 A ②~⑥ · ⑨).
+ * 선택자는 전부 .ph 로 시작한다. 색은 CSS 변수로만(배지 바탕 rgba 는 vmHub.css 토큰과 같은 값). 그리드 자식은 min-width:0. uppercase 금지.
+ * 탭 줄(호스트별 · 법인별 ‖ 도구 · 카드 | 표 ‖ 도구)은 가상화 서버 허브의 .vmh-tabs 를 그대로 쓴다(views/platform/HubTabs.jsx — 같은 줄이 세 탭에 선다).
+ */
+.ph { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin-bottom: 14px; }
+.ph-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; min-width: 0; }
+.ph-head h1 { margin: 0; font-size: 20px; font-weight: 800; color: var(--text); }
+.ph-head .ph-sub { font-size: 12.5px; color: var(--text-dim); min-width: 0; }
+/* v2.994: '마지막으로 본 탭을 기억합니다'(.ph-note)는 지웠다 — 그 자리의 오른쪽 밀기(margin-left:auto)는 스냅샷 시각이 맡는다. */
+.ph-head .ph-snap { margin-left: auto; font-size: 12px; color: var(--text-dim); font-family: var(--mono); white-space: nowrap; }
+
+/* 엔티티 탭 3장 — 수 + '지금 볼 것' 배지 + 그 탭에만 있는 분해. 열린 탭은 accent 테두리 + 아래 3px 밑줄(허브 탭 줄과 같은 표지). */
+.ph-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; min-width: 0; }
+.ph-tab { display: flex; flex-direction: column; gap: 7px; padding: 13px 16px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--border);
+  color: var(--text); text-decoration: none; min-width: 0; cursor: pointer; font: inherit; text-align: left; }
+.ph-tab:hover { border-color: var(--accent); }
+.ph-tab.on { border-color: var(--accent); background: var(--panel-2); box-shadow: inset 0 -3px 0 var(--accent); }
+.ph-tab .lb { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; color: var(--text-dim); min-width: 0; }
+.ph-tab .lb .ph-ico { width: 16px; height: 16px; flex: none; }
+.ph-tab .lb .sub { font-weight: 500; }
+.ph-tab.on .lb { color: #93c5fd; }
+.ph-tab .val { font-family: var(--mono); font-size: 30px; font-weight: 800; line-height: 1; color: var(--text); white-space: nowrap; }
+.ph-tab .parts { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--text-dim); min-width: 0; }
+.ph-tab .parts b { color: var(--text); font-weight: 600; }
+.ph-tab .parts b.green { color: #86efac; }
+.ph-tab .parts b.amber { color: #fcd34d; }
+.ph-tab .parts b.red { color: #fca5a5; }
+.ph-tab .parts small { color: var(--text-faint); }
+.ph-badge { margin-left: auto; font-family: var(--mono); font-size: 11px; font-weight: 800; border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+.ph-badge.amber { color: #fcd34d; background: rgba(245, 158, 11, 0.14); }
+.ph-badge.red { color: #fca5a5; background: rgba(239, 68, 68, 0.14); }
+
+/* 바로가기 칩 줄 — 기존 vCenter 화면의 .vc-quicknav / .qn-btn 을 그대로 쓴다(styles.css). 숫자 · 접기만 더한다. */
+.ph-chips { margin-bottom: 0; }
+.ph-chips .qn-n { font-family: var(--mono); font-size: 11px; font-weight: 800; }
+.ph-chips .qn-n.amber { color: #fcd34d; }
+.ph-chips .qn-n.red { color: #fca5a5; }
+.ph-chips .ph-legend { font-size: 11.5px; color: var(--text-faint); white-space: nowrap; }
+.ph-chips .ph-fold { margin-left: auto; }
+.ph-chips.folded .qn-btn, .ph-chips.folded .ph-legend { display: none; }
+
+/* 탭 줄 오른쪽(탭 고유 조건 — 상태 · 전원 · 메모 · IPMS · 호스트 칩) */
+.ph-right { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: nowrap; padding-left: 8px; }
+.ph-right .select { min-height: 30px; }
+.ph-right label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; cursor: pointer; }
+
+/* 1200 미만: 탭 3장 글자 줄이기 · 720 미만(400px 판 ⑥): 3칸 한 줄에 수 + 이름 + 배지만, 분해는 아래 한 줄 */
+@media (max-width: 1199px) { .ph-tab .val { font-size: 26px; } .ph-tab .parts { font-size: 11.5px; } }
+@media (max-width: 719px) {
+  .ph-tabs { gap: 6px; }
+  .ph-tab { align-items: center; gap: 3px; padding: 8px 4px; }
+  .ph-tab .lb { flex-direction: column; gap: 2px; font-size: 11.5px; text-align: center; }
+  .ph-tab .lb .sub, .ph-tab .lb .ph-ico { display: none; }
+  .ph-badge { margin-left: 0; font-size: 10px; }
+  .ph-tab .val { font-size: 20px; order: -1; }
+  .ph-tab .parts { display: none; }
+  .ph-tab.on .parts { display: flex; grid-column: 1 / -1; }
+  .ph-parts-narrow { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--text-dim); }
+  .ph-right { margin-left: 0; flex-wrap: wrap; }
+}
+@media (min-width: 720px) { .ph-parts-narrow { display: none; } }
+
+/* vCenter 카드의 호스트 · VM 수(v2.915 — 누르면 그 법인 범위로 탭 이동). 카드 안 버튼이라 테두리 · 배경을 지운다(모양은 예전 .vc-count 그대로). */
+.vc-counts .vc-count-go { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.vc-counts .vc-count-go:hover b { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.vc-counts .vc-count-go:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+/* 공용 범위 바의 안내 글(400px 은 숨긴다 — 두 줄 바에 자리가 없다) */
+@media (max-width: 719px) { .ph-scope-note { display: none; } }
+/* vCenter 탭의 남은 KPI(백업 · 추이) — 1440 은 한 줄(kpis-1row), 720 미만은 세로로(추이 스파크라인 130px 가 110px 칸을 넘쳐 400px 에서 8px 가로 스크롤이 났다 — Chromium 실측). */
+@media (max-width: 719px) { .kpis.kpis-1row.ph-kpis { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); } }

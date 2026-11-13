@@ -135,7 +135,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
   const pickVc = (vcId) => { selRef.current = vcId; setSelVc(vcId); setRows(null); setRowsFor(null); loadVms(vcId); };
   const setRow = (id, patch) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   // 배포 대상(로컬↔엣지)이 바뀌면 저장 표시 기준이 달라지므로 조회된 VM 목록을 다시 불러온다.
-  useEffect(() => { if (selVc) { setRows(null); setRowsFor(null); loadVms(selVc); } /* eslint-disable-next-line */ }, [deployAgent]);
+  useEffect(() => { if (selVc) { setRows(null); setRowsFor(null); loadVms(selVc); } }, [deployAgent]); // eslint-disable-line react-hooks/exhaustive-deps
   const rowsMatch = vmCredRowsMatch({ selVc, deployAgent, rowsFor });
 
   const runTest = async (subset) => {

@@ -19,7 +19,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { setKeepDays, RAW_KEEP_DAYS_DEF, DAILY_KEEP_DAYS_DEF } from './db.js';
+import { setKeepDays, RAW_KEEP_DAYS_DEF, DAILY_KEEP_DAYS_DEF, NODE_LOAD_RAW_KEEP_DAYS_DEF, NODE_LOAD_HOURLY_KEEP_DAYS_DEF,
+  NODE_CLIENT_RAW_KEEP_DAYS_DEF, NODE_CLIENT_HOURLY_KEEP_DAYS_DEF, NODE_CLIENT_DAILY_KEEP_DAYS_DEF } from './db.js';
 
 const FILE = () => path.join(config.configDir, 'storage-growth-settings.json');
 
@@ -36,6 +37,40 @@ export const GROWTH_SPEC = Object.freeze([
     label: '원시 표본 보존 기간',
     hint: '수집 주기마다 남기는 점입니다. 최근 구간을 세밀히 보는 용도라 짧게 둡니다 — 길게 두면 파일이 빠르게 커집니다(증가량 분석에는 쓰이지 않습니다).',
     presets: [{ days: 30, label: '30일' }, { days: 90, label: '90일(기본)' }, { days: 180, label: '180일' }, { days: 400, label: '400일' }],
+  },
+  {
+    // v2.926 — 노드 부하(네트워크·디스크·CPU) 원시. 노드 × 수집 주기라 용량 원시보다 크다 — 일 롤업(위 '사용량 저장 기간')은 따로 남는다.
+    key: 'nodeLoadRawKeepDays', def: NODE_LOAD_RAW_KEEP_DAYS_DEF, min: 1, max: 400,
+    label: '노드 부하 원시 보존 기간',
+    // v2.932: 기본 30일 → 7일(표본 주기가 1시간 → 5분이면 행이 12배). 저장값이 있으면 그대로다(저장값 우선 — 아래 loadGrowthSettings).
+    hint: '아이실론 노드별 네트워크·디스크·CPU·IOPS 를 표본 주기마다 남기는 점입니다(노드 수 × 주기 — 5분 표본이면 1시간 수집의 12배). 원시보다 오래된 구간은 시간 요약·일 요약으로 봅니다.',
+    presets: [{ days: 2, label: '2일' }, { days: 7, label: '7일(기본)' }, { days: 30, label: '30일' }, { days: 90, label: '90일' }],
+  },
+  {
+    // v2.932(2차) — 노드 시간 요약(노드 × 24/일). 원시가 끝난 뒤 7일·30일 보기의 세밀한 원천.
+    key: 'nodeLoadHourlyKeepDays', def: NODE_LOAD_HOURLY_KEEP_DAYS_DEF, min: 7, max: 1825,
+    label: '노드 부하 시간 요약 보존 기간',
+    hint: '노드별 1시간 평균·최대입니다(노드 수 × 24행/일). 원시 보존이 끝난 구간을 1시간 단위로 볼 수 있는 기간이고, 그보다 오래된 구간은 일 단위 요약만 남습니다.',
+    presets: [{ days: 30, label: '30일' }, { days: 90, label: '90일(기본)' }, { days: 365, label: '1년' }],
+  },
+  {
+    // v2.932(2차 ③) — 노드별 클라이언트·프로토콜 원시(표본마다 노드 × 상위 N 행). 가장 많이 쌓이는 표라 짧다.
+    key: 'nodeClientRawKeepDays', def: NODE_CLIENT_RAW_KEEP_DAYS_DEF, min: 1, max: 30,
+    label: '노드 클라이언트 원시 보존 기간',
+    hint: '노드마다 ‘지금 작업 중인 클라이언트 상위 N’ 을 표본 주기마다 남기는 행입니다(노드 수 × N × 주기 — 가장 많이 쌓입니다). 노드 드로어의 ‘지금’ 열이 이 표를 읽습니다.',
+    presets: [{ days: 1, label: '1일' }, { days: 2, label: '2일(기본)' }, { days: 7, label: '7일' }],
+  },
+  {
+    key: 'nodeClientHourlyKeepDays', def: NODE_CLIENT_HOURLY_KEEP_DAYS_DEF, min: 7, max: 365,
+    label: '노드 클라이언트 시간 요약 보존 기간',
+    hint: '클라이언트 × 노드 × 프로토콜의 1시간 평균입니다. 노드 드로어의 24시간·7일 창과 ‘클라이언트 분포(쏠림·재배치 후보)’ 가 이 표를 읽습니다.',
+    presets: [{ days: 14, label: '14일' }, { days: 30, label: '30일(기본)' }, { days: 90, label: '90일' }],
+  },
+  {
+    key: 'nodeClientDailyKeepDays', def: NODE_CLIENT_DAILY_KEEP_DAYS_DEF, min: 30, max: 1825,
+    label: '노드 클라이언트 일 요약 보존 기간',
+    hint: '클라이언트 × 노드 × 프로토콜의 하루 평균입니다(30일보다 긴 창). 재배치 전후를 달 단위로 비교할 때 씁니다.',
+    presets: [{ days: 180, label: '180일' }, { days: 365, label: '1년(기본)' }, { days: 730, label: '2년' }],
   },
 ]);
 const SPEC_BY_KEY = new Map(GROWTH_SPEC.map((s) => [s.key, s]));
@@ -80,6 +115,10 @@ export function loadGrowthSettings() {
   // 다음 prune 에서 지워졌고, 화면은 '기본값' 이라 말했다.
   const envVals = normalizeGrowthSettings({
     rawKeepDays: process.env.STORAGE_HISTORY_KEEP_DAYS, dailyKeepDays: process.env.STORAGE_DAILY_KEEP_DAYS,
+    nodeLoadRawKeepDays: process.env.STORAGE_NODELOAD_KEEP_DAYS,
+    // v2.932 — 새 칸 4개의 env 폴백(db.js 와 같은 이름)
+    nodeLoadHourlyKeepDays: process.env.STORAGE_NODELOAD_HOURLY_KEEP_DAYS, nodeClientRawKeepDays: process.env.STORAGE_NODECLIENT_KEEP_DAYS,
+    nodeClientHourlyKeepDays: process.env.STORAGE_NODECLIENT_HOURLY_KEEP_DAYS, nodeClientDailyKeepDays: process.env.STORAGE_NODECLIENT_DAILY_KEEP_DAYS,
   }).values;
   const out = {};
   for (const s of GROWTH_SPEC) {
@@ -106,7 +145,9 @@ export function saveGrowthSettings(input) {
 /** 기동 시·저장 시 DB 모듈에 보존 일수를 주입한다. */
 export function applyGrowthSettings() {
   const v = loadGrowthSettings();
-  setKeepDays({ rawKeepDays: v.rawKeepDays, dailyKeepDays: v.dailyKeepDays });
+  setKeepDays({ rawKeepDays: v.rawKeepDays, dailyKeepDays: v.dailyKeepDays, nodeLoadRawKeepDays: v.nodeLoadRawKeepDays,
+    nodeLoadHourlyKeepDays: v.nodeLoadHourlyKeepDays, nodeClientRawKeepDays: v.nodeClientRawKeepDays,
+    nodeClientHourlyKeepDays: v.nodeClientHourlyKeepDays, nodeClientDailyKeepDays: v.nodeClientDailyKeepDays });
   return v;
 }
 

@@ -20,6 +20,7 @@ import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
 import { splitHostPort } from '../util/hostPort.js';   // v2.603(LEFT2603-02): IPv6 host:port 분리
 import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v2.492: 다중 VM 기간 사용률(엔티티별 파싱)
+import { HOST_NIC_COUNTERS, NIC_REALTIME_SAMPLES, parsePerfInstancesXml, summarizeNicPerf } from './nicPerf.js'; // v2.925(B-③) vmnic 드롭·에러
 
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
 export { parseObjectContent, xmlUnescape };
@@ -32,6 +33,8 @@ import { refreshHostCfg, HOST_CFG_BUDGET_MS } from '../hostcfg/collect.js';   //
 import { get as hostCfgCacheGet } from '../hostcfg/cache.js';
 import { refreshContention, CONTENTION_BUDGET_MS } from '../contention/collect.js';   // v2.706(C2·C3)
 import { get as contentionGet } from '../contention/cache.js';
+import { refreshStorPath, STORPATH_BUDGET_MS, hasFcHba } from '../storpath/collect.js';   // v2.935(C-①) ESXi 경로 카운터
+import { get as storPathGet } from '../storpath/cache.js';
 import { dsUuidOf } from '../contention/parse.js';
 import { refreshDsCfg, getDsCfg, DS_CFG_BUDGET_MS } from '../dscfg/collect.js';   // v2.700(A17)
 import { refreshClusterCfg, getClusterCfg, CLUSTER_CFG_BUDGET_MS } from '../clustercfg/collect.js';   // v2.701(A6)
@@ -589,6 +592,24 @@ export class VimSoapClient {
   }
 
   /**
+   * v2.925(B-③) — 한 엔티티의 카운터 여러 개를 **인스턴스별로**(instance '*') 한 번의 QueryPerf 로. 호스트 net.* 은 인스턴스가 vmnic 이름이다.
+   * 반환은 parsePerfInstancesXml 모양(집계 계열 '' 은 버린다).
+   */
+  async queryEntityPerfInstances(entityType, ref, counterIds, intervalId, { maxSample = 0 } = {}) {
+    const ids = [...new Set((counterIds || []).filter(Boolean).map(String))];
+    if (!ids.length) return parsePerfInstancesXml('', []);
+    const metricIds = ids.map((id) => `<metricId><counterId>${id}</counterId><instance>*</instance></metricId>`).join('');
+    const spec =
+      `<querySpec><entity type="${entityType}">${ref}</entity>` +
+      (maxSample ? `<maxSample>${maxSample}</maxSample>` : '') +
+      metricIds + `<intervalId>${intervalId}</intervalId></querySpec>`;
+    const xml = await this.#call(
+      `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
+    );
+    return parsePerfInstancesXml(xml, ids);
+  }
+
+  /**
    * 다중 VM × 다중 카운터 QueryPerf(v2.492) → Map&lt;moref, Map&lt;counterId, [{t,v}]&gt;&gt;.
    *
    * querySpec 을 VM 마다 하나씩 이어 붙여 **요청 1회**로 받는다(queryHostPower 가 호스트 전력에
@@ -819,6 +840,31 @@ export function vmDns(netXml, ipStackXml) {
     if (!servers.includes(a) && servers.length < DNS_LIST_MAX) servers.push(a);
   }
   return { servers, stack, nics };
+}
+/** vmk 하나당 최대 이만큼만 싣는다(비정상 응답이 스냅샷을 키우지 않게). */
+export const VMK_MAX = 32;
+/**
+ * v3.6.0(IP 관리 재설계 묶음 다): ESXi `config.network.vnic`(HostVirtualNic 배열) → [{ dev, ip, mask, pg }].
+ * IPv4 정규형만 싣는다(IPv6 · DHCP 로 아직 주소가 없는 vmk 는 뺀다). `pg` 는 표준 스위치 포트그룹 이름 — 분산 스위치 vmk 는 이름이 없어 ''.
+ * ipV6Config 블록을 먼저 지운다(그 안의 <ipAddress> 를 IPv4 자리로 읽지 않게). 순서는 vCenter 가 준 순서(보통 vmk0 이 먼저).
+ */
+export function parseVmks(xml) {
+  const out = [];
+  for (const blk of xmlBlocks(xml, 'HostVirtualNic', VMK_MAX)) {
+    const v4 = stripXmlBlocks(blk, 'ipV6Config');
+    const ip = String(xmlText(v4, 'ipAddress') || '').trim();
+    if (!isIPv4(ip)) continue;
+    const mask = String(xmlText(v4, 'subnetMask') || '').trim();
+    out.push({ dev: String(xmlText(blk, 'device') || '').slice(0, 32), ip, mask: isIPv4(mask) ? mask : '', pg: String(xmlText(stripXmlBlocks(blk, 'spec'), 'portgroup') || '').slice(0, 128) });
+  }
+  return out;
+}
+/** v3.6.0: ESXi `config.network.dnsConfig`(HostDnsConfig) → { osHostName, osDomain }. 없으면 둘 다 null(못 읽음). */
+export function hostDnsName(xml) {
+  const s = String(xml || '');
+  const h = String(xmlText(s, 'hostName') || '').trim();
+  const d = String(xmlText(s, 'domainName') || '').trim();
+  return { osHostName: h || null, osDomain: d || null };
 }
 export function vmIps(netXml, primary) {
   const ips = extractIPv4s(netXml, primary);
@@ -1383,6 +1429,28 @@ export async function fetchEntityMetrics(vc, entityType, moref, types, interval,
   }
 }
 export const fetchVmMetrics = (vc, moref, types, interval, opts) => fetchEntityMetrics(vc, 'VirtualMachine', moref, types, interval, opts);
+
+/**
+ * v2.925(B-③) — 호스트 물리 NIC(vmnic)별 드롭·에러·패킷·KBps, **실시간 최근 1시간**(로그인 1회 · QueryPerf 1회).
+ *   카탈로그에 없는 카운터는 던지지 않고 missingCounters 로(나머지는 보여 준다). 요약 규약은 nicPerf.js summarizeNicPerf.
+ *   주기 수집이 아니다 — 화면 버튼으로만 부른다(고RTT vCenter 에 로그인을 늘리지 않게).
+ */
+export async function fetchHostNicStats(vc, moref) {
+  const c = new VimSoapClient(vc);
+  await c.login();
+  try {
+    const map = await c.perfCounterMap();
+    const idOf = {}; const missing = [];
+    for (const [k, key] of Object.entries(HOST_NIC_COUNTERS)) { const id = map.get(key); if (id) idOf[k] = String(id); else missing.push(k); }
+    const parsed = Object.keys(idOf).length
+      ? await c.queryEntityPerfInstances('HostSystem', moref, Object.values(idOf), PERF_INTERVALS.realtime, { maxSample: NIC_REALTIME_SAMPLES })
+      : parsePerfInstancesXml('', []);
+    const sum = summarizeNicPerf(parsed, idOf);
+    return { ok: true, interval: 'realtime', sampleSec: PERF_INTERVALS.realtime, ...sum, missingCounters: missing, instancesTruncated: !!parsed.truncated };
+  } finally {
+    await c.logout();
+  }
+}
 export const fetchHostMetrics = (vc, moref, types, interval, opts) => fetchEntityMetrics(vc, 'HostSystem', moref, types, interval, opts);
 
 /**
@@ -1962,6 +2030,8 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         'summary.hardware.vendor', 'summary.hardware.model', 'summary.hardware.otherIdentifyingInfo', 'config.storageDevice.hostBusAdapter',
         'runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo',
         'summary.managementServerIp', 'config.network.vnic', 'config.network.pnic',
+        // v3.6.0(IP 관리 재설계 묶음 다 — 호스트명 대조): ESXi 에 설정된 호스트명 · 도메인. 같은 조회에 속성 하나라 SOAP 왕복은 늘지 않는다.
+        'config.network.dnsConfig',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage',
         // v2.706(C4): 부팅 시각 — '유지보수 모드 없이 재부팅된 호스트(PSOD·정전 후보)' 판정. 시각 하나라 응답이 거의 늘지 않는다.
         'runtime.bootTime'] },
@@ -2073,6 +2143,10 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         // 게스트 파일 회수용: vCenter 실제 IP(호스트가 보고) + ESXi 관리 IP(vmk).
         mgmtServerIp: p['summary.managementServerIp'] || '',
         mgmtIp: (/<ipAddress[^>]*>([^<]+)<\/ipAddress>/.exec(p['config.network.vnic'] || '')?.[1]) || '',
+        // v3.6.0(IP 관리 재설계 묶음 다 — 서버 보기 · 스캔 대역 후보): vmk 전체(관리 · vMotion · vSAN · 스토리지). 이미 받는 vnic 속성이라 왕복 0.
+        vmks: parseVmks(p['config.network.vnic']),
+        // v3.6.0(호스트명 대조 'OS' 칸): ESXi 자신에 설정된 호스트명(config.network.dnsConfig.hostName). 못 읽으면 null(이름을 지어내지 않는다).
+        ...hostDnsName(p['config.network.dnsConfig']),
         gpus: (() => {
           const gfx = parseGpus(p['config.graphicsInfo']);
           // vGPU/vSGA로 이미 잡힌 물리 GPU(pciId)는 패스쓰루에서 제외해 이중 집계 방지.
@@ -2218,6 +2292,13 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
       const liveHosts = [...hostByRef].filter(([, h]) => h.connectionState !== 'DISCONNECTED').map(([ref]) => ref);
       await runAux('contention', 'CPU 경합·디스크 지연', CONTENTION_BUDGET_MS, (budgetMs) => refreshContention(c, vc.id, { vms: liveVms, hostRefs: liveHosts, budgetMs, signal }));
       for (const [ref, h] of hostByRef) { const e = contentionGet(vc.id, 'host', ref); if (e) h.perfc = e; }
+    }
+    // v2.935(C-①): ESXi 경로별 스토리지 카운터 — FC HBA 가 있는 연결 호스트만, 매시 한 번 최근 창(storpath/collect.js).
+    //   경로 이름을 풀 때 hcfg.mp.targets(rt) · hbas 를 쓰므로 hostcfg 뒤에 돈다. 캐시 값을 host.spath 로 싣는다.
+    if (c.sc.perfManager) {
+      const fcHosts = [...hostByRef].filter(([, h]) => h.connectionState !== 'DISCONNECTED' && hasFcHba(h)).map(([ref, h]) => ({ ref, host: h }));
+      await runAux('storpath', 'ESXi 경로 카운터', STORPATH_BUDGET_MS, (budgetMs) => refreshStorPath(c, vc.id, { hosts: fcHosts, budgetMs, signal }));
+      for (const [ref, h] of hostByRef) { const e = storPathGet(vc.id, ref); if (e) h.spath = e; }
     }
 
     const vms = [];

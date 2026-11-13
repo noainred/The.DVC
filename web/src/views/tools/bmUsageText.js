@@ -103,11 +103,14 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
     if (by['no-idrac']) parts.push(`iDRAC 등록이 없는 서버 **${by['no-idrac']}대**`);
     if (by['no-os-cred']) parts.push(`OS 계정이 없는 서버 **${by['no-os-cred']}대**`);
     if (by['no-idrac-cred']) parts.push(`iDRAC 계정이 없는 서버 **${by['no-idrac-cred']}대**`);
+    if (by['os-ambiguous']) parts.push(`OS 등록을 하나로 못 정한 서버 **${by['os-ambiguous']}대**`);   // 2차 재확인 G3
+    if (by['os-foreign']) parts.push(`OS 등록이 다른 법인 것인 서버 **${by['os-foreign']}대**`);
+    if (by['remote-collector-unknown']) parts.push(`원격 수집 서버를 모르는 서버 **${by['remote-collector-unknown']}대**`);   // v2.961
     return {
       kind: 'no-target', waiting: false,
       text: parts.length
         ? `수집할 수 있는 서버가 없습니다 — ${parts.join(' · ')}. 아래 '대상이 아닌 서버' 를 펼쳐 사유별로 확인하세요.`
-        : '베어메탈로 분류된 서버가 없습니다(서버 분석 › 구분 › Baremetal 과 같은 기준입니다).',
+        : '베어메탈로 분류된 서버가 없습니다(Physical Server › 구분 › Baremetal 과 같은 기준입니다).',
     };
   }
   if (d.db && d.db.available === false) {
@@ -142,6 +145,8 @@ export const MISSING_MARK = Object.freeze({
   'no-os-cred': 'OS 계정 없음',
   'no-idrac': 'iDRAC 등록 없음',
   'no-idrac-cred': 'iDRAC 계정 없음',
+  'os-ambiguous': 'OS 등록 모호',      // 2차 재확인 G3 — 법인으로 하나를 못 정함
+  'os-foreign': 'OS 등록 다른 법인',
 });
 export function missingMark(list = []) {
   const parts = (list || []).map((k) => MISSING_MARK[k] || k);
@@ -159,17 +164,94 @@ export function missingFootnotes(rows = []) {
   if (kinds.has('no-os-cred')) out.push('**OS 계정 없음** — 그 서버는 CPU·메모리만(iDRAC 텔레메트리) 읽습니다. 디스크·네트워크·HBA 를 보려면 설정 › 베어메탈 스토리지에 그 호스트를 등록하세요(같은 계정을 두 번 등록하지 않도록 그 등록부를 재사용합니다).');
   if (kinds.has('no-idrac')) out.push('**iDRAC 등록 없음** — 수동 태그로 베어메탈이 된 ESXi 호스트일 수 있습니다. OS 계정만 있으면 다섯 지표를 모두 읽습니다.');
   if (kinds.has('no-idrac-cred')) out.push('**iDRAC 계정 없음** — 설정 › iDRAC 등록에서 계정·비밀번호를 채우세요.');
+  if (kinds.has('os-ambiguous')) out.push('**OS 등록 모호** — 같은 이름 · 주소의 OS 등록이 여럿(주소가 다름)이거나, ‘수집에 추가’ 한 서버에 법인이 지정되지 않은 등록뿐입니다. 어느 장비인지 몰라 OS 로 접속하지 않습니다 — 설정 › 베어메탈 스토리지에서 그 등록에 법인을 지정하세요.');
+  if (kinds.has('os-foreign')) out.push('**OS 등록 다른 법인** — 이름 · 주소가 맞는 OS 등록이 다른 법인으로 지정돼 있어 쓰지 않습니다(다른 법인 서버의 주소 · 계정으로 접속하지 않게).');
   return out;
 }
 
+/** 대상이 아닌 서버 — 사유 code → 짧은 이름(모르는 code 는 그대로). */
+export const SKIP_LABEL = Object.freeze({
+  'edge-delegated': '엣지 수집', 'corp-off': '법인 미선택', unassigned: '법인 귀속 없음', 'no-idrac': 'iDRAC 등록 없음', 'no-idrac-cred': 'iDRAC 계정 없음',
+  'no-os-cred': 'OS 계정 없음', 'both-off': '두 경로 모두 꺼짐', 'key-conflict': '키 충돌', 'os-ambiguous': 'OS 등록 모호', 'os-foreign': 'OS 등록 다른 법인',
+  'remote-collector-unknown': '수집 서버 모름',   // v2.961 — 원격 수집 서버가 맡은 서버인데 그 수집 서버를 등록부에서 못 찾음(못 읽음 · 삭제)
+});
 /** 대상이 아닌 서버 — 사유마다 조치가 다르므로 **있는 사유만** 한 번씩 적는다. */
 export function skippedNotes(counts = {}, reasons = {}) {
   const out = [];
   for (const [kind, cnt] of Object.entries(counts)) {
     if (!cnt) continue;
-    out.push(`**${kind === 'edge-delegated' ? '엣지 수집' : kind === 'corp-off' ? '법인 미선택' : kind === 'unassigned' ? '법인 귀속 없음' : kind === 'no-idrac' ? 'iDRAC 등록 없음' : kind === 'no-idrac-cred' ? 'iDRAC 계정 없음' : kind === 'no-os-cred' ? 'OS 계정 없음' : kind === 'both-off' ? '두 경로 모두 꺼짐' : kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
+    out.push(`**${SKIP_LABEL[kind] || kind} ${cnt}대** — ${t(reasons[kind]) || '사유 미상'}`);
   }
   return out;
+}
+
+/**
+ * v2.961 — '엣지 수집' 서버를 **엣지별로** 센다(순수). 사용자 보고: 엣지 iDRAC 스캔이 자동 등록한 서버가 중앙에서 'iDRAC 등록 없음' 으로 보였다 —
+ *   이제 서버가 그 서버를 '엣지 수집 — 그 엣지' 로 판정하므로, 화면은 어느 엣지가 몇 대를 맡는지와 그 엣지의 상태(엣지 보관분 표와 같은 판정)를 보여 준다.
+ *   센 것은 **응답에 실린 제외 목록**이다 — 범위 계정은 서버가 이미 범위 안 행만 준다(이 함수가 범위를 다시 판정하지 않는다).
+ *   이름이 빈 행은 '' 한 묶음(이름 모름). stateOf(agent) → 엣지 표의 상태({ state, label, tone }) 또는 null(표에 그 엣지가 없음).
+ * @returns {{ agent:string, count:number, state:object|null }[]}  대수 내림차순 · 같으면 이름순
+ */
+/** 재확인 R1 — 이름이 겹친 엣지 칸의 상태(엣지 표 줄을 이름으로 가릴 수 없다 — 지어내지 않는다). */
+export const EDGE_NAME_CLASH_STATE = Object.freeze({ state: 'name-clash', label: '이름이 다른 수집 서버와 겹침 — 엣지 표에서 직접 확인', tone: 'warn',
+  why: '이 엣지의 이름이 다른 수집 서버의 id · 이름과 같아, 엣지 표의 같은 이름 줄(그 줄의 가져오기 · 중앙에서 켜기 포함)이 다른 수집 서버로 갈 수 있습니다. 설정 › 엣지·원격 › 수집 서버(원격)에서 이름을 서로 다르게 바꾸세요.' });
+export function edgeDelegatedByAgent(skipped = [], { stateOf = null } = {}) {
+  const by = new Map();
+  for (const s of Array.isArray(skipped) ? skipped : []) {
+    if (!s || typeof s !== 'object' || s.reason !== 'edge-delegated') continue;
+    const a = t(s.agent);
+    const k = a.toLowerCase();
+    const cur = by.get(k);
+    if (cur) { cur.count += 1; if (s.agentClash) cur.clash = true; } else by.set(k, { agent: a, count: 1, clash: !!s.agentClash });
+  }
+  const out = [...by.values()].map((x) => {
+    // 재확인 R1: 서버가 '이 이름은 다른 수집 서버의 id · 이름과 겹친다(agentClash)' 고 하면 엣지 표의 같은 이름 줄이 다른 수집 서버일 수 있다 — 그 줄의 상태를 붙이지 않는다.
+    if (x.clash) return { ...x, state: { ...EDGE_NAME_CLASH_STATE } };
+    let state = null;
+    if (x.agent && typeof stateOf === 'function') { try { state = stateOf(x.agent) || null; } catch { state = null; } }
+    return { ...x, state };
+  });
+  return out.sort((a, b) => b.count - a.count || a.agent.localeCompare(b.agent));
+}
+
+/**
+ * 반증 의심 2(v2.961): '수집 서버 모름' 의 갈래(서버 collectorIssue)를 사실대로 — 등록부를 못 읽음 · 등록부에 없음(삭제) · 이름이 빈 등록.
+ *   응답 제외 목록에서 센다(범위 계정은 범위 안 행만). 해당 행이 없으면 ''. 모르는 갈래 값은 '사유 미상' 으로 센다(지어내지 않는다).
+ */
+export const COLLECTOR_ISSUE_TEXT = Object.freeze({ unread: '수집 서버 등록부를 읽지 못함', 'not-found': '등록부에 없는 수집 서버(삭제됨)', 'no-name': '이름이 빈 수집 서버 등록' });
+export function remoteUnknownNote(skipped = []) {
+  const by = new Map();
+  for (const s of Array.isArray(skipped) ? skipped : []) {
+    if (!s || typeof s !== 'object' || s.reason !== 'remote-collector-unknown') continue;
+    const k = COLLECTOR_ISSUE_TEXT[t(s.collectorIssue)] ? t(s.collectorIssue) : '';
+    by.set(k, (by.get(k) || 0) + 1);
+  }
+  if (!by.size) return '';
+  const parts = [...by].map(([k, cnt]) => `${k ? COLLECTOR_ISSUE_TEXT[k] : '사유 미상'} **${cnt}대**`);
+  const fix = by.has('no-name') ? ' — 이름이 빈 등록은 설정 › 엣지·원격 › 수집 서버(원격)에서 이름을 채우면 다음 조회부터 그 엣지로 보입니다.' : '';
+  return `수집 서버 모름 — ${parts.join(' · ')}${fix}`;
+}
+
+/** v2.961 — 엣지별 한 칸의 문구(엣지 이름 · 대수 · 상태). 이름이 비면 '이름 모름'. 상태를 모르면 그 사실을 말한다(지어내지 않는다). */
+export function edgeDelegatedChip(x = {}) {
+  const name = t(x.agent) ? `‘${t(x.agent)}’` : '이름 모름';
+  const st = x.state && t(x.state.label) ? t(x.state.label) : (t(x.agent) ? '엣지 보관분 표에 없음' : '');
+  return `${name} ${Number(x.count) || 0}대${st ? ` · ${st}` : ''}`;
+}
+
+/** v2.961 — 엣지별 묶음 아래 안내 한 줄(조치). 표에 없는 엣지가 있으면 그 이유 후보를 함께 말한다. */
+export function edgeDelegatedGuide(list = []) {
+  if (!Array.isArray(list) || !list.length) return '';
+  const clash = list.some((x) => x.clash);
+  const missing = list.some((x) => !t(x.agent) || !x.state);
+  const off = list.some((x) => x.state && x.state.state === 'off-edge');
+  return [
+    '이 서버들은 **그 엣지가 수집**합니다(계정이 엣지에만 있어 중앙은 접속하지 않습니다). 아래 ‘엣지 보관분’ 표에서 그 엣지의 상태를 확인하세요 — ',
+    off ? '**엣지에서 꺼짐**' : '‘엣지에서 꺼짐’',
+    ' 이면 그 줄의 ‘중앙에서 켜기’ 로 켭니다(버튼은 전체 범위 관리자에게만 보입니다).',
+    missing ? ' 표에 없는 엣지는 수집 서버 등록부에 그 이름이 없거나(엣지가 보고한 이름), 이 계정에 보이는 대상이 없는 엣지이거나, 엣지 표를 아직 불러오지 못한 경우입니다.' : '',
+    clash ? ' **이름이 겹친 엣지**는 엣지 표의 같은 이름 줄이 다른 수집 서버일 수 있어 상태를 붙이지 않았습니다 — 수집 서버 이름을 서로 다르게 바꾸세요.' : '',
+  ].join('');
 }
 
 /**
@@ -400,13 +482,16 @@ export function hostsUnreadNote(h = null) {
 export function keyConflictNote(list = []) {
   const arr = Array.isArray(list) ? list : [];
   if (!arr.length) return '';
-  const shown = arr.slice(0, 3).map((x) => `${t(x.key)}(${(x.names || []).join(' · ')})`);
-  const more = arr.length > shown.length ? ` 외 ${arr.length - shown.length}건` : '';
-  return `**식별 키가 겹치는 서버 ${arr.length}건**이 있습니다 — ${shown.join(' / ')}${more}.`
-    + ' 같은 키를 쓰면 **한 서버의 값이 다른 서버 것으로 보입니다**(추이가 섞입니다).'
-    + ' 서비스태그가 비어 있어 이름·내부 id 로 키가 정해진 경우가 대부분이니'
-    + ' 설정 › iDRAC 등록에서 **서비스태그를 채우면** 해결됩니다.'
-    + ' 어느 쪽을 버릴지 판단할 근거가 없어 **수집에서 빼지는 않았습니다**.';
+  // 서버마다 한 줄(서버 keyConflicts — 다음 점검 ①) — 같은 키끼리 묶어 ‘키(이름 · 이름)’ 로 보인다(범위 계정에는 자기 법인 서버만 온다).
+  const byKey = new Map();
+  for (const x of arr) { const k = t(x?.key); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(...(Array.isArray(x?.names) ? x.names : [])); }
+  const keys = [...byKey.keys()];
+  const shown = keys.slice(0, 3).map((k) => `${k}(${byKey.get(k).join(' · ')})`);
+  const more = keys.length > shown.length ? ` 외 ${keys.length - shown.length}건` : '';
+  return `**식별 키가 겹치는 서버 ${arr.length}대**(키 ${keys.length}건)가 있습니다 — ${shown.join(' / ')}${more}.`
+    + ' 같은 키를 쓰면 **한 서버의 값이 다른 서버 것으로 보이고**(추이 · 최신값 · 인증 정지가 섞입니다) 오류도 나지 않아,'
+    + ' 이 서버들은 **수집하지 않습니다**(대상이 아닌 서버 › 키 충돌). 서비스태그가 비어 이름·내부 id·IP 로 키가 정해진 경우가 대부분이니'
+    + ' 설정 › iDRAC 등록에서 **서비스태그를 채우면** 키가 갈려 다음 주기부터 수집합니다. 이미 쌓인 값은 섞여 있을 수 있습니다(지우지 않았습니다).';
 }
 
 /** 보존·행 수 안내 — 서버가 준 값으로만 만든다(숫자를 박지 않는다). */
@@ -740,7 +825,7 @@ export function unassignedNote(info = null) {
   const by = info.byCause || {};
   const items = [];
   if (by['registry-no-vc']) {
-    items.push(`**iDRAC 등록에 법인이 비어 있음 ${by['registry-no-vc']}대** — 설정 › iDRAC 등록에서 각 서버의 법인을 고르거나, 서버 분석 › 통합 인벤토리에서 **일괄 지정**하세요.`);
+    items.push(`**iDRAC 등록에 법인이 비어 있음 ${by['registry-no-vc']}대** — 설정 › iDRAC 등록에서 각 서버의 법인을 고르거나, Physical Server › 통합 인벤토리에서 **일괄 지정**하세요.`);
   }
   if (by['assign-ghost']) {
     items.push(`**지금 없는 법인을 가리킴 ${by['assign-ghost']}대** — 수동 귀속이 삭제된 vCenter 를 가리킵니다. 다시 지정하면 해결됩니다.`);
@@ -766,7 +851,7 @@ export function unassignedNote(info = null) {
  * 이 표 최악의 거짓이다. 이유를 **순서대로** 말한다(v2.552 `rowState` 와 같은 규약).
  * @returns {{state:string, label:string, why:string, tone:string}}
  */
-export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60_000, now = Date.now() } = {}) {
+export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60_000, now = Date.now(), canEnableCentral = false, offWhy = '' } = {}) {
   const at = n(row.snapAt);
   const att = row.lastAttempt || null;
   if (row.enabled === false) return { state: 'off-central', label: '중앙에서 비활성', why: '중앙에서 이 수집 서버를 비활성으로 두었습니다 — 켜야 가져올 수 있습니다.', tone: 'idle' };
@@ -782,7 +867,21 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
     };
   }
   if (row.enabledOnEdge === false) {
-    return { state: 'off-edge', label: '엣지에서 꺼짐', why: '그 엣지에서 베어메탈 사용률 수집이 꺼져 있습니다 — 그 법인 포탈에서 켜야 값이 생깁니다(중앙에서는 켤 수 없습니다).', tone: 'warn' };
+    /*
+     * v2.927 정정: v2.627 부터 중앙이 엣지 설정을 내려줄 수 있고, v2.927 '중앙에서 켜기' 로 한 엣지만 켤 수 있다 — 예전 문구 '중앙에서는 켤 수
+     *   없습니다' 는 사실과 달랐다. 버튼을 쓸 수 있는 사람(전체 범위 관리자 · 중앙 · 그 엣지가 전체 배포·제외에 묶이지 않음)에게만 버튼을 말한다.
+     */
+    // 반증 F7: 그 노드가 엣지가 아니면(중앙·단독 — 배포 인출 워커가 없다) 중앙 켜기는 닿지 않는다 — 노드 역할은 서버가 보관분에서 판정해 준다(nodeRole).
+    if (row.nodeRole === 'central') return { state: 'off-edge', label: '그 노드에서 꺼짐', tone: 'warn', why: '그 노드에서 베어메탈 사용률 수집이 꺼져 있습니다 — 이 노드는 엣지가 아닙니다(중앙·단독 — 배포를 받지 않습니다). 그 포탈의 베어메탈 사용률 설정에서 직접 켜세요.' };
+    const base = '그 엣지에서 베어메탈 사용률 수집이 꺼져 있습니다 — ';
+    return { state: 'off-edge', label: '엣지에서 꺼짐', tone: 'warn',
+      // offWhy — 관리자 화면이 배포 현황으로 아는 더 정확한 사유(중앙 켜기 저장됨 · 전체 배포가 끔 — bmUsageDistText.edgeOnView). 완결된 문장이다.
+      why: offWhy ? String(offWhy)
+        : canEnableCentral
+          ? `${base}**중앙에서 켜기** 버튼으로 켤 수 있습니다(그 법인 포탈에서 켜도 됩니다).`
+          : row.nodeRole === 'edge' || row.nodeRole == null
+            ? `${base}관리자가 중앙에서 켜거나 그 법인 포탈에서 켭니다.`
+            : `${base}이 노드의 역할을 확인할 수 없어 중앙 켜기를 제공하지 않습니다 — 그 법인 포탈에서 켭니다(보관분에 노드 역할이 없습니다).` };
   }
   const old = now - at > staleMs;
   if (att && !att.ok) {
@@ -796,6 +895,23 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
  * 엣지 패널 머리말. ⚠ **'push 가 없다' 는 사실을 말한다** — 값이 낡은 것이 장애가 아니라 설계다
  * (사용자 선택: "중앙으로 전달은 중앙에서 조회할때만").
  */
+/**
+ * v2.945.1(사용자 보고 — 엣지 보관분 안내가 같은 이름으로 십여 줄 반복): 안내 줄은 **이름별 한 줄**. 같은 이름(대소문자 무시 · 앞뒤 공백 무시)이
+ *   여러 행이면 첫 행만 쓰고 그 수(dup)를 밝힌다 — 조용히 합치지 않는다(화면이 '등록부에 n개' 를 말한다). 표는 행을 그대로 둔다. 순수.
+ * @returns {{r:object, dup:number}[]}
+ */
+export function edgeNoteRows(rows = []) {
+  const out = [];
+  const at = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r !== 'object') continue;
+    const k = String(r.agent ?? '').trim().toLowerCase();
+    if (at.has(k)) { out[at.get(k)].dup += 1; continue; }
+    at.set(k, out.length);
+    out.push({ r, dup: 1 });
+  }
+  return out;
+}
 export function edgePullNote(rows = []) {
   const arr = Array.isArray(rows) ? rows : [];
   const have = arr.filter((r) => n(r.snapAt)).length;

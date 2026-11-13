@@ -158,3 +158,103 @@ describe('v2.871 버그 점검', () => {
     expect(sortSiblings(mix, { key: 'off', dir: 'desc' }).map((x) => x.name)).toEqual(['off', 'on']);
   });
 });
+
+describe('v2.939 GPU 할당율 개선(웹)', async () => {
+  const M = await import('./gpuAllocText.js');
+  const g = (idx, model, vms, slots, o = {}) => ({ idx, model, mode: 'vgpu', capGB: 48, placement: true, vms, slots, allocGB: 0, ...o });
+  const placeTree = () => ({
+    vcenters: [{ id: 'vc1', name: 'kr', totals: tot(), datacenters: [{ name: 'DC', totals: tot(), clusters: [{ key: 'c', name: 'CL', totals: tot(), hosts: [
+      { id: 'h1', name: 'esx1', connectionState: 'CONNECTED', unplaced: [], off: [], totals: tot(), models: [], gpus: [
+        g(0, 'NVIDIA A40', [vmr('a', 'a', 24, { profile: 'grid_a40-24q' })], { profile: 'grid_a40-24q', used: 1, total: 2, free: 1 }),
+        g(1, 'NVIDIA A40', [], { total: null, used: 0, free: null, profile: null }),
+        g(2, 'NVIDIA A40', [vmr('b', 'b', 8, { profile: 'grid_a40-8q' })], { profile: 'grid_a40-8q', used: 1, total: 6, free: 5 }),
+        g(3, 'NVIDIA L40S', [], { total: null, used: 0, free: null, profile: null }),
+        g(4, 'NVIDIA A40', [], null, { placement: false }),
+      ] },
+      { id: 'h2', name: 'esx2', connectionState: 'DISCONNECTED', unplaced: [], off: [], totals: tot(), models: [], gpus: [g(0, 'NVIDIA A40', [], { total: null, used: 0, free: null, profile: null })] },
+    ] }] }] }],
+  });
+  it('배치 추천 — 같은 프로파일 남은 슬롯 먼저 · 모델이 맞는 빈 GPU · 다른 프로파일 · 끊김 · 배치 모름 · 다른 계열은 뺀다', () => {
+    const r = M.placementCandidates(placeTree(), 'grid_a40-24q');
+    expect(r.per).toBe(24); expect(r.family).toBe('a40');
+    expect(r.rows.map((x) => [x.host, x.gpu, x.kind, x.fit])).toEqual([['esx1', 0, 'same', 1], ['esx1', 1, 'empty', 2]]);
+    expect([r.same, r.empty]).toEqual([1, 2]);
+    expect(r.skipped).toEqual({ down: 1, maint: 0, noPlacement: 1, mixed: 0, otherProfile: 1, capUnknown: 0, small: 0 });
+    expect(M.placementCandidates(placeTree(), 'nonsense').rows).toEqual([]);
+    expect(M.modelHasFamily('NVIDIA L40S', 'l4')).toBe(false);
+    expect(M.modelHasFamily('GA102GL [A40]', 'a40')).toBe(true);
+    expect(M.profileFamily('grid_a100-3-40c')).toEqual({ family: 'a100', mig: true });
+    expect(M.profileOptions(placeTree()).map((o) => o.profile)).toEqual(['grid_a40-24q', 'grid_a40-8q']);
+  });
+  it('새로 고침 — 새로 생긴 노드만 지금 단계대로 펼치고, 사용자가 접은 기존 노드는 그대로', () => {
+    const old = tree();
+    const open = M.openForLevel(old, 4);
+    open.delete('v:vc1');   // 사용자가 법인을 접었다
+    const nw = tree();
+    nw.vcenters.push({ ...nw.vcenters[0], id: 'vc9', name: 'new' });
+    const next = M.openAfterRefresh(open, old, nw, 4);
+    expect(next.has('v:vc1')).toBe(false);
+    expect(next.has('v:vc9')).toBe(true);
+    expect(M.openAfterRefresh(null, old, nw, 4)).toBe(null);
+  });
+  it('수집 점검 글자 — 관측 대상이 없으면 판단 불가 · 일부만 읽히면 경고', () => {
+    const t = { vgpuGpus: 4, vgpuNoPlacement: 1, offVgpuVms: 0, offListed: 0, ptOnVms: 3, ptOnPciRead: 2, unparsedVms: 0, nonGpuPtVms: 1, nonGpuOnlyVms: 1, capUnknown: 0, capModel: 2 };
+    const v = M.diagVerdicts({ totals: t, verdicts: { placement: 'partial', offListed: 'unknown', ptPciRead: 'partial', profiles: 'yes' } });
+    expect(v.find((x) => x.key === 'offListed').text).toMatch(/^판단 불가/);
+    expect(v.find((x) => x.key === 'placement').tone).toBe('warn');
+    expect(v.find((x) => x.key === 'ptPciRead').text).toMatch(/3대 중 2대만/);
+    expect(v.find((x) => x.key === 'nonGpu').text).toMatch(/1대는 GPU 장치가 없어/);
+  });
+  it('추이 — 쿼리는 화면 범위 · 소진 예상이 없으면 이유를 말한다(소진 안 함으로 단정하지 않음)', () => {
+    expect(M.historyQuery({ days: 30 })).toBe('?days=30');
+    expect(M.historyQuery({ days: 90, vcSel: new Set(['a', 'b']) })).toBe('?days=90&vcenterIds=a%2Cb');
+    expect(M.historyQuery({ days: 90, scope: 'vc1', vcSel: new Set(['x']) })).toBe('?days=90&vcenterIds=vc1');
+    const now = Date.UTC(2026, 10, 7);
+    expect(M.trendText({ points: 30, gbPerDay: 0.5, change30: 14.5, daysLeft: 47, r2: 0.99 }, now)).toEqual({ change: '+14.5 GB', perDay: '+0.5 GB/일', left: '47일 뒤 (2026-12-24)', why: '최근 30일 할당 증가 기울기로 낸 추정' });
+    expect(M.trendText({ points: 3, gbPerDay: null, change30: 1, daysLeft: null }).why).toMatch(/점이 3개/);
+    expect(M.trendText({ points: 10, gbPerDay: -1, change30: -5, daysLeft: null }).why).toMatch(/늘지 않았/);
+    expect(M.trendText(null).left).toBe('—');
+  });
+});
+
+describe('v2.939 추이 글자 — 화면 판독 정정', () => {
+  it('이미 넘은 법인은 남은 일수 대신 이미 넘음 · 날짜는 지금 시각 기준(1970년이 아님)', async () => {
+    const M = await import('./gpuAllocText.js');
+    expect(M.trendText({ points: 30, gbPerDay: 1, change30: 30, daysLeft: null, over: true }).left).toBe('이미 넘음');
+    const t = M.trendText({ points: 30, gbPerDay: 0.5, change30: 14.5, daysLeft: 10, r2: 0.9 });
+    expect(Number(t.left.match(/\((\d{4})-/)[1])).toBeGreaterThanOrEqual(2026);
+  });
+  it('추이 화면은 trendText 에 지금 시각을 넘긴다(일 번호 today 를 넘기면 1970년)', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('./GpuAllocHistory.jsx', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/trendText\([^)]*today/);
+  });
+});
+
+describe('v2.951 점검', () => {
+  it('배치 추천 — 유지보수 모드 호스트의 GPU 는 놓을 수 있는 자리가 아니다', async () => {
+    const M = await import('./gpuAllocText.js');
+    const g = (idx, vms, slots) => ({ idx, model: 'NVIDIA A40', mode: 'vgpu', capGB: 48, placement: true, vms, slots, allocGB: 0 });
+    const h = (id, cs, gpus) => ({ id, name: id, connectionState: cs, unplaced: [], off: [], totals: tot(), models: [], gpus });
+    const t = { vcenters: [{ id: 'vc1', name: 'kr', totals: tot(), datacenters: [{ name: 'DC', totals: tot(), clusters: [{ key: 'c', name: 'CL', totals: tot(), hosts: [
+      h('esx-maint', 'MAINTENANCE', [g(0, [vmr('a', 'a', 24, { profile: 'grid_a40-24q' })], { profile: 'grid_a40-24q', used: 1, total: 2, free: 1 }), g(1, [], { total: null, used: 0, free: null, profile: null })]),
+      h('esx-ok', 'CONNECTED', [g(0, [], { total: null, used: 0, free: null, profile: null })]),
+    ] }] }] }] };
+    const r = M.placementCandidates(t, 'grid_a40-24q');
+    expect(r.rows.map((x) => x.host)).toEqual(['esx-ok']);
+    expect(r.skipped.maint).toBe(2);
+  });
+  it('추이 글자 — 보고가 멈춘 법인은 소진 예상 대신 보고 없음 N일', async () => {
+    const M = await import('./gpuAllocText.js');
+    const t = M.trendText({ points: 20, gbPerDay: null, change30: 0, daysLeft: null, stale: 10 });
+    expect(t.left).toBe('— (보고 없음 10일)');
+    expect(t.why).toMatch(/10일 전/);
+  });
+  it('추이 글자 — 합계는 보고 없음이 아니라 합계 없음(다른 법인은 보고 중일 수 있다)', async () => {
+    const M = await import('./gpuAllocText.js');
+    const t = M.trendText({ points: 20, gbPerDay: null, change30: 5, daysLeft: null, stale: 5 }, Date.now(), { total: true });
+    expect(t.left).toBe('— (합계 없음 5일)');
+    expect(t.why).toMatch(/보고가 빠진 법인/);
+    expect(t.left).not.toMatch(/보고 없음/);
+  });
+});

@@ -90,9 +90,10 @@ export default function RemoteCommand() {
                 <tr key={g.agent}>
                   <td><b>{g.agent}</b></td>
                   <td style={{ color: st === 'online' ? TONE.ok : st === 'offline' ? TONE.bad : TONE.muted }}>{st === 'online' ? '온라인' : st === 'offline' ? '오프라인' : '미배포'}</td>
-                  <td>
+                  {/* v2.977(전체 점검): 인스턴스 칸이 한 줄로 이어져(913px) 1440px 에서 분배 · 대기 · 보안 · 동작 단추가 가로 스크롤 뒤로 숨었다 — 줄바꿈을 허용한다 */}
+                  <td style={{ whiteSpace: 'normal', minWidth: 300, maxWidth: 560 }}>
                     {(g.instances || []).length ? g.instances.map((i) => (
-                      <div key={i.instance} title={`${i.hostname || ''} · v${i.version || '?'} · ${i.os || ''} · pid ${i.pid || '?'} · 가동 ${uptimeText(i.uptimeSec)}${i.ip ? ` · ${i.ip}` : ''}`}>
+                      <div key={i.instance} style={{ overflowWrap: 'anywhere' }} title={`${i.hostname || ''} · v${i.version || '?'} · ${i.os || ''} · pid ${i.pid || '?'} · 가동 ${uptimeText(i.uptimeSec)}${i.ip ? ` · ${i.ip}` : ''}`}>
                         <Dot on={i.online} title={i.online ? '온라인' : `오프라인 (${ago(i.lastSeen)})`} />
                         <code>{i.instance}</code>
                         {g.mode === 'active-backup' && g.activePrimary === i.instance && <span className="badge" style={{ marginLeft: 4 }}>주</span>}
@@ -105,10 +106,12 @@ export default function RemoteCommand() {
                   <td>{g.pending || 0}</td>
                   <td>{g.hasPassword ? <span style={{ color: TONE.ok }}>서명</span> : <span style={{ color: TONE.warn }} title="법인 비밀번호 미등록 — 토큰만으로 명령이 실행됩니다">무서명</span>}</td>
                   <td className="muted">{ago(g.lastSeen)}</td>
-                  <td className="flex gap">
-                    <button className="tab" disabled={st === 'none'} onClick={() => setRun({ agent: g.agent })}>▶ 실행</button>
-                    <button className="tab" onClick={() => setCfg(g)}>설정</button>
-                    <button className="tab" onClick={() => setDeploy({ agent: g.agent })}>배포</button>
+                  <td>
+                    <div className="flex gap" style={{ flexWrap: 'wrap' }}>
+                      <button className="tab" disabled={st === 'none'} onClick={() => setRun({ agent: g.agent })}>▶ 실행</button>
+                      <button className="tab" onClick={() => setCfg(g)}>설정</button>
+                      <button className="tab" onClick={() => setDeploy({ agent: g.agent })}>배포</button>
+                    </div>
                   </td>
                 </tr>
               );

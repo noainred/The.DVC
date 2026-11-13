@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-13T23:42:39.594Z",
-  "count": 122,
+  "generatedAt": "2026-11-13T23:43:46.761Z",
+  "count": 127,
   "tools": [
     {
       "k": "service-hub",
@@ -91,6 +91,14 @@
       "comingSoon": false
     },
     {
+      "k": "ps-inspect",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
       "k": "storage-growth",
       "adminOnly": true,
       "perm": null,
@@ -115,6 +123,14 @@
       "comingSoon": false
     },
     {
+      "k": "focus-mon",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
       "k": "power-total",
       "adminOnly": false,
       "perm": null,
@@ -124,6 +140,14 @@
     },
     {
       "k": "corp-usage",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "bm-folders",
       "adminOnly": false,
       "perm": null,
       "external": null,
@@ -236,6 +260,22 @@
     },
     {
       "k": "san-switch",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "san-storage",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "san-flow",
       "adminOnly": true,
       "perm": null,
       "external": null,

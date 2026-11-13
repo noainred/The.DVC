@@ -72,17 +72,19 @@ export const TOOL_PATH_KEYS = Object.freeze({
   // 한 도구에 묶으면 그 엔드포인트를 쓰는 **다른 화면이 같이 막힌다**(가장 위험한 실수).
   'orphan-vmdk': 'orphanvmdk',       // OrphanVmdk.jsx 전용(v2.505)
   'part-faults': 'part-faults',      // PartFaults.jsx 전용(v2.547) — 물리 부품 장애 기록·알림
-  'disk-bad': 'disk-bad',            // DiskBadTool.jsx · iDRAC 상세 '디스크 이력' 탭 전용(v2.915) — 디스크 배드 섹터 이력
+  'disk-bad': 'disk-bad',            // DiskBadTool.jsx · iDRAC 상세 '디스크 이력' 탭 전용(v3.8.0) — 디스크 배드 섹터 이력
   'edge-log': 'edge-log',            // EdgeLog.jsx 전용(v2.549) — 엣지 로그·진행상태(adminOnly)
   'edge-log-local': 'edge-log',      // 〃 이 포탈 자신의 로그(경로를 `/:agent` 와 섞지 않기 위해 분리)
   'bm-usage': 'bm-usage',            // BmUsage.jsx 전용(v2.550) — 베어메탈 사용률
   'corp-usage': 'corp-usage',
   'svc-inventory': 'svc-inventory', // SvcInventory.jsx 전용(v2.887) — 서비스 인벤토리(조회·쓰기 연산·CSV)
+  'bm-folders': 'bm-folders',        // BmFolders.jsx 전용(v2.984) — 물리서버 폴더(조회·찾기·쓰기 연산·CSV)
   'power-total': 'power-total',      // PowerTotal.jsx 전용(v2.664) — 전체 소비 전력(서버·네트워크·스토리지)        // CorpUsage.jsx 전용(v2.625) — 법인별 서버 사용량(전체·물리·가상화)
   'link-check': 'link-check',        // LinkCheck.jsx 전용(v2.552) — 중앙↔엣지·vCenter 통신 점검(adminOnly)
   'portal-check': 'portal-check',    // PortalCheck.jsx 전용(v2.560) — 토큰 점검(adminOnly+fullScope)
   'comm-map': 'comm-map',            // CommMap.jsx 전용(v2.584) — 통신 지도(중앙↔엣지 시각화, adminOnly+fullScope)
   'xfer-speed': 'xfer-speed',        // XferSpeedTool.jsx 전용(v2.735) — 법인 간 전송 속도(adminOnly+fullScope)
+  'focus-mon': 'focus-mon',          // FocusMonTool.jsx 전용(v2.976) — 집중 모니터링(adminOnly+fullScope · 쓰기는 조회·쓰기 전체 범위)
   'isilon-dirusage': 'isilon-dirusage', // IsilonDirUsageTool.jsx 전용(v2.736) — 아이실론 디렉터리 사용량(adminOnly+fullScope)
   'data-flow': 'data-flow',          // DataFlow.jsx 전용(v2.587) — 데이터 흐름 지도(포탈 사이 전 경로, adminOnly+fullScope)
   'device-flow': 'device-flow',      // DeviceFlow.jsx 전용(v2.588) — 3단 지도(장비 → 엣지 → 메인, adminOnly+fullScope)
@@ -94,6 +96,9 @@ export const TOOL_PATH_KEYS = Object.freeze({
   rightsize: 'rightsizing',
   rma: 'rma',
   sanswitch: 'san-switch',
+  'san-flow': 'san-flow',            // v2.935(C-②) SAN 플로우 모니터(SanFlowTool.jsx 전용 — 세그먼트 = 키)
+  'san-storage': 'san-storage',      // v2.948 SAN 스토리지 성능(SanStorageTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/san-storage-perf)
+  'ps-inspect': 'ps-inspect',        // v2.965 PowerScale 장비 점검(PsInspectTool.jsx 전용 — 세그먼트 = 키 · 설계 docs/design/powerscale-inspection)
   'secret-scan': 'secret-scan',
   'serial-lookup': 'serial-lookup',
   snapshots: 'snapshots',

@@ -50,7 +50,8 @@ export const NUMERIC_PATHS = Object.freeze([
  * 미디어(hdd·ssd)는 객체이거나 null. 그 밖의 키는 담지 않는다(v2.598 CENTRAL '아는 필드만' 규약).
  */
 export const NODE_STR_KEYS = Object.freeze(['id', 'name', 'ip', 'health', 'ext', 'model', 'lnn', 'serial', 'chassisSerial']);   // v2.735.2 시리얼
-export const NODE_NUM_KEYS = Object.freeze(['inBps', 'outBps', 'totalBps', 'l3Bytes']);
+// v2.926 — 노드 부하 시계열(디스크 쓰기·읽기 B/s · CPU %). 새 엣지 export 필드는 여기에도(구버전 엣지는 없다 — null 로 남는다).
+export const NODE_NUM_KEYS = Object.freeze(['inBps', 'outBps', 'totalBps', 'l3Bytes', 'diskInBytesPs', 'diskOutBytesPs', 'cpuPct', 'busyPct', 'iops', 'opsPs', 'latencyMs']); // v2.932 busy·IOPS·ops·지연
 export const NODE_MEDIA_KEYS = Object.freeze(['hdd', 'ssd']);
 export const NODE_LIST_MAX = 64;
 const STR_MAX = 512;

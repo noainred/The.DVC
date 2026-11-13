@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>용도 분석 — OS × 기능 프로파일</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.dim{color:#8b9bb4}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.chip.pur{color:#c084fc;border-color:rgba(168,85,247,.35);background:rgba(168,85,247,.1)}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid #243049}
+.tabs a{padding:10px 14px;color:#8b9bb4;font-weight:600;text-decoration:none;border-bottom:2px solid transparent;min-height:40px;box-sizing:border-box;display:inline-flex;align-items:center}
+.tabs a.on{color:#e6edf6;border-bottom-color:#22d3ee}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+.sel{min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+.cell{border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626;min-width:0;min-height:76px;display:flex;flex-direction:column;gap:4px}
+.cell.off{border-style:dashed;color:#8b9bb4}
+.ev{display:inline-block;width:14px;text-align:center;font-weight:700}
+.ev.a{color:#4ade80}.ev.b{color:#fbbf24}.ev.c{color:#8b9bb4}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+h2{margin:0;font-size:15px;font-weight:700}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:12px;color:#8b9bb4">특수 기능 › 서버 분석 › <a href="Main.dc.html">리눅스 베어메탈 통합 성능</a> › <b style="color:#e6edf6">용도 분석</b></div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">용도 분석 — OS × 기능 프로파일 <span class="dim" style="font-size:13px;font-weight:500">(이번 범위: Rocky 9.4 × Airflow · GPDB · 구조는 확장형)</span></h1>
+    </div>
+    <div style="flex:1 1 20px"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#8b9bb4">범위 <select class="sel" aria-label="법인 범위"><option>전체 법인 (켠 6곳)</option><option>KR-SEL</option></select></label>
+    <button class="btn" type="button">프로파일 카탈로그 설정</button>
+    <button class="btn" type="button">CSV</button>
+  </div>
+  <nav class="tabs" aria-label="용도 분석 탭"><a class="on" href="Profiles.dc.html" aria-current="page">매트릭스</a><a href="Profiles.dc.html">카탈로그</a><a href="Profiles.dc.html">점검 결과</a><a href="Profiles.dc.html">튜닝 차이</a></nav>
+
+  <!-- A. 매트릭스 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:10px"><h2>OS × 기능 매트릭스 — 서버 수 · 점검 결과</h2><span class="dim" style="font-size:12px">칸 = 그 조합의 서버 수 · 정상/주의/이상 · 프로파일이 없는 조합은 ‘프로파일 없음’(점검하지 않음 — 틀린 판정보다 낫다)</span></div>
+    <div style="overflow-x:auto"><div style="display:grid;grid-template-columns:150px repeat(4,minmax(150px,1fr));gap:8px;min-width:780px">
+      <div></div><div class="dim" style="font-size:12px;font-weight:700;text-align:center">Airflow</div><div class="dim" style="font-size:12px;font-weight:700;text-align:center">GPDB (Greenplum)</div><div class="dim" style="font-size:12px;font-weight:700;text-align:center">Hadoop</div><div class="dim" style="font-size:12px;font-weight:700;text-align:center">기능 미지정</div>
+      <div style="display:flex;align-items:center;font-weight:700">Rocky 9.4<br><span class="dim" style="font-weight:500;font-size:11.5px">프로파일 rocky9-base ●</span></div>
+      <div class="cell"><div style="font-size:20px;font-weight:800">6</div><div><span class="chip ok">정상 4</span> <span class="chip warn">주의 1</span> <span class="chip bad">이상 1</span></div><div class="dim" style="font-size:11.5px">감지: unit 5 · 포트 1</div></div>
+      <div class="cell"><div style="font-size:20px;font-weight:800">9</div><div><span class="chip ok">정상 7</span> <span class="chip warn">주의 2</span></div><div class="dim" style="font-size:11.5px">coordinator 1 · segment 8 · 감지: gpadmin + 포트</div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">14</div><div><span class="chip">프로파일 없음 — 예정</span></div><div style="font-size:11.5px">OS 점검만(rocky9-base)</div></div>
+      <div class="cell"><div style="font-size:20px;font-weight:800">38</div><div><span class="chip ok">정상 35</span> <span class="chip warn">주의 3</span></div><div class="dim" style="font-size:11.5px">OS 점검 + 역할 ‘일반’ 튜닝</div></div>
+      <div style="display:flex;align-items:center;font-weight:700">Rocky 8.x<br><span class="dim" style="font-weight:500;font-size:11.5px">프로파일 예정</span></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">2</div><div><span class="chip">OS 프로파일 없음</span></div><div style="font-size:11.5px">기능 감지는 됨 · 점검 안 함</div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">4</div><div><span class="chip">OS 프로파일 없음</span></div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">22</div><div><span class="chip">둘 다 없음</span></div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">41</div><div><span class="chip">OS 프로파일 없음</span></div></div>
+      <div style="display:flex;align-items:center;font-weight:700">Ubuntu 22.04<br><span class="dim" style="font-weight:500;font-size:11.5px">프로파일 예정</span></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">1</div><div><span class="chip">OS 프로파일 없음</span></div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">0</div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">9</div><div><span class="chip">둘 다 없음</span></div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">12</div><div><span class="chip">OS 프로파일 없음</span></div></div>
+      <div style="display:flex;align-items:center;font-weight:700">Windows Server<br><span class="dim" style="font-weight:500;font-size:11.5px">프로파일 예정</span></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">0</div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">0</div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">0</div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">31</div><div><span class="chip">OS 프로파일 없음</span></div><div style="font-size:11.5px">WinPerf 경로로 사용률만</div></div>
+      <div style="display:flex;align-items:center;font-weight:700">OS 미확인<br><span class="dim" style="font-weight:500;font-size:11.5px">iDRAC 만 · 없음</span></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">—</div></div><div class="cell off"><div style="font-size:20px;font-weight:800">—</div></div><div class="cell off"><div style="font-size:20px;font-weight:800">—</div></div>
+      <div class="cell off"><div style="font-size:20px;font-weight:800">24</div><div><span class="chip">OS 안을 못 봄</span></div><div style="font-size:11.5px">OS 계정 등록 전까지 기능 감지 불가</div></div>
+    </div></div>
+    <div class="dim" style="font-size:11.5px;margin-top:10px">OS 는 /etc/os-release(ID · VERSION_ID) 와 Windows Caption 에서, 기능은 systemd 유닛 · 프로세스 · 수신 포트 · 설정 파일 · 계정 존재로 감지하고 수동 태그가 덮어쓴다. 한 서버에 기능이 둘 이상이면 둘 다 센다(Airflow 워커 + GPDB 세그먼트). 숫자는 가상이다.</div>
+  </div>
+
+  <!-- B. 카탈로그 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>프로파일 카탈로그 — 확장 구조</h2><span class="dim" style="font-size:12px">프로파일 1개 = 파일 1개(match · checks · tunings · sources) · 우선순위: 기능 &gt; 역할 &gt; OS 기본 · 같은 키의 권장값이 겹치면 상위가 이기고 화면이 ‘누가 정했는지’ 를 적는다</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>프로파일</th><th>종류</th><th>매칭(감지) 규칙 — 전부 읽기 전용</th><th>점검</th><th>튜닝</th><th>상태</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">rocky9-base</td><td>OS</td><td>os-release ID=rocky · VERSION_ID 9.x(9.4 확인) · uname 5.14</td><td>8</td><td>튜닝 탭(⑤) 전부 상속</td><td><span class="chip ok">활성</span></td><td><span class="ev a">●</span><span class="ev b">◐</span></td></tr>
+        <tr><td class="mono">airflow</td><td>기능</td><td>unit <span class="mono">airflow-*</span>(이름은 설정) 또는 프로세스 <span class="mono">airflow scheduler|api-server|webserver|triggerer|dag-processor|celery worker</span> · 포트 8080·8974 · <span class="mono">$AIRFLOW_HOME/airflow.cfg</span></td><td>9</td><td>8</td><td><span class="chip ok">활성</span></td><td><span class="ev a">●</span></td></tr>
+        <tr><td class="mono">gpdb</td><td>기능</td><td>계정 <span class="mono">gpadmin</span> + 프로세스 <span class="mono">postgres</span>(gpseg/gpcoord 데이터 디렉터리) · 포트 5432(coordinator) · 6000+(segment) · 역할 coordinator/segment 자동 구분</td><td>9</td><td>22(OS 요구값)</td><td><span class="chip ok">활성</span></td><td><span class="ev a">●</span></td></tr>
+        <tr><td class="mono">ubuntu-base</td><td>OS</td><td>os-release ID=ubuntu</td><td class="dim">—</td><td class="dim">—</td><td><span class="chip">예정</span></td><td class="dim">—</td></tr>
+        <tr><td class="mono">windows-base</td><td>OS</td><td>WinPerf 경로 Caption ‘Windows Server’</td><td class="dim">—</td><td class="dim">—</td><td><span class="chip">예정</span></td><td class="dim">—</td></tr>
+        <tr><td class="mono">hadoop</td><td>기능</td><td>프로세스 NameNode/DataNode/ResourceManager · 포트 9870·8088</td><td class="dim">—</td><td class="dim">—</td><td><span class="chip">예정</span></td><td class="dim">—</td></tr>
+      </tbody></table></div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px">새 프로파일 = 파일 하나 추가 + 카탈로그 테스트(매칭 규칙 · 점검·튜닝 항목의 출처 번호 · 근거 등급이 비면 실패). 감지는 기존 SSH 1회 명령에 구획 <span class="mono">##UNITS</span>(running 유닛) · <span class="mono">##PROCS</span>(프로세스 이름 상위) · <span class="mono">##PORTS</span>(ss -ltn) · <span class="mono">##OSREL</span> 을 더해 받는다 — 왕복은 그대로 1회.</div>
+  </div>
+
+  <!-- C. Rocky 9.4 × Airflow 서버 탭 -->
+  <div class="card" style="border-color:rgba(34,211,238,.35)">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:8px"><h2>서버 ‘용도’ 탭 예시 ① — bm-kr1-af01 · Rocky 9.4 × Airflow 3.x (scheduler + api-server + triggerer)</h2><span class="chip info">감지: unit airflow-scheduler running · 포트 8080/8974 · /opt/airflow/airflow.cfg</span><span class="dim" style="font-size:12px;margin-left:auto">OS 13:35 · 점검 13:36(엣지 SSH 1회 + HTTP 2회)</span></div>
+    <div style="font-weight:700;font-size:12.5px;margin:6px 0">정상 동작 점검 — Airflow 공식 문서 기준</div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:200px">점검</th><th style="width:260px">방법(엣지가 실행 · 읽기 전용)</th><th style="width:130px">결과</th><th>근거 — 문서 요지</th><th style="width:150px">출처</th></tr></thead>
+      <tbody>
+        <tr><td>스케줄러 하트비트</td><td class="mono">airflow jobs check --job-type SchedulerJob --hostname $(hostname)</td><td><span class="chip ok">정상 · 0</span></td><td><span class="ev a">●</span> “On failure, the command will exit with a non-zero error code.” 운영 가이드: “make sure you have a health check set up that will detect when your scheduler has not heartbeat in a while.”</td><td>A1 · A2</td></tr>
+        <tr><td>스케줄러 헬스 서버</td><td class="mono">GET http://host:8974/health</td><td><span class="chip warn">꺼짐(기본)</span></td><td><span class="ev a">●</span> 200 = 정상 · 503 = 비정상. “[scheduler]enable_health_check to True. By default, it is False … By default, it is 8974.” → 켜면 기존 성능점검(svcmon) HTTP 점검으로 등록</td><td>A1</td></tr>
+        <tr><td>API 서버 종합 상태</td><td class="mono">GET /api/v2/monitor/health</td><td><span class="chip ok">metadatabase · scheduler · triggerer · dag_processor healthy</span></td><td><span class="ev a">●</span> 컴포넌트별 최신 하트비트 · 임계값 [scheduler] scheduler_health_check_threshold 등. 웹서버 프로브로 쓰면 다른 컴포넌트 장애에 같이 재시작되므로 프로브는 api/v2/version 권고</td><td>A1</td></tr>
+        <tr><td>메타데이터 DB</td><td class="mono">airflow.cfg [database] sql_alchemy_conn</td><td><span class="chip ok">postgresql</span></td><td><span class="ev a">●</span> “configure the backend to be an external database such as PostgreSQL or MySQL.” 기본 SQLite 는 시험용</td><td>A2</td></tr>
+        <tr><td>실행기(executor)</td><td class="mono">[core] executor</td><td><span class="chip ok">LocalExecutor</span></td><td><span class="ev a">●</span> “Airflow uses LocalExecutor by default. For a multi-node setup, choose a remote executor, or a multi-executor configuration”</td><td>A2</td></tr>
+        <tr><td>다중 스케줄러 조건</td><td class="mono">DB 종류·버전 · use_row_level_locking</td><td><span class="chip ok">PostgreSQL 15 · 스케줄러 1</span></td><td><span class="ev a">●</span> “PostgreSQL 12+ or MySQL 8.0+ are all ready to go” · row-level locking False 면 스케줄러 1개만</td><td>A3</td></tr>
+        <tr><td>DAG 임포트 오류 · 파싱 시간</td><td class="mono">StatsD/OTel: dag_processing.import_errors · total_parse_time · dagbag_size</td><td><span class="chip">미수집 — statsd_on 꺼짐</span></td><td><span class="ev a">●</span> 메트릭 이름은 공식 목록. 포탈이 받으려면 StatsD 수신기 또는 OTel 수신이 필요(이번 범위 밖 — 화면이 말한다)</td><td>A4</td></tr>
+        <tr><td>실행 슬롯 · 굶는 태스크</td><td class="mono">executor.open_slots · queued_tasks · pool.open_slots · scheduler.tasks.starving</td><td><span class="chip">미수집</span></td><td><span class="ev a">●</span> 같은 메트릭 목록</td><td>A4</td></tr>
+        <tr><td>서비스 유닛 · 로그</td><td class="mono">systemctl is-active airflow-* · journalctl -u … -p err --since -1h</td><td><span class="chip ok">3/3 · 오류 0</span></td><td><span class="ev c">○</span> 유닛 이름은 현장마다 다르다(Airflow 는 유닛을 배포하지 않음) → 감지 규칙 설정값</td><td class="dim">—</td></tr>
+      </tbody></table></div>
+    <div style="font-weight:700;font-size:12.5px;margin:12px 0 6px">기능 튜닝 — Airflow (OS 튜닝은 ⑤ 상속)</div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:200px">항목</th><th style="width:110px">현재</th><th style="width:150px">권장</th><th>근거 — 문서 요지</th><th style="width:150px">출처</th><th style="width:88px">상태</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">scheduler.max_tis_per_query</td><td>16</td><td>≤ core.parallelism (0 = 같게)</td><td><span class="ev a">●</span> “This should not be greater than core.parallelism. If this is too high then SQL query performance may be impacted … Set this to 0 to use the value of core.parallelism.”</td><td>A3</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">core.parallelism · max_active_tasks_per_dag</td><td>32 · 16</td><td>워커 자원에 맞춰</td><td><span class="ev b">◐</span> 전역/DAG별 동시 태스크 상한(기본 16 — 3rd party 요약). 공식 설정 참조 원문은 미열람</td><td>A5</td><td><span class="chip">참고</span></td></tr>
+        <tr><td class="mono">scheduler.use_row_level_locking</td><td>True</td><td>True(스케줄러 2+면 필수)</td><td><span class="ev a">●</span> “If this is set to False then you should not run more than a single scheduler at once.”</td><td>A3</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">max_dagruns_per_loop_to_schedule</td><td>20</td><td>작은 DAG 많으면 ↑ · 500+ 태스크 DAG 면 ↓</td><td><span class="ev a">●</span> “Increasing this limit will allow more throughput for smaller Dags but will likely slow down throughput for larger (&gt;500 tasks …) Dags.”</td><td>A3</td><td><span class="chip">참고</span></td></tr>
+        <tr><td class="mono">orphaned_tasks_check_interval · scheduler_health_check_threshold</td><td>300 · 30</td><td>기본 유지</td><td><span class="ev a">●</span> 죽은 SchedulerJob 감지·태스크 인계 주기 — “there is no harm in not detecting this for a while.”</td><td>A3</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">parsing_processes · min_file_process_interval</td><td>2 · 30</td><td>CPU 여유만큼 ↑ · 동적 DAG 면 간격 ↑</td><td><span class="ev b">◐</span> Astronomer: parsing_processes ≈ 2×vCPU, 낮은 간격은 스케줄러 CPU ↑. Airflow 3 는 dag-processor 설정 — 공식 원문 미확인</td><td>A5</td><td><span class="chip">확인 불가</span></td></tr>
+        <tr><td>DAG 상위(top-level) 코드</td><td>파싱 1.8초/파일</td><td>무거운 import·Variable 접근 제거</td><td><span class="ev a">●</span> “avoid writing the top level code which is not necessary to create Operators” · Variables 는 jinja 로(파싱 때 DB 호출 금지)</td><td>A6</td><td><span class="chip warn">권고</span></td></tr>
+        <tr><td>스케줄러 자원</td><td>CPU 62% · RSS 1.9GB</td><td>병목 자원 증설</td><td><span class="ev a">●</span> “CPU, memory, I/O are the usual limiting factors” · 메모리는 total 이 아니라 working memory 로 본다</td><td>A3</td><td><span class="chip ok">적합</span></td></tr>
+      </tbody></table></div>
+  </div>
+
+  <!-- D. Rocky 9.4 × GPDB -->
+  <div class="card" style="border-color:rgba(168,85,247,.35)">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:8px"><h2>서버 ‘용도’ 탭 예시 ② — bm-kr1-gp01 · Rocky 9.4 × Greenplum 7 (coordinator)</h2><span class="chip pur">감지: gpadmin · postgres -D /data/coordinator/gpseg-1 · 포트 5432</span><span class="dim" style="font-size:12px;margin-left:auto">점검은 gpadmin 으로 읽기 전용 SQL · gpstate</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:230px">점검(권장 주기 · 심각도 — 문서값)</th><th style="width:250px">방법</th><th style="width:130px">결과</th><th>근거 — 문서 요지</th><th style="width:110px">출처</th></tr></thead>
+      <tbody>
+        <tr><td>다운 세그먼트 (5~10분 · IMPORTANT)</td><td class="mono">SELECT * FROM gp_segment_configuration WHERE status='d' · gpstate -Q</td><td><span class="chip ok">0</span></td><td><span class="ev a">●</span> “List segments that are currently down. If any rows are returned, this should generate a warning or alert.”</td><td>G3 · G4</td></tr>
+        <tr><td>선호 역할 이탈 (5~10분 · CRITICAL)</td><td class="mono">gp_segment_configuration role≠preferred_role · 분산 쿼리 1행/primary</td><td><span class="chip warn">2 세그먼트</span></td><td><span class="ev a">●</span> “When the segments are not running in their preferred role, processing might be skewed. Run gprecoverseg -r”</td><td>G3</td></tr>
+        <tr><td>데이터 볼륨 공간 (5~30분 · CRITICAL)</td><td class="mono">gp_toolkit.gp_disk_free · df /data*</td><td><span class="chip ok">61%</span></td><td><span class="ev a">●</span> “The recommended threshold is 75% full. It is not recommended to run the system with capacities approaching 100%.”</td><td>G3</td></tr>
+        <tr><td>NIC 오류·드롭 (매시 · IMPORTANT) · RAID (5분 · CRITICAL)</td><td>USE 네트워크 E 칸 · iDRAC 컨트롤러·물리 디스크 상태(②)</td><td><span class="chip ok">0 · 정상</span></td><td><span class="ev a">●</span> “Check for errors or dropped packets on the network interfaces … Check for RAID errors or degraded RAID performance.” → 통합 행이 이미 가진 값을 재사용</td><td>G3</td></tr>
+        <tr><td>카탈로그 일관성 (주 1회 · IMPORTANT)</td><td class="mono">gpcheckcat -O (DB마다)</td><td><span class="chip">6일 전 통과</span></td><td><span class="ev a">●</span> 주 1회 권장 · 실행 중에도 가능(제한 모드면 거짓 불일치 회피)</td><td>G3</td></tr>
+        <tr><td>통계 누락 · 블로트 · VACUUM (일 1회 · CRITICAL)</td><td class="mono">gp_toolkit.gp_stats_missing · gp_bloat_diag</td><td><span class="chip warn">통계 누락 3 테이블</span></td><td><span class="ev a">●</span> “Vacuum user tables … Recommended frequency: daily Severity: CRITICAL”</td><td>G3</td></tr>
+        <tr><td>상태 상세 · 로그</td><td class="mono">gpstate -s · gp_toolkit 로그 뷰</td><td><span class="chip ok">오류 0 (24h)</span></td><td><span class="ev a">●</span> “To get detailed status information for the Greenplum system, run gpstate -s.”</td><td>G4</td></tr>
+        <tr><td>하드웨어 기준선(의심 시만)</td><td class="mono">gpcheckperf -d /data -r ds</td><td><span class="chip">수동 · DB 정지 필요</span></td><td><span class="ev a">●</span> “To obtain valid numbers from gpcheckperf, the database system must be stopped.” → 자동 실행 금지</td><td>G4</td></tr>
+      </tbody></table></div>
+    <div style="font-weight:700;font-size:12.5px;margin:12px 0 6px">OS 요구값 — Greenplum ‘Configuring Your Systems’ (기능 프로파일이 OS 기본·역할 권장값을 덮어쓴다)</div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>항목</th><th>현재</th><th>요구(문서값)</th><th>근거 — 문서 요지</th><th style="width:88px">상태</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">vm.overcommit_memory · overcommit_ratio</td><td>2 · 95</td><td>2 · 95</td><td><span class="ev a">●</span> “This should be always set to 2, which is the only safe setting for the database.”</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">vm.swappiness</td><td>10</td><td>1</td><td><span class="ev a">●</span> sysctl.conf 예시 “vm.swappiness = 1” — 역할 DB 의 10 보다 기능 프로파일이 우선</td><td><span class="chip warn">권고</span></td></tr>
+        <tr><td class="mono">kernel.shmall · shmmax · shmmni</td><td>계산값과 일치</td><td>_PHYS_PAGES/2 · ×PAGE_SIZE · 32768</td><td><span class="ev a">●</span> “the value for both parameters should be one half of the system physical memory.”</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">kernel.sem · ip_local_port_range</td><td>32000 1048576000 1000 32768 · 10000 65535</td><td>같음</td><td><span class="ev a">●</span> sysctl.conf 예시값 · 포트 범위는 Greenplum 포트와 충돌 금지</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">vm.dirty_* (256GB)</td><td>ratio 20/10</td><td>background_bytes 1.5GB · dirty_bytes 4GB · ratio 0</td><td><span class="ev a">●</span> “For host systems with more than 64GB of memory … vm.dirty_background_bytes = 1610612736 … vm.dirty_bytes = 4294967296” (64GB 이하는 ratio 3 / 10)</td><td><span class="chip warn">권고</span></td></tr>
+        <tr><td class="mono">vm.min_free_kbytes</td><td>256MB (0.1%)</td><td>물리 메모리 3% · 5% 초과 금지</td><td><span class="ev a">●</span> “set vm.min_free_kbytes to a recommended 3% of system physical memory … Do not set … higher than 5%” — Rocky KVM 가이드(1~2%)와 다르다 → 기능 프로파일이 이긴다</td><td><span class="chip warn">권고</span></td></tr>
+        <tr><td class="mono">net.core.rmem/wmem_max · netdev_max_backlog · tcp_tw_reuse</td><td>212992 · 1000 · 0</td><td>16777216 · 10000 · 1</td><td><span class="ev a">●</span> sysctl.conf 예시값</td><td><span class="chip warn">권고</span></td></tr>
+        <tr><td class="mono">limits nofile · nproc · core</td><td>524288 · 131072 · unlimited</td><td>같음</td><td><span class="ev a">●</span> “* soft nofile 524288 … * soft nproc 131072” · 20-nproc.conf 가 덮어쓰므로 확인 · core_pattern=/var/core/core.%h.%t</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">transparent_hugepage</td><td>never</td><td>never</td><td><span class="ev a">●</span> “Deactivate Transparent Huge Pages (THP) as it degrades Greenplum Database performance.”</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">XFS mount · read-ahead · scheduler</td><td>nodev,noatime,inode64 · 16384 · none(NVMe)</td><td>rw,nodev,noatime,inode64 · 16384 · NVMe none / SSD none / 그 밖 mq-deadline</td><td><span class="ev a">●</span> “read-ahead (blockdev) value of 16384” · 재부팅에 안 남으므로 rc.local 등으로 · 스케줄러 표(RHEL9/Rocky)</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">RemoveIPC · SELinux · firewalld · 시각 동기화</td><td>no · disabled · inactive · chrony 동기</td><td>no · disabled 또는 허용 구성 · 끄거나 허용 · 동기</td><td><span class="ev a">●</span> “RemoveIPC=yes … causes gpinitsystem to fail” · “SELinux must either be Disabled or configured to allow unconfined access” · “Synchronize system clocks”</td><td><span class="chip ok">적합</span></td></tr>
+      </tbody></table></div>
+  </div>
+
+  <!-- E. 출처 · 정직 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <h2 style="margin-bottom:8px">근거 문서 — 이 화면이 인용한 것 (확인일 2026-11-06)</h2>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>#</th><th>문서</th><th>확인</th></tr></thead>
+        <tbody>
+          <tr><td>A1</td><td>Apache Airflow (stable) · <a href="https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html">Checking Airflow Health Status</a></td><td><span class="ev a">●</span> 원문</td></tr>
+          <tr><td>A2</td><td>Apache Airflow (stable) · <a href="https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/production-deployment.html">Production Deployment</a></td><td><span class="ev a">●</span> 원문</td></tr>
+          <tr><td>A3</td><td>Apache Airflow (stable) · <a href="https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/scheduler.html">Scheduler</a> (Running More Than One Scheduler · Fine-tuning)</td><td><span class="ev a">●</span> 원문</td></tr>
+          <tr><td>A4</td><td>Apache Airflow (stable) · <a href="https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/metrics.html">Metrics Configuration</a></td><td><span class="ev a">●</span> 원문</td></tr>
+          <tr><td>A5</td><td>Astronomer · Scaling Airflow to optimize performance (3rd party)</td><td><span class="ev b">◐</span> 검색 발췌</td></tr>
+          <tr><td>A6</td><td>Apache Airflow (stable) · <a href="https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html">Best Practices</a> (Top level Python Code)</td><td><span class="ev a">●</span> 원문</td></tr>
+          <tr><td>G1</td><td>Tanzu Greenplum 7 · <a href="https://techdocs.broadcom.com/us/en/vmware-tanzu/data-solutions/tanzu-greenplum/7/greenplum-database/install_guide-prep_os.html">Configuring Your Systems</a></td><td><span class="ev a">●</span> 원문</td></tr>
+          <tr><td>G2</td><td>Tanzu Greenplum 7 · <a href="https://techdocs.broadcom.com/us/en/vmware-tanzu/data-solutions/tanzu-greenplum/7/greenplum-database/best_practices-sysconfig.html">System Configuration (Best Practices)</a></td><td><span class="ev a">●</span> 원문</td></tr>
+          <tr><td>G3</td><td>Tanzu Greenplum 7 · <a href="https://techdocs.broadcom.com/us/en/vmware-tanzu/data-solutions/tanzu-greenplum/7/greenplum-database/admin_guide-monitoring-monitoring.html">Recommended Monitoring and Maintenance Tasks</a></td><td><span class="ev a">●</span> 원문</td></tr>
+          <tr><td>G4</td><td>Tanzu Greenplum 7 · <a href="https://techdocs.broadcom.com/us/en/vmware-tanzu/data-solutions/tanzu-greenplum/7/greenplum-database/best_practices-maintenance.html">System Monitoring and Maintenance</a></td><td><span class="ev a">●</span> 원문</td></tr>
+          <tr><td>R3</td><td>Rocky Linux · <a href="https://docs.rockylinux.org/9/release_notes/9_4/">Release notes 9.4</a> (업그레이드 경로 · 알려진 문제 · 폐기 스트림)</td><td><span class="ev a">●</span> 원문</td></tr>
+        </tbody></table></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">정직하게 적어 둘 것</h2>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:12.5px" class="dim">
+        <li><b style="color:#e6edf6">Rocky 9.4 ‘정상 동작 점검’ 의 공식 항목은 적다.</b> 릴리스 노트가 주는 것은 업그레이드 경로(9.x → dnf upgrade · 8 에서 불가), 알려진 문제 분류(상세는 upstream), 폐기 스트림(Node.js 16 · .NET 7 · OpenJDK 11 2024-10 EoL) 뿐이다. 그래서 rocky9-base 점검은 ① 그 세 가지 + ② TuneD 활성 프로파일(⑤) + ③ systemd 실패 유닛·journal 오류·chrony 동기(○ 일반 관행 — 공식 권고 문장 없음) + ④ GPDB 가 요구하는 SELinux·firewalld·RemoveIPC 상태(●) 로 둔다.</li>
+        <li><b style="color:#e6edf6">Airflow 메트릭(import_errors · open_slots · starving)은 StatsD/OTel 로만 나온다.</b> 포탈이 받으려면 수신기가 필요하다 — 이번 범위에 넣지 않고 ‘미수집’ 으로 표시한다. 대신 CLI(jobs check)·HTTP(health) 두 경로로 생존을 본다.</li>
+        <li><b style="color:#e6edf6">GPDB 점검은 gpadmin 계정의 읽기 전용 SQL 이 필요하다.</b> 기존 bmstor OS 계정이 gpadmin 이 아니면 ‘권한 없음’ 으로 비고, gpcheckperf 는 DB 를 멈춰야 하므로 자동 실행하지 않는다.</li>
+        <li>Airflow 3 의 DAG 파싱(parsing_processes · min_file_process_interval)은 dag-processor 로 옮겨 갔을 수 있다 — 공식 설정 참조 원문을 열지 않아 ‘확인 불가’. 구현 때 configurations-ref 를 대조한다.</li>
+        <li>Ubuntu · Windows · Hadoop 프로파일은 이번에 만들지 않았다 — 매트릭스에 ‘프로파일 없음’ 으로 보이고 점검하지 않는다(틀린 판정을 내지 않는다).</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
