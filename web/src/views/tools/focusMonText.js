@@ -497,6 +497,45 @@ export function suggestionText(sg, existing = []) {
   return sg.moves.slice(0, 6).map((m) => `${m.group}${have.has(m.group) ? '' : '(새 그룹)'} ${m.ids.length}대(${m.names.slice(0, 3).join(' · ')}${m.names.length > 3 ? ' …' : ''})`).join(' · ') + (sg.moves.length > 6 ? ` 외 ${sg.moves.length - 6}묶음` : '');
 }
 
+/* ── 개요 카드 아래 줄(v2.984 — 사용자 '빨간 부분을 선택해서 볼 수 있게 · Disk write/read · Network in/out · disk wait 등') ──────────
+ * 값은 서버 요약(rates.summaryOf) 그대로 — 디스크는 물리 디스크 합(지연은 요청 수 가중) · 못 읽은 값은 '—'(0 아님). 고른 목록은 브라우저가 기억(fm.ov.line).
+ */
+export const CARD_LINE_MAX = 4;
+export const CARD_LINE_DEFAULT = Object.freeze(['net', 'wAwait']); // 예전 고정 줄과 같다
+const swapText = (u, t) => { const tt = n(t); if (tt === 0) return '없음'; const uu = n(u); return uu == null ? DASH : bytesText(uu); };
+const mbNum = (v) => { const x = n(v); return x == null ? DASH : x >= 100 ? String(Math.round(x)) : x >= 10 ? x.toFixed(1) : x.toFixed(2); };
+/** 읽기 · 쓰기 MB/s 한 칸(R 읽기 · W 쓰기 — 카드 반 칸에 들어가게 · 단위는 한 번 · 둘 다 없으면 단위 없음). 1440px 카드에서 '읽기 173 · 쓰기 272 MB/s' 가 잘렸다(2026-11-13 화면 확인). */
+const rwText = (r, w) => `R ${mbNum(r)} · W ${mbNum(w)}${n(r) == null && n(w) == null ? '' : ' MB/s'}`;
+export const CARD_LINE_ITEMS = Object.freeze([
+  { key: 'net', label: '네트워크 수신 · 송신', title: '가장 바쁜 본딩(없으면 물리) 인터페이스의 수신 ↓ · 송신 ↑', text: (x) => `↓${bpsText(x?.netRx)} ↑${bpsText(x?.netTx)}` },
+  { key: 'diskRw', label: '디스크 읽기 · 쓰기', title: '물리 디스크 합 — R 읽기 · W 쓰기 MB/s(iostat rMB/s · wMB/s)', text: (x) => rwText(x?.rMB, x?.wMB) },
+  { key: 'iops', label: '디스크 IOPS', title: '물리 디스크 합 — 초당 읽기 / 쓰기 횟수(iostat r/s · w/s)', text: (x) => `IOPS ${numText(x?.rIo, 0)} / ${numText(x?.wIo, 0)}` },
+  { key: 'rAwait', label: '디스크 읽기 지연', title: '물리 디스크 — 읽기 요청 수로 가중한 평균 지연(iostat r_await)', text: (x) => `읽기 지연 ${msText(x?.rAwait)}` },
+  { key: 'wAwait', label: '디스크 쓰기 지연', title: '물리 디스크 — 쓰기 요청 수로 가중한 평균 지연(iostat w_await)', text: (x) => `쓰기 지연 ${msText(x?.wAwait)}` },
+  { key: 'qu', label: '디스크 대기열', title: '물리 디스크 합 — 평균 대기열 길이(iostat avgqu-sz)', text: (x) => `대기열 ${numText(x?.qu, 2)}` },
+  { key: 'iow', label: 'CPU I/O 대기', title: 'CPU 가 디스크 I/O 를 기다린 시간 비율(iowait)', text: (x) => `I/O 대기 ${pctText(x?.iow, 1)}` },
+  { key: 'stl', label: 'CPU steal', title: '가상 머신에서 하이퍼바이저가 가져간 시간 비율(steal)', text: (x) => `steal ${pctText(x?.stl, 1)}` },
+  { key: 'load', label: '부하 평균(1분)', title: '/proc/loadavg 1분 값 · 코어 수와 비교해 보세요', text: (x) => `부하 ${numText(x?.load1, 2)}${n(x?.cores) ? ` / ${x.cores}코어` : ''}` },
+  { key: 'swap', label: '스왑 사용', title: '쓰고 있는 스왑(전체 - 남은 것) — 스왑이 없으면 없음', text: (x) => `스왑 ${swapText(x?.swU, x?.swT)}` },
+]);
+const LINE_KEYS = new Set(CARD_LINE_ITEMS.map((x) => x.key));
+/** 저장된 목록 정리 — 아는 열쇠만 · 겹침 없이 · 최대 CARD_LINE_MAX · 비면 기본값(카드 아래 줄이 사라지지 않게). */
+export function normCardLine(v) {
+  const out = [];
+  for (const k of Array.isArray(v) ? v : []) if (typeof k === 'string' && LINE_KEYS.has(k) && !out.includes(k)) out.push(k);
+  return out.length ? out.slice(0, CARD_LINE_MAX) : [...CARD_LINE_DEFAULT];
+}
+/** 체크를 바꿨을 때의 새 목록 — 고른 순서대로 · 넷이면 더 못 고른다 · 마지막 하나는 끄지 못한다(빈 줄 방지). */
+export function toggleCardLine(list, key) {
+  const cur = normCardLine(list);
+  if (cur.includes(key)) return cur.length > 1 ? cur.filter((k) => k !== key) : cur;
+  return cur.length >= CARD_LINE_MAX || !LINE_KEYS.has(key) ? cur : [...cur, key];
+}
+/** 카드 아래 줄 칸들 — [{ key, text, title }] · 요약이 없으면 값은 '—'. */
+export function cardLineCells(sum, list) {
+  return normCardLine(list).map((k) => { const it = CARD_LINE_ITEMS.find((x) => x.key === k); return { key: k, text: it.text(sum || null), title: `${it.label} — ${it.title}` }; });
+}
+
 /* ── 수집 부하(v2.983 — 시안 ⑪ · '늘 잼 · 세 묶음') ─────────────────────────────────────────────────── */
 /** 판정(서버 load.judgeLoad 와 같은 이름) — 문턱은 응답 settings(코어 1개 기준 %). */
 export const LOAD_JUDGE = Object.freeze({ light: { label: '가벼움', tone: 'ok' }, mid: { label: '보통', tone: 'warn' }, heavy: { label: '큼', tone: 'crit' } });
