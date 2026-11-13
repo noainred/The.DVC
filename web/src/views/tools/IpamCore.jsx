@@ -5,7 +5,7 @@ import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js'; // v
 import { fetchJson, usePolling, hasRole, canCsv } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
-import { agentLabel, DEVTYPE_LABEL, DiscoveryBadge, fmtDt, fmtDur, MGMT, MgmtBadge } from './ipamShared.jsx';
+import { agentLabel, DEVTYPE_LABEL, DiscoveryBadge, fmtDt, MGMT, MgmtBadge, periodText } from './ipamShared.jsx';
 import { IpamNetMap, RangePolicies } from './IpamNet.jsx';
 import { MemoEditor, OverrideEditor } from './IpamEditors.jsx';
 import { IpmsSettings } from './IpmsSettings.jsx';
@@ -623,7 +623,8 @@ function IpHistoryModal({ row, scope, onClose, canManage = false, onEditName = n
     return () => { active = false; };
   }, [ip]);
   const fmt = fmtDt; // v2.639(U7): 시각·소요는 ipamShared 한 벌(예전 이 모달만 브라우저 로케일 toLocaleString() · '분' 단위 소요)
-  const dur = (ms) => fmtDur(Math.max(0, ms));
+  // v2.993.1: 기간은 periodText(ipamShared) — fmtDur 로 그리면 해제된 적 없는 IP 의 '총 미사용 기간' 이 '0ms' 였다(그런 구간이 없으면 '없음').
+  const dur = (ms, count = 1) => periodText(Math.max(0, ms), count);
   // 이벤트(오래된→최신)로 사용(up)/미사용(down) 구간을 만든다. 마지막 구간은 현재까지.
   //   v2.991: 이름 변경(renames)은 events 와 따로 온다 — 구간 계산에는 넣지 않고 전이 기록 표에만 끼워 보인다.
   const evs = ((h?.events) || []).filter((e) => e && (e.type === 'up' || e.type === 'down'));
@@ -634,6 +635,8 @@ function IpHistoryModal({ row, scope, onClose, canManage = false, onEditName = n
     .map((s) => ({ ...s, ms: Math.max(0, s.end - s.start) }));
   const usedMs = segs.filter((s) => s.type === 'up').reduce((a, s) => a + s.ms, 0);
   const idleMs = segs.filter((s) => s.type === 'down').reduce((a, s) => a + s.ms, 0);
+  const upCount = segs.filter((s) => s.type === 'up').length;
+  const downCount = segs.filter((s) => s.type === 'down').length;
   // v2.991: 호스트명은 위 '호스트명' 묶음(HostNameBlock — 방식별 결과)이 말한다(예전 '확인된 호스트명' 칸은 마지막 up 이벤트의 이름 하나였다).
   return (
     <Modal title={`IP 사용 이력 — ${ip}`} onClose={onClose} width={640} resizable minWidth={440} minHeight={380}>
@@ -648,7 +651,7 @@ function IpHistoryModal({ row, scope, onClose, canManage = false, onEditName = n
             {[['현재 상태', h.status === 'up' ? <span className="badge green">사용 중</span> : <span className="badge amber">미사용(해제)</span>],
               ['확인 방식', <DiscoveryBadge d={row.discovery} />],
               ['최초 확인', fmt(h.firstSeen)], ['마지막 확인', fmt(h.lastSeen)],
-              ['총 사용 기간', dur(usedMs)], ['총 미사용 기간', dur(idleMs)]].map(([k, v], i) => (
+              ['총 사용 기간', dur(usedMs, upCount)], ['총 미사용 기간', dur(idleMs, downCount)]].map(([k, v], i) => (
               <div key={i} style={{ minWidth: 150 }}><div className="muted" style={{ fontSize: 12 }}>{k}</div><div style={{ fontSize: 13, marginTop: 2 }}>{v}</div></div>
             ))}
           </div>
