@@ -3,6 +3,7 @@
  * 라우트가 만든 시트(buildSubnetSheets) · 원장 행(buildIpamRows) · 대역 용도(subnetNotes)를 받아 요약 · 대역 목록 · 조치 필요 · 안내 값을 만든다.
  * 판정은 새로 만들지 않는다 — 시트 행의 status · mgmtStatus, 원장 행의 reconcile · duplicate · 예약 만료 · 충돌 의심 · dnsFwd 를 그대로 읽는다.
  */
+import { pushAll } from '../util/pushAll.js';
 
 /** 내보내기에서 고를 수 있는 시트(웹 내보내기 창과 1:1). 기본은 전부. */
 export const EXPORT_SHEETS = Object.freeze(['summary', 'nets', 'ledger', 'issues', 'info']);
@@ -70,7 +71,7 @@ export function buildExportExtra({ sheets = [], rows = [], notes = {}, include =
     else if (r.status === 'scanned') st['스캔 확인'] += 1; else if (r.status === 'released') st['해제(이력)'] += 1;
   }
   let issues = [];
-  for (const r of rows) { issues.push(...issuesOfRow(r)); if (issues.length > ISSUES_MAX) break; }
+  for (const r of rows) { pushAll(issues, issuesOfRow(r)); if (issues.length > ISSUES_MAX) break; } // 인벤토리 규모 배열 — spread push 금지(audit2603a)
   const issuesTruncated = issues.length > ISSUES_MAX;
   if (issuesTruncated) issues = issues.slice(0, ISSUES_MAX);
   return {
