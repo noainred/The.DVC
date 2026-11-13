@@ -57,6 +57,16 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
     <div style="min-width:0">
       <div style="font-size:22px;font-weight:800">디스크 배드 섹터 분석</div>
       <div class="muted">전 법인 서버의 iDRAC Lifecycle 로그에서 찾은 배드 섹터 기록 — 아직 쓰고 있는 디스크, 국가·법인별, 모델별, 월별 추이.</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <label for="scope" class="muted" style="font-size:12px">범위</label>
+        <select id="scope" style="min-height:32px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:700">
+          <option selected>전체 법인</option>
+          <option>폴란드 · PL 바르샤바</option>
+          <option>한국 · KR 본사</option>
+          <option>미국 · US 동부</option>
+        </select>
+        <span class="muted" style="font-size:12px">법인을 고르면 이 화면 전체가 그 법인으로 좁혀집니다 — <a href="FleetCorp.dc.html">PL 바르샤바 예</a></span>
+      </div>
     </div>
     <div class="seg" role="tablist" aria-label="보기">
       <button type="button" class="on" aria-current="page">요약</button>
@@ -124,7 +134,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
     </table>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-      <span class="muted" style="font-size:12px">복구 불가 = PDR46 · PDR47 · PDR63 · PDR64 건수, PDR54 = 미디어 오류를 복구 중에 고쳐 쓴 건수, PDR59 = 불량 블록을 다른 블록으로 옮긴 건수, PDR57 = 불량 블록 표가 차 간다는 경고 건수입니다(<a href="Refs.dc.html">근거 문서</a>). ‘교체 기록 없음’ 은 로그로 미룬 것이고, ‘시리얼 같음’ 은 포탈이 그때 적어 둔 시리얼과 맞춘 것입니다. 서버 이름을 누르면 그 서버의 디스크 이력이 열립니다.</span>
+      <span class="muted" style="font-size:12px">복구 불가 = PDR46 · PDR47 · PDR63 · PDR64 건수, PDR54 = 미디어 오류를 복구 중에 고쳐 쓴 건수, PDR59 = 불량 블록을 다른 블록으로 옮긴 건수, PDR57 = 불량 블록 표가 차 간다는 경고 건수입니다(<a href="Refs.dc.html">근거 문서</a>). ‘교체 기록 없음’ 은 로그로 미룬 것이고, ‘시리얼 같음’ 은 포탈이 그때 적어 둔 시리얼과 맞춘 것입니다. 서버 이름을 누르면 그 서버의 디스크 이력이, 근거 칸을 누르면 <a href="Basis.dc.html">판단 근거</a>가 열립니다.</span>
       <button class="btn" type="button">나머지 52개 더 보기</button>
     </div>
   </div>
@@ -146,7 +156,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
         </tr></thead>
         <tbody>
           <tr><td>인도 · IN 첸나이</td><td class="r mono">39 / 52</td><td class="r mono">344</td><td class="r mono">12</td><td><div class="rate"><i style="width:100px"></i><span class="mono">34.9</span></div></td><td class="r mono"><b>8</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
-          <tr><td>폴란드 · PL 바르샤바</td><td class="r mono">61 / 64</td><td class="r mono">540</td><td class="r mono">14</td><td><div class="rate"><i style="width:74px"></i><span class="mono">25.9</span></div></td><td class="r mono"><b>9</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
+          <tr><td><a href="FleetCorp.dc.html">폴란드 · PL 바르샤바</a></td><td class="r mono">61 / 64</td><td class="r mono">540</td><td class="r mono">14</td><td><div class="rate"><i style="width:74px"></i><span class="mono">25.9</span></div></td><td class="r mono"><b>9</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
           <tr><td>독일 · DE 프랑크푸르트</td><td class="r mono">44 / 45</td><td class="r mono">396</td><td class="r mono">8</td><td><div class="rate"><i style="width:58px"></i><span class="mono">20.2</span></div></td><td class="r mono"><b>5</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
           <tr><td>미국 · US 동부</td><td class="r mono">74 / 80</td><td class="r mono">688</td><td class="r mono">11</td><td><div class="rate"><i style="width:46px"></i><span class="mono">16.0</span></div></td><td class="r mono"><b>7</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
           <tr><td>한국 · KR 본사</td><td class="r mono">212 / 214</td><td class="r mono">2,104</td><td class="r mono">19</td><td><div class="rate"><i style="width:26px"></i><span class="mono">9.0</span></div></td><td class="r mono"><b>6</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
@@ -157,7 +167,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
       </table>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <span class="muted" style="font-size:12px">IN 첸나이는 52대 중 13대를 못 읽었습니다 — 읽은 서버의 디스크만으로 낸 값입니다.</span>
+        <span class="muted" style="font-size:12px">법인 이름을 누르면 그 법인만 봅니다. IN 첸나이는 52대 중 13대를 못 읽었습니다 — 읽은 서버의 디스크만으로 낸 값입니다.</span>
         <button class="btn" type="button">나머지 20곳</button>
       </div>
     </div>

@@ -1,7 +1,7 @@
 # 설계: iDRAC 디스크 배드 섹터 이력 — 이 서버에서 과거에 배드 섹터가 난 적이 있는지 찾기
 
 작성 2026-11-14 (v2.914.0 기준) · 상태 **시안 — 컨펌 대기**(구현 전) · 시안 캔버스: https://claude.ai/artifact/FB317UnqoXFZQjPAGdM2xU
-(아트보드 8장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 서버 이름 · IP · 서비스태그 · 시리얼 · 건수 · 날짜는 **전부 가상**이고
+(아트보드 10장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 서버 이름 · IP · 서비스태그 · 시리얼 · 건수 · 날짜는 **전부 가상**이고
 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로. 계정의 ‘Design System’ 아티팩트는 내용이 비어 있어(자기 파일 0개) 쓰지 않았다.)
 
 ## 1. 요구(사용자 2026-11-14)
@@ -494,3 +494,38 @@ Get-Partition | Select-Object DiskNumber, PartitionNumber, DriveLetter, AccessPa
 ⓖ https://i.dell.com/sites/doccontent/shared-content/services/en/Documents/Dell_SupportAssist_Enterprise_Customer_Overview.pdf · https://m.principledtechnologies.com/Dell/ProSupport_Plus_with_SupportAssist_for_servers_0618.pdf ·
 ⓗ https://snia.org/sites/default/files/2025-05/SNIA-SDC21-Jibbe-Binford-Drive-Health-Monitor-for-HDD-drives-On-Prem-and-Cloud.pdf · https://kb.netapp.com/on-prem/ontap/OHW/OHW-KBs/What_is_the_difference_between_disk_predictive_failure_and_physical_disk_failure_in_ONTAP_9 ·
 ⓘ https://www.manualslib.com/manual/600037/Dell-6-Series.html?page=38
+
+## 17. 추가 요구(사용자 2026-11-14 10차) — 판단 근거 표시 · 법인별 보기 · 참고 자료
+
+- "판단 근거를 포탈에 표시해줘" · "디스크 배드 섹터 분석 메뉴를 법인별로 보는 기능 추가" · (출처 목록 그림을 ‘판단 근거’ 아트보드에 붙여 넣고) "이것도 추가해줘"
+
+### 17.1 판단 근거 — 아트보드 `Basis.dc.html`
+
+화면의 판정 표지(기록 있음 · 기록 없음 · 아직 사용 중 · 교체됨 · 판단 불가 · 볼 수 없음 · 확정하지 못함)를 누르면 열린다. 판정마다 세 가지를 보여 준다.
+
+1. **확신 수준**: 확정(포탈이 직접 본 값끼리 맞춤 — 시리얼 등) / 추정(로그에 남은 기록으로 미룸) / 판단 안 함(근거가 모자라 말하지 않음).
+2. **근거 목록**: 사실 한 줄 + 출처(로그 항목 · 포탈이 적어 둔 시리얼 이력 · iDRAC 스토리지 구성 · Dell 문서) + 시각.
+3. **틀릴 수 있는 경우**(또는 ‘왜 말하지 않는가’): 그 판정이 뒤집힐 조건을 한 줄로.
+
+`Main` 판정 띠에 ‘판단 근거 보기’, ‘지금 디스크’ 표의 판정 표지 옆에 확신 수준과 ‘근거’ 링크, `Fleet` 표의 근거 칸이 이 화면을 연다.
+구현 규칙: 판정을 내는 순수 함수가 **판정 · 확신 수준 · 근거 목록을 한 번에** 돌려준다(화면이 근거를 따로 지어내지 않는다 — 판정 코어는 하나). 근거가 비면 판정도 ‘판단 안 함’ 이다.
+
+### 17.2 법인별 보기 — 아트보드 `FleetCorp.dc.html`
+
+분석 화면 머리의 **범위** 선택(전체 법인 / 법인 하나) 또는 국가·법인 표의 법인 이름을 누르면 화면 전체가 그 법인으로 좁혀진다.
+수치 5칸 · 전체와 견주기(1,000개당) · 모델별 · **서버별 표**(국가·법인 표 자리) · 월별 추이 · [이 법인 점검]. ‘전체로’ 로 돌아간다.
+
+- 법인 계정은 처음부터 자기 법인으로 열리고 범위를 바꿀 수 없다(§10 결정). 범위 밖 법인은 목록에 없다.
+- 포탈 도구 화면은 머리의 범위 선택을 이미 갖고 있다(`SpecialTools.jsx` — `docs/design/server-temp/README.md` §‘달리하는 점’ 1). **범위 선택을 두 번 그리지 않는다** — 구현 때 기존 것을 쓴다(시안은 위치만 보여 준다).
+- 한 법인만 보면 건수가 적어 비율 · 추이가 한두 건에 흔들린다는 문구를 화면에 넣었다.
+
+### 17.3 참고 자료를 판단 근거에 표시
+
+§16 조사에 쓴 자료 19건을 `Basis` 아래 ‘판단 규칙을 정할 때 참고한 자료’ 표로 넣었다(무엇을 뒷받침하나 · 자료 링크 · 이 포탈에서의 쓰임).
+쓰임은 정직하게 나눴다: **판단에 반영**(고장 예측을 따로 세는 규칙 — Dell KB 000126418 · Dell 백서) / **검토 중**(재발 판정 · vSAN 상태 · SMART 값 · 조치 추적 — 아직 판단 규칙에 없다) / **참고만**.
+즉 지금 화면의 판정은 ‘검토 중’ 자료에 기대지 않는다는 문구를 같이 넣었다. 붙여 넣으신 그림은 이 표로 바꿨다.
+
+### 17.4 캔버스 직접 편집과 겹친 일
+
+사용자가 캔버스에서 직접 편집(그림 붙여 넣기)하는 사이에 내가 `Fleet.dc.html` · `canvas.json` 을 게시했다(게시 도구가 ‘직전 저장본을 덮었다’ 고 경고).
+다시 읽어 확인한 바로는 `canvas.json` 은 내 것과 같았고 붙여 넣은 그림은 `Basis.dc.html` 에 남아 있었다. `Fleet.dc.html` 에 손으로 고친 것이 있었다면 사라졌을 수 있다 — 사용자에게 알렸다.
