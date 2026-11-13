@@ -21,6 +21,7 @@ import { ScanRangeMigration } from './ScanRangeMigration.jsx';     // v2.691
 import { applyImport, classifyLine, otherSavedRanges, reflectDups } from './vcRangeImportText.js';
 import { agentDupReasonText, agentName, ownersToSaved } from './scanRangeImportText.js';
 import { REPORT_STATE_TEXT, REPORT_STATE_TONE, agentReportRows, reportKpis, reportStateNote, reportStateDetail, agentDeleteConfirmText, agentDeleteResultText } from './scanRangeImportText.js';
+import { nameStatsCell, nameStatsText } from './ipamHostText.js'; // v2.991 호스트명 확인 요약
 import { clearDraft } from './ipamDraft.js'; // v2.694: 지운 에이전트의 편집 초안이 옛 대역을 되살리지 않게
 import BoldText from '../../components/boldText.jsx';
 import { ScanRangeList } from './ScanRangeList.jsx'; // v2.692
@@ -30,6 +31,12 @@ import { dayStamp } from '../../dayStamp.js';
 import Select from '../../components/Select.jsx';
 
 const SUBS = [{ k: 'ranges', label: '① 등록된 스캔 대역' }, { k: 'agents', label: '② 에이전트별 대역·보고 현황' }];
+// v2.991 호스트명 확인 방식 — [설정 키, 이름, 설명]. 표시 우선순위 순(서버 ipam/hostNames.js NAME_METHODS). mDNS · NetBIOS 는 대상 장비로 질의를 보낸다.
+const HOST_METHODS = [
+  ['reverseDns', '역DNS', 'DNS 서버에 PTR 레코드를 묻습니다. 대상 장비로는 아무것도 보내지 않습니다.'],
+  ['mdns', 'mDNS', 'UDP 5353 으로 대상 IP 에 1회 묻습니다. 이 에이전트와 같은 서브넷의 IP 만 답합니다(macOS · Linux avahi · Windows 10 이상).'],
+  ['netbios', 'NetBIOS 이름', 'UDP 137 로 대상 IP 에 1회 묻습니다. Windows · Samba 가 컴퓨터 이름 · 작업 그룹 · MAC 을 답합니다.'],
+];
 const DUP_TA = { resize: 'vertical', fontFamily: 'monospace', fontSize: 12, width: '100%', boxSizing: 'border-box', display: 'block' };
 
 /**
@@ -371,8 +378,8 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
               </div>
             </div>
           )}
-          <STable className="v3-table" minWidth={1060}>
-            <thead><tr><th>에이전트</th><th>데이터센터</th><th>주기 스캔</th><th style={{ textAlign: 'right' }}>대역 / IP 수</th><th>마지막 보고</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th>상태</th><th data-nosort>작업</th></tr></thead>
+          <STable className="v3-table" minWidth={1140}>
+            <thead><tr><th>에이전트</th><th>데이터센터</th><th>주기 스캔</th><th style={{ textAlign: 'right' }}>대역 / IP 수</th><th>마지막 보고</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th style={{ textAlign: 'right' }} title="마지막 완료 스캔에서 호스트명을 찾은 IP 수 / 응답한 IP 수">이름 확인</th><th>상태</th><th data-nosort>작업</th></tr></thead>
             <tbody>
               {reportList.map((x) => (
                 <tr key={x.name} style={x.name === agent ? { background: 'rgba(59,130,246,.10)' } : undefined}>
@@ -382,6 +389,10 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
                   <td style={{ textAlign: 'right' }} data-sort={x.lines}>{x.lines} / {x.ips.toLocaleString()}{x.invalid ? <span style={{ color: 'var(--red)' }} title="형식 오류 줄 — IP 수에 넣지 않았습니다"> · 오류 {x.invalid}</span> : null}</td>
                   <td className="muted" style={{ fontSize: 12 }} data-sort={x.at ?? ''}>{x.at ? fmtDt(x.at) : '보고 없음'}</td>
                   <td style={{ textAlign: 'right' }} data-sort={x.alive ?? ''}>{x.scanned == null ? '—' : `${Number(x.scanned).toLocaleString()} / `}{x.scanned == null ? '' : <b>{x.alive == null ? '—' : Number(x.alive).toLocaleString()}</b>}</td>
+                  {(() => { const c = nameStatsCell(x); return ( // v2.991 호스트명 확인(이전 버전 엣지는 '방식 보고 없음')
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} title={c.title} data-sort={x.nameStats?.named ?? ''}>
+                      {c.noReport ? <span className="badge gray" style={{ fontSize: 10 }}>방식 보고 없음</span> : c.text}
+                    </td>); })()}
                   <td data-sort={x.state} title={reportStateDetail(x)}>
                     <span className={`badge ${REPORT_STATE_TONE[x.state] || 'gray'}`}>{REPORT_STATE_TEXT[x.state]}</span>
                     {reportStateNote(x) && <div className="muted" style={{ fontSize: 11, marginTop: 2, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{reportStateNote(x)}</div>}
@@ -402,7 +413,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
 
           <div ref={editorRef} className="card" style={{ padding: 14, minWidth: 0 }}>
             <div style={{ fontWeight: 700, marginBottom: 10 }}>설정 편집 — {agentName(agent)}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}> {/* v2.636: 페이지(400px)에서 1fr 의 최소폭이 내용 폭이라 입력칸이 카드 밖으로 밀렸다 */}
+      <div className="ipscan-form"> {/* v2.636: 페이지(400px)에서 1fr 의 최소폭이 내용 폭이라 입력칸이 카드 밖으로 밀렸다 · v2.991: 격자는 styles.css .ipscan-form(640px 이하 1열) */}
         <label style={{ fontWeight: 600, paddingTop: 9 }}>할당 에이전트</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <Select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: '100%', width: 260 }} aria-label="할당 에이전트">
@@ -472,9 +483,19 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
           <input className="input" type="number" min={1} max={1024} style={{ width: 80 }} value={s.concurrency} onChange={(e) => setS({ ...s, concurrency: e.target.value })} /><span className="muted">동시</span>
           <input className="input" type="number" min={100} max={10000} style={{ width: 90 }} value={s.timeoutMs} onChange={(e) => setS({ ...s, timeoutMs: e.target.value })} /><span className="muted">ms</span>
         </div>
-        <label style={{ fontWeight: 600, paddingTop: 9 }}>역DNS / 보존</label>
+        {/* v2.991 호스트명 확인(시안 ③) — 응답한 IP 에만 묻는다. 표시 순서는 위에서 아래(역DNS > mDNS > NetBIOS). */}
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>호스트명 확인</label>
+        <div className="card" style={{ padding: '10px 12px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {HOST_METHODS.map(([k, label, desc]) => (
+            <label key={k} className="flex" style={{ alignItems: 'flex-start', gap: 8 }}>
+              <input type="checkbox" style={{ marginTop: 3, flex: 'none' }} checked={s[k] !== false} onChange={(e) => setS({ ...s, [k]: e.target.checked })} />
+              <span style={{ minWidth: 0, whiteSpace: 'normal' }}><b>{label}</b> <span className="muted" style={{ fontSize: 12 }}>— {desc}</span></span>
+            </label>
+          ))}
+          <div className="muted" style={{ fontSize: 11, borderTop: '1px dashed var(--border)', paddingTop: 6, whiteSpace: 'normal' }}>스캔에 응답한 IP 에만 묻습니다 · 로그인 시도는 하지 않습니다 · 방식마다 IP 당 1회이고 기다리는 시간은 위 타임아웃입니다 · 여러 방식이 답하면 위에서 아래 순서로 먼저 찾은 이름을 표시합니다.</div>
+        </div>
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>ICMP ping / 보존</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <label className="flex gap" style={{ alignItems: 'center' }}><input type="checkbox" checked={s.reverseDns} onChange={(e) => setS({ ...s, reverseDns: e.target.checked })} /> 역DNS 호스트명</label>
           <label className="flex gap" style={{ alignItems: 'center' }} title="TCP 포트가 전부 닫힌 서버도 ICMP 응답으로 '사용 중' 감지. 기본 꺼짐 — 큰 대역에서는 ping 프로세스 부하가 있으니 필요한 대역에만 켜세요(동시 실행은 소수로 제한됨)."><input type="checkbox" checked={s.ping === true} onChange={(e) => setS({ ...s, ping: e.target.checked })} /> ICMP ping 병행 <span className="muted" style={{ fontSize: 11 }}>(기본 꺼짐)</span></label>
           <input className="input" type="number" min={0} style={{ width: 80 }} value={s.retentionDays} onChange={(e) => setS({ ...s, retentionDays: e.target.value })} /><span className="muted">일 보존</span>
         </div>
@@ -507,7 +528,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         <span className="muted">이 포탈 상태 <b style={{ color: status?.running ? 'var(--amber)' : 'var(--text)' }}>{status?.running ? '스캔 중' : (status?.enabled ? '활성' : '비활성')}</b></span>{' · '}
         <span className="muted">저장된 결과 <b style={{ color: 'var(--text)' }}>{info?.count ?? 0}</b>개</span>
         {info?.byAgent && Object.keys(info.byAgent).length > 0 && <span className="muted"> ({Object.entries(info.byAgent).map(([a, n]) => `${agentLabel(a)}:${n}`).join(', ')})</span>}
-        {last && !last.skipped && !last.error && <span className="muted"> · 최근(포탈): {last.scanned}개 중 {last.alive}개 응답</span>}
+        {last && !last.skipped && !last.error && <span className="muted"> · 최근(포탈): {last.scanned}개 중 {last.alive}개 응답{nameStatsText(last.nameStats) ? ` · ${nameStatsText(last.nameStats)}` : ''}</span>}
         {last?.error && <span style={{ color: 'var(--red)' }}> · 오류: {last.error}</span>}
         <ScanProgressBar progress={status?.progress} />
       </div>
