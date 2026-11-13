@@ -54,6 +54,10 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
   const [status, setStatus] = useState(row.mgmtStatus || '');
   const [owner, setOwner] = useState(row.owner_ || '');
   const [label, setLabel] = useState(row.label || '');
+  // v3.5.0(재설계 묶음 나): 용도 · 요청자 · 할당자 — 대장 행은 ipPurpose · requester · assigner 로 싣는다(purpose 는 시트의 자동 값).
+  const [purpose, setPurpose] = useState(row.ipPurpose || '');
+  const [requester, setRequester] = useState(row.requester || '');
+  const [assigner, setAssigner] = useState(row.assigner || '');
   const [deviceType, setDeviceType] = useState(row.deviceType || '');
   const [hostnameOverride, setHostnameOverride] = useState((row.managed && row.hostName) || '');
   const [claimedVcenterId, setClaimedVcenterId] = useState(row.vcenterId || '');
@@ -74,7 +78,7 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
     if (isNew || !row.ip) return;
     // v2.620(WEB2620-10): 응답이 늦게 오면(고RTT) 사용자가 이미 고친 칸을 서버 값으로 되돌렸다 — 목록값 그대로인 칸만 채운다.
     //   재조회 실패는 무음이었다(목록의 근사값으로 저장될 수 있다) — 사유를 적는다.
-    const init = { status: row.mgmtStatus || '', owner: row.owner_ || '', label: row.label || '', deviceType: row.deviceType || '',
+    const init = { status: row.mgmtStatus || '', owner: row.owner_ || '', label: row.label || '', purpose: row.ipPurpose || '', requester: row.requester || '', assigner: row.assigner || '', deviceType: row.deviceType || '',
       hostnameOverride: (row.managed && row.hostName) || '', claimedVcenterId: row.vcenterId || '', note: row.note || '',
       reservedUntil: rowDay };
     const keep = (k, v) => (cur) => (cur === init[k] ? v : cur);
@@ -84,6 +88,7 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
       const o = r.override; if (!o) { setMacLoaded(false); return; }
       setMacLoaded(o.macAlertOff === true); setMacAlertOff((cur) => (cur === false ? o.macAlertOff === true : cur));
       setStatus(keep('status', o.status || '')); setOwner(keep('owner', o.owner || '')); setLabel(keep('label', o.label || ''));
+      setPurpose(keep('purpose', o.purpose || '')); setRequester(keep('requester', o.requester || '')); setAssigner(keep('assigner', o.assigner || ''));
       setDeviceType(keep('deviceType', o.deviceType || '')); setHostnameOverride(keep('hostnameOverride', o.hostnameOverride || ''));
       setClaimedVcenterId(keep('claimedVcenterId', o.claimedVcenterId || '')); setNote(keep('note', o.note || ''));
       const srvDay = r.reservedUntilDay != null ? String(r.reservedUntilDay) : reservedDayOf(o.reservedUntil, r.tzOffsetMin ?? tzOffsetMin);
@@ -98,7 +103,7 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
   const ipList = split.tokens;
   const bulk = ipList.length > 1;
   const invalidNote = isNew ? bulkInvalidText(split.invalid) : null;
-  const fields = { status, owner, label, deviceType, hostnameOverride, claimedVcenterId, note,
+  const fields = { status, owner, label, purpose, requester, assigner, deviceType, hostnameOverride, claimedVcenterId, note,
     ...reservedFieldForSave(reservedUntil, loadedDay, { always: isNew || bulk }),
     ...(macAlertOff !== (macLoaded ?? false) ? { macAlertOff } : {}) };
   const save = async () => {
@@ -166,6 +171,15 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
 
         <label style={L}>라벨(표시명)</label>
         <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="자동 호스트명 대신 표시할 이름" style={{ width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>용도</label>
+        <input className="input" value={purpose} maxLength={200} onChange={(e) => setPurpose(e.target.value)} placeholder="예: 웹 프런트 · DB · 백업망" style={{ width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>요청자</label>
+        <input className="input" value={requester} maxLength={200} onChange={(e) => setRequester(e.target.value)} placeholder="이 주소를 요청한 사람 · 팀" style={{ width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>할당자</label>
+        <input className="input" value={assigner} maxLength={200} onChange={(e) => setAssigner(e.target.value)} placeholder="이 주소를 내준 사람 · 팀" style={{ width: '100%', boxSizing: 'border-box' }} />
 
         <label style={L}>호스트명 override</label>
         <input className="input" value={hostnameOverride} onChange={(e) => setHostnameOverride(e.target.value)} placeholder="자동 수집 호스트명을 덮어쓸 이름(선택)" style={{ width: '100%', boxSizing: 'border-box' }} />

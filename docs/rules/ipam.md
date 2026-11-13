@@ -22,6 +22,7 @@
 - v3.1.0 — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)
 
 - v3.4.0 — IP 관리 재설계 묶음 가: 탭 5개 · 현황 · 대역 목록/주소 맵 · 필터 한 줄 · '복수IP'
+- v3.5.0 — IP 관리 재설계 묶음 나: 용도 · 요청자 · 할당자 · 대역 용도 · 예약/DHCP 집계 · 엑셀 창 · 상세 창 하나
 
 ## 본문
 
@@ -280,4 +281,21 @@
   · 지운 것: 모든 페이지 위 KPI 9장 · vCenter 칩 줄(VcenterChips) · /24 칩 벽과 같은 목록의 드롭다운 · 출처 대조 버튼 줄 · 빨간 검색창. 옛 구조를 고정하던 테스트
     `audit2612f`(KPI '—') · `ipamRanges2639` U5(칩 2곳) · `audit2732lead`(dbCountText 위치)는 새 위치를 보도록 고쳤다(뜻은 같다).
   · 정직 기록: Chromium 은 목 데이터(관리자 · 1440/400)로만 봤다 — 목 데이터에는 IP 변화 기록 · 스캔 결과가 없어 그 칸은 빈 상태로만 확인했다. 범위 계정 화면은 보지 못했다.
+
+- ⚠⚠ **v3.5.0 — IP 관리 재설계 묶음 나: 용도 · 요청자 · 할당자 · 대역 용도 · 예약/DHCP 집계 · 엑셀 창 · 상세 창 하나**(설계 `docs/design/ipam-redesign` §5-0 · 컨펌 '전부 기본값' ·
+  사용자 "묶음 나, 다, 라 진행해줘" · "순서대로 진행해줘". 서버 `ipam/overrides.js` · `ledger.js`(policyCellCounts) · `record.js` · `db.js` · `manageCsv.js` · `subnetNotes.js`(새) ·
+  `excel.js` · `excelExtra.js`(새) · `excelWorker.js` · 라우트 `PUT /tools/ipam/subnet-note` · `GET /tools/ipam.xlsx?sheets=`. 웹 `IpamEditors` · `IpamCore`(MgmtBlock) · `IpamSubnets`(SubnetPurposeEdit) ·
+  `IpamExportModal`(새) · `ipamHomeText`(occOf). 회귀 `server/test/ipamRedesign350.test.js` · `web/src/views/tools/ipamRedesign350.test.js`):
+  · **용도는 새 필드**(override `purpose` · `requester` · `assigner`, 200자) — `label`(표시 이름)과 다르다. 대장 행에는 `ipPurpose`(시트의 `purpose` 는 예전 그대로 포탈이 채운 값 —
+    엑셀 'Purpose' 열도 그대로). 대역 정책은 이 칸을 갖지 않는다. ⚠ 관리 CSV 의 '용도' 별칭은 label → purpose 로 옮겼다(동작 변화 — 릴리스 노트에 적음).
+  · **ipam.db 열은 맨 뒤에만 더한다**(`purpose` · `requester` · `assigner` — `MIGRATE_COLUMNS` 에도). 앞 열 순서를 바꾸면 외부 리더가 깨진다(테스트가 `range_policy_spec` 위치를 고정).
+  · **대역 용도는 원장 판정에 쓰이지 않는다**(subnetNotes — 대역 목록 응답에 붙일 뿐 · 입력 지문 · ipam.db 밖). 쓰기는 운영자 이상 + **전체 범위**(범위 계정 403 — 한 /24 를 여러 vCenter 가
+    나눠 쓴다). 응답은 목록에 보이는 대역(범위 안)의 것만 실린다. 길이 초과는 자르지 않고 400.
+  · **예약 · DHCP 수는 대장에 없는 호스트 주소만**(`policyCellCounts` — 시트와 같은 `findPolicy`, ignored 는 어느 쪽도 아님) → used + rsv + dhcp ≤ 254. 대역 목록 기억(_subnetMemo) 키의
+    ipamRevKey 에 정책 리비전이 있어 정책을 바꾸면 다시 센다. 옛 판본 동일성 테스트(`audit2733j` · `audit2611e`)는 예전 세 값 · 뒤에 붙은 칸을 빼고 비교하도록 고쳤다.
+  · **엑셀**: extra 가 없으면 예전 파일과 같다(테스트) · 덧붙임 시트 값은 라우트가 `excelExtra.buildExportExtra` 로 만들어 워커에 `end` 메시지로 넘긴다 — 새 칸을 행에 더하면 `slimSheet` 에도 넣을 것
+    (워커는 거기 있는 칸만 받는다). 조치 필요는 20,000건 상한 · 넘으면 시트 머리에 적는다. 창은 CSV 권한(`canCsv`)으로 막는다(csvGate2643 스윕).
+  · 상세 창: 목록의 IP 는 늘 `IpHistoryModal`(제목 'IP 상세 — …') — '관리 정보' 묶음(MgmtBlock)에서 편집기로 넘어간다. 소유 자원 칸은 예전처럼 자원 상세.
+  · 정직 기록: Chromium(목 데이터 · 관리자 · 1440/400)으로 현황 · 대역(용도 저장 → 목록 · 머리 반영) · 상세 창 · 엑셀 창을 봤고 엑셀은 API 로 받아 시트 이름만 확인했다(열어 본 것은 아님).
+    범위 계정의 403 은 라우트 코드로만 확인했다.
 

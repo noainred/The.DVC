@@ -412,6 +412,8 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       r.label = (ov?.label) || (erp?.label) || '';
       r.deviceType = (ov?.deviceType) || (erp?.deviceType) || '';
       r.note = (ov?.note) || (erp?.note) || '';
+      // v3.5.0(재설계 묶음 나): IP 용도 · 요청자 · 할당자 — IP 단위 관리상태에만 있다(대역 정책은 이 칸을 갖지 않는다).
+      r.ipPurpose = ov?.purpose || ''; r.requester = ov?.requester || ''; r.assigner = ov?.assigner || '';
       r.managed = true;
       r.appliedBy = ov ? 'override' : 'range-policy';
       if (erp) { r.rangePolicyId = erp.id; r.rangePolicySpec = erp.spec; }
@@ -627,6 +629,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
       const ip = `${base}.${i}`;
       const recs = byIp.get(ip) || [];
       let status = 'empty', purpose = '', hostname = '', notes = '', power = '', scope = '', serverType = '', os = '';
+      let ipPurpose = '', requester = '', assigner = ''; // v3.5.0: 사람이 넣은 용도 · 요청자 · 할당자(purpose 는 예전 그대로 자동 값)
       let firstSeen = null, lastSeen = null, usageStatus = null;
       let mgmtStatus = '', appliedBy = '', rangePolicySpec = ''; // 관리상태/방식/적용정책
       let owner = null, ownerType = '', vcenterId = '', discovery = ''; // 상세/원격접속/확인출처
@@ -657,6 +660,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
         power = r.powerState === 'POWERED_ON' ? 'On' : (r.powerState ? 'Off' : '');
         scope = r.scope === 'public' ? '공인' : '사설';
         mgmtStatus = r.mgmtStatus || ''; appliedBy = r.appliedBy || ''; rangePolicySpec = r.rangePolicySpec || '';
+        ipPurpose = r.ipPurpose || ''; requester = r.requester || ''; assigner = r.assigner || '';
       } else if (i >= 1 && i <= 254 && cellPolicies.length) {
         // 빈(미사용) 셀이라도 정책이 덮으면 커버리지를 표시(행은 생성하지 않고 셀 메타만).
         const ipn = b0 + i;
@@ -665,7 +669,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
       }
       const annRaw = annotations[ip];
       const ann = annRaw && (!annVisible || annVisible(ip)) ? annRaw : null;
-      sheetRows.push({ ip, last: i, purpose, hostname, ...(nameVia ? { nameVia } : {}), ...(fwdName ? { fwdName } : {}), serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
+      sheetRows.push({ ip, last: i, purpose, ipPurpose, requester, assigner, hostname, ...(nameVia ? { nameVia } : {}), ...(fwdName ? { fwdName } : {}), serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
     sheets.push({
       subnet: `${base}.0/24`, base, used, rows: sheetRows,
@@ -694,7 +698,7 @@ const _subnetMemo = new Map(); // key -> { at, list }
 const subnetBaseNum = (b) => { const p = b.split('.').map(Number); return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8); };
 
 /** 원장 행 → [{subnet, base, used}] — 시트 조립 없이(순수). 결과는 buildSubnetSheets 의 같은 세 값과 같다. */
-export function subnetsFromRows(rows) {
+export function subnetsFromRows(rows, vcenterId = '') {
   const byBase = new Map(); // base -> Set(끝 조각 — '1'..'255' 중 실제로 있는 것)
   for (const r of rows || []) {
     if (r.ipNum == null) continue;
@@ -707,7 +711,25 @@ export function subnetsFromRows(rows) {
     if (r.ip.startsWith(`${base}.`) && LAST_OCTETS.has(last)) set.add(last);
   }
   return [...byBase.keys()].sort((a, b) => subnetBaseNum(a) - subnetBaseNum(b))
-    .map((base) => ({ subnet: `${base}.0/24`, base, used: byBase.get(base).size }));
+    .map((base) => ({ subnet: `${base}.0/24`, base, used: byBase.get(base).size, ...policyCellCounts(base, byBase.get(base), vcenterId) }));
+}
+
+/**
+ * v3.5.0(재설계 묶음 나 — 현황의 사용률에 예약 · DHCP 포함): 대장에 없는 호스트 주소(.1~.254) 가운데 대역 정책이 예약 · 폐기예정(rsv) ·
+ * DHCP(dhcp)로 잡은 수. 판정은 시트와 같은 findPolicy(좁은 대역 우선 · 그 vCenter 귀속 정책) 하나다. 대장에 있는 주소(used)는 세지 않는다 —
+ * used + rsv + dhcp ≤ 254 가 늘 성립한다. 숨김(ignored) 정책은 어느 쪽에도 넣지 않는다.
+ */
+export function policyCellCounts(base, usedLast, vcenterId = '') {
+  const b0 = subnetBaseNum(base);
+  let rsv = 0; let dhcp = 0;
+  for (let i = 1; i <= 254; i += 1) {
+    if (usedLast?.has(String(i))) continue;
+    const p = findPolicy(b0 + i, vcenterId || '');
+    if (!p) continue;
+    if (p.status === 'dhcp') dhcp += 1;
+    else if (p.status === 'reserved' || p.status === 'deprecated') rsv += 1;
+  }
+  return { rsv, dhcp };
 }
 
 /**
@@ -723,7 +745,7 @@ export function listSubnets(snap, vcenterId, allowed = null, opts = {}) {
   const ck = `${head}|${vcenterId}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|${ipamRevKey()}${_dcKey(snap, vcenterId, allowed)}`;
   const hit = _subnetMemo.get(ck);
   if (hit && now - hit.at < SUBNET_MEMO_MAX_AGE_MS && now >= hit.at) return hit.list.map((s) => ({ ...s }));
-  const list = subnetsFromRows(buildIpamRows(snap, vcenterId, allowed).rows);
+  const list = subnetsFromRows(buildIpamRows(snap, vcenterId, allowed).rows, vcenterId);
   putGenerationCache(_subnetMemo, ck, { at: now, list });
   return list.map((s) => ({ ...s }));
 }

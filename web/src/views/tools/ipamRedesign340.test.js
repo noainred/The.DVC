@@ -36,6 +36,9 @@ describe('현황 계산', () => {
     expect(utilSummary([]).pct).toBe(null);
     const u = utilSummary([{ used: 254 }, { used: 0 }, { used: 203 }]);
     expect(u).toMatchObject({ nets: 3, used: 457, cap: 762, free: 305, over80: 1 }); // 203/254 = 79.9% 는 80% 미만
+    // v3.5.0: 예약 · DHCP 포함 — (used + rsv + dhcp) / cap, 80% 판정도 점유 기준
+    const u2 = utilSummary([{ used: 200, rsv: 3, dhcp: 1 }, { used: 0, rsv: 0, dhcp: 254 }]);
+    expect(u2).toMatchObject({ used: 200, rsv: 3, dhcp: 255, occ: 458, free: 50, over80: 2 });
     expect(pctText(u.pct)).toBe('60%');
     expect(pctText(null)).toBe('—');
   });

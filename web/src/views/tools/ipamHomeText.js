@@ -7,22 +7,30 @@ export const SUBNET_HOSTS = 254;
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
+/** 대역 하나의 점유 수 — 대장 주소(used) + 대역 정책의 예약 · DHCP(rsv · dhcp — v3.5.0 서버 policyCellCounts). 254 를 넘지 않는다. */
+export function occOf(s) {
+  const used = Math.max(0, num(s?.used) ?? 0);
+  return Math.min(SUBNET_HOSTS, used + Math.max(0, num(s?.rsv) ?? 0) + Math.max(0, num(s?.dhcp) ?? 0));
+}
+
 /**
- * 주소 공간 사용률 — 대장에 있는 주소(사용 중) / (대역 수 × 254).
- * ⚠ 예약 · DHCP 구간은 이 목록에 따로 실리지 않아 세지 않는다(설계 §5-0 의 '예약 · DHCP 포함' 은 묶음 나에서 — 화면이 그 사실을 밝힌다).
- * @param {Array<{used:number}>|null} subnets 못 읽었으면 null
- * @returns {{ nets:number, used:number, cap:number, free:number, pct:number|null, over80:number } | null}
+ * 주소 공간 사용률 — (대장 주소 + 예약 + DHCP) / (대역 수 × 254). v3.5.0(재설계 묶음 나 — 설계 §5-0 '예약 · DHCP 포함'):
+ * 예약 · DHCP 는 대장에 없는 주소 가운데 대역 정책이 잡은 것만 센다(서버가 대장 주소를 빼고 센다 — 겹쳐 세지 않는다).
+ * @param {Array<{used:number,rsv?:number,dhcp?:number}>|null} subnets 못 읽었으면 null
  */
 export function utilSummary(subnets) {
   if (!Array.isArray(subnets)) return null;
-  let used = 0; let over80 = 0;
+  let used = 0; let rsv = 0; let dhcp = 0; let over80 = 0;
   for (const s of subnets) {
     const u = Math.max(0, Math.min(SUBNET_HOSTS, num(s?.used) ?? 0));
     used += u;
-    if (u / SUBNET_HOSTS >= 0.8) over80 += 1;
+    rsv += Math.max(0, num(s?.rsv) ?? 0);
+    dhcp += Math.max(0, num(s?.dhcp) ?? 0);
+    if (occOf(s) / SUBNET_HOSTS >= 0.8) over80 += 1;
   }
   const cap = subnets.length * SUBNET_HOSTS;
-  return { nets: subnets.length, used, cap, free: Math.max(0, cap - used), pct: cap ? (used / cap) * 100 : null, over80 };
+  const occ = Math.min(cap, used + rsv + dhcp);
+  return { nets: subnets.length, used, rsv, dhcp, occ, cap, free: Math.max(0, cap - occ), pct: cap ? (occ / cap) * 100 : null, over80 };
 }
 
 /** 사용률(%) → 지도 칸 단계 0~4(20% 간격 · 80% 이상이 4). 못 읽음은 null. */
@@ -44,13 +52,13 @@ export function meterTone(pct) {
   return p >= 90 ? 'crit' : p >= 80 ? 'warn' : 'ok';
 }
 
-/** 사용률 높은 대역 — used 내림차순(같으면 대역 순) 상위 n개. */
+/** 사용률 높은 대역 — 점유(대장 + 예약 + DHCP) 내림차순(같으면 대역 순) 상위 n개. 대역 용도가 있으면 함께. */
 export function topSubnets(subnets, n = 10) {
   if (!Array.isArray(subnets)) return [];
   return subnets
     .map((s, i) => {
-      const used = Math.max(0, Math.min(SUBNET_HOSTS, num(s?.used) ?? 0));
-      return { base: s.base, subnet: s.subnet, used, free: SUBNET_HOSTS - used, pct: (used / SUBNET_HOSTS) * 100, i };
+      const occ = occOf(s);
+      return { base: s.base, subnet: s.subnet, purpose: s.purpose || '', used: occ, free: SUBNET_HOSTS - occ, pct: (occ / SUBNET_HOSTS) * 100, i };
     })
     .sort((a, b) => (b.used - a.used) || (a.i - b.i))
     .slice(0, Math.max(0, n))
@@ -118,9 +126,9 @@ export function mapCounts(rows) {
   return c;
 }
 
-/** 대역 목록 검색 — 대역 글자(10.20.30 · 10.20.30.0/24)로 찾는다. */
+/** 대역 목록 검색 — 대역 글자(10.20.30 · 10.20.30.0/24) · 대역 용도로 찾는다. */
 export function filterSubnets(subnets, q) {
   const t = String(q || '').trim().toLowerCase();
   if (!t) return subnets || [];
-  return (subnets || []).filter((s) => String(s.subnet || '').toLowerCase().includes(t) || String(s.base || '').startsWith(t));
+  return (subnets || []).filter((s) => String(s.subnet || '').toLowerCase().includes(t) || String(s.base || '').startsWith(t) || String(s.purpose || '').toLowerCase().includes(t)); // v3.5.0: 대역 용도로도 찾는다
 }

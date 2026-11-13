@@ -47,7 +47,8 @@ export function _setWriteReplyDeadlineForTest(ms) { _writeReplyDeadlineMs = Numb
 //   틀린 원인). 이제 ① table_info 로 **없는 열만** ALTER 하고 ② 'duplicate column name' 만 삼키며 ③ 잠금이면 다시 던져
 //   getImpl 이 래치하지 않고 잠시 뒤 다시 연다(util/sqliteOpen.js 규약 — ipam.db 는 외부 리더 공유라 WAL 전환은 하지 않는다).
 export const MIGRATE_COLUMNS = ['scope', 'server_type', 'os_name', 'os_version', 'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner',
-  'label', 'device_type', 'first_seen', 'last_seen', 'usage_status', 'applied_by', 'range_policy_spec'];
+  'label', 'device_type', 'first_seen', 'last_seen', 'usage_status', 'applied_by', 'range_policy_spec',
+  'purpose', 'requester', 'assigner']; // v3.5.0: 옛 ipam.db 에 없는 열 — 없는 것만 ALTER 로 더한다
 
 /** 없는 열만 추가한다. 잠금·그 밖의 오류는 던진다('이미 있음' 경합만 삼킨다). @returns {string[]} 추가한 열 */
 export function migrateIpRecordColumns(db) {
