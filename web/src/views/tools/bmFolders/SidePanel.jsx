@@ -9,6 +9,7 @@ import EscClose from '../../../components/EscClose.jsx';
 import { UsageBar, StatusDot, SrcBadge, WhyTip } from './parts.jsx';
 import { PLACE_LABEL, pathText, wattsText, opErrorText } from '../bmFoldersText.js';
 import { unitText } from '../../unitText.js';
+import HwPanel from './HwPanel.jsx'; // v3.3.0: 하드웨어(iDRAC) 상세 · iDRAC 접속
 
 export default function SidePanel({ r, corps, corpName, scoped, op, busy, onClose }) {
   const [to, setTo] = useState('');
@@ -43,8 +44,10 @@ export default function SidePanel({ r, corps, corpName, scoped, op, busy, onClos
         <span className="k">용량</span><span>{r.cores != null ? `${r.cores}코어` : '—'} · {r.memGB != null ? `${r.memGB} GB` : '—'}</span>
         <span className="k">받는 길</span><span><SrcBadge src={r.src} />{r.agent ? <span className="muted mono" style={{ fontSize: 11, marginLeft: 4 }}>{r.agent}</span> : null}</span>
         <span className="k">부품 장애</span><span>{r.faults == null ? '—(못 읽음)' : r.faults > 0 ? `${r.faults}건` : '없음'}</span>
-        {r.addr ? <><span className="k">관리 주소</span><span className="mono" style={{ fontSize: 12 }}>{r.addr}</span></> : null}
+        {r.addr && r.kind !== 'bm' ? <><span className="k">관리 주소</span><span className="mono" style={{ fontSize: 12 }}>{r.addr}</span></> : null}
       </div>
+      {/* v3.3.0: 베어메탈은 하드웨어(iDRAC) 구역에서 관리 주소 · 접속(웹 · SSH) · 부품별 목록을 보인다 */}
+      <HwPanel r={r} scoped={scoped} />
       <Trend k={r.key} kind={r.kind} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>폴더</span>

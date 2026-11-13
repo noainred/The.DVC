@@ -16,6 +16,7 @@ import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js'; // v
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { sanitizeHwSummary, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 엣지 하드웨어 요약 · iDRAC 주소 정제(엣지 agent/fleetPush.js 와 짝)
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
 
 const FILE = path.join(config.configDir, 'central-fleet.json');
@@ -153,6 +154,10 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
     scanRangeId: typeof b.scanRangeId === 'string' ? capStr(b.scanRangeId, 128) : null,
     // 6차 2(서비스 인벤토리): 태그가 없을 때의 엣지 fleetId — 글자만 · 256자. 구버전 엣지는 없다(null — 승계 없음, 예전과 같다).
     untaggedId: typeof b.untaggedId === 'string' && b.untaggedId.trim() ? capStr(b.untaggedId.trim().toLowerCase(), 256) : null,
+    // v3.3.0(물리서버 폴더 하드웨어): 하드웨어 요약(아는 키만 · 수는 수로 · 글자 상한) · iDRAC 관리 주소(호스트 글자만). 없거나 형식이 아니면 키를 만들지 않는다.
+    //   분류 서명(hashList)에는 넣지 않는다 — 인벤토리 시각이 바뀔 때마다 fleet 캐시가 무효화되지 않게.
+    ...((() => { const hw = sanitizeHwSummary(b.hw); return hw ? { hw } : {}; })()),
+    ...((() => { const h = mgmtHostOf(b.mgmtHost); return h ? { mgmtHost: h } : {}; })()),
   }));
   if (omitted) console.warn(`[central-fleet] '${a}' 베어메탈 ${valid.length}대 중 ${omitted}대를 상한으로 받지 않았습니다(에이전트당 ${PER_AGENT_MAX} · 전체 ${TOTAL_MAX}${verified ? '' : ` · 미검증 이름 합 ${UNVERIFIED_TOTAL_MAX}`}).`);
   if (vcenterBlanked) console.warn(`[central-fleet] '${a}' 가 소유하지 않은 vCenter 로 귀속된 베어메탈 ${vcenterBlanked}대 — 귀속(vcenterId)을 비웠습니다.`);
@@ -254,6 +259,8 @@ export function getEdgeFleetServers() {
         scanRangeId: typeof b.scanRangeId === 'string' ? b.scanRangeId : null,
         // 태그가 없었을 때의 중앙 serverId — 서비스 인벤토리가 옛 fl: 고정을 승계하는 데 쓴다(6차 2). 구버전 엣지는 null.
         untaggedServerId: typeof b.untaggedId === 'string' && b.untaggedId ? `edge:${agent}:${b.untaggedId}` : null,
+        // v3.3.0: 엣지가 보낸 하드웨어 요약 · iDRAC 주소(정제본) — 물리서버 폴더만 쓴다(관리 주소는 관리자 판본만 화면에)
+        hw: b.hw || null, mgmtHost: b.mgmtHost || '',
       });
     }
   }

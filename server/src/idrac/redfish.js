@@ -589,6 +589,9 @@ export async function fetchInventory(entry) {
         powerState: s.PowerState || '',
         health: s.Status?.Health || '',
         indicatorLED: s.IndicatorLED || '',
+        // v3.3.0(물리서버 폴더 'OS' 칸): HPE iLO 는 System 응답 Oem.Hpe.HostOS 에 OS 이름 · 버전을 싣는다(AMS 가 있을 때). Dell 은 아래 System 속성에서.
+        ...(typeof s.Oem?.Hpe?.HostOS?.OsName === 'string' && s.Oem.Hpe.HostOS.OsName.trim() ? { osName: s.Oem.Hpe.HostOS.OsName.trim().slice(0, 128) } : {}),
+        ...(typeof s.Oem?.Hpe?.HostOS?.OsVersion === 'string' && s.Oem.Hpe.HostOS.OsVersion.trim() ? { osVersion: s.Oem.Hpe.HostOS.OsVersion.trim().slice(0, 64) } : {}),
       };
       inv.cpu = {
         count: s.ProcessorSummary?.Count ?? null,
@@ -630,6 +633,24 @@ export async function fetchInventory(entry) {
       };
     }
   } catch { /* manager optional */ }
+
+  // --- OS 이름(v3.3.0 — 물리서버 폴더 'OS' 칸 · 사용자 결정 'iDRAC 에서 OS 이름도 수집') ---
+  // Dell: iDRAC System 속성 ServerOS.1.OSName · OSVersion — 서버 OS 에 iSM(iDRAC Service Module)이 있어야 채워진다(없으면 빈 값 → 화면 '—').
+  //   $select 로 두 값만 받는다(속성 전체는 수십 KB — 중앙 직접 수집 법인은 WAN 왕복). $select 를 모르는 펌웨어(4xx — 401 · 404 제외)면 한 번만 전체로.
+  //   404(속성 자원 없음 — iDRAC8 등)는 다시 묻지 않는다. 실패해도 인벤토리는 그대로다(OS 는 선택 항목 — 컬렉션 메타에 넣지 않는다).
+  if (inv.collections.system === 'ok' && !inv.system.osName && !inv.system.hpe && (/dell/i.test(inv.system.manufacturer || '') || entry.vendor === 'dell')) {
+    try {
+      const P = '/redfish/v1/Managers/System.Embedded.1/Attributes';
+      let a = null;
+      try { a = await G(`${P}?$select=Attributes/ServerOS.1.OSName,Attributes/ServerOS.1.OSVersion`); }
+      catch (e) { if (e?.status >= 400 && e?.status < 500 && e.status !== 401 && e.status !== 404) a = await G(P); else throw e; }
+      const at = a?.Attributes && typeof a.Attributes === 'object' ? a.Attributes : {};
+      const nm = typeof at['ServerOS.1.OSName'] === 'string' ? at['ServerOS.1.OSName'].trim() : '';
+      const vr = typeof at['ServerOS.1.OSVersion'] === 'string' ? at['ServerOS.1.OSVersion'].trim() : '';
+      if (nm) inv.system.osName = nm.slice(0, 128);
+      if (vr) inv.system.osVersion = vr.slice(0, 64);
+    } catch { /* OS 이름 optional */ }
+  }
 
   // --- iDRAC network identity (hostname/FQDN/MAC/IP) ---
   try {

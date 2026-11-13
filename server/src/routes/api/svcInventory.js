@@ -412,6 +412,7 @@ async function gatherNowInner(snap, tagCategory) {
       model: t(b.model), watts: numOrNull(b.watts), collectorId: t(b.collectorId),
       // v2.987 물리서버 폴더: 사용률 이력 키(bm-usage 적재 키 — idOf) · 관리 주소(등록부 iDRAC 주소 — 관리자 판본만 싣는다)
       usageKey: id.key, mgmtHost: b.source === 'idrac' ? hostOnly(regById.get(sid)?.host) : '',
+      serverId: sid,   // v3.3.0 물리서버 폴더 하드웨어(iDRAC) 요약 — 인벤토리 찾기 열쇠(로컬 등록부 id · remote:<수집 서버>:<id> · edge:<엣지>:<fleetId>). 응답에 싣지 않는다
     });
   }
   // ── 파생 호스트(구성원이 아니다): 가상화 호스트의 사용률·장애 ──

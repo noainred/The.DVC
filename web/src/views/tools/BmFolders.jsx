@@ -20,6 +20,8 @@ import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
 import { SRC_COLOR, SRC_SHORT, rowSrcClass, srcCounts, metricSrcText } from './bmFolders/usageSrc.js'; // v2.993: 사용률 출처 색
 import { whyBands, whyShort, WHY_DOT } from './bmFolders/whyText.js'; // v2.994: 값 없음 사유
+import { hwLines, hwSortKey, hwWhyText, osText, OS_WHY } from './bmFolders/hwText.js'; // v3.3.0: 하드웨어(iDRAC) 요약
+import { IdracConnect } from './bmFolders/IdracConnect.jsx'; // v3.3.0: iDRAC 주소 접속(웹 · SSH)
 import {
   INTRO, PLACE_LABEL, MISSING_WHY, pctText, wattsText, pathText, lastSeg, parentOf, ageText,
   rowsOf, aggregate, filterRows, resultNote, foldersByName, opErrorText, csvNameOf, trimPath,
@@ -313,17 +315,22 @@ export default function BmFolders() {
                         {writable ? <th data-nosort style={{ width: 30 }}><input type="checkbox" aria-label="보이는 서버 전체 선택" checked={rows.length > 0 && rows.every((r) => picked.has(r.key))} onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.key)) : new Set())} /></th> : null}
                         <th>이름</th>
                         {sel.type !== 'folder' || sub ? <th>폴더</th> : null}
-                        <th>{d.scoped ? '모델' : '모델 · 서비스 태그'}</th><th>받는 길</th><th>부품 장애</th><th title="CPU · 메모리 사용률">사용률</th><th>전력</th>
+                        <th>{d.scoped ? '모델' : '모델 · 서비스 태그'}</th>
+                        <th title="iDRAC 인벤토리 요약 — CPU · 메모리 / 디스크 / NIC · FC HBA (정렬은 코어 수)">하드웨어(iDRAC)</th>
+                        <th title={d.scoped ? undefined : '관리자 판본은 iDRAC 주소를 눌러 웹 · SSH 로 접속합니다'}>받는 길</th><th>부품 장애</th><th title="CPU · 메모리 사용률">사용률</th><th>전력</th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((r) => (
                         <tr key={r.key} className={picked.has(r.key) ? 'bmf-picked' : undefined} style={{ cursor: 'pointer' }} onClick={() => setPanel(r.key)}>
                           {writable ? <td data-nosort onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`${r.name} 선택`} checked={picked.has(r.key)} onChange={(e) => setPicked((s) => { const n = new Set(s); if (e.target.checked) n.add(r.key); else n.delete(r.key); return n; })} /></td> : null}
-                          <td data-sort={r.name}><span className="bmf-nm"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} />{r.name}{r.kind === 'esxi' ? <span className="badge gray" style={{ marginLeft: 4 }}>ESXi</span> : null}{r.tmpKey ? <TmpKeyBadge /> : null}</span></td>
+                          <td data-sort={r.name}><span className="bmf-nm"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} />{r.name}{r.kind === 'esxi' ? <span className="badge gray" style={{ marginLeft: 4 }}>ESXi</span> : null}{r.tmpKey ? <TmpKeyBadge /> : null}</span>
+                            {r.hw ? <OsLine os={r.hw.os} /> : null}</td>
                           {sel.type !== 'folder' || sub ? <td data-sort={r.place ? r.path : '￿'}>{r.place ? <span title={PLACE_LABEL[r.place]}>{pathText(r.path)}{r.place === 'rule' ? <span className="badge gray" style={{ marginLeft: 4 }}>규칙</span> : null}</span> : <span className="muted">(미분류)</span>}</td> : null}
                           <td data-sort={r.model || ''}>{r.model || '—'}{!d.scoped && r.serviceTag ? <div className="mono muted" style={{ fontSize: 11 }}>{r.serviceTag}</div> : null}</td>
-                          <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}{r.addr ? <div className="muted mono" style={{ fontSize: 11 }} title="관리 주소(iDRAC) — 관리자 판본">{r.addr}</div> : null}</td>
+                          <td data-sort={hwSortKey(r.hw) ?? ''}><HwCell r={r} /></td>
+                          <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}
+                            {r.addr ? <div title="관리 주소(iDRAC) — 관리자 판본">{d.scoped ? <span className="muted mono" style={{ fontSize: 11 }}>{r.addr}</span> : <IdracConnect addr={r.addr} name={r.name} corp={r.corp} small />}</div> : null}</td>
                           <td data-sort={r.faults ?? ''}>{r.faults == null ? <span className="muted">—</span> : r.faults > 0 ? <span className="badge red">{r.faults}건</span> : <span className="muted">없음</span>}</td>
                           <td data-sort={r.cpu ?? ''}><UsagePair cpu={r.cpu} mem={r.mem} usrc={r.usrc} why={r.why} /></td>
                           <td data-sort={r.watts ?? ''} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{wattsText(r.watts)}</td>
@@ -744,6 +751,7 @@ function NarrowList({ rows, writable, picked, setPicked, onOpen, scoped }) {
               {r.faults > 0 ? <span className="badge red">{r.faults}건</span> : null}<span style={{ marginLeft: 'auto' }}><SrcBadge src={r.src} small /></span></span>
             <span className="l2">{[r.place ? pathText(r.path) : '(미분류)', r.model, !scoped ? r.serviceTag : ''].filter(Boolean).join(' · ')}</span>
             <span className="l2">{r.cpu == null && r.mem == null && r.why?.code ? `사용률 — ${whyShort(r.why)}` : <>CPU {pctText(r.cpu)} · 메모리 {pctText(r.mem)}</>} · {wattsText(r.watts)}{SRC_SHORT[rowSrcClass(r)] ? ` · ${SRC_SHORT[rowSrcClass(r)]}` : ''}</span>
+            {r.hw ? <span className="l2">{hwCardText(r.hw)}</span> : null}
           </button>
         </div>
       ))}
@@ -787,6 +795,24 @@ function WhyBand({ rows, quick, setQuick }) {
       })}
     </div>
   );
+}
+
+/** v3.3.0: 하드웨어(iDRAC) 칸 — CPU · 메모리 / 디스크 / NIC · FC HBA 세 줄. 베어메탈인데 요약이 없으면 '—' 와 이유(툴팁). ESXi 행은 '—'. */
+function HwCell({ r }) {
+  if (r.kind !== 'bm') return <span className="muted" title="ESXi 호스트는 호스트 화면에서 봅니다">—</span>;
+  const L = hwLines(r.hw);
+  if (!L) return <span className="muted" title={hwWhyText(r)}>— <span style={{ fontSize: 11 }}>{r.hwVia === 'edge' ? '엣지 미전송' : '인벤토리 없음'}</span></span>;
+  return <span className="bmf-hw"><span className="l">{L.l1}</span><span className="l muted">{L.l2}</span><span className="l muted">{L.l3}</span></span>;
+}
+/** v3.3.0: 이름 아래 OS(iDRAC 보고) — 없으면 'OS —'(이유는 툴팁). */
+function OsLine({ os }) {
+  const o = osText(os);
+  return <div className="muted" style={{ fontSize: 11, marginTop: 1 }} title={o.full || OS_WHY}>{o.short || 'OS —'}</div>;
+}
+/** 좁은 화면 카드 한 줄 — '2×24C · 1 TB · SSD 2 · 960 GB · 25G×2 · RHEL 9.2'. */
+function hwCardText(hw) {
+  const L = hwLines(hw); const o = osText(hw?.os);
+  return [L?.l1, L?.l2, L?.l3, o.short].filter((x) => x && x !== '—').join(' · ') || '하드웨어 —';
 }
 
 /** v2.995(묶음 C): 서비스 태그를 아직 읽지 못한 서버 — 임시 키(이름 기반)로 등록된다. 태그가 읽히면 등록이 태그 키로 저절로 옮겨 간다. */
