@@ -26,6 +26,8 @@ import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANA
 import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES } from '../../ipam/rangePolicies.js';
 import { ipToNum } from '../../ipam/ledger.js';
 import { logAudit } from '../../audit.js';
+import { setSubnetNote, withSubnetNotes, getSubnetNotes, subnetNoteWriteDenied } from '../../ipam/subnetNotes.js'; // v3.5.0 대역 용도 · 설명
+import { buildExportExtra, parseExportSheets } from '../../ipam/excelExtra.js'; // v3.5.0 엑셀 덧붙임 시트
 import { getIpHistory, scanResultList, getIpHistoryMap, scanDetailOf } from '../../ipam/scanStore.js';
 import { displayName } from '../../ipam/hostNames.js'; // v2.991: 스캔 결과 CSV 의 hostname_source
 import { entryMac, macInfo } from '../../ipam/macVendor.js'; // v2.999: 스캔 결과 CSV 의 mac · mac_src · mac_vendor
@@ -167,7 +169,20 @@ api.get('/tools/ipam/insights', requirePerm('tools'), async (req, res) => {
 //   입력이 그대로인 폴링은 원장 재구성·/24 시트 조립을 하지 않는다(결과는 같다).
 api.get('/tools/ipam/subnets', requirePerm('tools'), (req, res) => {
   const snap = store.get();
-  res.json({ subnets: listSubnets(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap), { inputSig: ledgerInputSignatureOf(snap) }) });
+  // v3.5.0: 대역 용도 · 설명(subnetNotes)을 붙인다 — 목록에 보이는 대역(범위 안)의 것만 실리므로 범위 계정에 남의 대역 이름이 새지 않는다.
+  res.json({ subnets: withSubnetNotes(listSubnets(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap), { inputSig: ledgerInputSignatureOf(snap) })) });
+});
+// v3.5.0(재설계 묶음 나): 대역 용도 · 설명 저장 — 운영자 이상 + 전체 범위(한 /24 를 두 vCenter 가 나눠 쓸 수 있어 범위 계정은 쓰지 못한다).
+api.put('/tools/ipam/subnet-note', canWrite, requirePerm('tools'), (req, res) => {
+  const denied = subnetNoteWriteDenied(scopedVcenterIds(req.user, store.get()));
+  if (denied) return res.status(403).json({ error: denied });
+  const b = req.body || {};
+  let r;
+  try { r = setSubnetNote(b.base, { purpose: b.purpose, desc: b.desc }, req.user?.username); }
+  catch (e) { return res.status(500).json({ error: `저장하지 못했습니다: ${e?.code || 'write-failed'}` }); }
+  if (!r.ok) return res.status(400).json({ error: r.reason });
+  logAudit({ user: req.user?.username, action: '대역 용도 저장', target: `대역 ${b.base}`, detail: JSON.stringify(r.note || {}).slice(0, 600) });
+  res.json({ ok: true, note: r.note });
 });
 api.get('/tools/ipam/sheet', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
@@ -505,7 +520,12 @@ api.get('/tools/ipam.xlsx', csvPerm, requirePerm('tools'), async (req, res) => {
     // 시트도 양보판 — 기다리는 사이 새 세대가 게시됐으면 캐시에 넣지 않는다(옛 세대가 새 세대 항목을 지우지 않게).
     const sheets = await buildSubnetSheetsAsync(snap, { vcenterId: req.query.vcenterId, allowed, ledger, cache: store.get() === snap, shouldCache: () => store.get() === snap });
     if (ac.signal.aborted) return; // 받을 사람이 떠났다 — 워커를 띄우지 않는다(소켓은 이미 닫혔다)
-    const out = await renderIpamWorkbook(sheets, { signal: ac.signal });
+    // v3.5.0(재설계 묶음 나 — 시안 ⑨ ⑩): ?sheets= 로 고른 시트(요약 · 대역 목록 · 대장 · 조치 필요 · 안내 — 기본 전부). 원장 행 · 대역 용도는 범위 안의 것만.
+    const include = parseExportSheets(req.query.sheets);
+    const vcName = req.query.vcenterId ? ((snap?.vcenters || []).find((v) => v.id === req.query.vcenterId)?.name || req.query.vcenterId) : '';
+    const scopeText = vcName ? `vCenter ${vcName}` : (allowed ? `내 범위 vCenter ${allowed.size}곳` : '전체 vCenter');
+    const extra = buildExportExtra({ sheets, rows: ledger?.rows || [], notes: getSubnetNotes(), include, scopeText, createdText: new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC' });
+    const out = await renderIpamWorkbook(include.ledger ? sheets : [], { signal: ac.signal, extra });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="ip-ledger-${todayStamp()}.xlsx"`);
     res.setHeader('Cache-Control', 'no-store');

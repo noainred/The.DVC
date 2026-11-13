@@ -7,7 +7,7 @@ import { STable } from '../../components/STable.jsx';
 import { fmtDt } from './ipamShared.jsx';
 import { CHANGE_TYPE, changeDetail } from './ipamChangeText.js';
 import { dbCountText, dbMetaText } from './ipamDbInfoText.js';
-import { HEAT_LABELS, checkBadge, checkCards, heatBin, meterTone, pctText, topSubnets, utilSummary } from './ipamHomeText.js';
+import { HEAT_LABELS, checkBadge, checkCards, heatBin, meterTone, occOf, pctText, topSubnets, utilSummary } from './ipamHomeText.js';
 
 /** 막대 하나(사용률) — 80% 주황 · 90% 빨강. */
 export function Meter({ pct }) {
@@ -91,22 +91,26 @@ export function IpamHome({ data, error, recon, subnets, subnetsErr, db, access, 
           <div className="ipam-hero">
             <span className="ipam-hero-v">{u ? pctText(u.pct) : '—'}</span>
             <span className="muted" style={{ fontSize: 12.5 }}>
-              {u ? <>대역 {u.nets.toLocaleString()}개 · 주소 {u.cap.toLocaleString()}개 가운데<br /><b style={{ color: 'var(--text)' }}>{u.used.toLocaleString()}</b>개가 대장에 있습니다</>
+              {u ? <>대역 {u.nets.toLocaleString()}개 · 주소 {u.cap.toLocaleString()}개 가운데<br /><b style={{ color: 'var(--text)' }}>{u.occ.toLocaleString()}</b>개가 쓰이거나 잡혀 있습니다</>
                 : subnetsErr ? `대역 목록을 읽지 못했습니다: ${subnetsErr}` : '대역 목록을 읽는 중…'}
             </span>
           </div>
           {u && u.cap > 0 && (
             <>
-              <div className="ipam-split" role="img" aria-label={`사용 중 ${u.used}개, 빈 주소 ${u.free}개`}>
-                <span className="used" style={{ flexGrow: u.used }}>{u.pct >= 8 ? pctText(u.pct) : ''}</span>
-                <span className="free" style={{ flexGrow: u.free }}>{100 - u.pct >= 8 ? pctText(100 - u.pct) : ''}</span>
+              <div className="ipam-split" role="img" aria-label={`대장 주소 ${u.used}개, 예약 ${u.rsv}개, DHCP ${u.dhcp}개, 빈 주소 ${u.free}개`}>
+                {[['used', u.used], ['rsv', u.rsv], ['dhcp', u.dhcp], ['free', u.free]].filter(([, n]) => n > 0).map(([k, n]) => {
+                  const p = (n / u.cap) * 100;
+                  return <span key={k} className={k} style={{ flexGrow: n }}>{p >= 8 ? pctText(p) : ''}</span>;
+                })}
               </div>
               <div className="ipam-split-lg">
-                <span><i className="used" />사용 중 <b>{u.used.toLocaleString()}</b></span>
+                <span><i className="used" />대장 주소 <b>{u.used.toLocaleString()}</b></span>
+                <span><i className="rsv" />예약 <b>{u.rsv.toLocaleString()}</b></span>
+                <span><i className="dhcp" />DHCP <b>{u.dhcp.toLocaleString()}</b></span>
                 <span><i className="free" />빈 주소 <b>{u.free.toLocaleString()}</b></span>
                 <span>80% 이상 대역 <b>{u.over80.toLocaleString()}</b></span>
               </div>
-              <div className="muted" style={{ fontSize: 11.5 }}>예약 · DHCP 구간은 아직 따로 세지 않습니다 — 대역 정책으로 잡아 둔 주소도 대장에 없으면 빈 주소로 셉니다.</div>
+              <div className="muted" style={{ fontSize: 11.5 }}>예약 · DHCP 는 대장에 없는 주소 가운데 대역 정책이 잡은 것입니다(대장 주소와 겹쳐 세지 않습니다).</div>
             </>
           )}
           {data && (
@@ -155,7 +159,7 @@ export function IpamHome({ data, error, recon, subnets, subnetsErr, db, access, 
             <div className="ipam-top">
               {top.map((t) => (
                 <button key={t.base} type="button" className="ipam-top-row" title={`${t.subnet} · 대장 ${t.used}/254 · 빈 ${t.free}`} onClick={() => onPickSubnet(t.base)}>
-                  <span className="mono" style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.subnet}</span>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><span className="mono" style={{ fontWeight: 600 }}>{t.subnet}</span>{t.purpose ? <b style={{ marginLeft: 8 }}>{t.purpose}</b> : null}</span>
                   <Meter pct={t.pct} />
                   <span className="mono r" style={{ fontWeight: 600 }}>{pctText(t.pct)}</span>
                   <span className="mono r muted">빈 {t.free}</span>
@@ -171,8 +175,8 @@ export function IpamHome({ data, error, recon, subnets, subnetsErr, db, access, 
             <>
               <div className="ipam-heat">
                 {subnets.map((s) => {
-                  const pct = (Math.min(254, Number(s.used) || 0) / 254) * 100;
-                  const tip = `${s.subnet} · ${pctText(pct)} · 대장 ${s.used}`;
+                  const pct = (occOf(s) / 254) * 100;
+                  const tip = `${s.subnet}${s.purpose ? ` · ${s.purpose}` : ''} · ${pctText(pct)} · 대장 ${s.used}${s.rsv ? ` · 예약 ${s.rsv}` : ''}${s.dhcp ? ` · DHCP ${s.dhcp}` : ''}`;
                   return <button key={s.base} type="button" className={`ipam-heat-c h${heatBin(pct)}`} title={tip} aria-label={tip} onClick={() => onPickSubnet(s.base)} />;
                 })}
               </div>

@@ -91,6 +91,10 @@ function clean(partial = {}) {
   }
   if (partial.owner !== undefined) out.owner = String(partial.owner || '').trim().slice(0, 200);
   if (partial.label !== undefined) out.label = String(partial.label || '').trim().slice(0, 200);
+  // v3.4.0 묶음 나(재설계 — docs/design/ipam-redesign §5-0 '용도 = 새 필드'): IP 용도 · 요청자 · 할당자. label(표시 이름)과 다른 칸이다.
+  if (partial.purpose !== undefined) out.purpose = String(partial.purpose || '').trim().slice(0, 200);
+  if (partial.requester !== undefined) out.requester = String(partial.requester || '').trim().slice(0, 200);
+  if (partial.assigner !== undefined) out.assigner = String(partial.assigner || '').trim().slice(0, 200);
   if (partial.deviceType !== undefined) {
     const d = String(partial.deviceType || '').trim().toLowerCase();
     out.deviceType = DEVICE_TYPES.includes(d) ? d : '';
@@ -110,7 +114,7 @@ function clean(partial = {}) {
 
 // 의미 있는 값이 하나도 없으면 레코드를 제거(빈 껍데기 방지).
 function isEmpty(rec) {
-  return !rec || (!rec.status && !rec.owner && !rec.label && !rec.deviceType
+  return !rec || (!rec.status && !rec.owner && !rec.label && !rec.deviceType && !rec.purpose && !rec.requester && !rec.assigner
     && !rec.hostnameOverride && !rec.note && !rec.reservedUntil && !rec.claimedVcenterId && !rec.macAlertOff);
 }
 
