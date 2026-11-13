@@ -361,3 +361,84 @@
 - 한계: 저장소 공간(Storage Spaces) · 동적 디스크 · 클러스터 공유 볼륨은 디스크와 볼륨이 일대일이 아니다 → ‘확정하지 못함’. RAID 가상 디스크는 §13.2 와 같은 식별자 문제(㉚ ㉛)가 있다.
 - **미확인**: PowerShell 의 디스크 · 파티션 · 볼륨 조회 명령이 내 주는 속성 이름(시리얼 · 고유 ID)은 내 기억에 의존한다. 실제 Windows 서버 1대로 확인해야 한다.
 - Windows 서버가 ESXi 위의 VM 이면 이 기능의 대상이 아니다(물리 디스크는 ESXi 호스트 쪽 — §13.2 ESXi 행).
+
+## 14. 결정 기록 3(사용자 2026-11-14 7차) · 실장비 확인 절차
+
+사용자 답: "1. PDR59 를 PDR 59 라고 표시하고 PDR 57도 PDR 57이라고 표시해 · 2. 알았어 · 3. 전체 점검과 법인별 점검 기능을 구현해줘 · 4. 6시간마다 읽기 · 5. 먼저 확인"
+
+| 항목 | 결정 | 반영 · 비고 |
+|---|---|---|
+| PDR59 · PDR57(§12.5-1) | **분류에 넣고 ID 그대로 표시** | `Refs` 분류 열 · `Main` 주석 · `Fleet` ‘아직 사용 중’ 표에 PDR59 · PDR57 열. 표기는 Dell 의 ID 그대로 **‘PDR59’ · ‘PDR57’(띄어쓰기 없음)** 로 했다 — 말씀은 ‘PDR 59’ 였고, 띄어 쓰기를 원하신 것이면 바꾼다(**해석**) |
+| 가상 디스크 기록 VDR(§12.5-2) | 제안대로 — **서버 단위 참고 기록으로만** | "알았어" 를 제안 수락으로 읽었다(**해석**) |
+| 전체 · 법인별 점검(§10.1-5) | **둘 다 구현 범위** | 시안 `Scan` · `Fleet` 그대로. 동시 법인 수는 말씀이 없어 기본값(전부 동시) |
+| 읽는 방식(§12.5-3) | **6시간마다 읽기**(이벤트 구독 안 씀) | |
+| 실장비 확인(§10.1-11) | **구현 전에 먼저 확인** | 아래 14.1 — 확인 결과가 나온 뒤 Opus 로 구현 |
+
+### 14.1 실장비 확인 — 무엇을 · 어떻게
+
+이 작업 세션(클라우드)은 사내 iDRAC · 서버에 닿지 못한다. 아래는 **읽기 전용 조회**이고, 포탈 서버(또는 그 법인 엣지)에서 직접 실행해 결과를 알려 주시면 된다.
+고를 서버 3종: ⓐ RAID 로 묶인 베어메탈(가능하면 과거에 디스크를 교체한 적 있는 서버) ⓑ HBA · vSAN 구성의 ESXi 호스트 ⓒ Windows 베어메탈.
+명령은 Redfish 표준 경로와 이 저장소 코드(`redfish.js`)가 쓰는 경로를 바탕으로 **내가 쓴 것이고 실장비에서 돌려 보지 않았다** — 오류가 나면 그 오류 문장도 결과다.
+
+```bash
+# 준비 — 비밀번호는 화면에 남기지 않는다
+B=https://<iDRAC 주소>; U=<계정>; read -s -p "password: " P; echo
+G() { curl -sk -u "$U:$P" "$@"; }
+L="$B/redfish/v1/Managers/iDRAC.Embedded.1/LogServices/Lclog/Entries"
+
+# ① 첫 쪽 — 전체 건수 · 한 쪽 건수 · 다음 쪽 링크 · 정렬 방향 · MessageId 모양
+G "$L" | jq '{count: .["Members@odata.count"], page: (.Members|length), next: .["Members@odata.nextLink"], first: .Members[0] | {Id, Created, MessageId, Severity, Message}, last: .Members[-1] | {Id, Created, MessageId}}'
+
+# ② 건너뛰기 · 개수 지정이 되는가
+G "$L?\$skip=100&\$top=5" | jq '[.Members[] | {Id, Created, MessageId}]'
+
+# ③ ID 로 걸러 받을 수 있는가(되면 6시간 주기 부하가 크게 준다) — MessageId 값은 ①에서 본 모양 그대로 넣는다
+G --get --data-urlencode "\$filter=MessageId eq 'PDR54'" "$L" | jq '{count: .["Members@odata.count"], page: (.Members|length), err: .error}'
+
+# ④ 시각으로 걸러 받을 수 있는가(‘지난번 이후 새 로그만’ 의 전제)
+G --get --data-urlencode "\$filter=Created ge '2026-11-01T00:00:00-00:00'" "$L" | jq '{count: .["Members@odata.count"], page: (.Members|length), err: .error}'
+
+# ⑤ 전량 읽기 — 걸리는 시간 · 가장 오래된 기록 · ID 분포
+time ( n=0; while :; do r=$(G "$L?\$skip=$n"); c=$(echo "$r" | jq '.Members|length'); [ "${c:-0}" -gt 0 ] || break
+  echo "$r" | jq -r '.Members[] | [.Created, .MessageId, .Severity, (.Message|.[0:160])] | @tsv'; n=$((n+c)); done > lclog.tsv )
+wc -l lclog.tsv; sort lclog.tsv | head -1; cut -f2 lclog.tsv | sort | uniq -c | sort -rn | head -40
+grep -E 'PDR|VDR' lclog.tsv | head -60        # 물리 · 가상 디스크 기록의 실제 문장(슬롯 표기 형식 확인)
+
+# ⑥ 가상 디스크 ↔ 물리 디스크 · 식별자
+S="$B/redfish/v1/Systems/System.Embedded.1/Storage"
+for c in $(G "$S" | jq -r '.Members[]["@odata.id"]'); do
+  G "$B$c" | jq '{Id, Name, drives: (.Drives|length), volumes: .Volumes}'
+  for v in $(G "$B$c/Volumes" | jq -r '.Members[]?["@odata.id"]'); do
+    G "$B$v" | jq '{Id, Name, RAIDType, CapacityBytes, Identifiers, drives: [.Links.Drives[]?["@odata.id"]]}'; done
+done
+# 디스크 한 개 — 시리얼 · 소속 가상 디스크 · Dell 확장 속성(RaidStatus 등)
+G "$B<위에서 본 디스크 경로 하나>" | jq '{Id, SerialNumber, Model, FailurePredicted, volumes: .Links.Volumes, dell: .Oem.Dell.DellPhysicalDisk}'
+```
+
+OS 쪽(같은 서버에서):
+
+```bash
+lsblk -o NAME,TYPE,SIZE,SERIAL,WWN,MOUNTPOINT          # Linux — 시리얼 · WWN 이 나오는가
+```
+```powershell
+Get-PhysicalDisk | Select-Object FriendlyName, SerialNumber, UniqueId, Size     # Windows
+Get-Disk | Select-Object Number, SerialNumber, UniqueId, PartitionStyle
+Get-Partition | Select-Object DiskNumber, PartitionNumber, DriveLetter, AccessPaths
+```
+
+### 14.2 결과로 정해지는 것
+
+| 확인 | 결과에 따라 |
+|---|---|
+| ① 정렬 방향 · MessageId 모양 | 분류 대조 방식(ID 전체 일치인지 끝부분 일치인지) · ‘새 로그만’ 을 읽는 방향 |
+| ③ ④ 걸러 받기 | 되면 6시간 주기는 가볍다. 안 되면 최신순으로 읽다 지난번 항목에서 멈추는 방식(①의 정렬이 최신순일 때만 가능) — 그것도 안 되면 **주기를 다시 여쭌다** |
+| ⑤ 걸린 시간 · 가장 오래된 기록 | 서버당 시한 · 동시성 · ‘로그가 남아 있는 구간’ 의 실제 길이 |
+| ⑤ ID 분포 · 문장 | §4 분류표 확정(PDR56 · 삽입 ID 포함) · 슬롯 표기 파서 |
+| ⑥ `Identifiers` · `Links` | RAID 가상 디스크를 OS 장치와 맞출 수 있는가(§13.2) · ‘이 방법으로 볼 수 없는 디스크’ 판정(§12.4-7) |
+| OS 명령 | 시리얼 · WWN 대조가 실제로 되는가(§13) |
+
+결과를 붙여 주실 때 비밀번호는 넣지 말고, 주소 · 서비스태그 · 시리얼은 가려도 된다(형식만 보이면 충분하다).
+
+### 14.3 아직 답이 없는 것
+
+메일(§10.1-7 · 8 · 9 · 10 · §13.5-3) · ‘지금 쓰이는 곳’ 범위(§13.5-1 · 2) · PR 지켜보기 · 구현 착수 시점(실장비 확인 뒤로 읽었다 — §14 표).
