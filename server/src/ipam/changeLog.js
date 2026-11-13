@@ -1,5 +1,5 @@
 /**
- * IP 변화 기록(vNEXT — 설계 docs/design/ipam-alerts-mac-dns ① ② · IP관리 › IP 변화 페이지).
+ * IP 변화 기록(v3.1.0 — 설계 docs/design/ipam-alerts-mac-dns ① ② · IP관리 › IP 변화 페이지).
  *
  * 스캔이 본 변화(새 미등록 IP · 예약 · 폐기 IP 사용 시작 · 호스트명 변경 · MAC 변경 · 충돌 의심 발생/해소 · 기준선)를 **알림과 무관하게** 남긴다 —
  *   알림을 끈 종류 · '알리지 않을 에이전트' 의 변화도 기록한다(보드 ③-8). 알림 결과는 항목의 `notify` 칸이 말한다.

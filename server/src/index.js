@@ -70,7 +70,7 @@ import { startGpuGuestPoller } from './gpu/poller.js';
 import { startGpuAllocHistory } from './gpu/allocHistory.js';   // GPU 할당율 일 단위 이력(v2.939) — 1시간 · 재진입 가드 · 스냅샷만 읽는다
 import { startPhysicalGpuPoller } from './gpu/physicalPoller.js';
 import { startIpScanPoller } from './ipam/scanPoller.js';
-import { startIpamChangeNotify } from './ipam/changeNotify.js'; // vNEXT: IP 변화 기록 · 알림 묶음
+import { startIpamChangeNotify } from './ipam/changeNotify.js'; // v3.1.0: IP 변화 기록 · 알림 묶음
 import { startIpScanAgent } from './agent/ipScanWorker.js';
 import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';

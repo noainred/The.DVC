@@ -1,4 +1,4 @@
-// IpamChanges.jsx — IP관리 › IP 변화(vNEXT, 시안 docs/design/ipam-alerts-mac-dns ②). 스캔이 본 변화 기록 — 알림을 끈 종류도 남는다.
+// IpamChanges.jsx — IP관리 › IP 변화(v3.1.0, 시안 docs/design/ipam-alerts-mac-dns ②). 스캔이 본 변화 기록 — 알림을 끈 종류도 남는다.
 // 폴링 30초(가벼운 목록 — 서버가 상한까지 잘라 준다). 403(범위 계정)은 ErrorBox 가 권한 안내로.
 import React, { useState } from 'react';
 import { usePolling } from '../../api.js';

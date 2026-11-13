@@ -5,6 +5,9 @@ import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
 import ForceOtpEnroll from './views/ForceOtpEnroll.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+// v2.999 업그레이드 뒤 새로고침 안내(설계 docs/design/upgrade-reload) — 판정 코어 upgradeNotice.js · 알림 · 배지 · 오류 상자가 같은 값을 본다.
+import { noteServerVersion, UPGRADE_TITLE } from './upgradeNotice.js';
+import { useUpgradeVersions, useSinceNotes, RefreshIcon } from './components/UpgradeNotice.jsx';
 import SessionExpiryGuard from './components/SessionExpiryGuard.jsx';
 import { createActivityPinger, sendActivity, serverLogout, ACTIVITY_EVENTS } from './sessionActivity.js'; // 2026-10-09 검토 S-05 — 서버 로그아웃·활동 신호
 import { createUsageTracker, sendUsage, POLL_MS as USAGE_POLL_MS } from './usageTracker.js'; // v2.913 기능 사용 추적(설정 › 사용자 › 기능 사용 현황)
@@ -246,7 +249,7 @@ export default function App() {
     }} />;
   }
   return (
-    <ErrorBoundary fallback={
+    <ErrorBoundary upgradeClassName="login-screen" fallback={
       <div className="login-screen"><div className="error-box">
         <div style={{ fontWeight: 700, marginBottom: 8 }}>화면을 표시하는 중 오류가 발생했습니다.</div>
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={() => window.location.reload()}>새로고침</button>
@@ -468,19 +471,16 @@ function Portal({ user, onLogout }) {
   const { data: vcenters } = usePolling('/vcenters', {}, 60_000);
 
   // Notify when the running version changes (an upgrade was applied + restarted).
-  const lastVerRef = useRef(null);
-  const [upToast, setUpToast] = useState(null);
-  useEffect(() => {
-    const v = health?.version;
-    if (!v) return;
-    if (lastVerRef.current === null) { lastVerRef.current = v; return; }
-    if (lastVerRef.current !== v) { lastVerRef.current = v; setUpToast(v); }
-  }, [health?.version]);
-  useEffect(() => {
-    if (!upToast) return;
-    const t = setTimeout(() => setUpToast(null), 8000);
-    return () => clearTimeout(t);
-  }, [upToast]);
+  // v2.999(사용자 요청 2026-11-13 · 설계 docs/design/upgrade-reload ②): 판정은 upgradeNotice.js 하나 — 이 창의 판(빌드 값 · 없으면 처음 본 판) ≠ 서버 판.
+  //   알림은 8초 뒤 저절로 사라지지 않고 닫을 때까지 남는다(자리를 비운 사이 업그레이드되면 오류가 날 때까지 몰랐다). 닫으면 그 서버 판에 대해서만 닫히고,
+  //   버전 배지 옆 '새로고침 필요' 는 판이 다른 동안 계속 남는다.
+  useEffect(() => { noteServerVersion(health?.version); }, [health?.version]);
+  const upv = useUpgradeVersions();
+  const [upDismissedFor, setUpDismissedFor] = useState(null);
+  const upNotes = useSinceNotes(upv.stale ? upv.loaded : null, upv.stale ? upv.server : null);
+  const upLines = upNotes ? upNotes.notes.reduce((n, g) => n + g.lines.length, 0) : 0;
+  // 안내 상자(오류 경계)가 떠 있으면 알림은 숨긴다 — 같은 말이고 1440 에서 상자 모서리를 덮었다(Chromium 판독). 배지는 남는다.
+  const showUpToast = upv.stale && !upv.noticeOpen && upDismissedFor !== upv.server;
 
   // Easter egg: click the logo 30 times.
   const [eggClicks, setEggClicks] = useState(0);
@@ -683,15 +683,15 @@ function Portal({ user, onLogout }) {
   );
   const overlays = (
     <>
-      {upToast && (
-        <div className="up-toast">
-          <span className="up-toast-icon">⬆️</span>
+      {showUpToast && (
+        <div className="up-toast" role="status" style={{ '--statusbar-h': `${shellH.bottom}px` }}>
+          <span className="up-toast-icon" aria-hidden="true"><RefreshIcon size={17} /></span>
           <div className="up-toast-body">
-            <div className="up-toast-title">업그레이드 완료</div>
-            <div className="up-toast-sub">버전 <b>v{upToast}</b> 으로 업데이트되었습니다.</div>
+            <div className="up-toast-title">{UPGRADE_TITLE}</div>
+            <div className="up-toast-sub">v{upv.loaded} → v{upv.server}{upLines ? ` · 바뀐 것 ${upLines}줄` : ''}</div>
           </div>
           <button className="up-toast-reload" onClick={() => window.location.reload()}>새로고침</button>
-          <button className="up-toast-x" onClick={() => setUpToast(null)} aria-label="닫기">×</button>
+          <button className="up-toast-x" onClick={() => setUpDismissedFor(upv.server)} aria-label="닫기">×</button>
         </div>
       )}
 
@@ -768,6 +768,12 @@ function Portal({ user, onLogout }) {
             ) : (
               <>
                 {health?.version && <span className="ver-badge brand-ver" style={{ cursor: 'pointer' }} title="릴리즈 노트 보기" onClick={() => setShowNotes(true)}>v{health.version}</span>}
+                {/* v2.999: 이 창의 판이 서버 판과 다르면 '새로고침 필요'(누르면 새로고침) — 알림을 닫아도 남는다 */}
+                {upv.stale && (
+                  <button type="button" className="ver-badge brand-ver upg-need" title={`이 창 v${upv.loaded} · 서버 v${upv.server} — 누르면 새로고침합니다`} onClick={() => window.location.reload()}>
+                    <RefreshIcon size={11} />새로고침 필요
+                  </button>
+                )}
                 {health?.source && (
                   <span className="ver-badge brand-ver" role="button" tabIndex={0} style={{
                     marginLeft: 6, cursor: 'pointer',

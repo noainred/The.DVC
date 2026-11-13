@@ -1,5 +1,5 @@
 /**
- * 지금의 IP 충돌 의심 목록(vNEXT) — 알림 엔진의 평가(alerts.js evaluate)가 매 틱 판정(ipam/conflict.js)해 여기에 둔다. 규칙을 꺼도 판정은 한다(화면 표시용).
+ * 지금의 IP 충돌 의심 목록(v3.1.0) — 알림 엔진의 평가(alerts.js evaluate)가 매 틱 판정(ipam/conflict.js)해 여기에 둔다. 규칙을 꺼도 판정은 한다(화면 표시용).
  *   대장(ledger.js — '충돌 의심' 배지 · 칩) · 추천 카드가 읽는다. 의존이 없는 작은 모듈로 둔다(ledger → alerts 순환 import 를 만들지 않게).
  *   rev 는 목록(IP · MAC)이 바뀔 때만 오른다 — 대장 캐시 키(ipamRevKey)에 들어간다.
  */

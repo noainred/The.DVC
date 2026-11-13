@@ -3,7 +3,7 @@
 import React from 'react';
 import { fmtDt } from './ipamShared.jsx';
 import { MAC_SRC, macKindBadge, macVendorText, macStaleText } from './ipamMacText.js';
-import { macAlertBadge } from './ipamChangeText.js'; // vNEXT 충돌 의심 · MAC 변경 배지
+import { macAlertBadge } from './ipamChangeText.js'; // v3.1.0 충돌 의심 · MAC 변경 배지
 
 const MONO = { fontFamily: 'var(--mono)' };
 
@@ -23,7 +23,7 @@ export function MacCell({ r }) {
   if (!r?.mac) return <span className="muted">—</span>;
   const vendor = macVendorText({ vendor: r.macVendor, kind: r.macKind, platform: r.macPlatform });
   const dim = !r.macVendor && r.macKind !== 'virtual';
-  const alert = macAlertBadge(r);   // vNEXT: 충돌 의심 > 최근 MAC 변경
+  const alert = macAlertBadge(r);   // v3.1.0: 충돌 의심 > 최근 MAC 변경
   return (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 1, lineHeight: 1.35 }}>
       <span className="flex" style={{ alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>

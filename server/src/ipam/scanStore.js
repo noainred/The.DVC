@@ -483,7 +483,7 @@ function cleanStoredArp(v) {
   const mac = cleanMac(v.v);
   if (!mac) return null;
   const miss = numOrNull(v.miss);
-  const n = numOrNull(v.n);   // vNEXT: 같은 MAC 을 이어 본 완료 스캔 수(충돌 의심 '연속 N회') — 옛 저장본은 1
+  const n = numOrNull(v.n);   // v3.1.0: 같은 MAC 을 이어 본 완료 스캔 수(충돌 의심 '연속 N회') — 옛 저장본은 1
   return { v: mac, at: numOrNull(v.at) ?? 0, miss: miss != null && miss > 0 ? Math.min(Math.floor(miss), NAME_MISS_MAX) : 0, n: n != null && n >= 1 ? Math.min(Math.floor(n), ARP_SEEN_MAX) : 1 };
 }
 const ARP_SEEN_MAX = 1000;
@@ -495,7 +495,7 @@ const ARP_SEEN_MAX = 1000;
  */
 export function mergeArp(prevArp, h, ts) {
   const p = prevArp && typeof prevArp === 'object' && prevArp.v ? prevArp : null;
-  // vNEXT: n = 같은 MAC 을 이어 본 횟수(다른 MAC 이면 1부터) — 표에 없었던 스캔 · 볼 수 없던 보고는 n 을 바꾸지 않는다.
+  // v3.1.0: n = 같은 MAC 을 이어 본 횟수(다른 MAC 이면 1부터) — 표에 없었던 스캔 · 볼 수 없던 보고는 n 을 바꾸지 않는다.
   if (h.arpMac) return { arp: { v: h.arpMac, at: ts, miss: 0, n: p && p.v === h.arpMac ? Math.min((p.n || 1) + 1, ARP_SEEN_MAX) : 1 }, changed: p && p.v !== h.arpMac ? { from: p.v, to: h.arpMac } : null };
   if (h.arpTried) {
     if (!p) return { arp: null, changed: null };
@@ -553,7 +553,7 @@ function nameSig(e) {
   const n = e.names || {};
   return `${NAME_METHODS.map((k) => (n[k] ? `${n[k].v}${n[k].miss > 0 ? '~' : ''}` : '')).join('|')}|${(e.tried || ['?']).join(',')}|${e.nbGroup || ''}|${e.mac || ''}`
     + `|${e.arp?.v || ''}${e.arp?.miss > 0 ? '~' : ''}`;   // v2.999: ARP MAC · '지난 스캔 표에 없음' 표지(확인 시각 · miss 1→2 는 넣지 않는다)
-  // vNEXT: 이어 본 횟수(arp.n)는 넣지 않는다 — 대장의 '충돌 의심' 은 conflictState 리비전(ipamRevKey |c)이 따로 무효화한다(스캔마다 재계산하지 않게).
+  // v3.1.0: 이어 본 횟수(arp.n)는 넣지 않는다 — 대장의 '충돌 의심' 은 conflictState 리비전(ipamRevKey |c)이 따로 무효화한다(스캔마다 재계산하지 않게).
 }
 // v2.999: 표시 MAC → 그 MAC 의 IP 들(IP 상세 창 '같은 MAC 의 다른 IP' — 요청마다 결과 전량을 훑지 않게). 갱신 지점은 _agentCount 와 같다:
 //   로드 정제 · mergeScanResults(항목 교체) · pruneScanResults(삭제). results 를 다른 곳에서 고치면 여기도 함께.
@@ -736,7 +736,7 @@ const sameList = (a, b) => { const x = a || [], y = b || []; return x.length ===
  */
 export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {}) {
   const seenOnly = opts?.seenOnly === true;
-  // vNEXT: 스캔이 본 변화(설계 ipam-alerts-mac-dns ① — 변화 기록 · 알림). 부분 결과(시한에 걸린 스캔)는 비교하지 않는다(보드 ③-4).
+  // v3.1.0: 스캔이 본 변화(설계 ipam-alerts-mac-dns ① — 변화 기록 · 알림). 부분 결과(시한에 걸린 스캔)는 비교하지 않는다(보드 ③-4).
   const changes = seenOnly ? null : [];
   let baseCheck = null;   // 새 IP 의 기준선 판정 — 처음 새 IP 를 볼 때 한 번 만든다(에이전트 대역 컴파일)
   let changed = false;
@@ -785,8 +785,8 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
     noteSeen(ts); // v2.733 C6-02
     resWritten = true;
     const hPrev = Object.prototype.hasOwnProperty.call(history, h.ip) ? history[h.ip] : null;
-    const wasUp = hPrev?.status === 'up';   // vNEXT: 사용 시작(새 IP · 해제 뒤 다시 응답) 판정 — recordSeen 이 바꾸기 전에 본다
-    const flapTo = ma.changed ? macSeenBefore(hPrev, ma.changed.to) : false;   // vNEXT: 예전에 본 MAC 으로 되돌아감(이중화 의심)
+    const wasUp = hPrev?.status === 'up';   // v3.1.0: 사용 시작(새 IP · 해제 뒤 다시 응답) 판정 — recordSeen 이 바꾸기 전에 본다
+    const flapTo = ma.changed ? macSeenBefore(hPrev, ma.changed.to) : false;   // v3.1.0: 예전에 본 MAC 으로 되돌아감(이중화 의심)
     recordSeen({ ...h, hostname: next.hostname }, ts, agent); // IP 사용 이력(온라인 전환) 갱신
     if (mn.renames.length) noteRenames(h.ip, mn.renames, ts, agent);
     if (h.arpMac) noteMac(h.ip, h.arpMac, ts, agent);   // v2.999: MAC 이력(스캐너 이웃 표에서 본 값만 — NetBIOS 가 말한 MAC 은 넣지 않는다)
@@ -812,7 +812,7 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
 }
 
 
-// ---- vNEXT: 스캔이 본 변화(설계 docs/design/ipam-alerts-mac-dns ①) ---------------------------------
+// ---- v3.1.0: 스캔이 본 변화(설계 docs/design/ipam-alerts-mac-dns ①) ---------------------------------
 // 보고 하나(mergeScanResults 한 번)마다 { agent, ts, changes:[{type, ip, …}] } 를 구독자에게 준다(ipam/changeNotify.js — 기록 · 알림 묶음).
 //   이 모듈은 알림을 모른다(의존 방향: changeNotify → scanStore). 구독자는 미뤄서 돈다(setImmediate — 병합을 막지 않는다).
 //   종류: new-ip(처음 응답 — 그 대역 줄의 첫 완료 스캔이 끝난 뒤에만 · vCenter 가 아는 IP 인지는 구독자가 스냅샷으로 거른다) ·
@@ -1191,7 +1191,7 @@ export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = 
   const ns = cleanNameStats(nameStats);
   reports[name] = { at: Date.now(), scanned, alive, ...(ns ? { nameStats: ns } : {}) };
   scheduleWrite(REP); // 디바운스 원자 기록(에이전트 보고 핫패스 비차단)
-  // vNEXT: 완료 스캔 — 그 에이전트 대역 줄의 기준선(첫 완료 스캔)을 잡는다. 이번 스캔의 새 IP 는 이미 병합 때 '기준선 전' 으로 판정됐다(알리지 않음).
+  // v3.1.0: 완료 스캔 — 그 에이전트 대역 줄의 기준선(첫 완료 스캔)을 잡는다. 이번 스캔의 새 IP 는 이미 병합 때 '기준선 전' 으로 판정됐다(알리지 않음).
   const added = markBaseline(name);
   if (added.length) emitScanChanges({ agent: name, ts: Date.now(), changes: added.map((spec) => ({ type: 'baseline', spec })) });
   recordRun({ agent: name, scanned, alive, durationMs, nameStats: ns }); // 완료된 스캔 이력에 추가

@@ -62,7 +62,7 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
   const [reservedUntil, setReservedUntil] = useState(rowDay);
   const [loadedDay, setLoadedDay] = useState(rowDay);   // 폼을 연 시점의 저장값 — 바뀌지 않았으면 저장 본문에서 뺀다
   const [note, setNote] = useState(row.note || '');
-  // vNEXT: 'MAC 변경 알림 제외' — 목록 행에는 값이 없다. 저장값을 읽은 뒤에만 알고(macLoaded), 바꿨을 때만 보낸다(못 읽었을 때 참을 거짓으로 덮지 않게).
+  // v3.1.0: 'MAC 변경 알림 제외' — 목록 행에는 값이 없다. 저장값을 읽은 뒤에만 알고(macLoaded), 바꿨을 때만 보낸다(못 읽었을 때 참을 거짓으로 덮지 않게).
   const [macAlertOff, setMacAlertOff] = useState(false);
   const [macLoaded, setMacLoaded] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -137,7 +137,7 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
       </div>
       {err && <div className="login-error" style={{ marginBottom: 8, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{err}</div>}
       {loadWarn && <div className="muted" style={{ marginBottom: 8, fontSize: 12, color: 'var(--amber)' }}>{loadWarn}</div>}
-      {/* vNEXT: 400px 에서 전역 .input 최소 폭(220px)이 오른쪽 칸을 넘쳐 입력칸이 창 밖으로 잘렸다(Chromium 판독 — 기존 결함) — .ipam-page 와 같이 이 폼에서 푼다 */}
+      {/* v3.1.0: 400px 에서 전역 .input 최소 폭(220px)이 오른쪽 칸을 넘쳐 입력칸이 창 밖으로 잘렸다(Chromium 판독 — 기존 결함) — .ipam-page 와 같이 이 폼에서 푼다 */}
       <div className="ipam-ov-form" style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
         <label style={L}>IP{isNew && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> (여러 개 가능)</span>}</label>
         {isNew

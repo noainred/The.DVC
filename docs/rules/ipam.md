@@ -19,7 +19,7 @@
 - (원래 5768행) IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다
 - v2.991 — IP 스캔 호스트명 확인(역DNS · mDNS · NetBIOS) · 대장 '호스트명' 열
 - v2.999 — IP 스캔 MAC · 제조사(스캐너 이웃 표 ARP · 제조사 표) · 대장 '제조사 · MAC' 열
-- vNEXT — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)
+- v3.1.0 — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)
 
 ## 본문
 
@@ -223,8 +223,8 @@
   - ⚠ 정직 기록: **실제 L2 이웃이 있는 망에서 이웃 표 읽기를 확인하지 못했다**(이 환경의 이웃은 게이트웨이 1개 — 파서는 커널 꼴의 표본 · 주입한 읽기 함수로 확인). IEEE 등록부 원문 · 재배포 조건 문서는
     이 환경의 네트워크 정책이 막아 읽지 못했다(oui-data 의 BSD 라이선스만 확인). '미등록 가상 NIC' 은 ESXi vmkernel 포트(vMotion 등)도 VMware 대역을 써서 단정하지 않는다.
 
-- ⚠⚠ **vNEXT — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)**(시안 `docs/design/ipam-alerts-mac-dns` ① ③ · 컨펌 기본값: 충돌 의심만 켬 · 연속 2회 · 묶음 상한 50 ·
-  회귀 `server/test/ipamChangesNext.test.js`(변이 20종 20 검출) + 웹 `ipamChangeText.test.js`):
+- ⚠⚠ **v3.1.0 — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)**(시안 `docs/design/ipam-alerts-mac-dns` ① ③ · 컨펌 기본값: 충돌 의심만 켬 · 연속 2회 · 묶음 상한 50 ·
+  회귀 `server/test/ipamChanges310.test.js`(변이 20종 20 검출) + 웹 `ipamChangeText.test.js`):
   - 감지는 **병합 때 한 번 · 중앙에서**(`scanStore.mergeScanResults` → `onScanChanges` 구독 — 엣지는 '변화' 를 보내지 않는다). 부분 결과(seenOnly)는 비교하지 않는다.
     종류: new-ip(이력이 없던 IP — **그 대역 줄의 첫 완료 스캔이 끝난 뒤에만**, 기준선 `ipam-change-baseline.json` 은 `recordAgentReport` 가 표시) · reserved-up(관리상태 예약 · 폐기 —
     IP 지정 > 전역 대역 정책 — 가 해제 · 새 상태에서 응답 시작) · rename(v2.991 renames) · mac-change(ARP MAC 만 · 예전 MAC 으로 되돌아가면 `flap`).

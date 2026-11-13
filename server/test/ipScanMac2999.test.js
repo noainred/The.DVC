@@ -214,7 +214,7 @@ test('④ scanRev — MAC 이 바뀌거나 표에 없었다는 표지가 생길 
   ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], arpMac: 'AA:00:00:00:01:01', arpTried: true }], T0, 'e-a');
   let rev = ss.scanRev();
   ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], arpMac: 'AA:00:00:00:01:01', arpTried: true }], T0 + 1000, 'e-a');
-  assert.equal(ss.scanRev(), rev, '같은 MAC — 대장 재계산 없음(이어 본 횟수 n 이 올라도 — vNEXT)');
+  assert.equal(ss.scanRev(), rev, '같은 MAC — 대장 재계산 없음(이어 본 횟수 n 이 올라도 — v3.1.0)');
   ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], arpTried: true }], T0 + 2000, 'e-a');
   assert.ok(ss.scanRev() > rev, '표에 없었다(지난 확인) — 표시가 바뀐다'); rev = ss.scanRev();
   ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], arpTried: true }], T0 + 3000, 'e-a');

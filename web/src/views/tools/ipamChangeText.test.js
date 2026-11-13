@@ -1,4 +1,4 @@
-// vNEXT — IP 변화 페이지 · 대장 '충돌 의심 · MAC 변경' 문구(ipamChangeText.js) · 알림 설정의 알리지 않을 에이전트 입력(Alerts2 parseQuietAgents).
+// v3.1.0 — IP 변화 페이지 · 대장 '충돌 의심 · MAC 변경' 문구(ipamChangeText.js) · 알림 설정의 알리지 않을 에이전트 입력(Alerts2 parseQuietAgents).
 import { describe, it, expect } from 'vitest';
 import { CHANGE_TYPE, CHANGE_ORDER, NOTIFY_TEXT, notifyBadge, changeDetail, macAlertBadge, hasMacAlert } from './ipamChangeText.js';
 import { parseQuietAgents, IPAM_RULES } from '../Alerts2.jsx';

@@ -11,7 +11,7 @@ import { loadScanSettings, saveScanSettings, deleteScanAgent, scanResultList, sc
 import { buildScanRangeRows, applyRangeLineOp } from '../../ipam/scanRangeRows.js'; // v2.692: 등록된 스캔 대역 표 · 줄 단위 수정
 import { startScan, scanStatus, rescheduleScanPoller } from '../../ipam/scanPoller.js';
 import { recordScanLog, listScanLog, SCAN_LOG_EVENTS } from '../../ipam/scanLog.js'; // v2.636: 스캔 실행 로그
-import { listChanges, CHANGE_TYPES } from '../../ipam/changeLog.js'; // vNEXT: IP 변화 기록
+import { listChanges, CHANGE_TYPES } from '../../ipam/changeLog.js'; // v3.1.0: IP 변화 기록
 import { scanRangesToCsv, scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport, LOCAL_AGENT } from '../../ipam/scanRangesCsv.js'; // v2.636: 에이전트별 스캔 대역 CSV
 import { RANGE_CAP } from '../../ipam/scan.js';
 import { agentVcenterIds, suggestAgentSubnets } from '../../ipam/scanDatacenter.js'; // v2.638: 데이터센터 귀속 · /24 대역 제안
@@ -389,7 +389,7 @@ adminRouter.post('/ipam/scan/migration/dismiss', adminOnly, fleetOnly, (_req, re
   res.status(r.ok ? 200 : 404).json({ ...r, ...migrationView() });
 });
 // v2.636: 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경) — 형제 status 와 같은 게이트(전 엣지 이름·대역이 들어간다).
-// vNEXT(설계 ipam-alerts-mac-dns ② — IP관리 › IP 변화): 스캔이 본 변화 기록. 스캔 결과처럼 vCenter 귀속이 없어 스캔 로그와 같은 게이트(관리자 · 전 법인).
+// v3.1.0(설계 ipam-alerts-mac-dns ② — IP관리 › IP 변화): 스캔이 본 변화 기록. 스캔 결과처럼 vCenter 귀속이 없어 스캔 로그와 같은 게이트(관리자 · 전 법인).
 adminRouter.get('/ipam/changes', adminOnly, fleetOnly, (req, res) => {
   const q = (v) => (typeof v === 'string' ? v : '');
   res.json({ ok: true, ...listChanges({ type: q(req.query.type), ip: q(req.query.ip), agent: q(req.query.agent), limit: req.query.limit }), types: CHANGE_TYPES });

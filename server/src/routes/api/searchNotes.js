@@ -2,7 +2,7 @@
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { currentVersion } from '../../config.js';
-import { listNotes } from '../../release-notes.js';
+import { listNotes, notesSince, parseSinceVersion } from '../../release-notes.js';
 import { nlSearch, NL_ENTITY_PERM, NL_QUERY_MAX } from '../../llm/nlSearch.js';
 import { userHasPermission } from '../../auth/permissions.js';
 
@@ -32,5 +32,15 @@ api.post('/search/nl', async (req, res) => {
 // Release notes (built-in changelog + admin-recorded), newest first.
 api.get('/release-notes', (_req, res) => {
   res.json({ current: currentVersion(), notes: listNotes() });
+});
+
+// v2.999(설계 docs/design/upgrade-reload): 이 창의 판(from)보다 새 판들의 노트만 — 업그레이드 뒤 열어 둔 창의 '새로고침 하세요' 상자가 부른다.
+//   ⚠ 옛 판 창이 새 서버에 부르는 계약 — 경로 · 응답 모양을 바꾸지 않는다(웹 upgradeNotice.SINCE_PATH · server/test/upgradeNotice2999.test.js 대조).
+api.get('/release-notes/since', (req, res) => {
+  const from = parseSinceVersion(typeof req.query?.from === 'string' ? req.query.from : '');
+  if (!from) return res.status(400).json({ error: 'bad-from', reason: 'from 은 a.b.c 형식의 버전이어야 합니다.' });
+  const current = currentVersion();
+  const out = notesSince(listNotes(), from, current);
+  res.json({ current, from, notes: out.notes, truncated: out.truncated });
 });
 }

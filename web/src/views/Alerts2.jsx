@@ -15,7 +15,7 @@ const RULE_LABEL = {
   gpuAllocPct: '법인 GPU 할당률 ≥ (%)',   // v2.939(GPU 할당율 개선 6 · 기본 끔 — 예비가 음수면 위험 등급)
 };
 
-// vNEXT(시안 docs/design/ipam-alerts-mac-dns ① — 컨펌 '기본값: 충돌 의심만 켬'): IP 스캔이 본 변화. 판정 · 묶음은 서버(ipam/changeNotify.js · conflict.js).
+// v3.1.0(시안 docs/design/ipam-alerts-mac-dns ① — 컨펌 '기본값: 충돌 의심만 켬'): IP 스캔이 본 변화. 판정 · 묶음은 서버(ipam/changeNotify.js · conflict.js).
 export const IPAM_RULES = Object.freeze([
   { k: 'ipamConflict', label: '충돌 의심', sev: '위험', tone: 'red', th: '연속 스캔 수',
     desc: 'vCenter 가 아는 VM 의 IP 에 그 VM 의 NIC 이 아닌 MAC 이 연속으로 응답합니다(스캐너와 같은 서브넷의 IP 만). 풀릴 때까지 현재 발생 중에 남고 해소되면 알립니다.' },
@@ -56,7 +56,7 @@ export default function Alerts2({ initialData = null } = {}) {
       v && typeof v === 'object' && 'threshold' in v ? { ...v, threshold: blankOr(v.threshold) } : v])),
     cooldownMin: blankOr(cfg.cooldownMin),
     intervalSec: blankOr(cfg.intervalSec),
-    // vNEXT: 알리지 않을 에이전트 — 칸을 고쳤을 때만 보낸다(안 고쳤으면 키를 빼 서버가 이전 값을 유지)
+    // v3.1.0: 알리지 않을 에이전트 — 칸을 고쳤을 때만 보낸다(안 고쳤으면 키를 빼 서버가 이전 값을 유지)
     ...('__quietText' in cfg ? { ipamQuietAgents: parseQuietAgents(cfg.__quietText) } : {}),
     __quietText: undefined,
   });

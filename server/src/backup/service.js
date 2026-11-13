@@ -66,7 +66,7 @@ export const RUNTIME_STATE_NAMES = new Set([
   'focusmon-sessions.json', 'focusmon-keys.json', 'focusmon-auth-stops.json', // v2.976 집중 모니터링 계속 수집 정의 · 엣지 공개키 기록 · 인증 정지(registerStateFile 과 이중 안전망)
   'storage-inspect-runs.json', 'storage-inspect-ring.json', 'storage-inspect-state.json', // v2.965 PowerScale 점검 이력 · 엣지 미전송 고리 · 회차 기록(registerStateFile 과 이중 안전망)
   'issue-notify-state.json', // v2.871 이슈 기한 알림 기록(issues/notify.js — registerStateFile 과 이중 안전망)
-  'ipam-changes.json', 'ipam-change-baseline.json', // vNEXT IP 변화 기록 · 대역 줄 기준선(ipam/changeLog.js · scanStore.js — registerStateFile 과 이중 안전망)
+  'ipam-changes.json', 'ipam-change-baseline.json', // v3.1.0 IP 변화 기록 · 대역 줄 기준선(ipam/changeLog.js · scanStore.js — registerStateFile 과 이중 안전망)
   'issue-filter-mail-state.json', // v2.883 저장 필터 주간 메일 기록(issues/notify.js — 같은 이중 안전망)
   'issue-inbox.json', // v2.908 포탈 알림함(issues/inbox.js — 같은 이중 안전망)
   'backup.json', 'central-agent-config.json', 'central-inventory.json', 'central-fleet.json', 'central-pdu.json',

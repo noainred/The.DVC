@@ -1,4 +1,4 @@
-// ipamChangeText.js — IP관리 › IP 변화 페이지 · 대장 '충돌 · MAC 변경' 문구(순수 · vNEXT, 시안 docs/design/ipam-alerts-mac-dns ② ③).
+// ipamChangeText.js — IP관리 › IP 변화 페이지 · 대장 '충돌 · MAC 변경' 문구(순수 · v3.1.0, 시안 docs/design/ipam-alerts-mac-dns ② ③).
 // 판정(변화 종류 · 알림 결과 · 충돌 의심)은 서버(ipam/changeNotify.js · conflict.js)가 하고 기록 · 행에 실어 보낸다 — 여기는 라벨 · 줄 문구만.
 
 /** 종류(서버 CHANGE_TYPES 와 1:1) — 칩 순서도 이것. */

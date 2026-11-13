@@ -151,7 +151,7 @@
 | `initial-admin-password.txt` | 텍스트 | 최초 기동 시 생성된 관리자 임시 비밀번호 | ✅ | ✅ | ✅ | auth/auth.js, security/selfCheck.js |
 | `ipam-annotations.json` | 설정 | Per-IP user annotations (custom memo + tags) for the IP ledger. These are | ✅ | ✅ |  | ipam/annotations.js |
 | `ipam-change-baseline.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
-| `ipam-changes.json` | 설정 | IP 변화 기록(vNEXT — 설계 docs/design/ipam-alerts-mac-dns ① ② · IP관리 › IP 변화 페이지). | ✅ | ✅ | ✅ | ipam/changeLog.js |
+| `ipam-changes.json` | 설정 | IP 변화 기록(v3.1.0 — 설계 docs/design/ipam-alerts-mac-dns ① ② · IP관리 › IP 변화 페이지). | ✅ | ✅ | ✅ | ipam/changeLog.js |
 | `ipam-overrides.json` | 설정 | Per-IP 수동 관리(override) 저장소 — vCenter/스캔으로 자동 발견되는 정보와 별개로, | ✅ | ✅ | ✅ | ipam/overrides.js |
 | `ipam-range-policies.json` | 설정 | 대역(subnet/range) 단위 IP 정책 저장소 — IP 단위 override(overrides.js)와 '평행'한 | ✅ | ✅ | ✅ | ipam/rangePolicies.js |
 | `ipam-scan-agents.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |

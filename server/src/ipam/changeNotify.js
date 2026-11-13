@@ -1,5 +1,5 @@
 /**
- * IP 변화 → 기록 · 알림 묶음(vNEXT — 설계 docs/design/ipam-alerts-mac-dns ① · 보드 ② ③).
+ * IP 변화 → 기록 · 알림 묶음(v3.1.0 — 설계 docs/design/ipam-alerts-mac-dns ① · 보드 ② ③).
  *
  * scanStore.onScanChanges 로 보고 하나(스캔 한 번)의 변화를 받아:
  *   ① 거른다 — new-ip 는 vCenter 가 아는 IP(VM IP · 호스트 관리 IP)를 뺀다(미등록만), mac-change 는 게이트웨이 이중화 가상 MAC 을 뺀다(보드 ⑥-2).
