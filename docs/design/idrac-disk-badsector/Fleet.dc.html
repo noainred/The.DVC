@@ -74,6 +74,9 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
       <button type="button">국가·법인</button>
       <button type="button">모델</button>
       <button type="button">추이</button>
+      <button type="button">조치</button>
+      <button type="button">상태 값</button>
+      <button type="button">설정 점검</button>
       <button type="button">근거</button>
     </div>
   </div>
@@ -85,6 +88,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <a class="btn primary" href="Scan.dc.html" style="text-decoration:none">지금 점검</a>
+      <a class="btn" href="Priority.dc.html" style="text-decoration:none">조치할 디스크 58개</a>
       <button class="btn" type="button">못 읽은 서버 44대</button>
       <button class="btn" type="button">엑셀</button>
     </div>
@@ -124,7 +128,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
         <th><button type="button">‘아직 사용 중’ 근거</button></th>
       </tr></thead>
       <tbody>
-        <tr><td>인도 · IN 첸나이</td><td><a href="#server">IN-ESX-R740-021</a></td><td><b>Disk 2</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1K9M2X</div></td><td><a href="Usage.dc.html">vSAN 데이터스토어 vsan-IN01</a><div class="note">VM 142대가 씀</div></td><td class="r mono"><b>6</b></td><td class="r mono">9</td><td class="r mono">3</td><td class="r mono">0</td><td class="mono">2026-11-09</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
+        <tr><td>인도 · IN 첸나이</td><td><a href="#server">IN-ESX-R740-021</a></td><td><b>Disk 2</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1K9M2X</div></td><td><a href="Usage.dc.html">로컬 데이터스토어 IN-ESX-021-local</a><div class="note">VM 14대가 씀</div></td><td class="r mono"><b>6</b></td><td class="r mono">9</td><td class="r mono">3</td><td class="r mono">0</td><td class="mono">2026-11-09</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
         <tr><td>폴란드 · PL 바르샤바</td><td><a href="#server">PL-DB-R750-003</a></td><td><b>Disk 7</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>모델 A · 2.4 TB SAS<div class="muted mono" style="font-size:11.5px">S/N WBM2F81R</div></td><td><a href="Usage.dc.html" class="mono">/var/lib/pgsql</a> 외 1곳<div class="note">가상 디스크 1 · /dev/sdb</div></td><td class="r mono"><b>4</b></td><td class="r mono">2</td><td class="r mono">1</td><td class="r mono">1</td><td class="mono">2026-11-06</td><td><span class="tag warn">경고 · 고장 예측</span></td><td>시리얼이 기록 전후로 같음</td></tr>
         <tr><td>미국 · US 동부</td><td><a href="#server">US-ESX-R650-112</a></td><td><b>Disk 0</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1P44TQ</div></td><td><a href="Usage.dc.html">로컬 데이터스토어 US-ESX-112-local</a><div class="note">VM 9대가 씀</div></td><td class="r mono"><b>2</b></td><td class="r mono">0</td><td class="r mono">0</td><td class="r mono">0</td><td class="mono">2026-08-21</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
         <tr><td>한국 · KR 본사</td><td><a href="#server">KR-ESX-R750-014</a></td><td><b>Disk 5</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>모델 A · 2.4 TB SAS<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td><td><a href="Usage.dc.html">로컬 데이터스토어 KR-ESX-014-local</a><div class="note">VM 6대가 씀</div></td><td class="r mono"><b>1</b></td><td class="r mono">2</td><td class="r mono">0</td><td class="r mono">0</td><td class="mono">2026-11-03</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
