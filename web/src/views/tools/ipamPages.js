@@ -27,11 +27,15 @@ export const IPAM_PAGES = Object.freeze([
   { k: 'policies', label: '대역 정책', icon: '🧩', group: 'range', needsLedger: true, title: '대역 단위 관리상태(예약·DHCP풀·폐기 등) 기본값' , tab: 'range' },
   // v2.691: 예전 '대역·스캔'(vCenter 별 대역)은 이 페이지로 합쳐졌다 — 옛 주소 #/ipam/ranges 는 IPAM_PAGE_ALIASES 가 옮긴다.
   { k: 'scan', label: '스캔 대역·설정', icon: '🛰️', group: 'scan', admin: true, title: '에이전트별 스캔 대역(iDRAC·VM 대역 가져오기)·포트·주기' , tab: 'scan' },
+  // v3.7.0(재설계 묶음 라 — 시안 ⑭): 에이전트마다 오늘 시간표 · 다음 예정 · 쉬는 시간 · 늦음.
+  { k: 'schedule', label: '주기 스캔 일정', icon: '', group: 'scan', admin: true, title: '에이전트마다 오늘 스캔 시간표 · 다음 예정 · 쉬는 시간', tab: 'scan' },
   { k: 'status', label: '스캔 상태', icon: '📡', group: 'scan', admin: true, title: '진행 중 스캔 + 완료된 스캔 이력' , tab: 'scan' },
   { k: 'log', label: '스캔 로그', icon: '🧾', group: 'scan', admin: true, title: '스캔 시작·종료·실패·건너뜀·엣지 보고·설정 변경 기록' , tab: 'scan' },
   // v3.1.0(시안 ipam-alerts-mac-dns ②): 스캔이 본 변화 — 새 미등록 IP · MAC 변경 · 충돌 의심 · 호스트명 변경 · 예약 IP 사용 시작
   { k: 'changes', label: 'IP 변화', icon: '🔔', group: 'scan', admin: true, title: '스캔이 본 변화 — 새 미등록 IP · MAC 변경 · 충돌 의심 · 호스트명 변경' , tab: 'scan' },
   { k: 'ipms', label: 'IPMS 설정', icon: '⚙', group: 'setup', admin: true, title: '무시 대역 · vCenter 스캔 대역 · 공인/사설 분류' , tab: 'setup' },
+  // v3.7.0(재설계 묶음 라 — 시안 ⑫ ⑬): 정기 보고(IPMS 알람) 설정 · 미리 보기 · 발송 기록.
+  { k: 'report', label: '정기 보고', icon: '', group: 'setup', admin: true, title: '법인별 IP 사용 변화를 정한 요일 · 시각에 메일로(전체 종합 + 법인별)', tab: 'setup' },
   { k: 'csv', label: 'CSV 가져오기·내보내기', icon: '⇅', group: 'setup', csv: true, title: '대장 내보내기 · IP 관리상태·메모 CSV · 스캔 대역 CSV' , tab: 'setup' },
 ]);
 export const IPAM_GROUPS = Object.freeze([['ledger', 'IP 대장'], ['range', '대역'], ['scan', '스캔'], ['setup', '설정·데이터']]);
@@ -44,7 +48,7 @@ export const IPAM_TABS = Object.freeze([['home', '현황'], ['range', '대역'],
 /** 주소 없이 열었을 때의 페이지(v3.4.0 — 예전 'list'). */
 export const IPAM_DEFAULT_PAGE = 'home';
 /** 탭 안 보기 순서(IPAM_PAGES 순서와 별개 — 대역 탭은 서브넷 대장이 먼저). */
-const TAB_ORDER = Object.freeze({ home: ['home', 'insights'], range: ['sheet', 'policies', 'netmap'], addr: ['list', 'names'], scan: ['scan', 'status', 'log', 'changes'], setup: ['ipms', 'csv'] });
+const TAB_ORDER = Object.freeze({ home: ['home', 'insights'], range: ['sheet', 'policies', 'netmap'], addr: ['list', 'names'], scan: ['scan', 'schedule', 'status', 'log', 'changes'], setup: ['ipms', 'report', 'csv'] });
 /** v2.691: 없어진 페이지의 옛 주소 → 새 페이지(북마크·공유 링크·다른 화면의 바로가기를 살린다). */
 export const IPAM_PAGE_ALIASES = Object.freeze({ ranges: 'scan' });
 export const IPAM_PAGE_KEYS = Object.freeze(IPAM_PAGES.map((p) => p.k));

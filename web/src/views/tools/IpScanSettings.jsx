@@ -18,6 +18,7 @@ import { RangeCheck, SCAN_CAP } from './VcScanRangeEditor.jsx';
 import { ScanProgressBar } from './IpamScanStatus.jsx';
 import { ScanRangeImportModal } from './ScanRangeImportModal.jsx'; // v2.691
 import { ScanRangeAdd } from './ScanRangeAdd.jsx'; // v3.6.0 사용 중인 대역에서 추가(줄을 눌러 담기)
+import { ScanQuietEdit, ScanSpeed } from './ScanQuietEdit.jsx'; // v3.7.0 쉬는 시간 · 스캔 속도
 import { ScanRangeMigration } from './ScanRangeMigration.jsx';     // v2.691
 import { applyImport, classifyLine, otherSavedRanges, reflectDups } from './vcRangeImportText.js';
 import { agentDupReasonText, agentName, ownersToSaved } from './scanRangeImportText.js';
@@ -411,12 +412,17 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         <label style={{ fontWeight: 600, paddingTop: 9 }}>포트</label>
         <input className="input" value={(s.ports || []).join(', ')} onChange={(e) => setS({ ...s, ports: e.target.value.split(/[\s,]+/).map(Number).filter(Boolean) })}
           style={{ width: '100%', boxSizing: 'border-box' }} />
-        <label style={{ fontWeight: 600, paddingTop: 9 }}>주기 / 동시성 / 타임아웃</label>
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>주기 / 동시에 스캔하는 IP 수 / 응답 대기</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <input className="input" type="number" min={1} style={{ width: 90 }} value={intervalMinText(s)} onChange={(e) => setS({ ...s, intervalMin: e.target.value })} /><span className="muted">분</span>
-          <input className="input" type="number" min={1} max={1024} style={{ width: 80 }} value={s.concurrency} onChange={(e) => setS({ ...s, concurrency: e.target.value })} /><span className="muted">동시</span>
-          <input className="input" type="number" min={100} max={10000} style={{ width: 90 }} value={s.timeoutMs} onChange={(e) => setS({ ...s, timeoutMs: e.target.value })} /><span className="muted">ms</span>
+          <input className="input" type="number" min={1} style={{ width: 90 }} aria-label="주기(분)" value={intervalMinText(s)} onChange={(e) => setS({ ...s, intervalMin: e.target.value })} /><span className="muted">분마다</span>
+          <input className="input" type="number" min={1} max={1024} style={{ width: 80 }} aria-label="동시에 스캔하는 IP 수" value={s.concurrency} onChange={(e) => setS({ ...s, concurrency: e.target.value })} /><span className="muted">IP 동시</span>
+          <input className="input" type="number" min={100} max={10000} style={{ width: 90 }} aria-label="응답 대기(ms)" value={s.timeoutMs} onChange={(e) => setS({ ...s, timeoutMs: e.target.value })} /><span className="muted">ms 대기</span>
         </div>
+        {/* v3.7.0(재설계 묶음 라 — 시안 ⑭): 스캔 속도(위 두 칸을 채우는 단추) · 쉬는 시간(그 에이전트 현지 시각) */}
+        <label style={{ fontWeight: 600, paddingTop: 7 }}>스캔 속도</label>
+        <ScanSpeed s={s} onChange={(v) => setS({ ...s, ...v })} />
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>쉬는 시간</label>
+        <ScanQuietEdit quiet={s.quiet} onChange={(q) => setS({ ...s, quiet: q })} />
         {/* v2.991 호스트명 확인(시안 ③) — 응답한 IP 에만 묻는다. 표시 순서는 위에서 아래(역DNS > mDNS > NetBIOS). */}
         <label style={{ fontWeight: 600, paddingTop: 9 }}>호스트명 확인</label>
         <div className="card" style={{ padding: '10px 12px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>

@@ -22,6 +22,10 @@ import { ipToNum } from '../../util/ipv4.js'; // v3.6.0: vmk 주소의 스캔 �
 import { listDatacenters, datacenterOfVcenter, getDatacenterAssign } from '../../datacenter/store.js';
 import { listScanRanges as listIdracScanRanges } from '../../idrac/scanRanges.js';
 import { idracSubnets, vmSubnets, annotateSubnets, SUBNET_MAX, excludedIpReason } from '../../ipam/vcRangeSuggest.js';
+import { parseQuietInput } from '../../ipam/scanQuiet.js'; // v3.7.0 쉬는 시간
+import { buildScanSchedule } from '../../ipam/scanSchedule.js'; // v3.7.0 주기 스캔 일정
+import { loadReportSettings, reportSettingsError, saveReportSettings, previewReport, sendReport, reportStatus } from '../../ipam/report.js'; // v3.7.0 정기 보고
+import { REPORT_SECTIONS, REPORT_FREQS } from '../../ipam/reportRules.js';
 import { hostVmks } from '../../ipam/serverView.js'; // v3.6.0: 스캔 대역 후보에 ESXi vmk 전체 주소
 import { getSubnetNotes, subnetKey } from '../../ipam/subnetNotes.js'; // v3.6.0: 후보 줄에 대역 용도 // v2.690: vCenter 스캔 대역 '/24 가져오기'
 import { todayStamp } from '../../util/dayKey.js';
@@ -159,6 +163,11 @@ adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => {
     const raw = req.body.ranges;
     check = checkRangeList(Array.isArray(raw) ? raw : String(raw ?? '').split(/[\n,]/), { reversed: 'error', scanCap: RANGE_CAP });
     if (check.invalid.length) return invalidReply(res, check.invalid.map((x) => ({ field: 'ranges', agent, ...x })));
+  }
+  // v3.7.0(재설계 묶음 라): 쉬는 시간 — 잘못된 줄은 버리지 않고 400(사용자가 넣은 창이 조용히 사라지면 그 시간에 스캔이 돈다).
+  if (req.body && req.body.quiet !== undefined) {
+    const q = parseQuietInput(req.body.quiet);
+    if (q.error) return res.status(400).json({ ok: false, reason: q.error, field: 'quiet' });
   }
   const settings = saveScanSettings(agent, req.body || {});
   invalidateScanDatacenters();
@@ -403,6 +412,49 @@ adminRouter.post('/ipam/scan/migration/dismiss', adminOnly, fleetOnly, (_req, re
 adminRouter.get('/ipam/changes', adminOnly, fleetOnly, (req, res) => {
   const q = (v) => (typeof v === 'string' ? v : '');
   res.json({ ok: true, ...listChanges({ type: q(req.query.type), ip: q(req.query.ip), agent: q(req.query.agent), limit: req.query.limit }), types: CHANGE_TYPES });
+});
+/**
+ * v3.7.0(재설계 묶음 라 — 시안 ⑭): 주기 스캔 일정 — 에이전트마다 오늘(포탈 날짜) 스캔 기록 시간표 · 다음 예정 어림 · 늦음 · 걸린 시간 > 주기.
+ *   스캔 로그 · 마지막 보고만 읽는다(장비 왕복 0). 전 법인 데이터라 형제 스캔 라우트와 같은 게이트.
+ */
+adminRouter.get('/ipam/scan/schedule', adminOnly, fleetOnly, (_req, res) => {
+  const agents = listScanAgents();
+  if (!agents.some((x) => x.name === LOCAL)) agents.unshift({ name: LOCAL, ...loadScanSettings(LOCAL) });
+  const { entries } = listScanLog({ limit: 100_000 });
+  res.json({ ok: true, ...buildScanSchedule({ agents, log: entries, reports: getAgentReports() || {} }) });
+});
+/**
+ * v3.7.0(재설계 묶음 라 — 시안 ⑫ ⑬): 정기 보고(IPMS 알람) — 설정 · 상태 · 미리 보기 · 지금 보내기. 전 법인 데이터라 형제 IP 관리 설정과 같은 게이트(관리자 + 전체 범위).
+ *   저장은 잘못된 주소 · 요일 없음 · 모르는 시간대를 자르지 않고 400. 미리 보기는 보내지 않는다(저장하지 않은 화면 값으로 만들 수 있다).
+ */
+adminRouter.get('/ipam/report', adminOnly, fleetOnly, (_req, res) => {
+  const r = loadReportSettings();
+  let datacenters = [];
+  try {
+    const asg = getDatacenterAssign() || {};
+    const vcName = {}; for (const v of store.get().vcenters || []) vcName[v.id] = v.name || v.id;
+    datacenters = listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id, vcenters: Object.keys(asg).filter((k) => String(asg[k]) === String(d.id)).map((k) => vcName[k] || k) }));
+  } catch { datacenters = []; }
+  res.json({ ok: true, report: r, settingsError: reportSettingsError(), status: reportStatus(), datacenters, sections: REPORT_SECTIONS, freqs: REPORT_FREQS });
+});
+adminRouter.put('/ipam/report', adminOnly, fleetOnly, (req, res) => {
+  const r = saveReportSettings(req.body?.report ?? req.body);
+  if (r.error) return res.status(400).json({ ok: false, reason: r.error, field: r.field });
+  logAudit({ user: req.user?.username, action: 'ipam.report.settings', target: 'ipam-report', detail: `${r.report.enabled ? '켜짐' : '꺼짐'} · ${r.report.freq} · ${r.report.time} · ${r.report.clock === 'corp' ? '법인 현지 시각' : '메인 서버 시각'} · 법인 ${Object.keys(r.report.corps).length}곳`, ip: req.ip || '' });
+  res.json({ ok: true, report: r.report, status: reportStatus() });
+});
+adminRouter.post('/ipam/report/preview', adminOnly, fleetOnly, (req, res) => {
+  try {
+    const r = previewReport(req.body?.report ?? null);
+    if (!r.ok) return res.status(400).json({ ok: false, reason: r.error, field: r.field });
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, reason: `미리 보기를 만들지 못했습니다: ${String(e?.message || e).slice(0, 200)}` }); }
+});
+adminRouter.post('/ipam/report/send-now', adminOnly, fleetOnly, async (req, res) => {
+  const target = typeof req.body?.target === 'string' && req.body.target ? req.body.target.slice(0, 64) : 'overall';
+  const results = await sendReport({ slot: Date.now(), target, manual: true, by: req.user?.username || 'admin' });
+  logAudit({ user: req.user?.username, action: 'ipam.report.send-now', target, detail: results.map((x) => x.state).join(','), ip: req.ip || '' });
+  res.json({ ok: results.some((x) => x.state === 'sent'), results, status: reportStatus() });
 });
 adminRouter.get('/ipam/scan/log', adminOnly, fleetOnly, (req, res) => {
   res.json({ ok: true, ...listScanLog({ limit: req.query.limit, agent: req.query.agent, level: req.query.level, event: req.query.event }), events: SCAN_LOG_EVENTS });

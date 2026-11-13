@@ -25,6 +25,7 @@ import { capStr } from '../util/capStr.js'; // v2.733: 엣지가 보낸 미완�
 import { NAME_METHODS, NAME_MISS_MAX, displayName, nameMismatch } from './hostNames.js'; // v2.991: 호스트명 확인(방식별 이름 · 표시 순서)
 import { macInfo, entryMac } from './macVendor.js'; // v2.999: MAC → 제조사 · 종류(IP 상세 창) · 표시 MAC(ARP > NetBIOS)
 import { confirmHoursOf, DNS_CONFIRM_HOURS_MIN, DNS_CONFIRM_HOURS_MAX, DNS_FWD_STATES, DNS_OTHER_MAX } from './dnsConfirm.js'; // v3.2.0: DNS 정합성
+import { cleanQuiet } from './scanQuiet.js'; // v3.7.0: 주기 스캔 쉬는 시간
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 // v2.603(감사 CEN2603-02): **전체** 상한. MAX_MERGE 는 한 호출에만 걸려, 배정 범위가 없는 토큰이 보고를 반복하면 results·history 가
@@ -284,6 +285,8 @@ function normalizeCfg(p = {}) {
     retentionDays: clamp(p.retentionDays, 0, 3650, DEFAULTS.retentionDays),
     // v2.638: 이 에이전트가 찾은 IP 를 귀속시킬 DataCenter(비우면 자동 — ipam/scanDatacenter.js). 엣지는 이 칸을 쓰지 않는다.
     datacenterId: typeof p.datacenterId === 'string' ? p.datacenterId.trim().slice(0, 64) : '',
+    // v3.7.0(재설계 묶음 라 — 시안 ⑭): 쉬는 시간 — 스캔하는 쪽(엣지 · 이 포탈)이 자기 현지 시각으로 판정한다(ipam/scanQuiet.js). 없으면 [].
+    quiet: cleanQuiet(p.quiet),
   };
 }
 
@@ -376,6 +379,7 @@ export function saveScanSettings(agent, partial = {}) {
   if (partial.retentionDays !== undefined) next.retentionDays = clampSetting(partial.retentionDays, { min: 0, max: 3650, def: cur.retentionDays });
   // v2.638: 데이터센터 귀속(빈 값 = 자동). 존재 여부는 라우트가 등록부로 검사한다(여기는 형식만).
   if (partial.datacenterId !== undefined) next.datacenterId = typeof partial.datacenterId === 'string' ? partial.datacenterId.trim().slice(0, 64) : '';
+  if (partial.quiet !== undefined) next.quiet = cleanQuiet(partial.quiet); // v3.7.0 — 형식 오류는 라우트가 먼저 400(parseQuietInput)
   saveAll({ ...all, agents: { ...all.agents, [key]: next } }); // v2.639 I3: 캐시 객체를 제자리에서 고치지 않는다(쓰기 실패 시 메모리≠디스크 방지)
   return next;
 }

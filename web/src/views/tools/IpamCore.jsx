@@ -19,6 +19,8 @@ import { SubnetList, SubnetMap, SubnetPurposeEdit } from './IpamSubnets.jsx'; //
 import { IpamExportModal } from './IpamExportModal.jsx'; // v3.5.0 — 엑셀 내보내기 창
 import { IpamServerModal } from './IpamServerModal.jsx'; // v3.6.0 — 서버 보기(서비스 태그)
 import { IpamHostNames } from './IpamHostNames.jsx'; // v3.6.0 — 호스트명 대조
+import { IpamScanSchedule } from './IpamScanSchedule.jsx'; // v3.7.0 — 주기 스캔 일정
+import { IpamReport } from './IpamReport.jsx'; // v3.7.0 — 정기 보고
 import { RECON_OPTIONS, ROW_OPTIONS, reconLabel } from './ipamFilterText.js'; // v3.4.0 — 필터 한 줄
 import { IpamChanges } from './IpamChanges.jsx'; // v3.1.0 IP 변화
 import { IpamCsv } from './IpamCsv.jsx';
@@ -364,11 +366,13 @@ function Ipam({ scope, onScope }) {
       : view === 'home' ? <IpamHome data={data} error={error} recon={recon} subnets={subnetsErr ? null : subnets} subnetsErr={subnetsErr} db={db} access={access}
           onGo={go} onFilter={goFiltered} onPickSubnet={(b) => openSheets(undefined, b)} onPickVcenter={(id) => { onScope?.(id); openSheets(id); }} />
       : view === 'scan' ? <IpScanSettings asPage onSaved={() => setReload((n) => n + 1)} />
+      : view === 'schedule' ? <IpamScanSchedule />
       : view === 'status' ? <ScanStatusModal asPage />
       : view === 'log' ? <IpamScanLog />
       : view === 'changes' ? <IpamChanges />
       : view === 'names' ? <IpamHostNames />
       : view === 'ipms' ? <IpmsSettings asPage access={access} />
+      : view === 'report' ? <IpamReport />
       : view === 'csv' ? <IpamCsv scope={scope} access={access} canManage={canManage} onGoto={go} onApplied={() => setReload((n) => n + 1)} />
       : view === 'netmap' ? (
         <IpamNetMap />

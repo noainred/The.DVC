@@ -26,8 +26,11 @@ import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.4
 import { headerSafeText } from './util/smtp.js'; // v2.743(INJPKG-03): 메일 제목 제어문자 정리(buildMime 과 같은 판정)
 import { registerExitFlush } from './util/exitFlush.js';
 import { unreadVcenterReasons } from './metrics/unreadVcenters.js';
-import { getScanResults, macIpCount, getAgentReports } from './ipam/scanStore.js';   // v3.1.0: IP 충돌 의심 규칙(스캔이 본 ARP MAC)
+import { getScanResults, macIpCount, getAgentReports, listScanAgents, loadScanSettings, LOCAL } from './ipam/scanStore.js';   // v3.1.0: IP 충돌 의심 규칙(스캔이 본 ARP MAC)
 import { findConflicts } from './ipam/conflict.js';
+import { duplicateAlerts, subnetFullAlerts, scanStaleAlerts } from './ipam/instantAlerts.js'; // v3.7.0 바로 알림 3가지
+import { buildIpamRows, listSubnets } from './ipam/ledger.js';
+import { withSubnetNotes } from './ipam/subnetNotes.js';
 import { setConflictSuspects } from './ipam/conflictState.js';
 import { buildGpuAllocTree } from './gpu/allocTree.js';   // v2.939 개선 6: 법인 GPU 할당률 규칙(계층과 같은 합계) // v2.768(점검 R3-C5-03): '지금 값 아님' 판정 한 벌
 // v2.604(감사 SEC2604-03): 채널 웹훅 URL 은 그 자체가 비밀(경로에 토큰이 들어 있다)이라 암호화 모드에서 봉인한다.
@@ -62,6 +65,10 @@ const DEFAULTS = {
     ipamNewIp: { enabled: false, threshold: 50 },
     ipamReservedUp: { enabled: false },
     ipamRename: { enabled: false },
+    // v3.7.0(재설계 묶음 라 — 바로 알림 3가지 · 사용자 결정 '함께 넣는다'): 상태형(처음 넘은 때 한 번 · 회복 한 번). 기본 끔 — 켜면 아래 임계.
+    ipamDuplicate: { enabled: false },
+    ipamSubnetFull: { enabled: false, threshold: 90 },   // 대역 점유율(%) — 대장 + 예약 + DHCP
+    ipamScanStale: { enabled: false, threshold: 3 },     // 주기의 몇 배
   },
   // v3.1.0: IP 변화 알림을 보내지 않을(기록만 할) 스캔 에이전트 — 대역을 새로 넣는 동안 등.
   ipamQuietAgents: [],
@@ -85,6 +92,8 @@ export const RULE_THRESHOLD_RANGE = Object.freeze({
   gpuAllocPct: { min: 1, max: 100 },
   ipamConflict: { min: 1, max: 10 },   // 연속 스캔 수(같은 MAC 을 이어 본 횟수 — scanStore arp.n)
   ipamNewIp: { min: 1, max: 1000 },    // 묶음 상한 — 넘으면 요약 한 건
+  ipamSubnetFull: { min: 50, max: 100 }, // v3.7.0 대역 점유율(%)
+  ipamScanStale: { min: 2, max: 48 },    // v3.7.0 주기의 몇 배
 });
 /** v3.1.0: 알리지 않을 에이전트 목록 정제 — 글자만 · 64자 · 200개 · 중복 제거(대소문자 무시). */
 export function cleanQuietAgents(v) {
@@ -309,6 +318,27 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
             + `${c.otherVm ? ` · 그 MAC 은 다른 VM(${c.otherVm.name || c.otherVm.id}) 의 NIC 입니다` : ''} · 같은 IP 를 두 장비가 쓰거나 VM 의 IP 보고가 오래됐을 수 있습니다` });
       }
     }
+  }
+  // v3.7.0(재설계 묶음 라): IP 관리 바로 알림 — 중복 IP · 대역 가득 참 · 스캔 보고 끊김(판정 ipam/instantAlerts.js). 대장은 store 가 30초마다 만드는
+  //   캐시(같은 세대면 그대로)를 읽는다 — 규칙을 켠 경우에만. 실패는 격리한다(다른 규칙 평가를 막지 않는다).
+  if (R.ipamDuplicate?.enabled || R.ipamSubnetFull?.enabled) {
+    try {
+      if (R.ipamDuplicate?.enabled) {
+        const d = duplicateAlerts(buildIpamRows(snap, '', null).rows, { unreadVc: new Set([...unreadVc, ...staleVc]) });
+        for (const k of d.held) held.add(k);
+        for (const x of d.alerts.slice(0, 300)) out.push(x);
+      }
+      if (R.ipamSubnetFull?.enabled) for (const x of subnetFullAlerts(withSubnetNotes(listSubnets(snap, '', null)), { threshold: R.ipamSubnetFull.threshold }).slice(0, 300)) out.push(x);
+    } catch (e) { console.warn(`[alerts] IP 관리 바로 알림 평가 실패: ${e?.message || e}`); }
+  }
+  if (R.ipamScanStale?.enabled) {
+    try {
+      const agents = listScanAgents();
+      if (!agents.some((a) => a.name === LOCAL)) agents.unshift({ name: LOCAL, ...loadScanSettings(LOCAL) });
+      const st = scanStaleAlerts(agents, getAgentReports() || {}, { threshold: R.ipamScanStale.threshold, label: (a) => (a === LOCAL ? '이 포탈' : a) });
+      for (const k of st.held) held.add(k);
+      for (const x of st.alerts) out.push(x);
+    } catch (e) { console.warn(`[alerts] 스캔 보고 끊김 평가 실패: ${e?.message || e}`); }
   }
   if (R.ramOvercommitPct?.enabled || R.vcpuPerCore?.enabled) {
     const byC = new Map();
