@@ -8,7 +8,7 @@ export const UNASSIGNED = '__none__';
 export const COLLECTOR_DC_HREF = '#/settings/collectors';
 /** 법인 판정 출처 → [짧은 표시, 설명]. 서버 makeCorpOf 의 src 값과 같은 이름. */
 export const CORP_SRC = Object.freeze({
-  scan: ['Agent', '수집한 Agent(수집 서버)의 법인 · 스캔 등록 법인(서버 분석과 같은 판정)'],
+  scan: ['Agent', '수집한 Agent(수집 서버)의 법인 · 스캔 등록 법인(Physical Server 와 같은 판정)'],
   vcenter: ['vCenter', '그 서버의 vCenter 에 할당된 법인'],
   agent: ['엣지', '보고한 엣지(수집 서버)의 법인'],
   vcgroup: ['vCenter 묶음', '법인이 할당되지 않은 vCenter — vCenter 이름으로 따로 묶었습니다'],

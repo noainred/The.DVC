@@ -6,6 +6,8 @@
 `web/src/styles.css` `:root` 토큰과 목 서버 Chromium 캡처(2026-11-07 19:37~19:39 KST · `#/vcenters` · `#/hosts` · `#/vms` · 상세 · 400px)를 따랐다. 계정에 'Design System' 아티팩트가 없어 쓰지 않았다.
 §2 는 코드 분석 에이전트 4명(기능 목록 3 + 제약 1)이 파일:줄로 확인한 것, §3 은 조사 에이전트 12명(제품별)의 결과를 메인(Fable)이 추린 것, §4~§6 은 시안 단계(Fable)에서 채웠다.
 
+> **이름 · 항목 분리는 v2.994 에서 바뀜 → `docs/design/server-menu-rename`**('가상화 플랫폼' → 'Virtual Machine(VM)'(vms · vcenters) + 새 항목 'Hypervisor'(hosts) · 마지막 본 탭 기억 삭제 · 저장 메뉴 별칭 tab:vcenters → tab:vms).
+
 ## 1. 요구(사용자 2026-11-07)
 
 > "vCenter, esxi 호스트, 가상화 서버... 이 3개의 가상화 플랫폼 메뉴를 1개로 합치고 싶어, 유명한 관련 솔루션 찾아서 시안 만들어줘"

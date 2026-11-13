@@ -80,7 +80,7 @@ export function cardMeta(k, c) {
   switch (k) {
     case 'datacenters': return '설정 › DataCenter 등록 수';
     case 'farms': return '설정 › 수집 Agent 등록 수';
-    case 'physical': { const p = c.physical; return `서버 분석 등록 · 인벤토리 수집 ${countText(p.inventoryRead)}대${p.inventoryStale ? ` · 오래된 인벤토리 ${countText(p.inventoryStale)}` : ''}${p.disabled ? ` · 비활성 ${countText(p.disabled)}대 제외` : ''}`; }
+    case 'physical': { const p = c.physical; return `Physical Server 등록 · 인벤토리 수집 ${countText(p.inventoryRead)}대${p.inventoryStale ? ` · 오래된 인벤토리 ${countText(p.inventoryStale)}` : ''}${p.disabled ? ` · 비활성 ${countText(p.disabled)}대 제외` : ''}`; }
     case 'virtual': { const v = c.virtual; return `구동 ${countText(v.poweredOn)}${v.templates ? ` · 템플릿 ${countText(v.templates)}` : ''} · vCenter ${countText(v.vcenters)}${v.vcentersPending ? ` (첫 수집 중 ${v.vcentersPending})` : ''}`; }
     case 'gpus': return gpuCardMeta(c.gpus);
     case 'storage': { const s = c.storage; if (s.totalBytes == null) return s.devices ? `용량을 읽은 장비 없음(${s.devices}대${s.stale ? ` · 오래된 값 ${s.stale}` : ''})` : '등록된 스토리지 없음';
@@ -110,7 +110,7 @@ export function powerTotalKw(d) {
  * v2.682 R3S-07: 원천 오류 문구 — 서버는 admin 이 아니면 원문 대신 true(실패 사실만)를 준다. 원문이 있으면 그대로,
  *   없으면 '사유는 관리자에게만 표시' 로 말한다. 실패가 없으면 ''.
  */
-const SOURCE_LABEL = { servers: '서버 전력', network: '네트워크(CVP)', storage: '스토리지', serversRegistry: '서버 분석 등록부' };
+const SOURCE_LABEL = { servers: '서버 전력', network: '네트워크(CVP)', storage: '스토리지', serversRegistry: 'Physical Server 등록부' };
 export function sourceErrorsText(errors) {
   const ent = Object.entries(errors || {}).filter(([, v]) => v);
   if (!ent.length) return '';

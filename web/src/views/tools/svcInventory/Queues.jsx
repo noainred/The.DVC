@@ -515,7 +515,7 @@ export function RulesView({ corp, corpRow, servicesOf, writable, op, busy, canFl
   const ORDER = [
     ['고정(수동)', '한 대씩 추가한 지정. 자동 판정과 다르면 드리프트로 검토 탭에 오릅니다.'],
     ['vCenter 폴더 규칙(VM 1순위)', '정확한 vSphere 위치(‘/ERP/prod’ 꼴)의 ‘/’ 경계 접두 · 가장 긴 접두가 이깁니다 · 대소문자를 구분합니다(vSphere 폴더 이름이 구분하므로 ‘/ERP’ 와 ‘/erp’ 는 다른 폴더). 매 수집 주기로 반영됩니다.'],
-    ['물리서버 폴더 규칙(베어메탈 1순위)', '특수 기능 › 물리서버 폴더의 경로(하위 폴더 포함 · 가장 긴 경로가 이깁니다). VM 의 vCenter 폴더 규칙과 같은 자리이고 스캔 라벨 · 이름 규칙보다 먼저입니다 — 다른 서비스로 가는 스캔 라벨 · 이름 규칙도 걸리면 검토 탭(규칙 겹침)에 오릅니다.'],
+    ['물리서버 폴더 규칙(베어메탈 1순위)', '특수 기능 › Bare Metal Server 의 폴더 경로(하위 폴더 포함 · 가장 긴 경로가 이깁니다). VM 의 vCenter 폴더 규칙과 같은 자리이고 스캔 라벨 · 이름 규칙보다 먼저입니다 — 다른 서비스로 가는 스캔 라벨 · 이름 규칙도 걸리면 검토 탭(규칙 겹침)에 오릅니다.'],
     ['스캔 엔트리 라벨(베어메탈)', 'iDRAC 스캔 엔트리의 서비스 라벨 = 서비스명 또는 별칭.'],
     ['vSphere 태그(선택)', '전역 카테고리를 정하고 법인이 켰을 때만. 태그가 여럿이면 서비스(이름·별칭)에 걸리는 값을 고르고, 둘 이상의 서비스에 걸리면 검토 탭에 올립니다. 태그를 못 읽은 VM 은 ‘확인 안 됨’ 입니다.'],
     ['이름 규칙(선택)', '접두·접미·포함 3종(정규식 아님). 적용 순서는 등록 순이 아닙니다 — 접두·접미가 포함보다 먼저, 같은 종류면 긴 값 먼저, 그다음 등록 순(규칙 표의 ‘N번째’). 대소문자는 구분하지 않습니다.'],
@@ -559,7 +559,7 @@ export function RulesView({ corp, corpRow, servicesOf, writable, op, busy, canFl
                   <div className="flex wrap gap">
                     <button type="button" className="logout-btn" style={btn} disabled={!svcs.length} title={svcs.length ? undefined : '먼저 이 법인에 서비스를 만드십시오'} onClick={() => setAdding('folder')}>＋ 폴더 규칙</button>
                     <button type="button" className="logout-btn" style={btn} disabled={!svcs.length} title={svcs.length ? undefined : '먼저 이 법인에 서비스를 만드십시오'} onClick={() => setAdding('name')}>＋ 이름 규칙</button>
-                    <button type="button" className="logout-btn" style={btn} disabled={!svcs.length || !(corpRow?.bmFolders || []).length} title={!(corpRow?.bmFolders || []).length ? '이 법인에 물리서버 폴더가 없습니다(특수 기능 › 물리서버 폴더)' : svcs.length ? undefined : '먼저 이 법인에 서비스를 만드십시오'} onClick={() => setAdding('bm')}>＋ 물리서버 폴더 규칙</button>
+                    <button type="button" className="logout-btn" style={btn} disabled={!svcs.length || !(corpRow?.bmFolders || []).length} title={!(corpRow?.bmFolders || []).length ? '이 법인에 물리서버 폴더가 없습니다(특수 기능 › Bare Metal Server)' : svcs.length ? undefined : '먼저 이 법인에 서비스를 만드십시오'} onClick={() => setAdding('bm')}>＋ 물리서버 폴더 규칙</button>
                   </div>
                 ) : null}
                 {adding === 'folder' ? (

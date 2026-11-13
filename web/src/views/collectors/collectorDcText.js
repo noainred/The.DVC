@@ -46,12 +46,12 @@ export function conflictChoices(match, dcs) {
     const n = Number(x.servers) || 0;
     return {
       key: `${x.vcenterId}|${x.serverDatacenterId}|${x.datacenterId}`,
-      text: `불일치 — 서버 ${n}대: 서버 분석은 ‘${a}’, 전력 분석 · 통합 인벤토리는 vCenter ‘${vc}’ 의 할당 법인 ‘${b}’ 로 봅니다. 한쪽으로 맞추세요.`,
+      text: `불일치 — 서버 ${n}대: Physical Server 는 ‘${a}’, 전력 분석 · 통합 인벤토리는 vCenter ‘${vc}’ 의 할당 법인 ‘${b}’ 로 봅니다. 한쪽으로 맞추세요.`,
       toCollector: { label: `수집 서버를 ‘${b}’ 로 매칭`, datacenterId: x.datacenterId },
       toVcenter: {
         label: `vCenter 를 ‘${a}’ 에 할당`, vcenterId: x.vcenterId, datacenterId: x.serverDatacenterId,
         // 반증 D6: 확인 창에 대상 vCenter 와 바뀌는 법인(B → A)을 밝힌다.
-        confirm: `vCenter ‘${vc}’ 의 법인 할당을 ‘${b}’ → ‘${a}’ 로 바꿀까요?\n\n그 vCenter 의 호스트 · VM · 서버가 모두 ‘${a}’ 로 집계됩니다(서버 분석 · 통합 서버 인벤토리 · 전력 분석 · 법인별 화면).`,
+        confirm: `vCenter ‘${vc}’ 의 법인 할당을 ‘${b}’ → ‘${a}’ 로 바꿀까요?\n\n그 vCenter 의 호스트 · VM · 서버가 모두 ‘${a}’ 로 집계됩니다(Physical Server · 통합 서버 인벤토리 · 전력 분석 · 법인별 화면).`,
       },
     };
   });
@@ -71,6 +71,6 @@ export function saveText(r, collectorId, dcs) {
   if (!r || r.ok === false) throw new Error(r?.reason || '법인 매칭을 저장하지 못했습니다.');
   if (!r.changed) return `'${collectorId}' — 이미 같은 매칭입니다.`;
   const id = r.collector?.datacenterId;
-  return id ? `'${collectorId}' 를 법인 '${nameOf(id, dcs)}' 로 매칭했습니다 — 서버 분석 · 통합 서버 인벤토리 · 전력 분석에 반영됩니다.`
+  return id ? `'${collectorId}' 를 법인 '${nameOf(id, dcs)}' 로 매칭했습니다 — Physical Server · 통합 서버 인벤토리 · 전력 분석에 반영됩니다.`
     : `'${collectorId}' 의 법인 매칭을 해제했습니다 — 이름 맞춤으로 판정합니다.`;
 }

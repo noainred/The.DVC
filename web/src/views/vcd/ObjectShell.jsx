@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { objTabsOf } from './objTabs.js';
+import { platformMenuLabel } from '../platform/platformText.js'; // v2.994: 경로 뿌리 = 이 화면(#/vcenters/…)에서 켜지는 사이드바 항목 이름
 
 export default function ObjectShell({ type, crumbs, onBack, backLabel, title, badges, sub, actions, tab, onTab, extraTabs = [], children }) {
   const base = objTabsOf(type);
@@ -11,7 +12,8 @@ export default function ObjectShell({ type, crumbs, onBack, backLabel, title, ba
     <div className="vcd-obj" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10, minWidth: 0 }}>
       {/* v2.915(가상화 플랫폼 · 브레드크럼 3단): 가상화 플랫폼 › vCenter › <vCenter 이름 · 누르면 vCenter 탭으로> › 클러스터/폴더 › <이름>. '← 돌아가기' 는 줄 끝에 남긴다. */}
       <nav className="vcd-crumb" aria-label="경로">
-        <a href="#/vcenters" style={{ color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'none' }}>가상화 플랫폼</a>
+        {/* v2.994: 뿌리 이름 '가상화 플랫폼' → 'Virtual Machine(VM)'(호스트 개체 보기도 주소가 #/vcenters/… 라 같은 항목이 켜진다) */}
+        <a href="#/vcenters" style={{ color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'none' }}>{platformMenuLabel('vcenters')}</a>
         <span aria-hidden="true">›</span>
         <a href="#/vcenters" style={{ color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'none' }}>vCenter</a>
         {crumbs.filter(Boolean).map((c, i) => (
