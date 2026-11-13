@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 현황</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+*{box-sizing:border-box}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.srch{display:flex;align-items:center;width:420px;height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#8b9bb4;font-size:12px;padding:0 10px}
+.sb{flex:1 0 236px;max-width:236px;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp{box-shadow:inset 3px 0 0 #22d3ee}
+.sb .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.teal{background:rgba(45,212,191,.14);color:#5eead4}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:7px;padding:11px 16px;color:#8b9bb4;font-weight:600;font-size:13.5px;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tabs .c{font-size:11.5px;font-weight:600;color:#8b9bb4}
+.tabs .adm{font-size:10.5px;font-weight:700;color:#aebbd0;border:1px solid #243049;border-radius:5px;padding:0 5px}
+.tile{padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+.tile .lb{font-size:12px;font-weight:600;color:#8b9bb4}
+.tile .val{font-size:30px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.tile .val small{font-size:13px;font-weight:600;color:#8b9bb4;margin-left:5px}
+.tile .sub{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:3px 12px}
+.tile .sub b{color:#e6edf6;font-weight:600}
+.bar{height:6px;background:#0f1626;border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px}
+.h2{font-size:14px;font-weight:700;margin:0}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{border:0;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;padding:6px 11px;cursor:pointer}
+.seg button.on{background:#1a2236;color:#e6edf6}
+.row{display:grid;grid-template-columns:84px 132px minmax(0,1fr) 96px 58px;gap:12px;align-items:center;padding:11px 18px;border-top:1px solid #1f2a40}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:9px 12px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+th.s::after{content:" ↕";font-weight:400}
+td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+.r{text-align:right}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;min-height:1320px">
+<header class="tb">
+  <span class="logo"><span class="v">V</span>The Davinci</span><span class="ver">v2.914.0</span>
+  <span class="srch" style="margin:0 auto">장비 · 기능 찾기 — 이름 · IP · 시리얼</span>
+  <span class="muted mono" style="font-size:11.5px">28/28 vCenter OK</span>
+  <span class="muted" style="font-size:12px">관리자</span>
+</header>
+<div style="display:flex;flex-wrap:wrap;flex:1">
+<nav class="sb" aria-label="포탈 메뉴">
+  <a href="#">Overview</a><a href="#">Summary</a>
+  <a href="#">서버<span class="n">6</span></a><a href="#">스토리지<span class="n">7</span></a>
+  <a href="#" class="grp">네트워크<span class="n">6</span></a>
+  <a href="#" class="sub">전체 네트워크 장비</a><a href="#" class="sub">가상화 네트워크</a><a href="#" class="sub">통신 지도</a><a href="#" class="sub">글로벌 네트워크 점검</a>
+  <a href="#" class="sub on">IP관리</a><a href="#" class="sub">Monitoring</a>
+  <a href="#">자원관리<span class="n">3</span></a><a href="#">자원 최적화<span class="n">2</span></a><a href="#">특수 기능</a><a href="#">이슈</a><a href="#">위키</a><a href="#">게시판</a><a href="#">설정<span class="n">2</span></a>
+</nav>
+<main style="flex:999 1 560px;min-width:0;padding:20px 28px 40px;display:flex;flex-direction:column;gap:18px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <h1 style="margin:0;font-size:20px;font-weight:800">IP 관리</h1>
+    <button type="button" class="btn">전체 법인 28곳 ▾</button>
+    <span class="muted" style="font-size:12px;margin-left:auto">대장 갱신 <span class="mono">14:52</span> · 마지막 스캔 보고 <span class="mono">14:40</span></span>
+    <button type="button" class="btn">내보내기</button>
+    <button type="button" class="btn primary">+ IP 등록 · 예약</button>
+  </div>
+
+  <nav class="tabs" aria-label="IP 관리 탭">
+    <a href="Main.dc.html" class="on" aria-current="page">현황</a>
+    <a href="Subnets.dc.html">대역 <span class="c">312</span></a>
+    <a href="Addresses.dc.html">IP 주소 <span class="c">8,047</span></a>
+    <a href="Scan.dc.html">스캔 <span class="adm">관리자</span></a>
+    <a href="Settings.dc.html">설정 <span class="adm">관리자</span></a>
+  </nav>
+
+  <section class="card" style="padding:18px 20px;display:flex;flex-direction:column;gap:10px" aria-label="주소 찾기">
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <label style="flex:1 1 420px;display:flex;align-items:center;gap:10px;height:48px;padding:0 14px;border:1px solid #3b82f6;border-radius:10px;background:#0a0e17">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+        <input type="text" aria-label="IP 주소 · 호스트명 · VM · 대역 검색" placeholder="IP 주소 · 호스트명 · VM 이름 · 대역(10.20.30.0/24)으로 찾기" style="flex:1;min-width:0;border:0;outline:0;background:transparent;color:#e6edf6;font:inherit;font-size:15px">
+      </label>
+      <button type="button" class="btn primary" style="min-height:48px;padding:0 20px;font-size:14px">찾기</button>
+      <a href="Subnets.dc.html" class="btn" style="min-height:48px;padding:0 16px;font-size:13px">빈 IP 찾기</a>
+    </div>
+    <div class="muted" style="font-size:12px;display:flex;flex-wrap:wrap;gap:6px 14px">
+      <span>주소를 넣으면 그 IP 의 상세가, 대역을 넣으면 그 대역이 바로 열립니다.</span>
+      <span>최근 찾은 것: <a href="#" class="mono">10.20.30.47</a> · <a href="#">web-kr1-023</a> · <a href="#" class="mono">10.31.4.0/24</a></span>
+    </div>
+  </section>
+
+  <section style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px" aria-label="요약">
+    <div class="card tile">
+      <span class="lb">사용 중 주소</span>
+      <span class="val">8,047</span>
+      <span class="sub"><span>VM <b>6,912</b></span><span>물리 서버 <b>658</b></span><span>스캔으로만 확인 <b>477</b></span></span>
+    </div>
+    <div class="card tile">
+      <span class="lb">대역(/24)</span>
+      <span class="val">312<small>평균 사용률 26%</small></span>
+      <div class="bar" aria-hidden="true"><i style="width:26%;background:#3b82f6"></i></div>
+      <span class="sub"><span>80% 이상 <b>9</b></span><span>정책 적용 <b>41</b></span></span>
+    </div>
+    <div class="card tile" style="border-color:rgba(239,68,68,.45)">
+      <span class="lb">조치 필요</span>
+      <span class="val" style="color:#fca5a5">23</span>
+      <span class="sub"><span>충돌 <b>4</b></span><span>중복 <b>7</b></span><span>예약 만료·임박 <b>12</b></span></span>
+    </div>
+    <div class="card tile">
+      <span class="lb">스캔 수집</span>
+      <span class="val">27<small>/ 29 에이전트 정상</small></span>
+      <span class="sub"><span>보고 늦음 <b style="color:#fcd34d">1</b></span><span>꺼짐 <b>1</b></span></span>
+    </div>
+  </section>
+
+  <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:14px;align-items:start">
+    <section class="card" style="overflow:hidden" aria-label="조치 필요">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:14px 18px">
+        <h2 class="h2">조치 필요</h2>
+        <span class="muted" style="font-size:12px">23건</span>
+        <span class="seg" style="margin-left:auto">
+          <button type="button" class="on">전체 23</button><button type="button">충돌 4</button><button type="button">중복 7</button><button type="button">예약 12</button>
+        </span>
+      </div>
+      <div class="row"><span><span class="tag crit">충돌</span></span><a href="Addresses.dc.html" class="mono" style="font-weight:600;text-decoration:none">10.20.30.47</a><span>VC-KR1 <b>web-kr1-023</b> 과 VC-KR2 <b>legacy-app-02</b> 가 같은 주소를 씁니다</span><span class="muted" style="font-size:12px">3시간 전부터</span><a href="Addresses.dc.html" class="btn sm">열기</a></div>
+      <div class="row"><span><span class="tag crit">충돌</span></span><a href="#" class="mono" style="font-weight:600;text-decoration:none">10.31.4.12</a><span>VC-PL1 <b>db-pl1-004</b> 와 VC-DE1 <b>db-de1-011</b> 이 같은 주소를 씁니다</span><span class="muted" style="font-size:12px">어제부터</span><a href="#" class="btn sm">열기</a></div>
+      <div class="row"><span><span class="tag crit">중복</span></span><a href="#" class="mono" style="font-weight:600;text-decoration:none">10.20.31.105</a><span>VC-KR1 안에서 VM 2대 — <b>app-kr1-051</b> · <b>app-kr1-051-clone</b></span><span class="muted" style="font-size:12px">2일 전부터</span><a href="#" class="btn sm">열기</a></div>
+      <div class="row"><span><span class="tag crit">중복</span></span><a href="#" class="mono" style="font-weight:600;text-decoration:none">172.16.40.8</a><span>VC-US1 안에서 VM 3대가 같은 주소를 보고합니다</span><span class="muted" style="font-size:12px">5일 전부터</span><a href="#" class="btn sm">열기</a></div>
+      <div class="row"><span><span class="tag warn">예약 만료</span></span><a href="#" class="mono" style="font-weight:600;text-decoration:none">10.20.30.210</a><span>예약 ‘신규 DB 이중화’ 가 11-10 에 끝났습니다 · 담당 infra-kr</span><span class="muted" style="font-size:12px">3일 지남</span><a href="#" class="btn sm">열기</a></div>
+      <div class="row"><span><span class="tag warn">예약 임박</span></span><a href="#" class="mono" style="font-weight:600;text-decoration:none">10.50.2.15</a><span>예약 ‘랙 증설 2차’ 가 11-20 에 끝납니다 · 담당 dc-us</span><span class="muted" style="font-size:12px">7일 남음</span><a href="#" class="btn sm">열기</a></div>
+      <div class="row"><span><span class="tag warn">예약 임박</span></span><a href="#" class="mono" style="font-weight:600;text-decoration:none">10.50.2.16</a><span>예약 ‘랙 증설 2차’ 가 11-20 에 끝납니다 · 담당 dc-us</span><span class="muted" style="font-size:12px">7일 남음</span><a href="#" class="btn sm">열기</a></div>
+      <div style="padding:11px 18px;border-top:1px solid #1f2a40;font-size:12px" class="muted">23건 중 7건 · <a href="Addresses.dc.html">IP 주소 탭에서 전부 보기</a></div>
+    </section>
+
+    <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+      <section class="card" style="padding:14px 18px;display:flex;flex-direction:column;gap:11px" aria-label="여유가 적은 대역">
+        <div style="display:flex;align-items:baseline;gap:8px"><h2 class="h2">여유가 적은 대역</h2><span class="muted" style="font-size:12px;margin-left:auto">80% 이상 9개</span></div>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 70px;gap:5px 10px;align-items:center;font-size:12.5px">
+          <a href="Subnets.dc.html" class="mono" style="text-decoration:none">10.20.30.0/24 <span class="muted" style="font-family:inherit">VC-KR1</span></a><span class="mono r">241/254</span>
+          <div class="bar" style="grid-column:1 / 3" aria-hidden="true"><i style="width:95%;background:#ef4444"></i></div>
+          <a href="#" class="mono" style="text-decoration:none">10.31.4.0/24 <span class="muted">VC-PL1</span></a><span class="mono r">233/254</span>
+          <div class="bar" style="grid-column:1 / 3" aria-hidden="true"><i style="width:92%;background:#ef4444"></i></div>
+          <a href="#" class="mono" style="text-decoration:none">172.16.40.0/24 <span class="muted">VC-US1</span></a><span class="mono r">221/254</span>
+          <div class="bar" style="grid-column:1 / 3" aria-hidden="true"><i style="width:87%;background:#f59e0b"></i></div>
+          <a href="#" class="mono" style="text-decoration:none">10.50.2.0/24 <span class="muted">VC-US2</span></a><span class="mono r">214/254</span>
+          <div class="bar" style="grid-column:1 / 3" aria-hidden="true"><i style="width:84%;background:#f59e0b"></i></div>
+          <a href="#" class="mono" style="text-decoration:none">10.20.31.0/24 <span class="muted">VC-KR1</span></a><span class="mono r">208/254</span>
+          <div class="bar" style="grid-column:1 / 3" aria-hidden="true"><i style="width:82%;background:#f59e0b"></i></div>
+        </div>
+        <a href="Subnets.dc.html" style="font-size:12px">대역 탭에서 사용률 순으로 보기</a>
+      </section>
+
+      <section class="card" style="padding:14px 18px;display:flex;flex-direction:column;gap:9px" aria-label="점검 항목">
+        <div style="display:flex;align-items:baseline;gap:8px"><h2 class="h2">점검 항목</h2><span class="muted" style="font-size:12px;margin-left:auto">주의 6</span></div>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px 10px;font-size:12.5px">
+          <span>이름 · DNS 불일치</span><b class="mono" style="color:#fcd34d">14</b>
+          <span>미등록 주소 — 스캔에만 응답</span><b class="mono" style="color:#fcd34d">477</b>
+          <span>회수 가능 주소</span><b class="mono" style="color:#fcd34d">126</b>
+          <span>오래된 주소 — 30일 넘게 무응답</span><b class="mono" style="color:#fcd34d">38</b>
+          <span>위험 포트 노출</span><b class="mono" style="color:#fcd34d">11</b>
+          <span>중복 호스트명</span><b class="mono" style="color:#fcd34d">9</b>
+          <span>신규 주소 — 최근 7일</span><b class="mono">64</b>
+        </div>
+        <a href="#" style="font-size:12px">점검 항목 전부 보기</a>
+      </section>
+    </div>
+  </div>
+
+  <section class="card" style="overflow:hidden" aria-label="법인별 현황">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 18px">
+      <h2 class="h2">법인별</h2><span class="muted" style="font-size:12px">법인 = vCenter = 스캔 에이전트 한 단위 · 행을 누르면 그 법인의 대역으로</span>
+    </div>
+    <div style="overflow-x:auto">
+    <table style="min-width:860px">
+      <thead><tr><th class="s">법인</th><th class="s r">사용 중 주소</th><th class="s r">대역</th><th class="s" style="width:220px">평균 사용률</th><th class="s r">조치 필요</th><th class="s">스캔 에이전트</th><th class="s">마지막 스캔 보고</th></tr></thead>
+      <tbody>
+        <sc-for list="{{corps}}" as="c" hint-placeholder-count="6">
+        <tr>
+          <td><a href="Subnets.dc.html" style="font-weight:600;color:#e6edf6;text-decoration:none">{{c.name}}</a> <span class="muted">{{c.site}}</span></td>
+          <td class="r mono">{{c.ips}}</td>
+          <td class="r mono">{{c.nets}}</td>
+          <td><span style="display:flex;align-items:center;gap:8px"><span class="bar" style="flex:1"><i style="{{c.barStyle}}"></i></span><span class="mono" style="width:34px;text-align:right">{{c.util}}</span></span></td>
+          <td class="r"><span class="{{c.issCls}}">{{c.iss}}</span></td>
+          <td class="muted">{{c.agent}}</td>
+          <td><span class="{{c.scanCls}}">{{c.scan}}</span> <span class="muted mono" style="font-size:11.5px">{{c.at}}</span></td>
+        </tr>
+        </sc-for>
+      </tbody>
+    </table>
+    </div>
+    <div style="padding:11px 18px;font-size:12px" class="muted">28곳 중 6곳 · <a href="#">전부 보기</a></div>
+  </section>
+
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mk = (name, site, ips, nets, util, iss, agent, scan, at) => ({
+      name, site, ips, nets, util: util + '%', iss: iss ? String(iss) : '—', agent, scan, at,
+      barStyle: 'width:' + util + '%;background:' + (util >= 80 ? '#ef4444' : util >= 60 ? '#f59e0b' : '#3b82f6'),
+      issCls: iss ? 'tag crit' : 'muted',
+      scanCls: scan === '정상' ? 'tag ok' : scan === '보고 늦음' ? 'tag warn' : 'tag gray',
+    });
+    return {
+      corps: [
+        mk('VC-KR1', '서울', '1,204', 38, 41, 6, 'edge-kr1', '정상', '14:40'),
+        mk('VC-US1', '미국 동부', '842', 31, 33, 4, 'edge-us1', '정상', '14:31'),
+        mk('VC-PL1', '폴란드', '611', 22, 35, 3, 'edge-pl1', '보고 늦음', '11:02'),
+        mk('VC-DE1', '독일', '574', 19, 29, 1, 'edge-de1', '정상', '14:36'),
+        mk('VC-KR2', '부산', '388', 14, 24, 1, '이 포탈에서 직접', '정상', '14:38'),
+        mk('VC-BR1', '브라질', '201', 9, 18, 0, 'edge-br1', '꺼짐', '—'),
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

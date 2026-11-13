@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 대역(주소 맵)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+*{box-sizing:border-box}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.srch{display:flex;align-items:center;width:420px;height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#8b9bb4;font-size:12px;padding:0 10px}
+.sb{flex:1 0 236px;max-width:236px;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp{box-shadow:inset 3px 0 0 #22d3ee}
+.sb .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;min-width:0}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.teal{background:rgba(45,212,191,.14);color:#5eead4}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:7px;padding:11px 16px;color:#8b9bb4;font-weight:600;font-size:13.5px;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tabs .c{font-size:11.5px;font-weight:600;color:#8b9bb4}
+.tabs .adm{font-size:10.5px;font-weight:700;color:#aebbd0;border:1px solid #243049;border-radius:5px;padding:0 5px}
+.bar{height:5px;background:#0f1626;border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px}
+.h2{font-size:14px;font-weight:700;margin:0}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg a,.seg button{border:0;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;padding:6px 12px;cursor:pointer;text-decoration:none}
+.seg .on{background:#1a2236;color:#e6edf6}
+.chip{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:999px;border:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.chip.on{border-color:#3b82f6;color:#e6edf6;background:rgba(59,130,246,.14)}
+.net{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;padding:10px 14px;border-top:1px solid #1f2a40;text-decoration:none;color:#e6edf6}
+.net.on{background:#1a2236;box-shadow:inset 3px 0 0 #3b82f6}
+.st{display:flex;flex-direction:column;gap:2px;padding:0 18px;border-left:1px solid #1f2a40}
+.st b{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1}
+.st span{font-size:11.5px;color:#8b9bb4}
+.map{display:grid;grid-template-columns:repeat(16,minmax(0,1fr));gap:3px}
+.cell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:5px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;border:1px solid transparent;padding:0;cursor:pointer}
+.cell.vm{background:rgba(59,130,246,.42);color:#eff6ff}
+.cell.bm{background:rgba(168,85,247,.45);color:#faf5ff}
+.cell.scan{background:rgba(45,212,191,.30);color:#ccfbf1}
+.cell.rsv{background:rgba(245,158,11,.16);color:#fcd34d;border-color:rgba(245,158,11,.55)}
+.cell.dhcp{background:rgba(139,155,180,.16);color:#aebbd0}
+.cell.bad{background:#ef4444;color:#fff;font-weight:700}
+.cell.free{background:transparent;color:#8b9bb4;border-color:#243049;border-style:dashed}
+.cell.nw{background:#0f1626;color:#8b9bb4}
+.cell.sel{outline:2px solid #fff;outline-offset:1px}
+.lg{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4}
+.lg i{width:12px;height:12px;border-radius:3px;display:inline-block;border:1px solid transparent}
+.kv{display:grid;grid-template-columns:76px minmax(0,1fr);gap:7px 10px;font-size:12.5px}
+.kv dt{color:#8b9bb4;margin:0}.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:8px 12px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+th.s::after{content:" ↕";font-weight:400}
+td{padding:8px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;min-height:1320px">
+<header class="tb">
+  <span class="logo"><span class="v">V</span>The Davinci</span><span class="ver">v2.914.0</span>
+  <span class="srch" style="margin:0 auto">장비 · 기능 찾기 — 이름 · IP · 시리얼</span>
+  <span class="muted mono" style="font-size:11.5px">28/28 vCenter OK</span>
+  <span class="muted" style="font-size:12px">관리자</span>
+</header>
+<div style="display:flex;flex-wrap:wrap;flex:1">
+<nav class="sb" aria-label="포탈 메뉴">
+  <a href="#">Overview</a><a href="#">Summary</a>
+  <a href="#">서버<span class="n">6</span></a><a href="#">스토리지<span class="n">7</span></a>
+  <a href="#" class="grp">네트워크<span class="n">6</span></a>
+  <a href="#" class="sub">전체 네트워크 장비</a><a href="#" class="sub">가상화 네트워크</a><a href="#" class="sub">통신 지도</a><a href="#" class="sub">글로벌 네트워크 점검</a>
+  <a href="#" class="sub on">IP관리</a><a href="#" class="sub">Monitoring</a>
+  <a href="#">자원관리<span class="n">3</span></a><a href="#">자원 최적화<span class="n">2</span></a><a href="#">특수 기능</a><a href="#">이슈</a><a href="#">위키</a><a href="#">게시판</a><a href="#">설정<span class="n">2</span></a>
+</nav>
+<main style="flex:999 1 560px;min-width:0;padding:20px 28px 40px;display:flex;flex-direction:column;gap:16px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <h1 style="margin:0;font-size:20px;font-weight:800">IP 관리</h1>
+    <button type="button" class="btn">전체 법인 28곳 ▾</button>
+    <span class="muted" style="font-size:12px;margin-left:auto">대장 갱신 <span class="mono">14:52</span> · 마지막 스캔 보고 <span class="mono">14:40</span></span>
+    <button type="button" class="btn">내보내기</button>
+    <button type="button" class="btn primary">+ IP 등록 · 예약</button>
+  </div>
+
+  <nav class="tabs" aria-label="IP 관리 탭">
+    <a href="Main.dc.html">현황</a>
+    <a href="Subnets.dc.html" class="on" aria-current="page">대역 <span class="c">312</span></a>
+    <a href="Addresses.dc.html">IP 주소 <span class="c">8,047</span></a>
+    <a href="Scan.dc.html">스캔 <span class="adm">관리자</span></a>
+    <a href="Settings.dc.html">설정 <span class="adm">관리자</span></a>
+  </nav>
+
+  <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+
+    <section class="card" style="flex:1 1 300px;max-width:340px;overflow:hidden" aria-label="대역 목록">
+      <div style="padding:12px 14px;display:flex;flex-direction:column;gap:9px">
+        <input class="input" type="text" aria-label="대역 · 법인 검색" placeholder="대역 · 법인 찾기">
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <button type="button" class="chip on">전체 312</button><button type="button" class="chip">80% 이상 9</button><button type="button" class="chip">정책 있음 41</button><button type="button" class="chip">스캔 대상 96</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px" class="muted"><span>정렬</span><button type="button" class="btn sm">사용률 높은 순 ▾</button><span style="margin-left:auto">312개 중 12개</span></div>
+      </div>
+      <sc-for list="{{nets}}" as="n" hint-placeholder-count="12">
+      <a href="#" class="{{n.cls}}">
+        <span class="mono" style="font-weight:600">{{n.cidr}}</span><span class="mono muted" style="font-size:11.5px">{{n.used}}</span>
+        <span class="bar" style="grid-column:1 / 3"><i style="{{n.barStyle}}"></i></span>
+        <span class="muted" style="font-size:11.5px;grid-column:1 / 3">{{n.meta}}</span>
+      </a>
+      </sc-for>
+      <div style="padding:10px 14px;border-top:1px solid #1f2a40;font-size:12px" class="muted">아래로 내리면 이어서 불러옵니다</div>
+    </section>
+
+    <section style="flex:999 1 520px;min-width:0;display:flex;flex-direction:column;gap:14px" aria-label="고른 대역">
+
+      <div class="card" style="padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 0">
+        <div style="display:flex;flex-direction:column;gap:4px;padding-right:18px;min-width:0">
+          <span class="mono" style="font-size:20px;font-weight:700">10.20.30.0/24</span>
+          <span class="muted" style="font-size:12px">VC-KR1 · 서울 1센터 · 스캔 edge-kr1 · 마지막 스캔 <span class="mono">14:40</span></span>
+        </div>
+        <div class="st"><b>{{cnt.used}}</b><span>사용 중</span></div>
+        <div class="st"><b>{{cnt.rsv}}</b><span>예약</span></div>
+        <div class="st"><b>{{cnt.dhcp}}</b><span>DHCP</span></div>
+        <div class="st"><b style="color:#86efac">{{cnt.free}}</b><span>빈 주소</span></div>
+        <div class="st"><b style="color:#fca5a5">{{cnt.bad}}</b><span>문제</span></div>
+        <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn">대역 정책</button>
+          <button type="button" class="btn">엑셀</button>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+        <span class="seg" role="group" aria-label="보기">
+          <a href="Subnets.dc.html" class="on">주소 맵</a><a href="Ledger.dc.html">대장(표)</a><a href="#">시간대별</a>
+        </span>
+        <span class="lg"><i style="background:rgba(59,130,246,.42)"></i>VM {{cnt.vm}}</span>
+        <span class="lg"><i style="background:rgba(168,85,247,.45)"></i>물리 서버 {{cnt.bm}}</span>
+        <span class="lg"><i style="background:rgba(45,212,191,.30)"></i>스캔으로만 확인 {{cnt.scan}}</span>
+        <span class="lg"><i style="background:rgba(245,158,11,.16);border-color:rgba(245,158,11,.55)"></i>예약 {{cnt.rsv}}</span>
+        <span class="lg"><i style="background:rgba(139,155,180,.16)"></i>DHCP {{cnt.dhcp}}</span>
+        <span class="lg"><i style="background:#ef4444"></i>문제 {{cnt.bad}}</span>
+        <span class="lg"><i style="border:1px dashed #243049"></i>빈 주소 {{cnt.free}}</span>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+        <div class="card" style="flex:999 1 420px;padding:14px" aria-label="주소 맵 — 칸 하나가 주소 하나">
+          <div class="map">
+            <sc-for list="{{cells}}" as="c" hint-placeholder-count="256"><button type="button" class="{{c.cls}}" aria-label="{{c.label}}">{{c.n}}</button></sc-for>
+          </div>
+        </div>
+
+        <aside class="card" style="flex:1 1 240px;max-width:280px;padding:14px 16px;display:flex;flex-direction:column;gap:12px" aria-label="고른 주소">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="mono" style="font-size:16px;font-weight:700">10.20.30.47</span><span class="tag crit">충돌</span></div>
+          <dl class="kv" style="margin:0">
+            <dt>자원</dt><dd><b>web-kr1-023</b> <span class="muted">VM · 켜짐</span></dd>
+            <dt>같은 주소</dt><dd>VC-KR2 <b>legacy-app-02</b></dd>
+            <dt>확인</dt><dd>vCenter + 스캔 · <span class="mono">14:40</span></dd>
+            <dt>관리</dt><dd><span class="tag teal">고정할당</span></dd>
+            <dt>용도</dt><dd>웹 프런트</dd>
+            <dt>요청자</dt><dd>web-team</dd>
+            <dt>할당자</dt><dd>ops-kr</dd>
+            <dt>메모</dt><dd>1호기 · 배포 창구</dd>
+          </dl>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <a href="Addresses.dc.html" class="btn sm primary">상세 열기</a>
+            <button type="button" class="btn sm">관리 · 메모 편집</button>
+          </div>
+          <div style="border-top:1px solid #1f2a40;padding-top:12px;display:flex;flex-direction:column;gap:8px">
+            <span style="font-size:12px;font-weight:700">이 대역의 정책</span>
+            <span style="font-size:12px"><span class="mono">.1 – .9</span> <span class="tag warn">예약</span> <span class="muted">네트워크 장비</span></span>
+            <span style="font-size:12px"><span class="mono">.200 – .254</span> <span class="tag gray">DHCP</span></span>
+          </div>
+        </aside>
+      </div>
+
+      <div class="card" style="padding:14px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px" aria-label="빈 주소">
+        <h2 class="h2">빈 주소 {{cnt.free}}개</h2>
+        <span class="muted" style="font-size:12px">스캔에도 응답이 없고 예약 · 정책에도 없는 주소</span>
+        <span style="flex-basis:100%;height:0"></span>
+        <sc-for list="{{frees}}" as="f" hint-placeholder-count="13"><span class="mono tag gray">.{{f}}</span></sc-for>
+        <button type="button" class="btn sm primary" style="margin-left:auto">.17 예약하기</button>
+      </div>
+
+      <div class="card" style="overflow:hidden" aria-label="대장 미리 보기">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 18px">
+          <h2 class="h2">대장</h2><span class="muted" style="font-size:12px">맵에서 고른 주소 앞뒤 · 254행 전체는 대장(표) 보기</span>
+          <a href="Ledger.dc.html" class="btn sm" style="margin-left:auto">대장(표)으로 보기</a>
+        </div>
+        <div style="overflow-x:auto">
+        <table style="min-width:720px">
+          <thead><tr><th class="s">주소</th><th class="s">상태</th><th class="s">호스트명 · 자원</th><th class="s">용도</th><th class="s">요청자</th><th class="s">할당자</th><th class="s">관리</th><th class="s">메모</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">.45</td><td><span class="tag blue">사용 중</span></td><td><b>web-kr1-021</b> <span class="muted">VM</span></td><td>웹 프런트</td><td>web-team</td><td>ops-kr</td><td><span class="tag teal">고정할당</span></td><td class="muted">—</td></tr>
+            <tr><td class="mono">.46</td><td><span class="tag blue">사용 중</span></td><td><b>web-kr1-022</b> <span class="muted">VM</span></td><td>웹 프런트</td><td>web-team</td><td>ops-kr</td><td><span class="tag teal">고정할당</span></td><td class="muted">—</td></tr>
+            <tr style="background:rgba(239,68,68,.08)"><td class="mono"><b>.47</b></td><td><span class="tag crit">충돌</span></td><td><b>web-kr1-023</b> <span class="muted">VM · VC-KR2 legacy-app-02 와 겹침</span></td><td>웹 프런트</td><td>web-team</td><td>ops-kr</td><td><span class="tag teal">고정할당</span></td><td>1호기 · 배포 창구</td></tr>
+            <tr><td class="mono">.48</td><td><span class="tag blue">사용 중</span></td><td><b>web-kr1-024</b> <span class="muted">VM</span></td><td>웹 프런트</td><td>web-team</td><td>net-admin</td><td class="muted">—</td><td class="muted">—</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+
+    </section>
+  </div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const NAME = { vm: 'VM', bm: '물리 서버', scan: '스캔으로만 확인', rsv: '예약', dhcp: 'DHCP', bad: '문제', free: '빈 주소', nw: '네트워크 주소' };
+    const kindOf = (i) => {
+      if (i === 0 || i === 255) return 'nw';
+      if (i <= 9) return 'rsv';
+      if (i >= 200) return 'dhcp';
+      if (i === 47 || i === 131) return 'bad';
+      if (i % 17 === 0 || i === 58 || i === 149) return 'free';
+      if (i % 23 === 5) return 'scan';
+      if (i % 29 === 3) return 'bm';
+      return 'vm';
+    };
+    const cnt = { vm: 0, bm: 0, scan: 0, rsv: 0, dhcp: 0, bad: 0, free: 0, nw: 0 };
+    const cells = []; const frees = [];
+    for (let i = 0; i < 256; i++) {
+      const k = kindOf(i); cnt[k]++;
+      if (k === 'free') frees.push(i);
+      cells.push({ n: i, cls: 'cell ' + k + (i === 47 ? ' sel' : ''), label: '10.20.30.' + i + ' ' + NAME[k] });
+    }
+    cnt.used = cnt.vm + cnt.bm + cnt.scan + cnt.bad;
+    const net = (cidr, used, corp, extra, on) => {
+      const pct = Math.round(used / 254 * 100);
+      return { cidr, used: used + '/254', meta: corp + ' · ' + pct + '%' + (extra ? ' · ' + extra : ''), cls: on ? 'net on' : 'net',
+        barStyle: 'width:' + pct + '%;background:' + (pct >= 90 ? '#ef4444' : pct >= 80 ? '#f59e0b' : '#3b82f6') };
+    };
+    return {
+      cells, frees, cnt,
+      nets: [
+        net('10.20.30.0/24', 241, 'VC-KR1', '정책 2 · 문제 2', true),
+        net('10.31.4.0/24', 233, 'VC-PL1', '문제 1'),
+        net('172.16.40.0/24', 221, 'VC-US1', '문제 1'),
+        net('10.50.2.0/24', 214, 'VC-US2', '정책 1'),
+        net('10.20.31.0/24', 208, 'VC-KR1', '문제 1'),
+        net('10.31.5.0/24', 187, 'VC-PL1', ''),
+        net('10.40.8.0/24', 173, 'VC-DE1', '정책 1'),
+        net('10.20.32.0/24', 151, 'VC-KR1', ''),
+        net('10.60.1.0/24', 118, 'VC-KR2', ''),
+        net('172.16.41.0/24', 96, 'VC-US1', ''),
+        net('10.70.3.0/24', 51, 'VC-BR1', '스캔 꺼짐'),
+        net('10.20.33.0/24', 22, 'VC-KR1', ''),
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

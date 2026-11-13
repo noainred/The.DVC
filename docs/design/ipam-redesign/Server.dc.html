@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 서버 보기(서비스 태그 기준)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+*{box-sizing:border-box}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.srch{display:flex;align-items:center;width:420px;height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#8b9bb4;font-size:12px;padding:0 10px}
+.sb{flex:1 0 236px;max-width:236px;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp{box-shadow:inset 3px 0 0 #22d3ee}
+.sb .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.btn.ghost{background:transparent}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;min-width:0}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.teal{background:rgba(45,212,191,.14);color:#5eead4}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:7px;padding:11px 16px;color:#8b9bb4;font-weight:600;font-size:13.5px;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tabs .c{font-size:11.5px;font-weight:600;color:#8b9bb4}
+.tabs .adm{font-size:10.5px;font-weight:700;color:#aebbd0;border:1px solid #243049;border-radius:5px;padding:0 5px}
+.h2{font-size:14px;font-weight:700;margin:0}
+.st{display:flex;flex-direction:column;gap:2px;padding:0 20px;border-left:1px solid #1f2a40}
+.st b{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1}
+.st span{font-size:11.5px;color:#8b9bb4}
+.kv{display:grid;grid-template-columns:86px minmax(0,1fr);gap:8px 10px;font-size:12.5px;margin:0}
+.kv dt{color:#8b9bb4;margin:0}.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:9px 12px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+th.s::after{content:" ↕";font-weight:400}
+td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+tr.hit td{background:#1a2236}
+tr.hit td:first-child{box-shadow:inset 3px 0 0 #3b82f6}
+tr.bad td{background:rgba(239,68,68,.07)}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;min-height:1320px">
+<header class="tb">
+  <span class="logo"><span class="v">V</span>The Davinci</span><span class="ver">v2.914.0</span>
+  <span class="srch" style="margin:0 auto">장비 · 기능 찾기 — 이름 · IP · 시리얼</span>
+  <span class="muted mono" style="font-size:11.5px">28/28 vCenter OK</span>
+  <span class="muted" style="font-size:12px">관리자</span>
+</header>
+<div style="display:flex;flex-wrap:wrap;flex:1">
+<nav class="sb" aria-label="포탈 메뉴">
+  <a href="#">Overview</a><a href="#">Summary</a>
+  <a href="#">서버<span class="n">6</span></a><a href="#">스토리지<span class="n">7</span></a>
+  <a href="#" class="grp">네트워크<span class="n">6</span></a>
+  <a href="#" class="sub">전체 네트워크 장비</a><a href="#" class="sub">가상화 네트워크</a><a href="#" class="sub">통신 지도</a><a href="#" class="sub">글로벌 네트워크 점검</a>
+  <a href="#" class="sub on">IP관리</a><a href="#" class="sub">Monitoring</a>
+  <a href="#">자원관리<span class="n">3</span></a><a href="#">자원 최적화<span class="n">2</span></a><a href="#">특수 기능</a><a href="#">이슈</a><a href="#">위키</a><a href="#">게시판</a><a href="#">설정<span class="n">2</span></a>
+</nav>
+<main style="flex:999 1 560px;min-width:0;padding:20px 28px 40px;display:flex;flex-direction:column;gap:16px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <h1 style="margin:0;font-size:20px;font-weight:800">IP 관리</h1>
+    <button type="button" class="btn">전체 법인 28곳 ▾</button>
+    <span class="muted" style="font-size:12px;margin-left:auto">대장 갱신 <span class="mono">14:52</span> · 마지막 스캔 보고 <span class="mono">14:40</span></span>
+    <button type="button" class="btn">내보내기</button>
+    <button type="button" class="btn primary">+ IP 등록 · 예약</button>
+  </div>
+
+  <nav class="tabs" aria-label="IP 관리 탭">
+    <a href="Main.dc.html">현황</a>
+    <a href="Subnets.dc.html">대역 <span class="c">312</span></a>
+    <a href="Addresses.dc.html" class="on" aria-current="page">IP 주소 <span class="c">8,047</span></a>
+    <a href="Scan.dc.html">스캔 <span class="adm">관리자</span></a>
+    <a href="Settings.dc.html">설정 <span class="adm">관리자</span></a>
+  </nav>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+    <a href="Addresses.dc.html" class="btn ghost sm">‹ IP 주소</a>
+    <span><span class="mono" style="font-weight:600">10.20.30.12</span> 를 쓰는 서버</span>
+    <input class="input mono" type="text" aria-label="서비스 태그 또는 IP 로 다른 서버 찾기" placeholder="서비스 태그 · IP 로 다른 서버 찾기" style="margin-left:auto;width:260px">
+  </div>
+
+  <section class="card" style="padding:18px 20px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 0" aria-label="서버">
+    <div style="display:flex;flex-direction:column;gap:5px;padding-right:20px;min-width:0">
+      <span class="muted" style="font-size:11.5px;font-weight:600">서비스 태그</span>
+      <span style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="mono" style="font-size:24px;font-weight:700;letter-spacing:.04em">7XK2M93</span><span class="tag purple">ESXi 호스트</span></span>
+      <span class="muted" style="font-size:12px"><b style="color:#e6edf6">esx-kr1-07</b> · PowerEdge R760 · VC-KR1 · 서울 1센터 · 클러스터 kr1-prod-a</span>
+    </div>
+    <div class="st"><b>6</b><span>서버가 쓰는 IP</span></div>
+    <div class="st"><b>23</b><span>VM 18대의 IP</span></div>
+    <div class="st"><b style="color:#fca5a5">3</b><span>이름 · DNS 불일치</span></div>
+    <div class="st"><b>2</b><span>DNS 기록 없음</span></div>
+    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn">호스트 개체 보기</button>
+      <button type="button" class="btn">iDRAC 정보</button>
+      <button type="button" class="btn">엑셀</button>
+    </div>
+  </section>
+
+  <div class="muted" style="font-size:12px">이름 확인 — 설정한 이름(호스트명 · VM 이름 · 직접 넣은 이름)과 그 IP 를 DNS 로 조회한 이름의 첫 마디를 대소문자 구분 없이 견줍니다. 조회는 그 법인 엣지가 자기 DNS 로 합니다.</div>
+
+  <section class="card" style="overflow:hidden" aria-label="서버가 직접 쓰는 IP">
+    <div style="display:flex;align-items:center;gap:10px;padding:13px 18px">
+      <h2 class="h2">서버가 직접 쓰는 IP</h2><span class="muted" style="font-size:12px">6개 · iDRAC 과 ESXi 인터페이스</span>
+    </div>
+    <div style="overflow-x:auto">
+    <table style="min-width:940px">
+      <thead><tr><th class="s">역할</th><th class="s">IP 주소</th><th class="s">대역</th><th class="s">설정한 이름</th><th class="s">DNS 조회 결과</th><th class="s">이름 확인</th><th class="s">출처</th><th class="s">마지막 확인</th></tr></thead>
+      <tbody>
+        <tr><td><b>iDRAC</b></td><td class="mono"><a href="#" style="text-decoration:none">10.20.8.107</a></td><td class="mono muted">10.20.8.0/24</td><td>idrac-kr1-07</td><td class="mono">idrac-kr1-07.kr1.example</td><td><span class="tag ok">일치</span></td><td class="muted">iDRAC 등록</td><td class="mono muted">14:35</td></tr>
+        <tr class="hit"><td><b>ESXi 관리</b> <span class="muted">vmk0</span></td><td class="mono"><a href="#" style="text-decoration:none;font-weight:700">10.20.30.12</a> <span class="tag blue" style="font-family:inherit">찾은 주소</span></td><td class="mono muted">10.20.30.0/24</td><td>esx-kr1-07</td><td class="mono">esx-kr1-07.kr1.example</td><td><span class="tag ok">일치</span></td><td class="muted">vCenter + 스캔</td><td class="mono muted">14:40</td></tr>
+        <tr><td><b>vMotion</b> <span class="muted">vmk1</span></td><td class="mono"><a href="#" style="text-decoration:none">10.20.40.12</a></td><td class="mono muted">10.20.40.0/24</td><td class="muted">—</td><td class="muted">—</td><td class="muted">이름 없음</td><td class="muted">vCenter</td><td class="mono muted">14:52</td></tr>
+        <tr class="bad"><td><b>vSAN</b> <span class="muted">vmk2</span></td><td class="mono"><a href="#" style="text-decoration:none">10.20.41.12</a></td><td class="mono muted">10.20.41.0/24</td><td>esx-kr1-07-vsan</td><td class="mono" style="color:#fca5a5">esx-kr1-08-vsan.kr1.example</td><td><span class="tag crit">불일치</span></td><td class="muted">vCenter</td><td class="mono muted">14:52</td></tr>
+        <tr><td><b>스토리지</b> <span class="muted">vmk3</span></td><td class="mono"><a href="#" style="text-decoration:none">10.20.42.12</a></td><td class="mono muted">10.20.42.0/24</td><td>esx-kr1-07-stor</td><td class="muted">조회 결과 없음</td><td><span class="tag gray">DNS 기록 없음</span></td><td class="muted">vCenter</td><td class="mono muted">14:52</td></tr>
+        <tr><td><b>예전 관리 주소</b></td><td class="mono"><a href="#" style="text-decoration:none">10.20.30.212</a> <span class="tag warn" style="font-family:inherit">해제</span></td><td class="mono muted">10.20.30.0/24</td><td class="muted">esx-kr1-07</td><td class="muted">—</td><td class="muted">확인 안 함</td><td class="muted">사용 이력</td><td class="mono muted">11-02</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="card" style="overflow:hidden" aria-label="이 서버 위 VM 의 IP">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:13px 18px">
+      <h2 class="h2">이 서버 위 VM 의 IP</h2><span class="muted" style="font-size:12px">VM 18대 · IP 23개</span>
+      <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" class="btn sm">전체 23</button><button type="button" class="btn sm">불일치 2</button><button type="button" class="btn sm">DNS 기록 없음 1</button>
+      </span>
+    </div>
+    <div style="overflow-x:auto">
+    <table style="min-width:940px">
+      <thead><tr><th class="s">VM</th><th class="s">IP 주소</th><th class="s">설정한 이름</th><th class="s">DNS 조회 결과</th><th class="s">이름 확인</th><th class="s">용도</th><th class="s">요청자</th><th class="s">할당자</th></tr></thead>
+      <tbody>
+        <sc-for list="{{vms}}" as="v" hint-placeholder-count="8">
+        <tr class="{{v.trCls}}">
+          <td><b>{{v.vm}}</b> <span class="{{v.pwCls}}">{{v.pw}}</span></td>
+          <td class="mono"><a href="#" style="text-decoration:none">{{v.ip}}</a> <span class="{{v.flagCls}}" style="font-family:inherit">{{v.flag}}</span></td>
+          <td>{{v.name}}</td>
+          <td class="mono" style="{{v.dnsStyle}}">{{v.dns}}</td>
+          <td><span class="{{v.okCls}}">{{v.ok}}</span></td>
+          <td>{{v.purpose}}</td>
+          <td>{{v.req}}</td>
+          <td>{{v.asg}}</td>
+        </tr>
+        </sc-for>
+      </tbody>
+    </table>
+    </div>
+    <div style="padding:11px 18px;font-size:12px" class="muted">23개 중 8개 · 불일치가 위로 오게 정렬 · IP 를 누르면 그 주소의 상세로 갑니다</div>
+  </section>
+
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const D = '.kr1.example';
+    const mk = (vm, ip, dns, ok, purpose, req, asg, opt) => {
+      const o = opt || {};
+      return {
+        vm, ip, name: vm, dns: dns ? dns + D : '조회 결과 없음', ok, purpose, req, asg,
+        okCls: ok === '일치' ? 'tag ok' : ok === '불일치' ? 'tag crit' : 'tag gray',
+        dnsStyle: ok === '불일치' ? 'color:#fca5a5' : ok === '일치' ? '' : 'color:#8b9bb4;font-family:inherit',
+        trCls: ok === '불일치' ? 'bad' : '',
+        pw: o.off ? '꺼짐' : '', pwCls: o.off ? 'tag gray' : '',
+        flag: o.flag || '', flagCls: o.flag ? (o.flag === '중복' ? 'tag crit' : 'tag gray') : '',
+      };
+    };
+    return {
+      vms: [
+        mk('api-kr1-009', '10.20.30.20', 'old-api-03', '불일치', 'API 서버', 'api-team', 'net-admin', { off: true }),
+        mk('batch-kr1-007', '10.20.30.131', 'batch-kr1-070', '불일치', '배치', 'data-team', 'ops-kr', { flag: '중복' }),
+        mk('db-kr1-002', '10.20.50.14', '', 'DNS 기록 없음', '백업망', 'dba-team', 'net-admin', { flag: '멀티홈' }),
+        mk('db-kr1-002', '10.20.31.14', 'db-kr1-002', '일치', 'DB', 'dba-team', 'net-admin', { flag: '멀티홈' }),
+        mk('web-kr1-023', '10.20.30.47', 'web-kr1-023', '일치', '웹 프런트', 'web-team', 'ops-kr'),
+        mk('api-kr1-003', '10.20.30.14', 'api-kr1-003', '일치', 'API 서버', 'api-team', 'ops-kr'),
+        mk('infra-kr1-dns01', '10.20.30.10', 'infra-kr1-dns01', '일치', 'DNS', 'infra-kr', 'net-admin'),
+        mk('web-kr1-001', '10.20.30.25', 'web-kr1-001', '일치', '웹 프런트', 'web-team', 'net-admin'),
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>
