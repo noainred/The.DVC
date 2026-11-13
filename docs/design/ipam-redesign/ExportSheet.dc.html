@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 내보낸 엑셀 미리 보기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#1f2328;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:12.5px;line-height:1.4}
+*{box-sizing:border-box}
+a{color:#0b57d0}a:hover{color:#0842a0}
+.win{width:1440px;height:940px;display:flex;flex-direction:column;background:#fff}
+.bar{display:flex;align-items:center;gap:12px;height:40px;padding:0 14px;background:#1e6b3a;color:#fff;font-weight:600}
+.bar .x{width:22px;height:22px;border-radius:4px;background:#fff;color:#1e6b3a;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
+.area{flex:1;overflow:auto;background:#fff}
+table{border-collapse:collapse;font-size:12.5px}
+td,th{border:1px solid #d9dce1;padding:5px 9px;white-space:nowrap;height:26px;text-align:left;font-weight:400}
+.cl th{background:#f1f3f5;color:#5b6370;text-align:center;font-size:11.5px;font-weight:600;position:sticky;top:0}
+.rn{background:#f1f3f5;color:#5b6370;text-align:center;font-size:11.5px;width:38px;font-weight:600}
+.t1{font-size:17px;font-weight:800;border-color:transparent #d9dce1}
+.t2{color:#5b6370;border-color:transparent #d9dce1}
+.hd td{background:#1f2a40;color:#fff;font-weight:700}
+.kl td{background:#eef2f7;color:#5b6370;font-weight:600}
+.kv td{font-size:15px;font-weight:800}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.f-used td{background:#e2f3e4}.f-scan td{background:#d9f1ee}.f-rsv td{background:#fdeed3}.f-dhcp td{background:#ececee}.f-bad td{background:#f9dadd}
+.bad{color:#b3261e;font-weight:700}
+.sum td{font-weight:800;background:#f1f3f5}
+.tabs{display:flex;align-items:stretch;gap:2px;height:36px;padding:0 10px;background:#f1f3f5;border-top:1px solid #d9dce1;overflow-x:auto}
+.tabs button{border:0;background:transparent;font:inherit;font-size:12.5px;font-weight:600;color:#5b6370;padding:0 14px;cursor:pointer;white-space:nowrap;border-bottom:3px solid transparent}
+.tabs button.on{background:#fff;color:#1e6b3a;border-bottom-color:#1e6b3a}
+.sw{display:inline-block;width:14px;height:14px;border:1px solid #c9ced6;vertical-align:-2px;margin-right:8px}
+</style>
+</helmet>
+<div class="win">
+  <div class="bar"><span class="x">X</span><span>ip-ledger_VC-KR1_20261113-1452.xlsx</span><span style="margin-left:auto;font-weight:400;font-size:12px">아래 시트 탭을 누르면 바뀝니다 · 시안이라 각 시트의 앞부분만 그렸습니다</span></div>
+
+  <div class="area">
+
+    <sc-if value="{{isSum}}" hint-placeholder-val="{{ true }}">
+    <table>
+      <thead class="cl"><tr><th class="rn"></th><th style="min-width:150px">A</th><th style="min-width:110px">B</th><th style="min-width:90px">C</th><th style="min-width:100px">D</th><th style="min-width:90px">E</th><th style="min-width:100px">F</th><th style="min-width:100px">G</th><th style="min-width:150px">H</th><th style="min-width:150px">I</th></tr></thead>
+      <tbody>
+        <tr><td class="rn">1</td><td class="t1" colspan="9">IP 관리 대장 — VC-KR1</td></tr>
+        <tr><td class="rn">2</td><td class="t2" colspan="9">범위 VC-KR1(서울) · 기준 2026-11-13 14:52 KST · 만든 계정 admin · 숨길 대역의 주소는 뺐습니다</td></tr>
+        <tr><td class="rn">3</td><td colspan="9"></td></tr>
+        <tr class="kl"><td class="rn">4</td><td>전체 주소</td><td>사용 중</td><td>예약</td><td>DHCP</td><td>빈 주소</td><td>사용률</td><td>대역 수</td><td>조치 필요</td><td>이름 · DNS 불일치</td></tr>
+        <tr class="kv"><td class="rn">5</td><td class="num">9,652</td><td class="num">1,204</td><td class="num">412</td><td class="num">2,340</td><td class="num">5,696</td><td class="num">41.0%</td><td class="num">38</td><td class="num bad">6</td><td class="num">5</td></tr>
+        <tr><td class="rn">6</td><td colspan="9"></td></tr>
+        <tr class="hd"><td class="rn">7</td><td>상태</td><td>주소 수</td><td>비율</td><td colspan="6">뜻</td></tr>
+        <tr class="f-used"><td class="rn">8</td><td>사용 중</td><td class="num">1,204</td><td class="num">12.5%</td><td colspan="6">vCenter · iDRAC · OS 수집이 알고 있는 주소(VM 1,061 · 물리 서버 88) + 스캔으로만 확인 55</td></tr>
+        <tr class="f-rsv"><td class="rn">9</td><td>예약</td><td class="num">412</td><td class="num">4.3%</td><td colspan="6">사람이 잡아 둔 주소와 대역 정책으로 예약된 주소</td></tr>
+        <tr class="f-dhcp"><td class="rn">10</td><td>DHCP</td><td class="num">2,340</td><td class="num">24.2%</td><td colspan="6">DHCP 로 나눠 주는 구간</td></tr>
+        <tr><td class="rn">11</td><td>빈 주소</td><td class="num">5,696</td><td class="num">59.0%</td><td colspan="6">스캔에도 응답이 없고 예약 · 정책에도 없는 주소</td></tr>
+        <tr class="sum"><td class="rn">12</td><td>합계</td><td class="num">9,652</td><td class="num">100.0%</td><td colspan="6"></td></tr>
+      </tbody>
+    </table>
+    </sc-if>
+
+    <sc-if value="{{isNets}}" hint-placeholder-val="{{ false }}">
+    <table>
+      <thead class="cl"><tr><th class="rn"></th><th style="min-width:130px">A</th><th style="min-width:150px">B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th><th>H</th><th style="min-width:330px">I</th><th style="min-width:120px">J</th></tr></thead>
+      <tbody>
+        <tr><td class="rn">1</td><td class="t1" colspan="10">대역 목록 — VC-KR1</td></tr>
+        <tr class="hd"><td class="rn">2</td><td>대역</td><td>용도</td><td>사용 중</td><td>예약</td><td>DHCP</td><td>빈 주소</td><td>사용률</td><td>문제</td><td>설명</td><td>대장 시트</td></tr>
+        <sc-for list="{{nets}}" as="n" hint-placeholder-count="8">
+        <tr><td class="rn">{{n.r}}</td><td class="mono">{{n.cidr}}</td><td><b>{{n.pur}}</b></td><td class="num">{{n.used}}</td><td class="num">{{n.rsv}}</td><td class="num">{{n.dhcp}}</td><td class="num">{{n.free}}</td><td class="num">{{n.pct}}</td><td class="{{n.badCls}}">{{n.bad}}</td><td>{{n.desc}}</td><td><a href="#">{{n.sheet}}</a></td></tr>
+        </sc-for>
+      </tbody>
+    </table>
+    </sc-if>
+
+    <sc-if value="{{isLed}}" hint-placeholder-val="{{ false }}">
+    <table>
+      <thead class="cl"><tr><th class="rn"></th><th style="min-width:104px">A</th><th style="min-width:118px">B</th><th style="min-width:150px">C</th><th>D</th><th style="min-width:110px">E</th><th>F</th><th>G</th><th>H</th><th style="min-width:170px">I</th><th style="min-width:130px">J</th><th style="min-width:210px">K</th><th>L</th><th>M</th></tr></thead>
+      <tbody>
+        <tr><td class="rn">1</td><td class="t1" colspan="13">10.20.30.0/24 · 웹 서비스망 · VC-KR1</td></tr>
+        <tr><td class="rn">2</td><td class="t2" colspan="13">사용 중 177 · 예약 9 · DHCP 55 · 빈 주소 13 · 문제 2 · 기준 2026-11-13 14:52 KST · 3행 머리글은 고정이고 자동 필터가 걸려 있습니다</td></tr>
+        <tr class="hd"><td class="rn">3</td><td>주소 ▾</td><td>상태 ▾</td><td>호스트명 · 자원 ▾</td><td>종류 ▾</td><td>용도 ▾</td><td>요청자 ▾</td><td>할당자 ▾</td><td>관리 ▾</td><td>메모 ▾</td><td>사용 이력 ▾</td><td>DNS 조회 결과 ▾</td><td>이름 확인 ▾</td><td>서비스 태그 ▾</td></tr>
+        <sc-for list="{{rows}}" as="r" hint-placeholder-count="24">
+        <tr class="{{r.cls}}"><td class="rn">{{r.r}}</td><td class="mono">{{r.ip}}</td><td>{{r.st}}</td><td><b>{{r.name}}</b></td><td>{{r.kind}}</td><td>{{r.pur}}</td><td>{{r.req}}</td><td>{{r.asg}}</td><td>{{r.mg}}</td><td>{{r.memo}}</td><td>{{r.hist}}</td><td class="mono">{{r.dns}}</td><td class="{{r.okCls}}">{{r.ok}}</td><td class="mono">{{r.tag}}</td></tr>
+        </sc-for>
+      </tbody>
+    </table>
+    </sc-if>
+
+    <sc-if value="{{isAct}}" hint-placeholder-val="{{ false }}">
+    <table>
+      <thead class="cl"><tr><th class="rn"></th><th style="min-width:110px">A</th><th style="min-width:120px">B</th><th style="min-width:130px">C</th><th style="min-width:120px">D</th><th style="min-width:400px">E</th><th style="min-width:120px">F</th><th>G</th><th>H</th></tr></thead>
+      <tbody>
+        <tr><td class="rn">1</td><td class="t1" colspan="8">조치 필요 — VC-KR1</td></tr>
+        <tr class="hd"><td class="rn">2</td><td>종류</td><td>IP 주소</td><td>대역</td><td>용도</td><td>내용</td><td>언제부터</td><td>요청자</td><td>할당자</td></tr>
+        <tr class="f-bad"><td class="rn">3</td><td class="bad">충돌</td><td class="mono">10.20.30.47</td><td class="mono">10.20.30.0/24</td><td>웹 서비스망</td><td>VC-KR1 web-kr1-023 · VC-KR2 legacy-app-02 가 같은 주소</td><td>11-13 11:42</td><td>web-team</td><td>ops-kr</td></tr>
+        <tr class="f-bad"><td class="rn">4</td><td class="bad">중복</td><td class="mono">10.20.30.131</td><td class="mono">10.20.30.0/24</td><td>웹 서비스망</td><td>VM 2대 — batch-kr1-007 외 1</td><td>11-12</td><td>data-team</td><td>ops-kr</td></tr>
+        <tr class="f-bad"><td class="rn">5</td><td class="bad">중복</td><td class="mono">10.20.31.105</td><td class="mono">10.20.31.0/24</td><td>앱 서버망</td><td>VM 2대 — app-kr1-051 · app-kr1-051-clone</td><td>11-11</td><td>api-team</td><td>ops-kr</td></tr>
+        <tr class="f-rsv"><td class="rn">6</td><td>예약 만료</td><td class="mono">10.20.30.210</td><td class="mono">10.20.30.0/24</td><td>웹 서비스망</td><td>‘신규 DB 이중화’ 예약이 11-10 에 끝남</td><td>11-10</td><td>infra-kr</td><td>net-admin</td></tr>
+        <tr><td class="rn">7</td><td>이름 · DNS 불일치</td><td class="mono">10.20.30.20</td><td class="mono">10.20.30.0/24</td><td>웹 서비스망</td><td>설정한 이름 api-kr1-009 · DNS 조회 결과 old-api-03.kr1.example</td><td>—</td><td>api-team</td><td>net-admin</td></tr>
+        <tr><td class="rn">8</td><td>이름 · DNS 불일치</td><td class="mono">10.20.41.12</td><td class="mono">10.20.41.0/24</td><td>vSAN</td><td>설정한 이름 esx-kr1-07-vsan · DNS 조회 결과 esx-kr1-08-vsan.kr1.example</td><td>—</td><td>infra-kr</td><td>net-admin</td></tr>
+      </tbody>
+    </table>
+    </sc-if>
+
+    <sc-if value="{{isInfo}}" hint-placeholder-val="{{ false }}">
+    <table>
+      <thead class="cl"><tr><th class="rn"></th><th style="min-width:190px">A</th><th style="min-width:760px">B</th></tr></thead>
+      <tbody>
+        <tr><td class="rn">1</td><td class="t1" colspan="2">안내</td></tr>
+        <tr class="hd"><td class="rn">2</td><td>항목</td><td>내용</td></tr>
+        <tr><td class="rn">3</td><td>범위</td><td>VC-KR1(서울) — 대역 38개 · 주소 9,652개</td></tr>
+        <tr><td class="rn">4</td><td>기준 시각</td><td>2026-11-13 14:52 KST(대장 갱신) · 마지막 스캔 보고 14:40</td></tr>
+        <tr><td class="rn">5</td><td>뺀 것</td><td>‘숨길 대역’ 에 든 주소 · 만든 계정의 범위 밖 법인</td></tr>
+        <tr><td class="rn">6</td><td><span class="sw" style="background:#e2f3e4"></span>사용 중</td><td>vCenter · iDRAC · OS 수집이 알고 있는 주소</td></tr>
+        <tr><td class="rn">7</td><td><span class="sw" style="background:#d9f1ee"></span>스캔으로만 확인</td><td>스캔에는 응답하지만 등록 정보가 없는 주소 — 담당 확인 대상</td></tr>
+        <tr><td class="rn">8</td><td><span class="sw" style="background:#fdeed3"></span>예약</td><td>사람이 잡아 둔 주소 · 대역 정책으로 예약된 주소</td></tr>
+        <tr><td class="rn">9</td><td><span class="sw" style="background:#ececee"></span>DHCP</td><td>DHCP 로 나눠 주는 구간</td></tr>
+        <tr><td class="rn">10</td><td><span class="sw" style="background:#f9dadd"></span>문제</td><td>충돌(다른 법인과 같은 주소) · 중복(같은 법인 안에서 겹침)</td></tr>
+        <tr><td class="rn">11</td><td><span class="sw"></span>빈 주소</td><td>칸 색 없음</td></tr>
+        <tr><td class="rn">12</td><td>이름 확인</td><td>설정한 이름과 DNS 조회 결과의 첫 마디를 대소문자 구분 없이 견준 결과 — 일치 · 불일치 · DNS 기록 없음 · 빈 칸은 확인 대상 아님</td></tr>
+        <tr><td class="rn">13</td><td>복수IP</td><td>장비 한 대가 주소를 둘 이상 가진 경우 — ‘호스트명 · 자원’ 이 같은 행이 여러 개입니다</td></tr>
+        <tr><td class="rn">14</td><td>빈 칸</td><td>값을 못 읽은 것과 값이 없는 것을 구분합니다 — 못 읽은 칸은 ‘확인 안 됨’ 이라고 적습니다</td></tr>
+      </tbody>
+    </table>
+    </sc-if>
+
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="시트">
+    <sc-for list="{{tabs}}" as="t" hint-placeholder-count="8">
+    <button type="button" role="tab" class="{{t.cls}}" onClick="{{t.pick}}">{{t.label}}</button>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":940}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = (this.state && this.state.sheet) || 'led';
+    const TABS = [['sum', '요약'], ['nets', '대역 목록'], ['act', '조치 필요'], ['led', '10.20.30.0_24'], ['x1', '10.20.31.0_24'], ['x2', '10.20.32.0_24'], ['x3', '… 35장 더'], ['info', '안내']];
+    const real = { sum: 1, nets: 1, act: 1, led: 1, info: 1 };
+    const tabs = TABS.map(([k, label]) => ({ label, cls: k === cur ? 'on' : '', pick: () => { if (real[k]) this.setState({ sheet: k }); } }));
+    const kindOf = (i) => {
+      if (i <= 9) return 'rsv';
+      if (i === 47 || i === 131) return 'bad';
+      if (i % 17 === 0 || i === 58 || i === 149) return 'free';
+      if (i % 23 === 5) return 'scan';
+      if (i % 29 === 3) return 'bm';
+      return 'vm';
+    };
+    const pad = (n) => String(n).padStart(3, '0');
+    const D = '.kr1.example';
+    const rows = [];
+    for (let i = 1; i <= 24; i++) {
+      const k = kindOf(i);
+      const r = { r: i + 3, ip: '10.20.30.' + i, cls: '', st: '', name: '', kind: '', pur: '', req: '', asg: '', mg: '', memo: '', hist: '', dns: '', ok: '', okCls: '', tag: '' };
+      if (k === 'rsv') Object.assign(r, { cls: 'f-rsv', st: '예약', name: i === 1 ? 'gw-kr1-30' : '', kind: i === 1 ? '네트워크 장비' : '', pur: '네트워크 장비', asg: 'net-admin', mg: '예약(정책)', hist: i <= 6 ? '스캔 응답' : '', dns: i === 1 ? 'gw-kr1-30' + D : '', ok: i === 1 ? '일치' : '' });
+      else if (k === 'free') Object.assign(r, { st: '빈 주소', memo: '직전 사용: api-kr1-006', hist: '11-02 까지 사용' });
+      else {
+        const dns = i <= 11; const api = !dns && i < 25; const off = i === 20;
+        const nm = dns ? 'infra-kr1-dns0' + (i - 9) : 'api-kr1-' + pad(i - 11);
+        Object.assign(r, { cls: 'f-used', st: off ? '사용 중 · 꺼짐' : '사용 중', name: nm, kind: 'VM', pur: dns ? 'DNS' : 'API 서버', req: dns ? 'infra-kr' : 'api-team', asg: dns || i % 5 === 0 ? 'net-admin' : 'ops-kr',
+          mg: dns ? '고정할당' : i % 4 === 0 ? '사용중(확정)' : '', memo: dns ? (i - 9) + '차 · 변경 전 공지' : i === 14 ? '11-20 증설 때 교체 예정' : off ? '회수 후보' : '',
+          hist: (120 + i * 7) + '일째', dns: off ? 'old-api-03' + D : nm + D, ok: off ? '불일치' : '일치', okCls: off ? 'bad' : '', tag: i % 2 ? '7XK2M93' : '5BD8R21' });
+      }
+      rows.push(r);
+    }
+    const net = (r, cidr, pur, used, rsv, dhcp, bad, desc) => ({ r, cidr, pur: pur || '(용도 없음)', used, rsv, dhcp, free: 254 - used - rsv - dhcp, pct: Math.round((254 - (254 - used - rsv - dhcp)) / 254 * 100) + '%', bad: bad || '', badCls: bad ? 'num bad' : 'num', desc, sheet: cidr.replace('/', '_') });
+    return {
+      tabs, rows,
+      isSum: cur === 'sum', isNets: cur === 'nets', isLed: cur === 'led', isAct: cur === 'act', isInfo: cur === 'info',
+      nets: [
+        net(3, '10.20.30.0/24', '웹 서비스망', 177, 9, 55, 2, '외부 서비스용 웹 프런트 · API 서버. 신규 할당은 web-team 요청으로만'),
+        net(4, '10.20.31.0/24', '앱 서버망', 158, 10, 40, 1, '내부 앱 · DB 물리 서버'),
+        net(5, '10.20.32.0/24', '개발 · 스테이징', 101, 10, 40, 0, '개발 · 검증 환경'),
+        net(6, '10.20.33.0/24', '', 22, 0, 0, 0, ''),
+        net(7, '10.20.40.0/24', 'vMotion', 24, 0, 0, 0, 'ESXi vmk1 전용 · DNS 등록 안 함'),
+        net(8, '10.20.41.0/24', 'vSAN', 24, 0, 0, 0, 'ESXi vmk2 전용'),
+        net(9, '10.20.42.0/24', '스토리지망', 31, 4, 0, 0, 'iSCSI'),
+        net(10, '10.20.50.0/24', '백업망', 46, 8, 0, 0, '백업 전용 인터페이스'),
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

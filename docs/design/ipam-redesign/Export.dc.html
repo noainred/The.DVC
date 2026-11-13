@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 엑셀 내보내기 창</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+*{box-sizing:border-box}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 16px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.h3{font-size:12px;font-weight:700;color:#8b9bb4;margin:0}
+.sec{padding:16px 22px;border-top:1px solid #1f2a40;display:flex;flex-direction:column;gap:10px}
+.opt{all:unset;box-sizing:border-box;cursor:pointer;display:flex;flex-direction:column;gap:3px;padding:11px 13px;border:1px solid #243049;border-radius:10px;min-width:0}
+.opt.on{border-color:#3b82f6;background:rgba(59,130,246,.12)}
+.opt b{font-size:13px}
+.opt span{font-size:11.5px;color:#8b9bb4}
+.ck{display:grid;grid-template-columns:18px minmax(0,1fr);gap:2px 9px;align-items:start;cursor:pointer}
+.ck input{margin:2px 0 0;width:15px;height:15px}
+.ck b{font-size:13px;font-weight:600}
+.ck span{grid-column:2;font-size:11.5px;color:#8b9bb4}
+.col{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;border:1px solid #243049;font-size:12px;font-weight:600;color:#8b9bb4;cursor:pointer}
+.col input{margin:0;width:13px;height:13px}
+.col.on{border-color:#3b82f6;color:#e6edf6;background:rgba(59,130,246,.12)}
+</style>
+</helmet>
+<div style="width:760px;min-height:1080px;padding:28px;display:flex;align-items:flex-start;justify-content:center">
+<div role="dialog" aria-label="엑셀로 내보내기" style="width:100%;background:#141b2d;border:1px solid #243049;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.4);overflow:hidden">
+
+  <div style="display:flex;align-items:center;gap:10px;padding:18px 22px">
+    <h1 style="margin:0;font-size:17px;font-weight:800">엑셀로 내보내기</h1>
+    <span class="muted" style="font-size:12px">기준 <span class="mono">2026-11-13 14:52</span></span>
+    <button type="button" class="btn" style="margin-left:auto;min-height:30px;padding:0 10px;font-size:12px" aria-label="창 닫기">닫기</button>
+  </div>
+
+  <div class="sec">
+    <h2 class="h3">무엇을 내보낼까요</h2>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+      <sc-for list="{{scopes}}" as="s" hint-placeholder-count="4">
+      <button type="button" class="{{s.cls}}" aria-pressed="{{s.on}}" onClick="{{s.pick}}"><b>{{s.title}}</b><span>{{s.sub}}</span></button>
+      </sc-for>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2 class="h3">시트 구성</h2>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px">
+      <label class="ck"><input type="checkbox" checked><b>요약</b><span>법인별 주소 · 사용률 · 조치 필요 수</span></label>
+      <label class="ck"><input type="checkbox" checked><b>대역 목록</b><span>대역 · 용도 · 사용률 · 빈 주소 · 대장 시트로 가는 링크</span></label>
+      <label class="ck"><input type="checkbox" checked><b>IP 대장 — 대역마다 시트 하나</b><span>지금 방식. 주소 하나가 한 행</span></label>
+      <label class="ck"><input type="checkbox"><b>IP 대장 — 한 시트에 전부</b><span>필터 · 피벗으로 직접 가공할 때</span></label>
+      <label class="ck"><input type="checkbox" checked><b>조치 필요</b><span>충돌 · 중복 · 예약 만료 · 이름/DNS 불일치</span></label>
+      <label class="ck"><input type="checkbox"><b>서버별 IP</b><span>서비스 태그 기준 — 서버 한 대가 쓰는 주소 전부</span></label>
+      <label class="ck"><input type="checkbox" checked><b>안내</b><span>색 뜻 · 열 설명 · 범위 · 기준 시각</span></label>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div style="display:flex;align-items:baseline;gap:8px"><h2 class="h3">IP 대장에 넣을 열</h2><span class="muted" style="font-size:12px;margin-left:auto">13개 고름 · <a href="#">화면과 같게</a> · <a href="#">전부</a></span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <label class="col on"><input type="checkbox" checked disabled>주소</label>
+      <label class="col on"><input type="checkbox" checked>상태</label>
+      <label class="col on"><input type="checkbox" checked>호스트명 · 자원</label>
+      <label class="col on"><input type="checkbox" checked>종류</label>
+      <label class="col on"><input type="checkbox" checked>용도</label>
+      <label class="col on"><input type="checkbox" checked>요청자</label>
+      <label class="col on"><input type="checkbox" checked>할당자</label>
+      <label class="col on"><input type="checkbox" checked>관리</label>
+      <label class="col on"><input type="checkbox" checked>메모</label>
+      <label class="col on"><input type="checkbox" checked>사용 이력</label>
+      <label class="col on"><input type="checkbox" checked>DNS 조회 결과</label>
+      <label class="col on"><input type="checkbox" checked>이름 확인</label>
+      <label class="col on"><input type="checkbox" checked>서비스 태그</label>
+      <label class="col"><input type="checkbox">OS</label>
+      <label class="col"><input type="checkbox">전원</label>
+      <label class="col"><input type="checkbox">확인 방식</label>
+      <label class="col"><input type="checkbox">마지막 확인</label>
+      <label class="col"><input type="checkbox">열린 포트</label>
+      <label class="col"><input type="checkbox">태그</label>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2 class="h3">행과 서식</h2>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px">
+      <label class="ck"><input type="checkbox" checked><b>빈 주소도 행으로</b><span>대역마다 254행 — 종이 대장처럼</span></label>
+      <label class="ck"><input type="checkbox" checked><b>상태별 색</b><span>사용 중 · 예약 · DHCP · 문제를 칸 색으로</span></label>
+      <label class="ck"><input type="checkbox" checked><b>머리글 고정 · 자동 필터</b><span>열어서 바로 걸러 볼 수 있게</span></label>
+      <label class="ck"><input type="checkbox"><b>인쇄 설정</b><span>A4 가로 · 머리글 반복</span></label>
+    </div>
+  </div>
+
+  <div class="sec" style="background:#0f1626">
+    <div style="display:grid;grid-template-columns:86px minmax(0,1fr);gap:7px 12px;font-size:12.5px">
+      <span class="muted">파일 이름</span><span class="mono" style="overflow-wrap:anywhere">{{d.file}}</span>
+      <span class="muted">들어가는 것</span><span>{{d.what}}</span>
+      <span class="muted">빠지는 것</span><span>숨길 대역의 주소 · 내 범위 밖 법인</span>
+    </div>
+    <div style="font-size:12px;color:#fcd34d">{{d.warn}}</div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="muted" style="font-size:12px;flex:1 1 220px">내보내기는 한 번에 한 건만 만듭니다. 다른 사람이 만드는 중이면 끝난 뒤 시작합니다.</span>
+      <button type="button" class="btn">취소</button>
+      <a href="ExportSheet.dc.html" class="btn primary">엑셀 내려받기</a>
+    </div>
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = (this.state && this.state.scope) || 'corp';
+    const S = {
+      net: { title: '이 대역', sub: '10.20.30.0/24 · 웹 서비스망', file: 'ip-ledger_10.20.30.0_24_20261113-1452.xlsx', what: '대장 시트 1장(254행) + 요약 · 조치 필요 · 안내', warn: '' },
+      corp: { title: '이 법인', sub: 'VC-KR1 · 대역 38개 · 주소 9,652개', file: 'ip-ledger_VC-KR1_20261113-1452.xlsx', what: '대장 시트 38장(9,652행) + 요약 · 대역 목록 · 조치 필요 · 안내', warn: '' },
+      all: { title: '전체 법인', sub: '28곳 · 대역 312개 · 주소 79,248개', file: 'ip-ledger_all_20261113-1452.xlsx', what: '대장 시트 312장(79,248행) + 요약 · 대역 목록 · 조치 필요 · 안내', warn: '시트가 312장입니다 — 만드는 데 시간이 걸리고 파일이 큽니다. 가공이 목적이면 ‘한 시트에 전부’ 를 권합니다.' },
+      list: { title: '지금 목록', sub: 'IP 주소 탭의 필터 결과 11개', file: 'ip-list_filtered_20261113-1452.xlsx', what: '한 시트 11행 + 안내(걸린 필터를 적습니다)', warn: '' },
+    };
+    const scopes = ['net', 'corp', 'all', 'list'].map((k) => ({
+      title: S[k].title, sub: S[k].sub, on: k === cur ? 'true' : 'false', cls: k === cur ? 'opt on' : 'opt',
+      pick: () => this.setState({ scope: k }),
+    }));
+    return { scopes, d: S[cur] };
+  }
+}
+</script>
+</body>
+</html>
