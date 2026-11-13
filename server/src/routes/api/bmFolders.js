@@ -20,6 +20,7 @@
  */
 import { requirePerm, requireRole } from '../../auth/auth.js';
 import { usageSrcOf } from '../../bmfolders/usageSrc.js'; // v2.993: 사용률 지표별 출처(출처 색)
+import { usageWhyOf, currentWhyIndex } from '../../bmfolders/usageWhy.js'; // v2.994: 값 없음 사유
 import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { todayStamp } from '../../util/dayKey.js';
@@ -32,7 +33,7 @@ import { numOrNull } from '../../util/numOrNull.js';
 import { cleanFolderPath, cleanText, peekMap as smPeekMap, mutateMap as smMutateMap, flushStore as smFlushStore, storeLoadError as smLoadError, storeRev as smStoreRev } from '../../servicemap/store.js';
 import { sharedGather, sharedInputRev, sharedFresh, bmKeyOf, pubKey, keyResolverFor, maskName, corpWriteAccess, stripTag, visibleOrder, visibleKeyOrder } from './svcInventory.js';
 import { userToolAllowed } from '../../auth/permissions.js';
-import { buildFolders, searchMembers, parseTokens, srcClassOf, assignOf, aliasRegsOf } from '../../bmfolders/build.js';
+import { buildFolders, searchMembers, parseTokens, srcClassOf, assignOf, aliasRegsOf, applyKeyMigration, keyMigrationPending } from '../../bmfolders/build.js';
 import {
   storeLoadError, storeRev, peekMain, peekAssign, mutateMain, mutateAssign, flushStore, resetCorrupt,
   LIMITS, newRuleId, underPath, ancestorsOf, isMemberKey,
@@ -85,7 +86,7 @@ export function membersOf(g) {
     seen.add(key);
     out.push({
       key, keyKind, kind: 'esxi', corp: t(h.corp), name: t(h.name), nameIsAddr: false, serviceTag: t(h.serviceTag), model: t(h.model), source: 'vcenter',
-      remoteAgent: '', collectorId: '', powered: null, usage: h.usage ? { state: h.usage.state, cpuPct: h.usage.cpuPct, memPct: h.usage.memPct, src: h.usage.src, ...(h.usage.srcBy ? { srcBy: h.usage.srcBy } : {}) } : { state: 'unread' },
+      remoteAgent: '', collectorId: '', powered: null, usage: h.usage ? { state: h.usage.state, cpuPct: h.usage.cpuPct, memPct: h.usage.memPct, src: h.usage.src, ...(h.usage.srcBy ? { srcBy: h.usage.srcBy } : {}), ...(h.usage.at ? { at: h.usage.at } : {}), ...(h.usage.vcUnread ? { vcUnread: true } : {}) } : { state: 'unread' },
       faults: h.faults ?? null, watts: h.watts ?? null, cores: null, memGB: null,
     });
   }
@@ -116,7 +117,34 @@ const missingName = (x, admin, hide) => {
   return nameOf({ key: x.key, name: x.name || '(이름 모름)', serviceTag: tag, nameIsAddr: x.addr === true }, admin, hide);
 };
 
-function serverRow(m, p, admin, hide) {
+/*
+ * v2.995(묶음 C — 폴더 등록 키 정리): 등록 저장 키 자동 변경. 조회 응답을 만든 **뒤** 한 번 쓴다(setImmediate — 응답을 막지 않는다 · 진행 중이면 겹쳐 쓰지 않는다).
+ *   사람이 고른 위치(경로)는 바뀌지 않는다 — 열쇠만 태그 키로. 저장소를 못 읽었으면 mutateAssign 이 503 으로 막는다(쓰지 않음).
+ *   감사 로그에 '시스템' 으로 남긴다(누가 바꿨나 — 자동). 세대가 올라 응답 캐시가 새로 만들어지고, 그때는 별칭을 쓰지 않으니 다시 옮기지 않는다.
+ */
+let _migrating = false;
+export function scheduleKeyMigration(list, { mutate = mutateAssign, peek = peekAssign, audit = logAudit, defer = setImmediate, loadErr = storeLoadError } = {}) {
+  if (_migrating || !Array.isArray(list) || !list.length) return false;
+  // 두 파일 중 하나라도 손상이면 쓰지 않는다(이 폴더 규약 — 두 파일을 함께 보는 판정이라 한쪽만 정상이어도 옮기지 않는다)
+  try { if (loadErr()) return false; } catch { return false; }
+  let pending = false;
+  try { pending = keyMigrationPending(peek(), list); } catch { pending = false; }
+  if (!pending) return false;
+  _migrating = true;
+  defer(() => {
+    try {
+      let moved = 0;
+      const r = mutate((draft) => { moved = applyKeyMigration(draft.assign, list); return { result: moved }; });
+      if (r?.ok && moved) {
+        try { audit({ user: 'system', action: '물리서버 폴더 등록 키 자동 변경(태그를 읽음 · fl: → st:)', target: `${moved}건`, detail: list.slice(0, 10).map((x) => `${x.from}→${x.to}`).join(', ').slice(0, 400), ip: '' }); } catch { /* 감사 실패는 쓰기를 되돌리지 않는다 */ }
+      }
+    } catch (e) { console.warn(`[bm-folders] 등록 키 자동 변경 실패: ${String(e?.message || e).slice(0, 160)}`); }
+    finally { _migrating = false; }
+  });
+  return true;
+}
+
+function serverRow(m, p, admin, hide, ix) {
   return {
     key: pubKey(m.key, hide), kind: m.kind, corp: m.corp, name: nameOf(m, admin, hide), serviceTag: hide ? undefined : m.serviceTag, model: m.model,
     src: srcClassOf(m), agent: hide ? undefined : (m.remoteAgent || (m.collectorId ? `수집 서버 ${m.collectorId}` : '')),
@@ -124,6 +152,10 @@ function serverRow(m, p, admin, hide) {
     powered: m.powered, usage: m.usage?.state || 'unread', cpu: m.usage?.cpuPct ?? null, mem: m.usage?.memPct ?? null,
     // v2.993(출처 색): 지표별 출처 { cpu, mem } — 'os' · 'idrac' · 'vcenter' · null. 장비 단서가 아니라 판본 구분 없이 싣는다.
     usrc: usageSrcOf(m.usage) || undefined,
+    // v2.994(값 없음 사유 — 설계 §12): 사용률이 없을 때 서버가 판정한 사유 코드(+ 오래됨이면 마지막 값 시각). 코드만 — 계정 · 주소 · 엣지 이름을 싣지 않는다.
+    why: ix !== undefined ? usageWhyOf(m, ix) || undefined : undefined,
+    // v2.995(묶음 C): 서비스 태그를 아직 읽지 못해 임시 키(fl: — 이름 해시)로 다루는 서버 — 태그가 읽히면 등록이 태그 키로 저절로 옮겨 간다
+    tmpKey: String(m.key).startsWith('fl:') ? true : undefined,   // 키 접두어로(keyKind 는 'fleetId' 등 — 값이 다르다)
     watts: m.watts ?? null, faults: m.faults ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null,
     // 관리 주소 — 관리자 판본만(비관리자 · 데모에게 장비 주소를 싣지 않는다 — isAdminDetailUser 하나로 판정)
     // 범위 계정 판본(범위 지정 관리자 포함)에서는 주소 속 태그도 가린다(2차 반증 1: Dell 기본 이름 'idrac-<태그>' 주소로 가린 태그가 드러났다)
@@ -273,15 +305,18 @@ export function registerBmFolders(api) {
       if (!hide) {
         try { const { listEdgeFleet } = await import('../../central/fleet.js'); edgeAt = new Map(listEdgeFleet().map((e) => [e.agent, e.at || null])); } catch { edgeAt = new Map(); }
       }
+      scheduleKeyMigration(b.migrate);   // v2.995(묶음 C): 태그를 읽은 서버의 등록 저장 키를 st: 로(응답 뒤 · 다시 확인하고 쓴다)
       const servers = [];
+      const ix = await currentWhyIndex();   // v2.994: 값 없음 사유 — 베어메탈 사용률 대상 해석(60초 memo · 실패면 null = '확인 못 함')
       for (const m of members) {
         if (!m.corp ? hide || m.kind !== 'bm' : !(allowed ? allowed.has(m.corp) : true)) continue;
         const p = b.placeOf.get(m.key);
         if (m.kind !== 'bm' && !p?.src) continue;   // ESXi 는 폴더에 넣은 것만
-        servers.push(serverRow(m, p, admin, hide));
+        servers.push(serverRow(m, p, admin, hide, ix));
       }
       return {
         ok: true, at: g.at, rev: storeRev(), scoped: hide, admin, canWrite: writerOk(req.user), canFleet: full,
+        usageOff: !!ix?.off,   // v2.994: 이 노드의 베어메탈 사용률 수집이 꺼져 있다(화면 위 띠 — 칸마다 같은 이유를 보지 않게)
         settings: { autoRules: b.autoRules },
         corps: b.corps.map((c) => ({
           ...c, name: g.corpNames?.get(c.vcenterId) || c.vcenterId, writable: writableOf(req.user, s, c.vcenterId),
