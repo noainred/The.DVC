@@ -18,6 +18,7 @@
  */
 import { numOrNull } from '../../util/numOrNull.js';
 import { capacityOfInventory } from '../../idrac/physicalCapacity.js';
+import { readInvArr } from '../../idrac/hwSummary.js'; // v3.3.0: 컬렉션 읽음 판정 하나(물리서버 폴더 하드웨어 요약과 공유)
 import { dedupNics } from '../../idrac/nicPorts.js';
 import { localStamp } from '../../util/dayKey.js';
 import { partHealthRollup } from '../../idrac/invView.js'; // v2.973 B1: 하위 상태를 부품 원소 판정으로(화면 inventoryView 와 같은 판정)
@@ -32,16 +33,10 @@ const arr = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === 'object
  */
 const strictSum = (xs) => { let t = 0; for (const x of xs) { if (x == null) return null; t += x; } return t; };
 /*
- * 그 컬렉션을 읽었는가(반증 F3 — 못 읽은 값은 0 이 아니다): redfish.js 는 배열을 먼저 [] 로 만들고 실패하면 collections.<키>='failed' 만 남긴다
- * — 배열 길이 0 을 그대로 세면 '읽지 못함' 이 '0개' 로 나간다. 배열이 없거나 'failed' 면 null.
- * emptyUnknown: 표식이 없는 컬렉션(NIC)은 빈 배열도 못 읽음으로 본다(NIC 0개 서버는 없다 — 구분할 근거가 없으면 지어내지 않는다).
+ * 그 컬렉션을 읽었는가(반증 F3 — 못 읽은 값은 0 이 아니다): 판정은 idrac/hwSummary.js readInvArr 하나(v3.3.0 — 물리서버 폴더 하드웨어 요약과 같은 함수).
+ * 배열이 없거나 collections.<키>='failed' 면 null · emptyUnknown 이면 빈 배열도 못 읽음(NIC).
  */
-function readArr(inv, key, { emptyUnknown = false } = {}) {
-  if (!inv || !Array.isArray(inv[key])) return null;
-  if (inv.collections && typeof inv.collections === 'object' && inv.collections[key] === 'failed') return null;
-  const a = arr(inv[key]);
-  return emptyUnknown && !a.length ? null : a;
-}
+const readArr = readInvArr;
 const countOf = (inv, key, o) => { const a = readArr(inv, key, o); return a ? a.length : null; };
 
 /*

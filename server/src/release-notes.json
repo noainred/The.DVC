@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "3.3.0",
+      "date": "2026-11-13",
+      "title": "물리서버 폴더(Bare Metal Server) — iDRAC 하드웨어 요약 · OS 이름 수집 · iDRAC 주소 접속(웹 · SSH)",
+      "notes": [
+        "표에 하드웨어 열(CPU · 메모리 / 디스크 / NIC · FC HBA + iDRAC 주소)과 이름 아래 OS · 옆 패널에 부품별 목록(CPU · DIMM · 디스크 · 컨트롤러 · NIC · FC HBA).",
+        "iDRAC 주소를 누르면 웹 콘솔(https 새 탭) · 포탈 웹 SSH(원격 접속 — 중계 프록시 · remote.access) · 내 PC SSH(ssh:// · 명령 복사)를 고릅니다. 주소 · OS 호스트명은 관리자 판본만, 관리 NIC IPv4 는 전체 범위 관리자만.",
+        "OS 이름: Dell 은 iDRAC ServerOS 속성(서버에 iSM 이 있어야 채워짐), HPE 는 HostOS. 수집 서버 · 엣지가 이 버전으로 올라와야 그쪽 서버에도 보입니다(엣지가 올린 서버는 요약만)."
+      ]
+    },
+    {
       "version": "3.2.1",
       "date": "2026-11-13",
       "title": "VM 사양 변경 — NIC 연결 해제 · NIC 추가가 vCenter 오류(SOAP 500 allowGuestControl)로 실패하던 결함 수정",
