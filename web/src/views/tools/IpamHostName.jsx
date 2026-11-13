@@ -40,7 +40,8 @@ export function HostNameCell({ r, canManage = false, onAdd }) {
 }
 
 /**
- * IP 상세 창의 '호스트명' 묶음 — 표시 이름 · 방식별 결과(서버 scanDetailOf) · '이름 다름' 안내 · NetBIOS 그룹/MAC · '이름 직접 지정'.
+ * IP 상세 창의 '호스트명' 묶음 — 표시 이름 · 방식별 결과(서버 scanDetailOf) · '이름 다름' 안내 · NetBIOS 그룹 · '이름 직접 지정'.
+ * v2.999: NetBIOS MAC 은 아래 'MAC · 제조사' 묶음(IpamMac.jsx MacBlock)으로 옮겼다(ARP MAC 과 함께 — 출처를 밝혀).
  * @param {{ row:object, scan:object|null|undefined, canManage?:boolean, onEditName?:Function }} props
  *   scan: undefined = 아직 모름(조회 중) · null = 스캔 결과 없음
  */
@@ -90,11 +91,6 @@ export function HostNameBlock({ row, scan, canManage = false, onEditName }) {
       {alt && (
         <div className="banner warn" style={{ marginTop: 8, whiteSpace: 'normal' }}>
           방식마다 다른 이름을 답했습니다. DNS 레코드가 예전 장비를 가리키고 있을 수 있습니다 — 어느 쪽이 맞는지는 포탈이 판정하지 않습니다.
-        </div>
-      )}
-      {scan?.mac && (
-        <div className="muted" style={{ fontSize: 12, marginTop: 8 }} title="NetBIOS 노드 상태 응답에 실린 어댑터 MAC 입니다(어댑터가 여럿이면 그중 하나)">
-          MAC <span style={{ fontFamily: 'var(--mono)' }}>{scan.mac}</span> <span style={{ fontSize: 11 }}>(NetBIOS 응답)</span>
         </div>
       )}
     </div>

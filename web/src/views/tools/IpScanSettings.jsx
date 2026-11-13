@@ -22,6 +22,7 @@ import { applyImport, classifyLine, otherSavedRanges, reflectDups } from './vcRa
 import { agentDupReasonText, agentName, ownersToSaved } from './scanRangeImportText.js';
 import { REPORT_STATE_TEXT, REPORT_STATE_TONE, agentReportRows, reportKpis, reportStateNote, reportStateDetail, agentDeleteConfirmText, agentDeleteResultText } from './scanRangeImportText.js';
 import { nameStatsCell, nameStatsText } from './ipamHostText.js'; // v2.991 호스트명 확인 요약
+import { macStatsCell, macStatsText } from './ipamMacText.js'; // v2.999 이웃 표 MAC 요약
 import { clearDraft } from './ipamDraft.js'; // v2.694: 지운 에이전트의 편집 초안이 옛 대역을 되살리지 않게
 import BoldText from '../../components/boldText.jsx';
 import { ScanRangeList } from './ScanRangeList.jsx'; // v2.692
@@ -381,8 +382,8 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
               </div>
             </div>
           )}
-          <STable className="v3-table" minWidth={1140}>
-            <thead><tr><th>에이전트</th><th>데이터센터</th><th>주기 스캔</th><th style={{ textAlign: 'right' }}>대역 / IP 수</th><th>마지막 보고</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th style={{ textAlign: 'right' }} title="마지막 완료 스캔에서 호스트명을 찾은 IP 수 / 응답한 IP 수">이름 확인</th><th>상태</th><th data-nosort>작업</th></tr></thead>
+          <STable className="v3-table" minWidth={1220}>
+            <thead><tr><th>에이전트</th><th>데이터센터</th><th>주기 스캔</th><th style={{ textAlign: 'right' }}>대역 / IP 수</th><th>마지막 보고</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th style={{ textAlign: 'right' }} title="마지막 완료 스캔에서 호스트명을 찾은 IP 수 / 응답한 IP 수">이름 확인</th><th style={{ textAlign: 'right' }} title="마지막 완료 스캔에서 스캐너 이웃 표(ARP)로 MAC 을 읽은 IP 수 / 스캐너와 같은 서브넷에서 응답한 IP 수">MAC</th><th>상태</th><th data-nosort>작업</th></tr></thead>
             <tbody>
               {reportList.map((x) => (
                 <tr key={x.name} style={x.name === agent ? { background: 'rgba(59,130,246,.10)' } : undefined}>
@@ -395,6 +396,10 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
                   {(() => { const c = nameStatsCell(x); return ( // v2.991 호스트명 확인(이전 버전 엣지는 '방식 보고 없음')
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} title={c.title} data-sort={x.nameStats?.named ?? ''}>
                       {c.noReport ? <span className="badge gray" style={{ fontSize: 10 }}>방식 보고 없음</span> : c.text}
+                    </td>); })()}
+                  {(() => { const c = macStatsCell(x); return ( // v2.999 이웃 표 MAC(이전 버전 엣지는 '보고 없음' · 표를 못 읽으면 사유)
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} title={c.title} data-sort={x.nameStats?.mac?.found ?? ''}>
+                      {c.tone === 'amber' ? <span className="badge amber" style={{ fontSize: 10 }}>{c.text}</span> : c.tone === 'muted' ? <span className="muted">{c.text}</span> : c.text}
                     </td>); })()}
                   <td data-sort={x.state} title={reportStateDetail(x)}>
                     <span className={`badge ${REPORT_STATE_TONE[x.state] || 'gray'}`}>{REPORT_STATE_TEXT[x.state]}</span>
@@ -531,7 +536,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         <span className="muted">이 포탈 상태 <b style={{ color: status?.running ? 'var(--amber)' : 'var(--text)' }}>{status?.running ? '스캔 중' : (status?.enabled ? '활성' : '비활성')}</b></span>{' · '}
         <span className="muted">저장된 결과 <b style={{ color: 'var(--text)' }}>{info?.count ?? 0}</b>개</span>
         {info?.byAgent && Object.keys(info.byAgent).length > 0 && <span className="muted"> ({Object.entries(info.byAgent).map(([a, n]) => `${agentLabel(a)}:${n}`).join(', ')})</span>}
-        {last && !last.skipped && !last.error && <span className="muted"> · 최근(포탈): {last.scanned}개 중 {last.alive}개 응답{nameStatsText(last.nameStats) ? ` · ${nameStatsText(last.nameStats)}` : ''}</span>}
+        {last && !last.skipped && !last.error && <span className="muted"> · 최근(포탈): {last.scanned}개 중 {last.alive}개 응답{nameStatsText(last.nameStats) ? ` · ${nameStatsText(last.nameStats)}` : ''}{macStatsText(last.nameStats) ? ` · ${macStatsText(last.nameStats)}` : ''}</span>}
         {last?.error && <span style={{ color: 'var(--red)' }}> · 오류: {last.error}</span>}
         <ScanProgressBar progress={status?.progress} />
       </div>

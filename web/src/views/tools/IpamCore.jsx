@@ -20,6 +20,8 @@ import { dbCountText, dbMetaText } from './ipamDbInfoText.js'; // v2.732: count:
 import { Card, useTool } from './shared.jsx';
 import { HostNameCell, HostNameBlock, NameSrcBadge } from './IpamHostName.jsx'; // v2.991 호스트명 칸 · IP 상세 창 호스트명 묶음
 import { scanNameSummary, scanNameSummaryParts } from './ipamHostText.js';
+import { MacCell, MacBlock } from './IpamMac.jsx'; // v2.999 제조사 · MAC 칸 · IP 상세 창 MAC 묶음
+import { scanMacSummary, scanMacSummaryParts, isUnregisteredVirtual, macSortValue } from './ipamMacText.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 
@@ -211,6 +213,8 @@ function Ipam({ scope, onScope }) {
       if (r.ownerType === 'scanned' && !r.netName) c.noname++; // v2.991: 이름을 찾지 못한 스캔 IP(직접 넣을 대상)
     }
     c.names = scanNameSummary(data?.rows || []); // v2.991: 스캔 IP 호스트명 요약(목록 위 한 줄)
+    c.macs = scanMacSummary(data?.rows || []); // v2.999: 스캔 IP MAC 요약(같은 줄) · '미등록 가상 NIC' 칩 수
+    c.vnic = c.macs.virtualUnreg;
     return c;
   }, [data]);
   const rows = useMemo(() => (data?.rows || []).filter((r) => {
@@ -222,7 +226,8 @@ function Ipam({ scope, onScope }) {
     if (reconFilter === 'unmanaged' && r.managed) return false;
     if (reconFilter === 'reserved' && !(r.reservedExpired || r.reservedExpiringSoon)) return false;
     if (reconFilter === 'noname' && !(r.ownerType === 'scanned' && !r.netName)) return false;
-    if (reconFilter && !['managed', 'unmanaged', 'reserved', 'noname'].includes(reconFilter) && r.reconcile !== reconFilter) return false;
+    if (reconFilter === 'vnic' && !isUnregisteredVirtual(r)) return false; // v2.999
+    if (reconFilter && !['managed', 'unmanaged', 'reserved', 'noname', 'vnic'].includes(reconFilter) && r.reconcile !== reconFilter) return false;
     if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term) || (r.netName || '').toLowerCase().includes(term) || (r.label || '').toLowerCase().includes(term) || (r.owner_ || '').toLowerCase().includes(term) || (r.note || '').toLowerCase().includes(term))) return false;
     return true;
   }), [data, term, rowFilter, reconFilter]);
@@ -250,6 +255,8 @@ function Ipam({ scope, onScope }) {
     ) },
     // v2.991: 호스트명 — 관리상태 이름 > 역DNS > mDNS > NetBIOS(서버 netName). IP 옆에 둔다(표가 가로로 넘겨도 IP 와 함께 보이게).
     { key: 'netName', label: '호스트명', sortValue: (r) => r.netName || null, render: (r) => <HostNameCell r={r} canManage={canManage} onAdd={() => setEditOv(r)} /> },
+    // v2.999: 제조사 · MAC — 스캔이 본 MAC(스캐너 이웃 표 ARP > NetBIOS) · 제조사(서버 macVendor). VM · 호스트 행에도(스캔 대역 안일 때).
+    { key: 'mac', label: '제조사 · MAC', sortValue: macSortValue, render: (r) => <MacCell r={r} /> },
     { key: 'scope', label: '분류', sortValue: (r) => r.scope || '', render: (r) => (
       <span className={`badge ${r.scope === 'public' ? 'amber' : 'green'}`}>{r.scope === 'public' ? '공인' : '사설'}</span>
     ) },
@@ -486,7 +493,8 @@ function Ipam({ scope, onScope }) {
               ['managed', `관리상태 지정됨 (${recon.managed})`, 'amber'],
               ['unmanaged', `미관리 (${recon.unmanaged})`, 'gray'],
               ['reserved', `⏳ 예약 만료/임박 (${recon.reserved})`, 'amber'],
-              ['noname', `호스트명 없음(스캔 IP) (${recon.noname})`, 'gray']].map(([k, label]) => (
+              ['noname', `호스트명 없음(스캔 IP) (${recon.noname})`, 'gray'],
+              ...(recon.vnic > 0 || reconFilter === 'vnic' ? [['vnic', `미등록 가상 NIC (${recon.vnic})`, 'teal']] : [])].map(([k, label]) => (
               <button key={k} className={reconFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => k ? toggleRecon(k) : setReconFilter('')}>{label}</button>
             ))}
             {canManage && <button className="logout-btn" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} title="수동으로 IP를 등록하거나 한 대역을 일괄 관리(예약 등)" onClick={() => setEditOv({ ip: '', __new: true })}>＋ IP 수동 등록 / 일괄 관리</button>}
@@ -498,6 +506,13 @@ function Ipam({ scope, onScope }) {
                 title="스캔으로만 확인한 IP 의 호스트명 — 직접 넣은 이름 · 역DNS · mDNS · NetBIOS 중 표시한 것의 출처별 개수입니다">
                 <span className="muted">스캔 IP 호스트명</span> <b>{recon.names.named.toLocaleString()}</b><span className="muted">/ {recon.names.total.toLocaleString()}</span>
                 {scanNameSummaryParts(recon.names).map((p) => <span key={p.key} className={`badge ${p.tone}`} style={{ fontSize: 10 }}>{p.label}</span>)}
+              </span>
+            )}
+            {recon.macs.withMac > 0 && (
+              <span className="flex gap wrap" style={{ alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}
+                title="스캔으로만 확인한 IP 중 MAC 을 아는 수 — 같은 서브넷은 스캐너 이웃 표(ARP), 다른 서브넷은 NetBIOS 가 답했을 때만 압니다">
+                <span className="muted">MAC</span> <b>{recon.macs.withMac.toLocaleString()}</b><span className="muted">/ {recon.macs.total.toLocaleString()}</span>
+                {scanMacSummaryParts(recon.macs).map((p) => <span key={p.key} className={`badge ${p.tone}`} style={{ fontSize: 10 }}>{p.label}</span>)}
               </span>
             )}
           </div>
@@ -641,6 +656,7 @@ function IpHistoryModal({ row, scope, onClose, canManage = false, onEditName = n
   return (
     <Modal title={`IP 사용 이력 — ${ip}`} onClose={onClose} width={640} resizable minWidth={440} minHeight={380}>
       {h !== undefined && !hErr && <HostNameBlock row={row} scan={scan} canManage={canManage} onEditName={onEditName} />}
+      {h !== undefined && !hErr && <MacBlock scan={scan} />}
       {h === undefined ? <Loading /> : hErr ? <ErrorBox message={`IP 사용 이력을 읽지 못했습니다 — ${hErr}`} /> : !h ? (
         <div style={{ padding: 8 }}>
           <div className="muted" style={{ fontSize: 13 }}>이 IP의 스캔 이력이 아직 없습니다. IP 능동 스캔이 이 대역을 한 번 이상 관측하면, 확인 시점·호스트명·사용/미사용 기간이 여기에 쌓입니다.</div>

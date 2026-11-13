@@ -11,6 +11,7 @@ import { recordScanLog } from './scanLog.js';
 import { scheduleVcRangeMigration } from './vcRangeMigrate.js';
 import { scanStarted, scanFinished, registerScanResumer, journalFor, isResumePending } from '../util/scanJournal.js'; // v2.737: 재시작으로 중단된 스캔 기록·재개 // v2.691: vCenter 별 대역 → 수집 에이전트로 1회 이전 // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
 import { numOrNull } from '../util/numOrNull.js';
+import { warmOui } from './macVendor.js'; // v2.999: 제조사 표 미리 읽기
 import { fwdNamesFor } from './scanNames.js'; // v2.993: 정방향 DNS 이름(물리서버 — 라우트 층이 공급)
 
 // 로컬 폴러가 실제로 스캔할 대역 = __local__ 설정 대역 ∪ enabled인 모든 vCenter 대역(유니크).
@@ -28,7 +29,14 @@ function nameMethodsText(s) {
 function nameStatsLogText(ns) {
   if (!ns || ns.named == null) return '';
   const parts = ['dns', 'mdns', 'netbios'].filter((k) => (ns.tried?.[k] ?? 0) > 0).map((k) => `${METHOD_LABEL[k]} ${ns.found?.[k] ?? 0}`);
-  return `호스트명 ${ns.named}개 확인${parts.length ? `(${parts.join(' · ')})` : ''}`;
+  return `호스트명 ${ns.named}개 확인${parts.length ? `(${parts.join(' · ')})` : ''}${macLogText(ns.mac)}`;
+}
+// v2.999: 이웃 표(ARP) 요약 — 같은 서브넷 IP 중 MAC 을 읽은 수. 표를 못 읽었으면 사유(무음 실패 금지).
+const MAC_REASON_TEXT = { unsupported: '리눅스가 아니라 이웃 표를 읽지 않음', unreadable: '이웃 표를 읽지 못함', off: '읽지 않음' };
+function macLogText(m) {
+  if (!m) return '';
+  if (m.reason) return ` · MAC ${MAC_REASON_TEXT[m.reason] || m.reason}`;
+  return m.onLink ? ` · MAC ${m.found ?? 0}/${m.onLink}(같은 서브넷)` : ' · MAC 같은 서브넷 IP 없음';
 }
 
 // 일정 시간 응답이 없으면 'IP 해제'로 간주(이력에 down 기록). 스캔 주기의 3배 또는 최소 3시간.
@@ -178,6 +186,8 @@ export function rescheduleScanPoller() {
 
 export function startIpScanPoller() {
   const s = loadScanSettings();
+  // v2.999: 제조사 표(약 560KB 압축)를 기동 뒤 한 번 미리 읽는다 — 대장을 처음 만드는 요청이 동기 적재(약 45ms)를 맡지 않게(macVendor.warmOui).
+  setTimeout(() => { warmOui().catch(() => {}); }, 15_000).unref?.();
   // v2.737: 이전 프로세스가 끝내지 못한 스캔을 로그에 남긴다(조용히 사라지지 않게) — 재개는 기동 30초 뒤 주기 스캔 또는 scanJournal 이 한다.
   try {
     for (const x of journalFor('ipscan').interrupted) {

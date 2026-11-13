@@ -388,6 +388,7 @@ export function registerOpsRoutes(centralRouter, deps) {
 
   // Agent posts its IP-scan result. Body: { agent, alive:[{ip,openPorts,services,hostname, names?, tried?, nbGroup?, mac?}], scanned, nameStats? }
   //   v2.991: names·tried·nbGroup·mac(호스트명 확인)과 nameStats(방식별 요약)는 scanStore 가 아는 키 · 아는 모양만 받는다(cleanAliveHost · cleanNameStats).
+  //   v2.999: arpMac · arpTried(스캐너 이웃 표의 MAC)와 nameStats.mac({onLink, found, reason})도 같은 정제(cleanAliveHost · cleanMacStats).
   //   본문 상한은 index.js 의 BIG_JSON(이미 등록 — 행마다 방식별 이름이 실려도 8,000행이 1mb 기본을 넘지 않게 걱정할 필요가 없다).
   centralRouter.post('/ip-scan-result', requireCentral({ notFound: { ok: false } }), (req, res) => {
     const b = req.body || {};
