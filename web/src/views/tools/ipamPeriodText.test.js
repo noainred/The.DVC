@@ -1,4 +1,4 @@
-// v2.994.1 — IP 사용 이력 창의 사용 · 미사용 기간(periodText). 해제된 적 없는 IP 의 '총 미사용 기간' 이 '0ms' 로 보였다.
+// v2.995.1 — IP 사용 이력 창의 사용 · 미사용 기간(periodText). 해제된 적 없는 IP 의 '총 미사용 기간' 이 '0ms' 로 보였다.
 import { describe, it, expect } from 'vitest';
 import { periodText, fmtDur } from './ipamShared.jsx';
 
