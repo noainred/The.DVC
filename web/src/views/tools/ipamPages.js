@@ -25,6 +25,8 @@ export const IPAM_PAGES = Object.freeze([
   { k: 'scan', label: '스캔 대역·설정', icon: '🛰️', group: 'scan', admin: true, title: '에이전트별 스캔 대역(iDRAC·VM 대역 가져오기)·포트·주기' },
   { k: 'status', label: '스캔 상태', icon: '📡', group: 'scan', admin: true, title: '진행 중 스캔 + 완료된 스캔 이력' },
   { k: 'log', label: '스캔 로그', icon: '🧾', group: 'scan', admin: true, title: '스캔 시작·종료·실패·건너뜀·엣지 보고·설정 변경 기록' },
+  // v3.1.0(시안 ipam-alerts-mac-dns ②): 스캔이 본 변화 — 새 미등록 IP · MAC 변경 · 충돌 의심 · 호스트명 변경 · 예약 IP 사용 시작
+  { k: 'changes', label: 'IP 변화', icon: '🔔', group: 'scan', admin: true, title: '스캔이 본 변화 — 새 미등록 IP · MAC 변경 · 충돌 의심 · 호스트명 변경' },
   { k: 'ipms', label: 'IPMS 설정', icon: '⚙', group: 'setup', admin: true, title: '무시 대역 · vCenter 스캔 대역 · 공인/사설 분류' },
   { k: 'csv', label: 'CSV 가져오기·내보내기', icon: '⇅', group: 'setup', csv: true, title: '대장 내보내기 · IP 관리상태·메모 CSV · 스캔 대역 CSV' },
 ]);

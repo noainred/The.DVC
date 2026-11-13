@@ -184,7 +184,7 @@ test('S6 ledger — _ipamKey 는 ipamRevKey() 를 재사용한다(리비전 조�
   assert.ok(keyLine, '_ipamKey 선언');
   assert.match(keyLine, /\|\$\{ipamRevKey\(\)\}\$\{_dcKey\(/, '리비전 조각은 ipamRevKey() 하나');
   assert.ok(!/settingsRev\(\)|scanRev\(\)/.test(keyLine), '_ipamKey 줄에 인라인 리비전이 없다');
-  assert.match(src, /export function ipamRevKey\(\) \{ return `s\$\{settingsRev\(\)\}\|a\$\{annotationsRev\(\)\}\|n\$\{scanRev\(\)\}\|o\$\{overridesRev\(\)\}\|p\$\{policiesRev\(\)\}`; \}/, 'ipamRevKey 값 형식은 그대로(라우트 memo 키가 본다)');
+  assert.match(src, /export function ipamRevKey\(\) \{ return `s\$\{settingsRev\(\)\}\|a\$\{annotationsRev\(\)\}\|n\$\{scanRev\(\)\}\|o\$\{overridesRev\(\)\}\|p\$\{policiesRev\(\)\}\|c\$\{conflictRev\(\)\}`; \}/, 'ipamRevKey 값 형식(라우트 memo 키가 본다 — v3.1.0: 끝에 |c 충돌 의심 리비전)');
 });
 
 /* ── I3 ─────────────────────────────────────────────────────────────────────── */

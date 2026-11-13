@@ -13,6 +13,7 @@
  *   hostnameOverride  자동 hostname을 덮어쓸 이름
  *   reservedUntil ISO 문자열 — 예약 만료 시각(없으면 무기한)
  *   note          한 줄 비고(메모/태그는 annotations.js가 담당, 여기는 상태성 비고)
+ *   macAlertOff   v3.1.0 — 이 IP 의 'MAC 변경' 알림 제외(이중화 장비 등 · 변화 기록은 계속)
  *   updatedAt/updatedBy
  */
 
@@ -102,13 +103,15 @@ function clean(partial = {}) {
     if (!v) out.reservedUntil = null;
     else out.reservedUntil = reservedUntilIso(v);
   }
+  // v3.1.0: 'MAC 변경 알림 제외'(이중화 장비 등 — 기록은 계속한다 · ipam/changeNotify.js). 불리언 참만 켠다.
+  if (partial.macAlertOff !== undefined) out.macAlertOff = partial.macAlertOff === true;
   return out;
 }
 
 // 의미 있는 값이 하나도 없으면 레코드를 제거(빈 껍데기 방지).
 function isEmpty(rec) {
   return !rec || (!rec.status && !rec.owner && !rec.label && !rec.deviceType
-    && !rec.hostnameOverride && !rec.note && !rec.reservedUntil && !rec.claimedVcenterId);
+    && !rec.hostnameOverride && !rec.note && !rec.reservedUntil && !rec.claimedVcenterId && !rec.macAlertOff);
 }
 
 function persist(data) {

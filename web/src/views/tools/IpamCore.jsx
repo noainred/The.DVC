@@ -14,6 +14,7 @@ import { ScanStatusModal } from './IpamScanStatus.jsx';
 import { IPAM_HASH_KEYS, IPAM_PAGE_ALIASES, ipamPage, menuGroups, pageDeniedNote } from './ipamPages.js'; // v2.636 IP관리 서브메뉴
 import { dirtyKeys, dirtyPages, onDraftChange } from './ipamDraft.js';
 import { IpamScanLog } from './IpamScanLog.jsx';
+import { IpamChanges } from './IpamChanges.jsx'; // v3.1.0 IP 변화
 import { IpamCsv } from './IpamCsv.jsx';
 import { reservedUntilText } from './ipamReserveText.js';
 import { dbCountText, dbMetaText } from './ipamDbInfoText.js'; // v2.732: count:null(범위 계정·못 읽음)에서 죽지 않게
@@ -22,6 +23,7 @@ import { HostNameCell, HostNameBlock, NameSrcBadge } from './IpamHostName.jsx'; 
 import { scanNameSummary, scanNameSummaryParts } from './ipamHostText.js';
 import { MacCell, MacBlock } from './IpamMac.jsx'; // v2.999 제조사 · MAC 칸 · IP 상세 창 MAC 묶음
 import { scanMacSummary, scanMacSummaryParts, isUnregisteredVirtual, macSortValue } from './ipamMacText.js';
+import { hasMacAlert } from './ipamChangeText.js'; // v3.1.0 '충돌 · MAC 변경' 칩
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 
@@ -215,6 +217,7 @@ function Ipam({ scope, onScope }) {
     c.names = scanNameSummary(data?.rows || []); // v2.991: 스캔 IP 호스트명 요약(목록 위 한 줄)
     c.macs = scanMacSummary(data?.rows || []); // v2.999: 스캔 IP MAC 요약(같은 줄) · '미등록 가상 NIC' 칩 수
     c.vnic = c.macs.virtualUnreg;
+    c.macAlert = (data?.rows || []).filter(hasMacAlert).length; // v3.1.0: 충돌 의심 · 최근 MAC 변경
     return c;
   }, [data]);
   const rows = useMemo(() => (data?.rows || []).filter((r) => {
@@ -227,7 +230,8 @@ function Ipam({ scope, onScope }) {
     if (reconFilter === 'reserved' && !(r.reservedExpired || r.reservedExpiringSoon)) return false;
     if (reconFilter === 'noname' && !(r.ownerType === 'scanned' && !r.netName)) return false;
     if (reconFilter === 'vnic' && !isUnregisteredVirtual(r)) return false; // v2.999
-    if (reconFilter && !['managed', 'unmanaged', 'reserved', 'noname', 'vnic'].includes(reconFilter) && r.reconcile !== reconFilter) return false;
+    if (reconFilter === 'macalert' && !hasMacAlert(r)) return false; // v3.1.0
+    if (reconFilter && !['managed', 'unmanaged', 'reserved', 'noname', 'vnic', 'macalert'].includes(reconFilter) && r.reconcile !== reconFilter) return false;
     if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term) || (r.netName || '').toLowerCase().includes(term) || (r.label || '').toLowerCase().includes(term) || (r.owner_ || '').toLowerCase().includes(term) || (r.note || '').toLowerCase().includes(term))) return false;
     return true;
   }), [data, term, rowFilter, reconFilter]);
@@ -344,6 +348,7 @@ function Ipam({ scope, onScope }) {
       : view === 'scan' ? <IpScanSettings asPage onSaved={() => setReload((n) => n + 1)} />
       : view === 'status' ? <ScanStatusModal asPage />
       : view === 'log' ? <IpamScanLog />
+      : view === 'changes' ? <IpamChanges />
       : view === 'ipms' ? <IpmsSettings asPage access={access} />
       : view === 'csv' ? <IpamCsv scope={scope} access={access} canManage={canManage} onGoto={go} onApplied={() => setReload((n) => n + 1)} />
       : view === 'netmap' ? (
@@ -494,7 +499,8 @@ function Ipam({ scope, onScope }) {
               ['unmanaged', `미관리 (${recon.unmanaged})`, 'gray'],
               ['reserved', `⏳ 예약 만료/임박 (${recon.reserved})`, 'amber'],
               ['noname', `호스트명 없음(스캔 IP) (${recon.noname})`, 'gray'],
-              ...(recon.vnic > 0 || reconFilter === 'vnic' ? [['vnic', `미등록 가상 NIC (${recon.vnic})`, 'teal']] : [])].map(([k, label]) => (
+              ...(recon.vnic > 0 || reconFilter === 'vnic' ? [['vnic', `미등록 가상 NIC (${recon.vnic})`, 'teal']] : []),
+              ...(recon.macAlert > 0 || reconFilter === 'macalert' ? [['macalert', `충돌 의심 · MAC 변경 (${recon.macAlert})`, 'red']] : [])].map(([k, label]) => (
               <button key={k} className={reconFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => k ? toggleRecon(k) : setReconFilter('')}>{label}</button>
             ))}
             {canManage && <button className="logout-btn" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} title="수동으로 IP를 등록하거나 한 대역을 일괄 관리(예약 등)" onClick={() => setEditOv({ ip: '', __new: true })}>＋ IP 수동 등록 / 일괄 관리</button>}
