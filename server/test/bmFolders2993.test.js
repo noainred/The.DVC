@@ -1,5 +1,5 @@
 /**
- * v2.993 묶음 C(설계 docs/design/bm-folders §14 결정 1-(가)) — 폴더 등록 저장 키 자동 변경(fl: → st:) · '태그 없음' 표지.
+ * v2.995 묶음 C(설계 docs/design/bm-folders §14 결정 1-(가)) — 폴더 등록 저장 키 자동 변경(fl: → st:) · '태그 없음' 표지.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';

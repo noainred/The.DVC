@@ -118,7 +118,7 @@ const missingName = (x, admin, hide) => {
 };
 
 /*
- * v2.993(묶음 C — 폴더 등록 키 정리): 등록 저장 키 자동 변경. 조회 응답을 만든 **뒤** 한 번 쓴다(setImmediate — 응답을 막지 않는다 · 진행 중이면 겹쳐 쓰지 않는다).
+ * v2.995(묶음 C — 폴더 등록 키 정리): 등록 저장 키 자동 변경. 조회 응답을 만든 **뒤** 한 번 쓴다(setImmediate — 응답을 막지 않는다 · 진행 중이면 겹쳐 쓰지 않는다).
  *   사람이 고른 위치(경로)는 바뀌지 않는다 — 열쇠만 태그 키로. 저장소를 못 읽었으면 mutateAssign 이 503 으로 막는다(쓰지 않음).
  *   감사 로그에 '시스템' 으로 남긴다(누가 바꿨나 — 자동). 세대가 올라 응답 캐시가 새로 만들어지고, 그때는 별칭을 쓰지 않으니 다시 옮기지 않는다.
  */
@@ -154,7 +154,7 @@ function serverRow(m, p, admin, hide, ix) {
     usrc: usageSrcOf(m.usage) || undefined,
     // v2.994(값 없음 사유 — 설계 §12): 사용률이 없을 때 서버가 판정한 사유 코드(+ 오래됨이면 마지막 값 시각). 코드만 — 계정 · 주소 · 엣지 이름을 싣지 않는다.
     why: ix !== undefined ? usageWhyOf(m, ix) || undefined : undefined,
-    // v2.993(묶음 C): 서비스 태그를 아직 읽지 못해 임시 키(fl: — 이름 해시)로 다루는 서버 — 태그가 읽히면 등록이 태그 키로 저절로 옮겨 간다
+    // v2.995(묶음 C): 서비스 태그를 아직 읽지 못해 임시 키(fl: — 이름 해시)로 다루는 서버 — 태그가 읽히면 등록이 태그 키로 저절로 옮겨 간다
     tmpKey: String(m.key).startsWith('fl:') ? true : undefined,   // 키 접두어로(keyKind 는 'fleetId' 등 — 값이 다르다)
     watts: m.watts ?? null, faults: m.faults ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null,
     // 관리 주소 — 관리자 판본만(비관리자 · 데모에게 장비 주소를 싣지 않는다 — isAdminDetailUser 하나로 판정)
@@ -305,7 +305,7 @@ export function registerBmFolders(api) {
       if (!hide) {
         try { const { listEdgeFleet } = await import('../../central/fleet.js'); edgeAt = new Map(listEdgeFleet().map((e) => [e.agent, e.at || null])); } catch { edgeAt = new Map(); }
       }
-      scheduleKeyMigration(b.migrate);   // v2.993(묶음 C): 태그를 읽은 서버의 등록 저장 키를 st: 로(응답 뒤 · 다시 확인하고 쓴다)
+      scheduleKeyMigration(b.migrate);   // v2.995(묶음 C): 태그를 읽은 서버의 등록 저장 키를 st: 로(응답 뒤 · 다시 확인하고 쓴다)
       const servers = [];
       const ix = await currentWhyIndex();   // v2.994: 값 없음 사유 — 베어메탈 사용률 대상 해석(60초 memo · 실패면 null = '확인 못 함')
       for (const m of members) {
