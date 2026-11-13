@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디스크 배드 섹터 분석 — 전 법인</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0;box-sizing:border-box}
+.h{font-size:13.5px;font-weight:700}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626;flex-wrap:wrap}
+.seg button{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;font-size:12.5px;font-weight:700;color:#8b9bb4;white-space:nowrap}
+.seg button.on{background:#3b82f6;color:#ffffff}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+th button{all:unset;cursor:pointer}
+th.r,td.r{text-align:right}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-size:12.5px;line-height:1.45;white-space:nowrap}
+.box{overflow-x:auto;border:1px solid #243049;border-radius:10px}
+.kpi{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px;min-width:0;display:flex;flex-direction:column;gap:2px}
+.kpi b{font-size:22px;font-weight:800;line-height:1.2}
+.kpi span{font-size:11.5px;color:#8b9bb4}
+.dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
+.rate{display:flex;align-items:center;gap:8px;min-width:150px}
+.rate i{display:block;height:8px;border-radius:0 4px 4px 0;background:#3b82f6}
+.plot{position:relative;display:flex;align-items:flex-end;gap:6px;height:140px;border-bottom:1px solid #243049}
+.grid{position:absolute;left:0;right:0;border-top:1px dashed #1f2a40}
+.grid span{position:absolute;right:100%;top:-8px;padding-right:6px;font-size:10.5px;color:#8b9bb4}
+.col{position:relative;flex:1;min-width:14px;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%}
+.col .fx{display:block;background:#f59e0b;border-radius:4px 4px 0 0}
+.col .bd{display:block;background:#ef4444}
+.cov{display:flex;align-items:flex-end;gap:6px;height:36px;border-bottom:1px solid #243049}
+.cov i{flex:1;min-width:14px;display:block;background:#3b82f6;opacity:.75;border-radius:3px 3px 0 0}
+.xl{display:flex;gap:6px;font-size:10.5px;color:#8b9bb4}
+.xl span{flex:1;min-width:14px;text-align:center;white-space:nowrap;overflow:visible}
+</style>
+</helmet>
+<div style="width:100%;min-height:1760px;box-sizing:border-box;background:#0a0e17;padding:20px 24px 40px;color:#e6edf6;font-family:'Inter','Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:13px">
+<div style="max-width:1392px;margin:0 auto;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px 16px;flex-wrap:wrap">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">디스크 배드 섹터 분석</div>
+      <div class="muted">전 법인 서버의 iDRAC Lifecycle 로그에서 찾은 배드 섹터 기록 — 아직 쓰고 있는 디스크, 국가·법인별, 모델별, 월별 추이.</div>
+    </div>
+    <div class="seg" role="tablist" aria-label="보기">
+      <button type="button" class="on" aria-current="page">요약</button>
+      <button type="button">디스크 목록</button>
+      <button type="button">국가·법인</button>
+      <button type="button">모델</button>
+      <button type="button">추이</button>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px">
+    <div style="min-width:0;line-height:1.6">
+      <b>서버 1,157대 중 1,096대 읽음</b> · 못 읽음 44대 · 대상 아님 17대(Lifecycle 로그 없는 장비)
+      <div class="muted" style="font-size:12px">법인 엣지가 매일 한 번 새 로그만 이어 읽어 올립니다 · 마지막 수신 2026-11-14 06:40 · 못 읽은 44대의 디스크는 아래 수치에 들어 있지 않습니다</div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn" type="button">못 읽은 서버 44대</button>
+      <button class="btn" type="button">엑셀</button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:10px">
+    <div class="kpi"><b>131</b><span>배드 섹터 기록이 있는 디스크 자리 (서버 97대)</span></div>
+    <div class="kpi" style="border-color:rgba(239,68,68,.55)"><b><span class="dot" style="background:#ef4444"></span>58</b><span>그 디스크를 <b style="font-size:11.5px;color:#e6edf6">아직 사용 중</b></span></div>
+    <div class="kpi"><b>61</b><span>이미 교체됨</span></div>
+    <div class="kpi"><b>12</b><span>판단 불가 (교체 여부를 알 수 없음)</span></div>
+    <div class="kpi"><b>13.3</b><span>디스크 1,000개당 기록 디스크 (9,840개 중 131)</span></div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="h">배드 섹터 기록이 있는데 아직 쓰고 있는 디스크 <span class="muted" style="font-weight:400">58개 중 6개 · 복구 불가 많은 순</span></div>
+      <div class="seg" aria-label="판정">
+        <button type="button" class="on">아직 사용 중 58</button>
+        <button type="button">교체됨 61</button>
+        <button type="button">판단 불가 12</button>
+      </div>
+    </div>
+    <div class="box">
+    <table style="min-width:1120px">
+      <thead><tr>
+        <th><button type="button">국가 · 법인</button></th>
+        <th><button type="button">서버</button></th>
+        <th><button type="button">슬롯</button></th>
+        <th><button type="button">모델 · 시리얼</button></th>
+        <th class="r" aria-sort="descending"><button type="button">복구 불가 ▼</button></th>
+        <th class="r"><button type="button">복구됨</button></th>
+        <th><button type="button">최근 기록</button></th>
+        <th><button type="button">지금 상태</button></th>
+        <th><button type="button">‘아직 사용 중’ 근거</button></th>
+      </tr></thead>
+      <tbody>
+        <tr><td>인도 · IN 첸나이</td><td><a href="#server">IN-ESX-R740-021</a></td><td><b>Disk 2</b></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1K9M2X</div></td><td class="r mono"><b>6</b></td><td class="r mono">9</td><td class="mono">2026-11-09</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
+        <tr><td>폴란드 · PL 바르샤바</td><td><a href="#server">PL-DB-R750-003</a></td><td><b>Disk 7</b></td><td>모델 A · 2.4 TB SAS<div class="muted mono" style="font-size:11.5px">S/N WBM2F81R</div></td><td class="r mono"><b>4</b></td><td class="r mono">2</td><td class="mono">2026-11-06</td><td><span class="tag warn">경고 · 고장 예측</span></td><td>시리얼이 기록 전후로 같음</td></tr>
+        <tr><td>미국 · US 동부</td><td><a href="#server">US-ESX-R650-112</a></td><td><b>Disk 0</b></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1P44TQ</div></td><td class="r mono"><b>2</b></td><td class="r mono">0</td><td class="mono">2026-08-21</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
+        <tr><td>한국 · KR 본사</td><td><a href="#server">KR-ESX-R750-014</a></td><td><b>Disk 5</b></td><td>모델 A · 2.4 TB SAS<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td><td class="r mono"><b>1</b></td><td class="r mono">2</td><td class="mono">2026-11-03</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
+        <tr><td>독일 · DE 프랑크푸르트</td><td><a href="#server">DE-BK-R740XD-002</a></td><td><b>Disk 11</b></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1M70HD</div></td><td class="r mono"><b>1</b></td><td class="r mono">5</td><td class="mono">2026-07-30</td><td><span class="tag ok">정상 (OK)</span></td><td>시리얼이 기록 전후로 같음</td></tr>
+        <tr><td style="border-bottom:none">한국 · KR 평택</td><td style="border-bottom:none"><a href="#server">KR-GPU-R760XA-007</a></td><td style="border-bottom:none"><b>Disk 1</b></td><td style="border-bottom:none">모델 D · 960 GB SATA SSD<div class="muted mono" style="font-size:11.5px">S/N S4EWNX0R</div></td><td class="r mono" style="border-bottom:none"><b>0</b></td><td class="r mono" style="border-bottom:none">3</td><td class="mono" style="border-bottom:none">2026-05-14</td><td style="border-bottom:none"><span class="tag ok">정상 (OK)</span></td><td style="border-bottom:none">기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="muted" style="font-size:12px">‘교체 기록 없음’ 은 로그로 미룬 것이고, ‘시리얼 같음’ 은 포탈이 그때 적어 둔 시리얼과 맞춘 것입니다. 서버 이름을 누르면 그 서버의 디스크 이력이 열립니다.</span>
+      <button class="btn" type="button">나머지 52개 더 보기</button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:14px">
+
+    <div class="card">
+      <div class="h">국가 · 법인별 <span class="muted" style="font-weight:400">28곳 중 8곳 · 1,000개당 많은 순</span></div>
+      <div class="box">
+      <table style="min-width:620px">
+        <thead><tr>
+          <th><button type="button">국가 · 법인</button></th>
+          <th class="r"><button type="button">서버 읽음</button></th>
+          <th class="r"><button type="button">디스크</button></th>
+          <th class="r"><button type="button">기록 디스크</button></th>
+          <th aria-sort="descending"><button type="button">1,000개당 ▼</button></th>
+          <th class="r"><button type="button">사용 중</button></th>
+        </tr></thead>
+        <tbody>
+          <tr><td>인도 · IN 첸나이</td><td class="r mono">39 / 52</td><td class="r mono">344</td><td class="r mono">12</td><td><div class="rate"><i style="width:100px"></i><span class="mono">34.9</span></div></td><td class="r mono"><b>8</b></td></tr>
+          <tr><td>폴란드 · PL 바르샤바</td><td class="r mono">61 / 64</td><td class="r mono">540</td><td class="r mono">14</td><td><div class="rate"><i style="width:74px"></i><span class="mono">25.9</span></div></td><td class="r mono"><b>9</b></td></tr>
+          <tr><td>독일 · DE 프랑크푸르트</td><td class="r mono">44 / 45</td><td class="r mono">396</td><td class="r mono">8</td><td><div class="rate"><i style="width:58px"></i><span class="mono">20.2</span></div></td><td class="r mono"><b>5</b></td></tr>
+          <tr><td>미국 · US 동부</td><td class="r mono">74 / 80</td><td class="r mono">688</td><td class="r mono">11</td><td><div class="rate"><i style="width:46px"></i><span class="mono">16.0</span></div></td><td class="r mono"><b>7</b></td></tr>
+          <tr><td>한국 · KR 본사</td><td class="r mono">212 / 214</td><td class="r mono">2,104</td><td class="r mono">19</td><td><div class="rate"><i style="width:26px"></i><span class="mono">9.0</span></div></td><td class="r mono"><b>6</b></td></tr>
+          <tr><td>한국 · KR 평택</td><td class="r mono">96 / 96</td><td class="r mono">912</td><td class="r mono">7</td><td><div class="rate"><i style="width:22px"></i><span class="mono">7.7</span></div></td><td class="r mono"><b>2</b></td></tr>
+          <tr><td>미국 · US 서부</td><td class="r mono">58 / 58</td><td class="r mono">502</td><td class="r mono">3</td><td><div class="rate"><i style="width:17px"></i><span class="mono">6.0</span></div></td><td class="r mono"><b>1</b></td></tr>
+          <tr><td style="border-bottom:none">베트남 · VN 하노이</td><td class="r mono" style="border-bottom:none">47 / 47</td><td class="r mono" style="border-bottom:none">410</td><td class="r mono" style="border-bottom:none">2</td><td style="border-bottom:none"><div class="rate"><i style="width:14px"></i><span class="mono">4.9</span></div></td><td class="r mono" style="border-bottom:none"><b>0</b></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="muted" style="font-size:12px">IN 첸나이는 52대 중 13대를 못 읽었습니다 — 읽은 서버의 디스크만으로 낸 값입니다.</span>
+        <button class="btn" type="button">나머지 20곳</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="h">모델별 <span class="muted" style="font-weight:400">지금 꽂혀 있는 디스크 기준</span></div>
+      <div class="box">
+      <table style="min-width:600px">
+        <thead><tr>
+          <th><button type="button">모델</button></th>
+          <th class="r"><button type="button">장착 수</button></th>
+          <th class="r"><button type="button">기록 디스크</button></th>
+          <th aria-sort="descending"><button type="button">비율 ▼</button></th>
+          <th class="r"><button type="button">복구 불가</button></th>
+        </tr></thead>
+        <tbody>
+          <tr><td>모델 E · 4 TB NL-SAS <span class="tag gray">표본 적음</span></td><td class="r mono">18</td><td class="r mono">1</td><td><div class="rate"><i style="width:100px;opacity:.4"></i><span class="mono">5.56%</span></div></td><td class="r mono">1</td></tr>
+          <tr><td>모델 C · 8 TB NL-SAS</td><td class="r mono">1,124</td><td class="r mono">14</td><td><div class="rate"><i style="width:22px"></i><span class="mono">1.25%</span></div></td><td class="r mono">11</td></tr>
+          <tr><td>모델 A · 2.4 TB SAS</td><td class="r mono">2,960</td><td class="r mono">31</td><td><div class="rate"><i style="width:19px"></i><span class="mono">1.05%</span></div></td><td class="r mono">22</td></tr>
+          <tr><td>모델 B · 2.4 TB SAS</td><td class="r mono">2,210</td><td class="r mono">9</td><td><div class="rate"><i style="width:7px"></i><span class="mono">0.41%</span></div></td><td class="r mono">4</td></tr>
+          <tr><td>모델 D · 960 GB SATA SSD</td><td class="r mono">1,870</td><td class="r mono">3</td><td><div class="rate"><i style="width:3px"></i><span class="mono">0.16%</span></div></td><td class="r mono">1</td></tr>
+          <tr><td style="border-bottom:none">모델을 알 수 없음<div class="muted" style="font-size:11.5px">교체되어 지금 없는 디스크 61 · 판단 불가 12</div></td><td class="r mono" style="border-bottom:none">—</td><td class="r mono" style="border-bottom:none">73</td><td style="border-bottom:none">—</td><td class="r mono" style="border-bottom:none">—</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <span class="muted" style="font-size:12px;line-height:1.6">로그에는 모델·시리얼이 없습니다. 이미 교체된 디스크 73개는 어느 모델이었는지 알 수 없어 비율에서 빠졌고, 그만큼 실제보다 낮게 나옵니다. 포탈이 수집을 시작한 뒤의 교체분부터는 모델이 채워집니다.</span>
+    </div>
+
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="h">월별 추이 <span class="muted" style="font-weight:400">최근 18개월 · 기록 건수</span></div>
+      <div style="display:flex;gap:6px 16px;flex-wrap:wrap;font-size:12px;color:#aebbd0">
+        <span><span class="dot" style="background:#ef4444"></span>복구 불가</span>
+        <span><span class="dot" style="background:#f59e0b"></span>복구됨</span>
+        <span><span class="dot" style="background:#3b82f6;opacity:.75"></span>그 달 로그가 남아 있는 서버 비율</span>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+    <div style="min-width:560px;padding-left:26px;display:flex;flex-direction:column;gap:6px">
+      <div class="plot" role="img" aria-label="월별 배드 섹터 기록 건수 누적 막대. 2025년 6월 3건에서 2026년 10월 16건으로 늘었다.">
+        <div class="grid" style="bottom:40px"><span>5</span></div>
+        <div class="grid" style="bottom:80px"><span>10</span></div>
+        <div class="grid" style="bottom:120px"><span>15</span></div>
+        <div class="col" title="2025-06 · 복구 불가 1 · 복구됨 2"><i class="fx" style="height:16px"></i><i class="bd" style="height:8px"></i></div>
+        <div class="col" title="2025-07 · 복구 불가 0 · 복구됨 3"><i class="fx" style="height:24px"></i></div>
+        <div class="col" title="2025-08 · 복구 불가 2 · 복구됨 2"><i class="fx" style="height:16px"></i><i class="bd" style="height:16px"></i></div>
+        <div class="col" title="2025-09 · 복구 불가 1 · 복구됨 4"><i class="fx" style="height:32px"></i><i class="bd" style="height:8px"></i></div>
+        <div class="col" title="2025-10 · 복구 불가 1 · 복구됨 3"><i class="fx" style="height:24px"></i><i class="bd" style="height:8px"></i></div>
+        <div class="col" title="2025-11 · 복구 불가 3 · 복구됨 3"><i class="fx" style="height:24px"></i><i class="bd" style="height:24px"></i></div>
+        <div class="col" title="2025-12 · 복구 불가 2 · 복구됨 5"><i class="fx" style="height:40px"></i><i class="bd" style="height:16px"></i></div>
+        <div class="col" title="2026-01 · 복구 불가 2 · 복구됨 4"><i class="fx" style="height:32px"></i><i class="bd" style="height:16px"></i></div>
+        <div class="col" title="2026-02 · 복구 불가 1 · 복구됨 6"><i class="fx" style="height:48px"></i><i class="bd" style="height:8px"></i></div>
+        <div class="col" title="2026-03 · 복구 불가 3 · 복구됨 5"><i class="fx" style="height:40px"></i><i class="bd" style="height:24px"></i></div>
+        <div class="col" title="2026-04 · 복구 불가 2 · 복구됨 7"><i class="fx" style="height:56px"></i><i class="bd" style="height:16px"></i></div>
+        <div class="col" title="2026-05 · 복구 불가 4 · 복구됨 6"><i class="fx" style="height:48px"></i><i class="bd" style="height:32px"></i></div>
+        <div class="col" title="2026-06 · 복구 불가 3 · 복구됨 8"><i class="fx" style="height:64px"></i><i class="bd" style="height:24px"></i></div>
+        <div class="col" title="2026-07 · 복구 불가 5 · 복구됨 7"><i class="fx" style="height:56px"></i><i class="bd" style="height:40px"></i></div>
+        <div class="col" title="2026-08 · 복구 불가 4 · 복구됨 9"><i class="fx" style="height:72px"></i><i class="bd" style="height:32px"></i></div>
+        <div class="col" title="2026-09 · 복구 불가 6 · 복구됨 9"><i class="fx" style="height:72px"></i><i class="bd" style="height:48px"></i></div>
+        <div class="col" title="2026-10 · 복구 불가 5 · 복구됨 11"><i class="fx" style="height:88px"></i><i class="bd" style="height:40px"></i></div>
+        <div class="col" title="2026-11 (진행 중) · 복구 불가 3 · 복구됨 5" style="opacity:.6"><i class="fx" style="height:40px"></i><i class="bd" style="height:24px"></i></div>
+      </div>
+      <div class="cov" role="img" aria-label="그 달의 로그가 남아 있는 서버 비율. 2025년 6월 52퍼센트에서 2026년 11월 95퍼센트.">
+        <i style="height:19px" title="2025-06 · 52%"></i><i style="height:19px" title="2025-07 · 54%"></i><i style="height:21px" title="2025-08 · 57%"></i><i style="height:22px" title="2025-09 · 60%"></i><i style="height:23px" title="2025-10 · 63%"></i><i style="height:24px" title="2025-11 · 66%"></i><i style="height:25px" title="2025-12 · 70%"></i><i style="height:26px" title="2026-01 · 73%"></i><i style="height:27px" title="2026-02 · 76%"></i><i style="height:28px" title="2026-03 · 79%"></i><i style="height:30px" title="2026-04 · 82%"></i><i style="height:31px" title="2026-05 · 85%"></i><i style="height:32px" title="2026-06 · 88%"></i><i style="height:32px" title="2026-07 · 90%"></i><i style="height:33px" title="2026-08 · 92%"></i><i style="height:34px" title="2026-09 · 94%"></i><i style="height:34px" title="2026-10 · 95%"></i><i style="height:34px" title="2026-11 · 95%"></i>
+      </div>
+      <div class="xl mono">
+        <span>25-06</span><span></span><span></span><span>25-09</span><span></span><span></span><span>25-12</span><span></span><span></span><span>26-03</span><span></span><span></span><span>26-06</span><span></span><span></span><span>26-09</span><span></span><span>26-11</span>
+      </div>
+    </div>
+    </div>
+    <span class="muted" style="font-size:12px;line-height:1.6">아래 파란 막대가 낮은 달(52% → 95%)은 로그가 남아 있는 서버가 적어 건수가 적게 잡힙니다. 위 막대가 오른쪽으로 갈수록 높아지는 것의 일부는 그 때문입니다 — 실제로 늘었는지는 파란 막대가 비슷한 달끼리만 비교할 수 있습니다. 2026-11 은 진행 중인 달입니다.</span>
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
