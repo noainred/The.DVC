@@ -60,4 +60,5 @@
   ⑥ **엣지 포탈(v2.996)**: 저장소는 중앙 하나 — 엣지는 `GET /api/central/bm-folders`(**개별 토큰만** · 그 엣지 법인만 · **엣지 키** `edgeKeyOfRow` · 규칙 값 · 등록자 · 주소 없음 — `edgeBundle.js`)를
   `agent/bmFoldersPull.js`(10분 · 지난 사본 유지 · edgelog 등재)로 받아 `bm-folders-central.json`(`edgeCopy.js` — 다시 정제 · 경로는 글자만 · 손상 보존)에 두고 **읽기 전용**(`/op` 409).
   사본 배치는 같은 법인일 때만 놓는다 · '이 엣지 밖 등록' 이름 · 받기 오류 원문은 전체 범위 관리자만. 회귀 `bmFolders2994`(변이 9/9).
+  ⑦ 폴더 옮기기(v2.995 `folder.move`): 같은 법인 안 · 부모만 — 이름 바꾸기와 **같은 공통부**(하위 · 등록 · 법인 규칙 · 서비스 인벤토리 규칙 · `svcRulePlan` 겹침 409) · 자기/하위 409 · 같은 이름 409 · 없는 곳 404 · parent 글자만 · **하위 폴더 새 경로도 검증**(깊이). 회귀 `bmFolders2995`(변이 5/5).
 - 회귀: `server/test/bmFolders2984.test.js` · `bmFolders2987.test.js`(v2.987 · 2차 반증 반영 — 변이 12/12) · 웹 `web/src/views/tools/bmFoldersText.test.js`.
