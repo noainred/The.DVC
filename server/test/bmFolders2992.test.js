@@ -1,5 +1,5 @@
 /**
- * v2.992 묶음 B(설계 docs/design/bm-folders §12) — 값 없음 사유(서버 판정 코드).
+ * v2.994 묶음 B(설계 docs/design/bm-folders §12) — 값 없음 사유(서버 판정 코드).
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';

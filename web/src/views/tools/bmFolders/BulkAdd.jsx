@@ -11,7 +11,7 @@ import Select from '../../../components/Select.jsx';
 import DataList from '../../../components/DataList.jsx';
 import { SrcBadge, StatusDot } from './parts.jsx';
 import { SRC_LABEL, parseQuery, highlight, previewAssign, pathText, opErrorText, trimPath } from '../bmFoldersText.js';
-import { pickAll, pickNotInFolder, pickNote } from './whyText.js'; // v2.992: 고르기 버튼
+import { pickAll, pickNotInFolder, pickNote } from './whyText.js'; // v2.994: 고르기 버튼
 
 const btn = { padding: '6px 12px', flex: 'none' };
 const ON_LABEL = { name: '이름', tag: '서비스 태그', model: '모델', addr: '관리 주소' };
@@ -28,7 +28,7 @@ export default function BulkAdd({ init, d, corpName, op, busy, onClose }) {
   const [err, setErr] = useState('');
   const [off, setOff] = useState({ corp: new Set(), src: new Set(), state: new Set(), model: new Set() });
   const [checked, setChecked] = useState(() => new Set());
-  const [pickMsg, setPickMsg] = useState('');   // v2.992: 고르기 버튼 결과 문장
+  const [pickMsg, setPickMsg] = useState('');   // v2.994: 고르기 버튼 결과 문장
   const [path, setPath] = useState(init.path || '');
   const [moveExisting, setMoveExisting] = useState(false);
   const [saveRule, setSaveRule] = useState(false);
@@ -139,7 +139,7 @@ export default function BulkAdd({ init, d, corpName, op, busy, onClose }) {
                 {res.shown < res.total ? <span className="muted">앞 {res.shown}대만 받았습니다 — 글자를 더 넣어 좁히십시오</span> : null}
               </div>
               {rows.length ? (
-                // v2.992(설계 §12 ⑤): 고르기 버튼 셋 — 찾은 서버 전부(표에 보이지 않는 줄 포함 · 왼쪽 조건으로 뺀 줄은 제외)에 적용하고 결과를 문장으로 말한다
+                // v2.994(설계 §12 ⑤): 고르기 버튼 셋 — 찾은 서버 전부(표에 보이지 않는 줄 포함 · 왼쪽 조건으로 뺀 줄은 제외)에 적용하고 결과를 문장으로 말한다
                 <div className="flex wrap gap" role="group" aria-label="고르기" style={{ alignItems: 'center' }}>
                   <button type="button" className="bmf-chip" onClick={() => { const n = pickAll(rows); setChecked(n); setPickMsg(pickNote('all', rows, n)); }}>전체 선택 {rows.length}</button>
                   <button type="button" className="bmf-chip" onClick={() => { const n = pickNotInFolder(rows); setChecked(n); setPickMsg(pickNote('notin', rows, n)); }}>폴더에 없는 서버만 선택 {rows.filter((x) => x.place !== 'manual').length}</button>

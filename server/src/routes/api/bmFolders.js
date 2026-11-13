@@ -20,7 +20,7 @@
  */
 import { requirePerm, requireRole } from '../../auth/auth.js';
 import { usageSrcOf } from '../../bmfolders/usageSrc.js'; // v2.993: 사용률 지표별 출처(출처 색)
-import { usageWhyOf, currentWhyIndex } from '../../bmfolders/usageWhy.js'; // v2.992: 값 없음 사유
+import { usageWhyOf, currentWhyIndex } from '../../bmfolders/usageWhy.js'; // v2.994: 값 없음 사유
 import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { todayStamp } from '../../util/dayKey.js';
@@ -125,7 +125,7 @@ function serverRow(m, p, admin, hide, ix) {
     powered: m.powered, usage: m.usage?.state || 'unread', cpu: m.usage?.cpuPct ?? null, mem: m.usage?.memPct ?? null,
     // v2.993(출처 색): 지표별 출처 { cpu, mem } — 'os' · 'idrac' · 'vcenter' · null. 장비 단서가 아니라 판본 구분 없이 싣는다.
     usrc: usageSrcOf(m.usage) || undefined,
-    // v2.992(값 없음 사유 — 설계 §12): 사용률이 없을 때 서버가 판정한 사유 코드(+ 오래됨이면 마지막 값 시각). 코드만 — 계정 · 주소 · 엣지 이름을 싣지 않는다.
+    // v2.994(값 없음 사유 — 설계 §12): 사용률이 없을 때 서버가 판정한 사유 코드(+ 오래됨이면 마지막 값 시각). 코드만 — 계정 · 주소 · 엣지 이름을 싣지 않는다.
     why: ix !== undefined ? usageWhyOf(m, ix) || undefined : undefined,
     watts: m.watts ?? null, faults: m.faults ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null,
     // 관리 주소 — 관리자 판본만(비관리자 · 데모에게 장비 주소를 싣지 않는다 — isAdminDetailUser 하나로 판정)
@@ -277,7 +277,7 @@ export function registerBmFolders(api) {
         try { const { listEdgeFleet } = await import('../../central/fleet.js'); edgeAt = new Map(listEdgeFleet().map((e) => [e.agent, e.at || null])); } catch { edgeAt = new Map(); }
       }
       const servers = [];
-      const ix = await currentWhyIndex();   // v2.992: 값 없음 사유 — 베어메탈 사용률 대상 해석(60초 memo · 실패면 null = '확인 못 함')
+      const ix = await currentWhyIndex();   // v2.994: 값 없음 사유 — 베어메탈 사용률 대상 해석(60초 memo · 실패면 null = '확인 못 함')
       for (const m of members) {
         if (!m.corp ? hide || m.kind !== 'bm' : !(allowed ? allowed.has(m.corp) : true)) continue;
         const p = b.placeOf.get(m.key);
@@ -286,7 +286,7 @@ export function registerBmFolders(api) {
       }
       return {
         ok: true, at: g.at, rev: storeRev(), scoped: hide, admin, canWrite: writerOk(req.user), canFleet: full,
-        usageOff: !!ix?.off,   // v2.992: 이 노드의 베어메탈 사용률 수집이 꺼져 있다(화면 위 띠 — 칸마다 같은 이유를 보지 않게)
+        usageOff: !!ix?.off,   // v2.994: 이 노드의 베어메탈 사용률 수집이 꺼져 있다(화면 위 띠 — 칸마다 같은 이유를 보지 않게)
         settings: { autoRules: b.autoRules },
         corps: b.corps.map((c) => ({
           ...c, name: g.corpNames?.get(c.vcenterId) || c.vcenterId, writable: writableOf(req.user, s, c.vcenterId),

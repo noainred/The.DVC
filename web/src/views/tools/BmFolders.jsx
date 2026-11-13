@@ -17,7 +17,7 @@ import MapView from './bmFolders/MapView.jsx';
 import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
 import { SRC_COLOR, SRC_SHORT, rowSrcClass, srcCounts, metricSrcText } from './bmFolders/usageSrc.js'; // v2.993: 사용률 출처 색
-import { whyBands, whyShort, WHY_DOT } from './bmFolders/whyText.js'; // v2.992: 값 없음 사유
+import { whyBands, whyShort, WHY_DOT } from './bmFolders/whyText.js'; // v2.994: 값 없음 사유
 import {
   INTRO, PLACE_LABEL, MISSING_WHY, pctText, wattsText, pathText, lastSeg, parentOf, ageText,
   rowsOf, aggregate, filterRows, resultNote, foldersByName, opErrorText, csvNameOf, trimPath,
@@ -721,7 +721,7 @@ function SrcSummary({ rows }) {
   );
 }
 
-/** v2.992(값 없음 사유 — 설계 §12): 값이 없는 칸의 사유별 개수 띠 — 누르면 그 사유의 서버만(다시 누르면 풂). 사유가 없으면 그리지 않는다. */
+/** v2.994(값 없음 사유 — 설계 §12): 값이 없는 칸의 사유별 개수 띠 — 누르면 그 사유의 서버만(다시 누르면 풂). 사유가 없으면 그리지 않는다. */
 function WhyBand({ rows, quick, setQuick }) {
   const bands = whyBands(rows);
   if (!bands.length) return null;

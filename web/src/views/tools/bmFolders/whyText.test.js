@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { whyOf, whyShort, whyBands, agoText, pickAll, pickNotInFolder, pickNote } from './whyText.js';
 import { filterRows } from '../bmFoldersText.js';
 
-describe('v2.992 값 없음 사유(설계 bm-folders §12)', () => {
+describe('v2.994 값 없음 사유(설계 bm-folders §12)', () => {
   it('모르는 코드는 확인 못 함 · 오래됨은 경과 시간', () => {
     expect(whyOf('zzz').s).toBe('확인 못 함');
     const now = 10 * 3600_000;
@@ -17,7 +17,7 @@ describe('v2.992 값 없음 사유(설계 bm-folders §12)', () => {
   });
 });
 
-describe('v2.992 고르기 버튼(서버 찾아 등록)', () => {
+describe('v2.994 고르기 버튼(서버 찾아 등록)', () => {
   const rows = [{ key: 'a', place: 'manual' }, { key: 'b', place: null }, { key: 'c', place: 'auto' }];
   it('전체 · 폴더에 없는 서버만(손 등록 없는 서버 — 자동 규칙만인 서버 포함) · 결과 문장', () => {
     expect([...pickAll(rows)]).toEqual(['a', 'b', 'c']);

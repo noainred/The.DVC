@@ -1,5 +1,5 @@
 /**
- * bmfolders/usageWhy.js — 물리서버 폴더 **값 없음 사유**(v2.992 · 설계 docs/design/bm-folders §12). 판정은 서버 — 화면은 코드를 글자로 바꿀 뿐이다.
+ * bmfolders/usageWhy.js — 물리서버 폴더 **값 없음 사유**(v2.994 · 설계 docs/design/bm-folders §12). 판정은 서버 — 화면은 코드를 글자로 바꿀 뿐이다.
  *
  * 사용률(CPU · 메모리)이 없는 칸의 사유 코드. 근거는 베어메탈 사용률 대상 해석(`bmusage/poller.js currentTargets` — 누락 점검과 같은 입력 · 같은 사유 코드)이다.
  *   off              — 이 노드의 베어메탈 사용률 수집이 꺼져 있다(엣지가 수집하는 서버는 그 엣지 설정이라 이 코드가 아니다)

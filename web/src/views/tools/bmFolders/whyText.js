@@ -1,5 +1,5 @@
 /**
- * 물리서버 폴더 값 없음 사유 문구(v2.992 · 설계 docs/design/bm-folders §12). 판정은 서버(`bmfolders/usageWhy.js`) — 여기는 코드 → 글자만.
+ * 물리서버 폴더 값 없음 사유 문구(v2.994 · 설계 docs/design/bm-folders §12). 판정은 서버(`bmfolders/usageWhy.js`) — 여기는 코드 → 글자만.
  * 분류(점 색): none = 수집 대상 아님(회색) · stale = 오래됨(호박색) · fail = 수집 실패/기록 없음(빨강) · unknown = 확인 못 함(빈 원).
  * 문구에 계정 · 주소 · 엣지 이름을 넣지 않는다(판본 구분 없이 같은 글자).
  */
