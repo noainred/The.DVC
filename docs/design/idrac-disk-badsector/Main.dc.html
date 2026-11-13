@@ -183,17 +183,18 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size
   <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
     <div style="font-size:13.5px;font-weight:700">기록이 있는 슬롯의 지금 디스크</div>
     <div style="overflow-x:auto;border:1px solid #243049;border-radius:10px">
-    <table style="min-width:760px">
+    <table style="min-width:960px">
       <thead><tr>
         <th><button type="button">슬롯</button></th>
         <th><button type="button">모델 · 시리얼</button></th>
+        <th><button type="button">지금 쓰이는 곳</button></th>
         <th><button type="button">현재 상태</button></th>
         <th><button type="button">SMART 고장 예측</button></th>
         <th><button type="button">이 디스크의 기록</button></th>
       </tr></thead>
       <tbody>
-        <tr><td class="nw"><b>Disk 5</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>ST2400MM0159 · 2.4 TB SAS HDD<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td><td><span class="tag ok">정상 (OK)</span></td><td class="nw">아님</td><td><span class="tag bad">배드 섹터 이력 · 아직 사용 중</span><div style="margin-top:4px"><b>3건</b> — 상태는 정상으로 읽히지만 최근 3개월 사이 오류가 이어졌습니다</div></td></tr>
-        <tr><td class="nw" style="border-bottom:none"><b>Disk 3</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td style="border-bottom:none">ST2400MM0159 · 2.4 TB SAS HDD<div class="muted mono" style="font-size:11.5px">S/N WBM3K7QL</div></td><td style="border-bottom:none"><span class="tag ok">정상 (OK)</span></td><td class="nw" style="border-bottom:none">아님</td><td style="border-bottom:none">0건 — 2025-01-15 교체 뒤로 기록 없음</td></tr>
+        <tr><td class="nw"><b>Disk 5</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>ST2400MM0159 · 2.4 TB SAS HDD<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td><td>로컬 데이터스토어 KR-ESX-014-local<div class="note">가상 디스크 0 의 구성원 · VM 6대가 씀 · <a href="Usage.dc.html">따라가 보기</a></div></td><td><span class="tag ok">정상 (OK)</span></td><td class="nw">아님</td><td><span class="tag bad">배드 섹터 이력 · 아직 사용 중</span><div style="margin-top:4px"><b>3건</b> — 상태는 정상으로 읽히지만 최근 3개월 사이 오류가 이어졌습니다</div></td></tr>
+        <tr><td class="nw" style="border-bottom:none"><b>Disk 3</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td style="border-bottom:none">ST2400MM0159 · 2.4 TB SAS HDD<div class="muted mono" style="font-size:11.5px">S/N WBM3K7QL</div></td><td style="border-bottom:none">같은 데이터스토어<div class="note">가상 디스크 0 의 구성원</div></td><td style="border-bottom:none"><span class="tag ok">정상 (OK)</span></td><td class="nw" style="border-bottom:none">아님</td><td style="border-bottom:none">0건 — 2025-01-15 교체 뒤로 기록 없음</td></tr>
       </tbody>
     </table>
     </div>

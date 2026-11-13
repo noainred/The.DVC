@@ -67,7 +67,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
       <div class="cap">1 · 범위 고르기</div>
       <fieldset style="border:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;min-width:0">
         <legend class="h" style="padding:0 0 8px">어디를 점검할까요</legend>
-        <label class="opt"><input type="radio" name="scope"><span style="color:#e6edf6"><b>전체 — 모든 법인의 서버</b><span>법인 28곳 · 서버 1,140대 (HPE iLO 등 17대 제외)</span></span></label>
+        <label class="opt"><input type="radio" name="scope"><span style="color:#e6edf6"><b>전체 — 모든 법인의 서버</b><span>법인 28곳 · 서버 1,140대 (HPE iLO 등 17대 제외) · 법인마다 따로 돌고, 도는 중에도 법인별로 다시 점검 · 중단할 수 있습니다</span></span></label>
         <label class="opt on"><input type="radio" name="scope" checked><span style="color:#e6edf6"><b>법인을 골라서</b><span>고른 법인의 서버만 점검합니다</span></span></label>
       </fieldset>
 
@@ -104,15 +104,15 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
     </section>
 
     <section class="card" style="flex:999 1 560px;max-width:100%">
-      <div class="cap">2 · 진행 — 법인마다 따로 돌고, 끝난 법인부터 결과가 들어옵니다</div>
+      <div class="cap">2 · 진행 (전체 점검의 예) — 법인마다 따로 돌고, 법인별로 다시 점검 · 중단할 수 있습니다</div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <div style="line-height:1.5"><span class="h">점검 중 — 서버 196대 중 105대</span><div class="muted" style="font-size:12px">2026-11-14 07:10 시작 · 법인 3곳 · 새 로그만 이어 읽기 · 시작한 사람 admin</div></div>
-        <button class="btn" type="button">중단</button>
+        <div style="line-height:1.5"><span class="h">전체 점검 중 — 법인 28곳 중 19곳 끝남 · 서버 1,140대 중 742대</span><div class="muted" style="font-size:12px">2026-11-14 07:10 시작 · 새 로그만 이어 읽기 · 시작한 사람 admin · 읽는 중 7곳 · 시작 못 함 2곳</div></div>
+        <button class="btn" type="button">전체 중단</button>
       </div>
-      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="196" aria-valuenow="105" aria-label="전체 진행"><i style="width:53.6%"></i></div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="1140" aria-valuenow="742" aria-label="전체 진행"><i style="width:65.1%"></i></div>
 
       <div class="box">
-      <table style="min-width:720px">
+      <table style="min-width:860px">
         <thead><tr>
           <th><button type="button">국가 · 법인</button></th>
           <th><button type="button">상태</button></th>
@@ -120,14 +120,19 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
           <th class="r"><button type="button">못 읽음</button></th>
           <th class="r"><button type="button">새 기록</button></th>
           <th class="r"><button type="button">걸린 시간</button></th>
+          <th class="r">이 법인만</th>
         </tr></thead>
         <tbody>
-          <tr><td>폴란드 · PL 바르샤바</td><td><span class="tag ok">끝남</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:100%"></i></div><span class="mono">64 / 64</span></div></td><td class="r mono">3</td><td class="r mono"><b>2</b></td><td class="r mono">6분 12초</td></tr>
-          <tr><td>미국 · US 동부</td><td><span class="tag run">읽는 중</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:51.3%"></i></div><span class="mono">41 / 80</span></div></td><td class="r mono">2</td><td class="r mono"><b>1</b></td><td class="r mono">4분 40초째</td></tr>
-          <tr><td style="border-bottom:none">인도 · IN 첸나이</td><td style="border-bottom:none"><span class="tag bad">엣지 응답 없음</span></td><td style="border-bottom:none"><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:0%"></i></div><span class="mono">0 / 52</span></div></td><td class="r mono" style="border-bottom:none">—</td><td class="r mono" style="border-bottom:none">—</td><td class="r mono" style="border-bottom:none">—</td></tr>
+          <tr><td>폴란드 · PL 바르샤바</td><td><span class="tag ok">끝남</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:100%"></i></div><span class="mono">64 / 64</span></div></td><td class="r mono">3</td><td class="r mono"><b>2</b></td><td class="r mono">6분 12초</td><td class="r"><button class="btn" type="button">다시 점검</button></td></tr>
+          <tr><td>한국 · KR 본사</td><td><span class="tag ok">끝남</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:100%"></i></div><span class="mono">214 / 214</span></div></td><td class="r mono">2</td><td class="r mono"><b>0</b></td><td class="r mono">3분 05초</td><td class="r"><button class="btn" type="button">다시 점검</button></td></tr>
+          <tr><td>한국 · KR 평택</td><td><span class="tag ok">끝남</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:100%"></i></div><span class="mono">96 / 96</span></div></td><td class="r mono">0</td><td class="r mono"><b>1</b></td><td class="r mono">1분 48초</td><td class="r"><button class="btn" type="button">다시 점검</button></td></tr>
+          <tr><td>독일 · DE 프랑크푸르트</td><td><span class="tag run">읽는 중</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:66.7%"></i></div><span class="mono">30 / 45</span></div></td><td class="r mono">1</td><td class="r mono"><b>0</b></td><td class="r mono">3분 20초째</td><td class="r"><button class="btn" type="button">중단</button></td></tr>
+          <tr><td>미국 · US 동부</td><td><span class="tag run">읽는 중</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:51.3%"></i></div><span class="mono">41 / 80</span></div></td><td class="r mono">2</td><td class="r mono"><b>1</b></td><td class="r mono">4분 40초째</td><td class="r"><button class="btn" type="button">중단</button></td></tr>
+          <tr><td style="border-bottom:none">인도 · IN 첸나이</td><td style="border-bottom:none"><span class="tag bad">엣지 응답 없음</span></td><td style="border-bottom:none"><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:0%"></i></div><span class="mono">0 / 52</span></div></td><td class="r mono" style="border-bottom:none">—</td><td class="r mono" style="border-bottom:none">—</td><td class="r mono" style="border-bottom:none">—</td><td class="r" style="border-bottom:none"><button class="btn" type="button">다시 보내기</button></td></tr>
         </tbody>
       </table>
       </div>
+      <div><button class="btn" type="button">나머지 22곳 더 보기</button></div>
       <div class="muted" style="font-size:12px;line-height:1.6">IN 첸나이는 엣지가 작업을 받아 가지 않아 시작하지 못했습니다(엣지 마지막 보고 05:41). 엣지가 돌아오면 이 작업을 이어 받습니다 — 기다리는 시한이 지나면 ‘시작 못 함’ 으로 닫습니다. 이 창을 닫아도 점검은 계속됩니다.</div>
 
       <div class="cap" style="padding-top:6px;border-top:1px solid #1f2a40">3 · 끝난 뒤 — 지난 점검 결과 (2026-11-14 02:00 · 전체 · 자동 — 6시간마다)</div>
