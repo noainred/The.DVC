@@ -60,6 +60,7 @@ export const MIGRATABLE = [
   { file: 'xfer-speed.db', label: '법인 간 전송 속도 측정 이력(중앙↔엣지 10MB 왕복 — 원시 + 일 요약, v2.735)' },
   { file: 'usage.db', label: '기능 사용 현황 — 사용자 × 화면 × 날 열람 수 · 머문 시간 일 집계(v2.913)' },
   { file: 'isidu.db', label: '아이실론 디렉터리 사용량 이력(사용자 폴더 크기 — 조사마다 전체, v2.736)' },
+  { file: 'disk-bad.db', label: '디스크 배드 섹터 이력(iDRAC Lifecycle 로그 · 시리얼 이력, v2.915)' },
   // vcenter-logs.db 는 **이미 자체 경로 설정**(설정 › 로그 수집의 storagePath)이 있어 제외한다 —
   // 두 곳에서 경로를 제어하면 어느 쪽이 이겼는지 알 수 없다(그 화면에서 옮기세요).
   // ipam.db 는 **외부 프로그램이 경로를 고정해 읽는 공유 파일**이라 기본 대상에서 제외한다

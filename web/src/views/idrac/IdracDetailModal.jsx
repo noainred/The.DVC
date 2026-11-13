@@ -27,6 +27,7 @@ import { bmcLabel } from '../tools/serverVendorText.js';
 import { partStatusBadge, linkBadge, portSpeedText, partsHeadline, failedKindsNote, statusMissingNote, partFaultNote, PART_STATE_TEXT } from './hwStatusText.js';
 import BoldText from '../../components/boldText.jsx';
 import { holdText } from '../tools/partFaultText.js';
+import { DiskBadServerPanel } from '../tools/DiskBadServerPanel.jsx'; // v2.915 디스크 이력 탭
 
 const LINE_COLORS = ['#60a5fa', '#f87171', '#34d399', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#e879f9', '#94a3b8', '#fca5a5'];
 const FW_TYPE_ORDER = ['iDRAC', 'BIOS', 'NIC', 'Storage', 'GPU', 'PSU', 'Disk', 'CPLD', 'Driver', '기타'];
@@ -218,7 +219,7 @@ export function IdracDetailModal({ server, onClose }) {
   const [invErr, setInvErr] = useState(null);
   const [sensors, setSensors] = useState(null);
   const [sensErr, setSensErr] = useState(null); // 센서 조회 실패(수집 0 과 구분해 표시)
-  const [tab, setTab] = useState('charts'); // charts | versions | gpu
+  const [tab, setTab] = useState('charts'); // charts | versions | gpu | disk(v2.915)
   const [gpuProbe, setGpuProbe] = useState(null); // null | 'loading' | result
   const [vh, setVh] = useState(null); // 서비스태그로 매칭된 vCenter 가상화 호스트
   const runGpuProbe = () => { setGpuProbe('loading'); fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/gpu-probe`).then(setGpuProbe).catch((e) => setGpuProbe({ ok: false, reason: e.message })); };
@@ -305,6 +306,8 @@ export function IdracDetailModal({ server, onClose }) {
           <button className={tab === 'charts' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setTab('charts')}>📈 센서 차트(온도·CPU)</button>
           <button className={tab === 'versions' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setTab('versions')}>🏷 하드웨어 / 버전</button>
           <button className={tab === 'gpu' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => { setTab('gpu'); if (!gpuProbe) runGpuProbe(); }}>🎮 GPU 수집 확인</button>
+          {/* v2.915: 디스크 배드 섹터 이력 — 도구 키 'disk-bad' 가 막힌 계정에는 탭을 그리지 않는다(서버도 tools 권한 · 범위로 막는다). */}
+          {toolAllowed('disk-bad') && <button className={tab === 'disk' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 14px' }} onClick={() => setTab('disk')}>💽 디스크 이력</button>}
           {tab === 'versions' && <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => { setInv(null); loadInv(true); }}>↻ 즉시 재수집</button>}
         </div>
 
@@ -555,6 +558,7 @@ export function IdracDetailModal({ server, onClose }) {
           )
         )}
 
+        {tab === 'disk' && <DiskBadServerPanel serverId={server.id} />}
         {tab === 'gpu' && (
           <div>
             <div className="flex gap" style={{ alignItems: 'center', marginBottom: 12 }}>

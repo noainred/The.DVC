@@ -150,6 +150,8 @@ import { startCurUserConfigPull } from './agent/curUserConfigPull.js'; // 〃 �
 import { startPartFaultPoller } from './partfault/poller.js';       // 파트 장애(v2.547) — 중앙: 스캔→전이→DB→알림
 import { startPartFaultPush } from './partfault/push.js';           // 〃 엣지: 로컬 판정 후 '장애 + 전체 요약' 을 중앙 push(v2.548 프로토콜 2)
 import { startPartFaultConfigPull } from './agent/partFaultConfigPull.js'; // 〃 중앙→엣지 스위치 배포(v2.548)
+import { startDiskBadJobs } from './diskbad/jobs.js';             // 디스크 배드 섹터 이력(v2.915) — 중앙: 작업 · 6시간 자동 점검(기본 꺼짐)
+import { startDiskBadEdge } from './diskbad/edge.js';             // 〃 엣지: 중앙 작업을 가져가 그 법인 iDRAC 로그를 읽고 결과 push
 import { startBmUsageConfigPull } from './agent/bmUsageConfigPull.js'; // v2.627 베어메탈 사용률 설정 중앙→엣지 배포
 import { startEdgeLogWorker } from './agent/edgeLogWorker.js';  // 엣지 로그 폴백 워커(v2.549) — 중앙이 못 닿는 법인에서만 쓰인다
 import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 사용률 수집(v2.550) — 기본 꺼짐, 법인 단위 opt-in
@@ -379,6 +381,7 @@ app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다
 // 엣지 쪽은 gzip 을 붙였지만 express.json 의 limit 은 **해제 후 길이**라 한도도 함께 올려야 한다.
 app.use('/api/central/storage-data', BIG_JSON);
 app.use('/api/central/part-faults', BIG_JSON);  // 파트 장애 push(v2.547) — 열린 장애가 많은 법인이 1mb 기본을 넘으면 413 = 조용한 소실
+app.use('/api/central/disk-bad', BIG_JSON);     // 디스크 배드 섹터 이력 push(v2.915) — 25대 묶음이라도 첫 점검(전량)은 서버당 기록 수천 건이 될 수 있다(413 = 조용한 소실)
 app.use('/api/central/edge-log-result', BIG_JSON);  // 엣지 로그 폴백 회신(v2.549) — 로그 400줄 × 줄당 최대 2,000자면 1mb 기본을 넘고, 413 은 재시도 대상이 아니라 조용한 소실이 된다
 // 엣지 로그 **연합 조회** 결과(v2.561) — v2.549 가 형제 경로만 등록해 이쪽이 빠져 있었다.
 // 실측: 500행(`checksLogs.js` 의 limit 상한) × vCenter 이벤트 message 1,900자 = 981KB 로 기본 1mb 에 닿고
@@ -636,6 +639,7 @@ const stagger = [
   // 중앙은 직접 수집분 + 엣지 보고를 합쳐 전이(열림/변화/해소)를 계산해 DB 에 남기고 알린다.
   // 둘 다 opt-in/조건부이며(PARTFAULT_ENABLED · CENTRAL_URL) 왜 안 도는지 로그가 말한다.
   startPartFaultPoller, startPartFaultPush, startPartFaultConfigPull, startBmUsageConfigPull,
+  startDiskBadJobs, startDiskBadEdge, // 디스크 배드 섹터 이력(v2.915) — 자동 점검은 설정에서 켤 때만 · 엣지 워커는 CENTRAL_URL 미설정이면 자기기동 안 함
   startEdgeLogWorker,
   startBmUsagePoller,
   startLinkCheckPoller,

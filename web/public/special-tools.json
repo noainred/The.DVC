@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-04T13:26:00.150Z",
-  "count": 121,
+  "generatedAt": "2026-11-13T23:42:39.594Z",
+  "count": 122,
   "tools": [
     {
       "k": "service-hub",
@@ -205,6 +205,14 @@
     {
       "k": "part-faults",
       "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "disk-bad",
+      "adminOnly": false,
       "perm": null,
       "external": null,
       "topTab": false,

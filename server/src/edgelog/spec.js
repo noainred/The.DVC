@@ -58,6 +58,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'push.isidu', label: '아이실론 디렉터리 사용량', group: 'push', mod: '../isidu/push.js', fn: 'isiduPushStatus' }, // v2.736
   { key: 'push.veeam', label: 'Veeam 백업 상태', group: 'push', mod: '../veeam/push.js', fn: 'veeamPushStatus' }, // v2.751
   { key: 'push.partFault', label: '파트 장애', group: 'push', mod: '../partfault/push.js', fn: 'partFaultPushStatus' },
+  { key: 'push.diskBad', label: '디스크 배드 섹터 이력', group: 'push', mod: '../diskbad/edge.js', fn: 'diskBadEdgeStatus' }, // v2.915 — 중앙 작업을 가져가 iDRAC Lifecycle 로그를 읽고 결과 push
   /*
    * ⚠ v2.554 에 추가 — v2.552 가 이 워커를 만들면서 **이 표에 넣지 않았다**. 그래서 엣지가
    *   보고하지 못하는 상황(개별 토큰 아님 403 · 잴 링크 0개 · 워커 미동작)을 중앙 화면에서도
