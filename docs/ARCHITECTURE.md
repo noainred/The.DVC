@@ -76,7 +76,7 @@
 <!-- arch-doc:modules:start -->
 | 디렉터리 | 파일 | 줄 | 대표 파일(밖에서 import 수) | 머리말 첫 줄 |
 |---|---:|---:|---|---|
-| `agent/` | 53 | 8,004 | `agent/envTimeout.js` (24) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
+| `agent/` | 53 | 8,012 | `agent/envTimeout.js` (24) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
 | `attach/` | 1 | 272 | `attach/store.js` (3) | attach/store.js — 위키 문서 · 이슈 첨부 파일(v2.889 · 시안 ⑨⑩ '첨부' · C-4). |
 | `auth/` | 15 | 4,218 | `auth/scope.js` (99) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
 | `availability/` | 1 | 205 | `availability/analyze.js` (2) | availability/analyze.js — 특수 기능 'VM 가용성(SLA)'(도구 키 `vm-availability`, v2.707 — C6) 판정(순수). |
@@ -97,7 +97,7 @@
 | `cost/` | 2 | 225 | `cost/analyze.js` (1) | cost/analyze.js — 특수 기능 '비용 배분(쇼백)'(도구 키 `cost-showback`, v2.707 — C11) 계산(순수). |
 | `curuser/` | 12 | 1,934 | `curuser/settings.js` (4) | curuser/settings.js — '현재 사용자' 수집 설정(v2.520). |
 | `cvp/` | 21 | 6,875 | `cvp/registry.js` (9) | cvp/registry.js — Arista CloudVision(CVP) 서버 등록부(v2.608). |
-| `datacenter/` | 1 | 206 | `datacenter/store.js` (42) | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. |
+| `datacenter/` | 1 | 206 | `datacenter/store.js` (43) | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. |
 | `dataflow/` | 1 | 305 | `dataflow/build.js` (3) | dataflow/build.js — '데이터 흐름 지도' 의 판정(v2.587, 순수 함수). |
 | `devflow/` | 1 | 204 | `devflow/build.js` (1) | devflow/build.js — 특수기능 '3단 지도(장비 → 엣지 → 메인)' 조립기(v2.588, 순수). |
 | `dirusage/` | 5 | 1,109 | `dirusage/scheduler.js` (3) | dirusage/scheduler.js — 폴더 사용량 스캔 주기 실행 + 메일 발송 (v2.454). |
@@ -117,14 +117,14 @@
 | `insights/` | 28 | 10,726 | `insights/analysisServers.js` (15) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
 | `intro/` | 5 | 1,967 | `intro/support.js` (0) | GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`. |
 | `inventory/` | 11 | 1,561 | `inventory/osKind.js` (3) | VM 게스트 OS 문자열 → 'windows' \| 'linux' \| 'other' \| null (v2.834 — Bareos 백업 대상 OS 구분). |
-| `ipam/` | 43 | 8,150 | `ipam/scanStore.js` (11) | IP 스캔 설정(에이전트별) + 결과 저장소. |
-| `isidu/` | 21 | 4,743 | `isidu/digestRules.js` (6) | isidu/digestRules.js — 아이실론 디렉터리 사용량 **종합 메일**의 순수 규칙(v2.742). 파일·타이머·메일 발송 없음. |
+| `ipam/` | 49 | 8,902 | `ipam/ledger.js` (11) | IPAM ledger builder — turns a snapshot into a per-center IP record list. |
+| `isidu/` | 21 | 4,743 | `isidu/digestRules.js` (7) | isidu/digestRules.js — 아이실론 디렉터리 사용량 **종합 메일**의 순수 규칙(v2.742). 파일·타이머·메일 발송 없음. |
 | `issues/` | 17 | 4,955 | `issues/store.js` (5) | issues/store.js — 이슈 트래커 저장소(v2.864). 포탈 공용 이슈(장애·작업·요청·개선)를 등록하고 담당자에게 할당해 끝날 때까지 추적한다. |
 | `linkcheck/` | 12 | 2,898 | `linkcheck/links.js` (5) | linkcheck/links.js — **설정에서 통신 링크를 자동으로 뽑는다**(순수, v2.552). |
 | `llm/` | 5 | 594 | `llm/config.js` (4) | Local LLM (Ollama) settings for natural-language search. Stored in |
 | `loganalysis/` | 8 | 2,076 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › 로그 › 로그 분석 파사드(v2.583). |
 | `logs/` | 6 | 2,106 | `logs/db.js` (16) | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 |
-| `mail/` | 3 | 479 | `mail/settings.js` (18) | mail/settings.js — 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). |
+| `mail/` | 3 | 480 | `mail/settings.js` (19) | mail/settings.js — 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). |
 | `metrics/` | 8 | 2,097 | `metrics/db.js` (12) | Generic metrics time-series store (host temperature, datastore usage, GPU |
 | `migration/` | 1 | 140 | `migration/analyze.js` (1) | migration/analyze.js — 특수 기능 'VM 이전 준비도'(도구 키 `migration-readiness`, v2.707 — C7) 판정(순수). |
 | `mock/` | 27 | 7,384 | `mock/demo/flags.js` (62) | mock/demo/flags.js — 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). |
@@ -144,7 +144,7 @@
 | `relaytopo/` | 4 | 680 | `relaytopo/store.js` (4) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 1,014 | `reports/compliance.js` (3) | 버전/패치 준수 리포트 — VMware Tools 상태·VM 하드웨어 버전·ESXi 버전 분포를 스냅샷만으로 |
 | `rma/` | 14 | 2,693 | `rma/jobs.js` (8) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 165 | 50,807 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
+| `routes/` | 165 | 50,859 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
 | `sanswitch/` | 51 | 11,457 | `sanswitch/registry.js` (11) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 4 | 932 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 20 | 4,829 | `security/secretVault.js` (35) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
@@ -160,7 +160,7 @@
 | `upgrade/` | 19 | 4,208 | `upgrade/manager.js` (8) | Orchestrates the auto-upgrade feature for the running portal: tracks the last |
 | `usage/` | 4 | 927 | `usage/settings.js` (2) | usage/settings.js — 기능 사용 추적 설정(v2.913). 파일 `usage-settings.json`(CONFIG_DIR, 비밀 없음). |
 | `usermenu/` | 1 | 370 | `usermenu/store.js` (1) | usermenu/store.js — 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). |
-| `util/` | 88 | 8,842 | `util/numOrNull.js` (272) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
+| `util/` | 88 | 8,842 | `util/numOrNull.js` (275) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
 | `vcenter/` | 28 | 7,874 | `vcenter/registry.js` (31) | vCenter registry — read/write the managed list of vCenters in |
 | `vcinfo/` | 2 | 790 | `vcinfo/collect.js` (6) | vCenter 알람 · 최근 작업 · 권한 목록 갱신(v2.898). 인벤토리 수집 한 주기 안에서(soapClient runAux) vCenter 마다 종류별 주기로 한 번. |
 | `veeam/` | 49 | 9,355 | `veeam/backupStatus.js` (11) | veeam/backupStatus.js — '백업' 메뉴(백업 서머리 · 백업 세부내용, v2.779 — 사용자 요청 "1개 vcenter 를 선택하면 VM 백업 전체 현황 · |
@@ -175,7 +175,7 @@
 | `wiki/` | 4 | 1,225 | `wiki/store.js` (6) | wiki/store.js — 위키(컨플루언스 같은 문서 공간) 저장소(v2.881 · 시안 docs/design/wiki-issues ①~⑤ · ⑫). |
 | `xferspeed/` | 7 | 1,993 | `xferspeed/schedule.js` (4) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 98개 · 파일 1418개 · 321,897줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 98개 · 파일 1424개 · 322,710줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
