@@ -688,12 +688,14 @@ tbody tr:last-child td { border-bottom: none; }
   position: fixed; top: 78px; right: 20px; z-index: 400; display: flex; align-items: center; gap: 12px;
   background: linear-gradient(135deg, #14233f, #0c1322); border: 1px solid var(--accent);
   border-radius: 12px; padding: 14px 16px; box-shadow: 0 10px 40px rgba(0,0,0,.5), 0 0 0 1px rgba(59,130,246,.2);
-  animation: up-slide .4s cubic-bezier(.2,1.2,.4,1); max-width: 360px;
+  animation: up-slide .4s cubic-bezier(.2,1.2,.4,1); max-width: 400px;   /* v2.999: 문구가 길어져 360 → 400 */
 }
 @keyframes up-slide { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-.up-toast-icon { font-size: 24px; }
-.up-toast-body { flex: 1; }
-.up-toast-title { font-weight: 800; color: var(--accent-2); }
+/* v2.999: 아이콘은 이모지 대신 새로고침 SVG(UpgradeNotice RefreshIcon) · 제목은 단어 단위로 줄바꿈 */
+.up-toast-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: none; border-radius: 50%;
+  background: rgba(34, 211, 238, .12); color: var(--accent-2); }
+.up-toast-body { flex: 1; min-width: 0; }
+.up-toast-title { font-weight: 800; color: var(--accent-2); line-height: 1.45; word-break: keep-all; }
 .up-toast-sub { font-size: 13px; color: var(--text-dim); margin-top: 2px; }
 .up-toast-reload {
   padding: 7px 12px; border-radius: 8px; border: none; cursor: pointer; font-weight: 700; font-size: 12px;
@@ -3579,8 +3581,8 @@ table.bmu-util tbody td { padding: 9px 10px; }
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); min-width: 0; box-sizing: border-box; }
 .login-screen > .upg-box { width: min(560px, calc(100vw - 32px)); }
 .upg-ico { width: 44px; height: 44px; flex: none; border-radius: 50%; background: rgba(34, 211, 238, .12); color: var(--accent-2); display: inline-flex; align-items: center; justify-content: center; }
-.upg-title { font-size: 16px; font-weight: 800; line-height: 1.45; color: var(--text); }
-.upg-sub { font-size: 12.5px; line-height: 1.6; color: var(--text-dim); max-width: 460px; }
+.upg-title { font-size: 16px; font-weight: 800; line-height: 1.45; color: var(--text); word-break: keep-all; }
+.upg-sub { font-size: 12.5px; line-height: 1.6; color: var(--text-dim); max-width: 460px; word-break: keep-all; }
 .upg-verline { display: inline-flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 8px; font-size: 12px; color: var(--text-dim); }
 .upg-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-deep);
   font-family: var(--mono); font-size: 11.5px; font-weight: 700; color: var(--text-dim); white-space: nowrap; flex: none; }
@@ -3594,8 +3596,9 @@ table.bmu-util tbody td { padding: 9px 10px; }
 .upg-list li::before { content: ''; position: absolute; left: 2px; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-2); }
 .upg-list.clamp li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 .upg-scroll { max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 6px; min-width: 0; }
-.upg-ver { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; font-weight: 700; color: var(--text); min-width: 0; }
-.upg-ver .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 펼친 목록의 판 제목은 자르지 않고 줄바꿈한다(Chromium 판독 — 말줄임이면 제목을 끝까지 읽을 길이 없다) */
+.upg-ver { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; font-size: 12px; font-weight: 700; line-height: 1.5; color: var(--text); min-width: 0; }
+.upg-ver .t { min-width: 0; overflow-wrap: anywhere; padding-top: 2px; }
 .upg-more { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; margin: -6px 0 -8px -10px;
   border: none; background: none; color: #93c5fd; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
 .upg-more:hover { color: #bfdbfe; }
@@ -3605,14 +3608,10 @@ table.bmu-util tbody td { padding: 9px 10px; }
 .ver-badge.upg-need { margin-left: 6px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700;
   color: #fcd34d; background: rgba(245, 158, 11, .18); border-color: transparent; }
 .ver-badge.upg-need:hover { background: rgba(245, 158, 11, .28); }
-.up-toast { max-width: 400px; }
-.up-toast-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: none; border-radius: 50%;
-  background: rgba(34, 211, 238, .12); color: var(--accent-2); font-size: 0; }
-.up-toast-body { min-width: 0; }
-.up-toast-title { line-height: 1.45; }
 @media (max-width: 480px) {
   .upg-box { margin: 12px 0; padding: 20px 14px; }
   .upg-reload { align-self: stretch; }
-  .up-toast { left: 12px; right: 12px; max-width: none; flex-wrap: wrap; }
+  /* 좁은 화면: 위에 두면 헤더(아바타 · Out)와 본문 첫머리를 덮는다 — 상태바 바로 위로(높이는 App 이 잰 값 · 인라인 --statusbar-h) */
+  .up-toast { top: auto; bottom: calc(var(--statusbar-h, 52px) + 12px); left: 12px; right: 12px; max-width: none; flex-wrap: wrap; }
   .up-toast-body { flex: 1 1 160px; }
 }

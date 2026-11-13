@@ -6,7 +6,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { stripComments } from './test/_stripComments.js';
 import {
-  normVersion, cmpVersion, isStale, noteServerVersion, loadedVersion, serverVersion, staleNow, subscribeUpgrade,
+  normVersion, cmpVersion, isStale, noteServerVersion, loadedVersion, serverVersion, staleNow, subscribeUpgrade, noticeShown, markNoticeShown,
   checkServerVersion, cleanSince, summarize, loadSince, SUMMARY_LINES, UPGRADE_TITLE, SINCE_PATH, BUILT_VERSION, _resetUpgradeForTest,
 } from './upgradeNotice.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -67,6 +67,17 @@ describe('서버 판 저장소', () => {
     expect(staleNow()).toBe(false);
     noteServerVersion('3.0.0');
     expect(staleNow()).toBe(true);
+  });
+  it('안내 상자 표시 — 마운트마다 세고 해제는 한 번만 · 구독자 호출(알림을 숨기는 근거)', () => {
+    let calls = 0; subscribeUpgrade(() => { calls += 1; });
+    expect(noticeShown()).toBe(false);
+    const a = markNoticeShown(); const b = markNoticeShown();
+    expect(noticeShown()).toBe(true);
+    a(); a();                  // 두 번 불러도 한 번만 뺀다
+    expect(noticeShown()).toBe(true);
+    b();
+    expect(noticeShown()).toBe(false);
+    expect(calls).toBe(4);
   });
   it('checkServerVersion — /health 를 짧은 시한 · 재시도 없이 · 실패해도 던지지 않는다', async () => {
     _resetUpgradeForTest({ loaded: '2.998.0' });
@@ -174,6 +185,7 @@ describe('App — 알림은 닫을 때까지 · 배지 · 판정은 저장소 �
     expect(app).toMatch(/useEffect\(\(\) => \{ noteServerVersion\(health\?\.version\); \}, \[health\?\.version\]\);/);
     expect(app).toContain('{UPGRADE_TITLE}');
     expect(app).toMatch(/setUpDismissedFor\(upv\.server\)/);
+    expect(app).toMatch(/const showUpToast = upv\.stale && !upv\.noticeOpen && upDismissedFor !== upv\.server;/);   // 상자가 떠 있으면 알림을 숨긴다(1440 겹침)
     expect(app).toMatch(/upv\.stale && \(\s*<button type="button" className="ver-badge brand-ver upg-need"/);
     expect(app).toContain('새로고침 필요');
   });

@@ -70,6 +70,16 @@ export const serverVersion = () => _server;
 /** 지금 다른 판인가. */
 export const staleNow = () => isStale(_loaded, _server);
 
+// 안내 상자가 지금 화면에 있는가(개수) — 있으면 같은 말을 하는 알림을 숨긴다(Chromium 판독: 1440 에서 알림이 상자 모서리를 덮었다).
+let _noticeShown = 0;
+export const noticeShown = () => _noticeShown > 0;
+/** UpgradeNotice 가 마운트될 때 부른다 — 돌려준 함수로 해제. */
+export function markNoticeShown() {
+  _noticeShown += 1; emit();
+  let done = false;
+  return () => { if (done) return; done = true; _noticeShown = Math.max(0, _noticeShown - 1); emit(); };
+}
+
 /** 서버 판을 넣는다(형식이 아니면 무시). 빌드 값이 없으면 처음 값을 이 창의 판으로 삼는다. 값이 바뀌면 구독자를 부른다. */
 export function noteServerVersion(v) {
   const s = normVersion(v);
@@ -141,5 +151,5 @@ export function loadSince(from, to, fetcher = fetchJson) {
 
 /** 테스트 전용 — 저장소 초기화. */
 export function _resetUpgradeForTest({ loaded = null } = {}) {
-  _loaded = normVersion(loaded) || null; _server = null; _subs.clear(); _sinceCache.clear();
+  _loaded = normVersion(loaded) || null; _server = null; _noticeShown = 0; _subs.clear(); _sinceCache.clear();
 }

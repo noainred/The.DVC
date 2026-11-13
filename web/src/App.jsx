@@ -479,7 +479,8 @@ function Portal({ user, onLogout }) {
   const [upDismissedFor, setUpDismissedFor] = useState(null);
   const upNotes = useSinceNotes(upv.stale ? upv.loaded : null, upv.stale ? upv.server : null);
   const upLines = upNotes ? upNotes.notes.reduce((n, g) => n + g.lines.length, 0) : 0;
-  const showUpToast = upv.stale && upDismissedFor !== upv.server;
+  // 안내 상자(오류 경계)가 떠 있으면 알림은 숨긴다 — 같은 말이고 1440 에서 상자 모서리를 덮었다(Chromium 판독). 배지는 남는다.
+  const showUpToast = upv.stale && !upv.noticeOpen && upDismissedFor !== upv.server;
 
   // Easter egg: click the logo 30 times.
   const [eggClicks, setEggClicks] = useState(0);
@@ -683,7 +684,7 @@ function Portal({ user, onLogout }) {
   const overlays = (
     <>
       {showUpToast && (
-        <div className="up-toast" role="status">
+        <div className="up-toast" role="status" style={{ '--statusbar-h': `${shellH.bottom}px` }}>
           <span className="up-toast-icon" aria-hidden="true"><RefreshIcon size={17} /></span>
           <div className="up-toast-body">
             <div className="up-toast-title">{UPGRADE_TITLE}</div>

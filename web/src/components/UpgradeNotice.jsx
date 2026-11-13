@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  UPGRADE_TITLE, UPGRADE_SUB, CHANGES_HEAD, summarize, loadSince, loadedVersion, serverVersion, subscribeUpgrade, isStale,
+  UPGRADE_TITLE, UPGRADE_SUB, CHANGES_HEAD, summarize, loadSince, loadedVersion, serverVersion, subscribeUpgrade, isStale, noticeShown, markNoticeShown,
 } from '../upgradeNotice.js';
 
 /**
@@ -12,13 +12,13 @@ import {
 // 서버 렌더(테스트의 renderToStaticMarkup)에서는 useLayoutEffect 가 경고만 내므로 useEffect 로 대신한다.
 const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
-const snap = () => `${loadedVersion() || ''}|${serverVersion() || ''}`;
+const snap = () => `${loadedVersion() || ''}|${serverVersion() || ''}|${noticeShown() ? 1 : 0}`;
 
-/** 이 창의 판 · 서버의 판 · 다른가(구독 — App 폴링이 서버 판을 넣으면 다시 그린다). */
+/** 이 창의 판 · 서버의 판 · 다른가 · 안내 상자가 떠 있는가(구독 — App 폴링이 서버 판을 넣거나 상자가 뜨고 지면 다시 그린다). */
 export function useUpgradeVersions() {
   const key = useSyncExternalStore(subscribeUpgrade, snap, snap);
-  const [loaded, server] = key.split('|');
-  return { loaded: loaded || null, server: server || null, stale: isStale(loaded, server) };
+  const [loaded, server, shown] = key.split('|');
+  return { loaded: loaded || null, server: server || null, stale: isStale(loaded, server), noticeOpen: shown === '1' };
 }
 
 /** 이 창의 판보다 새 판들의 릴리스 노트(한 번만 부른다 · 못 읽으면 null). from/to 가 없으면 부르지 않는다. */
@@ -99,6 +99,7 @@ export default function UpgradeNotice({ versions = null, notes = undefined }) {
   const fetched = useSinceNotes(notes === undefined && v.stale ? v.loaded : null, notes === undefined && v.stale ? v.server : null);
   const data = notes === undefined ? fetched : notes;
   const [open, setOpen] = useState(false);
+  useEffect(() => markNoticeShown(), []);   // 떠 있는 동안 App 은 같은 말을 하는 알림을 숨긴다(배지는 남는다)
   return (
     <div className="upg-box" role="alert">
       <span className="upg-ico"><RefreshIcon /></span>
