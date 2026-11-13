@@ -3,6 +3,7 @@
 import React from 'react';
 import { fmtDt } from './ipamShared.jsx';
 import { MAC_SRC, macKindBadge, macVendorText, macStaleText } from './ipamMacText.js';
+import { macAlertBadge } from './ipamChangeText.js'; // vNEXT 충돌 의심 · MAC 변경 배지
 
 const MONO = { fontFamily: 'var(--mono)' };
 
@@ -22,11 +23,13 @@ export function MacCell({ r }) {
   if (!r?.mac) return <span className="muted">—</span>;
   const vendor = macVendorText({ vendor: r.macVendor, kind: r.macKind, platform: r.macPlatform });
   const dim = !r.macVendor && r.macKind !== 'virtual';
+  const alert = macAlertBadge(r);   // vNEXT: 충돌 의심 > 최근 MAC 변경
   return (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 1, lineHeight: 1.35 }}>
       <span className="flex" style={{ alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
         <span className={dim ? 'muted' : undefined}>{vendor}</span>
         {r.macKind === 'virtual' && <KindBadge kind="virtual" platform={null} />}
+        {alert && <span className={`badge ${alert.tone}`} style={{ fontSize: 10 }} title={alert.title}>{alert.label}</span>}
       </span>
       <span style={{ ...MONO, fontSize: 11, color: r.macStale ? 'var(--text-faint)' : 'var(--text-dim)' }}
         title={`${MAC_SRC[r.macSrc]?.title || ''}${r.macStale ? ' · 마지막 스캔이 이 MAC 을 다시 보지 못했습니다(IP 를 누르면 확인 시각)' : ''}${r.macShared ? ` · 같은 MAC 의 IP ${r.macShared}개` : ''}`}>

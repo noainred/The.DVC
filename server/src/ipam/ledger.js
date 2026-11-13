@@ -14,6 +14,7 @@ import { datacenterOfVcenter } from '../datacenter/store.js';
 import { createYielder } from '../util/timeSlice.js';
 import { netNameFields } from './hostNames.js'; // v2.991: 호스트명 칸(관리상태 이름 > 역DNS > mDNS > NetBIOS)
 import { netMacFields } from './macVendor.js'; // v2.999: 제조사 · MAC 칸(ARP > NetBIOS)
+import { conflictRev, conflictSuspectOf } from './conflictState.js'; // vNEXT: 충돌 의심(알림 엔진 평가가 판정)
 
 // buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
@@ -47,7 +48,8 @@ export function _ledgerCacheStats() {
 // 캐시 키에 사용자 scope 서명(sc:)을 반드시 포함한다 — 빠지면 무제한 계정의 전체 원장이
 // 범위 제한 계정에 캐시 히트로 새어 나간다(M1 캐시 교차 유출과 동형). allowed=null='all'.
 /** 스냅샷 세대 밖의 변동 축(설정·주석·스캔·override·정책 리비전) — 라우트 memo 키가 같이 써야 주석 저장 직후 TTL 동안 낡은 응답이 나가지 않는다(v2.582 TUNE-1). */
-export function ipamRevKey() { return `s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}`; }
+// vNEXT: c = 충돌 의심 목록 리비전(alerts.js 평가가 바꾼다 — 대장 '충돌 의심' 배지)
+export function ipamRevKey() { return `s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}|c${conflictRev()}`; }
 // v2.638: 스캔 행의 데이터센터 귀속(scanDatacenter.js)도 키에 넣는다 — 스캔 설정의 데이터센터·DataCenter 할당을 바꾸면
 //   다음 스냅샷 세대(30초)를 기다리지 않고 대장이 다시 만들어진다. 범위 계정은 스캔 행을 받지 않으므로 넣지 않는다.
 //   vCenter 를 고른 조회(vcenterId)는 그 vCenter 의 DataCenter 할당도 넣는다(그 할당이 어떤 스캔 행이 보이는지를 정한다).
@@ -432,7 +434,12 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
     //   붙이지 않는다(스캔 결과는 vCenter 귀속이 없다 — 스캔 행을 주지 않는 것과 같은 판정). ipam.db 열(record.js)은 바꾸지 않는다.
     Object.assign(r, netNameFields(allowed ? null : (scanByIp.get(r.ip) || null), ov || null));
     // v2.999: 제조사 · MAC 칸 — 스캔이 본 값(VM · 호스트 행에도). 범위 계정에는 싣지 않는다(호스트명과 같은 판정). ipam.db 열은 그대로.
-    if (!allowed) Object.assign(r, netMacFields(scanByIp.get(r.ip) || null, macIpCount));
+    if (!allowed) {
+      Object.assign(r, netMacFields(scanByIp.get(r.ip) || null, macIpCount, ipHistoryEntry(r.ip)));
+      // vNEXT: 충돌 의심 — 그 VM 행에만(스캔 행은 vCenter 가 모르는 IP 라 대조할 NIC 이 없다)
+      const cs = r.ownerType === 'vm' ? conflictSuspectOf(r.ip) : null;
+      if (cs) r.macConflict = { mac: cs.mac, ...(cs.vendor ? { vendor: cs.vendor } : {}), seen: cs.seen, ...(cs.otherVm ? { otherVm: cs.otherVm.name || cs.otherVm.id } : {}) };
+    }
     const vcs = vcByIp.get(r.ip);
     if (vcs && vcs.size > 1) { r.reconcile = 'conflict'; r.conflictVcenters = [...vcs]; }
     else r.reconcile = reconcileOf(r.discovery);

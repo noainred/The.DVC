@@ -70,6 +70,7 @@ import { startGpuGuestPoller } from './gpu/poller.js';
 import { startGpuAllocHistory } from './gpu/allocHistory.js';   // GPU 할당율 일 단위 이력(v2.939) — 1시간 · 재진입 가드 · 스냅샷만 읽는다
 import { startPhysicalGpuPoller } from './gpu/physicalPoller.js';
 import { startIpScanPoller } from './ipam/scanPoller.js';
+import { startIpamChangeNotify } from './ipam/changeNotify.js'; // vNEXT: IP 변화 기록 · 알림 묶음
 import { startIpScanAgent } from './agent/ipScanWorker.js';
 import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';
@@ -612,7 +613,7 @@ upgradeManager.start();
 const stagger = [
   startSelfRegister, // 엣지 자기등록(EDGE_MODE=all) — 중앙 수집 서버 목록에 자동 등록
   startIdracPoller, startIdracScanPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
-  startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
+  startIpScanPoller, startIpamChangeNotify, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startGpuGuestConfigPull, startUsersConfigPull, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
   startDbSizeSampler, startPingMonitor, startCertMonitor, startDailyReport, startSvcmonPoller,
   startCapacitySampler, startCapacityPush,   // 리소스 적정성 진단 — 로컬 상시 샘플 + (엣지면) 중앙 push

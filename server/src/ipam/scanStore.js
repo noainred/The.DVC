@@ -14,7 +14,7 @@ import { clampSetting } from '../util/clampSetting.js';
 import { DEFAULT_PORTS, isIpv4 } from './scan.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { getOverrides } from './overrides.js';
-import { getPolicies, isCoveredByAnyPolicy } from './rangePolicies.js';
+import { getPolicies, isCoveredByAnyPolicy, findPolicy, specToRange } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { ipToNum, canonIp } from '../util/ipv4.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -483,8 +483,10 @@ function cleanStoredArp(v) {
   const mac = cleanMac(v.v);
   if (!mac) return null;
   const miss = numOrNull(v.miss);
-  return { v: mac, at: numOrNull(v.at) ?? 0, miss: miss != null && miss > 0 ? Math.min(Math.floor(miss), NAME_MISS_MAX) : 0 };
+  const n = numOrNull(v.n);   // vNEXT: 같은 MAC 을 이어 본 완료 스캔 수(충돌 의심 '연속 N회') — 옛 저장본은 1
+  return { v: mac, at: numOrNull(v.at) ?? 0, miss: miss != null && miss > 0 ? Math.min(Math.floor(miss), NAME_MISS_MAX) : 0, n: n != null && n >= 1 ? Math.min(Math.floor(n), ARP_SEEN_MAX) : 1 };
 }
+const ARP_SEEN_MAX = 1000;
 /**
  * v2.999: 이번 보고(h — cleanAliveHost 결과)로 ARP MAC 을 갱신한다(순수). 이름(mergeNames)과 같은 규칙 —
  *   표에 있었으면 새 값(miss 0), 표를 읽었고 같은 서브넷인데 없었으면 값은 두고 miss+1(NAME_MISS_MAX 에 지운다 — 표에서 한 번 밀려난 것으로 깜박이지 않게),
@@ -493,7 +495,8 @@ function cleanStoredArp(v) {
  */
 export function mergeArp(prevArp, h, ts) {
   const p = prevArp && typeof prevArp === 'object' && prevArp.v ? prevArp : null;
-  if (h.arpMac) return { arp: { v: h.arpMac, at: ts, miss: 0 }, changed: p && p.v !== h.arpMac ? { from: p.v, to: h.arpMac } : null };
+  // vNEXT: n = 같은 MAC 을 이어 본 횟수(다른 MAC 이면 1부터) — 표에 없었던 스캔 · 볼 수 없던 보고는 n 을 바꾸지 않는다.
+  if (h.arpMac) return { arp: { v: h.arpMac, at: ts, miss: 0, n: p && p.v === h.arpMac ? Math.min((p.n || 1) + 1, ARP_SEEN_MAX) : 1 }, changed: p && p.v !== h.arpMac ? { from: p.v, to: h.arpMac } : null };
   if (h.arpTried) {
     if (!p) return { arp: null, changed: null };
     const miss = (p.miss || 0) + 1;
@@ -550,6 +553,7 @@ function nameSig(e) {
   const n = e.names || {};
   return `${NAME_METHODS.map((k) => (n[k] ? `${n[k].v}${n[k].miss > 0 ? '~' : ''}` : '')).join('|')}|${(e.tried || ['?']).join(',')}|${e.nbGroup || ''}|${e.mac || ''}`
     + `|${e.arp?.v || ''}${e.arp?.miss > 0 ? '~' : ''}`;   // v2.999: ARP MAC · '지난 스캔 표에 없음' 표지(확인 시각 · miss 1→2 는 넣지 않는다)
+  // vNEXT: 이어 본 횟수(arp.n)는 넣지 않는다 — 대장의 '충돌 의심' 은 conflictState 리비전(ipamRevKey |c)이 따로 무효화한다(스캔마다 재계산하지 않게).
 }
 // v2.999: 표시 MAC → 그 MAC 의 IP 들(IP 상세 창 '같은 MAC 의 다른 IP' — 요청마다 결과 전량을 훑지 않게). 갱신 지점은 _agentCount 와 같다:
 //   로드 정제 · mergeScanResults(항목 교체) · pruneScanResults(삭제). results 를 다른 곳에서 고치면 여기도 함께.
@@ -732,6 +736,9 @@ const sameList = (a, b) => { const x = a || [], y = b || []; return x.length ===
  */
 export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {}) {
   const seenOnly = opts?.seenOnly === true;
+  // vNEXT: 스캔이 본 변화(설계 ipam-alerts-mac-dns ① — 변화 기록 · 알림). 부분 결과(시한에 걸린 스캔)는 비교하지 않는다(보드 ③-4).
+  const changes = seenOnly ? null : [];
+  let baseCheck = null;   // 새 IP 의 기준선 판정 — 처음 새 IP 를 볼 때 한 번 만든다(에이전트 대역 컴파일)
   let changed = false;
   let resContent = false; let resWritten = false; // v2.731 A6-01: 결과 파일을 쓸 일이 있는가 · 그것이 내용 변화인가(lastSeen 만이면 긴 디바운스)
   let n = 0; let merged = 0; let capped = 0; const histCappedBefore = _histCapped;
@@ -777,10 +784,23 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
     results[h.ip] = next;
     noteSeen(ts); // v2.733 C6-02
     resWritten = true;
+    const hPrev = Object.prototype.hasOwnProperty.call(history, h.ip) ? history[h.ip] : null;
+    const wasUp = hPrev?.status === 'up';   // vNEXT: 사용 시작(새 IP · 해제 뒤 다시 응답) 판정 — recordSeen 이 바꾸기 전에 본다
+    const flapTo = ma.changed ? macSeenBefore(hPrev, ma.changed.to) : false;   // vNEXT: 예전에 본 MAC 으로 되돌아감(이중화 의심)
     recordSeen({ ...h, hostname: next.hostname }, ts, agent); // IP 사용 이력(온라인 전환) 갱신
     if (mn.renames.length) noteRenames(h.ip, mn.renames, ts, agent);
     if (h.arpMac) noteMac(h.ip, h.arpMac, ts, agent);   // v2.999: MAC 이력(스캐너 이웃 표에서 본 값만 — NetBIOS 가 말한 MAC 은 넣지 않는다)
+    if (changes) {
+      if (!hPrev) {
+        if (!baseCheck) baseCheck = baselineChecker(agent);
+        if (baseCheck(h.ip)) changes.push({ type: 'new-ip', ip: h.ip, services: h.services.slice(0, 6), ...(next.arp ? { mac: next.arp.v } : {}) });
+      }
+      if (!wasUp) { const st = mgmtStatusOf(h.ip); if (st === 'reserved' || st === 'deprecated') changes.push({ type: 'reserved-up', ip: h.ip, status: st, services: h.services.slice(0, 6) }); }
+      for (const r of mn.renames) changes.push({ type: 'rename', ip: h.ip, src: r.src, from: r.from, to: r.to });
+      if (ma.changed) changes.push({ type: 'mac-change', ip: h.ip, from: ma.changed.from, to: ma.changed.to, ...(flapTo ? { flap: true } : {}) });
+    }
   }
+  if (changes && changes.length) emitScanChanges({ agent, ts, changes });
   if (histDirty) changed = true; // up/down 전이·신규 이력도 대장(usageStatus/firstSeen)에 영향
   // v2.731 A6-01: 결과가 바뀌지 않은 보고(살아 있는 IP 0개·전부 더 오래된 보고)는 쓰지 않는다. lastSeen 만 바뀌었으면 긴 디바운스.
   if (resWritten) scheduleWrite(RES, !resContent);   // 디바운스 + 비동기 조각 쓰기(위 '디바운스 원자적 쓰기' 머리말)
@@ -791,6 +811,60 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
   return { merged, capped };
 }
 
+
+// ---- vNEXT: 스캔이 본 변화(설계 docs/design/ipam-alerts-mac-dns ①) ---------------------------------
+// 보고 하나(mergeScanResults 한 번)마다 { agent, ts, changes:[{type, ip, …}] } 를 구독자에게 준다(ipam/changeNotify.js — 기록 · 알림 묶음).
+//   이 모듈은 알림을 모른다(의존 방향: changeNotify → scanStore). 구독자는 미뤄서 돈다(setImmediate — 병합을 막지 않는다).
+//   종류: new-ip(처음 응답 — 그 대역 줄의 첫 완료 스캔이 끝난 뒤에만 · vCenter 가 아는 IP 인지는 구독자가 스냅샷으로 거른다) ·
+//   reserved-up(관리상태 예약 · 폐기 IP 가 응답 시작) · rename(같은 방식이 다른 이름) · mac-change(같은 IP 의 ARP MAC 이 바뀜 — flap 은 예전 MAC 으로 되돌아감).
+//   기준선(baseline): 그 줄의 완료 스캔이 처음 끝나면 recordAgentReport 가 표시하고 { type:'baseline', spec } 를 낸다.
+const _changeListeners = new Set();
+export function onScanChanges(fn) { if (typeof fn === 'function') _changeListeners.add(fn); return () => _changeListeners.delete(fn); }
+function emitScanChanges(batch) {
+  for (const fn of _changeListeners) setImmediate(() => { try { const r = fn(batch); if (r?.catch) r.catch(() => {}); } catch { /* 구독자 오류는 병합과 무관 */ } });
+}
+/** 그 IP 의 관리상태(IP 지정 > 대역 정책 — 전역 정책만: 스캔 IP 는 vCenter 귀속이 없다). 없으면 ''. */
+function mgmtStatusOf(ip) {
+  const ov = getOverrides();
+  const o = Object.prototype.hasOwnProperty.call(ov, ip) ? ov[ip] : null;
+  if (o && o.status) return o.status;
+  const p = findPolicy(ipToNum(ip), '');
+  return p?.status || '';
+}
+/** MAC 이력에 그 MAC 이 이미 있었는가(마지막 줄 제외 — 지금 MAC 에서 바뀌는 것이므로). */
+function macSeenBefore(h, mac) {
+  const list = Array.isArray(h?.macs) ? h.macs : [];
+  for (let i = 0; i < list.length - 1; i++) if (list[i]?.mac === mac) return true;
+  return false;
+}
+// 기준선 — { 에이전트 키: { 대역 줄: 처음 완료한 시각 } }. 상태 파일(백업의 설정 변경 감시 대상이 아니다).
+const BASE = path.join(config.configDir, 'ipam-change-baseline.json');
+registerStateFile(BASE);
+const baseKey = (a) => String(a || LOCAL).toLowerCase();   // 에이전트 이름은 대소문자 무시(설정 · 보고와 같은 규칙)
+let baseline = (() => { const v = readJson(BASE, {}); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; })();
+registerStore(BASE, () => baseline);
+/** 그 에이전트의 대역 중 기준선이 잡힌 줄 안의 IP 인가 — 판정 함수를 돌려준다(대역은 한 번만 컴파일). */
+function baselineChecker(agent) {
+  const marks = baseline[baseKey(agent)] || {};
+  const bounds = (loadScanSettings(agent)?.ranges || []).filter((spec) => marks[spec]).map(specToRange).filter(Boolean);
+  if (!bounds.length) return () => false;
+  return (ip) => { const n = ipToNum(ip); return n != null && bounds.some((r) => n >= r.lo && n <= r.hi); };
+}
+/** 완료 스캔 — 아직 기준선이 없는 그 에이전트의 대역 줄을 표시한다(새로 표시한 줄 목록). */
+function markBaseline(agent, ts = Date.now()) {
+  const k = baseKey(agent);
+  let ranges = [];
+  try { ranges = loadScanSettings(agent)?.ranges || []; } catch { return []; }
+  const marks = baseline[k] && typeof baseline[k] === 'object' ? baseline[k] : {};
+  const added = ranges.filter((spec) => typeof spec === 'string' && !marks[spec]);
+  if (!added.length) return added;
+  for (const spec of added) marks[spec] = ts;
+  baseline[k] = marks;
+  scheduleWrite(BASE);
+  return added;
+}
+/** 테스트 · 진단 — 그 에이전트의 기준선 표시(사본). */
+export function changeBaselineOf(agent = LOCAL) { return { ...(baseline[baseKey(agent)] || {}) }; }
 
 // ---- IP 사용 이력 ----------------------------------------------------------
 // 어떤 IP가 "사용 시작(up) → 미사용(down)"으로 바뀌는 전이를 기록해 대장에서 추이를 본다.
@@ -1117,6 +1191,9 @@ export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = 
   const ns = cleanNameStats(nameStats);
   reports[name] = { at: Date.now(), scanned, alive, ...(ns ? { nameStats: ns } : {}) };
   scheduleWrite(REP); // 디바운스 원자 기록(에이전트 보고 핫패스 비차단)
+  // vNEXT: 완료 스캔 — 그 에이전트 대역 줄의 기준선(첫 완료 스캔)을 잡는다. 이번 스캔의 새 IP 는 이미 병합 때 '기준선 전' 으로 판정됐다(알리지 않음).
+  const added = markBaseline(name);
+  if (added.length) emitScanChanges({ agent: name, ts: Date.now(), changes: added.map((spec) => ({ type: 'baseline', spec })) });
   recordRun({ agent: name, scanned, alive, durationMs, nameStats: ns }); // 완료된 스캔 이력에 추가
 }
 
