@@ -15,6 +15,7 @@ import BulkAdd from './bmFolders/BulkAdd.jsx';
 import SidePanel from './bmFolders/SidePanel.jsx';
 import MapView from './bmFolders/MapView.jsx';
 import EdgeView from './bmFolders/EdgeView.jsx'; // v2.996: 엣지 포탈 화면
+import { canMove, moveTargets, movedPath, followSel, moveNote } from './bmFolders/folderMove.js'; // v2.997: 폴더 옮기기
 import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
 import { SRC_COLOR, SRC_SHORT, rowSrcClass, srcCounts, metricSrcText } from './bmFolders/usageSrc.js'; // v2.993: 사용률 출처 색
@@ -97,6 +98,14 @@ export default function BmFolders() {
   const pendingFilter = useRef(null);
   useEffect(() => { const p = pendingFilter.current; pendingFilter.current = null; setPicked(new Set()); setForm(''); setFv({}); setQ(p?.q || ''); setQuick(p?.quick || ''); }, [selKey]);
   const pick = useCallback((corp) => setOpen((s) => { const n = new Set(s); n.add(corp); return n; }), []);
+  // v2.997(폴더 끌어 옮기기): 같은 법인 안에서 부모만 바꾼다 — 서버 folder.move 가 겹침 · 자기 하위 · 깊이 · 규칙을 다시 본다. 끌어 놓기는 확인을 묻는다.
+  const moveFolder = async (corp, path, parent, { confirm = true } = {}) => {
+    const to = movedPath(path, parent);
+    if (confirm && !window.confirm(`‘${path.split('\\').join(' › ')}’ 을(를) ${parent ? `‘${parent.split('\\').join(' › ')}’ 아래로` : '법인 바로 아래로'} 옮깁니다 — 하위 폴더 · 등록 · 이 법인 규칙 · 서비스 인벤토리 규칙도 함께 옮겨 갑니다. 계속할까요?`)) return false;
+    const r = await op({ op: 'folder.move', corp, path, parent }, (x) => moveNote(path, x?.path || to, x));
+    if (r) { setSel((s0) => followSel(s0, corp, path, r.result?.path || to)); return true; }
+    return false;
+  };
 
   if (err && !d) {
     const corrupt = err?.status === 503;
@@ -212,7 +221,7 @@ export default function BmFolders() {
           <div style={{ padding: '6px 2px', overflowY: 'auto', maxHeight: 640 }}>
             <TreeNode on={sel.type === 'all'} depth={0} name="전체 물리서버" count={servers.length} onClick={() => setSel({ type: 'all' })} />
             {treeMode === 'corp' ? (
-              <CorpTree corps={corps} sel={sel} setSel={setSel} open={open} setOpen={setOpen} q={treeQ} pick={pick} />
+              <CorpTree corps={corps} sel={sel} setSel={setSel} open={open} setOpen={setOpen} q={treeQ} pick={pick} onMove={d.canWrite ? moveFolder : null} />
             ) : (
               <NameTree list={byName} sel={sel} setSel={setSel} q={treeQ} />
             )}
@@ -242,6 +251,7 @@ export default function BmFolders() {
                       <button type="button" className="login-btn" style={btn} disabled={busy} onClick={() => openBulk({ corp: sel.corp, path: sel.path })}>서버 찾아 등록</button>
                       <button type="button" className="logout-btn" style={btn} onClick={() => { setForm('folder'); setFv({ path: `${sel.path}\\` }); }}>＋ 하위 폴더</button>
                       <button type="button" className="logout-btn" style={btn} onClick={() => { setForm('rename'); setFv({ name: lastSeg(sel.path) }); }}>이름 바꾸기</button>
+                      <button type="button" className="logout-btn" style={btn} title="다른 폴더 아래로(같은 법인) — 트리에서 폴더를 끌어 놓아도 됩니다" onClick={() => { setForm('move'); setFv({ parent: null }); }}>옮기기…</button>
                       <button type="button" className="logout-btn" style={{ ...btn, color: 'var(--red)' }} onClick={() => setForm('remove')}>폴더 삭제</button>
                     </>
                   ) : null}
@@ -258,7 +268,7 @@ export default function BmFolders() {
                   folderN={baseRows.filter((r) => r.place === 'manual').length} ruleN={baseRows.filter((r) => r.place === 'rule').length} svcRuleN={svcRuleN}
                   folderRegs={sel.type === 'folder' ? corps.find((c) => c.vcenterId === sel.corp)?.folders?.find((f) => f.path === sel.path)?.regs : undefined}
                   onRemoved={() => setSel(parentOf(sel.path) ? { type: 'folder', corp: sel.corp, path: parentOf(sel.path) } : { type: 'corp', corp: sel.corp })}
-                  onRenamed={(to) => setSel({ type: 'folder', corp: sel.corp, path: to })} />
+                  onRenamed={(to) => setSel({ type: 'folder', corp: sel.corp, path: to })} moveFolder={moveFolder} />
                 {sel.type === 'name' ? <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>같은 경로의 폴더를 법인을 넘어 합쳐 본 것입니다(읽기 전용 — 저장은 법인별 그대로). 바꾸려면 법인별 트리에서 고르십시오.</div> : null}
                 {sel.type === 'nocorp' ? <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>어느 법인 서버인지 모르는 서버는 폴더에 넣을 수 없습니다 — 특수 기능 › 통합 서버 인벤토리에서 법인(vCenter)을 먼저 정하십시오.</div> : null}
                 {d.usageOff ? <div className="bmf-offbar" role="status"><b>베어메탈 사용률 수집이 꺼져 있습니다</b> — 이 포탈이 직접 수집하는 서버의 CPU · 메모리가 비어 있는 이유입니다(엣지가 수집하는 서버는 그 엣지 설정을 따릅니다). 설정 › 베어메탈 사용률에서 켜면 다음 주기부터 보입니다.</div> : null}
@@ -354,10 +364,11 @@ export default function BmFolders() {
   );
 }
 
-function TreeNode({ on, depth, name, title, count, un, onClick, toggle, opened, children }) {
+function TreeNode({ on, depth, name, title, count, un, onClick, toggle, opened, children, dnd = null, drop = '' }) {
+  // v2.997: dnd = 끌기 · 놓기 이벤트(쓰기 가능한 법인 트리만) · drop = 'ok'(놓을 수 있는 곳 위) · 'no'(못 놓는 곳 위)
   return (
-    <div className={`svcinv-tn${on ? ' on' : ''}`} style={{ paddingLeft: 8 + depth * 14 }} role="button" tabIndex={0} aria-current={on ? 'true' : undefined} title={title || name}
-      onClick={onClick} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}>
+    <div className={`svcinv-tn${on ? ' on' : ''}${drop ? ` bmf-drop-${drop}` : ''}`} style={{ paddingLeft: 8 + depth * 14 }} role="button" tabIndex={0} aria-current={on ? 'true' : undefined} title={title || name}
+      onClick={onClick} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }} {...(dnd || {})}>
       {toggle ? <span className="bmf-tw" role="button" tabIndex={-1} aria-label={opened ? '접기' : '펼치기'} onClick={(e) => { e.stopPropagation(); toggle(); }}>{opened ? '▾' : '▸'}</span> : <span className="bmf-tw" />}
       {un ? <span className="bmf-fo un" aria-hidden="true" /> : depth >= 2 ? <span className="bmf-fo" aria-hidden="true" /> : null}
       <span className="nm" style={un ? { color: '#fbbf24' } : undefined}>{name}</span>
@@ -367,9 +378,26 @@ function TreeNode({ on, depth, name, title, count, un, onClick, toggle, opened, 
   );
 }
 
-function CorpTree({ corps, sel, setSel, open, setOpen, q, pick }) {
+function CorpTree({ corps, sel, setSel, open, setOpen, q, pick, onMove = null }) {
   const ql = q.trim().toLowerCase();
   const toggle = (vc) => setOpen((s) => { const n = new Set(s); if (n.has(vc)) n.delete(vc); else n.add(vc); return n; });
+  // v2.997(폴더 끌어 옮기기): 끄는 폴더 { corp, path } · 위에 있는 곳 key. 쓰기 가능한 법인 · 거르기 글자가 없을 때만(걸러진 트리는 놓을 곳이 숨는다).
+  const [drag, setDrag] = React.useState(null);
+  const [over, setOver] = React.useState('');
+  const dndFor = (c, path) => {
+    if (!onMove || !c.writable || ql) return null;
+    const paths = c.folders.map((f) => f.path);
+    const key = `${c.vcenterId}|${path ?? ''}`;
+    const target = path ?? '';
+    const ok = () => !!drag && drag.corp === c.vcenterId && canMove(drag.path, target, paths).ok;
+    return {
+      ...(path != null ? { draggable: true, onDragStart: (e) => { setDrag({ corp: c.vcenterId, path }); try { e.dataTransfer.setData('text/plain', path); e.dataTransfer.effectAllowed = 'move'; } catch { /* 끌기 데이터는 보조 */ } }, onDragEnd: () => { setDrag(null); setOver(''); } } : {}),
+      onDragOver: (e) => { if (!drag) return; if (ok()) { e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch { /* */ } } if (over !== key) setOver(key); },
+      onDragLeave: () => { if (over === key) setOver(''); },
+      onDrop: (e) => { e.preventDefault(); const d = drag; setDrag(null); setOver(''); if (d && d.corp === c.vcenterId && canMove(d.path, target, paths).ok) onMove(c.vcenterId, d.path, target); },
+    };
+  };
+  const dropOf = (c, path) => { const key = `${c.vcenterId}|${path ?? ''}`; if (!drag || over !== key) return ''; return drag.corp === c.vcenterId && canMove(drag.path, path ?? '', c.folders.map((f) => f.path)).ok ? 'ok' : 'no'; };
   return corps.map((c) => {
     const folders = ql ? c.folders.filter((f) => f.path.toLowerCase().includes(ql)) : c.folders;
     if (ql && !c.name.toLowerCase().includes(ql) && !folders.length) return null;
@@ -379,14 +407,14 @@ function CorpTree({ corps, sel, setSel, open, setOpen, q, pick }) {
     return (
       <React.Fragment key={c.vcenterId}>
         <TreeNode on={sel.type === 'corp' && sel.corp === c.vcenterId} depth={1} name={shortCorp(c.name)} title={c.name} count={c.total} opened={opened} toggle={() => toggle(c.vcenterId)}
-          onClick={() => { setSel({ type: 'corp', corp: c.vcenterId }); pick(c.vcenterId); }}>
+          onClick={() => { setSel({ type: 'corp', corp: c.vcenterId }); pick(c.vcenterId); }} dnd={dndFor(c, null)} drop={dropOf(c, null)}>
           {expired ? <span className="badge amber" title="이 법인 서버를 보고하던 엣지의 보고가 만료됐습니다">만료</span> : <SrcBadge src={mainSrc} small />}
           {c.faults ? <StatusDot tone="red" title={`부품 장애 ${c.faults}대`} /> : null}
           <StackBar parts={[{ n: c.registered, c: 'var(--accent)' }, { n: c.unassigned, c: 'var(--amber)' }]} w={28} h={6} label={`등록 ${c.registered}, 미분류 ${c.unassigned}`} />
         </TreeNode>
         {opened ? folders.map((f) => (
           <TreeNode key={f.path} on={sel.type === 'folder' && sel.corp === c.vcenterId && sel.path === f.path} depth={1 + f.depth} name={f.name} count={f.total}
-            onClick={() => setSel({ type: 'folder', corp: c.vcenterId, path: f.path })}>
+            onClick={() => setSel({ type: 'folder', corp: c.vcenterId, path: f.path })} dnd={dndFor(c, f.path)} drop={dropOf(c, f.path)}>
             {f.faults ? <StatusDot tone="red" title={`부품 장애 ${f.faults}대`} /> : null}
           </TreeNode>
         )) : null}
@@ -418,7 +446,7 @@ function Crumb({ sel, corpName }) {
 }
 
 /** 폴더 만들기 · 이름 바꾸기 · 삭제 · 구조 복사 입력 줄. */
-function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName, folderN, ruleN, svcRuleN = 0, folderRegs, onRemoved, onRenamed }) {
+function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName, folderN, ruleN, svcRuleN = 0, folderRegs, onRemoved, onRenamed, moveFolder }) {
   // 삭제 확인 수는 서버가 세는 것(그 폴더 아래 등록 — 목록에 없는 등록 · 하위 폴더 포함)과 같아야 한다(반증 3a 별건 — 손 등록 서버 행만 세서 늘 409). 서버가 주지 않으면 예전 셈
   const regs = Number.isFinite(folderRegs) ? folderRegs : folderN;
   const extra = Math.max(0, regs - folderN);
@@ -446,6 +474,24 @@ function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName,
           const r = await op({ op: 'folder.rename', corp: sel.corp, path: sel.path, name: fv.name }, renameNote);
           if (r) { setForm(''); onRenamed(r.result?.path || sel.path); }
         }}>바꾸기</button>
+        <button type="button" className="logout-btn" style={btn} onClick={() => setForm('')}>취소</button>
+      </div>
+    );
+  }
+  if (form === 'move') {
+    // v2.997: 끌어 놓기의 대체(터치 · 키보드) — 같은 법인 폴더 중 놓을 수 있는 곳만
+    const paths = (corps.find((c) => c.vcenterId === sel.corp)?.folders || []).map((f) => f.path);
+    const targets = moveTargets(sel.path, paths);
+    return (
+      <div className="flex wrap gap" style={bar}>
+        <span className="muted" style={{ fontSize: 12 }}>‘{pathText(sel.path)}’ 을(를) 옮길 곳(하위 폴더 · 등록 · 규칙도 함께)</span>
+        {targets.length ? (
+          <Select sort={false} className="input" aria-label="옮길 곳" value={fv.parent == null ? '\u0000' : fv.parent} onChange={(e) => setFv({ ...fv, parent: e.target.value === '\u0000' ? null : e.target.value })} style={{ maxWidth: 320 }}>
+            <option value={'\u0000'}>옮길 곳 고르기</option>
+            {targets.map((x) => <option key={x.parent || '(root)'} value={x.parent}>{x.label}</option>)}
+          </Select>
+        ) : <span className="muted" style={{ fontSize: 12 }}>옮길 수 있는 곳이 없습니다(같은 법인 안).</span>}
+        <button type="button" className="login-btn" style={btn} disabled={busy || fv.parent == null} onClick={async () => { const ok = await moveFolder(sel.corp, sel.path, fv.parent, { confirm: false }); if (ok) setForm(''); }}>옮기기</button>
         <button type="button" className="logout-btn" style={btn} onClick={() => setForm('')}>취소</button>
       </div>
     );

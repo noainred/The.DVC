@@ -623,7 +623,7 @@ function IpHistoryModal({ row, scope, onClose, canManage = false, onEditName = n
     return () => { active = false; };
   }, [ip]);
   const fmt = fmtDt; // v2.639(U7): 시각·소요는 ipamShared 한 벌(예전 이 모달만 브라우저 로케일 toLocaleString() · '분' 단위 소요)
-  // v2.996.1: 기간은 periodText(ipamShared) — fmtDur 로 그리면 해제된 적 없는 IP 의 '총 미사용 기간' 이 '0ms' 였다(그런 구간이 없으면 '없음').
+  // v2.997.1: 기간은 periodText(ipamShared) — fmtDur 로 그리면 해제된 적 없는 IP 의 '총 미사용 기간' 이 '0ms' 였다(그런 구간이 없으면 '없음').
   const dur = (ms, count = 1) => periodText(Math.max(0, ms), count);
   // 이벤트(오래된→최신)로 사용(up)/미사용(down) 구간을 만든다. 마지막 구간은 현재까지.
   //   v2.991: 이름 변경(renames)은 events 와 따로 온다 — 구간 계산에는 넣지 않고 전이 기록 표에만 끼워 보인다.

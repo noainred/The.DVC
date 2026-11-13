@@ -703,7 +703,7 @@ export function registerBmFolders(api) {
       }
 
       // ── 폴더 연산(법인 하나) ──
-      if (op === 'folder.add' || op === 'folder.rename' || op === 'folder.remove' || op === 'folder.copy') {
+      if (op === 'folder.add' || op === 'folder.rename' || op === 'folder.move' || op === 'folder.remove' || op === 'folder.copy') {
         const corp = t(op === 'folder.copy' ? body.to : body.corp);
         const deny = corpWriteAccess(user, snap, corp);
         if (deny) return res.status(deny.status).json({ ok: false, error: deny.status === 403 ? 'forbidden' : 'not_found', reason: deny.reason });
@@ -739,15 +739,39 @@ export function registerBmFolders(api) {
         const corpRules = (peekMain().rules || []).filter((x) => x.corp === corp && underPath(x.path, p.value));
         const starRules = (peekMain().rules || []).filter((x) => x.corp === '*' && underPath(x.path, p.value)).length;
 
-        if (op === 'folder.rename') {
-          const nm = cleanText(body.name, 60, { label: '폴더 이름' });
-          if (nm.error) return res.status(400).json({ ok: false, reason: nm.error });
-          if (nm.value.includes('\\')) return res.status(400).json({ ok: false, reason: '폴더 이름에 \\ 를 쓸 수 없습니다.' });
-          const segs = p.value.split('\\');
-          const to = [...segs.slice(0, -1), nm.value].join('\\');
+        if (op === 'folder.rename' || op === 'folder.move') {
+          let to;
+          if (op === 'folder.rename') {
+            const nm = cleanText(body.name, 60, { label: '폴더 이름' });
+            if (nm.error) return res.status(400).json({ ok: false, reason: nm.error });
+            if (nm.value.includes('\\')) return res.status(400).json({ ok: false, reason: '폴더 이름에 \\ 를 쓸 수 없습니다.' });
+            const segs = p.value.split('\\');
+            to = [...segs.slice(0, -1), nm.value].join('\\');
+          } else {
+            // v2.997(폴더 끌어 옮기기): 부모만 바꾼다 — **같은 법인 안**(등록 · 규칙이 법인에 묶여 있다). parent '' = 법인 바로 아래.
+            //   하위 폴더 · 등록 · 법인 규칙 · 서비스 인벤토리 규칙은 이름 바꾸기와 같은 길(아래 공통부)로 함께 옮긴다.
+            if (typeof body.parent !== 'string') return res.status(400).json({ ok: false, reason: '옮길 곳(폴더 또는 법인 바로 아래)을 지정하십시오.' });
+            let parent = '';
+            if (body.parent !== '') {
+              const pp = cleanFolderPath(body.parent);
+              if (pp.error || !pp.value) return res.status(400).json({ ok: false, reason: pp.error || '옮길 곳이 올바르지 않습니다.' });
+              parent = pp.value;
+              if (!existing.has(parent)) return res.status(404).json({ ok: false, error: 'not_found', reason: '옮길 곳 폴더를 찾지 못했습니다(그 사이 바뀌었을 수 있습니다 — 새로고침).' });
+            }
+            if (parent && underPath(parent, p.value)) return res.status(409).json({ ok: false, reason: '폴더를 자기 자신이나 자기 하위 폴더 안으로 옮길 수 없습니다.' });
+            const tp = cleanFolderPath(parent ? `${parent}\\${p.value.split('\\').pop()}` : p.value.split('\\').pop());
+            if (tp.error || !tp.value) return res.status(400).json({ ok: false, reason: tp.error || '옮길 곳이 올바르지 않습니다.' });
+            to = tp.value;
+          }
           if (to === p.value) return done({ path: to });
-          if (existing.has(to)) return res.status(409).json({ ok: false, reason: '같은 이름의 폴더가 이미 있습니다.' });
+          if (existing.has(to)) return res.status(409).json({ ok: false, reason: op === 'folder.move' ? '옮길 곳에 같은 이름의 폴더가 이미 있습니다.' : '같은 이름의 폴더가 이미 있습니다.' });
           const swap = (x) => (underPath(x, p.value) ? to + x.slice(p.value.length) : x);
+          // v2.997: 하위 폴더의 새 경로도 검증한다(옮기면 깊이 · 길이 상한을 넘을 수 있다 — 이름 바꾸기도 같은 규칙)
+          for (const x of existing) {
+            if (!underPath(x, p.value)) continue;
+            const c = cleanFolderPath(swap(x));
+            if (c.error || c.value !== swap(x)) return res.status(400).json({ ok: false, reason: `하위 폴더 ‘${swap(x).split('\\').join(' › ')}’ 가 상한을 넘습니다 — ${c.error || '경로가 올바르지 않습니다'}` });
+          }
           // 서비스 인벤토리의 물리서버 폴더 규칙도 함께 옮긴다 — 아무것도 쓰기 전에 옮길 수 있는지 먼저 본다(2차 반증 2: 바뀐 경로에 다른 규칙이 있으면 옮기던 규칙을 버리고도 '옮겼다' 고 했다)
           const pre = svcRulePlan(corp, p.value, swap);
           if (pre.collide.length) return res.status(409).json({ ok: false, reason: `서비스 인벤토리의 물리서버 폴더 규칙 ‘${pre.collide.slice(0, 3).join(', ')}’ 이(가) 이미 있어 이름을 바꾸면 규칙이 겹칩니다 — 서비스 인벤토리 › 소속 규칙에서 먼저 정리하십시오.` });
@@ -767,7 +791,7 @@ export function registerBmFolders(api) {
           }
           // v2.987: 서비스 인벤토리의 물리서버 폴더 규칙도 새 경로로 옮긴다(이름만 바꿨는데 서비스 소속이 풀리지 않게). 그 저장소를 못 읽으면 밝힌다.
           const svc = svcRuleRename(corp, p.value, swap);
-          audit(`${corp}:${p.value}`, `→ ${to} · 등록 ${underKeys.length} · 규칙 ${corpRules.length} · 서비스 인벤토리 규칙 ${svc.n}${svc.error ? `(못 옮김: ${svc.error})` : ''}`);
+          audit(`${corp}:${p.value}`, `${op === 'folder.move' ? '옮기기 ' : ''}→ ${to} · 등록 ${underKeys.length} · 규칙 ${corpRules.length} · 서비스 인벤토리 규칙 ${svc.n}${svc.error ? `(못 옮김: ${svc.error})` : ''}`);
           return done({ path: to, moved: underKeys.length, rules: corpRules.length, starRules, svcRules: svc.n, ...(svc.error ? { svcRulesNotMoved: svc.error } : {}) });
         }
 
