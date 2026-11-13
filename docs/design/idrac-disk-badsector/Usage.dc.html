@@ -94,6 +94,21 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
     </section>
 
     <section class="card">
+      <div class="cap">3-2 · 베어메탈 Windows — RAID 로 묶인 디스크 (OS 에 SSH 로 접속해 PowerShell 로 읽음)</div>
+      <div class="h">KR-SQL-R750-009 · Disk 3 은 지금 <span style="color:#bfdbfe">D:\</span> 드라이브와 <span style="color:#bfdbfe">C:\Mount\Logs</span> 폴더 아래에 있습니다</div>
+      <div class="chain">
+        <div class="step hit"><span class="k">물리 디스크</span><span><b>Disk 3</b> · Backplane 1 · RAID Controller 1 <span class="tag bad" style="margin-left:4px">PDR46 2건</span><div class="s mono">S/N WBM5T02K</div></span></div>
+        <div class="link"><i></i>iDRAC 가 말하는 가상 디스크 구성원</div>
+        <div class="step"><span class="k">가상 디스크</span><span><b>Virtual Disk 1</b> · RAID-5 · 디스크 4개(Disk 2~5) · 7.2 TB</span></div>
+        <div class="link"><i></i>가상 디스크 식별자가 Windows 디스크의 고유 ID 와 같음</div>
+        <div class="step"><span class="k">Windows 디스크</span><span><b>디스크 1</b> · 7.2 TB · GPT · 온라인</span></div>
+        <div class="link"><i></i>Windows 가 말하는 파티션 · 볼륨</div>
+        <div class="step end"><span class="k">볼륨</span><span><b class="mono">D:\</b> · NTFS · 이름 ‘SQLData’ · 5.4 TB 중 63% 사용<br><b class="mono">C:\Mount\Logs</b> · NTFS · 폴더에 탑재된 볼륨 · 1.8 TB 중 22% 사용</span></div>
+      </div>
+      <div class="muted" style="font-size:12px;line-height:1.6">드라이브 문자가 없는 볼륨(폴더에 탑재)도 찾습니다. 저장소 공간 · 동적 디스크 · 클러스터 공유 볼륨으로 묶여 있으면 디스크와 볼륨이 일대일이 아니라서 ‘확정하지 못함’ 으로 둡니다.</div>
+    </section>
+
+    <section class="card">
       <div class="cap">4 · OS 계정이 없음 — iDRAC 가 아는 데까지만</div>
       <div class="h">US-DB-R650-031 · Disk 0 — 가상 디스크까지만 찾았습니다</div>
       <div class="chain">

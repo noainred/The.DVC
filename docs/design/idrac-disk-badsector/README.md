@@ -322,7 +322,7 @@
 |---|---|---|---|
 | 베어메탈 Linux · Windows — RAID 로 묶이지 않은 디스크 | OS SSH — **있다**(`bmusage/collectors/osSsh.js` · `proxy/sshExec.js withSsh` · 계정은 베어메탈 스토리지 등록부 `bmstor/registry.js`) | 디스크 시리얼(iDRAC `redfish.js:738`) = OS 가 말하는 시리얼 | 가능(OS 명령이 시리얼을 내 주는지 실장비 확인 필요) |
 | 베어메탈 — RAID 가상 디스크의 구성원 | 같음 | 가상 디스크 식별자(NAA) = OS 장치 WWN | **불확실** — Dell 커뮤니티에 PERC 가상 디스크의 `Identifiers` 가 비어 온다는 보고가 있다(§13.4 ㉚ ㉛). 비면 ‘확정하지 못함’(시안 5번) |
-| ESXi 호스트 | vCenter — **있다**(OS 로그인 불필요). 단 호스트 디스크 · VMFS extent 는 지금 수집하지 않는다(vSAN `DiskMapping` 파싱만 있다 — `vcenter/soapParse.js:256`) | 디스크 시리얼 · 장치 이름(naa) → VMFS extent 또는 vSAN 디스크 그룹 → 데이터스토어 → VM | 가능하나 vCenter 수집 항목 추가 필요. vSAN 은 데이터스토어 단위까지만(어느 VM 의 데이터가 그 디스크에 있는지는 말하지 못한다) |
+| ESXi 호스트 | vCenter — **있다**(OS 로그인 불필요). 단 호스트 디스크 · VMFS extent · vSAN 디스크 그룹은 **지금 수집하지 않는다**(`vcenter/soapParse.js:256` 의 `RawDiskMapping` 은 VM 가상 디스크의 RDM 판정이지 호스트 디스크가 아니다 — 처음에 ‘vSAN DiskMapping 파싱이 있다’ 고 쓴 것은 틀렸고 정정했다) | 디스크 시리얼 · 장치 이름(naa) → VMFS extent 또는 vSAN 디스크 그룹 → 데이터스토어 → VM | 가능하나 vCenter 수집 항목 추가 필요. vSAN 은 데이터스토어 단위까지만(어느 VM 의 데이터가 그 디스크에 있는지는 말하지 못한다) |
 | OS 계정이 없는 베어메탈 | 없음 | — | iDRAC 가 아는 가상 디스크까지만 + 등록 안내(기존 `no-os-cred` 문구와 같은 방식 — `bmusage/targets.js:50`) |
 | 엣지 위임 법인의 서버 | 엣지가 그 법인 안에서 실행하고 요약만 올린다 | — | 엣지 작업에 포함(§5 · §9.3) |
 
@@ -351,3 +351,13 @@
 1. ESXi 호스트를 이번 범위에 넣을지(vCenter 수집 항목이 늘어난다) — 제안: 넣는다. 서버 대부분이 ESXi 라 빼면 쓸모가 크게 준다.
 2. OS 계정이 없는 베어메탈은 ‘가상 디스크까지만’ 으로 둘지 — 제안: 그렇게 두고 등록 안내.
 3. 새 기록 메일에 ‘지금 쓰이는 곳’ 을 같이 적을지 — 제안: 적는다(찾은 경우만).
+
+### 13.6 Windows 서버(사용자 2026-11-14 "windows 서버들도 있어")
+
+- **접속 수단은 이미 있다**: 포탈의 OS 수집은 Linux · Windows 둘 다 SSH 로 붙고, Windows 는 PowerShell 스크립트 1개를 base64(`-EncodedCommand`)로 보낸다(`server/src/bmusage/collectors/osSsh.js:9 · 79-89` — CIM 조회).
+  WinRM 경로는 없다(`winrm` 은 `ipam/netmap.js` 에만 나온다 — 수집용이 아님). 따라서 **Windows 서버에 OpenSSH 서버가 켜져 있고 베어메탈 스토리지에 계정이 등록돼 있어야** 한다.
+- 시안: `Usage` 3(RAID 로 묶이지 않은 디스크 → 드라이브) · 3-2(RAID 구성원 → 가상 디스크 → Windows 디스크 → 드라이브 문자 · 폴더에 탑재된 볼륨).
+- 읽을 것(안): 물리 디스크 · 디스크 · 파티션 · 볼륨 목록(시리얼 · 고유 ID · 드라이브 문자 · 탑재 경로 · 파일 시스템 · 사용량). 읽기 전용 · 스크립트 고정.
+- 한계: 저장소 공간(Storage Spaces) · 동적 디스크 · 클러스터 공유 볼륨은 디스크와 볼륨이 일대일이 아니다 → ‘확정하지 못함’. RAID 가상 디스크는 §13.2 와 같은 식별자 문제(㉚ ㉛)가 있다.
+- **미확인**: PowerShell 의 디스크 · 파티션 · 볼륨 조회 명령이 내 주는 속성 이름(시리얼 · 고유 ID)은 내 기억에 의존한다. 실제 Windows 서버 1대로 확인해야 한다.
+- Windows 서버가 ESXi 위의 VM 이면 이 기능의 대상이 아니다(물리 디스크는 ESXi 호스트 쪽 — §13.2 ESXi 행).
