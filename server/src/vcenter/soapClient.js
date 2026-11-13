@@ -841,6 +841,31 @@ export function vmDns(netXml, ipStackXml) {
   }
   return { servers, stack, nics };
 }
+/** vmk 하나당 최대 이만큼만 싣는다(비정상 응답이 스냅샷을 키우지 않게). */
+export const VMK_MAX = 32;
+/**
+ * v3.6.0(IP 관리 재설계 묶음 다): ESXi `config.network.vnic`(HostVirtualNic 배열) → [{ dev, ip, mask, pg }].
+ * IPv4 정규형만 싣는다(IPv6 · DHCP 로 아직 주소가 없는 vmk 는 뺀다). `pg` 는 표준 스위치 포트그룹 이름 — 분산 스위치 vmk 는 이름이 없어 ''.
+ * ipV6Config 블록을 먼저 지운다(그 안의 <ipAddress> 를 IPv4 자리로 읽지 않게). 순서는 vCenter 가 준 순서(보통 vmk0 이 먼저).
+ */
+export function parseVmks(xml) {
+  const out = [];
+  for (const blk of xmlBlocks(xml, 'HostVirtualNic', VMK_MAX)) {
+    const v4 = stripXmlBlocks(blk, 'ipV6Config');
+    const ip = String(xmlText(v4, 'ipAddress') || '').trim();
+    if (!isIPv4(ip)) continue;
+    const mask = String(xmlText(v4, 'subnetMask') || '').trim();
+    out.push({ dev: String(xmlText(blk, 'device') || '').slice(0, 32), ip, mask: isIPv4(mask) ? mask : '', pg: String(xmlText(stripXmlBlocks(blk, 'spec'), 'portgroup') || '').slice(0, 128) });
+  }
+  return out;
+}
+/** v3.6.0: ESXi `config.network.dnsConfig`(HostDnsConfig) → { osHostName, osDomain }. 없으면 둘 다 null(못 읽음). */
+export function hostDnsName(xml) {
+  const s = String(xml || '');
+  const h = String(xmlText(s, 'hostName') || '').trim();
+  const d = String(xmlText(s, 'domainName') || '').trim();
+  return { osHostName: h || null, osDomain: d || null };
+}
 export function vmIps(netXml, primary) {
   const ips = extractIPv4s(netXml, primary);
   return { ipAddress: ips[0] || (isIPv4(primary) ? String(primary) : null), ipAddresses: ips };
@@ -2005,6 +2030,8 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         'summary.hardware.vendor', 'summary.hardware.model', 'summary.hardware.otherIdentifyingInfo', 'config.storageDevice.hostBusAdapter',
         'runtime.healthSystemRuntime.systemHealthInfo.numericSensorInfo',
         'summary.managementServerIp', 'config.network.vnic', 'config.network.pnic',
+        // v3.6.0(IP 관리 재설계 묶음 다 — 호스트명 대조): ESXi 에 설정된 호스트명 · 도메인. 같은 조회에 속성 하나라 SOAP 왕복은 늘지 않는다.
+        'config.network.dnsConfig',
         'summary.quickStats.overallCpuUsage', 'summary.quickStats.overallMemoryUsage',
         // v2.706(C4): 부팅 시각 — '유지보수 모드 없이 재부팅된 호스트(PSOD·정전 후보)' 판정. 시각 하나라 응답이 거의 늘지 않는다.
         'runtime.bootTime'] },
@@ -2116,6 +2143,10 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         // 게스트 파일 회수용: vCenter 실제 IP(호스트가 보고) + ESXi 관리 IP(vmk).
         mgmtServerIp: p['summary.managementServerIp'] || '',
         mgmtIp: (/<ipAddress[^>]*>([^<]+)<\/ipAddress>/.exec(p['config.network.vnic'] || '')?.[1]) || '',
+        // v3.6.0(IP 관리 재설계 묶음 다 — 서버 보기 · 스캔 대역 후보): vmk 전체(관리 · vMotion · vSAN · 스토리지). 이미 받는 vnic 속성이라 왕복 0.
+        vmks: parseVmks(p['config.network.vnic']),
+        // v3.6.0(호스트명 대조 'OS' 칸): ESXi 자신에 설정된 호스트명(config.network.dnsConfig.hostName). 못 읽으면 null(이름을 지어내지 않는다).
+        ...hostDnsName(p['config.network.dnsConfig']),
         gpus: (() => {
           const gfx = parseGpus(p['config.graphicsInfo']);
           // vGPU/vSGA로 이미 잡힌 물리 GPU(pciId)는 패스쓰루에서 제외해 이중 집계 방지.

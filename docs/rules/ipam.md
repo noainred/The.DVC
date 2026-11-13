@@ -23,6 +23,7 @@
 
 - v3.4.0 — IP 관리 재설계 묶음 가: 탭 5개 · 현황 · 대역 목록/주소 맵 · 필터 한 줄 · '복수IP'
 - v3.5.0 — IP 관리 재설계 묶음 나: 용도 · 요청자 · 할당자 · 대역 용도 · 예약/DHCP 집계 · 엑셀 창 · 상세 창 하나
+- v3.6.0 — IP 관리 재설계 묶음 다: 서버 보기(서비스 태그) · 호스트명 대조 · 스캔 대역 담기(ESXi vmk 포함)
 
 ## 본문
 
@@ -298,4 +299,20 @@
   · 상세 창: 목록의 IP 는 늘 `IpHistoryModal`(제목 'IP 상세 — …') — '관리 정보' 묶음(MgmtBlock)에서 편집기로 넘어간다. 소유 자원 칸은 예전처럼 자원 상세.
   · 정직 기록: Chromium(목 데이터 · 관리자 · 1440/400)으로 현황 · 대역(용도 저장 → 목록 · 머리 반영) · 상세 창 · 엑셀 창을 봤고 엑셀은 API 로 받아 시트 이름만 확인했다(열어 본 것은 아님).
     범위 계정의 403 은 라우트 코드로만 확인했다.
+- **v3.6.0 — IP 관리 재설계 묶음 다**(설계 `docs/design/ipam-redesign` ⑤ · ⑤-2 · ⑪ · ⑮ · 회귀 `server/test/ipamRedesign360.test.js` · `web/src/views/tools/ipamRedesign360.test.js`):
+  · **판정 코어는 `ipam/serverView.js` 하나** — 서버 색인(서비스 태그) · 서버 보기 응답 · 주소별 이름 확인(`nameCheck`) · 호스트명 대조(`compareNames` — `hostNames.nameKey` 위에 얹음). 웹은 글자만 바꾼다(`ipamServerText.js`).
+  · **같은 태그를 호스트 둘 이상이 보고하면 그 태그로 묶지 않는다**(키는 호스트 id · 그 태그의 iDRAC 중 짧은 이름이 같은 하나로만 잇는다). 호스트가 보고한 태그의 iDRAC 은 물리 서버로 세지 않는다.
+    태그 없는 호스트는 '다른 호스트가 태그로 가져갈 수 없는 iDRAC' 중 짧은 이름이 하나뿐일 때만 잇는다(순서에 따라 결과가 바뀌지 않게).
+  · **가림**: 관리자 판본이 아니면(`isAdminDetailUser`) iDRAC 등록부를 읽지도 않고 서비스 태그를 지운다(키도 호스트 id — 키로 태그가 새지 않게). 범위 계정은 자기 vCenter 의 호스트 · VM 만 ·
+    물리 서버 없음 · 스캔 이름(역DNS · NetBIOS) 없음(v2.991 규칙) · override 는 범위 안 IP 만. 변이 5건(태그 지우기 · 물리 서버 · 스캔 이름 · override · 등록부 읽기)을 테스트가 모두 잡는다.
+  · **vmk 전체**: 수집기가 `config.network.vnic` 에서 `vmks`(IPv4 만 · ipV6Config 안 주소 제외 · 32개 상한)와 `config.network.dnsConfig` 에서 `osHostName` · `osDomain` 을 싣는다(같은 조회 · 왕복 0).
+    중앙은 엣지 인벤토리를 필드 화이트리스트 없이 병합하므로(`central/inventory.js`) 소비처(`hostVmks`)가 모양 · 수를 다시 자른다. 옛 수집기는 관리 IP 하나(`fromMgmt`)로 대신한다.
+    원장(ipam.db)에는 vmk 주소를 더하지 않았다 — 원장은 예전처럼 호스트당 관리 IP 하나.
+  · **스캔 대역 후보**: v2.638 제안(`suggestAgentSubnets`)에 vmk 주소를 주입(`hostIps`)하고 출처별 수(vmIps · esxiIps · idracIps — vcenterIps 는 VM + ESXi 그대로) · 분류 · 대역 용도를 붙였다.
+    화면은 '/24 고르기' 표를 줄을 눌러 담는 `ScanRangeAdd.jsx` 로 바꿨고 넣기는 가져오기 창과 같은 `applyImport`(겹치는 줄은 '중복 대역' 칸) — 예전 `appendSubnets` 는 지웠다(되살리면 두 경로가 갈라진다 — 테스트가 없음을 고정).
+    iDRAC 대역 · VM 대역 가져오기 버튼(v2.691 — 서비스별 iDRAC 스캔 대역 · 다른 vCenter 의 VM)은 그대로 둔다.
+  · **호스트명 대조는 폴링하지 않는다**(장비 수천 대 집계 — 열 때 1회 + 새로고침). 응답은 정렬(다름 → 비교 불가 → 같음) 뒤 300행(최대 2,000).
+  · 정직 기록 · 남긴 것: ① 물리 서버의 **OS 인터페이스별 주소 · Linux OS 호스트명**은 아직 모으지 않는다(osSsh 가 이름을 읽지만 poller 상세에 없다 — 엣지 계약 변경이라 따로) —
+    물리 서버의 OS 칸은 스캔 NetBIOS 이름뿐이다. ② 서버 보기는 주소(`#/ipam/server/…`)가 아니라 창이다. ③ vmk 의 쓰임(관리 · vMotion · vSAN)은 포트그룹 이름으로만 보인다(분산 스위치 vmk 는 이름 없음).
+    ④ Chromium(목 · 관리자 · 1440/400)으로 세 화면을 봤다. 범위 계정 · 비관리자 화면은 라우트 입력 테스트로만 확인했다.
 

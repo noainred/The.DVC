@@ -11,6 +11,7 @@ import { registerReports } from './api/reports.js';
 import { registerSearchNotes } from './api/searchNotes.js';
 import { registerInvSearch } from './api/invSearch.js'; // v2.909 헤더 ⌘K 통합 장비 검색
 import { registerIpamExport } from './api/ipamExport.js';
+import { registerIpamServer } from './api/ipamServer.js'; // v3.6.0 IP 관리 서버 보기 · 호스트명 대조
 import { registerVmExport } from './api/vmExport.js';   // v2.799 VM 전체 정보 내보내기(ipamExport.js 에서 옮김)
 import { registerHostExport } from './api/hostExport.js'; // v2.802 vCenter 화면 '호스트 · 클러스터 엑셀'(호스트 1대 = 시트 1장)
 import { registerHostCorp } from './api/hostCorp.js'; // v2.811 ESXi 호스트 화면 '법인별' 보기 집계(/hosts/:id 보다 먼저)
@@ -145,6 +146,7 @@ registerReports(api);
 registerSearchNotes(api);
 registerInvSearch(api);
 registerIpamExport(api);
+registerIpamServer(api);
 registerVmExport(api);
 registerHostExport(api);
 registerHostCorp(api);

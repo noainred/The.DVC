@@ -19,6 +19,8 @@ export const IPAM_PAGES = Object.freeze([
   // v3.4.0(재설계 묶음 가 · 설계 docs/design/ipam-redesign): 맨 앞 '현황' — 탭 5개(IPAM_TABS)의 첫 화면. tab = 그 페이지가 속한 위 탭.
   { k: 'home', label: '현황', icon: '', group: 'ledger', tab: 'home', title: '사용률 · 지금 확인할 것 · 사용률 높은 대역 · IP 변화 · vCenter별' },
   { k: 'list', label: '대장 목록', icon: '📋', group: 'ledger', needsLedger: true, title: 'vCenter·스캔·수동 등록 IP 전체 목록' , tab: 'addr' },
+  // v3.6.0(재설계 묶음 다 — 시안 ⑮): 장비마다 iDRAC · vCenter · OS · DNS 이름 대조. 대장 데이터 없이 그린다(서버 GET /tools/ipam/hostnames).
+  { k: 'names', label: '호스트명 대조', icon: '', group: 'ledger', title: 'iDRAC · vCenter · OS · DNS 에 설정된 호스트명이 같은지 장비별로', tab: 'addr' },
   { k: 'sheet', label: '서브넷 대장', icon: '📊', group: 'ledger', title: '/24 서브넷 단위 엑셀형 대장' , tab: 'range' },
   { k: 'insights', label: '추천 기능 30선', icon: '🧠', group: 'ledger', title: '유명 IPAM 솔루션 대표 기능 30선을 수집 데이터로 계산' , tab: 'home' },
   { k: 'netmap', label: '네트워크 맵', icon: '🗺️', group: 'ledger', title: '대역 선택 → OS별·시간대별 사용/미사용 네트워크 맵' , tab: 'range' },
@@ -42,7 +44,7 @@ export const IPAM_TABS = Object.freeze([['home', '현황'], ['range', '대역'],
 /** 주소 없이 열었을 때의 페이지(v3.4.0 — 예전 'list'). */
 export const IPAM_DEFAULT_PAGE = 'home';
 /** 탭 안 보기 순서(IPAM_PAGES 순서와 별개 — 대역 탭은 서브넷 대장이 먼저). */
-const TAB_ORDER = Object.freeze({ home: ['home', 'insights'], range: ['sheet', 'policies', 'netmap'], addr: ['list'], scan: ['scan', 'status', 'log', 'changes'], setup: ['ipms', 'csv'] });
+const TAB_ORDER = Object.freeze({ home: ['home', 'insights'], range: ['sheet', 'policies', 'netmap'], addr: ['list', 'names'], scan: ['scan', 'status', 'log', 'changes'], setup: ['ipms', 'csv'] });
 /** v2.691: 없어진 페이지의 옛 주소 → 새 페이지(북마크·공유 링크·다른 화면의 바로가기를 살린다). */
 export const IPAM_PAGE_ALIASES = Object.freeze({ ranges: 'scan' });
 export const IPAM_PAGE_KEYS = Object.freeze(IPAM_PAGES.map((p) => p.k));

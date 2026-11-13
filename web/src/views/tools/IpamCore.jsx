@@ -17,6 +17,8 @@ import { IpamScanLog } from './IpamScanLog.jsx';
 import { IpamHome } from './IpamHome.jsx'; // v3.4.0 재설계 묶음 가 — 현황 탭
 import { SubnetList, SubnetMap, SubnetPurposeEdit } from './IpamSubnets.jsx'; // v3.4.0 — 대역 목록 · 주소 맵 · v3.5.0 대역 용도
 import { IpamExportModal } from './IpamExportModal.jsx'; // v3.5.0 — 엑셀 내보내기 창
+import { IpamServerModal } from './IpamServerModal.jsx'; // v3.6.0 — 서버 보기(서비스 태그)
+import { IpamHostNames } from './IpamHostNames.jsx'; // v3.6.0 — 호스트명 대조
 import { RECON_OPTIONS, ROW_OPTIONS, reconLabel } from './ipamFilterText.js'; // v3.4.0 — 필터 한 줄
 import { IpamChanges } from './IpamChanges.jsx'; // v3.1.0 IP 변화
 import { IpamCsv } from './IpamCsv.jsx';
@@ -365,6 +367,7 @@ function Ipam({ scope, onScope }) {
       : view === 'status' ? <ScanStatusModal asPage />
       : view === 'log' ? <IpamScanLog />
       : view === 'changes' ? <IpamChanges />
+      : view === 'names' ? <IpamHostNames />
       : view === 'ipms' ? <IpmsSettings asPage access={access} />
       : view === 'csv' ? <IpamCsv scope={scope} access={access} canManage={canManage} onGoto={go} onApplied={() => setReload((n) => n + 1)} />
       : view === 'netmap' ? (
@@ -647,6 +650,7 @@ function IpHistoryModal({ row, scope, onClose, canManage = false, onEditName = n
   const [h, setH] = useState(undefined);
   const [scan, setScan] = useState(undefined); // v2.991: 그 IP 의 스캔 결과(방식별 호스트명) — undefined 조회 중 · null 없음
   const [showDetail, setShowDetail] = useState(false);
+  const [serverOpen, setServerOpen] = useState(false); // v3.6.0 서버 보기
   // 목록(/tools/ipam) 응답 다이어트로 VM 행의 owner 는 목록에 실리지 않는다(hasOwner 플래그만).
   // 모달을 연 시점에 /vms/lookup 으로 1건만 지연 조회 — 목록이 수십 MB로 커지던 것의 짝 수정.
   const [owner, setOwner] = useState(row.owner || null);
@@ -751,10 +755,12 @@ function IpHistoryModal({ row, scope, onClose, canManage = false, onEditName = n
       <MgmtBlock row={row} canManage={canManage} onEdit={onEditName} onEditMemo={onEditMemo} />
       <div className="flex gap" style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         {owner && <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={() => setShowDetail(true)}>{row.ownerType === 'host' ? '🖥 호스트 정보 보기' : '🖥 VM 정보 보기'}</button>}
+        <button className="logout-btn" style={{ padding: '8px 14px' }} title="이 IP 를 쓰는 서버(서비스 태그)와 그 서버의 모든 IP · 그 위 VM 의 IP" onClick={() => setServerOpen(true)}>🗄 서버 보기</button>
         <VmRemoteButton item={remoteItem} />
         {!owner && !row.hasOwner && <span className="muted" style={{ fontSize: 12 }}>스캔으로 확인된 IP — 원격 접속은 IP로 직접 연결합니다.</span>}
       </div>
       {showDetail && owner && <EntityDetail type={row.ownerType} item={owner} onClose={() => setShowDetail(false)} />}
+      {serverOpen && <IpamServerModal ip={ip} onClose={() => setServerOpen(false)} />}
     </Modal>
   );
 }
