@@ -58,4 +58,7 @@
   **같은 법인**(스캔 에이전트가 그 법인을 수집 · `agentVcenterIds` 또는 같은 엣지)만 · iDRAC 자기 주소 제외 · 등록은 suggest/pick + SSH 열린 후보만 · **주소만(`addrOnly` · 비활성 · 마운트 '/')** —
   `addrOnly` 항목은 사용률 수집 색인(`targets.indexOsHosts`)에서 빠진다(계정 없는 root SSH · 엣지 위임 이탈 방지). 계정이 생기면 등록부가 표지를 지운다. ③ 정방향 DNS — 배정(`ip-scan-assignment`)이 **개별 토큰에만** 그 법인 이름(`fwdNamesFor`)을 싣고
   스캔이 `dns.lookup`(search 도메인) + 이름당 시한 · 동시 4 · 살아 있는 IP 만 `fwdName`. 회귀 `bmOsSuggest2991.test.js`.
+- **v2.994 묶음 B(설계 §12)**: 값 없음 사유는 **서버 코드**(`usageWhy.js usageWhyOf` — 근거 `bmusage/poller.js currentTargets` 의 skipped · targets, 60초 memo · 실패면 'unknown') · 응답은 `why:{code, at?}` 와 `usageOff` 뿐(문구 · 계정 · 주소 · 엣지 이름 없음 — 판본 구분 없음).
+  화면 문구는 `web/.../bmFolders/whyText.js` 하나(코드 전부를 덮는지 시험이 대조). 서버별 수집 실패 원문은 저장하지 않는다(collectHealth 머리말) — 대상인데 값이 없으면 'no-record'(실패 · 첫 주기 · 등록 직후를 가르지 않는다).
+  고르기 버튼의 '폴더에 없는 서버' = 손 등록이 없는 서버(기본 선택과 같은 기준). 회귀 `bmFolders2992.test.js` · 웹 `whyText.test.js`.
 - 회귀: `server/test/bmFolders2984.test.js` · `bmFolders2987.test.js`(v2.987 · 2차 반증 반영 — 변이 12/12) · 웹 `web/src/views/tools/bmFoldersText.test.js`.

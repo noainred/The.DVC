@@ -20,6 +20,7 @@
  */
 import { requirePerm, requireRole } from '../../auth/auth.js';
 import { usageSrcOf } from '../../bmfolders/usageSrc.js'; // v2.993: 사용률 지표별 출처(출처 색)
+import { usageWhyOf, currentWhyIndex } from '../../bmfolders/usageWhy.js'; // v2.994: 값 없음 사유
 import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { todayStamp } from '../../util/dayKey.js';
@@ -85,7 +86,7 @@ export function membersOf(g) {
     seen.add(key);
     out.push({
       key, keyKind, kind: 'esxi', corp: t(h.corp), name: t(h.name), nameIsAddr: false, serviceTag: t(h.serviceTag), model: t(h.model), source: 'vcenter',
-      remoteAgent: '', collectorId: '', powered: null, usage: h.usage ? { state: h.usage.state, cpuPct: h.usage.cpuPct, memPct: h.usage.memPct, src: h.usage.src, ...(h.usage.srcBy ? { srcBy: h.usage.srcBy } : {}) } : { state: 'unread' },
+      remoteAgent: '', collectorId: '', powered: null, usage: h.usage ? { state: h.usage.state, cpuPct: h.usage.cpuPct, memPct: h.usage.memPct, src: h.usage.src, ...(h.usage.srcBy ? { srcBy: h.usage.srcBy } : {}), ...(h.usage.at ? { at: h.usage.at } : {}), ...(h.usage.vcUnread ? { vcUnread: true } : {}) } : { state: 'unread' },
       faults: h.faults ?? null, watts: h.watts ?? null, cores: null, memGB: null,
     });
   }
@@ -116,7 +117,7 @@ const missingName = (x, admin, hide) => {
   return nameOf({ key: x.key, name: x.name || '(이름 모름)', serviceTag: tag, nameIsAddr: x.addr === true }, admin, hide);
 };
 
-function serverRow(m, p, admin, hide) {
+function serverRow(m, p, admin, hide, ix) {
   return {
     key: pubKey(m.key, hide), kind: m.kind, corp: m.corp, name: nameOf(m, admin, hide), serviceTag: hide ? undefined : m.serviceTag, model: m.model,
     src: srcClassOf(m), agent: hide ? undefined : (m.remoteAgent || (m.collectorId ? `수집 서버 ${m.collectorId}` : '')),
@@ -124,6 +125,8 @@ function serverRow(m, p, admin, hide) {
     powered: m.powered, usage: m.usage?.state || 'unread', cpu: m.usage?.cpuPct ?? null, mem: m.usage?.memPct ?? null,
     // v2.993(출처 색): 지표별 출처 { cpu, mem } — 'os' · 'idrac' · 'vcenter' · null. 장비 단서가 아니라 판본 구분 없이 싣는다.
     usrc: usageSrcOf(m.usage) || undefined,
+    // v2.994(값 없음 사유 — 설계 §12): 사용률이 없을 때 서버가 판정한 사유 코드(+ 오래됨이면 마지막 값 시각). 코드만 — 계정 · 주소 · 엣지 이름을 싣지 않는다.
+    why: ix !== undefined ? usageWhyOf(m, ix) || undefined : undefined,
     watts: m.watts ?? null, faults: m.faults ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null,
     // 관리 주소 — 관리자 판본만(비관리자 · 데모에게 장비 주소를 싣지 않는다 — isAdminDetailUser 하나로 판정)
     // 범위 계정 판본(범위 지정 관리자 포함)에서는 주소 속 태그도 가린다(2차 반증 1: Dell 기본 이름 'idrac-<태그>' 주소로 가린 태그가 드러났다)
@@ -274,14 +277,16 @@ export function registerBmFolders(api) {
         try { const { listEdgeFleet } = await import('../../central/fleet.js'); edgeAt = new Map(listEdgeFleet().map((e) => [e.agent, e.at || null])); } catch { edgeAt = new Map(); }
       }
       const servers = [];
+      const ix = await currentWhyIndex();   // v2.994: 값 없음 사유 — 베어메탈 사용률 대상 해석(60초 memo · 실패면 null = '확인 못 함')
       for (const m of members) {
         if (!m.corp ? hide || m.kind !== 'bm' : !(allowed ? allowed.has(m.corp) : true)) continue;
         const p = b.placeOf.get(m.key);
         if (m.kind !== 'bm' && !p?.src) continue;   // ESXi 는 폴더에 넣은 것만
-        servers.push(serverRow(m, p, admin, hide));
+        servers.push(serverRow(m, p, admin, hide, ix));
       }
       return {
         ok: true, at: g.at, rev: storeRev(), scoped: hide, admin, canWrite: writerOk(req.user), canFleet: full,
+        usageOff: !!ix?.off,   // v2.994: 이 노드의 베어메탈 사용률 수집이 꺼져 있다(화면 위 띠 — 칸마다 같은 이유를 보지 않게)
         settings: { autoRules: b.autoRules },
         corps: b.corps.map((c) => ({
           ...c, name: g.corpNames?.get(c.vcenterId) || c.vcenterId, writable: writableOf(req.user, s, c.vcenterId),
