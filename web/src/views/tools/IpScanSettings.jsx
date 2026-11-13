@@ -505,7 +505,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
           <div className="flex" style={{ alignItems: 'flex-start', gap: 8, flexWrap: 'wrap', borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
             <label className="flex" style={{ alignItems: 'flex-start', gap: 8, flex: '1 1 260px', minWidth: 0 }}>
               <input type="checkbox" style={{ marginTop: 3, flex: 'none' }} disabled={s.reverseDns === false} checked={s.reverseDns !== false && s.dnsConfirm !== false} onChange={(e) => setS({ ...s, dnsConfirm: e.target.checked })} />
-              <span style={{ minWidth: 0, whiteSpace: 'normal' }}><b>정방향 확인(DNS 정합성)</b> <span className="muted" style={{ fontSize: 12 }}>— 역DNS 가 답한 이름을 DNS 에 다시 물어 그 IP 를 가리키는지 봅니다. 물리서버 이름 정방향 조회 다음, 남은 예산(90초) 안에서 묻습니다.{s.reverseDns === false ? ' 역DNS 를 꺼서 묻지 않습니다.' : ''}</span></span>
+              <span style={{ minWidth: 0, whiteSpace: 'normal' }}><b>정방향 확인(DNS 정합성)</b> <span className="muted" style={{ fontSize: 12 }}>— 역DNS 가 답한 이름을 DNS 에 다시 물어 그 IP 를 가리키는지 봅니다. 물리서버 이름 정방향 조회 다음, 그 단계와 함께 쓰는 시간 예산의 남은 시간 안에서 묻습니다(넘친 이름은 다음 스캔이 이어 묻습니다).{s.reverseDns === false ? ' 역DNS 를 꺼서 묻지 않습니다.' : ''}</span></span>
             </label>
             <span className="flex" style={{ alignItems: 'center', gap: 6, flex: 'none' }}>
               <input className="input" type="number" min={1} max={720} style={{ width: 72 }} aria-label="정방향 확인 결과를 다시 쓰는 시간" value={s.dnsConfirmHours ?? ''} onChange={(e) => setS({ ...s, dnsConfirmHours: e.target.value })} disabled={s.reverseDns === false || s.dnsConfirm === false} />

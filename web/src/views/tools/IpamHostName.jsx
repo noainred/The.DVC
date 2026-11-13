@@ -55,7 +55,7 @@ function FwdLine({ d }) {
     <span className="flex" style={{ flex: '1 0 100%', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 2, fontSize: 12, marginTop: 2 }}>
       <span className="muted" style={{ flex: '0 0 auto' }}>↳ 정방향</span>
       <span style={{ flex: '1 1 180px', minWidth: 0, overflowWrap: 'anywhere', color: l.tone === 'amber' ? 'var(--amber)' : l.tone === 'green' ? 'var(--green)' : 'var(--text-dim)' }}>{l.text}</span>
-      {l.at ? <span className="muted" style={{ flex: '0 0 auto' }} title="정방향 확인 결과는 설정한 기간(기본 24시간) 동안 다시 씁니다 — 스캔 시각과 다를 수 있습니다">{fmtDt(l.at)} 확인</span> : null}
+      {l.at ? <span className="muted" style={{ flex: '0 0 auto' }} title="정방향 확인 결과는 스캔 설정의 기간 동안 다시 씁니다 — 스캔 시각과 다를 수 있습니다">{fmtDt(l.at)} 확인</span> : null}
     </span>
   );
 }
