@@ -809,22 +809,22 @@ function DnsCheckTable({ c }) {
         {['match', 'other', 'none', 'unknown'].map((k) => <span key={k} className={`badge ${DNS_FWD[k].tone}`} style={{ fontSize: 10 }}>{DNS_FWD[k].label} {Number(c.counts?.[k] || 0).toLocaleString()}</span>)}
       </div>
       {rows.length > 0 && (
-        <div className="table-wrap" style={{ maxHeight: 260 }}>
-          <STable minWidth={640} wrap={false}>
-            <thead><tr><th>판정</th><th>IP 주소</th><th>역DNS 이름</th><th>정방향 주소</th><th>대장이 아는 이름</th><th>확인한 때</th></tr></thead>
-            <tbody>
-              {rows.map((x) => (
-                <tr key={x.ip}>
-                  <td><span className={`badge ${DNS_FWD[x.v]?.tone || 'gray'}`} style={{ fontSize: 10 }}>{DNS_FWD[x.v]?.label || x.v}</span></td>
-                  <td style={{ fontFamily: 'var(--mono)' }} data-sort={x.ip}>{x.ip}</td>
-                  <td>{x.ptr || '—'}</td>
-                  <td style={{ fontFamily: x.addrs?.length ? 'var(--mono)' : undefined }}>{x.addrs?.length ? x.addrs.join(', ') : <span className="muted">그런 이름 없음</span>}</td>
-                  <td>{x.known ? <>{x.known} <span className="muted" style={{ fontSize: 11 }}>({KNOWN_SRC[x.knownSrc] || x.knownSrc})</span></> : <span className="muted">—</span>}</td>
-                  <td className="muted" data-sort={x.at ?? ''}>{x.at ? fmtDt(x.at) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </STable>
+        // 표가 아니라 줄바꿈되는 행 — 카드는 격자 한 칸(1440px 에서도 약 370px)이라 6열 표는 정방향 주소 · 대장 이름이 가로 스크롤 밖으로 숨었다(Chromium 판독).
+        <div role="list" aria-label="정방향 확인이 어긋난 IP" style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+          {rows.map((x, i) => (
+            <div role="listitem" key={x.ip} style={{ padding: '7px 10px', borderTop: i ? '1px solid rgba(36,48,73,.5)' : 'none', fontSize: 12, lineHeight: 1.55, minWidth: 0 }}>
+              <div className="flex" style={{ flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 2 }}>
+                <span className={`badge ${DNS_FWD[x.v]?.tone || 'gray'}`} style={{ fontSize: 10, flex: 'none' }}>{DNS_FWD[x.v]?.label || x.v}</span>
+                <b style={{ fontFamily: 'var(--mono)', flex: 'none' }}>{x.ip}</b>
+                {x.known ? <span className="muted" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{x.known} ({KNOWN_SRC[x.knownSrc] || x.knownSrc})</span> : null}
+              </div>
+              <div style={{ overflowWrap: 'anywhere' }}>
+                <span className="muted">역DNS</span> {x.ptr || '—'} <span className="muted">→ 정방향</span>{' '}
+                {x.addrs?.length ? <span style={{ fontFamily: 'var(--mono)', color: 'var(--amber)' }}>{x.addrs.join(', ')}</span> : <span style={{ color: 'var(--amber)' }}>그런 이름 없음</span>}
+                {x.at ? <span className="muted"> · {fmtDt(x.at)} 확인</span> : null}
+              </div>
+            </div>
+          ))}
         </div>
       )}
       {c.total > rows.length && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>어긋난 IP {Number(c.total).toLocaleString()}개 중 {rows.length.toLocaleString()}개 — 전부는 스캔 결과 CSV 의 dns_forward 열에 있습니다.</div>}
