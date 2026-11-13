@@ -3592,13 +3592,13 @@ table.bmu-util tbody td { padding: 9px 10px; }
 .upg-chg-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 8px; font-size: 12px; font-weight: 700; color: var(--text-dim); }
 .upg-chg-n { font-family: var(--mono); font-weight: 500; }
 .upg-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.upg-list li { position: relative; padding-left: 14px; font-size: 12.5px; line-height: 1.55; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.upg-list li { position: relative; padding-left: 14px; font-size: 12.5px; line-height: 1.55; color: var(--text); min-width: 0; word-break: keep-all; overflow-wrap: anywhere; }
 .upg-list li::before { content: ''; position: absolute; left: 2px; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-2); }
 .upg-list.clamp li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 .upg-scroll { max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 6px; min-width: 0; }
 /* 펼친 목록의 판 제목은 자르지 않고 줄바꿈한다(Chromium 판독 — 말줄임이면 제목을 끝까지 읽을 길이 없다) */
 .upg-ver { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; font-size: 12px; font-weight: 700; line-height: 1.5; color: var(--text); min-width: 0; }
-.upg-ver .t { min-width: 0; overflow-wrap: anywhere; padding-top: 2px; }
+.upg-ver .t { min-width: 0; word-break: keep-all; overflow-wrap: anywhere; padding-top: 2px; }   /* 한국어는 단어 중간에서 끊지 않는다(Chromium 판독 '전 / 달') */
 .upg-more { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; margin: -6px 0 -8px -10px;
   border: none; background: none; color: #93c5fd; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
 .upg-more:hover { color: #bfdbfe; }
