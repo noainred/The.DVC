@@ -18,6 +18,7 @@
 - (원래 5762행) v2.692 — 스캔 대역·설정 서브메뉴 2개 · /24 가져오기에 IPMS 설정 적용
 - (원래 5768행) IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다
 - v2.991 — IP 스캔 호스트명 확인(역DNS · mDNS · NetBIOS) · 대장 '호스트명' 열
+- v2.999 — IP 스캔 MAC · 제조사(스캐너 이웃 표 ARP · 제조사 표) · 대장 '제조사 · MAC' 열
 
 ## 본문
 
@@ -203,4 +204,21 @@
   - `hostName`(스캔 행 = 호스트명 · ipam.db 열)의 뜻은 그대로 — 화면의 'ESXi 호스트' 칸만 VM · 호스트 행으로 좁혔다(스캔 · 수동 행은 '—'). 스캔 결과 CSV 는 **뒤에** 열을 덧붙였다(앞 열 순서 불변).
   - ⚠ 정직 기록: NetBIOS · mDNS 의 **실제 장비 응답은 확인하지 못했다**(이 환경에 Windows · mDNS 장비 없음 — 루프백 응답자와 규격으로 확인). mDNS 는 같은 L2 구간만 답하므로 라우터 너머 대역은 역DNS · NetBIOS 만 채운다.
     기본 켜짐이라 업그레이드 뒤 중앙과 (업그레이드된) 엣지가 응답한 IP 마다 UDP 137 질의를 보낸다 — IDS 가 정찰로 볼 수 있다는 점을 시안 · 릴리스 노트에 밝혔다.
+
+- ⚠⚠ **v2.999 — IP 스캔 MAC · 제조사(스캐너 이웃 표 ARP)와 대장 '제조사 · MAC' 열**(사용자 선택 '②③ MAC · 제조사 + 충돌 감지' · 시안 `docs/design/ipam-alerts-mac-dns`
+  (캔버스 https://claude.ai/artifact/FZQsds5xAS4f6QT24nJ4Mu) · 컨펌 10개 전부 기본값 — 릴리스 세 번 중 첫째(가: 수집과 표시). 회귀 `server/test/ipScanMac2999.test.js` + 웹 `ipamMacText.test.js`):
+  - MAC 은 **스캐너의 이웃 표를 읽기만** 한다(`ipam/neighbors.js` — 리눅스 `/proc/net/arp`, 새 패킷 · 명령 실행 없음). 큰 대역에서 앞 항목이 밀려나므로 1단계 동안 주기적으로(2초) +
+    1 · 2단계 끝에 읽어 모은다(타이머는 finally 에서 멈춘다 — 인라인 폴백이 메인 프로세스에서 돌아도 새지 않게). 완성 항목(0x2)만 · 게시 항목(0x8 — 이 장비 MAC) · 0 MAC 은 버린다.
+    Windows 의 `arp -a` 는 범위 밖(사유 `unsupported`).
+  - 보고 칸은 **`arpMac`(이웃 표) · `arpTried`(표를 읽었고 같은 서브넷 · 이 장비 주소 제외)** — `mac` 칸은 예전처럼 NetBIOS 가 답한 MAC 이다(옛 중앙이 ARP 값을 'NetBIOS 응답' 으로 보이지 않게 칸을 나눴다).
+    요약은 `nameStats.mac = {onLink, found, reason}`(옛 중앙은 모르는 키를 버린다). 중앙 정제 `cleanAliveHost`(꼴 · 참일 때만) · `cleanMacStats`(수치 · 아는 사유만).
+  - 저장 `arp = {v, at, miss}` — 이름과 같은 규칙(`mergeArp`): 표에 있으면 새 값 · **같은 서브넷인데 표에 없으면 miss+1(NAME_MISS_MAX 에 지움)** ·
+    **볼 수 없었던 보고(옛 엣지 · 다른 서브넷 에이전트 · 표 못 읽음)는 그대로**(보지 못한 것을 없어졌다고 세지 않는다 — 화면은 확인 시각으로 '지난 확인' 을 말한다).
+    MAC 이력 `history[ip].macs`(최근 10 · **ARP 값만** — 다음 묶음 'MAC 변경' 의 근거라 상대가 말한 NetBIOS 값을 섞지 않는다). 같은 MAC 의 IP 색인 `_macIps`(갱신 지점은 _agentCount 와 같다 — 로드 · 병합 · 정리).
+  - 판정 코어는 `ipam/macVendor.js` 하나 — 표시 MAC(ARP > NetBIOS) · 제조사(`vendor/oui.tsv.gz` — npm oui-data@2.1.58 BSD-2-Clause, IEEE MA-L · MA-M · MA-S 5만 4천 건, 9 → 7 → 6자리 순) ·
+    종류(`gateway` VRRP · HSRP · GLBP / `virtual` VMware · Hyper-V · Xen · VirtualBox · Parallels · Proxmox · QEMU / `random` 로컬 관리 비트 — 제조사를 추정하지 않는다).
+    표는 기동 15초 뒤 비동기로 미리 읽고(`warmOui`), 그 전에 찾으면 동기 적재(실측 약 45ms 한 번). 표 갱신은 `scripts/oui-build.mjs` → 고지 `scripts/third-party-notices.mjs` 3절.
+  - 범위 계정: 대장 행에 MAC 칸을 싣지 않는다(호스트명과 같은 `allowed ?` 판정) · `/tools/ipam/history` 의 scan 은 예전처럼 null. 스캔 결과 CSV 는 `mac`(표시 MAC) 뒤에 `mac_src` · `mac_vendor` 를 덧붙였다.
+  - ⚠ 정직 기록: **실제 L2 이웃이 있는 망에서 이웃 표 읽기를 확인하지 못했다**(이 환경의 이웃은 게이트웨이 1개 — 파서는 커널 꼴의 표본 · 주입한 읽기 함수로 확인). IEEE 등록부 원문 · 재배포 조건 문서는
+    이 환경의 네트워크 정책이 막아 읽지 못했다(oui-data 의 BSD 라이선스만 확인). '미등록 가상 NIC' 은 ESXi vmkernel 포트(vMotion 등)도 VMware 대역을 써서 단정하지 않는다.
 

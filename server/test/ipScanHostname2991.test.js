@@ -250,7 +250,9 @@ test('⑥ scanRanges — 응답한 IP 에 이름 확인을 붙인다(표시 이�
     assert.deepEqual(row.tried, ['netbios']);
     assert.equal(row.nbGroup, 'WG');
     assert.equal(row.mac, '00:11:22:33:44:55');
-    assert.deepEqual(out.nameStats, { tried: { dns: 0, mdns: 0, netbios: 1 }, found: { dns: 0, mdns: 0, netbios: 1 }, named: 1, alive: 1 });
+    const { mac: macStats, ...nameOnly } = out.nameStats;   // v2.999: nameStats.mac(이웃 표 요약)는 ipScanMac2999 이 본다
+    assert.deepEqual(nameOnly, { tried: { dns: 0, mdns: 0, netbios: 1 }, found: { dns: 0, mdns: 0, netbios: 1 }, named: 1, alive: 1 });
+    assert.equal(typeof macStats, 'object');
   } finally { srv.close(); }
 });
 
@@ -505,7 +507,8 @@ test('⑨ /tools/ipam 호스트명 칸 · VM 행에도 스캔 이름 · 범위 �
   assert.equal(o.hist.scan.nbGroup, 'WG');
   assert.equal(o.scopedHist.scan, null);
   const lines = String(o.csv).trim().split('\n');
-  assert.equal(lines[0], 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent,hostname_source,name_dns,name_mdns,name_netbios,netbios_group,mac');
+  // v2.999: 뒤에 mac_src · mac_vendor 가 붙었다(앞 열 순서 그대로) — mac 은 표시 MAC(ARP > NetBIOS). 이 행은 NetBIOS 만 MAC 을 답했다.
+  assert.equal(lines[0], 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent,hostname_source,name_dns,name_mdns,name_netbios,netbios_group,mac,mac_src,mac_vendor');
   const row = lines.find((l) => l.startsWith('10.250.0.5,'));
-  assert.ok(row && row.endsWith(',netbios,,,WIN-X,WG,00:50:56:00:00:01'), row);
+  assert.ok(row && row.endsWith(',netbios,,,WIN-X,WG,00:50:56:00:00:01,netbios,"VMware, Inc."'), row);
 });

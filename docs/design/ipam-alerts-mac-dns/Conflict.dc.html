@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>충돌 감지 — 판정 규칙과 화면</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+.muted{color:#8b9bb4}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.btn{padding:7px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:12px;font-weight:600;background:#1a2236;border:1px solid #243049;color:#8b9bb4;white-space:nowrap}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{text-align:left;padding:10px 12px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;letter-spacing:.5px;white-space:nowrap;border-bottom:1px solid #243049}
+tbody td{padding:9px 12px;border-bottom:1px solid rgba(36,48,73,.5);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+.ip{color:#3b82f6;font-weight:700;background:none;border:none;padding:0;font:inherit;font-weight:700;cursor:pointer}
+.new{outline:2px dashed rgba(34,211,238,.6);outline-offset:4px}
+.rule{font-size:12px;color:#8b9bb4;line-height:1.7}
+.rule b{color:#e6edf6;font-weight:600}
+.box{box-sizing:border-box;min-width:0;border:1px solid #243049;border-radius:12px;background:#0f1626;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.box h3{margin:0;font-size:13px;font-weight:700;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.pair{display:grid;grid-template-columns:96px minmax(0,1fr);gap:4px 10px;font-size:12.5px;align-items:baseline}
+.pair .k{color:#8b9bb4;font-size:12px}
+.step{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;line-height:1.65}
+.step i{font-style:normal;flex:none;width:20px;height:20px;border-radius:50%;background:#1a2236;border:1px solid #243049;display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#8b9bb4;margin-top:1px}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:20px 24px 28px;max-width:1240px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:10px">
+    <span style="font-size:15px;font-weight:700">충돌 감지 — 무엇을 ‘충돌 의심’ 이라고 부르는가</span>
+    <span class="muted" style="font-size:12px">‘충돌’ 이라고 단정하지 않습니다 — 스캐너는 한 번에 한 MAC 만 봅니다 · 주소 · 이름은 가상</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px">
+    <div class="box">
+      <h3><span class="badge red">충돌 의심</span>vCenter 가 아는 VM 의 IP 에 다른 MAC 이 응답</h3>
+      <div class="pair">
+        <span class="k">vCenter</span><span><b>erp-db-02</b> <span class="muted">의 NIC</span> <span class="mono">00:50:56:9A:11:04</span> <span class="muted">· IP 10.210.5.14</span></span>
+        <span class="k">스캔(ARP)</span><span><span class="mono">10.210.5.14</span> <span class="muted">에</span> <span class="mono">F4:8E:38:2A:91:0C</span> <span class="muted">(Dell) 이 응답</span></span>
+      </div>
+      <div class="rule">스캔이 본 MAC 이 <b>그 VM 의 어떤 NIC MAC 과도 같지 않을 때</b>만입니다. 같은 IP 를 두 장비가 쓰고 있거나, VM 의 IP 가 바뀌었는데 vCenter(VMware Tools)가 옛 IP 를 아직 보고하는 경우입니다. <b>위험</b> 알림(상태형 — 풀릴 때까지 ‘현재 발생 중’).</div>
+    </div>
+    <div class="box">
+      <h3><span class="badge amber">MAC 변경</span>같은 IP 의 MAC 이 지난 스캔과 다름</h3>
+      <div class="pair">
+        <span class="k">지난 스캔</span><span><span class="mono">10.210.5.40</span> <span class="muted">→</span> <span class="mono">00:1B:21:7A:44:10</span> <span class="muted">(Intel)</span></span>
+        <span class="k">이번 스캔</span><span><span class="mono">10.210.5.40</span> <span class="muted">→</span> <span class="mono">3C:EC:EF:12:9B:E2</span> <span class="muted">(Super Micro)</span></span>
+      </div>
+      <div class="rule">vCenter 가 모르는 IP 라 대조할 기준이 없습니다. 장비 교체 · NIC 교체 · IP 재사용 · 충돌이 <b>모두 같은 모양</b>이라 원인을 적지 않고 ‘변경’ 이라고만 알립니다. <b>경고</b> 알림(사건형 — 한 번).</div>
+    </div>
+  </div>
+
+  <div class="card new" style="padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+        <b style="font-size:14px">추천 › 충돌 의심 · MAC 변경</b>
+        <span class="badge red">충돌 의심 1</span><span class="badge amber">MAC 변경 2</span><span class="badge gray">판정 못 함 1,204</span>
+      </div>
+      <span class="muted" style="font-size:12px">대장 › 추천 탭의 새 카드 · 대장 목록의 ‘충돌 · MAC 변경’ 칩과 같은 목록</span>
+    </div>
+    <div style="overflow-x:auto;border-radius:10px;border:1px solid #243049;min-width:0">
+      <table style="min-width:1080px">
+        <thead><tr><th>판정</th><th>IP 주소</th><th>대장이 아는 것</th><th>스캔이 본 것</th><th>처음 본 때 ▼</th><th>에이전트</th><th data-nosort></th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="badge red">충돌 의심</span></td>
+            <td><button class="ip">10.210.5.14</button></td>
+            <td><b>erp-db-02</b> <span class="muted">(VM · vc-seoul-01)</span><div class="mono muted" style="font-size:11px">00:50:56:9A:11:04</div></td>
+            <td>Dell<div class="mono muted" style="font-size:11px">F4:8E:38:2A:91:0C <span class="badge gray" style="font-size:10px">ARP</span></div></td>
+            <td style="white-space:nowrap">11-13 10:05<div class="muted" style="font-size:11px">연속 3회 스캔</div></td>
+            <td>central</td>
+            <td style="white-space:nowrap"><button class="btn">이력</button></td>
+          </tr>
+          <tr>
+            <td><span class="badge amber">MAC 변경</span></td>
+            <td><button class="ip">10.210.5.40</button></td>
+            <td><span class="muted">스캔만 · 직전 MAC</span><div class="mono muted" style="font-size:11px">00:1B:21:7A:44:10 (Intel)</div></td>
+            <td>Super Micro<div class="mono muted" style="font-size:11px">3C:EC:EF:12:9B:E2 <span class="badge gray" style="font-size:10px">ARP</span></div></td>
+            <td style="white-space:nowrap">11-13 10:05</td>
+            <td>central</td>
+            <td style="white-space:nowrap"><button class="btn">이력</button></td>
+          </tr>
+          <tr>
+            <td><span class="badge amber">MAC 변경</span> <span class="badge gray">이중화 의심</span></td>
+            <td><button class="ip">10.210.5.9</button></td>
+            <td><span class="muted">스캔만 · 두 MAC 사이 전환</span><div class="mono muted" style="font-size:11px">최근 6회 중 4회</div></td>
+            <td>Arista Networks<div class="mono muted" style="font-size:11px">28:99:3A:4C:10:07 <span class="badge gray" style="font-size:10px">ARP</span></div></td>
+            <td style="white-space:nowrap">11-12 22:05</td>
+            <td>central</td>
+            <td style="white-space:nowrap"><button class="btn">알림 제외</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="rule"><b>판정 못 함 1,204</b> — 스캐너와 다른 서브넷이라 MAC 을 모르는 IP 수입니다. 이 수를 ‘충돌 없음’ 에 넣지 않고 따로 셉니다. 스캔 대역 밖의 VM IP 는 여기에도 들지 않습니다(스캔하지 않음).</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start">
+    <div class="box">
+      <h3>판정 순서 <span class="muted" style="font-weight:400;font-size:12px">스캔 결과를 저장할 때 한 번 · 중앙에서</span></h3>
+      <div class="step"><i>1</i><span>이번 스캔이 <b>끝까지 돌았고</b> 그 IP 의 MAC 을 읽었는가 — 아니면 판정하지 않습니다(유지도 해소도 아님).</span></div>
+      <div class="step"><i>2</i><span>MAC 이 <b>VRRP · HSRP 가상 MAC</b>(00:00:5E:00:01:xx 등)이거나 한 MAC 이 여러 IP 에 답하는 <b>라우터(대리 ARP)</b>면 뺍니다.</span></div>
+      <div class="step"><i>3</i><span>그 IP 를 vCenter 의 VM 이 갖고 있고(전원 켜짐), 스캔 MAC 이 그 VM 의 NIC MAC 목록에 <b>없으면</b> 충돌 의심.</span></div>
+      <div class="step"><i>4</i><span>vCenter 가 모르는 IP 면 지난 스캔의 MAC 과 비교 — 다르면 MAC 변경. 처음 읽은 MAC 은 기준선입니다.</span></div>
+      <div class="step"><i>5</i><span>충돌 의심은 <b>연속 2회</b> 스캔에서 같게 보일 때 알립니다(vMotion · IP 교체 직후의 한 번짜리 엇갈림을 거릅니다 — 횟수는 설정값).</span></div>
+    </div>
+    <div class="box">
+      <h3>알지 못하는 것 <span class="muted" style="font-weight:400;font-size:12px">과장하지 않기 위한 한계</span></h3>
+      <div class="rule"><b>두 장비를 동시에 보지 못합니다</b> — 스캐너는 운영체제 이웃 표에 남은 MAC 하나만 읽습니다. 같은 IP 에 두 MAC 이 번갈아 답하는 것을 한 번의 스캔으로 확정하려면 원시 ARP 패킷이 필요한데(관리자 권한 · 전용 소켓), 이번 범위에 넣지 않았습니다.</div>
+      <div class="rule"><b>ESXi 호스트 관리 IP 는 대조하지 않습니다</b> — 관리 IP 에는 vmkernel NIC 의 MAC 이 답하는데, 지금 수집에는 물리 NIC MAC 만 있고 vmkernel MAC 은 없습니다. 이 IP 는 MAC 변경만 봅니다.</div>
+      <div class="rule"><b>iDRAC(BMC) 주소</b> — iDRAC 인벤토리에 BMC NIC 의 MAC 이 있어 대조할 수 있습니다. 다만 대장이 iDRAC 주소를 출처로 갖고 있지 않아 등록부와 잇는 일이 따로 듭니다 — 넣을지는 컨펌 질문입니다.</div>
+      <div class="rule"><b>NAT · 방화벽 너머</b> — 다른 서브넷의 IP 는 라우터 MAC 만 보여 판정에서 뺍니다. 엣지 에이전트가 그 서브넷 안에 있으면 그 엣지의 스캔으로 판정합니다.</div>
+      <div class="rule"><b>VM 의 IP 는 VMware Tools 가 보고한 값</b>입니다 — Tools 가 없거나 멈춘 VM 은 IP 를 몰라 대조 대상이 아닙니다.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

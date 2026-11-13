@@ -59,7 +59,7 @@
 - (v2.976) 집중 모니터링 화면 — 시간 띠 하나가 모든 차트를 옮김 · 숫자는 응답 limits · 비교 색은 고정한 서버에만(4색) · 대상 표는 1440px 에서 동작 열까지
 - (v2.977) 업그레이드 뒤 화면 조각 404 는 자동 새로고침(60초에 한 번) · 열이 많은 표는 오른쪽 동작 열을 고정한다(sm-pin-right)
 - (v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다)) 서버 메뉴 이름 변경 — Virtual Machine(VM)(vms · vcenters) · Hypervisor(hosts · 새 항목) · Physical Server · Bare Metal Server · 저장 메뉴 별칭은 tab:vcenters → tab:vms · 마지막 본 탭 기억 삭제 · 허브 제목 = 메뉴 라벨
-- (v2.999) 업그레이드 뒤 ‘새로고침 하세요’ — 이 창의 판(빌드 값) ≠ 서버 판이면 오류 상자 대신 안내 + 바뀐 것 3줄 + More · 알림은 닫을 때까지 · ‘새로고침 필요’ 배지 · /release-notes/since 는 옛 판 창의 계약
+- (v3.0.0(코드 · 테스트 표지는 v2.999 — main 이 v2.999 까지 먼저 나가 번호만 올렸다)) 업그레이드 뒤 ‘새로고침 하세요’ — 이 창의 판(빌드 값) ≠ 서버 판이면 오류 상자 대신 안내 + 바뀐 것 3줄 + More · 알림은 닫을 때까지 · ‘새로고침 필요’ 배지 · /release-notes/since 는 옛 판 창의 계약
 
 ## 본문
 
@@ -499,14 +499,14 @@
   - 1440px(사이드바 열림 · 칸 약 1,154px)에서 열이 가로 스크롤 뒤로 가면 결함이다. 먼저 긴 칸을 접고(whiteSpace normal + maxWidth), 그래도 안 되면 동작 · 상태처럼 꼭 보여야 할
     오른쪽 열을 고정한다(`styles.css .sm-pin-right` — 마지막 두 칸 sticky · colSpan 행 제외). 표 칸(td)에 `className="flex"` 를 직접 주지 말 것 — 칸이 플렉스 상자가 돼 줄 높이 · 테두리가 어긋난다(안에 div 로).
 
-- **(v2.999) 업그레이드 뒤 ‘새로고침 하세요’ 안내(사용자 요청 2026-11-13 · 설계 `docs/design/upgrade-reload` · 컨펌 ‘추천대로 전부 진행’)**.
+- **(v3.0.0(코드 · 테스트 표지는 v2.999 — main 이 v2.999 까지 먼저 나가 번호만 올렸다)) 업그레이드 뒤 ‘새로고침 하세요’ 안내(사용자 요청 2026-11-13 · 설계 `docs/design/upgrade-reload` · 컨펌 ‘추천대로 전부 진행’)**.
   회귀 `web/src/upgradeNotice.test.jsx`(판정 · 저장소 · 3줄 요약 · 오류 경계 분기 · 상자 렌더 · App 소스) · `server/test/upgradeNotice2999.test.js`(notesSince · 실제 라우트 · 웹 대조 · 주 번들).
   ① **판정 코어는 `web/src/upgradeNotice.js` 하나**: 이 창의 판 = 빌드 값(`vite.config.js` define `import.meta.env.VITE_APP_VERSION` ← web/package.json — 이 글자 그대로 읽는다, `?.` 금지) ·
      없으면(개발 서버) 처음 본 서버 판 / 서버 판 = `/api/health` version(App 20초 폴링 → `noteServerVersion`). `isStale` 은 **못 읽은 값이면 false**(단정하지 않는다) · 되돌림(서버가 낮음)도 다르다.
   ② **오류 경계**(`components/ErrorBoundary.jsx`): 판이 다르거나 화면 조각 오류(v2.977)면 `UpgradeNotice` 상자가 **fallback 보다 먼저**. 판이 같으면 예전 그대로(오류 원문 + 다시 시도 / 호출부 fallback) —
      진짜 결함을 업그레이드 탓으로 가리지 않는다. 폴링 사이 업그레이드는 잡은 순간 `/health` 를 한 번 더(5초 · 재시도 없음 · 같은 오류일 때만 바꾼다). 포탈 전체 경계는 `upgradeClassName="login-screen"`.
   ③ **주 번들에 둔다** — `ErrorBoundary` · `UpgradeNotice` · `upgradeNotice.js` 에 lazy · 동적 import 금지(옛 판 창은 새 서버에서 옛 청크를 못 받는다 · 서버 테스트 ④가 막는다).
-     따라서 이 안내는 **이 기능이 들어간 판(v2.999) 이후의 업그레이드부터** 보인다 — 그 전 판으로 열어 둔 창은 옛 코드라 예전 상자가 뜬다.
+     따라서 이 안내는 **이 기능이 들어간 판(v3.0.0) 이후의 업그레이드부터** 보인다 — 그 전 판으로 열어 둔 창은 옛 코드라 예전 상자가 뜬다.
   ④ **바뀐 것**: `GET /api/release-notes/since?from=<이 창 판>` → `{ current, from, notes[{version,date,title,notes}], truncated }`(from < 판 ≤ current · 최신 먼저 · 20판 · 판당 30줄 · 줄 600자 · 넘친 판 수).
      **옛 판 창이 새 서버에 부르는 계약 — 경로 · 모양을 바꾸지 않는다**(웹 `SINCE_PATH` ↔ 서버 라우트 대조). 전체 `/release-notes`(1.9MB)를 이 용도로 부르지 않는다. 판 형식 판정은 웹 `normVersion` ↔ 서버 `parseSinceVersion` 같은 입력 같은 답.
      화면: 접힘 = 새 판부터 앞 3줄(줄마다 한 줄 말줄임) · `More · N줄 더` / 펼침 = 판별(버전 칩 + 제목) 전체 문장 · 상자 안 스크롤 · 접기. More 는 3줄을 넘거나 보이는 줄이 잘렸을 때(잘린 문장을 끝까지 읽을 길). 못 읽으면 칸을 그리지 않는다.

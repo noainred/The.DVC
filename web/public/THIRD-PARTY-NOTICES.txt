@@ -126,7 +126,39 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   https://github.com/topojson/world-atlas  ·  https://www.naturalearthdata.com/
 
 ------------------------------------------------------------------------------
-3. ⚠ 라이선스를 확인할 수 없는 패키지
+3. MAC 제조사 표
+------------------------------------------------------------------------------
+
+`server/src/ipam/vendor/oui.tsv.gz` 는 npm 패키지 oui-data 의 index.json 에서 조직 이름 줄만 뽑아
+만든 파생 데이터입니다(oui-data@2.1.58 · 54438). oui-data 는 IEEE 등록 기관이 공개하는 MA-L · MA-M · MA-S
+목록을 JSON 으로 담은 것입니다. 아래는 oui-data 의 라이선스 전문입니다.
+  https://github.com/silverwind/oui-data  ·  https://standards.ieee.org/products-programs/regauth/
+
+Copyright (c) silverwind
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+------------------------------------------------------------------------------
+4. ⚠ 라이선스를 확인할 수 없는 패키지
 ------------------------------------------------------------------------------
 
 아래 패키지는 `package.json` 의 `license` 필드도, 라이선스 본문 파일도 없습니다.
@@ -136,7 +168,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
   · precond@0.2.3   (server)
 
 ------------------------------------------------------------------------------
-4. 패키지 목록
+5. 패키지 목록
 ------------------------------------------------------------------------------
 
 @babel/runtime@7.29.7  —  MIT  [web]
@@ -440,7 +472,7 @@ yocto-queue@0.1.0  —  MIT  [web]
 zip-stream@4.1.1  —  MIT  [server]
 
 ------------------------------------------------------------------------------
-5. 라이선스 본문
+6. 라이선스 본문
 ------------------------------------------------------------------------------
 
 ==============================================================================

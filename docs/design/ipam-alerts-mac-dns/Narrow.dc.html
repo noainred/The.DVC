@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>400px — 좁은 화면</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.chip{padding:6px 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;white-space:nowrap}
+.chip.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn{padding:6px 10px;border-radius:8px;font:inherit;font-size:12px;font-weight:600;background:#1a2236;border:1px solid #243049;color:#8b9bb4;white-space:nowrap}
+.input{box-sizing:border-box;background:#141b2d;border:1px solid #243049;color:#e6edf6;padding:6px 10px;border-radius:8px;font:inherit;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{text-align:left;padding:9px 10px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;white-space:nowrap;border-bottom:1px solid #243049}
+tbody td{padding:8px 10px;border-bottom:1px solid rgba(36,48,73,.5);white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+.ip{color:#3b82f6;font-weight:700}
+.sec{font-size:11px;font-weight:700;color:#67e8f9;letter-spacing:.3px;padding-top:6px}
+.scroll{overflow-x:auto;border-radius:10px;border:1px solid #243049;min-width:0}
+.hint{font-size:11px;color:#8b9bb4}
+.rule{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid rgba(36,48,73,.6)}
+.rule:last-child{border-bottom:none}
+.rule input{width:16px;height:16px;margin:3px 0 0;accent-color:#3b82f6;flex:none}
+.rule .tx{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px}
+.rule .tx span{font-size:12px;color:#8b9bb4;line-height:1.55}
+.mrow{display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px;padding:8px 10px;border-top:1px solid rgba(36,48,73,.5);font-size:12.5px}
+.mrow:first-child{border-top:none}
+</style>
+</helmet>
+<div style="box-sizing:border-box;width:400px;padding:14px 16px 20px;display:flex;flex-direction:column;gap:10px;min-width:0">
+
+  <div class="sec">IP관리 › IP 변화</div>
+  <div style="display:flex;flex-wrap:wrap;gap:6px">
+    <span class="chip on">전체 (41)</span><span class="chip">충돌 의심 (1)</span><span class="chip">MAC 변경 (2)</span><span class="chip">새 미등록 IP (17)</span><span class="chip">예약 IP 사용 시작 (1)</span><span class="chip">호스트명 변경 (4)</span><span class="chip">DNS 불일치 (16)</span>
+  </div>
+  <div class="scroll">
+    <table style="min-width:760px">
+      <thead><tr><th>시각 ▼</th><th>종류</th><th>IP</th><th>내용</th><th>에이전트</th><th>알림</th></tr></thead>
+      <tbody>
+        <tr><td>11-13 10:05</td><td><span class="badge red">충돌 의심</span></td><td class="ip">10.210.5.14</td><td>erp-db-02 의 IP 에 다른 MAC</td><td>central</td><td><span class="badge green">보냄</span></td></tr>
+        <tr><td>11-13 10:05</td><td><span class="badge amber">MAC 변경</span></td><td class="ip">10.210.5.40</td><td>Intel → Super Micro</td><td>central</td><td><span class="badge green">보냄</span></td></tr>
+        <tr><td>11-13 04:05</td><td><span class="badge blue">새 미등록 IP</span></td><td class="ip">10.210.5.77</td><td>SSH,HTTPS · Dell</td><td>central</td><td><span class="badge gray">기록만</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <span class="hint">표는 옆으로 밉니다(지금의 다른 표와 같은 방식) — 칩 줄은 줄바꿈합니다.</span>
+
+  <div class="sec">설정 › 알림 — IP 관리 묶음</div>
+  <div class="card" style="padding:12px 14px">
+    <div class="rule"><input type="checkbox" checked aria-label="충돌 의심"><div class="tx"><b>충돌 의심 <span class="badge red">위험</span></b><span>VM 의 IP 에 그 VM 의 NIC 이 아닌 MAC 이 응답합니다.</span></div></div>
+    <div class="rule"><input type="checkbox" aria-label="새 미등록 IP"><div class="tx"><b>새 미등록 IP <span class="badge amber">경고</span></b><span>vCenter 가 모르는 IP 가 처음 응답했습니다.</span>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:#8b9bb4"><span>묶음 상한</span><input class="input" style="width:72px" value="50" aria-label="묶음 상한"><span>개</span></div></div></div>
+    <div class="rule"><input type="checkbox" aria-label="호스트명 변경"><div class="tx"><b>호스트명 변경 <span class="badge amber">경고</span></b><span>같은 방식이 지난번과 다른 이름을 답했습니다.</span></div></div>
+  </div>
+  <span class="hint">옵션 칸은 설명 아래로 내려갑니다(오른쪽에 두면 글이 눌립니다).</span>
+
+  <div class="sec">대장 목록 — 요약 줄과 표</div>
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px">
+    <span>총 <b>2,952</b>개 IP</span>
+    <span class="muted">호스트명</span> <b>9</b><span class="muted">/ 12</span>
+    <span class="muted">MAC</span> <b>12</b><span class="muted">/ 12</span>
+    <span class="badge gray">제조사 확인 11</span><span class="badge gray">임의 지정 1</span>
+    <span class="badge amber">DNS 불일치 2</span>
+  </div>
+  <div class="scroll">
+    <table style="min-width:680px">
+      <thead><tr><th>IP 주소 ▲</th><th>호스트명</th><th>제조사 · MAC</th><th>분류</th></tr></thead>
+      <tbody>
+        <tr><td class="ip">10.210.5.11</td><td>WIN-APP01 <span class="badge purple" style="font-size:10px">NetBIOS</span></td><td>Dell<div class="mono muted" style="font-size:11px">F4:8E:38:2A:91:0C</div></td><td><span class="badge green">사설</span></td></tr>
+        <tr><td class="ip">10.210.5.40</td><td class="muted">—</td><td>Super Micro <span class="badge amber" style="font-size:10px">MAC 변경</span><div class="mono muted" style="font-size:11px">3C:EC:EF:12:9B:E2</div></td><td><span class="badge green">사설</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sec">IP 상세 창 — MAC 묶음</div>
+  <div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+    <span class="muted" style="font-size:12px">MAC · 제조사</span>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">
+      <b class="mono" style="font-size:14px;overflow-wrap:anywhere">3C:EC:EF:12:9B:E2</b>
+      <span>Super Micro</span><span class="badge gray">ARP</span><span class="badge amber">MAC 변경</span>
+    </div>
+    <div style="border:1px solid #243049;border-radius:10px;overflow:hidden">
+      <div class="mrow"><span class="muted" style="flex:1 1 100%">11-13 10:05 부터</span><span class="mono">3C:EC:EF:12:9B:E2</span><span class="muted">Super Micro</span></div>
+      <div class="mrow"><span class="muted" style="flex:1 1 100%">10-23 ~ 11-13</span><span class="mono">00:1B:21:7A:44:10</span><span class="muted">Intel</span></div>
+    </div>
+    <div style="font-size:12.5px">같은 MAC 의 다른 IP <span class="ip">10.210.5.41</span></div>
+    <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px"><input type="checkbox" style="width:16px;height:16px;margin-top:2px;accent-color:#3b82f6;flex:none"><span>이 IP 의 MAC 변경 알림 제외</span></label>
+  </div>
+
+  <div class="sec">IP 상세 창 — 역DNS 의 정방향 확인</div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="mrow"><span class="badge blue">역DNS</span><span style="flex:1 1 150px;min-width:0;overflow-wrap:anywhere">fs-old.corp.example</span><span class="muted">11-13 10:05</span>
+      <div style="flex:1 1 100%;display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px;margin-top:4px;padding:6px 8px;border-radius:8px;background:#0f1626;font-size:12px">
+        <span class="muted">정방향</span><span class="mono">10.210.7.12</span><span class="badge amber" style="font-size:10px">이 IP 아님</span><span class="muted" style="flex:1 1 100%">11-13 04:05 확인</span>
+      </div>
+    </div>
+    <div class="mrow"><span class="badge purple">NetBIOS</span><span style="flex:1 1 150px;min-width:0">NAS-BACKUP</span><span class="muted">11-13 10:05</span></div>
+  </div>
+
+  <div class="sec">채널 알림 한 건(메일 · 메신저)</div>
+  <div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:6px;font-size:12.5px">
+    <b>[경고] 새 미등록 IP 3개 — central</b>
+    <div class="mono" style="font-size:11.5px;line-height:1.7;overflow-wrap:anywhere;color:#c8d3e6">10.210.5.77 SSH,HTTPS Dell<br>10.210.5.78 HTTP 제조사 미상<br>10.210.5.91 ICMP(ping) —</div>
+    <span class="muted" style="font-size:12px">11-13 04:05 스캔 · IP관리 › IP 변화</span>
+  </div>
+  <span class="hint">줄마다 ‘IP · 열린 포트 · 제조사’ 만 적어 좁은 화면에서도 한 줄에 들어가게 합니다.</span>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

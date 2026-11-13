@@ -33,7 +33,7 @@
 | 목록의 열: IP 주소 · 분류 · 센터 · 서버종류 · 확인 방식 · 관리상태 · 소유 자원 · 전원 · OS 종류 · OS 버전 · **‘ESXi 호스트’(= `hostName`)** — 스캔 행의 이름이 ‘소유 자원’ 과 ‘ESXi 호스트’ 두 칸에 들어간다. 표는 1440 에서 이미 가로로 넘긴다(표 폭 1,314px) | `web/src/views/tools/IpamCore.jsx:232~274` · 캡처 ⓪ |
 | 목록에서 스캔 IP 를 누르면 `IpOwnerDetail` — "이 IP에 연결된 자원 상세를 열 수 없습니다" 안내뿐. `IpHistoryModal`(확인된 호스트명 · 최초/마지막 확인 · 사용 이력)은 **서브넷 대장에서만** 열린다 | `IpamCore.jsx:402·421(setHistIp)` · `:540~` · 캡처 ⓪ |
 | 직접 넣는 이름은 이미 있다 — 관리상태 편집의 `hostnameOverride`(‘자동 수집 호스트명을 덮어쓸 이름’) · 관리상태 CSV 의 hostname 열 | `IpamEditors.jsx:165` · `ipam/overrides.js` · `manageCsv.js` |
-| VM 의 게스트 호스트명(`guest.hostName`)은 수집하지 않는다(grep 0건) | `server/src/vcenter/soapClient.js` |
+| VM 의 게스트 호스트명(`guest.hostName`)은 **주기 수집 스냅샷에는 없다**(soapClient.js grep 0건). ⚠ 정정(2026-11-13 10:17 KST): 처음에 '수집하지 않는다' 고 적었으나 VM 내보내기는 내보낼 때 읽는다(`vcenter/vmExport.js:50` · `vmExportCatalog.js:162 guestHostName`) — 대장 · 스냅샷에 없다는 뜻이다 | `server/src/vcenter/soapClient.js` · `vcenter/vmExport.js` |
 | **Angry IP Scanner**(공개 소스 `angryip/ipscan` master, 2026-11-13 WebFetch 로 읽음): `HostnameFetcher.scan()` = ① 역DNS(+ 정방향 재확인) → ② 이름이 없고 대상이 ‘로컬’ 이면 mDNS → ③ 그래도 없으면 NetBIOS. `MDNSResolver` 는 역이름(`d.c.b.a.in-addr.arpa`) PTR 질의를 **224.0.0.251:5353 멀티캐스트(TTL 1)** 로 보낸다. `NetBIOSResolver` 는 대상 IP 의 **UDP 137** 로 50바이트 노드 상태(NBSTAT, 와일드카드 `*`) 질의를 보내 컴퓨터 이름 · 사용자 · 그룹 · MAC 을 읽는다. ‘로컬’ 은 `ScanningSubject.isLocal()`(`ifAddr != null`)인데 그 판정의 세부(같은 서브넷인지)는 읽은 파일에서 확인하지 못했다 | `HostnameFetcher.java` · `util/MDNSResolver.java` · `util/NetBIOSResolver.java` · `core/ScanningSubject.java` |
 
 ## 3. 정직하게 밝혀야 하는 것
