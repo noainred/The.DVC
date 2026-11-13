@@ -91,7 +91,8 @@ test('① 못 읽은 컬렉션은 0 이 아니라 null · 부분 합은 null(개
 
 // ───────── ② FC HBA 판정 ─────────
 test('② FC HBA 판정 — FC 어댑터만(Ethernet CNA · SAS HBA · 일반 NIC 는 아니다)', () => {
-  for (const m of [FC_MODEL, 'Emulex LPe35002-M2-D 2-Port 32Gb Fibre Channel Adapter', 'QLE2692', 'LPe31002', 'Synth 16Gb FC HBA', 'Brocade 1860 16G FC']) {
+  for (const m of [FC_MODEL, 'Emulex LPe35002-M2-D 2-Port 32Gb Fibre Channel Adapter', 'QLE2692', 'LPe31002', 'Synth 16Gb FC HBA', 'Brocade 1860 16G FC',
+    'Synth Vendor 2-Port Fibre Channel Adapter' /* 'Fibre Channel' 글자로만 알아보는 경우(변이 검증에서 살아남았던 규칙) */]) {
     assert.equal(H.isFcHba({ model: m }), true, m);
   }
   for (const m of ['QLogic BCM57810 10Gb CNA', 'Emulex OneConnect OCe14102 10GbE', 'HBA355i Front', 'Dell HBA330 Mini', 'Broadcom Adv. Dual 25Gb Ethernet', 'Mellanox ConnectX-6', '']) {

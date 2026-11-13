@@ -14,6 +14,9 @@ describe('하드웨어 글자', () => {
     expect(hwLines(null)).toBe(null);
     expect(hwLines({ v: 1 })).toEqual({ l1: '—', l2: '—', l3: '—' });
     expect(hwSortKey(HW)).toBe(48); expect(hwSortKey(null)).toBe(null);
+    expect(hwLines({ ...HW, hba: { n: 0, ports: 0 } }, { compact: true }).l3).toBe('25G×2 · 1G×2', '표 칸은 FC 없음을 쓰지 않는다');
+    expect(hwLines({ ...HW, hba: { n: 0, ports: 0 } }).l3).toBe('25G×2 · 1G×2 · FC 없음');
+    expect(hwLines({ ...HW, hba: null }, { compact: true }).l3).toBe('25G×2 · 1G×2', 'FC 모름도 비운다');
   });
   it('못 읽은 값은 0 이 아니다', () => {
     expect(cpuText({ sockets: 2, cores: null })).toBe('2소켓');

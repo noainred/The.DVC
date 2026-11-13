@@ -61,4 +61,5 @@
   `agent/bmFoldersPull.js`(10분 · 지난 사본 유지 · edgelog 등재)로 받아 `bm-folders-central.json`(`edgeCopy.js` — 다시 정제 · 경로는 글자만 · 손상 보존)에 두고 **읽기 전용**(`/op` 409).
   사본 배치는 같은 법인일 때만 놓는다 · '이 엣지 밖 등록' 이름 · 받기 오류 원문은 전체 범위 관리자만. 회귀 `bmFolders2994`(변이 9/9).
   ⑦ 폴더 옮기기(v2.997 `folder.move`): 같은 법인 안 · 부모만 — 이름 바꾸기와 **같은 공통부**(하위 · 등록 · 법인 규칙 · 서비스 인벤토리 규칙 · `svcRulePlan` 겹침 409) · 자기/하위 409 · 같은 이름 409 · 없는 곳 404 · parent 글자만 · **하위 폴더 새 경로도 검증**(깊이). 회귀 `bmFolders2995`(변이 5/5).
+  ⑧ 하드웨어(v3.3.0): 요약 · 상세는 `idrac/hwSummary.js` 하나 · 주소 · OS 호스트명은 관리자 판본만(범위 판본 태그 가림) · 관리 NIC IPv4 는 전체 범위 관리자만 · `VmRemoteButton` 을 행마다 그리지 않는다. 상세 `docs/rules/idrac-server.md` v3.3.0.
 - 회귀: `server/test/bmFolders2984.test.js` · `bmFolders2987.test.js`(v2.987 · 2차 반증 반영 — 변이 12/12) · 웹 `web/src/views/tools/bmFoldersText.test.js`.

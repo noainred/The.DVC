@@ -315,9 +315,10 @@ export default function BmFolders() {
                         {writable ? <th data-nosort style={{ width: 30 }}><input type="checkbox" aria-label="보이는 서버 전체 선택" checked={rows.length > 0 && rows.every((r) => picked.has(r.key))} onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.key)) : new Set())} /></th> : null}
                         <th>이름</th>
                         {sel.type !== 'folder' || sub ? <th>폴더</th> : null}
-                        <th>{d.scoped ? '모델' : '모델 · 서비스 태그'}</th>
-                        <th title="iDRAC 인벤토리 요약 — CPU · 메모리 / 디스크 / NIC · FC HBA (정렬은 코어 수)">하드웨어(iDRAC)</th>
-                        <th title={d.scoped ? undefined : '관리자 판본은 iDRAC 주소를 눌러 웹 · SSH 로 접속합니다'}>받는 길</th><th>부품 장애</th><th title="CPU · 메모리 사용률">사용률</th><th>전력</th>
+                        {/* v3.3.0: 긴 머리글은 접히게(STable 기본 nowrap) — 하드웨어 열을 더한 뒤 1440px 에서 표가 영역보다 넓어 '전력' 이 가로 스크롤 뒤로 숨었다(실측) */}
+                        <th style={HEAD_WRAP}>{d.scoped ? '모델' : '모델 · 서비스 태그'}</th>
+                        <th style={HW_HEAD} title={`iDRAC 인벤토리 요약 — CPU · 메모리 / 디스크 / NIC · FC HBA${d.scoped ? '' : ' / iDRAC 주소(누르면 웹 · SSH 접속 — 관리자 판본)'} · 정렬은 코어 수`}>하드웨어</th>
+                        <th>받는 길</th><th style={HEAD_WRAP}>부품 장애</th><th title="CPU · 메모리 사용률">사용률</th><th>전력</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -328,9 +329,10 @@ export default function BmFolders() {
                             {r.hw ? <OsLine os={r.hw.os} /> : null}</td>
                           {sel.type !== 'folder' || sub ? <td data-sort={r.place ? r.path : '￿'}>{r.place ? <span title={PLACE_LABEL[r.place]}>{pathText(r.path)}{r.place === 'rule' ? <span className="badge gray" style={{ marginLeft: 4 }}>규칙</span> : null}</span> : <span className="muted">(미분류)</span>}</td> : null}
                           <td data-sort={r.model || ''}>{r.model || '—'}{!d.scoped && r.serviceTag ? <div className="mono muted" style={{ fontSize: 11 }}>{r.serviceTag}</div> : null}</td>
-                          <td data-sort={hwSortKey(r.hw) ?? ''}><HwCell r={r} /></td>
-                          <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}
+                          {/* v3.3.0: iDRAC 열 하나에 요약 세 줄 + 주소(1440px 실측 — 주소를 '받는 길' 에 두면 표가 97px 넓어져 '전력' 이 가로 스크롤 뒤로 숨었다) */}
+                          <td data-sort={hwSortKey(r.hw) ?? ''}><HwCell r={r} />
                             {r.addr ? <div title="관리 주소(iDRAC) — 관리자 판본">{d.scoped ? <span className="muted mono" style={{ fontSize: 11 }}>{r.addr}</span> : <IdracConnect addr={r.addr} name={r.name} corp={r.corp} small />}</div> : null}</td>
+                          <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}</td>
                           <td data-sort={r.faults ?? ''}>{r.faults == null ? <span className="muted">—</span> : r.faults > 0 ? <span className="badge red">{r.faults}건</span> : <span className="muted">없음</span>}</td>
                           <td data-sort={r.cpu ?? ''}><UsagePair cpu={r.cpu} mem={r.mem} usrc={r.usrc} why={r.why} /></td>
                           <td data-sort={r.watts ?? ''} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{wattsText(r.watts)}</td>
@@ -797,12 +799,16 @@ function WhyBand({ rows, quick, setQuick }) {
   );
 }
 
+const HW_HEAD = { minWidth: 96 };   // 하드웨어 세 줄이 ' · ' 마다 접혀 6줄이 되지 않게 — 여유가 있는 다른 열(사용률)에서 폭을 가져온다(1440px 실측)
+const HEAD_WRAP = { whiteSpace: 'normal', wordBreak: 'keep-all' };   // 한글 머리글은 낱말 사이에서만 접는다('부품 장/애' 로 끊기지 않게 — 판독)
 /** v3.3.0: 하드웨어(iDRAC) 칸 — CPU · 메모리 / 디스크 / NIC · FC HBA 세 줄. 베어메탈인데 요약이 없으면 '—' 와 이유(툴팁). ESXi 행은 '—'. */
 function HwCell({ r }) {
   if (r.kind !== 'bm') return <span className="muted" title="ESXi 호스트는 호스트 화면에서 봅니다">—</span>;
-  const L = hwLines(r.hw);
+  const L = hwLines(r.hw, { compact: true });
   if (!L) return <span className="muted" title={hwWhyText(r)}>— <span style={{ fontSize: 11 }}>{r.hwVia === 'edge' ? '엣지 미전송' : '인벤토리 없음'}</span></span>;
-  return <span className="bmf-hw"><span className="l">{L.l1}</span><span className="l muted">{L.l2}</span><span className="l muted">{L.l3}</span></span>;
+  // 줄 안의 ' · ' 에서만 접힌다(값 하나 — '2×32C' · '16.3 TB' — 는 쪼개지 않는다): 1440px 에서 표가 영역보다 넓어져 '전력' 이 가로 스크롤 뒤로 숨지 않게(실측)
+  const seg = (txt) => String(txt).split(' · ').map((x, i, a) => <React.Fragment key={i}><span className="seg">{x}</span>{i < a.length - 1 ? ' · ' : ''}</React.Fragment>);
+  return <span className="bmf-hw" title="iDRAC 인벤토리 요약 — CPU · 메모리 / 디스크 / NIC · FC HBA"><span className="l">{seg(L.l1)}</span><span className="l muted">{seg(L.l2)}</span><span className="l muted">{seg(L.l3)}</span></span>;
 }
 /** v3.3.0: 이름 아래 OS(iDRAC 보고) — 없으면 'OS —'(이유는 툴팁). */
 function OsLine({ os }) {

@@ -3187,8 +3187,9 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
   background: var(--panel, var(--bg)); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,.35); white-space: normal; color: var(--text); font-size: 12px; }
 .bmf-why-a { color: var(--accent); }
 /* v3.3.0 물리서버 폴더 하드웨어(iDRAC) 칸 · iDRAC 접속 상자 */
-.bmf-hw { display: inline-flex; flex-direction: column; gap: 1px; font-size: 12px; line-height: 1.35; min-width: 0; }
-.bmf-hw .l { white-space: nowrap; }
+.bmf-hw { display: inline-flex; flex-direction: column; gap: 1px; font-size: 11.5px; line-height: 1.35; min-width: 0; }
+.bmf-hw .l { white-space: normal; }
+.bmf-hw .seg { white-space: nowrap; }
 .bmf-os { display: inline-flex; flex-direction: column; gap: 2px; font-size: 12px; min-width: 0; align-items: flex-start; }
 .bmf-idc { position: relative; display: inline-flex; min-width: 0; }
 .bmf-idc-b { background: none; border: 0; padding: 0; font-size: 12px; color: var(--accent); cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; white-space: nowrap; }

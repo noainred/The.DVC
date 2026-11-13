@@ -82,11 +82,15 @@ export function osText(os) {
   return { short: [short, showVer ? ver : ''].filter(Boolean).join(' ').slice(0, 60), full: [name, ver].filter(Boolean).join(' ') };
 }
 
-/** 표 칸 세 줄 — CPU · 메모리 / 디스크 / NIC · HBA. 줄마다 없으면 '—'. */
-export function hwLines(hw) {
+/**
+ * 표 칸 세 줄 — CPU · 메모리 / 디스크 / NIC · HBA. 줄마다 없으면 '—'.
+ * compact(표 칸): FC 가 없으면(읽었고 0) 'FC 없음' 을 쓰지 않는다 — 1440px 실측에서 가장 긴 줄이 열 폭을 정했다(옆 패널 · 카드는 그대로 '없음' 을 말한다).
+ */
+export function hwLines(hw, { compact = false } = {}) {
   if (!hw) return null;
   const join = (...xs) => xs.filter(Boolean).join(' · ') || '—';
-  return { l1: join(cpuText(hw.cpu), memText(hw.mem)), l2: join(diskText(hw.disk)), l3: join(nicText(hw.nic), hbaText(hw.hba)) };
+  const hba = compact && hw.hba && hw.hba.n === 0 ? '' : hbaText(hw.hba);
+  return { l1: join(cpuText(hw.cpu), memText(hw.mem)), l2: join(diskText(hw.disk)), l3: join(nicText(hw.nic), hba) };
 }
 /** 정렬 값 — 코어 합(없으면 null → 표 정렬에서 뒤로). */
 export const hwSortKey = (hw) => N(hw?.cpu?.cores);
