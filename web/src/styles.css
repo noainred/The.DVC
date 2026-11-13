@@ -3160,7 +3160,7 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmf-ub-t { display: inline-block; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; flex: none; }
 .bmf-ub-t > span { display: block; height: 100%; border-radius: 3px; }
 .bmf-ub-n { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
-/* v2.992 사용률 출처 색(설계 bm-folders §13 ①) — 막대 색 = 출처 · 글자 표지를 함께(색만으로 가르지 않는다) */
+/* v2.993 사용률 출처 색(설계 bm-folders §13 ①) — 막대 색 = 출처 · 글자 표지를 함께(색만으로 가르지 않는다) */
 .bmf-up { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .bmf-scs { display: inline-flex; flex-direction: column; gap: 3px; align-items: flex-start; }
 .bmf-sc { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; font-size: 10.5px; font-weight: 700; white-space: nowrap; }

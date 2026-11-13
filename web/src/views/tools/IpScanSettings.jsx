@@ -29,9 +29,9 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { dayStamp } from '../../dayStamp.js';
 import Select from '../../components/Select.jsx';
-import { BmOsSuggest } from './BmOsSuggest.jsx'; // v2.992: 물리서버 OS 주소 제안 탭
+import { BmOsSuggest } from './BmOsSuggest.jsx'; // v2.993: 물리서버 OS 주소 제안 탭
 
-const SUBS = [{ k: 'ranges', label: '① 등록된 스캔 대역' }, { k: 'agents', label: '② 에이전트별 대역·보고 현황' }, { k: 'osaddr', label: '③ 물리서버 OS 주소 제안' }]; // v2.992: ③ 설계 bm-folders §13 ②
+const SUBS = [{ k: 'ranges', label: '① 등록된 스캔 대역' }, { k: 'agents', label: '② 에이전트별 대역·보고 현황' }, { k: 'osaddr', label: '③ 물리서버 OS 주소 제안' }]; // v2.993: ③ 설계 bm-folders §13 ②
 // v2.991 호스트명 확인 방식 — [설정 키, 이름, 설명]. 표시 우선순위 순(서버 ipam/hostNames.js NAME_METHODS). mDNS · NetBIOS 는 대상 장비로 질의를 보낸다.
 const HOST_METHODS = [
   ['reverseDns', '역DNS', 'DNS 서버에 PTR 레코드를 묻습니다. 대상 장비로는 아무것도 보내지 않습니다.'],

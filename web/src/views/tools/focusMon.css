@@ -274,3 +274,19 @@
 .fm-wrap .fm-lgroups { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .fm-wrap .fm-lgroup { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--border-soft); min-width: 0; overflow-wrap: anywhere; font-size: 12.5px; }
 .fm-wrap .fm-lgroup:last-child { border-bottom: 0; }
+/* v2.992 카드 아래 줄 — 고른 값을 두 개씩(오른쪽 칸은 오른쪽 맞춤) · 넘치면 말줄임(마우스를 올리면 전체) */
+/* 칸 너비는 내용에 맞춘다(반씩 고정하면 '↓876 Mb/s ↑543 Mb/s' 가 1440px 카드에서 잘렸다 — 2026-11-13 화면 확인) · 모자라면 말줄임 */
+.fm-wrap .fm-sub.fm-cardline { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, max-content); justify-content: space-between; gap: 2px 10px; }
+.fm-wrap .fm-sub.fm-cardline > span:nth-child(even) { text-align: right; }
+.fm-wrap .fm-sub.fm-cardline > span:only-child { grid-column: 1 / -1; }
+.fm-wrap .fm-pick { position: relative; }
+.fm-wrap .fm-pick-pop { position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; min-width: 240px; max-width: min(320px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.fm-wrap .fm-pick-pop .fm-chk { display: flex; align-items: center; gap: 8px; font-size: 12.5px; min-width: 0; cursor: pointer; color: var(--text); }
+.fm-wrap .fm-pick-pop .fm-chk.fm-dim { color: var(--text-faint, var(--text-dim)); cursor: not-allowed; }
+.fm-wrap .fm-pick-pop .fm-chk b { margin-left: auto; font-size: 11px; color: var(--accent, #3987e5); }
+/* 카드가 좁으면(1280px 화면의 카드 안쪽 약 210px) 한 줄에 하나씩 — 두 칸이면 잘렸다(예전 고정 줄도 8장 중 3장 · 2026-11-13 A/B 실측) */
+.fm-wrap .fm-sv { container-type: inline-size; }
+@container (max-width: 225px) {
+  .fm-wrap .fm-sub.fm-cardline { grid-template-columns: minmax(0, 1fr); }
+  .fm-wrap .fm-sub.fm-cardline > span:nth-child(even) { text-align: left; }
+}

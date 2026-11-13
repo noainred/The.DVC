@@ -758,7 +758,7 @@ function IpamInsights({ scope }) {
   );
 }
 
-/** v2.992(설계 bm-folders §13 ③): 스캔 이름을 어떻게 찾았나 — 역방향 DNS · 정방향 DNS(물리서버 이름으로 물어 이 IP) · 둘 다 · 서로 다름(둘 다 보인다). */
+/** v2.993(설계 bm-folders §13 ③): 스캔 이름을 어떻게 찾았나 — 역방향 DNS · 정방향 DNS(물리서버 이름으로 물어 이 IP) · 둘 다 · 서로 다름(둘 다 보인다). */
 // 역방향 DNS 만으로 찾은 이름(예전부터의 기본)은 표지를 달지 않는다 — 스캔 행마다 같은 표지가 붙어 표가 시끄러워진다.
 const NAME_VIA = { fwd: ['정방향 DNS', 'blue'], both: ['정방향 DNS 일치', 'gray'], differ: ['이름이 서로 다름', 'amber'] };
 function NameVia({ r }) {

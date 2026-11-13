@@ -31,7 +31,7 @@ import { strOf } from '../../util/coercionTrap.js';
 import { listRegistry as listVcentersForLinks } from '../../vcenter/registry.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fwdNamesForAgent } from '../admin/bmOsSuggest.js'; // v2.992: 스캔 배정에 정방향 DNS 이름(그 엣지 법인의 물리서버)
+import { fwdNamesForAgent } from '../admin/bmOsSuggest.js'; // v2.993: 스캔 배정에 정방향 DNS 이름(그 엣지 법인의 물리서버)
 // central.js 의 공용 판정 — 등록 때 인자로 받는다(import 하면 central.js ↔ 이 파일 순환이 생긴다 — archScan IMPORT_CYCLE_MAX)
 let PERSISTENT_503_HEADERS, agentOwnsVcenter, edgeVcWriteDenied, persistent503, registryUnreadable, reqAgentDenied, requireCentral, settingsUnreadable, strAgent;
 
@@ -379,7 +379,7 @@ export function registerOpsRoutes(centralRouter, deps) {
     const who = req.centralAuth?.mode === 'agent' && req.centralAuth.agent ? req.centralAuth.agent : String(req.query.agent || '');
     const cfg = loadScanSettings(who);
     if (!cfg.enabled || !cfg.ranges.length) return res.json({ ok: true, assigned: false });
-    // v2.992(설계 bm-folders §13 ③): 정방향 DNS 로 물을 물리서버 이름 — **그 엣지가 수집하는 법인**의 것만(법인 로컬 · 다른 법인 이름을 주지 않는다).
+    // v2.993(설계 bm-folders §13 ③): 정방향 DNS 로 물을 물리서버 이름 — **그 엣지가 수집하는 법인**의 것만(법인 로컬 · 다른 법인 이름을 주지 않는다).
     //   이름은 개별 토큰(인증된 이름)일 때만 싣는다 — 공유 토큰은 ?agent= 를 가릴 수 없어 아무 이름이나 대고 다른 법인 서버 이름을 받아 갈 수 있다.
     //   계산이 실패하면 이름 없이(역방향 DNS 만) — 배정 자체는 막지 않는다. 구버전 엣지는 이 필드를 모른다(무시).
     const fwdNames = req.centralAuth?.mode === 'agent' && req.centralAuth.agent ? await fwdNamesForAgent(req.centralAuth.agent).catch(() => []) : [];

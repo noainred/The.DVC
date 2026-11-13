@@ -1,5 +1,5 @@
 /**
- * 사용률 출처(v2.992 · 설계 docs/design/bm-folders §13 ①) — 서버가 내려 준 지표별 출처 `usrc` { cpu, mem }('os' · 'idrac' · 'vcenter' · null)를 화면용으로.
+ * 사용률 출처(v2.993 · 설계 docs/design/bm-folders §13 ①) — 서버가 내려 준 지표별 출처 `usrc` { cpu, mem }('os' · 'idrac' · 'vcenter' · null)를 화면용으로.
  * 색은 시안 기본값: OS 파랑 · iDRAC 밝은 청록(밝기도 다르다 — 색만으로 가르지 않게 글자 표지를 함께 쓴다) · vCenter 는 회색.
  */
 export const SRC_COLOR = Object.freeze({ os: '#3b82f6', idrac: '#5eead4', vcenter: '#94a3b8' });

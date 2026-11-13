@@ -179,7 +179,7 @@ export async function runIpScanAgentOnce(...args) {
     try {
       scanOut = await runScan({
         ranges: a.ranges, ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
-        fwdNames: Array.isArray(a.fwdNames) ? a.fwdNames : undefined, // v2.992: 정방향 DNS 로 물을 물리서버 이름(중앙 배정 — 이 엣지 법인 것만 · 구버전 중앙이면 없음)
+        fwdNames: Array.isArray(a.fwdNames) ? a.fwdNames : undefined, // v2.993: 정방향 DNS 로 물을 물리서버 이름(중앙 배정 — 이 엣지 법인 것만 · 구버전 중앙이면 없음)
         ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 OFF(v2.360)
         // v2.991 호스트명 확인(mDNS · NetBIOS) — 사용자 결정 '기본 켜짐'. 구버전 중앙(키 없음)도 켜짐이다 — 옛 중앙은 더 보낸 칸을
         //   정제에서 버리고 표시 이름(hostname)만 받는다(그 이름이 NetBIOS 에서 왔어도 hostname 칸의 뜻은 같다).

@@ -3,13 +3,13 @@
  */
 import React from 'react';
 import { SRC_LABEL, SRC_BADGE, pctText } from '../bmFoldersText.js';
-import { SRC_COLOR, SRC_LABEL as USRC_LABEL, SRC_LONG, rowSrcClass, srcTitle } from './usageSrc.js'; // v2.992: 사용률 출처 색
+import { SRC_COLOR, SRC_LABEL as USRC_LABEL, SRC_LONG, rowSrcClass, srcTitle } from './usageSrc.js'; // v2.993: 사용률 출처 색
 
 /** 사용률 막대 + 숫자. 값이 없으면 막대 없이 '—'(0 으로 그리지 않는다). */
 export function UsageBar({ v, w = 54, src = null }) {
   if (v == null) return <span className="muted">—</span>;
   const tone = v >= 90 ? 'var(--red)' : v >= 75 ? 'var(--amber)' : 'var(--accent)';
-  // v2.992(출처 색): 출처를 알면 막대 = 출처 색(OS 파랑 · iDRAC 밝은 청록), 높음 · 주의는 숫자 색으로 남긴다(색 하나에 두 뜻을 싣지 않게)
+  // v2.993(출처 색): 출처를 알면 막대 = 출처 색(OS 파랑 · iDRAC 밝은 청록), 높음 · 주의는 숫자 색으로 남긴다(색 하나에 두 뜻을 싣지 않게)
   const bar = src && SRC_COLOR[src] ? SRC_COLOR[src] : tone;
   const numColor = src && v >= 75 ? tone : undefined;
   return (
@@ -26,7 +26,7 @@ export function SrcChip({ src }) {
   return <span className={`bmf-sc ${src}`}>{src !== 'mixed' && USRC_LABEL[src] ? USRC_LABEL[src] : SRC_LONG[src] || src}</span>;
 }
 
-/** CPU · 메모리 두 줄(열을 줄이려고 합쳤다 — 1440px 실측: 따로 두면 뒤쪽 열이 가로 스크롤 뒤로 숨었다). v2.992: 막대 색 · 오른쪽 표지 = 출처. */
+/** CPU · 메모리 두 줄(열을 줄이려고 합쳤다 — 1440px 실측: 따로 두면 뒤쪽 열이 가로 스크롤 뒤로 숨었다). v2.993: 막대 색 · 오른쪽 표지 = 출처. */
 export function UsagePair({ cpu, mem, usrc = null }) {
   const r = { cpu, mem, usrc };
   const cls = rowSrcClass(r);

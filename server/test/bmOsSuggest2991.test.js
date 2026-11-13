@@ -1,5 +1,5 @@
 /**
- * v2.992 묶음 A(설계 docs/design/bm-folders §13) — ① 사용률 지표별 출처 ② 물리서버 OS 주소 제안 ③ IP 스캔 정방향 DNS.
+ * v2.993 묶음 A(설계 docs/design/bm-folders §13) — ① 사용률 지표별 출처 ② 물리서버 OS 주소 제안 ③ IP 스캔 정방향 DNS.
  * CONFIG_DIR · DATA_DIR 은 임시 폴더(저장소 server/config 를 건드리지 않는다).
  */
 import test from 'node:test';

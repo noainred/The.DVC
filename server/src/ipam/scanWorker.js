@@ -47,7 +47,7 @@ if (process.send) {
       const { scanned, alive, nameStats, fwd } = await scanRanges(j.ranges || [], {
         ports: j.ports, concurrency: j.concurrency, timeoutMs: j.timeoutMs, reverseDns: j.reverseDns, ping: j.ping,
         mdns: j.mdns !== false, netbios: j.netbios !== false, // v2.991 호스트명 확인(기본 켜짐 — 사용자 결정)
-        fwdNames: j.fwdNames, // v2.992: 정방향 DNS 로 물을 물리서버 이름(물리서버 §13 ③)
+        fwdNames: j.fwdNames, // v2.993: 정방향 DNS 로 물을 물리서버 이름(물리서버 §13 ③)
         onTcpAlive: (row) => { if (partialN >= PARTIAL_MAX) return; partialN++; pend.push(row); flushAlive(false); },
         onProgress: (done, total, aliveN) => {
           const now = Date.now();

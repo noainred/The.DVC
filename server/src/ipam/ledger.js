@@ -332,7 +332,7 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       const hist = ipHistoryEntry(sc.ip);
       const released = hist?.status === 'down';
       count.set(sc.ip, (count.get(sc.ip) || 0) + 1);
-      // v2.992(설계 bm-folders §13 ③): 이름 = 역방향 DNS(hostname) → 없으면 정방향 DNS 로 찾은 물리서버 이름(fwdName). 어떻게 찾았는지(nameVia)를 함께 —
+      // v2.993(설계 bm-folders §13 ③): 이름 = 역방향 DNS(hostname) → 없으면 정방향 DNS 로 찾은 물리서버 이름(fwdName). 어떻게 찾았는지(nameVia)를 함께 —
       //   둘이 다르면 역방향 이름을 쓰고 'differ' + fwdName 으로 둘 다 보인다(하나로 정하지 않는다).
       const nm = scanNameOf(sc);
       rows.push({
@@ -617,7 +617,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
       let firstSeen = null, lastSeen = null, usageStatus = null;
       let mgmtStatus = '', appliedBy = '', rangePolicySpec = ''; // 관리상태/방식/적용정책
       let owner = null, ownerType = '', vcenterId = '', discovery = ''; // 상세/원격접속/확인출처
-      let nameVia = '', fwdName = ''; // v2.992: 스캔 이름 찾은 방법(ptr · fwd · both · differ) · 다를 때 정방향 이름
+      let nameVia = '', fwdName = ''; // v2.993: 스캔 이름 찾은 방법(ptr · fwd · both · differ) · 다를 때 정방향 이름
       if (i === 0) { status = 'network'; purpose = 'Network ID'; }
       else if (recs.length) {
         used++;
@@ -633,7 +633,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
           : r.serverType === 'Scanned' ? 'scanned'
             : (recs.length > 1 ? 'duplicate' : (r.multiHomed ? 'multihomed' : 'used'));
         hostname = [...new Set(recs.map((x) => x.ownerName))].join(' / ');
-        { const sr = recs.find((x) => x.nameVia); if (sr) { nameVia = sr.nameVia; fwdName = sr.fwdName || ''; } }   // v2.992: 스캔 행 이름을 찾은 방법
+        { const sr = recs.find((x) => x.nameVia); if (sr) { nameVia = sr.nameVia; fwdName = sr.fwdName || ''; } }   // v2.993: 스캔 행 이름을 찾은 방법
         serverType = r.serverType === 'BareMetal' ? '베어메탈' : (r.serverType === 'Scanned' ? '스캔' : 'VM');
         os = r.serverType === 'Scanned' ? (r.services || []).join(', ') : [r.osName, r.osVersion].filter(Boolean).join(' ');
         purpose = r.serverType === 'Scanned'
@@ -752,7 +752,7 @@ export function ipVcenterOwners(snap) {
 }
 
 /**
- * v2.992(설계 bm-folders §13 ③): 스캔 행 이름과 찾은 방법(순수). via — 'ptr'(스캔이 찾은 이름 — v2.991 부터 역DNS · mDNS · NetBIOS 중 표시 이름) ·
+ * v2.993(설계 bm-folders §13 ③): 스캔 행 이름과 찾은 방법(순수). via — 'ptr'(스캔이 찾은 이름 — v2.991 부터 역DNS · mDNS · NetBIOS 중 표시 이름) ·
  *   'fwd'(정방향 DNS — 물리서버 이름으로 물어 이 IP) · 'both'(둘이 같은 이름 — 짧은 이름 · 대소문자 무시) · 'differ'(둘이 다름 — 이름은 스캔 이름, fwd 는 따로) · ''(이름 없음).
  */
 export function scanNameOf(sc) {

@@ -1,5 +1,5 @@
 /**
- * routes/admin/bmOsSuggest.js — IP 관리 › IP 스캔 › '물리서버 OS 주소 제안'(v2.992 · 설계 docs/design/bm-folders §13 ②).
+ * routes/admin/bmOsSuggest.js — IP 관리 › IP 스캔 › '물리서버 OS 주소 제안'(v2.993 · 설계 docs/design/bm-folders §13 ②).
  * 게이트는 형제 IP 스캔 라우트와 같다(centralIpam.js: 관리자 + 전체 범위 — 스캔 결과는 vCenter 귀속이 없는 전 법인 데이터).
  * 등록은 **주소만**(계정 · 비밀번호 · 키 없음 · `addrOnly` 표지 · 비활성) — 계정을 넣기 전에는 어떤 수집도 접속하지 않는다(bmusage/targets.js indexOsHosts · bmstor 폴러 enabled).
  * 판정 코어는 bmfolders/osSuggest.js 하나(GET 과 등록이 같은 함수 — 등록은 지금 다시 계산한 제안에서 suggest · pick 이고 고른 IP 가 SSH 열린 후보일 때만).

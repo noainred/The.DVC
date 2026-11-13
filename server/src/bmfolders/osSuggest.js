@@ -1,5 +1,5 @@
 /**
- * bmfolders/osSuggest.js — 물리서버 **OS 접속 주소 제안**(v2.992 · 설계 docs/design/bm-folders §13 ② · ③). 순수.
+ * bmfolders/osSuggest.js — 물리서버 **OS 접속 주소 제안**(v2.993 · 설계 docs/design/bm-folders §13 ② · ③). 순수.
  *
  * 사용자 요청(2026-11-13): "idrac hostname 을 management network 에서 동일한 hostname 을 찾아서 그 서버의 OS 접속 가능한 IP 를 자동으로 찾아서 제안".
  * 결정(기본값 컨펌): 사람이 확인하고 등록 · 이름 기준 = 대소문자 무시 + 도메인 뒤를 떼고 짧은 이름 · 이름 찾는 방법 = 역방향 + 정방향 DNS ·

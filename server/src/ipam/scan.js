@@ -210,7 +210,7 @@ async function reverseMany(ips, limit = 16) {
 }
 
 /*
- * v2.992(설계 docs/design/bm-folders §13 ③ — 정방향 DNS): 물리서버 이름(iDRAC 이 읽은 호스트 이름 — 중앙이 배정과 함께 준다)을 DNS 에 물어 IP 를 받는다.
+ * v2.993(설계 docs/design/bm-folders §13 ③ — 정방향 DNS): 물리서버 이름(iDRAC 이 읽은 호스트 이름 — 중앙이 배정과 함께 준다)을 DNS 에 물어 IP 를 받는다.
  *   **스캔 대역 안의 IP 만** 채택하고 그 IP 행에 `fwdName` 으로 단다(역방향 이름 `hostname` 과 따로 — 둘이 다르면 화면이 둘 다 보인다).
  *   계정 없이 OS 주소를 찾는 방법은 DNS 뿐이다. 접속은 하지 않는다.
  *   · getaddrinfo(`dns.lookup`)를 쓴다 — resolve4(c-ares)는 resolv.conf 의 search 도메인을 붙이지 않아 짧은 이름이 풀리지 않는다.
@@ -347,7 +347,7 @@ export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 1
   // 생존 IP = TCP 생존 ∪ ping 생존. 호스트명 확인(v2.991 — 역DNS · mDNS · NetBIOS 동시).
   const aliveIps = [...tcp.keys(), ...[...pinged]];
   const { byIp, stats } = await resolveNames(aliveIps, { reverseDns, mdns, netbios, timeoutMs, ...nameOpts });
-  // v2.992(물리서버 §13 ③): 정방향 DNS — 물리서버 이름(배정 · 설정이 준다)을 DNS 에 물어 **살아 있는 IP**(이 결과에 행이 있는 IP)에만 단다.
+  // v2.993(물리서버 §13 ③): 정방향 DNS — 물리서버 이름(배정 · 설정이 준다)을 DNS 에 물어 **살아 있는 IP**(이 결과에 행이 있는 IP)에만 단다.
   //   방식별 이름(names — 역DNS · mDNS · NetBIOS)과 따로 둔다: 이 IP 의 이름을 묻는 것이 아니라 '그 이름의 IP 가 이것' 이라는 사실이라서.
   const fwd = Array.isArray(fwdNames) && fwdNames.length ? await forwardMany(fwdNames, new Set(aliveIps), lookup ? { lookup } : {}) : null;
   const alive = aliveIps.map((ip) => {

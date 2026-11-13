@@ -71,7 +71,7 @@ export async function runScan(job, { onProgress, deadlineMs = DEADLINE_MS } = {}
   const r = await scanRanges(job.ranges || [], {
     ports: job.ports, concurrency: job.concurrency, timeoutMs: job.timeoutMs, reverseDns: job.reverseDns, ping: job.ping,
     mdns: job.mdns !== false, netbios: job.netbios !== false, // v2.991
-    fwdNames: job.fwdNames, // v2.992: 정방향 DNS 이름
+    fwdNames: job.fwdNames, // v2.993: 정방향 DNS 이름
     onProgress,
   });
   return { ...r, viaWorker: false };

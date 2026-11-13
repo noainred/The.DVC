@@ -218,7 +218,7 @@ export const PERF_TABLE_COLS = Object.freeze({
   usage_latest: [...PERF_COL_NAMES.map((c) => [c, 'REAL']), ['os_at', 'INTEGER'], ['idrac_at', 'INTEGER'], ['detail_json', 'TEXT'], ['tuning_json', 'TEXT'],
     // v2.922: 피크(<열>_peak · _peak_at) · 피크 출처·창 · 장치 상한 초과 수 — 최신값에도 둔다(보드가 이 파일만 읽는다).
     ...PEAK_SQL_COLS, ...PEAK_META_COLS, ['dev_over', 'INTEGER'],
-    // v2.992(출처 색): CPU · 메모리 **지표별** 출처 두 글자(o = OS · i = iDRAC 텔레메트리 · e = iDRAC 대체 수집 · - = 없음 — `usage.js srcCmOf`).
+    // v2.993(출처 색): CPU · 메모리 **지표별** 출처 두 글자(o = OS · i = iDRAC 텔레메트리 · e = iDRAC 대체 수집 · - = 없음 — `usage.js srcCmOf`).
     //   행 출처(src)는 지표를 가르지 않아 I/O 만 iDRAC 이어도 CPU · 메모리가 OS 인 행이 '혼합' 이었다.
     ['src_cm', 'TEXT']],
 });

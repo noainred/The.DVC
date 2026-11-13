@@ -122,7 +122,7 @@ function delegatedAgentFields(remoteCollectors, agent) {
  * ⚠ 같은 host 가 여러 번 등록될 수 있으므로 **처음 것을 쓰고** 나머지는 세어 밝힌다.
  */
 /**
- * v2.992(OS 주소 제안 — 설계 bm-folders §13 ②): **주소만 등록한 항목**(`addrOnly` — IP 스캔 이름 일치로 사람이 등록, 계정 없음)은 수집 색인에 넣지 않는다.
+ * v2.993(OS 주소 제안 — 설계 bm-folders §13 ②): **주소만 등록한 항목**(`addrOnly` — IP 스캔 이름 일치로 사람이 등록, 계정 없음)은 수집 색인에 넣지 않는다.
  *   넣으면 ① 계정 없이 root 로 SSH 를 시도하고(`refs.resolveOsAuth` authKind 'none' — 계정 잠금 위험) ② 엣지 위임 서버가 '이 노드에 OS 등록 있음' 으로
  *   위임에서 빠져 iDRAC 값까지 잃는다(resolveTargets 의 edge-delegated 갈래가 `!osPick.entry` 를 본다). 계정을 넣으면 등록부가 표지를 지운다(bmstor/registry.js).
  *   제안 화면은 `includeAddrOnly` 로 전부 본다(이미 등록됨 판정).

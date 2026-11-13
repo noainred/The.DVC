@@ -53,7 +53,7 @@
   전력 미보고 · 오래됨이면 목록에서 빠진다 — 그 수집 서버가 지금 보고하는(인벤토리) 키는 `svcInventory.collectorHeldKeys` 로 보류('collector-listed' · 서비스 인벤토리 'bm-collector-listed').
   시한 = 그 수집 서버의 마지막 성공(상태 `at`)이 `UNREADABLE_HOLD_MS`(24시간) 안 · 지금 ESXi 호스트(태그 · 이름 전부)인 서버 · 신선한 전력 항목이 있는 서버(분류 예외로 빠진 것) ·
   분류 exclude/virtualization 은 빼기(4차 반증 2 — 함대 키로 보류하다 되돌린 이력 · 반증 3a B1 · B2). 화면 문구에 시한 숫자를 박지 않는다(설정값). 회귀 `bmFolders2989.test.js`(변이 26/26).
-- **v2.992 묶음 A(설계 §13)**: ① 사용률 **지표별 출처** — 최신값 `src_cm` 두 글자(`usage.js srcCmOf` · 꼴 `perfCols.js SRC_CM_RE` · 엣지 행 정제 화이트리스트) → `corpusage judgeServer srcBy` → `usageSrc.js usageSrcOf` → 응답 `usrc`.
+- **v2.993 묶음 A(설계 §13)**: ① 사용률 **지표별 출처** — 최신값 `src_cm` 두 글자(`usage.js srcCmOf` · 꼴 `perfCols.js SRC_CM_RE` · 엣지 행 정제 화이트리스트) → `corpusage judgeServer srcBy` → `usageSrc.js usageSrcOf` → 응답 `usrc`.
   행 출처(`src`)는 I/O 까지 합쳐 'mixed' 가 흔하다 — 지표 색을 그것으로 칠하지 말 것(칸이 없으면 '구분 모름'). ② OS 주소 제안 `osSuggest.js`(순수) · 라우트 `routes/admin/bmOsSuggest.js`(형제 스캔 라우트와 같은 관리자 · 전체 범위) —
   **같은 법인**(스캔 에이전트가 그 법인을 수집 · `agentVcenterIds` 또는 같은 엣지)만 · iDRAC 자기 주소 제외 · 등록은 suggest/pick + SSH 열린 후보만 · **주소만(`addrOnly` · 비활성 · 마운트 '/')** —
   `addrOnly` 항목은 사용률 수집 색인(`targets.indexOsHosts`)에서 빠진다(계정 없는 root SSH · 엣지 위임 이탈 방지). 계정이 생기면 등록부가 표지를 지운다. ③ 정방향 DNS — 배정(`ip-scan-assignment`)이 **개별 토큰에만** 그 법인 이름(`fwdNamesFor`)을 싣고
