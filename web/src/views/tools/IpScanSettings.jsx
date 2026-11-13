@@ -31,6 +31,7 @@ import { downloadFailText } from '../downloadFailText.js';
 import { dayStamp } from '../../dayStamp.js';
 import Select from '../../components/Select.jsx';
 import { BmOsSuggest } from './BmOsSuggest.jsx'; // v2.993: 물리서버 OS 주소 제안 탭
+import { dnsStatsText } from './ipamDnsText.js'; // v3.2.0: 정방향 확인 요약
 
 const SUBS = [{ k: 'ranges', label: '① 등록된 스캔 대역' }, { k: 'agents', label: '② 에이전트별 대역·보고 현황' }, { k: 'osaddr', label: '③ 물리서버 OS 주소 제안' }]; // v2.993: ③ 설계 bm-folders §13 ②
 // v2.991 호스트명 확인 방식 — [설정 키, 이름, 설명]. 표시 우선순위 순(서버 ipam/hostNames.js NAME_METHODS). mDNS · NetBIOS 는 대상 장비로 질의를 보낸다.
@@ -500,6 +501,17 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
               <span style={{ minWidth: 0, whiteSpace: 'normal' }}><b>{label}</b> <span className="muted" style={{ fontSize: 12 }}>— {desc}</span></span>
             </label>
           ))}
+          {/* v3.2.0 DNS 정합성 — 역DNS 이름을 정방향으로 다시 묻는다(DNS 서버에만 · 역DNS 를 끄면 묻지 않는다) */}
+          <div className="flex" style={{ alignItems: 'flex-start', gap: 8, flexWrap: 'wrap', borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
+            <label className="flex" style={{ alignItems: 'flex-start', gap: 8, flex: '1 1 260px', minWidth: 0 }}>
+              <input type="checkbox" style={{ marginTop: 3, flex: 'none' }} disabled={s.reverseDns === false} checked={s.reverseDns !== false && s.dnsConfirm !== false} onChange={(e) => setS({ ...s, dnsConfirm: e.target.checked })} />
+              <span style={{ minWidth: 0, whiteSpace: 'normal' }}><b>정방향 확인(DNS 정합성)</b> <span className="muted" style={{ fontSize: 12 }}>— 역DNS 가 답한 이름을 DNS 에 다시 물어 그 IP 를 가리키는지 봅니다. 물리서버 이름 정방향 조회 다음, 남은 예산(90초) 안에서 묻습니다.{s.reverseDns === false ? ' 역DNS 를 꺼서 묻지 않습니다.' : ''}</span></span>
+            </label>
+            <span className="flex" style={{ alignItems: 'center', gap: 6, flex: 'none' }}>
+              <input className="input" type="number" min={1} max={720} style={{ width: 72 }} aria-label="정방향 확인 결과를 다시 쓰는 시간" value={s.dnsConfirmHours ?? ''} onChange={(e) => setS({ ...s, dnsConfirmHours: e.target.value })} disabled={s.reverseDns === false || s.dnsConfirm === false} />
+              <span className="muted" style={{ fontSize: 12 }}>시간 동안 답을 다시 씀</span>
+            </span>
+          </div>
           <div className="muted" style={{ fontSize: 11, borderTop: '1px dashed var(--border)', paddingTop: 6, whiteSpace: 'normal' }}>스캔에 응답한 IP 에만 묻습니다 · 로그인 시도는 하지 않습니다 · 방식마다 IP 당 1회이고 기다리는 시간은 위 타임아웃입니다 · 여러 방식이 답하면 위에서 아래 순서로 먼저 찾은 이름을 표시합니다.</div>
         </div>
         <label style={{ fontWeight: 600, paddingTop: 9 }}>ICMP ping / 보존</label>
@@ -536,7 +548,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         <span className="muted">이 포탈 상태 <b style={{ color: status?.running ? 'var(--amber)' : 'var(--text)' }}>{status?.running ? '스캔 중' : (status?.enabled ? '활성' : '비활성')}</b></span>{' · '}
         <span className="muted">저장된 결과 <b style={{ color: 'var(--text)' }}>{info?.count ?? 0}</b>개</span>
         {info?.byAgent && Object.keys(info.byAgent).length > 0 && <span className="muted"> ({Object.entries(info.byAgent).map(([a, n]) => `${agentLabel(a)}:${n}`).join(', ')})</span>}
-        {last && !last.skipped && !last.error && <span className="muted"> · 최근(포탈): {last.scanned}개 중 {last.alive}개 응답{nameStatsText(last.nameStats) ? ` · ${nameStatsText(last.nameStats)}` : ''}{macStatsText(last.nameStats) ? ` · ${macStatsText(last.nameStats)}` : ''}</span>}
+        {last && !last.skipped && !last.error && <span className="muted"> · 최근(포탈): {last.scanned}개 중 {last.alive}개 응답{nameStatsText(last.nameStats) ? ` · ${nameStatsText(last.nameStats)}` : ''}{macStatsText(last.nameStats) ? ` · ${macStatsText(last.nameStats)}` : ''}{dnsStatsText(last.nameStats) ? ` · ${dnsStatsText(last.nameStats)}` : ''}</span>}
         {last?.error && <span style={{ color: 'var(--red)' }}> · 오류: {last.error}</span>}
         <ScanProgressBar progress={status?.progress} />
       </div>

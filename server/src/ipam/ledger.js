@@ -14,6 +14,7 @@ import { datacenterOfVcenter } from '../datacenter/store.js';
 import { createYielder } from '../util/timeSlice.js';
 import { netNameFields } from './hostNames.js'; // v2.991: 호스트명 칸(관리상태 이름 > 역DNS > mDNS > NetBIOS)
 import { netMacFields } from './macVendor.js'; // v2.999: 제조사 · MAC 칸(ARP > NetBIOS)
+import { dnsFwdFields } from './dnsConfirm.js'; // v3.2.0: 역DNS 이름의 정방향 확인(DNS 정합성)
 import { conflictRev, conflictSuspectOf } from './conflictState.js'; // v3.1.0: 충돌 의심(알림 엔진 평가가 판정)
 
 // buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
@@ -436,6 +437,8 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
     // v2.999: 제조사 · MAC 칸 — 스캔이 본 값(VM · 호스트 행에도). 범위 계정에는 싣지 않는다(호스트명과 같은 판정). ipam.db 열은 그대로.
     if (!allowed) {
       Object.assign(r, netMacFields(scanByIp.get(r.ip) || null, macIpCount, ipHistoryEntry(r.ip)));
+      // v3.2.0: DNS 정합성 — 스캔이 역DNS 이름을 정방향으로 다시 물은 결과(VM · 호스트 행에도 — 역방향 레코드가 낡았으면 그 행의 일이다)
+      Object.assign(r, dnsFwdFields(scanByIp.get(r.ip) || null));
       // v3.1.0: 충돌 의심 — 그 VM 행에만(스캔 행은 vCenter 가 모르는 IP 라 대조할 NIC 이 없다)
       const cs = r.ownerType === 'vm' ? conflictSuspectOf(r.ip) : null;
       if (cs) r.macConflict = { mac: cs.mac, ...(cs.vendor ? { vendor: cs.vendor } : {}), seen: cs.seen, ...(cs.otherVm ? { otherVm: cs.otherVm.name || cs.otherVm.id } : {}) };
