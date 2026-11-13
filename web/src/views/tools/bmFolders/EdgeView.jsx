@@ -22,7 +22,7 @@ export default function EdgeView({ d, reload }) {
   const pullNow = async () => {
     setBusy(true); setMsg(null);
     try { const r = await postJson('/tools/bm-folders/edge/pull', {}); setMsg({ ok: true, text: `사본을 받았습니다 — 법인 ${r.corps ?? 0} · 배치 ${r.place ?? 0}` }); reload(); }
-    catch (e) { setMsg({ ok: false, text: opErrorText(e) }); } finally { setBusy(false); }
+    catch (e) { setMsg({ ok: false, text: `받지 못했습니다 — 지난 사본은 그대로입니다(${opErrorText(e)})` }); } finally { setBusy(false); }
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
@@ -39,8 +39,9 @@ export default function EdgeView({ d, reload }) {
         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
           폴더 · 등록은 <b>중앙 포탈의 물리서버 폴더</b>에서 편집합니다 — 바꾸면 {Math.round((d.pull?.intervalMs || 600000) / 60000)}분 안에 이 엣지로 옵니다. 사용률 · 전력 · 부품 장애는 이 엣지가 지금 읽은 값입니다.
         </div>
-        {copyNote.warn ? <div style={{ fontSize: 12, marginTop: 4, color: 'var(--amber)' }}>{copyNote.warn}</div> : null}
-        {msg ? <div style={{ fontSize: 12, marginTop: 4, color: msg.ok ? 'var(--green)' : 'var(--red)' }}>{msg.text}</div> : null}
+        {/* 방금 누른 '지금 받기' 결과가 있으면 그것만(마지막 받기 실패 줄과 같은 내용을 두 번 말하지 않게 — Chromium 판독) */}
+        {msg ? <div style={{ fontSize: 12, marginTop: 4, color: msg.ok ? 'var(--green)' : 'var(--amber)' }} role="status">{msg.text}</div>
+          : copyNote.warn ? <div style={{ fontSize: 12, marginTop: 4, color: 'var(--amber)' }}>{copyNote.warn}</div> : null}
       </div>
       {d.usageOff ? <div className="bmf-offbar" role="status"><b>이 엣지의 베어메탈 사용률 수집이 꺼져 있습니다</b> — CPU · 메모리가 비어 있는 이유입니다(중앙 설정 › 베어메탈 사용률에서 이 엣지 법인을 켜면 다음 주기부터).</div> : null}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 260px) minmax(0, 1fr)', gap: 12 }} className="bmf-edge-grid">
