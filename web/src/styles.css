@@ -3174,13 +3174,13 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmf-rsum .it { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 [data-theme="light"] .bmf-sc.os { color: #1d4ed8; background: rgba(59,130,246,.14); }
 [data-theme="light"] .bmf-sc.idrac { color: #0f766e; background: rgba(45,212,191,.18); }
-/* v2.994 값 없음 사유(설계 bm-folders §12) — '—' 아래 짧은 사유 + 점(글자 병기) · 누르면 자세한 사유. 상자는 오른쪽 끝에 맞춰 왼쪽으로 연다(사용률 칸이 표 오른쪽이라 왼쪽 기준이면 화면 밖 — Chromium 판독) */
+/* v2.994 값 없음 사유(설계 bm-folders §12) — '—' 아래 짧은 사유 + 점(글자 병기) · 누르면 자세한 사유. 상자는 화면 좌표(fixed — 위치는 컴포넌트가 버튼 기준으로 정한다)로 연다: absolute 는 표 래퍼에 잘리고 왼쪽 기준이면 화면 밖이었다(Chromium 판독) */
 .bmf-why { position: relative; display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; font-size: 12px; min-width: 0; }
 .bmf-why-b { display: inline-flex; align-items: center; gap: 5px; background: none; border: 0; padding: 0; color: var(--text-dim); font: inherit; font-size: 11.5px; cursor: pointer; text-align: left; white-space: nowrap; }
 .bmf-why-b:hover, .bmf-why-b:focus-visible { color: var(--text); text-decoration: underline dotted; }
 .bmf-wd { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
 .bmf-wd.unknown { border: 1.5px solid var(--text-faint); }
-.bmf-why-pop { position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; width: min(340px, 80vw); display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 8px;
+.bmf-why-pop { position: fixed; z-index: 60; width: min(340px, 80vw); display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 8px;
   background: var(--panel, var(--bg)); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,.35); white-space: normal; color: var(--text); font-size: 12px; }
 .bmf-why-a { color: var(--accent); }
 .bmf-wband { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }

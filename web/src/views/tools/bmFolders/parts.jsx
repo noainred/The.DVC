@@ -72,26 +72,42 @@ export function StackBar({ parts = [], w, h = 8, label }) {
  * 문구는 서버가 정한 사유 코드의 글자(whyText.js) — 화면이 원인을 추측하지 않는다.
  */
 export function WhyTip({ why, what }) {
-  const [open, setOpen] = React.useState(false);
+  const [pos, setPos] = React.useState(null);   // 열림 = 상자 위치(화면 좌표) · null = 닫힘
   const ref = React.useRef(null);
+  const btn = React.useRef(null);
+  const open = !!pos;
   React.useEffect(() => {
     if (!open) return undefined;
-    const key = (e) => { if (e.key === 'Escape') setOpen(false); };
-    const click = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const key = (e) => { if (e.key === 'Escape') { setPos(null); btn.current?.focus?.(); } };
+    const click = (e) => { if (ref.current && !ref.current.contains(e.target)) setPos(null); };
+    const away = () => setPos(null);   // fixed 상자라 스크롤 · 크기 변경이면 버튼과 어긋난다 — 닫는다
     document.addEventListener('keydown', key); document.addEventListener('mousedown', click);
-    return () => { document.removeEventListener('keydown', key); document.removeEventListener('mousedown', click); };
+    window.addEventListener('scroll', away, true); window.addEventListener('resize', away);
+    return () => { document.removeEventListener('keydown', key); document.removeEventListener('mousedown', click); window.removeEventListener('scroll', away, true); window.removeEventListener('resize', away); };
   }, [open]);
+  // 상자는 화면 좌표(fixed)로 연다 — 표 스크롤 래퍼 안의 absolute 는 래퍼에 잘렸다(Chromium 판독). 오른쪽 끝을 버튼에 맞추고 화면 안으로 자른다 · 아래가 모자라면 위로.
+  const toggle = () => {
+    if (open) { setPos(null); return; }
+    const r = btn.current?.getBoundingClientRect?.();
+    const vw = window.innerWidth || 1024; const vh = window.innerHeight || 768;
+    const w = Math.min(340, vw * 0.8); const h = 150;
+    if (!r) { setPos({ left: 8, top: 8, width: w }); return; }
+    const left = Math.max(8, Math.min(r.right - w, vw - w - 8));
+    const top = r.bottom + 4 + h > vh ? Math.max(8, r.top - 4 - h) : r.bottom + 4;
+    setPos({ left, top, width: w });
+  };
   const w = whyOf(why.code);
   const short = whyShort(why);
   return (
-    // 클릭이 표 행까지 올라가면 그 행의 옆 패널이 같이 열린다(Chromium 판독 결함) — 이 칸 안의 클릭은 여기서 멈춘다
-    <span className="bmf-why" ref={ref} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} role="presentation">
+    // 클릭이 표 행까지 올라가면 그 행의 옆 패널이 같이 열린다(Chromium 판독 결함) — 이 칸 안의 클릭만 여기서 멈춘다.
+    //   키 이벤트는 막지 않는다(막으면 문서에 단 Esc 처리기까지 막혀 상자가 닫히지 않았다 — 재확인 판독).
+    <span className="bmf-why" ref={ref} onClick={(e) => e.stopPropagation()} role="presentation">
       <span className="muted">—</span>
-      <button type="button" className="bmf-why-b" aria-expanded={open} onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} title={`${w.l} ${w.a}`.trim()}>
+      <button ref={btn} type="button" className="bmf-why-b" aria-expanded={open} onClick={(e) => { e.stopPropagation(); toggle(); }} title={`${w.l} ${w.a}`.trim()}>
         <span className={`bmf-wd ${w.cls}`} style={{ background: WHY_DOT[w.cls] }} aria-hidden="true" />{short}
       </button>
       {open ? (
-        <span className="bmf-why-pop" role="dialog" aria-label={`${what} — 값이 없는 이유`}>
+        <span className="bmf-why-pop" role="dialog" aria-label={`${what} — 값이 없는 이유`} style={{ left: pos.left, top: pos.top, width: pos.width }}>
           <b>{what} 값이 없습니다</b>
           <span>{w.l}</span>
           {why.at ? <span className="muted">마지막 값 {new Date(why.at).toLocaleString('ko-KR', { hour12: false })}</span> : null}
