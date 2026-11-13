@@ -118,9 +118,11 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
           <label class="ck"><input type="checkbox"><b>기본 일정 따르기</b><span>아래 ‘기본 일정’ 값을 그대로 씁니다</span></label>
           <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
             <label class="fld">주기<select class="input"><option>{{sel.every}}</option><option>30분마다</option><option>1시간마다</option><option>2시간마다</option><option>6시간마다</option><option>하루 한 번</option></select></label>
-            <label class="fld">스캔 속도<select class="input"><option>보통</option><option>느리게 — 회선 부담 줄이기</option><option>빠르게</option></select></label>
-            <label class="fld" style="grid-column:1 / 3">쉬는 시간(그 법인 현지 시각)<input class="input mono" type="text" value="{{sel.quiet}}" placeholder="없음 — 예: 02:00-06:00"></label>
+            <label class="fld">스캔 속도<select class="input"><option>보통</option><option>느리게 — 회선 부담 줄이기</option><option>빠르게</option><option>직접 정함</option></select></label>
+            <label class="fld">동시에 스캔하는 IP 수<input class="input mono" type="text" value="128" aria-describedby="conc-help"></label>
+            <label class="fld">쉬는 시간(그 법인 현지 시각)<input class="input mono" type="text" value="{{sel.quiet}}" placeholder="없음 — 예: 02:00-06:00"></label>
           </div>
+          <span id="conc-help" class="muted" style="font-size:12px">속도를 고르면 동시 IP 수가 따라 바뀝니다. 숫자를 직접 고치면 ‘직접 정함’ 이 됩니다. 쉬는 시간에는 새 회차를 시작하지 않고, 돌던 스캔은 끝까지 돕니다.</span>
           <div style="font-size:12px;border:1px solid #243049;border-radius:8px;padding:10px 12px;background:#0a0e17">{{sel.advice}}</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button type="button" class="btn primary">저장</button>
@@ -134,7 +136,8 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
         <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
           <label class="fld">주기<select class="input"><option>1시간마다</option></select></label>
           <label class="fld">스캔 속도<select class="input"><option>보통</option></select></label>
-          <label class="fld" style="grid-column:1 / 3">쉬는 시간(현지 시각)<input class="input mono" type="text" placeholder="없음"></label>
+          <label class="fld">동시에 스캔하는 IP 수<input class="input mono" type="text" value="128"></label>
+          <label class="fld">쉬는 시간(현지 시각)<input class="input mono" type="text" placeholder="없음"></label>
         </div>
         <label class="ck"><input type="checkbox" checked><b>에이전트마다 시작 분을 흩어 놓기</b><span>모든 법인이 정각에 한꺼번에 보고하지 않게</span></label>
         <button type="button" class="btn" style="align-self:flex-start">기본 일정 저장</button>

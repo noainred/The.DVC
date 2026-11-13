@@ -54,9 +54,9 @@ td{padding:7px 9px;border-bottom:1px solid #eceff3;vertical-align:top}
   <sc-if value="{{isCorp}}" hint-placeholder-val="{{ true }}">
   <div class="mail">
     <dl class="meta">
-      <dt>제목</dt><dd><b>[IP 관리] VC-KR1 주간 변경 보고 · 11-02 ~ 11-09</b></dd>
+      <dt>제목</dt><dd><b>[IP 관리] VC-KR1 주간 변경 보고 · 11-01 ~ 11-08</b></dd>
       <dt>받는 사람</dt><dd>ops-kr@corp.example, web-team@corp.example</dd>
-      <dt>첨부</dt><dd class="mono">ip-changes_VC-KR1_20261109.xlsx</dd>
+      <dt>첨부</dt><dd class="mono">ip-changes_VC-KR1_20261108.xlsx</dd>
     </dl>
     <div class="body">
       <div style="font-size:15px;line-height:1.6">지난 7일 동안 VC-KR1 에서 주소 <b>31개</b>가 새로 쓰이기 시작했고 <b>13개</b>가 해제됐습니다. <b>웹 서비스망(10.20.30.0/24)</b>이 95% 로 가득 찼고, 충돌 1건이 새로 생겼습니다.</div>
@@ -87,7 +87,7 @@ td{padding:7px 9px;border-bottom:1px solid #eceff3;vertical-align:top}
         <table>
           <thead><tr><th>IP 주소</th><th>자원</th><th>용도</th><th>요청자</th><th>할당자</th><th>처음 본 때</th></tr></thead>
           <tbody>
-            <tr><td class="mono">10.20.33.18</td><td><b>web-kr1-031</b> <span class="dim">VM</span></td><td>웹 프런트</td><td>web-team</td><td>ops-kr</td><td class="mono dim">11-08 14:40</td></tr>
+            <tr><td class="mono">10.20.33.18</td><td><b>web-kr1-031</b> <span class="dim">VM</span></td><td>웹 프런트</td><td>web-team</td><td>ops-kr</td><td class="mono dim">11-07 14:40</td></tr>
             <tr><td class="mono">10.20.32.71</td><td><b>stg-kr1-api-04</b> <span class="dim">VM</span></td><td>스테이징</td><td>api-team</td><td>ops-kr</td><td class="mono dim">11-07 10:12</td></tr>
             <tr><td class="mono">10.20.31.52</td><td><b>db-kr1-phy02</b> <span class="dim">물리 서버</span></td><td>DB 서버</td><td>dba-team</td><td>net-admin</td><td class="mono dim">11-06 16:03</td></tr>
             <tr><td class="mono">10.20.30.28</td><td><b>prn-3f.kr1.example</b> <span class="dim">스캔만</span></td><td class="dim">—</td><td class="dim">—</td><td class="dim">—</td><td class="mono dim">11-05 09:20</td></tr>
@@ -127,7 +127,7 @@ td{padding:7px 9px;border-bottom:1px solid #eceff3;vertical-align:top}
         <table>
           <thead><tr><th>언제</th><th>누가</th><th>무엇을</th></tr></thead>
           <tbody>
-            <tr><td class="mono dim" style="white-space:nowrap">11-08 10:05</td><td>ops-kr</td><td>관리 정보 CSV 가져오기 — 38행(용도 · 요청자)</td></tr>
+            <tr><td class="mono dim" style="white-space:nowrap">11-07 10:05</td><td>ops-kr</td><td>관리 정보 CSV 가져오기 — 38행(용도 · 요청자)</td></tr>
             <tr><td class="mono dim">11-06 15:58</td><td>net-admin</td><td><span class="mono">10.20.31.52 · .60</span> 고정할당 · 요청자 dba-team</td></tr>
             <tr><td class="mono dim">11-05 09:31</td><td>ops-kr</td><td>대역 <span class="mono">10.20.32.0/24</span> 용도 ‘개발’ → ‘개발 · 스테이징’</td></tr>
           </tbody>
@@ -144,9 +144,9 @@ td{padding:7px 9px;border-bottom:1px solid #eceff3;vertical-align:top}
   <sc-if value="{{isAll}}" hint-placeholder-val="{{ false }}">
   <div class="mail">
     <dl class="meta">
-      <dt>제목</dt><dd><b>[IP 관리] 전체 법인 주간 변경 보고 · 11-02 ~ 11-09</b></dd>
+      <dt>제목</dt><dd><b>[IP 관리] 전체 법인 주간 변경 보고 · 11-01 ~ 11-08</b></dd>
       <dt>받는 사람</dt><dd>메일 설정의 기본 받는 사람 3명, net-admin@corp.example, infra-lead@corp.example</dd>
-      <dt>첨부</dt><dd class="mono">ip-changes_all_20261109.xlsx</dd>
+      <dt>첨부</dt><dd class="mono">ip-changes_all_20261108.xlsx</dd>
     </dl>
     <div class="body">
       <div style="font-size:15px;line-height:1.6">지난 7일 동안 28개 법인에서 주소 <b>64개</b>가 새로 쓰이기 시작했고 <b>41개</b>가 해제됐습니다. 가득 찬 대역은 <b>9개</b>(새로 1), 충돌은 <b>4건</b>(새로 1)입니다. 법인 2곳은 스캔 보고가 온전하지 않았습니다.</div>
@@ -188,7 +188,7 @@ td{padding:7px 9px;border-bottom:1px solid #eceff3;vertical-align:top}
         </table>
       </div>
 
-      <div class="note"><b>수집 상태</b> — VC-PL1 은 11-09 02:00 이후 스캔 보고가 없어 그 뒤의 사용 · 해제가 빠졌을 수 있습니다. VC-BR1 은 주기 스캔이 꺼져 있어 vCenter 가 아는 주소의 변화만 실었습니다. 못 읽은 구간을 ‘변화 없음’ 으로 세지 않았습니다.</div>
+      <div class="note"><b>수집 상태</b> — VC-PL1 은 11-07 02:00 이후 스캔 보고가 없어 그 뒤의 사용 · 해제가 빠졌을 수 있습니다. VC-BR1 은 주기 스캔이 꺼져 있어 vCenter 가 아는 주소의 변화만 실었습니다. 못 읽은 구간을 ‘변화 없음’ 으로 세지 않았습니다.</div>
 
       <div class="dim" style="font-size:12px;border-top:1px solid #dfe3e8;padding-top:14px">이 메일은 The Davinci 포탈의 IP 관리 › 설정 › 알림 · 정기 보고에서 보냅니다 · <a href="Main.dc.html">포탈에서 보기</a> · 법인별 상세는 각 법인 받는 사람에게 따로 갔습니다(22통 · 변경 없는 6곳은 건너뜀).</div>
     </div>
