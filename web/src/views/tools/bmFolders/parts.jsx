@@ -84,9 +84,10 @@ export function WhyTip({ why, what }) {
   const w = whyOf(why.code);
   const short = whyShort(why);
   return (
-    <span className="bmf-why" ref={ref}>
+    // 클릭이 표 행까지 올라가면 그 행의 옆 패널이 같이 열린다(Chromium 판독 결함) — 이 칸 안의 클릭은 여기서 멈춘다
+    <span className="bmf-why" ref={ref} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} role="presentation">
       <span className="muted">—</span>
-      <button type="button" className="bmf-why-b" aria-expanded={open} onClick={() => setOpen((v) => !v)} title={`${w.l} ${w.a}`.trim()}>
+      <button type="button" className="bmf-why-b" aria-expanded={open} onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} title={`${w.l} ${w.a}`.trim()}>
         <span className={`bmf-wd ${w.cls}`} style={{ background: WHY_DOT[w.cls] }} aria-hidden="true" />{short}
       </button>
       {open ? (
