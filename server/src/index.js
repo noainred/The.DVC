@@ -167,6 +167,7 @@ import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
 import { startIsiduPoller } from './isidu/poller.js';
 import { startIsiduDigest } from './isidu/digest.js';   // v2.742 아이실론 종합 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
+import { startIpamReport } from './ipam/report.js';   // v3.7.0 IP 관리 정기 보고(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startGuestPartMail } from './guestpart/notify.js';   // v2.749 게스트 파티션 사용률 메일(통합·vCenter 별·95% 즉시·실패) — 중앙 전용 · 기본 꺼짐
 import { startIssueAutomation } from './issues/automation.js'; // v2.908 이슈 자동화 규칙(고정 4개 — 기본 꺼짐) · 저장소 이벤트 구독
 import { startAlertIssues } from './issues/alertIssues.js'; // v2.908 다른 알람 · 백업 실패 → 이슈 자동 등록(기본 꺼짐) — 알람 엔진 · Bareos 틱 구독
@@ -674,7 +675,7 @@ const stagger = [
   startBmUsagePoller,
   startLinkCheckPoller,
   startLinkCheckWorker,
-  startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
+  startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, startIpamReport, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startGuestPartMail, // 게스트 파티션 사용률 메일(v2.749) — 엣지는 기동하지 않는다 · 메일 설정이 꺼져 있으면 틱만 돈다
   startVeeamPoller, startVeeamPush, startVeeamConfigPull, startVeeamSnapWarmup, startVeeamSnapCollector, startEmPoller, startLicenseWatch, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함 · 전용 수집기(v2.765)는 로그 수집 주기로 Veeam 계정 이벤트만
   startBareosConfigPull, startBareosOpWorker, // Bareos 법인 Director 엣지 대행(v2.824) — CENTRAL_URL 미설정이면 자기기동 안 함

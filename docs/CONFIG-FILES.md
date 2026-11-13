@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **321개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **323개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-13)
@@ -154,6 +154,8 @@
 | `ipam-changes.json` | 설정 | IP 변화 기록(v3.1.0 — 설계 docs/design/ipam-alerts-mac-dns ① ② · IP관리 › IP 변화 페이지). | ✅ | ✅ | ✅ | ipam/changeLog.js |
 | `ipam-overrides.json` | 설정 | Per-IP 수동 관리(override) 저장소 — vCenter/스캔으로 자동 발견되는 정보와 별개로, | ✅ | ✅ | ✅ | ipam/overrides.js |
 | `ipam-range-policies.json` | 설정 | 대역(subnet/range) 단위 IP 정책 저장소 — IP 단위 override(overrides.js)와 '평행'한 | ✅ | ✅ | ✅ | ipam/rangePolicies.js |
+| `ipam-report-state.json` | 설정 | IP 관리 정기 보고(IPMS 알람) 설정 · 상태 · 틱 · 발송 · 미리 보기(v3.7.0 재설계 묶음 라 — 설계 docs/design/ipam-redesign ⑫ ⑬). | ✅ | ✅ | ✅ | ipam/report.js |
+| `ipam-report.json` | 설정 | IP 관리 정기 보고(IPMS 알람) 설정 · 상태 · 틱 · 발송 · 미리 보기(v3.7.0 재설계 묶음 라 — 설계 docs/design/ipam-redesign ⑫ ⑬). | ✅ | ✅ | ✅ | ipam/report.js |
 | `ipam-scan-agents.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
 | `ipam-scan-history.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
 | `ipam-scan-log.json` | 설정 | IP 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경 — 링버퍼, 손상이면 새로 시작). | ✅ | ✅ | ✅ | ipam/scanLog.js |

@@ -6,6 +6,7 @@
  * 실패는 격리되고 이벤트 루프를 막지 않는다.
  */
 
+import { cleanQuiet, quietWindowAt, quietText } from '../ipam/scanQuiet.js'; // v3.7.0 쉬는 시간
 import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -165,6 +166,13 @@ export async function runIpScanAgentOnce(...args) {
       // 아직 주기 전 — 배정(주기)만 반영. 직전 '배정 조회' 실패는 이번 조회가 성공했으므로 남겨 두지 않고 마지막 스캔 시도의
       // 기록으로 돌아간다(그 시각이 '마지막 실행' 이다). 스캔·결과 보고 실패 기록은 다음 스캔까지 그대로 둔다(숨기지 않는다).
       if (last?.error && last.phase === 'assignment' && _lastScanRecord) last = _lastScanRecord;
+      return last;
+    }
+    // v3.7.0(재설계 묶음 라): 쉬는 시간(중앙 배정 quiet — 이 엣지의 현지 시각으로 판정)에 걸린 주기 회차는 건너뛴다. 기준 시각(_lastScanAt)을
+    //   바꾸지 않는다 — 쉬는 시간이 끝난 첫 틱에 한 번 돈다(몰아서 여러 번 돌지 않는다). 옛 중앙(quiet 없음)이면 예전 그대로.
+    const qw = dueOnly ? quietWindowAt(cleanQuiet(a.quiet)) : null;
+    if (qw) {
+      last = { at: Date.now(), assigned: true, skipped: 'quiet', quiet: quietText(qw) };
       return last;
     }
     // 엣지도 스캔을 별도 프로세스에서(v2.363) — 원격지 포탈/에이전트 부하 격리.

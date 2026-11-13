@@ -33,8 +33,8 @@ describe('ipamChangeText', () => {
 });
 
 describe('Alerts2 — IP 관리 규칙 · 알리지 않을 에이전트', () => {
-  it('규칙 다섯은 서버 기본값 키와 같다', () => {
-    expect(IPAM_RULES.map((r) => r.k)).toEqual(['ipamConflict', 'ipamMacChange', 'ipamNewIp', 'ipamReservedUp', 'ipamRename']);
+  it('규칙은 서버 기본값 키와 같다(v3.1.0 다섯 + v3.7.0 바로 알림 셋)', () => {
+    expect(IPAM_RULES.map((r) => r.k)).toEqual(['ipamConflict', 'ipamMacChange', 'ipamNewIp', 'ipamReservedUp', 'ipamRename', 'ipamDuplicate', 'ipamSubnetFull', 'ipamScanStale']);
   });
   it('쉼표 · 줄바꿈으로 나누고 빈 칸 · 중복(대소문자 무시)을 뺀다', () => {
     expect(parseQuietAgents(' edge-a, EDGE-A ,\nedge-b,, ')).toEqual(['edge-a', 'edge-b']);

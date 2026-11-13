@@ -27,6 +27,13 @@ export const IPAM_RULES = Object.freeze([
     desc: '관리상태가 예약 또는 폐기인 IP(직접 지정 · 대역 정책)가 응답하기 시작했습니다.' },
   { k: 'ipamRename', label: '호스트명 변경', sev: '경고', tone: 'amber',
     desc: '같은 확인 방식(역DNS · mDNS · NetBIOS)이 지난번과 다른 이름을 답했습니다.' },
+  // v3.7.0(재설계 묶음 라 — 바로 알림 3가지): 상태형 — 처음 넘은 때 한 번 · 회복 한 번(판정 server ipam/instantAlerts.js).
+  { k: 'ipamDuplicate', label: '중복 IP 새로 생김', sev: '경고', tone: 'amber', state: true,
+    desc: '한 vCenter 안에서 같은 IP 를 둘 이상이 씁니다(IP 대장의 ‘중복’). 풀릴 때까지 현재 발생 중에 남고 해소되면 알립니다. 지금 값을 못 읽은 vCenter 의 IP 는 판정을 미룹니다.' },
+  { k: 'ipamSubnetFull', label: '대역 가득 참', sev: '경고', tone: 'amber', th: '점유율(%)', state: true,
+    desc: '/24 대역의 점유(대장 주소 + 예약 + DHCP — 현황의 사용률과 같은 값)가 기준 이상입니다. 98% 이상은 위험 등급입니다.' },
+  { k: 'ipamScanStale', label: '스캔 보고 끊김', sev: '경고', tone: 'amber', th: '주기의 몇 배', state: true,
+    desc: '주기 스캔을 켠 에이전트의 마지막 완료가 주기 × 기준보다 오래됐습니다(엣지 정지 · 통신 · 배정 문제). 완료 기록이 한 번도 없으면 끊김인지 알 수 없어 알리지 않습니다.' },
 ]);
 /** 쉼표 · 줄바꿈으로 나눈 에이전트 이름(빈 칸 · 중복 제거 — 서버 cleanQuietAgents 가 다시 정제한다). */
 export function parseQuietAgents(text) {
@@ -147,7 +154,7 @@ export default function Alerts2({ initialData = null } = {}) {
         </label>
         <div className="flex gap wrap" style={{ marginTop: 10, alignItems: 'center' }}>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!lock} title={lock || undefined}>저장</button>
-          <span className="muted" style={{ fontSize: 11 }}>충돌 의심은 위의 재통지 쿨다운 · 평가 주기를 따릅니다. 나머지 넷은 한 번 일어난 사건이라 현재 발생 중에 남지 않고 최근 통지와 IP 변화 페이지에 남습니다.</span>
+          <span className="muted" style={{ fontSize: 11 }}>충돌 의심 · 중복 IP · 대역 가득 참 · 스캔 보고 끊김은 상태형이라 위의 재통지 쿨다운 · 평가 주기를 따릅니다. MAC 변경 · 새 미등록 IP · 예약 사용 시작 · 호스트명 변경은 한 번 일어난 사건이라 현재 발생 중에 남지 않고 최근 통지와 IP 변화 페이지에 남습니다.</span>
         </div>
       </div>
 

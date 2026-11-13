@@ -3775,3 +3775,19 @@ table.bmu-util tbody td { padding: 9px 10px; }
 .ipam-add-basket ul { list-style: none; padding: 0; margin: 4px 0 8px; max-height: 220px; overflow-y: auto; }
 .ipam-add-basket li { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; padding: 2px 0; }
 .ipam-add-list { max-height: 520px; overflow-y: auto; padding-right: 4px; min-width: 0; }
+/* v3.7.0 IP 관리 재설계 묶음 라 — 주기 스캔 일정 시간표 · 쉬는 시간 */
+.ipam-day { position: relative; height: 18px; border-radius: 4px; background: rgba(255, 255, 255, .05); border: 1px solid var(--border); overflow: hidden; }
+.ipam-day-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, .12); }
+.ipam-day-run { position: absolute; top: 3px; bottom: 3px; border-radius: 2px; min-width: 3px; display: inline-block; }
+.ipam-day-run.done { background: #4783f0; }
+.ipam-day-run.fail { background: var(--red); }
+.ipam-day-run.skip { background: #8a94a6; }
+.ipam-day-run.running { background: var(--green); }
+.ipam-day-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--amber); display: inline-block; }
+.ipam-day-lg { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; margin-bottom: 8px; }
+.ipam-day-lg span { display: inline-flex; align-items: center; gap: 5px; }
+.ipam-day-lg i { position: static; width: 12px; height: 10px; }
+.ipam-quiet-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.ipam-rep-grid { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 10px 14px; align-items: start; }
+.ipam-rep-grid > label.muted { padding-top: 6px; font-size: 12.5px; }
+@media (max-width: 640px) { .ipam-rep-grid { grid-template-columns: minmax(0, 1fr); gap: 4px; } .ipam-rep-grid > label.muted { padding-top: 8px; } }
