@@ -50,6 +50,7 @@ const BmUsage = React.lazy(() => import('./tools/BmUsage.jsx'));         // 베�
 const FocusMonTool = React.lazy(() => import('./tools/FocusMonTool.jsx')); // 집중 모니터링 — 리눅스 서버 실시간 성능 · iostat 비교(v2.976)
 const CorpUsage = React.lazy(() => import('./tools/CorpUsage.jsx'));
 const SvcInventory = React.lazy(() => import('./tools/SvcInventory.jsx')); // v2.887 서비스 인벤토리
+const BmFolders = React.lazy(() => import('./tools/BmFolders.jsx')); // v2.984 물리서버 폴더
 const PowerTotal = React.lazy(() => import('./tools/PowerTotal.jsx')); // v2.664 전체 소비 전력
 const IdracTrend = React.lazy(() => import('./tools/IdracTrendTool.jsx')); // iDRAC 통합 추이(v2.660)     // 법인별 서버 사용량(v2.625)
 const LinkCheck = React.lazy(() => import('./tools/LinkCheck.jsx'));     // 통신 점검(중앙↔엣지·vCenter, v2.552)
@@ -634,6 +635,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'focus-mon' && <FocusMonTool />}
       {tool === 'corp-usage' && <CorpUsage scope={scope} />}
       {tool === 'svc-inventory' && <SvcInventory />}
+      {tool === 'bm-folders' && <BmFolders />}
       {tool === 'power-total' && <PowerTotal />}
       {tool === 'idrac-trend' && <IdracTrend />}
       {tool === 'link-check' && <LinkCheck />}

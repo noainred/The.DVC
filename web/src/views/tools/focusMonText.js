@@ -497,7 +497,7 @@ export function suggestionText(sg, existing = []) {
   return sg.moves.slice(0, 6).map((m) => `${m.group}${have.has(m.group) ? '' : '(새 그룹)'} ${m.ids.length}대(${m.names.slice(0, 3).join(' · ')}${m.names.length > 3 ? ' …' : ''})`).join(' · ') + (sg.moves.length > 6 ? ` 외 ${sg.moves.length - 6}묶음` : '');
 }
 
-/* ── 개요 카드 아래 줄(v2.984 — 사용자 '빨간 부분을 선택해서 볼 수 있게 · Disk write/read · Network in/out · disk wait 등') ──────────
+/* ── 개요 카드 아래 줄(v2.992 — 사용자 '빨간 부분을 선택해서 볼 수 있게 · Disk write/read · Network in/out · disk wait 등') ──────────
  * 값은 서버 요약(rates.summaryOf) 그대로 — 디스크는 물리 디스크 합(지연은 요청 수 가중) · 못 읽은 값은 '—'(0 아님). 고른 목록은 브라우저가 기억(fm.ov.line).
  */
 export const CARD_LINE_MAX = 4;

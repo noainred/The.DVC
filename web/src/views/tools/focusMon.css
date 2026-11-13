@@ -274,7 +274,7 @@
 .fm-wrap .fm-lgroups { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .fm-wrap .fm-lgroup { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--border-soft); min-width: 0; overflow-wrap: anywhere; font-size: 12.5px; }
 .fm-wrap .fm-lgroup:last-child { border-bottom: 0; }
-/* v2.984 카드 아래 줄 — 고른 값을 두 개씩(오른쪽 칸은 오른쪽 맞춤) · 넘치면 말줄임(마우스를 올리면 전체) */
+/* v2.992 카드 아래 줄 — 고른 값을 두 개씩(오른쪽 칸은 오른쪽 맞춤) · 넘치면 말줄임(마우스를 올리면 전체) */
 /* 칸 너비는 내용에 맞춘다(반씩 고정하면 '↓876 Mb/s ↑543 Mb/s' 가 1440px 카드에서 잘렸다 — 2026-11-13 화면 확인) · 모자라면 말줄임 */
 .fm-wrap .fm-sub.fm-cardline { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, max-content); justify-content: space-between; gap: 2px 10px; }
 .fm-wrap .fm-sub.fm-cardline > span:nth-child(even) { text-align: right; }

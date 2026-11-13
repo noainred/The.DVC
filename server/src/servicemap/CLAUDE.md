@@ -2,12 +2,13 @@
 
 > 설계·결정 기록은 `docs/design/service-map/README.md`. 사용자 선택: 시안 2(전역 카탈로그 globalId + 커버리지 매트릭스) · 1+2단계 전부.
 
-- **판정 코어는 `resolve.js` 하나**(순수): 고정(pin) → vCenter 폴더 규칙(vmPlacement `/ERP/prod` 모양 · `/` 경계 · 가장 긴 접두 · 루트 규칙은 `/` 만) →
+- **판정 코어는 `resolve.js` 하나**(순수): 고정(pin) → [VM] vCenter 폴더 규칙 · [베어메탈] **물리서버 폴더 규칙**(v2.987 — `bmFolderRules` · 물리서버 폴더 경로 '\\' 경계 · 가장 긴 경로 · 배치는 `ctx.bmFolderOf` = 물리서버 폴더 `placeMember` 하나 · 저장소 손상이면 null = 건너뜀) → vCenter 폴더 규칙(vmPlacement `/ERP/prod` 모양 · `/` 경계 · 가장 긴 접두 · 루트 규칙은 `/` 만) →
   스캔 엔트리 라벨(서비스명 또는 별칭) → vSphere 태그(전역 카테고리 + 법인 켬일 때만 · 태그 못 읽음 = unchecked, 미지정과 다르다) → 이름 규칙(접두·접미·포함, 정규식 아님) → 미지정.
   **이름 규칙은 등록 순이 아니다**: 접두·접미 > 포함 · 긴 값 먼저 · 그다음 등록 순(`sortNameRules` — 화면 'N번째' 도 서버가 준 순번). **태그가 여럿이면** 소문자 정렬 뒤 서비스에 걸리는 첫 값,
   둘 이상의 서비스면 `tagAmbiguous`, 이름 규칙 둘 이상(다른 서비스)이 걸리면 `ruleOverlap` 으로 검토 큐(고정 구성원 제외 · 5차 3차 M4·R13·M5·R14 · 3차 반증 1). 폴더 규칙만 대소문자를 구분한다(R12).
   이 순서를 바꾸면 업그레이드 뒤 자동 소속이 옮겨 간다 — **옮겨 갈 수 있는 구성원이 검토 큐에 드러나는지** 먼저 답하고 릴리스 노트에 고지할 것. 모호한 자동 판정을 확인한 고정은 '불필요한 고정' 이 아니다(순환 — 3차 반증 4).
   **서비스는 자동으로 만들지 않는다** — 규칙 값에 맞는 서비스가 없으면 '매핑 안 된 값' 큐로 보낸다. 판정은 구성원당 1회, 결과 Map 을 표·큐·전역이 공유한다.
+- **물리서버 폴더 규칙(v2.987 `bmFolderRules`)**: 없으면 판정이 예전과 같다 · 세대 `bmfRevSafe` 가 memo · 캐시 열쇠에. 상세는 `bmfolders/CLAUDE.md` 끝 절.
 - **집계는 `corpusage/build.js` 의 `emptyAgg/addAgg/finishAgg` 를 그대로 쓴다**(가중 사용률 = Σ(사용률×용량)÷Σ용량 · 꺼진 VM 제외 · 못 읽음·오래됨·용량 없음은 따로 센다).
   같은 입력이면 법인 사용률 화면과 같은 값이어야 한다 — 복제 판정 금지.
 - **저장소(`store.js`)**: 메모리가 진실 · 200ms 디바운스 원자 쓰기 · rev 단조 증가. 고정 쓰기(`mutatePins`)는 **바뀐 키만** 정리·동결한다(6차 8 — 5만 건 깊은 복사가 쓰기마다 130ms) — fn 은 항목을 고치지 말고 새 객체로 바꿔 넣는다(고치면 던진다). 파일이 손상이면 **빈 트리로 시작하지 않고** 503 + 쓰기 차단,
@@ -15,8 +16,8 @@
 - **범위**: 조회는 `scopedVcenterIds` 교집합이 요청 필터보다 먼저 · 법인 대상 쓰기는 `corpWriteAccess`(모르는 법인·조회 밖 404 → 쓰기 밖 403, writeVcenters 미설정 = 조회 범위) ·
   전역 카탈로그·태그 카테고리·초기화는 전체 범위 관리자(`FLEET_OPS`). 법인 미지정 구성원은 범위 계정에 싣지 않는다. 응답 캐시는 범위·쓰기 범위·관리자·저장소 rev 를 키에 넣는다.
   비관리자 판본에는 스캔 엔트리 대역(CIDR)·주소 모양 BM 이름을 싣지 않는다. **범위 계정 판본에는 베어메탈 서비스태그를 싣지 않는다**(5차 R7·결정 ⑤ — `/insights/fleet` 403 과 같은 기준):
-  키는 `pubKey`(st:·fl: → `maskedIdToken`) · 쓰기는 `keyResolverFor`(그 법인 후보 안에서만 · 원문 베어메탈 키 거부) · 이름 안의 태그는 `stripTag`(찾기·CSV 도 가린 이름 기준).
-  새 응답 필드·새 키 입력을 만들면 **이 셋을 지나는지** 먼저 볼 것. 잔여 위험: 쓰기 계정이 이름 규칙을 추측해 넣으면 소속 변화로 태그를 되찾을 수 있다(4차 반증 4 — 판정은 판본마다 바꾸지 않는다).
+  키는 `pubKey`(st:·fl: → `maskedIdToken`) · 쓰기는 `keyResolverFor`(그 법인 후보 안에서만 · 원문 베어메탈 키 거부) · 이름 안의 태그는 `stripTag`(찾기·CSV 도 가린 이름) · 목록 순서 `visibleOrder`.
+  새 응답 필드·새 키 입력을 만들면 **이 셋을 지나는지** 먼저 볼 것. 4차 반증 4(이름 규칙으로 가린 태그 맞혀 보기)는 v2.989 에 닫았다 — 베어메탈 이름 규칙은 가린 뒤 이름(`util/ruleName.js`, 판본 공통).
 - **고정**: 법인이 있는 구성원만(법인 없는 서버는 통합 서버 인벤토리에서 법인을 먼저 정한다). 자동 판정과 다르면 드리프트 큐. 법인이 바뀌면 무시(pinMismatch).
   '고정 유지'(`pins.review`)는 그 순간의 자동 판정을 `reviewedAuto` 로 저장하고 **그와 같은 드리프트만** 가린다 — 자동 판정이 다른 서비스로 바뀌면 다시 묻는다.
   `reviewedAuto` 가 없는 옛 표지는 같다고 보지 않는다(5차 반증 R8 — 예전에는 검토 한 번이 이후 모든 드리프트를 숨겼다).
@@ -60,4 +61,4 @@
   `rule/alias/namerule.update`(대상 서비스만 — 지우고 다시 넣는 사이 소속이 비지 않게) · 전역 `global.update/remove`(화면은 전체 범위 관리자만). 쓰기 결과가 0건이면 화면이 성공 문구 대신 경고(`writeResultNote`).
 - **구성원 조회 `members?global=<id>`** 는 corp 없이도 범위 안 전 법인을 준다(화면 '전 법인 구성원 모두 보기'). 영향 호스트의 '함께 떠받치는 서비스' 에서는 **그 전역 서비스의 법인 서비스 id 를 모두** 뺀다(`svc` 만 빼면 자기 자신이 뜬다 — v2.887~v2.890 결함).
 - **라우트(`routes/api/svcInventory.js`)·이 폴더를 고치면 커밋 전에 `node scripts/api-doc.mjs` · `node scripts/arch-doc.mjs`** — 줄 번호가 바뀌어 `apiDoc2563`·`audit2613h` 가 깨진다(v2.887·v2.890 두 번 전량 verify 에서 처음 잡혔다).
-- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · `svcInventoryReview5b.test.js`(2차) · `svcInventoryReview5c.test.js`(3차 — 판정 순서 변이 13종) · `svcInventoryReview5d.test.js`(4차 — 범위 가림·키 승계 · 반증 대상에서 3건 실패 확인) · `svcInventoryReview6.test.js`·`6b`(6차 + 예약 수정 + 반증 F1~F6 — 수정 전 10/10 실패 · 변이 32/32) · `svcInventoryReview7.test.js`(7차 — 변이 13/13) · 웹 `web/src/views/tools/svcInventoryText.test.js`.
+- 회귀: `server/test/svcInventory2887.test.js` · `svcInventoryReview5{,b,c,d}.test.js`(5차 1~4차 — c 는 판정 순서 변이 13종) · `svcInventoryReview6{,b}.test.js`(6차 · 변이 32/32) · `svcInventoryReview7.test.js`(7차 · 변이 13/13) · `bmFolders2987.test.js`(물리서버 폴더 규칙) · 웹 `svcInventoryText.test.js`. 회차별 상세는 각 테스트 머리 주석.

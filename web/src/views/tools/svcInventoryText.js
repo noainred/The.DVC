@@ -6,9 +6,9 @@
 import { numOrNull } from '../../numOrNull.js';
 import { dayStamp } from '../../dayStamp.js';
 
-export const SRC_LABEL = Object.freeze({ pin: '고정', folder: 'vCenter 폴더 규칙', scan: '스캔 엔트리', tag: 'vSphere 태그', rule: '이름 규칙', none: '미지정' });
-export const SRC_SHORT = Object.freeze({ pin: '고정', folder: '폴더', scan: '스캔', tag: '태그', rule: '규칙' });
-export const SRC_BADGE = Object.freeze({ pin: 'purple', folder: 'blue', scan: 'teal', tag: 'blue', rule: 'gray', none: 'amber' });
+export const SRC_LABEL = Object.freeze({ pin: '고정', folder: 'vCenter 폴더 규칙', bmfolder: '물리서버 폴더 규칙', scan: '스캔 엔트리', tag: 'vSphere 태그', rule: '이름 규칙', none: '미지정' });
+export const SRC_SHORT = Object.freeze({ pin: '고정', folder: '폴더', bmfolder: '물리 폴더', scan: '스캔', tag: '태그', rule: '규칙' });
+export const SRC_BADGE = Object.freeze({ pin: 'purple', folder: 'blue', bmfolder: 'blue', scan: 'teal', tag: 'blue', rule: 'gray', none: 'amber' });
 export const REASON_TEXT = Object.freeze({
   'no-corp': '법인 귀속 없음 — 통합 서버 인벤토리에서 법인을 먼저 정합니다',
   'no-corp-error': '법인 귀속 판정을 돌리지 못함(오류 — 입력 오류 목록 참고) — 이 서버의 법인을 지금은 모릅니다',
@@ -61,7 +61,7 @@ export function backupView(b, meta) {
 }
 /** 소속 근거 요약 'pin 1 · 폴더 4 · 스캔 2'. */
 export function srcSummary(src) {
-  return ['pin', 'folder', 'scan', 'tag', 'rule'].filter((k) => n0(src?.[k]) > 0).map((k) => ({ k, label: SRC_SHORT[k], n: n0(src[k]) }));
+  return ['pin', 'folder', 'bmfolder', 'scan', 'tag', 'rule'].filter((k) => n0(src?.[k]) > 0).map((k) => ({ k, label: SRC_SHORT[k], n: n0(src[k]) }));
 }
 /** 켜짐 칸 — 전원을 모르는 구성원은 분모에서 뺀다. */
 export function powerText(p) {

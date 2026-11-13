@@ -1,5 +1,5 @@
 /**
- * focusMonCard.test.js — v2.984 개요 카드 아래 줄 고르기(사용자 "빨간 부분을 선택해서 볼 수 있게 · Disk write/read · Network in/out · disk wait 등").
+ * focusMonCard.test.js — v2.992 개요 카드 아래 줄 고르기(사용자 "빨간 부분을 선택해서 볼 수 있게 · Disk write/read · Network in/out · disk wait 등").
  *  · 목록 정리(아는 열쇠 · 겹침 없음 · 최대 4 · 비면 기본값) · 체크 토글(넷이면 잠김 · 마지막 하나는 못 끔)
  *  · 칸 글(값 없으면 '—' · 단위 없음) · 서버 요약 칸 이름과 대조 · 화면 소스(브라우저 기억 · 카드가 고른 칸을 그림)
  */

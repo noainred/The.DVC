@@ -1485,6 +1485,31 @@
     캐시: /insights/fleet · 전력 분석 키에 `collectorDcSig()`(수집 서버 id · 라벨 · 매칭 서명)를 넣었다 — 매칭을 바꾸면 1분 칸을 기다리지 않는다.
     통합 서버 인벤토리의 미지정 이유가 수집 서버 때문이면 `corpWhyCode: 'collector'` 를 싣고 화면이 '수집 서버 법인 매칭 →' 링크(#/settings/collectors)를 띄운다.
     회귀 `server/test/collectorDc2972.test.js` · `web/src/views/collectors/collectorDcText.test.js`.
+  - **v2.985 — 법인 매칭 후속 P1~P7**(사용자 요청 2026-11-11 'P1~P7 진행' — v2.972 반증 추정 E1~E4 · Chromium 발견):
+    P2(재현): 통합 인벤토리 · 하드웨어 내보내기(`hwExport/corp.js makeCorpOf`)의 원격 수집 행(serverId 'remote:<수집 서버>:…')도 수집 서버의 법인을 본다(예전: 서버 분석 색인에 없으면 '미지정').
+    에이전트는 remoteAgent → 행 collectorId → serverId 접두의 **등록된 수집 서버 id 최장 일치**(`agentOfRow` — 반증 D4: id 에 ':' 가 올 수 있다). 순서는 예전대로 **색인 > vCenter 할당 > 에이전트 법인**.
+    ⚠ 정정(반증 D3): 처음 판은 P3 로 '사용자 매칭 > vCenter' 를 넣었다가 전력 분석(vCenter 할당 우선)과 새로 갈려 되돌렸다 — 매칭과 vCenter 할당의 순서는 아래 P4 결정으로 남긴다.
+    P4(조사만 — 코드 그대로): 전력 분석(`powerBreakdown.resolveDc`)은 ESXi 호스트로 매핑된 측정값을 **vCenter 할당 법인**으로 센다(가상화 호스트 — 통합 인벤토리 vh 와 같다).
+    같은 서버의 iDRAC 을 서버 분석은 수집 서버 매칭 법인으로 보므로, **vCenter 할당 법인 ≠ 수집 서버 매칭 법인**이면 두 화면이 갈린다(1:1:1 에서는 설정 불일치일 때만).
+    바꿀지(매칭 우선 · 불일치 경고만)는 사용자 결정 대기.
+    P5: 손으로 고친 datacenters.json 의 대문자 id 도 매칭 — 고르는 규칙은 `collector/datacenterMatch.js resolvePickedDc` 하나(정확 일치 → 대소문자 무시, 반증 D2: 서버 분석 · 설정 화면 · IP 관리 · 등록부가 같은 규칙)이고
+    등록부는 **실제 id 그대로** 저장한다(예전 소문자 저장은 대소문자만 다른 두 법인 중 하나를 고를 수 없었다). id 에 [a-z0-9._-] 밖 글자가 있으면 여전히 400.
+    P6(재현 — 목 데이터 'Seoul 법인' · 'Seoul' 중복): `ensureCollectorDatacenter` 는 수집 서버의 법인이 이미 정해졌으면(사용자 매칭 · **라벨**이 기존 법인 id 또는 **이름**과 맞음 —
+    라벨이 없을 때만 수집 서버 id · 이름. 반증 D1: id · 이름이 우연히 다른 법인과 같아 라벨이 밝힌 새 법인을 막지 않게)
+    법인을 새로 만들지 않는다(운영도 라벨이 기존 법인 id 와 다르고 이름만 같으면 중복이 생겼다). 목 데이터는 엣지 라벨 = 도시면 법인 id 를 라벨 id 로(`mock/demo/pdu.js demoCorpId`).
+    P1: 설정 › 수집 서버 표 — ID · 이름 한 칸, 엣지 라벨은 법인 매칭 칸 안, 동기화는 버전 아래, 수집 켜짐은 상태 칸, 작업 버튼 세로(1440px scrollWidth 1600 → 894 = clientWidth).
+    법인 목록을 받은 뒤 수집 서버 목록을 한 번 다시 읽는다(목록 조회의 법인 백필 뒤 매칭이 15초간 '맞는 법인 없음' 이던 것). P7: verify 문서 — worktree 는 /home/user 아래.
+    회귀 `server/test/collectorDcFollow2985.test.js`.
+  - **v2.986 — 수집 서버 법인 ↔ vCenter 할당 법인 불일치는 사용자가 고른다**(사용자 결정 2026-11-12 '불일치가 생기면 사용자가 매칭을 선택' · 방식 '버튼으로 한쪽에 맞추기' — v2.985 P4):
+    판정 규칙은 그대로다(서버 분석 = 수집 서버 법인 먼저 · 전력 분석 / 통합 인벤토리 = vCenter 할당 먼저). 불일치는 **서버 한 대 단위**(`collectorsDc.js dcConflictsOf`):
+    A = 서버 분석이 그 서버에 쓰는 법인(remoteServersResolved — 사용자 매칭 > 엣지 태그 > 이름 맞춤) · B = 그 서버 vCenter(수집 서버 vcenterId → 서버 vcenterId → 태그로 찾은
+    ESXi 의 vCenter, hostVcByTag)의 할당 법인. A · B 가 있고 다르면 (vCenter, A, B) 로 묶어 대수와 함께 `GET /admin/collectors` 의 `dcMatch[id].conflicts` 로(8묶음 상한).
+    ⚠ 정정(반증 D1 — 재현): 첫 판은 수집 서버 수준 매칭과 비교해 엣지 태그로 이미 같은 법인인 서버에 거짓 경보를 냈고, 그 'vCenter 할당' 버튼이 오히려 화면을 갈랐다.
+    화면 '법인 매칭' 칸이 경고 + 두 버튼: '수집 서버를 B 로 매칭'(사용자 매칭이 엣지 태그 · 이름 맞춤보다 먼저라 모든 서버가 B) · 'vCenter 를 A 에 할당'(기존 PUT /datacenters/assign ·
+    확인 창에 vCenter 이름(id) 과 B → A — 반증 D6). 저장 응답이 ok 여도 바뀐 것이 없으면(없는 법인 · 형식 · 이미 같음) 실패로 말한다(반증 D3 — `assignFailText`).
+    `setVcenterDatacenterMany` 는 법인 id 를 실제 id 로(resolvePickedDc — 대문자 id 법인에 할당 못 하던 것). ⚠ 반증 D4: `PUT /datacenters/assign` 게이트를
+    fleetOnly → **fullReadWriteScopeOnlyWith**(쓰기 범위만 줄인 관리자가 쓰기 범위 밖 vCenter 의 법인을 바꿀 수 있었다 — 수집 서버 매칭 PUT 과 같은 게이트).
+    회귀 `server/test/collectorDcConflict2986.test.js` · `web/src/views/collectors/collectorDcText.test.js`.
   - 회귀 `server/test/hwExport2967.test.js` · `web/src/views/tools/fleetHwExportText.test.js`.
   - **v2.973 — 엣지 서버의 빈 칸 채우기**(사용자 요청 2026-11-11 — WA 법인 R640 엑셀에서 제조사 · 전원 · 스레드 · 펌웨어 · BIOS · iDRAC 칸이 비었다 · 결정 'A1~A14 · B1 · C1 · C2 모두'):
     원인은 엣지 축약 인벤토리(`collector/compactInv.js`)가 iDRAC 이 수집한 값 일부를 중앙으로 보내지 않은 것이다(중앙 직접 수집 서버는 채워졌다).

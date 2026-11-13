@@ -260,7 +260,7 @@ function DanglingCard({ q, writableOf, op, busy, corpName }) {
   );
 }
 
-const HELD_SHORT = { 'corp-unread': '법인 vCenter 를 지금 못 읽음', 'bm-source-unread': '베어메탈 출처를 못 읽음', 'uuid-unread': 'VM 식별 키(instanceUuid)를 못 읽음',
+const HELD_SHORT = { 'corp-unread': '법인 vCenter 를 지금 못 읽음', 'bm-source-unread': '베어메탈 출처를 못 읽음', 'bm-collector-listed': '수집 서버가 보고 중 — 분류 목록에서만 빠짐', 'uuid-unread': 'VM 식별 키(instanceUuid)를 못 읽음',
   'snapshot-initial': '포탈 기동 직후 — 첫 수집 전', 'corp-pending': '법인 vCenter 첫 수집 대기', 'corp-disabled': '법인 vCenter 수집 꺼짐', 'corp-no-vms': '법인 VM 이 한 대도 없음',
   'uuid-partial': '일부 VM 의 식별 키(instanceUuid)를 못 읽음' };
 const HELD_TEXT = {
@@ -272,6 +272,7 @@ const HELD_TEXT = {
   'corp-unread': '그 법인 vCenter 를 지금 읽지 못해 이 키의 VM 이 정말 없는지 모릅니다 — 다시 읽히면 판정합니다',
   'bm-source-unread': 'iDRAC 등록부·OME·수집 서버·엣지 중 읽지 못한 출처가 있어 이 베어메탈이 정말 없는지 모릅니다 — 어느 출처에 있는지 알 수 없어 법인을 가리지 않고 보류합니다',
   'uuid-unread': '이 법인 vCenter 에서 VM 의 instanceUuid 를 하나도 읽지 못했습니다(REST 폴백 수집 등) — 이 키의 VM 이 정말 없는지 모릅니다. 다시 읽히면 판정합니다',
+  'bm-collector-listed': '수집 서버가 지금도 이 서버를 보고하지만 전력을 못 읽었거나 보고가 오래돼 서버 목록(분류)에서 빠졌습니다 — 없어진 것이 아니라 일괄 정리하지 않습니다. 수집 서버가 마지막으로 성공한 뒤 보류 시한(설정값)이 지나면 이 보류도 끝납니다(필요 없는 고정이면 행의 ‘고정 지우기’ 로 한 건씩 지웁니다)',
 };
 const SOURCE_TEXT = { 'idrac-registry': 'iDRAC 등록부를 읽지 못함', ome: 'OME 장비 목록을 아직 받지 못함', 'collector-registry': '수집 서버 등록부를 읽지 못함', collector: '수집 서버 목록을 아직 받지 못함', edge: '엣지 보고를 받지 못함', snapshot: '인벤토리 스냅샷 없음', 'fleet-keys': '베어메탈 출처 목록을 만들지 못함' };
 
@@ -386,6 +387,8 @@ function AliasPinsCard({ q, svcName, writableOf, op, busy, corpName }) {
  * 이름 규칙 둘 이상(다른 서비스)이 걸린 구성원(3차 반증 1) — 결과가 적용 순서에 달렸다. v2.894 에서 순서를 '등록 순' 에서 '접두·접미 > 포함 · 긴 값' 으로
  * 바꿨으므로 업그레이드 뒤 소속이 옮겨 간 구성원은 여기에 모두 있다. '이대로 고정' 은 지금 판정을 사람이 확인한 것으로 남긴다.
  */
+/** 겹친 규칙 글자 — 'scan:DB' → '스캔 라벨 DB' · 'name:prefix:db' → '이름 규칙 prefix:db' · 그 밖(이름 규칙끼리 'prefix:db')은 그대로. */
+const overlapText = (s) => (String(s).startsWith('scan:') ? `스캔 라벨 ${String(s).slice(5)}` : String(s).startsWith('name:') ? `이름 규칙 ${String(s).slice(5)}` : String(s));
 function RuleOverlapCard({ q, svcName, writableOf, op, busy, corpName }) {
   const items = q.ruleOverlap?.items || [];
   const n = q.ruleOverlap?.n || 0;
@@ -393,15 +396,15 @@ function RuleOverlapCard({ q, svcName, writableOf, op, busy, corpName }) {
   return (
     <div className="card" style={{ minWidth: 0 }}>
       <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-        <b>이름 규칙이 겹침</b><span className="muted" style={{ fontSize: 12 }}>{n}대 · 다른 서비스로 가는 이름 규칙도 걸립니다 — 적용 순서(접두·접미 &gt; 포함 · 긴 값)로 정했습니다. 맞으면 ‘이대로 고정’, 아니면 규칙을 고치거나 ‘한 대씩 고정’</span>
+        <b>규칙이 겹침</b><span className="muted" style={{ fontSize: 12 }}>{n}대 · 다른 서비스로 가는 규칙도 걸립니다 — 이름 규칙끼리는 적용 순서(접두·접미 &gt; 포함 · 긴 값), 물리서버 폴더 규칙은 스캔 라벨 · 이름 규칙보다 먼저입니다. 맞으면 ‘이대로 고정’, 아니면 규칙을 고치거나 ‘한 대씩 고정’</span>
       </div>
       <STable className="table svcinv-t" minWidth={640}>
         <thead><tr><th>구성원 · 법인</th><th>지금 판정(이긴 규칙)</th><th>함께 걸린 규칙</th><th data-nosort>조치</th></tr></thead>
         <tbody>{items.map((x) => (
           <tr key={x.key}>
             <td data-sort={x.name}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)} · {x.kind === 'vm' ? 'VM' : '베어메탈'}</div></td>
-            <td>{svcName(x.serviceId)}<div className="svcinv-sub" style={{ fontFamily: 'var(--mono)' }}>{x.via}</div></td>
-            <td style={{ whiteSpace: 'normal', fontSize: 12, fontFamily: 'var(--mono)' }}>{(x.others || []).join(', ')}</td>
+            <td>{svcName(x.serviceId)}<div className="svcinv-sub" style={{ fontFamily: 'var(--mono)' }}>{x.src === 'bmfolder' ? `물리서버 폴더 ${String(x.via || '').split('\\').join(' › ')}` : x.via}</div></td>
+            <td style={{ whiteSpace: 'normal', fontSize: 12, fontFamily: 'var(--mono)' }}>{(x.others || []).map(overlapText).join(', ')}</td>
             <td>{writableOf(x.corp) ? <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.set', corp: x.corp, keys: [x.key], serviceId: x.serviceId }, `${x.name} 을(를) ‘${svcName(x.serviceId)}’ 에 고정했습니다.`)}>이대로 고정</button> : <span className="muted">조회 전용</span>}</td>
           </tr>
         ))}</tbody>
@@ -442,6 +445,44 @@ function RedundantCard({ q, svcName, writableOf, op, busy, corpName }) {
   );
 }
 
+/**
+ * v2.987 물리서버 폴더 규칙 추가 — 폴더 · 서비스를 고르면 **먼저 미리보기**(그 폴더 베어메탈이 지금 어느 서비스에 있는지 · 고정 여부)를 보이고 사람이 확인해 만든다.
+ * 늦게 온 미리보기 응답은 버린다(그 사이 다른 폴더를 골랐으면).
+ */
+function BmRuleAdd({ corp, folders, svcs, nameOf, op, busy, onDone }) {
+  const [v, setV] = useState({ prefix: '', svc: '' });
+  const [pv, setPv] = useState(null);
+  const [pvErr, setPvErr] = useState('');
+  const asked = useRef('');
+  useEffect(() => {
+    setPv(null); setPvErr('');
+    if (!v.prefix) return;
+    const k = `${corp}|${v.prefix}`; asked.current = k;
+    postJson('/tools/svc-inventory/op', { op: 'bmrule.add', corp, prefix: v.prefix, dry: true })
+      .then((r) => { if (asked.current === k) { if (r?.ok) setPv(r.result); else setPvErr(r?.reason || '미리보기를 받지 못했습니다.'); } })
+      .catch((e) => { if (asked.current === k) setPvErr(opErrorText(e)); });
+  }, [corp, v.prefix]);
+  const moving = pv ? pv.from.filter((x) => !x.pinned && x.serviceId !== v.svc).reduce((s, x) => s + x.n, 0) : 0;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div className="flex wrap gap" style={{ alignItems: 'center' }}>
+        <span className="muted" style={{ fontSize: 12 }}>물리서버 폴더 규칙</span>
+        <Select className="select" value={v.prefix} onChange={(e) => setV({ ...v, prefix: e.target.value })} style={{ maxWidth: 260 }} aria-label="물리서버 폴더"><option value="">폴더 선택…</option>{folders.map((p) => <option key={p} value={p}>{String(p).split('\\').join(' › ')}</option>)}</Select>
+        <Select className="select" value={v.svc} onChange={(e) => setV({ ...v, svc: e.target.value })} style={{ maxWidth: 200 }} aria-label="서비스"><option value="">서비스 선택…</option>{svcs.map((s) => <option key={s.id} value={s.id}>{svcLabel(s)}</option>)}</Select>
+        <button type="button" className="login-btn" style={btn} disabled={busy || !v.prefix || !v.svc || !pv} onClick={async () => { const r = await op({ op: 'bmrule.add', corp, prefix: v.prefix, serviceId: v.svc }, `물리서버 폴더 규칙 ‘${String(v.prefix).split('\\').join(' › ')}’ 을 만들었습니다.`); if (r) onDone(); }}>추가</button>
+        <button type="button" className="logout-btn" style={btn} onClick={onDone}>취소</button>
+      </div>
+      {pvErr ? <div style={{ fontSize: 12, color: 'var(--red)' }}>{pvErr}</div> : null}
+      {pv ? (
+        <div className="muted" style={{ fontSize: 12 }}>
+          이 폴더(하위 포함) 베어메탈 <b>{pv.members}</b>대{pv.from.length ? ` — 지금: ${pv.from.map((x) => `${x.serviceId ? nameOf(x.serviceId) : '(미지정)'}${x.pinned ? '(고정)' : ''} ${x.n}`).join(' · ')}` : ''}{pv.kept ? ` · 하위 폴더 규칙이 잡고 있어 그대로 ${pv.kept}` : ''}.
+          {v.svc && moving ? <> 만들면 <b>{moving}</b>대가 ‘{nameOf(v.svc)}’ 로 옮겨 갑니다(고정한 서버는 그대로 · 고정과 달라지면 드리프트).</> : null}
+        </div>
+      ) : v.prefix && !pvErr ? <div className="muted" style={{ fontSize: 12 }}>미리보기를 받는 중…</div> : null}
+    </div>
+  );
+}
+
 /** 소속 규칙 탭 — 판정 순서 + 이 법인의 규칙·별칭·이름 규칙 · 태그 켜기 · (전체 범위 관리자) 태그 카테고리. */
 export function RulesView({ corp, corpRow, servicesOf, writable, op, busy, canFleet, tagCategory, corpName }) {
   const [f, setF] = useState({ prefix: '', svc: '', match: 'prefix', nv: '', nsvc: '', cat: tagCategory || '' });
@@ -474,6 +515,7 @@ export function RulesView({ corp, corpRow, servicesOf, writable, op, busy, canFl
   const ORDER = [
     ['고정(수동)', '한 대씩 추가한 지정. 자동 판정과 다르면 드리프트로 검토 탭에 오릅니다.'],
     ['vCenter 폴더 규칙(VM 1순위)', '정확한 vSphere 위치(‘/ERP/prod’ 꼴)의 ‘/’ 경계 접두 · 가장 긴 접두가 이깁니다 · 대소문자를 구분합니다(vSphere 폴더 이름이 구분하므로 ‘/ERP’ 와 ‘/erp’ 는 다른 폴더). 매 수집 주기로 반영됩니다.'],
+    ['물리서버 폴더 규칙(베어메탈 1순위)', '특수 기능 › 물리서버 폴더의 경로(하위 폴더 포함 · 가장 긴 경로가 이깁니다). VM 의 vCenter 폴더 규칙과 같은 자리이고 스캔 라벨 · 이름 규칙보다 먼저입니다 — 다른 서비스로 가는 스캔 라벨 · 이름 규칙도 걸리면 검토 탭(규칙 겹침)에 오릅니다.'],
     ['스캔 엔트리 라벨(베어메탈)', 'iDRAC 스캔 엔트리의 서비스 라벨 = 서비스명 또는 별칭.'],
     ['vSphere 태그(선택)', '전역 카테고리를 정하고 법인이 켰을 때만. 태그가 여럿이면 서비스(이름·별칭)에 걸리는 값을 고르고, 둘 이상의 서비스에 걸리면 검토 탭에 올립니다. 태그를 못 읽은 VM 은 ‘확인 안 됨’ 입니다.'],
     ['이름 규칙(선택)', '접두·접미·포함 3종(정규식 아님). 적용 순서는 등록 순이 아닙니다 — 접두·접미가 포함보다 먼저, 같은 종류면 긴 값 먼저, 그다음 등록 순(규칙 표의 ‘N번째’). 대소문자는 구분하지 않습니다.'],
@@ -505,6 +547,7 @@ export function RulesView({ corp, corpRow, servicesOf, writable, op, busy, canFl
             <STable className="table" minWidth={560}>
               <thead><tr><th>종류</th><th>값</th><th>→ 서비스</th><th data-nosort /></tr></thead>
               <tbody>
+                {(corpRow?.bmFolderRules || []).map((r) => <tr key={`b${r.prefix}`}><td>물리서버 폴더</td><td>{String(r.prefix).split('\\').join(' › ')}</td>{ruleCells(`b${r.prefix}`, r.serviceId, { op: 'bmrule.remove', corp, prefix: r.prefix }, `물리서버 폴더 규칙 ‘${String(r.prefix).split('\\').join(' › ')}’`)}</tr>)}
                 {(corpRow?.folderRules || []).map((r) => <tr key={`f${r.prefix}`}><td>폴더 접두</td><td style={{ fontFamily: 'var(--mono)' }}>{r.prefix}</td>{ruleCells(`f${r.prefix}`, r.serviceId, { op: 'rule.remove', corp, prefix: r.prefix }, `폴더 규칙 ‘${r.prefix}’`)}</tr>)}
                 {(corpRow?.aliases || []).map((a) => <tr key={`a${a.kind}${a.value}`}><td>{a.kind === 'scan' ? '스캔 라벨 별칭' : '태그 별칭'}</td><td style={{ fontFamily: 'var(--mono)' }}>{a.value}</td>{ruleCells(`a${a.kind}${a.value}`, a.serviceId, { op: 'alias.remove', corp, kind: a.kind, value: a.value }, `별칭 ‘${a.value}’`)}</tr>)}
                 {(corpRow?.nameRules || []).map((r) => <tr key={`n${r.match}${r.value}`}><td>이름 {r.match === 'prefix' ? '접두' : r.match === 'suffix' ? '접미' : '포함'}{r.order ? <span className="badge gray" style={{ marginLeft: 4 }} title="이름 규칙 적용 순서 — 접두·접미가 포함보다 먼저, 같은 종류면 긴 값 먼저, 그다음 등록 순">{r.order}번째</span> : null}</td><td style={{ fontFamily: 'var(--mono)' }}>{r.value}</td>{ruleCells(`n${r.match}${r.value}`, r.serviceId, { op: 'namerule.remove', corp, match: r.match, value: r.value }, `이름 규칙 ‘${r.value}’`)}</tr>)}
@@ -516,6 +559,7 @@ export function RulesView({ corp, corpRow, servicesOf, writable, op, busy, canFl
                   <div className="flex wrap gap">
                     <button type="button" className="logout-btn" style={btn} disabled={!svcs.length} title={svcs.length ? undefined : '먼저 이 법인에 서비스를 만드십시오'} onClick={() => setAdding('folder')}>＋ 폴더 규칙</button>
                     <button type="button" className="logout-btn" style={btn} disabled={!svcs.length} title={svcs.length ? undefined : '먼저 이 법인에 서비스를 만드십시오'} onClick={() => setAdding('name')}>＋ 이름 규칙</button>
+                    <button type="button" className="logout-btn" style={btn} disabled={!svcs.length || !(corpRow?.bmFolders || []).length} title={!(corpRow?.bmFolders || []).length ? '이 법인에 물리서버 폴더가 없습니다(특수 기능 › 물리서버 폴더)' : svcs.length ? undefined : '먼저 이 법인에 서비스를 만드십시오'} onClick={() => setAdding('bm')}>＋ 물리서버 폴더 규칙</button>
                   </div>
                 ) : null}
                 {adding === 'folder' ? (
@@ -527,6 +571,7 @@ export function RulesView({ corp, corpRow, servicesOf, writable, op, busy, canFl
                     <button type="button" className="logout-btn" style={btn} onClick={closeAdd}>취소</button>
                   </div>
                 ) : null}
+                {adding === 'bm' ? <BmRuleAdd corp={corp} folders={corpRow?.bmFolders || []} svcs={svcs} nameOf={nameOf} op={op} busy={busy} onDone={closeAdd} /> : null}
                 {adding === 'name' ? (
                   <div className="flex wrap gap" style={{ alignItems: 'center' }}>
                     <span className="muted" style={{ fontSize: 12 }}>이름 규칙</span>

@@ -29,7 +29,7 @@ function emptyStat() {
     alloc: { vcpu: 0, vmMemGB: 0, storageGB: 0, storageUnknown: 0, bmCores: 0, bmMemGB: 0, bmCapUnknown: 0 },
     faults: { member: 0, memberUnknown: 0, host: 0, hostUnknown: 0 },
     backup: { ok: 0, fail: 0, none: 0, unknown: 0, na: 0 },
-    src: { pin: 0, folder: 0, scan: 0, tag: 0, rule: 0, none: 0 }, drift: 0, unchecked: 0,
+    src: { pin: 0, folder: 0, bmfolder: 0, scan: 0, tag: 0, rule: 0, none: 0 }, drift: 0, unchecked: 0,
     byName: { scan: 0, tag: 0 },   // 서비스 이름 그대로(별칭 아님)로 걸린 스캔 라벨·태그 값 — 개명하면 끊기는 대수(5차 반증 R3)
     hosts: new Set(),
   };
@@ -75,11 +75,13 @@ function finishStat(st, hostByKey) {
 /**
  * 전부 한 번에 — 판정은 구성원당 1회(결과 Map 을 표·큐·전역이 공유 — 4차 반증 9).
  * @param {{members:object[], map:object, pins:object, hostByKey:Map, allowed:Set|null, unreadCorps:Set, bmBlocked:boolean,
- *          corpNames:Map, scanEntries?:Map, adminView?:boolean}} input
+ *          corpNames:Map, scanEntries?:Map, adminView?:boolean, queueMembers?:object[]|null}} input
+ *   queueMembers — members 와 같은 구성원을 큐에 실을 순서로 준 것(없으면 members 순서). 판정 · 집계에는 쓰지 않는다.
  */
-export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null } = {}) {
+export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, bmHeldKeys = null, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null, bmFolderOf = null, queueMembers = null } = {}) {
   const idx = buildIndex(map);
-  const ctx = { tagCategory: map?.settings?.tagCategory || '' };
+  // bmFolderOf(v2.987): 베어메탈 키 → 물리서버 폴더 경로(미분류 '' · 모름 undefined). 없으면(null) 물리서버 폴더 규칙을 건너뛴다.
+  const ctx = { tagCategory: map?.settings?.tagCategory || '', bmFolderOf };
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
   const resolved = new Map();          // key → r (전 구성원 — 유령 판정은 범위와 무관한 전체 집합으로)
   for (const m of members) resolved.set(m.key, resolveMember(m, idx, ctx, pins));
@@ -107,6 +109,7 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
       vcenterId: vc, name: corpNames.get(vc) || vc, folders: c.folders, tagEnabled: !!c.tagEnabled,
       // 이름 규칙은 **적용 순서대로** 싣고 순번을 붙인다(5차 M4 — 화면이 순서를 다시 계산하지 않게 · 판정 코어는 resolve.js 하나)
       folderRules: c.folderRules, aliases: c.aliases, nameRules: sortNameRules(c.nameRules || []).map((r, i) => ({ ...r, order: i + 1 })),
+      bmFolderRules: c.bmFolderRules || [],
       unassigned: unStat.has(vc) ? finishStat(unStat.get(vc), hostByKey) : null,
       stale: unreadCorps.has(vc),
       // 등록 해제된 vCenter — 저장소에만 남은 법인 항목(5차 반증 R2). knownCorps 가 null(스냅샷 vCenter 0개 — 기동 직후 등)이면 판단하지 않는다.
@@ -146,7 +149,9 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
   const unlinked = services.filter((s) => !s.globalId || !globalById.has(s.globalId))
     .map((s) => ({ id: s.id, corp: s.corp, name: s.name, suggest: globalNames.get(lc(s.name)) || null, n: s.stat.n.total }));
 
-  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members, resolved, pins, allowed, unreadCorps, bmBlocked, uuidUnreadCorps, corpHold, snapInitial, idx, scanEntries, adminView, knownCorps }) };
+  // queueMembers(v2.990): **같은 구성원**을 큐에 실을 순서로(가린 판본 — 보이는 이름 → 보이는 키). 큐 순회는 구성원마다 독립이라 순서 · 표본(앞 N건)만 달라진다.
+  //   판정(resolved) · 집계는 위에서 members 순서 그대로 끝냈다 — 판본마다 판정이 달라지지 않는다.
+  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members: queueMembers || members, resolved, pins, allowed, unreadCorps, bmBlocked, bmHeldKeys, uuidUnreadCorps, corpHold, snapInitial, idx, scanEntries, adminView, knownCorps }) };
 }
 
 /**
@@ -154,7 +159,7 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
  * ⚠ 유령 판정은 **읽지 못한 출처를 막는다**(4차 반증 5): 그 법인 vCenter 를 지금 못 읽거나(unreadCorps) 베어메탈 출처를 못 읽으면
  *   (bmBlocked — 등록부 손상·엣지 만료 등) 그 고정은 유령이 아니라 '판정 보류' 다. v2.783 P-B3 와 같은 사고 유형.
  */
-export function buildQueues({ members = [], resolved, pins = {}, allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, idx, scanEntries = new Map(), adminView = true, knownCorps = null }) {
+export function buildQueues({ members = [], resolved, pins = {}, allowed = null, unreadCorps = new Set(), bmBlocked = false, bmHeldKeys = null, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, idx, scanEntries = new Map(), adminView = true, knownCorps = null }) {
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
   const groups = new Map();
   const unmapped = new Map();
@@ -202,7 +207,8 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
       }
     }
     // 이름 규칙 둘 이상(다른 서비스)이 걸림 — 결과가 적용 순서에 달렸다(3차 반증 1: 순서를 바꾼 업그레이드에서 조용히 옮겨 간 구성원).
-    if (r.src === 'rule' && r.ruleOverlap) ruleOverlap.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.via, others: r.ruleOverlap });
+    // v2.987: 물리서버 폴더 규칙으로 정해졌는데 스캔 라벨 · 이름 규칙이 다른 서비스를 가리키는 베어메탈도 같은 큐(src 'bmfolder' · others 'scan:…' · 'name:…')
+    if ((r.src === 'rule' || r.src === 'bmfolder') && r.ruleOverlap) ruleOverlap.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.via, src: r.src, others: r.ruleOverlap });
     if (r.serviceId) continue;
     let gk; let kind; let value = '';
     if (!m.corp) {   // 이유별로 나눈다(5차 R18 둘째 절) — 귀속 판정 실패 · 서비스 태그가 두 법인에 걸림 · 어느 규칙에도 맞지 않음
@@ -262,7 +268,7 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     //   **VM 이 한 대도 없는데 VM 고정이 있는** 법인은 판정 보류다(일괄 정리하지 않는다 — 보류 행의 '고정 지우기'(pins.clear)로 한 건씩 지울 수 있다).
     const why = snapInitial ? 'snapshot-initial'
       : unreadCorps.has(p.corp) ? 'corp-unread'
-        : corpHold.get(p.corp) || (isVm && !vmCorps.has(p.corp) ? 'corp-no-vms' : isBm && bmBlocked ? 'bm-source-unread' : uuidUnread ? 'uuid-unread'
+        : corpHold.get(p.corp) || (isVm && !vmCorps.has(p.corp) ? 'corp-no-vms' : isBm && bmBlocked ? 'bm-source-unread' : isBm && bmHeldKeys?.has?.(k) ? 'bm-collector-listed' : uuidUnread ? 'uuid-unread'
           : k.startsWith('iu:') && morefCorps.has(p.corp) ? 'uuid-partial' : '');
     (why ? held : ghosts).push({ key: k, serviceId: p.serviceId, serviceName: svcName, corp: p.corp, by: p.by, at: p.at, ...(why ? { held: why } : {}) });
   }

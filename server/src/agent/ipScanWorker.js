@@ -180,6 +180,9 @@ export async function runIpScanAgentOnce(...args) {
       scanOut = await runScan({
         ranges: a.ranges, ports: a.ports, concurrency: a.concurrency, timeoutMs: a.timeoutMs, reverseDns: a.reverseDns,
         ping: a.ping, // 중앙 배정 설정(v2.359) — 구버전 중앙이면 undefined → 기본 OFF(v2.360)
+        // v2.991 호스트명 확인(mDNS · NetBIOS) — 사용자 결정 '기본 켜짐'. 구버전 중앙(키 없음)도 켜짐이다 — 옛 중앙은 더 보낸 칸을
+        //   정제에서 버리고 표시 이름(hostname)만 받는다(그 이름이 NetBIOS 에서 왔어도 hostname 칸의 뜻은 같다).
+        mdns: a.mdns !== false, netbios: a.netbios !== false,
       });
     } catch (se) { scanErr = se; } finally { _lastScanAt = Date.now(); saveLastScanAt(_lastScanAt); journalScanFinished('ipscan-agent', 'scan'); }
     if (scanErr) {
@@ -187,10 +190,10 @@ export async function runIpScanAgentOnce(...args) {
       if (scanErr && typeof scanErr === 'object') scanErr.incompleteReport = await reportScanIncomplete(scanErr, _lastScanAt - scanStarted);
       throw scanErr;
     }
-    const { alive, scanned } = scanOut;
+    const { alive, scanned, nameStats } = scanOut;
     phase = 'report';
     const rRes = await resilientFetch(`${config.agent.centralUrl}/api/central/ip-scan-result`, {
-      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive, scanned }), timeoutMs: 30_000, retries: 2,
+      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, alive, scanned, ...(nameStats ? { nameStats } : {}) }), timeoutMs: 30_000, retries: 2,
     });
     // 결과 POST 응답을 검사한다 — 검사하지 않으면 403/거부(토큰 만료·에이전트명 불일치)도
     // '성공 보고'로 기록돼, 실제로는 중앙에 병합되지 않은 스캔을 정상으로 오인한다.
@@ -198,7 +201,7 @@ export async function runIpScanAgentOnce(...args) {
     // v2.607(감사 EDGE2607-02): 200 이어도 중앙은 전체 상한(capped)·형식 오류(dropped)·절단(omitted)으로 일부를 받지 않을 수 있다 —
     //   예전에는 r.ok 만 보고 '성공 alive N' 으로 적어, 중앙 IP 대장에 없는데 엣지 로그 화면은 성공이었다(v2.606 EDGE2606-03 의 형제 누락).
     const drop = ipScanDropOf(await readCentralReply(rRes));
-    last = { at: Date.now(), assigned: true, scanned, alive: alive.length, ...(drop ? { centralDropped: drop } : {}) };
+    last = { at: Date.now(), assigned: true, scanned, alive: alive.length, ...(Number.isFinite(nameStats?.named) ? { named: nameStats.named } : {}), ...(drop ? { centralDropped: drop } : {}) };
     _lastScanRecord = last;
     warnDrop('ipscan-agent', drop);
     return last;

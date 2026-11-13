@@ -15,7 +15,7 @@ import { loadRegistry as loadIdracRegistry } from '../idrac/registry.js';
 import { getInventory as getIdracInventory } from '../idrac/invCache.js';
 import { loadCollectors } from '../collector/registry.js';
 import { allRemoteServers, dedupRemoteServers } from '../collector/remoteInventory.js';
-import { matchDatacenterId } from '../collector/datacenterMatch.js';
+import { matchDatacenterId, resolvePickedDc } from '../collector/datacenterMatch.js';
 import { serverInScope } from './analysisScope.js';
 import { listDatacenters, getDatacenterAssign, ensureDatacenter } from '../datacenter/store.js';
 import { listScanRanges } from '../idrac/scanRanges.js';
@@ -90,11 +90,11 @@ export function collectorToDatacenterMap() { return collectorDcMaps().map; }
  */
 export function collectorDcMaps() {
   const dcs = listDatacenters();
-  const ids = new Set(dcs.map((d) => String(d.id)));
+  // P5(v2.985): 실제 법인 id 로(정확 일치 → 대소문자 무시 — collector/datacenterMatch.js resolvePickedDc 하나, 반증 D2).
   const map = new Map(); const manual = new Map();
   for (const c of loadCollectors()) {
-    const picked = String(c.datacenterId || '').trim().toLowerCase();
-    if (picked && ids.has(picked)) { map.set(String(c.id), picked); manual.set(String(c.id), picked); continue; }
+    const picked = resolvePickedDc(c.datacenterId, dcs);
+    if (picked) { map.set(String(c.id), picked); manual.set(String(c.id), picked); continue; }
     map.set(String(c.id), matchDatacenterId([c.datacenter, c.id, c.name], dcs));
   }
   return { map, manual };
@@ -162,9 +162,18 @@ export function invForServer(s) {
 
 // 수집 서버의 데이터센터(라벨/ id)를 DataCenter로 자동 등록 — '스캔 대역 추가' 등 DataCenter
 // 목록에 바로 뜨게 한다(수집 서버만 있고 법인 미등록이면 스캔 대상에 안 보이던 문제 해결).
+// P6(v2.985 — 재현): 이미 그 수집 서버의 법인이 정해졌으면 새 법인을 만들지 않는다. 예전에는 라벨 'Seoul' 이 기존 법인
+//   'dc-seoul'(이름 'Seoul 법인')과 id 가 달라 'Seoul' 법인을 하나 더 만들어 법인 목록에 둘이 나란히 보였다(목 데이터에서 발견 —
+//   운영도 라벨이 기존 법인의 id 와 다르면 같다). 건너뛰는 경우: ① 사용자가 매칭한 법인(collector.datacenterId)이 지금 목록에 있다
+//   ② 라벨 · id · 이름이 기존 법인의 id 또는 **이름**과 맞는다(collector/datacenterMatch.js — 판정과 같은 규칙).
 export function ensureCollectorDatacenter(c) {
   if (!c) return;
+  const dcs = listDatacenters();
+  const picked = String(c.datacenterId || '').trim().toLowerCase();
+  if (picked && dcs.some((d) => String(d.id).toLowerCase() === picked)) return;
+  // 반증 D1: 라벨이 있으면 **라벨만** 본다 — id · 이름이 우연히 다른 법인과 같아 라벨이 밝힌 새 법인을 막지 않게(IP 관리 dcIdOf 도 라벨만 본다).
   const label = String(c.datacenter || '').trim();
+  if (matchDatacenterId(label ? [label] : [c.id, c.name], dcs)) return;
   const id = (label || c.id || '').toString();
   if (id) ensureDatacenter({ id, name: label || c.name || c.id });
 }

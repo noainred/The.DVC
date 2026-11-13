@@ -51,7 +51,7 @@
 - **프로세스 세부 정보(v2.981)** — 원문은 `docs/rules/focusmon.md`(v2.982 에 상한 때문에 옮김). 요지: PROC 줄 14칸(옛 6칸도 읽는다) · `##UNIT`(30초 · 경로의 **첫** .service/.scope) ·
   `##IO`(그 계정 · root 만 · 못 읽으면 null) · io · cgroup 읽기는 `timeout -s KILL` · pid 는 `grep -H` 파일 경로에서 · 부트 줄은 `grep -c nodelayacct` 개수만 ·
   `query.procDetail` 은 pid + 시작 tick · 상위 30 밖 · 못 읽음은 null(0 아님) · 서버 전체 네트워크는 참고 · 라우트 admin + 전체 범위 · 사용자 이름은 관리자 판본만.
-- **서버 그룹(v2.982)** — 원문은 `docs/rules/focusmon.md`(v2.984 에 상한 때문에 줄임). 요지: 서버마다 그룹 하나 · `GROUP_RE` 1~32자(웹과 대조) · 대소문자 무시로 하나 · 상한 50 ·
+- **서버 그룹(v2.982)** — 원문은 `docs/rules/focusmon.md`(v2.992 에 상한 때문에 줄임). 요지: 서버마다 그룹 하나 · `GROUP_RE` 1~32자(웹과 대조) · 대소문자 무시로 하나 · 상한 50 ·
   쓰기 넷은 수집 시작과 같은 문 + 503 + 감사 · **CSV 그룹 열이 없으면 그대로** · 데모 계정에 등록부 그룹 이름 없음 · 그룹 색 없음.
 - **수집 부하(v2.983 — 사용자 '엣지노드와 수집 대상 서버에 부하를 얼마나 주는지 · 수집 방법에 따른 분석' · 시안 ⑪ §17 · '구현해줘' + 구획 비용 '늘 잼 · 세 묶음')** — 회귀
   `server/test/focusMonLoad2983.test.js` · `web/src/views/tools/focusMonLoad.test.js` · 상세 `docs/rules/focusmon.md`. 원격은 여전히 **상수**(주기 × 프로세스 표본 주기 5 · 15 · 30 = 12개 `SCRIPT_TABLE`) ·
@@ -62,5 +62,5 @@
   반증 1인 13건 반영(변이 46/46): ck 실패면 c 줄 없음(`CKBAD` · 서버도 묶음 합 0 이면 null) · **수집기가 있을 때만 노드 표본**(쉬는 노드에 측정기 · DB 쓰기 0) ·
   엣지 노드 표본은 바뀐 것만 · 맡은 서버 · 수집기 있는 엣지만 · 'l'/'n' 은 (종류, 열쇠, 분) 한 줄 · '지연 p99'(해상도 20ms 가 값이 됐다) 대신 루프 사용률 · 가장 긴 멈춤 ·
   표본 주기 변경은 수집 중인 세션만 다시 연다(물러남 · 정지 대기를 건너뛰지 않는다) · 끝난 수집의 묵은 창은 최근 구간에 없다.
-- **카드 아래 줄 고르기(v2.984 — 사용자 '빨간 부분을 선택해서 볼 수 있게 · Disk write/read · Network in/out · disk wait 등')** — `rates.summaryOf` 에 rMB · wMB · rIo · wIo · qu(물리 디스크 합) ·
-  iow · stl · load1 · cores · swU · swT(**이미 저장된 열에서** — 새 열 없음 · 못 읽음 null) · 웹 `CARD_LINE_ITEMS`(최대 4 · 기본 네트워크 + 쓰기 지연 · `fm.ov.line`) · 회귀 `focusMonCard2984` · web `focusMonCard`.
+- **카드 아래 줄 고르기(v2.992 — 사용자 '빨간 부분을 선택해서 볼 수 있게 · Disk write/read · Network in/out · disk wait 등')** — `rates.summaryOf` 에 rMB · wMB · rIo · wIo · qu(물리 디스크 합) ·
+  iow · stl · load1 · cores · swU · swT(**이미 저장된 열에서** — 새 열 없음 · 못 읽음 null) · 웹 `CARD_LINE_ITEMS`(최대 4 · 기본 네트워크 + 쓰기 지연 · `fm.ov.line`) · 회귀 `focusMonCard2992` · web `focusMonCard`.

@@ -236,14 +236,16 @@ export function hwCorpContext(snap) {
   let index = { byId: new Map(), byTag: new Map() };
   try { index = buildDcIndex(analysisServersWithRemote(null), dcOfVc); } catch { /* 색인을 못 만들면 vCenter 할당만으로(더 많은 서버가 미지정 — 지어내지 않는다) */ }
   // 엣지 보고 행의 에이전트 → 법인(수집 서버 id · 이름, 대소문자 무시 — analysisServers.scanSiteIndex 의 agentDc 와 같은 맞춤)
-  let agentDc = () => '';
+  let agentDc = () => ''; let collectorIds = [];
   try {
-    const byCollector = collectorToDatacenterMap();
+    const byCollector = collectorToDatacenterMap();   // 사용자 매칭 → 이름 맞춤(analysisServers.collectorDcMaps 하나)
+    const cols = loadCollectors();
+    collectorIds = cols.map((c) => String(c?.id || '')).filter(Boolean);   // v2.985(P2 · 반증 D4): remote:<수집 서버>:… 최장 일치용
     const lower = new Map([...byCollector].map(([k, v]) => [String(k).toLowerCase(), v]));
-    for (const c of loadCollectors()) { const n = String(c?.name || '').toLowerCase(); if (n && !lower.has(n)) lower.set(n, byCollector.get(String(c.id)) || ''); }
+    for (const c of cols) { const n = String(c?.name || '').toLowerCase(); if (n && !lower.has(n)) lower.set(n, byCollector.get(String(c.id)) || ''); }
     agentDc = (a) => byCollector.get(a) || lower.get(String(a).toLowerCase()) || '';
   } catch { /* 수집 서버 등록부를 못 읽으면 에이전트 귀속 없이 */ }
-  const corpOf = makeCorpOf({ index, dcOfVc, dcName: (id) => dcNames.get(id) || '', vcName: (id) => vcNames.get(id) || '', agentDc });
+  const corpOf = makeCorpOf({ index, dcOfVc, dcName: (id) => dcNames.get(id) || '', vcName: (id) => vcNames.get(id) || '', agentDc, collectorIds });
   return { corpOf, dcOrder: dcs.map((d) => String(d.id)), dcOfVc, datacenters: dcs.map((d) => ({ id: String(d.id), name: String(d.name || d.id) })) };
 }
 /** v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정 · 이름 라벨) 서명 — 매칭을 바꾸면 법인 판정 캐시 키가 바뀌게. */

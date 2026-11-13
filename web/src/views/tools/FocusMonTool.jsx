@@ -190,7 +190,7 @@ function TimeBar({ tb, now, coverage, oldestMinute }) {
 
 /* ── 개요 ─────────────────────────────────────────────────────────────────── */
 /**
- * v2.984 카드 아래 줄 고르기 — 체크 목록(최대 CARD_LINE_MAX · 고른 순서대로 두 개씩 줄바꿈). 바깥을 누르거나 Esc 면 닫힌다.
+ * v2.992 카드 아래 줄 고르기 — 체크 목록(최대 CARD_LINE_MAX · 고른 순서대로 두 개씩 줄바꿈). 바깥을 누르거나 Esc 면 닫힌다.
  * 마지막 하나는 끄지 못하고(빈 줄 방지) 넷을 고르면 나머지는 잠긴다 — 판정은 focusMonText.toggleCardLine 하나.
  */
 function CardLinePicker({ value, onChange }) {
@@ -232,7 +232,7 @@ function Overview({ main, ids, tb, now, onOpen }) {
   const [sort, setSort] = useState(() => lsGet('fm.sort', 'cpu'));
   const [node, setNode] = useState('all');
   const [split, setSplit] = useState(() => lsGet('fm.ov.split', 'flat'));
-  // v2.984 카드 아래 줄 — 사용자가 고른 값(최대 CARD_LINE_MAX · 브라우저가 기억)
+  // v2.992 카드 아래 줄 — 사용자가 고른 값(최대 CARD_LINE_MAX · 브라우저가 기억)
   const [line, setLineRaw] = useState(() => normCardLine(lsGet('fm.ov.line', null)));
   const setLine = (v) => { const x = normCardLine(v); setLineRaw(x); lsSet('fm.ov.line', x); };
   const params = useMemo(() => ({ view: 'overview', targets: ids.join(','), win: tb.win, end: tb.end ?? '' }), [ids, tb.win, tb.end]);

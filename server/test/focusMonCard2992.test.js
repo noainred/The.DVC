@@ -1,5 +1,5 @@
 /**
- * test/focusMonCard2984.test.js — v2.984 서버 집중 모니터링 개요 카드 아래 줄 고르기(사용자 2026-11-13 "빨간색 부분에 보이는 것들을 사용자가 선택해서 볼 수 있게 —
+ * test/focusMonCard2992.test.js — v2.992 서버 집중 모니터링 개요 카드 아래 줄 고르기(사용자 2026-11-13 "빨간색 부분에 보이는 것들을 사용자가 선택해서 볼 수 있게 —
  * Disk write/read, Network in/out, disk wait 등등의 값을 표시한 부분에 메뉴를 만들어서 선택해서 볼 수 있게").
  *  ① rates.summaryOf 의 새 칸: 디스크 읽기 · 쓰기(MB/s) · IOPS · 대기열(물리 디스크 합) · CPU I/O 대기 · steal · 부하 1분 · 코어 수 · 스왑 — 못 읽은 값은 null(0 아님)
  *  ② 저장된 묶음에서 다시 만든 표본(query.overview — 메모리 묶음)도 같은 칸을 낸다(새 열을 저장하지 않고 이미 있는 열 t.* · c.* · l.* · m.* 에서)
@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'focusmoncard2984-'));
+process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'focusmoncard2992-'));
 process.env.DATA_SOURCE = 'mock';
 const store = await import('../src/focusmon/store.js');
 const Q = await import('../src/focusmon/query.js');

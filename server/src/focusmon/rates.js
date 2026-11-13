@@ -284,7 +284,7 @@ export function summaryOf(s) {
     net: best?.u ?? null, netIf: best?.n ?? null, netRx: best?.rx ?? null, netTx: best?.tx ?? null,
     disk: busy ? busy.v[C.util] : null, diskDev: busy?.n ?? null,
     wAwait: s.dtot ? s.dtot[C.wAwait] : null, rAwait: s.dtot ? s.dtot[C.rAwait] : null,
-    // v2.984 카드 아래 줄을 사용자가 고른다(사용자 요청 '빨간 부분을 선택해서 볼 수 있게 — Disk write/read · Network in/out · disk wait 등') —
+    // v2.992 카드 아래 줄을 사용자가 고른다(사용자 요청 '빨간 부분을 선택해서 볼 수 있게 — Disk write/read · Network in/out · disk wait 등') —
     //   물리 디스크 합(aggregateIostat: 횟수 · 처리량 · 대기열은 합) · CPU I/O 대기 · steal · 부하 평균(1분) · 코어 수 · 스왑. 못 읽은 값은 null(0 아님).
     rMB: s.dtot ? s.dtot[C.rMB] : null, wMB: s.dtot ? s.dtot[C.wMB] : null, rIo: s.dtot ? s.dtot[C.r] : null, wIo: s.dtot ? s.dtot[C.w] : null, qu: s.dtot ? s.dtot[C.qu] : null,
     iow: s.cpu?.iow ?? null, stl: s.cpu?.stl ?? null,

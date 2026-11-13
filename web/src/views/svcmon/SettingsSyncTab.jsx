@@ -81,7 +81,9 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
   const [msg, setMsg] = useState('');
   const [result, setResult] = useState(null);
   const [autoKinds, setAutoKinds] = useState(null);
+  const [rp, setRp] = useState(null);   // v2.988 '법인 폴더로 정리' — { preview, result, busy, msg } · null = 닫힘
   const seq = useRef(0);
+  const rpSeq = useRef(0);   // v2.988(반증 R10): 닫은 뒤 늦게 온 미리보기 응답이 창을 다시 열지 않게
   const firstLoad = useRef(true);
 
   const load = useCallback(async () => {
@@ -155,6 +157,30 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
       setMsg(e.message);
     } finally { setBusy(false); }
   };
+  // v2.988 '법인 폴더로 정리' — 설정 연동이 놓은 자리에 그대로 있고 지금은 법인을 알 수 있는 연동 대상(행의 repath)만. 미리보기 → 옮기기.
+  const repathKeys = rows.filter((r) => r.repath).map((r) => r.key).slice(0, maxApply);
+  const openRepath = async () => {
+    const my = ++rpSeq.current;
+    setRp({ busy: true });
+    try {
+      const r = await postJson('/svcmon/settings-sync/repath', { keys: repathKeys });
+      if (r?.ok === false) throw new Error(r.error || '미리보기를 받지 못했습니다.');
+      if (my === rpSeq.current) setRp({ preview: r.preview });
+    } catch (e) { if (my === rpSeq.current) setRp({ msg: e.message }); }
+  };
+  const closeRepath = () => { rpSeq.current += 1; setRp(null); };
+  const doRepath = async () => {
+    const keys = (rp?.preview?.move || []).map((m) => m.key);
+    const my = ++rpSeq.current;
+    setRp((p) => ({ ...p, busy: true, msg: '' }));
+    try {
+      const r = await postJson('/svcmon/settings-sync/repath', { keys, mode: 'apply' });
+      if (r?.ok === false && !r.result) throw new Error(r.error || '옮기지 못했습니다.');
+      onApplied?.(r);
+      load();
+      if (my === rpSeq.current) setRp({ result: r });   // 창을 닫았어도 적용은 끝났다 — 목록은 다시 읽는다
+    } catch (e) { if (my === rpSeq.current) setRp((p) => ({ ...p, busy: false, msg: e.message })); }
+  };
   const saveAuto = async () => {
     setBusy(true); setMsg('');
     try { const r = requireChanged(await putJson('/svcmon/settings-sync/options', { autoKinds: [...(autoKinds || [])] }), '자동 등록 설정을 저장하지 못했습니다.'); setAutoKinds(new Set(r.options?.autoKinds || [])); setMsg('자동 등록 설정을 저장했습니다.'); }
@@ -181,6 +207,13 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
       </div>
 
       {err && <ErrorBox error={err} />}
+      {canEdit && repathKeys.length > 0 && (
+        <div className="tv-bulkbar" style={{ marginTop: 0 }}>
+          <b>{`법인 폴더로 옮길 수 있는 연동 대상 ${repathKeys.length}건`}{(c.repath || 0) > repathKeys.length ? ` (전체 ${c.repath}건 — 목록에 보이는 행만)` : ''}</b>
+          <span className="sub">설정 연동이 놓은 자리에 그대로 있고 지금은 법인을 알 수 있는 대상입니다 — 사람이 옮긴 대상 · 경로 기준 엣지 배정 대상은 건드리지 않습니다.</span>
+          <span className="btns"><button type="button" className="btn" disabled={busy || !!rp?.busy} onClick={openRepath}>법인 폴더로 정리…</button></span>
+        </div>
+      )}
 
       {!compact && (
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
@@ -311,6 +344,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
                       <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'normal', minWidth: 160 }}>
                         {r.reason || (r.targetId ? `대상 ${r.targetName || r.targetId}${r.targetEnabled === false ? ' · 중지' : ''}` : '')}
                         {r.agentNote && !r.reason ? r.agentNote : ''}
+                        {r.repath ? <div className="mono" title={r.repath}>{`→ 법인 폴더: ${r.repath}`}</div> : null}
                       </td>
                     </tr>
                   );
@@ -415,6 +449,58 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
                 {(result.assign || []).map((a) => (
                   <div key={a.agent} className="tv-note">{`엣지 ${a.agent}: ${a.ok ? `배정 동기화 ${a.targets}대상` : a.reason}`}</div>
                 ))}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {rp && (
+        <Modal title="법인 폴더로 정리" onClose={closeRepath} width={1000}>
+          <div className="tv-opts">
+            <div className="muted" style={{ fontSize: 12 }}>
+              등록할 때 법인을 몰라 ‘전역’ 같은 폴더에 들어간 연동 대상을 지금 아는 법인 폴더로 옮깁니다. 대상 · 점검 id 는 그대로라 이 포탈이 직접 재는 점검은 연속 횟수 · 만기 · 기록이 이어집니다.
+              담당 엣지가 있는 대상은 그 엣지 배정을 다시 굳힙니다 — 엣지는 점검을 다시 등록하므로 <b>엣지 쪽 연속 횟수는 새로 시작</b>하고, 실패 중인 점검은 경로가 바뀌어 다시 알릴 수 있습니다.
+              건너뜀: 경로 기준 배정 엣지가 맡는(옮기기 전이든 뒤든) 대상 · 옮길 폴더에 같은 이름의 대상이 있는 것 · 그사이 사람이 옮긴 것.
+              {rows.length < (data.total || 0) ? ` 목록이 잘려(${rows.length}/${data.total}) 보이는 행만 대상입니다.` : ''}
+            </div>
+            {rp.busy && !rp.preview && <Loading label="미리보기" />}
+            {rp.msg && <div className="svc-warn">{rp.msg}</div>}
+            {rp.preview && (
+              <>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="muted" style={{ fontSize: 12 }}>{`옮김 ${rp.preview.move.length} · 건너뜀 ${rp.preview.skip.length}`}</span>
+                  <button type="button" className="btn primary" style={{ marginLeft: 'auto' }} disabled={!!rp.busy || !rp.preview.move.length} onClick={doRepath}>
+                    {rp.busy ? '옮기는 중…' : `${rp.preview.move.length}건 옮기기`}
+                  </button>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <STable className="tv-table" minWidth={760} limit={300}>
+                    <thead><tr><th>결과</th><th>이름</th><th>지금 경로</th><th>옮길 경로 · 사유</th></tr></thead>
+                    <tbody>
+                      {rp.preview.move.map((m) => (
+                        <tr key={m.key}><td><span className="tv-pill ok">옮김</span></td><td>{m.name}</td><td className="mono">{m.from}</td><td className="mono">{m.to}</td></tr>
+                      ))}
+                      {rp.preview.skip.map((x, i) => (
+                        <tr key={`s${i}`}><td><span className="tv-pill ex">건너뜀</span></td><td>{x.name || x.key}</td><td className="mono">—</td><td className="muted" style={{ whiteSpace: 'normal' }}>{x.reason}</td></tr>
+                      ))}
+                      {!rp.preview.move.length && !rp.preview.skip.length && <tr><td colSpan={4} className="tv-empty">옮길 대상이 없습니다.</td></tr>}
+                    </tbody>
+                  </STable>
+                </div>
+              </>
+            )}
+            {rp.result && (
+              <div className="tv-w">
+                <div className="tv-wh">정리 결과<em>repath</em></div>
+                <div className="tv-note">
+                  {`옮김 ${(rp.result.result?.moved || []).length} · 건너뜀 ${(rp.result.result?.skip || []).length}`}
+                  {(rp.result.result?.errors || []).length ? ` · 실패 ${rp.result.result.errors.length}: ${rp.result.result.errors.slice(0, 3).map((e) => `${e.name} ${e.reason}`).join(' / ')}` : ''}
+                </div>
+                {(rp.result.assign || []).map((a) => (
+                  <div key={a.agent} className="tv-note">{`엣지 ${a.agent}: ${a.ok ? `배정 동기화 ${a.targets}대상` : a.reason}`}</div>
+                ))}
+                <div style={{ padding: '0 12px 10px' }}><button type="button" className="btn" onClick={closeRepath}>닫기</button></div>
               </div>
             )}
           </div>

@@ -67,7 +67,12 @@ export function createDashAcc({ targets = [] } = {}) {
 
   // 엣지 행 → 중앙 대상(출처) 조인 키 — 엣지 사본은 경로·이름이 같다(배정 스냅샷).
   const byPathName = new Map();
-  for (const tg of targets) byPathName.set(`${t(tg.path)}\u0001${t(tg.name).toLowerCase()}`, tg);
+  // v2.988: 구분(infra|service)까지 맞춘 조인 — 같은 경로 · 이름의 다른 구분 대상이 섞이지 않게(엣지가 구분을 실을 때만 · 옛 엣지는 위 키로).
+  const byPathNameKind = new Map();
+  for (const tg of targets) {
+    byPathName.set(`${t(tg.path)}\u0001${t(tg.name).toLowerCase()}`, tg);
+    byPathNameKind.set(`${t(tg.path)}\u0001${t(tg.name).toLowerCase()}\u0001${tg.kind === 'service' ? 'service' : 'infra'}`, tg);
+  }
 
   const add = (state, { tg, where, test, reply, ms, streak, type, targetName, host, path }) => {
     summary.total += 1;
@@ -125,7 +130,7 @@ export function createDashAcc({ targets = [] } = {}) {
       slow, streaks, certs,
     };
   };
-  return { add, finish, byPathName };
+  return { add, finish, byPathName, byPathNameKind };
 }
 
 /** 직접 실행 결과 1건 → 누산기. */
@@ -135,7 +140,8 @@ function addLocal(acc, tg, x, results, now) {
 }
 /** 엣지 행 1건 → 누산기. */
 function addEdge(acc, agent, it) {
-  const tg = acc.byPathName.get(`${t(it.path)}\u0001${t(it.target).toLowerCase()}`) || null;
+  const base = `${t(it.path)}\u0001${t(it.target).toLowerCase()}`;
+  const tg = (it.kind ? acc.byPathNameKind.get(`${base}\u0001${it.kind}`) : null) || (it.kind ? null : acc.byPathName.get(base)) || null;
   acc.add(DASH_STATES.includes(it.state) ? it.state : 'unknown', { tg, where: agent, test: it.test, reply: it.reply, ms: it.ms, streak: it.streak, type: it.type, targetName: it.target, host: it.host, path: it.path });
 }
 
