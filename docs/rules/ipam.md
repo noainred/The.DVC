@@ -19,6 +19,7 @@
 - (원래 5768행) IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다
 - v2.991 — IP 스캔 호스트명 확인(역DNS · mDNS · NetBIOS) · 대장 '호스트명' 열
 - v2.999 — IP 스캔 MAC · 제조사(스캐너 이웃 표 ARP · 제조사 표) · 대장 '제조사 · MAC' 열
+- v3.1.0 — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)
 
 ## 본문
 
@@ -221,4 +222,20 @@
   - 범위 계정: 대장 행에 MAC 칸을 싣지 않는다(호스트명과 같은 `allowed ?` 판정) · `/tools/ipam/history` 의 scan 은 예전처럼 null. 스캔 결과 CSV 는 `mac`(표시 MAC) 뒤에 `mac_src` · `mac_vendor` 를 덧붙였다.
   - ⚠ 정직 기록: **실제 L2 이웃이 있는 망에서 이웃 표 읽기를 확인하지 못했다**(이 환경의 이웃은 게이트웨이 1개 — 파서는 커널 꼴의 표본 · 주입한 읽기 함수로 확인). IEEE 등록부 원문 · 재배포 조건 문서는
     이 환경의 네트워크 정책이 막아 읽지 못했다(oui-data 의 BSD 라이선스만 확인). '미등록 가상 NIC' 은 ESXi vmkernel 포트(vMotion 등)도 VMware 대역을 써서 단정하지 않는다.
+
+- ⚠⚠ **v3.1.0 — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)**(시안 `docs/design/ipam-alerts-mac-dns` ① ③ · 컨펌 기본값: 충돌 의심만 켬 · 연속 2회 · 묶음 상한 50 ·
+  회귀 `server/test/ipamChanges310.test.js`(변이 20종 20 검출) + 웹 `ipamChangeText.test.js`):
+  - 감지는 **병합 때 한 번 · 중앙에서**(`scanStore.mergeScanResults` → `onScanChanges` 구독 — 엣지는 '변화' 를 보내지 않는다). 부분 결과(seenOnly)는 비교하지 않는다.
+    종류: new-ip(이력이 없던 IP — **그 대역 줄의 첫 완료 스캔이 끝난 뒤에만**, 기준선 `ipam-change-baseline.json` 은 `recordAgentReport` 가 표시) · reserved-up(관리상태 예약 · 폐기 —
+    IP 지정 > 전역 대역 정책 — 가 해제 · 새 상태에서 응답 시작) · rename(v2.991 renames) · mac-change(ARP MAC 만 · 예전 MAC 으로 되돌아가면 `flap`).
+  - 기록 · 알림은 `ipam/changeNotify.js`: vCenter 가 아는 IP(VM · 호스트 관리 IP)는 new-ip 에서 빼고 이중화 가상 MAC 은 mac-change 에서 뺀다 → **전부 기록**(`ipam/changeLog.js` ·
+    `ipam-changes.json` 5,000건 · 180일) → 켠 종류만 **스캔 한 번 · 종류 하나에 한 건**(10줄 + 외 N건 · 상한 넘으면 요약). 기록만 사유는 항목의 `notify`(off · quiet · excluded · flap).
+    'MAC 변경 알림 제외' 는 관리상태 `macAlertOff`(불리언 참만 — 그 칸만 있어도 관리상태 항목이 남아 '관리' 로 센다).
+  - 충돌 의심 판정은 `ipam/conflict.js` 하나: VM(켜짐)의 IP 에 그 VM 의 NIC MAC(`vm.dev.nics` ∪ `vm.dns.nics`)이 아닌 **ARP MAC 이 연속 N회**(`arp.n` — 같은 MAC 을 이어 본 횟수) ·
+    이중화 MAC · 한 MAC 이 8개 이상 IP(대리 ARP) 제외 · **모름**(NIC MAC 미수집 · 여러 VM · miss>0 · 그 에이전트의 마지막 완료 스캔이 못 봄)은 알림 엔진이 보류(held — 해소로 기록하지 않음).
+    상태형이라 `alerts.js evaluate` 가 판정하고(규칙을 꺼도 판정은 해 `conflictState` 에 둔다 — 대장 배지), 발생 · 해소 기록은 `onAlertState` 로 한 번씩. ESXi 관리 IP 는 대조하지 않는다(vmkernel MAC 미수집).
+  - 대장: VM 행 `macConflict`(conflictState — `ipamRevKey` 끝 `|c` 가 캐시를 무효화) · 최근 7일 MAC 변경 `macChangedAt · macPrev` · 칩 '충돌 의심 · MAC 변경'. 범위 계정에는 싣지 않는다.
+    `arp.n` 은 nameSig 에 넣지 않았다(스캔마다 대장 재계산 금지). 화면: IP관리 › IP 변화(`GET /admin/ipam/changes` — 스캔 로그와 같은 adminOnly + fleetOnly) · 설정 › 알림 카드 · 관리상태 편집 칸.
+  - ⚠ 설계와 다른 것: 추천 카드('충돌 의심 · MAC 변경')는 넣지 않았다 — '추천 기능 30선' 은 개수가 테스트로 고정(30)이라 대장 칩 · IP 변화 페이지로 대신했다. 대리 ARP 기준(8)은 설정값이 아니라 상수다.
+  - ⚠ 정직 기록: 실제 충돌 · 장비 교체 현장으로 확인하지 못했다(시험은 저장소에 값을 넣어 판정 · 알림 묶음을 확인). 알림은 채널이 없는 시험 환경이라 '보내지 않음' 까지만 봤다.
 

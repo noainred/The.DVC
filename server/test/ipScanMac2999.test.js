@@ -186,7 +186,7 @@ test('④ 엣지가 보낸 arpMac · arpTried 는 아는 꼴만(꼴이 틀리면
     { ip: '10.98.0.4', openPorts: [22], services: ['SSH'], arpMac: `${'AA:'.repeat(20)}FF`, arpTried: 1 },
   ], T0, 'e-a');
   const r = ss.getScanResults();
-  assert.deepEqual(r['10.98.0.1'].arp, { v: 'F4:8E:38:2A:91:0C', at: T0, miss: 0 });
+  assert.deepEqual(r['10.98.0.1'].arp, { v: 'F4:8E:38:2A:91:0C', at: T0, miss: 0, n: 1 });
   for (const ip of ['10.98.0.2', '10.98.0.3', '10.98.0.4']) assert.equal(r[ip].arp, undefined, ip);
   assert.equal(r['10.98.0.1'].arpMac, undefined, '보고 칸(arpMac · arpTried)을 저장 항목에 그대로 두지 않는다');
   assert.equal(r['10.98.0.1'].arpTried, undefined);
@@ -200,7 +200,7 @@ test('④ 엣지가 보낸 arpMac · arpTried 는 아는 꼴만(꼴이 틀리면
 
 test('④ mergeArp — 새 값 · 표에 없으면 miss(NAME_MISS_MAX 에 지움) · 볼 수 없었던 보고는 그대로 · 바뀌면 changed', () => {
   const p = { v: 'AA:00:00:00:00:01', at: 1, miss: 0 };
-  assert.deepEqual(ss.mergeArp(null, { arpMac: 'AA:00:00:00:00:01' }, 5), { arp: { v: 'AA:00:00:00:00:01', at: 5, miss: 0 }, changed: null });
+  assert.deepEqual(ss.mergeArp(null, { arpMac: 'AA:00:00:00:00:01' }, 5), { arp: { v: 'AA:00:00:00:00:01', at: 5, miss: 0, n: 1 }, changed: null });
   assert.deepEqual(ss.mergeArp(p, { arpMac: 'AA:00:00:00:00:02' }, 5).changed, { from: 'AA:00:00:00:00:01', to: 'AA:00:00:00:00:02' });
   let cur = p;
   for (let i = 1; i < NAME_MISS_MAX; i++) { cur = ss.mergeArp(cur, { arpTried: true }, 5 + i).arp; assert.equal(cur.miss, i); assert.equal(cur.at, 1, '확인 시각은 마지막으로 본 때'); }
@@ -214,7 +214,7 @@ test('④ scanRev — MAC 이 바뀌거나 표에 없었다는 표지가 생길 
   ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], arpMac: 'AA:00:00:00:01:01', arpTried: true }], T0, 'e-a');
   let rev = ss.scanRev();
   ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], arpMac: 'AA:00:00:00:01:01', arpTried: true }], T0 + 1000, 'e-a');
-  assert.equal(ss.scanRev(), rev, '같은 MAC — 대장 재계산 없음');
+  assert.equal(ss.scanRev(), rev, '같은 MAC — 대장 재계산 없음(이어 본 횟수 n 이 올라도 — v3.1.0)');
   ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], arpTried: true }], T0 + 2000, 'e-a');
   assert.ok(ss.scanRev() > rev, '표에 없었다(지난 확인) — 표시가 바뀐다'); rev = ss.scanRev();
   ss.mergeScanResults([{ ip, openPorts: [22], services: ['SSH'], arpTried: true }], T0 + 3000, 'e-a');
@@ -424,8 +424,8 @@ test('⑥ 디스크의 결과 파일 — 저장된 arp 를 정제해 읽고(꼴�
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, CONFIG_DIR: dir }, encoding: 'utf8', timeout: 60_000 });
   assert.equal(r.status, 0, r.stderr.slice(-1500));
   const o = JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('@@')).slice(2));
-  assert.deepEqual(o.a, { v: 'AA:00:00:00:00:01', at: 90, miss: NAME_MISS_MAX });
-  assert.deepEqual(o.b, { v: 'AA:00:00:00:00:01', at: 0, miss: 0 });
+  assert.deepEqual(o.a, { v: 'AA:00:00:00:00:01', at: 90, miss: NAME_MISS_MAX, n: 1 });
+  assert.deepEqual(o.b, { v: 'AA:00:00:00:00:01', at: 0, miss: 0, n: 1 });
   assert.equal(o.c, null); assert.equal(o.d, null);
   assert.equal(o.n, 2);
 });
