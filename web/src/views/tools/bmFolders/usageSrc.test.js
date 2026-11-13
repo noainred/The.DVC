@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { rowSrcClass, srcCounts, metricSrcText, srcTitle } from './usageSrc.js';
 import { suggestRowsOf, pickableOf, applyResultText, initialFilter } from '../bmOsSuggestText.js';
 
-describe('v2.991 사용률 출처(설계 bm-folders §13 ①)', () => {
+describe('v2.992 사용률 출처(설계 bm-folders §13 ①)', () => {
   it('행 분류 — 같은 출처 · 다르면 mixed · 서버가 구분 모름이면 mixed · 값 없으면 none', () => {
     expect(rowSrcClass({ cpu: 1, mem: 2, usrc: { cpu: 'os', mem: 'os' } })).toBe('os');
     expect(rowSrcClass({ cpu: 1, mem: 2, usrc: { cpu: 'os', mem: 'idrac' } })).toBe('mixed');
@@ -19,7 +19,7 @@ describe('v2.991 사용률 출처(설계 bm-folders §13 ①)', () => {
   });
 });
 
-describe('v2.991 OS 주소 제안 문구(설계 bm-folders §13 ②)', () => {
+describe('v2.992 OS 주소 제안 문구(설계 bm-folders §13 ②)', () => {
   const rows = [{ state: 'suggest' }, { state: 'pick' }, { state: 'none' }, { state: 'noname' }, { state: 'closed' }, { state: 'registered' }];
   it('못 찾음 거르기는 이름 없음 · SSH 닫힘을 함께 · 고를 수 있는 것은 제안 · 고르기만', () => {
     expect(suggestRowsOf(rows, 'none').map((r) => r.state)).toEqual(['none', 'noname', 'closed']);

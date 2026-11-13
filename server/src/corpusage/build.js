@@ -103,7 +103,7 @@ export function srcOfRow(row) {
 }
 
 /**
- * v2.991(출처 색 — 설계 bm-folders §13): 행의 지표별 출처(`src_cm` 두 글자 — bmusage/usage.js srcCmOf)를 { cpu, mem } 으로.
+ * v2.992(출처 색 — 설계 bm-folders §13): 행의 지표별 출처(`src_cm` 두 글자 — bmusage/usage.js srcCmOf)를 { cpu, mem } 으로.
  *   값: 'os' · 'idrac'(텔레메트리 · 대체 수집 모두) · null(그 지표 값 없음). 칸이 없거나 꼴이 틀리면 null(모름 — 행 출처로 돌아간다).
  */
 const CM_OF = Object.freeze({ o: 'os', i: 'idrac', e: 'idrac', '-': null });
@@ -161,7 +161,7 @@ export function judgeServer({ role, row = null, host = null, now, freshMs, vcUnr
     const memPct = rowMem != null ? rowMem : hm;
     const filled = [rowCpu == null && hc != null ? 'cpu' : null, rowMem == null && hm != null ? 'mem' : null].filter(Boolean);
     const by = srcByOfRow(row);
-    // v2.991(출처 색): 지표별 출처 — vCenter 로 채운 지표는 'vcenter'. 행에 칸이 없으면(구버전 엣지 · 칸 추가 전 행) srcBy 를 싣지 않는다(화면은 행 출처로).
+    // v2.992(출처 색): 지표별 출처 — vCenter 로 채운 지표는 'vcenter'. 행에 칸이 없으면(구버전 엣지 · 칸 추가 전 행) srcBy 를 싣지 않는다(화면은 행 출처로).
     const srcBy = by ? { cpu: rowCpu == null && hc != null ? 'vcenter' : by.cpu, mem: rowMem == null && hm != null ? 'vcenter' : by.mem } : null;
     return { state: 'ok', cpuPct, memPct, src: srcOfRow(row), ...(srcBy ? { srcBy } : {}), at: rowAt, ...(filled.length ? { filledFromVcenter: filled } : {}) };
   }

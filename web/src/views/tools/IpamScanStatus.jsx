@@ -8,6 +8,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { numOrNull } from '../../numOrNull.js';
 import { agentLabel, fmtDt, fmtDur, Frame } from './ipamShared.jsx';
+import { nameStatsCell, nameStatsText } from './ipamHostText.js'; // v2.991 호스트명 확인 요약
 
 /*
  * v2.733(점검 3회차 C1-02): 스캔이 시한을 넘기거나 실패하면 서버가 그 에이전트의 '스캔 미완료' 를 기록하고(reports[이름].incomplete),
@@ -81,15 +82,16 @@ export function ScanRunsTable({ runs = [], emptyText = '완료된 스캔 이력�
   const n = (v) => (v == null ? '—' : Number(v).toLocaleString());
   return (
     <div className="table-wrap" style={{ maxHeight }}>
-      <STable minWidth={520} wrap={false}>
-        <thead><tr><th>완료 시각</th><th>에이전트</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th style={{ textAlign: 'right' }}>소요</th></tr></thead>
+      <STable minWidth={600} wrap={false}>
+        <thead><tr><th>완료 시각</th><th>에이전트</th><th style={{ textAlign: 'right' }}>스캔 / 응답</th><th style={{ textAlign: 'right' }} title="호스트명을 찾은 IP 수 / 응답한 IP 수(v2.991 이전 스캔 · 이전 버전 엣지는 기록 없음)">이름 확인</th><th style={{ textAlign: 'right' }}>소요</th></tr></thead>
         <tbody>
-          {runs.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 20, whiteSpace: 'normal' }}>{emptyText}</td></tr>}
+          {runs.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 20, whiteSpace: 'normal' }}>{emptyText}</td></tr>}
           {runs.map((r, i) => (
             <tr key={i}>
               <td style={{ whiteSpace: 'nowrap' }} data-sort={r.at ?? ''}>{fmtDt(r.at)}</td>
               <td><b>{agentLabel(r.agent)}</b></td>
               <td style={{ textAlign: 'right' }} className="tabular" data-sort={r.scanned ?? ''}>{n(r.scanned)} / <b style={{ color: 'var(--green)' }}>{n(r.alive)}</b></td>
+              {(() => { const c = nameStatsCell(r.nameStats ? r : { nameStats: null }); return <td style={{ textAlign: 'right' }} className="tabular muted" title={c.title} data-sort={r.nameStats?.named ?? ''}>{c.noReport ? '—' : c.text}</td>; })()}
               <td style={{ textAlign: 'right' }} className="muted" data-sort={r.durationMs ?? ''}>{fmtDur(r.durationMs)}</td>
             </tr>
           ))}
@@ -121,7 +123,7 @@ export function ScanStatusModal({ onClose, asPage = false }) {
             </div>
             {st?.running && <ScanProgressBar progress={st.progress} />}
             {!st?.running && st?.lastRun && !st.lastRun.error && !st.lastRun.skipped && (
-              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>최근(포탈): {st.lastRun.scanned}개 중 {st.lastRun.alive}개 응답 · {fmtDur(st.lastRun.durationMs)} · {fmtDt(st.lastRun.at)}</div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>최근(포탈): {st.lastRun.scanned}개 중 {st.lastRun.alive}개 응답{nameStatsText(st.lastRun.nameStats) ? ` · ${nameStatsText(st.lastRun.nameStats)}` : ''} · {fmtDur(st.lastRun.durationMs)} · {fmtDt(st.lastRun.at)}</div>
             )}
           </div>
           {(() => {

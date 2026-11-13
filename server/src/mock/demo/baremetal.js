@@ -65,7 +65,7 @@ export function demoBmUsageRow(target, t) {
   const hasFc = /db/.test(String(target.name || ''));
   return {
     // v2.719(감사 R1-03): 데모 행 표지 — src 토큰 'demo'. 'idrac' 토큰은 그대로 둔다(iDRAC 출처 판정 bmSrcIsIdrac·IDRAC_ONLY_SQL 이 같게 읽는다).
-    key, name: target.name || key, vcenterId: target.vcenterId || '', ts: t, src: 'idrac+demo', src_cm: 'ii', // v2.991: 지표별 출처(데모 — iDRAC 행)
+    key, name: target.name || key, vcenterId: target.vcenterId || '', ts: t, src: 'idrac+demo', src_cm: 'ii', // v2.992: 지표별 출처(데모 — iDRAC 행)
     cpu_pct: r1(load), mem_pct: r1(clamp(memBase + load * 0.25 + (wob('m') - 0.5) * 4, 1, 99)),
     disk_busy_pct: null, disk_used_pct: null,
     net_pct: netPct, net_bps: Math.round((netPct / 100) * (fast / 8)),
@@ -133,7 +133,7 @@ export function demoPerfOverlay(target, t, scenario, base = {}) {
   const h = judgeHealth({ hfacts: detail.hfacts, tuning, row: cols, cert: scenario === 'disk-sat' ? { days: 12, count: 1 } : null, th: {}, now: t });
   h.since = Object.fromEntries(Object.entries(h.cells).map(([k, c]) => [k, ['warn', 'bad'].includes(c.code) ? t - (1 + (demoHash(`${key}|${k}`) % 6)) * DAY : t - 20 * DAY]));
   detail.health = h;
-  // v2.991(출처 색): 지표별 출처 — 데모 서버 일곱 대 중 하나는 메모리만 iDRAC(OS 가 메모리를 못 읽은 경우를 화면에서 보이게)
+  // v2.992(출처 색): 지표별 출처 — 데모 서버 일곱 대 중 하나는 메모리만 iDRAC(OS 가 메모리를 못 읽은 경우를 화면에서 보이게)
   const srcCm = demoHash(`srccm|${key}`) % 7 === 0 ? 'oi' : 'oo';
   return { ...cols, src: 'os+idrac+demo', src_cm: srcCm, os_at: t, idrac_at: t, detail_json: JSON.stringify(detail), tuning_json: JSON.stringify(tuning) };
 }

@@ -1,5 +1,5 @@
 /**
- * bmfolders/osSuggest.js — 물리서버 **OS 접속 주소 제안**(v2.991 · 설계 docs/design/bm-folders §13 ② · ③). 순수.
+ * bmfolders/osSuggest.js — 물리서버 **OS 접속 주소 제안**(v2.992 · 설계 docs/design/bm-folders §13 ② · ③). 순수.
  *
  * 사용자 요청(2026-11-13): "idrac hostname 을 management network 에서 동일한 hostname 을 찾아서 그 서버의 OS 접속 가능한 IP 를 자동으로 찾아서 제안".
  * 결정(기본값 컨펌): 사람이 확인하고 등록 · 이름 기준 = 대소문자 무시 + 도메인 뒤를 떼고 짧은 이름 · 이름 찾는 방법 = 역방향 + 정방향 DNS ·
@@ -60,19 +60,27 @@ export function fwdNamesFor(members, agent, corps = null) {
   return out;
 }
 
-/** 스캔 결과 색인 — 짧은 이름 → [{ip, via, ...}] (역방향 이름 · 정방향 이름 둘 다). want 에 있는 이름만 담는다(전량 26만 행을 다 담지 않게). */
+/**
+ * 스캔 결과 색인 — 짧은 이름 → [{ip, vias, ...}]. 이름 출처는 방식별로 가른다(v2.991 호스트명 확인 — 저장 `names: { dns|mdns|netbios: {v} }`):
+ *   'dns'(역방향 DNS) · 'mdns' · 'netbios' · 'fwd'(정방향 DNS — 물리서버 이름으로 물어 이 IP). 방식별 이름이 없는 옛 행은 hostname 을 'dns' 로 본다.
+ *   want 에 있는 이름만 담는다(전량 26만 행을 다 담지 않게).
+ */
+export const NAME_SRC = Object.freeze(['dns', 'mdns', 'netbios']);
 export function indexScanByName(rows, want) {
   const by = new Map();
   const add = (k, r, via) => {
     if (!k || !want.has(k)) return;
     let l = by.get(k); if (!l) { l = []; by.set(k, l); }
     const ex = l.find((x) => x.ip === r.ip);
-    if (ex) { if (ex.via !== via) ex.via = 'both'; return; }
-    l.push({ ip: r.ip, via, agent: agentKey(r.agent), ssh: Array.isArray(r.openPorts) && r.openPorts.includes(22), ptrName: t(r.hostname), fwdName: t(r.fwdName), lastSeen: Number(r.lastSeen) || null });
+    if (ex) { if (!ex.vias.includes(via)) ex.vias.push(via); return; }
+    l.push({ ip: r.ip, vias: [via], agent: agentKey(r.agent), ssh: Array.isArray(r.openPorts) && r.openPorts.includes(22), scanName: t(r.hostname), fwdName: t(r.fwdName), lastSeen: Number(r.lastSeen) || null });
   };
   for (const r of rows) {
     if (!r || typeof r !== 'object' || !IPV4.test(t(r.ip))) continue;
-    add(shortName(r.hostname), r, 'ptr');
+    const nm = r.names && typeof r.names === 'object' ? r.names : null;
+    let any = false;
+    for (const m of NAME_SRC) { const v = nm?.[m] && typeof nm[m] === 'object' ? nm[m].v : nm?.[m]; if (typeof v === 'string' && v) { add(shortName(v), r, m); any = true; } }
+    if (!any) add(shortName(r.hostname), r, 'dns');
     add(shortName(r.fwdName), r, 'fwd');
   }
   return by;

@@ -1,5 +1,5 @@
 /**
- * v2.991 묶음 A(설계 docs/design/bm-folders §13) — ① 사용률 지표별 출처 ② 물리서버 OS 주소 제안 ③ IP 스캔 정방향 DNS.
+ * v2.992 묶음 A(설계 docs/design/bm-folders §13) — ① 사용률 지표별 출처 ② 물리서버 OS 주소 제안 ③ IP 스캔 정방향 DNS.
  * CONFIG_DIR · DATA_DIR 은 임시 폴더(저장소 server/config 를 건드리지 않는다).
  */
 import test from 'node:test';
@@ -140,10 +140,10 @@ test('③ 원장 이름 — 역방향 우선 · 없으면 정방향 · 같으면
 test('③ 배정 · 중앙 스캔이 이름을 넘긴다(소스 — 개별 토큰일 때만 · 엣지 워커 · 워커 · 러너)', () => {
   const rd = (f) => fs.readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8');
   const ops = rd('routes/central/opsRoutes.js');
-  assert.match(ops, /const names = req\.centralAuth\?\.mode === 'agent' && req\.centralAuth\.agent \? await fwdNamesForAgent\(req\.centralAuth\.agent\)/);
-  assert.match(rd('agent/ipScanWorker.js'), /names: Array\.isArray\(a\.names\) \? a\.names : undefined/);
-  assert.match(rd('ipam/scanWorker.js'), /names: j\.names/);
-  assert.match(rd('ipam/scanRunner.js'), /names: job\.names/);
+  assert.match(ops, /const fwdNames = req\.centralAuth\?\.mode === 'agent' && req\.centralAuth\.agent \? await fwdNamesForAgent\(req\.centralAuth\.agent\)/);
+  assert.match(rd('agent/ipScanWorker.js'), /fwdNames: Array\.isArray\(a\.fwdNames\) \? a\.fwdNames : undefined/);
+  assert.match(rd('ipam/scanWorker.js'), /fwdNames: j\.fwdNames/);
+  assert.match(rd('ipam/scanRunner.js'), /fwdNames: job\.fwdNames/);
   assert.match(rd('ipam/scanPoller.js'), /await fwdNamesFor\(LOCAL\)/);
   assert.match(rd('routes/admin/bmOsSuggest.js'), /setFwdNamesProvider\(fwdNamesForAgent\)/);
 });
@@ -177,7 +177,16 @@ test('② 상태 판정 — 제안 · 고르기 · 닫힘 · 못 찾음 · 이�
   const st = Object.fromEntries(r.rows.map((x) => [x.name, x.state]));
   assert.deepEqual(st, { 'kr-ora-rac02': 'suggest', 'kr-web-07.corp.local': 'suggest', 'kr-db-11': 'pick', 'kr-bak-02': 'closed', '10.20.0.9': 'noname', 'kr-none-01': 'none', 'kr-ora-rac01': 'registered', 'kr-ora-rac03': 'differs' });
   assert.equal(r.total, 8, 'ESXi 는 세지 않는다');
-  assert.equal(r.rows.find((x) => x.name === 'kr-web-07.corp.local').cands[0].via, 'fwd');
+  assert.deepEqual(r.rows.find((x) => x.name === 'kr-web-07.corp.local').cands[0].vias, ['fwd']);
+  assert.deepEqual(r.rows.find((x) => x.name === 'kr-ora-rac02').cands[0].vias, ['dns'], '방식별 이름이 없는 옛 행은 hostname 을 역DNS 로 본다');
+});
+
+test('② 이름 출처는 방식별(v2.991 호스트명 확인 저장 형식 names{dns|mdns|netbios:{v}}) — mDNS · NetBIOS 이름도 후보 · 같은 IP 의 여러 출처는 모은다', () => {
+  const members = [M({ tag: 'N1', name: 'win-db-01' })];
+  const scanRows = [{ ip: '10.9.9.1', openPorts: [22], hostname: 'WIN-DB-01', names: { netbios: { v: 'WIN-DB-01', at: 1, miss: 0 }, mdns: { v: 'win-db-01.local', at: 1, miss: 0 } }, fwdName: 'win-db-01', agent: 'edge-kr', lastSeen: 1 }];
+  const r = OS.buildOsSuggest({ members, scanRows });
+  assert.equal(r.rows[0].state, 'suggest');
+  assert.deepEqual(r.rows[0].cands[0].vias.sort(), ['fwd', 'mdns', 'netbios']);
 });
 
 test('② 같은 법인만 — 다른 엣지가 스캔한 같은 이름 IP 는 후보가 아니다 · corpsOf 가 그 법인을 수집하는 에이전트면 후보', () => {

@@ -31,7 +31,7 @@ import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
-import { registerBmOsSuggest } from './bmOsSuggest.js'; // v2.991: 물리서버 OS 주소 제안(설계 bm-folders §13 ②)
+import { registerBmOsSuggest } from './bmOsSuggest.js'; // v2.992: 물리서버 OS 주소 제안(설계 bm-folders §13 ②)
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
 
@@ -399,7 +399,7 @@ adminRouter.post('/ipam/scan/run', adminOnly, fleetOnly, (_req, res) => {
 adminRouter.get('/ipam/scan/status', adminOnly, fleetOnly, (_req, res) => { // v2.611 LEFT2611-07
   res.json({ status: scanStatus(), info: scanInfo(), runs: getScanRuns(50), reports: getAgentReports() });
 });
-registerBmOsSuggest(adminRouter); // v2.991 — 형제 스캔 라우트와 같은 게이트(관리자 · 전체 범위 — bmOsSuggest.js)
+registerBmOsSuggest(adminRouter); // v2.992 — 형제 스캔 라우트와 같은 게이트(관리자 · 전체 범위 — bmOsSuggest.js)
 adminRouter.get('/ipam/scan/results', adminOnly, fleetOnly, (_req, res) => {
   res.json({ results: scanResultList().slice(0, 5000), info: scanInfo() });
 });

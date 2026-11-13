@@ -19,7 +19,7 @@
  * ⚠ 폴링하지 않는다(화면은 마운트 1회 + 새로고침 + 쓰기 뒤 재조회).
  */
 import { requirePerm, requireRole } from '../../auth/auth.js';
-import { usageSrcOf } from '../../bmfolders/usageSrc.js'; // v2.991: 사용률 지표별 출처(출처 색)
+import { usageSrcOf } from '../../bmfolders/usageSrc.js'; // v2.992: 사용률 지표별 출처(출처 색)
 import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { todayStamp } from '../../util/dayKey.js';
@@ -122,7 +122,7 @@ function serverRow(m, p, admin, hide) {
     src: srcClassOf(m), agent: hide ? undefined : (m.remoteAgent || (m.collectorId ? `수집 서버 ${m.collectorId}` : '')),
     path: p?.path || '', place: p?.src || null, moved: p?.moved ? true : undefined,
     powered: m.powered, usage: m.usage?.state || 'unread', cpu: m.usage?.cpuPct ?? null, mem: m.usage?.memPct ?? null,
-    // v2.991(출처 색): 지표별 출처 { cpu, mem } — 'os' · 'idrac' · 'vcenter' · null. 장비 단서가 아니라 판본 구분 없이 싣는다.
+    // v2.992(출처 색): 지표별 출처 { cpu, mem } — 'os' · 'idrac' · 'vcenter' · null. 장비 단서가 아니라 판본 구분 없이 싣는다.
     usrc: usageSrcOf(m.usage) || undefined,
     watts: m.watts ?? null, faults: m.faults ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null,
     // 관리 주소 — 관리자 판본만(비관리자 · 데모에게 장비 주소를 싣지 않는다 — isAdminDetailUser 하나로 판정)

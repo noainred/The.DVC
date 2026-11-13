@@ -19,7 +19,7 @@ import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-03: 엣지 �
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { sanitizePerfFields } from './bmPerfSanitize.js'; // v2.919: 리눅스 성능 항목 화이트리스트
-import { PERF_COL_NAMES, PEAK_SQL_COLS, PEAK_SRC, SRC_CM_RE } from '../bmusage/perfCols.js'; // v2.991: SRC_CM_RE 지표별 출처 두 글자 꼴
+import { PERF_COL_NAMES, PEAK_SQL_COLS, PEAK_SRC, SRC_CM_RE } from '../bmusage/perfCols.js'; // v2.992: SRC_CM_RE 지표별 출처 두 글자 꼴
 import { clampEdgeTs } from '../util/clampEdgeTs.js'; // v2.932(점검 A1-06): 피크 시각도 수신 시각으로 자른다
 /**
  * v2.919 — 행의 **새** 수치 열(리눅스 성능 열 + 두 경로 읽은 시각)은 수로 좁힌다('1.5' → 1.5 · 못 읽으면 null).
@@ -142,7 +142,7 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
       rest[c] = cut;
     }
     if (Object.hasOwn(rest, 'peak_src')) rest.peak_src = PEAK_SRC_SET.has(rest.peak_src) ? rest.peak_src : null;
-    // v2.991(출처 색): 지표별 출처 두 글자 — 꼴(o · i · e · -)만 받는다(그 밖은 null = 모름 · 화면은 행 출처로 돌아간다).
+    // v2.992(출처 색): 지표별 출처 두 글자 — 꼴(o · i · e · -)만 받는다(그 밖은 null = 모름 · 화면은 행 출처로 돌아간다).
     if (Object.hasOwn(rest, 'src_cm')) rest.src_cm = typeof rest.src_cm === 'string' && SRC_CM_RE.test(rest.src_cm) ? rest.src_cm : null;
     return { ...rest, ...(raw ? { peakAtRaw: raw } : {}), key: strOf(r.key, 256), name: strOf(r.name, 256) };
   });

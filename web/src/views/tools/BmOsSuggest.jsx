@@ -1,5 +1,5 @@
 /**
- * IP 관리 › IP 스캔 › 물리서버 OS 주소 제안(v2.991 · 설계 docs/design/bm-folders §13 ②).
+ * IP 관리 › IP 스캔 › 물리서버 OS 주소 제안(v2.992 · 설계 docs/design/bm-folders §13 ②).
  * iDRAC 이 읽은 호스트 이름과 **같은 이름**(대소문자 무시 · 도메인 뒤를 뗀 짧은 이름)을 가진 IP 를 같은 법인의 스캔 결과에서 찾아 보여 주고,
  * 사람이 확인해 OS 주소로 등록한다. 주소만 넣는다(계정 · 비밀번호 없음) — 계정을 넣기 전에는 어떤 수집도 접속하지 않는다.
  * 판정은 서버(`bmfolders/osSuggest.js`) — 화면은 그리기 · 고르기만.
@@ -97,7 +97,7 @@ export function BmOsSuggest() {
                       {r.cands.length ? r.cands.map((x) => <div key={x.ip}>{x.ip}</div>) : <span className="muted">—</span>}
                       {r.reg && r.state === 'differs' ? <div className="muted" style={{ fontSize: 11.5 }}>등록된 주소 {r.reg.host}</div> : null}
                     </td>
-                    <td style={{ fontSize: 12 }}>{r.cands.length ? [...new Set(r.cands.map((x) => x.via))].map((v) => <span key={v} className="badge gray" style={{ marginRight: 4 }}>{VIA_TEXT[v] || v}</span>) : <span className="muted">—</span>}</td>
+                    <td style={{ fontSize: 12 }}>{r.cands.length ? [...new Set(r.cands.flatMap((x) => x.vias || []))].map((v) => <span key={v} className={`badge ${v === 'fwd' ? 'blue' : 'gray'}`} style={{ marginRight: 4 }}>{VIA_TEXT[v] || v}</span>) : <span className="muted">—</span>}</td>
                     <td style={{ fontSize: 12 }}>{r.cands.length ? (sshC.length === r.cands.length ? <span className="badge green">{r.cands.length > 1 ? '모두 열림' : '열림'}</span> : sshC.length ? <span className="badge amber">{sshC.length}/{r.cands.length} 열림</span> : <span className="badge red">닫힘</span>) : <span className="muted">—</span>}</td>
                     <td data-sort={r.state}><span className={`badge ${st[1]}`}>{st[0]}</span> <span className="muted" style={{ fontSize: 12 }}>{st[2]}{r.state === 'registered' && r.reg?.addrOnly ? ' · 주소만(계정 없음)' : ''}</span></td>
                     <td>

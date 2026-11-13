@@ -196,7 +196,7 @@ function applyServerInput(data, body = {}, { now = Date.now() } = {}) {
   // 7b: 인증 방식 고정 — 'password' 면 공통 계정에 기본 키가 있어도 비밀번호로(onboard/refs.js resolveOsAuth). 빈 값 = 키 우선(기본).
   if (body.osAuth !== undefined && !(bindRefused && !bind.moved)) { if (body.osAuth === 'password') server.osAuth = 'password'; else delete server.osAuth; }
   if (body.onboardAt !== undefined && Number(body.onboardAt) > 0) server.onboardAt = Number(body.onboardAt);
-  // v2.991(OS 주소 제안 — 설계 bm-folders §13 ②): '주소만' 표지 — 새 항목에서 요청이 true 를 줄 때만 세운다(계정 · 비밀번호 없이 주소만 기록).
+  // v2.992(OS 주소 제안 — 설계 bm-folders §13 ②): '주소만' 표지 — 새 항목에서 요청이 true 를 줄 때만 세운다(계정 · 비밀번호 없이 주소만 기록).
   //   이 표지가 있는 동안 사용률 수집 색인(bmusage/targets.js indexOsHosts)이 이 항목을 쓰지 않는다(계정 없는 SSH 시도 · 엣지 위임 이탈 방지).
   //   계정이 생기면(비밀번호 · 키 · 공통 계정 참조) 표지를 지운다 — 그때부터 보통 항목. false 를 주면 지운다.
   if (!existing && body.addrOnly === true) server.addrOnly = true;

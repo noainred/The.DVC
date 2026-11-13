@@ -12,8 +12,8 @@
  *
  * DB·store 는 건드리지 않는다(순수 scanRanges 만). 결과 병합·보고는 부모가 한다.
  * 메시지 프로토콜:
- *   부모 → 자식: { job: { ranges, ports, concurrency, timeoutMs, reverseDns, ping } }
- *   자식 → 부모: { type:'progress', done, total, alive } | { type:'alive', rows:[...] } | { type:'done', scanned, alive:[...] } | { type:'error', message }
+ *   부모 → 자식: { job: { ranges, ports, concurrency, timeoutMs, reverseDns, mdns, netbios, ping } }
+ *   자식 → 부모: { type:'progress', done, total, alive } | { type:'alive', rows:[...] } | { type:'done', scanned, alive:[...], nameStats } | { type:'error', message }
  *
  * v2.733(점검 3회차 C1-02): 'alive' 는 1단계(TCP)에서 찾은 생존 IP 를 조금씩 미리 보내는 **부분 결과**다 — 부모가 시한에
  *   이 자식을 죽이면 'done' 이 오지 않아 그때까지 찾은 것이 전부 사라졌다(v2.732 B4-02 가 메인 재실행을 없앤 뒤로는 결과 0).
@@ -44,8 +44,10 @@ if (process.send) {
     const aliveTimer = setInterval(() => flushAlive(true), 500);
     aliveTimer.unref?.();
     try {
-      const { scanned, alive, fwd } = await scanRanges(j.ranges || [], {
-        ports: j.ports, concurrency: j.concurrency, timeoutMs: j.timeoutMs, reverseDns: j.reverseDns, ping: j.ping, names: j.names, // v2.991: 정방향 DNS 이름
+      const { scanned, alive, nameStats, fwd } = await scanRanges(j.ranges || [], {
+        ports: j.ports, concurrency: j.concurrency, timeoutMs: j.timeoutMs, reverseDns: j.reverseDns, ping: j.ping,
+        mdns: j.mdns !== false, netbios: j.netbios !== false, // v2.991 호스트명 확인(기본 켜짐 — 사용자 결정)
+        fwdNames: j.fwdNames, // v2.992: 정방향 DNS 로 물을 물리서버 이름(물리서버 §13 ③)
         onTcpAlive: (row) => { if (partialN >= PARTIAL_MAX) return; partialN++; pend.push(row); flushAlive(false); },
         onProgress: (done, total, aliveN) => {
           const now = Date.now();
@@ -54,7 +56,7 @@ if (process.send) {
         },
       });
       clearInterval(aliveTimer); pend = []; // 'done' 에 전체가 실린다 — 부분 결과를 더 보내지 않는다
-      try { process.send({ type: 'done', scanned, alive, ...(fwd ? { fwd } : {}) }); } catch { /* */ }
+      try { process.send({ type: 'done', scanned, alive, nameStats, ...(fwd ? { fwd } : {}) }); } catch { /* */ }
     } catch (e) {
       clearInterval(aliveTimer);
       try { process.send({ type: 'error', message: e?.message || String(e) }); } catch { /* */ }

@@ -1,5 +1,5 @@
 /**
- * 물리서버 OS 주소 제안 화면 문구 · 거르기(순수 — v2.991 · 설계 bm-folders §13 ②). 판정은 서버(bmfolders/osSuggest.js) — 여기는 글자와 거르기만.
+ * 물리서버 OS 주소 제안 화면 문구 · 거르기(순수 — v2.992 · 설계 bm-folders §13 ②). 판정은 서버(bmfolders/osSuggest.js) — 여기는 글자와 거르기만.
  */
 export const STATE_TEXT = Object.freeze({
   suggest: ['제안', 'blue', '이름이 같은 IP 하나(SSH 열림)'],
@@ -11,7 +11,7 @@ export const STATE_TEXT = Object.freeze({
   registered: ['등록됨', 'green', '등록된 주소와 같음'],
   ambiguous: ['확인 필요', 'amber', '같은 이름 · 주소의 OS 등록이 여럿'],
 });
-export const VIA_TEXT = Object.freeze({ ptr: '역방향 DNS', fwd: '정방향 DNS', both: '역방향 · 정방향' });
+export const VIA_TEXT = Object.freeze({ dns: '역방향 DNS', mdns: 'mDNS', netbios: 'NetBIOS', fwd: '정방향 DNS' });
 
 /** 거르기 — '못 찾음' 은 이름 없음 · SSH 닫힘을 함께 묶는다(제안이 나오지 않은 행). */
 export function suggestRowsOf(rows, filter) {

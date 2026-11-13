@@ -1,5 +1,5 @@
 /**
- * routes/admin/bmOsSuggest.js — IP 관리 › IP 스캔 › '물리서버 OS 주소 제안'(v2.991 · 설계 docs/design/bm-folders §13 ②).
+ * routes/admin/bmOsSuggest.js — IP 관리 › IP 스캔 › '물리서버 OS 주소 제안'(v2.992 · 설계 docs/design/bm-folders §13 ②).
  * 게이트는 형제 IP 스캔 라우트와 같다(centralIpam.js: 관리자 + 전체 범위 — 스캔 결과는 vCenter 귀속이 없는 전 법인 데이터).
  * 등록은 **주소만**(계정 · 비밀번호 · 키 없음 · `addrOnly` 표지 · 비활성) — 계정을 넣기 전에는 어떤 수집도 접속하지 않는다(bmusage/targets.js indexOsHosts · bmstor 폴러 enabled).
  * 판정 코어는 bmfolders/osSuggest.js 하나(GET 과 등록이 같은 함수 — 등록은 지금 다시 계산한 제안에서 suggest · pick 이고 고른 IP 가 SSH 열린 후보일 때만).
@@ -87,7 +87,7 @@ export function registerBmOsSuggest(adminRouter, { D = {} } = {}) {   // D: 시�
     const inputs = plan.ok.map(({ row, ip }) => ({
       // mounts '/' — 등록부가 마운트 하나 이상을 요구한다(스토리지 측정용). 비활성이라 측정하지 않고, 계정을 넣고 켜면 루트(/)부터 잰다.
       name: row.name, host: ip, vcenterId: row.corp, agent: row.agent || '', enabled: false, addrOnly: true, mounts: ['/'],
-      note: `IP 스캔 이름 일치로 등록한 OS 주소(${(row.cands.find((c) => c.ip === ip)?.via) || ''}) — 계정을 넣기 전에는 접속하지 않습니다.`,
+      note: `IP 스캔 이름 일치로 등록한 OS 주소(${(row.cands.find((c) => c.ip === ip)?.vias || []).join('+')}) — 계정을 넣기 전에는 접속하지 않습니다.`,
     }));
     // 방어선: 주소만 넣는 쓰기는 비밀을 묶지 않는다(7b choke point 와 같은 함수로 확인 — 묶는다면 이 경로가 아니다).
     if (inputs.some((x) => bindOfWrite(null, x).binds)) return res.status(500).json({ ok: false, reason: '주소만 등록하는 쓰기가 인증 참조를 묶으려 했습니다 — 등록하지 않았습니다.' });

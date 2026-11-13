@@ -530,8 +530,8 @@ test('⑬ DB — v2.918 스키마 DB 에 migratePerfColumns 를 돌리면 새 �
   old.prepare('INSERT INTO usage_latest (agent,key,ts,cpu_pct) VALUES (?,?,?,?)').run('', 'OLD', 1, 33);
   const r1 = db.migratePerfColumns(old);
   // v2.922: 최신값에 피크 열(8 × 2) · 피크 메타 3 · 장치 상한 초과 1 이 더해졌다(3a — 3단 저장 구조).
-  // v2.991: 최신값 전용 src_cm(CPU · 메모리 지표별 출처) 1칸 더
-  assert.equal(r1.added, PERF_COL_NAMES.length * 3 + 4 + 16 + 3 + 1 + 1, '이력·롤업·최신값 × 새 열 + 최신값 전용 4 + v2.922 피크 20 + v2.991 src_cm');
+  // v2.992: 최신값 전용 src_cm(CPU · 메모리 지표별 출처) 1칸 더
+  assert.equal(r1.added, PERF_COL_NAMES.length * 3 + 4 + 16 + 3 + 1 + 1, '이력·롤업·최신값 × 새 열 + 최신값 전용 4 + v2.922 피크 20 + v2.992 src_cm');
   assert.equal(db.migratePerfColumns(old).added, 0, '멱등');
   const row = old.prepare("SELECT * FROM usage_latest WHERE key='OLD'").get();
   assert.equal(row.cpu_pct, 33, '기존 행 보존'); assert.equal(row.runq_per_core, null, '기존 행의 새 열은 null(0 이 아니다)');

@@ -16,7 +16,7 @@ import SidePanel from './bmFolders/SidePanel.jsx';
 import MapView from './bmFolders/MapView.jsx';
 import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
-import { SRC_COLOR, SRC_SHORT, rowSrcClass, srcCounts, metricSrcText } from './bmFolders/usageSrc.js'; // v2.991: 사용률 출처 색
+import { SRC_COLOR, SRC_SHORT, rowSrcClass, srcCounts, metricSrcText } from './bmFolders/usageSrc.js'; // v2.992: 사용률 출처 색
 import {
   INTRO, PLACE_LABEL, MISSING_WHY, pctText, wattsText, pathText, lastSeg, parentOf, ageText,
   rowsOf, aggregate, filterRows, resultNote, foldersByName, opErrorText, csvNameOf, trimPath,
@@ -699,7 +699,7 @@ function NarrowList({ rows, writable, picked, setPicked, onOpen, scoped }) {
   );
 }
 
-/** v2.991(출처 색 — 설계 bm-folders §13 ①): 표 위 '사용률을 읽은 곳' 개수 띠. 출처가 하나도 없으면 그리지 않는다. */
+/** v2.992(출처 색 — 설계 bm-folders §13 ①): 표 위 '사용률을 읽은 곳' 개수 띠. 출처가 하나도 없으면 그리지 않는다. */
 function SrcSummary({ rows }) {
   const c = srcCounts(rows);
   const items = [['os', 'OS(SSH)'], ['idrac', 'iDRAC'], ['vcenter', 'vCenter'], ['mixed', '지표마다 다름'], ['none', '없음'], ['unknown', '출처 모름']].filter(([k]) => c[k]);
