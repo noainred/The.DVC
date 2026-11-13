@@ -82,7 +82,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size
 
   <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
     <div class="kpi"><b style="color:#fca5a5">3</b><span>복구 불가 (읽지 못한 블록)</span></div>
-    <div class="kpi"><b style="color:#fcd34d">3</b><span>복구됨 (오류를 고쳐 씀)</span></div>
+    <div class="kpi"><b style="color:#fcd34d">3</b><span>PDR54 (미디어 오류를 고쳐 씀)</span></div>
     <div class="kpi"><b style="color:#bfdbfe">1</b><span>고장 예측 (SMART)</span></div>
     <div class="kpi"><b>3년 8개월</b><span>로그가 남아 있는 구간</span></div>
   </div>
@@ -116,7 +116,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size
         <div class="track">
           <span class="unk"></span>
           <span class="prev" style="left:8%;width:46%"></span>
-          <span class="mk fix" style="left:38.5%" title="2024-06-02 복구됨 (PDR54)"></span>
+          <span class="mk fix" style="left:38.5%" title="2024-06-02 PDR54"></span>
           <span class="mk bad" style="left:45.9%" title="2024-09-18 복구 불가 2건 (PDR46 · PDR47)"></span>
           <span class="cnt" style="left:45.9%">2</span>
           <span class="mk pre" style="left:50.2%" title="2024-11-20 고장 예측 (PDR16)"></span>
@@ -129,8 +129,8 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size
         <span style="font-weight:700">Disk 5 <span style="font-weight:400;font-size:11.5px;color:#fca5a5">· 현재 장착</span></span>
         <div class="track">
           <span class="unk"></span>
-          <span class="mk fix" style="left:94.8%" title="2026-08-30 복구됨 (PDR54)"></span>
-          <span class="mk fix" style="left:97.2%" title="2026-10-12 복구됨 (PDR54)"></span>
+          <span class="mk fix" style="left:94.8%" title="2026-08-30 PDR54"></span>
+          <span class="mk fix" style="left:97.2%" title="2026-10-12 PDR54"></span>
           <span class="mk bad" style="left:99.4%" title="2026-11-03 복구 불가 (PDR46)"></span>
         </div>
         <span class="mono" style="text-align:right;font-weight:700">3</span>
@@ -142,7 +142,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size
 
     <div style="display:flex;gap:8px 18px;flex-wrap:wrap;padding-top:4px;border-top:1px solid #1f2a40">
       <span class="lg" style="padding-top:8px"><i class="mk bad"></i>복구 불가</span>
-      <span class="lg" style="padding-top:8px"><i class="mk fix"></i>복구됨</span>
+      <span class="lg" style="padding-top:8px"><i class="mk fix"></i>PDR54</span>
       <span class="lg" style="padding-top:8px"><i class="mk pre"></i>고장 예측</span>
       <span class="lg" style="padding-top:8px"><i class="mk swap" style="height:14px"></i>디스크 교체 (제거·삽입 기록)</span>
       <span class="lg" style="padding-top:8px"><i style="width:22px;height:10px;border-radius:2px;background:rgba(139,155,180,.22)"></i>교체 전 디스크 구간</span>
@@ -169,12 +169,12 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size
       </tr></thead>
       <tbody>
         <tr><td class="nw mono">2026-11-03 02:14</td><td class="nw"><b>Disk 5</b></td><td><span class="tag bad">복구 불가</span></td><td class="mono">PDR46</td><td>Patrol Read found an uncorrectable media error on Disk 5 in Backplane 1 of Integrated RAID Controller 1.</td><td class="nw">현재 장착<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td></tr>
-        <tr><td class="nw mono">2026-10-12 03:40</td><td class="nw"><b>Disk 5</b></td><td><span class="tag fix">복구됨</span></td><td class="mono">PDR54</td><td>A disk media error on Disk 5 in Backplane 1 of Integrated RAID Controller 1 was corrected during recovery.</td><td class="nw">현재 장착<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td></tr>
-        <tr><td class="nw mono">2026-08-30 02:51</td><td class="nw"><b>Disk 5</b></td><td><span class="tag fix">복구됨</span></td><td class="mono">PDR54</td><td>A disk media error on Disk 5 in Backplane 1 of Integrated RAID Controller 1 was corrected during recovery.</td><td class="nw">현재 장착<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td></tr>
+        <tr><td class="nw mono">2026-10-12 03:40</td><td class="nw"><b>Disk 5</b></td><td><span class="tag fix">PDR54</span></td><td class="mono">PDR54</td><td>A disk media error on Disk 5 in Backplane 1 of Integrated RAID Controller 1 was corrected during recovery.</td><td class="nw">현재 장착<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td></tr>
+        <tr><td class="nw mono">2026-08-30 02:51</td><td class="nw"><b>Disk 5</b></td><td><span class="tag fix">PDR54</span></td><td class="mono">PDR54</td><td>A disk media error on Disk 5 in Backplane 1 of Integrated RAID Controller 1 was corrected during recovery.</td><td class="nw">현재 장착<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td></tr>
         <tr><td class="nw mono">2024-11-20 11:06</td><td class="nw"><b>Disk 3</b></td><td><span class="tag pre">고장 예측</span></td><td class="mono">PDR16</td><td>Predictive failure reported for Disk 3 in Backplane 1 of Integrated RAID Controller 1.</td><td class="nw">교체 전 디스크<div class="muted" style="font-size:11.5px">시리얼은 로그에 없음</div></td></tr>
         <tr><td class="nw mono">2024-09-18 04:22</td><td class="nw"><b>Disk 3</b></td><td><span class="tag bad">복구 불가</span></td><td class="mono">PDR47</td><td>A block on Disk 3 in Backplane 1 of Integrated RAID Controller 1 was punctured by the controller.</td><td class="nw">교체 전 디스크<div class="muted" style="font-size:11.5px">시리얼은 로그에 없음</div></td></tr>
         <tr><td class="nw mono">2024-09-18 04:22</td><td class="nw"><b>Disk 3</b></td><td><span class="tag bad">복구 불가</span></td><td class="mono">PDR46</td><td>Patrol Read found an uncorrectable media error on Disk 3 in Backplane 1 of Integrated RAID Controller 1.</td><td class="nw">교체 전 디스크<div class="muted" style="font-size:11.5px">시리얼은 로그에 없음</div></td></tr>
-        <tr><td class="nw mono" style="border-bottom:none">2024-06-02 03:15</td><td class="nw" style="border-bottom:none"><b>Disk 3</b></td><td style="border-bottom:none"><span class="tag fix">복구됨</span></td><td class="mono" style="border-bottom:none">PDR54</td><td style="border-bottom:none">A disk media error on Disk 3 in Backplane 1 of Integrated RAID Controller 1 was corrected during recovery.</td><td class="nw" style="border-bottom:none">교체 전 디스크<div class="muted" style="font-size:11.5px">시리얼은 로그에 없음</div></td></tr>
+        <tr><td class="nw mono" style="border-bottom:none">2024-06-02 03:15</td><td class="nw" style="border-bottom:none"><b>Disk 3</b></td><td style="border-bottom:none"><span class="tag fix">PDR54</span></td><td class="mono" style="border-bottom:none">PDR54</td><td style="border-bottom:none">A disk media error on Disk 3 in Backplane 1 of Integrated RAID Controller 1 was corrected during recovery.</td><td class="nw" style="border-bottom:none">교체 전 디스크<div class="muted" style="font-size:11.5px">시리얼은 로그에 없음</div></td></tr>
       </tbody>
     </table>
     </div>

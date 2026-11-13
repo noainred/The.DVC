@@ -72,6 +72,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
       <div class="muted" style="font-size:12px">법인 엣지가 매일 한 번 새 로그만 이어 읽어 올립니다 · 마지막 수신 2026-11-14 06:40 · 못 읽은 44대의 디스크는 아래 수치에 들어 있지 않습니다</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <a class="btn primary" href="Scan.dc.html" style="text-decoration:none">지금 점검</a>
       <button class="btn" type="button">못 읽은 서버 44대</button>
       <button class="btn" type="button">엑셀</button>
     </div>
@@ -102,7 +103,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
         <th><button type="button">슬롯</button></th>
         <th><button type="button">모델 · 시리얼</button></th>
         <th class="r" aria-sort="descending"><button type="button">복구 불가 ▼</button></th>
-        <th class="r"><button type="button">복구됨</button></th>
+        <th class="r"><button type="button">PDR54</button></th>
         <th><button type="button">최근 기록</button></th>
         <th><button type="button">지금 상태</button></th>
         <th><button type="button">‘아직 사용 중’ 근거</button></th>
@@ -186,7 +187,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
       <div class="h">월별 추이 <span class="muted" style="font-weight:400">최근 18개월 · 기록 건수</span></div>
       <div style="display:flex;gap:6px 16px;flex-wrap:wrap;font-size:12px;color:#aebbd0">
         <span><span class="dot" style="background:#ef4444"></span>복구 불가</span>
-        <span><span class="dot" style="background:#f59e0b"></span>복구됨</span>
+        <span><span class="dot" style="background:#f59e0b"></span>PDR54</span>
         <span><span class="dot" style="background:#3b82f6;opacity:.75"></span>그 달 로그가 남아 있는 서버 비율</span>
       </div>
     </div>
@@ -196,24 +197,24 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
         <div class="grid" style="bottom:40px"><span>5</span></div>
         <div class="grid" style="bottom:80px"><span>10</span></div>
         <div class="grid" style="bottom:120px"><span>15</span></div>
-        <div class="col" title="2025-06 · 복구 불가 1 · 복구됨 2"><i class="fx" style="height:16px"></i><i class="bd" style="height:8px"></i></div>
-        <div class="col" title="2025-07 · 복구 불가 0 · 복구됨 3"><i class="fx" style="height:24px"></i></div>
-        <div class="col" title="2025-08 · 복구 불가 2 · 복구됨 2"><i class="fx" style="height:16px"></i><i class="bd" style="height:16px"></i></div>
-        <div class="col" title="2025-09 · 복구 불가 1 · 복구됨 4"><i class="fx" style="height:32px"></i><i class="bd" style="height:8px"></i></div>
-        <div class="col" title="2025-10 · 복구 불가 1 · 복구됨 3"><i class="fx" style="height:24px"></i><i class="bd" style="height:8px"></i></div>
-        <div class="col" title="2025-11 · 복구 불가 3 · 복구됨 3"><i class="fx" style="height:24px"></i><i class="bd" style="height:24px"></i></div>
-        <div class="col" title="2025-12 · 복구 불가 2 · 복구됨 5"><i class="fx" style="height:40px"></i><i class="bd" style="height:16px"></i></div>
-        <div class="col" title="2026-01 · 복구 불가 2 · 복구됨 4"><i class="fx" style="height:32px"></i><i class="bd" style="height:16px"></i></div>
-        <div class="col" title="2026-02 · 복구 불가 1 · 복구됨 6"><i class="fx" style="height:48px"></i><i class="bd" style="height:8px"></i></div>
-        <div class="col" title="2026-03 · 복구 불가 3 · 복구됨 5"><i class="fx" style="height:40px"></i><i class="bd" style="height:24px"></i></div>
-        <div class="col" title="2026-04 · 복구 불가 2 · 복구됨 7"><i class="fx" style="height:56px"></i><i class="bd" style="height:16px"></i></div>
-        <div class="col" title="2026-05 · 복구 불가 4 · 복구됨 6"><i class="fx" style="height:48px"></i><i class="bd" style="height:32px"></i></div>
-        <div class="col" title="2026-06 · 복구 불가 3 · 복구됨 8"><i class="fx" style="height:64px"></i><i class="bd" style="height:24px"></i></div>
-        <div class="col" title="2026-07 · 복구 불가 5 · 복구됨 7"><i class="fx" style="height:56px"></i><i class="bd" style="height:40px"></i></div>
-        <div class="col" title="2026-08 · 복구 불가 4 · 복구됨 9"><i class="fx" style="height:72px"></i><i class="bd" style="height:32px"></i></div>
-        <div class="col" title="2026-09 · 복구 불가 6 · 복구됨 9"><i class="fx" style="height:72px"></i><i class="bd" style="height:48px"></i></div>
-        <div class="col" title="2026-10 · 복구 불가 5 · 복구됨 11"><i class="fx" style="height:88px"></i><i class="bd" style="height:40px"></i></div>
-        <div class="col" title="2026-11 (진행 중) · 복구 불가 3 · 복구됨 5" style="opacity:.6"><i class="fx" style="height:40px"></i><i class="bd" style="height:24px"></i></div>
+        <div class="col" title="2025-06 · 복구 불가 1 · PDR54 2"><i class="fx" style="height:16px"></i><i class="bd" style="height:8px"></i></div>
+        <div class="col" title="2025-07 · 복구 불가 0 · PDR54 3"><i class="fx" style="height:24px"></i></div>
+        <div class="col" title="2025-08 · 복구 불가 2 · PDR54 2"><i class="fx" style="height:16px"></i><i class="bd" style="height:16px"></i></div>
+        <div class="col" title="2025-09 · 복구 불가 1 · PDR54 4"><i class="fx" style="height:32px"></i><i class="bd" style="height:8px"></i></div>
+        <div class="col" title="2025-10 · 복구 불가 1 · PDR54 3"><i class="fx" style="height:24px"></i><i class="bd" style="height:8px"></i></div>
+        <div class="col" title="2025-11 · 복구 불가 3 · PDR54 3"><i class="fx" style="height:24px"></i><i class="bd" style="height:24px"></i></div>
+        <div class="col" title="2025-12 · 복구 불가 2 · PDR54 5"><i class="fx" style="height:40px"></i><i class="bd" style="height:16px"></i></div>
+        <div class="col" title="2026-01 · 복구 불가 2 · PDR54 4"><i class="fx" style="height:32px"></i><i class="bd" style="height:16px"></i></div>
+        <div class="col" title="2026-02 · 복구 불가 1 · PDR54 6"><i class="fx" style="height:48px"></i><i class="bd" style="height:8px"></i></div>
+        <div class="col" title="2026-03 · 복구 불가 3 · PDR54 5"><i class="fx" style="height:40px"></i><i class="bd" style="height:24px"></i></div>
+        <div class="col" title="2026-04 · 복구 불가 2 · PDR54 7"><i class="fx" style="height:56px"></i><i class="bd" style="height:16px"></i></div>
+        <div class="col" title="2026-05 · 복구 불가 4 · PDR54 6"><i class="fx" style="height:48px"></i><i class="bd" style="height:32px"></i></div>
+        <div class="col" title="2026-06 · 복구 불가 3 · PDR54 8"><i class="fx" style="height:64px"></i><i class="bd" style="height:24px"></i></div>
+        <div class="col" title="2026-07 · 복구 불가 5 · PDR54 7"><i class="fx" style="height:56px"></i><i class="bd" style="height:40px"></i></div>
+        <div class="col" title="2026-08 · 복구 불가 4 · PDR54 9"><i class="fx" style="height:72px"></i><i class="bd" style="height:32px"></i></div>
+        <div class="col" title="2026-09 · 복구 불가 6 · PDR54 9"><i class="fx" style="height:72px"></i><i class="bd" style="height:48px"></i></div>
+        <div class="col" title="2026-10 · 복구 불가 5 · PDR54 11"><i class="fx" style="height:88px"></i><i class="bd" style="height:40px"></i></div>
+        <div class="col" title="2026-11 (진행 중) · 복구 불가 3 · PDR54 5" style="opacity:.6"><i class="fx" style="height:40px"></i><i class="bd" style="height:24px"></i></div>
       </div>
       <div class="cov" role="img" aria-label="그 달의 로그가 남아 있는 서버 비율. 2025년 6월 52퍼센트에서 2026년 11월 95퍼센트.">
         <i style="height:19px" title="2025-06 · 52%"></i><i style="height:19px" title="2025-07 · 54%"></i><i style="height:21px" title="2025-08 · 57%"></i><i style="height:22px" title="2025-09 · 60%"></i><i style="height:23px" title="2025-10 · 63%"></i><i style="height:24px" title="2025-11 · 66%"></i><i style="height:25px" title="2025-12 · 70%"></i><i style="height:26px" title="2026-01 · 73%"></i><i style="height:27px" title="2026-02 · 76%"></i><i style="height:28px" title="2026-03 · 79%"></i><i style="height:30px" title="2026-04 · 82%"></i><i style="height:31px" title="2026-05 · 85%"></i><i style="height:32px" title="2026-06 · 88%"></i><i style="height:32px" title="2026-07 · 90%"></i><i style="height:33px" title="2026-08 · 92%"></i><i style="height:34px" title="2026-09 · 94%"></i><i style="height:34px" title="2026-10 · 95%"></i><i style="height:34px" title="2026-11 · 95%"></i>
