@@ -91,7 +91,11 @@ tr.bad td{background:rgba(239,68,68,.07)}
   <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
     <a href="Addresses.dc.html" class="btn ghost sm">‹ IP 주소</a>
     <span><span class="mono" style="font-weight:600">10.20.30.12</span> 를 쓰는 서버</span>
-    <input class="input mono" type="text" aria-label="서비스 태그 또는 IP 로 다른 서버 찾기" placeholder="서비스 태그 · IP 로 다른 서버 찾기" style="margin-left:auto;width:260px">
+    <span style="margin-left:auto;display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden" role="group" aria-label="시안 예시 바꾸기">
+      <a href="Server.dc.html" style="background:#1a2236;color:#e6edf6;font-size:12px;font-weight:600;padding:7px 12px;text-decoration:none">예시: 가상화 호스트</a>
+      <a href="ServerOs.dc.html" style="color:#8b9bb4;font-size:12px;font-weight:600;padding:7px 12px;text-decoration:none">물리 서버(OS 직접 설치)</a>
+    </span>
+    <input class="input mono" type="text" aria-label="서비스 태그 또는 IP 로 다른 서버 찾기" placeholder="서비스 태그 · IP 로 다른 서버 찾기" style="width:240px">
   </div>
 
   <section class="card" style="padding:18px 20px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 0" aria-label="서버">
@@ -184,8 +188,8 @@ class Component extends DCLogic {
       vms: [
         mk('api-kr1-009', '10.20.30.20', 'old-api-03', '불일치', 'API 서버', 'api-team', 'net-admin', { off: true }),
         mk('batch-kr1-007', '10.20.30.131', 'batch-kr1-070', '불일치', '배치', 'data-team', 'ops-kr', { flag: '중복' }),
-        mk('db-kr1-002', '10.20.50.14', '', 'DNS 기록 없음', '백업망', 'dba-team', 'net-admin', { flag: '멀티홈' }),
-        mk('db-kr1-002', '10.20.31.14', 'db-kr1-002', '일치', 'DB', 'dba-team', 'net-admin', { flag: '멀티홈' }),
+        mk('db-kr1-002', '10.20.50.14', '', 'DNS 기록 없음', '백업망', 'dba-team', 'net-admin', { flag: 'IP 2개' }),
+        mk('db-kr1-002', '10.20.31.14', 'db-kr1-002', '일치', 'DB', 'dba-team', 'net-admin', { flag: 'IP 2개' }),
         mk('web-kr1-023', '10.20.30.47', 'web-kr1-023', '일치', '웹 프런트', 'web-team', 'ops-kr'),
         mk('api-kr1-003', '10.20.30.14', 'api-kr1-003', '일치', 'API 서버', 'api-team', 'ops-kr'),
         mk('infra-kr1-dns01', '10.20.30.10', 'infra-kr1-dns01', '일치', 'DNS', 'infra-kr', 'net-admin'),

@@ -48,6 +48,8 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .chip.on{border-color:#3b82f6;color:#e6edf6;background:rgba(59,130,246,.14)}
 .net{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;padding:10px 14px;border-top:1px solid #1f2a40;text-decoration:none;color:#e6edf6}
 .net.on{background:#1a2236;box-shadow:inset 3px 0 0 #3b82f6}
+.pur{font-size:13.5px;font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pur.none{font-weight:500;color:#8b9bb4}
 .st{display:flex;flex-direction:column;gap:2px;padding:0 18px;border-left:1px solid #1f2a40}
 .st b{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1}
 .st span{font-size:11.5px;color:#8b9bb4}
@@ -110,15 +112,16 @@ td{padding:8px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
 
     <section class="card" style="flex:1 1 300px;max-width:340px;overflow:hidden" aria-label="대역 목록">
       <div style="padding:12px 14px;display:flex;flex-direction:column;gap:9px">
-        <input class="input" type="text" aria-label="대역 · 법인 검색" placeholder="대역 · 법인 찾기">
+        <input class="input" type="text" aria-label="대역 · 용도 · 법인 검색" placeholder="대역 · 용도 · 법인 찾기">
         <div style="display:flex;flex-wrap:wrap;gap:6px">
-          <button type="button" class="chip on">전체 312</button><button type="button" class="chip">80% 이상 9</button><button type="button" class="chip">정책 있음 41</button><button type="button" class="chip">스캔 대상 96</button>
+          <button type="button" class="chip on">전체 312</button><button type="button" class="chip">80% 이상 9</button><button type="button" class="chip">용도 없음 58</button><button type="button" class="chip">정책 있음 41</button>
         </div>
         <div style="display:flex;align-items:center;gap:8px;font-size:12px" class="muted"><span>정렬</span><button type="button" class="btn sm">사용률 높은 순 ▾</button><span style="margin-left:auto">312개 중 12개</span></div>
       </div>
       <sc-for list="{{nets}}" as="n" hint-placeholder-count="12">
       <a href="#" class="{{n.cls}}">
-        <span class="mono" style="font-weight:600">{{n.cidr}}</span><span class="mono muted" style="font-size:11.5px">{{n.used}}</span>
+        <span class="{{n.purCls}}">{{n.pur}}</span><span class="mono muted" style="font-size:11.5px">{{n.used}}</span>
+        <span class="mono" style="font-size:12px;grid-column:1 / 3">{{n.cidr}}</span>
         <span class="bar" style="grid-column:1 / 3"><i style="{{n.barStyle}}"></i></span>
         <span class="muted" style="font-size:11.5px;grid-column:1 / 3">{{n.meta}}</span>
       </a>
@@ -129,9 +132,9 @@ td{padding:8px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
     <section style="flex:999 1 520px;min-width:0;display:flex;flex-direction:column;gap:14px" aria-label="고른 대역">
 
       <div class="card" style="padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 0">
-        <div style="display:flex;flex-direction:column;gap:4px;padding-right:18px;min-width:0">
-          <span class="mono" style="font-size:20px;font-weight:700">10.20.30.0/24</span>
-          <span class="muted" style="font-size:12px">VC-KR1 · 서울 1센터 · 스캔 edge-kr1 · 마지막 스캔 <span class="mono">14:40</span></span>
+        <div style="display:flex;flex-direction:column;gap:3px;padding-right:18px;min-width:0">
+          <span style="font-size:22px;font-weight:800;line-height:1.2">웹 서비스망</span>
+          <span><span class="mono" style="font-size:14px;font-weight:600">10.20.30.0/24</span> <span class="muted" style="font-size:12px">VC-KR1 · 서울 1센터 · 스캔 edge-kr1 · 마지막 스캔 <span class="mono">14:40</span></span></span>
         </div>
         <div class="st"><b>{{cnt.used}}</b><span>사용 중</span></div>
         <div class="st"><b>{{cnt.rsv}}</b><span>예약</span></div>
@@ -141,6 +144,12 @@ td{padding:8px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
         <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
           <button type="button" class="btn">대역 정책</button>
           <button type="button" class="btn">엑셀</button>
+        </div>
+        <div style="flex-basis:100%;border-top:1px solid #1f2a40;padding-top:14px;display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px" role="group" aria-label="대역 용도">
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:#8b9bb4;flex:1 1 180px;max-width:240px">대역 용도<input class="input" type="text" value="웹 서비스망" style="font-weight:700"></label>
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:#8b9bb4;flex:3 1 280px">설명<input class="input" type="text" value="외부 서비스용 웹 프런트 · API 서버. 신규 할당은 web-team 요청으로만"></label>
+          <button type="button" class="btn primary">저장</button>
+          <span class="muted" style="font-size:12px;padding-bottom:8px">마지막 수정 ops-kr · <span class="mono">11-10</span></span>
         </div>
       </div>
 
@@ -242,9 +251,11 @@ class Component extends DCLogic {
       cells.push({ n: i, cls: 'cell ' + k + (i === 47 ? ' sel' : ''), label: '10.20.30.' + i + ' ' + NAME[k] });
     }
     cnt.used = cnt.vm + cnt.bm + cnt.scan + cnt.bad;
+    const PUR = { '10.20.30.0/24': '웹 서비스망', '10.31.4.0/24': 'DB 망', '10.40.2.0/24': '사무 VDI', '172.16.40.0/24': 'K8s 노드', '10.50.2.0/24': '랙 증설 구역', '10.20.31.0/24': '앱 서버망', '10.31.7.0/24': '백업망', '10.31.5.0/24': 'ETL · 배치', '10.40.8.0/24': '모니터링 · CI', '10.20.32.0/24': '개발 · 스테이징' };
     const net = (cidr, used, corp, extra, on) => {
       const pct = Math.round(used / 254 * 100);
-      return { cidr, used: used + '/254', meta: corp + ' · ' + pct + '%' + (extra ? ' · ' + extra : ''), cls: on ? 'net on' : 'net',
+      return { cidr, used: used + '/254', pur: PUR[cidr] || '용도 없음 — 넣기', purCls: PUR[cidr] ? 'pur' : 'pur none',
+        meta: corp + ' · ' + pct + '%' + (extra ? ' · ' + extra : ''), cls: on ? 'net on' : 'net',
         barStyle: 'width:' + pct + '%;background:' + (pct >= 90 ? '#ef4444' : pct >= 80 ? '#f59e0b' : '#3b82f6') };
     };
     return {

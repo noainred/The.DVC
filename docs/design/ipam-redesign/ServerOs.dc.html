@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 서버 보기(OS 직접 설치 물리 서버)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+*{box-sizing:border-box}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.srch{display:flex;align-items:center;width:420px;height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#8b9bb4;font-size:12px;padding:0 10px}
+.sb{flex:1 0 236px;max-width:236px;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp{box-shadow:inset 3px 0 0 #22d3ee}
+.sb .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.btn.ghost{background:transparent}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;min-width:0}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:7px;padding:11px 16px;color:#8b9bb4;font-weight:600;font-size:13.5px;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tabs .c{font-size:11.5px;font-weight:600;color:#8b9bb4}
+.tabs .adm{font-size:10.5px;font-weight:700;color:#aebbd0;border:1px solid #243049;border-radius:5px;padding:0 5px}
+.h2{font-size:14px;font-weight:700;margin:0}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg a,.seg button{border:0;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;padding:7px 12px;cursor:pointer;text-decoration:none}
+.seg .on{background:#1a2236;color:#e6edf6}
+.st{display:flex;flex-direction:column;gap:2px;padding:0 20px;border-left:1px solid #1f2a40}
+.st b{font-size:20px;font-weight:800;line-height:1.1}
+.st span{font-size:11.5px;color:#8b9bb4}
+.kv{display:grid;grid-template-columns:96px minmax(0,1fr);gap:8px 10px;font-size:12.5px;margin:0}
+.kv dt{color:#8b9bb4;margin:0}.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:9px 12px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+th.s::after{content:" ↕";font-weight:400}
+td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+tr.hit td{background:#1a2236}
+tr.hit td:first-child{box-shadow:inset 3px 0 0 #3b82f6}
+tr.bad td{background:rgba(239,68,68,.07)}
+tr.dim td{color:#8b9bb4}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;min-height:1320px">
+<header class="tb">
+  <span class="logo"><span class="v">V</span>The Davinci</span><span class="ver">v2.914.0</span>
+  <span class="srch" style="margin:0 auto">장비 · 기능 찾기 — 이름 · IP · 시리얼</span>
+  <span class="muted mono" style="font-size:11.5px">28/28 vCenter OK</span>
+  <span class="muted" style="font-size:12px">관리자</span>
+</header>
+<div style="display:flex;flex-wrap:wrap;flex:1">
+<nav class="sb" aria-label="포탈 메뉴">
+  <a href="#">Overview</a><a href="#">Summary</a>
+  <a href="#">서버<span class="n">6</span></a><a href="#">스토리지<span class="n">7</span></a>
+  <a href="#" class="grp">네트워크<span class="n">6</span></a>
+  <a href="#" class="sub">전체 네트워크 장비</a><a href="#" class="sub">가상화 네트워크</a><a href="#" class="sub">통신 지도</a><a href="#" class="sub">글로벌 네트워크 점검</a>
+  <a href="#" class="sub on">IP관리</a><a href="#" class="sub">Monitoring</a>
+  <a href="#">자원관리<span class="n">3</span></a><a href="#">자원 최적화<span class="n">2</span></a><a href="#">특수 기능</a><a href="#">이슈</a><a href="#">위키</a><a href="#">게시판</a><a href="#">설정<span class="n">2</span></a>
+</nav>
+<main style="flex:999 1 560px;min-width:0;padding:20px 28px 40px;display:flex;flex-direction:column;gap:16px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <h1 style="margin:0;font-size:20px;font-weight:800">IP 관리</h1>
+    <button type="button" class="btn">전체 법인 28곳 ▾</button>
+    <span class="muted" style="font-size:12px;margin-left:auto">대장 갱신 <span class="mono">14:52</span> · 마지막 스캔 보고 <span class="mono">14:40</span></span>
+    <button type="button" class="btn">내보내기</button>
+    <button type="button" class="btn primary">+ IP 등록 · 예약</button>
+  </div>
+
+  <nav class="tabs" aria-label="IP 관리 탭">
+    <a href="Main.dc.html">현황</a>
+    <a href="Subnets.dc.html">대역 <span class="c">312</span></a>
+    <a href="Addresses.dc.html" class="on" aria-current="page">IP 주소 <span class="c">8,047</span></a>
+    <a href="Scan.dc.html">스캔 <span class="adm">관리자</span></a>
+    <a href="Settings.dc.html">설정 <span class="adm">관리자</span></a>
+  </nav>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+    <a href="Addresses.dc.html" class="btn ghost sm">‹ IP 주소</a>
+    <span><span class="mono" style="font-weight:600">{{d.hitIp}}</span> 를 쓰는 서버</span>
+    <span class="seg" role="group" aria-label="시안 예시 바꾸기" style="margin-left:auto">
+      <a href="Server.dc.html">예시: 가상화 호스트</a>
+      <button type="button" class="{{linuxCls}}" onClick="{{pickLinux}}">Linux 물리 서버</button>
+      <button type="button" class="{{winCls}}" onClick="{{pickWin}}">Windows 물리 서버</button>
+    </span>
+    <input class="input mono" type="text" aria-label="서비스 태그 또는 IP 로 다른 서버 찾기" placeholder="서비스 태그 · IP 로 다른 서버 찾기" style="width:240px">
+  </div>
+
+  <section class="card" style="padding:18px 20px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 0" aria-label="서버">
+    <div style="display:flex;flex-direction:column;gap:5px;padding-right:20px;min-width:0">
+      <span class="muted" style="font-size:11.5px;font-weight:600">서비스 태그</span>
+      <span style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="mono" style="font-size:24px;font-weight:700;letter-spacing:.04em">{{d.tag}}</span><span class="tag blue">물리 서버 · OS 직접 설치</span></span>
+      <span class="muted" style="font-size:12px"><b style="color:#e6edf6">{{d.name}}</b> · {{d.model}} · 법인 KR1 · 서울 1센터</span>
+    </div>
+    <div class="st"><b>{{d.nIp}}</b><span>서버가 쓰는 IP</span></div>
+    <div class="st"><b>{{d.nIf}}</b><span>인터페이스</span></div>
+    <div class="st"><b style="color:#fca5a5">{{d.nBad}}</b><span>이름 · DNS 불일치</span></div>
+    <div class="st"><b>{{d.nNone}}</b><span>DNS 기록 없음</span></div>
+    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn">원격 접속</button>
+      <button type="button" class="btn">iDRAC 정보</button>
+      <button type="button" class="btn">엑셀</button>
+    </div>
+  </section>
+
+  <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+
+    <section class="card" style="flex:999 1 560px;overflow:hidden" aria-label="서버가 쓰는 IP">
+      <div style="display:flex;align-items:center;gap:10px;padding:13px 18px">
+        <h2 class="h2">서버가 쓰는 IP</h2><span class="muted" style="font-size:12px">iDRAC 과 OS 인터페이스 · 주소를 누르면 그 IP 의 상세로</span>
+      </div>
+      <div style="overflow-x:auto">
+      <table style="min-width:860px">
+        <thead><tr><th class="s">인터페이스</th><th class="s">IP 주소</th><th class="s">대역 · 용도</th><th class="s">설정한 이름</th><th class="s">DNS 조회 결과</th><th class="s">이름 확인</th><th class="s">열린 포트</th></tr></thead>
+        <tbody>
+          <sc-for list="{{d.rows}}" as="r" hint-placeholder-count="6">
+          <tr class="{{r.trCls}}">
+            <td><b>{{r.ifn}}</b> <span class="muted">{{r.ifSub}}</span></td>
+            <td class="mono"><a href="#" style="text-decoration:none;font-weight:600">{{r.ip}}</a> <span class="{{r.flagCls}}" style="font-family:inherit">{{r.flag}}</span></td>
+            <td><span class="mono muted">{{r.net}}</span> <b>{{r.pur}}</b></td>
+            <td>{{r.name}}</td>
+            <td class="mono" style="{{r.dnsStyle}}">{{r.dns}}</td>
+            <td><span class="{{r.okCls}}">{{r.ok}}</span></td>
+            <td class="mono muted">{{r.ports}}</td>
+          </tr>
+          </sc-for>
+        </tbody>
+      </table>
+      </div>
+      <div style="padding:11px 18px;font-size:12px" class="muted">출처 — iDRAC 주소는 iDRAC 등록, OS 주소는 OS 수집({{d.via}}), 열린 포트는 스캔</div>
+    </section>
+
+    <aside class="card" style="flex:1 1 280px;max-width:340px;padding:16px 18px;display:flex;flex-direction:column;gap:12px" aria-label="OS 정보">
+      <h2 class="h2">OS 정보</h2>
+      <dl class="kv">
+        <dt>OS</dt><dd><b>{{d.os}}</b></dd>
+        <dt>호스트명</dt><dd>{{d.name}}</dd>
+        <dt>도메인</dt><dd class="mono">kr1.example</dd>
+        <dt>DNS 서버</dt><dd class="mono">10.20.30.10 · 10.20.30.11</dd>
+        <dt>기본 게이트웨이</dt><dd class="mono">10.20.31.1</dd>
+        <dt>가동 시간</dt><dd>{{d.up}}</dd>
+        <dt>수집</dt><dd>{{d.via}} · <span class="mono">14:35</span> <span class="tag ok">정상</span></dd>
+      </dl>
+      <div class="muted" style="font-size:12px;border-top:1px solid #1f2a40;padding-top:12px">OS 수집이 안 되는 서버는 iDRAC 주소와 스캔으로 확인한 주소만 보이고, 빠진 이유를 이 자리에 적습니다.</div>
+    </aside>
+  </div>
+
+  <section class="card" style="overflow:hidden" aria-label="할당 정보">
+    <div style="display:flex;align-items:center;gap:10px;padding:13px 18px">
+      <h2 class="h2">할당 정보</h2><span class="muted" style="font-size:12px">대장에 적힌 내용 · 숨김 대역 주소는 빠집니다</span>
+    </div>
+    <div style="overflow-x:auto">
+    <table style="min-width:820px">
+      <thead><tr><th class="s">IP 주소</th><th class="s">용도</th><th class="s">요청자</th><th class="s">할당자</th><th class="s">관리</th><th class="s">사용 이력</th><th class="s">메모</th></tr></thead>
+      <tbody>
+        <sc-for list="{{d.asg}}" as="a" hint-placeholder-count="5">
+        <tr>
+          <td class="mono"><a href="#" style="text-decoration:none;font-weight:600">{{a.ip}}</a></td>
+          <td>{{a.pur}}</td><td>{{a.req}}</td><td>{{a.asg}}</td>
+          <td><span class="{{a.mgCls}}">{{a.mg}}</span></td>
+          <td class="muted">{{a.hist}}</td>
+          <td class="muted">{{a.memo}}</td>
+        </tr>
+        </sc-for>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const D = '.kr1.example';
+    const win = (this.state && this.state.os) === 'windows';
+    const row = (ifn, ifSub, ip, net, pur, name, dns, ok, ports, opt) => {
+      const o = opt || {};
+      return {
+        ifn, ifSub, ip, net, pur, name: name || '—', ports: ports || '—', ok,
+        dns: dns ? dns + D : (ok === 'DNS 기록 없음' ? '조회 결과 없음' : '—'),
+        okCls: ok === '일치' ? 'tag ok' : ok === '불일치' ? 'tag crit' : ok === 'DNS 기록 없음' ? 'tag gray' : 'muted',
+        dnsStyle: ok === '불일치' ? 'color:#fca5a5' : ok === '일치' ? '' : 'color:#8b9bb4;font-family:inherit',
+        trCls: o.hit ? 'hit' : ok === '불일치' ? 'bad' : o.hidden ? 'dim' : '',
+        flag: o.hit ? '찾은 주소' : o.hidden ? '숨김 대역' : o.extra || '',
+        flagCls: o.hit ? 'tag blue' : (o.hidden || o.extra) ? 'tag gray' : '',
+        hidden: !!o.hidden,
+      };
+    };
+    const asg = (ip, pur, req, a, mg, hist, memo) => ({ ip, pur, req, asg: a, mg: mg || '—', mgCls: mg ? 'tag ok' : 'muted', hist, memo: memo || '—' });
+    const linux = {
+      tag: '4HT9P14', name: 'db-kr1-phy02', model: 'PowerEdge R660', os: 'Rocky Linux 9.4', via: 'SSH', up: '41일', hitIp: '10.20.31.52',
+      rows: [
+        row('iDRAC', '', '10.20.8.121', '10.20.8.0/24', 'iDRAC 관리망', 'idrac-db-kr1-phy02', 'idrac-db-kr1-phy01', '불일치', '443'),
+        row('bond0', 'eno1 + eno2', '10.20.31.52', '10.20.31.0/24', '앱 서버망', 'db-kr1-phy02', 'db-kr1-phy02', '일치', '22, 5432', { hit: true }),
+        row('bond0', '추가 주소', '10.20.31.60', '10.20.31.0/24', '앱 서버망', 'db-kr1-vip', 'db-kr1-vip', '일치', '5432', { extra: '서비스 주소' }),
+        row('bond1', 'eno3 + eno4', '10.20.50.52', '10.20.50.0/24', '백업망', 'db-kr1-phy02-bk', '', 'DNS 기록 없음', '22'),
+        row('ens5f0', '', '10.20.42.52', '10.20.42.0/24', '스토리지망', '', '', '이름 없음', ''),
+        row('docker0', '', '172.17.0.1', '172.17.0.0/16', '', '', '', '확인 안 함', '', { hidden: true }),
+      ],
+      asg: [
+        asg('10.20.8.121', 'iDRAC', 'infra-kr', 'net-admin', '고정할당', '612일째', ''),
+        asg('10.20.31.52', 'DB 서버', 'dba-team', 'net-admin', '고정할당', '598일째', '주 서버'),
+        asg('10.20.31.60', 'DB 서비스 주소', 'dba-team', 'net-admin', '고정할당', '598일째', '장애 때 phy01 로 넘어감'),
+        asg('10.20.50.52', '백업', 'dba-team', 'ops-kr', '', '311일째', ''),
+        asg('10.20.42.52', '스토리지', 'infra-kr', 'net-admin', '', '598일째', ''),
+      ],
+    };
+    const windows = {
+      tag: '9QW3L57', name: 'file-kr1-phy01', model: 'PowerEdge R760xd2', os: 'Windows Server 2022 Standard', via: 'WinRM', up: '18일', hitIp: '10.20.31.71',
+      rows: [
+        row('iDRAC', '', '10.20.8.133', '10.20.8.0/24', 'iDRAC 관리망', 'idrac-file-kr1-phy01', 'idrac-file-kr1-phy01', '일치', '443'),
+        row('NIC Team 1', 'NIC1 + NIC2', '10.20.31.71', '10.20.31.0/24', '앱 서버망', 'file-kr1-phy01', 'file-kr1-phy01', '일치', '445, 3389, 5985', { hit: true }),
+        row('NIC Team 1', '추가 주소', '10.20.31.72', '10.20.31.0/24', '앱 서버망', 'file-kr1', 'file-kr1', '일치', '445', { extra: '서비스 주소' }),
+        row('NIC3', '', '10.20.50.71', '10.20.50.0/24', '백업망', 'file-kr1-phy01-bk', 'old-file-02-bk', '불일치', '—'),
+        row('NIC4', '', '10.20.42.71', '10.20.42.0/24', '스토리지망', '', '', '이름 없음', ''),
+        row('vEthernet', '', '172.17.80.1', '172.17.0.0/16', '', '', '', '확인 안 함', '', { hidden: true }),
+      ],
+      asg: [
+        asg('10.20.8.133', 'iDRAC', 'infra-kr', 'net-admin', '고정할당', '402일째', ''),
+        asg('10.20.31.71', '파일 서버', 'it-support', 'ops-kr', '고정할당', '398일째', ''),
+        asg('10.20.31.72', '파일 공유 서비스 주소', 'it-support', 'ops-kr', '고정할당', '398일째', '사용자가 접속하는 이름'),
+        asg('10.20.50.71', '백업', 'it-support', 'ops-kr', '', '120일째', 'DNS 정리 필요'),
+        asg('10.20.42.71', '스토리지', 'infra-kr', 'net-admin', '', '398일째', ''),
+      ],
+    };
+    const d = win ? windows : linux;
+    d.nIp = d.rows.length;
+    d.nIf = new Set(d.rows.map((r) => r.ifn)).size;
+    d.nBad = d.rows.filter((r) => r.ok === '불일치').length;
+    d.nNone = d.rows.filter((r) => r.ok === 'DNS 기록 없음').length;
+    return {
+      d,
+      linuxCls: win ? '' : 'on', winCls: win ? 'on' : '',
+      pickLinux: () => this.setState({ os: 'linux' }),
+      pickWin: () => this.setState({ os: 'windows' }),
+    };
+  }
+}
+</script>
+</body>
+</html>

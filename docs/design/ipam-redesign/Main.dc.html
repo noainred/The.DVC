@@ -56,7 +56,8 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .sig .sub{font-size:11.5px;color:#8b9bb4}
 .chk{display:flex;align-items:baseline;gap:6px;padding:7px 12px;border:1px solid #243049;border-radius:8px;text-decoration:none;color:#8b9bb4;font-size:12px;white-space:nowrap}
 .chk b{color:#e6edf6;font-size:13.5px}
-.ml{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr) 44px 58px;gap:10px;align-items:center;padding:6px 18px;text-decoration:none;color:#e6edf6;font-size:12.5px}
+.purp{font-weight:700}
+.ml{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) 40px 50px;gap:10px;align-items:center;padding:6px 18px;text-decoration:none;color:#e6edf6;font-size:12.5px}
 .ml:hover{background:rgba(59,130,246,.06)}
 .mt{height:8px;border-radius:4px;overflow:hidden}
 .mt i{display:block;height:100%;border-radius:4px}
@@ -169,7 +170,7 @@ td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
       <div class="hd" style="padding-bottom:10px"><h2 class="h2">사용률 높은 대역</h2><span class="muted" style="font-size:12px">상위 10</span><a href="Subnets.dc.html" class="more">전체 312</a></div>
       <sc-for list="{{top}}" as="t" hint-placeholder-count="10">
       <a href="Subnets.dc.html" class="ml" title="{{t.tip}}">
-        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="mono" style="font-weight:600">{{t.cidr}}</span> <span class="muted">{{t.corp}}</span></span>
+        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="mono" style="font-weight:600">{{t.cidr}}</span> <span class="{{t.purCls}}">{{t.pur}}</span> <span class="muted">{{t.corp}}</span></span>
         <span class="mt" style="{{t.track}}"><i style="{{t.fill}}"></i></span>
         <span class="mono r" style="font-weight:600">{{t.pct}}</span>
         <span class="mono r muted">빈 {{t.free}}</span>
@@ -243,9 +244,11 @@ class Component extends DCLogic {
   renderVals() {
     const sev = (p) => (p >= 90 ? '239,68,68' : p >= 80 ? '245,158,11' : '59,130,246');
     const meter = (p) => ({ track: 'flex:1;background:rgba(' + sev(p) + ',.18)', fill: 'width:' + p + '%;background:rgb(' + sev(p) + ')' });
+    const PUR = { '10.20.30.0/24': '웹 서비스망', '10.31.4.0/24': 'DB 망', '10.40.2.0/24': '사무 VDI', '172.16.40.0/24': 'K8s 노드', '10.50.2.0/24': '랙 증설 구역', '10.20.31.0/24': '앱 서버망', '10.31.7.0/24': '백업망', '10.31.5.0/24': 'ETL · 배치' };
     const mkTop = (cidr, corp, used) => {
       const p = Math.round(used / 254 * 100);
-      return { cidr, corp, pct: p + '%', free: 254 - used, tip: cidr + ' · ' + corp + ' · ' + used + '/254', ...meter(p) };
+      const pur = PUR[cidr] || '';
+      return { cidr, corp, pur: pur || '용도 없음', purCls: pur ? 'purp' : 'muted', pct: p + '%', free: 254 - used, tip: cidr + ' · ' + (pur || '용도 없음') + ' · ' + corp + ' · ' + used + '/254', ...meter(p) };
     };
     const mkCorp = (name, site, ips, nets, util, iss, agent, scan, at) => ({
       name, site, ips, nets, util: util + '%', iss: iss ? String(iss) : '—', agent, scan, at, ...meter(util),
