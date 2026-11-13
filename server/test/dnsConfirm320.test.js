@@ -250,6 +250,9 @@ test('⑥ /tools/ipam dnsFwd 칸(일치는 판정만 · 어긋남은 이름 · �
     '10.250.9.7': { ip: '10.250.9.7', openPorts: [22], services: ['SSH'], lastSeen: Date.now(), agent: '__local__', names: { dns: { v: 'gone.corp', at: 1, miss: 0 } }, dnsFwd: { v: 'none', at: 2 } },
     '10.250.9.8': { ip: '10.250.9.8', openPorts: [22], services: ['SSH'], lastSeen: Date.now(), agent: '__local__', names: { dns: { v: 'slow.corp', at: 1, miss: 0 } }, dnsFwd: { v: 'unknown' } },
     '10.250.9.9': { ip: '10.250.9.9', openPorts: [22], services: ['SSH'], lastSeen: Date.now(), agent: '__local__', dnsFwd: { v: 'none', at: 2 } },
+    // 디스크의 꼴이 틀린 값 — 로드 정제(모르는 판정 · 주소 꼴 · 미래 시각)
+    '10.250.9.10': { ip: '10.250.9.10', openPorts: [22], services: ['SSH'], lastSeen: Date.now(), agent: '__local__', names: { dns: { v: 'evil.corp', at: 1, miss: 0 } }, dnsFwd: { v: 'evil' } },
+    '10.250.9.11': { ip: '10.250.9.11', openPorts: [22], services: ['SSH'], lastSeen: Date.now(), agent: '__local__', names: { dns: { v: 'odd.corp', at: 1, miss: 0 } }, dnsFwd: { v: 'other', at: 9e15, addrs: ['<b>', '10.250.9.98'] } },
   }));
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};
@@ -265,11 +268,18 @@ test('⑥ /tools/ipam dnsFwd 칸(일치는 판정만 · 어긋남은 이름 · �
     const call = async (p, h = {}) => { const r = await fetch(base + '/api' + p, { headers: h }); const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch { j = t; } return { s: r.status, j }; };
     const out = {};
     try {
+      const led0 = await call('/tools/ipam');
+      const vm = led0.j.rows.find((r) => r.ownerType === 'vm');
+      const ss = await import(SRC + 'ipam/scanStore.js');
+      ss.mergeScanResults([{ ip: vm.ip, openPorts: [22], services: ['SSH'], names: { dns: 'vm-old.corp' }, tried: ['dns'], dnsFwd: { v: 'none', at: 3 } }], Date.now(), '__local__');
       const led = await call('/tools/ipam');
+      out.vmRow = led.j.rows.find((r) => r.ip === vm.ip && r.ownerType === 'vm');
       out.rows = Object.fromEntries(led.j.rows.filter((r) => r.ip.startsWith('10.250.9.')).map((r) => [r.ip, { dnsFwd: r.dnsFwd, dnsPtr: r.dnsPtr, dnsFwdAddrs: r.dnsFwdAddrs, dnsFwdAt: r.dnsFwdAt }]));
-      const vc = led.j.rows.find((r) => r.ownerType === 'vm')?.vcenterId;
+      out.loaded11 = ss.getScanResults()['10.250.9.11']?.dnsFwd;
+      const vc = vm.vcenterId;
       const sled = await call('/tools/ipam', { 'x-scope': vc });
       out.scopedAny = sled.j.rows.some((r) => r.dnsFwd);
+      out.scopedVm = sled.j.rows.find((r) => r.ip === vm.ip && r.ownerType === 'vm');
       const ins = await call('/tools/ipam/insights');
       out.card = ins.j.features.find((f) => f.key === 'ptr');
       out.cards = ins.j.features.length;
@@ -294,13 +304,23 @@ test('⑥ /tools/ipam dnsFwd 칸(일치는 판정만 · 어긋남은 이름 · �
   assert.deepEqual(o.rows['10.250.9.7'], { dnsFwd: 'none', dnsPtr: 'gone.corp', dnsFwdAt: 2 });
   assert.deepEqual(o.rows['10.250.9.8'], { dnsFwd: 'unknown' });
   assert.deepEqual(o.rows['10.250.9.9'], {}, '역DNS 이름 없는 저장본의 결과는 로드에서 버린다');
-  assert.equal(o.scopedAny, false, '범위 계정에는 싣지 않는다(스캔 결과는 vCenter 귀속이 없다)');
+  assert.deepEqual(o.rows['10.250.9.10'], {}, '모르는 판정은 로드에서 버린다');
+  assert.ok(o.loaded11.at <= Date.now(), '미래 시각은 로드 시각으로 자른다');
+  assert.deepEqual(o.loaded11.addrs, ['10.250.9.98']);
+  assert.equal(o.vmRow.dnsFwd, 'none', 'VM 행에도 스캔이 확인한 정방향 결과');
+  assert.equal(o.vmRow.dnsPtr, 'vm-old.corp');
+  assert.ok(o.scopedVm, '범위 계정도 자기 VM 행은 본다');
+  assert.equal(o.scopedVm.dnsFwd, undefined, '범위 계정의 VM 행에는 싣지 않는다(스캔 결과는 vCenter 귀속이 없다)');
+  assert.equal(o.scopedAny, false);
   assert.equal(o.cards, 30, '추천 기능 30선 — 개수는 그대로');
   assert.equal(o.card.title, 'DNS 정합성 · 레코드 초안');
-  assert.equal(o.card.value, '불일치 2');
+  assert.equal(o.card.value, '불일치 4');
   assert.equal(o.card.severity, 'warn');
-  assert.deepEqual(o.card.dnsCheck.counts, { match: 1, other: 1, none: 1, unknown: 1 });
-  assert.deepEqual(o.card.dnsCheck.rows.map((x) => [x.ip, x.v, x.ptr, x.addrs.join(' ')]), [['10.250.9.5', 'other', 'stale.corp', '10.250.9.99'], ['10.250.9.7', 'none', 'gone.corp', '']]);
+  assert.deepEqual(o.card.dnsCheck.counts, { match: 1, other: 2, none: 2, unknown: 1 });
+  const cr = o.card.dnsCheck.rows.filter((x) => x.ip.startsWith('10.250.9.'));
+  assert.deepEqual(cr.map((x) => [x.ip, x.v, x.ptr, x.addrs.join(' ')]), [['10.250.9.5', 'other', 'stale.corp', '10.250.9.99'], ['10.250.9.7', 'none', 'gone.corp', ''], ['10.250.9.11', 'other', 'odd.corp', '10.250.9.98']]);
+  const vmCard = o.card.dnsCheck.rows.find((x) => x.ip === o.vmRow.ip);
+  assert.equal(vmCard.knownSrc, 'vm', '대장이 아는 이름 — VM 이름');
   assert.equal(o.scopedCard.dnsCheck, undefined, '범위 계정은 예전 카드(레코드 초안)');
   assert.equal(o.scopedCard.title, 'DNS 레코드 제안(정방향/PTR)');
   assert.deepEqual(o.hist.scan.dnsFwd, { v: 'other', at: 2, addrs: ['10.250.9.99'] });
