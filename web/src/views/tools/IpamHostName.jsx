@@ -3,12 +3,19 @@
 import React from 'react';
 import { fmtDt } from './ipamShared.jsx';
 import { NAME_SRC, methodRows, methodStateText, mismatchTitle } from './ipamHostText.js';
+import { dnsBadge, dnsDetailLine } from './ipamDnsText.js'; // v3.2.0 DNS 정합성(역DNS 이름의 정방향 확인)
 
 /** 출처 배지(역DNS · mDNS · NetBIOS · 수동). 모르는 값이면 그리지 않는다. */
 export function NameSrcBadge({ src, style }) {
   const m = NAME_SRC[src];
   if (!m) return null;
   return <span className={`badge ${m.tone}`} title={m.title} style={{ fontSize: 10, ...style }}>{m.label}</span>;
+}
+
+/** v3.2.0: 정방향 확인이 어긋났을 때만(DNS 다른 IP · 정방향 없음) — 일치 · 확인 못 함은 달지 않는다(요약 줄이 센다). */
+export function DnsBadge({ r }) {
+  const b = dnsBadge(r, fmtDt);
+  return b ? <span className={`badge ${b.tone}`} style={{ fontSize: 10 }} title={b.title}>{b.label}</span> : null;
 }
 
 /**
@@ -23,6 +30,7 @@ export function HostNameCell({ r, canManage = false, onAdd }) {
         <NameSrcBadge src={r.netNameSrc} />
         {r.netNameStale && <span className="muted" style={{ fontSize: 11 }} title="지난 스캔에서 이 방식이 답하지 않았습니다 — 이 시각에 확인한 이름입니다">{fmtDt(r.netNameAt)} 확인</span>}
         {r.nameMismatch && <span className="badge amber" style={{ fontSize: 10 }} title={mismatchTitle(r.nameAlt)}>이름 다름</span>}
+        <DnsBadge r={r} />
       </span>
     );
   }
@@ -35,6 +43,19 @@ export function HostNameCell({ r, canManage = false, onAdd }) {
         <button className="tab" style={{ padding: '1px 7px', fontSize: 11, border: '1px dashed var(--border)' }}
           title="이 IP 의 호스트명을 직접 넣습니다(IP 관리상태 편집 › 호스트명)" onClick={onAdd}>+ 이름</button>
       )}
+    </span>
+  );
+}
+
+/** v3.2.0: 역DNS 줄 아래 정방향 결과(이름을 다시 물은 답 — 하루 동안 다시 쓰므로 확인 시각이 스캔 시각과 다를 수 있다). 확인하지 않았으면 그리지 않는다. */
+function FwdLine({ d }) {
+  const l = dnsDetailLine(d);
+  if (!l) return null;
+  return (
+    <span className="flex" style={{ flex: '1 0 100%', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 2, fontSize: 12, marginTop: 2 }}>
+      <span className="muted" style={{ flex: '0 0 auto' }}>↳ 정방향</span>
+      <span style={{ flex: '1 1 180px', minWidth: 0, overflowWrap: 'anywhere', color: l.tone === 'amber' ? 'var(--amber)' : l.tone === 'green' ? 'var(--green)' : 'var(--text-dim)' }}>{l.text}</span>
+      {l.at ? <span className="muted" style={{ flex: '0 0 auto' }} title="정방향 확인 결과는 스캔 설정의 기간 동안 다시 씁니다 — 스캔 시각과 다를 수 있습니다">{fmtDt(l.at)} 확인</span> : null}
     </span>
   );
 }
@@ -84,6 +105,7 @@ export function HostNameBlock({ row, scan, canManage = false, onEditName }) {
                 {m.state === 'stale' && <span className="muted" style={{ display: 'block', fontSize: 11 }}>{methodStateText(m, scan.nameMissMax)}</span>}
               </span>
               <span className="muted" style={{ flex: '0 0 auto', fontSize: 12 }}>{m.at ? fmtDt(m.at) : ''}</span>
+              {m.key === 'dns' && m.value && <FwdLine d={scan.dnsFwd} />}
             </div>
           ))}
         </div>

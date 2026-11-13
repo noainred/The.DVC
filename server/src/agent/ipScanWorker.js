@@ -184,6 +184,8 @@ export async function runIpScanAgentOnce(...args) {
         // v2.991 호스트명 확인(mDNS · NetBIOS) — 사용자 결정 '기본 켜짐'. 구버전 중앙(키 없음)도 켜짐이다 — 옛 중앙은 더 보낸 칸을
         //   정제에서 버리고 표시 이름(hostname)만 받는다(그 이름이 NetBIOS 에서 왔어도 hostname 칸의 뜻은 같다).
         mdns: a.mdns !== false, netbios: a.netbios !== false,
+        // v3.2.0: 역DNS 이름의 정방향 확인(법인 DNS 에 묻는다) — 옛 중앙(키 없음)이면 켜짐 · 기간은 중앙 설정(없으면 24시간)
+        dnsConfirm: a.dnsConfirm !== false, dnsConfirmHours: a.dnsConfirmHours,
       });
     } catch (se) { scanErr = se; } finally { _lastScanAt = Date.now(); saveLastScanAt(_lastScanAt); journalScanFinished('ipscan-agent', 'scan'); }
     if (scanErr) {

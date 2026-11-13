@@ -24,6 +24,7 @@ import { scanNameSummary, scanNameSummaryParts } from './ipamHostText.js';
 import { MacCell, MacBlock } from './IpamMac.jsx'; // v2.999 제조사 · MAC 칸 · IP 상세 창 MAC 묶음
 import { scanMacSummary, scanMacSummaryParts, isUnregisteredVirtual, macSortValue } from './ipamMacText.js';
 import { hasMacAlert } from './ipamChangeText.js'; // v3.1.0 '충돌 · MAC 변경' 칩
+import { dnsSummary, dnsSummaryParts, hasDnsMismatch, DNS_FWD } from './ipamDnsText.js'; // v3.2.0 DNS 정합성 — 요약 · 칩 'DNS 불일치'
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 
@@ -218,6 +219,8 @@ function Ipam({ scope, onScope }) {
     c.macs = scanMacSummary(data?.rows || []); // v2.999: 스캔 IP MAC 요약(같은 줄) · '미등록 가상 NIC' 칩 수
     c.vnic = c.macs.virtualUnreg;
     c.macAlert = (data?.rows || []).filter(hasMacAlert).length; // v3.1.0: 충돌 의심 · 최근 MAC 변경
+    c.dns = dnsSummary(data?.rows || []); // v3.2.0: 역DNS 이름의 정방향 확인(일치 · 불일치 · 확인 못 함)
+    c.dnsBad = c.dns.other + c.dns.none;
     return c;
   }, [data]);
   const rows = useMemo(() => (data?.rows || []).filter((r) => {
@@ -231,7 +234,8 @@ function Ipam({ scope, onScope }) {
     if (reconFilter === 'noname' && !(r.ownerType === 'scanned' && !r.netName)) return false;
     if (reconFilter === 'vnic' && !isUnregisteredVirtual(r)) return false; // v2.999
     if (reconFilter === 'macalert' && !hasMacAlert(r)) return false; // v3.1.0
-    if (reconFilter && !['managed', 'unmanaged', 'reserved', 'noname', 'vnic', 'macalert'].includes(reconFilter) && r.reconcile !== reconFilter) return false;
+    if (reconFilter === 'dnsbad' && !hasDnsMismatch(r)) return false; // v3.2.0
+    if (reconFilter && !['managed', 'unmanaged', 'reserved', 'noname', 'vnic', 'macalert', 'dnsbad'].includes(reconFilter) && r.reconcile !== reconFilter) return false;
     if (term && !(r.ip.includes(term) || (r.ownerName || '').toLowerCase().includes(term) || (r.hostName || '').toLowerCase().includes(term) || (r.netName || '').toLowerCase().includes(term) || (r.label || '').toLowerCase().includes(term) || (r.owner_ || '').toLowerCase().includes(term) || (r.note || '').toLowerCase().includes(term))) return false;
     return true;
   }), [data, term, rowFilter, reconFilter]);
@@ -500,7 +504,8 @@ function Ipam({ scope, onScope }) {
               ['reserved', `⏳ 예약 만료/임박 (${recon.reserved})`, 'amber'],
               ['noname', `호스트명 없음(스캔 IP) (${recon.noname})`, 'gray'],
               ...(recon.vnic > 0 || reconFilter === 'vnic' ? [['vnic', `미등록 가상 NIC (${recon.vnic})`, 'teal']] : []),
-              ...(recon.macAlert > 0 || reconFilter === 'macalert' ? [['macalert', `충돌 의심 · MAC 변경 (${recon.macAlert})`, 'red']] : [])].map(([k, label]) => (
+              ...(recon.macAlert > 0 || reconFilter === 'macalert' ? [['macalert', `충돌 의심 · MAC 변경 (${recon.macAlert})`, 'red']] : []),
+              ...(recon.dnsBad > 0 || reconFilter === 'dnsbad' ? [['dnsbad', `DNS 불일치 (${recon.dnsBad})`, 'amber']] : [])].map(([k, label]) => (
               <button key={k} className={reconFilter === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => k ? toggleRecon(k) : setReconFilter('')}>{label}</button>
             ))}
             {canManage && <button className="logout-btn" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} title="수동으로 IP를 등록하거나 한 대역을 일괄 관리(예약 등)" onClick={() => setEditOv({ ip: '', __new: true })}>＋ IP 수동 등록 / 일괄 관리</button>}
@@ -512,6 +517,13 @@ function Ipam({ scope, onScope }) {
                 title="스캔으로만 확인한 IP 의 호스트명 — 직접 넣은 이름 · 역DNS · mDNS · NetBIOS 중 표시한 것의 출처별 개수입니다">
                 <span className="muted">스캔 IP 호스트명</span> <b>{recon.names.named.toLocaleString()}</b><span className="muted">/ {recon.names.total.toLocaleString()}</span>
                 {scanNameSummaryParts(recon.names).map((p) => <span key={p.key} className={`badge ${p.tone}`} style={{ fontSize: 10 }}>{p.label}</span>)}
+              </span>
+            )}
+            {recon.dns.total > 0 && (
+              <span className="flex gap wrap" style={{ alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}
+                title="역DNS 가 답한 이름을 정방향으로 다시 물어 그 IP 를 가리키는 수 / 확인한 수 — 확인 못 함(시한 · 예산)은 일치에도 불일치에도 넣지 않습니다. 묻는 곳은 스캔을 돌린 쪽의 DNS 입니다">
+                <span className="muted">정방향 확인</span> <b>{recon.dns.match.toLocaleString()}</b><span className="muted">/ {(recon.dns.total - recon.dns.unknown).toLocaleString()}</span>
+                {dnsSummaryParts(recon.dns).map((p) => <span key={p.key} className={`badge ${p.tone}`} style={{ fontSize: 10 }}>{p.label}</span>)}
               </span>
             )}
             {recon.macs.withMac > 0 && (
@@ -758,14 +770,15 @@ function IpamInsights({ scope }) {
       </div>
       <div className="vc-grid">
         {feats.map((f) => (
-          <div key={f.key} className="card" style={{ cursor: f.items?.length ? 'pointer' : 'default', borderColor: f.severity === 'warn' ? 'var(--amber)' : undefined }}
-            onClick={() => f.items?.length && setOpen((o) => (o === f.key ? null : f.key))}>
+          <div key={f.key} className="card" style={{ cursor: (f.items?.length || f.dnsCheck?.rows?.length) ? 'pointer' : 'default', borderColor: f.severity === 'warn' ? 'var(--amber)' : undefined, minWidth: 0 }}
+            onClick={() => (f.items?.length || f.dnsCheck?.rows?.length) && setOpen((o) => (o === f.key ? null : f.key))}>
             <div className="flex between" style={{ alignItems: 'baseline' }}>
               <b style={{ fontSize: 14 }}><span className="muted" style={{ fontSize: 12 }}>{String(f.n).padStart(2, '0')}.</span> {f.title}</b>
               <span style={{ fontSize: 15, fontWeight: 700, color: sevColor[f.severity] || 'var(--text)' }}>{f.value}</span>
             </div>
             <div className="muted" style={{ fontSize: 12, marginTop: 5, lineHeight: 1.5 }}>{f.detail}</div>
-            <div className="vc-foot"><span className="muted" style={{ fontSize: 11 }}>📚 {f.tool}</span>{f.items?.length ? <span className="muted" style={{ fontSize: 11 }}>{open === f.key ? '▲ 닫기' : `▼ 상세 ${f.items.length}`}</span> : <span />}</div>
+            <div className="vc-foot"><span className="muted" style={{ fontSize: 11 }}>📚 {f.tool}</span>{(f.items?.length || f.dnsCheck?.rows?.length) ? <span className="muted" style={{ fontSize: 11 }}>{open === f.key ? '▲ 닫기' : `▼ 상세 ${(f.dnsCheck?.total || 0) + (f.items?.length || 0)}`}</span> : <span />}</div>
+            {open === f.key && f.dnsCheck && <DnsCheckTable c={f.dnsCheck} />}
             {open === f.key && f.items?.length > 0 && (
               <div style={{ marginTop: 8, borderTop: '1px solid rgba(36,48,73,.5)', paddingTop: 8, maxHeight: 220, overflowY: 'auto' }}>
                 {f.items.map((it, i) => (
@@ -780,6 +793,43 @@ function IpamInsights({ scope }) {
         ))}
       </div>
     </>
+  );
+}
+
+/**
+ * v3.2.0: 추천 › DNS 정합성 — 어긋난 IP(다른 IP · 정방향 없음)의 표. 카드 안에서 펼친다(클릭이 카드 접힘으로 새지 않게 막는다).
+ *   대장이 아는 이름 = VM · 호스트 이름 또는 스캔 행이면 역DNS 가 아닌 방식(NetBIOS · mDNS · 수동)이 답한 이름.
+ */
+const KNOWN_SRC = { vm: 'VM', host: '호스트', netbios: 'NetBIOS', mdns: 'mDNS', manual: '수동' };
+function DnsCheckTable({ c }) {
+  const rows = Array.isArray(c?.rows) ? c.rows : [];
+  return (
+    <div style={{ marginTop: 8, borderTop: '1px solid rgba(36,48,73,.5)', paddingTop: 8, cursor: 'default' }} onClick={(e) => e.stopPropagation()}>
+      <div className="flex gap wrap" style={{ gap: 6, marginBottom: 6 }}>
+        {['match', 'other', 'none', 'unknown'].map((k) => <span key={k} className={`badge ${DNS_FWD[k].tone}`} style={{ fontSize: 10 }}>{DNS_FWD[k].label} {Number(c.counts?.[k] || 0).toLocaleString()}</span>)}
+      </div>
+      {rows.length > 0 && (
+        // 표가 아니라 줄바꿈되는 행 — 카드는 격자 한 칸(1440px 에서도 약 370px)이라 6열 표는 정방향 주소 · 대장 이름이 가로 스크롤 밖으로 숨었다(Chromium 판독).
+        <div role="list" aria-label="정방향 확인이 어긋난 IP" style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+          {rows.map((x, i) => (
+            <div role="listitem" key={x.ip} style={{ padding: '7px 10px', borderTop: i ? '1px solid rgba(36,48,73,.5)' : 'none', fontSize: 12, lineHeight: 1.55, minWidth: 0 }}>
+              <div className="flex" style={{ flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 2 }}>
+                <span className={`badge ${DNS_FWD[x.v]?.tone || 'gray'}`} style={{ fontSize: 10, flex: 'none' }}>{DNS_FWD[x.v]?.label || x.v}</span>
+                <b style={{ fontFamily: 'var(--mono)', flex: 'none' }}>{x.ip}</b>
+                {x.known ? <span className="muted" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{x.known} ({KNOWN_SRC[x.knownSrc] || x.knownSrc})</span> : null}
+              </div>
+              <div style={{ overflowWrap: 'anywhere' }}>
+                <span className="muted">역DNS</span> {x.ptr || '—'} <span className="muted">→ 정방향</span>{' '}
+                {x.addrs?.length ? <span style={{ fontFamily: 'var(--mono)', color: 'var(--amber)' }}>{x.addrs.join(', ')}</span> : <span style={{ color: 'var(--amber)' }}>그런 이름 없음</span>}
+                {x.at ? <span className="muted"> · {fmtDt(x.at)} 확인</span> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {c.total > rows.length && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>어긋난 IP {Number(c.total).toLocaleString()}개 중 {rows.length.toLocaleString()}개 — 전부는 스캔 결과 CSV 의 dns_forward 열에 있습니다.</div>}
+      <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>스캐너가 쓰는 DNS 의 답입니다 — 안팎이 다른 DNS(분할 DNS)에서는 다른 곳의 답과 다를 수 있고, 운영체제 이름 풀이를 쓰므로 hosts 파일 항목도 섞입니다. 아래는 대장 이름으로 만든 레코드 초안입니다.</div>
+    </div>
   );
 }
 

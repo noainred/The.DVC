@@ -5,7 +5,7 @@ import { parseQuietAgents, IPAM_RULES } from '../Alerts2.jsx';
 
 describe('ipamChangeText', () => {
   it('종류 · 알림 결과 라벨은 서버 목록과 1:1(모르는 값은 —)', () => {
-    expect(CHANGE_ORDER).toEqual(['conflict', 'mac-change', 'new-ip', 'reserved-up', 'rename', 'conflict-resolved', 'baseline']);
+    expect(CHANGE_ORDER).toEqual(['conflict', 'mac-change', 'new-ip', 'reserved-up', 'rename', 'dns-mismatch', 'conflict-resolved', 'baseline']);
     expect(Object.keys(NOTIFY_TEXT).sort()).toEqual(['engine', 'excluded', 'failed', 'flap', 'none', 'off', 'quiet', 'sent', 'skipped', 'summary']);
     expect(notifyBadge('nope')).toEqual(NOTIFY_TEXT.none);
     expect(CHANGE_TYPE.conflict.tone).toBe('red');
@@ -19,6 +19,8 @@ describe('ipamChangeText', () => {
     expect(changeDetail({ type: 'rename', src: 'netbios', from: 'A', to: 'B' })).toBe('NetBIOS A → B');
     expect(changeDetail({ type: 'conflict', vm: 'vm-1', note: 'd' })).toBe('VM vm-1 · d');
     expect(changeDetail({ type: 'baseline', spec: '10.0.0.0/24' })).toMatch(/^대역 10\.0\.0\.0\/24 첫 완료 스캔/);
+    expect(changeDetail({ type: 'dns-mismatch', name: 'web.corp', status: 'other', from: 'match', addrs: ['10.0.0.9'] })).toBe('역DNS web.corp → 10.0.0.9 · 이전 일치');   // v3.2.0
+    expect(changeDetail({ type: 'dns-mismatch', name: 'web.corp', status: 'none', from: 'other' })).toBe('역DNS web.corp → 정방향 없음 · 이전 다른 IP');
     expect(changeDetail(null)).toBe('');
   });
   it('대장 배지 — 충돌 의심이 먼저 · 최근 MAC 변경 · 없으면 null · 칩 판정', () => {

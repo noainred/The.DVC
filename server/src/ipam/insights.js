@@ -63,6 +63,9 @@ function buildSubnets(rows) {
   return out;
 }
 
+/** v3.2.0: DNS 정합성 카드에 싣는 어긋난 IP 수(나머지는 수만 — 전부는 스캔 결과 CSV 의 dns_forward 열). */
+export const DNS_CHECK_ROWS = 100;
+
 /** 30개 추천 기능 카탈로그를 계산해 반환. */
 export function buildIpamInsights(snap, vcenterId = '', allowed = null) {
   const { rows } = buildIpamRows(snap, vcenterId, allowed);
@@ -104,7 +107,7 @@ export function buildIpamInsights(snap, vcenterId = '', allowed = null) {
   // ── 30개 기능 카탈로그 ────────────────────────────────────────────────
   // 각 항목: { n, key, title, tool(영감을 준 솔루션), value(요약), detail, severity, items? }
   const F = [];
-  const add = (key, title, tool, value, detail, opts = {}) => F.push({ n: F.length + 1, key, title, tool, value, detail, severity: opts.severity || 'info', items: opts.items });
+  const add = (key, title, tool, value, detail, opts = {}) => F.push({ n: F.length + 1, key, title, tool, value, detail, severity: opts.severity || 'info', items: opts.items, ...(opts.dnsCheck ? { dnsCheck: opts.dnsCheck } : {}) });
 
   add('subnet-util', '서브넷 사용률', 'NetBox · SolarWinds', `${subnets.length}개 서브넷 · 전체 ${overallUtil}%`,
     '발견된 /24 서브넷별 사용/여유/사용률을 자동 계산합니다.', { items: topN(subnets.map((s) => ({ label: s.cidr, value: `${s.used}/254 (${s.utilizationPct}%)` }))) });
@@ -136,8 +139,31 @@ export function buildIpamInsights(snap, vcenterId = '', allowed = null) {
     'IP를 2개 이상 가진 VM/호스트(NIC 다중) 목록.', { items: topN(multiHomed.map((r) => ({ label: r.ip, value: r.ownerName || '' }))) });
   add('dup-hostname', '중복 호스트명', 'Infoblox(DNS)', `${dupHosts.length}건`,
     '같은 호스트명이 여러 IP에 매핑된 경우(DNS/명명 충돌).', { severity: dupHosts.length ? 'warn' : 'info', items: topN(dupHosts.map((d) => ({ label: d.hostName, value: d.ips.join(', ') }))) });
-  add('ptr', 'DNS 레코드 제안(정방향/PTR)', 'Infoblox · NetBox', `${ipv4.filter((r) => (r.ownerName || r.hostName)).length}개 매핑`,
-    '호스트명↔IP 매핑으로 A/PTR 레코드 초안을 만들 수 있습니다.', { items: topN(ipv4.filter((r) => r.ownerName).map((r) => ({ label: r.ip, value: r.ownerName }))) });
+  // v3.2.0(시안 ipam-alerts-mac-dns ⑦): 카드 16 'DNS 레코드 제안' → 'DNS 정합성' — 스캔이 역DNS 이름을 정방향으로 다시 물은 결과(ledger dnsFwd — 전 범위 계정만 실린다).
+  //   결과가 하나도 없으면(범위 계정 · 옛 엣지 · 확인 끔) 예전 카드 그대로. 레코드 초안(대장 이름 ↔ IP)은 아래 항목으로 그대로 둔다.
+  const dnsCnt = { match: 0, other: 0, none: 0, unknown: 0 };
+  const dnsBad = [];
+  for (const r of ipv4) {
+    if (!Object.prototype.hasOwnProperty.call(dnsCnt, r.dnsFwd)) continue;
+    dnsCnt[r.dnsFwd] += 1;
+    if (r.dnsFwd === 'other' || r.dnsFwd === 'none') dnsBad.push(r);
+  }
+  const dnsN = dnsCnt.match + dnsCnt.other + dnsCnt.none + dnsCnt.unknown;
+  const drafts = topN(ipv4.filter((r) => r.ownerName).map((r) => ({ label: r.ip, value: r.ownerName })));
+  if (dnsN) {
+    dnsBad.sort((a, b) => (a.ipNum ?? 0) - (b.ipNum ?? 0));
+    add('ptr', 'DNS 정합성 · 레코드 초안', 'Infoblox · NetBox', `불일치 ${dnsBad.length}`,
+      `역DNS 가 답한 이름을 정방향으로 다시 물어 그 IP 를 가리키는지 봅니다 — 일치 ${dnsCnt.match} · 다른 IP ${dnsCnt.other} · 정방향 없음 ${dnsCnt.none} · 확인 못 함 ${dnsCnt.unknown}. 펼치면 어긋난 IP 와 대장 이름으로 만든 A/PTR 초안이 보입니다.`,
+      { severity: dnsBad.length ? 'warn' : 'info', items: drafts,
+        dnsCheck: { counts: dnsCnt, total: dnsBad.length, rows: dnsBad.slice(0, DNS_CHECK_ROWS).map((r) => ({
+          ip: r.ip, v: r.dnsFwd, ptr: r.dnsPtr || '', addrs: Array.isArray(r.dnsFwdAddrs) ? r.dnsFwdAddrs : [], at: r.dnsFwdAt || null, agent: r.dnsAgent || '',
+          known: r.ownerType === 'scanned' ? (r.netName && r.netNameSrc && r.netNameSrc !== 'dns' ? r.netName : '') : (r.ownerName || ''),
+          knownSrc: r.ownerType === 'scanned' ? (r.netName && r.netNameSrc && r.netNameSrc !== 'dns' ? r.netNameSrc : '') : (r.ownerType || ''),
+        })) } });
+  } else {
+    add('ptr', 'DNS 레코드 제안(정방향/PTR)', 'Infoblox · NetBox', `${ipv4.filter((r) => (r.ownerName || r.hostName)).length}개 매핑`,
+      '호스트명↔IP 매핑으로 A/PTR 레코드 초안을 만들 수 있습니다.', { items: drafts });
+  }
   add('new-ip', '신규 IP(최근 7일)', 'SolarWinds(변경)', `${newIps.length}개`,
     '최근 7일 내 처음 발견된 IP — 신규 장비/변경 추적.', { items: topN(newIps.map((r) => ({ label: r.ip, value: r.ownerName || '' }))) });
   add('stale', '오래된 IP(30일+ 미응답)', 'NetBox · OpUtils', `${staleIps.length}개`,

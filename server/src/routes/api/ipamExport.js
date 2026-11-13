@@ -238,7 +238,8 @@ api.get('/tools/ipam/netmap', requirePerm('tools'), async (req, res) => {
 api.get('/tools/ipam/scan-report.csv', csvPerm, requirePerm('tools'), (req, res) => {
   // v2.991: 뒤에 호스트명 확인 열을 덧붙인다(앞 열 순서는 그대로 — 열 위치로 읽는 외부 도구가 깨지지 않게).
   // v2.999: mac 은 표시 MAC(스캐너 이웃 표 ARP > NetBIOS 가 답한 MAC — 예전에는 NetBIOS 뿐) · 뒤에 mac_src(arp|netbios) · mac_vendor 를 덧붙인다.
-  const head = 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent,hostname_source,name_dns,name_mdns,name_netbios,netbios_group,mac,mac_src,mac_vendor';
+  // v3.2.0: 뒤에 dns_forward(역DNS 이름의 정방향 확인 — match · other · none · 빈칸 = 확인 못 함 · 묻지 않음) · dns_forward_addrs(other 의 주소 — 공백 구분)를 덧붙인다.
+  const head = 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent,hostname_source,name_dns,name_mdns,name_netbios,netbios_group,mac,mac_src,mac_vendor,dns_forward,dns_forward_addrs';
   // 스캔 결과 전량(전 사이트 IP/포트/서비스/수집엣지)은 vCenter 귀속이 없어 scope 판정 불가 →
   // 범위 제한 계정에는 헤더만 반환한다(ledger.js 스캔 행 차단과 일관 — 이 경로로 새면 하드닝 무의미).
   if (scopedVcenterIds(req.user, store.get())) {
@@ -256,7 +257,8 @@ api.get('/tools/ipam/scan-report.csv', csvPerm, requirePerm('tools'), (req, res)
     const em = entryMac(r);
     return [r.ip, r.hostname || '', h.status || '', (r.openPorts || []).join(' '), (r.services || []).join(' '),
       iso(h.firstSeen), iso(r.lastSeen || h.lastSeen), r.agent || '',
-      displayName(nm).src, nm.dns?.v || '', nm.mdns?.v || '', nm.netbios?.v || '', r.nbGroup || '', em.mac, em.src || '', (em.mac && macInfo(em.mac)?.vendor) || ''].map(esc).join(',');
+      displayName(nm).src, nm.dns?.v || '', nm.mdns?.v || '', nm.netbios?.v || '', r.nbGroup || '', em.mac, em.src || '', (em.mac && macInfo(em.mac)?.vendor) || '',
+      r.dnsFwd && r.dnsFwd.v !== 'unknown' ? r.dnsFwd.v : '', (r.dnsFwd?.addrs || []).join(' ')].map(esc).join(',');
   });
   const csv = `${head}\n${lines.join('\n')}\n`;
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
