@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>새로고침 안내 — 400px</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./upg.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div style="width: 400px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #0a0e17; color: #e6edf6">
+
+<div class="tb" style="padding: 6px 12px; gap: 8px"><span class="logo"><span class="v">V</span>The Davinci</span><span class="ver">v2.993.0</span><button type="button" class="need" style="min-height: 44px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>새로고침 필요</button></div>
+
+<div style="padding: 12px; display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; min-height: 0">
+
+<div class="toast" style="max-width: none; flex-wrap: wrap; gap: 10px 12px; padding: 12px 14px">
+<span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg></span>
+<div style="flex: 1 1 180px; min-width: 0"><div class="tt">프로그램이 업그레이드되었으니 새로고침 하세요.</div><div class="ts mono">v2.991.0 → v2.993.0</div></div>
+<button type="button" class="tx" style="margin: -6px -8px -6px 0; align-self: flex-start" aria-label="닫기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+<button type="button" class="tr" style="flex: 1 1 100%">새로고침</button>
+</div>
+
+<div class="pane after" style="flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0">
+<div class="pane-head">스토리지 › 데이터스토어</div>
+<div style="flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-width: 0">
+<div class="upbox" style="padding: 20px 14px; align-self: stretch; flex: 1 1 auto; min-width: 0; justify-content: center">
+<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg></span>
+<h3 style="font-size: 15px">프로그램이 업그레이드되었으니 새로고침 하세요.</h3>
+<p>열어 둔 창은 업그레이드 전 판이라 화면이 맞지 않을 수 있습니다. 새로고침하면 새 판으로 열립니다.</p>
+<div class="verline"><span>이 창</span><span class="verchip">v2.991.0</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width: 14px; height: 14px"><path d="M4 12h16M14 6l6 6-6 6"/></svg><span>지금</span><span class="verchip new">v2.993.0</span></div>
+
+<div class="chg">
+<div class="chg-h"><span>이번 업그레이드에서 바뀐 것</span><span class="mono" style="font-weight: 500">2개 판 · 8줄</span></div>
+<sc-if value="{{ closed }}" hint-placeholder-val="{{ true }}">
+<ul class="chg-list clamp">
+<li>사용률 출처 색: 물리서버 폴더의 CPU · 메모리 막대를 읽은 곳(OS 파랑 · iDRAC 밝은 청록)으로 칠하고 글자 표지를 붙입니다.</li>
+<li>IP 스캔 정방향 DNS: 중앙이 배정에 그 엣지 법인의 물리서버 이름(iDRAC 이 읽은 호스트 이름)을 싣고, 스캔이 그 이름을 DNS 에 물어 스캔 대역 안의 살아 있는 IP 에 이름을 답니다.</li>
+<li>물리서버 OS 주소 제안: IP 관리 › IP 스캔 › ③ 탭 — 이름이 같은 IP(같은 법인 · SSH 열림)를 제안하고 사람이 확인해 등록합니다.</li>
+</ul>
+<button type="button" class="more" aria-expanded="false" onClick="{{ toggle }}">More<span class="n">· 5줄 더</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+</sc-if>
+<sc-if value="{{ open }}" hint-placeholder-val="{{ false }}">
+<div class="chg-scroll" style="max-height: 200px">
+<div class="chg-ver"><span class="verchip new">v2.993.0</span><span class="t">물리서버 사용률 출처 색 · IP 스캔 정방향 DNS 이름 · 물리서버 OS 주소 제안</span></div>
+<ul class="chg-list">
+<li>사용률 출처 색: 물리서버 폴더의 CPU · 메모리 막대를 읽은 곳(OS 파랑 · iDRAC 밝은 청록)으로 칠하고 글자 표지를 붙입니다. 지표마다 따로(CPU 는 OS · 메모리는 iDRAC 일 수 있음) — 최신값에 지표별 출처 칸을 더했습니다(업그레이드 직후 마지막 값은 '지표마다 다름'으로 보이고 다음 수집부터 지표별로 보입니다).</li>
+<li>IP 스캔 정방향 DNS: 중앙이 배정에 그 엣지 법인의 물리서버 이름(iDRAC 이 읽은 호스트 이름)을 싣고, 스캔이 그 이름을 DNS 에 물어 스캔 대역 안의 살아 있는 IP 에 이름을 답니다. IP 원장 Hostname 칸에 '정방향 DNS' · '이름이 서로 다름' 표지. 정방향 단계는 90초 예산 · DNS 무응답 차단기로 기존 스캔 시한을 지킵니다.</li>
+<li>물리서버 OS 주소 제안: IP 관리 › IP 스캔 › ③ 탭 — 이름이 같은 IP(같은 법인 · SSH 열림)를 제안하고 사람이 확인해 등록합니다. 주소만(계정 없음 · 비활성) 넣으며, 계정을 넣기 전에는 어떤 수집도 접속하지 않습니다.</li>
+<li>동작 변화: 계정 없이 주소만 등록한 OS 항목은 사용률 수집에 쓰이지 않습니다(예전에는 빈 비밀번호로 SSH 를 시도할 수 있었음 — 이번에 새로 만드는 '주소만' 항목에만 해당, 기존 항목은 그대로).</li>
+</ul>
+<div class="chg-ver"><span class="verchip">v2.992.0</span><span class="t">서버 집중 모니터링 — 개요 카드 아래 줄을 골라 보기(디스크 읽기·쓰기 · 네트워크 · 지연 등)</span></div>
+<ul class="chg-list">
+<li>개요 정렬 줄에 ‘카드 아래 줄’ 메뉴: 네트워크 수신·송신 · 디스크 읽기·쓰기(MB/s) · 디스크 IOPS · 읽기 지연 · 쓰기 지연 · 디스크 대기열 · CPU I/O 대기 · CPU steal · 부하 평균 · 스왑 사용 중 최대 4개</li>
+<li>고른 순서대로 두 개씩 · 기본은 예전과 같은 ‘네트워크 + 쓰기 지연’ · 브라우저가 기억합니다 · 칸에 마우스를 올리면 무엇인지 보입니다</li>
+<li>디스크 값은 물리 디스크 합(지연은 요청 수 가중) · 이미 저장된 기록에서 계산하므로 지난 구간에도 나옵니다 · 못 읽은 값은 —</li>
+<li>카드가 좁은 화면(1280px 등)에서는 한 줄에 하나씩 놓아 잘리지 않게 했습니다</li>
+</ul>
+</div>
+<button type="button" class="more" aria-expanded="true" onClick="{{ toggle }}">접기<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
+</sc-if>
+</div>
+
+<button type="button" class="btn" style="margin-top: 4px; align-self: stretch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>새로고침</button>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const open = !!(this.state && this.state.open);
+return { open: open, closed: !open, toggle: () => this.setState({ open: !open }) };
+}
+}
+</script>
+</body>
+</html>
