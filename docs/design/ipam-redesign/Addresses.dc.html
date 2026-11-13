@@ -95,6 +95,7 @@ tr.sel td:first-child{box-shadow:inset 3px 0 0 #3b82f6}
     <button type="button" class="btn">출처 ▾</button>
     <button type="button" class="btn">공인 · 사설 ▾</button>
     <button type="button" class="btn">관리 상태 ▾</button>
+    <button type="button" class="btn">이름 · DNS · MAC ▾</button>
     <button type="button" class="btn" style="background:transparent;border-color:transparent;color:#93c5fd">필터 지우기</button>
     <span class="muted" style="font-size:12px;margin-left:auto"><b style="color:#e6edf6">8,047</b>개 중 <b style="color:#e6edf6">11</b>개</span>
   </div>
@@ -150,7 +151,9 @@ tr.sel td:first-child{box-shadow:inset 3px 0 0 #3b82f6}
           <dt>OS</dt><dd>Rocky Linux 9</dd>
           <dt>서버</dt><dd>esx-kr1-07 · 서비스 태그 <span class="mono">7XK2M93</span></dd>
           <dt>확인</dt><dd>vCenter + 스캔(포트 22, 443) · <span class="mono">14:40</span></dd>
-          <dt>이름 확인</dt><dd><span class="tag ok">일치</span> <span class="muted">DNS</span> <span class="mono">web-kr1-023.kr1.example</span></dd>
+          <dt>역DNS</dt><dd><span class="mono">web-kr1-023.kr1.example</span><br><span class="muted">↳ 정방향</span> <span class="tag ok">일치</span> <span class="muted mono">14:40 확인</span></dd>
+          <dt>mDNS · NetBIOS</dt><dd class="muted">응답 없음</dd>
+          <dt>MAC</dt><dd><span class="mono">00:50:56:9a:1f:23</span> <span class="tag teal">가상 NIC · VMware</span></dd>
         </dl>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><a href="Server.dc.html" class="btn sm primary">서버 보기 — 이 서버의 모든 IP</a><button type="button" class="btn sm">원격 접속</button><button type="button" class="btn sm">VM 개체 보기</button></div>
       </div>

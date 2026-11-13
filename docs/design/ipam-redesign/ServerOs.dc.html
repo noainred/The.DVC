@@ -111,8 +111,8 @@ tr.dim td{color:#8b9bb4}
     </div>
     <div class="st"><b>{{d.nIp}}</b><span>서버가 쓰는 IP</span></div>
     <div class="st"><b>{{d.nIf}}</b><span>인터페이스</span></div>
-    <div class="st"><b style="color:#fca5a5">{{d.nBad}}</b><span>이름 · DNS 불일치</span></div>
-    <div class="st"><b>{{d.nNone}}</b><span>DNS 기록 없음</span></div>
+    <div class="st"><b style="color:#fcd34d">{{d.nBad}}</b><span>DNS 불일치</span></div>
+    <div class="st"><b>{{d.nNone}}</b><span>역DNS 이름 없음</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
       <button type="button" class="btn">원격 접속</button>
       <button type="button" class="btn">iDRAC 정보</button>
@@ -128,7 +128,7 @@ tr.dim td{color:#8b9bb4}
       </div>
       <div style="overflow-x:auto">
       <table style="min-width:860px">
-        <thead><tr><th class="s">인터페이스</th><th class="s">IP 주소</th><th class="s">대역 · 용도</th><th class="s">설정한 이름</th><th class="s">DNS 조회 결과</th><th class="s">이름 확인</th><th class="s">열린 포트</th></tr></thead>
+        <thead><tr><th class="s">인터페이스</th><th class="s">IP 주소</th><th class="s">대역 · 용도</th><th class="s">대장의 이름</th><th class="s">역DNS 이름</th><th class="s">DNS 확인</th><th class="s">열린 포트</th></tr></thead>
         <tbody>
           <sc-for list="{{d.rows}}" as="r" hint-placeholder-count="6">
           <tr class="{{r.trCls}}">
@@ -158,7 +158,7 @@ tr.dim td{color:#8b9bb4}
         <dt>가동 시간</dt><dd>{{d.up}}</dd>
         <dt>수집</dt><dd>{{d.via}} · <span class="mono">14:35</span> <span class="tag ok">정상</span></dd>
       </dl>
-      <div class="muted" style="font-size:12px;border-top:1px solid #1f2a40;padding-top:12px">OS 수집이 안 되는 서버는 iDRAC 주소와 스캔으로 확인한 주소만 보이고, 빠진 이유를 이 자리에 적습니다.</div>
+      <div class="muted" style="font-size:12px;border-top:1px solid #1f2a40;padding-top:12px">OS 주소는 ‘물리서버 OS 주소 제안’ 에서 사람이 확인해 등록한 것입니다. OS 수집이 안 되는 서버는 iDRAC 주소와 스캔으로 확인한 주소만 보이고, 빠진 이유를 이 자리에 적습니다.</div>
     </aside>
   </div>
 
@@ -196,10 +196,10 @@ class Component extends DCLogic {
     const row = (ifn, ifSub, ip, net, pur, name, dns, ok, ports, opt) => {
       const o = opt || {};
       return {
-        ifn, ifSub, ip, net, pur, name: name || '—', ports: ports || '—', ok,
-        dns: dns ? dns + D : (ok === 'DNS 기록 없음' ? '조회 결과 없음' : '—'),
-        okCls: ok === '일치' ? 'tag ok' : ok === '불일치' ? 'tag crit' : ok === 'DNS 기록 없음' ? 'tag gray' : 'muted',
-        dnsStyle: ok === '불일치' ? 'color:#fca5a5' : ok === '일치' ? '' : 'color:#8b9bb4;font-family:inherit',
+        ifn, ifSub, ip, net, pur, name: name || '—', ports: ports || '—', ok: ok === '불일치' ? 'DNS 다른 IP · 이름 다름' : ok === 'DNS 기록 없음' ? '확인할 이름 없음' : ok, rawOk: ok,
+        dns: dns ? dns + D : (ok === 'DNS 기록 없음' ? '역DNS 이름 없음' : '—'),
+        okCls: ok === '일치' ? 'tag ok' : ok === '불일치' ? 'tag warn' : 'muted',
+        dnsStyle: ok === '불일치' ? 'color:#fcd34d' : ok === '일치' ? '' : 'color:#8b9bb4;font-family:inherit',
         trCls: o.hit ? 'hit' : ok === '불일치' ? 'bad' : o.hidden ? 'dim' : '',
         flag: o.hit ? '찾은 주소' : o.hidden ? '숨김 대역' : o.extra || '',
         flagCls: o.hit ? 'tag blue' : (o.hidden || o.extra) ? 'tag gray' : '',
@@ -226,7 +226,7 @@ class Component extends DCLogic {
       ],
     };
     const windows = {
-      tag: '9QW3L57', name: 'file-kr1-phy01', model: 'PowerEdge R760xd2', os: 'Windows Server 2022 Standard', via: 'WinRM', up: '18일', hitIp: '10.20.31.71',
+      tag: '9QW3L57', name: 'file-kr1-phy01', model: 'PowerEdge R760xd2', os: 'Windows Server 2022 Standard', via: '스캔 NetBIOS · iDRAC — Windows OS 수집은 새로 필요', up: '18일', hitIp: '10.20.31.71',
       rows: [
         row('iDRAC', '', '10.20.8.133', '10.20.8.0/24', 'iDRAC 관리망', 'idrac-file-kr1-phy01', 'idrac-file-kr1-phy01', '일치', '443'),
         row('NIC Team 1', 'NIC1 + NIC2', '10.20.31.71', '10.20.31.0/24', '앱 서버망', 'file-kr1-phy01', 'file-kr1-phy01', '일치', '445, 3389, 5985', { hit: true }),
@@ -246,8 +246,8 @@ class Component extends DCLogic {
     const d = win ? windows : linux;
     d.nIp = d.rows.length;
     d.nIf = new Set(d.rows.map((r) => r.ifn)).size;
-    d.nBad = d.rows.filter((r) => r.ok === '불일치').length;
-    d.nNone = d.rows.filter((r) => r.ok === 'DNS 기록 없음').length;
+    d.nBad = d.rows.filter((r) => r.rawOk === '불일치').length;
+    d.nNone = d.rows.filter((r) => r.rawOk === 'DNS 기록 없음').length;
     return {
       d,
       linuxCls: win ? '' : 'on', winCls: win ? 'on' : '',

@@ -106,8 +106,8 @@ tr.bad td{background:rgba(239,68,68,.07)}
     </div>
     <div class="st"><b>6</b><span>서버가 쓰는 IP</span></div>
     <div class="st"><b>23</b><span>VM 18대의 IP</span></div>
-    <div class="st"><b style="color:#fca5a5">3</b><span>이름 · DNS 불일치</span></div>
-    <div class="st"><b>2</b><span>DNS 기록 없음</span></div>
+    <div class="st"><b style="color:#fcd34d">3</b><span>DNS 불일치</span></div>
+    <div class="st"><b>2</b><span>역DNS 이름 없음</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
       <button type="button" class="btn">호스트 개체 보기</button>
       <button type="button" class="btn">iDRAC 정보</button>
@@ -115,7 +115,7 @@ tr.bad td{background:rgba(239,68,68,.07)}
     </div>
   </section>
 
-  <div class="muted" style="font-size:12px">이름 확인 — 설정한 이름(호스트명 · VM 이름 · 직접 넣은 이름)과 그 IP 를 DNS 로 조회한 이름의 첫 마디를 대소문자 구분 없이 견줍니다. 조회는 그 법인 엣지가 자기 DNS 로 합니다.</div>
+  <div class="muted" style="font-size:12px">DNS 확인 — 스캔이 역DNS 로 찾은 이름을 DNS 에 다시 물어 그 이름이 정말 이 IP 를 가리키는지 봅니다(일치 · DNS 다른 IP · 정방향 없음 · 확인 못 함). 대장의 이름과 역DNS 이름이 다르면 ‘이름 다름’ 을 붙입니다. 묻는 곳은 그 법인 엣지의 DNS 입니다.</div>
 
   <section class="card" style="overflow:hidden" aria-label="서버가 직접 쓰는 IP">
     <div style="display:flex;align-items:center;gap:10px;padding:13px 18px">
@@ -123,13 +123,13 @@ tr.bad td{background:rgba(239,68,68,.07)}
     </div>
     <div style="overflow-x:auto">
     <table style="min-width:940px">
-      <thead><tr><th class="s">역할</th><th class="s">IP 주소</th><th class="s">대역</th><th class="s">설정한 이름</th><th class="s">DNS 조회 결과</th><th class="s">이름 확인</th><th class="s">출처</th><th class="s">마지막 확인</th></tr></thead>
+      <thead><tr><th class="s">역할</th><th class="s">IP 주소</th><th class="s">대역</th><th class="s">대장의 이름</th><th class="s">역DNS 이름</th><th class="s">DNS 확인</th><th class="s">출처</th><th class="s">마지막 확인</th></tr></thead>
       <tbody>
         <tr><td><b>iDRAC</b></td><td class="mono"><a href="#" style="text-decoration:none">10.20.8.107</a></td><td class="mono muted">10.20.8.0/24</td><td>idrac-kr1-07</td><td class="mono">idrac-kr1-07.kr1.example</td><td><span class="tag ok">일치</span></td><td class="muted">iDRAC 등록</td><td class="mono muted">14:35</td></tr>
         <tr class="hit"><td><b>ESXi 관리</b> <span class="muted">vmk0</span></td><td class="mono"><a href="#" style="text-decoration:none;font-weight:700">10.20.30.12</a> <span class="tag blue" style="font-family:inherit">찾은 주소</span></td><td class="mono muted">10.20.30.0/24</td><td>esx-kr1-07</td><td class="mono">esx-kr1-07.kr1.example</td><td><span class="tag ok">일치</span></td><td class="muted">vCenter + 스캔</td><td class="mono muted">14:40</td></tr>
         <tr><td><b>vMotion</b> <span class="muted">vmk1</span></td><td class="mono"><a href="#" style="text-decoration:none">10.20.40.12</a></td><td class="mono muted">10.20.40.0/24</td><td class="muted">—</td><td class="muted">—</td><td class="muted">이름 없음</td><td class="muted">vCenter</td><td class="mono muted">14:52</td></tr>
-        <tr class="bad"><td><b>vSAN</b> <span class="muted">vmk2</span></td><td class="mono"><a href="#" style="text-decoration:none">10.20.41.12</a></td><td class="mono muted">10.20.41.0/24</td><td>esx-kr1-07-vsan</td><td class="mono" style="color:#fca5a5">esx-kr1-08-vsan.kr1.example</td><td><span class="tag crit">불일치</span></td><td class="muted">vCenter</td><td class="mono muted">14:52</td></tr>
-        <tr><td><b>스토리지</b> <span class="muted">vmk3</span></td><td class="mono"><a href="#" style="text-decoration:none">10.20.42.12</a></td><td class="mono muted">10.20.42.0/24</td><td>esx-kr1-07-stor</td><td class="muted">조회 결과 없음</td><td><span class="tag gray">DNS 기록 없음</span></td><td class="muted">vCenter</td><td class="mono muted">14:52</td></tr>
+        <tr class="bad"><td><b>vSAN</b> <span class="muted">vmk2</span></td><td class="mono"><a href="#" style="text-decoration:none">10.20.41.12</a></td><td class="mono muted">10.20.41.0/24</td><td>esx-kr1-07-vsan</td><td class="mono" style="color:#fcd34d">esx-kr1-08-vsan.kr1.example</td><td><span class="tag warn">DNS 다른 IP</span> <span class="tag warn">이름 다름</span></td><td class="muted">vCenter</td><td class="mono muted">14:52</td></tr>
+        <tr><td><b>스토리지</b> <span class="muted">vmk3</span></td><td class="mono"><a href="#" style="text-decoration:none">10.20.42.12</a></td><td class="mono muted">10.20.42.0/24</td><td>esx-kr1-07-stor</td><td class="muted">역DNS 이름 없음</td><td class="muted">확인할 이름 없음</td><td class="muted">vCenter</td><td class="mono muted">14:52</td></tr>
         <tr><td><b>예전 관리 주소</b></td><td class="mono"><a href="#" style="text-decoration:none">10.20.30.212</a> <span class="tag warn" style="font-family:inherit">해제</span></td><td class="mono muted">10.20.30.0/24</td><td class="muted">esx-kr1-07</td><td class="muted">—</td><td class="muted">확인 안 함</td><td class="muted">사용 이력</td><td class="mono muted">11-02</td></tr>
       </tbody>
     </table>
@@ -140,12 +140,12 @@ tr.bad td{background:rgba(239,68,68,.07)}
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:13px 18px">
       <h2 class="h2">이 서버 위 VM 의 IP</h2><span class="muted" style="font-size:12px">VM 18대 · IP 23개</span>
       <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
-        <button type="button" class="btn sm">전체 23</button><button type="button" class="btn sm">불일치 2</button><button type="button" class="btn sm">DNS 기록 없음 1</button>
+        <button type="button" class="btn sm">전체 23</button><button type="button" class="btn sm">DNS 불일치 2</button><button type="button" class="btn sm">역DNS 이름 없음 1</button>
       </span>
     </div>
     <div style="overflow-x:auto">
     <table style="min-width:940px">
-      <thead><tr><th class="s">VM</th><th class="s">IP 주소</th><th class="s">설정한 이름</th><th class="s">DNS 조회 결과</th><th class="s">이름 확인</th><th class="s">용도</th><th class="s">요청자</th><th class="s">할당자</th></tr></thead>
+      <thead><tr><th class="s">VM</th><th class="s">IP 주소</th><th class="s">VM 이름</th><th class="s">역DNS 이름</th><th class="s">DNS 확인</th><th class="s">용도</th><th class="s">요청자</th><th class="s">할당자</th></tr></thead>
       <tbody>
         <sc-for list="{{vms}}" as="v" hint-placeholder-count="8">
         <tr class="{{v.trCls}}">
@@ -162,7 +162,7 @@ tr.bad td{background:rgba(239,68,68,.07)}
       </tbody>
     </table>
     </div>
-    <div style="padding:11px 18px;font-size:12px" class="muted">23개 중 8개 · 불일치가 위로 오게 정렬 · IP 를 누르면 그 주소의 상세로 갑니다</div>
+    <div style="padding:11px 18px;font-size:12px" class="muted">23개 중 8개 · DNS 불일치가 위로 오게 정렬 · IP 를 누르면 그 주소의 상세로 갑니다</div>
   </section>
 
 </main>
@@ -176,9 +176,9 @@ class Component extends DCLogic {
     const mk = (vm, ip, dns, ok, purpose, req, asg, opt) => {
       const o = opt || {};
       return {
-        vm, ip, name: vm, dns: dns ? dns + D : '조회 결과 없음', ok, purpose, req, asg,
-        okCls: ok === '일치' ? 'tag ok' : ok === '불일치' ? 'tag crit' : 'tag gray',
-        dnsStyle: ok === '불일치' ? 'color:#fca5a5' : ok === '일치' ? '' : 'color:#8b9bb4;font-family:inherit',
+        vm, ip, name: vm, dns: dns ? dns + D : '역DNS 이름 없음', ok: ok === '불일치' ? 'DNS 다른 IP · 이름 다름' : ok === '일치' ? '일치' : '확인할 이름 없음', purpose, req, asg,
+        okCls: ok === '일치' ? 'tag ok' : ok === '불일치' ? 'tag warn' : 'muted',
+        dnsStyle: ok === '불일치' ? 'color:#fcd34d' : ok === '일치' ? '' : 'color:#8b9bb4;font-family:inherit',
         trCls: ok === '불일치' ? 'bad' : '',
         pw: o.off ? '꺼짐' : '', pwCls: o.off ? 'tag gray' : '',
         flag: o.flag || '', flagCls: o.flag ? (o.flag === '중복' ? 'tag crit' : 'tag gray') : '',
@@ -188,7 +188,7 @@ class Component extends DCLogic {
       vms: [
         mk('api-kr1-009', '10.20.30.20', 'old-api-03', '불일치', 'API 서버', 'api-team', 'net-admin', { off: true }),
         mk('batch-kr1-007', '10.20.30.131', 'batch-kr1-070', '불일치', '배치', 'data-team', 'ops-kr', { flag: '중복' }),
-        mk('db-kr1-002', '10.20.50.14', '', 'DNS 기록 없음', '백업망', 'dba-team', 'net-admin', { flag: '복수IP' }),
+        mk('db-kr1-002', '10.20.50.14', '', '없음', '백업망', 'dba-team', 'net-admin', { flag: '복수IP' }),
         mk('db-kr1-002', '10.20.31.14', 'db-kr1-002', '일치', 'DB', 'dba-team', 'net-admin', { flag: '복수IP' }),
         mk('web-kr1-023', '10.20.30.47', 'web-kr1-023', '일치', '웹 프런트', 'web-team', 'ops-kr'),
         mk('api-kr1-003', '10.20.30.14', 'api-kr1-003', '일치', 'API 서버', 'api-team', 'ops-kr'),

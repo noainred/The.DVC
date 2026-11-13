@@ -93,13 +93,14 @@ td{padding:8px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle}
     <section class="card box" aria-label="무엇을 넣을까요">
       <h2 class="h2">무엇을 넣을까요</h2>
       <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px">
-        <label class="ck"><input type="checkbox" checked><b>새로 쓰기 시작한 주소</b><span>자원 · 용도 · 요청자 · 할당자</span></label>
+        <label class="ck"><input type="checkbox" checked><b>새로 쓰기 시작한 주소</b><span>새 미등록 IP 포함 · 자원 · 용도 · 요청자 · 할당자</span></label>
         <label class="ck"><input type="checkbox" checked><b>해제된 주소</b><span>쓰이다가 응답이 없어진 주소</span></label>
         <label class="ck"><input type="checkbox" checked><b>대역 사용률 변화</b><span>지난 구간 → 이번 구간, 변화 큰 순</span></label>
         <label class="ck"><input type="checkbox" checked><b>가득 찬 대역</b><span>사용률이 기준을 넘은 대역</span></label>
         <label class="ck"><input type="checkbox" checked><b>충돌 · 중복</b><span>새로 생긴 것과 아직 남은 것</span></label>
         <label class="ck"><input type="checkbox" checked><b>예약 만료 · 임박</b><span>정리할 예약</span></label>
-        <label class="ck"><input type="checkbox" checked><b>이름 · DNS 불일치</b><span>새로 어긋난 주소</span></label>
+        <label class="ck"><input type="checkbox" checked><b>DNS 불일치 · 호스트명 변경</b><span>IP 변화 기록에서 — 새로 어긋난 주소 · 바뀐 이름</span></label>
+        <label class="ck"><input type="checkbox" checked><b>충돌 의심 · MAC 변경</b><span>IP 변화 기록에서</span></label>
         <label class="ck"><input type="checkbox" checked><b>관리 정보 변경</b><span>누가 용도 · 요청자 · 할당자 · 예약을 바꿨는지</span></label>
         <label class="ck"><input type="checkbox" checked><b>스캔 수집 상태</b><span>보고가 끊긴 구간 — 그동안의 변화는 빠졌을 수 있음을 밝힙니다</span></label>
         <label class="ck"><input type="checkbox" checked><b>엑셀 첨부</b><span>변경 내역 전체(본문은 상위 몇 건만)</span></label>
@@ -123,10 +124,10 @@ td{padding:8px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle}
       <table style="min-width:820px">
         <thead><tr><th class="s">법인</th><th class="s">받는 사람</th><th class="s">스캔 에이전트</th><th class="s">지난 발송</th><th style="width:90px"></th></tr></thead>
         <tbody>
-          <tr><td><b>VC-KR1</b> <span class="muted">서울</span></td><td><input class="input" type="text" aria-label="VC-KR1 받는 사람" value="ops-kr@corp.example, web-team@corp.example" style="width:100%"></td><td class="muted">edge-kr1</td><td><span class="tag ok">보냄</span> <span class="mono muted">{{d.last}}</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
-          <tr><td><b>VC-US1</b> <span class="muted">미국 동부</span></td><td><input class="input" type="text" aria-label="VC-US1 받는 사람" value="dc-us@corp.example" style="width:100%"></td><td class="muted">edge-us1</td><td><span class="tag ok">보냄</span> <span class="mono muted">{{d.last}}</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
-          <tr><td><b>VC-PL1</b> <span class="muted">폴란드</span></td><td><input class="input" type="text" aria-label="VC-PL1 받는 사람" value="it-pl@corp.example" style="width:100%"></td><td class="muted">edge-pl1</td><td><span class="tag ok">보냄</span> <span class="mono muted">{{d.last}}</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
-          <tr><td><b>VC-BR1</b> <span class="muted">브라질</span></td><td><input class="input" type="text" aria-label="VC-BR1 받는 사람" placeholder="받는 사람 없음 — 전체 종합에만 실립니다" style="width:100%"></td><td class="muted">edge-br1</td><td><span class="tag gray">받는 사람 없음</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
+          <tr><td><b>한국</b> <span class="muted">vCenter 2</span></td><td><input class="input" type="text" aria-label="VC-KR1 받는 사람" value="ops-kr@corp.example, web-team@corp.example" style="width:100%"></td><td class="muted">edge-kr1 외 1</td><td><span class="tag ok">보냄</span> <span class="mono muted">{{d.last}}</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
+          <tr><td><b>미국 동부</b> <span class="muted">vCenter 2</span></td><td><input class="input" type="text" aria-label="VC-US1 받는 사람" value="dc-us@corp.example" style="width:100%"></td><td class="muted">edge-us1 외 1</td><td><span class="tag ok">보냄</span> <span class="mono muted">{{d.last}}</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
+          <tr><td><b>폴란드</b> <span class="muted">vCenter 1</span></td><td><input class="input" type="text" aria-label="VC-PL1 받는 사람" value="it-pl@corp.example" style="width:100%"></td><td class="muted">edge-pl1</td><td><span class="tag ok">보냄</span> <span class="mono muted">{{d.last}}</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
+          <tr><td><b>브라질</b> <span class="muted">vCenter 1</span></td><td><input class="input" type="text" aria-label="VC-BR1 받는 사람" placeholder="받는 사람 없음 — 전체 종합에만 실립니다" style="width:100%"></td><td class="muted">edge-br1</td><td><span class="tag gray">받는 사람 없음</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
         </tbody>
       </table>
       </div>

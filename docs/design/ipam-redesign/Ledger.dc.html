@@ -125,7 +125,7 @@ tr.bad td{background:rgba(239,68,68,.07)}
     <button type="button" class="chip"><i class="sq bad" style="margin:0"></i>문제 {{cnt.bad}}</button>
     <button type="button" class="chip">DNS 불일치 3</button>
     <input class="input" type="text" aria-label="이 대역 안에서 찾기" placeholder="이 대역 안에서 찾기" style="margin-left:auto;width:200px">
-    <button type="button" class="btn">열 선택 · 숨김 3</button>
+    <button type="button" class="btn">열 선택 · 숨김 4</button>
     <button type="button" class="btn">엑셀</button>
   </div>
 
@@ -167,7 +167,7 @@ tr.bad td{background:rgba(239,68,68,.07)}
     </div>
     <div style="padding:11px 18px;font-size:12px;display:flex;flex-wrap:wrap;gap:6px 16px" class="muted">
       <span>254개 주소 중 <span class="mono">.1 ~ .36</span> · 아래로 내리면 이어집니다</span>
-      <span>숨긴 열 3개(OS · 확인 방식 · 마지막 확인)는 ‘열 선택’ 에서 켭니다</span>
+      <span>숨긴 열 4개(제조사 · MAC · OS · 확인 방식 · 마지막 확인)는 ‘열 선택’ 에서 켭니다 · 호스트명 옆 표시는 이름의 출처(역DNS · mDNS · NetBIOS · 수동)와 DNS 확인 결과입니다</span>
       <span>행을 누르면 IP 주소 탭과 같은 상세 창이 열립니다 — 이력 · 관리 상태 · 메모 · 원격 접속이 한곳에</span>
     </div>
   </section>
@@ -204,7 +204,7 @@ class Component extends DCLogic {
         if (i === 17) Object.assign(r, { hbCls: 'hb', hbStyle: 'width:72%;background:#f59e0b', hist: '11-02 까지 사용', memo: '직전 사용: api-kr1-006' });
         else r.hist = '사용 기록 없음';
       } else if (k === 'scan') {
-        Object.assign(r, { st: '스캔으로만 확인', stCls: 'tag teal', name: 'prn-3f.kr1.example', nameSub: '미등록 · 역방향 DNS', purpose: '—', req: '—', asg: '—', hbCls: 'hb', hbStyle: 'width:100%;background:#2dd4bf', hist: '41일째', tagCls: 'tag warn', tagTxt: '담당 확인 필요', act: '등록', actCls: 'btn sm' });
+        Object.assign(r, { st: '스캔으로만 확인', stCls: 'tag teal', name: 'prn-3f.kr1.example', nameSub: '미등록', dns: '역DNS', dnsCls: 'tag blue', dnsTip: 'DNS 서버의 PTR 레코드로 확인한 이름', purpose: '—', req: '—', asg: '—', hbCls: 'hb', hbStyle: 'width:100%;background:#2dd4bf', hist: '41일째', tagCls: 'tag warn', tagTxt: '담당 확인 필요', act: '등록', actCls: 'btn sm' });
       } else if (k === 'bm') {
         Object.assign(r, { st: '사용 중', stCls: 'tag blue', name: 'esx-kr1-07', nameSub: '물리 서버', purpose: 'ESXi 관리망', req: 'infra-kr', asg: 'net-admin', mg: '고정할당', mgCls: 'tag teal', hbCls: 'hb', hbStyle: 'width:100%;background:#a855f7', hist: '380일째' });
       } else {
@@ -224,8 +224,8 @@ class Component extends DCLogic {
           memo: dns ? (i - 9) + '차 · 변경 전 공지' : i === 14 ? '11-20 증설 때 교체 예정' : '',
           tagCls: off ? 'tag warn' : '', tagTxt: off ? '회수 후보' : '',
         });
-        if (off) Object.assign(r, { dns: 'DNS 불일치 · old-api-03', dnsCls: 'tag crit', dnsTip: '설정한 이름 api-kr1-009 · DNS 조회 결과 old-api-03.kr1.example' });
-        if (i === 30) Object.assign(r, { dns: 'DNS 기록 없음', dnsCls: 'tag gray', dnsTip: '이 주소를 DNS 로 조회한 결과가 없습니다' });
+        if (off) Object.assign(r, { dns: 'DNS 다른 IP', dnsCls: 'tag warn', dnsTip: '역DNS 이름 old-api-03.kr1.example 을 정방향으로 물으면 10.20.30.77 — 이 IP 가 아닙니다' });
+        if (i === 30) Object.assign(r, { dns: '정방향 없음', dnsCls: 'tag warn', dnsTip: '역DNS 이름을 정방향으로 물으면 그런 이름이 없습니다 — 역방향 기록만 남은 경우입니다' });
       }
       rows.push(r);
     }

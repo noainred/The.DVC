@@ -69,7 +69,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .sc i{width:14px;height:10px;border-radius:2px;display:inline-block}
 .row{display:grid;grid-template-columns:78px 120px minmax(0,1fr) 84px;gap:12px;align-items:center;padding:10px 18px;border-top:1px solid #1f2a40;text-decoration:none;color:#e6edf6}
 .row:hover{background:rgba(59,130,246,.06)}
-.ev{display:grid;grid-template-columns:44px 74px minmax(0,1fr);gap:10px;align-items:baseline;padding:9px 18px;border-top:1px solid #1f2a40;font-size:12.5px}
+.ev{display:grid;grid-template-columns:44px 156px minmax(0,1fr);gap:10px;align-items:baseline;padding:9px 18px;border-top:1px solid #1f2a40;font-size:12.5px}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:9px 12px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
 th.s::after{content:" ↕";font-weight:400}
@@ -143,11 +143,12 @@ td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
 
     <section class="card" style="display:flex;flex-direction:column" aria-label="지금 확인할 것">
       <div class="hd"><h2 class="h2">지금 확인할 것</h2><span class="muted" style="font-size:12px">숫자를 누르면 그 목록으로 갑니다</span></div>
-      <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));padding:8px 2px 4px">
-        <a href="Addresses.dc.html" class="sig"><span class="lb">충돌</span><span class="v">4</span><span><span class="tag crit">심각</span></span><span class="sub">두 법인이 같은 주소</span></a>
-        <a href="Addresses.dc.html" class="sig"><span class="lb">중복</span><span class="v">7</span><span><span class="tag crit">심각</span></span><span class="sub">한 법인 안에서 겹침</span></a>
+      <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));padding:8px 2px 4px">
+        <a href="Addresses.dc.html" class="sig"><span class="lb">충돌</span><span class="v">4</span><span><span class="tag crit">심각</span></span><span class="sub">다른 vCenter 와 같은 주소</span></a>
+        <a href="Addresses.dc.html" class="sig"><span class="lb">중복</span><span class="v">7</span><span><span class="tag crit">심각</span></span><span class="sub">한 vCenter 안에서 겹침</span></a>
+        <a href="Addresses.dc.html" class="sig"><span class="lb">충돌 의심 · MAC 변경</span><span class="v">3</span><span><span class="tag crit">심각</span></span><span class="sub">VM 주소에 다른 MAC 이 응답</span></a>
         <a href="#" class="sig"><span class="lb">예약 만료 · 임박</span><span class="v">12</span><span><span class="tag warn">주의</span></span><span class="sub">만료 3 · 임박 9</span></a>
-        <a href="HostNames.dc.html" class="sig"><span class="lb">이름 · DNS 불일치</span><span class="v">14</span><span><span class="tag warn">주의</span></span><span class="sub">DNS 기록 없음 31 은 따로</span></a>
+        <a href="HostNames.dc.html" class="sig"><span class="lb">DNS 불일치</span><span class="v">14</span><span><span class="tag warn">주의</span></span><span class="sub">다른 IP 9 · 정방향 없음 5</span></a>
         <a href="Scan.dc.html" class="sig"><span class="lb">스캔 보고 늦음</span><span class="v">1</span><span><span class="tag warn">주의</span></span><span class="sub">edge-pl1 · 꺼짐 1곳은 따로</span></a>
       </div>
       <div style="margin-top:auto;padding:14px 18px 16px;border-top:1px solid #1f2a40;display:flex;flex-direction:column;gap:9px">
@@ -158,7 +159,9 @@ td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
           <a href="#" class="chk">회수 가능 <b>126</b></a>
           <a href="#" class="chk">오래된 주소 <b>38</b></a>
           <a href="#" class="chk">위험 포트 노출 <b>11</b></a>
-          <a href="#" class="chk">중복 호스트명 <b>9</b></a>
+          <a href="#" class="chk">호스트명 없음(스캔 IP) <b>212</b></a>
+          <a href="#" class="chk">미등록 가상 NIC <b>18</b></a>
+          <a href="HostNames.dc.html" class="chk">이름 대조 — 서로 다름 <b>187</b></a>
           <a href="#" class="chk">신규 주소(7일) <b>64</b></a>
         </div>
       </div>
@@ -203,18 +206,18 @@ td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
     </section>
 
     <section class="card" style="overflow:hidden" aria-label="최근 변화">
-      <div class="hd" style="padding-bottom:12px"><h2 class="h2">최근 변화</h2><span class="muted" style="font-size:12px">오늘</span><a href="#" class="more">전부 보기</a></div>
-      <div class="ev"><span class="mono muted">14:40</span><span><span class="tag blue">새 주소</span></span><span><span class="mono">10.20.33.18</span> web-kr1-031 · VC-KR1</span></div>
-      <div class="ev"><span class="mono muted">14:22</span><span><span class="tag gray">설정</span></span><span>edge-pl1 스캔 대역 1줄 추가 · 관리자</span></div>
-      <div class="ev"><span class="mono muted">13:58</span><span><span class="tag gray">예약</span></span><span><span class="mono">10.50.2.15 – .16</span> 요청자 dc-us · 할당자 net-admin</span></div>
-      <div class="ev"><span class="mono muted">13:40</span><span><span class="tag gray">해제</span></span><span><span class="mono">10.20.30.212</span> esx-kr1-07 예전 관리 주소</span></div>
-      <div class="ev"><span class="mono muted">11:42</span><span><span class="tag crit">충돌</span></span><span><span class="mono">10.20.30.47</span> 겹치기 시작</span></div>
-      <div class="ev"><span class="mono muted">10:05</span><span><span class="tag gray">가져오기</span></span><span>관리 정보 CSV · 38행 변경 · 운영자</span></div>
+      <div class="hd" style="padding-bottom:12px"><h2 class="h2">IP 변화</h2><span class="muted" style="font-size:12px">스캔이 본 변화 · 오늘</span><a href="#" class="more">전부 보기</a></div>
+      <div class="ev"><span class="mono muted">14:40</span><span><span class="tag blue">새 미등록 IP</span></span><span><span class="mono">10.20.33.40</span> 외 2 · edge-kr1</span></div>
+      <div class="ev"><span class="mono muted">14:40</span><span><span class="tag warn">MAC 변경</span></span><span><span class="mono">10.20.31.52</span> Dell → 다른 Dell NIC</span></div>
+      <div class="ev"><span class="mono muted">13:51</span><span><span class="tag warn">예약 · 폐기 IP 사용 시작</span></span><span><span class="mono">10.50.2.15</span> 예약해 둔 주소가 응답</span></div>
+      <div class="ev"><span class="mono muted">13:40</span><span><span class="tag gray">호스트명 변경</span></span><span><span class="mono">10.20.30.20</span> api-kr1-009 → old-api-03</span></div>
+      <div class="ev"><span class="mono muted">11:42</span><span><span class="tag crit">충돌 의심</span></span><span><span class="mono">10.20.30.47</span> web-kr1-023 의 NIC 이 아닌 MAC</span></div>
+      <div class="ev"><span class="mono muted">10:40</span><span><span class="tag warn">DNS 불일치</span></span><span><span class="mono">10.20.41.12</span> 역DNS 이름이 다른 IP 를 가리킴</span></div>
     </section>
   </div>
 
   <section class="card" style="overflow:hidden" aria-label="법인별 현황">
-    <div class="hd" style="padding-bottom:12px"><h2 class="h2">법인별</h2><span class="muted" style="font-size:12px">행을 누르면 그 법인의 대역으로</span><a href="#" class="more">28곳 전부 보기</a></div>
+    <div class="hd" style="padding-bottom:12px"><h2 class="h2">법인별</h2><span class="muted" style="font-size:12px">법인 하나에 vCenter 가 여럿일 수 있습니다 · 행을 누르면 그 법인의 대역으로</span><a href="#" class="more">28곳 전부 보기</a></div>
     <div style="overflow-x:auto">
     <table style="min-width:860px">
       <thead><tr><th class="s">법인</th><th class="s r">사용 중 주소</th><th class="s r">대역</th><th class="s" style="width:240px">사용률</th><th class="s r">조치 필요</th><th class="s">스캔 에이전트</th><th class="s">마지막 스캔 보고</th></tr></thead>
@@ -273,12 +276,12 @@ class Component extends DCLogic {
         mkTop('10.31.5.0/24', 'VC-PL1', 187),
       ],
       corps: [
-        mkCorp('VC-KR1', '서울', '1,204', 38, 41, 6, 'edge-kr1', '정상', '14:40'),
-        mkCorp('VC-US1', '미국 동부', '842', 31, 33, 4, 'edge-us1', '정상', '14:31'),
-        mkCorp('VC-PL1', '폴란드', '611', 22, 35, 3, 'edge-pl1', '보고 늦음', '11:02'),
-        mkCorp('VC-DE1', '독일', '574', 19, 29, 1, 'edge-de1', '정상', '14:36'),
-        mkCorp('VC-KR2', '부산', '388', 14, 24, 1, '이 포탈에서 직접', '정상', '14:38'),
-        mkCorp('VC-BR1', '브라질', '201', 9, 18, 0, 'edge-br1', '꺼짐', '—'),
+        mkCorp('한국', 'vCenter 2', '1,592', 52, 36, 7, 'edge-kr1 외 1', '정상', '14:40'),
+        mkCorp('미국 동부', 'vCenter 2', '1,244', 43, 32, 4, 'edge-us1 외 1', '정상', '14:31'),
+        mkCorp('폴란드', 'vCenter 1', '611', 22, 35, 3, 'edge-pl1', '보고 늦음', '11:02'),
+        mkCorp('독일', 'vCenter 1', '574', 19, 29, 1, 'edge-de1', '정상', '14:36'),
+        mkCorp('일본', 'vCenter 1', '266', 8, 22, 0, 'edge-jp1', '정상', '14:33'),
+        mkCorp('브라질', 'vCenter 1', '201', 9, 18, 0, 'edge-br1', '꺼짐', '—'),
       ],
     };
   }

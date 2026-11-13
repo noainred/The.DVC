@@ -114,8 +114,8 @@ td{padding:7px 9px;border-bottom:1px solid #eceff3;vertical-align:top}
         <h2 class="h2">조치 필요<small>6건 — 새로 생긴 것 먼저</small></h2>
         <table>
           <tbody>
-            <tr><td style="width:96px"><span class="pill crit">충돌 · 새로</span></td><td class="mono" style="width:120px">10.20.30.47</td><td>VC-KR1 web-kr1-023 · VC-KR2 legacy-app-02 가 같은 주소</td></tr>
-            <tr><td><span class="pill warn">DNS · 새로</span></td><td class="mono">10.20.30.20</td><td>설정한 이름 api-kr1-009 · DNS 조회 결과 old-api-03.kr1.example</td></tr>
+            <tr><td style="width:96px"><span class="pill crit">충돌 · 새로</span></td><td class="mono" style="width:120px">10.20.30.47</td><td>VC-KR1 web-kr1-023 · VC-KR2 legacy-app-02 가 같은 주소 · 스캔에서도 다른 MAC 이 응답(충돌 의심)</td></tr>
+            <tr><td><span class="pill warn">DNS · 새로</span></td><td class="mono">10.20.30.20</td><td>역DNS 이름 old-api-03.kr1.example 을 정방향으로 물으면 10.20.30.77 — 이 IP 가 아닙니다</td></tr>
             <tr><td><span class="pill crit">중복</span></td><td class="mono">10.20.31.105</td><td>VM 2대 — app-kr1-051 외 1 · 9일째</td></tr>
             <tr><td><span class="pill warn">예약 만료</span></td><td class="mono">10.20.30.210</td><td>‘신규 DB 이중화’ · 요청자 infra-kr</td></tr>
           </tbody>

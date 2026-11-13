@@ -49,7 +49,7 @@ td,th{border:1px solid #d9dce1;padding:5px 9px;white-space:nowrap;height:26px;te
         <tr><td class="rn">1</td><td class="t1" colspan="9">IP 관리 대장 — VC-KR1</td></tr>
         <tr><td class="rn">2</td><td class="t2" colspan="9">범위 VC-KR1(서울) · 기준 2026-11-13 14:52 KST · 만든 계정 admin · 숨길 대역의 주소는 뺐습니다</td></tr>
         <tr><td class="rn">3</td><td colspan="9"></td></tr>
-        <tr class="kl"><td class="rn">4</td><td>전체 주소</td><td>사용 중</td><td>예약</td><td>DHCP</td><td>빈 주소</td><td>사용률</td><td>대역 수</td><td>조치 필요</td><td>이름 · DNS 불일치</td></tr>
+        <tr class="kl"><td class="rn">4</td><td>전체 주소</td><td>사용 중</td><td>예약</td><td>DHCP</td><td>빈 주소</td><td>사용률</td><td>대역 수</td><td>조치 필요</td><td>DNS 불일치</td></tr>
         <tr class="kv"><td class="rn">5</td><td class="num">9,652</td><td class="num">1,204</td><td class="num">412</td><td class="num">2,340</td><td class="num">5,696</td><td class="num">41.0%</td><td class="num">38</td><td class="num bad">6</td><td class="num">5</td></tr>
         <tr><td class="rn">6</td><td colspan="9"></td></tr>
         <tr class="hd"><td class="rn">7</td><td>상태</td><td>주소 수</td><td>비율</td><td colspan="6">뜻</td></tr>
@@ -81,7 +81,7 @@ td,th{border:1px solid #d9dce1;padding:5px 9px;white-space:nowrap;height:26px;te
       <tbody>
         <tr><td class="rn">1</td><td class="t1" colspan="13">10.20.30.0/24 · 웹 서비스망 · VC-KR1</td></tr>
         <tr><td class="rn">2</td><td class="t2" colspan="13">사용 중 177 · 예약 9 · DHCP 55 · 빈 주소 13 · 문제 2 · 기준 2026-11-13 14:52 KST · 3행 머리글은 고정이고 자동 필터가 걸려 있습니다</td></tr>
-        <tr class="hd"><td class="rn">3</td><td>주소 ▾</td><td>상태 ▾</td><td>호스트명 · 자원 ▾</td><td>종류 ▾</td><td>용도 ▾</td><td>요청자 ▾</td><td>할당자 ▾</td><td>관리 ▾</td><td>메모 ▾</td><td>사용 이력 ▾</td><td>DNS 조회 결과 ▾</td><td>이름 확인 ▾</td><td>서비스 태그 ▾</td></tr>
+        <tr class="hd"><td class="rn">3</td><td>주소 ▾</td><td>상태 ▾</td><td>호스트명 · 자원 ▾</td><td>종류 ▾</td><td>용도 ▾</td><td>요청자 ▾</td><td>할당자 ▾</td><td>관리 ▾</td><td>메모 ▾</td><td>사용 이력 ▾</td><td>역DNS 이름 ▾</td><td>DNS 확인 ▾</td><td>서비스 태그 ▾</td></tr>
         <sc-for list="{{rows}}" as="r" hint-placeholder-count="24">
         <tr class="{{r.cls}}"><td class="rn">{{r.r}}</td><td class="mono">{{r.ip}}</td><td>{{r.st}}</td><td><b>{{r.name}}</b></td><td>{{r.kind}}</td><td>{{r.pur}}</td><td>{{r.req}}</td><td>{{r.asg}}</td><td>{{r.mg}}</td><td>{{r.memo}}</td><td>{{r.hist}}</td><td class="mono">{{r.dns}}</td><td class="{{r.okCls}}">{{r.ok}}</td><td class="mono">{{r.tag}}</td></tr>
         </sc-for>
@@ -99,8 +99,8 @@ td,th{border:1px solid #d9dce1;padding:5px 9px;white-space:nowrap;height:26px;te
         <tr class="f-bad"><td class="rn">4</td><td class="bad">중복</td><td class="mono">10.20.30.131</td><td class="mono">10.20.30.0/24</td><td>웹 서비스망</td><td>VM 2대 — batch-kr1-007 외 1</td><td>11-12</td><td>data-team</td><td>ops-kr</td></tr>
         <tr class="f-bad"><td class="rn">5</td><td class="bad">중복</td><td class="mono">10.20.31.105</td><td class="mono">10.20.31.0/24</td><td>앱 서버망</td><td>VM 2대 — app-kr1-051 · app-kr1-051-clone</td><td>11-11</td><td>api-team</td><td>ops-kr</td></tr>
         <tr class="f-rsv"><td class="rn">6</td><td>예약 만료</td><td class="mono">10.20.30.210</td><td class="mono">10.20.30.0/24</td><td>웹 서비스망</td><td>‘신규 DB 이중화’ 예약이 11-10 에 끝남</td><td>11-10</td><td>infra-kr</td><td>net-admin</td></tr>
-        <tr><td class="rn">7</td><td>이름 · DNS 불일치</td><td class="mono">10.20.30.20</td><td class="mono">10.20.30.0/24</td><td>웹 서비스망</td><td>설정한 이름 api-kr1-009 · DNS 조회 결과 old-api-03.kr1.example</td><td>—</td><td>api-team</td><td>net-admin</td></tr>
-        <tr><td class="rn">8</td><td>이름 · DNS 불일치</td><td class="mono">10.20.41.12</td><td class="mono">10.20.41.0/24</td><td>vSAN</td><td>설정한 이름 esx-kr1-07-vsan · DNS 조회 결과 esx-kr1-08-vsan.kr1.example</td><td>—</td><td>infra-kr</td><td>net-admin</td></tr>
+        <tr><td class="rn">7</td><td>DNS 불일치</td><td class="mono">10.20.30.20</td><td class="mono">10.20.30.0/24</td><td>웹 서비스망</td><td>역DNS 이름 old-api-03.kr1.example 을 정방향으로 물으면 10.20.30.77 — 다른 IP</td><td>—</td><td>api-team</td><td>net-admin</td></tr>
+        <tr><td class="rn">8</td><td>DNS 불일치</td><td class="mono">10.20.41.12</td><td class="mono">10.20.41.0/24</td><td>vSAN</td><td>역DNS 이름 esx-kr1-08-vsan.kr1.example 을 정방향으로 물으면 10.20.41.13 — 다른 IP</td><td>—</td><td>infra-kr</td><td>net-admin</td></tr>
       </tbody>
     </table>
     </sc-if>
@@ -120,7 +120,7 @@ td,th{border:1px solid #d9dce1;padding:5px 9px;white-space:nowrap;height:26px;te
         <tr><td class="rn">9</td><td><span class="sw" style="background:#ececee"></span>DHCP</td><td>DHCP 로 나눠 주는 구간</td></tr>
         <tr><td class="rn">10</td><td><span class="sw" style="background:#f9dadd"></span>문제</td><td>충돌(다른 법인과 같은 주소) · 중복(같은 법인 안에서 겹침)</td></tr>
         <tr><td class="rn">11</td><td><span class="sw"></span>빈 주소</td><td>칸 색 없음</td></tr>
-        <tr><td class="rn">12</td><td>이름 확인</td><td>설정한 이름과 DNS 조회 결과의 첫 마디를 대소문자 구분 없이 견준 결과 — 일치 · 불일치 · DNS 기록 없음 · 빈 칸은 확인 대상 아님</td></tr>
+        <tr><td class="rn">12</td><td>DNS 확인</td><td>역DNS 로 찾은 이름을 DNS 에 다시 물어 그 이름이 이 IP 를 가리키는지 본 결과 — 일치 · DNS 다른 IP · 정방향 없음 · 확인 못 함 · 빈 칸은 역DNS 이름이 없어 확인하지 않음</td></tr>
         <tr><td class="rn">13</td><td>복수IP</td><td>장비 한 대가 주소를 둘 이상 가진 경우 — ‘호스트명 · 자원’ 이 같은 행이 여러 개입니다</td></tr>
         <tr><td class="rn">14</td><td>빈 칸</td><td>값을 못 읽은 것과 값이 없는 것을 구분합니다 — 못 읽은 칸은 ‘확인 안 됨’ 이라고 적습니다</td></tr>
       </tbody>
@@ -164,7 +164,7 @@ class Component extends DCLogic {
         const nm = dns ? 'infra-kr1-dns0' + (i - 9) : 'api-kr1-' + pad(i - 11);
         Object.assign(r, { cls: 'f-used', st: off ? '사용 중 · 꺼짐' : '사용 중', name: nm, kind: 'VM', pur: dns ? 'DNS' : 'API 서버', req: dns ? 'infra-kr' : 'api-team', asg: dns || i % 5 === 0 ? 'net-admin' : 'ops-kr',
           mg: dns ? '고정할당' : i % 4 === 0 ? '사용중(확정)' : '', memo: dns ? (i - 9) + '차 · 변경 전 공지' : i === 14 ? '11-20 증설 때 교체 예정' : off ? '회수 후보' : '',
-          hist: (120 + i * 7) + '일째', dns: off ? 'old-api-03' + D : nm + D, ok: off ? '불일치' : '일치', okCls: off ? 'bad' : '', tag: i % 2 ? '7XK2M93' : '5BD8R21' });
+          hist: (120 + i * 7) + '일째', dns: off ? 'old-api-03' + D : nm + D, ok: off ? 'DNS 다른 IP' : '일치', okCls: off ? 'bad' : '', tag: i % 2 ? '7XK2M93' : '5BD8R21' });
       }
       rows.push(r);
     }
