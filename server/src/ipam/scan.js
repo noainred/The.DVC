@@ -14,6 +14,7 @@ import { checkRangeSpec } from './rangeSyntax.js'; // v2.639: 대역 문법 판�
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 import { probeNetbios, probeMdns, localSubnets, onLink } from './nameProbe.js'; // v2.991: 호스트명 확인(NetBIOS · mDNS)
 import { NAME_METHODS, displayName } from './hostNames.js';
+import { createNeighborSampler } from './neighbors.js'; // v2.999: 이웃 표(ARP)에서 MAC — 읽기만(새 패킷 없음)
 
 export const DEFAULT_PORTS = [22, 80, 443, 445, 3389, 623, 8006, 902, 5985, 5986];
 const SERVICE = {
@@ -312,56 +313,78 @@ export async function resolveNames(ips, { reverseDns = true, mdns = true, netbio
  *   2) 포트가 전부 닫힌 IP만 ping(fping 배치 우선 / 폴백 capped per-IP) — 방화벽 서버 갭 보강.
  * 마지막에 생존 IP만 역DNS. onProgress(done,total,alive) 는 1단계(TCP) 기준으로 보고.
  * onTcpAlive(row) 는 1단계에서 열린 포트를 찾을 때마다 부른다(v2.733 — 시한 초과 시 부분 결과. hostname 은 빈 값).
- * 반환: { scanned, alive:[{ip,openPorts,services,hostname, names?, nbGroup?, mac?, tried}], nameStats }.
+ * 반환: { scanned, alive:[{ip,openPorts,services,hostname, names?, nbGroup?, mac?, tried, arpMac?, arpTried?}], nameStats }.
+ * v2.999: 스캔 동안 이웃 표(ARP 캐시)를 주기적으로 읽어(neighbors.js — 큰 대역에서 앞 항목이 밀려나기 전에) 같은 서브넷 IP 의 MAC 을 단다.
+ *   arpMac = 이웃 표의 MAC(mac 은 예전처럼 NetBIOS 가 답한 MAC — 옛 중앙이 arpMac 을 NetBIOS MAC 으로 읽지 않게 칸을 나눴다),
+ *   arpTried = 표를 읽었고 그 IP 가 같은 서브넷이다(이 장비 자신의 주소는 뺀다) — 중앙이 '못 읽음' 과 '볼 수 없음' 을 가른다.
+ *   요약은 nameStats.mac = { onLink, found, reason }(reason: null · 'unsupported'(리눅스 아님) · 'unreadable').
+ *   macOpts = { read, subnets, intervalMs }(테스트 주입) · arp:false 면 읽지 않는다(요약 reason 'off').
  * v2.991: 마지막 단계가 역DNS 하나에서 '호스트명 확인'(역DNS · mDNS · NetBIOS — resolveNames)이 됐다. hostname 은 표시 이름
  *   (역DNS > mDNS > NetBIOS 중 먼저 있는 것 — 옛 중앙도 이 칸은 받는다), names 는 방식별 이름(있는 것만), tried 는 이 IP 에 실제로
  *   물어본 방식(mDNS 는 같은 서브넷일 때만 들어간다 — 중앙이 '응답 없음' 과 '묻지 않음' 을 가른다).
  */
-export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, mdns = true, netbios = true, ping = true, onAlive, onTcpAlive, onProgress, nameOpts = {}, fwdNames = null, lookup = undefined } = {}) {
+export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 128, timeoutMs = 700, reverseDns = true, mdns = true, netbios = true, ping = true, onAlive, onTcpAlive, onProgress, nameOpts = {}, fwdNames = null, lookup = undefined, arp = true, macOpts = {} } = {}) {
   const seen = new Set();
   const ips = [];
   for (const spec of (Array.isArray(specs) ? specs : [specs])) for (const ip of expandRange(spec)) if (!seen.has(ip)) { seen.add(ip); ips.push(ip); }
   const total = ips.length;
   onProgress?.(0, total, 0);
 
-  // 1단계: TCP 전수.
-  const tcp = new Map(); // ip -> openPorts[]
-  let done = 0;
-  // v2.575 IMP-08: 동시성 풀 단일 소스. `tcpPortsOf` 의 실패는 이미 `.catch` 로 삼킨다.
-  await poolRun(ips, concurrency, async (ip) => {
-    const open = await tcpPortsOf(ip, ports, timeoutMs).catch(() => []);
-    if (open.length) {
-      tcp.set(ip, open);
-      // v2.733(점검 3회차 C1-02): 1단계에서 찾은 생존 IP 를 바로 알린다 — 워커가 시한에 걸려 죽어도 부모가 '부분 결과' 로
-      //   마지막 확인 시각을 갱신할 수 있게(호스트명은 아직 없다 — 역DNS 는 마지막 단계다). 콜백 오류가 스캔을 깨지 않게.
-      try { onTcpAlive?.({ ip, openPorts: open, services: open.map(portService), hostname: '' }); } catch { /* 부분 결과는 보조 */ }
-    }
-    done++;
-    onProgress?.(done, total, tcp.size);
-  });
+  // v2.999: 이웃 표 — 1단계 동안 주기적으로, 1 · 2단계 끝에 한 번씩 읽어 모은다(대상 IP 만). 타이머는 끝에서(또는 예외에서) 멈춘다.
+  const nbr = arp ? createNeighborSampler(new Set(ips), { ...(macOpts.read ? { read: macOpts.read } : {}), ...(macOpts.intervalMs ? { intervalMs: macOpts.intervalMs } : {}) }) : null;
+  nbr?.start();
+  try {
+    // 1단계: TCP 전수.
+    const tcp = new Map(); // ip -> openPorts[]
+    let done = 0;
+    // v2.575 IMP-08: 동시성 풀 단일 소스. `tcpPortsOf` 의 실패는 이미 `.catch` 로 삼킨다.
+    await poolRun(ips, concurrency, async (ip) => {
+      const open = await tcpPortsOf(ip, ports, timeoutMs).catch(() => []);
+      if (open.length) {
+        tcp.set(ip, open);
+        // v2.733(점검 3회차 C1-02): 1단계에서 찾은 생존 IP 를 바로 알린다 — 워커가 시한에 걸려 죽어도 부모가 '부분 결과' 로
+        //   마지막 확인 시각을 갱신할 수 있게(호스트명은 아직 없다 — 역DNS 는 마지막 단계다). 콜백 오류가 스캔을 깨지 않게.
+        try { onTcpAlive?.({ ip, openPorts: open, services: open.map(portService), hostname: '' }); } catch { /* 부분 결과는 보조 */ }
+      }
+      done++;
+      onProgress?.(done, total, tcp.size);
+    });
 
-  // 2단계: 포트 무응답 IP만 ping.
-  const dead = ips.filter((ip) => !tcp.has(ip));
-  const pinged = await pingAliveSet(dead, timeoutMs, ping);
+    await nbr?.sample();
+    // 2단계: 포트 무응답 IP만 ping.
+    const dead = ips.filter((ip) => !tcp.has(ip));
+    const pinged = await pingAliveSet(dead, timeoutMs, ping);
+    await nbr?.sample();
+    nbr?.stop();
+    const nb = nbr ? nbr.result() : { ok: false, reason: 'off', map: new Map() };
+    const nets = macOpts.subnets || nameOpts.subnets || localSubnets();
+    const own = new Set(nets.map((x) => x.address).filter(Boolean));
+    const macStats = { onLink: 0, found: 0, reason: nb.ok ? null : nb.reason };
 
-  // 생존 IP = TCP 생존 ∪ ping 생존. 호스트명 확인(v2.991 — 역DNS · mDNS · NetBIOS 동시).
-  const aliveIps = [...tcp.keys(), ...[...pinged]];
-  const { byIp, stats } = await resolveNames(aliveIps, { reverseDns, mdns, netbios, timeoutMs, ...nameOpts });
-  // v2.993(물리서버 §13 ③): 정방향 DNS — 물리서버 이름(배정 · 설정이 준다)을 DNS 에 물어 **살아 있는 IP**(이 결과에 행이 있는 IP)에만 단다.
-  //   방식별 이름(names — 역DNS · mDNS · NetBIOS)과 따로 둔다: 이 IP 의 이름을 묻는 것이 아니라 '그 이름의 IP 가 이것' 이라는 사실이라서.
-  const fwd = Array.isArray(fwdNames) && fwdNames.length ? await forwardMany(fwdNames, new Set(aliveIps), lookup ? { lookup } : {}) : null;
-  const alive = aliveIps.map((ip) => {
-    const open = tcp.get(ip);
-    const nm = byIp.get(ip) || { names: {}, nb: null, tried: [] };
-    const row = { ip, openPorts: open || [], services: open ? open.map(portService) : ['ICMP(ping)'], hostname: displayName(nm.names).name, tried: nm.tried };
-    if (Object.keys(nm.names).length) row.names = nm.names;
-    if (nm.nb?.group) row.nbGroup = nm.nb.group;
-    if (nm.nb?.mac) row.mac = nm.nb.mac;
-    const fn = fwd?.byIp.get(ip);
-    if (fn) row.fwdName = fn;
-    onAlive?.(row);
-    return row;
-  });
-  onProgress?.(total, total, alive.length);
-  return { scanned: ips.length, alive, nameStats: { ...stats, alive: alive.length }, ...(fwd ? { fwd: fwd.stats } : {}) };
+    // 생존 IP = TCP 생존 ∪ ping 생존. 호스트명 확인(v2.991 — 역DNS · mDNS · NetBIOS 동시).
+    const aliveIps = [...tcp.keys(), ...[...pinged]];
+    const { byIp, stats } = await resolveNames(aliveIps, { reverseDns, mdns, netbios, timeoutMs, ...nameOpts });
+    // v2.993(물리서버 §13 ③): 정방향 DNS — 물리서버 이름(배정 · 설정이 준다)을 DNS 에 물어 **살아 있는 IP**(이 결과에 행이 있는 IP)에만 단다.
+    //   방식별 이름(names — 역DNS · mDNS · NetBIOS)과 따로 둔다: 이 IP 의 이름을 묻는 것이 아니라 '그 이름의 IP 가 이것' 이라는 사실이라서.
+    const fwd = Array.isArray(fwdNames) && fwdNames.length ? await forwardMany(fwdNames, new Set(aliveIps), lookup ? { lookup } : {}) : null;
+    const alive = aliveIps.map((ip) => {
+      const open = tcp.get(ip);
+      const nm = byIp.get(ip) || { names: {}, nb: null, tried: [] };
+      const row = { ip, openPorts: open || [], services: open ? open.map(portService) : ['ICMP(ping)'], hostname: displayName(nm.names).name, tried: nm.tried };
+      if (Object.keys(nm.names).length) row.names = nm.names;
+      if (nm.nb?.group) row.nbGroup = nm.nb.group;
+      if (nm.nb?.mac) row.mac = nm.nb.mac;
+      const fn = fwd?.byIp.get(ip);
+      if (fn) row.fwdName = fn;
+      if (nb.ok && !own.has(ip) && onLink(ip, nets)) {
+        row.arpTried = true; macStats.onLink += 1;
+        const m = nb.map.get(ip);
+        if (m) { row.arpMac = m; macStats.found += 1; }
+      }
+      onAlive?.(row);
+      return row;
+    });
+    onProgress?.(total, total, alive.length);
+    return { scanned: ips.length, alive, nameStats: { ...stats, alive: alive.length, mac: macStats }, ...(fwd ? { fwd: fwd.stats } : {}) };
+  } finally { nbr?.stop(); }
 }
