@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>설정 — 법인(DataCenter)과 서비스, 물리서버 귀속</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./corp.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:760px">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span><span>The Davinci</span></span>
+    <span class="ver">v3.3.0</span>
+    <span class="cmdk"><span>장비 · 기능 찾기 — 이름 · IP · 시리얼</span><span class="kbd" style="margin-left:auto">Ctrl K</span></span>
+    <span class="pill" style="margin-left:auto"><span class="dot" style="background:#22c55e"></span><span>vCenter 28/28</span></span>
+    <span class="pill"><span>admin · 전체 범위</span></span>
+  </div>
+  <div class="body">
+    <nav class="sb" aria-label="주 메뉴">
+      <span class="h">모니터링</span>
+      <a href="#">Overview</a>
+      <a href="#">서버</a>
+      <a href="#">스토리지</a>
+      <a href="#">네트워크</a>
+      <span class="h">도구</span>
+      <a href="#">특수 기능</a>
+      <a href="#" class="on">설정</a>
+    </nav>
+    <div class="main">
+      <div class="crumb">설정 › DataCenter(법인)</div>
+      <div class="row">
+        <h1 class="h1">법인(DataCenter)</h1>
+        <span class="sp row"><button type="button" class="btn pri">+ 법인</button><button type="button" class="btn">CSV</button></span>
+      </div>
+      <p class="intro"><b>법인 하나에 서비스가 여럿</b> 있을 수 있고, 서비스 하나는 <b>vCenter 1개 + Bareos 1대</b>입니다. vCenter 를 법인에 넣으면 그 vCenter 가 그 법인의 서비스가 됩니다. Bareos 는 특수 기능 › Bareos 설정에서 vCenter 에 묶은 Director 를 그대로 보입니다.</p>
+
+      <div class="pane">
+        <div class="card cnt">
+          <div class="bar">
+            <span class="h2">법인 › 서비스</span>
+            <span class="note">법인 줄을 누르면 서비스가 펼쳐집니다</span>
+            <span class="sp row"><input class="inp" type="search" placeholder="법인 · vCenter 이름" aria-label="법인 · vCenter 이름 찾기" style="width:180px"></span>
+          </div>
+          <div style="overflow:hidden">
+            <table class="t">
+              <thead><tr>
+                <th>법인 · 서비스(vCenter)</th><th>Bareos(Director)</th><th>수집</th><th class="r">가상화 호스트</th><th class="r">물리서버(베어메탈)</th><th>물리서버 내역</th><th class="r">작업</th>
+              </tr></thead>
+              <tbody>
+                <tr class="grp">
+                  <td><span class="nm"><span class="co"></span>▾ 폴란드 법인</span> <span class="bdg e">서비스 3</span></td>
+                  <td class="soft">2대 · 없음 1</td>
+                  <td><span class="bdg e">엣지</span> <span class="mono soft">pl-edge-01</span></td>
+                  <td class="r num">52</td><td class="r num">153</td>
+                  <td class="soft">서비스에 매임 52 · 법인 직속 101</td>
+                  <td class="r"><button type="button" class="btn sm">이름 · 리전</button></td>
+                </tr>
+                <tr class="kid">
+                  <td><span class="nm"><span class="sg"></span>PL-ERP</span><span class="sub mono">vc-pl-erp</span></td>
+                  <td><span class="svc"><span class="ba">Bareos</span><b>bareos-pl-erp</b></span></td>
+                  <td class="dim">법인과 같음</td>
+                  <td class="r num">31</td><td class="r num">31</td>
+                  <td class="soft">등록부 · 지정으로 이 서비스에 매임</td>
+                  <td class="r"><span class="sel"><span>폴란드 법인</span><span class="dim">▾</span></span></td>
+                </tr>
+                <tr class="kid">
+                  <td><span class="nm"><span class="sg"></span>PL-MES</span><span class="sub mono">vc-pl-mes</span></td>
+                  <td><span class="svc"><span class="ba">Bareos</span><b>bareos-pl-mes</b></span></td>
+                  <td class="dim">법인과 같음</td>
+                  <td class="r num">12</td><td class="r num">12</td>
+                  <td class="soft">등록부 · 지정으로 이 서비스에 매임</td>
+                  <td class="r"><span class="sel"><span>폴란드 법인</span><span class="dim">▾</span></span></td>
+                </tr>
+                <tr class="kid">
+                  <td><span class="nm"><span class="sg"></span>PL-GPDB</span><span class="sub mono">vc-pl-gpdb</span></td>
+                  <td><span class="svc"><span class="no">Bareos 없음</span></span> <a href="#" style="font-size:12px">묶기</a></td>
+                  <td class="dim">법인과 같음</td>
+                  <td class="r num">9</td><td class="r num">9</td>
+                  <td class="soft">등록부 · 지정으로 이 서비스에 매임</td>
+                  <td class="r"><span class="sel"><span>폴란드 법인</span><span class="dim">▾</span></span></td>
+                </tr>
+                <tr class="kid">
+                  <td><span class="nm"><span class="sv"></span>법인 직속 물리서버</span><span class="sub">vCenter 에 매이지 않은 물리 전용 서버</span></td>
+                  <td class="dim">—</td>
+                  <td class="dim">법인과 같음</td>
+                  <td class="r dim">—</td><td class="r num">101</td>
+                  <td class="soft">스캔 대역 78 · 엣지가 올림 23</td>
+                  <td class="r"><a href="#" style="font-size:12px">물리서버 폴더에서 보기</a></td>
+                </tr>
+                <tr class="grp">
+                  <td><span class="nm"><span class="co"></span>▸ 미국 동부 법인</span> <span class="bdg e">서비스 2</span></td>
+                  <td class="soft">2대</td>
+                  <td><span class="bdg e">엣지</span> <span class="mono soft">us-edge-01</span></td>
+                  <td class="r num">64</td><td class="r num">121</td>
+                  <td class="soft">서비스에 매임 64 · 법인 직속 57</td>
+                  <td class="r"><button type="button" class="btn sm">이름 · 리전</button></td>
+                </tr>
+                <tr class="grp">
+                  <td><span class="nm"><span class="co"></span>▸ 한국 본사</span> <span class="bdg e">서비스 4</span></td>
+                  <td class="soft">4대</td>
+                  <td><span class="bdg c">중앙</span></td>
+                  <td class="r num">88</td><td class="r num">196</td>
+                  <td class="soft">서비스에 매임 88 · 법인 직속 108</td>
+                  <td class="r"><button type="button" class="btn sm">이름 · 리전</button></td>
+                </tr>
+                <tr class="grp">
+                  <td><span class="nm" style="color:#fbbf24"><span class="sg" style="border-color:#fbbf24"></span>법인에 넣지 않은 vCenter</span> <span class="bdg w">1</span></td>
+                  <td class="dim">—</td><td class="dim">—</td>
+                  <td class="r num">4</td><td class="r num">4</td>
+                  <td class="soft">이 vCenter 의 서버는 법인 없이 vCenter 이름으로 보입니다</td>
+                  <td class="r"></td>
+                </tr>
+                <tr class="kid">
+                  <td><span class="nm"><span class="sg" style="border-color:#fbbf24"></span>vc-lab-01</span></td>
+                  <td class="dim">—</td>
+                  <td><span class="bdg c">중앙</span></td>
+                  <td class="r num">4</td><td class="r num">4</td>
+                  <td class="soft">등록부 · 지정으로 이 서비스에 매임</td>
+                  <td class="r"><span class="sel" style="border-color:rgba(245,158,11,.5)"><span>법인 고르기…</span><span class="dim">▾</span></span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="foot"><span>서비스 이름은 vCenter 표시 이름입니다 · Bareos 는 그 vCenter 에 묶인 Director 를 보일 뿐 여기서 바꾸지 않습니다</span></div>
+        </div>
+
+        <div class="card" style="width:372px;flex:none;padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+          <h2 class="h2">물리서버가 법인 · 서비스에 매이는 순서</h2>
+          <div class="mini">
+            <div class="ln"><span class="bdg c">1</span><span>사람이 정한 값(통합 서버 인벤토리의 지정)</span></div>
+            <div class="ln"><span class="bdg c">2</span><span>ESXi 호스트와 같은 서버(서비스 태그 · 이름)</span></div>
+            <div class="ln"><span class="bdg c">3</span><span>iDRAC 등록부에 적힌 vCenter</span></div>
+            <div class="ln soft" style="white-space:normal">→ <b style="color:#5eead4">서비스까지</b> 압니다(법인 = 그 vCenter 의 법인)</div>
+          </div>
+          <div class="mini">
+            <div class="ln"><span class="bdg e">4</span><span>스캔 대역에 정한 법인</span></div>
+            <div class="ln"><span class="bdg e">5</span><span>그 서버를 올린 엣지 · 수집 서버의 법인</span></div>
+            <div class="ln soft" style="white-space:normal">→ <b style="color:#e6edf6">법인만</b> 압니다 = <b>법인 직속</b>. 법인에 vCenter 가 몇 개든 됩니다</div>
+          </div>
+          <div class="mini">
+            <div class="ln"><span class="bdg w">–</span><span>어느 것도 아니면 (법인 미지정)</span></div>
+          </div>
+          <div class="band w" style="align-items:flex-start"><span><b>바뀌는 점</b> 지금은 4 · 5 번이 ‘법인에 vCenter 가 정확히 하나일 때만’ 그 vCenter 로 붙습니다. 둘 이상이면 법인 미지정이 됩니다.</span></div>
+          <p class="note">엣지가 vCenter 를 여러 법인 것으로 수집하면 5번은 쓰지 않습니다(어느 법인인지 가를 수 없음).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
