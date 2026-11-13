@@ -174,9 +174,11 @@ describe('D7·U2·U3·U7·I6 — 소스 계약', () => {
     expect(read('./IpScanSettings.jsx')).toMatch(/<STable className="v3-table" minWidth=\{1220\}>/); // v2.999: 'MAC' 열로 1140→1220 · v2.991: '이름 확인' 열로 1060→1140 · v2.694: 대역 삭제 버튼으로 980→1060 · v2.692: 보고 현황 표는 ② 에이전트별 대역·보고 현황 한 표로 합쳐졌다
     for (const f of ['IpamNet.jsx', 'IpamCore.jsx', 'IpScanSettings.jsx', 'IpamScanStatus.jsx']) expect(read(`./${f}`), f).not.toMatch(/<STable>/);
   });
-  it('U5: vCenter 칩 블록은 컴포넌트 하나', () => {
+  it('U5 → v3.4.0: vCenter 칩 줄은 지웠다 — vCenter별 수는 현황 탭의 표 하나(스캔만 확인된 묶음은 표 밖에 따로 적는다)', () => {
     const core = read('./IpamCore.jsx');
-    expect((core.match(/<VcenterChips /g) || []).length).toBe(2);
-    expect((core.match(/'🛰 네트워크 스캔'/g) || []).length).toBe(1);
+    expect(core).not.toMatch(/<VcenterChips /);
+    const home = read('./IpamHome.jsx');
+    expect(home).toMatch(/filter\(\(v\) => !v\.scanned\)/);
+    expect(home).toMatch(/스캔으로만 확인된 주소/);
   });
 });

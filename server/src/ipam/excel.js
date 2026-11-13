@@ -53,7 +53,7 @@ export async function buildWorkbook(sheets, opts = {}) {
     ws.getRow(2).font = { bold: true };
     ws.getRow(2).eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3D9C9' } }; });
 
-    const label = { used: '사용', multihomed: '멀티홈', duplicate: '중복', network: 'Network ID', empty: '' };
+    const label = { used: '사용', multihomed: '복수IP', duplicate: '중복', network: 'Network ID', empty: '' }; // v3.4.0: '멀티홈' → '복수IP'(사용자 결정)
     for (const r of s.rows) {
       const row = ws.addRow({ ip: r.ip, purpose: r.purpose, hostname: r.hostname, serverType: r.serverType, os: r.os, notes: r.notes, power: r.power, scope: r.scope, status: label[r.status] });
       const argb = FILL[r.status];

@@ -21,6 +21,8 @@
 - v2.999 — IP 스캔 MAC · 제조사(스캐너 이웃 표 ARP · 제조사 표) · 대장 '제조사 · MAC' 열
 - v3.1.0 — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)
 
+- v3.4.0 — IP 관리 재설계 묶음 가: 탭 5개 · 현황 · 대역 목록/주소 맵 · 필터 한 줄 · '복수IP'
+
 ## 본문
 
 - ⚠⚠ **v2.619 — IP 원장(ipam.db) 동기화는 '입력 지문' 이 같으면 재구성을 건너뛴다(PERF-1 — 사용자 결정 "PERF-1 진행해줘")**
@@ -260,3 +262,22 @@
     목록 칸의 '이름 다름' × 정방향 판정 조합은 웹 테스트 표로 고정했다.
   - ⚠ 정직 기록: 실제 법인 DNS 로 확인하지 못했다(시험은 묻는 함수를 주입 · 이 컨테이너의 루프백 역DNS 는 환경마다 다르다). 분할 DNS · hosts 파일 항목이 답에 섞이는 것은 화면 문구로 밝혔다.
     엣지에서 묻는 시간은 스캔 시간에 더해진다(최대 FWD_BUDGET_MS 90초 — 물리서버 이름 단계와 합).
+
+- ⚠⚠ **v3.4.0 — IP 관리 재설계 묶음 가: 탭 5개 · 현황 · 대역 목록/주소 맵 · 필터 한 줄 · '복수IP'**(사용자 요청 "IP 관리 기능 많이 복잡하고 지저분한데 … 다시 디자인" →
+  시안 `docs/design/ipam-redesign`(캔버스 https://claude.ai/artifact/9PZqpcYuX7ppskdW3iqwvG) → 컨펌 "컨펌 질문 전부 기본값으로 진행해서 구현해줘" · 단계 릴리스 · 표준 검증.
+  웹 `ipamPages.js`(tab · IPAM_TABS · tabGroups · IPAM_DEFAULT_PAGE) · `IpamHome.jsx` · `IpamSubnets.jsx` · `ipamHomeText.js` · `ipamFilterText.js` · `IpamCore.jsx` · styles `.ipam-tabs`~`.ipam-fsel`.
+  회귀 `web/src/views/tools/ipamRedesign340.test.js`):
+  · **탭은 묶음일 뿐이다** — 페이지 키 · 주소(`#/ipam/<키>`) · 권한 판정(pageShown — 403 일 때만 숨김)은 그대로. 새 페이지는 `ipamPages.js` 에 `tab` 과 함께 더하고
+    `TAB_ORDER` 에도 넣을 것(테스트가 '탭 보기가 페이지 전부를 한 번씩 덮는다' 를 고정 — 빠지면 갈 길이 없는 화면이 된다). 주소 없이 열면 'home'(예전 'list') —
+    통합 검색이 검색어를 넘기며 `#/ipam` 으로 열면 'list' 로 옮긴다.
+  · **KPI 카드 9장은 현황 탭에만** — '지금 확인할 것' 칸의 필터 키는 IP 주소 탭 고르기 항목(`ipamFilterText` RECON_OPTIONS · ROW_OPTIONS)과 1:1(테스트 대조).
+    판정은 새로 만들지 않았다 — IpamCore 의 recon 집계 · 대장 응답을 그대로 읽는다. 대장을 못 받았으면 칸은 0 이 아니라 '—'.
+  · **현황의 사용률은 대장에 있는 주소(/tools/ipam/subnets 의 used)만 센다** — 예약 · DHCP 구간(대역 정책)은 세지 않고 화면이 그 사실을 적는다.
+    설계 컨펌의 '예약 · DHCP 포함' 은 묶음 나에서(서버 집계 필요 — 대역 312개 시트를 요청 경로에서 만들지 말 것).
+  · 대역 탭을 주소로 바로 열면 대역을 고르지 않은 채 '불러오는 중' 에 머물렀다(Chromium 에서 잡음) — 목록이 오면 `firstBase`(대장 주소가 가장 많은 대역)를 고른다.
+    ⚠ 그 effect 는 subnets · base · pickBase **선언 뒤**에 둔다(앞에 두면 의존 배열 평가에서 TDZ — 한 번 그렇게 썼다가 옮겼다).
+  · '멀티홈' 표기는 화면 · 엑셀 상태 칸 · 추천 카드 이름에서 '복수IP'(사용자 결정 2026-11-13). 응답 필드 `multiHomed` · 필터 키 `multihomed` · ipam.db `multi_homed` 열은 그대로.
+  · 지운 것: 모든 페이지 위 KPI 9장 · vCenter 칩 줄(VcenterChips) · /24 칩 벽과 같은 목록의 드롭다운 · 출처 대조 버튼 줄 · 빨간 검색창. 옛 구조를 고정하던 테스트
+    `audit2612f`(KPI '—') · `ipamRanges2639` U5(칩 2곳) · `audit2732lead`(dbCountText 위치)는 새 위치를 보도록 고쳤다(뜻은 같다).
+  · 정직 기록: Chromium 은 목 데이터(관리자 · 1440/400)로만 봤다 — 목 데이터에는 IP 변화 기록 · 스캔 결과가 없어 그 칸은 빈 상태로만 확인했다. 범위 계정 화면은 보지 못했다.
+

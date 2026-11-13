@@ -80,7 +80,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/gpu.md` (8항목) | GPU 모니터링(할당·메모리·온도·수집 점검) — server/src/gpu/ · web/src/views/tools/Gpu* |
 | `docs/rules/cvp.md` (16항목) | Arista CVP 수집·장애·GBIC·Overview — server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
 | `docs/rules/isilon.md` (7항목) | 아이실론 디렉터리 사용량·메일 — server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
-| `docs/rules/ipam.md` (15항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
+| `docs/rules/ipam.md` (16항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | `docs/rules/horizon-curuser.md` (6항목) | Horizon 세션·앱 사용·현재 사용자(Windows) — server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | `docs/rules/demo.md` (6항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
 | `docs/rules/audits.md` (82항목) | 회차별 점검(감사) 기록 v2.583~v2.785 — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
