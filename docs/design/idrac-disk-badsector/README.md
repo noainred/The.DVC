@@ -462,3 +462,35 @@ Get-Partition | Select-Object DiskNumber, PartitionNumber, DriveLetter, AccessPa
 
 이로써 설계 결정은 모두 정해졌다. 남은 것: **실장비 확인(§14.1 — 사용자 쪽에서 실행)** → 그 결과로 §14.2 를 확정 → Opus 로 구현.
 ‘법인 담당자’ 의 메일 주소를 어디서 가져오는지(기존 알림 수신자 설정을 쓰는지)는 구현 때 코드로 확인한다 — 아직 보지 않았다.
+
+## 16. 추가하면 좋은 기능 — 제조사 · 모니터링 제품 · 커뮤니티 조사(사용자 2026-11-14 9차)
+
+- "제조사 레딧 모니터링 솔루션 개발사 검색해서 추가하면 좋은 기능 제안해줘"
+
+조사 한계: **Reddit 은 검색하지 못했다**(검색 도구가 reddit.com 에 접근할 수 없다) — 현장 경험은 Dell 커뮤니티 포럼 글로 대신했다. PRTG · Checkmk 의 Dell 디스크 점검은 결과를 찾지 못했다.
+아래 출처는 전부 웹 검색 요약 기준이다(원문 미열람). 채택 여부는 미정 — 시안에는 넣지 않았다.
+
+| # | 제안 | 무엇을 더하나 | 근거(출처) | 이 포탈에서의 전제 · 미확인 |
+|---|---|---|---|---|
+| 1 | **디스크 SMART 누적 값** | 재할당 섹터 · 보류 섹터 · 복구 불가 오류 수를 디스크에서 직접 읽는다. 로그가 넘어가도 디스크에 남아 있어 ‘과거에 났는가’ 를 로그 없이 답한다 | Backblaze 는 SMART 5 · 187 · 188 · 197 · 198 로 고장 위험을 보고, 187 이 0 을 넘으면 교체를 잡는다(ⓐ). Scrutiny 는 제조사 임계 대신 실제 고장 통계 기반 임계를 쓴다(ⓕ) | iDRAC 텔레메트리 스토리지 리포트(Datacenter 라이선스) 또는 OS · ESXi 에서 읽기. RAID 뒤 디스크를 OS 에서 읽으려면 컨트롤러 통과 옵션이 필요(ⓕ) — 속성 이름 · 가능 여부 미확인 |
+| 2 | **vSAN · ESXi 쪽 디스크 상태** | vSAN 이 ‘고장 임박’ 으로 표시했거나 데이터를 대피시킨 디스크, ESXi 가 말하는 SMART 상태를 함께 보여 준다 — Patrol Read 가 돌지 않는 HBA · vSAN 디스크(§12.4-7)를 덮는다 | vSAN 은 느려지거나 고장 나는 디스크를 감지해 데이터를 옮기거나 디스크를 내린다. 호스트에서 디스크별 SMART 상태를 조회할 수 있다(ⓑ). 소프트웨어 정의 스토리지가 고장으로 표시한 디스크는 교체 대상(ⓒ) | vCenter 의 vSAN 상태 API 수집 추가 — 지금 없다. API 이름 미확인 |
+| 3 | **재발 판정** | 같은 디스크에서 점검마다 계속 나오는가 / 한 번 나오고 멈췄는가를 가른다. ‘계속 나옴’ 을 교체 우선으로 올린다 | Patrol Read 때마다 오류가 나오면 곧 교체, 고쳐진 오류가 그 뒤 멈추면 대개 무해하다는 현장 경험(ⓓ) | 이미 모으는 기록만으로 가능 |
+| 4 | **교체 뒤 재발 → 가상 디스크 의심** | 디스크를 바꾼 뒤에도 같은 자리에서 고장 예측 · 불량 블록이 다시 나오면 ‘디스크가 아니라 가상 디스크(puncture) 문제일 수 있음’ 을 알린다 | 두 번 교체해도 예측 실패가 돌아온 사례 — 가상 디스크의 puncture 가 새 디스크로 복사된 것으로 추정(ⓓ) · puncture 설명(§12.1 ③) | 시리얼 이력(§8.3)이 쌓인 뒤부터 가능 |
+| 5 | **같은 가상 디스크에 이력 디스크 2개 이상** | 한 RAID 묶음 안에 배드 섹터 이력 디스크가 둘 이상이면 ‘이중 장애 위험’ 으로 맨 위에 올린다. 리빌드 전에 다른 구성원의 이력을 보여 준다 | puncture 는 이중 장애에서 생긴다(§12.1 ③) · 리빌드 중 복구 불가 오류 PDR64(§12.1 ④) · 교체 · 리빌드 전에 백업 먼저(ⓔ) | 가상 디스크 구성원 정보(§14.1 ⑥)가 읽히면 가능 |
+| 6 | **펌웨어를 같이 본다** | 기록이 있는 디스크의 펌웨어 판을 옆에 쓰고, 같은 모델 안에서 펌웨어별로 가른다. ‘교체 전에 펌웨어부터’ 안내 | Dell 은 예측 실패 때 디스크 · iDRAC · RAID 컨트롤러 펌웨어를 먼저 올리고, 그래도 남으면 교체하라고 한다(ⓔ) · 특정 모델의 미디어 오류가 펌웨어 문제였던 사례(§12.2 ㉓) | 포탈은 이미 펌웨어 인벤토리를 읽고 ‘Disk’ 로 분류한다(`redfish.js:964 · 1013`) — 엣지 축약 인벤토리에 실리는지는 미확인 |
+| 7 | **조치 추적** | 새 ‘복구 불가’ 기록 → 포탈 이슈로 자동 등록, 상태(확인 · 교체 요청 · 교체됨)를 쫓고, 시리얼이 바뀌면 자동으로 닫는다 | Dell SupportAssist 는 예측 고장을 감지해 케이스를 자동으로 열고 부품을 보낸다(ⓖ) — 포탈은 Dell 에 케이스를 열 수 없으니 내부 추적으로 대신한다 | 기존 `server/src/issues/` 모듈(자동 등록 전례 있음 — 연결 방식은 구현 때 확인) |
+| 8 | **Patrol Read · 일관성 검사가 켜져 있는가** | 꺼진 컨트롤러를 따로 표시한다 — 꺼져 있으면 기록이 안 생겨 ‘기록 없음’ 을 믿을 수 없다 | 펌웨어 갱신 뒤 Patrol Read · Consistency Check 가 켜져 있는지 확인하라는 Dell 권고(§12.2 ㉓) | 컨트롤러 설정을 Redfish 로 읽는 속성 이름 미확인 |
+| 9 | **디스크 가동 시간 기준 고장률** | 디스크 수가 아니라 ‘디스크 × 사용 기간’ 으로 나눈 연간 고장률, 나이대별 분포 | Backblaze Drive Stats 방식(ⓐ) · NetApp 은 드라이브 오류 계수를 점수화한다(ⓗ) | 가동 시간은 SMART 값이라 1번이 먼저 |
+| 10 | **핫 스페어 · 자동 교체 설정 점검** | 이력 디스크가 있는 가상 디스크에 핫 스페어가 있는지, ‘예측 실패 시 자동 멤버 교체’ 가 켜져 있는지 | Dell PERC 의 ‘Automatic Replace Member with Predicted Failure’ 기능(ⓘ — 제목만 확인) · NetApp 은 예측 시 스페어로 미리 옮긴다(ⓗ) | 설정 속성 미확인 |
+
+권하는 순서(내 판단): **3 · 5**(지금 모으는 것만으로 되고 교체 우선순위를 바로 준다) → **7**(찾은 뒤의 일을 닫는다) → **1 · 2**(볼 수 없는 디스크와 로그 유실을 메운다 — 가장 값이 크지만 실장비 확인이 필요) → 6 · 8 → 9 · 10.
+
+출처: ⓐ https://www.backblaze.com/blog/hard-drive-smart-stats/ · https://www.computerworld.com/article/2846009/the-5-smart-stats-that-actually-predict-hard-drive-failure.html ·
+ⓑ https://knowledge.broadcom.com/external/article/326859/how-to-troubleshoot-vsan-osa-disk-issues.html · https://knowledge.broadcom.com/external/article/395966 · https://blogs.vmware.com/cloud-foundation/2021/01/01/degraded-device-handling/ ·
+ⓒ https://www.dell.com/support/kbdoc/000219050/drives-replacement-request-for-drives-marked-as-failed-or-unusable-by-software-defined-storage-solution-sdss ·
+ⓓ https://www.dell.com/community/PowerEdge-HDD-SCSI-RAID/PERC-H700-predictive-failure-continues-with-new-drive/m-p/7209908 · https://www.dell.com/community/PowerEdge-HDD-SCSI-RAID/R720XD-Correctable-Disk-Media-Errors/td-p/5183008 · https://www.esdm.co.uk/looking-at-perc-raid-controller-log-files-for-disk-errors ·
+ⓔ https://www.dell.com/support/kbdoc/en-uk/000126418/poweredge-hdd-what-is-predicted-drive-failure-and-how-to-solve-it ·
+ⓕ https://www.linuxlinks.com/scrutiny-webui-smartd-smart-monitoring/ · https://grafana.com/grafana/dashboards/24591 · https://shop.zimaspace.com/blogs/product-comparisons/best-raid-monitoring-tools-home-servers(판매처 블로그 — 2차 자료) ·
+ⓖ https://i.dell.com/sites/doccontent/shared-content/services/en/Documents/Dell_SupportAssist_Enterprise_Customer_Overview.pdf · https://m.principledtechnologies.com/Dell/ProSupport_Plus_with_SupportAssist_for_servers_0618.pdf ·
+ⓗ https://snia.org/sites/default/files/2025-05/SNIA-SDC21-Jibbe-Binford-Drive-Health-Monitor-for-HDD-drives-On-Prem-and-Cloud.pdf · https://kb.netapp.com/on-prem/ontap/OHW/OHW-KBs/What_is_the_difference_between_disk_predictive_failure_and_physical_disk_failure_in_ONTAP_9 ·
+ⓘ https://www.manualslib.com/manual/600037/Dell-6-Series.html?page=38
