@@ -28,6 +28,7 @@
 - v2.901 — 리소스 풀 설정(`vcinfo` pools) · NIC 팀 구성(hcfg.net teaming) · 호스트별 DS 마운트(dscfg mounts) · VMXNET3 권장(nic-legacy) · Linked 범위 가림 · 엣지 vcInfo 계약(키 없음 = 유지 · 낡음 · 만료)
 - v2.906 — 분산 포트그룹 팀 구성 · LACP · VLAN(`vcinfo` dvpg — 6시간 · 이미 받은 포트그룹 moref 만 · Enhanced LACP 의 LAG)
 - v2.935 — ESXi 경로 카운터(`storpath/` — storagePath 그룹 · 한 시간마다 5분 표본 · 비율만 실측)
+- v3.0.1 — vim25 데이터 객체는 스키마 원소 순서로 보낸다(NIC connectable — `vcenter/connectInfo.js` 하나 · 장치 edit 은 읽은 본문 그대로 + connectable 만 교체)
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
 
 ## 본문
@@ -502,3 +503,11 @@
   - 이력은 인메모리(호스트당 26개 — 5분 스냅샷 스윕)이고 귀속 엔진에는 **비율만** 넘긴다. 엣지가 보낸 `spath` 는 중앙에서 아는 필드만 정제한다(`sanitizeHostSpath`).
   - v2.940: 못 푼 경로 인스턴스 이름의 원문 표본 5개(`unparsedSamples` — 120자 · 제어문자 제거 · 엣지 정제 포함)를 남기고 호스트 상세 '이름 못 푼 경로' 에 마우스를 올리면 보인다 — 이름 형식이 실장비 미확인이라 처음 붙은 현장에서 확인할 근거.
 - **v2.958 `/tools/vm-track` 의 `?region=`**(허브 범위 바): 사용자 범위(`scopedVcenterIds`)와의 **교집합**으로만 좁힌다(`vmtrack/scopeIds.js trackScopeIds`) · 맞는 vCenter 가 없으면 빈 Set(전체로 넓히지 않는다 — service 는 `scopeIds.has` 로만 거른다) · `vcenterId` 가 있으면 region 은 무시. 회귀 `test/vmtrackScope2958.test.js`.
+- **v3.0.1 — vim25 데이터 객체는 스키마 원소 순서로 보낸다(vCenter SOAP 역직렬화는 순서를 지킨다)**(사용자 보고 'network 끊으려고 하는데 안 돼' · '전체 검증'). VM 사양 변경의 NIC 연결 해제가
+  'SOAP 500: Required property allowGuestControl is missing from data object of type VirtualDeviceConnectInfo' 로 늘 실패했다 — `startConnected · connected · allowGuestControl` 순서였다
+  (스키마: migrateConnect? · startConnected · allowGuestControl · connected · status?). NIC 추가도 같은 순서였다(같은 거부 추정).
+  - connectable 조립은 `server/src/vcenter/connectInfo.js` 하나(사양 변경 토글 · NIC 추가 · VM 복제 NIC 끊기). 밖에서 `<connectable><…>` 를 조립하면 소스 스윕이 막는다.
+  - 장치 edit 은 **읽은 장치 본문을 그대로** 되돌려 보내고 connectable 만 바꾼다(MAC · addressType · DVS 포트 · slotInfo 보존 — govc device.connect 와 같은 방식). `key`+`backing` 만으로 다시 만들면 빠진 칸을 vCenter 가 무엇으로 채울지 모른다.
+  - 사용자가 바꾸지 않은 `allowGuestControl` 은 읽은 값을 지킨다. 본문(`deviceInner`)과 `backingXml` 은 열거 불가 — GET `/vm/:id/hardware` 응답에 DVS connectionCookie 를 싣지 않는다.
+  - 새 vim25 쓰기(deviceChange · RelocateSpec 등)를 손으로 조립할 때는 govmomi `vim25/types` 필드 순서(= WSDL sequence)와 대조하는 테스트를 둘 것. 회귀 `server/test/nicConnectInfo301.test.js`(변이 9/9 · 반증 1인).
+  - 남긴 것(반증 판독 — 실환경 미확인): 프로비저닝 RelocateSpec 의 스토리지 정책이 `<profile><profile …><profileName>` 모양이다(스키마는 배열 원소 하나 + 필수 `profileId`) — 정책을 입력한 클론은 거부될 것으로 본다.

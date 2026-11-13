@@ -62,12 +62,12 @@ export function parseHardware(deviceXml, meta = {}) {
         macAddress: pickTag(blk, 'macAddress'),
         connected: /<connected>true<\/connected>/.test(blk),
         allowGuestControl: readConnectFlag(inner, 'allowGuestControl'),   // v3.0.1: 연결 토글이 사용자가 바꾸지 않은 이 값을 지킨다(못 읽으면 null)
-        // 연결 토글 시 backing을 그대로 echo해야 안전(특히 DVS).
-        backingXml: /<backing xsi:type="[^"]+">[\s\S]*?<\/backing>/.exec(blk)?.[0] || '',
       };
       // v3.0.1: 연결 토글은 읽은 장치 본문 전체를 되돌려 보낸다(connectable 만 바꿈 — vmclone nicDisconnectSpec 과 같은 방식).
-      //   열거 불가 — GET /vm/:id/hardware 응답(JSON)에는 싣지 않는다(응답 크기·DVS connectionCookie 를 늘리지 않게).
+      //   backingXml 은 본문을 못 읽었을 때의 대체 경로 전용(backing 을 그대로 echo해야 안전 — 특히 DVS).
+      //   둘 다 열거 불가 — GET /vm/:id/hardware 응답(JSON)에 싣지 않는다(응답 크기 · DVS portKey · connectionCookie 를 화면에 내리지 않게. 웹은 쓰지 않는다).
       Object.defineProperty(nic, 'deviceInner', { value: inner, enumerable: false });
+      Object.defineProperty(nic, 'backingXml', { value: /<backing xsi:type="[^"]+">[\s\S]*?<\/backing>/.exec(blk)?.[0] || '', enumerable: false });
       nics.push(nic);
     }
   }

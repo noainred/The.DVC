@@ -86,8 +86,9 @@ test('③ allowGuestControl 은 읽은 값을 지킨다(이 화면은 그 칸을
 test('④ 장치 본문은 GET /vm/:id/hardware 응답(JSON)에 실리지 않는다', () => {
   const hw = parseHardware(nicXml(), META_ON);
   assert.ok(hw.nics[0].deviceInner.includes('<macAddress>'));
+  assert.ok(hw.nics[0].backingXml.includes('<connectionCookie>'));   // 대체 경로용으로는 남아 있다
   const json = JSON.stringify(hw);
-  assert.doesNotMatch(json, /deviceInner|pciSlotNumber/);
+  assert.doesNotMatch(json, /deviceInner|pciSlotNumber|backingXml|connectionCookie/);
   assert.match(json, /"allowGuestControl":true/);
 });
 
@@ -104,6 +105,9 @@ test('① VM 복제 NIC 끊기도 같은 헬퍼 — 순서 · 게스트 제어 �
   assert.equal(count, 2);
   assert.deepEqual(connOrders(specXml), [SCHEMA, SCHEMA]);
   assert.deepEqual([...specXml.matchAll(/<allowGuestControl>(\w+)</g)].map((m) => m[1]), ['true', 'false']);
+  // 칸을 못 읽은 NIC 는 false(끊는 쪽이라 게스트 재연결을 열지 않는다).
+  const bare = nicDisconnectSpec('<VirtualDevice xsi:type="VirtualVmxnet3"><key>4002</key><connectable><connected>true</connected></connectable><controllerKey>100</controllerKey></VirtualDevice>');
+  assert.match(bare.specXml, /<connectable><startConnected>false<\/startConnected><allowGuestControl>false<\/allowGuestControl><connected>false<\/connected><\/connectable><controllerKey>100/);
 });
 
 test('withConnectable — connectable 이 없는 장치는 그 뒤 원소 가장 앞에 넣는다(끝에 덧붙여 macAddress 뒤로 가지 않게)', () => {

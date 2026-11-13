@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "3.0.1",
+      "date": "2026-11-13",
+      "title": "VM 사양 변경 — NIC 연결 해제 · NIC 추가가 vCenter 오류(SOAP 500 allowGuestControl)로 실패하던 결함 수정",
+      "notes": [
+        "VM 사양 변경에서 NIC '연결' 을 해제하고 적용하면 'SOAP 500: Required property allowGuestControl is missing…' 로 실패했습니다 — 보내는 연결 설정의 항목 순서가 vCenter 가 요구하는 순서와 달랐습니다. NIC 추가도 같은 순서였습니다.",
+        "이제 연결 해제 · 연결 · NIC 추가가 vCenter 가 요구하는 순서로 나갑니다. 연결을 바꿀 때는 읽은 NIC 설정(MAC · 분산 포트 등)을 그대로 두고 연결 칸만 바꾸며, '게스트 제어 허용' 값도 지킵니다.",
+        "실제 vCenter 에서는 확인하지 못했습니다 — 같은 화면에서 다시 시도해 보시고 결과를 알려 주세요."
+      ]
+    },
+    {
       "version": "3.0.0",
       "date": "2026-11-13",
       "title": "업그레이드 뒤 ‘새로고침 하세요’ 안내 — 바뀐 것 3줄 + More · 알림은 닫을 때까지",
