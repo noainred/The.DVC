@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 더할 지표</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0;box-sizing:border-box}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap;background:rgba(139,155,180,.16);color:#c3cede}
+.badge.ok{background:rgba(34,197,94,.14);color:#86efac}
+.badge.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.badge.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.badge.new{background:rgba(125,211,252,.12);color:#7dd3fc}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1e3a8a;color:#fff}
+.pc{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.cap{font-size:12px;color:#8b9bb4;overflow-wrap:anywhere}
+.g2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start}
+.tw{overflow-x:auto}
+.ft{display:grid;grid-template-columns:150px 64px 130px 84px minmax(170px,1fr) 104px 116px;column-gap:12px;align-items:center;padding:0 16px;min-width:960px;box-sizing:border-box}
+.th{height:34px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.tr{min-height:40px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.bar{height:8px;border-radius:4px;background:#1b2a48;overflow:hidden;flex:1;min-width:60px}
+.bar span{display:block;height:8px;border-radius:4px}
+.kp{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:10px}
+.k{background:#0f1626;border:1px solid #1f2a40;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.k .v{font-size:20px;font-weight:700;line-height:1.2}
+.k .u{font-size:12px;color:#8b9bb4;font-weight:500;margin-left:3px}
+.k .l{font-size:12px;color:#8b9bb4}
+.k svg{display:block;width:100%;height:30px;margin-top:4px}
+.code{font-family:"JetBrains Mono",monospace;font-size:12px;background:#0b111d;border:1px solid #1f2a40;border-radius:8px;padding:10px 12px;line-height:1.6;white-space:pre;overflow-x:auto;color:#c3cede}
+.cf{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:10px;row-gap:8px;font-size:12.5px}
+.cf b{color:#7dd3fc}
+.dl{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:10px;row-gap:4px;font-size:12.5px}
+@media (max-width:600px){.dl{grid-template-columns:minmax(0,1fr)}.dl>span:nth-child(even){padding-bottom:4px}}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">특수 기능 › 서버 집중 모니터링 › 서버 상세 — 지금 없는 지표 다섯 묶음을 더합니다(파일시스템 · TCP · CPU 스케줄링 · 메모리 압박 · 프로세스 상태)</div>
+    <div class="dim" style="font-size:12px">가상의 서버 · 값입니다. 새로 더하는 칸에는 ‘새’ 표지를 붙였습니다. 위 구간 단추를 눌러 보세요(값은 그대로 · 칸 수만 바뀝니다).</div>
+  </div>
+
+  <div class="card pc">
+    <div class="row" style="justify-content:space-between">
+      <div class="row"><h3 class="h3">kr-db-01</h3><span class="mono dim">10.10.20.11</span><span class="badge">RHEL 7.8 · 16코어</span><span class="badge ok">수집 중 · 2초</span></div>
+      <div class="row"><span class="dim" style="font-size:12.5px">구간</span><div class="seg"><sc-for list="{{ winBtns }}" as="b" hint-placeholder-count="4"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div></div>
+    </div>
+    <span class="cap">기존 카드(CPU · 메모리 · 네트워크 · 디스크 · 파티션) 아래에 다음 카드들을 놓습니다. 그래프 하나는 {{ pts }}칸입니다.</span>
+  </div>
+
+  <div class="card" style="padding:14px 0 10px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <div class="row"><h3 class="h3">파일시스템 — 사용률 · inode</h3><span class="badge new">새 · A1</span></div>
+      <span class="cap">60초마다 · 로컬 파일시스템만 · 마지막 확인 13:20:41</span>
+    </div>
+    <div class="tw">
+      <div class="ft th"><span>마운트</span><span>종류</span><span>장치</span><span style="text-align:right">크기</span><span>사용률</span><span>inode</span><span>가득 찰 때까지</span></div>
+      <sc-for list="{{ fs }}" as="f" hint-placeholder-count="6">
+        <div class="ft tr">
+          <span class="mono" style="font-weight:600">{{ f.mnt }}</span>
+          <span class="dim">{{ f.type }}</span>
+          <span class="mono dim" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ f.dev }}">{{ f.dev }}</span>
+          <span class="num" style="text-align:right">{{ f.size }}</span>
+          <span class="row" style="gap:8px;flex-wrap:nowrap"><span class="bar"><span style="{{ f.fill }}"></span></span><span class="num" style="min-width:110px">{{ f.used }}</span></span>
+          <span class="num">{{ f.inode }}</span>
+          <span class="row" style="gap:6px"><span class="{{ f.stCls }}">{{ f.st }}</span></span>
+        </div>
+      </sc-for>
+    </div>
+    <div class="cap" style="padding:0 16px">사용률은 일반 계정 기준 df 값입니다(root 예약분은 ‘쓸 수 있는 양’ 에서 빠집니다). xfs 의 inode 는 필요할 때 늘어나 비율이 큰 뜻이 없어 ‘—’ 로 둡니다. ‘가득 찰 때까지’ 는 계속 수집 서버에서 지난 24시간 추세로 낸 추정이고, 기록이 6시간보다 짧으면 ‘—’ 입니다. 판정 문턱은 주의 80% · 위험 90%(설정)입니다.</div>
+  </div>
+
+  <div class="g2">
+    <div class="card pc">
+      <div class="row" style="justify-content:space-between"><div class="row"><h3 class="h3">TCP · 소켓</h3><span class="badge new">새 · A2</span></div><span class="cap">프레임마다</span></div>
+      <div class="kp"><sc-for list="{{ tcp }}" as="k" hint-placeholder-count="4"><div class="k"><span class="l">{{ k.label }}</span><span><span class="v num" style="{{ k.color }}">{{ k.v }}</span><span class="u">{{ k.u }}</span></span><svg viewBox="0 0 160 30" preserveAspectRatio="none"><path d="{{ k.d }}" fill="none" stroke="#3987e5" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg><span class="l">{{ k.sub }}</span></div></sc-for></div>
+      <span class="cap">재전송률 = 재전송 세그먼트 ÷ 보낸 세그먼트(구간 안 차이). 리슨 큐 넘침은 accept 가 밀려 연결을 버린 횟수입니다 — 0 이 아니면 앱이 연결을 제때 받지 못하고 있다는 뜻입니다. 값은 서버 전체(네트워크 네임스페이스 하나)이며 컨테이너 안 소켓은 보이지 않습니다. 소켓마다의 목록(/proc/net/tcp 전체)은 비싸서 읽지 않습니다.</span>
+    </div>
+
+    <div class="card pc">
+      <div class="row" style="justify-content:space-between"><div class="row"><h3 class="h3">CPU 스케줄링 · 프로세스 상태</h3><span class="badge new">새 · A3 · A5</span></div><span class="cap">프레임마다</span></div>
+      <div class="kp"><sc-for list="{{ sched }}" as="k" hint-placeholder-count="4"><div class="k"><span class="l">{{ k.label }}</span><span><span class="v num" style="{{ k.color }}">{{ k.v }}</span><span class="u">{{ k.u }}</span></span><svg viewBox="0 0 160 30" preserveAspectRatio="none"><path d="{{ k.d }}" fill="none" stroke="#3987e5" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg><span class="l">{{ k.sub }}</span></div></sc-for></div>
+      <div class="dl"><span class="dim">D 상태(디스크 대기에서 멈춘) 프로세스 — 지금</span><span class="dim">상태 · 이어진 시간</span><sc-for list="{{ dproc }}" as="d" hint-placeholder-count="2"><span class="mono">{{ d.name }}</span><span class="num">{{ d.st }}</span></sc-for></div>
+      <span class="cap">좀비 · D 상태 · 실행 대기는 이미 받는 프로세스 줄과 /proc/stat 에서 셉니다(원격 명령 추가 없음). 실행 대기가 코어 수를 오래 넘으면 CPU 가 모자란 것이고, D 상태가 이어지면 디스크 · NFS 를 봐야 합니다.</span>
+    </div>
+
+    <div class="card pc">
+      <div class="row" style="justify-content:space-between"><div class="row"><h3 class="h3">메모리 압박</h3><span class="badge new">새 · A4</span></div><span class="cap">프레임마다</span></div>
+      <div class="kp"><sc-for list="{{ mem }}" as="k" hint-placeholder-count="4"><div class="k"><span class="l">{{ k.label }}</span><span><span class="v num" style="{{ k.color }}">{{ k.v }}</span><span class="u">{{ k.u }}</span></span><svg viewBox="0 0 160 30" preserveAspectRatio="none"><path d="{{ k.d }}" fill="none" stroke="#3987e5" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg><span class="l">{{ k.sub }}</span></div></sc-for></div>
+      <span class="cap">RHEL 7 에는 압박 지표(PSI)가 없어 스왑 입출력 · major fault · 페이지 회수로 대신합니다. 스왑 사용량(지금 있는 값)보다 스왑 입출력이 실제로 느려지는 원인입니다. OOM 횟수 카운터(oom_kill)는 RHEL 7 커널에 없는 것으로 보여(추정) dmesg 감지(⑯)로 대신합니다.</span>
+    </div>
+
+    <div class="card pc">
+      <div class="row" style="justify-content:space-between"><h3 class="h3">원격 명령에 더하는 줄(여전히 상수)</h3><span class="badge">root 없이</span></div>
+      <div class="code">{{ script }}</div>
+      <span class="cap">사용자 값 · 마운트 목록을 명령에 넣지 않습니다. df 는 timeout 으로 감싸고 로컬만 봅니다(NFS 하나가 반복문 전체를 멈추지 않게). intr 줄은 수천 칸이라 첫 합계 칸만 자릅니다. 늘어나는 양(추정): 프레임마다 약 0.4KB · 60초마다 df 약 1KB — v2.983 수집 부하 탭이 그대로 잽니다.</span>
+    </div>
+  </div>
+
+  <div class="card pc">
+    <div class="row" style="justify-content:space-between"><h3 class="h3">다른 화면에 붙는 곳</h3></div>
+    <div class="dl"><sc-for list="{{ links }}" as="l" hint-placeholder-count="4"><span>{{ l.a }}</span><span class="dim">{{ l.b }}</span></sc-for></div>
+  </div>
+
+  <div class="card pc">
+    <h3 class="h3">컨펌 받을 것(답이 없으면 괄호 값으로 구현)</h3>
+    <div class="cf">
+      <b>①</b><span>파일시스템 주기 — (60초 · df 시한 3초. 시한을 넘긴 마운트는 ‘응답 없음’ 으로 한 줄 표시)</span>
+      <b>②</b><span>파일시스템 판정 문턱 — (주의 80% · 위험 90% · inode 도 같은 문턱 · 설정으로 바꿈)</span>
+      <b>③</b><span>‘가득 찰 때까지’ 추정을 넣을지 — (넣는다 · 계속 수집 서버만 · 기록 6시간 미만이면 ‘—’)</span>
+      <b>④</b><span>TCP · 스케줄링 · 메모리 압박 값을 DB 에 남길지 — (남긴다 · 같은 1분 묶음에 열 추가 · 30일)</span>
+      <b>⑤</b><span>새 값을 비교 탭 · 카드 아래 줄 고르기 · 알림 지표에도 넣을지 — (넣는다)</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2000}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { win: 30 }; }
+  renderVals() {
+    const S = this.state;
+    const PTS = { 1: 30, 5: 75, 10: 100, 30: 120 };
+    const pts = PTS[S.win];
+    let seed = 7;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    const spark = (base, amp, spike) => {
+      const n = 60; const v = [];
+      for (let i = 0; i < n; i++) v.push(Math.max(0, base + (rnd() - 0.5) * amp + (spike && i > 40 && i < 46 ? spike : 0)));
+      const mx = Math.max.apply(null, v) || 1;
+      return v.map((y, i) => (i ? 'L' : 'M') + (i * 160 / (n - 1)).toFixed(1) + ' ' + (28 - y / mx * 26).toFixed(1)).join(' ');
+    };
+    const winBtns = [1, 5, 10, 30].map((w) => ({ label: w + '분', cls: S.win === w ? 'on' : '', pick: () => this.setState({ win: w }) }));
+    const C = { ok: '#3fb950', warn: '#f59e0b', bad: '#ef4444' };
+    // [마운트, 종류, 장치, 크기, 사용 GB, 크기 GB, inode %|null, 가득(일)|null|'nfs']
+    const FS = [
+      ['/', 'xfs', '/dev/mapper/rhel-root', '50G', 31.2, 50, null, null],
+      ['/boot', 'xfs', '/dev/sda1', '1.0G', 0.21, 1, null, null],
+      ['/var', 'xfs', '/dev/mapper/rhel-var', '100G', 84.1, 100, null, 9],
+      ['/data', 'ext4', '/dev/mapper/vg_data-lv_data', '2.0T', 1987, 2048, 41, 2.6],
+      ['/arch', 'ext4', '/dev/mapper/vg_data-lv_arch', '500G', 212, 500, 93, null],
+      ['/u01', 'xfs', '/dev/sdc1', '—', null, null, null, 'stuck'],
+    ];
+    const lvl = (p) => (p == null ? null : p >= 90 ? 'bad' : p >= 80 ? 'warn' : 'ok');
+    const fs = FS.map((f) => {
+      const p = f[4] == null ? null : Math.round(f[4] / f[5] * 1000) / 10;
+      const worst = [lvl(p), lvl(f[6])].includes('bad') ? 'bad' : [lvl(p), lvl(f[6])].includes('warn') ? 'warn' : 'ok';
+      const unitOf = (gb) => (gb >= 1000 ? (gb / 1024).toFixed(2) + 'T' : gb >= 10 ? gb.toFixed(1) + 'G' : gb.toFixed(2) + 'G');
+      let st, stCls;
+      if (f[7] === 'stuck') { st = '응답 없음(3초)'; stCls = 'badge bad'; }
+      else if (f[7] == null) { st = worst === 'ok' ? '—' : (lvl(f[6]) === 'bad' ? 'inode ' + f[6] + '%' : '—'); stCls = worst === 'ok' ? 'dim' : 'badge ' + worst; }
+      else { st = '약 ' + f[7] + '일(추정)'; stCls = 'badge ' + (f[7] < 3 ? 'bad' : 'warn'); }
+      return {
+        mnt: f[0], type: f[1], dev: f[2], size: f[3],
+        used: p == null ? '—' : unitOf(f[4]) + ' · ' + p + '%',
+        fill: p == null ? 'width:0' : 'width:' + p + '%;background:' + C[lvl(p)],
+        inode: f[6] == null ? (f[1] === 'xfs' && f[7] !== 'stuck' ? '— (xfs)' : '—') : f[6] + '%',
+        st, stCls,
+      };
+    });
+    const k = (label, v, u, sub, d, color) => ({ label, v, u, sub, d, color: color ? 'color:' + color : '' });
+    const tcp = [
+      k('재전송률', '0.84', '%', '보통 0.1% 안팎 · 14:02 부터 오름', spark(0.3, 0.2, 1.6), C.warn),
+      k('리슨 큐 넘침', '12', '회/분', '앞 구간 0회', spark(0, 0.4, 14), C.warn),
+      k('연결(ESTABLISHED)', '1,284', '', '최고 1,402', spark(1200, 180)),
+      k('TIME_WAIT', '3,912', '', '연결의 3배 — 짧은 연결이 많음', spark(3600, 500)),
+    ];
+    const sched = [
+      k('컨텍스트 스위치', '48,210', '/s', '코어당 3,013/s', spark(46000, 9000)),
+      k('인터럽트', '22,103', '/s', '첫 합계 칸만', spark(21000, 4000)),
+      k('새 프로세스(fork)', '3.2', '/s', '짧게 사는 프로세스 신호', spark(3, 2.4)),
+      k('실행 대기 / 코어', '6 / 16', '', '최고 21 — 13:58', spark(5, 6, 14)),
+      k('D 상태', '2', '개', '최고 9 — 14:03', spark(1, 2, 8), C.warn),
+      k('좀비', '0', '개', '구간 내내 0', spark(0, 0)),
+    ];
+    const dproc = [{ name: 'jbd2/dm-3-8 (pid 1187)', st: 'D · 6초째' }, { name: 'oracle_dbw0 (pid 25109)', st: 'D · 2초째' }];
+    const mem = [
+      k('스왑 들어옴', '214', '페이지/s', '0.8 MB/s', spark(120, 160, 260), C.warn),
+      k('스왑 나감', '96', '페이지/s', '0.4 MB/s', spark(60, 90, 120)),
+      k('major fault', '41', '/s', '디스크에서 다시 읽은 페이지', spark(30, 30, 60)),
+      k('페이지 회수(스캔)', '18,240', '/s', '회수 성공 72%', spark(14000, 6000, 9000)),
+    ];
+    const script = '# 프레임마다(지금 읽는 /proc/stat 의 grep 을 넓힘)\n'
+      + "grep -E '^(cpu|procs_|ctxt|processes) ' /proc/stat\n"
+      + "grep '^intr ' /proc/stat | cut -d' ' -f1-2\n"
+      + "grep -E '^(pswpin|pswpout|pgmajfault|pgscan|pgsteal)' /proc/vmstat\n"
+      + 'grep -E \'^(Tcp|TcpExt):\' /proc/net/snmp /proc/net/netstat ; cat /proc/net/sockstat\n'
+      + '# 60초마다(로컬만 · 시한)\n'
+      + 'timeout -s KILL 3 df -P -l -k ; timeout -s KILL 3 df -P -l -i';
+    const links = [
+      { a: '개요 카드 아래 줄 고르기(v2.992)', b: '파일시스템 최대 % · TCP 재전송 % · D 상태 수 · 실행 대기/코어 · 스왑 입출력 — 5항목 추가' },
+      { a: '비교 탭 지표 목록', b: '같은 다섯 묶음을 서버끼리 나란히' },
+      { a: '알림 규칙(⑯)', b: '파일시스템 % · 재전송 % · D 상태 · 스왑 입출력을 조건으로' },
+      { a: '수집 부하 탭(v2.983)', b: '새 줄의 비용은 기본 지표 묶음 비용에 그대로 잡힙니다 — 따로 재지 않습니다' },
+    ];
+    return { winBtns, pts, fs, tcp, sched, dproc, mem, script, links };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 앱 단위 묶음</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0;box-sizing:border-box}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap;background:rgba(139,155,180,.16);color:#c3cede}
+.badge.new{background:rgba(125,211,252,.12);color:#7dd3fc}
+.badge.ok{background:rgba(34,197,94,.14);color:#86efac}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1e3a8a;color:#fff}
+.pc{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.cap{font-size:12px;color:#8b9bb4;overflow-wrap:anywhere}
+.lay{display:grid;grid-template-columns:minmax(0,1fr) 440px;gap:14px;align-items:start}
+.side{display:flex;flex-direction:column;gap:14px;min-width:0}
+.tw{overflow-x:auto}
+.ag{display:grid;grid-template-columns:minmax(220px,1.4fr) 110px 70px 70px minmax(150px,1fr) 90px 140px;column-gap:12px;align-items:center;padding:0 16px;min-width:880px;box-sizing:border-box}
+.th{height:34px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.tr{min-height:42px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.tr button.tog{border:0;background:transparent;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;padding:0;display:inline-flex;align-items:center;gap:6px;text-align:left;min-width:0}
+.sub{background:#0f1626}
+.sub .ag{min-height:34px;font-size:12px;color:#c3cede;border-bottom:1px solid #182136}
+.bar{height:8px;border-radius:4px;background:#1b2a48;overflow:hidden;flex:1;min-width:50px}
+.bar span{display:block;height:8px;border-radius:4px;background:#3987e5}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;flex:none}
+.chart{position:relative;height:200px;margin-left:30px}
+.chart svg{position:absolute;inset:0;width:100%;height:100%}
+.yax{position:absolute;left:-30px;top:0;bottom:0;width:26px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;font-size:11px;color:#8b9bb4}
+.xax{display:flex;justify-content:space-between;margin-left:30px;font-size:11px;color:#8b9bb4}
+.leg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 12px;font-size:12px}
+.leg span{display:flex;align-items:center;gap:6px;min-width:0}
+.leg em{font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cf{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:10px;row-gap:8px;font-size:12.5px}
+.cf b{color:#7dd3fc}
+@media (max-width:1000px){.lay{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:520px){.leg{grid-template-columns:minmax(0,1fr)}}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">특수 기능 › 서버 집중 모니터링 › 프로세스 — 같은 서비스(systemd) · 같은 프로그램의 프로세스를 하나로 묶어 합을 봅니다</div>
+    <div class="dim" style="font-size:12px">가상의 서버 · 값입니다. 보기 · 묶는 기준 단추와 줄 앞 ▸ 를 눌러 보세요.</div>
+  </div>
+
+  <div class="card pc">
+    <div class="row" style="justify-content:space-between">
+      <div class="row"><h3 class="h3">kr-db-01</h3><span class="badge">{{ procBadge }}</span><span class="badge new">새 · B4</span></div>
+      <div class="row">
+        <span class="dim" style="font-size:12.5px">보기</span><div class="seg"><sc-for list="{{ viewBtns }}" as="b" hint-placeholder-count="2"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div>
+        <span class="dim" style="font-size:12.5px">묶는 기준</span><div class="seg"><sc-for list="{{ byBtns }}" as="b" hint-placeholder-count="2"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div>
+      </div>
+    </div>
+    <span class="cap">{{ byNote }}</span>
+  </div>
+
+  <div class="lay">
+    <div class="card" style="padding:12px 0 10px;display:flex;flex-direction:column;gap:10px">
+      <div class="row" style="justify-content:space-between;padding:0 16px"><h3 class="h3">{{ tableTitle }}</h3><span class="cap">14:10:02 표본 · CPU 순</span></div>
+      <div class="tw">
+        <div class="ag th"><span>{{ firstCol }}</span><span>계정</span><span style="text-align:right">프로세스</span><span style="text-align:right">스레드</span><span>CPU(코어 1개 = 100%)</span><span style="text-align:right">메모리(RSS)</span><span style="text-align:right">디스크 읽기 · 쓰기</span></div>
+        <sc-for list="{{ apps }}" as="a" hint-placeholder-count="8">
+          <div class="ag tr">
+            <span style="min-width:0"><button type="button" class="tog" onClick="{{ a.toggle }}" aria-expanded="{{ a.open }}"><span class="dim">{{ a.arrow }}</span><span class="dot" style="{{ a.dot }}"></span><span class="mono" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ a.name }}">{{ a.name }}</span></button></span>
+            <span class="dim" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.user }}</span>
+            <span class="num" style="text-align:right">{{ a.n }}</span>
+            <span class="num" style="text-align:right">{{ a.thr }}</span>
+            <span class="row" style="gap:8px;flex-wrap:nowrap"><span class="bar"><span style="{{ a.fill }}"></span></span><span class="num" style="min-width:52px;text-align:right">{{ a.cpu }}</span></span>
+            <span class="num" style="text-align:right">{{ a.rss }}</span>
+            <span class="num dim" style="text-align:right" title="{{ a.ioTitle }}">{{ a.io }}</span>
+          </div>
+          <sc-if value="{{ a.open }}" hint-placeholder-val="{{ false }}">
+            <div class="sub"><sc-for list="{{ a.members }}" as="m" hint-placeholder-count="4">
+              <div class="ag"><span class="mono" style="padding-left:34px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.name }}</span><span class="dim">{{ m.user }}</span><span class="num" style="text-align:right">{{ m.n }}</span><span class="num" style="text-align:right">{{ m.thr }}</span><span class="num" style="text-align:right;padding-right:0">{{ m.cpu }}</span><span class="num" style="text-align:right">{{ m.rss }}</span><span class="num dim" style="text-align:right">{{ m.io }}</span></div>
+            </sc-for></div>
+          </sc-if>
+        </sc-for>
+      </div>
+      <div class="cap" style="padding:0 16px">합에는 상위 30 밖의 프로세스도 모두 들어갑니다(원격은 이미 모든 프로세스의 stat 줄과 서비스 이름을 보냅니다 — 원격 명령 추가 없음). 디스크 읽기 · 쓰기는 수집 계정의 프로세스만 읽혀, 다른 계정 프로세스가 섞인 묶음은 ‘—’ 이고 일부만 읽힌 묶음은 ‘부분’ 으로 표시합니다(0 으로 채우지 않습니다). 메모리 RSS 합은 공유 메모리를 여러 번 센 값이라 실제보다 큽니다.</div>
+    </div>
+
+    <div class="side">
+      <div class="card pc">
+        <div class="row" style="justify-content:space-between"><h3 class="h3">앱별 CPU — 최근 30분</h3><span class="cap">쌓은 영역 · 위 5개 + 나머지</span></div>
+        <div class="chart">
+          <div class="yax"><span>{{ yMax }}</span><span>{{ yMid }}</span><span>0</span></div>
+          <svg viewBox="0 0 400 200" preserveAspectRatio="none">
+            <path d="M0 0 H400 M0 100 H400 M0 200 H400" stroke="#1f2a40" stroke-width="1" vector-effect="non-scaling-stroke"/>
+            <sc-for list="{{ layers }}" as="l" hint-placeholder-count="6"><path d="{{ l.d }}" fill="{{ l.c }}" stroke="#141b2d" stroke-width="1.5" vector-effect="non-scaling-stroke"/></sc-for>
+          </svg>
+        </div>
+        <div class="xax"><span>13:40</span><span>13:50</span><span>14:00</span><span>14:10</span></div>
+        <div class="leg"><sc-for list="{{ legend }}" as="g" hint-placeholder-count="6"><span><i class="dot" style="{{ g.dot }}"></i><em title="{{ g.name }}">{{ g.name }}</em><b class="num" style="margin-left:auto;font-weight:500">{{ g.v }}</b></span></sc-for></div>
+        <span class="cap">색은 묶음 이름을 따라갑니다(순위가 바뀌어도 같은 앱은 같은 색). 14:00 이후 oracle-db 가 늘어난 몫이 서버 CPU 증가의 대부분입니다.</span>
+      </div>
+
+      <div class="card pc">
+        <h3 class="h3">기록 · 다른 화면</h3>
+        <span class="cap">분마다 묶음 상위 20개(CPU · RSS · 프로세스 수 · 스레드)를 DB 에 남겨 시간 띠로 지난 시점도 봅니다 — 1분 묶음에 열을 더합니다(30일). ‘필수 앱’ 을 알림 규칙(⑯)의 조건으로 쓸 수 있습니다: 예 ‘oracle-db.service 프로세스 0개 1분 이상’.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card pc">
+    <h3 class="h3">컨펌 받을 것(답이 없으면 괄호 값으로 구현)</h3>
+    <div class="cf">
+      <b>①</b><span>기본 묶는 기준 — (systemd 서비스. 서비스가 없는 프로세스는 ‘서비스 없음 — 커널 스레드’ · ‘사용자 세션’ 으로 · 단추로 프로그램 이름 묶음)</span>
+      <b>②</b><span>프로세스 탭의 기본 보기 — (지금처럼 상위 30 · ‘앱 단위’ 는 단추. 고른 보기는 브라우저가 기억)</span>
+      <b>③</b><span>DB 에 남길 묶음 수 — (분마다 상위 20 · 30일)</span>
+      <b>④</b><span>사용자 지정 묶음(이름 규칙으로 직접 묶기 — Netdata apps_groups 같은) — (이번에는 넣지 않는다 · 서비스 · 프로그램 이름 두 가지로 먼저)</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { view: 'app', by: 'unit', open: { 'oracle-db.service': true } }; }
+  renderVals() {
+    const S = this.state;
+    const COL = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'];
+    const REST = '#5b6b86';
+    // [이름, 계정, 프로세스, 스레드, CPU%, RSS(MB), 디스크(null=다른 계정 · 'part' · [r,w] MB/s), 구성]
+    const UNIT = [
+      ['oracle-db.service', 'oracle', 214, 640, 312, 42190, null, [['oracle (서버 프로세스)', 'oracle', 180, 180, 241, 30120], ['ora_dbw0 ~ ora_dbw7', 'oracle', 8, 8, 52, 6410], ['ora_lgwr', 'oracle', 1, 1, 11, 410], ['그 밖 25개', 'oracle', 25, 451, 8, 5250]]],
+      ['tomcat.service', 'tomcat', 37, 1284, 96, 13110, null, [['java', 'tomcat', 37, 1284, 96, 13110]]],
+      ['서비스 없음 — 커널 스레드', 'root', 402, 402, 18, 0, null, [['kworker/*', 'root', 211, 211, 9.1, 0], ['jbd2/*', 'root', 14, 14, 4.2, 0], ['그 밖', 'root', 177, 177, 4.7, 0]]],
+      ['dvc-agent.service', 'dvcmon', 2, 11, 7.4, 96, [0.0, 0.3], [['dvc-agent', 'dvcmon', 2, 11, 7.4, 96]]],
+      ['rsyslog.service', 'root', 1, 4, 6.2, 210, null, [['rsyslogd', 'root', 1, 4, 6.2, 210]]],
+      ['sshd.service', 'root · dvcmon', 9, 9, 1.4, 38, 'part', [['sshd', 'root · dvcmon', 9, 9, 1.4, 38]]],
+      ['사용자 세션', '계정 4개', 21, 25, 0.6, 180, 'part', [['bash', '계정 4개', 14, 14, 0.2, 60], ['그 밖', '계정 3개', 7, 11, 0.4, 120]]],
+      ['그 밖 서비스 41개', '여러 계정', 66, 210, 2.1, 1130, null, []],
+    ];
+    const COMM = [
+      ['oracle', 'oracle', 180, 180, 241, 30120, null, []], ['java', 'tomcat', 37, 1284, 96, 13110, null, []], ['ora_dbw*', 'oracle', 8, 8, 52, 6410, null, []],
+      ['kworker/*', 'root', 211, 211, 9.1, 0, null, []], ['ora_lgwr', 'oracle', 1, 1, 11, 410, null, []], ['dvc-agent', 'dvcmon', 2, 11, 7.4, 96, [0.0, 0.3], []],
+      ['rsyslogd', 'root', 1, 4, 6.2, 210, null, []], ['그 밖 프로그램 96개', '여러 계정', 312, 1022, 22.4, 7350, 'part', []],
+    ];
+    const LIST = S.by === 'unit' ? UNIT : COMM;
+    const procTotal = LIST.reduce((a, r) => a + r[2], 0);
+    const mem = (mb) => (mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb + ' MB');
+    const io = (v) => (v == null ? '—' : v === 'part' ? '부분' : 'R ' + v[0].toFixed(1) + ' · W ' + v[1].toFixed(1) + ' MB/s');
+    const ioTitle = (v) => (v == null ? '다른 계정 프로세스라 읽을 수 없음' : v === 'part' ? '일부 프로세스만 읽힘 — 합이 아님' : '수집 계정 프로세스');
+    const cpuMax = Math.max.apply(null, LIST.map((r) => r[4]));
+    const apps = LIST.map((r, i) => {
+      const open = !!S.open[r[0]] && r[7].length > 0;
+      return {
+        name: r[0], user: r[1], n: r[2].toLocaleString('en-US'), thr: r[3].toLocaleString('en-US'), cpu: r[4] + '%', fill: 'width:' + Math.round(r[4] / cpuMax * 100) + '%;background:' + (i < 5 ? COL[i] : REST),
+        rss: r[5] ? mem(r[5]) : '—', io: io(r[6]), ioTitle: ioTitle(r[6]), dot: 'background:' + (i < 5 ? COL[i] : REST),
+        open, arrow: r[7].length ? (open ? '▾' : '▸') : '', toggle: () => this.setState({ open: Object.assign({}, S.open, { [r[0]]: !S.open[r[0]] }) }),
+        members: r[7].map((m) => ({ name: m[0], user: m[1], n: String(m[2]), thr: String(m[3]), cpu: m[4] + '%', rss: m[5] ? mem(m[5]) : '—', io: r[6] == null ? '—' : io(r[6]) })),
+      };
+    });
+    // 쌓은 영역: 30분 · 60칸
+    const N = 60;
+    const series = LIST.slice(0, 5).map((r, k) => {
+      const v = []; for (let i = 0; i < N; i++) { const base = r[4] * (k === 0 ? (i < 40 ? 0.62 : 1) : 1); v.push(Math.max(0, base * (0.88 + 0.24 * (Math.sin(i * 0.7 + k * 2.1) * 0.5 + 0.5)))); }
+      return v;
+    });
+    const restSum = LIST.slice(5).reduce((a, r) => a + r[4], 0);
+    series.push(Array.from({ length: N }, (_, i) => restSum * (0.9 + 0.2 * (Math.cos(i * 0.5) * 0.5 + 0.5))));
+    const tot = Array.from({ length: N }, (_, i) => series.reduce((a, s) => a + s[i], 0));
+    const top = Math.ceil(Math.max.apply(null, tot) / 100) * 100;
+    const X = (i) => (i * 400 / (N - 1)).toFixed(1);
+    const Y = (v) => (200 - v / top * 200).toFixed(1);
+    const acc = new Array(N).fill(0);
+    const layers = series.map((s, k) => {
+      const lo = acc.slice(); for (let i = 0; i < N; i++) acc[i] += s[i];
+      const up = acc.map((v, i) => X(i) + ' ' + Y(v)); const dn = lo.map((v, i) => X(i) + ' ' + Y(v)).reverse();
+      return { d: 'M' + up.join(' L') + ' L' + dn.join(' L') + ' Z', c: k < 5 ? COL[k] : REST };
+    });
+    const legend = LIST.slice(0, 5).map((r, k) => ({ name: r[0], v: r[4] + '%', dot: 'background:' + COL[k] })).concat([{ name: '나머지', v: Math.round(restSum * 10) / 10 + '%', dot: 'background:' + REST }]);
+    const viewBtns = [['app', '앱 단위'], ['proc', '프로세스 상위 30']].map(([k, l]) => ({ label: l, cls: S.view === k ? 'on' : '', pick: () => this.setState({ view: k }) }));
+    const byBtns = [['unit', 'systemd 서비스'], ['comm', '프로그램 이름']].map(([k, l]) => ({ label: l, cls: S.by === k ? 'on' : '', pick: () => this.setState({ by: k }) }));
+    const byNote = S.view === 'proc' ? '‘프로세스 상위 30’ 은 지금 화면(④ · ⑩)과 같습니다 — 이 시안에서는 앱 단위 표만 그렸습니다.'
+      : S.by === 'unit' ? '서비스 이름은 30초마다 받는 프로세스의 cgroup 경로에서 읽습니다(v2.981 과 같은 값). 서비스가 없는 프로세스는 커널 스레드 · 사용자 세션으로 따로 묶습니다.'
+        : '같은 프로그램 이름(comm)끼리 묶습니다. 이름 끝의 번호(ora_dbw0 ~ 7 · kworker/3:1 등)는 한 묶음으로 봅니다.';
+    return {
+      procBadge: '프로세스 ' + procTotal.toLocaleString('en-US') + '개 · 16코어', viewBtns, byBtns, byNote, apps, layers, legend, yMax: top + '%', yMid: top / 2 + '%',
+      tableTitle: S.by === 'unit' ? '서비스별 합 — ' + LIST.length + '묶음' : '프로그램 이름별 합 — ' + LIST.length + '묶음', firstCol: S.by === 'unit' ? '서비스' : '프로그램',
+    };
+  }
+}
+</script>
+</body>
+</html>
