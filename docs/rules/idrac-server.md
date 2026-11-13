@@ -43,6 +43,7 @@
 - (다음 점검 ②③ 추가) 전력 알림 규칙 4종(랙 여유 · 흡기 지속 · 피크 급증 · PowerCap 걸림 — 같은 엔진 · 기본 꺼짐) · 엣지 서버별 PowerCap 봉투 — 보류는 잇지도 끊지도 않음 · 같은 표본은 한 번 · 판정은 원천이 있는 노드
 - (2026-11-09 추가) 사용자 결정 기록 — 7b 공통 계정 묶기 · 8a 운영자 정비 창 12h · 법인 미지정 OS 등록 공유 · 전력 알림 랙 창/판정 노드 — 네 가지 모두 현행 유지(다시 묻지 않는다)
 - (v2.967 추가) 서버 하드웨어 정보 내보내기 — 값 카탈로그 하나(insights/hwExport/catalog.js) · 대상은 통합 서버 인벤토리 판정 그대로 · 못 읽은 값은 빈 칸 · 관리자 전용 값 · 사양서 파일 나눔
+- (v3.3.0 추가) 물리서버 폴더 하드웨어(iDRAC) 요약 · OS 이름 수집 · iDRAC 주소 접속 — 요약 코어 하나(idrac/hwSummary.js) · Dell ServerOS 속성 $select · 엣지 fleet 요약은 중앙 정제 · 주소는 관리자 판본만
 ## 본문
 
 - ⚠⚠ **물리 파트(부품) 장애 — v2.548 재설계. '확인 불가' 를 정상으로도 장애로도 세지 않고, 전이만 기록한다**
@@ -1525,4 +1526,28 @@
     관리 NIC 주소 · 이름 · 시스템 UUID · iDRAC 계정을 가린다(로컬 · 원격 모두 — 원격도 이제 이 값을 갖는다).
     (정정 v2.974: 남겼던 R3 — 시리얼 조회의 UUID 행 — 도 관리자 판본만 보이게 했다. `routes/api/serialLookup.js serialRowsForViewer` 가 화면 · CSV · 개수에서 뺀다 · 응답 `uuidHidden` → 화면 한 줄. 회귀 `server/test/serialUuidAdmin2974.test.js`.)
     회귀 `server/test/hwExportFill2973.test.js`.
+
+- **v3.3.0 물리서버 폴더 하드웨어(iDRAC)**(사용자 요청 '여기 기능에 iDRAC 에서 수집한 데이터 보여줘 cpu/memory/disk/nic/hba/OS 종류/idrac IP · idrac ip 클릭하면 ssh/web 선택해서 접속' ·
+  고른 방식: 표 요약 열 + 옆 패널 상세 · iDRAC 에서 OS 이름도 수집 · 포탈 웹 SSH + 내 PC SSH · 전체 검증).
+  - **요약 · 상세는 `idrac/hwSummary.js` 하나**(순수): 코어 · 소켓 · 메모리 = `capacityOfInventory` · NIC 포트 중복 = `dedupNics` · 컬렉션 읽음 = `readInvArr`(내보내기 catalog.js 도 이 함수 — 복제 금지).
+    못 읽은 컬렉션은 null(0 이 아니다) · 디스크 용량 하나라도 못 읽으면 합은 null(개수는 그대로) · NIC 은 빈 배열도 못 읽음(표식 없는 컬렉션).
+  - **FC HBA**(`isFcHba` — 모델 · 이름 글자): Fibre Channel · QLE2xxx · LPe · 'NNG FC'. Ethernet CNA(QLogic 57xxx · QLE8262 · Emulex OneConnect) · 10GbE(QLE3242 · QLE3442) · SAS HBA(HBA330 · HBA355i — 스토리지 컨트롤러)는 아니다(반증 F6).
+    FC 어댑터는 NetworkAdapters 에도 나오므로 **NIC 포트 수에서 뺀다**. HBA 목록은 PCIe(카드 하나 = 한 줄 · 이름 우선)와 NetworkAdapters 의 FC 중 **더 많이 본 쪽**(PCIe 는 앞 16개만 읽는다 — F7).
+    합성 '(EthernetInterfaces)' 는 실어댑터 포트에 속도가 없을 때의 **속도 폴백**일 뿐 — 포트 수는 실어댑터에서만(실어댑터가 없으면 합성이 곧 포트 · 요약과 상세가 같은 규칙 — F4).
+    빈 슬롯(Status.State 'Absent')은 CPU · DIMM · 디스크로 세지 않는다(F5).
+  - **OS 이름**: Dell `/redfish/v1/Managers/System.Embedded.1/Attributes` 의 `ServerOS.1.OSName · OSVersion` — **iSM 이 있어야 채워진다**(없으면 빈 값 → 화면 '—' + 이유).
+    `$select` 로 두 값만(속성 전체는 수십 KB) · 4xx(401 · 404 제외) · 501(Redfish 규격의 미지원 질의 — F2)이면 한 번만 전체로 · 404 는 다시 묻지 않는다 · Dell 이라고 알 때만(비 Dell BMC 에 요청을 늘리지 않게) · 실패해도 인벤토리 판정 불변.
+    HPE 는 System 응답 `Oem.Hpe.HostOS`(추가 요청 없음). 엣지 `compactInv` 와 중앙 `INV_SHAPE.system` 에 **짝**으로 `osName · osVersion`.
+  - **엣지가 올린 서버(edge:)** 는 중앙에 인벤토리가 없다 — 엣지 `agent/fleetPush.js` 가 요약(`hw`) · iDRAC 주소(`mgmtHost`)를 싣고 중앙 `central/fleet.js` 가
+    `sanitizeHwSummary`(아는 키만 · 문자열 수치 거부 · 글자 상한 · 시각은 수신 시각으로 자름 — F8) · `mgmtHostOf`(호스트 · IPv4 · [IPv6] 세 꼴만 · 선행 '-' 금지 — F9)로 정제하고,
+    **검증된 이름(개별 토큰)의 보고만** 받는다(F10 — 주소는 중앙 관리자가 누르는 링크 · SSH 대상). **분류 서명(hashList)에 넣지 않는다**(인벤토리 시각마다 fleet 캐시 무효화 금지).
+    부품별 목록은 그 엣지 포탈에서. 구버전 엣지는 요약 없음(화면 '엣지 미전송').
+  - **가림**: 관리 주소(addr — 수집 서버 · 엣지가 보낸 주소 포함) · OS 호스트명은 관리자 판본만(`isAdminDetailUser`), 범위 판본은 `stripTag` · iDRAC 관리 NIC IPv4 는 **전체 범위 관리자만** ·
+    `GET /tools/bm-folders/hw` 는 목록과 같은 노출 규칙(범위 밖 · 없는 키 404). 비관리자도 하드웨어 요약 수치는 본다(장비 단서가 아니다).
+  - **접속**: 웹 = `https://<주소>/` 새 탭(noopener) · SSH = 기존 원격 접속(`VmRemoteButton` — 중계 프록시 · remote.access · 대상 범위는 서버 판정) + `ssh://계정@주소` · 명령 복사.
+    ⚠ `VmRemoteButton` 은 **그려지는 순간 도달성 점검(POST /remote/probe)** 을 보낸다 — 표의 행마다 그리지 말고 고른 뒤 한 대만(`startOpen · hideButton · onClose`). 주소 · 계정은 글자 검사(`idracLinks`).
+  - 화면 폭: 하드웨어 열을 더하자 1440px 에서 표가 영역보다 97px 넓어 '전력' 이 가로 스크롤 뒤로 숨었다(실측) — 주소를 하드웨어 열로 옮기고 · 'FC 없음' 은 표 칸에서 생략 ·
+    ' · ' 에서만 접힘 · 긴 머리글 keep-all 접힘 · 열 최소 96px 로 822/822 에 맞췄다. 데이터가 더 길면(이름 · 모델) 다시 넘칠 수 있다.
+  - 회귀 `server/test/bmHw330.test.js`(14 — 엣지 pushFleetNow 실제 호출 · 가짜 Redfish 서버 · 변이 35/35) · 웹 `hwText.test.js`. 반증 1인(F1~F14 반영 · F15 'Attributes 401 시 세션' 은 실장비 응답 미확인으로 남김).
+    남은 것: '주소로 찾기' 는 새로 보이는 수집 서버 · 엣지 주소로는 찾지 못한다(등록부 주소만 — F13).
 

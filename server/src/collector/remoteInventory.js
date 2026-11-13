@@ -47,7 +47,7 @@ const scalar = (v) => (typeof v === 'boolean' ? v : (typeof v === 'number' ? (Nu
 const ST = ['health', 'state'];
 const INV_SHAPE = {
   // v2.973(A1~A14): 엣지 compactInv 가 새로 싣는 값 — **짝**(한쪽만 넓히면 버려진다). bios.attributes 는 아래 sanitizeRemoteInv 가 따로(목록 키만).
-  system: ['o', ['model', 'serviceTag', 'biosVersion', 'hostName', 'health', 'manufacturer', 'powerState', 'assetTag', 'uuid']],
+  system: ['o', ['model', 'serviceTag', 'biosVersion', 'hostName', 'health', 'manufacturer', 'powerState', 'assetTag', 'uuid', 'osName', 'osVersion']],   // v3.3.0: osName · osVersion(엣지 compactInv 와 짝)
   cpu: ['o', ['model', 'count', 'cores', 'health', 'threads']],
   memory: ['o', ['totalGiB', 'health']],
   gpus: ['a', ['model', 'name', 'memoryMiB', ...ST, 'manufacturer']],
