@@ -394,7 +394,7 @@ async function gatherNowInner(snap, tagCategory) {
     members.push({
       key, keyKind, aliasKeys: bmAliasKeys(b, keyKind), kind: 'bm', corp: vc, name: t(b.name), nameIsAddr: isAddr(t(b.name)), serviceTag: t(b.serviceTag), source: t(b.source), remoteAgent: t(b.remoteAgent),
       scan, ...(scanWhy ? { scanWhy } : {}), ...(corpWhy ? { corpWhy } : {}), powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
-      usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src, ...(x.srcBy ? { srcBy: x.srcBy } : {}) } : { state: 'unread' },
+      usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src, ...(x.srcBy ? { srcBy: x.srcBy } : {}), ...(x.at ? { at: x.at } : {}) } : { state: 'unread' },
       faults: faultsOf(b.serviceTag, sid), corpRule: b.vcSource === 'corp-rule',
       // v2.984 물리서버 폴더(bmfolders)가 함께 쓰는 입력 — 서비스 인벤토리 응답에는 싣지 않는다(memberRow 가 고른다)
       model: t(b.model), watts: numOrNull(b.watts), collectorId: t(b.collectorId),
@@ -407,7 +407,7 @@ async function gatherNowInner(snap, tagCategory) {
   for (const h of fleet.virtualizationHosts || []) {
     const vc = t(h.vcenterId); if (!vc) continue;
     const x = judged.get(`${vc}|virt|${lc(h.name)}`) || null;
-    hostByKey.set(hostKeyOf(vc, h.name), { name: t(h.name), corp: vc, serviceTag: t(h.serviceTag), usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src, ...(x.srcBy ? { srcBy: x.srcBy } : {}) } : null, faults: faultsOf(h.serviceTag), connectionState: t(h.connectionState), model: t(h.model), watts: numOrNull(h.watts) });
+    hostByKey.set(hostKeyOf(vc, h.name), { name: t(h.name), corp: vc, serviceTag: t(h.serviceTag), usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src, ...(x.srcBy ? { srcBy: x.srcBy } : {}), ...(x.at ? { at: x.at } : {}), ...(x.vcUnread ? { vcUnread: true } : {}) } : null, faults: faultsOf(h.serviceTag), connectionState: t(h.connectionState), model: t(h.model), watts: numOrNull(h.watts) });
   }
   let bmBlocked = false; let bmBlockedSources = [];
   try {

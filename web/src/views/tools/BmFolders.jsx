@@ -17,6 +17,7 @@ import MapView from './bmFolders/MapView.jsx';
 import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
 import { SRC_COLOR, SRC_SHORT, rowSrcClass, srcCounts, metricSrcText } from './bmFolders/usageSrc.js'; // v2.993: 사용률 출처 색
+import { whyBands, whyShort, WHY_DOT } from './bmFolders/whyText.js'; // v2.994: 값 없음 사유
 import {
   INTRO, PLACE_LABEL, MISSING_WHY, pctText, wattsText, pathText, lastSeg, parentOf, ageText,
   rowsOf, aggregate, filterRows, resultNote, foldersByName, opErrorText, csvNameOf, trimPath,
@@ -257,6 +258,7 @@ export default function BmFolders() {
                   onRenamed={(to) => setSel({ type: 'folder', corp: sel.corp, path: to })} />
                 {sel.type === 'name' ? <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>같은 경로의 폴더를 법인을 넘어 합쳐 본 것입니다(읽기 전용 — 저장은 법인별 그대로). 바꾸려면 법인별 트리에서 고르십시오.</div> : null}
                 {sel.type === 'nocorp' ? <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>어느 법인 서버인지 모르는 서버는 폴더에 넣을 수 없습니다 — 특수 기능 › 통합 서버 인벤토리에서 법인(vCenter)을 먼저 정하십시오.</div> : null}
+                {d.usageOff ? <div className="bmf-offbar" role="status"><b>베어메탈 사용률 수집이 꺼져 있습니다</b> — 이 포탈이 직접 수집하는 서버의 CPU · 메모리가 비어 있는 이유입니다(엣지가 수집하는 서버는 그 엣지 설정을 따릅니다). 설정 › 베어메탈 사용률에서 켜면 다음 주기부터 보입니다.</div> : null}
                 <div className="bmf-tiles">
                   <div className="bmf-tile">
                     <span className="k">서버 {agg.n}대 — 상태</span>
@@ -285,6 +287,7 @@ export default function BmFolders() {
                   {sel.type === 'folder' || sel.type === 'name' ? <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center' }}><input type="checkbox" checked={sub} onChange={(e) => setSub(e.target.checked)} /> 하위 폴더 포함</label> : null}
                 </div>
                 <SrcSummary rows={baseRows} />
+                <WhyBand rows={baseRows} quick={quick} setQuick={setQuick} />
                 {writable && picked.size ? (
                   <SelBar picked={pickedRows} folders={folderPaths} sel={sel} op={op} busy={busy} onDone={() => setPicked(new Set())} />
                 ) : null}
@@ -309,7 +312,7 @@ export default function BmFolders() {
                           <td data-sort={r.model || ''}>{r.model || '—'}{!d.scoped && r.serviceTag ? <div className="mono muted" style={{ fontSize: 11 }}>{r.serviceTag}</div> : null}</td>
                           <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}{r.addr ? <div className="muted mono" style={{ fontSize: 11 }} title="관리 주소(iDRAC) — 관리자 판본">{r.addr}</div> : null}</td>
                           <td data-sort={r.faults ?? ''}>{r.faults == null ? <span className="muted">—</span> : r.faults > 0 ? <span className="badge red">{r.faults}건</span> : <span className="muted">없음</span>}</td>
-                          <td data-sort={r.cpu ?? ''}><UsagePair cpu={r.cpu} mem={r.mem} usrc={r.usrc} /></td>
+                          <td data-sort={r.cpu ?? ''}><UsagePair cpu={r.cpu} mem={r.mem} usrc={r.usrc} why={r.why} /></td>
                           <td data-sort={r.watts ?? ''} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{wattsText(r.watts)}</td>
                         </tr>
                       ))}
@@ -691,7 +694,7 @@ function NarrowList({ rows, writable, picked, setPicked, onOpen, scoped }) {
             <span className="l1"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} /><b>{r.name}</b>
               {r.faults > 0 ? <span className="badge red">{r.faults}건</span> : null}<span style={{ marginLeft: 'auto' }}><SrcBadge src={r.src} small /></span></span>
             <span className="l2">{[r.place ? pathText(r.path) : '(미분류)', r.model, !scoped ? r.serviceTag : ''].filter(Boolean).join(' · ')}</span>
-            <span className="l2">CPU {pctText(r.cpu)} · 메모리 {pctText(r.mem)} · {wattsText(r.watts)}{SRC_SHORT[rowSrcClass(r)] ? ` · ${SRC_SHORT[rowSrcClass(r)]}` : ''}</span>
+            <span className="l2">{r.cpu == null && r.mem == null && r.why?.code ? `사용률 — ${whyShort(r.why)}` : <>CPU {pctText(r.cpu)} · 메모리 {pctText(r.mem)}</>} · {wattsText(r.watts)}{SRC_SHORT[rowSrcClass(r)] ? ` · ${SRC_SHORT[rowSrcClass(r)]}` : ''}</span>
           </button>
         </div>
       ))}
@@ -714,6 +717,25 @@ function SrcSummary({ rows }) {
         </span>
       ))}
       <span className="muted" style={{ marginLeft: 'auto' }}>OS 를 먼저 읽고, 안 되거나 값이 없으면 iDRAC 값을 씁니다 — 막대 색과 표지가 출처입니다(지표마다 따로)</span>
+    </div>
+  );
+}
+
+/** v2.994(값 없음 사유 — 설계 §12): 값이 없는 칸의 사유별 개수 띠 — 누르면 그 사유의 서버만(다시 누르면 풂). 사유가 없으면 그리지 않는다. */
+function WhyBand({ rows, quick, setQuick }) {
+  const bands = whyBands(rows);
+  if (!bands.length) return null;
+  return (
+    <div className="bmf-wband" role="group" aria-label="값이 없는 칸의 이유">
+      <span className="muted">값이 없는 칸의 이유</span>
+      {bands.map((b) => {
+        const k = `why:${b.code}`;
+        return (
+          <button key={b.code} type="button" className={`bmf-chip${quick === k ? ' on' : ''}`} aria-pressed={quick === k} onClick={() => setQuick(quick === k ? '' : k)} title={`${b.l} ${b.a}`.trim()}>
+            <span className={`bmf-wd ${b.cls}`} style={{ background: WHY_DOT[b.cls], marginRight: 5 }} aria-hidden="true" />{b.s} {b.n}
+          </button>
+        );
+      })}
     </div>
   );
 }
