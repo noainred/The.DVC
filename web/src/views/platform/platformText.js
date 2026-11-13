@@ -1,7 +1,7 @@
 /**
  * views/platform/platformText.js — '서버 › 가상화 플랫폼' 허브(v2.915 · 설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07)의 순수 보조(vitest 고정).
  *
- *  · 메뉴 하나 = 탭 세 개(vCenter · 호스트 · VM). 탭 id(vcenters · hosts · vms) · 해시 · 권한 id 는 그대로다 — 여기서는 이름 · 순서 · 문구 · 기억만 정한다.
+ *  · 탭 세 개(vCenter · 호스트 · VM) — v2.994 부터 메뉴 항목 둘('Virtual Machine(VM)' = vCenter · VM · 'Hypervisor' = 호스트). 탭 id(vcenters · hosts · vms) · 해시 · 권한 id 는 그대로다 — 여기서는 이름 · 순서 · 문구 · 기억만 정한다.
  *  · 숫자 판정은 서버 /platform/summary(inventory/platformSummary.js) 하나 — 여기서는 글자로 바꾸기만 한다. 못 읽은 값(null)은 '—' 이고 단위를 붙이지 않는다.
  *  · 도구 키는 바꾸지 않는다(권한 파일의 값). 탭 줄 오른쪽의 도구는 그 탭 성격의 특수 기능 — vCenter 6 · 호스트 4 · VM 6(vmHubText.HUB_TOOLS).
  *  · localStorage 는 try/catch(사생활 모드 · 차단에서 던진다) — 못 기억해도 화면은 동작한다.
@@ -9,16 +9,29 @@
 import { numOrNull } from '../../numOrNull.js';
 import { HUB_TOOLS } from '../vms/vmHubText.js';
 import { handoffMany, takeSearch } from '../../hooks/searchHandoff.js'; // v2.959: KPI 카드 → 도구 화면에 고른 vCenter 인계(메모리)
+import { MENU_GROUPS, tabsOf } from '../topMenu.js'; // v2.994: 허브 제목 = 그 탭에서 켜지는 사이드바 항목 이름(이름 코어는 MENU_GROUPS 하나)
 
-/** 허브 탭 — 순서 = 계층(법인 → 호스트 → VM). k 는 App 의 탭 id 그대로. */
+/** 허브 탭 — 순서 = 계층(법인 → 호스트 → VM). k 는 App 의 탭 id 그대로.
+ *  v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 이름 'Hypervisor' · 'Virtual Machine' — 옛 이름은 작은 글자(sub)로 남긴다. */
 export const PLATFORM_TABS = Object.freeze([
   { k: 'vcenters', label: 'vCenter', sub: '법인', perm: 'dashboard' },
-  { k: 'hosts', label: 'ESXi 호스트', sub: '', perm: 'inv.hosts' },
-  { k: 'vms', label: '가상화 서버 · VM', sub: '', perm: 'inv.vms' },
+  { k: 'hosts', label: 'Hypervisor', sub: 'ESXi 호스트', perm: 'inv.hosts' },
+  { k: 'vms', label: 'Virtual Machine', sub: 'VM', perm: 'inv.vms' },
 ]);
 export const PLATFORM_TAB_KEYS = Object.freeze(PLATFORM_TABS.map((t) => t.k));
-export const PLATFORM_MENU_LABEL = '가상화 플랫폼';
 export const isPlatformTab = (t) => PLATFORM_TAB_KEYS.includes(t);
+
+/**
+ * v2.994: 허브 제목 — 그 탭에서 사이드바에 켜지는 기본 메뉴 항목의 이름(vcenters · vms → 'Virtual Machine(VM)', hosts → 'Hypervisor').
+ * 이름을 여기 따로 적지 않는다 — topMenu.MENU_GROUPS 의 라벨을 읽는다(v2.915 의 상수 PLATFORM_MENU_LABEL 은 없앴다). 허브 탭이 아니면 ''.
+ */
+export function platformMenuLabel(tab, groups = MENU_GROUPS) {
+  if (!isPlatformTab(tab)) return '';
+  for (const g of groups) {
+    for (const c of Array.isArray(g.children) ? g.children : [g]) if (c.tab && tabsOf(c).includes(tab)) return String(c.label || '');
+  }
+  return '';
+}
 
 /** 공용 범위 바 문구 — 세 탭이 같은 바를 쓴다(사용자 요청 2026-11-07). */
 export const SCOPE_SEARCH_PLACEHOLDER = 'vCenter · 호스트 · VM 이름 · IP';
@@ -32,24 +45,18 @@ export const VC_TOOLS = Object.freeze([
 export const HOST_TOOLS = Object.freeze([
   ['host-hygiene', 'ESXi 호스트 구성 점검'], ['esxi', 'ESXi 버전별'], ['hba', 'HBA 카드 속도'], ['cluster-check', '클러스터 HA·DRS 점검'],
 ]);
-/** 메뉴 항목 also 에 들어가는 전체(VM 도구 6 + vCenter 6 + 호스트 4) — 그 도구를 열어도 '서버 › 가상화 플랫폼' 이 켜진다. 순서 = VM(기존) → vCenter → 호스트. */
-export const PLATFORM_TOOL_KEYS = Object.freeze([...HUB_TOOLS.map(([k]) => k), ...VC_TOOLS.map(([k]) => k), ...HOST_TOOLS.map(([k]) => k)]);
+/**
+ * 메뉴 항목 also 에 들어가는 도구 — v2.994 부터 두 항목으로 갈린다: 'Virtual Machine(VM)'(virt) = VM 6 + vCenter 6 · 'Hypervisor'(hv) = 호스트 4.
+ * 그 도구를 열면 그 항목이 켜진다(topMenu.locate). 순서 = VM(기존) → vCenter → 호스트. 전체(16)는 PLATFORM_TOOL_KEYS.
+ */
+export const VM_ITEM_TOOL_KEYS = Object.freeze([...HUB_TOOLS.map(([k]) => k), ...VC_TOOLS.map(([k]) => k)]);
+export const HV_ITEM_TOOL_KEYS = Object.freeze(HOST_TOOLS.map(([k]) => k));
+export const PLATFORM_TOOL_KEYS = Object.freeze([...VM_ITEM_TOOL_KEYS, ...HV_ITEM_TOOL_KEYS]);
 
-/** 브라우저 기억 키 — 마지막 본 탭 · 바로가기 접힘 · vCenter 탭 보기(카드 | 표). */
-export const LS_TAB = 'platform.tab';
+/** 브라우저 기억 키 — 바로가기 접힘 · vCenter 탭 보기(카드 | 표). v2.994: '마지막 본 탭'(platform.tab) 기억은 없앴다 — 메뉴 항목마다 자기 탭으로 간다. */
 export const LS_CHIPS = 'platform.chips';
 export const LS_VC_VIEW = 'platform.vcView';
 
-export function loadLastTab(storage, ok = () => true) {
-  try {
-    const v = storage?.getItem?.(LS_TAB);
-    return isPlatformTab(v) && ok(v) ? v : null;
-  } catch { return null; }
-}
-export function saveLastTab(storage, t) {
-  if (!isPlatformTab(t)) return;
-  try { storage?.setItem?.(LS_TAB, t); } catch { /* 기억 못 해도 화면은 동작한다 */ }
-}
 export function loadChipsCollapsed(storage) {
   try { return storage?.getItem?.(LS_CHIPS) === '1'; } catch { return false; }
 }
@@ -111,13 +118,14 @@ export const fmtN = (v) => { const n = numOrNull(v); return n == null ? '—' : 
  * 호스트는 연결 · 점검 · 끊김 · 미수집 · 클러스터, VM 은 구동 · 정지 · 미수집 · 템플릿. 배지는 '지금 볼 것'(낡은 값 · 확인 대상 · 조치 필요) — 0 이면 없다.
  * 요약이 아직 없으면(응답 전 · 첫 수집 중 · 권한 없음) 수는 '—' 이고 배지도 없다(0 을 지어내지 않는다).
  */
+const tabText = (k) => { const x = PLATFORM_TABS.find((p) => p.k === k); return { label: x.label, sub: x.sub }; };   // v2.994: 탭 이름은 PLATFORM_TABS 하나
 export function entityTabs(summary) {
   const t = summary && typeof summary === 'object' && !summary.initial ? summary.totals : null;
   const v = t?.vcenters || null; const a = t?.alarms || null; const h = t?.hosts || null; const m = t?.vms || null;
   const pos = (x) => numOrNull(x) != null && x > 0;
   return [
     {
-      k: 'vcenters', label: 'vCenter', sub: '법인', value: fmtN(v?.total),
+      k: 'vcenters', ...tabText('vcenters'), value: fmtN(v?.total),
       badge: pos(v?.stale) ? { text: `낡은 값 ${fmtN(v.stale)}`, tone: 'amber' } : pos(v?.unreachable) ? { text: `불가 ${fmtN(v.unreachable)}`, tone: 'red' } : null,
       parts: v ? [
         { text: `연결 ${fmtN(v.connected)}`, tone: 'green' }, { text: `불가 ${fmtN(v.unreachable)}`, tone: pos(v.unreachable) ? 'red' : '' },
@@ -127,7 +135,7 @@ export function entityTabs(summary) {
       ] : [],
     },
     {
-      k: 'hosts', label: 'ESXi 호스트', sub: '', value: fmtN(h?.total),
+      k: 'hosts', ...tabText('hosts'), value: fmtN(h?.total),
       badge: pos(h?.attention) ? { text: `확인 대상 ${fmtN(h.attention)}`, tone: 'amber' } : null,
       parts: h ? [
         { text: `연결 ${fmtN(h.connected)}` }, { text: `점검 ${fmtN(h.maint)}`, tone: pos(h.maint) ? 'amber' : '' }, { text: `끊김 ${fmtN(h.down)}`, tone: pos(h.down) ? 'red' : '' },
@@ -136,7 +144,7 @@ export function entityTabs(summary) {
       ] : [],
     },
     {
-      k: 'vms', label: '가상화 서버 · VM', sub: '', value: fmtN(m?.total),
+      k: 'vms', ...tabText('vms'), value: fmtN(m?.total),
       badge: pos(m?.attention) ? { text: `조치 필요 ${fmtN(m.attention)}`, tone: 'red' } : null,
       parts: m ? [
         { text: `구동 ${fmtN(m.on)}`, tone: 'green' }, { text: `정지 ${fmtN(m.off)}` }, { text: `사용률 미수집 ${fmtN(m.usageUnknown)}` }, { text: `템플릿 ${fmtN(m.templates)}` },

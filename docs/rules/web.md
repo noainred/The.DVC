@@ -58,6 +58,7 @@
 - (8b단계 추가) 리눅스 성능 8b단계 화면 — 이 시점 프로세스 · 띠 · 저활용 · 전력/온도 — 서버 값만(점수 · 합 · 단서 재계산 없음) · 권한 · 미측정 ≠ 0 · 폴링 없음
 - (v2.976) 집중 모니터링 화면 — 시간 띠 하나가 모든 차트를 옮김 · 숫자는 응답 limits · 비교 색은 고정한 서버에만(4색) · 대상 표는 1440px 에서 동작 열까지
 - (v2.977) 업그레이드 뒤 화면 조각 404 는 자동 새로고침(60초에 한 번) · 열이 많은 표는 오른쪽 동작 열을 고정한다(sm-pin-right)
+- (v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다)) 서버 메뉴 이름 변경 — Virtual Machine(VM)(vms · vcenters) · Hypervisor(hosts · 새 항목) · Physical Server · Bare Metal Server · 저장 메뉴 별칭은 tab:vcenters → tab:vms · 마지막 본 탭 기억 삭제 · 허브 제목 = 메뉴 라벨
 
 ## 본문
 
@@ -851,6 +852,25 @@
   ⑨ vCenter 탭 보기는 **카드 | 표**(`platform/VcTable.jsx` — 법인별 비교 · `/vcenters` + 허브 요약만 · 새 집계 없음 · localStorage `platform.vcView`). '트리' 보기와 호스트 · VM 탭 '법인별' 흡수는 2차(README §4.0-12·13).
      마지막 본 탭은 `platform.tab`, 바로가기 접힘은 `platform.chips`(전부 try/catch). 400px: 엔티티 탭 3칸 한 줄(수 + 이름 + 배지 — `.ph-tab .parts` 숨김 · 열린 탭의 분해는 아래 한 줄) · KPI 한 줄(`kpis-1row`)은 720 미만에서 세로로(추이 스파크 130px 가 넘쳤다 — Chromium 실측 8px).
   ⑩ 기능 사용 현황(`featureUsageText.js menuIndex`)은 `tabs` 도 같은 자리로 센다(`tab:vms` 키 그대로 · 이름 '가상화 플랫폼 › 가상화 서버 · VM').
+  ⑪ **v2.994 에서 이름 · 항목 분리가 바뀌었다** — 아래 'v2.994 서버 메뉴 이름 변경' 항목이 우선한다(①의 항목 모양 · ②의 별칭 방향 · ⑨의 '마지막 본 탭' 기억 · ⑥의 브레드크럼 뿌리 이름).
+
+- **v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다) — 서버 메뉴 이름 변경: Virtual Machine(VM) · Hypervisor · Bare Metal Server · Physical Server(사용자 요청 2026-11-13 · 설계 `docs/design/server-menu-rename/README.md` · 컨펌 '추천대로 전부 진행')**.
+  회귀 `web/src/views/topMenu.test.js`(구성 · locate · 진입 탭 `menuTabOf` · aka 검색) · `sidebar/{sideMenu,singleMenu2891,menuEdit}.test.js`(옛 저장 메뉴 두 모양) · `platform/platformText.test.js`(허브 제목 = 메뉴 라벨) · `featureUsageText.test.js` · `server/test/platformHub2915.test.js` ④.
+  ① **바꾸지 않은 것**: 탭 id(vcenters · hosts · vms) · 해시 · 권한 id · 도구 키(serveranalysis · bm-folders · 호스트 도구 4 등) · 저장 형식. 옛 이름은 카탈로그 `aka`('서버 분석' · '서버분석' · '물리서버 폴더' · '물리 서버 폴더').
+  ② **메뉴**(`topMenu.js` 서버 그룹): `virt` = 'Virtual Machine(VM)' · `tab:'vms'` · `tabs:['vcenters']` · also = VM 6 + vCenter 6 / 새 항목 `hv` = 'Hypervisor' · `tab:'hosts'` · also = 호스트 4(host-hygiene · esxi · hba · cluster-check) /
+     `bm` = 'Physical Server · Baremetal'(id · tool · seg 그대로) / 자원관리 `sa` = 'Physical Server'. 도구 목록은 `platformText.VM_ITEM_TOOL_KEYS` · `HV_ITEM_TOOL_KEYS`(합 = `PLATFORM_TOOL_KEYS`)와 테스트가 대조한다.
+  ③ **저장 메뉴 별칭 방향이 바뀌었다**: `itemAliases` 는 topMenu `tabs` 에서만 만든다 → 이제 `tab:vcenters → tab:vms`(virt) 하나. 옛 저장 메뉴 — v2.942~v2.993 의 `tab:vcenters` 하나는 virt 로,
+     그 이전의 `tab:vms` · `tab:hosts` · `tab:vcenters` 셋은 virt · hv 둘로 풀린다(중복 없음 · unknown 0). `tab:hosts` 는 **별칭이 아니라 실제 항목**이다. 별칭 키를 sideMenu 에 따로 적지 말 것.
+     저장 메뉴에 Hypervisor 를 **자동으로 넣지 않는다**(결정 4) — `missingDefaults` 의 '다시 넣기' 후보로 나온다(넣기 전에는 #/hosts 에서 켜지는 항목이 없다).
+  ④ **메뉴 클릭 = 그 항목의 처음 허용 탭**(`topMenu.menuTabOf` — visibleMenu 의 `entryTab` → `tab`): Virtual Machine(VM) → VM 탭(inv.vms 가 없으면 vCenter 탭) · Hypervisor → 호스트 탭.
+     v2.915~v2.993 의 '마지막으로 본 탭' 기억(`loadLastTab` · `saveLastTab` · localStorage `platform.tab`)과 허브 헤더 문구 '마지막으로 본 탭을 기억합니다'는 **지웠다** — 되살리지 말 것(두 항목이 같은 기억을 나누면 Hypervisor 를 눌러 VM 탭이 열린다).
+     vCenter 탭으로 갈 때 드릴다운을 닫는 재클릭 신호(`setPlatformResetSeq`)는 그대로.
+  ⑤ **허브 이름은 메뉴 라벨 하나에서**: 제목 `<h1>` · `aria-label` · 경로 뿌리(`vcd/ObjectShell.jsx` · `VCenterDetail.jsx`)는 `platformText.platformMenuLabel(tab)` 이 MENU_GROUPS 라벨을 읽는다(v2.915 상수 `PLATFORM_MENU_LABEL` 은 없앴다).
+     호스트 탭 = 'Hypervisor', vCenter · VM 탭 = 'Virtual Machine(VM)'. 호스트 개체 보기도 주소가 `#/vcenters/<vc>/host/<id>` 라 경로 뿌리는 'Virtual Machine(VM)'(locate 가 virt).
+     탭 줄 이름은 `PLATFORM_TABS`(label + sub) 하나 — 'vCenter · 법인' · 'Hypervisor · ESXi 호스트' · 'Virtual Machine · VM'(`entityTabs` 도 여기서 읽는다).
+  ⑥ **위치 안내 문구**: '서버 분석 › …' → 'Physical Server › …'(통합 검색 화면 이름 `invSearchQuery.LIST_SCREEN` · `TO_LABEL` 은 웹 한 벌 · 서버 `dbGuideData` · `hwExport/xlsx` 안내) ·
+     '특수 기능 › 물리서버 폴더' → '특수 기능 › Bare Metal Server' · BmFolders 화면 제목. **개념 이름은 그대로**: '물리서버 폴더 규칙'(서비스 인벤토리 `SRC_LABEL` — 서버 `svcInventory.js` 와 두 벌) ·
+     저장소 손상 · 이름 변경/삭제 결과 문구 · 일반 용어 '물리 서버'(Overview 카드 · 법인별 서버 사용량 역할 이름). 도구 이름 안의 'ESXi'(ESXi 호스트 구성 점검 · ESXi 버전별)도 그대로.
 
 - **리눅스 성능 7b단계 설정 › 베어메탈 성능 › 서버 등록(`web/src/views/tools/BmOnboardPanel.jsx` · 문구 `bmOnboardText.js` · `bmOnboard.css` · vitest `bmOnboardText.test.jsx`)**:
   - 순서: SSH 키 저장소 → 법인 공통 계정 → CSV · Excel 등록(파일 → 분석 표 → 결과 CSV · 적용) → 엣지 배포 목록(중앙) → 누락 점검. 마운트 1회 + 버튼(폴링 없음) · 늦은 응답은 gen 으로 버린다.

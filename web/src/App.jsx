@@ -36,9 +36,9 @@ const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
 import { movedTabHash, legacyShellHash, LEGACY_SHELL_KEY, hashSegments } from './hooks/hashTab.js';
 // v2.915 '서버 › 가상화 플랫폼' 허브(설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07): vcenters · hosts · vms 세 탭 위에 한 셸 — 탭 id · 해시는 그대로.
 import PlatformHub from './views/platform/PlatformHub.jsx';
-import { isPlatformTab, PLATFORM_TAB_KEYS, loadLastTab, saveLastTab, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE } from './views/platform/platformText.js';
+import { isPlatformTab, PLATFORM_TAB_KEYS, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE } from './views/platform/platformText.js';
 // v2.725 상단 메뉴 재구성(시안 A '2단 탭') — 대메뉴·하위 메뉴·현재 위치 판정은 views/topMenu.js 하나가 소유한다.
-import { visibleMenu, locate, entryOf, hashOf } from './views/topMenu.js';
+import { visibleMenu, locate, entryOf, hashOf, menuTabOf } from './views/topMenu.js';
 import { lockReasonOf } from './views/toolVisibility.js';
 // v2.726 좌측 사이드바 — 계정별 메뉴(내 메뉴 > 배포 메뉴 > 기본)의 해석은 views/sidebar/sideMenu.js, 편집 창은 MenuEditor(lazy).
 import Sidebar from './views/sidebar/Sidebar.jsx';
@@ -112,7 +112,6 @@ const INV_FILTER_TABS = ['vms', 'hosts', 'datastores', 'vcenters'];   // v2.915:
 const PLATFORM_SCOPE_KEY = 'platform';
 const SHARED_FILTER_KEYS = ['region', 'vcenterId', 'q'];
 const pickKeys = (o, keys) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
-const lsSafe = () => { try { return window.localStorage; } catch { return null; } };
 const readOvMode = () => { try { return normMode(window.localStorage.getItem(MODE_KEY)); } catch { return null; } };
 const writeOvMode = (m) => { try { window.localStorage.setItem(MODE_KEY, m); } catch { /* 저장 실패는 기능을 막지 않는다 */ } };
 
@@ -360,7 +359,7 @@ function Portal({ user, onLogout }) {
   }, []);
 
   // Keep the URL hash in sync with the active tab, and follow back/forward.
-  const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; setHashNow(`#/${id}`); if (isPlatformTab(id)) saveLastTab(lsSafe(), id); };   // v2.915: 허브는 마지막 본 탭을 기억
+  const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; setHashNow(`#/${id}`); };   // v2.994: 허브 '마지막 본 탭' 기억은 없앴다(메뉴 항목마다 자기 탭)
   // Platform 탭 재클릭 신호 — vCenter 상세로 드릴다운한 상태에서 상단메뉴 Platform을 다시
   // 누르면 전체 vCenter 목록으로 복귀한다(드릴다운은 VCenters 내부 상태라 탭 클릭만으론 못 되돌림).
   const [platformResetSeq, setPlatformResetSeq] = useState(0);
@@ -532,8 +531,10 @@ function Portal({ user, onLogout }) {
       if (window.location.hash !== h) window.location.hash = h;
       return;
     }
-    // v2.915 가상화 플랫폼(탭 여러 개를 맡는 항목): 마지막으로 본 탭(허용된 것만) · 처음은 vCenter(계층의 루트)
-    const dest = Array.isArray(item.tabs) && item.tabs.length ? (loadLastTab(lsSafe(), isAllowed) || item.entryTab || item.tab) : item.tab;
+    // v2.994(설계 docs/design/server-menu-rename): 탭 여러 개를 맡는 항목도 '마지막으로 본 탭' 이 아니라 그 항목의 처음 허용 탭(visibleMenu 의 entryTab)으로 —
+    //   Virtual Machine(VM) → VM 탭(inv.vms 가 없으면 vCenter 탭) · Hypervisor → 호스트 탭. vCenter 탭으로 가면 드릴다운을 닫는 재클릭 신호는 그대로다.
+    const dest = menuTabOf(item);
+    if (!dest) return;
     if (dest === 'vcenters') setPlatformResetSeq((n) => n + 1);
     setTab(dest);
   };
