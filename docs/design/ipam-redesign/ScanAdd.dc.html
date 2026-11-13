@@ -51,7 +51,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
   </div>
 
   <div class="card" style="padding:12px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;font-size:12.5px" role="status">
-    <span>이 에이전트가 맡은 <b>VC-KR1</b> 과 <b>iDRAC 등록</b>에서 지금 쓰고 있는 대역 <b>{{n.all}}개</b>를 찾았습니다.</span>
+    <span>이 에이전트가 맡은 <b>VC-KR1</b>(VM · ESXi 호스트)과 <b>iDRAC 등록</b>에서 지금 쓰고 있는 대역 <b>{{n.all}}개</b>를 찾았습니다.</span>
     <span class="muted">사설 {{n.priv}} · 공인 {{n.pub}} · 이미 스캔 중 {{n.scanning}} · 추가할 수 있음 {{n.addable}}</span>
   </div>
 
@@ -61,7 +61,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:13px 16px">
         <h2 class="h2">사용 중인 IP 대역</h2>
         <span class="muted" style="font-size:12px">줄을 누르면 오른쪽에 담깁니다 · 다시 누르면 빠집니다</span>
-        <span class="seg" style="margin-left:auto" role="group" aria-label="출처"><button type="button" class="on">전체</button><button type="button">vCenter</button><button type="button">iDRAC</button></span>
+        <span class="seg" style="margin-left:auto" role="group" aria-label="출처"><button type="button" class="on">전체</button><button type="button">VM</button><button type="button">ESXi 호스트</button><button type="button">iDRAC</button></span>
       </div>
 
       <div class="gh">
@@ -135,11 +135,13 @@ class Component extends DCLogic {
   renderVals() {
     const picked = (this.state && this.state.picked) || { '10.20.32.0/24': true, '10.20.8.0/24': true };
     const C = [
-      ['priv', '10.20.30.0/24', '웹 서비스망', 'VM 163대', 'scanning'],
+      ['priv', '10.20.30.0/24', '웹 서비스망', 'VM 163대 · ESXi 호스트 24대(관리)', 'scanning'],
       ['priv', '10.20.31.0/24', '앱 서버망', 'VM 150대', 'scanning'],
       ['priv', '10.20.32.0/24', '개발 · 스테이징', 'VM 101대', 'new'],
       ['priv', '10.20.33.0/24', '', 'VM 22대', 'new'],
-      ['priv', '10.20.40.0/24', 'vMotion', 'ESXi 호스트 24대', 'new'],
+      ['priv', '10.20.40.0/24', 'vMotion', 'ESXi 호스트 24대(vmk1)', 'new'],
+      ['priv', '10.20.41.0/24', 'vSAN', 'ESXi 호스트 24대(vmk2)', 'new'],
+      ['priv', '10.20.42.0/24', '스토리지망', 'ESXi 호스트 24대(vmk3)', 'new'],
       ['priv', '10.20.8.0/24', 'iDRAC 관리망', 'iDRAC 88대 · 서비스 1 서울 1센터 서버', 'new'],
       ['priv', '10.20.9.0/24', '', 'iDRAC 24대 · 서비스 2 이름 없음', 'new'],
       ['priv', '10.31.9.0/24', '', 'VM 3대', 'overlap'],

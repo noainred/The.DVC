@@ -55,7 +55,7 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px">
       <label class="ck"><input type="checkbox" checked><b>요약</b><span>법인별 주소 · 사용률 · 조치 필요 수</span></label>
       <label class="ck"><input type="checkbox" checked><b>대역 목록</b><span>대역 · 용도 · 사용률 · 빈 주소 · 대장 시트로 가는 링크</span></label>
-      <label class="ck"><input type="checkbox" checked><b>IP 대장 — 대역마다 시트 하나</b><span>지금 방식. 주소 하나가 한 행</span></label>
+      <label class="ck"><input type="checkbox" checked><b>IP 대장 — 대역마다 시트 하나</b><span>기본. 전체 법인을 골라도 대역마다 시트로 만듭니다</span></label>
       <label class="ck"><input type="checkbox"><b>IP 대장 — 한 시트에 전부</b><span>필터 · 피벗으로 직접 가공할 때</span></label>
       <label class="ck"><input type="checkbox" checked><b>조치 필요</b><span>충돌 · 중복 · 예약 만료 · 이름/DNS 불일치</span></label>
       <label class="ck"><input type="checkbox"><b>서버별 IP</b><span>서비스 태그 기준 — 서버 한 대가 쓰는 주소 전부</span></label>
@@ -122,7 +122,7 @@ class Component extends DCLogic {
     const S = {
       net: { title: '이 대역', sub: '10.20.30.0/24 · 웹 서비스망', file: 'ip-ledger_10.20.30.0_24_20261113-1452.xlsx', what: '대장 시트 1장(254행) + 요약 · 조치 필요 · 안내', warn: '' },
       corp: { title: '이 법인', sub: 'VC-KR1 · 대역 38개 · 주소 9,652개', file: 'ip-ledger_VC-KR1_20261113-1452.xlsx', what: '대장 시트 38장(9,652행) + 요약 · 대역 목록 · 조치 필요 · 안내', warn: '' },
-      all: { title: '전체 법인', sub: '28곳 · 대역 312개 · 주소 79,248개', file: 'ip-ledger_all_20261113-1452.xlsx', what: '대장 시트 312장(79,248행) + 요약 · 대역 목록 · 조치 필요 · 안내', warn: '시트가 312장입니다 — 만드는 데 시간이 걸리고 파일이 큽니다. 가공이 목적이면 ‘한 시트에 전부’ 를 권합니다.' },
+      all: { title: '전체 법인', sub: '28곳 · 대역 312개 · 주소 79,248개', file: 'ip-ledger_all_20261113-1452.xlsx', what: '대장 시트 312장(79,248행) + 요약 · 대역 목록 · 조치 필요 · 안내', warn: '대역마다 시트 하나씩 312장을 만듭니다 — 시간이 걸립니다. ‘대역 목록’ 시트의 링크로 각 대장 시트에 바로 갑니다.' },
       list: { title: '지금 목록', sub: 'IP 주소 탭의 필터 결과 11개', file: 'ip-list_filtered_20261113-1452.xlsx', what: '한 시트 11행 + 안내(걸린 필터를 적습니다)', warn: '' },
     };
     const scopes = ['net', 'corp', 'all', 'list'].map((k) => ({
