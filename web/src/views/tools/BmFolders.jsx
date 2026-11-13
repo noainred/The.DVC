@@ -307,7 +307,7 @@ export default function BmFolders() {
                       {rows.map((r) => (
                         <tr key={r.key} className={picked.has(r.key) ? 'bmf-picked' : undefined} style={{ cursor: 'pointer' }} onClick={() => setPanel(r.key)}>
                           {writable ? <td data-nosort onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`${r.name} 선택`} checked={picked.has(r.key)} onChange={(e) => setPicked((s) => { const n = new Set(s); if (e.target.checked) n.add(r.key); else n.delete(r.key); return n; })} /></td> : null}
-                          <td data-sort={r.name}><span className="bmf-nm"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} />{r.name}{r.kind === 'esxi' ? <span className="badge gray" style={{ marginLeft: 4 }}>ESXi</span> : null}</span></td>
+                          <td data-sort={r.name}><span className="bmf-nm"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} />{r.name}{r.kind === 'esxi' ? <span className="badge gray" style={{ marginLeft: 4 }}>ESXi</span> : null}{r.tmpKey ? <TmpKeyBadge /> : null}</span></td>
                           {sel.type !== 'folder' || sub ? <td data-sort={r.place ? r.path : '￿'}>{r.place ? <span title={PLACE_LABEL[r.place]}>{pathText(r.path)}{r.place === 'rule' ? <span className="badge gray" style={{ marginLeft: 4 }}>규칙</span> : null}</span> : <span className="muted">(미분류)</span>}</td> : null}
                           <td data-sort={r.model || ''}>{r.model || '—'}{!d.scoped && r.serviceTag ? <div className="mono muted" style={{ fontSize: 11 }}>{r.serviceTag}</div> : null}</td>
                           <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}{r.addr ? <div className="muted mono" style={{ fontSize: 11 }} title="관리 주소(iDRAC) — 관리자 판본">{r.addr}</div> : null}</td>
@@ -738,5 +738,10 @@ function WhyBand({ rows, quick, setQuick }) {
       })}
     </div>
   );
+}
+
+/** v2.995(묶음 C): 서비스 태그를 아직 읽지 못한 서버 — 임시 키(이름 기반)로 등록된다. 태그가 읽히면 등록이 태그 키로 저절로 옮겨 간다. */
+function TmpKeyBadge() {
+  return <span className="badge gray" style={{ marginLeft: 4, fontSize: 10.5 }} title="서비스 태그를 아직 읽지 못해 임시 키(이름 기반)로 다룹니다. 태그가 읽히면 폴더 등록이 태그 키로 저절로 옮겨 가고 위치는 그대로입니다. 이름이 바뀌면 임시 키도 바뀌어 등록이 ‘목록에 없는 등록’ 으로 보일 수 있습니다.">태그 없음</span>;
 }
 
