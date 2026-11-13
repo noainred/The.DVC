@@ -98,7 +98,7 @@ export default function BmFolders() {
   const pendingFilter = useRef(null);
   useEffect(() => { const p = pendingFilter.current; pendingFilter.current = null; setPicked(new Set()); setForm(''); setFv({}); setQ(p?.q || ''); setQuick(p?.quick || ''); }, [selKey]);
   const pick = useCallback((corp) => setOpen((s) => { const n = new Set(s); n.add(corp); return n; }), []);
-  // v2.995(폴더 끌어 옮기기): 같은 법인 안에서 부모만 바꾼다 — 서버 folder.move 가 겹침 · 자기 하위 · 깊이 · 규칙을 다시 본다. 끌어 놓기는 확인을 묻는다.
+  // v2.997(폴더 끌어 옮기기): 같은 법인 안에서 부모만 바꾼다 — 서버 folder.move 가 겹침 · 자기 하위 · 깊이 · 규칙을 다시 본다. 끌어 놓기는 확인을 묻는다.
   const moveFolder = async (corp, path, parent, { confirm = true } = {}) => {
     const to = movedPath(path, parent);
     if (confirm && !window.confirm(`‘${path.split('\\').join(' › ')}’ 을(를) ${parent ? `‘${parent.split('\\').join(' › ')}’ 아래로` : '법인 바로 아래로'} 옮깁니다 — 하위 폴더 · 등록 · 이 법인 규칙 · 서비스 인벤토리 규칙도 함께 옮겨 갑니다. 계속할까요?`)) return false;
@@ -365,7 +365,7 @@ export default function BmFolders() {
 }
 
 function TreeNode({ on, depth, name, title, count, un, onClick, toggle, opened, children, dnd = null, drop = '' }) {
-  // v2.995: dnd = 끌기 · 놓기 이벤트(쓰기 가능한 법인 트리만) · drop = 'ok'(놓을 수 있는 곳 위) · 'no'(못 놓는 곳 위)
+  // v2.997: dnd = 끌기 · 놓기 이벤트(쓰기 가능한 법인 트리만) · drop = 'ok'(놓을 수 있는 곳 위) · 'no'(못 놓는 곳 위)
   return (
     <div className={`svcinv-tn${on ? ' on' : ''}${drop ? ` bmf-drop-${drop}` : ''}`} style={{ paddingLeft: 8 + depth * 14 }} role="button" tabIndex={0} aria-current={on ? 'true' : undefined} title={title || name}
       onClick={onClick} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }} {...(dnd || {})}>
@@ -381,7 +381,7 @@ function TreeNode({ on, depth, name, title, count, un, onClick, toggle, opened, 
 function CorpTree({ corps, sel, setSel, open, setOpen, q, pick, onMove = null }) {
   const ql = q.trim().toLowerCase();
   const toggle = (vc) => setOpen((s) => { const n = new Set(s); if (n.has(vc)) n.delete(vc); else n.add(vc); return n; });
-  // v2.995(폴더 끌어 옮기기): 끄는 폴더 { corp, path } · 위에 있는 곳 key. 쓰기 가능한 법인 · 거르기 글자가 없을 때만(걸러진 트리는 놓을 곳이 숨는다).
+  // v2.997(폴더 끌어 옮기기): 끄는 폴더 { corp, path } · 위에 있는 곳 key. 쓰기 가능한 법인 · 거르기 글자가 없을 때만(걸러진 트리는 놓을 곳이 숨는다).
   const [drag, setDrag] = React.useState(null);
   const [over, setOver] = React.useState('');
   const dndFor = (c, path) => {
@@ -479,7 +479,7 @@ function FolderForms({ form, setForm, fv, setFv, sel, op, busy, corps, corpName,
     );
   }
   if (form === 'move') {
-    // v2.995: 끌어 놓기의 대체(터치 · 키보드) — 같은 법인 폴더 중 놓을 수 있는 곳만
+    // v2.997: 끌어 놓기의 대체(터치 · 키보드) — 같은 법인 폴더 중 놓을 수 있는 곳만
     const paths = (corps.find((c) => c.vcenterId === sel.corp)?.folders || []).map((f) => f.path);
     const targets = moveTargets(sel.path, paths);
     return (

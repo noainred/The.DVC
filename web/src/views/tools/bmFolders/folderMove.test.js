@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { canMove, moveTargets, movedPath, followSel, moveNote } from './folderMove.js';
 
 const paths = ['AWX', 'DVC', 'Service', 'Service\\SBP', 'Service\\SBP\\AP', 'Service\\SBP\\DP', 'Service\\SBP\\DP\\Airflow', 'DVC\\AP'];
-describe('v2.995 폴더 옮기기(같은 법인 · 부모만)', () => {
+describe('v2.997 폴더 옮기기(같은 법인 · 부모만)', () => {
   it('막는 곳 — 지금 자리 · 자기/하위 · 같은 이름 · 없는 폴더 · 깊이', () => {
     expect(canMove('Service\\SBP\\DP', 'Service\\SBP', paths).ok).toBe(false);
     expect(canMove('Service\\SBP', 'Service\\SBP\\DP', paths).why).toContain('하위');

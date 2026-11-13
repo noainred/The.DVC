@@ -1,4 +1,4 @@
-// 물리서버 폴더 v2.995 — 폴더 끌어 옮기기(folder.move: 같은 법인 안 · 부모만 · 하위 · 등록 · 법인 규칙 · 서비스 인벤토리 규칙 함께 · 가드)
+// 물리서버 폴더 v2.997 — 폴더 끌어 옮기기(folder.move: 같은 법인 안 · 부모만 · 하위 · 등록 · 법인 규칙 · 서비스 인벤토리 규칙 함께 · 가드)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

@@ -748,7 +748,7 @@ export function registerBmFolders(api) {
             const segs = p.value.split('\\');
             to = [...segs.slice(0, -1), nm.value].join('\\');
           } else {
-            // v2.995(폴더 끌어 옮기기): 부모만 바꾼다 — **같은 법인 안**(등록 · 규칙이 법인에 묶여 있다). parent '' = 법인 바로 아래.
+            // v2.997(폴더 끌어 옮기기): 부모만 바꾼다 — **같은 법인 안**(등록 · 규칙이 법인에 묶여 있다). parent '' = 법인 바로 아래.
             //   하위 폴더 · 등록 · 법인 규칙 · 서비스 인벤토리 규칙은 이름 바꾸기와 같은 길(아래 공통부)로 함께 옮긴다.
             if (typeof body.parent !== 'string') return res.status(400).json({ ok: false, reason: '옮길 곳(폴더 또는 법인 바로 아래)을 지정하십시오.' });
             let parent = '';
@@ -766,7 +766,7 @@ export function registerBmFolders(api) {
           if (to === p.value) return done({ path: to });
           if (existing.has(to)) return res.status(409).json({ ok: false, reason: op === 'folder.move' ? '옮길 곳에 같은 이름의 폴더가 이미 있습니다.' : '같은 이름의 폴더가 이미 있습니다.' });
           const swap = (x) => (underPath(x, p.value) ? to + x.slice(p.value.length) : x);
-          // v2.995: 하위 폴더의 새 경로도 검증한다(옮기면 깊이 · 길이 상한을 넘을 수 있다 — 이름 바꾸기도 같은 규칙)
+          // v2.997: 하위 폴더의 새 경로도 검증한다(옮기면 깊이 · 길이 상한을 넘을 수 있다 — 이름 바꾸기도 같은 규칙)
           for (const x of existing) {
             if (!underPath(x, p.value)) continue;
             const c = cleanFolderPath(swap(x));
