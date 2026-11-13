@@ -44,9 +44,10 @@ if (process.send) {
     const aliveTimer = setInterval(() => flushAlive(true), 500);
     aliveTimer.unref?.();
     try {
-      const { scanned, alive, nameStats } = await scanRanges(j.ranges || [], {
+      const { scanned, alive, nameStats, fwd } = await scanRanges(j.ranges || [], {
         ports: j.ports, concurrency: j.concurrency, timeoutMs: j.timeoutMs, reverseDns: j.reverseDns, ping: j.ping,
         mdns: j.mdns !== false, netbios: j.netbios !== false, // v2.991 호스트명 확인(기본 켜짐 — 사용자 결정)
+        fwdNames: j.fwdNames, // v2.993: 정방향 DNS 로 물을 물리서버 이름(물리서버 §13 ③)
         onTcpAlive: (row) => { if (partialN >= PARTIAL_MAX) return; partialN++; pend.push(row); flushAlive(false); },
         onProgress: (done, total, aliveN) => {
           const now = Date.now();
@@ -55,7 +56,7 @@ if (process.send) {
         },
       });
       clearInterval(aliveTimer); pend = []; // 'done' 에 전체가 실린다 — 부분 결과를 더 보내지 않는다
-      try { process.send({ type: 'done', scanned, alive, nameStats }); } catch { /* */ }
+      try { process.send({ type: 'done', scanned, alive, nameStats, ...(fwd ? { fwd } : {}) }); } catch { /* */ }
     } catch (e) {
       clearInterval(aliveTimer);
       try { process.send({ type: 'error', message: e?.message || String(e) }); } catch { /* */ }

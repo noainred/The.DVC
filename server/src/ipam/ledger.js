@@ -332,11 +332,15 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       const hist = ipHistoryEntry(sc.ip);
       const released = hist?.status === 'down';
       count.set(sc.ip, (count.get(sc.ip) || 0) + 1);
+      // v2.993(설계 bm-folders §13 ③): 이름 = 역방향 DNS(hostname) → 없으면 정방향 DNS 로 찾은 물리서버 이름(fwdName). 어떻게 찾았는지(nameVia)를 함께 —
+      //   둘이 다르면 역방향 이름을 쓰고 'differ' + fwdName 으로 둘 다 보인다(하나로 정하지 않는다).
+      const nm = scanNameOf(sc);
       rows.push({
         ip: sc.ip, ipNum: n, vcenterId: '', vcenterName: '(네트워크 스캔)',
-        ownerType: 'scanned', serverType: 'Scanned', ownerName: sc.hostname || sc.ip,
+        ownerType: 'scanned', serverType: 'Scanned', ownerName: nm.name || sc.ip,
         powerState: released ? 'POWERED_OFF' : 'POWERED_ON', guestOS: '', osName: '', osVersion: '',
-        hostName: sc.hostname || '', cluster: '', multiHomed: false, scope: scopeAt(sc.ip, n),
+        // 역방향만으로 찾은 이름(예전부터의 기본)에는 칸을 더하지 않는다 — 원장 행 · ipam.db 를 정방향 이름이 없을 때 예전과 같게(PERF2611-01)
+        hostName: nm.name, ...(nm.via && nm.via !== 'ptr' ? { nameVia: nm.via } : {}), ...(nm.via === 'differ' ? { fwdName: nm.fwd } : {}), cluster: '', multiHomed: false, scope: scopeAt(sc.ip, n),
         openPorts: sc.openPorts || [], services: sc.services || [], lastSeen: sc.lastSeen || null,
         firstSeen: hist?.firstSeen || null, usageStatus: hist?.status || null, released,
         source: 'scan', discovery: 'scan', owner: null,
@@ -613,6 +617,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
       let firstSeen = null, lastSeen = null, usageStatus = null;
       let mgmtStatus = '', appliedBy = '', rangePolicySpec = ''; // 관리상태/방식/적용정책
       let owner = null, ownerType = '', vcenterId = '', discovery = ''; // 상세/원격접속/확인출처
+      let nameVia = '', fwdName = ''; // v2.993: 스캔 이름 찾은 방법(ptr · fwd · both · differ) · 다를 때 정방향 이름
       if (i === 0) { status = 'network'; purpose = 'Network ID'; }
       else if (recs.length) {
         used++;
@@ -628,6 +633,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
           : r.serverType === 'Scanned' ? 'scanned'
             : (recs.length > 1 ? 'duplicate' : (r.multiHomed ? 'multihomed' : 'used'));
         hostname = [...new Set(recs.map((x) => x.ownerName))].join(' / ');
+        { const sr = recs.find((x) => x.nameVia); if (sr) { nameVia = sr.nameVia; fwdName = sr.fwdName || ''; } }   // v2.993: 스캔 행 이름을 찾은 방법
         serverType = r.serverType === 'BareMetal' ? '베어메탈' : (r.serverType === 'Scanned' ? '스캔' : 'VM');
         os = r.serverType === 'Scanned' ? (r.services || []).join(', ') : [r.osName, r.osVersion].filter(Boolean).join(' ');
         purpose = r.serverType === 'Scanned'
@@ -646,7 +652,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
       }
       const annRaw = annotations[ip];
       const ann = annRaw && (!annVisible || annVisible(ip)) ? annRaw : null;
-      sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
+      sheetRows.push({ ip, last: i, purpose, hostname, ...(nameVia ? { nameVia } : {}), ...(fwdName ? { fwdName } : {}), serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
     sheets.push({
       subnet: `${base}.0/24`, base, used, rows: sheetRows,
@@ -744,3 +750,18 @@ export function ipVcenterOwners(snap) {
   for (const h of snap.hosts || []) { const hip = hostLedgerIp(h); if (!hip) continue; if (!m.has(hip.ip)) m.set(hip.ip, new Set()); if (h.vcenterId) m.get(hip.ip).add(h.vcenterId); }
   return m;
 }
+
+/**
+ * v2.993(설계 bm-folders §13 ③): 스캔 행 이름과 찾은 방법(순수). via — 'ptr'(스캔이 찾은 이름 — v2.991 부터 역DNS · mDNS · NetBIOS 중 표시 이름) ·
+ *   'fwd'(정방향 DNS — 물리서버 이름으로 물어 이 IP) · 'both'(둘이 같은 이름 — 짧은 이름 · 대소문자 무시) · 'differ'(둘이 다름 — 이름은 스캔 이름, fwd 는 따로) · ''(이름 없음).
+ */
+export function scanNameOf(sc) {
+  const p = typeof sc?.hostname === 'string' ? sc.hostname : '';
+  const f = typeof sc?.fwdName === 'string' ? sc.fwdName : '';
+  const sh = (v) => v.toLowerCase().replace(/\.$/, '').split('.')[0];
+  if (p && f) return sh(p) === sh(f) ? { name: p, via: 'both' } : { name: p, via: 'differ', fwd: f };
+  if (p) return { name: p, via: 'ptr' };
+  if (f) return { name: f, via: 'fwd' };
+  return { name: '', via: '' };
+}
+

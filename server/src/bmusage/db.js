@@ -217,11 +217,14 @@ export const PERF_TABLE_COLS = Object.freeze({
   usage_daily: PERF_COL_NAMES.map((c) => [`${c}_max`, 'REAL']),
   usage_latest: [...PERF_COL_NAMES.map((c) => [c, 'REAL']), ['os_at', 'INTEGER'], ['idrac_at', 'INTEGER'], ['detail_json', 'TEXT'], ['tuning_json', 'TEXT'],
     // v2.922: 피크(<열>_peak · _peak_at) · 피크 출처·창 · 장치 상한 초과 수 — 최신값에도 둔다(보드가 이 파일만 읽는다).
-    ...PEAK_SQL_COLS, ...PEAK_META_COLS, ['dev_over', 'INTEGER']],
+    ...PEAK_SQL_COLS, ...PEAK_META_COLS, ['dev_over', 'INTEGER'],
+    // v2.993(출처 색): CPU · 메모리 **지표별** 출처 두 글자(o = OS · i = iDRAC 텔레메트리 · e = iDRAC 대체 수집 · - = 없음 — `usage.js srcCmOf`).
+    //   행 출처(src)는 지표를 가르지 않아 I/O 만 iDRAC 이어도 CPU · 메모리가 OS 인 행이 '혼합' 이었다.
+    ['src_cm', 'TEXT']],
 });
 /** v2.922 — 최신값 전용 추가 열(지표 열 뒤에 붙는다). os_at·idrac_at 만 ‘그 경로의 마지막 성공’ 이라 COALESCE 로 지킨다. */
-export const LATEST_EXTRA_COLS = Object.freeze(['os_at', 'idrac_at', 'detail_json', 'tuning_json', ...PEAK_SQL_COLS.map(([c]) => c), ...PEAK_META_COLS.map(([c]) => c), 'dev_over']);
-const TEXT_EXTRA = new Set(['detail_json', 'tuning_json', 'peak_src']);
+export const LATEST_EXTRA_COLS = Object.freeze(['os_at', 'idrac_at', 'detail_json', 'tuning_json', ...PEAK_SQL_COLS.map(([c]) => c), ...PEAK_META_COLS.map(([c]) => c), 'dev_over', 'src_cm']);
+const TEXT_EXTRA = new Set(['detail_json', 'tuning_json', 'peak_src', 'src_cm']);
 export function migratePerfColumns(conn) {
   let added = 0; const failed = []; const have = {};
   for (const [table, cols] of Object.entries(PERF_TABLE_COLS)) {

@@ -466,10 +466,12 @@ function cleanGroup(v) {
 /** alive 원소 하나를 아는 필드로 좁힌다(순수). ip 는 호출부가 isIpv4 로 검사한다. v2.639: 바깥 호출부 0건(테스트도 mergeScanResults 로 검사한다) — 내부 함수. */
 function cleanAliveHost(h) {
   const names = cleanNames(h.names);
+  // v2.993(물리서버 §13 ③ 정방향 DNS): fwdName — 물리서버 이름을 DNS 에 물어 이 IP 가 나왔을 때 그 이름(엣지가 올린다 → 같은 정제). 없으면 칸을 두지 않는다.
+  const fwdName = cleanHostname(h.fwdName);
   // 표시 이름은 방식별 이름에서 다시 고른다(보낸 hostname 과 names 가 어긋나도 한 규칙). 방식별 이름이 없으면 옛 계약의 hostname.
   const hostname = names ? displayName(names).name : cleanHostname(h.hostname);
   return { ip: h.ip, openPorts: cleanPorts(h.openPorts), services: cleanServices(h.services), hostname,
-    names, tried: cleanTried(h.tried), nbGroup: cleanGroup(h.nbGroup), mac: cleanMac(h.mac) };
+    names, tried: cleanTried(h.tried), nbGroup: cleanGroup(h.nbGroup), mac: cleanMac(h.mac), ...(fwdName ? { fwdName } : {}) };
 }
 /** 저장된 방식별 이름 { k: {v, at, miss} } 정제 — 값이 없는 키는 뺀다. */
 function cleanStoredNames(v) {
@@ -549,6 +551,7 @@ function storedEntry(base, names, tried) {
   if (tried) e.tried = tried;
   if (nm?.netbios && base.nbGroup) e.nbGroup = base.nbGroup;
   if (nm?.netbios && base.mac) e.mac = base.mac;
+  if (base.fwdName) e.fwdName = base.fwdName;   // v2.993: 저장본의 정방향 DNS 이름(cleanAliveHost 가 정제)
   return e;
 }
 function cleanStoredResults(raw) {
@@ -691,9 +694,10 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
     const mac = mn.nbAnswered ? h.mac : (mn.nbDropped ? '' : (prev?.mac || ''));
     if (nbGroup && next.names?.netbios) next.nbGroup = nbGroup;
     if (mac && next.names?.netbios) next.mac = mac;
+    if (h.fwdName) next.fwdName = h.fwdName;   // v2.993: 정방향 DNS 이름(이번 보고에 있을 때만 — 묻지 않은 보고는 칸이 빈다)
     // 실제 내용(포트/서비스/호스트명/에이전트) 변화가 있을 때만 리비전을 올린다(불필요한 대장 재계산 방지).
     if (!prev || !sameList(prev.openPorts, next.openPorts) || !sameList(prev.services, next.services)
-      || (prev.hostname || '') !== next.hostname || prev.agent !== agent || nameSig(prev) !== nameSig(next)) { changed = true; resContent = true; }
+      || (prev.hostname || '') !== next.hostname || prev.agent !== agent || nameSig(prev) !== nameSig(next) || (prev.fwdName || '') !== (next.fwdName || '')) { changed = true; resContent = true; }
     if (!prev) bumpAgent(agent, 1); else if (prev.agent !== agent) { bumpAgent(prev.agent, -1); bumpAgent(agent, 1); } // v2.639 I2
     results[h.ip] = next;
     noteSeen(ts); // v2.733 C6-02
