@@ -3570,3 +3570,49 @@ table.bmu-util tbody td { padding: 9px 10px; }
 .svcinv-tn.bmf-drop-ok { outline: 2px solid var(--accent); outline-offset: -2px; background: rgba(59,130,246,.14); }
 .svcinv-tn.bmf-drop-no { outline: 1px dashed var(--red); outline-offset: -2px; }
 
+
+/* ───────────────────────────────────────────────────────────────────────────
+   v2.999 업그레이드 뒤 '새로고침 하세요' 안내(components/UpgradeNotice.jsx · 설계 docs/design/upgrade-reload ①③).
+   오류 경계가 '이 창의 판 ≠ 서버 판' 일 때 그리는 상자 + 바뀐 것(3줄 + More). 색은 토큰만 · uppercase 금지 · 자식 min-width:0.
+   ─────────────────────────────────────────────────────────────────────────── */
+.upg-box { max-width: 560px; margin: 24px auto; padding: 28px 24px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); min-width: 0; box-sizing: border-box; }
+.login-screen > .upg-box { width: min(560px, calc(100vw - 32px)); }
+.upg-ico { width: 44px; height: 44px; flex: none; border-radius: 50%; background: rgba(34, 211, 238, .12); color: var(--accent-2); display: inline-flex; align-items: center; justify-content: center; }
+.upg-title { font-size: 16px; font-weight: 800; line-height: 1.45; color: var(--text); }
+.upg-sub { font-size: 12.5px; line-height: 1.6; color: var(--text-dim); max-width: 460px; }
+.upg-verline { display: inline-flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 8px; font-size: 12px; color: var(--text-dim); }
+.upg-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-deep);
+  font-family: var(--mono); font-size: 11.5px; font-weight: 700; color: var(--text-dim); white-space: nowrap; flex: none; }
+.upg-chip.new { border-color: var(--mint-dim); color: #5eead4; }
+.upg-chg { align-self: stretch; text-align: left; background: var(--panel-deep); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; box-sizing: border-box; }
+.upg-chg-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 8px; font-size: 12px; font-weight: 700; color: var(--text-dim); }
+.upg-chg-n { font-family: var(--mono); font-weight: 500; }
+.upg-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.upg-list li { position: relative; padding-left: 14px; font-size: 12.5px; line-height: 1.55; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.upg-list li::before { content: ''; position: absolute; left: 2px; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-2); }
+.upg-list.clamp li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.upg-scroll { max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 6px; min-width: 0; }
+.upg-ver { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; font-weight: 700; color: var(--text); min-width: 0; }
+.upg-ver .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upg-more { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; margin: -6px 0 -8px -10px;
+  border: none; background: none; color: #93c5fd; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.upg-more:hover { color: #bfdbfe; }
+.upg-more .n { color: var(--text-dim); font-weight: 500; }
+.upg-reload { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 10px 20px; margin-top: 4px; }
+/* 헤더 '새로고침 필요' 배지(버튼) — 알림을 닫아도 판이 다른 동안 남는다 */
+.ver-badge.upg-need { margin-left: 6px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700;
+  color: #fcd34d; background: rgba(245, 158, 11, .18); border-color: transparent; }
+.ver-badge.upg-need:hover { background: rgba(245, 158, 11, .28); }
+.up-toast { max-width: 400px; }
+.up-toast-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: none; border-radius: 50%;
+  background: rgba(34, 211, 238, .12); color: var(--accent-2); font-size: 0; }
+.up-toast-body { min-width: 0; }
+.up-toast-title { line-height: 1.45; }
+@media (max-width: 480px) {
+  .upg-box { margin: 12px 0; padding: 20px 14px; }
+  .upg-reload { align-self: stretch; }
+  .up-toast { left: 12px; right: 12px; max-width: none; flex-wrap: wrap; }
+  .up-toast-body { flex: 1 1 160px; }
+}
