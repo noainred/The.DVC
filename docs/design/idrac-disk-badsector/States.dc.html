@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디스크 이력 — 상태별 화면</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0;box-sizing:border-box}
+.cap{font-size:12px;font-weight:700;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn[disabled]{opacity:.55;cursor:not-allowed}
+.band{border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;line-height:1.6}
+.band.neutral{border:1px solid #243049;background:#0f1626}
+.band.warn{border:1px solid rgba(245,158,11,.45);background:rgba(245,158,11,.10)}
+.band.err{border:1px solid rgba(239,68,68,.45);background:rgba(239,68,68,.10)}
+.band b.h{font-size:15px;font-weight:800}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.fix{background:rgba(245,158,11,.16);color:#fcd34d}
+.bar{height:8px;border-radius:999px;background:#0f1626;border:1px solid #1f2a40;overflow:hidden}
+.bar i{display:block;height:100%;background:#3b82f6}
+.cov{position:relative;height:14px;border-radius:4px;background:#0f1626;border:1px solid #1f2a40;overflow:hidden}
+.cov .unk{position:absolute;left:0;top:0;bottom:0;background:repeating-linear-gradient(135deg,rgba(139,155,180,.28) 0 4px,rgba(139,155,180,0) 4px 8px)}
+.cov .has{position:absolute;top:0;bottom:0;right:0;background:rgba(59,130,246,.45)}
+</style>
+</helmet>
+<div style="width:100%;min-height:1360px;box-sizing:border-box;background:#0a0e17;padding:28px 24px 40px;color:#e6edf6;font-family:'Inter','Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:13px">
+<div style="max-width:1392px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:16px">
+
+  <section class="card">
+    <div class="cap">1 · 조회 전 — 이 서버를 아직 조회한 적 없음</div>
+    <div class="band neutral">
+      <b class="h">아직 조회하지 않았습니다</b>
+      <span class="muted">Lifecycle 로그 전체를 읽는 작업이라 탭을 열 때 자동으로 돌지 않습니다. 버튼을 누르면 이 서버의 법인 엣지가 iDRAC 에서 읽어 옵니다.</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn primary" type="button">배드 섹터 이력 조회</button>
+      <span class="muted" style="font-size:12px">로그가 많은 서버는 1분 넘게 걸릴 수 있습니다</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="cap">2 · 조회 중 — 이 서버 버튼만 잠금</div>
+    <div class="band neutral">
+      <b class="h">Lifecycle 로그를 읽는 중입니다</b>
+      <span class="muted">법인 엣지(PL 바르샤바)에서 실행 중 · 12,480건 중 3,200건 읽음 · 지금까지 스토리지 계열 21건</span>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="12480" aria-valuenow="3200" aria-label="로그 읽기 진행"><i style="width:25.6%"></i></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn primary" type="button" disabled>조회 중…</button>
+      <button class="btn" type="button">중단</button>
+      <span class="muted" style="font-size:12px">창을 닫아도 조회는 이어지고, 다시 열면 결과가 보입니다</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="cap">3 · 기록 없음 — 초록 ‘정상’ 으로 칠하지 않음</div>
+    <div class="band neutral">
+      <b class="h">남아 있는 로그에는 배드 섹터 기록이 없습니다</b>
+      <span>2023-03-14 ~ 2026-11-14 (3년 8개월) · 로그 12,480건을 전부 읽었습니다.</span>
+      <div class="cov" aria-hidden="true"><span class="unk" style="width:8%"></span><span class="has" style="width:92%"></span></div>
+      <span class="muted" style="font-size:12px">빗금 구간(2023-03-14 이전)은 로그가 없어 확인할 수 없습니다. ‘발생한 적 없음’ 이 아니라 ‘이 구간에 기록 없음’ 입니다.</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn" type="button">다시 조회</button>
+      <span class="muted" style="font-size:12px">마지막 조회 2026-11-14 07:02</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="cap">4 · 기록 없음 + 로그 구간이 짧음</div>
+    <div class="band warn">
+      <b class="h" style="color:#fde68a">기록은 없지만, 로그가 73일치뿐입니다</b>
+      <span>가장 오래된 로그가 2026-09-02 입니다. 그 이전 일은 이 서버 로그로 확인할 수 없습니다.</span>
+      <div class="cov" aria-hidden="true"><span class="unk" style="width:86%"></span><span class="has" style="width:14%"></span></div>
+      <span class="muted" style="font-size:12px">로그 지움 · 메인보드 교체 · 오래된 기록 덮어쓰기 중 무엇 때문인지는 로그만으로 알 수 없습니다.</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn" type="button">다시 조회</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="cap">5 · 일부만 읽음 — 시한 초과</div>
+    <div class="band warn">
+      <b class="h" style="color:#fde68a">최근 5,000건까지만 읽었습니다 (전체 12,480건)</b>
+      <span>읽은 구간 2025-06-10 ~ 2026-11-14 에서 <b>1건</b> 찾았습니다. 그 이전 7,480건은 아직 읽지 못했습니다.</span>
+      <div class="cov" aria-hidden="true"><span class="unk" style="width:60%"></span><span class="has" style="width:40%"></span></div>
+    </div>
+    <div style="border:1px solid #243049;border-radius:10px;padding:9px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="mono">2026-11-03 02:14</span><b>Disk 5</b><span class="tag bad">복구 불가</span><span class="mono muted">PDR46</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn primary" type="button">이어서 조회</button>
+      <span class="muted" style="font-size:12px">읽은 곳부터 이어 갑니다 — 처음부터 다시 읽지 않습니다</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="cap">6 · 못 읽음 — 인증 실패</div>
+    <div class="band err">
+      <b class="h" style="color:#fecaca">iDRAC 로그인에 실패해 읽지 못했습니다</b>
+      <span>배드 섹터 유무는 판정하지 않았습니다. 계정 잠금을 피하려고 자동으로 다시 시도하지 않습니다.</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <a class="btn" href="#idrac-admin" style="text-decoration:none">iDRAC 등록 정보 확인</a>
+      <button class="btn" type="button">다시 조회</button>
+      <span class="muted" style="font-size:12px">2026-11-14 07:02 시도</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="cap">7 · 못 읽음 — 법인 엣지 응답 없음</div>
+    <div class="band err">
+      <b class="h" style="color:#fecaca">법인 엣지(US 동부)가 응답하지 않아 조회를 시작하지 못했습니다</b>
+      <span>이 서버의 iDRAC 는 법인 엣지를 거쳐 읽습니다. 엣지 마지막 보고 2026-11-14 05:41.</span>
+    </div>
+    <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;line-height:1.6">
+      <b>지난 조회 결과 (2026-10-02 14:20)</b> — 배드 섹터 기록 2건 · Disk 1
+      <div class="muted" style="font-size:12px">43일 전 결과입니다. 그 뒤에 생긴 기록은 들어 있지 않습니다.</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn" type="button">지난 결과 보기</button>
+      <button class="btn" type="button">다시 조회</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="cap">8 · 대상 아님 — Lifecycle 로그가 없는 장비</div>
+    <div class="band neutral">
+      <b class="h">이 장비에는 Dell Lifecycle 로그가 없습니다</b>
+      <span class="muted">HPE iLO 서버입니다. 이 기능은 Dell iDRAC 의 Lifecycle 로그만 읽습니다 — iLO 로그(IML)는 아직 대상이 아닙니다.</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn" type="button" disabled>배드 섹터 이력 조회</button>
+    </div>
+  </section>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1360}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

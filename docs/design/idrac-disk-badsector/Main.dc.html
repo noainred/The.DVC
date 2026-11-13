@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 상세 — 디스크 이력 (배드 섹터 기록 있음)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.on{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.tag{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.fix{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.pre{background:rgba(59,130,246,.18);color:#bfdbfe}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+th button{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+.nw{white-space:nowrap}
+.kpi{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px;min-width:0}
+.kpi b{display:block;font-size:22px;font-weight:800;line-height:1.2}
+.kpi span{font-size:11.5px;color:#8b9bb4}
+.row{display:grid;grid-template-columns:132px minmax(0,1fr) 52px;gap:10px;align-items:center;min-height:30px}
+.track{position:relative;height:22px;border-radius:5px;background:#0f1626;border:1px solid #1f2a40;overflow:visible}
+.unk{position:absolute;left:0;top:0;bottom:0;width:8%;border-radius:5px 0 0 5px;background:repeating-linear-gradient(135deg,rgba(139,155,180,.22) 0 4px,rgba(139,155,180,0) 4px 8px)}
+.prev{position:absolute;top:0;bottom:0;background:rgba(139,155,180,.10)}
+.mk{position:absolute;top:50%;transform:translate(-50%,-50%);display:block}
+.mk.bad{width:10px;height:10px;background:#f87171;transform:translate(-50%,-50%) rotate(45deg)}
+.mk.fix{width:10px;height:10px;border-radius:50%;background:#fbbf24}
+.mk.pre{width:7px;height:7px;border-radius:50%;border:2.5px solid #93c5fd;background:#0f1626}
+.mk.swap{width:2px;height:28px;background:#e6edf6}
+.cnt{position:absolute;top:-9px;transform:translateX(4px);font-size:10px;font-weight:800;color:#fca5a5}
+.lg{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#aebbd0;white-space:nowrap}
+.lg i{position:static;transform:none;display:inline-block}
+.lg i.bad{transform:rotate(45deg)}
+</style>
+</helmet>
+<div style="width:100%;min-height:1640px;box-sizing:border-box;background:#0a0e17;padding:32px 16px 48px;color:#e6edf6;font-family:'Inter','Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:13px">
+<div class="card" style="max-width:980px;margin:0 auto;box-sizing:border-box;padding:18px 20px 22px;display:flex;flex-direction:column;gap:14px;min-width:0;box-shadow:0 4px 24px rgba(0,0,0,.4)">
+
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0">
+      <b style="font-size:15px">KR-ESX-R750-014 — iDRAC 상세 / 센서</b>
+      <a class="mono" href="#idrac" style="font-size:12.5px">10.21.4.114</a>
+      <span class="tag gray">서비스태그 7XK2P93</span>
+    </div>
+    <button class="btn" type="button" aria-label="닫기">닫기</button>
+  </div>
+
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button class="btn" type="button">센서 차트(온도·CPU)</button>
+    <button class="btn" type="button">하드웨어 / 버전</button>
+    <button class="btn" type="button">GPU 수집 확인</button>
+    <button class="btn on" type="button" aria-current="page">디스크 이력</button>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px">
+    <div style="min-width:0;display:flex;flex-direction:column;gap:3px">
+      <div style="font-weight:700">Lifecycle 로그에서 디스크 배드 섹터 계열 기록을 찾습니다</div>
+      <div class="muted" style="font-size:12px;line-height:1.5">마지막 조회 2026-11-14 07:02 · 41초 걸림 · 법인 엣지(KR 본사)에서 실행 · 로그 12,480건을 전부 읽어 스토리지 계열 86건 확인</div>
+    </div>
+    <button class="btn primary" type="button">다시 조회</button>
+  </div>
+
+  <div style="border:1px solid rgba(239,68,68,.45);border-radius:10px;background:rgba(239,68,68,.10);padding:12px 14px;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:16px;font-weight:800;color:#fecaca">배드 섹터 기록이 있습니다 — 7건 · 디스크 슬롯 2곳</div>
+    <div style="line-height:1.6;color:#e6edf6"><b>Disk 5</b> — 지금 꽂혀 있는 디스크에서 3건. 가장 최근은 2026-11-03 복구 불가 오류입니다.</div>
+    <div style="line-height:1.6;color:#e6edf6"><b>Disk 3</b> — 4건 모두 2025-01-15 디스크 교체 전입니다. 교체 뒤로는 기록이 없습니다.</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
+    <div class="kpi"><b style="color:#fca5a5">3</b><span>복구 불가 (읽지 못한 블록)</span></div>
+    <div class="kpi"><b style="color:#fcd34d">3</b><span>복구됨 (오류를 고쳐 씀)</span></div>
+    <div class="kpi"><b style="color:#bfdbfe">1</b><span>고장 예측 (SMART)</span></div>
+    <div class="kpi"><b>3년 8개월</b><span>로그가 남아 있는 구간</span></div>
+  </div>
+
+  <div class="card" style="padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0;background:#141b2d">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <div style="font-size:13.5px;font-weight:700">슬롯별 발생 시점</div>
+      <div class="muted" style="font-size:12px">2023-03-14 ~ 2026-11-14 · 그 이전은 로그가 없어 확인할 수 없습니다</div>
+    </div>
+
+    <div style="overflow-x:auto">
+    <div style="min-width:640px;display:flex;flex-direction:column;gap:4px;padding:10px 6px 2px 0">
+      <div class="row" style="min-height:18px">
+        <span></span>
+        <div style="position:relative;height:16px;font-size:11px;color:#8b9bb4">
+          <span style="position:absolute;left:0">이전 기록 없음</span>
+          <span class="mono" style="position:absolute;left:8%;transform:translateX(4px)">2023-03</span>
+          <span class="mono" style="position:absolute;left:28.1%;transform:translateX(-50%)">2024</span>
+          <span class="mono" style="position:absolute;left:53.2%;transform:translateX(-50%)">2025</span>
+          <span class="mono" style="position:absolute;left:78.3%;transform:translateX(-50%)">2026</span>
+          <span style="position:absolute;right:0">오늘</span>
+        </div>
+        <span class="muted" style="font-size:11px;text-align:right">건수</span>
+      </div>
+
+      <div class="row"><span class="muted">Disk 0</span><div class="track"><span class="unk"></span></div><span class="muted mono" style="text-align:right">0</span></div>
+      <div class="row"><span class="muted">Disk 1</span><div class="track"><span class="unk"></span></div><span class="muted mono" style="text-align:right">0</span></div>
+      <div class="row"><span class="muted">Disk 2</span><div class="track"><span class="unk"></span></div><span class="muted mono" style="text-align:right">0</span></div>
+      <div class="row">
+        <span style="font-weight:700">Disk 3 <span class="muted" style="font-weight:400;font-size:11.5px">· 교체됨</span></span>
+        <div class="track">
+          <span class="unk"></span>
+          <span class="prev" style="left:8%;width:46%"></span>
+          <span class="mk fix" style="left:38.5%" title="2024-06-02 복구됨 (PDR54)"></span>
+          <span class="mk bad" style="left:45.9%" title="2024-09-18 복구 불가 2건 (PDR46 · PDR47)"></span>
+          <span class="cnt" style="left:45.9%">2</span>
+          <span class="mk pre" style="left:50.2%" title="2024-11-20 고장 예측 (PDR16)"></span>
+          <span class="mk swap" style="left:54%" title="2025-01-15 디스크 제거·삽입"></span>
+        </div>
+        <span class="mono" style="text-align:right;font-weight:700">4</span>
+      </div>
+      <div class="row"><span class="muted">Disk 4</span><div class="track"><span class="unk"></span></div><span class="muted mono" style="text-align:right">0</span></div>
+      <div class="row">
+        <span style="font-weight:700">Disk 5 <span style="font-weight:400;font-size:11.5px;color:#fca5a5">· 현재 장착</span></span>
+        <div class="track">
+          <span class="unk"></span>
+          <span class="mk fix" style="left:94.8%" title="2026-08-30 복구됨 (PDR54)"></span>
+          <span class="mk fix" style="left:97.2%" title="2026-10-12 복구됨 (PDR54)"></span>
+          <span class="mk bad" style="left:99.4%" title="2026-11-03 복구 불가 (PDR46)"></span>
+        </div>
+        <span class="mono" style="text-align:right;font-weight:700">3</span>
+      </div>
+      <div class="row"><span class="muted">Disk 6</span><div class="track"><span class="unk"></span></div><span class="muted mono" style="text-align:right">0</span></div>
+      <div class="row"><span class="muted">Disk 7</span><div class="track"><span class="unk"></span></div><span class="muted mono" style="text-align:right">0</span></div>
+    </div>
+    </div>
+
+    <div style="display:flex;gap:8px 18px;flex-wrap:wrap;padding-top:4px;border-top:1px solid #1f2a40">
+      <span class="lg" style="padding-top:8px"><i class="mk bad"></i>복구 불가</span>
+      <span class="lg" style="padding-top:8px"><i class="mk fix"></i>복구됨</span>
+      <span class="lg" style="padding-top:8px"><i class="mk pre"></i>고장 예측</span>
+      <span class="lg" style="padding-top:8px"><i class="mk swap" style="height:14px"></i>디스크 교체 (제거·삽입 기록)</span>
+      <span class="lg" style="padding-top:8px"><i style="width:22px;height:10px;border-radius:2px;background:rgba(139,155,180,.22)"></i>교체 전 디스크 구간</span>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="font-size:13.5px;font-weight:700">기록 7건</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn" type="button">CSV</button>
+        <button class="btn" type="button">스토리지 계열 86건 전체 보기</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;border:1px solid #243049;border-radius:10px">
+    <table style="min-width:860px">
+      <thead><tr>
+        <th aria-sort="descending"><button type="button">시각 ▼</button></th>
+        <th><button type="button">슬롯</button></th>
+        <th><button type="button">분류</button></th>
+        <th><button type="button">ID</button></th>
+        <th><button type="button">Lifecycle 로그 원문</button></th>
+        <th><button type="button">어느 디스크</button></th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="nw mono">2026-11-03 02:14</td><td class="nw"><b>Disk 5</b></td><td><span class="tag bad">복구 불가</span></td><td class="mono">PDR46</td><td>Patrol Read found an uncorrectable media error on Disk 5 in Backplane 1 of Integrated RAID Controller 1.</td><td class="nw">현재 장착<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td></tr>
+        <tr><td class="nw mono">2026-10-12 03:40</td><td class="nw"><b>Disk 5</b></td><td><span class="tag fix">복구됨</span></td><td class="mono">PDR54</td><td>A disk media error on Disk 5 in Backplane 1 of Integrated RAID Controller 1 was corrected during recovery.</td><td class="nw">현재 장착<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td></tr>
+        <tr><td class="nw mono">2026-08-30 02:51</td><td class="nw"><b>Disk 5</b></td><td><span class="tag fix">복구됨</span></td><td class="mono">PDR54</td><td>A disk media error on Disk 5 in Backplane 1 of Integrated RAID Controller 1 was corrected during recovery.</td><td class="nw">현재 장착<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td></tr>
+        <tr><td class="nw mono">2024-11-20 11:06</td><td class="nw"><b>Disk 3</b></td><td><span class="tag pre">고장 예측</span></td><td class="mono">PDR16</td><td>Predictive failure reported for Disk 3 in Backplane 1 of Integrated RAID Controller 1.</td><td class="nw">교체 전 디스크<div class="muted" style="font-size:11.5px">시리얼은 로그에 없음</div></td></tr>
+        <tr><td class="nw mono">2024-09-18 04:22</td><td class="nw"><b>Disk 3</b></td><td><span class="tag bad">복구 불가</span></td><td class="mono">PDR47</td><td>A block on Disk 3 in Backplane 1 of Integrated RAID Controller 1 was punctured by the controller.</td><td class="nw">교체 전 디스크<div class="muted" style="font-size:11.5px">시리얼은 로그에 없음</div></td></tr>
+        <tr><td class="nw mono">2024-09-18 04:22</td><td class="nw"><b>Disk 3</b></td><td><span class="tag bad">복구 불가</span></td><td class="mono">PDR46</td><td>Patrol Read found an uncorrectable media error on Disk 3 in Backplane 1 of Integrated RAID Controller 1.</td><td class="nw">교체 전 디스크<div class="muted" style="font-size:11.5px">시리얼은 로그에 없음</div></td></tr>
+        <tr><td class="nw mono" style="border-bottom:none">2024-06-02 03:15</td><td class="nw" style="border-bottom:none"><b>Disk 3</b></td><td style="border-bottom:none"><span class="tag fix">복구됨</span></td><td class="mono" style="border-bottom:none">PDR54</td><td style="border-bottom:none">A disk media error on Disk 3 in Backplane 1 of Integrated RAID Controller 1 was corrected during recovery.</td><td class="nw" style="border-bottom:none">교체 전 디스크<div class="muted" style="font-size:11.5px">시리얼은 로그에 없음</div></td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+    <div style="font-size:13.5px;font-weight:700">기록이 있는 슬롯의 지금 디스크</div>
+    <div style="overflow-x:auto;border:1px solid #243049;border-radius:10px">
+    <table style="min-width:760px">
+      <thead><tr>
+        <th><button type="button">슬롯</button></th>
+        <th><button type="button">모델 · 시리얼</button></th>
+        <th><button type="button">현재 상태</button></th>
+        <th><button type="button">SMART 고장 예측</button></th>
+        <th><button type="button">이 디스크의 기록</button></th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="nw"><b>Disk 5</b></td><td>ST2400MM0159 · 2.4 TB SAS HDD<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td><td><span class="tag ok">정상 (OK)</span></td><td class="nw">아님</td><td><b style="color:#fca5a5">3건</b> — 상태는 정상으로 읽히지만 최근 3개월 사이 오류가 이어졌습니다</td></tr>
+        <tr><td class="nw" style="border-bottom:none"><b>Disk 3</b></td><td style="border-bottom:none">ST2400MM0159 · 2.4 TB SAS HDD<div class="muted mono" style="font-size:11.5px">S/N WBM3K7QL</div></td><td style="border-bottom:none"><span class="tag ok">정상 (OK)</span></td><td class="nw" style="border-bottom:none">아님</td><td style="border-bottom:none">0건 — 2025-01-15 교체 뒤로 기록 없음</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div style="border:1px solid #243049;border-radius:10px;background:rgba(59,130,246,.08);padding:10px 12px;font-size:12px;line-height:1.65;color:#cbd5e1">
+    <b>읽는 법</b> — 이 화면은 iDRAC Lifecycle 로그에 남아 있는 구간만 봅니다. 2023-03-14 이전에 있었던 일은 여기서 알 수 없습니다.
+    ‘어느 디스크’ 는 같은 슬롯의 제거·삽입 기록으로 나눈 것이라, 그 기록이 로그에 없으면 구분하지 못합니다.
+    찾은 기록은 포탈에 보관해, 나중에 iDRAC 로그가 덮어써져도 다음 조회에 그대로 보입니다.
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1640}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
