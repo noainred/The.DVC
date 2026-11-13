@@ -1399,7 +1399,108 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 /* v2.636: 전역 .input 의 min-width 220px 이 페이지로 옮긴 IP 스캔 설정의 2열 폼을 400px 에서 24px 밀어냈다
    (숫자 칸 width 90 도 220 으로 늘어나 있었다). IP관리 페이지 안에서만 풀고 칸 폭은 각 입력의 width 를 따른다. */
 .ipam-page .input { min-width: 0; max-width: 100%; }
-.ipam-ov-form .input { min-width: 0; max-width: 100%; }   /* v3.1.0: IP 관리상태 편집 창(400px — 전역 .input 220px 가 창 밖으로) */
+.ipam-ov-form .input { min-width: 0; max-width: 100%; }
+/* ── v3.4.0 IP 관리 재설계 묶음 가(설계 docs/design/ipam-redesign) — 탭 5개 · 현황 · 대역 목록/주소 맵 · 필터 한 줄 ──────────
+   색은 :root 토큰과 기존 .badge 의 rgba 톤이다. 새 hex 는 현황 '대역 사용률 지도' 의 파랑 5단뿐 — dataviz 검증 스크립트
+   (--ordinal --mode dark --surface #141b2d)로 단조 밝기 · 인접 단 차이 · 가장 어두운 단의 바탕 대비 2.19:1 통과. uppercase 쓰지 않는다. */
+.ipam-tabs { display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--border); overflow-x: auto; margin-bottom: 10px; min-width: 0; }
+.ipam-tab { display: inline-flex; align-items: center; gap: 7px; padding: 10px 16px; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--text-dim); font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.ipam-tab:hover { color: var(--text); }
+.ipam-tab.on { color: var(--text); border-bottom-color: var(--accent); }
+.ipam-tab-n { font-size: 11.5px; font-weight: 600; color: var(--text-dim); }
+.ipam-tab-adm { font-size: 10.5px; font-weight: 700; color: var(--text-dim); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; }
+.ipam-subtabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; min-width: 0; }
+.ipam-subtabs .tab { padding: 5px 11px; font-size: 12.5px; white-space: nowrap; }
+.ipam-subtabs .tab.active .ipam-dirty-dot { color: #fde68a; }
+
+.ipam-home { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ipam-home-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 14px; align-items: stretch; }
+.ipam-home-row > * { min-width: 0; }
+.ipam-home-card { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ipam-home-head { word-break: keep-all; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.ipam-home-head h2 { margin: 0; font-size: 14px; font-weight: 700; }
+.ipam-home-head .muted { font-size: 12px; }
+.ipam-link { margin-left: auto; background: none; border: 0; padding: 0; color: var(--accent-2); font: inherit; font-size: 12px; cursor: pointer; }
+.ipam-link:hover { text-decoration: underline; }
+.ipam-hero { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; }
+.ipam-hero-v { font-size: 52px; font-weight: 800; line-height: 1; letter-spacing: -.02em; }
+.ipam-split { display: flex; gap: 2px; height: 28px; min-width: 0; }
+.ipam-split span { display: flex; align-items: center; padding: 0 8px; border-radius: 4px; font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; min-width: 0; flex-basis: 0; }
+.ipam-split .used { background: #4783f0; color: #0b0b0b; }
+.ipam-split .free { background: var(--border); color: var(--text); }
+.ipam-split-lg { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--text-dim); }
+.ipam-split-lg b { color: var(--text); }
+.ipam-split-lg i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.ipam-split-lg i.used { background: #4783f0; }
+.ipam-split-lg i.free { background: var(--border); }
+.ipam-checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; }
+.ipam-check { display: flex; flex-direction: column; gap: 4px; word-break: keep-all; overflow-wrap: anywhere; padding: 12px 14px; background: none; border: 0; border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); margin: 0 -1px -1px 0; color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.ipam-check:hover:not(:disabled) { background: var(--hover); }
+.ipam-check:disabled { cursor: default; }
+.ipam-check .lb { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.ipam-check .v { font-size: 28px; font-weight: 800; line-height: 1.05; }
+.ipam-check .sub { font-size: 11.5px; color: var(--text-dim); }
+.ipam-chk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.ipam-chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 11px; border: 1px solid var(--border); border-radius: 999px; background: none; color: var(--text-dim); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.ipam-chip b { color: var(--text); }
+.ipam-chip:hover { border-color: var(--accent); color: var(--text); }
+.ipam-top { display: flex; flex-direction: column; margin: 0 -18px -6px; }
+.ipam-top-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 52px 54px; gap: 10px; align-items: center; padding: 6px 18px; background: none; border: 0; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.ipam-top-row:hover { background: var(--hover); }
+.ipam-top-row .r, .ipam-home .r { text-align: right; }
+.ipam-meter { display: block; height: 8px; border-radius: 4px; overflow: hidden; min-width: 0; background: rgba(59, 130, 246, .18); }
+.ipam-meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.ipam-meter.warn { background: rgba(245, 158, 11, .18); }
+.ipam-meter.warn i { background: var(--amber); }
+.ipam-meter.crit { background: rgba(239, 68, 68, .18); }
+.ipam-meter.crit i { background: var(--red); }
+.ipam-heat { display: grid; grid-template-columns: repeat(auto-fill, minmax(16px, 1fr)); gap: 2px; }
+.ipam-heat-c { aspect-ratio: 1; border: 0; border-radius: 3px; padding: 0; cursor: pointer; }
+.ipam-heat-c:hover, .ipam-heat-c:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+.ipam-heat-lg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 11.5px; color: var(--text-dim); }
+.ipam-heat-lg i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.ipam-heat .h0, .ipam-heat-lg .h0 { background: #2f4f96; }
+.ipam-heat .h1, .ipam-heat-lg .h1 { background: #3567c9; }
+.ipam-heat .h2, .ipam-heat-lg .h2 { background: #4783f0; }
+.ipam-heat .h3, .ipam-heat-lg .h3 { background: #7fb0ff; }
+.ipam-heat .h4, .ipam-heat-lg .h4 { background: #c4dcff; }
+.ipam-ev-list { display: flex; flex-direction: column; margin: 0 -18px; }
+.ipam-ev { display: grid; grid-template-columns: 112px 140px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 8px 18px; border-top: 1px solid var(--border-soft); font-size: 12.5px; }
+.ipam-home .mono, .ipam-range .mono, .ipam-ev .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.ipam-range { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; min-width: 0; }
+.ipam-netlist { flex: 1 1 260px; max-width: 320px; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.ipam-netlist-top { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.ipam-netlist-top .input { min-width: 0; width: 100%; }
+.ipam-netlist-rows { max-height: 70vh; overflow-y: auto; }
+.ipam-net { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; width: 100%; padding: 9px 12px; background: none; border: 0; border-top: 1px solid var(--border-soft); color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.ipam-net:hover { background: var(--hover); }
+.ipam-net.on { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
+.ipam-range-main { flex: 999 1 520px; min-width: 0; }
+.ipam-range-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-bottom: 10px; }
+.ipam-map-wrap { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.ipam-map-lg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-dim); }
+.ipam-map-lg b { color: var(--text); font-weight: 600; }
+.ipam-map-lg .ipam-mc { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; padding: 0; }
+.ipam-map { display: grid; grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 3px; max-width: 560px; }
+.ipam-map .ipam-mc { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-family: var(--mono); font-size: 10px; padding: 0; cursor: pointer; min-width: 0; overflow: hidden; }
+.ipam-map .ipam-mc:hover:not(:disabled), .ipam-map .ipam-mc:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+.ipam-mc { border: 1px solid transparent; color: var(--text); }
+.ipam-mc.used { background: rgba(34, 197, 94, .45); }
+.ipam-mc.scan { background: rgba(45, 212, 191, .35); }
+.ipam-mc.bad { background: var(--red); color: #fff; font-weight: 700; }
+.ipam-mc.rsv { background: rgba(245, 158, 11, .16); border-color: rgba(245, 158, 11, .6); color: #fcd34d; }
+.ipam-mc.dhcp { background: rgba(139, 155, 180, .2); color: var(--text-dim); }
+.ipam-mc.rel { background: rgba(245, 158, 11, .1); color: var(--text-dim); }
+.ipam-mc.free { background: transparent; border: 1px dashed var(--border); color: var(--text-dim); }
+.ipam-mc.nw { background: var(--panel-deep); color: var(--text-faint); cursor: default; }
+@media (max-width: 640px) { .ipam-map .ipam-mc { font-size: 0; } .ipam-netlist { max-width: none; } .ipam-netlist-rows { max-height: 240px; } }
+
+.ipam-filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; min-width: 0; }
+.ipam-filterbar .input { min-width: 0; }
+.ipam-fsel { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
+.ipam-fsel .select { max-width: 230px; }
+   /* v3.1.0: IP 관리상태 편집 창(400px — 전역 .input 220px 가 창 밖으로) */
 /* v2.991: IP 스캔 설정 폼 — 넓으면 '라벨 | 입력' 2열, 640px 이하는 라벨을 위로(1열). 400px 에서 라벨 칸(가장 긴 라벨 폭)이 절반을 차지해
    '호스트명 확인' 설명이 약 120px 폭에 세로로 늘어졌다(Chromium 판독). 트랙은 minmax(0,1fr) — v2.576 min-width 규약. */
 .ipscan-form { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 16px; row-gap: 14px; align-items: start; }

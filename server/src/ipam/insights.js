@@ -135,7 +135,7 @@ export function buildIpamInsights(snap, vcenterId = '', allowed = null) {
     'Telnet/RDP/SMB/DB 등 위험 포트가 열린 IP를 점검합니다.', { severity: risky.length ? 'warn' : 'info', items: topN(risky.map((r) => ({ label: `${r.ip}:${r.port}`, value: r.label }))) });
   add('services', '서비스/포트 맵', 'Device42', `${withPorts.length}개 IP에 포트`,
     '스캔으로 식별한 오픈 포트/서비스 분포(자산 식별).', { items: topN([...svcCount.entries()].sort((a, b) => b[1] - a[1]).map(([s, c]) => ({ label: s, value: `${c}개` }))) });
-  add('multihomed', '멀티홈 호스트', 'NetBox', `${multiHomed.length}개`,
+  add('multihomed', '복수IP 호스트', 'NetBox', `${multiHomed.length}개`,
     'IP를 2개 이상 가진 VM/호스트(NIC 다중) 목록.', { items: topN(multiHomed.map((r) => ({ label: r.ip, value: r.ownerName || '' }))) });
   add('dup-hostname', '중복 호스트명', 'Infoblox(DNS)', `${dupHosts.length}건`,
     '같은 호스트명이 여러 IP에 매핑된 경우(DNS/명명 충돌).', { severity: dupHosts.length ? 'warn' : 'info', items: topN(dupHosts.map((d) => ({ label: d.hostName, value: d.ips.join(', ') }))) });
