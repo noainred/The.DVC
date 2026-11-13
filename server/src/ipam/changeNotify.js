@@ -133,14 +133,14 @@ export function handleAlertState(ev) {
     const ip = k.slice('ipconflict:'.length);
     if (_openConflicts.has(ip)) continue;
     _openConflicts.add(ip);
-    add.push({ type: 'conflict', ip, vcenterId: f.alert?.vcenterId || '', note: f.alert?.detail || '', vm: (/\(([^)]*)\)\s*$/.exec(f.alert?.title || '') || [])[1] || '', notify: 'engine' });
+    add.push({ type: 'conflict', ip, agent: f.alert?.scanAgent || '', vcenterId: f.alert?.vcenterId || '', note: f.alert?.detail || '', vm: (/\(([^)]*)\)\s*$/.exec(f.alert?.title || '') || [])[1] || '', notify: 'engine' });
   }
   for (const r of Array.isArray(ev?.resolved) ? ev.resolved : []) {
     const k = String(r?.key || '');
     if (!k.startsWith('ipconflict:')) continue;
     const ip = k.slice('ipconflict:'.length);
     if (!_openConflicts.delete(ip)) continue;
-    add.push({ type: 'conflict-resolved', ip, vcenterId: r.alert?.vcenterId || '', notify: 'engine' });
+    add.push({ type: 'conflict-resolved', ip, agent: r.alert?.scanAgent || '', vcenterId: r.alert?.vcenterId || '', notify: 'engine' });
   }
   if (add.length) appendChanges(add, numOrNow(ev?.now));
   return add.length;

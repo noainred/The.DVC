@@ -65,6 +65,8 @@ const PURPOSES = {
   'os-scan.json': '실제 OS(게스트) 스캔 설정',
   'ipam-scan.json': 'IPAM 능동 스캔 설정',
   'ipam-scan-agents.json': 'IP 스캔 에이전트별 마지막 보고(시각·스캔 수·응답 수)',
+  'ipam-changes.json': 'IP 스캔이 본 변화 기록(새 미등록 IP · MAC 변경 · 충돌 의심 · 호스트명 변경 — 최근 5,000건 · 180일)',
+  'ipam-change-baseline.json': 'IP 스캔 대역 줄마다 첫 완료 스캔 시각(새 미등록 IP 판정의 기준선)',
   'ipam-vcrange-migration.json': 'vCenter 별 스캔 대역 → 에이전트 1회 이전 기록(v2.691 — 옮긴 곳·남긴 사유·백업 파일명)',
   'ipam-scan-history.json': 'IPAM 스캔 이력',
   'ipam-scan-results.json': 'IPAM 스캔 결과(최근)',

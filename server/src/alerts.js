@@ -303,8 +303,9 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
       for (const c of suspects) {
         const key = `ipconflict:${c.ip}`;
         if (unreadVc.has(String(c.vm.vcenterId)) || staleVc.has(String(c.vm.vcenterId))) { held.add(key); continue; }
-        out.push({ key, vcenterId: c.vm.vcenterId, severity: 'critical', title: `IP 충돌 의심: ${c.ip} (${c.vm.name || c.vm.id})`,
-          detail: `${c.vm.vcenterId} · VM 의 NIC MAC ${c.vmMacs.join(', ')} 이 아닌 ${c.mac}${c.vendor ? `(${c.vendor})` : ''} 이 연속 ${c.seen}회 응답 — 스캐너 ${c.agent || '—'} 의 이웃 표`
+        const scanner = !c.agent || c.agent === '__local__' ? '이 포탈' : c.agent;
+        out.push({ key, vcenterId: c.vm.vcenterId, scanAgent: c.agent || '__local__', severity: 'critical', title: `IP 충돌 의심: ${c.ip} (${c.vm.name || c.vm.id})`,
+          detail: `${c.vm.vcenterId} · VM 의 NIC MAC ${c.vmMacs.join(', ')} 이 아닌 ${c.mac}${c.vendor ? `(${c.vendor})` : ''} 이 연속 ${c.seen}회 응답 — 스캐너(${scanner})의 이웃 표`
             + `${c.otherVm ? ` · 그 MAC 은 다른 VM(${c.otherVm.name || c.otherVm.id}) 의 NIC 입니다` : ''} · 같은 IP 를 두 장비가 쓰거나 VM 의 IP 보고가 오래됐을 수 있습니다` });
       }
     }

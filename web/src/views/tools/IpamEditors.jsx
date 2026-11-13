@@ -137,7 +137,8 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
       </div>
       {err && <div className="login-error" style={{ marginBottom: 8, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{err}</div>}
       {loadWarn && <div className="muted" style={{ marginBottom: 8, fontSize: 12, color: 'var(--amber)' }}>{loadWarn}</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
+      {/* vNEXT: 400px 에서 전역 .input 최소 폭(220px)이 오른쪽 칸을 넘쳐 입력칸이 창 밖으로 잘렸다(Chromium 판독 — 기존 결함) — .ipam-page 와 같이 이 폼에서 푼다 */}
+      <div className="ipam-ov-form" style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
         <label style={L}>IP{isNew && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> (여러 개 가능)</span>}</label>
         {isNew
           ? (

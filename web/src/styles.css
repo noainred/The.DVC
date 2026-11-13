@@ -1397,6 +1397,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 /* v2.636: 전역 .input 의 min-width 220px 이 페이지로 옮긴 IP 스캔 설정의 2열 폼을 400px 에서 24px 밀어냈다
    (숫자 칸 width 90 도 220 으로 늘어나 있었다). IP관리 페이지 안에서만 풀고 칸 폭은 각 입력의 width 를 따른다. */
 .ipam-page .input { min-width: 0; max-width: 100%; }
+.ipam-ov-form .input { min-width: 0; max-width: 100%; }   /* vNEXT: IP 관리상태 편집 창(400px — 전역 .input 220px 가 창 밖으로) */
 /* v2.991: IP 스캔 설정 폼 — 넓으면 '라벨 | 입력' 2열, 640px 이하는 라벨을 위로(1열). 400px 에서 라벨 칸(가장 긴 라벨 폭)이 절반을 차지해
    '호스트명 확인' 설명이 약 120px 폭에 세로로 늘어졌다(Chromium 판독). 트랙은 minmax(0,1fr) — v2.576 min-width 규약. */
 .ipscan-form { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 16px; row-gap: 14px; align-items: start; }
