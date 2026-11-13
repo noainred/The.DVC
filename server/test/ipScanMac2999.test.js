@@ -401,10 +401,11 @@ test('⑥ /tools/ipam 제조사 · MAC 칸(스캔 행 · VM 행) · 범위 계�
   assert.equal(o.hist.scan.hw.kind, 'virtual');
   assert.equal(o.hist.history.macs[0].mac, '00:50:56:9A:11:04');
   const lines = String(o.csv).trim().split('\n');
-  assert.equal(lines[0], 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent,hostname_source,name_dns,name_mdns,name_netbios,netbios_group,mac,mac_src,mac_vendor');
-  assert.ok(lines.find((l) => l.startsWith('10.250.7.5,')).endsWith(',00:50:56:9A:11:04,arp,"VMware, Inc."'));
-  assert.ok(lines.find((l) => l.startsWith('10.250.7.6,')).endsWith(',00:1B:21:7A:44:10,netbios,Intel Corporate'));
-  assert.ok(lines.find((l) => l.startsWith('10.250.7.7,')).endsWith(',7A:3F:11:C0:5D:08,arp,'), '임의 지정 MAC 은 제조사를 쓰지 않는다');
+  // v3.2.0: 뒤에 dns_forward · dns_forward_addrs 가 더 붙었다(앞 열 순서 그대로 — 이 행들은 역DNS 이름이 없어 빈칸).
+  assert.equal(lines[0], 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent,hostname_source,name_dns,name_mdns,name_netbios,netbios_group,mac,mac_src,mac_vendor,dns_forward,dns_forward_addrs');
+  assert.ok(lines.find((l) => l.startsWith('10.250.7.5,')).endsWith(',00:50:56:9A:11:04,arp,"VMware, Inc.",,'));
+  assert.ok(lines.find((l) => l.startsWith('10.250.7.6,')).endsWith(',00:1B:21:7A:44:10,netbios,Intel Corporate,,'));
+  assert.ok(lines.find((l) => l.startsWith('10.250.7.7,')).endsWith(',7A:3F:11:C0:5D:08,arp,,,'), '임의 지정 MAC 은 제조사를 쓰지 않는다');
 });
 
 test('⑥ 디스크의 결과 파일 — 저장된 arp 를 정제해 읽고(꼴이 틀리면 버림 · miss 상한) 같은 MAC 색인을 다시 만든다(자식 프로세스)', () => {

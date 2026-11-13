@@ -30,6 +30,7 @@ export function IpamChanges() {
         IP 스캔이 끝날 때마다 지난 결과와 비교한 변화입니다. 알림을 끈 종류와 알리지 않을 에이전트의 변화도 남습니다.
         대역 줄의 첫 완료 스캔은 기준선이라 새 미등록 IP 로 세지 않고, 시한에 걸린 스캔은 비교하지 않습니다.
         충돌 의심은 VM 의 IP 에 그 VM 의 NIC 이 아닌 MAC 이 연속으로 응답한 경우입니다 — 스캐너는 한 번에 한 MAC 만 보므로 충돌이라고 단정하지 않습니다.
+        DNS 불일치는 역DNS 이름을 정방향으로 다시 물은 답이 알던 판정에서 다른 IP · 정방향 없음으로 바뀐 경우이고 알림 없이 기록만 합니다 — 지금 어긋난 IP 전부는 추천 › DNS 정합성 카드에 있습니다.
       </div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <button className={type === '' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setType('')}>전체 ({all.toLocaleString()})</button>
