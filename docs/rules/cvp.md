@@ -17,6 +17,8 @@
 - (원래 4634행) CVP 장비 목록 EOS 버전 칩 · 필터 연동 KPI(v2.652)
 - (원래 4639행) CVP 인터페이스 세부 정보(v2.649) — 설명은 설정 노드에서 부품 주기에 읽고, `null`(못 읽음)과 `''`(설명 없음)을 구분한다
 - (원래 4688행) CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다
+- (v2.922) 포트 드롭 열(in_drop/out_drop — 추정 경로) · 베어메탈 NIC 매핑·대조는 hostMatch 하나
+- (v2.935) EndpointLocation(MAC → 지금 배운 포트) — 404 는 본문으로 가르고, likelihood 가 낮은 위치 · 스위치 사이 포트는 업링크가 아니다
 
 ## 본문
 
@@ -117,3 +119,81 @@
   근거가 모자라면 상태를 바꾸지 않는다. ⚠ ecb 의 뜻·'slice 번호 = 라인카드 슬롯' 은 실장비 미확인 추정이다.
 
   · v2.769(점검 R4-D5-2): 비-admin 응답의 BGP 라벨은 피어를 통째 '(주소 가림)' 으로 바꾸고 VRF 만 남긴다(`maskBgpLabel` — IPv6 정규식으로 피어를 찾지 않는다). `maskErrText` 는 IPv6('::' 축약·콜론 7개)도 상한 있는 선형 정규식으로 가린다 — 세 응답(overview·device·faults) 전부.
+- **호스트 업링크 매칭(v2.920 — 설계 `docs/design/san-cvp-traffic/README.md` §4.2, A 단계)** — 판정은 `cvp/hostMatch.js`(순수 `matchUplinks`) 하나, 조회는
+  `cvp/db.js portsByDesc`(설명 LIKE 로 넉넉히 뽑고 토큰 경계는 순수 모듈이 판정), 라우트 `routes/api/hostSan.js GET /hosts/:id/net-uplinks`, 화면
+  `HostNetCvp.jsx`·`hostNetText.js`(네트워크 카드 NIC 표의 CVP 열 3개 + 업링크 블록). 회귀 `server/test/sanAttrib2920.test.js` ④ · 웹 `hostNetText.test.js`.
+  - **근거 없는 매칭을 만들지 않는다**: 근거 우선순위 LLDP(확정) → MAC 테이블(높음) → **포트 설명 일치(보통 — 지금 가능한 유일한 근거)** → 미매칭. 포탈 CVP 수집은
+    LLDP·MAC 테이블·discards 를 아직 읽지 않으므로(위 항목들) 매칭은 전부 '보통' 이고 화면이 그렇게 말한다. 설명의 호스트 이름은 **토큰 경계**로 본다(`esx01` ⊄ `esx010`),
+    MAC 은 콜론·하이픈·점·붙임 표기 전부. `vmnic0` 글자만으로는 호스트를 특정하지 않는다(어느 호스트나 vmnic0 이 있다). 같은 MAC 이 포트 3개 이상이면 '충돌' 로 표시만.
+  - 방향은 스위치 포트 기준 **In = 서버 송신 · Out = 서버 수신** — 응답 `direction` 과 화면 띠·열 이름이 말한다. 값 없음은 '—'(0 금지).
+    ✅ v2.923 정정: '드롭은 수집 전' 이었던 이 줄 — 드롭은 v2.922(3a)가 수집하고 v2.923(B-①)이 화면에 싣는다(아래 항목).
+  - 범위 계정은 그 호스트 법인의 CVP 서버 행만(`rowOwnerOf` + `datacenterId`), 범위 검사(404)가 도구 키 검사(403)보다 먼저다(존재 은닉).
+- ⚠ **v2.922(리눅스 성능 3a) — 포트 드롭 열 · 베어메탈 서버 NIC ↔ 포트 매핑은 hostMatch 하나**(`cvp/{parse,db,poller,push,hostMatch}.js` · `central/cvpEdge.js` · 회귀 `server/test/bmPerf2921Cvp.test.js`):
+  - `parseCounters` 후보에 `inDiscards/outDiscards`(필드 이름 **추정** — Arista 공식 경로 미확인) → `portDelta` 의 `inDrop/outDrop`(못 읽으면 null · 리셋 null). `port_latest/port_sample` 에 `in_drop/out_drop`,
+    `port_daily` 에 `in_drop_sum/out_drop_sum/in_drop_n/out_drop_n` — **ALTER 로 더한다**(`addPortDropCols` · 멱등 · 기존 행 null). 엣지 push 표본 행은 12칸(뒤 두 칸 드롭) — 구버전 엣지의 10칸 행은 드롭 null.
+    해시 키(push RATE_KEYS)·adopt 병합·portSeries·portsByDesc 에도 넣었다. ⚠ 정정(반증 D3): 31140f2a 는 **중앙 정제(sanitizeCvpBody)가 표본 행을 10칸으로 잘라**
+    드롭이 중앙에서 사라졌고(이 문장이 ‘정제에도 넣었다’ 고 잘못 적었다), 표본 적재(rateFromSample)가 장비 레코드의 드롭을 null 로 덮었다 — 지금은 12칸 행만 12칸으로 두고(구 엣지 10칸은
+    10칸), 10칸 표본은 port_latest 드롭을 덮지 않는다(rateFromSampleNoDrop). 회귀는 **실제 수신 라우트**(POST /api/central/cvp-data)로 `bmPerf2921CvpRecv.test.js`.
+  - 베어메탈 성능 화면의 포트 후보는 **v2.920 `hostMatch.matchUplinks` 를 재사용**한다(판정 두 벌 금지). 넓힌 것: `host.aliases`(서비스 태그) · 리눅스 NIC 이름(eno1·bond0 — 이름 단서와 함께일 때만 NIC 지목).
+    ⚠ 고친 결함: `descHasName` 이 구분자 있는 이름(`bm-kr1-db01` · `esx-01`)을 설명 토큰 하나와 비교해 **영원히 매칭하지 못했다** → 이름도 나눠 연속 토큰열로 비교(경계 규칙 유지).
+    ⚠ 반증 D7 보강(v2.922): 토큰열만 보면 ‘esx-01’ 이 ‘esx-01-b’·‘kr-esx-01’ 에 맞는 새 거짓 양성이 생겼다 → **하이픈·밑줄로 붙은 앞·뒤 토큰이 있으면 다른 호스트**로 본다
+    (뒤는 NIC·역할 접미사 `JOIN_OK_RE` — vmnicN·ethN·enoN·mgmt·uplink 등 — 만 허용, 앞은 연결어 `JOIN_PREFIX_OK_RE` — to·link·srv 등 — 만 허용 · 앞 연장은 후보로도 남기지 않는다) ·
+    여러 토큰 이름은 영숫자 3자 이상. 반증 36표본: 거짓 음성 0 · 거짓 양성 1(2자 이름 ‘10’ — hostMatchTerms 가 단서로 쓰지 않아 업링크 매칭에는 닿지 않음).
+    **v2.920 대비 행동 변화**(릴리스 노트): 구분자 있는 호스트 이름이 이제 매칭된다 · ‘esx01-b’·‘kr-esx01’ 처럼 붙어 이어진 다른 이름은 더 이상 매칭되지 않는다(예전엔 토큰 ‘esx01’ 이 있어 맞았다).
+  - PROFILES §10 매핑 출처: ① 수동 매핑 — v2.922 신규(`bmusage/portMap.js`) ② 포트 설명 매칭 — v2.920 hostMatch(가상화 호스트) 를 베어메탈로 확장 ③ LLDP · ④ MAC — **미구현**(경로 미확인).
+- **v2.923(SAN·CVP 설계 B-①) — 포트 드롭을 화면에 싣는다**(수집·저장·push·정제는 위 v2.922 3a 항목 그대로 — 같은 일을 두 벌로 만들지 않았다):
+  CVP 도구 장비 상세 포트 표·포트 사용량 표 ‘드롭(수/송)’ 열(`portUsage` 행에 `inDrop/outDrop`) · 호스트 상세 네트워크 카드 CVP 업링크 블록 KPI ‘업링크 에러/드롭 · 최근 24시간’ +
+  포트별 24시간 합. 24시간 합은 `db.portWindowSums`(원시 표본을 JS 로 더함 — 집계 함수 두 개를 한 문장에 쓰지 않는다)이고 **값이 있는 표본만** 더해 표본 수(`dropN/samples`)를
+  같이 준다 — 드롭 수집 전·구버전 엣지 10칸 표본은 빠진다(부분 합을 전체 합처럼 말하지 않는다). 데모 합성 포트·백필 행에도 드롭. 회귀 `server/test/cvpDropUi2923.test.js` · 웹 `hostNetText.test.js`.
+- **v2.924(SAN·CVP 설계 B-②) — LLDP 이웃 · MAC 테이블(FDB) → 호스트 업링크 매칭 ‘확정 · 높음’**(`cvp/{client,parse,db,poller,push,hostMatch}.js` · `central/cvpEdge.js cleanL2` ·
+  `routes/central.js` · `routes/api/hostSan.js` · 웹 `hostNetText.l2Text` · 데모 `mock/demo/cvp.js demoL2` · 회귀 `server/test/cvpL2924.test.js`):
+  - **경로·필드는 추정**(LLDP `/Sysdb/l2discovery/lldp/status/local/1/portStatus` · FDB `/Smash/bridging/status/smashFdbStatus` — docs/CVP.md 표). 부품 주기(30분)에만 읽고
+    `CVP_L2=false` 로 끈다. 경로 탐색 표본에 두 경로를 더했다. LLDP 는 링크가 올라온 포트만 따라가고 개체 이름은 포인터 경로 전체(포트 › remoteSystem › 번호 — 첫 조각이 로컬 포트).
+  - ⚠ **FDB 는 `entitiesOf` 로 읽지 않는다** — 항목 키가 `{fid, addr}` 복합 객체라 `updKey`(첫 스칼라 = VLAN)로 이름을 지으면 같은 VLAN 의 MAC 이 한 개체로 합쳐진다.
+    update 마다 값 + 키 객체를 함께 펼친다. 포트당 MAC 이 `FDB_PORT_MAX`(512)를 넘는 포트(스위치 사이 트렁크)는 버리고 `portsOverCap` 으로 밝힌다. 장비당 `FDB_MAX` 4096 · LLDP 512.
+  - 저장은 **장비마다 최신 한 벌**(`l2_fdb`·`l2_lldp`·`l2_meta` — 배열이면 교체 · 같은 내용 해시면 다시 쓰지 않음 · null(못 읽음)은 실패 시각만 · undefined 는 그대로).
+    장비 정리(pruneDevices)가 L2 행도 지운다. 엣지 이름 변형 모으기(adopt)는 L2 를 옮기지 않고 변형 행을 지운다(두 시각의 목록이 섞이지 않게 — 다시 보낸다).
+  - **엣지 push 는 바뀐 장비만**(메타 해시 · 전량 갱신 주기) 별도 배열 `l2` 로 보낸다. **중앙이 `saved.l2` 를 수로 답할 때만** 보낸 것으로 친다 — 구버전 중앙은 필드를 버리고
+    그 칸이 없으므로 `L2_UNSUPPORTED_HOLD_MS`(6시간) 동안 L2 를 싣지 않는다(매 주기 큰 본문을 헛보내지 않게). 새 중앙은 L2 가 없어도 `saved.l2 = 0` 을 준다.
+  - 매칭 근거 순위 **LLDP(확정) > MAC(높음 — 물리 NIC MAC 학습) > VM MAC(높음 — 그 포트 학습의 절반 이상이 이 호스트 VM vNIC, 2개 이상 또는 학습 1개뿐) > 포트 설명(보통)**.
+    포트 학습 수를 모르면 VM MAC 비율을 판정하지 않는다(트렁크일 수 있다). 한 포트가 여러 근거면 가장 강한 하나 + also. 판정 코어는 `hostMatch.matchL2 · mergeUplinks` 하나 —
+    베어메탈 성능 화면(PROFILES §10 ‘③ LLDP · ④ MAC — 미구현’)도 같은 함수를 쓰면 된다(두 벌 금지). ⚠ ESXi 는 표준 vSwitch 에서 LLDP 를 보내지 않는다(분산 스위치에서 켜야 한다).
+  - ⚠ **반증 1인(v2.924) 확정분 — 되돌리지 말 것**(재현 스크립트로 확인 · 회귀 `cvpL2924.test.js`):
+    · H-1 MAC 근거는 그 포트 학습의 **절반 이상이 이 호스트 것**(NIC MAC + VM MAC)일 때만 · 그 포트의 **LLDP 이웃이 다른 장비면 버림** · Vxlan·Vlan·Loopback·Management 는 보지 않음 —
+      vmk0(=vmnic0 MAC)을 MLAG peer 가 peer-link 에서 배워 스위치 사이 포트가 '높음' 업링크로 잡히고 호스트 송수신 합에 들어갔다(작은 법인은 포트당 512 상한 아래).
+    · M-1 매칭은 **그 호스트 법인의 CVP + 법인 미지정 CVP** 만(전체 범위 계정도) · LLDP 이름은 양쪽 다 도메인이 있으면 전체 이름 일치 — 다른 법인의 같은 짧은 이름이 '확정' 으로 붙었다.
+    · M-2 LLDP 추종 요청 상한 3배(`FOLLOW_REQ_MAX_BY_KIND`) · 잘리면 **부분 읽기**(`lldpPartial` — 읽은 포트만 바꾼다).
+    · M-3 종류마다 읽은 시각(`fdbAt`·`lldpAt` — push·중앙 저장 모두) · 업링크마다 근거 나이(`l2At`) · 3시간 넘으면 ‘오래됨’ · 수집 현황에 마지막 읽기 실패 수.
+    · L-1 push 가 장비마다 양보 · L-2/L-6 큰 L2 삭제는 COMMIT 밖 조각(chunkedDelete) · 중앙은 장비 레코드로 보고한 장비의 L2 만(`requireDevice`) · 고아 L2 는 prune 이 지운다.
+    · L-3 NIC MAC 과 VM MAC 을 따로 조회(상한 때문에 NIC 행이 빠졌다) · L-4 FDB 알림 시각 순 · 같은 키 마지막 값 · deletes(배열·맵) · L-7 `saved` 가 없는 답(noDelegation)은 구버전 중앙으로 보지 않는다 · 보류는 `_last.l2HeldUntil`.
+    · L-9 이웃 섀시 MAC 이 NIC MAC 이면 LLDP 일치(IP 로 알린 이웃) · NIC 목록이 없어도 portId 가 vmnicN 이면 그 이름.
+    · 남긴 것(정직): L-5 vMotion·유지보수 직후 30분 FDB 와 지금 VM 목록이 어긋나 VM MAC 근거가 옮겨 간 쪽 호스트에 잠깐 붙을 수 있다(근거 나이로만 드러난다) ·
+      L-8 FDB 응답이 본문 상한(BODY_MAX_BYTES 8MB)을 넘으면 그 장비는 매 주기 못 읽는다(사유가 남는다).
+- **v2.925(SAN·CVP 설계 B-③) — ESXi vmnic 드롭·에러와 같은 1시간 스위치 드롭을 나란히 · ‘어느 쪽 드롭’ 판정**(`vcenter/nicPerf.js`(순수) · `soapClient.js fetchHostNicStats` ·
+  `GET /hosts/:id/nic-stats`(`routes/api/vmMetrics.js`) · `cvp/db.js portWindowSums recentMs` · net-uplinks `hour` · 웹 `HostNicCounters.jsx`·`hostNicText.js` · 회귀 `server/test/esxiNic2925.test.js` · 웹 `hostNicText.test.js`):
+  - ESXi 쪽은 **주기 수집이 아니다** — 호스트 상세 ‘네트워크’ 카드의 버튼으로만 vCenter QueryPerf 를 instance ‘*’ 로 한 번(로그인 1회 · `net.{droppedRx,droppedTx,errorsRx,errorsTx,packetsRx,packetsTx}.summation`
+    · 실시간 20초 × 180 = 최근 1시간). 게이트는 형제 `/hosts/:id/metrics` 와 같다(inv.hosts · 범위 밖 404 · 인증 정지 vCenter 는 로그인하지 않음). 같은 호스트 동시 요청은 진행 중인 조회 하나를 함께 쓴다(캐시는 아니다).
+  - 집계 계열(instance '')·이름이 이상한 인스턴스는 버리고 vmnic 은 64개 상한. vCenter 결측(-1)은 0 으로 세지 않는다 — 값이 있는 표본만 더하고 결측이 섞이면 `partial`(화면 ‘(일부)’).
+    카탈로그에 없는 카운터는 `missingCounters` + 그 칸 null. ⚠ ‘실시간은 통계 레벨과 무관’ 은 VMware 문서 기준이고 실장비로 확인하지 못했다(계열이 비면 ‘—’ 와 안내).
+  - 스위치 쪽은 net-uplinks 의 `hour`(같은 원시 표본에서 최근 1시간 — `portWindowSums({ recentMs })`, `day` 모양은 그대로). 판정은 **방향 짝**:
+    서버 수신 = 스위치 Out 드롭 ↔ ESXi droppedRx · 서버 송신 = 스위치 In 드롭 ↔ ESXi droppedTx. 양쪽 값이 다 있을 때만 ‘ESXi 쪽 · 스위치 쪽 · 양쪽 · 드롭 없음’,
+    결측이 섞인 0 · 매칭 포트 없음/둘 이상은 ‘판정 보류’(한쪽에만 드롭이 보이면 그쪽 드롭만 말한다). 판정 코어는 웹 `hostNicText.sideVerdict` 하나.
+  - 데모는 `synthNicStats`(인벤토리 NIC 이 없으면 가상 스위치 업링크 이름) — 몇몇 호스트의 한 NIC 에만 수신 드롭.
+
+- **CVP EndpointLocation(v2.935 — 설계 `docs/design/san-cvp-traffic/README.md` §10, 회귀 `test/cvpEndpoint2935.test.js` · `cvpEpReview2935.test.js`)**
+  - 경로 · 필드는 공개 proto 기준 **추정**(`GET /api/resources/endpointlocation/v1/EndpointLocation?key.searchTerm=<MAC>` · 2021.1+ · 단건). 파서는 관용 — JSON 이 아니면 parsed:false(위치 없음과 구분).
+  - 404 는 본문으로 가른다(`endpoint.js notFoundKind`): 구체적 not found = 위치 없음, ‘Not Found’ 한 마디는 **답한 MAC 없이 8번 이어질 때만** 미지원(pNIC MAC 몇 개가 안 배워졌다고 CVP 전체를
+    미지원으로 적지 않는다). 연결 실패 · 401 · 403 이 3번 이어지면 그만 묻는다. 인증 정지 CVP 는 버튼으로도 로그인하지 않는다(`cvpAuthGuard`).
+  - 대상 고르기(`pickEndpointMacs`)는 셋 다 **오래전에 물은 것부터** · 호스트 몫 절반 — 스냅샷 순서로 고르면 같은 앞부분만 계속 묻는다(반증 M-1 재현).
+    **엣지에서는 법인 필터를 건너뛴다** — 법인 할당표(datacenters.json)는 중앙에만 있다(반증 H-1 — 엣지에서 묻는 MAC 이 0개였다).
+  - 업링크 근거(`hostMatch.matchEndpoint`): MAC 마다 가장 높은 likelihood 위치만 · 물리 아닌 인터페이스 · LLDP 이웃이 다른 장비인 포트 제외(B-② H-1 과 같은 방어).
+    VM 위치 판정은 net-uplinks 와 같은 호스트 업링크(LLDP 이름 규칙 + 위 규칙)로 하고, 위치 모르는 업링크 NIC 이 있거나 LAG 면 **판정 보류**(거짓 불일치 금지).
+  - 엣지 push 커서는 `ep_meta.seq`(쓸 때마다 늘어나는 순번) — 물어본 시각(at)으로 자르면 같은 at 경계 · 늦게 커밋된 작은 at 을 건너뛴다. 엣지 이름은 대소문자를 가리지 않는다(큐 · DB owners).
+  - 라우트: 범위 밖 404 → 도구 키 cvp 403 → 역할(admin · operator — `toolActorOf`, 인증 꺼짐도 익명 역할) → **쓰기 범위 밖 403**. 범위 계정 + 법인 미지정 vCenter = CVP 0대.
+    비-admin 의 오류 사유는 `maskErrText` 로 가린다. DB 를 못 읽으면 ‘아직 안 물음’ 이 아니라 ‘읽지 못함’. 주기 숫자 · 켜짐은 API 값(partsEveryMs · scan).
+  - v2.940(회귀 `test/sanCvpRest2940.test.js` ①②): 반증 L-10 — 엣지 시각이 수신 시각으로 잘리면 원본을 `ep_meta.edge_at` 에 따로 두고 VM 위치 카드가 '엣지 시계 +n분' 을 보인다.
+    주기 요약(`endpoints`)은 엣지 상태 정제(`cleanStatus`)가 아는 필드만 받아 넘기고(예전에는 버렸다) CVP 도구 서버 표 '위치 조회(주기)' 열이 보여 준다(못 읽은 수는 '—').
+  - v2.966(회귀 `test/cvpEpStartup2966.test.js` · 변이 3/3): 위치 조회 시각(`poller._epAt`)은 **부품 주기(`_partsAt`)와 따로** 센다. 예전에는 부품 주기에 묶여 기동 직후 첫 주기
+    (vCenter 첫 수집 전 — 인벤토리가 빔)에 묻는 MAC 이 0개인데도 그 주기를 '했다' 로 쳐서 다음 부품 주기(기본 30분)까지 위치 칸이 비었다. 이제 인벤토리가 비면(`inventoryReady`)
+    묻지도 소모하지도 않고, 부품 단계가 예산을 다 써 건너뛴 주기(`stopped:'budget'`)도 소모하지 않는다(다음 폴링은 부품 주기가 아니라 예산이 남는다 — 이 분기는 데모로 재현이 안 돼 테스트 밖).
+    인증 · 연결 멈춤은 소모한다(매 폴링 재시도로 두드리지 않게).

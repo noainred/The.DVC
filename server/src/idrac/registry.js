@@ -223,6 +223,15 @@ function normalize(body, existing = null) {
   return [entry, null, droppedSecrets];
 }
 
+/**
+ * 7b 온보딩 — 저장과 같은 규칙의 입력 검증(순수 · 단일 소스 — normalize 를 그대로 부른다). 통과면 null, 아니면 사유.
+ * 정규화한 host 도 돌려준다(분석이 기존 항목과 주소를 대조할 때 저장과 같은 꼴로 본다).
+ */
+export function idracInputIssue(body = {}, existing = null) {
+  const [entry, err] = normalize(body, existing);
+  return err ? { issue: err, host: '' } : { issue: null, host: entry.host };
+}
+
 export function addServer(body) {
   const list = loadRegistry();
   const [entry, err] = normalize(body);
@@ -242,6 +251,18 @@ export function updateServer(id, body) {
   list[idx] = entry;
   saveRegistry(list);
   return { ok: true, server: redact(entry), droppedSecrets };
+}
+
+/** 7b(감사 L-6): 여러 항목을 **한 번** 원자적으로 지운다(id 마다 쓰지 않는다). 등록부를 못 읽었으면 쓰지 않는다. 지운 id 목록. */
+export function removeServersBatch(ids = []) {
+  const list = loadRegistry();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', reason: 'iDRAC 등록부를 읽지 못해 지우지 않았습니다.' };
+  const drop = new Set((Array.isArray(ids) ? ids : []).map((x) => String(x)));
+  const removed = list.filter((s) => drop.has(String(s.id))).map((s) => s.id);
+  if (!removed.length) return { ok: true, removed: [] };
+  saveRegistry(list.filter((s) => !drop.has(String(s.id))));
+  dropDerivedCaches(removed);
+  return { ok: true, removed };
 }
 
 export function removeServer(id) {

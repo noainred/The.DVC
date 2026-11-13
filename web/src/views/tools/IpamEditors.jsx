@@ -62,6 +62,9 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
   const [reservedUntil, setReservedUntil] = useState(rowDay);
   const [loadedDay, setLoadedDay] = useState(rowDay);   // 폼을 연 시점의 저장값 — 바뀌지 않았으면 저장 본문에서 뺀다
   const [note, setNote] = useState(row.note || '');
+  // v3.1.0: 'MAC 변경 알림 제외' — 목록 행에는 값이 없다. 저장값을 읽은 뒤에만 알고(macLoaded), 바꿨을 때만 보낸다(못 읽었을 때 참을 거짓으로 덮지 않게).
+  const [macAlertOff, setMacAlertOff] = useState(false);
+  const [macLoaded, setMacLoaded] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [loadWarn, setLoadWarn] = useState(null);
@@ -78,7 +81,8 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
     let alive = true;
     fetchJson(`/tools/ipam/ip/${encodeURIComponent(row.ip)}`).then((r) => {
       if (!alive) return;
-      const o = r.override; if (!o) return;
+      const o = r.override; if (!o) { setMacLoaded(false); return; }
+      setMacLoaded(o.macAlertOff === true); setMacAlertOff((cur) => (cur === false ? o.macAlertOff === true : cur));
       setStatus(keep('status', o.status || '')); setOwner(keep('owner', o.owner || '')); setLabel(keep('label', o.label || ''));
       setDeviceType(keep('deviceType', o.deviceType || '')); setHostnameOverride(keep('hostnameOverride', o.hostnameOverride || ''));
       setClaimedVcenterId(keep('claimedVcenterId', o.claimedVcenterId || '')); setNote(keep('note', o.note || ''));
@@ -95,7 +99,8 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
   const bulk = ipList.length > 1;
   const invalidNote = isNew ? bulkInvalidText(split.invalid) : null;
   const fields = { status, owner, label, deviceType, hostnameOverride, claimedVcenterId, note,
-    ...reservedFieldForSave(reservedUntil, loadedDay, { always: isNew || bulk }) };
+    ...reservedFieldForSave(reservedUntil, loadedDay, { always: isNew || bulk }),
+    ...(macAlertOff !== (macLoaded ?? false) ? { macAlertOff } : {}) };
   const save = async () => {
     if (!ipList.length) { setErr('IP를 입력하세요.'); return; }
     if (invalidNote) { setErr(invalidNote); return; }
@@ -132,7 +137,8 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
       </div>
       {err && <div className="login-error" style={{ marginBottom: 8, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{err}</div>}
       {loadWarn && <div className="muted" style={{ marginBottom: 8, fontSize: 12, color: 'var(--amber)' }}>{loadWarn}</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
+      {/* v3.1.0: 400px 에서 전역 .input 최소 폭(220px)이 오른쪽 칸을 넘쳐 입력칸이 창 밖으로 잘렸다(Chromium 판독 — 기존 결함) — .ipam-page 와 같이 이 폼에서 푼다 */}
+      <div className="ipam-ov-form" style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
         <label style={L}>IP{isNew && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> (여러 개 가능)</span>}</label>
         {isNew
           ? (
@@ -172,6 +178,12 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
 
         <label style={L}>예약 만료일</label>
         <input className="input" type="date" value={reservedUntil} onChange={(e) => setReservedUntil(e.target.value)} style={{ width: 200, boxSizing: 'border-box' }} />
+
+        <label style={L}>MAC 변경 알림</label>
+        <label className="flex" style={{ alignItems: 'flex-start', gap: 8, fontSize: 13, minWidth: 0 }}>
+          <input type="checkbox" checked={macAlertOff} onChange={(e) => setMacAlertOff(e.target.checked)} style={{ marginTop: 3, flex: 'none' }} />
+          <span style={{ minWidth: 0 }}>이 IP 는 알리지 않음 <span className="muted" style={{ fontSize: 12 }}>(이중화 장비처럼 MAC 이 정상적으로 바뀌는 IP — IP 변화 기록은 계속합니다)</span></span>
+        </label>
 
         <label style={L}>비고</label>
         <textarea className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="상태 관련 한 줄 메모(상세 메모/태그는 목록의 '메모·태그' 사용)" style={{ resize: 'vertical', minHeight: 56, width: '100%', boxSizing: 'border-box' }} />

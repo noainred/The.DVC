@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>SAN 스토리지 — 400px 목록 · 상세</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.page{display:flex;flex-direction:column;gap:12px;padding:12px 16px 24px;min-width:0}
+.top{height:44px;background:rgba(12,17,30,.9);border-bottom:1px solid #1f2a40;opacity:.45;margin:0 -16px}
+h1{margin:0;font-size:18px;font-weight:800}
+.view{display:flex;border:1px solid #243049;border-radius:10px;overflow:hidden;background:#0f1626}
+.view a{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:38px;color:#8b9bb4;font-size:12.5px;font-weight:600;text-decoration:none;border-left:1px solid #243049;min-width:0}
+.view a:first-child{border-left:0}
+.view a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #34e0b4}
+.new{font-size:10px;font-weight:800;color:#04201a;background:#34e0b4;border-radius:999px;padding:1px 6px}
+.live{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;border:1px solid #243049;background:#0f1626;font-size:11.5px;color:#8b9bb4;flex-wrap:wrap}
+.live b{color:#e6edf6;font-weight:600}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;background:#34e0b4;box-shadow:0 0 0 4px rgba(52,224,180,.15)}
+.kpis{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:8px;min-width:0}
+.kpi{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.kpi .lb{font-size:11.5px;font-weight:600;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:22px;font-weight:700;line-height:1.05;white-space:nowrap}
+.kpi .v small{font-size:11px;font-weight:600;color:#8b9bb4;margin-left:3px}
+.kpi .m{font-size:11px;color:#5d6b85;overflow-wrap:anywhere}
+.seg{display:flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626;flex-wrap:wrap}
+.seg button{flex:1 0 auto;height:30px;padding:0 10px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#34e0b4;color:#04201a;font-weight:700}
+.seg.blue button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;border:1px solid #243049;background:#0f1626;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;white-space:nowrap;flex:none}
+.chip.on{border-color:#34e0b4;background:rgba(52,224,180,.08);color:#e6edf6}
+.row{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0;color:inherit;text-decoration:none}
+.row.warn{box-shadow:inset 3px 0 0 #f59e0b}.row.bad{box-shadow:inset 3px 0 0 #ef4444}
+.row .h{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0}
+.row .name{font-weight:700;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;min-width:0}
+.row .sub{font-size:11px;color:#5d6b85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .now{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:18px;font-weight:700;color:#34e0b4;white-space:nowrap}
+.row .g{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;font-size:11.5px;color:#8b9bb4}
+.row .g b{color:#e6edf6;font-weight:600;font-family:"JetBrains Mono",ui-monospace,monospace}
+.vend{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;font-size:10.5px;font-weight:700;flex:none}
+.vend.pmax{background:rgba(57,135,229,.2);color:#9cc4f5}.vend.pstore{background:rgba(217,89,38,.2);color:#f4a988}.vend.unity{background:rgba(25,158,112,.22);color:#7fdcb9}
+.tag{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;font-size:10.5px;font-weight:700;white-space:nowrap;flex:none}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.bar{display:flex;align-items:center;gap:8px}
+.bar .tr{flex:1;height:6px;border-radius:999px;background:#0f1626;overflow:hidden}
+.bar .tr span{display:block;height:100%;border-radius:999px;background:#3b82f6}
+.bar .pct{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;width:40px;text-align:right}
+.spark{display:block;width:100%;height:26px}
+.sep{height:1px;background:#1f2a40;margin:8px -16px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.card h4{margin:0;font-size:13.5px;font-weight:700}
+.plot svg{display:block;width:100%;height:auto}
+.plot svg text{font-family:"JetBrains Mono",ui-monospace,monospace;fill:#8b9bb4;font-size:10px}
+.legend{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px;color:#8b9bb4}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.dir{background:#0f1626;border:1px solid #243049;border-radius:10px;padding:10px 12px;display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center}
+.dir b{display:flex;align-items:center;gap:8px;font-size:13px}
+.dir b i{display:inline-block;width:10px;height:10px;border-radius:2px}
+.dir .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:700;font-size:15px;text-align:right}
+.dir .m{grid-column:1 / -1;font-size:11px;color:#8b9bb4;display:flex;justify-content:space-between;gap:8px}
+.win{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;height:30px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;white-space:nowrap}
+.slider{flex:1;min-width:120px;height:6px;border-radius:999px;background:#0f1626;position:relative}
+.slider span{position:absolute;right:0;top:-5px;width:16px;height:16px;border-radius:50%;background:#3b82f6;border:2px solid #0a0e17}
+.note{font-size:11.5px;color:#8b9bb4;line-height:1.55}
+.note b{color:#e6edf6}
+.tbl{overflow-x:auto;margin:0 -14px;padding:0 14px}
+table{min-width:520px;border-collapse:collapse}
+th{font-size:11px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:6px 8px;border-bottom:1px solid #1f2a40;font-size:12px;white-space:nowrap}
+.r{text-align:right}
+.lbl{font-size:11px;letter-spacing:.14em;color:#5d6b85;font-family:"JetBrains Mono",ui-monospace,monospace;margin-top:6px}
+</style>
+</helmet>
+<div class="page" style="width: 400px">
+  <div class="top"></div>
+  <div class="lbl">④-a 목록 · 400px</div>
+  <h1>SAN 스위치 모니터링</h1>
+  <nav class="view" aria-label="보기"><a href="#">스위치</a><a href="#" class="on" aria-current="page">스토리지 <span class="new">NEW</span></a></nav>
+  <div class="live"><span class="dot"></span><b>실시간</b> 마지막 표본 1분 전 · 주기 5분 · 60초마다 다시 읽음</div>
+  <div class="kpis">
+    <div class="kpi"><div class="lb">지금 합계</div><div class="v" style="color:#34e0b4">64.1<small>Gb/s</small></div><div class="m">24시간 평균보다 12% 높음</div></div>
+    <div class="kpi"><div class="lb">회선 사용률(합)</div><div class="v">9.8<small>%</small></div><div class="m">속도 모르는 포트 2 제외</div></div>
+    <div class="kpi"><div class="lb">편중</div><div class="v" style="color:#fcd34d">2<small>건</small></div><div class="m">디렉터 · 컨트롤러</div></div>
+    <div class="kpi"><div class="lb">측정 없음 · 미보고</div><div class="v" style="color:#fca5a5">2<small>대</small></div><div class="m">합계에 넣지 않음</div></div>
+  </div>
+  <div class="chips"><button class="chip on" type="button">전체 9</button><button class="chip" type="button">KR1 3</button><button class="chip" type="button">PL1 2</button><button class="chip" type="button">USE 1</button><button class="chip" type="button">JP1 1</button><button class="chip" type="button">DE1 1</button><button class="chip" type="button">SG1 1</button></div>
+  <div class="seg blue" role="group" aria-label="정렬"><button class="on" type="button">지금</button><button type="button">사용률</button><button type="button">24시간 대비</button><button type="button">편중</button></div>
+
+  <a class="row" href="#">
+    <div class="h"><span class="name"><span class="vend pmax">PowerMax</span>PMAX-KR1-01</span><span class="now">20.7 Gb/s</span></div>
+    <div class="sub">KR1 · 8000 · FA 4 · 포트 4/4 · 32G · 용량 68%</div>
+    <div class="bar"><div class="tr"><span style="width:8.1%"></span></div><span class="pct">8.1%</span></div>
+    <svg class="spark" viewBox="0 0 360 26" role="img" aria-label="최근 1시간"><polyline fill="none" stroke="#3b82f6" stroke-width="1.6" points="0,18 24,17 48,15 72,16 96,12 120,13 144,10 168,11 192,9 216,12 240,8 264,9 288,7 312,8 336,6 360,7"/></svg>
+    <div class="g"><span>24시간 평균 / 피크</span><b>21.0 / 28.5</b><span>7일 대비</span><b style="color:#fcd34d">▲ 9%</b></div>
+  </a>
+  <a class="row warn" href="#">
+    <div class="h"><span class="name"><span class="vend pstore">PowerStore</span>PSTORE-KR1-02</span><span class="now">12.9 Gb/s</span></div>
+    <div class="sub">KR1 · 1200T · Node 2 · 포트 2/2 · 32G · 용량 54%</div>
+    <div class="bar"><div class="tr"><span style="width:10.1%"></span></div><span class="pct">10.1%</span></div>
+    <div class="g"><span>24시간 평균 / 피크</span><b>9.8 / 21.2</b><span>상태</span><span class="tag warn">편중 · Node A 1.7×</span></div>
+  </a>
+  <a class="row" href="#">
+    <div class="h"><span class="name"><span class="vend unity">Unity</span>UNITY-USE-01</span><span class="now">7.3 Gb/s</span></div>
+    <div class="sub">USE · 480F · SP 2 · 포트 2/2 · 16G · 엣지 3분 전</div>
+    <div class="bar"><div class="tr"><span style="width:11.4%"></span></div><span class="pct">11.4%</span></div>
+    <div class="g"><span>24시간 평균 / 피크</span><b>6.0 / 12.1</b><span>7일 대비</span><b style="color:#fcd34d">▲ 6%</b></div>
+  </a>
+  <a class="row bad" href="#" style="opacity:.85">
+    <div class="h"><span class="name"><span class="vend unity">Unity</span>UNITY-DE1-01</span><span class="now" style="color:#8b9bb4">—</span></div>
+    <div class="sub">DE1 · XT 380 · SP 2 · 포트 1/1 · 용량 73%</div>
+    <div class="g"><span>상태</span><span class="tag crit">엣지 미보고 · edge-de1</span></div>
+  </a>
+  <div class="note">그 밖 5대 … · 호스트(HBA)로 분류된 68개는 표에 없음 — <a href="#">보기</a></div>
+
+  <div class="sep"></div>
+  <div class="lbl">④-b 상세 · 400px</div>
+  <div class="muted" style="font-size:12px"><a href="#">← 스토리지 목록</a></div>
+  <h1 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="vend pmax">PowerMax</span>PMAX-KR1-01 <span class="tag ok">정상</span></h1>
+  <div class="note">S/N <b class="mono">000197900123</b> · KR1 · SW-KR1-A1 · B1 · 포트 8 · FA 4 · 용량 <b>68%</b> <a href="#">열기 ↗</a></div>
+  <div class="seg" role="group" aria-label="기간"><button type="button">1시간</button><button class="on" type="button">24시간</button><button type="button">7일</button><button type="button">30일</button><button type="button">90일</button><button type="button">1년</button></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><div class="seg blue" role="group" aria-label="기준" style="flex:1"><button class="on" type="button">평균</button><button type="button">피크</button></div><div class="seg blue" role="group" aria-label="묶음" style="flex:2"><button type="button">합계</button><button class="on" type="button">디렉터별</button><button type="button">팹 A·B</button><button type="button">포트별</button></div></div>
+  <div class="kpis">
+    <div class="kpi"><div class="lb">지금</div><div class="v" style="color:#34e0b4">20.7<small>Gb/s</small></div><div class="m">회선 8.1% / 256</div></div>
+    <div class="kpi"><div class="lb">24시간 평균</div><div class="v">21.0<small>Gb/s</small></div><div class="m">94/96칸 · 부분 합 2 제외</div></div>
+    <div class="kpi"><div class="lb">최고</div><div class="v">28.5<small>Gb/s</small></div><div class="m">13:00 칸 · 피크 41.2</div></div>
+    <div class="kpi"><div class="lb">7일 대비</div><div class="v" style="color:#fcd34d">▲ 9<small>%</small></div><div class="m">지난 7일 하루 평균 19.3</div></div>
+  </div>
+  <div class="card">
+    <h4>처리량 추이 — 디렉터별 쌓기 <span class="muted" style="font-weight:500;font-size:11.5px">15분 평균 · Gb/s</span></h4>
+    <div class="plot">
+      <svg viewBox="0 0 400 230" role="img" aria-label="24시간 디렉터별 쌓기 차트(400px)">
+        <g stroke="#1f2a40"><line x1="28" y1="200" x2="392" y2="200"/><line x1="28" y1="140" x2="392" y2="140"/><line x1="28" y1="80" x2="392" y2="80"/><line x1="28" y1="20" x2="392" y2="20"/></g>
+        <g text-anchor="end"><text x="22" y="204">0</text><text x="22" y="144">10</text><text x="22" y="84">20</text><text x="22" y="24">30</text></g>
+        <rect x="248" y="10" width="30" height="190" fill="#243049" opacity=".55"/>
+        <path fill="#3987e5" fill-opacity=".85" d="M28,174 L58,175 L88,176 L118,178 L148,178 L178,177 L208,176 L238,174 L238,200 L28,200 Z M288,170 L318,166 L348,164 L378,168 L392,172 L392,200 L288,200 Z"/>
+        <path fill="#d95926" fill-opacity=".85" d="M28,148 L58,154 L88,156 L118,158 L148,158 L178,156 L208,152 L238,148 L238,174 L208,176 L178,177 L148,178 L118,178 L88,176 L58,175 L28,174 Z M288,142 L318,130 L348,128 L378,136 L392,146 L392,172 L378,168 L348,164 L318,166 L288,170 Z"/>
+        <path fill="#199e70" fill-opacity=".85" d="M28,118 L58,128 L88,132 L118,134 L148,134 L178,128 L208,122 L238,116 L238,148 L208,152 L178,156 L148,158 L118,158 L88,156 L58,154 L28,148 Z M288,108 L318,90 L348,84 L378,98 L392,116 L392,146 L378,136 L348,128 L318,130 L288,142 Z"/>
+        <path fill="#c98500" fill-opacity=".85" d="M28,86 L58,102 L88,108 L118,112 L148,112 L178,102 L208,92 L238,84 L238,116 L208,122 L178,128 L148,134 L118,134 L88,132 L58,128 L28,118 Z M288,70 L318,46 L348,38 L378,58 L392,84 L392,116 L378,98 L348,84 L318,90 L288,108 Z"/>
+        <line x1="28" y1="74" x2="392" y2="74" stroke="#8b9bb4" stroke-dasharray="4 4"/>
+        <g text-anchor="middle"><text x="28" y="222">17:00</text><text x="148" y="222">01:00</text><text x="268" y="222">09:00</text><text x="392" y="222">17:00</text></g>
+      </svg>
+    </div>
+    <div class="legend"><span><i style="background:#3987e5"></i>FA-1D</span><span><i style="background:#d95926"></i>FA-2D</span><span><i style="background:#199e70"></i>FA-3D</span><span><i style="background:#c98500"></i>FA-4D</span><span>┄ 평균 21.0</span><span><i style="background:#243049"></i>부분 합</span></div>
+    <div class="win"><button class="btn" type="button">◀ 이전</button><div class="slider" role="slider" aria-label="구간 이동" aria-valuemin="0" aria-valuemax="30" aria-valuenow="0" tabindex="0"><span></span></div><button class="btn" type="button" disabled>다음 ▶</button></div>
+    <div class="note">11-07 17:00 ~ 11-08 17:00 · 최신 · 눌러서 값 보기(마우스 오버 상자는 터치에서 탭)</div>
+  </div>
+  <div class="card">
+    <h4>디렉터별 — FA 4 <span class="tag ok" style="margin-left:6px">편중 없음</span></h4>
+    <div class="dir"><b><i style="background:#3987e5"></i>FA-1D</b><span class="v">3.8</span><span class="m"><span>A1:12 · B1:12</span><span>피크 7.9 · 회선 5.6% · 0.72×</span></span></div>
+    <div class="dir"><b><i style="background:#d95926"></i>FA-2D</b><span class="v">4.9</span><span class="m"><span>A1:13 · B1:13</span><span>피크 9.8 · 회선 7.7% · 0.93×</span></span></div>
+    <div class="dir"><b><i style="background:#199e70"></i>FA-3D</b><span class="v">5.8</span><span class="m"><span>A1:14 · B1:14</span><span>피크 11.4 · 회선 9.1% · 1.10×</span></span></div>
+    <div class="dir"><b><i style="background:#c98500"></i>FA-4D</b><span class="v">6.5</span><span class="m"><span>A1:15 · B1:15</span><span>피크 12.1 · 회선 10.2% · 1.25×</span></span></div>
+    <div class="note">값 = 24시간 평균 Gb/s · 배수 = 디렉터 평균 대비(1.4배 이상이면 편중)</div>
+  </div>
+  <div class="card">
+    <h4>포트 8 <span class="muted" style="font-weight:500;font-size:11.5px">· 표는 가로로 넘깁니다</span></h4>
+    <div class="tbl"><table aria-label="포트별 사용량">
+      <thead><tr><th>디렉터</th><th>어레이 포트</th><th>스위치</th><th>포트</th><th class="r">지금</th><th class="r">평균 / 피크</th><th class="r">피크 포화도</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">FA-1D</td><td class="mono">FA-1D:4</td><td>SW-KR1-A1</td><td class="mono">12</td><td class="r mono">1.7</td><td class="r mono">1.9 / 4.1</td><td class="r mono">12.8%</td></tr>
+        <tr><td class="mono">FA-1D</td><td class="mono">FA-1D:5</td><td>SW-KR1-B1</td><td class="mono">12</td><td class="r mono">1.9</td><td class="r mono">1.9 / 3.8</td><td class="r mono">11.9%</td></tr>
+        <tr><td class="mono">FA-2D</td><td class="mono">FA-2D:4</td><td>SW-KR1-A1</td><td class="mono">13</td><td class="r mono">2.4</td><td class="r mono">2.5 / 5.0</td><td class="r mono">15.6%</td></tr>
+        <tr><td colspan="7" class="faint">… 5행 더</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <h4>어레이가 보고하는 디렉터 성능 <span class="tag ok" style="margin-left:6px">최신 15분 · 4분 전</span></h4>
+    <div class="dir"><b><i style="background:#3987e5"></i>FA-1D</b><span class="v">40%</span><span class="m"><span>18,400 IOPS · 410 MB/s</span><span>0.9 / 1.4 ms · 큐 12%</span></span></div>
+    <div class="dir"><b><i style="background:#d95926"></i>FA-2D</b><span class="v">47%</span><span class="m"><span>22,100 IOPS · 520 MB/s</span><span>1.0 / 1.5 ms · 큐 15%</span></span></div>
+    <div class="dir"><b><i style="background:#199e70"></i>FA-3D</b><span class="v">54%</span><span class="m"><span>25,600 IOPS · 610 MB/s</span><span>1.1 / 1.7 ms · 큐 19%</span></span></div>
+    <div class="dir"><b><i style="background:#c98500"></i>FA-4D</b><span class="v">60%</span><span class="m"><span>28,900 IOPS · 690 MB/s</span><span>1.2 / 1.9 ms · 큐 23%</span></span></div>
+    <div class="note">busy % 가 큰 숫자 · 주의 70% · 이상 85%(설정값) · 보고 대조: 2,230 MB/s ≈ 17.8 Gb/s ↔ 스위치 20.7 Gb/s(차이 14%)</div>
+  </div>
+  <div class="note" style="color:#5d6b85">요일 × 시간 히트맵은 400px 에서 가로로 넘깁니다(24칸 유지 · 칸 12px). 상단 알약(해상도 · 읽은 시각)은 한 줄로 접힙니다.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":2560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -28,11 +28,19 @@ const OP_CONCURRENCY = 2;
 let timer = null;
 let running = false;
 let _last = null;
+// v2.977(전체 점검 — 재현 · audits.md '별건' 이던 것): 마지막 실패는 따로 10분 남긴다 — 5초마다 도는 빈 인출 틱이 `_last` 를 ok 로 덮어
+//   회신 실패가 엣지 로그에서 곧바로 사라졌다(bareosOpWorker G18 과 같은 모양 · 같은 고침).
+let _lastError = null;
+const ERROR_KEEP_MS = 10 * 60_000;
+const noteError = (msg) => { _lastError = { at: Date.now(), error: msg }; };
 const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 
 /** 마지막 실행 결과 — edgelog/spec.js 가 화면에 싣는다. 비밀은 담지 않는다. */
-export function veeamRunWorkerStatus() { return { pollMs: POLL_MS, ..._last }; }
+export function veeamRunWorkerStatus() {
+  const recentError = _lastError && Date.now() - _lastError.at < ERROR_KEEP_MS ? { lastError: _lastError } : {};
+  return { pollMs: POLL_MS, ..._last, ...recentError };
+}
 
 function headers() {
   return { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -45,11 +53,16 @@ export function localServerIssue(server, agentName = config.agent.name) {
   return null;
 }
 
-async function postResult(id, result) {
+async function postResult(id, result, kind = '') {
   let r;
   try { r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/veeam-run-result`, config.agent.name), { method: 'POST', headers: headers(), body: JSON.stringify({ id, result }), timeoutMs: 30_000, retries: 2 }); }
   catch (e) { return `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; }
-  if (r.ok) return null;
+  if (r.ok) {
+    // 중앙이 모르는 작업(시한으로 닫았거나 중앙이 재시작)이면 결과가 반영되지 않았다 — Veeam 에 실제로 실행한(상태를 바꾼) 작업이면 조용히 넘기지 않는다(bareos G15 와 같은 규칙)
+    let b = null; try { b = await r.json(); } catch { b = null; }
+    if (b?.stale && MUTATING.has(kind) && result?.ok) return `중앙이 ${kind} 결과를 받지 않았습니다(시한이 지났거나 중앙이 재시작) — 이 엣지가 Veeam 에 실행한 작업이 포탈에 반영되지 않았을 수 있습니다(Veeam 콘솔에서 확인)`;
+    return null;
+  }
   let reason = '';
   try { const b = await r.json(); reason = String(b?.reason || '').slice(0, 200); } catch { /* 본문 없음 */ }
   return `결과 회신 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
@@ -80,13 +93,14 @@ export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
   try {
     let r;
     try { r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/veeam-run-ops`, config.agent.name), { headers: headers(), timeoutMs: 15_000, retries: 1 }); }
-    catch (e) { const msg = `인출 실패 — ${String(e?.message || e).slice(0, 200)}`; _last = { at: Date.now(), ok: false, error: msg }; if (_logChange('인출', msg)) console.warn(`[veeam-run-agent] ${msg}`); return null; }
+    catch (e) { const msg = `인출 실패 — ${String(e?.message || e).slice(0, 200)}`; _last = { at: Date.now(), ok: false, error: msg }; noteError(msg); if (_logChange('인출', msg)) console.warn(`[veeam-run-agent] ${msg}`); return null; }
     const receivedAt = Date.now();
     if (!r.ok) {
       let reason = '';
       try { const b = await r.json(); reason = String(b?.reason || '').slice(0, 200); } catch { /* */ }
       const msg = `인출 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
       _last = { at: Date.now(), ok: false, error: msg, status: r.status };
+      noteError(msg);
       if (_logChange('인출', msg)) console.warn(`[veeam-run-agent] ${msg}`);
       return null;
     }
@@ -99,9 +113,10 @@ export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
     await poolRun(ops, OP_CONCURRENCY, async (op) => {
       const res = await runEdgeOp(op, { receivedAt, fetchImpl });
       console.log(`[veeam-run-agent] ${op.kind} → ${op.serverId}: ${res.ok ? '성공' : `${res.unknown ? '결과 모름' : res.notSent ? '보내지 않음' : '실패'} — ${String(res.reason || '').slice(0, 160)}`}`);
-      postErr = (await postResult(op.id, res)) || postErr;
+      postErr = (await postResult(op.id, res, op.kind)) || postErr;
     });
     _last = postErr ? { at: Date.now(), ok: false, ops: ops.length, error: postErr } : { at: Date.now(), ok: true, ops: ops.length };
+    if (postErr) noteError(postErr);
     if (postErr && _logChange('회신', postErr)) console.warn(`[veeam-run-agent] ${postErr}`);
     return _last;
   } finally { running = false; }

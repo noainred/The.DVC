@@ -19,15 +19,32 @@
  * ⚠ 마운트 경로는 `bmstor/collect.js sanitizeMounts` 를 **반드시** 통과한 것만 명령에 넣는다
  *   (명령 주입 방어 — 그 함수가 단일 소스다).
  */
-import { withSsh } from '../../proxy/sshExec.js';
+import { withSsh, EXEC_MAX_OUTPUT } from '../../proxy/sshExec.js';
 import { sanitizeMounts, parseDfOutput } from '../../bmstor/collect.js';
-import { splitSections, parseProcStat, parseMemInfo, parseDiskstats, parseNetDev, parseNetInfo, parseFcHosts, parseClkTck } from '../parse/linuxProc.js';
+import {
+  splitSections, parseProcStat, parseMemInfo, parseDiskstats, parseNetDev, parseNetInfo, parseFcHosts, parseClkTck,
+  readSection, parseProcStatFull, parseLoadavg, parsePsi, parseVmstat, parseSnmpTcp, parseBlkq, parseSysctl, parseHugePages, parseIrq, parseDfInodes,
+  SYSCTL_PATHS, MAX_CORES, MAX_BLKQ, MAX_IRQ_LINES, BLKQ_SHELL_LINES,
+} from '../parse/linuxProc.js';
+import { FACT_SHELL, FACT_SECTIONS, FACT_LINE_CAP, FACT_LINE_BYTES, parseOsRel, parseUnits, parsePorts, parseProcs, parseAccts, parseKargs, parseSoftnet, parseNetq, parseXfs } from '../parse/linuxFacts.js'; // v2.923: 4단계 용도 감지 · 튜닝 사실
+import { HEALTH_SHELL, HEALTH_SECTIONS, HEALTH_LINE_CAP, HEALTH_LINE_BYTES, parseChrony, parseDmesgCounts, parseChanges } from '../parse/linuxHealth.js'; // v2.929(5단계): 점검 소모품 · 변경 이벤트
+import { topCommand, readTopOutput, TOP_EXEC_TIMEOUT_MS } from '../parse/linuxTop.js'; // 8b단계: 프로세스 Top-N — 같은 세션의 별도 exec(반증 F1 — 주 명령 밖)
+import { planWindow, peakCommand, parsePeakOutput, computePeaks, PEAK_OVERHEAD_MS } from '../peakWindow.js'; // v2.922: 피크 A 안
+import { samplerCommand, parseSamplerFile, SAMPLER_MAX_LINES } from '../samplerSpec.js'; // v2.922: 피크 B 안(수거 자리만)
 import { parseWinPerf } from '../parse/winPerf.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 
 // v2.605(TIM2605-04): 음수·2^31 초과 env 가 즉시 타임아웃이 되지 않게 [1초, 10분] 으로 정규화한다(agent/envTimeout.js).
 const READY_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_SSH_TIMEOUT_MS, 15_000);
-const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_CMD_TIMEOUT_MS, 30_000);
+export const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_CMD_TIMEOUT_MS, 30_000);
+/**
+ * ⚠⚠ 8b 반증 F1(8b 이전부터의 결함 — 4 · 5단계): 주 명령 **안** 구획 timeout(systemctl · chronyc · dmesg · needs-restarting · dnf …)의 최악 합 + 이 여유 ≤ CMD_TIMEOUT_MS.
+ *   합이 시한보다 크면 ‘한 칸이 전 구획을 잃지 않게’ 둔 timeout 이 목적을 잃는다 — exec 시한에 걸리면 sshExec 가 모은 출력을 버려 그 주기 **전 구획**이 사라진다.
+ *   예전 최악 합 34초(8b 가 ##TOP 을 넣어 37초 + 대기 1초) > 30초였다. 여유는 ssh 왕복(고 RTT 800ms+ · 채널 열기 · 출력) · 시한 없는 짧은 읽기(ps · ss · sysctl -a · find)의 몫(추정).
+ *   bmTop8bBudget 시험이 명령 문자열에서 timeout · sleep 을 기계적으로 뽑아 합을 고정하고(needs-restarting ↔ dnf 는 한 주기에 하나 — 실제 셸로 확인),
+ *   가짜 PATH(멈추는 명령) + 실제 collectOsUsage 로 주 표본이 살아남는지 본다. env 로 CMD_TIMEOUT_MS 를 낮추면 이 산수가 깨진다(운영 기본값만 보장).
+ */
+export const CMD_INNER_MARGIN_MS = 6_000;
 /**
  * ⚠⚠ **세션 예산 — 두 번 시도하는 경로는 장비 시한을 넘길 수 있다**(v2.550.3 에 고친 결함.
  *   CLAUDE.md v2.528 이 Unity 에서 겪은 것과 **같은 유형**):
@@ -47,26 +64,104 @@ const _osKind = new Map();
 export function _resetOsKindForTest() { _osKind.clear(); }
 export function osKindOf(host) { return _osKind.get(String(host || '').toLowerCase()) || ''; }
 
+/**
+ * v2.919(리눅스 성능 1단계 · 반증 D1 반영) — **구획별 줄 상한 + 전체 바이트 상한** 두 겹.
+ *  ① 기존 구획(MEM·DISK·NET·NETINFO·FC·DF)에도 `head -n (상한+1)` 을 둔다 — 상한+1 줄이 오면 그 구획은 ‘상한 도달’(`linesCapped`)이고
+ *     파서는 앞 상한 줄만 쓴다(온전한 줄만 — 값이 틀리지 않는다). 멀티패스 SAN 서버(LUN 500 × 경로 8 + 파티션 + dm)를 생각해 DISK 는 10,000줄.
+ *  ② 전체는 `head -c OUTPUT_MAX_BYTES` — **구획 상한 × 줄 최대 바이트(가정)의 합보다 크게**(정상 서버에서 걸리지 않게), 그리고
+ *     `proxy/sshExec.js EXEC_MAX_OUTPUT`(넘으면 결과를 통째로 버린다)보다 작게 잡는다. 테스트가 이 산수를 고정한다.
+ *  ③ 그래도 잘리면(`##END` 미도착) **마지막 구획을 통째로 버린다**(missing) — 숫자 중간에서 잘린 줄을 카운터로 읽으면 다음 주기 Δ 가 부풀어
+ *     가짜 디스크 100% 가 원시·일 롤업에 남는다(반증 재현). 버린 구획의 누적 카운터는 `_prev` 에 들어가지 않는다(빈 목록 → 다음 주기 첫 표본).
+ * ⚠ 예전(v2.918)에는 출력 상한이 sshExec 4MB 뿐이었고 그 아래면 다섯 지표가 다 왔다 — 1단계 초판의 1MiB 상한은 그것을 퇴행시켰다(D1).
+ */
+export const SECTION_LINE_CAP = Object.freeze({
+  STAT_OTHER: 64, STAT_CPU: MAX_CORES + 1,
+  MEM: 256, DISK: 10_000, NET: 1_026, NETINFO: 1_024, FC: 128, DF: 128,
+  PSI: 6, VMSTAT: 8, SNMP: 2, BLKQ: BLKQ_SHELL_LINES, SYSCTL: 48, IRQ: MAX_IRQ_LINES, DFI: 66, SAMPLER: SAMPLER_MAX_LINES,
+  // v2.923(4단계): 용도 감지 · 튜닝 사실 구획(parse/linuxFacts.js — 명령 조각도 그 모듈의 상수)
+  ...FACT_LINE_CAP,
+  // v2.929(5단계): 점검 소모품 · 변경 이벤트(parse/linuxHealth.js — 줄마다 고정 접두)
+  ...HEALTH_LINE_CAP,
+});
+/** 줄 최대 바이트(가정 — 개행 포함). cut 으로 자르는 구획은 그 폭, 커널 숫자 형식(DISK·NET)은 관측 폭의 여유값(추정 — 자르지 않는다: 숫자 중간 절단 금지). */
+export const SECTION_LINE_BYTES = Object.freeze({
+  STAT_OTHER: 257, STAT_CPU: 257, MEM: 80, DISK: 220, NET: 260, NETINFO: 129, FC: 513, DF: 1_025,
+  PSI: 128, VMSTAT: 32, SNMP: 300, BLKQ: 100, SYSCTL: 200, IRQ: 80, DFI: 1_025, SAMPLER: 257,
+  ...FACT_LINE_BYTES,
+  ...HEALTH_LINE_BYTES,
+});
+/** 기존 구획 중 줄 상한을 파서가 확인하는 것(splitSections 이름 → 상한). 상한+1 줄이 오면 상한 도달. */
+export const LEGACY_CAPPED = Object.freeze({ MEM: SECTION_LINE_CAP.MEM, DISK: SECTION_LINE_CAP.DISK, NET: SECTION_LINE_CAP.NET, NETINFO: SECTION_LINE_CAP.NETINFO, FC: SECTION_LINE_CAP.FC, DF: SECTION_LINE_CAP.DF });
+/** 구획 상한의 바이트 합(가정) — 테스트가 `< OUTPUT_MAX_BYTES < EXEC_MAX_OUTPUT` 를 고정한다. */
+export const SECTION_BYTES_SUM = Object.keys(SECTION_LINE_BYTES).reduce((a, k) => a + (SECTION_LINE_CAP[k] + 1) * SECTION_LINE_BYTES[k], 0) + 4_096;
+/** 전체 바이트 상한 = sshExec 상한 − 256KB(stderr·여유). env 로 sshExec 상한을 낮추면 함께 낮아진다(그때는 ③ 이 지킨다). */
+export const OUTPUT_MAX_BYTES = Math.max(64 * 1024, EXEC_MAX_OUTPUT - 256 * 1024);
+/** `##SYSCTL` 이 읽는 파일 — 상수 표(파서의 화이트리스트와 같은 원천). 명령에 변수 삽입이 없다. */
+const SYSCTL_FILES = Object.keys(SYSCTL_PATHS).join(' ');
+/**
+ * `##IRQ` awk 요약 — 첫 줄(CPU 머리글)로 코어 수를 세고, NIC 큐로 보이는 줄만 `<irq>|<0 아닌 코어 수>|<코어 수>|<이름>` 으로 낸다.
+ *   ⚠ 코어 수만큼 넓은 원문을 그대로 보내지 않는다(256코어면 줄당 3KB). 이름 패턴은 흔한 드라이버 접두사 — 못 잡은 NIC 는 ‘요약 없음’ 이다.
+ */
+const IRQ_AWK = "awk 'NR==1{n=NF;next} {nz=0; for(i=2;i<=n+1&&i<=NF;i++) if(($i+0)>0) nz++; nm=$NF; if (nm ~ /^(eth|en|em|p[0-9]|bond|mlx|i40e|ice|ixgbe|igb|bnxt|qede|nfp|virtio|be2net|tg3)/) print substr($1,1,12) \"|\" nz \"|\" n \"|\" substr(nm,1,48)}' /proc/interrupts 2>/dev/null";
+
+/**
+ * v2.923(반증 R1): 명령이 표지를 내는 **순서** — 파서(splitSections)는 이 순서에서 지금보다 뒤의 표지만 받는다(앞 구획을 다시 열지 않는다).
+ *   linuxCommand 의 echo 순서와 같아야 한다(테스트가 명령 문자열에서 표지를 뽑아 대조).
+ */
+export const LINUX_SECTIONS = Object.freeze(['STAT', 'MEM', 'DISK', 'NET', 'NETINFO', 'FC', 'TICK', 'DF', 'HOST', 'LOAD', 'PSI', 'VMSTAT', 'SNMP', 'BLKQ', 'SYSCTL', 'IRQ', 'DFI', ...FACT_SECTIONS, ...HEALTH_SECTIONS, 'SAMPLER', 'END']);
+
 /** Linux 수집 명령 — 구획 표지로 나눈 한 방. */
-export function linuxCommand(mounts = []) {
-  const dfPart = mounts.length ? `df -P -k -- ${mounts.join(' ')} 2>/dev/null` : 'true';
-  return [
-    "echo '##STAT'", 'head -1 /proc/stat 2>/dev/null',
-    "echo '##MEM'", 'cat /proc/meminfo 2>/dev/null',
-    "echo '##DISK'", 'cat /proc/diskstats 2>/dev/null',
-    "echo '##NET'", 'cat /proc/net/dev 2>/dev/null',
+export function linuxCommand(mounts = [], { sampler = false } = {}) {
+  const dfPart = mounts.length ? `df -P -k -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DF + 1} | cut -c1-1024` : 'true';
+  // v2.919: inode(##DFI) — 같은 sanitize 된 마운트만(변수 삽입은 이 화이트리스트뿐).
+  const dfiPart = mounts.length ? `df -P -i -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DFI}` : 'true';
+  const cmds = [
+    // v2.919: /proc/stat 전체 — cpu 합계 + cpuN(코어 수 = 줄 수) + ctxt·intr·procs_running·procs_blocked. 줄 폭은 cut 으로(intr 줄은 수천 칸).
+    "echo '##STAT'", `grep -v '^cpu' /proc/stat 2>/dev/null | head -n ${SECTION_LINE_CAP.STAT_OTHER} | cut -c1-256`, `grep '^cpu' /proc/stat 2>/dev/null | head -n ${SECTION_LINE_CAP.STAT_CPU} | cut -c1-256`,
+    "echo '##MEM'", `head -n ${SECTION_LINE_CAP.MEM + 1} /proc/meminfo 2>/dev/null`,
+    "echo '##DISK'", `head -n ${SECTION_LINE_CAP.DISK + 1} /proc/diskstats 2>/dev/null`,
+    "echo '##NET'", `head -n ${SECTION_LINE_CAP.NET + 1} /proc/net/dev 2>/dev/null`,
     "echo '##NETINFO'",
     // 인터페이스별 링크 속도(Mbit)와 상태. 속도를 못 읽으면 -1 → 파서가 null 로 다룬다.
     // v2.605(COL2605-01): 넷째 필드 = 물리 여부(`device` 링크가 있거나 bonding 마스터면 1, 아니면 0).
     //   tun/tap·veth·bridge 는 드라이버가 **고정 속도(tun 은 10Mb/s)** 를 보고해 사용률(%)이 거짓 100% 가 된다.
-    'for d in /sys/class/net/*; do n=`basename "$d"`; if [ "$n" = lo ]; then continue; fi; s=-1; if [ -r "$d/speed" ]; then s=`cat "$d/speed" 2>/dev/null || echo -1`; fi; st=`cat "$d/operstate" 2>/dev/null`; p=0; if [ -e "$d/device" ] || [ -d "$d/bonding" ]; then p=1; fi; echo "$n $s ${st:--} $p"; done',
+    'for d in /sys/class/net/*; do n=`basename "$d"`; if [ "$n" = lo ]; then continue; fi; s=-1; if [ -r "$d/speed" ]; then s=`cat "$d/speed" 2>/dev/null || echo -1`; fi; st=`cat "$d/operstate" 2>/dev/null`; p=0; if [ -e "$d/device" ] || [ -d "$d/bonding" ]; then p=1; fi; echo "$n $s ${st:--} $p"; done' + ` | head -n ${SECTION_LINE_CAP.NETINFO + 1} | cut -c1-128`,
     "echo '##FC'",
     // FC HBA — 속도 원문에 공백이 있어 `|` 로 구분한다.
-    'for d in /sys/class/fc_host/*; do if [ ! -d "$d" ]; then continue; fi; h=`basename "$d"`; ps=`cat "$d/port_state" 2>/dev/null`; sp=`cat "$d/speed" 2>/dev/null`; tx=`cat "$d/statistics/tx_words" 2>/dev/null`; rx=`cat "$d/statistics/rx_words" 2>/dev/null`; echo "$h|$ps|$sp|$tx|$rx"; done',
+    'for d in /sys/class/fc_host/*; do if [ ! -d "$d" ]; then continue; fi; h=`basename "$d"`; ps=`cat "$d/port_state" 2>/dev/null`; sp=`cat "$d/speed" 2>/dev/null`; tx=`cat "$d/statistics/tx_words" 2>/dev/null`; rx=`cat "$d/statistics/rx_words" 2>/dev/null`; echo "$h|$ps|$sp|$tx|$rx"; done' + ` | head -n ${SECTION_LINE_CAP.FC + 1} | cut -c1-512`,
     "echo '##TICK'", 'getconf CLK_TCK 2>/dev/null',
     "echo '##DF'", dfPart,
     "echo '##HOST'", 'uname -srn 2>/dev/null',
-  ].join('; ');
+    // ── v2.919 새 구획(전부 읽기 전용 · 표지는 항상 출력 — ‘표지는 왔는데 0줄’ = absent) ─────────────────────────
+    "echo '##LOAD'", 'cat /proc/loadavg 2>/dev/null',
+    // PSI — 파일이 없으면(커널 4.20 미만 · RHEL 8 기본) 0줄 = absent. 자원 이름을 앞에 붙여 한 구획으로.
+    "echo '##PSI'", `for r in cpu memory io; do if [ -r /proc/pressure/$r ]; then while read -r l; do echo "$r $l"; done < /proc/pressure/$r; fi; done 2>/dev/null | head -n ${SECTION_LINE_CAP.PSI}`,
+    "echo '##VMSTAT'", `grep -E '^(pswpin|pswpout|pgmajfault|oom_kill) ' /proc/vmstat 2>/dev/null | head -n ${SECTION_LINE_CAP.VMSTAT}`,
+    "echo '##SNMP'", `grep '^Tcp:' /proc/net/snmp 2>/dev/null | head -n ${SECTION_LINE_CAP.SNMP}`,
+    "echo '##BLKQ'",
+    // v2.922(D7): 장치마다 프로세스 4개(basename + cat×3)를 띄우고 앞 64개만 읽던 루프 → grep -H 한 번(+ 가상 장치 거르는 grep 하나).
+    //   장치 수 상한(store.blkqMax)과 ‘물리 디스크 먼저’ 는 파서(parseBlkq)가 정한다 — 멀티패스 서버에서 dm-* 가 물리 디스크 큐를 밀어내지 않게.
+    // v2.923: read_ahead_kb 추가(GPDB 요구 read-ahead · 튜닝 탭 ‘nr_requests · read_ahead_kb’) — 같은 grep 한 번.
+    `grep -H '' /sys/block/*/queue/scheduler /sys/block/*/queue/nr_requests /sys/block/*/queue/rotational /sys/block/*/queue/read_ahead_kb 2>/dev/null | grep -v -E '^/sys/block/(loop|ram|zram|sr)[0-9]' | head -n ${SECTION_LINE_CAP.BLKQ}`,
+    // sysctl·THP·governor·numa_balancing·TuneD — grep -H 한 번으로 `<경로>:<값>`(키마다 프로세스를 띄우지 않는다). 없는 파일은 줄이 없다(= 확인 불가).
+    // ⚠ 셸 `read` 내장으로 읽지 말 것 — dash 는 1바이트씩 읽는데 sysctl 정수 파일은 오프셋 0 이 아니면 EOF 를 준다(이 컨테이너 실측: swappiness 60 → '6').
+    "echo '##SYSCTL'", `grep -H '' ${SYSCTL_FILES} 2>/dev/null | head -n ${SECTION_LINE_CAP.SYSCTL}`,
+    // v2.923(반증 R8): systemctl 은 D-Bus 기본 시한(25초)까지 기다릴 수 있다 — timeout 3 으로 감싼다(끊기면 빈 값 = 확인 불가). 주기 명령 전체가 시한 하나라 한 칸이 전 구획을 잃게 하지 않게.
+    "echo '##IRQ'", `${IRQ_AWK} | head -n ${SECTION_LINE_CAP.IRQ}`, 'echo "irqbalance=`timeout 3 systemctl is-active irqbalance 2>/dev/null`"',
+    "echo '##DFI'", dfiPart,
+    // ── v2.923(4단계) 용도 감지 · 튜닝 사실 — 전부 읽기 전용 상수 조각(parse/linuxFacts.js FACT_SHELL). 프로세스는 이름(comm)만 · 인자 없음 · sudo 없음.
+    ...FACT_SECTIONS.flatMap((k) => [`echo '##${k}'`, FACT_SHELL[k]]),
+    // ── v2.929(5단계) 점검 소모품 · 변경 이벤트 — 상수 조각(parse/linuxHealth.js HEALTH_SHELL). 줄마다 고정 접두 · 내용은 CRC · 개수만(설정 파일 · dmesg 원문 없음).
+    ...HEALTH_SECTIONS.flatMap((k) => [`echo '##${k}'`, HEALTH_SHELL[k]]),
+    // ⚠ 8b단계 프로세스 Top-N 은 여기(주 명령)에 넣지 않는다 — 같은 세션의 별도 exec(collectOsUsage · parse/linuxTop.js topCommand). 반증 F1: 주 명령은 exec 시한 하나라
+    //   top 대기 · 시한이 구획 timeout 합을 시한 밖으로 밀면 그 주기 전 구획을 잃었다. 구획 timeout 합 + 여유 ≤ CMD_TIMEOUT_MS 는 bmTop8bBudget 시험이 고정한다.
+    // v2.922: 피크 B 안 수거 구획 — 옵트인일 때만(기본 명령은 그대로). 파일이 없으면 0줄(absent).
+    ...(sampler ? ["echo '##SAMPLER'", samplerCommand()] : []),
+    "echo '##END'",
+  ];
+  // ⚠ 총량 상한 — 넘치면 잘리고 ##END 가 오지 않는다(shapeLinux 의 truncated). stderr 는 예전처럼 따로 받는다.
+  // ⚠ LC_ALL=C(반증 D8): 한국어 로캘이면 df 머리글이 번역되어 ##DF·##DFI 에 가짜 행이 생긴다 — 명령 전체를 C 로캘로.
+  return `export LC_ALL=C; { ${cmds.join('; ')}; } | head -c ${OUTPUT_MAX_BYTES}`;
 }
 
 /**
@@ -93,9 +188,25 @@ export function winCommand(script = WIN_PS) {
 }
 
 /** Linux 구획 출력 → 스냅샷 + 다음 주기용 누적값(순수 — 테스트 대상). */
-export function shapeLinux(stdout, mounts = []) {
-  const sec = splitSections(stdout);
+export function shapeLinux(stdout, mounts = [], { partitionIo = false, blkqMax = MAX_BLKQ, samplerSha = '' } = {}) {
+  const sec = splitSections(stdout, { order: LINUX_SECTIONS });   // v2.923(반증 R1): 순서 · 줄 머리 정확 일치 · 재개방 금지
   if (!Object.keys(sec).length) return null;              // 구획 표지 0개 = Linux 가 아니거나 셸이 다르다
+  /*
+   * v2.919(반증 D1): ① 출력이 잘렸으면(##END 미도착) **마지막 구획을 통째로 버린다** — 그 구획의 마지막 줄은 숫자 중간에서 잘렸을 수 있고
+   *   (io_ticks 149360 → 14), 그 값을 카운터로 쓰면 다음 주기 Δ 가 부풀어 가짜 100% 가 남는다. 버린 구획은 missing 이고 카운터는 빈 목록이라
+   *   `_prev` 에 들어가지 않는다(다음 주기는 첫 표본).
+   * ② 기존 구획의 줄 상한(명령이 상한+1 줄까지 보낸다) — 넘었으면 앞 상한 줄(온전한 줄)만 쓰고 그 구획을 ‘상한 도달’ 로 밝힌다.
+   */
+  const truncated = !Array.isArray(sec.END);
+  const cutSections = [];
+  if (truncated) {
+    const last = Object.keys(sec).at(-1);
+    if (last) { delete sec[last]; cutSections.push(last); }
+  }
+  const linesCapped = [];
+  for (const [name, cap] of Object.entries(LEGACY_CAPPED)) {
+    if (Array.isArray(sec[name]) && sec[name].length > cap) { sec[name] = sec[name].slice(0, cap); linesCapped.push(name); }
+  }
   /*
    * ⚠⚠ **'없는 것' 과 '못 읽은 것' 을 같은 칸에 넣지 말 것**(v2.526 Unity `REMOVED` 규약과 같은 유형).
    *   FC HBA 가 아예 없는 서버를 `missing:['hba']` 로 세면 화면이 '확인 불가 1건' 이라 말해
@@ -116,7 +227,7 @@ export function shapeLinux(stdout, mounts = []) {
   mark('cpu', !!stat);
   const mem = parseMemInfo(sec.MEM || []);
   mark('mem', !!mem);
-  const disks = parseDiskstats(sec.DISK || []);
+  const disks = parseDiskstats(sec.DISK || [], { partitions: partitionIo });
   mark('diskio', !!disks);
   const nets = parseNetDev(sec.NET || []);
   mark('net', !!nets);
@@ -128,6 +239,8 @@ export function shapeLinux(stdout, mounts = []) {
   if (!mounts.length) absent.push('diskspace');
   else mark('diskspace', !!(df.mounts || []).length);
   const host = (sec.HOST || []).join(' ').trim();
+  // v2.919 — 새 구획(값 · absent · missing). 잘림(##END 미도착)이면 그 뒤 구획은 missing 이 된다(표지가 안 왔다).
+  const perf = shapePerfSections(sec, { blkqMax });
 
   return {
     osKind: 'linux',
@@ -143,8 +256,51 @@ export function shapeLinux(stdout, mounts = []) {
       disks: disks || [],
       nets: (nets || []).map((n) => ({ ...n, bitsPerSec: netInfo[n.iface]?.bitsPerSec ?? null, state: netInfo[n.iface]?.state || '', ...(netInfo[n.iface]?.virtual ? { virtual: true } : {}) })),
       hbas: fcs || [],
+      // v2.919 — 누적 카운터(rates.js 가 환산). 못 읽었으면 null(첫 표본과 같이 다룬다).
+      cpuExt: perf.stat.value ? { ...perf.stat.value.cpu, cores: perf.stat.value.cores } : null,
+      ctxt: perf.stat.value?.ctxt ?? null, intr: perf.stat.value?.intr ?? null,
+      vm: perf.vmstat.value || null,
+      tcp: perf.snmp.value ? { retransSegs: perf.snmp.value.retransSegs, outSegs: perf.snmp.value.outSegs, inErrs: perf.snmp.value.inErrs } : null,
     },
+    // v2.919 — 순간값·튜닝 현재값(누적이 아니라 델타가 필요 없다)과 구획별 상태.
+    perf,
+    // v2.922: 샘플러(B 안) — 구획을 보냈을 때만(옵트인). 해시 대조 전에는 값을 쓰지 않는다(samplerSpec).
+    ...(Object.hasOwn(sec, 'SAMPLER') ? { sampler: parseSamplerFile(sec.SAMPLER, { expectedSha: samplerSha }) } : {}),
+    truncated, cutSections, linesCapped,
     read, missing, absent,
+  };
+}
+
+/**
+ * v2.919 — 새 구획을 한 번에 읽는다(순수). 각 칸은 `{ value, absent, missing }`(parse/linuxProc.js readSection 규약).
+ *   ##STAT 은 기존 구획이지만 확장분(분해·코어·ctxt)을 여기서 함께 읽는다 — cpu_pct 는 예전 parseProcStat 그대로 쓴다.
+ */
+export function shapePerfSections(sec = {}, { blkqMax = MAX_BLKQ } = {}) {
+  return {
+    stat: readSection(sec, 'STAT', parseProcStatFull),
+    load: readSection(sec, 'LOAD', parseLoadavg),
+    psi: readSection(sec, 'PSI', parsePsi),
+    vmstat: readSection(sec, 'VMSTAT', parseVmstat),
+    snmp: readSection(sec, 'SNMP', parseSnmpTcp),
+    blkq: readSection(sec, 'BLKQ', (l) => parseBlkq(l, { max: blkqMax })),
+    sysctl: readSection(sec, 'SYSCTL', parseSysctl),
+    hugepages: readSection(sec, 'MEM', parseHugePages),
+    irq: readSection(sec, 'IRQ', parseIrq),
+    dfi: readSection(sec, 'DFI', parseDfInodes),
+    // v2.923(4단계) — 용도 감지 · 튜닝 사실(구획 상태 규약 그대로: 표지 없음 missing · 0줄 absent)
+    osrel: readSection(sec, 'OSREL', parseOsRel),
+    units: readSection(sec, 'UNITS', parseUnits),
+    ports: readSection(sec, 'PORTS', parsePorts),
+    procs: readSection(sec, 'PROCS', parseProcs),
+    acct: readSection(sec, 'ACCT', parseAccts),
+    kargs: readSection(sec, 'KARGS', parseKargs),
+    softnet: readSection(sec, 'SOFTNET', parseSoftnet),
+    netq: readSection(sec, 'NETQ', parseNetq),
+    xfs: readSection(sec, 'XFS', parseXfs),
+    // v2.929(5단계) — 점검 소모품 · 변경 이벤트(표지 없음 missing · 0줄 absent — chrony 없는 서버는 absent)
+    chrony: readSection(sec, 'CHRONY', parseChrony),
+    dmesg: readSection(sec, 'DMESG', parseDmesgCounts),
+    changes: readSection(sec, 'CHANGES', parseChanges),
   };
 }
 
@@ -153,9 +309,12 @@ export function shapeLinux(stdout, mounts = []) {
  * @param {object} osHost  `bmstor` 등록 항목(host·port·username·password·mounts)
  * @param {{signal?:AbortSignal}} opt
  */
-export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS } = {}) {
+export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null, extraCommands = [], top = false } = {}) {
   const host = String(osHost.host || '').trim();
   if (!host) return { ok: false, error: 'OS host 가 없습니다.' };
+  // 7b: 키 · 공통 계정 참조를 해석하지 못했으면(키 삭제 · 봉인 해제 실패 · 저장소 손상) 접속하지 않는다 — 빈 비밀번호로 시도해
+  //   인증 실패 · 계정 잠금을 부르지 않게(onboard/refs.js withResolvedAuth 가 단다).
+  if (osHost.authError) return { ok: false, error: String(osHost.authError).slice(0, 300), authErrorCode: String(osHost.authErrorCode || '') };
   const { mounts } = sanitizeMounts(osHost.mounts);
   const hostKey = host.toLowerCase();
   const known = _osKind.get(hostKey) || '';
@@ -164,7 +323,7 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
     return await withSsh({
       host, port: Number(osHost.port) || 22,
       username: String(osHost.username || 'root'),
-      password: osHost.password || '', privateKey: osHost.privateKey || undefined,
+      password: osHost.password || '', privateKey: osHost.privateKey || undefined, passphrase: osHost.passphrase || undefined,
       readyTimeout: READY_TIMEOUT_MS, signal,
     }, async ({ exec }) => {
       // 예산 시계는 **SSH 연결이 끝난 시점**부터 센다(READY 는 withSsh 가 이미 소비했다).
@@ -176,9 +335,57 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
         // ⚠ `exec` 는 `(cmd, timeoutMs)` **위치 인자**다(`sshExec.js:87`). 객체를 넘기면
         //   `Math.max(1000, {…})` 이 **NaN** 이 되고 `setTimeout(fn, NaN)` 은 즉시 발화해
         //   **항상 즉시 타임아웃**된다(v2.550 자체 재검토에서 잡았다 — 목 데이터로는 드러나지 않는다).
-        const r = await exec(linuxCommand(mounts), slice());
-        const shaped = shapeLinux(r.stdout || '', mounts);
-        return shaped ? { ...shaped, ok: true, stderr: (r.stderr || '').slice(0, 300) } : null;
+        const r = await exec(linuxCommand(mounts, { sampler }), slice());
+        const shaped = shapeLinux(r.stdout || '', mounts, { partitionIo, blkqMax, samplerSha });
+        if (!shaped) return null;
+        // v2.922 피크 A 안 — 같은 세션에서 1초 창. 남은 예산이 모자라면 줄이고(planWindow) 그 사실을 남긴다. 1초 표본은 여기서 집계 뒤 버린다.
+        const plan = planWindow({ wantS: peakWindowS, remainingMs: endsAt - Date.now() });
+        let peak = { windowS: 0, wantS: Math.max(0, Number(peakWindowS) || 0), reduced: plan.reduced, reason: plan.reason,
+          // v2.922: 주기 예산 자동 맞춤이 설정 상한보다 줄였으면 그 사실(행 노트 · 화면이 ‘왜 창이 짧은가’ 를 말한다).
+          ...(peakCycle && Number(peakCycle.plannedS) < Number(peakCycle.capS) ? { cycle: { capS: Number(peakCycle.capS), plannedS: Number(peakCycle.plannedS), reason: String(peakCycle.reason || '') } } : {}) };
+        if (plan.windowS) {
+          try {
+            const startWall = Date.now();
+            const PEAK_TMO = Math.min(Math.max(1_000, endsAt - Date.now()), plan.windowS * 1000 + PEAK_OVERHEAD_MS + 2_000);   // ⚠ 위치 인자(숫자)
+            const pr = await exec(peakCommand(plan.windowS), PEAK_TMO);
+            const parsed = parsePeakOutput(pr.stdout || '', { partitions: partitionIo });
+            const nicInfo = Object.fromEntries((shaped.counters?.nets || []).map((x) => [x.iface, { bitsPerSec: x.bitsPerSec ?? null, virtual: !!x.virtual }]));
+            const pk = computePeaks({ samples: parsed.samples, startWall, nicInfo });
+            peak = { ...peak, windowS: pk.windowS, server: pk.server, devices: Object.fromEntries(pk.devices), truncated: parsed.truncated,
+              // v2.922(반증 D12): 예산으로 줄인 것(plan)과 창을 돌렸는데 표본 구간이 모자란 것(short — 원인 미확인)을 따로 남긴다.
+              plannedS: plan.windowS, reduced: plan.reduced || pk.windowS < plan.windowS, reason: plan.reason, shortBy: Math.max(0, plan.windowS - pk.windowS) };
+          } catch (e) { peak = { ...peak, windowS: 0, reason: 'error', error: String(e?.message || e).slice(0, 160) }; }
+        }
+        /*
+         * v2.929(5단계 — 집중 모니터링 경량 스냅샷): 같은 세션에서 덧붙일 **상수 명령**(호출부가 상수만 넘긴다 — snapshot/command.js FOCUS_SNAPSHOT_COMMAND).
+         *   남은 예산 안에서만 돌리고(MIN_SLICE 아래면 건너뛰고 사유) 출력은 상한으로 자른다. 실패해도 본 수집 결과는 그대로다(그 칸만 비운다).
+         */
+        const extra = {};
+        for (const x of Array.isArray(extraCommands) ? extraCommands.slice(0, 2) : []) {
+          if (!x || typeof x.cmd !== 'string' || !/^[a-z]{1,16}$/.test(String(x.name || ''))) continue;
+          if (slice() < MIN_SLICE_MS) { extra[x.name] = { skipped: 'budget' }; continue; }
+          try {
+            const EXTRA_TMO = Math.min(Number(x.timeoutMs) || 15_000, slice());   // ⚠ 위치 인자(숫자) — 객체를 넘기면 NaN → 즉시 시한
+            const er = await exec(x.cmd, EXTRA_TMO);
+            extra[x.name] = { stdout: String(er.stdout || '').slice(0, Math.max(1_024, Number(x.maxBytes) || 64 * 1024)) };
+          } catch (e) { extra[x.name] = { error: String(e?.message || e).slice(0, 160) }; }
+        }
+        /*
+         * 8b단계 프로세스 Top-N — 같은 세션의 **별도 exec**(반증 F1 · S1). 주 명령 · 피크 · 덧붙인 exec 뒤 남은 예산 안에서만(MIN_SLICE 아래면 건너뛰고 사유 'budget') ·
+         *   실패 · 시한이어도 본 표본은 그대로다(그 칸만 missing). 끄면(설정 top.on=false · 집중 모니터링 — 기본값 false) exec 하지 않고 ‘꺼짐’(1초 대기 없음 — 반증 F10).
+         */
+        let topSec = { value: { off: true }, absent: false, missing: false };
+        if (top) {
+          if (slice() < MIN_SLICE_MS) topSec = { value: null, absent: false, missing: true, skipped: 'budget' };
+          else {
+            try {
+              const TOP_TMO = Math.min(TOP_EXEC_TIMEOUT_MS, slice());   // ⚠ 위치 인자(숫자) — 객체를 넘기면 NaN → 즉시 시한
+              const tr = await exec(topCommand(), TOP_TMO);
+              topSec = readTopOutput(tr.stdout || '');
+            } catch (e) { topSec = { value: null, absent: false, missing: true, error: String(e?.message || e).slice(0, 160) }; }
+          }
+        }
+        return { ...shaped, perf: { ...shaped.perf, top: topSec }, peak, ok: true, stderr: (r.stderr || '').slice(0, 300), ...(Object.keys(extra).length ? { extra } : {}) };
       };
       const tryWin = async () => {
         const r = await exec(winCommand(), slice());

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>추천 등록 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a111c;color:#c8d6e8;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.4}
+a{color:#9fcaff}a:hover{color:#cfe4ff}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.seg{display:inline-flex;border:1px solid #1e3350;border-radius:999px;overflow:hidden;background:#0f1a2b}
+.seg button{min-height:44px;padding:0 18px;border:0;background:transparent;color:#9fb4cc;font:inherit;font-size:13px}
+.seg button.on{background:#1668d8;color:#fff;font-weight:700}
+.tv{display:inline-flex;align-items:center;height:26px;border:1px solid #1e3350;border-radius:6px;background:#0a141f;font-family:"JetBrains Mono",monospace;font-size:11px;color:#9fcaff;overflow:hidden;white-space:nowrap}
+.tv span{padding:0 7px;color:#8ea4bd;background:#0f1a2b;border-right:1px solid #1e3350;height:100%;display:inline-flex;align-items:center}
+.tv b{padding:0 8px;font-weight:500}
+.w{background:#0f1a2b;border:1px solid #1c2c42;border-radius:8px;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.wh{display:flex;align-items:center;min-height:34px;padding:0 12px;border-bottom:1px solid #131f30;font-size:11px;letter-spacing:.05em;color:#8ea4bd;font-family:"JetBrains Mono",monospace}
+.ms{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.ms .t{background:#0f1a2b;border:1px solid #1c2c42;border-left:4px solid #1e3350;border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.ms .t span{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;color:#8ea4bd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms .t b{font-family:"JetBrains Mono",monospace;font-size:21px;font-weight:600;color:#dbe7f5;line-height:1.15}
+.ms .ok{border-left-color:#3ddc84}.ms .ok b{color:#3ddc84}.ms .warn{border-left-color:#f0a92e}.ms .warn b{color:#f0a92e}.ms .bad{border-left-color:#ff5c5c}.ms .bad b{color:#ff5c5c}.ms .stale{border-left-color:#64748b}.ms .pend{border-left-color:#4b9bff}.ms .off{border-left-color:#7b8fa8}.ms .tot{border-left-color:#4b9bff}
+.n4{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}
+.n4 div{display:flex;flex-direction:column;gap:1px}
+.n4 span{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.05em;color:#8ea4bd}
+.n4 b{font-family:"JetBrains Mono",monospace;font-size:22px;font-weight:600;line-height:1.15;color:#dbe7f5}
+.cbar{display:flex;height:12px;border-radius:3px;overflow:hidden;background:#131f30}
+.cbar i{display:block;height:100%}
+.btn{display:flex;align-items:center;justify-content:center;min-height:44px;padding:0 14px;border:1px solid #1e3350;border-radius:8px;background:#0f1a2b;color:#c8d6e8;font:inherit;font-size:13px;box-sizing:border-box;text-decoration:none}
+.btn.accent{border-color:#2b6fc0;background:#153357;color:#9fcaff}
+.btn.primary{border-color:#1668d8;background:#1668d8;color:#fff;font-weight:700;font-size:14px;min-height:48px}
+.chips{display:flex;gap:8px;overflow-x:auto}
+.chips button{flex:none;min-height:44px;padding:0 14px;border-radius:22px;border:1px solid #1e3350;background:transparent;color:#9fb4cc;font:inherit;font-size:12px;font-family:"JetBrains Mono",monospace;white-space:nowrap}
+.cc{display:grid;grid-template-columns:28px minmax(0,1fr) auto;column-gap:8px;row-gap:7px;align-items:start;padding:11px 12px;border:1px solid #1c2c42;border-radius:8px;background:#0f1a2b}
+.cc.on{border-color:#2b6fc0;background:#0f2440}
+.cc input{margin:3px 0 0;width:20px;height:20px;accent-color:#4b9bff}
+.cc .nm{color:#e8f1fb;font-weight:600;font-size:13.5px}
+.cc .ed{font-family:"JetBrains Mono",monospace;font-size:11px;color:#9fb4cc;display:flex;align-items:center;gap:6px;margin-top:2px}
+.cc .ed i{width:8px;height:8px;border-radius:50%;background:#3ddc84;flex:none;display:inline-block}
+.cc .ed.none i{background:transparent;border:1px solid #5f7388}
+.cc .v{font-family:"JetBrains Mono",monospace;font-size:13px;color:#e8f1fb;white-space:nowrap;text-align:right}
+.cc .v em{font-style:normal;color:#8ea4bd}
+.cc .v small{display:block;font-family:"Inter","Noto Sans KR",sans-serif;font-size:11px;color:#8ea4bd}
+.cc .kinds{grid-column:2 / 4;display:flex;gap:5px;flex-wrap:wrap}
+.kd{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;border:1px solid #24405f;background:#0b1727;font-size:11px;color:#b8c7d9;white-space:nowrap}
+.kd b{font-family:"JetBrains Mono",monospace;font-weight:600;color:#e8f1fb}
+.kd.lk{border-color:#3a4c63;color:#9fb4cc}
+.foot{border:1px solid #2b6fc0;background:#0f2440;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.sel{display:flex;align-items:center;justify-content:space-between;min-height:44px;padding:0 12px;border:1px solid #2b4a6f;border-radius:8px;background:#0b1727;color:#fff;font:inherit;font-size:13px;width:100%;box-sizing:border-box}
+</style>
+</helmet>
+<div style="width:400px;height:1500px;box-sizing:border-box;padding:12px;display:flex;flex-direction:column;gap:10px;background:#0a111c;overflow:hidden">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+    <b style="font-size:15px;color:#e8f1fb">Monitoring · 개요</b>
+    <span class="seg"><button type="button">트리</button><button type="button" class="on">개요</button></span>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <span class="tv"><span>time</span><b>최근 24시간</b></span><span class="tv"><span>live</span><b style="color:#3ddc84">60s</b></span><span class="tv"><span>alerts</span><b>off</b></span>
+  </div>
+
+  <div class="ms">
+    <div class="t tot"><span>TOTAL</span><b>158</b></div>
+    <div class="t ok"><span>OK</span><b>108</b></div>
+    <div class="t warn"><span>WARN</span><b>6</b></div>
+    <div class="t bad"><span>ALERT</span><b>8</b></div>
+    <div class="t stale"><span>NO DATA</span><b>0</b></div>
+    <div class="t pend"><span>PENDING</span><b>0</b></div>
+    <div class="t off"><span>DISABLED</span><b>36</b></div>
+  </div>
+
+  <div class="w" style="border-color:#2b6fc0">
+    <div class="wh">감시 범위 · 설정된 시스템 대비</div>
+    <div style="padding:12px;display:flex;flex-direction:column;gap:12px">
+      <div class="n4">
+        <div><span>설정된 시스템</span><b>277</b></div>
+        <div><span>감시 중</span><b style="color:#3ddc84">1</b></div>
+        <div><span>등록됐지만 중지</span><b style="color:#b8c7d9">20</b></div>
+        <div><span>미등록</span><b style="color:#f0a92e">256</b></div>
+      </div>
+      <div class="cbar" role="img" aria-label="설정된 시스템 277 가운데 감시 중 1, 중지 20, 미등록 256"><i style="width:4px;background:#3ddc84"></i><i style="width:7.2%;background:#7b8fa8"></i><i style="flex:1;background:#8a5a12"></i></div>
+      <button class="btn accent" type="button" aria-expanded="true">법인별 추천 등록 접기</button>
+    </div>
+  </div>
+
+  <div class="chips"><button type="button">모두 선택</button><button type="button">엣지 있는 법인만</button><button type="button">선택 해제</button></div>
+
+  <label class="cc on">
+    <input type="checkbox" checked aria-label="Frankfurt 법인 선택">
+    <span><span class="nm">Frankfurt 법인</span><span class="ed"><i></i>mock-Edge-Frankfurt</span></span>
+    <span class="v">35 <em>/ 35</em><small>미감시</small></span>
+    <span class="kinds"><span class="kd">iDRAC <b>14</b></span><span class="kd">SAN 스위치 <b>10</b></span><span class="kd">PDU <b>6</b></span><span class="kd">스토리지 <b>3</b></span><span class="kd lk">CVP <b>1</b></span><span class="kd lk">엣지 포탈 <b>1</b></span></span>
+  </label>
+  <label class="cc on">
+    <input type="checkbox" checked aria-label="Seoul 법인 선택">
+    <span><span class="nm">Seoul 법인</span><span class="ed"><i></i>mock-Edge-Seoul</span></span>
+    <span class="v">29 <em>/ 30</em><small>미감시</small></span>
+    <span class="kinds"><span class="kd">iDRAC <b>10</b></span><span class="kd">PDU <b>8</b></span><span class="kd">SAN 스위치 <b>6</b></span><span class="kd">스토리지 <b>4</b></span><span class="kd lk">CVP <b>1</b></span><span class="kd lk">엣지 포탈 <b>1</b></span></span>
+  </label>
+  <label class="cc on">
+    <input type="checkbox" checked aria-label="Ashburn 법인 선택">
+    <span><span class="nm">Ashburn 법인</span><span class="ed"><i></i>mock-Edge-Virginia</span></span>
+    <span class="v">28 <em>/ 28</em><small>미감시</small></span>
+    <span class="kinds"><span class="kd">iDRAC <b>11</b></span><span class="kd">SAN 스위치 <b>8</b></span><span class="kd">PDU <b>5</b></span><span class="kd">스토리지 <b>2</b></span><span class="kd lk">CVP <b>1</b></span><span class="kd lk">엣지 포탈 <b>1</b></span></span>
+  </label>
+  <label class="cc">
+    <input type="checkbox" aria-label="Shanghai 법인 선택">
+    <span><span class="nm">Shanghai 법인</span><span class="ed"><i></i>mock-Edge-Shanghai</span></span>
+    <span class="v">25 <em>/ 25</em><small>미감시</small></span>
+    <span class="kinds"><span class="kd">iDRAC <b>8</b></span><span class="kd">SAN 스위치 <b>8</b></span><span class="kd">PDU <b>7</b></span><span class="kd">스토리지 <b>1</b></span><span class="kd lk">엣지 포탈 <b>1</b></span></span>
+  </label>
+  <label class="cc">
+    <input type="checkbox" aria-label="Beijing 법인 선택">
+    <span><span class="nm">Beijing 법인</span><span class="ed none"><i></i>엣지 없음 · 이 포탈이 직접</span></span>
+    <span class="v">22 <em>/ 22</em><small>미감시</small></span>
+    <span class="kinds"><span class="kd">SAN 스위치 <b>8</b></span><span class="kd">iDRAC <b>7</b></span><span class="kd">PDU <b>6</b></span><span class="kd">스토리지 <b>1</b></span></span>
+  </label>
+
+  <button class="btn" type="button">법인 6개 더 보기 · 미감시 122</button>
+
+  <label class="cc">
+    <input type="checkbox" aria-label="법인 미상 항목 선택">
+    <span><span class="nm" style="color:#b8c7d9;font-weight:500">법인 미상</span><span class="ed none"><i></i>설정에 법인 정보가 없음</span></span>
+    <span class="v">15 <em>/ 15</em><small>미감시</small></span>
+    <span class="kinds"><span class="kd lk">베어메탈 스토리지 <b>11</b></span><span class="kd lk">Horizon <b>2</b></span><span class="kd">iDRAC <b>2</b></span></span>
+  </label>
+
+  <div class="foot">
+    <span class="mono" style="font-size:12px;color:#dceaff">3개 법인 · 새로 등록 87 · 중지된 것 켜기 5</span>
+    <button class="sel" type="button" aria-haspopup="listbox" aria-label="등록 방식">
+      <span>시험 점검 후 사용 <span class="mono" style="font-size:10px;color:#9fcaff;border:1px solid #2b6fc0;border-radius:3px;padding:0 4px;margin-left:4px">권장</span></span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9fb4cc" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <label style="display:flex;align-items:center;gap:10px;min-height:44px;font-size:13px;color:#c8d6e8"><input type="checkbox" checked style="margin:0;width:20px;height:20px;accent-color:#4b9bff">법인 엣지에 배정(엣지가 현지에서 점검)</label>
+    <button class="btn primary" type="button">시험 점검 후 등록 · 92건</button>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

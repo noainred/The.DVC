@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>지금 — 세 화면에 흩어진 값</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.wrap{padding:24px;display:flex;flex-direction:column;gap:16px}
+.cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:14px;padding:14px 16px;min-width:0;display:flex;flex-direction:column;gap:8px}
+.card h3{margin:0;font-size:14px;display:flex;align-items:center;gap:8px}
+.path{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;color:#8b9bb4}
+.has{display:flex;flex-direction:column;gap:4px;font-size:12.5px}
+.has div{display:flex;gap:8px;align-items:baseline}
+.has .k{color:#8b9bb4;flex:none;width:72px}
+.has b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:600}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.bm{background:rgba(52,224,180,.14);color:#5eead4}
+.tag.pmax{background:rgba(59,130,246,.16);color:#93c5fd}
+.tag.san{background:rgba(168,85,247,.16);color:#d8b4fe}
+.tag.no{background:rgba(239,68,68,.16);color:#fca5a5}
+.mini{border:1px solid #1f2a40;border-radius:10px;background:#0f1626;padding:10px 12px;font-size:12px;color:#8b9bb4;line-height:1.6}
+.mini b{color:#e6edf6}
+.gap{border:1px dashed #ef4444;border-radius:14px;padding:14px 16px;font-size:13px;line-height:1.7;background:rgba(239,68,68,.05)}
+.gap b{color:#fca5a5}
+.foot{font-size:11.5px;color:#8b9bb4;line-height:1.6}
+</style>
+</helmet>
+<div class="wrap">
+  <div class="cols">
+    <div class="card">
+      <h3><span class="tag bm">베어메탈</span>베어메탈 스토리지 (현황)</h3>
+      <div class="path">특수 기능 › 베어메탈 스토리지 · #/tools/bm-storage</div>
+      <div class="has">
+        <div><span class="k">수집</span><span>SSH <b>df -P -k</b> · 지정 마운트만 · 주기 1~1440분(기본 10분)</span></div>
+        <div><span class="k">있는 값</span><span>총 · 사용 · 가용 · <b>사용률</b>(서버 · 그룹 · 전체) · 12시간 이력</span></div>
+        <div><span class="k">없는 값</span><span style="color:#fca5a5">전송 속도 · 디스크 바쁨 — 수집하지 않음</span></div>
+      </div>
+      <div class="mini"><b>전체 디스크 사용률 67.4%</b> · 463.3 TB / 687.2 TB<br>그룹 카드 7 · 서버 표 10행 · 추이 1일~반기</div>
+    </div>
+    <div class="card">
+      <h3><span class="tag pmax">PowerMax</span>스토리지 모니터링</h3>
+      <div class="path">특수 기능 › 스토리지 모니터링 · #/tools/storage-mon</div>
+      <div class="has">
+        <div><span class="k">수집</span><span>Unisphere REST · 주기 60분 · 법인 엣지 위임 가능</span></div>
+        <div><span class="k">있는 값</span><span>총 · 사용 · <b>사용률</b>(감축 후 실사용) · 시리얼 · 풀(SRP) · 노드 · 경보</span></div>
+        <div><span class="k">없는 값</span><span style="color:#fca5a5">어레이 성능(IOPS · MB/s) — Unisphere performance API 미수집</span></div>
+      </div>
+      <div class="mini"><b>PMAX-2500-KR1 68.9%</b> · 124.0 / 180.0 TB · 시리얼 000120001234<br>표 행 하나 — 베어메탈과 나란히 볼 자리 없음</div>
+    </div>
+    <div class="card">
+      <h3><span class="tag san">SAN 스위치</span>포트 사용량 › 스토리지 사용량 분석</h3>
+      <div class="path">특수 기능 › SAN 스위치 · 법인 카드 › 스토리지 사용량 분석(모달)</div>
+      <div class="has">
+        <div><span class="k">수집</span><span>portperfshow 5분 주기 · 바이트/초 · 포트 메타(연결 장비 이름)</span></div>
+        <div><span class="k">있는 값</span><span>어레이별 <b>전송 속도</b>(평균 · 피크) · 포트 수 · 스위치 · 시리얼 대조로 <b>용량 %</b> 덧붙임</span></div>
+        <div><span class="k">없는 값</span><span style="color:#fca5a5">베어메탈 쪽 값 — 이 모달은 SAN 만</span></div>
+      </div>
+      <div class="mini"><b>SYMMETRIX::000120001234</b> 1.03 GB/s 평균 · 2.40 GB/s 피크 · 포트 8 · 스위치 2 · 용량 68.9%</div>
+    </div>
+  </div>
+  <div class="gap">
+    <b>없는 것</b> — 세 값이 세 화면에 흩어져 있어 ‘베어메탈이 SAN 보다 얼마나 찼고 얼마나 흘리는가’ 를 숫자로 한 자리에서 볼 수 없습니다. 베어메탈의 전송 속도는 아예 수집되지 않습니다.
+    시안 ① 은 <b>수집 1종(서버 diskstats 2초 표본)</b>을 더하고, 나머지는 이미 있는 값을 <b>한 표</b>로 묶습니다 — 새 vCenter · 어레이 호출은 없습니다.
+  </div>
+  <div class="foot">이 보드의 수치는 데모(mock) 사양과 가상 어레이 이름입니다. 현재 화면 캡처는 이 세션에서 목 서버를 띄우지 않아 싣지 않았습니다(의존성 설치 중) — 구현 단계의 Chromium 검증에서 실제 화면으로 확인합니다.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":620}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

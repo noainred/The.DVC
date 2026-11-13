@@ -23,6 +23,15 @@
 - (원래 5857행) CLI 계정 관리 메뉴(v2.723) — `server/src/tools/user-admin.js` + 래퍼 `user-admin.sh` → 설치본 `sudo vmware-port
 - (원래 5877행) super_admin 은 '저장 역할' 이고 요청 문맥에서는 admin + `superAdmin:true` 다
 - (v2.912 추가) 로그인 기록(최근 로그인 · 로그인 횟수)은 감사 로그가 아니라 `security/loginHistory.js` 하나로 센다
+- (v2.923 추가) 베어메탈 진단 스냅샷(원격 명령 실행 경로) — 상수 명령 · 읽기 전용 · sudo 0 · 인자 0 · 사유 · 감사 · 동시 1건 · 법인당 하루 상한 · 범위 404/403 · 인증 가드
+- (v2.929 추가) 베어메탈 집중 모니터링(분마다 SSH · Redfish 를 여는 쓰기 경로) · 성능 알림 규칙 설정 · 시험 실행 — 스냅샷 규약 재사용 · 법인 상한 예약 · 인증 즉시 중단 · 설정 소유자 · 전체 범위
+- (6단계 추가) 리눅스 성능 6단계 — 비교(법인 간은 전체 범위만 · 범위 밖 = 없음) · 5대 집중(전부 검사 뒤 시작) · 주석(작성자/관리자 · 흔적 삭제) · 목표 저장(설정 소유자) · 플레이북 실행 경로 없음 · 공유 링크 권한 없음
+- (7a단계 추가) 리눅스 성능 7a단계 로그 분석 — 조회 범위 교집합 먼저 · 단건 404 · 보안 패널(IP · 계정)은 관리자 판본만 원문 · 쓰기 경로 없음 · 차단 · 잠금 없음
+
+- (7b단계 추가) 리눅스 성능 7b단계 SSH 키 저장소 · 공통 계정 · 서버 등록 업로드 — 관리 = 설정 소유자 등급 + 본인 OTP(마지막 게이트) · 지문 · 공개키만 · 번들 가림 · 행 단위 범위 404/403 · 비밀 원문 행 거부
+- (8a단계 추가) 리눅스 성능 8a단계 정비 창 · 용량 예측 — 조회 밖 404 → 쓰기 밖 403(한 함수) · 법인/태그/12h 초과는 소유자 등급 · 고치기는 전후 모두 · 줄이는 동작은 쓰기 범위 · 배포는 개별 토큰만
+- (8b단계 추가) 리눅스 성능 8b단계 Top-N · 저활용 · 전력 API — 범위 먼저(합하기 전) · 단건 404 · 검토 쓰기 404 → 403 · 프로세스 사용자는 관리자 판본만 원문 · 인자 · 환경은 수집 단계에서 없음
+- (v2.976) 집중 모니터링 — admin + 전체 범위 · 키 로그인만 · 인증 거부 자동 재시도 금지 · 프로세스 comm 만 · 원격 명령 상수
 
 ## 본문
 
@@ -389,6 +398,9 @@
      베어메탈 귀속은 서버 분석 범위 절단과 같은 함수(`idrac/corpAttribution.js idracServerVcOf`) — 사본을 만들지 않는다(반증 L-1).
   ⑥ 검색어에서 파생한 값(시리얼 정규화 등)은 **요청당 한 번**(반증 M-2 — 행마다 하면 조작한 254자 검색어가 5만 행에서 215ms). 색인 생성은 시간 기준 양보(createYielder).
   ④ 색인은 관리자 판본 하나를 30초 공유하고 범위 · 가림은 응답 때 건다(사용자별 색인 금지 — 캐시 키 실수로 새는 것을 막는다). 응답 캐시(memoJson)는 두지 않는다. 검색어 256자 상한(넘으면 아무것도 맞지 않음) · 정규식 없는 선형 일치.
+  ⑦ v2.928 — **VM 태그 · 사용자 지정 속성으로 찾기는 그 값이 보이는 화면(`vm-tags` 도구)을 쓸 수 있는 계정만**(`accessPlan.tagsSearchable` — tools ∧ `userToolAllowed('vm-tags')`, 아니면 태그 칸을
+     일치에서 뺀다 · 표지 `tags` 도 싣지 않는다). 메모(annotation)는 inv.vms 의 '메모 포함' 과 같은 값이라 vm 종류로 충분하지만 본문은 응답에 싣지 않는다(`_notes` 는 검색 키).
+     `recent=`(클라이언트가 보낸 최근 장비 id)는 **이미 보이는 행의 순서에만** 쓴다 — 행을 더하거나 범위 판정에 쓰지 않는다. 색인 실측(`index` · 전체 행 수)은 관리자 판본(∧ 전체 범위)에게만.
   회귀 `server/test/invSearch2909.test.js` 21건 · 변이 22건 중 21 잡음(살아남은 1건은 `visible()` 의 이중 방어 줄 — 동등 변이) · 반증 1인 결과와 조치는 docs/design/inventory-search/README.md §7.4.
 - **v2.912 — 로그인 기록(설정 › 로그 › 최근 로그인 · 로그인 횟수)은 감사 로그가 아니라 `security/loginHistory.js` 하나로 센다.**
   ① 감사 로그(`audit.ndjson`)는 모든 관리 작업과 함께 **줄 수 상한**(AUDIT_MAX)으로 잘린다 — 기간 집계(최근 1달 · 사용자 정의)에 쓰면 밀려난 로그인이 '0 회' 로 보인다.
@@ -406,3 +418,203 @@
   ③ 라우트가 감사 줄에 '무엇이 어떻게' 를 남기려면 `res.locals.auditDetail`(문자열)을 세운다 — `auditMiddleware` 가 같은 줄의 detail 로 싣는다.
      쓰기 경로를 AUDIT_SKIP 에 넣어 두 줄을 피하지 말 것(데모 계정 쓰기 차단이 그 목록을 '읽기성 POST' 로 본다).
   회귀 `server/test/featureUsage2913.test.js` · 웹 `web/src/usageTracker.test.js` · `web/src/views/featureUsageText.test.js` · 설계 `docs/design/feature-usage/`.
+
+- ⚠⚠ **v2.923 — 베어메탈 진단 스냅샷(`POST /api/tools/bm-usage/perf/:key/snapshot`)은 원격 명령 실행 경로다 — 규약 10개를 테스트가 하나씩 고정한다**
+  (`bmusage/snapshot/{command,run}.js` · `routes/api/bmUsage.js bmSnapshotRun · bmSnapshotRead` · `routes/collector.js /bm-usage/snapshot(s)` · `central/bmUsageEdgePull.js runEdgeSnapshot`.
+  회귀 `server/test/bmPerf2923Snapshot.test.js`(실제 api 라우터 + 엣지 collector 라우트 포함) · 변이 검증):
+  ① **명령은 상수 하나**(`SNAPSHOT_COMMAND` — 함수가 아니라 값). 서버 이름 · 키 · 주소 · 사유 · 실행자 · 설정값(상위 N · 줄 수)을 명령에 넣지 않는다 — 설정은 파서가 결과를 자를 때만 쓴다(테스트가 악성 이름 · 사유로 SSH 에 간 명령 === 상수를 대조 · `exec(` 인자 스윕).
+  ② **읽기 전용 · 대상에 파일을 쓰지 않는다** — /proc/<pid>/io 두 표본의 차이는 awk 메모리에서 계산(임시 파일 없음) · 리다이렉트는 /dev/null 만 · rm · kill · tee 0.
+  ③ **sudo · su · pkexec · doas 자동 시도 0**(소스 스윕) — 권한이 없으면 그 칸은 ‘권한 부족 · 확인 불가’(/proc/<pid>/io 읽힌 수 < 전체 · dmesg_restrict) — 0 으로 두지 않는다.
+  ④ **프로세스 인자 · 환경 0** — ps 는 comm · /proc/<pid>/comm 만(cmdline · environ 금지 — 인자에 비밀번호가 흔하다).
+  ⑤ **출력 상한 세 겹** — 구획마다 head/tail · cut · 전체 `head -c SNAPSHOT_OUTPUT_MAX`(256KB · sshExec 4MB 보다 훨씬 작게) · 파서 줄 수 · 길이 · 설정 상위 N. 잘리면(END 없음) 뒤 구획은 missing.
+     **보관 상한(64KB)** 은 `fitSnapshotResult` 가 큰 칸부터(커널 로그 오래된 줄 → iDRAC 문장 → ss → 프로세스 표) 덜어 맞추고 `trimmed` · `dmesgDropped` 로 밝힌다 — 예전에는 결과를 통째로 `{truncated}` 로 바꿔 다시 열면 전 칸이 ‘받지 못함’ 이었다(반증 R4).
+     **표지는 위조되지 않게**(반증 R6 — 수집 명령 R1 과 같은 규칙): 줄 머리 정확 일치 · `SNAPSHOT_SECTIONS` 순서에서 뒤의 표지만 · 재개방 금지 · 커널 로그 줄은 `d:` 접두. dmesg ‘권한 부족’ 은 dmesg 자신의 오류 줄(`dmesg:`)만 본다(반증 R5 — 커널 메시지 안의 ‘Permission denied’ 는 실제 오류).
+  ⑥ **권한**: 실행 = `writeRole`(operator 이상 — viewer 403) + tools · 조회 밖 404(존재 은닉) → **쓰기 범위 밖 403 무조건**(server/CLAUDE.md v2.733 함정 — 조회 무제한 + writeVcenters 계정) · 사유 2~300자 필수(400) ·
+     보관분 조회는 tools + 조회 범위(실행 권한과 다르다) · 실행자(by)는 관리자에게만 · 비관리자에게는 dmesg · ss · 이벤트 · 사유의 IPv4 를 가린다.
+  ⑦ **서버당 동시 1건**(실행 노드의 실행 중 집합 — 검사와 등록 사이에 await 없음 · 중앙 대행도 같은 키 중복 전송을 막는다 · 409) · **법인당 24시간 상한**(실행 노드 설정 `snapshot.dailyCorpMax` · 429) —
+     ⚠ 상한은 **보관 행 + 실행 중** 으로 센다(반증 R2: 같은 법인 서로 다른 서버 6대를 동시에 누르면 상한 2 에 6건이 돌았다). 법인별 실행 중 수를 **동기적으로 예약**하고, [세기 → 검사 → 예약] 과 [보관 행 쓰기 → 해제] 를
+     법인 잠금 안에서 한다(세기와 해제 사이 틈 없음 · SSH 는 잠금 밖) · 보관 목록 · 조회도 7일 밖 행은 내지 않고 폴러 주기 정리가 지운다(반증 R3 — 예전에는 실행할 때만 지웠다) ·
+     **보관 DB 를 못 열면 실행하지 않는다**(상한을 셀 수 없다 — 503). 실패한 시도도 보관 · 상한에 센다(SSH 세션을 열었으므로).
+  ⑧ **SSH 는 공용 경로** — `withSsh`(호스트키 확인 S-01) + `withDeadline`(세션 시한 50초 > 연결 15 + 명령 30 — 시한이 세션을 실제로 끊는다) · 인증 실패는 **주기 수집과 같은 가드 · 같은 식별자**에 기록(`poller.recordOsAuthOutcome` — 계정 잠금 방지) ·
+     성공은 정지를 푼다 · 수동 실행은 정지 중에도 막지 않는다(규칙 3 — 결과가 ‘정지 상태였다’ 를 말한다) · 호스트키 거부 · 시한은 인증 실패가 아니다.
+  ⑨ **감사 로그** — 중앙 `bm-usage.snapshot`(실행자 · 사유 · via · code · id) · 엣지 `중앙 대행 진단 스냅샷`(central-portal:<계정 — 글자 제한>). 사유 · 실행자는 명령에 들어가지 않는다.
+     사유는 `cleanReason` 이 C0 · C1 제어 · 양방향 제어(U+202A~202E · U+2066~2069 — 감사 화면 글자 순서 뒤집기) · 폭 없는 문자를 뺀다(반증).
+     (기록 — 반증 E) 이 쓰기 경로는 감사가 두 줄이다: `auditMiddleware` 의 자동 줄 + 라우트의 `logAudit`(무엇이 · 어떻게). 같은 파일 port-map · purpose 와 같은 기존 패턴이라 고치지 않았다 · ip 는 `req.ip`(기존 패턴).
+  ⑩ **엣지 대행 계약** — 같은 url · 같은 토큰(tokenFirst + 4kb 파서) · POST 재전송 0(retries 0) · 엣지는 자기 대상 목록 밖 키를 not-found · 업무 결과는 200 + code(중앙이 HTTP 로 옮긴다) · 중앙 정제 `sanitizeSnapshotBody`(아는 필드 · 상한 · enum 밖 code/상태 차단) ·
+     결과는 엣지 7일 보관 · 중앙은 받기만(복제 적재 없음) · 다른 서버 키로 id 를 읽지 못한다.
+  iDRAC 쪽은 명령이 아니라 **이미 가진 값**(인벤토리 SEL/LC 최근 5 · 센서 순간값 · 전력 최신 — Redfish 호출 0). 튜닝 탭에는 **쓰기 경로 자체가 없다**(sysctl -w · tuned-adm profile · ethtool -G 0 — 소스 스윕).
+  ⑪ **GET 에 writable**(반증 W4 — server/CLAUDE.md v2.733): 보관분 목록 · 용도 보기 응답에 쓰기 범위(`inUserWriteScope`)를 싣고 화면이 실행 · 태그 칸을 잠근다(서버는 그대로 403). 응답 캐시 키(opsKey)에 **쓰기 범위 서명**을 넣었다 — 조회 범위 · 역할이 같고 쓰기 범위만 다른 두 계정이 캐시를 나누면 writable 이 샌다.
+  ⑫ **덮어쓰기 scope(반증 R10)**: `PUT /tools/bm-usage/tuning/overrides` 의 scope 는 'all' 또는 vCenter id 형식이면서 Object.prototype 이름이 아닌 것만 · 맵은 null 프로토타입 · 읽기는 Object.hasOwn — 예전에는 ‘toString’ 이 ok:true 인데 저장되지 않고 전역 내장 함수 객체를 고쳤다(재현).
+- ⚠⚠ **리눅스 성능 6단계 — 비교 · 주석 · 세트 · 목표선 · 수집 건강의 권한 · 범위 · 감사(새 쓰기 경로는 주석 · 세트 · 목표 · 5대 집중뿐 — 원격 명령 실행 경로는 없다)**
+  (`routes/api/{bmCompare,bmAnnotations,bmPlaybookSlo,bmCollectHealth}.js`. 회귀 `server/test/bmPerfStage6{Compare,Annot,PlaybookSlo,Health}.test.js` — 실제 api 라우터 · 변이 28건 전부 잡힘):
+  ① **비교 조회**(tools): 범위 밖 · 없는 서버는 둘 다 `none`(존재 은닉) · **법인 간 허용(`cross=1`)은 전체 범위 계정만** — 범위 계정이 보내면 404(기능 은닉 · 화면에 토글 없음) · 비관리자는 이름 가림(주소 매처).
+  ② **5대 동시 집중**(`POST /compare/focus` — writeRole + tools): 키를 전부 먼저 해석(하나라도 없음 · 범위 밖 → 404, 아무것도 시작하지 않음) → **쓰기 범위 하나라도 밖이면 403 전부 거부**(v2.733 함정 — 조회 무제한 + writeVcenters) →
+     서버마다 5단계 `focusStartResolved`(사유 필수 · 법인 상한 · 인증 정지 거부 · 감사 `bm-perf.focus` origin `compare`). 사유는 한 번 받아 모든 서버에 같이 쓴다.
+  ③ **운영 주석**: 조회 tools — 주석의 법인이 **전부** 조회 범위 안일 때만 보인다(귀속 없음은 범위 계정에 숨김) · 쓰기 writeRole — 조회 밖 404 → 쓰기 밖 403(서버 대상은 대상 해석의 법인 · 법인 대상은 알려진 법인만) ·
+     고침 · 삭제는 **작성자 또는 관리자**(자동 주석 `system` 은 관리자만) · 삭제는 흔적(본문 · 연결을 비운다) · 감사 `bm-perf.annotation`(op · 종류 · 본문 앞 120자) · 응답에 서버 키를 싣지 않는다(요청한 토큰만 `includes` · 이름은 비관리자 가림).
+  ④ **비교 세트**: 사용자별(남의 세트를 읽거나 지우지 못한다) · 범위 계정은 `cross` 세트 저장 400 · 쓰기 writeRole · 감사 `bm-perf.compare-set`.
+  ⑤ **목표선 설정**: 저장 `PUT /tools/bm-usage/slo` = admin + `requireSettingsOwner`(소유자 ∧ 전체 범위) + tools · 형식 밖 400(모르는 지표 · 기준 · 연산 · Object.prototype 이름) · 감사 `bm-perf.slo`(바뀐 범위 요약) ·
+     조회는 tools — 범위 관리자는 보이는 서버의 개별 목표만 · **비관리자는 서버 키(주소일 수 있다)를 받지 않고 개수만**(`serversHidden`).
+  ⑥ **수집 건강**(admin/operator + tools — 설계 ‘관리자와 운영자’): 범위 계정은 자기 법인 행만 · 다른 법인 서버가 섞인 노드 값(주기 · 동시성 · SSH · DB · 추이 · 며칠째)은 `nodeHidden` · 보이는 법인이 없는 노드는 개수만 · 마지막 당김 사유 원문 없음.
+  ⑦ **진단 플레이북은 실행 경로가 없다**: 카탈로그 · 서버별 응답 모두 `executes:false` · 라우트는 GET 뿐 · `bmusage/playbooks.js` 는 SSH · exec 모듈을 import 하지 않는다(테스트가 소스로 확인) ·
+     명령 줄은 **검토된 읽기 전용 목록에 글자 그대로 있는 줄만**(`READONLY_COMMANDS` 정확 일치 — 반증 F6: 예전 도구 화이트리스트는 `dnf history undo` · `ss -K` · `sort -o /etc/passwd` ·
+     `awk 'BEGIN{system(…)}'` · `grep "a\" # " ; reboot`(이스케이프 따옴표가 주석 자르기를 속임 — bash 실측 실행) 등 17건을 통과시켰다) 싣고, 자리표시 값은 이름 화이트리스트(셸 의미 문자 금지) —
+     복사한 사람이 서버에서 그대로 붙여 넣어도 쓰기 · 재시작 명령이 되지 않게. 목록에 더할 줄은 `lintCommand`(도구별 허용 인자)를 통과해야 한다(검토 보조 — 보증은 목록).
+  ⑨ **가림 판정기는 하나**(반증 F11): 엣지 위임 서버 이름이 실리는 응답(비교 · 운영 주석)은 `bmUsage.perfAddressMatcher`(이 노드 대상 · 등록부 + 엣지 보관분 idracHost · osHostName)로 가린다 —
+     주석 목록이 엣지 호스트명(FQDN)을 비관리자에게 그대로 보내던 것을 막는다(응답은 `addressHidden:true` 라고 말하면서 원문을 실었다).
+  ⑩ **범위 계정의 수집 건강 노드 상태**(반증 F8): 노드 값을 숨긴 노드는 상태도 숨기고(`hidden`) 법인 행은 그 법인 값으로 판정 — 다른 법인의 인증 정지가 ‘기준 밖’ 으로 새지 않는다.
+  ⑧ **공유 링크는 권한을 주지 않는다**: 해시(`#/tools/bm-usage/share?…`)에는 보기 상태만 — 여는 사람의 권한 · 범위로 다시 조회한다(없으면 ‘찾지 못함’ — 존재 여부를 말하지 않는다). 캡처 PNG 는 브라우저가 화면을 그린 것(서버 경로 없음).
+- ⚠⚠ **리눅스 성능 7a단계 로그 분석의 권한 · 범위 · 가림(읽기 전용 — 새 쓰기 경로는 없다. 설정 · 규칙 저장은 5단계 perf-rules 하나)**
+  (`routes/api/bmLogs.js` · `central/bmLogsPull.js` · `edgelog/redact.js redactSystemLogLine`. 회귀 `server/test/bmLogs7a{Route,RoundTrip,Rules}.test.js`):
+  - 경로는 `/tools/bm-usage/perf/:key/logs` · `/tools/bm-usage/logs`(도구 키 ‘bm-usage’ 그대로 — toolGate 집행 · 테스트가 `toolKeyForPath` 로 고정) · `tools` + vCenter scope.
+    **조회 범위 교집합을 먼저**(`resolvePerfTarget` · 함대는 `applyScope` 뒤에 공통 원인 후보를 계산 — 범위 밖 서버가 후보 목록으로 새지 않게) · 범위 밖 · 귀속 없음(범위 계정) · 없는 키 = 같은 404.
+  - **누가 무엇을 보나** — 판정은 `isAdminDetailUser` 하나(`addressMask.isAdminReq`): 관리자(데모 계정 제외)는 실패 상위 IP · 계정 · 성공 로그인 · sudo(계정 → 대상 · 명령 이름) · 계정 변경 · 집중 IP ·
+    보안 패턴 표본까지. 그 밖은 **개수 · 분류 · 규칙은 같고** IP · 계정은 가림 토큰(`maskedIdToken` — 같은 값은 같은 토큰) · 보안 분류 패턴 표본은 싣지 않음(`samplesHidden`) · 다른 표본 · 연계 문구 ·
+    서버 이름은 공용 판정기(`perfAddressMatcher` — 엣지 대상 주소 포함) + IPv4 토큰. 근거: 로그인 실패 IP · 계정은 공격 표면 정보라 포탈 로그인 실패 분석(security/loginFails — 범위 계정 403)과 같은 등급.
+  - 응답 캐시 `memoJson` 열쇠 = 범위 서명 + **역할** + 마지막 수집 + 로그 주기 + 엣지 보관분 세대(관리자가 먼저 읽어도 비관리자는 가린 판본 — 테스트) · 엣지 대행 실패는 `__noStore`.
+  - **표본 가림**(`redactSystemLogLine` — 표본 5줄 · 서명 · 함대 표본 공통): 포탈 규칙(`redactLogLine`) + `pass=`/`pwd=`/`pw=`(소문자 — 대문자 `PWD=` 는 sudo 작업 폴더라 두었다) · `Authorization:` 줄 끝까지 ·
+    PEM 머리 줄 · 줄 전체 긴 base64 · 전자우편 · 주민번호 · 휴대전화 · 카드번호 · **sudo COMMAND 인자**. 줄 길이 먼저 자르고 길이 한정 반복만(ReDoS 비율 테스트). 완전할 수 없다 — 1차 방어는 원문 미보관.
+  - ⚠⚠ **가림 판정은 하나 — 표본 · 서명 · 보안 상위가 같은 줄에서 어긋나면 안 된다**(7a 반증 F7 — 서명 `templateFor` 가 `redactSystemLogLine` 을 건너뛰어 같은 줄의 표본은 [가림] 인데 서명에
+    계정 · 메일 · 토큰이 나갔고, 비관리자 보안 상위는 토큰인데 서명에 계정 원문이 있었다): 서명 = 보안 꼴 치환(OpenSSH 연결 식별 꼴 · GPDB `user "…"` 포함) → **같은 줄에서 뽑은 계정 · 주소 값 치환**
+    (`scrubFacts`) → `redactSystemLogLine` → 경로 → `templateOf`. 보관 · 봉투 · 중앙 정제에서 읽을 때도 `maskStoredTmpl`(멱등)로 다시 댄다. 비관리자 판본은 보안이 아닌 표본 · 서명의 계정 꼴
+    (`role "x"` · `user=x` · `acct="x"`)도 토큰(`maskAccountForms`). GPDB 로그인 실패는 보안 분류(표본은 관리자만 · 반증 F11).
+  - **함대 노드 목록도 범위**(반증 F10): 범위 계정의 `/tools/bm-usage/logs` `nodes` 는 자기 범위 대상이 보이는 노드(이 노드 · 엣지)만 — 엣지 이름 · 상태 · 시각도 다른 법인 운영 정보다
+    (`/tools/bm-usage/edges` v2.600 AUTHZ-2600-07 과 같은 규약) · 뺀 수는 `nodesOmitted`.
+  - 포탈은 **차단 · 계정 잠금을 하지 않는다**(보안 판정은 알림 규칙 ‘logs’ 까지).
+- ⚠⚠ **v2.929 — 베어메탈 집중 모니터링(`POST /api/tools/bm-usage/perf/:key/focus` · `/focus/:id/stop`)은 분마다 SSH · Redfish 를 여는 쓰기 경로다 — v2.923 스냅샷 규약을 그대로 쓰고, 넘는 부분만 더했다**
+  (`routes/api/bmPerfOps.js bmFocusStart · bmFocusStop` · `bmusage/focus/run.js` · `routes/collector.js /bm-usage/focus[/stop]` · `central/bmPerfOpsPull.js runEdgeFocus · stopEdgeFocus`.
+  회귀 `server/test/bmPerf2929Focus.test.js`(실제 api 라우터 + 엣지 collector 라우트) · `bmPerf2929Alerts.test.js ⑥` · 변이 20건 전부 잡힘):
+  ① **권한**: 시작 · 중지 = `writeRole`(operator 이상) + tools · 조회 밖 404 → **쓰기 범위 밖 403 무조건**(v2.733 함정) · 사유 2~300자 필수(400 — `snapshot/reason.js cleanReason` · 제어 · 양방향 · 폭 없는 문자 제거) ·
+     감사 `bm-perf.focus`(사유 · via · code · id) · `bm-perf.focus.stop` · 엣지 쪽 `중앙 대행 집중 모니터링`(central-portal:<계정 — 글자 제한>). 사유 · 실행자는 명령에 들어가지 않는다.
+  ② **명령은 상수**: 1분 = 주기 수집 명령(`linuxCommand` — 마운트 화이트리스트만 삽입) + `FOCUS_SNAPSHOT_COMMAND`(상수 · 읽기 전용 · ps comm 만 · sudo 0 · 출력 16KB) — 같은 SSH 세션(`extraCommands` — 세션을 더 열지 않는다).
+  ③ **동시성 · 부하 상한**: 서버당 1세션 · 법인당 동시 상한(기본 5 — **실행 중 + 예약을 동기적으로 세고 예약** · 넘치면 대기열) · 전역 슬롯 공유 · 세션 시한 50초(`withDeadline` 이 세션을 끊는다) ·
+     자동 집중은 법인 옵트인 + 하루 상한(10) + 같은 서버 재발 억제 30분 · 인증 정지 계정이면 자동 시작 0.
+  ④ **인증 거부는 그 분에서 즉시 중단** — 다음 분을 예약하지 않는다 · 주기 수집과 **같은 가드 · 같은 식별자**에 기록(자동 재시도 0 — 계정 잠금). ⚠ 반증 F11 정정: 초판은 ‘수동은 정지 중에도 막지 않는다(스냅샷 규칙 3 과 같다)’ 였지만 스냅샷에는 법인당 하루 상한이 있어 시도 수가 묶였고 집중에는 없었다 —
+     누를 때마다 정지된 계정으로 로그인 1회(계정 잠금 경로). 이제 **수동도 정지된 계정이면 거부**(`auth-stopped` · 어느 경로가 정지인지 · 이유 문구) + **법인당 하루 수동 상한**(`daily.manualFocus` 기본 20 — `daily-cap` 429 ·
+     처음 한 번 DB 에서 세고 그 뒤는 동기 증가: 동시 요청도 한 번만 통과).
+  ⑤ **엣지 대행 계약** — POST 재전송 0(retries 0) · 같은 토큰(tokenFirst + 4kb 파서) · 엣지는 자기 대상 목록 밖 키를 not-found · 업무 결과 200 + code · 중앙 정제(`sanitizeFocusBody` — 아는 필드 · enum · 상한 · 시각 clamp) ·
+     구버전 엣지(경로 없음 401 · 404)는 `old-version`(문구의 최소 버전은 릴리스 노트에서 읽는다 — `perfOpsMinEdgeVersion` · edge.md v2.929 · 판정은 경로 존재).
+  ⑧ **엣지 봉투의 법인 · 키 · 제목은 신뢰하지 않는다**(반증 F9 — edge.md v2.929): 이슈 · 알림 이력 범위는 중앙이 정한 법인(파트 장애 자동 등록과 같은 함수) · 그 엣지 대상 목록 밖 키는 버림 · 제목은 code 로 다시 만든다.
+  ⑥ **알림 규칙 설정(`PUT /tools/bm-usage/perf-rules`)** = admin + `requireSettingsOwner`(소유자 ∧ 전체 범위) + tools · 형식 밖 400(모르는 규칙 · 채널 · Object.prototype 이름 거부) · 감사 `bm-perf.rules`(켠 규칙 요약 · 비밀 없음).
+     읽기는 tools — 범위 계정은 **자기 법인 예외 · 자기 법인 발송 기록만**(비관리자는 주소 가림 · 제목의 IPv4 가림) · 채널 URL 은 싣지 않는다(기존 알림 채널 설정의 사본만 쓴다).
+  ⑦ **시험 실행(`POST /perf-rules/dry-run`)** = admin + **fullScopeOnly**(이 노드 전 서버를 대 본다 — 이름 · 법인이 실린다) + tools · 보내지 않고 상태도 바꾸지 않는다. (archScan `route-gate-missing` 이 이 게이트 누락을 잡았다.)
+
+- ⚠⚠ **리눅스 성능 7b단계 — SSH 키 저장소 · 법인 공통 계정 · 서버 등록(CSV/Excel) 업로드의 권한 · 비밀 · 범위**
+  (`bmusage/onboard/{keyParse,keyStore,keyBundle,refs,importParse,importAnalyze,onboardRun,edgeDeploy,edgeApply,missing,connTest}.js` · `routes/api/bmOnboard.js` ·
+  회귀 `server/test/bmOnboard7b{Keys,Import,Edge,Missing}.test.js`):
+  ① **키 · 공통 계정 관리**(등록 · 이름/회전 예정 · passphrase · 회전 · 삭제 · 계정 저장/삭제) = `adminOnly → tools → requireSettingsOwner(소유자 ∧ 전체 범위) → reauth(본인 OTP)` —
+     **reauth 는 마지막**: 권한이 없는 요청(소유자 아님 · 범위 소유자)이 OTP 코드를 소모하지 않는다(⑨ 가 순서를 고정). 감사 로그에는 이름 · 종류 · 지문 · code 만.
+  ② **응답 · 감사 · 내보내기 · 백업 · 엣지 설정 push 에는 지문 · 공개키만** — 라우트는 원본 목록(`listKeysRaw` · `listAccountsRaw` · `keyMaterial` · `resolveOsAuth`)을
+     쓰지 않는다(소스 스윕 ⑩). 접속 자격 원본은 `refs.withResolvedAuth`(폴러) · `connTest.testSavedOs`(연결 시험)만 만든다.
+     번들(`backup/service.js putCollected` — 백업과 엣지 push 가 같은 함수)은 ssh-keys.json 의 개인키 · passphrase · 비밀번호를 **봉인본도 싣지 않는다**(`keyBundle.redactKeyStoreText`) ·
+     복원은 지금 파일의 같은 지문 · 같은 계정의 저장값(봉인 그대로)을 옮겨 붙이고 못 살린 항목은 빼며 `envKeysDropped` 로 밝힌다.
+  ③ **키 판정은 키 자체로**(사람이 적은 종류 · 지문을 받지 않는다): DSA · RSA<2048 · 공개키만 · PKCS#8(ssh2 미지원) · 여러 개 · 틀린 passphrase 거부.
+  ④ **저장소 손상 = 쓰기 거절(503)** — 로드를 **먼저** 하고 오류를 본다(⑦ 이 잡은 결함: 첫 호출이 쓰기면 오류 상태가 비어 손상 파일을 빈 저장소로 덮어썼다).
+     정책 잠금(S-07)은 `SECRETS_POLICY_UNAVAILABLE` 그대로 · 메모리도 바꾸지 않는다(사본 수정 → 봉인 · 원자적 쓰기 → 성공 뒤 캐시 교체).
+  ⑤ **주소가 바뀌면 키 · 공통 계정 참조도 승계하지 않는다**(bm-storage `keyRef` · `credRef` — host · port · 계정, secretCarry 와 같은 판정 · `droppedSecrets`).
+     공통 계정은 법인 · 종류 · 계정명이 바뀌면 비밀번호 · 기본 키를 잇지 않는다. 키를 못 찾으면 **비밀번호로 몰래 넘어가지 않고** 접속하지 않는다(authError).
+  ⑥ **업로드**(`POST /tools/bm-usage/onboard/{analyze,apply}`) = admin + tools + `data.csv` + 데모 계정 403 · BIG_JSON(세션 풀 · `sessionBigBodyAllowed` 의 `ONBOARD_UPLOAD`) ·
+     파일 4MB · 5,000행 · 칸 1,024자 · .xlsx 는 압축 폭탄 가드(`svcmon/formats.js assertXlsxSizeOk` — 실제로 풀며 상한) · 파일 미보관 ·
+     **비밀 칸 값은 읽지 않고 그 행 거부 · 칸 내용이 키 블록 · password= 꼴이면 거부 · 자격 칸(os_cred · idrac_cred · os_key) 값은 결과 · 결과 CSV 에 다시 싣지 않는다** ·
+     결과 CSV 는 `csvLine`(수식 주입 `= + - @` 가드).
+  ⑦ **범위는 행 단위**(archScan `ROUTE_GATE_ALLOW` 에 사유): 조회 밖 법인 = '없는 법인' 과 같은 문구(corp-not-found — 404 꼴, 존재 은닉) → 쓰기 밖 = corp-forbidden(403 꼴) ·
+     바꾸려는 **기존 항목의 법인**도 쓰기 범위 · 미귀속 행 · 귀속 없는 기존 항목은 전체 범위만. 적용은 같은 파일을 **다시 분석**한 서명이 사람이 본 서명과 같을 때만(다르면 409).
+  ⑧ 연결 시험(`POST /onboard/test`)은 **id 만** 받는다(v2.480 — 요청 host 무시) · 한 번 · 인증 거부는 '정지 후보' 안내(자동 재시도 없음) · 호스트키 미신뢰는 peerTrust 승인 안내.
+  ⑨ **(r2 메인 결정 — 감사 H-1 · 반증 F1 · F1-b · F19 · Q4 · L-11) 저장된 비밀을 주소에 묶는 것 = 그 비밀을 관리하는 등급**: 공통 계정 · SSH 키 **이름**을 새 항목 · 주소가 바뀐 항목 ·
+     다른 묶음에 쓰는 CSV 행(`importAnalyze` binds) · `POST /tools/bm-storage/servers` 의 keyRef · credRef(`bmstor.js bmBindCheck` — 존재 · 퇴역 · 종류 확인) · iDRAC 공통 계정 사본 ·
+     엣지 배포 행은 **설정 소유자 등급 + 본인 OTP**(`runGate(requireSettingsOwner)` → 서명 대조 → `runGate(reauth)` 마지막). 비소유자 · 범위 관리자는 **계정 · 키를 찾기 전에** `bind-owner-only`
+     (다른 법인 계정 · 없는 키를 가르는 오라클 없음) — 개별 계정(개별:계정명)으로만 올린다. 주소 · 묶음이 그대로인 행은 묶음이 아니다(변화 없음).
+     공통 계정을 쓰면 접속 계정명은 **계정 쪽**(F19) · 퇴역 키는 접속에 쓰지 않는다(`keyMaterial` key-retired). 회귀 `bmOnboard7bReview` ① ⑨ · 변이 N1~N6.
+     감사 권고 ②(peerTrust 를 경로별로 강제 — observe 정책에서도 미승인 상대에 저장 비밀을 보내지 않기)는 **이번에 하지 않았다** — 묶는 권한을 소유자 + OTP 로 올려
+     권한 상승 경로(범위 · 비소유자 관리자가 비밀의 행선지를 고르는 것)가 닫혔고, 소유자 자신이 observe 정책에서 새 주소에 묶는 것은 의도된 동작이다. 화면이 'observe 면 첫 접속에 지문 승인 없이 보낸다' 를 밝힌다.
+  ⑩ (r2) 범위 계정: 범위 밖(조회 밖 법인 · 귀속 없음) 기존 항목 · 배포 행과 겹치는 행은 **신규와 같은 꼴**로 보이고(`plan.hidden` — 응답에 없음) 적용 단계에서 막는다(수만 `blocked`) —
+     존재 오라클 차단(감사 L-1 · 반증 F18). class 는 전체 범위만 · purposes/role 은 그 service_tag 가 쓰기 범위 안 수집 대상으로 해석될 때만(감사 M-2 · F10).
+     키 목록은 범위 계정에 주지 않고 · 공통 계정은 자기 법인 소속만(공용 이름 · 사용처 없음 — L-7). 키 저장소는 복호 실패가 있으면 쓰기 거절(F5 — 봉인본이 유일한 사본).
+     복원은 ssh-keys.json 을 **합집합**으로 병합(백업 뒤 키를 지우지 않음 · `sshKeysKept` — F13) · 중앙은 엣지 설정 사본의 ssh-keys.json 도 다시 가린다(L-3).
+  ⑪ (r3 · 재검증 R-N1) **묶음 판정은 `bmusage/onboard/bindRule.js` 하나 + 등록부 choke point**. R-N1: 소유자가 묶은 서버(credRef + osAuth=password)를 비소유자 · 범위 관리자가
+     `os_cred` 빈칸 + `os_key=password` + 새 주소로 올리면 예전 분석은 '이름을 쓰는 행' 만 묶음으로 봐 통과시켰고, 적용 계획이 기존 credRef 를 **명시로** 다시 실어
+     bm-storage 의 '주소가 바뀌면 버림' 가드를 지나 공통 계정 비밀번호가 새 주소로 나갔다(가짜 sshd 수신 재현). 고친 것:
+     (가) `bindDecision(existing, next)` — 토큰(접속처 = host · port · 계정, accessMoved 와 같은 정규화 · 참조 · osAuth)으로 '효력 참조가 있고 (새 항목 · 이동 · 다른 참조)
+     이거나 같은 주소에서 공통 계정의 인증 방식을 바꾼다' 를 판정. 분석(계정 · 키를 찾기 **전** 이름 토큰 + 찾은 뒤 적용 본문 그대로 `bindOfWrite`) · `bmBindCheck` ·
+     등록부가 같은 함수를 쓴다(예전 조각 `bindOs` · 라우트의 moved 계산은 지웠다 — 스윕). (나) **`bmstor/registry.js applyServerInput` = choke point**: 묶음 쓰기는
+     `bindApproved === true`(엄격) 일 때만 묶고, 아니면 주소가 바뀐 쓰기는 참조를 버리고 같은 주소면 기존 참조 · osAuth 를 둔다(`bindRefused` · `droppedSecrets`) · 떼기는 된다 ·
+     표지는 저장하지 않는다. 표지를 세우는 곳은 셋뿐(소스 스윕 ⑫): bm-storage 라우트(소유자 게이트 → OTP 게이트 **뒤** · 클라이언트가 보낸 값은 버림) ·
+     온보딩 적용(`plan.binds` — 라우트가 소유자 + OTP 를 통과시킨 행) · 엣지 적용은 같은 applyOnboard 를 지나되 **엣지 문맥의 소유자 = 행의 중앙 승인 `bindOk === true`**
+     (중앙 적용이 묶음 행에만 싣고, 묶음 칸 — 주소 · 이름 — 이 그대로인 갱신만 앞 승인을 잇는다). 엣지 쪽 기존 항목을 중앙이 모르므로 '잇는'(os_cred 빈칸 + os_key) 배포 행은
+     늘 묶음으로 본다 · 다른 엣지로 옮기는 행은 그 엣지에겐 새 묶음. 회귀 `bmOnboard7bReview` ⑩(h18 — 비소유자 · 범위 관리자 · 가짜 sshd 수신 0) ⑪(h20 — choke point ·
+     일괄 · 온보딩 · 엣지) ⑫(스윕) · 변이 R1~R10. 키 회전(`replaceBmServerKeyRefs` — 같은 주소의 키 교체, 소유자 + OTP 라우트)은 choke point 를 지나지 않는다(주소 불변).
+
+- ⚠⚠ **리눅스 성능 8a단계 정비 창 · 용량 예측 API — 억제를 늘리는 쓰기는 등급 게이트, 줄이는 쓰기는 쓰기 범위, 판정은 서버 하나**
+  (`routes/api/bmMaint.js` · `routes/api/bmCapacity.js` · `routes/central.js GET /bm-maint` · 회귀 `bmMaint8aRoute` · `bmMaint8aEdge` · `bmCapacity8aRoute`):
+  - 읽기 = tools + 조회 범위(창 · 행의 법인 — 귀속 없음은 범위 계정에 숨김) · 상세 · 음영 구간은 형제 라우트와 같은 `resolvePerfTarget`(범위 밖 · 없는 키 404) · 비관리자는 주소인 서버 이름 · 키를 가림 토큰으로.
+  - 쓰기 = operator 이상 + tools · **`writeGate` 한 함수**가 서버 · 태그 · 법인 대상을 모두 ‘조회 밖 404 → 쓰기 밖 403’ 으로 · 서버 창은 1~20대 · **한 법인**(법인 간 400 cross-corp · 귀속 없는 서버 불가).
+  - **승인 등급**: 법인 전체 · 태그 · 12시간 초과 창 = 설정 소유자 등급(`isOwnerTier` — requireSettingsOwner 와 같은 판정: 소유자 ∧ 전체 범위 · 인증 꺼짐은 통과). 소유자 아닌 관리자 · 범위 소유자 · 운영자 403 owner-required.
+    **고치기는 전(cur)과 후(next) 중 하나라도 소유자 등급이면 소유자 등급**(법인 창을 서버 창으로 바꿔 쥐거나 서버 창을 늘려 넓히는 우회 금지) · 법인(vcenterId)은 바꿀 수 없다(지우고 새로) ·
+    재확인(반복 창 시한 연장)도 만들 때 등급. **억제를 줄이는 동작**(지금 끝내기 · 지우기)은 그 법인 쓰기 범위면 된다. 7b 반증 ‘업로드로 전체 범위 게이트 우회’ 와 같은 효과를 내는 다른 경로를 대조했다 —
+    창을 만드는 경로는 이 라우트 · 중앙 배포(개별 토큰 · 엣지 재정규화) · 백업 복원(소유자 등급) 셋뿐이다.
+  - ⚠⚠ **8a 반증 뒤**(회귀 `bmMaint8aFixRoute` · `bmMaint8aFixEdge`): 서버 대상은 **(법인, 키) 쌍**(F1 — 같은 키가 여러 법인에 보이면 400 ambiguous-key · 법인을 고르면 그 법인 안에서만
+    `resolvePerfTarget` · 판정 · 배포도 법인을 본다 — 범위 계정 A 의 창이 같은 IP 키인 법인 B 서버를 억제하던 범위 우회 차단) ·
+    **12시간 소유자 규칙은 같은 서버를 덮는 창들(소유자 창 · 법인 · 태그 창 포함 — 살아 있는 창 전부)의 합**(F5 · 재확인 G1 · G2 — `store.coverNeedsOwner`: 어느 24시간에서든 12시간 초과 ·
+    비소유자의 만들기 · 덮임이 바뀌는 고치기(대상 · 시간대 · 일정 · 범위) · 재확인에 적용 · 이름 · 사유만 고치기는 억제를 늘리지 않아 예외 · 소유자 자신의 저장은 그대로 허용 ·
+    `approvedBy` 는 **기록일 뿐 합 판정에 쓰지 않는다** — 운영자 혼자 12h 창 두 개 + 재확인, 또는 소유자 12h 창 옆에 12h 를 붙여 ② 보류를 상시 · 무기한으로 만들던 경로 차단 ·
+    소유자가 운영자 창 이름만 고쳐 approvedBy 가 붙어도 합에서 빠지지 않는다). **rev 없는 고치기 · 끝내기 · 재확인 · 지우기는 409 rev-required**(마지막 쓰기 승리 금지).
+  - 동시 쓰기: 저장소 직렬 큐 + 창마다 rev(없거나 다르면 409) · 손상이면 503 · 쓰기 거부. 감사 `bm-perf.maintenance`(op create/edit/end/confirm/delete · 대상 종류 · 법인 · 수 · 일정 꼴 · 범위 · 사유 앞 120자) · `bm-perf.capacity.recompute`.
+  - 다시 계산(`POST /capacity/recompute`)은 operator 이상 + **전체 범위만**(전 법인 대상 계산을 범위 계정이 일으키지 않게).
+  - 배포 인출 `GET /api/central/bm-maint` 은 **개별 토큰으로 인증된 이름에만**(공유 토큰 `?agent=` 는 distribute:false — 남의 법인 정비 일정을 받아 가거나 억제를 씌울 수 없다) · 창 파일 손상이면 지속 503.
+- ⚠⚠ **리눅스 성능 8b단계 API(`routes/api/{bmTop,bmIdle,bmPower}.js`) — 범위 먼저 · 사용자 이름은 관리자 판본만 · 인자 · 환경은 아예 읽지 않는다**
+  - 프로세스 Top-N(`/tools/bm-usage/perf/:key/top` · `/top/band`): 해석은 `resolvePerfTarget` 하나(범위 밖 · 귀속 없음 · 없는 키 404 · 비관리자는 가림 토큰으로도 찾는다) · ts · 창 형식 밖 400 ·
+    **프로세스 사용자 이름은 관리자 판본(`isAdminReq` = `isAdminDetailUser`)에만 원문** — 그 밖은 `maskedIdToken`(같은 값은 같은 토큰). 근거: OS 계정 이름은 7a 로그 분석의 계정과 같은 등급(어떤 계정이 서버에 있고 무엇을 돌리나).
+    comm 은 기능의 본문이라 가리지 않되 주소 꼴(등록부 · IPv4)은 가린다 · 인자 · 환경 · 열린 파일은 **수집 명령이 읽지 않는다**(명령 문자열 스윕 시험) · kill 등 조작 경로 없음.
+  - 저활용(`/tools/bm-usage/idle`): 행 법인으로 범위 거르기(귀속 없음은 범위 계정에 숨김) · 출처(노드) 목록도 보이는 행의 노드만 · 검토한 사람은 비관리자에게 가림 토큰 ·
+    검토 쓰기(`POST …/idle/review`) = 운영자 이상 · **조회 밖 404 → 쓰기 밖 403**(`resolvePerfTarget` → `inUserWriteScope`) · 상태 열거 밖 400 · ‘유지’ 사유 필수 · 저장은 운영 주석(auto `idle:<상태>`) · 감사 `bm-perf.idle.review` ·
+    다시 계산(`…/idle/recompute`)은 전체 범위만(403 full-scope-only) · 감사.
+  - 전력 · 온도(`/tools/bm-usage/power`): **범위로 서버 기록을 먼저 거른 뒤 합한다**(범위 밖 서버가 합 · 랙 · 피크에 섞이지 않게) · 랙 배치도 보이는 법인 것만 · ⚠ 집계 함수의 `cfg` 에 설정 원본(`power.racks` — 전 법인 랙 · 서버 키)을 넘기지 말 것(시험이 잡은 누수 — 응답 cfg 로 범위 밖 랙이 샜다) ·
+    알림 규칙 GET 의 `power.racks` · `racksText` 도 보이는 법인 것만 · 랙 배치 쓰기는 알림 규칙 PUT(설정 소유자 등급) — 텍스트는 서버가 해석(`perfRules.parseRackText` — 같은 랙 두 번 · 한 서버 두 랙 · 상한 범위 = 400).
+  - 반증 F7: 비관리자 판본은 프로파일 단서(hint)도 **가린 사용자로 다시 계산**(`maskTopRows` — ‘gpdb’ 는 계정 gpadmin 에서 나온 단서라 두면 가림 토큰 ↔ gpadmin 대응이 샌다 · 같은 값 = 같은 토큰이라 다른 서버 행까지 풀린다).
+  - 반증 F9: 저활용 검토 쓰기 대상 = **(법인, 키) 쌍** — 요청에 `vcenterId` 필수(없으면 400) · `resolvePerfTarget(…, { vcenterId })` 가 그 법인 대상만 찾는다(키 충돌 때 다른 법인 서버에 적히던 결함 · 자기 법인 운영자 404). 조회 밖 404 → 쓰기 밖 403 순서는 그대로.
+  - ~~**다음 점검 첫 후보(8b 이전부터의 별건 — 고치지 않음)**~~ → ✅ **고쳤다(다음 점검 ① · 2026-11-08)**. ⚠ **정정**: 위 옛 줄의 ‘범위 밖 노출은 아니다(범위 거르기가 먼저)’ 는
+    **틀렸다** — 범위 거르기는 첫 대상을 고른 **뒤**였다. 기준판(b533c396) 재현: ⓐ 관리자는 `?vcenterId=` 를 줘도 늘 이 노드 서버(엣지 B · C 의 같은 키 서버를 볼 길이 없었다)
+    ⓑ 범위 운영자 B · C 는 자기 서버가 **404**(첫 대상 A 가 범위 밖) ⓒ 엣지끼리만 겹치는 키도 첫 엣지에서 멈춰 C 범위 계정 404 · 주석 쓰기는 관리자 요청이 이 노드 서버에 적혔다.
+    노출은 아니었지만 **잘못된 서버(ⓐ)와 자기 서버 거부(ⓑ ⓒ)** 였다. 이제:
+    · 해석은 `routes/api/bmUsage.js resolvePerfTarget` **하나**(bmPerfView · bmTrendView · `/history` 가 따로 두던 사본을 없앴다) — 후보 = 이 노드 + 엣지 보관분 **전부**의 같은 키(비관리자 가림 토큰 포함 ·
+      토큰은 대상 목록마다 한 번 만든 색인) → `vcenterId` 를 주면 그 법인만 → **범위 밖 · 귀속 없음은 세기 전에 뺀다** → 같은 쌍(`maint/judge.js targetIdOf`)은 하나(이 노드 > 엣지 — 엣지끼리는 최근 보관분) →
+      0 = 404(범위 밖만 있어도 같은 모양) · 1 = 그 서버 · 2+ = **400 `ambiguous-key` + `candidates`(범위 안 법인만 — `{vcenterId, vcName}`)**. 응답 모양은 `perfTargetFail` 하나.
+    · 요청의 법인은 `perfVcOf(req)`(본문 → 질의 `vcenterId`) · 여러 대(비교 · 주석)는 `perfPairsOf(keys, vcenterIds)`(같은 순서). 정비 창 쓰기(8a)의 `corpOnly`/`corpsOfKey` 사본도 이 함수로 바꿨다(400 계약 그대로).
+    · 운영 주석 **읽기**도 쌍(`annotForPair` — 키 ∧ 법인 ∈ 주석 법인 집합 · 여러 법인 · 여러 서버 주석은 짝을 저장하지 않아 근사 — 정직 기록) · 비교 표의 열 식별은 요청 쌍 `cid`(같은 키 두 열이 표에서 섞이지 않게).
+    · 회귀 `server/test/bmPerfKeyPair.test.js`(실제 api 라우터 — 상세 · 추이 · 장치 · 로그 · Top-N · 튜닝 · 용도 · 용량 · 플레이북 · 목표선 · 변경 × 관리자 · 범위 관리자 · 범위 운영자 · 주석 · 검토 · 정비 창 · 집중 ·
+      스냅샷 · 포트 매핑 · 용도 태그 쓰기 · 소스 스윕(호출마다 `vcenterId` + `perfTargetFail`) · 비용 실측) · 변이 23건 전부 잡힘.
+    · **저장 단계** — ⚠ **정정(2차 반증 F1)**: 첫 판은 ‘같은 노드 같은 키 두 서버는 값이 섞인다(사실) → 둘 다 수집하지 않는다’ 고 적었지만, 실제 파이프라인에서는
+      분류(`insights/fleetInventory.js classifyFleet` — 같은 dk 의 둘째 서버) · 서버 목록 단계(`buildServerUniverse` — 공통 태그 · 호스트명이 겹친 전력 미보고 등록부 서버) ·
+      가상화 호스트 루프(`targets.js` — 같은 키 대상이 있으면 건너뜀)가 **둘째 서버를 조용히 버려** key-conflict 경로에 닿지 않는다. 섞임은 기본키가 허용하는 상태이지 파이프라인 사실이 아니었고,
+      실제 결함은 **조용한 제외**(그 서버가 대상에도 ‘대상이 아닌 서버’ 에도 없음)였다. key-conflict 는 방어 코드로 남는다.
+      → 사용자 결정(2026-11-08): 버려지던 서버를 **‘식별 키가 겹치는 서버’** 로 보이고 사용자가 정한다(`GET/POST/DELETE /tools/bm-usage/key-overlaps[/decision]` — `routes/api/bmKeyOverlaps.js`):
+      읽기 = tools + 조회 범위(범위 밖 법인 행 없음 · **겹친 상대가 범위 밖이면 이름도 개수도 싣지 않음** · 주소(iDRAC · OS)는 관리자 판본만 · 결정한 사람은 관리자만) ·
+      쓰기 = operator 이상 + **조회 밖 404 → 쓰기 밖 403**(되돌리기도 — 겹침이 풀린 서버는 결정 기록의 법인으로) · ‘수집에 추가’ 는 별도 키 `<법인>:<serverId>`(지금 대상 키와 겹치면 409) ·
+      결정 파일 `bm-key-decisions.json`(원자 쓰기 0600 · 직렬 큐 · 손상 보존 → 읽기 503 · 쓰기 거부 · **못 읽으면 결정을 하나도 적용하지 않고** 사유를 sourceErrors 로) · 감사 `bm-usage.key-decision`.
+      이미 수집 중인 서버(겹친 쌍 중 남은 쪽)의 키 · 이력은 그대로다. 엣지가 맡는 법인 서버의 결정은 그 엣지의 같은 화면(파일은 노드마다) — 중앙 → 엣지 배포는 다음 점검 후보.
+    · **용도 태그 저장(2차 반증 F2 — 범위 경계 위반)**: 첫 판은 해석만 쌍이고 저장은 키 단독이라, 범위 관리자 A 가 단 태그가 같은 키의 **쓰기 범위 밖 법인 B 서버** 판정을 바꾸고 B 의 해제가 A 를 지웠으며
+      B 관리자에게 A 관리자 계정명이 보였다(재현). → 저장 · 조회 키 규칙은 `bmusage/purposeKey.js` 하나: 읽기는 늘 `<법인>|<키>` 쌍 → 기본 열쇠(서비스태그 키면 그 태그 · 아니면 키) ·
+      쓰기는 쌍 키 — 서비스태그 키는 **전역 열쇠로 써도 될 때만** 그 태그(판정기 `bmusage/commonTag.js` 하나: 공통 기본값(‘To Be Filled By O.E.M.’ 목록 · 4자 미만 · 반복 · 연속 숫자) 아님 ·
+      이 노드 + 엣지 보관분에서 둘 이상 법인에 없음 · 이 노드 겹침 목록에 없음 · **이 노드가 같은 저장소를 쓰는 서버를 다 앎**(엣지 · 단일 노드 — 중앙이 엣지에 맡기면 모름) — 2차 재확인 G1:
+      첫 판은 ‘서비스태그는 전역 유일’ 이라 보고 태그 단독으로 썼는데 공통 태그에서 F2 가 그대로 성립했다. 전역 태그로 쓸 때는 그 서버의 쌍 행을 지운다(쌍 먼저 읽기라 남으면 새 값을 가린다)) ·
+      예전(키 단독) 행: **범위 계정은 지우지 않는다**(쌍 행만 쓰고 `legacyRemains` 로 남았다고 말한다 — 2차 재확인 G2: 첫 판은 ‘지금 보이는 대상’ 이 모두 쓰기 범위 안이면 나눠 옮기고 지웠는데,
+      엣지 보관분은 중앙이 조회할 때만 당기는 메모리라 재시작 뒤 · 첫 당김 전 · 엣지의 대상이 아닌 서버를 세지 못해 다른 법인 서버의 태그가 사라졌다 — 409 legacy-shared 는 없앴다) ·
+      전체 범위 계정은 판정기가 complete 일 때만 그 열쇠의 서버(대상 · **대상이 아닌 서버**)마다 쌍으로 나눠 옮기고 지운다(값 · 처음 단 사람 보존) ·
+      예전 행에서 온 태그의 계정명은 범위 계정에 싣지 않는다. 7b 일괄 등록의 용도 · 역할도 같은 규칙(공통 태그 · 같은 태그 서버 여럿이면 적용하지 않음 `purpose-common-tag` · 저장 키는 분석이 정한 것 — `purposeKey.tagTargetsOf` 하나를
+      중앙 라우트와 **엣지 배포 적용**(`onboard/edgeApply.js` — 3차 재확인 H1: 예전에는 문맥에 tagTarget 이 없어 공통 태그도 전역 열쇠로 썼다)이 같이 쓴다 · 엣지의 아직 대상이 아닌 새 서버는
+      판정기가 전역 열쇠로 써도 된다고 하고 그 배포에 태그 행이 하나일 때만 · 대상을 못 읽으면 적용하지 않음). 공통 기본값 판정은 NFKC · 0폭 문자 제거 뒤 영숫자 꼴로도 비교한다. 목표선의 서버별 목표(`bm-perf-slo.json servers`)도 키 단독이지만 쓰기가 설정 소유자 등급(전체 범위)만이라 범위 위반은 없다(남은 것 — 같은 키 두 법인 서버가 목표를 같이 쓴다).
+    · **OS 계정 등록 고르기(2차 재확인 G3)**: 예전에는 iDRAC 주소 → 이름 → 이름 = 주소 순으로 **첫 등록**을 집어 법인을 보지 않아, ‘수집에 추가’ 한 공통 태그 서버(같은 이름 ‘db01’ 이 두 법인)가
+      **다른 법인 등록의 주소 · 계정으로 SSH** 했다(재현 rvn1/v2/r9). → `targets.js pickOsEntry` 하나: 단계마다 다른 법인으로 지정된 등록은 쓰지 않고(`os-foreign`) · 이 법인 등록 우선 ·
+      별도 키 서버(strict)는 법인이 맞는 등록만(법인 미지정이면 `os-ambiguous`) · 남은 등록의 주소가 여럿이면 `os-ambiguous`(어느 장비인지 모름 — 0/정상 아님). 일반 대상은 법인 미지정 ·
+      주소 하나인 등록(7b 이전 현장 대부분)은 예전과 같은 등록을 고른다(시험 bmKeyOverlap ⑫ A/B 3,200 사례 동일) — 달라지는 것은 다른 법인 지정 등록 · 같은 이름 다른 주소 · 지정/미지정 혼재뿐이고,
+      그 서버는 OS 경로 없이 사유(`missing` · 대상이 아닌 서버 · 겹침 행 `osIssue`)가 화면에 보인다. 3차 재확인 H2: iDRAC 도 없어 대상이 아닌 서버가 되면 사유를 OS 쪽(`os-foreign` ·
+      `os-ambiguous`)으로 싣고 iDRAC 사유는 `idracIssue` 로 함께(예전: `no-idrac` 하나 — 기준판에서 OS 로 수집되던 서버가 왜 빠졌는지 말하지 못했다) · 귀속 없음 대상에게 법인 지정 등록은 `os-ambiguous`.
+    · 반증 F3: 범위 계정의 `counts.keyConflicts` 는 보이는 줄의 고유 키 수 · 줄의 `peers`(범위 밖 서버까지 센 수)는 싣지 않는다. 반증 F4: 귀속 없음 후보는 **노드까지** 가른다
+      (쌍 = `|키@노드` · 고르는 값 `-@<노드>` · 후보에 `pick` · `via`(이 노드도 agent 이름이 있어 단추가 ‘엣지 <이 노드>’ 로 보였다 — 2차 재확인 G4) — 사유 수 = 후보 수 = 버튼 수 · 범위 계정은 귀속 없음을 못 본다). 반증 F5: 시험 ⑤ 소스 스윕은 첫 인자 이름과 무관하게 호출을 세고
+      `vcenterId` 값이 요청에서 온 식인지 · 대상 목록을 읽는 함수 안 키 비교 선택 · 키 맵이 허용 목록에 있는지 본다(반증 변형 5종이 걸린다 — 시험이 고정).
+
+- **(v2.976) 집중 모니터링 API · 수집**(`routes/api/focusMon.js` · `server/src/focusmon/CLAUDE.md`):
+  - 조회는 `requireRole('admin')` + `fullScopeOnly`(전 법인 서버 주소 · 프로세스가 나온다 — 대상이 vCenter 귀속이 아니라 범위 계정에 나눌 축이 없다) · 쓰기는 전체 쓰기 범위 · 데모 계정 쓰기 차단 · CSV 는 `data.csv` 권한.
+  - 등록부에 비밀 없음(IP · 포트 · 계정 · 담당 노드). 접속은 노드가 만든 키(`util/sshKeyStore.js` — 아이실론 키와 같은 공장)만 · 응답에는 공개키 · 지문만.
+  - 인증 거부는 `util/authGuard.js` 로 멈추고 사람이 ‘다시 연결’ 할 때 한 번 시도(60초에 한 번) · 대상 주소는 엄격한 IPv4 + SSRF 정적 가드 · 등록부를 못 읽으면 503.
+  - 원격 명령은 미리 만든 상수(주기별) · 프로세스는 comm 만(cmdline · environ 0) · 프로세스 사용자 이름은 `isAdminDetailUser` 만 원문.

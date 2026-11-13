@@ -11,6 +11,7 @@ import { loadScanSettings, saveScanSettings, deleteScanAgent, scanResultList, sc
 import { buildScanRangeRows, applyRangeLineOp } from '../../ipam/scanRangeRows.js'; // v2.692: 등록된 스캔 대역 표 · 줄 단위 수정
 import { startScan, scanStatus, rescheduleScanPoller } from '../../ipam/scanPoller.js';
 import { recordScanLog, listScanLog, SCAN_LOG_EVENTS } from '../../ipam/scanLog.js'; // v2.636: 스캔 실행 로그
+import { listChanges, CHANGE_TYPES } from '../../ipam/changeLog.js'; // v3.1.0: IP 변화 기록
 import { scanRangesToCsv, scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport, LOCAL_AGENT } from '../../ipam/scanRangesCsv.js'; // v2.636: 에이전트별 스캔 대역 CSV
 import { RANGE_CAP } from '../../ipam/scan.js';
 import { agentVcenterIds, suggestAgentSubnets } from '../../ipam/scanDatacenter.js'; // v2.638: 데이터센터 귀속 · /24 대역 제안
@@ -31,6 +32,7 @@ import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+import { registerBmOsSuggest } from './bmOsSuggest.js'; // v2.993: 물리서버 OS 주소 제안(설계 bm-folders §13 ②)
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
 
@@ -387,6 +389,11 @@ adminRouter.post('/ipam/scan/migration/dismiss', adminOnly, fleetOnly, (_req, re
   res.status(r.ok ? 200 : 404).json({ ...r, ...migrationView() });
 });
 // v2.636: 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경) — 형제 status 와 같은 게이트(전 엣지 이름·대역이 들어간다).
+// v3.1.0(설계 ipam-alerts-mac-dns ② — IP관리 › IP 변화): 스캔이 본 변화 기록. 스캔 결과처럼 vCenter 귀속이 없어 스캔 로그와 같은 게이트(관리자 · 전 법인).
+adminRouter.get('/ipam/changes', adminOnly, fleetOnly, (req, res) => {
+  const q = (v) => (typeof v === 'string' ? v : '');
+  res.json({ ok: true, ...listChanges({ type: q(req.query.type), ip: q(req.query.ip), agent: q(req.query.agent), limit: req.query.limit }), types: CHANGE_TYPES });
+});
 adminRouter.get('/ipam/scan/log', adminOnly, fleetOnly, (req, res) => {
   res.json({ ok: true, ...listScanLog({ limit: req.query.limit, agent: req.query.agent, level: req.query.level, event: req.query.event }), events: SCAN_LOG_EVENTS });
 });
@@ -398,6 +405,7 @@ adminRouter.post('/ipam/scan/run', adminOnly, fleetOnly, (_req, res) => {
 adminRouter.get('/ipam/scan/status', adminOnly, fleetOnly, (_req, res) => { // v2.611 LEFT2611-07
   res.json({ status: scanStatus(), info: scanInfo(), runs: getScanRuns(50), reports: getAgentReports() });
 });
+registerBmOsSuggest(adminRouter); // v2.993 — 형제 스캔 라우트와 같은 게이트(관리자 · 전체 범위 — bmOsSuggest.js)
 adminRouter.get('/ipam/scan/results', adminOnly, fleetOnly, (_req, res) => {
   res.json({ results: scanResultList().slice(0, 5000), info: scanInfo() });
 });

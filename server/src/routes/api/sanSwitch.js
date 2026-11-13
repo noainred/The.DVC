@@ -40,15 +40,14 @@ import { saveBaseline, getBaseline, clearBaseline, publicBaseline, listBaselines
 import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable, invalidatePerfQueries, perfQueryTtlMs } from '../../sanswitch/perfDb.js';
 import * as pu from '../../sanswitch/portUsage.js';   // v2.748 포트 사용량 화면(순수 조립)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
-import { listDevices as listStorageDevices } from '../../storage/registry.js';
-import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
-import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 import * as swBulk from '../../sanswitch/bulk.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
-import { fullScopeOnlyWith } from '../admin/shared.js';
+import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { isDemoGuest, DEMO_ONLY_REASON } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03·B2-01·R1-06)
 import { isSanDemoId } from '../../mock/demo/sanswitch.js';
+import { NONE_DC, abandoned, capacityIndexFor } from '../../sanswitch/storagePerfCore.js';   // v2.953: 라우트 밖(알림 · 보고서 · 공개 API)도 쓰는 코어 — 재수출
+export { NONE_DC, abandoned, capacityIndexFor };
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -58,6 +57,8 @@ const toolsPerm = requirePerm('tools'); // 조회 라우트에도 기능 권한(
 // v2.612 AUTHZ2612-01·02: SAN 스위치 장비 등록·삭제·내보내기·수집·주기/임계 설정도 전 법인 공용이라 adminOnly 에 이 게이트를 함께 건다
 //   (조회만 막혀 있어 범위 제한 admin 이 다른 법인 장비를 내보내고 지울 수 있었다).
 const fullScopeOnly = fullScopeOnlyWith('SAN 스위치 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
+// v2.935(C-② 반증 L-1): 상태를 바꾸는 라우트는 쓰기 범위까지 전체여야 한다(writeVcenters 로 쓰기만 줄인 admin 이 지나갔다 — isFullReadWriteScope).
+const fullRwOnly = fullReadWriteScopeOnlyWith('SAN 스위치 등록 · 수집 · 설정 변경은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다.');
 
 /*
  * 목록 화면용 축약 — 목록이 그리는 요약만 보낸다(목록 응답이 MB 가 되지 않게).
@@ -122,7 +123,6 @@ export function sanListKeyOf({ local = [], edge = [], devices = [], pending = []
 }
 
 /** `?ports=1,2,3` 파싱(순수). 빈 값/빈 토큰은 무시 — `''.split(',')` → [''] → Number('') → 0 함정 방지. */
-export const NONE_DC = '__none__';
 
 /**
  * 조회 기간 파라미터(v2.420, 사용자 요구 '조회 조건에 내가 원하는 기간의 값을 볼 수 있는 기능').
@@ -179,6 +179,13 @@ export function sanStorageDcSubtotals(series, dcNameOf = (id) => id || '(법인 
     return row;
   }).sort((a, b) => (b.avgTotal ?? -1) - (a.avgTotal ?? -1));
 }
+
+export function perfAbortSignal(res) {
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+  return ac.signal;
+}
+
 
 export function registerSanSwitch(api) {
 
@@ -337,7 +344,7 @@ api.get('/tools/sanswitch/devices/:id/zoning', toolsPerm, fullScopeOnly, (req, r
   });
 });
 
-api.post('/tools/sanswitch/devices', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/sanswitch/devices', adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
   try {
     const saved = saveDevice(req.body || {});
     logAudit({ user: req.user?.username, action: 'SAN 스위치 등록/수정', target: `${saved.name}(${saved.host})`, detail: `${saved.type}/${saved.collectMethod}${saved.agent ? ` 엣지 ${saved.agent}` : ' 중앙 직접'}` });
@@ -345,7 +352,7 @@ api.post('/tools/sanswitch/devices', adminOnly, fullScopeOnly, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
-api.delete('/tools/sanswitch/devices/:id', adminOnly, fullScopeOnly, (req, res) => {
+api.delete('/tools/sanswitch/devices/:id', adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
   const dev = listDevices().find((d) => d.id === req.params.id);
   const ok = deleteDevice(req.params.id);
   if (ok) {
@@ -361,7 +368,7 @@ api.delete('/tools/sanswitch/devices/:id', adminOnly, fullScopeOnly, (req, res) 
  * 저장된 비밀번호를 이월하지 않는다**(uagmon M3 — host 바꿔치기로 자격증명이 공격자 서버로
  * 선제 전송되는 경로 차단). 비번을 새로 입력하지 않으면 접속처(host·계정·포트·방식)가 저장분과 같을 때만 저장분을 쓴다(v2.770 R5-E3-4).
  */
-api.post('/tools/sanswitch/test', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/sanswitch/test', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
   const b = req.body || {};
   const issue = deviceInputIssue(b);
   if (issue) return res.status(400).json({ ok: false, reason: issue });
@@ -395,7 +402,7 @@ api.get('/tools/sanswitch/test/:runId', adminOnly, fullScopeOnly, (req, res) => 
  * 지금 수집 — 중앙 직접 수집 장비는 즉시, 엣지 위임 장비는 **재수집 요청 등록**(중앙은 엣지에
  * 명령을 밀어넣을 수 없어, 엣지가 다음 config pull 때 가져가 즉시 수집·push 한다).
  */
-api.post('/tools/sanswitch/devices/:id/collect', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/sanswitch/devices/:id/collect', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
   try {
     const dev = listDevices().find((d) => d.id === req.params.id);
     if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
@@ -432,7 +439,7 @@ api.get('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, async (_req,
     status: sanSwitchPerfStatus(), edges: listEdgePerfStatus(), db: await perfDbStats() });
 });
 
-api.put('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, async (req, res) => {
+api.put('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
   try {
     const before = loadPerfSettings();
     const saved = savePerfSettings(req.body || {});
@@ -447,7 +454,7 @@ api.put('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, async (req, 
  * 보관 기간 밖 표본 즉시 정리(v2.420, 설정 화면 '지금 정리'). 폴러의 prune 스로틀(20틱)을 기다리지
  * 않고 현재 retentionDays 기준으로 DELETE 1회 — ts 단독 인덱스를 타므로 풀스캔이 아니다.
  */
-api.post('/tools/sanswitch/perf/prune', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/sanswitch/perf/prune', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
   try {
     const st = loadPerfSettings();
     const r = await pruneNow(st.retentionDays);
@@ -464,7 +471,7 @@ api.post('/tools/sanswitch/perf/prune', adminOnly, fullScopeOnly, async (req, re
  * (`registry.js:135`) 엣지 위임 장비는 **아무 일도 일어나지 않았는데 화면은 그 사실을 말하지 않았다.**
  * 이제 위임 엣지마다 재수집 요청을 등록하고(one-shot·TTL 15분), 응답에 '즉시 N대 / 요청 M대' 를 싣는다.
  */
-api.post('/tools/sanswitch/perf/collect', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/sanswitch/perf/collect', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
   // v2.720(감사 R1-03·B2-01·R1-06): 데모 계정은 데모(mock-) 장비만 — force 캡처(중앙)와 엣지 요청(엣지 몫 전체를 SSH 캡처) 둘 다.
   //   엣지 요청은 엣지 단위(그 엣지 몫 전체를 캡처)라 데모 장비만 고를 수 없다 — 데모 계정은 엣지 요청을 아예 등록하지 않는다.
   //   뺀 대수는 skippedNonDemo(비-데모 장비)·edgeSkipped(요청하지 않은 엣지 장비)로 밝힌다.
@@ -653,7 +660,7 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req
  * 이번 달 기준선 저장 — 현재 스냅샷의 포트 에러 카운터를 포탈에 기억한다.
  * ⚠ 스위치의 `portstatsclear` 를 실행하지 않는다(다른 팀의 기준선을 지우는 파괴적 동작).
  */
-api.post('/tools/sanswitch/devices/:id/err-baseline', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/sanswitch/devices/:id/err-baseline', adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
   const dev = listDevices().find((d) => d.id === req.params.id);
   if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
   const snap = snapshotFor(req.params.id);
@@ -665,7 +672,7 @@ api.post('/tools/sanswitch/devices/:id/err-baseline', adminOnly, fullScopeOnly, 
   res.json({ ok: true, baseline: saved });
 });
 
-api.delete('/tools/sanswitch/devices/:id/err-baseline', adminOnly, fullScopeOnly, (req, res) => {
+api.delete('/tools/sanswitch/devices/:id/err-baseline', adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
   const had = clearBaseline(req.params.id);
   logAudit({ user: req.user?.username, action: 'SAN 스위치 에러 기준선 삭제', target: req.params.id });
   res.json({ ok: true, removed: had });
@@ -736,13 +743,6 @@ async function withPerfDiag(deviceId, r, req = null) {
  * 같은 조회를 기다리는 다른 요청이 있으면 멈추지 않는다(perfDb.heavyQuery 가 요청자 수를 센다).
  * 응답을 다 보낸 뒤의 close 는 취소가 아니다(writableEnded).
  */
-function perfAbortSignal(res) {
-  const ac = new AbortController();
-  res.on('close', () => { if (!res.writableEnded) ac.abort(); });
-  return ac.signal;
-}
-/** 요청한 화면이 떠나 멈춘 조회 — 받을 사람이 없으니 응답하지 않는다(소켓은 이미 닫혔다). */
-const abandoned = (e) => e?.code === 'abandoned';
 
 api.get('/tools/sanswitch/devices/:id/perf', toolsPerm, fullScopeOnly, async (req, res) => {
   const { hours, from, to, issue } = rangeParams(req.query);
@@ -914,28 +914,8 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   const memoHit = memo?.get(memoKey);
   if (memoHit && Date.now() - memoHit.at <= memoTtl) return res.json(memoHit.body);
 
-  // 등록 스토리지의 최신 스냅샷(용량) 색인 — 시리얼 정규화 후 대조.
-  const norm = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
-  const stDevById = new Map(listStorageDevices().map((d) => [d.id, admin ? d : maskDeviceAddress(d)]));
-  // 법인별로 분리해 볼 때는 **그 법인의 스토리지 용량만** 붙여야 한다 — 그래서 키에 법인을 넣는다.
-  const capBySerial = new Map();   // `${dc}\u0000${serial}` 또는 split 아니면 serial
-  const capKey = (dcId, serial) => (split ? `${dcId}\u0000${serial}` : serial);
-  for (const snap of [...storageLocalSnaps(), ...edgeStorageSnapshots()]) {
-    if (!snap?.ok) continue;
-    const d = stDevById.get(snap.deviceId) || {};
-    if (dcSet && !dcSet.has(String(d.datacenterId || ''))) continue;  // 범위 밖 법인의 어레이는 붙이지 않는다
-    const info = {
-      deviceId: snap.deviceId, name: d.name || snap.name || '', type: d.type || '',
-      totalBytes: snap.capacity?.totalBytes ?? null, usedBytes: snap.capacity?.usedBytes ?? null,
-      pct: snap.capacity?.pct ?? null,
-    };
-    // v2.606(감사 CEN2606-04): appliances 가 배열이 아니거나 원소가 null 이면 이 요약 전체가 500 이었다 — 객체 원소의 글자만 읽는다.
-    const apps = Array.isArray(snap.extra?.appliances) ? snap.extra.appliances : [];
-    const keys = [snap.serial, ...apps.map((a) => (a && typeof a === 'object' ? a.serviceTag : null))];
-    for (const key of keys) {
-      if (key && (typeof key === 'string' || typeof key === 'number')) capBySerial.set(capKey(String(d.datacenterId || ''), norm(key)), info);
-    }
-  }
+  // 등록 스토리지의 최신 스냅샷(용량) 색인 — v2.948 부터 capacityIndexFor(SAN 스토리지 성능과 같은 코어).
+  const capIdx = capacityIndexFor({ dcSet, split, admin });
 
   const nameOf = new Map(devices.map((d) => [d.id, d.name || d.host || d.id]));
   const dcNameOf = (() => {
@@ -944,7 +924,7 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
   })();
   const series = agg.series.map((s) => {
     const serial = arraySerialOf(s.key);
-    const capacity = serial ? (capBySerial.get(capKey(s.group ?? '', norm(serial))) || null) : null;
+    const capacity = capIdx.lookup(serial, s.group ?? '');
     return {
       ...s,
       datacenterId: s.group ?? null,
@@ -984,7 +964,7 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     // 예전에는 무조건 그 문구여서, 이미 켜져 있고 장비에서 실패하는 상황에서도 설정을 의심하게 만들었다.
     perfEnabled: demoOn(loadPerfSettings().enabled),   // v2.708: mock 은 켜진 것처럼(저장 설정은 그대로)
     edgeSwitches, edgeNote: edgeMissing.length
-      ? `엣지(${[...new Set(edgeMissing.map((e) => e.agent))].join(', ')}) 수집 스위치 ${edgeMissing.length}대(${edgeMissing.map((e) => e.name).join(', ')})의 포트 사용량 시계열이 아직 중앙에 오지 않았습니다. 확인: ① 설정 › 수집 › SAN 스위치 포트 사용량이 켜져 있는지(중앙 설정이 엣지에도 내려갑니다) ② 그 엣지가 v2.423 이상인지(엣지가 현지 수집분을 중앙으로 중계) ③ 켠 직후면 수집 주기(기본 5분) + 엣지 설정 pull(≤5분) 뒤 반영됩니다.`
+      ? `엣지(${[...new Set(edgeMissing.map((e) => e.agent))].join(', ')}) 수집 스위치 ${edgeMissing.length}대(${edgeMissing.map((e) => e.name).join(', ')})의 포트 사용량 시계열이 아직 중앙에 오지 않았습니다. 확인: ① 설정 › 수집 주기·임계 › SAN 스위치 포트 사용량이 켜져 있는지(중앙 설정이 엣지에도 내려갑니다) ② 그 엣지가 v2.423 이상인지(엣지가 현지 수집분을 중앙으로 중계) ③ 켠 직후면 수집 주기(기본 5분) + 엣지 설정 pull(≤5분) 뒤 반영됩니다.`
       : '',
     byDatacenter: byDcRows,
     switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId, datacenterName: dcNameOf(d.datacenterId) })),
@@ -1092,7 +1072,7 @@ api.get('/tools/sanswitch/activity', toolsPerm, fullScopeOnly, (req, res) => {
  * 재진입: `pollSanSwitchOnce` 가 진행 중이면 `{ok:false, reason}` 을 돌려주고 그 사실을 그대로
  * 전달한다(폴러와 가드를 공유 — 중복 수집 금지 규약).
  */
-api.post('/tools/sanswitch/collect-all', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/sanswitch/collect-all', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
   try {
     // v2.720(감사 R1-03·B2-01·R1-06): 데모 계정은 데모(mock-) 장비만 — 중앙 수집·엣지 재수집 요청 둘 다. 뺀 대수는 밝힌다.
     const demoGuest = isDemoGuest(req.user);
@@ -1116,7 +1096,7 @@ api.post('/tools/sanswitch/collect-all', adminOnly, fullScopeOnly, async (req, r
 });
 
 /** 이 노드 몫 전체 재수집(관리자 수동 실행 — 폴러와 재진입 가드를 공유한다). */
-api.post('/tools/sanswitch/poll', adminOnly, fullScopeOnly, async (req, res) => {
+api.post('/tools/sanswitch/poll', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
   logAudit({ user: req.user?.username, action: 'SAN 스위치 전체 수집 실행' });
   res.json(await pollSanSwitchOnce({ manual: true, demoOnly: isDemoGuest(req.user) })); // v2.720(감사 B2-01): SAFE_ACTIONS 밖이라 데모 계정은 미들웨어가 막지만 같은 규칙을 둔다 · v2.590: 수동 실행은 인증 실패 정지 장비도 1회 시도한다
 });
@@ -1201,7 +1181,7 @@ api.get('/tools/sanswitch/devices/sample.txt', csvPerm, adminOnly, fullScopeOnly
  *   자격증명을 의심하며 고친다(정직 규약).
  * ⚠ 자동 재시도 없음(잘못된 비밀번호 반복 = 계정 잠금). bulkRun 이 강제한다.
  */
-api.post('/tools/sanswitch/devices/import/test', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/sanswitch/devices/import/test', csvPerm, adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
   const p = swParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
   const resolveDc = swDcResolver();
@@ -1256,7 +1236,7 @@ api.get('/tools/sanswitch/devices/import/test/:id', csvPerm, adminOnly, fullScop
  *  · `testRunId`    연결 테스트 실행 id — 주면 **통과한 줄과의 교집합**만 저장
  * 걸러낸 행은 버리지 않고 `skipped` 로 사유와 함께 돌려준다.
  */
-api.post('/tools/sanswitch/devices/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/sanswitch/devices/import', csvPerm, adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
   const p = swParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 

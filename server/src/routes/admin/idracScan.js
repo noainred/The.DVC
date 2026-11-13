@@ -40,6 +40,7 @@ import { idracScopeOf, idracInScope } from './idracCore.js'; // v2.629 AUTHZ2629
 //   v2.629(AUTHZ2629-03) 부터 범위 계정에 귀속 서버만 보인다(아래 hiddenByScope) — 예전 '범위를 걸지 않는다' 결정은 폐기.
 const fleetOnly = fullScopeOnlyWith('iDRAC 등록부·스캔 대역·스캔 실행은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다(재귀속·삭제로 다른 법인 서버를 옮길 수 있었다).');
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+import { isAdminReq } from '../../auth/addressMask.js'; // v2.973(반증 F4): 관리자 판본이 아니면 관리 NIC 주소 · UUID · iDRAC 계정 가림
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requireCsvPerm('data.csv');
 
@@ -59,6 +60,20 @@ const NOT_FOUND = { ok: false, reason: '서버를 찾을 수 없습니다.' };
 
 const normIdracMode = (m) => (['replace', 'replace-vcenter', 'merge'].includes(m) ? m : 'merge');
 
+/**
+ * v2.973(반증 F4): 관리자 판본(isAdminDetailUser)이 아닌 계정(데모 등 — adminOnly 는 지나지만 관리자 판본은 아니다)에게는
+ * iDRAC 관리 NIC 주소 · 이름(IP · MAC · 호스트 이름 · FQDN) · 시스템 UUID · iDRAC 사용자 계정을 가린다. vmMetrics 의 host 정보 가림과 같은 규칙.
+ * 로컬 · 원격 모두(v2.973 부터 엣지도 이 값을 보낸다). 원본은 바꾸지 않는다(사본).
+ */
+export function maskInventoryForViewer(inv) {
+  if (!inv || typeof inv !== 'object') return inv;
+  const out = { ...inv };
+  if (Array.isArray(inv.network)) out.network = inv.network.map((n) => (n && typeof n === 'object' ? { ...n, ipv4: '', mac: '', hostName: '', fqdn: '' } : n));
+  if (inv.system && typeof inv.system === 'object' && 'uuid' in inv.system) out.system = { ...inv.system, uuid: '' };
+  if ('idracUsers' in inv) delete out.idracUsers;
+  return out;
+}
+
 export function registerIdracScan(adminRouter) {
 
 // 서버 상세 인벤토리(iDRAC/BIOS/드라이버 버전 등). 캐시 우선, ?refresh=1이면 즉시 재수집.
@@ -72,7 +87,7 @@ async function inventoryResponse(req, server, inv, { remote = false, collectorId
   const agents = remote ? [collectorId, listCollectors().find((c) => String(c.id) === String(collectorId))?.name || ''] : [''];
   return {
     ok: true, fresh, ...(remote ? { remote: true, collectorId } : {}),
-    inventory: inventoryView(inv || null),
+    inventory: isAdminReq(req) ? inventoryView(inv || null) : maskInventoryForViewer(inventoryView(inv || null)),
     ...(remote ? { statusMissing: statusFieldsMissing(inv) } : {}),
     parts: summarizeServerParts(sv, inv || null, { remote }),
     partFault: await serverPartFaultInfo(sv, { remote, agents, scoped: !!idracScopeOf(req) }),

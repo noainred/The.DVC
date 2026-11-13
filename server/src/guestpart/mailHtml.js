@@ -67,7 +67,7 @@ ${vcTable}
 <div style="font-size:11.5px;color:#475569;border-top:1px solid #e2e8f0;padding-top:10px;margin-top:14px;line-height:1.6">
 사용률은 VMware Tools 가 보고한 게스트 파일시스템 기준입니다. Tools 가 돌지 않거나 전원이 꺼진 게스트${m.kpi.notReported ? ` ${esc(m.kpi.notReported)}대` : ''}는 확인할 수 없어 이 목록에 없습니다.
 가득 참 예상은 지난 7일 증가 속도를 그대로 이어 간 단순 추정입니다. 무시 규칙(Windows 드라이브·Linux 마운트 지점 등)에 걸린 파티션은 싣지 않았습니다.
-이 메일은 포탈 설정 › 수집 › 게스트 파티션 사용률에서 끄거나 바꿀 수 있습니다.</div>
+이 메일은 포탈 설정 › 게스트·GPU › 게스트 파티션 사용률에서 끄거나 바꿀 수 있습니다.</div>
 </div></body></html>`;
   const text = [
     title, '',

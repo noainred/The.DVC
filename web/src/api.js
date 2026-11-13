@@ -535,7 +535,8 @@ export const ensurePerfClientConfig = () => {
 
 /** Poll an endpoint on an interval and expose {data, error, loading}.
  *  최적화: 백그라운드 탭이면 폴링 일시정지(가시화 시 즉시 갱신), 주기에 ±10% 지터(동시 사용자
- *  부하 분산), ETag/304로 변동 없는 응답은 본문 미수신. in-flight 가드·언마운트 취소 유지. */
+ *  부하 분산), ETag/304로 변동 없는 응답은 본문 미수신. in-flight 가드·언마운트 취소 유지.
+ *  `intervalMs` 가 0 이하이면 **1회만 읽고 자동 갱신하지 않는다**(과거 창 · 무거운 조회 — v2.948. 탭 가시화에도 다시 읽지 않는다). */
 export function usePolling(path, params = {}, intervalMs = 15_000, fetchOpts = null) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -587,6 +588,7 @@ export function usePolling(path, params = {}, intervalMs = 15_000, fetchOpts = n
     // 자가 스케줄(지터 적용) — setInterval 대신 매 주기 ±10% 흔들어 다수 사용자 폴링이 한꺼번에
     // 몰리지 않게 분산. 백그라운드 탭(document.hidden)이면 네트워크 호출을 건너뛴다.
     const schedule = () => {
+      if (!(intervalMs > 0)) return;   // 1회 조회 — 주기 없음
       const jitter = intervalMs * (0.9 + Math.random() * 0.2);
       timer = setTimeout(loop, jitter);
     };
@@ -596,7 +598,7 @@ export function usePolling(path, params = {}, intervalMs = 15_000, fetchOpts = n
       if (active && !forbidden) schedule();
     };
     // 탭이 다시 보이면 즉시 한 번 갱신(백그라운드 동안 멈춰 있던 데이터 최신화).
-    const onVisible = () => { if (active && !forbidden && typeof document !== 'undefined' && !document.hidden) tick(); };
+    const onVisible = () => { if (intervalMs > 0 && active && !forbidden && typeof document !== 'undefined' && !document.hidden) tick(); };
 
     tick().then(() => { if (active && !forbidden) schedule(); });
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);

@@ -145,6 +145,9 @@ export function setAssignment(agent, scope = {}, targets = [], { user = '' } = {
     state: prev && prev.sig === sig ? (prev.state || 'pending') : 'pending',
     pulledAt: prev && prev.sig === sig ? (prev.pulledAt || 0) : 0,
     ack: prev && prev.sig === sig ? (prev.ack || null) : null,
+    // v2.988(반증 R1): 오류 없이 적용된 sig 이력(sig → 시각, 최근 OK_SIGS_MAX 개) — 배정이 엣지가 이미 적용한 sig 로 되돌아오면(A→B→A)
+    //   엣지는 unchanged 를 받고 다시 ack 하지 않는다. 그때 '변경 없음' pull 을 적용 확인으로 쓰려면 그 sig 가 오류 없이 적용된 적이 있어야 한다.
+    ...(prev?.okSigs ? { okSigs: prev.okSigs } : {}),
     // v2.630(감사 R2630-06): 엣지 push 주기는 배정 내용과 무관하다 — 재배정해도 유지한다.
     ...(prev?.lastExpectMs ? { lastExpectMs: prev.lastExpectMs } : {}),
   };
@@ -236,6 +239,46 @@ export function markPulled(agent, sig) {
  * 적용 수가 배포 수와 다르면 `state` 를 `mismatch` 로 두고 그대로 노출한다 — 조용히
  * 성공으로 넘기면 감시 공백이 정상으로 보인다.
  */
+const OK_SIGS_MAX = 8;
+/** sig → 시각 객체에 하나를 더하고 최근 OK_SIGS_MAX 개만 남긴다(파일에서 읽은 값은 모양을 믿지 않는다). */
+function okSigsWith(cur, sig, at) {
+  const ent = (cur && typeof cur === 'object' && !Array.isArray(cur) ? Object.entries(cur) : [])
+    .filter(([k, v]) => typeof k === 'string' && k !== sig && Number.isFinite(Number(v)));
+  ent.push([sig, at]);
+  ent.sort((x, y) => Number(y[1]) - Number(x[1]));
+  return Object.fromEntries(ent.slice(0, OK_SIGS_MAX).map(([k, v]) => [k, Number(v)]));
+}
+
+// v2.988(반증 R1): '변경 없음' pull 로 확인한 시각 — 엣지가 지금 sig 를 적용해 두고 있다는 확인(메모리 · 파일에 쓰지 않는다 — pull 마다 저장하면 EDGE2629-01).
+//   재시작하면 비고 다음 pull(기본 5분)에 다시 생긴다. sig 가 바뀌면 그 값은 맞지 않아 쓰이지 않는다.
+const _confirmed = new Map();   // agent -> { sig, at }
+
+/**
+ * 엣지가 지금 배정 sig 로 물어 unchanged 를 받았을 때(routes/central.js /svcmon-config) — 그 sig 가 **오류 없이 적용된 적이 있을 때만** 확인으로 남긴다
+ *   (엣지는 검증에서 거부된 sig 로도 백오프 동안 묻는다 — agent/svcmonConfigPull.js failedSig).
+ */
+export function noteUnchangedPull(agent, sig, now = Date.now()) {
+  const name = String(agent || '').trim();
+  const a = load().agents[name];
+  if (!a || !sig || a.sig !== sig) return false;
+  const ok = a.okSigs && typeof a.okSigs === 'object' ? Number(a.okSigs[sig]) : NaN;
+  if (!Number.isFinite(ok)) return false;
+  _confirmed.set(name, { sig, at: now });
+  return true;
+}
+
+/**
+ * 시험 판정용 — 지금 배정 sig · ack 시각 · '변경 없음' 확인 시각(지금 sig 일 때만). 배정이 없으면 null.
+ * @returns {{sig:string, ackAt:number, confirmAt:number}|null}
+ */
+export function assignReadiness(agent) {
+  const name = String(agent || '').trim();
+  const a = load().agents[name];
+  if (!a) return null;
+  const c = _confirmed.get(name);
+  return { sig: String(a.sig || ''), ackAt: Number(a.ack?.at) || 0, confirmAt: c && c.sig === a.sig ? c.at : 0 };
+}
+
 export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = [] } = {}) {
   const db = load();
   const name = String(agent || '').trim();
@@ -256,6 +299,7 @@ export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = 
   const want = a.counts || { targets: 0, tests: 0 };
   const exact = added === want.targets && tests === want.tests;
   a.ack = { at: Date.now(), added, tests, removed: cnt(removed), errors: errs, ...(errorsInvalid ? { errorsInvalid: true } : {}), exact };
+  if (!errs.length && !errorsInvalid) a.okSigs = okSigsWith(a.okSigs, sig, a.ack.at);
   a.state = errs.length ? 'error' : (errorsInvalid ? 'mismatch' : (exact ? 'active' : 'mismatch'));
   save();
   logAudit({
@@ -265,4 +309,4 @@ export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = 
   return { ok: true, state: a.state, exact };
 }
 
-export function _resetAssignCache() { cache = null; _loadErr.ok(); }
+export function _resetAssignCache() { cache = null; _loadErr.ok(); _confirmed.clear(); }

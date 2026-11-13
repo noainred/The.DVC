@@ -60,6 +60,17 @@ export const IMPORT_CYCLE_MAX = 4;
  * 런타임판). 핸들러 안 판정을 새로 만들면 사유와 함께 여기 적을 것.
  */
 export const ROUTE_GATE_ALLOW = Object.freeze({
+  // routes/api/bmUsage.js — v2.922 베어메탈 NIC ↔ CVP 포트 수동 매핑: 범위 판정은 핸들러 안(조회 밖 404 · 쓰기 범위 밖 403 · 다른 법인 CVP 403)
+  'PUT /api/tools/bm-usage/port-map': 'portMapWrite — resolvePerfTarget(조회 범위 404) → inUserWriteScope 무조건(403) → isFullReadWriteScope 아니면 법인 CVP 일치(403) · v2.922 반증 D1',
+  'DELETE /api/tools/bm-usage/port-map': 'portMapWrite(remove) — 조회 범위 404 → inUserWriteScope 무조건 403 · v2.922 반증 D1',
+  // v2.923 베어메탈 용도 태그(기능 · 역할 — 판정 기준이고 서버에 쓰지 않는다): 같은 규칙(조회 밖 404 → 쓰기 밖 403 무조건)
+  'PUT /api/tools/bm-usage/purpose': 'purposeWrite — resolvePerfTarget(조회 범위 404) → inUserWriteScope 무조건(403) · v2.923',
+  // routes/api/bmOnboard.js — 7b 서버 등록: 행마다 법인 판정(analyzeOnboardRows — 조회 밖 corp-not-found(404 꼴) → 쓰기 밖 corp-forbidden(403 꼴) ·
+  //   바꾸려는 기존 항목의 법인도 쓰기 범위 · 미귀속 · 귀속 없는 기존 항목은 전체 범위만). 적용은 같은 파일을 다시 분석한 서명이 같을 때만.
+  'POST /api/tools/bm-usage/onboard/analyze': 'analyzeOnboardRows — 행마다 inUserScope(밖 = 없는 법인 문구) → inUserWriteScope(403 꼴) · 기존 항목 법인 · 미귀속은 전체 범위만 · 7b',
+  'POST /api/tools/bm-usage/onboard/apply': 'analyzeOnboardRows 재분석(같은 범위 판정) + 서명 대조 · 거부 행은 적용 안 함 · 7b',
+  'DELETE /api/tools/bm-usage/onboard/edge-rows': '배포 행 법인 inUserScope(밖 404) → inUserWriteScope(403) · 귀속 없는 행은 전체 범위만 · 7b',
+  'POST /api/tools/bm-usage/onboard/test': '저장 항목 법인 inUserScope(밖 404) → inUserWriteScope(403) · 귀속 없는 항목은 전체 범위만 · 주소는 저장값(v2.480) · 7b',
   // routes/admin/backupNetSec.js — denyScopedRun·writeScopedVcenterIds·denyGuestScanOutOfScope(v2.606 AUTHZ2606)
   'PUT /api/admin/vclogs/settings': 'denyScopedRun — 범위 계정 403(v2.606)',
   'POST /api/admin/vclogs/collect': 'denyScopedRun — 범위 계정 403(v2.606)',
@@ -193,11 +204,11 @@ export const BIG_JSON_SMALL = Object.freeze({
   'central:/svcmon-config-ack': '배정 sig 확인응답 한 줄',
   'central:/idrac-scan-progress': '진행률 숫자 몇 개',
   'central:/sanswitch-test-result': '연결 테스트 1대 결과',
+  'central:/sanswitch-flow-result': 'Flow Vision 플로우 작업 1건 결과 — 명령 32개 × 출력 16KB 상한(v2.935)',
   'central:/rma-poll': '잡 인출 요청(본문은 agent 이름뿐)',
   'central:/rma-credential': '자격증명 요청(대상 id 하나)',
   'central:/ping-result': 'ping 결과 — 대상당 수 필드 × 대상 수백(수십 KB)',
   'central:/capture-result': '캡처 결과 요약(파일은 별도 경로)',
-  'central:/bmstor-result': 'df 마운트 결과 — 서버 1대 단위',
   'collector:/set-password': '계정 비밀번호 한 건(라우트 파서 4KB 상한)',
   'collector:/idrac-scan': '스캔 요청 — 대역 문자열·스캔 계정(라우트 파서 1MB 상한)',
   'collector:/bmstor-collect': '수집 요청 — 서버 목록·SSH 자격증명·마운트(라우트 파서 1MB 상한 · v2.741 정정: 대상 id 만 싣는 것이 아니다)',

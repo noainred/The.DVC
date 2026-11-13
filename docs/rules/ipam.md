@@ -17,6 +17,9 @@
 - (원래 5524행) v2.696 — 특수 기능 'VM DNS 설정 확인'(`vm-dns`). 판정은 `server/src/vmdns/analyze.js` 하나
 - (원래 5762행) v2.692 — 스캔 대역·설정 서브메뉴 2개 · /24 가져오기에 IPMS 설정 적용
 - (원래 5768행) IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다
+- v2.991 — IP 스캔 호스트명 확인(역DNS · mDNS · NetBIOS) · 대장 '호스트명' 열
+- v2.999 — IP 스캔 MAC · 제조사(스캐너 이웃 표 ARP · 제조사 표) · 대장 '제조사 · MAC' 열
+- v3.1.0 — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)
 
 ## 본문
 
@@ -184,3 +187,76 @@
 
 - **v2.771(점검 R6-F2)**: ① /24 시트(엑셀 포함)도 범위 계정에는 `ipInWriteScope` 를 통과한 칸의 메모·태그와 claim 이 범위 안인 정책만(판정 코어는 ledger.js 하나 — 라우트가 재수출)
   ② claim 판정은 본문에 `claimedVcenterId` **키가 있는가** 로(빈 값 = 새 claim '' — 범위 계정은 거부) ③ 엣지 스캔 결과 키는 `canonIp` 정규형(로드에서 비정규 키 병합) ④ 범위 계정 대역 정책은 65,536 주소(/16) 이하.
+
+- ⚠⚠ **v2.991 — IP 스캔 호스트명 확인(역DNS · mDNS · NetBIOS)과 대장 '호스트명' 열**(사용자 요청 "ip scan 에서 사용 중 IP 에 hostname 추가" ·
+  "Angry IP Scanner 처럼" · 시안 `docs/design/ip-scan-hostname`(캔버스 https://claude.ai/artifact/Pf48uY3zo4bzgYny5CGqeE) · 컨펌: 방식 3가지 · **새 방식 기본 켜짐** ·
+  NetBIOS MAC 수집 · 표준 + 변이 1회. 회귀 `server/test/ipScanHostname2991.test.js`(21건 — 변이 15종 중 13종 검출, 2종은 동등 변이) + 웹 `ipamHostText.test.js`):
+  - 판정은 `ipam/hostNames.js` 하나 — 표시 순서 **관리상태 호스트명(override) > 역DNS > mDNS > NetBIOS**, '이름 다름'(첫 라벨 · 소문자 · 15자 비교 — 어느 쪽이 맞는지 판정하지 않는다),
+    대장 행 칸 `netName · netNameSrc · netNameStale · netNameAt · nameMismatch · nameAlt · nameUnchecked`(값이 있을 때만). 웹 `ipamHostText.js` 는 문구만 — IP 상세는 서버 `scanDetailOf` 의 `display` · `alt` 를 그대로 쓴다.
+  - 패킷은 `ipam/nameProbe.js` — NBSTAT(UDP 137, 50바이트) · 역방향 PTR(UDP 5353 · 대상 IP 로 직접 — Angry IP 는 224.0.0.251 멀티캐스트). 파서는 오프셋 기반 · 길이 먼저 · 포인터 점프 16회 ·
+    인쇄 가능한 글자만. **물어본 IP · 그 포트 · 맞는 거래 ID 의 응답만** 받는다(셋 중 하나만 보면 위조 응답이 이름이 된다 — 테스트 ④가 셋 다 고정). 방식당 UDP 소켓 1개 · 묶음 전송(v2.359 FD 교훈 — IP 마다 소켓 금지).
+    mDNS 는 이 장비와 같은 서브넷 IP 에만(`os.networkInterfaces` · /0 · 내부 제외). 사용자 이름(접미 0x03)은 읽지 않는다.
+  - 저장(`scanStore`): 방식별 `names[k] = {v, at, miss}` — 물었는데 답이 없으면 miss+1(**NAME_MISS_MAX=3** 에 지움 — UDP 유실 한 번에 이름이 깜박이지 않게), **묻지 않은 방식은 지운다**(끈 에이전트 —
+    v2.990 까지 역DNS 를 끄면 hostname 이 바로 비던 것과 같은 방향), 같은 방식이 다른 이름을 답하면 이력 항목 `renames`(events 에 섞지 않는다 — events 를 읽는 해제 판정 · 구간 계산은 up/down 만 가정).
+    `scanRev` 는 이름 · '지난 스캔 무응답' 표지 · tried · 그룹/MAC 이 바뀔 때만(miss 1→2 · 확인 시각만이면 올리지 않는다). 부분 결과(seenOnly)는 이름을 건드리지 않는다.
+  - 엣지 수신: `cleanAliveHost` 가 `names`(아는 키 3개 · 글자만) · `tried`(아는 값 · 없으면 null = 옛 엣지 → 역DNS 만 물은 것) · `nbGroup`(15자) · `mac`(AA:BB:… 모양 · 0 제외)만 받고 표시 이름은 방식별 이름에서 **다시 고른다**.
+    보고 요약 `nameStats` 는 `cleanNameStats`(수치만 · 못 읽음 null). **새 엣지 필드는 이 화이트리스트에도** 넣을 것. 디스크의 옛 결과 파일은 hostname → dns 이름으로 옮긴다(v2.990 까지 역DNS 뿐 — 코드로 확인).
+  - 범위 계정: 스캔 행은 예전처럼 주지 않고, **VM · 호스트 행에도 스캔이 찾은 이름을 붙이지 않는다**(ledger `allowed ? null :`) · `/tools/ipam/history` 의 `scan` 도 null.
+  - `hostName`(스캔 행 = 호스트명 · ipam.db 열)의 뜻은 그대로 — 화면의 'ESXi 호스트' 칸만 VM · 호스트 행으로 좁혔다(스캔 · 수동 행은 '—'). 스캔 결과 CSV 는 **뒤에** 열을 덧붙였다(앞 열 순서 불변).
+  - ⚠ 정직 기록: NetBIOS · mDNS 의 **실제 장비 응답은 확인하지 못했다**(이 환경에 Windows · mDNS 장비 없음 — 루프백 응답자와 규격으로 확인). mDNS 는 같은 L2 구간만 답하므로 라우터 너머 대역은 역DNS · NetBIOS 만 채운다.
+    기본 켜짐이라 업그레이드 뒤 중앙과 (업그레이드된) 엣지가 응답한 IP 마다 UDP 137 질의를 보낸다 — IDS 가 정찰로 볼 수 있다는 점을 시안 · 릴리스 노트에 밝혔다.
+
+- ⚠⚠ **v2.999 — IP 스캔 MAC · 제조사(스캐너 이웃 표 ARP)와 대장 '제조사 · MAC' 열**(사용자 선택 '②③ MAC · 제조사 + 충돌 감지' · 시안 `docs/design/ipam-alerts-mac-dns`
+  (캔버스 https://claude.ai/artifact/FZQsds5xAS4f6QT24nJ4Mu) · 컨펌 10개 전부 기본값 — 릴리스 세 번 중 첫째(가: 수집과 표시). 회귀 `server/test/ipScanMac2999.test.js` + 웹 `ipamMacText.test.js`):
+  - MAC 은 **스캐너의 이웃 표를 읽기만** 한다(`ipam/neighbors.js` — 리눅스 `/proc/net/arp`, 새 패킷 · 명령 실행 없음). 큰 대역에서 앞 항목이 밀려나므로 1단계 동안 주기적으로(2초) +
+    1 · 2단계 끝에 읽어 모은다(타이머는 finally 에서 멈춘다 — 인라인 폴백이 메인 프로세스에서 돌아도 새지 않게). 완성 항목(0x2)만 · 게시 항목(0x8 — 이 장비 MAC) · 0 MAC 은 버린다.
+    Windows 의 `arp -a` 는 범위 밖(사유 `unsupported`).
+  - 보고 칸은 **`arpMac`(이웃 표) · `arpTried`(표를 읽었고 같은 서브넷 · 이 장비 주소 제외)** — `mac` 칸은 예전처럼 NetBIOS 가 답한 MAC 이다(옛 중앙이 ARP 값을 'NetBIOS 응답' 으로 보이지 않게 칸을 나눴다).
+    요약은 `nameStats.mac = {onLink, found, reason}`(옛 중앙은 모르는 키를 버린다). 중앙 정제 `cleanAliveHost`(꼴 · 참일 때만) · `cleanMacStats`(수치 · 아는 사유만).
+  - 저장 `arp = {v, at, miss}` — 이름과 같은 규칙(`mergeArp`): 표에 있으면 새 값 · **같은 서브넷인데 표에 없으면 miss+1(NAME_MISS_MAX 에 지움)** ·
+    **볼 수 없었던 보고(옛 엣지 · 다른 서브넷 에이전트 · 표 못 읽음)는 그대로**(보지 못한 것을 없어졌다고 세지 않는다 — 화면은 확인 시각으로 '지난 확인' 을 말한다).
+    MAC 이력 `history[ip].macs`(최근 10 · **ARP 값만** — 다음 묶음 'MAC 변경' 의 근거라 상대가 말한 NetBIOS 값을 섞지 않는다). 같은 MAC 의 IP 색인 `_macIps`(갱신 지점은 _agentCount 와 같다 — 로드 · 병합 · 정리).
+  - 판정 코어는 `ipam/macVendor.js` 하나 — 표시 MAC(ARP > NetBIOS) · 제조사(`vendor/oui.tsv.gz` — npm oui-data@2.1.58 BSD-2-Clause, IEEE MA-L · MA-M · MA-S 5만 4천 건, 9 → 7 → 6자리 순) ·
+    종류(`gateway` VRRP · HSRP · GLBP / `virtual` VMware · Hyper-V · Xen · VirtualBox · Parallels · Proxmox · QEMU / `random` 로컬 관리 비트 — 제조사를 추정하지 않는다).
+    표는 기동 15초 뒤 비동기로 미리 읽고(`warmOui`), 그 전에 찾으면 동기 적재(실측 약 45ms 한 번). 표 갱신은 `scripts/oui-build.mjs` → 고지 `scripts/third-party-notices.mjs` 3절.
+  - 범위 계정: 대장 행에 MAC 칸을 싣지 않는다(호스트명과 같은 `allowed ?` 판정) · `/tools/ipam/history` 의 scan 은 예전처럼 null. 스캔 결과 CSV 는 `mac`(표시 MAC) 뒤에 `mac_src` · `mac_vendor` 를 덧붙였다.
+  - ⚠ 정직 기록: **실제 L2 이웃이 있는 망에서 이웃 표 읽기를 확인하지 못했다**(이 환경의 이웃은 게이트웨이 1개 — 파서는 커널 꼴의 표본 · 주입한 읽기 함수로 확인). IEEE 등록부 원문 · 재배포 조건 문서는
+    이 환경의 네트워크 정책이 막아 읽지 못했다(oui-data 의 BSD 라이선스만 확인). '미등록 가상 NIC' 은 ESXi vmkernel 포트(vMotion 등)도 VMware 대역을 써서 단정하지 않는다.
+
+- ⚠⚠ **v3.1.0 — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)**(시안 `docs/design/ipam-alerts-mac-dns` ① ③ · 컨펌 기본값: 충돌 의심만 켬 · 연속 2회 · 묶음 상한 50 ·
+  회귀 `server/test/ipamChanges310.test.js`(변이 20종 20 검출) + 웹 `ipamChangeText.test.js`):
+  - 감지는 **병합 때 한 번 · 중앙에서**(`scanStore.mergeScanResults` → `onScanChanges` 구독 — 엣지는 '변화' 를 보내지 않는다). 부분 결과(seenOnly)는 비교하지 않는다.
+    종류: new-ip(이력이 없던 IP — **그 대역 줄의 첫 완료 스캔이 끝난 뒤에만**, 기준선 `ipam-change-baseline.json` 은 `recordAgentReport` 가 표시) · reserved-up(관리상태 예약 · 폐기 —
+    IP 지정 > 전역 대역 정책 — 가 해제 · 새 상태에서 응답 시작) · rename(v2.991 renames) · mac-change(ARP MAC 만 · 예전 MAC 으로 되돌아가면 `flap`).
+  - 기록 · 알림은 `ipam/changeNotify.js`: vCenter 가 아는 IP(VM · 호스트 관리 IP)는 new-ip 에서 빼고 이중화 가상 MAC 은 mac-change 에서 뺀다 → **전부 기록**(`ipam/changeLog.js` ·
+    `ipam-changes.json` 5,000건 · 180일) → 켠 종류만 **스캔 한 번 · 종류 하나에 한 건**(10줄 + 외 N건 · 상한 넘으면 요약). 기록만 사유는 항목의 `notify`(off · quiet · excluded · flap).
+    'MAC 변경 알림 제외' 는 관리상태 `macAlertOff`(불리언 참만 — 그 칸만 있어도 관리상태 항목이 남아 '관리' 로 센다).
+  - 충돌 의심 판정은 `ipam/conflict.js` 하나: VM(켜짐)의 IP 에 그 VM 의 NIC MAC(`vm.dev.nics` ∪ `vm.dns.nics`)이 아닌 **ARP MAC 이 연속 N회**(`arp.n` — 같은 MAC 을 이어 본 횟수) ·
+    이중화 MAC · 한 MAC 이 8개 이상 IP(대리 ARP) 제외 · **모름**(NIC MAC 미수집 · 여러 VM · miss>0 · 그 에이전트의 마지막 완료 스캔이 못 봄)은 알림 엔진이 보류(held — 해소로 기록하지 않음).
+    상태형이라 `alerts.js evaluate` 가 판정하고(규칙을 꺼도 판정은 해 `conflictState` 에 둔다 — 대장 배지), 발생 · 해소 기록은 `onAlertState` 로 한 번씩. ESXi 관리 IP 는 대조하지 않는다(vmkernel MAC 미수집).
+  - 대장: VM 행 `macConflict`(conflictState — `ipamRevKey` 끝 `|c` 가 캐시를 무효화) · 최근 7일 MAC 변경 `macChangedAt · macPrev` · 칩 '충돌 의심 · MAC 변경'. 범위 계정에는 싣지 않는다.
+    `arp.n` 은 nameSig 에 넣지 않았다(스캔마다 대장 재계산 금지). 화면: IP관리 › IP 변화(`GET /admin/ipam/changes` — 스캔 로그와 같은 adminOnly + fleetOnly) · 설정 › 알림 카드 · 관리상태 편집 칸.
+  - ⚠ 설계와 다른 것: 추천 카드('충돌 의심 · MAC 변경')는 넣지 않았다 — '추천 기능 30선' 은 개수가 테스트로 고정(30)이라 대장 칩 · IP 변화 페이지로 대신했다. 대리 ARP 기준(8)은 설정값이 아니라 상수다.
+  - ⚠ 정직 기록: 실제 충돌 · 장비 교체 현장으로 확인하지 못했다(시험은 저장소에 값을 넣어 판정 · 알림 묶음을 확인). 알림은 채널이 없는 시험 환경이라 '보내지 않음' 까지만 봤다.
+
+
+- ⚠⚠ **v3.2.0 — DNS 정합성(역DNS 이름의 정방향 확인 · 릴리스 다)**(시안 `docs/design/ipam-alerts-mac-dns` ④ ⑦ · 컨펌 7 '역DNS 이름만' · 8 '기록만' ·
+  회귀 `server/test/dnsConfirm320.test.js` + 웹 `ipamDnsText.test.js`):
+  - 묻는 쪽은 **스캔을 돌린 쪽**(법인 엣지 → 법인 DNS)이다. 묻는 함수 · 이름마다 시한 · 동시 수 · 차단기는 v2.993 정방향 DNS 와 같은 코어(`scan.js lookupMany` — forwardMany 에서 떼어 냈다)이고,
+    물리서버 이름을 먼저 물은 뒤 **같은 예산(FWD_BUDGET_MS)의 남은 시간**으로 묻는다. 물리서버 단계가 차단기('DNS 닿지 않음')로 멈췄으면 묻지 않는다. 판정 코어는 `ipam/dnsConfirm.js` 하나 —
+    match(주소 목록에 이 IP) · other(다른 IP 만 — 최대 4) · none(ENOTFOUND · ENODATA · EAI_NONAME) · unknown(시한 · 예산 · 그 밖의 오류 — **일치에도 불일치에도 넣지 않는다**).
+  - 답 기억은 scanRunner 를 부르는 프로세스(중앙 포탈 · 엣지 에이전트)의 **메모리**다 — 잡에 실어 자식(scanWorker)에 보내고 새로 얻은 답(`dnsLearned`)만 돌려받는다. 기간(설정 `dnsConfirmHours`, 기본 24 · 1~720) 안의
+    답은 다시 묻지 않고, 묻는 순서는 오래된 답부터(한 번도 묻지 않은 이름이 맨 앞) · 미래 시각 답은 믿지 않는다 · 상한 20,000 이름. 재시작하면 비어서 다시 묻는다(파일로 남기지 않는다).
+    설정 `dnsConfirm`(기본 켜짐 — DNS 서버에만 묻는다) · 역DNS 를 끄면 묻지 않는다 · 키 없는 옛 설정 · 옛 중앙 배정도 켜짐.
+  - 엣지 수신: 행 `dnsFwd {v, at?, addrs?}` 는 `cleanDnsFwd`(아는 판정만 · at 은 받은 시각으로 자름 · addrs 는 other 에서만 IPv4 정규형 4개 — 없으면 버림) · **역DNS 이름이 있을 때만** ·
+    요약 `nameStats.dnsFwd` 는 `cleanDnsFwdStats`(수치만 · stopped 는 budget · unreachable 만). 저장본 로드도 같은 정제. 이번 보고에 없으면 칸을 비운다(옛 엣지 · 확인 끔).
+  - 리비전: nameSig 끝에 판정 · 다른 IP(**확인 시각은 넣지 않는다** — 기억을 다시 쓴 스캔마다 대장을 다시 만들지 않게). 변화 기록 `dns-mismatch`(알림 규칙 없음 → notify none ·
+    `scanStore.dnsMismatchChange`): **같은 역DNS 이름의 알던 판정(match · other · none)에서** other · none 으로 바뀌었을 때만 — 첫 확인 · 확인 못 함 다음 · 이름 변경은 변화가 아니다
+    (지금 어긋난 IP 전부는 추천 카드가 보인다 — 첫 확인에서 기록이 쏟아지지 않게).
+  - 대장(전 범위 계정만 — `ledger` 의 `!allowed` 블록): 일치 · 확인 못 함은 `dnsFwd` 판정만(행마다 실리므로 짧게), 어긋난 것만 `dnsPtr · dnsFwdAt · dnsFwdAddrs · dnsAgent`.
+    화면: 호스트명 칸 배지 'DNS 다른 IP' · '정방향 없음'(일치는 달지 않는다) · 칩 'DNS 불일치' · 요약 줄 '정방향 확인 n / N'(N = 확인 못 함 제외) · IP 상세 역DNS 줄 아래 정방향 결과 ·
+    추천 카드 16 'DNS 정합성 · 레코드 초안'(결과가 하나도 없으면 — 범위 계정 · 옛 엣지 · 끔 — 예전 카드 그대로 · 카드 수 30 불변) · 스캔 결과 CSV 끝에 `dns_forward,dns_forward_addrs`.
+  - v2.993 `nameVia` 배지(정방향 DNS · 정방향 DNS 일치 · 이름이 서로 다름)는 **서브넷 시트의 Hostname 칸**, 이번 배지는 **대장 목록의 호스트명 칸**이라 한 칸에 겹치지 않는다 —
+    목록 칸의 '이름 다름' × 정방향 판정 조합은 웹 테스트 표로 고정했다.
+  - ⚠ 정직 기록: 실제 법인 DNS 로 확인하지 못했다(시험은 묻는 함수를 주입 · 이 컨테이너의 루프백 역DNS 는 환경마다 다르다). 분할 DNS · hosts 파일 항목이 답에 섞이는 것은 화면 문구로 밝혔다.
+    엣지에서 묻는 시간은 스캔 시간에 더해진다(최대 FWD_BUDGET_MS 90초 — 물리서버 이름 단계와 합).

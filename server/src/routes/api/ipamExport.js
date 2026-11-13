@@ -26,7 +26,9 @@ import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANA
 import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES } from '../../ipam/rangePolicies.js';
 import { ipToNum } from '../../ipam/ledger.js';
 import { logAudit } from '../../audit.js';
-import { getIpHistory, scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
+import { getIpHistory, scanResultList, getIpHistoryMap, scanDetailOf } from '../../ipam/scanStore.js';
+import { displayName } from '../../ipam/hostNames.js'; // v2.991: 스캔 결과 CSV 의 hostname_source
+import { entryMac, macInfo } from '../../ipam/macVendor.js'; // v2.999: 스캔 결과 CSV 의 mac · mac_src · mac_vendor
 import { renderIpamWorkbook } from '../../ipam/excel.js'; // v2.741 LEFT-01: 조립·직렬화는 워커 스레드에서
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드
 import { todayStamp, DAY_OFFSET_MIN } from "../../util/dayKey.js";
@@ -181,8 +183,10 @@ api.get('/tools/ipam/sheet', requirePerm('tools'), async (req, res) => {
 api.get('/tools/ipam/history', requirePerm('tools'), (req, res) => {
   // 스캔 이력은 vCenter 귀속이 없어 scope 판정 불가 → 범위 제한 계정에는 노출하지 않는다
   // (ledger.js 스캔 행 차단·deep-search scanItems 미노출과 같은 정책. 임의 IP 프로빙 차단).
-  if (scopedVcenterIds(req.user, store.get())) return res.json({ ip: req.query.ip, history: null });
-  res.json({ ip: req.query.ip, history: getIpHistory(String(req.query.ip || '')) });
+  if (scopedVcenterIds(req.user, store.get())) return res.json({ ip: req.query.ip, history: null, scan: null });
+  // v2.991: 그 IP 의 스캔 결과(방식별 호스트명 · 확인 시각 · 연속 무응답 · NetBIOS 그룹/MAC) — IP 상세 창의 '호스트명' 묶음. 같은 게이트(범위 계정 null).
+  const ip = String(req.query.ip || '');
+  res.json({ ip: req.query.ip, history: getIpHistory(ip), scan: scanDetailOf(ip) });
 });
 
 // vCenter별 등록 스캔 대역 목록(+vCenter 이름·IP 수 추정).
@@ -232,7 +236,10 @@ api.get('/tools/ipam/netmap', requirePerm('tools'), async (req, res) => {
 
 // 스캔 결과를 '첨부파일'처럼 내려받기(CSV). 현재 결과 + 이력(상태/최초관측) 조인.
 api.get('/tools/ipam/scan-report.csv', csvPerm, requirePerm('tools'), (req, res) => {
-  const head = 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent';
+  // v2.991: 뒤에 호스트명 확인 열을 덧붙인다(앞 열 순서는 그대로 — 열 위치로 읽는 외부 도구가 깨지지 않게).
+  // v2.999: mac 은 표시 MAC(스캐너 이웃 표 ARP > NetBIOS 가 답한 MAC — 예전에는 NetBIOS 뿐) · 뒤에 mac_src(arp|netbios) · mac_vendor 를 덧붙인다.
+  // v3.2.0: 뒤에 dns_forward(역DNS 이름의 정방향 확인 — match · other · none · 빈칸 = 확인 못 함 · 묻지 않음) · dns_forward_addrs(other 의 주소 — 공백 구분)를 덧붙인다.
+  const head = 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent,hostname_source,name_dns,name_mdns,name_netbios,netbios_group,mac,mac_src,mac_vendor,dns_forward,dns_forward_addrs';
   // 스캔 결과 전량(전 사이트 IP/포트/서비스/수집엣지)은 vCenter 귀속이 없어 scope 판정 불가 →
   // 범위 제한 계정에는 헤더만 반환한다(ledger.js 스캔 행 차단과 일관 — 이 경로로 새면 하드닝 무의미).
   if (scopedVcenterIds(req.user, store.get())) {
@@ -246,8 +253,12 @@ api.get('/tools/ipam/scan-report.csv', csvPerm, requirePerm('tools'), (req, res)
   const iso = (t) => (t ? new Date(t).toISOString() : '');
   const lines = rows.map((r) => {
     const h = histMap[r.ip] || {};
+    const nm = r.names || {};
+    const em = entryMac(r);
     return [r.ip, r.hostname || '', h.status || '', (r.openPorts || []).join(' '), (r.services || []).join(' '),
-      iso(h.firstSeen), iso(r.lastSeen || h.lastSeen), r.agent || ''].map(esc).join(',');
+      iso(h.firstSeen), iso(r.lastSeen || h.lastSeen), r.agent || '',
+      displayName(nm).src, nm.dns?.v || '', nm.mdns?.v || '', nm.netbios?.v || '', r.nbGroup || '', em.mac, em.src || '', (em.mac && macInfo(em.mac)?.vendor) || '',
+      r.dnsFwd && r.dnsFwd.v !== 'unknown' ? r.dnsFwd.v : '', (r.dnsFwd?.addrs || []).join(' ')].map(esc).join(',');
   });
   const csv = `${head}\n${lines.join('\n')}\n`;
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');

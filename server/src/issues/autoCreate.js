@@ -357,10 +357,16 @@ async function vcenterOfPart(p, ctx) {
     const byTag = tag ? ctx.byTag.get(tag) : '';
     if (byTag) return { id: byTag, name: ctx.names.get(byTag) || byTag, via: 'serviceTag' };
     const ids = ctx.agentIds(p.agent);
+    // v2.929(반증 F9): 엣지 봉투가 대상의 법인을 말하면(claimedVcenterId) **그 엣지가 담당하는 vCenter 일 때만** 받는다(엣지 주장 ∩ 중앙이 아는 담당).
+    //   파트 장애는 claimed 가 없어 예전과 같다.
+    const claimed = t(p.claimedVcenterId);
+    if (claimed && ids.includes(claimed)) return { id: claimed, name: ctx.names.get(claimed) || claimed, via: 'agent-claim' };
     if (ids.length === 1) return { id: ids[0], name: ctx.names.get(ids[0]) || ids[0], via: 'agent' };
     return { id: '', name: '', via: 'none' };
   } catch { return { id: '', name: '', via: 'none' }; }
 }
+/** 이슈 법인 결정(위 vcenterOfPart 하나 — 베어메탈 성능 엣지 발송도 이것을 쓴다: 두 벌 금지). p = { agent, scope, deviceKeyKind, deviceKey, claimedVcenterId? }. */
+export async function resolveIssueVcenter(p, ctx = {}) { return vcenterOfPart(p || {}, ctx); }
 
 /**
  * 전이를 받아 이슈를 만들고 고친다. 던지지 않는다(폴러를 막지 않는다).
@@ -388,7 +394,7 @@ export async function applyPartFaultIssues(tr, { now = Date.now() } = {}) {
   // v2.904(점검 S-4 — 재현): 자동 댓글이 실패해도(이슈당 댓글 200개 상한 등) 그 전이의 나머지('검토' 로 옮기기)는 한다 — 출처(해소 · 다시 열림)는
   // 이미 기록돼 다음 폴링에 같은 전이가 다시 오지 않으므로, 댓글에서 던지면 상태 전이가 영영 빠졌다. 실패는 errors · error 로 밝힌다.
   const comment = (key, body) => {
-    try { addComment(key, { body: capStr(body, 1_900) }, SYSTEM_USER); out.commented += 1; status.commented += 1; }
+    try { addComment(key, { body: capStr(body, 1_900) }, SYSTEM_USER, { auto: true }); out.commented += 1; status.commented += 1; } // v2.932(점검 B1-03) 자동 댓글은 사람 몫과 따로 센다
     catch (e) { status.errors += 1; status.error = `comment ${key}: ${String(e?.message || e).slice(0, 160)}`; console.warn(`[issues] 파트 장애 자동 등록 댓글 실패(${status.error})`); }
   };
   const vcCtx = {};

@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { resolvePickedDc } from '../collector/datacenterMatch.js'; // v2.986(반증 D3): 법인 id 고르기 규칙 하나(순수 · 의존 없음)
 
 const FILE = path.join(config.configDir, 'datacenters.json');
 const norm = (s) => String(s || '').trim();
@@ -182,8 +183,11 @@ export function setVcenterDatacenterMany(entries = []) {
     else { malformed += 1; continue; }
     if ((typeof rawVc !== 'string' && typeof rawVc !== 'number') || (rawDc != null && typeof rawDc !== 'string' && typeof rawDc !== 'number')) { malformed += 1; continue; }
     const vc = norm(rawVc); if (!vc) { malformed += 1; continue; }
-    const dc = idOf(rawDc);
-    if (dc && !valid.has(dc)) { unknownDatacenter += 1; continue; }
+    // v2.986(반증 D3): 법인 id 는 실제 id 로(정확 일치 → 대소문자 무시 — collector/datacenterMatch.js resolvePickedDc 하나). 예전 idOf(소문자) 비교는
+    //   손으로 고친 대문자 id 법인에 할당할 수 없어 '바뀐 것 없음(unknownDatacenter)' 이었다.
+    const rawS = norm(rawDc);
+    const dc = rawS ? (valid.has(rawS) ? rawS : resolvePickedDc(rawS, cur.datacenters)) : '';
+    if (rawS && !dc) { unknownDatacenter += 1; continue; }
     if (!dc) { if (vc in assign) { delete assign[vc]; changed += 1; } }
     else if (assign[vc] !== dc) { assign[vc] = dc; changed += 1; }
   }

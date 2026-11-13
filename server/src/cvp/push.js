@@ -40,6 +40,8 @@ const MAX_ROWS = Math.max(1000, Number(process.env.CVP_PUSH_ROWS) || 20_000);
 const PUSH_GZIP = process.env.CVP_PUSH_GZIP !== 'false';
 export const pushMs = () => clampIntervalMs(Number(process.env.CVP_PUSH_MS) || 5 * 60_000, 5 * 60_000, 60_000);
 const failLog = createChangeLogger({ windowMs: 10 * 60_000 });
+const l2Log = createChangeLogger({ windowMs: 60 * 60_000 });
+const warnL2 = (sig) => l2Log('l2', sig);   // v2.924(B-②): 같은 L2 경고는 한 시간에 한 번
 
 /**
  * 장비 레코드는 **구성이 바뀌었을 때만** 통째로 보낸다(그 밖에는 `touch` — [cvpId, key, ts] 로 수집 시각만).
@@ -50,6 +52,39 @@ const failLog = createChangeLogger({ windowMs: 10 * 60_000 });
  */
 import { EDGE_FULL_REFRESH_MS as FULL_REFRESH_MS } from './faults.js'; // v2.681: 중앙 부품 신선도 경계와 한 벌
 const _sent = new Map(); // `${cvpId}|${key}` → { h, at }
+/**
+ * v2.924(SAN·CVP 설계 B-②): LLDP·MAC 테이블은 장비 레코드와 따로 보낸다(행이 많다 — 장비 레코드 해시에 섞으면 매 주기 전량이 간다).
+ *   보낸 내용 해시를 기억하고 바뀐 장비만(또는 전량 갱신 주기마다) 보낸다. **중앙이 받았다고 답할 때만**(saved.l2 가 수) 보낸 것으로 친다 —
+ *   구버전 중앙은 필드를 버리므로, 그 답이 없으면 L2_UNSUPPORTED_HOLD_MS 동안 L2 를 싣지 않는다(매 주기 같은 큰 본문을 헛보내지 않게).
+ */
+const _l2Sent = new Map(); // `${cvpId}|${key}` → { h, at }
+// v2.935(C-③): EndpointLocation — CVP 마다 중앙이 받았다고 답한 마지막 '물어본 시각'. 그 뒤에 물은 MAC 만 보낸다(L2 와 같은 ack 규약 · 구버전 중앙 보류).
+const _epSentAt = new Map(); // cvpId → 마지막으로 중앙이 받은 ep_meta 순번(seq — v2.935 반증 L-5: 예전에는 at)
+let _epUnsupported = 0;
+export const EP_PUSH_PER_CVP = 500;
+/** 중앙 답 → EndpointLocation 수신 여부(순수) — 'acked' = saved.ep 가 수 · 'old-central' = saved 는 있는데 ep 칸이 없다 · 'unknown'. */
+export function epAckOf(reply) {
+  const sv = reply && typeof reply === 'object' ? reply.saved : null;
+  if (!sv || typeof sv !== 'object') return 'unknown';
+  return typeof sv.ep === 'number' ? 'acked' : 'old-central';
+}
+let _l2Unsupported = 0;
+export const L2_UNSUPPORTED_HOLD_MS = 6 * 3600_000;
+/**
+ * v2.924(반증 L-7): 중앙 답 → L2 수신 여부(순수). 'acked' = saved.l2 가 수(새 중앙) · 'old-central' = saved 는 있는데 l2 칸이 없다(구버전 중앙) ·
+ *   'unknown' = saved 자체가 없다(noDelegation 등 — 구버전으로 단정하지 않는다: 보류하지 않고 보낸 것으로도 치지 않는다).
+ */
+export function l2AckOf(reply) {
+  const sv = reply && typeof reply === 'object' ? reply.saved : null;
+  if (!sv || typeof sv !== 'object') return 'unknown';
+  return typeof sv.l2 === 'number' ? 'acked' : 'old-central';
+}
+/** L2 를 실을지(순수) — 바뀐 장비 · 전량 갱신 주기 · 구버전 중앙 보류. */
+export function l2Due(prev, h, nowMs, { refreshMs = FULL_REFRESH_MS, unsupportedAt = 0, holdMs = L2_UNSUPPORTED_HOLD_MS } = {}) {
+  if (!h) return false;
+  if (unsupportedAt && nowMs - unsupportedAt < holdMs) return false;
+  return !(prev && prev.h === h && nowMs - prev.at < refreshMs);
+}
 const _evSent = new Map(); // v2.641: cvpId → 보낸 이벤트의 최대 (updatedAt|ts) — 재기동하면 비어 최근 7일분을 다시 보낸다(중앙 upsert)
 export const EVENT_PUSH_MAX = 2000;
 /** v2.680(감사 F-04): push 한 번에 싣는 이벤트 원문 바이트 상한(CVP 전체 합) — 중앙 본문 한도(해제 후 16MB)보다 충분히 작게. */
@@ -73,7 +108,7 @@ export function pickEventsForPush(events, wm, budget) {
   }
   return { fresh, bytes, held };
 }
-const RATE_KEYS = ['inBps', 'outBps', 'inUtil', 'outUtil', 'inErr', 'outErr'];
+const RATE_KEYS = ['inBps', 'outBps', 'inUtil', 'outUtil', 'inErr', 'outErr', 'inDrop', 'outDrop']; // v2.922: 드롭
 export function recordHash(d) {
   // v2.641: CPU·메모리 값은 매 주기 바뀐다 — 해시에 넣으면 전 장비 레코드가 매번 다시 간다. 값은 devSamples 가 싣고 해시에는 '있는가' 만.
   const { ts, partsAt, sysAt, cpuPct, memPct, memTotal, ...rest } = d;
@@ -153,6 +188,8 @@ async function pushInner() {
   const servers = serversForThisNode();
   const statuses = servers.map(statusFor);
   const deviceItems = []; const deviceKeys = {}; const touch = []; const sentNow = []; const devSamples = []; const events = {}; const evMaxNow = new Map();
+  const l2Items = []; const l2SentNow = []; let l2Acked = false; let l2OldCentral = false;   // v2.924(B-②)
+  const epItems = []; const epMaxNow = new Map(); let epAcked = false; let epOldCentral = false;   // v2.935(C-③)
   const nowMs = Date.now();
   let evBytes = 0; let evHeld = 0;
   let devicesUnavailable = !(await db.available());
@@ -175,6 +212,26 @@ async function pushInner() {
           evMaxNow.set(srv.id, Math.max(...fresh.map((e) => Math.max(e.updatedAt || 0, e.ts || 0))));
         }
       } catch { /* 이벤트는 부가 정보 — 실패해도 장비 push 는 계속한다 */ }
+      // v2.924(B-②): 바뀐 장비의 L2 레코드(메타 해시로 고르고, 고른 장비만 행을 읽는다).
+      try {
+        const metas = await db.l2MetaFor(db.LOCAL_AGENT, srv.id);
+        for (const m of metas || []) {
+          await new Promise((r) => setImmediate(r));   // 반증 L-1: 장비마다 양보(행을 읽고 JSON 을 만드는 동안 타이머를 막지 않게)
+          const k = `${srv.id}|${m.key}`; const h = `${m.fdbHash}|${m.lldpHash}`;
+          if (!l2Due(_l2Sent.get(k), m.fdbHash || m.lldpHash ? h : '', nowMs, { unsupportedAt: _l2Unsupported })) continue;
+          const rec = await db.l2RecordFor(db.LOCAL_AGENT, srv.id, m.key);
+          if (!rec) continue;
+          l2Items.push({ t: 'l', v: { cvpId: srv.id, ...rec } });
+          l2SentNow.push([k, h]);
+        }
+      } catch (e) { if (warnL2(e.message)) console.warn(`[cvp-push] L2(LLDP·MAC 테이블) 레코드를 읽지 못해 이번에는 싣지 않습니다: ${e.message}`); }
+      // v2.935(C-③): 지난 ack 뒤 새로 물어본 EndpointLocation 결과(오래된 것부터 CVP 마다 500개). 구버전 중앙이면 보류.
+      if (!(_epUnsupported && nowMs - _epUnsupported < L2_UNSUPPORTED_HOLD_MS)) {
+        try {
+          const eps = await db.endpointsSince(db.LOCAL_AGENT, srv.id, _epSentAt.get(srv.id) || 0, EP_PUSH_PER_CVP);
+          for (const { seq, ...e } of eps || []) { epItems.push({ t: 'e', v: { cvpId: srv.id, ...e } }); epMaxNow.set(srv.id, Math.max(epMaxNow.get(srv.id) || 0, Number(seq) || 0)); }   // 커서 = 순번(반증 L-5)
+        } catch (e) { if (warnL2(`ep:${e.message}`)) console.warn(`[cvp-push] EndpointLocation 결과를 읽지 못해 이번에는 싣지 않습니다: ${e.message}`); }
+      }
       for (const d of recs) {
         if (d.sysAt != null && (d.cpuPct != null || d.memPct != null)) devSamples.push([srv.id, d.key, d.sysAt, d.cpuPct, d.memPct, d.memTotal ?? null]);
         const k = `${srv.id}|${d.key}`;
@@ -196,7 +253,7 @@ async function pushInner() {
     rows = r.rows; maxRowid = r.maxRowid;
   }
   const head = { agent: config.agent.name, servers: statuses, deviceKeys: devicesUnavailable ? null : deviceKeys, devicesUnavailable, touch, devSamples, events };
-  const items = [...deviceItems, ...rows.map((v) => ({ t: 'r', v }))];
+  const items = [...deviceItems, ...l2Items, ...epItems, ...rows.map((v) => ({ t: 'r', v }))];
   const chunks = chunkItems(items, CHUNK_BYTES, Buffer.byteLength(JSON.stringify(head)));
   // v2.620(RECENT2620-02): 한글 이름을 헤더에 원문으로 실으면 fetch 가 요청 자체를 던진다 — 안전할 때만 싣는다.
   const hdrs = { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), 'X-Central-Token': config.agent.centralToken };
@@ -206,6 +263,8 @@ async function pushInner() {
     const body = {
       ...(i === 0 ? head : { agent: config.agent.name }), chunk: i, chunks: chunks.length,
       devices: c.filter((x) => x.t === 'd').map((x) => x.v), rows: c.filter((x) => x.t === 'r').map((x) => x.v),
+      ...(c.some((x) => x.t === 'l') ? { l2: c.filter((x) => x.t === 'l').map((x) => x.v) } : {}),   // v2.924(B-②)
+      ...(c.some((x) => x.t === 'e') ? { ep: c.filter((x) => x.t === 'e').map((x) => x.v) } : {}),   // v2.935(C-③)
     };
     const json = Buffer.from(JSON.stringify(body));
     let payload = json; const h = { ...hdrs };
@@ -235,11 +294,23 @@ async function pushInner() {
       throw e;
     }
     if (i === 0 && reply?.saved && typeof reply.saved.touched === 'number') touchedAt = reply.saved.touched;
+    { const a = l2AckOf(reply); if (a === 'acked') l2Acked = true; else if (a === 'old-central') l2OldCentral = true; }   // v2.924(B-② · 반증 L-7)
+    { const a = epAckOf(reply); if (a === 'acked') epAcked = true; else if (a === 'old-central') epOldCentral = true; }   // v2.935(C-③)
     drop = mergeDrop(drop, dropSummaryOf(reply));
   }
   if (rows.length) saveCursor(maxRowid);
   for (const [c, m] of evMaxNow) _evSent.set(c, Math.max(_evSent.get(c) || 0, m));
   for (const [k, h] of sentNow) _sent.set(k, { h, at: nowMs });
+  // v2.924(B-②): 중앙이 L2 를 받았다고 답했을 때만 보낸 것으로 친다. 실었는데 답이 없으면 구버전 중앙 — 보류 시각을 적는다.
+  if (l2SentNow.length) {
+    if (l2Acked) { for (const [k, h] of l2SentNow) _l2Sent.set(k, { h, at: nowMs }); _l2Unsupported = 0; }
+    else if (l2OldCentral) { _l2Unsupported = nowMs; if (warnL2('unsupported')) console.warn(`[cvp-push] 중앙이 LLDP·MAC 테이블을 받았다고 답하지 않았습니다(구버전 중앙으로 보입니다) — ${Math.round(L2_UNSUPPORTED_HOLD_MS / 3600_000)}시간 동안 싣지 않습니다`); }
+  }
+  // v2.935(C-③): EndpointLocation 도 중앙이 받았다고 답했을 때만 보낸 것으로 친다(실었는데 답이 없으면 구버전 중앙 — 보류).
+  if (epItems.length) {
+    if (epAcked) { for (const [c, at] of epMaxNow) _epSentAt.set(c, Math.max(_epSentAt.get(c) || 0, at)); _epUnsupported = 0; }
+    else if (epOldCentral) { _epUnsupported = nowMs; if (warnL2('ep-unsupported')) console.warn(`[cvp-push] 중앙이 EndpointLocation 을 받았다고 답하지 않았습니다(구버전 중앙으로 보입니다) — ${Math.round(L2_UNSUPPORTED_HOLD_MS / 3600_000)}시간 동안 싣지 않습니다`); }
+  }
   // v2.611(EDGE2611-04): 중앙에 그 장비 행이 없으면(중앙 DB 교체·정리) touch 는 아무것도 갱신하지 않는다 — 해시를 버려
   //   다음 push 에 레코드 전체를 다시 보낸다(한 시간 전량 갱신을 기다리지 않게).
   let touchMissing = 0;
@@ -250,13 +321,17 @@ async function pushInner() {
   // 등록부에서 빠진 CVP·장비의 해시는 버린다(누수 방지 — 다시 나타나면 전량을 보낸다).
   const liveKeys = new Set(Object.entries(deviceKeys).flatMap(([c, ks]) => ks.map((x) => `${c}|${x}`)));
   if (!devicesUnavailable) for (const k of [..._sent.keys()]) if (!liveKeys.has(k)) _sent.delete(k);
-  { const liveCvp = new Set(servers.map((x) => String(x.id))); for (const k of [..._evSent.keys()]) if (!liveCvp.has(k)) _evSent.delete(k); }
+  if (!devicesUnavailable) for (const k of [..._l2Sent.keys()]) if (!liveKeys.has(k)) _l2Sent.delete(k);
+  { const liveCvp = new Set(servers.map((x) => String(x.id))); for (const k of [..._evSent.keys()]) if (!liveCvp.has(k)) _evSent.delete(k); for (const k of [..._epSentAt.keys()]) if (!liveCvp.has(k)) _epSentAt.delete(k); }
   warnDrop('cvp-push', drop);
   const cursorNow = rows.length ? maxRowid : cursor0;
   const backlogRows = dbMax != null ? Math.max(0, dbMax - cursorNow) : null;
   const more = rows.length >= MAX_ROWS;
   const lost = db.lostUnsentStats();
   _last = { at: Date.now(), ok: true, servers: statuses.length, devices: deviceItems.length, touched: touch.length, samples: rows.length, chunks: chunks.length, bytes, gzBytes: gz,
+    l2: l2Items.length, ep: epItems.length,
+    ...(_epUnsupported && nowMs - _epUnsupported < L2_UNSUPPORTED_HOLD_MS ? { epHeldUntil: _epUnsupported + L2_UNSUPPORTED_HOLD_MS, epHeldNote: '중앙이 EndpointLocation 을 받지 않아(구버전 중앙) 보류 중입니다' } : {}),
+    ...(_l2Unsupported && nowMs - _l2Unsupported < L2_UNSUPPORTED_HOLD_MS ? { l2HeldUntil: _l2Unsupported + L2_UNSUPPORTED_HOLD_MS, l2HeldNote: '중앙이 LLDP·MAC 테이블을 받지 않아(구버전 중앙) 보류 중입니다' } : {}),
     backlogRows, more, ...(evHeld ? { eventsHeld: evHeld, eventsHeldNote: '이벤트 바이트 상한으로 다음 주기에 보냅니다' } : {}), ...(touchMissing ? { touchMissing } : {}), ...(lost.total ? { lostUnsent: lost.total, lostUnsentAt: lost.at } : {}),
     ...(devicesUnavailable ? { devicesUnavailable: true, note: '엣지 DB 를 쓸 수 없어 상태만 보냈습니다(중앙의 장비 목록은 그대로)' } : {}),
     ...(servers.length ? {} : { cleared: true, note: '위임 CVP 0대 — 중앙의 이 엣지 목록을 비웠습니다' }),
@@ -295,4 +370,4 @@ export function startCvpPush() {
   _timer = startAdaptiveTimer(pushMs, () => pushCvpNow(), { firstDelayMs: 70_000, name: 'CVP push' });
 }
 export function cvpPushStatus() { return { ...(_last || {}), intervalMs: pushMs(), cursor: loadCursor() }; }
-export function _resetForTest() { _busy = null; _again = false; _last = null; _sent.clear(); _evSent.clear(); try { fs.rmSync(CURSOR_FILE()); } catch { /* */ } }
+export function _resetForTest() { _busy = null; _again = false; _last = null; _sent.clear(); _evSent.clear(); _epSentAt.clear(); _epUnsupported = 0; _l2Sent.clear(); _l2Unsupported = 0; try { fs.rmSync(CURSOR_FILE()); } catch { /* */ } }

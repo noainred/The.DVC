@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readApiSource } from './lib/apiSource.js';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sec-m1m2-'));
 
@@ -165,7 +166,7 @@ test('M2 정적(2차): /agent-config 저장 키가 req.centralAuth.agent', () =>
 });
 
 /* ── 정적 검증: M2 central 저장 키 바인딩 ── */
-const centralSrc = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
+const centralSrc = centralSource();
 const centralRoute = (marker, next) => {
   const i = centralSrc.indexOf(marker);
   assert.ok(i >= 0, `central 라우트 없음: ${marker}`);

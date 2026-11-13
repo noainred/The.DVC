@@ -192,7 +192,8 @@ export function alertOf(f = {}) {
   return {
     key: `bmusage:${f.key}:${f.metric}`,
     severity: sev,
-    title: `${f.name} ${f.label} 사용률 ${valueText} (임계 ${f.pct}%)`,
+    // 8a단계 ①: 정비 창이 끝났는데 아직 초과라 그때 1회 보내는 발화(maint/alertHold.js).
+    title: `${f.afterMaint ? '(정비 창 안부터 초과) ' : ''}${f.name} ${f.label} 사용률 ${valueText} (임계 ${f.pct}%)`,
     detail: `${f.sustainedMin}분 이상 지속${f.peak != null && !f.overRate ? ` · 최고 ${f.peak}%` : ''}${f.overRate ? ' · HBA 처리량을 확인하세요(카운터 이상일 수 있습니다)' : ''}${f.vcenterId ? ` · 법인 ${f.vcenterId}` : ''}`
       + ` · 베어메탈 사용률 화면에서 추이를 확인하세요.`,
   };

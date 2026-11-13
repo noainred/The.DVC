@@ -59,17 +59,22 @@ export default function AgentScans() {
     finally { setBusy(false); }
   };
 
+  // v2.977(전체 점검): 403 · 404 는 다시 물어도 같다 — 폴링을 멈추고 오류 객체를 넘겨 ErrorBox 가 권한 안내로 그리게 한다.
+  const pollRef = React.useRef(null);
   const load = async () => {
     try { setData(await fetchJson('/admin/assignments')); setError(null); }
-    catch (e) { setError(e.message); }
+    catch (e) {
+      setError(e);
+      if ((e?.status === 403 || e?.status === 404) && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    }
   };
   useEffect(() => {
     load();
-    const t = setInterval(load, 15_000);
-    return () => clearInterval(t);
+    pollRef.current = setInterval(load, 15_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; };
   }, []);
 
-  if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
+  if (error && !data) return <ErrorBox error={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!data) return <Loading />;
 
   // 등록된 에이전트가 없으면 처음부터 직접 입력, 있으면 목록 선택을 기본값으로.

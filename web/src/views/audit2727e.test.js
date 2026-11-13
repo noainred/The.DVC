@@ -208,7 +208,7 @@ describe('스윕 — 반환값을 받아 놓고 ok·requireChanged 를 보지 �
   const ALLOW2 = {
     'views/AnomalyDetection.jsx': 1, 'views/GpuGuestSettings.jsx': 1, 'views/GpuSettings.jsx': 1, 'views/Insights.jsx': 1,
     'views/LoginFails.jsx': 1, 'views/MetricsSettings.jsx': 1, 'views/PortalBackup.jsx': 1, 'views/PowerOffCheckSettings.jsx': 1,
-    'views/ToolsReports.jsx': 1, 'views/tools/BmUsage.jsx': 2, 'views/tools/CvpTool.jsx': 1, 'views/tools/GuestOsTools.jsx': 1,
+    'views/ToolsReports.jsx': 1, 'views/tools/BmUsage.jsx': 1 /* v2.927: 배포 저장(PUT /distribute)은 409 충돌이 생겨 r.ok 를 본다 — 남은 1 = 수집 설정 저장 */, 'views/tools/CvpTool.jsx': 1, 'views/tools/GuestOsTools.jsx': 1,
     'views/tools/LinkCheck.jsx': 1,
   };
   const walk2 = (d, out = []) => {

@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { MENU_GROUPS, locate, visibleMenu, hashOf } from '../topMenu.js';
 import { TOOLS } from '../specialToolsList.js';
-import { resolveMenu, defaultMenu, missingDefaults, itemKey, toolEligible, retryDelayMs, MENU_RETRY_MS, nextOpenGroup } from './sideMenu.js';
+import { resolveMenu, defaultMenu, missingDefaults, itemKey, toolEligible, retryDelayMs, MENU_RETRY_MS, nextOpenGroup, itemAliases } from './sideMenu.js';
 
 describe('resolveMenu — 내 메뉴 > 배포 메뉴 > 포탈 기본', () => {
   it('저장된 메뉴가 없으면 포탈 기본 메뉴 그대로다', () => {
@@ -17,7 +17,7 @@ describe('resolveMenu — 내 메뉴 > 배포 메뉴 > 포탈 기본', () => {
     expect(r.groups.map((g) => g.id)).toEqual(MENU_GROUPS.map((g) => g.id));
     expect(r.groups.map((g) => g.label)).toEqual(MENU_GROUPS.map((g) => g.label));
     const server = r.groups.find((g) => g.id === 'server');
-    expect(server.children.map((c) => c.id)).toEqual(['vm', 'esxi', 'vc', 'bm', 'veeam', 'alarm']);   // v2.787 서버 › Veeam
+    expect(server.children.map((c) => c.id)).toEqual(['virt', 'hv', 'bm', 'veeam', 'alarm']);   // v2.787 서버 › Veeam · v2.915 가상화 플랫폼(세 탭 한 항목) · v2.994 Hypervisor(hv) 분리
     expect(server.children.find((c) => c.id === 'bm')).toMatchObject({ tool: 'serveranalysis', seg: 'baremetal', adminOnly: true });
     expect(server.custom).toBe(false);
   });
@@ -51,18 +51,20 @@ describe('resolveMenu — 내 메뉴 > 배포 메뉴 > 포탈 기본', () => {
     ] };
     const r = resolveMenu({ mine, catalog: TOOLS });
     expect(r.groups.map((g) => g.id)).toEqual(['a']);
-    expect(r.groups[0].children.map((c) => c.id)).toEqual(['vm', 'board']);
+    expect(r.groups[0].children.map((c) => c.id)).toEqual(['virt', 'board']);   // v2.994: tab:vms 는 Virtual Machine(VM) 항목의 정체 키
     expect(r.unknown).toBe(0);
   });
   it('해석된 메뉴로도 locate·visibleMenu·hashOf 가 그대로 동작한다(사용자 그룹에 넣은 도구는 그 그룹이 켜진다)', () => {
     const mine = { v: 1, groups: [{ id: 'overview', tab: 'overview' }, { id: 'custom-1', label: '내 그룹', children: [{ tool: 'esxitemp' }, { tab: 'hosts' }] }, { id: 'tools', tab: 'tools' }] };
     const { groups } = resolveMenu({ mine, catalog: TOOLS });
     expect(locate('tools', '#/tools/esxitemp', groups)).toEqual({ group: 'custom-1', child: 't-esxitemp' });
-    expect(locate('hosts', '#/hosts', groups)).toEqual({ group: 'custom-1', child: 'esxi' });
+    // v2.994: tab:hosts 는 이제 별칭이 아니라 실제 항목 Hypervisor(hv) — 그 그룹에 hv 가 켜지고, VM 항목이 없는 메뉴에서 vCenter 탭은 어느 항목도 아니다
+    expect(locate('hosts', '#/hosts', groups)).toEqual({ group: 'custom-1', child: 'hv' });
+    expect(locate('vcenters', '#/vcenters', groups)).toEqual({ group: null, child: null });
     expect(locate('tools', '#/tools/pdu', groups)).toEqual({ group: 'tools', child: null });
     expect(hashOf(groups[1].children[0])).toBe('#/tools/esxitemp');
     const vis = visibleMenu({ tabOk: () => true, toolOk: (k) => k !== 'esxitemp' }, groups);
-    expect(vis.find((g) => g.id === 'custom-1').children.map((c) => c.id)).toEqual(['esxi']);
+    expect(vis.find((g) => g.id === 'custom-1').children.map((c) => c.id)).toEqual(['hv']);
   });
 });
 
@@ -71,11 +73,15 @@ describe('missingDefaults · toolEligible · itemKey', () => {
     const mine = { v: 1, groups: [{ id: 'server', children: [{ tab: 'vms' }] }, { id: 'tools', tab: 'tools' }] };
     const { groups } = resolveMenu({ mine, catalog: TOOLS });
     const miss = missingDefaults(groups);
+    // v2.994: tab:vms 는 Virtual Machine(VM) 항목 그 자체 — 별칭 tab:vcenters 는 후보가 아니고, 새 기본 항목 Hypervisor(tab:hosts)는 '다시 넣기' 후보다
     expect(miss.map((m) => m.key)).toContain('tab:hosts');
+    expect(miss.find((m) => m.key === 'tab:hosts')).toMatchObject({ id: 'hv', label: 'Hypervisor', groupLabel: '서버' });
+    expect(miss.map((m) => m.key)).not.toContain('tab:vcenters');
+    expect(miss.map((m) => m.key)).toContain('tab:alarms');
     expect(miss.map((m) => m.key)).toContain('tool:serveranalysis/baremetal');
     expect(miss.map((m) => m.key)).toContain('tab:overview');
     expect(miss.map((m) => m.key)).not.toContain('tab:vms');
-    expect(miss.find((m) => m.key === 'tab:hosts').groupLabel).toBe('서버');
+    expect(miss.find((m) => m.key === 'tab:alarms').groupLabel).toBe('서버');
     expect(missingDefaults(MENU_GROUPS)).toEqual([]);
   });
   it('외부 포탈·승격 탭·준비 중 도구는 메뉴에 넣을 수 없다', () => {
@@ -89,6 +95,47 @@ describe('missingDefaults · toolEligible · itemKey', () => {
     expect(itemKey({ tool: 'serveranalysis' })).toBe('tool:serveranalysis');
     expect(itemKey({ tool: 'serveranalysis', seg: 'baremetal' })).toBe('tool:serveranalysis/baremetal');
     expect(itemKey({})).toBe('');
+  });
+});
+
+describe('v2.994 저장 메뉴 별칭 — 이름 변경 · Hypervisor 분리 뒤에도 옛 저장 메뉴가 깨지지 않는다', () => {
+  it('별칭은 tab:vcenters → tab:vms(Virtual Machine(VM)) 하나다 · tab:hosts 는 별칭이 아니다', () => {
+    expect([...itemAliases()]).toEqual([['tab:vcenters', 'tab:vms']]);
+  });
+  it('v2.942~v2.993 저장 모양(서버 그룹에 tab:vcenters 하나) → Virtual Machine(VM) 하나 · 중복 · unknown 없음 · Hypervisor 는 다시 넣기 후보', () => {
+    const mine = { v: 1, groups: [{ id: 'overview', tab: 'overview' }, { id: 'server', children: [{ tab: 'vcenters' }, { tool: 'bm-folders' }, { tool: 'serveranalysis', seg: 'baremetal' }] }, { id: 'tools', tab: 'tools' }] };
+    const r = resolveMenu({ mine, catalog: TOOLS });
+    expect(r.unknown).toBe(0);
+    const server = r.groups.find((g) => g.id === 'server');
+    expect(server.children.map((c) => [c.id, c.label])).toEqual([['virt', 'Virtual Machine(VM)'], ['t-bm-folders', 'Bare Metal Server'], ['bm', 'Physical Server · Baremetal']]);
+    expect(locate('vcenters', '#/vcenters', r.groups)).toEqual({ group: 'server', child: 'virt' });
+    expect(locate('vms', '#/vms', r.groups)).toEqual({ group: 'server', child: 'virt' });
+    expect(locate('hosts', '#/hosts', r.groups)).toEqual({ group: null, child: null });   // 넣기 전에는 어느 항목도 켜지지 않는다(자동으로 넣지 않는다 — 결정 4)
+    expect(missingDefaults(r.groups).map((m) => m.key)).toContain('tab:hosts');
+    // 다시 넣으면 Hypervisor 가 그 자리에 생긴다
+    const again = resolveMenu({ mine: { ...mine, groups: mine.groups.map((g) => (g.id === 'server' ? { ...g, children: [g.children[0], { tab: 'hosts' }, ...g.children.slice(1)] } : g)) }, catalog: TOOLS });
+    expect(again.groups.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['virt', 'hv', 't-bm-folders', 'bm']);
+    expect(missingDefaults(again.groups).map((m) => m.key)).not.toContain('tab:hosts');
+  });
+  it('v2.914 이전 저장 모양(tab:vms · tab:hosts · tab:vcenters 셋) → Virtual Machine(VM) · Hypervisor 둘 · 중복 없음 · unknown 0', () => {
+    const mine = { v: 1, groups: [{ id: 'server', children: [{ tab: 'vms' }, { tab: 'hosts' }, { tab: 'vcenters' }, { tab: 'alarms' }] }] };
+    const r = resolveMenu({ mine, catalog: TOOLS });
+    expect(r.unknown).toBe(0);
+    expect(r.groups[0].children.map((c) => c.id)).toEqual(['virt', 'hv', 'alarm']);
+    // 순서가 달라도(vcenters 가 먼저) 같은 항목은 한 번만 — 자리는 처음 나온 것
+    const r2 = resolveMenu({ mine: { v: 1, groups: [{ id: 'server', children: [{ tab: 'vcenters' }, { tab: 'hosts' }, { tab: 'vms' }] }] }, catalog: TOOLS });
+    expect(r2.groups[0].children.map((c) => c.id)).toEqual(['virt', 'hv']);
+    expect(r2.unknown).toBe(0);
+    // 단독 메뉴로 저장된 tab:vcenters 도 같은 항목
+    const r3 = resolveMenu({ mine: { v: 1, groups: [{ id: 'my-vc', tab: 'vcenters' }, { id: 'my-vm', tab: 'vms' }, { id: 'my-h', tab: 'hosts' }] }, catalog: TOOLS });
+    expect(r3.groups.map((g) => [g.id, g.label])).toEqual([['my-vc', 'Virtual Machine(VM)'], ['my-h', 'Hypervisor']]);
+    expect(r3.unknown).toBe(0);
+    const miss3 = missingDefaults(r3.groups).map((m) => m.key);
+    for (const k of ['tab:vms', 'tab:hosts', 'tab:vcenters']) expect(miss3, k).not.toContain(k);
+  });
+  it('기본 메뉴를 저장 모양으로 → 새 저장 키는 tab:vms · tab:hosts(tab:vcenters 는 저장하지 않는다)', () => {
+    const server = defaultMenu().groups.find((g) => g.id === 'server');
+    expect(server.children.slice(0, 2)).toEqual([{ tab: 'vms' }, { tab: 'hosts' }]);
   });
 });
 

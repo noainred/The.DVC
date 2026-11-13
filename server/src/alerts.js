@@ -25,7 +25,11 @@ import { numOrNull } from './util/numOrNull.js';   // v2.506: DNS 리바인딩(T
 import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
 import { headerSafeText } from './util/smtp.js'; // v2.743(INJPKG-03): 메일 제목 제어문자 정리(buildMime 과 같은 판정)
 import { registerExitFlush } from './util/exitFlush.js';
-import { unreadVcenterReasons } from './metrics/unreadVcenters.js'; // v2.768(점검 R3-C5-03): '지금 값 아님' 판정 한 벌
+import { unreadVcenterReasons } from './metrics/unreadVcenters.js';
+import { getScanResults, macIpCount, getAgentReports } from './ipam/scanStore.js';   // v3.1.0: IP 충돌 의심 규칙(스캔이 본 ARP MAC)
+import { findConflicts } from './ipam/conflict.js';
+import { setConflictSuspects } from './ipam/conflictState.js';
+import { buildGpuAllocTree } from './gpu/allocTree.js';   // v2.939 개선 6: 법인 GPU 할당률 규칙(계층과 같은 합계) // v2.768(점검 R3-C5-03): '지금 값 아님' 판정 한 벌
 // v2.604(감사 SEC2604-03): 채널 웹훅 URL 은 그 자체가 비밀(경로에 토큰이 들어 있다)이라 암호화 모드에서 봉인한다.
 // 메모리는 평문이다 — 화면·연결 테스트·발송은 예전과 같다. 평문 파일(구버전·평문 모드)은 그대로 읽힌다.
 import { openSecretsDeep, sealSecretsDeep, FILE_EXTRA_SECRET_FIELDS } from './security/secretVault.js';
@@ -49,7 +53,18 @@ const DEFAULTS = {
     datastorePct: { enabled: true, threshold: 90 },
     ramOvercommitPct: { enabled: false, threshold: 120 },
     vcpuPerCore: { enabled: false, threshold: 5 },
+    // v2.939 개선 6(사용자 결정 '기본 끔 · 켜면 90%'): 법인(vCenter) GPU 할당률 ≥ 임계. 예비가 음수(할당 > 용량)면 위험.
+    gpuAllocPct: { enabled: false, threshold: 90 },
+    // v3.1.0(설계 docs/design/ipam-alerts-mac-dns ① · 컨펌 '기본값 — 충돌 의심만 켬'): IP 스캔이 본 변화. 충돌 의심은 상태형(이 엔진의 평가 —
+    //   threshold = 연속 스캔 수), 나머지 넷은 사건형(ipam/changeNotify.js 가 스캔 한 번 · 종류 하나에 한 건으로 묶어 보낸다 — ipamNewIp.threshold = 묶음 상한).
+    ipamConflict: { enabled: true, threshold: 2 },
+    ipamMacChange: { enabled: false },
+    ipamNewIp: { enabled: false, threshold: 50 },
+    ipamReservedUp: { enabled: false },
+    ipamRename: { enabled: false },
   },
+  // v3.1.0: IP 변화 알림을 보내지 않을(기록만 할) 스캔 에이전트 — 대역을 새로 넣는 동안 등.
+  ipamQuietAgents: [],
   cooldownMin: 60,
   intervalSec: 60,
   // 채널 무관 전역 중복 억제 창(분) — 엔진의 firing/cooldown을 거치지 않고 notify()를 직접
@@ -67,7 +82,22 @@ export const RULE_THRESHOLD_RANGE = Object.freeze({
   ramOvercommitPct: { min: 1, max: 10000 },
   vcpuPerCore: { min: 0.1, max: 1000, float: true },
   massVmPowerOff: { min: 1, max: 100000 },
+  gpuAllocPct: { min: 1, max: 100 },
+  ipamConflict: { min: 1, max: 10 },   // 연속 스캔 수(같은 MAC 을 이어 본 횟수 — scanStore arp.n)
+  ipamNewIp: { min: 1, max: 1000 },    // 묶음 상한 — 넘으면 요약 한 건
 });
+/** v3.1.0: 알리지 않을 에이전트 목록 정제 — 글자만 · 64자 · 200개 · 중복 제거(대소문자 무시). */
+export function cleanQuietAgents(v) {
+  const out = []; const seen = new Set();
+  for (const x of Array.isArray(v) ? v.slice(0, 500) : []) {
+    if (typeof x !== 'string') continue;
+    const t = x.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 64);
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase()); out.push(t);
+    if (out.length >= 200) break;
+  }
+  return out;
+}
 
 /** 임계치 1개 정규화(순수). 미지정이면 prev 를 돌려준다. */
 export function normalizeRuleThreshold(rule, v, prev) {
@@ -117,6 +147,7 @@ export function loadAlertConfig() {
         cooldownMin: clampSetting(s.cooldownMin, { min: 1, max: 10_080, def: DEFAULTS.cooldownMin }),
         intervalSec: clampSetting(s.intervalSec, { min: 15, max: ALERT_INTERVAL_MAX_SEC, def: DEFAULTS.intervalSec }),
         suppressWindowMin: clampSetting(s.suppressWindowMin, { min: 0, max: 10_080, def: DEFAULTS.suppressWindowMin }),
+        ipamQuietAgents: cleanQuietAgents(s.ipamQuietAgents),   // v3.1.0
       };
     }
   } catch (e) { preserveCorrupt(FILE, e.message); /* defaults */ }
@@ -138,6 +169,8 @@ export function saveAlertConfig(body = {}) {
     // v2.607 WEB2607-04: 빈 칸('')은 '미지정' 이다 — 예전 `Number('') || 0` 은 빈 칸 저장을 0(= 억제 끔)으로 바꿨다.
     //   명시적 0 만 값이다(v2.596 규약: numOrNull(v) ?? cur).
     suppressWindowMin: Math.max(0, numOrNull(body.suppressWindowMin) ?? (cur.suppressWindowMin ?? 5)),
+    // v3.1.0: 본문에 없으면 이전 값 유지(다른 화면의 저장이 지우지 않게)
+    ipamQuietAgents: Array.isArray(body.ipamQuietAgents) ? cleanQuietAgents(body.ipamQuietAgents) : cleanQuietAgents(cur.ipamQuietAgents),
   };
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next, undefined, URL_SECRET_FIELDS), null, 2), { mode: 0o600 });
   cache = next; // 메모리는 평문(sealSecretsDeep 는 복제본을 봉인한다)
@@ -237,6 +270,44 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
     for (const d of snap.datastores || []) if (numOrNull(d.usagePct) == null && d.id != null) held.add(`ds:${d.id}`);
     for (const d of holdTail((snap.datastores || []).filter((x) => numOrNull(x.usagePct) != null && Number(x.usagePct) >= th && fresh(x)), 200, (x) => (x.id != null ? `ds:${x.id}` : null))) {
       out.push({ key: `ds:${d.id}`, vcenterId: d.vcenterId || '', severity: d.usagePct >= 95 ? 'critical' : 'warning', title: `데이터스토어 용량 ${d.usagePct}%: ${d.name}`, detail: `${d.vcenterId} · 여유 ${d.freeGB}GB` });
+    }
+  }
+  // v2.939 개선 6: 법인 GPU 할당률(GPU 할당율 화면 · 엑셀과 같은 계층 합계 — gpu/allocTree.js). 모르는 값이 섞여 할당률이 없거나
+  //   지금 값을 읽지 못한 법인(unreadVc · 낡은 위임 보고)은 판정 보류(held — 해소로 기록하지 않는다). 계층이 상한으로 잘렸으면 어느 법인이
+  //   덜 셌는지 몰라 전부 보류한다(새로 내지도 해소하지도 않는다).
+  if (R.gpuAllocPct?.enabled) {
+    const th = Number(R.gpuAllocPct.threshold) || 90;
+    const tree = buildGpuAllocTree(snap);
+    for (const vc of tree.vcenters) {
+      const key = `gpualloc:${vc.id}`;
+      const t = vc.totals;
+      if (tree.truncated || unreadVc.has(String(vc.id)) || staleVc.has(String(vc.id)) || numOrNull(t.allocPct) == null) { held.add(key); continue; }
+      if (t.allocPct < th) continue;
+      const over = numOrNull(t.spareGB) != null && t.spareGB < 0;
+      out.push({ key, vcenterId: vc.id, severity: over ? 'critical' : 'warning', title: `GPU 할당률 ${t.allocPct}%: ${vc.name || vc.id}`,
+        detail: `${vc.id} · 할당 ${t.allocGB} / 전체 ${t.capGB} GB · 예비 ${t.spareGB} GB${over ? ' — 할당이 용량을 넘음(확인 필요)' : ''} · GPU ${t.gpus}장 · 호스트 ${t.hosts}대` });
+    }
+  }
+  // v3.1.0(설계 ipam-alerts-mac-dns ③): IP 충돌 의심 — VM 의 IP 에 그 VM 의 NIC 이 아닌 MAC 이 연속 N회 응답(판정 ipam/conflict.js 하나).
+  //   모르는 것(NIC MAC 미수집 · 여러 VM · 지난 스캔에 못 봄 · MAC 이 지워짐) · 지금 값을 못 읽은 vCenter 의 VM 은 판정 보류(held — 해소로 기록하지 않는다).
+  //   판정은 규칙을 꺼도 한다(대장 · 추천 카드 표시 — ipam/conflictState.js). 알림만 규칙을 따른다.
+  {
+    const results = getScanResults();
+    const scanOf = (ip) => (Object.prototype.hasOwnProperty.call(results, ip) ? results[ip] : null);
+    const reps = getAgentReports() || {};
+    const lastScanOf = (a) => { const k = a || '__local__'; return Object.prototype.hasOwnProperty.call(reps, k) ? numOrNull(reps[k]?.at) : null; };
+    const { suspects, unknown } = findConflicts(snap, scanOf, { streak: R.ipamConflict?.threshold, macIpCount, lastScanOf });
+    setConflictSuspects(suspects);
+    if (R.ipamConflict?.enabled) {
+      for (const u of unknown) held.add(`ipconflict:${u.ip}`);
+      for (const c of suspects) {
+        const key = `ipconflict:${c.ip}`;
+        if (unreadVc.has(String(c.vm.vcenterId)) || staleVc.has(String(c.vm.vcenterId))) { held.add(key); continue; }
+        const scanner = !c.agent || c.agent === '__local__' ? '이 포탈' : c.agent;
+        out.push({ key, vcenterId: c.vm.vcenterId, scanAgent: c.agent || '__local__', severity: 'critical', title: `IP 충돌 의심: ${c.ip} (${c.vm.name || c.vm.id})`,
+          detail: `${c.vm.vcenterId} · VM 의 NIC MAC ${c.vmMacs.join(', ')} 이 아닌 ${c.mac}${c.vendor ? `(${c.vendor})` : ''} 이 연속 ${c.seen}회 응답 — 스캐너(${scanner})의 이웃 표`
+            + `${c.otherVm ? ` · 그 MAC 은 다른 VM(${c.otherVm.name || c.otherVm.id}) 의 NIC 입니다` : ''} · 같은 IP 를 두 장비가 쓰거나 VM 의 IP 보고가 오래됐을 수 있습니다` });
+      }
     }
   }
   if (R.ramOvercommitPct?.enabled || R.vcpuPerCore?.enabled) {
@@ -656,6 +727,8 @@ let timer = null;
 let vmPowerPrev = null;      // vmId -> powerState (직전 스냅샷, 동시 다운 감지용)
 
 function pushRecent(entry) { recent.unshift(entry); if (recent.length > 200) recent.pop(); }
+/** v3.1.0: 엔진 밖 사건형 발송(IP 변화 묶음 — ipam/changeNotify.js)을 '최근 통지' 목록에도 남긴다. */
+export function noteEventSent(alert, channels) { pushRecent({ at: new Date().toISOString(), ...alert, channels }); }
 
 /**
  * v2.908 알람 상태 구독(이슈 자동 등록 — issues/alertIssues.js). 평가가 끝날 때마다 { now, firing:[{key, alert, since}], resolved:[{key, alert}] } 를 준다.

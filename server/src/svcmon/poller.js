@@ -22,6 +22,7 @@ import { appendResult, logStats } from './csvlog.js';
 import { ensureSvcmonDemo, splitSvcmonDue, demoSvcmonResult } from '../mock/demo/svcmon.js'; // v2.716: 데모 대상은 접속하지 않는다
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) ? n : d; };
+import { noteResult, forgetAlertedWhere } from './transitions.js'; // v2.915 Monitoring 개요 · 실패 알림
 // v2.628(감사 EDGE2628-05): 상한이 없어 2^31-1ms 를 넘는 값이 setInterval 1ms 루프가 됐다 — config.js 관문으로 [1초, MAX_TIMER_MS].
 const TICK_MS = clampIntervalMs(envNum('SVCMON_TICK_MS', 5000), 5000, 1000);
 const MAX_PER_TICK = Math.max(100, envNum('SVCMON_MAX_PER_TICK', 4000));
@@ -117,12 +118,14 @@ export function snapshotResults({ withMeta = false, replyMax = 120 } = {}) {
     }
     if (meta) {
       // 내부 구성 정보(url·keyword·send·body·payload·soapAction)는 **절대 싣지 않는다.**
-      meta.push({ i: test.id, p: target.path, n: target.name, h: target.host, t: test.name, y: test.type, iv: test.intervalSec });
+      // v2.988: k = 대상 구분(infra|service) — 중앙이 같은 경로 · 이름의 다른 구분 대상을 가른다(시험 판정 · 알림 억제 · 개요 조인).
+      meta.push({ i: test.id, p: target.path, n: target.name, h: target.host, t: test.name, y: test.type, iv: test.intervalSec, k: target.kind || 'infra' });
     }
   }
   if (!covered && index.length && rows.length >= index.length) covered = true; // 한 번 전 항목을 덮으면 이후로는 예열이 아니다
   const warmingUp = warmingUpOf({ covered, items: index.length, reported: rows.length, startedAt: pollerStartedAt, now: at });
-  return { rows, items: index.length, reported: rows.length, metaSig: `r${indexRev}-${index.length}`, meta, warmingUp };
+  // metaSig 접두사 m2 = 메타 모양 판(v2.988 k 추가) — 업그레이드한 엣지가 예전 서명과 겹쳐 중앙이 새 메타(구분)를 요청하지 않는 일이 없게.
+  return { rows, items: index.length, reported: rows.length, metaSig: `m2:r${indexRev}-${index.length}`, meta, warmingUp };
 }
 export function getLastSweep() { return lastSweepTs; }
 export function pollerStats() {
@@ -165,6 +168,8 @@ function rebuildIndex() {
   // 사라진 항목의 상태·만기 정리(메모리 누수 방지)
   for (const id of [...nextDue.keys()]) if (!liveIds.has(id)) nextDue.delete(id);
   for (const id of [...results.keys()]) if (!liveIds.has(id)) results.delete(id);
+  // v2.932(점검 D1-05 ③): 지우거나 끈 점검은 결과가 더 오지 않는다 — 이 포탈(scope '')의 '알린 상태' 도 닫는다(복구 알림 없음).
+  forgetAlertedWhere('', (_k, e) => liveIds.has(e.testId));
 }
 
 /*
@@ -236,6 +241,9 @@ async function sweep(force = false) {
         const rec = { status: r.status, reply: r.reply, ms: r.ms, ts, streak: changed ? 1 : prev.streak + 1 };
         results.set(test.id, rec);
         appendResult({ ts, target, test, result: rec, changed });
+        // v2.915: 전이 이력 · 시간별 집계 · 실패 알림(svcmon/transitions.js — 판정은 그 파일 하나, O(1)).
+        noteResult({ at: ts, scope: '', testId: test.id, prev: prev?.status || null, status: rec.status, reply: rec.reply, ms: rec.ms, streak: rec.streak,
+          target: { name: target.name, path: target.path, host: target.host, kind: target.kind || 'infra' }, test: { name: test.name, type: test.type } });
       }
       if (i + APPLY_CHUNK < due.length) await new Promise((r) => setImmediate(r));
     }

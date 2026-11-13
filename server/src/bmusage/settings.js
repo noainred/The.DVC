@@ -96,7 +96,131 @@ export const DEFAULTS = Object.freeze({
   alertPct: 90,
   alertSustainMin: 15,
   alertRepeatHours: 6,
+  /*
+   * v2.919(리눅스 성능 1단계): USE 판정 기준값 — **이 노드(법인 엣지)의 설정**이고 API 가 내려준다(화면에 박지 않는다).
+   *   판정은 bmusage/useJudge.js 하나가 이 값으로 한다. ⚠ 중앙 배포(DISTRIBUTED_KEYS)에는 아직 넣지 않았다 — 넣으면 배포 서명이 바뀌어
+   *   구버전 엣지가 영원히 '적용 대기' 로 보인다(혼재 버전 호환). 배포는 엣지가 전부 이 판으로 오른 뒤의 일이다.
+   */
+  perf: null,   // normalizeSettings 가 PERF_DEFAULTS 로 채운다
+  /*
+   * v2.922(3a 단계 — 설계 README §4.4 사용자 확정 2026-11-06): 저장 구조·장치별 이력·피크 수집 설정. perf 와 같이 **이 노드의 설정**이고
+   *   중앙 배포 키(DISTRIBUTED_KEYS)에는 넣지 않는다(넣으면 배포 서명이 바뀌어 구버전 엣지가 ‘적용 대기’ 로 남는다 — perf 와 같은 이유).
+   */
+  store: null,  // normalizeSettings 가 STORE_DEFAULTS 로 채운다
+  /*
+   * v2.923(4단계 — 진단 스냅샷 · 설계 README §4.1): 사람이 누를 때만 도는 SSH 1회 · 읽기 전용. 이 노드(법인 엣지)의 설정이고 배포 키에 넣지 않는다(perf · store 와 같은 이유).
+   *   법인 · 엣지 · Bareos 는 1:1:1 이라 ‘법인당 하루 상한’ 은 그 법인을 수집하는 노드가 지킨다(중앙 직접 수집분은 중앙이).
+   */
+  snapshot: null, // normalizeSettings 가 SNAPSHOT_DEFAULTS 로 채운다
 });
+
+/**
+ * v2.923 — 진단 스냅샷 기본값. dailyCorpMax 20(법인당 24시간 안 실행 상한 — 임의 시작값 · 추정) · topN 10(프로세스 상위 N) · dmesgLines 50(커널 로그 최근 N줄).
+ *   보존 7일은 설계 고정값(SNAPSHOT_KEEP_DAYS — 설정으로 늘리지 않는다: 프로세스 이름 · 커널 로그가 쌓인다).
+ */
+export const SNAPSHOT_DEFAULTS = Object.freeze({ dailyCorpMax: 20, topN: 10, dmesgLines: 50 });
+const SNAPSHOT_LIMITS = Object.freeze({ dailyCorpMax: [1, 500], topN: [3, 30], dmesgLines: [10, 200] });
+export const SNAPSHOT_KEEP_DAYS = 7;
+export function normalizeSnapshotSettings(raw = {}) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const out = {};
+  for (const [k, [min, max]] of Object.entries(SNAPSHOT_LIMITS)) out[k] = clampSetting(src[k], { min, max, def: SNAPSHOT_DEFAULTS[k] });
+  return out;
+}
+
+/**
+ * v2.922 — 저장 구조·피크 기본값(설계 §4.4 · PROFILES §6 끝 ‘피크 수집 3안’ · §9 · §10).
+ *  · rawDays 30(5분 원시 · 월 파일) — 실제 보존은 min(이 값, 기존 rawRetentionDays)다(기존 키를 더 짧게 둔 현장의 결정을 늘리지 않는다).
+ *  · hourlyDays 365(1시간 롤업) · 1일 롤업은 기존 dailyRetentionDays(5년) 그대로 · 장치 5분 14일 · 장치 1시간 90일(설계).
+ *  · deviceMax 32(서버당 장치 수 상한 — 넘으면 ‘상한 초과 n’) · partitionIo 꺼짐(파티션 I/O 는 옵트인) · blkqMax 64(##BLKQ 장치 수 — D7).
+ *  · peakWindowS 10(A 안: 같은 SSH 세션 안 1초 간격 창 — 0 이면 끔. 세션 예산이 모자라면 줄이고 행에 적는다).
+ *  · peakSampler 꺼짐(B 안 — 서버 샘플러 파일 수거. 이번 단계는 수거 구획·형식 명세·해시 **기록** 자리만 — 파일 머리 줄의 sha256 은 자기 신고 값이라
+ *    설정값과 같아도 위조 방지가 아니다(반증 D13). 스크립트 실물 대조·배포는 7단계).
+ *  · portTolPct 5(CVP 양쪽 대조 ⑤ 의 어긋남 기준 — 설계 ‘예 5%’ · 임의 시작값).
+ */
+export const STORE_DEFAULTS = Object.freeze({
+  rawDays: 30, hourlyDays: 365, devRawDays: 14, devHourlyDays: 90,
+  deviceMax: 32, partitionIo: false, blkqMax: 64,
+  peakWindowS: 10, peakSampler: false, peakSamplerSha256: '',
+  // 피크 창 주기 예산 — 예상 주기 소요가 주기 × 이 비율을 넘으면 창을 줄인다(peakPlan.js · 0.7 은 메인 지시값). peakWindowS 는 그 상한이다.
+  peakCycleRatio: 0.7,
+  portTolPct: 5,
+});
+const STORE_LIMITS = Object.freeze({
+  rawDays: [7, 365, false], hourlyDays: [30, 730, false], devRawDays: [1, 60, false], devHourlyDays: [7, 365, false],
+  deviceMax: [1, 256, false], blkqMax: [1, 1_024, false], peakWindowS: [0, 30, false], peakCycleRatio: [0.3, 0.95, true], portTolPct: [0.5, 100, true],
+});
+/** 저장 구조 설정 정규화(순수) — 모르는 키는 버리고, 빈 칸은 기본값(clampSetting 규약). sha256 은 64자리 16진수만(아니면 ''). */
+export function normalizeStoreSettings(raw = {}) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const out = {};
+  for (const [k, [min, max, frac]] of Object.entries(STORE_LIMITS)) out[k] = clampSetting(src[k], { min, max, def: STORE_DEFAULTS[k], round: !frac });
+  // peakWindowS 0 = 끔 — clampSetting 의 '0 은 미지정' 규약과 달리 명시적 0 을 지킨다(끄는 값이다).
+  if (src.peakWindowS === 0 || src.peakWindowS === '0') out.peakWindowS = 0;
+  out.partitionIo = src.partitionIo === true;
+  out.peakSampler = src.peakSampler === true;
+  const sha = String(src.peakSamplerSha256 || '').trim().toLowerCase();
+  out.peakSamplerSha256 = /^[0-9a-f]{64}$/.test(sha) ? sha : '';
+  return out;
+}
+/** 실효 원시 보존(일) — 월 파일 5분 원시. 기존 키(rawRetentionDays)를 더 짧게 둔 현장은 그 값을 따른다(늘리지 않는다). */
+export function effectiveRawDays(s = {}) {
+  const a = Number(s?.store?.rawDays) || STORE_DEFAULTS.rawDays;
+  const b = Number(s?.rawRetentionDays) || a;
+  return Math.max(1, Math.min(a, b));
+}
+
+/**
+ * v2.919 — USE 판정 기준값 기본(설계 §4.2). ⚠ ‘(추정)’ 표시는 공식 권고가 아니라 **임의 시작값**이라는 뜻이다 — 현장에서 조정한다.
+ *  · 사용률 warn 80 / bad 90(설계) · 런큐/코어 1.0 / 2.0(설계) · 평균 대기열 2(설계) / 4(추정) · PSI full 10초 5% / 20%(설계)
+ *  · PSI cpu some 10초 20% / 50%(추정 — cpu 는 full 이 시스템 수준에서 0 이라 some 을 쓴다) · 스왑 아웃 1 / 100 pages/s(추정)
+ *  · TCP 재전송 1% / 5%(추정) · 오류·드롭: 증가분 > 0 → warn, `errRepeatBad` 주기 연속 증가 → bad(설계 ‘반복 → bad’ — 3 은 추정)
+ *  · OS↔iDRAC CPU 불일치 15%p(설계 — 임의 시작값) · 흡기 온도 27 / 35℃(추정 — ASHRAE 권장 상한 · A2 허용 상한) · 전력 cap 대비 90 / 98%(추정)
+ */
+export const PERF_DEFAULTS = Object.freeze({
+  utilWarn: 80, utilBad: 90,
+  runqWarn: 1, runqBad: 2,
+  queueWarn: 2, queueBad: 4,
+  psiFullWarn: 5, psiFullBad: 20,
+  psiCpuSomeWarn: 20, psiCpuSomeBad: 50,
+  swapOutWarn: 1, swapOutBad: 100,
+  retransWarn: 1, retransBad: 5,
+  errRepeatBad: 3,
+  cpuMismatchPct: 15,
+  inletWarnC: 27, inletBadC: 35,
+  powerCapWarnPct: 90, powerCapBadPct: 98,
+  // v2.919(반증 D5): 경로가 있는 칸 중 판정한 칸이 이 비율(%) 미만이면 ‘정상’ 대신 ‘대부분 못 읽음’(50 은 추정 시작값).
+  minJudgedPct: 50,
+});
+/** 기준값 범위(서버가 강제 — 화면 입력을 믿지 않는다). [min, max, 소수 허용] */
+const PERF_LIMITS = Object.freeze({
+  utilWarn: [1, 100, false], utilBad: [1, 100, false],
+  runqWarn: [0.1, 64, true], runqBad: [0.1, 64, true],
+  queueWarn: [0.1, 1_024, true], queueBad: [0.1, 1_024, true],
+  psiFullWarn: [0.1, 100, true], psiFullBad: [0.1, 100, true],
+  psiCpuSomeWarn: [0.1, 100, true], psiCpuSomeBad: [0.1, 100, true],
+  swapOutWarn: [0.1, 1e7, true], swapOutBad: [0.1, 1e7, true],
+  retransWarn: [0.01, 100, true], retransBad: [0.01, 100, true],
+  errRepeatBad: [1, 1_000, false],
+  cpuMismatchPct: [1, 100, false],
+  inletWarnC: [10, 60, false], inletBadC: [10, 70, false],
+  powerCapWarnPct: [10, 100, false], powerCapBadPct: [10, 100, false],
+  minJudgedPct: [0, 100, false],
+});
+/** 기준값 정규화(순수) — 모르는 키는 버리고, 빈 칸은 기본값(clampSetting 규약), warn 이 bad 보다 크면 bad 를 warn 으로 올린다. */
+export function normalizePerfThresholds(raw = {}) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const out = {};
+  for (const [k, [min, max, frac]] of Object.entries(PERF_LIMITS)) {
+    out[k] = clampSetting(src[k], { min, max, def: PERF_DEFAULTS[k], round: !frac });
+  }
+  for (const base of ['util', 'runq', 'queue', 'psiFull', 'psiCpuSome', 'swapOut', 'retrans', 'inlet', 'powerCap']) {
+    const w = base === 'inlet' ? 'inletWarnC' : base === 'powerCap' ? 'powerCapWarnPct' : `${base}Warn`;
+    const b = base === 'inlet' ? 'inletBadC' : base === 'powerCap' ? 'powerCapBadPct' : `${base}Bad`;
+    if (out[w] > out[b]) out[b] = out[w];
+  }
+  return out;
+}
 
 /** 하한·상한은 서버가 강제한다(화면 입력을 믿지 않는다). */
 const MIN_INTERVAL_MS = 60_000;
@@ -109,7 +233,7 @@ const CACHE_MS = 3_000;
 // v2.631(EDGE2631-01): 중앙에서는 이 파일이 **배포 원본**이다. 손상이면 기본값(꺼짐·빈 법인)으로 떨어지는데, 그 기본값을
 //   배포 라우트가 200 으로 내려보내면 전 엣지의 수집이 꺼진다 — 로드 오류를 기억해 /api/central/bmusage-config 가 503 으로 답한다.
 const _localErr = makeSettingsLoadError(FILE, { label: '베어메탈 사용률 설정', confirm: () => saveBmUsageSettings({}) });
-const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포', confirm: ({ by } = {}) => saveDistribution({}, by || '') });
+const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포(전체 배포 · 제외 · 중앙 켜기 — 기본값으로 확정하면 모두 비워집니다)', confirm: ({ by } = {}) => saveDistribution({}, by || '') });
 function readFile() {
   if (!fs.existsSync(FILE())) { _localErr.missing(); return {}; }
   try {
@@ -167,6 +291,9 @@ export function normalizeSettings(raw = {}) {
     dailyRetentionDays: clampSetting(raw.dailyRetentionDays, { min: 30, max: 365 * 10, def: DEFAULTS.dailyRetentionDays }),
     osSsh: raw.osSsh === undefined ? DEFAULTS.osSsh : !!raw.osSsh,
     idracTelemetry: raw.idracTelemetry === undefined ? DEFAULTS.idracTelemetry : !!raw.idracTelemetry,
+    perf: normalizePerfThresholds(raw.perf),   // v2.919
+    store: normalizeStoreSettings(raw.store),   // v2.922
+    snapshot: normalizeSnapshotSettings(raw.snapshot),   // v2.923
   };
 }
 
@@ -254,36 +381,164 @@ export function loadDistribution() {
     return normalizeDistribution(j);
   } catch (e) { _distErr.corrupt(e); if (fs.existsSync(DIST_FILE())) preserveCorrupt(DIST_FILE(), e.message); return normalizeDistribution({}); }
 }
+/*
+ * v2.927 '중앙에서 켜기'(사용자 요청 "중앙에서 엣지를 켜는 기능 추가" · 선택: 엣지별 버튼) — `perEdge: { [agent소문자]: { on, at, by, corps } }`.
+ *   전체 배포(위 enabled)를 켜지 않고 **한 엣지만** 중앙이 켠다. 내려가는 값은 중앙 로컬 설정의 배포 키 **전부**이되 켜기 = true ·
+ *   법인 = **저장 때 확정한 그 엣지 법인**(`corps` — 관리자가 확인 상자에서 본 목록). ⚠ 엣지 코드는 바꾸지 않는다 — 2.627 이상 엣지의
+ *   applyCentralBmUsage 는 받은 본문을 normalizeSettings 로 채워 배포 키 **전부**를 덮으므로(빠진 키는 기본값이 된다), 일부 키만 보내면
+ *   엣지의 주기·보존이 기본값으로 바뀐다. 그래서 주기·보존·경로·알림도 중앙 값으로 바뀐다 — 화면 확인 문구가 그 사실을 말한다.
+ * ⚠⚠ 법인은 **저장 때 확정**한다(반증 F2·F3): 인출 때 매핑을 다시 계산하면 점검중 · 비활성 · push 전 · fleet 만료 · 중앙 재기동 같은 순간 상태에
+ *   법인이 빠지고, 0 이면 엣지가 사본을 지워 수집이 꺼졌다. 저장 목록을 그대로 보내고, 지금 매핑과 다르면 화면이 '다시 확인' 을 받는다.
+ *   법인 없는 항목은 만들 수 없다(라우트가 400 no-corps) — 손으로 고친 파일의 빈 항목은 버리고 개수를 밝힌다(perEdgeOmitted).
+ * ⚠⚠ 우선순위(조용한 우선순위 금지 — 결정과 근거, 테스트 `bmUsageEdgeOn2927.test.js`):
+ *   ① 전체 배포 켜짐 + 제외 아님 → 전체 배포(v2.627 동작 그대로 — 기존 구성의 동작을 바꾸지 않는다). 그 엣지의 중앙 켜기는 **가려지고**
+ *      상태 행이 `perEdgeSuperseded` 로 밝힌다. 이미 전체 배포를 받는 엣지에 새로 켜기를 저장하는 것은 409(`conflict:'all'`)로 막는다.
+ *   ② 중앙 켜기 → 이 엣지만 켜기(개별 토큰 인출에만 — 아래 distributeFor).
+ *   ③ 제외 · 꺼짐 → 엣지 로컬.
+ *   · 제외와 중앙 켜기는 **같은 엣지에 동시에 둘 수 없다**(저장이 양방향 409 — '이 엣지는 로컬 설정' 과 '중앙이 켠다' 는 서로 반대 지시다).
+ *     관리자가 하나를 먼저 풀게 한다. 파일을 손으로 고쳐 둘 다 생기면 **제외가 이긴다**(장비 부하를 더하지 않는 쪽 · 행 `conflict:true`).
+ * ⚠ 손상 파일의 '기본값으로 확정'(설정 파일 점검 — saveDistribution({}))은 전체 배포 · 제외 · 중앙 켜기를 **모두 비운다**(라벨이 말한다).
+ */
+export const PER_EDGE_MAX = 256;       // 중앙 켜기 엣지 수 상한(넘는 저장은 400 too-many — 조용히 버리지 않는다)
+export const PER_EDGE_CORPS_MAX = 64;  // 한 엣지에 저장하는 법인 수 상한(법인 · vCenter · 엣지 1:1:1 이라 보통 1)
+const CORP_ID_MAX = 128;
+/** 법인 id 목록 정규화(순수) — 글자만 · 앞뒤 공백 제거 · 길이 상한 · 중복 제거 · 정렬. 상한을 넘으면 null(저장 거절의 근거). */
+export function normalizeCorpIds(list) {
+  if (!Array.isArray(list)) return [];
+  const set = new Set();
+  for (const v of list) { if (typeof v !== 'string') continue; const k = capStr(v.trim(), CORP_ID_MAX); if (k) set.add(k); }
+  return set.size > PER_EDGE_CORPS_MAX ? null : [...set].sort();
+}
+const sameIds = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]);
 export function normalizeDistribution(raw = {}) {
   // v2.628(SEC2628-03): 엣지 이름은 외부 값이다 — '__proto__'·'constructor' 가 프로토타입을 건드리거나 상속 속성으로
   //   '제외됨' 이 되지 않게 프로토타입 없는 객체에 담고, 조회는 자기 속성만(isExcluded) 본다.
   const excluded = Object.create(null);
   const src = raw && typeof raw.excluded === 'object' && raw.excluded ? raw.excluded : {};
   for (const [k, v] of Object.entries(src)) { const a = lowerAgent(k); if (a && v === true) excluded[a] = true; }
-  return { enabled: raw?.enabled === true, excluded, updatedAt: Number(raw?.updatedAt) > 0 ? Number(raw.updatedAt) : 0, updatedBy: t(raw?.updatedBy).slice(0, 64) };
+  // v2.927: 중앙 켜기도 같은 규약(프로토타입 없는 객체 · 자기 속성만 · 이름 정규화 · 켠 것만 · 개수 상한). 법인 없는 항목은 버리고 센다.
+  const perEdge = Object.create(null);
+  const pe = raw && typeof raw.perEdge === 'object' && raw.perEdge && !Array.isArray(raw.perEdge) ? raw.perEdge : {};
+  let omitted = 0;
+  for (const [k, v] of Object.entries(pe)) {
+    const a = lowerAgent(k);
+    if (!a || !v || typeof v !== 'object' || v.on !== true || Object.hasOwn(perEdge, a)) continue;
+    const corps = normalizeCorpIds(v.corps);
+    if (!corps || !corps.length || Object.keys(perEdge).length >= PER_EDGE_MAX) { omitted += 1; continue; }
+    perEdge[a] = { on: true, at: Number(v.at) > 0 ? Math.round(Number(v.at)) : 0, by: t(v.by).slice(0, 64), corps };
+  }
+  const out = { enabled: raw?.enabled === true, excluded, perEdge, updatedAt: Number(raw?.updatedAt) > 0 ? Number(raw.updatedAt) : 0, updatedBy: t(raw?.updatedBy).slice(0, 64) };
+  // 버린 항목 수 — 파일에 쓰지 않는다(열거 안 됨). 배포 현황이 밝힌다.
+  Object.defineProperty(out, 'perEdgeOmitted', { value: omitted, enumerable: false });
+  return out;
 }
-export function saveDistribution(patch = {}, by = '') {
-  const cur = loadDistribution();
-  const next = normalizeDistribution({
-    enabled: typeof patch.enabled === 'boolean' ? patch.enabled : cur.enabled,
-    excluded: patch.excluded && typeof patch.excluded === 'object' ? patch.excluded : cur.excluded,
-    updatedAt: Date.now(), updatedBy: by,
-  });
+function writeDistribution(next) {
   fs.mkdirSync(path.dirname(DIST_FILE()), { recursive: true });
   atomicWriteFileSync(DIST_FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
   _distErr.ok();
   return next;
 }
+/** 전체 배포 켬/끔 · 제외 저장. 중앙 켜기(perEdge)는 여기서 바꾸지 않는다(setPerEdge 만 — 지금 값을 그대로 둔다). */
+export function saveDistribution(patch = {}, by = '') {
+  const cur = loadDistribution();
+  return writeDistribution(normalizeDistribution({
+    enabled: typeof patch.enabled === 'boolean' ? patch.enabled : cur.enabled,
+    excluded: patch.excluded && typeof patch.excluded === 'object' ? patch.excluded : cur.excluded,
+    perEdge: cur.perEdge,
+    updatedAt: Date.now(), updatedBy: by,
+  }));
+}
 
 const isExcluded = (d, a) => Object.hasOwn(d.excluded, a) && d.excluded[a] === true;
+const perEdgeOf = (d, a) => (d.perEdge && Object.hasOwn(d.perEdge, a) && d.perEdge[a]?.on === true ? d.perEdge[a] : null);
+/** v2.927: 이 이름(대소문자 무시)의 중앙 켜기 항목 — 없으면 null. 해제는 등록부와 무관하게 이것으로 찾는다(반증 F1). */
+export function perEdgeFor(agent, d = loadDistribution()) { return perEdgeOf(d, lowerAgent(agent)); }
 
-/** 중앙이 한 엣지에 내려줄 값. 배포 원본은 **중앙의 로컬 설정**이다(중앙은 사본을 갖지 않는다). */
-export function distributeFor(agent) {
+/**
+ * v2.927: 제외 저장 패치가 중앙 켜기와 부딪히는 엣지(소문자 이름 목록). 비면 충돌 없음 — 라우트가 409 로 막는다.
+ * @param {object} excludedPatch PUT /distribute 의 excluded 맵(통째)
+ */
+export function exclusionConflicts(excludedPatch, d = loadDistribution()) {
+  const out = [];
+  if (!excludedPatch || typeof excludedPatch !== 'object') return out;
+  for (const [k, v] of Object.entries(excludedPatch)) { const a = lowerAgent(k); if (a && v === true && perEdgeOf(d, a) && !out.includes(a)) out.push(a); }
+  return out;
+}
+
+/** v2.927: 전체 배포가 덮어 중앙 켜기가 가려진 엣지(소문자 이름 목록) — 전체 배포를 켤 때 응답이 밝힌다. */
+export function perEdgeSuperseded(d = loadDistribution()) {
+  if (!d.enabled) return [];
+  return Object.keys(d.perEdge || {}).filter((a) => perEdgeOf(d, a) && !isExcluded(d, a)).sort();
+}
+
+/**
+ * v2.927: 한 엣지의 중앙 켜기 저장(법인 확정 · 다시 확인)/해제. 이름 검증(등록부)·역할·매핑은 라우트가 한다 — 여기는 정규화·충돌·원자적 쓰기.
+ * @param {{corps?:string[]}} [o] 켤 때 저장할 법인(관리자가 확인한 목록 — 비면 거절)
+ * @returns {{ok:true, changed:boolean, distribution:object} | {ok:false, conflict:'excluded'|'all', reason:string} | {ok:false, code:'bad-name'|'no-corps'|'too-many', reason:string}}
+ */
+export function setPerEdge(agent, on, by = '', { corps = null } = {}) {
+  const a = lowerAgent(agent);
+  if (!a) return { ok: false, code: 'bad-name', reason: '엣지 이름이 필요합니다.' };
+  const cur = loadDistribution();
+  const prev = perEdgeOf(cur, a);
+  let ids = null;
+  if (on === true) {
+    if (isExcluded(cur, a)) {
+      return { ok: false, conflict: 'excluded', reason: `이 엣지(${t(agent)})는 '엣지에 배포' 표에서 제외(자기 로컬 설정 사용)로 지정돼 있습니다 — 중앙 켜기와 반대 지시라 함께 둘 수 없습니다. 제외를 먼저 해제하세요.` };
+    }
+    if (cur.enabled) {
+      return { ok: false, conflict: 'all', reason: `이 엣지(${t(agent)})는 이미 전체 배포를 받고 있습니다 — 켜짐 · 법인은 전체 배포 원본(이 중앙의 수집 설정)이 정합니다. 중앙 켜기는 전체 배포가 꺼져 있을 때 한 엣지만 켜는 기능입니다.` };
+    }
+    ids = normalizeCorpIds(corps);
+    if (ids === null) return { ok: false, code: 'too-many', reason: `한 엣지에 저장하는 법인은 ${PER_EDGE_CORPS_MAX}곳까지입니다.` };
+    if (!ids.length) return { ok: false, code: 'no-corps', reason: '이 엣지의 법인을 찾지 못해 켤 수 없습니다(켜도 수집 대상이 없습니다).' };
+    if (prev && sameIds(prev.corps, ids)) return { ok: true, changed: false, distribution: cur };
+    if (!prev && Object.keys(cur.perEdge).length >= PER_EDGE_MAX) return { ok: false, code: 'too-many', reason: `중앙 켜기는 ${PER_EDGE_MAX}곳까지입니다 — 쓰지 않는 엣지의 중앙 켜기를 먼저 해제하세요.` };
+  } else if (!prev) {
+    return { ok: true, changed: false, distribution: cur };
+  }
+  // ⚠ 프로토타입 없는 사본에 쓴다 — 일반 객체에 '__proto__' 이름을 대입하면 프로토타입이 바뀌고 항목이 사라진다(이름은 외부 값).
+  const perEdge = Object.assign(Object.create(null), cur.perEdge);
+  if (on === true) perEdge[a] = { on: true, at: Date.now(), by: t(by).slice(0, 64), corps: ids };
+  else delete perEdge[a];
+  const next = writeDistribution(normalizeDistribution({ enabled: cur.enabled, excluded: cur.excluded, perEdge, updatedAt: Date.now(), updatedBy: by }));
+  return { ok: true, changed: true, distribution: next };
+}
+
+/**
+ * v2.927: 한 엣지에 '중앙에서 켜기' 로 내려줄 설정(순수). 중앙 로컬 설정의 배포 키 **전부** + 켜기 true + 법인 = 저장한 그 엣지 법인.
+ * ⚠ 일부 키만 보내지 말 것 — 구버전 엣지(2.627~)가 빠진 키를 기본값으로 채워 엣지 설정을 조용히 바꾼다(위 머리말).
+ */
+export function perEdgeSettings(local, corpIds = []) {
+  const s = pickDistributed(normalizeSettings(local || {}));
+  const corps = {};
+  for (const id of corpIds || []) { const k = t(id); if (k) corps[k] = true; }
+  return { ...s, enabled: true, corps };
+}
+
+/**
+ * 중앙이 한 엣지에 내려줄 값. 배포 원본은 **중앙의 로컬 설정**이다(중앙은 사본을 갖지 않는다).
+ * v2.927: `mode` 를 더한다('all' | 'per-edge' | 'off' | 'excluded') — 구버전 엣지는 distribute·settings·sig·reason 만 읽으므로 무시한다.
+ *   중앙 켜기 판의 법인은 **저장 목록**이다 — 인출 때 매핑을 다시 계산하지 않는다(매핑이 순간적으로 비어도 엣지를 끄지 않는다).
+ * @param {string} agent
+ * @param {{verified?:boolean}} [o] verified — **개별 토큰으로 인증된 이름**인가(공유 토큰의 ?agent= 는 남의 이름을 댈 수 있다 — 중앙 켜기 설정을 내주지 않는다).
+ */
+export function distributeFor(agent, { verified = false } = {}) {
   const d = loadDistribution();
-  if (!d.enabled) return { distribute: false, reason: 'off' };
-  if (isExcluded(d, lowerAgent(agent))) return { distribute: false, reason: 'excluded' };
-  const settings = pickDistributed(loadLocalBmUsageSettings());
-  return { distribute: true, settings, sig: settingsSig(settings) };
+  const a = lowerAgent(agent);
+  const excluded = isExcluded(d, a);
+  if (d.enabled && !excluded) {
+    const settings = pickDistributed(loadLocalBmUsageSettings());
+    return { distribute: true, mode: 'all', settings, sig: settingsSig(settings) };
+  }
+  const pe = perEdgeOf(d, a);
+  if (pe && !excluded) {
+    if (verified !== true) return { distribute: false, mode: 'per-edge', reason: 'per-edge-unverified' };
+    const settings = perEdgeSettings(loadLocalBmUsageSettings(), pe.corps);
+    return { distribute: true, mode: 'per-edge', settings, sig: settingsSig(settings) };
+  }
+  if (!d.enabled) return { distribute: false, mode: 'off', reason: 'off', ...(pe ? { conflict: true } : {}) };
+  return { distribute: false, mode: 'excluded', reason: 'excluded', ...(pe ? { conflict: true } : {}) };
 }
 
 /* 엣지별 마지막 인출(인메모리 — 중앙 재시작 직후엔 비어 있고 화면이 그 사실을 말한다). */
@@ -323,12 +578,22 @@ export function recordBmUsagePull(agent, { appliedSig = '', version = '', reason
   const lapsedVerifiedAt = !verified && prev?.verified ? prev.at : (!verified ? prev?.lapsedVerifiedAt || 0 : 0);
   _pulls.set(a, { agent: capStr(t(agent), 128), at: now, appliedSig: capStr(t(appliedSig), 32), version: capStr(t(version), 32), reason: capStr(t(reason), 32), verified: verified === true, deliveredSig: capStr(t(deliveredSig), 32), ...(lapsedVerifiedAt ? { lapsedVerifiedAt } : {}) });
 }
-/** 화면용 — 알려진 엣지 이름(대소문자 무시)과 인출 기록을 합친다. */
-export function distributionStatus(knownNames = []) {
+/**
+ * 화면용 — 알려진 엣지 이름(대소문자 무시)과 인출 기록을 합친다.
+ * v2.927: 행마다 **그 엣지에 실제로 보낼 판의 서명**과 엣지가 알린 판을 비교한다 — 전역 서명 하나와 비교하면 중앙 켜기(법인이 엣지마다
+ *   다르다) 행은 영원히 '대기' 다. 행에 `mode`('all'|'per-edge'|'excluded'|'off') · 중앙 켜기 기록(저장 법인 `savedCorps`) · 지금 매핑(`corps`) ·
+ *   둘이 다른가(`corpsChanged` — 화면이 '다시 확인' 을 받는다)를 싣는다.
+ * @param {string[]} knownNames 등록부 이름
+ * @param {{edgeCorps?:(agent:string)=>string[], tokenAgents?:Set<string>}} [o] edgeCorps — 지금 매핑(bmusage/edgeCorps.js) · tokenAgents — 개별 토큰이 발급된 이름(소문자)
+ */
+export function distributionStatus(knownNames = [], { edgeCorps = null, tokenAgents = null } = {}) {
   const d = loadDistribution();
-  const cur = settingsSig(loadLocalBmUsageSettings());
+  const local = loadLocalBmUsageSettings();
+  const cur = settingsSig(local);
   const names = new Map();
   for (const n of knownNames || []) { const k = lowerAgent(n); if (k && !names.has(k)) names.set(k, t(n)); }
+  // v2.927: 중앙 켜기가 저장된 이름은 등록부에서 빠졌어도 행으로 싣는다(켜 둔 지시가 화면에서 사라지지 않게 — 해제는 등록부와 무관하게 된다).
+  for (const k of Object.keys(d.perEdge || {})) if (!names.has(k)) names.set(k, k);
   // v2.632(감사 A6-2632-03): 등록부에 없는 **미검증** 이름(공유 토큰이 ?agent= 로 댄 것)은 최근 것 UNKNOWN_UNVERIFIED_ROWS_MAX 개만
   //   행으로 싣고 나머지는 개수만 밝힌다 — 가짜 이름 512행이 배포 현황을 덮지 않게. 검증된 이름은 전부 싣는다.
   const unknownUnverified = [];
@@ -339,19 +604,39 @@ export function distributionStatus(knownNames = []) {
   unknownUnverified.sort((x, y) => (y[1].at || 0) - (x[1].at || 0));
   for (const [k, p] of unknownUnverified.slice(0, UNKNOWN_UNVERIFIED_ROWS_MAX)) names.set(k, p.agent || k);
   const unknownUnverifiedOmitted = Math.max(0, unknownUnverified.length - UNKNOWN_UNVERIFIED_ROWS_MAX);
+  const corpsOf = typeof edgeCorps === 'function' ? edgeCorps : null;
   const rows = [...names].map(([k, name]) => {
     const p = _pulls.get(k) || null;
     const excluded = isExcluded(d, k);
-    let state;
-    if (!d.enabled || excluded) state = excluded ? 'excluded' : 'off';
+    const pe = perEdgeOf(d, k);
+    const now = corpsOf ? normalizeCorpIds(corpsOf(name)) : null;
+    let mode; let sig = ''; let state = '';
+    if (d.enabled && !excluded) { mode = 'all'; sig = cur; }
+    else if (pe && !excluded) { mode = 'per-edge'; sig = settingsSig(perEdgeSettings(local, pe.corps)); }
+    else mode = excluded ? 'excluded' : 'off';
+    // v2.927: 배포를 끄거나 제외 · 중앙 켜기 해제 직후에는 엣지가 아직 사본을 쥐고 있다(다음 인출에 지운다) — '꺼짐' 이라 단정하지 않는다.
+    if (mode === 'off' || mode === 'excluded') state = p?.deliveredSig ? 'releasing' : mode;
     else if (!p) state = 'no-pull';
-    else if (p.appliedSig && p.appliedSig === cur) state = 'applied';
+    // v2.927: 중앙 켜기는 개별 토큰 인출에만 내준다 — 마지막 인출이 공유 토큰(이름 미검증)이면 받지 못했다.
+    else if (mode === 'per-edge' && p.verified !== true) state = 'unverified';
+    else if (p.appliedSig && p.appliedSig === sig) state = 'applied';
     // v2.628(R2628-05): 엣지는 받기 전 판을 알린다 — 마지막 응답이 지금 판을 보냈으면 '전달됨'(적용 확인은 다음 인출).
-    else if (p.deliveredSig && p.deliveredSig === cur) state = 'delivered';
+    else if (p.deliveredSig && p.deliveredSig === sig) state = 'delivered';
     else state = 'pending';
-    return { agent: name, excluded, lastPullAt: p?.at || 0, appliedSig: p?.appliedSig || '', state, verified: p ? p.verified === true : null, lapsedVerifiedAt: p?.lapsedVerifiedAt || null, pullReason: p?.reason || '' };
+    return {
+      agent: name, excluded, lastPullAt: p?.at || 0, appliedSig: p?.appliedSig || '', state, verified: p ? p.verified === true : null,
+      lapsedVerifiedAt: p?.lapsedVerifiedAt || null, pullReason: p?.reason || '',
+      mode, sig, corps: now,
+      perEdge: !!pe, perEdgeAt: pe?.at || 0, perEdgeBy: pe?.by || '', savedCorps: pe ? pe.corps : null,
+      // 지금 매핑이 저장 목록과 다르다(지금 매핑을 모르면 null) — 인출은 저장 목록 그대로 · 화면이 '다시 확인' 을 받는다.
+      corpsChanged: pe && now ? !sameIds(pe.corps, now) : (pe ? null : false),
+      perEdgeSuperseded: !!pe && mode === 'all', conflict: !!pe && excluded,
+      tokenIssued: tokenAgents instanceof Set ? tokenAgents.has(k) : null,
+    };
   }).sort((a, b) => a.agent.localeCompare(b.agent));
-  return { ...d, sig: cur, keys: [...DISTRIBUTED_KEYS], rows, since: _startedAt, unknownUnverifiedOmitted, pullsOmitted: _pullsOmitted };
+  // 중앙 켜기로 내려갈 값(법인 제외) — 화면 확인 문구가 '무엇이 중앙 값으로 바뀌는지' 를 이 값으로 말한다(숫자를 화면에 박지 않는다).
+  const { corps: _c, ...perEdgeBase } = perEdgeSettings(local, []);
+  return { ...d, sig: cur, keys: [...DISTRIBUTED_KEYS], rows, since: _startedAt, unknownUnverifiedOmitted, pullsOmitted: _pullsOmitted, perEdgeBase, perEdgeOmitted: d.perEdgeOmitted || 0, perEdgeMax: PER_EDGE_MAX };
 }
 
 /*
@@ -391,7 +676,17 @@ export function saveBmUsageSettings(body = {}) {
   const { patch } = dropUnspecifiedNumbers(body);
   const ignoredCentralManaged = [];
   if (readCentralCopy()) for (const k of DISTRIBUTED_KEYS) if (Object.hasOwn(patch, k)) { delete patch[k]; ignoredCentralManaged.push(k); }
-  const local = normalizeSettings({ ...normalizeSettings(readFile()), ...patch });
+  const prevLocal = normalizeSettings(readFile());
+  // v2.919: 기준값은 **키 단위로** 겹친다(일부만 보내도 나머지는 직전 값 — 통째로 바꾸면 보내지 않은 기준이 기본값으로 되돌아간다).
+  if (patch.perf && typeof patch.perf === 'object' && !Array.isArray(patch.perf)) patch.perf = { ...prevLocal.perf, ...patch.perf };
+  else delete patch.perf;
+  // v2.922: 저장 구조 설정도 키 단위로 겹친다(perf 와 같은 이유).
+  if (patch.store && typeof patch.store === 'object' && !Array.isArray(patch.store)) patch.store = { ...prevLocal.store, ...patch.store };
+  else delete patch.store;
+  // v2.923: 진단 스냅샷 설정도 키 단위로 겹친다.
+  if (patch.snapshot && typeof patch.snapshot === 'object' && !Array.isArray(patch.snapshot)) patch.snapshot = { ...prevLocal.snapshot, ...patch.snapshot };
+  else delete patch.snapshot;
+  const local = normalizeSettings({ ...prevLocal, ...patch });
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(local, null, 2), { mode: 0o600 });
   _localErr.ok();
