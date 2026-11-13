@@ -1,7 +1,7 @@
 # 설계: iDRAC 디스크 배드 섹터 이력 — 이 서버에서 과거에 배드 섹터가 난 적이 있는지 찾기
 
 작성 2026-11-14 (v2.914.0 기준) · 상태 **시안 — 컨펌 대기**(구현 전) · 시안 캔버스: https://claude.ai/artifact/FB317UnqoXFZQjPAGdM2xU
-(아트보드 5장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 서버 이름 · IP · 서비스태그 · 시리얼 · 건수 · 날짜는 **전부 가상**이고
+(아트보드 6장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 서버 이름 · IP · 서비스태그 · 시리얼 · 건수 · 날짜는 **전부 가상**이고
 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로. 계정의 ‘Design System’ 아티팩트는 내용이 비어 있어(자기 파일 0개) 쓰지 않았다.)
 
 ## 1. 요구(사용자 2026-11-14)
@@ -52,9 +52,12 @@
 | 복구 불가 | PDR64 | 리빌드 · 복구 중 복구 불가 미디어 오류 | 문서 확인(Dell KB — ②) |
 | PDR54(화면에 ID 그대로 — §9) | PDR54 | 미디어 오류를 복구 중에 고쳐 씀 | 문서 확인(Dell 커뮤니티 — ③) |
 | 고장 예측 | PDR16 | SMART 고장 예측 보고 | 문서 확인(Dell KB — ④) |
-| (후보) | PDR56 · PDR57 · PDR59 · PDR63 | 불량 블록 표 80% · 가득 참 · 재할당 · 재할당 불가 | **미확인 — 기억에 의존.** 구현 전에 Dell EEMI 로 대조 |
-| (후보) | PDR5 · PDR8 | 디스크 제거 · 삽입(교체 구분용) | **미확인 — 기억에 의존.** 실장비 로그로 대조 |
-| (후보) | VDR 계열 | 가상 디스크 bad block | **ID 를 모른다.** EEMI 에서 찾아 넣을지 결정 |
+| 복구 불가 | PDR63 | 쓰기 중 불량 블록을 다른 블록으로 옮기지 못함(critical) | 문서 확인(§12.1 ⑤⑥) — 2026-11-14 5차에 분류에 추가 |
+| (후보 — 문서 확인됨) | PDR59 · PDR57 | 불량 블록을 옮김(정보성 · 손실 없음) · 불량 블록 표가 차 감(warning) | 문서 확인(§12.1 ⑦⑧). 분류에 넣을지는 미정(§12.5-1) |
+| (후보) | PDR56 | 불량 블록 표 80%(기억) | **미확인** — 검색 결과에서 PDR56 문구를 특정하지 못했다 |
+| 교체 구분 | PDR5 | 디스크가 디스크 그룹에서 빠짐. **케이블 · 인클로저 문제로도 뜬다** | 문서 확인(§12.1 ⑨⑩) → PDR5 만으로 ‘교체’ 라고 판정하지 않는다(§12.4-6) |
+| (후보) | 디스크 삽입 ID(기억: PDR8) | 디스크 삽입 | **미확인** — ‘PDR8 is inserted’ 를 적은 문서를 찾지 못했다 |
+| (후보 — 문서 확인됨) | VDR57 · VDR93 · VDR47 | 가상 디스크 쪽 불량 블록 · 미디어 오류 기록 | 문서 확인(§12.1 ⑪) · VDR47 은 커뮤니티 글(⑫). 물리 디스크를 가리키지 않아 슬롯 귀속 불가 — 분류에 넣을지 미정 |
 
 출처: ① https://www.manualsdir.com/manuals/620821/dell-poweredge-vrtx.html?page=450 · ② https://www.dell.com/support/kbdoc/en-ca/000218950/gen5a-physical-disk-failure-eventid-52807 ·
 ③ https://www.dell.com/community/PowerEdge-HDD-SCSI-RAID/R720XD-Correctable-Disk-Media-Errors/td-p/5183008 · ④ https://www.dell.com/support/kbdoc/en-uk/000126418/poweredge-hdd-what-is-predicted-drive-failure-and-how-to-solve-it
@@ -63,7 +66,7 @@
 
 ## 5. 수집 방식(제안)
 
-- 경로: `Managers/<id>/LogServices/Lclog/Entries` 를 `$skip` 으로 넘겨 가며 끝까지 읽는다(`$skip` 순회는 Dell 공개 PowerShell 모듈
+- 경로: `Managers/<id>/LogServices/Lclog/Entries` 를 `$skip` 으로 넘겨 가며 끝까지 읽는다(`$skip` 순회는 PowerShell Gallery 공개 모듈
   `Get-IdracLifecycleLogsREDFISH` 설명으로 확인). **`$filter` 로 MessageId 만 받아 올 수 있는지 · 한 쪽 건수 · LC 로그 최대 보관 건수는 미확인** —
   실장비 1대로 먼저 잰다. `$filter` 가 되면 조회가 크게 짧아진다.
 - **법인 쪽에서 돈다**(운영 규칙 '작업 하나를 법인에 보내 로컬에서 묶어 돌리고 요약만 올린다'): 중앙이 800ms RTT 로 수백 쪽을 왕복하지 않는다.
@@ -110,7 +113,7 @@
 1. 분모는 **디스크 수**(현재 장착)다. 디스크-년(사용 기간)이 아니다 — 장착일을 모른다(제조 주차 · 가동 시간을 Redfish 로 읽을 수 있는지 미확인).
 2. 못 읽은 서버의 디스크는 분자 · 분모에서 모두 뺀다. 법인 행에 '읽음/전체' 를 같이 쓴다.
 3. 장착 수가 적은 모델은 '표본 적음' 표지(기준 수는 구현 때 정한다 — 시안은 문구만).
-4. **RAID 컨트롤러 뒤가 아닌 디스크**(HBA 패스스루 · vSAN · NVMe 직결)는 Patrol Read 가 돌지 않아 PDR46 류 기록이 안 남을 수 있다 — **추정이고 미확인**. 사실이면 그 디스크들은 '기록 없음' 이 아니라 '이 방법으로는 볼 수 없음' 으로 따로 세야 한다. 실장비 확인 1순위.
+4. **RAID 로 묶이지 않은 디스크**(HBA 모드 · 패스스루 · Ready 상태)는 Patrol Read 가 돌지 않는다 — **문서 확인**(§12.1 ⑬⑭⑮: Patrol Read 는 가상 디스크 구성원 · 핫 스페어에서만 돌고, HBA 모드에서는 설정 자체를 지원하지 않는다). 따라서 그 디스크에는 PDR46 이 생기지 않는다 → '기록 없음' 이 아니라 '이 방법으로는 볼 수 없음' 으로 따로 센다. 남은 미확인: 현행 PERC 10/11/12 · HBA330 문서의 같은 문구, NVMe 직결 디스크, 그리고 포탈이 Redfish 로 '이 디스크가 가상 디스크 구성원인가' 를 읽는 방법.
 5. 디스크 자체의 누적 오류 수(재할당 섹터 등)를 Redfish 로 읽을 수 있으면 로그와 무관하게 '그 디스크' 의 상태를 알 수 있다. iDRAC9 스토리지 텔레메트리(SMART 리포트)가 있다는 것까지만 확인했고(Datacenter 라이선스 · `bmusage/parse/idracTelemetry.js:63` 이 리포트 이름을 이미 안다), 속성 이름 · Enterprise 서버 대체 경로는 미확인.
 
 ### 8.3 수집이 바뀌는 점
@@ -213,3 +216,89 @@
 
 §10.1 의 5(전체 점검 때 동시 법인 수 — 기본값 전부 동시) · 7(메일 받는 사람) · 8(메일 묶음) · 9(첫 점검의 과거 기록 메일 여부) · 10(PDR54 만 새로 생겨도 메일) ·
 11(구현 전 실장비 확인) · 12(PR 지켜보기) · 13(구현 착수 컨펌). 6(매일 점검 시각)은 6시간 주기로 바뀌어 없어졌다.
+
+## 12. 참조 문서 — 이 시안과 기능이 기대는 근거 전부(사용자 2026-11-14 5차)
+
+- "이 시안과 기능에 포함된 모든 참조 문서에 대한 내용을 추가해서 기능의 신뢰성을 높여줘"
+
+→ 아트보드 `Refs.dc.html`(분석 화면의 ‘근거’ 보기 — 화면 안에서 ID 의 뜻 · Dell 권장 조치 · 출처 · 확인 수준을 본다) 추가,
+`Main` · `Fleet` 에 ‘근거 문서’ 링크, 미확인 항목 재조사, 이 절.
+
+**확인 수준을 정직하게 적는다**: 아래 외부 문서는 전부 **웹 검색 결과의 요약으로 확인**했다. 원문 페이지는 이 작업 세션의 네트워크 정책에 막혀
+열지 못했다(`www.manualsdir.com` · `www.powershellgallery.com` 접속 불가 — 다른 호스트는 시도하지 않았다). 즉 ‘문서 확인’ 은 ‘그 문서가 그렇게 말한다고 검색 요약이 전한다’ 는 뜻이고,
+문구 한 자 한 자를 대조한 것이 아니다. 매뉴얼 미러 사이트(manualsdir · manualslib · manualowl)는 Dell 매뉴얼의 사본이지 Dell 공식 호스트가 아니다.
+**실장비 대조는 0건**이다.
+
+### 12.1 외부 문서 — 기록 ID
+
+| # | 문서 | 뒷받침하는 것 | 수준 |
+|---|---|---|---|
+| ① | Dell PowerEdge VRTX 매뉴얼 450쪽 — https://www.manualsdir.com/manuals/620821/dell-poweredge-vrtx.html?page=450 | PDR46 = Patrol Read 가 고칠 수 없는 미디어 오류. 옮길 수 없는 불량 블록일 수 있다 | 매뉴얼 사본 · 요약 |
+| ② | 같은 매뉴얼 451쪽 — …?page=451 | PDR47 = 고칠 수 없는 미디어 오류 → 컨트롤러가 블록을 puncture. 쓰면 풀린다 | 매뉴얼 사본 · 요약 |
+| ③ | Dell KB 000139251 ‘Double Faults and Punctures in RAID Arrays’ — https://www.dell.com/support/kbdoc/el-gr/000139251/double-faults-and-punctures-in-raid-arrays | puncture 가 무엇이고 어떻게 복구하는가 | Dell KB · 요약 |
+| ④ | Dell KB 000218950 ‘Gen 5a Physical Disk Failure EventID 52807’ — https://www.dell.com/support/kbdoc/en-ca/000218950/gen5a-physical-disk-failure-eventid-52807 | PDR64 = 리빌드 · 복구 중 고칠 수 없는 미디어 오류. 권장: 디스크 교체 | Dell KB · 요약(Avamar 제품 문서) |
+| ⑤ | Dell KB 000403212 ‘PDR63 A Bad Disk Block … Cannot be Reassigned During a Write Operation’ — https://www.dell.com/support/kbdoc/ar-bh/000403212/ppdma-dm5510-pdr63-a-bad-disk-block-on-arg1-cannot-be-reassigned-during-a-write-operation | PDR63 문구 · 권장: 디스크 교체 | Dell KB · 요약(PowerProtect 제품 문서) |
+| ⑥ | VRTX 매뉴얼 459쪽 — …?page=459 | PDR63: 데이터 손실 · 이중화 손실 가능 | 매뉴얼 사본 · 요약 |
+| ⑦ | VRTX 매뉴얼 457쪽 — …?page=457 | PDR59 = 불량 블록을 다른 블록으로 옮김 · 손실 없음 · 정보성 · 권장: 지켜봄 | 매뉴얼 사본 · 요약 |
+| ⑧ | VRTX 매뉴얼 456쪽 — …?page=456 | PDR57 = 불량 블록 표가 차 감 · warning · 권장: 교체 + 백업 복원. (80% 인지 가득인지는 요약으로 특정 못 함) | 매뉴얼 사본 · 요약 |
+| ⑨ | VRTX 매뉴얼 429쪽 — …?page=429 | PDR5 = 디스크가 디스크 그룹에서 빠짐. 케이블 · 인클로저 문제로도 뜸 · 정보성 | 매뉴얼 사본 · 요약 |
+| ⑩ | Dell KB 000481601 ‘Drives are Missing in iDRAC — PDR5 or PR8’ — https://www.dell.com/support/kbdoc/ru-lt/000481601/powerflex-drives-are-missing-in-idrac | PDR5 가 디스크 펌웨어 문제(NVMe PM1733a/PM1735a)로도 뜬다 → 교체의 증거가 아니다 | Dell KB · 요약 |
+| ⑪ | VRTX 매뉴얼 888쪽 — …?page=888 | VDR57(초기화 중 미디어 오류를 고치고 불량 블록을 옮김) · VDR93(불량 블록 미디어 오류가 지워짐) | 매뉴얼 사본 · 요약 |
+| ⑫ | Dell 커뮤니티 ‘R720XD Correctable Disk Media Errors’ — https://www.dell.com/community/PowerEdge-HDD-SCSI-RAID/R720XD-Correctable-Disk-Media-Errors/td-p/5183008 | PDR54 = 미디어 오류를 고쳐 씀 · 조치 불필요 · VDR47 사례. 교체 뒤에도 계속 뜬 사례가 있다 | 커뮤니티 · 요약 |
+| ⑬ | Dell KB 000126418 ‘What is Predictive Drive Failure — PDR16’ — https://www.dell.com/support/kbdoc/en-uk/000126418/poweredge-hdd-what-is-predicted-drive-failure-and-how-to-solve-it | PDR16 = SMART 고장 예측 | Dell KB · 요약 |
+| ⑭ | Dell KB 000221846 ‘SAS, SATA SSD: SMART predictive failures triggered by Remaining Write Rated Endurance’ — https://www.dell.com/support/kbdoc/000221846/sas-sata-ssd-smart-predictive-failure | SSD 의 PDR16 은 쓰기 수명 소진으로도 뜬다 → **PDR16 을 배드 섹터와 같은 뜻으로 세면 안 된다** | Dell KB · 요약 |
+| ⑮ | Dell KB 000308774(제목: 교체 뒤 24시간마다 PDR16 이 적힘) — https://www.dell.com/support/kbdoc/en-ai/000308774/poweredge-idrac9-pdr16-felet-predictive-failure-loggas-var-24-e-timme-efter-bytet?lang=tw | PDR16 이 반복 기록될 수 있다 → 같은 디스크 · 같은 ID 는 건수보다 ‘있음’ 으로 본다 | **제목만 확인** |
+| ⑯ | Dell KB 000143247 ‘Understanding Disk Errors: PDR1001, PDR3 …’ — https://www.dell.com/support/kbdoc/en-uk/000143247/dell-enterprise-hdd-what-is-the-meaning-of-led-on-physical-drives-pd | 물리 디스크 오류 ID 일반 | 제목만 확인 |
+| ⑰ | Dell KB SLN111146(가상 디스크 bad block 지우기) — https://www.dell.com/support/article/ky/en/kydhs1/SLN111146 · 커뮤니티 ‘R520 Virtual disk bad block medium error is detected’ | 가상 디스크 bad block 은 구성 디스크의 복구 불가 블록에서 온다 · OMSA 이벤트 2387 · 2417 | Dell KB · 커뮤니티 · 요약 |
+| ⑱ | Dell Error and Event Message(EEMI) 참조 안내서 — https://www.dell.com/support/manuals/en-qa/enterprise-solution-resources/eemi_automated_2024/swusoftware-change-event-messages · https://dell.com/support/manuals/en-ca/idrac9-lifecycle-controller-v3.3-series/eemi_pub/introduction | 전체 ID 의 공식 목록. PDR = Physical Disk · VDR = Virtual Disk 범주. **구현 전에 이 안내서로 ①~⑰ 을 다시 맞춘다** | 존재만 확인 |
+
+### 12.2 외부 문서 — 볼 수 있는 범위 · 읽는 방법
+
+| # | 문서 | 뒷받침하는 것 | 수준 |
+|---|---|---|---|
+| ⑲ | Dell PERC H310 사용 설명서 21쪽 — https://www.manualslib.com/manual/692159/Dell-H310.html?page=21 | Patrol Read 는 가상 디스크 구성원 · 핫 스페어에서만 돈다. Ready 상태 디스크는 돌지 않는다 | 매뉴얼 사본 · 요약(구형 컨트롤러) |
+| ⑳ | Dell PowerEdge T140 문제 해결 안내서 90쪽 — https://www.manualowl.com/m/Dell/PowerEdge-T140/Manual/593027?page=90 | HBA 모드의 PERC 는 Patrol Read 설정을 지원하지 않는다 | 매뉴얼 사본 · 요약 |
+| ㉑ | Dell iDRAC8 사용 설명서 209쪽 — https://www.manualslib.com/manual/1244291/Dell-Idrac-8.html?page=209 | HBA 모드에서는 가상 디스크 · 핫 스페어가 없고 모든 디스크가 non-RAID | 매뉴얼 사본 · 요약 |
+| ㉒ | Dell PERC 10 사용 설명서 — https://dl.dell.com/topicspdf/perc10_ug_en-us.pdf | 현행 컨트롤러의 같은 내용 | **목차만 보임 — 본문 미확인** |
+| ㉓ | Dell KB 000239838 ‘Seagate Summit SAS or SATA Drives Report Medium Errors …’ — https://www.dell.com/support/kbdoc/en-us/000239838/seagate-summit-hard-drives-failing-at-increased-rate?lang=en | 특정 모델의 미디어 오류가 펌웨어 문제일 수 있다 → 모델별 분석에서 ‘모델 + 펌웨어’ 를 같이 봐야 한다. 펌웨어 갱신 뒤 Patrol Read · Consistency Check 가 켜져 있는지 확인하라는 권고 | Dell KB · 요약 |
+| ㉔ | PowerShell Gallery 모듈 `Get-IdracLifecycleLogsREDFISH` — https://www.powershellgallery.com/packages/Get-IdracLifecycleLogsREDFISH/10.0.0/Content/Get-IdracLifecycleLogsREDFISH.psm1 | `LogServices/Lclog/Entries` 를 `$skip` 을 올려 가며 끝까지 읽는다 · 날짜 범위 · 메시지 ID 옵션이 있다(서버 쪽 필터인지 받은 뒤 거르는지는 요약에 없음) | 공개 스크립트 · 요약(작성 주체 미확인 — 앞서 ‘Dell 공개’ 라고 쓴 것을 정정) |
+| ㉕ | DMTF Redfish LogEntry 규격 — https://redfish.dmtf.org/schemas/v1/LogEntry.v1_20_0.json | 로그 항목의 `MessageId` · `Created` 속성 | 표준 규격 |
+| ㉖ | HPE iLO OData 질의 옵션 문서 — https://servermanagementportal.ext.hpe.com/docs/redfishservices/ilos/supplementdocuments/odataqueryoptions | `$filter=Created gt …` · `$top` · `$skip` 문법의 예. **iDRAC 의 동작을 증명하지 않는다** | 타사 문서(문법 참고만) |
+| ㉗ | Dell 백서 ‘Redfish Life Cycle Events’(iDRAC9 5.00.00.00 부터) — https://downloads.dell.com/manuals/all-products/esuprt_solutions_int/esuprt_solutions_int_solutions_resources/dell-management-solution-resources_White-Papers26_en-us.pdf | LC 이벤트를 구독(push)으로 받을 수 있다 · 구독 필터에 MessageId 를 쓸 수 있다 → 6시간 폴링의 대안 후보(§12.5-3) | Dell 백서 · 요약 |
+| ㉘ | iDRAC9 Redfish API 안내서 v4.x — https://dell.com/support/manuals/en-us/idrac9-lifecycle-controller-v4.x-series/idrac9_4.00.00.00_redfishapiguide_pub | `DellPhysicalDisk` 자원이 있다(속성 이름은 미확인) | 존재만 확인 |
+| ㉙ | iDRAC9 텔레메트리 백서 — https://dl.dell.com/manuals/all-products/esuprt_software_int/esuprt_software_ent_systems_mgmt/idrac9-lifecycle-controller-v4x-series_White-Papers2_en-us.pdf · Dell KB 000178016(라이선스) | 스토리지 리포트 3종에 SMART 지표가 있다 · 텔레메트리는 라이선스 등급에 달려 있다 | Dell 백서 · 요약 |
+
+### 12.3 이 저장소 안의 근거
+
+| 사실 | 위치 |
+|---|---|
+| 지금 이벤트 수집은 로그 한 쪽의 끝 40건 · Critical/Warning 15건 · MessageId 버림 | `server/src/idrac/redfish.js:789-803` |
+| 디스크 인벤토리의 모델 · 시리얼 · `FailurePredicted`(없으면 null) | `server/src/idrac/redfish.js:732-750` |
+| 엣지 축약 인벤토리의 디스크에는 시리얼이 없다 | `server/src/collector/compactInv.js:50` |
+| 엣지 위임 서버는 중앙에서 즉시 재수집 · 프로브 불가 | `server/src/routes/admin/idracScan.js:85-88 · 229` |
+| 서버 상세 모달(탭 3개 · 폭 980) · 물리 디스크 표 · 이벤트 목록 | `web/src/views/idrac/IdracDetailModal.jsx:221 · 305-307 · 438-455 · 522-535` |
+| 법인 귀속 · 국가 | `server/src/idrac/corpAttribution.js:142 idracCorpIndex` · `server/src/vcenter/registry.js:74-102` · `server/src/gpu/allocTree.js:287` |
+| 텔레메트리 스토리지 리포트 이름 패턴 | `server/src/bmusage/parse/idracTelemetry.js:63` |
+| 파트 장애 메일 경로와 그 한계(순차 발송 · 시간당 상한 주석) | `server/src/partfault/notify.js:1-20` · `server/src/mail/kinds.js:75`(시간 창 — 상한 숫자는 직접 확인 안 함) |
+| 엣지 작업 워커 전례 | `server/src/agent/idracScanWorker.js` · `server/src/agent/logQueryWorker.js` |
+| 운영 규칙(법인 로컬 실행 · 엣지 정제 · 보류 시한 · 인증 정지 · 못 읽은 값은 0 이 아니다) | 루트 `CLAUDE.md` · `docs/rules/idrac-server.md` · `docs/rules/edge.md` · `docs/rules/perf-db.md` |
+| 시안 색 · 글자 토큰 | `web/src/styles.css:1-35` |
+
+### 12.4 신뢰성 장치 — 구현이 지킬 것
+
+1. **분류표는 한 곳**(순수 모듈)에 두고 ID 마다 `뜻 · 분류 · 출처 URL · 확인 수준 · 대조한 날짜` 를 같이 적는다. 화면 ‘근거’ 보기는 이 표를 그대로 그린다(문구를 두 벌로 두지 않는다).
+2. **출처 없는 ID 는 분류에 없다** — 테스트가 고정한다. 미확인 ID(PDR56 · 삽입 ID 등)는 실장비 로그 또는 EEMI 로 확인한 뒤에만 넣는다.
+3. **원문을 버리지 않는다**: 스토리지 계열 기록은 분류되지 않은 것도 MessageId · 메시지 · 시각 · 로그 항목 Id 를 보관한다 → 분류표가 바뀌면 다시 분류할 수 있다.
+4. **PDR16 은 배드 섹터 수에 넣지 않고 따로 센다**(⑭ SSD 수명 · ⑮ 반복 기록). 시안도 처음부터 따로 세고 있다.
+5. **같은 디스크 · 같은 ID 의 반복**은 건수와 함께 ‘처음 · 마지막 시각’ 을 보여 준다(⑫ ⑮ — 건수만 보면 부풀려 읽힌다).
+6. **‘교체됨’ 은 PDR5 만으로 판정하지 않는다**(⑨ ⑩ 케이블 · 펌웨어로도 뜬다). 순서: 시리얼이 달라짐(확정) → 제거 + 삽입 기록이 둘 다 있음(추정) → 그 밖은 ‘판단 불가’.
+7. **볼 수 없는 디스크를 ‘기록 없음’ 에 넣지 않는다**(⑲ ⑳ ㉑): RAID 로 묶이지 않은 디스크는 따로 세고, 분석의 분모에서도 뺀다.
+8. **모델별 분석은 모델 + 펌웨어**로 본다(㉓).
+9. **실장비 대조를 기록한다**: 대조한 서버 수 · 날짜 · 어긋난 점을 이 문서와 ‘근거’ 보기에 적는다. 대조 전에는 화면에 ‘실장비 대조 전’ 이라고 쓴다.
+10. 기존 규칙 그대로: 못 읽음 · 일부만 읽음은 판정하지 않는다 · 로그가 남은 구간을 항상 같이 쓴다 · 엣지가 보낸 것은 정제한다 · 인증 실패는 자동 재시도하지 않는다.
+
+### 12.5 이번 조사로 새로 생긴 질문
+
+1. 문서로 확인된 **PDR59**(불량 블록을 옮김) · **PDR57**(불량 블록 표가 차 감)을 분류에 넣을지 — 제안: 넣는다(PDR59 는 PDR54 와 같은 줄에 ID 그대로, PDR57 은 경고).
+2. 가상 디스크 기록(**VDR57 · VDR93 · VDR47**)을 볼지 — 제안: 서버 단위 참고 기록으로만(디스크 슬롯에 귀속 못 함).
+3. 6시간 폴링 대신 LC 이벤트 구독(㉗)을 쓸지 — 제안: 이번에는 폴링. 구독은 엣지가 수신 포트를 열어야 해 별도 검토.

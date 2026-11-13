@@ -82,7 +82,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size
   </div>
 
   <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
-    <div class="kpi"><b style="color:#fca5a5">3</b><span>복구 불가 (PDR46 · PDR47 · PDR64)</span></div>
+    <div class="kpi"><b style="color:#fca5a5">3</b><span>복구 불가 (PDR46 · PDR47 · PDR63 · PDR64)</span></div>
     <div class="kpi"><b style="color:#fcd34d">3</b><span>PDR54 (미디어 오류를 고쳐 씀)</span></div>
     <div class="kpi"><b style="color:#bfdbfe">1</b><span>PDR16 (SMART 고장 예측)</span></div>
     <div class="kpi"><b>3년 8개월</b><span>로그가 남아 있는 구간</span></div>
@@ -142,7 +142,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size
     </div>
 
     <div style="display:flex;gap:8px 18px;flex-wrap:wrap;padding-top:4px;border-top:1px solid #1f2a40">
-      <span class="lg" style="padding-top:8px"><i class="mk bad"></i>복구 불가 (PDR46 · PDR47 · PDR64)</span>
+      <span class="lg" style="padding-top:8px"><i class="mk bad"></i>복구 불가 (PDR46 · PDR47 · PDR63 · PDR64)</span>
       <span class="lg" style="padding-top:8px"><i class="mk fix"></i>PDR54 (미디어 오류를 고쳐 씀)</span>
       <span class="lg" style="padding-top:8px"><i class="mk pre"></i>PDR16 (SMART 고장 예측)</span>
       <span class="lg" style="padding-top:8px"><i class="mk swap" style="height:14px"></i>디스크 교체 (제거·삽입 기록)</span>
@@ -200,7 +200,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size
   </div>
 
   <div style="border:1px solid #243049;border-radius:10px;background:rgba(59,130,246,.08);padding:10px 12px;font-size:12px;line-height:1.65;color:#cbd5e1">
-    <b>기록 ID 주석</b> — PDR46: Patrol Read 가 고치지 못한 미디어 오류 · PDR47: 컨트롤러가 블록을 못 쓰는 곳으로 표시 · PDR64: 리빌드·복구 중 고치지 못한 미디어 오류 · PDR54: 미디어 오류를 복구 중에 고쳐 씀 · PDR16: SMART 고장 예측. ID 는 Dell 이 붙인 메시지 번호입니다.<br>
+    <b>기록 ID 주석</b> — PDR46: Patrol Read 가 고치지 못한 미디어 오류 · PDR47: 컨트롤러가 블록을 못 쓰는 곳으로 표시 · PDR63: 쓰기 중 불량 블록을 옮기지 못함 · PDR64: 리빌드·복구 중 고치지 못한 미디어 오류 · PDR54: 미디어 오류를 복구 중에 고쳐 씀 · PDR16: SMART 고장 예측. ID 는 Dell 이 붙인 메시지 번호입니다 — <a href="Refs.dc.html">근거 문서 보기</a><br>
     <b>읽는 법</b> — 이 화면은 iDRAC Lifecycle 로그에 남아 있는 구간만 봅니다. 2023-03-14 이전에 있었던 일은 여기서 알 수 없습니다.
     ‘어느 디스크’ 는 같은 슬롯의 제거·삽입 기록으로 나눈 것이라, 그 기록이 로그에 없으면 구분하지 못합니다.
     찾은 기록은 포탈에 보관해, 나중에 iDRAC 로그가 덮어써져도 다음 조회에 그대로 보입니다.

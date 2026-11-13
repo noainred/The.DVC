@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디스크 배드 섹터 — 근거 문서</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0;box-sizing:border-box}
+.h{font-size:13.5px;font-weight:700}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626;flex-wrap:wrap}
+.seg button{all:unset;cursor:pointer;display:inline-flex;align-items:center;min-height:32px;padding:0 12px;font-size:12.5px;font-weight:700;color:#8b9bb4;white-space:nowrap}
+.seg button.on{background:#3b82f6;color:#ffffff}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.fix{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.pre{background:rgba(59,130,246,.18);color:#bfdbfe}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+th button{all:unset;cursor:pointer}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.55}
+.nw{white-space:nowrap}
+.box{overflow-x:auto;border:1px solid #243049;border-radius:10px}
+.lv{display:flex;gap:8px 18px;flex-wrap:wrap;font-size:12px;color:#aebbd0;line-height:1.6}
+</style>
+</helmet>
+<div style="width:100%;min-height:1700px;box-sizing:border-box;background:#0a0e17;padding:20px 24px 40px;color:#e6edf6;font-family:'Inter','Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:13px">
+<div style="max-width:1392px;margin:0 auto;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px 16px;flex-wrap:wrap">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">디스크 배드 섹터 분석 — 근거 문서</div>
+      <div class="muted">이 화면의 분류와 판정이 무엇을 근거로 하는지, 어디까지 확인했는지 적습니다. 근거가 없는 기록 ID 는 분류에 넣지 않습니다.</div>
+    </div>
+    <div class="seg" role="tablist" aria-label="보기">
+      <button type="button">요약</button>
+      <button type="button">디스크 목록</button>
+      <button type="button">국가·법인</button>
+      <button type="button">모델</button>
+      <button type="button">추이</button>
+      <button type="button" class="on" aria-current="page">근거</button>
+    </div>
+  </div>
+
+  <div class="card" style="background:#0f1626">
+    <div class="lv">
+      <span><span class="tag ok">Dell 문서</span> Dell 지원 문서 · 제품 매뉴얼에 그 ID 의 뜻이 적혀 있음</span>
+      <span><span class="tag warn">커뮤니티 · 공개 스크립트</span> Dell 포럼 글이나 공개된 스크립트에서만 확인</span>
+      <span><span class="tag gray">미확인</span> 문서를 찾지 못함 — 분류에 넣지 않음</span>
+      <span><span class="tag gray">실장비 대조 전</span> 이 포탈의 서버 로그로 아직 맞춰 보지 않음</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h">기록 ID 가 뜻하는 것 <span class="muted" style="font-weight:400">ID 는 Dell 이 Lifecycle 로그 메시지에 붙인 번호입니다</span></div>
+    <div class="box">
+    <table style="min-width:1180px">
+      <thead><tr>
+        <th><button type="button">ID</button></th>
+        <th><button type="button">포탈 분류</button></th>
+        <th><button type="button">Dell 문서가 말하는 뜻</button></th>
+        <th><button type="button">Dell 권장 조치</button></th>
+        <th><button type="button">출처</button></th>
+        <th><button type="button">확인</button></th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="nw"><span class="tag bad">PDR46</span></td><td class="nw">복구 불가</td><td>Patrol Read 가 고칠 수 없는 미디어 오류를 찾음. 다른 블록으로 옮길 수 없는 불량 블록일 수 있음</td><td class="muted">문서에서 확인하지 못함</td><td><a href="https://www.manualsdir.com/manuals/620821/dell-poweredge-vrtx.html?page=450">PowerEdge VRTX 매뉴얼 450쪽</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+        <tr><td class="nw"><span class="tag bad">PDR47</span></td><td class="nw">복구 불가</td><td>고칠 수 없는 미디어 오류가 있어 컨트롤러가 그 블록을 무효로 표시(puncture). 그 블록에 새로 쓰면 풀림</td><td>RAID puncture 복구 절차</td><td><a href="https://www.manualsdir.com/manuals/620821/dell-poweredge-vrtx.html?page=451">VRTX 매뉴얼 451쪽</a> · <a href="https://www.dell.com/support/kbdoc/el-gr/000139251/double-faults-and-punctures-in-raid-arrays">Dell KB 000139251</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+        <tr><td class="nw"><span class="tag bad">PDR63</span></td><td class="nw">복구 불가</td><td>쓰기 도중 불량 블록을 다른 블록으로 옮기지 못함. 데이터 손실 · 이중화 손실 가능</td><td>디스크 교체</td><td><a href="https://www.dell.com/support/kbdoc/ar-bh/000403212/ppdma-dm5510-pdr63-a-bad-disk-block-on-arg1-cannot-be-reassigned-during-a-write-operation">Dell KB 000403212</a> · <a href="https://www.manualsdir.com/manuals/620821/dell-poweredge-vrtx.html?page=459">VRTX 매뉴얼 459쪽</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+        <tr><td class="nw"><span class="tag bad">PDR64</span></td><td class="nw">복구 불가</td><td>리빌드 · 복구 도중 고칠 수 없는 미디어 오류가 남</td><td>디스크 교체</td><td><a href="https://www.dell.com/support/kbdoc/en-ca/000218950/gen5a-physical-disk-failure-eventid-52807">Dell KB 000218950</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+        <tr><td class="nw"><span class="tag fix">PDR54</span></td><td class="nw">PDR54</td><td>미디어 오류를 복구 과정에서 고쳐 씀. 정보성 기록</td><td>조치 없음</td><td><a href="https://www.dell.com/community/PowerEdge-HDD-SCSI-RAID/R720XD-Correctable-Disk-Media-Errors/td-p/5183008">Dell 커뮤니티 글</a></td><td class="nw"><span class="tag warn">커뮤니티</span></td></tr>
+        <tr><td class="nw"><span class="tag pre">PDR16</span></td><td class="nw">고장 예측</td><td>SMART 고장 예측. SSD 는 불량 블록이 아니라 쓰기 수명이 다해서도 뜸 — 배드 섹터와 같은 뜻이 아님</td><td>Dell KB 절차에 따라 점검 · 교체</td><td><a href="https://www.dell.com/support/kbdoc/en-uk/000126418/poweredge-hdd-what-is-predicted-drive-failure-and-how-to-solve-it">Dell KB 000126418</a> · <a href="https://www.dell.com/support/kbdoc/000221846/sas-sata-ssd-smart-predictive-failure">KB 000221846</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+        <tr><td class="nw"><span class="tag gray">PDR5</span></td><td class="nw">교체 구분에만 씀</td><td>디스크가 디스크 그룹에서 빠짐. 케이블 · 인클로저 문제로도 뜸 — 이것만으로 ‘교체’ 라고 하지 않음</td><td>디스크를 다시 꽂거나 바꾼 뒤 다시 검색</td><td><a href="https://www.manualsdir.com/manuals/620821/dell-poweredge-vrtx.html?page=429">VRTX 매뉴얼 429쪽</a> · <a href="https://www.dell.com/support/kbdoc/ru-lt/000481601/powerflex-drives-are-missing-in-idrac">Dell KB 000481601</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+        <tr><td class="nw"><span class="tag gray">PDR59</span></td><td class="nw">아직 분류 안 함</td><td>불량 블록을 다른 블록으로 옮김. 데이터 손실 없음. 정보성 기록</td><td>다른 이상 징후가 있는지 지켜봄</td><td><a href="https://www.manualsdir.com/manuals/620821/dell-poweredge-vrtx.html?page=457">VRTX 매뉴얼 457쪽</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+        <tr><td class="nw"><span class="tag gray">PDR57</span></td><td class="nw">아직 분류 안 함</td><td>불량 블록을 옮겨 적는 표가 차 감. 가득 차면 더 옮기지 못함</td><td>디스크 교체 · 백업에서 복원</td><td><a href="https://www.manualsdir.com/manuals/620821/dell-poweredge-vrtx.html?page=456">VRTX 매뉴얼 456쪽</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+        <tr><td class="nw"><span class="tag gray">VDR57 · VDR93</span></td><td class="nw">아직 분류 안 함</td><td>가상 디스크 쪽 기록 — 초기화 중 미디어 오류를 고치고 불량 블록을 옮김 · 불량 블록 오류가 지워짐. 어느 물리 디스크인지는 말하지 않음</td><td>고장 난 디스크 교체</td><td><a href="https://www.manualsdir.com/manuals/620821/dell-poweredge-vrtx.html?page=888">VRTX 매뉴얼 888쪽</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+        <tr><td class="nw" style="border-bottom:none"><span class="tag gray">PDR56 · 디스크 삽입 ID</span></td><td class="nw" style="border-bottom:none">분류에 없음</td><td style="border-bottom:none" class="muted">뜻을 적은 문서를 찾지 못함</td><td style="border-bottom:none" class="muted">—</td><td style="border-bottom:none" class="muted">—</td><td class="nw" style="border-bottom:none"><span class="tag gray">미확인</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <span class="muted" style="font-size:12px;line-height:1.6">위 매뉴얼은 PowerEdge VRTX 판입니다. 서버 세대마다 문구가 다를 수 있어, 분류는 문장이 아니라 ID 로 합니다. 전체 목록은 Dell 의 <a href="https://www.dell.com/support/manuals/en-qa/enterprise-solution-resources/eemi_automated_2024/swusoftware-change-event-messages">Error and Event Message 참조 안내서</a>에 있습니다.</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:14px">
+
+    <div class="card">
+      <div class="h">이 방법으로 볼 수 있는 것과 없는 것</div>
+      <div class="box">
+      <table style="min-width:520px">
+        <thead><tr><th>사실</th><th>출처</th><th>확인</th></tr></thead>
+        <tbody>
+          <tr><td>Patrol Read 는 가상 디스크에 들어 있는 디스크와 핫 스페어에서만 돈다. Ready 상태 디스크는 돌지 않는다</td><td><a href="https://www.manualslib.com/manual/692159/Dell-H310.html?page=21">PERC H310 사용 설명서 21쪽</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+          <tr><td>컨트롤러가 HBA 모드면 Patrol Read 설정을 지원하지 않는다 — 그런 디스크에는 PDR46 이 생기지 않는다</td><td><a href="https://www.manualowl.com/m/Dell/PowerEdge-T140/Manual/593027?page=90">PowerEdge 문제 해결 안내서 90쪽</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+          <tr><td>HBA 모드에서는 가상 디스크 · 핫 스페어가 없고 모든 디스크가 non-RAID 다</td><td><a href="https://www.manualslib.com/manual/1244291/Dell-Idrac-8.html?page=209">iDRAC8 사용 설명서 209쪽</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+          <tr><td>같은 모델에서 미디어 오류가 몰리면 펌웨어 문제일 수 있다(Seagate 일부 모델 사례)</td><td><a href="https://www.dell.com/support/kbdoc/en-us/000239838/seagate-summit-hard-drives-failing-at-increased-rate?lang=en">Dell KB 000239838</a></td><td class="nw"><span class="tag ok">Dell 문서</span></td></tr>
+          <tr><td style="border-bottom:none">디스크를 바꾼 뒤에도 PDR16 이 24시간마다 다시 적히는 경우가 있다</td><td style="border-bottom:none"><a href="https://www.dell.com/support/kbdoc/en-ai/000308774/poweredge-idrac9-pdr16-felet-predictive-failure-loggas-var-24-e-timme-efter-bytet?lang=tw">Dell KB 000308774</a></td><td class="nw" style="border-bottom:none"><span class="tag ok">Dell 문서</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <span class="muted" style="font-size:12px;line-height:1.6">그래서 RAID 로 묶이지 않은 디스크(HBA · 패스스루)는 ‘기록 없음’ 이 아니라 ‘이 방법으로는 볼 수 없음’ 으로 따로 셉니다.</span>
+    </div>
+
+    <div class="card">
+      <div class="h">로그를 읽는 방법</div>
+      <div class="box">
+      <table style="min-width:520px">
+        <thead><tr><th>사실</th><th>출처</th><th>확인</th></tr></thead>
+        <tbody>
+          <tr><td>Lifecycle 로그는 Redfish 로 읽고, 건너뛰기 값을 올려 가며 끝까지 넘긴다</td><td><a href="https://www.powershellgallery.com/packages/Get-IdracLifecycleLogsREDFISH/10.0.0/Content/Get-IdracLifecycleLogsREDFISH.psm1">PowerShell Gallery 공개 모듈</a></td><td class="nw"><span class="tag warn">공개 스크립트</span></td></tr>
+          <tr><td>로그 항목에는 기록 ID(MessageId)와 만든 시각(Created)이 있다</td><td><a href="https://redfish.dmtf.org/schemas/v1/LogEntry.v1_20_0.json">Redfish LogEntry 규격</a></td><td class="nw"><span class="tag ok">표준 규격</span></td></tr>
+          <tr><td>ID · 시각으로 걸러서 받을 수 있는지, 로그가 최대 몇 건까지 남는지</td><td class="muted">찾지 못함</td><td class="nw"><span class="tag gray">미확인</span></td></tr>
+          <tr><td style="border-bottom:none">디스크별 SMART 값은 iDRAC 텔레메트리 스토리지 리포트에 있다(Datacenter 라이선스)</td><td style="border-bottom:none"><a href="https://dl.dell.com/manuals/all-products/esuprt_software_int/esuprt_software_ent_systems_mgmt/idrac9-lifecycle-controller-v4x-series_White-Papers2_en-us.pdf">iDRAC9 텔레메트리 백서</a></td><td class="nw" style="border-bottom:none"><span class="tag ok">Dell 문서</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <span class="muted" style="font-size:12px;line-height:1.6">모든 항목은 아직 <b style="color:#e6edf6">실장비 대조 전</b>입니다. 이 포탈의 서버 로그로 맞춰 본 뒤 여기에 대조한 날짜와 서버 수를 적습니다.</span>
+    </div>
+
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
