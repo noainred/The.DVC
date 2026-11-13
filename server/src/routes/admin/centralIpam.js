@@ -18,9 +18,12 @@ import { agentVcenterIds, suggestAgentSubnets } from '../../ipam/scanDatacenter.
 import { currentScanDatacenters, invalidateScanDatacenters, scanDatacenterOf } from '../../ipam/scanDatacenterSource.js';
 import { agentIdracServers } from '../../ipam/scanSuggestSource.js';
 import { hostLedgerIp } from '../../ipam/ledger.js'; // v2.744(감사 후속 FB-2): FQDN 호스트의 관리 IP — IP 원장과 같은 판정(복제 금지)
+import { ipToNum } from '../../util/ipv4.js'; // v3.6.0: vmk 주소의 스캔 뜻 없는 주소 거르기
 import { listDatacenters, datacenterOfVcenter, getDatacenterAssign } from '../../datacenter/store.js';
 import { listScanRanges as listIdracScanRanges } from '../../idrac/scanRanges.js';
-import { idracSubnets, vmSubnets, annotateSubnets, SUBNET_MAX } from '../../ipam/vcRangeSuggest.js'; // v2.690: vCenter 스캔 대역 '/24 가져오기'
+import { idracSubnets, vmSubnets, annotateSubnets, SUBNET_MAX, excludedIpReason } from '../../ipam/vcRangeSuggest.js';
+import { hostVmks } from '../../ipam/serverView.js'; // v3.6.0: 스캔 대역 후보에 ESXi vmk 전체 주소
+import { getSubnetNotes, subnetKey } from '../../ipam/subnetNotes.js'; // v3.6.0: 후보 줄에 대역 용도 // v2.690: vCenter 스캔 대역 '/24 가져오기'
 import { todayStamp } from '../../util/dayKey.js';
 import { readMigrationState, runVcRangeMigration, moveVcRangeManually, removeVcRangeManually, dismissMigration } from '../../ipam/vcRangeMigrate.js'; // v2.691: vCenter 별 대역 → 에이전트
 import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
@@ -173,7 +176,14 @@ adminRouter.get('/ipam/scan/suggest', adminOnly, fleetOnly, (req, res) => {
   const idrac = agentIdracServers(agent, inputs.collectors);
   const vcName = {};
   for (const v of snap.vcenters || []) vcName[v.id] = v.name || v.id;
-  const r = suggestAgentSubnets({ vcenterIds: vcIds, vms: snap.vms, hosts: snap.hosts, idrac: idrac.servers, vcName, hostIp: hostLedgerIp });
+  // v3.6.0(재설계 묶음 다 ⑪): ESXi vmk 전체 주소를 후보에 넣는다(루프백 · 링크 로컬 등 스캔 뜻이 없는 주소는 뺀다 — vcRangeSuggest 와 같은 판정).
+  const hostIps = (h) => hostVmks(h).map((v) => v.ip).filter((ip) => { const n = ipToNum(ip); return n != null && !excludedIpReason(n); });
+  const r0 = suggestAgentSubnets({ vcenterIds: vcIds, vms: snap.vms, hosts: snap.hosts, idrac: idrac.servers, vcName, hostIp: hostLedgerIp, hostIps });
+  // v3.6.0: IPMS 무시 대역(전부 무시면 뺀다) · 공인/사설 분류(사설 · 공인 두 묶음) · 대역 용도. 가져오기 창과 같은 판정(annotateSubnets).
+  const ann = annotateSubnets(r0.subnets, { ...ipmsCtx(snap), vcenterIds: vcIds });
+  let notes = {}; try { notes = getSubnetNotes() || {}; } catch { notes = {}; }
+  const subnets = ann.subnets.map((x) => { const p = notes[subnetKey(x.cidr)]?.purpose; return p ? { ...x, purpose: String(p) } : x; });
+  const r = { ...r0, subnets, ignored: ann.ignored, ignoreSources: ann.sources };
   res.json({
     ok: true, agent, ...r,
     vcenters: vcIds.map((id) => ({ id, name: vcName[id] || id })),
