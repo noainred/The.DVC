@@ -649,7 +649,7 @@ function ServerAnalysisView({ bm = false }) {
           <label className="flex gap" style={{ alignItems: 'center' }} title="2차: vCenter=가상화 장비만 · Baremetal=vCenter에 속하지 않는 물리 서버">
             <span className="muted">구분</span>
             <Select className="select" value={lvl2} onChange={(e) => setLvl2(e.target.value)} style={{ minWidth: 180 }} disabled={bm}
-              title={bm ? '서버 › 물리 서버 메뉴는 Baremetal(미가상화 물리)로 고정입니다 — 다른 구분은 자원관리 › 서버 분석에서 고릅니다.' : undefined}>
+              title={bm ? '서버 › Physical Server · Baremetal 메뉴는 Baremetal(미가상화 물리)로 고정입니다 — 다른 구분은 자원관리 › Physical Server 에서 고릅니다.' : undefined}>
               <option value="">{vcErr ? '전체 (vCenter 목록을 읽지 못함)' : dc ? '전체 (법인 모든 장비)' : '전체'}</option>
               {dcVcs.length > 0 && (
                 <optgroup label="🖥 vCenter (가상화 장비만)">
@@ -663,7 +663,7 @@ function ServerAnalysisView({ bm = false }) {
       </div>
       {bm && (
         <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-          물리 서버 — 서버 분석의 구분 ‘Baremetal(미가상화 물리)’ 을 보여 줍니다. 법인을 고르지 않으면 전체 법인입니다. 하드웨어 집계 탭은 구분과 무관하게 전체 서버를 셉니다.
+          Physical Server · Baremetal — Physical Server 의 구분 ‘Baremetal(미가상화 물리)’ 을 보여 줍니다. 법인을 고르지 않으면 전체 법인입니다. 하드웨어 집계 탭은 구분과 무관하게 전체 서버를 셉니다.
         </div>
       )}
       <DcErrNote err={dcErr} />

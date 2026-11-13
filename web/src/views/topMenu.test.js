@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MENU_GROUPS, BAREMETAL_SEG, hashOf, locate, visibleMenu, entryOf, tabsOf } from './topMenu.js';
+import { MENU_GROUPS, BAREMETAL_SEG, hashOf, locate, visibleMenu, entryOf, tabsOf, menuTabOf } from './topMenu.js';
 import { TOOLS } from './specialToolsList.js';
 import { stripComments } from '../test/_stripComments.js';
 
@@ -35,7 +35,7 @@ describe('메뉴 구성', () => {
 
   it('메뉴가 가리키는 도구는 카탈로그에 실재하고 패널이 있는 도구다', () => {
     const keys = allItems().map(({ c }) => c?.tool).filter(Boolean);
-    expect(keys.length).toBe(19);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1 · v2.827 엣지 토큰 맞추기 1 · v2.948 SAN 스토리지 성능 1 · v2.965 PowerScale 장비 점검 1
+    expect(keys.length).toBe(19);               // 서버 분석(Physical Server)은 'Physical Server · Baremetal' 과 'Physical Server' 두 자리 · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1 · v2.827 엣지 토큰 맞추기 1 · v2.948 SAN 스토리지 성능 1 · v2.965 PowerScale 장비 점검 1
     expect(new Set(keys).size).toBe(18);
     for (const k of keys) {
       const t = TOOLS.find((x) => x.k === k);
@@ -47,9 +47,15 @@ describe('메뉴 구성', () => {
   it('하위 메뉴 이름은 사용자가 정한 것이다', () => {
     const labels = (id) => MENU_GROUPS.find((g) => g.id === id).children.map((c) => c.label);
     // v2.915(사용자 요청 '세 메뉴를 하나로' · 이름 '가상화 플랫폼'): 가상화 서버 · ESXi 호스트 · vCenter → 항목 하나(탭은 vcenters + hosts · vms)
-    expect(labels('server')).toEqual(['가상화 플랫폼', '물리 서버', 'Backup', '알람']);
-    const virt = MENU_GROUPS.find((g) => g.id === 'server').children.find((c) => c.id === 'virt');
-    expect(tabsOf(virt)).toEqual(['vcenters', 'hosts', 'vms']);
+    // v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 'Virtual Machine(VM)'(vms + vcenters) · 'Hypervisor'(hosts) 둘로 ·
+    //   물리 서버 → 'Physical Server · Baremetal'. id · 탭 id · 도구 키는 그대로.
+    expect(labels('server')).toEqual(['Virtual Machine(VM)', 'Hypervisor', 'Physical Server · Baremetal', 'Backup', '알람']);
+    const srv = MENU_GROUPS.find((g) => g.id === 'server').children;
+    expect(srv.map((c) => c.id)).toEqual(['virt', 'hv', 'bm', 'veeam', 'alarm']);
+    const virt = srv.find((c) => c.id === 'virt');
+    expect(tabsOf(virt)).toEqual(['vms', 'vcenters']);
+    expect(tabsOf(srv.find((c) => c.id === 'hv'))).toEqual(['hosts']);
+    expect(srv.find((c) => c.id === 'bm')).toMatchObject({ tool: 'serveranalysis', seg: BAREMETAL_SEG });
     expect(tabsOf({ tool: 'x' })).toEqual([]);
     expect(tabsOf({ tab: 'a', tabs: ['a', 'b', ''] })).toEqual(['a', 'b']);
     // v2.789: 사용자 요청 '스토리지 사용량을 일간/주간 별로 정리해서 보는 기능'(새 메뉴 선택)으로 증가량 보고서 다음에 한 줄을 더했다.
@@ -57,7 +63,7 @@ describe('메뉴 구성', () => {
     // v2.965: 사용자 요청 '법인별로 전체 power scale 장비의 장비 점검을 하는 기능'(독립 도구 ps-inspect)을 스토리지 현황 바로 아래에 더했다.
     expect(labels('storage')).toEqual(['스토리지 현황', 'PowerScale 장비 점검', '데이터스토어', '스토리지 증가량 보고서', '스토리지 사용량 보고서', '스토리지 사용량 추이', '베어메탈 스토리지', 'SAN 스위치 모니터링', 'SAN 스토리지 성능']);
     expect(labels('network')).toEqual(['전체 네트워크 장비', '가상화 네트워크', '통신 지도', '글로벌 네트워크 점검', 'IP관리', 'Monitoring']);
-    expect(labels('resource')).toEqual(['서버 분석', 'GPU 인벤토리', '전력 분석']);
+    expect(labels('resource')).toEqual(['Physical Server', 'GPU 인벤토리', '전력 분석']);   // v2.994 '서버 분석' → 'Physical Server'(도구 키 serveranalysis 그대로)
     expect(labels('optimize')).toEqual(['Optimization', 'Infra Observability']);   // v2.878 이름 변경(id·도구 키 idrac-trend 그대로)
   });
 });
@@ -96,12 +102,14 @@ describe('locate — 지금 화면이 어느 메뉴인가', () => {
     const body = src.slice(src.indexOf('export function locate('), src.indexOf('function groupOfTool('));
     expect(body).not.toMatch(/group:\s*'tools'/);
   });
-  it('옛 탭 주소는 새 메뉴 자리로 간다(#/hosts → 서버 › ESXi 호스트, #/upgrade → 설정 › 업그레이드)', () => {
+  it('옛 탭 주소는 새 메뉴 자리로 간다(#/hosts → 서버 › Hypervisor, #/upgrade → 설정 › 업그레이드)', () => {
     // v2.915: 세 탭 모두 '서버 › 가상화 플랫폼' 한 항목(옛 주소 · 탭 id 는 그대로)
-    expect(locate('hosts', '#/hosts')).toEqual({ group: 'server', child: 'virt' });
+    // v2.994: hosts 는 'Hypervisor'(hv) · vms · vcenters 는 'Virtual Machine(VM)'(virt). 호스트 개체 보기(#/vcenters/…/host/…)는 vcenters 탭이라 virt.
+    expect(locate('hosts', '#/hosts')).toEqual({ group: 'server', child: 'hv' });
     expect(locate('vms', '#/vms')).toEqual({ group: 'server', child: 'virt' });
     expect(locate('vcenters', '#/vcenters')).toEqual({ group: 'server', child: 'virt' });
     expect(locate('vcenters', '#/vcenters/vc-a/host/h1')).toEqual({ group: 'server', child: 'virt' });
+    expect(locate('hosts', '#/hosts?vc=x')).toEqual({ group: 'server', child: 'hv' });
     expect(locate('datastores', '#/datastores')).toEqual({ group: 'storage', child: 'ds' });
     expect(locate('upgrade', '#/upgrade')).toEqual({ group: 'settings', child: 'upgrade' });
     expect(locate('settings', '#/settings/collectors')).toEqual({ group: 'settings', child: 'settings' });
@@ -114,13 +122,38 @@ describe('visibleMenu · entryOf', () => {
     expect(m.map((g) => g.id)).toEqual(['overview', 'server', 'tools']);
     expect(m.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['virt']);
     // v2.915: 하나라도 허용이면 보이고 처음 여는 탭은 허용된 것 중 첫째(entryTab) — hashOf 가 그리로
+    // v2.994: virt 의 처음 탭이 vms 가 됐다(entryTab 없음) · inv.vms 가 없으면 vcenters 로(entryTab) · hosts 는 hv 항목
     expect(hashOf(m.find((g) => g.id === 'server').children[0])).toBe('#/vms');
+    expect(m.find((g) => g.id === 'server').children[0].entryTab).toBe(undefined);
     const m2 = visibleMenu({ tabOk: (t) => ['overview', 'hosts', 'vcenters'].includes(t), toolOk: () => false });
+    expect(m2.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['virt', 'hv']);
     const it2 = m2.find((g) => g.id === 'server').children[0];
     expect(hashOf(it2)).toBe('#/vcenters');
-    expect(it2.entryTab).toBe(undefined);
+    expect(it2.entryTab).toBe('vcenters');
     const m3 = visibleMenu({ tabOk: (t) => ['overview', 'alarms'].includes(t), toolOk: () => false });
     expect(m3.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['alarm']);
+  });
+  it('v2.994 메뉴 클릭 진입 탭(menuTabOf) — 마지막으로 본 탭이 아니라 그 항목의 처음 허용 탭 · 권한별', () => {
+    const srv = (tabs) => visibleMenu({ tabOk: (t) => tabs.includes(t), toolOk: () => true }).find((g) => g.id === 'server')?.children || [];
+    const pick = (tabs, id) => srv(tabs).find((c) => c.id === id) || null;
+    // 전부 허용: Virtual Machine(VM) → VM 탭 · Hypervisor → 호스트 탭
+    expect(menuTabOf(pick(['vms', 'hosts', 'vcenters'], 'virt'))).toBe('vms');
+    expect(menuTabOf(pick(['vms', 'hosts', 'vcenters'], 'hv'))).toBe('hosts');
+    // inv.vms 없음 → vCenter 탭으로 진입
+    expect(menuTabOf(pick(['hosts', 'vcenters'], 'virt'))).toBe('vcenters');
+    // inv.hosts 없음 → Hypervisor 항목이 보이지 않는다 · VM 은 그대로
+    expect(pick(['vms', 'vcenters'], 'hv')).toBe(null);
+    expect(menuTabOf(pick(['vms', 'vcenters'], 'virt'))).toBe('vms');
+    // vCenter 만 → virt 는 vcenters · hosts 만 → virt 가 사라지고 hv 만
+    expect(menuTabOf(pick(['vcenters'], 'virt'))).toBe('vcenters');
+    expect(srv(['hosts']).filter((c) => !c.tool).map((c) => c.id)).toEqual(['hv']);   // 도구 항목(bm · veeam)은 toolOk 로 따로 보인다
+    // 도구 항목 · 빈 값은 null
+    expect(menuTabOf(pick(['vms'], 'bm'))).toBe(null);
+    expect(menuTabOf(null)).toBe(null);
+    // App 은 이 판정 하나로 간다 — 옛 '마지막 본 탭' 기억(loadLastTab · saveLastTab)은 지웠다
+    const app = stripComments(read('../App.jsx'));
+    expect(app).toMatch(/const dest = menuTabOf\(item\);/);
+    expect(app).not.toMatch(/loadLastTab|saveLastTab|platform\.tab/);
   });
   it('설정 소유자가 아니어도 업그레이드를 볼 수 있으면 설정 메뉴는 업그레이드 하나로 남는다', () => {
     const m = visibleMenu({ tabOk: (t) => t === 'upgrade', toolOk: () => false });
@@ -217,3 +250,18 @@ describe('v2.785→v2.787 Veeam — 주소·도구 키는 그대로 · 옛 이�
   });
 });
 
+
+// v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 도구 이름 변경 — 키는 그대로 · 옛 이름은 aka 로 찾힌다.
+describe('v2.994 Physical Server · Bare Metal Server — 도구 키 그대로 · 옛 이름으로도 찾힌다', async () => {
+  const { searchTools } = await import('./toolSearch.js');
+  it('카탈로그 이름 · aka', () => {
+    const sa = TOOLS.find((t) => t.k === 'serveranalysis'); const bf = TOOLS.find((t) => t.k === 'bm-folders');
+    expect([sa.label, bf.label]).toEqual(['Physical Server', 'Bare Metal Server']);
+    expect(sa.aka).toEqual(expect.arrayContaining(['서버 분석', '서버분석']));
+    expect(bf.aka).toEqual(expect.arrayContaining(['물리서버 폴더', '물리 서버 폴더']));
+  });
+  it('옛 이름 · 새 이름 모두 첫 결과로', () => {
+    for (const q of ['서버 분석', '서버분석', 'Physical Server', 'physical']) expect(searchTools(TOOLS, q)[0].k, q).toBe('serveranalysis');
+    for (const q of ['물리서버 폴더', '물리 서버 폴더', 'Bare Metal Server', 'bare metal']) expect(searchTools(TOOLS, q)[0].k, q).toBe('bm-folders');
+  });
+});

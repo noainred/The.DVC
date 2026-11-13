@@ -453,7 +453,7 @@ export function BmUsage() {
       <div className="card" style={{ minWidth: 0 }}>
         <h3 style={{ marginTop: 0 }}>베어메탈 사용률</h3>
         <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
-          <BoldText text={'대상은 **서버 분석 › 구분 › Baremetal(미가상화 물리)** 과 정확히 같은 집합입니다. 디스크·네트워크·HBA 는 **OS 계정이 있는 서버만** 읽을 수 있고, iDRAC 텔레메트리는 CPU·메모리·I/O(집계)까지 줍니다.'} />
+          <BoldText text={'대상은 **Physical Server › 구분 › Baremetal(미가상화 물리)** 과 정확히 같은 집합입니다. 디스크·네트워크·HBA 는 **OS 계정이 있는 서버만** 읽을 수 있고, iDRAC 텔레메트리는 CPU·메모리·I/O(집계)까지 줍니다.'} />
         </p>
         {diag?.text && (
           <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar(diag.waiting || diag.kind === 'demo' ? 'warn' : (diag.kind === 'ok' ? 'ok' : 'bad')) }}>

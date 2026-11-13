@@ -1,10 +1,10 @@
-// views/platform/PlatformHub.jsx — '서버 › 가상화 플랫폼' 허브 셸(v2.915 · 설계 docs/design/virt-platform-menu 시안 A ②③④⑥ · 컨펌 2026-11-07 '시안 A · 표준 검증').
+// views/platform/PlatformHub.jsx — 가상화 허브 셸(v2.994 메뉴 '서버 › Virtual Machine(VM)' · '서버 › Hypervisor' — 옛 이름 '가상화 플랫폼')(v2.915 · 설계 docs/design/virt-platform-menu 시안 A ②③④⑥ · 컨펌 2026-11-07 '시안 A · 표준 검증').
 //   App 이 vcenters · hosts · vms 탭 위에 그린다: 제목 · 엔티티 탭 3장(수 + '지금 볼 것' 배지 + 그 탭의 분해) · 바로가기 칩(vCenter 별 이 탭의 숫자 · 고른 법인은 파랗게 · 접기 기억).
 //   숫자는 서버 /platform/summary 하나(30초 · 탭 배지를 위해 무거운 집계를 다시 부르지 않는다) — 응답 전 · 첫 수집 중은 '—'(0 금지). 화면은 글자만 만든다(platformText.js).
 //   탭 id · 해시는 그대로(#/vcenters · #/hosts · #/vms) — 탭을 누르면 App 의 setTab, 칩을 누르면 허브 범위(위 필터 바의 vCenter)가 그 법인으로 바뀐다.
 import React, { useState } from 'react';
 import { vcQuickDot } from '../vcCardText.js';
-import { entityTabs, chipCount, chipLegend, loadChipsCollapsed, saveChipsCollapsed } from './platformText.js';
+import { entityTabs, chipCount, chipLegend, loadChipsCollapsed, saveChipsCollapsed, platformMenuLabel } from './platformText.js';
 import './platform.css';
 
 const lsSafe = () => { try { return typeof window !== 'undefined' ? window.localStorage : null; } catch { return null; } };
@@ -35,16 +35,18 @@ export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters
   const sites = Array.isArray(vcenters) ? vcenters : [];
   const snap = summary?.generatedAt ? new Date(summary.generatedAt).toLocaleTimeString('ko-KR') : '';
   const cur = items.find((t) => t.k === tab) || null;
+  // v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 제목 = 이 탭에서 사이드바에 켜지는 항목 이름(호스트 탭 'Hypervisor' · vCenter · VM 탭 'Virtual Machine(VM)').
+  //   '마지막으로 본 탭을 기억합니다' 문구는 기억을 없애 지웠다(메뉴 항목마다 자기 탭으로 간다).
+  const title = platformMenuLabel(tab) || 'Virtual Machine(VM)';
   return (
-    <section className="ph" aria-label="가상화 플랫폼">
+    <section className="ph" aria-label={title}>
       <header className="ph-head">
-        <h1>가상화 플랫폼</h1>
+        <h1>{title}</h1>
         <span className="ph-sub">법인 = vCenter = Bareos 한 단위 · vCenter 에서 호스트 · VM 으로 내려가고, 숫자를 누르면 그 범위로 탭이 바뀝니다</span>
-        <span className="ph-note">마지막으로 본 탭을 기억합니다</span>
         {snap && <span className="ph-snap" title="이 숫자들의 기준(인벤토리 스냅샷 시각)">스냅샷 {snap}</span>}
       </header>
 
-      <nav className="ph-tabs" role="tablist" aria-label="가상화 플랫폼 보기">
+      <nav className="ph-tabs" role="tablist" aria-label={`${title} 보기`}>
         {items.map((t) => {
           const on = t.k === tab;
           return (

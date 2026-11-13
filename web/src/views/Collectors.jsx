@@ -63,7 +63,7 @@ export default function Collectors() {
       const r = await putJson('/admin/datacenters/assign', { entries: [{ vcenterId: ch.vcenterId, datacenterId: ch.datacenterId }] });
       const fail = assignFailText(r);   // 반증 D3: ok 여도 바뀐 것이 없으면 성공으로 말하지 않는다
       if (fail) throw new Error(fail);
-      await load(); setBanner({ ok: true, text: `vCenter ‘${ch.vcenterId}’ 의 법인 할당을 바꿨습니다 — 서버 분석 · 통합 서버 인벤토리 · 전력 분석이 같은 법인을 봅니다.` });
+      await load(); setBanner({ ok: true, text: `vCenter ‘${ch.vcenterId}’ 의 법인 할당을 바꿨습니다 — Physical Server · 통합 서버 인벤토리 · 전력 분석이 같은 법인을 봅니다.` });
     } catch (e) { setBanner({ ok: false, text: e.message }); }
     finally { setDcBusy((s) => { const n = new Set(s); n.delete(c.id); return n; }); }
   };
@@ -486,7 +486,7 @@ export default function Collectors() {
           <thead><tr>
             {/* v2.985(P1): 1440px(설정 메뉴가 열린 표 영역 약 894px)에서 '작업' 열이 스크롤 밖이던 것 — 이름은 ID 아래, 엣지 라벨은 법인 매칭 칸 안,
                 동기화 시각은 버전 아래, 수집 켜짐은 상태 칸, 작업 버튼은 세로로. 정렬 키(id · dcmatch · url · state · hosts · version)는 그대로. */}
-            {th('id', 'ID · 이름')}{th('dcmatch', '법인 매칭', { title: '이 수집 서버(Agent)가 수집한 서버를 어느 법인(DataCenter)으로 볼지 — 서버 분석 · 통합 서버 인벤토리 · 전력 분석 · IP 관리가 씁니다. 아래 작은 글자는 엣지가 보낸 데이터센터 라벨입니다.' })}{th('url', 'URL')}{th('state', '상태 · 수집')}{th('hosts', '호스트')}{th('version', '버전 · 동기화')}<th className="right">작업</th>
+            {th('id', 'ID · 이름')}{th('dcmatch', '법인 매칭', { title: '이 수집 서버(Agent)가 수집한 서버를 어느 법인(DataCenter)으로 볼지 — Physical Server · 통합 서버 인벤토리 · 전력 분석 · IP 관리가 씁니다. 아래 작은 글자는 엣지가 보낸 데이터센터 라벨입니다.' })}{th('url', 'URL')}{th('state', '상태 · 수집')}{th('hosts', '호스트')}{th('version', '버전 · 동기화')}<th className="right">작업</th>
           </tr></thead>
           <tbody>
             {sortedList.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 28 }}>등록된 수집 서버가 없습니다. “+ 수집 서버 추가”로 등록하세요.</td></tr>}

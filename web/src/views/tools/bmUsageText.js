@@ -110,7 +110,7 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
       kind: 'no-target', waiting: false,
       text: parts.length
         ? `수집할 수 있는 서버가 없습니다 — ${parts.join(' · ')}. 아래 '대상이 아닌 서버' 를 펼쳐 사유별로 확인하세요.`
-        : '베어메탈로 분류된 서버가 없습니다(서버 분석 › 구분 › Baremetal 과 같은 기준입니다).',
+        : '베어메탈로 분류된 서버가 없습니다(Physical Server › 구분 › Baremetal 과 같은 기준입니다).',
     };
   }
   if (d.db && d.db.available === false) {
@@ -825,7 +825,7 @@ export function unassignedNote(info = null) {
   const by = info.byCause || {};
   const items = [];
   if (by['registry-no-vc']) {
-    items.push(`**iDRAC 등록에 법인이 비어 있음 ${by['registry-no-vc']}대** — 설정 › iDRAC 등록에서 각 서버의 법인을 고르거나, 서버 분석 › 통합 인벤토리에서 **일괄 지정**하세요.`);
+    items.push(`**iDRAC 등록에 법인이 비어 있음 ${by['registry-no-vc']}대** — 설정 › iDRAC 등록에서 각 서버의 법인을 고르거나, Physical Server › 통합 인벤토리에서 **일괄 지정**하세요.`);
   }
   if (by['assign-ghost']) {
     items.push(`**지금 없는 법인을 가리킴 ${by['assign-ghost']}대** — 수동 귀속이 삭제된 vCenter 를 가리킵니다. 다시 지정하면 해결됩니다.`);

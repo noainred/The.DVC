@@ -54,6 +54,9 @@ export const LEGACY_GROUP_LABELS = Object.freeze({ backup: 'Veeam 백업' });
  * v2.915: 항목 별칭 — 메뉴 항목 하나가 여러 탭을 맡으면(topMenu `tabs`) 저장 메뉴에 남은 옛 항목(`tab:hosts` · `tab:vms` — v2.914 까지 따로 있던
  * 'ESXi 호스트' · '가상화 서버')은 그 항목으로 잇는다. 저장 메뉴는 주소만 담고 서버는 탭 실재를 모르므로, 별칭이 없으면 옛 항목이 unknown('미표시 N')으로
  * 조용히 사라진다(그룹 id 별칭 LEGACY_GROUP_LABELS 와 같은 이유 · 항목 별칭은 이것이 처음). 반환: 별칭 키 → 기본 항목 키.
+ * v2.994(설계 docs/design/server-menu-rename): 별칭 방향이 바뀌었다 — 'Virtual Machine(VM)'(virt)의 정체 키가 tab:vms 가 되고 tab:vcenters 가 별칭이다.
+ *   v2.942~v2.993 에 저장된 메뉴(tab:vcenters 하나)도, 그 이전 메뉴(tab:vms · tab:hosts · tab:vcenters 셋)도 그대로 풀린다 — 옛 tab:hosts 는 이제
+ *   별칭이 아니라 실제 항목 'Hypervisor'(hv)다. 별칭은 topMenu 의 `tabs` 에서만 만든다(여기에 키를 따로 적지 않는다).
  */
 export function itemAliases() {
   const out = new Map();
@@ -101,7 +104,7 @@ export function resolveMenu({ mine = null, distributed = null, catalog = null, o
   if (!base) return { groups: MENU_GROUPS, source: failed ? 'unknown' : 'default', unknown: 0 };
   const source = failed ? 'unknown' : (base === mine ? 'mine' : 'distributed');
   const { groupLabel, items } = defaultIndex();
-  const aliases = itemAliases();   // v2.915 tab:hosts · tab:vms → 가상화 플랫폼 항목
+  const aliases = itemAliases();   // v2.994 tab:vcenters → Virtual Machine(VM) 항목(tab:vms)
   const toolMap = new Map((catalog || []).filter(toolEligible).map((t) => [t.k, t]));
   const seen = new Set();
   let unknown = 0;
@@ -160,7 +163,7 @@ export function resolveMenu({ mine = null, distributed = null, catalog = null, o
 
 /** 기본 메뉴 항목 중 지금 메뉴에 없는 것(지운 것 · 업그레이드로 새로 생긴 것) — 편집 화면의 '다시 넣기' 목록. */
 export function missingDefaults(groups) {
-  const aliases = itemAliases();   // v2.915: 별칭 키(tab:hosts · tab:vms)는 '다시 넣기' 후보가 아니다 — 그 항목(가상화 플랫폼)이 있으면 들어 있는 것
+  const aliases = itemAliases();   // v2.915: 별칭 키(v2.994 부터 tab:vcenters)는 '다시 넣기' 후보가 아니다 — 그 항목(Virtual Machine(VM))이 있으면 들어 있는 것
   const present = new Set();
   for (const g of groups || []) {
     if (isSingle(g)) { present.add(canonKey(itemKey(g), aliases)); continue; }   // v2.891: 단독 도구도

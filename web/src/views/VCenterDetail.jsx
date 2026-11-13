@@ -46,6 +46,7 @@ import { normObjTab, TUNING_TAB } from './vcd/objTabs.js';
 import { VmTuning, HostTuning } from './vcd/TuningTabs.jsx'; // v2.895 성능 튜닝 탭(승인 시안 ⑫⑬ · 기본값 11~13)
 import VmObject from './vcd/VmObject.jsx';
 import HostObject from './vcd/HostObject.jsx';
+import { platformMenuLabel } from './platform/platformText.js'; // v2.994: 경로 뿌리 = #/vcenters 에서 켜지는 사이드바 항목 이름('Virtual Machine(VM)')
 import VmDrawer from './vms/VmDrawer.jsx';
 import HostDrawer from './hosts/HostDrawer.jsx';   // v2.975 호스트도 드로어(시안 docs/design/host-drawer ①) // v2.911(시안 docs/design/vm-perf ①): 트리의 VM 클릭 = 가상화 서버와 같은 드로어(옛 VM 모달 대신)
 import { treeVmRows, treeHostRows } from './vcd/treeRows.js';
@@ -563,7 +564,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
   return (
     <div className="vcd">
       <nav className="vcd-crumb" aria-label="경로" style={{ marginBottom: 8, fontSize: 12.5, gap: 8 }}>
-        <a href="#/vcenters" onClick={(e) => { e.preventDefault(); onBack(); }} style={{ color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'none' }}>가상화 플랫폼</a>
+        <a href="#/vcenters" onClick={(e) => { e.preventDefault(); onBack(); }} style={{ color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'none' }}>{platformMenuLabel('vcenters')}</a>
         <span aria-hidden="true">›</span>
         <a href="#/vcenters" onClick={(e) => { e.preventDefault(); onBack(); }} style={{ color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'none' }}>vCenter</a>
         <span aria-hidden="true">›</span><b>{site.name}</b>

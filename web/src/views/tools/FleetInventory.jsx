@@ -212,7 +212,7 @@ export function FleetInventory({ isAdmin }) {
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
           {d.mode === 'edge' ? '이 엣지 포탈은 자기 데이터센터에 등록된 서버만 보여줍니다(로컬 검색). 중앙으로 베어메탈을 보고합니다. ' : (d.mode === 'central' ? `중앙 포탈 — 법인(DataCenter) 필터로 법인별 검색이 가능합니다. ${s.edgeReported ? `🛰 엣지 ${s.edgeAgents}곳에서 ${s.edgeReported}대 집계. ` : ''}` : '')}
-          법인은 서버 분석 화면과 같은 <b>법인(DataCenter)</b>입니다 — <b>수집한 Agent(수집 서버)의 법인</b> → 스캔 등록 법인 → vCenter 에 할당된 법인 순으로 정합니다. 법인을 모르는 서버는 이유를 함께 보입니다. 베어메탈 행에서 <b>vCenter</b>(전력 · 사용률 귀속)를 지정할 수 있고, 자동 분류가 틀리면 분류도 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.
+          법인은 Physical Server 화면과 같은 <b>법인(DataCenter)</b>입니다 — <b>수집한 Agent(수집 서버)의 법인</b> → 스캔 등록 법인 → vCenter 에 할당된 법인 순으로 정합니다. 법인을 모르는 서버는 이유를 함께 보입니다. 베어메탈 행에서 <b>vCenter</b>(전력 · 사용률 귀속)를 지정할 수 있고, 자동 분류가 틀리면 분류도 직접 바꿀 수 있습니다(서비스태그 기준 저장). 베어메탈 총전력은 이미 수집 중인 iDRAC/OME 측정값을 합산합니다.
         </div>
       </div>
 
@@ -222,7 +222,7 @@ export function FleetInventory({ isAdmin }) {
           <button className={view === 'virt' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('virt')}>가상화 호스트 ({(d.virtualizationHosts || []).length})</button>
         </div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <Select sort={false} className="select" value={fvc} onChange={(e) => setFvc(e.target.value)} style={{ maxWidth: 260 }} title="법인(DataCenter) 필터 — 서버 분석 화면과 같은 법인">
+          <Select sort={false} className="select" value={fvc} onChange={(e) => setFvc(e.target.value)} style={{ maxWidth: 260 }} title="법인(DataCenter) 필터 — Physical Server 화면과 같은 법인">
             <option value="">전체 법인</option>
             {corpOptions(d.corps).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </Select>

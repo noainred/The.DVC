@@ -5,11 +5,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   PLATFORM_TABS, PLATFORM_TAB_KEYS, isPlatformTab, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
-  loadLastTab, saveLastTab, loadChipsCollapsed, saveChipsCollapsed, loadVcView, saveVcView, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
+  VM_ITEM_TOOL_KEYS, HV_ITEM_TOOL_KEYS, platformMenuLabel,
+  loadChipsCollapsed, saveChipsCollapsed, loadVcView, saveVcView, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
 } from './platformText.js';
+import * as PT from './platformText.js';
 import { HUB_TOOL_KEYS } from '../vms/vmHubText.js';
 import { TOOLS } from '../specialToolsList.js';
-import { MENU_GROUPS } from '../topMenu.js';
+import { MENU_GROUPS, locate } from '../topMenu.js';
 import { stripComments } from '../../test/_stripComments.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -18,13 +20,55 @@ const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.
 const broken = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
 
 describe('탭 · 도구 · 메뉴 대조', () => {
-  it('허브 탭은 계층 순서(vCenter → 호스트 → VM)이고 App 의 탭 id 그대로 · 메뉴 항목 하나가 셋을 맡는다', () => {
+  it('허브 탭은 계층 순서(vCenter → 호스트 → VM)이고 App 의 탭 id 그대로 · v2.994 메뉴 항목 둘이 나눠 맡는다', () => {
     expect(PLATFORM_TAB_KEYS).toEqual(['vcenters', 'hosts', 'vms']);
     expect(PLATFORM_TABS.map((t) => t.perm)).toEqual(['dashboard', 'inv.hosts', 'inv.vms']);
     expect(isPlatformTab('hosts')).toBe(true); expect(isPlatformTab('datastores')).toBe(false);
-    const virt = MENU_GROUPS.find((g) => g.id === 'server').children.find((c) => c.id === 'virt');
-    expect([virt.tab, ...virt.tabs]).toEqual(PLATFORM_TAB_KEYS);
-    expect(virt.also).toEqual(PLATFORM_TOOL_KEYS);
+    const srv = MENU_GROUPS.find((g) => g.id === 'server').children;
+    const virt = srv.find((c) => c.id === 'virt'); const hv = srv.find((c) => c.id === 'hv');
+    // v2.994: Virtual Machine(VM) = vms(처음) + vcenters · Hypervisor = hosts — 두 항목의 탭을 합치면 허브 탭 셋 그대로(빠짐 · 겹침 없음)
+    expect([virt.tab, ...virt.tabs]).toEqual(['vms', 'vcenters']);
+    expect([hv.tab, ...(hv.tabs || [])]).toEqual(['hosts']);
+    expect([virt.tab, ...virt.tabs, hv.tab].sort()).toEqual([...PLATFORM_TAB_KEYS].sort());
+    // 도구도 두 항목으로 갈린다 — VM 6 + vCenter 6 → virt · 호스트 4 → hv · 합치면 16 그대로
+    expect(virt.also).toEqual([...VM_ITEM_TOOL_KEYS]);
+    expect(hv.also).toEqual([...HV_ITEM_TOOL_KEYS]);
+    expect(HV_ITEM_TOOL_KEYS).toEqual(HOST_TOOLS.map(([k]) => k));
+    expect([...virt.also, ...hv.also]).toEqual([...PLATFORM_TOOL_KEYS]);
+    for (const k of HV_ITEM_TOOL_KEYS) expect(locate('tools', `#/tools/${k}`), k).toEqual({ group: 'server', child: 'hv' });
+    for (const k of VM_ITEM_TOOL_KEYS) expect(locate('tools', `#/tools/${k}`), k).toEqual({ group: 'server', child: 'virt' });
+  });
+  it('v2.994 허브 제목 = 그 탭에서 켜지는 사이드바 항목 이름(MENU_GROUPS 라벨에서 읽는다 — 이름을 따로 적지 않는다)', () => {
+    const srv = MENU_GROUPS.find((g) => g.id === 'server').children;
+    const label = (id) => srv.find((c) => c.id === id).label;
+    expect(platformMenuLabel('hosts')).toBe(label('hv'));
+    expect(platformMenuLabel('vms')).toBe(label('virt'));
+    expect(platformMenuLabel('vcenters')).toBe(label('virt'));
+    expect([platformMenuLabel('hosts'), platformMenuLabel('vms')]).toEqual(['Hypervisor', 'Virtual Machine(VM)']);
+    for (const t of PLATFORM_TAB_KEYS) {
+      const at = locate(t, `#/${t}`);
+      expect(platformMenuLabel(t), t).toBe(srv.find((c) => c.id === at.child).label);
+    }
+    expect(platformMenuLabel('datastores')).toBe('');
+    expect(platformMenuLabel('')).toBe('');
+    // 옛 상수 · 기억은 없다
+    expect(PT.PLATFORM_MENU_LABEL).toBe(undefined);
+    expect(PT.loadLastTab).toBe(undefined); expect(PT.saveLastTab).toBe(undefined); expect(PT.LS_TAB).toBe(undefined);
+    // 허브 화면 · 경로 뿌리가 이 함수를 쓴다(글자를 박지 않는다) · '마지막으로 본 탭을 기억합니다' 문구는 없다
+    const hub = stripComments(read('./PlatformHub.jsx'));
+    expect(hub).toMatch(/platformMenuLabel\(tab\)/);
+    expect(hub).toMatch(/<h1>\{title\}<\/h1>/);
+    expect(hub).toMatch(/aria-label=\{title\}/);
+    expect(hub).not.toMatch(/마지막으로 본 탭|가상화 플랫폼/);
+    for (const f of ['../vcd/ObjectShell.jsx', '../VCenterDetail.jsx']) {
+      const src = stripComments(read(f));
+      expect(src, f).toMatch(/platformMenuLabel\('vcenters'\)/);
+      expect(src, f).not.toMatch(/가상화 플랫폼/);
+    }
+  });
+  it('v2.994 탭 줄 이름 — Hypervisor · ESXi 호스트 / Virtual Machine · VM(옛 이름은 작은 글자) · 엔티티 탭도 같은 이름', () => {
+    expect(PLATFORM_TABS.map((t) => [t.k, t.label, t.sub])).toEqual([['vcenters', 'vCenter', '법인'], ['hosts', 'Hypervisor', 'ESXi 호스트'], ['vms', 'Virtual Machine', 'VM']]);
+    expect(entityTabs(null).map((t) => [t.k, t.label, t.sub])).toEqual(PLATFORM_TABS.map((t) => [t.k, t.label, t.sub]));
   });
   it('도구 키는 카탈로그에 실재하고 패널이 있는 도구 · VM 6 은 v2.909 그대로 · 겹치지 않는다', () => {
     expect(PLATFORM_TOOL_KEYS.slice(0, HUB_TOOL_KEYS.length)).toEqual([...HUB_TOOL_KEYS]);
@@ -91,17 +135,11 @@ describe('엔티티 탭 글자 — 못 읽은 값은 — · 분해는 그 탭 �
 });
 
 describe('브라우저 기억 — try/catch · 모르는 값은 기본', () => {
-  it('마지막 본 탭(허용된 것만) · 바로가기 접힘 · vCenter 보기', () => {
+  it('바로가기 접힘 · vCenter 보기(v2.994: 마지막 본 탭 기억은 없앴다)', () => {
     const st = mem();
-    expect(loadLastTab(st)).toBe(null);
-    saveLastTab(st, 'hosts'); expect(loadLastTab(st)).toBe('hosts');
-    expect(loadLastTab(st, (t) => t !== 'hosts')).toBe(null);
-    saveLastTab(st, 'datastores'); expect(loadLastTab(st)).toBe('hosts');
     expect(loadChipsCollapsed(st)).toBe(false); saveChipsCollapsed(st, true); expect(loadChipsCollapsed(st)).toBe(true);
     expect(loadVcView(st)).toBe('cards'); saveVcView(st, 'table'); expect(loadVcView(st)).toBe('table'); saveVcView(st, 'tree'); expect(loadVcView(st)).toBe('table');
-    expect(loadLastTab(broken)).toBe(null); expect(() => saveLastTab(broken, 'vms')).not.toThrow();
     expect(loadChipsCollapsed(broken)).toBe(false); expect(loadVcView(broken)).toBe('cards');
-    expect(loadLastTab(null)).toBe(null);
   });
 });
 

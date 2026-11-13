@@ -151,7 +151,7 @@ export default function BmFolders() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       <div className="card" style={{ padding: '10px 14px', borderLeft: '3px solid var(--accent-2)' }}>
         <div className="flex wrap gap" style={{ alignItems: 'center', marginBottom: 6 }}>
-          <b style={{ fontSize: 15 }}>물리서버 폴더</b>
+          <b style={{ fontSize: 15 }}>Bare Metal Server</b>
           <div className="tabs" style={{ marginLeft: 0 }} role="group" aria-label="보기 방식">
             <button type="button" className={`tab${view === 'list' ? ' active' : ''}`} onClick={() => setView('list')}>목록</button>
             <button type="button" className={`tab${view === 'map' ? ' active' : ''}`} onClick={() => setView('map')}>맵</button>

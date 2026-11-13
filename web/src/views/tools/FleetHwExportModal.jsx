@@ -115,7 +115,7 @@ export function FleetHwExportModal({ initialKind = 'bm', screenCorp = '', onClos
                     );
                   })}
                 </div>
-                <div className="muted hwx-note">{noneSel ? '' : `${corpSel == null ? '모든 법인' : `법인 ${s.picked}곳`} · 서버 ${s.servers}대`} — 서버 분석 화면과 같은 법인 구분입니다.</div>
+                <div className="muted hwx-note">{noneSel ? '' : `${corpSel == null ? '모든 법인' : `법인 ${s.picked}곳`} · 서버 ${s.servers}대`} — Physical Server 화면과 같은 법인 구분입니다.</div>
                 {noneSel && <div className="gpu-alloc-export-warn">법인을 하나 이상 고르세요.</div>}
               </section>
 

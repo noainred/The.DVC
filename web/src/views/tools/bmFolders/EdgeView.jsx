@@ -1,5 +1,5 @@
 /**
- * 물리서버 폴더 — **엣지 포탈** 화면(v2.996 · 설계 docs/design/bm-folders §11 묶음 D · 결정 기본값).
+ * 물리서버 폴더(v2.994 메뉴 이름 Bare Metal Server — 화면 제목 · 위치 안내만 새 이름) — **엣지 포탈** 화면(v2.996 · 설계 docs/design/bm-folders §11 묶음 D · 결정 기본값).
  * 중앙 사본(그 엣지 법인 것만)을 읽기 전용으로 보이고, 값(사용률 · 전력 · 부품 장애)은 이 엣지의 지금 값이다(서버 값이 WAN 을 왕복하지 않는다).
  * 편집은 중앙 포탈에서 — 10분마다(또는 '지금 받기') 사본이 온다. 끊겨도 사본을 지우지 않고 나이를 보인다.
  */
@@ -28,7 +28,7 @@ export default function EdgeView({ d, reload }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       <div className="card" style={{ padding: '10px 14px', borderLeft: '3px solid var(--accent-2)' }}>
         <div className="flex wrap gap" style={{ alignItems: 'center' }}>
-          <b>물리서버 폴더 — 중앙 사본(읽기 전용)</b>
+          <b>Bare Metal Server — 중앙 사본(읽기 전용)</b>
           <span className="badge gray">엣지 포탈</span>
           <span className="muted" style={{ fontSize: 12 }}>{copyNote.text}</span>
           <span style={{ marginLeft: 'auto' }} className="flex wrap gap">
@@ -37,7 +37,7 @@ export default function EdgeView({ d, reload }) {
           </span>
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          폴더 · 등록은 <b>중앙 포탈의 물리서버 폴더</b>에서 편집합니다 — 바꾸면 {Math.round((d.pull?.intervalMs || 600000) / 60000)}분 안에 이 엣지로 옵니다. 사용률 · 전력 · 부품 장애는 이 엣지가 지금 읽은 값입니다.
+          폴더 · 등록은 <b>중앙 포탈의 Bare Metal Server</b>에서 편집합니다 — 바꾸면 {Math.round((d.pull?.intervalMs || 600000) / 60000)}분 안에 이 엣지로 옵니다. 사용률 · 전력 · 부품 장애는 이 엣지가 지금 읽은 값입니다.
         </div>
         {/* 방금 누른 '지금 받기' 결과가 있으면 그것만(마지막 받기 실패 줄과 같은 내용을 두 번 말하지 않게 — Chromium 판독) */}
         {msg ? <div style={{ fontSize: 12, marginTop: 4, color: msg.ok ? 'var(--green)' : 'var(--amber)' }} role="status">{msg.text}</div>
