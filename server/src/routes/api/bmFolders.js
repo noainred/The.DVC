@@ -449,7 +449,8 @@ export function registerBmFolders(api) {
         if (!m.corp ? hide || m.kind !== 'bm' : !(allowed ? allowed.has(m.corp) : true)) continue;
         const p = b.placeOf.get(m.key);
         if (m.kind !== 'bm' && !p?.src) continue;   // ESXi 는 폴더에 넣은 것만
-        let hx = null;
+        // 찾기를 못 만들었으면 hx = undefined → 행에 hw 키를 싣지 않는다(화면이 '인벤토리 없음' 으로 단정하지 않고 '요약을 만들지 못함' 으로 — 반증 F11)
+        let hx;
         if (hxOf) { try { hx = hxOf(m); } catch { hx = null; } }
         servers.push(serverRow(m, p, admin, hide, ix, hx));
       }

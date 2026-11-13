@@ -154,10 +154,11 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
     scanRangeId: typeof b.scanRangeId === 'string' ? capStr(b.scanRangeId, 128) : null,
     // 6차 2(서비스 인벤토리): 태그가 없을 때의 엣지 fleetId — 글자만 · 256자. 구버전 엣지는 없다(null — 승계 없음, 예전과 같다).
     untaggedId: typeof b.untaggedId === 'string' && b.untaggedId.trim() ? capStr(b.untaggedId.trim().toLowerCase(), 256) : null,
-    // v3.3.0(물리서버 폴더 하드웨어): 하드웨어 요약(아는 키만 · 수는 수로 · 글자 상한) · iDRAC 관리 주소(호스트 글자만). 없거나 형식이 아니면 키를 만들지 않는다.
-    //   분류 서명(hashList)에는 넣지 않는다 — 인벤토리 시각이 바뀔 때마다 fleet 캐시가 무효화되지 않게.
-    ...((() => { const hw = sanitizeHwSummary(b.hw); return hw ? { hw } : {}; })()),
-    ...((() => { const h = mgmtHostOf(b.mgmtHost); return h ? { mgmtHost: h } : {}; })()),
+    // v3.3.0(물리서버 폴더 하드웨어): 하드웨어 요약(아는 키만 · 수는 수로 · 글자 상한 · 시각은 수신 시각으로 자름) · iDRAC 관리 주소(호스트 글자만).
+    //   없거나 형식이 아니면 키를 만들지 않는다. 분류 서명(hashList)에는 넣지 않는다 — 인벤토리 시각이 바뀔 때마다 fleet 캐시가 무효화되지 않게.
+    //   **검증된 이름(개별 토큰)만** 받는다(반증 F10 — 주소는 중앙 관리자가 누르는 링크 · SSH 대상이 된다. 공유 토큰의 이름 주장으로 남의 주소를 심지 못하게).
+    ...(verified ? (() => { const hw = sanitizeHwSummary(b.hw, { now: Date.now() }); return hw ? { hw } : {}; })() : {}),
+    ...(verified ? (() => { const h = mgmtHostOf(b.mgmtHost); return h ? { mgmtHost: h } : {}; })() : {}),
   }));
   if (omitted) console.warn(`[central-fleet] '${a}' 베어메탈 ${valid.length}대 중 ${omitted}대를 상한으로 받지 않았습니다(에이전트당 ${PER_AGENT_MAX} · 전체 ${TOTAL_MAX}${verified ? '' : ` · 미검증 이름 합 ${UNVERIFIED_TOTAL_MAX}`}).`);
   if (vcenterBlanked) console.warn(`[central-fleet] '${a}' 가 소유하지 않은 vCenter 로 귀속된 베어메탈 ${vcenterBlanked}대 — 귀속(vcenterId)을 비웠습니다.`);

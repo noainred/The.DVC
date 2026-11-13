@@ -97,30 +97,38 @@ export const hwSortKey = (hw) => N(hw?.cpu?.cores);
 
 /** 하드웨어 칸이 빈 이유(서버가 준 hwVia 로 — 원인을 단정하지 않는다). */
 export function hwWhyText(r) {
-  if (r?.hwVia === 'edge') return '엣지가 하드웨어 요약을 아직 보내지 않았습니다 — 그 엣지를 이 버전 이상으로 올리면 다음 전송부터 보입니다(엣지 포탈에서는 바로 보입니다).';
+  // 원인을 하나로 단정하지 않는다(반증 F3 · F11 — 엣지 포탈 화면에는 하드웨어 열이 없다 · OME 등 등록부 밖 서버는 엣지를 올려도 요약이 오지 않는다)
+  if (r?.hwVia === 'edge') return '엣지가 하드웨어 요약을 보내지 않았습니다 — 엣지가 이 버전보다 낮거나, 그 엣지의 iDRAC 등록부 밖 서버(OME 등)이거나, 엣지가 인벤토리를 아직 읽지 못한 경우입니다.';
   return 'iDRAC 인벤토리를 아직 읽지 못했습니다 — 등록 직후 · 수집 전 · OME 로만 보이는 서버 · 수집 서버가 아직 보내지 않은 경우 비어 있습니다.';
 }
-/** OS 칸이 빈 이유. */
-export const OS_WHY = 'iDRAC 이 OS 이름을 보고하지 않았습니다 — 서버 OS 에 iSM(iDRAC Service Module)이 있어야 채워집니다. 엣지 · 수집 서버가 이 버전보다 낮아도 비어 있습니다.';
+/** OS 칸이 빈 이유(벤더마다 채우는 에이전트가 다르다 — 반증 F11). */
+export const OS_WHY = 'BMC 가 OS 이름을 보고하지 않았습니다 — Dell 은 서버 OS 에 iSM(iDRAC Service Module), HPE 는 AMS 가 있어야 채워집니다. 엣지 · 수집 서버가 이 버전보다 낮아도 비어 있습니다.';
+/** 하드웨어 요약 자체를 만들지 못했다(서버가 이번 응답에 hw 를 싣지 않음 — 일시). */
+export const HW_FAIL = '이번 응답에서 하드웨어 요약을 만들지 못했습니다 — 새로고침하면 다시 만듭니다.';
 
 /* ───────── iDRAC 접속 주소(웹 · SSH) ───────── */
 const HOST_RE = /^[A-Za-z0-9._:[\]-]{1,255}$/;
+/** 선행 '-'(ssh 인자로 읽힌다) · 점으로 시작 · 숫자 없는 콜론 덩어리를 막는다 — 서버 mgmtHostOf 와 같은 세 꼴(반증 F9). */
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/;
+const V6_RE = /^[0-9A-Fa-f:.]{2,45}$/;
 const USER_RE = /^[A-Za-z0-9._-]{1,32}$/;
 /** 'host' · 'host:port' · IPv6 · '[v6]:port' → { host(포트 없음 · URL 용 괄호), port }. 형식이 아니면 null. */
 const portOk = (p) => /^\d{1,5}$/.test(p) && Number(p) >= 1 && Number(p) <= 65535;
 export function splitHost(addr) {
   const a = String(addr || '').trim();
   if (!HOST_RE.test(a)) return null;
+  const v6ok = (v) => V6_RE.test(v) && v.includes(':') && /[0-9A-Fa-f]/.test(v);
   if (a.startsWith('[')) {
     const e = a.indexOf(']'); if (e < 0) return null;
-    const rest = a.slice(e + 1);
+    const inner = a.slice(1, e); const rest = a.slice(e + 1);
+    if (!v6ok(inner)) return null;
     if (rest && !(rest.startsWith(':') && portOk(rest.slice(1)))) return null;
     return { host: a.slice(0, e + 1), port: rest ? rest.slice(1) : '' };
   }
   const colons = (a.match(/:/g) || []).length;
-  if (colons > 1) return { host: `[${a}]`, port: '' };   // 괄호 없는 IPv6
-  if (colons === 1) { const [h, p] = a.split(':'); return h && portOk(p) ? { host: h, port: p } : null; }
-  return { host: a, port: '' };
+  if (colons > 1) return v6ok(a) ? { host: `[${a}]`, port: '' } : null;   // 괄호 없는 IPv6
+  if (colons === 1) { const [h, p] = a.split(':'); return h && NAME_RE.test(h) && portOk(p) ? { host: h, port: p } : null; }
+  return NAME_RE.test(a) ? { host: a, port: '' } : null;
 }
 /**
  * 접속 주소 — 웹은 등록 주소 그대로(포트 포함 · https), SSH 는 포트를 뗀 호스트(22). 계정이 형식이 아니면 root.

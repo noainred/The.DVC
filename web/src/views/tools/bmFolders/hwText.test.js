@@ -63,7 +63,8 @@ describe('iDRAC 접속 주소', () => {
     expect(idracLinks('[2001:db8::5]:443').web).toBe('https://[2001:db8::5]:443/');
   });
   it('주소 · 계정이 형식이 아니면 링크를 만들지 않는다(계정은 root 로)', () => {
-    for (const bad of ['', 'a b', 'javascript:alert(1)', 'x@y', '192.0.2.5/x', '"><img>', 'host:port', '[::1', '[::1]x']) expect(idracLinks(bad), bad).toBe(null);
+    for (const bad of ['', 'a b', 'javascript:alert(1)', 'x@y', '192.0.2.5/x', '"><img>', 'host:port', '[::1', '[::1]x',
+      '-oProxyCommand', '.x', '::::', '[::::]', '[x]', ']]', '-h:22']) expect(idracLinks(bad), bad).toBe(null);   // 반증 F9 — 선행 '-' · 숫자 없는 콜론
     expect(idracLinks('192.0.2.5', 'ro ot;rm').user).toBe('root');
     expect(idracLinks('192.0.2.5', '').user).toBe('root');
     expect(splitHost('192.0.2.5:99999')).toBe(null);

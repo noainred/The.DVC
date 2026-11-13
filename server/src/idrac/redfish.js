@@ -636,14 +636,15 @@ export async function fetchInventory(entry) {
 
   // --- OS 이름(v3.3.0 — 물리서버 폴더 'OS' 칸 · 사용자 결정 'iDRAC 에서 OS 이름도 수집') ---
   // Dell: iDRAC System 속성 ServerOS.1.OSName · OSVersion — 서버 OS 에 iSM(iDRAC Service Module)이 있어야 채워진다(없으면 빈 값 → 화면 '—').
-  //   $select 로 두 값만 받는다(속성 전체는 수십 KB — 중앙 직접 수집 법인은 WAN 왕복). $select 를 모르는 펌웨어(4xx — 401 · 404 제외)면 한 번만 전체로.
+  //   $select 로 두 값만 받는다(속성 전체는 수십 KB — 중앙 직접 수집 법인은 WAN 왕복). $select 를 모르는 펌웨어(4xx — 401 · 404 제외 · 501)면 한 번만 전체로.
   //   404(속성 자원 없음 — iDRAC8 등)는 다시 묻지 않는다. 실패해도 인벤토리는 그대로다(OS 는 선택 항목 — 컬렉션 메타에 넣지 않는다).
   if (inv.collections.system === 'ok' && !inv.system.osName && !inv.system.hpe && (/dell/i.test(inv.system.manufacturer || '') || entry.vendor === 'dell')) {
     try {
       const P = '/redfish/v1/Managers/System.Embedded.1/Attributes';
       let a = null;
       try { a = await G(`${P}?$select=Attributes/ServerOS.1.OSName,Attributes/ServerOS.1.OSVersion`); }
-      catch (e) { if (e?.status >= 400 && e?.status < 500 && e.status !== 401 && e.status !== 404) a = await G(P); else throw e; }
+      // 다시 묻는 경우: 4xx(401 · 404 제외) · 501(Redfish 규격 — 지원하지 않는 $ 질의 인자, 반증 F2)
+      catch (e) { if ((e?.status >= 400 && e?.status < 500 && e.status !== 401 && e.status !== 404) || e?.status === 501) a = await G(P); else throw e; }
       const at = a?.Attributes && typeof a.Attributes === 'object' ? a.Attributes : {};
       const nm = typeof at['ServerOS.1.OSName'] === 'string' ? at['ServerOS.1.OSName'].trim() : '';
       const vr = typeof at['ServerOS.1.OSVersion'] === 'string' ? at['ServerOS.1.OSVersion'].trim() : '';

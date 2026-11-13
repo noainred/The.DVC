@@ -33,7 +33,7 @@ const svcinv = await import('../src/routes/api/svcInventory.js');
 
 const FC_MODEL = 'QLogic QLE2772 Dual Port 32Gb Fibre Channel to PCIe Adapter';
 const INV = (o = {}) => ({
-  collectedAt: 1_800_000_000_000,
+  collectedAt: 1_790_000_000_000,   // 과거 시각(중앙이 엣지 시각을 수신 시각으로 자른다 — 미래면 바뀐다)
   collections: { system: 'ok', psus: 'ok', disks: 'ok', storageControllers: 'ok', memoryDimms: 'ok', cpus: 'ok', gpus: 'ok', pcie: 'ok' },
   system: { hostName: 'synth-os-01', model: 'PowerEdge R750', manufacturer: 'Dell Inc.', serviceTag: 'SYNTH01', osName: 'Red Hat Enterprise Linux', osVersion: '9.2' },
   idrac: { firmwareVersion: '7.00.00.171', model: '15G Monolithic' },
@@ -65,7 +65,7 @@ test('① 요약 — CPU · 메모리 · 디스크 · NIC(FC 제외) · FC HBA �
   assert.deepEqual(h.nic, { ports: 4, up: 3, maxGbps: 25, speeds: [[25, 2], [1, 2]] }, 'FC 어댑터 포트는 NIC 에 넣지 않는다');
   assert.deepEqual(h.hba, { n: 1, ports: 2 }, 'SAS HBA(HBA355i)는 FC HBA 가 아니다 · 포트 수는 같은 모델 NetworkAdapter 에서');
   assert.deepEqual(h.os, { name: 'Red Hat Enterprise Linux', ver: '9.2' });
-  assert.equal(h.host, 'synth-os-01'); assert.equal(h.fw, '7.00.00.171'); assert.equal(h.at, 1_800_000_000_000);
+  assert.equal(h.host, 'synth-os-01'); assert.equal(h.fw, '7.00.00.171'); assert.equal(h.at, 1_790_000_000_000);
   assert.equal(H.hwSummaryOf(null), null);
 });
 
@@ -89,13 +89,33 @@ test('① 못 읽은 컬렉션은 0 이 아니라 null · 부분 합은 null(개
   assert.equal(noOs.os, null, 'iSM 없음 → os null(지어내지 않는다)');
 });
 
+test('① 반증 F4 · F5 · F7 — 합성 NIC 은 속도 폴백만(포트를 두 번 세지 않는다) · 빈 슬롯은 부품이 아니다 · FC 는 더 많이 본 쪽', () => {
+  const SYN = { name: 'EthernetInterfaces', model: '(EthernetInterfaces)', ports: [{ id: 'a', link: 'Up', speedMbps: 25000 }, { id: 'b', link: 'Up', speedMbps: 25000 }] };
+  const realNoSpeed = { name: 'NIC.Slot.3', model: 'Synth 25GbE', ports: [{ id: '1', link: 'Up' }, { id: '2', link: 'Down' }] };
+  const both = H.hwSummaryOf(INV({ nics: [realNoSpeed, SYN] }));
+  assert.deepEqual(both.nic, { ports: 2, up: 1, maxGbps: 25, speeds: [[25, 2]] }, '포트 수는 실어댑터 · 속도는 합성 폴백');
+  assert.deepEqual(H.hwDetailOf(INV({ nics: [realNoSpeed, SYN] })).nics.map((x) => x.model), ['Synth 25GbE'], '상세도 실어댑터만');
+  const only = H.hwSummaryOf(INV({ nics: [SYN] }));
+  assert.equal(only.nic.ports, 2);
+  assert.deepEqual(H.hwDetailOf(INV({ nics: [SYN] })).nics.map((x) => [x.model, x.ports]), [['(EthernetInterfaces)', 2]], '실어댑터가 없으면 합성 항목이 곧 포트 — 요약과 상세가 같은 말');
+  const dimms = [...Array.from({ length: 8 }, (_, i) => ({ locator: `A${i}`, sizeGB: 64, type: 'DDR5', speedMHz: 4800 })), ...Array.from({ length: 16 }, (_, i) => ({ locator: `B${i}`, state: 'Absent' }))];
+  const ab = H.hwSummaryOf(INV({ memory: {}, memoryDimms: dimms, cpus: [...INV().cpus, { socket: 'CPU.Socket.3', state: 'Absent' }], disks: [...INV().disks, { name: 'empty', state: 'Absent' }] }));
+  assert.deepEqual(ab.mem, { gib: 512, dimms: 8 }, '빈 DIMM 슬롯을 세지 않는다');
+  assert.equal(ab.disk.n, 4); assert.equal(ab.disk.gb, 13760, '빈 디스크 슬롯이 합을 null 로 만들지 않는다');
+  assert.deepEqual(H.hwDetailOf(INV({ memoryDimms: dimms })).dimms.map((x) => [x.gb, x.n]), [[64, 8]]);
+  // F7: PCIe 에서 FC 1장만 봤는데 NetworkAdapters 에 FC 2장 → 2
+  const fc2 = { name: 'FC.Slot.6', model: 'Synth 32Gb Fibre Channel Adapter B', ports: [{ id: '1', link: 'Up', speedMbps: 32000 }] };
+  assert.equal(H.hwSummaryOf(INV({ nics: [...INV().nics, fc2] })).hba.n, 2);
+});
+
 // ───────── ② FC HBA 판정 ─────────
 test('② FC HBA 판정 — FC 어댑터만(Ethernet CNA · SAS HBA · 일반 NIC 는 아니다)', () => {
   for (const m of [FC_MODEL, 'Emulex LPe35002-M2-D 2-Port 32Gb Fibre Channel Adapter', 'QLE2692', 'LPe31002', 'Synth 16Gb FC HBA', 'Brocade 1860 16G FC',
     'Synth Vendor 2-Port Fibre Channel Adapter' /* 'Fibre Channel' 글자로만 알아보는 경우(변이 검증에서 살아남았던 규칙) */]) {
     assert.equal(H.isFcHba({ model: m }), true, m);
   }
-  for (const m of ['QLogic BCM57810 10Gb CNA', 'Emulex OneConnect OCe14102 10GbE', 'HBA355i Front', 'Dell HBA330 Mini', 'Broadcom Adv. Dual 25Gb Ethernet', 'Mellanox ConnectX-6', '']) {
+  for (const m of ['QLogic BCM57810 10Gb CNA', 'Emulex OneConnect OCe14102 10GbE', 'HBA355i Front', 'Dell HBA330 Mini', 'Broadcom Adv. Dual 25Gb Ethernet', 'Mellanox ConnectX-6', '',
+    'QLogic QLE3442 Dual Port 10GbE', 'QLogic QLE3242 10Gb', 'QLogic QLE8262 CNA' /* 반증 F6 — QLE 는 2xxx 만 FC */]) {
     assert.equal(H.isFcHba({ model: m }), false, m);
   }
   assert.equal(H.isFcHba({ name: 'Emulex LPe35002 32Gb 2-Port PCIe Fibre Channel Adapter', model: 'LPe35002' }), true, '이름으로도');
@@ -116,12 +136,14 @@ test('③ sanitizeHwSummary — 아는 키만 · 문자열 수치는 버린다 �
   assert.equal(H.sanitizeHwSummary([good]), null);
   assert.equal(H.sanitizeHwSummary('x'), null);
   assert.equal(H.sanitizeHwSummary({ v: 1, cpu: { cores: -1 }, disk: { n: Infinity } }).cpu.cores, null, '음수 · 무한은 null');
+  assert.equal(H.sanitizeHwSummary({ ...good, at: 2_000_000_000_000 }, { now: 1_900_000_000_000 }).at, 1_900_000_000_000, '반증 F8 — 엣지 시각은 수신 시각으로 자른다');
 });
 
 // ───────── ④ 관리 주소 ─────────
 test('④ mgmtHostOf — 스킴 · 경로를 떼고 호스트 글자만(링크에 넣을 값)', () => {
   const cases = [['https://192.0.2.5:443/x', '192.0.2.5:443'], ['idrac-synth.example.test', 'idrac-synth.example.test'], ['[2001:db8::5]', '[2001:db8::5]'],
-    ['a b', ''], ['javascript:alert(1)', ''], ['x@y', ''], ['192.0.2.9"><img>', ''], [42, ''], ['', '']];
+    ['a b', ''], ['javascript:alert(1)', ''], ['x@y', ''], ['192.0.2.9"><img>', ''], [42, ''], ['', ''],
+    ['-oProxyCommand', ''], ['.hidden', ''], ['::::', ''], [']]', ''], ['a]b', ''], ['2001:db8::7', '2001:db8::7'], ['idrac.example.test:8443', 'idrac.example.test:8443']];   // 반증 F9
   for (const [v, want] of cases) assert.equal(H.mgmtHostOf(v), want, String(v));
 });
 
@@ -148,6 +170,10 @@ test('⑥ 중앙 fleet — 엣지 요약 · 주소를 정제해 담고, 요약�
   assert.equal(fleetRev(), r0, '요약만 바뀌었다 — 분류 서명에 넣지 않는다(캐시 무효화 폭증 방지)');
   s = fleet.getEdgeFleetServers().find((x) => x.serverId === 'edge:synth-edge:synth-f1');
   assert.equal(s.hw.mem.gib, 1024, '새 요약은 담긴다');
+  // 반증 F10: 검증되지 않은 이름(공유 토큰의 주장)이 보낸 요약 · 주소는 받지 않는다(주소는 중앙 관리자가 누르는 링크 · SSH 대상이 된다)
+  fleet.setEdgeFleet('synth-unverified', [{ ...row, fleetId: 'synth-u1', hw, mgmtHost: '192.0.2.66' }], 'gu', { verified: false });
+  const u = fleet.getEdgeFleetServers().find((x) => x.serverId === 'edge:synth-unverified:synth-u1');
+  assert.deepEqual([u.hw, u.mgmtHost], [null, '']);
   fleet.setEdgeFleet('synth-edge', [{ ...row, hw: 'bad', mgmtHost: 'a b' }], 'g3');
   s = fleet.getEdgeFleetServers().find((x) => x.serverId === 'edge:synth-edge:synth-f1');
   assert.deepEqual([s.hw, s.mgmtHost], [null, ''], '형식이 아니면 비운다');
@@ -188,6 +214,10 @@ test('⑦ fetchInventory — Dell ServerOS 속성을 $select 로(4xx 면 한 번
   r = await run({ ...SYS(), [SEL]: 400, [ATTR]: { Attributes: { 'ServerOS.1.OSName': 'VMware ESXi', 'ServerOS.1.OSVersion': '8.0.2', Other: 'x' } } });
   assert.deepEqual([r.inv.system.osName, r.inv.system.osVersion], ['VMware ESXi', '8.0.2']);
   assert.equal(r.seen.filter((x) => x.startsWith(ATTR)).length, 2, '$select 400 → 전체 1회');
+  // b2) 반증 F2 — 지원하지 않는 $ 질의에 501(Redfish 규격) → 전체로 한 번
+  r = await run({ ...SYS(), [SEL]: 501, [ATTR]: { Attributes: { 'ServerOS.1.OSName': 'Rocky Linux', 'ServerOS.1.OSVersion': '9.3' } } });
+  assert.deepEqual([r.inv.system.osName, r.inv.system.osVersion], ['Rocky Linux', '9.3']);
+  assert.equal(r.seen.filter((x) => x.startsWith(ATTR)).length, 2, '$select 501 → 전체 1회');
   // c) 속성 자원 없음(404 — iDRAC8 등) → 다시 묻지 않고 빈 값
   r = await run({ ...SYS() });
   assert.equal(r.inv.system.osName, undefined); assert.equal(r.seen.filter((x) => x.startsWith(ATTR)).length, 1, '404 는 다시 묻지 않는다');
@@ -230,7 +260,8 @@ function reset() {
   fs.writeFileSync(path.join(tmp, 'service-map-pins.json'), JSON.stringify({ rev: 0, pins: {} }));
   // 관리 주소에 태그가 든 Dell 기본 이름 — 범위 판본에서 태그를 가리는지 본다
   registry.importServers([{ id: 's1', name: 'synth-db-01', host: 'https://idrac-synth01.example.test', username: 'root', password: 'x', serviceTag: 'SYNTH01', vcenterId: 'vc-a' }], 'replace');
-  invCache.setInventory('s1', INV());
+  // OS 호스트명에 태그가 든 경우 — 범위 판본에서 가리는지 본다(반증 시험 공백)
+  invCache.setInventory('s1', INV({ system: { ...INV().system, hostName: 'db-synth01-os' } }));
   cstate.clearCollectorHosts('c1'); rinv.clearCollectorServers('c1');
 }
 
@@ -239,13 +270,13 @@ test('⑧ 목록 — 관리자: 요약 · OS 호스트명 · 관리 주소 / 비
   await withSnap(async () => {
     const a = (await call('GET /tools/bm-folders')).body.servers.find((x) => x.name === 'synth-db-01');
     assert.equal(a.hw.cpu.cores, 48); assert.deepEqual(a.hw.hba, { n: 1, ports: 2 }); assert.equal(a.hw.os.name, 'Red Hat Enterprise Linux');
-    assert.equal(a.hw.host, 'synth-os-01'); assert.equal(a.addr, 'idrac-synth01.example.test'); assert.equal(a.hwVia, 'local');
+    assert.equal(a.hw.host, 'db-synth01-os'); assert.equal(a.addr, 'idrac-synth01.example.test'); assert.equal(a.hwVia, 'local');
     const v = (await call('GET /tools/bm-folders', { user: VIEWER })).body.servers.find((x) => x.model === 'PowerEdge R750' || x.hw);
     assert.ok(v && v.hw, '비관리자도 하드웨어 요약은 본다');
     assert.equal(v.hw.host, '', 'OS 호스트명은 관리자 판본만'); assert.equal(v.addr, undefined, '관리 주소는 관리자 판본만');
     const sa = (await call('GET /tools/bm-folders', { user: SCOPED_A })).body.servers.find((x) => x.hw);
     assert.ok(sa); assert.equal(/synth01/i.test(sa.addr || ''), false, `범위 판본 주소에 태그가 남으면 안 된다: ${sa.addr}`);
-    assert.equal(sa.hw.host, 'synth-os-01', '호스트명에 태그가 없으면 그대로');
+    assert.ok(sa.hw.host && !/synth01/i.test(sa.hw.host), `범위 판본 OS 호스트명의 태그를 가린다: ${sa.hw.host}`);
     const sb = (await call('GET /tools/bm-folders', { user: SCOPED_B })).body.servers;
     assert.equal(sb.some((x) => x.hw?.cpu?.cores === 48), false, '범위 밖 서버는 목록에 없다');
   });
@@ -257,7 +288,7 @@ test('⑧ 상세 /hw — 관리자: 부품 목록 · 관리 NIC IPv4 · 호스�
     const key = (await call('GET /tools/bm-folders')).body.servers.find((x) => x.name === 'synth-db-01').key;
     const a = (await call('GET /tools/bm-folders/hw', { query: { key } })).body;
     assert.equal(a.via, 'local'); assert.equal(a.addr, 'idrac-synth01.example.test');
-    assert.equal(a.detail.idrac.ipv4, '192.0.2.50'); assert.equal(a.detail.os.host, 'synth-os-01');
+    assert.equal(a.detail.idrac.ipv4, '192.0.2.50'); assert.equal(a.detail.os.host, 'db-synth01-os');
     assert.deepEqual(a.detail.hbas, [{ model: FC_MODEL, ports: 2 }]);
     assert.deepEqual(a.detail.disks.map((x) => [x.model, x.n]), [['SYNTH-SSD', 2], ['SYNTH-NVME', 1], ['SYNTH-HDD', 1]]);
     assert.deepEqual(a.detail.nics.map((x) => [x.model, x.ports, x.up]), [['Broadcom Gigabit Ethernet BCM5720', 2, 1], ['Mellanox ConnectX-6 Lx 25GbE', 2, 2]], 'FC 는 NIC 목록에 없다');
@@ -267,6 +298,8 @@ test('⑧ 상세 /hw — 관리자: 부품 목록 · 관리 NIC IPv4 · 호스�
     const skey = (await call('GET /tools/bm-folders', { user: SCOPED_A })).body.servers.find((x) => x.hw).key;
     const s = (await call('GET /tools/bm-folders/hw', { user: SCOPED_A, query: { key: skey } })).body;
     assert.equal('ipv4' in s.detail.idrac, false, '관리 NIC IPv4 는 전체 범위 관리자만'); assert.equal(/synth01/i.test(s.addr || ''), false);
+    assert.ok(s.detail.os.host && !/synth01/i.test(s.detail.os.host), `상세 OS 호스트명도 태그를 가린다: ${s.detail.os.host}`);
+    assert.equal(/synth01/i.test(s.detail.summary.host || ''), false);
     assert.equal((await call('GET /tools/bm-folders/hw', { user: SCOPED_B, query: { key: skey } })).statusCode, 404, '범위 밖은 404(존재 은닉)');
     assert.equal((await call('GET /tools/bm-folders/hw', { user: SCOPED_B, query: { key } })).statusCode, 404);
     assert.equal((await call('GET /tools/bm-folders/hw', { query: { key: 'st:nope' } })).statusCode, 404);
@@ -308,6 +341,9 @@ test('⑧ 엣지가 올린 서버 — 요약만(상세 summary-only) · 요약�
     assert.equal(d3.why, 'summary-only'); assert.equal(d3.summary.cpu.cores, 48); assert.equal(d3.detail, undefined);
     const d4 = (await call('GET /tools/bm-folders/hw', { query: { key: e4.key } })).body;
     assert.equal(d4.why, 'edge-none');
+    const vkey = (await call('GET /tools/bm-folders', { user: VIEWER })).body.servers.find((x) => x.hwVia === 'edge' && x.hw).key;
+    const v3 = (await call('GET /tools/bm-folders/hw', { user: VIEWER, query: { key: vkey } })).body;
+    assert.equal(v3.why, 'summary-only'); assert.equal(v3.addr, undefined, '엣지 주소도 관리자 판본만'); assert.equal(v3.summary.host, '', '엣지 요약의 OS 호스트명도 관리자 판본만');
   });
 });
 

@@ -35,7 +35,8 @@ export function IdracConnect({ addr, name, corp, small = false }) {
     // Esc 는 이 상자만 닫는다 — 캡처 단계에서 받고 전파를 멈춰 옆 패널(EscClose)까지 닫지 않게(WhyTip 과 같은 처리)
     const key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); setPos(null); btn.current?.focus?.(); } };
     const click = (e) => { if (ref.current && !ref.current.contains(e.target)) setPos(null); };
-    const away = () => setPos(null);
+    // 휴대폰에서 계정 칸에 들어가면 화상 키보드로 resize 가 난다 — 상자 안에 포커스가 있으면 닫지 않는다(반증 F14)
+    const away = (e) => { if (e?.type === 'resize' && ref.current && ref.current.contains(document.activeElement)) return; setPos(null); };
     document.addEventListener('keydown', key, true); document.addEventListener('mousedown', click);
     window.addEventListener('scroll', away, true); window.addEventListener('resize', away);
     return () => { document.removeEventListener('keydown', key, true); document.removeEventListener('mousedown', click); window.removeEventListener('scroll', away, true); window.removeEventListener('resize', away); };

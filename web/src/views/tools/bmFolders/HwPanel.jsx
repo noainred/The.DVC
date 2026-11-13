@@ -9,8 +9,8 @@ import { memSizeText, diskSizeText, speedText, osText, hwLines, hwWhyText, OS_WH
 import { IdracConnect } from './IdracConnect.jsx';
 
 const WHY = {
-  'summary-only': '엣지가 보낸 요약만 있습니다 — 부품별 목록은 그 엣지 포탈의 물리서버 폴더에서 봅니다.',
-  'edge-none': '엣지가 하드웨어 요약을 아직 보내지 않았습니다 — 그 엣지를 이 버전 이상으로 올리면 다음 전송부터 보입니다.',
+  'summary-only': '엣지가 보낸 요약만 있습니다 — 엣지는 부품별 목록을 중앙으로 보내지 않습니다(부품별 목록은 그 엣지의 iDRAC 인벤토리 화면에서 봅니다).',
+  'edge-none': '엣지가 하드웨어 요약을 보내지 않았습니다 — 엣지가 이 버전보다 낮거나, 그 엣지의 iDRAC 등록부 밖 서버(OME 등)이거나, 엣지가 인벤토리를 아직 읽지 못한 경우입니다.',
   'no-inv': 'iDRAC 인벤토리를 아직 읽지 못했습니다 — 등록 직후 · 수집 전 · OME 로만 보이는 서버 · 수집 서버가 아직 보내지 않은 경우 비어 있습니다.',
 };
 
@@ -32,7 +32,11 @@ export default function HwPanel({ r, scoped }) {
   return (
     <div className="bmf-hwsec">
       <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>하드웨어(iDRAC)</span>
-      {err ? <span style={{ fontSize: 12, color: 'var(--red)' }}>{err}</span> : !d ? <span className="muted" style={{ fontSize: 12 }}>읽는 중…</span> : (
+      {/* 상세를 못 받아도 관리 주소(목록 행에 이미 있는 값)와 접속은 그대로 보인다(반증 F12 — 예전 '관리 주소' 칸 회귀 방지) */}
+      {err ? (<>
+        {r.addr ? <div className="bmf-kv"><span className="k">iDRAC 주소</span><span>{scoped ? <span className="mono" style={{ fontSize: 12 }}>{r.addr}</span> : <IdracConnect addr={r.addr} name={r.name} corp={r.corp} />}</span></div> : null}
+        <span style={{ fontSize: 12, color: 'var(--red)' }}>{err}</span>
+      </>) : !d ? <span className="muted" style={{ fontSize: 12 }}>읽는 중…</span> : (
         <>
           <div className="bmf-kv">
             <span className="k">iDRAC 주소</span>

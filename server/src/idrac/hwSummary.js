@@ -32,7 +32,8 @@ export function readInvArr(inv, key, { emptyUnknown = false } = {}) {
 }
 
 /** FC HBA 인가 — 모델 · 이름 글자로(Redfish 에 'FC' 표준 필드가 컬렉션마다 다르다). Ethernet CNA(QLogic 57xxx · Emulex OneConnect)는 아니다. */
-const FC_RE = /fibre\s*channel|\bfc\s*(hba|adapter)\b|\b(8|16|32|64|128)\s*(gb|g|gfc)\s*fc\b|\bqle\s?\d{4}|\blpe\s?\d{4,5}/i;
+// QLogic 은 QLE2xxx 만 FC 다(QLE3242 · QLE3442 는 10GbE NIC, QLE8262 는 CNA — 반증 F6)
+const FC_RE = /fibre\s*channel|\bfc\s*(hba|adapter)\b|\b(8|16|32|64|128)\s*(gb|g|gfc)\s*fc\b|\bqle\s?2\d{3}|\blpe\s?\d{4,5}/i;
 export function isFcHba(x) {
   const txt = `${s(x?.model)} ${s(x?.name)}`.slice(0, 300);
   return !!txt.trim() && FC_RE.test(txt);
@@ -40,6 +41,23 @@ export function isFcHba(x) {
 
 const SYNTH_NIC = '(EthernetInterfaces)';   // redfish.js 가 어댑터 응답에 속도가 하나도 없을 때만 붙이는 포트 폴백(실물 어댑터가 아니다)
 const ethNics = (inv) => dedupNics(arr(inv?.nics)).filter((n) => !isFcHba(n));
+/*
+ * NIC 포트(반증 F4): 합성 '(EthernetInterfaces)' 는 실어댑터 포트에 속도가 하나도 없을 때만 붙는 **속도 폴백**이다 — 포트 수는 실어댑터에서만 센다
+ * (둘을 더하면 같은 포트를 두 번 센다). 속도는 실어댑터 포트에 있으면 그것, 없으면 합성 포트의 속도. 실어댑터가 없으면 합성 포트가 곧 포트다.
+ * 상세(hwDetailOf)도 같은 규칙 — 실어댑터가 없을 때만 합성 항목을 한 줄로 보인다(요약과 상세가 서로 다른 말을 하지 않게).
+ */
+function nicPortsOf(inv) {
+  const all = ethNics(inv);
+  const real = all.filter((n) => s(n.model) !== SYNTH_NIC);
+  const synth = all.filter((n) => s(n.model) === SYNTH_NIC);
+  const realPorts = real.flatMap((a) => arr(a.ports));
+  const synthPorts = synth.flatMap((a) => arr(a.ports));
+  if (!real.length) return { count: synthPorts, speed: synthPorts, adapters: synth };
+  const realHasSpeed = realPorts.some((p) => pos(p.speedMbps) != null);
+  return { count: realPorts, speed: realHasSpeed ? realPorts : synthPorts, adapters: real };
+}
+/** 빈 슬롯(Status.State 'Absent')은 부품이 아니다(반증 F5 — iLO 등이 빈 DIMM · CPU 슬롯을 컬렉션에 싣는다). */
+const present = (list) => (list ? list.filter((x) => !/^absent$/i.test(s(x?.state))) : list);
 /** 링크 속도(Mbps) → 표시 단위 Gbps(0.1 단위 반올림 — 100M/1G/10G/25G/100G). */
 const gbpsOf = (mbps) => { const v = pos(mbps); return v == null ? null : Math.round(v / 100) / 10; };
 
@@ -60,16 +78,16 @@ function mediaOf(d) {
 export function hwSummaryOf(inv) {
   if (!inv || typeof inv !== 'object') return null;
   const cap = capacityOfInventory(inv);
-  const cpuList = readInvArr(inv, 'cpus');
+  const cpuList = present(readInvArr(inv, 'cpus'));
   const cpuModel = s(inv.cpu?.model) || s(cpuList?.[0]?.model);
   const cpu = cap && (cap.sockets != null || cap.cores != null || cpuModel)
     ? { sockets: cap.sockets ?? null, cores: cap.cores ?? null, threads: cap.threads ?? null, model: cpuModel.slice(0, 128) }
     : null;
-  const dimms = readInvArr(inv, 'memoryDimms');
+  const dimms = present(readInvArr(inv, 'memoryDimms'));
   const dimmGb = dimms && dimms.length ? dimms.reduce((a, m) => (a == null || pos(m.sizeGB) == null ? null : a + pos(m.sizeGB)), 0) : null;
   const gib = cap?.memGiB != null ? Math.round(cap.memGiB) : dimmGb;
   const mem = gib != null || dimms ? { gib: gib ?? null, dimms: dimms ? dimms.length : null } : null;
-  const dl = readInvArr(inv, 'disks');
+  const dl = present(readInvArr(inv, 'disks'));
   let disk = null;
   if (dl) {
     let gb = 0; let ssd = 0; let hdd = 0; let nvme = 0;
@@ -84,14 +102,14 @@ export function hwSummaryOf(inv) {
   const nicsRead = readInvArr(inv, 'nics', { emptyUnknown: true });
   let nic = null;
   if (nicsRead) {
-    const ports = ethNics(inv).flatMap((a) => arr(a.ports));
-    const bySpeed = new Map(); let up = 0; let maxMbps = null;
-    for (const p of ports) {
-      if (nicLinkState(p.link) === 'up') up += 1;
+    const np = nicPortsOf(inv);
+    const bySpeed = new Map(); let maxMbps = null;
+    for (const p of np.speed) {
       const g = gbpsOf(p.speedMbps);
       if (g != null) { bySpeed.set(g, (bySpeed.get(g) || 0) + 1); maxMbps = Math.max(maxMbps ?? 0, pos(p.speedMbps)); }
     }
-    nic = { ports: ports.length, up, maxGbps: gbpsOf(maxMbps), speeds: [...bySpeed].sort((a, b) => b[0] - a[0]).slice(0, 3) };
+    const up = np.count.filter((p) => nicLinkState(p.link) === 'up').length;
+    nic = { ports: np.count.length, up, maxGbps: gbpsOf(maxMbps), speeds: [...bySpeed].sort((a, b) => b[0] - a[0]).slice(0, 3) };
   }
   const hba = hbaListOf(inv);
   const osName = s(inv.system?.osName); const osVer = s(inv.system?.osVersion);
@@ -118,8 +136,9 @@ export function hbaListOf(inv) {
   const portsOf = (model) => { const n = fcNics.find((x) => s(x.model) && s(x.model) === s(model)); return n ? arr(n.ports).length || null : null; };
   // PCIe 는 Name 이 설명형(‘Emulex LPe35002 32Gb 2-Port … Fibre Channel Adapter’)이고 Model 은 짧거나 비어 있다 — 이름을 먼저
   const fromPcie = (pcie || []).filter(isFcHba).map((d) => ({ model: (s(d.name) || s(d.model)).slice(0, 128), ports: portsOf(d.model) }));
-  if (fromPcie.length) return fromPcie.slice(0, 16);
-  return fcNics.map((n) => ({ model: (s(n.model) || s(n.name)).slice(0, 128), ports: arr(n.ports).length || null })).slice(0, 16);
+  const fromNics = fcNics.map((n) => ({ model: (s(n.model) || s(n.name)).slice(0, 128), ports: arr(n.ports).length || null }));
+  // 카드 하나 = PCIe 한 줄 = NetworkAdapter 하나 — 수집기가 PCIe 를 앞 16개만 읽으므로 더 많이 본 쪽을 쓴다(반증 F7 — 같으면 PCIe: 이름이 설명형)
+  return (fromPcie.length >= fromNics.length ? fromPcie : fromNics).slice(0, 16);
 }
 
 /** 같은 라벨끼리 묶어 개수(상세 목록 — 순서는 처음 나온 순). */
@@ -135,9 +154,9 @@ function groupBy(list, keyOf, make, max = 32) {
  */
 export function hwDetailOf(inv, { admin = false } = {}) {
   if (!inv || typeof inv !== 'object') return null;
-  const cpus = readInvArr(inv, 'cpus');
-  const dimms = readInvArr(inv, 'memoryDimms');
-  const disks = readInvArr(inv, 'disks');
+  const cpus = present(readInvArr(inv, 'cpus'));
+  const dimms = present(readInvArr(inv, 'memoryDimms'));
+  const disks = present(readInvArr(inv, 'disks'));
   const ctrls = readInvArr(inv, 'storageControllers');
   const nicsRead = readInvArr(inv, 'nics', { emptyUnknown: true });
   const net = arr(inv.network);
@@ -147,7 +166,7 @@ export function hwDetailOf(inv, { admin = false } = {}) {
     dimms: dimms ? groupBy(dimms, (d) => `${pos(d.sizeGB)}|${s(d.type)}|${pos(d.speedMHz)}|${s(d.manufacturer)}`, (d) => ({ gb: pos(d.sizeGB), type: s(d.type).slice(0, 32), mhz: pos(d.speedMHz), maker: s(d.manufacturer).slice(0, 64) })) : null,
     disks: disks ? groupBy(disks, (d) => `${s(d.model)}|${pos(d.capacityGB)}|${s(d.media)}|${s(d.protocol)}`, (d) => ({ model: s(d.model).slice(0, 128), gb: pos(d.capacityGB), media: s(d.media).slice(0, 16), proto: s(d.protocol).slice(0, 16) })) : null,
     ctrls: ctrls ? groupBy(ctrls, (c) => s(c.model) || s(c.name), (c) => ({ model: (s(c.model) || s(c.name)).slice(0, 128), fw: s(c.firmware).slice(0, 64) }), 8) : null,
-    nics: nicsRead ? ethNics(inv).filter((n) => s(n.model) !== SYNTH_NIC).map((n) => {
+    nics: nicsRead ? nicPortsOf(inv).adapters.map((n) => {
       const ports = arr(n.ports);
       const speeds = [...new Set(ports.map((p) => gbpsOf(p.speedMbps)).filter((g) => g != null))].sort((a, b) => b - a);
       return { model: (s(n.model) || s(n.name)).slice(0, 128), ports: ports.length, up: ports.filter((p) => nicLinkState(p.link) === 'up').length, speeds: speeds.slice(0, 3) };
@@ -171,7 +190,12 @@ export function mgmtHostOf(v) {
   const i = x.indexOf('://'); if (i >= 0) x = x.slice(i + 3);
   const j = x.indexOf('/'); if (j >= 0) x = x.slice(0, j);
   x = x.slice(0, 255);
-  return x && /^[A-Za-z0-9._:\[\]-]+$/.test(x) ? x : '';
+  if (!x) return '';
+  // 반증 F9: 선행 '-'(ssh 인자로 읽힌다) · ':::' · ']]' 같은 글자를 막는다 — 세 꼴만 받는다
+  if (/^[A-Za-z0-9][A-Za-z0-9._-]{0,252}(:\d{1,5})?$/.test(x)) return x;   // 호스트 이름 · IPv4 (+ 포트)
+  if (/^\[[0-9A-Fa-f:.]{2,45}\](:\d{1,5})?$/.test(x)) return x;         // [IPv6] (+ 포트)
+  if (/^[0-9A-Fa-f:.]{2,45}$/.test(x) && x.split(':').length > 2 && /[0-9A-Fa-f]/.test(x)) return x;   // 맨 IPv6(숫자가 하나는 있어야)
+  return '';
 }
 
 /* ───────── 받는 쪽 정제(엣지 → 중앙 fleet push · 아는 키만) ───────── */
@@ -179,13 +203,14 @@ const capS = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
 const capN = (v, max = 1e7) => { const x = typeof v === 'number' ? numOrNull(v) : null; return x != null && x >= 0 && x <= max ? x : null; };
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
 /** 엣지가 보낸 요약 → 아는 필드만. 형식이 아니면 null(지어내지 않는다). 문자열 수치는 받지 않는다(엣지는 수로 보낸다). */
-export function sanitizeHwSummary(x) {
+export function sanitizeHwSummary(x, { now = Date.now() } = {}) {
   const h = obj(x);
   if (!h || h.v !== 1) return null;
+  const at = capN(h.at, 1e14);
   const cpu = obj(h.cpu); const mem = obj(h.mem); const disk = obj(h.disk); const nic = obj(h.nic); const hba = obj(h.hba); const os = obj(h.os);
   return {
     v: 1,
-    at: capN(h.at, 1e14),
+    at: at == null ? null : Math.min(at, now),   // 반증 F8: 엣지 시각은 수신 시각으로 자른다(미래 시각이면 '0초 전' 이 계속 나온다)
     cpu: cpu ? { sockets: capN(cpu.sockets, 64), cores: capN(cpu.cores, 4096), threads: capN(cpu.threads, 8192), model: capS(cpu.model, 128) } : null,
     mem: mem ? { gib: capN(mem.gib, 1e6), dimms: capN(mem.dimms, 256) } : null,
     disk: disk ? { n: capN(disk.n, 1024), gb: capN(disk.gb, 1e8), ssd: capN(disk.ssd, 1024), hdd: capN(disk.hdd, 1024), nvme: capN(disk.nvme, 1024) } : null,

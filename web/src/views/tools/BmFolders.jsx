@@ -20,7 +20,7 @@ import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
 import { SRC_COLOR, SRC_SHORT, rowSrcClass, srcCounts, metricSrcText } from './bmFolders/usageSrc.js'; // v2.993: 사용률 출처 색
 import { whyBands, whyShort, WHY_DOT } from './bmFolders/whyText.js'; // v2.994: 값 없음 사유
-import { hwLines, hwSortKey, hwWhyText, osText, OS_WHY } from './bmFolders/hwText.js'; // v3.3.0: 하드웨어(iDRAC) 요약
+import { hwLines, hwSortKey, hwWhyText, osText, OS_WHY, HW_FAIL } from './bmFolders/hwText.js'; // v3.3.0: 하드웨어(iDRAC) 요약
 import { IdracConnect } from './bmFolders/IdracConnect.jsx'; // v3.3.0: iDRAC 주소 접속(웹 · SSH)
 import {
   INTRO, PLACE_LABEL, MISSING_WHY, pctText, wattsText, pathText, lastSeg, parentOf, ageText,
@@ -804,6 +804,7 @@ const HEAD_WRAP = { whiteSpace: 'normal', wordBreak: 'keep-all' };   // 한글 �
 /** v3.3.0: 하드웨어(iDRAC) 칸 — CPU · 메모리 / 디스크 / NIC · FC HBA 세 줄. 베어메탈인데 요약이 없으면 '—' 와 이유(툴팁). ESXi 행은 '—'. */
 function HwCell({ r }) {
   if (r.kind !== 'bm') return <span className="muted" title="ESXi 호스트는 호스트 화면에서 봅니다">—</span>;
+  if (r.hw === undefined) return <span className="muted" title={HW_FAIL}>—</span>;   // 서버가 이번 응답에 요약을 싣지 못함(반증 F11 — '인벤토리 없음' 으로 단정하지 않는다)
   const L = hwLines(r.hw, { compact: true });
   if (!L) return <span className="muted" title={hwWhyText(r)}>— <span style={{ fontSize: 11 }}>{r.hwVia === 'edge' ? '엣지 미전송' : '인벤토리 없음'}</span></span>;
   // 줄 안의 ' · ' 에서만 접힌다(값 하나 — '2×32C' · '16.3 TB' — 는 쪼개지 않는다): 1440px 에서 표가 영역보다 넓어져 '전력' 이 가로 스크롤 뒤로 숨지 않게(실측)
