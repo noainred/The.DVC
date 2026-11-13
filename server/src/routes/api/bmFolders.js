@@ -125,7 +125,7 @@ export async function edgeBundleFor(agent, D = {}) {
   const b = buildFolders({ members, main, assign: (D.peekAssign || peekAssign)(), allowed: null, bmBlocked: !!g.bmBlocked, holdCorps, snapInitial: !!g.snapInitial,
     heldKeys: g.bmHeldKeys instanceof Set ? g.bmHeldKeys : null, nameFn: (m) => m.name });
   let corps = null;
-  try { const f = D.corpsOf !== undefined ? D.corpsOf : (await import('../admin/bmOsSuggest.js')).corpsOfFactory(snap); corps = f ? f(agent) : null; } catch { corps = null; }
+  try { const f = D.corpsOf !== undefined ? D.corpsOf : (await import('../../ipam/scanDatacenterSource.js')).corpsOfFactory(snap); corps = f ? f(agent) : null; } catch { corps = null; }
   const corpSet = new Set([...(corps || [])]);
   for (const m of members) if (m.kind === 'bm' && String(m.remoteAgent || '').toLowerCase() === String(agent).toLowerCase() && m.corp) corpSet.add(m.corp);
   return buildEdgeBundle({ agent, members, b, main, corps: corpSet, corpNames: g.corpNames instanceof Map ? g.corpNames : new Map(), svcLinks: (D.svcLinksFor || svcLinksFor)([...corpSet]), rev: (D.storeRev || storeRev)() });
