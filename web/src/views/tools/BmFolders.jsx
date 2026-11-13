@@ -14,6 +14,7 @@ import BoldText from '../../components/boldText.jsx';
 import BulkAdd from './bmFolders/BulkAdd.jsx';
 import SidePanel from './bmFolders/SidePanel.jsx';
 import MapView from './bmFolders/MapView.jsx';
+import EdgeView from './bmFolders/EdgeView.jsx'; // v2.996: 엣지 포탈 화면
 import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
 import { SRC_COLOR, SRC_SHORT, rowSrcClass, srcCounts, metricSrcText } from './bmFolders/usageSrc.js'; // v2.993: 사용률 출처 색
@@ -83,8 +84,9 @@ export default function BmFolders() {
     finally { setBusy(false); }
   }, [load]);
 
-  const corps = useMemo(() => d?.corps || [], [d]);
-  const servers = useMemo(() => d?.servers || [], [d]);
+  // v2.996(묶음 D): 엣지 포탈 응답(d.edge)은 모양이 다르다(폴더가 경로 글자) — 중앙 화면 계산에 넣지 않는다
+  const corps = useMemo(() => (d?.edge ? [] : d?.corps || []), [d]);
+  const servers = useMemo(() => (d?.edge ? [] : d?.servers || []), [d]);
   const corpName = useCallback((id) => corps.find((c) => c.vcenterId === id)?.name || id || '(법인 미지정)', [corps]);
   const baseRows = useMemo(() => rowsOf(servers, sel, { sub }), [servers, sel, sub]);
   const rows = useMemo(() => filterRows(baseRows, q, quick), [baseRows, q, quick]);
@@ -120,6 +122,7 @@ export default function BmFolders() {
     );
   }
   if (!d) return <Loading />;
+  if (d.edge) return <EdgeView d={d} reload={() => load()} />;   // v2.996(묶음 D): 엣지 포탈 — 중앙 사본 읽기 전용
 
   const bmAll = servers.filter((s) => s.kind === 'bm');
   const sum = { total: bmAll.length, reg: bmAll.filter((s) => s.place).length, un: bmAll.filter((s) => s.corp && !s.place).length, nocorp: bmAll.filter((s) => !s.corp).length, esxi: servers.filter((s) => s.kind === 'esxi').length };
@@ -531,7 +534,7 @@ function Overview({ d, corps, corpName, setSel, pick, op, busy, openBulk }) {
                       {['central', 'edge', 'collector'].filter((k) => c.sources[k]).map((k) => <span key={k} style={{ whiteSpace: 'nowrap' }}><SrcBadge src={k} /> <span className="muted" style={{ fontSize: 11 }}>{c.sources[k]}</span></span>)}
                     </span>
                     {(c.agents || []).filter((a) => !a.agent.startsWith('collector:')).slice(0, 3).map((a) => (
-                      <div key={a.agent} className="muted" style={{ fontSize: 11 }}><span className="mono">{a.agent}</span> · {a.expired ? <span style={{ color: '#fbbf24' }}>보고 만료</span> : `보고 ${ageText(a.at, now)}`}</div>
+                      <div key={a.agent} className="muted" style={{ fontSize: 11 }}><span className="mono">{a.agent}</span> · {a.expired ? <span style={{ color: '#fbbf24' }}>보고 만료</span> : `보고 ${ageText(a.at, now)}`}{a.sync === undefined ? null : <span title="엣지 전달 — 그 엣지가 폴더 사본을 받아 간 시각 · 지금 판인가(엣지는 가진 판을 다음 받기에 알린다)"> · 폴더 전달 {a.sync ? `${ageText(a.sync.at, now)}${a.sync.current ? '(최신)' : '(이전 판)'}` : '모름'}</span>}</div>
                     ))}
                   </td>
                   <td data-sort={c.bm}>{c.bm}{c.esxiPlaced ? <span className="muted" style={{ fontSize: 11 }}> + ESXi {c.esxiPlaced}</span> : null}</td>

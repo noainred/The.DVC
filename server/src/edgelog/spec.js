@@ -93,6 +93,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'pull.bmUsage', label: '베어메탈 사용률 설정(중앙 배포)', group: 'pull', mod: '../agent/bmUsageConfigPull.js', fn: 'bmUsageConfigPullStatus' },
   { key: 'pull.bmOnboard', label: '베어메탈 서버 등록 배포(중앙 → 엣지 · 7b)', group: 'pull', mod: '../agent/bmOnboardPull.js', fn: 'bmOnboardPullStatus' },
   { key: 'pull.bmMaint', label: '베어메탈 정비 창 배포(중앙 → 엣지 · 8a)', group: 'pull', mod: '../agent/bmMaintPull.js', fn: 'bmMaintPullStatus' },
+  { key: 'pull.bmFolders', label: '물리서버 폴더 사본(중앙 → 엣지 · v2.996)', group: 'pull', mod: '../agent/bmFoldersPull.js', fn: 'bmFoldersPullStatus' },
 
   // ── 로컬 수집 ──────────────────────────────────────────────────────────────
   /*

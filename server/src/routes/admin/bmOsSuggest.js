@@ -7,8 +7,7 @@
 import { store } from '../../store.js';
 import { getScanResults } from '../../ipam/scanStore.js';
 import { setFwdNamesProvider } from '../../ipam/scanNames.js';
-import { agentVcenterIds } from '../../ipam/scanDatacenter.js';
-import { currentScanDatacenters } from '../../ipam/scanDatacenterSource.js';
+import { corpsOfFactory } from '../../ipam/scanDatacenterSource.js'; // v2.996: 판정을 도메인으로 옮겼다(라우트 간 import 순환 방지)
 import { buildOsSuggest, applyPlan, fwdNamesFor, agentKey } from '../../bmfolders/osSuggest.js';
 import { indexOsHosts, pickOsEntry } from '../../bmusage/targets.js';
 import { listBmServersRaw, registryLoadError, applyBmServerBatch } from '../../bmstor/registry.js';
@@ -22,14 +21,6 @@ const fleetOnly = fullScopeOnlyWith('이 기능은 전 법인(엣지·스캔 전
 export const BM_OS_GATES = Object.freeze([adminOnly, fleetOnly]);
 
 export const SUGGEST_ROWS_MAX = 5000;
-
-/** 에이전트 → 그 에이전트가 수집하는 vCenter(법인) 집합 — IP 스캔 데이터센터 귀속과 같은 판정. */
-export function corpsOfFactory(snap) {
-  let inputs = null;
-  try { inputs = currentScanDatacenters(snap?.vcenters).inputs; } catch { inputs = null; }
-  if (!inputs) return null;
-  return (ag) => new Set(agentVcenterIds(ag || '', { vcenters: inputs.vcenters, snapVcenters: snap?.vcenters, collectors: inputs.collectors }));
-}
 
 /** 물리서버 폴더와 같은 입력(서비스 인벤토리 입력 수집 하나)에서 베어메탈 구성원. 무거운 라우트 모듈은 쓸 때 읽는다(기동 비용). */
 async function bmMembers(snap) {
