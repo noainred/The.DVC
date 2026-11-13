@@ -58,7 +58,7 @@
 - (8b단계 추가) 리눅스 성능 8b단계 화면 — 이 시점 프로세스 · 띠 · 저활용 · 전력/온도 — 서버 값만(점수 · 합 · 단서 재계산 없음) · 권한 · 미측정 ≠ 0 · 폴링 없음
 - (v2.976) 집중 모니터링 화면 — 시간 띠 하나가 모든 차트를 옮김 · 숫자는 응답 limits · 비교 색은 고정한 서버에만(4색) · 대상 표는 1440px 에서 동작 열까지
 - (v2.977) 업그레이드 뒤 화면 조각 404 는 자동 새로고침(60초에 한 번) · 열이 많은 표는 오른쪽 동작 열을 고정한다(sm-pin-right)
-- (v2.997.0(코드 · 테스트 표지는 v2.994 — main 이 v2.996 까지 먼저 나가 번호만 올렸다)) 서버 메뉴 이름 변경 — Virtual Machine(VM)(vms · vcenters) · Hypervisor(hosts · 새 항목) · Physical Server · Bare Metal Server · 저장 메뉴 별칭은 tab:vcenters → tab:vms · 마지막 본 탭 기억 삭제 · 허브 제목 = 메뉴 라벨
+- (v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다)) 서버 메뉴 이름 변경 — Virtual Machine(VM)(vms · vcenters) · Hypervisor(hosts · 새 항목) · Physical Server · Bare Metal Server · 저장 메뉴 별칭은 tab:vcenters → tab:vms · 마지막 본 탭 기억 삭제 · 허브 제목 = 메뉴 라벨
 
 ## 본문
 
@@ -854,7 +854,7 @@
   ⑩ 기능 사용 현황(`featureUsageText.js menuIndex`)은 `tabs` 도 같은 자리로 센다(`tab:vms` 키 그대로 · 이름 '가상화 플랫폼 › 가상화 서버 · VM').
   ⑪ **v2.994 에서 이름 · 항목 분리가 바뀌었다** — 아래 'v2.994 서버 메뉴 이름 변경' 항목이 우선한다(①의 항목 모양 · ②의 별칭 방향 · ⑨의 '마지막 본 탭' 기억 · ⑥의 브레드크럼 뿌리 이름).
 
-- **v2.997.0(코드 · 테스트 표지는 v2.994 — main 이 v2.996 까지 먼저 나가 번호만 올렸다) — 서버 메뉴 이름 변경: Virtual Machine(VM) · Hypervisor · Bare Metal Server · Physical Server(사용자 요청 2026-11-13 · 설계 `docs/design/server-menu-rename/README.md` · 컨펌 '추천대로 전부 진행')**.
+- **v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다) — 서버 메뉴 이름 변경: Virtual Machine(VM) · Hypervisor · Bare Metal Server · Physical Server(사용자 요청 2026-11-13 · 설계 `docs/design/server-menu-rename/README.md` · 컨펌 '추천대로 전부 진행')**.
   회귀 `web/src/views/topMenu.test.js`(구성 · locate · 진입 탭 `menuTabOf` · aka 검색) · `sidebar/{sideMenu,singleMenu2891,menuEdit}.test.js`(옛 저장 메뉴 두 모양) · `platform/platformText.test.js`(허브 제목 = 메뉴 라벨) · `featureUsageText.test.js` · `server/test/platformHub2915.test.js` ④.
   ① **바꾸지 않은 것**: 탭 id(vcenters · hosts · vms) · 해시 · 권한 id · 도구 키(serveranalysis · bm-folders · 호스트 도구 4 등) · 저장 형식. 옛 이름은 카탈로그 `aka`('서버 분석' · '서버분석' · '물리서버 폴더' · '물리 서버 폴더').
   ② **메뉴**(`topMenu.js` 서버 그룹): `virt` = 'Virtual Machine(VM)' · `tab:'vms'` · `tabs:['vcenters']` · also = VM 6 + vCenter 6 / 새 항목 `hv` = 'Hypervisor' · `tab:'hosts'` · also = 호스트 4(host-hygiene · esxi · hba · cluster-check) /
