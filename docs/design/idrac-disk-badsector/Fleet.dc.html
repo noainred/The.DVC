@@ -34,6 +34,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
 .kpi{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px;min-width:0;display:flex;flex-direction:column;gap:2px}
 .kpi b{font-size:22px;font-weight:800;line-height:1.2}
 .kpi span{font-size:11.5px;color:#8b9bb4}
+.note{font-size:11.5px;color:#8b9bb4;margin-top:3px;font-weight:400}
 .dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
 .rate{display:flex;align-items:center;gap:8px;min-width:150px}
 .rate i{display:block;height:8px;border-radius:0 4px 4px 0;background:#3b82f6}
@@ -68,8 +69,8 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
 
   <div style="display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px">
     <div style="min-width:0;line-height:1.6">
-      <b>서버 1,157대 중 1,096대 읽음</b> · 못 읽음 44대 · 대상 아님 17대(Lifecycle 로그 없는 장비)
-      <div class="muted" style="font-size:12px">법인 엣지가 매일 한 번 새 로그만 이어 읽어 올립니다 · 새 기록이 생기면 메일로 알립니다 · 마지막 수신 2026-11-14 06:40 · 못 읽은 44대의 디스크는 아래 수치에 들어 있지 않습니다</div>
+      <b>서버 1,157대 중 1,096대 읽음</b> · 못 읽음 44대 · 제외 17대(HPE iLO 등 Lifecycle 로그 없는 장비)
+      <div class="muted" style="font-size:12px">법인 엣지가 6시간마다 새 로그만 이어 읽어 올립니다 · 새 기록이 생기면 메일로 알립니다 · 마지막 수신 2026-11-14 06:40 · 못 읽은 44대의 디스크는 아래 수치에 들어 있지 않습니다</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <a class="btn primary" href="Scan.dc.html" style="text-decoration:none">지금 점검</a>
@@ -100,7 +101,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
       <thead><tr>
         <th><button type="button">국가 · 법인</button></th>
         <th><button type="button">서버</button></th>
-        <th><button type="button">슬롯</button></th>
+        <th><button type="button">위치</button></th>
         <th><button type="button">모델 · 시리얼</button></th>
         <th class="r" aria-sort="descending"><button type="button">복구 불가 ▼</button></th>
         <th class="r"><button type="button">PDR54</button></th>
@@ -109,17 +110,17 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
         <th><button type="button">‘아직 사용 중’ 근거</button></th>
       </tr></thead>
       <tbody>
-        <tr><td>인도 · IN 첸나이</td><td><a href="#server">IN-ESX-R740-021</a></td><td><b>Disk 2</b></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1K9M2X</div></td><td class="r mono"><b>6</b></td><td class="r mono">9</td><td class="mono">2026-11-09</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
-        <tr><td>폴란드 · PL 바르샤바</td><td><a href="#server">PL-DB-R750-003</a></td><td><b>Disk 7</b></td><td>모델 A · 2.4 TB SAS<div class="muted mono" style="font-size:11.5px">S/N WBM2F81R</div></td><td class="r mono"><b>4</b></td><td class="r mono">2</td><td class="mono">2026-11-06</td><td><span class="tag warn">경고 · 고장 예측</span></td><td>시리얼이 기록 전후로 같음</td></tr>
-        <tr><td>미국 · US 동부</td><td><a href="#server">US-ESX-R650-112</a></td><td><b>Disk 0</b></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1P44TQ</div></td><td class="r mono"><b>2</b></td><td class="r mono">0</td><td class="mono">2026-08-21</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
-        <tr><td>한국 · KR 본사</td><td><a href="#server">KR-ESX-R750-014</a></td><td><b>Disk 5</b></td><td>모델 A · 2.4 TB SAS<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td><td class="r mono"><b>1</b></td><td class="r mono">2</td><td class="mono">2026-11-03</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
-        <tr><td>독일 · DE 프랑크푸르트</td><td><a href="#server">DE-BK-R740XD-002</a></td><td><b>Disk 11</b></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1M70HD</div></td><td class="r mono"><b>1</b></td><td class="r mono">5</td><td class="mono">2026-07-30</td><td><span class="tag ok">정상 (OK)</span></td><td>시리얼이 기록 전후로 같음</td></tr>
-        <tr><td style="border-bottom:none">한국 · KR 평택</td><td style="border-bottom:none"><a href="#server">KR-GPU-R760XA-007</a></td><td style="border-bottom:none"><b>Disk 1</b></td><td style="border-bottom:none">모델 D · 960 GB SATA SSD<div class="muted mono" style="font-size:11.5px">S/N S4EWNX0R</div></td><td class="r mono" style="border-bottom:none"><b>0</b></td><td class="r mono" style="border-bottom:none">3</td><td class="mono" style="border-bottom:none">2026-05-14</td><td style="border-bottom:none"><span class="tag ok">정상 (OK)</span></td><td style="border-bottom:none">기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
+        <tr><td>인도 · IN 첸나이</td><td><a href="#server">IN-ESX-R740-021</a></td><td><b>Disk 2</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1K9M2X</div></td><td class="r mono"><b>6</b></td><td class="r mono">9</td><td class="mono">2026-11-09</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
+        <tr><td>폴란드 · PL 바르샤바</td><td><a href="#server">PL-DB-R750-003</a></td><td><b>Disk 7</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>모델 A · 2.4 TB SAS<div class="muted mono" style="font-size:11.5px">S/N WBM2F81R</div></td><td class="r mono"><b>4</b></td><td class="r mono">2</td><td class="mono">2026-11-06</td><td><span class="tag warn">경고 · 고장 예측</span></td><td>시리얼이 기록 전후로 같음</td></tr>
+        <tr><td>미국 · US 동부</td><td><a href="#server">US-ESX-R650-112</a></td><td><b>Disk 0</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1P44TQ</div></td><td class="r mono"><b>2</b></td><td class="r mono">0</td><td class="mono">2026-08-21</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
+        <tr><td>한국 · KR 본사</td><td><a href="#server">KR-ESX-R750-014</a></td><td><b>Disk 5</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td>모델 A · 2.4 TB SAS<div class="muted mono" style="font-size:11.5px">S/N WBM41T9E</div></td><td class="r mono"><b>1</b></td><td class="r mono">2</td><td class="mono">2026-11-03</td><td><span class="tag ok">정상 (OK)</span></td><td>기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
+        <tr><td>독일 · DE 프랑크푸르트</td><td><a href="#server">DE-BK-R740XD-002</a></td><td><b>Disk 11</b><div class="note">Backplane 2 · RAID Controller 1</div></td><td>모델 C · 8 TB NL-SAS<div class="muted mono" style="font-size:11.5px">S/N ZA1M70HD</div></td><td class="r mono"><b>1</b></td><td class="r mono">5</td><td class="mono">2026-07-30</td><td><span class="tag ok">정상 (OK)</span></td><td>시리얼이 기록 전후로 같음</td></tr>
+        <tr><td style="border-bottom:none">한국 · KR 평택</td><td style="border-bottom:none"><a href="#server">KR-GPU-R760XA-007</a></td><td style="border-bottom:none"><b>Disk 1</b><div class="note">Backplane 1 · RAID Controller 1</div></td><td style="border-bottom:none">모델 D · 960 GB SATA SSD<div class="muted mono" style="font-size:11.5px">S/N S4EWNX0R</div></td><td class="r mono" style="border-bottom:none"><b>0</b></td><td class="r mono" style="border-bottom:none">3</td><td class="mono" style="border-bottom:none">2026-05-14</td><td style="border-bottom:none"><span class="tag ok">정상 (OK)</span></td><td style="border-bottom:none">기록 뒤 이 슬롯에 교체 기록 없음</td></tr>
       </tbody>
     </table>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-      <span class="muted" style="font-size:12px">‘교체 기록 없음’ 은 로그로 미룬 것이고, ‘시리얼 같음’ 은 포탈이 그때 적어 둔 시리얼과 맞춘 것입니다. 서버 이름을 누르면 그 서버의 디스크 이력이 열립니다.</span>
+      <span class="muted" style="font-size:12px">복구 불가 = PDR46 · PDR47 · PDR64 건수, PDR54 = 미디어 오류를 복구 중에 고쳐 쓴 건수입니다. ‘교체 기록 없음’ 은 로그로 미룬 것이고, ‘시리얼 같음’ 은 포탈이 그때 적어 둔 시리얼과 맞춘 것입니다. 서버 이름을 누르면 그 서버의 디스크 이력이 열립니다.</span>
       <button class="btn" type="button">나머지 52개 더 보기</button>
     </div>
   </div>
@@ -129,7 +130,7 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
     <div class="card">
       <div class="h">국가 · 법인별 <span class="muted" style="font-weight:400">28곳 중 8곳 · 1,000개당 많은 순</span></div>
       <div class="box">
-      <table style="min-width:620px">
+      <table style="min-width:700px">
         <thead><tr>
           <th><button type="button">국가 · 법인</button></th>
           <th class="r"><button type="button">서버 읽음</button></th>
@@ -137,16 +138,17 @@ td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-s
           <th class="r"><button type="button">기록 디스크</button></th>
           <th aria-sort="descending"><button type="button">1,000개당 ▼</button></th>
           <th class="r"><button type="button">사용 중</button></th>
+          <th class="r">법인 점검</th>
         </tr></thead>
         <tbody>
-          <tr><td>인도 · IN 첸나이</td><td class="r mono">39 / 52</td><td class="r mono">344</td><td class="r mono">12</td><td><div class="rate"><i style="width:100px"></i><span class="mono">34.9</span></div></td><td class="r mono"><b>8</b></td></tr>
-          <tr><td>폴란드 · PL 바르샤바</td><td class="r mono">61 / 64</td><td class="r mono">540</td><td class="r mono">14</td><td><div class="rate"><i style="width:74px"></i><span class="mono">25.9</span></div></td><td class="r mono"><b>9</b></td></tr>
-          <tr><td>독일 · DE 프랑크푸르트</td><td class="r mono">44 / 45</td><td class="r mono">396</td><td class="r mono">8</td><td><div class="rate"><i style="width:58px"></i><span class="mono">20.2</span></div></td><td class="r mono"><b>5</b></td></tr>
-          <tr><td>미국 · US 동부</td><td class="r mono">74 / 80</td><td class="r mono">688</td><td class="r mono">11</td><td><div class="rate"><i style="width:46px"></i><span class="mono">16.0</span></div></td><td class="r mono"><b>7</b></td></tr>
-          <tr><td>한국 · KR 본사</td><td class="r mono">212 / 214</td><td class="r mono">2,104</td><td class="r mono">19</td><td><div class="rate"><i style="width:26px"></i><span class="mono">9.0</span></div></td><td class="r mono"><b>6</b></td></tr>
-          <tr><td>한국 · KR 평택</td><td class="r mono">96 / 96</td><td class="r mono">912</td><td class="r mono">7</td><td><div class="rate"><i style="width:22px"></i><span class="mono">7.7</span></div></td><td class="r mono"><b>2</b></td></tr>
-          <tr><td>미국 · US 서부</td><td class="r mono">58 / 58</td><td class="r mono">502</td><td class="r mono">3</td><td><div class="rate"><i style="width:17px"></i><span class="mono">6.0</span></div></td><td class="r mono"><b>1</b></td></tr>
-          <tr><td style="border-bottom:none">베트남 · VN 하노이</td><td class="r mono" style="border-bottom:none">47 / 47</td><td class="r mono" style="border-bottom:none">410</td><td class="r mono" style="border-bottom:none">2</td><td style="border-bottom:none"><div class="rate"><i style="width:14px"></i><span class="mono">4.9</span></div></td><td class="r mono" style="border-bottom:none"><b>0</b></td></tr>
+          <tr><td>인도 · IN 첸나이</td><td class="r mono">39 / 52</td><td class="r mono">344</td><td class="r mono">12</td><td><div class="rate"><i style="width:100px"></i><span class="mono">34.9</span></div></td><td class="r mono"><b>8</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
+          <tr><td>폴란드 · PL 바르샤바</td><td class="r mono">61 / 64</td><td class="r mono">540</td><td class="r mono">14</td><td><div class="rate"><i style="width:74px"></i><span class="mono">25.9</span></div></td><td class="r mono"><b>9</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
+          <tr><td>독일 · DE 프랑크푸르트</td><td class="r mono">44 / 45</td><td class="r mono">396</td><td class="r mono">8</td><td><div class="rate"><i style="width:58px"></i><span class="mono">20.2</span></div></td><td class="r mono"><b>5</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
+          <tr><td>미국 · US 동부</td><td class="r mono">74 / 80</td><td class="r mono">688</td><td class="r mono">11</td><td><div class="rate"><i style="width:46px"></i><span class="mono">16.0</span></div></td><td class="r mono"><b>7</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
+          <tr><td>한국 · KR 본사</td><td class="r mono">212 / 214</td><td class="r mono">2,104</td><td class="r mono">19</td><td><div class="rate"><i style="width:26px"></i><span class="mono">9.0</span></div></td><td class="r mono"><b>6</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
+          <tr><td>한국 · KR 평택</td><td class="r mono">96 / 96</td><td class="r mono">912</td><td class="r mono">7</td><td><div class="rate"><i style="width:22px"></i><span class="mono">7.7</span></div></td><td class="r mono"><b>2</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
+          <tr><td>미국 · US 서부</td><td class="r mono">58 / 58</td><td class="r mono">502</td><td class="r mono">3</td><td><div class="rate"><i style="width:17px"></i><span class="mono">6.0</span></div></td><td class="r mono"><b>1</b></td><td class="r"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
+          <tr><td style="border-bottom:none">베트남 · VN 하노이</td><td class="r mono" style="border-bottom:none">47 / 47</td><td class="r mono" style="border-bottom:none">410</td><td class="r mono" style="border-bottom:none">2</td><td style="border-bottom:none"><div class="rate"><i style="width:14px"></i><span class="mono">4.9</span></div></td><td class="r mono" style="border-bottom:none"><b>0</b></td><td class="r" style="border-bottom:none"><button class="btn" type="button" aria-label="이 법인 점검">점검</button></td></tr>
         </tbody>
       </table>
       </div>
