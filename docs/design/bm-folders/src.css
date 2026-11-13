@@ -1,0 +1,43 @@
+/* 사용률 출처 색 · OS 접속 주소 찾기 시안 전용 조각. 색은 bmf.css 와 같은 포탈 토큰 */
+
+/* 출처 색 — OS = 파랑 · iDRAC = 밝은 청록(밝기도 다르다) · 글자 표지를 함께 쓴다 */
+.mbt i.os{background:#3b82f6}
+.mbt i.id{background:#5eead4}
+.sc{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;font-size:10.5px;font-weight:700;white-space:nowrap;letter-spacing:0}
+.sc.os{color:#bfdbfe;background:rgba(59,130,246,.22)}
+.sc.id{color:#99f6e4;background:rgba(45,212,191,.16)}
+.sc.no{color:#c7d2e4;background:transparent;border:1px dashed #8b9bb4}
+.sw{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}
+.sw.os{background:#3b82f6}
+.sw.id{background:#5eead4}
+.sw.no{background:transparent;border:1.5px dashed #8b9bb4}
+.ucell{display:flex;align-items:center;gap:8px}
+.ucell .bars{display:flex;flex-direction:column;gap:3px}
+.ucell .mb{justify-content:flex-start}
+.ucell .ul0{width:32px;color:#8b9bb4}
+.ucell .chips{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
+.ucell.open{background:#1f2a40;box-shadow:0 0 0 1px #33456a;border-radius:8px;margin:-4px -6px;padding:4px 6px}
+
+/* 수집 순서 띠 */
+.ord{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 14px;border-top:1px solid #1f2a40;font-size:12px;color:#c7d2e4}
+.ord .st2{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:7px;border:1px solid #243049;background:#0f1626;white-space:nowrap}
+.ord .arr{color:#8b9bb4}
+
+/* 툴팁 안의 시도 순서 */
+.try{display:flex;flex-direction:column;gap:5px;font-size:12px}
+.try .tl{display:flex;align-items:center;gap:8px}
+.try .no2{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#243049;color:#e6edf6;font-size:10.5px;font-weight:700;flex:none}
+.ok2{color:#86efac;font-weight:600}
+.bad2{color:#fca5a5;font-weight:600}
+
+/* OS 주소 제안 표 */
+.t tr.done td{color:#8b9bb4}
+.kv2{display:flex;flex-direction:column;gap:1px;line-height:1.3}
+.kv2 .s{font-size:11.5px;color:#8b9bb4}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #1f2a40}
+.opt:last-child{border-bottom:0}
+.opt .ot{font-weight:600;color:#e6edf6}
+.opt p{margin:2px 0 0;font-size:12px;color:#aebbd0}
+a.btn{text-decoration:none}
+/* 고른 거르기 — 장애용 빨강(.qf.on)과 가른다 */
+.qf.sel{border-color:#3b82f6;background:rgba(59,130,246,.16);color:#bfdbfe}

@@ -17,6 +17,7 @@
 - (원래 5524행) v2.696 — 특수 기능 'VM DNS 설정 확인'(`vm-dns`). 판정은 `server/src/vmdns/analyze.js` 하나
 - (원래 5762행) v2.692 — 스캔 대역·설정 서브메뉴 2개 · /24 가져오기에 IPMS 설정 적용
 - (원래 5768행) IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다
+- v2.991 — IP 스캔 호스트명 확인(역DNS · mDNS · NetBIOS) · 대장 '호스트명' 열
 
 ## 본문
 
@@ -184,3 +185,22 @@
 
 - **v2.771(점검 R6-F2)**: ① /24 시트(엑셀 포함)도 범위 계정에는 `ipInWriteScope` 를 통과한 칸의 메모·태그와 claim 이 범위 안인 정책만(판정 코어는 ledger.js 하나 — 라우트가 재수출)
   ② claim 판정은 본문에 `claimedVcenterId` **키가 있는가** 로(빈 값 = 새 claim '' — 범위 계정은 거부) ③ 엣지 스캔 결과 키는 `canonIp` 정규형(로드에서 비정규 키 병합) ④ 범위 계정 대역 정책은 65,536 주소(/16) 이하.
+
+- ⚠⚠ **v2.991 — IP 스캔 호스트명 확인(역DNS · mDNS · NetBIOS)과 대장 '호스트명' 열**(사용자 요청 "ip scan 에서 사용 중 IP 에 hostname 추가" ·
+  "Angry IP Scanner 처럼" · 시안 `docs/design/ip-scan-hostname`(캔버스 https://claude.ai/artifact/Pf48uY3zo4bzgYny5CGqeE) · 컨펌: 방식 3가지 · **새 방식 기본 켜짐** ·
+  NetBIOS MAC 수집 · 표준 + 변이 1회. 회귀 `server/test/ipScanHostname2991.test.js`(21건 — 변이 15종 중 13종 검출, 2종은 동등 변이) + 웹 `ipamHostText.test.js`):
+  - 판정은 `ipam/hostNames.js` 하나 — 표시 순서 **관리상태 호스트명(override) > 역DNS > mDNS > NetBIOS**, '이름 다름'(첫 라벨 · 소문자 · 15자 비교 — 어느 쪽이 맞는지 판정하지 않는다),
+    대장 행 칸 `netName · netNameSrc · netNameStale · netNameAt · nameMismatch · nameAlt · nameUnchecked`(값이 있을 때만). 웹 `ipamHostText.js` 는 문구만 — IP 상세는 서버 `scanDetailOf` 의 `display` · `alt` 를 그대로 쓴다.
+  - 패킷은 `ipam/nameProbe.js` — NBSTAT(UDP 137, 50바이트) · 역방향 PTR(UDP 5353 · 대상 IP 로 직접 — Angry IP 는 224.0.0.251 멀티캐스트). 파서는 오프셋 기반 · 길이 먼저 · 포인터 점프 16회 ·
+    인쇄 가능한 글자만. **물어본 IP · 그 포트 · 맞는 거래 ID 의 응답만** 받는다(셋 중 하나만 보면 위조 응답이 이름이 된다 — 테스트 ④가 셋 다 고정). 방식당 UDP 소켓 1개 · 묶음 전송(v2.359 FD 교훈 — IP 마다 소켓 금지).
+    mDNS 는 이 장비와 같은 서브넷 IP 에만(`os.networkInterfaces` · /0 · 내부 제외). 사용자 이름(접미 0x03)은 읽지 않는다.
+  - 저장(`scanStore`): 방식별 `names[k] = {v, at, miss}` — 물었는데 답이 없으면 miss+1(**NAME_MISS_MAX=3** 에 지움 — UDP 유실 한 번에 이름이 깜박이지 않게), **묻지 않은 방식은 지운다**(끈 에이전트 —
+    v2.990 까지 역DNS 를 끄면 hostname 이 바로 비던 것과 같은 방향), 같은 방식이 다른 이름을 답하면 이력 항목 `renames`(events 에 섞지 않는다 — events 를 읽는 해제 판정 · 구간 계산은 up/down 만 가정).
+    `scanRev` 는 이름 · '지난 스캔 무응답' 표지 · tried · 그룹/MAC 이 바뀔 때만(miss 1→2 · 확인 시각만이면 올리지 않는다). 부분 결과(seenOnly)는 이름을 건드리지 않는다.
+  - 엣지 수신: `cleanAliveHost` 가 `names`(아는 키 3개 · 글자만) · `tried`(아는 값 · 없으면 null = 옛 엣지 → 역DNS 만 물은 것) · `nbGroup`(15자) · `mac`(AA:BB:… 모양 · 0 제외)만 받고 표시 이름은 방식별 이름에서 **다시 고른다**.
+    보고 요약 `nameStats` 는 `cleanNameStats`(수치만 · 못 읽음 null). **새 엣지 필드는 이 화이트리스트에도** 넣을 것. 디스크의 옛 결과 파일은 hostname → dns 이름으로 옮긴다(v2.990 까지 역DNS 뿐 — 코드로 확인).
+  - 범위 계정: 스캔 행은 예전처럼 주지 않고, **VM · 호스트 행에도 스캔이 찾은 이름을 붙이지 않는다**(ledger `allowed ? null :`) · `/tools/ipam/history` 의 `scan` 도 null.
+  - `hostName`(스캔 행 = 호스트명 · ipam.db 열)의 뜻은 그대로 — 화면의 'ESXi 호스트' 칸만 VM · 호스트 행으로 좁혔다(스캔 · 수동 행은 '—'). 스캔 결과 CSV 는 **뒤에** 열을 덧붙였다(앞 열 순서 불변).
+  - ⚠ 정직 기록: NetBIOS · mDNS 의 **실제 장비 응답은 확인하지 못했다**(이 환경에 Windows · mDNS 장비 없음 — 루프백 응답자와 규격으로 확인). mDNS 는 같은 L2 구간만 답하므로 라우터 너머 대역은 역DNS · NetBIOS 만 채운다.
+    기본 켜짐이라 업그레이드 뒤 중앙과 (업그레이드된) 엣지가 응답한 IP 마다 UDP 137 질의를 보낸다 — IDS 가 정찰로 볼 수 있다는 점을 시안 · 릴리스 노트에 밝혔다.
+

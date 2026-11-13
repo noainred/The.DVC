@@ -1397,6 +1397,13 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 /* v2.636: 전역 .input 의 min-width 220px 이 페이지로 옮긴 IP 스캔 설정의 2열 폼을 400px 에서 24px 밀어냈다
    (숫자 칸 width 90 도 220 으로 늘어나 있었다). IP관리 페이지 안에서만 풀고 칸 폭은 각 입력의 width 를 따른다. */
 .ipam-page .input { min-width: 0; max-width: 100%; }
+/* v2.991: IP 스캔 설정 폼 — 넓으면 '라벨 | 입력' 2열, 640px 이하는 라벨을 위로(1열). 400px 에서 라벨 칸(가장 긴 라벨 폭)이 절반을 차지해
+   '호스트명 확인' 설명이 약 120px 폭에 세로로 늘어졌다(Chromium 판독). 트랙은 minmax(0,1fr) — v2.576 min-width 규약. */
+.ipscan-form { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 16px; row-gap: 14px; align-items: start; }
+@media (max-width: 640px) {
+  .ipscan-form { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }
+  .ipscan-form > label { padding-top: 8px !important; }
+}
 
 /* v2.645 CVP Overview — 좁은 폭에서 1열로(트랙은 minmax(0,1fr) — v2.576 min-width 규약) */
 .cvp-ov-top { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 14px; }
@@ -3153,6 +3160,20 @@ table.bmf-t tr.bmf-picked td { background: rgba(59, 130, 246, .08); }
 .bmf-ub-t { display: inline-block; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; flex: none; }
 .bmf-ub-t > span { display: block; height: 100%; border-radius: 3px; }
 .bmf-ub-n { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+/* v2.993 사용률 출처 색(설계 bm-folders §13 ①) — 막대 색 = 출처 · 글자 표지를 함께(색만으로 가르지 않는다) */
+.bmf-up { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.bmf-scs { display: inline-flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.bmf-sc { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.bmf-sc.os { color: #bfdbfe; background: rgba(59,130,246,.22); }
+.bmf-sc.idrac { color: #99f6e4; background: rgba(45,212,191,.16); }
+.bmf-sc.vcenter { color: var(--text-dim); background: rgba(148,163,184,.16); }
+.bmf-sc.mixed { color: var(--text-dim); border: 1px dashed var(--border); }
+.bmf-sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+.bmf-sw.none { border: 1.5px dashed var(--text-faint); }
+.bmf-rsum { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.bmf-rsum .it { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+[data-theme="light"] .bmf-sc.os { color: #1d4ed8; background: rgba(59,130,246,.14); }
+[data-theme="light"] .bmf-sc.idrac { color: #0f766e; background: rgba(45,212,191,.18); }
 .bmf-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 5px; background: var(--border-soft); color: var(--text); font-size: 11px; font-family: var(--mono); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .bmf-tok { display: inline-flex; align-items: stretch; height: 22px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); font-family: var(--mono); font-size: 11.5px; flex: none; }
 .bmf-tok > span { padding: 0 6px; background: var(--border-soft); color: var(--text-dim); display: inline-flex; align-items: center; }

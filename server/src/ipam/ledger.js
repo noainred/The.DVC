@@ -12,6 +12,7 @@ import { ipToNum, numToIp, strictIpv4Num, canonIp } from '../util/ipv4.js';
 import { currentScanDatacenters } from './scanDatacenterSource.js'; // v2.638: 스캔 결과의 데이터센터 귀속
 import { datacenterOfVcenter } from '../datacenter/store.js';
 import { createYielder } from '../util/timeSlice.js';
+import { netNameFields } from './hostNames.js'; // v2.991: 호스트명 칸(관리상태 이름 > 역DNS > mDNS > NetBIOS)
 
 // buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
@@ -261,8 +262,9 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
   const parseOsMemo = (g) => { const k = String(g || ''); let v = osMemo.get(k); if (!v) { v = parseOs(k); osMemo.set(k, v); } return v; };
   // 확인 출처(discovery): 'vcenter'(vCenter 인식) · 'scan'(Ping/TCP 스캔) · 'both'(둘 다).
   // vCenter가 아는 IP가 스캔에도 잡히면 'both'로 표시. (스캔 결과는 1회만 조회해 재사용 — 호출부가 넘긴다)
-  const scanIpSet = new Set();
-  for (const s of scanList) { scanIpSet.add(s.ip); if ((++tick & YIELD_MASK) === 0) yield; }
+  // v2.991: IP → 스캔 결과(Set 이 아니라 Map — 호스트명 칸을 VM·호스트 행에도 붙인다. discovery 판정은 예전처럼 .has).
+  const scanByIp = new Map();
+  for (const s of scanList) { scanByIp.set(s.ip, s); if ((++tick & YIELD_MASK) === 0) yield; }
   const rows = [];
   const count = new Map();
   for (const vm of vms) {
@@ -277,7 +279,7 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
         ownerType: 'vm', serverType: 'VM', ownerName: vm.name, powerState: vm.powerState, guestOS: vm.guestOS,
         ...parseOsMemo(vm.guestOS),
         hostName: vm.host || '', cluster: vm.cluster || '', multiHomed: ips.length > 1, scope: scopeAt(ip, n), owner: vm,
-        discovery: scanIpSet.has(ip) ? 'both' : 'vcenter',
+        discovery: scanByIp.has(ip) ? 'both' : 'vcenter',
       });
     }
   }
@@ -294,7 +296,7 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       ownerType: 'host', serverType: 'BareMetal', ownerName: h.name, powerState: h.powerState, guestOS: `ESXi ${h.version || ''}`.trim(),
       osName: 'ESXi', osVersion: h.version || '',
       hostName: h.name, cluster: h.cluster || '', multiHomed: false, scope: scopeAt(ip, n), owner: h,
-      discovery: scanIpSet.has(ip) ? 'both' : 'vcenter',
+      discovery: scanByIp.has(ip) ? 'both' : 'vcenter',
     });
   }
   // 능동 스캔으로 발견된 IP(물리/기타 서버 등) 병합 — vCenter가 모르는 IP만 추가.
@@ -330,11 +332,15 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       const hist = ipHistoryEntry(sc.ip);
       const released = hist?.status === 'down';
       count.set(sc.ip, (count.get(sc.ip) || 0) + 1);
+      // v2.993(설계 bm-folders §13 ③): 이름 = 역방향 DNS(hostname) → 없으면 정방향 DNS 로 찾은 물리서버 이름(fwdName). 어떻게 찾았는지(nameVia)를 함께 —
+      //   둘이 다르면 역방향 이름을 쓰고 'differ' + fwdName 으로 둘 다 보인다(하나로 정하지 않는다).
+      const nm = scanNameOf(sc);
       rows.push({
         ip: sc.ip, ipNum: n, vcenterId: '', vcenterName: '(네트워크 스캔)',
-        ownerType: 'scanned', serverType: 'Scanned', ownerName: sc.hostname || sc.ip,
+        ownerType: 'scanned', serverType: 'Scanned', ownerName: nm.name || sc.ip,
         powerState: released ? 'POWERED_OFF' : 'POWERED_ON', guestOS: '', osName: '', osVersion: '',
-        hostName: sc.hostname || '', cluster: '', multiHomed: false, scope: scopeAt(sc.ip, n),
+        // 역방향만으로 찾은 이름(예전부터의 기본)에는 칸을 더하지 않는다 — 원장 행 · ipam.db 를 정방향 이름이 없을 때 예전과 같게(PERF2611-01)
+        hostName: nm.name, ...(nm.via && nm.via !== 'ptr' ? { nameVia: nm.via } : {}), ...(nm.via === 'differ' ? { fwdName: nm.fwd } : {}), cluster: '', multiHomed: false, scope: scopeAt(sc.ip, n),
         openPorts: sc.openPorts || [], services: sc.services || [], lastSeen: sc.lastSeen || null,
         firstSeen: hist?.firstSeen || null, usageStatus: hist?.status || null, released,
         source: 'scan', discovery: 'scan', owner: null,
@@ -421,6 +427,9 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       r.appliedBy = 'auto';
     }
     if (!r.displayName) r.displayName = r.hostName || r.ownerName || r.ip;
+    // v2.991: 호스트명 칸 — 관리상태의 호스트명(override) > 스캔이 찾은 이름(역DNS > mDNS > NetBIOS). 범위 계정에는 스캔이 찾은 이름을
+    //   붙이지 않는다(스캔 결과는 vCenter 귀속이 없다 — 스캔 행을 주지 않는 것과 같은 판정). ipam.db 열(record.js)은 바꾸지 않는다.
+    Object.assign(r, netNameFields(allowed ? null : (scanByIp.get(r.ip) || null), ov || null));
     const vcs = vcByIp.get(r.ip);
     if (vcs && vcs.size > 1) { r.reconcile = 'conflict'; r.conflictVcenters = [...vcs]; }
     else r.reconcile = reconcileOf(r.discovery);
@@ -608,6 +617,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
       let firstSeen = null, lastSeen = null, usageStatus = null;
       let mgmtStatus = '', appliedBy = '', rangePolicySpec = ''; // 관리상태/방식/적용정책
       let owner = null, ownerType = '', vcenterId = '', discovery = ''; // 상세/원격접속/확인출처
+      let nameVia = '', fwdName = ''; // v2.993: 스캔 이름 찾은 방법(ptr · fwd · both · differ) · 다를 때 정방향 이름
       if (i === 0) { status = 'network'; purpose = 'Network ID'; }
       else if (recs.length) {
         used++;
@@ -623,6 +633,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
           : r.serverType === 'Scanned' ? 'scanned'
             : (recs.length > 1 ? 'duplicate' : (r.multiHomed ? 'multihomed' : 'used'));
         hostname = [...new Set(recs.map((x) => x.ownerName))].join(' / ');
+        { const sr = recs.find((x) => x.nameVia); if (sr) { nameVia = sr.nameVia; fwdName = sr.fwdName || ''; } }   // v2.993: 스캔 행 이름을 찾은 방법
         serverType = r.serverType === 'BareMetal' ? '베어메탈' : (r.serverType === 'Scanned' ? '스캔' : 'VM');
         os = r.serverType === 'Scanned' ? (r.services || []).join(', ') : [r.osName, r.osVersion].filter(Boolean).join(' ');
         purpose = r.serverType === 'Scanned'
@@ -641,7 +652,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
       }
       const annRaw = annotations[ip];
       const ann = annRaw && (!annVisible || annVisible(ip)) ? annRaw : null;
-      sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
+      sheetRows.push({ ip, last: i, purpose, hostname, ...(nameVia ? { nameVia } : {}), ...(fwdName ? { fwdName } : {}), serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
     sheets.push({
       subnet: `${base}.0/24`, base, used, rows: sheetRows,
@@ -739,3 +750,18 @@ export function ipVcenterOwners(snap) {
   for (const h of snap.hosts || []) { const hip = hostLedgerIp(h); if (!hip) continue; if (!m.has(hip.ip)) m.set(hip.ip, new Set()); if (h.vcenterId) m.get(hip.ip).add(h.vcenterId); }
   return m;
 }
+
+/**
+ * v2.993(설계 bm-folders §13 ③): 스캔 행 이름과 찾은 방법(순수). via — 'ptr'(스캔이 찾은 이름 — v2.991 부터 역DNS · mDNS · NetBIOS 중 표시 이름) ·
+ *   'fwd'(정방향 DNS — 물리서버 이름으로 물어 이 IP) · 'both'(둘이 같은 이름 — 짧은 이름 · 대소문자 무시) · 'differ'(둘이 다름 — 이름은 스캔 이름, fwd 는 따로) · ''(이름 없음).
+ */
+export function scanNameOf(sc) {
+  const p = typeof sc?.hostname === 'string' ? sc.hostname : '';
+  const f = typeof sc?.fwdName === 'string' ? sc.fwdName : '';
+  const sh = (v) => v.toLowerCase().replace(/\.$/, '').split('.')[0];
+  if (p && f) return sh(p) === sh(f) ? { name: p, via: 'both' } : { name: p, via: 'differ', fwd: f };
+  if (p) return { name: p, via: 'ptr' };
+  if (f) return { name: f, via: 'fwd' };
+  return { name: '', via: '' };
+}
+

@@ -16,6 +16,7 @@ import SidePanel from './bmFolders/SidePanel.jsx';
 import MapView from './bmFolders/MapView.jsx';
 import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { UsagePair, StatusDot, SrcBadge, StackBar } from './bmFolders/parts.jsx';
+import { SRC_COLOR, SRC_SHORT, rowSrcClass, srcCounts, metricSrcText } from './bmFolders/usageSrc.js'; // v2.993: 사용률 출처 색
 import {
   INTRO, PLACE_LABEL, MISSING_WHY, pctText, wattsText, pathText, lastSeg, parentOf, ageText,
   rowsOf, aggregate, filterRows, resultNote, foldersByName, opErrorText, csvNameOf, trimPath,
@@ -262,8 +263,8 @@ export default function BmFolders() {
                     <span className="v" style={{ fontSize: 13, fontWeight: 600 }}>켜짐 {agg.on} · 꺼짐 {agg.off}{agg.powerUnknown ? ` · 모름 ${agg.powerUnknown}` : ''}</span>
                     <span className="s">사용률 못 읽음 {agg.usageMissing}{agg.noCap ? ` · 용량 모름 ${agg.noCap}` : ''}</span>
                   </div>
-                  <div className="bmf-tile"><span className="k">CPU(용량 가중)</span><span className="v">{pctText(agg.cpu)}</span><span className="s">{agg.usageN}대 기준</span></div>
-                  <div className="bmf-tile"><span className="k">메모리(용량 가중)</span><span className="v">{pctText(agg.mem)}</span><span className="s">{agg.usageN}대 기준</span></div>
+                  <div className="bmf-tile"><span className="k">CPU(용량 가중)</span><span className="v">{pctText(agg.cpu)}</span><span className="s">{agg.usageN}대 기준</span>{metricSrcText(baseRows, 'cpu') ? <span className="s" title="이 지표를 읽은 곳별 대수">{metricSrcText(baseRows, 'cpu')}</span> : null}</div>
+                  <div className="bmf-tile"><span className="k">메모리(용량 가중)</span><span className="v">{pctText(agg.mem)}</span><span className="s">{agg.usageN}대 기준</span>{metricSrcText(baseRows, 'mem') ? <span className="s" title="이 지표를 읽은 곳별 대수">{metricSrcText(baseRows, 'mem')}</span> : null}</div>
                   <div className="bmf-tile"><span className="k">전력</span><span className="v">{wattsText(agg.watts)}</span><span className="s">{agg.wattsN}대 합{agg.n - agg.wattsN ? ` · 못 읽음 ${agg.n - agg.wattsN}` : ''}</span></div>
                   <div className="bmf-tile" style={agg.faults ? { borderColor: 'rgba(239,68,68,.45)' } : undefined}>
                     <span className="k">부품 장애</span><span className="v" style={agg.faults ? { color: '#f87171' } : undefined}>{agg.faults}대</span>
@@ -283,6 +284,7 @@ export default function BmFolders() {
                   ))}
                   {sel.type === 'folder' || sel.type === 'name' ? <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center' }}><input type="checkbox" checked={sub} onChange={(e) => setSub(e.target.checked)} /> 하위 폴더 포함</label> : null}
                 </div>
+                <SrcSummary rows={baseRows} />
                 {writable && picked.size ? (
                   <SelBar picked={pickedRows} folders={folderPaths} sel={sel} op={op} busy={busy} onDone={() => setPicked(new Set())} />
                 ) : null}
@@ -307,7 +309,7 @@ export default function BmFolders() {
                           <td data-sort={r.model || ''}>{r.model || '—'}{!d.scoped && r.serviceTag ? <div className="mono muted" style={{ fontSize: 11 }}>{r.serviceTag}</div> : null}</td>
                           <td><SrcBadge src={r.src} />{r.agent ? <div className="muted mono" style={{ fontSize: 11 }}>{r.agent}</div> : null}{r.addr ? <div className="muted mono" style={{ fontSize: 11 }} title="관리 주소(iDRAC) — 관리자 판본">{r.addr}</div> : null}</td>
                           <td data-sort={r.faults ?? ''}>{r.faults == null ? <span className="muted">—</span> : r.faults > 0 ? <span className="badge red">{r.faults}건</span> : <span className="muted">없음</span>}</td>
-                          <td data-sort={r.cpu ?? ''}><UsagePair cpu={r.cpu} mem={r.mem} /></td>
+                          <td data-sort={r.cpu ?? ''}><UsagePair cpu={r.cpu} mem={r.mem} usrc={r.usrc} /></td>
                           <td data-sort={r.watts ?? ''} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{wattsText(r.watts)}</td>
                         </tr>
                       ))}
@@ -689,10 +691,30 @@ function NarrowList({ rows, writable, picked, setPicked, onOpen, scoped }) {
             <span className="l1"><StatusDot tone={r.faults > 0 ? 'red' : r.cpu == null && r.mem == null ? 'none' : r.powered === false ? 'gray' : 'green'} /><b>{r.name}</b>
               {r.faults > 0 ? <span className="badge red">{r.faults}건</span> : null}<span style={{ marginLeft: 'auto' }}><SrcBadge src={r.src} small /></span></span>
             <span className="l2">{[r.place ? pathText(r.path) : '(미분류)', r.model, !scoped ? r.serviceTag : ''].filter(Boolean).join(' · ')}</span>
-            <span className="l2">CPU {pctText(r.cpu)} · 메모리 {pctText(r.mem)} · {wattsText(r.watts)}</span>
+            <span className="l2">CPU {pctText(r.cpu)} · 메모리 {pctText(r.mem)} · {wattsText(r.watts)}{SRC_SHORT[rowSrcClass(r)] ? ` · ${SRC_SHORT[rowSrcClass(r)]}` : ''}</span>
           </button>
         </div>
       ))}
     </div>
   );
 }
+
+/** v2.993(출처 색 — 설계 bm-folders §13 ①): 표 위 '사용률을 읽은 곳' 개수 띠. 출처가 하나도 없으면 그리지 않는다. */
+function SrcSummary({ rows }) {
+  const c = srcCounts(rows);
+  const items = [['os', 'OS(SSH)'], ['idrac', 'iDRAC'], ['vcenter', 'vCenter'], ['mixed', '지표마다 다름'], ['none', '없음'], ['unknown', '출처 모름']].filter(([k]) => c[k]);
+  if (!c.os && !c.idrac && !c.vcenter && !c.mixed) return null;
+  return (
+    <div className="bmf-rsum" role="group" aria-label="사용률을 읽은 곳">
+      <span className="muted">사용률을 읽은 곳</span>
+      {items.map(([k, lb]) => (
+        <span key={k} className="it">
+          {k === 'mixed' ? <><span className="bmf-sw" style={{ background: SRC_COLOR.os }} /><span className="bmf-sw" style={{ background: SRC_COLOR.idrac }} /></> : <span className={`bmf-sw${SRC_COLOR[k] ? '' : ' none'}`} style={SRC_COLOR[k] ? { background: SRC_COLOR[k] } : undefined} />}
+          {lb} <b>{c[k]}</b>
+        </span>
+      ))}
+      <span className="muted" style={{ marginLeft: 'auto' }}>OS 를 먼저 읽고, 안 되거나 값이 없으면 iDRAC 값을 씁니다 — 막대 색과 표지가 출처입니다(지표마다 따로)</span>
+    </div>
+  );
+}
+

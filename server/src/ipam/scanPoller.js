@@ -5,17 +5,30 @@
  */
 
 import { runScan, SCAN_DEADLINE_CODE } from './scanRunner.js';
-import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, recordAgentIncomplete, sweepReleases, listScanAgents, releaseHoldStatus, getAgentReports, LOCAL } from './scanStore.js';
+import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, recordAgentIncomplete, sweepReleases, listScanAgents, releaseHoldStatus, getAgentReports, cleanNameStats, LOCAL } from './scanStore.js';
 import { enabledVcRanges } from './rangeStore.js';
 import { recordScanLog } from './scanLog.js';
 import { scheduleVcRangeMigration } from './vcRangeMigrate.js';
 import { scanStarted, scanFinished, registerScanResumer, journalFor, isResumePending } from '../util/scanJournal.js'; // v2.737: 재시작으로 중단된 스캔 기록·재개 // v2.691: vCenter 별 대역 → 수집 에이전트로 1회 이전 // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
 import { numOrNull } from '../util/numOrNull.js';
+import { fwdNamesFor } from './scanNames.js'; // v2.993: 정방향 DNS 이름(물리서버 — 라우트 층이 공급)
 
 // 로컬 폴러가 실제로 스캔할 대역 = __local__ 설정 대역 ∪ enabled인 모든 vCenter 대역(유니크).
 // v2.691: vCenter 별 대역은 수집 에이전트로 옮겨지고(vcRangeMigrate) 옮기지 못한 것만 남는다 — 남은 것은 예전처럼 중앙이 스캔한다.
 function effectiveRanges(s) {
   return [...new Set([...(s.ranges || []), ...enabledVcRanges()])];
+}
+
+// v2.991: 스캔 로그 문구 — 켜 둔 호스트명 확인 방식 · 방식별로 찾은 개수(못 읽은 값은 적지 않는다).
+const METHOD_LABEL = { dns: '역DNS', mdns: 'mDNS', netbios: 'NetBIOS' };
+function nameMethodsText(s) {
+  const on = [s.reverseDns !== false && 'dns', s.mdns !== false && 'mdns', s.netbios !== false && 'netbios'].filter(Boolean);
+  return on.length ? on.map((k) => METHOD_LABEL[k]).join('·') : '꺼짐';
+}
+function nameStatsLogText(ns) {
+  if (!ns || ns.named == null) return '';
+  const parts = ['dns', 'mdns', 'netbios'].filter((k) => (ns.tried?.[k] ?? 0) > 0).map((k) => `${METHOD_LABEL[k]} ${ns.found?.[k] ?? 0}`);
+  return `호스트명 ${ns.named}개 확인${parts.length ? `(${parts.join(' · ')})` : ''}`;
 }
 
 // 일정 시간 응답이 없으면 'IP 해제'로 간주(이력에 down 기록). 스캔 주기의 3배 또는 최소 3시간.
@@ -54,21 +67,23 @@ async function runScanOnce({ manual = false, resumeOf = null } = {}) {
   scanStarted('ipscan', 'local', { label: `IP 스캔(대역 ${ranges.length}개)`, trigger, resumeOf, meta: { manual: !!manual, ranges: ranges.length } });
   if (resumeOf) recordScanLog({ event: 'resume', trigger, message: `재시작으로 중단된 스캔을 다시 시작합니다(${new Date(resumeOf.since || started).toISOString()} 시작분 · 재개 ${(resumeOf.resumes || 0) + 1}회째).` });
   recordScanLog({ event: 'start', trigger, at: started, ranges: ranges.length, rangesSample: ranges.slice(0, 5),
-    message: `대역 ${ranges.length}개 · 포트 ${(s.ports || []).length}개 · 동시 ${s.concurrency} · 시한 ${s.timeoutMs}ms${s.ping ? ' · ICMP 병행' : ''}` });
+    message: `대역 ${ranges.length}개 · 포트 ${(s.ports || []).length}개 · 동시 ${s.concurrency} · 시한 ${s.timeoutMs}ms${s.ping ? ' · ICMP 병행' : ''} · 호스트명 확인 ${nameMethodsText(s)}` });
   try {
     // 스캔은 별도 프로세스에서(v2.363) — TCP/ping/역DNS 부하·FD 를 포탈에서 격리.
-    const { scanned, alive } = await runScan(
-      { ranges, ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, ping: s.ping },
+    // v2.993(설계 bm-folders §13 ③): 정방향 DNS 이름 — 이 포탈이 직접 수집하는 법인의 물리서버 이름(실패하면 없이 — 역방향만).
+    const fwdNames = await fwdNamesFor(LOCAL);   // 공급자는 라우트 층이 등록한다(ipam/scanNames.js — 도메인이 routes/ 를 import 하지 않게)
+    const { scanned, alive, nameStats } = await runScan(
+      { ranges, ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, mdns: s.mdns, netbios: s.netbios, ping: s.ping, ...(fwdNames.length ? { fwdNames } : {}) },
       { onProgress: (done, total, aliveCount) => { progress = { total, done, alive: aliveCount, startedAt: started }; } },
     );
     mergeScanResults(alive, Date.now(), LOCAL);
-    recordAgentReport(LOCAL, { scanned, alive: alive.length, durationMs: Date.now() - started });
+    recordAgentReport(LOCAL, { scanned, alive: alive.length, durationMs: Date.now() - started, nameStats });
     // 중앙 직접 스캔이 끝난 직후의 해제 마킹은 '중앙(LOCAL)이 소유한 IP'에만 적용한다.
     // (원격 사이트 에이전트가 보고한 IP를 중앙 스캔 결과로 오탐 down하지 않게 — 전역 staleness는 releaseTimer가 담당)
     sweepReleases(releaseIdleMs(), { agent: LOCAL });
     pruneScanResults(s.retentionDays);
-    lastRun = { at: Date.now(), durationMs: Date.now() - started, scanned, alive: alive.length, manual };
-    recordScanLog({ event: 'finish', trigger, ranges: ranges.length, scanned, alive: alive.length, durationMs: lastRun.durationMs });
+    lastRun = { at: Date.now(), durationMs: Date.now() - started, scanned, alive: alive.length, manual, ...(nameStats ? { nameStats: cleanNameStats(nameStats) } : {}) };
+    recordScanLog({ event: 'finish', trigger, ranges: ranges.length, scanned, alive: alive.length, durationMs: lastRun.durationMs, message: nameStatsLogText(lastRun.nameStats) });
     return { ok: true, ...lastRun };
   } catch (e) {
     // v2.733(점검 3회차 C1-02 — v2.732 B4-02 가 만든 회귀): 시한 초과·실패한 스캔은 결과를 남기지 않아 해제 판정이 살아 있는 IP 를

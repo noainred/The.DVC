@@ -22,6 +22,7 @@ import {
   atOptions, atCaption, normAt, editFormOf, editChanges, editNotes, editResultText,
   procDescOf, PROC_STATE_TEXT, procKey, procCoverText, procIoNote, procWaitNote, procThreadNote, PROC_NET_NOTE, PROC_ARGS_NOTE, mbsText, mbText,
   GROUP_NONE, groupLabel, groupSections, groupChips, filterByGroup, groupChipOn, groupSummary, groupStartPlan, groupStartText, groupSuggestions, suggestionText,
+  CARD_LINE_ITEMS, CARD_LINE_MAX, normCardLine, toggleCardLine, cardLineCells,
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
@@ -188,10 +189,52 @@ function TimeBar({ tb, now, coverage, oldestMinute }) {
 }
 
 /* ── 개요 ─────────────────────────────────────────────────────────────────── */
+/**
+ * v2.992 카드 아래 줄 고르기 — 체크 목록(최대 CARD_LINE_MAX · 고른 순서대로 두 개씩 줄바꿈). 바깥을 누르거나 Esc 면 닫힌다.
+ * 마지막 하나는 끄지 못하고(빈 줄 방지) 넷을 고르면 나머지는 잠긴다 — 판정은 focusMonText.toggleCardLine 하나.
+ */
+function CardLinePicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const off = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', off); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', off); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  const full = value.length >= CARD_LINE_MAX;
+  return (
+    <div className="fm-pick" ref={ref}>
+      <button type="button" className={`fm-btn sm ${open ? 'pri' : ''}`} aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(!open)}>카드 아래 줄 · {value.length}개</button>
+      {open ? (
+        <div className="fm-pick-pop" role="group" aria-label="카드 아래 줄에 보일 값">
+          <span className="fm-dim">최대 {CARD_LINE_MAX}개 · 고른 순서대로 두 개씩 · 브라우저가 기억합니다</span>
+          {CARD_LINE_ITEMS.map((it) => {
+            const on = value.includes(it.key);
+            const pos = on ? value.indexOf(it.key) + 1 : null;
+            const locked = (on && value.length === 1) || (!on && full);
+            return (
+              <label key={it.key} className={`fm-chk ${locked ? 'fm-dim' : ''}`} title={it.title}>
+                <input type="checkbox" checked={on} disabled={locked} onChange={() => onChange(toggleCardLine(value, it.key))} />
+                <span>{it.label}</span>{pos ? <b className="fm-num">{pos}</b> : null}
+              </label>
+            );
+          })}
+          <button type="button" className="fm-btn sm" onClick={() => onChange(null)}>기본값(네트워크 · 쓰기 지연)</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Overview({ main, ids, tb, now, onOpen }) {
   const [sort, setSort] = useState(() => lsGet('fm.sort', 'cpu'));
   const [node, setNode] = useState('all');
   const [split, setSplit] = useState(() => lsGet('fm.ov.split', 'flat'));
+  // v2.992 카드 아래 줄 — 사용자가 고른 값(최대 CARD_LINE_MAX · 브라우저가 기억)
+  const [line, setLineRaw] = useState(() => normCardLine(lsGet('fm.ov.line', null)));
+  const setLine = (v) => { const x = normCardLine(v); setLineRaw(x); lsSet('fm.ov.line', x); };
   const params = useMemo(() => ({ view: 'overview', targets: ids.join(','), win: tb.win, end: tb.end ?? '' }), [ids, tb.win, tb.end]);
   const ivMs = Math.max(1, Math.min(...(main.sessions.map((s) => s.interval)), 10) || 2) * 1000;
   const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? ivMs : 0, ids.length > 0);
@@ -227,7 +270,7 @@ function Overview({ main, ids, tb, now, onOpen }) {
         {[['CPU', 'cpu', x.sum?.cpu, levelOf(x.sum?.cpu, settings)], ['메모리', 'mem', x.sum?.mem, levelOf(x.sum?.mem, settings)], ['네트워크', 'net', x.sum?.net, levelOf(x.sum?.net, settings)], ['디스크', 'disk', x.sum?.disk, levelOf(x.sum?.disk, settings)]].map(([lab, k, v, lv]) => (
           <div key={k} className="fm-mrow"><span className="fm-dim">{lab}</span><span className={`fm-mv ${lv}`}>{v == null ? DASH : `${Math.round(v)}%`}</span><Spark vals={x.series?.[k]} hover={{ from: q.data?.from, to: q.data?.to, label: lab, fmt: (u) => pctText(u) }} /></div>
         ))}
-        <div className="fm-sub"><span>{x.sum ? `↓${bpsText(x.sum.netRx)} ↑${bpsText(x.sum.netTx)}` : DASH}</span><span>쓰기 지연 {msText(x.sum?.wAwait)}</span></div>
+        <div className="fm-sub fm-cardline">{cardLineCells(x.sum, line).map((c) => <span key={c.key} className="fm-ell" title={c.title}>{c.text}</span>)}</div>
         {off ? <div className="fm-why">{x.t.status?.error || STATE_TEXT[x.t.status?.state]?.label}</div> : null}
       </div>
     );
@@ -250,6 +293,7 @@ function Overview({ main, ids, tb, now, onOpen }) {
           <span className="fm-dim">담당 노드</span>
           <Seg label="담당 노드" value={node} onChange={setNode} options={nodes} />
           {hasGroups ? <><span className="fm-dim">나눠 보기</span><Seg label="나눠 보기" value={split} onChange={(v) => { setSplit(v); lsSet('fm.ov.split', v); }} options={[['flat', '한 판'], ['group', '그룹별로']]} /></> : null}
+          <CardLinePicker value={line} onChange={setLine} />
         </div>
         <span className="fm-dim">세로축 0~100% 공통 · 숫자는 구간 끝의 값</span>
       </div>

@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 대장 목록 — 호스트명 열 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+.muted{color:#8b9bb4}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.tab{padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;border:1px solid transparent;background:none;font:inherit;font-size:13px;font-weight:600;white-space:nowrap}
+.tab.active{color:#fff;background:#3b82f6;border-color:#3b82f6}
+.chip{padding:7px 12px;border-radius:8px;cursor:pointer;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;white-space:nowrap}
+.chip.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.mini{padding:1px 7px;border-radius:8px;cursor:pointer;border:1px solid transparent;background:none;color:#8b9bb4;font:inherit;font-size:11px;font-weight:600}
+.mini.add{border:1px dashed #36507a;color:#93c5fd}
+.grp{font-size:11px;color:#8b9bb4;padding:0 4px 0 10px;white-space:nowrap}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{text-align:left;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;letter-spacing:.5px;white-space:nowrap;border-bottom:1px solid #243049}
+tbody td{padding:10px 14px;border-bottom:1px solid rgba(36,48,73,.5);white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+th.nw,td.nw{background:rgba(34,211,238,.055)}
+th.nw{color:#67e8f9}
+.ip{color:#3b82f6;font-weight:700;background:none;border:none;padding:0;font:inherit;font-weight:700;cursor:pointer}
+.hn{display:inline-flex;align-items:center;gap:7px}
+.new{outline:2px dashed rgba(34,211,238,.6);outline-offset:3px}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:20px 24px 28px;max-width:1240px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:15px;font-weight:700">센터별 IP 관리대장</span>
+      <span class="muted">범위</span>
+      <span class="input" style="background:#141b2d;border:1px solid #243049;border-radius:8px;padding:7px 12px;font-size:13px">전체 vCenter</span>
+    </div>
+    <div class="muted" style="font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="display:inline-block;width:22px;height:12px;border:2px dashed rgba(34,211,238,.6);border-radius:3px"></span>
+      <span>청록 표시 = 이번에 새로 생기는 것 · 주소 · 이름은 전부 가상</span>
+    </div>
+  </div>
+
+  <div class="card" style="padding:8px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:2px">
+    <span class="grp">IP 대장</span>
+    <button class="tab active">대장 목록</button>
+    <button class="tab">서브넷 대장</button>
+    <button class="tab">추천 기능 30선</button>
+    <button class="tab">네트워크 맵</button>
+    <span class="grp">대역</span>
+    <button class="tab">대역 정책</button>
+    <span class="grp">스캔</span>
+    <button class="tab">스캔 대역·설정</button>
+    <button class="tab">스캔 상태</button>
+    <button class="tab">스캔 로그</button>
+    <span class="grp">설정·데이터</span>
+    <button class="tab">IPMS 설정</button>
+    <button class="tab">CSV 가져오기·내보내기</button>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+    <span class="input" style="background:#141b2d;border:1px solid #243049;border-radius:8px;padding:8px 12px;min-width:240px;color:#8b9bb4">IP / VM / 호스트명 검색</span>
+    <span style="flex:1 1 auto"></span>
+    <button class="chip">CSV·엑셀</button>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+    <span class="muted" style="font-size:12px">출처 대조</span>
+    <button class="chip">전체 (3007)</button>
+    <button class="chip">vCenter만 (2060)</button>
+    <button class="chip">vCenter+스캔 (0)</button>
+    <button class="chip on">스캔만(수동확인) (12)</button>
+    <button class="chip">수동등록 (0)</button>
+    <button class="chip">충돌 (935)</button>
+    <button class="chip">관리상태 지정됨 (1)</button>
+    <button class="chip">미관리 (3006)</button>
+    <button class="chip">예약 만료/임박 (0)</button>
+    <button class="chip new" title="호스트명을 찾지 못한 IP 만 — 이름을 직접 넣을 대상을 고를 때">호스트명 없음 (3)</button>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+    <span>총 <b>3,007</b>개 IP <span class="muted">(상위 12개 표시)</span></span>
+    <span class="badge blue">필터 적용 중</span>
+    <span class="new" style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px;padding:4px 10px;border-radius:8px;background:#0f1626;border:1px solid #1f2a40;font-size:12px">
+      <span>호스트명 <b>9</b> / 12</span>
+      <span class="badge blue">역DNS 4</span>
+      <span class="badge purple">NetBIOS 3</span>
+      <span class="badge green">mDNS 1</span>
+      <span class="badge teal">수동 1</span>
+      <span class="badge gray">없음 3</span>
+    </span>
+  </div>
+
+  <div style="overflow-x:auto;border-radius:12px;border:1px solid #243049;min-width:0">
+    <table style="min-width:1500px">
+      <thead>
+        <tr>
+          <th>IP 주소 ▲</th>
+          <th class="nw">호스트명</th>
+          <th>분류</th>
+          <th>센터(vCenter)</th>
+          <th>서버종류</th>
+          <th>확인 방식</th>
+          <th>관리상태</th>
+          <th>소유 자원</th>
+          <th>전원</th>
+          <th>OS 종류</th>
+          <th>OS 버전</th>
+          <th>ESXi 호스트</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><button class="ip">10.210.5.1</button></td>
+          <td class="nw"><span class="hn"><span>gw-b1.corp.example</span><span class="badge blue">역DNS</span></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">SSH · HTTPS</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.11</button></td>
+          <td class="nw"><span class="hn"><span>WIN-APP01</span><span class="badge purple">NetBIOS</span></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">SMB · RDP · WinRM</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.12</button></td>
+          <td class="nw"><span class="hn"><span>WIN-APP02</span><span class="badge purple">NetBIOS</span></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">SMB · RDP · WinRM</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.13</button></td>
+          <td class="nw"><span class="hn"><span>WIN-FILE01</span><span class="badge purple">NetBIOS</span></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">SMB · RDP</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.21</button></td>
+          <td class="nw"><span class="hn"><span>lnx-batch-01.corp.example</span><span class="badge blue">역DNS</span></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">SSH</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.22</button></td>
+          <td class="nw"><span class="hn"><span>web-stg-02.local</span><span class="badge green">mDNS</span></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">SSH · HTTP · HTTPS</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.31</button></td>
+          <td class="nw"><span class="hn"><span class="muted">—</span><button class="mini add" title="이 IP 의 호스트명을 직접 넣습니다(IP 관리상태 편집 창의 호스트명 칸)">+ 이름</button></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">HTTPS · IPMI/BMC</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.32</button></td>
+          <td class="nw"><span class="hn"><span>idrac-r740-b12</span><span class="badge teal">수동</span></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <span class="badge teal" style="font-size:9px">IP수동</span> <button class="mini">✎</button></td>
+          <td><span class="muted" style="font-size:12px">HTTPS · IPMI/BMC</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.40</button></td>
+          <td class="nw"><span class="hn"><span class="muted">—</span><button class="mini add">+ 이름</button></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">HTTP · HTTPS</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.51</button></td>
+          <td class="nw"><span class="hn"><span class="muted">—</span><button class="mini add">+ 이름</button></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">ICMP(ping)</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.52</button></td>
+          <td class="nw"><span class="hn"><span>esx-lab-07.corp.example</span><span class="badge blue">역DNS</span></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">SSH · ESXi · HTTPS</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><button class="ip">10.210.5.60</button></td>
+          <td class="nw"><span class="hn"><span>fs-old.corp.example</span><span class="badge blue">역DNS</span><span class="badge amber" title="NetBIOS 는 NAS-BACKUP 이라고 답했습니다 — 눌러서 방식별 결과 보기">이름 다름</span></span></td>
+          <td><span class="badge green">사설</span></td>
+          <td>(네트워크 스캔) <span class="muted" style="font-size:10px">데이터센터 미정</span></td>
+          <td><span class="badge teal">스캔 확인</span></td>
+          <td><span class="badge teal">Ping스캔</span></td>
+          <td><span class="muted">—</span> <button class="mini">+</button></td>
+          <td><span class="muted" style="font-size:12px">SMB</span></td>
+          <td><span class="badge green">On</span></td>
+          <td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="muted" style="font-size:12px;line-height:1.75;display:flex;flex-direction:column;gap:2px">
+    <div><b style="color:#e6edf6">호스트명 열</b> — IP 바로 옆에 둡니다(표가 가로로 넘겨도 IP 와 함께 보입니다). 배지는 그 이름을 어디서 알았는지입니다: 역DNS · mDNS · NetBIOS · 수동.</div>
+    <div><b style="color:#e6edf6">표시 순서</b> — 직접 넣은 이름 &gt; 역DNS &gt; mDNS &gt; NetBIOS. 방식마다 이름이 다르면 ‘이름 다름’ 을 붙이고, IP 를 누르면 방식별 결과를 보여 줍니다.</div>
+    <div><b style="color:#e6edf6">못 찾은 IP</b> — ‘—’ 로 두고 지어내지 않습니다. ‘+ 이름’ 은 지금 있는 ‘IP 관리상태 편집 › 호스트명’ 칸을 바로 엽니다(운영자 · 관리자).</div>
+    <div><b style="color:#e6edf6">소유 자원 · ESXi 호스트 칸</b> — 스캔 행은 소유 자원 칸에 열린 서비스만, ESXi 호스트 칸은 ‘—’(지금은 두 칸에 이름이 중복으로 들어갑니다).</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
