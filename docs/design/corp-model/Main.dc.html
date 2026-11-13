@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>물리서버 폴더 — 법인 아래 폴더, 서버마다 서비스</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./corp.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+</style>
+</helmet>
+<div class="root" style="width:1440px;height:900px">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span><span>The Davinci</span></span>
+    <span class="ver">v3.3.0</span>
+    <span class="cmdk"><span>장비 · 기능 찾기 — 이름 · IP · 시리얼</span><span class="kbd" style="margin-left:auto">Ctrl K</span></span>
+    <span class="pill" style="margin-left:auto"><span class="dot" style="background:#22c55e"></span><span>vCenter 28/28</span></span>
+    <span class="pill"><span>admin · 전체 범위</span></span>
+  </div>
+  <div class="body">
+    <nav class="sb" aria-label="주 메뉴">
+      <span class="h">모니터링</span>
+      <a href="#">Overview</a>
+      <a href="#">서버</a>
+      <a href="#">스토리지</a>
+      <a href="#">네트워크</a>
+      <span class="h">도구</span>
+      <a href="#" class="on">특수 기능</a>
+      <a href="#">설정</a>
+    </nav>
+    <div class="main">
+      <div class="crumb">특수 기능 › Bare Metal Server</div>
+      <div class="row">
+        <h1 class="h1">Bare Metal Server</h1>
+        <span class="seg"><button type="button" class="on">목록</button><button type="button">맵</button></span>
+        <span class="sp row">
+          <button type="button" class="btn pri">서버 찾아 등록</button>
+          <button type="button" class="btn">CSV</button>
+          <button type="button" class="btn">입력 다시 읽기</button>
+        </span>
+      </div>
+      <p class="intro">물리서버를 <b>법인 › 폴더</b>에 등록해 묶어 봅니다. 법인은 설정의 DataCenter 이고, 한 법인에는 서비스(vCenter + Bareos)가 여럿 있을 수 있습니다. 서버마다 어느 서비스에 매였는지, 법인 직속인지를 함께 보입니다.</p>
+
+      <div class="kpis">
+        <div class="card kpi"><span class="k">물리서버(베어메탈)</span><span class="v num">480</span><span class="s">법인 3곳 · 서비스 9개</span></div>
+        <div class="card kpi"><span class="k">폴더 등록</span><span class="v num">391</span><span class="s">81% · 폴더 34개</span></div>
+        <div class="card kpi"><span class="k">미분류</span><span class="v num">79</span><span class="s">법인은 알지만 폴더가 없음</span></div>
+        <div class="card kpi"><span class="k">법인 미지정</span><span class="v num">6</span><span class="s">법인도 서비스도 모름</span></div>
+        <div class="card kpi"><span class="k">부품 장애</span><span class="v num" style="color:#fca5a5">4대</span><span class="s">보류 0 · 없어짐 0</span></div>
+      </div>
+
+      <div class="pane">
+        <div class="card tree">
+          <div class="th">
+            <span class="seg" style="align-self:flex-start"><button type="button" class="on">법인별</button><button type="button">폴더 이름별</button></span>
+            <input class="inp" type="search" placeholder="폴더 · 법인 이름 찾기" aria-label="폴더 · 법인 이름 찾기">
+          </div>
+          <div class="rows">
+            <button type="button" class="tr"><span class="tw"></span><span class="nm">전체 물리서버</span><span class="ct">480</span></button>
+            <button type="button" class="tr on"><span class="tw">▾</span><span class="co"></span><span class="nm">폴란드 법인</span><span class="bdg e">서비스 3</span><span class="ct">153</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="fo"></span><span class="nm">ERP</span><span class="ct">42</span></button>
+            <button type="button" class="tr d1"><span class="tw">▾</span><span class="fo"></span><span class="nm">MES</span><span class="ct">18</span></button>
+            <button type="button" class="tr d2"><span class="tw"></span><span class="fo"></span><span class="nm">DB</span><span class="ct">12</span></button>
+            <button type="button" class="tr d1"><span class="tw">▸</span><span class="fo"></span><span class="nm">분석</span><span class="ct">76</span></button>
+            <button type="button" class="tr d1 un"><span class="tw"></span><span class="fo un"></span><span class="nm">(미분류)</span><span class="ct">17</span></button>
+            <button type="button" class="tr"><span class="tw">▸</span><span class="co"></span><span class="nm">미국 동부 법인</span><span class="bdg e">서비스 2</span><span class="ct">121</span></button>
+            <button type="button" class="tr"><span class="tw">▸</span><span class="co"></span><span class="nm">한국 본사</span><span class="bdg e">서비스 4</span><span class="ct">196</span></button>
+            <button type="button" class="tr un"><span class="tw">▸</span><span class="sg" style="border-color:#fbbf24"></span><span class="nm">vc-lab-01</span><span class="bdg w">법인 미배정</span><span class="ct">4</span></button>
+            <button type="button" class="tr un"><span class="tw"></span><span class="fo un"></span><span class="nm">(법인 미지정)</span><span class="ct">6</span></button>
+          </div>
+          <div class="foot"><span>법인 = 설정 › DataCenter · ‘법인 미배정’ 은 DataCenter 에 넣지 않은 vCenter 입니다</span></div>
+        </div>
+
+        <div class="card cnt">
+          <div class="fh">
+            <div class="row">
+              <span class="path"><span class="co"></span><span>폴란드 법인</span></span>
+              <span class="sp row">
+                <button type="button" class="btn pri sm">서버 찾아 등록</button>
+                <button type="button" class="btn sm">+ 폴더</button>
+                <button type="button" class="btn sm">폴더 구조 복사…</button>
+              </span>
+            </div>
+            <div class="row">
+              <span class="dim" style="font-size:12px">이 법인의 서비스</span>
+              <span class="svc"><span class="sg"></span><b>PL-ERP</b><span class="vc">vCenter</span><span class="ba">Bareos</span></span>
+              <span class="svc"><span class="sg"></span><b>PL-MES</b><span class="vc">vCenter</span><span class="ba">Bareos</span></span>
+              <span class="svc"><span class="sg"></span><b>PL-GPDB</b><span class="vc">vCenter</span><span class="no">Bareos 없음</span></span>
+              <span class="dim" style="font-size:12px">수집 <span class="mono">pl-edge-01</span></span>
+            </div>
+          </div>
+          <div class="bar">
+            <input class="inp" type="search" placeholder="이 목록에서 거르기(이름 · 모델 · 서비스 태그)" aria-label="목록 거르기" style="flex:1 1 200px;max-width:280px">
+            <button type="button" class="chipb on">전체 153</button>
+            <button type="button" class="chipb">PL-ERP 31</button>
+            <button type="button" class="chipb">PL-MES 12</button>
+            <button type="button" class="chipb">PL-GPDB 9</button>
+            <button type="button" class="chipb">법인 직속 101</button>
+          </div>
+          <div style="padding:8px 14px 0">
+            <div class="band i"><span><b>법인 직속</b> = 어느 vCenter(서비스)에도 매이지 않은 물리 전용 서버입니다. 예전에는 법인에 vCenter 가 둘 이상이면 이런 서버가 ‘법인 미지정’ 으로 빠졌습니다.</span></div>
+          </div>
+          <div style="padding:8px 0 0;overflow:hidden">
+            <table class="t">
+              <thead><tr>
+                <th style="width:28px"><input class="chk" type="checkbox" aria-label="보이는 서버 전체 선택"></th>
+                <th>이름</th><th>폴더 · 서비스</th><th>모델 · 서비스 태그</th><th>하드웨어</th><th>받는 길</th><th>부품 장애</th><th>사용률</th><th class="r">전력</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td><input class="chk" type="checkbox" aria-label="pl-erp-db01 선택"></td>
+                  <td><span class="nm"><span class="sv"></span>pl-erp-db01</span><span class="sub">RHEL 9.2</span></td>
+                  <td>ERP › DB<span class="sub" style="color:#5eead4">PL-ERP</span></td>
+                  <td>PowerEdge R750<span class="sub mono">SYNTH01</span></td>
+                  <td>2×24C · 512 GB<span class="sub">SSD 8 · 15.4 TB</span></td>
+                  <td><span class="bdg e">엣지</span><span class="sub mono">pl-edge-01</span></td>
+                  <td class="dim">없음</td>
+                  <td>CPU 35%<span class="sub">MEM 72%</span></td>
+                  <td class="r num">446 W</td>
+                </tr>
+                <tr>
+                  <td><input class="chk" type="checkbox" aria-label="pl-erp-app02 선택"></td>
+                  <td><span class="nm"><span class="sv"></span>pl-erp-app02</span><span class="sub">ESXi 8.0.2</span></td>
+                  <td>ERP<span class="sub" style="color:#5eead4">PL-ERP</span></td>
+                  <td>PowerEdge R650<span class="sub mono">SYNTH02</span></td>
+                  <td>2×16C · 256 GB<span class="sub">SSD 2 · 960 GB</span></td>
+                  <td><span class="bdg e">엣지</span><span class="sub mono">pl-edge-01</span></td>
+                  <td class="dim">없음</td>
+                  <td>CPU 22%<span class="sub">MEM 61%</span></td>
+                  <td class="r num">312 W</td>
+                </tr>
+                <tr>
+                  <td><input class="chk" type="checkbox" aria-label="pl-mes-db01 선택"></td>
+                  <td><span class="nm"><span class="sv bad"></span>pl-mes-db01</span><span class="sub">RHEL 8.9</span></td>
+                  <td>MES › DB<span class="sub" style="color:#5eead4">PL-MES</span></td>
+                  <td>PowerEdge R750<span class="sub mono">SYNTH03</span></td>
+                  <td>2×24C · 1 TB<span class="sub">SSD 6 · 16.3 TB</span></td>
+                  <td><span class="bdg e">엣지</span><span class="sub mono">pl-edge-01</span></td>
+                  <td><span class="bdg r">1건</span></td>
+                  <td>CPU 44%<span class="sub">MEM 82%</span></td>
+                  <td class="r num">935 W</td>
+                </tr>
+                <tr>
+                  <td><input class="chk" type="checkbox" aria-label="pl-ana-gp01 선택"></td>
+                  <td><span class="nm"><span class="sv"></span>pl-ana-gp01</span><span class="sub">Rocky Linux 9.3</span></td>
+                  <td>분석 › GPDB<span class="sub">법인 직속</span></td>
+                  <td>PowerEdge R760<span class="sub mono">SYNTH04</span></td>
+                  <td>2×32C · 1 TB<span class="sub">SSD 10 · 38.4 TB</span></td>
+                  <td><span class="bdg e">엣지</span><span class="sub mono">pl-edge-01</span></td>
+                  <td class="dim">없음</td>
+                  <td>CPU 58%<span class="sub">MEM 77%</span></td>
+                  <td class="r num">702 W</td>
+                </tr>
+                <tr>
+                  <td><input class="chk" type="checkbox" aria-label="pl-ana-gp02 선택"></td>
+                  <td><span class="nm"><span class="sv"></span>pl-ana-gp02</span><span class="sub">Rocky Linux 9.3</span></td>
+                  <td>분석 › GPDB<span class="sub">법인 직속</span></td>
+                  <td>PowerEdge R760<span class="sub mono">SYNTH05</span></td>
+                  <td>2×32C · 1 TB<span class="sub">SSD 10 · 38.4 TB</span></td>
+                  <td><span class="bdg e">엣지</span><span class="sub mono">pl-edge-01</span></td>
+                  <td class="dim">없음</td>
+                  <td>CPU 61%<span class="sub">MEM 74%</span></td>
+                  <td class="r num">688 W</td>
+                </tr>
+                <tr>
+                  <td><input class="chk" type="checkbox" aria-label="pl-ana-etl01 선택"></td>
+                  <td><span class="nm"><span class="sv off"></span>pl-ana-etl01</span><span class="sub">OS —</span></td>
+                  <td>분석<span class="sub">법인 직속</span></td>
+                  <td>PowerEdge R650<span class="sub mono">SYNTH06</span></td>
+                  <td>2×16C · 256 GB<span class="sub">SSD 4 · 3.8 TB</span></td>
+                  <td><span class="bdg e">엣지</span><span class="sub mono">pl-edge-01</span></td>
+                  <td class="dim">없음</td>
+                  <td class="dim">—<span class="sub">엣지 값 없음</span></td>
+                  <td class="r num">—</td>
+                </tr>
+                <tr>
+                  <td><input class="chk" type="checkbox" aria-label="pl-new-07 선택"></td>
+                  <td><span class="nm"><span class="sv"></span>pl-new-07</span><span class="sub">OS —</span></td>
+                  <td><span class="dim">(미분류)</span><span class="sub">법인 직속</span></td>
+                  <td>PowerEdge R660<span class="sub mono">SYNTH07</span></td>
+                  <td>2×24C · 512 GB<span class="sub">SSD 2 · 960 GB</span></td>
+                  <td><span class="bdg e">엣지</span><span class="sub mono">pl-edge-01</span></td>
+                  <td class="dim">없음</td>
+                  <td>CPU 3%<span class="sub">MEM 9%</span></td>
+                  <td class="r num">188 W</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="foot"><span>153대 중 7대를 그렸습니다 · 서비스는 폴더와 따로입니다(폴더는 법인 단위 — 한 폴더에 여러 서비스의 서버를 함께 넣을 수 있습니다)</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
