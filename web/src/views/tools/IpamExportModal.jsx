@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { Modal } from '../../components/Modal.jsx';
 import { downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
+import { dayStamp } from '../../dayStamp.js';
 
 export const EXPORT_SHEET_OPTS = Object.freeze([
   ['summary', '요약', '전체 주소 · 대장 주소 · 예약 · DHCP · 빈 주소 · 상태별 수'],
@@ -29,7 +30,7 @@ export function IpamExportModal({ scope, scopeName, subnetCount, onClose }) {
   const [msg, setMsg] = useState('');
   const allowed = canCsv(); // v2.643 CSV 권한(관리자 이상 + data.csv) — 서버 csvPerm 이 집행하고 화면은 안내한다
   const url = allowed ? exportUrl(picked, scope) : null;
-  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const stamp = dayStamp().replace(/-/g, ''); // 브라우저 현지 날짜(toISOString 은 UTC — 한국 오전 9시 전엔 하루 전 날짜)
   const file = `ip-ledger_${scope ? (scopeName || scope).replace(/[^\w.-]+/g, '_') : 'all'}_${stamp}.xlsx`;
   const go = async () => {
     if (!url) return;
