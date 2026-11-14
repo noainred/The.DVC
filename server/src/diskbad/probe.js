@@ -13,12 +13,18 @@
  *  · 중앙은 받은 것을 다시 자른다(ingest.js cleanProbe — 깊이 · 개수 · 길이 상한). 화면은 관리자 판본에만 보인다(라우트).
  */
 import { redfishGetCapped } from '../idrac/redfish.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { codeOf } from './classify.js';
-import { orderOf, entryRow } from './lclog.js';
+import { orderOf, entryRow, safeMgrPath } from './lclog.js';
 
 export const PROBE_VERSION = 1;
 const t = (v, n = 120) => String(v ?? '').slice(0, n);
-const errOf = (e) => (e?.status ? `HTTP ${e.status}` : t(e?.message || e, 80));
+// 실패는 상태 코드만 남긴다. 상태 코드가 없는 오류(연결 · 시한 · JSON 아님)는 문구를 싣지 않고 종류만(본문 조각 · 리다이렉트 호스트가 실리지 않게 — 반증 3.8.2 #10).
+const errOf = (e) => (Number.isFinite(e?.status) ? `HTTP ${e.status}` : (/시한|timeout|abort/i.test(String(e?.message || '').slice(0, 200)) ? '시한 초과' : '요청 실패'));
+const isAuthErr = (e) => e?.authFailed === true || e?.status === 401;
+/** 장비가 준 경로는 이 꼴일 때만 따라간다 — 같은 호스트의 /redfish/v1/ 아래 · 길이 상한 · `..` · `//` · 쿼리 없음. */
+const SAFE_PATH_RE = /^\/redfish\/v1\/[A-Za-z0-9._:\/-]{1,280}$/;
+const safePath = (v) => (typeof v === 'string' && v.length <= 300 && SAFE_PATH_RE.test(v) && !v.includes('..') && !v.includes('//') ? v : '');
 const SAFE_ID_RE = /^[A-Za-z0-9.]{1,64}$/;
 const ATTR_RE = /lclog|aggregat/i;
 const PICK_RE = /error|media|predict|fail|smart|life|realloc|block|wear|endur|remain|spare|hours/i;
@@ -27,12 +33,13 @@ const LINK_RE = /smart|metric|sensor/i;
 const members = (j) => (Array.isArray(j?.Members) ? j.Members : []);
 const pageFacts = (j) => {
   const rows = members(j).map(entryRow).filter(Boolean);
-  const count = Number(j?.['Members@odata.count']);
-  return { rows, n: rows.length, count: Number.isFinite(count) ? count : null, next: typeof j?.['Members@odata.nextLink'] === 'string' };
+  const count = numOrNull(j?.['Members@odata.count']);   // 못 읽은 건수는 0 이 아니다
+  return { rows, n: rows.length, count: count != null && count >= 0 ? count : null, next: typeof j?.['Members@odata.nextLink'] === 'string' };
 };
 const iso = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 
 /** 값 하나를 보일 꼴로(숫자 · 불리언 · 짧은 글자만). */
+const numBool = (v) => (typeof v === 'boolean' ? v : (typeof v === 'number' && Number.isFinite(v) ? v : undefined));
 const scalar = (v) => (typeof v === 'number' || typeof v === 'boolean' ? v : (typeof v === 'string' ? t(v, 60) : (v === null ? null : undefined)));
 
 /** 객체에서 이름이 PICK_RE 에 맞는 값만(얕게). */
@@ -71,7 +78,15 @@ function links(obj, max = 8) {
 export async function probeIdrac(entry, { signal = null, getJson = redfishGetCapped, now = Date.now } = {}) {
   const G = (p) => getJson(entry, p, { signal });
   const out = { v: PROBE_VERSION, at: now() };
-  const step = async (key, fn) => { try { out[key] = await fn(); } catch (e) { out[key] = { error: errOf(e) }; } };
+  // 인증이 거부되면(401) **남은 단계를 묻지 않는다** — 단계마다 다시 로그인하면 계정 잠금 · IP 차단으로 이어진다(반증 3.8.2 #5 · 자동 재시도 금지).
+  let authDenied = false;
+  const step = async (key, fn) => {
+    if (authDenied) { out[key] = { skipped: '인증 거부 뒤 건너뜀' }; return; }
+    try { out[key] = await fn(); } catch (e) {
+      out[key] = { error: errOf(e) };
+      if (isAuthErr(e)) { authDenied = true; out.authDenied = true; }
+    }
+  };
   const firstOk = async (paths) => {
     let last = null;
     for (const p of paths) {
@@ -80,11 +95,10 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
     throw last || new Error('경로 없음');
   };
 
-  let mgr = '/redfish/v1/Managers/iDRAC.Embedded.1';
+  let mgr = safeMgrPath(null);
   await step('manager', async () => {
     const list = await G('/redfish/v1/Managers');
-    const id = members(list)[0]?.['@odata.id'];
-    if (typeof id === 'string' && id.startsWith('/redfish/v1/Managers/') && id.length < 120) mgr = id.replace(/\/$/, '');
+    mgr = safeMgrPath(members(list)[0]?.['@odata.id']);
     const m = await G(mgr);
     return { firmware: t(m?.FirmwareVersion, 40), model: t(m?.Model, 60) };
   });
@@ -92,14 +106,19 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
   // ── Lifecycle 로그 첫 쪽: 쪽 크기 · 건수 · 다음 쪽 링크 · 순서 · 시각 범위 · 기록 ID 꼴 ──
   let base = `${mgr}/LogServices/Lclog/Entries`;
   let sample = '';
+  let lclogCount = null;
   await step('lclog', async () => {
     const r = await firstOk([base, `${mgr}/Logs/Lclog`]);
     base = r.path;
     const f = pageFacts(r.json);
     const ts = f.rows.map((x) => x.created).filter(Number.isFinite);
-    sample = f.rows.map((x) => x.messageId).find((x) => SAFE_ID_RE.test(x)) || '';
     const byCode = {};
     for (const x of f.rows) { const c = codeOf(x.messageId) || '(ID 없음)'; byCode[c] = (byCode[c] || 0) + 1; }
+    // 시험에 쓸 기록 ID 는 첫 쪽에서 **가장 드문 것** — 가장 흔한 것(로그인 기록)으로 물으면 걸러 받기를 무시하는 장비의 첫 쪽도 '전부 맞는 답' 처럼 보인다.
+    const byId = new Map();
+    for (const x of f.rows) if (SAFE_ID_RE.test(x.messageId)) byId.set(x.messageId, (byId.get(x.messageId) || 0) + 1);
+    sample = [...byId.entries()].sort((a, b) => a[1] - b[1])[0]?.[0] || '';
+    lclogCount = f.count;
     const e0 = members(r.json)[0] || {};
     return {
       path: base, pageLen: f.n, count: f.count, nextLink: f.next, order: orderOf(f.rows),
@@ -112,26 +131,36 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
   // ── 걸러 받기($filter): 첫 쪽에서 본 기록 ID 로 물어 **답이 맞는지** 본다(Dell 공식 스크립트가 쓰는 꼴 — MessageId eq '…') ──
   // 식은 **보낼 꼴 그대로** 만든다(공백 · 따옴표를 미리 %XX 로) — fetch 가 나중에 바꾸면 Digest 인증의 uri 와 실제 요청이 어긋나 401 이 된다.
   const enc = (expr) => encodeURIComponent(expr).replace(/'/g, '%27');
+  // 판단은 셋을 함께 본다(반증 3.8.2 #3 — 하나만 보면 걸러 받기를 **무시하는** 장비가 '지원' 으로 보인다):
+  //   ① 온 행이 전부 식에 맞는가(allMatch) ② 건수가 전체보다 줄었는가(narrowed — 건수를 모르면 null) ③ 없는 ID 로 물으면 0건인가(음성 대조).
   const filterTry = async (expr, okRow) => {
     const j = await G(`${base}?$filter=${enc(expr)}`);
     const f = pageFacts(j);
-    return { n: f.n, count: f.count, nextLink: f.next, allMatch: f.n > 0 && f.rows.every(okRow) };
+    const matched = f.rows.filter(okRow).length;
+    return { n: f.n, matched, count: f.count, nextLink: f.next, allMatch: f.n > 0 && matched === f.n,
+      narrowed: f.count != null && lclogCount != null ? f.count < lclogCount : null };
   };
   if (sample) {
     const code = codeOf(sample);
     const stem = sample.replace(/\d+$/, '');
+    const head = code && sample.endsWith(code) ? sample.slice(0, sample.length - code.length) : '';
+    // 음성 대조: 있을 수 없는 ID. 행이 오면 이 장비는 식을 무시한다 — 아래 '맞는 답' 은 믿지 않는다.
+    await step('filterNone', async () => { const r = await filterTry(`MessageId eq '${head}ZZZ99999'`, () => false); return { n: r.n, count: r.count }; });
+    const ignores = Number.isFinite(out.filterNone?.n) ? out.filterNone.n > 0 : null;
+    const verdict = (r) => (r && !r.error && !r.skipped ? (ignores === true ? false : (r.allMatch && r.narrowed !== false && ignores === false ? true : (r.allMatch ? null : false))) : null);
     await step('filterExact', () => filterTry(`MessageId eq '${sample}'`, (x) => x.messageId === sample));
     if (stem && stem !== sample) {
       await step('filterPrefixEq', () => filterTry(`MessageId eq '${stem}'`, (x) => String(x.messageId).startsWith(stem)));
       await step('filterStartsWith', () => filterTry(`startswith(MessageId,'${stem}')`, (x) => String(x.messageId).startsWith(stem)));
     }
-    // 디스크 기록만: 같은 머리말에 PDR 을 붙여 물어본다(머리말 일치를 받아 주는 장비라면 한 번에 PDR 전부가 온다).
-    const head = code && sample.endsWith(code) ? sample.slice(0, sample.length - code.length) : '';
+    // 디스크 기록: 머리말 일치(PDR 전부)와 정확한 ID(PDR54) — **맞는 행만** 센다(무시하는 장비의 첫 쪽 50건을 'PDR54 50건' 으로 읽지 않게).
     await step('filterPdr', async () => {
-      const r = await filterTry(`MessageId eq '${head}PDR'`, (x) => /PDR\d+$/i.test(String(x.messageId)));
-      const j = await G(`${base}?$filter=${enc(`MessageId eq '${head}PDR54'`)}`);
-      return { ...r, pdr54: pageFacts(j).n };
+      const r = await filterTry(`MessageId eq '${head}PDR'`, (x) => /PDR\d{1,6}$/i.test(String(x.messageId)));
+      const q = await filterTry(`MessageId eq '${head}PDR54'`, (x) => /PDR54$/i.test(String(x.messageId)));
+      return { prefix: { n: r.n, matched: r.matched, count: r.count }, pdr54: { n: q.n, matched: q.matched, count: q.count } };
     });
+    // 한 줄 결론: true = 맞는 답을 줬고 음성 대조도 통과 · false = 무시하거나 틀린 답 · null = 판단할 근거가 모자람(0건 등).
+    out.filterVerdict = { ignoresFilter: ignores, exact: verdict(out.filterExact), prefixEq: verdict(out.filterPrefixEq), startsWith: verdict(out.filterStartsWith) };
   } else out.filterExact = { error: '첫 쪽에 쓸 수 있는 기록 ID 가 없음' };
 
   // ── 내보내기 동작이 있는가(부르지 않는다 — 이름과 받는 값만) ──
@@ -143,16 +172,16 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
     for (const want of ['ExportLCLog', 'ExportCompleteLCLog']) {
       const a = actions[`#DellLCService.${want}`];
       if (!a) { res[want] = '없음'; continue; }
-      const info = typeof a['@Redfish.ActionInfo'] === 'string' ? a['@Redfish.ActionInfo'] : '';
+      const info = safePath(a['@Redfish.ActionInfo']);
       const inline = Array.isArray(a['ShareType@Redfish.AllowableValues']) ? a['ShareType@Redfish.AllowableValues'] : null;
       if (inline) { res[want] = { shareTypes: inline.slice(0, 10).map((x) => t(x, 16)) }; continue; }
-      if (!info.startsWith('/redfish/v1/') || info.length > 200) { res[want] = '있음(받는 값 모름)'; continue; }
+      if (!info) { res[want] = '있음(받는 값 모름)'; continue; }
       try {
         const ai = await G(info);
         const params = Array.isArray(ai?.Parameters) ? ai.Parameters : [];
         const st = params.find((p) => p?.Name === 'ShareType');
         res[want] = { params: params.slice(0, 16).map((p) => t(p?.Name, 32)), shareTypes: Array.isArray(st?.AllowableValues) ? st.AllowableValues.slice(0, 10).map((x) => t(x, 16)) : null };
-      } catch (e) { res[want] = { error: errOf(e) }; }
+      } catch (e) { if (isAuthErr(e)) throw e; res[want] = { error: errOf(e) }; }
     }
     return res;
   });
@@ -176,19 +205,20 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
   // ── 디스크 한 개: 누적 오류 값 · SMART 링크가 있는가 ──
   await step('drive', async () => {
     const sys = await G('/redfish/v1/Systems');
-    const sysId = members(sys)[0]?.['@odata.id'];
-    if (typeof sysId !== 'string' || !sysId.startsWith('/redfish/v1/Systems/')) throw new Error('시스템 경로 없음');
-    const st = await G(`${sysId.replace(/\/$/, '')}/Storage`);
+    const sysRaw = safePath(members(sys)[0]?.['@odata.id']);
+    if (!sysRaw.startsWith('/redfish/v1/Systems/')) throw new Error('시스템 경로 없음');
+    const sysId = sysRaw.endsWith('/') ? sysRaw.slice(0, -1) : sysRaw;
+    const st = await G(`${sysId}/Storage`);
     let driveUrl = '';
     let ctrls = 0;
     for (const m of members(st).slice(0, 6)) {
-      const cu = m?.['@odata.id'];
-      if (typeof cu !== 'string' || !cu.startsWith('/redfish/v1/')) continue;
+      const cu = safePath(m?.['@odata.id']);
+      if (!cu.startsWith(`${sysId}/`)) continue;
       ctrls += 1;
       // eslint-disable-next-line no-await-in-loop
       const c = await G(cu);
-      const d = (Array.isArray(c?.Drives) ? c.Drives : [])[0]?.['@odata.id'];
-      if (typeof d === 'string' && d.startsWith('/redfish/v1/') && d.length < 300) { driveUrl = d; break; }
+      const d = safePath((Array.isArray(c?.Drives) ? c.Drives : [])[0]?.['@odata.id']);
+      if (d) { driveUrl = d; break; }
     }
     if (!driveUrl) return { controllers: ctrls, note: '디스크가 달린 컨트롤러를 찾지 못함' };
     const d = await G(driveUrl);
@@ -198,19 +228,20 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
       keys: Object.keys(d || {}).slice(0, 50).map((k) => t(k, 40)), dellKeys: Object.keys(dell).slice(0, 60).map((k) => t(k, 48)),
       values: { ...picks(d), ...picks(dell) }, links: links(d),
     };
-    const smart = res.links.find((x) => /smart/i.test(x));
-    if (smart && smart.startsWith('/redfish/v1/')) {
+    // SMART 링크는 **그 디스크 아래**의 것만 따라가고(다른 자원으로 새지 않게) 값은 수 · 불리언만 싣는다(계정 이름 같은 글자가 실리지 않게 — 반증 3.8.2 #10).
+    const smart = res.links.map(safePath).find((x) => x && /smart/i.test(x) && x.startsWith(`${driveUrl}/`));
+    if (smart) {
       try {
         const sj = await G(smart);
         const vals = {};
         let n = 0;
         for (const [k, v] of Object.entries(sj || {})) {
           if (n >= 40 || k.startsWith('@')) continue;
-          const s = scalar(v);
-          if (s !== undefined) { vals[t(k, 48)] = s; n += 1; }
+          const x = numBool(v);
+          if (x !== undefined) { vals[t(k, 48)] = x; n += 1; }
         }
         res.smart = vals;
-      } catch (e) { res.smart = { error: errOf(e) }; }
+      } catch (e) { if (isAuthErr(e)) throw e; res.smart = { error: errOf(e) }; }
     }
     return res;
   });

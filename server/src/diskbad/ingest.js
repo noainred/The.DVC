@@ -45,14 +45,19 @@ function cleanLog(L, now) {
     // v3.8.2 읽기 진단(판정에 쓰지 않는다 — 화면이 '무엇을 읽었는지' 를 밝힌다). 모르는 판의 엣지는 보내지 않는다(null).
     pages: cnt(L.pages), ms: cnt(L.ms), distinct: cnt(L.distinct), firstLen: cnt(L.firstLen),
     hasNext: b(L.hasNext), path: PATHS.has(L.path) ? L.path : '',
-    top: Array.isArray(L.top) ? L.top.slice(0, TOP_MAX).map((x) => (isObj(x) ? { code: s(x.code, 16), n: cnt(x.n) ?? 0 } : null)).filter((x) => x && x.code) : null,
+    // 건수를 못 읽은 항목은 0 으로 두지 않고 버린다.
+    top: Array.isArray(L.top) ? L.top.slice(0, TOP_MAX).map((x) => (isObj(x) ? { code: s(x.code, 16), n: cnt(x.n) } : null)).filter((x) => x && x.code && x.n != null) : null,
   };
 }
 
 /** 0 이상의 정수(못 읽으면 null — 0 이 아니다). */
 function cnt(v) { const n = numOrNull(v); return n != null && n >= 0 ? Math.floor(n) : null; }
 
-/** 장비 진단(probe.js)을 다시 자른다 — 글자 · 수 · 불리언만, 깊이 4 · 객체 60키 · 배열 60개 · 글자 200자. */
+/**
+ * 장비 진단(probe.js)을 다시 자른다 — 글자 · 수 · 불리언만, 깊이 4 · 객체 60키 · 배열 60개 · 글자 200자 · 전체 16KB(UTF-8 바이트).
+ * ⚠ 의도한 예외: 다른 엣지 수신(아는 필드만)과 달리 **모양을 정하지 않은 절단**이다 — 진단은 '장비가 무엇을 주는지 모른다' 가 전제라
+ *   필드를 미리 정할 수 없다. 그래서 판정 · 집계에 쓰지 않고(화면에 관리자 판본으로만 보인다) 크기 · 깊이 · 타입만 묶는다.
+ */
 function san(v, depth) {
   if (v === null || typeof v === 'boolean') return v;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
@@ -72,7 +77,7 @@ function san(v, depth) {
 export function cleanProbe(p) {
   if (!isObj(p)) return null;
   const o = san(p, 0);
-  return JSON.stringify(o).length > PROBE_MAX_BYTES ? { v: typeof o.v === 'number' ? o.v : 0, error: '진단 결과가 상한보다 커서 버렸습니다.' } : o;
+  return Buffer.byteLength(JSON.stringify(o), 'utf8') > PROBE_MAX_BYTES ? { v: typeof o.v === 'number' ? o.v : 0, error: '진단 결과가 상한보다 커서 버렸습니다.' } : o;
 }
 
 function cleanRecord(r, now) {
@@ -90,7 +95,7 @@ function cleanDrive(d) {
   const cap = numOrNull(d.capacityGB);
   return {
     id: s(d.id, 200), name: s(d.name, 128), model: s(d.model, 80), serial: s(d.serial, 64),
-    capacityGB: cap != null && cap >= 0 ? cap : null, media: s(d.media, 16), health: s(d.health, 16),
+    capacityGB: cap != null && cap >= 0 ? cap : null, media: s(d.media, 16), health: s(d.health, 16), state: s(d.state, 24),
     predictive: b(d.predictive), inVolume: b(d.inVolume),
   };
 }

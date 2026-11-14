@@ -185,7 +185,8 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
         read_diag: prev?.read_diag ?? null, probe_json: prev?.probe_json ?? null, probe_at: prev?.probe_at ?? null,
       };
       // 장비 진단은 온 것만 바꾼다(서버 한 대를 직접 점검했을 때만 온다). 로그 읽기가 실패한 점검에도 실릴 수 있다.
-      if (s.probe) { row.probe_json = JSON.stringify(s.probe).slice(0, 20_000); row.probe_at = now; }
+      //   답한 단계가 하나도 없는 진단(전부 실패 · 시한)은 지난 정상 진단을 덮지 않는다 — 지난 것이 없을 때만 남긴다(실패했다는 사실을 보이게).
+      if (s.probe && (probeAnswered(s.probe) || !prev?.probe_json)) { row.probe_json = JSON.stringify(s.probe).slice(0, 20_000); row.probe_at = now; }
       if (s.ok && s.log) {
         // 반증 #8: 기록 상한으로 잘렸으면 그 아래 구간은 이번에 '본' 것이 아니다 — 남긴 가장 오래된 기록부터만 본 것으로 적고 complete 를 내린다.
         let capFloor = null;
@@ -206,8 +207,9 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
         row.read_last = finite(L.read);
         // 왜 끝까지 못 읽었나(budget · max · skip — 장비가 쪽 넘김을 지원하지 않음 · capped — 기록 상한). 화면이 '일부만 읽음' 의 이유로 밝힌다.
         row.read_stop = s.recordsCapped ? 'capped' : (s.log.stopped || null);
-        // 읽기 진단은 **처음부터 읽은 점검**의 것만 남긴다 — 이어 읽기는 새 항목 몇 건의 구성이라 활성 로그 전체를 말하지 않는다.
-        if (!s.log.cursorUsed && Array.isArray(s.log.top)) {
+        // 읽기 진단은 **로그 전체를 읽은 점검**의 것만 남긴다 — 지난 자리를 찾아 멈춘 이어 읽기는 새 항목 몇 건의 구성이라 활성 로그 전체를 말하지 않는다.
+        //   지난 자리를 못 찾고 끝까지 읽은 점검(활성 로그가 점검 간격보다 짧은 서버는 매번 이 경우다)은 전체 읽기다(반증 3.8.2 #2).
+        if (!s.log.foundCursor && Array.isArray(s.log.top)) {
           row.read_diag = JSON.stringify({ at: now, read: finite(s.log.read), total: finite(s.log.total), pages: finite(s.log.pages), ms: finite(s.log.ms),
             distinct: finite(s.log.distinct), firstLen: finite(s.log.firstLen), hasNext: s.log.hasNext ?? null, path: s.log.path || '', top: s.log.top,
             oldest: finite(s.log.oldestRead), newest: finite(s.log.newestCreated), reachedEnd: s.log.reachedEnd === true }).slice(0, 4_000);
@@ -249,6 +251,12 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
   return { ok: true, servers: storedIds.length, storedIds, newRecords, baselineServers };
 }
 
+/** 장비 진단에 답한 단계가 하나라도 있는가(`{error}` · `{skipped}` 가 아닌 객체). */
+export function probeAnswered(p) {
+  if (!p || typeof p !== 'object') return false;
+  return Object.entries(p).some(([k, v]) => !['v', 'at', 'ms', 'error', 'authDenied', 'synthesized', 'filterVerdict'].includes(k)
+    && v && typeof v === 'object' && !('error' in v) && !('skipped' in v));
+}
 const parseObj = (v) => { try { const j = JSON.parse(v || 'null'); return j && typeof j === 'object' && !Array.isArray(j) ? j : null; } catch { return null; } };
 const rowServer = (r) => ({
   agent: r.agent, serverId: r.server_id, name: r.name || '', host: r.host || '', serviceTag: r.service_tag || '',

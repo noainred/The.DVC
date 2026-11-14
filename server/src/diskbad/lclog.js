@@ -21,11 +21,21 @@
  *   남은 예산을 보고 멈춘다 — 그러면 읽은 데까지는 결과로 남는다(일부만 읽음 — complete:false).
  */
 import { redfishGetCapped } from '../idrac/redfish.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { codeOf, isStorageCode, MESSAGE_MAX } from './classify.js';
+
+/** 장비가 준 관리자 경로는 **이 꼴일 때만** 쓴다(반증 3.8.2 #4 — 검사 없이 붙이면 다른 호스트 · 포트 꼴이 만들어지고, 끝 슬래시를 정규식으로 떼면 O(n²)). */
+export const MGR_PATH_RE = /^\/redfish\/v1\/Managers\/[A-Za-z0-9._-]{1,64}\/?$/;
+export const DEFAULT_MGR = '/redfish/v1/Managers/iDRAC.Embedded.1';
+export function safeMgrPath(v) {
+  if (typeof v !== 'string' || v.length > 100 || !MGR_PATH_RE.test(v)) return DEFAULT_MGR;
+  return v.endsWith('/') ? v.slice(0, -1) : v;
+}
 
 const PAGE_MAX = 2_000;          // 한 쪽 항목 수 상한(장비가 이상한 값을 줘도 메모리를 지킨다)
 const CODES_MAX = 2_000;         // 구성 집계에 담는 서로 다른 기록 ID 수 상한
 export const TOP_CODES = 8;      // 결과에 싣는 상위 기록 ID 수
+const COUNT_MAX = 5_000_000;     // 건수로 믿는 상한(터무니없는 값은 모르는 것으로)
 const t = (v, n) => String(v ?? '').slice(0, n);
 
 /** Redfish LogEntry → 보관 행. 시각을 못 읽으면 null(순서 판정에 못 쓴다 — 버리지 않고 센다). */
@@ -38,13 +48,20 @@ export function entryRow(e) {
   };
 }
 
-/** 첫 쪽의 정렬 방향 — 시각이 내려가면 desc, 올라가면 asc, 판단이 안 서면 unknown. */
+/**
+ * 첫 쪽의 정렬 방향 — **이웃한 항목끼리** 본다(반증 3.8.2 #9). 처음과 끝만 비교하면 iDRAC 시계가 뒤로 간 뒤의 새 항목 몇 건
+ * (맨 위인데 시각은 더 옛날) 때문에 '오래된 것 먼저' 로 오판해 그 새 항목을 건너뛰었다. 이웃 비교가 한쪽으로 가고 거스르는 것이
+ * 한 번(또는 10%) 이하이면 그 방향, 섞였으면 unknown(전량을 읽는다). 시각이 같은 이웃은 세지 않는다.
+ */
 export function orderOf(rows) {
   const ts = rows.map((r) => r?.created).filter((v) => Number.isFinite(v));
-  if (ts.length < 2) return 'unknown';
-  const first = ts[0]; const last = ts[ts.length - 1];
-  if (first > last) return 'desc';
-  if (first < last) return 'asc';
+  let down = 0; let up = 0;
+  for (let i = 1; i < ts.length; i += 1) { if (ts[i] < ts[i - 1]) down += 1; else if (ts[i] > ts[i - 1]) up += 1; }
+  const n = down + up;
+  if (!n) return 'unknown';
+  const slack = Math.max(1, Math.floor(n * 0.1));
+  if (down > up && up <= slack) return 'desc';
+  if (up > down && down <= slack) return 'asc';
   return 'unknown';
 }
 
@@ -66,22 +83,48 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
   const t0 = now();
   const G = (p) => getJson(entry, p, { signal });
   const mgrs = await G('/redfish/v1/Managers');
-  const mgrPath = String((Array.isArray(mgrs?.Members) ? mgrs.Members : [])[0]?.['@odata.id'] || '/redfish/v1/Managers/iDRAC.Embedded.1');
-  const mgr = mgrPath.replace(/\/+$/, '');
+  const mgrPath = safeMgrPath((Array.isArray(mgrs?.Members) ? mgrs.Members : [])[0]?.['@odata.id']);
+  const mgr = mgrPath;
   let base = `${mgr}/LogServices/Lclog/Entries`;
   let pages = 0;
   const page = async (skip) => {
     const j = await G(skip > 0 ? `${base}?$skip=${skip}` : base);
     pages += 1;
-    const members = Array.isArray(j?.Members) ? j.Members.slice(0, PAGE_MAX) : [];
-    const count = Number(j?.['Members@odata.count']);
-    return { rows: members.map(entryRow).filter(Boolean), total: Number.isFinite(count) && count >= 0 ? count : null, hasNext: typeof j?.['Members@odata.nextLink'] === 'string' };
+    const has = Array.isArray(j?.Members);
+    const members = has ? j.Members.slice(0, PAGE_MAX) : [];
+    // 못 읽은 건수는 0 이 아니다(Number(null) === 0 — 반증 3.8.2 #7). 정수 꼴일 때만 건수로 본다.
+    const c = numOrNull(j?.['Members@odata.count']);
+    return { rows: members.map(entryRow).filter(Boolean), total: c != null && c >= 0 && Number.isSafeInteger(c) && c <= COUNT_MAX ? c : null,
+      hasNext: typeof j?.['Members@odata.nextLink'] === 'string', noMembers: !has };
+  };
+  /**
+   * 다음 쪽(skip > 0). 장비가 오류를 주거나 Members 없는 답을 줄 때 **읽은 데까지를 버리지 않는다**(반증 3.8.2 #6):
+   *  · 앞 쪽에 다음 쪽 링크가 없었고 건수도 다 찼거나 모르면 → 끝(Dell 공식 스크립트도 범위 밖 오류 · 500 을 끝으로 본다).
+   *  · 그 밖(링크가 더 있다고 했거나 건수 안쪽) → 도중에 끊김(short — 일부만 읽음).
+   *  · 인증 · 권한(401 · 403)과 상태 코드 없는 오류(연결 · 시한)는 그대로 던진다.
+   */
+  const nextPage = async (skip, prevHadNext) => {
+    const expectMore = prevHadNext || (out.total != null && skip < out.total);
+    let r;
+    try { r = await page(skip); } catch (e) {
+      const st = e?.status;
+      if (!Number.isFinite(st) || st === 401 || st === 403 || st < 400) throw e;
+      return expectMore ? { short: true } : { end: true };
+    }
+    if (r.noMembers) return expectMore ? { short: true } : { end: true };
+    return r;
   };
   // 반증 #9: `$skip` 을 무시하는 장비는 어느 쪽을 달라 해도 첫 쪽을 준다 — 그대로 믿으면 같은 50건을 끝까지 돌고 '끝까지 읽음' 이라 거짓말한다.
   //   다른 쪽을 달라 했는데 첫 행이 첫 쪽의 첫 행과 같으면 지원하지 않는 것으로 보고 멈춘다(일부만 읽음 — complete:false).
+  //   첫 행만 비교하면 요청 사이에 맨 위에 새 항목이 쌓일 때 빗나간다(반증 3.8.2 #8-B) — 그 쪽의 행 **절반 이상**이 첫 쪽에 있던 행이면 무시한 것으로 본다.
   const rowKey = (r) => (r ? `${r.entryId}|${r.created}` : '');
-  let firstKey = '';
-  const skipIgnored = (rows) => rows.length > 0 && firstKey !== '' && rowKey(rows[0]) === firstKey;
+  let firstKeys = new Set();
+  const skipIgnored = (rows) => {
+    if (!rows.length || !firstKeys.size) return false;
+    let hit = 0;
+    for (const r of rows) if (firstKeys.has(rowKey(r))) hit += 1;
+    return hit * 2 >= rows.length;
+  };
 
   const out = { mgrPath, order: 'unknown', total: null, read: 0, undated: 0, newest: null, oldestRead: null, reachedEnd: false, foundCursor: false, cursorUsed: false, stopped: '', entries: [],
     pages: 0, ms: 0, distinct: 0, top: [], firstLen: 0, hasNext: false, path: 'std' };
@@ -122,11 +165,12 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
     base = `${mgr}/Logs/Lclog`; out.path = 'legacy';
     first = await page(0);
   }
-  firstKey = rowKey(first.rows[0]);
+  firstKeys = new Set(first.rows.map(rowKey));
   out.firstLen = first.rows.length; out.hasNext = first.hasNext;
   // 건수(Members@odata.count)는 **첫 쪽보다 클 때만** 전체 건수로 믿는다. 다음 쪽 링크가 있는데 건수가 첫 쪽 길이 이하이면 그 값은
   //   '이 쪽의 건수' 다(펌웨어마다 다를 수 있다 — Dell 공식 스크립트는 건수를 쓰지 않고 빈 쪽까지 넘긴다). 그때는 건수를 모르는 것으로 두고 빈 쪽까지 읽는다.
-  out.total = (first.total != null && first.hasNext && first.total <= first.rows.length) ? null : first.total;
+  //   건수가 첫 쪽 길이보다 **작으면** 모순이라 버린다(다음 쪽 링크와 무관 — 반증 3.8.2 #7).
+  out.total = (first.total == null || first.total < first.rows.length || (first.hasNext && first.total <= first.rows.length)) ? null : first.total;
   out.order = orderOf(first.rows);
   // cursor 로 멈추는 것은 '최신부터 읽고 있다' 가 확실할 때만 — 방향을 모르거나(unknown) 오래된 것 먼저인데 전체 건수를 모르면
   //   첫 항목(가장 오래된 것)에서 멈춰 '이어 읽었다' 고 거짓말하게 된다. 그때는 전량을 읽는다(중앙이 중복을 거른다).
@@ -143,8 +187,16 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
     while (end > 0) {
       if (!firstPage && overBudget()) return done();
       const start = Math.max(0, end - size);
-      const rows = start === 0 ? first.rows.slice(0, end) : (await page(start)).rows;
-      if (start > 0 && skipIgnored(rows)) { out.stopped = 'skip'; return done(); }
+      let rows;
+      if (start === 0) rows = first.rows.slice(0, end);
+      else {
+        const nx = await nextPage(start, true);
+        if (nx.short || nx.end) { out.stopped = 'short'; return done(); }
+        rows = nx.rows;
+      }
+      // 첫 쪽과 겹치는 자리(start < 첫 쪽 길이)는 겹치는 것이 정상이다 — 그때는 첫 행이 첫 쪽의 첫 행과 같은지만 본다.
+      const ignored = start >= size ? skipIgnored(rows) : (start > 0 && rows.length > 0 && rowKey(rows[0]) === rowKey(first.rows[0]));
+      if (ignored) { out.stopped = 'skip'; return done(); }
       firstPage = false;
       // 건수 안쪽인데 빈 쪽 — 끝이 아니라 도중에 끊긴 것이다(그 아래를 못 봤다).
       if (!rows.length) { out.stopped = 'short'; return done(); }
@@ -154,21 +206,33 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
     out.reachedEnd = true;
     return done();
   }
-  // 최신 먼저(또는 판단 불가 — 그대로 앞에서부터. 판단 불가일 때 cursor 로 멈추는 것은 desc 와 같은 가정이라 화면이 order 를 밝힌다).
+  // 최신 먼저(또는 판단 불가 — 그대로 앞에서부터. 판단 불가일 때는 cursor 를 쓰지 않는다 — 위).
+  // 끝 판정(반증 3.8.2 #6 · #8-D): 건수는 **멈추는 근거가 아니다** — 읽는 동안 로그가 늘면 끝의 항목이 건수 밖으로 밀린다.
+  //   다음 쪽 링크가 없고 건수가 다 찼을 때만 더 묻지 않는다. 그 밖에는 빈 쪽(또는 끝을 알리는 오류)이 올 때까지 묻는다.
+  //   읽는 동안 맨 위에 새 항목이 쌓이면 끝의 몇 줄이 계속 한 쪽 뒤로 밀려 **같은 줄**이 다시 온다 — 받은 쪽이 전부 앞 쪽에서 본 줄이면 끝이다
+  //   (끝을 쫓아 무한히 묻지 않는다).
   let rows = first.rows;
+  let hadNext = first.hasNext;
   let skip = 0;
+  let prevKeys = new Set();
   for (;;) {
+    if (rows.length && prevKeys.size && rows.every((r) => prevKeys.has(rowKey(r)))) break;
     for (const r of rows) if (!take(r)) return done();
+    prevKeys = new Set(rows.map(rowKey));
     skip += rows.length;
-    if (out.total != null && skip >= out.total) break;
+    if (!hadNext && out.total != null && skip >= out.total) break;
     if (overBudget()) return done();
-    rows = (await page(skip)).rows;
-    if (skipIgnored(rows)) { out.stopped = 'skip'; return done(); }
-    if (!rows.length) {
-      // 장비가 알려 준 건수보다 먼저 빈 쪽이 왔다 — '끝' 으로 치지 않는다(도중에 끊김 · 일부만 읽음).
-      if (out.total != null && skip < out.total) { out.stopped = 'short'; return done(); }
+    const nx = await nextPage(skip, hadNext);
+    if (nx.end) break;
+    if (nx.short) { out.stopped = 'short'; return done(); }
+    if (skipIgnored(nx.rows)) { out.stopped = 'skip'; return done(); }
+    if (!nx.rows.length) {
+      // 장비가 알려 준 건수보다 먼저, 또는 다음 쪽이 있다고 해 놓고 빈 쪽이 왔다 — '끝' 으로 치지 않는다(도중에 끊김 · 일부만 읽음).
+      //   건수를 알고 다 읽었으면 끝이다(마지막 쪽에도 다음 쪽 링크를 다는 장비가 있을 수 있다).
+      if (out.total != null ? skip < out.total : hadNext) { out.stopped = 'short'; return done(); }
       break;
     }
+    rows = nx.rows; hadNext = nx.hasNext;
   }
   out.reachedEnd = true;
   return done();

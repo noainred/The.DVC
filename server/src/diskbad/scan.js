@@ -55,7 +55,7 @@ export function drivesOf(inv) {
   if (inv.collections && inv.collections.disks && inv.collections.disks !== 'ok') return null;
   return inv.disks.slice(0, DRIVES_MAX).map((d) => ({
     id: t(d?.id, 200), name: t(d?.name, 128), model: t(d?.model, 80), serial: t(d?.serial, 64),
-    capacityGB: Number.isFinite(d?.capacityGB) ? d.capacityGB : null, media: t(d?.media, 16), health: t(d?.health, 16),
+    capacityGB: Number.isFinite(d?.capacityGB) ? d.capacityGB : null, media: t(d?.media, 16), health: t(d?.health, 16), state: t(d?.state, 24),
     predictive: d?.predictiveFailure === true ? true : (d?.predictiveFailure === false ? false : null),
     inVolume: d?.inVolume === true ? true : (d?.inVolume === false ? false : null),
   }));

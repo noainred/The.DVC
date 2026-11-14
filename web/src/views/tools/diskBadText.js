@@ -67,7 +67,8 @@ export function clsOfCode(code, refs) {
 export function serverBand(view, now = Date.now()) {
   if (!view) return { tone: 'neutral', title: '아직 조회하지 않았습니다', lines: ['Lifecycle 로그 전체를 읽는 작업이라 탭을 열 때 자동으로 돌지 않습니다. 점검을 누르면 이 서버를 맡은 노드(법인 엣지 또는 중앙)가 읽어 옵니다.'] };
   const cov = view.coverage || {};
-  const from = cov.coveredFrom ?? cov.continuousSince;
+  // 구간은 **끊김 없이 본 구간**(continuousSince)으로 말한다 — '지금까지 본 가장 오래된 시각'(coveredFrom)은 사이에 못 본 틈이 있어도 내려간다(반증 3.8.2 #1).
+  const from = cov.continuousSince;
   const span = Number.isFinite(from) ? `${fmtDate(from)} ~ ${fmtDate(now)} (${spanText(from, now)})` : '구간 모름';
   if (view.status === 'unread') {
     return { tone: 'err', title: cov.lastStatusLabel ? `읽지 못했습니다 — ${cov.lastStatusLabel}` : '아직 읽지 못했습니다', lines: ['배드 섹터 유무는 판정하지 않았습니다.', ...(cov.lastReason ? [cov.lastReason] : [])] };
@@ -75,17 +76,20 @@ export function serverBand(view, now = Date.now()) {
   if (view.status === 'records') {
     const c = view.counts || {};
     return { tone: 'bad', title: `배드 섹터 기록이 있습니다 — ${c.records}건 · 디스크 자리 ${c.slots}곳`, lines: [
-      `아직 사용 중 ${c.inUse} · 교체됨 ${c.replaced} · 판단 불가 ${c.unknown}`, `로그가 남아 있는 구간 ${span}`] };
+      `아직 사용 중 ${c.inUse} · 교체됨 ${c.replaced} · 판단 불가 ${c.unknown}`, `끊김 없이 본 구간 ${span}`] };
   }
   if (view.status === 'unwatched') return { tone: 'warn', title: '이 방법으로는 볼 수 없는 서버입니다', lines: ['디스크가 RAID 로 묶여 있지 않아(HBA · 패스스루) Patrol Read 가 돌지 않습니다 — ‘기록 없음’ 이 아닙니다.'] };
   if (view.status === 'partial') {
     const why = READ_STOP_LABEL[cov.readStop] || '';
     return { tone: 'warn', title: '일부만 읽었습니다 — 읽은 구간에는 기록이 없습니다', lines: [`읽은 구간 ${span}. 다음 점검에서 처음부터 다시 읽습니다.`, ...(why ? [why] : [])] };
   }
-  const short = Number.isFinite(from) && now - from < 120 * 86_400_000;
-  // v3.8.2: iDRAC 가 주는 것은 **활성 로그**뿐이다 — 그 이전 기록이 '없다' 가 아니라 '여기서는 안 보인다' 이다(보관 로그로 넘어갔을 수 있다).
-  return { tone: short ? 'warn' : 'neutral', title: short ? `기록은 없지만, iDRAC 가 보여 주는 로그가 ${spanText(from, now)}치뿐입니다` : '남아 있는 로그에는 배드 섹터 기록이 없습니다',
-    lines: [`${span} · 그 이전 기록은 iDRAC 의 활성 로그에 없어 확인하지 못했습니다(보관 로그로 넘어갔을 수 있고, 이 기능은 아직 보관 로그를 읽지 않습니다). ‘발생한 적 없음’ 이 아니라 ‘이 구간에 기록 없음’ 입니다.`] };
+  // v3.8.2: iDRAC 가 이 경로로 주는 것은 활성 로그로 보인다(Dell 안내서 검색 요약 + 실제 서버 1대) — 그 이전 기록이 '없다' 가 아니라 '여기서는 안 보인다' 이다.
+  //   '며칠치뿐' 은 **활성 로그가 담은 기간**(서버 summary.logSpanOf — 시간이 지나도 늘지 않는다)으로 말하고, 기준 일수는 서버가 준 값을 쓴다(전 법인 경고와 같은 값).
+  const spanMs = cov.logSpan?.ms;
+  const limitDays = Number.isFinite(cov.shortLogDays) ? cov.shortLogDays : 30;
+  const short = Number.isFinite(spanMs) && spanMs < limitDays * 86_400_000;
+  return { tone: short ? 'warn' : 'neutral', title: short ? `기록은 없지만, iDRAC 가 보여 주는 로그가 ${spanText(0, spanMs)}치뿐입니다` : '남아 있는 로그에는 배드 섹터 기록이 없습니다',
+    lines: [`끊김 없이 본 구간 ${span} · 그 이전 기록은 iDRAC 가 보여 주는 로그에 없어 확인하지 못했습니다(보관 로그로 넘어갔을 수 있고, 이 기능은 아직 보관 로그를 읽지 않습니다). ‘발생한 적 없음’ 이 아니라 ‘이 구간에 기록 없음’ 입니다.`] };
 }
 
 /** 끝까지 못 읽은 이유(서버 db.js read_stop). 모르는 값은 말하지 않는다. */
@@ -113,7 +117,7 @@ export function diagInfo(diag) {
   if (top.length) lines.push(`많이 나온 기록 ID: ${top.map((x) => `${x.code} ${n(x.n)}`).join(' · ')}${Number.isFinite(diag.distinct) && diag.distinct > top.length ? ` · 그 밖 ${n(diag.distinct - top.length)}종` : ''}`);
   let warn = '';
   if (Number.isFinite(diag.loginShare) && diag.loginShare >= 0.5) {
-    warn = `읽은 로그의 ${Math.floor(diag.loginShare * 100)}% 이상이 로그인 · 로그아웃 기록(${(diag.loginCodes || []).join(' · ')})입니다. 이 기록이 활성 로그를 채워, 그 이전의 디스크 기록은 보관 로그로 넘어갔을 수 있습니다.`;
+    warn = `읽은 로그의 ${Math.floor(diag.loginShare * 100)}% 이상이 로그인 계열로 보이는 기록(${(diag.loginCodes || []).join(' · ')})입니다 — 위 ‘많이 나온 기록 ID’ 로 직접 확인할 수 있습니다. 이런 기록이 로그를 채우면 그 이전의 디스크 기록은 보관 로그로 넘어갔을 수 있습니다.`;
   }
   return { lines, warn };
 }
@@ -125,11 +129,11 @@ export function diagInfo(diag) {
 export function shortLogNote(T) {
   if (!T || !Number.isFinite(T.shortLog) || T.shortLog <= 0) return null;
   const days = Number.isFinite(T.shortLogDays) ? T.shortLogDays : 30;
-  const med = Number.isFinite(T.medianLogDays) ? ` 남은 기간의 가운데값은 ${T.medianLogDays < 2 ? `${Math.max(1, Math.round(T.medianLogDays * 24))}시간` : `${Math.round(T.medianLogDays)}일`}입니다.` : '';
-  const login = Number.isFinite(T.loginHeavy) && T.loginHeavy > 0 ? ` 읽기 진단이 있는 ${num(T.diagKnown)}대 가운데 ${num(T.loginHeavy)}대는 읽은 로그의 절반 이상이 로그인 기록입니다.` : '';
+  const med = Number.isFinite(T.medianLogDays) ? ` 로그 길이의 가운데값은 ${T.medianLogDays < 2 ? `${Math.max(1, Math.round(T.medianLogDays * 24))}시간` : `${Math.round(T.medianLogDays)}일`}입니다.` : '';
+  const login = Number.isFinite(T.loginHeavy) && T.loginHeavy > 0 ? ` 읽기 진단이 있는 ${num(T.diagKnown)}대 가운데 ${num(T.loginHeavy)}대는 읽은 로그의 절반 이상이 로그인 계열로 보이는 기록입니다.` : '';
   return {
-    title: `읽은 서버 ${num(T.spanKnown)}대 가운데 ${num(T.shortLog)}대는 iDRAC 로그가 ${days}일 미만만 남아 있습니다`,
-    body: `iDRAC 가 보여 주는 것은 활성 로그뿐이라, 그 이전에 난 배드 섹터 기록은 이 결과에 없습니다 — 아래 수치의 ‘0’ 은 ‘과거에 없었다’ 가 아닙니다.${med}${login} 서버 탭에서 서버별로 남은 기간을 봅니다.`,
+    title: `읽은 서버 ${num(T.spanKnown)}대 가운데 ${num(T.shortLog)}대는 iDRAC 가 보여 주는 로그가 ${days}일치 미만입니다`,
+    body: `iDRAC 가 이 경로로 보여 주는 것은 활성 로그로 보입니다(Dell 안내서 요약 기준 — 실제 서버에서 확인 중). 그 이전에 난 배드 섹터 기록은 이 결과에 없습니다 — 아래 수치의 ‘0’ 은 ‘과거에 없었다’ 가 아닙니다.${med}${login} 서버 탭에서 서버별 로그 길이를 봅니다.`,
   };
 }
 
