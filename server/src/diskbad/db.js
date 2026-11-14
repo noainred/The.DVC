@@ -21,7 +21,8 @@ import { createYielder } from '../util/timeSlice.js';
 import { slotOf, slotKeyOf, codeOf, driveSlotOf } from './classify.js';
 
 export const DB_FILE = 'disk-bad.db';
-const DB_PATH = () => process.env.DISKBAD_DB_PATH || path.join(config.dbDir || config.configDir, DB_FILE);
+// 파일 이름은 글자 그대로 둔다 — 설정 파일 문서 생성기(scripts/config-doc.mjs)가 path.join 의 '*.db' 글자를 찾는다(docsGen2452).
+const DB_PATH = () => process.env.DISKBAD_DB_PATH || path.join(config.dbDir || config.configDir, 'disk-bad.db');
 export const SCHEMA_VERSION = 1;
 
 let x = null;

@@ -128,18 +128,17 @@ export function DiskBadTool() {
 function InUseTable({ list, refs, openServer, limit = 0 }) {
   if (!list.length) return <div className="muted" style={{ fontSize: 12.5 }}>해당하는 디스크가 없습니다.</div>;
   return (
-    <STable className="data-table" minWidth={1320} limit={limit} style={{ width: '100%', fontSize: 12.5 }}>
-      <thead><tr><th>국가 · 법인</th><th>서버</th><th>위치</th><th>모델 · 시리얼</th><th>기록</th><th>최근 기록</th><th>판정</th><th data-nosort style={{ minWidth: 260 }}>근거</th></tr></thead>
+    // 1440px 카드(약 1,130px)에 '근거' 열까지 들어오게 — 위치는 서버 칸 아래, 최근 기록은 기록 칸 아래에 싣는다(화면 재확인에서 근거 열이 카드 밖으로 밀렸다).
+    <STable className="data-table" minWidth={1080} limit={limit} style={{ width: '100%', fontSize: 12.5 }}>
+      <thead><tr><th>국가 · 법인</th><th>서버 · 위치</th><th>모델 · 시리얼</th><th>기록 · 최근</th><th>판정</th><th data-nosort style={{ minWidth: 240 }}>근거</th></tr></thead>
       <tbody>{list.map((s) => (
         <tr key={`${s.agent}|${s.serverId}|${s.slotKey}`}>
-          <td>{s.country ? `${s.country} · ` : ''}{s.corpName}</td>
-          <td><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(s)}>{s.serverName}</button></td>
-          <td data-sort={s.slotKey}>{s.label}</td>
+          <td style={{ whiteSpace: 'normal', minWidth: 140 }}>{s.country ? `${s.country} · ` : ''}{s.corpName}</td>
+          <td data-sort={s.serverName}><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(s)}>{s.serverName}</button><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{s.label}</div></td>
           <td>{s.drive ? <>{s.drive.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {s.drive.serial || '—'}</div></> : <span className="muted">—</span>}</td>
-          <td data-sort={s.unrecoverable * 1000 + s.total}>{Object.entries(s.byCode).map(([c, n]) => <span key={c} className={`badge ${clsTone(clsOfCode(c, refs))}`} style={{ marginRight: 4 }} title={noteOf(c, refs)}>{c} {n}</span>)}</td>
-          <td data-sort={s.last} style={{ whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>{fmtDate(s.last)}</td>
+          <td data-sort={s.last}>{Object.entries(s.byCode).map(([c, n]) => <span key={c} className={`badge ${clsTone(clsOfCode(c, refs))}`} style={{ marginRight: 4 }} title={noteOf(c, refs)}>{c} {n}</span>)}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)', marginTop: 2 }}>최근 {fmtDate(s.last)}</div></td>
           <td data-sort={s.verdict}><span className={`badge ${verdictTone(s.verdict)}`}>{s.verdictLabel}</span> <span className={`badge ${confidenceTone(s.confidence)}`}>{s.confidenceLabel}</span></td>
-          <td style={{ fontSize: 11.5, minWidth: 260, maxWidth: 360, whiteSpace: 'normal' }} className="muted">{s.evidence[s.evidence.length - 1]?.text || '—'}</td>
+          <td style={{ fontSize: 11.5, minWidth: 240, maxWidth: 360, whiteSpace: 'normal' }} className="muted">{s.evidence[s.evidence.length - 1]?.text || '—'}</td>
         </tr>
       ))}</tbody>
     </STable>
