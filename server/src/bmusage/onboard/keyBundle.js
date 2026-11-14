@@ -57,7 +57,8 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
     if (!cur0 || typeof cur0.privateKey !== 'string' || !cur0.privateKey) { dropped.push(`key:${String(o.name || o.id || '').slice(0, 64)}`); continue; }
     o.privateKey = cur0.privateKey; o.passphrase = typeof cur0.passphrase === 'string' ? cur0.passphrase : '';
     // v3.10.0(점검 A3): 공개키 · 알고리즘 칸도 지금 파일의 것 — 같은 지문에 남의 공개키를 실은 번들이 ‘공개키 복사’ · authorized_keys 줄에 남의 키를 싣지 못하게.
-    for (const f of ['publicKey', 'algo', 'sshType', 'bits']) { if (cur0[f] === undefined) delete o[f]; else o[f] = cur0[f]; }
+    // 반증 R7: **키 id 도** 지금 것 — 번들에서 두 키의 id 를 맞바꾸면 keyRef 로 묶인 서버가 다른 키를 쓰게 됐다(복원은 OTP 를 묻지 않는다).
+    for (const f of ['id', 'publicKey', 'algo', 'sshType', 'bits']) { if (cur0[f] === undefined) delete o[f]; else o[f] = cur0[f]; }
     restored += 1;
     keys.push(o);
   }
@@ -77,6 +78,8 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
     const o = { ...a };
     // v3.10.0(점검 A4): 비밀번호는 가렸든(정상 번들) 아니든(손으로 만든 번들) **번들에서 받지 않는다** — 같은 계정(종류 · 법인 · 계정명)의 지금 값만 쓴다.
     //   복원 라우트는 OTP 를 묻지 않으므로 번들의 평문 비밀번호로 공통 계정의 비밀을 바꿀 수 있었다.
+    // 반증 R7: 지금 있는 공통 계정(같은 id)은 **묶음 칸**(종류 · 법인 · 계정명 · 기본 키)을 지금 값으로 — 복원(OTP 없음)이 키 묶음을 바꾸지 못하게.
+    { const c0 = curAccById.get(String(o.id || '')); if (c0) for (const f of ['kind', 'corp', 'username', 'keyRef']) { if (c0[f] === undefined) delete o[f]; else o[f] = c0[f]; } }
     if ((typeof o.password === 'string' && o.password) || o.password === REDACTED_SECRET) {
       const c = curAccById.get(String(o.id || ''));
       const same = c && String(c.kind || '') === String(o.kind || '') && lc(c.corp) === lc(o.corp) && lc(c.username) === lc(o.username);

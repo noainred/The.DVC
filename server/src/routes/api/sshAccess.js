@@ -117,8 +117,8 @@ export function registerSshAccess(api) {
   });
 
   /* ── 키 로그인 설정 · 키 거두기(v3.10.0 — 서버의 authorized_keys 를 바꾸는 동작) ──── */
-  const serverList = (v) => (Array.isArray(v) ? v.slice(0, 200).map((x) => ({ id: t(x?.id, 64), addr: typeof x?.addr === 'string' ? x.addr.slice(0, 400) : '' })) : null);
-  const jobPre = (kind) => (_req, res, next) => { const p = SVC.keyJobPrecheck(kind); return p ? send(res, p) : next(); };
+  const serverList = (v) => (Array.isArray(v) ? v.slice(0, 1000).map((x) => ({ id: t(x?.id, 64), addr: typeof x?.addr === 'string' ? x.addr.slice(0, 400) : '' })) : null);
+  const jobPre = (kind) => (req, res, next) => { const p = SVC.keyJobPrecheck(kind, t(bodyOf(req).keyId, 32)); return p ? send(res, p) : next(); };
   api.post('/settings/ssh-access/key-login', adminOnly, requireSettingsOwner, jobPre('key-login'), reauth, async (req, res) => {
     const b = bodyOf(req);
     const once = typeof b.oncePassword === 'string' ? b.oncePassword : '';
@@ -137,8 +137,10 @@ export function registerSshAccess(api) {
     const j = SVC.keyJob(t(req.params.id, 20));
     send(res, j ? { ok: true, job: j } : { ok: false, status: 404, code: 'not-found', reason: '작업을 찾을 수 없습니다(끝난 지 1시간이 지났거나 포탈이 다시 시작했습니다 — 다시 시작했으면 그때 처리 중이던 서버는 끝나지 않았을 수 있습니다).' });
   });
-  // 멈추기 — 줄이는 방향(남은 서버를 하지 않는다)이라 OTP 없이 소유자 등급만. 지금 서버는 끝까지(되돌림을 끊지 않는다).
-  api.post('/settings/ssh-access/jobs/:id/cancel', ...ownerRead, (req, res) => {
+  // 멈추기 — 키 로그인 설정을 멈추는 것은 줄이는 방향(남은 서버에 키를 넣지 않는다)이라 OTP 없이 소유자 등급만.
+  //   **키 거두기를 멈추는 것은 OTP**(유출 키가 남은 서버에 그대로 남는다 — 줄이는 방향이 아니다 · 반증 D1). 지금 서버는 끝까지(되돌림을 끊지 않는다).
+  const cancelGate = (req, res, next) => (SVC.keyJobKind(t(req.params.id, 20)) === 'key-revoke' ? reauth(req, res, next) : next());
+  api.post('/settings/ssh-access/jobs/:id/cancel', ...ownerRead, cancelGate, (req, res) => {
     const r = SVC.cancelKeyJob(t(req.params.id, 20), { by: who(req) });
     audit(req, 'ssh-access.key-job.cancel', req.params.id, { ok: !!r.ok, code: r.code });
     send(res, r);

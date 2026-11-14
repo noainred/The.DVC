@@ -30,7 +30,7 @@ import { READ_COMMAND, parseReadOutput } from './authorizedKeys.js';
 import * as AP from '../approval/store.js';
 import * as TP from '../approval/twoPerson.js';
 import * as KL from './keyLogin.js';
-import { twoPersonOn, serverRestrictOn, otherOwners, listedOtherOwners } from './guards.js';
+import { twoPersonOn, serverRestrictOn, otherOwners, notePair } from './guards.js';
 import { startKeyNotify } from './notify.js';
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
@@ -93,6 +93,7 @@ function publicServer(s, { accById, keyById }) {
 
 /** 화면 한 번에 필요한 것(비밀 없음). 등록부 · 저장소를 못 읽으면 그 칸에 unreadable 표지(빈 목록을 지어내지 않는다). */
 export async function buildView({ now = Date.now() } = {}) {
+  notePair({ by: '' });
   const corps = await corpList();
   const storeErr = KS.keyStoreLoadError();
   const regErr = bmRegistryLoadError();
@@ -141,7 +142,7 @@ export async function buildView({ now = Date.now() } = {}) {
     events: ST.listEvents({ limit: 50 }),
     tampered: KS.tamperedKeyIds(),
     // v3.10.0 — 보호 장치 · 두 사람 승인
-    guards: { ...ST.getGuards(), twoPersonActive: twoPersonOn() },
+    guards: { ...ST.getGuards(), twoPersonActive: twoPersonOn() },   // pairSeen = 혼자 끌 수 없음(화면 안내)
     approvalsUnreadable: !!AP.approvalsLoadError(),
     approvals: AP.listForView({ kinds: SSH_KINDS, doneLimit: 60 }, { now }).map((r) => ({ ...r, label: TP.kindLabel(r.kind) })),
     // 칸마다 마지막 키 작업(1시간 안) — 화면을 다시 열어도 진행 · 결과를 이어 본다(점검 E-2).
@@ -455,11 +456,13 @@ TP.registerKind('ssh-guard-change', { label: '보호 장치 끄기', run: (p, { 
  * 받는 곳 승인은 평문 파일까지 지워 키 원문을 잃었다). 부작용(대기 키 저장 · 평문 삭제) **전에** 부른다.
  */
 function noApproverIssue(by) {
+  notePair({ by });
   if (!twoPersonOn() || otherOwners(by).length) return null;
-  const listed = listedOtherOwners(by);
-  const who = listed.length ? `(목록의 ${listed.slice(0, 3).join(' · ')}${listed.length > 3 ? ` 외 ${listed.length - 3}` : ''} — 지금 승인할 수 없는 계정입니다: 관리자 역할 · 전체 범위 · 로그인 수단이 필요)` : '';
+  const seen = ST.getGuards().pairSeen === true;
   return { ok: false, code: 'no-approver', status: 409,
-    reason: `두 사람 승인이 켜져 있지만 승인할 수 있는 다른 설정 소유자가 없습니다${who} — 요청을 만들지 않았습니다. ${listed.length ? '그 계정을 고치거나 설정 소유자 목록에서 뺀 뒤 ' : ''}보호 장치에서 두 사람 승인을 끄면 본인 OTP 만으로 할 수 있습니다.` };
+    reason: `두 사람 승인이 켜져 있지만 승인할 수 있는 다른 설정 소유자(관리자 역할 · 전체 범위 · 로그인 수단)가 없습니다 — 요청을 만들지 않았습니다. ${seen
+      ? '이 포탈에는 승인할 수 있는 소유자가 둘 있었던 적이 있어 두 사람 승인을 혼자 끌 수 없습니다 — 다른 설정 소유자가 다시 승인할 수 있게(역할 · 범위 · 로그인 수단) 한 뒤 그 사람이 승인하게 하세요.'
+      : '보호 장치에서 두 사람 승인을 끄면 본인 OTP 만으로 할 수 있습니다.'}` };
 }
 
 /** 요청을 만들거나(두 사람 승인 켬) 바로 실행한다(끔). 요청이 만들어지면 사건을 남긴다. */
@@ -515,6 +518,7 @@ export async function deleteKeyReq({ keyId, by = '' } = {}) {
  * 보호 장치 바꾸기. **켜는 것**은 바로(본인 OTP). **끄는 것**은 두 사람 승인 — 단, 승인해 줄 다른 설정 소유자가 한 명도 없으면 바로(잠김 방지 · 사건에 적는다).
  */
 export async function changeGuards(patch = {}, { by = '' } = {}) {
+  notePair({ by });
   const cur = ST.getGuards();
   if (cur.unreadable) return { ok: false, code: 'state-unreadable', status: 503, reason: '상태 파일을 읽지 못해 보호 장치를 바꾸지 않았습니다.' };
   const want = {}; const off = {}; const on = {};
@@ -530,8 +534,8 @@ export async function changeGuards(patch = {}, { by = '' } = {}) {
     const names = Object.keys(off).map((k) => (k === 'twoPerson' ? '두 사람 승인' : '서버 쪽 제한')).join(' · ');
     return partial(await submitSsh({ kind: 'ssh-guard-change', title: `보호 장치 끄기 — ${names}`, target: Object.keys(off).sort().join(','), payload: { patch: off }, by }, () => ST.setGuards(off, { by })));
   }
-  // 승인자 0명 지름길은 **목록에도 다른 소유자가 없을 때만**(점검 A1 — 다른 소유자를 강등 · 범위 지정해 ‘승인 불가’ 로 만든 뒤 바로 끄는 길을 막는다).
-  if (tpOn && listedOtherOwners(by).length > 0) return partial(noApproverIssue(by));
+  // 승인자 0명 지름길은 **승인할 수 있는 소유자 둘을 본 적이 없는 설치만**(점검 A1 · 반증 R3 — 다른 소유자를 강등 · 범위 지정 · 목록에서 빼 ‘승인 불가’ 로 만든 뒤 혼자 끄는 길을 막는다).
+  if (tpOn && ST.getGuards().pairSeen === true) return partial(noApproverIssue(by));
   const r = ST.setGuards(off, { by });
   if (r.ok && tpOn) ST.addEvent({ kind: 'guard-changed', by, detail: '승인할 다른 설정 소유자가 없어 본인 OTP 만으로 껐습니다' });
   return partial(r);
@@ -553,11 +557,10 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
   }
   return null;
 }
-/** 키 작업 시작 사전 검사 — 같은 칸 작업이 진행 중이면 OTP 를 쓰기 전에 409. */
-export function keyJobPrecheck(kind) {
-  const busy = KL.busyJob(kind);
-  return busy ? { ok: false, code: 'busy', status: 409, jobId: busy, reason: kind === 'key-revoke' ? '다른 키 거두기 작업이 진행 중입니다 — 끝난 뒤 다시 하세요.' : '다른 키 로그인 설정 작업이 진행 중입니다 — 끝나거나 멈춘 뒤 다시 하세요.' } : null;
-}
+/** 키 작업 시작 사전 검사 — 칸이 차 있거나(넣기) 같은 키 거두기 중이거나(넣기) 같은 키 거두기 · 동시 상한(거두기)이면 OTP 를 쓰기 전에 409. */
+export function keyJobPrecheck(kind, keyId = '') { return KL.jobStartIssue(kind, keyId); }
+/** 작업 종류(라우트 — 거두기 멈추기는 OTP). */
+export function keyJobKind(id) { return KL.jobKind(id); }
 
 /** 승인 · 돌려보내기(요청한 사람은 승인할 수 없다 — store 가 강제). */
 export async function decideApproval(id, { approve, by = '', digest = '', note = '' } = {}) {
@@ -584,12 +587,16 @@ const bindKey = (server, keyId) => {
 // 키 접속이 확인된 뒤에만 불린다(keyLogin.installOne) — 공통 계정의 기본 키를 따르는 서버면 viaAccountKey(등록부는 계정 키를 모른다).
 const clearPassword = (server) => clearBmServerPassword(server.id, { expectAddr: regAddrOf(server), viaAccountKey: !t(server.keyRef) && !!t(server.credRef) });
 
-/** 요청의 서버 목록({id, addr}) → 등록부 원본. 화면이 본 접속처와 다르면 그 서버는 ‘moved’ 로 뺀다. */
-function pickServers(list) {
+/**
+ * 요청의 서버 목록({id, addr}) → 등록부 원본. 화면이 본 접속처와 다르면 그 서버는 ‘moved’ 로 뺀다.
+ * max 를 넘는 서버는 조용히 자르지 않고 ‘over-limit’ 으로 밝힌다(반증 R6 — 골라 보낸 거두기가 101대에서 잘렸다). 넣기는 101대째가 오면 작업이 too-many 로 거절한다.
+ */
+function pickServers(list, max = KL.MAX_JOB_SERVERS + 1) {
   const all = new Map(listBmServersRaw().map((s) => [s.id, s]));
   const ok = []; const skipped = [];
   const seen = new Set();
-  for (const it of (Array.isArray(list) ? list : []).slice(0, KL.MAX_JOB_SERVERS + 1)) {
+  for (const it of (Array.isArray(list) ? list : [])) {
+    if (ok.length >= max) { const id = t(it?.id, 64); if (id && !seen.has(id)) { seen.add(id); skipped.push({ id, name: all.get(id)?.name || id, ok: false, code: 'over-limit', reason: `한 번에 ${max}대까지라 이번 작업에서 빠졌습니다 — 나눠서 다시 하세요.` }); } continue; }
     const id = t(it?.id, 64);
     if (!id || seen.has(id)) continue;
     seen.add(id);
@@ -613,6 +620,28 @@ function freshKey(id) { const k = KS.listKeysRaw().find((x) => x.id === id); ret
 async function mockRefusal() {
   try { const { isMockMode } = await import('../mock/demo/flags.js'); if (isMockMode()) return { ok: false, code: 'demo', status: 409, reason: '데모(mock) 모드에서는 서버에 접속하지 않습니다.' }; } catch { /* 판정 모듈이 없으면 실제 모드 */ }
   return null;
+}
+/**
+ * 같은 비밀번호의 거부를 센다(반증 D3 — 서버들이 같은 디렉터리(AD · FreeIPA)로 인증하면 틀린 비밀번호 하나가 서버 수만큼 실패가 되어 계정이 잠긴다).
+ *  · 1회 비밀번호: 두 번 거부되면 작업을 멈춘다(나머지 서버는 ‘멈춤’).
+ *  · 공통 계정 비밀번호: 한 번 거부되면 그 계정을 쓰는 나머지 서버는 하지 않는다(auth-skipped).
+ * 키 인증의 거부는 세지 않는다(서버마다 키가 없을 수 있다 — 잠금과 무관).
+ */
+function authRejectTracker() {
+  let onceRejects = 0; const accRejected = new Set();
+  const accOf = (s, pw) => (!pw && t(s.credRef) && !t(s.keyRef) ? t(s.credRef) : '');
+  return {
+    skip(s, pw) {
+      const a = accOf(s, pw);
+      if (a && accRejected.has(a)) return { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'auth-skipped', reason: '같은 공통 계정의 비밀번호가 이 작업의 다른 서버에서 거부돼 이 서버는 하지 않았습니다(계정 잠금 방지) — 비밀번호를 확인한 뒤 다시 하세요.' };
+      return null;
+    },
+    note(s, pw, res, job) {
+      if (!res || res.code !== 'auth-rejected' || !(res.via === 'password' || res.via === 'password-once')) return;
+      if (pw) { onceRejects += 1; if (onceRejects >= 2) job?.stop('한 번만 쓰는 비밀번호가 두 번 거부됨 — 계정 잠금 방지'); return; }
+      const a = accOf(s, pw); if (a) accRejected.add(a);
+    },
+  };
 }
 const countBy = (results, pick) => { const m = {}; for (const r of results) { const k = pick(r); m[k] = (m[k] || 0) + 1; } return m; };
 const failNames = (results) => results.filter((r) => !r.ok && r.code !== 'cancelled').slice(0, 5).map((r) => `${t(r.name, 40)}(${t(r.code, 24)})`).join(', ');
@@ -641,14 +670,17 @@ export async function startKeyLogin({ servers, keyId, oncePassword = '', removeP
   if (!list.length) return { ok: false, code: 'empty', status: 400, reason: skipped[0]?.reason || '대상 서버가 없습니다.', skipped };
   const restrict = serverRestrictOn();
   const pw = oncePw(oncePassword);
+  const rejects = authRejectTracker();
   const r = KL.startJob({ kind: 'key-login', servers: list, by, meta: { keyId: key.id, keyName: key.name, restrict, removePassword: !!removePassword, replaceKeyName: replaceKey?.name || '', skipped },
-    run: async (s0) => {
+    run: async (s0, job) => {
       const s = freshServer(s0);
       if (!s) return movedResult(s0);
       const k = freshKey(key.id);
       if (!k || k.status !== 'active' || !KS.publicKeyMatches(k)) return { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'key-changed', reason: '작업 도중 키가 퇴역 · 삭제됐거나 저장된 내용이 바뀌어 이 서버에는 하지 않았습니다.' };
       const rk = replaceKey ? freshKey(replaceKey.id) : null;
+      const skip = rejects.skip(s, pw); if (skip) return skip;
       const res = await KL.installOne(s, k, { oncePassword: pw, restrict, removePassword: !!removePassword, replaceKey: rk && KS.publicKeyMatches(rk) ? rk : null, by, bind: bindKey, clearPassword });
+      rejects.note(s, pw, res, job);
       ST.addEvent({ kind: 'key-login-set', corp: t(s.vcenterId), target: `${s.name || s.host} · ${key.name}`, by, detail: res.ok ? `키 접속 확인${res.restricted ? ' · 출발지 제한' : ''}${res.passwordRemoved ? ' · 저장 비밀번호 삭제' : ''}` : `실패(${res.code})` });
       return res;
     },
@@ -673,7 +705,7 @@ export async function startKeyRevoke({ keyId, corp = '', servers = null, oncePas
   if (!key) return { ok: false, code: 'key-missing', status: 404, reason: '키를 찾을 수 없습니다.' };
   if (!KS.publicKeyMatches(key)) return { ok: false, code: 'key-tampered', status: 409, reason: '저장된 공개키가 지문과 맞지 않아 거두지 않았습니다(남의 줄을 지울 수 있다) — 서버에서 지문으로 직접 찾아 지우세요.' };
   let list; let skipped = [];
-  if (Array.isArray(servers)) ({ ok: list, skipped } = pickServers(servers));
+  if (Array.isArray(servers)) ({ ok: list, skipped } = pickServers(servers, KL.MAX_REVOKE_SERVERS));
   else {
     const c = t(corp, 128);
     if (!c) return { ok: false, code: 'bad-corp', reason: '법인을 고르세요.' };
@@ -686,11 +718,14 @@ export async function startKeyRevoke({ keyId, corp = '', servers = null, oncePas
   }
   if (!list.length) return { ok: false, code: 'empty', status: 400, reason: skipped[0]?.reason || '대상 서버가 없습니다.', skipped };
   const pw = oncePw(oncePassword);
+  const rejects = authRejectTracker();
   const r = KL.startJob({ kind: 'key-revoke', servers: list, by, meta: { keyId: key.id, keyName: key.name, corp: t(corp, 128), skipped },
-    run: async (s0) => {
+    run: async (s0, job) => {
       const s = freshServer(s0);
       if (!s) return movedResult(s0);
+      const skip = rejects.skip(s, pw); if (skip) return skip;
       const res = await KL.revokeOne(s, key, { oncePassword: pw, by });
+      rejects.note(s, pw, res, job);
       if (res.ok && res.removed > 0) ST.addEvent({ kind: 'key-lines-removed', corp: t(s.vcenterId), target: `${s.name || s.host} · ${key.name}`, by, detail: `${res.removed}줄` });
       return res;
     },
@@ -731,6 +766,7 @@ export async function runSshAccessScan({ now = Date.now() } = {}) {
   _running = true;
   try {
     const events = [];
+    notePair({ by: '' });
     // 승인 요청 만료 확정은 **맨 먼저** — 뒤 단계(대조 · 받는 곳)가 던져도 이 회차가 만료를 확정하고 대기 키를 정리한다(점검 C 의심 S-3).
     for (const r of TP.expireSweep({ now })) events.push({ kind: 'approval-decided', corp: r.corp, target: r.title, detail: r.interrupted ? '승인 뒤 실행 결과가 적히지 않음 — 실행됐는지 확인 필요' : '시한(24시간)이 지나 사라짐' });
     let drift = { changed: [], added: [], accountsChanged: [] }; let ib = { items: [] }; let regErr = null; let servers = [];
@@ -793,6 +829,7 @@ export function startSshAccessScanNow() {
 export function startSshAccessScheduler({ firstDelayMs = 90_000 } = {}) {
   if (_timer) return;
   startKeyNotify();   // 키 보안 사건 메일(모아서 한 통 — notify.js)
+  notePair({ by: '' });   // 기동 때 바로 ‘승인할 수 있는 소유자 둘’ 을 본다(첫 관측 전 강등 창을 줄인다 — guards.notePair)
   const run = () => { runSshAccessScan().catch((e) => console.warn(`[ssh-access] 주기 점검 실패: ${String(e?.message || e).slice(0, 160)}`)); };
   const first = setTimeout(() => { run(); _timer = setInterval(run, SCAN_EVERY_MS); _timer.unref?.(); }, firstDelayMs);
   first.unref?.();

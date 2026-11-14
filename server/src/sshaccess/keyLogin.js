@@ -145,7 +145,8 @@ export async function installOne(server, key, o = {}) {
     if (!cmd) return { kind: 'fail', why: 'badkey' };
     return AK.parseMarker((await run(cmd, true))?.stdout);
   }, { execs: o.restrict ? 2 : 1 });
-  if (!step1.ok) return fail(step1.sent ? 'uncertain' : step1.code, `${step1.reason}${step1.sent ? UNCERTAIN_TAIL : ' 서버에서 바꾼 것은 없습니다.'}`);
+  // via = 첫 접속에 쓴 인증 방식(작업이 같은 비밀번호의 거부를 세어 멈춘다 — 계정 잠금 · 반증 D3).
+  if (!step1.ok) return fail(step1.sent ? 'uncertain' : step1.code, `${step1.reason}${step1.sent ? UNCERTAIN_TAIL : ' 서버에서 바꾼 것은 없습니다.'}`, { via: first.authKind });
   const m = step1.value;
   if (m.kind === 'fail' || m.kind === 'unknown') {
     const why = m.why === 'noip' ? '서버가 본 접속 주소를 읽지 못해 출발지 제한을 붙일 수 없습니다 — 제한 없이 넣으려면 ‘서버 쪽 제한’ 을 끄고 다시 하세요.'
@@ -157,7 +158,7 @@ export async function installOne(server, key, o = {}) {
   const replaced = m.kind === 'replaced';
   const notes = [];
   if (m.unmarked > 0) notes.push(`표식 없는 같은 키 줄 ${m.unmarked}개가 서버에 있습니다(사람이 넣은 줄 — 포탈은 건드리지 않습니다)${o.restrict ? ' — 그 줄은 출발지 제한이 없으니 서버에서 직접 정리하세요' : ''}.`);
-  if (m.custom > 0) notes.push(`관리자가 옵션을 바꾼 포탈 줄 ${m.custom}개는 그대로 두었습니다(제한을 다시 넣지 않았습니다).`);
+  if (m.custom > 0) notes.push(`관리자가 옵션을 바꾼 포탈 줄 ${m.custom}개는 그대로 두었습니다(제한을 다시 넣지 않았습니다 — 그 줄의 제한 여부는 포탈이 판정하지 않습니다).`);
   const replaceSkipped = m.kind === 'present-marked' && !!o.restrict && firstIsKey && m.loose > 0;
   if (replaceSkipped) notes.push('제한 없는 포탈 줄이 있지만 지금 그 키로만 접속돼 제한 줄로 바꾸지 않았습니다(확인이 실패하면 되돌릴 길이 없습니다) — 이번 한 번만 쓸 비밀번호를 넣고 다시 하면 바꿉니다.');
 
@@ -230,7 +231,7 @@ export async function revokeOne(server, key, o = {}) {
   const r = await sshRun(server, auth, async (run) => AK.parseMarker((await run(cmd, true))?.stdout));
   if (auth.keyFingerprint) noteKeyUse({ fingerprint: auth.keyFingerprint, keyName: auth.keyName, server: base.name, corp: base.corp, feature: 'conn-test', ok: r.ok, code: r.ok ? 'ok' : r.code, trigger: 'manual', by: o.by });
   const pinned = serverUsesKey(server, key.id);
-  if (!r.ok) return { ...base, ok: false, code: r.sent ? 'uncertain' : r.code, reason: `${r.reason}${r.sent ? ' 지우는 명령은 보냈지만 결과를 받지 못했습니다 — 지워졌는지 서버에서 확인하세요.' : ''}`, pinned };
+  if (!r.ok) return { ...base, ok: false, code: r.sent ? 'uncertain' : r.code, reason: `${r.reason}${r.sent ? ' 지우는 명령은 보냈지만 결과를 받지 못했습니다 — 지워졌는지 서버에서 확인하세요.' : ''}`, pinned, via: auth.authKind };
   const m = r.value;
   if (m.kind === 'none') return { ...base, ok: true, code: 'none', removed: 0, unmarked: 0, pinned };
   if (m.kind !== 'removed') return { ...base, ok: false, code: 'revoke-failed', why: m.kind === 'fail' ? m.why : 'unknown', reason: m.kind === 'fail' ? AK.failText(m.why) : '서버가 예상한 답을 주지 않았습니다.', pinned };
@@ -240,17 +241,27 @@ export async function revokeOne(server, key, o = {}) {
 /* ── 작업(여러 서버 — 1대씩 차례로 · 화면은 진행을 물어 본다) ────────────────── */
 
 const jobs = new Map();
-/** 작업 칸 — 넣기와 거두기는 따로 돈다(긴급 거두기가 넣기에 막히지 않게). */
-const SLOT_OF = Object.freeze({ 'key-login': 'install', 'key-revoke': 'revoke' });
+/**
+ * 작업 칸 — 넣기는 하나, 거두기는 **키마다** 하나(동시에 최대 MAX_REVOKE_JOBS — 다른 키의 긴급 거두기가 몇 시간 기다리지 않게 · 반증 D2).
+ * 넣기와 거두기는 따로 돈다(긴급 거두기가 넣기에 막히지 않게). 같은 서버(접속처)는 서버 자물쇠로 한 번에 한 작업만 만진다.
+ */
+export const MAX_REVOKE_JOBS = 3;
+const slotOf = (kind, keyId) => (kind === 'key-login' ? 'install' : kind === 'key-revoke' ? `revoke:${t(keyId, 32)}` : '');
+const viewKey = (slot) => (slot.startsWith('revoke:') ? 'revoke' : slot);
 const slots = new Map();   // 칸 → 진행 중인 작업 id
-const lastBySlot = new Map();   // 칸 → 마지막 작업 id(끝난 것 포함 — 화면이 다시 열려도 결과를 보여 준다 · 점검 E-2)
+const lastBySlot = new Map();   // 화면 칸(install · revoke) → 마지막 작업 id(끝난 것 포함 — 화면이 다시 열려도 결과를 보여 준다 · 점검 E-2)
 const serverLocks = new Map();
 function sweep(now) { for (const [id, j] of jobs) if (j.doneAt && now - j.doneAt > JOB_KEEP_MS) jobs.delete(id); }
 export function _resetKeyLoginJobsForTest() { jobs.clear(); slots.clear(); lastBySlot.clear(); serverLocks.clear(); }
+const runningIn = (slot) => { const id = slots.get(slot); const j = id ? jobs.get(id) : null; return j && !j.doneAt ? j : null; };
+const runningRevokes = () => [...slots.keys()].filter((k) => k.startsWith('revoke:')).map(runningIn).filter(Boolean);
 
-/** 같은 서버는 한 번에 한 작업만 만진다(넣기 · 거두기가 같은 파일을 동시에 바꾸지 않게). */
-async function withServerLock(id, fn) {
-  const key = String(id);
+/**
+ * 같은 서버는 한 번에 한 작업만 만진다. 열쇠는 **접속처(주소:포트)** — 등록부 항목 id 로 잡으면 같은 서버를 가리키는 두 항목이 동시에 같은 파일을 바꿨다(반증 R1).
+ * 서버 쪽에도 자물쇠가 있다(akScript LOCK — 다른 포탈 · 다른 노드).
+ */
+export const serverLockKey = (s) => `${String(s?.host || '').trim().toLowerCase()}:${Number(s?.port) || 22}`;
+async function withServerLock(key, fn) {
   const prev = serverLocks.get(key) || Promise.resolve();
   let release; const mine = new Promise((r) => { release = r; });
   const tail = prev.then(() => mine);
@@ -259,12 +270,32 @@ async function withServerLock(id, fn) {
   try { return await fn(); } finally { release(); if (serverLocks.get(key) === tail) serverLocks.delete(key); }
 }
 
-/** 그 종류의 칸에 진행 중인 작업 id(없으면 ''). */
-export function busyJob(kind) {
-  const slot = SLOT_OF[kind]; const id = slot ? slots.get(slot) : '';
-  const j = id ? jobs.get(id) : null;
-  return j && !j.doneAt ? j.id : '';
+/**
+ * 시작 사전 검사(OTP 앞 — 라우트 jobPre). 넣기: 넣기 칸이 차 있거나 **같은 키를 거두는 중**이면 409(거둔 키를 다시 넣지 않게 · 반증 R2).
+ * 거두기: 같은 키 거두기가 진행 중이거나 동시 거두기 상한이면 409.
+ * @returns {null | {ok:false, code, status, jobId?, reason}}
+ */
+export function jobStartIssue(kind, keyId = '') {
+  const k = t(keyId, 32);
+  if (kind === 'key-login') {
+    const cur = runningIn('install');
+    if (cur) return { ok: false, code: 'busy', status: 409, jobId: cur.id, reason: '다른 키 로그인 설정 작업이 진행 중입니다 — 끝나거나 멈춘 뒤 다시 하세요.' };
+    const rv = k ? runningIn(`revoke:${k}`) : null;
+    if (rv) return { ok: false, code: 'revoking', status: 409, jobId: rv.id, reason: '그 키를 서버에서 거두는 작업이 진행 중입니다 — 거두는 키를 다시 넣지 않습니다.' };
+    return null;
+  }
+  if (kind === 'key-revoke') {
+    const same = k ? runningIn(`revoke:${k}`) : null;
+    if (same) return { ok: false, code: 'busy', status: 409, jobId: same.id, reason: '그 키를 거두는 작업이 이미 진행 중입니다 — 진행을 보세요.' };
+    if (runningRevokes().length >= MAX_REVOKE_JOBS) return { ok: false, code: 'busy', status: 409, reason: `키 거두기 작업이 이미 ${MAX_REVOKE_JOBS}개 진행 중입니다 — 하나가 끝난 뒤 다시 하세요.` };
+    return null;
+  }
+  return { ok: false, code: 'bad-kind', status: 400, reason: '모르는 작업입니다.' };
 }
+/** 화면 · 라우트용 — 그 종류(와 키)의 진행 중인 작업 id(없으면 ''). */
+export function busyJob(kind, keyId = '') { const p = jobStartIssue(kind, keyId); return p && p.jobId ? p.jobId : ''; }
+/** 작업 종류(라우트가 멈추기 게이트를 고른다 — 거두기를 멈추는 것은 OTP · 반증 D1). 없으면 ''. */
+export function jobKind(id) { return jobs.get(t(id, 20))?.kind || ''; }
 /** 작업을 멈춘다(지금 서버는 끝까지 — 되돌림을 끊지 않는다 · 남은 서버는 ‘멈춤’ 으로 적는다). */
 export function cancelJob(id, { by = '', why = '' } = {}) {
   const j = jobs.get(t(id, 20));
@@ -275,28 +306,30 @@ export function cancelJob(id, { by = '', why = '' } = {}) {
 }
 
 /**
- * 작업을 시작한다(칸마다 하나). `run(server)` 를 서버마다 차례로 부른다 — 한 대의 예외는 그 서버의 실패로 적고 다음으로 간다.
- * 거두기는 같은 키를 넣는 작업이 돌고 있으면 그 작업을 멈춘다.
+ * 작업을 시작한다. `run(server, job)` 를 서버마다 차례로 부른다 — 한 대의 예외는 그 서버의 실패로 적고 다음으로 간다.
+ * 거두기는 같은 키를 넣는 작업이 돌고 있으면 그 작업을 멈춘다(넣기는 같은 키 거두기 중에는 시작하지 않는다 — jobStartIssue).
+ * run 이 `job.stop(why)` 를 부르면 남은 서버는 하지 않는다(같은 비밀번호가 거부될 때 — 계정 잠금 · 반증 D3).
  * @param {{kind:'key-login'|'key-revoke', servers:object[], run:Function, by?:string, meta?:object, onDone?:(view:object)=>void}} o
- * @returns {{ok:true, jobId:string, stopped?:string} | {ok:false, code:'busy'|'too-many'|'empty'|'bad-kind', status:number, reason:string}}
+ * @returns {{ok:true, jobId:string, stopped?:string} | {ok:false, code:string, status:number, reason:string}}
  */
 export function startJob({ kind, servers, run, by = '', meta = {}, onDone = null } = {}, { now = Date.now() } = {}) {
   sweep(now);
-  const slot = SLOT_OF[kind];
+  const slot = slotOf(kind, meta?.keyId);
   if (!slot) return { ok: false, code: 'bad-kind', status: 400, reason: '모르는 작업입니다.' };
-  const cur = slots.has(slot) ? jobs.get(slots.get(slot)) : null;   // 기록이 이미 정리된 작업은 끝난 것이다(없는 작업 때문에 ‘진행 중’ 으로 잠기지 않게)
-  if (cur && !cur.doneAt) return { ok: false, code: 'busy', status: 409, jobId: cur.id, reason: slot === 'revoke' ? '다른 키 거두기 작업이 진행 중입니다 — 끝난 뒤 다시 하세요.' : '다른 키 로그인 설정 작업이 진행 중입니다 — 끝나거나 멈춘 뒤 다시 하세요.' };
+  const pre = jobStartIssue(kind, meta?.keyId);
+  if (pre) return pre;
   if (!Array.isArray(servers) || !servers.length) return { ok: false, code: 'empty', status: 400, reason: '대상 서버가 없습니다.' };
-  const max = slot === 'revoke' ? MAX_REVOKE_SERVERS : MAX_JOB_SERVERS;
+  const max = kind === 'key-revoke' ? MAX_REVOKE_SERVERS : MAX_JOB_SERVERS;
   if (servers.length > max) return { ok: false, code: 'too-many', status: 400, reason: `한 번에 ${max}대까지입니다 — 나눠서 하세요.` };
   let stopped = '';
-  if (slot === 'revoke' && meta?.keyId) {
-    const inst = slots.has('install') ? jobs.get(slots.get('install')) : null;
-    if (inst && !inst.doneAt && inst.meta?.keyId === meta.keyId) { cancelJob(inst.id, { by, why: '같은 키 거두기가 시작됨' }); stopped = inst.id; }
+  if (kind === 'key-revoke' && meta?.keyId) {
+    const inst = runningIn('install');
+    if (inst && inst.meta?.keyId === meta.keyId) { cancelJob(inst.id, { by, why: '같은 키 거두기가 시작됨' }); stopped = inst.id; }
   }
   const id = `kj_${crypto.randomBytes(6).toString('hex')}`;
   const job = { id, kind, slot, by: t(by, 64), meta, startedAt: now, doneAt: 0, total: servers.length, results: [], current: '', cancelled: false, cancelledBy: '', cancelWhy: '' };
-  jobs.set(id, job); slots.set(slot, id); lastBySlot.set(slot, id);
+  const handle = { stop: (why) => { if (!job.cancelled) { job.cancelled = true; job.cancelledBy = ''; job.cancelWhy = t(why, 120); } } };
+  jobs.set(id, job); slots.set(slot, id); lastBySlot.set(viewKey(slot), id);
   (async () => {
     for (const s of servers) {
       if (job.cancelled) {
@@ -305,7 +338,7 @@ export function startJob({ kind, servers, run, by = '', meta = {}, onDone = null
       }
       job.current = s.name || s.host;
       let r;
-      try { r = await withServerLock(s.id, () => run(s)); } catch (e) { r = { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'error', reason: `처리 중 오류(${String(e?.message || e).replace(/\s+/g, ' ').slice(0, 100)})` }; }
+      try { r = await withServerLock(serverLockKey(s), () => run(s, handle)); } catch (e) { r = { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'error', reason: `처리 중 오류(${String(e?.message || e).replace(/\s+/g, ' ').slice(0, 100)})` }; }
       job.results.push(r);
     }
     job.current = ''; job.doneAt = Date.now();

@@ -58,8 +58,22 @@ const HEAD = [
   'LC_ALL=C; export LC_ALL',
   'umask 077',
   '[ -n "$HOME" ] || { echo "##KL fail nohome"; exit 3; }',
-  'd="$HOME/.ssh"; f="$d/authorized_keys"; tmp="$d/.authorized_keys.portal.$$"',
-  'trap \'rm -f "$tmp"\' 0',
+  'd="$HOME/.ssh"; f="$d/authorized_keys"; tmp="$d/.authorized_keys.portal.$$"; lk="$d/.authorized_keys.portal.lock"; held=""',
+  // 끝날 때(신호로 끊겨도) 임시 파일 · 자물쇠를 치운다(반증 R11 — 0 만 걸면 신호에 남았다).
+  'cleanup() { rm -f "$tmp"; if [ -n "$held" ]; then rmdir "$lk" 2>/dev/null; fi; }',
+  'trap cleanup 0; trap \'exit 3\' HUP INT TERM PIPE',
+];
+/**
+ * 서버 쪽 자물쇠(반증 R1 — 넣기 · 거두기가 동시에 같은 파일을 바꾸면 한쪽 갱신이 사라졌다): mkdir 은 원자적이다. 15초 기다려도 못 잡으면 실패,
+ * 2분 넘은 자물쇠는 남은 것으로 보고 치운다(포탈이 끊긴 경우). 읽기(분류)부터 mv 까지 잡는다. 사람 · 다른 도구는 이 자물쇠를 모른다 — 그래서 mv 뒤에 다시 본다(post).
+ */
+const LOCK = [
+  'i=0',
+  'until mkdir "$lk" 2>/dev/null; do',
+  '  i=$((i + 1)); [ "$i" -ge 15 ] && { echo "##KL fail locked"; exit 3; }',
+  '  if command -v find >/dev/null 2>&1 && [ -n "$(find "$lk" -prune -mmin +2 2>/dev/null)" ]; then rmdir "$lk" 2>/dev/null; else sleep 1; fi',
+  'done',
+  'held=1',
 ];
 /** 줄 다듬기(앞 공백 · 끝 CR) — awk 안에서 같은 식을 쓴다. 이 글은 셸의 작은따옴표 안에만 들어간다(작은따옴표가 없다). */
 const STRIP = '{ s = $0; sub(/\\r$/, "", s); t = s; sub(/^[ \\t]+/, "", t) }';
@@ -75,12 +89,17 @@ const CHECKS = (needDir) => [
   'if [ -e "$f" ] && [ ! -r "$f" ]; then echo "##KL fail unreadable"; exit 3; fi',
 ];
 /**
- * 임시 파일을 만들고 검증한 뒤 한 번에 바꾼다. 앞에서 정한 것: 셸 함수 keep(남길 줄을 낸다) · extra(덧붙일 줄을 낸다 — 없으면 :) ·
- * exp(기대 줄 수) · tailn(덧붙인 줄 수) · last(마지막 줄 — 빈 값이면 보지 않음).
+ * 임시 파일을 만들고 검증한 뒤 한 번에 바꾼다. 앞에서 정한 것: 셸 함수 keep(남길 줄을 낸다) · extra(덧붙일 줄을 낸다 — 없으면 :) · post(바꾼 뒤 원하는 상태인가) ·
+ * exp(기대 줄 수) · tailn(덧붙인 줄 수). 남길 줄과 덧붙인 줄을 **둘 다** cksum 으로 대조한다(반증 D4 — 덧붙인 옛 줄은 줄 수만 봤다).
  * 쓸 수 없는 파일(관리자가 root 소유 · 읽기 전용으로 둔 것)은 바꾸지 않는다 — mv 는 폴더 권한만 보므로 그 뜻을 우회할 수 있다.
+ * root 에게 `test -w` 는 모드 444 에서도 참이라 소유자 쓰기 비트를 따로 본다(반증 R8).
+ * mv 뒤에 다시 읽어 원하는 상태가 아니면(자물쇠를 모르는 쪽이 그 사이 바꿈) `raced` — ‘성공’ 이라고 하지 않는다(반증 R1).
  */
 const COMMIT = [
-  'if [ -e "$f" ] && [ ! -w "$f" ]; then echo "##KL fail notwritable"; exit 3; fi',
+  'if [ -e "$f" ]; then',
+  '  [ -w "$f" ] || { echo "##KL fail notwritable"; exit 3; }',
+  '  if command -v find >/dev/null 2>&1 && [ -z "$(find "$f" -prune -perm -0200 2>/dev/null)" ]; then echo "##KL fail notwritable"; exit 3; fi',
+  'fi',
   '[ -w "$d" ] || { echo "##KL fail notwritable"; exit 3; }',
   'rm -f "$tmp"',
   'keep > "$tmp" || { echo "##KL fail write"; exit 3; }',
@@ -89,10 +108,11 @@ const COMMIT = [
   '[ "$got" = "$exp" ] || { echo "##KL fail verify"; exit 3; }',
   'c1=$(keep | cksum); c2=$(head -n "$((got - tailn))" "$tmp" | cksum)',
   '[ "$c1" = "$c2" ] || { echo "##KL fail verify"; exit 3; }',
-  'if [ -n "$last" ]; then [ "$(tail -n 1 "$tmp")" = "$last" ] || { echo "##KL fail verify"; exit 3; }; fi',
+  'if [ "$tailn" -gt 0 ]; then c3=$(extra | cksum); c4=$(tail -n "$tailn" "$tmp" | cksum); [ "$c3" = "$c4" ] || { echo "##KL fail verify"; exit 3; }; fi',
   'chmod 600 "$tmp" || { echo "##KL fail write"; exit 3; }',
   'mv -f "$tmp" "$f" || { echo "##KL fail rename"; exit 3; }',
   'if command -v restorecon >/dev/null 2>&1; then if [ -n "${mkd:-}" ]; then restorecon -F "$d" >/dev/null 2>&1; fi; restorecon -F "$f" >/dev/null 2>&1; fi',
+  'post || { echo "##KL fail raced"; exit 3; }',
 ];
 
 /**
@@ -104,13 +124,14 @@ const COMMIT = [
 export function installScript({ publicKey, keyId, line, replace = false } = {}) {
   const pk = splitPublicKey(publicKey); const mark = markOf(keyId);
   if (!pk || !mark || !safeQ(line) || !line.includes(` ${pk.blob} `) || !line.endsWith(` ${mark}`)) return null;
-  const CLS = `${STRIP} index(t, b) == 0 { next } index(t, m) > 0 { if (t == L) ex++; else if (index(t, ty " ") == 1) un++; else if (t ~ /^from="[^"]*",no-agent-forwarding,no-port-forwarding,no-X11-forwarding /) sd++; else cu++; next } { um++ } END { printf "%d %d %d %d %d %d", NR, ex + 0, un + 0, sd + 0, cu + 0, um + 0 }`;
+  const CLS = `${STRIP} index(t, b) == 0 { next } index(t, m) > 0 { if (t == L) ex++; else if (index(t, ty " ") == 1) un++; else if (t ~ /^from="[0-9A-Fa-f.:]+",no-agent-forwarding,no-port-forwarding,no-X11-forwarding /) sd++; else cu++; next } { um++ } END { printf "%d %d %d %d %d %d", NR, ex + 0, un + 0, sd + 0, cu + 0, um + 0 }`;
   const OLD = `${STRIP} index(t, b) > 0 && index(t, m) > 0 { print $0 }`;
   const DROPM = `${STRIP} index(t, b) > 0 && index(t, m) > 0 { next } { print }`;
   return [
     ...HEAD,
     `B='${pk.blob}'; M='${mark}'; L='${line}'; TY='${pk.type}'; RP='${replace ? 1 : 0}'`,
     ...CHECKS(true),
+    ...LOCK,
     'st="0 0 0 0 0 0"',
     `if [ -e "$f" ]; then st=$(awk -v b="$B" -v m="$M" -v L="$L" -v ty="$TY" '${CLS}' "$f") || { echo "##KL fail read"; exit 3; }; fi`,
     'set -- $st; nr=$1; ex=$2; un=$3; sd=$4; cu=$5; um=$6',
@@ -134,7 +155,8 @@ export function installScript({ publicKey, keyId, line, replace = false } = {}) 
     '  exp=1',
     'fi',
     `extra() { printf '%s\\n' "$L"; }`,
-    'tailn=1; last="$L"',
+    `post() { n=$(awk -v L="$L" '${STRIP} t == L { c++ } END { print c + 0 }' "$f") && [ "$n" -ge 1 ]; }`,
+    'tailn=1',
     ...COMMIT,
     'if [ "$act" = replace ]; then echo "##KL replaced $um 0 $old"; else echo "##KL added $um 0"; fi',
   ].join('\n');
@@ -154,6 +176,7 @@ export function rollbackScript({ line, oldB64 = '' } = {}) {
     `L='${line}'; OLD='${oldB64}'`,
     ...CHECKS(false),
     'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
+    ...LOCK,
     `st=$(awk -v L="$L" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
     'set -- $st; nr=$1; n=$2',
     'if [ "$n" -eq 0 ]; then echo "##KL restored 0"; exit 0; fi',
@@ -161,32 +184,37 @@ export function rollbackScript({ line, oldB64 = '' } = {}) {
     'if [ -n "$OLD" ]; then command -v base64 >/dev/null 2>&1 || { echo "##KL fail nobase64"; exit 3; }; on=$(printf \'%s\' "$OLD" | base64 -d | awk \'END { print NR }\') || { echo "##KL fail read"; exit 3; }; fi',
     `keep() { awk -v L="$L" '${DROPL}' "$f"; }`,
     'if [ "$on" -gt 0 ]; then extra() { printf \'%s\' "$OLD" | base64 -d; }; else extra() { :; }; fi',
-    'exp=$((nr - n + on)); tailn=$on; last=""',
+    `post() { n2=$(awk -v L="$L" '${STRIP} t == L { c++ } END { print c + 0 }' "$f") && [ "$n2" -eq 0 ]; }`,
+    'exp=$((nr - n + on)); tailn=$on',
     ...COMMIT,
     'echo "##KL restored $n"',
   ].join('\n');
 }
 
 /**
- * 키 거두기 — 그 키의 **포탈 줄**(공개키 + 표식)만 모두 지운다. 표식 없는 같은 키 줄(사람이 넣은 줄)은 남기고 수를 알린다.
- * 결과: `##KL removed <지운 수> unmarked <남긴 수>` · `##KL none`(파일 없음) · `##KL fail <사유>`(심볼릭 링크 · 못 읽음 · 못 씀 포함 — ‘없음’ 이 아니다).
+ * 키 거두기 — 그 공개키의 **포탈 줄**(공개키 + 포탈 표식 — 어느 키 id 든)만 모두 지운다. 표식 없는 같은 키 줄(사람이 넣은 줄)은 남기고 수를 알린다.
+ * 키 id 를 가리지 않는 것은 지웠다 다시 등록한 키(새 id)의 거두기가 옛 id 로 넣은 포탈 줄을 남기던 것(반증 R10) 때문이다 — 같은 공개키이므로 같은 키다.
+ * 결과: `##KL removed <지운 수> unmarked <남긴 수>` · `##KL none`(파일 없음) · `##KL fail <사유>`(심볼릭 링크 · 못 읽음 · 못 씀 · 경합 포함 — ‘없음’ 이 아니다).
  */
 export function removeScript({ publicKey, keyId } = {}) {
   const pk = splitPublicKey(publicKey); const mark = markOf(keyId);
   if (!pk || !mark) return null;
+  const anyMark = ` ${PORTAL_MARK}k_`;
   const CNT = `${STRIP} index(t, b) == 0 { next } index(t, m) > 0 { n++; next } { u++ } END { printf "%d %d %d", NR, n + 0, u + 0 }`;
   const DROPM = `${STRIP} index(t, b) > 0 && index(t, m) > 0 { next } { print }`;
   return [
     ...HEAD,
-    `B='${pk.blob}'; M='${mark}'`,
+    `B='${pk.blob}'; M='${anyMark}'`,
     ...CHECKS(false),
     'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
+    ...LOCK,
     `st=$(awk -v b="$B" -v m="$M" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
     'set -- $st; nr=$1; n=$2; u=$3',
     'if [ "$n" -eq 0 ]; then echo "##KL removed 0 unmarked $u"; exit 0; fi',
     `keep() { awk -v b="$B" -v m="$M" '${DROPM}' "$f"; }`,
     'extra() { :; }',
-    'exp=$((nr - n)); tailn=0; last=""',
+    `post() { n2=$(awk -v b="$B" -v m="$M" '${STRIP} index(t, b) > 0 && index(t, m) > 0 { c++ } END { print c + 0 }' "$f") && [ "$n2" -eq 0 ]; }`,
+    'exp=$((nr - n)); tailn=0',
     ...COMMIT,
     'echo "##KL removed $n unmarked $u"',
   ].join('\n');
@@ -196,7 +224,7 @@ export function removeScript({ publicKey, keyId } = {}) {
 export const WHOAMI_SCRIPT = 'echo "##KL ip ${SSH_CONNECTION%% *}"';
 
 /** 표지 줄 읽기(마지막 `##KL …` 한 줄 — 로그인 배너가 앞에 섞여도). 모르는 사유 글자는 'unknown'. */
-const FAIL_WHY = new Set(['nohome', 'symlink', 'notdir', 'mkdir', 'notfile', 'unreadable', 'notwritable', 'read', 'write', 'verify', 'rename', 'nobase64', 'toolong']);
+const FAIL_WHY = new Set(['nohome', 'symlink', 'notdir', 'mkdir', 'notfile', 'unreadable', 'notwritable', 'read', 'write', 'verify', 'rename', 'nobase64', 'toolong', 'locked', 'raced']);
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.floor(Number(v)) : 0);
 export function parseMarker(stdout) {
   const lines = String(stdout || '').slice(0, 200_000).split('\n').map((x) => x.trim()).filter((x) => x.startsWith('##KL '));
@@ -218,7 +246,9 @@ export const FAIL_TEXT = Object.freeze({
   notdir: '~/.ssh 가 폴더가 아니라 건드리지 않았습니다.', mkdir: '~/.ssh 폴더를 만들지 못했습니다.', notfile: 'authorized_keys 가 일반 파일이 아니라 건드리지 않았습니다.',
   unreadable: 'authorized_keys 를 읽을 수 없어(권한) 건드리지 않았습니다.', notwritable: 'authorized_keys(또는 ~/.ssh)에 이 계정이 쓸 수 없어(관리자가 잠가 둠) 건드리지 않았습니다.', read: 'authorized_keys 를 읽지 못했습니다.',
   write: '임시 파일을 쓰지 못했습니다(권한 · 디스크) — 원래 파일은 그대로입니다.', verify: '새로 쓴 내용이 예상과 달라(디스크 가득 등) 바꾸지 않았습니다 — 원래 파일은 그대로입니다.',
-  rename: '새 파일로 바꾸지 못했습니다 — 원래 파일은 그대로입니다.', nobase64: '서버에 base64 명령이 없어 처리하지 않았습니다.', toolong: '바꿀 포탈 줄이 너무 많아 처리하지 않았습니다.',
+  rename: '새 파일로 바꾸지 못했습니다 — 원래 파일은 그대로입니다.',
+  locked: '다른 작업이 이 서버의 authorized_keys 를 바꾸는 중이라 기다리다 그만뒀습니다(또는 남은 자물쇠 ~/.ssh/.authorized_keys.portal.lock — 2분 지나면 치웁니다) — 잠시 뒤 다시 하세요.',
+  raced: '바꾼 직후 다시 읽어 보니 다른 쪽(사람 · 구성 관리 도구)이 그 사이 파일을 바꿔 원하는 상태가 아닙니다 — 서버에 들어 있는 키를 다시 읽어 확인하세요.', nobase64: '서버에 base64 명령이 없어 처리하지 않았습니다.', toolong: '바꿀 포탈 줄이 너무 많아 처리하지 않았습니다.',
   unknown: '서버가 예상한 답을 주지 않았습니다.',
 });
 export const failText = (why) => (Object.hasOwn(FAIL_TEXT, why) ? FAIL_TEXT[why] : FAIL_TEXT.unknown);

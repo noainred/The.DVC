@@ -51,7 +51,8 @@ function norm(j) {
   if (j.events !== undefined && !Array.isArray(j.events)) throw new ShapeError('events 가 배열이 아닙니다');
   if (j.guards !== undefined && !isObj(j.guards)) throw new ShapeError('guards 가 객체가 아닙니다');
   // v3.10.0 보호 장치 — 없으면 켬(엄한 쪽이 기본). 글자 그대로 false 일 때만 끔.
-  const guards = { twoPerson: j.guards?.twoPerson !== false, serverRestrict: j.guards?.serverRestrict !== false };
+  // pairSeen: 승인할 수 있는 설정 소유자가 둘 이상인 것을 한 번이라도 본 설치(guards.notePair) — 그 뒤로는 두 사람 승인을 혼자 끄지 못한다(반증 R3).
+  const guards = { twoPerson: j.guards?.twoPerson !== false, serverRestrict: j.guards?.serverRestrict !== false, pairSeen: j.guards?.pairSeen === true };
   const stops = Object.create(null);
   const ents = Object.entries(j.stops || {});
   // 넘치는 중지 기록을 조용히 자르면 잘린 법인의 중지가 풀린다(반증 D6) — 손상으로 본다.
@@ -162,12 +163,17 @@ function pushEvents(d, list, now) {
     const e = { at: now, kind: t(ev.kind, 40), corp: t(ev.corp, 128), target: t(ev.target, 128), by: t(ev.by, 64), detail: t(ev.detail, 300) };
     d.events.push(e); fresh.push(e);
   }
-  // 넘치면 덜 중요한 오래된 사건부터 버린다(받는 곳 새 파일이 몰려도 사용 중지 · 바꿔치기 사건이 밀려나지 않게 — 점검 C-7).
+  // 넘치면 **이번에 넣지 않은** 사건 가운데 덜 중요한 오래된 것부터 버린다(받는 곳 새 파일이 몰려도 사용 중지 · 바꿔치기 사건이 밀려나지 않게 — 점검 C-7).
+  //   이번에 넣은 사건은 자르지 않는다 — 오래 운영해 기록이 중요 사건으로 차면 새 덜 중요한 사건(inbox-new)이 넣자마자 잘려 알림도 영영 나가지 않았다(반증 R5).
+  const freshSet = new Set(fresh);
   while (d.events.length > MAX_EVENTS) {
-    const i = d.events.findIndex((e) => !CRITICAL_EVENTS.includes(e.kind));
-    d.events.splice(i >= 0 ? i : 0, 1);
+    let i = d.events.findIndex((e) => !freshSet.has(e) && !CRITICAL_EVENTS.includes(e.kind));
+    if (i < 0) i = d.events.findIndex((e) => !freshSet.has(e));
+    if (i < 0) break;
+    d.events.splice(i, 1);
   }
-  // 알림은 **기록에 남은** 사건만(점검 C-3 부수 — 방금 넣은 사건이 자르기로 지워졌는데 알림만 나가던 것).
+  if (d.events.length > MAX_EVENTS) d.events.splice(0, d.events.length - MAX_EVENTS);   // 한 번에 상한보다 많이 넣은 경우만
+  // 알림은 **기록에 남은** 사건만(점검 C-3 부수).
   const kept = new Set(d.events);
   for (const e of fresh) if (kept.has(e)) pendingNotify.push(e);
 }
@@ -201,8 +207,17 @@ export function clearCorpStop(corp, { by = '', now = Date.now() } = {}) {
  */
 export function getGuards() {
   const d = load();
-  if (!d || loadErr.get()) return { twoPerson: true, serverRestrict: true, unreadable: true };
+  if (!d || loadErr.get()) return { twoPerson: true, serverRestrict: true, pairSeen: true, unreadable: true };
   return { ...d.guards };
+}
+/** ‘승인할 수 있는 소유자 둘’ 을 본 표지를 세운다(한 번 세우면 내리지 않는다 — 화면 · API 로 내릴 길이 없다). */
+export function markPairSeen({ by = '', now = Date.now() } = {}) {
+  const u = unreadable(); if (u) return u;
+  const d = draft();
+  if (d.guards.pairSeen === true) return { ok: true, changed: 0 };
+  d.guards.pairSeen = true;
+  pushEvents(d, [{ kind: 'guard-changed', by, detail: '승인할 수 있는 설정 소유자 둘을 확인 — 이제 두 사람 승인은 혼자 끌 수 없습니다' }], now);
+  return commit(d);
 }
 /** 보호 장치 바꾸기(호출부가 권한 · OTP · 두 사람 승인을 거친 뒤). 아는 키 · 참/거짓만. */
 export function setGuards(patch = {}, { by = '', now = Date.now() } = {}) {
