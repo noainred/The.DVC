@@ -180,11 +180,15 @@ export function markExecuted(id, result = {}, { now = Date.now() } = {}) {
 }
 
 /** 시한이 지난 대기 요청을 ‘expired’ 로 확정하고 그 목록을 돌려준다(호출부가 뒷정리 — 예: 승인 대기 키 삭제). 바뀐 것이 없으면 쓰지 않는다. */
+export const INTERRUPTED_MS = 10 * 60_000;
 export function expireDue({ now = Date.now() } = {}) {
   if (unreadable()) return [];
   const d = draft();
   const due = d.requests.filter((r) => r.status === OPEN && r.expiresAt <= now);
-  if (!due.length) return [];
+  // 승인은 됐지만 실행 결과가 적히지 않은 요청(실행 중 포탈이 멈춤) — 10분이 지나면 ‘failed(중단)’ 로 확정한다(영원히 ‘승인됨’ 으로 남아 승인 대기 키가 갇히지 않게).
+  const stuck = d.requests.filter((r) => r.status === 'approved' && r.decidedAt && r.decidedAt + INTERRUPTED_MS <= now);
+  if (!due.length && !stuck.length) return [];
   for (const r of due) { r.status = 'expired'; r.decidedAt = now; }
-  return commit(d).ok ? due.map(view) : [];
+  for (const r of stuck) { r.status = 'failed'; r.result = { ok: false, code: 'interrupted', reason: '승인 뒤 실행 결과가 적히지 않았습니다(포탈이 실행 중 멈춤) — 다시 요청하세요.' }; }
+  return commit(d).ok ? [...due, ...stuck].map(view) : [];
 }

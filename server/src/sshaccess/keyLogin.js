@@ -16,6 +16,7 @@
  */
 import crypto from 'node:crypto';
 import * as REFS from '../bmusage/onboard/refs.js';
+import * as KS from '../bmusage/onboard/keyStore.js';
 import * as INS from './installed.js';
 import { noteKeyUse } from './usage.js';
 import { PORTAL_MARK, READ_COMMAND, parseReadOutput } from './authorizedKeys.js';
@@ -228,10 +229,17 @@ export async function installOne(server, key, o = {}) {
   // ④ 확인됨 — 서버를 그 키에 묶고(등록부), 고른 뒷일을 한다.
   const out = { ...base, ok: true, code: 'ok', line: m.kind, restricted: !!o.restrict && added, fromIp: added ? fromIp : '', bound: false, passwordRemoved: false };
   if (step2.value?.read?.ok) INS.noteInstalled(server.id, { host: server.host, port: Number(server.port) || 22, username: kAuth.username, file: '~/.ssh/authorized_keys', keys: step2.value.read.keys, truncated: step2.value.read.truncated, by: t(o.by, 64) });
-  const b = t(server.keyRef) === key.id && server.osAuth !== 'password' ? { ok: true, already: true } : o.bind(server, key.id);
+  // 이미 그 키를 쓰는 서버는 다시 묶지 않는다 — 특히 ‘법인 기본 키를 따름’ 인 서버를 이름 고정으로 바꾸지 않는다(법인 기본 키를 바꾸면 따라가야 한다).
+  const accKey = t(server.credRef) ? t(KS.accountById(server.credRef)?.keyRef) : '';
+  const usesAlready = server.osAuth !== 'password' && (t(server.keyRef) === key.id || (!t(server.keyRef) && accKey === key.id));
+  const b = usesAlready ? { ok: true, already: true } : o.bind(server, key.id);
   if (!b.ok) return { ...out, ok: false, code: 'bind-failed', reason: `키 접속은 확인됐지만 서버 설정에 적지 못했습니다(${t(b.reason, 120)}) — 서버의 키 줄은 남아 있습니다. ‘키 고르기’ 로 이 키를 고르세요.` };
   out.bound = true;
-  if (o.removePassword) { const c = o.clearPassword(server); out.passwordRemoved = !!c.ok; if (!c.ok) out.note = `저장 비밀번호를 지우지 못했습니다(${t(c.reason, 100)}).`; }
+  // 저장 비밀번호 지우기 — 서버 항목에 저장된 비밀번호가 있을 때만(공통 계정의 비밀번호는 다른 서버도 쓰므로 여기서 지우지 않는다).
+  if (o.removePassword) {
+    if (!server.password) out.passwordRemoved = null;   // 지울 것이 없다(공통 계정을 쓰거나 처음부터 없음)
+    else { const c = o.clearPassword(server); out.passwordRemoved = !!c.ok; if (!c.ok) out.note = `저장 비밀번호를 지우지 못했습니다(${t(c.reason, 100)}).`; }
+  }
   if (o.replaceKey && o.replaceKey.id !== key.id) {
     const cmd = removeCommand({ publicKey: o.replaceKey.publicKey, keyId: o.replaceKey.id });
     const rm = cmd ? await sshRun(server, kAuth, async (exec) => parseMarker((await exec(cmd, STEP_TIMEOUT_MS))?.stdout)) : { ok: false, reason: '옛 키의 공개키 꼴이 올바르지 않습니다' };
