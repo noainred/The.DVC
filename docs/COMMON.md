@@ -42,7 +42,7 @@
 | `registryCore.js` | 장비 등록부(storage·sanswitch·pdu·cvp·bmstor)의 **공용 판정**(v2.613 PERSIST2613-04 · DEPS2613-04). | `corruptOnlyReason` `makeLoadError` `autoWriteRefusal` `manualRemoteWriteRefusal` `summarizeRegistryError` `pullRecoveryNote` 외 5 | 59 | 23 | 5 |
 | `timeSlice.js` | 시간 기준 양보(v2.672). | `createYielder` | 52 | 26 | 3 |
 | `logThrottle.js` | '같은 내용이면 가끔만' 찍는 로그 조절기(v2.583, 순수). | `createChangeLogger` | 51 | 14 | 1 |
-| `stateFiles.js` | '이 파일은 설정이 아니라 **상태·캐시** 다' 를 파일이 스스로 선언하는 등록부(v2.613 PERSIST2613-01·08). | `registerStateFile` `isRegisteredStateFile` `registeredStateFiles` | 49 | 23 | 6 |
+| `stateFiles.js` | '이 파일은 설정이 아니라 **상태·캐시** 다' 를 파일이 스스로 선언하는 등록부(v2.613 PERSIST2613-01·08). | `registerStateFile` `isRegisteredStateFile` `registeredStateFiles` | 51 | 24 | 7 |
 | `readCapped.js` | 응답 본문을 **상한까지만** 읽어 JSON 으로(v2.583 — 감사 확정). | `readJsonCapped` `readTextCapped` `EDGE_EXPORT_MAX_BYTES` `EDGE_RESPONSE_MAX_BYTES` | 40 | 17 | 1 |
 | `sqliteOpen.js` | SQLite 첫 open 공용 규칙(v2.599 감사 DB2599-02 후속). | `isSqliteLockError` `applyStdPragmas` `createLockRetry` `chmodDbFiles` `openSqlite` `withOpenCleanup` 외 1 | 37 | 29 | 3 |
 | `authGuard.js` | 인증 실패(401/403) 대상의 **주기 수집 정지** 공용 코어(v2.535). | `isPeerRejectText` `isAuthFailureText` `credHashOf` `createAuthGuard` `createAuthBreaker` `runWithBreakerWarmup` 외 2 | 34 | 27 | 11 |
