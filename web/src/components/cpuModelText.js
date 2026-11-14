@@ -13,8 +13,11 @@
  */
 
 /** 표시용으로 다듬은 이름. 원문이 없으면 빈 문자열. */
+// v3.10.12(공통 기능 점검 10회차): 정규식 전에 길이를 자른다 — `\s*@\s*` 는 앵커가 없어 공백이 길면 O(n²)이다
+//   (실측: 공백 2만 자 392ms · 4만 자 1,490ms — 화면 그리기를 막는다). CPU 모델명은 100자 안팎이라 200자면 넉넉하다.
+export const CPU_MODEL_MAX = 200;
 export function cpuModelText(raw) {
-  const s = String(raw ?? '').trim();
+  const s = String(raw ?? '').slice(0, CPU_MODEL_MAX).trim();
   if (!s) return '';
   return s
     .replace(/\((?:R|TM|C)\)/gi, '')     // (R) (TM) (C)
@@ -30,7 +33,7 @@ export function cpuModelText(raw) {
  * 다듬은 결과가 원문과 같으면 툴팁을 중복해 붙이지 않는다.
  */
 export function cpuModelCell(raw) {
-  const s = String(raw ?? '').trim();
+  const s = String(raw ?? '').slice(0, CPU_MODEL_MAX).trim();
   const t = cpuModelText(s);
   if (!t) {
     return {

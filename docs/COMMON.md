@@ -145,7 +145,7 @@
 | `ErrorBoundary.jsx` | Catches render/runtime errors in its subtree so a single broken component never blanks the whole portal. Shows a small fallback (or a custom one). | `default` | 3 | 2 | 2 |
 | `VmConsole.jsx` | VM remote-console launcher (원격 콘솔), mirroring the vSphere Client: - LAUNCH REMOTE CONSOLE → VMRC desktop app (vmrc:// URL) - LAUNCH WEB CONSOLE → HTML… | `VmConsoleButton` | 3 | 3 | 0 |
 | `VmReconfig.jsx` | VM 사양 변경 버튼/모달 — vCPU·RAM 증설, 디스크 증설/추가, NIC 추가/삭제. 접근 권한은 기능 권한 'vm.reconfig'로 통제(기본 admin 전용, 권한 매트릭스에서 부여 가능). 안전: 증설만(감소·축소 차단은 서버에서도 강제), 변경 전 확인… | `VmReconfigButton` | 3 | 3 | 0 |
-| `cpuModelText.js` | CPU 모델명 표시 문구(순수, v2.556). | `cpuModelText` `cpuModelCell` | 3 | 3 | 1 |
+| `cpuModelText.js` | CPU 모델명 표시 문구(순수, v2.556). | `cpuModelText` `cpuModelCell` `CPU_MODEL_MAX` | 3 | 3 | 1 |
 | `mentionText.js` | 댓글 @멘션 자동완성의 순수 판정(v2.907 · 시안 docs/design/wiki-mention ①②). | `mentionQueryAt` `mentionText` `applyMention` `mentionsInText` `MENTION_TOKEN_MAX` | 3 | 3 | 1 |
 | `taskLabel.js` | 요청 경로 → **사람이 읽는 작업 이름**(v2.501) — 순수 함수. | `taskLabel` `secText` `taskRows` `visibleProgress` | 3 | 2 | 3 |
 | `ExportPreviewModal.jsx` | 내보내기 미리보기 '크게 보기'(전체 화면 팝업, v2.801 — 승인 시안 ⑤ https://claude.ai/artifact/5PT9nUWUwMPTxwURq3xm1h). 사용자 요청(2026-10-27): "지금 미리보기 화면이 작은데, 미리보기를 전체화면으로 팝업… | `default` | 2 | 2 | 0 |
