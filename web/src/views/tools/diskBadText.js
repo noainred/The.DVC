@@ -112,14 +112,24 @@ export function diagInfo(diag) {
   const lines = [];
   const sec = Number.isFinite(diag.ms) ? `${Math.max(1, Math.round(diag.ms / 1000)).toLocaleString('ko-KR')}초` : '—';
   lines.push(`처음부터 읽은 점검(${fmtDateTime(diag.at)}): ${n(diag.read)}건 · ${n(diag.pages)}쪽 · ${sec}${diag.reachedEnd ? ' · iDRAC 가 준 끝까지 읽음' : ' · 끝까지 읽지 못함'}${diag.path === 'legacy' ? ' · 옛 경로(Logs/Lclog)' : ''}`);
-  if (Number.isFinite(diag.oldest)) lines.push(`읽은 로그의 범위: ${fmtDateTime(diag.oldest)} ~ ${fmtDateTime(diag.newest)} (${spanText(diag.oldest, Number.isFinite(diag.newest) ? diag.newest : diag.at)})`);
+  if (Number.isFinite(diag.oldest)) lines.push(`읽은 로그의 범위: ${fmtDateTime(diag.oldest)} ~ ${fmtDateTime(diag.newest)} (${spanText(diag.oldest, Number.isFinite(diag.newest) ? diag.newest : diag.at)})${diag.oldestCode ? ` · 가장 오래된 항목 ${diag.oldestCode}` : ''}`);
   const top = Array.isArray(diag.top) ? diag.top.filter((x) => x && x.code) : [];
   if (top.length) lines.push(`많이 나온 기록 ID: ${top.map((x) => `${x.code} ${n(x.n)}`).join(' · ')}${Number.isFinite(diag.distinct) && diag.distinct > top.length ? ` · 그 밖 ${n(diag.distinct - top.length)}종` : ''}`);
   let warn = '';
   if (Number.isFinite(diag.loginShare) && diag.loginShare >= 0.5) {
-    warn = `읽은 로그의 ${Math.floor(diag.loginShare * 100)}% 이상이 로그인 계열로 보이는 기록(${(diag.loginCodes || []).join(' · ')})입니다 — 위 ‘많이 나온 기록 ID’ 로 직접 확인할 수 있습니다. 이런 기록이 로그를 채우면 그 이전의 디스크 기록은 보관 로그로 넘어갔을 수 있습니다.`;
+    warn = `읽은 로그의 ${Math.floor(diag.loginShare * 100)}% 이상이 로그인 계열로 보이는 기록(${(diag.loginCodes || []).join(' · ')})${diag.repeatCode ? `과 그 반복 표시(${diag.repeatCode})` : ''}입니다 — 위 ‘많이 나온 기록 ID’ 로 직접 확인할 수 있습니다. 이런 기록이 로그를 채우면 그 이전의 디스크 기록은 보관 로그로 넘어갔을 수 있습니다.`;
   }
   return { lines, warn };
+}
+
+/**
+ * 점검 요청의 답을 화면 문구로(v3.8.3). 서버는 시작하지 못한 점검을 409 + `ok:false` + reason 으로 답하고, api.js 는 409 를 던지지 않는다 —
+ * 그래서 답을 보지 않으면 건너뛰어진 점검도 '보냈습니다' 가 된다(실사용에서 서버 한 대 점검이 조용히 건너뛰어졌다).
+ * @returns {{ok:boolean, text:string}}
+ */
+export function scanSent(r, okText = '점검을 보냈습니다 — 이 서버를 맡은 노드가 읽고 나면 아래가 바뀝니다. 서버 한 대를 직접 점검하면 장비 진단(이 iDRAC 가 무엇을 주는지)도 함께 받아 옵니다 — 장비 진단은 관리자 화면에만 보입니다.') {
+  if (r && r.ok === false) return { ok: false, text: String(r.reason || '점검을 시작하지 못했습니다.') };
+  return { ok: true, text: okText };
 }
 
 /**

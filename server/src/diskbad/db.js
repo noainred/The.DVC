@@ -212,7 +212,7 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
         if (!s.log.foundCursor && Array.isArray(s.log.top)) {
           row.read_diag = JSON.stringify({ at: now, read: finite(s.log.read), total: finite(s.log.total), pages: finite(s.log.pages), ms: finite(s.log.ms),
             distinct: finite(s.log.distinct), firstLen: finite(s.log.firstLen), hasNext: s.log.hasNext ?? null, path: s.log.path || '', top: s.log.top,
-            oldest: finite(s.log.oldestRead), newest: finite(s.log.newestCreated), reachedEnd: s.log.reachedEnd === true }).slice(0, 4_000);
+            oldest: finite(s.log.oldestRead), newest: finite(s.log.newestCreated), reachedEnd: s.log.reachedEnd === true, oldestCode: s.log.oldestCode || '' }).slice(0, 4_000);
         }
         const nc = finite(L.newestCreated);
         row.newest_created = nc != null && (prevNewest == null || nc > prevNewest) ? nc : prevNewest;

@@ -104,7 +104,7 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
       oldestRead: r.oldestRead, reachedEnd: r.reachedEnd, foundCursor: r.foundCursor, cursorUsed: r.cursorUsed, stopped: r.stopped,
       cursorCreated: cursor?.created ?? null,
       // 무엇을 읽었는가(진단 — 판정에 쓰지 않는다): 쪽 수 · 걸린 시간 · 기록 ID 구성 · 첫 쪽 크기 · 다음 쪽 링크 · 경로.
-      pages: r.pages, ms: r.ms, distinct: r.distinct, top: r.top, firstLen: r.firstLen, hasNext: r.hasNext, path: r.path,
+      pages: r.pages, ms: r.ms, distinct: r.distinct, top: r.top, firstLen: r.firstLen, hasNext: r.hasNext, path: r.path, oldestCode: r.oldestCode,
     };
     // 상한을 넘으면 **가장 새 것** 을 남긴다(반증 #8 — 장비가 준 순서와 무관하게). 잘렸으면 이어 읽기 커서도 '끝까지 봄' 이 아니다
     //   — 다음 점검이 처음부터 다시 읽고, 중앙은 잘린 아래 구간을 '본 구간' 에서 뺀다(db.js).

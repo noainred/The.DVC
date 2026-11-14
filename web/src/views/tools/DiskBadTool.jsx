@@ -18,7 +18,7 @@ import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { DiskBadServerPanel } from './DiskBadServerPanel.jsx';
-import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText } from './diskBadText.js';
+import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent } from './diskBadText.js';
 
 const TABS = [
   { k: 'summary', label: '요약' }, { k: 'disks', label: '디스크 목록' }, { k: 'corps', label: '국가 · 법인' },
@@ -255,7 +255,7 @@ function Corps({ fleet, setCorp, canScan, onScanned }) {
   const scanCorp = (c) => {
     setBusy(c.id); setMsg('');
     postJson('/tools/disk-bad/scan', { scope: 'corp', corpId: c.id, mode: 'incremental' })
-      .then(() => onScanned()).catch((e) => setMsg(e?.message || String(e))).finally(() => setBusy(''));
+      .then((r) => { const sent = scanSent(r); if (sent.ok) onScanned(); else setMsg(sent.text); }).catch((e) => setMsg(e?.message || String(e))).finally(() => setBusy(''));
   };
   return (
     <div className="card" style={{ padding: 12, minWidth: 0 }}>
@@ -407,7 +407,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
   const start = () => {
     setBusy(true); setMsg('');
     postJson('/tools/disk-bad/scan', scope === 'all' ? { scope, mode } : { scope: 'corp', corpId, mode })
-      .then((r) => { setJobs([r.job, ...jobs.filter((j) => j.id !== r.job.id)]); setMsg('점검을 보냈습니다.'); })
+      .then((r) => { const sent = scanSent(r, '점검을 보냈습니다.'); if (sent.ok && r.job) setJobs([r.job, ...jobs.filter((j) => j.id !== r.job.id)]); setMsg(sent.text); })
       .catch((e) => setMsg(e?.message || String(e))).finally(() => setBusy(false));
   };
   const act = (j, path, body) => postJson(`/tools/disk-bad/jobs/${encodeURIComponent(j.id)}/${path}`, body)

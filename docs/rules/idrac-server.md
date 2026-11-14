@@ -1617,5 +1617,13 @@
     ⑦ 답한 단계가 없는 장비 진단은 지난 정상 진단을 덮지 않는다(`db.js probeAnswered`) · `cleanProbe` 는 **의도한 예외**(모양을 정하지 않은 절단 — 판정 · 집계에 쓰지 않는다) · 상한은 UTF-8 바이트.
     남긴 것: Id 없는 항목이 지난 자리와 같은 초에 있으면 그 초의 항목을 건너뛸 수 있다(iDRAC 항목은 Id 가 있다 — 가짜 입력으로만 재현) · 읽기 · 진단이 Basic 요청마다 로그인 기록을 남긴다면
     전량 읽기 한 번이 활성 로그의 몇 % 를 밀어낸다(추정 — 걸러 읽기 · 세션 토큰은 장비 진단의 답을 보고).
+  - **v3.8.3 — 3.8.2 실사용 화면에서 드러난 것**(서버 한 대: 1,894건 · 37일 · USR0030 884 · LOG007 883 · SWC0403 126 · LOG203 1 · 장비 진단 상자 없음):
+    ① **시작하지 못한 점검은 그렇다고 답한다** — 그 노드가 다른 점검 중이면 조각이 'busy' 로 건너뛰어지는데 화면은 '점검을 보냈습니다' 였다(서버 한 대 점검 = 장비 진단을 받는 유일한 길).
+    조각이 전부 바쁜 노드면 작업을 만들지 않고 409 `{ ok:false, busy:true, reason }`(`routes/api/diskBad.js busyBody` · `jobs.js isAgentBusy`). ⚠ `api.js postJson` 은 **409 를 던지지 않는다** —
+    화면은 답의 `ok` 를 본다(`diskBadText.js scanSent` — 엣지 포탈 409 · 같은 id 409 도 예전에는 '보냈습니다' 였다). 장비 진단이 없으면 관리자에게 받는 방법을 안내한다(`canProbe`).
+    ② 로그인 비율은 **반복 표시(LOG007)를 로그인 계열 건수까지만** 로그인 쪽으로 센다(`classify.js loginShareOf` — 위 구성은 47% 가 아니라 93%. 넘치는 LOG007 은 세지 않는다).
+    ③ 읽기 진단에 **가장 오래된 항목의 기록 ID**(`oldestCode`)를 싣는다 — 활성 로그의 맨 끝이 LOG203 한 건이었다(로그를 보관으로 넘긴 표시로 **보인다** — 문서 대조 전. 장비 진단이 그 문장을 받아 온다).
+    ④ 장비 진단: 로그인이 온 경로(`loginVia` — 문장 끝의 낱말만 · 계정 · 주소 없음) · 가장 오래된 항목 한 건(`lclogOldest` — 건수를 믿을 수 있을 때 요청 1번 · 문장은 LOG 계열일 때만).
+    회귀 `server/test/diskBadField383.test.js` · 웹 `diskBadText.test.js`. 이 서버의 활성 로그는 37일치였다(다른 서버는 하루치) — 서버마다 다르다.
   - 남은 것(설계 §16 · §18 범위 B · C): 지금 쓰이는 곳(OS · vCenter) · 교체 우선순위 · 조치 추적 · 디스크 SMART 값 · vSAN 상태 · 설정 점검. 실장비 대조는 3.8.2 의 장비 진단으로 받는다(§14.1 명령 대신) — 그 답으로 분류표 · 읽는 방법을 고친다.
-  - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · 웹 `diskBadText.test.js`.
+  - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · `server/test/diskBadField383.test.js` · 웹 `diskBadText.test.js`.

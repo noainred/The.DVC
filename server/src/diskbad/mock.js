@@ -55,9 +55,10 @@ function mockDiag(id, total, entries) {
   const flooded = h % 5 === 0;
   const disk = entries.length;
   const login = flooded ? Math.floor(total * 0.48) : Math.floor(total * 0.06);
-  const top = [{ code: 'USR0030', n: login }, { code: 'USR0032', n: login }, { code: 'LOG007', n: Math.floor(total * 0.01) }, { code: 'SYS1003', n: Math.floor(total * 0.004) }];
+  // 실장비에서 본 꼴(v3.8.3): 로그인 한 건 + 반복 표시(LOG007) 한 건이 짝으로 쌓인다.
+  const top = [{ code: 'USR0030', n: login }, { code: 'LOG007', n: flooded ? login - 1 : Math.floor(total * 0.01) }, { code: 'SWC0403', n: Math.floor(total * 0.03) }, { code: 'SYS1003', n: Math.floor(total * 0.004) }];
   if (disk) top.push({ code: entries[0].code, n: disk });
-  return { flooded, diag: { pages: Math.ceil(total / 50), ms: 400 * Math.ceil(total / 50), distinct: 14 + (h % 20), top: top.filter((x) => x.n > 0).sort((a, b) => b.n - a.n), firstLen: 50, hasNext: total > 50, path: 'std' } };
+  return { flooded, diag: { pages: Math.ceil(total / 50), ms: 400 * Math.ceil(total / 50), distinct: 14 + (h % 20), top: top.filter((x) => x.n > 0).sort((a, b) => b.n - a.n), firstLen: 50, hasNext: total > 50, path: 'std', oldestCode: flooded ? 'LOG203' : 'SYS1003' } };
 }
 
 function mockProbe(now) {
