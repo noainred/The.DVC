@@ -58,6 +58,16 @@ export const SCOPES = Object.freeze([
 /** 사용처를 찾을 소스 범위(공용 위치를 import 할 수 있는 곳 전부). */
 export const SOURCE_ROOTS = Object.freeze(['server/src', 'server/test', 'web/src', 'scripts']);
 
+/**
+ * 테스트 수에서 빼는 테스트 — 이 생성기와 화면 자신의 테스트다. 검사 데이터로 모듈 경로를 적어 두므로(예: ‘머리 주석이 있는 모듈’ 목록)
+ * 세면 그 모듈을 ‘가리키는 테스트’ 가 생긴 것처럼 된다(v3.10.0 실측 — 20개 모듈이 부풀고 5개가 0 → 1). 그 모듈을 검증하는 테스트가 아니다.
+ */
+export const CATALOG_SELF_TESTS = Object.freeze([
+  'server/test/commonDoc.test.js',
+  'server/test/commonCatalog3100.test.js',
+  'web/src/views/tools/commonCatalogText.test.js',
+]);
+
 /** 공용 위치 밖 모듈을 '널리 쓰인다' 로 싣는 기준 — 테스트가 아닌 사용처가 속한 영역 수(자기 영역 제외). */
 export const SHARED_MIN_AREAS = 5;
 /**
@@ -248,6 +258,10 @@ export function scanImports(stripped) {
     if (m[2]) specs.push(m[2]);
     else dynamicUnknown += 1;
   }
+  // 워커 진입점 · 같은 폴더 모듈을 가리키는 `new URL('./x.js', import.meta.url)` 도 사용처다(v3.10.1 — `util/parseWorker.js` 가
+  // `util/soapParsePool.js` 의 `new Worker(new URL('./parseWorker.js', import.meta.url))` 로만 쓰여 ‘사용처 0’ 으로 실렸다).
+  // 코드 파일만 센다(`./commonCatalog.json` · `./vendor/oui.tsv.gz` 같은 데이터 파일은 모듈이 아니다).
+  for (const m of s.matchAll(/\bnew\s+URL\s*\(\s*['"](\.{1,2}\/[^'"\n]+\.(?:m?js|jsx))['"]\s*,\s*import\.meta\.url\s*\)/g)) specs.push(m[1]);
   return { specs, dynamicUnknown };
 }
 
@@ -318,6 +332,7 @@ export function buildCatalog(root = ROOT) {
       me.summary = headSummary(raw, r);
     }
     if (isTestFile(r)) {
+      if (CATALOG_SELF_TESTS.includes(r)) continue; // 자기 테스트는 세지 않는다(CATALOG_SELF_TESTS 머리말)
       // 테스트: import 든 소스 스윕이든 '실재 모듈을 가리키는 경로 문자열' 을 센다(scanPathLiterals 머리말).
       for (const lit of scanPathLiterals(stripped)) {
         let target = lit.startsWith('.') ? resolveSpec(abs(r), lit) : null;

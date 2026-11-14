@@ -14,6 +14,7 @@ import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import EscClose from '../../components/EscClose.jsx';
+import { copyText } from '../../util/copyText.js';
 import {
   SCOPE_IDS, scopeLabel, summaryText, baseName, dirName, countText, kpiOf, chipCounts, applyFilter, exportsView,
   areaLabel, areaNote, builtText, footnoteText, statusView, emptyView, filterLabel, shownText,
@@ -37,10 +38,9 @@ function Section({ title, children }) {
 
 /** 모듈 상세 — 오른쪽 서랍(720 미만은 전체 화면). 목록이 뒤에 남는다. */
 function ModuleDrawer({ m, onClose }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(m.file); setCopied(true); } catch { setCopied(false); }
-  };
+  // 'idle' | 'ok' | 'fail' — HTTP 포탈에서는 Clipboard API 가 없어 폴백으로 복사한다(util/copyText.js). 실패를 조용히 넘기지 않는다.
+  const [copied, setCopied] = useState('idle');
+  const copy = async () => setCopied((await copyText(m.file)) ? 'ok' : 'fail');
   const exportsAll = Array.isArray(m.exports) ? m.exports : [];
   const tests = Array.isArray(m.testFiles) ? m.testFiles : [];
   const areas = Array.isArray(m.areaCounts) ? m.areaCounts : [];
@@ -80,8 +80,9 @@ function ModuleDrawer({ m, onClose }) {
           <Section title="경로">
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <code className="cc-path">{m.file}</code>
-              <button type="button" className="btn" onClick={copy}>{copied ? '복사됨' : '복사'}</button>
+              <button type="button" className="btn" onClick={copy}>{copied === 'ok' ? '복사됨' : '복사'}</button>
             </div>
+            {copied === 'fail' && <div role="status" style={{ fontSize: 12, color: 'var(--amber)' }}>이 브라우저에서는 복사하지 못했습니다 — 경로를 직접 선택해 복사하십시오.</div>}
             {m.twin && <div style={{ fontSize: 12, color: 'var(--text-dim)', overflowWrap: 'anywhere' }}>같은 이름의 다른 한 벌: <span style={MONO}>{m.twin}</span></div>}
           </Section>
 

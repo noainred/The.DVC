@@ -105,8 +105,8 @@ jobs:
       - name: 문서 최신 여부 — docs/API.md
         continue-on-error: true
         run: node scripts/api-doc.mjs --check
-      # 공통 기능 목록(공용 모듈의 내보내는 이름·사용처·테스트 수)도 생성물이다 — 공용 모듈을 새로 쓰는 파일이 생기면
-      # 사용처 수가 바뀐다. 서버 단위테스트(commonDoc)는 같은 대조를 **실패**로 고정한다.
+      # 공통 기능 목록(공용 모듈의 내보내는 이름·사용처·테스트 수)도 생성물이다 — 소스 파일 하나만 늘어도 숫자가 바뀐다.
+      # v3.10.1: 낡음은 **경고만** 한다(PR 마다 다시 만들게 하면 병렬 세션의 PR 이 서로 충돌한다). 배포본은 release.yml 이 패키징 직전에 다시 만든다.
       - name: 문서 최신 여부 — docs/COMMON.md
         continue-on-error: true
         run: node scripts/common-doc.mjs --check

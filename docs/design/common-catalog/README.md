@@ -119,3 +119,17 @@
 2 의 한계(보수적인 쪽을 골랐다): import 뒤 머리 주석이 **모듈 상수에 바로 붙어 있으면**(`TaskWho.jsx` · `EscClose.jsx`) ‘설명 없음’ 이 된다 —
 받으면 `store.js` 처럼 상수 하나의 설명이 모듈 설명으로 실린다. 틀린 설명이 빈 설명보다 나쁘다고 봤다. 그 파일의 머리 주석을 맨 앞으로 옮기면 실린다.
 영어로 된 요약(소스 주석이 영어인 모듈)과 요약에 실린 주소(`ExportPreviewModal.jsx` 의 시안 링크)는 소스 주석 그대로다 — 고치지 않았다.
+
+### 7.2 v3.10.1 — 공통 기능 개선 · 버그 수정(사용자 요청 ‘공통 기능 개선 및 버그 수정’ · 범위 1~5 전부 · 4번은 ‘릴리스 때 재생성’ · 검증 표준)
+
+| # | 무엇 | 고친 것 |
+|---|---|---|
+| 1 | 자기 테스트(`commonDoc` · `commonCatalog3100` · `commonCatalogText`)가 검사 데이터로 적은 모듈 경로가 테스트 수로 세어졌다 — 20개 모듈이 부풀고 5개가 0 → 1(화면 ‘테스트 0’ 20 → 실제 25) | 생성기 `CATALOG_SELF_TESTS` 로 뺀다 |
+| 2 | `util/parseWorker.js` 가 ‘사용처 0’ — `new Worker(new URL('./parseWorker.js', import.meta.url))` 를 세지 않았다 | `new URL('./x.js', import.meta.url)` 를 사용처로(코드 파일만) |
+| 3 | 서랍의 ‘복사’ 가 HTTP 포탈에서 조용히 실패 — `navigator.clipboard` 는 보안 문맥에만 있다 | 공용 `web/src/util/copyText.js`(Clipboard API → textarea + execCommand 폴백 · 실패는 false) · 실패하면 화면에 안내 |
+| 4 | 다른 PR 이 소스 파일 하나만 추가해도 `commonDoc` 테스트가 깨지고 생성물에서 충돌 | 낡음은 CI 경고 · `release.yml` 이 패키징 직전에 다시 만든다 · 테스트는 그 단계를 고정 |
+| 5 | `TaskWho.jsx` · `EscClose.jsx` 가 ‘설명 없음’ | 머리 주석을 파일 맨 앞으로(글자는 그대로 · EscClose 는 한국어 첫 줄을 덧붙였다) |
+
+남긴 것: `web/src/components/vmMetricStats.js` 는 실제로 import 하는 곳이 없다(테스트만 — v2.911 에 성능 모달을 바꾼 뒤로 보인다 · 확인만 했고 지우지 않았다).
+`AccessDenied.jsx` · `ServiceDown.jsx` · `VmConsole.jsx` 의 복사도 Clipboard API 만 쓴다 — 같은 HTTP 문제가 있을 수 있으나 이번 범위 밖이다(`copyText` 로 옮기면 된다).
+
