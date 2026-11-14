@@ -369,6 +369,9 @@ export function jobView(id) {
 /** 칸마다 마지막 작업(1시간 안 — 진행 중이면 진행 중인 것). 화면이 다시 열려도 결과를 이어 보여 준다. */
 export function lastJobs() {
   const out = {};
-  for (const [slot, id] of lastBySlot) { const v = jobView(id); if (v) out[slot] = { id: v.id, kind: v.kind, running: v.running, startedAt: v.startedAt, doneAt: v.doneAt, total: v.total, done: v.done, by: v.by }; }
+  const brief = (v) => ({ id: v.id, kind: v.kind, running: v.running, startedAt: v.startedAt, doneAt: v.doneAt, total: v.total, done: v.done, by: v.by, keyName: t(v.meta?.keyName, 64) });
+  for (const [slot, id] of lastBySlot) { const v = jobView(id); if (v) out[slot] = brief(v); }
+  // 거두기는 키마다 돌 수 있다 — 1시간 안의 거두기 작업을 최근 것부터 최대 5개(화면이 다른 사람이 돌린 거두기도 이어 본다).
+  out.revokes = [...jobs.values()].filter((j) => j.kind === 'key-revoke').sort((a, b) => b.startedAt - a.startedAt).slice(0, 5).map((j) => brief(jobView(j.id)));
   return out;
 }

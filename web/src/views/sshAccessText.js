@@ -248,7 +248,7 @@ export function pendingText(r, { what = '요청', then = '실행됩니다' } = {
   const n = finiteNum(r?.approvers);
   if (n != null && n <= 0) {
     return `${what} 요청을 보냈지만 승인할 수 있는 다른 설정 소유자가 없습니다 — 이 요청은 승인되지 못한 채 시한이 지나면 사라집니다. `
-      + '설정 소유자를 한 명 더 두거나, 키 보안 › 보호 장치에서 ‘두 사람 승인’ 을 끈 뒤(다른 소유자가 없으면 본인 OTP 로 꺼집니다) 요청을 취소하고 다시 하세요.';
+      + '다른 설정 소유자가 승인할 수 있게 하거나(관리자 역할 · 전체 범위 · 로그인 수단), 키 보안 › 보호 장치에서 ‘두 사람 승인’ 을 끈 뒤 요청을 취소하고 다시 하세요(승인할 수 있는 소유자 둘을 확인한 적이 있는 포탈은 혼자 끌 수 없습니다).';
   }
   return `${what} 요청을 보냈습니다 — 다른 설정 소유자가 승인하면 ${then}${n != null ? `(승인할 수 있는 소유자 ${n}명)` : ''}. 키 보안 › 승인 대기에서 볼 수 있습니다.`;
 }
@@ -289,6 +289,19 @@ export function guardFailText(body, reason = '') {
   const why = String(reason || body?.reason || '실패했습니다');
   if (!applied.length) return why;
   return `${applied.map((k) => GUARD_TEXT[k]?.label || k).join(' · ')} — 켰습니다(적용됨). 끄는 변경은 하지 못했습니다: ${why}`;
+}
+/**
+ * 보호 장치를 끄는 규칙 안내(서버 `changeGuards` — 반증 R3 뒤): 두 사람 승인이 켜져 있으면 끄는 변경은 다른 소유자의 승인을 거친다.
+ * 승인할 사람이 없을 때 본인 OTP 로 바로 끄는 지름길은 **승인할 수 있는 소유자 둘을 본 적이 없는 설치(pairSeen 아님)만**이다.
+ * 못 받은 값을 지어내지 않는다 — pairSeen 이 참/거짓이 아니면 두 경우를 함께 말한다.
+ */
+export function guardOffRuleText(guards) {
+  const g = guards && typeof guards === 'object' ? guards : {};
+  const head = '두 사람 승인이 켜져 있으면 끄는 변경은 승인할 수 있는 다른 설정 소유자(관리자 역할 · 전체 범위 · 로그인 수단)의 승인을 거쳐 꺼집니다(켜는 변경은 바로 적용됩니다).';
+  if (g.unreadable) return `${head} 상태 파일을 읽지 못해 지금은 바꿀 수 없습니다.`;
+  if (g.pairSeen === true) return `${head} 이 포탈은 승인할 수 있는 설정 소유자 둘을 확인한 적이 있어, 승인할 다른 소유자가 없어져도 혼자 끌 수 없습니다 — 다른 소유자가 다시 승인할 수 있게 한 뒤 그 사람이 승인해야 합니다.`;
+  if (g.pairSeen === false) return `${head} 승인할 수 있는 다른 소유자가 없으면 본인 OTP 로 바로 꺼집니다(이 포탈은 승인할 수 있는 소유자 둘을 확인한 적이 없습니다 — 한 번 확인되면 그 뒤로는 혼자 끌 수 없습니다).`;
+  return `${head} 승인할 다른 소유자가 없을 때 본인 OTP 로 바로 꺼지는 것은 승인할 수 있는 소유자 둘을 확인한 적이 없는 포탈뿐입니다.`;
 }
 /** 보호 장치 저장 결과 문구 — 202 면 끄는 변경이 승인을 기다린다(켜는 변경은 그때도 바로 적용된다). */
 export function guardSaveText(r, diff) {
@@ -394,12 +407,16 @@ export const JOB_CODE_TEXT = Object.freeze({
   // 바꾸는 명령을 보낸 뒤 답을 못 받음 — ‘바꾼 것 없음’ 이 아니다(서버의 명령은 끊겨도 끝까지 돌 수 있다)
   uncertain: '명령은 보냈지만 답을 받지 못함 — 서버의 authorized_keys 가 바뀌었을 수 있음',
   'install-failed': '줄을 넣지 못함', 'key-login-failed': '키 접속 확인 실패', 'bind-failed': '서버 설정에 적지 못함', 'revoke-failed': '줄을 지우지 못함', 'bad-key': '공개키 꼴이 올바르지 않음',
-  cancelled: '작업을 멈춰 이 서버는 하지 않음', 'over-limit': '한 번에 거두는 상한을 넘어 이번 작업에서 빠짐', demo: '데모(mock) 모드에서는 서버에 접속하지 않음',
+  cancelled: '작업을 멈춰 이 서버는 하지 않음', 'over-limit': '한 번에 처리하는 상한을 넘어 이번 작업에서 빠짐', demo: '데모(mock) 모드에서는 서버에 접속하지 않음',
+  // 같은 공통 계정 비밀번호가 이 작업의 다른 서버에서 거부돼 건너뜀(같은 디렉터리 인증이면 서버 수만큼 실패가 쌓여 계정이 잠긴다)
+  'auth-skipped': '같은 공통 계정 비밀번호가 다른 서버에서 거부돼 건너뜀(계정 잠금 방지)',
   error: '처리 중 오류',
 });
 /** 서버에 손대지 않고 넘어간 사유(시도 자체를 하지 않았다 — 실패와 따로 센다). 글자가 따로 있는 것은 SKIP_LABEL. */
-const SKIP_CODES = new Set(['edge-delegated', 'moved', 'not-found', 'key-changed', 'cancelled', 'over-limit']);
-const SKIP_LABEL = Object.freeze({ cancelled: '멈춤', 'over-limit': '빠짐(상한)' });
+const SKIP_CODES = new Set(['edge-delegated', 'moved', 'not-found', 'key-changed', 'cancelled', 'over-limit', 'auth-skipped']);
+const SKIP_LABEL = Object.freeze({ cancelled: '멈춤', 'over-limit': '빠짐(상한)', 'auth-skipped': '건너뜀' });
+/** 거두기에서 시도하지 않은 것 가운데 키 줄이 그대로 남은 것(위험 톤) — 엣지 위임 · 접속처 바뀜과 달리 이 노드가 할 일이 남았다. */
+const REVOKE_LEFT_CODES = new Set(['cancelled', 'over-limit', 'auth-skipped']);
 /** 결과를 모르는 행 — 명령을 보냈는데 답이 없다(실패도 성공도 아니다). */
 const UNCERTAIN_LABEL = '결과 모름';
 const LINE_TEXT = Object.freeze({
@@ -454,14 +471,14 @@ export function keyLoginRow(r, meta = {}) {
  * 키 거두기 결과 한 줄 — 지움 / 포탈 줄 없음 / 파일 없음 / 못 닿음 / 실패 / 결과 모름.
  * 심볼릭 링크 · 못 읽음 · 못 씀은 서버가 ‘revoke-failed’(실패)로 준다 — ‘파일 없음’ 과 섞지 않는다.
  * 표식 없는 같은 키 줄이 남았거나 서버가 아직 그 키를 쓰도록 설정돼 있으면(이름 고정 · 공통 계정 기본 키) ‘확인’ 톤.
- * 멈춤 · 상한으로 빠진 서버는 키 줄이 그대로 남았으므로 ‘위험’ 톤(긴급 조치가 끝나지 않았다).
+ * 멈춤 · 상한으로 빠짐 · 비밀번호 거부로 건너뜀은 키 줄이 그대로 남았으므로 ‘위험’ 톤(긴급 조치가 끝나지 않았다).
  * @returns {{label:string, tone:'ok'|'warn'|'bad'|'muted', parts:string[], rollback:''}}
  */
 export function keyRevokeRow(r) {
   const row = rowOf(r);
   if (row.ok !== true) {
     if (SKIP_CODES.has(row.code)) {
-      return { label: SKIP_LABEL[row.code] || '하지 않음', tone: row.code === 'cancelled' || row.code === 'over-limit' ? 'bad' : 'warn', parts: [failText(row)], rollback: '' };
+      return { label: SKIP_LABEL[row.code] || '하지 않음', tone: REVOKE_LEFT_CODES.has(row.code) ? 'bad' : 'warn', parts: [failText(row)], rollback: '' };
     }
     const failed = row.code === 'revoke-failed' || row.code === 'bad-key' || row.code === 'error' || row.code === 'key-tampered';
     const parts = [failText(row)];
@@ -489,9 +506,9 @@ export function jobHeadText(job, { stopped = false } = {}) {
   const prog = `${done} / ${unitText(finiteNum(job.total), '대')}`;
   if (job.running === true) {
     if (stopped) return `마지막으로 받은 진행 ${prog}${job.current ? ` — 그때 처리 중 ${job.current}` : ''} · 그 뒤는 모릅니다`;
-    return `진행 ${prog}${job.current ? ` — 지금 ${job.current}` : ''} · 1대씩 차례로 합니다${job.cancelled ? ' · 멈추는 중(지금 서버를 끝낸 뒤 남은 서버는 하지 않음)' : ''}`;
+    return `진행 ${prog}${job.current ? ` — 지금 ${job.current}` : ''} · 1대씩 차례로 합니다${job.cancelled ? ` · 멈추는 중${job.cancelledBy ? `(${job.cancelledBy})` : '(작업이 스스로 멈춤)'} — 지금 서버를 끝낸 뒤 남은 서버는 하지 않음` : ''}`;
   }
-  return `끝났습니다(${dateTime(job.doneAt)})${job.cancelled ? ` — 도중에 멈춤${job.cancelledBy ? `(${job.cancelledBy})` : ''}` : ''}`;
+  return `끝났습니다(${dateTime(job.doneAt)})${job.cancelled ? ` — 도중에 멈춤${job.cancelledBy ? `(${job.cancelledBy})` : '(작업이 스스로 멈춤 — 사유는 ‘멈춤’ 줄)'}` : ''}`;
 }
 /**
  * 진행을 더 묻지 못했을 때의 안내(점검 E-6). 404 = 서버가 작업 기록을 모른다(끝난 지 오래됐거나 포탈 재시작 — 서버 사유를 그대로 싣는다).
@@ -521,7 +538,7 @@ export function revokeStartText(r) {
 /** 키 거두기의 1회 비밀번호 주의(점검 E-13) — 그 법인 서버 전부에 같은 비밀번호로 한 번씩 접속한다(저장 인증이 되던 서버까지). n 을 모르면 수 없이. */
 export function revokeOnceWarn(n) {
   const cnt = finiteNum(n);
-  return `넣으면 이 법인 서버${cnt != null ? ` ${cnt}대` : ''} 전부에 이 비밀번호로 한 번씩 접속합니다 — 저장된 인증으로 되던 서버도 이 비밀번호를 씁니다. 비밀번호가 다른 서버는 로그인 실패가 한 번 기록되고(다시 시도하지 않습니다) 계정 잠금 정책에 걸릴 수 있습니다.`;
+  return `넣으면 이 법인 서버${cnt != null ? ` ${cnt}대` : ''} 전부에 이 비밀번호로 한 번씩 접속합니다 — 저장된 인증으로 되던 서버도 이 비밀번호를 씁니다. 비밀번호가 다른 서버는 로그인 실패가 한 번 기록되고(다시 시도하지 않습니다) 계정 잠금 정책에 걸릴 수 있습니다. 두 서버에서 거부되면 작업이 스스로 멈추고 남은 서버는 하지 않습니다(남은 서버에는 키 줄이 그대로 남습니다).`;
 }
 
 /** 작업 진행 요약 — 수는 서버 값 그대로(총 대수를 모르면 null). */

@@ -510,7 +510,8 @@ test('⑪ 복원 제외 · 소스 스윕 — 상태 파일은 복원하지 않�
   assert.equal([...rt.matchAll(/api\.(get|post|put|delete)\(/g)].length, chains.size, '미들웨어 줄을 읽지 못한 라우트가 없다');
   const OWNER = ['adminOnly', 'requireSettingsOwner'];
   const readOnly = ['/settings/ssh-access/scan', '/settings/ssh-access/servers/:id/installed-keys', '/settings/ssh-access/servers/:id/test'];
-  // 멈추기는 줄이는 방향(남은 서버를 하지 않는다) — OTP 없이 소유자 등급만. 쓰기 라우트 가운데 명시적 예외는 이것 하나다.
+  // 멈추기 — 넣기 작업을 멈추는 것은 줄이는 방향(남은 서버에 키를 넣지 않는다)이라 OTP 없이 소유자 등급만, 거두기 작업을 멈추는 것은 OTP(반증 D1 — cancelGate 가 작업 종류로 고른다).
+  //   쓰기 라우트 가운데 명시적 예외는 이것 하나다(동작은 sshKeyLogin3100 ⑰-c).
   const reduceOnly = ['/settings/ssh-access/jobs/:id/cancel'];
   const keyAdd = ['/settings/ssh-access/keys', '/settings/ssh-access/inbox/approve'];
   const PRE = new Set(['approvePre(true)', 'approvePre(false)', "jobPre('key-login')", "jobPre('key-revoke')"]);
@@ -519,7 +520,8 @@ test('⑪ 복원 제외 · 소스 스윕 — 상태 파일은 복원하지 않�
     const [method, p] = k.split(' ');
     if (method === 'get') continue;
     writes += 1;
-    if (readOnly.includes(p) || reduceOnly.includes(p)) { assert.deepEqual(c, OWNER, `${k} — 소유자 등급만`); continue; }
+    if (readOnly.includes(p)) { assert.deepEqual(c, OWNER, `${k} — 소유자 등급만`); continue; }
+    if (reduceOnly.includes(p)) { assert.deepEqual(c, [...OWNER, 'cancelGate'], `${k} — 소유자 등급 + 작업 종류별 OTP`); continue; }
     if (keyAdd.includes(p)) { assert.deepEqual(c, [...OWNER, 'vaultFirst', 'reauth'], k); continue; }
     assert.deepEqual(c.slice(0, 2), OWNER, k);
     assert.deepEqual([c.at(-1), c.filter((x) => x === 'reauth').length], ['reauth', 1], `${k} — OTP 는 한 번 · 마지막(${c.join(', ')})`);
@@ -530,7 +532,7 @@ test('⑪ 복원 제외 · 소스 스윕 — 상태 파일은 복원하지 않�
   assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/reject'), [...OWNER, 'approvePre(false)', 'reauth']);
   assert.deepEqual(chains.get('post /settings/ssh-access/key-login'), [...OWNER, "jobPre('key-login')", 'reauth']);
   assert.deepEqual(chains.get('post /settings/ssh-access/key-revoke'), [...OWNER, "jobPre('key-revoke')", 'reauth']);
-  assert.deepEqual(chains.get('post /settings/ssh-access/jobs/:id/cancel'), OWNER);
+  assert.match(rt, /const cancelGate = \(req, res, next\) => \(SVC\.keyJobKind\(t\(req\.params\.id, 20\)\) === 'key-revoke' \? reauth\(req, res, next\) : next\(\)\);/, '거두기 멈추기만 OTP');
   assert.match(rt, /const ownerWrite = \[adminOnly, requireSettingsOwner, reauth\];/);
   assert.match(rt, /const keyAddWrite = \[adminOnly, requireSettingsOwner, vaultFirst, reauth\];/);
   assert.match(rt, /api\.post\('\/settings\/ssh-access\/reload-state', \.\.\.ownerWrite/);
