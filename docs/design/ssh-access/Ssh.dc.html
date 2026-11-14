@@ -109,13 +109,13 @@ input[type=checkbox]{width:15px;height:15px;accent-color:#3b82f6;margin:0;vertic
 </div>
 <div style="overflow-x:auto">
 <table style="min-width:980px">
-<thead><tr><th style="width:30px"><input type="checkbox" aria-label="모두 선택"></th><th>서버 ▴</th><th>계정</th><th>로그인</th><th>상태</th><th>호스트 키</th><th>root 권한</th><th>쓰는 기능</th><th>마지막 확인</th><th style="text-align:right"><span class="sm">동작</span></th></tr></thead>
+<thead><tr><th style="width:30px"><input type="checkbox" aria-label="모두 선택"></th><th>서버 ▴</th><th>계정</th><th>로그인 · 쓰는 키</th><th>상태</th><th>호스트 키</th><th>root 권한</th><th>쓰는 기능</th><th>마지막 확인</th><th style="text-align:right"><span class="sm">동작</span></th></tr></thead>
 <tbody>
 <tr>
 <td><input type="checkbox" aria-label="pl-app-01 선택"></td>
 <td><b>pl-app-01</b><div class="sm mono">192.0.2.71</div></td>
 <td>법인 공통<div class="sm mono">root</div></td>
-<td>키</td>
+<td>키<div class="sm"><a href="SshPick.dc.html" class="mono" style="text-decoration:none">공통 / id_ed25519</a> · 법인 기본</div></td>
 <td><span class="tag ok">키 로그인 됨</span></td>
 <td><span class="sm">지문 일치</span></td>
 <td>root</td>
@@ -127,7 +127,7 @@ input[type=checkbox]{width:15px;height:15px;accent-color:#3b82f6;margin:0;vertic
 <td><input type="checkbox" checked aria-label="pl-bareos-01 선택"></td>
 <td><b>pl-bareos-01</b><div class="sm mono">192.0.2.70</div></td>
 <td>법인 공통<div class="sm mono">root</div></td>
-<td>비밀번호<div class="sm">저장됨</div></td>
+<td>비밀번호<div class="sm">저장됨 · <a href="SshPick.dc.html" style="text-decoration:none">키 고르기</a></div></td>
 <td><span class="tag warn">키 미등록</span></td>
 <td><span class="sm">지문 일치</span></td>
 <td>root</td>
@@ -139,7 +139,7 @@ input[type=checkbox]{width:15px;height:15px;accent-color:#3b82f6;margin:0;vertic
 <td><input type="checkbox" aria-label="pl-bkp-sd01 선택"></td>
 <td><b>pl-bkp-sd01</b><div class="sm mono">192.0.2.74</div></td>
 <td>법인 공통<div class="sm mono">root</div></td>
-<td>키</td>
+<td>키<div class="sm"><a href="SshPick.dc.html" class="mono" style="text-decoration:none">공통 / id_ed25519</a> · 법인 기본</div></td>
 <td><span class="tag ok">키 로그인 됨</span></td>
 <td><span class="sm">지문 일치</span></td>
 <td>root</td>
@@ -151,7 +151,7 @@ input[type=checkbox]{width:15px;height:15px;accent-color:#3b82f6;margin:0;vertic
 <td><input type="checkbox" aria-label="pl-db-03 선택"></td>
 <td><b>pl-db-03</b><div class="sm mono">192.0.2.79</div></td>
 <td>법인 공통<div class="sm mono">root</div></td>
-<td>키</td>
+<td>키<div class="sm"><a href="SshPick.dc.html" class="mono" style="text-decoration:none">공통 / id_ed25519</a> · 법인 기본</div></td>
 <td><span class="tag bad">로그인 실패</span><div class="sm" style="margin-top:3px">자동 접속 정지 — 모든 기능 공통</div></td>
 <td><span class="sm">지문 일치</span></td>
 <td class="muted">—</td>
@@ -163,7 +163,7 @@ input[type=checkbox]{width:15px;height:15px;accent-color:#3b82f6;margin:0;vertic
 <td><input type="checkbox" aria-label="pl-gpu-01 선택"></td>
 <td><b>pl-gpu-01</b><div class="sm mono">192.0.2.77</div></td>
 <td><span class="tag unk">단독</span><div class="sm mono" style="margin-top:3px">svc-mon</div></td>
-<td>키</td>
+<td>키<div class="sm"><a href="SshPick.dc.html" class="mono" style="text-decoration:none">서버별 / id_ed25519</a> · 이름 고정</div></td>
 <td><span class="tag ok">키 로그인 됨</span></td>
 <td><span class="sm">지문 일치</span></td>
 <td>sudo<div class="sm">비밀번호 없음 확인</div></td>
@@ -176,6 +176,7 @@ input[type=checkbox]{width:15px;height:15px;accent-color:#3b82f6;margin:0;vertic
 </div>
 <div class="sm" style="padding:12px 14px;display:flex;flex-direction:column;gap:4px">
 <span>계정을 정하는 순서: <b style="color:#aebbd0">서버 단독 → 법인 공통</b>. 둘 다 없으면 접속하지 않고 ‘미설정’ 이라고 말합니다.</span>
+<span>‘쓰는 키’ 의 이름을 누르면 그 서버가 쓸 키를 고릅니다 — 폴더의 키를 이름으로 고정하거나, 서버에 이미 들어 있는 키 중에서 고르거나, 법인 기본 키를 따르게 합니다.</span>
 <span>로그인에 실패한 서버는 계정 잠금을 막으려고 모든 기능의 자동 접속을 멈춥니다. 계정을 고치거나 ‘다시 확인’ 을 눌러야 풀립니다.</span>
 <span>주소 · 포트 · 계정을 바꾸면 저장된 비밀번호와 ‘키 로그인 됨’ 상태를 이어받지 않습니다 — 새로 확인해야 합니다.</span>
 </div>
