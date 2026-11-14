@@ -22,6 +22,8 @@ const MAX = 50;
 const t = (v, max = 128) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max);
 let cache = null;
 let readFailedAt = 0;   // 마지막 읽기 오류 시각(3회차 C3-4 — 못 읽는 동안 ‘중단’ 기록이 조용히 꺼졌다: 화면 · 콘솔이 밝힌다)
+// ‘없음’ 은 ENOENT 일 때만(4회차 C4-2 · C4-3 — 폴더 검색 권한 · NFS 오류에도 existsSync 가 거짓이라 빈 값으로 캐시하고 다음 쓰기가 원본을 덮었다).
+const isMissing = (f) => { try { fs.statSync(f); return false; } catch (e) { return e?.code === 'ENOENT'; } };
 /** 진행 기록 파일을 지금 읽을 수 있는가 — 못 읽으면 { at } (화면 키 점검 · 콘솔). */
 export function inflightReadIssue() { if (!cache) load(); return cache ? null : (readFailedAt ? { at: readFailedAt } : null); }
 
@@ -30,7 +32,7 @@ function load() {
   if (cache) return cache;
   let text;
   try {
-    if (!fs.existsSync(FILE())) { cache = []; return cache; }
+    if (isMissing(FILE())) { cache = []; return cache; }
     text = fs.readFileSync(FILE(), 'utf8');
   } catch { readFailedAt = Date.now(); return null; }   // 읽기 오류(권한 · EISDIR 등)는 손상이 아니다 — 원본을 두고 다음에 다시 읽는다(2회차 C2-8)
   try {

@@ -831,7 +831,7 @@ function FoldersTab({ v, corpName, reload, say }) {
                     {k.rotateDue && <Chip tone="warn">회전 예정일 지남</Chip>}</td>
                   <td data-sort={k.fingerprint}><code title={`${k.fingerprint}\n${k.publicKey}`}>{shortFp(k.fingerprint)}</code></td>
                   <td data-sort={featuresText(k.features, v.features)}>{k.features == null ? <Chip tone="warn">모든 기능(예전 방식)</Chip> : k.features.length ? featuresText(k.features, v.features) : <Chip tone="bad">없음 — 어느 기능도 못 씀</Chip>}</td>
-                  <td data-sort={k.servers ?? ''}>서버 {k.servers ?? '—'}{k.accountsUsing ? ` · 공통 계정 ${k.accountsUsing}` : ''}<div className="ssa-sub">{v.usageLoadFailed ? '사용 기록을 읽지 못함' : k.lastUse ? `${dateTime(k.lastUse.lastAt)} · ${k.lastUse.server}` : '쓴 기록 없음'}</div></td>
+                  <td data-sort={k.servers ?? ''}>서버 {k.servers ?? '—'}{k.accountsUsing ? ` · 공통 계정 ${k.accountsUsing}` : ''}<div className="ssa-sub">{v.usageLoadFailed || v.usageReadFailed ? '사용 기록을 읽지 못함' : k.lastUse ? `${dateTime(k.lastUse.lastAt)} · ${k.lastUse.server}` : '쓴 기록 없음'}</div></td>
                   <td data-nosort>
                     <div className="ssa-acts">
                       <button className="btn btn-sm" type="button" disabled={busy || k.status !== 'active'} onClick={() => setEdit({ key: k, folderCorp: k.folderCorp, folderServer: k.folderServer, features: k.features == null ? null : [...k.features], otp: '' })}>폴더 · 기능</button>
@@ -1328,6 +1328,7 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
         <div className="ssa-acts"><h4>키 사용 기록</h4><span className="ssa-sub">접속 결과 · {unitText(use.resp?.retainDays, '일')} 보관 · 주기 성공은 묶음 횟수로만</span><button className="btn btn-sm" type="button" onClick={loadUse}>다시 읽기</button></div>
         {use.err && <ErrorBox error={use.err} />}
         {use.resp?.loadFailed && <p className="ssa-note" style={{ color: toneVar('warn') }}>사용 기록 파일이 손상돼 보존본을 남기고 새로 시작했습니다 — 그 이전 기록은 이 화면에 없습니다.</p>}
+        {use.resp?.readFailed && !use.resp?.loadFailed && <p className="ssa-note" style={{ color: toneVar('warn') }}>사용 기록 파일을 지금 읽지 못했습니다(권한 등 — 손상이 아닙니다) — 이전 기록은 파일에 그대로 있고, 다시 읽히면 그동안의 기록과 합칩니다.</p>}
         {use.resp && (
           <STable minWidth={860} className="ssa-t" limit={100}>
             <thead><tr><th>시각</th><th>키</th><th>서버</th><th>기능</th><th>시작</th><th>결과</th></tr></thead>

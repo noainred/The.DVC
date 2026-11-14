@@ -25,7 +25,7 @@ import { loadSecretsPolicy } from '../security/secretVault.js';
 import * as ST from './state.js';
 import * as INS from './installed.js';
 import * as INB from './inbox.js';
-import { noteKeyUse, keyUsageView, flushKeyUsage, lastUseByFingerprint, keyUsageLoadFailed } from './usage.js';
+import { noteKeyUse, keyUsageView, flushKeyUsage, lastUseByFingerprint, keyUsageLoadFailed, keyUsageReadFailed } from './usage.js';
 import { buildKeyCheck, checkKeyDrift } from './check.js';
 import { READ_COMMAND, parseReadOutput } from './authorizedKeys.js';
 import * as AP from '../approval/store.js';
@@ -137,6 +137,7 @@ export async function buildView({ now = Date.now() } = {}) {
     authEnabled: !!config.auth?.enabled,   // 화면이 인증 꺼짐을 짐작하지 않게(3회차 반증 R3R-4)   // 화면이 숫자를 박지 않게(3회차 E3-7)
     storeUnreadable: !!storeErr, registryUnreadable: !!regErr, stateUnreadable: !!ST.stateLoadError(),
     usageLoadFailed: keyUsageLoadFailed(), installedLoadFailed: INS.installedLoadFailed(),
+    usageReadFailed: keyUsageReadFailed(), installedReadFailed: INS.installedReadFailed(),   // 못 읽음 ≠ 손상(4회차 D4-3)
     corps: corps.map((c) => ({ ...c, inboxPath: c.missing ? '' : INB.inboxPathOf(c.id), stop: ST.stopFor(c.id) })),
     accounts: accRaw.filter((a) => a.kind === 'os').map((a) => KS.publicAccountView(a, { usage: usage.account(a.id) })),
     keys: keysRaw.map((k) => ({ ...KS.publicKeyView(k, { usage: usage.key(k.id), now }), lastUse: lastUse.get(k.fingerprint) || null,
@@ -482,7 +483,7 @@ export async function reloadKeyStore({ by = '' } = {}) {
 function reloadKeyStoreNow({ by = '', expectSha } = {}) {
   const r = KS.reloadKeyStoreFromDisk({ expectSha });
   REFS._resetVerifiedForTest();
-  _seenDrift = null;
+  _seenDrift = null; _driftGen += 1;   // 도는 점검이 다시 읽기 전에 본 ‘밖에서 바뀜’ 을 쓰지 않게(4회차 C4-4)
   if (r.ok) ST.addEvent({ kind: 'keystore-reloaded', by, detail: `키 ${r.keys}개` });
   return r;
 }
@@ -495,12 +496,7 @@ TP.registerKind('ssh-key-activate', { label: '키 등록',
   run: (p) => KS.activateKey(p.keyId, { fingerprint: p.fingerprint }),
   // 돌려보냄 · 취소 · 시한 만료 · 실행 실패 — 승인 대기 키를 지운다(쓰이지 않은 키가 저장소에 남지 않게).
   // 사용처가 있으면 지우지 않는다(점검 C-5 — 예전에는 대기 키를 묶은 서버가 key-missing 으로 남았다. 지금은 묶기 자체를 막지만 그 전 자료가 있을 수 있다).
-  discard: (p) => {
-    let k = KS.keyById(p.keyId);
-    // id 가 복원으로 바뀌었으면 지문으로(3회차 D3-3 — 같은 지문의 대기 키가 하나일 때만)
-    if (!k && p.fingerprint) { const same = KS.listKeysRaw().filter((x) => x.status === 'pending' && x.fingerprint === p.fingerprint); if (same.length === 1) k = same[0]; }
-    if (k && k.status === 'pending') REFS.deleteKeyIfUnused(k.id);
-  } });
+  discard: (p) => { const k = KS.keyById(p.keyId); if (k && k.status === 'pending') REFS.deleteKeyIfUnused(p.keyId); } });   // id 로만(4회차 D4-1 — 복원이 대기 키 id 를 지킨다)
 /** 그 키를 넣는 작업이 도는 동안에는 지우거나 퇴역시키지 않는다(1회차 C1-3 — 지운 키의 줄이 서버에 남아 거둘 수 없었다). */
 const installingIssue = (keyId) => (t(keyId, 32) && KL.installingKeyIds().includes(t(keyId, 32))
   ? { ok: false, code: 'key-installing', status: 409, reason: '그 키를 서버에 넣거나 교체하는 작업이 진행 중입니다 — 작업이 끝나거나 멈춘 뒤 다시 하세요.' } : null);   // 교체로 지울 옛 키도(2회차 D2-2)
@@ -1046,6 +1042,7 @@ let _seenInbox = null;
 const inboxSigKey = (sig) => crypto.createHash('sha256').update(String(sig)).digest('hex').slice(0, 12);
 const INBOX_SIGS_PER_EVENT = 20;
 let _seenDrift = null;
+let _driftGen = 0;
 let _running = false;
 let _runningSince = 0;
 /** 점검 한 회차의 상한 — 넘으면 다음 회차가 가드를 무시하고 돈다(1회차 C1-6 — 응답 없는 파일시스템 하나가 가드를 영원히 붙잡아 만료 확정 · 대조가 멈췄다). */
@@ -1057,8 +1054,9 @@ export async function runSshAccessScan({ now = Date.now() } = {}) {
   if (_running) console.warn('[ssh-access] 앞 점검이 15분 넘게 끝나지 않아 이번 회차를 돌립니다(앞 회차는 버립니다).');
   _running = true; _runningSince = Date.now();
   const myRun = _runningSince;
+  const gen0 = _driftGen;
   try {
-    const events = [];
+    let events = [];
     notePair({ by: '' });
     // 승인 요청 만료 확정은 **맨 먼저** — 뒤 단계(대조 · 받는 곳)가 던져도 이 회차가 만료를 확정하고 대기 키를 정리한다(점검 C 의심 S-3).
     // 만료 사건은 바로 쓴다 — 이 회차가 15분을 넘겨 버려지면 아래 몰아 쓰기가 일어나지 않아, 만료 확정은 됐는데 사건이 사라졌다(2회차 반증). 실패하면 다음 점검이 다시 쓴다.
@@ -1121,8 +1119,10 @@ export async function runSshAccessScan({ now = Date.now() } = {}) {
     if (_runningSince !== myRun) return { ok: false, abandoned: true };
     retryJobEvents();
     processLeftovers();
+    // 이 회차 도중 ‘키 저장소 다시 읽기’ 가 있었으면(받아들인 새 기준) 앞서 본 ‘밖에서 바뀜’ 은 쓰지 않는다 — 다음 회차가 새 기준으로 다시 본다(4회차 C4-4 — TypeError 로 회차가 죽고 받는 곳 사건을 다시 냈다).
+    if (_driftGen !== gen0) { events = events.filter((e) => !['key-changed-outside', 'key-added-outside', 'account-changed-outside'].includes(e.kind)); seenDrift.length = 0; }
     const wrote = events.length || seenInbox.length ? ST.addEvents(events, { now, inboxSeen: seenInbox }).ok : true;
-    if (wrote) { for (const x of seenDrift) _seenDrift.add(x); if (_seenInbox) for (const x of seenInbox) _seenInbox.add(x); }
+    if (wrote) { if (!_seenDrift) _seenDrift = new Set(); for (const x of seenDrift) _seenDrift.add(x); if (_seenInbox) for (const x of seenInbox) _seenInbox.add(x); }
     if (!regErr && !bmRegistryLoadError()) INS.pruneInstalled(new Set(listBmServersRaw().map((s) => s.id)));   // 지울 때는 지금 서버 목록으로(2회차 C2-5)
     flushKeyUsage({ now });
     return { ok: true, drift, inbox: ib.items.length, events: events.length };

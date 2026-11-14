@@ -56,6 +56,9 @@ const installingFirst = (req, res, next) => {
   // 처리 함수와 **같은 다듬기**(t(v, 32) — 자른 뒤 공백 제거)로 본다(2회차 A4 — 공백을 붙인 id 로 비켜 갔다). 넣는 키 · 교체로 지울 옛 키 둘 다(D2-2).
   const target = t(req.params?.id || bodyOf(req).from || '', 32);
   if (target && busy.includes(target)) return res.status(409).json({ ok: false, code: 'key-installing', reason: '그 키를 서버에 넣거나 교체하는 작업이 진행 중입니다 — 작업이 끝나거나 멈춘 뒤 다시 하세요.' });
+  // 승인 대기 키는 7b 에서 지우지 않는다 — 그 키의 등록 요청이 열려 있을 수 있다(4회차 D4-1 — 두 사람 승인을 잠시 끈 사이 7b 삭제가 열린 요청의 키를 지웠다).
+  //   SSH 공용 접속의 승인 대기에서 돌려보내면 지워진다.
+  if (req.method === 'DELETE' && target && KS.keyById(target)?.status === 'pending') return res.status(409).json({ ok: false, code: 'key-pending', reason: '승인 대기 키입니다 — 설정 › 보안 › SSH 공용 접속의 승인 대기에서 돌려보내면 지워집니다.' });
   return next();
 };
 const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, installingFirst, reauth];

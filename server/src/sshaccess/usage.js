@@ -43,15 +43,17 @@ function rebuildIndex() { byFp = new Map(); for (const r of rows.values()) index
 
 // 읽기 오류(권한 · EMFILE 등)는 손상이 아니다 — 원본을 옮기지 않고, 그동안 모은 것은 메모리에 두었다가 다시 읽히면 합쳐 쓴다(3회차 C3-5 — EACCES 로 원본을 .corrupt 로 옮겨 90일 기록이 사라졌다).
 let readBlocked = false;
+// ‘없음’ 은 ENOENT 일 때만(4회차 C4-2 · C4-3 — 폴더 검색 권한 · NFS 오류에도 existsSync 가 거짓이라 빈 값으로 캐시하고 다음 쓰기가 원본을 덮었다).
+const isMissing = (f) => { try { fs.statSync(f); return false; } catch (e) { return e?.code === 'ENOENT'; } };
 function readText() {
-  if (!fs.existsSync(FILE())) return '';
+  if (isMissing(FILE())) return '';
   return fs.readFileSync(FILE(), 'utf8');
 }
 function load() {
   if (rows) return;
   rows = new Map(); recent = []; byFp = new Map();
   let text;
-  try { text = readText(); } catch { readBlocked = true; loadFailed = true; return; }
+  try { text = readText(); } catch { readBlocked = true; return; }   // 손상(loadFailed)과 가른다 — 원본은 그대로다(4회차 D4-3)
   if (!text) return;
   parseText(text);
 }
@@ -173,6 +175,8 @@ export function lastUseByFingerprint() {
   return m;
 }
 export function keyUsageLoadFailed() { load(); return loadFailed; }
+/** 사용 기록 파일을 지금 읽지 못함(권한 등 — 손상 아님 · 원본 그대로 · 다시 읽히면 합친다). */
+export function keyUsageReadFailed() { load(); return readBlocked; }
 
 /** 화면용 — 묶음(최근 사용 순) · 최근 사건(최신 먼저). 비밀 없음. */
 export function keyUsageView({ fingerprint = '', limit = 200 } = {}) {
@@ -180,7 +184,7 @@ export function keyUsageView({ fingerprint = '', limit = 200 } = {}) {
   const fp = t(fingerprint, 80);
   const list = [...rows.values()].filter((r) => !fp || r.fingerprint === fp).sort((a, b) => b.lastAt - a.lastAt);
   const ev = recent.filter((e) => !fp || e.fingerprint === fp).slice(-Math.max(1, Math.min(MAX_RECENT, limit))).reverse();
-  return { rows: list.slice(0, Math.max(1, Math.min(2000, limit * 5))), totalRows: list.length, recent: ev, retainDays: RETAIN_MS / 86_400_000, loadFailed };
+  return { rows: list.slice(0, Math.max(1, Math.min(2000, limit * 5))), totalRows: list.length, recent: ev, retainDays: RETAIN_MS / 86_400_000, loadFailed, readFailed: readBlocked };
 }
 
 export function _resetKeyUsageForTest() { if (timer) clearTimeout(timer); timer = null; rows = null; recent = null; byFp = null; dirty = false; loadFailed = false; readBlocked = false; }

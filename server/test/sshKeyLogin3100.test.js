@@ -3883,7 +3883,10 @@ test('㉑-j 점검 회차가 하는 뒷일(2회차 C2-3 · C2-4 · C2-5 · C2-8)
   assert.deepEqual(INF.peekLeftovers(), []);
   // ③ 소스 — 버려진 회차(15분 상한을 넘겨 다음 회차가 돌았다)는 뒷일 · 쓰기 · 지우기 전에 돌아간다 · 지울 때는 지금 서버 목록
   const svc = (await import('./_stripComments.js')).stripComments(fs.readFileSync(path.join(SRC, 'sshaccess/service.js'), 'utf8'));
-  assert.match(svc, /if \(_runningSince !== myRun\) return \{ ok: false, abandoned: true \};\s*retryJobEvents\(\);\s*processLeftovers\(\);\s*const wrote = /);
+  assert.match(svc, /if \(_runningSince !== myRun\) return \{ ok: false, abandoned: true \};\s*retryJobEvents\(\);\s*processLeftovers\(\);\s*if \(_driftGen !== gen0\) \{[^\n]*\}\s*const wrote = /);
+  // 회차 도중 키 저장소 다시 읽기 — 그 전에 본 ‘밖에서 바뀜’ 은 쓰지 않고 _seenDrift 가 비어도 던지지 않는다(4회차 C4-4)
+  assert.match(svc, /_seenDrift = null; _driftGen \+= 1;/);
+  assert.match(svc, /if \(wrote\) \{ if \(!_seenDrift\) _seenDrift = new Set\(\);/);
   assert.match(svc, /const exp = TP\.expireSweep\(\{ now \}\)[^]*?if \(exp\.length\) writeJobEvents\(exp\);[^]*?if \(_runningSince !== myRun\) return/, '만료 사건은 점검 맨 앞에서 바로 쓴다(버려진 회차여도 남는다 — 2회차 반증)');
   assert.match(svc, /if \(!regErr && !bmRegistryLoadError\(\)\) INS\.pruneInstalled\(new Set\(listBmServersRaw\(\)\.map\(\(s\) => s\.id\)\)\);/);
   assert.match(svc, /startKeyNotify\(\);[^]*?processLeftovers\(\);[^]*?const run = \(\) =>/, '기동 때도');
@@ -4448,7 +4451,14 @@ test('㉕-d 그 밖(3회차 D · 공통) — 복원으로 id 가 바뀐 대기 �
     const d = JSON.parse(fs.readFileSync(f, 'utf8')); for (const k of d.keys) if (k.id === oldId) k.id = 'k_0000000025dd'; fs.writeFileSync(f, JSON.stringify(d)); KS._resetKeyStoreForTest();
     const a1 = KS.activateKey(oldId); const a2 = KS.activateKey(oldId, { fingerprint: fp });
     console.log(JSON.stringify({ a1: a1.ok, a2: a2.ok, st: KS.keyById('k_0000000025dd')?.status }));` });
-  assert.deepEqual([j.a1, j.a2, j.st], [false, true, 'active'], `요청의 id 로 못 찾으면 지문이 같은 대기 키(하나)를 쓴다 ${JSON.stringify(j)}`);
+  // 4회차 D4-1: 지문으로 대신 찾지 않는다(다른 범위로 다시 등록한 대기 키를 활성화했다) — 복원 합치기가 대기 키의 id 를 지킨다(아래 keyBundle 확인).
+  assert.deepEqual([j.a1, j.a2, j.st], [false, false, 'pending'], `id 로만 찾는다 ${JSON.stringify(j)}`);
+  { const KB = await import('../src/bmusage/onboard/keyBundle.js');
+    const cur = { keys: [{ id: 'k_00000000cur1', fingerprint: 'SHA256:pend', status: 'pending', privateKey: 'P', name: 'n', publicKey: 'ssh-ed25519 AAAA', folderCorp: 'vcA', features: ['bm-usage'] }], accounts: [] };
+    const bundle = { keys: [{ id: 'k_00000000old1', fingerprint: 'SHA256:pend', status: 'active', name: 'n', folderCorp: 'vcB', features: ['bm-usage', 'bm-storage'] }], accounts: [] };
+    const m = KB.mergeRedactedKeyStore ? KB.mergeRedactedKeyStore(JSON.stringify(bundle), JSON.stringify(cur)) : null;
+    if (m) { const text = typeof m === 'string' ? m : (m.text || m.json || JSON.stringify(m.store || m)); const ks = (JSON.parse(text).keys || []);
+      assert.deepEqual(ks.map((k) => [k.id, k.status]), [['k_00000000cur1', 'pending']], `복원은 대기 키의 지금 id · 상태를 지킨다 ${text.slice(0, 300)}`); } }
   // 1회 비밀번호의 접속 계정 — 공통 계정을 확인할 수 없으면 보내지 않는다(예전: 서버 칸 · root 로 짐작)
   assert.deepEqual(KL.onceUsername({ host: '10.0.0.1', username: 'mon' }), { ok: true, username: 'mon' });
   assert.deepEqual(KL.onceUsername({ host: '10.0.0.1' }), { ok: true, username: 'root' });

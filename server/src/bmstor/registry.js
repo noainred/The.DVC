@@ -34,17 +34,24 @@ let cache = null;
 const loadErr = makeLoadError();
 export function registryLoadError() { load(); return loadErr.get(); }
 
+// ‘없음’ 은 ENOENT 일 때만(4회차 C4-2 · C4-3 — 폴더 검색 권한 · NFS 오류에도 existsSync 가 거짓이라 빈 값으로 캐시하고 다음 쓰기가 원본을 덮었다).
+const isMissing = (f) => { try { fs.statSync(f); return false; } catch (e) { return e?.code === 'ENOENT'; } };
 function load() {
   if (cache) return cache;
   try {
-    if (fs.existsSync(FILE)) {
+    if (!isMissing(FILE)) {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       const servers = filterObjectElements(openSecretsDeep(Array.isArray(j?.servers) ? j.servers : [])).list; // 객체 원소만 — 변형 루프가 null 에서 던지지 않게
       // v2.340 저장분(단일 group 문자열) → groups 배열 마이그레이션(로드 시 정규화 — 다음 저장에 영속).
       for (const s of servers) { if (!Array.isArray(s.groups)) s.groups = groupsOf(s); delete s.group; }
       cache = { servers, settings: j?.settings || {} };
     }
-  } catch (e) { preserveCorrupt(FILE, e?.message); loadErr.set(e); cache = null; }
+  } catch (e) {
+    // 읽기 오류(권한 · EMFILE 등)는 손상이 아니다 — 원본을 옮기지 않고 잠근다(4회차 C4-3).
+    if (e?.code && !(e instanceof SyntaxError)) loadErr.set(`읽기 실패(${String(e.code).slice(0, 40)})`);
+    else { preserveCorrupt(FILE, e?.message); loadErr.set(e); }
+    cache = null;
+  }
   if (!cache) { loadErr.checkCorruptOnly(FILE); cache = { servers: [], settings: {} }; }
   return cache;
 }

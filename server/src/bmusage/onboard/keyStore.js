@@ -103,10 +103,12 @@ function normAccount(a) {
   };
 }
 
+// ‘없음’ 은 ENOENT 일 때만(4회차 C4-2 · C4-3 — 폴더 검색 권한 · NFS 오류에도 existsSync 가 거짓이라 빈 값으로 캐시하고 다음 쓰기가 원본을 덮었다).
+const isMissing = (f) => { try { fs.statSync(f); return false; } catch (e) { return e?.code === 'ENOENT'; } };
 function load() {
   if (cache) return cache;
   try {
-    if (fs.existsSync(FILE)) {
+    if (!isMissing(FILE)) {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       const failBefore = decryptFailureCount();
       const opened = openSecretsDeep({ keys: Array.isArray(j?.keys) ? j.keys : [], accounts: Array.isArray(j?.accounts) ? j.accounts : [] });
@@ -116,7 +118,12 @@ function load() {
         accounts: filterObjectElements(opened.accounts).list.map(normAccount).filter(Boolean),
       };
     }
-  } catch (e) { preserveCorrupt(FILE, e?.message); loadErr.set(e); cache = null; }
+  } catch (e) {
+    // 읽기 오류(권한 · EMFILE 등)는 손상이 아니다 — 원본을 옮기지 않고 잠근다(쓰기 거절 · 키 접속 없음 — ‘다시 읽기’ 로 푼다 · 4회차 C4-3).
+    if (e?.code && !(e instanceof SyntaxError)) loadErr.set(`읽기 실패(${String(e.code).slice(0, 40)})`);
+    else { preserveCorrupt(FILE, e?.message); loadErr.set(e); }
+    cache = null;
+  }
   if (!cache) { loadErr.checkCorruptOnly(FILE); cache = { keys: [], accounts: [] }; }
   return cache;
 }
@@ -220,7 +227,7 @@ export function accountByName(kind, name) {
 /** 파일에 **평문으로** 남아 있는 개인키 · passphrase 의 키 id(봉인 표지가 없는 값). 파일을 못 읽으면 null(모름). 원문은 돌려주지 않는다. */
 export function plainStoredKeyIds() {
   try {
-    if (!fs.existsSync(FILE)) return [];
+    if (isMissing(FILE)) return [];
     const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     return (Array.isArray(j?.keys) ? j.keys : []).filter((k) => k && typeof k === 'object'
       && ((typeof k.privateKey === 'string' && k.privateKey !== '' && !k.privateKey.startsWith('enc$1$'))
@@ -262,7 +269,7 @@ export function diskDrift() {
   if (keyStoreLoadError()) return { ...out, ok: false, reason: 'store-unreadable' };
   let disk;
   try {
-    if (!fs.existsSync(FILE)) disk = { keys: [], accounts: [] };
+    if (isMissing(FILE)) disk = { keys: [], accounts: [] };
     else { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); disk = openSecretsDeep({ keys: Array.isArray(j?.keys) ? j.keys : [], accounts: Array.isArray(j?.accounts) ? j.accounts : [] }); }
   } catch (e) { return { ...out, ok: false, reason: `read-failed:${String(e?.code || e?.message || e).slice(0, 40)}` }; }
   const d = load();
@@ -292,7 +299,7 @@ export function diskDrift() {
 }
 /** 디스크 파일의 sha256(없으면 '', 못 읽으면 null) — ‘다시 읽기’ 승인을 요청 때 본 디스크 내용에 묶는다(점검 A5). */
 export function diskFileSha() {
-  try { return fs.existsSync(FILE) ? crypto.createHash('sha256').update(fs.readFileSync(FILE)).digest('hex') : ''; } catch { return null; }
+  try { return isMissing(FILE) ? '' : crypto.createHash('sha256').update(fs.readFileSync(FILE)).digest('hex'); } catch { return null; }
 }
 /**
  * 설정 소유자 + OTP — 디스크 파일을 새 기준으로 다시 읽는다(포탈 밖에서 바뀐 것을 사람이 확인한 뒤). 바꿔치기 표지도 푼다.
@@ -446,10 +453,8 @@ export function setKeyPassphrase(id, passphrase, { now = Date.now() } = {}) {
 export function activateKey(id, { fingerprint = '' } = {}) {
   const u = unreadable(); if (u) return u;
   const d = draft();
-  // id 로 못 찾으면 요청의 지문과 같은 **승인 대기** 키 하나를 쓴다(3회차 D3-3 — 백업 복원이 같은 키의 id 를 번들 id 로 바꾸면 요청이 가리키는 id 가 사라져 대기 키가 요청 없이 남았다).
-  //   지문이 같은 대기 키가 둘 이상이면 고르지 않는다(모호).
-  let k = d.keys.find((x) => x.id === t(id, 32));
-  if (!k && t(fingerprint, 80)) { const same = d.keys.filter((x) => x.status === 'pending' && x.fingerprint === t(fingerprint, 80)); if (same.length === 1) k = same[0]; }
+  // id 로만 찾는다 — 복원 합치기가 대기 키의 id 를 지킨다(4회차 D4-1 — 3회차 D3-3 의 ‘지문으로 대신 찾기’ 는 다른 범위로 다시 등록한 대기 키를 활성화했다).
+  const k = d.keys.find((x) => x.id === t(id, 32));
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다(요청 뒤 지워졌습니다).' };
   if (k.status !== 'pending') return { ok: false, code: 'not-pending', status: 409, reason: '승인 대기 상태의 키가 아닙니다.' };
   if (t(fingerprint, 80) !== k.fingerprint) return { ok: false, code: 'fingerprint-changed', status: 409, reason: '요청 때의 키와 지문이 다릅니다 — 승인하지 않았습니다.' };

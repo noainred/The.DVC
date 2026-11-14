@@ -43,14 +43,16 @@ function normRec(v) {
 }
 // 읽기 오류(권한 · EMFILE 등)는 손상이 아니다 — 원본을 옮기지 않고 캐시하지 않아 다음에 다시 읽는다 · 그동안은 덮어쓰지 않는다(3회차 C3-5 — EACCES 로 원본을 .corrupt 로 옮겼다).
 let readBlocked = false;
+// ‘없음’ 은 ENOENT 일 때만(4회차 C4-2 · C4-3 — 폴더 검색 권한 · NFS 오류에도 existsSync 가 거짓이라 빈 값으로 캐시하고 다음 쓰기가 원본을 덮었다).
+const isMissing = (f) => { try { fs.statSync(f); return false; } catch (e) { return e?.code === 'ENOENT'; } };
 function load() {
   if (cache) return cache;
   let text;
   try {
-    if (!fs.existsSync(FILE())) { readBlocked = false; cache = new Map(); return cache; }
+    if (isMissing(FILE())) { readBlocked = false; cache = new Map(); return cache; }
     text = fs.readFileSync(FILE(), 'utf8');
-  } catch { readBlocked = true; loadFailed = true; return new Map(); }
-  if (readBlocked) { readBlocked = false; loadFailed = false; }
+  } catch { readBlocked = true; return new Map(); }   // 손상(loadFailed)과 가른다(4회차 D4-3)
+  readBlocked = false;
   cache = new Map();
   try {
     const j = JSON.parse(text);
@@ -69,6 +71,7 @@ function persist(next) {
 }
 export function _resetInstalledForTest() { cache = null; loadFailed = false; readBlocked = false; }
 export function installedLoadFailed() { load(); return loadFailed; }
+export function installedReadFailed() { if (!cache) load(); return readBlocked; }
 
 export function noteInstalled(serverId, rec = {}, { now = Date.now() } = {}) {
   const id = t(serverId, 64);

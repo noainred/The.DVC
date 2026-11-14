@@ -31,6 +31,8 @@ export const REQUEST_TTL_MS = 24 * 3600_000;
 export const MAX_PENDING = 200;
 export const MAX_HISTORY = 300;
 export const MAX_PENDING_PER_USER = 30;
+// ‘없음’ 은 ENOENT 일 때만(4회차 C4-2 · C4-3 — 폴더 검색 권한 · NFS 오류에도 existsSync 가 거짓이라 빈 값으로 캐시하고 다음 쓰기가 원본을 덮었다).
+const isMissing = (f) => { try { fs.statSync(f); return false; } catch (e) { return e?.code === 'ENOENT'; } };
 const MAX_PAYLOAD_BYTES = 4096;
 const OPEN = 'pending';
 const STATUSES = ['pending', 'approved', 'rejected', 'cancelled', 'expired', 'executed', 'failed'];
@@ -87,7 +89,7 @@ let lastReadErr = false;
 function load() {
   if (cache) return cache;
   let text = null;
-  try { if (fs.existsSync(FILE())) text = fs.readFileSync(FILE(), 'utf8'); }
+  try { if (!isMissing(FILE())) text = fs.readFileSync(FILE(), 'utf8'); }
   catch (e) { loadErr.set(`읽기 실패(${String(e?.code || e?.message || e).slice(0, 40)})`); lastReadErr = true; return null; }
   if (text == null) {
     if (lastReadErr) { loadErr.clear(); lastReadErr = false; }

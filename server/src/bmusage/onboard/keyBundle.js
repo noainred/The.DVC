@@ -63,6 +63,8 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
     // 키 id: 번들의 id 가 **지금 다른 지문의 키** 것이면 지금 이 지문의 id 를 쓴다(반증 R7 — 두 키의 id 를 맞바꾸면 keyRef 로 묶인 서버가 다른 키를 썼다).
     //   그 밖에는 번들 id 그대로 — 같은 키를 새 id 로 다시 등록한 설치에 옛 백업을 복원해도 번들 안의 참조(공통 계정 · 서버)가 이어진다(1회차 D2 — 항상 지금 id 로 바꾸자 참조가 조용히 끊겼다).
     { const owner = curById.get(String(o.id || '')); if (owner && String(owner.fingerprint || '') !== String(o.fingerprint || '')) o.id = cur0.id; }
+    // 승인 대기 키는 지금 id 를 지킨다 — 열린 등록 요청이 그 id 를 가리킨다(4회차 D4-1 — 번들 id 로 바꾸자 요청이 키를 잃었고, 지문으로 대신 찾는 길이 다른 범위의 대기 키를 집었다).
+    if (cur0 && cur0.status === 'pending' && cur0.id) o.id = cur0.id;
     restored += 1;
     keys.push(o);
   }

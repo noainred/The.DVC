@@ -26,6 +26,8 @@ export const STATE_FILE_NAME = 'ssh-access-state.json';
 const FILE = () => path.join(config.configDir, 'ssh-access-state.json');   // = STATE_FILE_NAME(문서 생성기가 글자 그대로 찾는다)
 export const MAX_EVENTS = 300;
 export const MAX_INBOX_SEEN = 2000;
+// ‘없음’ 은 ENOENT 일 때만(4회차 C4-2 · C4-3 — 폴더 검색 권한 · NFS 오류에도 existsSync 가 거짓이라 빈 값으로 캐시하고 다음 쓰기가 원본을 덮었다).
+const isMissing = (f) => { try { fs.statSync(f); return false; } catch (e) { return e?.code === 'ENOENT'; } };
 const MAX_STOPS = 500;
 const MAX_STOP_SERVERS = 2000;
 const READ_RETRY_MS = 30_000;
@@ -81,7 +83,7 @@ function load() {
   if (readFailAt && Date.now() - readFailAt < READ_RETRY_MS) return null;   // 읽기 실패 뒤 잠시 — 매 호출마다 디스크를 두드리지 않는다
   let text = null;
   try {
-    if (fs.existsSync(FILE())) text = fs.readFileSync(FILE(), 'utf8');
+    if (!isMissing(FILE())) text = fs.readFileSync(FILE(), 'utf8');
   } catch (e) {
     // 읽기 자체가 실패(EMFILE · 권한 등 — 내용 손상이 아니다): 원본을 옮기지 않고 잠근 채 다시 읽는다.
     loadErr.set(`읽기 실패(${String(e?.code || e?.message || e).slice(0, 40)})`); readFailAt = Date.now(); return null;
