@@ -67,9 +67,21 @@ export const WHOAMI_COMMAND = 'echo "##KL ip ${SSH_CONNECTION%% *}"';
  *   `##KL added` · `##KL present-marked`(포탈 줄이 이미 있음) · `##KL present-unmarked`(표식 없는 같은 키 줄이 있음) · `##KL fail <사유>`
  * authorized_keys 가 심볼릭 링크이거나 일반 파일이 아니면 건드리지 않는다. 폴더 · 파일을 새로 만들 때만 권한(0700 · 0600 — umask) · SELinux 문맥(restorecon — 있을 때)을 맞춘다.
  */
-export function installCommand({ publicKey, keyId, line } = {}) {
+export const BACKUP_SUFFIX = '.portal-bak';
+export function installCommand({ publicKey, keyId, line, replace = false } = {}) {
   const pk = splitPublicKey(publicKey); const mark = markOf(keyId);
   if (!pk || !mark || !safeForSingleQuote(line) || !line.includes(pk.blob) || !line.endsWith(mark)) return null;
+  // replace: 그 키의 포탈 줄이 있지만 원하는 줄(제한 포함)과 다르면 — 사본을 남기고(되돌림용) 포탈 줄을 원하는 줄로 바꾼다(테스트 ⑮-c).
+  //   표식 없는 같은 키 줄 · 다른 줄은 그대로. 키 재접속 확인이 실패하면 사본으로 되돌리고(restoreCommand), 되면 사본을 지운다(dropBackupCommand).
+  const marked = replace ? [
+    `elif grep -qxF -- '${line}' "$f"; then echo "##KL present-marked"`,
+    `elif grep -F -- '${pk.blob}' "$f" | grep -qF -- '${mark}'; then`,
+    `  cp -p "$f" "$f${BACKUP_SUFFIX}" || { echo "##KL fail backup"; exit 3; }`,
+    `  awk -v b='${pk.blob}' -v m='${mark}' 'index($0, b) > 0 && index($0, m) > 0 { next } { print }' "$f${BACKUP_SUFFIX}" > "$f.portal.$$" && printf '%s\n' '${line}' >> "$f.portal.$$" && cat "$f.portal.$$" > "$f"; rc=$?`,
+    '  rm -f "$f.portal.$$"',
+    `  if [ "$rc" -ne 0 ]; then cat "$f${BACKUP_SUFFIX}" > "$f"; rm -f "$f${BACKUP_SUFFIX}"; echo "##KL fail rewrite"; exit 3; fi`,
+    '  echo "##KL replaced"',
+  ] : [`elif grep -F -- '${pk.blob}' "$f" | grep -qF -- '${mark}'; then echo "##KL present-marked"`];
   return [
     'umask 077',
     'd="$HOME/.ssh"; f="$d/authorized_keys"; mkd=""; mkf=""',
@@ -77,7 +89,8 @@ export function installCommand({ publicKey, keyId, line } = {}) {
     'if [ -L "$f" ]; then echo "##KL fail symlink"; exit 3; fi',
     'if [ ! -e "$f" ]; then : > "$f" || { echo "##KL fail create"; exit 3; }; mkf=1; fi',
     'if [ ! -f "$f" ]; then echo "##KL fail notfile"; exit 3; fi',
-    `if grep -F -- '${pk.blob}' "$f" | grep -qF -- '${mark}'; then echo "##KL present-marked"`,
+    `if false; then :`,
+    ...marked,
     `elif grep -qF -- '${pk.blob}' "$f"; then echo "##KL present-unmarked"`,
     'else',
     '  if [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ]; then printf "\\n" >> "$f" || { echo "##KL fail append"; exit 3; }; fi',
@@ -114,13 +127,19 @@ export function removeCommand({ publicKey, keyId } = {}) {
   ].join('\n');
 }
 
+/** 줄 바꾸기(replaced)를 되돌린다 — 사본이 있으면 그 내용으로 되쓰고 사본을 지운다. `##KL restored` · `##KL none`. */
+export const RESTORE_COMMAND = ['f="$HOME/.ssh/authorized_keys"', `b="$f${BACKUP_SUFFIX}"`,
+  'if [ -f "$b" ] && [ ! -L "$b" ] && [ -f "$f" ] && [ ! -L "$f" ]; then cat "$b" > "$f" && rm -f "$b" && echo "##KL restored" || echo "##KL fail restore"; else echo "##KL none"; fi'].join('\n');
+/** 줄 바꾸기가 확인된 뒤 사본을 지운다. */
+export const DROP_BACKUP_COMMAND = `rm -f "$HOME/.ssh/authorized_keys${BACKUP_SUFFIX}"; echo "##KL none"`;
+
 /** 표지 줄 읽기(마지막 `##KL …` 한 줄 — 로그인 배너가 앞에 섞여도). */
 export function parseMarker(stdout) {
   const lines = String(stdout || '').slice(0, 65536).split('\n').map((x) => x.trim()).filter((x) => x.startsWith('##KL '));
   const last = lines[lines.length - 1] || '';
   const w = last.split(' ');
   if (w[1] === 'ip') return { kind: 'ip', ip: IP_RE.test(w[2] || '') ? w[2] : '' };
-  if (w[1] === 'added' || w[1] === 'present-marked' || w[1] === 'present-unmarked' || w[1] === 'none') return { kind: w[1] };
+  if (w[1] === 'added' || w[1] === 'replaced' || w[1] === 'restored' || w[1] === 'present-marked' || w[1] === 'present-unmarked' || w[1] === 'none') return { kind: w[1] };
   if (w[1] === 'removed') return { kind: 'removed', removed: Number(w[2]) || 0, unmarked: Number(w[4]) || 0 };
   if (w[1] === 'fail') return { kind: 'fail', why: t(w[2], 20) };
   return { kind: 'unknown' };
@@ -128,7 +147,8 @@ export function parseMarker(stdout) {
 
 const FAIL_TEXT = Object.freeze({
   mkdir: '~/.ssh 폴더를 만들지 못했습니다.', create: 'authorized_keys 를 만들지 못했습니다.', symlink: 'authorized_keys 가 심볼릭 링크라 건드리지 않았습니다.',
-  notfile: 'authorized_keys 가 일반 파일이 아니라 건드리지 않았습니다.', append: 'authorized_keys 에 쓰지 못했습니다(권한 · 디스크).', rewrite: 'authorized_keys 를 다시 쓰지 못했습니다.',
+  notfile: 'authorized_keys 가 일반 파일이 아니라 건드리지 않았습니다.', append: 'authorized_keys 에 쓰지 못했습니다(권한 · 디스크).', rewrite: 'authorized_keys 를 다시 쓰지 못했습니다(원래대로 두었습니다).',
+  backup: 'authorized_keys 의 사본을 만들지 못해 줄을 바꾸지 않았습니다(권한 · 디스크).', restore: 'authorized_keys 를 사본으로 되돌리지 못했습니다.',
 });
 
 /* ── 접속(한 번 · 재시도 없음) ────────────────────────────────────────────── */
@@ -137,24 +157,31 @@ async function sshRun(server, auth, fn) {
   const { withSsh } = await import('../proxy/sshExec.js');
   const { isAuthFailureText, isPeerRejectText } = await import('../util/authGuard.js');
   try {
+    // passwordOnly: 비밀번호는 password 방식으로 **한 번만** 보낸다(keyboard-interactive 로 다시 보내지 않는다 — 실패 기록 2회 · 계정 잠금 · 테스트 ⑪-b).
     const v = await withSsh({ host: String(server.host), port: Number(server.port) || 22, username: auth.username, password: auth.password || '',
-      privateKey: auth.privateKey, passphrase: auth.passphrase, readyTimeout: 15_000 }, async ({ exec }) => fn(exec));
+      privateKey: auth.privateKey, passphrase: auth.passphrase, readyTimeout: 15_000, passwordOnly: true }, async ({ exec }) => fn(exec));
     return { ok: true, value: v };
   } catch (e) {
     const msg = String(e?.message || e);
     const code = isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : 'connect';
     return { ok: false, code, reason: code === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
-      : code === 'auth-rejected' ? '인증이 거부됐습니다 — 다시 시도하지 않았습니다(계정 잠금 방지).' : `접속하지 못했습니다(${msg.replace(/\s+/g, ' ').slice(0, 100)})` };
+      : code === 'auth-rejected' ? `인증이 거부됐습니다 — 다시 시도하지 않았습니다(계정 잠금 방지).${auth.privateKey ? '' : ' 비밀번호는 password 방식으로 한 번만 보냈습니다 — 서버가 대화형(keyboard-interactive) 로그인만 받으면 이 경로로는 넣을 수 없으니 공개키를 직접 넣으세요(키 폴더의 공개키 복사).'}` : `접속하지 못했습니다(${msg.replace(/\s+/g, ' ').slice(0, 100)})` };
   }
 }
 
 /** 지금 되는 접속(첫 접속에 쓴다) — 1회 비밀번호가 있으면 그것, 없으면 저장된 자격. */
-function firstLegAuth(server, oncePassword) {
+function firstLegAuth(server, oncePassword, installingKeyId = '') {
   if (oncePassword) {
     const r0 = REFS.resolveOsAuth({ ...server, keyRef: '', osAuth: 'password' }, { feature: 'conn-test' });
     return { ok: true, username: r0.ok ? r0.username : (t(server.username) || 'root'), password: oncePassword, authKind: 'password-once' };
   }
   const r = REFS.resolveOsAuth(server, { feature: 'conn-test' });
+  // 서버에 설정된 키가 **지금 넣으려는 그 키** 면(공통 계정의 기본 키로 정해 두고 서버에 넣는 흐름) 그 키는 아직 서버에 없을 수 있다 —
+  //   저장된 비밀번호가 있으면 그것으로 붙는다(키를 먼저 대 보고 안 되면 비밀번호로 — 처럼 두 번 시도하지 않는다 · 웹 점검 W1).
+  if (r.ok && r.authKind === 'key' && installingKeyId && r.keyId === installingKeyId) {
+    const pw = REFS.resolveOsAuth({ ...server, keyRef: '', osAuth: 'password' }, { feature: 'conn-test' });
+    if (pw.ok && pw.authKind === 'password' && pw.password) return pw;
+  }
   if (!r.ok) return { ok: false, code: r.code, reason: r.error };
   if (r.authKind === 'none') return { ok: false, code: 'no-secret', reason: '저장된 인증 수단이 없습니다 — 이번 한 번만 쓸 비밀번호를 넣으세요(저장하지 않습니다).' };
   return r;
@@ -177,7 +204,7 @@ export async function installOne(server, key, o = {}) {
   if (!key || key.status !== 'active') return fail(key?.status === 'pending' ? 'key-pending' : 'key-retired', key?.status === 'pending' ? REFS.AUTH_ERROR['key-pending'] : '퇴역한 키는 넣지 않습니다.');
   const pi = REFS.keyPlacementIssue(key, server, 'conn-test');
   if (pi) return fail(pi, REFS.AUTH_ERROR[pi]);
-  const first = firstLegAuth(server, o.oncePassword);
+  const first = firstLegAuth(server, o.oncePassword, key.id);
   if (!first.ok) return fail(first.code, first.reason);
   // 그 키 자격을 먼저 푼다 — 여기서 막히면(사용 중지 · 바꿔치기) 서버를 건드리기 전에 끝낸다.
   const kAuth = keyLegAuth(server, key.id);
@@ -188,11 +215,13 @@ export async function installOne(server, key, o = {}) {
   const step1 = await sshRun(server, first, async (exec) => {
     if (o.restrict) {
       const w = parseMarker((await exec(WHOAMI_COMMAND, STEP_TIMEOUT_MS))?.stdout);
-      fromIp = w.kind === 'ip' ? w.ip : '';
+      if (w.kind !== 'ip') return { kind: 'unknown' };   // 표지가 아예 없음 — 명령을 받지 않는 셸(주소 문제가 아니다 · 테스트 ⑫-c)
+      fromIp = w.ip;
       if (!fromIp) return { kind: 'fail', why: 'noip' };
     }
     line = buildKeyLine({ publicKey: key.publicKey, keyId: key.id, restrict: !!o.restrict, fromIp });
-    const cmd = line ? installCommand({ publicKey: key.publicKey, keyId: key.id, line }) : null;
+    // 제한을 붙여야 하는데 포탈 줄이 제한 없이(또는 다른 주소로) 들어가 있으면 바꾼다 — 제한을 빼는 쪽으로는 바꾸지 않는다(보호 장치를 끈 뒤 다시 넣어도 있던 제한은 남는다).
+    const cmd = line ? installCommand({ publicKey: key.publicKey, keyId: key.id, line, replace: !!o.restrict }) : null;
     if (!cmd) return { kind: 'fail', why: 'badkey' };
     return parseMarker((await exec(cmd, STEP_TIMEOUT_MS))?.stdout);
   });
@@ -204,10 +233,12 @@ export async function installOne(server, key, o = {}) {
     return fail('install-failed', `${why} 서버에서 바꾼 것은 없습니다.`);
   }
   const added = m.kind === 'added';
+  const replaced = m.kind === 'replaced';
 
   // ② 끊고 그 키로 다시 접속해 확인한다.
   const step2 = await sshRun(server, kAuth, async (exec) => {
     const u = await exec('uname -s', STEP_TIMEOUT_MS);
+    if (replaced) { try { await exec(DROP_BACKUP_COMMAND, STEP_TIMEOUT_MS); } catch { /* 사본이 남아도 키 줄 판정과 무관 — 다음 설정 때 덮인다 */ } }
     let read = null;
     try { read = parseReadOutput((await exec(READ_COMMAND, STEP_TIMEOUT_MS))?.stdout || ''); } catch { read = null; }
     return { uname: t(u?.stdout, 40), read };
@@ -220,14 +251,20 @@ export async function installOne(server, key, o = {}) {
       const rb = await sshRun(server, first, async (exec) => parseMarker((await exec(removeCommand({ publicKey: key.publicKey, keyId: key.id }), STEP_TIMEOUT_MS))?.stdout));
       rolledBack = rb.ok && rb.value.kind === 'removed' && rb.value.removed > 0;
       if (!rolledBack) rollbackReason = rb.ok ? '서버가 예상한 답을 주지 않았습니다' : rb.reason;
+    } else if (replaced) {
+      const rb = await sshRun(server, first, async (exec) => parseMarker((await exec(RESTORE_COMMAND, STEP_TIMEOUT_MS))?.stdout));
+      rolledBack = rb.ok && rb.value.kind === 'restored';
+      if (!rolledBack) rollbackReason = rb.ok ? '사본이 없거나 되쓰지 못했습니다' : rb.reason;
     }
     const hint = o.restrict && fromIp ? ` 출발지 제한(from="${fromIp}") 때문일 수 있습니다 — 이 포탈이 서버에 닿는 주소가 접속마다 다르면 ‘서버 쪽 제한’ 을 끄고 다시 하세요(자동으로 빼지 않습니다).` : '';
-    const tail = !added ? ' 줄은 이미 있던 것이라 지우지 않았습니다.' : rolledBack ? ' 더한 줄을 지웠습니다.' : ` 더한 줄을 지우지 못했습니다(${rollbackReason}) — 서버의 authorized_keys 에서 표식 ‘${markOf(key.id)}’ 줄을 직접 지우세요.`;
+    const tail = replaced
+      ? (rolledBack ? ' 바꾼 줄을 원래대로 되돌렸습니다.' : ` 바꾼 줄을 되돌리지 못했습니다(${rollbackReason}) — 서버의 ~/.ssh/authorized_keys${BACKUP_SUFFIX} 사본을 확인하세요.`)
+      : !added ? ' 줄은 이미 있던 것이라 지우지 않았습니다.' : rolledBack ? ' 더한 줄을 지웠습니다.' : ` 더한 줄을 지우지 못했습니다(${rollbackReason}) — 서버의 authorized_keys 에서 표식 ‘${markOf(key.id)}’ 줄을 직접 지우세요.`;
     return fail('key-login-failed', `키 접속 확인 실패 — ${step2.reason}${tail}${hint}`, { line: m.kind, rolledBack, fromIp });
   }
 
   // ④ 확인됨 — 서버를 그 키에 묶고(등록부), 고른 뒷일을 한다.
-  const out = { ...base, ok: true, code: 'ok', line: m.kind, restricted: !!o.restrict && added, fromIp: added ? fromIp : '', bound: false, passwordRemoved: false };
+  const out = { ...base, ok: true, code: 'ok', line: m.kind, restricted: !!o.restrict && (added || replaced || m.kind === 'present-marked'), fromIp: added || replaced ? fromIp : '', bound: false, passwordRemoved: false };
   if (step2.value?.read?.ok) INS.noteInstalled(server.id, { host: server.host, port: Number(server.port) || 22, username: kAuth.username, file: '~/.ssh/authorized_keys', keys: step2.value.read.keys, truncated: step2.value.read.truncated, by: t(o.by, 64) });
   // 이미 그 키를 쓰는 서버는 다시 묶지 않는다 — 특히 ‘법인 기본 키를 따름’ 인 서버를 이름 고정으로 바꾸지 않는다(법인 기본 키를 바꾸면 따라가야 한다).
   const accKey = t(server.credRef) ? t(KS.accountById(server.credRef)?.keyRef) : '';

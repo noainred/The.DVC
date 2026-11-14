@@ -473,6 +473,8 @@ export async function deleteKeyReq({ keyId, by = '' } = {}) {
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
   if (k.status === 'pending') {
     // 요청이 살아 있으면 그 요청을 돌려보내 지운다. 요청이 없는 승인 대기 키(요청 뒷정리가 실패해 남은 것)는 한 번도 쓰인 적이 없으므로 바로 지운다.
+    // 승인 기록을 못 읽으면 ‘요청 없음’ 이 아니라 모름 — 지우지 않는다(웹 점검 W3).
+    if (AP.approvalsLoadError()) return { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' };
     const open = AP.listRequests({ kinds: ['ssh-key-activate'], includeDone: false }).some((r) => r.target === k.id);
     if (open) return { ok: false, code: 'key-pending', status: 409, reason: '승인 대기 중인 키입니다 — 키 보안 › 승인 대기에서 돌려보내면 지워집니다.' };
     return KS._removeKey(k.id);
@@ -519,7 +521,8 @@ export async function decideApproval(id, { approve, by = '', digest = '', note =
 
 /** 등록부 쓰기 두 가지는 이 파일에서만 부른다(소스 스윕 — keyLogin.js 는 넘겨받은 함수만 쓴다). */
 const bindKey = (server, keyId) => setBmServerKeyRef(server.id, keyId, { expectAddr: regAddrOf(server) });
-const clearPassword = (server) => clearBmServerPassword(server.id, { expectAddr: regAddrOf(server) });
+// 키 접속이 확인된 뒤에만 불린다(keyLogin.installOne) — 공통 계정의 기본 키를 따르는 서버면 viaAccountKey(등록부는 계정 키를 모른다).
+const clearPassword = (server) => clearBmServerPassword(server.id, { expectAddr: regAddrOf(server), viaAccountKey: !t(server.keyRef) && !!t(server.credRef) });
 
 /** 요청의 서버 목록({id, addr}) → 등록부 원본. 화면이 본 접속처와 다르면 그 서버는 ‘moved’ 로 뺀다. */
 function pickServers(list) {

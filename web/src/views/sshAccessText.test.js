@@ -361,8 +361,13 @@ describe('SSH 공용 접속 2단계 — 키 로그인 설정 · 키 거두기 �
     expect(h[1]).toContain('서버 1대는 저장된 인증 수단이 없습니다');
     expect(savedAuthHints([t[2], t[3]])).toEqual([]);
     expect(savedAuthHints(undefined)).toEqual([]);
-    // 근거 — 서버는 첫 접속에 지금 설정된 자격을 그대로 쓴다(1회 비밀번호가 없을 때)
-    expect(serverSrc('sshaccess/keyLogin.js')).toMatch(/const r = REFS\.resolveOsAuth\(server, \{ feature: 'conn-test' \}\);/);
+    // 지금 넣는 키가 그 서버에 설정된 키이고 저장 비밀번호가 있으면 주의하지 않는다(서버가 그 비밀번호로 붙는다 — keyLogin.firstLegAuth)
+    const u = [{ id: 'f', keyMode: 'corp-default', keyId: 'k_1', accountName: 'kr-acc', installed: null }, { id: 'g', keyMode: 'pinned', keyId: 'k_1', hasPassword: true, installed: null }];
+    expect(savedAuthHints(u, { keyId: 'k_1', accounts: [{ name: 'kr-acc', hasPassword: true }] })).toEqual([]);
+    expect(savedAuthHints(u, { keyId: 'k_1', accounts: [{ name: 'kr-acc', hasPassword: false }] })[0]).toContain('서버 1대는');
+    expect(savedAuthHints(u, { keyId: 'k_2', accounts: [{ name: 'kr-acc', hasPassword: true }] })[0]).toContain('서버 2대는');
+    // 근거 — 서버 쪽 판정(설정된 키 = 넣는 키 → 저장 비밀번호 먼저)
+    expect(serverSrc('sshaccess/keyLogin.js')).toMatch(/r\.authKind === 'key' && installingKeyId && r\.keyId === installingKeyId/);
   });
 });
 

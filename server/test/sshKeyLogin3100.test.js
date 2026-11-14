@@ -645,7 +645,7 @@ test('⑥ 다시 여는 방향은 두 사람 승인 — 법인 사용 재개 202
 });
 
 test('⑥-b 승인해 줄 사람이 없는 설치(설정 소유자 한 명) — 두 사람 승인 끄기는 본인만으로 바로 된다(영영 잠기지 않게 — guards.js) · 승인할 수 있는 사람 수는 0',
-  { todo: 'guards.js otherOwners 가 로그인 수단이 없는 자동 포함 계정(noainred — 비밀번호 · OTP 없이 시드)과 범위 소유자(소유자 등급 403)까지 세어, 혼자뿐인 설치에서 끄기 요청이 승인 대기로 갇힌다' }, () => {
+  {}, () => {
     const d = fs.mkdtempSync(path.join(TMP, 'sshkl-solo-'));
     TMP_DIRS.push(d);
     const out = execFileSync(process.execPath, ['--input-type=module', '-e', `
@@ -670,7 +670,7 @@ test('⑥-b 승인해 줄 사람이 없는 설치(설정 소유자 한 명) — 
   });
 
 test('⑥-c 복원 번들이 실어 온 새 개인키 — 복원(적용 시점 합치기)이 두 사람 승인 · OTP 없이 활성 키를 들이지 않는다(백업에는 개인키가 없다 — 설계 S13)',
-  { todo: 'keyBundle.js mergeRedactedKeyStore 가 지금 파일에 없는 키도 번들에 개인키가 실려 있으면 그대로(상태 active) 받아들인다 — 복원 라우트는 OTP · 승인을 묻지 않는다' }, async () => {
+  {}, async () => {
     const SR = await import('../src/backup/stagedRestore.js');
     const P = await import('../src/bmusage/onboard/keyParse.js');
     const NEW = F.ed25519Key();
@@ -877,7 +877,8 @@ test('⑩ 키 로그인 설정 — 저장 비밀번호로 붙어 from= + 포워�
   assert.deepEqual((({ code, status }) => [code, status])(SVC.startKeyRevoke({ keyId: K.id, servers: [sv], by: 'own' })), ['busy', 409]);
   assert.equal(SVC.startKeyLogin({ servers: [sv], keyId: K.id, by: 'own' }).code, 'busy');
   const r2 = (await waitJob(again.jobId)).results[0];
-  assert.deepEqual([r2.ok, r2.line, r2.restricted, r2.bound, r2.passwordRemoved], [true, 'present-marked', false, true, false], JSON.stringify(r2));
+  // restricted = 지금 서버에 있는 그 키의 포탈 줄에 제한이 붙어 있는가(이미 제한된 같은 줄이 있으면 참 — 바꾸지 않았어도)
+  assert.deepEqual([r2.ok, r2.line, r2.restricted, r2.bound, r2.passwordRemoved], [true, 'present-marked', true, true, false], JSON.stringify(r2));
   assert.equal(S.readAk().split('\n').filter((l) => l.includes(K.blob)).length, 1, '줄을 두 번 넣지 않았다');
   assert.equal(S.passwordTries().length, 0);
   // 화면 — 서버 행이 키 고정 · 제한 있음으로 보인다
@@ -914,7 +915,7 @@ test('⑪ 비밀번호가 틀리면 — auth-rejected · authorized_keys 는 그
 });
 
 test('⑪-b keyboard-interactive 도 받는 sshd(PAM 을 켠 서버) — 틀린 비밀번호는 서버에 한 번만 간다(한 번의 동작 = 인증 실패 한 번)',
-  { todo: 'proxy/sshExec.js connect 의 tryKeyboard 가 password 거부 뒤 같은 비밀번호를 keyboard-interactive 로 한 번 더 보낸다 — 동작 한 번에 인증 실패 2회(계정 잠금)' }, async () => {
+  {}, async () => {
     const S = await fakeSshd();
     S.st.password = 'Right-Pw-Never-Sent';
     S.st.offerKbd = true;
@@ -949,13 +950,29 @@ test('⑫ 키 접속 확인이 실패하면(출발지 제한 불일치) — key-
   assert.deepEqual([raw.keyRef, raw.password], [undefined, S.st.password], '키를 묶지 않았고 저장 비밀번호도 지우지 않았다');
   const use = US.keyUsageView({ fingerprint: K.fingerprint }).rows.find((u) => u.server === 'bm-kl3' && u.feature === 'conn-test');
   assert.deepEqual([use.okCount, use.failCount, use.lastOk, use.lastCode], [0, 1, false, 'auth-rejected'], '거부된 키 접속도 사용 기록에 남는다(한 번)');
-  // 포탈 줄이 이미 있던 서버 — 키 접속이 안 돼도 그 줄은 우리가 더한 것이 아니므로 지우지 않는다
+  // 포탈 줄이 이미 있던 서버(다른 출발지로 제한된 줄) — 제한을 지금 주소로 바꿔 넣었다가(replaced) 키 접속이 안 되면 **사본으로 원래대로** 되돌린다(테스트 ⑮-c 의 바꾸기 경로)
   const kept = `${before}from="10.1.1.1",${RESTRICT} ${K.pub} portal-ssh:${K.id}\n`;
   S.writeAk(kept); S.clear();
+  S.st.ipQueue.push('127.0.0.1', '10.77.0.9');   // 바꿔 넣은 뒤에도 둘째 연결의 출발지가 달라 키 접속이 안 되는 경우
   const r2 = (await runLogin({ servers: [sv], keyId: K.id, by: 'own' })).job.results[0];
-  assert.deepEqual([r2.ok, r2.code, r2.line, r2.rolledBack], [false, 'key-login-failed', 'present-marked', null], JSON.stringify(r2));
-  assert.match(r2.reason, /이미 있던 것이라 지우지 않았습니다/);
-  assert.equal(S.readAk(), kept);
+  assert.deepEqual([r2.ok, r2.code, r2.line, r2.rolledBack], [false, 'key-login-failed', 'replaced', true], JSON.stringify(r2));
+  assert.match(r2.reason, /원래대로 되돌렸습니다/);
+  assert.equal(S.readAk(), kept, '이미 있던 줄이 글자 그대로 돌아왔다');
+  assert.equal(S.st.conns, 3, '붙어서 바꿈 → 키로 확인(거부) → 붙어서 되돌림');
+  // 출발지가 같으면 바꾼 줄로 접속이 확인되고 사본은 지운다(제한이 지금 주소로 갱신된다)
+  S.writeAk(kept); S.clear();
+  const r4 = (await runLogin({ servers: [sv], keyId: K.id, by: 'own' })).job.results[0];
+  assert.deepEqual([r4.ok, r4.line, r4.restricted, r4.fromIp], [true, 'replaced', true, '127.0.0.1'], JSON.stringify(r4));
+  assert.equal(S.readAk(), `${before}from="127.0.0.1",${RESTRICT} ${K.pub} portal-ssh:${K.id}\n`);
+  assert.equal(fs.existsSync(path.join(S.home, '.ssh', 'authorized_keys.portal-bak')), false, '사본을 남기지 않았다');
+  // 같은(제한된) 줄이 이미 있으면 바꾸지 않고, 키 접속이 안 돼도 지우지 않는다
+  const same = `${before}from="127.0.0.1",${RESTRICT} ${K.pub} portal-ssh:${K.id}\n`;
+  S.writeAk(same); S.clear();
+  S.st.ipQueue.push('127.0.0.1', '10.77.0.9');
+  const r3 = (await runLogin({ servers: [sv], keyId: K.id, by: 'own' })).job.results[0];
+  assert.deepEqual([r3.ok, r3.code, r3.line, r3.rolledBack], [false, 'key-login-failed', 'present-marked', null], JSON.stringify(r3));
+  assert.match(r3.reason, /이미 있던 것이라 지우지 않았습니다/);
+  assert.equal(S.readAk(), same);
   assert.equal(S.st.conns, 2, '되돌릴 것이 없으면 세 번째 연결도 없다');
 });
 
@@ -1007,7 +1024,7 @@ test('⑫-b 서버가 예상한 답을 주지 않으면 install-failed — 서�
 });
 
 test('⑫-c 명령을 받지 않는 셸 — 표지 줄이 아예 오지 않았으면 ‘예상한 답을 주지 않았다’ 고 말한다(‘출발지 주소를 못 읽었으니 서버 쪽 제한을 끄라’ 고 하지 않는다 — 꺼도 같은 서버에서 다시 실패한다)',
-  { todo: 'keyLogin.js installOne 이 출발지 문의의 답에 표지가 없는 것(unknown)을 주소가 빈 것과 같은 noip 로 묶어, 도움이 되지 않는 ‘보호 장치 끄기’ 를 안내한다' }, async () => {
+  {}, async () => {
     const S = await fakeSshd();
     S.st.password = secret('Pw-Rsh-Stored-4c');
     S.st.fakeOut = 'This account is restricted.\n';
@@ -1144,7 +1161,7 @@ test('⑮-b 법인 기본 키(공통 계정)를 따르는 서버 — 키 로그�
 });
 
 test('⑮-c 서버 쪽 제한 ‘다시 넣기’ — 제한 없이 들어가 있는 포탈 줄은 보호 장치를 켠 뒤 키 로그인 설정을 다시 하면 제한이 붙는다(키 점검 restrict-missing 의 안내 · 시안 SshSec ‘다시 넣기’)',
-  { todo: 'keyLogin.js installCommand 가 포탈 줄이 이미 있으면(present-marked) 아무것도 하지 않는다 — 키 점검이 안내하는 ‘다시 넣으면 제한이 붙습니다’ 가 실제로는 일어나지 않는다' }, async () => {
+  {}, async () => {
     const S = await fakeSshd();
     S.st.password = secret('Pw-Reinsert-Stored-6c');
     const K = mkKey('kl-reinsert');

@@ -304,13 +304,15 @@ export function restoreBmServerKeyRef(id, previous = {}) {
  *  · 서버에 키가 고정돼 있을 때만(지우고 나서 인증 수단이 하나도 남지 않게 하지 않는다) · 접속처가 화면이 본 것과 같을 때만.
  *  · 비밀을 줄이는 쓰기다(묶지 않는다) — 부르는 곳은 `sshaccess/service.js` 하나(소스 스윕).
  */
-export function clearBmServerPassword(id, { expectAddr = null } = {}) {
+export function clearBmServerPassword(id, { expectAddr = null, viaAccountKey = false } = {}) {
   const data = load();
   if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 바꾸지 않았습니다.' };
   const s = data.servers.find((x) => x.id === String(id || ''));
   if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
   if (expectAddr != null && addrKey(s.host, s.port, s.username) !== String(expectAddr)) return { ok: false, code: 'moved', status: 409, reason: '서버 주소 · 포트 · 계정이 바뀌었습니다 — 비밀번호를 지우지 않았습니다.' };
-  if (!String(s.keyRef || '').trim() || s.osAuth === 'password') return { ok: false, code: 'no-key', status: 409, reason: '이 서버에 고정된 키가 없어 비밀번호를 지우지 않았습니다.' };
+  // 키가 있을 때만 — 서버에 고정한 키, 또는 공통 계정의 기본 키(호출부가 그 키로 접속을 확인한 뒤 viaAccountKey 로 알린다 · 웹 점검 W2).
+  const hasKey = !!String(s.keyRef || '').trim() || (viaAccountKey === true && !!String(s.credRef || '').trim());
+  if (!hasKey || s.osAuth === 'password') return { ok: false, code: 'no-key', status: 409, reason: '이 서버에 키가 정해져 있지 않아 비밀번호를 지우지 않았습니다.' };
   if (!s.password) return { ok: true, already: true };
   const had = s.password;
   s.password = '';

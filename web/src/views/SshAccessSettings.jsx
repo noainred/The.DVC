@@ -450,7 +450,7 @@ function KeyLoginDialog({ servers, corp, v, corpName, onClose }) {
                 <label className="ssa-radio"><input type="radio" name="ssa-kl-pw" checked={pwMode === 'saved'} onChange={() => { setPwMode('saved'); setOnce(''); }} /><span>저장된 인증 사용 — 이 서버가 지금 쓰는 접속 수단(키로 설정돼 있으면 그 키, 아니면 저장된 비밀번호)</span></label>
                 <label className="ssa-radio"><input type="radio" name="ssa-kl-pw" checked={pwMode === 'once'} onChange={() => setPwMode('once')} /><span>지금 입력 — 이번 한 번만 쓰고 저장하지 않습니다</span></label>
                 <input className="input ssa-pw" type="password" aria-label="등록에 쓸 비밀번호" placeholder="비밀번호" disabled={pwMode !== 'once'} value={once} onChange={(e) => setOnce(e.target.value)} autoComplete="new-password" />
-                {pwMode === 'saved' && savedAuthHints(targets).map((t) => <span key={t} className="ssa-sub" style={{ color: toneVar('warn') }}>{t}</span>)}
+                {pwMode === 'saved' && savedAuthHints(targets, { keyId: key?.id || '', accounts: v.accounts }).map((t) => <span key={t} className="ssa-sub" style={{ color: toneVar('warn') }}>{t}</span>)}
                 {!single && pwMode === 'once' && <span className="ssa-sub">고른 서버 {targets.length}대에 같은 비밀번호로 한 번씩 접속합니다 — 비밀번호가 다른 서버는 인증이 거부되고, 다시 시도하지 않습니다.</span>}
               </div>
             </div>

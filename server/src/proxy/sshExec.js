@@ -150,7 +150,7 @@ const LEGACY_ALGOS = (() => {
 })();
 const NO_MATCH = /no matching (key exchange|host key|cipher|MAC|compression)|Handshake failed/i;
 
-function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false }) {
+function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false, passwordOnly = false }) {
   const say = (msg, level) => { try { trace?.(msg, level); } catch { /* */ } };
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('SSH 접속 취소(타임아웃)'));
@@ -209,7 +209,9 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       if (r.ok && r.reason !== 'approved') say(`SSH 호스트키 ${r.algo} ${r.fp} — ${r.reason === 'observed-new' ? '처음 관찰(미승인 · 관찰 모드)' : '관찰 키(미승인 · 관찰 모드)'}`, 'warn');
     });
     if (privateKey) { auth.privateKey = privateKey; if (passphrase) auth.passphrase = passphrase; }
-    else { auth.password = password; auth.tryKeyboard = true; }
+    // passwordOnly(v3.10.0 — SSH 키 로그인 설정): password 방식만 — 거부되면 같은 비밀번호를 keyboard-interactive 로 한 번 더 보내지 않는다(실패 기록 2회 · 계정 잠금 위험).
+    //   기본값은 그대로(keyboard-interactive 만 받는 서버를 지원 — 기존 기능의 동작을 바꾸지 않는다).
+    else { auth.password = password; if (!passwordOnly) auth.tryKeyboard = true; }
     if (_legacy) auth.algorithms = LEGACY_ALGOS;
     // '자세히'(ssh -vvv 상당): ssh2 의 debug 콜백은 소켓 연결·ident 교환·KEXINIT·인증 방식 시도·채널 열기까지
     // 프로토콜 단계마다 한 줄씩 남긴다. 비밀번호는 찍히지 않는다(ssh2 가 로그에 넣지 않음).

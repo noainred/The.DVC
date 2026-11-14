@@ -431,9 +431,13 @@ export function restrictLineText(guards) {
  * 화면이 접속 가능 여부를 판정하는 것은 아니다(마지막으로 읽은 authorized_keys 기준의 안내 — 실제 결과는 서버가 준다).
  * @returns {string[]} 안내 문장(없으면 빈 배열)
  */
-export function savedAuthHints(targets) {
+export function savedAuthHints(targets, { keyId = '', accounts = [] } = {}) {
   const list = Array.isArray(targets) ? targets.filter(Boolean) : [];
-  const byKey = list.filter((s) => (s.keyMode === 'pinned' || s.keyMode === 'corp-default') && s.installed?.hasKey !== true).length;
+  // 서버에 설정된 키가 **지금 넣으려는 그 키** 이고 저장 비밀번호(서버 또는 공통 계정)가 있으면, 서버는 첫 접속에 그 비밀번호를 쓴다(keyLogin.firstLegAuth) — 주의할 것 없음.
+  const accPw = new Map((Array.isArray(accounts) ? accounts : []).map((a) => [a.name, a.hasPassword === true]));
+  const storedPw = (s) => s.hasPassword === true || (!!s.accountName && accPw.get(s.accountName) === true);
+  const byKey = list.filter((s) => (s.keyMode === 'pinned' || s.keyMode === 'corp-default') && s.installed?.hasKey !== true
+    && !(keyId && s.keyId === keyId && storedPw(s))).length;
   const none = list.filter((s) => s.keyMode === 'none').length;
   const out = [];
   if (byKey) out.push(`서버 ${byKey}대는 지금 키로 접속하도록 설정돼 있는데, 그 키가 서버에 들어 있는지 확인된 적이 없습니다 — 들어 있지 않으면 저장된 인증으로는 접속이 거부됩니다(다시 시도하지 않습니다). 그런 서버는 ‘지금 입력’ 으로 비밀번호를 넣으세요.`);

@@ -51,14 +51,12 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
     //   좁히는 값인데 복원 라우트는 OTP 를 묻지 않는다(server/CLAUDE.md v2.842 — OTP 로만 끄는 보안 설정을 복원이 되살리지 않는다).
     const cur0 = curKeyByFp.get(String(o.fingerprint || ''));
     if (cur0) for (const f of ['folderCorp', 'folderServer', 'features', 'status', 'retiredAt']) { if (cur0[f] === undefined) delete o[f]; else o[f] = cur0[f]; }
-    if (o.privateKey === REDACTED_SECRET) {
-      const c = curKeyByFp.get(String(o.fingerprint || ''));
-      if (!c || typeof c.privateKey !== 'string' || !c.privateKey) { dropped.push(`key:${String(o.name || o.id || '').slice(0, 64)}`); continue; }
-      o.privateKey = c.privateKey; o.passphrase = typeof c.passphrase === 'string' ? c.passphrase : ''; restored += 1;
-    } else if (o.passphrase === REDACTED_SECRET) {
-      const c = curKeyByFp.get(String(o.fingerprint || ''));
-      o.passphrase = c && typeof c.passphrase === 'string' ? c.passphrase : '';
-    }
+    // v3.10.0(테스트 ⑥-c): **개인키 · passphrase 는 번들에서 받지 않는다** — 정상 번들은 가린다(redactKeyStoreText). 지금 파일의 같은 지문 키 것을 쓰고,
+    //   지금 파일에 없는 키는 뺀다. 가리지 않은 개인키가 실린 번들(손으로 만든 번들)을 복원하면 OTP · 두 사람 승인 없이 활성 로그인 키가 들어갔고,
+    //   같은 지문에 다른 원문을 실으면 원문만 바꿔치기할 수 있었다.
+    if (!cur0 || typeof cur0.privateKey !== 'string' || !cur0.privateKey) { dropped.push(`key:${String(o.name || o.id || '').slice(0, 64)}`); continue; }
+    o.privateKey = cur0.privateKey; o.passphrase = typeof cur0.passphrase === 'string' ? cur0.passphrase : '';
+    restored += 1;
     keys.push(o);
   }
   const fps = new Set(keys.map((k) => String(k.fingerprint || '')));
