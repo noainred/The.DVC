@@ -126,7 +126,8 @@ export function entryMac(e) {
  * @param {(mac:string)=>number} [ipCount] 그 MAC 을 표시 MAC 으로 가진 IP 수(scanStore.macIpCount)
  * @returns {object} { mac, macSrc:'arp'|'netbios', macVendor?, macKind?, macPlatform?, macStale?, macShared? }
  */
-export function netMacFields(sc, ipCount = null) {
+export const MAC_CHANGE_RECENT_MS = 7 * 86_400_000;   // v3.1.0: 'MAC 변경' 배지를 보이는 기간(MAC 이력의 마지막 줄이 이 안에 시작)
+export function netMacFields(sc, ipCount = null, hist = null) {
   const em = entryMac(sc);
   if (!em.mac) return {};
   const out = { mac: em.mac, macSrc: em.src };
@@ -138,6 +139,12 @@ export function netMacFields(sc, ipCount = null) {
   if (arp && ((arp.miss || 0) > 0 || (arp.at || 0) < (sc.lastSeen || 0))) out.macStale = true;
   const n = typeof ipCount === 'function' ? ipCount(em.mac) : 0;
   if (n > 1) out.macShared = n;
+  // v3.1.0: 최근 MAC 이 바뀌었다(이력 두 줄 이상 · 마지막 줄이 MAC_CHANGE_RECENT_MS 안에 시작 · 지금 표시 MAC 과 같다) — 직전 MAC 과 함께.
+  const list = Array.isArray(hist?.macs) ? hist.macs : [];
+  if (em.src === 'arp' && list.length >= 2) {
+    const last = list[list.length - 1]; const prev = list[list.length - 2];
+    if (last?.mac === em.mac && Number(last.first) > Date.now() - MAC_CHANGE_RECENT_MS) { out.macChangedAt = Number(last.first); out.macPrev = String(prev?.mac || ''); }
+  }
   return out;
 }
 

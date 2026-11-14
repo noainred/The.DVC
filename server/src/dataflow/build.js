@@ -51,7 +51,7 @@ export const CATS = Object.freeze([
   // v2.608: Arista CloudVision(CVP) 도 같은 '스위치' 칸에 둔다(웹 CAT_COLOR 에 새 칸을 만들지 않으려고 — 라벨이 그 사실을 말한다).
   { id: 'san', label: 'SAN·네트워크 스위치', test: /^central:\/(sanswitch-(data|config|perf|test-result|flow-result)|cvp-(data|config))$/ },
   // v2.735: 법인 간 전송 속도 측정(중앙이 엣지와 10MB 를 주고받는다)도 회선 감시라 이 칸이다.
-  { id: 'watch', label: '장애·감시', test: /^central:\/(part-faults|partfault-config|svcmon-(config|config-ack|report)|link-check(-config)?|ping-(jobs|result))$|^collector:\/(ping|xfer-test)$/ },
+  { id: 'watch', label: '장애·감시', test: /^central:\/(part-faults|partfault-config|disk-bad|disk-bad-job|svcmon-(config|config-ack|report)|link-check(-config)?|ping-(jobs|result))$|^collector:\/(ping|xfer-test)$/ },
   { id: 'users', label: '사용자·세션', test: /^central:\/(curuser(-config)?|users-config)$/ },
   // v2.793: VM 백업 법인 위임(엣지가 담당 vCenter 의 잡 정의·작업을 당기고 상태를 올린다)도 운영 작업 칸이다.
   { id: 'ops', label: '운영 작업', test: /^central:\/(capture-(jobs|result)|rma-(poll|result|credential)|log-quer(ies|y-result)|edge-log-(jobs|result)|result|vm-clone-(sync|report)|veeam-run-(ops|result)|bareos-(config|ops|op-result))$|^collector:\/edge-log$/ },

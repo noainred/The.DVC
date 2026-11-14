@@ -47,6 +47,8 @@ export function compactInv(inv) {
     system: inv.system ? {
       model: inv.system.model, serviceTag: inv.system.serviceTag, biosVersion: inv.system.biosVersion, hostName: inv.system.hostName, health: cs(inv.system.health, 32),
       ...optS('manufacturer', inv.system.manufacturer), ...optS('powerState', inv.system.powerState, 32), ...optS('assetTag', inv.system.assetTag), ...optS('uuid', inv.system.uuid),
+      // v3.3.0: OS 이름 · 버전(iDRAC ServerOS 속성 · HPE HostOS — 물리서버 폴더 'OS' 칸). 중앙 remoteInventory INV_SHAPE.system 과 짝.
+      ...optS('osName', inv.system.osName, 128), ...optS('osVersion', inv.system.osVersion, 64),
     } : undefined,
     cpu: inv.cpu ? { model: inv.cpu.model, count: inv.cpu.count, cores: inv.cpu.cores, health: cs(inv.cpu.health, 32), ...optN('threads', inv.cpu.threads) } : undefined,
     memory: inv.memory ? { totalGiB: inv.memory.totalGiB, health: cs(inv.memory.health, 32) } : undefined,

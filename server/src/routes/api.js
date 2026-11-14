@@ -11,6 +11,7 @@ import { registerReports } from './api/reports.js';
 import { registerSearchNotes } from './api/searchNotes.js';
 import { registerInvSearch } from './api/invSearch.js'; // v2.909 헤더 ⌘K 통합 장비 검색
 import { registerIpamExport } from './api/ipamExport.js';
+import { registerIpamServer } from './api/ipamServer.js'; // v3.6.0 IP 관리 서버 보기 · 호스트명 대조
 import { registerVmExport } from './api/vmExport.js';   // v2.799 VM 전체 정보 내보내기(ipamExport.js 에서 옮김)
 import { registerHostExport } from './api/hostExport.js'; // v2.802 vCenter 화면 '호스트 · 클러스터 엑셀'(호스트 1대 = 시트 1장)
 import { registerHostCorp } from './api/hostCorp.js'; // v2.811 ESXi 호스트 화면 '법인별' 보기 집계(/hosts/:id 보다 먼저)
@@ -45,6 +46,7 @@ import { registerSanFlow } from './api/sanFlow.js';       // v2.935(C-②) Broca
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
 import { registerCvpBulk } from './api/cvpBulk.js';       // CVP 서버 CSV·자유텍스트 대량 등록(v2.641)
 import { registerPartFaults } from './api/partFaults.js'; // 파트 장애(물리 부품 장애 기록·알림, v2.547)
+import { registerDiskBad } from './api/diskBad.js'; // 디스크 배드 섹터 분석(v3.8.0)
 import { registerEdgeLog } from './api/edgeLog.js'; // 엣지 로그·진행상태(중앙이 당긴다 + 폴백, v2.549)
 import { registerBmUsage } from './api/bmUsage.js'; // 베어메탈 사용률(CPU·MEM·디스크·NET·HBA, v2.550)
 import { registerBmPerfOps } from './api/bmPerfOps.js'; // v2.929 리눅스 성능 5단계(집중 모니터링 · 변경 이벤트 · 베이스라인 · 구간 비교 · 알림 규칙)
@@ -145,6 +147,7 @@ registerReports(api);
 registerSearchNotes(api);
 registerInvSearch(api);
 registerIpamExport(api);
+registerIpamServer(api);
 registerVmExport(api);
 registerHostExport(api);
 registerHostCorp(api);
@@ -179,6 +182,7 @@ registerSanFlow(api);   // v2.935 — /tools/san-flow*(전체 범위 관리자 �
 registerCvp(api);
 registerCvpBulk(api);
 registerPartFaults(api);
+registerDiskBad(api);
 registerEdgeLog(api);
 registerBmUsage(api);
 registerBmPerfOps(api);

@@ -252,6 +252,10 @@ server/config/vmseries/
 server/config/partfault-edge.json
 # v2.548 파트 장애 스위치(중앙 전체/엣지별 on-off · 엣지에 내려온 중앙값). 비밀은 없지만 현장 설정이다.
 server/config/partfault-settings.json
+server/config/disk-bad-settings.json
+server/config/diskbad-cursors.json
+server/config/diskbad-auth-stops.json
+server/config/disk-bad.db*
 
 # v2.550 베어메탈 사용률 — 수집 대상 법인·주기·보존 설정(법인 식별자가 들어간다).
 #   DB(bm-usage.db)는 위 server/config/*.db 와일드카드가 이미 덮는다.

@@ -168,6 +168,17 @@ function macOf(seed) {
  * @param {number} now
  * @param {{watts?:number|null}} [o]
  */
+const DEMO_OS = Object.freeze([
+  ['Red Hat Enterprise Linux', '9.2'], ['Rocky Linux', '9.3'], ['Microsoft Windows Server 2022 Standard', '10.0.20348'], ['Ubuntu', '22.04.4 LTS'],
+]);
+/** 데모 OS 이름 — ESXi 호스트는 VMware ESXi, 베어메탈은 목록에서 고정 선택 · 5대에 1대는 iSM 없음(빈 값). */
+function demoOsOf(id, kind) {
+  const h = demoHash(`os|${id}`);
+  if (h % 5 === 0) return {};
+  if (kind === 'esxi') return { osName: 'VMware ESXi', osVersion: '8.0.2' };
+  const [osName, osVersion] = DEMO_OS[h % DEMO_OS.length];
+  return { osName, osVersion };
+}
 export function demoInventory(server, p, now = Date.now(), { watts = null } = {}) {
   const id = String(server.id);
   const plan = demoFaultPlan(id, now);
@@ -186,6 +197,8 @@ export function demoInventory(server, p, now = Date.now(), { watts = null } = {}
       hostName, model: p.model, manufacturer: 'Dell Inc.', serviceTag: tag, serialNumber: `CN${String(demoHash(`sn|${id}`)).slice(0, 10)}`,
       sku: tag, hpe: false, assetTag: '', uuid: `4c4c4544-00${String(demoHash(`u|${id}`) % 100).padStart(2, '0')}-4d10-80${String(demoHash(`u2|${id}`) % 100).padStart(2, '0')}-${tag.toLowerCase().padEnd(12, '0').slice(0, 12)}`,
       biosVersion: bios, powerState: 'On', health: sysHealth, indicatorLED: 'Off',
+      // v3.3.0: OS 이름(iDRAC ServerOS 속성 — iSM 이 있어야 채워진다). 데모는 서버마다 고정 — 5대에 1대는 iSM 없음(빈 값)으로 '—' 를 보인다
+      ...demoOsOf(id, p.kind),
     },
     idrac: { firmwareVersion: idracFw, model: '15G Monolithic', type: 'BMC', dateTime: new Date(now).toISOString(), ipmiVersion: '2.0' },
     cpu: { count: p.sockets, model: p.cpuModel, cores: p.sockets * p.coresPerSocket, threads: p.sockets * p.coresPerSocket * 2, health: 'OK' },

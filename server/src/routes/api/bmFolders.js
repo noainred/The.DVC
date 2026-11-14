@@ -22,6 +22,7 @@ import { requirePerm, requireRole } from '../../auth/auth.js';
 import { usageSrcOf } from '../../bmfolders/usageSrc.js'; // v2.993: 사용률 지표별 출처(출처 색)
 import { usageWhyOf, currentWhyIndex } from '../../bmfolders/usageWhy.js'; // v2.994: 값 없음 사유
 import { buildEdgeBundle, edgeSyncOf } from '../../bmfolders/edgeBundle.js'; // v2.996: 엣지 묶음 · 엣지 전달 상태
+import { hwSummaryOf, hwDetailOf, mgmtHostOf } from '../../idrac/hwSummary.js'; // v3.3.0: 하드웨어(iDRAC) 요약 · 상세 · 관리 주소
 import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { todayStamp } from '../../util/dayKey.js';
@@ -79,6 +80,7 @@ export function membersOf(g) {
       // v2.989(③-가): 키 등급이 오르기 전 키(태그를 읽기 전 fl:) — 그 키로 한 등록을 승계한다(서비스 인벤토리 고정과 같은 별칭 규칙 `bmAliasKeys`)
       aliasKeys: Array.isArray(m.aliasKeys) ? m.aliasKeys.filter((a) => typeof a === 'string' && a && a !== m.key).slice(0, 4) : [],
       ...(typeof m.edgeKey === 'string' && m.edgeKey ? { edgeKey: m.edgeKey } : {}),   // v2.996(묶음 D): 엣지 쪽 키(엣지 묶음 전용 — 화면 응답에 싣지 않는다)
+      serverId: t(m.serverId),   // v3.3.0: 하드웨어(iDRAC) 인벤토리 찾기 열쇠 — 화면 응답에 싣지 않는다
     });
   }
   for (const h of g?.hostByKey?.values?.() || []) {
@@ -167,7 +169,52 @@ export function scheduleKeyMigration(list, { mutate = mutateAssign, peek = peekA
   return true;
 }
 
-function serverRow(m, p, admin, hide, ix) {
+/*
+ * v3.3.0(사용자 요청 '여기 기능에 iDRAC 에서 수집한 데이터 보여줘 — CPU · 메모리 · 디스크 · NIC · HBA · OS 종류 · iDRAC IP'):
+ *   구성원 → 인벤토리 · 하드웨어 요약 · 관리 주소. 찾는 순서는 통합 서버 인벤토리 내보내기와 같다(insights/hwExport/rows.js makeInvOf —
+ *   로컬 등록부 id → remote:<수집 서버>:<id> → 같은 서비스 태그). 엣지가 올린 서버(edge:)는 중앙에 인벤토리가 없어 엣지가 fleet push 에 실은 요약만.
+ *   요약은 인벤토리 객체마다 한 번(WeakMap — 인벤토리를 새로 읽으면 새 객체라 저절로 다시 계산).
+ */
+const _hwMemo = new WeakMap();
+function hwOfInv(inv) {
+  if (!inv || typeof inv !== 'object') return null;
+  let h = _hwMemo.get(inv);
+  if (h === undefined) { h = hwSummaryOf(inv); _hwMemo.set(inv, h); }
+  return h;
+}
+/** 요청마다 한 벌(O(N)) — (m) → { inv, hw, mgmt, via:'local'|'remote'|'edge'|'' } | null(ESXi). D 는 시험 주입. */
+export async function hwLookupFactory(D = {}) {
+  const pick = async (k, mod, fn) => (D[k] !== undefined ? D[k] : (await import(mod))[fn]);
+  const getInventory = await pick('getInventory', '../../idrac/invCache.js', 'getInventory');
+  const loadRegistry = await pick('loadRegistry', '../../idrac/registry.js', 'loadRegistry');
+  const allRemoteServers = await pick('allRemoteServers', '../../collector/remoteInventory.js', 'allRemoteServers');
+  const getEdgeFleetServers = await pick('getEdgeFleetServers', '../../central/fleet.js', 'getEdgeFleetServers');
+  const makeInvOf = await pick('makeInvOf', '../../insights/hwExport/rows.js', 'makeInvOf');
+  const safe = (fn) => { try { const v = fn(); return Array.isArray(v) ? v : []; } catch { return []; } };
+  const registry = safe(loadRegistry); const remote = safe(allRemoteServers); const edge = safe(getEdgeFleetServers);
+  const invOf = makeInvOf({ getInventory, registry, remoteServers: remote });
+  const remById = new Map(remote.map((r) => [`remote:${t(r.collectorId)}:${t(r.id)}`, r]));
+  const edgeById = new Map(edge.map((e) => [t(e.serverId), e]));
+  return (m) => {
+    if (m?.kind !== 'bm') return null;
+    const sid = t(m.serverId);
+    if (t(m.source) === 'edge' || sid.startsWith('edge:')) {
+      const e = edgeById.get(sid);
+      return { inv: null, hw: e?.hw || null, mgmt: mgmtHostOf(e?.mgmtHost), via: 'edge' };
+    }
+    let r = { inv: null, via: '' };
+    try { r = invOf({ serverId: sid, serviceTag: m.serviceTag }); } catch { r = { inv: null, via: '' }; }
+    return { inv: r.inv, hw: hwOfInv(r.inv), mgmt: t(m.mgmtHost) || mgmtHostOf(remById.get(sid)?.host), via: r.via };
+  };
+}
+/** 화면용 요약 — OS 호스트명은 관리자 판본만(범위 판본은 태그를 가린다 — 이 파일 주소 가림과 같은 규칙). */
+function hwView(hw, admin, hide, tag) {
+  if (!hw) return null;
+  return { ...hw, host: admin && hw.host ? (hide ? stripTag(hw.host, tag) : hw.host) : '' };
+}
+
+function serverRow(m, p, admin, hide, ix, hx) {
+  const mgmt = t(m.mgmtHost) || t(hx?.mgmt);
   return {
     key: pubKey(m.key, hide), kind: m.kind, corp: m.corp, name: nameOf(m, admin, hide), serviceTag: hide ? undefined : m.serviceTag, model: m.model,
     src: srcClassOf(m), agent: hide ? undefined : (m.remoteAgent || (m.collectorId ? `수집 서버 ${m.collectorId}` : '')),
@@ -182,7 +229,10 @@ function serverRow(m, p, admin, hide, ix) {
     watts: m.watts ?? null, faults: m.faults ?? null, cores: m.cores ?? null, memGB: m.memGB ?? null,
     // 관리 주소 — 관리자 판본만(비관리자 · 데모에게 장비 주소를 싣지 않는다 — isAdminDetailUser 하나로 판정)
     // 범위 계정 판본(범위 지정 관리자 포함)에서는 주소 속 태그도 가린다(2차 반증 1: Dell 기본 이름 'idrac-<태그>' 주소로 가린 태그가 드러났다)
-    addr: admin && m.mgmtHost ? (hide ? stripTag(m.mgmtHost, m.serviceTag) : m.mgmtHost) : undefined,
+    //   v3.3.0: 등록부 주소가 없는 수집 서버 · 엣지 서버는 그쪽이 보낸 iDRAC 주소(hwLookupFactory — 호스트 글자만)
+    addr: admin && mgmt ? (hide ? stripTag(mgmt, m.serviceTag) : mgmt) : undefined,
+    // v3.3.0: 하드웨어(iDRAC) 요약 — 베어메탈만(ESXi 행은 undefined). 인벤토리가 없으면 null(화면 '—' + hwWhy)
+    ...(m.kind === 'bm' && hx !== undefined ? { hw: hwView(hx?.hw || null, admin, hide, m.serviceTag), hwVia: hx?.via || '' } : {}),
   };
 }
 
@@ -392,11 +442,17 @@ export function registerBmFolders(api) {
       scheduleKeyMigration(b.migrate);   // v2.995(묶음 C): 태그를 읽은 서버의 등록 저장 키를 st: 로(응답 뒤 · 다시 확인하고 쓴다)
       const servers = [];
       const ix = await currentWhyIndex();   // v2.994: 값 없음 사유 — 베어메탈 사용률 대상 해석(60초 memo · 실패면 null = '확인 못 함')
+      // v3.3.0: 하드웨어(iDRAC) 요약 — 찾기를 못 만들면 요약 없이(화면 '—') 목록은 그대로
+      let hxOf = null;
+      try { hxOf = await hwLookupFactory(); } catch { hxOf = null; }
       for (const m of members) {
         if (!m.corp ? hide || m.kind !== 'bm' : !(allowed ? allowed.has(m.corp) : true)) continue;
         const p = b.placeOf.get(m.key);
         if (m.kind !== 'bm' && !p?.src) continue;   // ESXi 는 폴더에 넣은 것만
-        servers.push(serverRow(m, p, admin, hide, ix));
+        // 찾기를 못 만들었으면 hx = undefined → 행에 hw 키를 싣지 않는다(화면이 '인벤토리 없음' 으로 단정하지 않고 '요약을 만들지 못함' 으로 — 반증 F11)
+        let hx;
+        if (hxOf) { try { hx = hxOf(m); } catch { hx = null; } }
+        servers.push(serverRow(m, p, admin, hide, ix, hx));
       }
       return {
         ok: true, at: g.at, rev: storeRev(), scoped: hide, admin, canWrite: writerOk(req.user), canFleet: full,
@@ -460,6 +516,34 @@ export function registerBmFolders(api) {
   // ── 옆 패널 24시간 CPU · 메모리 추이(v2.987) — 서버 비교(6단계)와 **같은 대상 해석 · 같은 경로**를 쓴다(판정 하나):
   //   이 노드가 수집한 서버 = 로컬 비교 계열 · 엣지가 수집한 서버 = 그 엣지에서 서버당 요청 1개(central/bmComparePull — 지표마다 WAN 왕복하지 않는다).
   //   숫자 · 시각만 싣는다(주소 · 계정 단서 없음) · 못 읽은 칸은 null(0 으로 채우지 않는다) · 범위 계정에는 엣지 실패 사유(엣지 이름이 들어 있다)를 싣지 않는다.
+  // v3.3.0: 서버 한 대의 하드웨어(iDRAC) 상세 — 옆 패널이 열릴 때 1건(목록에는 요약만). 범위 밖 · 없는 키는 404(존재 은닉).
+  //   관리 NIC IPv4 · OS 호스트명 · 관리 주소는 관리자 판본만(범위 판본은 태그를 가린다). 엣지가 올린 서버는 요약만(부품 목록은 그 엣지 포탈).
+  api.get('/tools/bm-folders/hw', toolsPerm, async (req, res) => {
+    try {
+      const snap = store.get();
+      const { members, allowed } = await stateFor(req, snap);
+      const hide = !!allowed;
+      const admin = isAdminDetailUser(req.user);
+      // 목록과 같은 노출 규칙 — 법인 미지정 베어메탈은 범위 없는 계정에만
+      const visible = members.filter((m) => (m.corp ? (!allowed || allowed.has(m.corp)) : (!hide && m.kind === 'bm')));
+      const k = keyResolverFor(hide, visible.map((m) => m.key))(typeof req.query.key === 'string' ? req.query.key.slice(0, 200) : '');
+      const m = k ? visible.find((x) => x.key === k) : null;
+      if (!m) return res.status(404).json({ ok: false, error: 'not_found', reason: '서버를 찾지 못했습니다.' });
+      res.set('Cache-Control', 'no-store');
+      if (m.kind !== 'bm') return res.json({ ok: true, kind: m.kind, why: 'esxi' });
+      const hx = (await hwLookupFactory())(m) || { inv: null, hw: null, mgmt: '', via: '' };
+      const mgmt = t(m.mgmtHost) || t(hx.mgmt);
+      const addr = admin && mgmt ? (hide ? stripTag(mgmt, m.serviceTag) : mgmt) : undefined;
+      if (hx.inv) {
+        const d = hwDetailOf(hx.inv, { admin: admin && !hide });
+        const os = { ...d.os, host: admin && d.os.host ? (hide ? stripTag(d.os.host, m.serviceTag) : d.os.host) : '' };
+        return res.json({ ok: true, kind: 'bm', via: hx.via, addr, detail: { ...d, summary: hwView(d.summary, admin, hide, m.serviceTag), os } });
+      }
+      if (hx.hw) return res.json({ ok: true, kind: 'bm', via: hx.via, addr, summary: hwView(hx.hw, admin, hide, m.serviceTag), why: 'summary-only' });
+      return res.json({ ok: true, kind: 'bm', via: hx.via, addr, why: hx.via === 'edge' ? 'edge-none' : 'no-inv' });
+    } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
+  });
+
   api.get('/tools/bm-folders/trend', toolsPerm, async (req, res) => {
     try {
       const snap = store.get();

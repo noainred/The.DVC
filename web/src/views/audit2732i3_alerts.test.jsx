@@ -68,7 +68,7 @@ describe('설정 › 알림(Alerts2) 렌더', () => {
     for (const x of urlInputs) expect(x).toContain('disabled=""');
     expect(html).toContain('placeholder="설정됨(가림)"');
     for (const b of [...btn(html, '저장'), ...btn(html, '테스트 발송')]) expect(b).toContain('disabled=""');
-    expect(btn(html, '저장').length).toBe(2);
+    expect(btn(html, '저장').length).toBe(3); // 채널 · 규칙 · IP 관리 규칙(v3.1.0) 카드의 저장 — 셋 다 잠긴다(위 반복)
     expect(html).toContain('data-alert-lock');
   });
   it('전체 범위 — 예전처럼 URL 원문·버튼 활성', () => {

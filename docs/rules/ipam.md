@@ -19,6 +19,13 @@
 - (원래 5768행) IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다
 - v2.991 — IP 스캔 호스트명 확인(역DNS · mDNS · NetBIOS) · 대장 '호스트명' 열
 - v2.999 — IP 스캔 MAC · 제조사(스캐너 이웃 표 ARP · 제조사 표) · 대장 '제조사 · MAC' 열
+- v3.1.0 — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)
+
+- v3.4.0 — IP 관리 재설계 묶음 가: 탭 5개 · 현황 · 대역 목록/주소 맵 · 필터 한 줄 · '복수IP'
+- v3.5.0 — IP 관리 재설계 묶음 나: 용도 · 요청자 · 할당자 · 대역 용도 · 예약/DHCP 집계 · 엑셀 창 · 상세 창 하나
+- v3.6.0 — IP 관리 재설계 묶음 다: 서버 보기(서비스 태그) · 호스트명 대조 · 스캔 대역 담기(ESXi vmk 포함)
+- v3.7.0 — IP 관리 재설계 묶음 라: 정기 보고(IPMS 알람) · 바로 알림 3가지 · 주기 스캔 일정(쉬는 시간 · 속도)
+- v3.8.1 — 안정화: 쉬는 시간 × 끊김/늦음 거짓 경보 · 엣지 쉬는 시간이 실패 기록을 덮음 · 정기 보고 기준 · 알림 평가의 동기 원장 재구성
 
 ## 본문
 
@@ -221,4 +228,115 @@
   - 범위 계정: 대장 행에 MAC 칸을 싣지 않는다(호스트명과 같은 `allowed ?` 판정) · `/tools/ipam/history` 의 scan 은 예전처럼 null. 스캔 결과 CSV 는 `mac`(표시 MAC) 뒤에 `mac_src` · `mac_vendor` 를 덧붙였다.
   - ⚠ 정직 기록: **실제 L2 이웃이 있는 망에서 이웃 표 읽기를 확인하지 못했다**(이 환경의 이웃은 게이트웨이 1개 — 파서는 커널 꼴의 표본 · 주입한 읽기 함수로 확인). IEEE 등록부 원문 · 재배포 조건 문서는
     이 환경의 네트워크 정책이 막아 읽지 못했다(oui-data 의 BSD 라이선스만 확인). '미등록 가상 NIC' 은 ESXi vmkernel 포트(vMotion 등)도 VMware 대역을 써서 단정하지 않는다.
+
+- ⚠⚠ **v3.1.0 — IP 변화 기록 · 알림 묶음 · 충돌 의심(릴리스 나)**(시안 `docs/design/ipam-alerts-mac-dns` ① ③ · 컨펌 기본값: 충돌 의심만 켬 · 연속 2회 · 묶음 상한 50 ·
+  회귀 `server/test/ipamChanges310.test.js`(변이 20종 20 검출) + 웹 `ipamChangeText.test.js`):
+  - 감지는 **병합 때 한 번 · 중앙에서**(`scanStore.mergeScanResults` → `onScanChanges` 구독 — 엣지는 '변화' 를 보내지 않는다). 부분 결과(seenOnly)는 비교하지 않는다.
+    종류: new-ip(이력이 없던 IP — **그 대역 줄의 첫 완료 스캔이 끝난 뒤에만**, 기준선 `ipam-change-baseline.json` 은 `recordAgentReport` 가 표시) · reserved-up(관리상태 예약 · 폐기 —
+    IP 지정 > 전역 대역 정책 — 가 해제 · 새 상태에서 응답 시작) · rename(v2.991 renames) · mac-change(ARP MAC 만 · 예전 MAC 으로 되돌아가면 `flap`).
+  - 기록 · 알림은 `ipam/changeNotify.js`: vCenter 가 아는 IP(VM · 호스트 관리 IP)는 new-ip 에서 빼고 이중화 가상 MAC 은 mac-change 에서 뺀다 → **전부 기록**(`ipam/changeLog.js` ·
+    `ipam-changes.json` 5,000건 · 180일) → 켠 종류만 **스캔 한 번 · 종류 하나에 한 건**(10줄 + 외 N건 · 상한 넘으면 요약). 기록만 사유는 항목의 `notify`(off · quiet · excluded · flap).
+    'MAC 변경 알림 제외' 는 관리상태 `macAlertOff`(불리언 참만 — 그 칸만 있어도 관리상태 항목이 남아 '관리' 로 센다).
+  - 충돌 의심 판정은 `ipam/conflict.js` 하나: VM(켜짐)의 IP 에 그 VM 의 NIC MAC(`vm.dev.nics` ∪ `vm.dns.nics`)이 아닌 **ARP MAC 이 연속 N회**(`arp.n` — 같은 MAC 을 이어 본 횟수) ·
+    이중화 MAC · 한 MAC 이 8개 이상 IP(대리 ARP) 제외 · **모름**(NIC MAC 미수집 · 여러 VM · miss>0 · 그 에이전트의 마지막 완료 스캔이 못 봄)은 알림 엔진이 보류(held — 해소로 기록하지 않음).
+    상태형이라 `alerts.js evaluate` 가 판정하고(규칙을 꺼도 판정은 해 `conflictState` 에 둔다 — 대장 배지), 발생 · 해소 기록은 `onAlertState` 로 한 번씩. ESXi 관리 IP 는 대조하지 않는다(vmkernel MAC 미수집).
+  - 대장: VM 행 `macConflict`(conflictState — `ipamRevKey` 끝 `|c` 가 캐시를 무효화) · 최근 7일 MAC 변경 `macChangedAt · macPrev` · 칩 '충돌 의심 · MAC 변경'. 범위 계정에는 싣지 않는다.
+    `arp.n` 은 nameSig 에 넣지 않았다(스캔마다 대장 재계산 금지). 화면: IP관리 › IP 변화(`GET /admin/ipam/changes` — 스캔 로그와 같은 adminOnly + fleetOnly) · 설정 › 알림 카드 · 관리상태 편집 칸.
+  - ⚠ 설계와 다른 것: 추천 카드('충돌 의심 · MAC 변경')는 넣지 않았다 — '추천 기능 30선' 은 개수가 테스트로 고정(30)이라 대장 칩 · IP 변화 페이지로 대신했다. 대리 ARP 기준(8)은 설정값이 아니라 상수다.
+  - ⚠ 정직 기록: 실제 충돌 · 장비 교체 현장으로 확인하지 못했다(시험은 저장소에 값을 넣어 판정 · 알림 묶음을 확인). 알림은 채널이 없는 시험 환경이라 '보내지 않음' 까지만 봤다.
+
+
+- ⚠⚠ **v3.2.0 — DNS 정합성(역DNS 이름의 정방향 확인 · 릴리스 다)**(시안 `docs/design/ipam-alerts-mac-dns` ④ ⑦ · 컨펌 7 '역DNS 이름만' · 8 '기록만' ·
+  회귀 `server/test/dnsConfirm320.test.js` + 웹 `ipamDnsText.test.js`):
+  - 묻는 쪽은 **스캔을 돌린 쪽**(법인 엣지 → 법인 DNS)이다. 묻는 함수 · 이름마다 시한 · 동시 수 · 차단기는 v2.993 정방향 DNS 와 같은 코어(`scan.js lookupMany` — forwardMany 에서 떼어 냈다)이고,
+    물리서버 이름을 먼저 물은 뒤 **같은 예산(FWD_BUDGET_MS)의 남은 시간**으로 묻는다. 물리서버 단계가 차단기('DNS 닿지 않음')로 멈췄으면 묻지 않는다. 판정 코어는 `ipam/dnsConfirm.js` 하나 —
+    match(주소 목록에 이 IP) · other(다른 IP 만 — 최대 4) · none(ENOTFOUND · ENODATA · EAI_NONAME) · unknown(시한 · 예산 · 그 밖의 오류 — **일치에도 불일치에도 넣지 않는다**).
+  - 답 기억은 scanRunner 를 부르는 프로세스(중앙 포탈 · 엣지 에이전트)의 **메모리**다 — 잡에 실어 자식(scanWorker)에 보내고 새로 얻은 답(`dnsLearned`)만 돌려받는다. 기간(설정 `dnsConfirmHours`, 기본 24 · 1~720) 안의
+    답은 다시 묻지 않고, 묻는 순서는 오래된 답부터(한 번도 묻지 않은 이름이 맨 앞) · 미래 시각 답은 믿지 않는다 · 상한 20,000 이름. 재시작하면 비어서 다시 묻는다(파일로 남기지 않는다).
+    설정 `dnsConfirm`(기본 켜짐 — DNS 서버에만 묻는다) · 역DNS 를 끄면 묻지 않는다 · 키 없는 옛 설정 · 옛 중앙 배정도 켜짐.
+  - 엣지 수신: 행 `dnsFwd {v, at?, addrs?}` 는 `cleanDnsFwd`(아는 판정만 · at 은 받은 시각으로 자름 · addrs 는 other 에서만 IPv4 정규형 4개 — 없으면 버림) · **역DNS 이름이 있을 때만** ·
+    요약 `nameStats.dnsFwd` 는 `cleanDnsFwdStats`(수치만 · stopped 는 budget · unreachable 만). 저장본 로드도 같은 정제. 이번 보고에 없으면 칸을 비운다(옛 엣지 · 확인 끔).
+  - 리비전: nameSig 끝에 판정 · 다른 IP(**확인 시각은 넣지 않는다** — 기억을 다시 쓴 스캔마다 대장을 다시 만들지 않게). 변화 기록 `dns-mismatch`(알림 규칙 없음 → notify none ·
+    `scanStore.dnsMismatchChange`): **같은 역DNS 이름의 알던 판정(match · other · none)에서** other · none 으로 바뀌었을 때만 — 첫 확인 · 확인 못 함 다음 · 이름 변경은 변화가 아니다
+    (지금 어긋난 IP 전부는 추천 카드가 보인다 — 첫 확인에서 기록이 쏟아지지 않게).
+  - 대장(전 범위 계정만 — `ledger` 의 `!allowed` 블록): 일치 · 확인 못 함은 `dnsFwd` 판정만(행마다 실리므로 짧게), 어긋난 것만 `dnsPtr · dnsFwdAt · dnsFwdAddrs · dnsAgent`.
+    화면: 호스트명 칸 배지 'DNS 다른 IP' · '정방향 없음'(일치는 달지 않는다) · 칩 'DNS 불일치' · 요약 줄 '정방향 확인 n / N'(N = 확인 못 함 제외) · IP 상세 역DNS 줄 아래 정방향 결과 ·
+    추천 카드 16 'DNS 정합성 · 레코드 초안'(결과가 하나도 없으면 — 범위 계정 · 옛 엣지 · 끔 — 예전 카드 그대로 · 카드 수 30 불변) · 스캔 결과 CSV 끝에 `dns_forward,dns_forward_addrs`.
+  - v2.993 `nameVia` 배지(정방향 DNS · 정방향 DNS 일치 · 이름이 서로 다름)는 **서브넷 시트의 Hostname 칸**, 이번 배지는 **대장 목록의 호스트명 칸**이라 한 칸에 겹치지 않는다 —
+    목록 칸의 '이름 다름' × 정방향 판정 조합은 웹 테스트 표로 고정했다.
+  - ⚠ 정직 기록: 실제 법인 DNS 로 확인하지 못했다(시험은 묻는 함수를 주입 · 이 컨테이너의 루프백 역DNS 는 환경마다 다르다). 분할 DNS · hosts 파일 항목이 답에 섞이는 것은 화면 문구로 밝혔다.
+    엣지에서 묻는 시간은 스캔 시간에 더해진다(최대 FWD_BUDGET_MS 90초 — 물리서버 이름 단계와 합).
+
+- ⚠⚠ **v3.4.0 — IP 관리 재설계 묶음 가: 탭 5개 · 현황 · 대역 목록/주소 맵 · 필터 한 줄 · '복수IP'**(사용자 요청 "IP 관리 기능 많이 복잡하고 지저분한데 … 다시 디자인" →
+  시안 `docs/design/ipam-redesign`(캔버스 https://claude.ai/artifact/9PZqpcYuX7ppskdW3iqwvG) → 컨펌 "컨펌 질문 전부 기본값으로 진행해서 구현해줘" · 단계 릴리스 · 표준 검증.
+  웹 `ipamPages.js`(tab · IPAM_TABS · tabGroups · IPAM_DEFAULT_PAGE) · `IpamHome.jsx` · `IpamSubnets.jsx` · `ipamHomeText.js` · `ipamFilterText.js` · `IpamCore.jsx` · styles `.ipam-tabs`~`.ipam-fsel`.
+  회귀 `web/src/views/tools/ipamRedesign340.test.js`):
+  · **탭은 묶음일 뿐이다** — 페이지 키 · 주소(`#/ipam/<키>`) · 권한 판정(pageShown — 403 일 때만 숨김)은 그대로. 새 페이지는 `ipamPages.js` 에 `tab` 과 함께 더하고
+    `TAB_ORDER` 에도 넣을 것(테스트가 '탭 보기가 페이지 전부를 한 번씩 덮는다' 를 고정 — 빠지면 갈 길이 없는 화면이 된다). 주소 없이 열면 'home'(예전 'list') —
+    통합 검색이 검색어를 넘기며 `#/ipam` 으로 열면 'list' 로 옮긴다.
+  · **KPI 카드 9장은 현황 탭에만** — '지금 확인할 것' 칸의 필터 키는 IP 주소 탭 고르기 항목(`ipamFilterText` RECON_OPTIONS · ROW_OPTIONS)과 1:1(테스트 대조).
+    판정은 새로 만들지 않았다 — IpamCore 의 recon 집계 · 대장 응답을 그대로 읽는다. 대장을 못 받았으면 칸은 0 이 아니라 '—'.
+  · **현황의 사용률은 대장에 있는 주소(/tools/ipam/subnets 의 used)만 센다** — 예약 · DHCP 구간(대역 정책)은 세지 않고 화면이 그 사실을 적는다.
+    설계 컨펌의 '예약 · DHCP 포함' 은 묶음 나에서(서버 집계 필요 — 대역 312개 시트를 요청 경로에서 만들지 말 것).
+  · 대역 탭을 주소로 바로 열면 대역을 고르지 않은 채 '불러오는 중' 에 머물렀다(Chromium 에서 잡음) — 목록이 오면 `firstBase`(대장 주소가 가장 많은 대역)를 고른다.
+    ⚠ 그 effect 는 subnets · base · pickBase **선언 뒤**에 둔다(앞에 두면 의존 배열 평가에서 TDZ — 한 번 그렇게 썼다가 옮겼다).
+  · '멀티홈' 표기는 화면 · 엑셀 상태 칸 · 추천 카드 이름에서 '복수IP'(사용자 결정 2026-11-13). 응답 필드 `multiHomed` · 필터 키 `multihomed` · ipam.db `multi_homed` 열은 그대로.
+  · 지운 것: 모든 페이지 위 KPI 9장 · vCenter 칩 줄(VcenterChips) · /24 칩 벽과 같은 목록의 드롭다운 · 출처 대조 버튼 줄 · 빨간 검색창. 옛 구조를 고정하던 테스트
+    `audit2612f`(KPI '—') · `ipamRanges2639` U5(칩 2곳) · `audit2732lead`(dbCountText 위치)는 새 위치를 보도록 고쳤다(뜻은 같다).
+  · 정직 기록: Chromium 은 목 데이터(관리자 · 1440/400)로만 봤다 — 목 데이터에는 IP 변화 기록 · 스캔 결과가 없어 그 칸은 빈 상태로만 확인했다. 범위 계정 화면은 보지 못했다.
+
+- ⚠⚠ **v3.5.0 — IP 관리 재설계 묶음 나: 용도 · 요청자 · 할당자 · 대역 용도 · 예약/DHCP 집계 · 엑셀 창 · 상세 창 하나**(설계 `docs/design/ipam-redesign` §5-0 · 컨펌 '전부 기본값' ·
+  사용자 "묶음 나, 다, 라 진행해줘" · "순서대로 진행해줘". 서버 `ipam/overrides.js` · `ledger.js`(policyCellCounts) · `record.js` · `db.js` · `manageCsv.js` · `subnetNotes.js`(새) ·
+  `excel.js` · `excelExtra.js`(새) · `excelWorker.js` · 라우트 `PUT /tools/ipam/subnet-note` · `GET /tools/ipam.xlsx?sheets=`. 웹 `IpamEditors` · `IpamCore`(MgmtBlock) · `IpamSubnets`(SubnetPurposeEdit) ·
+  `IpamExportModal`(새) · `ipamHomeText`(occOf). 회귀 `server/test/ipamRedesign350.test.js` · `web/src/views/tools/ipamRedesign350.test.js`):
+  · **용도는 새 필드**(override `purpose` · `requester` · `assigner`, 200자) — `label`(표시 이름)과 다르다. 대장 행에는 `ipPurpose`(시트의 `purpose` 는 예전 그대로 포탈이 채운 값 —
+    엑셀 'Purpose' 열도 그대로). 대역 정책은 이 칸을 갖지 않는다. ⚠ 관리 CSV 의 '용도' 별칭은 label → purpose 로 옮겼다(동작 변화 — 릴리스 노트에 적음).
+  · **ipam.db 열은 맨 뒤에만 더한다**(`purpose` · `requester` · `assigner` — `MIGRATE_COLUMNS` 에도). 앞 열 순서를 바꾸면 외부 리더가 깨진다(테스트가 `range_policy_spec` 위치를 고정).
+  · **대역 용도는 원장 판정에 쓰이지 않는다**(subnetNotes — 대역 목록 응답에 붙일 뿐 · 입력 지문 · ipam.db 밖). 쓰기는 운영자 이상 + **전체 범위**(범위 계정 403 — 한 /24 를 여러 vCenter 가
+    나눠 쓴다). 응답은 목록에 보이는 대역(범위 안)의 것만 실린다. 길이 초과는 자르지 않고 400.
+  · **예약 · DHCP 수는 대장에 없는 호스트 주소만**(`policyCellCounts` — 시트와 같은 `findPolicy`, ignored 는 어느 쪽도 아님) → used + rsv + dhcp ≤ 254. 대역 목록 기억(_subnetMemo) 키의
+    ipamRevKey 에 정책 리비전이 있어 정책을 바꾸면 다시 센다. 옛 판본 동일성 테스트(`audit2733j` · `audit2611e`)는 예전 세 값 · 뒤에 붙은 칸을 빼고 비교하도록 고쳤다.
+  · **엑셀**: extra 가 없으면 예전 파일과 같다(테스트) · 덧붙임 시트 값은 라우트가 `excelExtra.buildExportExtra` 로 만들어 워커에 `end` 메시지로 넘긴다 — 새 칸을 행에 더하면 `slimSheet` 에도 넣을 것
+    (워커는 거기 있는 칸만 받는다). 조치 필요는 20,000건 상한 · 넘으면 시트 머리에 적는다. 창은 CSV 권한(`canCsv`)으로 막는다(csvGate2643 스윕).
+  · 상세 창: 목록의 IP 는 늘 `IpHistoryModal`(제목 'IP 상세 — …') — '관리 정보' 묶음(MgmtBlock)에서 편집기로 넘어간다. 소유 자원 칸은 예전처럼 자원 상세.
+  · 정직 기록: Chromium(목 데이터 · 관리자 · 1440/400)으로 현황 · 대역(용도 저장 → 목록 · 머리 반영) · 상세 창 · 엑셀 창을 봤고 엑셀은 API 로 받아 시트 이름만 확인했다(열어 본 것은 아님).
+    범위 계정의 403 은 라우트 코드로만 확인했다.
+- **v3.6.0 — IP 관리 재설계 묶음 다**(설계 `docs/design/ipam-redesign` ⑤ · ⑤-2 · ⑪ · ⑮ · 회귀 `server/test/ipamRedesign360.test.js` · `web/src/views/tools/ipamRedesign360.test.js`):
+  · **판정 코어는 `ipam/serverView.js` 하나** — 서버 색인(서비스 태그) · 서버 보기 응답 · 주소별 이름 확인(`nameCheck`) · 호스트명 대조(`compareNames` — `hostNames.nameKey` 위에 얹음). 웹은 글자만 바꾼다(`ipamServerText.js`).
+  · **같은 태그를 호스트 둘 이상이 보고하면 그 태그로 묶지 않는다**(키는 호스트 id · 그 태그의 iDRAC 중 짧은 이름이 같은 하나로만 잇는다). 호스트가 보고한 태그의 iDRAC 은 물리 서버로 세지 않는다.
+    태그 없는 호스트는 '다른 호스트가 태그로 가져갈 수 없는 iDRAC' 중 짧은 이름이 하나뿐일 때만 잇는다(순서에 따라 결과가 바뀌지 않게).
+  · **가림**: 관리자 판본이 아니면(`isAdminDetailUser`) iDRAC 등록부를 읽지도 않고 서비스 태그를 지운다(키도 호스트 id — 키로 태그가 새지 않게). 범위 계정은 자기 vCenter 의 호스트 · VM 만 ·
+    물리 서버 없음 · 스캔 이름(역DNS · NetBIOS) 없음(v2.991 규칙) · override 는 범위 안 IP 만. 변이 5건(태그 지우기 · 물리 서버 · 스캔 이름 · override · 등록부 읽기)을 테스트가 모두 잡는다.
+  · **vmk 전체**: 수집기가 `config.network.vnic` 에서 `vmks`(IPv4 만 · ipV6Config 안 주소 제외 · 32개 상한)와 `config.network.dnsConfig` 에서 `osHostName` · `osDomain` 을 싣는다(같은 조회 · 왕복 0).
+    중앙은 엣지 인벤토리를 필드 화이트리스트 없이 병합하므로(`central/inventory.js`) 소비처(`hostVmks`)가 모양 · 수를 다시 자른다. 옛 수집기는 관리 IP 하나(`fromMgmt`)로 대신한다.
+    원장(ipam.db)에는 vmk 주소를 더하지 않았다 — 원장은 예전처럼 호스트당 관리 IP 하나.
+  · **스캔 대역 후보**: v2.638 제안(`suggestAgentSubnets`)에 vmk 주소를 주입(`hostIps`)하고 출처별 수(vmIps · esxiIps · idracIps — vcenterIps 는 VM + ESXi 그대로) · 분류 · 대역 용도를 붙였다.
+    화면은 '/24 고르기' 표를 줄을 눌러 담는 `ScanRangeAdd.jsx` 로 바꿨고 넣기는 가져오기 창과 같은 `applyImport`(겹치는 줄은 '중복 대역' 칸) — 예전 `appendSubnets` 는 지웠다(되살리면 두 경로가 갈라진다 — 테스트가 없음을 고정).
+    iDRAC 대역 · VM 대역 가져오기 버튼(v2.691 — 서비스별 iDRAC 스캔 대역 · 다른 vCenter 의 VM)은 그대로 둔다.
+  · **호스트명 대조는 폴링하지 않는다**(장비 수천 대 집계 — 열 때 1회 + 새로고침). 응답은 정렬(다름 → 비교 불가 → 같음) 뒤 300행(최대 2,000).
+  · 정직 기록 · 남긴 것: ① 물리 서버의 **OS 인터페이스별 주소 · Linux OS 호스트명**은 아직 모으지 않는다(osSsh 가 이름을 읽지만 poller 상세에 없다 — 엣지 계약 변경이라 따로) —
+    물리 서버의 OS 칸은 스캔 NetBIOS 이름뿐이다. ② 서버 보기는 주소(`#/ipam/server/…`)가 아니라 창이다. ③ vmk 의 쓰임(관리 · vMotion · vSAN)은 포트그룹 이름으로만 보인다(분산 스위치 vmk 는 이름 없음).
+    ④ Chromium(목 · 관리자 · 1440/400)으로 세 화면을 봤다. 범위 계정 · 비관리자 화면은 라우트 입력 테스트로만 확인했다.
+- **v3.7.0 — IP 관리 재설계 묶음 라**(설계 `docs/design/ipam-redesign` ⑫ ⑬ ⑭ · 회귀 `server/test/ipamRedesign370.test.js` · `web/src/views/tools/ipamRedesign370.test.js`):
+  · **쉬는 시간은 스캔하는 쪽이 자기 시계로 판정한다**(`ipam/scanQuiet.js` — 중앙 폴러는 이 포탈 시각, 엣지 워커는 엣지 현지 시각). 주기 회차만 건너뛰고(수동 · 재개는 막지 않음)
+    기준 시각을 바꾸지 않는다 — 끝난 뒤 첫 틱에 한 번(몰아서 여러 번 돌지 않는다). 배정(`/api/central/ip-scan-assignment`)은 `...cfg` 라 `quiet` 가 그대로 실리고 엣지가 `cleanQuiet` 로 다시 자른다.
+    옛 엣지는 무시한다(업그레이드 전까지 쉬는 시간이 없다). 저장은 잘못된 줄을 버리지 않고 400(`parseQuietInput`). 스캔 속도는 동시 IP 수 · 응답 대기 칸을 채우는 화면 단추일 뿐이다(새 저장 칸 없음).
+  · **주기 스캔 일정**은 스캔 로그 하나로 그린다(`ipam/scanSchedule.js` — 이 포탈 start/finish, 엣지 report 의 걸린 시간). 다음 예정은 어림(마지막 완료 + 주기), 늦음 = 주기의 2배, 완료 기록 없음은 '모름'.
+  · **바로 알림 3가지**(`ipam/instantAlerts.js` · alerts.js 상태형 — 기본 끔): 중복 IP(대장 duplicate · 못 읽은/낡은 vCenter 는 보류 · 200개 넘으면 요약 한 건) · 대역 가득 참(점유 = 대장 + 예약 + DHCP — 현황과 같은 값) ·
+    스캔 보고 끊김(주기 × 배수 · 완료 기록 없음은 보류). 충돌은 v3.1.0 ipamConflict 그대로. 대장은 store 가 만든 캐시를 읽는다(같은 세대 — 새 세대 직후 한 번은 동기 재구성일 수 있다).
+  · **정기 보고**(`ipam/report{Rules,Model,}.js` · 메일 종류 `ipam-report` · 중앙 전용 · 기본 끔): 회차 · 놓침은 아이실론 종합 메일 규칙(`isidu/digestRules.planDigestTick`) 재사용 — 놓친 회차는 기록만, 켠 직후 소급 없음(since).
+    전체 종합(메인 서버 시각) + 받는 사람을 정한 법인마다 한 통. 법인 = DataCenter, 행의 법인은 vCenter 할당 · 스캔 귀속. 법인 메일에 다른 법인 내용 없음(테스트). 데모 법인은 실제 메일 밖(미리 보기에는 '(데모)').
+    **'법인 현지 시각' 은 보고 설정의 법인별 시간대(IANA) 칸으로 계산한다** — 중앙은 엣지의 시간대를 모른다(엣지가 보내지 않고 법인 설정에도 칸이 없다). 비면 메인 서버 시각.
+    대역 사용률의 '지난 보고 대비' 는 지난 **예약 발송** 때 남긴 점유(`ipam-report-state.json` prevOcc)와 견준다(지금 보내기 · 미리 보기는 남기지 않는다). 스캔 보고가 끊긴 법인은 메일에 밝힌다.
+  · 정직 기록 · 하지 않은 것: 매월 주기 · 에이전트 공통 '기본 일정' · 시작 분 흩기 · 관리 정보 변경(감사 로그) 절 · 시간표의 쉬는 시간 음영(엣지 시각과 포탈 시각이 달라 글자로만)은 넣지 않았다.
+    Chromium(목 · 관리자 · 1440/400)으로 일정 · 스캔 설정 · 알림 · 정기 보고(미리 보기 포함)를 봤다. 실제 메일 발송은 목 환경에서 하지 않았다(SMTP 없음 — 본문은 미리 보기와 단위 테스트로 확인).
+- **v3.8.1 — 안정화(v3.7.0 결함 정정 · 회귀 `server/test/stabilize381.test.js` · 변이 6건 전부 검출)**:
+  · ⚠ **정정**: v3.7.0 의 쉬는 시간이 다른 두 기능과 맞물려 거짓 신호를 냈다 — ① '스캔 보고 끊김' 알림과 일정 화면 '늦음' 이 쉬는 시간을 몰라 매일 밤 울렸다
+    (주기 60분 · 쉬는 시간 4시간 · 기준 3배 → 새벽 4시쯤). 이제 기준에 **그 에이전트의 가장 긴 연속 쉬는 시간**(`scanQuiet.quietLongestMs` — 요일 무시 · 이어 붙은 창 합침 · 24시간 상한)을
+    더한다. 중앙은 엣지 시계를 모르므로 '지금 쉬는 중인가' 를 판정하지 않고 길이만큼 늦춘다. ② 엣지 워커의 쉬는 시간 건너뛰기가 `last` 를 덮어 직전 스캔 · 보고 실패가
+    쉬는 동안 엣지 로그에서 사라졌다 — 실패 기록(`_lastScanRecord.error`)은 그대로 두고 `quiet` 표시만 더한다(배정 조회 실패는 남기지 않는 기존 규칙 그대로).
+  · ③ 정기 보고 '지난 보고 대비' 기준(prevOcc)은 **그 법인 메일이 실제로 나간(sent) 법인만** 갱신한다 — 예전에는 예약 발송 한 번마다 모든 법인을 갱신해 법인 현지 시각 모드에서
+    메인 시각의 전체 종합이 법인 메일의 기준을 당겼다. 전체 종합 · 지금 보내기 · 미리 보기는 기준을 바꾸지 않는다. 받는 사람 없는 법인의 회차 기록도 저장한다.
+  · ④ **알림 평가는 원장을 만들지 않는다**(`ledger.peekIpamRows` — 캐시에 있을 때만). 없으면(새 스냅샷 직후 원장 동기화 전) 그 회차는 `heldPrefixes`(ipdup: · ipfull:)로 보류 —
+    알림 엔진 해소 단계가 키 앞부분 보류를 본다(발생 중인 것을 해소로 기록하지 않음). 평가 예외도 보류다. 동기 경로에서 원장을 새로 만드는 코드를 다시 넣지 말 것(소스 단언).
 

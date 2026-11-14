@@ -13,6 +13,8 @@
 import { VimSoapClient } from '../vcenter/soapClient.js';
 // v2.743(감사 VC-03): 주문형 vCenter 로그인 문 — 판정은 collectTarget.js·authStopGate.js 하나(dsBrowse.js 가 묶는다). 사본을 만들지 않는다.
 import { onDemandLogin } from '../vcenter/dsBrowse.js';
+// v3.0.1: connectable 은 스키마 순서(startConnected · allowGuestControl · connected)로 — 조립은 connectInfo.js 하나(순서가 틀리면 vCenter 가 SOAP 500 으로 거부).
+import { connectInfoXml, readConnectFlag, withConnectable, deviceInnerOf } from '../vcenter/connectInfo.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const GB_KB = 1024 * 1024;
@@ -53,14 +55,20 @@ export function parseHardware(deviceXml, meta = {}) {
     } else if (ETH_TYPES.has(type)) {
       const stdNet = /<backing xsi:type="VirtualEthernetCardNetworkBackingInfo">[\s\S]*?<deviceName>([^<]*)<\/deviceName>/.exec(blk)?.[1];
       const dvsKey = /<portgroupKey>([^<]*)<\/portgroupKey>/.exec(blk)?.[1];
-      nics.push({
+      const inner = deviceInnerOf(blk);
+      const nic = {
         key, label, type,
         network: stdNet || (dvsKey ? `(DVS:${dvsKey})` : ''),
         macAddress: pickTag(blk, 'macAddress'),
         connected: /<connected>true<\/connected>/.test(blk),
-        // 연결 토글 시 backing을 그대로 echo해야 안전(특히 DVS).
-        backingXml: /<backing xsi:type="[^"]+">[\s\S]*?<\/backing>/.exec(blk)?.[0] || '',
-      });
+        allowGuestControl: readConnectFlag(inner, 'allowGuestControl'),   // v3.0.1: 연결 토글이 사용자가 바꾸지 않은 이 값을 지킨다(못 읽으면 null)
+      };
+      // v3.0.1: 연결 토글은 읽은 장치 본문 전체를 되돌려 보낸다(connectable 만 바꿈 — vmclone nicDisconnectSpec 과 같은 방식).
+      //   backingXml 은 본문을 못 읽었을 때의 대체 경로 전용(backing 을 그대로 echo해야 안전 — 특히 DVS).
+      //   둘 다 열거 불가 — GET /vm/:id/hardware 응답(JSON)에 싣지 않는다(응답 크기 · DVS portKey · connectionCookie 를 화면에 내리지 않게. 웹은 쓰지 않는다).
+      Object.defineProperty(nic, 'deviceInner', { value: inner, enumerable: false });
+      Object.defineProperty(nic, 'backingXml', { value: /<backing xsi:type="[^"]+">[\s\S]*?<\/backing>/.exec(blk)?.[0] || '', enumerable: false });
+      nics.push(nic);
     }
   }
   return {
@@ -173,7 +181,7 @@ export function buildReconfigSpec(hw, plan = {}) {
     dev.push(
       `<deviceChange><operation>add</operation><device xsi:type="VirtualVmxnet3">` +
       `<key>${nicNeg--}</key>${backing}` +
-      `<connectable><startConnected>true</startConnected><connected>${poweredOn ? 'true' : 'false'}</connected><allowGuestControl>true</allowGuestControl></connectable>` +
+      connectInfoXml({ startConnected: true, allowGuestControl: true, connected: poweredOn }) +
       `</device></deviceChange>`);
     changes.push(`NIC 추가 (${n.dvs?.portgroupKey ? 'DVS' : n.network})`);
   }
@@ -194,11 +202,11 @@ export function buildReconfigSpec(hw, plan = {}) {
     if (removeSet.has(Number(nc.key))) continue; // 삭제 대상이면 토글 무시
     const connected = !!nc.connected;
     if (connected === nic.connected) continue;    // 변화 없음
-    dev.push(
-      `<deviceChange><operation>edit</operation><device xsi:type="${nic.type}"><key>${nic.key}</key>` +
-      `${nic.backingXml || ''}` +
-      `<connectable><startConnected>${connected}</startConnected><connected>${connected}</connected><allowGuestControl>true</allowGuestControl></connectable>` +
-      `</device></deviceChange>`);
+    // v3.0.1: 예전엔 startConnected · connected · allowGuestControl 순서라 vCenter 가 늘 SOAP 500 으로 거부했다(사용자 실측).
+    //   allowGuestControl 은 읽은 값을 지킨다(이 화면은 그 칸을 바꾸지 않는다). 못 읽었을 때만 새 NIC 기본값 true.
+    const conn = connectInfoXml({ startConnected: connected, allowGuestControl: nic.allowGuestControl ?? true, connected });
+    const body = nic.deviceInner ? withConnectable(nic.deviceInner, conn) : `<key>${nic.key}</key>${nic.backingXml || ''}${conn}`;
+    dev.push(`<deviceChange><operation>edit</operation><device xsi:type="${nic.type}">${body}</device></deviceChange>`);
     changes.push(`NIC ${connected ? '연결' : '연결 해제'} (${nic.network || nic.macAddress || nic.key})`);
   }
 

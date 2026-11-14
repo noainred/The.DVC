@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 스캔</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+*{box-sizing:border-box}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.srch{display:flex;align-items:center;width:420px;height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#8b9bb4;font-size:12px;padding:0 10px}
+.sb{flex:1 0 236px;max-width:236px;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp{box-shadow:inset 3px 0 0 #22d3ee}
+.sb .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;min-width:0;width:100%}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.teal{background:rgba(45,212,191,.14);color:#5eead4}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:7px;padding:11px 16px;color:#8b9bb4;font-weight:600;font-size:13.5px;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tabs .c{font-size:11.5px;font-weight:600;color:#8b9bb4}
+.tabs .adm{font-size:10.5px;font-weight:700;color:#aebbd0;border:1px solid #243049;border-radius:5px;padding:0 5px}
+.tabs .dirty{font-size:10.5px;font-weight:700;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:5px;padding:0 6px}
+.h2{font-size:14px;font-weight:700;margin:0}
+.h3{font-size:12px;font-weight:700;color:#8b9bb4;margin:0}
+.st{display:flex;flex-direction:column;gap:2px;padding:0 22px;border-left:1px solid #1f2a40}
+.st b{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1}
+.st span{font-size:11.5px;color:#8b9bb4}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{border:0;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;padding:6px 11px;cursor:pointer}
+.seg button.on{background:#1a2236;color:#e6edf6}
+.rg{display:grid;grid-template-columns:minmax(0,1fr) 54px auto 28px;gap:10px;align-items:center;padding:8px 10px;border:1px solid #243049;border-radius:8px;background:#0a0e17;font-size:12.5px}
+.rg.new{border-color:rgba(245,158,11,.6)}
+.x{all:unset;cursor:pointer;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;color:#8b9bb4;font-size:14px}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#8b9bb4;min-width:0}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:9px 12px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+th.s::after{content:" ↕";font-weight:400}
+td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+tr.sel td{background:#1a2236}
+tr.sel td:first-child{box-shadow:inset 3px 0 0 #3b82f6}
+.r{text-align:right}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;min-height:1180px">
+<header class="tb">
+  <span class="logo"><span class="v">V</span>The Davinci</span><span class="ver">v2.914.0</span>
+  <span class="srch" style="margin:0 auto">장비 · 기능 찾기 — 이름 · IP · 시리얼</span>
+  <span class="muted mono" style="font-size:11.5px">28/28 vCenter OK</span>
+  <span class="muted" style="font-size:12px">관리자</span>
+</header>
+<div style="display:flex;flex-wrap:wrap;flex:1">
+<nav class="sb" aria-label="포탈 메뉴">
+  <a href="#">Overview</a><a href="#">Summary</a>
+  <a href="#">서버<span class="n">6</span></a><a href="#">스토리지<span class="n">7</span></a>
+  <a href="#" class="grp">네트워크<span class="n">6</span></a>
+  <a href="#" class="sub">전체 네트워크 장비</a><a href="#" class="sub">가상화 네트워크</a><a href="#" class="sub">통신 지도</a><a href="#" class="sub">글로벌 네트워크 점검</a>
+  <a href="#" class="sub on">IP관리</a><a href="#" class="sub">Monitoring</a>
+  <a href="#">자원관리<span class="n">3</span></a><a href="#">자원 최적화<span class="n">2</span></a><a href="#">특수 기능</a><a href="#">이슈</a><a href="#">위키</a><a href="#">게시판</a><a href="#">설정<span class="n">2</span></a>
+</nav>
+<main style="flex:999 1 560px;min-width:0;padding:20px 28px 40px;display:flex;flex-direction:column;gap:16px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <h1 style="margin:0;font-size:20px;font-weight:800">IP 관리</h1>
+    <button type="button" class="btn">전체 법인 28곳 ▾</button>
+    <span class="muted" style="font-size:12px;margin-left:auto">대장 갱신 <span class="mono">14:52</span> · 마지막 스캔 보고 <span class="mono">14:40</span></span>
+    <button type="button" class="btn">내보내기</button>
+    <button type="button" class="btn primary">+ IP 등록 · 예약</button>
+  </div>
+
+  <nav class="tabs" aria-label="IP 관리 탭">
+    <a href="Main.dc.html">현황</a>
+    <a href="Subnets.dc.html">대역 <span class="c">312</span></a>
+    <a href="Addresses.dc.html">IP 주소 <span class="c">8,047</span></a>
+    <a href="Scan.dc.html" class="on" aria-current="page">스캔 <span class="adm">관리자</span> <span class="dirty">저장 전 1</span></a>
+    <a href="Settings.dc.html">설정 <span class="adm">관리자</span></a>
+  </nav>
+
+  <section class="card" style="padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 0" aria-label="스캔 수집 상태">
+    <div style="display:flex;flex-direction:column;gap:3px;padding-right:22px">
+      <h2 class="h2">스캔 에이전트 29곳</h2>
+      <span class="muted" style="font-size:12px">법인 엣지가 자기 대역을 스캔해 결과만 올립니다</span>
+    </div>
+    <div class="st"><b style="color:#86efac">27</b><span>정상 · 그중 실행 중 2</span></div>
+    <div class="st"><b style="color:#fcd34d">1</b><span>보고 늦음</span></div>
+    <div class="st"><b>1</b><span>꺼짐</span></div>
+    <div class="st"><b>0</b><span>미완료</span></div>
+    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <a href="#" class="btn">IP 변화</a>
+      <a href="#" class="btn">물리서버 OS 주소 제안</a>
+      <a href="ScanSchedule.dc.html" class="btn">주기 일정</a>
+      <a href="ScanAdd.dc.html" class="btn">+ 대역 추가</a>
+    </div>
+  </section>
+
+  <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+
+    <section class="card" style="flex:999 1 480px;overflow:hidden" aria-label="에이전트 목록">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 18px">
+        <h2 class="h2">에이전트</h2>
+        <input class="input" type="text" aria-label="에이전트 · 대역 찾기" placeholder="에이전트 · 대역 찾기" style="width:200px;margin-left:auto">
+      </div>
+      <div style="overflow-x:auto">
+      <table style="min-width:720px">
+        <thead><tr><th class="s">에이전트</th><th class="s">데이터센터</th><th class="s r">대역</th><th class="s r">주소</th><th class="s">상태</th><th class="s">마지막 보고</th><th class="s r">응답 IP</th><th class="s r">이름 확인</th></tr></thead>
+        <tbody>
+          <sc-for list="{{agents}}" as="a" hint-placeholder-count="9">
+          <tr class="{{a.trCls}}">
+            <td><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">{{a.name}}</a> <span class="muted">{{a.corp}}</span></td>
+            <td class="muted">{{a.dc}}</td>
+            <td class="r mono">{{a.ranges}}</td>
+            <td class="r mono">{{a.addrs}}</td>
+            <td><span class="{{a.stCls}}">{{a.st}}</span></td>
+            <td class="mono muted">{{a.at}}</td>
+            <td class="r mono">{{a.up}}</td>
+            <td class="r mono muted">{{a.names}}</td>
+          </tr>
+          </sc-for>
+        </tbody>
+      </table>
+      </div>
+      <div style="padding:11px 18px;font-size:12px" class="muted">29곳 중 9곳 · 꺼짐 · 대기는 ‘보고 늦음’ 으로 세지 않습니다</div>
+    </section>
+
+    <aside class="card" style="flex:1 1 380px;max-width:460px;overflow:hidden" aria-label="edge-pl1 설정">
+      <div style="padding:16px 18px;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-size:16px;font-weight:700">edge-pl1</span><span class="muted">VC-PL1</span><span class="tag warn">보고 늦음</span>
+          <label style="margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-size:12px;cursor:pointer"><input type="checkbox" checked> 주기 스캔</label>
+        </div>
+        <span class="muted" style="font-size:12px">마지막 보고 <span class="mono">11:02</span> — 3시간 50분 전. 엣지 연결 상태는 통신 지도에서 확인합니다.</span>
+      </div>
+
+      <div style="padding:14px 18px;border-top:1px solid #1f2a40;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:baseline;gap:8px"><h3 class="h3">스캔 대역</h3><span class="muted" style="font-size:12px;margin-left:auto">4줄 · 주소 822개</span></div>
+        <div class="rg"><span class="mono">10.31.4.0/24</span><span class="mono muted r">254</span><span class="tag ok">정상</span><button type="button" class="x" aria-label="10.31.4.0/24 지우기">×</button></div>
+        <div class="rg"><span class="mono">10.31.5.0/24</span><span class="mono muted r">254</span><span class="tag ok">정상</span><button type="button" class="x" aria-label="10.31.5.0/24 지우기">×</button></div>
+        <div class="rg"><span class="mono">10.31.9.1-10.31.9.60</span><span class="mono muted r">60</span><span class="tag warn">edge-de1 과 겹침</span><button type="button" class="x" aria-label="10.31.9.1-10.31.9.60 지우기">×</button></div>
+        <div class="rg new"><span class="mono">10.31.12.0/24</span><span class="mono muted r">254</span><span class="tag warn">저장 전</span><button type="button" class="x" aria-label="10.31.12.0/24 지우기">×</button></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input class="input mono" type="text" aria-label="새 대역" placeholder="10.0.0.0/24 또는 10.0.0.1-50" style="flex:1 1 180px;width:auto">
+          <button type="button" class="btn">추가</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <a href="ScanAdd.dc.html" class="btn sm primary">사용 중인 대역에서 고르기</a>
+          <span class="muted" style="font-size:12px">이 법인의 vCenter 와 iDRAC 등록에서 찾습니다</span>
+        </div>
+      </div>
+
+      <div style="padding:14px 18px;border-top:1px solid #1f2a40;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+        <label class="fld">데이터센터<select class="input"><option>폴란드 1센터 — 자동 판정</option><option>직접 지정…</option></select></label>
+        <label class="fld">주기<select class="input"><option>1시간마다</option></select></label>
+        <label class="fld" style="grid-column:1 / 3">확인할 포트<input class="input mono" type="text" value="22, 80, 443, 3389"></label>
+        <div class="fld" style="grid-column:1 / 3">호스트명 확인 — 응답한 IP 에만 묻습니다
+          <span style="display:flex;flex-wrap:wrap;gap:6px 14px;color:#e6edf6;font-size:12.5px"><label><input type="checkbox" checked> 역DNS</label><label><input type="checkbox" checked> mDNS</label><label><input type="checkbox" checked> NetBIOS 이름</label><label><input type="checkbox" checked> 정방향 확인(DNS 정합성)</label></span>
+        </div>
+      </div>
+
+      <div style="padding:12px 18px;border-top:1px solid rgba(245,158,11,.5);background:rgba(245,158,11,.08);display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+        <span style="font-size:12.5px;flex:1 1 180px">저장하지 않은 변경 1건 — 다른 탭에 다녀와도 남아 있습니다</span>
+        <button type="button" class="btn sm">되돌리기</button>
+        <button type="button" class="btn sm primary">저장</button>
+        <button type="button" class="btn sm">저장하고 지금 스캔</button>
+      </div>
+    </aside>
+  </div>
+
+  <section class="card" style="overflow:hidden" aria-label="실행 기록">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 18px">
+      <h2 class="h2">실행 기록</h2>
+      <span class="muted" style="font-size:12px">진행 중인 스캔과 지난 기록을 한 표에</span>
+      <span class="seg" style="margin-left:auto"><button type="button" class="on">전체</button><button type="button">실행 중 2</button><button type="button">실패 · 건너뜀</button><button type="button">설정 변경</button></span>
+    </div>
+    <div style="overflow-x:auto">
+    <table style="min-width:760px">
+      <thead><tr><th class="s">시각</th><th class="s">에이전트</th><th class="s">일</th><th class="s">결과</th><th class="s r">주소</th><th class="s r">응답</th><th class="s r">걸린 시간</th></tr></thead>
+      <tbody>
+        <tr><td class="mono muted">14:51</td><td>edge-us1</td><td>주기 스캔</td><td><span class="tag blue">실행 중 62%</span></td><td class="r mono">7,874</td><td class="r mono muted">—</td><td class="r mono muted">3분째</td></tr>
+        <tr><td class="mono muted">14:49</td><td>이 포탈에서 직접</td><td>주기 스캔</td><td><span class="tag blue">실행 중 18%</span></td><td class="r mono">3,556</td><td class="r mono muted">—</td><td class="r mono muted">5분째</td></tr>
+        <tr><td class="mono muted">14:40</td><td>edge-kr1</td><td>주기 스캔</td><td><span class="tag ok">완료</span></td><td class="r mono">9,652</td><td class="r mono">1,204</td><td class="r mono">6분 12초</td></tr>
+        <tr><td class="mono muted">14:22</td><td>edge-pl1</td><td>설정 변경 — 대역 1줄 추가(관리자)</td><td><span class="tag gray">기록</span></td><td class="r mono muted">—</td><td class="r mono muted">—</td><td class="r mono muted">—</td></tr>
+        <tr><td class="mono muted">13:40</td><td>edge-kr1</td><td>주기 스캔</td><td><span class="tag ok">완료</span></td><td class="r mono">9,652</td><td class="r mono">1,201</td><td class="r mono">6분 05초</td></tr>
+        <tr><td class="mono muted">11:02</td><td>edge-pl1</td><td>주기 스캔</td><td><span class="tag ok">완료</span></td><td class="r mono">568</td><td class="r mono">611</td><td class="r mono">2분 41초</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div style="padding:11px 18px;font-size:12px" class="muted">최근 6건 · <a href="#">기록 전부 보기</a></div>
+  </section>
+
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mk = (name, corp, dc, ranges, addrs, st, at, up, sel) => ({
+      name, corp, dc, ranges, addrs, st, at, up, names: up === '—' ? '—' : Math.round(parseInt(up.replace(',', ''), 10) * 0.93).toLocaleString() + '/' + up, trCls: sel ? 'sel' : '',
+      stCls: st === '정상' ? 'tag ok' : st === '실행 중' ? 'tag blue' : st === '보고 늦음' ? 'tag warn' : 'tag gray',
+    });
+    return {
+      agents: [
+        mk('edge-pl1', 'VC-PL1', '폴란드 1센터', 3, '568', '보고 늦음', '11:02', '611', true),
+        mk('edge-us1', 'VC-US1', '미국 동부 1센터', 31, '7,874', '실행 중', '13:51', '842'),
+        mk('이 포탈에서 직접', 'VC-KR2', '부산 센터', 14, '3,556', '실행 중', '13:49', '388'),
+        mk('edge-kr1', 'VC-KR1', '서울 1센터', 38, '9,652', '정상', '14:40', '1,204'),
+        mk('edge-de1', 'VC-DE1', '독일 1센터', 19, '4,826', '정상', '14:36', '574'),
+        mk('edge-us2', 'VC-US2', '미국 동부 2센터', 12, '3,048', '정상', '14:29', '402'),
+        mk('edge-jp1', 'VC-JP1', '도쿄 센터', 8, '2,032', '정상', '14:33', '266'),
+        mk('edge-in1', 'VC-IN1', '데이터센터 미정', 6, '1,524', '정상', '14:27', '171'),
+        mk('edge-br1', 'VC-BR1', '브라질 센터', 9, '2,286', '꺼짐', '—', '—'),
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

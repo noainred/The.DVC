@@ -69,18 +69,18 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | 파일 | 다루는 것 · 언제 읽나 |
 |---|---|
 | `docs/rules/perf-db.md` (24항목) | 성능·DB·폴러 규약 — 폴러·DB 모듈·캐시·대량 쓰기·응답 캐시를 새로 만들거나 고칠 때 |
-| `docs/rules/common.md` (12항목) | 공통 코드·테스트·문서 규약(numOrNull·주석 제거·TDZ·생성기·의존 방향·릴리스 워크플로) — 테스트·스윕·문서 생성기·릴리스 워크플로를 만질 때 |
+| `docs/rules/common.md` (13항목) | 공통 코드·테스트·문서 규약(numOrNull·주석 제거·TDZ·생성기·의존 방향·릴리스 워크플로) — 테스트·스윕·문서 생성기·릴리스 워크플로를 만질 때 |
 | `docs/rules/security-api.md` (19항목) | 보안·라우트·외부 API·감사 로그·라이선스 — server/src/routes/ · publicapi · auth · 압축 해제 · CSP |
 | `docs/rules/web.md` (53항목) | 웹 화면·메뉴·표·문구 규약 — web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
 | `docs/rules/edge.md` (19항목) | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개·VM 백업 법인 위임 — server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed,vmclone}/ |
 | `docs/rules/storage.md` (38항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
 | `docs/rules/sanswitch.md` (22항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
-| `docs/rules/idrac-server.md` (28항목) | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 — server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
+| `docs/rules/idrac-server.md` (29항목) | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 — server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
 | `docs/rules/vcenter.md` (31항목) | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) — server/src/{vcenter,vcinfo,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
 | `docs/rules/gpu.md` (8항목) | GPU 모니터링(할당·메모리·온도·수집 점검) — server/src/gpu/ · web/src/views/tools/Gpu* |
 | `docs/rules/cvp.md` (16항목) | Arista CVP 수집·장애·GBIC·Overview — server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
 | `docs/rules/isilon.md` (7항목) | 아이실론 디렉터리 사용량·메일 — server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
-| `docs/rules/ipam.md` (13항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
+| `docs/rules/ipam.md` (20항목) | IP 관리(IPMS·대역·스캔·원장·VM DNS) — server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | `docs/rules/horizon-curuser.md` (6항목) | Horizon 세션·앱 사용·현재 사용자(Windows) — server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | `docs/rules/demo.md` (6항목) | 데모(mock) 모드·데모 계정 — server/src/mock/ · auth/demoGuest.js |
 | `docs/rules/audits.md` (82항목) | 회차별 점검(감사) 기록 v2.583~v2.785 — 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
@@ -160,6 +160,9 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
   현재 진행 중인 작업 + 추가로 해야 할 작업(미릴리스 포함)을 모두 한 표에 정리한다.
 - **`.` 입력 시 작업 현황 표 응답**: 사용자가 `.` 하나만 입력하면 진행 중·대기 작업을 같은 형식의 표로 보여준다. 릴리스 폴링 등
   백그라운드 확인도 포함하고, 없으면 "모두 완료" 와 최근 완료 릴리스 버전을 알린다.
+- **`....` 입력 시 전체 세션 현황 표**(2026-11-13 사용자 지시): 이 세션만이 아니라 **Claude Code 에서 돌아가는 모든 작업**을 표로 정리한다 —
+  `list_sessions`(mine)·`get_session`(상태 문구)·`list_triggers`·열린 PR 을 조회해 ① 실행 중 ② CI·머지·예약 대기 ③ 사용자 응답 대기 ④ 예약 루틴 순으로,
+  열은 `세션(링크) | 최근 갱신(KST) | 상태 | 하는 일·필요한 조치 | 브랜치·PR`. 오늘 끝난 세션은 한 줄 요약. 상태 문구가 오래됐으면 추정임을 밝힌다.
 - **진행 메시지에 시각 표시**(2026-11-05 사용자 '기억해줘'): 작업 중 사용자에게 보내는 진행 메시지(지금 무엇을 하는지 · 중간 결과 · 기다리는 것)는
   맨 앞에 **KST 시각**을 붙인다 — 예 `[13:34] 반증 결과 반영 중입니다`. 시각은 그때 `TZ=Asia/Seoul date '+%H:%M'` 으로 뽑는다(지어내지 않는다).
 - **30분 이상 걸릴 것 같으면 착수 전에 방식을 물어볼 것**(2026-09-15 지시): 표의 `시간` 열에 예상 소요를 적고, 합이 30분을 넘길 것 같으면

@@ -70,6 +70,7 @@ import { startGpuGuestPoller } from './gpu/poller.js';
 import { startGpuAllocHistory } from './gpu/allocHistory.js';   // GPU 할당율 일 단위 이력(v2.939) — 1시간 · 재진입 가드 · 스냅샷만 읽는다
 import { startPhysicalGpuPoller } from './gpu/physicalPoller.js';
 import { startIpScanPoller } from './ipam/scanPoller.js';
+import { startIpamChangeNotify } from './ipam/changeNotify.js'; // v3.1.0: IP 변화 기록 · 알림 묶음
 import { startIpScanAgent } from './agent/ipScanWorker.js';
 import { startCollectorPuller } from './collector/puller.js';
 import { startAgentScanner } from './agent/scanner.js';
@@ -157,6 +158,8 @@ import { startCurUserConfigPull } from './agent/curUserConfigPull.js'; // 〃 �
 import { startPartFaultPoller } from './partfault/poller.js';       // 파트 장애(v2.547) — 중앙: 스캔→전이→DB→알림
 import { startPartFaultPush } from './partfault/push.js';           // 〃 엣지: 로컬 판정 후 '장애 + 전체 요약' 을 중앙 push(v2.548 프로토콜 2)
 import { startPartFaultConfigPull } from './agent/partFaultConfigPull.js'; // 〃 중앙→엣지 스위치 배포(v2.548)
+import { startDiskBadJobs } from './diskbad/jobs.js';             // 디스크 배드 섹터 이력(v3.8.0) — 중앙: 작업 · 6시간 자동 점검(기본 꺼짐)
+import { startDiskBadEdge } from './diskbad/edge.js';             // 〃 엣지: 중앙 작업을 가져가 그 법인 iDRAC 로그를 읽고 결과 push
 import { startBmUsageConfigPull } from './agent/bmUsageConfigPull.js'; // v2.627 베어메탈 사용률 설정 중앙→엣지 배포
 import { startBmOnboardPull } from './agent/bmOnboardPull.js'; // 7b단계 서버 등록 배포(중앙 → 엣지 — 수집 경로 edge)
 import { startBmMaintPull } from './agent/bmMaintPull.js'; // 8a단계 정비 창 배포(중앙 → 엣지 — 그 법인 창)
@@ -166,6 +169,7 @@ import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
 import { startIsiduPoller } from './isidu/poller.js';
 import { startIsiduDigest } from './isidu/digest.js';   // v2.742 아이실론 종합 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
+import { startIpamReport } from './ipam/report.js';   // v3.7.0 IP 관리 정기 보고(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startGuestPartMail } from './guestpart/notify.js';   // v2.749 게스트 파티션 사용률 메일(통합·vCenter 별·95% 즉시·실패) — 중앙 전용 · 기본 꺼짐
 import { startIssueAutomation } from './issues/automation.js'; // v2.908 이슈 자동화 규칙(고정 4개 — 기본 꺼짐) · 저장소 이벤트 구독
 import { startAlertIssues } from './issues/alertIssues.js'; // v2.908 다른 알람 · 백업 실패 → 이슈 자동 등록(기본 꺼짐) — 알람 엔진 · Bareos 틱 구독
@@ -392,6 +396,7 @@ app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다
 // 엣지 쪽은 gzip 을 붙였지만 express.json 의 limit 은 **해제 후 길이**라 한도도 함께 올려야 한다.
 app.use('/api/central/storage-data', BIG_JSON);
 app.use('/api/central/part-faults', BIG_JSON);  // 파트 장애 push(v2.547) — 열린 장애가 많은 법인이 1mb 기본을 넘으면 413 = 조용한 소실
+app.use('/api/central/disk-bad', BIG_JSON);     // 디스크 배드 섹터 이력 push(v3.8.0) — 25대 묶음이라도 첫 점검(전량)은 서버당 기록 수천 건이 될 수 있다(413 = 조용한 소실)
 app.use('/api/central/edge-log-result', BIG_JSON);  // 엣지 로그 폴백 회신(v2.549) — 로그 400줄 × 줄당 최대 2,000자면 1mb 기본을 넘고, 413 은 재시도 대상이 아니라 조용한 소실이 된다
 // 엣지 로그 **연합 조회** 결과(v2.561) — v2.549 가 형제 경로만 등록해 이쪽이 빠져 있었다.
 // 실측: 500행(`checksLogs.js` 의 limit 상한) × vCenter 이벤트 message 1,900자 = 981KB 로 기본 1mb 에 닿고
@@ -612,7 +617,7 @@ upgradeManager.start();
 const stagger = [
   startSelfRegister, // 엣지 자기등록(EDGE_MODE=all) — 중앙 수집 서버 목록에 자동 등록
   startIdracPoller, startIdracScanPoller, startNsxPoller, startAlertEngine, startMetricsSampler, startGpuGuestPoller, startPhysicalGpuPoller,
-  startIpScanPoller, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
+  startIpScanPoller, startIpamChangeNotify, startIpScanAgent, startCollectorPuller, startAgentScanner, startIdracScanWorker, startInventoryPush,
   startGpuGuestPush, startGpuGuestConfigPull, startUsersConfigPull, startPingWorker, startConfigPush, startFleetPush, startBackupScheduler, startLogPoller, startLogQueryWorker, startCaptureWorker, startCaptureMonitor, startLoginMonitor, startGuestScanScheduler, startOsScanner,
   startDbSizeSampler, startPingMonitor, startCertMonitor, startDailyReport, startSvcmonPoller,
   startCapacitySampler, startCapacityPush,   // 리소스 적정성 진단 — 로컬 상시 샘플 + (엣지면) 중앙 push
@@ -620,7 +625,7 @@ const stagger = [
   // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
   startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,
   startSvcmonTrials, // v2.960 시험 점검 엣지 대기 이어 받기(파일에 남은 것만 · 시한이 지났으면 되돌린다) — 없으면 아무것도 하지 않는다
-  startSettingsSyncDetector, // v2.915 Monitoring 설정 연동 — 5분마다 설정 카탈로그를 **읽기만** 해 새 항목·주소 변경·사라짐을 센다(네트워크 왕복 0) · 엣지는 기동하지 않는다
+  startSettingsSyncDetector, // v3.8.0 Monitoring 설정 연동 — 5분마다 설정 카탈로그를 **읽기만** 해 새 항목·주소 변경·사라짐을 센다(네트워크 왕복 0) · 엣지는 기동하지 않는다
   startVmCloneScheduler, // VM 복제(백업식) — 60초 틱, 재진입 가드 + 전역 직렬 실행 큐(runner)
   startVmBackupMail,     // 〃 실패 메일(v2.794) — 1분 틱, 엣지는 기동하지 않는다
   startVmCloneWorker,    // 〃 법인 위임(v2.793) — 엣지가 담당 vCenter 의 잡 정의·작업을 당기고 상태를 올린다. 재진입 가드, CENTRAL_URL 미설정이면 자기기동 안 함
@@ -669,11 +674,12 @@ const stagger = [
   startBmOnboardPull, // 7b 서버 등록 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
   startBmMaintPull, // 8a 정비 창 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
   startBmFoldersPull, // v2.996 물리서버 폴더 사본(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
+  startDiskBadJobs, startDiskBadEdge, // 디스크 배드 섹터 이력(v3.8.0) — 자동 점검은 설정에서 켤 때만 · 엣지 워커는 CENTRAL_URL 미설정이면 자기기동 안 함
   startEdgeLogWorker,
   startBmUsagePoller,
   startLinkCheckPoller,
   startLinkCheckWorker,
-  startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
+  startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, startIpamReport, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startGuestPartMail, // 게스트 파티션 사용률 메일(v2.749) — 엣지는 기동하지 않는다 · 메일 설정이 꺼져 있으면 틱만 돈다
   startVeeamPoller, startVeeamPush, startVeeamConfigPull, startVeeamSnapWarmup, startVeeamSnapCollector, startEmPoller, startLicenseWatch, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함 · 전용 수집기(v2.765)는 로그 수집 주기로 Veeam 계정 이벤트만
   startBareosConfigPull, startBareosOpWorker, // Bareos 법인 Director 엣지 대행(v2.824) — CENTRAL_URL 미설정이면 자기기동 안 함

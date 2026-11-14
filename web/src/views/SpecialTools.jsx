@@ -45,6 +45,7 @@ const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
 const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx'));
 const StorageUsageTool = React.lazy(() => import('./tools/StorageUsageTool.jsx')); // v2.789 스토리지 사용량 보고서
 const PartFaults = React.lazy(() => import('./tools/PartFaults.jsx'));   // 파트 장애(v2.547)
+const DiskBadTool = React.lazy(() => import('./tools/DiskBadTool.jsx'));   // 디스크 배드 섹터 분석(v3.8.0)
 const EdgeLog = React.lazy(() => import('./tools/EdgeLog.jsx'));         // 엣지 로그·진행상태(v2.549)
 const BmUsage = React.lazy(() => import('./tools/BmUsage.jsx'));         // 베어메탈 사용률(v2.550)
 const FocusMonTool = React.lazy(() => import('./tools/FocusMonTool.jsx')); // 집중 모니터링 — 리눅스 서버 실시간 성능 · iostat 비교(v2.976)
@@ -630,6 +631,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'storage-growth' && <StorageGrowthTool />}
       {tool === 'storage-usage' && <StorageUsageTool isAdmin={isAdmin} />}
       {tool === 'part-faults' && <PartFaults />}
+      {tool === 'disk-bad' && <DiskBadTool />}
       {tool === 'edge-log' && <EdgeLog />}
       {tool === 'bm-usage' && <BmUsage />}
       {tool === 'focus-mon' && <FocusMonTool />}

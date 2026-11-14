@@ -13,6 +13,7 @@ import { scanStarted, scanFinished, registerScanResumer, journalFor, isResumePen
 import { numOrNull } from '../util/numOrNull.js';
 import { warmOui } from './macVendor.js'; // v2.999: 제조사 표 미리 읽기
 import { fwdNamesFor } from './scanNames.js'; // v2.993: 정방향 DNS 이름(물리서버 — 라우트 층이 공급)
+import { quietWindowAt, quietText } from './scanQuiet.js'; // v3.7.0: 쉬는 시간(이 포탈의 현지 시각)
 
 // 로컬 폴러가 실제로 스캔할 대역 = __local__ 설정 대역 ∪ enabled인 모든 vCenter 대역(유니크).
 // v2.691: vCenter 별 대역은 수집 에이전트로 옮겨지고(vcRangeMigrate) 옮기지 못한 것만 남는다 — 남은 것은 예전처럼 중앙이 스캔한다.
@@ -63,6 +64,13 @@ async function runScanOnce({ manual = false, resumeOf = null } = {}) {
     recordScanLog({ event: 'skip', trigger, message: '주기 스캔이 꺼져 있습니다(이 포탈 설정 비활성 · 켜진 vCenter 대역 없음).' });
     return { ok: false, reason: '비활성' };
   }
+  // v3.7.0(재설계 묶음 라): 쉬는 시간에 걸린 **주기** 회차는 건너뛴다(끝난 뒤 몰아서 돌리지 않는다). 수동 · 재개는 막지 않는다.
+  const qw = trigger === 'periodic' ? quietWindowAt(s.quiet) : null;
+  if (qw) {
+    lastRun = { at: Date.now(), skipped: '쉬는 시간' };
+    recordScanLog({ event: 'skip', trigger, message: `쉬는 시간(${quietText(qw)} — 이 서버 시각)이라 이번 주기 스캔을 건너뜁니다.` });
+    return { ok: false, reason: '쉬는 시간' };
+  }
   if (!ranges.length) {
     lastRun = { at: Date.now(), skipped: '대역 없음' };
     recordScanLog({ event: 'skip', trigger, message: '스캔할 대역이 없습니다.' });
@@ -81,7 +89,7 @@ async function runScanOnce({ manual = false, resumeOf = null } = {}) {
     // v2.993(설계 bm-folders §13 ③): 정방향 DNS 이름 — 이 포탈이 직접 수집하는 법인의 물리서버 이름(실패하면 없이 — 역방향만).
     const fwdNames = await fwdNamesFor(LOCAL);   // 공급자는 라우트 층이 등록한다(ipam/scanNames.js — 도메인이 routes/ 를 import 하지 않게)
     const { scanned, alive, nameStats } = await runScan(
-      { ranges, ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, mdns: s.mdns, netbios: s.netbios, ping: s.ping, ...(fwdNames.length ? { fwdNames } : {}) },
+      { ranges, ports: s.ports, concurrency: s.concurrency, timeoutMs: s.timeoutMs, reverseDns: s.reverseDns, mdns: s.mdns, netbios: s.netbios, ping: s.ping, dnsConfirm: s.dnsConfirm, dnsConfirmHours: s.dnsConfirmHours, ...(fwdNames.length ? { fwdNames } : {}) },
       { onProgress: (done, total, aliveCount) => { progress = { total, done, alive: aliveCount, startedAt: started }; } },
     );
     mergeScanResults(alive, Date.now(), LOCAL);

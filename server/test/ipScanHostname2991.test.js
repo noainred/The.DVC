@@ -508,7 +508,8 @@ test('⑨ /tools/ipam 호스트명 칸 · VM 행에도 스캔 이름 · 범위 �
   assert.equal(o.scopedHist.scan, null);
   const lines = String(o.csv).trim().split('\n');
   // v2.999: 뒤에 mac_src · mac_vendor 가 붙었다(앞 열 순서 그대로) — mac 은 표시 MAC(ARP > NetBIOS). 이 행은 NetBIOS 만 MAC 을 답했다.
-  assert.equal(lines[0], 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent,hostname_source,name_dns,name_mdns,name_netbios,netbios_group,mac,mac_src,mac_vendor');
+  // v3.2.0: 뒤에 dns_forward · dns_forward_addrs 가 더 붙었다(앞 열 순서 그대로 — 이 행은 역DNS 이름이 없어 빈칸).
+  assert.equal(lines[0], 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent,hostname_source,name_dns,name_mdns,name_netbios,netbios_group,mac,mac_src,mac_vendor,dns_forward,dns_forward_addrs');
   const row = lines.find((l) => l.startsWith('10.250.0.5,'));
-  assert.ok(row && row.endsWith(',netbios,,,WIN-X,WG,00:50:56:00:00:01,netbios,"VMware, Inc."'), row);
+  assert.ok(row && row.endsWith(',netbios,,,WIN-X,WG,00:50:56:00:00:01,netbios,"VMware, Inc.",,'), row);
 });

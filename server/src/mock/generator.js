@@ -638,6 +638,10 @@ export function generateSnapshot() {
         // v2.716: 서비스태그 — 예전엔 없어서 시리얼 조회 'ESXi 호스트' 가 0건이었다. iDRAC 데모 시드(seed.js)와 같은 규칙이라
         //   Dell 호스트는 자기 iDRAC 서버와 태그가 같다(다르면 hostMatch 가 '다른 장비' 로 본다 — v2.682 R3D-04).
         serviceTag: mockServiceTag(`${site.id}|${h.name}`),
+        // v3.6.0(IP 관리 재설계 묶음 다): vmk 주소(관리 · vMotion · 일부 vSAN)와 ESXi 에 설정된 호스트명 — 실수집 soapClient parseVmks · hostDnsName 과 같은 모양.
+        //   mgmtIp 는 싣지 않는다(목 원장 행 수를 바꾸지 않게 — 목 호스트 이름은 IP 가 아니라 원장에 호스트 행이 없다).
+        vmks: mkVmks(site, h.idx),
+        ...mkHostDns(site, h),
         hbas: mkHbas(h.idx, `${site.id}|${h.name}`),
         nics: mkPnics(h.idx, `${site.id}|${h.name}`),   // v2.935(C-③)
         gpus: mkGpus(h.idx, site),
@@ -719,7 +723,7 @@ export function generateSnapshot() {
         memUsagePct,
         ipAddress: powered ? mkIp(site, vm.idx) : null,
         ipAddresses: powered ? mkIps(site, vm.idx) : [],
-        dns: powered ? mkDns(site, vm.idx) : null,   // v2.695: VM 이 쓰는 DNS 서버(IP 대장에는 들어가지 않는다)
+        dns: powered ? mkDns(site, vm.idx, vm.name) : null,   // v2.695: VM 이 쓰는 DNS 서버(IP 대장에는 들어가지 않는다)
         folder: VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length],
         resourcePool: RES_POOLS[(vm.idx * 3) % RES_POOLS.length],
         // v2.820: Bareos 연동용 정확한 위치(vcenter/vmPlacement.js 와 같은 모양) — 데이터센터는 사이트별 1개, 폴더는 위 folder 의 '/' 경로.
@@ -835,6 +839,27 @@ function mkIp(site, idx) {
   const oct = Math.abs(Math.round(site.lat)) % 250;
   return `10.${oct}.${Math.floor(idx / 254) % 254}.${(idx % 253) + 1}`;
 }
+// v3.6.0(호스트명 대조 시연): 게스트 OS 호스트명 — 대부분 VM 이름과 같고, 17대에 1대는 OS 쪽 이름이 다르다(옛 이름). 이름이 없으면 예전 값.
+function guestHostName(name, idx) {
+  const n = String(name || '').toLowerCase();
+  if (!n) return `vm${idx}`;
+  return idx % 17 === 3 ? `${n}-old` : n;
+}
+// v3.6.0: ESXi vmk 주소(목). 관리(vmk0) 는 VM 대역과 겹치지 않는 10.<법인>.250.x, vMotion · vSAN 은 172.20 · 172.21.
+function mkVmks(site, idx) {
+  const oct = Math.abs(Math.round(site.lat)) % 250;
+  const last = (idx % 240) + 10;
+  const out = [{ dev: 'vmk0', ip: `10.${oct}.250.${last}`, mask: '255.255.255.0', pg: 'Management Network' },
+    { dev: 'vmk1', ip: `172.20.${oct}.${last}`, mask: '255.255.255.0', pg: 'vMotion' }];
+  if (idx % 3 === 0) out.push({ dev: 'vmk2', ip: `172.21.${oct}.${last}`, mask: '255.255.255.0', pg: '' });
+  return out;
+}
+// v3.6.0: ESXi 에 설정된 호스트명(목). 대부분 vCenter 이름과 같고, 일부는 옛 이름(대조 '다름' 시연) · 일부는 못 읽음(null).
+function mkHostDns(site, h) {
+  if (h.idx % 13 === 5) return { osHostName: null, osDomain: null };
+  const dom = `${site.id.replace(/^vc-/, '')}.corp.example`;
+  return { osHostName: h.idx % 11 === 4 ? `${h.name}-old` : h.name, osDomain: dom };
+}
 // Some VMs are multi-homed (mgmt + service + storage NIC). Returns 1-3 IPv4s.
 function mkIps(site, idx) {
   const ips = [mkIp(site, idx)];
@@ -844,7 +869,7 @@ function mkIps(site, idx) {
 }
 // v2.695: 게스트가 보고하는 DNS 설정(목). 사내 DNS 는 같은 법인 VM 1·2번의 IP(정체 대조가 VM 으로 찾게),
 //   일부는 공인 DNS·다른 법인 DNS·DHCP·NIC/OS 불일치·미보고(null)로 둔다.
-function mkDns(site, idx) {
+function mkDns(site, idx, name = '') {
   if (idx % 19 === 0) return null;                                   // Tools 가 DNS 를 보고하지 않음(모름)
   const corp = [mkIp(site, 1), mkIp(site, 2)];
   const dom = `${site.id.replace(/^vc-/, '')}.corp.example`;
@@ -853,7 +878,7 @@ function mkDns(site, idx) {
   else if (idx % 41 === 0) servers = ['168.126.63.1', '168.126.63.2'];
   else if (idx % 37 === 0) servers = ['10.0.0.53'];                  // 대장에 없는 주소
   const dhcp = idx % 7 === 0;
-  const stack = { servers, domain: dom, search: [dom, 'corp.example'], dhcp, hostName: `vm${idx}` };
+  const stack = { servers, domain: dom, search: [dom, 'corp.example'], dhcp, hostName: guestHostName(name, idx) };
   const nicServers = idx % 31 === 0 ? [corp[1], '1.1.1.1'] : servers;   // NIC 설정 ≠ OS 실제
   return { servers: [...new Set([...servers, ...nicServers])].slice(0, 8), stack,
     nics: [{ network: 'VM Network', mac: `00:50:56:${(idx >> 8 & 255).toString(16).padStart(2, '0')}:${(idx & 255).toString(16).padStart(2, '0')}:01`,

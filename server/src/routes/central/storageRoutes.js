@@ -138,6 +138,42 @@ export function registerStorageRoutes(centralRouter, deps) {
     // v2.607(감사 EDGE2607-02): 상한으로 버린 파트 수도 돌려준다 — 예전에는 중앙 보관분에만 있어 엣지가 알 수 없었다.
     return res.json({ ok: true, agent, protocol: r.protocol, devices: r.devices, rejected: r.rejected, open: r.open, ...(r.partsOmitted ? { partsOmitted: r.partsOmitted } : {}), centralEnabled: partFaultEnabled().enabled });
   });
+  /**
+   * 디스크 배드 섹터 이력(v3.8.0) — 엣지가 중앙의 점검 작업을 가져간다(claim). 1분마다 GET.
+   * 공유 토큰이면 이름을 고를 수 있으므로 **중앙이 아는 · 등록된 엣지 이름만**(edge-log-result v2.602 · v2.605 와 같은 규칙).
+   */
+  centralRouter.get('/disk-bad-job', requireCentral(), async (req, res) => {
+    const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : (strAgent(req.query?.agent) || strAgent(req.get?.('x-agent-name')));
+    if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+    if (req.centralAuth?.mode !== 'agent' && !edgeNameKnown(agent) && !edgeNameRegistered(agent)) {
+      return res.status(403).json({ ok: false, reason: `중앙이 모르는 엣지 이름(${agent}) — 공유 토큰은 등록된 엣지 이름만 작업을 가져갑니다.`, unverifiedAgent: true });
+    }
+    // 인증 이름 → 수집 서버 등록부 id(조각 · 화면이 쓰는 키). 다르면 그 엣지가 영영 '시작 못 함' 이 된다(diskbad/agentKey.js · 반증 #3).
+    const [{ claimForAgent }, { agentKeyOf }] = await Promise.all([import('../../diskbad/jobs.js'), import('../../diskbad/agentKey.js')]);
+    res.json({ ok: true, agent, job: claimForAgent(agentKeyOf(agent)) });
+  });
+
+  // 디스크 배드 섹터 이력 결과(v3.8.0) — 25대 묶음. 저장 키는 **인증된 agent** 이고, 그 엣지가 가져간(claim) 작업의 보고만 받는다
+  //   (요청하지 않은 보고로 다른 법인 기록을 덮지 못하게). 본문은 정제한다(diskbad/ingest.js — 아는 필드 · 상한 · 시각 자름).
+  // ⚠ BIG_JSON 등록 필수(index.js) — 413 은 그 묶음의 조용한 소실이다.
+  centralRouter.post('/disk-bad', requireCentral(), async (req, res) => {
+    const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
+    if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+    if (req.centralAuth?.mode !== 'agent' && !edgeNameKnown(agent) && !edgeNameRegistered(agent)) {
+      return res.status(403).json({ ok: false, reason: `중앙이 모르는 엣지 이름(${agent}).`, unverifiedAgent: true });
+    }
+    try {
+      const [{ cleanPush }, { acceptPush }, { agentKeyOf }] = await Promise.all([import('../../diskbad/ingest.js'), import('../../diskbad/jobs.js'), import('../../diskbad/agentKey.js')]);
+      const p = cleanPush(req.body);
+      if (!p.ok) return res.status(400).json(p);
+      const r = await acceptPush(agentKeyOf(agent), p);
+      if (!r.ok) return res.status(503).json(r);
+      return res.json({ ...r, agent, omitted: p.omitted });
+    } catch (e) {
+      // async throw 는 express 4 가 잡지 않아 요청이 응답 없이 매달린다(v2.548 S1).
+      return res.status(400).json({ ok: false, reason: `본문 처리 오류: ${String(e?.message || e).slice(0, 200)}` });
+    }
+  });
 
   /**
    * 엣지 로그 폴백 큐(v2.549) — 중앙이 그 엣지에 **닿지 못할 때만** 쓰인다.

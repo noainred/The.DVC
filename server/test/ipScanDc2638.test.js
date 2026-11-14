@@ -171,7 +171,8 @@ test('④ 웹: 귀속 문구 · 입력된 대역 판정 · 붙이기', async () 
   assert.equal(w.coverageOf('10.1.3.0/24', rg), 'full');
   assert.equal(w.coverageOf('10.1.4.0/24', rg), '');
   assert.equal(w.coverageOf('10.1.4.0/24', w.rangesOf(['10.1.4.0-10.1.4.127', '10.1.4.128-10.1.4.255'])), 'full', '겹치지 않는 두 줄의 합');
-  const a = w.appendSubnets(['10.1.3.0/24', ''], ['10.1.3.0/24', '10.1.5.0/24', '10.1.5.0/24']);
-  assert.deepEqual(a.lines, ['10.1.3.0/24', '10.1.5.0/24']); assert.equal(a.added, 1); assert.equal(a.skipped, 2);
+  // v3.6.0: '붙이기'(appendSubnets)는 지웠다 — 담기 화면(ScanRangeAdd)이 가져오기 창과 같은 applyImport 로 넣는다(겹치는 대역은 '중복 대역' 칸 —
+  //   web ipamRedesign360 · vcRangeImportText 시험이 본다). 함수가 되살아나 두 경로가 갈라지지 않게 없음을 고정한다.
+  assert.equal(w.appendSubnets, undefined);
   assert.match(w.suggestSummaryText({ totals: { subnets: 3, vmIps: 1, hostIps: 2, idracIps: 0 }, skipped: { hostsNoIp: 1 }, omitted: 0, subnets: [] }), /이름으로 등록된 ESXi 호스트 1대/);
 });
