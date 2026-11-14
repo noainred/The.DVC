@@ -41,17 +41,25 @@ function normRec(v) {
     keys: Object.freeze((Array.isArray(v.keys) ? v.keys : []).map(normKey).filter(Boolean).slice(0, MAX_INSTALLED_KEYS)),
   });
 }
+// 읽기 오류(권한 · EMFILE 등)는 손상이 아니다 — 원본을 옮기지 않고 캐시하지 않아 다음에 다시 읽는다 · 그동안은 덮어쓰지 않는다(3회차 C3-5 — EACCES 로 원본을 .corrupt 로 옮겼다).
+let readBlocked = false;
 function load() {
   if (cache) return cache;
+  let text;
+  try {
+    if (!fs.existsSync(FILE())) { readBlocked = false; cache = new Map(); return cache; }
+    text = fs.readFileSync(FILE(), 'utf8');
+  } catch { readBlocked = true; loadFailed = true; return new Map(); }
+  if (readBlocked) { readBlocked = false; loadFailed = false; }
   cache = new Map();
   try {
-    if (!fs.existsSync(FILE())) return cache;
-    const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    const j = JSON.parse(text);
     for (const [id, v] of Object.entries(isObj(j?.servers) ? j.servers : {}).slice(0, MAX_SERVERS)) { const sid = t(id, 64); if (sid && isObj(v)) cache.set(sid, normRec(v)); }
   } catch (e) { preserveCorrupt(FILE(), e?.message); loadFailed = true; cache = new Map(); }
   return cache;
 }
 function persist(next) {
+  if (readBlocked) return { ok: false, code: 'read-failed', status: 503, reason: '서버에서 읽은 키 기록 파일을 지금 읽지 못해 덮어쓰지 않았습니다(다음에 다시 읽습니다).' };
   try {
     fs.mkdirSync(path.dirname(FILE()), { recursive: true });
     atomicWriteFileSync(FILE(), JSON.stringify({ servers: Object.fromEntries(next) }), { mode: 0o600 });
@@ -59,7 +67,7 @@ function persist(next) {
   cache = next; loadFailed = false;
   return { ok: true };
 }
-export function _resetInstalledForTest() { cache = null; loadFailed = false; }
+export function _resetInstalledForTest() { cache = null; loadFailed = false; readBlocked = false; }
 export function installedLoadFailed() { load(); return loadFailed; }
 
 export function noteInstalled(serverId, rec = {}, { now = Date.now() } = {}) {

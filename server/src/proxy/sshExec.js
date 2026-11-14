@@ -234,7 +234,8 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
             const list = Array.isArray(prompts) ? prompts : [];
             // 가리는 칸 가운데 비밀번호를 묻는 글이 있는 칸을 먼저, 없으면 OTP · 코드 류가 아닌 가리는 칸(2회차 반증 R2R-11 — 가리는 OTP 칸에 비밀번호가 갔다).
             const hidden = list.map((p, i) => ({ i, text: String(p?.prompt ?? '').slice(0, 300), hid: !!p && p.echo === false })).filter((x) => x.hid);
-            const pick = hidden.find((x) => PW_PROMPT_RE.test(x.text)) || hidden.find((x) => !OTP_PROMPT_RE.test(x.text));
+            // 1순위는 ‘비밀번호 글이 있고 OTP 글이 없는’ 칸(3회차 B3-3 — ‘One-time password’ · ‘Token password’ 같은 OTP 칸에 넣었다).
+            const pick = hidden.find((x) => PW_PROMPT_RE.test(x.text) && !OTP_PROMPT_RE.test(x.text)) || hidden.find((x) => !OTP_PROMPT_RE.test(x.text) && !PW_PROMPT_RE.test(x.text));
             const at = answered || !pick ? -1 : pick.i;
             if (at >= 0) { answered = true; noPwMethod = ''; }   // 앞 질의가 OTP 만 물었어도 이번에 비밀번호를 보냈다 — 거부면 거부다
             else if (!answered && list.length > 0) noPwMethod = '서버의 대화형 로그인이 비밀번호 칸(입력을 가리는 칸)을 묻지 않았습니다(OTP 등만 물음) — 비밀번호를 보내지 않았습니다';

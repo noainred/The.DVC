@@ -132,7 +132,9 @@ function commit(next) {
   cache = normed;
   loadErr.clear();
   if (lost.length) console.warn(`[ssh-access] 사건 ${lost.length}건이 기록 상한(${MAX_EVENTS})에 밀려 남지 않았습니다 — 메일에는 수로 밝힙니다.`);
-  if (sent.length || lost.length) for (const fn of listeners) { try { fn(sent, { lost }); } catch { /* 알림 실패는 쓰기 결과를 바꾸지 않는다 */ } }
+  if (!listeners.size) {
+    if (sent.length || lost.length) { early = early.concat(sent); earlyLost = earlyLost.concat(lost); if (early.length > EARLY_MAX) { earlyLost = earlyLost.concat(early.slice(0, early.length - EARLY_MAX)); early = early.slice(-EARLY_MAX); } earlyLost = earlyLost.slice(-1000); }
+  } else if (sent.length || lost.length) for (const fn of listeners) { try { fn(sent, { lost }); } catch { /* 알림 실패는 쓰기 결과를 바꾸지 않는다 */ } }
   return { ok: true };
 }
 
@@ -163,7 +165,25 @@ export function listStops() { const d = load(); return d ? Object.entries(d.stop
 
 /** 사건이 **파일에 쓰인 뒤** 불리는 알림(메일 등 — sshaccess/notify.js). 듣는 쪽 오류는 삼킨다(사건 기록을 막지 않는다). */
 const listeners = new Set();
-export function onEvents(fn) { if (typeof fn === 'function') listeners.add(fn); return () => listeners.delete(fn); }
+// 듣는 쪽이 붙기 전(기동 뒤 알림이 붙기까지 — 3회차 C3-2: 그 사이 긴급 중지 사건이 메일이 되지 않았다)의 사건은 상한 있게 모아 두었다가 처음 붙는 쪽에 넘긴다.
+const EARLY_MAX = 200;
+let early = []; let earlyLost = [];
+export function onEvents(fn) {
+  if (typeof fn !== 'function') return () => {};
+  listeners.add(fn);
+  if (early.length || earlyLost.length) {
+    const sent = early; const lost = earlyLost; early = []; earlyLost = [];
+    queueMicrotask(() => { try { fn(sent, { lost }); } catch { /* 알림 실패는 기록을 바꾸지 않는다 */ } });
+  }
+  return () => listeners.delete(fn);
+}
+/** 쓰지 못하고 버린 사건을 알림 쪽에 수로만 넘긴다(메일 ‘외 N건’ — 3회차 C3-3). */
+export function reportLostEvents(list) {
+  const lost = (Array.isArray(list) ? list : []).filter((e) => e && typeof e === 'object');
+  if (!lost.length) return;
+  if (!listeners.size) { earlyLost = earlyLost.concat(lost).slice(-1000); return; }
+  for (const fn of listeners) { try { fn([], { lost }); } catch { /* */ } }
+}
 let pendingNotify = [];
 let pendingLost = [];   // 이번 쓰기에서 기록 상한에 밀려 남지 못한 새 사건(2회차 반증 R2R-10 — 기록 · 메일 수에서 말없이 빠졌다)
 function pushEvents(d, list, now) {

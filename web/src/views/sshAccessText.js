@@ -397,7 +397,8 @@ export function guardFailText(body, reason = '') {
 export function guardOffRuleText(guards, { authOff = false } = {}) {
   const g = guards && typeof guards === 'object' ? guards : {};
   // 인증을 끈 설치(twoPerson 켬 · twoPersonActive 거짓)는 두 사람 승인이 적용되지 않는다 — 끄는 변경도 승인 없이 바로 꺼진다(2회차 E2-2 — 예전에는 ‘혼자 끌 수 없음’ 이라고 반대로 말했다).
-  if (authOff && !g.unreadable) return '이 설치는 로그인(인증)이 꺼져 있어 두 사람 승인이 적용되지 않습니다 — 끄는 변경도 다른 소유자의 승인 없이 바로 꺼집니다(켜는 변경도 바로 적용됩니다).';
+  // 인증이 꺼진 설치는 보호 장치를 끄지 못한다(3회차 A3-1 — 익명이 끈 것이 인증을 다시 켠 뒤에도 남았다). 켜기는 된다.
+  if (authOff && !g.unreadable) return '이 설치는 로그인(인증)이 꺼져 있어 보호 장치를 끌 수 없습니다(켜기는 됩니다) — 누가 껐는지 가를 수 없고, 인증을 다시 켠 뒤에도 꺼진 채 남기 때문입니다.';
   const head = '두 사람 승인이 켜져 있으면 끄는 변경은 승인할 수 있는 다른 설정 소유자(관리자 역할 · 전체 범위 · 로그인 수단)의 승인을 거쳐 꺼집니다(켜는 변경은 바로 적용됩니다).';
   if (g.unreadable) return `${head} 상태 파일을 읽지 못해 지금은 바꿀 수 없습니다.`;
   if (g.pairSeen === true) return `${head} 이 포탈은 승인할 수 있는 설정 소유자 둘을 확인한 적이 있어, 승인할 다른 소유자가 없어져도 혼자 끌 수 없습니다 — 다른 소유자가 다시 승인할 수 있게 한 뒤 그 사람이 승인해야 합니다.`;
@@ -485,7 +486,7 @@ export function stopDoneText(r, corpLabel = '') {
   if (r?.already === true) {
     const added = finiteNum(r?.added);
     if (added > 0) return `${corpLabel} — 이미 키 사용이 중지돼 있습니다. 그 뒤 등록된 서버 ${added}대를 중지 기록에 더했습니다(사건은 다시 쓰지 않았습니다).`;
-    if (r?.reason && /더하지 못했습니다/.test(String(r.reason))) return `${corpLabel} — ${String(r.reason)}`;
+    if (r?.addFailed === true) return `${corpLabel} — 이미 키 사용이 중지돼 있지만, 그 뒤 등록된 서버를 중지 기록에 더하지 못했습니다(상태 파일 쓰기 실패 — ${String(r?.reason || '사유를 받지 못함')}).`;
     return `${corpLabel} — 이미 키 사용이 중지돼 있습니다(기록을 다시 쓰지 않았습니다).`;
   }
   const head = `${corpLabel} — 키 사용을 중지했습니다`;

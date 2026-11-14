@@ -82,22 +82,26 @@ function norm(j) {
   if (j.requests !== undefined && !Array.isArray(j.requests)) throw new ShapeError('requests 가 배열이 아닙니다');
   return { requests: (j.requests || []).map(normReq) };
 }
+// 앞 실패가 읽기 오류였는가(손상이 아님) — 그 뒤 파일이 없어졌으면(손상 보존본도 없음) 표지를 지운다(3회차 C3-6 — 재시작 전까지 503 이 남았다).
+let lastReadErr = false;
 function load() {
   if (cache) return cache;
   let text = null;
   try { if (fs.existsSync(FILE())) text = fs.readFileSync(FILE(), 'utf8'); }
-  catch (e) { loadErr.set(`읽기 실패(${String(e?.code || e?.message || e).slice(0, 40)})`); return null; }
+  catch (e) { loadErr.set(`읽기 실패(${String(e?.code || e?.message || e).slice(0, 40)})`); lastReadErr = true; return null; }
   if (text == null) {
+    if (lastReadErr) { loadErr.clear(); lastReadErr = false; }
     loadErr.checkCorruptOnly(FILE());
     if (loadErr.get()) return null;
     cache = { requests: [] };
     return cache;
   }
+  lastReadErr = false;
   try { cache = norm(JSON.parse(text)); loadErr.clear(); }
   catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); cache = null; return null; }
   return cache;
 }
-export function _resetApprovalsForTest() { cache = null; loadErr.clear(); }
+export function _resetApprovalsForTest() { cache = null; loadErr.clear(); lastReadErr = false; }
 export function approvalsLoadError() { load(); return loadErr.get(); }
 const unreadable = () => {
   load();

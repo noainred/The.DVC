@@ -446,7 +446,10 @@ export function setKeyPassphrase(id, passphrase, { now = Date.now() } = {}) {
 export function activateKey(id, { fingerprint = '' } = {}) {
   const u = unreadable(); if (u) return u;
   const d = draft();
-  const k = d.keys.find((x) => x.id === t(id, 32));
+  // id 로 못 찾으면 요청의 지문과 같은 **승인 대기** 키 하나를 쓴다(3회차 D3-3 — 백업 복원이 같은 키의 id 를 번들 id 로 바꾸면 요청이 가리키는 id 가 사라져 대기 키가 요청 없이 남았다).
+  //   지문이 같은 대기 키가 둘 이상이면 고르지 않는다(모호).
+  let k = d.keys.find((x) => x.id === t(id, 32));
+  if (!k && t(fingerprint, 80)) { const same = d.keys.filter((x) => x.status === 'pending' && x.fingerprint === t(fingerprint, 80)); if (same.length === 1) k = same[0]; }
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다(요청 뒤 지워졌습니다).' };
   if (k.status !== 'pending') return { ok: false, code: 'not-pending', status: 409, reason: '승인 대기 상태의 키가 아닙니다.' };
   if (t(fingerprint, 80) !== k.fingerprint) return { ok: false, code: 'fingerprint-changed', status: 409, reason: '요청 때의 키와 지문이 다릅니다 — 승인하지 않았습니다.' };

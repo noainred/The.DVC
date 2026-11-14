@@ -1134,7 +1134,7 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
       // 중지는 엣지 서버 수 · 등록부를 못 읽어 법인으로만 걸렸는지를 그대로 알린다(stopDoneText — 점검 E-8).
       if (r?.pending) say(pendingText(r, { what: `${corpName(stopF.corp)} 키 사용 재개`, then: '재개됩니다' }), pendingTone(r));
       else if (resume) say(`${corpName(stopF.corp)} — 키 사용을 재개했습니다.`, 'ok');
-      else say(stopDoneText(r, corpName(stopF.corp)), r?.registryUnreadable ? 'bad' : r?.already ? (r?.added > 0 ? 'warn' : /더하지 못했습니다/.test(String(r?.reason || '')) ? 'bad' : 'muted') : 'warn');
+      else say(stopDoneText(r, corpName(stopF.corp)), r?.registryUnreadable ? 'bad' : r?.already ? (r?.addFailed ? 'bad' : r?.added > 0 ? 'warn' : 'muted') : 'warn');
       setStopF({ corp: '', reason: '', otp: '' }); reload(); loadChg();
     } catch (e) { say(errText(e), 'bad'); setStopF((x) => ({ ...x, otp: '' })); } finally { setBusy(false); }
   };
@@ -1168,7 +1168,7 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
         ))}</ul>
       </section>
       <section className="ssa-sec">
-        <div className="ssa-acts"><h4>승인 대기 — {v.approvalsUnreadable ? '읽지 못함' : `${apprPending.length}건`}</h4><span className="ssa-sub">{authOff ? '이 설치는 인증이 꺼져 있어 두 사람 승인이 적용되지 않습니다' : '두 사람 승인 — 요청한 사람이 아닌 설정 소유자가 본인 OTP 로 승인해야 실행됩니다'} · 남은 시간은 화면을 읽은 시각({dateTime(v.at)}) 기준</span></div>
+        <div className="ssa-acts"><h4>승인 대기 — {v.approvalsUnreadable ? '읽지 못함' : `${apprPending.length}건`}</h4><span className="ssa-sub">{authOff ? '이 설치는 인증이 꺼져 있어 승인 · 돌려보내기를 받지 않습니다(남은 요청은 시한이 지나면 사라집니다)' : '두 사람 승인 — 요청한 사람이 아닌 설정 소유자가 본인 OTP 로 승인해야 실행됩니다'} · 남은 시간은 화면을 읽은 시각({dateTime(v.at)}) 기준</span></div>
         {v.approvalsUnreadable && <p className="ssa-banner" style={{ color: toneVar('bad') }}>승인 기록 파일(approvals.json)을 읽지 못해 요청 · 승인을 받지 않습니다 — 손상 보존본(approvals.json.corrupt.*)을 확인하세요. 아래 목록은 비어 있는 것이 아니라 읽지 못한 것입니다.</p>}
         {!v.approvalsUnreadable && (
           <STable minWidth={820} className="ssa-t ssa-appr">
@@ -1233,7 +1233,7 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
       </section>
       <section className="ssa-sec">
         <div className="ssa-acts"><h4>보호 장치</h4><span className="ssa-sub">전 법인 공통 설정 · 바꾸려면 본인 OTP{authOff ? '(이 설치는 인증이 꺼져 있어 OTP 를 묻지 않습니다)' : ''}</span></div>
-        {authOff && <p className="ssa-banner" style={{ color: toneVar('warn') }}>이 설치는 로그인(인증)을 꺼 두었습니다 — 두 사람 승인과 본인 OTP 가 적용되지 않습니다. 이 화면의 쓰기는 다른 사람의 승인 · OTP 확인 없이 바로 실행됩니다.</p>}
+        {authOff && <p className="ssa-banner" style={{ color: toneVar('warn') }}>이 설치는 로그인(인증)을 꺼 두었습니다 — 두 사람 승인과 본인 OTP 가 적용되지 않습니다. 이 화면의 쓰기는 다른 사람의 승인 · OTP 확인 없이 바로 실행됩니다. 다만 보호 장치 끄기와 승인 · 돌려보내기는 받지 않습니다(누가 했는지 가를 수 없고, 인증을 다시 켠 뒤에도 남기 때문입니다).</p>}
         {g.unreadable && <p className="ssa-banner" style={{ color: toneVar('bad') }}>상태 파일을 읽지 못해 보호 장치를 모두 켠 것으로 봅니다 — 지금은 바꿀 수 없습니다(먼저 아래에서 상태 파일을 다시 읽으세요).</p>}
         {!g.unreadable && !guardsKnown && <p className="ssa-banner" style={{ color: toneVar('bad') }}>보호 장치 설정을 받지 못했습니다 — 켬 · 끔을 모릅니다(다시 읽기를 누르세요).</p>}
         <ul className="ssa-guards">
@@ -1254,7 +1254,7 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
             </li>
           ))}
         </ul>
-        {gdiff.off.length > 0 && <p className="ssa-note" style={{ color: toneVar('warn') }}>{guardOffRuleText(g, { authOff })}{gdiff.off.includes('twoPerson') ? ` 두 사람 승인을 끄면 ${TWO_PERSON_TARGETS}가 다른 소유자의 승인 없이 ${authOff ? '바로' : '본인 OTP 만으로'} 실행됩니다.` : ''}{gdiff.off.includes('serverRestrict') ? ' 서버 쪽 제한을 끄면 앞으로 넣는 키 줄에 출발지 제한 · 포워딩 금지가 붙지 않습니다(이미 넣은 줄은 그대로).' : ''}</p>}
+        {gdiff.off.length > 0 && <p className="ssa-note" style={{ color: toneVar('warn') }}>{guardOffRuleText(g, { authOff })}{!authOff && gdiff.off.includes('twoPerson') ? ` 두 사람 승인을 끄면 ${TWO_PERSON_TARGETS}가 다른 소유자의 승인 없이 본인 OTP 만으로 실행됩니다.` : ''}{!authOff && gdiff.off.includes('serverRestrict') ? ' 서버 쪽 제한을 끄면 앞으로 넣는 키 줄에 출발지 제한 · 포워딩 금지가 붙지 않습니다(이미 넣은 줄은 그대로).' : ''}</p>}
         {guardReq && <p className="ssa-note" style={{ color: toneVar('warn') }}>보호 장치 끄기 요청이 승인을 기다리고 있습니다 — {guardReq.title || '보호 장치 끄기'} · 요청 {guardReq.requestedBy || '—'}. 위 ‘승인 대기’ 에서 처리합니다.</p>}
         <div className="ssa-form ssa-inline">
           <Otp value={gOtp} onChange={setGOtp} />

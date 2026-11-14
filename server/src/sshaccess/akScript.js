@@ -73,8 +73,9 @@ const HEAD = [
   'me=$(uname -n 2>/dev/null); [ -z "$me" ] || me="$me/$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)/$(readlink /proc/self/ns/pid 2>/dev/null)"',
   'tok="$me:$$:$(date +%s 2>/dev/null)"',
   // 자기 시한(2회차 B1 — SCRIPT_DEADLINE_S): date 를 못 쓰는 서버(시각이 숫자가 아님)는 시한 없이 돈다.
-  't0=$(date +%s 2>/dev/null); case "$t0" in ""|*[!0-9]*) t0=0 ;; esac',
-  `late() { [ "$t0" -gt 0 ] || return 1; tn=$(date +%s 2>/dev/null); case "$tn" in ""|*[!0-9]*) return 1 ;; esac; [ "$tn" -gt $((t0 + ${SCRIPT_DEADLINE_S})) ]; }`,
+  // 시각 칸은 숫자만 · 앞 0 없음 · 12자리까지(3회차 B3-2 — 20자리 · ‘08’ 같은 값을 산술에 넣으면 dash · bash 가 죽어 자물쇠가 남았다).
+  't0=$(date +%s 2>/dev/null); case "$t0" in ""|0*|*[!0-9]*|?????????????*) t0=0 ;; esac',
+  `late() { [ "$t0" -gt 0 ] || return 1; tn=$(date +%s 2>/dev/null); case "$tn" in ""|0*|*[!0-9]*|?????????????*) return 1 ;; esac; [ "$tn" -gt $((t0 + ${SCRIPT_DEADLINE_S})) ]; }`,
   'owns() { [ "$(cat "$lk/owner" 2>/dev/null)" = "$tok" ]; }',
   'cleanup() { rm -f "$tmp"; if [ -n "$held" ] && owns; then rm -f "$lk/owner"; rmdir "$lk" 2>/dev/null; fi; }',
   'trap cleanup 0; trap \'exit 3\' HUP INT TERM PIPE',
@@ -90,7 +91,7 @@ const HEAD = [
  * 읽기(분류)부터 mv 까지 잡는다. 사람 · 다른 도구는 이 자물쇠를 모른다 — 그래서 mv 직전에 원본을 다시 대조하고 mv 뒤에 다시 본다(post).
  */
 const LOCK = [
-  'i=0; nf=0; nos=""',
+  'i=0; nf=0; nos=""; nob=""',
   'while :; do',
   '  if mkdir "$lk" 2>/dev/null; then',
   // 주인 표를 못 쓰면(디스크 가득 등) 자물쇠를 남기지 않고 사유를 가른다(1회차 반증 6 — 빈 표가 든 자물쇠가 남고 ‘관리자가 잠가 둠’ 이라고 했다).
@@ -109,13 +110,16 @@ const LOCK = [
   '    continue',
   '  fi',
   '  i=$((i + 1)); if [ "$i" -ge 15 ] || late; then echo "##KL fail locked"; exit 3; fi',
-  '  o=$(cat "$lk/owner" 2>/dev/null); stale=""; now=$(date +%s 2>/dev/null); case "$now" in ""|*[!0-9]*) now=0 ;; esac',
+  '  o=$(cat "$lk/owner" 2>/dev/null); stale=""; now=$(date +%s 2>/dev/null); case "$now" in ""|0*|*[!0-9]*|?????????????*) now=0 ;; esac',
   '  if [ -n "$o" ]; then',
   '    nos=""',
   '    ot=${o##*:}; r=${o%:*}; op=${r##*:}; oh=${r%:*}',
   '    case "$op" in ""|*[!0-9]*) op="" ;; esac',
-  '    if [ -n "$me" ] && [ -n "$op" ] && [ "$oh" = "$me" ] && ! kill -0 "$op" 2>/dev/null; then stale=1; fi',
-  '    case "$ot" in ""|*[!0-9]*) ;; *) if [ "$now" -gt $((ot + 600)) ]; then stale=1; fi ;; esac',
+  '    sh1=""; if [ -n "$me" ] && [ -n "$op" ] && [ "$oh" = "$me" ]; then sh1=1; fi',
+  '    if [ -n "$sh1" ] && ! kill -0 "$op" 2>/dev/null; then stale=1; fi',
+  // 다른 호스트인데 표의 시각을 읽을 수 없으면(꼴이 틀림) 시각 규칙을 쓸 수 없다 — 주인 표 없음과 같이 처음 본 때부터 5초(3회차 B3-2 — 영원히 locked 였다).
+  //   살아 있는 주인이었다면 그쪽은 mv 직전 `owns` 에서 locklost 로 멈춘다(바꾸지 않음).
+  '    case "$ot" in ""|0*|*[!0-9]*|?????????????*) if [ -z "$sh1" ]; then [ -n "$nob" ] || nob=$now; if [ "$now" -ge $((nob + 5)) ]; then stale=1; fi; fi ;; *) nob=""; if [ "$now" -gt $((ot + 600)) ]; then stale=1; fi ;; esac',
   // 주인 표가 없는 자물쇠: **처음 본 때부터** 5초(1회차 반증 7 ② — 대기자 자신의 대기 횟수로 재서, 막 만든 자물쇠를 치웠다).
   '  else',
   '    [ -n "$nos" ] || nos=$now',
@@ -194,7 +198,7 @@ const COMMIT = [
 export function installScript({ publicKey, keyId, line, replace = false } = {}) {
   const pk = splitPublicKey(publicKey); const mark = markOf(keyId);
   if (!pk || !mark || !safeQ(line) || !line.includes(` ${pk.blob} `) || !line.endsWith(` ${mark}`)) return null;
-  const CLS = `${STRIP} index(t, b) == 0 { next } index(t, m) > 0 { if (t == L) ex++; else if (index(t, ty " ") == 1) un++; else if (t ~ /^from="[0-9A-Fa-f.:]+",no-agent-forwarding,no-port-forwarding,no-X11-forwarding /) sd++; else cu++; next } { um++ } END { printf "%d %d %d %d %d %d", NR, ex + 0, un + 0, sd + 0, cu + 0, um + 0 }`;
+  const CLS = `${STRIP} index(t, b) == 0 { next } index(t, m) > 0 { if (t == L) ex++; else if (index(t, ty " ") == 1) un++; else if (t ~ /^from="[0-9A-Fa-f.:]+",no-agent-forwarding,no-port-forwarding,no-X11-forwarding /) sd++; else cu++; next } index(t, pm) > 0 { oi++; next } { um++ } END { printf "%d %d %d %d %d %d %d", NR, ex + 0, un + 0, sd + 0, cu + 0, um + 0, oi + 0 }`;
   const OLD = `${STRIP} index(t, b) > 0 && index(t, m) > 0 { print $0 }`;
   const DROPM = `${STRIP} index(t, b) > 0 && index(t, m) > 0 { next } { print }`;
   return [
@@ -203,12 +207,13 @@ export function installScript({ publicKey, keyId, line, replace = false } = {}) 
     ...CHECKS(true),
     'cls() {',
     '  st="0 0 0 0 0 0"',
-    `  if [ -e "$f" ]; then st=$(awk -v b="$B" -v m="$M" -v L="$L" -v ty="$TY" '${CLS}' "$f") || { echo "##KL fail read"; exit 3; }; fi`,
-    '  set -- $st; nr=$1; ex=$2; un=$3; sd=$4; cu=$5; um=$6',
+    `  if [ -e "$f" ]; then st=$(awk -v b="$B" -v m="$M" -v L="$L" -v ty="$TY" -v pm=" ${PORTAL_MARK}k_" '${CLS}' "$f") || { echo "##KL fail read"; exit 3; }; fi`,
+    '  set -- $st; nr=$1; ex=$2; un=$3; sd=$4; cu=$5; um=$6; oi=$7',
     '  act=add',
     '  if [ $((ex + un + sd + cu)) -gt 0 ]; then',
-    '    if [ "$cu" -eq 0 ] && [ "$RP" = 1 ] && [ $((un + sd)) -gt 0 ]; then act=replace; else echo "##KL present-marked $um $cu $ex $((un + sd))"; exit 0; fi',
-    '  elif [ "$um" -gt 0 ]; then echo "##KL present-unmarked $um 0"; exit 0',
+    '    if [ "$cu" -eq 0 ] && [ "$RP" = 1 ] && [ $((un + sd)) -gt 0 ]; then act=replace; else echo "##KL present-marked $um $cu $ex $((un + sd)) $oi"; exit 0; fi',
+    // 다른 키 id 로 포탈이 넣은 같은 공개키 줄(oi — 지웠다 다시 등록한 키의 옛 줄)은 사람 줄이 아니다(3회차 B3-4 — 넣기는 ‘사람이 넣은 줄’ 로, 거두기는 포탈 줄로 셌다). 이미 그 키로 접속되므로 더하지 않는다.
+    '  elif [ $((um + oi)) -gt 0 ]; then echo "##KL present-unmarked $um 0 0 0 $oi"; exit 0',
     '  fi',
     '}',
     // 바꿀 것이 없으면(이미 있음) 자물쇠 없이 끝난다 — 쓸 수 없는 ~/.ssh(root 소유)에서도 ‘있음’ 으로 답한다(1회차 축 B 재확인). 바꿀 것이 있으면 자물쇠 안에서 다시 판정한다.
@@ -235,7 +240,7 @@ export function installScript({ publicKey, keyId, line, replace = false } = {}) 
     `post() { n=$(awk -v L="$L" '${STRIP} t == L { c++ } END { print c + 0 }' "$f") && [ "$n" -ge 1 ]; }`,
     'tailn=1',
     ...COMMIT,
-    'if [ "$act" = replace ]; then echo "##KL replaced $um 0 $old"; else echo "##KL added $um 0"; fi',
+    'if [ "$act" = replace ]; then echo "##KL replaced $um 0 $old $oi"; else echo "##KL added $um 0 0 0 $oi"; fi',
   ].join('\n');
 }
 
@@ -329,8 +334,8 @@ export function parseMarker(stdout) {
   const w = last.split(' ');
   if (w[1] === 'begin' || w[1] === 'commit') return { kind: 'begun' };   // 시작했는데(또는 바꾸기 직전인데) 끝 표지가 없다 — 결과 모름(B5 · 2회차 반증 R2R-3)
   if (w[1] === 'ip') return { kind: 'ip', ip: IP_RE.test(w[2] || '') ? w[2] : '' };
-  if (w[1] === 'added' || w[1] === 'present-marked' || w[1] === 'present-unmarked') return { kind: w[1], unmarked: num(w[2]), custom: num(w[3]), exact: num(w[4]), loose: num(w[5]) };
-  if (w[1] === 'replaced') return { kind: 'replaced', unmarked: num(w[2]), custom: num(w[3]), old: w[4] && B64_RE.test(w[4]) && w[4].length <= MAX_OLD_B64 ? w[4] : null };
+  if (w[1] === 'added' || w[1] === 'present-marked' || w[1] === 'present-unmarked') return { kind: w[1], unmarked: num(w[2]), custom: num(w[3]), exact: num(w[4]), loose: num(w[5]), otherId: num(w[6]) };
+  if (w[1] === 'replaced') return { kind: 'replaced', unmarked: num(w[2]), custom: num(w[3]), old: w[4] && B64_RE.test(w[4]) && w[4].length <= MAX_OLD_B64 ? w[4] : null, otherId: num(w[5]) };
   if (w[1] === 'restored') return { kind: 'restored', removed: num(w[2]) };
   if (w[1] === 'none') return { kind: 'none' };
   if (w[1] === 'removed') return { kind: 'removed', removed: num(w[2]), unmarked: num(w[4]) };

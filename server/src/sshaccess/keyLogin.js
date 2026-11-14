@@ -103,11 +103,22 @@ const unknownOutcome = (r) => (!r.ok && r.sent) || (r.ok && (r.value.kind === 'n
 /** 바꾸는 명령을 보낸 뒤 답을 못 받았을 때 — ‘바꾼 것 없음’ 이라고 하지 않는다. */
 const UNCERTAIN_TAIL = ' 바꾸는 명령은 서버에 보냈지만 결과를 받지 못했습니다 — 서버의 authorized_keys 가 바뀌었을 수 있습니다. ‘서버에 들어 있는 키 다시 읽기’ 로 확인하세요(포탈의 서버 설정은 바꾸지 않았습니다).';
 
+/**
+ * 1회 비밀번호를 보낼 계정 이름. 공통 계정을 쓰는 서버인데 그 계정을 확인할 수 없으면(바뀜 · 없음) 이름을 짐작하지 않는다
+ * (3회차 C 참고 D-5 — 서버 칸 · root 로 넘어가 엉뚱한 계정에 비밀번호를 보내고 그 계정의 실패 기록을 남겼다).
+ */
+export function onceUsername(server) {
+  const r0 = REFS.resolveOsAuth({ ...server, keyRef: '', osAuth: 'password' }, { feature: 'conn-test' });
+  if (r0.ok) return { ok: true, username: r0.username };
+  if (t(server.credRef)) return { ok: false, code: r0.code || 'auth-unresolved', reason: `${r0.error || '공통 계정을 확인하지 못했습니다'} — 접속 계정을 정할 수 없어 이번 한 번만 쓸 비밀번호를 보내지 않았습니다.` };
+  return { ok: true, username: t(server.username) || 'root' };
+}
 /** 지금 되는 접속(첫 접속에 쓴다) — 1회 비밀번호가 있으면 그것, 없으면 저장된 자격. */
 function firstLegAuth(server, oncePassword, installingKeyId = '') {
   if (oncePassword) {
-    const r0 = REFS.resolveOsAuth({ ...server, keyRef: '', osAuth: 'password' }, { feature: 'conn-test' });
-    return { ok: true, username: r0.ok ? r0.username : (t(server.username) || 'root'), password: oncePassword, authKind: 'password-once' };
+    const u = onceUsername(server);
+    if (!u.ok) return u;
+    return { ok: true, username: u.username, password: oncePassword, authKind: 'password-once' };
   }
   const r = REFS.resolveOsAuth(server, { feature: 'conn-test' });
   // 서버에 설정된 키가 **지금 넣으려는 그 키** 면(공통 계정의 기본 키로 정해 두고 서버에 넣는 흐름) 그 키는 아직 서버에 없을 수 있다 —
@@ -188,29 +199,20 @@ export async function installOne(server, key, o = {}) {
   const replaced = m.kind === 'replaced';
   const notes = [];
   if (m.unmarked > 0) notes.push(`표식 없는 같은 키 줄 ${m.unmarked}개가 서버에 있습니다(사람이 넣은 줄 — 포탈은 건드리지 않습니다)${o.restrict ? ' — 그 줄은 출발지 제한이 없으니 서버에서 직접 정리하세요' : ''}.`);
+  if (m.otherId > 0) notes.push(`같은 공개키를 다른 키 id 로 포탈이 넣은 줄 ${m.otherId}개가 서버에 있습니다(지웠다 다시 등록한 키의 옛 줄 — 이 키를 거두면 함께 지워집니다)${o.restrict ? ' — 그 줄의 제한 여부는 포탈이 판정하지 않습니다' : ''}.`);
   if (m.custom > 0) notes.push(`관리자가 옵션을 바꾼 포탈 줄 ${m.custom}개는 그대로 두었습니다(제한을 다시 넣지 않았습니다 — 그 줄의 제한 여부는 포탈이 판정하지 않습니다).`);
   const replaceSkipped = m.kind === 'present-marked' && !!o.restrict && firstIsKey && m.loose > 0;
   if (replaceSkipped) notes.push('제한 없는 포탈 줄이 있지만 지금 그 키로만 접속돼 제한 줄로 바꾸지 않았습니다(확인이 실패하면 되돌릴 길이 없습니다) — 이번 한 번만 쓸 비밀번호를 넣고 다시 하면 바꿉니다.');
 
-  // ② 끊고 그 키로 다시 접속해 확인한다.
-  // 출력도 본다(2회차 B6 — 강제 명령(command=) 줄이면 exec 는 성공하지만 우리 명령은 돌지 않는다: 그런 키에 서버를 묶고 저장 비밀번호까지 지웠다).
-  //   이번 접속에만 쓰는 글자(nonce)를 되돌려 받아야 ‘명령을 돌릴 수 있는 키’ 다 — 로그인 메시지가 섞여도 그 줄을 찾는다(셸과 무관하게 /bin/sh 로 싼다).
-  const nonce = crypto.randomBytes(6).toString('hex');
-  const step2 = await sshRun(server, kAuth, async (run) => {
-    const u = await run(AK.wrapSh(`echo "##KLV ${nonce} $(uname -s 2>/dev/null)"`));
-    const hit = String(u?.stdout ?? '').slice(-200_000).split('\n').map((x) => x.trim()).find((x) => x.startsWith(`##KLV ${nonce}`));
-    if (!hit) { const e = new Error(KEY_UNUSABLE_TEXT); e.code = 'key-login-unusable'; throw e; }
-    let read = null;
-    try { read = parseReadOutput((await run(READ_COMMAND))?.stdout || ''); } catch { read = null; }
-    return { uname: t(hit.slice(`##KLV ${nonce}`.length).trim(), 40), read };
-  }, { execs: 2 });
-  noteKeyUse({ fingerprint: key.fingerprint, keyName: key.name, server: base.name, corp: base.corp, feature: 'conn-test', ok: step2.ok, code: step2.ok ? 'ok' : step2.code, trigger: 'manual', by: o.by });
   /** 우리가 바꾼 것만 되돌린다(더한 그 줄을 지우고, 바꿨으면 바꾸기 전 포탈 줄을 다시 넣는다). 이미 있던 줄은 손대지 않는다. → { rolledBack, tail } */
   const rollbackChange = async () => {
     let rolledBack = null; let rollbackReason = ''; let unknown = false;
     if (added || replaced) {
       const cmd = replaced && m.old == null ? null : rollbackCommand({ line, oldB64: replaced ? m.old : '' });
-      const rb = cmd ? await sshRun(server, first, async (run) => mutRun(run, cmd)) : { ok: false, reason: '바꾸기 전 줄을 받지 못했습니다' };
+      // 되돌림도 그 차례에 자격을 다시 푼다 — 그 사이 법인 사용 중지가 걸렸으면 키로 접속하지 않는다(3회차 C3-1).
+      const fa = first.authKind === 'key' ? firstLegAuth(server, o.oncePassword, key.id) : first;
+      const rb = !fa.ok ? { ok: false, reason: `${fa.reason || fa.error || '접속 자격을 풀지 못함'} — 되돌리려고 접속하지 않았습니다` }
+        : cmd ? await sshRun(server, fa, async (run) => mutRun(run, cmd)) : { ok: false, reason: '바꾸기 전 줄을 받지 못했습니다' };
       rolledBack = rb.ok && rb.value.kind === 'restored' && rb.value.removed > 0;
       unknown = !rolledBack && unknownOutcome(rb);
       if (!rolledBack) rollbackReason = !rb.ok ? `${rb.reason}${rb.sent ? ' — 되돌림 명령의 결과를 받지 못했습니다' : ''}`
@@ -224,6 +226,25 @@ export async function installOne(server, key, o = {}) {
           : ` ${replaced ? '바꾼 줄을 되돌리지' : '더한 줄을 지우지'} 못했습니다(${rollbackReason}) — 서버의 authorized_keys 에서 표식 ‘${AK.markOf(key.id)}’ 줄을 ${replaced ? '확인하세요' : '직접 지우세요'}.`;
     return { rolledBack, rollbackUnknown: unknown || undefined, tail };
   };
+  // 확인 직전에 그 키 자격을 다시 푼다 — 줄을 넣는 사이 법인 사용 중지 · 바꿔치기가 걸렸으면 그 키로 접속하지 않고 넣은 줄을 되돌린다(3회차 C3-1 — 중지 뒤에도 그 키로 확인 · 묶기 · 옛 키 지우기를 했다).
+  const kAuthNow = keyLegAuth(server, key.id);
+  if (!kAuthNow.ok) {
+    const rb = await rollbackChange();
+    return fail(kAuthNow.code, `${kAuthNow.error} — 그 키로 확인하지 않았습니다.${rb.tail}`, { line: m.kind, rolledBack: rb.rolledBack, rollbackUnknown: rb.rollbackUnknown, fromIp, notes });
+  }
+  // ② 끊고 그 키로 다시 접속해 확인한다.
+  // 출력도 본다(2회차 B6 — 강제 명령(command=) 줄이면 exec 는 성공하지만 우리 명령은 돌지 않는다: 그런 키에 서버를 묶고 저장 비밀번호까지 지웠다).
+  //   이번 접속에만 쓰는 글자(nonce)를 되돌려 받아야 ‘명령을 돌릴 수 있는 키’ 다 — 로그인 메시지가 섞여도 그 줄을 찾는다(셸과 무관하게 /bin/sh 로 싼다).
+  const nonce = crypto.randomBytes(6).toString('hex');
+  const step2 = await sshRun(server, kAuthNow, async (run) => {
+    const u = await run(AK.wrapSh(`echo "##KLV ${nonce} $(uname -s 2>/dev/null)"`));
+    const hit = String(u?.stdout ?? '').slice(-200_000).split('\n').map((x) => x.trim()).find((x) => x.startsWith(`##KLV ${nonce}`));
+    if (!hit) { const e = new Error(KEY_UNUSABLE_TEXT); e.code = 'key-login-unusable'; throw e; }
+    let read = null;
+    try { read = parseReadOutput((await run(READ_COMMAND))?.stdout || ''); } catch { read = null; }
+    return { uname: t(hit.slice(`##KLV ${nonce}`.length).trim(), 40), read };
+  }, { execs: 2 });
+  noteKeyUse({ fingerprint: key.fingerprint, keyName: key.name, server: base.name, corp: base.corp, feature: 'conn-test', ok: step2.ok, code: step2.ok ? 'ok' : step2.code, trigger: 'manual', by: o.by });
   if (!step2.ok) {
     const rb = await rollbackChange();
     // 출발지 제한 안내는 그 키가 **거부됐을 때만**(3회차 E3-5 — 로그인은 됐지만 강제 명령으로 명령이 돌지 않은 key-login-unusable 에도 ‘제한을 끄라’ 고 했다).
@@ -233,10 +254,10 @@ export async function installOne(server, key, o = {}) {
   // ④ 확인됨 — 서버를 그 키에 묶고(등록부), 고른 뒷일을 한다.
   // 제한이 붙었다 = 이 키의 포탈 줄이 모두 원하는 제한 줄이고, 표식 없는 같은 키 줄도 없다.
   const exactOnly = m.kind === 'present-marked' && m.exact > 0 && !m.loose && !m.custom;
-  const restricted = !!o.restrict && (added || replaced || exactOnly) && !m.unmarked && !m.custom;
+  const restricted = !!o.restrict && (added || replaced || exactOnly) && !m.unmarked && !m.custom && !m.otherId;
   const out = { ...base, ok: true, code: 'ok', line: m.kind, restricted, fromIp: added || replaced ? fromIp : '', bound: false, passwordRemoved: false,
-    unmarked: m.unmarked || 0, custom: m.custom || 0, replaceSkipped, notes };
-  if (step2.value?.read?.ok) INS.noteInstalled(server.id, { host: server.host, port: Number(server.port) || 22, username: kAuth.username, file: '~/.ssh/authorized_keys', keys: step2.value.read.keys, truncated: step2.value.read.truncated, by: t(o.by, 64) });
+    unmarked: m.unmarked || 0, custom: m.custom || 0, otherId: m.otherId || 0, replaceSkipped, notes };
+  if (step2.value?.read?.ok) INS.noteInstalled(server.id, { host: server.host, port: Number(server.port) || 22, username: kAuthNow.username, file: '~/.ssh/authorized_keys', keys: step2.value.read.keys, truncated: step2.value.read.truncated, by: t(o.by, 64) });
   // 이미 그 키를 쓰는 서버는 다시 묶지 않는다 — 특히 ‘법인 기본 키를 따름’ 인 서버를 이름 고정으로 바꾸지 않는다(법인 기본 키를 바꾸면 따라가야 한다).
   const b = serverUsesKey(server, key.id) ? { ok: true, already: true } : o.bind(server, key.id);
   if (!b.ok) {
@@ -255,7 +276,9 @@ export async function installOne(server, key, o = {}) {
   }
   if (o.replaceKey && o.replaceKey.id !== key.id) {
     const cmd = removeCommand({ publicKey: o.replaceKey.publicKey, keyId: o.replaceKey.id });
-    const rm = cmd ? await sshRun(server, kAuth, async (run) => mutRun(run, cmd)) : { ok: false, reason: '옛 키의 공개키 꼴이 올바르지 않습니다' };
+    const ka = keyLegAuth(server, key.id);   // 그 차례에 다시(3회차 C3-1)
+    const rm = !ka.ok ? { ok: false, reason: `${ka.error} — 그 키로 접속하지 않았습니다` }
+      : cmd ? await sshRun(server, ka, async (run) => mutRun(run, cmd)) : { ok: false, reason: '옛 키의 공개키 꼴이 올바르지 않습니다' };
     out.oldRemoved = rm.ok && rm.value.kind === 'removed' ? rm.value.removed : rm.ok && rm.value.kind === 'none' ? 0 : null;
     out.oldUnmarked = rm.ok && rm.value.kind === 'removed' ? rm.value.unmarked : null;
     if (out.oldRemoved == null) notes.push(`옛 키 줄을 ${unknownOutcome(rm) ? '지웠는지 모릅니다' : '지우지 못했습니다'}(${!rm.ok ? `${rm.reason}${rm.sent ? ' — 결과를 받지 못했습니다' : ''}` : rm.value.kind === 'fail' ? AK.failText(rm.value.why) : rm.value.kind === 'nocode' ? '결과를 받지 못했습니다(연결 끊김)' : '서버가 예상한 답을 주지 않았습니다'}) — 서버의 authorized_keys 에서 확인하세요.`);
@@ -331,6 +354,11 @@ export async function withServerLock(key, fn) {
  * 거두기: 같은 키 거두기가 진행 중이거나 동시 거두기 상한이면 409.
  * @returns {null | {ok:false, code, status, jobId?, reason}}
  */
+/** 그 키를 서버에서 거두는 작업이 도는 중인가 — 키 고르기 · 교체의 새 키로 쓰지 않는다(3회차 C 참고 D-2 — 넣기만 막았다). */
+export function revokingIssue(keyId) {
+  const k = t(keyId, 32); const rv = k ? runningIn(`revoke:${k}`) : null;
+  return rv ? { ok: false, code: 'revoking', status: 409, jobId: rv.id, reason: '그 키를 서버에서 거두는 작업이 진행 중입니다 — 거두는 키로 서버를 묶지 않습니다.' } : null;
+}
 export function jobStartIssue(kind, keyId = '') {
   const k = t(keyId, 32);
   if (kind === 'key-login') {

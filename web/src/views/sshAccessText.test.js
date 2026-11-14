@@ -300,7 +300,7 @@ describe('SSH 공용 접속 2단계 — 보호 장치 · 사건 문구', () => {
     expect(guardOffRuleText({ unreadable: true, pairSeen: true })).toContain('읽지 못해');
     // 2회차 E2-2 — 인증을 끈 설치는 바로 꺼진다(서버 changeGuards: tpOn 거짓 → 곧바로 setGuards) · pairSeen 이어도 ‘혼자 끌 수 없음’ 이 아니다
     const ao = guardOffRuleText({ twoPerson: true, pairSeen: true, twoPersonActive: false }, { authOff: true });
-    expect(ao).toContain('바로 꺼집니다'); expect(ao).not.toContain('혼자 끌 수 없');
+    expect(ao).toContain('끌 수 없습니다(켜기는 됩니다)'); expect(ao).not.toContain('혼자 끌 수 없');   // 3회차 A3-1 — 인증 꺼짐은 끄기를 받지 않는다
     expect(guardOffRuleText(null)).toContain('승인을 거쳐');
     // 예전 규칙(목록에 다른 소유자가 있으면 거절)을 말하지 않는다 — 서버에서 listedOtherOwners 가 없어졌다
     for (const g of [{ pairSeen: true }, { pairSeen: false }, {}]) expect(guardOffRuleText(g)).not.toContain('목록에서 뺀 뒤');
@@ -343,7 +343,9 @@ describe('SSH 공용 접속 2단계 — 보호 장치 · 사건 문구', () => {
     expect(svc).toMatch(/return \{ ok: true, already: true, stop: ST\.stopFor\(c\) \|\| cur, added,/);
     // 그 뒤 등록된 서버를 더했으면 그 수 · 더하지 못했으면 서버 사유(3회차 E3-3)
     expect(stopDoneText({ ok: true, already: true, added: 2 }, 'KR')).toBe('KR — 이미 키 사용이 중지돼 있습니다. 그 뒤 등록된 서버 2대를 중지 기록에 더했습니다(사건은 다시 쓰지 않았습니다).');
-    expect(stopDoneText({ ok: true, already: true, added: 0, reason: '이미 사용 중지 상태입니다 — 사건을 다시 쓰지 않았습니다(그 뒤 등록된 서버를 기록에 더하지 못했습니다 — 상태 파일).' }, 'KR')).toContain('더하지 못했습니다');
+    expect(stopDoneText({ ok: true, already: true, added: 0, addFailed: true, reason: 'x' }, 'KR')).toContain('더하지 못했습니다');
+    expect(stopDoneText({ ok: true, already: true, added: 0, reason: '…더하지 못했습니다…' }, 'KR')).toBe('KR — 이미 키 사용이 중지돼 있습니다(기록을 다시 쓰지 않았습니다).');   // 판정은 사유 글자가 아니라 addFailed 칸(3회차 D3-2)
+    expect(svc).toMatch(/addFailed: extra\.length > 0 && !w\.ok/);
   });
   it('두 사람 승인 대상 목록 — 보호 장치 설명 · 끄기 안내가 같은 글자 하나 · 서버 SSH_KINDS 의 종류가 모두 들어 있다', () => {
     expect(GUARD_TEXT.twoPerson.note.startsWith(TWO_PERSON_TARGETS)).toBe(true);
@@ -420,7 +422,7 @@ describe('SSH 공용 접속 2단계 — 키 로그인 설정 · 키 거두기 �
     expect(present.tone).toBe('warn');
     // 제한이 다 붙은 기존 포탈 줄 — 서버는 restricted:true 로 준다(keyLogin exactOnly)
     expect(keyLoginRow({ ok: true, line: 'present-marked', restricted: true, bound: true }, { restrict: true })).toMatchObject({ tone: 'ok' });
-    expect(serverSrc('sshaccess/keyLogin.js')).toMatch(/const restricted = !!o\.restrict && \(added \|\| replaced \|\| exactOnly\) && !m\.unmarked && !m\.custom;/);
+    expect(serverSrc('sshaccess/keyLogin.js')).toMatch(/const restricted = !!o\.restrict && \(added \|\| replaced \|\| exactOnly\) && !m\.unmarked && !m\.custom && !m\.otherId;/);   // 다른 id 포탈 줄도(3회차 B3-4)
     // 사람이 넣은 줄만 있음(present-unmarked) · 표식 없는 줄 · 관리자가 바꾼 줄 + 제한 켬 — 메모가 없어도 초록으로 끝내지 않는다
     const human = keyLoginRow({ ok: true, line: 'present-unmarked', restricted: false, unmarked: 1, bound: true }, { restrict: true });
     expect(human.tone).toBe('warn'); expect(human.parts[0]).toContain('사람이 넣은 줄'); expect(human.parts.join(' ')).toContain('제한 없는 같은 키 줄');
@@ -691,7 +693,8 @@ describe('SSH 공용 접속 화면 — 규약', () => {
     expect(src).toMatch(/const authOff = !g\.unreadable && g\.twoPerson === true && g\.twoPersonActive === false;/);
     expect(src).toContain('켬(적용 안 됨)');
     expect(src).not.toContain('두 사람 승인이 적용되지 않고 본인 OTP 만으로 실행됩니다');
-    expect(src).toMatch(/\$\{authOff \? '바로' : '본인 OTP 만으로'\}/);
+    // 인증 꺼짐은 끄기 자체를 받지 않는다(3회차 A3-1) — 끄기 결과 문장은 인증이 켜진 설치에서만
+    expect(src).toMatch(/\{!authOff && gdiff\.off\.includes\('twoPerson'\)/);
     // 정보 — 값을 모르면 스위치를 그리지 않는다(role=switch 에 ‘모름’ 이 없다)
     expect(src).toMatch(/\{guardsKnown\n\s+\? <button type="button" role="switch"/);
     // E1-7 · E1-8 — 닫은 작업 칸은 서버가 다시 알려도 나타나지 않는다(화면이 열려 있는 동안)

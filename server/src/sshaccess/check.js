@@ -29,7 +29,7 @@ export function checkKeyDrift({ now = Date.now() } = {}) {
  * @param {{now?:number, policyMode?:string, inbox?:{items:object[], exists:boolean, unknownFolders:string[]}|null, integrity?:object|null,
  *          corpName?:(id:string)=>string}} o
  */
-export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null, drift = null, servers = null, corpName = (x) => x, guards = null, pendingApprovals = null } = {}) {
+export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null, drift = null, servers = null, corpName = (x) => x, guards = null, pendingApprovals = null, inflightUnreadable = false } = {}) {
   const items = [];
   const add = (level, code, title, detail, extra = {}) => items.push({ level, code, title, detail, ...extra });
   const storeErr = KS.keyStoreLoadError();
@@ -88,6 +88,8 @@ export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null,
     if (!guards.twoPerson) add('warn', 'two-person-off', '두 사람 승인이 꺼져 있음', '키 등록 · 교체 · 삭제 · 사용 재개가 본인 OTP 만으로 실행됩니다 — 설정 소유자가 둘 이상이면 켜 두세요.');
     if (!guards.serverRestrict) add('warn', 'restrict-off', '서버 쪽 제한이 꺼져 있음', '서버에 넣는 키 줄에 출발지 제한 · 포워딩 금지를 붙이지 않습니다 — 키가 새면 다른 곳에서도 쓸 수 있습니다.');
   }
+  // 키 작업 진행 기록을 못 읽음(3회차 C3-4) — 작업은 돌지만, 그동안 포탈이 재시작하면 ‘중단’ 사건이 남지 않는다.
+  if (inflightUnreadable) add('warn', 'inflight-unreadable', '키 작업 진행 기록 파일을 읽지 못함', 'ssh-key-jobs-inflight.json 의 권한 · 꼴을 확인하세요 — 키 작업은 돌지만, 그동안 포탈이 재시작하면 바꾸던 서버가 ‘중단’ 사건으로 남지 않습니다.');
   if (pendingApprovals) add('warn', 'approvals-pending', `승인을 기다리는 요청 ${pendingApprovals}건`, '다른 설정 소유자가 승인해야 실행됩니다 — 24시간이 지나면 사라집니다.');
   // ⑦ 사용 중지
   if (stateLoadError()) add('bad', 'state-unreadable', 'SSH 공용 접속 상태 파일을 읽지 못함', '사용 중지 기록을 모르므로 모든 키 접속을 멈췄습니다.');

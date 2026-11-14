@@ -41,12 +41,24 @@ function indexRow(r) {
 }
 function rebuildIndex() { byFp = new Map(); for (const r of rows.values()) indexRow(r); }
 
+// 읽기 오류(권한 · EMFILE 등)는 손상이 아니다 — 원본을 옮기지 않고, 그동안 모은 것은 메모리에 두었다가 다시 읽히면 합쳐 쓴다(3회차 C3-5 — EACCES 로 원본을 .corrupt 로 옮겨 90일 기록이 사라졌다).
+let readBlocked = false;
+function readText() {
+  if (!fs.existsSync(FILE())) return '';
+  return fs.readFileSync(FILE(), 'utf8');
+}
 function load() {
   if (rows) return;
   rows = new Map(); recent = []; byFp = new Map();
+  let text;
+  try { text = readText(); } catch { readBlocked = true; loadFailed = true; return; }
+  if (!text) return;
+  parseText(text);
+}
+/** 파일 글 → rows · recent(지금 메모리에 덮어쓴다). 손상이면 보존하고 빈 기록. */
+function parseText(text) {
   try {
-    if (!fs.existsSync(FILE())) return;
-    const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    const j = JSON.parse(text);
     for (const r of Array.isArray(j?.rows) ? j.rows.slice(0, MAX_ROWS) : []) {
       if (!r || typeof r !== 'object') continue;
       const fp = t(r.fingerprint, 80); const server = t(r.server); const feature = t(r.feature, 32);
@@ -79,8 +91,28 @@ function schedule() {
 }
 
 /** 파일로 쓴다(테스트 · 종료 직전 · 타이머). 실패하면 다음 기회에 다시(메모리는 그대로). */
+/** 읽기 오류 뒤 다시 읽혔으면 파일 기록에 메모리에 모은 것을 합친다(같은 묶음은 수를 더하고 처음 · 마지막 시각을 넓힌다). */
+function mergeAfterReadBlock() {
+  let text;
+  try { text = readText(); } catch { return false; }
+  const memRows = rows; const memRecent = recent;
+  rows = new Map(); recent = []; byFp = new Map();
+  readBlocked = false; loadFailed = false;
+  if (text) parseText(text);
+  for (const [k, m] of memRows) {
+    const f = rows.get(k);
+    if (!f) { rows.set(k, m); continue; }
+    rows.set(k, { ...f, keyName: m.keyName || f.keyName, firstAt: Math.min(f.firstAt || m.firstAt, m.firstAt || f.firstAt), lastAt: Math.max(f.lastAt, m.lastAt),
+      count: f.count + m.count, okCount: f.okCount + m.okCount, failCount: f.failCount + m.failCount,
+      lastOk: m.lastAt >= f.lastAt ? m.lastOk : f.lastOk, lastCode: m.lastAt >= f.lastAt ? m.lastCode : f.lastCode });
+  }
+  recent = recent.concat(memRecent).sort((a, b) => a.at - b.at).slice(-MAX_RECENT);
+  rebuildIndex();
+  return true;
+}
 export function flushKeyUsage({ now = Date.now() } = {}) {
   if (!rows || !dirty) return { ok: true, skipped: true };
+  if (readBlocked && !mergeAfterReadBlock()) return { ok: false, skipped: true, reason: '사용 기록 파일을 지금 읽지 못해 덮어쓰지 않았습니다(다음에 다시)' };
   const cut = now - RETAIN_MS;
   for (const [k, r] of rows) if (r.lastAt && r.lastAt < cut) rows.delete(k);
   if (rows.size > MAX_ROWS) {
@@ -151,4 +183,4 @@ export function keyUsageView({ fingerprint = '', limit = 200 } = {}) {
   return { rows: list.slice(0, Math.max(1, Math.min(2000, limit * 5))), totalRows: list.length, recent: ev, retainDays: RETAIN_MS / 86_400_000, loadFailed };
 }
 
-export function _resetKeyUsageForTest() { if (timer) clearTimeout(timer); timer = null; rows = null; recent = null; byFp = null; dirty = false; loadFailed = false; }
+export function _resetKeyUsageForTest() { if (timer) clearTimeout(timer); timer = null; rows = null; recent = null; byFp = null; dirty = false; loadFailed = false; readBlocked = false; }

@@ -163,7 +163,7 @@ export function registerSshAccess(api) {
   });
 
   /* ── 서버 ───────────────────────────────────────────────────────── */
-  api.post('/settings/ssh-access/servers/:id/key', ...write((req) => SVC.prechecks.chooseKey({ serverId: req.params.id })), async (req, res) => {
+  api.post('/settings/ssh-access/servers/:id/key', ...write((req) => SVC.prechecks.chooseKey({ serverId: req.params.id, keyId: bodyOf(req).keyId })), async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.chooseServerKey({ serverId: t(req.params.id, 64), keyId: t(b.keyId, 32), expectAddr: typeof b.expectAddr === 'string' ? t(b.expectAddr, 400) : null, by: who(req) });
     audit(req, 'ssh-access.server.key', req.params.id, { keyId: t(b.keyId, 32) || 'corp-default', ok: !!r.ok, code: r.code, test: r.test?.kind, reverted: r.reverted, revertFailed: r.revertError ? true : undefined });

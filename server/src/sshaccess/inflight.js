@@ -21,6 +21,9 @@ registerStateFile(INFLIGHT_FILE_NAME);
 const MAX = 50;
 const t = (v, max = 128) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max);
 let cache = null;
+let readFailedAt = 0;   // 마지막 읽기 오류 시각(3회차 C3-4 — 못 읽는 동안 ‘중단’ 기록이 조용히 꺼졌다: 화면 · 콘솔이 밝힌다)
+/** 진행 기록 파일을 지금 읽을 수 있는가 — 못 읽으면 { at } (화면 키 점검 · 콘솔). */
+export function inflightReadIssue() { if (!cache) load(); return cache ? null : (readFailedAt ? { at: readFailedAt } : null); }
 
 /** → 기록 배열, 또는 읽기 오류면 null(그때는 기록하지 않는다 — 작업은 계속 돈다 · 원본을 덮지 않는다). */
 function load() {
@@ -29,7 +32,7 @@ function load() {
   try {
     if (!fs.existsSync(FILE())) { cache = []; return cache; }
     text = fs.readFileSync(FILE(), 'utf8');
-  } catch { return null; }   // 읽기 오류(권한 · EISDIR 등)는 손상이 아니다 — 원본을 두고 다음에 다시 읽는다(2회차 C2-8)
+  } catch { readFailedAt = Date.now(); return null; }   // 읽기 오류(권한 · EISDIR 등)는 손상이 아니다 — 원본을 두고 다음에 다시 읽는다(2회차 C2-8)
   try {
     const j = JSON.parse(text);
     cache = Array.isArray(j?.items) ? j.items.filter((x) => x && typeof x === 'object').slice(-MAX) : [];
@@ -74,4 +77,4 @@ export function clearLeftovers(items) {
   cache = cache.filter((x) => !gone.has(`${x.jobId}|${x.sid}`));
   return save();
 }
-export function _resetInflightForTest() { cache = null; }
+export function _resetInflightForTest() { cache = null; readFailedAt = 0; }
