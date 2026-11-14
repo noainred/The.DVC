@@ -1,0 +1,11 @@
+# 가짜 명령 공용: 호출 기록을 남기고, 시나리오 폴더($RDH_FIX)의 고정 출력을 내준다.
+[ -n "$RDH_FIX" ] || { echo "RDH_FIX 미설정" >&2; exit 99; }
+printf '%s %s\n' "${0##*/}" "$*" >> "$RDH_FIX/calls.log"
+emit() { # emit 파일 [기본 종료 코드]
+  if [ -f "$RDH_FIX/$1" ]; then
+    cat "$RDH_FIX/$1"
+    if [ -f "$RDH_FIX/$1.rc" ]; then exit "$(cat "$RDH_FIX/$1.rc")"; fi
+    exit 0
+  fi
+  exit "${2:-1}"
+}

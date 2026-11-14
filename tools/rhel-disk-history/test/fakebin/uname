@@ -1,0 +1,2 @@
+#!/bin/bash
+if [ -n "$RDH_FIX" ] && [ -f "$RDH_FIX/uname.out" ]; then cat "$RDH_FIX/uname.out"; else echo "3.10.0-1160.el7.x86_64"; fi
