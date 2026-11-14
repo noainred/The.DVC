@@ -14,6 +14,7 @@ import {
   headlineFor, diagnosticLines, diagnosticText, probeOutcome, reconnectStep, reconnectStatusText, RECONNECT_INITIAL,
 } from './serviceDownText.js';
 import { getToken } from '../api.js';
+import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 export default function ServiceDown({ kind, message, http = null, compact = false }) {
   const [open, setOpen] = useState(false);   // 기본 접힘
@@ -63,14 +64,8 @@ export default function ServiceDown({ kind, message, http = null, compact = fals
   const rcText = reconnectStatusText(rc, elapsed);
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(diagnosticText(lines));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // 클립보드 차단 환경(비 HTTPS·권한 거부) — 아래 항목을 직접 선택해 복사하면 된다.
-      setCopied(false);
-    }
+    // 비 HTTPS 에서도 폴백으로 복사한다. 그래도 안 되면(권한 거부) 아래 항목을 직접 선택해 복사하면 된다.
+    if (await copyToClipboard(diagnosticText(lines))) { setCopied(true); setTimeout(() => setCopied(false), 2000); } else setCopied(false);
   };
 
   return (

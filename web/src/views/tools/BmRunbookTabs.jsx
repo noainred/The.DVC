@@ -18,6 +18,7 @@ import {
   sloMaintText,
 } from './bmRunbookText.js';
 import './bmStage6.css';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 function useOnce(path, tick = 0) {
   const [st, setSt] = useState({ data: null, err: null, loading: !!path });
@@ -35,7 +36,7 @@ function CopyPre({ text }) {
   return (
     <div className="bmrb-cmd">
       <pre>{text}</pre>
-      <button type="button" className="btn btn-sm bmp-touch" onClick={async () => { try { await navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 1500); } catch { setOk(false); } }}>{ok ? '복사됨' : '복사'}</button>
+      <button type="button" className="btn btn-sm bmp-touch" onClick={async () => { if (await copyToClipboard(text)) { setOk(true); setTimeout(() => setOk(false), 1500); } else setOk(false); }}>{ok ? '복사됨' : '복사'}</button>
     </div>
   );
 }

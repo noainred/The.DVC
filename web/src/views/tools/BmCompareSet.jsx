@@ -18,6 +18,7 @@ import {
   MAX_TARGETS, SLOT_LABELS, SLOT_COLORS, SET_RANGES, METRICS, metricOf, kindLabel, kindBadge, sourceText, reasonText,
   idsFromHash, hashForIds, normalizeIds, candidatesFrom, presetsFrom, labelFor, matrixRows, chartRows, showDots, gridText, CANDIDATE_KINDS, wideSpread, LOG_HINT_RATIO,
 } from './compareSetText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 const LS_KEY = 'bmCompareSet.ids';
 // 법인 미지정(dcId '')을 고르기 값으로 쓰면 ‘전체’('')와 겹친다 — 따로 뗀 값으로.
@@ -110,7 +111,7 @@ export default function BmCompareSet() {
   const makeBase = (id) => setIds([id, ...ids.filter((x) => x !== id)]);
   const copyLink = async () => {
     const url = `${window.location.origin}${window.location.pathname}${hashForIds(ids)}`;
-    try { await navigator.clipboard.writeText(url); setCopied('링크를 복사했습니다'); } catch { setCopied(url); }
+    setCopied((await copyToClipboard(url)) ? '링크를 복사했습니다' : url);
     setTimeout(() => setCopied(''), 4000);
   };
 

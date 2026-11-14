@@ -30,6 +30,7 @@ import { CapacityCard, TrafficCard, DcGrid } from './SanSwitchV2Parts.jsx'; // v
 import { trackFetch, freshState, freshNote, clockText } from './sanFreshText.js'; // 검토 I-04: 목록 갱신 실패를 숨기지 않는다
 import { FreshNote } from './SanFreshNote.jsx';
 import { headStatus, lastCollectedAt, sortSwitches, hotCount, rowMark, LIST_SORTS } from './sanSwitchViewText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 import { perfAvgOf, perfMaxOf, dcGrandTotals, dcUnmeasuredNote, dcSharePct } from './sanStorageSumText.js'; // v2.721(감사 R1-02·R2-01·R2-02): 측정 없음은 null
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
@@ -527,8 +528,8 @@ function TestResult({ run }) {
   const trace = run.trace || [];
   useEffect(() => { if (active && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [trace.length, active]);
   const copy = async () => {
-    try { await navigator.clipboard.writeText(`${statusText(run)}\n${test.reason ? `사유: ${test.reason}\n` : ''}${test.hint ? `안내: ${test.hint}\n` : ''}\n${traceText(trace)}`); setCopied(true); setTimeout(() => setCopied(false), 1500); }
-    catch { setCopied(false); }
+    if (await copyToClipboard(`${statusText(run)}\n${test.reason ? `사유: ${test.reason}\n` : ''}${test.hint ? `안내: ${test.hint}\n` : ''}\n${traceText(trace)}`)) { setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    else setCopied(false);
   };
   const debugCount = trace.filter((l) => l.level === 'debug').length;
   return (

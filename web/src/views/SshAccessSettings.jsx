@@ -21,6 +21,7 @@ import {
   shortFp, dateTime, ageDays, featuresText, folderTree, keysInFolder, inboxInFolder, sortedCheck, suggestKeyName, serverStatus, auditTime, COLLECT_FEATURES,
 } from './sshAccessText.js';
 import './sshAccess.css';
+import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 const errText = (e) => e?.body?.reason || e?.message || String(e);
 /** 쓰기 응답 — ok:false(400 · 409 를 던지지 않는 api.js 경로)를 오류로 바꾼다. */
@@ -351,8 +352,8 @@ function KeyPicker({ server, catalog, onClose, say }) {
 
 /* ── 키 폴더(시안 ②) ───────────────────────────────────────────────── */
 async function copyText(text) {
-  try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; } } catch { /* 아래로 */ }
-  window.prompt('공개키 — 직접 복사하세요(Ctrl+C)', text);   // 비보안 컨텍스트(HTTP)는 clipboard API 가 없다(E-L10)
+  if (await copyToClipboard(text)) return true;   // HTTP 에서도 폴백으로 복사한다(util/copyText.js)
+  window.prompt('공개키 — 직접 복사하세요(Ctrl+C)', text);   // 그래도 못 했으면(권한 거부 등) 직접 복사하게 보여 준다(E-L10)
   return false;
 }
 function FoldersTab({ v, corpName, reload, say }) {

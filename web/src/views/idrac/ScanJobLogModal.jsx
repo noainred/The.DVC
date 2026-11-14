@@ -5,6 +5,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 import { scanJobResultText } from './scanRunText.js'; // v2.612 WEB2612-06
 
 // ---- 스캔 잡 세부 로그창 ------------------------------------------------------
@@ -112,7 +113,7 @@ export function ScanJobLogModal({ reqId, dcName, onClose }) {
                   <div className="flex" style={{ alignItems: 'center', gap: 8, marginBottom: 3 }}>
                     <b style={{ fontSize: 12 }}>인증 거부된 IP ({d.result.authFailedIps.length}{d.result.authFailedIpsTruncated ? '+' : ''}개)</b>
                     <button className="logout-btn" style={{ padding: '2px 8px', fontSize: 11 }}
-                      onClick={() => { try { navigator.clipboard?.writeText(d.result.authFailedIps.join('\n')); } catch { /* */ } }}
+                      onClick={() => { copyToClipboard(d.result.authFailedIps.join('\n')); }}
                       title="IP 목록을 클립보드로 복사">복사</button>
                   </div>
                   <textarea readOnly value={d.result.authFailedIps.join('\n')}
@@ -133,16 +134,9 @@ export function ScanJobLogModal({ reqId, dcName, onClose }) {
 function Cmd({ text }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    // navigator.clipboard 는 비보안 컨텍스트(사내 http)에서 없을 수 있어 textarea 폴백을 둔다.
+    // 비보안 컨텍스트(사내 http)의 폴백은 공용 util/copyText.js 가 한다. 실패는 조용히 — 텍스트는 화면에 그대로 보인다.
     const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1200); };
-    try {
-      if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(text).then(done).catch(() => {}); return; }
-    } catch { /* 아래 폴백 */ }
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done();
-    } catch { /* 복사 실패는 조용히 — 텍스트는 화면에 그대로 보인다 */ }
+    copyToClipboard(text).then((ok) => { if (ok) done(); }, () => {});
   };
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 4 }}>

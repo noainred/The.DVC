@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "3.10.6",
+      "date": "2026-11-15",
+      "title": "공용 기능 점검 4회차: 클립보드 복사를 공용 헬퍼 하나로 — HTTP 포탈의 거짓 '복사했습니다' 제거",
+      "notes": [
+        "웹 22개 파일의 직접 navigator.clipboard 호출(26줄)을 공용 util/copyText.js(Clipboard API → execCommand 폴백 → 성공 여부)로 바꿨다 — 사내 HTTP 로 연 포탈에서는 navigator.clipboard 가 없어 조용히 실패하던 곳들.",
+        "서버 집중 모니터링 일괄 등록의 '공개키를 복사했습니다' 가 HTTP 에서 실제로 복사하지 않고도 떴다(동기 true 반환) — 이제 실제 결과로 말한다.",
+        "회귀 server/test/commonRound4_3106.test.js(웹 소스에서 공용 헬퍼 밖 직접 호출 0건) · Chromium(HTTP 비보안 출처) 집중 모니터링 · 위키 · 이슈 · VM 콘솔 복사 확인."
+      ]
+    },
+    {
       "version": "3.10.5",
       "date": "2026-11-15",
       "title": "공용 유틸 점검 3회차: 정적 gzip 캐시 크기 계산 · SOAP 파싱 워커 재시작 폭주 상한",
