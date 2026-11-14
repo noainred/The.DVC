@@ -77,7 +77,7 @@ export function registerSshAccess(api) {
   });
 
   /* ── 키 ─────────────────────────────────────────────────────────── */
-  api.post('/settings/ssh-access/keys', adminOnly, requireSettingsOwner, fullRW, vaultFirst, pre((req) => SVC.prechecks.addKey({ by: who(req) })), reauth, async (req, res) => {
+  api.post('/settings/ssh-access/keys', adminOnly, requireSettingsOwner, fullRW, vaultFirst, pre((req) => SVC.prechecks.addKey({ by: who(req), folderCorp: bodyOf(req).folderCorp, folderServer: bodyOf(req).folderServer })), reauth, async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.addKeyInFolder({ name: b.name, privateKey: typeof b.privateKey === 'string' ? b.privateKey : '', passphrase: typeof b.passphrase === 'string' ? b.passphrase : '',
       rotateAt: b.rotateAt, folderCorp: b.folderCorp, folderServer: b.folderServer, features: featuresOf(b.features) }, { by: who(req) });
@@ -85,7 +85,7 @@ export function registerSshAccess(api) {
     send(res, r, r.pending ? 202 : 200);
   });
 
-  api.put('/settings/ssh-access/keys/:id/placement', ...ownerWrite, (req, res) => {
+  api.put('/settings/ssh-access/keys/:id/placement', ...write((req) => SVC.prechecks.placement({ keyId: req.params.id, folderCorp: bodyOf(req).folderCorp, folderServer: bodyOf(req).folderServer })), (req, res) => {
     const b = bodyOf(req);
     const r = SVC.setKeyPlacement({ keyId: t(req.params.id, 32), ...(b.folderCorp !== undefined ? { folderCorp: t(b.folderCorp, 128) } : {}),
       ...(b.folderServer !== undefined ? { folderServer: t(b.folderServer, 128) } : {}), ...(b.features !== undefined ? { features: featuresOf(b.features) } : {}) });
@@ -192,7 +192,10 @@ export function registerSshAccess(api) {
   api.post('/settings/ssh-access/corps/:corp/stop', ...write((req) => SVC.prechecks.stop({ corp: req.params.corp })), async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.stopCorp(t(req.params.corp, 128), { by: who(req), reason: t(b.reason, 300) });
-    audit(req, 'ssh-access.corp.stop', req.params.corp, { ok: !!r.ok, code: r.code, reason: t(b.reason, 120), servers: r.servers });
+    // 다시 중지(중지 기록 갱신)는 새 중지와 가른다 · 더하지 못했으면 실패로 적는다(4회차 E4-6).
+    audit(req, r.already ? 'ssh-access.corp.stop-refresh' : 'ssh-access.corp.stop', req.params.corp, r.already
+      ? { ok: !!r.ok && !r.addFailed, added: r.added || 0, addFailed: r.addFailed || undefined }
+      : { ok: !!r.ok, code: r.code, reason: t(b.reason, 120), servers: r.servers });
     send(res, r);
   });
   api.delete('/settings/ssh-access/corps/:corp/stop', ...write((req) => SVC.prechecks.resume({ corp: req.params.corp, by: who(req) })), async (req, res) => {

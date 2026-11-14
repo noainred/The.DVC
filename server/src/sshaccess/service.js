@@ -117,7 +117,8 @@ export async function buildView({ now = Date.now() } = {}) {
   try { policyMode = loadSecretsPolicy()?.mode || ''; } catch { policyMode = ''; }
   const inbox = await INB.scanInbox({ corps: vcCorps, servers: servers.map((s) => ({ id: s.id, name: s.name || s.host, vcenterId: t(s.vcenterId) })) });
   const corpName = (id) => corps.find((c) => c.id === id)?.name || id || '전 법인';
-  const pubServers = servers.filter((s) => !s.addrOnly).map((s) => ({ ...publicServer(s, { accById, keyById }), inboxPath: t(s.vcenterId) ? INB.inboxPathOf(s.vcenterId, s.name || s.host) : '' }));
+  const vcIds = new Set(vcCorps.map((c) => c.id));   // 받는 곳 경로는 vCenter 법인만(4회차 E4-2 — 목록 밖 법인 서버의 경로가 남아 거기 넣은 파일이 ‘모르는 폴더’ 가 됐다)
+  const pubServers = servers.filter((s) => !s.addrOnly).map((s) => ({ ...publicServer(s, { accById, keyById }), inboxPath: t(s.vcenterId) && vcIds.has(t(s.vcenterId)) ? INB.inboxPathOf(s.vcenterId, s.name || s.host) : '' }));
   // 키 점검 ‘서버’ 칸 — 키를 쓰는데 폴더 · 기능 규칙 때문에 주기 수집이 막힌 서버, 법인이 없어 폴더 키를 못 쓰는 서버(엣지 위임 서버는 그 엣지가 본다).
   const keyed = pubServers.filter((s) => s.keyId && !s.agent);
   const serverSummary = regErr ? null : {
@@ -139,7 +140,7 @@ export async function buildView({ now = Date.now() } = {}) {
     corps: corps.map((c) => ({ ...c, inboxPath: c.missing ? '' : INB.inboxPathOf(c.id), stop: ST.stopFor(c.id) })),
     accounts: accRaw.filter((a) => a.kind === 'os').map((a) => KS.publicAccountView(a, { usage: usage.account(a.id) })),
     keys: keysRaw.map((k) => ({ ...KS.publicKeyView(k, { usage: usage.key(k.id), now }), lastUse: lastUse.get(k.fingerprint) || null,
-      inboxPath: k.folderCorp ? INB.inboxPathOf(k.folderCorp, k.folderServer) : '' })),
+      inboxPath: k.folderCorp && vcIds.has(k.folderCorp) ? INB.inboxPathOf(k.folderCorp, k.folderServer) : '' })),
     usageKnown: usage.known,
     servers: pubServers,
     edgeRows,
@@ -347,7 +348,8 @@ export function setKeyPlacement({ keyId, folderCorp, folderServer, features } = 
   const nextCorp = folderCorp !== undefined ? t(folderCorp, 128) : k.folderCorp;
   const nextServer = folderServer !== undefined ? t(folderServer, 128) : (folderCorp !== undefined ? '' : k.folderServer);
   const accById = new Map(KS.listAccountsRaw().map((a) => [a.id, a]));
-  if (folderCorp !== undefined || folderServer !== undefined) {
+  if ((folderCorp !== undefined || folderServer !== undefined) && (nextCorp !== k.folderCorp || nextServer !== k.folderServer)) {
+    // 폴더가 실제로 바뀔 때만 대상을 본다 — 지금 폴더가 vCenter 목록 밖 법인이어도 기능만 바꾸는 저장은 된다(4회차 E4-3).
     const fi = folderTargetIssue(nextCorp, nextServer); if (fi) return { ok: false, code: 'bad-folder', reason: fi };
     // 충돌 판정은 refs.placementConflicts 하나(키 회전과 같은 함수 — 판정을 두 벌 두지 않는다).
     const conflicts = REFS.placementConflicts({ folderCorp: nextCorp, folderServer: nextServer }, { serversUsing: (s) => effectiveKeyId(s, accById) === k.id, accountsUsing: (a) => a.keyRef === k.id });
@@ -449,7 +451,7 @@ export async function stopCorp(corp, { by = '', reason = '' } = {}) {
     const extra = servers.filter((x) => !ids.has(x.id) || (x.addr && !addrs.has(x.addr)));
     const w = extra.length ? ST.addStopServers(c, extra) : { ok: true };
     const added = w.ok ? extra.length : 0;
-    return { ok: true, already: true, stop: ST.stopFor(c) || cur, added, addFailed: extra.length > 0 && !w.ok, reason: `이미 사용 중지 상태입니다 — 사건을 다시 쓰지 않았습니다${added ? `(그 뒤 등록된 서버 ${added}대를 중지 기록에 더함)` : extra.length ? '(그 뒤 등록된 서버를 기록에 더하지 못했습니다 — 상태 파일)' : ''}.` };
+    return { ok: true, already: true, stop: ST.stopFor(c) || cur, added, addFailed: extra.length > 0 && !w.ok, newServers: extra.length, reason: `이미 사용 중지 상태입니다 — 사건을 다시 쓰지 않았습니다${added ? `(그 뒤 등록된 서버 ${added}대를 중지 기록에 더함)` : extra.length ? '(그 뒤 등록된 서버를 기록에 더하지 못했습니다 — 상태 파일)' : ''}.` };
   }
   const { regErr, corpServers, servers } = corpServerList(c);
   const r = ST.setCorpStop(c, { by, reason, servers });
@@ -638,7 +640,9 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
     // 넣는 중인 키(교체의 옛 키 · 삭제할 키)와 새 키 상태도 OTP 앞에서(3회차 A3-2 — 실행 단계에서 409 key-installing 으로 끝나 승인자의 OTP 와 요청이 버려졌다).
     //   넣기 작업은 끝나면 풀리므로 요청은 그대로 두고 나중에 다시 승인하게 한다.
     if (cur.kind === 'ssh-key-rotate') {
-      const ii = installingIssue(cur.payload?.from) || KL.revokingIssue(cur.payload?.to); if (ii) return { ...ii, reason: `${ii.reason} 요청은 그대로 둡니다 — 작업이 끝난 뒤 승인하세요.` };   // 새 키 거두는 중도(3회차 반증 R3R-2)
+      const ii = installingIssue(cur.payload?.from); if (ii) return { ...ii, reason: `${ii.reason} 요청은 그대로 둡니다 — 작업이 끝난 뒤 승인하세요.` };
+      // 새 키를 거두는 중이면 교체할 수 없다 — 거두기가 끝나도 그 키 줄은 서버에 없다(4회차 E4-5 — ‘끝난 뒤 승인하세요’ 라고 해 따르면 접속이 끊겼다). 돌려보내라고 말한다.
+      const rv = KL.revokingIssue(cur.payload?.to); if (rv) return { ...rv, reason: '새 키를 서버에서 거두는 중입니다 — 거둔 키로 교체하면 그 서버들의 키 접속이 끊깁니다. 이 요청은 돌려보내세요.' };
       const nb = KS.keyById(t(cur.payload?.to, 32));
       if (nb && nb.status !== 'active') return { ok: false, code: nb.status === 'pending' ? 'key-pending' : 'key-retired', status: 409, reason: nb.status === 'pending' ? REFS.AUTH_ERROR['key-pending'] : '새 키가 그 사이 퇴역했습니다 — 이 요청은 돌려보내세요.' };
     }
@@ -701,7 +705,15 @@ export function requestPrecheck({ kind, target = '', by = '' } = {}) {
 }
 /** 라우트별 사전 검사 묶음(OTP 앞). */
 export const prechecks = Object.freeze({
-  addKey: ({ by }) => requestPrecheck({ kind: 'ssh-key-activate', by }),
+  // 폴더 대상도 OTP 앞(4회차 E4-2 — vCenter 목록 밖 법인 폴더에 등록하면 OTP 를 쓴 뒤 400 이었다). 받는 곳 승인은 폴더를 넘기지 않는다.
+  addKey: ({ by, folderCorp, folderServer }) => { const fi = folderTargetIssue(folderCorp, folderServer); return fi ? { ok: false, code: 'bad-folder', status: 400, reason: fi } : requestPrecheck({ kind: 'ssh-key-activate', by }); },
+  placement: ({ keyId, folderCorp, folderServer }) => {
+    const k = KS.keyById(t(keyId, 32)); if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
+    if (folderCorp === undefined && folderServer === undefined) return null;
+    const nc = folderCorp !== undefined ? t(folderCorp, 128) : k.folderCorp; const ns = folderServer !== undefined ? t(folderServer, 128) : (folderCorp !== undefined ? '' : k.folderServer);
+    if (nc === k.folderCorp && ns === k.folderServer) return null;
+    const fi = folderTargetIssue(nc, ns); return fi ? { ok: false, code: 'bad-folder', status: 400, reason: fi } : null;
+  },
   rotate: ({ from, to, by }) => {
     const a = KS.keyById(t(from, 32)); const b = KS.keyById(t(to, 32));
     if (!a || !b) return { ok: false, code: 'not-found', status: 404, reason: '옛 키 또는 새 키를 찾을 수 없습니다.' };

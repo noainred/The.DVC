@@ -339,12 +339,12 @@ describe('SSH 공용 접속 2단계 — 보호 장치 · 사건 문구', () => {
     expect(approvalStatusChip(null)).toEqual({ label: '—', tone: 'muted' });
     expect(serverSrc('approval/store.js')).toMatch(/code: 'interrupted'/);
     // 이미 중지 — 기록을 다시 쓰지 않았다
-    expect(stopDoneText({ ok: true, already: true }, 'KR')).toBe('KR — 이미 키 사용이 중지돼 있습니다(기록을 다시 쓰지 않았습니다).');
+    expect(stopDoneText({ ok: true, already: true }, 'KR')).toBe('KR — 이미 키 사용이 중지돼 있습니다 — 그 뒤 등록된 서버가 없어 기록을 바꾸지 않았습니다.');
     expect(svc).toMatch(/return \{ ok: true, already: true, stop: ST\.stopFor\(c\) \|\| cur, added,/);
     // 그 뒤 등록된 서버를 더했으면 그 수 · 더하지 못했으면 서버 사유(3회차 E3-3)
     expect(stopDoneText({ ok: true, already: true, added: 2 }, 'KR')).toBe('KR — 이미 키 사용이 중지돼 있습니다. 그 뒤 등록된 서버 2대를 중지 기록에 더했습니다(사건은 다시 쓰지 않았습니다).');
     expect(stopDoneText({ ok: true, already: true, added: 0, addFailed: true, reason: 'x' }, 'KR')).toContain('더하지 못했습니다');
-    expect(stopDoneText({ ok: true, already: true, added: 0, reason: '…더하지 못했습니다…' }, 'KR')).toBe('KR — 이미 키 사용이 중지돼 있습니다(기록을 다시 쓰지 않았습니다).');   // 판정은 사유 글자가 아니라 addFailed 칸(3회차 D3-2)
+    expect(stopDoneText({ ok: true, already: true, added: 0, reason: '…더하지 못했습니다…' }, 'KR')).toBe('KR — 이미 키 사용이 중지돼 있습니다 — 그 뒤 등록된 서버가 없어 기록을 바꾸지 않았습니다.');   // 판정은 사유 글자가 아니라 addFailed 칸(3회차 D3-2)
     expect(svc).toMatch(/addFailed: extra\.length > 0 && !w\.ok/);
   });
   it('두 사람 승인 대상 목록 — 보호 장치 설명 · 끄기 안내가 같은 글자 하나 · 서버 SSH_KINDS 의 종류가 모두 들어 있다', () => {

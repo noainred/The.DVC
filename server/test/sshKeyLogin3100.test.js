@@ -4508,7 +4508,8 @@ test('㉖ 3회차 반증 — 목록 밖 법인은 받는 곳 폴더가 없다(in
   try {
     const p = SVC.approvalPrecheck(rq.request.id, { approve: true, by: 'own2', digest: rq.request.digest });
     assert.deepEqual([p?.code, p?.status, AP.getRequest(rq.request.id).status], ['revoking', 409, 'pending'], JSON.stringify(p));
-    assert.match(p.reason, /요청은 그대로 둡니다/);
+    // 거두는 새 키로는 교체할 수 없다 — ‘끝난 뒤 승인’ 이 아니라 돌려보내라고 말한다(4회차 E4-5)
+    assert.match(p.reason, /돌려보내세요/); assert.doesNotMatch(p.reason, /끝난 뒤 승인하세요/);
   } finally { h.release(); }
   await waitJob(rvj.jobId);
   assert.equal((await SVC.decideApproval(rq.request.id, { approve: false, by: 'own' })).request.status, 'cancelled');

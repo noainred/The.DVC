@@ -777,7 +777,9 @@ function FoldersTab({ v, corpName, reload, say }) {
   const [disc, setDisc] = useState(null);   // 받은 키 파일 지우기 — { item, otp }(OTP 는 보통 입력 칸으로 — window.prompt 는 글자가 그대로 보였다 · 점검 E-16)
   const [busy, setBusy] = useState(false);
   const storeBad = !!v.storeUnreadable;   // 키 저장소를 못 읽으면 수는 ‘—’ · 빈 폴더는 ‘못 읽음’(점검 E-11)
-  const canAdd = node && (node.kind === 'common' || node.kind === 'server');
+  // vCenter 목록 밖 법인의 폴더에는 키를 새로 넣지 않는다(4회차 E4-2 — 폼이 남아 400 으로 거절되고 붙여 넣은 개인키가 비워졌다).
+  const nodeMissing = !!node?.corp && !!(v.corps || []).find((c) => c.id === node.corp)?.missing;
+  const canAdd = node && (node.kind === 'common' || node.kind === 'server') && !nodeMissing;
   /**
    * 쓰기 하나 — 실패는 서버 사유 그대로(충돌 목록 포함). 성공 문구는 결과로 만든다.
    * v3.10.0: 202 `pending`(다른 설정 소유자의 승인 대기)이면 성공 톤으로 그리지 않는다 — 문구는 호출부가 `pendingText` 로 만든다.
@@ -852,7 +854,8 @@ function FoldersTab({ v, corpName, reload, say }) {
           <fieldset className="ssa-form">
             <legend>{edit.key.name} — 폴더 · 쓸 수 있는 기능</legend>
             <label>법인 <Select sort={false} className="select select-sm" value={edit.folderCorp} onChange={(e) => setEdit({ ...edit, folderCorp: e.target.value, folderServer: '' })}>
-              <option value="">미분류(폴더 없음)</option>{(v.corps || []).filter((c) => !c.missing).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {/* 지금 폴더가 vCenter 목록 밖 법인이면 그 값도 보인다(3회차 반증 뒤 4회차 E4-3 — ‘미분류’ 로 보였는데 그 값이 저장됐다). 새로 고를 수는 없다. */}
+              <option value="">미분류(폴더 없음)</option>{(v.corps || []).filter((c) => !c.missing || c.id === edit.key.folderCorp).map((c) => <option key={c.id} value={c.id} disabled={c.missing && c.id !== edit.folderCorp}>{c.name}</option>)}
             </Select></label>
             <label>서버(비우면 공통) <Select sort={false} className="select select-sm" value={edit.folderServer} disabled={!edit.folderCorp} onChange={(e) => setEdit({ ...edit, folderServer: e.target.value })}>
               <option value="">공통</option>{(v.servers || []).filter((s) => s.vcenterId === edit.folderCorp).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
@@ -1246,7 +1249,7 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
                 ? <button type="button" role="switch" aria-checked={gd[k]} aria-label={GUARD_TEXT[k].label} className={`ssa-sw${gd[k] ? ' on' : ''}`} disabled={busy} onClick={() => setGd({ ...gd, [k]: !gd[k] })}><i /></button>
                 : <span className="ssa-lock" title={`${GUARD_TEXT[k].label} — 설정을 받지 못해 켬 · 끔을 모릅니다`}>모름</span>}</span>
               <span className="ssa-gb">
-                <span><b>{GUARD_TEXT[k].label}</b> {guardsKnown ? (k === 'twoPerson' && authOff ? <Chip tone="warn" title="인증이 꺼진 설치라 적용되지 않습니다">켬(적용 안 됨)</Chip> : <Chip tone={g[k] ? 'ok' : 'warn'}>{g[k] ? '켬' : '끔'}</Chip>) : <Chip>모름</Chip>}{guardsKnown && gd[k] !== g[k] && <Chip>저장 전 — {gd[k] ? '켬' : '끔'}으로 바꿈</Chip>}</span>
+                <span><b>{GUARD_TEXT[k].label}</b> {guardsKnown ? (k === 'twoPerson' && authOff && g.twoPerson === true ? <Chip tone="warn" title="인증이 꺼진 설치라 적용되지 않습니다">켬(적용 안 됨)</Chip> : <Chip tone={g[k] ? 'ok' : 'warn'}>{g[k] ? '켬' : '끔'}</Chip>) : <Chip>모름</Chip>}{guardsKnown && gd[k] !== g[k] && <Chip>저장 전 — {gd[k] ? '켬' : '끔'}으로 바꿈</Chip>}</span>
                 <span className="ssa-sub">{GUARD_TEXT[k].note}</span>
                 {k === 'twoPerson' && g.pairSeen === true && !g.unreadable && !authOff && <span className="ssa-sub">혼자 끌 수 없음 — 이 포탈은 승인할 수 있는 설정 소유자 둘을 확인한 적이 있습니다(끄려면 다른 소유자의 승인).</span>}
                 {k === 'twoPerson' && authOff && <span className="ssa-sub" style={{ color: toneVar('warn') }}>이 설치는 로그인(인증)을 꺼 두어 계정을 가를 수 없습니다 — 두 사람 승인도 본인 OTP 도 적용되지 않습니다.</span>}
