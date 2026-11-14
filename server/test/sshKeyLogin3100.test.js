@@ -4022,6 +4022,8 @@ test('㉓-a 진행 기록을 못 읽어도(파일 자리에 폴더 — EISDIR) �
   const sv2 = mkServer('bm-mine-done', S2, { password: pw });
   const j = await runLogin({ servers: [sv2], keyId: K.id, by: 'own' });
   INF.markStart({ jobId: j.start.jobId, kind: 'key-login', keyName: K.name, sid: sv2.id, server: 'bm-mine-done', corp: 'vcA', by: 'own' });
+  KL._resetKeyLoginJobsForTest();   // 작업 기록이 1시간 뒤 사라진 때(jobView 없음) — 그래도 이 프로세스가 시작한 작업이면 ‘재시작으로 중단’ 이 아니다
+  assert.equal(KL.jobView(j.start.jobId), null, '전제');
   const before = eventsOf('key-job-interrupted').length;
   assert.equal((await SVC.runSshAccessScan()).ok, true);
   assert.deepEqual([eventsOf('key-job-interrupted').length, INF.peekLeftovers()], [before, []], '내 작업의 남은 줄은 중단이 아니다 · 끝났으니 지웠다');
@@ -4180,6 +4182,8 @@ test('㉓-e 서버에서 키 읽기 · 대화형 칸 고르기(2회차 반증 R2
   assert.deepEqual(await trial([[{ prompt: 'Verification code: ', echo: false }, { prompt: 'Password: ', echo: false }]]), { seen: ['0.0:""', '0.1:PW'], code: '' });
   // o) 첫 질의 가리는 Verification(빈 답) → 둘째 질의 Password → 거기에(보냈으니 거부는 거부)
   assert.deepEqual(await trial([[{ prompt: 'Verification code: ', echo: false }], [{ prompt: 'Password: ', echo: false }]]), { seen: ['0.0:""', '1.0:PW'], code: '' });
+  //    가리는 칸이 여럿이면 비밀번호 글 칸이 먼저(그 앞의 다른 가리는 칸이 OTP 류가 아니어도)
+  assert.deepEqual(await trial([[{ prompt: 'Account name: ', echo: false }, { prompt: 'Password: ', echo: false }]]), { seen: ['0.0:""', '0.1:PW'], code: '' });
   //    글이 없는 가리는 칸 하나(옛 sshd) → 거기에 · 가리는 OTP 칸만 → 보내지 않음(no-password-method)
   assert.deepEqual(await trial([[{ prompt: '', echo: false }]]), { seen: ['0.0:PW'], code: '' });
   assert.deepEqual(await trial([[{ prompt: 'Duo passcode: ', echo: false }]]), { seen: ['0.0:""'], code: 'SSH_NO_PASSWORD_METHOD' });
