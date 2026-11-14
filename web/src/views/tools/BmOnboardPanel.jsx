@@ -12,7 +12,7 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
-import { rotatePartialText } from '../sshAccessText.js';   // 회전 중간 실패(partial)의 이미 옮긴 곳 — SSH 공용 접속 화면과 같은 문구(점검 E1-11)
+import { rotatePartialText, keyNoCollect, rotateNoCollectWarn } from '../sshAccessText.js';   // 회전 중간 실패(partial)의 이미 옮긴 곳 · 수집 미허용 판정 — SSH 공용 접속 화면과 같은 판정 · 문구(점검 E1-11 · 2회차 E2-1)
 import { downloadBlob } from './bmCapture.js';
 import { missingView, facetOptions, clampPageSize, readPageSize, writePageSize, nodeOf, corpOf, PAGE_SIZE_MIN, PAGE_SIZE_MAX } from './bmMissingView.js';
 import {
@@ -67,7 +67,7 @@ function KeysSection({ manage, onChanged }) {
     setBusy(true); setMsg({ text: '', tone: 'muted' });
     try {
       const r = await postJson('/tools/bm-usage/ssh-keys', body);
-      if (r?.ok === false) { refused(r); setMsg({ text: `등록하지 못했습니다 — ${r.reason || r.code} (개인키 · passphrase 는 화면에서 비웠습니다 — 다시 붙여 넣으세요)`, tone: 'bad' }); return; }
+      if (r?.ok === false) { refused(r); setMsg({ text: `등록하지 못했습니다 — ${r.reason || r.code} (개인키 · passphrase 는 화면에서 비웠습니다 — ${r.code === 'two-person-required' ? '키는 설정 › 보안 › SSH 공용 접속에서 등록을 요청하세요' : '다시 붙여 넣으세요'})`, tone: 'bad' }); return; }
       setMsg({ text: `등록했습니다 — ${r.key.algo} ${r.key.bits ?? ''} · ${r.key.fingerprint}`, tone: 'ok' });
       setF({ name: '', privateKey: '', passphrase: '', rotateAt: '', otp: '' });
       load(); onChanged?.();
@@ -151,7 +151,8 @@ function KeysSection({ manage, onChanged }) {
             <legend>회전(참조 교체)</legend>
             <p className="bmo-sub">순서: 새 키 등록 → 서버 authorized_keys 에 새 공개키 넣기(SSH 공용 접속의 키 로그인 설정 또는 현장) → 여기서 교체 → 전 서버 연결 시험 → 옛 키 사용 0 이면 삭제.</p>
             <label>옛 키 <Select sort={false} className="select select-sm" value={rot.from} onChange={(e) => setRot({ ...rot, from: e.target.value })}><option value="">선택</option>{keys.filter((k) => k.status === 'active').map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</Select></label>
-            <label>새 키 <Select sort={false} className="select select-sm" value={rot.to} onChange={(e) => setRot({ ...rot, to: e.target.value })}><option value="">선택</option>{keys.filter((k) => k.status === 'active' && k.id !== rot.from).map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</Select></label>
+            <label>새 키 <Select sort={false} className="select select-sm" value={rot.to} onChange={(e) => setRot({ ...rot, to: e.target.value })}><option value="">선택</option>{keys.filter((k) => k.status === 'active' && k.id !== rot.from).map((k) => <option key={k.id} value={k.id}>{k.name}{keyNoCollect(k.features) ? ' · 수집 미허용' : ''}</option>)}</Select></label>
+            {rotateNoCollectWarn(keys.find((k) => k.id === rot.from), keys.find((k) => k.id === rot.to)) && <p className="bmo-note bmob-wide" style={{ color: toneVar('warn') }}>{rotateNoCollectWarn(keys.find((k) => k.id === rot.from), keys.find((k) => k.id === rot.to))}</p>}
             <label>본인 OTP <input className="input" inputMode="numeric" value={rot.otp} onChange={(e) => setRot({ ...rot, otp: e.target.value })} maxLength={8} autoComplete="one-time-code" /></label>
             <div><button className="btn" type="button" disabled={busy || !rot.from || !rot.to} onClick={rotate}>참조 교체</button></div>
           </fieldset>

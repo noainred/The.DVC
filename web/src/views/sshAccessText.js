@@ -170,6 +170,28 @@ export const COLLECT_FEATURES = Object.freeze(['bm-usage', 'bm-storage']);
 export function keyNoCollect(features) {
   return Array.isArray(features) && !COLLECT_FEATURES.some((f) => features.includes(f));
 }
+/**
+ * 교체(회전)의 새 키가 수집 미허용일 때 경고(2회차 E2-1 — SSH 공용 접속 교체 폼 · 7b 회전 폼 공용). 해당 없으면 ''.
+ * from = 옛 키(쓰는 서버 · 공통 계정 수 — 모르면 수를 적지 않는다) · to = 새 키(허용 기능).
+ */
+export function rotateNoCollectWarn(from, to) {
+  if (!to || !keyNoCollect(to.features)) return '';
+  const srv = finiteNum(from?.servers); const acc = finiteNum(from?.accountsUsing);
+  const where = srv != null || acc != null ? `옛 키를 쓰는 서버 ${unitText(srv, '대')} · 공통 계정 ${unitText(acc, '개')}(그 계정을 따르는 서버 포함)` : '옛 키를 쓰는 서버 · 공통 계정';
+  return `새 키 ‘${to.name || '—'}’ 는 베어메탈 사용률 · 스토리지 수집에 허용되지 않았습니다 — 교체하면 ${where}의 주기 수집이 이 키로 접속하지 않고 비밀번호로 넘어가지도 않아 멈춥니다. 키 폴더에서 새 키의 쓸 수 있는 기능을 먼저 더하세요.`;
+}
+/**
+ * 폴더 · 기능 저장 결과(2회차 E2-1 — 서버 affectedServers 를 쓴다). 기능을 바꿨고 서버가 쓰는 서버 수를 주면 그 수를 말하고,
+ * 수집 기능이 빠졌으면 그 서버들의 주기 수집이 멈춘다고 말한다(확인 톤).
+ * @returns {{text:string, tone:'ok'|'warn'}}
+ */
+export function placementDoneText(name, r, { features } = {}) {
+  const n = finiteNum(r?.affectedServers);
+  const base = `${name} — 폴더 · 기능을 바꿨습니다.`;
+  if (n == null) return { text: base, tone: 'ok' };
+  if (n > 0 && keyNoCollect(features)) return { text: `${base} 이 키를 쓰는 서버 ${n}대는 이제 주기 수집이 이 키로 접속하지 않고 비밀번호로 넘어가지도 않아 수집이 멈춥니다(수집 기능이 빠졌습니다).`, tone: 'warn' };
+  return { text: `${base} 이 키를 쓰는 서버 ${n}대에 바로 적용됩니다.`, tone: 'ok' };
+}
 /** 수집 미허용 키를 서버에 묶을 때의 경고(키 고르기 · 키 로그인 설정 창 공용 문구). */
 export const NO_COLLECT_WARN = '이 키는 베어메탈 사용률 · 스토리지 수집에 허용되지 않았습니다 — 서버가 이 키를 쓰도록 적히면(연결 시험 · 키 접속 확인은 통과해도) 주기 수집은 이 키로 접속하지 않고 비밀번호로 넘어가지도 않아 그 서버의 수집이 멈춥니다. 키 폴더 탭에서 기능을 더하거나 다른 키를 고르세요.';
 /**
@@ -243,7 +265,9 @@ export function noEndDot(text, max = 300) {
  * @returns {{text:string, tone:'ok'|'warn'}}
  */
 export function installedReadText(r) {
-  if (r && typeof r.error === 'string' && r.error) return { text: `서버에 들어 있는 키를 읽지 못했습니다 — ${noEndDot(r.error)}.`, tone: 'warn' };
+  if (r && (r.readFailed === true || (typeof r.error === 'string' && r.error && r.missing !== true))) return { text: `서버에 들어 있는 키를 읽지 못했습니다 — ${noEndDot(r.error) || '사유를 받지 못함'}.`, tone: 'warn' };
+  // 파일 없음 — 읽기 실패가 아니다(키 0개 · 2회차 E2-3). 중립으로.
+  if (r && r.missing === true) return { text: '서버 계정에 authorized_keys 파일이 없습니다(키 0개).', tone: 'muted' };
   const n = Array.isArray(r?.keys) ? r.keys.length : null;
   const cut = finiteNum(r?.truncated);
   return { text: `서버에 들어 있는 키 ${unitText(n, '줄')}을 읽었습니다${cut > 0 ? ` · ${cut}줄은 상한을 넘어 읽지 않음` : ''}.`, tone: 'ok' };
@@ -266,6 +290,15 @@ export const APPROVAL_STATUS_TEXT = Object.freeze({
   pending: '승인 대기', approved: '승인됨(실행 결과 아직 없음)', rejected: '돌려보냄', cancelled: '요청 취소', expired: '시한 지남', executed: '실행됨', failed: '실행 실패',
 });
 export const APPROVAL_STATUS_TONE = Object.freeze({ pending: 'warn', approved: 'warn', rejected: 'muted', cancelled: 'muted', expired: 'muted', executed: 'ok', failed: 'bad' });
+/**
+ * 요청 상태 칩 — 서버가 ‘승인됨’ 에 오래 멈춘 요청을 failed + result.code ‘interrupted’ 로 확정한다(실행됐는지 모른다 — approval/store expireDue).
+ * 그것은 ‘실행 실패’ 가 아니라 ‘실행 여부 모름’ 이다(2회차 E2-4).
+ * @returns {{label:string, tone:string}}
+ */
+export function approvalStatusChip(r) {
+  if (r?.status === 'failed' && r?.result?.code === 'interrupted') return { label: '실행 여부 모름', tone: 'warn' };
+  return { label: APPROVAL_STATUS_TEXT[r?.status] || r?.status || '—', tone: APPROVAL_STATUS_TONE[r?.status] || 'muted' };
+}
 
 const finiteNum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
@@ -360,8 +393,10 @@ export function guardFailText(body, reason = '') {
  * 승인할 사람이 없을 때 본인 OTP 로 바로 끄는 지름길은 **승인할 수 있는 소유자 둘을 본 적이 없는 설치(pairSeen 아님)만**이다.
  * 못 받은 값을 지어내지 않는다 — pairSeen 이 참/거짓이 아니면 두 경우를 함께 말한다.
  */
-export function guardOffRuleText(guards) {
+export function guardOffRuleText(guards, { authOff = false } = {}) {
   const g = guards && typeof guards === 'object' ? guards : {};
+  // 인증을 끈 설치(twoPerson 켬 · twoPersonActive 거짓)는 두 사람 승인이 적용되지 않는다 — 끄는 변경도 승인 없이 바로 꺼진다(2회차 E2-2 — 예전에는 ‘혼자 끌 수 없음’ 이라고 반대로 말했다).
+  if (authOff && !g.unreadable) return '이 설치는 로그인(인증)이 꺼져 있어 두 사람 승인이 적용되지 않습니다 — 끄는 변경도 다른 소유자의 승인 없이 바로 꺼집니다(켜는 변경도 바로 적용됩니다).';
   const head = '두 사람 승인이 켜져 있으면 끄는 변경은 승인할 수 있는 다른 설정 소유자(관리자 역할 · 전체 범위 · 로그인 수단)의 승인을 거쳐 꺼집니다(켜는 변경은 바로 적용됩니다).';
   if (g.unreadable) return `${head} 상태 파일을 읽지 못해 지금은 바꿀 수 없습니다.`;
   if (g.pairSeen === true) return `${head} 이 포탈은 승인할 수 있는 설정 소유자 둘을 확인한 적이 있어, 승인할 다른 소유자가 없어져도 혼자 끌 수 없습니다 — 다른 소유자가 다시 승인할 수 있게 한 뒤 그 사람이 승인해야 합니다.`;
@@ -390,7 +425,12 @@ export function approvalDetail(req, corpName = (x) => x, catalog = []) {
       const feat = p.features === null || Array.isArray(p.features) ? ` · 쓸 수 있는 기능 ${featuresText(p.features, catalog)}` : '';
       return `키 ${p.name || '—'}${p.algo ? ` · ${p.algo}` : ''} · 지문 ${shortFp(p.fingerprint)} · 폴더 ${folderText(p, corpName)}${feat} — 승인하면 이 키가 접속에 쓰이기 시작합니다`;
     }
-    case 'ssh-key-rotate': return `옛 키 ${p.fromName || p.from || '—'} → 새 키 ${p.toName || p.to || '—'} — 옛 키를 쓰는 서버 · 공통 계정을 새 키로 옮기고 옛 키를 퇴역시킵니다(서버의 authorized_keys 는 바꾸지 않습니다)`;
+    case 'ssh-key-rotate': {
+      // 새 키의 허용 기능(toFeatures)은 2회차부터 본문에 실린다 — 없으면(예전 요청) 지어내지 않고 적지 않는다.
+      const feat = p.toFeatures === null || Array.isArray(p.toFeatures) ? ` · 새 키의 쓸 수 있는 기능 ${featuresText(p.toFeatures, catalog)}` : '';
+      const nc = p.noCollect === true ? ' ⚠ 새 키는 베어메탈 사용률 · 스토리지 수집에 허용되지 않았습니다 — 승인하면 옛 키를 쓰던 서버의 주기 수집이 멈춥니다.' : '';
+      return `옛 키 ${p.fromName || p.from || '—'} → 새 키 ${p.toName || p.to || '—'}${feat} — 옛 키를 쓰는 서버 · 공통 계정을 새 키로 옮기고 옛 키를 퇴역시킵니다(서버의 authorized_keys 는 바꾸지 않습니다).${nc}`;
+    }
     case 'ssh-key-delete': return `키 ${p.name || '—'} · 지문 ${shortFp(p.fingerprint)} — 쓰는 곳이 없을 때만 지워집니다`;
     case 'ssh-corp-resume': return `${corpName(p.corp)} — 이 법인의 키 접속을 다시 엽니다`;
     case 'ssh-keystore-reload': return '디스크의 키 저장소 파일 내용을 새 기준으로 받아들입니다 — 포탈 밖에서 바뀐 키도 다시 쓰입니다';
@@ -439,6 +479,8 @@ export function recordFailedText(r) {
 }
 /** 법인 키 사용 중지 결과(점검 E-8) — 등록부를 못 읽었으면 법인으로만 걸렸다는 것을 밝힌다. */
 export function stopDoneText(r, corpLabel = '') {
+  // 이미 중지 상태 — 서버는 기록을 다시 쓰지 않는다(사건을 쌓지 않는다 · 2회차)
+  if (r?.already === true) return `${corpLabel} — 이미 키 사용이 중지돼 있습니다(기록을 다시 쓰지 않았습니다).`;
   const head = `${corpLabel} — 키 사용을 중지했습니다`;
   if (r?.registryUnreadable === true) {
     return `${head}(법인으로만). OS 계정 등록부를 읽지 못해 그 법인 서버 목록을 함께 적지 못했습니다 — 서버의 법인 칸을 바꾸면 이 중지에서 빠질 수 있습니다. 등록부를 고친 뒤 서버 목록을 확인하세요.`;
